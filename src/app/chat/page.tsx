@@ -886,7 +886,7 @@ export default function NewChatPage() {
         initialValue={prefillText}
       />
       <ChatComposerActionBar
-        left={<><ModeIndicator mode={mode} onModeChange={setMode} disabled={isStreaming} /><ImageGenToggle /></>}
+        left={<><ModeIndicator mode={mode} onModeChange={setMode} disabled={isStreaming} />{/* ImageGenToggle hidden from UI — restore by uncommenting. Component + ImageGen logic kept intact. */}{/* <ImageGenToggle /> */}</>}
         center={
           <ChatPermissionSelector
             permissionProfile={permissionProfile}

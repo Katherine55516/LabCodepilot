@@ -1007,7 +1007,7 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
         hasMessages={messages.length > 0}
       />
       <ChatComposerActionBar
-        left={<><ModeIndicator mode={mode} onModeChange={handleModeChange} disabled={isStreaming} /><ImageGenToggle /></>}
+        left={<><ModeIndicator mode={mode} onModeChange={handleModeChange} disabled={isStreaming} />{/* ImageGenToggle hidden from UI — restore by uncommenting. Component + ImageGen logic kept intact. */}{/* <ImageGenToggle /> */}</>}
         center={
           <ChatPermissionSelector
             sessionId={sessionId}

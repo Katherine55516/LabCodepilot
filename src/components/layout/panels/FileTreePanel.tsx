@@ -201,7 +201,7 @@ export function FileTreePanel() {
             the files list, not next to the panel title. */}
         <div className="flex h-10 shrink-0 items-center justify-between px-3">
           <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-            {t("panel.files")}
+            {t("panel.taskList")}
           </span>
           <Button
             variant="ghost"
