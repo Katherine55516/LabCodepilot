@@ -306,8 +306,10 @@ export function GeneralSection() {
           </Button>
         </FieldRow>
 
-        {/* Error Reporting — right after Setup Center */}
-        <SentryToggle locale={locale} t={t} />
+        {/* Error Reporting — hidden from UI; SentryToggle function + sentry
+            API route + localStorage persistence + i18n keys all preserved.
+            Restore by uncommenting. */}
+        {/* <SentryToggle locale={locale} t={t} /> */}
 
       </SettingsCard>
 

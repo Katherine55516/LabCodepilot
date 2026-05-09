@@ -136,7 +136,7 @@ const en = {
 
   // ── Settings: Appearance ──────────────────────────────────────
   'settings.appearance': 'Appearance',
-  'settings.appearanceDesc': 'Customize the look and feel of CodePilot',
+  'settings.appearanceDesc': 'Customize look and feel',
   'settings.themeMode': 'Theme Mode',
   'settings.themeModeDesc': 'Choose between light, dark, or system preference',
   'settings.themeFamily': 'Color Theme',
@@ -1304,6 +1304,7 @@ const en = {
 
   // ── Top Bar ───────────────────────────────────────────────────
   'topBar.fileTree': 'File Tree',
+  'topBar.taskList': 'Task List',
   'topBar.git': 'Git',
   'topBar.dashboard': 'Dashboard',
   'topBar.commit': 'Commit All',

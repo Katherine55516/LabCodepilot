@@ -9,7 +9,8 @@ import { usePanel } from "@/hooks/usePanel";
 import { useTranslation } from "@/hooks/useTranslation";
 import { ResizeHandle } from "@/components/layout/ResizeHandle";
 import { FileTree } from "@/components/project/FileTree";
-import { TaskList } from "@/components/project/TaskList";
+// TaskList moved to its own panel (TaskListPanel) so users can toggle the
+// task list independently of the file tree from the top bar.
 
 const TREE_MIN_WIDTH = 220;
 const TREE_MAX_WIDTH = 500;
@@ -18,7 +19,7 @@ const TREE_DEFAULT_WIDTH = 280;
 type NewItemMode = "file" | "folder";
 
 export function FileTreePanel() {
-  const { workingDirectory, sessionId, previewFile, setPreviewFile, setPreviewOpen, setFileTreeOpen } = usePanel();
+  const { workingDirectory, previewFile, setPreviewFile, setPreviewOpen, setFileTreeOpen } = usePanel();
   const { t } = useTranslation();
   const searchParams = useSearchParams();
   const [width, setWidth] = useState(TREE_DEFAULT_WIDTH);
@@ -201,7 +202,7 @@ export function FileTreePanel() {
             the files list, not next to the panel title. */}
         <div className="flex h-10 shrink-0 items-center justify-between px-3">
           <span className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-            {t("panel.taskList")}
+            {t("panel.files")}
           </span>
           <Button
             variant="ghost"
@@ -213,15 +214,10 @@ export function FileTreePanel() {
           </Button>
         </div>
 
-        {/* Body — TaskList → divider → Files Actions Bar → (optional
-            new-item input) → FileTree. */}
+        {/* Body — Files Actions Bar → (optional new-item input) → FileTree.
+            TaskList previously lived above this section but has been moved
+            to its own panel (TaskListPanel) so users can toggle independently. */}
         <div className="flex flex-1 flex-col min-h-0 overflow-hidden">
-          <div className="shrink-0 px-3 pb-3">
-            <TaskList sessionId={sessionId} />
-          </div>
-
-          <div className="mx-3 mt-1 mb-2 border-t border-border/40" />
-
           {/* Files Actions Bar — VS-Code-style New File / New Folder
               icons aligned to the right so they don't fight the search
               input that FileTree renders below. */}

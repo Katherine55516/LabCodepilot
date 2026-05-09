@@ -61,20 +61,25 @@ const CHATLIST_MIN = 180;
 const CHATLIST_MAX = 300;
 
 /**
- * Extensions that default to "rendered" view mode when a file is opened
- * via setPreviewSource / setPreviewFile. Keeping this list aligned with
- * PreviewPanel's RENDERABLE_EXTENSIONS so anything we can actually
- * render in Preview mode also lands there by default — previously .jsx
- * / .tsx fell through to Source even though Sandpack can render them,
- * which made the DiffSummary "Open preview" button surface source code
- * when the user clicked a TSX card.
+ * Default view mode when a file is opened via setPreviewSource / setPreviewFile.
+ *
+ * Per user preference: every file lands in edit mode. PreviewPanel's render
+ * branch combines edit + source for editable files (both route to CodeMirror,
+ * which is editable), so this gives a consistent "click → editor" experience
+ * regardless of extension. The ViewModeToggle still lets users flip to
+ * "preview" (rendered) for .md / .html / .jsx / .tsx / .csv when needed —
+ * we just no longer pick rendered as the default.
+ *
+ * For files whose extension isn't editable (binary-ish, or content past
+ * EXTENSION_LINE_CAPS truncation), PreviewPanel's `canEdit` flag falls
+ * through to SourceView automatically — no inconsistent state.
+ *
+ * The legacy RENDERED_EXTENSIONS allowlist (kept commented as a reference
+ * for the previous behavior — restore by reverting this function and the
+ * import) used to default .md/.html/.jsx/.tsx/.csv to "rendered".
  */
-const RENDERED_EXTENSIONS = new Set([".md", ".mdx", ".html", ".htm", ".jsx", ".tsx", ".csv", ".tsv"]);
-
-function defaultViewMode(filePath: string): PreviewViewMode {
-  const dot = filePath.lastIndexOf(".");
-  const ext = dot >= 0 ? filePath.slice(dot).toLowerCase() : "";
-  return RENDERED_EXTENSIONS.has(ext) ? "rendered" : "source";
+function defaultViewMode(_filePath: string): PreviewViewMode {
+  return "edit";
 }
 
 const LG_BREAKPOINT = 1024;
@@ -186,6 +191,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   // --- New independent panel states ---
   const [fileTreeOpen, setFileTreeOpen] = useState(false);
+  const [taskListOpen, setTaskListOpen] = useState(false);
   const [gitPanelOpen, setGitPanelOpen] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [terminalOpen, setTerminalOpen] = useState(false);
@@ -454,6 +460,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     () => ({
       fileTreeOpen,
       setFileTreeOpen,
+      taskListOpen,
+      setTaskListOpen,
       gitPanelOpen,
       setGitPanelOpen,
       previewOpen,
@@ -489,7 +497,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       previewViewMode,
       setPreviewViewMode,
     }),
-    [fileTreeOpen, gitPanelOpen, previewOpen, terminalOpen, dashboardPanelOpen, assistantPanelOpen, isAssistantWorkspace, currentBranch, gitDirtyCount, currentWorktreeLabel, workingDirectory, sessionId, sessionTitle, streamingSessionId, pendingApprovalSessionId, activeStreamingSessions, pendingApprovalSessionIds, previewSource, setPreviewSource, previewFile, setPreviewFile, previewViewMode]
+    [fileTreeOpen, taskListOpen, gitPanelOpen, previewOpen, terminalOpen, dashboardPanelOpen, assistantPanelOpen, isAssistantWorkspace, currentBranch, gitDirtyCount, currentWorktreeLabel, workingDirectory, sessionId, sessionTitle, streamingSessionId, pendingApprovalSessionId, activeStreamingSessions, pendingApprovalSessionIds, previewSource, setPreviewSource, previewFile, setPreviewFile, previewViewMode]
   );
 
   const imageGenValue = useImageGenState();

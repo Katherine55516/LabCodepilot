@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import {
   GitBranch,
   TreeStructure,
+  ListChecks,
   PencilSimple,
   DotOutline,
   ChartBar,
@@ -31,6 +32,8 @@ export function UnifiedTopBar() {
     workingDirectory,
     fileTreeOpen,
     setFileTreeOpen,
+    taskListOpen,
+    setTaskListOpen,
     gitPanelOpen,
     setGitPanelOpen,
     dashboardPanelOpen,
@@ -245,6 +248,21 @@ export function UnifiedTopBar() {
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent side="bottom">{t('topBar.fileTree')}</TooltipContent>
+              </Tooltip>
+
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant={taskListOpen ? "secondary" : "ghost"}
+                    size="icon-sm"
+                    className={taskListOpen ? "" : "text-muted-foreground hover:text-foreground"}
+                    onClick={() => setTaskListOpen(!taskListOpen)}
+                  >
+                    <ListChecks size={16} />
+                    <span className="sr-only">{t('topBar.taskList')}</span>
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent side="bottom">{t('topBar.taskList')}</TooltipContent>
               </Tooltip>
 
               <Tooltip>

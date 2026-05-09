@@ -776,7 +776,13 @@ function ViewModeToggle({
     <div className="flex h-6 items-center rounded-full bg-muted p-0.5 text-[11px]">
       {editable
         ? pill("edit", t("filePreview.viewMode.edit"), value === "edit" || value === "source")
-        : pill("source", t("filePreview.viewMode.source"), value === "source")}
+        : // Non-editable files (truncated content or non-editable extension):
+          // when defaultViewMode("edit") meets a file we can't actually edit,
+          // PreviewPanel falls back to SourceView — so visually we should
+          // keep the source pill highlighted to match what's rendered, even
+          // though the underlying value is still "edit". Treat edit + source
+          // as equivalent here, mirroring the editable=true branch above.
+          pill("source", t("filePreview.viewMode.source"), value === "source" || value === "edit")}
       {pill("rendered", t("filePreview.viewMode.preview"), value === "rendered")}
     </div>
   );

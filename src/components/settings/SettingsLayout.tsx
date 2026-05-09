@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useSyncExternalStore } from "react";
-import { type Icon, Gear, Code, UserCircle, Plug, ChartBar } from "@/components/ui/icon";
+import { type Icon, Gear, Code, UserCircle, Plug, ChartBar, Lightning, Terminal } from "@/components/ui/icon";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { GeneralSection } from "./GeneralSection";
@@ -9,10 +9,17 @@ import { ProviderManager } from "./ProviderManager";
 import { CliSettingsSection } from "./CliSettingsSection";
 import { UsageStatsSection } from "./UsageStatsSection";
 import { AssistantWorkspaceSection } from "./AssistantWorkspaceSection";
+// Skills / MCP / CLI Tools managers — embedded as settings sub-sections so
+// users have a single panel for everything customizable. The /skills, /mcp,
+// /cli-tools routes still exist (FileTreePanel deep-links etc.) but the
+// sidebar links to them have been hidden in NavRail / ChatListPanel.
+import { SkillsManager } from "@/components/skills/SkillsManager";
+import { McpManager } from "@/components/plugins/McpManager";
+import { CliToolsManager } from "@/components/cli-tools/CliToolsManager";
 import { useTranslation } from "@/hooks/useTranslation";
 import type { TranslationKey } from "@/i18n";
 
-type Section = "general" | "providers" | "cli" | "usage" | "assistant";
+type Section = "general" | "providers" | "cli" | "usage" | "assistant" | "skills" | "mcp" | "cli-tools";
 
 interface SidebarItem {
   id: Section;
@@ -25,7 +32,15 @@ const sidebarItems: SidebarItem[] = [
   { id: "providers", label: "Providers", icon: Plug },
   { id: "cli", label: "Claude CLI", icon: Code },
   { id: "usage", label: "Usage", icon: ChartBar },
-  { id: "assistant", label: "Assistant", icon: UserCircle },
+  // Hidden from settings sidebar — assistant section + AssistantWorkspaceSection
+  // logic still in the codebase. Restore by uncommenting.
+  // { id: "assistant", label: "Assistant", icon: UserCircle },
+  // Phase: Skills / MCP / CLI Tools moved here from the main app sidebar so
+  // the settings panel becomes the single home for all customization. The
+  // standalone routes remain navigable via direct URL or deep links.
+  { id: "skills", label: "Skills", icon: Lightning },
+  { id: "mcp", label: "MCP", icon: Plug },
+  { id: "cli-tools", label: "CLI Tools", icon: Terminal },
 ];
 
 function getSectionFromHash(): Section {
@@ -59,6 +74,13 @@ export function SettingsLayout() {
     'Claude CLI': 'settings.claudeCli',
     'Usage': 'settings.usage',
     'Assistant': 'settings.assistant',
+    // Reuse the existing nav.* keys from when these sections lived in the
+    // main app sidebar — keeps the labels in lockstep across both surfaces
+    // for the lifetime of the migration (and beyond if anyone restores
+    // those NavRail / ChatListPanel entries).
+    'Skills': 'nav.skills',
+    'MCP': 'nav.mcp',
+    'CLI Tools': 'nav.cliTools',
   };
 
   const handleSectionChange = useCallback((section: Section) => {
@@ -106,6 +128,9 @@ export function SettingsLayout() {
           {activeSection === "cli" && <CliSettingsSection />}
           {activeSection === "usage" && <UsageStatsSection />}
           {activeSection === "assistant" && <AssistantWorkspaceSection />}
+          {activeSection === "skills" && <SkillsManager />}
+          {activeSection === "mcp" && <McpManager />}
+          {activeSection === "cli-tools" && <CliToolsManager />}
         </div>
       </div>
     </div>

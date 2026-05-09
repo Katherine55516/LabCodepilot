@@ -54,6 +54,7 @@ export {
   Info,
   Lightning,
   List,
+  ListChecks,
   ListMagnifyingGlass,
   Lock,
   LockOpen,

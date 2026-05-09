@@ -133,7 +133,7 @@ const zh: Record<TranslationKey, string> = {
 
   // ── Settings: Appearance ──────────────────────────────────────
   'settings.appearance': '外观',
-  'settings.appearanceDesc': '自定义 CodePilot 的外观和风格',
+  'settings.appearanceDesc': '自定义外观和风格',
   'settings.themeMode': '主题模式',
   'settings.themeModeDesc': '选择浅色、深色或跟随系统',
   'settings.themeFamily': '颜色主题',
@@ -1301,6 +1301,7 @@ const zh: Record<TranslationKey, string> = {
 
   // ── Top Bar ───────────────────────────────────────────────────
   'topBar.fileTree': '文件树',
+  'topBar.taskList': '任务列表',
   'topBar.git': 'Git',
   'topBar.dashboard': '看板',
   'topBar.commit': '提交全部',

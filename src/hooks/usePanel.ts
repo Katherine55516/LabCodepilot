@@ -43,6 +43,10 @@ export interface PanelContextValue {
   // --- New independent panel states ---
   fileTreeOpen: boolean;
   setFileTreeOpen: (open: boolean) => void;
+  // Task list panel — split out from FileTreePanel so users can toggle the
+  // SDK TodoWrite task list independently of the file tree.
+  taskListOpen: boolean;
+  setTaskListOpen: (open: boolean) => void;
   gitPanelOpen: boolean;
   setGitPanelOpen: (open: boolean) => void;
   previewOpen: boolean;

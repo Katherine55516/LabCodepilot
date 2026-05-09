@@ -32,11 +32,14 @@ interface NavRailProps {
 
 const navItems = [
   { href: "/chat", label: "Chats", icon: ChatCircle },
-  { href: "/skills", label: "Skills", icon: Lightning },
-  { href: "/mcp", label: "MCP", icon: Plug },
-  { href: "/cli-tools", label: "CLI Tools", icon: Terminal },
-  { href: "/gallery", label: "Gallery", icon: Image },
-  // Hidden from sidebar (route + bridge subsystem still active). Restore by uncommenting.
+  // Skills / MCP / CLI Tools moved into Settings sub-sections — routes
+  // still resolve, just no top-level entries here. Restore by uncommenting.
+  // { href: "/skills", label: "Skills", icon: Lightning },
+  // { href: "/mcp", label: "MCP", icon: Plug },
+  // { href: "/cli-tools", label: "CLI Tools", icon: Terminal },
+  // Hidden from sidebar — route + gallery subsystem still active. Restore by uncommenting.
+  // { href: "/gallery", label: "Gallery", icon: Image },
+  // Hidden from sidebar — route + bridge subsystem still active. Restore by uncommenting.
   // { href: "/bridge", label: "Bridge", icon: WifiHigh },
 ] as const;
 
