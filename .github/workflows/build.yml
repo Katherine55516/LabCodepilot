@@ -132,27 +132,49 @@ jobs:
       - name: Build Electron app
         run: npm run electron:build
 
-      - name: Decode signing certificate
+      # ── Signing is OPTIONAL ─────────────────────────────────────────────
+      # If `MAC_CERT_P12_BASE64` + `MAC_CERT_PASSWORD` secrets are present:
+      #   → decode the .p12, pass it to electron-builder via CSC_LINK,
+      #     and verify the resulting .app is signed with Developer ID.
+      # Otherwise:
+      #   → build an UNSIGNED DMG (still works on macOS, but users will see
+      #     a Gatekeeper warning on first launch and need to right-click →
+      #     "Open" or approve under System Settings → Privacy & Security).
+      # This lets the workflow succeed without Apple Developer Program
+      # credentials, useful for development / verification builds.
+
+      - name: Decode signing certificate (if configured)
+        if: env.HAS_CERT == 'true'
         env:
           MAC_CERT_P12_BASE64: ${{ secrets.MAC_CERT_P12_BASE64 }}
           MAC_CERT_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
         run: |
-          if [ "${HAS_CERT}" != "true" ]; then
-            echo "::error::Missing signing certificate (MAC_CERT_P12_BASE64 secret not set)"
-            exit 1
-          fi
           printf '%s' "$MAC_CERT_P12_BASE64" | tr -d '\r\n' | base64 --decode > /tmp/cert.p12
           openssl pkcs12 -in /tmp/cert.p12 -passin pass:"$MAC_CERT_PASSWORD" -noout
           echo "Certificate decoded and validated"
 
-      - name: Package for macOS (arm64 only, sign only)
+      - name: Package for macOS (arm64, signed)
+        if: env.HAS_CERT == 'true'
         timeout-minutes: 15
         env:
           CSC_LINK: /tmp/cert.p12
           CSC_KEY_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
         run: npx electron-builder --mac --arm64 --config electron-builder.yml --publish never
 
-      - name: Verify code signature
+      - name: Package for macOS (arm64, unsigned)
+        if: env.HAS_CERT != 'true'
+        timeout-minutes: 15
+        env:
+          # Disable automatic identity discovery so electron-builder doesn't
+          # try to sign with any keychain identity that might exist on the
+          # runner. We want a fully unsigned build.
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+        run: |
+          echo "::warning::Building UNSIGNED macOS bundle (MAC_CERT_P12_BASE64 secret not set). Users will need to approve the app under System Settings → Privacy & Security on first launch."
+          npx electron-builder --mac --arm64 --config electron-builder.yml --publish never
+
+      - name: Verify code signature (if signed)
+        if: env.HAS_CERT == 'true'
         run: |
           APPS=$(find release -name "CodePilot.app" -maxdepth 3)
           if [ -z "$APPS" ]; then
