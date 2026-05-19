@@ -79,7 +79,8 @@ win:
       arch: [x64]
 nsis:
   oneClick: false
-  perMachine: false
+  perMachine: false                  # Per-user install → no admin/UAC required
+  packElevateHelper: false           # No elevate.exe needed since perMachine=false; explicit guarantee no UAC prompt
   allowToChangeInstallationDirectory: false
   createDesktopShortcut: true
   createStartMenuShortcut: true

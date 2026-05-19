@@ -30,7 +30,6 @@ import { getOAuthStatus } from '@/lib/openai-oauth-manager';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import type { Options, SDKResultSuccess } from '@anthropic-ai/claude-agent-sdk';
 import os from 'os';
-import path from 'path';
 import fs from 'fs';
 
 // ── Types ───────────────────────────────────────────────────────
@@ -105,8 +104,17 @@ async function runCliProbe(): Promise<ProbeResult> {
   // The CLI probe no longer searches for a user-installed binary on the
   // host — instead it verifies the bundled subpackage is present and
   // reports the bundled version.
+  //
+  // We read SDK package.json via createRequire().resolve + fs to avoid
+  // a literal require() call (banned by the project's lint rule
+  // @typescript-eslint/no-require-imports). The fallback walks up from
+  // process.cwd() in case the SDK lives outside the normal module
+  // resolution path (e.g. an unusual electron-builder asar layout).
   try {
-    const sdkPkg = require('@anthropic-ai/claude-agent-sdk/package.json');
+    const { createRequire } = await import('module');
+    const requireFromHere = createRequire(import.meta.url);
+    const pkgPath = requireFromHere.resolve('@anthropic-ai/claude-agent-sdk/package.json');
+    const sdkPkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
     const claudeCodeVersion = (sdkPkg.claudeCodeVersion as string) || (sdkPkg.version as string);
     findings.push({
       severity: 'ok',
@@ -701,31 +709,6 @@ function sanitizeEnvForProbe(env: Record<string, string>): Record<string, string
     }
   }
   return clean;
-}
-
-/**
- * On Windows, resolve .cmd wrapper to the underlying .js script.
- */
-function resolveScriptFromCmd(cmdPath: string): string | undefined {
-  try {
-    const content = fs.readFileSync(cmdPath, 'utf-8');
-    const cmdDir = path.dirname(cmdPath);
-    const patterns = [
-      /"%~dp0\\([^"]*claude[^"]*\.js)"/i,
-      /%~dp0\\(\S*claude\S*\.js)/i,
-      /"%dp0%\\([^"]*claude[^"]*\.js)"/i,
-    ];
-    for (const re of patterns) {
-      const m = content.match(re);
-      if (m) {
-        const resolved = path.normalize(path.join(cmdDir, m[1]));
-        if (fs.existsSync(resolved)) return resolved;
-      }
-    }
-  } catch {
-    // ignore read errors
-  }
-  return undefined;
 }
 
 /**
