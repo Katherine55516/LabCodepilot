@@ -1403,8 +1403,9 @@ const zh: Record<TranslationKey, string> = {
   'setup.welcome.description': 'CodePilot 是多模型 AI Agent 桌面客户端。连接任意 AI 服务商，通过 MCP 和 Skills 扩展能力，让你的助理学会你的工作方式。',
 
   // Setup: Claude Code card
-  'setup.claude.title': 'Claude Code CLI（可选）',
-  'setup.claude.description': '安装 Claude Code CLI 可获得完整命令行能力。不安装也能通过 AI SDK 引擎正常使用。',
+  'setup.claude.title': 'Claude Code',
+  'setup.claude.description': 'Claude Code 已随应用一同分发，无需单独安装。',
+  'setup.claude.bundled': '已内置于 CodePilot',
   'setup.claude.detected': '已检测到 Claude Code',
   'setup.claude.notFound': '未找到 Claude Code',
   'setup.claude.conflict': '检测到多个安装版本，可能导致版本冲突',

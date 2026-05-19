@@ -1,15 +1,14 @@
 import { NextResponse } from 'next/server';
-import { invalidateClaudeClientCache } from '@/lib/claude-client';
-import { invalidateWingetCache } from '@/lib/platform';
 
 /**
  * POST /api/claude-status/invalidate
- * Clears all cached Claude binary paths and install-type detection so the next
- * status check picks up freshly-installed binaries. Called by the install
- * wizard and upgrade flow on success.
+ *
+ * Since v0.55, Claude Code ships bundled with the installer — there is no
+ * binary-path cache to invalidate. This endpoint is kept as a no-op for
+ * backwards compatibility with existing UI flows (install wizard, upgrade
+ * action) that still call it. It can be removed once those flows are
+ * rewritten to drop the call.
  */
 export async function POST() {
-  invalidateClaudeClientCache();
-  invalidateWingetCache();
-  return NextResponse.json({ ok: true });
+  return NextResponse.json({ ok: true, deprecated: true });
 }

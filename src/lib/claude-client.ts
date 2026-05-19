@@ -23,7 +23,9 @@ import { roughTokenEstimate } from './context-estimator';
 import { getSetting, updateSdkSessionId, createPermissionRequest } from './db';
 import { resolveForClaudeCode } from './provider-resolver';
 import { sanitizeClaudeModelOptions } from './claude-model-options';
-import { findClaudeBinary, invalidateClaudePathCache } from './platform';
+// platform.ts CLI binary lookup helpers were removed when CodePilot switched to
+// the bundled platform-specific @anthropic-ai/claude-agent-sdk subpackage
+// (cli.js no longer needs to be resolved against the user's local install).
 import { notifyPermissionRequest, notifyGeneric } from './telegram-bot';
 import { classifyError, formatClassifiedError } from './error-classifier';
 import { resolveWorkingDirectory } from './working-directory';
@@ -79,56 +81,14 @@ function sanitizeEnv(env: Record<string, string>): Record<string, string> {
 }
 
 /**
- * On Windows, npm installs CLI tools as .cmd wrappers that can't be
- * spawned without shell:true. Parse the wrapper to extract the real
- * .js script path so we can pass it to the SDK directly.
- */
-function resolveScriptFromCmd(cmdPath: string): string | undefined {
-  try {
-    const content = fs.readFileSync(cmdPath, 'utf-8');
-    const cmdDir = path.dirname(cmdPath);
-
-    // npm .cmd wrappers typically contain a line like:
-    //   "%~dp0\node_modules\@anthropic-ai\claude-code\cli.js" %*
-    // Match paths containing claude-code or claude-agent and ending in .js
-    const patterns = [
-      // Quoted: "%~dp0\...\cli.js"
-      /"%~dp0\\([^"]*claude[^"]*\.js)"/i,
-      // Unquoted: %~dp0\...\cli.js
-      /%~dp0\\(\S*claude\S*\.js)/i,
-      // Quoted with %dp0%: "%dp0%\...\cli.js"
-      /"%dp0%\\([^"]*claude[^"]*\.js)"/i,
-    ];
-
-    for (const re of patterns) {
-      const m = content.match(re);
-      if (m) {
-        const resolved = path.normalize(path.join(cmdDir, m[1]));
-        if (fs.existsSync(resolved)) return resolved;
-      }
-    }
-  } catch {
-    // ignore read errors
-  }
-  return undefined;
-}
-
-let cachedClaudePath: string | null | undefined;
-
-function findClaudePath(): string | undefined {
-  if (cachedClaudePath !== undefined) return cachedClaudePath || undefined;
-  const found = findClaudeBinary();
-  cachedClaudePath = found ?? null;
-  return found;
-}
-
-/**
- * Invalidate the cached Claude binary path in this module AND in platform.ts.
- * Must be called after installation so the next SDK call picks up the new binary.
+ * @deprecated Local CLI path lookup is no longer used since CodePilot switched
+ * to the bundled platform-specific @anthropic-ai/claude-agent-sdk subpackage.
+ * Kept as a no-op for backwards compatibility with /api/claude-upgrade and
+ * /api/claude-status/invalidate which still call this. Those routes will be
+ * cleaned up alongside the UI rework.
  */
 export function invalidateClaudeClientCache(): void {
-  cachedClaudePath = undefined; // reset to "not yet looked up"
-  invalidateClaudePathCache();  // also reset the 60s TTL cache in platform.ts
+  // no-op
 }
 
 /**
@@ -380,16 +340,9 @@ export async function generateTextViaSdk(params: {
     queryOptions.model = params.model;
   }
 
-  const claudePath = findClaudePath();
-  if (claudePath) {
-    const ext = path.extname(claudePath).toLowerCase();
-    if (ext === '.cmd' || ext === '.bat') {
-      const scriptPath = resolveScriptFromCmd(claudePath);
-      if (scriptPath) queryOptions.pathToClaudeCodeExecutable = scriptPath;
-    } else {
-      queryOptions.pathToClaudeCodeExecutable = claudePath;
-    }
-  }
+  // pathToClaudeCodeExecutable is intentionally not set — the SDK auto-discovers
+  // the native binary from the bundled platform subpackage
+  // (@anthropic-ai/claude-agent-sdk-<platform>-<arch>).
 
   let resultText = '';
   try {
@@ -625,24 +578,11 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
           queryOptions.allowDangerouslySkipPermissions = true;
         }
 
-        // Find claude binary for packaged app where PATH is limited.
-        // On Windows, npm installs Claude CLI as a .cmd wrapper which cannot
-        // be spawned directly without shell:true. Parse the wrapper to
-        // extract the real .js script path and pass that to the SDK instead.
-        const claudePath = findClaudePath();
-        if (claudePath) {
-          const ext = path.extname(claudePath).toLowerCase();
-          if (ext === '.cmd' || ext === '.bat') {
-            const scriptPath = resolveScriptFromCmd(claudePath);
-            if (scriptPath) {
-              queryOptions.pathToClaudeCodeExecutable = scriptPath;
-            } else {
-              console.warn('[claude-client] Could not resolve .js path from .cmd wrapper, falling back to SDK resolution:', claudePath);
-            }
-          } else {
-            queryOptions.pathToClaudeCodeExecutable = claudePath;
-          }
-        }
+        // pathToClaudeCodeExecutable is intentionally not set — the SDK
+        // auto-discovers the native binary from the bundled platform subpackage
+        // (@anthropic-ai/claude-agent-sdk-<platform>-<arch>). This is the same
+        // claude.exe / claude binary that the official native installer ships,
+        // but distributed via npm so it's bundled at install/build time.
 
         if (model) {
           queryOptions.model = model;

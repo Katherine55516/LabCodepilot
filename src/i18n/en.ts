@@ -1406,8 +1406,9 @@ const en = {
   'setup.welcome.description': 'CodePilot is a multi-model AI agent desktop client. Connect any AI provider, extend with MCP & skills, and let your assistant learn your workflow.',
 
   // Setup: Claude Code card
-  'setup.claude.title': 'Claude Code CLI (Optional)',
-  'setup.claude.description': 'Install Claude Code CLI for full command-line capabilities. CodePilot works without it via the AI SDK engine.',
+  'setup.claude.title': 'Claude Code',
+  'setup.claude.description': 'Claude Code is bundled with the application. No separate installation needed.',
+  'setup.claude.bundled': 'Bundled with CodePilot',
   'setup.claude.detected': 'Claude Code detected',
   'setup.claude.notFound': 'Claude Code not found',
   'setup.claude.conflict': 'Multiple installations detected — this may cause version conflicts',

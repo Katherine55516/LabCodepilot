@@ -340,8 +340,8 @@ export function CliSettingsSection() {
         <FieldRow
           label={isZh ? '执行引擎' : 'Engine'}
           description={isZh
-            ? '选择执行 AI 任务的引擎。Claude Code 需要先安装 CLI；AI SDK 直接调用服务商 API，无需 CLI。'
-            : 'Choose the engine that runs AI tasks. Claude Code requires the CLI; AI SDK calls provider APIs directly with no CLI.'}
+            ? '选择执行 AI 任务的引擎。Claude Code 引擎已随应用一同发布；AI SDK 直接调用服务商 API，作为应急备选。'
+            : 'Choose the engine that runs AI tasks. Claude Code is bundled with the app; AI SDK calls provider APIs directly as an emergency fallback.'}
         >
           <Select value={agentRuntime} onValueChange={handleRuntimeChange}>
             <SelectTrigger className="w-[180px] h-8 text-xs">

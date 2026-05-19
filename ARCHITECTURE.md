@@ -165,6 +165,8 @@ Schema 定义在 `src/lib/db.ts`，12 张表：
 | 上下文存储迁移（执行） | `docs/exec-plans/active/context-storage-migration.md` | 分阶段进度 + 决策日志 |
 | 技术债务 | `docs/exec-plans/tech-debt-tracker.md` | 已知技术债务清单 |
 | Provider/Error/Doctor | `docs/handover/provider-error-doctor.md` | 错误分类、Provider 生效、Auth 自动、诊断中心 |
+| 内置 Claude Code | `docs/handover/builtin-claude-code.md` | v0.55+ SDK 平台子包架构、binary 自动发现、asarUnpack、CI 跨架构装包、应急 fallback |
+| 内置 Claude Code（产品） | `docs/insights/builtin-claude-code.md` | 为什么从外置 → 内置、3 个方案对比、SDK 架构演进、+200MB 体积换零配置 |
 
 ## 技术栈
 

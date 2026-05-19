@@ -31,4 +31,5 @@
 | provider-governance.md | 服务商治理系统：Zod Schema 防护、authStyle 修正 6 preset、宿主接管、连通性验证、引导 UX、错误恢复、模型 CRUD |
 | sentry-error-reporting.md | Sentry 匿名错误上报：三层覆盖（browser/server/electron）、opt-out 机制、隐私保护、上报策略 |
 | decouple-native-runtime.md | Native Agent Runtime：双 Runtime 架构、AI SDK agent-loop、OpenAI Codex 集成、文件快照 rewind、MCP 全链路、验证边界与剩余风险 |
+| builtin-claude-code.md | 内置 Claude Code（v0.55+）：SDK 平台子包架构、自动发现 binary、asarUnpack 配置、CI 跨架构装包、Native runtime 应急 fallback |
 | markdown-artifact-overhaul.md | Markdown 渲染 × Artifact 预览体系：PreviewSource 联合、DiffSummary 卡片、Sandpack 单文件 React、CodeMirror 编辑+自动保存、长图导出 IPC、文件 I/O API 合同、loadedPath/freshPreview 防漂移 |

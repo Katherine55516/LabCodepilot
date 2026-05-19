@@ -17,4 +17,5 @@
 | [performance-memory.md](./performance-memory.md) | [handover/performance-memory.md](../handover/performance-memory.md) | 内存优化：LRU vs 定期清理、300 条上限 + reconciliation、定时器泄漏、大文件流式读取 |
 | [user-audience-analysis.md](./user-audience-analysis.md) | [handover/provider-architecture.md](../handover/provider-architecture.md) | 用户受众分析：画像、需求优先级、竞品格局、品牌定位路线取舍（2026-04-04 数据快照） |
 | [decouple-native-runtime.md](./decouple-native-runtime.md) | [handover/decouple-native-runtime.md](../handover/decouple-native-runtime.md) | 脱离 Claude Code：用户痛点（安装门槛/单一锁定）、双 Runtime 设计理由、OpenAI 集成、参考项目对比 |
+| [builtin-claude-code.md](./builtin-claude-code.md) | [handover/builtin-claude-code.md](../handover/builtin-claude-code.md) | 内置 Claude Code（v0.55+）：从外置 → 内置的产品决策、3 个备选方案对比、+200MB 体积换零配置 setup、SDK 架构变化的偶然性 |
 | [markdown-artifact-overhaul.md](./markdown-artifact-overhaul.md) | [handover/markdown-artifact-overhaul.md](../handover/markdown-artifact-overhaul.md) | Markdown/Artifact 重构：卡片点击 vs 自动弹、升级 DiffSummary、分档 50000 行 + 截断提示、PreviewPanel 编辑即核心能力、单文件 React 产品边界、长图走隐藏窗口复用、两段失败路径复盘 |

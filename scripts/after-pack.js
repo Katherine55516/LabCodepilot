@@ -119,6 +119,78 @@ module.exports = async function afterPack(context) {
     }
   }
 
+  // Step 4: Verify & chmod the Claude Code native binary shipped by the
+  // @anthropic-ai/claude-agent-sdk-<platform>-<arch> subpackage.
+  // The binary is asarUnpack'd, so it lives under:
+  //   <appOutDir>/.../resources/app.asar.unpacked/node_modules/@anthropic-ai/
+  //     claude-agent-sdk-<platform>-<arch>/{claude|claude.exe}
+  // and also at the standalone copy:
+  //   <appOutDir>/.../resources/standalone/node_modules/@anthropic-ai/
+  //     claude-agent-sdk-<platform>-<arch>/{claude|claude.exe}
+  // We make sure it exists for the target platform/arch, and on macOS/Linux
+  // ensure it's executable (npm sometimes strips the +x bit when extracting
+  // optional dependencies on CI).
+  const sdkPlatform =
+    platform === 'mac' ? 'darwin' :
+    platform === 'windows' ? 'win32' :
+    platform === 'linux' ? 'linux' :
+    platform;
+  const expectedSubpackages =
+    sdkPlatform === 'linux'
+      ? [`@anthropic-ai/claude-agent-sdk-linux-${archName}`,
+         `@anthropic-ai/claude-agent-sdk-linux-${archName}-musl`]
+      : [`@anthropic-ai/claude-agent-sdk-${sdkPlatform}-${archName}`];
+
+  const binaryName = sdkPlatform === 'win32' ? 'claude.exe' : 'claude';
+
+  const sdkSearchRoots = [
+    path.join(appOutDir, 'CodePilot.app', 'Contents', 'Resources'),
+    path.join(appOutDir, 'Contents', 'Resources'),
+    path.join(appOutDir, 'resources'),
+  ];
+
+  let sdkBinariesFound = 0;
+  for (const root of sdkSearchRoots) {
+    if (!fs.existsSync(root)) continue;
+    for (const subpkg of expectedSubpackages) {
+      // Two possible locations within each resources root:
+      //   app.asar.unpacked/node_modules/<subpkg>/<binary>
+      //   standalone/node_modules/<subpkg>/<binary>
+      const candidates = [
+        path.join(root, 'app.asar.unpacked', 'node_modules', ...subpkg.split('/'), binaryName),
+        path.join(root, 'standalone', 'node_modules', ...subpkg.split('/'), binaryName),
+      ];
+      for (const binPath of candidates) {
+        if (!fs.existsSync(binPath)) continue;
+        const stats = fs.statSync(binPath);
+        // On macOS/Linux, ensure +x is set
+        if (sdkPlatform !== 'win32') {
+          fs.chmodSync(binPath, 0o755);
+        }
+        console.log(`[afterPack] Verified Claude Code binary: ${binPath} (${stats.size} bytes)`);
+        sdkBinariesFound++;
+      }
+    }
+  }
+
+  if (sdkBinariesFound === 0) {
+    // For Linux, having neither glibc nor musl variant is fatal — the SDK
+    // can't pick at runtime if neither is present. For mac/win, just one
+    // expected subpackage; missing it means npm didn't install the platform
+    // optional dependency for this arch.
+    const msg =
+      `[afterPack] FATAL: No Claude Code native binary found for ` +
+      `${sdkPlatform}-${archName}. ` +
+      `Expected subpackages: ${expectedSubpackages.join(', ')}. ` +
+      `This usually means \`npm install\` did not install the platform-specific ` +
+      `optional dependency for ${sdkPlatform}-${archName}. ` +
+      `On CI, ensure the build job runs on a matching runner OR explicitly ` +
+      `installs the subpackage with --force --os=<platform> --cpu=<arch>.`;
+    console.error(msg);
+    throw new Error(msg);
+  }
+  console.log(`[afterPack] Claude Code SDK binary check passed (${sdkBinariesFound} copies verified)`);
+
   // Note: Ad-hoc code signing moved to scripts/after-sign.js (afterSign hook).
   // afterSign runs after electron-builder's own signing step (which is a no-op
   // with CSC_IDENTITY_AUTO_DISCOVERY=false), ensuring the signature is the last

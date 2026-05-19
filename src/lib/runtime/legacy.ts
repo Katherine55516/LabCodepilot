@@ -29,19 +29,19 @@ export function isConcreteRuntime(v: unknown): v is ConcreteRuntime {
  * migration purposes. Rules:
  *   - 'claude-code-sdk' → 'claude-code-sdk'   (user's explicit choice)
  *   - 'native'          → 'native'            (user's explicit choice)
- *   - 'auto' / null / undefined / anything else → environment-driven:
- *                          cliConnected ? 'claude-code-sdk' : 'native'
+ *   - 'auto' / null / undefined / anything else → 'claude-code-sdk'
  *
- * `cliConnected` must come from a real /api/claude-status read. Passing a
- * pessimistic default (false) while the status is still loading will silently
- * migrate Claude Code users to Native — callers should either await status
- * resolution or gate the persistence step, and only use this for local
- * display when status is unknown.
+ * Since the Claude Code native binary is bundled inside the installer
+ * (platform-specific @anthropic-ai/claude-agent-sdk-* subpackage),
+ * SDK runtime is always available. The legacy `cliConnected` parameter
+ * is retained for ABI compatibility with existing call sites but ignored;
+ * it can be removed once those call sites stop passing it.
  */
 export function resolveLegacyRuntimeForDisplay(
   saved: string | undefined | null,
-  cliConnected: boolean,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  _cliConnected?: boolean,
 ): ConcreteRuntime {
   if (isConcreteRuntime(saved)) return saved;
-  return cliConnected ? 'claude-code-sdk' : 'native';
+  return 'claude-code-sdk';
 }

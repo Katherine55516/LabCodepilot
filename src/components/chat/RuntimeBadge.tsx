@@ -37,15 +37,12 @@ export function RuntimeBadge({ providerId }: RuntimeBadgeProps) {
   useEffect(() => {
     const loadRuntime = async () => {
       try {
-        const [settingsRes, statusRes] = await Promise.all([
-          fetch('/api/settings/app').catch(() => null),
-          fetch('/api/claude-status').catch(() => null),
-        ]);
+        const settingsRes = await fetch('/api/settings/app').catch(() => null);
         const settings = settingsRes?.ok ? await settingsRes.json() : null;
-        const status = statusRes?.ok ? await statusRes.json() : null;
         const saved = settings?.settings?.agent_runtime;
-        const cliConnected = !!status?.connected;
-        setRuntimeSetting(resolveLegacyRuntimeForDisplay(saved, cliConnected));
+        // Bundled Claude Code is always available, so the legacy
+        // `cliConnected` argument is irrelevant — pass true.
+        setRuntimeSetting(resolveLegacyRuntimeForDisplay(saved, true));
       } catch {
         /* ignore — keep previous runtimeSetting */
       }
@@ -86,7 +83,7 @@ export function RuntimeBadge({ providerId }: RuntimeBadgeProps) {
           <p className="text-muted-foreground">
             {effectiveRuntime === 'native'
               ? (isZh ? 'AI SDK：内置多模型引擎，无需 CLI' : 'AI SDK: built-in multi-model engine, no CLI required')
-              : (isZh ? 'Claude Code：通过 CLI 子进程驱动' : 'Claude Code: driven by CLI subprocess')
+              : (isZh ? 'Claude Code：内置原生二进制，开箱即用' : 'Claude Code: bundled native binary, ready out of the box')
             }
           </p>
         )}

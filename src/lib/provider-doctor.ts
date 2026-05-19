@@ -6,9 +6,6 @@
  */
 
 import {
-  findClaudeBinary,
-  getClaudeVersion,
-  findAllClaudeBinaries,
   isWindows,
   findGitBash,
 } from '@/lib/platform';
@@ -103,47 +100,34 @@ async function runCliProbe(): Promise<ProbeResult> {
   const findings: Finding[] = [];
   const start = Date.now();
 
-  // Check primary binary
-  const bin = findClaudeBinary();
-  if (!bin) {
+  // Since v0.55, Claude Code is bundled with the application installer
+  // via the @anthropic-ai/claude-agent-sdk-<platform>-<arch> subpackage.
+  // The CLI probe no longer searches for a user-installed binary on the
+  // host — instead it verifies the bundled subpackage is present and
+  // reports the bundled version.
+  try {
+    const sdkPkg = require('@anthropic-ai/claude-agent-sdk/package.json');
+    const claudeCodeVersion = (sdkPkg.claudeCodeVersion as string) || (sdkPkg.version as string);
+    findings.push({
+      severity: 'ok',
+      code: 'cli.bundled',
+      message: `Claude Code is bundled with the application (v${claudeCodeVersion})`,
+      detail: 'The native binary ships inside the installer — no user setup required.',
+    });
+  } catch (err) {
     findings.push({
       severity: 'error',
-      code: 'cli.not-found',
-      message: 'Claude CLI binary not found on this system',
-      detail: 'Install Claude Code CLI: npm install -g @anthropic-ai/claude-code',
-    });
-  } else {
-    const version = await getClaudeVersion(bin);
-    if (version) {
-      findings.push({
-        severity: 'ok',
-        code: 'cli.found',
-        message: `Claude CLI found at ${bin}`,
-        detail: `Version: ${version}`,
-      });
-    } else {
-      findings.push({
-        severity: 'warn',
-        code: 'cli.version-failed',
-        message: `Claude CLI found at ${bin} but --version failed`,
-        detail: 'The binary may be corrupted or incompatible',
-      });
-    }
-  }
-
-  // Check for multiple installations
-  const allBinaries = findAllClaudeBinaries();
-  if (allBinaries.length > 1) {
-    const paths = allBinaries.map(b => `${b.path} (${b.version || 'unknown'})`).join(', ');
-    findings.push({
-      severity: 'warn',
-      code: 'cli.multiple-installs',
-      message: `Multiple Claude CLI installations detected (${allBinaries.length})`,
-      detail: paths,
+      code: 'cli.bundle-missing',
+      message: 'Bundled Claude Code SDK metadata is unavailable',
+      detail:
+        'This is a packaging defect — the application was built without the ' +
+        '@anthropic-ai/claude-agent-sdk package. ' + (err instanceof Error ? err.message : String(err)),
     });
   }
 
-  // Windows-specific: check Git Bash
+  // Windows-specific: check Git Bash. Several Claude Code hooks (and some
+  // shell-tool patterns the user may configure) still expect bash to be
+  // available on Windows.
   if (isWindows) {
     const gitBash = findGitBash();
     if (gitBash) {
@@ -156,7 +140,7 @@ async function runCliProbe(): Promise<ProbeResult> {
       findings.push({
         severity: 'warn',
         code: 'cli.git-bash-missing',
-        message: 'Git Bash not found (recommended for Claude CLI on Windows)',
+        message: 'Git Bash not found (recommended for some Claude Code hooks on Windows)',
       });
     }
   }
@@ -777,16 +761,10 @@ async function runLiveProbe(): Promise<ProbeResult> {
     return { probe: 'live', severity: probeSeverity(findings), findings, durationMs: Date.now() - start };
   }
 
-  // 3. Skip if no CLI binary
-  const claudePath = findClaudeBinary();
-  if (!claudePath) {
-    findings.push({
-      severity: 'warn',
-      code: 'live.no-cli',
-      message: 'Live probe skipped — Claude CLI binary not found',
-    });
-    return { probe: 'live', severity: probeSeverity(findings), findings, durationMs: Date.now() - start };
-  }
+  // 3. (Removed in v0.55) "Skip if no CLI binary" check — the Claude Code
+  //    native binary is now bundled inside the installer via the platform
+  //    subpackage, so the SDK runtime is always available. The live probe
+  //    proceeds directly to building the env + query options.
 
   // 4. Build env via the shared helper so the live probe sees the EXACT same
   // provider-owned auth isolation as the real chat path. Otherwise the
@@ -819,14 +797,9 @@ async function runLiveProbe(): Promise<ProbeResult> {
     stderr: stderrCallback,
   };
 
-  // Resolve executable path (handle Windows .cmd wrappers)
-  const ext = path.extname(claudePath).toLowerCase();
-  if (ext === '.cmd' || ext === '.bat') {
-    const scriptPath = resolveScriptFromCmd(claudePath);
-    if (scriptPath) queryOptions.pathToClaudeCodeExecutable = scriptPath;
-  } else {
-    queryOptions.pathToClaudeCodeExecutable = claudePath;
-  }
+  // pathToClaudeCodeExecutable intentionally not set — the SDK auto-discovers
+  // the native binary from the bundled platform subpackage. See v0.55 change
+  // notes for the rationale.
 
   // 6. Run the probe
   try {

@@ -12,7 +12,6 @@ on:
           - all
           - windows
           - macos
-          - linux
   pull_request:
     branches: [main]
   push:
@@ -91,8 +90,8 @@ jobs:
       - name: Build Electron app
         run: npm run electron:build
 
-      - name: Package for Windows
-        run: npx electron-builder --win --config electron-builder.yml --publish never
+      - name: Package for Windows (x64 only)
+        run: npx electron-builder --win --x64 --config electron-builder.yml --publish never
 
       - name: Generate checksums
         shell: pwsh
@@ -146,12 +145,12 @@ jobs:
           openssl pkcs12 -in /tmp/cert.p12 -passin pass:"$MAC_CERT_PASSWORD" -noout
           echo "Certificate decoded and validated"
 
-      - name: Package for macOS (x64 + arm64, sign only)
+      - name: Package for macOS (arm64 only, sign only)
         timeout-minutes: 15
         env:
           CSC_LINK: /tmp/cert.p12
           CSC_KEY_PASSWORD: ${{ secrets.MAC_CERT_PASSWORD }}
-        run: npx electron-builder --mac --config electron-builder.yml --publish never
+        run: npx electron-builder --mac --arm64 --config electron-builder.yml --publish never
 
       - name: Verify code signature
         run: |
@@ -202,179 +201,9 @@ jobs:
             release/checksums-macos.sha256
           retention-days: 3
 
-  build-linux-x64:
-    needs: [lint-test, smoke-test]
-    if: ${{ github.event_name == 'push' || inputs.platform == 'all' || inputs.platform == 'linux' }}
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build Electron app
-        run: npm run electron:build
-
-      - name: Package for Linux (x64)
-        run: npx electron-builder --linux --x64 --config electron-builder.yml --publish never
-
-      - name: Verify Linux x64 artifacts
-        run: |
-          echo "=== Artifact list ==="
-          find release -type f \( -name "*.AppImage" -o -name "*.deb" -o -name "*.rpm" \) | sort
-
-          COUNT=$(find release -type f \( -name "*.AppImage" -o -name "*.deb" -o -name "*.rpm" \) | wc -l)
-          if [ "$COUNT" -eq 0 ]; then
-            echo "::error::No Linux x64 artifacts produced"
-            exit 1
-          fi
-
-          # Verify AppImage ELF architecture
-          for f in release/*.AppImage; do
-            [ -f "$f" ] || continue
-            FILE_INFO=$(file "$f")
-            echo "$FILE_INFO"
-            if ! echo "$FILE_INFO" | grep -qi "x86-64\|x86_64"; then
-              echo "::error::AppImage $f is not x64"
-              exit 1
-            fi
-          done
-
-          # Verify deb architecture
-          for f in release/*.deb; do
-            [ -f "$f" ] || continue
-            DEB_ARCH=$(dpkg-deb --info "$f" 2>/dev/null | grep '^ Architecture:' | awk '{print $2}')
-            echo "deb $f arch=$DEB_ARCH"
-            if [ "$DEB_ARCH" != "amd64" ]; then
-              echo "::error::deb $f has wrong architecture: $DEB_ARCH (expected amd64)"
-              exit 1
-            fi
-          done
-
-          # Verify rpm architecture
-          for f in release/*.rpm; do
-            [ -f "$f" ] || continue
-            RPM_ARCH=$(rpm -qp --qf '%{ARCH}' "$f" 2>/dev/null || echo "unknown")
-            echo "rpm $f arch=$RPM_ARCH"
-            if [ "$RPM_ARCH" != "x86_64" ]; then
-              echo "::error::rpm $f has wrong architecture: $RPM_ARCH (expected x86_64)"
-              exit 1
-            fi
-          done
-
-          echo "✓ All Linux x64 artifacts verified"
-
-      - name: Generate checksums
-        run: |
-          cd release
-          sha256sum *.AppImage *.deb *.rpm 2>/dev/null | tee checksums-linux-x64.sha256
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-linux-x64
-          path: |
-            release/*.AppImage
-            release/*.deb
-            release/*.rpm
-            release/checksums-linux-x64.sha256
-          retention-days: 3
-
-  build-linux-arm64:
-    needs: [lint-test, smoke-test]
-    if: ${{ github.event_name == 'push' || inputs.platform == 'all' || inputs.platform == 'linux' }}
-    # Use a native arm64 runner — avoids fragile cross-compilation toolchain
-    # setup that breaks across Ubuntu versions (sources.list vs deb822).
-    # Falls back gracefully: if the runner label isn't available, the job
-    # stays queued and doesn't block the x64 build or other platforms.
-    runs-on: ubuntu-24.04-arm
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: npm
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Build Electron app
-        run: npm run electron:build
-
-      - name: Package for Linux (arm64)
-        run: npx electron-builder --linux --arm64 --config electron-builder.yml --publish never
-
-      - name: Verify Linux arm64 artifacts
-        run: |
-          echo "=== Artifact list ==="
-          find release -type f \( -name "*.AppImage" -o -name "*.deb" -o -name "*.rpm" \) | sort
-
-          COUNT=$(find release -type f \( -name "*.AppImage" -o -name "*.deb" -o -name "*.rpm" \) | wc -l)
-          if [ "$COUNT" -eq 0 ]; then
-            echo "::error::No Linux arm64 artifacts produced"
-            exit 1
-          fi
-
-          # Verify AppImage ELF architecture
-          for f in release/*.AppImage; do
-            [ -f "$f" ] || continue
-            FILE_INFO=$(file "$f")
-            echo "$FILE_INFO"
-            if ! echo "$FILE_INFO" | grep -qi "aarch64\|ARM aarch64"; then
-              echo "::error::AppImage $f is not arm64"
-              exit 1
-            fi
-          done
-
-          # Verify deb architecture
-          for f in release/*.deb; do
-            [ -f "$f" ] || continue
-            DEB_ARCH=$(dpkg-deb --info "$f" 2>/dev/null | grep '^ Architecture:' | awk '{print $2}')
-            echo "deb $f arch=$DEB_ARCH"
-            if [ "$DEB_ARCH" != "arm64" ]; then
-              echo "::error::deb $f has wrong architecture: $DEB_ARCH (expected arm64)"
-              exit 1
-            fi
-          done
-
-          # Verify rpm architecture
-          for f in release/*.rpm; do
-            [ -f "$f" ] || continue
-            RPM_ARCH=$(rpm -qp --qf '%{ARCH}' "$f" 2>/dev/null || echo "unknown")
-            echo "rpm $f arch=$RPM_ARCH"
-            if [ "$RPM_ARCH" != "aarch64" ]; then
-              echo "::error::rpm $f has wrong architecture: $RPM_ARCH (expected aarch64)"
-              exit 1
-            fi
-          done
-
-          echo "✓ All Linux arm64 artifacts verified"
-
-      - name: Generate checksums
-        run: |
-          cd release
-          sha256sum *.AppImage *.deb *.rpm 2>/dev/null | tee checksums-linux-arm64.sha256
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
-        with:
-          name: build-linux-arm64
-          path: |
-            release/*.AppImage
-            release/*.deb
-            release/*.rpm
-            release/checksums-linux-arm64.sha256
-          retention-days: 3
-
   release:
     if: ${{ always() && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v') && !contains(needs.*.result, 'cancelled') }}
-    needs: [build-windows, build-macos, build-linux-x64, build-linux-arm64]
+    needs: [build-windows, build-macos]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -433,7 +262,6 @@ jobs:
 
           ### macOS
           - [Apple Silicon (M1/M2/M3/M4)](https://github.com/op7418/CodePilot/releases/download/v${VERSION}/CodePilot-${VERSION}-arm64.dmg)
-          - [Intel](https://github.com/op7418/CodePilot/releases/download/v${VERSION}/CodePilot-${VERSION}-x64.dmg)
 
           ### Windows
           - [Windows 安装包](https://github.com/op7418/CodePilot/releases/download/v${VERSION}/CodePilot.Setup.${VERSION}.exe)
@@ -445,9 +273,9 @@ jobs:
 
           ## 系统要求
 
-          - macOS 12.0+ / Windows 10+ / Linux (glibc 2.31+)
+          - macOS 12.0+（Apple Silicon）/ Windows 10+ (x64)
           - 需要配置 API 服务商（Anthropic / OpenRouter 等）
-          - 推荐安装 Claude Code CLI 以获得完整功能
+          - Claude Code 已内置，无需单独安装
           NOTES_EOF
           fi
 
@@ -465,7 +293,7 @@ jobs:
           FILES=()
           while IFS= read -r f; do
             FILES+=("$f")
-          done < <(find artifacts -type f \( -name "*.dmg" -o -name "*.zip" -o -name "*.exe" -o -name "*.AppImage" -o -name "*.deb" -o -name "*.rpm" \) | sort)
+          done < <(find artifacts -type f \( -name "*.dmg" -o -name "*.zip" -o -name "*.exe" \) | sort)
           FILES+=("artifacts/SHA256SUMS.txt")
 
           gh release create "${GITHUB_REF_NAME}" \

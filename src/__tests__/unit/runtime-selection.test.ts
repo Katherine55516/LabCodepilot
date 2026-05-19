@@ -11,95 +11,75 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 
-// ── Suite 1: predictNativeRuntime (inlined — registry.ts has side effects) ──
+// ── Suite 1: predictNativeRuntime (v0.55+: SDK always available) ──
 // Mirrors registry.ts predictNativeRuntime() — update if source changes.
+// Since v0.55 the Claude Code binary is bundled, so `sdkAvailable` is
+// effectively always true and the "no SDK → fallback to native" branch is gone.
 
 function predictNativeRuntime(
   providerId: string | undefined,
   cliEnabled: boolean,
   agentRuntime: string,
-  sdkAvailable: boolean,
-  hasAnyCreds: boolean,
 ): boolean {
   if (providerId === 'openai-oauth') return true;
   if (!cliEnabled) return true;
   if (agentRuntime === 'native') return true;
-  if (agentRuntime === 'claude-code-sdk') return !sdkAvailable; // fallback if no CLI
-  // auto: SDK only if CLI + has credentials
-  if (sdkAvailable && hasAnyCreds) return false;
-  return true;
+  // 'claude-code-sdk' or 'auto' → SDK runtime (always available)
+  return false;
 }
 
-describe('predictNativeRuntime (mirrors registry.ts)', () => {
+describe('predictNativeRuntime (mirrors registry.ts, v0.55+)', () => {
   it('openai-oauth → always native', () => {
-    assert.equal(predictNativeRuntime('openai-oauth', true, 'auto', true, true), true);
+    assert.equal(predictNativeRuntime('openai-oauth', true, 'auto'), true);
   });
-  it('cli disabled → always native', () => {
-    assert.equal(predictNativeRuntime(undefined, false, 'auto', true, true), true);
+  it('cli_enabled=false → always native (emergency fallback)', () => {
+    assert.equal(predictNativeRuntime(undefined, false, 'auto'), true);
   });
   it('setting=native → native', () => {
-    assert.equal(predictNativeRuntime(undefined, true, 'native', true, true), true);
+    assert.equal(predictNativeRuntime(undefined, true, 'native'), true);
   });
-  it('setting=claude-code-sdk + CLI → not native', () => {
-    assert.equal(predictNativeRuntime(undefined, true, 'claude-code-sdk', true, true), false);
+  it('setting=claude-code-sdk → not native (bundled binary always present)', () => {
+    assert.equal(predictNativeRuntime(undefined, true, 'claude-code-sdk'), false);
   });
-  it('setting=claude-code-sdk + no CLI → native (fallback)', () => {
-    assert.equal(predictNativeRuntime(undefined, true, 'claude-code-sdk', false, true), true);
-  });
-  it('auto + SDK + has creds → not native', () => {
-    assert.equal(predictNativeRuntime(undefined, true, 'auto', true, true), false);
-  });
-  it('auto + SDK + no creds → native (#456)', () => {
-    assert.equal(predictNativeRuntime(undefined, true, 'auto', true, false), true);
-  });
-  it('auto + no SDK → native', () => {
-    assert.equal(predictNativeRuntime(undefined, true, 'auto', false, true), true);
+  it('auto → not native (bundled binary always present)', () => {
+    assert.equal(predictNativeRuntime(undefined, true, 'auto'), false);
   });
 });
 
-// ── Suite 2: resolveRuntime auto semantics (mirrors registry.ts) ──
+// ── Suite 2: resolveRuntime auto semantics (v0.55+) ──
 
 function resolveRuntime(
   cliDisabled: boolean,
   overrideId: string | undefined,
   settingId: string | undefined,
-  sdkAvailable: boolean,
-  hasAnyCreds: boolean,
 ): string {
   if (cliDisabled) return 'native';
   // Explicit override — respected directly (user chose it)
   if (overrideId && overrideId !== 'auto') return overrideId;
-  // Explicit setting — respected if SDK is available
-  if (settingId && settingId !== 'auto') {
-    if (settingId === 'claude-code-sdk' && !sdkAvailable) return 'native'; // fallback
-    return settingId;
-  }
-  // Auto: SDK only if CLI exists AND user has any credentials
-  if (sdkAvailable && hasAnyCreds) return 'claude-code-sdk';
-  return 'native';
+  // Explicit setting — respected (SDK always available, no fallback needed)
+  if (settingId && settingId !== 'auto') return settingId;
+  // Auto: always SDK runtime since binary is bundled
+  return 'claude-code-sdk';
 }
 
-describe('resolveRuntime (mirrors registry.ts)', () => {
+describe('resolveRuntime (mirrors registry.ts, v0.55+)', () => {
   it('cli disabled → native regardless', () => {
-    assert.equal(resolveRuntime(true, 'claude-code-sdk', 'claude-code-sdk', true, true), 'native');
+    assert.equal(resolveRuntime(true, 'claude-code-sdk', 'claude-code-sdk'), 'native');
   });
   it('explicit override takes precedence', () => {
-    assert.equal(resolveRuntime(false, 'native', 'claude-code-sdk', true, true), 'native');
+    assert.equal(resolveRuntime(false, 'native', 'claude-code-sdk'), 'native');
   });
-  it('explicit claude-code-sdk + no CLI → fallback native', () => {
-    assert.equal(resolveRuntime(false, undefined, 'claude-code-sdk', false, true), 'native');
+  it('explicit claude-code-sdk → sdk (no fallback, binary is bundled)', () => {
+    assert.equal(resolveRuntime(false, undefined, 'claude-code-sdk'), 'claude-code-sdk');
   });
-  it('setting takes precedence over auto', () => {
-    assert.equal(resolveRuntime(false, undefined, 'native', true, true), 'native');
+  it('setting=native takes precedence over auto', () => {
+    assert.equal(resolveRuntime(false, undefined, 'native'), 'native');
   });
-  it('auto + SDK + has creds → sdk', () => {
-    assert.equal(resolveRuntime(false, undefined, undefined, true, true), 'claude-code-sdk');
+  it('auto → sdk (bundled binary always present)', () => {
+    assert.equal(resolveRuntime(false, undefined, undefined), 'claude-code-sdk');
   });
-  it('auto + SDK + no creds → native (#456)', () => {
-    assert.equal(resolveRuntime(false, undefined, undefined, true, false), 'native');
-  });
-  it('auto + no SDK → native', () => {
-    assert.equal(resolveRuntime(false, undefined, undefined, false, true), 'native');
+  it('auto with no setting → sdk', () => {
+    assert.equal(resolveRuntime(false, undefined, 'auto'), 'claude-code-sdk');
   });
 });
 
@@ -154,23 +134,20 @@ describe('OpenAI OAuth status (inlined logic)', () => {
   });
 });
 
-// ── Suite 4: SDK availability matrix (mirrors sdk-runtime.ts isAvailable) ──
+// ── Suite 4: SDK availability matrix (v0.55+: always available) ──
 
-describe('SDK isAvailable matrix (inlined logic)', () => {
-  // Mirrors the 3-layer check in sdk-runtime.ts:76-97.
-  // Mirrors sdk-runtime.ts isAvailable() — now a simple CLI binary check.
-  // Auth is managed by the CLI itself; availability only depends on binary.
+describe('SDK isAvailable (v0.55+)', () => {
+  // Mirrors sdk-runtime.ts isAvailable(). Since the Claude Code binary is
+  // bundled with the installer via the @anthropic-ai/claude-agent-sdk-*
+  // platform subpackage, SDK runtime is always available. Authentication
+  // errors surface at stream time, not pre-filtered here.
 
-  function sdkIsAvailable(cliBinaryExists: boolean): boolean {
-    return cliBinaryExists;
+  function sdkIsAvailable(): boolean {
+    return true;
   }
 
-  it('no CLI binary → unavailable', () => {
-    assert.equal(sdkIsAvailable(false), false);
-  });
-
-  it('CLI binary exists → available', () => {
-    assert.equal(sdkIsAvailable(true), true);
+  it('always available (bundled binary)', () => {
+    assert.equal(sdkIsAvailable(), true);
   });
 });
 

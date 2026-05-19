@@ -14,12 +14,30 @@ const nextConfig: NextConfig = {
   // serverExternalPackages: keep these in node_modules at runtime instead of bundling.
   // - better-sqlite3 / zlib-sync: native modules, can't be bundled
   // - discord.js / @discordjs/ws: dynamic require chain
-  // - @anthropic-ai/claude-agent-sdk: ships its own `cli.js` that the SDK spawns
-  //   as a child process. When Next.js bundles the SDK, the standalone build
-  //   omits cli.js, so the SDK fails with "Claude Code executable not found at
-  //   .../node_modules/@anthropic-ai/claude-agent-sdk/cli.js" in production.
-  //   Sentry recorded ~247 events in 14d before this was added.
-  serverExternalPackages: ['better-sqlite3', 'discord.js', '@discordjs/ws', 'zlib-sync', '@anthropic-ai/claude-agent-sdk'],
+  // - @anthropic-ai/claude-agent-sdk: orchestrates spawning the Claude Code
+  //   native binary at runtime via require.resolve('@anthropic-ai/claude-agent-sdk-<platform>-<arch>').
+  //   If Next.js bundles the SDK, that dynamic require can't be statically
+  //   analyzed and the runtime binary lookup fails.
+  // - @anthropic-ai/claude-agent-sdk-<platform>-<arch>: 8 platform subpackages
+  //   each shipping a self-contained native `claude` / `claude.exe` binary
+  //   (~230 MB). They must be visible as real packages in node_modules at
+  //   runtime — bundling them is both pointless (binaries can't be inlined) and
+  //   harmful (the SDK's require.resolve probe relies on the package layout).
+  serverExternalPackages: [
+    'better-sqlite3',
+    'discord.js',
+    '@discordjs/ws',
+    'zlib-sync',
+    '@anthropic-ai/claude-agent-sdk',
+    '@anthropic-ai/claude-agent-sdk-darwin-arm64',
+    '@anthropic-ai/claude-agent-sdk-darwin-x64',
+    '@anthropic-ai/claude-agent-sdk-linux-arm64',
+    '@anthropic-ai/claude-agent-sdk-linux-arm64-musl',
+    '@anthropic-ai/claude-agent-sdk-linux-x64',
+    '@anthropic-ai/claude-agent-sdk-linux-x64-musl',
+    '@anthropic-ai/claude-agent-sdk-win32-arm64',
+    '@anthropic-ai/claude-agent-sdk-win32-x64',
+  ],
   env: {
     NEXT_PUBLIC_APP_VERSION: pkg.version,
     NEXT_PUBLIC_SENTRY_DSN: 'https://245dc3525425bcd8eb99dd4b9a2ca5cd@o4511161899548672.ingest.us.sentry.io/4511161904791552',

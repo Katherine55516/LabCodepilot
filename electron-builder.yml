@@ -47,6 +47,12 @@ afterSign: scripts/after-sign.js
 asarUnpack:
   - "**/*.node"
   - "**/better-sqlite3/**"
+  # @anthropic-ai/claude-agent-sdk-<platform>-<arch> ships a Bun-compiled native
+  # binary (claude / claude.exe, ~230 MB). It must be unpacked from app.asar so
+  # child_process.spawn can execute it — binaries inside asar archives are not
+  # executable in place. SDK auto-discovers the platform-specific subpackage at
+  # runtime via require.resolve, which works fine through asarUnpack.
+  - "**/@anthropic-ai/claude-agent-sdk-*/**"
 mac:
   icon: build/icon.icns
   category: public.app-category.developer-tools
@@ -56,16 +62,21 @@ mac:
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.inherit.plist
   notarize: false
+  # Only Apple Silicon — Intel Macs are no longer targeted (drops the need to
+  # cross-install the darwin-x64 SDK platform subpackage in CI and halves the
+  # release artifact size for macOS).
   target:
     - target: dmg
-      arch: [x64, arm64]
+      arch: [arm64]
     - target: zip
-      arch: [x64, arm64]
+      arch: [arm64]
 win:
   icon: build/icon.ico
+  # Only x64 — arm64 is no longer targeted (most Windows users are x64; drops
+  # the need to cross-install win32-arm64 SDK platform subpackage in CI).
   target:
     - target: nsis
-      arch: [x64, arm64]
+      arch: [x64]
 nsis:
   oneClick: false
   perMachine: false
