@@ -42,6 +42,30 @@ const nextConfig: NextConfig = {
     NEXT_PUBLIC_APP_VERSION: pkg.version,
     NEXT_PUBLIC_SENTRY_DSN: 'https://245dc3525425bcd8eb99dd4b9a2ca5cd@o4511161899548672.ingest.us.sentry.io/4511161904791552',
   },
+  // outputFileTracingIncludes: force Next.js NFT to copy the Anthropic SDK
+  // platform-specific subpackages into .next/standalone/node_modules/ so the
+  // electron-builder extraResources step picks them up. The SDK locates its
+  // native binary at runtime via a dynamic `require.resolve()` keyed on
+  // process.platform + process.arch, which Next.js cannot statically follow —
+  // without this include the subpackages get silently dropped from the
+  // standalone output and `after-pack.js` fails with
+  // "FATAL: No Claude Code native binary found for <platform>-<arch>".
+  // Only the subpackage matching the current OS/arch is actually installed
+  // by npm (the others are optionalDependencies that npm skips on mismatch),
+  // so listing all 8 is safe — Next.js silently skips includes that don't
+  // resolve to real files.
+  outputFileTracingIncludes: {
+    '**/*': [
+      'node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64/**/*',
+      'node_modules/@anthropic-ai/claude-agent-sdk-darwin-x64/**/*',
+      'node_modules/@anthropic-ai/claude-agent-sdk-linux-arm64/**/*',
+      'node_modules/@anthropic-ai/claude-agent-sdk-linux-arm64-musl/**/*',
+      'node_modules/@anthropic-ai/claude-agent-sdk-linux-x64/**/*',
+      'node_modules/@anthropic-ai/claude-agent-sdk-linux-x64-musl/**/*',
+      'node_modules/@anthropic-ai/claude-agent-sdk-win32-arm64/**/*',
+      'node_modules/@anthropic-ai/claude-agent-sdk-win32-x64/**/*',
+    ],
+  },
   // outputFileTracingExcludes: strip non-code dirs out of every route's NFT.
   // Turbopack sees the recursive fs.readdir() in src/lib/files#scanDirectory
   // (used by /api/files/suggest) and conservatively marks the whole project
