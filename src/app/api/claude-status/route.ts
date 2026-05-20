@@ -20,19 +20,35 @@ import { isWindows, findGitBash } from '@/lib/platform';
 /** Pulled at first GET, cached for the process lifetime. */
 let cachedVersion: string | null = null;
 
+/**
+ * Read the bundled SDK's claudeCodeVersion at runtime.
+ *
+ * Implementation note (why we don't `require.resolve('.../package.json')`):
+ *   Next.js bundlers (Turbopack/Webpack) statically analyze the string literal
+ *   passed to require/require.resolve, even when wrapped in `createRequire`.
+ *   The SDK does NOT expose `./package.json` in its `exports` field, so the
+ *   static analyzer floods the dev server with
+ *     "Module not found: Can't resolve '@anthropic-ai/claude-agent-sdk/package.json'"
+ *   warnings (the runtime resolve actually works — exports gating only applies
+ *   at bundle time, not at Node-native resolution). To eliminate the noise
+ *   we resolve the SDK's MAIN entry instead (which IS in `exports`) and walk
+ *   up to its package root to read package.json with fs.
+ */
 function getBundledVersion(): string | null {
   if (cachedVersion !== null) return cachedVersion;
-  // Use createRequire().resolve so Next.js / Turbopack reliably finds the SDK
-  // package.json on disk at runtime (a plain `require('.../package.json')` is
-  // statically analyzed and breaks under the `serverExternalPackages` setup).
   try {
     const requireFromHere = createRequire(import.meta.url);
-    const pkgPath = requireFromHere.resolve('@anthropic-ai/claude-agent-sdk/package.json');
-    const raw = fs.readFileSync(pkgPath, 'utf-8');
-    const sdkPkg = JSON.parse(raw);
+    // Resolve the main entry — this hits the `.` export, so bundler analysis
+    // is happy. SDK ships as a flat package (sdk.mjs at root), so the
+    // package.json lives in the same dir as the resolved entry.
+    const sdkEntry = requireFromHere.resolve('@anthropic-ai/claude-agent-sdk');
+    const pkgPath = path.join(path.dirname(sdkEntry), 'package.json');
+    const sdkPkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
     cachedVersion = (sdkPkg.claudeCodeVersion as string) || (sdkPkg.version as string) || null;
   } catch {
-    // Last-ditch fallback: walk up from process.cwd() to find node_modules
+    // Last-ditch fallback: walk up from process.cwd() to find node_modules.
+    // This handles edge cases where require.resolve fails (e.g. monorepo
+    // hoisting layouts where the SDK lives outside the natural require path).
     try {
       const candidate = path.join(process.cwd(), 'node_modules', '@anthropic-ai', 'claude-agent-sdk', 'package.json');
       if (fs.existsSync(candidate)) {

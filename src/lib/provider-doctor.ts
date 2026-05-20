@@ -31,6 +31,7 @@ import { query } from '@anthropic-ai/claude-agent-sdk';
 import type { Options, SDKResultSuccess } from '@anthropic-ai/claude-agent-sdk';
 import os from 'os';
 import fs from 'fs';
+import path from 'path';
 
 // ── Types ───────────────────────────────────────────────────────
 
@@ -107,13 +108,19 @@ async function runCliProbe(): Promise<ProbeResult> {
   //
   // We read SDK package.json via createRequire().resolve + fs to avoid
   // a literal require() call (banned by the project's lint rule
-  // @typescript-eslint/no-require-imports). The fallback walks up from
-  // process.cwd() in case the SDK lives outside the normal module
-  // resolution path (e.g. an unusual electron-builder asar layout).
+  // @typescript-eslint/no-require-imports).
+  //
+  // Important: do NOT pass '@anthropic-ai/claude-agent-sdk/package.json' to
+  // require.resolve directly — Next.js bundlers statically analyze the
+  // string and complain "Module not found" because the SDK's exports field
+  // doesn't expose ./package.json (runtime resolve actually works, but the
+  // dev warning floods the smoke-test webServer log). Instead we resolve
+  // the main entry and walk up to package.json via path.dirname.
   try {
     const { createRequire } = await import('module');
     const requireFromHere = createRequire(import.meta.url);
-    const pkgPath = requireFromHere.resolve('@anthropic-ai/claude-agent-sdk/package.json');
+    const sdkEntry = requireFromHere.resolve('@anthropic-ai/claude-agent-sdk');
+    const pkgPath = path.join(path.dirname(sdkEntry), 'package.json');
     const sdkPkg = JSON.parse(fs.readFileSync(pkgPath, 'utf-8'));
     const claudeCodeVersion = (sdkPkg.claudeCodeVersion as string) || (sdkPkg.version as string);
     findings.push({
