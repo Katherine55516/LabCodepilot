@@ -1554,6 +1554,37 @@ const en = {
   'buddy.namePlaceholder': 'Give your buddy a name...',
   'buddy.nameHint': 'This will be your buddy\'s name',
   'buddy.reset': 'Reset buddy',
+
+  // ── Managed-account login (auth.*) ─────────────────────────────
+  // Strictly separate from the OpenAI OAuth strings; do not merge.
+  'auth.login': 'Sign in',
+  'auth.logout': 'Sign out',
+  'auth.account': 'Account',
+  'auth.signedInAs': 'Signed in as {name}',
+  'auth.notSignedIn': 'Not signed in',
+  'auth.offline': 'Offline',
+  'auth.refreshConfigs': 'Refresh configurations',
+  'auth.refreshingConfigs': 'Refreshing…',
+  'auth.refreshSuccess': 'Refreshed {count} configurations',
+  'auth.refreshFailed': 'Refresh failed',
+  'auth.loginInBrowser': 'Sign in via browser',
+  'auth.skipForNow': 'Skip and configure manually',
+  'auth.openingBrowser': 'Opening browser…',
+  'auth.loginSuccess': 'Signed in successfully',
+  'auth.loginFailed': 'Sign-in failed: {error}',
+  'auth.loginCancelled': 'Sign-in cancelled',
+  'auth.confirmLogout': 'Sign out of your account?',
+  'auth.confirmLogoutBody': 'Your managed model configurations will be cleared. Your local providers stay intact.',
+  'auth.managedConfigs': 'Managed configurations',
+  'auth.managedConfigCount': '{count} managed configurations from your account',
+  'auth.noManagedConfigs': 'No managed configurations',
+  'auth.managedTag': 'Managed',
+  'auth.managedReadOnly': 'Pushed by your account; not editable here',
+  'auth.accountCardTitle': 'Sign in to CodePilot account',
+  'auth.accountCardSubtitle': 'Get pre-configured model providers without entering API keys',
+  'auth.accountCardPlan': 'Plan: {plan}',
+  'auth.email': 'Email',
+  'auth.backendUnavailable': 'Cannot reach the backend right now',
 } as const;
 
 export type TranslationKey = keyof typeof en;

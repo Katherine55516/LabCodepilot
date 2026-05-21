@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; style-src 'unsafe-inline' 'self'; script-src 'self'">
+  <title>CodePilot 登录</title>
+  <link rel="stylesheet" href="login-style.css">
+</head>
+<body>
+  <div class="container">
+    <div class="logo">
+      <svg viewBox="0 0 24 24" width="40" height="40" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M16 18l6-6-6-6"></path>
+        <path d="M8 6l-6 6 6 6"></path>
+      </svg>
+    </div>
+    <h1>登录 CodePilot 账号</h1>
+    <p class="subtitle">将在浏览器中完成登录，登录成功后自动返回应用</p>
+
+    <button id="login-btn" class="primary-btn" type="button">在浏览器中登录</button>
+
+    <button id="skip-btn" class="secondary-btn" type="button" hidden>跳过，手动配置 Provider</button>
+
+    <div id="status" role="status" aria-live="polite"></div>
+  </div>
+  <script src="login.js"></script>
+</body>
+</html>

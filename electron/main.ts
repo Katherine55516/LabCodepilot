@@ -26,6 +26,37 @@ import net from 'net';
 import os from 'os';
 import { TerminalManager } from './terminal-manager';
 
+// ── Managed-account login system (deliberately isolated from openai-oauth*) ──
+import {
+  tryUseCachedToken,
+  loginViaBrowser,
+  fetchMe,
+  registerDevice,
+  getConfigs,
+  anlLogout,
+} from './auth/client';
+import {
+  openLoginWindow,
+  notifyLoginSuccess,
+  notifyLoginSkip,
+  cancelLoginWindow,
+  isLoginWindowOpen,
+  focusLoginWindow,
+} from './auth/login-window';
+import { startBackgroundPolling, stopBackgroundPolling } from './auth/poller';
+import {
+  modelConfigToManagedProviderRow,
+} from './auth/managed-providers';
+import {
+  setBrokerServerPort,
+  syncManagedProvidersToServer,
+  purgeManagedProvidersOnServer,
+  getManagedProviderCountFromServer,
+} from './auth/broker';
+import { clearAuthState } from './auth/storage';
+import { logInfo, logWarn, logError } from './auth/log';
+import type { MeInfo, ModelConfig } from './auth/types';
+
 /**
  * Return a copy of process.env without __NEXT_PRIVATE_* variables.
  *
@@ -56,6 +87,13 @@ let resolvedProxyEnv: Record<string, string> = {};
 let isQuitting = false;
 let tray: Tray | null = null;
 let bgNotifyTimer: ReturnType<typeof setInterval> | null = null;
+
+// ── Managed-account auth state (held in-memory; tokens stay on disk) ──
+let currentMe: MeInfo | null = null;
+let isOfflineMode = false;
+let managedConfigCount = 0;
+/** Tracks whether bootAccountState has finished its initial pass. */
+let authBootCompleted = false;
 
 // --- Install orchestrator ---
 interface InstallStep {
@@ -717,6 +755,164 @@ function startServer(port: number): Electron.UtilityProcess {
   });
 
   return child;
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Managed-account login helpers (electron/auth/* glue)
+//
+// These build on electron/auth/client.ts (which knows about the backend API)
+// and electron/auth/broker.ts (which knows about the local Next.js server)
+// to drive the boot sequence and produce the AuthSnapshot the renderer cares
+// about. Token never leaves main.
+// ──────────────────────────────────────────────────────────────────────────
+
+interface AuthSnapshot {
+  authenticated: boolean;
+  offline: boolean;
+  me: { username: string; display_name: string; email?: string; plan?: string } | null;
+  managedConfigCount: number;
+}
+
+function buildAuthSnapshot(): AuthSnapshot {
+  return {
+    authenticated: !!currentMe || isOfflineMode,
+    offline: isOfflineMode,
+    me: currentMe
+      ? {
+          username: currentMe.username,
+          display_name: currentMe.display_name,
+          email: currentMe.email,
+          plan: currentMe.plan,
+        }
+      : null,
+    managedConfigCount,
+  };
+}
+
+/** Push the latest snapshot to the renderer. Safe to call before main window exists. */
+function broadcastAuthChange(): void {
+  const snapshot = buildAuthSnapshot();
+  try {
+    mainWindow?.webContents.send('auth:changed', snapshot);
+  } catch {
+    // window may have been torn down — ignore
+  }
+}
+
+/** Push ModelConfig[] to the embedded server so api_providers reflects reality. */
+async function syncManagedFromConfigs(configs: ModelConfig[]): Promise<void> {
+  const rows = configs.map((c) => modelConfigToManagedProviderRow(c));
+  try {
+    const result = await syncManagedProvidersToServer(rows);
+    managedConfigCount = configs.length;
+    logInfo('managed providers synced: upserted=', result.upserted, 'pruned=', result.pruned);
+  } catch (err) {
+    logError('failed to sync managed providers to server:', (err as Error).message);
+  }
+}
+
+/**
+ * Initial boot pass — runs once after the embedded server is ready.
+ *
+ * Behaviour matrix (also documented in docs/exec-plans/active/login-system.md):
+ *
+ *   token absent           → unauthenticated (no UI prompt)
+ *   probe 200              → fetchMe → registerDevice → getConfigs → sync → poller start
+ *   probe 401              → clear token + purge managed + push 'auth:changed'
+ *   probe network error    → load cached configs.json + me_json, offline mode
+ *
+ * Errors are caught and logged — boot failure must not crash the app.
+ */
+async function bootAccountState(): Promise<void> {
+  try {
+    const cached = await tryUseCachedToken();
+    if (!cached.alive) {
+      // No usable token — leave the user in the unauthenticated state.
+      // bootAccountState completes silently; UI surfaces login entry points.
+      authBootCompleted = true;
+      broadcastAuthChange();
+      return;
+    }
+
+    isOfflineMode = cached.offline;
+
+    if (!isOfflineMode) {
+      try {
+        currentMe = await fetchMe();
+        logInfo('fetched me:', currentMe.username);
+      } catch (e) {
+        logWarn('fetchMe failed at boot:', (e as Error).message);
+      }
+      try {
+        await registerDevice();
+      } catch (e) {
+        logWarn('registerDevice failed at boot:', (e as Error).message);
+      }
+    }
+
+    try {
+      const configs = await getConfigs({ force: true });
+      await syncManagedFromConfigs(configs);
+    } catch (e) {
+      logWarn('getConfigs failed at boot:', (e as Error).message);
+    }
+
+    if (!isOfflineMode) {
+      startBackgroundPolling({
+        onConfigsChanged: (configs) => {
+          void syncManagedFromConfigs(configs);
+          broadcastAuthChange();
+        },
+      });
+    }
+  } catch (e) {
+    logError('bootAccountState fatal error:', (e as Error).message);
+  } finally {
+    authBootCompleted = true;
+    broadcastAuthChange();
+  }
+}
+
+/** Full post-login pass — invoked after a successful interactive login. */
+async function postLoginSequence(): Promise<void> {
+  isOfflineMode = false;
+  try {
+    currentMe = await fetchMe();
+  } catch (e) {
+    logWarn('postLogin fetchMe failed:', (e as Error).message);
+  }
+  try {
+    await registerDevice();
+  } catch (e) {
+    logWarn('postLogin registerDevice failed:', (e as Error).message);
+  }
+  try {
+    const configs = await getConfigs({ force: true });
+    await syncManagedFromConfigs(configs);
+  } catch (e) {
+    logWarn('postLogin getConfigs failed:', (e as Error).message);
+  }
+  startBackgroundPolling({
+    onConfigsChanged: (configs) => {
+      void syncManagedFromConfigs(configs);
+      broadcastAuthChange();
+    },
+  });
+  broadcastAuthChange();
+}
+
+/** Full post-logout pass — invoked after the user explicitly logs out. */
+async function postLogoutSequence(): Promise<void> {
+  stopBackgroundPolling();
+  try {
+    await purgeManagedProvidersOnServer();
+  } catch (e) {
+    logWarn('postLogout purge failed:', (e as Error).message);
+  }
+  currentMe = null;
+  isOfflineMode = false;
+  managedConfigCount = 0;
+  broadcastAuthChange();
 }
 
 function getIconPath(): string {
@@ -1618,6 +1814,94 @@ app.whenReady().then(async () => {
     }
   });
 
+  // ── Managed-account login IPC handlers ─────────────────────────────────
+  // Two audiences:
+  //   1. The dedicated login BrowserWindow (handlers prefixed run-/skip-)
+  //   2. The main renderer (get-state / trigger-login / logout / etc.)
+
+  // Login window: "Login in browser" button. Drives the full OAuth dance,
+  // saves the token, then runs the post-login sequence.
+  ipcMain.handle('auth:run-login-flow', async () => {
+    try {
+      await loginViaBrowser();
+      // Token already on disk; run me/devices/configs in the background so
+      // the login window can close right away.
+      void postLoginSequence();
+      notifyLoginSuccess();
+      return { ok: true as const };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      logWarn('auth:run-login-flow failed:', msg);
+      return { ok: false as const, error: msg };
+    }
+  });
+
+  // Login window: "Skip" link. Only meaningful when the window was opened
+  // with allowSkip=true (first-run flow). Closes the login window and lets
+  // the user fall back to BYOK.
+  ipcMain.handle('auth:skip-login', () => {
+    notifyLoginSkip();
+    return { ok: true as const };
+  });
+
+  ipcMain.handle('auth:get-state', () => buildAuthSnapshot());
+
+  // Main window: user clicked "Login account" anywhere. Open the login
+  // window (without the skip link — they chose to log in explicitly).
+  ipcMain.handle('auth:trigger-login', async () => {
+    try {
+      if (isLoginWindowOpen()) {
+        focusLoginWindow();
+        return { ok: true as const, outcome: 'success' as const };
+      }
+      const outcome = await openLoginWindow({ allowSkip: false });
+      return { ok: outcome === 'success' || outcome === 'skipped' || outcome === 'cancelled', outcome };
+    } catch (e) {
+      return { ok: false as const, error: e instanceof Error ? e.message : String(e) };
+    }
+  });
+
+  ipcMain.handle('auth:logout', async () => {
+    try {
+      await anlLogout();
+    } catch (e) {
+      logWarn('anlLogout threw (continuing):', (e as Error).message);
+    }
+    await postLogoutSequence();
+    return { ok: true as const };
+  });
+
+  ipcMain.handle('auth:refresh-configs', async () => {
+    try {
+      const configs = await getConfigs({ force: true });
+      await syncManagedFromConfigs(configs);
+      broadcastAuthChange();
+      return { ok: true as const, count: configs.length };
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e);
+      return { ok: false as const, error: msg };
+    }
+  });
+
+  ipcMain.handle('auth:probe', async () => {
+    const result = await tryUseCachedToken();
+    if (!result.alive) {
+      // Token gone or rejected — clear local state to match.
+      clearAuthState();
+      currentMe = null;
+      isOfflineMode = false;
+      try {
+        await purgeManagedProvidersOnServer();
+      } catch { /* ignore */ }
+      managedConfigCount = 0;
+      broadcastAuthChange();
+    } else {
+      isOfflineMode = result.offline;
+      broadcastAuthChange();
+    }
+    return result;
+  });
+
   try {
     let port: number;
 
@@ -1659,6 +1943,15 @@ app.whenReady().then(async () => {
       autoStartReq.on('error', () => {});
       autoStartReq.write(autoStartData);
       autoStartReq.end();
+    }
+
+    // Managed-account login: wire the broker to the now-known server port and
+    // kick off the boot pass in the background so the main window doesn't
+    // wait on a possibly-slow probe. Renderer subscribes via
+    // window.electronAPI.auth.onChange to learn the outcome.
+    if (serverPort !== null) {
+      setBrokerServerPort(serverPort);
+      void bootAccountState();
     }
 
   } catch (err) {
@@ -1714,6 +2007,11 @@ app.on('activate', async () => {
 });
 
 app.on('before-quit', async (e) => {
+  // Stop the managed-account background poller so its timer doesn't keep
+  // the event loop alive past app.quit().
+  stopBackgroundPolling();
+  if (isLoginWindowOpen()) cancelLoginWindow('before-quit');
+
   // Kill all terminal processes
   terminalManager.killAll();
 

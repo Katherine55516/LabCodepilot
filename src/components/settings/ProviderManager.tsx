@@ -607,25 +607,48 @@ export function ProviderManager() {
                           ? (findMatchingPreset(provider)?.authStyle === 'auth_token' ? "Auth Token" : "API Key")
                           : t('provider.configured')}
                       </Badge>
+                      {provider.source === 'managed' && (
+                        <Badge
+                          variant="outline"
+                          className="text-[10px] px-1.5 py-0 border-primary/40 text-primary"
+                          title={t('auth.managedReadOnly')}
+                        >
+                          {t('auth.managedTag')}
+                        </Badge>
+                      )}
                     </div>
                   </div>
                   <div className="flex items-center gap-1 shrink-0">
-                    <Button
-                      variant="ghost"
-                      size="icon-xs"
-                      title="Edit"
-                      onClick={() => handleEdit(provider)}
-                    >
-                      <PencilSimple size={12} />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="xs"
-                      className="text-destructive hover:text-destructive"
-                      onClick={() => setDeleteTarget(provider)}
-                    >
-                      {t('provider.disconnect')}
-                    </Button>
+                    {provider.source === 'managed' ? (
+                      // Managed providers are pushed by the account backend; edits and
+                      // deletes would just get clobbered on the next sync. Surface a
+                      // hint instead of letting the buttons do anything.
+                      <span
+                        className="text-[11px] text-muted-foreground italic px-2"
+                        title={t('auth.managedReadOnly')}
+                      >
+                        {t('auth.managedReadOnly')}
+                      </span>
+                    ) : (
+                      <>
+                        <Button
+                          variant="ghost"
+                          size="icon-xs"
+                          title="Edit"
+                          onClick={() => handleEdit(provider)}
+                        >
+                          <PencilSimple size={12} />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="xs"
+                          className="text-destructive hover:text-destructive"
+                          onClick={() => setDeleteTarget(provider)}
+                        >
+                          {t('provider.disconnect')}
+                        </Button>
+                      </>
+                    )}
                   </div>
                 </div>
                 {/* Provider options — thinking/1M for Anthropic-official only */}

@@ -60,6 +60,34 @@ interface ElectronTerminalAPI {
   onExit: (callback: (data: { id: string; code: number }) => void) => () => void;
 }
 
+/**
+ * Snapshot of the managed-account auth state. Renderer-safe — no tokens.
+ */
+interface AuthSnapshot {
+  authenticated: boolean;
+  offline: boolean;
+  me: {
+    username: string;
+    display_name: string;
+    email?: string;
+    plan?: string;
+  } | null;
+  managedConfigCount: number;
+}
+
+interface ElectronAuthAPI {
+  // Login-window-only entry points (called from electron/login/login.js)
+  runLoginFlow: () => Promise<{ ok: true } | { ok: false; error: string }>;
+  skipLogin: () => Promise<{ ok: true }>;
+  // Main-window entry points
+  getState: () => Promise<AuthSnapshot>;
+  triggerLogin: () => Promise<{ ok: boolean; outcome?: 'success' | 'skipped' | 'cancelled'; error?: string }>;
+  logout: () => Promise<{ ok: true }>;
+  refreshConfigs: () => Promise<{ ok: boolean; count?: number; error?: string }>;
+  probe: () => Promise<{ alive: boolean; offline: boolean }>;
+  onChange: (callback: (state: AuthSnapshot) => void) => () => void;
+}
+
 interface ElectronAPI {
   versions: {
     electron: string;
@@ -93,6 +121,8 @@ interface ElectronAPI {
     show: (options: { title: string; body?: string; onClick?: string }) => Promise<void>;
     onClick: (listener: (action: string) => void) => () => void;
   };
+  /** Managed-account login. Isolated from any OpenAI OAuth flow. */
+  auth?: ElectronAuthAPI;
 }
 
 declare global {

@@ -215,6 +215,21 @@ export interface ApiProvider {
   /** Per-provider options — JSON string of { thinking_mode?, context_1m? } */
   options_json: string;
   notes: string;
+  /**
+   * Origin of this provider record:
+   *   - 'local'   (default): user-managed BYOK provider, editable
+   *   - 'managed': pushed by the managed-account login server; read-only in
+   *               the UI and pruned on logout
+   *
+   * Optional in the type because every row in the DB has a NOT NULL DEFAULT,
+   * so consumers reading from the DB always see a value — and inline test
+   * fixtures (which omit it) get treated as 'local' via `?? 'local'`.
+   */
+  source?: 'local' | 'managed' | string;
+  /** When source='managed', the server-side ModelConfig.id (lookup key for upsert) */
+  managed_config_id?: string;
+  /** When source='managed', JSON dump of fields not mapped into typed columns */
+  managed_extra_json?: string;
   created_at: string;
   updated_at: string;
 }

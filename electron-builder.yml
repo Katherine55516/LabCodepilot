@@ -42,6 +42,12 @@ extraResources:
   - from: build/
     to: .
     filter: ["icon.*"]
+  # Login window static assets for the managed-account login system.
+  # Loaded by electron/auth/login-window.ts:getLoginHtmlPath() at runtime via
+  # path.join(process.resourcesPath, 'login', 'index.html') in packaged mode.
+  - from: electron/login/
+    to: login/
+    filter: ["**/*"]
 afterPack: scripts/after-pack.js
 afterSign: scripts/after-sign.js
 asarUnpack:

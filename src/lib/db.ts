@@ -492,7 +492,20 @@ function migrateDb(db: Database.Database): void {
     if (!provColNames.includes('options_json')) {
       safeAddColumn(db, "ALTER TABLE api_providers ADD COLUMN options_json TEXT NOT NULL DEFAULT '{}'");
     }
+    // Managed-account login system: tag providers pushed by the server so
+    // we can distinguish them from BYOK rows in the UI and prune on logout.
+    if (!provColNames.includes('source')) {
+      safeAddColumn(db, "ALTER TABLE api_providers ADD COLUMN source TEXT NOT NULL DEFAULT 'local'");
+    }
+    if (!provColNames.includes('managed_config_id')) {
+      safeAddColumn(db, "ALTER TABLE api_providers ADD COLUMN managed_config_id TEXT NOT NULL DEFAULT ''");
+    }
+    if (!provColNames.includes('managed_extra_json')) {
+      safeAddColumn(db, "ALTER TABLE api_providers ADD COLUMN managed_extra_json TEXT NOT NULL DEFAULT '{}'");
+    }
   }
+  // Index for fast lookup of managed providers by their server-side ModelConfig id.
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_api_providers_managed_config_id ON api_providers(managed_config_id)`);
 
   // Create provider_models table
   db.exec(`
@@ -1702,6 +1715,138 @@ export function activateProvider(id: string): boolean {
 export function deactivateAllProviders(): void {
   const db = getDb();
   db.prepare('UPDATE api_providers SET is_active = 0').run();
+}
+
+// ──────────────────────────────────────────────────────────────────────────
+// Managed-account login system: server-pushed provider rows
+// ──────────────────────────────────────────────────────────────────────────
+
+/** Internal row shape — superset of CreateProviderRequest plus the managed-* columns. */
+export interface ManagedProviderRow {
+  id: string;
+  name: string;
+  provider_type: string;
+  protocol: string;
+  base_url: string;
+  api_key: string;
+  sort_order: number;
+  extra_env?: string;
+  headers_json?: string;
+  env_overrides_json?: string;
+  role_models_json?: string;
+  options_json?: string;
+  notes?: string;
+  /** Server-side ModelConfig.id — lookup key for upserts */
+  managed_config_id: string;
+  /** Raw JSON dump of ModelConfig fields not mapped into typed columns */
+  managed_extra_json: string;
+}
+
+/**
+ * Fetch all providers whose `source` matches the given tag.
+ * `source` defaults to 'local' for any row created before the column existed,
+ * so this is safe to call on legacy databases.
+ */
+export function getProvidersBySource(source: 'local' | 'managed'): ApiProvider[] {
+  const db = getDb();
+  return db
+    .prepare('SELECT * FROM api_providers WHERE source = ? ORDER BY sort_order ASC, created_at ASC')
+    .all(source) as ApiProvider[];
+}
+
+/**
+ * Replace the set of managed providers atomically:
+ *   - Upsert by `managed_config_id` (id stays stable across refreshes)
+ *   - Delete any managed row whose id is NOT in the new set (prune)
+ *
+ * Returns { upserted, pruned } counts so callers can log meaningful diffs.
+ * The user's `selected_config_id` is NOT touched — callers handle that.
+ *
+ * Active-state behaviour: if the currently active provider gets pruned,
+ * it stays "deactivated" — callers must pick a new active provider.
+ */
+export function setManagedProviders(rows: ManagedProviderRow[]): { upserted: number; pruned: number } {
+  const db = getDb();
+  const now = new Date().toISOString().replace('T', ' ').split('.')[0];
+
+  const upsert = db.prepare(
+    `INSERT INTO api_providers (
+       id, name, provider_type, protocol, base_url, api_key,
+       is_active, sort_order, extra_env, headers_json, env_overrides_json,
+       role_models_json, options_json, notes,
+       source, managed_config_id, managed_extra_json,
+       created_at, updated_at
+     ) VALUES (?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, 'managed', ?, ?, ?, ?)
+     ON CONFLICT(id) DO UPDATE SET
+       name = excluded.name,
+       provider_type = excluded.provider_type,
+       protocol = excluded.protocol,
+       base_url = excluded.base_url,
+       api_key = excluded.api_key,
+       sort_order = excluded.sort_order,
+       extra_env = excluded.extra_env,
+       headers_json = excluded.headers_json,
+       env_overrides_json = excluded.env_overrides_json,
+       role_models_json = excluded.role_models_json,
+       options_json = excluded.options_json,
+       notes = excluded.notes,
+       managed_config_id = excluded.managed_config_id,
+       managed_extra_json = excluded.managed_extra_json,
+       updated_at = excluded.updated_at
+     WHERE api_providers.source = 'managed'`,
+  );
+
+  const txn = db.transaction((items: ManagedProviderRow[]) => {
+    const keepIds = new Set<string>();
+    for (const r of items) {
+      keepIds.add(r.id);
+      upsert.run(
+        r.id,
+        r.name,
+        r.provider_type,
+        r.protocol,
+        r.base_url,
+        r.api_key,
+        r.sort_order,
+        r.extra_env || '{}',
+        r.headers_json || '{}',
+        r.env_overrides_json || '',
+        r.role_models_json || '{}',
+        r.options_json || '{}',
+        r.notes || '',
+        r.managed_config_id,
+        r.managed_extra_json || '{}',
+        now,
+        now,
+      );
+    }
+
+    // Prune: delete managed rows that are no longer in the server response
+    const existing = db
+      .prepare("SELECT id FROM api_providers WHERE source = 'managed'")
+      .all() as { id: string }[];
+    let prunedCount = 0;
+    const del = db.prepare("DELETE FROM api_providers WHERE id = ? AND source = 'managed'");
+    for (const row of existing) {
+      if (!keepIds.has(row.id)) {
+        del.run(row.id);
+        prunedCount++;
+      }
+    }
+    return { upserted: items.length, pruned: prunedCount };
+  });
+
+  return txn(rows);
+}
+
+/**
+ * Delete every managed-source provider. Called on logout.
+ * Returns the number of rows removed.
+ */
+export function purgeManagedProviders(): number {
+  const db = getDb();
+  const result = db.prepare("DELETE FROM api_providers WHERE source = 'managed'").run();
+  return result.changes;
 }
 
 // ==========================================

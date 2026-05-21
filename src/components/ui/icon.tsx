@@ -84,6 +84,7 @@ export {
   Trash,
   TreeStructure,
   UserCircle,
+  SignOut,
   Warning,
   WarningCircle,
   WifiHigh,

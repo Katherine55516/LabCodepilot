@@ -20,6 +20,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useTranslation } from "@/hooks/useTranslation";
 import type { TranslationKey } from "@/i18n";
+import { UserMenu } from "@/components/account/UserMenu";
 
 
 interface NavRailProps {
@@ -117,7 +118,7 @@ export function NavRail({ onToggleChatList, hasUpdate, readyToInstall, skipPermi
         })}
       </nav>
 
-      {/* Bottom: skip-permissions indicator + settings */}
+      {/* Bottom: skip-permissions indicator + account + settings */}
       <div className="mt-auto flex flex-col items-center gap-2">
         {skipPermissionsActive && (
           <Tooltip>
@@ -132,6 +133,8 @@ export function NavRail({ onToggleChatList, hasUpdate, readyToInstall, skipPermi
             <TooltipContent side="right">{t('nav.autoApproveOn')}</TooltipContent>
           </Tooltip>
         )}
+        {/* Managed-account login entry — distinct from any OpenAI OAuth UI. */}
+        <UserMenu />
         <Tooltip>
           <TooltipTrigger asChild>
             <div className="relative">

@@ -9,6 +9,7 @@ import { ProviderManager } from "./ProviderManager";
 import { CliSettingsSection } from "./CliSettingsSection";
 import { UsageStatsSection } from "./UsageStatsSection";
 import { AssistantWorkspaceSection } from "./AssistantWorkspaceSection";
+import { AccountSection } from "@/components/account/AccountSection";
 // Skills / MCP / CLI Tools managers — embedded as settings sub-sections so
 // users have a single panel for everything customizable. The /skills, /mcp,
 // /cli-tools routes still exist (FileTreePanel deep-links etc.) but the
@@ -19,7 +20,7 @@ import { CliToolsManager } from "@/components/cli-tools/CliToolsManager";
 import { useTranslation } from "@/hooks/useTranslation";
 import type { TranslationKey } from "@/i18n";
 
-type Section = "general" | "providers" | "cli" | "usage" | "assistant" | "skills" | "mcp" | "cli-tools";
+type Section = "general" | "account" | "providers" | "cli" | "usage" | "assistant" | "skills" | "mcp" | "cli-tools";
 
 interface SidebarItem {
   id: Section;
@@ -29,6 +30,7 @@ interface SidebarItem {
 
 const sidebarItems: SidebarItem[] = [
   { id: "general", label: "General", icon: Gear },
+  { id: "account", label: "Account", icon: UserCircle },
   { id: "providers", label: "Providers", icon: Plug },
   { id: "cli", label: "Claude CLI", icon: Code },
   { id: "usage", label: "Usage", icon: ChartBar },
@@ -70,6 +72,7 @@ export function SettingsLayout() {
 
   const settingsLabelKeys: Record<string, TranslationKey> = {
     'General': 'settings.general',
+    'Account': 'auth.account',
     'Providers': 'settings.providers',
     'Claude CLI': 'settings.claudeCli',
     'Usage': 'settings.usage',
@@ -124,6 +127,7 @@ export function SettingsLayout() {
         {/* Content */}
         <div className="flex-1 overflow-auto p-6">
           {activeSection === "general" && <GeneralSection />}
+          {activeSection === "account" && <AccountSection />}
           {activeSection === "providers" && <ProviderManager />}
           {activeSection === "cli" && <CliSettingsSection />}
           {activeSection === "usage" && <UsageStatsSection />}

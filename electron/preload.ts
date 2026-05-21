@@ -90,4 +90,23 @@ contextBridge.exposeInMainWorld('electronAPI', {
       return () => { ipcRenderer.removeListener('notification:click', listener); };
     },
   },
+  // Managed-account login system. Strictly isolated from the OpenAI OAuth
+  // module — different IPC channels, different storage, different callback
+  // port. Never read or surface a session token to the renderer.
+  auth: {
+    // Login-window-only entry points (consumed by electron/login/login.js)
+    runLoginFlow: () => ipcRenderer.invoke('auth:run-login-flow'),
+    skipLogin: () => ipcRenderer.invoke('auth:skip-login'),
+    // Main-window entry points
+    getState: () => ipcRenderer.invoke('auth:get-state'),
+    triggerLogin: () => ipcRenderer.invoke('auth:trigger-login'),
+    logout: () => ipcRenderer.invoke('auth:logout'),
+    refreshConfigs: () => ipcRenderer.invoke('auth:refresh-configs'),
+    probe: () => ipcRenderer.invoke('auth:probe'),
+    onChange: (callback: (state: unknown) => void) => {
+      const listener = (_event: unknown, state: unknown) => callback(state);
+      ipcRenderer.on('auth:changed', listener);
+      return () => { ipcRenderer.removeListener('auth:changed', listener); };
+    },
+  },
 });
