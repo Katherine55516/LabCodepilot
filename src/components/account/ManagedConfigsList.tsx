@@ -20,12 +20,17 @@ interface ManagedProviderRow {
  */
 export function ManagedConfigsList({ refreshKey = 0 }: { refreshKey?: number }) {
   const { t } = useTranslation();
+  // null = loading (first fetch hasn't returned yet)
+  // []   = no managed providers
+  // [..] = managed providers to display
+  // Using a single nullable state keeps the effect body free of a sync
+  // setLoading(true) call, which React 19's react-hooks/set-state-in-effect
+  // forbids. When refreshKey changes, the previous list stays visible until
+  // the new fetch resolves — fine UX given the network call is fast.
   const [providers, setProviders] = useState<ManagedProviderRow[] | null>(null);
-  const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     let cancelled = false;
-    setLoading(true);
     // Use the existing /api/providers endpoint and filter client-side by
     // source='managed' — avoids inventing yet another DB-touching route.
     fetch('/api/providers')
@@ -35,15 +40,14 @@ export function ManagedConfigsList({ refreshKey = 0 }: { refreshKey?: number }) 
         const all: Array<ManagedProviderRow & { source?: string }> = data?.providers ?? [];
         setProviders(all.filter((p) => p.source === 'managed'));
       })
-      .catch(() => { if (!cancelled) setProviders([]); })
-      .finally(() => { if (!cancelled) setLoading(false); });
+      .catch(() => { if (!cancelled) setProviders([]); });
     return () => { cancelled = true; };
   }, [refreshKey]);
 
-  if (loading) {
+  if (providers === null) {
     return <p className="text-sm text-muted-foreground">…</p>;
   }
-  if (!providers || providers.length === 0) {
+  if (providers.length === 0) {
     return <p className="text-sm text-muted-foreground">{t('auth.noManagedConfigs')}</p>;
   }
 

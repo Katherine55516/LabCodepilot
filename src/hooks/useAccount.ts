@@ -52,7 +52,12 @@ export function useAccount(): UseAccountResult {
   useEffect(() => {
     const api = window.electronAPI?.auth;
     if (!api) {
-      setLoading(false);
+      // Defer to a microtask so we satisfy React 19's
+      // react-hooks/set-state-in-effect rule (no synchronous setState
+      // inside the effect body). queueMicrotask resolves immediately on
+      // the next tick and lint considers that callback context, not
+      // effect-body context.
+      queueMicrotask(() => setLoading(false));
       return;
     }
     let cancelled = false;

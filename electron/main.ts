@@ -51,7 +51,6 @@ import {
   setBrokerServerPort,
   syncManagedProvidersToServer,
   purgeManagedProvidersOnServer,
-  getManagedProviderCountFromServer,
 } from './auth/broker';
 import { clearAuthState } from './auth/storage';
 import { logInfo, logWarn, logError } from './auth/log';
@@ -92,8 +91,6 @@ let bgNotifyTimer: ReturnType<typeof setInterval> | null = null;
 let currentMe: MeInfo | null = null;
 let isOfflineMode = false;
 let managedConfigCount = 0;
-/** Tracks whether bootAccountState has finished its initial pass. */
-let authBootCompleted = false;
 
 // --- Install orchestrator ---
 interface InstallStep {
@@ -829,7 +826,6 @@ async function bootAccountState(): Promise<void> {
     if (!cached.alive) {
       // No usable token — leave the user in the unauthenticated state.
       // bootAccountState completes silently; UI surfaces login entry points.
-      authBootCompleted = true;
       broadcastAuthChange();
       return;
     }
@@ -868,7 +864,6 @@ async function bootAccountState(): Promise<void> {
   } catch (e) {
     logError('bootAccountState fatal error:', (e as Error).message);
   } finally {
-    authBootCompleted = true;
     broadcastAuthChange();
   }
 }

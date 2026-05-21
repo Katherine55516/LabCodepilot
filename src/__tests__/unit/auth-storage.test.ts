@@ -8,7 +8,7 @@
  * Run with: npx tsx --test src/__tests__/unit/auth-storage.test.ts
  */
 
-import { describe, it, before, after, beforeEach } from 'node:test';
+import { describe, it, after, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import * as fs from 'fs';
 import * as os from 'os';
