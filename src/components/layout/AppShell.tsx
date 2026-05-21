@@ -98,17 +98,25 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // Poll server-side notification queue and display as toasts
   useNotificationPoll();
 
-  // Check if setup is needed
-  useEffect(() => {
-    fetch('/api/setup')
-      .then(r => r.ok ? r.json() : null)
-      .then(data => {
-        if (data && !data.completed) {
-          setSetupOpen(true);
-        }
-      })
-      .catch(() => {});
-  }, []);
+  // Check if setup is needed — DISABLED.
+  //
+  // Claude Code is now bundled into the installer (v0.55+) and API providers
+  // are pushed by the managed-account login system, so the three-card setup
+  // wizard no longer matches the boot reality. Auto-popup is hidden; manual
+  // entry points (open-setup-center custom event, /settings#providers hash
+  // bridge below) still work for users who want the wizard.
+  //
+  // Restore by uncommenting the block below.
+  // useEffect(() => {
+  //   fetch('/api/setup')
+  //     .then(r => r.ok ? r.json() : null)
+  //     .then(data => {
+  //       if (data && !data.completed) {
+  //         setSetupOpen(true);
+  //       }
+  //     })
+  //     .catch(() => {});
+  // }, []);
 
   // Listen for open-setup-center events
   useEffect(() => {
