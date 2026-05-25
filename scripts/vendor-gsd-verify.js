@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+/* eslint-disable @typescript-eslint/no-require-imports */
 /**
  * Verify the integrity of vendor/gsd-bundle/ produced by vendor-gsd-prepare.js.
  *
