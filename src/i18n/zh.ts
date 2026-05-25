@@ -1570,7 +1570,7 @@ const zh: Record<TranslationKey, string> = {
   'auth.loginFailed': '登录失败：{error}',
   'auth.loginCancelled': '已取消登录',
   'auth.confirmLogout': '确定退出登录？',
-  'auth.confirmLogoutBody': '退出后由账号下发的模型配置会被清除。本地手动配置的 Provider 保持不变。',
+  'auth.confirmLogoutBody': '退出后将无法继续使用本应用，需要重新登录账号才能恢复使用。',
   'auth.managedConfigs': '托管配置',
   'auth.managedConfigCount': '账号下发的 {count} 条托管配置',
   'auth.noManagedConfigs': '暂无托管配置',

@@ -1574,7 +1574,7 @@ const en = {
   'auth.loginFailed': 'Sign-in failed: {error}',
   'auth.loginCancelled': 'Sign-in cancelled',
   'auth.confirmLogout': 'Sign out of your account?',
-  'auth.confirmLogoutBody': 'Your managed model configurations will be cleared. Your local providers stay intact.',
+  'auth.confirmLogoutBody': 'After signing out you won\'t be able to use the app until you sign in again.',
   'auth.managedConfigs': 'Managed configurations',
   'auth.managedConfigCount': '{count} managed configurations from your account',
   'auth.noManagedConfigs': 'No managed configurations',

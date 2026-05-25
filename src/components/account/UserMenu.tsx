@@ -11,16 +11,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from '@/components/ui/alert-dialog';
+import { LogoutConfirmDialog } from './LogoutConfirmDialog';
 import { useAccount } from '@/hooks/useAccount';
 import { useTranslation } from '@/hooks/useTranslation';
 import { cn } from '@/lib/utils';
@@ -64,10 +55,9 @@ export function UserMenu() {
     }
   };
 
-  const handleConfirmLogout = async () => {
-    setLogoutDialogOpen(false);
-    await logout();
-  };
+  // Confirmation is handled inside LogoutConfirmDialog now — it calls
+  // onConfirm after closing itself.
+
 
   // ── Not signed in ────────────────────────────────────────────────────────
   // Strict-login means startup blocks the main window until login, so this
@@ -155,20 +145,11 @@ export function UserMenu() {
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <AlertDialog open={logoutDialogOpen} onOpenChange={setLogoutDialogOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>{t('auth.confirmLogout')}</AlertDialogTitle>
-            <AlertDialogDescription>{t('auth.confirmLogoutBody')}</AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>{t('common.cancel')}</AlertDialogCancel>
-            <AlertDialogAction onClick={handleConfirmLogout}>
-              {t('auth.logout')}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <LogoutConfirmDialog
+        open={logoutDialogOpen}
+        onOpenChange={setLogoutDialogOpen}
+        onConfirm={logout}
+      />
     </>
   );
 }

@@ -6,6 +6,7 @@ import { ArrowsClockwise, UserCircle } from '@/components/ui/icon';
 import { useAccount } from '@/hooks/useAccount';
 import { useTranslation } from '@/hooks/useTranslation';
 import { ManagedConfigsList } from './ManagedConfigsList';
+import { LogoutConfirmDialog } from './LogoutConfirmDialog';
 
 /**
  * Settings page card surfacing managed-account login state — distinct from
@@ -17,6 +18,7 @@ export function AccountSection() {
   const [refreshing, setRefreshing] = useState(false);
   const [refreshFeedback, setRefreshFeedback] = useState<string | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
+  const [logoutDialogOpen, setLogoutDialogOpen] = useState(false);
 
   if (typeof window !== 'undefined' && !window.electronAPI?.auth) {
     return null;
@@ -93,12 +95,22 @@ export function AccountSection() {
           </div>
 
           <div className="flex justify-end border-t border-border pt-3">
-            <Button size="sm" variant="ghost" onClick={() => void logout()}>
+            <Button
+              size="sm"
+              variant="destructive"
+              onClick={() => setLogoutDialogOpen(true)}
+            >
               {t('auth.logout')}
             </Button>
           </div>
         </div>
       )}
+
+      <LogoutConfirmDialog
+        open={logoutDialogOpen}
+        onOpenChange={setLogoutDialogOpen}
+        onConfirm={logout}
+      />
     </section>
   );
 }
