@@ -275,10 +275,25 @@ function scanDirectory(
       const name = prefix ? `${prefix}:${baseName}` : baseName;
       const filePath = fullPath;
       const content = fs.readFileSync(filePath, "utf-8");
-      const firstLine = content.split("\n")[0]?.trim() || "";
-      const description = firstLine.startsWith("#")
-        ? firstLine.replace(/^#+\s*/, "")
-        : firstLine || `Skill: /${name}`;
+
+      // Prefer YAML frontmatter `description:` (used by GSD and most modern
+      // Claude Code slash-command files). Fall back to the first non-empty
+      // line of the body (post-frontmatter), then a generic placeholder.
+      let description = "";
+      const meta = parseSkillFrontMatter(content);
+      if (meta.description) {
+        description = meta.description;
+      } else {
+        const body = content.replace(/^---\r?\n[\s\S]+?\r?\n---\r?\n?/, "");
+        const firstNonEmpty = body
+          .split("\n")
+          .map((line) => line.trim())
+          .find((line) => line.length > 0) || "";
+        description = firstNonEmpty.startsWith("#")
+          ? firstNonEmpty.replace(/^#+\s*/, "")
+          : firstNonEmpty || `Skill: /${name}`;
+      }
+
       skills.push({ name, description, content, source, kind: "slash_command", filePath });
     }
   } catch {
