@@ -37,6 +37,7 @@ import { ProjectGroupHeader } from "./ProjectGroupHeader";
 import { FolderPicker } from "@/components/chat/FolderPicker";
 import { useAssistantWorkspace } from "@/hooks/useAssistantWorkspace";
 import { AssistantPromoCard } from "@/components/chat/ChatEmptyState";
+import { UserMenu } from "@/components/account/UserMenu";
 import {
   formatRelativeTime,
   groupSessionsByProject,
@@ -666,22 +667,28 @@ export function ChatListPanel({ open, width, hasUpdate, readyToInstall }: ChatLi
         </div>
       </ScrollArea>
 
-      {/* Bottom: Settings */}
-      <div className="shrink-0 px-3 py-2">
-        <Link href="/settings">
+      {/* Bottom: account chip + settings gear (horizontal row) */}
+      <div className="shrink-0 px-3 py-2 flex items-center gap-1">
+        <UserMenu />
+        <Link href="/settings" className="shrink-0">
           <Button
             variant="ghost"
-            size="sm"
-            className={`w-full justify-start gap-2 h-8 text-xs ${
+            size="icon"
+            className={`relative h-9 w-9 ${
               pathname.startsWith("/settings")
-                ? "bg-accent text-accent-foreground font-medium"
+                ? "bg-accent text-accent-foreground"
                 : "text-muted-foreground hover:text-foreground"
             }`}
+            title={t('nav.settings' as TranslationKey)}
+            aria-label={t('nav.settings' as TranslationKey)}
           >
-            <Gear size={14} weight={pathname.startsWith("/settings") ? "fill" : "regular"} />
-            {t('nav.settings' as TranslationKey)}
+            <Gear size={16} weight={pathname.startsWith("/settings") ? "fill" : "regular"} />
             {(hasUpdate || readyToInstall) && (
-              <span className={`ml-auto h-2 w-2 rounded-full ${readyToInstall ? "bg-primary" : "bg-primary animate-pulse"}`} />
+              <span
+                className={`absolute top-1.5 right-1.5 h-2 w-2 rounded-full ${
+                  readyToInstall ? "bg-primary" : "bg-primary animate-pulse"
+                }`}
+              />
             )}
           </Button>
         </Link>

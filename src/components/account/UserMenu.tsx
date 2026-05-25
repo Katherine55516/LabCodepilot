@@ -12,11 +12,6 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from '@/components/ui/tooltip';
-import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -31,11 +26,12 @@ import { useTranslation } from '@/hooks/useTranslation';
 import { cn } from '@/lib/utils';
 
 /**
- * Compact user-account control for the NavRail bottom slot.
+ * Wide account chip with avatar + username, designed for the bottom row of
+ * ChatListPanel where horizontal space is available. Clicking opens a
+ * dropdown with profile info / refresh-configs / logout actions.
  *
- * - Logged out → icon button that triggers the login flow on click
- * - Logged in  → avatar + dropdown with profile / refresh / logout
- * - Offline    → small red dot on the avatar
+ * - Signed in    → [avatar] [username]  (clickable chip; offline shows a dot)
+ * - Signed out   → "Sign in" chip (rare under strict-login, kept for safety)
  *
  * Strictly tied to the managed-account login system — does NOT surface
  * OpenAI OAuth state.
@@ -51,9 +47,8 @@ export function UserMenu() {
     return null;
   }
 
-  const initials = me?.display_name?.trim().slice(0, 1).toUpperCase()
-    || me?.username?.trim().slice(0, 1).toUpperCase()
-    || '?';
+  const displayName = me?.display_name?.trim() || me?.username?.trim() || '';
+  const initials = displayName.slice(0, 1).toUpperCase() || '?';
 
   const handleLogin = async () => {
     await triggerLogin();
@@ -75,22 +70,21 @@ export function UserMenu() {
   };
 
   // ── Not signed in ────────────────────────────────────────────────────────
+  // Strict-login means startup blocks the main window until login, so this
+  // branch is mostly defensive. Show a single-button chip that mirrors the
+  // signed-in chip so the bottom row layout doesn't shift.
   if (!authenticated) {
     return (
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-9 w-9"
-            onClick={handleLogin}
-            aria-label={t('auth.login')}
-          >
-            <UserCircle size={16} weight="regular" />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent side="right">{t('auth.login')}</TooltipContent>
-      </Tooltip>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="flex-1 min-w-0 justify-start gap-2 h-9 px-1.5"
+        onClick={handleLogin}
+        aria-label={t('auth.login')}
+      >
+        <UserCircle size={20} weight="regular" />
+        <span className="text-xs">{t('auth.login')}</span>
+      </Button>
     );
   }
 
@@ -98,41 +92,35 @@ export function UserMenu() {
   return (
     <>
       <DropdownMenu>
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <DropdownMenuTrigger asChild>
-              <Button
-                variant="ghost"
-                size="icon"
-                className="relative h-9 w-9"
-                aria-label={t('auth.account')}
-              >
-                <span
-                  className={cn(
-                    'inline-flex h-6 w-6 items-center justify-center rounded-full',
-                    'bg-sidebar-accent text-sidebar-accent-foreground text-[11px] font-semibold uppercase',
-                  )}
-                >
-                  {initials}
-                </span>
-                {offline && (
-                  <span
-                    className="absolute right-1 top-1 inline-block h-2 w-2 rounded-full bg-status-warning"
-                    aria-label={t('auth.offline')}
-                  />
-                )}
-              </Button>
-            </DropdownMenuTrigger>
-          </TooltipTrigger>
-          <TooltipContent side="right">
-            {me ? t('auth.signedInAs').replace('{name}', me.display_name || me.username) : t('auth.account')}
-          </TooltipContent>
-        </Tooltip>
+        <DropdownMenuTrigger asChild>
+          <Button
+            variant="ghost"
+            size="sm"
+            className="flex-1 min-w-0 justify-start gap-2 h-9 px-1.5 hover:bg-accent/50"
+            aria-label={t('auth.account')}
+          >
+            <span
+              className={cn(
+                'inline-flex h-6 w-6 items-center justify-center rounded-full shrink-0',
+                'bg-foreground/10 text-foreground text-[11px] font-semibold uppercase',
+              )}
+            >
+              {initials}
+            </span>
+            <span className="truncate text-xs font-medium">{displayName || t('auth.account')}</span>
+            {offline && (
+              <span
+                className="ml-auto inline-block h-1.5 w-1.5 rounded-full bg-status-warning shrink-0"
+                aria-label={t('auth.offline')}
+              />
+            )}
+          </Button>
+        </DropdownMenuTrigger>
 
-        <DropdownMenuContent side="right" align="end" className="w-64">
+        <DropdownMenuContent side="top" align="start" className="w-64">
           <DropdownMenuLabel className="flex flex-col gap-0.5 py-2">
             <span className="text-sm font-medium">
-              {me?.display_name || me?.username || t('auth.account')}
+              {displayName || t('auth.account')}
             </span>
             {me?.email && (
               <span className="text-xs text-muted-foreground">{me.email}</span>
