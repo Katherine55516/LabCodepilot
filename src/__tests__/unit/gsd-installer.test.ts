@@ -11,8 +11,9 @@
  * Run with: npx tsx --test src/__tests__/unit/gsd-installer.test.ts
  */
 
-import { describe, it, beforeEach, afterEach } from 'node:test';
+import { describe, it, before, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -51,14 +52,25 @@ function buildPaths(homeRoot: string): InstallerPaths {
 let tmpHome: string;
 let paths: InstallerPaths;
 
-beforeEach(() => {
-  // Skip the entire suite gracefully if the bundle hasn't been built yet —
-  // CI must run `npm run vendor:gsd` before tests.
+// Bundle is gitignored (regenerated on demand). On CI, vendor/gsd-bundle/
+// is not present after a fresh checkout, so the suite self-bootstraps once
+// at module load by invoking the same prepare script the build pipeline uses.
+before(() => {
+  if (!fs.existsSync(BUNDLE_FIXTURE)) {
+    const script = path.join(REPO_ROOT, 'scripts', 'vendor-gsd-prepare.js');
+    execFileSync(process.execPath, [script], {
+      cwd: REPO_ROOT,
+      stdio: 'inherit',
+    });
+  }
   if (!fs.existsSync(BUNDLE_FIXTURE)) {
     throw new Error(
-      `vendor/gsd-bundle/ missing. Run 'npm run vendor:gsd' before tests.`,
+      `vendor/gsd-bundle/ still missing after running prepare script — check vendor/gsd-source/`,
     );
   }
+});
+
+beforeEach(() => {
   tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'gsd-installer-test-'));
   paths = buildPaths(tmpHome);
 });

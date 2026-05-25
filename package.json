@@ -25,7 +25,7 @@
     "test:e2e": "npx playwright test",
     "test:visual": "npx playwright test --grep @visual",
     "test:sdk-poc": "CLAUDE_SDK_POC=1 tsx --test src/__tests__/integration/*-poc.test.ts",
-    "test": "npm run typecheck && npm run test:unit",
+    "test": "npm run typecheck && npm run vendor:gsd && npm run test:unit",
     "lint:colors": "! grep -rn --include='*.tsx' --include='*.ts' -E '(bg|text|border)-(green|emerald|red|orange|yellow|amber|blue)-(400|500|600|700)' src/components/ src/app/ --exclude-dir=ui --exclude-dir=ai-elements | grep -v 'lint-allow-raw-color'",
     "prepare": "node -e \"try{require('husky')()}catch(e){}\"",
     "vendor:gsd": "node scripts/vendor-gsd-prepare.js",
