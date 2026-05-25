@@ -20,3 +20,4 @@
 | [builtin-claude-code.md](./builtin-claude-code.md) | [handover/builtin-claude-code.md](../handover/builtin-claude-code.md) | 内置 Claude Code（v0.55+）：从外置 → 内置的产品决策、3 个备选方案对比、+200MB 体积换零配置 setup、SDK 架构变化的偶然性 |
 | [markdown-artifact-overhaul.md](./markdown-artifact-overhaul.md) | [handover/markdown-artifact-overhaul.md](../handover/markdown-artifact-overhaul.md) | Markdown/Artifact 重构：卡片点击 vs 自动弹、升级 DiffSummary、分档 50000 行 + 截断提示、PreviewPanel 编辑即核心能力、单文件 React 产品边界、长图走隐藏窗口复用、两段失败路径复盘 |
 | [login-system.md](./login-system.md) | [handover/login-system.md](../handover/login-system.md) | 登录账号体系：BYOK vs SaaS 托管的并存决策、为什么独立于现有 OpenAI OAuth、文件 vs DB 存 token、启动不强制登录、与 bsApp 文档的偏离点、未来方向 |
+| [gsd-bundle.md](./gsd-bundle.md) | [handover/gsd-bundle.md](../handover/gsd-bundle.md) | 内置 GSD：装完即用对比"自己装"、命名空间隔离 + 命令名共享的看似矛盾解、副作用收益（frontmatter description 普惠修复）、未来"多内置插件 PluginsManager"方向 |

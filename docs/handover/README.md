@@ -34,3 +34,4 @@
 | builtin-claude-code.md | 内置 Claude Code（v0.55+）：SDK 平台子包架构、自动发现 binary、asarUnpack 配置、CI 跨架构装包、Native runtime 应急 fallback |
 | markdown-artifact-overhaul.md | Markdown 渲染 × Artifact 预览体系：PreviewSource 联合、DiffSummary 卡片、Sandpack 单文件 React、CodeMirror 编辑+自动保存、长图导出 IPC、文件 I/O API 合同、loadedPath/freshPreview 防漂移 |
 | login-system.md | 登录账号体系：浏览器 OAuth + ModelConfig 下发镜像到 api_providers (source='managed') + 与 OpenAI OAuth 完全隔离、双进程 token 文件共享、broker.ts 桥接、字段映射矩阵、错误处理矩阵 |
+| gsd-bundle.md | 内置 GSD（gsd-build/get-shit-done, MIT）：vendor 流水线、平面化 + colon→hyphen 转换、Electron 同步 + IPC、agents 镜像 + hash 冲突跳过、Settings UI 完整面板、扫描器 frontmatter description 普惠修复 |
