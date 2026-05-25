@@ -130,17 +130,23 @@ CodePilot 的远程账号登录体系。用户在系统浏览器完成 OAuth 后
 
 ## 启动序列
 
+**强制登录**：主窗 `loadURL(server)` 被推迟到 `bootAccountState` 完成之后；未登录用户永远卡在登录窗 / LOADING_HTML，不会看到任何应用 UI。
+
 ```
 app.whenReady()
   ├─ 现有：loadUserShellEnv / resolveSystemProxy / ABI check
   ├─ 注册所有 IPC handlers（含 auth:*）
-  ├─ 现有：startServerOnStablePort → createWindow → loadURL(server)
-  ├─ setBrokerServerPort(serverPort) + 异步 bootAccountState()
-  │     ├─ 无 token → unauthenticated（不弹窗）
-  │     ├─ probe 200 → fetchMe → registerDevice → getConfigs(force) → syncManagedFromConfigs → start poller
-  │     ├─ probe 401 → 清 token + push 'auth:changed'
-  │     └─ probe 网络错 → 用 configs.json 缓存 + isOfflineMode=true
-  └─ 现有：bridge auto-start
+  ├─ createWindow()  ← 仅显示 LOADING_HTML，不指向 server
+  ├─ startServerOnStablePort()  ← server 端口落定
+  ├─ setBrokerServerPort(serverPort)
+  ├─ ★ await bootAccountState()  ← 阻塞，强制门
+  │     ├─ probe 200          → fetchMe → registerDevice → getConfigs(force) → syncManagedFromConfigs → start poller
+  │     ├─ probe 网络错        → 用 configs.json 缓存 + isOfflineMode=true（仅在已有 token 时）
+  │     ├─ probe 401 / 无 token → openLoginWindow({ allowSkip: false })
+  │     │       ├─ 'success'   → IPC handler 已跑过 postLoginSequence，broadcast → 返回
+  │     │       └─ 其他（cancelled/skipped） → app.quit()
+  ├─ mainWindow.loadURL(server)  ← 此时才把主窗指向真正的 UI
+  └─ 现有：bridge auto-start  ← 也在登录之后，避免未登录预热远程通道
 ```
 
 ## 字段映射

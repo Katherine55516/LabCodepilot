@@ -820,12 +820,39 @@ async function syncManagedFromConfigs(configs: ModelConfig[]): Promise<void> {
  *
  * Errors are caught and logged — boot failure must not crash the app.
  */
+/**
+ * Boot pass with **mandatory** login enforcement.
+ *
+ * Resolves only after one of:
+ *   - cached token still works (online or offline) → fetch /me, register
+ *     device, sync configs, start poller
+ *   - user completes a fresh browser OAuth → post-login sequence ran inside
+ *     the auth:run-login-flow IPC handler, so this function just broadcasts
+ *     the resulting snapshot
+ *   - user dismisses the login window without authenticating → app.quit()
+ *     fires and the returned promise never resolves (the renderer will be
+ *     torn down anyway).
+ *
+ * Callers MUST await this before loading the main window URL so the
+ * user can't bypass the gate by interacting with a half-loaded UI.
+ */
 async function bootAccountState(): Promise<void> {
   try {
     const cached = await tryUseCachedToken();
     if (!cached.alive) {
-      // No usable token — leave the user in the unauthenticated state.
-      // bootAccountState completes silently; UI surfaces login entry points.
+      // STRICT LOGIN: no usable token → force the login window. allowSkip is
+      // false so the renderer-side "skip" button stays hidden, but we still
+      // treat 'skipped' as a quit signal defensively.
+      const outcome = await openLoginWindow({ allowSkip: false });
+      if (outcome !== 'success') {
+        logInfo('login window dismissed without success — quitting');
+        app.quit();
+        return;
+      }
+      // Login succeeded — the auth:run-login-flow IPC handler already kicked
+      // off postLoginSequence (fetchMe / registerDevice / getConfigs / start
+      // poller) in the background. Push whatever snapshot we have now;
+      // postLoginSequence will broadcast again when it finishes.
       broadcastAuthChange();
       return;
     }
@@ -1905,7 +1932,10 @@ app.whenReady().then(async () => {
       port = Number.isNaN(envPort) ? 3000 : envPort;
       console.log(`Dev mode: connecting to http://127.0.0.1:${port}`);
       serverPort = port;
-      createWindow(`http://127.0.0.1:${port}`);
+      // Strict-login flow: open the main window with LOADING_HTML only.
+      // The real server URL is loaded AFTER bootAccountState succeeds so
+      // the user can never interact with the app while unauthenticated.
+      createWindow();
     } else {
       // Show window immediately with loading screen so user sees progress
       // even if port acquisition takes a moment.
@@ -1917,17 +1947,40 @@ app.whenReady().then(async () => {
       port = await startServerOnStablePort();
       serverPort = port;
       console.log('Server is ready');
-      if (mainWindow) {
-        mainWindow.loadURL(`http://127.0.0.1:${port}`);
-      }
+      // NOTE: do NOT load the server URL into mainWindow yet. We must gate
+      // the main UI behind a successful login (see below).
+    }
 
-      // Trigger bridge auto-start via explicit POST (only checks setting once)
+    // Managed-account login: wire the broker, then BLOCK until the user has
+    // a valid session. If they dismiss the login window we quit before any
+    // chat UI is ever shown. Renderer subscribes to 'auth:changed' for the
+    // snapshot after we load the main URL below.
+    if (serverPort !== null) {
+      setBrokerServerPort(serverPort);
+      await bootAccountState();
+      // If bootAccountState chose to quit (login dismissed), the app is
+      // already shutting down — bail out before loading the main window.
+      if (!app.isReady() || !mainWindow) {
+        return;
+      }
+    }
+
+    // Auth gate passed (or the broker wasn't wired for some reason).
+    // Now load the real server URL into the main window.
+    if (mainWindow && serverPort !== null) {
+      mainWindow.loadURL(`http://127.0.0.1:${serverPort}`);
+    }
+
+    // Bridge auto-start lives behind the same gate so an unauthenticated
+    // start can't pre-arm remote channels. Only relevant in packaged mode
+    // (dev mode delegates bridge boot to the user-run server).
+    if (!isDev && serverPort !== null) {
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       const http = require('http');
       const autoStartData = JSON.stringify({ action: 'auto-start' });
       const autoStartReq = http.request({
         hostname: '127.0.0.1',
-        port,
+        port: serverPort,
         path: '/api/bridge',
         method: 'POST',
         headers: {
@@ -1938,15 +1991,6 @@ app.whenReady().then(async () => {
       autoStartReq.on('error', () => {});
       autoStartReq.write(autoStartData);
       autoStartReq.end();
-    }
-
-    // Managed-account login: wire the broker to the now-known server port and
-    // kick off the boot pass in the background so the main window doesn't
-    // wait on a possibly-slow probe. Renderer subscribes via
-    // window.electronAPI.auth.onChange to learn the outcome.
-    if (serverPort !== null) {
-      setBrokerServerPort(serverPort);
-      void bootAccountState();
     }
 
   } catch (err) {

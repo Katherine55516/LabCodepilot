@@ -11,7 +11,7 @@
 - 用户走系统浏览器 OAuth 登录后端账号
 - 服务端下发 `ModelConfig` 列表 → 镜像到 `api_providers` 表（`source='managed'`）
 - 与现有 OpenAI OAuth 模块**完全分离**（不同 token 存储、不同回调端口、不同 UI 入口）
-- 启动时可跳过，不强制登录
+- 启动时**强制登录**（关掉登录窗 = app.quit），不再支持跳过 — 见决策日志 2026-05-21
 
 BACKEND_BASE：
 - Prod：`https://code-agent.ai-native-lab.com`
@@ -39,6 +39,17 @@ BACKEND_BASE：
   - DB schema 改动：`api_providers` 加 3 列（`source` / `managed_config_id` / `managed_extra_json`）
   - **不接 `/api/v1/updates/check`** 轮询：避免与 `electron-updater` 重复
   - **与 OpenAI OAuth 完全分离**：不复用 `openai-oauth*.ts` 任何代码、token、UI 入口、回调端口
+
+- **2026-05-21**：登录从「可选」改为「强制」：
+  - 触发：用户改主意，希望未登录用户无法使用应用（产品主张：本应用是登录账号的客户端）
+  - 改动：
+    - `bootAccountState`：当 `tryUseCachedToken().alive === false` 时，**阻塞**调用 `openLoginWindow({ allowSkip: false })`；用户关掉登录窗 → `app.quit()`
+    - `main.ts` 启动序列：把主窗 `loadURL(server)` 推迟到 `await bootAccountState()` 之后；登录期间主窗保持 LOADING_HTML
+    - Bridge auto-start 同步推迟到登录之后（避免未登录的远程通道被预热）
+  - 受影响行为：
+    - 离线模式仍可用，但必须**已经登录过**（有 cached token + 探活网络失败时才离线启动）
+    - `auth.skipForNow` i18n 键、login.js 的 skip 按钮代码保留但用不到（hide-UI 模式，便于回滚）
+    - 与 BYOK 并存（不变）：登录后仍可同时使用本地 BYOK provider 和 managed provider
 
 ## 详细设计
 
