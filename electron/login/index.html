@@ -19,7 +19,16 @@
 
     <button id="login-btn" class="primary-btn" type="button">在浏览器中登录</button>
 
-    <button id="skip-btn" class="secondary-btn" type="button" hidden>跳过，手动配置 Provider</button>
+    <!--
+      Skip button — REMOVED because login is now mandatory at startup and
+      on re-gate after logout. Both call sites pass allowSkip=false so the
+      #allow-skip URL hash never arrives anyway, but `hidden` alone was
+      being overridden by `.secondary-btn { display: block }` in
+      login-style.css. Comment is safer than relying on CSS specificity.
+      Restore by uncommenting the <button> element below AND the matching
+      block in login.js (see "skipBtn" inside the IIFE).
+      <button id="skip-btn" class="secondary-btn" type="button" hidden>跳过，手动配置 Provider</button>
+    -->
 
     <div id="status" role="status" aria-live="polite"></div>
   </div>

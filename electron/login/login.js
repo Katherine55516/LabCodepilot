@@ -6,14 +6,15 @@
   'use strict';
 
   const loginBtn = document.getElementById('login-btn');
-  const skipBtn = document.getElementById('skip-btn');
   const statusEl = document.getElementById('status');
 
-  // The main process passes allow-skip via the URL fragment so we don't need
-  // a second preload contract. See login-window.ts:loadFile({ hash }).
-  if (window.location.hash === '#allow-skip') {
-    skipBtn.hidden = false;
-  }
+  // Skip button removed — login is mandatory. The HTML element and the
+  // companion CSS still exist; restore the block below (and uncomment
+  // the <button id="skip-btn"> in index.html) to bring it back.
+  // const skipBtn = document.getElementById('skip-btn');
+  // if (window.location.hash === '#allow-skip') {
+  //   skipBtn.hidden = false;
+  // }
 
   function setStatus(text, kind) {
     statusEl.textContent = text || '';
@@ -22,7 +23,7 @@
 
   function setBusy(busy) {
     loginBtn.disabled = busy;
-    skipBtn.disabled = busy;
+    // skipBtn.disabled = busy;  // Restore alongside the skipBtn block above.
   }
 
   async function doLogin() {
@@ -51,15 +52,16 @@
     }
   }
 
-  function doSkip() {
-    setBusy(true);
-    setStatus('已跳过登录，进入手动配置流程…', 'info');
-    const api = window.electronAPI && window.electronAPI.auth;
-    if (api && typeof api.skipLogin === 'function') {
-      api.skipLogin().catch(() => { /* swallow */ });
-    }
-  }
+  // Skip handler removed — see comment near the top of this IIFE.
+  // function doSkip() {
+  //   setBusy(true);
+  //   setStatus('已跳过登录，进入手动配置流程…', 'info');
+  //   const api = window.electronAPI && window.electronAPI.auth;
+  //   if (api && typeof api.skipLogin === 'function') {
+  //     api.skipLogin().catch(() => { /* swallow */ });
+  //   }
+  // }
 
   loginBtn.addEventListener('click', doLogin);
-  skipBtn.addEventListener('click', doSkip);
+  // skipBtn.addEventListener('click', doSkip);  // Restore with skipBtn above.
 })();
