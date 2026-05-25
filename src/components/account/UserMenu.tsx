@@ -115,11 +115,14 @@ export function UserMenu() {
             {me?.email && (
               <span className="text-xs text-muted-foreground">{me.email}</span>
             )}
-            {me?.plan && (
+            {/* Plan label hidden — me.plan is still fetched and surfaced
+                via IPC, but not shown in the dropdown. Restore by
+                uncommenting the block below. */}
+            {/* {me?.plan && (
               <span className="text-xs text-muted-foreground">
                 {t('auth.accountCardPlan').replace('{plan}', me.plan)}
               </span>
-            )}
+            )} */}
             {offline && (
               <span className="mt-1 inline-flex w-fit items-center gap-1 rounded-full bg-status-warning/15 px-2 py-0.5 text-[11px] text-status-warning">
                 {t('auth.offline')}

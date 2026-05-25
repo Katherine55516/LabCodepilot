@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button';
 import { ArrowsClockwise, UserCircle } from '@/components/ui/icon';
 import { useAccount } from '@/hooks/useAccount';
 import { useTranslation } from '@/hooks/useTranslation';
+import { cn } from '@/lib/utils';
 import { ManagedConfigsList } from './ManagedConfigsList';
 import { LogoutConfirmDialog } from './LogoutConfirmDialog';
 
@@ -64,18 +65,33 @@ export function AccountSection() {
         </div>
       ) : (
         <div className="space-y-4">
-          <div className="space-y-1">
-            <div className="text-sm font-medium">
-              {me?.display_name || me?.username || '—'}
-            </div>
-            {me?.email && (
-              <div className="text-xs text-muted-foreground">{me.email}</div>
-            )}
-            {me?.plan && (
-              <div className="text-xs text-muted-foreground">
-                {t('auth.accountCardPlan').replace('{plan}', me.plan)}
+          {/* Identity header: circular avatar (same style as the
+              ChatListPanel chip) + larger display name. Email shown
+              below the name; plan label intentionally hidden — the
+              data is still on `me` but not rendered here. */}
+          <div className="flex items-center gap-3">
+            <span
+              className={cn(
+                'inline-flex h-10 w-10 items-center justify-center rounded-full shrink-0',
+                'bg-foreground/10 text-foreground text-base font-semibold uppercase',
+              )}
+            >
+              {(me?.display_name || me?.username || '?').trim().slice(0, 1).toUpperCase()}
+            </span>
+            <div className="min-w-0 space-y-0.5">
+              <div className="text-lg font-semibold truncate">
+                {me?.display_name || me?.username || '—'}
               </div>
-            )}
+              {me?.email && (
+                <div className="text-xs text-muted-foreground truncate">{me.email}</div>
+              )}
+              {/* Plan label hidden. Restore by uncommenting. */}
+              {/* {me?.plan && (
+                <div className="text-xs text-muted-foreground">
+                  {t('auth.accountCardPlan').replace('{plan}', me.plan)}
+                </div>
+              )} */}
+            </div>
           </div>
 
           <div className="space-y-2">
