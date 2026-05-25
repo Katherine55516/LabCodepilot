@@ -40,7 +40,9 @@ BACKEND_BASE：
   - **不接 `/api/v1/updates/check`** 轮询：避免与 `electron-updater` 重复
   - **与 OpenAI OAuth 完全分离**：不复用 `openai-oauth*.ts` 任何代码、token、UI 入口、回调端口
 
-- **2026-05-21**：登录从「可选」改为「强制」：
+- **2026-05-21（B）**：退出登录配套强制门 — `auth:logout` 完成清理后 fire-and-forget 调 `rePromptLoginAfterLogout`：把主窗换回 LOADING_HTML，再 `openLoginWindow({ allowSkip: false })`，关窗 = `app.quit()`，登录成功 = `loadURL(serverURL)` 回主界面。这样应用永远不会处于"主窗可见但未登录"的中间态。
+
+- **2026-05-21（A）**：登录从「可选」改为「强制」：
   - 触发：用户改主意，希望未登录用户无法使用应用（产品主张：本应用是登录账号的客户端）
   - 改动：
     - `bootAccountState`：当 `tryUseCachedToken().alive === false` 时，**阻塞**调用 `openLoginWindow({ allowSkip: false })`；用户关掉登录窗 → `app.quit()`

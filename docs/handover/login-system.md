@@ -201,6 +201,17 @@ extra (free-form)           → managed_extra_json.extra
 **登出**清 `session_token` + `selected_config_id`（保留 `device_id` 和 `configs.json`，下次登录回归更快）。
 **全新重置**：`clearAll()` 删整个 `anlcode/` 目录。
 
+### 登出行为（强制登录配套）
+
+`auth:logout` IPC handler 完成 `anlLogout()` + `postLogoutSequence()` 后会 fire-and-forget 调 `rePromptLoginAfterLogout()`：
+
+1. `mainWindow.loadURL(LOADING_HTML)` — 把主窗内容换成 loading 占位，旧 React tree 销毁
+2. `openLoginWindow({ allowSkip: false })` 阻塞等待
+3. `'success'` → `mainWindow.loadURL(serverURL)` 回到主界面（postLoginSequence 已在 `auth:run-login-flow` 内跑过）
+4. 其他结局（cancelled）→ `app.quit()`
+
+这样**应用永远不会处于"主窗可见但未登录"的状态**，与启动 gate 对称。代价：切账号体验是"退出 → 立刻看到登录窗 → 重登"，不需要重启进程。
+
 ## 错误处理矩阵
 
 | 场景 | 检测 | 行为 |

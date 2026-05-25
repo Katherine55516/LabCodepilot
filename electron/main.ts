@@ -937,6 +937,42 @@ async function postLogoutSequence(): Promise<void> {
   broadcastAuthChange();
 }
 
+/**
+ * Re-gate the app after an explicit logout, matching the strict-login
+ * promise: the main window can never be visible while the user is
+ * unauthenticated.
+ *
+ * Flow:
+ *   1. Replace mainWindow's content with LOADING_HTML so the chat /
+ *      settings UI is hidden (the React tree is torn down — this is
+ *      desirable because Account/Provider sections no longer have
+ *      meaningful state anyway).
+ *   2. Open the login window with allowSkip=false. Anything other than
+ *      'success' triggers app.quit() — same gate as startup.
+ *   3. On success, reload the server URL so the user lands back in the
+ *      app with their freshly-issued token.
+ *
+ * Runs fire-and-forget from the auth:logout IPC handler so the IPC reply
+ * lands before we navigate the main window away.
+ */
+async function rePromptLoginAfterLogout(): Promise<void> {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.loadURL(LOADING_HTML);
+  }
+  const outcome = await openLoginWindow({ allowSkip: false });
+  if (outcome !== 'success') {
+    logInfo('post-logout login dismissed — quitting');
+    app.quit();
+    return;
+  }
+  // Login succeeded → auth:run-login-flow handler already ran
+  // postLoginSequence in the background. Bring the user back to the
+  // main app.
+  if (mainWindow && !mainWindow.isDestroyed() && serverPort !== null) {
+    mainWindow.loadURL(`http://127.0.0.1:${serverPort}`);
+  }
+}
+
 function getIconPath(): string {
   if (isDev) {
     return path.join(process.cwd(), 'build', 'icon.png');
@@ -1890,6 +1926,10 @@ app.whenReady().then(async () => {
       logWarn('anlLogout threw (continuing):', (e as Error).message);
     }
     await postLogoutSequence();
+    // Re-gate the app: hide the main UI and force a fresh login (or quit
+    // if the user dismisses). Fire-and-forget so the IPC reply lands
+    // before the main window navigates away.
+    void rePromptLoginAfterLogout();
     return { ok: true as const };
   });
 
