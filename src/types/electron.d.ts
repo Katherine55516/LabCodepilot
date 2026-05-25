@@ -88,6 +88,54 @@ interface ElectronAuthAPI {
   onChange: (callback: (state: AuthSnapshot) => void) => () => void;
 }
 
+/**
+ * Vendor-bundled GSD plugin (gsd-build/get-shit-done, MIT) installer API.
+ * See electron/gsd-installer.ts for the underlying implementation.
+ */
+export interface GsdPluginManifest {
+  name: string;
+  displayName: string;
+  description: string;
+  source: string;
+  sourceUrl?: string;
+  sourceCommit: string;
+  transformVersion: number;
+  license: string;
+  licenseFile?: string;
+  commandCount: number;
+  agentCount: number;
+  commandPrefix: string;
+  bundledAt?: string;
+}
+
+export interface GsdConflict {
+  agentName: string;
+  reason: 'hash-mismatch';
+  targetPath: string;
+}
+
+export interface GsdInstallStatus {
+  enabled: boolean;
+  installed: boolean;
+  bundledVersion: string | null;
+  installedVersion: string | null;
+  needsSync: boolean;
+  manifest: GsdPluginManifest | null;
+  installPath: string;
+  agentsMirrorPath: string;
+  conflicts: GsdConflict[];
+  lastError?: string;
+}
+
+interface ElectronGsdAPI {
+  getStatus: () => Promise<GsdInstallStatus>;
+  install: () => Promise<GsdInstallStatus>;
+  resync: () => Promise<GsdInstallStatus>;
+  enable: () => Promise<GsdInstallStatus>;
+  disable: () => Promise<GsdInstallStatus>;
+  uninstall: () => Promise<GsdInstallStatus>;
+}
+
 interface ElectronAPI {
   versions: {
     electron: string;
@@ -123,6 +171,8 @@ interface ElectronAPI {
   };
   /** Managed-account login. Isolated from any OpenAI OAuth flow. */
   auth?: ElectronAuthAPI;
+  /** Vendor-bundled GSD plugin (gsd-build/get-shit-done, MIT). */
+  gsd?: ElectronGsdAPI;
 }
 
 declare global {

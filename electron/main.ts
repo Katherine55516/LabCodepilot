@@ -56,6 +56,13 @@ import { clearAuthState } from './auth/storage';
 import { logInfo, logWarn, logError } from './auth/log';
 import type { MeInfo, ModelConfig } from './auth/types';
 
+// Vendor-bundled GSD plugin — synced to ~/.claude/plugins/external_plugins/
+// on first launch and version drift. See electron/gsd-installer.ts.
+import {
+  install as installGsdBundle,
+  registerGsdIpc,
+} from './gsd-installer';
+
 /**
  * Return a copy of process.env without __NEXT_PRIVATE_* variables.
  *
@@ -1110,6 +1117,25 @@ app.whenReady().then(async () => {
     const iconPath = getIconPath();
     app.dock.setIcon(nativeImage.createFromPath(iconPath));
   }
+
+  // --- Vendor-bundled GSD: sync (fire-and-forget, never blocks startup) ---
+  registerGsdIpc(ipcMain);
+  Promise.resolve()
+    .then(() => {
+      const status = installGsdBundle({
+        log: (msg) => console.log(msg),
+      });
+      if (status.lastError) {
+        console.warn('[gsd-installer] startup sync had error:', status.lastError);
+      } else if (status.conflicts.length > 0) {
+        console.warn(
+          `[gsd-installer] startup sync OK with ${status.conflicts.length} agent mirror conflicts (user-modified files skipped)`,
+        );
+      }
+    })
+    .catch((err) => {
+      console.error('[gsd-installer] startup sync threw:', err);
+    });
 
   // --- Install wizard IPC handlers ---
 

@@ -48,6 +48,17 @@ extraResources:
   - from: electron/login/
     to: login/
     filter: ["**/*"]
+  # Bundled GSD (gsd-build/get-shit-done, MIT) — packed at build time by
+  # `npm run vendor:gsd`. Loaded by electron/gsd-installer.ts at first launch
+  # (and on version drift) which copies it into
+  # ~/.claude/plugins/external_plugins/codepilot-gsd-vendor/ so CodePilot's
+  # slash-command scanner picks up /gsd-* commands automatically, and mirrors
+  # agents/ to ~/.claude/agents/ for Claude's subagent resolver.
+  - from: vendor/gsd-bundle/
+    to: gsd-bundle/
+    filter:
+      - "**/*"
+      - "!transform-report.json"
 afterPack: scripts/after-pack.js
 afterSign: scripts/after-sign.js
 asarUnpack:
