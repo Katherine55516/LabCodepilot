@@ -31,7 +31,12 @@ interface SidebarItem {
 const sidebarItems: SidebarItem[] = [
   { id: "general", label: "General", icon: Gear },
   { id: "account", label: "Account", icon: UserCircle },
-  { id: "providers", label: "Providers", icon: Plug },
+  // Providers tab hidden — API providers are pushed by the managed-account
+  // login system; users no longer self-configure them. The "providers"
+  // Section value, ProviderManager render branch, and hash-bridge to
+  // /settings#providers stay live (used by error toasts + bootstrap
+  // flows) so this is UI-only. Restore by uncommenting.
+  // { id: "providers", label: "Providers", icon: Plug },
   { id: "cli", label: "Claude CLI", icon: Code },
   { id: "usage", label: "Usage", icon: ChartBar },
   // Hidden from settings sidebar — assistant section + AssistantWorkspaceSection

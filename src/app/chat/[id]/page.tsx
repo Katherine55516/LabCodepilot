@@ -144,19 +144,26 @@ export default function ChatSessionPage({ params }: ChatSessionPageProps) {
           setFileTreeOpen(true);
           return;
         }
-        const res = await fetch('/api/settings/app');
-        if (!res.ok) return;
-        const data = await res.json();
-        const panel = data.settings?.default_panel || 'file_tree';
-        if (panel === 'none') {
-          setFileTreeOpen(false);
-          setGitPanelOpen(false);
-          setDashboardPanelOpen(false);
-        } else {
-          setFileTreeOpen(panel === 'file_tree');
-          setGitPanelOpen(panel === 'git');
-          setDashboardPanelOpen(panel === 'dashboard');
-        }
+        // Default panel is hardcoded to 'file_tree' because the picker has
+        // been hidden in the General settings UI. The original logic that
+        // honoured settings.default_panel is preserved below — restore by
+        // uncommenting and removing the hardcoded block.
+        setFileTreeOpen(true);
+        setGitPanelOpen(false);
+        setDashboardPanelOpen(false);
+        // const res = await fetch('/api/settings/app');
+        // if (!res.ok) return;
+        // const data = await res.json();
+        // const panel = data.settings?.default_panel || 'file_tree';
+        // if (panel === 'none') {
+        //   setFileTreeOpen(false);
+        //   setGitPanelOpen(false);
+        //   setDashboardPanelOpen(false);
+        // } else {
+        //   setFileTreeOpen(panel === 'file_tree');
+        //   setGitPanelOpen(panel === 'git');
+        //   setDashboardPanelOpen(panel === 'dashboard');
+        // }
       } catch {
         setFileTreeOpen(true);
       }

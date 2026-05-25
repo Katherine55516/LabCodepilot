@@ -253,8 +253,11 @@ export function GeneralSection() {
           />
         </FieldRow>
 
-        {/* Default panel */}
-        <FieldRow
+        {/* Default panel — hidden. Hardcoded to 'file_tree' in
+            src/app/chat/[id]/page.tsx so the choice is invisible AND
+            consistent across machines. Restore by uncommenting this
+            block AND reverting the hardcode in page.tsx. */}
+        {/* <FieldRow
           label={t('settings.defaultPanelTitle')}
           description={t('settings.defaultPanelDesc')}
           separator
@@ -270,10 +273,13 @@ export function GeneralSection() {
               <SelectItem value="git">{t('settings.defaultPanelGit')}</SelectItem>
             </SelectContent>
           </Select>
-        </FieldRow>
+        </FieldRow> */}
 
-        {/* Language picker */}
-        <FieldRow
+        {/* Language picker — hidden. Hardcoded to 'zh' in
+            src/components/layout/I18nProvider.tsx. Restore by
+            uncommenting this block AND removing the hardcode in
+            I18nProvider. */}
+        {/* <FieldRow
           label={t('settings.language')}
           description={t('settings.languageDesc')}
           separator
@@ -288,10 +294,14 @@ export function GeneralSection() {
               ))}
             </SelectContent>
           </Select>
-        </FieldRow>
+        </FieldRow> */}
 
-        {/* Setup Center */}
-        <FieldRow
+        {/* Setup Center entry — hidden. The wizard itself, the
+            'open-setup-center' CustomEvent listener, and the
+            /settings#providers hash bridge are all still wired in
+            AppShell.tsx, so error toasts that dispatch the event keep
+            working. Restore by uncommenting. */}
+        {/* <FieldRow
           label={t('setup.openSetupCenter')}
           description={t('setup.openSetupCenterDesc')}
           separator
@@ -304,7 +314,7 @@ export function GeneralSection() {
           >
             {t('setup.open')}
           </Button>
-        </FieldRow>
+        </FieldRow> */}
 
         {/* Error Reporting — hidden from UI; SentryToggle function + sentry
             API route + localStorage persistence + i18n keys all preserved.
