@@ -89,6 +89,28 @@ GSD v1.40+ 的 namespace router 文件名（`ns-context.md`）和 frontmatter `n
 
 实施前用了 3 轮 AskUserQuestion 收集决策（GSD 版本 / 安装位置 / Settings UI / Vendor 方式 / 冲突策略 / 同步时机），把不确定性都消除在动手前。第二轮用户的回答"插件命名空间隔离，但命令名还是 gsd 官方的不能变"——如果没问这个问题，我大概率会直接落到 `~/.claude/commands/` 全局目录或者加上 `codepilot-gsd-` 前缀，两个方案都偏离用户真实意图。
 
+## 与 npx 官方 installer 的差异（有意的）
+
+完整对比了 `npx get-shit-done-cc@latest` 走的 [`bin/install.js`](https://github.com/gsd-build/get-shit-done/blob/main/bin/install.js) 和我们的 mirror 链路。结论是：**所有命令执行实际需要的资源我们都装齐了，唯一刻意没做的是 hooks 注册**。
+
+对官方 installer 做的事，我们的对应处理：
+
+| 官方动作 | 我们的对应 |
+|---|---|
+| `commands/`、`agents/`、`get-shit-done/{workflows,references,templates,bin,contexts}` 一路复制 | ✅ 全部 mirror |
+| `hooks/*.js` → `~/.claude/hooks/` + 写入 `~/.claude/settings.json` 的 hooks 字段 | ❌ **故意不做** |
+| 留一份 `bin/install.js` 在 `~/.claude/get-shit-done/bin/` 做自我升级入口 | ❌ 与 vendor 锁版冲突，不要 |
+| `~/.claude/skills/gsd-*/SKILL.md`（仅 Redux 版） | N/A — 我们装的是 archived 版 |
+
+**为什么不装 hooks**——这是 archived 版自带的 13 个运行时 hook（statusline / prompt-guard / read-guard / context-monitor / check-update 等），它们注册到 `~/.claude/settings.json` 的 hooks 字段后会在 Claude Code 每次工具调用时介入。我做了一次 `@`-import 静态分析：**所有命令体和 workflow 文件里实际 `@`-import 的路径只有两个顶级目录** —— `@~/.claude/agents/` 和 `@~/.claude/get-shit-done/`。hooks 不在任何命令的依赖图里，它们是 GSD 的"附加体验层"，不是命令执行所需。
+
+三个反对装 hooks 的具体理由：
+1. **写入用户 `settings.json` 是侵入性的**——格式是 `"<absoluteNodePath> <scriptPath>"`，绝对路径在 CodePilot 升级/卸载后会失效，需要额外的清理流程，复杂度比收益高。
+2. **`gsd-check-update.js` 会绕过 vendor 版本控制**——它在用户机器上自动检查上游 GSD 更新并提示升级。但我们的模型是 CodePilot 内置版本锁定，让 hook 引导用户去 `npx` 升级反而打破设计假设。
+3. **用户想要就并行装官方版**——我们的"命令名空间共享"设计支持和官方 GSD 共存。真正在意 statusline 提示的用户可以 `npx get-shit-done-cc@latest` 装一份，hooks 自动生效，两份共用同一份 `~/.claude/agents/`。
+
+如果未来出现"GSD 命令实际依赖某个 hook"的情况（GSD 升级后新的命令体引入了 hooks `@`-import），需要重新评估这个决策。校验脚本里建一个 `@-import 顶级目录白名单`断言可以在升级时第一时间发现。
+
 ## 未来方向
 
 ### 1. 多个内置插件
