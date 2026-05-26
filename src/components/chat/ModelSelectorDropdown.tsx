@@ -162,7 +162,11 @@ export function ModelSelectorDropdown({
 
       {modelMenuOpen && (
         <CommandList className="w-64 mb-1.5">
-          <CommandListSearch
+          {/* Search input hidden — modelSearch state stays empty so
+              flatItems filter is effectively a no-op (all managed providers
+              shown). CommandListSearch import + Escape-to-close behaviour
+              preserved; restore by uncommenting. */}
+          {/* <CommandListSearch
             placeholder={t('composer.searchModels' as TranslationKey)}
             value={modelSearch}
             onChange={setModelSearch}
@@ -173,7 +177,7 @@ export function ModelSelectorDropdown({
                 setModelSearch('');
               }
             }}
-          />
+          /> */}
           <CommandListItems>
             <div className="py-0.5">
               {flatItems.map((item) => {

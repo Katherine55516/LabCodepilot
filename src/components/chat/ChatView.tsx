@@ -1006,6 +1006,24 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
         isAssistantProject={isAssistantProject}
         hasMessages={messages.length > 0}
       />
+      {/* RuntimeBadge ("Agent 引擎") + ContextUsageIndicator (百分比环) hidden —
+          RuntimeBadge / ContextUsageIndicator components + imports + context-usage
+          hooks (useContextUsage, hasSummary, currentModelUpstream) all preserved.
+          The `right` prop is simply omitted below; restore by re-adding:
+            right={
+              <div className="flex items-center gap-1">
+                <RuntimeBadge providerId={currentProviderId} />
+                <ContextUsageIndicator
+                  messages={messages}
+                  modelName={currentModel}
+                  context1m={context1m}
+                  hasSummary={hasSummary}
+                  upstreamModelId={currentModelUpstream}
+                  contextUsageSnapshot={streamSnapshot?.contextUsageSnapshot}
+                />
+              </div>
+            }
+      */}
       <ChatComposerActionBar
         left={<><ModeIndicator mode={mode} onModeChange={handleModeChange} disabled={isStreaming} />{/* ImageGenToggle hidden from UI — restore by uncommenting. Component + ImageGen logic kept intact. */}{/* <ImageGenToggle /> */}</>}
         center={
@@ -1014,19 +1032,6 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
             permissionProfile={permissionProfile}
             onPermissionChange={setPermissionProfile}
           />
-        }
-        right={
-          <div className="flex items-center gap-1">
-            <RuntimeBadge providerId={currentProviderId} />
-            <ContextUsageIndicator
-              messages={messages}
-              modelName={currentModel}
-              context1m={context1m}
-              hasSummary={hasSummary}
-              upstreamModelId={currentModelUpstream}
-              contextUsageSnapshot={streamSnapshot?.contextUsageSnapshot}
-            />
-          </div>
         }
       />
     </div>
