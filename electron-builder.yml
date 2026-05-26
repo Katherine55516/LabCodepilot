@@ -98,7 +98,12 @@ nsis:
   oneClick: false
   perMachine: false                  # Per-user install → no admin/UAC required
   packElevateHelper: false           # No elevate.exe needed since perMachine=false; explicit guarantee no UAC prompt
-  allowToChangeInstallationDirectory: false
+  # Show the "Choose Install Location" page in the NSIS wizard so users can
+  # pick where CodePilot installs. Default install dir is still per-user
+  # (%LOCALAPPDATA%\Programs\CodePilot) — if the user picks Program Files,
+  # NSIS will fail the write because perMachine=false runs without elevation;
+  # they should pick a writable per-user path.
+  allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
   deleteAppDataOnUninstall: false
