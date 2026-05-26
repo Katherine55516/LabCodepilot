@@ -269,54 +269,110 @@ export function getStatus(
 // ────────────────────────── sync ──────────────────────────
 
 /**
- * Atomically (best-effort) replace install path contents with bundle contents.
+ * Write the minimal "we installed this version" footprint to install path.
+ * Cheap (3 small files), idempotent, almost-impossible-to-fail — and run on
+ * every install() so the Settings UI's `installedVersion` is always defined
+ * as soon as a bundle exists, independent of whether the larger
+ * syncPluginDir() succeeds afterwards. Without this, a transient failure in
+ * the bulk copy (e.g. Windows Explorer holding a lock on installPath, AV
+ * scanning .cjs files mid-write) would leave the UI showing "未安装" even
+ * though commands work via mirror.
+ */
+function ensurePluginMetadata(bundleDir: string, installPath: string): void {
+  fs.mkdirSync(installPath, { recursive: true });
+  for (const fname of ["VERSION", "plugin.json", "LICENSE"]) {
+    const src = path.join(bundleDir, fname);
+    if (!fs.existsSync(src)) continue;
+    try {
+      fs.copyFileSync(src, path.join(installPath, fname));
+    } catch {
+      // best-effort per file; one failure doesn't block the others
+    }
+  }
+}
+
+/**
+ * Per-entry replace of install path contents with bundle contents.
  * Preserves the user's optional `extras/` subdirectory and `.disabled` marker.
+ *
+ * Earlier versions called `rmrf(installPath)` first — that was vulnerable to
+ * Windows Explorer holding a handle on the directory, AV scanners briefly
+ * locking .cjs files, etc. and would leave the dir empty when the rebuild
+ * step then failed. We now per-entry replace: each bundle entry overwrites
+ * its corresponding install path entry, and only stale entries (not in the
+ * bundle) are removed at the end. Partial failures leave install path in a
+ * mixed but identifiable state — the metadata copy (which ran via
+ * ensurePluginMetadata before this) is unaffected.
  */
 function syncPluginDir(bundleDir: string, installPath: string): void {
-  // Preserve extras/ and .disabled across sync
-  const extrasSrc = path.join(installPath, "extras");
-  const hasExtras = fs.existsSync(extrasSrc);
   const disabledMarker = path.join(installPath, ".disabled");
   const wasDisabled = fs.existsSync(disabledMarker);
 
-  let extrasBackup: string | null = null;
-  if (hasExtras) {
-    extrasBackup = path.join(
-      os.tmpdir(),
-      `codepilot-gsd-extras-${Date.now()}-${process.pid}`,
-    );
-    copyDirShallow(extrasSrc, extrasBackup);
-  }
-
-  // Wipe install dir (except parents) and recreate
-  rmrf(installPath);
   fs.mkdirSync(installPath, { recursive: true });
 
-  // Copy bundle contents
+  const bundleEntries = new Set<string>();
   for (const entry of fs.readdirSync(bundleDir, { withFileTypes: true })) {
     // skip the dev/debug transform-report.json — it's only useful at vendor
     // time, not at runtime. Keeping it out of the user's disk avoids confusion.
     if (entry.name === "transform-report.json") continue;
+    bundleEntries.add(entry.name);
     const src = path.join(bundleDir, entry.name);
     const dst = path.join(installPath, entry.name);
-    if (entry.isDirectory()) copyDirShallow(src, dst);
-    else if (entry.isFile()) fs.copyFileSync(src, dst);
+    if (entry.isDirectory()) {
+      // Replace the per-entry directory (small scope); if rmrf fails on one,
+      // other entries still get synced.
+      try {
+        rmrf(dst);
+      } catch {
+        // continue; copyDirShallow below will overlay what it can
+      }
+      copyDirShallow(src, dst);
+    } else if (entry.isFile()) {
+      try {
+        fs.copyFileSync(src, dst);
+      } catch {
+        // single-file failure shouldn't abort the whole sync
+      }
+    }
   }
 
-  // Restore extras
-  if (extrasBackup) {
-    copyDirShallow(extrasBackup, path.join(installPath, "extras"));
-    rmrf(extrasBackup);
+  // Clean up entries that are no longer in the bundle, but preserve user
+  // state (extras/, .disabled, .conflicts.json, commands.disabled/).
+  const preserved = new Set([
+    "extras",
+    ".disabled",
+    ".conflicts.json",
+    "commands.disabled",
+  ]);
+  let presentEntries: string[] = [];
+  try {
+    presentEntries = fs.readdirSync(installPath);
+  } catch {
+    presentEntries = [];
+  }
+  for (const name of presentEntries) {
+    if (preserved.has(name)) continue;
+    if (bundleEntries.has(name)) continue;
+    try {
+      rmrf(path.join(installPath, name));
+    } catch {
+      // best-effort cleanup
+    }
   }
 
-  // Re-apply disabled marker (sync resets commands/, so re-rename if needed)
+  // Re-apply disabled marker (sync re-created commands/, so re-rename if
+  // the user had it disabled). Marker file itself is preserved in `preserved`
+  // above, so no explicit re-write needed.
   if (wasDisabled) {
-    fs.writeFileSync(disabledMarker, "", "utf-8");
     const cmdDir = path.join(installPath, "commands");
     const cmdDirDisabled = path.join(installPath, "commands.disabled");
     if (fs.existsSync(cmdDir)) {
-      rmrf(cmdDirDisabled);
-      fs.renameSync(cmdDir, cmdDirDisabled);
+      try {
+        rmrf(cmdDirDisabled);
+        fs.renameSync(cmdDir, cmdDirDisabled);
+      } catch {
+        // best-effort
+      }
     }
   }
 }
@@ -484,6 +540,20 @@ export function install(opts: InstallOptions = {}): GsdInstallStatus {
     return { ...status, lastError: msg };
   }
 
+  // Always write metadata first. This is independent of needsSync because
+  // it's how the Settings UI tells "installed" from "not installed" — and
+  // a stale or missing VERSION on disk has bitten users in the past
+  // (Settings showed "未安装" while commands were actually present via the
+  // mirror layer). Wrapped separately so a metadata failure doesn't block
+  // mirrors or the content sync downstream.
+  let metadataError: string | null = null;
+  try {
+    ensurePluginMetadata(paths.bundleDir, paths.installPath);
+  } catch (err) {
+    metadataError = (err as Error).message;
+    log(`[gsd-installer] metadata write failed: ${metadataError}`);
+  }
+
   try {
     // Mirrors are idempotent (hash-compare per file), so run them every
     // launch — not just on version drift. This recovers from: 1) builds
@@ -500,13 +570,19 @@ export function install(opts: InstallOptions = {}): GsdInstallStatus {
       log(
         `[gsd-installer] up-to-date (version=${status.installedVersion}); mirrors re-checked (conflicts: ${conflicts.length})`,
       );
-      return getStatus(paths);
+      return metadataError
+        ? { ...getStatus(paths), lastError: metadataError }
+        : getStatus(paths);
     }
 
     log(
       `[gsd-installer] syncing: ${status.installedVersion ?? "<none>"} -> ${status.bundledVersion}`,
     );
     syncPluginDir(paths.bundleDir, paths.installPath);
+    // After sync, re-apply metadata — syncPluginDir may have overwritten
+    // VERSION/plugin.json from the bundle (correct) but if it failed
+    // partway, ensurePluginMetadata leaves a coherent footprint anyway.
+    ensurePluginMetadata(paths.bundleDir, paths.installPath);
     writeConflictsLog(paths.installPath, conflicts);
     log(
       `[gsd-installer] sync done. mirror conflicts: ${conflicts.length}`,
@@ -515,6 +591,9 @@ export function install(opts: InstallOptions = {}): GsdInstallStatus {
   } catch (err) {
     const msg = (err as Error).message;
     log(`[gsd-installer] sync FAILED: ${msg}`);
+    // Even if content sync blew up, the ensurePluginMetadata() call at
+    // the top of install() already wrote VERSION/plugin.json/LICENSE, so
+    // the UI will still show the right version + count instead of "未安装".
     return { ...getStatus(paths), lastError: msg };
   }
 }

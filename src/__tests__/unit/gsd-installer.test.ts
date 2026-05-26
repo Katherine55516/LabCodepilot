@@ -141,6 +141,26 @@ describe('gsd-installer / first install', () => {
     );
   });
 
+  // Regression: Settings showed "未安装" when install path was empty even
+  // though mirrors had succeeded. ensurePluginMetadata must guarantee
+  // VERSION + plugin.json + LICENSE are present after install(), so the
+  // UI's installedVersion check has a value to read.
+  it('writes VERSION+plugin.json+LICENSE to install path even if dir was wiped externally', () => {
+    install({ paths });
+    // Simulate: user/AV/Explorer wiped install path contents AFTER install
+    // but before next launch. Mirror layer is unaffected (lives elsewhere).
+    fs.rmSync(paths.installPath, { recursive: true, force: true });
+    // Next install() must re-create the metadata footprint.
+    const status = install({ paths });
+    assert.ok(
+      fs.existsSync(path.join(paths.installPath, 'VERSION')),
+      'VERSION must be re-created so Settings shows installed version',
+    );
+    assert.ok(fs.existsSync(path.join(paths.installPath, 'plugin.json')));
+    assert.ok(fs.existsSync(path.join(paths.installPath, 'LICENSE')));
+    assert.equal(status.installedVersion, status.bundledVersion);
+  });
+
   it('mirrors agents to ~/.claude/agents/', () => {
     install({ paths });
     const mirrored = fs
