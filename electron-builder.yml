@@ -1,5 +1,5 @@
 appId: com.codepilot.app
-productName: CodePilot
+productName: AI Native Lab
 publish:
   provider: github
   owner: CmftAiLabs
@@ -114,7 +114,7 @@ linux:
   artifactName: "${productName}-${version}-${arch}.${ext}"
   desktop:
     entry:
-      Name: CodePilot
+      Name: AI Native Lab
       Comment: A native desktop GUI for Claude Code
       Categories: Development;IDE;
       StartupWMClass: codepilot

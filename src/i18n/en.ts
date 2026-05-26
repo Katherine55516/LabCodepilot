@@ -98,11 +98,11 @@ const en = {
 
   // ── Settings: General ───────────────────────────────────────
   'settings.title': 'Settings',
-  'settings.description': 'Manage CodePilot and Claude Code settings',
+  'settings.description': 'Manage AI Native Lab - 研发平台 and Claude Code settings',
   'settings.general': 'General',
   'settings.providers': 'Providers',
   'settings.claudeCli': 'Claude Code',
-  'settings.codepilot': 'CodePilot',
+  'settings.codepilot': 'AI Native Lab - 研发平台',
   'settings.version': 'Version {version}',
   'settings.checkForUpdates': 'Check for Updates',
   'settings.checking': 'Checking...',
@@ -121,7 +121,7 @@ const en = {
   'settings.cancel': 'Cancel',
   'settings.enableAutoApprove': 'Enable Auto-approve',
   'settings.errorReporting': 'Anonymous Error Reporting',
-  'settings.errorReportingDesc': 'Help improve CodePilot by anonymously reporting errors. No conversation content or API keys are included. Restart the app for the change to fully take effect.',
+  'settings.errorReportingDesc': 'Help improve AI Native Lab - 研发平台 by anonymously reporting errors. No conversation content or API keys are included. Restart the app for the change to fully take effect.',
   'settings.generativeUITitle': 'Generative UI',
   'settings.generativeUIDesc': 'Enable interactive visualizations (charts, diagrams, mockups) in chat responses. Disabling saves tokens but removes visual generation capability.',
   'settings.defaultPanelTitle': 'Default Side Panel',
@@ -177,7 +177,7 @@ const en = {
   'cli.enableClaude': 'Enable Claude Code',
   'cli.enableClaudeDesc': 'OFF: Native AI SDK as backend. ON: Claude Code as backend.',
   'cli.agentRuntime': 'Agent Runtime',
-  'cli.agentRuntimeDesc': 'Choose how CodePilot executes agent tasks',
+  'cli.agentRuntimeDesc': 'Choose how AI Native Lab - 研发平台 executes agent tasks',
   'cli.runtimeNative': 'Native Runtime (AI SDK)',
   'cli.runtimeSdk': 'Claude Code SDK',
   'cli.cliStatus': 'Status',
@@ -415,7 +415,7 @@ const en = {
   'connection.missingGitDesc': 'Claude Code requires Git for Windows to run properly. Without it, all commands will fail with exit code 1.',
   'connection.installGit': 'Install Git',
   'connection.gitInstalling': 'Installing...',
-  'connection.gitInstallSuccess': 'Git installed successfully! Please restart CodePilot.',
+  'connection.gitInstallSuccess': 'Git installed successfully! Please restart AI Native Lab - 研发平台.',
   'connection.gitInstallFailed': 'Auto-install failed. Please download and install manually.',
   'connection.downloadGit': 'Download',
   'connection.recheck': 'Recheck',
@@ -426,7 +426,7 @@ const en = {
   'connection.versionCompare': 'v{current} → v{latest}',
   'connection.upgradeButton': 'Upgrade CLI',
   'connection.upgrading': 'Upgrading...',
-  'connection.upgradeSuccess': 'Upgrade successful! Please restart CodePilot to apply the update.',
+  'connection.upgradeSuccess': 'Upgrade successful! Please restart AI Native Lab - 研发平台 to apply the update.',
   'connection.upgradeFailed': 'Upgrade failed. Please try manually:',
   'connection.checkUpgrade': 'Check for Updates',
   'connection.manualUpdateHint': 'This install channel does not auto-update. Run the upgrade to check for new versions.',
@@ -508,10 +508,10 @@ const en = {
   'update.downloading': 'Downloading',
   'update.restartToUpdate': 'Restart to Update',
   'update.restartNow': 'Restart Now',
-  'update.readyToInstall': 'CodePilot v{version} is ready — restart to update',
+  'update.readyToInstall': 'AI Native Lab - 研发平台 v{version} is ready — restart to update',
   'update.installUpdate': 'Download & Install',
   'update.later': 'Later',
-  'update.rosettaWarning': 'CodePilot is running through Rosetta on this Apple Silicon Mac. Install the arm64 build for better responsiveness.',
+  'update.rosettaWarning': 'AI Native Lab - 研发平台 is running through Rosetta on this Apple Silicon Mac. Install the arm64 build for better responsiveness.',
   'update.recommendedAsset': 'Recommended download: {asset}',
   'update.getRecommendedBuild': 'Get Recommended Build',
 
@@ -693,7 +693,7 @@ const en = {
 
   // ── Feishu (Bridge) ──────────────────────────────────────
   'feishu.quickCreate': 'Quick Start',
-  'feishu.quickCreateDesc': 'Auto-create a Feishu bot and bind it to CodePilot — no manual permission or event setup needed',
+  'feishu.quickCreateDesc': 'Auto-create a Feishu bot and bind it to AI Native Lab - 研发平台 — no manual permission or event setup needed',
   'feishu.quickCreateBtn': 'Create & Bind Feishu App',
   'feishu.waitingAuth': 'Browser opened — please confirm creation in Feishu...',
   'feishu.createSuccess': 'Bound successfully: {botName}',
@@ -1208,7 +1208,7 @@ const en = {
   'mcp.enable': 'Enable',
   'mcp.enabled': 'Enabled',
   'mcp.disabled': 'Disabled',
-  'mcp.managerDesc': 'Toggle controls CodePilot MCP injection. Servers in your Claude Code config may still be loaded by the SDK via its own settings sources.',
+  'mcp.managerDesc': 'Toggle controls AI Native Lab - 研发平台 MCP injection. Servers in your Claude Code config may still be loaded by the SDK via its own settings sources.',
 
   // ── SDK Capabilities: Thinking ────────────────────────────
   'settings.thinkingMode': 'Thinking Mode',
@@ -1250,7 +1250,7 @@ const en = {
   'cliTools.path': 'Path',
   'cliTools.brewNotInstalled': 'Homebrew not detected',
   'cliTools.brewInstallGuide': 'Most recommended tools require Homebrew. Run this command in your terminal to install it:',
-  'cliTools.viewDocs': 'View CodePilot documentation',
+  'cliTools.viewDocs': 'View AI Native Lab - 研发平台 documentation',
   'cliTools.searchPlaceholder': 'Search CLI tools...',
   'cliTools.noToolsDetected': 'No installed CLI tools detected',
   'cliTools.goInstall': 'Go install CLI tools',
@@ -1393,7 +1393,7 @@ const en = {
   'terminal.exited': 'Process exited',
 
   // ── Setup Center ──────────────────────────────────────────────
-  'setup.title': 'Welcome to CodePilot',
+  'setup.title': 'Welcome to AI Native Lab - 研发平台',
   'setup.subtitle': 'Configure your Agent engine, providers, and workspace.',
   'setup.skipAndEnter': 'Skip and Enter',
   'setup.progress': '{completed}/3 completed',
@@ -1403,12 +1403,12 @@ const en = {
 
   // Setup: Welcome card
   'setup.welcome.title': 'Welcome',
-  'setup.welcome.description': 'CodePilot is a multi-model AI agent desktop client. Connect any AI provider, extend with MCP & skills, and let your assistant learn your workflow.',
+  'setup.welcome.description': 'AI Native Lab - 研发平台 is a multi-model AI agent desktop client. Connect any AI provider, extend with MCP & skills, and let your assistant learn your workflow.',
 
   // Setup: Claude Code card
   'setup.claude.title': 'Claude Code',
   'setup.claude.description': 'Claude Code is bundled with the application. No separate installation needed.',
-  'setup.claude.bundled': 'Bundled with CodePilot',
+  'setup.claude.bundled': 'Bundled with AI Native Lab - 研发平台',
   'setup.claude.detected': 'Claude Code detected',
   'setup.claude.notFound': 'Claude Code not found',
   'setup.claude.conflict': 'Multiple installations detected — this may cause version conflicts',
@@ -1425,7 +1425,7 @@ const en = {
 
   // Setup: Provider card
   'setup.provider.title': 'API Provider',
-  'setup.provider.description': 'Configure how CodePilot connects to AI models.',
+  'setup.provider.description': 'Configure how AI Native Lab - 研发平台 connects to AI models.',
   'setup.provider.envDetected': 'Environment variables detected — use Claude Code env as your provider.',
   'setup.provider.useEnv': 'Use Claude Code Env',
   'setup.provider.noProvider': 'No provider configured. Select a preset to get started.',
@@ -1580,7 +1580,7 @@ const en = {
   'auth.noManagedConfigs': 'No managed configurations',
   'auth.managedTag': 'Managed',
   'auth.managedReadOnly': 'Pushed by your account; not editable here',
-  'auth.accountCardTitle': 'Sign in to CodePilot account',
+  'auth.accountCardTitle': 'Sign in to AI Native Lab - 研发平台 account',
   'auth.accountCardSubtitle': 'Get pre-configured model providers without entering API keys',
   'auth.accountCardPlan': 'Plan: {plan}',
   'auth.email': 'Email',
@@ -1588,7 +1588,7 @@ const en = {
 
   // ─── Built-in plugins panel (GSD) ───
   'settings.plugins.title': 'Plugins',
-  'settings.plugins.subtitle': 'Built-in plugins shipped with CodePilot. Toggle, re-sync, or uninstall here.',
+  'settings.plugins.subtitle': 'Built-in plugins shipped with AI Native Lab - 研发平台. Toggle, re-sync, or uninstall here.',
   'settings.plugins.electronOnly': 'This panel requires the Electron desktop app.',
 
   'settings.gsd.description': 'Get-Shit-Done meta-prompting system by TÂCHES — adds /gsd-* slash commands and 33 specialized subagents. Vendored from gsd-build/get-shit-done (MIT).',

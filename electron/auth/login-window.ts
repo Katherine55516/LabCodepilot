@@ -30,7 +30,7 @@ const WINDOW_OPTIONS = {
   minimizable: true,
   maximizable: false,
   fullscreenable: false,
-  title: 'CodePilot — 登录账号',
+  title: 'AI Native Lab - 研发平台 — 登录账号',
   backgroundColor: '#0a0a0a',
 } as const;
 

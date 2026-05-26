@@ -29,7 +29,7 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "CodePilot",
+  title: "AI Native Lab - 研发平台",
   description: "A multi-model AI agent desktop client",
 };
 

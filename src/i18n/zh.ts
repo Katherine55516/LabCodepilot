@@ -95,11 +95,11 @@ const zh: Record<TranslationKey, string> = {
 
   // ── Settings: General ───────────────────────────────────────
   'settings.title': '设置',
-  'settings.description': '管理 CodePilot 和 Claude Code 设置',
+  'settings.description': '管理 AI Native Lab - 研发平台 和 Claude Code 设置',
   'settings.general': '通用',
   'settings.providers': '服务商',
   'settings.claudeCli': 'Claude Code',
-  'settings.codepilot': 'CodePilot',
+  'settings.codepilot': 'AI Native Lab - 研发平台',
   'settings.version': '版本 {version}',
   'settings.checkForUpdates': '检查更新',
   'settings.checking': '检查中...',
@@ -118,7 +118,7 @@ const zh: Record<TranslationKey, string> = {
   'settings.cancel': '取消',
   'settings.enableAutoApprove': '启用自动批准',
   'settings.errorReporting': '匿名错误上报',
-  'settings.errorReportingDesc': '帮助改进 CodePilot：匿名上报错误信息，不包含对话内容和 API Key。更改后需重启应用才能完全生效。',
+  'settings.errorReportingDesc': '帮助改进 AI Native Lab - 研发平台：匿名上报错误信息，不包含对话内容和 API Key。更改后需重启应用才能完全生效。',
   'settings.generativeUITitle': '生成式 UI',
   'settings.generativeUIDesc': '启用聊天中的交互式可视化功能（图表、流程图、原型图等）。关闭后可节省 token，但将无法生成可视化内容。',
   'settings.defaultPanelTitle': '默认侧边面板',
@@ -174,7 +174,7 @@ const zh: Record<TranslationKey, string> = {
   'cli.enableClaude': '启用 Claude Code',
   'cli.enableClaudeDesc': '关闭时使用原生 AI SDK 作为后端，开启后使用 Claude Code 作为后端。',
   'cli.agentRuntime': 'Agent 运行时',
-  'cli.agentRuntimeDesc': '选择 CodePilot 执行 Agent 任务的方式',
+  'cli.agentRuntimeDesc': '选择 AI Native Lab - 研发平台 执行 Agent 任务的方式',
   'cli.runtimeNative': '原生 Runtime (AI SDK)',
   'cli.runtimeSdk': 'Claude Code SDK',
   'cli.cliStatus': '状态',
@@ -412,7 +412,7 @@ const zh: Record<TranslationKey, string> = {
   'connection.missingGitDesc': 'Claude Code 需要 Git for Windows 才能正常运行。缺少 Git 会导致所有命令以 exit code 1 失败。',
   'connection.installGit': '一键安装 Git',
   'connection.gitInstalling': '安装中...',
-  'connection.gitInstallSuccess': 'Git 安装成功！请重启 CodePilot。',
+  'connection.gitInstallSuccess': 'Git 安装成功！请重启 AI Native Lab - 研发平台。',
   'connection.gitInstallFailed': '自动安装失败，请手动下载安装。',
   'connection.downloadGit': '手动下载',
   'connection.recheck': '重新检测',
@@ -423,7 +423,7 @@ const zh: Record<TranslationKey, string> = {
   'connection.versionCompare': 'v{current} → v{latest}',
   'connection.upgradeButton': '升级 CLI',
   'connection.upgrading': '升级中...',
-  'connection.upgradeSuccess': '升级成功！请重启 CodePilot 以应用更新。',
+  'connection.upgradeSuccess': '升级成功！请重启 AI Native Lab - 研发平台 以应用更新。',
   'connection.upgradeFailed': '升级失败，请手动执行：',
   'connection.checkUpgrade': '检查更新',
   'connection.manualUpdateHint': '当前安装渠道不会自动更新，点击下方按钮检查并安装新版本。',
@@ -505,10 +505,10 @@ const zh: Record<TranslationKey, string> = {
   'update.downloading': '下载中',
   'update.restartToUpdate': '重启以更新',
   'update.restartNow': '立即重启',
-  'update.readyToInstall': 'CodePilot v{version} 已就绪 — 重启以完成更新',
+  'update.readyToInstall': 'AI Native Lab - 研发平台 v{version} 已就绪 — 重启以完成更新',
   'update.installUpdate': '下载并安装',
   'update.later': '稍后',
-  'update.rosettaWarning': 'CodePilot 当前正通过 Rosetta 在这台 Apple Silicon Mac 上运行。安装 arm64 版本可获得更好的响应速度。',
+  'update.rosettaWarning': 'AI Native Lab - 研发平台 当前正通过 Rosetta 在这台 Apple Silicon Mac 上运行。安装 arm64 版本可获得更好的响应速度。',
   'update.recommendedAsset': '推荐下载：{asset}',
   'update.getRecommendedBuild': '下载推荐版本',
 
@@ -690,7 +690,7 @@ const zh: Record<TranslationKey, string> = {
 
   // ── Feishu (Bridge) ──────────────────────────────────────
   'feishu.quickCreate': '快速开始',
-  'feishu.quickCreateDesc': '自动创建飞书机器人并绑定到 CodePilot，无需手动配置权限和事件',
+  'feishu.quickCreateDesc': '自动创建飞书机器人并绑定到 AI Native Lab - 研发平台，无需手动配置权限和事件',
   'feishu.quickCreateBtn': '创建并绑定飞书应用',
   'feishu.waitingAuth': '浏览器已打开，请在飞书页面中确认创建...',
   'feishu.createSuccess': '绑定成功：{botName}',
@@ -1205,7 +1205,7 @@ const zh: Record<TranslationKey, string> = {
   'mcp.enable': '启用',
   'mcp.enabled': '已启用',
   'mcp.disabled': '已禁用',
-  'mcp.managerDesc': '开关控制 CodePilot 注入的 MCP 服务。Claude Code 自身配置中的服务仍可能被 SDK 通过 settingSources 自动加载。',
+  'mcp.managerDesc': '开关控制 AI Native Lab - 研发平台 注入的 MCP 服务。Claude Code 自身配置中的服务仍可能被 SDK 通过 settingSources 自动加载。',
 
   // ── SDK Capabilities: Thinking ────────────────────────────
   'settings.thinkingMode': '思考模式',
@@ -1247,7 +1247,7 @@ const zh: Record<TranslationKey, string> = {
   'cliTools.path': '路径',
   'cliTools.brewNotInstalled': '未检测到 Homebrew',
   'cliTools.brewInstallGuide': '大部分推荐工具依赖 Homebrew 安装，请先在终端中运行以下命令安装：',
-  'cliTools.viewDocs': '查看 CodePilot 官方文档',
+  'cliTools.viewDocs': '查看 AI Native Lab - 研发平台 官方文档',
   'cliTools.searchPlaceholder': '搜索 CLI 工具...',
   'cliTools.noToolsDetected': '还没有检测到已安装的 CLI 工具',
   'cliTools.goInstall': '去安装 CLI 工具',
@@ -1390,7 +1390,7 @@ const zh: Record<TranslationKey, string> = {
   'terminal.exited': '进程已退出',
 
   // ── Setup Center ──────────────────────────────────────────────
-  'setup.title': '欢迎使用 CodePilot',
+  'setup.title': '欢迎使用 AI Native Lab - 研发平台',
   'setup.subtitle': '配置 Agent 引擎、服务商和工作目录。',
   'setup.skipAndEnter': '跳过并进入',
   'setup.progress': '{completed}/3 已完成',
@@ -1400,12 +1400,12 @@ const zh: Record<TranslationKey, string> = {
 
   // Setup: Welcome card
   'setup.welcome.title': '欢迎',
-  'setup.welcome.description': 'CodePilot 是多模型 AI Agent 桌面客户端。连接任意 AI 服务商，通过 MCP 和 Skills 扩展能力，让你的助理学会你的工作方式。',
+  'setup.welcome.description': 'AI Native Lab - 研发平台 是多模型 AI Agent 桌面客户端。连接任意 AI 服务商，通过 MCP 和 Skills 扩展能力，让你的助理学会你的工作方式。',
 
   // Setup: Claude Code card
   'setup.claude.title': 'Claude Code',
   'setup.claude.description': 'Claude Code 已随应用一同分发，无需单独安装。',
-  'setup.claude.bundled': '已内置于 CodePilot',
+  'setup.claude.bundled': '已内置于 AI Native Lab - 研发平台',
   'setup.claude.detected': '已检测到 Claude Code',
   'setup.claude.notFound': '未找到 Claude Code',
   'setup.claude.conflict': '检测到多个安装版本，可能导致版本冲突',
@@ -1422,7 +1422,7 @@ const zh: Record<TranslationKey, string> = {
 
   // Setup: Provider card
   'setup.provider.title': 'API 服务商',
-  'setup.provider.description': '配置 CodePilot 连接 AI 模型的方式。',
+  'setup.provider.description': '配置 AI Native Lab - 研发平台 连接 AI 模型的方式。',
   'setup.provider.envDetected': '检测到环境变量 — 使用 Claude Code 环境变量作为服务商。',
   'setup.provider.useEnv': '使用 Claude Code 环境',
   'setup.provider.noProvider': '未配置服务商。选择一个预设开始。',
@@ -1576,7 +1576,7 @@ const zh: Record<TranslationKey, string> = {
   'auth.noManagedConfigs': '暂无托管配置',
   'auth.managedTag': '账号托管',
   'auth.managedReadOnly': '由账号下发，不可在此编辑',
-  'auth.accountCardTitle': '登录 CodePilot 账号',
+  'auth.accountCardTitle': '登录 AI Native Lab - 研发平台 账号',
   'auth.accountCardSubtitle': '登录后直接获得已配置好的模型 Provider，无需自行填写 API Key',
   'auth.accountCardPlan': '套餐：{plan}',
   'auth.email': '邮箱',
@@ -1584,7 +1584,7 @@ const zh: Record<TranslationKey, string> = {
 
   // ─── 内置插件面板（GSD） ───
   'settings.plugins.title': '插件',
-  'settings.plugins.subtitle': 'CodePilot 内置的插件，可在此启用/禁用、重新同步或卸载。',
+  'settings.plugins.subtitle': 'AI Native Lab - 研发平台 内置的插件，可在此启用/禁用、重新同步或卸载。',
   'settings.plugins.electronOnly': '此面板需要在 Electron 桌面端运行。',
 
   'settings.gsd.description': 'GSD（Get-Shit-Done）是 TÂCHES 出品的元提示词系统，提供 /gsd-* 斜杠命令和 33 个专用子 agent。基于 gsd-build/get-shit-done 内置打包（MIT 协议）。',

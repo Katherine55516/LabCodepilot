@@ -80,7 +80,7 @@ export function FeatureAnnouncementDialog() {
 
           {isZh ? (
             <>
-              <p>CodePilot 现在可以脱离 Claude Code CLI 独立运行了。</p>
+              <p>AI Native Lab - 研发平台 现在可以脱离 Claude Code CLI 独立运行了。</p>
               <div className="space-y-2 text-muted-foreground">
                 <p><span className="text-foreground font-medium">AI SDK 引擎</span> — 无需安装 CLI，支持所有已配置的服务商</p>
                 <p><span className="text-foreground font-medium">Claude Code 引擎</span> — 通过 CLI 驱动，获得完整的命令行能力</p>
@@ -89,7 +89,7 @@ export function FeatureAnnouncementDialog() {
             </>
           ) : (
             <>
-              <p>CodePilot can now run independently without the Claude Code CLI.</p>
+              <p>AI Native Lab - 研发平台 can now run independently without the Claude Code CLI.</p>
               <div className="space-y-2 text-muted-foreground">
                 <p><span className="text-foreground font-medium">AI SDK engine</span> — no CLI needed, works with all configured providers</p>
                 <p><span className="text-foreground font-medium">Claude Code engine</span> — driven by CLI for full command-line capabilities</p>
