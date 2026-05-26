@@ -53,10 +53,12 @@ export interface PluginManifest {
 }
 
 export interface GsdConflict {
-  /** Bare name (no `.md` suffix). e.g. "gsd-debugger" / "gsd-debug". */
+  /** Bare name (no `.md` suffix). For `asset` kind the value is the
+   *  relative path inside `~/.claude/get-shit-done/`, e.g.
+   *  "workflows/add-tests". */
   agentName: string;
-  /** Which mirror produced this conflict — agent or command. */
-  kind?: "agent" | "command";
+  /** Which mirror produced this conflict. */
+  kind?: "agent" | "command" | "asset";
   reason: "hash-mismatch";
   targetPath: string;
 }
@@ -79,6 +81,7 @@ export interface InstallerPaths {
   installPath: string;        // ~/.claude/plugins/external_plugins/codepilot-gsd-vendor/
   agentsMirrorPath: string;   // ~/.claude/agents/
   commandsMirrorPath: string; // ~/.claude/commands/
+  assetsMirrorPath: string;   // ~/.claude/get-shit-done/
 }
 
 // ────────────────────────── path resolution ──────────────────────────
@@ -111,6 +114,18 @@ export function getCommandsMirrorPath(homedir: string = os.homedir()): string {
 }
 
 /**
+ * `~/.claude/get-shit-done/` holds GSD's runtime resources: workflows,
+ * references, templates, bin/, contexts/. 57/67 GSD commands @-import
+ * paths under this tree (e.g. `@~/.claude/get-shit-done/workflows/...`).
+ * Without these files on disk, the commands fire but the agent spends
+ * the first turn fishing for missing files, often falling back to a
+ * global search that may or may not find the right copy.
+ */
+export function getAssetsMirrorPath(homedir: string = os.homedir()): string {
+  return path.join(homedir, ".claude", "get-shit-done");
+}
+
+/**
  * Resolve the bundle dir. In production (packaged), files are at
  * `<process.resourcesPath>/gsd-bundle/` (placed there by electron-builder
  * extraResources). In dev, fall back to `<repo>/vendor/gsd-bundle/`
@@ -136,6 +151,7 @@ export function defaultPaths(homedir: string = os.homedir()): InstallerPaths {
     installPath: getInstallPath(homedir),
     agentsMirrorPath: getAgentsMirrorPath(homedir),
     commandsMirrorPath: getCommandsMirrorPath(homedir),
+    assetsMirrorPath: getAssetsMirrorPath(homedir),
   };
 }
 
@@ -339,10 +355,26 @@ function mirrorCommands(
 }
 
 /**
- * Generic hash-aware file mirror. Used by both mirrorAgents and
+ * Mirror bundle get-shit-done/ subtree to `~/.claude/get-shit-done/`.
+ * Recursive, hash-aware (same conflict policy as the flat mirrors).
+ * Returns conflict list; preserved files keep their user edits.
+ */
+function mirrorAssets(
+  bundleDir: string,
+  assetsMirrorPath: string,
+): GsdConflict[] {
+  return mirrorTree(
+    path.join(bundleDir, "get-shit-done"),
+    assetsMirrorPath,
+    "asset",
+  );
+}
+
+/**
+ * Generic hash-aware flat-dir mirror. Used by both mirrorAgents and
  * mirrorCommands so the conflict policy stays identical: new file →
  * write; identical hash → skip; different hash → record conflict and
- * leave the user's file alone.
+ * leave the user's file alone. Only `.md` files are touched.
  */
 function mirrorDir(
   srcDir: string,
@@ -358,26 +390,73 @@ function mirrorDir(
     if (!name.endsWith(".md")) continue;
     const srcFile = path.join(srcDir, name);
     const dstFile = path.join(dstDir, name);
-
-    const srcBuf = fs.readFileSync(srcFile);
-
-    if (!fs.existsSync(dstFile)) {
-      fs.writeFileSync(dstFile, srcBuf);
-      continue;
-    }
-    const dstBuf = fs.readFileSync(dstFile);
-    if (sha1Buffer(srcBuf) === sha1Buffer(dstBuf)) {
-      continue;
-    }
-    conflicts.push({
-      agentName: name.replace(/\.md$/, ""),
-      kind,
-      reason: "hash-mismatch",
-      targetPath: dstFile,
-    });
+    applyFileMirror(srcFile, dstFile, kind, name, conflicts);
   }
 
   return conflicts;
+}
+
+/**
+ * Recursive variant of mirrorDir. Mirrors every file under srcDir
+ * (any extension — get-shit-done/bin/ contains .cjs scripts) into the
+ * matching position under dstDir, preserving directory structure.
+ * Same hash-aware conflict policy as flat mirrors.
+ */
+function mirrorTree(
+  srcRoot: string,
+  dstRoot: string,
+  kind: "agent" | "command" | "asset",
+): GsdConflict[] {
+  const conflicts: GsdConflict[] = [];
+  if (!fs.existsSync(srcRoot)) return conflicts;
+
+  function walk(relDir: string): void {
+    const absSrc = path.join(srcRoot, relDir);
+    const absDst = path.join(dstRoot, relDir);
+    fs.mkdirSync(absDst, { recursive: true });
+    for (const ent of fs.readdirSync(absSrc, { withFileTypes: true })) {
+      const childRel = path.join(relDir, ent.name);
+      if (ent.isDirectory()) {
+        walk(childRel);
+        continue;
+      }
+      if (!ent.isFile()) continue;
+      applyFileMirror(
+        path.join(srcRoot, childRel),
+        path.join(dstRoot, childRel),
+        // mirrorTree only emits 'asset'-kind conflicts; the agent/command
+        // variants use mirrorDir which provides those kinds explicitly.
+        kind === "asset" ? "asset" : kind,
+        childRel.replace(/\\/g, "/"),
+        conflicts,
+      );
+    }
+  }
+
+  walk("");
+  return conflicts;
+}
+
+function applyFileMirror(
+  srcFile: string,
+  dstFile: string,
+  kind: GsdConflict["kind"],
+  conflictName: string,
+  conflicts: GsdConflict[],
+): void {
+  const srcBuf = fs.readFileSync(srcFile);
+  if (!fs.existsSync(dstFile)) {
+    fs.writeFileSync(dstFile, srcBuf);
+    return;
+  }
+  const dstBuf = fs.readFileSync(dstFile);
+  if (sha1Buffer(srcBuf) === sha1Buffer(dstBuf)) return;
+  conflicts.push({
+    agentName: conflictName.replace(/\.md$/, ""),
+    kind,
+    reason: "hash-mismatch",
+    targetPath: dstFile,
+  });
 }
 
 // ────────────────────────── api ──────────────────────────
@@ -408,11 +487,13 @@ export function install(opts: InstallOptions = {}): GsdInstallStatus {
   try {
     // Mirrors are idempotent (hash-compare per file), so run them every
     // launch — not just on version drift. This recovers from: 1) builds
-    // installed before the commands-mirror feature shipped, 2) users who
-    // manually deleted a mirror file. Cost is ~100 hashes/launch, < 50ms.
+    // installed before the mirror features shipped, 2) users who
+    // manually deleted a mirror file. Total cost ~400 hashes/launch,
+    // dominated by the 299 get-shit-done/ asset files.
     const conflicts: GsdConflict[] = [];
     conflicts.push(...mirrorAgents(paths.bundleDir, paths.agentsMirrorPath));
     conflicts.push(...mirrorCommands(paths.bundleDir, paths.commandsMirrorPath));
+    conflicts.push(...mirrorAssets(paths.bundleDir, paths.assetsMirrorPath));
 
     if (!opts.force && !status.needsSync) {
       writeConflictsLog(paths.installPath, conflicts);
@@ -500,6 +581,10 @@ export function uninstall(opts: InstallOptions = {}): GsdInstallStatus {
       path.join(paths.bundleDir, "commands"),
       paths.commandsMirrorPath,
     );
+    cleanupMirrorTree(
+      path.join(paths.bundleDir, "get-shit-done"),
+      paths.assetsMirrorPath,
+    );
     log("[gsd-installer] uninstalled");
   } catch (err) {
     log(`[gsd-installer] uninstall FAILED: ${(err as Error).message}`);
@@ -508,8 +593,8 @@ export function uninstall(opts: InstallOptions = {}): GsdInstallStatus {
 }
 
 /**
- * Remove mirror files that still match the bundle exactly. User changes
- * are preserved — same conservative policy as install/mirror.
+ * Remove flat-dir mirror files that still match the bundle exactly. User
+ * changes are preserved — same conservative policy as install/mirror.
  */
 function cleanupMirror(srcDir: string, dstDir: string): void {
   if (!fs.existsSync(srcDir) || !fs.existsSync(dstDir)) return;
@@ -525,6 +610,50 @@ function cleanupMirror(srcDir: string, dstDir: string): void {
     } catch {
       // ignore per-file errors
     }
+  }
+}
+
+/**
+ * Recursive cleanup variant. Walks the bundle subtree; for each file,
+ * removes the matching destination iff hashes still match. Empty dirs
+ * left behind by the user are tidied last.
+ */
+function cleanupMirrorTree(srcRoot: string, dstRoot: string): void {
+  if (!fs.existsSync(srcRoot) || !fs.existsSync(dstRoot)) return;
+
+  function walk(relDir: string): void {
+    const absSrc = path.join(srcRoot, relDir);
+    for (const ent of fs.readdirSync(absSrc, { withFileTypes: true })) {
+      const childRel = path.join(relDir, ent.name);
+      if (ent.isDirectory()) {
+        walk(childRel);
+        continue;
+      }
+      if (!ent.isFile()) continue;
+      const srcFile = path.join(srcRoot, childRel);
+      const dstFile = path.join(dstRoot, childRel);
+      if (!fs.existsSync(dstFile)) continue;
+      try {
+        if (sha1File(srcFile) === sha1File(dstFile)) {
+          fs.unlinkSync(dstFile);
+        }
+      } catch {
+        // ignore per-file errors
+      }
+    }
+  }
+
+  walk("");
+
+  // Best-effort: remove the root if everything we wrote is gone.
+  try {
+    // fs.rmdir succeeds only on empty dir
+    const remaining = fs.readdirSync(dstRoot);
+    if (remaining.length === 0) {
+      fs.rmdirSync(dstRoot);
+    }
+  } catch {
+    // user files remain — leave the directory in place
   }
 }
 

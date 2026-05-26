@@ -14,6 +14,12 @@ const BUNDLE_DIR = path.join(REPO_ROOT, "vendor", "gsd-bundle");
 
 const EXPECTED_COMMAND_COUNT = 67;
 const EXPECTED_AGENT_COUNT = 33;
+// get-shit-done/ subtree (workflows + references + templates + bin + contexts).
+// Exact count varies if upstream churns; use a floor that catches a missing
+// subtree (e.g. someone forgot to copy in get-shit-done/) but tolerates
+// minor file shuffles.
+const ASSET_REQUIRED_SUBDIRS = ["workflows", "references", "templates", "bin", "contexts"];
+const ASSET_MIN_TOTAL_FILES = 250;
 
 const errors = [];
 
@@ -41,6 +47,16 @@ function listMd(dir) {
     .readdirSync(dir)
     .filter((n) => n.endsWith(".md"))
     .sort();
+}
+
+function countRecursive(dir) {
+  let total = 0;
+  for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
+    const child = path.join(dir, ent.name);
+    if (ent.isDirectory()) total += countRecursive(child);
+    else if (ent.isFile()) total += 1;
+  }
+  return total;
 }
 
 function checkCount(label, actual, expected) {
@@ -152,9 +168,33 @@ function main() {
     if (manifest.commandPrefix !== "gsd-") {
       err(`plugin.json commandPrefix = '${manifest.commandPrefix}', expected 'gsd-'`);
     }
+    if (manifest.builtIn !== true) {
+      err("plugin.json builtIn must be true for CodePilot-bundled plugin");
+    }
     ok("plugin.json schema");
   } catch (e) {
     err(`plugin.json parse error: ${e.message}`);
+  }
+
+  // ---- get-shit-done/ asset subtree ----
+  const assetsRoot = path.join(BUNDLE_DIR, "get-shit-done");
+  if (!fs.existsSync(assetsRoot)) {
+    err("get-shit-done/ asset directory missing from bundle");
+  } else {
+    let totalAssets = 0;
+    for (const sub of ASSET_REQUIRED_SUBDIRS) {
+      const subPath = path.join(assetsRoot, sub);
+      if (!fs.existsSync(subPath)) {
+        err(`get-shit-done/${sub}/ subdirectory missing`);
+        continue;
+      }
+      totalAssets += countRecursive(subPath);
+    }
+    if (totalAssets < ASSET_MIN_TOTAL_FILES) {
+      err(`get-shit-done/ total files = ${totalAssets}, expected >= ${ASSET_MIN_TOTAL_FILES}`);
+    } else {
+      ok(`get-shit-done/ assets present (${totalAssets} files across ${ASSET_REQUIRED_SUBDIRS.length} subdirs)`);
+    }
   }
 
   // ---- VERSION format ----

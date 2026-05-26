@@ -109,10 +109,11 @@ export interface GsdPluginManifest {
 }
 
 export interface GsdConflict {
-  /** Bare name (no `.md` suffix, no `kind:` prefix). e.g. "gsd-debugger". */
+  /** Bare name (no `.md` suffix, no `kind:` prefix). e.g. "gsd-debugger".
+   *  For `asset` kind, the relative path within ~/.claude/get-shit-done/. */
   agentName: string;
-  /** Which mirror produced this conflict — agent or command. */
-  kind?: 'agent' | 'command';
+  /** Which mirror produced this conflict. */
+  kind?: 'agent' | 'command' | 'asset';
   reason: 'hash-mismatch';
   targetPath: string;
 }

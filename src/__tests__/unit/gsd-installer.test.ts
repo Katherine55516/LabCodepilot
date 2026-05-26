@@ -47,6 +47,7 @@ function buildPaths(homeRoot: string): InstallerPaths {
     ),
     agentsMirrorPath: path.join(homeRoot, '.claude', 'agents'),
     commandsMirrorPath: path.join(homeRoot, '.claude', 'commands'),
+    assetsMirrorPath: path.join(homeRoot, '.claude', 'get-shit-done'),
   };
 }
 
@@ -176,6 +177,59 @@ describe('gsd-installer / first install', () => {
       .readdirSync(paths.commandsMirrorPath)
       .filter((n) => n.endsWith('.md'));
     assert.equal(restored.length, 67, 'mirror should be restored despite no-op sync');
+  });
+
+  it('mirrors get-shit-done/ assets recursively to ~/.claude/get-shit-done/', () => {
+    install({ paths });
+
+    function countFilesRec(dir: string, ext?: string): number {
+      let total = 0;
+      for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
+        const child = path.join(dir, ent.name);
+        if (ent.isDirectory()) total += countFilesRec(child, ext);
+        else if (ent.isFile() && (!ext || ent.name.endsWith(ext))) total += 1;
+      }
+      return total;
+    }
+
+    // Each subtree must contain at least N .md files (recursive). The
+    // workflows/ tree has nested subdirs (discuss-phase/, execute-phase/,
+    // help/) bringing it above the top-level count.
+    const expected: Array<[string, number]> = [
+      ['workflows', 100],
+      ['references', 60],
+      ['templates', 40],
+      ['contexts', 3],
+    ];
+    for (const [sub, atLeast] of expected) {
+      const dir = path.join(paths.assetsMirrorPath, sub);
+      assert.ok(fs.existsSync(dir), `${sub}/ should exist`);
+      const found = countFilesRec(dir, '.md');
+      assert.ok(
+        found >= atLeast,
+        `${sub}/ should have at least ${atLeast} .md files (got ${found})`,
+      );
+    }
+
+    // bin/ contains non-.md files (.cjs scripts + lib/ subdirectory) —
+    // verify the recursive copy preserves nested structure and writes
+    // non-md files too.
+    const binDir = path.join(paths.assetsMirrorPath, 'bin');
+    assert.ok(fs.existsSync(binDir));
+    assert.ok(fs.existsSync(path.join(binDir, 'lib')), 'bin/lib/ subdir preserved');
+    const cjs = countFilesRec(binDir, '.cjs');
+    assert.ok(cjs > 0, 'bin/ should contain .cjs scripts');
+  });
+
+  it('backfills missing assets mirror even when version is up-to-date', () => {
+    install({ paths });
+    fs.rmSync(paths.assetsMirrorPath, { recursive: true, force: true });
+    const status = install({ paths });
+    assert.equal(status.needsSync, false, 'precondition: version matches');
+    assert.ok(
+      fs.existsSync(path.join(paths.assetsMirrorPath, 'workflows', 'add-tests.md')),
+      'workflows file should be restored',
+    );
   });
 });
 
@@ -347,6 +401,23 @@ describe('gsd-installer / uninstall', () => {
       '# USER EDITED AFTER INSTALL',
       'content untouched',
     );
+  });
+
+  it('removes mirrored assets that still match bundle hash', () => {
+    install({ paths });
+    const wf = path.join(paths.assetsMirrorPath, 'workflows', 'add-tests.md');
+    assert.ok(fs.existsSync(wf));
+    uninstall({ paths });
+    assert.ok(!fs.existsSync(wf), 'unmodified workflow should be removed');
+  });
+
+  it('preserves user-modified mirrored assets on uninstall', () => {
+    install({ paths });
+    const wf = path.join(paths.assetsMirrorPath, 'workflows', 'add-tests.md');
+    fs.writeFileSync(wf, '# MY OWN VERSION', 'utf-8');
+    uninstall({ paths });
+    assert.ok(fs.existsSync(wf), 'user-modified asset survives');
+    assert.equal(fs.readFileSync(wf, 'utf-8'), '# MY OWN VERSION');
   });
 
   it('preserves user-modified mirrored agents on uninstall', () => {

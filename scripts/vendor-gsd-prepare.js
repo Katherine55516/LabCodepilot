@@ -33,10 +33,14 @@ const REPO_ROOT = path.resolve(__dirname, "..");
 const SOURCE_DIR = path.join(REPO_ROOT, "vendor", "gsd-source");
 const BUNDLE_DIR = path.join(REPO_ROOT, "vendor", "gsd-bundle");
 
-// v2 (2026-05-26): plugin.json now carries `builtIn: true`, required by
-// /api/skills to bypass the SDK whitelist filter and surface /gsd-*
-// commands in the popover. Bump triggers re-sync on existing installs.
-const TRANSFORM_VERSION = 2;
+// v3 (2026-05-26): bundle now includes the entire get-shit-done/ subtree
+// (workflows/ references/ templates/ bin/ contexts/, ~225 .md + scripts)
+// that GSD commands @-import via `@~/.claude/get-shit-done/...`. Without
+// these files, 57/67 commands fail to locate referenced workflow/template
+// content at runtime — agent goes fishing and either falls back to global
+// search or just gives up. Bump forces re-sync so existing installs pick
+// up the assets.
+const TRANSFORM_VERSION = 3;
 
 const GSD_COLON_RE = /\bgsd:([a-z][a-z0-9-]*)\b/g;
 
@@ -103,6 +107,52 @@ function listMdFiles(dir) {
     .sort();
 }
 
+/**
+ * Recursively copy a tree from src to dst. For each .md file we run the
+ * gsd: -> gsd- transform; non-md files are copied byte-for-byte (these
+ * are mostly the .cjs/.js scripts in get-shit-done/bin/lib/). Returns
+ * a flat list of {relPath, replacements, sha1} entries for the report.
+ */
+function copyTreeWithTransform(srcRoot, dstRoot) {
+  const stats = [];
+
+  function walk(relDir) {
+    const absSrc = path.join(srcRoot, relDir);
+    const absDst = path.join(dstRoot, relDir);
+    fs.mkdirSync(absDst, { recursive: true });
+    for (const ent of fs.readdirSync(absSrc, { withFileTypes: true })) {
+      const childRel = path.posix.join(relDir.replace(/\\/g, "/"), ent.name);
+      if (ent.isDirectory()) {
+        walk(childRel);
+        continue;
+      }
+      if (!ent.isFile()) continue;
+      const srcFile = path.join(srcRoot, childRel);
+      const dstFile = path.join(dstRoot, childRel);
+      if (ent.name.endsWith(".md")) {
+        const raw = fs.readFileSync(srcFile, "utf-8");
+        const { content, replacements } = transformContent(raw);
+        fs.writeFileSync(dstFile, content, "utf-8");
+        stats.push({
+          relPath: childRel,
+          replacements,
+          sha1: sha1(content),
+        });
+      } else {
+        fs.copyFileSync(srcFile, dstFile);
+        stats.push({
+          relPath: childRel,
+          replacements: 0,
+          sha1: sha1(fs.readFileSync(srcFile)),
+        });
+      }
+    }
+  }
+
+  walk("");
+  return stats;
+}
+
 function main() {
   console.log(`[vendor-gsd] source: ${SOURCE_DIR}`);
   console.log(`[vendor-gsd] bundle: ${BUNDLE_DIR}`);
@@ -115,10 +165,20 @@ function main() {
   const commandsSrc = path.join(SOURCE_DIR, "commands", "gsd");
   const agentsSrc = path.join(SOURCE_DIR, "agents");
   const licenseSrc = path.join(SOURCE_DIR, "LICENSE");
+  // get-shit-done/ holds workflows/ references/ templates/ bin/ contexts/ —
+  // the runtime resources commands @-import via ~/.claude/get-shit-done/...
+  const assetsSrc = path.join(SOURCE_DIR, "get-shit-done");
 
   if (!fs.existsSync(commandsSrc) || !fs.existsSync(agentsSrc) || !fs.existsSync(licenseSrc)) {
     console.error(
       "[vendor-gsd] missing required source files. Expected commands/gsd, agents, LICENSE under vendor/gsd-source/.",
+    );
+    process.exit(1);
+  }
+  if (!fs.existsSync(assetsSrc)) {
+    console.error(
+      "[vendor-gsd] missing get-shit-done/ assets directory under vendor/gsd-source/. " +
+      "Re-fetch the upstream repo and copy its get-shit-done/ subtree in.",
     );
     process.exit(1);
   }
@@ -135,7 +195,8 @@ function main() {
     sourceCommit,
     commands: [],
     agents: [],
-    totals: { commandFiles: 0, agentFiles: 0, totalReplacements: 0 },
+    assets: [],
+    totals: { commandFiles: 0, agentFiles: 0, assetFiles: 0, totalReplacements: 0 },
   };
 
   // ---- commands ----
@@ -223,6 +284,25 @@ function main() {
     )} gsd: replacements`,
   );
 
+  // ---- get-shit-done/ assets (workflows + references + templates + bin + contexts) ----
+  const assetStats = copyTreeWithTransform(
+    assetsSrc,
+    path.join(BUNDLE_DIR, "get-shit-done"),
+  );
+  report.assets = assetStats;
+  report.totals.assetFiles = assetStats.length;
+  report.totals.totalReplacements += assetStats.reduce(
+    (s, a) => s + a.replacements,
+    0,
+  );
+  const assetReplacements = assetStats.reduce(
+    (s, a) => s + a.replacements,
+    0,
+  );
+  console.log(
+    `[vendor-gsd] get-shit-done assets: ${assetStats.length} files, ${assetReplacements} gsd: replacements`,
+  );
+
   // ---- LICENSE ----
   fs.copyFileSync(licenseSrc, path.join(BUNDLE_DIR, "LICENSE"));
 
@@ -247,6 +327,7 @@ function main() {
     licenseFile: "LICENSE",
     commandCount: commandFiles.length,
     agentCount: agentFiles.length,
+    assetFileCount: assetStats.length,
     commandPrefix: "gsd-",
     bundledAt: new Date().toISOString().slice(0, 10), // date only; keep deterministic-ish across same day
   };
