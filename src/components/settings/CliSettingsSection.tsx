@@ -123,45 +123,36 @@ export function CliSettingsSection() {
         const appSettings = appData.settings || {};
         // cli_enabled defaults to true (backward compat)
         setCliEnabled(appSettings.cli_enabled !== "false");
-        // agent_runtime is now a two-value switch: 'claude-code-sdk' | 'native'.
-        // Pre-0.50.3 default was 'auto'; migrate legacy rows in-place to the
-        // runtime that matches the current environment. Saved back so the UI
-        // and backend stay aligned.
+        // Engine selector hidden — UI forces agentRuntime to 'claude-code-sdk'
+        // (the useState default). The legacy migration / persistence branch
+        // is preserved below behind a comment so it can be restored when the
+        // 执行引擎 selector is brought back. Restore by uncommenting.
         //
-        // We deliberately do NOT use the useClaudeStatus() hook value here —
-        // it's null on first render and only populates asynchronously. Using
-        // it would silently migrate CLI-installed users to 'native'. Instead
-        // we do a direct /api/claude-status fetch gated on the migration
-        // branch, and if that fetch itself fails we bail out of persistence
-        // entirely (keep the legacy 'auto' in the DB for a future retry,
-        // since the backend's resolveRuntime still tolerates it).
-        const saved = appSettings.agent_runtime;
-        if (!isConcreteRuntime(saved)) {
-          let cliConnected: boolean | null = null;
-          try {
-            const statusRes = await fetch('/api/claude-status');
-            if (statusRes.ok) {
-              const s = await statusRes.json();
-              cliConnected = !!s?.connected;
-            }
-          } catch { /* ignore — cliConnected stays null */ }
-
-          if (cliConnected !== null) {
-            const migrated = resolveLegacyRuntimeForDisplay(saved, cliConnected);
-            setAgentRuntime(migrated);
-            fetch('/api/settings/app', {
-              method: 'PUT',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ settings: { agent_runtime: migrated } }),
-            }).catch(() => { /* ignore */ });
-          } else {
-            // CLI status indeterminate — show a neutral default in the UI but
-            // don't persist. Next fetchSettings() can migrate correctly.
-            setAgentRuntime('claude-code-sdk');
-          }
-        } else {
-          setAgentRuntime(saved);
-        }
+        // const saved = appSettings.agent_runtime;
+        // if (!isConcreteRuntime(saved)) {
+        //   let cliConnected: boolean | null = null;
+        //   try {
+        //     const statusRes = await fetch('/api/claude-status');
+        //     if (statusRes.ok) {
+        //       const s = await statusRes.json();
+        //       cliConnected = !!s?.connected;
+        //     }
+        //   } catch { /* ignore — cliConnected stays null */ }
+        //
+        //   if (cliConnected !== null) {
+        //     const migrated = resolveLegacyRuntimeForDisplay(saved, cliConnected);
+        //     setAgentRuntime(migrated);
+        //     fetch('/api/settings/app', {
+        //       method: 'PUT',
+        //       headers: { 'Content-Type': 'application/json' },
+        //       body: JSON.stringify({ settings: { agent_runtime: migrated } }),
+        //     }).catch(() => { /* ignore */ });
+        //   } else {
+        //     setAgentRuntime('claude-code-sdk');
+        //   }
+        // } else {
+        //   setAgentRuntime(saved);
+        // }
       }
 
       if (optRes.ok) {
@@ -333,11 +324,17 @@ export function CliSettingsSection() {
     <div className="max-w-3xl space-y-6">
 
       {/* ════════ Card 1: Agent 内核 选择 ════════ */}
+      {/* "Agent 内核" header + 执行引擎选择器 hidden — agentRuntime state /
+          handleRuntimeChange / Select imports kept intact so backend logic
+          remains untouched and the selector can be restored by uncommenting
+          both the SettingsCard title/description and the 执行引擎 FieldRow
+          below. UI is forced to Claude Code. */}
       <SettingsCard
-        title={isZh ? 'Agent 内核' : 'Agent Engine'}
-        description={isZh ? '选择 AI 交互使用的执行引擎' : 'Choose the execution engine for AI interactions'}
+        // title={isZh ? 'Agent 内核' : 'Agent Engine'}
+        // description={isZh ? '选择 AI 交互使用的执行引擎' : 'Choose the execution engine for AI interactions'}
       >
-        <FieldRow
+        {/* 执行引擎 selector hidden — restore by uncommenting. */}
+        {/* <FieldRow
           label={isZh ? '执行引擎' : 'Engine'}
           description={isZh
             ? '选择执行 AI 任务的引擎。Claude Code 引擎已随应用一同发布；AI SDK 直接调用服务商 API，作为应急备选。'
@@ -352,11 +349,12 @@ export function CliSettingsSection() {
               <SelectItem value="native">{isZh ? 'AI SDK' : 'AI SDK'}</SelectItem>
             </SelectContent>
           </Select>
-        </FieldRow>
+        </FieldRow> */}
 
-        {/* Claude Code 状态 — 选了 Claude Code 或自动时显示 */}
+        {/* Agent 状态 — engine forced to Claude Code so this row always renders.
+            `separator` removed because this is now the first FieldRow in the card. */}
         {agentRuntime === 'claude-code-sdk' && (
-          <FieldRow label={isZh ? 'Claude Code 状态' : 'Claude Code Status'} separator>
+          <FieldRow label={isZh ? 'Agent 状态' : 'Agent Status'}>
             <div className="flex items-center gap-2">
               {connected ? (
                 <>
@@ -454,7 +452,10 @@ export function CliSettingsSection() {
       </SettingsCard>
 
       {/* ════════ Card 4: CLI 配置 ════════ */}
-      <SettingsCard title={t('cli.cliConfig')} description={t('cli.cliConfigDesc')}>
+      {/* Claude Code 配置卡片整块隐藏 — settings/JSON 读写逻辑、save/reset
+          handler、confirmSave 状态机、ImportSessionDialog 等全部保留以便
+          回滚。Restore by removing the JSX-block comment wrapper below. */}
+      {/* <SettingsCard title={t('cli.cliConfig')} description={t('cli.cliConfigDesc')}>
         <Tabs defaultValue="form">
           <TabsList className="mb-4">
             <TabsTrigger value="form" className="gap-2">
@@ -586,7 +587,7 @@ export function CliSettingsSection() {
             </div>
           </TabsContent>
         </Tabs>
-      </SettingsCard>
+      </SettingsCard> */}
 
       {/* Confirmation dialog */}
       <AlertDialog open={showConfirmDialog} onOpenChange={setShowConfirmDialog}>

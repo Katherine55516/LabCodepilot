@@ -220,7 +220,8 @@ function GsdPluginCard() {
 
       <FieldRow
         label={t("settings.gsd.agentCount")}
-        description={t("settings.gsd.agentMirrorPath")}
+        // description hidden — restore by uncommenting.
+        // description={t("settings.gsd.agentMirrorPath")}
       >
         <span className="text-xs">
           {manifest?.agentCount ?? 0}
@@ -240,7 +241,8 @@ function GsdPluginCard() {
 
       <FieldRow
         label={t("settings.gsd.license")}
-        description={t("settings.gsd.licenseDesc")}
+        // description hidden — restore by uncommenting.
+        // description={t("settings.gsd.licenseDesc")}
       >
         <span className="text-xs">{manifest?.license ?? "MIT"}</span>
       </FieldRow>
@@ -260,7 +262,9 @@ function GsdPluginCard() {
 
       {/* Footer action row */}
       <div className="flex flex-wrap items-center justify-end gap-2 border-t border-border/30 pt-4">
-        <Button
+        {/* "立即重新同步" button hidden — handleResync / busy='resync' state /
+            ArrowsClockwise import preserved. Restore by uncommenting. */}
+        {/* <Button
           variant="outline"
           size="sm"
           onClick={handleResync}
@@ -273,7 +277,7 @@ function GsdPluginCard() {
             <ArrowsClockwise size={14} />
           )}
           {t("settings.gsd.actions.resync")}
-        </Button>
+        </Button> */}
         <Button
           variant="destructive"
           size="sm"
