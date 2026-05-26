@@ -13,6 +13,45 @@ interface SkillFile {
   kind: SkillKind;
   installedSource?: "agents" | "claude";
   filePath: string;
+  /**
+   * True when this command comes from a plugin whose plugin.json has
+   * `builtIn: true` (i.e. CodePilot-bundled plugins like GSD). Bundled
+   * plugins are always considered "loaded" — the SDK whitelist does not
+   * apply because CodePilot itself put the files there.
+   */
+  builtInPlugin?: boolean;
+}
+
+/**
+ * Walk up from a plugin command's filePath to find its plugin.json and
+ * return whether the plugin is marked `builtIn: true`. Cached per call
+ * via the passed-in Map so we don't re-read the same JSON 67 times.
+ */
+function isBuiltInPlugin(
+  commandFilePath: string,
+  cache: Map<string, boolean>
+): boolean {
+  // Walk up until we find either a plugin.json or hit the filesystem root.
+  let dir = path.dirname(commandFilePath);
+  while (dir && dir !== path.dirname(dir)) {
+    if (cache.has(dir)) return cache.get(dir)!;
+    const manifestPath = path.join(dir, "plugin.json");
+    if (fs.existsSync(manifestPath)) {
+      try {
+        const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8")) as {
+          builtIn?: boolean;
+        };
+        const built = manifest.builtIn === true;
+        cache.set(dir, built);
+        return built;
+      } catch {
+        cache.set(dir, false);
+        return false;
+      }
+    }
+    dir = path.dirname(dir);
+  }
+  return false;
 }
 
 type InstalledSource = "agents" | "claude";
@@ -380,13 +419,17 @@ export async function GET(request: NextRequest) {
       // SDK capabilities not available
     }
 
-    // Annotate plugin skills with loaded status
-    const annotatedPluginSkills = pluginSkills.map(skill => ({
-      ...skill,
-      loaded: loadedPluginPaths ? loadedPluginPaths.has(
-        // The skill filePath is inside commands/ — check if any loaded plugin path is a parent
+    // Annotate plugin skills with loaded status. CodePilot-bundled plugins
+    // (plugin.json has `builtIn: true`) are always treated as loaded — the
+    // Claude Code SDK doesn't actively register them, but CodePilot itself
+    // put the files there so they are guaranteed available. Without this
+    // override, the two SDK-whitelist filters in useSlashCommands.ts strip
+    // them out and the popover shows zero /gsd-* commands.
+    const builtInCache = new Map<string, boolean>();
+    const annotatedPluginSkills = pluginSkills.map(skill => {
+      const builtIn = isBuiltInPlugin(skill.filePath, builtInCache);
+      const sdkLoaded = loadedPluginPaths ? loadedPluginPaths.has(
         (() => {
-          // Walk up from skill filePath to find plugin root
           let dir = path.dirname(skill.filePath);
           while (dir && dir !== path.dirname(dir)) {
             if (loadedPluginPaths!.has(dir)) return dir;
@@ -394,8 +437,13 @@ export async function GET(request: NextRequest) {
           }
           return '';
         })()
-      ) : false,
-    }));
+      ) : false;
+      return {
+        ...skill,
+        builtInPlugin: builtIn,
+        loaded: builtIn || sdkLoaded,
+      };
+    });
 
     const all: Array<SkillFile & { loaded?: boolean }> = [
       ...globalSkills, ...projectSkills, ...dedupedProjectSkills, ...installedSkills, ...annotatedPluginSkills,

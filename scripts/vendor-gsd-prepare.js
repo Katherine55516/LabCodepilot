@@ -33,7 +33,10 @@ const REPO_ROOT = path.resolve(__dirname, "..");
 const SOURCE_DIR = path.join(REPO_ROOT, "vendor", "gsd-source");
 const BUNDLE_DIR = path.join(REPO_ROOT, "vendor", "gsd-bundle");
 
-const TRANSFORM_VERSION = 1;
+// v2 (2026-05-26): plugin.json now carries `builtIn: true`, required by
+// /api/skills to bypass the SDK whitelist filter and surface /gsd-*
+// commands in the popover. Bump triggers re-sync on existing installs.
+const TRANSFORM_VERSION = 2;
 
 const GSD_COLON_RE = /\bgsd:([a-z][a-z0-9-]*)\b/g;
 
@@ -229,6 +232,13 @@ function main() {
     displayName: "GSD (Get-Shit-Done)",
     description:
       "Get-Shit-Done meta-prompting system by TÂCHES, vendored from gsd-build/get-shit-done (MIT).",
+    // `builtIn: true` signals to CodePilot's /api/skills scanner that this
+    // plugin is bundled inside the desktop app and its commands should be
+    // treated as loaded — i.e. surfaced in the slash-command popover even
+    // though the Claude Code SDK didn't actively load it. Without this
+    // flag, the two SDK-whitelist filters in useSlashCommands.ts strip out
+    // all 67 /gsd-* commands at runtime.
+    builtIn: true,
     source: "gsd-build/get-shit-done",
     sourceUrl: "https://github.com/gsd-build/get-shit-done",
     sourceCommit,

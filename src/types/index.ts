@@ -92,6 +92,14 @@ export interface PopoverItem {
   immediate?: boolean;
   installedSource?: 'agents' | 'claude';
   source?: 'global' | 'project' | 'plugin' | 'installed' | 'sdk';
+  /**
+   * True when this command comes from a CodePilot-bundled plugin (e.g. GSD)
+   * — `plugin.json` has `builtIn: true`. Bundled plugins exist on disk
+   * because CodePilot put them there, so they are always "loaded" regardless
+   * of what the Claude Code SDK reports. The slash-command popover must
+   * skip its two SDK-whitelist filters for these items.
+   */
+  builtInPlugin?: boolean;
   kind?: SkillKind;
   icon?: IconComponent;
   nodeType?: MentionNodeType;

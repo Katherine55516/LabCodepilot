@@ -101,16 +101,21 @@ export function useSlashCommands(opts: {
         const data = await res.json();
         const skills = data.skills || [];
         apiSkills = skills
-          .filter((s: { source?: string; loaded?: boolean }) => {
+          .filter((s: { source?: string; loaded?: boolean; builtInPlugin?: boolean }) => {
+            // CodePilot-bundled plugins (plugin.json builtIn:true) are always
+            // surfaced regardless of SDK load state — CodePilot put the
+            // files there itself.
+            if (s.builtInPlugin) return true;
             // Exclude plugin-source skills that are not loaded in the current session
             if (s.source === 'plugin' && s.loaded === false) return false;
             return true;
           })
-          .map((s: { name: string; description: string; source?: "global" | "project" | "plugin" | "installed" | "sdk"; kind?: SkillKind; installedSource?: "agents" | "claude" }) => ({
+          .map((s: { name: string; description: string; source?: "global" | "project" | "plugin" | "installed" | "sdk"; kind?: SkillKind; installedSource?: "agents" | "claude"; builtInPlugin?: boolean }) => ({
             label: s.name,
             value: `/${s.name}`,
             description: s.description || "",
             builtIn: false,
+            builtInPlugin: s.builtInPlugin,
             installedSource: s.installedSource,
             source: s.source,
             kind: s.kind || 'slash_command',
@@ -131,9 +136,12 @@ export function useSlashCommands(opts: {
         Array.isArray(rawSkills) ? rawSkills.map(s => typeof s === 'string' ? s : (s as { name?: string })?.name).filter(Boolean) as string[] : []
       );
 
-      // Only filter if SDK actually reported capabilities (non-empty arrays)
+      // Only filter if SDK actually reported capabilities (non-empty arrays).
+      // CodePilot-bundled plugin commands (builtInPlugin:true) are exempted —
+      // the SDK never registers them but they're guaranteed present on disk.
       if (sdkCommandNames.size > 0 || sdkSkillNames.size > 0) {
         apiSkills = apiSkills.filter(item => {
+          if (item.builtInPlugin) return true;
           if (item.kind === 'agent_skill') return sdkSkillNames.has(item.label);
           return sdkCommandNames.has(item.label);
         });
