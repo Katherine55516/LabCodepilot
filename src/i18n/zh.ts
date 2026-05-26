@@ -1105,6 +1105,9 @@ const zh: Record<TranslationKey, string> = {
   'composer.manageProviders': '管理服务商',
   'composer.designAgent': '设计 Agent',
   'composer.designAgentTooltip': '启用 AI 设计与图片生成',
+  'composer.placeholderDefault': '发送消息...',
+  'composer.placeholderWithBadges': '补充细节（可选），然后按回车...',
+  'composer.placeholderCliBadge': '描述你想做什么...',
 
   // ── Permission ────────────────────────────────────────────
   'permission.default': '默认权限',

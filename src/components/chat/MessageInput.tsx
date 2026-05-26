@@ -806,7 +806,13 @@ export function MessageInput({
             <FileAttachmentsCapsules />
             <PromptInputTextarea
               ref={textareaRef}
-              placeholder={badges.length > 0 ? "Add details (optional), then press Enter..." : cliBadge ? "Describe what you want to do..." : "Message Claude..."}
+              placeholder={
+                badges.length > 0
+                  ? t('composer.placeholderWithBadges')
+                  : cliBadge
+                  ? t('composer.placeholderCliBadge')
+                  : t('composer.placeholderDefault')
+              }
               value={inputValue}
               onChange={(e) => slashCommands.handleInputChange(e.currentTarget.value)}
               onKeyDown={handleKeyDown}

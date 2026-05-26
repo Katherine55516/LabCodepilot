@@ -1108,6 +1108,9 @@ const en = {
   'composer.manageProviders': 'Manage providers',
   'composer.designAgent': 'Design Agent',
   'composer.designAgentTooltip': 'Enable AI design & image generation',
+  'composer.placeholderDefault': 'Send a message...',
+  'composer.placeholderWithBadges': 'Add details (optional), then press Enter...',
+  'composer.placeholderCliBadge': 'Describe what you want to do...',
 
   // ── Permission ────────────────────────────────────────────
   'permission.default': 'Default',
