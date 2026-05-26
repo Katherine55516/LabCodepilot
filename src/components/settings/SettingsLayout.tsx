@@ -39,7 +39,10 @@ const sidebarItems: SidebarItem[] = [
   // flows) so this is UI-only. Restore by uncommenting.
   // { id: "providers", label: "Providers", icon: Plug },
   { id: "cli", label: "Claude CLI", icon: Code },
-  { id: "usage", label: "Usage", icon: ChartBar },
+  // Usage tab hidden — UsageStatsSection render branch, Section type entry,
+  // i18n key, and #usage hash bridge stay live so deep links still resolve.
+  // Restore by uncommenting.
+  // { id: "usage", label: "Usage", icon: ChartBar },
   // Hidden from settings sidebar — assistant section + AssistantWorkspaceSection
   // logic still in the codebase. Restore by uncommenting.
   // { id: "assistant", label: "Assistant", icon: UserCircle },

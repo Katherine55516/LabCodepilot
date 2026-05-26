@@ -265,7 +265,11 @@ export function UnifiedTopBar() {
                 <TooltipContent side="bottom">{t('topBar.taskList')}</TooltipContent>
               </Tooltip>
 
-              <Tooltip>
+              {/* Dashboard toggle button hidden — dashboardPanelOpen state,
+                  DashboardPanel render, ChartBar icon import, and i18n key
+                  stay live so panel still toggles via API / shortcuts.
+                  Restore by uncommenting. */}
+              {/* <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
                     variant={dashboardPanelOpen ? "secondary" : "ghost"}
@@ -285,7 +289,7 @@ export function UnifiedTopBar() {
                 <TooltipContent side="bottom">
                   {isAssistantWorkspace ? 'Assistant' : t('topBar.dashboard')}
                 </TooltipContent>
-              </Tooltip>
+              </Tooltip> */}
             </>
           )}
           {isWindows && <div style={{ width: 138 }} className="shrink-0" />}
