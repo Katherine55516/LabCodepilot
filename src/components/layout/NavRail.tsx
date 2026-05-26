@@ -43,8 +43,7 @@ const navItems = [
   // { href: "/cli-tools", label: "CLI Tools", icon: Terminal },
   // Hidden from sidebar — route + gallery subsystem still active. Restore by uncommenting.
   // { href: "/gallery", label: "Gallery", icon: Image },
-  // Hidden from sidebar — route + bridge subsystem still active. Restore by uncommenting.
-  // { href: "/bridge", label: "Bridge", icon: WifiHigh },
+  { href: "/bridge", label: "Bridge", icon: WifiHigh },
 ] as const;
 
 export function NavRail({ onToggleChatList, hasUpdate, readyToInstall, skipPermissionsActive }: NavRailProps) {

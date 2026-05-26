@@ -15,7 +15,6 @@ import {
   Image,
   WifiHigh,
   Gear,
-  type Icon,
 } from "@/components/ui/icon";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -423,9 +422,7 @@ export function ChatListPanel({ open, width, hasUpdate, readyToInstall }: ChatLi
 
   if (!open) return null;
 
-  // Type annotation needed because the array is currently empty (every entry
-  // commented out). When restoring any entry, drop the annotation if you like.
-  const navItems: Array<{ href: string; label: string; icon: Icon }> = [
+  const navItems = [
     // Skills / MCP / CLI Tools moved into Settings sub-sections — routes
     // still resolve, just no top-level entries here. Restore by uncommenting.
     // { href: "/skills", label: t('nav.skills' as TranslationKey), icon: Lightning },
@@ -433,8 +430,7 @@ export function ChatListPanel({ open, width, hasUpdate, readyToInstall }: ChatLi
     // { href: "/cli-tools", label: t('nav.cliTools' as TranslationKey), icon: Terminal },
     // Hidden from sidebar — route + gallery subsystem still active. Restore by uncommenting.
     // { href: "/gallery", label: t('nav.gallery' as TranslationKey), icon: Image },
-    // Hidden from sidebar — route + bridge subsystem still active. Restore by uncommenting.
-    // { href: "/bridge", label: t('nav.bridge' as TranslationKey), icon: WifiHigh },
+    { href: "/bridge", label: t('nav.bridge' as TranslationKey), icon: WifiHigh },
   ];
 
   return (
