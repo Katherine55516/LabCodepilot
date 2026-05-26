@@ -109,7 +109,10 @@ export interface GsdPluginManifest {
 }
 
 export interface GsdConflict {
+  /** Bare name (no `.md` suffix, no `kind:` prefix). e.g. "gsd-debugger". */
   agentName: string;
+  /** Which mirror produced this conflict — agent or command. */
+  kind?: 'agent' | 'command';
   reason: 'hash-mismatch';
   targetPath: string;
 }

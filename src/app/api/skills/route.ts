@@ -69,6 +69,22 @@ function getProjectSkillsDir(cwd?: string): string {
   return path.join(cwd || process.cwd(), ".claude", "skills");
 }
 
+/**
+ * Returns true if the plugin at `pluginRoot` has `builtIn: true` in its
+ * plugin.json. Bundled plugins (e.g. GSD) mirror their commands into
+ * `~/.claude/commands/` so the Claude Agent SDK can actually execute
+ * them; we must skip the plugin-dir copy here or the popover shows each
+ * /gsd-* twice (once from global, once from plugin).
+ */
+function isPluginBuiltIn(pluginRoot: string): boolean {
+  try {
+    const raw = fs.readFileSync(path.join(pluginRoot, "plugin.json"), "utf-8");
+    return (JSON.parse(raw) as { builtIn?: boolean }).builtIn === true;
+  } catch {
+    return false;
+  }
+}
+
 function getPluginCommandsDirs(): string[] {
   const dirs: string[] = [];
   const pluginsRoot = path.join(os.homedir(), ".claude", "plugins");
@@ -83,7 +99,9 @@ function getPluginCommandsDirs(): string[] {
         if (!fs.existsSync(pluginsDir)) continue;
         const plugins = fs.readdirSync(pluginsDir);
         for (const plugin of plugins) {
-          const commandsDir = path.join(pluginsDir, plugin, "commands");
+          const pluginRoot = path.join(pluginsDir, plugin);
+          if (isPluginBuiltIn(pluginRoot)) continue;
+          const commandsDir = path.join(pluginRoot, "commands");
           if (fs.existsSync(commandsDir)) {
             dirs.push(commandsDir);
           }
@@ -100,7 +118,9 @@ function getPluginCommandsDirs(): string[] {
     try {
       const externals = fs.readdirSync(externalDir);
       for (const plugin of externals) {
-        const commandsDir = path.join(externalDir, plugin, "commands");
+        const pluginRoot = path.join(externalDir, plugin);
+        if (isPluginBuiltIn(pluginRoot)) continue;
+        const commandsDir = path.join(pluginRoot, "commands");
         if (fs.existsSync(commandsDir)) {
           dirs.push(commandsDir);
         }

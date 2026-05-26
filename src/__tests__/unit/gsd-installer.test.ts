@@ -46,6 +46,7 @@ function buildPaths(homeRoot: string): InstallerPaths {
       'codepilot-gsd-vendor',
     ),
     agentsMirrorPath: path.join(homeRoot, '.claude', 'agents'),
+    commandsMirrorPath: path.join(homeRoot, '.claude', 'commands'),
   };
 }
 
@@ -146,6 +147,35 @@ describe('gsd-installer / first install', () => {
       .filter((n) => n.endsWith('.md'));
     assert.equal(mirrored.length, 33);
     assert.ok(mirrored.includes('gsd-debugger.md'));
+  });
+
+  // Without this mirror, /gsd-* commands show in the popover but the SDK
+  // doesn't know what they are at execution time — chat just no-ops.
+  it('mirrors commands to ~/.claude/commands/ so the SDK can execute them', () => {
+    install({ paths });
+    const mirrored = fs
+      .readdirSync(paths.commandsMirrorPath)
+      .filter((n) => n.endsWith('.md'));
+    assert.equal(mirrored.length, 67);
+    assert.ok(mirrored.includes('gsd-debug.md'));
+    assert.ok(mirrored.includes('gsd-new-project.md'));
+  });
+
+  // Edge case: when an existing v1/v2 install ships without the commands
+  // mirror feature, the next launch (version still matches) must still
+  // backfill the missing files. Otherwise upgrades silently leave users
+  // broken.
+  it('backfills missing command mirror even when version is up-to-date', () => {
+    install({ paths });
+    // Simulate: user deleted the mirror directory manually
+    fs.rmSync(paths.commandsMirrorPath, { recursive: true, force: true });
+    // And the version stamps already match → status.needsSync would be false
+    const status = install({ paths });
+    assert.equal(status.needsSync, false, 'precondition: version matches');
+    const restored = fs
+      .readdirSync(paths.commandsMirrorPath)
+      .filter((n) => n.endsWith('.md'));
+    assert.equal(restored.length, 67, 'mirror should be restored despite no-op sync');
   });
 });
 
@@ -296,6 +326,27 @@ describe('gsd-installer / uninstall', () => {
     assert.ok(fs.existsSync(dst));
     uninstall({ paths });
     assert.ok(!fs.existsSync(dst), 'unmodified mirrored agent should be removed');
+  });
+
+  it('removes mirrored commands that still match bundle hash', () => {
+    install({ paths });
+    const dst = path.join(paths.commandsMirrorPath, 'gsd-debug.md');
+    assert.ok(fs.existsSync(dst));
+    uninstall({ paths });
+    assert.ok(!fs.existsSync(dst), 'unmodified mirrored command should be removed');
+  });
+
+  it('preserves user-modified mirrored commands on uninstall', () => {
+    install({ paths });
+    const dst = path.join(paths.commandsMirrorPath, 'gsd-debug.md');
+    fs.writeFileSync(dst, '# USER EDITED AFTER INSTALL', 'utf-8');
+    uninstall({ paths });
+    assert.ok(fs.existsSync(dst), 'user-modified mirror should remain');
+    assert.equal(
+      fs.readFileSync(dst, 'utf-8'),
+      '# USER EDITED AFTER INSTALL',
+      'content untouched',
+    );
   });
 
   it('preserves user-modified mirrored agents on uninstall', () => {

@@ -53,7 +53,10 @@ export interface PluginManifest {
 }
 
 export interface GsdConflict {
+  /** Bare name (no `.md` suffix). e.g. "gsd-debugger" / "gsd-debug". */
   agentName: string;
+  /** Which mirror produced this conflict — agent or command. */
+  kind?: "agent" | "command";
   reason: "hash-mismatch";
   targetPath: string;
 }
@@ -72,9 +75,10 @@ export interface GsdInstallStatus {
 }
 
 export interface InstallerPaths {
-  bundleDir: string;        // source bundle (resources or dev vendor/)
-  installPath: string;      // ~/.claude/plugins/external_plugins/codepilot-gsd-vendor/
-  agentsMirrorPath: string; // ~/.claude/agents/
+  bundleDir: string;          // source bundle (resources or dev vendor/)
+  installPath: string;        // ~/.claude/plugins/external_plugins/codepilot-gsd-vendor/
+  agentsMirrorPath: string;   // ~/.claude/agents/
+  commandsMirrorPath: string; // ~/.claude/commands/
 }
 
 // ────────────────────────── path resolution ──────────────────────────
@@ -93,6 +97,17 @@ export function getInstallPath(homedir: string = os.homedir()): string {
 
 export function getAgentsMirrorPath(homedir: string = os.homedir()): string {
   return path.join(homedir, ".claude", "agents");
+}
+
+/**
+ * `~/.claude/commands/` is the canonical location Claude Code (and the
+ * Claude Agent SDK init scan) reads global slash commands from. Bundled
+ * plugin commands MUST be mirrored here — otherwise `/gsd-debug` shows
+ * up in CodePilot's popover but the SDK has no idea what to do with it
+ * and the request returns instantly with no work performed.
+ */
+export function getCommandsMirrorPath(homedir: string = os.homedir()): string {
+  return path.join(homedir, ".claude", "commands");
 }
 
 /**
@@ -120,6 +135,7 @@ export function defaultPaths(homedir: string = os.homedir()): InstallerPaths {
     bundleDir: getBundleDir(),
     installPath: getInstallPath(homedir),
     agentsMirrorPath: getAgentsMirrorPath(homedir),
+    commandsMirrorPath: getCommandsMirrorPath(homedir),
   };
 }
 
@@ -296,16 +312,52 @@ function mirrorAgents(
   bundleDir: string,
   agentsMirrorPath: string,
 ): GsdConflict[] {
+  return mirrorDir(
+    path.join(bundleDir, "agents"),
+    agentsMirrorPath,
+    "agent",
+  );
+}
+
+/**
+ * Mirror bundle commands/*.md to `~/.claude/commands/`. Returns list of
+ * conflicts (user-modified files left untouched). This is the step that
+ * actually makes `/gsd-debug` etc. work end-to-end: Claude Code's
+ * built-in slash-command scanner reads from `~/.claude/commands/`, so
+ * unless the files live there, the SDK has no command body to inject
+ * when the user sends the slash command — the message just no-ops.
+ */
+function mirrorCommands(
+  bundleDir: string,
+  commandsMirrorPath: string,
+): GsdConflict[] {
+  return mirrorDir(
+    path.join(bundleDir, "commands"),
+    commandsMirrorPath,
+    "command",
+  );
+}
+
+/**
+ * Generic hash-aware file mirror. Used by both mirrorAgents and
+ * mirrorCommands so the conflict policy stays identical: new file →
+ * write; identical hash → skip; different hash → record conflict and
+ * leave the user's file alone.
+ */
+function mirrorDir(
+  srcDir: string,
+  dstDir: string,
+  kind: "agent" | "command",
+): GsdConflict[] {
   const conflicts: GsdConflict[] = [];
-  const srcAgents = path.join(bundleDir, "agents");
-  if (!fs.existsSync(srcAgents)) return conflicts;
+  if (!fs.existsSync(srcDir)) return conflicts;
 
-  fs.mkdirSync(agentsMirrorPath, { recursive: true });
+  fs.mkdirSync(dstDir, { recursive: true });
 
-  for (const name of fs.readdirSync(srcAgents)) {
+  for (const name of fs.readdirSync(srcDir)) {
     if (!name.endsWith(".md")) continue;
-    const srcFile = path.join(srcAgents, name);
-    const dstFile = path.join(agentsMirrorPath, name);
+    const srcFile = path.join(srcDir, name);
+    const dstFile = path.join(dstDir, name);
 
     const srcBuf = fs.readFileSync(srcFile);
 
@@ -313,15 +365,13 @@ function mirrorAgents(
       fs.writeFileSync(dstFile, srcBuf);
       continue;
     }
-    // Hash compare
     const dstBuf = fs.readFileSync(dstFile);
     if (sha1Buffer(srcBuf) === sha1Buffer(dstBuf)) {
-      // identical — nothing to do
       continue;
     }
-    // Different — user-modified or another GSD install. Skip + record.
     conflicts.push({
       agentName: name.replace(/\.md$/, ""),
+      kind,
       reason: "hash-mismatch",
       targetPath: dstFile,
     });
@@ -355,22 +405,30 @@ export function install(opts: InstallOptions = {}): GsdInstallStatus {
     return { ...status, lastError: msg };
   }
 
-  if (!opts.force && !status.needsSync) {
-    log(
-      `[gsd-installer] up-to-date (version=${status.installedVersion}), skipping`,
-    );
-    return status;
-  }
-
   try {
+    // Mirrors are idempotent (hash-compare per file), so run them every
+    // launch — not just on version drift. This recovers from: 1) builds
+    // installed before the commands-mirror feature shipped, 2) users who
+    // manually deleted a mirror file. Cost is ~100 hashes/launch, < 50ms.
+    const conflicts: GsdConflict[] = [];
+    conflicts.push(...mirrorAgents(paths.bundleDir, paths.agentsMirrorPath));
+    conflicts.push(...mirrorCommands(paths.bundleDir, paths.commandsMirrorPath));
+
+    if (!opts.force && !status.needsSync) {
+      writeConflictsLog(paths.installPath, conflicts);
+      log(
+        `[gsd-installer] up-to-date (version=${status.installedVersion}); mirrors re-checked (conflicts: ${conflicts.length})`,
+      );
+      return getStatus(paths);
+    }
+
     log(
       `[gsd-installer] syncing: ${status.installedVersion ?? "<none>"} -> ${status.bundledVersion}`,
     );
     syncPluginDir(paths.bundleDir, paths.installPath);
-    const conflicts = mirrorAgents(paths.bundleDir, paths.agentsMirrorPath);
     writeConflictsLog(paths.installPath, conflicts);
     log(
-      `[gsd-installer] sync done. agent mirror conflicts: ${conflicts.length}`,
+      `[gsd-installer] sync done. mirror conflicts: ${conflicts.length}`,
     );
     return getStatus(paths);
   } catch (err) {
@@ -432,29 +490,42 @@ export function uninstall(opts: InstallOptions = {}): GsdInstallStatus {
   const log = opts.log ?? (() => {});
   try {
     rmrf(paths.installPath);
-    // Also remove mirrored agents *that match our bundle exactly*. User-edited
+    // Also remove mirrored files *that match our bundle exactly*. User-edited
     // ones are left alone (same hash policy as install).
-    const srcAgents = path.join(paths.bundleDir, "agents");
-    if (fs.existsSync(srcAgents) && fs.existsSync(paths.agentsMirrorPath)) {
-      for (const name of fs.readdirSync(srcAgents)) {
-        if (!name.endsWith(".md")) continue;
-        const srcFile = path.join(srcAgents, name);
-        const dstFile = path.join(paths.agentsMirrorPath, name);
-        if (!fs.existsSync(dstFile)) continue;
-        try {
-          if (sha1File(srcFile) === sha1File(dstFile)) {
-            fs.unlinkSync(dstFile);
-          }
-        } catch {
-          // ignore per-file errors
-        }
-      }
-    }
+    cleanupMirror(
+      path.join(paths.bundleDir, "agents"),
+      paths.agentsMirrorPath,
+    );
+    cleanupMirror(
+      path.join(paths.bundleDir, "commands"),
+      paths.commandsMirrorPath,
+    );
     log("[gsd-installer] uninstalled");
   } catch (err) {
     log(`[gsd-installer] uninstall FAILED: ${(err as Error).message}`);
   }
   return getStatus(paths);
+}
+
+/**
+ * Remove mirror files that still match the bundle exactly. User changes
+ * are preserved — same conservative policy as install/mirror.
+ */
+function cleanupMirror(srcDir: string, dstDir: string): void {
+  if (!fs.existsSync(srcDir) || !fs.existsSync(dstDir)) return;
+  for (const name of fs.readdirSync(srcDir)) {
+    if (!name.endsWith(".md")) continue;
+    const srcFile = path.join(srcDir, name);
+    const dstFile = path.join(dstDir, name);
+    if (!fs.existsSync(dstFile)) continue;
+    try {
+      if (sha1File(srcFile) === sha1File(dstFile)) {
+        fs.unlinkSync(dstFile);
+      }
+    } catch {
+      // ignore per-file errors
+    }
+  }
 }
 
 // ────────────────────────── IPC ──────────────────────────
