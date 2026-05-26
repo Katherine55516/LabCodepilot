@@ -5,9 +5,25 @@ import path from 'path';
 import os from 'os';
 import type { FileTreeNode, FilePreview } from '@/types';
 
+// User-requested whitelist for directories starting with `.` — these
+// bypass BOTH the "skip hidden" filter in scanDirectoryRecursive AND the
+// IGNORED_DIRS check below, so they appear and recurse normally in the
+// file tree. `.planning` is a user working dir; `.git` lets users browse
+// git internals (note: large repos can take time to expand on click since
+// objects/ may contain tens of thousands of files).
+//
+// IMPORTANT: This is display-only. `.git` is still in BLOCKED_SEGMENTS
+// (write-protection) so users cannot mkdir/write/delete/rename inside it
+// through the file API — the git repo state is safe.
+const ALLOWED_HIDDEN_DIRS = new Set([
+  '.planning',
+  '.git',
+]);
+
 const IGNORED_DIRS = new Set([
   'node_modules',
-  '.git',
+  // '.git' removed — surfaced via ALLOWED_HIDDEN_DIRS above. Restore
+  // this line if you want .git hidden from the file tree again.
   'dist',
   '.next',
   '__pycache__',
@@ -123,8 +139,13 @@ async function scanDirectoryRecursive(dir: string, depth: number): Promise<FileT
   });
 
   for (const entry of sorted) {
-    // Skip hidden files/dirs (except common config files)
-    if (entry.name.startsWith('.') && !entry.name.startsWith('.env')) {
+    // Skip hidden files/dirs (except .env* and the ALLOWED_HIDDEN_DIRS
+    // whitelist defined at the top of this file).
+    if (
+      entry.name.startsWith('.') &&
+      !entry.name.startsWith('.env') &&
+      !ALLOWED_HIDDEN_DIRS.has(entry.name)
+    ) {
       continue;
     }
 
