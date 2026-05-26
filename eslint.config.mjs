@@ -19,6 +19,7 @@ const eslintConfig = defineConfig([
     "apps/site/.source/**",
     // External reference materials / vendored packages (not part of the main codebase)
     "资料/**",
+    "vendor/**",
   ]),
 
   // ── Governance rules for business components ──
