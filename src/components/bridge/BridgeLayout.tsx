@@ -44,8 +44,29 @@ function subscribeToHash(callback: () => void) {
   return () => window.removeEventListener("hashchange", callback);
 }
 
-export function BridgeLayout() {
-  const hashSection = useSyncExternalStore(subscribeToHash, getSectionFromHash, () => "bridge" as Section);
+interface BridgeLayoutProps {
+  /**
+   * Embedded mode — used when BridgeLayout is rendered inside another
+   * container (e.g. SettingsLayout). In embedded mode:
+   *   - URL hash is NOT read or written (host owns the URL)
+   *   - Sub-channel selection uses pure useState
+   *   - Top header (h1 + description) is suppressed (host renders its own)
+   *
+   * Defaults to false to preserve standalone /bridge route behavior.
+   */
+  embedded?: boolean;
+}
+
+export function BridgeLayout({ embedded = false }: BridgeLayoutProps = {}) {
+  // In embedded mode, ignore the URL hash entirely (the host page owns it).
+  // useSyncExternalStore is still called to keep hook order stable, but its
+  // subscriber and snapshot become no-ops so external hash changes don't
+  // hijack the embedded panel.
+  const hashSection = useSyncExternalStore(
+    embedded ? () => () => {} : subscribeToHash,
+    embedded ? () => "bridge" as Section : getSectionFromHash,
+    () => "bridge" as Section,
+  );
   const [overrideSection, setOverrideSection] = useState<Section | null>(null);
   const activeSection = overrideSection ?? hashSection;
 
@@ -61,19 +82,28 @@ export function BridgeLayout() {
   };
 
   const handleSectionChange = useCallback((section: Section) => {
+    if (embedded) {
+      // Embedded mode: stay in pure useState; never touch the URL.
+      setOverrideSection(section);
+      return;
+    }
     setOverrideSection(section);
     window.history.replaceState(null, "", `/bridge#${section}`);
     queueMicrotask(() => setOverrideSection(null));
-  }, []);
+  }, [embedded]);
 
   return (
     <div className="flex h-full flex-col">
-      <div className="border-b border-border/50 px-6 pt-4 pb-4">
-        <h1 className="text-xl font-semibold">{t('bridge.title')}</h1>
-        <p className="text-sm text-muted-foreground">
-          {t('bridge.description')}
-        </p>
-      </div>
+      {/* Standalone-route header. Embedded mode (e.g. inside SettingsLayout)
+          suppresses this because the host already renders its own title. */}
+      {!embedded && (
+        <div className="border-b border-border/50 px-6 pt-4 pb-4">
+          <h1 className="text-xl font-semibold">{t('bridge.title')}</h1>
+          <p className="text-sm text-muted-foreground">
+            {t('bridge.description')}
+          </p>
+        </div>
+      )}
 
       <div className="flex min-h-0 flex-1">
         <nav className="flex w-52 shrink-0 flex-col gap-1 border-r border-border/50 p-3">

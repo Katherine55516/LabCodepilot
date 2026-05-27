@@ -43,7 +43,9 @@ const navItems = [
   // { href: "/cli-tools", label: "CLI Tools", icon: Terminal },
   // Hidden from sidebar — route + gallery subsystem still active. Restore by uncommenting.
   // { href: "/gallery", label: "Gallery", icon: Image },
-  { href: "/bridge", label: "Bridge", icon: WifiHigh },
+  // Bridge moved into Settings → "远程桥接" sub-section. The /bridge route
+  // still works for bookmarked URLs. Restore here by uncommenting.
+  // { href: "/bridge", label: "Bridge", icon: WifiHigh },
 ] as const;
 
 export function NavRail({ onToggleChatList, hasUpdate, readyToInstall, skipPermissionsActive }: NavRailProps) {

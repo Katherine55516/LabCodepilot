@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useSyncExternalStore } from "react";
-import { type Icon, Gear, Code, UserCircle, Plug, ChartBar, Lightning, Terminal, Sparkle } from "@/components/ui/icon";
+import { type Icon, Gear, Code, UserCircle, Plug, ChartBar, Lightning, Terminal, Sparkle, WifiHigh } from "@/components/ui/icon";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { GeneralSection } from "./GeneralSection";
@@ -18,10 +18,14 @@ import { SkillsManager } from "@/components/skills/SkillsManager";
 import { McpManager } from "@/components/plugins/McpManager";
 import { CliToolsManager } from "@/components/cli-tools/CliToolsManager";
 import { PluginsManager } from "./PluginsManager";
+// Remote Bridge — moved into Settings as a sub-section. /bridge route still
+// works for users with a bookmarked URL; embedded={true} disables BridgeLayout's
+// own hash routing so it doesn't fight with SettingsLayout's hash routing.
+import { BridgeLayout } from "@/components/bridge/BridgeLayout";
 import { useTranslation } from "@/hooks/useTranslation";
 import type { TranslationKey } from "@/i18n";
 
-type Section = "general" | "account" | "providers" | "cli" | "usage" | "assistant" | "skills" | "mcp" | "cli-tools" | "plugins";
+type Section = "general" | "account" | "providers" | "cli" | "usage" | "assistant" | "skills" | "mcp" | "cli-tools" | "bridge" | "plugins";
 
 interface SidebarItem {
   id: Section;
@@ -52,6 +56,9 @@ const sidebarItems: SidebarItem[] = [
   { id: "skills", label: "Skills", icon: Lightning },
   { id: "mcp", label: "MCP", icon: Plug },
   { id: "cli-tools", label: "CLI Tools", icon: Terminal },
+  // Remote Bridge — IM channels (Telegram / Feishu / Discord / QQ / WeChat).
+  // Standalone /bridge route still exists; this is the primary entry point.
+  { id: "bridge", label: "Bridge", icon: WifiHigh },
   // Built-in plugins panel — currently hosts vendor-bundled GSD.
   // See electron/gsd-installer.ts + docs/handover/gsd-bundle.md.
   { id: "plugins", label: "Plugins", icon: Sparkle },
@@ -96,6 +103,7 @@ export function SettingsLayout() {
     'Skills': 'nav.skills',
     'MCP': 'nav.mcp',
     'CLI Tools': 'nav.cliTools',
+    'Bridge': 'settings.bridge',
     'Plugins': 'settings.plugins.title',
   };
 
@@ -148,6 +156,7 @@ export function SettingsLayout() {
           {activeSection === "skills" && <SkillsManager />}
           {activeSection === "mcp" && <McpManager />}
           {activeSection === "cli-tools" && <CliToolsManager />}
+          {activeSection === "bridge" && <BridgeLayout embedded />}
           {activeSection === "plugins" && <PluginsManager />}
         </div>
       </div>
