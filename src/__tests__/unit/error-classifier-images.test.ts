@@ -20,9 +20,11 @@ describe('classifyError — IMAGES_NOT_SUPPORTED fast-path', () => {
       hasImages: true,
     });
     assert.equal(result.category, 'IMAGES_NOT_SUPPORTED');
-    assert.match(result.userMessage, /does not support image input/);
+    // Chinese-first wording — see error-classifier.ts fast-path comment.
+    assert.match(result.userMessage, /不支持图片输入/);
     assert.match(result.userMessage, /Qwen3.7-Max/);
-    assert.match(result.actionHint, /Remove the images/i);
+    assert.match(result.actionHint, /移除消息中的图片/);
+    assert.match(result.actionHint, /切换右下角的模型/);
     assert.equal(result.retryable, false);
     // Critical: no Open Settings button — would mislead users to Provider Doctor
     assert.deepEqual(result.recoveryActions, []);

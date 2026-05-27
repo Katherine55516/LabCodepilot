@@ -390,10 +390,16 @@ export function classifyError(ctx: ErrorContext): ClassifiedError {
       'this model does not support multimodal',
     ];
     if (IMAGE_UNSUPPORTED_KEYWORDS.some(kw => searchText.includes(kw))) {
+      // Chinese-first wording — the rest of the classifier still emits
+      // English to stay consistent with its existing 21 categories, but
+      // this newly-added branch defaults to Chinese because the product
+      // is targeted at zh-CN users. If we ever do a full i18n pass on
+      // the classifier, move this string into the i18n bundle.
+      const providerLabel = ctx.providerName ? `「${ctx.providerName}」` : '';
       return {
         category: 'IMAGES_NOT_SUPPORTED',
-        userMessage: `The current model${providerHint(ctx)} does not support image input.`,
-        actionHint: 'Remove the images from this message and resend, or switch the model in the bottom-right picker to a vision-capable one (e.g. Claude Sonnet / Opus).',
+        userMessage: `当前模型${providerLabel}不支持图片输入。`,
+        actionHint: '请移除消息中的图片后重发，或切换右下角的模型为支持视觉输入的版本（例如 Claude Sonnet / Opus）。',
         rawMessage,
         providerName: ctx.providerName,
         details: extraDetail || undefined,
