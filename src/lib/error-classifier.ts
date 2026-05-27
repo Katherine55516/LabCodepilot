@@ -78,6 +78,7 @@ export type ClaudeErrorCategory =
   | 'OPENAI_AUTH_FAILED'     // OpenAI OAuth token expired/invalid
   | 'MCP_CONNECTION_ERROR'   // MCP server connect/sync failure
   | 'EMPTY_RESPONSE'         // Model returned nothing (proxy rejection, unsupported model)
+  | 'IMAGES_NOT_SUPPORTED'   // User attached image(s) to a non-multimodal model
   | 'UNKNOWN';
 
 /** A concrete action the user can take to recover from an error */
@@ -368,6 +369,40 @@ export function classifyError(ctx: ErrorContext): ClassifiedError {
   // Combined text to search through
   const searchText = `${rawMessage}\n${stderrContent}\n${extraDetail}`.toLowerCase();
 
+  // ── Fast-path: non-multimodal model rejecting an image attachment ──
+  // Must run before the ERROR_PATTERNS loop because UNSUPPORTED_FEATURE
+  // contains `'not supported'` and MODEL_NOT_AVAILABLE contains
+  // `'does not exist'` — without this short-circuit the friendly
+  // "model doesn't support images" message would be eaten by those
+  // earlier patterns. Double-gated on `hasImages` so we never misfire
+  // when the message contains the keyword but the user didn't actually
+  // attach an image.
+  if (ctx.hasImages) {
+    const IMAGE_UNSUPPORTED_KEYWORDS = [
+      'does not support vision',
+      'does not support image',
+      'image content are not supported',
+      'image content is not supported',
+      'image_url is not supported',
+      'unsupported image',
+      'image input is not',
+      'multimodal is not supported',
+      'this model does not support multimodal',
+    ];
+    if (IMAGE_UNSUPPORTED_KEYWORDS.some(kw => searchText.includes(kw))) {
+      return {
+        category: 'IMAGES_NOT_SUPPORTED',
+        userMessage: `The current model${providerHint(ctx)} does not support image input.`,
+        actionHint: 'Remove the images from this message and resend, or switch the model in the bottom-right picker to a vision-capable one (e.g. Claude Sonnet / Opus).',
+        rawMessage,
+        providerName: ctx.providerName,
+        details: extraDetail || undefined,
+        retryable: false,
+        recoveryActions: buildRecoveryActions('IMAGES_NOT_SUPPORTED', ctx),
+      };
+    }
+  }
+
   for (const pattern of ERROR_PATTERNS) {
     // Check error code first (most specific)
     if (pattern.codes && errorCode && pattern.codes.includes(errorCode)) {
@@ -450,6 +485,11 @@ function buildRecoveryActions(category: ClaudeErrorCategory, ctx: ErrorContext):
       if (meta?.apiKeyUrl) actions.push({ label: 'Check API Key', url: meta.apiKeyUrl });
       if (meta?.docsUrl) actions.push({ label: 'View Docs', url: meta.docsUrl });
       actions.push({ label: 'Open Settings', action: 'open_settings' });
+      break;
+    case 'IMAGES_NOT_SUPPORTED':
+      // No actions — opening Settings / Provider Doctor solves nothing.
+      // The fix is for the user to either remove the image or switch
+      // models from the composer's model picker.
       break;
     default:
       actions.push({ label: 'Open Settings', action: 'open_settings' });
