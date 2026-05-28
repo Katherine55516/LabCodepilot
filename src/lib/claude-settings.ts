@@ -124,7 +124,11 @@ export function ensureSkipWebFetchPreflight(): EnsureSettingsResult {
 
   let created = false;
   let updated = false;
-  let skipped = false;
+  // `skipped` is only ever the initial value here — the early-return path
+  // when the field is already present writes the literal `true` directly,
+  // so it stays `const`. Keeping the variable so the catch-block return
+  // shape stays symmetric with the happy-path returns.
+  const skipped = false;
 
   try {
     // Step 1: ensure ~/.claude/ exists.
