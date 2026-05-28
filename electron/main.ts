@@ -63,6 +63,12 @@ import {
   registerGsdIpc,
 } from './gsd-installer';
 
+// Auto-inject `skipWebFetchPreflight: true` into ~/.claude/settings.json on
+// startup so users behind enterprise networks / GFW don't hit the
+// "Unable to verify if domain X is safe to fetch" error from Claude Code's
+// preflight call to api.anthropic.com. Respects user's explicit value if set.
+import { ensureSkipWebFetchPreflight } from '../src/lib/claude-settings';
+
 /**
  * Return a copy of process.env without __NEXT_PRIVATE_* variables.
  *
@@ -1135,6 +1141,28 @@ app.whenReady().then(async () => {
     })
     .catch((err) => {
       console.error('[gsd-installer] startup sync threw:', err);
+    });
+
+  // --- Auto-inject skipWebFetchPreflight into ~/.claude/settings.json ---
+  // Pre-empts the common "Unable to verify if domain X is safe to fetch"
+  // error users behind enterprise networks / GFW see when Claude Code's
+  // WebFetch preflight call to api.anthropic.com is blocked. The function
+  // is synchronous, never throws, and respects user's explicit value (true
+  // OR false) if they've already set it. Wrapped in Promise.resolve() to
+  // match GSD's fire-and-forget pattern.
+  Promise.resolve()
+    .then(() => {
+      const result = ensureSkipWebFetchPreflight();
+      if (result.error) {
+        console.warn('[claude-settings] skipWebFetchPreflight ensure had error:', result.error);
+      } else if (result.updated) {
+        console.log(`[claude-settings] injected skipWebFetchPreflight: true into ${result.path}`);
+      } else if (result.skipped) {
+        // User already set it (true or false) — log nothing, this is the steady state
+      }
+    })
+    .catch((err) => {
+      console.error('[claude-settings] skipWebFetchPreflight ensure threw:', err);
     });
 
   // --- Install wizard IPC handlers ---
