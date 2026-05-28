@@ -1616,6 +1616,85 @@ const zh: Record<TranslationKey, string> = {
   'settings.gsd.uninstallDesc': '将删除内置 GSD 插件目录以及对应的镜像 agent 文件（仅删除与内置副本完全一致的文件，用户改过的副本会被保留）。之后可在此面板重新安装。',
   'settings.gsd.cancel': '取消',
   'settings.gsd.confirmUninstall': '确认卸载',
+
+  // ── Error classifier ───────────────────────────────────────
+  // 与 en.ts 同步；变量 {provider} / {baseUrl} / {hints} 由
+  // src/lib/error-classifier.ts 在 server 端预先拼好。
+  'errors.providerHint': '（服务商：{provider}）',
+  'errors.baseUrlHint': '（{baseUrl}）',
+  'errors.markdownLabel': '错误',
+  'errors.markdownActionLabel': '处理方式',
+  'errors.markdownDetailsLabel': '详细信息',
+
+  // 恢复操作按钮文案
+  'errors.actions.openSettings': '打开设置',
+  'errors.actions.retry': '重试',
+  'errors.actions.newConversation': '新建对话',
+  'errors.actions.getApiKey': '获取 API Key',
+  'errors.actions.viewDocs': '查看文档',
+  'errors.actions.checkApiKey': '检查 API Key',
+  'errors.actions.upgradePlan': '升级套餐',
+
+  // 各错误类别的提示
+  'errors.CLI_NOT_FOUND.userMessage': '未找到 Claude Code CLI。',
+  'errors.CLI_NOT_FOUND.actionHint': '请先安装 Claude Code CLI 并确认它已加入 PATH，可执行：npm install -g @anthropic-ai/claude-code',
+
+  'errors.MISSING_GIT_BASH.userMessage': '在 Windows 上需要 Git Bash，但未找到。',
+  'errors.MISSING_GIT_BASH.actionHint': '请从 https://git-scm.com/downloads 安装 Git for Windows，并确保 bash.exe 已加入 PATH。',
+
+  'errors.NO_CREDENTIALS.userMessage': '未找到 API 凭据{provider}。',
+  'errors.NO_CREDENTIALS.actionHint': '请到「设置 → 服务商」添加 API Key，或设置 ANTHROPIC_API_KEY 环境变量。',
+
+  'errors.AUTH_REJECTED.userMessage': '身份认证失败{provider}。',
+  'errors.AUTH_REJECTED.actionHint': '请确认 API Key 正确且未过期。如使用第三方服务商，检查认证方式（API Key / Auth Token）是否匹配。',
+
+  'errors.AUTH_FORBIDDEN.userMessage': '访问被拒绝{provider}。',
+  'errors.AUTH_FORBIDDEN.actionHint': '当前 API Key 可能没有此操作的权限。请检查套餐额度，或联系服务商。',
+
+  'errors.AUTH_STYLE_MISMATCH.userMessage': '认证方式不匹配{provider}。',
+  'errors.AUTH_STYLE_MISMATCH.actionHint': '该服务商可能需要另一种认证方式。请在服务商设置里切换「API Key」与「Auth Token」试试。',
+
+  'errors.RATE_LIMITED.userMessage': '已达到访问频率限制。',
+  'errors.RATE_LIMITED.actionHint': '请稍后再试。如频繁出现，可考虑升级 API 套餐。',
+
+  'errors.MODEL_NOT_AVAILABLE.userMessage': '模型不可用{provider}。',
+  'errors.MODEL_NOT_AVAILABLE.actionHint': '当前服务商可能不支持所选模型。请到服务商设置确认模型名称，或换一个模型。',
+
+  'errors.CONTEXT_TOO_LONG.userMessage': '对话上下文过长。',
+  'errors.CONTEXT_TOO_LONG.actionHint': '正在自动压缩上下文。如持续出现，可尝试 /compact 或新建对话。',
+
+  'errors.UNSUPPORTED_FEATURE.userMessage': '你的 Claude Code CLI 版本不支持所请求的功能。',
+  'errors.UNSUPPORTED_FEATURE.actionHint': '请升级 Claude Code CLI 到最新版本：npm update -g @anthropic-ai/claude-code',
+
+  'errors.CLI_VERSION_TOO_OLD.userMessage': 'Claude Code CLI 版本过旧。',
+  'errors.CLI_VERSION_TOO_OLD.actionHint': '请升级到最新版：npm update -g @anthropic-ai/claude-code',
+
+  'errors.NETWORK_UNREACHABLE.userMessage': '无法连接到 API 端点{baseUrl}。',
+  'errors.NETWORK_UNREACHABLE.actionHint': '请检查网络连接，以及服务商设置中的 Base URL。',
+
+  'errors.ENDPOINT_NOT_FOUND.userMessage': '找不到 API 端点{provider}。',
+  'errors.ENDPOINT_NOT_FOUND.actionHint': 'Base URL 可能不正确。请检查服务商设置，确认 URL 含有正确的路径（如 /v1）。',
+
+  'errors.RESUME_FAILED.userMessage': '无法恢复上次对话。',
+  'errors.RESUME_FAILED.actionHint': '对话会自动重新开始，无需手动处理。',
+
+  'errors.SESSION_STATE_ERROR.userMessage': '会话状态无效或已损坏。',
+  'errors.SESSION_STATE_ERROR.actionHint': '存储的会话状态已失效。请新建对话，或重试 —— 会话会自动重置。',
+
+  'errors.PROCESS_CRASH.userMessage': 'Claude Code 进程异常退出{provider}。常见原因：\n• {hints}',
+  'errors.PROCESS_CRASH.actionHint': '请检查 API Key 与服务商设置。可在「设置」中运行 Provider Doctor 获取详细诊断。',
+  'errors.PROCESS_CRASH.hint.apiKey': 'API Key 无效或缺失',
+  'errors.PROCESS_CRASH.hint.baseUrl': 'Base URL 配置不正确',
+  'errors.PROCESS_CRASH.hint.network': '网络连通性问题',
+  'errors.PROCESS_CRASH.hint.images': '服务商可能不支持图片/视觉输入',
+  'errors.PROCESS_CRASH.hint.thinking': '该服务商可能不支持思考模式',
+  'errors.PROCESS_CRASH.hint.context1m': '该服务商可能不支持 1M 上下文',
+
+  'errors.IMAGES_NOT_SUPPORTED.userMessage': '当前模型{provider}不支持图片输入。',
+  'errors.IMAGES_NOT_SUPPORTED.actionHint': '请移除本消息中的图片后重发，或在右下角模型选择器切换到支持视觉的模型（如 Claude Sonnet / Opus）。',
+
+  'errors.UNKNOWN.userMessage': '发生未知错误{provider}。',
+  'errors.UNKNOWN.actionHint': '请查看下方错误详情。如问题持续，可在「设置」运行 Provider Doctor。',
 };
 
 export default zh;

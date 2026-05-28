@@ -1620,6 +1620,89 @@ const en = {
   'settings.gsd.uninstallDesc': 'This removes the bundled GSD plugin directory and its mirrored agent files (only files unchanged from the bundle — user-edited copies are preserved). You can re-install it later from this panel.',
   'settings.gsd.cancel': 'Cancel',
   'settings.gsd.confirmUninstall': 'Uninstall',
+
+  // ── Error classifier ───────────────────────────────────────
+  // Used by src/lib/error-classifier.ts via ClassifiedError.userMessageKey /
+  // actionHintKey. The classifier runs server-side so it ships these keys
+  // to the client; useSSEStream resolves them with the current locale.
+  //
+  // Variables: {provider} is the already-formatted ' (Provider: X)' suffix
+  // (or empty), {baseUrl} similarly. {hints} is a pre-joined bullet list.
+  'errors.providerHint': ' (Provider: {provider})',
+  'errors.baseUrlHint': ' ({baseUrl})',
+  'errors.markdownLabel': 'Error',
+  'errors.markdownActionLabel': 'What to do',
+  'errors.markdownDetailsLabel': 'Details',
+
+  // Recovery-action button labels
+  'errors.actions.openSettings': 'Open Settings',
+  'errors.actions.retry': 'Retry',
+  'errors.actions.newConversation': 'New Conversation',
+  'errors.actions.getApiKey': 'Get API Key',
+  'errors.actions.viewDocs': 'View Docs',
+  'errors.actions.checkApiKey': 'Check API Key',
+  'errors.actions.upgradePlan': 'Upgrade Plan',
+
+  // Per-category messages
+  'errors.CLI_NOT_FOUND.userMessage': 'Claude Code CLI not found.',
+  'errors.CLI_NOT_FOUND.actionHint': 'Please install Claude Code CLI and ensure it is available in your PATH. Run: npm install -g @anthropic-ai/claude-code',
+
+  'errors.MISSING_GIT_BASH.userMessage': 'Git Bash is required on Windows but was not found.',
+  'errors.MISSING_GIT_BASH.actionHint': 'Install Git for Windows from https://git-scm.com/downloads and ensure bash.exe is on PATH.',
+
+  'errors.NO_CREDENTIALS.userMessage': 'No API credentials found{provider}.',
+  'errors.NO_CREDENTIALS.actionHint': 'Go to Settings → Providers and add your API key, or set the ANTHROPIC_API_KEY environment variable.',
+
+  'errors.AUTH_REJECTED.userMessage': 'Authentication failed{provider}.',
+  'errors.AUTH_REJECTED.actionHint': 'Verify your API key is correct and has not expired. If using a third-party provider, check that the auth style (API Key vs Auth Token) matches.',
+
+  'errors.AUTH_FORBIDDEN.userMessage': 'Access denied{provider}.',
+  'errors.AUTH_FORBIDDEN.actionHint': 'Your API key may lack permissions for this operation. Check your plan limits or contact your provider.',
+
+  'errors.AUTH_STYLE_MISMATCH.userMessage': 'Auth style mismatch{provider}.',
+  'errors.AUTH_STYLE_MISMATCH.actionHint': 'This provider may require a different auth style. Try switching between "API Key" and "Auth Token" in provider settings.',
+
+  'errors.RATE_LIMITED.userMessage': 'Rate limit exceeded.',
+  'errors.RATE_LIMITED.actionHint': 'Wait a moment before retrying. If this persists, consider upgrading your API plan.',
+
+  'errors.MODEL_NOT_AVAILABLE.userMessage': 'Model not available{provider}.',
+  'errors.MODEL_NOT_AVAILABLE.actionHint': 'The selected model may not be supported by this provider. Check the model name in provider settings or try a different model.',
+
+  'errors.CONTEXT_TOO_LONG.userMessage': 'Conversation context is too long.',
+  'errors.CONTEXT_TOO_LONG.actionHint': 'Context is being auto-compressed. If this persists, try /compact or start a new conversation.',
+
+  'errors.UNSUPPORTED_FEATURE.userMessage': 'Your Claude Code CLI version does not support a requested feature.',
+  'errors.UNSUPPORTED_FEATURE.actionHint': 'Update Claude Code CLI to the latest version: npm update -g @anthropic-ai/claude-code',
+
+  'errors.CLI_VERSION_TOO_OLD.userMessage': 'Your Claude Code CLI version is too old.',
+  'errors.CLI_VERSION_TOO_OLD.actionHint': 'Update to the latest version: npm update -g @anthropic-ai/claude-code',
+
+  'errors.NETWORK_UNREACHABLE.userMessage': 'Cannot connect to API endpoint{baseUrl}.',
+  'errors.NETWORK_UNREACHABLE.actionHint': 'Check your network connection and the Base URL in provider settings.',
+
+  'errors.ENDPOINT_NOT_FOUND.userMessage': 'API endpoint not found{provider}.',
+  'errors.ENDPOINT_NOT_FOUND.actionHint': 'The Base URL may be incorrect. Check your provider settings and ensure the URL includes the correct path (e.g. /v1).',
+
+  'errors.RESUME_FAILED.userMessage': 'Failed to resume previous conversation.',
+  'errors.RESUME_FAILED.actionHint': 'The conversation will start fresh automatically. No action needed.',
+
+  'errors.SESSION_STATE_ERROR.userMessage': 'Session state is invalid or corrupted.',
+  'errors.SESSION_STATE_ERROR.actionHint': 'The stored session state has become stale. Please start a new conversation, or retry — the session will be automatically reset.',
+
+  'errors.PROCESS_CRASH.userMessage': 'Claude Code process exited with an error{provider}. Common causes:\n• {hints}',
+  'errors.PROCESS_CRASH.actionHint': 'Check your API key and provider settings. Run Provider Doctor in Settings for detailed diagnostics.',
+  'errors.PROCESS_CRASH.hint.apiKey': 'Invalid or missing API Key',
+  'errors.PROCESS_CRASH.hint.baseUrl': 'Incorrect Base URL configuration',
+  'errors.PROCESS_CRASH.hint.network': 'Network connectivity issues',
+  'errors.PROCESS_CRASH.hint.images': 'Provider may not support image/vision input',
+  'errors.PROCESS_CRASH.hint.thinking': 'Thinking mode may not be supported',
+  'errors.PROCESS_CRASH.hint.context1m': '1M context may not be supported',
+
+  'errors.IMAGES_NOT_SUPPORTED.userMessage': 'The current model{provider} does not support image input.',
+  'errors.IMAGES_NOT_SUPPORTED.actionHint': 'Remove the images from this message and resend, or switch the model in the bottom-right picker to a vision-capable one (e.g. Claude Sonnet / Opus).',
+
+  'errors.UNKNOWN.userMessage': 'An unexpected error occurred{provider}.',
+  'errors.UNKNOWN.actionHint': 'Check the error details below. If the problem persists, run Provider Doctor in Settings.',
 } as const;
 
 export type TranslationKey = keyof typeof en;
