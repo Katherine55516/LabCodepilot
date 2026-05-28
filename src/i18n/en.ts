@@ -373,6 +373,14 @@ const en = {
   'mcp.formTab': 'Form',
   'mcp.jsonEditTab': 'JSON',
   'mcp.saveChanges': 'Save Changes',
+  'mcp.jsonModeLabel': 'Server Configuration (JSON)',
+  'mcp.jsonModeHint': "Paste a single server's config, or a registry-format JSON with the standard `mcpServers` wrapper — both are accepted. If you paste the wrapper form, the server name is taken from the wrapper key when the name field is empty.",
+  'mcp.serverNameRequired': 'Server name is required',
+  'mcp.invalidJsonConfig': 'Invalid JSON configuration',
+  'mcp.jsonMustBeObject': 'JSON must be an object',
+  'mcp.jsonEmptyWrapper': 'The `mcpServers` wrapper is empty — add at least one server entry',
+  'mcp.jsonMultipleServers': 'Paste contains multiple servers. Add them one at a time, or use the JSON Config tab to import them in bulk.',
+  'mcp.saveFailed': 'Failed to save MCP server',
 
   // ── Folder picker ───────────────────────────────────────────
   'folderPicker.title': 'Select a project folder',

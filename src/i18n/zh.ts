@@ -370,6 +370,14 @@ const zh: Record<TranslationKey, string> = {
   'mcp.formTab': '表单',
   'mcp.jsonEditTab': 'JSON',
   'mcp.saveChanges': '保存更改',
+  'mcp.jsonModeLabel': '服务器配置（JSON）',
+  'mcp.jsonModeHint': '可直接粘贴单个 server 的配置，也可以粘贴包含 `mcpServers` 外层的标准注册表 JSON——两种格式都识别。粘贴注册表格式时，若上方"服务器名称"留空，会自动用外层的 key 作为名称。',
+  'mcp.serverNameRequired': '请填写服务器名称',
+  'mcp.invalidJsonConfig': 'JSON 配置无效',
+  'mcp.jsonMustBeObject': 'JSON 必须是对象',
+  'mcp.jsonEmptyWrapper': '`mcpServers` 外层为空，至少要包含一个 server 项',
+  'mcp.jsonMultipleServers': '粘贴的 JSON 含多个 server，请逐个添加，或在 JSON 配置 tab 批量导入',
+  'mcp.saveFailed': '保存 MCP 服务器失败',
 
   // ── Folder picker ───────────────────────────────────────────
   'folderPicker.title': '选择项目文件夹',

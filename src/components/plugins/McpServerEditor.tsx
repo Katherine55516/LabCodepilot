@@ -24,7 +24,7 @@ interface McpServerEditorProps {
   onOpenChange: (open: boolean) => void;
   name?: string;
   server?: MCPServer;
-  onSave: (name: string, server: MCPServer) => void;
+  onSave: (name: string, server: MCPServer) => Promise<void> | void;
 }
 
 export function McpServerEditor({
@@ -83,26 +83,67 @@ export function McpServerEditor({
   }, [open, initialName, initialServer]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
-  function handleSave() {
+  async function handleSave() {
     setError(null);
 
-    if (!name.trim()) {
-      setError('Server name is required');
+    if (jsonMode) {
+      let parsed: unknown;
+      try {
+        parsed = JSON.parse(jsonText);
+      } catch {
+        setError(t('mcp.invalidJsonConfig'));
+        return;
+      }
+      if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+        setError(t('mcp.jsonMustBeObject'));
+        return;
+      }
+
+      // Accept both shapes:
+      //   1. Single server object:        { command, args, ... }
+      //   2. Registry wrapper (standard): { mcpServers: { "<name>": { command, args, ... } } }
+      // The wrapper form is what MCP server READMEs / Anthropic docs / `claude mcp add-json`
+      // emit, so users frequently paste it as-is.
+      const obj = parsed as Record<string, unknown>;
+      let serverConfig: MCPServer = obj as MCPServer;
+      let detectedName: string | undefined;
+
+      if (obj.mcpServers && typeof obj.mcpServers === 'object' && !Array.isArray(obj.mcpServers)) {
+        const inner = obj.mcpServers as Record<string, unknown>;
+        const keys = Object.keys(inner);
+        if (keys.length === 0) {
+          setError(t('mcp.jsonEmptyWrapper'));
+          return;
+        }
+        if (keys.length > 1) {
+          setError(t('mcp.jsonMultipleServers'));
+          return;
+        }
+        detectedName = keys[0];
+        serverConfig = inner[keys[0]] as MCPServer;
+        if (typeof serverConfig !== 'object' || serverConfig === null) {
+          setError(t('mcp.jsonMustBeObject'));
+          return;
+        }
+      }
+
+      const finalName = name.trim() || detectedName || '';
+      if (!finalName) {
+        setError(t('mcp.serverNameRequired'));
+        return;
+      }
+
+      try {
+        await onSave(finalName, serverConfig);
+        onOpenChange(false);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : t('mcp.saveFailed'));
+      }
       return;
     }
 
-    if (jsonMode) {
-      try {
-        const parsed = JSON.parse(jsonText);
-        if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
-          setError('JSON must be an object');
-          return;
-        }
-        onSave(name.trim(), parsed as MCPServer);
-        onOpenChange(false);
-      } catch {
-        setError('Invalid JSON configuration');
-      }
+    if (!name.trim()) {
+      setError(t('mcp.serverNameRequired'));
       return;
     }
 
@@ -168,8 +209,12 @@ export function McpServerEditor({
           ...(headers ? { headers } : {}),
         };
 
-    onSave(name.trim(), server);
-    onOpenChange(false);
+    try {
+      await onSave(name.trim(), server);
+      onOpenChange(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : t('mcp.saveFailed'));
+    }
   }
 
   return (
@@ -243,7 +288,8 @@ export function McpServerEditor({
 
           {jsonMode ? (
             <div className="space-y-2">
-              <Label>Server Configuration (JSON)</Label>
+              <Label>{t('mcp.jsonModeLabel')}</Label>
+              <p className="text-xs text-muted-foreground">{t('mcp.jsonModeHint')}</p>
               <Textarea
                 value={jsonText}
                 onChange={(e) => {
@@ -251,7 +297,7 @@ export function McpServerEditor({
                   setError(null);
                 }}
                 className="font-mono text-sm min-h-[250px]"
-                placeholder='{"command": "npx", "args": ["-y", "@server/name"]}'
+                placeholder={'{"command": "npx", "args": ["-y", "@server/name"]}\n\n// or paste a registry-format JSON:\n{"mcpServers": {"playwright": {"command": "npx", "args": ["-y", "@playwright/mcp@latest"]}}}'}
               />
             </div>
           ) : (

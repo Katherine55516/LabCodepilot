@@ -95,10 +95,21 @@ export function McpManager() {
     setEditorOpen(true);
   }
 
+  // Pull a useful error message out of an HTTP response. Backend routes return
+  // { error: string } on failure; fall back to status text for non-JSON bodies.
+  async function readErrorBody(res: Response): Promise<string> {
+    try {
+      const data = await res.json();
+      if (data?.error && typeof data.error === 'string') return data.error;
+    } catch { /* ignore parse errors */ }
+    return `Server returned ${res.status} ${res.statusText}`.trim();
+  }
+
   const handlePersistentToggle = useCallback(async (name: string, enabled: boolean) => {
     const updated = { ...servers };
     updated[name] = { ...updated[name], enabled };
     setServers(updated);
+    setError(null);
     try {
       const res = await fetch('/api/plugins/mcp', {
         method: 'PUT',
@@ -106,16 +117,19 @@ export function McpManager() {
         body: JSON.stringify({ mcpServers: updated }),
       });
       if (!res.ok) {
-        throw new Error(`Server returned ${res.status}`);
+        const msg = await readErrorBody(res);
+        setError(msg);
+        // Revert on failure so the toggle reflects persisted state
+        fetchServers();
       }
     } catch (err) {
-      console.error('Failed to toggle MCP server:', err);
-      // Revert on failure
+      setError(err instanceof Error ? err.message : 'Failed to toggle MCP server');
       fetchServers();
     }
   }, [servers, fetchServers]);
 
   async function handleDelete(name: string) {
+    setError(null);
     try {
       const res = await fetch(`/api/plugins/mcp/${encodeURIComponent(name)}`, {
         method: "DELETE",
@@ -127,89 +141,92 @@ export function McpManager() {
           return updated;
         });
       } else {
-        const data = await res.json();
-        console.error("Failed to delete MCP server:", data.error);
+        setError(await readErrorBody(res));
       }
     } catch (err) {
-      console.error("Failed to delete MCP server:", err);
+      setError(err instanceof Error ? err.message : 'Failed to delete MCP server');
     }
   }
 
+  // The editor awaits this Promise — throw on failure so the dialog can keep
+  // itself open and display the error inline instead of silently closing.
   async function handleSave(name: string, server: MCPServer) {
+    setError(null);
     if (editingName && editingName !== name) {
       // Rename: preserve _source from the original entry
       const original = servers[editingName];
       const updated = { ...servers };
       delete updated[editingName];
       updated[name] = original?._source ? { ...server, _source: original._source } : server;
-      try {
-        await fetch("/api/plugins/mcp", {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ mcpServers: updated }),
-        });
-        setServers(updated);
-      } catch (err) {
-        console.error("Failed to save MCP server:", err);
-      }
+      const res = await fetch("/api/plugins/mcp", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mcpServers: updated }),
+      });
+      if (!res.ok) throw new Error(await readErrorBody(res));
+      setServers(updated);
     } else if (editingName) {
       // Edit in-place: preserve _source
       const original = servers[editingName];
       const serverWithSource = original?._source ? { ...server, _source: original._source } : server;
       const updated = { ...servers, [name]: serverWithSource };
-      try {
-        await fetch("/api/plugins/mcp", {
-          method: "PUT",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ mcpServers: updated }),
-        });
-        setServers(updated);
-      } catch (err) {
-        console.error("Failed to save MCP server:", err);
-      }
+      const res = await fetch("/api/plugins/mcp", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mcpServers: updated }),
+      });
+      if (!res.ok) throw new Error(await readErrorBody(res));
+      setServers(updated);
     } else {
-      try {
-        const res = await fetch("/api/plugins/mcp", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name, server }),
-        });
-        if (res.ok) {
-          setServers((prev) => ({ ...prev, [name]: server }));
-        } else {
-          const data = await res.json();
-          console.error("Failed to add MCP server:", data.error);
-        }
-      } catch (err) {
-        console.error("Failed to add MCP server:", err);
-      }
+      const res = await fetch("/api/plugins/mcp", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, server }),
+      });
+      if (!res.ok) throw new Error(await readErrorBody(res));
+      // POST writes to settings.json (route.ts), so tag the local copy
+      // accordingly. Without _source, a subsequent rename via PUT would treat
+      // it as a fresh insert instead of an update — harmless today but a
+      // latent inconsistency.
+      setServers((prev) => ({ ...prev, [name]: { ...server, _source: 'settings.json' } }));
     }
   }
 
   async function handleJsonSave(jsonStr: string) {
+    setError(null);
+    let parsed: Record<string, MCPServer>;
     try {
-      const parsed = JSON.parse(jsonStr) as Record<string, MCPServer>;
-      // JSON editor only manages settings.json servers.
-      // Merge back: keep claude.json servers untouched, replace settings.json servers.
-      const claudeJsonServers: Record<string, MCPServerWithSource> = {};
-      for (const [name, server] of Object.entries(servers)) {
-        if (server._source === 'claude.json') {
-          claudeJsonServers[name] = server;
-        }
+      parsed = JSON.parse(jsonStr) as Record<string, MCPServer>;
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Invalid JSON');
+      return;
+    }
+    // JSON editor only manages settings.json servers.
+    // Merge back: keep claude.json servers untouched, replace settings.json servers.
+    const claudeJsonServers: Record<string, MCPServerWithSource> = {};
+    for (const [name, server] of Object.entries(servers)) {
+      if (server._source === 'claude.json') {
+        claudeJsonServers[name] = server;
       }
-      const settingsServers: Record<string, MCPServerWithSource> = {};
-      for (const [name, server] of Object.entries(parsed)) {
-        settingsServers[name] = { ...server, _source: 'settings.json' };
-      }
-      const merged = { ...claudeJsonServers, ...settingsServers };
-      await fetch("/api/plugins/mcp", {
+    }
+    const settingsServers: Record<string, MCPServerWithSource> = {};
+    for (const [name, server] of Object.entries(parsed)) {
+      settingsServers[name] = { ...server, _source: 'settings.json' };
+    }
+    const merged = { ...claudeJsonServers, ...settingsServers };
+    try {
+      const res = await fetch("/api/plugins/mcp", {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ mcpServers: merged }),
       });
+      if (!res.ok) {
+        setError(await readErrorBody(res));
+        return;
+      }
       setServers(merged);
     } catch (err) {
-      console.error("Failed to save MCP config:", err);
+      setError(err instanceof Error ? err.message : 'Failed to save MCP config');
     }
   }
 
