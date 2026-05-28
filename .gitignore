@@ -39,6 +39,9 @@ yarn-error.log*
 # local database
 /data/
 
+# scratch / verification output (chrome-devtools screenshots, ad-hoc dumps)
+.tmp/
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts
