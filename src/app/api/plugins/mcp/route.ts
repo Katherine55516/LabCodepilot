@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import { invalidateMcpCache } from '@/lib/mcp-loader';
+import {
+  invalidateMcpCache,
+  migrateSettingsMcpServersToClaudeJson,
+} from '@/lib/mcp-loader';
 import type {
   MCPServerConfig,
   MCPConfigResponse,
@@ -10,12 +13,24 @@ import type {
   SuccessResponse,
 } from '@/types';
 
-function getSettingsPath(): string {
+// ── File-location semantics ──────────────────────────────────────────
+//
+// User-scope MCP servers live in `~/.claude.json.mcpServers` — that's
+// the only file the bundled Claude Code binary actually reads. See
+// `mcp-loader.ts` for the empirical proof and migration logic.
+//
+// `~/.claude/settings.json.mcpServers` was the legacy write target;
+// the migration helper moves any stragglers out and clears the field.
+// We never write to it anymore.
+//
+// `~/.claude/settings.json.mcpServerOverrides` is still used to persist
+// enable/disable state for project-scope (read-only) `.mcp.json` servers.
+
+function userSettingsPath(): string {
   return path.join(os.homedir(), '.claude', 'settings.json');
 }
 
-// ~/.claude.json — Claude CLI stores user-scoped MCP servers here
-function getUserConfigPath(): string {
+function userClaudeJsonPath(): string {
   return path.join(os.homedir(), '.claude.json');
 }
 
@@ -28,32 +43,42 @@ function readJsonFile(filePath: string): Record<string, unknown> {
   }
 }
 
-function readSettings(): Record<string, unknown> {
-  return readJsonFile(getSettingsPath());
-}
-
-function writeSettings(settings: Record<string, unknown>): void {
-  const settingsPath = getSettingsPath();
-  const dir = path.dirname(settingsPath);
+/**
+ * Atomic write: writes to a sibling tempfile then renames. Both
+ * `~/.claude.json` and `~/.claude/settings.json` hold long-lived state
+ * owned by the bundled binary — a partial write would corrupt it.
+ */
+function writeJsonAtomic(filePath: string, data: unknown): void {
+  const dir = path.dirname(filePath);
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
-  fs.writeFileSync(settingsPath, JSON.stringify(settings, null, 2), 'utf-8');
+  const tmp = path.join(dir, `.${path.basename(filePath)}.codepilot-tmp-${process.pid}-${Date.now()}`);
+  fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf-8');
+  fs.renameSync(tmp, filePath);
 }
 
 export async function GET(): Promise<NextResponse<MCPConfigResponse | ErrorResponse>> {
   try {
-    const settings = readSettings();
-    const userConfig = readJsonFile(getUserConfigPath());
-    const settingsServers = (settings.mcpServers || {}) as Record<string, MCPServerConfig>;
+    // Migrate any legacy settings.json.mcpServers entries before reading,
+    // so the UI sees a converged state on first load after upgrade.
+    migrateSettingsMcpServersToClaudeJson();
+
+    const settings = readJsonFile(userSettingsPath());
+    const userConfig = readJsonFile(userClaudeJsonPath());
     const userConfigServers = (userConfig.mcpServers || {}) as Record<string, MCPServerConfig>;
 
-    // Also read project-level .mcp.json so the UI can display and toggle project servers
+    // Project-scope servers (read-only for CodePilot; the file is part of
+    // the project's source tree).
     const projectMcp = readJsonFile(path.join(process.cwd(), '.mcp.json'));
     const projectServers = (projectMcp.mcpServers || {}) as Record<string, MCPServerConfig>;
 
-    // Merge: settings.json > claude.json > project .mcp.json
-    // Tag each server with _source so UI knows where it came from
+    // Merge with source tags. Priority: claude.json > project. Since
+    // settings.json.mcpServers is no longer a valid source, it doesn't
+    // participate in the merge — but if migration failed (e.g., disk
+    // full), we DON'T silently drop the entries: we surface them with a
+    // distinct _source so the UI can show them and the user knows
+    // something needs attention.
     const mcpServers: Record<string, MCPServerConfig & { _source?: string }> = {};
     for (const [name, server] of Object.entries(projectServers)) {
       mcpServers[name] = { ...server, _source: 'project' };
@@ -61,8 +86,15 @@ export async function GET(): Promise<NextResponse<MCPConfigResponse | ErrorRespo
     for (const [name, server] of Object.entries(userConfigServers)) {
       mcpServers[name] = { ...server, _source: 'claude.json' };
     }
-    for (const [name, server] of Object.entries(settingsServers)) {
-      mcpServers[name] = { ...server, _source: 'settings.json' };
+    // Defensive: if migration failed and settings.json still has stragglers,
+    // expose them so the UI doesn't pretend they don't exist. They won't be
+    // loaded by the SDK (dead field), but at least the user can re-save
+    // them through the UI to trigger a fresh write to .claude.json.
+    const legacySettingsServers = (settings.mcpServers || {}) as Record<string, MCPServerConfig>;
+    for (const [name, server] of Object.entries(legacySettingsServers)) {
+      if (!mcpServers[name]) {
+        mcpServers[name] = { ...server, _source: 'legacy-settings.json' };
+      }
     }
 
     // For project-source servers, check if settings.json has an enabled override
@@ -87,48 +119,48 @@ export async function PUT(
   request: NextRequest
 ): Promise<NextResponse<SuccessResponse | ErrorResponse>> {
   try {
+    migrateSettingsMcpServersToClaudeJson();
+
     const body = await request.json();
     const incoming = body.mcpServers as Record<string, MCPServerConfig & { _source?: string }>;
 
-    // Split incoming servers by source and write to the correct file.
-    // Servers without _source or with _source='settings.json' → settings.json
-    // Servers with _source='claude.json' → ~/.claude.json
-    const forSettings: Record<string, MCPServerConfig> = {};
+    // Split incoming by source. Everything user-scope (no _source,
+    // _source='claude.json', or _source='legacy-settings.json') goes to
+    // `~/.claude.json`. Project-scope only persists enable/disable to
+    // settings.json.mcpServerOverrides.
     const forUserConfig: Record<string, MCPServerConfig> = {};
     let forProjectOverrides: Record<string, { enabled?: boolean }> | undefined;
 
     for (const [name, server] of Object.entries(incoming)) {
       const { _source, ...cleanServer } = server;
       if (_source === 'project') {
-        // Project servers are read-only — only persist enabled override to settings.json
         if (cleanServer.enabled !== undefined) {
           if (!forProjectOverrides) forProjectOverrides = {};
           forProjectOverrides[name] = { enabled: cleanServer.enabled };
         }
-      } else if (_source === 'claude.json') {
-        forUserConfig[name] = cleanServer;
       } else {
-        forSettings[name] = cleanServer;
+        // claude.json | legacy-settings.json | undefined → user-scope
+        forUserConfig[name] = cleanServer;
       }
     }
 
-    // Write settings.json
-    const settings = readSettings();
-    settings.mcpServers = forSettings;
+    // Write `~/.claude.json` first (it's authoritative for what the SDK loads).
+    const userConfig = readJsonFile(userClaudeJsonPath());
+    userConfig.mcpServers = forUserConfig;
+    writeJsonAtomic(userClaudeJsonPath(), userConfig);
+
+    // Then update settings.json overrides. Also strip any lingering
+    // mcpServers field defensively — the PUT body is the new canonical
+    // state for user-scope MCPs, anything still in settings.json would
+    // become a phantom on the next GET.
+    const settings = readJsonFile(userSettingsPath());
     if (forProjectOverrides) {
       settings.mcpServerOverrides = forProjectOverrides;
     }
-    writeSettings(settings);
-
-    // Write ~/.claude.json (only the mcpServers key, preserve other fields)
-    const userConfig = readJsonFile(getUserConfigPath());
-    userConfig.mcpServers = forUserConfig;
-    const userConfigPath = getUserConfigPath();
-    const dir = path.dirname(userConfigPath);
-    if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
+    if ('mcpServers' in settings) {
+      delete settings.mcpServers;
     }
-    fs.writeFileSync(userConfigPath, JSON.stringify(userConfig, null, 2), 'utf-8');
+    writeJsonAtomic(userSettingsPath(), settings);
 
     invalidateMcpCache();
     return NextResponse.json({ success: true });
@@ -144,6 +176,8 @@ export async function POST(
   request: NextRequest
 ): Promise<NextResponse<SuccessResponse | ErrorResponse>> {
   try {
+    migrateSettingsMcpServersToClaudeJson();
+
     const body = await request.json();
     const { name, server } = body as { name: string; server: MCPServerConfig };
 
@@ -156,26 +190,23 @@ export async function POST(
       );
     }
 
-    // Check both config files for name collision (merged namespace)
-    const settings = readSettings();
-    const userConfig = readJsonFile(getUserConfigPath());
-    if (!settings.mcpServers) {
-      settings.mcpServers = {};
-    }
-
-    const settingsServers = settings.mcpServers as Record<string, MCPServerConfig>;
+    // Check `~/.claude.json` for collisions. We don't need to check
+    // settings.json anymore — migration moves everything out, and even
+    // if migration failed, settings.json entries are dead so a name
+    // collision there isn't a real conflict (the new write will succeed
+    // and supersede the dead one once the migration retry sweeps it).
+    const userConfig = readJsonFile(userClaudeJsonPath());
     const userConfigServers = (userConfig.mcpServers || {}) as Record<string, MCPServerConfig>;
-    if (settingsServers[name] || userConfigServers[name]) {
+    if (userConfigServers[name]) {
       return NextResponse.json(
         { error: `MCP server "${name}" already exists` },
         { status: 409 }
       );
     }
 
-    const mcpServers = settingsServers;
-
-    mcpServers[name] = server;
-    writeSettings(settings);
+    userConfigServers[name] = server;
+    userConfig.mcpServers = userConfigServers;
+    writeJsonAtomic(userClaudeJsonPath(), userConfig);
 
     invalidateMcpCache();
     return NextResponse.json({ success: true });

@@ -370,6 +370,7 @@ const zh: Record<TranslationKey, string> = {
   'mcp.formTab': '表单',
   'mcp.jsonEditTab': 'JSON',
   'mcp.saveChanges': '保存更改',
+  'mcp.jsonTabProjectHidden': '项目级服务器（来自当前项目的 .mcp.json）由项目文件管理，这里不显示。在列表 tab 可以切换它们的开关。',
   'mcp.jsonModeLabel': '服务器配置（JSON）',
   'mcp.jsonModeHint': '可直接粘贴单个 server 的配置，也可以粘贴包含 `mcpServers` 外层的标准注册表 JSON——两种格式都识别。粘贴注册表格式时，若上方"服务器名称"留空，会自动用外层的 key 作为名称。',
   'mcp.serverNameRequired': '请填写服务器名称',

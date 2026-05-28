@@ -598,10 +598,16 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
           };
         }
 
-        // MCP servers: pass explicitly provided config (e.g. from CodePilot UI).
-        // User-level MCP config from ~/.claude.json and ~/.claude/settings.json
-        // is automatically loaded by the SDK via settingSources: ['user'] (DB
-        // providers) or ['user', 'project', 'local'] (env mode).
+        // MCP servers: pass explicitly provided config (e.g. from CodePilot UI's
+        // ${...}-resolved servers + in-process SDK MCPs like memory/widget/...).
+        //
+        // User-scope MCP config from `~/.claude.json.mcpServers` is auto-loaded
+        // by the SDK at runtime — the bundled binary reads that file directly
+        // regardless of which `--setting-sources` layers we pass. NOTE that
+        // `~/.claude/settings.json.mcpServers` is a dead field the binary
+        // never reads; see `mcp-loader.ts` for the empirical proof. The MCP
+        // Manager API enforces this by writing only to `.claude.json` and
+        // migrating any legacy settings.json entries on read.
         if (mcpServers && Object.keys(mcpServers).length > 0) {
           queryOptions.mcpServers = toSdkMcpConfig(mcpServers);
         }

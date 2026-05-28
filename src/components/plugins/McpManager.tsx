@@ -184,11 +184,11 @@ export function McpManager() {
         body: JSON.stringify({ name, server }),
       });
       if (!res.ok) throw new Error(await readErrorBody(res));
-      // POST writes to settings.json (route.ts), so tag the local copy
-      // accordingly. Without _source, a subsequent rename via PUT would treat
-      // it as a fresh insert instead of an update — harmless today but a
-      // latent inconsistency.
-      setServers((prev) => ({ ...prev, [name]: { ...server, _source: 'settings.json' } }));
+      // POST writes to `~/.claude.json` — the only file the bundled
+      // Claude Code binary actually reads for user-scope MCP servers.
+      // Tag the local copy accordingly so subsequent PUT calls take the
+      // correct write path.
+      setServers((prev) => ({ ...prev, [name]: { ...server, _source: 'claude.json' } }));
     }
   }
 
@@ -201,19 +201,20 @@ export function McpManager() {
       setError(err instanceof Error ? err.message : 'Invalid JSON');
       return;
     }
-    // JSON editor only manages settings.json servers.
-    // Merge back: keep claude.json servers untouched, replace settings.json servers.
-    const claudeJsonServers: Record<string, MCPServerWithSource> = {};
+    // The JSON editor manages user-scope MCP servers (the ones that live
+    // in `~/.claude.json`). Project-scope servers come from a read-only
+    // file in the project tree and stay untouched.
+    const projectServers: Record<string, MCPServerWithSource> = {};
     for (const [name, server] of Object.entries(servers)) {
-      if (server._source === 'claude.json') {
-        claudeJsonServers[name] = server;
+      if (server._source === 'project') {
+        projectServers[name] = server;
       }
     }
-    const settingsServers: Record<string, MCPServerWithSource> = {};
+    const userScopeServers: Record<string, MCPServerWithSource> = {};
     for (const [name, server] of Object.entries(parsed)) {
-      settingsServers[name] = { ...server, _source: 'settings.json' };
+      userScopeServers[name] = { ...server, _source: 'claude.json' };
     }
-    const merged = { ...claudeJsonServers, ...settingsServers };
+    const merged = { ...projectServers, ...userScopeServers };
     try {
       const res = await fetch("/api/plugins/mcp", {
         method: "PUT",
@@ -297,17 +298,16 @@ export function McpManager() {
         </TabsContent>
 
         <TabsContent value="json" className="mt-4">
-          {Object.values(servers).some(s => s._source === 'claude.json') && (
+          {Object.values(servers).some(s => s._source === 'project') && (
             <p className="text-xs text-muted-foreground mb-2">
-              Servers from ~/.claude.json are managed by Claude CLI and not shown here.
-              Use the list tab to edit or delete them.
+              {t('mcp.jsonTabProjectHidden' as TranslationKey)}
             </p>
           )}
           <ConfigEditor
             value={JSON.stringify(
               Object.fromEntries(
                 Object.entries(servers)
-                  .filter(([, v]) => v._source !== 'claude.json')
+                  .filter(([, v]) => v._source !== 'project')
                   .map(([k, v]) => {
                     const { _source: _unused, ...rest } = v; // eslint-disable-line @typescript-eslint/no-unused-vars
                     return [k, rest];

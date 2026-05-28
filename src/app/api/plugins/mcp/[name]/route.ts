@@ -3,14 +3,18 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import type { MCPServerConfig, ErrorResponse, SuccessResponse } from '@/types';
-import { invalidateMcpCache } from '@/lib/mcp-loader';
+import {
+  invalidateMcpCache,
+  migrateSettingsMcpServersToClaudeJson,
+} from '@/lib/mcp-loader';
 
-function getSettingsPath(): string {
+function userSettingsPath(): string {
   return path.join(os.homedir(), '.claude', 'settings.json');
 }
 
-// ~/.claude.json — Claude CLI stores user-scoped MCP servers here
-function getUserConfigPath(): string {
+// `~/.claude.json` is the only file the bundled Claude Code binary
+// actually reads for user-scope MCP servers — see mcp-loader.ts for proof.
+function userClaudeJsonPath(): string {
   return path.join(os.homedir(), '.claude.json');
 }
 
@@ -23,12 +27,14 @@ function readJsonFile(filePath: string): Record<string, unknown> {
   }
 }
 
-function writeJsonFile(filePath: string, data: Record<string, unknown>): void {
+function writeJsonAtomic(filePath: string, data: unknown): void {
   const dir = path.dirname(filePath);
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true });
   }
-  fs.writeFileSync(filePath, JSON.stringify(data, null, 2), 'utf-8');
+  const tmp = path.join(dir, `.${path.basename(filePath)}.codepilot-tmp-${process.pid}-${Date.now()}`);
+  fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf-8');
+  fs.renameSync(tmp, filePath);
 }
 
 export async function DELETE(
@@ -36,28 +42,37 @@ export async function DELETE(
   { params }: { params: Promise<{ name: string }> }
 ): Promise<NextResponse<SuccessResponse | ErrorResponse>> {
   try {
+    migrateSettingsMcpServersToClaudeJson();
+
     const { name } = await params;
     const serverName = decodeURIComponent(name);
 
     let deleted = false;
 
-    // Try deleting from ~/.claude/settings.json
-    const settings = readJsonFile(getSettingsPath());
-    const settingsServers = (settings.mcpServers || {}) as Record<string, MCPServerConfig>;
-    if (settingsServers[serverName]) {
-      delete settingsServers[serverName];
-      settings.mcpServers = settingsServers;
-      writeJsonFile(getSettingsPath(), settings);
-      deleted = true;
-    }
-
-    // Also try deleting from ~/.claude.json
-    const userConfig = readJsonFile(getUserConfigPath());
+    // Primary target: `~/.claude.json`.
+    const userConfig = readJsonFile(userClaudeJsonPath());
     const userServers = (userConfig.mcpServers || {}) as Record<string, MCPServerConfig>;
     if (userServers[serverName]) {
       delete userServers[serverName];
       userConfig.mcpServers = userServers;
-      writeJsonFile(getUserConfigPath(), userConfig);
+      writeJsonAtomic(userClaudeJsonPath(), userConfig);
+      deleted = true;
+    }
+
+    // Defensive sweep: if migration earlier failed for some reason, an
+    // entry might still exist in the legacy settings.json location. Drop
+    // it too so the UI's GET no longer surfaces it.
+    const settings = readJsonFile(userSettingsPath());
+    const settingsServers = (settings.mcpServers || {}) as Record<string, MCPServerConfig>;
+    if (settingsServers[serverName]) {
+      delete settingsServers[serverName];
+      // If the field is now empty, remove it entirely — keeps settings.json tidy.
+      if (Object.keys(settingsServers).length === 0) {
+        delete settings.mcpServers;
+      } else {
+        settings.mcpServers = settingsServers;
+      }
+      writeJsonAtomic(userSettingsPath(), settings);
       deleted = true;
     }
 

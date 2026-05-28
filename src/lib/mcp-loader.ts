@@ -1,11 +1,20 @@
 /**
  * MCP Server Loader — shared module for loading MCP server configurations.
  *
- * The SDK auto-loads MCP servers from settingSources (['user', 'project', 'local']).
- * We only manually pass servers that need CodePilot-specific processing:
- * ${...} env placeholder resolution from the CodePilot DB.
+ * Source-of-truth for user-scope MCP servers is `~/.claude.json`'s `mcpServers`
+ * field. This matches what the bundled Claude Code binary (2.1.141) actually
+ * reads when `--setting-sources=user` is passed — see the implementation note
+ * at the bottom of this file for why `~/.claude/settings.json.mcpServers`
+ * is NOT a valid source despite the field name suggesting otherwise.
  *
- * This eliminates redundant config passing and reduces initialization overhead.
+ * Project-scope servers live in `<cwd>/.mcp.json`.
+ *
+ * `~/.claude/settings.json` still owns the `mcpServerOverrides` map that
+ * controls per-server enable/disable for project-scope MCPs.
+ *
+ * We only manually pass servers that need CodePilot-specific processing
+ * (${...} env placeholder resolution from the CodePilot DB) — the SDK
+ * loads the rest natively via settingSources.
  */
 
 import fs from 'fs';
@@ -13,6 +22,16 @@ import path from 'path';
 import os from 'os';
 import type { MCPServerConfig } from '@/types';
 import { getSetting } from '@/lib/db';
+
+// ── Paths ────────────────────────────────────────────────────────────
+
+function userClaudeJsonPath(): string {
+  return path.join(os.homedir(), '.claude.json');
+}
+
+function userSettingsJsonPath(): string {
+  return path.join(os.homedir(), '.claude', 'settings.json');
+}
 
 // ── Cache ────────────────────────────────────────────────────────────
 
@@ -37,19 +56,116 @@ function readJson(p: string): Record<string, unknown> {
   try { return JSON.parse(fs.readFileSync(p, 'utf-8')); } catch { return {}; }
 }
 
+/**
+ * Atomic-ish write: writes to a tempfile in the same directory then renames.
+ * `~/.claude.json` and `~/.claude/settings.json` both hold long-lived state
+ * owned by the bundled Claude Code binary (numStartups, projects, env, etc.)
+ * — a partial write would corrupt that state, so we never write in place.
+ */
+function writeJsonAtomic(filePath: string, data: unknown): void {
+  const dir = path.dirname(filePath);
+  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  const tmp = path.join(dir, `.${path.basename(filePath)}.codepilot-tmp-${process.pid}-${Date.now()}`);
+  fs.writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf-8');
+  fs.renameSync(tmp, filePath);
+}
+
+// ── Migration: settings.json.mcpServers → .claude.json.mcpServers ────
+//
+// Before commit 2ec37ec the MCP Manager UI wrote new servers to
+// `~/.claude/settings.json.mcpServers`, but the bundled Claude Code binary
+// never reads that field — see "Why settings.json.mcpServers is a dead
+// field" at the bottom of this file. Any user who added MCP servers via
+// the UI ended up with config that displayed in the manager but never
+// loaded at runtime. This function moves those entries to the correct
+// file (`~/.claude.json.mcpServers`) and strips them from settings.json.
+//
+// Re-entrancy: safe to call repeatedly. If settings.json has no
+// mcpServers field (or it's empty), this is a no-op.
+//
+// Conflict policy: when the same name exists in both files, `.claude.json`
+// wins — that's the file the SDK actually loads, so it's the source of
+// truth. The settings.json entry is discarded.
+//
+// Failure mode: if writing `.claude.json` succeeds but writing
+// settings.json fails, the entries are duplicated but `.claude.json` is
+// still authoritative; next invocation will retry and converge.
+
+interface MigrationResult {
+  migrated: string[];        // names moved from settings.json to .claude.json
+  conflictsResolved: string[]; // names present in both; .claude.json kept
+  cleared: boolean;          // settings.json.mcpServers was emptied
+  error?: string;
+}
+
+export function migrateSettingsMcpServersToClaudeJson(): MigrationResult {
+  const result: MigrationResult = { migrated: [], conflictsResolved: [], cleared: false };
+  try {
+    const settingsPath = userSettingsJsonPath();
+    if (!fs.existsSync(settingsPath)) return result;
+
+    const settings = readJson(settingsPath);
+    const legacy = (settings.mcpServers || {}) as Record<string, MCPServerConfig>;
+    if (!settings.mcpServers || Object.keys(legacy).length === 0) {
+      return result; // nothing to migrate
+    }
+
+    const claudeJsonPath = userClaudeJsonPath();
+    const claudeJson = readJson(claudeJsonPath);
+    const target = ((claudeJson.mcpServers || {}) as Record<string, MCPServerConfig>);
+
+    // Merge: .claude.json wins on name collision.
+    for (const [name, server] of Object.entries(legacy)) {
+      if (target[name]) {
+        result.conflictsResolved.push(name);
+      } else {
+        target[name] = server;
+        result.migrated.push(name);
+      }
+    }
+
+    // Write .claude.json first. Only if that succeeds do we touch settings.json.
+    claudeJson.mcpServers = target;
+    writeJsonAtomic(claudeJsonPath, claudeJson);
+
+    // Strip the dead field from settings.json. Other fields (env,
+    // permissions, hooks, mcpServerOverrides, …) must survive untouched.
+    delete settings.mcpServers;
+    writeJsonAtomic(settingsPath, settings);
+    result.cleared = true;
+
+    console.log(
+      `[mcp-migration] Moved ${result.migrated.length} MCP server(s) from settings.json to .claude.json` +
+      (result.conflictsResolved.length > 0
+        ? ` — ${result.conflictsResolved.length} conflict(s) resolved in favor of .claude.json: ${result.conflictsResolved.join(', ')}`
+        : '')
+    );
+  } catch (err) {
+    result.error = err instanceof Error ? err.message : String(err);
+    console.warn('[mcp-migration] failed:', result.error, '— settings.json left intact, will retry on next load');
+  }
+  return result;
+}
+
 function loadAndMerge(): CachedMcpConfig {
   // Check cache
   if (_cache && Date.now() - _cache.timestamp < CACHE_TTL_MS) {
     return _cache;
   }
 
-  const userConfig = readJson(path.join(os.homedir(), '.claude.json'));
-  const settings = readJson(path.join(os.homedir(), '.claude', 'settings.json'));
+  // Opportunistic migration: cheap no-op when there's nothing to move.
+  // Runs before reading so the freshly-migrated state is what we cache.
+  migrateSettingsMcpServersToClaudeJson();
+
+  const userConfig = readJson(userClaudeJsonPath());
+  const settings = readJson(userSettingsJsonPath());
   const projectMcp = readJson(path.join(process.cwd(), '.mcp.json'));
 
+  // settings.json.mcpServers is a dead field — see file-bottom note. We
+  // ignore it entirely; the migration above moves any stragglers to
+  // .claude.json on first read after upgrade.
   const merged: Record<string, MCPServerConfig> = {
     ...((userConfig.mcpServers || {}) as Record<string, MCPServerConfig>),
-    ...((settings.mcpServers || {}) as Record<string, MCPServerConfig>),
     ...((projectMcp.mcpServers || {}) as Record<string, MCPServerConfig>),
   };
 
@@ -176,7 +292,7 @@ export function loadProjectMcpServers(projectCwd: string | undefined): Record<st
     // silently re-enable a project MCP the user toggled off (or fail to
     // enable one they overrode on), creating a state mismatch between the
     // UI and what the SDK actually loads.
-    const userSettings = readJson(path.join(os.homedir(), '.claude', 'settings.json'));
+    const userSettings = readJson(userSettingsJsonPath());
     const overrides = (userSettings.mcpServerOverrides || {}) as Record<string, { enabled?: boolean }>;
 
     const resolved: Record<string, MCPServerConfig> = {};
@@ -209,3 +325,27 @@ export function loadProjectMcpServers(projectCwd: string | undefined): Record<st
     return undefined;
   }
 }
+
+// ── Why settings.json.mcpServers is a dead field ─────────────────────
+//
+// The bundled Claude Code 2.1.141 binary (which ships inside the
+// `@anthropic-ai/claude-agent-sdk-<platform>` subpackage) reads MCP
+// servers from these locations only:
+//
+//   1. `~/.claude.json`         user-scope (under `mcpServers`)
+//   2. `<cwd>/.mcp.json`        project-scope (under `mcpServers`)
+//   3. `--mcp-config <json>`    CLI flag (what the SDK populates from
+//                               queryOptions.mcpServers — used for our
+//                               in-process MCPs + ${...}-resolved servers)
+//
+// `~/.claude/settings.json` is loaded for its `env`, `permissions`,
+// `hooks`, `enabledPlugins`, `mcpServerOverrides`, etc. — but its
+// `mcpServers` field is silently ignored. Verified empirically by
+// inspecting the bundled binary's `mcp list` output against every
+// `--setting-sources` combination: settings.json.mcpServers never
+// appears, .claude.json.mcpServers always does (under any flag that
+// includes 'user', or the no-flag default).
+//
+// `claude mcp add -s user <name> -- <cmd>` confirms this from the other
+// direction: the binary itself writes to `~/.claude.json`, never to
+// settings.json. So we follow the same convention.
