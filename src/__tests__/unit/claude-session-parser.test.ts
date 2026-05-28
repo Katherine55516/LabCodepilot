@@ -10,6 +10,7 @@ import assert from 'node:assert/strict';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { pathToFileURL } from 'url';
 
 // We test the parser functions by creating temporary JSONL files
 // that mimic Claude Code's session storage format.
@@ -17,13 +18,45 @@ import os from 'os';
 const TEST_DIR = path.join(os.tmpdir(), `codepilot-test-sessions-${Date.now()}`);
 const PROJECTS_DIR = path.join(TEST_DIR, '.claude', 'projects');
 
-// Helper to create a JSONL session file
+// bsApp shadow home — emulates %APPDATA%\claude-bs-agent\claude-home on Windows
+// (or the equivalent userData layout on macOS/Linux). The parser builds this
+// path from different env/home sources depending on platform:
+//   - win32 : process.env.APPDATA + claude-bs-agent\claude-home
+//   - darwin: os.homedir() + Library/Application Support/claude-bs-agent/claude-home
+//   - linux : process.env.XDG_CONFIG_HOME (or ~/.config) + claude-bs-agent/claude-home
+// So the expected on-disk projects path depends on the platform we're running on.
+const BSAPP_DIR = path.join(TEST_DIR, 'AppData', 'Roaming');
+function getExpectedBsAppProjectsDir(): string {
+  if (process.platform === 'darwin') {
+    return path.join(
+      TEST_DIR,
+      'Library',
+      'Application Support',
+      'claude-bs-agent',
+      'claude-home',
+      '.claude',
+      'projects',
+    );
+  }
+  // win32 uses APPDATA mock; linux uses XDG_CONFIG_HOME mock — both point at BSAPP_DIR.
+  return path.join(
+    BSAPP_DIR,
+    'claude-bs-agent',
+    'claude-home',
+    '.claude',
+    'projects',
+  );
+}
+const BSAPP_PROJECTS_DIR = getExpectedBsAppProjectsDir();
+
+// Helper to create a JSONL session file in a chosen projects root
 function createSessionFile(
   projectDirName: string,
   sessionId: string,
   lines: object[],
+  root: string = PROJECTS_DIR,
 ): string {
-  const dir = path.join(PROJECTS_DIR, projectDirName);
+  const dir = path.join(root, projectDirName);
   fs.mkdirSync(dir, { recursive: true });
   const filePath = path.join(dir, `${sessionId}.jsonl`);
   const content = lines.map(l => JSON.stringify(l)).join('\n') + '\n';
@@ -119,20 +152,37 @@ const parserPath = path.resolve(__dirname, '../../lib/claude-session-parser.ts')
 describe('claude-session-parser', () => {
   // We'll dynamically import the parser module
   let parser: typeof import('../../lib/claude-session-parser');
+  // Save real env so we can restore in `after`
+  const realHome = process.env.HOME;
+  const realUserProfile = process.env.USERPROFILE;
+  const realAppData = process.env.APPDATA;
+  const realXdg = process.env.XDG_CONFIG_HOME;
 
   before(async () => {
-    // Set HOME to our test directory so the parser looks for sessions there
+    // Redirect every path source the parser inspects so it can't see the
+    // host's real ~/.claude or %APPDATA%\claude-bs-agent during tests.
+    // - HOME / USERPROFILE feed os.homedir() (USERPROFILE wins on Windows)
+    // - APPDATA is the bsApp discovery seed on win32
+    // - XDG_CONFIG_HOME is the bsApp discovery seed on linux
     process.env.HOME = TEST_DIR;
+    process.env.USERPROFILE = TEST_DIR;
+    process.env.APPDATA = BSAPP_DIR;
+    process.env.XDG_CONFIG_HOME = BSAPP_DIR;
 
-    // Dynamic import - tsx handles the TypeScript + path alias resolution
-    parser = await import(parserPath);
+    // Dynamic import - tsx handles the TypeScript + path alias resolution.
+    // Wrap in file:// URL so Windows absolute paths (e.g. D:\...) work too;
+    // Node's ESM loader rejects raw drive-letter paths.
+    parser = await import(pathToFileURL(parserPath).href);
   });
 
   after(() => {
     // Clean up test directory
     fs.rmSync(TEST_DIR, { recursive: true, force: true });
-    // Restore HOME
-    process.env.HOME = os.homedir();
+    // Restore env (delete the keys we created so we don't leak fake paths)
+    if (realHome === undefined) delete process.env.HOME; else process.env.HOME = realHome;
+    if (realUserProfile === undefined) delete process.env.USERPROFILE; else process.env.USERPROFILE = realUserProfile;
+    if (realAppData === undefined) delete process.env.APPDATA; else process.env.APPDATA = realAppData;
+    if (realXdg === undefined) delete process.env.XDG_CONFIG_HOME; else process.env.XDG_CONFIG_HOME = realXdg;
   });
 
   describe('decodeProjectPath', () => {
@@ -514,6 +564,126 @@ describe('claude-session-parser', () => {
       assert.ok(result, 'Should handle malformed lines gracefully');
       assert.equal(result!.messages.length, 1);
       assert.equal(result!.messages[0].content, 'Valid message after bad line');
+    });
+  });
+
+  describe('bsApp shadow home', () => {
+    it('should list sessions written under the bsApp shadow home', () => {
+      const sessionId = 'bsapp-session-001';
+      const userEntry = makeUserEntry({
+        sessionId,
+        content: 'Hello from bsApp',
+        cwd: '/Users/me/bsapp-project',
+        gitBranch: 'main',
+        version: '2.1.34',
+      });
+
+      // Write directly into the bsApp shadow projects dir, not the main one.
+      createSessionFile(
+        '-Users-me-bsapp-project',
+        sessionId,
+        [
+          makeQueueEntry(sessionId),
+          userEntry,
+          makeAssistantEntry({
+            sessionId,
+            content: [{ type: 'text', text: 'Hi from inside bsApp.' }],
+            parentUuid: userEntry.uuid,
+          }),
+        ],
+        BSAPP_PROJECTS_DIR,
+      );
+
+      const sessions = parser.listClaudeSessions();
+      const found = sessions.find(s => s.sessionId === sessionId);
+      assert.ok(found, 'bsApp session should appear in the unified list');
+      assert.equal(found!.preview, 'Hello from bsApp');
+      assert.equal(found!.cwd, '/Users/me/bsapp-project');
+    });
+
+    it('should parse a session from the bsApp shadow home', () => {
+      const sessionId = 'bsapp-parse-001';
+      const userEntry = makeUserEntry({
+        sessionId,
+        content: 'Parse me from bsApp',
+        cwd: '/Users/me/bsapp-parse',
+      });
+
+      createSessionFile(
+        '-Users-me-bsapp-parse',
+        sessionId,
+        [
+          makeQueueEntry(sessionId),
+          userEntry,
+          makeAssistantEntry({
+            sessionId,
+            content: [{ type: 'text', text: 'Parsed reply' }],
+            parentUuid: userEntry.uuid,
+          }),
+        ],
+        BSAPP_PROJECTS_DIR,
+      );
+
+      const result = parser.parseClaudeSession(sessionId);
+      assert.ok(result, 'parseClaudeSession should find sessions in bsApp shadow home');
+      assert.equal(result!.messages.length, 2);
+      assert.equal(result!.messages[0].content, 'Parse me from bsApp');
+      assert.equal(result!.messages[1].content, 'Parsed reply');
+    });
+
+    it('should prefer the main projects root when a session id collides', () => {
+      // Same sessionId written to both roots with different contents — the
+      // canonical ~/.claude/projects/ copy must win so existing CLI workflows
+      // remain authoritative.
+      const sessionId = 'collide-session-001';
+
+      createSessionFile(
+        '-home-user-mainproject',
+        sessionId,
+        [
+          makeQueueEntry(sessionId),
+          makeUserEntry({ sessionId, content: 'From main root', cwd: '/home/user/mainproject' }),
+        ],
+        PROJECTS_DIR,
+      );
+
+      createSessionFile(
+        '-home-user-bsappproject',
+        sessionId,
+        [
+          makeQueueEntry(sessionId),
+          makeUserEntry({ sessionId, content: 'From bsApp root', cwd: '/home/user/bsappproject' }),
+        ],
+        BSAPP_PROJECTS_DIR,
+      );
+
+      const sessions = parser.listClaudeSessions();
+      const matches = sessions.filter(s => s.sessionId === sessionId);
+      assert.equal(matches.length, 1, 'Colliding sessionId should appear exactly once');
+      assert.equal(matches[0].preview, 'From main root');
+      assert.equal(matches[0].cwd, '/home/user/mainproject');
+
+      const parsed = parser.parseClaudeSession(sessionId);
+      assert.ok(parsed);
+      assert.equal(parsed!.messages[0].content, 'From main root');
+    });
+  });
+
+  describe('getClaudeProjectsRoots', () => {
+    it('should always include the main root first', () => {
+      const roots = parser.getClaudeProjectsRoots();
+      assert.ok(roots.length >= 1);
+      assert.equal(roots[0].source, 'main');
+      assert.ok(roots[0].path.endsWith(path.join('.claude', 'projects')));
+    });
+
+    it('should include the bsApp shadow root on win32/darwin/linux', () => {
+      const roots = parser.getClaudeProjectsRoots();
+      // win32 needs APPDATA set (we mock it); darwin/linux derive from homedir/XDG.
+      const bsApp = roots.find(r => r.source === 'bsApp');
+      assert.ok(bsApp, 'bsApp root should be discovered');
+      assert.ok(bsApp!.path.includes('claude-bs-agent'));
+      assert.ok(bsApp!.path.endsWith(path.join('.claude', 'projects')));
     });
   });
 });

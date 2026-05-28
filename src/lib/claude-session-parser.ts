@@ -132,11 +132,77 @@ interface ContentBlock {
 // Session Discovery
 // ==========================================
 
+/** Where a discovered projects root comes from — used internally for ordering. */
+export type ClaudeProjectsSource = 'main' | 'bsApp';
+
+export interface ClaudeProjectsRoot {
+  source: ClaudeProjectsSource;
+  /** Absolute path to `<home>/.claude/projects` (may not exist on disk yet) */
+  path: string;
+}
+
 /**
- * Get the Claude Code projects directory.
+ * Resolve the "shadow HOME" that bsApp (claude-bs-agent) uses for its bundled
+ * Claude CLI. bsApp's Electron main process spawns the server child with
+ * `HOME`/`USERPROFILE` rewritten to `<userData>/claude-home` so the embedded
+ * CLI cannot read the user's global `~/.claude/settings.json`. This isolation
+ * also moves every session JSONL out of `~/.claude/projects/`, which is why
+ * CodePilot can't see those sessions by default.
+ *
+ * `userData` is Electron's standard per-app data directory:
+ *   - Windows: %APPDATA%\<productName>
+ *   - macOS:   ~/Library/Application Support/<productName>
+ *   - Linux:   ~/.config/<productName>   (or $XDG_CONFIG_HOME/<productName>)
+ *
+ * productName = "claude-bs-agent" (bsApp/package.json).
+ *
+ * Returns null on any unrecognised platform.
+ */
+function getBsAppShadowHome(): string | null {
+  const productName = 'claude-bs-agent';
+
+  if (process.platform === 'win32') {
+    const appData = process.env.APPDATA;
+    if (!appData) return null;
+    return path.join(appData, productName, 'claude-home');
+  }
+
+  if (process.platform === 'darwin') {
+    return path.join(os.homedir(), 'Library', 'Application Support', productName, 'claude-home');
+  }
+
+  const xdgConfig = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
+  return path.join(xdgConfig, productName, 'claude-home');
+}
+
+/**
+ * Return every Claude Code `projects/` directory CodePilot knows how to read.
+ * Order matters: when the same session UUID appears in multiple roots, the
+ * earlier root wins (so the user's real `~/.claude/projects/` is canonical).
+ *
+ * Non-existent roots are kept in the list so callers can short-circuit with
+ * `fs.existsSync`; we don't filter here to keep the function pure.
+ */
+export function getClaudeProjectsRoots(): ClaudeProjectsRoot[] {
+  const roots: ClaudeProjectsRoot[] = [
+    { source: 'main', path: path.join(os.homedir(), '.claude', 'projects') },
+  ];
+
+  const bsAppHome = getBsAppShadowHome();
+  if (bsAppHome) {
+    roots.push({ source: 'bsApp', path: path.join(bsAppHome, '.claude', 'projects') });
+  }
+
+  return roots;
+}
+
+/**
+ * Legacy single-root accessor. Returns the primary (main) root.
+ * Kept so callers that don't care about multi-root behaviour (and the
+ * existing unit tests that mock `process.env.HOME`) keep working.
  */
 export function getClaudeProjectsDir(): string {
-  return path.join(os.homedir(), '.claude', 'projects');
+  return getClaudeProjectsRoots()[0].path;
 }
 
 /**
@@ -159,49 +225,59 @@ export function decodeProjectPath(encodedName: string): string {
 
 /**
  * List all available Claude Code CLI sessions.
- * Scans ~/.claude/projects/ for .jsonl files and extracts metadata.
+ *
+ * Scans every root returned by `getClaudeProjectsRoots()` — i.e. the user's
+ * real `~/.claude/projects/` plus the bsApp shadow HOME if present — for
+ * `.jsonl` files and extracts metadata.
+ *
+ * Cross-root dedup: a sessionId observed in an earlier root suppresses the
+ * same id in later roots. This makes the primary `~/.claude/projects/` the
+ * canonical source when the user (theoretically) has the same UUID in both
+ * places. UUID collisions across roots are vanishingly rare in practice.
  */
 export function listClaudeSessions(): ClaudeSessionInfo[] {
-  const projectsDir = getClaudeProjectsDir();
-
-  if (!fs.existsSync(projectsDir)) {
-    return [];
-  }
-
   const sessions: ClaudeSessionInfo[] = [];
+  const seenIds = new Set<string>();
 
-  try {
-    const projectDirs = fs.readdirSync(projectsDir, { withFileTypes: true });
+  for (const root of getClaudeProjectsRoots()) {
+    if (!fs.existsSync(root.path)) continue;
 
-    for (const projectDir of projectDirs) {
-      if (!projectDir.isDirectory()) continue;
+    try {
+      const projectDirs = fs.readdirSync(root.path, { withFileTypes: true });
 
-      const projectPath = path.join(projectsDir, projectDir.name);
-      const decodedPath = decodeProjectPath(projectDir.name);
+      for (const projectDir of projectDirs) {
+        if (!projectDir.isDirectory()) continue;
 
-      try {
-        const files = fs.readdirSync(projectPath);
-        const jsonlFiles = files.filter(f => f.endsWith('.jsonl'));
+        const projectFolderPath = path.join(root.path, projectDir.name);
+        const decodedPath = decodeProjectPath(projectDir.name);
 
-        for (const jsonlFile of jsonlFiles) {
-          const filePath = path.join(projectPath, jsonlFile);
-          const sessionId = jsonlFile.replace('.jsonl', '');
+        try {
+          const files = fs.readdirSync(projectFolderPath);
+          const jsonlFiles = files.filter(f => f.endsWith('.jsonl'));
 
-          try {
-            const info = extractSessionInfo(filePath, sessionId, decodedPath);
-            if (info) {
-              sessions.push(info);
+          for (const jsonlFile of jsonlFiles) {
+            const sessionId = jsonlFile.replace('.jsonl', '');
+            if (seenIds.has(sessionId)) continue;
+
+            const filePath = path.join(projectFolderPath, jsonlFile);
+
+            try {
+              const info = extractSessionInfo(filePath, sessionId, decodedPath);
+              if (info) {
+                sessions.push(info);
+                seenIds.add(sessionId);
+              }
+            } catch {
+              // Skip files that can't be parsed
             }
-          } catch {
-            // Skip files that can't be parsed
           }
+        } catch {
+          // Skip directories that can't be read
         }
-      } catch {
-        // Skip directories that can't be read
       }
+    } catch {
+      // Projects directory can't be read
     }
-  } catch {
-    // Projects directory can't be read
   }
 
   // Sort by most recent first
@@ -315,31 +391,37 @@ function extractSessionInfo(
 /**
  * Fully parse a Claude Code session JSONL file into messages.
  * Reads the file once and extracts both metadata and messages in a single pass.
+ *
+ * Searches every root from `getClaudeProjectsRoots()` so sessions written by
+ * sibling apps with a redirected HOME (e.g. bsApp) are also importable. The
+ * first root containing the sessionId wins — matches the dedup order in
+ * `listClaudeSessions()`.
  */
 export function parseClaudeSession(sessionId: string): ParsedSession | null {
-  const projectsDir = getClaudeProjectsDir();
-
-  if (!fs.existsSync(projectsDir)) return null;
-
-  // Find the session file across all project directories
   let filePath: string | null = null;
   let projectPath = '';
 
-  try {
-    const projectDirs = fs.readdirSync(projectsDir, { withFileTypes: true });
+  for (const root of getClaudeProjectsRoots()) {
+    if (!fs.existsSync(root.path)) continue;
 
-    for (const projectDir of projectDirs) {
-      if (!projectDir.isDirectory()) continue;
+    try {
+      const projectDirs = fs.readdirSync(root.path, { withFileTypes: true });
 
-      const candidate = path.join(projectsDir, projectDir.name, `${sessionId}.jsonl`);
-      if (fs.existsSync(candidate)) {
-        filePath = candidate;
-        projectPath = decodeProjectPath(projectDir.name);
-        break;
+      for (const projectDir of projectDirs) {
+        if (!projectDir.isDirectory()) continue;
+
+        const candidate = path.join(root.path, projectDir.name, `${sessionId}.jsonl`);
+        if (fs.existsSync(candidate)) {
+          filePath = candidate;
+          projectPath = decodeProjectPath(projectDir.name);
+          break;
+        }
       }
+    } catch {
+      // Skip unreadable root
     }
-  } catch {
-    return null;
+
+    if (filePath) break;
   }
 
   if (!filePath) return null;
