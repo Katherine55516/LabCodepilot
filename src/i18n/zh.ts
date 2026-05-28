@@ -794,10 +794,10 @@ const zh: Record<TranslationKey, string> = {
   // ── Settings: Remote Bridge ────────────────────────────────
   'settings.bridge': '远程桥接',
   'bridge.title': '远程桥接',
-  'bridge.description': '通过 Telegram、飞书等外部渠道控制 Claude',
+  'bridge.description': '通过微信控制Agent',
   'bridge.enabled': '启用远程桥接',
-  'bridge.enabledDesc': '允许外部消息渠道与 Claude 交互',
-  'bridge.activeHint': '桥接已激活。外部渠道可以向 Claude 发送任务。',
+  'bridge.enabledDesc': '允许外部消息渠道与 Agent 交互',
+  'bridge.activeHint': '桥接已激活。外部渠道可以向 Agent 发送任务。',
   'bridge.status': '桥接状态',
   'bridge.statusConnected': '已连接',
   'bridge.statusDisconnected': '未连接',
