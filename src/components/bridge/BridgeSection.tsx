@@ -282,7 +282,12 @@ export function BridgeSection() {
           description={t("bridge.channelsDesc")}
         >
           <div className="space-y-3">
-            <div className="flex items-center justify-between">
+            {/* Telegram / Feishu / Discord / QQ channels hidden — WeChat is the
+                only enabled channel for now. Toggle handlers (handleToggleTelegram
+                etc.), isXxxEnabled state, icon imports and i18n keys all stay
+                intact. Restore by uncommenting these four blocks (and re-add
+                "border-t border-border/30 pt-3" to the WeChat block below). */}
+            {/* <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <TelegramLogo size={16} className="text-muted-foreground" />
                 <div>
@@ -340,9 +345,9 @@ export function BridgeSection() {
                 onCheckedChange={handleToggleQQ}
                 disabled={saving}
               />
-            </div>
+            </div> */}
 
-            <div className="flex items-center justify-between border-t border-border/30 pt-3">
+            <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <ChatTeardrop size={16} className="text-muted-foreground" />
                 <div>

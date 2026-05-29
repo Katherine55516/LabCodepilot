@@ -23,10 +23,14 @@ interface SidebarItem {
 
 const sidebarItems: SidebarItem[] = [
   { id: "bridge", label: "Bridge", icon: WifiHigh },
-  { id: "telegram", label: "Telegram", icon: TelegramLogo },
-  { id: "feishu", label: "Feishu", icon: ChatTeardrop },
-  { id: "discord", label: "Discord", icon: GameController },
-  { id: "qq", label: "QQ", icon: ChatsCircle },
+  // Telegram / Feishu / Discord / QQ channel tabs hidden — WeChat is the only
+  // active channel for now. The render branches below + their section
+  // components, icon imports and i18n keys all stay intact. Restore by
+  // uncommenting these four entries.
+  // { id: "telegram", label: "Telegram", icon: TelegramLogo },
+  // { id: "feishu", label: "Feishu", icon: ChatTeardrop },
+  // { id: "discord", label: "Discord", icon: GameController },
+  // { id: "qq", label: "QQ", icon: ChatsCircle },
   { id: "weixin", label: "WeChat", icon: ChatTeardrop },
 ];
 
