@@ -4,15 +4,7 @@ import { useState, useCallback, useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Input } from "@/components/ui/input";
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectLabel,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { BridgeModelSelector } from "./BridgeModelSelector";
 import { SpinnerGap, CheckCircle, Warning, TelegramLogo, ChatTeardrop, GameController, ChatsCircle } from "@/components/ui/icon";
 import { useTranslation } from "@/hooks/useTranslation";
 import { useBridgeStatus } from "@/hooks/useBridgeStatus";
@@ -460,35 +452,11 @@ export function BridgeSection() {
               <label className="text-xs font-medium text-muted-foreground mb-1 block">
                 {t("bridge.defaultModel")}
               </label>
-              {providerGroups.length > 0 ? (
-                <Select value={model} onValueChange={setModel}>
-                  <SelectTrigger className="w-full text-sm font-mono">
-                    <SelectValue placeholder={t("bridge.defaultModelHint")} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {providerGroups.map((group) => (
-                      <SelectGroup key={group.provider_id}>
-                        <SelectLabel>{group.provider_name}</SelectLabel>
-                        {group.models.map((m) => (
-                          <SelectItem
-                            key={`${group.provider_id}::${m.value}`}
-                            value={`${group.provider_id}::${m.value}`}
-                          >
-                            {m.label}
-                          </SelectItem>
-                        ))}
-                      </SelectGroup>
-                    ))}
-                  </SelectContent>
-                </Select>
-              ) : (
-                <Input
-                  value={model}
-                  onChange={(e) => setModel(e.target.value)}
-                  placeholder="sonnet"
-                  className="font-mono text-sm"
-                />
-              )}
+              <BridgeModelSelector
+                value={model}
+                onChange={setModel}
+                providerGroups={providerGroups}
+              />
               <p className="text-xs text-muted-foreground mt-1">
                 {t("bridge.defaultModelHint")}
               </p>
