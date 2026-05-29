@@ -9,7 +9,6 @@ import {
   CommandList,
   CommandListItems,
   CommandListItem,
-  CommandListGroup,
 } from '@/components/patterns';
 
 interface BridgeModelSelectorProps {
@@ -22,23 +21,23 @@ interface BridgeModelSelectorProps {
 }
 
 /**
- * Bridge default-model picker.
+ * Bridge default-model picker — flat one-row-per-provider list, matching the
+ * chat composer's ModelSelectorDropdown look & behaviour: rounded popover,
+ * hover/active rows, checkmark on the selected row, and a trigger showing the
+ * current provider's name.
  *
- * Reuses the chat composer's CommandList look & feel (rounded popover,
- * hover/active states, checkmark on the selected row) but keeps the bridge's
- * original data shape: every provider group is shown, with each concrete model
- * individually selectable — unlike the chat ModelSelectorDropdown which lists
- * only managed providers as a flat one-row-per-provider list.
+ * Each row selects that provider's PRIMARY (first) model. Multi-model
+ * providers are therefore not individually addressable here — that's an
+ * intentional trade chosen by the user in favour of matching the chat UI
+ * exactly (an earlier grouped variant kept every model selectable but looked
+ * too much like the old native <select>).
  *
- * Why the difference: the bridge default can target any configured provider
- * (env "Claude Code", local BYOK like GLM, or managed), and multi-model
- * providers must remain fully addressable. The visual container is what was
- * asked to match — not the managed-only filtering.
+ * Difference from the chat dropdown: that one lists managed providers only;
+ * the bridge default may target any configured provider (env "Claude Code",
+ * local BYOK, or managed), so we render every group from providerGroups.
  *
- * Form-context tweaks vs the chat dropdown:
- *   - trigger is a full-width form-style button, not a PromptInputButton
- *   - popover opens downward (top-full) instead of upward
- *   - no localStorage side effects (Settings saves explicitly via its button)
+ * Form-context tweaks: full-width form-style trigger (not a PromptInputButton),
+ * popover opens downward (top-full), and no localStorage side effects.
  */
 export function BridgeModelSelector({
   value,
@@ -68,15 +67,19 @@ export function BridgeModelSelector({
     return () => document.removeEventListener('mousedown', handler);
   }, [open]);
 
-  // Trigger label: prefer the selected model's display label (prefixed with its
-  // provider when resolvable); fall back to the raw model id, then placeholder.
-  const currentGroup = providerGroups.find((g) => g.provider_id === currentProviderId);
-  const currentModelLabel = currentGroup?.models.find((m) => m.value === currentModel)?.label;
-  const triggerLabel = currentModelLabel
-    ? currentGroup
-      ? `${currentGroup.provider_name} / ${currentModelLabel}`
-      : currentModelLabel
-    : currentModel || undefined;
+  // One row per provider; selecting a row uses that provider's first model.
+  const flatItems = providerGroups.map((g) => ({
+    providerId: g.provider_id,
+    providerName: g.provider_name,
+    modelValue: g.models[0]?.value ?? '',
+  }));
+
+  // Trigger shows the current provider's name; falls back to the raw model id
+  // (e.g. a stale "default") or a placeholder when nothing resolves.
+  const currentProviderName = providerGroups.find(
+    (g) => g.provider_id === currentProviderId,
+  )?.provider_name;
+  const triggerLabel = currentProviderName ?? (currentModel || undefined);
 
   const handleSelect = useCallback(
     (providerId: string, modelValue: string) => {
@@ -110,30 +113,23 @@ export function BridgeModelSelector({
         // chat composer) with a downward popover suited to a mid-form field.
         <CommandList className="w-full bottom-auto top-full mb-0 mt-2">
           <CommandListItems>
-            {providerGroups.map((group, idx) => (
-              <CommandListGroup
-                key={group.provider_id}
-                label={group.provider_name}
-                separator={idx > 0}
-              >
-                {group.models.map((m) => {
-                  const isActive =
-                    group.provider_id === currentProviderId && m.value === currentModel;
-                  return (
-                    <CommandListItem
-                      key={`${group.provider_id}::${m.value}`}
-                      active={isActive}
-                      onClick={() => handleSelect(group.provider_id, m.value)}
-                      className="justify-between"
-                    >
-                      <span className="truncate font-mono text-xs">{m.label}</span>
-                      {isActive && <span className="shrink-0 text-xs">&#10003;</span>}
-                    </CommandListItem>
-                  );
-                })}
-              </CommandListGroup>
-            ))}
-            {providerGroups.length === 0 && (
+            <div className="py-0.5">
+              {flatItems.map((item) => {
+                const isActive = item.providerId === currentProviderId;
+                return (
+                  <CommandListItem
+                    key={item.providerId}
+                    active={isActive}
+                    onClick={() => handleSelect(item.providerId, item.modelValue)}
+                    className="justify-between"
+                  >
+                    <span className="truncate font-mono text-xs">{item.providerName}</span>
+                    {isActive && <span className="shrink-0 text-xs">&#10003;</span>}
+                  </CommandListItem>
+                );
+              })}
+            </div>
+            {flatItems.length === 0 && (
               <div className="px-3 py-3 text-center text-xs text-muted-foreground">
                 {isZh ? '暂无可用模型' : 'No models available'}
               </div>
