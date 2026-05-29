@@ -510,9 +510,14 @@ function CopyButton({ text }: { text: string }) {
 
 function TokenUsageDisplay({ usage }: { usage: TokenUsage }) {
   const totalTokens = usage.input_tokens + usage.output_tokens;
-  const costStr = usage.cost_usd !== undefined && usage.cost_usd !== null
-    ? ` · $${usage.cost_usd.toFixed(4)}`
-    : '';
+  // USD cost display hidden — `usage.cost_usd` is still computed by the
+  // backend and stored on the message; only the visual `· $X.XXXX` suffix
+  // is suppressed (both in the inline display and the hover tooltip).
+  // Restore by uncommenting the real expression below.
+  const costStr = '';
+  // const costStr = usage.cost_usd !== undefined && usage.cost_usd !== null
+  //   ? ` · $${usage.cost_usd.toFixed(4)}`
+  //   : '';
 
   return (
     <span className="group/tokens relative cursor-default text-xs text-muted-foreground/50">
