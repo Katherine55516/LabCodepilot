@@ -40,8 +40,19 @@ export async function POST(request: Request) {
           send("output", chunk.toString());
         });
 
-        child.on("close", (code) => {
+        child.on("close", async (code) => {
           if (code === 0) {
+            // Drop our mirror in ~/.claude/skills/ if the `skills` CLI removed
+            // the source from ~/.agents/skills/ — keeps the agent's view in
+            // sync with the uninstall. See src/lib/skill-reconcile.ts.
+            try {
+              const { invalidateSkillReconcileCache, reconcileAgentsSkillsToClaudeSkills } =
+                await import("@/lib/skill-reconcile");
+              invalidateSkillReconcileCache();
+              reconcileAgentsSkillsToClaudeSkills();
+            } catch {
+              // non-fatal — startup / next /api/skills call will reconcile
+            }
             send("done", "Uninstall completed successfully");
           } else {
             send("error", `Process exited with code ${code}`);

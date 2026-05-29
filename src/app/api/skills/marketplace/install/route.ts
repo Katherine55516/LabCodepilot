@@ -40,8 +40,20 @@ export async function POST(request: Request) {
           send("output", chunk.toString());
         });
 
-        child.on("close", (code) => {
+        child.on("close", async (code) => {
           if (code === 0) {
+            // The `skills` CLI may land the skill in the agent-neutral
+            // ~/.agents/skills/ location, which the bundled Claude Code binary
+            // can't load. Mirror it into ~/.claude/skills/ now so the freshly
+            // installed skill is usable in the agent without an app restart.
+            try {
+              const { invalidateSkillReconcileCache, reconcileAgentsSkillsToClaudeSkills } =
+                await import("@/lib/skill-reconcile");
+              invalidateSkillReconcileCache();
+              reconcileAgentsSkillsToClaudeSkills();
+            } catch {
+              // non-fatal — startup / next /api/skills call will reconcile
+            }
             send("done", "Install completed successfully");
           } else {
             send("error", `Process exited with code ${code}`);

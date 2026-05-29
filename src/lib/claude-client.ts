@@ -514,6 +514,15 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
       });
 
       try {
+        // Mirror ~/.agents/skills/ → ~/.claude/skills/ before the SDK reads
+        // skills, so skills installed by the `skills` CLI into the agent-neutral
+        // location are loadable by the bundled binary. TTL-cached, so steady
+        // state is a cheap no-op. See src/lib/skill-reconcile.ts.
+        try {
+          const { reconcileSkillsCached } = await import('./skill-reconcile');
+          reconcileSkillsCached();
+        } catch { /* non-fatal: skills just won't be reconciled this turn */ }
+
         const resolvedWorkingDirectory = resolveWorkingDirectory([
           { path: workingDirectory, source: 'requested' },
         ]);

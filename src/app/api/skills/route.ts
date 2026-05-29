@@ -363,6 +363,17 @@ function scanDirectory(
 
 export async function GET(request: NextRequest) {
   try {
+    // Mirror ~/.agents/skills/ → ~/.claude/skills/ before scanning, so the
+    // skills this endpoint lists (which include the agent-neutral
+    // ~/.agents/skills/ location) match what the bundled Claude Code binary
+    // can actually load. TTL-cached. See src/lib/skill-reconcile.ts.
+    try {
+      const { reconcileSkillsCached } = await import("@/lib/skill-reconcile");
+      reconcileSkillsCached();
+    } catch {
+      // non-fatal — listing still proceeds
+    }
+
     // Accept optional cwd query param for project-level skills
     const cwd = request.nextUrl.searchParams.get("cwd") || undefined;
 
