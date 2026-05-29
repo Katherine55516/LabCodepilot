@@ -83,7 +83,7 @@ export async function GET() {
   return NextResponse.json({
     // Bundled binary always present — connected is true by definition.
     connected: true,
-    version: version ? `${version} (Claude Code, bundled)` : 'bundled',
+    version: version || 'bundled',
     // Marker so UI can distinguish "bundled" from "user-installed".
     bundled: true,
     // The following fields are kept for backwards compatibility with UI
