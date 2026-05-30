@@ -5,6 +5,7 @@ import { getDefaultModelsForProvider, getEffectiveProviderProtocol, findPresetFo
 import type { Protocol } from '@/lib/provider-catalog';
 import type { ErrorResponse, ProviderModelGroup } from '@/types';
 import { getOAuthStatus } from '@/lib/openai-oauth-manager';
+import { prependRoleModels } from '@/lib/provider-model-list';
 
 // OpenAI models available through ChatGPT Plus/Pro OAuth (Codex API)
 // Reasoning effort defaults to 'medium' server-side (not user-configurable)
@@ -202,24 +203,12 @@ export async function GET() {
       }
 
       // Inject models from role_models_json into the list if not already present
-      // (e.g. user configured "ark-code-latest" for a Volcengine or anthropic-thirdparty provider)
-      try {
-        const rm = JSON.parse(provider.role_models_json || '{}');
-        // Collect unique model IDs from all role fields (default, reasoning, small, haiku, sonnet, opus)
-        const roleEntries: { id: string; role: string }[] = [];
-        for (const role of ['default', 'reasoning', 'small', 'haiku', 'sonnet', 'opus'] as const) {
-          if (rm[role] && !roleEntries.some(e => e.id === rm[role])) {
-            roleEntries.push({ id: rm[role], role });
-          }
-        }
-        // Add each role model to the list (default role first, so it appears at the top)
-        for (const entry of roleEntries) {
-          if (!rawModels.some(m => m.value === entry.id || m.upstreamModelId === entry.id)) {
-            const label = entry.role === 'default' ? entry.id : `${entry.id} (${entry.role})`;
-            rawModels.unshift({ value: entry.id, label });
-          }
-        }
-      } catch { /* ignore */ }
+      // (e.g. user configured "ark-code-latest" for a Volcengine or anthropic-thirdparty provider).
+      // `default` (= ANTHROPIC_MODEL, the provider's primary model) is kept at
+      // index 0 — the flat model picker sends models[0].value as the request
+      // model. See prependRoleModels for the ordering rationale + the unshift
+      // regression it fixes.
+      rawModels = prependRoleModels(rawModels, provider.role_models_json);
 
       // Legacy: inject ANTHROPIC_MODEL from env overrides if not already present
       // Also check upstreamModelId to avoid duplicates (e.g. catalog has modelId='sonnet'
