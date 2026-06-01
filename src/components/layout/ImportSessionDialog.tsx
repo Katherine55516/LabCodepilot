@@ -155,8 +155,7 @@ export function ImportSessionDialog({
             {t('import.title')}
           </DialogTitle>
           <DialogDescription>
-            Browse and import conversations from Claude Code CLI. Imported
-            sessions can be resumed in AI Native Lab - 研发平台.
+            选择需要导入的会话
           </DialogDescription>
         </DialogHeader>
 

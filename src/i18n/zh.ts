@@ -190,8 +190,8 @@ const zh: Record<TranslationKey, string> = {
   'cli.cliConfig': 'Claude Code 配置',
   'cli.cliConfigDesc': '编辑 ~/.claude/settings.json',
   'cli.importTitle': '导入聊天记录',
-  'cli.importDesc': '从 Claude Code 会话中导入对话历史',
-  'cli.importButton': '从 Claude Code 导入',
+  'cli.importDesc': '从此处导入对话历史',
+  'cli.importButton': '导入',
   'cli.openaiCardTitle': 'OpenAI 账户',
   'cli.openaiCardDesc': '使用 ChatGPT Plus/Pro 订阅登录以访问 OpenAI 模型',
   'cli.openaiAccount': '账户',
@@ -388,7 +388,7 @@ const zh: Record<TranslationKey, string> = {
   'folderPicker.select': '选择此文件夹',
 
   // ── Import session dialog ───────────────────────────────────
-  'import.title': '从 Claude CLI 导入会话',
+  'import.title': '导入会话',
   'import.searchSessions': '搜索会话...',
   'import.noSessions': '未找到会话',
   'import.import': '导入',
