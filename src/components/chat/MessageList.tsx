@@ -5,7 +5,7 @@ import { useTranslation } from '@/hooks/useTranslation';
 import type { TranslationKey } from '@/i18n';
 import { useStickToBottomContext } from 'use-stick-to-bottom';
 import { Button } from '@/components/ui/button';
-import type { Message } from '@/types';
+import type { Message, MessageContentBlock } from '@/types';
 import {
   Conversation,
   ConversationContent,
@@ -162,6 +162,8 @@ interface MessageListProps {
   isStreaming: boolean;
   toolUses?: ToolUseInfo[];
   toolResults?: ToolResultInfo[];
+  /** Ordered content blocks for the interleaved live render. */
+  streamingBlocks?: MessageContentBlock[];
   streamingToolOutput?: string;
   streamingThinkingContent?: string;
   statusText?: string;
@@ -185,6 +187,7 @@ export function MessageList({
   isStreaming,
   toolUses = [],
   toolResults = [],
+  streamingBlocks = [],
   streamingToolOutput,
   streamingThinkingContent,
   statusText,
@@ -318,6 +321,7 @@ export function MessageList({
             isStreaming={isStreaming}
             sessionId={sessionId}
             startedAt={startedAt!}
+            blocks={streamingBlocks}
             toolUses={toolUses}
             toolResults={toolResults}
             streamingToolOutput={streamingToolOutput}

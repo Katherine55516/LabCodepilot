@@ -1,22 +1,22 @@
 'use client';
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useTranslation } from '@/hooks/useTranslation';
 import {
   Message as AIMessage,
   MessageContent,
   MessageResponse,
 } from '@/components/ai-elements/message';
-import { ToolActionsGroup } from '@/components/ai-elements/tool-actions-group';
 import { MediaPreview } from './MediaPreview';
+import { MessageSegments } from './MessageSegments';
 import { Button } from '@/components/ui/button';
 import { Shimmer } from '@/components/ai-elements/shimmer';
 import { ImageGenConfirmation } from './ImageGenConfirmation';
 import { BatchPlanInlinePreview } from './batch-image-gen/BatchPlanInlinePreview';
 import { WidgetRenderer } from './WidgetRenderer';
-import { parseAllShowWidgets, computePartialWidgetKey } from './MessageItem';
+import { parseAllShowWidgets, computePartialWidgetKey, segmentsFromBlocks } from './MessageItem';
 import { PENDING_KEY, buildReferenceImages } from '@/lib/image-ref-store';
-import type { PlannerOutput, MediaBlock } from '@/types';
+import type { PlannerOutput, MediaBlock, MessageContentBlock, RenderSegment } from '@/types';
 
 interface ImageGenRequest {
   prompt: string;
@@ -107,6 +107,8 @@ interface StreamingMessageProps {
   isStreaming: boolean;
   sessionId?: string;
   startedAt: number;
+  /** Ordered content blocks — drives the interleaved render. */
+  blocks?: MessageContentBlock[];
   toolUses?: ToolUseInfo[];
   toolResults?: ToolResultInfo[];
   streamingToolOutput?: string;
@@ -265,6 +267,7 @@ export function StreamingMessage({
   isStreaming,
   sessionId,
   startedAt,
+  blocks = [],
   toolUses = [],
   toolResults = [],
   streamingToolOutput,
@@ -273,7 +276,31 @@ export function StreamingMessage({
   onForceStop,
 }: StreamingMessageProps) {
   const { t } = useTranslation();
-  const bufferedContent = useBufferedContent(content, isStreaming);
+
+  // Ordered segments for the interleaved render. Prefer the snapshot's ordered
+  // blocks; fall back to the legacy separate fields (early stream / safety).
+  const segments = useMemo<RenderSegment[]>(() => {
+    if (blocks.length > 0) return segmentsFromBlocks(blocks);
+    const segs: RenderSegment[] = [];
+    if (thinkingContent) segs.push({ kind: 'thinking', thinking: thinkingContent });
+    if (content) segs.push({ kind: 'text', text: content });
+    for (const tu of toolUses) {
+      const r = toolResults.find((x) => x.tool_use_id === tu.id);
+      segs.push({ kind: 'tool', id: tu.id, name: tu.name, input: tu.input, result: r?.content, isError: r?.is_error, media: r?.media });
+    }
+    return segs;
+  }, [blocks, content, thinkingContent, toolUses, toolResults]);
+
+  // Only the trailing text segment is actively streaming; buffer it to smooth
+  // the initial character flicker.
+  const lastTextIdx = (() => {
+    for (let i = segments.length - 1; i >= 0; i--) if (segments[i].kind === 'text') return i;
+    return -1;
+  })();
+  const activeSeg = lastTextIdx >= 0 ? segments[lastTextIdx] : undefined;
+  const activeText = activeSeg && activeSeg.kind === 'text' ? activeSeg.text : '';
+  const bufferedActive = useBufferedContent(activeText, isStreaming);
+
   const runningTools = toolUses.filter(
     (tool) => !toolResults.some((r) => r.tool_use_id === tool.id)
   );
@@ -296,37 +323,18 @@ export function StreamingMessage({
     return `Running ${tool.name}...`;
   };
 
-  return (
-    <AIMessage from="assistant">
-      <MessageContent>
-        {/* Tool calls + thinking — single collapsible group */}
-        {(toolUses.length > 0 || thinkingContent) && (
-          <ToolActionsGroup
-            tools={toolUses.map((tool) => {
-              const result = toolResults.find((r) => r.tool_use_id === tool.id);
-              return {
-                id: tool.id,
-                name: tool.name,
-                input: tool.input,
-                result: result?.content,
-                isError: result?.is_error,
-                media: result?.media,
-              };
-            })}
-            isStreaming={isStreaming}
-            streamingToolOutput={streamingToolOutput}
-            thinkingContent={thinkingContent}
-          />
-        )}
-
-        {/* Media from tool results — rendered outside tool group so images stay visible */}
-        {(() => {
-          const allMedia = toolResults.flatMap(r => r.media || []);
-          return allMedia.length > 0 ? <MediaPreview media={allMedia} /> : null;
-        })()}
-
-        {/* Streaming text content rendered via Streamdown */}
-        {content && (() => {
+  /**
+   * Render one text segment. `streaming` is true only for the trailing/active
+   * segment (uses partial-widget detection + buffered text); completed earlier
+   * segments use the finished-content path. Mirrors AssistantContent but with
+   * streaming-aware widget preview.
+   */
+  const renderStreamingText = (rawText: string, streaming: boolean, bufferedText: string): React.ReactNode => {
+    const content = rawText;
+    const isStreaming = streaming;
+    const bufferedContent = bufferedText;
+    if (!content) return null;
+    return ((): React.ReactNode => {
           // ── Show-widget handling ──
           // During streaming: detect partial fences FIRST to avoid premature script execution.
           // After streaming: use parseAllShowWidgets for completed fences only.
@@ -521,10 +529,32 @@ export function StreamingMessage({
             .replace(/```show-widget[\s\S]*?(```|$)/g, '')
             .trim();
           return stripped ? <MessageResponse>{stripped}</MessageResponse> : null;
-        })()}
+    })();
+  };
 
-        {/* Loading indicator when no content yet and no thinking content — evolves over time */}
-        {isStreaming && !content && toolUses.length === 0 && !thinkingContent && (
+  // Media (actual images) rendered below the interleaved flow — tool rows only
+  // show an inline image icon.
+  const allMedia = toolResults.flatMap(r => r.media || []);
+
+  return (
+    <AIMessage from="assistant">
+      <MessageContent>
+        {/* Interleaved text / tool / thinking in chronological order. */}
+        <MessageSegments
+          segments={segments}
+          isStreaming={isStreaming}
+          streamingToolOutput={streamingToolOutput}
+          renderText={(text, { isStreaming: streamingSeg, keyHint }) => (
+            <React.Fragment key={keyHint}>
+              {renderStreamingText(text, streamingSeg, streamingSeg ? bufferedActive : text)}
+            </React.Fragment>
+          )}
+        />
+
+        {allMedia.length > 0 && <MediaPreview media={allMedia} />}
+
+        {/* Loading indicator when nothing has streamed yet — evolves over time */}
+        {isStreaming && segments.length === 0 && (
           <div className="py-2">
             <ThinkingPhaseLabel />
           </div>

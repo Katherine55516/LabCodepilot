@@ -2,14 +2,17 @@
 
 import { useState, useCallback, useRef, useEffect, useMemo, memo } from 'react';
 import { cn } from '@/lib/utils';
-import type { Message, TokenUsage, FileAttachment, MediaBlock } from '@/types';
+import type { Message, TokenUsage, FileAttachment, MediaBlock, RenderSegment } from '@/types';
 import {
   Message as AIMessage,
   MessageContent,
   MessageResponse,
 } from '@/components/ai-elements/message';
-import { ToolActionsGroup } from '@/components/ai-elements/tool-actions-group';
 import { MediaPreview } from './MediaPreview';
+import { MessageSegments } from './MessageSegments';
+import { segmentsFromBlocks, type OrderedBlockShape } from '@/lib/message-segments';
+// Re-export so existing importers (StreamingMessage) keep working.
+export { segmentsFromBlocks };
 import { DiffSummary } from './DiffSummary';
 import { Button } from "@/components/ui/button";
 import { Copy, Check, CaretDown, CaretUp, CaretRight, PushPin, DownloadSimple } from "@/components/ui/icon";
@@ -466,6 +469,47 @@ function pairTools(tools: ToolBlock[]): Array<{
   return paired;
 }
 
+/**
+ * Parse a persisted message.content into ORDERED render segments — text /
+ * thinking / tool laid out in the exact order stored, with each tool_use
+ * paired to its tool_result by id. This drives the interleaved render
+ * (MessageSegments). Unlike parseToolBlocks (which buckets by type and loses
+ * interleaving), this preserves the array order.
+ *
+ * Old messages persisted before the interleaved rebuild stored blocks in the
+ * legacy thinking→text→tools order — they render in that stored order (flat
+ * but not truly interleaved). New messages store true chronological order.
+ */
+export function parseOrderedSegments(content: string): RenderSegment[] {
+  if (content.startsWith('[')) {
+    try {
+      const blocks = JSON.parse(content) as OrderedBlockShape[];
+      return segmentsFromBlocks(blocks);
+    } catch {
+      // fall through to legacy
+    }
+  }
+
+  // Legacy / plain-text format: reuse parseToolBlocks' bucketed result and emit
+  // a best-effort order (thinking → text → tools). Old data lost true order.
+  const segments: RenderSegment[] = [];
+  const { text, tools, thinking } = parseToolBlocks(content);
+  if (thinking) segments.push({ kind: 'thinking', thinking });
+  if (text) segments.push({ kind: 'text', text });
+  for (const t of pairTools(tools)) {
+    segments.push({
+      kind: 'tool',
+      id: '',
+      name: t.name,
+      input: t.input,
+      result: t.result,
+      isError: t.isError,
+      media: t.media,
+    });
+  }
+  return segments;
+}
+
 function parseMessageFiles(content: string): { files: FileAttachment[]; text: string } {
   const match = content.match(/^<!--files:(.*?)-->\n?/);
   if (!match) return { files: [], text: content };
@@ -548,12 +592,20 @@ export const MessageItem = memo(function MessageItem({ message, sessionId, isAss
   const { setPreviewSource, workingDirectory } = usePanel();
 
 
-  // Memoize expensive parsing: parseToolBlocks + pairTools
-  const { text, pairedTools, thinking } = useMemo(() => {
-    const { text, tools, thinking } = parseToolBlocks(message.content);
+  // Memoize expensive parsing: parseToolBlocks + pairTools.
+  // `pairedTools` is still used for DiffSummary + media preview (which only
+  // need the tool set, not order); `orderedSegments` drives the interleaved
+  // assistant render.
+  const { text, pairedTools } = useMemo(() => {
+    const { text, tools } = parseToolBlocks(message.content);
     const pairedTools = pairTools(tools);
-    return { text, pairedTools, thinking };
+    return { text, pairedTools };
   }, [message.content]);
+
+  const orderedSegments = useMemo(
+    () => parseOrderedSegments(message.content),
+    [message.content],
+  );
 
   // Memoize file attachment parsing
   const { files, displayText } = useMemo(() => {
@@ -613,67 +665,64 @@ export const MessageItem = memo(function MessageItem({ message, sessionId, isAss
           <FileAttachmentDisplay files={files} />
         )}
 
-        {/* Tool calls + thinking for assistant messages — single collapsible group */}
-        {!isUser && (pairedTools.length > 0 || thinking) && (
-          <ToolActionsGroup
-            tools={pairedTools.map((tool, i) => ({
-              id: `hist-${i}`,
-              name: tool.name,
-              input: tool.input,
-              result: tool.result,
-              isError: tool.isError,
-              media: tool.media,
-            }))}
-            thinkingContent={thinking}
+        {/* Assistant: interleaved text / tool-call / thinking, in the true
+            chronological order they occurred (like Claude Desktop). Tools are
+            flat single rows; text segments go through AssistantContent so
+            widget / image-gen / markdown parsing still applies per segment. */}
+        {!isUser && (
+          <MessageSegments
+            segments={orderedSegments}
+            renderText={(t, { keyHint }) => (
+              <AssistantContent key={keyHint} displayText={t} messageId={message.id} sessionId={sessionId} />
+            )}
           />
         )}
 
-        {/* Media from tool results — rendered outside tool group so images stay visible */}
+        {/* Media from tool results — actual images rendered below (tool rows
+            only show an image icon inline). */}
         {!isUser && (() => {
           const allMedia = pairedTools.flatMap(t => t.media || []);
           return allMedia.length > 0 ? <MediaPreview media={allMedia} /> : null;
         })()}
 
-        {/* Text content */}
-        {displayText && (
-          isUser ? (
-            <div className="relative">
-              <div
-                ref={contentRef}
-                className="text-sm whitespace-pre-wrap break-words transition-[max-height] duration-300 ease-in-out overflow-hidden"
-                style={
-                  isOverflowing && !isExpanded
-                    ? { maxHeight: `${COLLAPSE_HEIGHT}px` }
-                    : undefined
-                }
-              >
-                {displayText}
-              </div>
-              {isOverflowing && !isExpanded && (
-                <div className="absolute bottom-0 left-0 right-0 h-16 bg-gradient-to-t from-secondary to-transparent pointer-events-none" />
-              )}
-              {isOverflowing && (
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setIsExpanded(!isExpanded)}
-                  className="relative z-10 flex items-center gap-1 mt-1 text-xs text-muted-foreground hover:text-foreground h-auto px-1 py-0.5"
-                >
-                  {isExpanded ? (
-                    <>
-                      <CaretUp size={12} />
-                      <span>收起</span>
-                    </>
-                  ) : (
-                    <>
-                      <CaretDown size={12} />
-                      <span>展开</span>
-                    </>
-                  )}
-                </Button>
-              )}
+        {/* User message text (collapsible) */}
+        {isUser && displayText && (
+          <div className="relative">
+            <div
+              ref={contentRef}
+              className="text-sm whitespace-pre-wrap break-words transition-[max-height] duration-300 ease-in-out overflow-hidden"
+              style={
+                isOverflowing && !isExpanded
+                  ? { maxHeight: `${COLLAPSE_HEIGHT}px` }
+                  : undefined
+              }
+            >
+              {displayText}
             </div>
-          ) : <AssistantContent displayText={displayText} messageId={message.id} sessionId={sessionId} />
+            {isOverflowing && !isExpanded && (
+              <div className="absolute bottom-0 left-0 right-0 h-16 bg-gradient-to-t from-secondary to-transparent pointer-events-none" />
+            )}
+            {isOverflowing && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setIsExpanded(!isExpanded)}
+                className="relative z-10 flex items-center gap-1 mt-1 text-xs text-muted-foreground hover:text-foreground h-auto px-1 py-0.5"
+              >
+                {isExpanded ? (
+                  <>
+                    <CaretUp size={12} />
+                    <span>收起</span>
+                  </>
+                ) : (
+                  <>
+                    <CaretDown size={12} />
+                    <span>展开</span>
+                  </>
+                )}
+              </Button>
+            )}
+          </div>
         )}
       </MessageContent>
 

@@ -377,7 +377,7 @@ function ContextGroup({ tools }: { tools: ToolAction[] }) {
 // Thinking row — same style as tool rows, Brain icon → caret on hover
 // ---------------------------------------------------------------------------
 
-function ThinkingRow({ content, isStreaming }: { content: string; isStreaming?: boolean }) {
+export function ThinkingRow({ content, isStreaming }: { content: string; isStreaming?: boolean }) {
   // Default open during streaming, collapsed in history
   const [expanded, setExpanded] = useState(!!isStreaming);
   const [hovered, setHovered] = useState(false);
@@ -444,7 +444,7 @@ function ThinkingRow({ content, isStreaming }: { content: string; isStreaming?: 
 // Compact row for a single tool action
 // ---------------------------------------------------------------------------
 
-function ToolActionRow({ tool, streamingToolOutput }: { tool: ToolAction; streamingToolOutput?: string }) {
+export function ToolActionRow({ tool, streamingToolOutput }: { tool: ToolAction; streamingToolOutput?: string }) {
   const renderer = getRenderer(tool.name);
   const summary = renderer.getSummary(tool.input, tool.name);
   const filePath = getFilePath(tool.input);

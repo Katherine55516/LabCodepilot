@@ -22,3 +22,4 @@
 | [login-system.md](./login-system.md) | [handover/login-system.md](../handover/login-system.md) | 登录账号体系：BYOK vs SaaS 托管的并存决策、为什么独立于现有 OpenAI OAuth、文件 vs DB 存 token、启动不强制登录、与 bsApp 文档的偏离点、未来方向 |
 | [gsd-bundle.md](./gsd-bundle.md) | [handover/gsd-bundle.md](../handover/gsd-bundle.md) | 内置 GSD：装完即用对比"自己装"、命名空间隔离 + 命令名共享的看似矛盾解、副作用收益（frontmatter description 普惠修复）、未来"多内置插件 PluginsManager"方向 |
 | [skill-agents-dir-mirror.md](./skill-agents-dir-mirror.md) | [handover/skill-agents-dir-mirror.md](../handover/skill-agents-dir-mirror.md) | Skill"装了却用不了"：位置契约裂缝、与 MCP `46caccd` 同一类问题、为何复制到 `~/.claude/skills/` 而非注入正文/搬移、未来统一 reconcile 心智模型 |
+| [conversation-interleaved-flow.md](./conversation-interleaved-flow.md) | [handover/conversation-interleaved-flow.md](../handover/conversation-interleaved-flow.md) | 对话流交错：工具多时不直观的痛点、参考 Claude 桌面版、为何全程交错而非仅完成后、为何不折叠、"顺序一直都在只是被丢了"的洞察、旧消息不可追溯限制 |

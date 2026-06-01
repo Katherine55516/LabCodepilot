@@ -189,6 +189,8 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
   const toolResults = streamSnapshot?.toolResults ?? [];
   const streamingToolOutput = streamSnapshot?.streamingToolOutput ?? '';
   const streamingThinkingContent = streamSnapshot?.streamingThinkingContent ?? '';
+  // Ordered blocks for the interleaved live render (StreamingMessage).
+  const streamingBlocks = streamSnapshot?.blocks ?? [];
   const statusText = streamSnapshot?.statusText;
   const pendingPermission = streamSnapshot?.pendingPermission ?? null;
   const permissionResolved = streamSnapshot?.permissionResolved ?? null;
@@ -854,6 +856,7 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
         isStreaming={isStreaming}
         toolUses={toolUses}
         toolResults={toolResults}
+        streamingBlocks={streamingBlocks}
         streamingToolOutput={streamingToolOutput}
         streamingThinkingContent={streamingThinkingContent}
         statusText={statusText}
