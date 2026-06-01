@@ -71,3 +71,60 @@ export function segmentsFromBlocks(blocks: OrderedBlockShape[]): RenderSegment[]
   }
   return segments;
 }
+
+// ---------------------------------------------------------------------------
+// Tool detail formatting — pure helpers for the expandable tool row detail.
+// Extracted here (no React/DOM) so they are unit-testable.
+// ---------------------------------------------------------------------------
+
+/**
+ * Format a tool_use input object for display in the expanded detail.
+ * Pretty-prints JSON objects; passes primitives through as strings; returns ''
+ * for null/undefined/empty-object (caller hides the section). Caps length so a
+ * huge Edit `new_string` can't blow up the DOM.
+ */
+export function formatToolInput(input: unknown, maxChars = 2000): string {
+  if (input === null || input === undefined) return '';
+  if (typeof input !== 'object') return String(input);
+  const keys = Object.keys(input as Record<string, unknown>);
+  if (keys.length === 0) return '';
+  let str: string;
+  try {
+    str = JSON.stringify(input, null, 2);
+  } catch {
+    return '';
+  }
+  if (str.length > maxChars) str = str.slice(0, maxChars) + '\n…';
+  return str;
+}
+
+export interface TruncatedResult {
+  /** The text to actually render. */
+  text: string;
+  /** True when the original was clipped (by line count or char count). */
+  truncated: boolean;
+  /** How many trailing lines were hidden (0 when clipped mid-line by char cap). */
+  hiddenLines: number;
+}
+
+/**
+ * Clip a tool result for inline display: cap lines first, then characters as a
+ * safety net. Returns the shown text plus how much was hidden so the caller can
+ * render a "… N more lines" / "… truncated" hint.
+ */
+export function truncateToolResult(text: string, maxLines = 200, maxChars = 8000): TruncatedResult {
+  if (!text) return { text: '', truncated: false, hiddenLines: 0 };
+  const allLines = text.split('\n');
+  let shown = text;
+  let truncated = false;
+  if (allLines.length > maxLines) {
+    shown = allLines.slice(0, maxLines).join('\n');
+    truncated = true;
+  }
+  if (shown.length > maxChars) {
+    shown = shown.slice(0, maxChars);
+    truncated = true;
+  }
+  const hiddenLines = truncated ? Math.max(0, allLines.length - shown.split('\n').length) : 0;
+  return { text: shown, truncated, hiddenLines };
+}

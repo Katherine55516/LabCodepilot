@@ -24,12 +24,12 @@ SDK (有序 content blocks)
 | 文件 | 职责 |
 |------|------|
 | [src/types/index.ts](../../src/types/index.ts) | `RenderSegment`（text/thinking/tool 视图模型）；`SessionStreamSnapshot.blocks` |
-| [src/lib/message-segments.ts](../../src/lib/message-segments.ts) | **纯函数** `segmentsFromBlocks(blocks)` — 保序 + 按 id 配对 tool_use/tool_result。无 React，可单测 |
+| [src/lib/message-segments.ts](../../src/lib/message-segments.ts) | **纯函数** `segmentsFromBlocks`（保序 + 按 id 配对 tool_use/tool_result）、`formatToolInput`、`truncateToolResult`（工具详情的参数格式化 / 结果截断）。无 React，可单测 |
 | [src/lib/stream-session-manager.ts](../../src/lib/stream-session-manager.ts) | 流式累积 `orderedBlocks`（`appendOrderedText`/`appendOrderedThinking`/`pushOrderedToolUse`/`pushOrderedToolResult`/`endOrderedTextRun`）；重建 `buildFinalContentFromBlocks` |
 | [src/components/chat/MessageSegments.tsx](../../src/components/chat/MessageSegments.tsx) | 共享渲染组件：按序 map，连续 tool/thinking 归到一条左边框，text 打断分组 |
 | [src/components/chat/MessageItem.tsx](../../src/components/chat/MessageItem.tsx) | `parseOrderedSegments(content)`（持久消息）；渲染改用 `<MessageSegments renderText={AssistantContent}>` |
 | [src/components/chat/StreamingMessage.tsx](../../src/components/chat/StreamingMessage.tsx) | 读 `blocks` → segments；`renderStreamingText` 保留流式 widget 预览（仅尾部 active 段） |
-| [src/components/ai-elements/tool-actions-group.tsx](../../src/components/ai-elements/tool-actions-group.tsx) | export `ToolActionRow` / `ThinkingRow` 供复用；`ToolActionsGroup` 折叠组保留但已停用 |
+| [src/components/ai-elements/tool-actions-group.tsx](../../src/components/ai-elements/tool-actions-group.tsx) | `ToolActionRow`（**可折叠**：hover→caret、点击展开）+ `GenericToolDetail`（参数+结果面板）+ `ThinkingRow`；`ToolActionsGroup` 折叠组保留但已停用 |
 
 ## 保序原理
 
@@ -43,6 +43,20 @@ SSE 事件到达顺序天然等于内容顺序（`onToolUse` 里 `flushTextThrot
 ## tool_use / tool_result 配对
 
 `segmentsFromBlocks` 先建 `resultById` 映射，每个 `tool_use` 取自己的 result（支持并行工具乱序到达）。孤儿 `tool_result`（无对应 tool_use）渲染成裸行。
+
+## 工具行折叠展开（查看参数 + 结果）
+
+`ToolActionRow` 与 `ThinkingRow` 同款交互：hover 时行首工具图标换成 `>`（CaretRight），点击整行 toggle 展开内联详情面板。
+
+- **可展开判定** `expandable`：有 bash/agent 运行中的自定义 detail、有 `result`、有 `input` 参数，或运行中有流式输出。不可展开的极少数行（空 input + 无 result + 非运行中）退化为普通 `<div>`。
+- **默认态**：运行中（`result === undefined`）默认展开看实时输出；完成 / 历史默认折叠。初始值随挂载只取一次（`useState(isRunning)`），跑完仍保持当时状态。
+- **展开内容**：
+  - bash / agent **运行中**（`liveCustom`）→ 复用各自 `renderDetail`（滚动输出窗口 / 子任务进度）。
+  - 其它工具，以及 bash / agent **完成后** → `GenericToolDetail`：上方 `formatToolInput` 渲染参数（JSON 美化，2000 字符封顶），下方 `truncateToolResult` 渲染结果（200 行 / 8000 字符封顶，超出提示「还有 N 行」/「内容已截断」），`isError` 标红。
+  - 这样 bash/agent 完成后也能看到**最终结果**（旧 `renderDetail` 只显示流式进度，agent 跑完看不到产出）。
+- **media（图片）**：仍走消息底部统一 `MediaPreview`，展开区不重复渲染（仅行内一个图片图标提示）。
+- **复用 `stopScroll`**：展开时调用，避免 stick-to-bottom 把页面跳到底。`ToolActionRow` 仅经 `MessageSegments` 渲染（与 `ThinkingRow` 同处），都在 `StickToBottom` provider 内，安全。
+- **改动面**：只改 `ToolActionRow` 一处，实时（StreamingMessage）/ 持久（MessageItem）/ 导入三条路径同时生效（都经 MessageSegments → ToolActionRow）。
 
 ## 向后兼容
 
@@ -69,6 +83,8 @@ SSE 事件到达顺序天然等于内容顺序（`onToolUse` 里 `flushTextThrot
 ## 测试
 
 - 单测：[src/__tests__/unit/message-segments-order.test.ts](../../src/__tests__/unit/message-segments-order.test.ts) — 8 例覆盖 text→tool→text 交错、并行工具乱序配对、多段 thinking、running 工具、孤儿 result、media、空块。
+- 单测：[src/__tests__/unit/tool-detail-format.test.ts](../../src/__tests__/unit/tool-detail-format.test.ts) — `formatToolInput`（对象/空/原始值/超长封顶）+ `truncateToolResult`（行截断/字符截断/空）共 8 例。
+- e2e（CDP 实测）：打开含 120 个工具行的导入会话 → hover 行首图标换成 `>`（caret path 119 vs NotePencil 332）、点击 Bash 行展开「参数 + 结果」、点击 Edit 行展开「参数 + File created」、console 零报错。
 - e2e 手测：插入合成交错消息 → CDP 确认 DOM 顺序 text→Read→text→Edit→text、无折叠头、console 零报错。
 
 ## 已知后续

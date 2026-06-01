@@ -486,6 +486,11 @@ const en = {
   'tool.running': 'running',
   'tool.success': 'success',
   'tool.error': 'error',
+  'tool.parameters': 'Parameters',
+  'tool.result': 'Result',
+  'tool.noResult': 'No output',
+  'tool.moreLines': '… {count} more lines',
+  'tool.truncated': '… truncated',
 
   // ── Common ──────────────────────────────────────────────────
   'common.cancel': 'Cancel',

@@ -483,6 +483,11 @@ const zh: Record<TranslationKey, string> = {
   'tool.running': '运行中',
   'tool.success': '成功',
   'tool.error': '错误',
+  'tool.parameters': '参数',
+  'tool.result': '结果',
+  'tool.noResult': '无返回内容',
+  'tool.moreLines': '… 还有 {count} 行',
+  'tool.truncated': '… 内容已截断',
 
   // ── Common ──────────────────────────────────────────────────
   'common.cancel': '取消',

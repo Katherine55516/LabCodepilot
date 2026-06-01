@@ -27,6 +27,8 @@ import { mermaid } from '@streamdown/mermaid';
 
 const thinkingPlugins = { cjk, math, mermaid };
 import type { MediaBlock } from '@/types';
+import { useTranslation } from '@/hooks/useTranslation';
+import { formatToolInput, truncateToolResult } from '@/lib/message-segments';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -441,7 +443,61 @@ export function ThinkingRow({ content, isStreaming }: { content: string; isStrea
 }
 
 // ---------------------------------------------------------------------------
-// Compact row for a single tool action
+// Generic tool detail — params + result panel for tools without a bespoke
+// renderDetail (Read / Edit / Write / Search / MCP / …). Also used for bash and
+// agent AFTER they finish, so their final result (not just live progress) shows.
+// ---------------------------------------------------------------------------
+
+function GenericToolDetail({ tool, streamingToolOutput }: { tool: ToolAction; streamingToolOutput?: string }) {
+  const { t } = useTranslation();
+  const isRunning = tool.result === undefined;
+  const inputStr = formatToolInput(tool.input);
+  const rawResult = isRunning ? (streamingToolOutput ?? '') : (tool.result ?? '');
+  const { text: shownResult, truncated, hiddenLines } = truncateToolResult(rawResult);
+  const hasResult = shownResult.length > 0;
+
+  return (
+    <div className="mt-1 ml-6 border-l-2 border-border/30 pl-2 space-y-1.5 pb-1">
+      {inputStr && (
+        <div>
+          <div className="mb-0.5 text-[10px] uppercase tracking-wide text-muted-foreground/40">
+            {t('tool.parameters')}
+          </div>
+          <pre className="max-h-[140px] overflow-auto whitespace-pre-wrap break-all rounded bg-muted/40 px-2 py-1 font-mono text-[11px] text-muted-foreground/70">
+            {inputStr}
+          </pre>
+        </div>
+      )}
+      {hasResult ? (
+        <div>
+          <div className="mb-0.5 text-[10px] uppercase tracking-wide text-muted-foreground/40">
+            {t('tool.result')}
+          </div>
+          <pre className={cn(
+            "max-h-[240px] overflow-auto whitespace-pre-wrap break-all rounded bg-muted/40 px-2 py-1 font-mono text-[11px]",
+            tool.isError ? "text-red-500/70" : "text-muted-foreground/70"
+          )}>
+            {shownResult}
+            {truncated && (
+              <span className="mt-1 block text-muted-foreground/40">
+                {hiddenLines > 0 ? t('tool.moreLines', { count: hiddenLines }) : t('tool.truncated')}
+              </span>
+            )}
+          </pre>
+        </div>
+      ) : isRunning ? (
+        <div className="py-0.5 text-[11px] text-muted-foreground/40">{t('tool.running')}</div>
+      ) : (
+        <div className="py-0.5 text-[11px] text-muted-foreground/40">{t('tool.noResult')}</div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Compact row for a single tool action — collapsible like ThinkingRow.
+// Hover swaps the tool icon for a caret; click toggles an inline detail panel
+// showing the call params + return result.
 // ---------------------------------------------------------------------------
 
 export function ToolActionRow({ tool, streamingToolOutput }: { tool: ToolAction; streamingToolOutput?: string }) {
@@ -449,35 +505,97 @@ export function ToolActionRow({ tool, streamingToolOutput }: { tool: ToolAction;
   const summary = renderer.getSummary(tool.input, tool.name);
   const filePath = getFilePath(tool.input);
   const status = getStatus(tool);
-  const hasDetail = renderer.icon === Terminal || renderer.icon === Lightning;
-  const showDetail = hasDetail && renderer.renderDetail && (status === 'running' || streamingToolOutput || tool.result);
+  const isRunning = status === 'running';
+
+  // bash / agent show their bespoke streaming detail ONLY while running (live
+  // rolling output / sub-task progress). Once finished, they fall through to
+  // GenericToolDetail so the final result is visible too.
+  const hasCustomDetail = (renderer.icon === Terminal || renderer.icon === Lightning) && !!renderer.renderDetail;
+  const liveCustom = hasCustomDetail && isRunning;
+  const hasInput = !!tool.input && typeof tool.input === 'object' && Object.keys(tool.input as Record<string, unknown>).length > 0;
+  const hasResult = tool.result !== undefined && tool.result !== '';
+  const expandable = liveCustom || hasResult || hasInput || (isRunning && !!streamingToolOutput);
+
+  // Running rows default open (watch live output); completed/historical rows
+  // default closed. Initial value is read once on mount, so a tool that
+  // finishes while expanded stays expanded.
+  const [expanded, setExpanded] = useState(isRunning);
+  const [hovered, setHovered] = useState(false);
+  const { stopScroll } = useStickToBottomContext();
+
+  const rowInner = (
+    <>
+      {expandable && hovered ? (
+        <CaretRight
+          size={14}
+          className={cn(
+            "shrink-0 text-muted-foreground transition-transform duration-200",
+            expanded && "rotate-90"
+          )}
+        />
+      ) : (
+        createElement(renderer.icon, { size: 14, className: "shrink-0 text-muted-foreground" })
+      )}
+
+      {renderer.label && (
+        <span className="font-medium text-muted-foreground shrink-0">{renderer.label}</span>
+      )}
+
+      <span className="font-mono text-muted-foreground/60 truncate flex-1 text-left">
+        {summary}
+      </span>
+
+      {filePath && !hasCustomDetail && (
+        <span className="text-muted-foreground/40 text-[11px] font-mono truncate max-w-[200px] hidden sm:inline">
+          {truncatePath(filePath)}
+        </span>
+      )}
+
+      {tool.media && tool.media.length > 0 && (
+        <ImageIcon size={14} className="shrink-0 text-primary/60" />
+      )}
+
+      <StatusDot status={status} />
+    </>
+  );
+
+  const rowClass = "flex w-full items-center gap-2 px-2 py-1 min-h-[28px] text-xs text-left hover:bg-muted/30 rounded-sm transition-colors";
 
   return (
     <div>
-      <div className="flex items-center gap-2 px-2 py-1 min-h-[28px] text-xs hover:bg-muted/30 rounded-sm transition-colors">
-        {createElement(renderer.icon, { size: 14, className: "shrink-0 text-muted-foreground" })}
+      {expandable ? (
+        <button
+          type="button"
+          onClick={() => {
+            const willExpand = !expanded;
+            setExpanded(willExpand);
+            if (willExpand) stopScroll();
+          }}
+          onMouseEnter={() => setHovered(true)}
+          onMouseLeave={() => setHovered(false)}
+          className={rowClass}
+        >
+          {rowInner}
+        </button>
+      ) : (
+        <div className={rowClass}>{rowInner}</div>
+      )}
 
-        {renderer.label && (
-          <span className="font-medium text-muted-foreground shrink-0">{renderer.label}</span>
+      <AnimatePresence initial={false}>
+        {expandable && expanded && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            transition={{ duration: 0.15, ease: 'easeOut' }}
+            style={{ overflow: 'hidden' }}
+          >
+            {liveCustom
+              ? renderer.renderDetail?.(tool, streamingToolOutput)
+              : <GenericToolDetail tool={tool} streamingToolOutput={streamingToolOutput} />}
+          </motion.div>
         )}
-
-        <span className="font-mono text-muted-foreground/60 truncate flex-1">
-          {summary}
-        </span>
-
-        {filePath && !hasDetail && (
-          <span className="text-muted-foreground/40 text-[11px] font-mono truncate max-w-[200px] hidden sm:inline">
-            {truncatePath(filePath)}
-          </span>
-        )}
-
-        {tool.media && tool.media.length > 0 && (
-          <ImageIcon size={14} className="shrink-0 text-primary/60" />
-        )}
-
-        <StatusDot status={status} />
-      </div>
-      {showDetail && renderer.renderDetail?.(tool, streamingToolOutput)}
+      </AnimatePresence>
     </div>
   );
 }
