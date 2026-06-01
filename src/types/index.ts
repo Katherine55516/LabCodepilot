@@ -182,6 +182,28 @@ export type MessageContentBlock =
   | { type: 'tool_result'; tool_use_id: string; content: string; is_error?: boolean; media?: MediaBlock[] }
   | { type: 'code'; language: string; code: string };
 
+/**
+ * Render-time view model for the interleaved conversation flow. Walks the
+ * ordered MessageContentBlock[] and pairs each tool_use with its matching
+ * tool_result (by id), so the renderer can lay out text / thinking / tool in
+ * the true chronological order they occurred. Unlike MessageContentBlock,
+ * tool_use + tool_result are collapsed into a single `tool` segment.
+ *
+ * See MessageSegments.tsx (renderer) and parseOrderedSegments (MessageItem.tsx).
+ */
+export type RenderSegment =
+  | { kind: 'text'; text: string }
+  | { kind: 'thinking'; thinking: string }
+  | {
+      kind: 'tool';
+      id: string;
+      name: string;
+      input: unknown;
+      result?: string;
+      isError?: boolean;
+      media?: MediaBlock[];
+    };
+
 // Helper to parse message content - returns blocks or wraps plain text
 export function parseMessageContent(content: string): MessageContentBlock[] {
   try {
@@ -1026,6 +1048,15 @@ export interface SessionStreamSnapshot {
   toolUses: ToolUseInfo[];
   toolResults: ToolResultInfo[];
   streamingToolOutput: string;
+  /**
+   * Ordered content blocks accumulated in SSE-event arrival order (= true
+   * chronological order, since the SDK emits text/tool/thinking in content
+   * order). Drives the interleaved render in StreamingMessage. The legacy
+   * split fields above (streamingContent / toolUses / ...) are kept for
+   * back-compat with other readers but `blocks` is the source of truth for
+   * ordering. See stream-session-manager.ts accumulation + MessageSegments.
+   */
+  blocks: MessageContentBlock[];
   statusText: string | undefined;
   pendingPermission: PermissionRequestEvent | null;
   permissionResolved: 'allow' | 'deny' | null;

@@ -22,6 +22,7 @@ import type {
   PermissionRequestEvent,
   FileAttachment,
   MentionRef,
+  MessageContentBlock,
 } from '@/types';
 
 // ==========================================
@@ -51,6 +52,23 @@ interface ActiveStream {
   isIdleTimeout: boolean;
   sendMessageFn: ((content: string, files?: FileAttachment[]) => void) | null;
   rewindPoints: Array<{ userMessageId: string }>;
+  /**
+   * Ordered content blocks built in SSE-event arrival order — the source of
+   * truth for the interleaved render + final persistence. text/tool/thinking
+   * are appended as they arrive, preserving true chronological order.
+   */
+  orderedBlocks: MessageContentBlock[];
+  /**
+   * Offset into the monotonic `accumulatedText` where the CURRENT trailing
+   * text segment begins. onText gives the full accumulated text; the current
+   * text block's content = accumulatedText.slice(currentTextOffset).
+   */
+  currentTextOffset: number;
+  /**
+   * Set true when a tool/thinking event ends the current text run, so the
+   * next onText starts a NEW text block instead of extending the previous one.
+   */
+  needNewTextBlock: boolean;
 }
 
 export interface StartStreamParams {
@@ -118,6 +136,7 @@ function buildSnapshot(stream: ActiveStream): SessionStreamSnapshot {
     toolUses: [...stream.toolUsesArray],
     toolResults: [...stream.toolResultsArray],
     streamingToolOutput: stream.toolOutputAccumulated,
+    blocks: [...stream.orderedBlocks],
     statusText: stream.snapshot.statusText,
     pendingPermission: stream.snapshot.pendingPermission,
     permissionResolved: stream.snapshot.permissionResolved,
@@ -207,6 +226,7 @@ export function startStream(params: StartStreamParams): void {
       toolUses: [],
       toolResults: [],
       streamingToolOutput: '',
+      blocks: [],
       statusText: undefined,
       pendingPermission: null,
       permissionResolved: null,
@@ -231,6 +251,9 @@ export function startStream(params: StartStreamParams): void {
     isIdleTimeout: false,
     sendMessageFn: params.sendMessageFn ?? null,
     rewindPoints: [],
+    orderedBlocks: [],
+    currentTextOffset: 0,
+    needNewTextBlock: false,
   };
 
   map.set(params.sessionId, stream);
@@ -238,6 +261,84 @@ export function startStream(params: StartStreamParams): void {
 
   // Run the stream in background (non-blocking)
   runStream(stream, params).catch(() => {});
+}
+
+// ── Ordered block accumulation (interleaved render source of truth) ─────────
+// All updates are IMMUTABLE (new block objects + new array) so React reconciles
+// correctly across throttled snapshot emits.
+
+/** Update/extend the current trailing text block from the monotonic accumulated text. */
+function appendOrderedText(stream: ActiveStream, acc: string) {
+  const segText = acc.slice(stream.currentTextOffset);
+  const blocks = stream.orderedBlocks;
+  const last = blocks[blocks.length - 1];
+  if (!stream.needNewTextBlock && last && last.type === 'text') {
+    if (segText === last.text) return; // no change
+    stream.orderedBlocks = [...blocks.slice(0, -1), { type: 'text', text: segText }];
+  } else if (segText.length > 0) {
+    // First text, or first text after a tool/thinking boundary → new block.
+    stream.orderedBlocks = [...blocks, { type: 'text', text: segText }];
+    stream.needNewTextBlock = false;
+  }
+}
+
+/** Mark a boundary: next text starts a fresh block beginning after current acc. */
+function endOrderedTextRun(stream: ActiveStream) {
+  stream.currentTextOffset = stream.accumulatedText.length;
+  stream.needNewTextBlock = true;
+}
+
+/** Append a thinking delta — new phase starts a new thinking block. */
+function appendOrderedThinking(stream: ActiveStream, delta: string, newPhase: boolean) {
+  const blocks = stream.orderedBlocks;
+  const last = blocks[blocks.length - 1];
+  if (!newPhase && last && last.type === 'thinking') {
+    stream.orderedBlocks = [...blocks.slice(0, -1), { type: 'thinking', thinking: last.thinking + delta }];
+  } else {
+    stream.orderedBlocks = [...blocks, { type: 'thinking', thinking: delta }];
+  }
+}
+
+/** Push a tool_use block (idempotent by id). */
+function pushOrderedToolUse(stream: ActiveStream, tool: ToolUseInfo) {
+  if (stream.orderedBlocks.some(b => b.type === 'tool_use' && b.id === tool.id)) return;
+  stream.orderedBlocks = [...stream.orderedBlocks, { type: 'tool_use', id: tool.id, name: tool.name, input: tool.input }];
+}
+
+/** Insert/update the tool_result block for a given tool_use_id. */
+function pushOrderedToolResult(stream: ActiveStream, res: ToolResultInfo) {
+  const block: MessageContentBlock = {
+    type: 'tool_result',
+    tool_use_id: res.tool_use_id,
+    content: res.content,
+    ...(res.is_error ? { is_error: true } : {}),
+    ...(res.media && res.media.length > 0 ? { media: res.media } : {}),
+  };
+  const idx = stream.orderedBlocks.findIndex(b => b.type === 'tool_result' && b.tool_use_id === res.tool_use_id);
+  if (idx >= 0) {
+    const next = [...stream.orderedBlocks];
+    next[idx] = block;
+    stream.orderedBlocks = next;
+  } else {
+    stream.orderedBlocks = [...stream.orderedBlocks, block];
+  }
+}
+
+/** Serialize ordered blocks → final persisted message content. */
+function buildFinalContentFromBlocks(stream: ActiveStream, fallbackText: string): string {
+  const cleaned = stream.orderedBlocks.filter(
+    b => b.type !== 'text' || (b.text != null && b.text.trim().length > 0),
+  );
+  if (cleaned.length === 0) return fallbackText.trim();
+  const hasNonText = cleaned.some(b => b.type !== 'text');
+  const textCount = cleaned.filter(b => b.type === 'text').length;
+  // Single text-only message → persist as plain text (back-compat with readers
+  // that expect bare text). Anything interleaved → ordered JSON array.
+  if (!hasNonText && textCount <= 1) {
+    const only = cleaned[0];
+    return only && only.type === 'text' ? only.text.trim() : fallbackText.trim();
+  }
+  return JSON.stringify(cleaned);
 }
 
 async function runStream(stream: ActiveStream, params: StartStreamParams): Promise<void> {
@@ -328,6 +429,7 @@ async function runStream(stream: ActiveStream, params: StartStreamParams): Promi
         markActive();
         stream.accumulatedText = acc;
         stream.thinkingPhaseEnded = true;
+        appendOrderedText(stream, acc); // ordered: extend current text block
         throttledTextEmit();
       },
       onThinking: (delta) => {
@@ -335,6 +437,7 @@ async function runStream(stream: ActiveStream, params: StartStreamParams): Promi
         // If non-thinking content has arrived since last thinking delta,
         // this is a new thinking phase (e.g. after a tool_use round-trip).
         // Reset the live accumulator so the UI shows only the current phase.
+        const newPhase = stream.thinkingPhaseEnded;
         if (stream.thinkingPhaseEnded) {
           // Save previous thinking to full history before resetting
           if (stream.accumulatedThinking) {
@@ -344,6 +447,10 @@ async function runStream(stream: ActiveStream, params: StartStreamParams): Promi
           stream.thinkingPhaseEnded = false;
         }
         stream.accumulatedThinking += delta;
+        // ordered: a new thinking phase ends the current text run + opens a new
+        // thinking block; continuation extends the trailing thinking block.
+        if (newPhase) endOrderedTextRun(stream);
+        appendOrderedThinking(stream, delta, newPhase);
         emit(stream, 'snapshot-updated');
       },
       onToolUse: (tool) => {
@@ -354,6 +461,9 @@ async function runStream(stream: ActiveStream, params: StartStreamParams): Promi
         if (!stream.toolUsesArray.some(t => t.id === tool.id)) {
           stream.toolUsesArray = [...stream.toolUsesArray, tool];
         }
+        // ordered: a tool ends the current text run + appends a tool_use block
+        endOrderedTextRun(stream);
+        pushOrderedToolUse(stream, tool);
         emit(stream, 'snapshot-updated');
       },
       onToolResult: (res) => {
@@ -367,6 +477,7 @@ async function runStream(stream: ActiveStream, params: StartStreamParams): Promi
         } else {
           stream.toolResultsArray = [...stream.toolResultsArray, res];
         }
+        pushOrderedToolResult(stream, res); // ordered: pair result to its tool_use
         emit(stream, 'snapshot-updated');
         // Refresh file tree after each tool completes
         window.dispatchEvent(new Event('refresh-file-tree'));
@@ -500,41 +611,13 @@ async function runStream(stream: ActiveStream, params: StartStreamParams): Promi
     // Flush any pending throttled text update before building final content
     flushTextThrottle();
 
-    // Stream completed successfully — build final message content
+    // Stream completed successfully — build final message content from the
+    // ordered blocks (true chronological order). This replaces the old
+    // hardcoded thinking→text→tools rebuild so the persisted message matches
+    // the interleaved render. `accumulated` is the back-compat fallback for
+    // text-only turns where orderedBlocks may be empty.
     const accumulated = result.accumulated;
-    const finalToolUses = stream.toolUsesArray;
-    const finalToolResults = stream.toolResultsArray;
-    const hasTools = finalToolUses.length > 0 || finalToolResults.length > 0;
-
-    let messageContent = accumulated.trim();
-    // Combine all thinking phases for persistence
-    const allThinking = [stream.fullThinking, stream.accumulatedThinking]
-      .filter(s => s.trim()).join('\n\n---\n\n');
-    const hasThinking = allThinking.length > 0;
-    if ((hasTools || hasThinking) && (messageContent || hasThinking)) {
-      const contentBlocks: Array<Record<string, unknown>> = [];
-      // Include thinking block if present — rendered as collapsed Reasoning in MessageItem
-      if (hasThinking) {
-        contentBlocks.push({ type: 'thinking', thinking: allThinking });
-      }
-      if (accumulated.trim()) {
-        contentBlocks.push({ type: 'text', text: accumulated.trim() });
-      }
-      for (const tu of finalToolUses) {
-        contentBlocks.push({ type: 'tool_use', id: tu.id, name: tu.name, input: tu.input });
-        const tr = finalToolResults.find(r => r.tool_use_id === tu.id);
-        if (tr) {
-          contentBlocks.push({
-            type: 'tool_result',
-            tool_use_id: tr.tool_use_id,
-            content: tr.content,
-            ...(tr.is_error ? { is_error: true } : {}),
-            ...(tr.media && tr.media.length > 0 ? { media: tr.media } : {}),
-          });
-        }
-      }
-      messageContent = JSON.stringify(contentBlocks);
-    }
+    const messageContent = buildFinalContentFromBlocks(stream, accumulated);
 
     // Update snapshot with completion info
     stream.snapshot = {
@@ -554,6 +637,9 @@ async function runStream(stream: ActiveStream, params: StartStreamParams): Promi
     stream.toolUsesArray = [];
     stream.toolResultsArray = [];
     stream.toolOutputAccumulated = '';
+    stream.orderedBlocks = [];
+    stream.currentTextOffset = 0;
+    stream.needNewTextBlock = false;
 
     cleanupTimers(stream);
     emit(stream, 'completed');
@@ -566,17 +652,18 @@ async function runStream(stream: ActiveStream, params: StartStreamParams): Promi
     flushTextThrottle();
     cleanupTimers(stream);
 
-    // Helper: build finalMessageContent preserving any accumulated thinking.
-    // On error/stop branches we previously only serialized accumulatedText,
-    // silently dropping reasoning blocks that the user had already seen.
-    const buildFinalContent = (textContent: string | null): string | null => {
-      const allThinking = [stream.fullThinking, stream.accumulatedThinking]
-        .filter(s => s.trim()).join('\n\n---\n\n');
-      if (!allThinking) return textContent;
-      // Wrap as content-block JSON so MessageItem can render the thinking block
-      const blocks: Array<Record<string, unknown>> = [];
-      blocks.push({ type: 'thinking', thinking: allThinking });
-      if (textContent) blocks.push({ type: 'text', text: textContent });
+    // Helper: build finalMessageContent from the interleaved ordered blocks
+    // accumulated so far, appending an optional trailing note (e.g. "generation
+    // stopped", an error/timeout message). This preserves the text / tool /
+    // thinking the user already saw, in order — previously the error/stop path
+    // only serialized merged text + thinking and dropped the tool calls.
+    const buildFinalContent = (note: string | null): string | null => {
+      const blocks: MessageContentBlock[] = stream.orderedBlocks.filter(
+        b => b.type !== 'text' || (b.text != null && b.text.trim().length > 0),
+      );
+      if (note) blocks.push({ type: 'text', text: note });
+      if (blocks.length === 0) return null;
+      if (blocks.length === 1 && blocks[0].type === 'text') return blocks[0].text;
       return JSON.stringify(blocks);
     };
 
@@ -584,16 +671,15 @@ async function runStream(stream: ActiveStream, params: StartStreamParams): Promi
       if (stream.isIdleTimeout) {
         // Idle timeout
         const idleSecs = Math.round(STREAM_IDLE_TIMEOUT_MS / 1000);
-        const textPart = stream.accumulatedText.trim()
-          ? stream.accumulatedText.trim() + `\n\n**Error:** Stream idle timeout — no response for ${idleSecs}s. The connection may have dropped.`
-          : `**Error:** Stream idle timeout — no response for ${idleSecs}s. The connection may have dropped.`;
+        // Text already lives in orderedBlocks; append only the error note.
+        const note = `**Error:** Stream idle timeout — no response for ${idleSecs}s. The connection may have dropped.`;
 
         stream.snapshot = {
           ...buildSnapshot(stream),
           phase: 'error',
           completedAt: Date.now(),
           error: `Stream idle timeout (${idleSecs}s)`,
-          finalMessageContent: buildFinalContent(textPart),
+          finalMessageContent: buildFinalContent(note),
           statusText: undefined,
           pendingPermission: null,
           permissionResolved: null,
@@ -615,15 +701,13 @@ async function runStream(stream: ActiveStream, params: StartStreamParams): Promi
       } else if (stream.toolTimeoutInfo) {
         // Tool timeout — auto-retry
         const timeoutInfo = stream.toolTimeoutInfo;
-        const textPart = stream.accumulatedText.trim()
-          ? stream.accumulatedText.trim() + `\n\n*(tool ${timeoutInfo.toolName} timed out after ${timeoutInfo.elapsedSeconds}s)*`
-          : null;
+        const note = `*(tool ${timeoutInfo.toolName} timed out after ${timeoutInfo.elapsedSeconds}s)*`;
 
         stream.snapshot = {
           ...buildSnapshot(stream),
           phase: 'stopped',
           completedAt: Date.now(),
-          finalMessageContent: buildFinalContent(textPart),
+          finalMessageContent: buildFinalContent(note),
           statusText: undefined,
           pendingPermission: null,
           permissionResolved: null,
@@ -648,16 +732,14 @@ async function runStream(stream: ActiveStream, params: StartStreamParams): Promi
           }, 500);
         }
       } else {
-        // User manually stopped — add partial content with "(generation stopped)"
-        const textPart = stream.accumulatedText.trim()
-          ? stream.accumulatedText.trim() + '\n\n*(generation stopped)*'
-          : null;
+        // User manually stopped — append a "(generation stopped)" note.
+        const note = '*(generation stopped)*';
 
         stream.snapshot = {
           ...buildSnapshot(stream),
           phase: 'stopped',
           completedAt: Date.now(),
-          finalMessageContent: buildFinalContent(textPart),
+          finalMessageContent: buildFinalContent(note),
           statusText: undefined,
           pendingPermission: null,
           permissionResolved: null,
@@ -894,6 +976,9 @@ export function seedSnapshotPatch(
     isIdleTimeout: false,
     sendMessageFn: null,
     rewindPoints: [],
+    orderedBlocks: [],
+    currentTextOffset: 0,
+    needNewTextBlock: false,
     snapshot: {
       sessionId,
       phase: 'completed',
@@ -902,6 +987,7 @@ export function seedSnapshotPatch(
       toolUses: [],
       toolResults: [],
       streamingToolOutput: '',
+      blocks: [],
       statusText: undefined,
       pendingPermission: null,
       permissionResolved: null,
