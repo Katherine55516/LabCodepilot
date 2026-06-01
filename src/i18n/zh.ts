@@ -332,7 +332,7 @@ const zh: Record<TranslationKey, string> = {
   'skills.placeholder': '用 Markdown 编写技能提示词...',
   'skills.description': '管理可复用的提示词模式和自动化技能',
   'skills.mySkills': '我的技能',
-  'skills.marketplace': '技能市场',
+  'skills.marketplace': '技能市场（外部）',
   'skills.marketplaceSearch': '搜索 Skills.sh...',
   'skills.install': '安装',
   'skills.installed': '已安装',
