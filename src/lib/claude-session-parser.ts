@@ -120,6 +120,7 @@ interface AssistantEntry extends JournalEntry {
 interface ContentBlock {
   type: string;
   text?: string;
+  thinking?: string;
   id?: string;
   name?: string;
   input?: unknown;
@@ -432,7 +433,14 @@ export function parseClaudeSession(sessionId: string): ParsedSession | null {
 
   if (lines.length === 0) return null;
 
-  // Single pass: extract both metadata and messages
+  // Single pass: extract both metadata and messages.
+  //
+  // Turn merging: a Claude Code transcript splits one logical assistant turn
+  // across many JSONL lines (separate lines for thinking / text / each
+  // tool_use, plus the tool_result fed back as a "user" line). To render the
+  // interleaved flow we MERGE all those lines between two real user prompts
+  // into ONE assistant message whose contentBlocks preserve chronological
+  // order — including thinking and tool_results paired to their tool_use.
   const messages: ParsedMessage[] = [];
   let cwd = '';
   let gitBranch = '';
@@ -442,6 +450,28 @@ export function parseClaudeSession(sessionId: string): ParsedSession | null {
   let updatedAt = '';
   let userMessageCount = 0;
   let assistantMessageCount = 0;
+
+  // Accumulator for the current assistant turn.
+  let pendingBlocks: MessageContentBlock[] | null = null;
+  let pendingTs = '';
+
+  const flushAssistant = () => {
+    if (pendingBlocks && pendingBlocks.length > 0) {
+      const textParts = pendingBlocks
+        .filter((b): b is { type: 'text'; text: string } => b.type === 'text')
+        .map(b => b.text);
+      const hasToolBlocks = pendingBlocks.some(b => b.type === 'tool_use' || b.type === 'tool_result');
+      messages.push({
+        role: 'assistant',
+        content: textParts.join('\n'),
+        contentBlocks: pendingBlocks,
+        hasToolBlocks,
+        timestamp: pendingTs,
+      });
+    }
+    pendingBlocks = null;
+    pendingTs = '';
+  };
 
   for (const line of lines) {
     try {
@@ -454,37 +484,50 @@ export function parseClaudeSession(sessionId: string): ParsedSession | null {
 
       if (entry.type === 'user') {
         const userEntry = entry as UserEntry;
-        userMessageCount++;
 
         if (!cwd && userEntry.cwd) cwd = userEntry.cwd;
         if (!gitBranch && userEntry.gitBranch) gitBranch = userEntry.gitBranch;
         if (!version && userEntry.version) version = userEntry.version;
 
-        if (!preview && userEntry.message?.content) {
-          const msgContent = userEntry.message.content;
-          if (typeof msgContent === 'string') {
-            preview = msgContent.slice(0, 120);
-          } else if (Array.isArray(msgContent)) {
-            const textBlock = msgContent.find(b => b.type === 'text');
-            if (textBlock?.text) {
-              preview = textBlock.text.slice(0, 120);
-            }
-          }
+        const { prompt, toolResults } = analyzeUserEntry(userEntry);
+
+        // tool_result lines belong to the in-flight assistant turn.
+        if (toolResults.length > 0 && pendingBlocks) {
+          pendingBlocks.push(...toolResults);
         }
 
-        const parsed = parseUserMessage(userEntry);
-        if (parsed) messages.push(parsed);
+        // A real user prompt is a turn boundary.
+        if (prompt) {
+          userMessageCount++;
+          if (!preview) preview = prompt.slice(0, 120);
+          flushAssistant();
+          messages.push({
+            role: 'user',
+            content: prompt,
+            contentBlocks: [{ type: 'text', text: prompt }],
+            hasToolBlocks: false,
+            timestamp: userEntry.timestamp || new Date().toISOString(),
+          });
+        }
       } else if (entry.type === 'assistant') {
         assistantMessageCount++;
-
         const assistantEntry = entry as AssistantEntry;
-        const parsed = parseAssistantMessage(assistantEntry);
-        if (parsed) messages.push(parsed);
+        const blocks = parseAssistantBlocks(assistantEntry);
+        if (blocks.length > 0) {
+          if (!pendingBlocks) {
+            pendingBlocks = [];
+            pendingTs = assistantEntry.timestamp || new Date().toISOString();
+          }
+          pendingBlocks.push(...blocks);
+        }
       }
     } catch {
       // Skip malformed lines
     }
   }
+
+  // Flush the trailing assistant turn (no user prompt closes it).
+  flushAssistant();
 
   // Skip empty sessions
   if (userMessageCount === 0 && assistantMessageCount === 0) {
@@ -511,99 +554,76 @@ export function parseClaudeSession(sessionId: string): ParsedSession | null {
   return { info, messages };
 }
 
-/**
- * Parse a user message entry into a ParsedMessage.
- */
-function parseUserMessage(entry: UserEntry): ParsedMessage | null {
-  const msgContent = entry.message?.content;
-  if (!msgContent) return null;
-
-  let text: string;
-  if (typeof msgContent === 'string') {
-    text = msgContent;
-  } else if (Array.isArray(msgContent)) {
-    // User messages can have structured content (e.g., with images)
-    text = msgContent
-      .filter(b => b.type === 'text')
-      .map(b => b.text || '')
-      .join('\n');
-  } else {
-    return null;
+/** Normalize a tool_result block's content (string or text-block array) to string. */
+function toolResultContentToString(content: string | ContentBlock[] | undefined): string {
+  if (typeof content === 'string') return content;
+  if (Array.isArray(content)) {
+    return content.filter(c => c.type === 'text').map(c => c.text || '').join('\n');
   }
-
-  if (!text.trim()) return null;
-
-  return {
-    role: 'user',
-    content: text,
-    contentBlocks: [{ type: 'text', text }],
-    hasToolBlocks: false,
-    timestamp: entry.timestamp || new Date().toISOString(),
-  };
+  return '';
 }
 
 /**
- * Parse an assistant message entry into a ParsedMessage.
- * Handles text, tool_use, and tool_result content blocks.
+ * Extract ordered content blocks from an assistant JSONL entry. Preserves the
+ * block array order (= chronological order) and includes thinking blocks.
+ * Returns [] for entries with no renderable blocks.
  */
-function parseAssistantMessage(entry: AssistantEntry): ParsedMessage | null {
+function parseAssistantBlocks(entry: AssistantEntry): MessageContentBlock[] {
   const msgContent = entry.message?.content;
-  if (!msgContent || !Array.isArray(msgContent)) return null;
+  if (!msgContent || !Array.isArray(msgContent)) return [];
 
-  const contentBlocks: MessageContentBlock[] = [];
-  const textParts: string[] = [];
-  let hasToolBlocks = false;
-
+  const blocks: MessageContentBlock[] = [];
   for (const block of msgContent) {
     switch (block.type) {
+      case 'thinking': {
+        if (block.thinking) blocks.push({ type: 'thinking', thinking: block.thinking });
+        break;
+      }
       case 'text': {
-        if (block.text) {
-          contentBlocks.push({ type: 'text', text: block.text });
-          textParts.push(block.text);
-        }
+        if (block.text) blocks.push({ type: 'text', text: block.text });
         break;
       }
       case 'tool_use': {
-        hasToolBlocks = true;
-        contentBlocks.push({
-          type: 'tool_use',
-          id: block.id || '',
-          name: block.name || '',
-          input: block.input,
-        });
+        blocks.push({ type: 'tool_use', id: block.id || '', name: block.name || '', input: block.input });
         break;
       }
       case 'tool_result': {
-        hasToolBlocks = true;
-        const resultContent = typeof block.content === 'string'
-          ? block.content
-          : Array.isArray(block.content)
-            ? block.content
-                .filter(c => c.type === 'text')
-                .map(c => c.text || '')
-                .join('\n')
-            : '';
-        contentBlocks.push({
+        blocks.push({
           type: 'tool_result',
           tool_use_id: block.tool_use_id || '',
-          content: resultContent,
+          content: toolResultContentToString(block.content),
           is_error: block.is_error || false,
         });
         break;
       }
     }
   }
+  return blocks;
+}
 
-  if (contentBlocks.length === 0) return null;
-
-  // Plain text content: join all text blocks
-  const plainText = textParts.join('\n');
-
-  return {
-    role: 'assistant',
-    content: plainText,
-    contentBlocks,
-    hasToolBlocks,
-    timestamp: entry.timestamp || new Date().toISOString(),
-  };
+/**
+ * Analyze a user JSONL entry. In Claude Code's transcript, a "user" line is
+ * EITHER a real user prompt (string / text content) OR the tool_result(s) fed
+ * back to the model after a tool_use (array of tool_result blocks). We split
+ * these so the importer can group tool_results into the assistant turn and
+ * only treat real prompts as turn boundaries.
+ */
+function analyzeUserEntry(entry: UserEntry): { prompt: string | null; toolResults: MessageContentBlock[] } {
+  const content = entry.message?.content;
+  if (typeof content === 'string') {
+    return { prompt: content.trim() ? content : null, toolResults: [] };
+  }
+  if (Array.isArray(content)) {
+    const text = content.filter(b => b.type === 'text').map(b => b.text || '').join('\n');
+    const toolResults: MessageContentBlock[] = content
+      .filter(b => b.type === 'tool_result')
+      .map(b => ({
+        type: 'tool_result' as const,
+        tool_use_id: b.tool_use_id || '',
+        content: toolResultContentToString(b.content),
+        is_error: b.is_error || false,
+      }));
+    return { prompt: text.trim() ? text : null, toolResults };
+  }
+  return { prompt: null, toolResults: [] };
 }

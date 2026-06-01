@@ -467,6 +467,86 @@ describe('claude-session-parser', () => {
       assert.equal(result!.messages[3].content, 'Follow-up answer');
     });
 
+    it('merges a real multi-line turn into one ordered assistant message (interleaved)', () => {
+      // Mimics Claude Code's actual transcript: thinking / text / each tool_use
+      // are SEPARATE assistant lines, and the tool_result comes back as a
+      // "user" line. The importer must merge them into ONE assistant message
+      // whose contentBlocks preserve chronological order (incl. thinking +
+      // tool_result paired to the tool_use).
+      const sessionId = 'parse-merge-001';
+      const user1 = makeUserEntry({
+        sessionId,
+        content: '创建一个应用',
+        cwd: '/home/user/mergeproject',
+        timestamp: '2026-01-15T10:00:01.000Z',
+      });
+      const asstThink = makeAssistantEntry({
+        sessionId,
+        content: [{ type: 'thinking', thinking: '用户想要一个应用，先规划。' } as never],
+        parentUuid: user1.uuid,
+        timestamp: '2026-01-15T10:00:02.000Z',
+      });
+      const asstText = makeAssistantEntry({
+        sessionId,
+        content: [{ type: 'text', text: '我来帮你读取配置。' }],
+        parentUuid: asstThink.uuid,
+        timestamp: '2026-01-15T10:00:03.000Z',
+      });
+      const asstTool = makeAssistantEntry({
+        sessionId,
+        content: [{ type: 'tool_use', id: 't1', name: 'Read', input: { file_path: 'cfg.json' } }],
+        parentUuid: asstText.uuid,
+        timestamp: '2026-01-15T10:00:04.000Z',
+      });
+      // tool_result arrives as a USER line (not a real prompt).
+      const toolResultLine = {
+        parentUuid: asstTool.uuid,
+        type: 'user',
+        cwd: '/home/user/mergeproject',
+        sessionId,
+        version: '2.1.34',
+        gitBranch: 'main',
+        message: {
+          role: 'user',
+          content: [{ type: 'tool_result', tool_use_id: 't1', content: '{"ok":true}' }],
+        },
+        uuid: `user-tr-${Date.now()}`,
+        timestamp: '2026-01-15T10:00:05.000Z',
+      };
+      const asstFinal = makeAssistantEntry({
+        sessionId,
+        content: [{ type: 'text', text: '配置没问题，完成。' }],
+        parentUuid: toolResultLine.uuid,
+        timestamp: '2026-01-15T10:00:06.000Z',
+      });
+
+      createSessionFile('-home-user-mergeproject', sessionId, [
+        makeQueueEntry(sessionId),
+        user1, asstThink, asstText, asstTool, toolResultLine, asstFinal,
+      ]);
+
+      const result = parser.parseClaudeSession(sessionId);
+      assert.ok(result);
+      // 1 user prompt + 1 merged assistant turn (NOT 5 separate messages).
+      assert.equal(result!.messages.length, 2);
+      assert.equal(result!.messages[0].role, 'user');
+      assert.equal(result!.messages[0].content, '创建一个应用');
+
+      const asst = result!.messages[1];
+      assert.equal(asst.role, 'assistant');
+      assert.equal(asst.hasToolBlocks, true);
+      // Blocks in true chronological order, including thinking + paired result.
+      assert.deepEqual(
+        asst.contentBlocks.map(b => b.type),
+        ['thinking', 'text', 'tool_use', 'tool_result', 'text'],
+      );
+      assert.equal(asst.contentBlocks[0].type === 'thinking' && asst.contentBlocks[0].thinking, '用户想要一个应用，先规划。');
+      if (asst.contentBlocks[3].type === 'tool_result') {
+        assert.equal(asst.contentBlocks[3].tool_use_id, 't1');
+        assert.equal(asst.contentBlocks[3].content, '{"ok":true}');
+      }
+    });
+
     it('should handle empty assistant content gracefully', () => {
       const sessionId = 'parse-empty-asst-001';
       const userEntry = makeUserEntry({

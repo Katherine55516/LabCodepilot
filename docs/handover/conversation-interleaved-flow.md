@@ -44,12 +44,23 @@ SSE 事件到达顺序天然等于内容顺序（`onToolUse` 里 `flushTextThrot
 
 `segmentsFromBlocks` 先建 `resultById` 映射，每个 `tool_use` 取自己的 result（支持并行工具乱序到达）。孤儿 `tool_result`（无对应 tool_use）渲染成裸行。
 
-## 向后兼容（重要限制）
+## 向后兼容
 
-- **历史旧消息**：改造前持久化的 content 是旧硬编码顺序（thinking→text→tools），**顺序信息已永久丢失**。改造后按**存储顺序**平铺渲染（思考→文字→工具，flat 但非真交错），可读不报错。
-- **只有新消息**（改造后生成）才有真交错。
+- **历史旧消息**：改造前 CodePilot 把 content 持久化成旧硬编码顺序（thinking→text→tools）。改造后这些旧消息按**存储顺序**平铺渲染（思考→文字→工具，flat 但非真交错），可读不报错。**只有新消息**（改造后生成）从 SQLite 读出来就是真交错。
+- **顺序并非永久丢失**：丢的只是 CodePilot 的 SQLite 缓存（`messages.content`）。Claude Code SDK 的原始转录 JSONL（`~/.claude/projects/<sdk_cwd 编码>/<sdk_session_id>.jsonl`）**完整保留了带时间戳的交错顺序**——每个 thinking/text/tool_use/tool_result 都是独立一行。因此旧消息的真顺序**可以从 JSONL 回填**（见下方「已知后续」）。
 - **持久化格式不变**：仍是 `MessageContentBlock[]` JSON，无 DB schema 迁移。
 - **legacy HTML-comment 格式**：`parseOrderedSegments` 保留兜底。
+
+## 导入历史会话 = 自动交错重建（已实现）
+
+应用未发布，没有线上老用户的旧消息——唯一会遇到旧 JSONL 的场景是**导入会话**功能。所以交错重建放在导入流程里做，[src/lib/claude-session-parser.ts](../../src/lib/claude-session-parser.ts) 的 `parseClaudeSession`：
+
+- **回合合并**：Claude Code 的 JSONL 把一个逻辑回合拆成多行（thinking / text / 每个 tool_use 各一行，tool_result 作为 `user` 行回喂）。导入时把**两个真实用户提示之间**的所有 assistant 行 + tool_result 行**合并成一条 assistant 消息**，`contentBlocks` 保持 JSONL 的时间顺序。
+- 关键修复（旧导入逻辑的 bug）：
+  - 之前 `thinking` 块**没解析 → 被丢弃**；现在 `parseAssistantBlocks` 加了 thinking。
+  - 之前 tool_result 在 `user` 行里、`parseUserMessage` 只取 text → **tool_result 被丢、tool_use 没结果**；现在 `analyzeUserEntry` 区分「真实提示」vs「tool_result 回喂行」，后者并入当前回合。
+- 实测：导入一个 444 行真实 JSONL → 1 用户 + 1 个含 350 个有序 block 的 assistant 回合，顺序 `thinking→text→tool_use→tool_result→thinking→text→…` 完整交错。
+- 局限：JSONL 需仍在磁盘；native runtime 会话无 JSONL。这些是导入功能本身的固有前提，非本改造引入。
 
 ## 自动批准 / MCP
 
