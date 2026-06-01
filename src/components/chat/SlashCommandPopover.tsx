@@ -4,6 +4,7 @@ import { useCallback } from 'react';
 import { Terminal, NotePencil, Brain, GlobeSimple, Lightning, Folder, File } from '@/components/ui/icon';
 import { useTranslation } from '@/hooks/useTranslation';
 import type { TranslationKey } from '@/i18n';
+import { GSD_COMMAND_DESCRIPTIONS_ZH } from '@/i18n/gsd-command-descriptions';
 import type { PopoverItem, PopoverMode } from '@/types';
 import {
   CommandList,
@@ -56,7 +57,7 @@ export function SlashCommandPopover({
   onClosePopover,
   onFocusTextarea,
 }: SlashCommandPopoverProps) {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
 
   const builtInItems = filteredItems.filter(item => item.builtIn);
   const slashCommandItems = filteredItems.filter(item => !item.builtIn && item.kind !== 'agent_skill');
@@ -115,10 +116,16 @@ export function SlashCommandPopover({
       ) : (
         <Terminal size={16} className="shrink-0 text-muted-foreground" />
       )}
-      <span className="font-mono text-xs truncate">{item.display || item.label}</span>
+      <span className="font-mono text-xs shrink-0">{item.display || item.label}</span>
       {(item.descriptionKey || item.description) && (
-        <span className="text-xs text-muted-foreground truncate max-w-[200px]">
-          {item.descriptionKey ? t(item.descriptionKey) : item.description}
+        // Description fills the remaining row width (flex-1 min-w-0) and only
+        // ellipsizes at the row edge — no fixed 200px cap. Localization fallback
+        // chain: built-in descriptionKey (already localized) → zh override for
+        // external/plugin commands when locale==='zh' → raw English frontmatter.
+        <span className="text-xs text-muted-foreground truncate flex-1 min-w-0">
+          {item.descriptionKey
+            ? t(item.descriptionKey)
+            : ((locale === 'zh' && GSD_COMMAND_DESCRIPTIONS_ZH[item.label]) || item.description)}
         </span>
       )}
       {!item.builtIn && item.installedSource && (
