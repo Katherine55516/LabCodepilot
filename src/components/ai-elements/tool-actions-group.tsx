@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, createElement } from 'react';
+import React, { useState, useMemo, createElement } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
 import type { Icon } from "@phosphor-icons/react";
 import {
@@ -29,6 +29,7 @@ const thinkingPlugins = { cjk, math, mermaid };
 import type { MediaBlock } from '@/types';
 import { useTranslation } from '@/hooks/useTranslation';
 import { formatToolInput, truncateToolResult } from '@/lib/message-segments';
+import { toolDiff, type LineDiff } from '@/lib/tool-diff';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -495,9 +496,49 @@ function GenericToolDetail({ tool, streamingToolOutput }: { tool: ToolAction; st
 }
 
 // ---------------------------------------------------------------------------
+// Diff view — green/red line diff for Edit / Write / MultiEdit tool calls.
+// Mirrors Claude desktop: removed lines red, added lines green, unchanged lines
+// dimmed as context.
+// ---------------------------------------------------------------------------
+
+const MAX_DIFF_ROWS = 400;
+
+function ToolDiffView({ diff }: { diff: LineDiff }) {
+  const { t } = useTranslation();
+  const rows = diff.lines.slice(0, MAX_DIFF_ROWS);
+  const hidden = diff.lines.length - rows.length;
+
+  return (
+    <div className="mt-1 ml-6 border-l-2 border-border/30 pl-2 pb-1">
+      <div className="max-h-[320px] overflow-auto rounded bg-muted/40 font-mono text-[11px] leading-relaxed">
+        {rows.map((ln, i) => (
+          <div
+            key={i}
+            className={cn(
+              "flex px-2",
+              ln.type === 'add' && "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
+              ln.type === 'remove' && "bg-red-500/10 text-red-600 dark:text-red-400",
+              ln.type === 'context' && "text-muted-foreground/50",
+            )}
+          >
+            <span className="mr-2 w-3 shrink-0 select-none opacity-60">
+              {ln.type === 'add' ? '+' : ln.type === 'remove' ? '−' : ''}
+            </span>
+            <span className="flex-1 whitespace-pre-wrap break-all">{ln.text || ' '}</span>
+          </div>
+        ))}
+        {hidden > 0 && (
+          <div className="px-2 py-0.5 text-muted-foreground/40">{t('tool.moreLines', { count: hidden })}</div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Compact row for a single tool action — collapsible like ThinkingRow.
 // Hover swaps the tool icon for a caret; click toggles an inline detail panel
-// showing the call params + return result.
+// showing the call params + return result (or a diff view for file edits).
 // ---------------------------------------------------------------------------
 
 export function ToolActionRow({ tool, streamingToolOutput }: { tool: ToolAction; streamingToolOutput?: string }) {
@@ -512,9 +553,13 @@ export function ToolActionRow({ tool, streamingToolOutput }: { tool: ToolAction;
   // GenericToolDetail so the final result is visible too.
   const hasCustomDetail = (renderer.icon === Terminal || renderer.icon === Lightning) && !!renderer.renderDetail;
   const liveCustom = hasCustomDetail && isRunning;
+  // File-edit tools (Edit / Write / MultiEdit) render a green/red line diff and
+  // a `+N −M` badge in the row header, Claude-desktop style.
+  const diff = useMemo(() => toolDiff(tool.name, tool.input), [tool.name, tool.input]);
+  const hasDiff = !!diff && (diff.added > 0 || diff.removed > 0);
   const hasInput = !!tool.input && typeof tool.input === 'object' && Object.keys(tool.input as Record<string, unknown>).length > 0;
   const hasResult = tool.result !== undefined && tool.result !== '';
-  const expandable = liveCustom || hasResult || hasInput || (isRunning && !!streamingToolOutput);
+  const expandable = liveCustom || hasDiff || hasResult || hasInput || (isRunning && !!streamingToolOutput);
 
   // Running rows default open (watch live output); completed/historical rows
   // default closed. Initial value is read once on mount, so a tool that
@@ -545,9 +590,16 @@ export function ToolActionRow({ tool, streamingToolOutput }: { tool: ToolAction;
         {summary}
       </span>
 
-      {filePath && !hasCustomDetail && (
+      {filePath && !hasCustomDetail && !hasDiff && (
         <span className="text-muted-foreground/40 text-[11px] font-mono truncate max-w-[200px] hidden sm:inline">
           {truncatePath(filePath)}
+        </span>
+      )}
+
+      {hasDiff && (
+        <span className="shrink-0 flex items-center gap-1.5 font-mono text-[11px] tabular-nums">
+          {diff!.added > 0 && <span className="text-emerald-600 dark:text-emerald-400">+{diff!.added}</span>}
+          {diff!.removed > 0 && <span className="text-red-600 dark:text-red-400">−{diff!.removed}</span>}
         </span>
       )}
 
@@ -592,7 +644,9 @@ export function ToolActionRow({ tool, streamingToolOutput }: { tool: ToolAction;
           >
             {liveCustom
               ? renderer.renderDetail?.(tool, streamingToolOutput)
-              : <GenericToolDetail tool={tool} streamingToolOutput={streamingToolOutput} />}
+              : hasDiff
+                ? <ToolDiffView diff={diff!} />
+                : <GenericToolDetail tool={tool} streamingToolOutput={streamingToolOutput} />}
           </motion.div>
         )}
       </AnimatePresence>

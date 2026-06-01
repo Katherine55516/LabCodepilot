@@ -29,7 +29,8 @@ SDK (有序 content blocks)
 | [src/components/chat/MessageSegments.tsx](../../src/components/chat/MessageSegments.tsx) | 共享渲染组件：按序 map，连续 tool/thinking 归到一条左边框，text 打断分组 |
 | [src/components/chat/MessageItem.tsx](../../src/components/chat/MessageItem.tsx) | `parseOrderedSegments(content)`（持久消息）；渲染改用 `<MessageSegments renderText={AssistantContent}>` |
 | [src/components/chat/StreamingMessage.tsx](../../src/components/chat/StreamingMessage.tsx) | 读 `blocks` → segments；`renderStreamingText` 保留流式 widget 预览（仅尾部 active 段） |
-| [src/components/ai-elements/tool-actions-group.tsx](../../src/components/ai-elements/tool-actions-group.tsx) | `ToolActionRow`（**可折叠**：hover→caret、点击展开）+ `GenericToolDetail`（参数+结果面板）+ `ThinkingRow`；`ToolActionsGroup` 折叠组保留但已停用 |
+| [src/components/ai-elements/tool-actions-group.tsx](../../src/components/ai-elements/tool-actions-group.tsx) | `ToolActionRow`（**可折叠**：hover→caret、点击展开）+ `GenericToolDetail`（参数+结果面板）+ `ToolDiffView`（文件编辑的行级 diff）+ `ThinkingRow`；`ToolActionsGroup` 折叠组保留但已停用 |
+| [src/lib/tool-diff.ts](../../src/lib/tool-diff.ts) | **纯函数** `computeLineDiff`（LCS 行级 diff）、`toolDiff`（从 Edit/Write/MultiEdit input 提取 diff）。无 React、无第三方依赖，可单测 |
 
 ## 保序原理
 
@@ -58,6 +59,14 @@ SSE 事件到达顺序天然等于内容顺序（`onToolUse` 里 `flushTextThrot
 - **复用 `stopScroll`**：展开时调用，避免 stick-to-bottom 把页面跳到底。`ToolActionRow` 仅经 `MessageSegments` 渲染（与 `ThinkingRow` 同处），都在 `StickToBottom` provider 内，安全。
 - **改动面**：只改 `ToolActionRow` 一处，实时（StreamingMessage）/ 持久（MessageItem）/ 导入三条路径同时生效（都经 MessageSegments → ToolActionRow）。
 
+### 文件编辑的 diff 视图（Edit / Write / MultiEdit）
+
+文件编辑类工具行尾显示 `+N −M` 徽标（绿增 / 红删），展开渲染行级 diff（绿底新增、红底删除、灰色 context），对齐 Claude 桌面版。
+
+- [src/lib/tool-diff.ts](../../src/lib/tool-diff.ts)：`computeLineDiff(old,new)` 用 LCS 算行级 diff（无外部依赖；一侧为空走全增 / 全删快路径；`m·n` 过大时退化为全删全增防 OOM）；`toolDiff(name,input)` 从 Edit（`old_string`/`new_string`）、Write（`content`，全增）、MultiEdit（`edits[]`）提取 diff，其它工具返回 null。
+- `ToolDiffView`：渲染 diff 行，最多 400 行（超出用 `tool.moreLines` 提示剩余），`max-h-[320px]` 可滚动。
+- `ToolActionRow` 展开优先级：`liveCustom`（bash/agent 运行中进度）> `hasDiff`（Edit/Write 的 diff）> result/input（`GenericToolDetail`）。有 diff 时隐藏完整路径，腾位给 `+N −M` 徽标。
+
 ## 向后兼容
 
 - **历史旧消息**：改造前 CodePilot 把 content 持久化成旧硬编码顺序（thinking→text→tools）。改造后这些旧消息按**存储顺序**平铺渲染（思考→文字→工具，flat 但非真交错），可读不报错。**只有新消息**（改造后生成）从 SQLite 读出来就是真交错。
@@ -84,7 +93,9 @@ SSE 事件到达顺序天然等于内容顺序（`onToolUse` 里 `flushTextThrot
 
 - 单测：[src/__tests__/unit/message-segments-order.test.ts](../../src/__tests__/unit/message-segments-order.test.ts) — 8 例覆盖 text→tool→text 交错、并行工具乱序配对、多段 thinking、running 工具、孤儿 result、media、空块。
 - 单测：[src/__tests__/unit/tool-detail-format.test.ts](../../src/__tests__/unit/tool-detail-format.test.ts) — `formatToolInput`（对象/空/原始值/超长封顶）+ `truncateToolResult`（行截断/字符截断/空）共 8 例。
-- e2e（CDP 实测）：打开含 120 个工具行的导入会话 → hover 行首图标换成 `>`（caret path 119 vs NotePencil 332）、点击 Bash 行展开「参数 + 结果」、点击 Edit 行展开「参数 + File created」、console 零报错。
+- 单测：[src/__tests__/unit/tool-diff.test.ts](../../src/__tests__/unit/tool-diff.test.ts) — `computeLineDiff`（全增/全删/单行改/无变化/多行插入）+ `toolDiff`（Edit/Write/MultiEdit/非编辑工具/缺字段）共 10 例。
+- e2e（CDP 实测）：打开含 120 个工具行的导入会话 → hover 行首图标换成 `>`（caret path 119 vs NotePencil 332）、Bash 行展开「参数 + 结果」、Write 行显示 `+N` 且展开全绿行级 diff、Edit 行显示 `+1 −1` 且展开红删 / 绿增对比、console 零报错。
+- 注意：直接 navigate `/chat/[id]` URL 会触发 Next 的 `generateStaticParams`（worker 查 DB），dev 下可能崩 worker（预存问题，与本改动无关）；验证走 `/chat` → 点击会话的 client 导航即可绕开。
 - e2e 手测：插入合成交错消息 → CDP 确认 DOM 顺序 text→Read→text→Edit→text、无折叠头、console 零报错。
 
 ## 已知后续
