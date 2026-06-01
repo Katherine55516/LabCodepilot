@@ -4,72 +4,21 @@ interface CodePilotLogoProps {
   className?: string;
 }
 
+/**
+ * Brand logo shown on the empty "new conversation" state (MessageList).
+ *
+ * Was a hand-drawn isometric-cube SVG; replaced with the AI Native Lab "A"
+ * mark (public/brand/anl-logo.png, 256×256 RGBA). The PNG already carries its
+ * own rounded-square shape + gradient, so we render it as-is — no forced
+ * rounded-full circle crop. The `className` sizing contract (e.g. h-16 w-16
+ * from MessageList) is preserved.
+ */
 export function CodePilotLogo({ className }: CodePilotLogoProps) {
   return (
-    <svg
-      viewBox="-150 -150 300 300"
-      xmlns="http://www.w3.org/2000/svg"
-      className={cn("rounded-full", className)}
-    >
-      {/* Background: gray in light, dark in dark mode */}
-      <rect
-        x="-150" y="-150" width="300" height="300"
-        className="fill-[#e0e0e0] dark:fill-[#2a2a2a]"
-      />
-
-      <defs>
-        <g id="codepilot-cube">
-          {/* Top Face */}
-          <path
-            d="M0,0 L0,-30 L25.98,-15 L25.98,15 Z"
-            className="fill-[#e0e0e0] stroke-black dark:fill-[#2a2a2a] dark:stroke-white"
-            strokeWidth="2.5"
-            strokeLinejoin="round"
-            strokeLinecap="round"
-          />
-          {/* Left Face */}
-          <path
-            d="M0,0 L25.98,15 L0,30 L-25.98,15 Z"
-            className="fill-[#e0e0e0] stroke-black dark:fill-[#2a2a2a] dark:stroke-white"
-            strokeWidth="2.5"
-            strokeLinejoin="round"
-            strokeLinecap="round"
-          />
-          {/* Right Face */}
-          <path
-            d="M0,0 L-25.98,15 L-25.98,-15 L0,-30 Z"
-            className="fill-[#e0e0e0] stroke-black dark:fill-[#2a2a2a] dark:stroke-white"
-            strokeWidth="2.5"
-            strokeLinejoin="round"
-            strokeLinecap="round"
-          />
-        </g>
-      </defs>
-
-      {/* Layer Z = -1 (Bottom) */}
-      <use href="#codepilot-cube" x="-25.98" y="15" />
-      <use href="#codepilot-cube" x="25.98"  y="15" />
-      <use href="#codepilot-cube" x="0"      y="30" />
-      <use href="#codepilot-cube" x="-25.98" y="45" />
-      <use href="#codepilot-cube" x="25.98"  y="45" />
-
-      {/* Layer Z = 0 (Middle) */}
-      <use href="#codepilot-cube" x="0"      y="-30" />
-      <use href="#codepilot-cube" x="-25.98" y="-15" />
-      <use href="#codepilot-cube" x="25.98"  y="-15" />
-      <use href="#codepilot-cube" x="0"      y="0" />
-      <use href="#codepilot-cube" x="-51.96" y="0" />
-      <use href="#codepilot-cube" x="51.96"  y="0" />
-      <use href="#codepilot-cube" x="-25.98" y="15" />
-      <use href="#codepilot-cube" x="25.98"  y="15" />
-      <use href="#codepilot-cube" x="0"      y="30" />
-
-      {/* Layer Z = 1 (Top) */}
-      <use href="#codepilot-cube" x="-25.98" y="-45" />
-      <use href="#codepilot-cube" x="25.98"  y="-45" />
-      <use href="#codepilot-cube" x="0"      y="-30" />
-      <use href="#codepilot-cube" x="-25.98" y="-15" />
-      <use href="#codepilot-cube" x="25.98"  y="-15" />
-    </svg>
+    <img
+      src="/brand/anl-logo.png"
+      alt="AI Native Lab"
+      className={cn('object-contain', className)}
+    />
   );
 }
