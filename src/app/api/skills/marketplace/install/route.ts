@@ -19,7 +19,10 @@ export async function POST(request: Request) {
     }
 
     const child = spawn("npx", args, {
-      env: { ...process.env },
+      // NO_COLOR / FORCE_COLOR=0 ask the CLI not to emit ANSI color codes, so
+      // the streamed output renders cleanly in the HTML dialog (stripAnsi on the
+      // client is the belt-and-suspenders fallback).
+      env: { ...process.env, NO_COLOR: "1", FORCE_COLOR: "0" },
       shell: true,
     });
 

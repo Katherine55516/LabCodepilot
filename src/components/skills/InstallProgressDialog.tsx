@@ -11,6 +11,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { SpinnerGap, CheckCircle, X } from "@/components/ui/icon";
 import { useTranslation } from "@/hooks/useTranslation";
+import { stripAnsi } from "@/lib/strip-ansi";
 
 interface InstallProgressDialogProps {
   open: boolean;
@@ -161,7 +162,7 @@ export function InstallProgressDialog({
           )}
           {logs.map((line, i) => (
             <div key={i} className="whitespace-pre-wrap break-all">
-              {line}
+              {stripAnsi(line)}
             </div>
           ))}
           <div ref={logsEndRef} />
