@@ -188,6 +188,7 @@ const TOOL_REGISTRY: ToolRendererDef[] = [
       return url || 'fetch';
     },
     primaryParam: 'prompt',
+    renderResult: (result) => <MarkdownResultView result={result} />,
   },
   {
     // TodoWrite — collapsed row shows the in-progress step's activeForm;
@@ -224,7 +225,7 @@ const TOOL_REGISTRY: ToolRendererDef[] = [
       return (inp?.subagent_type || inp?.agent || 'general') as string;
     },
     renderParams: (input) => <AgentParamsView input={input} />,
-    renderResult: (result) => <AgentResultView result={result} />,
+    renderResult: (result) => <MarkdownResultView result={result} />,
     renderDetail: (tool, streamingOutput) => {
       const isRunning = tool.result === undefined;
       const outputText = isRunning ? streamingOutput : undefined;
@@ -618,10 +619,11 @@ function AgentParamsView({ input }: { input: unknown }) {
   );
 }
 
-function AgentResultView({ result }: { result: string }) {
-  // Compact markdown: body ≈ the old plain-text size (11px), headings kept small
-  // but still tiered (h1>h2>h3>h4), colors softened. Arbitrary variants are used
-  // so they reliably override the typography plugin's larger defaults.
+function MarkdownResultView({ result }: { result: string }) {
+  // Shared compact markdown reader for tool results (Agent sub-agent output,
+  // WebFetch page content). Body ≈ the old plain-text size (11px), headings kept
+  // small but still tiered (h1>h2>h3>h4), colors softened. Arbitrary variants
+  // reliably override the typography plugin's larger defaults.
   return (
     <div
       className={cn(
