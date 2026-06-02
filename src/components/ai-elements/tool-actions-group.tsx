@@ -87,9 +87,14 @@ const TOOL_REGISTRY: ToolRendererDef[] = [
   {
     match: (n) => ['bash', 'execute', 'run', 'shell', 'execute_command'].includes(n.toLowerCase()),
     icon: Terminal,
-    label: '',
+    label: 'bash',
+    // Collapsed row reads "bash — <description>": prefer the human-readable
+    // `description`; fall back to the command when none was provided.
     getSummary: (input) => {
-      const cmd = ((input as Record<string, unknown>)?.command || (input as Record<string, unknown>)?.cmd || '') as string;
+      const inp = input as Record<string, unknown> | undefined;
+      const desc = (inp?.description || '') as string;
+      if (desc) return desc.length > 80 ? desc.slice(0, 77) + '...' : desc;
+      const cmd = (inp?.command || inp?.cmd || '') as string;
       return cmd ? (cmd.length > 60 ? cmd.slice(0, 57) + '...' : cmd) : 'bash';
     },
     renderDetail: (tool, streamingOutput) => {
@@ -443,6 +448,10 @@ export function ThinkingRow({ content, isStreaming }: { content: string; isStrea
   );
 }
 
+// Shell-style tools: the param worth showing is the raw command, not the full
+// {command, description} JSON (the description already sits in the collapsed row).
+const COMMAND_TOOL_NAMES = new Set(['bash', 'execute', 'run', 'shell', 'execute_command']);
+
 // ---------------------------------------------------------------------------
 // Generic tool detail — params + result panel for tools without a bespoke
 // renderDetail (Read / Edit / Write / Search / MCP / …). Also used for bash and
@@ -452,7 +461,14 @@ export function ThinkingRow({ content, isStreaming }: { content: string; isStrea
 function GenericToolDetail({ tool, streamingToolOutput }: { tool: ToolAction; streamingToolOutput?: string }) {
   const { t } = useTranslation();
   const isRunning = tool.result === undefined;
-  const inputStr = formatToolInput(tool.input);
+  // Shell tools show just the raw command; everything else shows pretty JSON.
+  const inp = tool.input as Record<string, unknown> | undefined;
+  const shellCommand = COMMAND_TOOL_NAMES.has(tool.name.toLowerCase())
+    ? ((inp?.command || inp?.cmd) as string | undefined)
+    : undefined;
+  const inputStr = typeof shellCommand === 'string' && shellCommand
+    ? shellCommand
+    : formatToolInput(tool.input);
   const rawResult = isRunning ? (streamingToolOutput ?? '') : (tool.result ?? '');
   const { text: shownResult, truncated, hiddenLines } = truncateToolResult(rawResult);
   const hasResult = shownResult.length > 0;
