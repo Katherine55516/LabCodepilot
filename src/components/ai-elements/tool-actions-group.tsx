@@ -16,6 +16,7 @@ import {
   Brain,
   Image as ImageIcon,
   Lightning,
+  Globe,
 } from "@phosphor-icons/react";
 import { cn } from '@/lib/utils';
 import { Shimmer } from '@/components/ai-elements/shimmer';
@@ -65,6 +66,11 @@ interface ToolRendererDef {
   getSummary: (input: unknown, name?: string) => string;
   /** Render inline detail when tool row is hovered/expanded (optional) */
   renderDetail?: (tool: ToolAction, streamingOutput?: string) => React.ReactNode;
+  /** When set, the expanded "参数" panel shows just this input field's raw
+   *  string value (e.g. 'command' for bash, 'prompt' for WebFetch) instead of
+   *  the full input JSON — the other fields already surface in the collapsed
+   *  row (bash description / WebFetch url). */
+  primaryParam?: string;
 }
 
 function extractFilename(path: string): string {
@@ -88,6 +94,7 @@ const TOOL_REGISTRY: ToolRendererDef[] = [
     match: (n) => ['bash', 'execute', 'run', 'shell', 'execute_command'].includes(n.toLowerCase()),
     icon: Terminal,
     label: 'bash',
+    primaryParam: 'command',
     // Collapsed row reads "bash — <description>": prefer the human-readable
     // `description`; fall back to the command when none was provided.
     getSummary: (input) => {
@@ -157,6 +164,17 @@ const TOOL_REGISTRY: ToolRendererDef[] = [
       const pattern = (inp?.pattern || inp?.query || inp?.glob || '') as string;
       return pattern ? `"${pattern.length > 50 ? pattern.slice(0, 47) + '...' : pattern}"` : 'search';
     },
+  },
+  {
+    // WebFetch — collapsed row shows the target URL; expanded 参数 shows the prompt.
+    match: (n) => ['webfetch', 'web_fetch', 'fetch', 'url_fetch'].includes(n.toLowerCase()),
+    icon: Globe,
+    label: 'WebFetch',
+    getSummary: (input) => {
+      const url = ((input as Record<string, unknown>)?.url || '') as string;
+      return url || 'fetch';
+    },
+    primaryParam: 'prompt',
   },
   {
     match: (n) => n.toLowerCase() === 'agent',
@@ -448,10 +466,6 @@ export function ThinkingRow({ content, isStreaming }: { content: string; isStrea
   );
 }
 
-// Shell-style tools: the param worth showing is the raw command, not the full
-// {command, description} JSON (the description already sits in the collapsed row).
-const COMMAND_TOOL_NAMES = new Set(['bash', 'execute', 'run', 'shell', 'execute_command']);
-
 // ---------------------------------------------------------------------------
 // Generic tool detail — params + result panel for tools without a bespoke
 // renderDetail (Read / Edit / Write / Search / MCP / …). Also used for bash and
@@ -461,13 +475,13 @@ const COMMAND_TOOL_NAMES = new Set(['bash', 'execute', 'run', 'shell', 'execute_
 function GenericToolDetail({ tool, streamingToolOutput }: { tool: ToolAction; streamingToolOutput?: string }) {
   const { t } = useTranslation();
   const isRunning = tool.result === undefined;
-  // Shell tools show just the raw command; everything else shows pretty JSON.
+  // If the renderer declares a primaryParam (bash→command, WebFetch→prompt), the
+  // 参数 panel shows just that field's raw string; otherwise pretty-printed JSON.
   const inp = tool.input as Record<string, unknown> | undefined;
-  const shellCommand = COMMAND_TOOL_NAMES.has(tool.name.toLowerCase())
-    ? ((inp?.command || inp?.cmd) as string | undefined)
-    : undefined;
-  const inputStr = typeof shellCommand === 'string' && shellCommand
-    ? shellCommand
+  const primaryKey = getRenderer(tool.name).primaryParam;
+  const primaryVal = primaryKey && inp ? inp[primaryKey] : undefined;
+  const inputStr = typeof primaryVal === 'string' && primaryVal
+    ? primaryVal
     : formatToolInput(tool.input);
   const rawResult = isRunning ? (streamingToolOutput ?? '') : (tool.result ?? '');
   const { text: shownResult, truncated, hiddenLines } = truncateToolResult(rawResult);
