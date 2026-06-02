@@ -11,6 +11,14 @@ import {
   CommandListItem,
 } from '@/components/patterns';
 
+// Managed provider row from /api/providers — only the fields we need.
+interface ManagedProviderRow {
+  id: string;
+  name: string;
+  source?: string;
+  sort_order?: number;
+}
+
 interface BridgeModelSelectorProps {
   /** Composite "providerId::model" value (or a bare model / empty string). */
   value: string;
@@ -32,9 +40,11 @@ interface BridgeModelSelectorProps {
  * exactly (an earlier grouped variant kept every model selectable but looked
  * too much like the old native <select>).
  *
- * Difference from the chat dropdown: that one lists managed providers only;
- * the bridge default may target any configured provider (env "Claude Code",
- * local BYOK, or managed), so we render every group from providerGroups.
+ * Like the chat dropdown, this lists MANAGED providers only (source==='managed',
+ * fetched from /api/providers). The built-in env "Claude Code" group and local
+ * BYOK providers are intentionally excluded so the bridge default surfaces only
+ * what the account backend pushed. providerGroups is still used to resolve each
+ * managed provider's primary model value.
  *
  * Form-context tweaks: full-width form-style trigger (not a PromptInputButton),
  * popover opens downward (top-full), and no localStorage side effects.
@@ -48,6 +58,31 @@ export function BridgeModelSelector({
   const isZh = t('nav.chats') === '对话';
   const menuRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
+  // Managed providers (source==='managed') — same source as the chat dropdown,
+  // so the bridge default only offers account-pushed providers (no built-in
+  // env "Claude Code", no local BYOK).
+  const [managedProviders, setManagedProviders] = useState<ManagedProviderRow[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const load = () => {
+      fetch('/api/providers')
+        .then((r) => (r.ok ? r.json() : { providers: [] }))
+        .then((data) => {
+          if (cancelled) return;
+          const all: ManagedProviderRow[] = data?.providers ?? [];
+          const managed = all
+            .filter((p) => p.source === 'managed')
+            .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
+          setManagedProviders(managed);
+        })
+        .catch(() => { if (!cancelled) setManagedProviders([]); });
+    };
+    load();
+    const handler = () => load();
+    window.addEventListener('provider-changed', handler);
+    return () => { cancelled = true; window.removeEventListener('provider-changed', handler); };
+  }, []);
 
   // Parse the composite "providerId::model". indexOf (not split) so a model id
   // that itself contains "::" stays intact.
@@ -67,18 +102,22 @@ export function BridgeModelSelector({
     return () => document.removeEventListener('mousedown', handler);
   }, [open]);
 
-  // One row per provider; selecting a row uses that provider's first model.
-  const flatItems = providerGroups.map((g) => ({
-    providerId: g.provider_id,
-    providerName: g.provider_name,
-    modelValue: g.models[0]?.value ?? '',
-  }));
+  // One row per MANAGED provider; selecting a row uses that provider's first
+  // model (resolved from providerGroups). Non-managed groups (env "Claude Code",
+  // local BYOK) never appear because managedProviders is the base list.
+  const flatItems = managedProviders.map((mp) => {
+    const group = providerGroups.find((g) => g.provider_id === mp.id);
+    return {
+      providerId: mp.id,
+      providerName: mp.name,
+      modelValue: group?.models[0]?.value ?? '',
+    };
+  });
 
   // Trigger shows the current provider's name; falls back to the raw model id
   // (e.g. a stale "default") or a placeholder when nothing resolves.
-  const currentProviderName = providerGroups.find(
-    (g) => g.provider_id === currentProviderId,
-  )?.provider_name;
+  const currentProviderName = managedProviders.find((p) => p.id === currentProviderId)?.name
+    ?? providerGroups.find((g) => g.provider_id === currentProviderId)?.provider_name;
   const triggerLabel = currentProviderName ?? (currentModel || undefined);
 
   const handleSelect = useCallback(
