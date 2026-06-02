@@ -490,6 +490,8 @@ const zh: Record<TranslationKey, string> = {
   'tool.truncated': '… 内容已截断',
   'tool.searchPath': '路径',
   'tool.searchPattern': '匹配规则',
+  'tool.agentDescription': '任务描述',
+  'tool.agentPrompt': '提示词',
 
   // ── Common ──────────────────────────────────────────────────
   'common.cancel': '取消',

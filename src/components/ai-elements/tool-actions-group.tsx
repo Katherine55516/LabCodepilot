@@ -217,13 +217,14 @@ const TOOL_REGISTRY: ToolRendererDef[] = [
     match: (n) => n.toLowerCase() === 'agent',
     icon: Lightning,
     label: 'Agent',
+    // Collapsed row reads "Agent <subagent_type>"; params show 任务描述 + 提示词,
+    // result is the sub-agent's final markdown output (rendered, not truncated).
     getSummary: (input) => {
       const inp = input as Record<string, unknown> | undefined;
-      const agentType = (inp?.agent || 'general') as string;
-      const prompt = (inp?.prompt || '') as string;
-      const short = prompt.length > 50 ? prompt.slice(0, 47) + '...' : prompt;
-      return `${agentType}: ${short}`;
+      return (inp?.subagent_type || inp?.agent || 'general') as string;
     },
+    renderParams: (input) => <AgentParamsView input={input} />,
+    renderResult: (result) => <AgentResultView result={result} />,
     renderDetail: (tool, streamingOutput) => {
       const isRunning = tool.result === undefined;
       const outputText = isRunning ? streamingOutput : undefined;
@@ -577,6 +578,50 @@ function AskAnswersView({ result, input }: { result: string; input: unknown }) {
           ))}
         </div>
       ))}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Agent (sub-agent) — params show 任务描述 + 提示词; result is the sub-agent's
+// final markdown output, rendered with a reader (full content, scrollable).
+// ---------------------------------------------------------------------------
+
+function AgentParamsView({ input }: { input: unknown }) {
+  const { t } = useTranslation();
+  const inp = (input || {}) as Record<string, unknown>;
+  const description = (inp.description || '') as string;
+  const prompt = (inp.prompt || '') as string;
+  return (
+    <div className="space-y-1.5">
+      {description && (
+        <div>
+          <div className="mb-0.5 text-[10px] uppercase tracking-wide text-muted-foreground/40">
+            {t('tool.agentDescription')}
+          </div>
+          <div className="rounded bg-muted/40 px-2 py-1 text-[11px] text-muted-foreground/80 break-words">
+            {description}
+          </div>
+        </div>
+      )}
+      {prompt && (
+        <div>
+          <div className="mb-0.5 text-[10px] uppercase tracking-wide text-muted-foreground/40">
+            {t('tool.agentPrompt')}
+          </div>
+          <pre className="max-h-[220px] overflow-auto whitespace-pre-wrap break-all rounded bg-muted/40 px-2 py-1 font-mono text-[11px] text-muted-foreground/70">
+            {prompt}
+          </pre>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function AgentResultView({ result }: { result: string }) {
+  return (
+    <div className="prose prose-sm dark:prose-invert max-w-none max-h-[520px] overflow-auto rounded bg-muted/40 px-3 py-2 text-xs prose-headings:text-sm prose-headings:mt-2 prose-p:my-1 prose-pre:text-[11px]">
+      <Streamdown plugins={thinkingPlugins}>{result}</Streamdown>
     </div>
   );
 }

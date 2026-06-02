@@ -493,6 +493,8 @@ const en = {
   'tool.truncated': '… truncated',
   'tool.searchPath': 'Path',
   'tool.searchPattern': 'Pattern',
+  'tool.agentDescription': 'Task',
+  'tool.agentPrompt': 'Prompt',
 
   // ── Common ──────────────────────────────────────────────────
   'common.cancel': 'Cancel',
