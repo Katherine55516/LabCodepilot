@@ -402,6 +402,17 @@ const en = {
   'import.daysAgo': '{n}d ago',
   'import.messages': '{n} msg',
   'import.messagesPlural': '{n} msgs',
+  // Batch import (multi-select / select-all)
+  'import.selectAll': 'Select all',
+  'import.selectedCount': '{n} selected',
+  'import.importSelected': 'Import selected ({n})',
+  'import.importingCount': 'Importing {n}…',
+  'import.clearSelection': 'Clear selection',
+  'import.batchSuccess': 'Imported {n} sessions',
+  'import.batchSummary': '{imported} imported, {skipped} skipped, {failed} failed',
+  'import.alreadyImported': 'Imported',
+  'import.hiddenSelectedHint': '{n} more selected outside current filter',
+  'import.batchEmptyError': 'Select sessions to import first',
 
   // ── Connection status ───────────────────────────────────────
   'connection.notInstalled': 'Claude Code is not installed',

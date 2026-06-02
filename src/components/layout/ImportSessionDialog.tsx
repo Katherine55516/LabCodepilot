@@ -21,8 +21,11 @@ import {
   Clock,
   FileArrowDown,
   ChatCircleText,
+  Check,
+  Minus,
 } from "@/components/ui/icon";
 import { useTranslation } from "@/hooks/useTranslation";
+import { showToast, showLoadingToast, updateToast } from "@/hooks/useToast";
 import { cn, parseDBDate } from "@/lib/utils";
 
 interface ClaudeSessionInfo {
@@ -43,6 +46,48 @@ interface ClaudeSessionInfo {
 interface ImportSessionDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
+}
+
+type CheckState = "unchecked" | "checked" | "indeterminate";
+
+/**
+ * Lightweight tri-state checkbox (no ui/checkbox component exists).
+ * `Check` for selected, `Minus` for indeterminate (partial select-all).
+ */
+function SelectCheckbox({
+  state,
+  onToggle,
+  disabled,
+  className,
+}: {
+  state: CheckState;
+  onToggle: () => void;
+  disabled?: boolean;
+  className?: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="checkbox"
+      aria-checked={state === "indeterminate" ? "mixed" : state === "checked"}
+      disabled={disabled}
+      onClick={(e) => {
+        e.stopPropagation();
+        if (!disabled) onToggle();
+      }}
+      className={cn(
+        "flex h-5 w-5 shrink-0 items-center justify-center rounded border transition-colors",
+        state === "unchecked" && "border-input bg-background hover:border-primary/60",
+        state === "checked" && "border-primary bg-primary text-primary-foreground",
+        state === "indeterminate" && "border-primary bg-primary/15 text-primary",
+        disabled && "opacity-40 cursor-not-allowed",
+        className,
+      )}
+    >
+      {state === "checked" && <Check size={12} />}
+      {state === "indeterminate" && <Minus size={12} />}
+    </button>
+  );
 }
 
 function formatRelativeTime(dateStr: string): { key: 'import.justNow' | 'import.minutesAgo' | 'import.hoursAgo' | 'import.daysAgo'; params?: Record<string, number> } | string {
@@ -77,6 +122,11 @@ export function ImportSessionDialog({
   const [importing, setImporting] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
+  // Multi-select state
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [batchImporting, setBatchImporting] = useState(false);
+  // Sessions already imported (or pre-existing) via batch — locked from re-select.
+  const [importedIds, setImportedIds] = useState<Set<string>>(new Set());
 
   const fetchSessions = useCallback(async () => {
     setLoading(true);
@@ -99,6 +149,10 @@ export function ImportSessionDialog({
   useEffect(() => {
     if (open) {
       fetchSessions();
+      // Reset selection each time the dialog opens.
+      setSelectedIds(new Set());
+      setImportedIds(new Set());
+      setSearchQuery("");
     }
   }, [open, fetchSessions]);
 
@@ -146,6 +200,105 @@ export function ImportSessionDialog({
       )
     : sessions;
 
+  // ── Selection derivations ──────────────────────────────────────────
+  // Select-all operates on the CURRENT filtered view, excluding rows already
+  // imported in this session.
+  const selectableInView = filteredSessions.filter((s) => !importedIds.has(s.sessionId));
+  const selectedInViewCount = selectableInView.filter((s) => selectedIds.has(s.sessionId)).length;
+  const allInViewSelected = selectableInView.length > 0 && selectedInViewCount === selectableInView.length;
+  const someInViewSelected = selectedInViewCount > 0 && !allInViewSelected;
+  const masterState: CheckState = allInViewSelected ? "checked" : someInViewSelected ? "indeterminate" : "unchecked";
+  // Selected ids that aren't visible under the current filter (kept across searches).
+  const hiddenSelectedCount = Array.from(selectedIds).filter(
+    (id) => !filteredSessions.some((s) => s.sessionId === id),
+  ).length;
+
+  const toggleSelect = (sessionId: string) => {
+    if (importedIds.has(sessionId)) return; // locked after import
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(sessionId)) next.delete(sessionId);
+      else next.add(sessionId);
+      return next;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (allInViewSelected) {
+        for (const s of selectableInView) next.delete(s.sessionId);
+      } else {
+        for (const s of selectableInView) next.add(s.sessionId);
+      }
+      return next;
+    });
+  };
+
+  const clearSelection = () => setSelectedIds(new Set());
+
+  const handleBatchImport = async () => {
+    const ids = Array.from(selectedIds);
+    if (ids.length === 0) {
+      showToast({ type: "warning", message: t("import.batchEmptyError") });
+      return;
+    }
+    setBatchImporting(true);
+    setError(null);
+    const toastId = showLoadingToast(t("import.importingCount", { n: ids.length }));
+    try {
+      const res = await fetch("/api/claude-sessions/import-batch", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sessionIds: ids }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || "Batch import failed");
+      }
+
+      const { imported, skipped, failed } = data.summary as {
+        imported: number;
+        skipped: number;
+        failed: number;
+      };
+
+      // Lock imported + skipped rows; drop them from the selection.
+      const processed = new Set<string>();
+      for (const r of data.results as Array<{ sessionId: string; status: string }>) {
+        if (r.status === "imported" || r.status === "skipped") processed.add(r.sessionId);
+      }
+      setImportedIds((prev) => new Set([...prev, ...processed]));
+      setSelectedIds((prev) => {
+        const next = new Set(prev);
+        for (const id of processed) next.delete(id);
+        return next;
+      });
+
+      if (failed === 0 && skipped === 0) {
+        updateToast(toastId, { type: "success", message: t("import.batchSuccess", { n: imported }) });
+      } else {
+        updateToast(toastId, {
+          type: imported > 0 ? "warning" : "error",
+          message: t("import.batchSummary", { imported, skipped, failed }),
+        });
+      }
+
+      if (imported > 0) {
+        window.dispatchEvent(new CustomEvent("session-created"));
+      }
+    } catch (err) {
+      updateToast(toastId, {
+        type: "error",
+        message: err instanceof Error ? err.message : "Batch import failed",
+      });
+    } finally {
+      setBatchImporting(false);
+    }
+  };
+
+  const hasList = !loading && filteredSessions.length > 0;
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-2xl max-h-[80vh] !flex flex-col overflow-hidden">
@@ -172,6 +325,24 @@ export function ImportSessionDialog({
             className="pl-8 text-sm"
           />
         </div>
+
+        {/* Select-all bar */}
+        {hasList && (
+          <div className="flex items-center justify-between gap-2 px-0.5">
+            <div
+              onClick={toggleSelectAll}
+              className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors cursor-pointer select-none"
+            >
+              <SelectCheckbox state={masterState} onToggle={toggleSelectAll} />
+              {t('import.selectAll')}
+            </div>
+            {hiddenSelectedCount > 0 && (
+              <span className="text-[11px] text-muted-foreground/70">
+                {t('import.hiddenSelectedHint', { n: hiddenSelectedCount })}
+              </span>
+            )}
+          </div>
+        )}
 
         {/* Error */}
         {error && (
@@ -207,85 +378,116 @@ export function ImportSessionDialog({
             ) : (
               filteredSessions.map((session) => {
                 const isImporting = importing === session.sessionId;
+                const isImported = importedIds.has(session.sessionId);
+                const isSelected = selectedIds.has(session.sessionId);
                 const totalMessages =
                   session.userMessageCount + session.assistantMessageCount;
                 return (
                   <div
                     key={session.sessionId}
+                    onClick={() => toggleSelect(session.sessionId)}
                     className={cn(
-                      "group flex flex-col gap-1.5 rounded-lg border p-3 transition-colors",
-                      "hover:bg-accent/50",
+                      "group flex gap-2.5 rounded-lg border p-3 transition-colors",
+                      isImported
+                        ? "opacity-60"
+                        : isSelected
+                          ? "bg-accent/60 border-primary/40 ring-1 ring-primary/20 cursor-pointer"
+                          : "hover:bg-accent/50 cursor-pointer",
                       isImporting && "opacity-60 pointer-events-none"
                     )}
                   >
-                    {/* Top row: project name + import button */}
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="font-medium text-sm truncate">
-                            {session.projectName}
-                          </span>
-                          {session.gitBranch && (
-                            <Badge
-                              variant="secondary"
-                              className="text-[10px] px-1.5 py-0 h-4 shrink-0"
-                            >
-                              <GitBranch size={10} className="mr-0.5" />
-                              {session.gitBranch}
-                            </Badge>
-                          )}
-                        </div>
-                        <p className="text-xs text-muted-foreground line-clamp-2 break-all">
-                          {session.preview}
-                        </p>
-                      </div>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="shrink-0 h-7 text-xs"
-                        onClick={() => handleImport(session.sessionId)}
-                        disabled={isImporting}
-                      >
-                        {isImporting ? (
-                          <>
-                            <SpinnerGap size={12} className="mr-1 animate-spin" />
-                            {t('import.importing')}
-                          </>
-                        ) : (
-                          <>
-                            <FileArrowDown size={12} className="mr-1" />
-                            {t('import.import')}
-                          </>
-                        )}
-                      </Button>
+                    {/* Row checkbox */}
+                    <div className="pt-0.5">
+                      <SelectCheckbox
+                        state={isSelected ? "checked" : "unchecked"}
+                        onToggle={() => toggleSelect(session.sessionId)}
+                        disabled={isImported}
+                      />
                     </div>
 
-                    {/* Bottom row: metadata */}
-                    <div className="flex items-center gap-3 text-[10px] text-muted-foreground/60">
-                      <span
-                        className="flex items-center gap-0.5 truncate"
-                        title={session.cwd}
-                      >
-                        <FolderOpen size={10} className="shrink-0" />
-                        {session.cwd}
-                      </span>
-                      <span className="flex items-center gap-0.5 shrink-0">
-                        <ChatCircleText size={10} />
-                        {t(totalMessages !== 1 ? 'import.messagesPlural' : 'import.messages', { n: totalMessages })}
-                      </span>
-                      <span className="flex items-center gap-0.5 shrink-0">
-                        <Clock size={10} />
-                        {(() => {
-                          const rel = formatRelativeTime(session.updatedAt);
-                          return typeof rel === 'string' ? rel : t(rel.key, rel.params);
-                        })()}
-                      </span>
-                      <span className="shrink-0">
-                        {formatFileSize(session.fileSize)}
-                      </span>
-                      {session.version && (
-                        <span className="shrink-0">v{session.version}</span>
-                      )}
+                    <div className="flex flex-1 min-w-0 flex-col gap-1.5">
+                      {/* Top row: project name + import button */}
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-1">
+                            <span className="font-medium text-sm truncate">
+                              {session.projectName}
+                            </span>
+                            {session.gitBranch && (
+                              <Badge
+                                variant="secondary"
+                                className="text-[10px] px-1.5 py-0 h-4 shrink-0"
+                              >
+                                <GitBranch size={10} className="mr-0.5" />
+                                {session.gitBranch}
+                              </Badge>
+                            )}
+                          </div>
+                          <p className="text-xs text-muted-foreground line-clamp-2 break-all">
+                            {session.preview}
+                          </p>
+                        </div>
+                        {isImported ? (
+                          <Badge
+                            variant="secondary"
+                            className="shrink-0 h-7 gap-1 px-2 text-xs"
+                          >
+                            <Check size={12} />
+                            {t('import.alreadyImported')}
+                          </Badge>
+                        ) : (
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="shrink-0 h-7 text-xs"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleImport(session.sessionId);
+                            }}
+                            disabled={isImporting || batchImporting}
+                          >
+                            {isImporting ? (
+                              <>
+                                <SpinnerGap size={12} className="mr-1 animate-spin" />
+                                {t('import.importing')}
+                              </>
+                            ) : (
+                              <>
+                                <FileArrowDown size={12} className="mr-1" />
+                                {t('import.import')}
+                              </>
+                            )}
+                          </Button>
+                        )}
+                      </div>
+
+                      {/* Bottom row: metadata */}
+                      <div className="flex items-center gap-3 text-[10px] text-muted-foreground/60">
+                        <span
+                          className="flex items-center gap-0.5 truncate"
+                          title={session.cwd}
+                        >
+                          <FolderOpen size={10} className="shrink-0" />
+                          {session.cwd}
+                        </span>
+                        <span className="flex items-center gap-0.5 shrink-0">
+                          <ChatCircleText size={10} />
+                          {t(totalMessages !== 1 ? 'import.messagesPlural' : 'import.messages', { n: totalMessages })}
+                        </span>
+                        <span className="flex items-center gap-0.5 shrink-0">
+                          <Clock size={10} />
+                          {(() => {
+                            const rel = formatRelativeTime(session.updatedAt);
+                            return typeof rel === 'string' ? rel : t(rel.key, rel.params);
+                          })()}
+                        </span>
+                        <span className="shrink-0">
+                          {formatFileSize(session.fileSize)}
+                        </span>
+                        {session.version && (
+                          <span className="shrink-0">v{session.version}</span>
+                        )}
+                      </div>
                     </div>
                   </div>
                 );
@@ -293,6 +495,46 @@ export function ImportSessionDialog({
             )}
           </div>
         </div>
+
+        {/* Batch action bar */}
+        {hasList && (
+          <div className="flex flex-none items-center justify-between gap-3 border-t pt-3">
+            <span className={cn("text-sm", selectedIds.size > 0 ? "text-muted-foreground" : "text-muted-foreground/50")}>
+              {t('import.selectedCount', { n: selectedIds.size })}
+            </span>
+            <div className="flex items-center gap-2">
+              {selectedIds.size > 0 && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  className="h-8 text-xs"
+                  onClick={clearSelection}
+                  disabled={batchImporting}
+                >
+                  {t('import.clearSelection')}
+                </Button>
+              )}
+              <Button
+                size="sm"
+                className="h-8 text-xs"
+                onClick={handleBatchImport}
+                disabled={selectedIds.size === 0 || batchImporting || loading}
+              >
+                {batchImporting ? (
+                  <>
+                    <SpinnerGap size={12} className="mr-1 animate-spin" />
+                    {t('import.importingCount', { n: selectedIds.size })}
+                  </>
+                ) : (
+                  <>
+                    <FileArrowDown size={12} className="mr-1" />
+                    {t('import.importSelected', { n: selectedIds.size })}
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
+        )}
       </DialogContent>
     </Dialog>
   );

@@ -399,6 +399,17 @@ const zh: Record<TranslationKey, string> = {
   'import.daysAgo': '{n}天前',
   'import.messages': '{n} 条消息',
   'import.messagesPlural': '{n} 条消息',
+  // 批量导入（多选 / 全选）
+  'import.selectAll': '全选',
+  'import.selectedCount': '已选 {n} 个',
+  'import.importSelected': '导入选中 ({n})',
+  'import.importingCount': '正在导入 {n} 个…',
+  'import.clearSelection': '清空选择',
+  'import.batchSuccess': '成功导入 {n} 个会话',
+  'import.batchSummary': '导入 {imported}，已存在 {skipped}，失败 {failed}',
+  'import.alreadyImported': '已导入',
+  'import.hiddenSelectedHint': '另有 {n} 个不在当前筛选内的已选会话',
+  'import.batchEmptyError': '请先选择要导入的会话',
 
   // ── Connection status ───────────────────────────────────────
   'connection.notInstalled': 'Claude Code 未安装',
