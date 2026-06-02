@@ -21,6 +21,7 @@ import {
   CheckSquare,
   Square,
   Question,
+  Sparkle,
 } from "@phosphor-icons/react";
 import { cn } from '@/lib/utils';
 import { Shimmer } from '@/components/ai-elements/shimmer';
@@ -213,6 +214,17 @@ const TOOL_REGISTRY: ToolRendererDef[] = [
     },
     renderParams: (input) => <AskQuestionsView input={input} />,
     renderResult: (result, input) => <AskAnswersView result={result} input={input} />,
+  },
+  {
+    // Skill — collapsed row shows the skill name; expanded 参数 shows args.
+    match: (n) => n.toLowerCase() === 'skill',
+    icon: Sparkle,
+    label: 'Skill',
+    getSummary: (input) => {
+      const skill = ((input as Record<string, unknown>)?.skill || '') as string;
+      return skill || 'skill';
+    },
+    primaryParam: 'args',
   },
   {
     match: (n) => n.toLowerCase() === 'agent',
