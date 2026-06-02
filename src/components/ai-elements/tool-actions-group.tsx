@@ -17,6 +17,9 @@ import {
   Image as ImageIcon,
   Lightning,
   Globe,
+  ListChecks,
+  CheckSquare,
+  Square,
 } from "@phosphor-icons/react";
 import { cn } from '@/lib/utils';
 import { Shimmer } from '@/components/ai-elements/shimmer';
@@ -31,6 +34,7 @@ import type { MediaBlock } from '@/types';
 import { useTranslation } from '@/hooks/useTranslation';
 import { formatToolInput, truncateToolResult } from '@/lib/message-segments';
 import { toolDiff, type LineDiff } from '@/lib/tool-diff';
+import { toolTodos, activeTodoForm, type TodoItem } from '@/lib/tool-todos';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -175,6 +179,17 @@ const TOOL_REGISTRY: ToolRendererDef[] = [
       return url || 'fetch';
     },
     primaryParam: 'prompt',
+  },
+  {
+    // TodoWrite — collapsed row shows the in-progress step's activeForm;
+    // expanded panel renders the todos as a checklist (see TodoListView).
+    match: (n) => ['todowrite', 'todo_write'].includes(n.toLowerCase()),
+    icon: ListChecks,
+    label: 'TodoWrite',
+    getSummary: (input) => {
+      const todos = toolTodos('todowrite', input);
+      return todos ? activeTodoForm(todos) : 'todos';
+    },
   },
   {
     match: (n) => n.toLowerCase() === 'agent',
@@ -566,6 +581,44 @@ function ToolDiffView({ diff }: { diff: LineDiff }) {
 }
 
 // ---------------------------------------------------------------------------
+// Todo checklist — TodoWrite renders its todos as a checklist (completed
+// struck-through, in_progress highlighted, pending hollow), matching the
+// agent's live task tracker. Row text uses the `content` field.
+// ---------------------------------------------------------------------------
+
+function TodoListView({ todos }: { todos: TodoItem[] }) {
+  return (
+    <div className="mt-1 ml-6 border-l-2 border-border/30 pl-2 pb-1 space-y-1">
+      {todos.map((todo, i) => {
+        const done = todo.status === 'completed';
+        const active = todo.status === 'in_progress';
+        return (
+          <div key={i} className="flex items-start gap-2 text-xs leading-relaxed">
+            {done ? (
+              <CheckSquare size={15} weight="fill" className="mt-px shrink-0 text-muted-foreground/50" />
+            ) : active ? (
+              <CheckSquare size={15} weight="fill" className="mt-px shrink-0 text-primary" />
+            ) : (
+              <Square size={15} className="mt-px shrink-0 text-muted-foreground/40" />
+            )}
+            <span
+              className={cn(
+                "flex-1 break-words",
+                done && "line-through text-muted-foreground/50",
+                active && "text-primary font-medium",
+                !done && !active && "text-muted-foreground/70",
+              )}
+            >
+              {todo.content || todo.activeForm}
+            </span>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Compact row for a single tool action — collapsible like ThinkingRow.
 // Hover swaps the tool icon for a caret; click toggles an inline detail panel
 // showing the call params + return result (or a diff view for file edits).
@@ -587,9 +640,12 @@ export function ToolActionRow({ tool, streamingToolOutput }: { tool: ToolAction;
   // a `+N −M` badge in the row header, Claude-desktop style.
   const diff = useMemo(() => toolDiff(tool.name, tool.input), [tool.name, tool.input]);
   const hasDiff = !!diff && (diff.added > 0 || diff.removed > 0);
+  // TodoWrite renders its todos as a checklist instead of raw JSON.
+  const todos = useMemo(() => toolTodos(tool.name, tool.input), [tool.name, tool.input]);
+  const hasTodos = !!todos && todos.length > 0;
   const hasInput = !!tool.input && typeof tool.input === 'object' && Object.keys(tool.input as Record<string, unknown>).length > 0;
   const hasResult = tool.result !== undefined && tool.result !== '';
-  const expandable = liveCustom || hasDiff || hasResult || hasInput || (isRunning && !!streamingToolOutput);
+  const expandable = liveCustom || hasDiff || hasTodos || hasResult || hasInput || (isRunning && !!streamingToolOutput);
 
   // Running rows default open (watch live output); completed/historical rows
   // default closed. Initial value is read once on mount, so a tool that
@@ -676,7 +732,9 @@ export function ToolActionRow({ tool, streamingToolOutput }: { tool: ToolAction;
               ? renderer.renderDetail?.(tool, streamingToolOutput)
               : hasDiff
                 ? <ToolDiffView diff={diff!} />
-                : <GenericToolDetail tool={tool} streamingToolOutput={streamingToolOutput} />}
+                : hasTodos
+                  ? <TodoListView todos={todos!} />
+                  : <GenericToolDetail tool={tool} streamingToolOutput={streamingToolOutput} />}
           </motion.div>
         )}
       </AnimatePresence>
