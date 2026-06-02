@@ -22,6 +22,7 @@ import {
   Square,
   Question,
   Sparkle,
+  ClipboardText,
 } from "@phosphor-icons/react";
 import { cn } from '@/lib/utils';
 import { Shimmer } from '@/components/ai-elements/shimmer';
@@ -225,6 +226,15 @@ const TOOL_REGISTRY: ToolRendererDef[] = [
       return skill || 'skill';
     },
     primaryParam: 'args',
+  },
+  {
+    // ExitPlanMode — collapsed row shows only the label; 参数 splits into the
+    // plan (rendered as markdown) and the plan file path.
+    match: (n) => ['exitplanmode', 'exit_plan_mode'].includes(n.toLowerCase()),
+    icon: ClipboardText,
+    label: 'ExitPlanMode',
+    getSummary: () => '',
+    renderParams: (input) => <ExitPlanParamsView input={input} />,
   },
   {
     match: (n) => n.toLowerCase() === 'agent',
@@ -653,6 +663,39 @@ function MarkdownResultView({ result }: { result: string }) {
       )}
     >
       <Streamdown plugins={thinkingPlugins}>{result}</Streamdown>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ExitPlanMode params — the plan (rendered as markdown) + the plan file path.
+// ---------------------------------------------------------------------------
+
+function ExitPlanParamsView({ input }: { input: unknown }) {
+  const { t } = useTranslation();
+  const inp = (input || {}) as Record<string, unknown>;
+  const plan = (inp.plan || '') as string;
+  const planFilePath = (inp.planFilePath || '') as string;
+  return (
+    <div className="space-y-2">
+      {plan && (
+        <div>
+          <div className="mb-0.5 text-[10px] uppercase tracking-wide text-muted-foreground/40">
+            {t('tool.planContent')}
+          </div>
+          <MarkdownResultView result={plan} />
+        </div>
+      )}
+      {planFilePath && (
+        <div>
+          <div className="mb-0.5 text-[10px] uppercase tracking-wide text-muted-foreground/40">
+            {t('tool.planFile')}
+          </div>
+          <div className="rounded bg-muted/40 px-2 py-1 font-mono text-[11px] text-muted-foreground/70 break-all">
+            {planFilePath}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

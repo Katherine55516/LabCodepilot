@@ -506,6 +506,8 @@ const en = {
   'tool.searchPattern': 'Pattern',
   'tool.agentDescription': 'Task',
   'tool.agentPrompt': 'Prompt',
+  'tool.planContent': 'Plan',
+  'tool.planFile': 'Plan file',
 
   // ── Common ──────────────────────────────────────────────────
   'common.cancel': 'Cancel',

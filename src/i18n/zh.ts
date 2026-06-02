@@ -503,6 +503,8 @@ const zh: Record<TranslationKey, string> = {
   'tool.searchPattern': '匹配规则',
   'tool.agentDescription': '任务描述',
   'tool.agentPrompt': '提示词',
+  'tool.planContent': '计划内容',
+  'tool.planFile': '计划文件',
 
   // ── Common ──────────────────────────────────────────────────
   'common.cancel': '取消',
