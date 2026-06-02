@@ -491,6 +491,8 @@ const en = {
   'tool.noResult': 'No output',
   'tool.moreLines': '… {count} more lines',
   'tool.truncated': '… truncated',
+  'tool.searchPath': 'Path',
+  'tool.searchPattern': 'Pattern',
 
   // ── Common ──────────────────────────────────────────────────
   'common.cancel': 'Cancel',

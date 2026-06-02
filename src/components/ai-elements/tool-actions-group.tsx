@@ -20,6 +20,7 @@ import {
   ListChecks,
   CheckSquare,
   Square,
+  Question,
 } from "@phosphor-icons/react";
 import { cn } from '@/lib/utils';
 import { Shimmer } from '@/components/ai-elements/shimmer';
@@ -35,6 +36,7 @@ import { useTranslation } from '@/hooks/useTranslation';
 import { formatToolInput, truncateToolResult } from '@/lib/message-segments';
 import { toolDiff, type LineDiff } from '@/lib/tool-diff';
 import { toolTodos, activeTodoForm, type TodoItem } from '@/lib/tool-todos';
+import { parseAskQuestions, parseAskAnswers } from '@/lib/tool-ask';
 
 // ---------------------------------------------------------------------------
 // Types
@@ -75,6 +77,11 @@ interface ToolRendererDef {
    *  the full input JSON — the other fields already surface in the collapsed
    *  row (bash description / WebFetch url). */
   primaryParam?: string;
+  /** Custom 参数 panel renderer — overrides primaryParam / JSON. */
+  renderParams?: (input: unknown) => React.ReactNode;
+  /** Custom 结果 panel renderer — overrides the raw result text (e.g. show only
+   *  the user's selected answers for AskUserQuestion). */
+  renderResult?: (result: string, input: unknown) => React.ReactNode;
 }
 
 function extractFilename(path: string): string {
@@ -154,6 +161,7 @@ const TOOL_REGISTRY: ToolRendererDef[] = [
     match: (n) => ['read', 'readfile', 'read_file'].includes(n.toLowerCase()),
     icon: File,
     label: 'Read',
+    primaryParam: 'file_path',
     getSummary: (input) => {
       const path = getFilePath(input);
       return path ? extractFilename(path) : 'file';
@@ -163,6 +171,7 @@ const TOOL_REGISTRY: ToolRendererDef[] = [
     match: (n) => ['search', 'glob', 'grep', 'find_files', 'search_files', 'websearch', 'web_search'].includes(n.toLowerCase()),
     icon: MagnifyingGlass,
     label: 'Search',
+    renderParams: (input) => <SearchParamsView input={input} />,
     getSummary: (input) => {
       const inp = input as Record<string, unknown> | undefined;
       const pattern = (inp?.pattern || inp?.query || inp?.glob || '') as string;
@@ -190,6 +199,19 @@ const TOOL_REGISTRY: ToolRendererDef[] = [
       const todos = toolTodos('todowrite', input);
       return todos ? activeTodoForm(todos) : 'todos';
     },
+  },
+  {
+    // AskUserQuestion — 参数 panel lists each question + its options;
+    // 结果 panel shows only the user's selected answers (see tool-ask.ts).
+    match: (n) => ['askuserquestion', 'ask_user_question'].includes(n.toLowerCase()),
+    icon: Question,
+    label: 'AskUserQuestion',
+    getSummary: (input) => {
+      const qs = parseAskQuestions(input);
+      return qs && qs[0]?.question ? qs[0].question : 'question';
+    },
+    renderParams: (input) => <AskQuestionsView input={input} />,
+    renderResult: (result, input) => <AskAnswersView result={result} input={input} />,
   },
   {
     match: (n) => n.toLowerCase() === 'agent',
@@ -482,6 +504,84 @@ export function ThinkingRow({ content, isStreaming }: { content: string; isStrea
 }
 
 // ---------------------------------------------------------------------------
+// Search params — show 路径 / 匹配规则 instead of raw {path, pattern} JSON.
+// ---------------------------------------------------------------------------
+
+function SearchParamsView({ input }: { input: unknown }) {
+  const { t } = useTranslation();
+  const inp = (input || {}) as Record<string, unknown>;
+  const path = (inp.path || '') as string;
+  const pattern = (inp.pattern || inp.query || inp.glob || '') as string;
+  return (
+    <div className="space-y-1 rounded bg-muted/40 px-2 py-1.5 font-mono text-[11px] text-muted-foreground/70">
+      {path && (
+        <div className="break-all">
+          <span className="text-muted-foreground/40">{t('tool.searchPath')}：</span>{path}
+        </div>
+      )}
+      {pattern && (
+        <div className="break-all">
+          <span className="text-muted-foreground/40">{t('tool.searchPattern')}：</span>{pattern}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// AskUserQuestion — questions + options (参数) and the user's selected answers
+// (结果). Single / multi-select and free-text "Other" all handled by tool-ask.ts.
+// ---------------------------------------------------------------------------
+
+function AskQuestionsView({ input }: { input: unknown }) {
+  const questions = parseAskQuestions(input);
+  if (!questions) return null;
+  return (
+    <div className="space-y-2">
+      {questions.map((q, qi) => (
+        <div key={qi} className="space-y-1">
+          <div className="text-xs font-medium text-foreground/80 break-words">{q.question}</div>
+          <div className="ml-1 space-y-1">
+            {q.options.map((opt, oi) => (
+              <div key={oi} className="border-l-2 border-border/40 pl-2">
+                <div className="text-[11px] font-medium text-muted-foreground/80 break-words">{opt.label}</div>
+                {opt.description && (
+                  <div className="text-[11px] text-muted-foreground/50 break-words">{opt.description}</div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function AskAnswersView({ result, input }: { result: string; input: unknown }) {
+  const answers = parseAskAnswers(result, input);
+  if (answers.length === 0) {
+    return <span className="text-[11px] text-muted-foreground/60 break-words">{result}</span>;
+  }
+  return (
+    <div className="space-y-1.5">
+      {answers.map((a, i) => (
+        <div key={i} className="flex flex-wrap items-center gap-1.5">
+          {a.answers.map((ans, j) => (
+            <span
+              key={j}
+              className="inline-flex items-center gap-1 rounded bg-primary/10 px-1.5 py-0.5 text-[11px] font-medium text-primary"
+            >
+              <CheckCircle size={12} weight="fill" className="shrink-0" />
+              {ans}
+            </span>
+          ))}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Generic tool detail — params + result panel for tools without a bespoke
 // renderDetail (Read / Edit / Write / Search / MCP / …). Also used for bash and
 // agent AFTER they finish, so their final result (not just live progress) shows.
@@ -489,32 +589,43 @@ export function ThinkingRow({ content, isStreaming }: { content: string; isStrea
 
 function GenericToolDetail({ tool, streamingToolOutput }: { tool: ToolAction; streamingToolOutput?: string }) {
   const { t } = useTranslation();
+  const renderer = getRenderer(tool.name);
   const isRunning = tool.result === undefined;
-  // If the renderer declares a primaryParam (bash→command, WebFetch→prompt), the
-  // 参数 panel shows just that field's raw string; otherwise pretty-printed JSON.
+  // Param panel: renderParams (custom JSX) > primaryParam (single raw field) > JSON.
   const inp = tool.input as Record<string, unknown> | undefined;
-  const primaryKey = getRenderer(tool.name).primaryParam;
-  const primaryVal = primaryKey && inp ? inp[primaryKey] : undefined;
+  const customParams = renderer.renderParams?.(tool.input);
+  const primaryVal = renderer.primaryParam && inp ? inp[renderer.primaryParam] : undefined;
   const inputStr = typeof primaryVal === 'string' && primaryVal
     ? primaryVal
     : formatToolInput(tool.input);
+  // Result panel: renderResult (custom JSX, e.g. selected answers) > raw text.
+  const customResult = !isRunning && tool.result ? renderer.renderResult?.(tool.result, tool.input) : undefined;
   const rawResult = isRunning ? (streamingToolOutput ?? '') : (tool.result ?? '');
   const { text: shownResult, truncated, hiddenLines } = truncateToolResult(rawResult);
   const hasResult = shownResult.length > 0;
 
   return (
     <div className="mt-1 ml-6 border-l-2 border-border/30 pl-2 space-y-1.5 pb-1">
-      {inputStr && (
+      {(customParams || inputStr) && (
         <div>
           <div className="mb-0.5 text-[10px] uppercase tracking-wide text-muted-foreground/40">
             {t('tool.parameters')}
           </div>
-          <pre className="max-h-[140px] overflow-auto whitespace-pre-wrap break-all rounded bg-muted/40 px-2 py-1 font-mono text-[11px] text-muted-foreground/70">
-            {inputStr}
-          </pre>
+          {customParams ?? (
+            <pre className="max-h-[140px] overflow-auto whitespace-pre-wrap break-all rounded bg-muted/40 px-2 py-1 font-mono text-[11px] text-muted-foreground/70">
+              {inputStr}
+            </pre>
+          )}
         </div>
       )}
-      {hasResult ? (
+      {customResult ? (
+        <div>
+          <div className="mb-0.5 text-[10px] uppercase tracking-wide text-muted-foreground/40">
+            {t('tool.result')}
+          </div>
+          {customResult}
+        </div>
+      ) : hasResult ? (
         <div>
           <div className="mb-0.5 text-[10px] uppercase tracking-wide text-muted-foreground/40">
             {t('tool.result')}

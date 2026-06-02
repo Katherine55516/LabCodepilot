@@ -488,6 +488,8 @@ const zh: Record<TranslationKey, string> = {
   'tool.noResult': '无返回内容',
   'tool.moreLines': '… 还有 {count} 行',
   'tool.truncated': '… 内容已截断',
+  'tool.searchPath': '路径',
+  'tool.searchPattern': '匹配规则',
 
   // ── Common ──────────────────────────────────────────────────
   'common.cancel': '取消',
