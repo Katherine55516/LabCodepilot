@@ -619,8 +619,25 @@ function AgentParamsView({ input }: { input: unknown }) {
 }
 
 function AgentResultView({ result }: { result: string }) {
+  // Compact markdown: body ≈ the old plain-text size (11px), headings kept small
+  // but still tiered (h1>h2>h3>h4), colors softened. Arbitrary variants are used
+  // so they reliably override the typography plugin's larger defaults.
   return (
-    <div className="prose prose-sm dark:prose-invert max-w-none max-h-[520px] overflow-auto rounded bg-muted/40 px-3 py-2 text-xs prose-headings:text-sm prose-headings:mt-2 prose-p:my-1 prose-pre:text-[11px]">
+    <div
+      className={cn(
+        "prose prose-invert max-w-none max-h-[520px] overflow-auto rounded bg-muted/40 px-3 py-2 text-[11px] leading-relaxed",
+        "[&_h1]:text-[15px] [&_h2]:text-[14px] [&_h3]:text-[12px] [&_h4]:text-[11px]",
+        "[&_h1]:font-semibold [&_h2]:font-semibold [&_h3]:font-semibold [&_h4]:font-semibold",
+        "[&_h1]:mb-1 [&_h1]:mt-2 [&_h2]:mb-1 [&_h2]:mt-2 [&_h3]:mb-0.5 [&_h3]:mt-1.5 [&_h4]:mb-0.5 [&_h4]:mt-1.5",
+        "[&_h1]:text-foreground/85 [&_h2]:text-foreground/85 [&_h3]:text-foreground/80 [&_h4]:text-foreground/80",
+        "[&_p]:my-1 [&_p]:text-[11px] [&_p]:text-muted-foreground/80",
+        "[&_li]:my-0.5 [&_li]:text-[11px] [&_li]:text-muted-foreground/80 [&_ul]:my-1 [&_ol]:my-1",
+        "[&_strong]:font-semibold [&_strong]:text-foreground/90",
+        "[&_code]:text-[11px] [&_pre]:my-1 [&_pre]:text-[11px]",
+        "[&_table]:text-[11px] [&_th]:text-[11px] [&_td]:text-[11px]",
+        "[&_a]:text-primary",
+      )}
+    >
       <Streamdown plugins={thinkingPlugins}>{result}</Streamdown>
     </div>
   );
