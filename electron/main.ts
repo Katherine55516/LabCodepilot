@@ -53,6 +53,7 @@ import {
   purgeManagedProvidersOnServer,
 } from './auth/broker';
 import { clearAuthState } from './auth/storage';
+import { initMasterKey, getMasterKeyHex, logSafeStorageStatus } from './auth/secret-key';
 import { logInfo, logWarn, logError } from './auth/log';
 import type { MeInfo, ModelConfig } from './auth/types';
 
@@ -734,6 +735,10 @@ function startServer(port: number): Electron.UtilityProcess {
     HOME: home,
     USERPROFILE: home,
     PATH: constructedPath,
+    // Credential-encryption master key (hex). Placed AFTER the userShellEnv
+    // spreads so a stray shell var can't shadow it. Empty when safeStorage is
+    // unavailable → server-side crypto-seal falls back to plaintext passthrough.
+    CLAUDE_GUI_SECRET_KEY: getMasterKeyHex(),
   };
 
   // Use Electron's utilityProcess to run the server in a child process
@@ -1097,6 +1102,12 @@ app.whenReady().then(async () => {
 
   // Verify native module ABI compatibility before starting the server
   checkNativeModuleABI();
+
+  // Initialise the credential-encryption master key BEFORE any server fork so
+  // its hex can be injected into the server env (startServer below). safeStorage
+  // is available now (app is ready). See electron/auth/secret-key.ts.
+  initMasterKey();
+  logSafeStorageStatus();
 
   // Clear cache on version upgrade
   const currentVersion = app.getVersion();

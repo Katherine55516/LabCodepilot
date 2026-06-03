@@ -7,9 +7,46 @@ import type { ChatSession, Message, SettingsMap, TaskItem, TaskStatus, ApiProvid
 import type { ChannelType, ChannelBinding } from './bridge/types';
 import { getLocalDateString, localDayStartAsUTC } from './utils';
 import { inferProtocolFromLegacy } from './provider-catalog';
+import { seal, open, isSealed, getKey } from './crypto-seal';
 
 const dataDir = process.env.CLAUDE_GUI_DATA_DIR || path.join(os.homedir(), '.codepilot');
 const DB_PATH = path.join(dataDir, 'codepilot.db');
+
+// ── 凭证列加密（at-rest）────────────────────────────────────────────────────
+// 敏感列经 crypto-seal（safeStorage 主密钥 + AES-256-GCM）透明加解密：写时 seal、
+// 读时 open。所有调用方拿到的都是明文。无主密钥（dev / safeStorage 不可用）时
+// seal/open 透明直通。详见 docs/handover/credential-encryption.md。
+//
+// 注意：api_providers 的所有读取都必须经下面的 hydrateProvider 出口（getProvider /
+// getActiveProvider / getAllProviders / getProvidersBySource）。任何裸 SQL 读
+// api_key 都会拿到密文（image-generator.ts 已改走 getAllProviders）。
+const SENSITIVE_PROVIDER_COLS = [
+  'api_key',
+  'managed_extra_json',
+  'headers_json',
+  'env_overrides_json',
+  'extra_env',
+] as const;
+
+// settings 表里需加密的 key（token 字段）。base_url 类非密 key 不加。
+const SENSITIVE_SETTINGS = new Set<string>([
+  'anthropic_auth_token',
+  'openai_oauth_access_token',
+  'openai_oauth_refresh_token',
+  'openai_oauth_id_token',
+]);
+
+/** 解密一行 provider 的敏感列（原地修改并返回）。undefined 透传。 */
+function hydrateProvider<T extends ApiProvider | undefined>(row: T): T {
+  if (!row) return row;
+  const k = getKey();
+  const r = row as unknown as Record<string, unknown>;
+  for (const col of SENSITIVE_PROVIDER_COLS) {
+    const v = r[col];
+    if (typeof v === 'string') r[col] = open(v, k);
+  }
+  return row;
+}
 
 let db: Database.Database | null = null;
 
@@ -955,6 +992,58 @@ function migrateDb(db: Database.Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_task_run_logs_task_id ON task_run_logs(task_id);
   `);
+
+  // 凭证列加密迁移：把历史明文敏感列就地重封为密文。必须放在所有列迁移之后。
+  reSealSensitiveColumns(db);
+}
+
+/**
+ * 幂等地把 api_providers / settings 里的历史明文敏感值重封为密文。
+ * - 仅在有主密钥时执行；无 key（dev / safeStorage 不可用）→ 跳过，保持明文。
+ * - isSealed 守护：已是密文的跳过，可重入、自愈半迁移、杜绝双封。
+ * - 读的是裸列值（不经 hydrateProvider），据此判断是否需要加密。
+ * - 随 migrateDb 在 withMigrationLock 内执行，多 Next worker 并发安全。
+ */
+function reSealSensitiveColumns(db: Database.Database): void {
+  const k = getKey();
+  if (!k) return;
+
+  // api_providers 敏感列
+  const provRows = db
+    .prepare(`SELECT id, ${SENSITIVE_PROVIDER_COLS.join(', ')} FROM api_providers`)
+    .all() as Array<Record<string, unknown>>;
+  const updateProv = db.prepare(
+    `UPDATE api_providers SET ${SENSITIVE_PROVIDER_COLS.map((c) => `${c} = ?`).join(', ')} WHERE id = ?`,
+  );
+  db.transaction((rows: Array<Record<string, unknown>>) => {
+    for (const r of rows) {
+      let dirty = false;
+      const vals = SENSITIVE_PROVIDER_COLS.map((col) => {
+        const v = r[col];
+        if (typeof v === 'string' && v !== '' && !isSealed(v)) {
+          dirty = true;
+          return seal(v, k);
+        }
+        return typeof v === 'string' ? v : '';
+      });
+      if (dirty) updateProv.run(...vals, r.id as string);
+    }
+  })(provRows);
+
+  // settings 敏感 key
+  const keys = [...SENSITIVE_SETTINGS];
+  const placeholders = keys.map(() => '?').join(', ');
+  const setRows = db
+    .prepare(`SELECT key, value FROM settings WHERE key IN (${placeholders})`)
+    .all(...keys) as Array<{ key: string; value: string }>;
+  const updateSet = db.prepare('UPDATE settings SET value = ? WHERE key = ?');
+  db.transaction((rows: Array<{ key: string; value: string }>) => {
+    for (const r of rows) {
+      if (typeof r.value === 'string' && r.value !== '' && !isSealed(r.value)) {
+        updateSet.run(seal(r.value, k), r.key);
+      }
+    }
+  })(setRows);
 }
 
 // ==========================================
@@ -1386,22 +1475,25 @@ function buildSnippet(content: string, lowerQuery: string): string {
 export function getSetting(key: string): string | undefined {
   const db = getDb();
   const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined;
-  return row?.value;
+  if (row === undefined) return undefined;
+  return SENSITIVE_SETTINGS.has(key) ? open(row.value, getKey()) : row.value;
 }
 
 export function setSetting(key: string, value: string): void {
   const db = getDb();
+  const stored = SENSITIVE_SETTINGS.has(key) ? seal(value, getKey()) : value;
   db.prepare(
     'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'
-  ).run(key, value);
+  ).run(key, stored);
 }
 
 export function getAllSettings(): SettingsMap {
   const db = getDb();
   const rows = db.prepare('SELECT key, value FROM settings').all() as { key: string; value: string }[];
+  const k = getKey();
   const settings: SettingsMap = {};
   for (const row of rows) {
-    settings[row.key] = row.value;
+    settings[row.key] = SENSITIVE_SETTINGS.has(row.key) ? open(row.value, k) : row.value;
   }
   return settings;
 }
@@ -1511,17 +1603,18 @@ export function syncSdkTasks(
 
 export function getAllProviders(): ApiProvider[] {
   const db = getDb();
-  return db.prepare('SELECT * FROM api_providers ORDER BY sort_order ASC, created_at ASC').all() as ApiProvider[];
+  const rows = db.prepare('SELECT * FROM api_providers ORDER BY sort_order ASC, created_at ASC').all() as ApiProvider[];
+  return rows.map((r) => hydrateProvider(r));
 }
 
 export function getProvider(id: string): ApiProvider | undefined {
   const db = getDb();
-  return db.prepare('SELECT * FROM api_providers WHERE id = ?').get(id) as ApiProvider | undefined;
+  return hydrateProvider(db.prepare('SELECT * FROM api_providers WHERE id = ?').get(id) as ApiProvider | undefined);
 }
 
 export function getActiveProvider(): ApiProvider | undefined {
   const db = getDb();
-  return db.prepare('SELECT * FROM api_providers WHERE is_active = 1 LIMIT 1').get() as ApiProvider | undefined;
+  return hydrateProvider(db.prepare('SELECT * FROM api_providers WHERE is_active = 1 LIMIT 1').get() as ApiProvider | undefined);
 }
 
 export function createProvider(data: CreateProviderRequest): ApiProvider {
@@ -1533,6 +1626,8 @@ export function createProvider(data: CreateProviderRequest): ApiProvider {
   const maxRow = db.prepare('SELECT MAX(sort_order) as max_order FROM api_providers').get() as { max_order: number | null };
   const sortOrder = (maxRow.max_order ?? -1) + 1;
 
+  // 敏感列加密落盘（api_key / extra_env / headers_json / env_overrides_json）。
+  const k = getKey();
   db.prepare(
     `INSERT INTO api_providers (id, name, provider_type, protocol, base_url, api_key, is_active, sort_order, extra_env, headers_json, env_overrides_json, role_models_json, options_json, notes, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
@@ -1542,12 +1637,12 @@ export function createProvider(data: CreateProviderRequest): ApiProvider {
     data.provider_type || 'anthropic',
     data.protocol || '',
     data.base_url || '',
-    data.api_key || '',
+    seal(data.api_key || '', k),
     0,
     sortOrder,
-    data.extra_env || '{}',
-    data.headers_json || '{}',
-    data.env_overrides_json || '',
+    seal(data.extra_env || '{}', k),
+    seal(data.headers_json || '{}', k),
+    seal(data.env_overrides_json || '', k),
     data.role_models_json || '{}',
     data.options_json || '{}',
     data.notes || '',
@@ -1577,11 +1672,13 @@ export function updateProvider(id: string, data: UpdateProviderRequest): ApiProv
   const notes = data.notes ?? existing.notes;
   const sortOrder = data.sort_order ?? existing.sort_order;
 
+  // existing.* 已由 getProvider 解密为明文，写回时重新加密敏感列。
+  const k = getKey();
   db.prepare(
     `UPDATE api_providers SET name = ?, provider_type = ?, protocol = ?, base_url = ?, api_key = ?,
      extra_env = ?, headers_json = ?, env_overrides_json = ?, role_models_json = ?, options_json = ?,
      notes = ?, sort_order = ?, updated_at = ? WHERE id = ?`
-  ).run(name, providerType, protocol, baseUrl, apiKey, extraEnv, headersJson, envOverridesJson, roleModelsJson, optionsJson, notes, sortOrder, now, id);
+  ).run(name, providerType, protocol, baseUrl, seal(apiKey, k), seal(extraEnv, k), seal(headersJson, k), seal(envOverridesJson, k), roleModelsJson, optionsJson, notes, sortOrder, now, id);
 
   return getProvider(id);
 }
@@ -1749,9 +1846,10 @@ export interface ManagedProviderRow {
  */
 export function getProvidersBySource(source: 'local' | 'managed'): ApiProvider[] {
   const db = getDb();
-  return db
+  const rows = db
     .prepare('SELECT * FROM api_providers WHERE source = ? ORDER BY sort_order ASC, created_at ASC')
     .all(source) as ApiProvider[];
+  return rows.map((r) => hydrateProvider(r));
 }
 
 /**
@@ -1768,6 +1866,7 @@ export function getProvidersBySource(source: 'local' | 'managed'): ApiProvider[]
 export function setManagedProviders(rows: ManagedProviderRow[]): { upserted: number; pruned: number } {
   const db = getDb();
   const now = new Date().toISOString().replace('T', ' ').split('.')[0];
+  const k = getKey(); // 敏感列加密落盘
 
   const upsert = db.prepare(
     `INSERT INTO api_providers (
@@ -1806,16 +1905,16 @@ export function setManagedProviders(rows: ManagedProviderRow[]): { upserted: num
         r.provider_type,
         r.protocol,
         r.base_url,
-        r.api_key,
+        seal(r.api_key, k),
         r.sort_order,
-        r.extra_env || '{}',
-        r.headers_json || '{}',
-        r.env_overrides_json || '',
+        seal(r.extra_env || '{}', k),
+        seal(r.headers_json || '{}', k),
+        seal(r.env_overrides_json || '', k),
         r.role_models_json || '{}',
         r.options_json || '{}',
         r.notes || '',
         r.managed_config_id,
-        r.managed_extra_json || '{}',
+        seal(r.managed_extra_json || '{}', k),
         now,
         now,
       );

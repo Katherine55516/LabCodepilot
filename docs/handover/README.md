@@ -38,3 +38,4 @@
 | skill-agents-dir-mirror.md | Skill 目录镜像（`~/.agents/skills/` → `~/.claude/skills/`）：内置 binary 只扫 `~/.claude/skills/` 导致 `~/.agents/skills/` 技能 agent 不可见、复制非搬移 + 标记 + 哈希刷新 + 孤儿清理、5 个调用点、与 MCP `46caccd` 同类问题 |
 | conversation-interleaved-flow.md | 对话流交错渲染：文字/工具/思考按时间序交错；orderedBlocks 累积 + segmentsFromBlocks 保序配对 + MessageSegments 共享渲染；流式 + 持久双路径；旧消息 back-compat 限制 |
 | batch-session-import.md | 批量会话导入：多选/全选/三态 checkbox、批量 endpoint（一次查重 Map vs 单条 N 次全表）、importOneSession 共用 helper、聚合 summary 永远 200、不跳转、嵌套 button hydration 修复 |
+| credential-encryption.md | 凭证本地加密落盘：safeStorage 守一把主密钥 + AES-256-GCM、双进程 env 过河、Layer1(anlcode 文件)+Layer2(SQLite 列) seal/hydrate 咽喉点、静默迁移 + fail-safe、image-generator 绕过修复、威胁模型边界 |

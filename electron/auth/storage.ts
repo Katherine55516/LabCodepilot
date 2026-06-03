@@ -8,6 +8,11 @@
  * OAuth module (which stores tokens in the settings table) to keep the two
  * systems isolated and to make cross-process sharing (main + Next.js
  * standalone server) trivial via the filesystem.
+ *
+ * 敏感文件加密：session_token / configs.json 经 crypto-seal（safeStorage 主密钥
+ * + AES-256-GCM）加密落盘，read 时静默迁移老明文、解密失败 fail-safe 返回 null。
+ * device_id / configs.hash / selected_config_id 无敏感，保持明文。详见
+ * docs/handover/credential-encryption.md。
  */
 
 import * as crypto from 'crypto';
@@ -15,6 +20,7 @@ import * as fs from 'fs';
 import { anlcodePath, getAnlcodeDir } from './paths';
 import type { ModelConfig } from './types';
 import { logWarn } from './log';
+import { seal, open, isSealed, getKey } from './crypto-seal';
 
 function safeUnlink(file: string): void {
   try {
@@ -28,7 +34,8 @@ function safeUnlink(file: string): void {
 
 export function saveToken(token: string): void {
   const file = anlcodePath('sessionToken');
-  fs.writeFileSync(file, token, 'utf-8');
+  // 敏感：safeStorage 主密钥 + AES-256-GCM 加密落盘（无密钥时透明明文，见 crypto-seal）。
+  fs.writeFileSync(file, seal(token, getKey()), 'utf-8');
   try {
     fs.chmodSync(file, 0o600);
   } catch (err) {
@@ -42,7 +49,14 @@ export function saveToken(token: string): void {
 export function loadToken(): string | null {
   try {
     const raw = fs.readFileSync(anlcodePath('sessionToken'), 'utf-8').trim();
-    return raw || null;
+    const key = getKey();
+    const token = open(raw, key).trim();
+    if (!token) return null; // 解密失败 → null，触发重新登录（绝不返回密文）
+    // 静默迁移：磁盘上是老明文且当前有密钥 → 机会性重写为密文
+    if (key && !isSealed(raw)) {
+      try { saveToken(token); } catch { /* best effort */ }
+    }
+    return token;
   } catch {
     return null;
   }
@@ -70,14 +84,25 @@ export function getOrCreateDeviceId(): string {
 // ── Configs ──────────────────────────────────────────────────────────────────
 
 export function saveConfigs(configs: ModelConfig[], hash: string): void {
-  fs.writeFileSync(anlcodePath('configs'), JSON.stringify(configs, null, 2), 'utf-8');
+  // configs 每条含 auth_token + base_url，整体加密落盘。
+  fs.writeFileSync(anlcodePath('configs'), seal(JSON.stringify(configs), getKey()), 'utf-8');
+  // hash 是 ETag，无敏感，保持明文，便于不解密即可做缓存比对。
   fs.writeFileSync(anlcodePath('configsHash'), hash, 'utf-8');
 }
 
 export function loadConfigs(): ModelConfig[] | null {
   try {
-    const parsed = JSON.parse(fs.readFileSync(anlcodePath('configs'), 'utf-8'));
-    return Array.isArray(parsed) ? (parsed as ModelConfig[]) : null;
+    const raw = fs.readFileSync(anlcodePath('configs'), 'utf-8').trim();
+    const key = getKey();
+    const json = open(raw, key);
+    if (!json) return null; // 解密失败/空 → 触发重新拉取
+    const parsed = JSON.parse(json);
+    if (!Array.isArray(parsed)) return null;
+    // 静默迁移：老明文 → 重写为密文
+    if (key && !isSealed(raw)) {
+      try { saveConfigs(parsed as ModelConfig[], loadConfigsHash() ?? ''); } catch { /* best effort */ }
+    }
+    return parsed as ModelConfig[];
   } catch {
     return null;
   }

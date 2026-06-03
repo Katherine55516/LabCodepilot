@@ -1,7 +1,7 @@
 import { generateImage, NoImageGeneratedError } from 'ai';
 import { createGoogleGenerativeAI } from '@ai-sdk/google';
 import { createOpenAI } from '@ai-sdk/openai';
-import { getDb, getSession, getSetting } from '@/lib/db';
+import { getDb, getSession, getSetting, getAllProviders } from '@/lib/db';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
@@ -218,10 +218,10 @@ function pickImageProvider(
   family: ImageFamily | undefined,
   providerId: string | undefined,
 ): { row: ProviderRow; family: ImageFamily } {
-  const db = getDb();
-  const rows = db.prepare(
-    "SELECT id, provider_type, api_key, base_url, extra_env FROM api_providers WHERE provider_type IN ('gemini-image', 'openai-image') AND api_key != ''"
-  ).all() as ProviderRow[];
+  // 必须经 getAllProviders（已透明解密 api_key）——裸读 SQL 会拿到密文。
+  const rows = getAllProviders().filter(
+    (p) => (p.provider_type === 'gemini-image' || p.provider_type === 'openai-image') && p.api_key,
+  ) as unknown as ProviderRow[];
 
   if (rows.length === 0) {
     throw new Error('No image provider configured. Please add a Gemini Image or OpenAI Image provider in Settings.');

@@ -167,6 +167,8 @@ Schema 定义在 `src/lib/db.ts`，12 张表：
 | Provider/Error/Doctor | `docs/handover/provider-error-doctor.md` | 错误分类、Provider 生效、Auth 自动、诊断中心 |
 | 内置 Claude Code | `docs/handover/builtin-claude-code.md` | v0.55+ SDK 平台子包架构、binary 自动发现、asarUnpack、CI 跨架构装包、应急 fallback |
 | 内置 Claude Code（产品） | `docs/insights/builtin-claude-code.md` | 为什么从外置 → 内置、3 个方案对比、SDK 架构演进、+200MB 体积换零配置 |
+| 凭证本地加密 | `docs/handover/credential-encryption.md` | safeStorage 主密钥 + AES-256-GCM 列加密、双进程 env 过河、anlcode 文件 + SQLite 敏感列 seal/hydrate、静默迁移 + fail-safe |
+| 凭证本地加密（产品） | `docs/insights/credential-encryption.md` | 保护下发凭证是 SaaS 必补一环、safeStorage vs SQLCipher/keytar、只加密磁盘的诚实边界 |
 
 ## 技术栈
 
