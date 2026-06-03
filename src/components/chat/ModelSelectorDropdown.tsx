@@ -7,6 +7,7 @@ import { useTranslation } from '@/hooks/useTranslation';
 import type { TranslationKey } from '@/i18n';
 import { PromptInputButton } from '@/components/ai-elements/prompt-input';
 import type { ProviderModelGroup } from '@/types';
+import { useManagedMultimodal } from '@/hooks/useManagedMultimodal';
 import {
   CommandList,
   CommandListSearch,
@@ -16,14 +17,6 @@ import {
   CommandListFooter,
   CommandListFooterAction,
 } from '@/components/patterns';
-
-// Managed provider row returned by /api/providers — only the fields we need.
-interface ManagedProviderRow {
-  id: string;
-  name: string;
-  source?: string;
-  sort_order?: number;
-}
 
 interface ModelOption {
   value: string;
@@ -60,32 +53,12 @@ export function ModelSelectorDropdown({
   const modelMenuRef = useRef<HTMLDivElement>(null);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [modelSearch, setModelSearch] = useState('');
-  // Managed providers (source='managed') — drives the flat 6-item list.
-  // Local / built-in providers are intentionally excluded so the menu only
-  // surfaces what the account backend has pushed.
-  const [managedProviders, setManagedProviders] = useState<ManagedProviderRow[]>([]);
-
-  useEffect(() => {
-    let cancelled = false;
-    const load = () => {
-      fetch('/api/providers')
-        .then((r) => (r.ok ? r.json() : { providers: [] }))
-        .then((data) => {
-          if (cancelled) return;
-          const all: ManagedProviderRow[] = data?.providers ?? [];
-          const managed = all
-            .filter((p) => p.source === 'managed')
-            .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0));
-          setManagedProviders(managed);
-        })
-        .catch(() => { if (!cancelled) setManagedProviders([]); });
-    };
-    load();
-    // Refresh when provider list changes elsewhere (settings refresh, login).
-    const handler = () => load();
-    window.addEventListener('provider-changed', handler);
-    return () => { cancelled = true; window.removeEventListener('provider-changed', handler); };
-  }, []);
+  // Managed providers (source='managed') enriched with a multimodal flag —
+  // drives the flat list. Local / built-in providers are intentionally
+  // excluded so the menu only surfaces what the account backend has pushed.
+  // The「多模态」detection + fetch + provider-changed refresh live in the
+  // shared useManagedMultimodal hook (also used by the composer upload guard).
+  const { managed: managedProviders } = useManagedMultimodal();
 
   const currentModelOption = modelOptions.find((m) => m.value === currentModelValue) || modelOptions[0];
   // Prefer showing the managed provider's name on the trigger button so the
@@ -142,6 +115,7 @@ export function ModelSelectorDropdown({
         providerId: mp.id,
         providerName: mp.name,
         modelValue: firstModel?.value ?? currentModelValue,
+        isMultimodal: mp.isMultimodal,
       };
     })
     .filter((item) => !mq || item.providerName.toLowerCase().includes(mq));
@@ -194,6 +168,11 @@ export function ModelSelectorDropdown({
                   >
                     <span className="font-mono text-xs flex items-center gap-1.5">
                       {item.providerName}
+                      {item.isMultimodal && (
+                        <span className="text-muted-foreground/60">
+                          {t('composer.multimodalSuffix' as TranslationKey)}
+                        </span>
+                      )}
                       {isDefault && (
                         <span className="text-[9px] px-1 py-0 rounded bg-primary/10 text-primary font-medium">
                           {isZh ? '默认' : 'Default'}

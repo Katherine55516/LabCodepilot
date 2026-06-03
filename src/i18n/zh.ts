@@ -513,6 +513,7 @@ const zh: Record<TranslationKey, string> = {
   'common.delete': '删除',
   'common.loading': '加载中...',
   'common.close': '关闭',
+  'common.gotIt': '知道了',
   'common.enabled': '已启用',
   'common.disabled': '已禁用',
 
@@ -1139,6 +1140,9 @@ const zh: Record<TranslationKey, string> = {
   'composer.placeholderDefault': '发送消息...',
   'composer.placeholderWithBadges': '补充细节（可选），然后按回车...',
   'composer.placeholderCliBadge': '描述你想做什么...',
+  'composer.multimodalSuffix': '（多模态）',
+  'composer.nonMultimodalUploadTitle': '当前模型不支持多模态',
+  'composer.nonMultimodalUploadDesc': '所选模型不是多模态模型，无法上传图片、音频、视频等附件。请切换到多模态模型后再试。',
 
   // ── Permission ────────────────────────────────────────────
   'permission.default': '默认权限',

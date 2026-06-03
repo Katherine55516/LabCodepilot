@@ -516,6 +516,7 @@ const en = {
   'common.delete': 'Delete',
   'common.loading': 'Loading...',
   'common.close': 'Close',
+  'common.gotIt': 'Got it',
   'common.enabled': 'Enabled',
   'common.disabled': 'Disabled',
 
@@ -1142,6 +1143,9 @@ const en = {
   'composer.placeholderDefault': 'Send a message...',
   'composer.placeholderWithBadges': 'Add details (optional), then press Enter...',
   'composer.placeholderCliBadge': 'Describe what you want to do...',
+  'composer.multimodalSuffix': '(Multimodal)',
+  'composer.nonMultimodalUploadTitle': "Model doesn't support multimodal input",
+  'composer.nonMultimodalUploadDesc': 'The selected model is not multimodal and cannot accept image, audio or video attachments. Switch to a multimodal model and try again.',
 
   // ── Permission ────────────────────────────────────────────
   'permission.default': 'Default',
