@@ -289,7 +289,7 @@ const zh: Record<TranslationKey, string> = {
 
   // ── File tree actions (Phase 4) ─────────────────────────────
   'fileTree.sectionTitle': '文件',
-  'fileTree.newMarkdown': '新建 Markdown 文件',
+  'fileTree.newMarkdown': '新建文件',
   'fileTree.newFolder': '新建文件夹',
   'fileTree.createButton': '创建',
   'fileTree.newFileHint': '回车创建 · Esc 取消',

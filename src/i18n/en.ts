@@ -292,7 +292,7 @@ const en = {
 
   // ── File tree actions (Phase 4) ─────────────────────────────
   'fileTree.sectionTitle': 'Files',
-  'fileTree.newMarkdown': 'New Markdown file',
+  'fileTree.newMarkdown': 'New file',
   'fileTree.newFolder': 'New folder',
   'fileTree.createButton': 'Create',
   'fileTree.newFileHint': 'Enter ⏎ to create · Esc to cancel',
