@@ -379,9 +379,16 @@ export type PromptInputProps = Omit<
   // bytes
   maxFileSize?: number;
   onError?: (err: {
-    code: "max_files" | "max_file_size" | "accept";
+    code: "max_files" | "max_file_size" | "accept" | "rejected";
     message: string;
   }) => void;
+  /**
+   * Optional per-file policy validator. Return a rejection message to block a
+   * file (fires onError with code 'rejected' and drops that file); return null
+   * to accept it. Runs after the accept/size checks. Kept generic — callers
+   * encode their own policy (e.g. "a non-multimodal model can't take images").
+   */
+  validateFile?: (file: File) => string | null;
   /**
    * Called when directories are dragged onto the prompt input. Caller is
    * responsible for turning each File into a usable path (e.g. via
@@ -435,6 +442,7 @@ export const PromptInput = ({
   maxFiles,
   maxFileSize,
   onError,
+  validateFile,
   onDirectoriesDropped,
   onSubmit,
   children,
@@ -517,14 +525,26 @@ export const PromptInput = ({
         return;
       }
 
+      // Per-file policy validation (e.g. block media on non-multimodal models).
+      const allowed = validateFile
+        ? sized.filter((f) => !validateFile(f))
+        : sized;
+      if (sized.length > allowed.length) {
+        const msg = sized
+          .map((f) => validateFile?.(f) ?? null)
+          .find((m): m is string => !!m);
+        onError?.({ code: "rejected", message: msg ?? "File rejected." });
+      }
+      if (allowed.length === 0) return;
+
       setItems((prev) => {
         const capacity =
           typeof maxFiles === "number"
             ? Math.max(0, maxFiles - prev.length)
             : undefined;
         const capped =
-          typeof capacity === "number" ? sized.slice(0, capacity) : sized;
-        if (typeof capacity === "number" && sized.length > capacity) {
+          typeof capacity === "number" ? allowed.slice(0, capacity) : allowed;
+        if (typeof capacity === "number" && allowed.length > capacity) {
           onError?.({
             code: "max_files",
             message: "Too many files. Some were not added.",
@@ -543,7 +563,7 @@ export const PromptInput = ({
         return [...prev, ...next];
       });
     },
-    [matchesAccept, maxFiles, maxFileSize, onError]
+    [matchesAccept, maxFiles, maxFileSize, onError, validateFile]
   );
 
   const removeLocal = useCallback(
@@ -581,14 +601,26 @@ export const PromptInput = ({
         return;
       }
 
+      // Per-file policy validation (e.g. block media on non-multimodal models).
+      const allowed = validateFile
+        ? sized.filter((f) => !validateFile(f))
+        : sized;
+      if (sized.length > allowed.length) {
+        const msg = sized
+          .map((f) => validateFile?.(f) ?? null)
+          .find((m): m is string => !!m);
+        onError?.({ code: "rejected", message: msg ?? "File rejected." });
+      }
+      if (allowed.length === 0) return;
+
       const currentCount = files.length;
       const capacity =
         typeof maxFiles === "number"
           ? Math.max(0, maxFiles - currentCount)
           : undefined;
       const capped =
-        typeof capacity === "number" ? sized.slice(0, capacity) : sized;
-      if (typeof capacity === "number" && sized.length > capacity) {
+        typeof capacity === "number" ? allowed.slice(0, capacity) : allowed;
+      if (typeof capacity === "number" && allowed.length > capacity) {
         onError?.({
           code: "max_files",
           message: "Too many files. Some were not added.",
@@ -599,7 +631,7 @@ export const PromptInput = ({
         controller?.attachments.add(capped);
       }
     },
-    [matchesAccept, maxFileSize, maxFiles, onError, files.length, controller]
+    [matchesAccept, maxFileSize, maxFiles, onError, files.length, controller, validateFile]
   );
 
   const clearAttachments = useCallback(

@@ -30,6 +30,17 @@ import { IMAGE_AGENT_SYSTEM_PROMPT } from '@/lib/constants/image-agent-prompt';
 import { dataUrlToFileAttachment } from '@/lib/file-utils';
 import { usePopoverState } from '@/hooks/usePopoverState';
 import { useProviderModels } from '@/hooks/useProviderModels';
+import { useManagedMultimodal } from '@/hooks/useManagedMultimodal';
+import { isMediaMimeType } from '@/lib/model-multimodal';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@/components/ui/alert-dialog';
 import { useCommandBadge } from '@/hooks/useCommandBadge';
 import { useCliToolsFetch } from '@/hooks/useCliToolsFetch';
 import { useSlashCommands } from '@/hooks/useSlashCommands';
@@ -170,6 +181,33 @@ export function MessageInput({
   // --- Extracted hooks ---
   const popover = usePopoverState(modelName);
   const { providerGroups, currentProviderIdValue, modelOptions, currentModelOption, globalDefaultModel, globalDefaultProvider } = useProviderModels(providerId, modelName);
+
+  // Multimodal upload guard: when the selected model is a managed provider we
+  // can prove is NOT multimodal (its description lacks「多模态」), block media
+  // attachments (image/audio/video) and explain via a dialog. Image-gen mode
+  // is exempt — those images feed the image model, not the chat model. Local /
+  // BYOK / unknown providers are never blocked (isManagedNonMultimodal=false).
+  const { isManagedNonMultimodal } = useManagedMultimodal();
+  const [mediaBlockedOpen, setMediaBlockedOpen] = useState(false);
+  const validateMediaFile = useCallback(
+    (file: File): string | null => {
+      if (
+        isManagedNonMultimodal(currentProviderIdValue) &&
+        !imageGen.state.enabled &&
+        isMediaMimeType(file.type)
+      ) {
+        return t('composer.nonMultimodalUploadDesc');
+      }
+      return null;
+    },
+    [isManagedNonMultimodal, currentProviderIdValue, imageGen.state.enabled, t],
+  );
+  const handlePromptInputError = useCallback(
+    (err: { code: string; message: string }) => {
+      if (err.code === 'rejected') setMediaBlockedOpen(true);
+    },
+    [],
+  );
 
   // Auto-correct model when it doesn't exist in the current provider's model list.
   // This prevents sending an unsupported model name (e.g. 'opus' to MiniMax which only has 'sonnet').
@@ -730,6 +768,20 @@ export function MessageInput({
 
   return (
     <div className="bg-background/80 backdrop-blur-lg px-4 pt-2 pb-1">
+      {/* Non-multimodal model: blocked-media-upload notice */}
+      <AlertDialog open={mediaBlockedOpen} onOpenChange={setMediaBlockedOpen}>
+        <AlertDialogContent size="sm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('composer.nonMultimodalUploadTitle')}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t('composer.nonMultimodalUploadDesc')}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogAction>{t('common.gotIt')}</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
       <div className="mx-auto">
         <div className="relative">
           {/* Slash Command / File Popover */}
@@ -785,6 +837,8 @@ export function MessageInput({
             onSubmit={handleSubmit}
             accept=""
             multiple
+            validateFile={validateMediaFile}
+            onError={handlePromptInputError}
             onDirectoriesDropped={handleDirectoriesDropped}
           >
             {/* Bridge: listens for file tree "+" button events */}

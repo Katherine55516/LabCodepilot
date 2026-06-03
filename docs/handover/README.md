@@ -40,3 +40,4 @@
 | batch-session-import.md | 批量会话导入：多选/全选/三态 checkbox、批量 endpoint（一次查重 Map vs 单条 N 次全表）、importOneSession 共用 helper、聚合 summary 永远 200、不跳转、嵌套 button hydration 修复 |
 | credential-encryption.md | 凭证本地加密落盘：safeStorage 守一把主密钥 + AES-256-GCM、双进程 env 过河、Layer1(anlcode 文件)+Layer2(SQLite 列) seal/hydrate 咽喉点、静默迁移 + fail-safe、image-generator 绕过修复、威胁模型边界 |
 | cross-host-session-import.md | 跨主机会话导入：多 `projects/` 根目录合并扫描、自动发现 bsApp（claude-bs-agent）shadow HOME（`<userData>/claude-home`）、零配置导入 bsApp 历史、只改 claude-session-parser.ts 对列表/导入 API 透明 |
+| multimodal-model-guard.md | 多模态模型标识 + 上传拦截：description 含「多模态」判定（已落 notes 列，零后端改动）、useManagedMultimodal hook、PromptInput 通用 validateFile、非多模态 managed 模型拦截图片/音视频 + AlertDialog、未知放行 + image-gen 绕过边界 |
