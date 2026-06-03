@@ -91,7 +91,10 @@ export function FileTreePanel() {
         return mode;
       });
       setNewItemTargetDir(effectiveTarget);
-      setNewItemName(mode === "file" ? "untitled.md" : "new-folder");
+      // Files open with an empty name (the placeholder hints "untitled.md")
+      // so the user types their own name — no pre-filled default. Folders
+      // keep a sensible default the user can accept or overwrite.
+      setNewItemName(mode === "folder" ? "new-folder" : "");
       setNewItemError(null);
     },
     [workingDirectory, selectedFolderPath, newItemTargetDir],
@@ -126,7 +129,8 @@ export function FileTreePanel() {
           : {
               path: targetPath,
               baseDir: workingDirectory,
-              content: `# ${trimmed.replace(/\.[^.]+$/, "")}\n\n`,
+              // Create a completely empty file — no auto-written "# title".
+              content: "",
               overwrite: false,
               createParents: false,
             };
