@@ -778,7 +778,11 @@ export function MessageInput({
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogAction>{t('common.gotIt')}</AlertDialogAction>
+            {/* size="sm" footer is a 2-col grid; span both cols + center so the
+                single button sits centered instead of pinned to the left col. */}
+            <AlertDialogAction className="col-span-2 justify-self-center">
+              {t('common.gotIt')}
+            </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
