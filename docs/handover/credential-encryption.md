@@ -133,3 +133,14 @@ app.whenReady → initMasterKey()（解封主密钥 + 写 process.env）
 - 主密钥与解密后凭证存在于 server/SDK 子进程 env（out-of-scope，本方案只攻"磁盘无明文"）。
 - BYOK 丢钥不可逆（无 escrow）。
 - Bridge 机器人 token（`weixin_accounts.token`、`channel_configs.config_json`）本次**未覆盖**，属另一类凭证，留后续迭代（同库同机制可平滑扩展）。
+
+## 12. 下发传输加密（与本地落盘正交，2026-06）
+
+本文档讲**落盘**加密（crypto-seal/safeStorage）。另有一层独立的**下发传输**加密：服务器把"用户体系下发配置"接口的 `auth_token` 用 AES-256-GCM 加密，客户端走 `GET /api/v1/configs/encrypted` 取回后解密。
+
+- 对接规格：`文档/config-delivery-api.md`；密钥 = `SHA-256(口令)`，口令默认 `ZJH2026`、支持 env `ANLCODE_CONFIG_SECRET` 覆盖。密文 = `nonce(12B) ‖ ciphertext ‖ tag(16B)` base64。
+- 解密实现：[`electron/auth/config-crypto.ts`](../../electron/auth/config-crypto.ts)（`decryptAuthToken` / `decryptConfigAuthTokens`）。改造点：[`getConfigs()`](../../electron/auth/client.ts) 全量 GET 改加密端点、`HttpError(503)` 退回明文版 `/api/v1/configs`、解密后下游消费明文。
+- **两层正交**：下发解密 → 明文 `auth_token` → crypto-seal 再加密落盘（`configs.json.enc` / SQLite `api_key`）→ 消费时解密注入 SDK env。互不感知。
+- fail-safe：单条解密失败置空（降级无凭证）；`503` 自动退明文版；网络失败仍走 `NetworkError` 缓存降级。hash/ETag 基于明文负载、两端点共用，304 协商不变。
+- 测试：`src/__tests__/unit/config-crypto.test.ts`（round-trip 验证与服务器算法兼容、env 覆盖、空串、篡改抛错、单条 fail-safe，7 例）。
+- 安全注意：对称口令进 bundle、逆向可提取（`SHA-256(短口令)` 未加盐，仅受控场景）；更强需服务器侧每用户密钥/加盐 KDF。`文档/config-delivery-api.md` 含明文口令，注意是否纳入 git。

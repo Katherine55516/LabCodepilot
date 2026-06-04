@@ -87,3 +87,18 @@ export class AuthExpiredError extends Error {
     this.name = 'AuthExpiredError';
   }
 }
+
+/**
+ * Non-401 HTTP error (>= 400) carrying the status code, so callers can branch
+ * on it (e.g. 503 → fall back to the plaintext configs endpoint, 409 → "gateway
+ * not provisioned"). Extends Error → backward-compatible with existing
+ * `catch (e as Error)` / instanceof NetworkError|AuthExpiredError handlers.
+ */
+export class HttpError extends Error {
+  status: number;
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = 'HttpError';
+    this.status = status;
+  }
+}

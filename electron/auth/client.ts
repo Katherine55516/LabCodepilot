@@ -11,7 +11,7 @@ import * as os from 'os';
 import { app, shell } from 'electron';
 
 import { getBackendBase } from './config';
-import { apiRequest, probeAuthStatus } from './http';
+import { apiRequest, probeAuthStatus, type ApiResponse } from './http';
 import { startCallbackServer } from './callback-server';
 import {
   saveToken,
@@ -26,12 +26,14 @@ import {
 } from './storage';
 import {
   AuthExpiredError,
+  HttpError,
   NetworkError,
   type AuthProbeResult,
   type MeInfo,
   type ModelConfig,
 } from './types';
 import { logInfo, logWarn, maskToken, maskConfigsForLog } from './log';
+import { decryptConfigAuthTokens } from './config-crypto';
 
 // The maximum time we'll wait for the user to complete the OAuth dance in the
 // browser. 10 minutes leaves time for legit cases (e.g. user goes to look up
@@ -154,10 +156,24 @@ export async function getConfigs(opts: { force?: boolean } = {}): Promise<ModelC
       }
     }
 
-    // Full GET (server can still 304 if our hash matches)
-    const r = await apiRequest<ModelConfig[]>('/api/v1/configs', {
-      extraHeaders: localHash ? { 'If-None-Match': `"${localHash}"` } : undefined,
-    });
+    // Full GET — prefer the encrypted endpoint; on 503 (server-side encryption
+    // key not configured) fall back to the plaintext endpoint. The server can
+    // still 304 if our hash matches: the hash/ETag is over the *plaintext*
+    // payload and shared by both endpoints.
+    const extraHeaders = localHash ? { 'If-None-Match': `"${localHash}"` } : undefined;
+    let r: ApiResponse<ModelConfig[]>;
+    let encrypted = true;
+    try {
+      r = await apiRequest<ModelConfig[]>('/api/v1/configs/encrypted', { extraHeaders });
+    } catch (e) {
+      if (e instanceof HttpError && e.status === 503) {
+        logWarn('encrypted configs unavailable (503) — falling back to plaintext /api/v1/configs');
+        encrypted = false;
+        r = await apiRequest<ModelConfig[]>('/api/v1/configs', { extraHeaders });
+      } else {
+        throw e;
+      }
+    }
 
     if (r.status === 304) {
       const cached = loadConfigs();
@@ -167,11 +183,19 @@ export async function getConfigs(opts: { force?: boolean } = {}): Promise<ModelC
     }
     if (!r.json) throw new Error('/api/v1/configs returned empty body');
 
+    // Encrypted endpoint returns auth_token as AES-256-GCM ciphertext — decrypt
+    // each to plaintext so every downstream consumer (local cache, broker →
+    // SQLite, provider-resolver) sees the real key, exactly as before.
+    const configs = encrypted ? decryptConfigAuthTokens(r.json) : r.json;
+
+    // Hash/ETag is over the plaintext payload. Prefer the server ETag (matches
+    // /api/v1/configs/hash for the polling fast-path); fall back to a local hash
+    // over the *decrypted* configs so it's stable across the random nonce.
     const etag = (r.headers.get('ETag') ?? '').replace(/^"|"$/g, '');
-    const hash = etag || sha256(JSON.stringify(r.json));
-    saveConfigs(r.json, hash);
-    logInfo('configs fetched & cached:', maskConfigsForLog(r.json));
-    return sortConfigs(r.json);
+    const hash = etag || sha256(JSON.stringify(configs));
+    saveConfigs(configs, hash);
+    logInfo('configs fetched & cached:', maskConfigsForLog(configs));
+    return sortConfigs(configs);
   } catch (e) {
     if (e instanceof NetworkError) {
       const cached = loadConfigs();

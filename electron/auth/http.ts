@@ -12,7 +12,7 @@
 
 import { getBackendBase } from './config';
 import { loadToken } from './storage';
-import { AuthExpiredError, NetworkError } from './types';
+import { AuthExpiredError, HttpError, NetworkError } from './types';
 
 interface RequestOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'DELETE';
@@ -77,7 +77,7 @@ export async function apiRequest<T>(
   }
   if (res.status >= 400) {
     const text = await res.text().catch(() => '');
-    throw new Error(`HTTP ${res.status}: ${text || res.statusText}`);
+    throw new HttpError(res.status, `HTTP ${res.status}: ${text || res.statusText}`);
   }
 
   let json: T | undefined;
