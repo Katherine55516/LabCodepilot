@@ -101,10 +101,13 @@ export function SessionListItem({
         <span className="flex-1 min-w-0 line-clamp-1 text-[13px] font-medium leading-tight break-all">
           {session.title}
         </span>
-        {/* Right area — fixed width, time or dots swap via opacity */}
-        <span className="shrink-0 w-[38px] flex items-center justify-end">
+        {/* Right area — width auto-sizes to the time so older sessions show
+            the full date (toLocaleDateString) instead of being clipped to
+            "2026..." by a fixed-width column. whitespace-nowrap keeps it on
+            one line; the title (flex-1 min-w-0) yields the needed space. */}
+        <span className="shrink-0 flex items-center justify-end">
           <span className={cn(
-            "text-[11px] text-muted-foreground/40 truncate transition-opacity",
+            "text-[11px] text-muted-foreground/40 whitespace-nowrap transition-opacity",
             showActions ? "opacity-0" : "opacity-100"
           )}>
             {formatRelativeTime(session.updated_at, t)}
