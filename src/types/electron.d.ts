@@ -75,6 +75,22 @@ interface AuthSnapshot {
   managedConfigCount: number;
 }
 
+/** One quota bucket from /api/v1/usage (mirrors electron/auth/types.ts). */
+interface UsageQuota {
+  renewal: number;
+  remaining: number;
+  used: number;
+}
+
+/** /api/v1/usage response — renderer-safe (no token). */
+interface UsageInfo {
+  username: string;
+  quota: UsageQuota;
+  quota_cn: UsageQuota;
+  quota_intl: UsageQuota;
+  quota_per_unit: number;
+}
+
 interface ElectronAuthAPI {
   // Login-window-only entry points (called from electron/login/login.js)
   runLoginFlow: () => Promise<{ ok: true } | { ok: false; error: string }>;
@@ -85,6 +101,11 @@ interface ElectronAuthAPI {
   logout: () => Promise<{ ok: true }>;
   refreshConfigs: () => Promise<{ ok: boolean; count?: number; error?: string }>;
   probe: () => Promise<{ alive: boolean; offline: boolean }>;
+  /** Fetch current quota usage on demand. status: 401/409/503; kind:'network'. */
+  getUsage: () => Promise<
+    | { ok: true; usage: UsageInfo }
+    | { ok: false; status?: number; kind?: 'network'; error: string }
+  >;
   onChange: (callback: (state: AuthSnapshot) => void) => () => void;
 }
 

@@ -114,6 +114,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     logout: () => ipcRenderer.invoke('auth:logout'),
     refreshConfigs: () => ipcRenderer.invoke('auth:refresh-configs'),
     probe: () => ipcRenderer.invoke('auth:probe'),
+    getUsage: () => ipcRenderer.invoke('auth:get-usage'),
     onChange: (callback: (state: unknown) => void) => {
       const listener = (_event: unknown, state: unknown) => callback(state);
       ipcRenderer.on('auth:changed', listener);

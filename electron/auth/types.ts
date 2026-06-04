@@ -36,6 +36,29 @@ export interface ModelConfig {
   sort_order: number;
 }
 
+// ── /api/v1/usage response ─────────────────────────────────────────────────
+
+export interface UsageQuota {
+  /** 本期总额度(周期重置时填充) */
+  renewal: number;
+  /** 当前剩余 */
+  remaining: number;
+  /** 本期已用 = renewal - remaining */
+  used: number;
+}
+
+export interface UsageInfo {
+  username: string;
+  /** 总额度(= 国内 + 国外) */
+  quota: UsageQuota;
+  /** 国内分项 */
+  quota_cn: UsageQuota;
+  /** 国外分项 */
+  quota_intl: UsageQuota;
+  /** 额度→货币换算单位,500000 = $1(本期不展示货币) */
+  quota_per_unit: number;
+}
+
 // ── /api/v1/me response ────────────────────────────────────────────────────
 
 export interface MeInfo {

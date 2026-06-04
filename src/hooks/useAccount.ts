@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import type { UsageInfo } from '@/lib/usage';
 
 /**
  * React hook that surfaces the managed-account login state to renderer UI.
@@ -43,6 +44,11 @@ export interface UseAccountResult {
   refreshConfigs: () => Promise<{ ok: boolean; count?: number; error?: string }>;
   /** Re-probe /api/v1/auth/status (transitions offline ↔ online if token is fine). */
   probe: () => Promise<{ alive: boolean; offline: boolean }>;
+  /** Fetch current quota usage on demand (not part of AuthSnapshot). */
+  getUsage: () => Promise<
+    | { ok: true; usage: UsageInfo }
+    | { ok: false; status?: number; kind?: 'network'; error: string }
+  >;
 }
 
 export function useAccount(): UseAccountResult {
@@ -98,6 +104,12 @@ export function useAccount(): UseAccountResult {
     return api.probe();
   }, []);
 
+  const getUsage = useCallback<UseAccountResult['getUsage']>(async () => {
+    const api = window.electronAPI?.auth;
+    if (!api) return { ok: false as const, error: 'desktop API unavailable' };
+    return api.getUsage();
+  }, []);
+
   return {
     authenticated: state.authenticated,
     offline: state.offline,
@@ -108,5 +120,6 @@ export function useAccount(): UseAccountResult {
     logout,
     refreshConfigs,
     probe,
+    getUsage,
   };
 }

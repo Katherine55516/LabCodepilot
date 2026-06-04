@@ -33,6 +33,7 @@ import {
   fetchMe,
   registerDevice,
   getConfigs,
+  fetchUsage,
   anlLogout,
 } from './auth/client';
 import {
@@ -55,7 +56,7 @@ import {
 import { clearAuthState } from './auth/storage';
 import { initMasterKey, getMasterKeyHex, logSafeStorageStatus } from './auth/secret-key';
 import { logInfo, logWarn, logError } from './auth/log';
-import type { MeInfo, ModelConfig } from './auth/types';
+import { HttpError, AuthExpiredError, NetworkError, type MeInfo, type ModelConfig } from './auth/types';
 
 // Vendor-bundled GSD plugin — synced to ~/.claude/plugins/external_plugins/
 // on first launch and version drift. See electron/gsd-installer.ts.
@@ -2027,6 +2028,21 @@ app.whenReady().then(async () => {
       broadcastAuthChange();
     }
     return result;
+  });
+
+  // Usage quota — fetched on demand when the user opens the account menu.
+  // Errors carry status so the renderer can show 409 (not provisioned) /
+  // 503 (gateway down) / 401 / network distinctly. Token never leaves main.
+  ipcMain.handle('auth:get-usage', async () => {
+    try {
+      const usage = await fetchUsage();
+      return { ok: true as const, usage };
+    } catch (e) {
+      if (e instanceof HttpError) return { ok: false as const, status: e.status, error: e.message };
+      if (e instanceof AuthExpiredError) return { ok: false as const, status: 401, error: e.message };
+      if (e instanceof NetworkError) return { ok: false as const, kind: 'network' as const, error: e.message };
+      return { ok: false as const, error: e instanceof Error ? e.message : String(e) };
+    }
   });
 
   try {

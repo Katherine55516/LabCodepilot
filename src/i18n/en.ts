@@ -1623,6 +1623,15 @@ const en = {
   'auth.accountCardPlan': 'Plan: {plan}',
   'auth.email': 'Email',
   'auth.backendUnavailable': 'Cannot reach the backend right now',
+  'auth.usageTitle': 'Quota usage',
+  'auth.usageTotal': 'Total',
+  'auth.usageCn': 'Domestic',
+  'auth.usageIntl': 'International',
+  'auth.usageUsedPercent': '{percent}% used',
+  'auth.usageLoading': 'Loading usage…',
+  'auth.usageError': 'Usage unavailable',
+  'auth.usageNotProvisioned': 'Quota not enabled — contact your admin',
+  'auth.usageServiceDown': 'Quota service unavailable',
 
   // ─── Built-in plugins panel (GSD) ───
   'settings.plugins.title': 'Plugins',

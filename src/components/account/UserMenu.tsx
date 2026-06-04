@@ -15,6 +15,7 @@ import { LogoutConfirmDialog } from './LogoutConfirmDialog';
 import { useAccount } from '@/hooks/useAccount';
 import { useTranslation } from '@/hooks/useTranslation';
 import { cn } from '@/lib/utils';
+import { usedPercent, levelOf, type UsageInfo } from '@/lib/usage';
 
 /**
  * Wide account chip with avatar + username, designed for the bottom row of
@@ -29,9 +30,12 @@ import { cn } from '@/lib/utils';
  */
 export function UserMenu() {
   const { t } = useTranslation();
-  const { authenticated, offline, me, managedConfigCount, triggerLogin, logout, refreshConfigs } = useAccount();
+  const { authenticated, offline, me, managedConfigCount, triggerLogin, logout, refreshConfigs, getUsage } = useAccount();
   const [logoutDialogOpen, setLogoutDialogOpen] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [usage, setUsage] = useState<UsageInfo | null>(null);
+  const [usageLoading, setUsageLoading] = useState(false);
+  const [usageError, setUsageError] = useState<{ status?: number; kind?: string } | null>(null);
 
   // Renderer running outside Electron (e.g. plain browser dev): no auth API.
   if (typeof window !== 'undefined' && !window.electronAPI?.auth) {
@@ -52,6 +56,26 @@ export function UserMenu() {
       await refreshConfigs();
     } finally {
       setRefreshing(false);
+    }
+  };
+
+  // Fetch usage only when the menu opens (no polling). Keep the last value so
+  // re-opening doesn't flash empty while the request is in flight.
+  const loadUsage = async () => {
+    if (usageLoading) return;
+    setUsageLoading(true);
+    try {
+      const res = await getUsage();
+      if (res.ok) {
+        setUsage(res.usage);
+        setUsageError(null);
+      } else {
+        setUsageError({ status: res.status, kind: res.kind });
+      }
+    } catch {
+      setUsageError({ kind: 'unknown' });
+    } finally {
+      setUsageLoading(false);
     }
   };
 
@@ -81,7 +105,7 @@ export function UserMenu() {
   // ── Signed in ────────────────────────────────────────────────────────────
   return (
     <>
-      <DropdownMenu>
+      <DropdownMenu onOpenChange={(open) => { if (open) void loadUsage(); }}>
         <DropdownMenuTrigger asChild>
           <Button
             variant="ghost"
@@ -137,6 +161,58 @@ export function UserMenu() {
             <ArrowsClockwise size={14} />
             <span>{refreshing ? t('auth.refreshingConfigs') : t('auth.refreshConfigs')}</span>
           </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          {/* Quota usage — refreshed only when the menu opens (see onOpenChange). */}
+          <div className="px-2 py-1.5">
+            <div className="mb-1.5 text-[11px] font-medium text-muted-foreground">
+              {t('auth.usageTitle')}
+            </div>
+            {usage ? (
+              <div className="space-y-1.5">
+                {([
+                  ['auth.usageTotal', usage.quota],
+                  ['auth.usageCn', usage.quota_cn],
+                  ['auth.usageIntl', usage.quota_intl],
+                ] as const).map(([labelKey, q]) => {
+                  const pct = usedPercent(q);
+                  const level = levelOf(pct);
+                  return (
+                    <div key={labelKey}>
+                      <div className="flex items-center justify-between text-[11px]">
+                        <span className="text-muted-foreground">{t(labelKey)}</span>
+                        <span className="tabular-nums text-foreground">
+                          {t('auth.usageUsedPercent').replace('{percent}', String(pct))}
+                        </span>
+                      </div>
+                      <div className="mt-0.5 h-1.5 w-full overflow-hidden rounded-full bg-muted">
+                        <div
+                          className={cn(
+                            'h-full rounded-full transition-all',
+                            level === 'danger'
+                              ? 'bg-destructive'
+                              : level === 'warning'
+                                ? 'bg-status-warning'
+                                : 'bg-primary',
+                          )}
+                          style={{ width: `${pct}%` }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="text-[11px] text-muted-foreground">
+                {usageError
+                  ? usageError.status === 409
+                    ? t('auth.usageNotProvisioned')
+                    : usageError.status === 503
+                      ? t('auth.usageServiceDown')
+                      : t('auth.usageError')
+                  : t('auth.usageLoading')}
+              </div>
+            )}
+          </div>
           <DropdownMenuSeparator />
           <DropdownMenuItem
             onSelect={(e) => { e.preventDefault(); setLogoutDialogOpen(true); }}

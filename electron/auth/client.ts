@@ -31,6 +31,7 @@ import {
   type AuthProbeResult,
   type MeInfo,
   type ModelConfig,
+  type UsageInfo,
 } from './types';
 import { logInfo, logWarn, maskToken, maskConfigsForLog } from './log';
 import { decryptConfigAuthTokens } from './config-crypto';
@@ -245,4 +246,16 @@ export async function anlLogout(): Promise<void> {
     }
   }
   clearAuthState();
+}
+
+// ── 7. /api/v1/usage ─────────────────────────────────────────────────────────
+
+/**
+ * 查询当前登录用户的额度用量。错误(401/409/503/网络)直接上抛,由 main 的
+ * IPC handler 归类后回传 renderer。token 由 apiRequest 自动注入,不出主进程。
+ */
+export async function fetchUsage(): Promise<UsageInfo> {
+  const r = await apiRequest<UsageInfo>('/api/v1/usage');
+  if (!r.json) throw new Error('/api/v1/usage returned empty body');
+  return r.json;
 }

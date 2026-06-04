@@ -1619,6 +1619,15 @@ const zh: Record<TranslationKey, string> = {
   'auth.accountCardPlan': '套餐：{plan}',
   'auth.email': '邮箱',
   'auth.backendUnavailable': '当前无法连接服务端',
+  'auth.usageTitle': '额度用量',
+  'auth.usageTotal': '总额度',
+  'auth.usageCn': '国内',
+  'auth.usageIntl': '国外',
+  'auth.usageUsedPercent': '已用 {percent}%',
+  'auth.usageLoading': '加载用量…',
+  'auth.usageError': '无法获取用量',
+  'auth.usageNotProvisioned': '额度未开通，请联系管理员',
+  'auth.usageServiceDown': '额度服务暂不可用',
 
   // ─── 内置插件面板（GSD） ───
   'settings.plugins.title': '插件',
