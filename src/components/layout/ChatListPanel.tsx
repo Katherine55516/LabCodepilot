@@ -537,13 +537,18 @@ export function ChatListPanel({ open, width, hasUpdate, readyToInstall }: ChatLi
             />
           )}
 
-          {/* Assistant promo card for unconfigured users */}
+          {/* Assistant promo card for unconfigured users — hidden per user
+              request (2026-06). Render commented out only; the AssistantPromoCard
+              import, assistantSummary + promoDismissed/setPromoDismissed state,
+              and i18n keys are all kept intact.
+              Restore by uncommenting the block below.
           {assistantSummary && !assistantSummary.configured && !promoDismissed && (
             <AssistantPromoCard
               onSetup={() => router.push('/settings#assistant')}
               onDismiss={() => setPromoDismissed(true)}
             />
           )}
+          */}
 
           {filteredSessions.length === 0 && (!isSplitActive || splitSessions.length === 0) ? (
             <p className="px-2.5 py-3 text-[11px] text-muted-foreground/60">
