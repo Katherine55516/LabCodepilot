@@ -357,8 +357,11 @@ const SESSION_RELATED_KEYWORDS = [
 /**
  * Classify an error from the Claude Code process into a structured error
  * with user-facing message and actionable hints.
+ *
+ * Internal core — the exported `classifyError` wraps this to prefer the
+ * upstream gateway's human-readable `message` (e.g. quota-exceeded) when present.
  */
-export function classifyError(ctx: ErrorContext): ClassifiedError {
+function classifyErrorCore(ctx: ErrorContext): ClassifiedError {
   const error = ctx.error;
   const rawMessage = error instanceof Error ? error.message : String(error);
   const errorCode = error instanceof Error ? (error as NodeJS.ErrnoException).code : undefined;
@@ -459,6 +462,68 @@ export function classifyError(ctx: ErrorContext): ClassifiedError {
     retryable: false,
     recoveryActions: buildRecoveryActions('UNKNOWN', ctx),
   };
+}
+
+/**
+ * 从原始错误文本里提取上游网关返回的可读 message(如额度不足提示)。
+ * 形如:`… API Error: 403 {"error":{"message":"用户高阶模型额度不足, 剩余: ¥-0.024640 (request id: …)"}}`
+ * → 返回「用户高阶模型额度不足, 剩余: ¥-0.024640」(去掉尾部 request id)。提取不到返回 null。
+ */
+export function extractUpstreamMessage(text: string): string | null {
+  if (!text) return null;
+  let msg: string | null = null;
+
+  // 1) 取文本里的 JSON 子串(首个 { 到末个 })尝试解析,读 error.message 或顶层 message
+  const first = text.indexOf('{');
+  const last = text.lastIndexOf('}');
+  if (first !== -1 && last > first) {
+    try {
+      const parsed = JSON.parse(text.slice(first, last + 1)) as {
+        error?: { message?: unknown };
+        message?: unknown;
+      };
+      const m = parsed?.error?.message ?? parsed?.message;
+      if (typeof m === 'string' && m.trim()) msg = m;
+    } catch {
+      /* 非完整 JSON — 落到正则兜底 */
+    }
+  }
+
+  // 2) 兜底:正则提第一个 "message":"…" 的值(再走 JSON.parse 解转义)
+  if (!msg) {
+    const m = text.match(/"message"\s*:\s*"((?:[^"\\]|\\.)*)"/);
+    if (m && m[1]) {
+      try {
+        msg = JSON.parse(`"${m[1]}"`) as string;
+      } catch {
+        msg = m[1];
+      }
+    }
+  }
+
+  if (!msg || !msg.trim()) return null;
+  // 去掉尾部 (request id: …),仅 UI 不展示;完整原文仍保留在 rawMessage 供排查
+  const cleaned = msg.replace(/\s*\(request id:[^)]*\)\s*$/i, '').trim();
+  return cleaned || null;
+}
+
+/**
+ * 对外的分类入口:在 classifyErrorCore 的结果上,优先用上游网关返回的可读
+ * message 覆盖通用文案——服务端 message(如「用户高阶模型额度不足」)比通用
+ * 分类更直观。提取不到时保持原分类不变。
+ */
+export function classifyError(ctx: ErrorContext): ClassifiedError {
+  const result = classifyErrorCore(ctx);
+  const rawMessage = ctx.error instanceof Error ? ctx.error.message : String(ctx.error);
+  const cause = ctx.error instanceof Error ? (ctx.error as { cause?: unknown }).cause : undefined;
+  const causeMsg = cause instanceof Error ? cause.message : cause ? String(cause) : '';
+  const upstream = extractUpstreamMessage(`${rawMessage}\n${ctx.stderr ?? ''}\n${causeMsg}`);
+  if (upstream) {
+    result.userMessage = upstream; // Error 行直接展示上游可读 message
+    result.actionHint = '';        // 前端据空串不渲染「What to do」
+    result.recoveryActions = [];   // 只显示 message(用户选择)
+  }
+  return result;
 }
 
 function buildRecoveryActions(category: ClaudeErrorCategory, ctx: ErrorContext): RecoveryAction[] {
