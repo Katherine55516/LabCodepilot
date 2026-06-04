@@ -8,9 +8,9 @@
     "packages/*"
   ],
   "author": {
-    "name": "op7418",
-    "email": "guohao631@gmail.com",
-    "url": "https://x.com/op7418"
+    "name": "AI Native Lab - liyq004",
+    "email": "liyq004@cmhk.com",
+    "url": "https://home.ai-native-lab.com"
   },
   "description": "A multi-model AI agent desktop client",
   "main": "dist-electron/main.js",

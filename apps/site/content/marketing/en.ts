@@ -145,7 +145,7 @@ export const en: MarketingContent = {
       },
     ],
     githubCta: 'Star on GitHub',
-    githubUrl: 'https://github.com/op7418/CodePilot',
+    githubUrl: '',
   },
   faq: {
     title: 'Frequently asked questions.',
@@ -239,7 +239,7 @@ export const en: MarketingContent = {
   footer: {
     copyright: '\u00a9 2026 CodePilot',
     links: [
-      { text: 'GitHub', url: 'https://github.com/op7418/CodePilot' },
+      { text: 'GitHub', url: '' },
       { text: 'Docs', url: '/docs' },
       { text: 'Download', url: '/download' },
     ],

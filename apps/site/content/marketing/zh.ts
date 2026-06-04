@@ -82,7 +82,7 @@ export const zh: MarketingContent = {
       },
     ],
     githubCta: '在 GitHub 上 Star',
-    githubUrl: 'https://github.com/op7418/CodePilot',
+    githubUrl: '',
   },
   faq: {
     title: '常见问题。',
@@ -176,7 +176,7 @@ export const zh: MarketingContent = {
   footer: {
     copyright: '\u00a9 2026 CodePilot',
     links: [
-      { text: 'GitHub', url: 'https://github.com/op7418/CodePilot' },
+      { text: 'GitHub', url: '' },
       { text: '文档', url: '/zh/docs' },
       { text: '下载', url: '/zh/download' },
     ],
