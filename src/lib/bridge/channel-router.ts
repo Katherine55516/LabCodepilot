@@ -14,6 +14,7 @@ import {
   getSession,
   createSession,
   getSetting,
+  updateSessionModel,
   updateSessionProviderId,
   updateSessionWorkingDirectory,
   updateSdkSessionId,
@@ -41,7 +42,7 @@ export function resolve(address: ChannelAddress): ChannelBinding {
         { path: getSetting('bridge_default_work_dir'), source: 'setting' },
       ]);
       const shouldResetResume = shouldResetResumeForSource(resolved.source);
-      const updates: Partial<Pick<ChannelBinding, 'workingDirectory' | 'sdkSessionId'>> = {};
+      const updates: Partial<Pick<ChannelBinding, 'workingDirectory' | 'sdkSessionId' | 'model' | 'providerId'>> = {};
 
       if (resolved.invalidCandidates.length > 0) {
         console.warn('[channel-router] Healed invalid bridge working directory', {
@@ -62,6 +63,22 @@ export function resolve(address: ChannelAddress): ChannelBinding {
       if (shouldResetResume && existing.sdkSessionId) {
         updates.sdkSessionId = '';
         existing.sdkSessionId = '';
+      }
+
+      // Model / provider 自愈:Bridge 会话始终跟随当前「桥接默认设置」,改设置后
+      // 下一条消息即生效(IM 端没有 per-会话切模型的入口,模型由桥接设置统一控制)。
+      // 默认为空时不覆盖(没设默认就不强制清空已有绑定)。
+      const bridgeModel = getSetting('bridge_default_model') || '';
+      if (bridgeModel && existing.model !== bridgeModel) {
+        updates.model = bridgeModel;
+        existing.model = bridgeModel;
+        if (session.model !== bridgeModel) updateSessionModel(session.id, bridgeModel);
+      }
+      const bridgeProvider = getSetting('bridge_default_provider_id') || '';
+      if (bridgeProvider && existing.providerId !== bridgeProvider) {
+        updates.providerId = bridgeProvider;
+        existing.providerId = bridgeProvider;
+        if (session.provider_id !== bridgeProvider) updateSessionProviderId(session.id, bridgeProvider);
       }
 
       if (Object.keys(updates).length > 0) {

@@ -364,6 +364,9 @@ Bridge 绑定和 chat session 中可能残留已经删除的 `working_directory`
 **30. 飞书 thread-session 守卫（#321）**
 `inbound.ts` 之前无条件把 `root_id` 拼进 `chatId` 做 thread 路由，`bridge_feishu_thread_session` 设置其实无效（永远开启）。现在检查 `config.threadSession && rootId` 才做 synthetic address，默认关闭时所有消息共享同一 session，和产品预期一致。
 
+**31. Bridge 会话模型跟随桥接默认设置（model/provider 自愈）**
+`bridge_default_model` / `bridge_default_provider_id` 原本只在 `createBinding` 新建会话时一次性固化进 `chat_sessions.model` + `channel_bindings.model`，`resolve()` 复用已有 binding 时只自愈 cwd/sdkSessionId、**不刷新 model**——导致改了桥接默认模型后已有 Bridge 会话仍用旧模型（`conversation-engine` 的 `effectiveModel` 链读 `binding.model`/`session.model` 旧值，链里根本没有 `bridge_default_model`）。现在 `channel-router.resolve()` 复用分支对 model/providerId 做同样的自愈：`bridge_default_model` 非空且与 `binding.model` 不同时，刷新 `binding.model` + `session.model`（provider 同理），让 Bridge 会话始终跟随当前桥接设置（改设置下一条消息即生效）。默认为空时不覆盖（不强制清空）。IM 端无 per-会话切模型入口，模型由桥接设置统一控制；桌面端对 Bridge 会话的手动改模型会被下条消息自愈回默认。`conversation-engine` 无需改（用刷新后的 `binding.model`）。测试 `src/__tests__/unit/channel-router.test.ts`。
+
 | Key | 说明 |
 |-----|------|
 | remote_bridge_enabled | 总开关 |
