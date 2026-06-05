@@ -13,6 +13,7 @@ import { CliToolBatchDescribeDialog } from "./CliToolBatchDescribeDialog";
 import { SpinnerGap, Sparkle, ArrowSquareOut, Warning, Plus, Trash, Star } from "@/components/ui/icon";
 import { Button } from "@/components/ui/button";
 import { EXTRA_WELL_KNOWN_BINS } from "@/lib/cli-tools-catalog";
+import { NEW_CHAT_PREFILL_KEY } from "@/lib/constants/chat-prefill";
 
 type AutoDescCache = Record<string, { zh: string; en: string; structured?: unknown }>;
 
@@ -147,8 +148,20 @@ export function CliToolsManager() {
     const prefill = locale === 'zh'
       ? '我想安装一个新的 CLI 工具并添加到工具库。\n工具名称：\n安装命令（如 brew install xxx）：'
       : 'I want to install a new CLI tool and add it to my tool library.\nTool name: \nInstall command (e.g. brew install xxx): ';
-    // Use hard navigation to ensure the new page reads the prefill param fresh
-    window.location.href = `/chat?prefill=${encodeURIComponent(prefill)}`;
+    // The old approach (`window.location.href = '/chat?prefill=...'`) silently
+    // did nothing inside the packaged Electron window — full-page navigations
+    // are unreliable there. Use the Next router (history API, works in both
+    // browser and Electron). The prefill is handed off via sessionStorage
+    // rather than the URL because App Router's client navigation updates
+    // window.location a tick after the new page mounts, so the /chat page's
+    // mount-time read of the query string would miss it. sessionStorage is set
+    // synchronously here and is guaranteed available when /chat mounts.
+    try {
+      sessionStorage.setItem(NEW_CHAT_PREFILL_KEY, prefill);
+    } catch {
+      /* private mode / quota — fall back to the URL param below */
+    }
+    router.push(`/chat?prefill=${encodeURIComponent(prefill)}`);
   };
 
   const handleDeleteCustomTool = async (id: string) => {

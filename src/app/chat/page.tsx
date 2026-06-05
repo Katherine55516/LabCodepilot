@@ -19,6 +19,7 @@ import { useTranslation } from '@/hooks/useTranslation';
 import { usePanel } from '@/hooks/usePanel';
 import { maybeShowStatusToast } from '@/hooks/useSSEStream';
 import { seedSnapshotPatch } from '@/lib/stream-session-manager';
+import { NEW_CHAT_PREFILL_KEY } from '@/lib/constants/chat-prefill';
 
 interface ToolUseInfo {
   id: string;
@@ -34,9 +35,22 @@ interface ToolResultInfo {
 
 export default function NewChatPage() {
   const router = useRouter();
-  // Read prefill from URL once on mount — avoids useSearchParams which requires Suspense boundary
+  // Read the one-shot prefill once on mount. Prefer sessionStorage (set by the
+  // caller right before an SPA navigation — reliable across App Router client
+  // nav and inside the packaged Electron window) and fall back to the
+  // ?prefill= query string for backward compatibility / hard navigations.
+  // Avoids useSearchParams, which would require a Suspense boundary.
   const prefillText = useMemo(() => {
     if (typeof window === 'undefined') return '';
+    try {
+      const stored = sessionStorage.getItem(NEW_CHAT_PREFILL_KEY);
+      if (stored) {
+        sessionStorage.removeItem(NEW_CHAT_PREFILL_KEY);
+        return stored;
+      }
+    } catch {
+      /* sessionStorage unavailable — fall through to URL param */
+    }
     const params = new URLSearchParams(window.location.search);
     return params.get('prefill') || '';
   }, []);
