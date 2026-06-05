@@ -2,7 +2,7 @@
 
 > 创建时间：2026-06-05
 > 最后更新：2026-06-05（v3：对照 Trae 方案补充——进程优雅退出 / 后台下载策略 / 重定向 / 签名）
-> 状态：🔄 开发中 — Phase 0（方案+决策）✅、Phase 1（V2 检查链路）✅ 已实施并 dev-mock 验证；Phase 2–4 待续
+> 状态：✅ 代码完成 — Phase 0–4 全部实施（dev-mock CDP + 单测 + typecheck 验证）；真实下载/安装/重启待用户打包验证后移入 completed/
 > 关联接口文档：[文档/updates-v2-api.md](../../../文档/updates-v2-api.md)
 > 关联登录体系：[docs/handover/login-system.md](../../handover/login-system.md)
 > 安装/避免重下设计来源：姊妹项目「AI-Native-Lab / bsApp」的《自动更新-避免重下与自动安装设计》（外部文档，关键设计已**内联**到 §7，不留外部链接）
@@ -257,9 +257,9 @@ DMG 无静默协议、不能边运行边替换自身 → 写一段 bash 脚本�
 |---|---|---|---|
 | Phase 0 | 本实施文档 + 决策确认 | ✅ 已完成 | 用户已批准开发（含 check-only 决策） |
 | Phase 1 | 主进程 V2 检查（`client.ts`/`platform.ts`）+ IPC（`updater:check`）+ preload `updater` 桥 + 渲染开闸（`UPDATE_CHECK_DISABLED=false`）+ 反注释 `<UpdateCard/>` + 字段映射 + `mustUpgrade` + **退役旧 GitHub 路由/browser 路径**；**仅检查与提示**（下载按钮 Phase 2 接真实下载） | ✅ 已完成 | dev-mock CDP 验证通过：available→弹窗渲染 release notes/版本、下载点击→进度→downloaded→"重启以更新"、mustUpgrade 隐藏"稍后"且不可关、齿轮蓝点恢复、设置卡渲染、console 无报错；typecheck 通过 |
-| Phase 2 | **下载器 `downloader.ts`**：固定文件名 + 三层避免重下 + sha256 三校验 + 原子 rename + 进度；`pending-update.json` 落盘/`loadPendingFromDisk`；**Windows 安装 `installer.ts`**：`shell.openPath`+`cmd start` 兜底 + 800ms `app.quit()` | 📋 | 用户打包：Win 端到端升级成功（含关掉重开不重下、原路径覆盖）；sha256 失败拦截 |
-| Phase 3 | **macOS 安装**：bash 脚本 `hdiutil attach`+`ditto` 覆盖 + `open` + 删 DMG + 自删脚本 + 失败兜底 `open DMG`；mac 侧避免重下复用同一套 | 📋 | 用户打包：mac(arm64) 端到端升级成功 |
-| Phase 4 | **强制升级阻断**（`must_upgrade` 全屏不可关 + 仅升级/退出 + 启动即强制）+ 手动检查（设置/关于页）+ i18n 收尾（en/zh）+ 主进程单测（平台映射/sha256/pending 校验纯函数）+ 交接/产品文档 | 📋 | 强制升级不可跳过、只能升级/退出；手动检查可用 |
+| Phase 2 | **下载器 `downloader.ts`**：固定文件名 + 三层避免重下 + sha256 三校验 + 原子 rename + 进度；`pending-update.json` 落盘/`loadPendingFromDisk`；**Windows 安装 `installer.ts`**：`shell.openPath`+`cmd start` 兜底 + 800ms `app.quit()` | ✅ 已完成 | tsc 通过；真实 Win 升级待用户打包验证（关掉重开不重下、原路径覆盖、sha256 失败拦截） |
+| Phase 3 | **macOS 安装**：bash 脚本 `hdiutil attach`+`ditto` 覆盖 + `open` + 删 DMG + 自删脚本 + 失败兜底 `open DMG`；mac 侧避免重下复用同一套 | ✅ 已完成 | tsc 通过；真实 mac(arm64) 升级待用户打包验证 |
+| Phase 4 | **强制升级阻断**（`must_upgrade` 隐藏 X/「稍后」+ 仅「立即升级」/「退出应用」+ 模态遮罩阻断）+ 手动检查（设置卡）+ i18n（en/zh 同步）+ 主进程单测（`updater-version.test.ts` 11 例）+ 交接/产品文档 | ✅ 已完成 | dev-mock CDP 验证：隐藏 X、提示、立即升级/退出应用、不可关；单测通过 |
 
 ---
 
@@ -271,7 +271,10 @@ DMG 无静默协议、不能边运行边替换自身 → 写一段 bash 脚本�
 - 2026-06-05（用户审核）：① 版本号与服务端对齐、以 `has_update` 为准；② mac 按姊妹项目 `ditto` 脚本方案；③ 不服务 Intel mac；④ 只做 `stable`；⑤ 强制升级阻断主界面、只能升级/退出；⑥ 服务端上传/登记由用户手动，客户端只按接口判定+下载安装；⑦ dev 跑 mock、真链路用户打包自验 → 旧 GitHub 路由直接退役。
 - 2026-06-05（用户补充）：避免重下（固定文件名 + 同 hash 复用 + `pending-update.json` 跨会话）与自动安装（Win `shell.openPath`、mac `hdiutil`+`ditto`、先拉起独立进程再 800ms `app.quit()`）按姊妹项目实战方案内联到 §7，win/mac 共用。
 - 2026-06-05（用户最终决策）：下载策略取 **check-only**——检查只提示、用户点击才下载（避免移动网络自动下大包）；`pending` 跨会话复用仍保留。
-- 2026-06-05（实施）：Phase 1 落地——新建 `electron/updater/{client,platform,index}.ts`（克隆 `fetchUsage` 调 V2 /check）+ `main.ts` 接 `registerUpdaterIpc`/`initUpdater`/`stopUpdater` + `preload` 暴露 `updater` 桥 + `electron.d.ts` 加 `mustUpgrade`；渲染 `useUpdateChecker` 改主进程单路径（移除 browser 兜底、`UPDATE_CHECK_DISABLED=false` 保留为 kill-switch）+ `useUpdate` 加 `mustUpgrade` + `UpdateDialog` 强制升级守卫 + 反注释 `UpdateCard`；退役并删除 `electron/updater.ts`(旧 stub，避免与新目录模块解析冲突)/`src/app/api/app/updates/route.ts`/`src/lib/update-release.ts`(+其单测)。dev-mock CDP 验证通过。
+- 2026-06-05（实施）：Phase 1 落地——新建 `electron/updater/{client,platform,index}.ts`（克隆 `fetchUsage` 调 V2 /check）+ `main.ts` 接 `registerUpdaterIpc`/`initUpdater`/`stopUpdater` + `preload` 暴露 `updater` 桥 + `electron.d.ts` 加 `mustUpgrade`；渲染 `useUpdateChecker` 改主进程单路径（移除 browser 兜底、`UPDATE_CHECK_DISABLED=false` 保留为 kill-switch）+ `useUpdate` 加 `mustUpgrade` + `UpdateDialog` 强制升级守卫 + 反注释 `UpdateCard`；退役并删除 `electron/updater.ts`(旧 stub，避免与新目录模块解析冲突)/`src/app/api/app/updates/route.ts`/`src/lib/update-release.ts`(+其单测)。dev-mock CDP 验证通过。（commit d23c734）
+- 2026-06-05（实施）：Phase 2——`downloader.ts`（Electron net 流式下载 + 跟随 30x + 背压、三层避免重下、sha256 三校验、原子 rename、`pending-update.json` 落 `getAnlcodeDir()`）+ `version.ts`（点分数字比较）+ `installer.ts`（win `shell.openPath`+`cmd start` 兜底、dev `showItemInFolder`）；`index.ts` 接下载/安装/缓存复用/离线兜底/`loadPendingFromDisk`。确认 `killServer()` 已在 win `taskkill /T` 连根杀 server 树（含 claude.exe），安装前进程优雅退出无需额外改 main。（commit 2bde920）
+- 2026-06-05（实施）：Phase 3——`installer-mac.ts`（脱离进程 bash 脚本 `hdiutil attach`+`ditto` 覆盖 + `open` + 删 DMG + 自删 + 失败兜底 `open DMG` + 防注入）。（commit 1f7a067）
+- 2026-06-05（实施）：Phase 4——`UpdateDialog` 强制升级完整 UX（`showCloseButton={!mustUpgrade}` + `onEscapeKeyDown`/`onInteractOutside` preventDefault + 必须升级提示 + 「立即升级」/「退出应用」）+ `app:quit` IPC（main+preload+类型）+ i18n（en/zh 同步 quitApp/upgradeNow/mustUpgradeHint）+ `updater-version.test.ts`（11 例）+ 交接 `docs/handover/updates-v2.md` + 产品 `docs/insights/updates-v2.md`。手动检查复用已开闸的 `UpdateCard` 按钮。
 
 ---
 
