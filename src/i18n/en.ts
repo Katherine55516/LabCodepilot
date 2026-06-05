@@ -546,6 +546,9 @@ const en = {
   'update.rosettaWarning': 'AI Native Lab - 研发平台 is running through Rosetta on this Apple Silicon Mac. Install the arm64 build for better responsiveness.',
   'update.recommendedAsset': 'Recommended download: {asset}',
   'update.getRecommendedBuild': 'Get Recommended Build',
+  'update.quitApp': 'Quit App',
+  'update.upgradeNow': 'Update Now',
+  'update.mustUpgradeHint': 'This is a required update. Please update to continue using AI Native Lab.',
 
   // ── Image Generation ──────────────────────────────────────
   'imageGen.toggle': 'Image Generation',

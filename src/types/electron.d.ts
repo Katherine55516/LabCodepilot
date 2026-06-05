@@ -185,6 +185,10 @@ interface ElectronAPI {
   };
   install: ElectronInstallAPI;
   updater?: ElectronUpdaterAPI;
+  /** App-level controls. quit() backs the forced-upgrade "退出应用" button. */
+  app?: {
+    quit: () => Promise<void>;
+  };
   bridge?: {
     isActive: () => Promise<boolean>;
   };

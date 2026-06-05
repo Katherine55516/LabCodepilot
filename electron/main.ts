@@ -2057,6 +2057,12 @@ app.whenReady().then(async () => {
   registerUpdaterIpc();
   initUpdater(() => mainWindow);
 
+  // Renderer-initiated app quit — used by the forced-upgrade ("必须升级") dialog's
+  // "退出应用" button, the only escape when must_upgrade blocks the UI.
+  ipcMain.handle('app:quit', () => {
+    app.quit();
+  });
+
   try {
     let port: number;
 

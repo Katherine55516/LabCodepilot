@@ -543,6 +543,9 @@ const zh: Record<TranslationKey, string> = {
   'update.rosettaWarning': 'AI Native Lab - 研发平台 当前正通过 Rosetta 在这台 Apple Silicon Mac 上运行。安装 arm64 版本可获得更好的响应速度。',
   'update.recommendedAsset': '推荐下载：{asset}',
   'update.getRecommendedBuild': '下载推荐版本',
+  'update.quitApp': '退出应用',
+  'update.upgradeNow': '立即升级',
+  'update.mustUpgradeHint': '此版本为必须升级版本，请升级后方可继续使用。',
 
   // ── Image Generation ──────────────────────────────────────
   'imageGen.toggle': '图片生成',

@@ -29,7 +29,12 @@ export function UpdateDialog() {
     <Dialog open={showDialog} onOpenChange={(open) => {
       if (!open && !mustUpgrade) dismissUpdate();
     }}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent
+        className="sm:max-w-md"
+        showCloseButton={!mustUpgrade}
+        onEscapeKeyDown={(e) => { if (mustUpgrade) e.preventDefault(); }}
+        onInteractOutside={(e) => { if (mustUpgrade) e.preventDefault(); }}
+      >
         <DialogHeader>
           <DialogTitle>{t('update.newVersionAvailable')}</DialogTitle>
           <DialogDescription>
@@ -85,6 +90,12 @@ export function UpdateDialog() {
           Current: v{updateInfo.currentVersion} &rarr; Latest: v{updateInfo.latestVersion}
         </p>
 
+        {mustUpgrade && (
+          <p className="rounded-md border border-status-warning-border bg-status-warning-muted px-2 py-1 text-xs text-status-warning-foreground">
+            {t('update.mustUpgradeHint')}
+          </p>
+        )}
+
         {updateInfo.runningUnderRosetta && (
           <p className="rounded-md border border-status-warning-border bg-status-warning-muted px-2 py-1 text-xs text-status-warning-foreground">
             {t('update.rosettaWarning')}
@@ -119,7 +130,11 @@ export function UpdateDialog() {
         )}
 
         <DialogFooter>
-          {!mustUpgrade && (
+          {mustUpgrade ? (
+            <Button variant="outline" onClick={() => window.electronAPI?.app?.quit()}>
+              {t('update.quitApp')}
+            </Button>
+          ) : (
             <Button variant="outline" onClick={dismissUpdate}>
               {t('update.later')}
             </Button>
@@ -142,7 +157,7 @@ export function UpdateDialog() {
             </Button>
           ) : (
             <Button onClick={downloadUpdate}>
-              {t('update.installUpdate')}
+              {mustUpgrade ? t('update.upgradeNow') : t('update.installUpdate')}
             </Button>
           )}
         </DialogFooter>

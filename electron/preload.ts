@@ -133,4 +133,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
       return () => { ipcRenderer.removeListener('updater:status', listener); };
     },
   },
+  // App-level controls. quit() backs the forced-upgrade "退出应用" button.
+  app: {
+    quit: () => ipcRenderer.invoke('app:quit'),
+  },
 });
