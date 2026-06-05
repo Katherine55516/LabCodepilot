@@ -464,10 +464,20 @@ function classifyErrorCore(ctx: ErrorContext): ClassifiedError {
   };
 }
 
+// 纯 HTTP 状态短语:信息量低于通用分类文案,提取到这些时回退(不覆盖)。
+const HTTP_STATUS_PHRASES = new Set([
+  'forbidden', 'unauthorized', 'not found', 'bad request', 'conflict',
+  'internal server error', 'service unavailable', 'bad gateway', 'gateway timeout',
+  'too many requests', 'request timeout', 'unprocessable entity', 'method not allowed',
+]);
+
 /**
- * 从原始错误文本里提取上游网关返回的可读 message(如额度不足提示)。
- * 形如:`… API Error: 403 {"error":{"message":"用户高阶模型额度不足, 剩余: ¥-0.024640 (request id: …)"}}`
- * → 返回「用户高阶模型额度不足, 剩余: ¥-0.024640」(去掉尾部 request id)。提取不到返回 null。
+ * 从原始错误文本里提取上游网关返回的可读 message(如额度不足提示)。覆盖两种形态:
+ *  - JSON:`… {"error":{"message":"用户高阶模型额度不足, 剩余: ¥-0.024640 (request id: …)"}}`
+ *  - 纯文本(Claude Code SDK 已把 HTTP body 解析后拼成):
+ *    `… Failed to authenticate. API Error: 403 用户高阶模型额度不足, 剩余: ¥-0.024640 (request id: …)`
+ * 均返回「用户高阶模型额度不足, 剩余: ¥-0.024640」(去掉尾部 request id)。
+ * 纯 HTTP 状态短语(Forbidden 等)或提取不到 → 返回 null,回退通用分类。
  */
 export function extractUpstreamMessage(text: string): string | null {
   if (!text) return null;
@@ -485,11 +495,11 @@ export function extractUpstreamMessage(text: string): string | null {
       const m = parsed?.error?.message ?? parsed?.message;
       if (typeof m === 'string' && m.trim()) msg = m;
     } catch {
-      /* 非完整 JSON — 落到正则兜底 */
+      /* 非完整 JSON — 落到下面 */
     }
   }
 
-  // 2) 兜底:正则提第一个 "message":"…" 的值(再走 JSON.parse 解转义)
+  // 2) JSON 嵌在文本里但整体不可解析:正则提第一个 "message":"…"(再走 JSON.parse 解转义)
   if (!msg) {
     const m = text.match(/"message"\s*:\s*"((?:[^"\\]|\\.)*)"/);
     if (m && m[1]) {
@@ -501,10 +511,17 @@ export function extractUpstreamMessage(text: string): string | null {
     }
   }
 
+  // 3) 纯文本:`API Error: <状态码> <可读文本>`(SDK 已把上游 JSON body 解析成文本)
+  if (!msg) {
+    const m = text.match(/API Error:\s*\d+\s+([\s\S]+)$/);
+    if (m && m[1]) msg = m[1];
+  }
+
   if (!msg || !msg.trim()) return null;
   // 去掉尾部 (request id: …),仅 UI 不展示;完整原文仍保留在 rawMessage 供排查
   const cleaned = msg.replace(/\s*\(request id:[^)]*\)\s*$/i, '').trim();
-  return cleaned || null;
+  if (!cleaned || HTTP_STATUS_PHRASES.has(cleaned.toLowerCase())) return null;
+  return cleaned;
 }
 
 /**

@@ -42,6 +42,17 @@ describe('extractUpstreamMessage', () => {
     assert.equal(extractUpstreamMessage('{"message":"line1\\nline2 \\"q\\""}'), 'line1\nline2 "q"');
   });
 
+  it('extracts from SDK plain-text "API Error: <status> <body>" format (the real case)', () => {
+    const real =
+      'Claude Code returned an error result: Failed to authenticate. API Error: 403 用户高阶模型额度不足, 剩余: ¥-0.024640 (request id: 202606050220328699012168268d9d6kvkCNAZI)';
+    assert.equal(extractUpstreamMessage(real), '用户高阶模型额度不足, 剩余: ¥-0.024640');
+  });
+
+  it('returns null for a bare HTTP status phrase (no real body)', () => {
+    assert.equal(extractUpstreamMessage('Failed to authenticate. API Error: 403 Forbidden'), null);
+    assert.equal(extractUpstreamMessage('API Error: 401 Unauthorized'), null);
+  });
+
   it('returns null when no JSON / no message', () => {
     assert.equal(extractUpstreamMessage('plain text 403 Forbidden'), null);
     assert.equal(extractUpstreamMessage('{"error":{"type":"forbidden"}}'), null);
@@ -78,5 +89,16 @@ describe('classifyError prefers upstream message', () => {
       stderr: '{"error":{"message":"额度不足"}}',
     });
     assert.equal(r.userMessage, '额度不足');
+  });
+
+  it('real SDK plain-text 403 → userMessage = message (the actual production bug)', () => {
+    const real = new Error(
+      'Claude Code returned an error result: Failed to authenticate. API Error: 403 用户高阶模型额度不足, 剩余: ¥-0.024640 (request id: 202606050220328699012168268d9d6kvkCNAZI)',
+    );
+    const r = classifyError({ error: real, providerName: '高阶模型-C48' });
+    assert.equal(r.userMessage, '用户高阶模型额度不足, 剩余: ¥-0.024640');
+    assert.equal(r.actionHint, '');
+    assert.deepEqual(r.recoveryActions, []);
+    assert.equal(r.category, 'AUTH_FORBIDDEN');
   });
 });

@@ -46,7 +46,7 @@ useSSEStream.ts / page.tsx 解析
 | PROCESS_CRASH | exit code N | 否 |
 | UNKNOWN | 兜底 | 否 |
 
-**上游 message 优先（2026-06）：** `classifyError` 是 `classifyErrorCore`（原分类逻辑）的包装——分类后用 `extractUpstreamMessage()` 从原始错误文本（rawMessage + stderr + cause）里提取上游网关返回的可读 `message`，如额度限制 `{"error":{"message":"用户高阶模型额度不足, 剩余: ¥-0.024640 (request id: …)"}}`。提取到则覆盖 `userMessage` 为该 message（去掉尾部 request id），并清空 `actionHint`/`recoveryActions`，让聊天里只显示这一行人话；提取不到则保持上表分类不变。`category`/`rawMessage`/Sentry 上报均不受影响（完整原文含 request id 仍留在 `rawMessage` 供排查）。前端零改动：`userMessage` 直接展示、`actionHint===''` 时不渲染「What to do」。测试见 `src/__tests__/unit/error-classifier-upstream.test.ts`。
+**上游 message 优先（2026-06）：** `classifyError` 是 `classifyErrorCore`（原分类逻辑）的包装——分类后用 `extractUpstreamMessage()` 从原始错误文本（rawMessage + stderr + cause）里提取上游网关返回的可读 `message`。**覆盖两种形态**：① JSON `{"error":{"message":"…"}}`；② SDK 已把 HTTP body 解析成的**纯文本** `API Error: <status> <可读文本>`（**实际线上就是这种**，如 `… API Error: 403 用户高阶模型额度不足, 剩余: ¥-0.024640 (request id: …)`，已不是 JSON）；纯 HTTP 状态短语（Forbidden/Unauthorized 等）信息量低则不覆盖、回退通用分类。提取到则覆盖 `userMessage` 为该 message（去掉尾部 request id），并清空 `actionHint`/`recoveryActions`，让聊天里只显示这一行人话；提取不到则保持上表分类不变。`category`/`rawMessage`/Sentry 上报均不受影响（完整原文含 request id 仍留在 `rawMessage` 供排查）。前端零改动：`userMessage` 直接展示、`actionHint===''` 时不渲染「What to do」。测试见 `src/__tests__/unit/error-classifier-upstream.test.ts`。
 
 ### Provider 生效修复（P0-A1）
 
