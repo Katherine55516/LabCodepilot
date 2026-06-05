@@ -35,7 +35,7 @@ window.electronAPI.updater
 | `platform.ts` | `getUpdateQueryParams()` — `process.platform`→`windows`/`darwin`、`process.arch`→`x64`/`arm64`、`channel='stable'`、`current=app.getVersion()`。仅 win-x64 / mac-arm64。 |
 | `version.ts` | `parseVersion`/`compareVersions`/`isNewerVersion` — 点分数字比较（纯函数，单测 `updater-version.test.ts`）。用于 pending 复用防降级、离线兜底。 |
 | `downloader.ts` | 固定文件名落 `app.getPath('temp')`、三层避免重下、sha256 三处校验、`{final}.{pid}.tmp` 原子 rename、Electron `net` 流式下载（跟随 30x + session 代理）+ 进度 + 背压；`pending-update.json` 读写（落 `getAnlcodeDir()`）。 |
-| `installer.ts` | `installNow()` — dev `showItemInFolder`；win `shell.openPath`(+`cmd start` 兜底)；darwin 委托 `installer-mac`。 |
+| `installer.ts` | `installNow()` — dev `showItemInFolder`；win 用 `cmd start … --updated`(+直接 spawn 兜底)拉起安装器(见下「Windows 更新安装 UX」)；darwin 委托 `installer-mac`。 |
 | `installer-mac.ts` | `installMac()` — 写脱离进程 bash 脚本：等父进程退出 → `hdiutil attach` → `ditto` 覆盖原 bundle → `open` + 删 DMG + 自删；失败兜底 `open DMG`；防注入拒绝 `" \` $`。 |
 | `index.ts` | 编排：状态机、`pushStatus`、`checkForUpdates`/`downloadUpdate`/`quitAndInstall`、缓存复用、`loadPendingFromDisk`、`registerUpdaterIpc`/`initUpdater`/`stopUpdater`、8h 周期检查(unref)。 |
 
@@ -45,6 +45,18 @@ window.electronAPI.updater
 2. **下载**（check-only：仅用户点击）：`downloadUpdate()` → `ensureInstaller`：① 同名文件 sha256 命中即复用 ② 否则下到 `{final}.{pid}.tmp`、校验 sha256+size、原子 rename → `writePending` + 推 `downloading`(percent)/`downloaded`。
 3. **安装**：`quitAndInstall()` → `installNow(filePath)` 拉起独立安装进程 → 成功后 `setTimeout(800) → app.quit()`；`before-quit` 的 `killServer()` 在 Windows `taskkill /T /F` 连根杀 server 进程树（含 `claude.exe` SDK 子进程），释放安装目录文件锁 → 安装器覆盖。
 4. **跨会话复用**：启动 `loadPendingFromDisk()` 校验 `pending-update.json`（版本 > 当前 + 文件在 + sha256 匹配）→ 设为缓存；下次 `checkForUpdates` 若服务端 latest 与缓存版本一致，直接推 `downloaded`，不重下。网络异常时用有效缓存离线兜底。
+
+## Windows 更新安装 UX（手动向导 / 更新静默直达进度）
+
+需求：手动/官网安装保留完整向导（选用户/选路径）；自动更新跳过这些选择页、**直达可见的安装进度条**、零点击、原路径覆盖（不要 `/S` 全静默那种"什么都看不到"）。
+
+实现（NSIS 无"跳过页但显示进度"档，靠 electron-builder 的 `${isUpdated}` 区分）：
+
+- **`build/installer.nsh`**（electron-builder 默认自动加载）：`!macro customInstallMode` 中 `${if} ${isUpdated}` → `StrCpy $isForceCurrentInstall "1"`——仅更新时强制 per-user、跳过「选择安装用户」页；手动安装不进此分支、照常显示。`electron-builder.yml` 亦显式 `nsis.include: build/installer.nsh`。
+- **`installer.ts`**：自动更新用 `cmd /c start "" "<setup>" --updated`（不带 `/S`）拉起。`--updated` 让模板置 `${isUpdated}=true` → 跳过欢迎/完成页、更新模式覆盖安装、显示进度条并自动重启；手动/官网安装无 `--updated` → 完整向导。
+
+> ⚠️ 两端都需**重新打包**才生效：`installer.nsh` 在构建期打入 setup.exe；`--updated` 在客户端代码里。旧的 0.55.0 产物不含这套。
+> ⚠️ 待打包验证项：`--updated` 是否也自动跳过「选择安装目录」页（`allowToChangeInstallationDirectory:true`）。多数情况下更新模式会用既有安装目录、不显示该页；若仍显示，再补目录页跳过（或更新时关该页）。
 
 ## IPC 与状态事件
 

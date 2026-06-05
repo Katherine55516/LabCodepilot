@@ -104,6 +104,11 @@ nsis:
   # NSIS will fail the write because perMachine=false runs without elevation;
   # they should pick a writable per-user path.
   allowToChangeInstallationDirectory: true
+  # Custom NSIS include (build/installer.nsh): on auto-update (installer launched
+  # with --updated → ${isUpdated}) force per-user and skip the install-mode page
+  # so updates go straight to the visible progress with zero clicks, while manual
+  # installs keep the full wizard. See electron/updater/installer.ts.
+  include: build/installer.nsh
   createDesktopShortcut: true
   createStartMenuShortcut: true
   deleteAppDataOnUninstall: false

@@ -33,26 +33,36 @@ export async function installNow(filePath: string): Promise<InstallResult> {
 }
 
 /**
- * Windows (NSIS): shell.openPath == double-click setup.exe → NSIS wizard with
- * UAC/SmartScreen, installs to the previous (per-user) path, overwriting. NOT
- * silent (/S spawn is refused elevation / blocked by AV — historical lesson).
- * Fallback to `cmd /c start` (system component, rarely blocked).
+ * Windows (NSIS): launch the installer in UPDATE mode by passing `--updated`.
+ *
+ * electron-builder's NSIS template sets ${isUpdated} from `--updated`; combined
+ * with build/installer.nsh (customInstallMode forces per-user when ${isUpdated}),
+ * the installer skips the install-mode / welcome / finish pages and goes straight
+ * to the VISIBLE install progress, overwriting the existing per-user install with
+ * zero clicks. We do NOT pass `/S` — that would be fully silent (no progress UI),
+ * exactly the "user sees nothing" experience we want to avoid.
+ *
+ * Launched via `cmd /c start` (system component, AV-friendly, and lets us pass
+ * the `--updated` arg which shell.openPath cannot); direct spawn as fallback.
+ * Manual / website installs run the installer with no args → full wizard.
  */
 async function installWindows(filePath: string): Promise<InstallResult> {
-  const err = await shell.openPath(filePath);
-  if (!err) {
-    logInfo('[updater] windows installer launched via shell.openPath');
-    return { ok: true };
-  }
-  logWarn(`[updater] shell.openPath failed (${err}); falling back to cmd start`);
   try {
-    const child = spawn('cmd.exe', ['/c', 'start', '', filePath], {
+    const child = spawn('cmd.exe', ['/c', 'start', '', filePath, '--updated'], {
       detached: true,
       stdio: 'ignore',
     });
     child.unref();
+    logInfo('[updater] windows installer launched (--updated, visible progress, no clicks)');
     return { ok: true };
   } catch (e) {
-    return { ok: false, error: (e as Error).message };
+    logWarn(`[updater] cmd start failed (${(e as Error).message}); trying direct spawn`);
+    try {
+      const child = spawn(filePath, ['--updated'], { detached: true, stdio: 'ignore' });
+      child.unref();
+      return { ok: true };
+    } catch (e2) {
+      return { ok: false, error: (e2 as Error).message };
+    }
   }
 }
