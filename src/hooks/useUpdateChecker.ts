@@ -7,6 +7,19 @@ const CHECK_INTERVAL = 8 * 60 * 60 * 1000; // 8 hours
 const DISMISSED_VERSION_KEY = "codepilot_dismissed_update_version";
 
 /**
+ * 临时整体关闭「检查新版本」功能。
+ *
+ * 当前更新检查指向旧的发布源(GitHub op7418/CodePilot 的 Releases),
+ * 后续会改造成从另一个服务器源拉取版本信息。在改造完成前,这里统一关闭:
+ * 不发起任何检查请求,自动更新弹窗(UpdateDialog)、顶部横幅(UpdateBanner)、
+ * 会话列表更新角标均不再出现;设置页的「检查更新」卡片已在
+ * GeneralSection.tsx 中注释隐藏。
+ *
+ * 恢复方式:把此常量改回 false(并确认更新源已切到新服务器)。
+ */
+const UPDATE_CHECK_DISABLED = true;
+
+/**
  * Encapsulates all update-checking logic (native Electron updater + browser fallback).
  * Returns a memoised context value suitable for UpdateContext.Provider.
  */
@@ -20,7 +33,7 @@ export function useUpdateChecker(): UpdateContextValue {
 
   // --- Native updater status listener ---
   useEffect(() => {
-    if (!isNativeUpdater) return;
+    if (UPDATE_CHECK_DISABLED || !isNativeUpdater) return;
     const cleanup = window.electronAPI!.updater!.onStatus((event) => {
       switch (event.status) {
         case 'available':
@@ -113,6 +126,7 @@ export function useUpdateChecker(): UpdateContextValue {
 
   // --- Unified check: native first, browser fallback ---
   const checkForUpdates = useCallback(async () => {
+    if (UPDATE_CHECK_DISABLED) return;
     if (isNativeUpdater) {
       try {
         await window.electronAPI!.updater!.checkForUpdates();
@@ -126,7 +140,7 @@ export function useUpdateChecker(): UpdateContextValue {
 
   // Browser mode: periodic check (non-Electron or as fallback)
   useEffect(() => {
-    if (isNativeUpdater) return; // native updater handles its own initial check
+    if (UPDATE_CHECK_DISABLED || isNativeUpdater) return; // native updater handles its own initial check
     checkForUpdatesBrowser();
     const id = setInterval(checkForUpdatesBrowser, CHECK_INTERVAL);
     return () => clearInterval(id);
