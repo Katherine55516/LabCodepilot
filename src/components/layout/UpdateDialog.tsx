@@ -22,10 +22,12 @@ export function UpdateDialog() {
 
   const { isNativeUpdate, readyToInstall, downloadProgress } = updateInfo;
   const isDownloading = isNativeUpdate && !readyToInstall && downloadProgress != null;
+  // 强制升级：弹窗不可关闭、不提供"稍后"（完整的主界面阻断在 Phase 4）。
+  const mustUpgrade = updateInfo.mustUpgrade === true;
 
   return (
     <Dialog open={showDialog} onOpenChange={(open) => {
-      if (!open) dismissUpdate();
+      if (!open && !mustUpgrade) dismissUpdate();
     }}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
@@ -117,9 +119,11 @@ export function UpdateDialog() {
         )}
 
         <DialogFooter>
-          <Button variant="outline" onClick={dismissUpdate}>
-            {t('update.later')}
-          </Button>
+          {!mustUpgrade && (
+            <Button variant="outline" onClick={dismissUpdate}>
+              {t('update.later')}
+            </Button>
+          )}
           {!isNativeUpdate ? (
             <Button
               onClick={() => {

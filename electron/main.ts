@@ -58,6 +58,10 @@ import { initMasterKey, getMasterKeyHex, logSafeStorageStatus } from './auth/sec
 import { logInfo, logWarn, logError } from './auth/log';
 import { HttpError, AuthExpiredError, NetworkError, type MeInfo, type ModelConfig } from './auth/types';
 
+// Native auto-updater (research-platform V2). Reuses the managed-account auth
+// infra (apiRequest Bearer + getBackendBase) for the authenticated check.
+import { initUpdater, registerUpdaterIpc, stopUpdater } from './updater';
+
 // Vendor-bundled GSD plugin — synced to ~/.claude/plugins/external_plugins/
 // on first launch and version drift. See electron/gsd-installer.ts.
 import {
@@ -2045,6 +2049,14 @@ app.whenReady().then(async () => {
     }
   });
 
+  // Native auto-updater (research-platform V2): register renderer IPC and wire
+  // to the main window. The first check is renderer-triggered (useUpdateChecker
+  // on mount, so the onStatus listener is registered before any result is
+  // pushed); a periodic background re-check runs every 8h. Check-only — the
+  // actual download is user-initiated from the update dialog.
+  registerUpdaterIpc();
+  initUpdater(() => mainWindow);
+
   try {
     let port: number;
 
@@ -2170,6 +2182,8 @@ app.on('before-quit', async (e) => {
   // Stop the managed-account background poller so its timer doesn't keep
   // the event loop alive past app.quit().
   stopBackgroundPolling();
+  // Stop the auto-updater periodic check timer (also unref'd, belt-and-braces).
+  stopUpdater();
   if (isLoginWindowOpen()) cancelLoginWindow('before-quit');
 
   // Kill all terminal processes

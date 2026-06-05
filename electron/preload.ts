@@ -121,4 +121,16 @@ contextBridge.exposeInMainWorld('electronAPI', {
       return () => { ipcRenderer.removeListener('auth:changed', listener); };
     },
   },
+  // Native auto-updater (research-platform V2). The check runs in main (Bearer
+  // token never crosses IPC); status is pushed via 'updater:status'.
+  updater: {
+    checkForUpdates: () => ipcRenderer.invoke('updater:check'),
+    downloadUpdate: () => ipcRenderer.invoke('updater:download'),
+    quitAndInstall: () => ipcRenderer.invoke('updater:install'),
+    onStatus: (callback: (data: unknown) => void) => {
+      const listener = (_event: unknown, data: unknown) => callback(data);
+      ipcRenderer.on('updater:status', listener);
+      return () => { ipcRenderer.removeListener('updater:status', listener); };
+    },
+  },
 });

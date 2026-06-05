@@ -217,8 +217,7 @@ export function GeneralSection() {
 
   return (
     <div className="max-w-3xl space-y-6">
-      {/* UpdateCard hidden — function still defined above; restore by uncommenting */}
-      {/* <UpdateCard /> */}
+      <UpdateCard />
 
       {/* General settings card */}
       <SettingsCard className={skipPermissions ? "border-status-warning-border bg-status-warning-muted" : undefined}>

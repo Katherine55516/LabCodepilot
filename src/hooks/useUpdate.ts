@@ -4,6 +4,8 @@ import { createContext, useContext } from "react";
 
 export interface UpdateInfo {
   updateAvailable: boolean;
+  /** V2 强制升级：true 时旧版应被阻断，弹窗不可关、只能升级或退出。 */
+  mustUpgrade?: boolean;
   latestVersion: string;
   currentVersion: string;
   releaseName: string;

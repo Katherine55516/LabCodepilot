@@ -34,6 +34,8 @@ interface UpdateStatusEvent {
     releaseNotes?: string | { version: string; note: string }[] | null;
     releaseName?: string | null;
     releaseDate?: string;
+    /** V2: 强制升级标记。true 时旧版应被阻断（must_upgrade）。 */
+    mustUpgrade?: boolean;
   };
   progress?: {
     percent: number;
