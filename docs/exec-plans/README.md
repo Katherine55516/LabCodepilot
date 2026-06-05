@@ -57,6 +57,7 @@
 | active/agent-sdk-0-2-111-adoption.md | Agent SDK 0.2.111 能力采纳（Codex 审核后双层化 + 用户视角推进路线图）：Layer A 已完成 Phase 1 chip + Phase 2b 类型适配 / 待做 Phase 1b chip 按钮 + Phase 2 限流 UI；Layer B 待 POC 后推进 WarmQuery / session fork / getContextUsage / 新 hooks / Elicitation / Deferred tools | SDK 升级已完成，下一步阶段 1（chip 按钮 + 限流 UI）1-2 周可发版 |
 | active/agent-sdk-0-2-141-upgrade.md | SDK 0.2.141 升级 + 内置 Claude Code：从 0.2.111 升到 0.2.141（含 Claude Code 2.1.141）；切换到 SDK 新架构的平台子包，把 Claude Code 原生二进制内置到安装包；删除本地 CLI 探测；保留 Native runtime 应急 fallback | Phase 0-9 已完成，Phase 10 进行中，Phase 11 待开始 |
 | active/login-system.md | 登录账号体系（managed-account login）：浏览器 OAuth + 服务端下发 ModelConfig + 与 BYOK 并存 + 与 OpenAI OAuth 完全隔离 | Phase 1-5 待开始 |
+| active/updates-v2-migration.md | 自动更新迁移到研发平台 V2 API：主进程自定义更新器（检查/CDN 下载/sha256 校验/安装）复用登录 `getBackendBase`+`apiRequest`+token，退役 GitHub op7418 旧检查 | Phase 0 待审核 |
 | active/v0.48-post-release-issues.md | v0.48.0/0.48.1 发版后问题追查（已归档至 issue-tracker.md，保留原始记录） | 已归档 |
 ### Completed
 
