@@ -14,6 +14,7 @@
 import { app, shell } from 'electron';
 import { spawn } from 'child_process';
 import { logInfo, logWarn } from '../auth/log';
+import { installMac } from './installer-mac';
 
 export interface InstallResult {
   ok: boolean;
@@ -27,10 +28,7 @@ export async function installNow(filePath: string): Promise<InstallResult> {
     return { ok: true };
   }
   if (process.platform === 'win32') return installWindows(filePath);
-  if (process.platform === 'darwin') {
-    // Implemented in Phase 3 (installer-mac.ts: hdiutil + ditto + open).
-    return { ok: false, error: 'macos-install-not-implemented' };
-  }
+  if (process.platform === 'darwin') return installMac(filePath);
   return { ok: false, error: 'unsupported-platform' };
 }
 
