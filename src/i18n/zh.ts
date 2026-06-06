@@ -1246,7 +1246,7 @@ const zh: Record<TranslationKey, string> = {
   'mcp.enable': '启用',
   'mcp.enabled': '已启用',
   'mcp.disabled': '已禁用',
-  'mcp.managerDesc': '开关控制 AI Native Lab - 研发平台 注入的 MCP 服务。Claude Code 自身配置中的服务仍可能被 SDK 通过 settingSources 自动加载。',
+  'mcp.managerDesc': '开关控制 AI Native Lab - 研发平台 注入的 MCP 服务。',
 
   // ── SDK Capabilities: Thinking ────────────────────────────
   'settings.thinkingMode': '思考模式',

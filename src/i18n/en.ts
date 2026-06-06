@@ -1249,7 +1249,7 @@ const en = {
   'mcp.enable': 'Enable',
   'mcp.enabled': 'Enabled',
   'mcp.disabled': 'Disabled',
-  'mcp.managerDesc': 'Toggle controls AI Native Lab - 研发平台 MCP injection. Servers in your Claude Code config may still be loaded by the SDK via its own settings sources.',
+  'mcp.managerDesc': 'Toggle controls AI Native Lab - 研发平台 MCP injection.',
 
   // ── SDK Capabilities: Thinking ────────────────────────────
   'settings.thinkingMode': 'Thinking Mode',
