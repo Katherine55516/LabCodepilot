@@ -8,6 +8,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
+import { useTranslation } from "@/hooks/useTranslation";
 import {
   Folder,
   FolderOpen,
@@ -234,6 +235,7 @@ export const FileTreeFile = ({
   ...props
 }: FileTreeFileProps) => {
   const { selectedPath, onSelect, onAdd } = useContext(FileTreeContext);
+  const { t } = useTranslation();
   const isSelected = selectedPath === path;
 
   const handleClick = useCallback(() => {
@@ -284,7 +286,7 @@ export const FileTreeFile = ({
                 type="button"
                 className="ml-auto flex size-5 shrink-0 items-center justify-center rounded opacity-0 transition-opacity hover:bg-muted group-hover/file:opacity-100"
                 onClick={handleAdd}
-                title="Add to chat"
+                title={t("fileTree.addToChat")}
               >
                 <Plus size={12} className="text-muted-foreground" />
               </button>

@@ -300,6 +300,7 @@ const en = {
   'fileTree.newFileErrorEmpty': 'Name cannot be empty',
   'fileTree.newFileErrorNoWorkspace': 'No workspace selected for this session',
   'fileTree.newFileErrorGeneric': 'Failed to create',
+  'fileTree.addToChat': 'Add to chat',
 
   // ── Doc preview ─────────────────────────────────────────────
   'docPreview.htmlPreview': 'HTML Preview',

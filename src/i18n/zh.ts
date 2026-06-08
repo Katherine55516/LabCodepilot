@@ -297,6 +297,7 @@ const zh: Record<TranslationKey, string> = {
   'fileTree.newFileErrorEmpty': '名称不能为空',
   'fileTree.newFileErrorNoWorkspace': '当前会话未选择 workspace',
   'fileTree.newFileErrorGeneric': '创建失败',
+  'fileTree.addToChat': '添加到对话',
 
   // ── Doc preview ─────────────────────────────────────────────
   'docPreview.htmlPreview': 'HTML 预览',
