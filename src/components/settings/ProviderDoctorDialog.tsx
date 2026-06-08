@@ -392,8 +392,9 @@ export function ProviderDoctorDialog({ open, onOpenChange }: ProviderDoctorDialo
           </div>
         )}
 
-        {/* GitHub issue guidance — shown after diagnosis completes */}
-        {result && !loading && (
+        {/* GitHub Issues + 服务商文档外链引导块 — 按用户要求隐藏。用 `(false as boolean)`
+            置前禁渲染（保留 result 类型收窄、代码全保留）；恢复改回 `{result && !loading && (`。 */}
+        {(false as boolean) && result && !loading && (
           <div className="rounded-md border border-border/30 bg-muted/30 px-3 py-2.5 text-xs text-muted-foreground">
             {isZh ? (
               <>

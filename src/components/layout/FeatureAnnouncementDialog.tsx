@@ -71,12 +71,14 @@ export function FeatureAnnouncementDialog() {
         </DialogHeader>
 
         <div className="space-y-3 text-sm">
+          {/* GitHub Issues 反馈外链区块 — 按用户要求隐藏。恢复取消注释。
           <div className="rounded-md bg-amber-500/10 border border-amber-500/20 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
             {isZh
               ? <>如遇问题请到 <a href="https://github.com/op7418/CodePilot/issues" target="_blank" rel="noopener noreferrer" className="underline font-medium">GitHub Issues</a> 反馈。</>
               : <>Report issues on <a href="https://github.com/op7418/CodePilot/issues" target="_blank" rel="noopener noreferrer" className="underline font-medium">GitHub Issues</a>.</>
             }
           </div>
+          */}
 
           {isZh ? (
             <>
