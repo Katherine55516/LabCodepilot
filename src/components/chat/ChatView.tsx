@@ -3,6 +3,7 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Message, MessagesResponse, FileAttachment, SessionStreamSnapshot, MentionRef } from '@/types';
+import { buildFilesDisplayContent } from '@/lib/file-utils';
 import { MessageList } from './MessageList';
 import { TerminalReasonChip } from './TerminalReasonChip';
 import { RateLimitBanner } from './RateLimitBanner';
@@ -666,8 +667,7 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
       const displayUserContent = displayOverride || content;
       let displayContent = displayUserContent;
       if (files && files.length > 0) {
-        const fileMeta = files.map(f => ({ id: f.id, name: f.name, type: f.type, size: f.size }));
-        displayContent = `<!--files:${JSON.stringify(fileMeta)}-->${displayUserContent}`;
+        displayContent = buildFilesDisplayContent(files, displayUserContent);
       }
 
       // Phase 1b safety: if a compress_and_retry is armed, drop it
@@ -718,8 +718,7 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
       const displayUserContent = next.displayOverride || next.content;
       let displayContent = displayUserContent;
       if (next.files && next.files.length > 0) {
-        const fileMeta = next.files.map(f => ({ id: f.id, name: f.name, type: f.type, size: f.size }));
-        displayContent = `<!--files:${JSON.stringify(fileMeta)}-->${displayUserContent}`;
+        displayContent = buildFilesDisplayContent(next.files, displayUserContent);
       }
       const userMessage: Message = {
         id: 'temp-' + Date.now(),

@@ -20,6 +20,7 @@ import { usePanel } from '@/hooks/usePanel';
 import { maybeShowStatusToast } from '@/hooks/useSSEStream';
 import { seedSnapshotPatch } from '@/lib/stream-session-manager';
 import { NEW_CHAT_PREFILL_KEY } from '@/lib/constants/chat-prefill';
+import { buildFilesDisplayContent } from '@/lib/file-utils';
 
 interface ToolUseInfo {
   id: string;
@@ -508,7 +509,7 @@ export default function NewChatPage() {
         // Add user message to UI — use displayOverride for chat bubble if provided
         const displayUserContent = displayOverride || content;
         const contentWithFileMeta = files && files.length > 0
-          ? `<!--files:${JSON.stringify(files.map(f => ({ id: f.id, name: f.name, type: f.type, size: f.size })))}-->${displayUserContent}`
+          ? buildFilesDisplayContent(files, displayUserContent)
           : displayUserContent;
         const userMessage: Message = {
           id: 'temp-' + Date.now(),
