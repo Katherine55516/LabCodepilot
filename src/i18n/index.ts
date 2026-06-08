@@ -1,18 +1,21 @@
 import en, { type TranslationKey } from './en';
 import zh from './zh';
+import zhHK from './zh-HK';
 
 export type { TranslationKey };
 
-export type Locale = 'en' | 'zh';
+export type Locale = 'en' | 'zh' | 'zh-HK';
 
 export const SUPPORTED_LOCALES: { value: Locale; label: string }[] = [
   { value: 'en', label: 'English' },
   { value: 'zh', label: '中文' },
+  { value: 'zh-HK', label: '繁體中文（香港）' },
 ];
 
 const dictionaries: Record<Locale, Record<TranslationKey, string>> = {
   en,
   zh,
+  'zh-HK': zhHK,
 };
 
 /**

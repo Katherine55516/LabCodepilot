@@ -29,7 +29,7 @@ export function I18nProvider({ children }: { children: ReactNode }) {
         if (res.ok) {
           const data = await res.json();
           const saved = data.settings?.locale;
-          if (saved === 'en' || saved === 'zh') {
+          if (saved === 'en' || saved === 'zh' || saved === 'zh-HK') {
             setLocaleState(saved);
             return;
           }
@@ -43,13 +43,17 @@ export function I18nProvider({ children }: { children: ReactNode }) {
           ...(navigator.languages || []),  // user's preferred language list
           navigator.language,               // primary browser/OS language
         ].filter(Boolean);
-        const isZh = candidates.some(lang => lang.startsWith('zh'));
-        if (isZh) {
-          setLocaleState('zh');
+        // Traditional-Chinese regions (HK / Macau / Taiwan) or explicit Hant
+        // script → zh-HK; any other zh-* → Simplified; otherwise leave default.
+        const isHant = candidates.some(lang => /^zh-(hk|mo|tw|hant)/i.test(lang));
+        const isZh = candidates.some(lang => lang.toLowerCase().startsWith('zh'));
+        const detected: Locale | null = isHant ? 'zh-HK' : isZh ? 'zh' : null;
+        if (detected) {
+          setLocaleState(detected);
           fetch('/api/settings/app', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ settings: { locale: 'zh' } }),
+            body: JSON.stringify({ settings: { locale: detected } }),
           }).catch(() => {});
         }
       }
