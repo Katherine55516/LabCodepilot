@@ -387,7 +387,8 @@ export function CliToolsManager() {
         )}
       </section>
 
-      {/* Docs link */}
+      {/* Docs link — 隐藏「查看官方文档」外链（指向 codepilot.sh），按用户要求。
+          i18n key cliTools.viewDocs 与 locale 逻辑保留，恢复取消注释即可。
       <div className="flex items-center gap-1.5 text-xs text-muted-foreground pt-2">
         <ArrowSquareOut size={12} />
         <a
@@ -399,6 +400,7 @@ export function CliToolsManager() {
           {t('cliTools.viewDocs')}
         </a>
       </div>
+      */}
 
       {/* Detail dialog */}
       {detailTool && (
