@@ -21,7 +21,7 @@ export function MarketplaceBrowser({ onInstalled }: MarketplaceBrowserProps) {
   const [error, setError] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(null);
 
-  const doSearch = useCallback(async (query: string) => {
+  const doSearch = useCallback(async (query: string): Promise<MarketplaceSkill[]> => {
     setLoading(true);
     setError(null);
     try {
@@ -34,10 +34,13 @@ export function MarketplaceBrowser({ onInstalled }: MarketplaceBrowserProps) {
         throw new Error(data.error || `HTTP ${res.status}`);
       }
       const data = await res.json();
-      setResults(data.skills || []);
+      const skills: MarketplaceSkill[] = data.skills || [];
+      setResults(skills);
+      return skills;
     } catch (err) {
       setError((err as Error).message);
       setResults([]);
+      return [];
     } finally {
       setLoading(false);
     }
@@ -59,9 +62,13 @@ export function MarketplaceBrowser({ onInstalled }: MarketplaceBrowserProps) {
     };
   }, [search, doSearch]);
 
-  const handleInstallComplete = useCallback(() => {
-    // Refresh results to update installed status
-    doSearch(search);
+  const handleInstallComplete = useCallback(async () => {
+    // Refresh results to update installed status, then re-sync the detail
+    // pane's selected skill from the fresh list so its Install/Uninstall button
+    // flips immediately (otherwise it keeps showing the stale pre-action state,
+    // e.g. still "已安装/卸载" right after a successful uninstall).
+    const fresh = await doSearch(search);
+    setSelected((prev) => (prev ? fresh.find((s) => s.id === prev.id) ?? prev : prev));
     onInstalled();
   }, [search, doSearch, onInstalled]);
 
