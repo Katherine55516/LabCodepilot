@@ -204,10 +204,15 @@ function ElapsedTimer({ startedAt }: { startedAt: number }) {
   // briefly be undefined / 0 (snapshot not populated yet), which made
   // `Date.now() - startedAt` → NaN → "NaNs". Fall back to mount time until a
   // valid startedAt arrives, then switch to it so the elapsed time is accurate.
-  const fallbackRef = useRef(Date.now());
+  // Mount-time fallback. Uses a useState lazy initializer (React calls it once,
+  // not on every render) instead of `useRef(Date.now())`: the latter evaluates
+  // Date.now() on every render — an impure call in the render path that the
+  // react-hooks/purity lint rule rejects. The setter is intentionally unused;
+  // the value is fixed at mount, identical to the previous behavior.
+  const [fallbackBase] = useState(() => Date.now());
   const base = typeof startedAt === 'number' && Number.isFinite(startedAt) && startedAt > 0
     ? startedAt
-    : fallbackRef.current;
+    : fallbackBase;
 
   const [elapsed, setElapsed] = useState(() => Math.max(0, Math.floor((Date.now() - base) / 1000)));
 
