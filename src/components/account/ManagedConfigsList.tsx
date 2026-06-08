@@ -63,7 +63,8 @@ export function ManagedConfigsList({ refreshKey = 0 }: { refreshKey?: number }) 
         >
           <div className="min-w-0">
             <div className="truncate text-sm font-medium">{p.name}</div>
-            <div className="truncate text-xs text-muted-foreground">{p.base_url}</div>
+            {/* base_url 行按用户要求隐藏（数据/接口保留）。恢复:取消下一行注释。 */}
+            {/* <div className="truncate text-xs text-muted-foreground">{p.base_url}</div> */}
           </div>
           <span className="shrink-0 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
             {t('auth.managedTag')}
