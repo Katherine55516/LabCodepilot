@@ -39,10 +39,14 @@ export function ChatEmptyState({
   return (
     <div className="flex flex-1 items-center justify-center p-8">
       <div className="max-w-2xl w-full space-y-6">
-        {/* Dual entry point cards */}
-        <div className="flex flex-col sm:flex-row gap-4">
+        {/* Entry cards. Personal Assistant card hidden per user request (2026-06)
+            — comment out JSX only; imports/hooks/i18n/props kept intact. The single
+            Project card is centered; to restore, uncomment the assistant card below
+            and revert the row to `flex flex-col sm:flex-row gap-4` and the project
+            card class to `flex-1`. */}
+        <div className="flex justify-center">
           {/* Project Chat card */}
-          <Card className="flex-1 cursor-pointer transition-colors hover:border-primary/40">
+          <Card className="w-full max-w-md cursor-pointer transition-colors hover:border-primary/40">
             <CardHeader>
               <div className="flex items-center gap-2">
                 <FolderOpen size={20} className="text-primary" />
@@ -58,7 +62,9 @@ export function ChatEmptyState({
             </CardFooter>
           </Card>
 
-          {/* Personal Assistant card */}
+          {/* Personal Assistant card — hidden per user request (2026-06).
+              Restore by uncommenting (and revert the row/project-card classes per
+              the note above).
           <Card className="flex-1 cursor-pointer transition-colors hover:border-primary/40">
             <CardHeader>
               <div className="flex items-center gap-2">
@@ -81,12 +87,15 @@ export function ChatEmptyState({
               )}
             </CardFooter>
           </Card>
+          */}
         </div>
 
-        {/* Explanation text */}
+        {/* Explanation text — hidden together with the assistant card (it
+            describes 个人助理). Restore by uncommenting.
         <p className="text-xs text-center text-muted-foreground px-4">
           {t('chat.empty.explanation')}
         </p>
+        */}
 
         {/* Provider setup prompt */}
         {!hasProvider && (
