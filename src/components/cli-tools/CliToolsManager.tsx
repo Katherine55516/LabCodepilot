@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslation } from "@/hooks/useTranslation";
 import type { TranslationKey } from "@/i18n";
+import { localize } from "@/i18n/zh-hk-runtime";
 import type { CliToolDefinition, CliToolRuntimeInfo, CustomCliTool } from "@/types";
 import { CliToolCard, computeAgentScore } from "./CliToolCard";
 import { CliToolDetailDialog } from "./CliToolDetailDialog";
@@ -117,37 +118,35 @@ export function CliToolsManager() {
   const handleInstall = (tool: CliToolDefinition, method: string) => {
     const installMethod = tool.installMethods.find(m => m.method === method);
     const installCmd = installMethod?.command || `${method} install ${tool.id}`;
-    const isZh = locale === 'zh';
-
     const lines: string[] = [];
-    lines.push(isZh
-      ? `帮我安装 ${tool.name} 并添加到工具库。`
-      : `Install ${tool.name} and add it to the tool library.`);
-    lines.push(isZh ? `安装命令：${installCmd}` : `Install command: ${installCmd}`);
-    lines.push(isZh ? '如果权限不足请用 sudo 重试。' : 'If permission denied, retry with sudo.');
+    lines.push(localize(locale,
+      `帮我安装 ${tool.name} 并添加到工具库。`,
+      `Install ${tool.name} and add it to the tool library.`));
+    lines.push(localize(locale, `安装命令：${installCmd}`, `Install command: ${installCmd}`));
+    lines.push(localize(locale, '如果权限不足请用 sudo 重试。', 'If permission denied, retry with sudo.'));
 
     // Include required post-install commands (e.g. skills install) that AI can't discover from --help
     if (tool.postInstallCommands && tool.postInstallCommands.length > 0) {
       lines.push('');
-      lines.push(isZh ? '安装后还需要执行：' : 'After installing, also run:');
+      lines.push(localize(locale, '安装后还需要执行：', 'After installing, also run:'));
       tool.postInstallCommands.forEach(cmd => lines.push(cmd));
     }
 
     // For tools that need auth, hint that setup is needed — let AI determine steps from --help
     if (tool.setupType === 'needs_auth') {
       lines.push('');
-      lines.push(isZh
-        ? '注意：这个工具安装后需要登录或配置认证才能使用，请安装完成后引导我完成认证设置。'
-        : 'Note: This tool requires login or auth configuration after installation. Please guide me through the setup after installing.');
+      lines.push(localize(locale,
+        '注意：这个工具安装后需要登录或配置认证才能使用，请安装完成后引导我完成认证设置。',
+        'Note: This tool requires login or auth configuration after installation. Please guide me through the setup after installing.'));
     }
 
     window.location.href = `/chat?prefill=${encodeURIComponent(lines.join('\n'))}`;
   };
 
   const handleAddTool = () => {
-    const prefill = locale === 'zh'
-      ? '我想安装一个新的 CLI 工具并添加到工具库。\n工具名称：\n安装命令（如 brew install xxx）：'
-      : 'I want to install a new CLI tool and add it to my tool library.\nTool name: \nInstall command (e.g. brew install xxx): ';
+    const prefill = localize(locale,
+      '我想安装一个新的 CLI 工具并添加到工具库。\n工具名称：\n安装命令（如 brew install xxx）：',
+      'I want to install a new CLI tool and add it to my tool library.\nTool name: \nInstall command (e.g. brew install xxx): ');
     // The old approach (`window.location.href = '/chat?prefill=...'`) silently
     // did nothing inside the packaged Electron window — full-page navigations
     // are unreliable there. Use the Next router (history API, works in both
@@ -268,7 +267,7 @@ export function CliToolsManager() {
                     </div>
                     <p className="text-xs text-muted-foreground mt-0.5 truncate">
                       {desc
-                        ? (locale === 'zh' ? desc.zh : desc.en)
+                        ? localize(locale, desc.zh, desc.en)
                         : t('cliTools.noDescription' as TranslationKey)}
                     </p>
                     {compat && (() => {
@@ -316,7 +315,7 @@ export function CliToolsManager() {
                     </div>
                     <p className="text-xs text-muted-foreground mt-0.5 truncate">
                       {desc
-                        ? (locale === 'zh' ? desc.zh : desc.en)
+                        ? localize(locale, desc.zh, desc.en)
                         : ct.binPath}
                     </p>
                     {compat && (() => {
@@ -392,7 +391,7 @@ export function CliToolsManager() {
       <div className="flex items-center gap-1.5 text-xs text-muted-foreground pt-2">
         <ArrowSquareOut size={12} />
         <a
-          href={locale === 'zh' ? 'https://www.codepilot.sh/zh/docs' : 'https://www.codepilot.sh/docs'}
+          href={locale === 'en' ? 'https://www.codepilot.sh/docs' : 'https://www.codepilot.sh/zh/docs'}
           target="_blank"
           rel="noopener noreferrer"
           className="hover:text-foreground hover:underline transition-colors"

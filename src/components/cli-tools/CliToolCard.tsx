@@ -5,6 +5,7 @@ import { Plus, CaretDown, Star } from "@/components/ui/icon";
 import { Button } from "@/components/ui/button";
 import { useTranslation } from "@/hooks/useTranslation";
 import type { TranslationKey } from "@/i18n";
+import { localize } from "@/i18n/zh-hk-runtime";
 import type { CliToolDefinition, CliToolRuntimeInfo, CliToolPlatform } from "@/types";
 
 /** Compute agent compatibility score (0-5) from tool definition fields */
@@ -41,15 +42,14 @@ export function CliToolCard({
 }: CliToolCardProps) {
   const { t } = useTranslation();
   const [showMethodPicker, setShowMethodPicker] = useState(false);
-  const isZh = locale === 'zh';
 
   const availableMethods = tool.installMethods.filter(
     m => m.platforms.includes(platform as CliToolPlatform)
   );
 
   const summary = autoDescription
-    ? (isZh ? autoDescription.zh : autoDescription.en)
-    : (isZh ? tool.summaryZh : tool.summaryEn);
+    ? localize(locale, autoDescription.zh, autoDescription.en)
+    : localize(locale, tool.summaryZh, tool.summaryEn);
 
   const handleInstallClick = (e: React.MouseEvent) => {
     e.stopPropagation();

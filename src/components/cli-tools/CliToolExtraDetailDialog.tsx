@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Copy, Play } from "@/components/ui/icon";
 import { useTranslation } from "@/hooks/useTranslation";
 import type { TranslationKey } from "@/i18n";
+import { localize, localizeArr } from "@/i18n/zh-hk-runtime";
 import type { CliToolRuntimeInfo, CliToolStructuredDesc } from "@/types";
 
 interface CliToolExtraDetailDialogProps {
@@ -34,7 +35,6 @@ export function CliToolExtraDetailDialog({
   binPath,
 }: CliToolExtraDetailDialogProps) {
   const { t } = useTranslation();
-  const isZh = locale === 'zh';
 
   const structured = autoDescription?.structured as CliToolStructuredDesc | undefined;
 
@@ -43,9 +43,7 @@ export function CliToolExtraDetailDialog({
   };
 
   const handleTryTool = () => {
-    const prefill = isZh
-      ? `我想用 ${displayName} 工具完成：`
-      : `I want to use ${displayName} to: `;
+    const prefill = localize(locale, `我想用 ${displayName} 工具完成：`, `I want to use ${displayName} to: `);
     window.location.href = `/chat?prefill=${encodeURIComponent(prefill)}`;
   };
 
@@ -106,14 +104,14 @@ export function CliToolExtraDetailDialog({
             <section>
               <h3 className="text-sm font-medium mb-2">{t('cliTools.detailIntro')}</h3>
               <p className="text-sm text-muted-foreground">
-                {isZh ? structured.intro.zh : structured.intro.en}
+                {localize(locale, structured.intro.zh, structured.intro.en)}
               </p>
             </section>
           ) : autoDescription ? (
             <section>
               <h3 className="text-sm font-medium mb-2">{t('cliTools.detailIntro')}</h3>
               <p className="text-sm text-muted-foreground">
-                {isZh ? autoDescription.zh : autoDescription.en}
+                {localize(locale, autoDescription.zh, autoDescription.en)}
               </p>
             </section>
           ) : null}
@@ -123,7 +121,7 @@ export function CliToolExtraDetailDialog({
             <section>
               <h3 className="text-sm font-medium mb-2">{t('cliTools.useCases')}</h3>
               <ul className="text-sm text-muted-foreground list-disc list-inside space-y-1">
-                {(isZh ? structured.useCases.zh : structured.useCases.en).map((uc, i) => (
+                {localizeArr(locale, structured.useCases.zh, structured.useCases.en).map((uc, i) => (
                   <li key={i}>{uc}</li>
                 ))}
               </ul>
@@ -135,7 +133,7 @@ export function CliToolExtraDetailDialog({
             <section>
               <h3 className="text-sm font-medium mb-2">{t('cliTools.guideSteps')}</h3>
               <ol className="text-sm text-muted-foreground list-decimal list-inside space-y-1">
-                {(isZh ? structured.guideSteps.zh : structured.guideSteps.en).map((step, i) => (
+                {localizeArr(locale, structured.guideSteps.zh, structured.guideSteps.en).map((step, i) => (
                   <li key={i}>{step}</li>
                 ))}
               </ol>
@@ -153,14 +151,14 @@ export function CliToolExtraDetailDialog({
                       <div className="flex-1 min-w-0">
                         <p className="text-xs font-medium mb-1">{ep.label}</p>
                         <p className="text-xs text-muted-foreground">
-                          {isZh ? ep.promptZh : ep.promptEn}
+                          {localize(locale, ep.promptZh, ep.promptEn)}
                         </p>
                       </div>
                       <Button
                         variant="ghost"
                         size="icon"
                         className="h-6 w-6 shrink-0"
-                        onClick={() => copyToClipboard(isZh ? ep.promptZh : ep.promptEn)}
+                        onClick={() => copyToClipboard(localize(locale, ep.promptZh, ep.promptEn))}
                         title={t('cliTools.copy')}
                       >
                         <Copy size={12} />

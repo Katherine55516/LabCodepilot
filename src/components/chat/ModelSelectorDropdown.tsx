@@ -5,6 +5,7 @@ import { CaretDown, Gear } from '@/components/ui/icon';
 import { cn } from '@/lib/utils';
 import { useTranslation } from '@/hooks/useTranslation';
 import type { TranslationKey } from '@/i18n';
+import { localize } from '@/i18n/zh-hk-runtime';
 import { PromptInputButton } from '@/components/ai-elements/prompt-input';
 import type { ProviderModelGroup } from '@/types';
 import { useManagedMultimodal } from '@/hooks/useManagedMultimodal';
@@ -48,8 +49,7 @@ export function ModelSelectorDropdown({
   globalDefaultModel,
   globalDefaultProvider,
 }: ModelSelectorDropdownProps) {
-  const { t } = useTranslation();
-  const isZh = t('nav.chats') === '对话';
+  const { t, locale } = useTranslation();
   const modelMenuRef = useRef<HTMLDivElement>(null);
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
   const [modelSearch, setModelSearch] = useState('');
@@ -128,7 +128,7 @@ export function ModelSelectorDropdown({
         <span className="text-xs font-mono">{currentProviderName ?? currentModelOption?.label}</span>
         {isCurrentDefault && (
           <span className="text-[9px] px-1 py-0 rounded bg-primary/10 text-primary font-medium ml-0.5">
-            {isZh ? '默认' : 'Default'}
+            {localize(locale, '默认', 'Default')}
           </span>
         )}
         <CaretDown size={10} className={cn("transition-transform duration-200", modelMenuOpen && "rotate-180")} />
@@ -175,7 +175,7 @@ export function ModelSelectorDropdown({
                       )}
                       {isDefault && (
                         <span className="text-[9px] px-1 py-0 rounded bg-primary/10 text-primary font-medium">
-                          {isZh ? '默认' : 'Default'}
+                          {localize(locale, '默认', 'Default')}
                         </span>
                       )}
                     </span>
@@ -187,8 +187,8 @@ export function ModelSelectorDropdown({
             {flatItems.length === 0 && (
               <div className="px-3 py-3 text-center text-xs text-muted-foreground">
                 {managedProviders.length === 0
-                  ? (isZh ? '暂无托管配置' : 'No managed configs')
-                  : (isZh ? '无匹配项' : 'No matches')}
+                  ? localize(locale, '暂无托管配置', 'No managed configs')
+                  : localize(locale, '无匹配项', 'No matches')}
               </div>
             )}
           </CommandListItems>

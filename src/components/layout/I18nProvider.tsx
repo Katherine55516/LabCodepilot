@@ -70,6 +70,15 @@ export function I18nProvider({ children }: { children: ReactNode }) {
     }).catch(() => {});
   }, []);
 
+  // Keep <html lang> in sync with the active locale (accessibility / SEO).
+  // layout.tsx renders lang="en" for the SSR first paint; this reconciles it
+  // on the client once the real locale is known.
+  useEffect(() => {
+    if (typeof document !== 'undefined') {
+      document.documentElement.lang = locale;
+    }
+  }, [locale]);
+
   const t = useCallback(
     (key: TranslationKey, params?: Record<string, string | number>) =>
       translate(locale, key, params),

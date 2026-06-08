@@ -5,6 +5,7 @@ import { Terminal, NotePencil, Brain, GlobeSimple, Lightning, Folder, File } fro
 import { useTranslation } from '@/hooks/useTranslation';
 import type { TranslationKey } from '@/i18n';
 import { GSD_COMMAND_DESCRIPTIONS_ZH } from '@/i18n/gsd-command-descriptions';
+import { localize } from '@/i18n/zh-hk-runtime';
 import type { PopoverItem, PopoverMode } from '@/types';
 import {
   CommandList,
@@ -125,7 +126,9 @@ export function SlashCommandPopover({
         <span className="text-xs text-muted-foreground truncate flex-1 min-w-0">
           {item.descriptionKey
             ? t(item.descriptionKey)
-            : ((locale === 'zh' && GSD_COMMAND_DESCRIPTIONS_ZH[item.label]) || item.description)}
+            : (GSD_COMMAND_DESCRIPTIONS_ZH[item.label]
+                ? localize(locale, GSD_COMMAND_DESCRIPTIONS_ZH[item.label]!, item.description ?? '')
+                : item.description)}
         </span>
       )}
       {!item.builtIn && item.installedSource && (

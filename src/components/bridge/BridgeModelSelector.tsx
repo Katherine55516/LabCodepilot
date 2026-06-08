@@ -4,6 +4,7 @@ import { useRef, useState, useEffect, useCallback } from 'react';
 import { CaretDown } from '@/components/ui/icon';
 import { cn } from '@/lib/utils';
 import { useTranslation } from '@/hooks/useTranslation';
+import { localize } from '@/i18n/zh-hk-runtime';
 import type { ProviderModelGroup } from '@/types';
 import {
   CommandList,
@@ -54,8 +55,7 @@ export function BridgeModelSelector({
   onChange,
   providerGroups,
 }: BridgeModelSelectorProps) {
-  const { t } = useTranslation();
-  const isZh = t('nav.chats') === '对话';
+  const { t, locale } = useTranslation();
   const menuRef = useRef<HTMLDivElement>(null);
   const [open, setOpen] = useState(false);
   // Managed providers (source==='managed') — same source as the chat dropdown,
@@ -139,7 +139,7 @@ export function BridgeModelSelector({
         )}
       >
         <span className={cn('truncate font-mono', !triggerLabel && 'text-muted-foreground')}>
-          {triggerLabel ?? (isZh ? '选择模型' : 'Select a model')}
+          {triggerLabel ?? localize(locale, '选择模型', 'Select a model')}
         </span>
         <CaretDown
           size={14}
@@ -170,7 +170,7 @@ export function BridgeModelSelector({
             </div>
             {flatItems.length === 0 && (
               <div className="px-3 py-3 text-center text-xs text-muted-foreground">
-                {isZh ? '暂无可用模型' : 'No models available'}
+                {localize(locale, '暂无可用模型', 'No models available')}
               </div>
             )}
           </CommandListItems>

@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useTranslation } from '@/hooks/useTranslation';
+import { localize } from '@/i18n/zh-hk-runtime';
 import { Badge } from '@/components/ui/badge';
 import {
   HoverCard,
@@ -26,8 +27,7 @@ export function RuntimeBadge({ providerId }: RuntimeBadgeProps) {
   // resolveLegacyRuntimeForDisplay — the badge never surfaces 'Agent: Auto'.
   const [runtimeSetting, setRuntimeSetting] = useState<ConcreteRuntime>('claude-code-sdk');
   const router = useRouter();
-  const { t } = useTranslation();
-  const isZh = t('nav.chats') === '对话';
+  const { t, locale } = useTranslation();
 
   // OpenAI models can't use Claude Code SDK — forced to AI SDK
   const isNonAnthropicProvider = providerId === 'openai-oauth';
@@ -63,32 +63,33 @@ export function RuntimeBadge({ providerId }: RuntimeBadgeProps) {
           className="text-[10px] px-1.5 py-0 cursor-pointer hover:bg-accent"
           onClick={() => router.push('/settings#cli')}
         >
-          {isZh ? label.zh : label.en}
+          {localize(locale, label.zh, label.en)}
         </Badge>
       </HoverCardTrigger>
       <HoverCardContent side="top" align="end" className="w-56 p-3 text-xs space-y-1.5">
         {isOverridden ? (
           <>
-            <p>{isZh
-              ? `当前使用 AI SDK 引擎（全局设置为 ${LABELS[runtimeSetting].zh}）`
-              : `Using AI SDK engine (global setting: ${LABELS[runtimeSetting].en})`
-            }</p>
+            <p>{localize(locale,
+              `当前使用 AI SDK 引擎（全局设置为 ${LABELS[runtimeSetting].zh}）`,
+              `Using AI SDK engine (global setting: ${LABELS[runtimeSetting].en})`
+            )}</p>
             <p className="text-muted-foreground">
-              {isZh
-                ? 'OpenAI 模型不支持 Claude Code 引擎，已自动切换为 AI SDK'
-                : 'OpenAI models are not compatible with Claude Code engine, automatically switched to AI SDK'}
+              {localize(locale,
+                'OpenAI 模型不支持 Claude Code 引擎，已自动切换为 AI SDK',
+                'OpenAI models are not compatible with Claude Code engine, automatically switched to AI SDK'
+              )}
             </p>
           </>
         ) : (
           <p className="text-muted-foreground">
             {effectiveRuntime === 'native'
-              ? (isZh ? 'AI SDK：内置多模型引擎，无需 CLI' : 'AI SDK: built-in multi-model engine, no CLI required')
-              : (isZh ? 'Claude Code：内置原生二进制，开箱即用' : 'Claude Code: bundled native binary, ready out of the box')
+              ? localize(locale, 'AI SDK：内置多模型引擎，无需 CLI', 'AI SDK: built-in multi-model engine, no CLI required')
+              : localize(locale, 'Claude Code：内置原生二进制，开箱即用', 'Claude Code: bundled native binary, ready out of the box')
             }
           </p>
         )}
         <p className="text-muted-foreground">
-          {isZh ? '点击前往设置' : 'Click to open settings'}
+          {localize(locale, '点击前往设置', 'Click to open settings')}
         </p>
       </HoverCardContent>
     </HoverCard>

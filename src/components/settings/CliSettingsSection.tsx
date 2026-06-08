@@ -41,6 +41,7 @@ import { FieldRow } from "@/components/patterns/FieldRow";
 import { ImportSessionDialog } from "@/components/layout/ImportSessionDialog";
 import { useClaudeStatus } from "@/hooks/useClaudeStatus";
 import { useTranslation } from "@/hooks/useTranslation";
+import { localize } from "@/i18n/zh-hk-runtime";
 import { resolveLegacyRuntimeForDisplay, isConcreteRuntime } from "@/lib/runtime/legacy";
 import type { TranslationKey } from "@/i18n";
 import type { ProviderOptions } from "@/types";
@@ -87,8 +88,7 @@ export function CliSettingsSection() {
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [installWizardOpen, setInstallWizardOpen] = useState(false);
 
-  const { t } = useTranslation();
-  const isZh = t('nav.chats') === '对话';
+  const { t, locale } = useTranslation();
 
   const knownFieldKeys: Record<string, { label: TranslationKey; description: TranslationKey }> = {
     permissions: { label: 'cli.permissions', description: 'cli.permissionsDesc' },
@@ -330,23 +330,23 @@ export function CliSettingsSection() {
           both the SettingsCard title/description and the 执行引擎 FieldRow
           below. UI is forced to Claude Code. */}
       <SettingsCard
-        // title={isZh ? 'Agent 内核' : 'Agent Engine'}
-        // description={isZh ? '选择 AI 交互使用的执行引擎' : 'Choose the execution engine for AI interactions'}
+        // title={localize(locale, 'Agent 内核', 'Agent Engine')}
+        // description={localize(locale, '选择 AI 交互使用的执行引擎', 'Choose the execution engine for AI interactions')}
       >
         {/* 执行引擎 selector hidden — restore by uncommenting. */}
         {/* <FieldRow
-          label={isZh ? '执行引擎' : 'Engine'}
-          description={isZh
-            ? '选择执行 AI 任务的引擎。Claude Code 引擎已随应用一同发布；AI SDK 直接调用服务商 API，作为应急备选。'
-            : 'Choose the engine that runs AI tasks. Claude Code is bundled with the app; AI SDK calls provider APIs directly as an emergency fallback.'}
+          label={localize(locale, '执行引擎', 'Engine')}
+          description={localize(locale,
+            '选择执行 AI 任务的引擎。Claude Code 引擎已随应用一同发布；AI SDK 直接调用服务商 API，作为应急备选。',
+            'Choose the engine that runs AI tasks. Claude Code is bundled with the app; AI SDK calls provider APIs directly as an emergency fallback.')}
         >
           <Select value={agentRuntime} onValueChange={handleRuntimeChange}>
             <SelectTrigger className="w-[180px] h-8 text-xs">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="claude-code-sdk">{isZh ? 'Claude Code' : 'Claude Code'}</SelectItem>
-              <SelectItem value="native">{isZh ? 'AI SDK' : 'AI SDK'}</SelectItem>
+              <SelectItem value="claude-code-sdk">{localize(locale, 'Claude Code', 'Claude Code')}</SelectItem>
+              <SelectItem value="native">{localize(locale, 'AI SDK', 'AI SDK')}</SelectItem>
             </SelectContent>
           </Select>
         </FieldRow> */}
@@ -354,7 +354,7 @@ export function CliSettingsSection() {
         {/* Agent 状态 — engine forced to Claude Code so this row always renders.
             `separator` removed because this is now the first FieldRow in the card. */}
         {agentRuntime === 'claude-code-sdk' && (
-          <FieldRow label={isZh ? 'Agent 状态' : 'Agent Status'}>
+          <FieldRow label={localize(locale, 'Agent 状态', 'Agent Status')}>
             <div className="flex items-center gap-2">
               {connected ? (
                 <>
@@ -379,7 +379,7 @@ export function CliSettingsSection() {
               ) : (
                 <>
                   <XCircle size={14} className="text-status-error-foreground" />
-                  <span className="text-xs text-muted-foreground">{isZh ? '未安装' : 'Not installed'}</span>
+                  <span className="text-xs text-muted-foreground">{localize(locale, '未安装', 'Not installed')}</span>
                   <Button
                     variant="outline"
                     size="sm"

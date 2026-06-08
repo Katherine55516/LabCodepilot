@@ -22,6 +22,8 @@ import {
   Stethoscope,
 } from "@/components/ui/icon";
 import { useTranslation } from "@/hooks/useTranslation";
+import { localize } from "@/i18n/zh-hk-runtime";
+import type { Locale } from "@/i18n";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -62,7 +64,7 @@ function mapSeverity(s: string): "pass" | "warn" | "error" {
 }
 
 /** Transform raw API response to the UI's DiagnosticResult format */
-function transformApiResponse(raw: Record<string, unknown>, isZh: boolean): DiagnosticResult {
+function transformApiResponse(raw: Record<string, unknown>, locale: Locale): DiagnosticResult {
   const overall = mapSeverity(String((raw as { overallSeverity?: string }).overallSeverity || (raw as { overall?: string }).overall || "ok"));
 
   const rawProbes = (raw as { probes?: Array<Record<string, unknown>> }).probes || [];
@@ -93,7 +95,7 @@ function transformApiResponse(raw: Record<string, unknown>, isZh: boolean): Diag
     });
     const probeKey = String(p.probe || p.id || p.name || "");
     const probeName = PROBE_NAMES[probeKey]
-      ? (isZh ? PROBE_NAMES[probeKey].zh : PROBE_NAMES[probeKey].en)
+      ? localize(locale, PROBE_NAMES[probeKey].zh, PROBE_NAMES[probeKey].en)
       : String(p.name || p.probe || probeKey);
     return {
       name: probeName,
@@ -147,8 +149,7 @@ interface ProviderDoctorDialogProps {
 }
 
 export function ProviderDoctorDialog({ open, onOpenChange }: ProviderDoctorDialogProps) {
-  const { t } = useTranslation();
-  const isZh = t("nav.chats") === "对话";
+  const { locale } = useTranslation();
 
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<DiagnosticResult | null>(null);
@@ -173,7 +174,7 @@ export function ProviderDoctorDialog({ open, onOpenChange }: ProviderDoctorDialo
       if (!res.ok) throw new Error("Diagnostic request failed");
       if (runId !== diagnosticRunRef.current) return; // stale
       const raw = await res.json();
-      const data = transformApiResponse(raw, isZh);
+      const data = transformApiResponse(raw, locale);
       setResult(data);
       const toExpand = new Set<number>();
       data.probes.forEach((probe, i) => {
@@ -192,7 +193,7 @@ export function ProviderDoctorDialog({ open, onOpenChange }: ProviderDoctorDialo
           // Discard if a newer run started while we were waiting
           if (runId !== diagnosticRunRef.current) return;
           if (!liveRaw) return;
-          const liveData = transformApiResponse(liveRaw, isZh);
+          const liveData = transformApiResponse(liveRaw, locale);
           // Live probe is the extra probe beyond the fast probes
           const liveProbe = liveData.probes.length > fastProbeCount
             ? liveData.probes[liveData.probes.length - 1]
@@ -221,7 +222,7 @@ export function ProviderDoctorDialog({ open, onOpenChange }: ProviderDoctorDialo
     } finally {
       setLoading(false);
     }
-  }, [isZh]);
+  }, [locale]);
 
   useEffect(() => {
     if (open) fetchDiagnostics();
@@ -290,12 +291,10 @@ export function ProviderDoctorDialog({ open, onOpenChange }: ProviderDoctorDialo
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Stethoscope size={18} />
-            {isZh ? "Provider 诊断" : "Provider Doctor"}
+            {localize(locale, "Provider 诊断", "Provider Doctor")}
           </DialogTitle>
           <DialogDescription>
-            {isZh
-              ? "检查 CLI、认证、模型兼容性和网络连接状态"
-              : "Check CLI health, auth, model compatibility, and network connectivity"}
+            {localize(locale, "检查 CLI、认证、模型兼容性和网络连接状态", "Check CLI health, auth, model compatibility, and network connectivity")}
           </DialogDescription>
         </DialogHeader>
 
@@ -303,7 +302,7 @@ export function ProviderDoctorDialog({ open, onOpenChange }: ProviderDoctorDialo
         {loading && (
           <div className="flex items-center justify-center gap-2 py-8 text-muted-foreground">
             <SpinnerGap size={16} className="animate-spin" />
-            <span className="text-sm">{isZh ? "正在诊断..." : "Running diagnostics..."}</span>
+            <span className="text-sm">{localize(locale, "正在诊断...", "Running diagnostics...")}</span>
           </div>
         )}
 
@@ -320,7 +319,7 @@ export function ProviderDoctorDialog({ open, onOpenChange }: ProviderDoctorDialo
             {/* Overall summary */}
             <div className="rounded-md border border-border/50 p-3">
               <div className="flex items-center gap-2 mb-1">
-                <span className="text-sm font-medium">{isZh ? "总体状态" : "Overall"}</span>
+                <span className="text-sm font-medium">{localize(locale, "总体状态", "Overall")}</span>
                 <StatusBadge status={result.overall} />
               </div>
               <p className="text-xs text-muted-foreground">{result.conclusion}</p>
@@ -368,7 +367,7 @@ export function ProviderDoctorDialog({ open, onOpenChange }: ProviderDoctorDialo
                                       {repairingActions.has(repair.action) ? (
                                         <SpinnerGap size={12} className="animate-spin mr-1" />
                                       ) : null}
-                                      {isZh ? "修复: " : "Fix: "}
+                                      {localize(locale, "修复: ", "Fix: ")}
                                       {repair.label}
                                     </Button>
                                   ))}
@@ -385,7 +384,7 @@ export function ProviderDoctorDialog({ open, onOpenChange }: ProviderDoctorDialo
               {liveProbeRunning && (
                 <div className="rounded-md border border-border/30 px-3 py-2 flex items-center gap-2 text-xs text-muted-foreground">
                   <SpinnerGap size={12} className="animate-spin shrink-0" />
-                  {isZh ? "正在运行实际连通性测试..." : "Running live connectivity test..."}
+                  {localize(locale, "正在运行实际连通性测试...", "Running live connectivity test...")}
                 </div>
               )}
             </div>
@@ -396,7 +395,7 @@ export function ProviderDoctorDialog({ open, onOpenChange }: ProviderDoctorDialo
             置前禁渲染（保留 result 类型收窄、代码全保留）；恢复改回 `{result && !loading && (`。 */}
         {(false as boolean) && result && !loading && (
           <div className="rounded-md border border-border/30 bg-muted/30 px-3 py-2.5 text-xs text-muted-foreground">
-            {isZh ? (
+            {locale !== 'en' ? (
               <>
                 {result.overall !== "pass"
                   ? "如果上述修复建议未能解决问题，"
@@ -455,13 +454,13 @@ export function ProviderDoctorDialog({ open, onOpenChange }: ProviderDoctorDialo
         <DialogFooter>
           <Button variant="outline" size="sm" onClick={fetchDiagnostics} disabled={loading}>
             <ArrowClockwise size={14} className={loading ? "animate-spin" : ""} />
-            {isZh ? "重新检测" : "Re-run"}
+            {localize(locale, "重新检测", "Re-run")}
           </Button>
           <Button variant="outline" size="sm" onClick={handleExport} disabled={loading || !result}>
-            {isZh ? "导出日志" : "Export Logs"}
+            {localize(locale, "导出日志", "Export Logs")}
           </Button>
           <Button variant="secondary" size="sm" onClick={() => onOpenChange(false)}>
-            {isZh ? "关闭" : "Close"}
+            {localize(locale, "关闭", "Close")}
           </Button>
         </DialogFooter>
       </DialogContent>

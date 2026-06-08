@@ -1,5 +1,6 @@
 import { useState, useCallback } from 'react';
 import type { CliToolItem, PopoverMode } from '@/types';
+import { localize } from '@/i18n/zh-hk-runtime';
 
 export interface UseCliToolsFetchReturn {
   cliTools: CliToolItem[];
@@ -69,7 +70,6 @@ export function useCliToolsFetch(opts: {
       // Load AI descriptions from API response (persisted in DB)
       const autoDesc: Record<string, { zh: string; en: string }> = installedData.descriptions || {};
 
-      const docLocale = document.documentElement.lang === 'zh' ? 'zh' : 'en';
       const items: CliToolItem[] = [];
 
       // Installed catalog tools
@@ -78,9 +78,9 @@ export function useCliToolsFetch(opts: {
         const cat = catalogMap.get(ri.id);
         const ad = autoDesc[ri.id];
         const summary = ad
-          ? (docLocale === 'zh' ? ad.zh : ad.en)
+          ? localize(locale, ad.zh, ad.en)
           : cat
-            ? (docLocale === 'zh' ? cat.summaryZh : cat.summaryEn)
+            ? localize(locale, cat.summaryZh, cat.summaryEn)
             : '';
         items.push({
           id: ri.id,
@@ -93,7 +93,7 @@ export function useCliToolsFetch(opts: {
       // Extra detected tools
       for (const ri of extraDetected) {
         const ad = autoDesc[ri.id];
-        const summary = ad ? (docLocale === 'zh' ? ad.zh : ad.en) : '';
+        const summary = ad ? localize(locale, ad.zh, ad.en) : '';
         items.push({
           id: ri.id,
           name: extraNames[ri.id] || ri.id,
@@ -106,7 +106,7 @@ export function useCliToolsFetch(opts: {
       const customTools = installedData.custom || [];
       for (const ct of customTools) {
         const ad = autoDesc[ct.id];
-        const summary = ad ? (docLocale === 'zh' ? ad.zh : ad.en) : '';
+        const summary = ad ? localize(locale, ad.zh, ad.en) : '';
         items.push({
           id: ct.id,
           name: ct.name,
@@ -119,7 +119,7 @@ export function useCliToolsFetch(opts: {
     } catch {
       setCliTools([]);
     }
-  }, []);
+  }, [locale]);
 
   const handleCliSelect = useCallback((tool: CliToolItem) => {
     closePopover();
@@ -127,9 +127,7 @@ export function useCliToolsFetch(opts: {
 
     if (!inputValue.trim()) {
       // Empty input: prefill with prompt template
-      const prefix = locale === 'zh'
-        ? `我想用 ${tool.name} 工具完成：`
-        : `I want to use ${tool.name} to: `;
+      const prefix = localize(locale, `我想用 ${tool.name} 工具完成：`, `I want to use ${tool.name} to: `);
       setInputValue(prefix);
       setTimeout(() => {
         const ta = textareaRef.current;

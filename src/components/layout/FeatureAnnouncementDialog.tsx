@@ -12,14 +12,14 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import { useTranslation } from '@/hooks/useTranslation';
+import { localize } from '@/i18n/zh-hk-runtime';
 
 const ANNOUNCEMENT_KEY = 'codepilot:announcement:v0.48-agent-engine';
 
 export function FeatureAnnouncementDialog() {
   const [open, setOpen] = useState(false);
   const router = useRouter();
-  const { t } = useTranslation();
-  const isZh = t('nav.chats') === '对话';
+  const { t, locale } = useTranslation();
 
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -63,50 +63,61 @@ export function FeatureAnnouncementDialog() {
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>
-            {isZh ? '新功能：独立 Agent 引擎 + OpenAI 支持' : 'New: Independent Agent Engine + OpenAI Support'}
+            {localize(locale, '新功能：独立 Agent 引擎 + OpenAI 支持', 'New: Independent Agent Engine + OpenAI Support')}
           </DialogTitle>
           <DialogDescription>
-            {isZh ? '本次更新带来了底层架构变更' : 'This update includes architectural changes'}
+            {localize(locale, '本次更新带来了底层架构变更', 'This update includes architectural changes')}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-3 text-sm">
           {/* GitHub Issues 反馈外链区块 — 按用户要求隐藏。恢复取消注释。
           <div className="rounded-md bg-amber-500/10 border border-amber-500/20 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
-            {isZh
+            {locale !== 'en'
               ? <>如遇问题请到 <a href="https://github.com/op7418/CodePilot/issues" target="_blank" rel="noopener noreferrer" className="underline font-medium">GitHub Issues</a> 反馈。</>
               : <>Report issues on <a href="https://github.com/op7418/CodePilot/issues" target="_blank" rel="noopener noreferrer" className="underline font-medium">GitHub Issues</a>.</>
             }
           </div>
           */}
 
-          {isZh ? (
-            <>
-              <p>AI Native Lab - 研发平台 现在可以脱离 Claude Code CLI 独立运行了。</p>
-              <div className="space-y-2 text-muted-foreground">
-                <p><span className="text-foreground font-medium">AI SDK 引擎</span> — 无需安装 CLI，支持所有已配置的服务商</p>
-                <p><span className="text-foreground font-medium">Claude Code 引擎</span> — 通过 CLI 驱动，获得完整的命令行能力</p>
-              </div>
-              <p>同时支持 <span className="font-medium">OpenAI 授权登录</span>，ChatGPT Plus/Pro 用户可在服务商设置中登录后直接使用 GPT-5.5 等模型。</p>
-            </>
-          ) : (
-            <>
-              <p>AI Native Lab - 研发平台 can now run independently without the Claude Code CLI.</p>
-              <div className="space-y-2 text-muted-foreground">
-                <p><span className="text-foreground font-medium">AI SDK engine</span> — no CLI needed, works with all configured providers</p>
-                <p><span className="text-foreground font-medium">Claude Code engine</span> — driven by CLI for full command-line capabilities</p>
-              </div>
-              <p>Also supports <span className="font-medium">OpenAI OAuth login</span> — ChatGPT Plus/Pro users can sign in under Providers to use GPT-5.5 and more.</p>
-            </>
-          )}
+          <>
+            <p>{localize(locale,
+              'AI Native Lab - 研发平台 现在可以脱离 Claude Code CLI 独立运行了。',
+              'AI Native Lab - 研发平台 can now run independently without the Claude Code CLI.'
+            )}</p>
+            <div className="space-y-2 text-muted-foreground">
+              <p>
+                <span className="text-foreground font-medium">
+                  {localize(locale, 'AI SDK 引擎', 'AI SDK engine')}
+                </span>
+                {localize(locale, ' — 无需安装 CLI，支持所有已配置的服务商', ' — no CLI needed, works with all configured providers')}
+              </p>
+              <p>
+                <span className="text-foreground font-medium">
+                  {localize(locale, 'Claude Code 引擎', 'Claude Code engine')}
+                </span>
+                {localize(locale, ' — 通过 CLI 驱动，获得完整的命令行能力', ' — driven by CLI for full command-line capabilities')}
+              </p>
+            </div>
+            <p>
+              {localize(locale, '同时支持 ', 'Also supports ')}
+              <span className="font-medium">
+                {localize(locale, 'OpenAI 授权登录', 'OpenAI OAuth login')}
+              </span>
+              {localize(locale,
+                '，ChatGPT Plus/Pro 用户可在服务商设置中登录后直接使用 GPT-5.5 等模型。',
+                ' — ChatGPT Plus/Pro users can sign in under Providers to use GPT-5.5 and more.'
+              )}
+            </p>
+          </>
         </div>
 
         <DialogFooter className="gap-3">
           <Button variant="outline" size="sm" onClick={handleGoToSettings}>
-            {isZh ? '前往设置' : 'Go to Settings'}
+            {localize(locale, '前往设置', 'Go to Settings')}
           </Button>
           <Button size="sm" onClick={handleDismiss}>
-            {isZh ? '知道了' : 'Got it'}
+            {localize(locale, '知道了', 'Got it')}
           </Button>
         </DialogFooter>
       </DialogContent>

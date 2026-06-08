@@ -31,6 +31,7 @@ import {
 import type { ApiProvider, ProviderModelGroup } from "@/types";
 import { useTranslation } from "@/hooks/useTranslation";
 import type { TranslationKey } from "@/i18n";
+import { localize } from "@/i18n/zh-hk-runtime";
 import Anthropic from "@lobehub/icons/es/Anthropic";
 import { ProviderOptionsSection } from "./ProviderOptionsSection";
 import {
@@ -52,8 +53,7 @@ export function ProviderManager() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [envDetected, setEnvDetected] = useState<Record<string, string>>({});
-  const { t } = useTranslation();
-  const isZh = t('nav.chats') === '对话';
+  const { t, locale } = useTranslation();
 
   // Edit dialog state — fallback ProviderForm for providers that don't match any preset
   const [formOpen, setFormOpen] = useState(false);
@@ -319,7 +319,7 @@ export function ProviderManager() {
         if (pollCount >= maxPolls) {
           clearInterval(poll);
           setOpenaiLoggingIn(false);
-          setOpenaiError(isZh ? '登录超时，请重试' : 'Login timed out, please try again');
+          setOpenaiError(localize(locale, '登录超时，请重试', 'Login timed out, please try again'));
           return;
         }
         try {
@@ -405,11 +405,9 @@ export function ProviderManager() {
       <div className="rounded-lg border border-border/50 p-4">
         <div className="flex items-center justify-between">
           <div>
-            <h3 className="text-sm font-medium">{isZh ? '连接诊断' : 'Connection Diagnostics'}</h3>
+            <h3 className="text-sm font-medium">{localize(locale, '连接诊断', 'Connection Diagnostics')}</h3>
             <p className="text-xs text-muted-foreground mt-0.5">
-              {isZh
-                ? '检查 CLI、认证、模型兼容性和网络连接是否正常'
-                : 'Check CLI, auth, model compatibility, and network connectivity'}
+              {localize(locale, '检查 CLI、认证、模型兼容性和网络连接是否正常', 'Check CLI, auth, model compatibility, and network connectivity')}
             </p>
           </div>
           <Button
@@ -419,7 +417,7 @@ export function ProviderManager() {
             onClick={() => setDoctorOpen(true)}
           >
             <Stethoscope size={14} />
-            {isZh ? '运行诊断' : 'Run Diagnostics'}
+            {localize(locale, '运行诊断', 'Run Diagnostics')}
           </Button>
         </div>
 
@@ -498,9 +496,7 @@ export function ProviderManager() {
             <div className="mb-2 rounded-md bg-amber-500/10 border border-amber-500/30 px-3 py-2 flex items-start gap-2">
               <div className="flex-1 min-w-0">
                 <p className="text-xs text-amber-700 dark:text-amber-400">
-                  {isZh
-                    ? '当前“图片生成默认”指向的服务商已不可用（被删除或类型已变更），图片生成会回退到其他服务商'
-                    : 'The provider currently marked as the image-generation default is unavailable (deleted or type changed). Image generation will fall back to another provider.'}
+                  {localize(locale, '当前”图片生成默认”指向的服务商已不可用（被删除或类型已变更），图片生成会回退到其他服务商', 'The provider currently marked as the image-generation default is unavailable (deleted or type changed). Image generation will fall back to another provider.')}
                 </p>
               </div>
               <Button
@@ -509,7 +505,7 @@ export function ProviderManager() {
                 className="h-6 text-[11px] text-amber-700 dark:text-amber-400 shrink-0"
                 onClick={() => setActiveImageProvider('')}
               >
-                {isZh ? '清除' : 'Clear'}
+                {localize(locale, '清除', 'Clear')}
               </Button>
             </div>
           )}
@@ -667,7 +663,7 @@ export function ProviderManager() {
                   return (
                     <>
                       <div className="ml-[34px] mt-2 flex items-center gap-1.5 flex-wrap">
-                        <span className="text-[11px] text-muted-foreground mr-1">{isZh ? '模型' : 'Model'}:</span>
+                        <span className="text-[11px] text-muted-foreground mr-1">{localize(locale, '模型', 'Model')}:</span>
                         {models.map((m) => {
                           const isActive = current === m.value;
                           return (
@@ -695,7 +691,7 @@ export function ProviderManager() {
                             // user and offer a 1-click fix.
                             <>
                               <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-amber-600 border-amber-500/50 dark:text-amber-400">
-                                {isZh ? '已失效（缺少密钥）' : 'Inactive (missing API key)'}
+                                {localize(locale, '已失效（缺少密钥）', 'Inactive (missing API key)')}
                               </Badge>
                               <Button
                                 variant="ghost"
@@ -703,12 +699,12 @@ export function ProviderManager() {
                                 className="h-6 text-[11px] text-muted-foreground"
                                 onClick={() => setActiveImageProvider('')}
                               >
-                                {isZh ? '清除' : 'Clear'}
+                                {localize(locale, '清除', 'Clear')}
                               </Button>
                             </>
                           ) : (
                             <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-status-success-foreground border-status-success-border">
-                              {isZh ? '用于图片生成' : 'Used for image generation'}
+                              {localize(locale, '用于图片生成', 'Used for image generation')}
                             </Badge>
                           )
                         ) : (
@@ -718,7 +714,7 @@ export function ProviderManager() {
                             className="h-6 text-[11px] text-muted-foreground"
                             onClick={() => setActiveImageProvider(provider.id)}
                           >
-                            {isZh ? '设为图片生成默认' : 'Use for image generation'}
+                            {localize(locale, '设为图片生成默认', 'Use for image generation')}
                           </Button>
                         )}
                       </div>
@@ -759,7 +755,7 @@ export function ProviderManager() {
                 <div className="flex-1 min-w-0">
                   <span className="text-sm font-medium">{preset.name}</span>
                   <p className="text-xs text-muted-foreground truncate">
-                    {isZh ? preset.descriptionZh : preset.description}
+                    {localize(locale, preset.descriptionZh, preset.description)}
                   </p>
                 </div>
                 <Button
@@ -788,7 +784,7 @@ export function ProviderManager() {
                 <div className="flex-1 min-w-0">
                   <span className="text-sm font-medium">{preset.name}</span>
                   <p className="text-xs text-muted-foreground truncate">
-                    {isZh ? preset.descriptionZh : preset.description}
+                    {localize(locale, preset.descriptionZh, preset.description)}
                   </p>
                 </div>
                 <Button

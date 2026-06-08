@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Copy, ArrowSquareOut, Plus, CaretDown, Play } from "@/components/ui/icon";
 import { useTranslation } from "@/hooks/useTranslation";
 import type { TranslationKey } from "@/i18n";
+import { localize, localizeArr } from "@/i18n/zh-hk-runtime";
 import type { CliToolDefinition, CliToolPlatform } from "@/types";
 import { computeAgentScore } from "./CliToolCard";
 
@@ -36,7 +37,6 @@ export function CliToolDetailDialog({
 }: CliToolDetailDialogProps) {
   const { t } = useTranslation();
   const router = useRouter();
-  const isZh = locale === 'zh';
   const [showMethodPicker, setShowMethodPicker] = useState(false);
 
   const copyToClipboard = (text: string) => {
@@ -117,7 +117,7 @@ export function CliToolDetailDialog({
           <section>
             <h3 className="text-sm font-medium mb-2">{t('cliTools.detailIntro')}</h3>
             <p className="text-sm text-muted-foreground">
-              {isZh ? tool.detailIntro.zh : tool.detailIntro.en}
+              {localize(locale, tool.detailIntro.zh, tool.detailIntro.en)}
             </p>
           </section>
 
@@ -125,7 +125,7 @@ export function CliToolDetailDialog({
           <section>
             <h3 className="text-sm font-medium mb-2">{t('cliTools.useCases')}</h3>
             <ul className="text-sm text-muted-foreground list-disc list-inside space-y-1">
-              {(isZh ? tool.useCases.zh : tool.useCases.en).map((uc, i) => (
+              {localizeArr(locale, tool.useCases.zh, tool.useCases.en).map((uc, i) => (
                 <li key={i}>{uc}</li>
               ))}
             </ul>
@@ -135,7 +135,7 @@ export function CliToolDetailDialog({
           <section>
             <h3 className="text-sm font-medium mb-2">{t('cliTools.guideSteps')}</h3>
             <ol className="text-sm text-muted-foreground list-decimal list-inside space-y-1">
-              {(isZh ? tool.guideSteps.zh : tool.guideSteps.en).map((step, i) => (
+              {localizeArr(locale, tool.guideSteps.zh, tool.guideSteps.en).map((step, i) => (
                 <li key={i}>{step}</li>
               ))}
             </ol>
@@ -151,7 +151,7 @@ export function CliToolDetailDialog({
                     <div className="flex-1 min-w-0">
                       <p className="text-xs font-medium mb-1">{ep.label}</p>
                       <p className="text-xs text-muted-foreground">
-                        {isZh ? ep.promptZh : ep.promptEn}
+                        {localize(locale, ep.promptZh, ep.promptEn)}
                       </p>
                     </div>
                     <div className="flex gap-1 shrink-0">
@@ -159,7 +159,7 @@ export function CliToolDetailDialog({
                         variant="ghost"
                         size="icon"
                         className="h-6 w-6"
-                        onClick={() => copyToClipboard(isZh ? ep.promptZh : ep.promptEn)}
+                        onClick={() => copyToClipboard(localize(locale, ep.promptZh, ep.promptEn))}
                         title={t('cliTools.copy')}
                       >
                         <Copy size={12} />
@@ -221,9 +221,7 @@ export function CliToolDetailDialog({
               size="sm"
               className="gap-1.5"
               onClick={() => {
-                const prefill = isZh
-                  ? `我想用 ${tool.name} 工具完成：`
-                  : `I want to use ${tool.name} to: `;
+                const prefill = localize(locale, `我想用 ${tool.name} 工具完成：`, `I want to use ${tool.name} to: `);
                 window.location.href = `/chat?prefill=${encodeURIComponent(prefill)}`;
               }}
             >
