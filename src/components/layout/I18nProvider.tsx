@@ -16,57 +16,54 @@ export const I18nContext = createContext<I18nContextValue>({
 });
 
 export function I18nProvider({ children }: { children: ReactNode }) {
-  // Locale hardcoded to 'zh' because the language picker has been hidden
-  // from the General settings UI. The original load-from-settings +
-  // auto-detect-system-language logic stays intact below (commented) so
-  // a one-block uncomment restores the dynamic behaviour.
-  const [locale /* , setLocaleState */] = useState<Locale>('zh');
+  // Dynamic locale. Initial 'zh' is a first-paint default; loadLocale() below
+  // immediately reconciles it with the persisted choice or the system language.
+  // Switched at runtime via the language picker in Settings → General.
+  const [locale, setLocaleState] = useState<Locale>('zh');
 
   // Load persisted locale on mount; auto-detect system language if never set
-  // useEffect(() => {
-  //   async function loadLocale() {
-  //     try {
-  //       const res = await fetch('/api/settings/app');
-  //       if (res.ok) {
-  //         const data = await res.json();
-  //         const saved = data.settings?.locale;
-  //         if (saved === 'en' || saved === 'zh') {
-  //           setLocaleState(saved);
-  //           return;
-  //         }
-  //       }
-  //     } catch { /* ignore */ }
-  //
-  //     // No persisted locale — detect system language
-  //     // Works across: Electron (Chromium OS locale), browser, SSR (skipped)
-  //     if (typeof navigator !== 'undefined') {
-  //       const candidates = [
-  //         ...(navigator.languages || []),  // user's preferred language list
-  //         navigator.language,               // primary browser/OS language
-  //       ].filter(Boolean);
-  //       const isZh = candidates.some(lang => lang.startsWith('zh'));
-  //       if (isZh) {
-  //         setLocaleState('zh');
-  //         fetch('/api/settings/app', {
-  //           method: 'PUT',
-  //           headers: { 'Content-Type': 'application/json' },
-  //           body: JSON.stringify({ settings: { locale: 'zh' } }),
-  //         }).catch(() => {});
-  //       }
-  //     }
-  //   }
-  //   loadLocale();
-  // }, []);
+  useEffect(() => {
+    async function loadLocale() {
+      try {
+        const res = await fetch('/api/settings/app');
+        if (res.ok) {
+          const data = await res.json();
+          const saved = data.settings?.locale;
+          if (saved === 'en' || saved === 'zh') {
+            setLocaleState(saved);
+            return;
+          }
+        }
+      } catch { /* ignore */ }
 
-  // No-op when language picker is hidden; the body below is the real
-  // implementation, restored alongside the hooks above.
-  const setLocale = useCallback((_newLocale: Locale) => {
-    // setLocaleState(_newLocale);
-    // fetch('/api/settings/app', {
-    //   method: 'PUT',
-    //   headers: { 'Content-Type': 'application/json' },
-    //   body: JSON.stringify({ settings: { locale: _newLocale } }),
-    // }).catch(() => {});
+      // No persisted locale — detect system language
+      // Works across: Electron (Chromium OS locale), browser, SSR (skipped)
+      if (typeof navigator !== 'undefined') {
+        const candidates = [
+          ...(navigator.languages || []),  // user's preferred language list
+          navigator.language,               // primary browser/OS language
+        ].filter(Boolean);
+        const isZh = candidates.some(lang => lang.startsWith('zh'));
+        if (isZh) {
+          setLocaleState('zh');
+          fetch('/api/settings/app', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ settings: { locale: 'zh' } }),
+          }).catch(() => {});
+        }
+      }
+    }
+    loadLocale();
+  }, []);
+
+  const setLocale = useCallback((newLocale: Locale) => {
+    setLocaleState(newLocale);
+    fetch('/api/settings/app', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ settings: { locale: newLocale } }),
+    }).catch(() => {});
   }, []);
 
   const t = useCallback(

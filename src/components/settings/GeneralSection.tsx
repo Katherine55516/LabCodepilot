@@ -274,11 +274,8 @@ export function GeneralSection() {
           </Select>
         </FieldRow> */}
 
-        {/* Language picker — hidden. Hardcoded to 'zh' in
-            src/components/layout/I18nProvider.tsx. Restore by
-            uncommenting this block AND removing the hardcode in
-            I18nProvider. */}
-        {/* <FieldRow
+        {/* Language picker */}
+        <FieldRow
           label={t('settings.language')}
           description={t('settings.languageDesc')}
           separator
@@ -293,7 +290,7 @@ export function GeneralSection() {
               ))}
             </SelectContent>
           </Select>
-        </FieldRow> */}
+        </FieldRow>
 
         {/* Setup Center entry — hidden. The wizard itself, the
             'open-setup-center' CustomEvent listener, and the
