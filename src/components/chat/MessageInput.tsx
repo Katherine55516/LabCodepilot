@@ -746,7 +746,27 @@ export function MessageInput({
 
   // Effort selector state — guard against undefined when model not found in current provider's list
   const currentModelMeta = currentModelOption as (typeof currentModelOption & { supportsEffort?: boolean; supportedEffortLevels?: string[] }) | undefined;
-  const showEffortSelector = currentModelMeta?.supportsEffort === true;
+  // Effort selector is ALWAYS rendered (常驻), regardless of the selected
+  // model's metadata. Previously this was gated on
+  // `currentModelMeta?.supportsEffort === true`, but that flag is populated
+  // inconsistently across model sources (env defaults + first-party/Bedrock
+  // catalog carry it; role-injected managed models, third-party models, custom
+  // models, and SDK-discovered models that don't return it do not). The result
+  // was the selector blinking in/out as the user switched between models that
+  // happened to carry the flag and ones that didn't.
+  //
+  // Keeping it always visible is safe: the default selection is the 'auto'
+  // sentinel, which page.tsx filters out before the request (so no effort is
+  // sent and the model's per-model default applies — a no-op for models that
+  // ignore effort). When the user explicitly picks a level it is injected on
+  // the SDK runtime (claude-client.ts) and on the native runtime where the
+  // provider/model supports it (agent-loop.ts already drops it with a toast
+  // for the Opus-4.7-on-native and third-party-proxy cases).
+  //
+  // `supportedEffortLevels` is still passed through when known so the dropdown
+  // shows the correct levels; EffortSelectorDropdown falls back to the full set
+  // when it is undefined.
+  const showEffortSelector = true;
   // Default label is 'auto' — the UI displays "默认 / Auto" and no explicit
   // effort value is sent to the backend. This lets Claude Code apply its
   // per-model default (e.g. xhigh on Opus 4.7). If we initialized to 'high'

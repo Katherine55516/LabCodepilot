@@ -134,8 +134,12 @@ export async function GET() {
               value: m.value,
               label: m.displayName,
               description: m.description,
-              supportsEffort: m.supportsEffort,
-              supportedEffortLevels: m.supportedEffortLevels,
+              // env group is the built-in Claude Code provider — every model
+              // here is a Claude model and effort-capable. Default the flags
+              // when the SDK didn't return them so the effort selector stays
+              // consistent (matches the Anthropic-protocol hardening below).
+              supportsEffort: m.supportsEffort ?? true,
+              supportedEffortLevels: m.supportedEffortLevels ?? ['low', 'medium', 'high', 'max'],
               supportsAdaptiveThinking: m.supportsAdaptiveThinking,
               ...(upstream ? { upstreamModelId: upstream } : {}),
               ...(cw != null ? { contextWindow: cw } : {}),
@@ -235,8 +239,19 @@ export async function GET() {
           ...(caps.supportedEffortLevels != null ? { supportedEffortLevels: caps.supportedEffortLevels as string[] } : {}),
           ...(caps.supportsAdaptiveThinking != null ? { supportsAdaptiveThinking: caps.supportsAdaptiveThinking as boolean } : {}),
         };
+        // Data-layer hardening: Anthropic-protocol models that don't declare an
+        // explicit effort capability default to effort-capable. This covers
+        // role-injected managed models (prependRoleModels only carries
+        // value+label), custom models, and env-injected ANTHROPIC_MODEL entries
+        // that flow through here without a `capabilities` object — previously
+        // they surfaced with supportsEffort=undefined. Explicit catalog/DB
+        // capabilities still win because effortLift is spread after this.
+        const effortDefault = (protocol === 'anthropic' && effortLift.supportsEffort == null)
+          ? { supportsEffort: true, supportedEffortLevels: ['low', 'medium', 'high', 'max'] }
+          : {};
         return {
           ...m,
+          ...effortDefault,
           ...effortLift,
           ...(cw != null ? { contextWindow: cw } : {}),
         };
