@@ -200,19 +200,24 @@ function ThinkingPhaseLabel() {
 }
 
 function ElapsedTimer({ startedAt }: { startedAt: number }) {
-  const [elapsed, setElapsed] = useState(() => Math.floor((Date.now() - startedAt) / 1000));
+  // On the first turn of a brand-new session the stream snapshot's startedAt can
+  // briefly be undefined / 0 (snapshot not populated yet), which made
+  // `Date.now() - startedAt` → NaN → "NaNs". Fall back to mount time until a
+  // valid startedAt arrives, then switch to it so the elapsed time is accurate.
+  const fallbackRef = useRef(Date.now());
+  const base = typeof startedAt === 'number' && Number.isFinite(startedAt) && startedAt > 0
+    ? startedAt
+    : fallbackRef.current;
 
-  // Reset elapsed when the stream start time changes (e.g. new turn or session switch)
-  useEffect(() => {
-    setElapsed(Math.floor((Date.now() - startedAt) / 1000));
-  }, [startedAt]);
+  const [elapsed, setElapsed] = useState(() => Math.max(0, Math.floor((Date.now() - base) / 1000)));
 
+  // Recompute immediately when base changes (new turn / session switch) and tick every second.
   useEffect(() => {
-    const interval = setInterval(() => {
-      setElapsed(Math.floor((Date.now() - startedAt) / 1000));
-    }, 1000);
+    const compute = () => setElapsed(Math.max(0, Math.floor((Date.now() - base) / 1000)));
+    compute();
+    const interval = setInterval(compute, 1000);
     return () => clearInterval(interval);
-  }, [startedAt]);
+  }, [base]);
 
   const mins = Math.floor(elapsed / 60);
   const secs = elapsed % 60;
