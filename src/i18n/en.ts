@@ -109,6 +109,7 @@ const en = {
   'settings.updateAvailable': 'Update available: v{version}',
   'settings.viewRelease': 'View Release',
   'settings.latestVersion': "You're on the latest version.",
+  'settings.checkUpdateFailed': 'Update check failed. Please try again later.',
   'settings.autoApproveTitle': 'Auto-approve All Actions',
   'settings.autoApproveDesc': 'Skip all permission checks and auto-approve every tool action. This is dangerous and should only be used for trusted tasks.',
   'settings.autoApproveWarning': 'All tool actions will be auto-approved without confirmation. Use with caution.',

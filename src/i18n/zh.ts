@@ -106,6 +106,7 @@ const zh: Record<TranslationKey, string> = {
   'settings.updateAvailable': '有新版本：v{version}',
   'settings.viewRelease': '查看发布',
   'settings.latestVersion': '已是最新版本。',
+  'settings.checkUpdateFailed': '检查更新失败，请稍后重试。',
   'settings.autoApproveTitle': '自动批准所有操作',
   'settings.autoApproveDesc': '跳过所有权限检查并自动批准每个工具操作。这很危险，仅应用于受信任的任务。',
   'settings.autoApproveWarning': '所有工具操作将在无确认的情况下自动批准。请谨慎使用。',

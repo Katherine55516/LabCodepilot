@@ -1,7 +1,9 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import type { UpdateInfo, UpdateContextValue } from "@/hooks/useUpdate";
+import { showToast } from "@/hooks/useToast";
+import { useTranslation } from "@/hooks/useTranslation";
 
 const DISMISSED_VERSION_KEY = "codepilot_dismissed_update_version";
 
@@ -33,6 +35,16 @@ export function useUpdateChecker(): UpdateContextValue {
   // 仅在 Electron 主进程暴露 updater 桥时才有真实更新能力。
   const isNativeUpdater = typeof window !== "undefined" && !!window.electronAPI?.updater;
 
+  const { t } = useTranslation();
+  // 让长生命周期的 onStatus 闭包始终拿到最新 t，又不必把 t 加进 onStatus 的依赖
+  // （否则会随 locale 变化重订阅并重复触发首检）。用 effect 同步 ref，避免在
+  // render 期写 ref（react-hooks/refs）。
+  const tRef = useRef(t);
+  useEffect(() => { tRef.current = t; }, [t]);
+  // 仅在「用户手动点击检查更新」期间为 true：用于区分启动自动首检/后台检查，
+  // 保证只有手动检查在"无更新/出错"时才弹 toast（自动检查保持静默）。
+  const manualCheckRef = useRef(false);
+
   // --- 主进程更新器状态监听 + 首检触发 ---
   useEffect(() => {
     if (UPDATE_CHECK_DISABLED || !isNativeUpdater) return;
@@ -44,6 +56,8 @@ export function useUpdateChecker(): UpdateContextValue {
           setChecking(true);
           break;
         case 'available': {
+          // 有更新时由卡片/弹窗负责反馈，手动检查标记直接消费掉。
+          manualCheckRef.current = false;
           const mustUpgrade = event.info?.mustUpgrade === true;
           setUpdateInfo({
             updateAvailable: true,
@@ -70,6 +84,12 @@ export function useUpdateChecker(): UpdateContextValue {
         }
         case 'not-available':
           setUpdateInfo((prev) => (prev ? { ...prev, updateAvailable: false, lastError: null } : prev));
+          // 手动检查且无更新：弹一个简短提示，告诉用户已是最新版本。
+          // 自动首检/后台检查不弹（manualCheckRef 为 false），避免每次启动打扰。
+          if (manualCheckRef.current) {
+            manualCheckRef.current = false;
+            showToast({ type: 'success', message: tRef.current('settings.latestVersion'), duration: 3000 });
+          }
           setChecking(false);
           break;
         case 'downloading':
@@ -91,6 +111,11 @@ export function useUpdateChecker(): UpdateContextValue {
           break;
         case 'error':
           setUpdateInfo((prev) => (prev ? { ...prev, lastError: event.error ?? 'Unknown error' } : prev));
+          // 手动检查失败也给出反馈，避免点了按钮却毫无动静。
+          if (manualCheckRef.current) {
+            manualCheckRef.current = false;
+            showToast({ type: 'error', message: tRef.current('settings.checkUpdateFailed') });
+          }
           setChecking(false);
           break;
       }
@@ -102,9 +127,11 @@ export function useUpdateChecker(): UpdateContextValue {
     return cleanup;
   }, [isNativeUpdater]);
 
-  // 手动检查（设置页 / 关于页按钮）。
+  // 手动检查（设置页 / 关于页按钮）。标记本次为手动触发，结果回到 onStatus 时
+  // 据此决定是否弹 toast（无更新→已是最新；出错→失败提示）。
   const checkForUpdates = useCallback(async () => {
     if (UPDATE_CHECK_DISABLED || !isNativeUpdater) return;
+    manualCheckRef.current = true;
     try {
       await window.electronAPI!.updater!.checkForUpdates();
     } catch {
