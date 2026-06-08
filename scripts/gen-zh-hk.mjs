@@ -13,7 +13,18 @@ const SRC = 'src/i18n/zh.ts';
 const OUT = 'src/i18n/zh-HK.ts';
 
 const src = readFileSync(SRC, 'utf8');
+const OVERRIDES = JSON.parse(readFileSync('src/i18n/zh-hk-overrides.json', 'utf8'));
+
 let out = conv(src);
+
+// Apply Hong Kong term overrides. OpenCC emits 陆词繁写 for some IT terms
+// (默認 / 賬 / 緩存 …); map them to idiomatic HK usage. These Han words only
+// ever appear inside Chinese values — never in ASCII keys or {placeholders} —
+// so whole-word replacement over the converted text is safe. The same table is
+// reused at runtime by toHK() so dictionary and on-the-fly conversion agree.
+for (const [from, to] of Object.entries(OVERRIDES)) {
+  out = out.split(from).join(to);
+}
 
 // Rename the binding + default export (zh -> zhHK). Both lines are pure ASCII,
 // so OpenCC left them unchanged and these replacements match exactly.
@@ -29,8 +40,8 @@ const banner = [
   ' * 由 src/i18n/zh.ts 經 OpenCC（簡體 → 香港繁體，s2hk）自動轉換生成。',
   ' * 重新生成：node scripts/gen-zh-hk.mjs',
   ' *',
-  ' * OpenCC 提供繁體字形轉換與部分香港詞彙；個別 IT 術語（如 內存/視頻/',
-  ' * 選單 等）如需更貼合香港本地用詞，可在本檔手動校訂，但下次重新生成會被覆蓋。',
+  ' * 常見 IT 術語已由 src/i18n/zh-hk-overrides.json 覆蓋校正為香港用詞',
+  ' *（預設/帳號/快取/貼上/登入/上載 等）；如需新增校正請編輯該覆蓋表後重新生成。',
   ' * 與 zh.ts 保持相同 key 結構（Record<TranslationKey, string>，型別強制對齊）。',
   ' */',
   '',
