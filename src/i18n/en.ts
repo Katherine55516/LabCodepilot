@@ -521,6 +521,8 @@ const en = {
   'common.gotIt': 'Got it',
   'common.enabled': 'Enabled',
   'common.disabled': 'Disabled',
+  'common.copy': 'Copy',
+  'common.copied': 'Copied',
 
   // ── Prompt dialog (replacement for window.prompt — not supported in Electron) ──
   'prompt.rename.title': 'Rename Conversation',

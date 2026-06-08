@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useRef, useEffect, useMemo, memo } from 'react';
 import { cn } from '@/lib/utils';
+import { useTranslation } from '@/hooks/useTranslation';
 import type { Message, TokenUsage, FileAttachment, MediaBlock, RenderSegment } from '@/types';
 import {
   Message as AIMessage,
@@ -523,6 +524,7 @@ function parseMessageFiles(content: string): { files: FileAttachment[]; text: st
 }
 
 function CopyButton({ text }: { text: string }) {
+  const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
 
   const handleCopy = useCallback(async () => {
@@ -541,7 +543,7 @@ function CopyButton({ text }: { text: string }) {
       size="sm"
       onClick={handleCopy}
       className="inline-flex items-center gap-1 px-1.5 py-0.5 text-xs text-muted-foreground/60 hover:text-muted-foreground h-auto"
-      title="Copy"
+      title={copied ? t('common.copied') : t('common.copy')}
     >
       {copied ? (
         <Check size={12} className="text-status-success-foreground" />

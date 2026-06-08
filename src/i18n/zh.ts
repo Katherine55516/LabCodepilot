@@ -518,6 +518,8 @@ const zh: Record<TranslationKey, string> = {
   'common.gotIt': '知道了',
   'common.enabled': '已启用',
   'common.disabled': '已禁用',
+  'common.copy': '复制',
+  'common.copied': '已复制',
 
   // ── Prompt dialog (replacement for window.prompt — not supported in Electron) ──
   'prompt.rename.title': '重命名对话',
