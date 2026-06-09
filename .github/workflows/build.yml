@@ -129,6 +129,23 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # `npm ci` on the macOS runner intermittently skips the platform-specific
+      # optional dependency that ships the Claude Code native binary — a known
+      # npm bug with optionalDependencies declared via os/cpu (same class as
+      # esbuild / @next/swc). Install it explicitly so afterPack can find
+      # @anthropic-ai/claude-agent-sdk-darwin-arm64; otherwise the build fails
+      # with "No Claude Code native binary found for darwin-arm64".
+      - name: Ensure macOS Claude Code native binary
+        run: |
+          SDK_VER=$(node -p "require('@anthropic-ai/claude-agent-sdk/package.json').version")
+          npm install --no-save --force --os=darwin --cpu=arm64 "@anthropic-ai/claude-agent-sdk-darwin-arm64@${SDK_VER}"
+          if [ -d "node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64" ]; then
+            echo "darwin-arm64 subpackage present"
+          else
+            echo "::error::darwin-arm64 subpackage still missing after explicit install"
+            exit 1
+          fi
+
       - name: Build Electron app
         run: npm run electron:build
 
