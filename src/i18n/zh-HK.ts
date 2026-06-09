@@ -901,6 +901,8 @@ const zhHK: Record<TranslationKey, string> = {
   'bridge.errorNoAdapters': '沒有適配器成功啓動，請檢查渠道配置。',
   'bridge.errorAdapterConfig': '渠道配置無效，請檢查已啓用渠道的設置。',
   'bridge.errorNetwork': '啓動橋接時網絡錯誤。',
+  'bridge.defaultsRequired': '請先填寫工作目錄並選擇模型。',
+  'bridge.startNeedsDefaults': '請先設定並儲存工作目錄和模型後再啓動橋接。',
 
   // ── Settings: Discord Bridge ─────────────────────────────────
   'discord.credentials': 'Bot 憑據',

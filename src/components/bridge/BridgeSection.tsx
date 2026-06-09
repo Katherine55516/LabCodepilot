@@ -137,8 +137,13 @@ export function BridgeSection() {
     const parts = model.split("::");
     const providerId = parts.length === 2 ? parts[0] : "";
     const modelValue = parts.length === 2 ? parts[1] : model;
+    // Both the working directory and the model are required.
+    if (!workDir.trim() || !modelValue.trim()) {
+      showToast({ type: "error", message: t("bridge.defaultsRequired") });
+      return;
+    }
     saveSettings({
-      bridge_default_work_dir: workDir,
+      bridge_default_work_dir: workDir.trim(),
       bridge_default_model: modelValue,
       bridge_default_provider_id: providerId,
     });
@@ -168,6 +173,14 @@ export function BridgeSection() {
   };
 
   const handleStartBridge = async () => {
+    // The bridge spawns sessions using the saved default work dir + model, so
+    // both must be configured AND saved before it can start. Check the persisted
+    // settings (not the possibly-unsaved input fields) so an unsaved edit can't
+    // slip a bridge through with no usable defaults.
+    if (!settings.bridge_default_work_dir.trim() || !settings.bridge_default_model.trim()) {
+      showToast({ type: "error", message: t("bridge.startNeedsDefaults") });
+      return;
+    }
     const reason = await startBridge();
     if (reason) {
       const reasonMessages: Record<string, string> = {

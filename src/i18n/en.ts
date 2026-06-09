@@ -895,6 +895,8 @@ const en = {
   'bridge.errorNoAdapters': 'No adapters started. Check channel configuration.',
   'bridge.errorAdapterConfig': 'Channel configuration is invalid. Check settings for each enabled channel.',
   'bridge.errorNetwork': 'Network error while starting bridge.',
+  'bridge.defaultsRequired': 'Please set both the working directory and the model.',
+  'bridge.startNeedsDefaults': 'Set and save the working directory and model before starting the bridge.',
 
   // ── Settings: Discord Bridge ─────────────────────────────────
   'discord.credentials': 'Bot Credentials',
