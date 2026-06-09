@@ -97,7 +97,11 @@ export function ChatEmptyState({
         </p>
         */}
 
-        {/* Provider setup prompt */}
+        {/* Provider setup prompt — hidden per user request (2026-06): the
+            "配置 API 服务商以开始对话" text + "打开设置" button. Comment out JSX
+            only; imports/hooks/props (hasProvider) and i18n keys
+            (chat.empty.noProvider, chat.empty.openSetup) kept intact.
+            Restore by uncommenting the block below.
         {!hasProvider && (
           <div className="space-y-2 text-center">
             <p className="text-sm font-medium">{t('chat.empty.noProvider')}</p>
@@ -110,6 +114,7 @@ export function ChatEmptyState({
             </Button>
           </div>
         )}
+        */}
 
         {/* Recent projects */}
         {recentProjects && recentProjects.length > 0 && onSelectProject && (
