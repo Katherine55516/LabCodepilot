@@ -59,12 +59,14 @@ interface ChatViewProps {
   initialPermissionProfile?: 'default' | 'full_access';
   initialMode?: 'code' | 'plan';
   initialHasSummary?: boolean;
+  /** Per-session reasoning effort restored from the DB ('' = no explicit effort). */
+  initialEffort?: string;
 }
 
 /** Maximum messages kept in React state. Older messages are trimmed and reloaded on scroll. */
 const MAX_MESSAGES_IN_MEMORY = 300;
 
-export function ChatView({ sessionId, initialMessages = [], initialHasMore = false, modelName, providerId, initialPermissionProfile, initialMode, initialHasSummary }: ChatViewProps) {
+export function ChatView({ sessionId, initialMessages = [], initialHasMore = false, modelName, providerId, initialPermissionProfile, initialMode, initialHasSummary, initialEffort }: ChatViewProps) {
   const { setStreamingSessionId, workingDirectory, setPendingApprovalSessionId, setDashboardPanelOpen, setFileTreeOpen, setIsAssistantWorkspace } = usePanel();
   const { t } = useTranslation();
   const router = useRouter();
@@ -129,14 +131,18 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
   const [mode, setMode] = useState<string>(initialMode || 'code');
   const [currentModel, setCurrentModel] = useState(() => modelName || (typeof window !== 'undefined' ? localStorage.getItem('codepilot:last-model') : null) || 'sonnet');
   const [currentProviderId, setCurrentProviderId] = useState(() => providerId || (typeof window !== 'undefined' ? localStorage.getItem('codepilot:last-provider-id') : null) || '');
-  const [selectedEffort, setSelectedEffort] = useState<string | undefined>(undefined);
+  // Restore per-session reasoning effort from the DB. ''→undefined so the
+  // MessageInput selector falls back to its 'auto' default display.
+  const [selectedEffort, setSelectedEffort] = useState<string | undefined>(() => initialEffort || undefined);
   const [thinkingMode, setThinkingMode] = useState<string>('adaptive');
   const [context1m, setContext1m] = useState(false);
   const [hasSummary, setHasSummary] = useState(initialHasSummary || false);
 
-  // Sync model/provider when session data loads
+  // Sync model/provider/effort when session data loads
   useEffect(() => { if (modelName) setCurrentModel(modelName); }, [modelName]);
   useEffect(() => { if (providerId) setCurrentProviderId(providerId); }, [providerId]);
+  // Guard on truthy so an empty restored effort never clobbers a mid-session pick.
+  useEffect(() => { if (initialEffort) setSelectedEffort(initialEffort); }, [initialEffort]);
 
   // Fetch provider-specific options (with abort to prevent stale responses on fast switch)
   useEffect(() => {
@@ -264,6 +270,21 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ model, provider_id: newProviderId }),
     }).catch(() => {});
+  }, [sessionId]);
+
+  // Persist reasoning effort per session so it survives conversation switches
+  // and app restarts. The 'auto' sentinel (and undefined) mean "no explicit
+  // effort" — normalise both to '' in the DB so only real levels are stored.
+  const handleEffortChange = useCallback((effort: string | undefined) => {
+    setSelectedEffort(effort);
+    if (sessionId) {
+      const persisted = effort && effort !== 'auto' ? effort : '';
+      fetch(`/api/chat/sessions/${sessionId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ effort: persisted }),
+      }).catch(() => {});
+    }
   }, [sessionId]);
 
   // ── Extracted hooks ──
@@ -1003,7 +1024,7 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
         workingDirectory={workingDirectory}
         onAssistantTrigger={checkAssistantTrigger}
         effort={selectedEffort}
-        onEffortChange={setSelectedEffort}
+        onEffortChange={handleEffortChange}
         sdkInitMeta={initMetaRef.current}
         isAssistantProject={isAssistantProject}
         hasMessages={messages.length > 0}

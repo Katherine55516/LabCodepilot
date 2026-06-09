@@ -22,6 +22,8 @@ export interface ChatSession {
   runtime_updated_at: string;
   runtime_error: string;
   permission_profile?: 'default' | 'full_access';
+  /** Per-session reasoning effort (e.g. 'low'|'medium'|'high'|'max'); ''/undefined = no explicit effort */
+  effort?: string;
   context_summary?: string;
   context_summary_updated_at?: string;
 }
@@ -368,6 +370,7 @@ export interface CreateSessionRequest {
   mode?: string;
   provider_id?: string;
   permission_profile?: string;
+  effort?: string;
 }
 
 export interface SendMessageRequest {

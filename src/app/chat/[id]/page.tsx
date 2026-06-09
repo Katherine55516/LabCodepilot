@@ -22,6 +22,7 @@ export default function ChatSessionPage({ params }: ChatSessionPageProps) {
   const [error, setError] = useState<string | null>(null);
   const [sessionModel, setSessionModel] = useState<string>('');
   const [sessionProviderId, setSessionProviderId] = useState<string>('');
+  const [sessionEffort, setSessionEffort] = useState<string>('');
   const [sessionInfoLoaded, setSessionInfoLoaded] = useState(false);
   const [sessionPermissionProfile, setSessionPermissionProfile] = useState<'default' | 'full_access'>('default');
   const [sessionMode, setSessionMode] = useState<'code' | 'plan'>('code');
@@ -38,6 +39,7 @@ export default function ChatSessionPage({ params }: ChatSessionPageProps) {
     setWorkingDirectory('');
     setSessionModel('');
     setSessionProviderId('');
+    setSessionEffort('');
     setSessionInfoLoaded(false);
 
     async function loadSession() {
@@ -63,6 +65,7 @@ export default function ChatSessionPage({ params }: ChatSessionPageProps) {
           if (cancelled) return;
           setSessionModel(resolved.model);
           setSessionProviderId(resolved.providerId);
+          setSessionEffort(data.session.effort || '');
           setSessionPermissionProfile(data.session.permission_profile || 'default');
           setSessionMode((data.session.mode as 'code' | 'plan') || 'code');
           setSessionHasSummary(!!data.session.context_summary);
@@ -193,7 +196,7 @@ export default function ChatSessionPage({ params }: ChatSessionPageProps) {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <ChatView key={id} sessionId={id} initialMessages={messages} initialHasMore={hasMore} modelName={sessionModel} providerId={sessionProviderId} initialPermissionProfile={sessionPermissionProfile} initialMode={sessionMode} initialHasSummary={sessionHasSummary} />
+      <ChatView key={id} sessionId={id} initialMessages={messages} initialHasMore={hasMore} modelName={sessionModel} providerId={sessionProviderId} initialPermissionProfile={sessionPermissionProfile} initialMode={sessionMode} initialHasSummary={sessionHasSummary} initialEffort={sessionEffort} />
     </div>
   );
 }

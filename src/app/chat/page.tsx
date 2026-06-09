@@ -510,6 +510,10 @@ export default function NewChatPage() {
           permission_profile: permissionProfile,
           model: currentModel,
           provider_id: currentProviderId,
+          // Persist the reasoning effort chosen on the new-chat screen so it
+          // survives the redirect to /chat/[id]. 'auto'/undefined → '' (no
+          // explicit effort); only real levels are stored.
+          effort: selectedEffort && selectedEffort !== 'auto' ? selectedEffort : '',
         };
 
         const createRes = await fetch('/api/chat/sessions', {

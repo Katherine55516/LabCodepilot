@@ -403,6 +403,12 @@ function migrateDb(db: Database.Database): void {
   if (!colNames.includes('provider_id')) {
     safeAddColumn(db, "ALTER TABLE chat_sessions ADD COLUMN provider_id TEXT NOT NULL DEFAULT ''");
   }
+  // Per-session reasoning effort (''=no explicit effort → CLI applies its
+  // per-model default). Persisted so each conversation keeps its own choice
+  // across conversation switches and app restarts.
+  if (!colNames.includes('effort')) {
+    safeAddColumn(db, "ALTER TABLE chat_sessions ADD COLUMN effort TEXT NOT NULL DEFAULT ''");
+  }
   if (!colNames.includes('sdk_cwd')) {
     safeAddColumn(db, "ALTER TABLE chat_sessions ADD COLUMN sdk_cwd TEXT NOT NULL DEFAULT ''");
     // Backfill sdk_cwd from working_directory for existing sessions
@@ -1121,6 +1127,7 @@ export function createSession(
   mode?: string,
   providerId?: string,
   permissionProfile?: string,
+  effort?: string,
 ): ChatSession {
   const db = getDb();
   const id = crypto.randomBytes(16).toString('hex');
@@ -1129,8 +1136,8 @@ export function createSession(
   const projectName = path.basename(wd);
 
   db.prepare(
-    'INSERT INTO chat_sessions (id, title, created_at, updated_at, model, system_prompt, working_directory, sdk_session_id, project_name, status, mode, sdk_cwd, provider_id, permission_profile) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-  ).run(id, title || 'New Chat', now, now, model || '', systemPrompt || '', wd, '', projectName, 'active', mode || 'code', wd, providerId || '', permissionProfile || 'default');
+    'INSERT INTO chat_sessions (id, title, created_at, updated_at, model, system_prompt, working_directory, sdk_session_id, project_name, status, mode, sdk_cwd, provider_id, permission_profile, effort) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+  ).run(id, title || 'New Chat', now, now, model || '', systemPrompt || '', wd, '', projectName, 'active', mode || 'code', wd, providerId || '', permissionProfile || 'default', effort || '');
 
   return getSession(id)!;
 }
@@ -1214,6 +1221,14 @@ export function updateSessionWorkingDirectory(id: string, workingDirectory: stri
 export function updateSessionMode(id: string, mode: string): void {
   const db = getDb();
   db.prepare('UPDATE chat_sessions SET mode = ? WHERE id = ?').run(mode, id);
+}
+
+// Persist per-session reasoning effort. ''=no explicit effort (CLI default).
+// Unlike model/provider changes, effort does NOT invalidate the SDK session —
+// it's a per-request reasoning hint, so sdk_session_id is left untouched.
+export function updateSessionEffort(id: string, effort: string): void {
+  const db = getDb();
+  db.prepare('UPDATE chat_sessions SET effort = ? WHERE id = ?').run(effort, id);
 }
 
 export function updateSessionPermissionProfile(id: string, profile: string): void {

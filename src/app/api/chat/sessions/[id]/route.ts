@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { deleteSession, getSession, updateSessionWorkingDirectory, updateSessionTitle, updateSessionMode, updateSessionModel, updateSessionProviderId, clearSessionMessages, updateSdkSessionId, updateSessionPermissionProfile } from '@/lib/db';
+import { deleteSession, getSession, updateSessionWorkingDirectory, updateSessionTitle, updateSessionMode, updateSessionModel, updateSessionProviderId, clearSessionMessages, updateSdkSessionId, updateSessionPermissionProfile, updateSessionEffort } from '@/lib/db';
 import { autoApprovePendingForSession } from '@/lib/bridge/permission-broker';
 
 export async function GET(
@@ -69,6 +69,11 @@ export async function PATCH(
         );
       }
       updateSdkSessionId(id, '');
+    }
+    if (body.effort !== undefined) {
+      // Effort is a per-request reasoning hint, independent of provider/model —
+      // persist it without touching sdk_session_id.
+      updateSessionEffort(id, body.effort);
     }
     if (body.permission_profile !== undefined) {
       if (body.permission_profile !== 'default' && body.permission_profile !== 'full_access') {
