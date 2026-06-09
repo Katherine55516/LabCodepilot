@@ -29,6 +29,36 @@ module.exports = async function afterPack(context) {
 
   console.log(`[afterPack] Electron ${electronVersion}, arch=${archName}, platform=${platform}`);
 
+  // Resolve the per-platform Resources root. The previous version hard-coded
+  // 'CodePilot.app', which broke after productName was renamed to "AI Native Lab"
+  // — the .app bundle is now "AI Native Lab.app" and every search hit
+  // "Path does not exist", causing both the better-sqlite3 swap and the SDK
+  // binary verification to silently no-op then FATAL. Discover the .app dir
+  // dynamically on macOS; Windows/Linux still use appOutDir/resources.
+  function findMacAppDir(parent) {
+    try {
+      const entries = fs.readdirSync(parent, { withFileTypes: true });
+      for (const e of entries) {
+        if (e.isDirectory() && e.name.endsWith('.app')) {
+          return path.join(parent, e.name);
+        }
+      }
+    } catch { /* ignore */ }
+    return null;
+  }
+  const resourceRoots = [];
+  if (platform === 'mac') {
+    const appDir = findMacAppDir(appOutDir);
+    if (appDir) {
+      resourceRoots.push(path.join(appDir, 'Contents', 'Resources'));
+      console.log(`[afterPack] Discovered macOS app bundle: ${appDir}`);
+    } else {
+      console.warn(`[afterPack] WARNING: no .app bundle found under ${appOutDir}`);
+    }
+  } else {
+    resourceRoots.push(path.join(appOutDir, 'resources'));
+  }
+
   // Step 1: Explicitly rebuild better-sqlite3 for the target Electron version
   const projectDir = process.cwd();
   console.log('[afterPack] Rebuilding better-sqlite3 for Electron ABI...');
@@ -74,14 +104,9 @@ module.exports = async function afterPack(context) {
   const sourceStats = fs.statSync(rebuiltSource);
   console.log(`[afterPack] Rebuilt .node file: ${rebuiltSource} (${sourceStats.size} bytes, mtime: ${sourceStats.mtime.toISOString()})`);
 
-  // Step 3: Find and replace all better_sqlite3.node in standalone resources
-  // macOS: <appOutDir>/CodePilot.app/Contents/Resources/standalone/...
-  // Windows/Linux: <appOutDir>/resources/standalone/...
-  const searchRoots = [
-    path.join(appOutDir, 'CodePilot.app', 'Contents', 'Resources', 'standalone'),
-    path.join(appOutDir, 'Contents', 'Resources', 'standalone'),
-    path.join(appOutDir, 'resources', 'standalone'),
-  ];
+  // Step 3: Find and replace all better_sqlite3.node in standalone resources.
+  // Built from the dynamically-resolved resourceRoots above.
+  const searchRoots = resourceRoots.map(r => path.join(r, 'standalone'));
 
   let replaced = 0;
 
@@ -143,11 +168,7 @@ module.exports = async function afterPack(context) {
 
   const binaryName = sdkPlatform === 'win32' ? 'claude.exe' : 'claude';
 
-  const sdkSearchRoots = [
-    path.join(appOutDir, 'CodePilot.app', 'Contents', 'Resources'),
-    path.join(appOutDir, 'Contents', 'Resources'),
-    path.join(appOutDir, 'resources'),
-  ];
+  const sdkSearchRoots = resourceRoots;
 
   let sdkBinariesFound = 0;
   for (const root of sdkSearchRoots) {

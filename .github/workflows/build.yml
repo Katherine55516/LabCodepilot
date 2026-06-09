@@ -75,7 +75,12 @@ jobs:
   build-windows:
     needs: [lint-test, smoke-test]
     if: ${{ github.event_name == 'push' || inputs.platform == 'all' || inputs.platform == 'windows' }}
-    runs-on: windows-latest
+    # Pin to windows-2022 — windows-latest is now windows-2025, which ships
+    # Visual Studio 18 (preview). node-gyp 11 can't parse VS 18's version string
+    # ("unknown version 'undefined'"), so any package that runs node-gyp during
+    # install (zlib-sync here) fails with "Could not find any Visual Studio
+    # installation". windows-2022 still has VS 17 which node-gyp recognises.
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v4
 
