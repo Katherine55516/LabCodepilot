@@ -154,6 +154,39 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener('hashchange', maybeOpenFromHash);
   }, []);
 
+  // Bridge managed-account changes → provider consumers.
+  //
+  // The Electron main process owns auth/managed-provider state and pushes
+  // 'auth:changed' over IPC after login / logout / config sync. But the
+  // renderer's provider consumers (model selector via useManagedMultimodal,
+  // the new-chat model-init + hasProvider check in chat/page.tsx, the bridge
+  // model selector, RuntimeBadge…) only refresh on the 'provider-changed'
+  // window event. On a fresh re-login the managed providers get synced to the
+  // DB but no 'provider-changed' ever fires, so an already-mounted model
+  // selector keeps its stale pre-login result ("Claude Code" / "暂无托管配置")
+  // until something remounts it. Re-broadcast managed-state transitions as
+  // 'provider-changed' so every consumer re-fetches. No local state here → no
+  // re-render of the shell. Outside Electron window.electronAPI is undefined
+  // (browser dev) → the effect is a harmless no-op.
+  useEffect(() => {
+    const api = window.electronAPI?.auth;
+    if (!api?.onChange) return;
+    let prevCount: number | null = null;
+    let prevAuth: boolean | null = null;
+    const unsubscribe = api.onChange((s) => {
+      const changed =
+        prevCount === null ||
+        s.managedConfigCount !== prevCount ||
+        s.authenticated !== prevAuth;
+      prevCount = s.managedConfigCount;
+      prevAuth = s.authenticated;
+      if (changed) {
+        window.dispatchEvent(new Event('provider-changed'));
+      }
+    });
+    return () => unsubscribe();
+  }, []);
+
   // Listen for open-global-search events from ChatListPanel
   useEffect(() => {
     const handler = () => setSearchOpen(true);

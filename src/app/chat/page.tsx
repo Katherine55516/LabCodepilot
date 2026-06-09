@@ -405,28 +405,68 @@ export default function NewChatPage() {
     return () => window.removeEventListener('provider-changed', checkProvider);
   }, []);
 
+  // Create a brand-new conversation rooted at `path` and open it. Mirrors the
+  // sidebar's ChatListPanel.handleFolderSelect so the empty-state「选择文件夹」
+  // flow matches user expectation: the folder appears as a project group in the
+  // list (via 'session-created') and the new conversation opens automatically.
+  // On failure, fall back to the old behaviour — set the dir locally so the
+  // user can still type a first message — and surface an error banner.
+  const openFolderAsNewSession = useCallback(async (path: string) => {
+    localStorage.setItem('codepilot:last-working-directory', path);
+    try {
+      const model = localStorage.getItem('codepilot:last-model') || '';
+      const provider_id = localStorage.getItem('codepilot:last-provider-id') || '';
+      const res = await fetch('/api/chat/sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ working_directory: path, model, provider_id }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        window.dispatchEvent(new CustomEvent('session-created'));
+        router.push(`/chat/${data.session.id}`);
+        return;
+      }
+    } catch {
+      // fall through to the local-dir fallback below
+    }
+    setWorkingDir(path);
+    setErrorBanner({ message: t('error.directoryInvalid') });
+  }, [router, t]);
+
   const handleSelectFolder = useCallback(async () => {
     if (isElectron) {
       const path = await openNativePicker({ title: t('folderPicker.title') });
-      if (path) {
-        setWorkingDir(path);
-        localStorage.setItem('codepilot:last-working-directory', path);
-      }
+      if (path) openFolderAsNewSession(path);
     } else {
       setFolderPickerOpen(true);
     }
-  }, [isElectron, openNativePicker, t]);
+  }, [isElectron, openNativePicker, t, openFolderAsNewSession]);
 
   const handleFolderPickerSelect = useCallback((path: string) => {
-    setWorkingDir(path);
-    localStorage.setItem('codepilot:last-working-directory', path);
     setFolderPickerOpen(false);
-  }, []);
+    openFolderAsNewSession(path);
+  }, [openFolderAsNewSession]);
 
-  const handleSelectProject = useCallback((path: string) => {
-    setWorkingDir(path);
+  // Recent-project chip: open the project's most recent existing conversation
+  // (per user preference); if the folder has no conversation yet, start a fresh
+  // one. by-cwd resolves the latest session for a working directory.
+  const handleSelectProject = useCallback(async (path: string) => {
     localStorage.setItem('codepilot:last-working-directory', path);
-  }, []);
+    try {
+      const res = await fetch(`/api/chat/sessions/by-cwd?cwd=${encodeURIComponent(path)}`);
+      if (res.ok) {
+        const data = await res.json();
+        if (data.sessionId) {
+          router.push(`/chat/${data.sessionId}`);
+          return;
+        }
+      }
+    } catch {
+      // fall through to create a new session
+    }
+    openFolderAsNewSession(path);
+  }, [router, openFolderAsNewSession]);
 
   const stopStreaming = useCallback(() => {
     abortControllerRef.current?.abort();
