@@ -34,6 +34,27 @@ interface ToolResultInfo {
   is_error?: boolean;
 }
 
+/**
+ * Pick the provider group to default-select when the user has no saved choice
+ * and no account-delivered global default. Prefers the first CONFIGURED
+ * provider (account-managed / BYOK) that actually has models, because the
+ * built-in 'env' "Claude Code" group is listed first but is NOT part of the
+ * account-delivered model list — defaulting to it surprises managed users who
+ * never see "Claude Code" in their list. Falls back to the first group (env, or
+ * whatever exists) only when no other provider has models, so env-only / local
+ * setups are unaffected.
+ */
+function pickDefaultProviderGroup<T extends { provider_id: string; models?: Array<unknown> }>(
+  groups: T[],
+): T {
+  // Callers guard against empty `groups` before calling, matching the previous
+  // `|| groups[0]` convention.
+  return (
+    groups.find((g) => g.provider_id !== 'env' && (g.models?.length ?? 0) > 0) ||
+    groups[0]
+  );
+}
+
 export default function NewChatPage() {
   const router = useRouter();
   // Read the one-shot prefill once on mount. Prefer sessionStorage (set by the
@@ -175,7 +196,7 @@ export default function NewChatPage() {
       const savedProvider = localStorage.getItem('codepilot:last-provider-id') || '';
       const savedModel = localStorage.getItem('codepilot:last-model') || '';
       const validProvider = groups.find(g => g.provider_id === savedProvider);
-      const resolvedGroup = validProvider || groups[0];
+      const resolvedGroup = validProvider || pickDefaultProviderGroup(groups);
       const resolvedPid = resolvedGroup?.provider_id || '';
 
       if (validProvider) {
@@ -347,11 +368,14 @@ export default function NewChatPage() {
           }
         }
 
-        // No global default — validate current model
+        // No global default — validate current model. When the user has no
+        // saved provider, default to the first configured (non-env) provider
+        // rather than the built-in "Claude Code" group.
+        const fallbackGroup = pickDefaultProviderGroup(groups);
         const resolvedPid = savedProviderId && groups.find(g => g.provider_id === savedProviderId)
           ? savedProviderId
-          : groups[0]?.provider_id || '';
-        const resolvedGroup = groups.find(g => g.provider_id === resolvedPid) || groups[0];
+          : fallbackGroup?.provider_id || '';
+        const resolvedGroup = groups.find(g => g.provider_id === resolvedPid) || fallbackGroup;
         setCurrentProviderId(resolvedPid);
         if (resolvedGroup?.models?.length > 0) {
           const savedModel = localStorage.getItem('codepilot:last-model');
