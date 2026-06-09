@@ -129,28 +129,37 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # `npm ci` on the macOS runner intermittently skips the platform-specific
-      # optional dependency that ships the Claude Code native binary — a known
-      # npm bug with optionalDependencies declared via os/cpu (same class as
-      # esbuild / @next/swc). Install it explicitly so afterPack can find
-      # @anthropic-ai/claude-agent-sdk-darwin-arm64; otherwise the build fails
-      # with "No Claude Code native binary found for darwin-arm64".
-      - name: Ensure macOS Claude Code native binary
-        run: |
-          # Read the version via fs (not require) because the package's "exports"
-          # field forbids require('.../package.json') → ERR_PACKAGE_PATH_NOT_EXPORTED.
-          SDK_VER=$(node -e "console.log(JSON.parse(require('fs').readFileSync('node_modules/@anthropic-ai/claude-agent-sdk/package.json','utf8')).version)")
-          echo "Detected claude-agent-sdk version: $SDK_VER"
-          npm install --no-save --force --os=darwin --cpu=arm64 "@anthropic-ai/claude-agent-sdk-darwin-arm64@${SDK_VER}"
-          if [ -d "node_modules/@anthropic-ai/claude-agent-sdk-darwin-arm64" ]; then
-            echo "darwin-arm64 subpackage present"
-          else
-            echo "::error::darwin-arm64 subpackage still missing after explicit install"
-            exit 1
-          fi
-
       - name: Build Electron app
         run: npm run electron:build
+
+      # The Claude Code native binary ships in the platform optional subpackage
+      # @anthropic-ai/claude-agent-sdk-darwin-arm64 and must end up at
+      # .next/standalone/node_modules/... (electron-builder packs that tree via
+      # extraResources, afterPack verifies it). npm ci sometimes skips the
+      # os/cpu-gated optional dep on the mac runner, and Next standalone tracing
+      # cannot follow the SDK dynamic require.resolve, so the binary goes missing.
+      # Fix: ensure subpackage exists in root node_modules, then copy it into
+      # the standalone tree where extraResources picks it up.
+      - name: Inject Claude Code native binary into standalone
+        run: |
+          SDK_VER=$(node -e "console.log(JSON.parse(require('fs').readFileSync('node_modules/@anthropic-ai/claude-agent-sdk/package.json','utf8')).version)")
+          echo "claude-agent-sdk version: $SDK_VER"
+          SUB="claude-agent-sdk-darwin-arm64"
+          if [ ! -f "node_modules/@anthropic-ai/${SUB}/claude" ]; then
+            npm install --no-save --force --os=darwin --cpu=arm64 "@anthropic-ai/${SUB}@${SDK_VER}"
+          fi
+          DEST=".next/standalone/node_modules/@anthropic-ai"
+          mkdir -p "$DEST"
+          rm -rf "${DEST}/${SUB}"
+          cp -R "node_modules/@anthropic-ai/${SUB}" "${DEST}/${SUB}"
+          if [ -f "${DEST}/${SUB}/claude" ]; then
+            ls -la "${DEST}/${SUB}/claude"
+            echo "OK: claude binary present in standalone"
+          else
+            echo "::error::claude binary missing in standalone after copy"
+            ls -la "${DEST}/${SUB}" || true
+            exit 1
+          fi
 
       # ── Signing is OPTIONAL ─────────────────────────────────────────────
       # If `MAC_CERT_P12_BASE64` + `MAC_CERT_PASSWORD` secrets are present:
