@@ -855,7 +855,7 @@ function PinnableWidget({ widgetCode, title }: {
     <>
       {workingDirectory && (
         <button
-          className="text-[10px] px-1.5 py-0.5 rounded text-muted-foreground/50 hover:text-muted-foreground hover:bg-muted/50 disabled:opacity-30 flex items-center gap-0.5"
+          className="text-[10px] px-1.5 py-0.5 rounded text-muted-foreground/70 hover:text-foreground hover:bg-muted/60 disabled:opacity-30 flex items-center gap-0.5"
           onClick={handlePin}
           disabled={cooldown}
         >
@@ -864,7 +864,7 @@ function PinnableWidget({ widgetCode, title }: {
         </button>
       )}
       <button
-        className="text-[10px] px-1.5 py-0.5 rounded text-muted-foreground/50 hover:text-muted-foreground hover:bg-muted/50 flex items-center gap-0.5"
+        className="text-[10px] px-1.5 py-0.5 rounded text-muted-foreground/70 hover:text-foreground hover:bg-muted/60 flex items-center gap-0.5"
         onClick={handleExport}
       >
         <DownloadSimple size={12} />

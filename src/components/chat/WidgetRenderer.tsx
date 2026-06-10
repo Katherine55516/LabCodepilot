@@ -267,12 +267,15 @@ function WidgetRendererInner({ widgetCode, isStreaming, title, showOverlay, extr
         </pre>
       )}
 
-      {/* Toolbar — top-right, visible on hover */}
-      <div className="absolute top-1 right-1 opacity-0 group-hover/widget:opacity-100 transition-opacity flex items-center gap-1">
+      {/* Toolbar — top-right, visible on hover. Frosted background + border so
+          the buttons stay legible when the widget's own content (stat cards,
+          titles) reaches the corner. Without a backdrop the button text merged
+          with the content text underneath and became unreadable. */}
+      <div className="absolute top-1.5 right-1.5 z-10 opacity-0 group-hover/widget:opacity-100 transition-opacity flex items-center gap-0.5 rounded-lg border border-border/40 bg-background/80 px-0.5 py-0.5 shadow-sm backdrop-blur-sm">
         {extraButtons}
         <button
           onClick={() => setShowCode(!showCode)}
-          className="text-[10px] px-1.5 py-0.5 rounded text-muted-foreground/50 hover:text-muted-foreground hover:bg-muted/50 flex items-center gap-0.5"
+          className="text-[10px] px-1.5 py-0.5 rounded text-muted-foreground/70 hover:text-foreground hover:bg-muted/60 flex items-center gap-0.5"
         >
           <Code size={12} />
           {showCode ? t('widget.hideCode') : t('widget.showCode')}
