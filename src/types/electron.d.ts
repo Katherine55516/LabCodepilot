@@ -189,6 +189,13 @@ interface ElectronAPI {
   app?: {
     quit: () => Promise<void>;
   };
+  /** Application file logs — open the log folder / get its path for diagnostics. */
+  logs?: {
+    /** Open the log directory in the OS file manager. Resolves to '' on success. */
+    openFolder: () => Promise<string>;
+    /** Absolute path of the log directory. */
+    getPath: () => Promise<string>;
+  };
   bridge?: {
     isActive: () => Promise<boolean>;
   };

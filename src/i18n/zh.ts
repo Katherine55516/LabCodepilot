@@ -130,6 +130,9 @@ const zh: Record<TranslationKey, string> = {
   'settings.defaultPanelGit': 'Git',
   'settings.language': '语言',
   'settings.languageDesc': '选择界面显示语言',
+  'settings.openLogs': '应用日志',
+  'settings.openLogsDesc': '打开诊断日志文件所在的文件夹,反馈问题时可一并发送',
+  'settings.openLogsButton': '打开日志目录',
   'settings.usage': '用量统计',
 
   // ── Settings: Appearance ──────────────────────────────────────

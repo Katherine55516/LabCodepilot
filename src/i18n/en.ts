@@ -133,6 +133,9 @@ const en = {
   'settings.defaultPanelGit': 'Git',
   'settings.language': 'Language',
   'settings.languageDesc': 'Choose the display language for the interface',
+  'settings.openLogs': 'Application Logs',
+  'settings.openLogsDesc': 'Open the folder with diagnostic log files — attach them when reporting a problem',
+  'settings.openLogsButton': 'Open Logs Folder',
   'settings.usage': 'Usage',
 
   // ── Settings: Appearance ──────────────────────────────────────

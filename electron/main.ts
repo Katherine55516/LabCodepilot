@@ -58,6 +58,11 @@ import { initMasterKey, getMasterKeyHex, logSafeStorageStatus } from './auth/sec
 import { logInfo, logWarn, logError } from './auth/log';
 import { HttpError, AuthExpiredError, NetworkError, type MeInfo, type ModelConfig } from './auth/types';
 
+// File logger — persists main-process logs, the forked Next-server's piped
+// stdout/stderr (re-console.log'd below), and renderer console output to
+// app.getPath('logs'). Secrets are scrubbed before writing. See electron/logger.ts.
+import { initFileLogger, openLogsFolder, getLogDir, logRendererConsole, registerKnownSecretsFromEnv } from './logger';
+
 // Native auto-updater (research-platform V2). Reuses the managed-account auth
 // infra (apiRequest Bearer + getBackendBase) for the authenticated check.
 import { initUpdater, registerUpdaterIpc, stopUpdater } from './updater';
@@ -192,7 +197,7 @@ async function isBridgeActive(): Promise<boolean> {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const http = require('http');
     return await new Promise<boolean>((resolve) => {
-      const req = http.get(`http://127.0.0.1:${serverPort}/api/bridge`, (res: { statusCode?: number; on: (event: string, cb: (data?: Buffer) => void) => void }) => {
+      const req = http.get(`http://127.0.0.1:${serverPort}/api/bridge`, (res: { statusCode?: number; on: (event: string, cb: (data: Buffer) => void) => void }) => {
         let body = '';
         res.on('data', (chunk: Buffer) => { body += chunk.toString(); });
         res.on('end', () => {
@@ -746,6 +751,12 @@ function startServer(port: number): Electron.UtilityProcess {
     CLAUDE_GUI_SECRET_KEY: getMasterKeyHex(),
   };
 
+  // Register every credential the forked server will hold (master key + the
+  // user's BYOK provider keys from userShellEnv, which never reach the main
+  // process.env) so the file logger redacts those exact values verbatim if they
+  // ever surface in the server's piped output.
+  registerKnownSecretsFromEnv(env);
+
   // Use Electron's utilityProcess to run the server in a child process
   // without spawning a separate Dock icon on macOS.
   const child = utilityProcess.fork(serverPath, [], {
@@ -755,17 +766,33 @@ function startServer(port: number): Electron.UtilityProcess {
     serviceName: 'codepilot-server',
   });
 
-  child.stdout?.on('data', (data: Buffer) => {
-    const msg = data.toString().trim();
-    console.log(`[server] ${msg}`);
-    serverErrors.push(msg);
-  });
-
-  child.stderr?.on('data', (data: Buffer) => {
-    const msg = data.toString().trim();
-    console.error(`[server:err] ${msg}`);
-    serverErrors.push(msg);
-  });
+  // Buffer piped output and emit COMPLETE lines. Logging per logical line (not
+  // per arbitrary pipe chunk) keeps the file log readable AND lets the logger's
+  // secret scrubber see whole tokens — a value split across two 'data' events
+  // would otherwise evade redaction. A 64 KB guard bounds a runaway partial line.
+  const makeLineHandler = (tag: string, isErr: boolean) => {
+    let buf = '';
+    const emit = (line: string) => {
+      const msg = line.replace(/\r$/, '');
+      if (!msg) return;
+      (isErr ? console.error : console.log)(`${tag} ${msg}`);
+      serverErrors.push(msg);
+    };
+    return (data: Buffer) => {
+      buf += data.toString();
+      let nl: number;
+      while ((nl = buf.indexOf('\n')) >= 0) {
+        emit(buf.slice(0, nl));
+        buf = buf.slice(nl + 1);
+      }
+      if (buf.length > 64 * 1024) {
+        emit(buf);
+        buf = '';
+      }
+    };
+  };
+  child.stdout?.on('data', makeLineHandler('[server]', false));
+  child.stderr?.on('data', makeLineHandler('[server:err]', true));
 
   child.on('exit', (code) => {
     console.log(`Server process exited with code ${code}`);
@@ -1087,6 +1114,34 @@ function createWindow(url?: string) {
     }
   });
 
+  // Capture renderer-process console warnings/errors into the file log so
+  // UI-side failures (React error boundary, uncaught renderer exceptions
+  // surfaced as console errors) are diagnosable too.
+  mainWindow.webContents.on('console-message', (details: unknown, levelArg: unknown, messageArg: unknown, lineArg: unknown, sourceIdArg: unknown) => {
+    try {
+      // Electron 40 emits a single details object ({ message, level, lineNumber,
+      // sourceId }); older majors used positional args (still emitted but
+      // @deprecated). Read from whichever is present so renderer capture
+      // survives the eventual removal of the positional form.
+      const d = details && typeof details === 'object' ? (details as Record<string, unknown>) : undefined;
+      const message = d && 'message' in d ? d.message : messageArg;
+      const level = d && 'level' in d ? d.level : levelArg;
+      const lineNo = d && 'lineNumber' in d ? d.lineNumber : lineArg;
+      const sourceId = d && 'sourceId' in d ? d.sourceId : sourceIdArg;
+      // Keep only warnings/errors — drop verbose/info noise. Level is a string
+      // ('warning'|'error') in the new form, a number (2|3) in the old.
+      if (level === 'error' || level === 'warning' || level === 2 || level === 3) {
+        logRendererConsole(
+          String(message ?? ''),
+          typeof lineNo === 'number' ? lineNo : undefined,
+          typeof sourceId === 'string' ? sourceId : undefined,
+        );
+      }
+    } catch {
+      /* never let logging break the window */
+    }
+  });
+
   mainWindow.loadURL(url || LOADING_HTML);
 
   if (isDev) {
@@ -1099,6 +1154,11 @@ function createWindow(url?: string) {
 }
 
 app.whenReady().then(async () => {
+  // Initialise file logging FIRST so every subsequent console.* in main — and
+  // the forked server's piped output we re-log below — is persisted to disk,
+  // and uncaught crashes are captured. Must run before the server fork.
+  initFileLogger();
+
   // Load user's full shell environment (API keys, PATH, etc.)
   userShellEnv = loadUserShellEnv();
 
@@ -1660,6 +1720,11 @@ app.whenReady().then(async () => {
   ipcMain.handle('shell:open-path', async (_event: Electron.IpcMainInvokeEvent, folderPath: string) => {
     return shell.openPath(folderPath);
   });
+
+  // Open the application log directory (so users can find & share logs when
+  // reporting a problem). Returns '' on success, else an error string.
+  ipcMain.handle('logs:open-folder', async () => openLogsFolder());
+  ipcMain.handle('logs:get-path', async () => getLogDir());
 
   // Bridge status IPC
   ipcMain.handle('bridge:is-active', async () => {

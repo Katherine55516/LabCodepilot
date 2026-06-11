@@ -132,6 +132,13 @@ export function GeneralSection() {
   const { accountInfo } = useAccountInfo();
   const { t, locale, setLocale } = useTranslation();
 
+  // File logs only exist in the packaged Electron app (the web dev server has
+  // no main process). Detect after mount to avoid a hydration mismatch.
+  const [logsAvailable, setLogsAvailable] = useState(false);
+  useEffect(() => {
+    setLogsAvailable(typeof window !== "undefined" && !!window.electronAPI?.logs);
+  }, []);
+
   const fetchAppSettings = useCallback(async () => {
     try {
       const res = await fetch("/api/settings/app");
@@ -291,6 +298,25 @@ export function GeneralSection() {
             </SelectContent>
           </Select>
         </FieldRow>
+
+        {/* Application logs — open the folder so users can attach logs when
+            reporting a problem. Electron-only (no file logs in web dev). */}
+        {logsAvailable && (
+          <FieldRow
+            label={t('settings.openLogs')}
+            description={t('settings.openLogsDesc')}
+            separator
+          >
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-xs"
+              onClick={() => { void window.electronAPI?.logs?.openFolder(); }}
+            >
+              {t('settings.openLogsButton')}
+            </Button>
+          </FieldRow>
+        )}
 
         {/* Setup Center entry — hidden. The wizard itself, the
             'open-setup-center' CustomEvent listener, and the

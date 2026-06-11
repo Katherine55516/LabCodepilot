@@ -139,6 +139,9 @@ const zhHK: Record<TranslationKey, string> = {
   'settings.defaultPanelGit': 'Git',
   'settings.language': '語言',
   'settings.languageDesc': '選擇界面顯示語言',
+  'settings.openLogs': '應用日誌',
+  'settings.openLogsDesc': '開啟診斷日誌檔案所在的資料夾,回報問題時可一併傳送',
+  'settings.openLogsButton': '開啟日誌目錄',
   'settings.usage': '用量統計',
 
   // ── Settings: Appearance ──────────────────────────────────────
