@@ -104,7 +104,12 @@ export const FileTree = ({
     <FileTreeContext.Provider value={contextValue}>
       <div
         className={cn(
-          "rounded-lg border bg-background font-mono text-sm",
+          // min-w-max lets the tree grow to its widest row (deep nesting +
+          // long names) instead of being clamped to the viewport, so the
+          // scroll container can show a horizontal scrollbar. min-width
+          // (not width) keeps rows filling the viewport when content is
+          // narrow, so hover/selection highlights still span full width.
+          "min-w-max rounded-lg border bg-background font-mono text-sm",
           className
         )}
         role="tree"
@@ -317,7 +322,11 @@ export const FileTreeName = ({
   children,
   ...props
 }: FileTreeNameProps) => (
-  <span className={cn("truncate", className)} {...props}>
+  // whitespace-nowrap (not truncate) keeps the name on one line but lets it
+  // extend to full length — combined with the tree's min-w-max + the scroll
+  // container's overflow-auto, deep/long names stay fully visible via the
+  // horizontal scrollbar instead of being clipped with an ellipsis.
+  <span className={cn("whitespace-nowrap", className)} {...props}>
     {children}
   </span>
 );
