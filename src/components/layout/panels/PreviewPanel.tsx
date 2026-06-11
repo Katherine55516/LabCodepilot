@@ -2,79 +2,9 @@
 
 import { useState, useEffect, useMemo, useCallback } from "react";
 import dynamic from "next/dynamic";
-import { useTheme } from "next-themes";
 import { X, Copy, Check, SpinnerGap, Image as ImageIcon } from "@/components/ui/icon";
 import { exportHtmlAsLongShot, ArtifactExportError } from "@/lib/artifact-export";
 import { Button } from "@/components/ui/button";
-// `Light` mode requires explicit registerLanguage. Without these, every file
-// renders as plaintext (no token classes) regardless of the resolved language.
-// Note: switching to the default `react-syntax-highlighter` export does NOT help
-// here — its default-highlight.js imports `lowlight`, but lowlight@1.20.0 ships
-// an empty registry on its main entry, so we'd be back at square one.
-import { Light as SyntaxHighlighter } from "react-syntax-highlighter";
-import typescript from "react-syntax-highlighter/dist/esm/languages/hljs/typescript";
-import javascript from "react-syntax-highlighter/dist/esm/languages/hljs/javascript";
-import python from "react-syntax-highlighter/dist/esm/languages/hljs/python";
-import ruby from "react-syntax-highlighter/dist/esm/languages/hljs/ruby";
-import rust from "react-syntax-highlighter/dist/esm/languages/hljs/rust";
-import go from "react-syntax-highlighter/dist/esm/languages/hljs/go";
-import java from "react-syntax-highlighter/dist/esm/languages/hljs/java";
-import kotlin from "react-syntax-highlighter/dist/esm/languages/hljs/kotlin";
-import swift from "react-syntax-highlighter/dist/esm/languages/hljs/swift";
-import c from "react-syntax-highlighter/dist/esm/languages/hljs/c";
-import cpp from "react-syntax-highlighter/dist/esm/languages/hljs/cpp";
-import csharp from "react-syntax-highlighter/dist/esm/languages/hljs/csharp";
-import css from "react-syntax-highlighter/dist/esm/languages/hljs/css";
-import scss from "react-syntax-highlighter/dist/esm/languages/hljs/scss";
-import less from "react-syntax-highlighter/dist/esm/languages/hljs/less";
-import xml from "react-syntax-highlighter/dist/esm/languages/hljs/xml";
-import json from "react-syntax-highlighter/dist/esm/languages/hljs/json";
-import yaml from "react-syntax-highlighter/dist/esm/languages/hljs/yaml";
-import markdown from "react-syntax-highlighter/dist/esm/languages/hljs/markdown";
-import sql from "react-syntax-highlighter/dist/esm/languages/hljs/sql";
-import bash from "react-syntax-highlighter/dist/esm/languages/hljs/bash";
-import powershell from "react-syntax-highlighter/dist/esm/languages/hljs/powershell";
-import dockerfile from "react-syntax-highlighter/dist/esm/languages/hljs/dockerfile";
-import lua from "react-syntax-highlighter/dist/esm/languages/hljs/lua";
-import r from "react-syntax-highlighter/dist/esm/languages/hljs/r";
-import php from "react-syntax-highlighter/dist/esm/languages/hljs/php";
-import dart from "react-syntax-highlighter/dist/esm/languages/hljs/dart";
-import vbnet from "react-syntax-highlighter/dist/esm/languages/hljs/vbnet";
-
-SyntaxHighlighter.registerLanguage("typescript", typescript);
-SyntaxHighlighter.registerLanguage("javascript", javascript);
-SyntaxHighlighter.registerLanguage("python", python);
-SyntaxHighlighter.registerLanguage("ruby", ruby);
-SyntaxHighlighter.registerLanguage("rust", rust);
-SyntaxHighlighter.registerLanguage("go", go);
-SyntaxHighlighter.registerLanguage("java", java);
-SyntaxHighlighter.registerLanguage("kotlin", kotlin);
-SyntaxHighlighter.registerLanguage("swift", swift);
-SyntaxHighlighter.registerLanguage("c", c);
-SyntaxHighlighter.registerLanguage("cpp", cpp);
-SyntaxHighlighter.registerLanguage("csharp", csharp);
-SyntaxHighlighter.registerLanguage("css", css);
-SyntaxHighlighter.registerLanguage("scss", scss);
-SyntaxHighlighter.registerLanguage("less", less);
-SyntaxHighlighter.registerLanguage("xml", xml);
-SyntaxHighlighter.registerLanguage("html", xml); // hljs xml grammar covers HTML
-SyntaxHighlighter.registerLanguage("json", json);
-SyntaxHighlighter.registerLanguage("yaml", yaml);
-SyntaxHighlighter.registerLanguage("markdown", markdown);
-SyntaxHighlighter.registerLanguage("sql", sql);
-SyntaxHighlighter.registerLanguage("bash", bash);
-SyntaxHighlighter.registerLanguage("powershell", powershell);
-SyntaxHighlighter.registerLanguage("dockerfile", dockerfile);
-SyntaxHighlighter.registerLanguage("lua", lua);
-SyntaxHighlighter.registerLanguage("r", r);
-SyntaxHighlighter.registerLanguage("php", php);
-SyntaxHighlighter.registerLanguage("dart", dart);
-SyntaxHighlighter.registerLanguage("vbnet", vbnet);
-// Languages without an hljs grammar (toml/graphql/svelte/prisma/dotenv/fish/zig/vue)
-// stay plaintext — acceptable trade-off vs. pulling in a second highlighter.
-
-import { useThemeFamily } from "@/lib/theme/context";
-import { resolveCodeTheme, resolveHljsStyle } from "@/lib/theme/code-themes";
 import { usePanel } from "@/hooks/usePanel";
 import { useTranslation } from "@/hooks/useTranslation";
 import { ResizeHandle } from "@/components/layout/ResizeHandle";
@@ -243,9 +173,7 @@ const PREVIEW_MAX_WIDTH = 800;
 const PREVIEW_DEFAULT_WIDTH = 480;
 
 export function PreviewPanel() {
-  const { resolvedTheme } = useTheme();
   const { workingDirectory, sessionId, previewSource, previewFile, setPreviewFile, previewViewMode, setPreviewViewMode, setPreviewOpen } = usePanel();
-  const isDark = resolvedTheme === "dark";
   const [preview, setPreview] = useState<FilePreviewType | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -362,11 +290,22 @@ export function PreviewPanel() {
     previewSource?.kind === "file" && loadedPath === previewSource.filePath;
   useEffect(() => {
     if (preview?.content !== undefined && preview.path) {
-      setEditContent(preview.content);
-      setSavedContent(preview.content);
+      // Only seed the edit buffers for EDITABLE files. Non-editable / truncated
+      // files render read-only from preview.content (SourceView) and never read
+      // editContent, so cloning the (possibly multi-MB) content into two more
+      // state strings is pure waste — exactly the huge truncated-file case.
+      // loadedPath must still be set for ALL files: freshPreview gates on it, so
+      // skipping it would spin non-editable files on a permanent loader.
+      if (isEditable(preview.path) && !preview.truncated) {
+        setEditContent(preview.content);
+        setSavedContent(preview.content);
+      } else {
+        setEditContent("");
+        setSavedContent("");
+      }
       setLoadedPath(preview.path);
     }
-  }, [preview?.content, preview?.path]);
+  }, [preview?.content, preview?.path, preview?.truncated]);
   const editDirty = editContent !== savedContent && loadedMatchesActive;
 
   // Codex P1 follow-up. The render path below used to read `preview`
@@ -692,7 +631,7 @@ export function PreviewPanel() {
             ) : previewViewMode === "rendered" && canRender ? (
               <RenderedView content={freshPreview.content} filePath={filePath} />
             ) : (
-              <SourceView preview={freshPreview} isDark={isDark} />
+              <SourceView preview={freshPreview} />
             )}
             {!(canEdit && (previewViewMode === "edit" || previewViewMode === "source")) &&
               freshPreview.truncated && <TruncationBanner preview={freshPreview} />}
@@ -788,41 +727,21 @@ function ViewModeToggle({
   );
 }
 
-/** Resolve hljs style from the current theme family + mode. */
-function useDocCodeTheme(isDark: boolean) {
-  const { family, families } = useThemeFamily();
-  const codeTheme = resolveCodeTheme(families, family);
-  return resolveHljsStyle(codeTheme, isDark);
-}
-
-/** Source code view using react-syntax-highlighter */
-function SourceView({ preview, isDark }: { preview: FilePreviewType; isDark: boolean }) {
-  const hljsStyle = useDocCodeTheme(isDark);
+/**
+ * Read-only source view. Renders through the same virtualized CodeMirror surface
+ * the edit path uses (O(viewport) DOM), so a large/truncated file no longer emits
+ * one DOM node per line (~50k spans at the line cap) — the dominant non-virtualized
+ * memory/CPU cost. Syntax highlighting + line numbers are preserved by CodeMirror;
+ * only the color palette shifts to match the edit surface.
+ */
+function SourceView({ preview }: { preview: FilePreviewType }) {
   return (
-    <div className="text-xs">
-      <SyntaxHighlighter
-        language={preview.language}
-        style={hljsStyle}
-        showLineNumbers
-        customStyle={{
-          margin: 0,
-          padding: "8px",
-          borderRadius: 0,
-          fontSize: "11px",
-          lineHeight: "1.5",
-          background: "transparent",
-        }}
-        lineNumberStyle={{
-          minWidth: "2.5em",
-          paddingRight: "8px",
-          color: "var(--muted-foreground)",
-          opacity: 0.5,
-          userSelect: "none",
-        }}
-      >
-        {preview.content}
-      </SyntaxHighlighter>
-    </div>
+    <MarkdownEditor
+      value={preview.content}
+      onChange={() => {}}
+      editable={false}
+      language={preview.language}
+    />
   );
 }
 

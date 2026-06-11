@@ -215,11 +215,23 @@ export function FileTree({ workingDirectory, onFileSelect, onFileAdd, selectedFo
     };
   }, []);
 
-  // Auto-refresh when AI finishes streaming
+  // Auto-refresh when AI finishes streaming. The 'refresh-file-tree' event is
+  // dispatched once per tool completion AND once per stream completion, i.e.
+  // many times per AI turn. Debounce so a burst coalesces into a SINGLE reload
+  // instead of re-fetching + rebuilding the whole tree N+1 times every turn —
+  // over a long session that repeated full-tree thrash is the dominant
+  // file-tree cost (and a needless source of GC churn / UI flicker).
   useEffect(() => {
-    const handler = () => fetchTree();
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const handler = () => {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => { timer = null; fetchTree(); }, 500);
+    };
     window.addEventListener('refresh-file-tree', handler);
-    return () => window.removeEventListener('refresh-file-tree', handler);
+    return () => {
+      window.removeEventListener('refresh-file-tree', handler);
+      if (timer) clearTimeout(timer);
+    };
   }, [fetchTree]);
 
   // Controlled expansion state for search-driven highlighting

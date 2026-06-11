@@ -4,6 +4,7 @@ import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Message, MessagesResponse, FileAttachment, SessionStreamSnapshot, MentionRef } from '@/types';
 import { buildFilesDisplayContent } from '@/lib/file-utils';
+import { trimMessageWindow } from '@/lib/message-window';
 import { MessageList } from './MessageList';
 import { TerminalReasonChip } from './TerminalReasonChip';
 import { RateLimitBanner } from './RateLimitBanner';
@@ -65,6 +66,13 @@ interface ChatViewProps {
 
 /** Maximum messages kept in React state. Older messages are trimmed and reloaded on scroll. */
 const MAX_MESSAGES_IN_MEMORY = 300;
+/**
+ * Soft cap on total bytes of message.content kept in React state. A single
+ * multi-MB tool_result (Read/Bash/WebFetch/Agent) otherwise stays fully
+ * resident ×300 messages and can crash the renderer. When the tail exceeds this,
+ * the oldest messages are evicted (still in DB, re-fetched via "Load earlier").
+ */
+const MAX_CONTENT_BYTES_IN_MEMORY = 24 * 1024 * 1024; // ~24MB
 
 export function ChatView({ sessionId, initialMessages = [], initialHasMore = false, modelName, providerId, initialPermissionProfile, initialMode, initialHasSummary, initialEffort }: ChatViewProps) {
   const { setStreamingSessionId, workingDirectory, setPendingApprovalSessionId, setDashboardPanelOpen, setFileTreeOpen, setIsAssistantWorkspace } = usePanel();
@@ -110,9 +118,7 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
           const localCommands = current.filter(m => m.id.startsWith('cmd-'));
           if (localCommands.length === 0) return dbMessages;
           const merged = [...dbMessages, ...localCommands];
-          return merged.length > MAX_MESSAGES_IN_MEMORY
-            ? merged.slice(-MAX_MESSAGES_IN_MEMORY)
-            : merged;
+          return trimMessageWindow(merged, MAX_MESSAGES_IN_MEMORY, MAX_CONTENT_BYTES_IN_MEMORY).trimmed;
         });
       })
       .catch(() => { /* keep current state as-is */ });
@@ -121,11 +127,9 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
   const cappedSetMessages: typeof setMessages = useCallback((action) => {
     setMessages((prev) => {
       const next = typeof action === 'function' ? action(prev) : action;
-      if (next.length > MAX_MESSAGES_IN_MEMORY) {
-        setHasMore(true);
-        return next.slice(-MAX_MESSAGES_IN_MEMORY);
-      }
-      return next;
+      const { trimmed, didTrim } = trimMessageWindow(next, MAX_MESSAGES_IN_MEMORY, MAX_CONTENT_BYTES_IN_MEMORY);
+      if (didTrim) setHasMore(true);
+      return trimmed;
     });
   }, []);
   const [mode, setMode] = useState<string>(initialMode || 'code');

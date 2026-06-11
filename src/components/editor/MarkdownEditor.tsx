@@ -49,6 +49,13 @@ export interface MarkdownEditorProps {
    * text (still editable, just without syntax highlighting).
    */
   language?: string;
+  /**
+   * When false, the editor is read-only (no edits, onChange never fires).
+   * Lets the preview panel reuse this virtualized surface for viewing large
+   * files cheaply instead of a non-virtualized one-DOM-node-per-line render.
+   * Defaults to true (existing editing callers unchanged).
+   */
+  editable?: boolean;
 }
 
 export function MarkdownEditor({
@@ -59,6 +66,7 @@ export function MarkdownEditor({
   placeholder,
   className,
   language = "markdown",
+  editable = true,
 }: MarkdownEditorProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
@@ -66,8 +74,12 @@ export function MarkdownEditor({
   // create new ones on every render (which would cause reconfigure loops).
   const themeCompartment = useRef(new Compartment()).current;
   const langCompartment = useRef(new Compartment()).current;
+  const editableCompartment = useRef(new Compartment()).current;
   const onChangeRef = useRef(onChange);
   const onSaveRef = useRef(onSave);
+  // Latest editable flag for the long-lived updateListener (avoids stale closure
+  // and lets the compartment-reconfigure path below toggle read-only live).
+  const editableRef = useRef(editable);
   // Tracks the most recently requested language so a slow desc.load() can't
   // overwrite a newer language reconfigure (race when user fast-switches files).
   const langSeqRef = useRef(0);
@@ -82,6 +94,9 @@ export function MarkdownEditor({
   useEffect(() => {
     onSaveRef.current = onSave;
   }, [onSave]);
+  useEffect(() => {
+    editableRef.current = editable;
+  }, [editable]);
 
   // Initialize EditorView once per mount. State changes flow through
   // dispatches in the other effects below.
@@ -128,10 +143,14 @@ export function MarkdownEditor({
         langCompartment.of(markdown()),
         baseTheme,
         themeCompartment.of(initialTheme),
+        editableCompartment.of([
+          EditorState.readOnly.of(!editable),
+          EditorView.editable.of(editable),
+        ]),
         saveKeymap,
         EditorView.lineWrapping,
         EditorView.updateListener.of((u) => {
-          if (u.docChanged) onChangeRef.current(u.state.doc.toString());
+          if (editableRef.current && u.docChanged) onChangeRef.current(u.state.doc.toString());
         }),
       ],
     });
@@ -170,6 +189,19 @@ export function MarkdownEditor({
       ),
     });
   }, [resolvedTheme, themeCompartment]);
+
+  // Editable compartment swap — toggle read-only without rebuilding the view,
+  // so the same instance can move between view (read-only) and edit modes.
+  useEffect(() => {
+    const view = viewRef.current;
+    if (!view) return;
+    view.dispatch({
+      effects: editableCompartment.reconfigure([
+        EditorState.readOnly.of(!editable),
+        EditorView.editable.of(editable),
+      ]),
+    });
+  }, [editable, editableCompartment]);
 
   // Language compartment swap — dynamically loads grammar via language-data.
   // Same compartment pattern as the theme: no EditorView rebuild, no cursor
