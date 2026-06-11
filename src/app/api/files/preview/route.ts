@@ -9,7 +9,8 @@ export async function GET(request: NextRequest) {
   const filePath = searchParams.get('path');
 
   // maxLines is a hint / cap, not a default. When absent, readFilePreview
-  // picks a per-extension cap (50k for Markdown/text, 1k for code).
+  // picks a per-extension cap (50k generous default for code / text /
+  // Markdown, 10k for bulk-data formats like log / csv).
   const maxLinesParam = searchParams.get('maxLines');
   const userMaxLines = maxLinesParam ? parseInt(maxLinesParam, 10) : undefined;
 

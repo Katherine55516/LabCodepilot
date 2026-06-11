@@ -187,23 +187,28 @@ async function scanDirectoryRecursive(dir: string, depth: number): Promise<FileT
 /**
  * Per-extension line caps for preview API.
  *
- * Prose files (Markdown, plain text, logs, delimited data) get a generous cap
- * so long AI-generated reports and 10万-字符级 Markdown display completely.
- * Code files keep a tighter cap because full file rendering is rarely useful
- * in a side panel.
+ * Code, prose (Markdown / text), and unknown files all use the generous
+ * DEFAULT_LINE_CAP — the preview panel exists to read whole files, so a
+ * multi-thousand-line source file must display in full, not get cut off at
+ * the first screenful. Only bulk-data formats that are routinely enormous and
+ * rarely read top-to-bottom (logs, delimited data) keep a tighter cap.
  *
- * Unknown extensions fall through to DEFAULT_LINE_CAP.
+ * Every cap is still bounded by ABSOLUTE_LINE_CEILING and BYTE_CEILING, which
+ * are the real safety nets against pathologically large files.
  */
 const EXTENSION_LINE_CAPS: Record<string, number> = {
-  md: 50000,
-  mdx: 50000,
-  txt: 50000,
   log: 10000,
   csv: 10000,
   tsv: 10000,
 };
 
-const DEFAULT_LINE_CAP = 1000;
+/**
+ * Generous default — covers virtually every real source file. Was 1000, which
+ * cut code previews off mid-file (everything past line 1000 was invisible in
+ * the preview panel). Raised so code files display completely; the absolute
+ * ceiling + byte ceiling below still guard against pathological inputs.
+ */
+const DEFAULT_LINE_CAP = 50000;
 
 /** Hard ceiling — no preview can exceed this even if extension allows more. */
 const ABSOLUTE_LINE_CEILING = 100000;
