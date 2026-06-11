@@ -49,7 +49,9 @@ src/
 
 electron/
 ├── main.ts         # Electron 主进程（窗口、IPC、Utility Process）
-└── preload.ts      # contextBridge 暴露（install API, updater API）
+├── logger.ts       # 主进程文件日志（app.getPath('logs')/main.log、console tee、崩溃捕获、密钥脱敏、滚动）
+├── log-scrub.ts    # 日志密钥脱敏（纯函数，单测覆盖）
+└── preload.ts      # contextBridge 暴露（install API, updater API, logs API）
 ```
 
 ## 数据流
@@ -171,6 +173,8 @@ Schema 定义在 `src/lib/db.ts`，12 张表：
 | 凭证本地加密（产品） | `docs/insights/credential-encryption.md` | 保护下发凭证是 SaaS 必补一环、safeStorage vs SQLCipher/keytar、只加密磁盘的诚实边界 |
 | 额度用量进度条 | `docs/handover/usage-meter.md` | 用户栏三条已用%进度条、主进程代理 /api/v1/usage、点开才刷新、usedPercent/levelOf 纯函数、错误态 |
 | 额度用量进度条（产品） | `docs/insights/usage-meter.md` | 位置选择、主进程代理零 token 暴露、点开才刷新不轮询、三条已用%仅百分比、轻量边界 |
+| 主进程文件日志 | `docs/handover/file-logging.md` | 汇聚主进程 console.* 捕获主进程+捆绑服务、main.log 5MB×5 滚动、appendFileSync 崩溃安全、两层密钥脱敏、按完整行防 chunk 绕过、uncaughtExceptionMonitor、logs:open-folder + 设置按钮 |
+| 主进程文件日志（产品） | `docs/insights/file-logging.md` | 「崩了没日志」硬伤起因、汇聚主进程零侵入、同步写换崩溃安全、只脱密钥保路径取舍、对抗评审三个坑、源头脱敏未来方向 |
 
 ## 技术栈
 

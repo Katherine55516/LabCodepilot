@@ -29,3 +29,4 @@
 | [usage-meter.md](./usage-meter.md) | [handover/usage-meter.md](../handover/usage-meter.md) | 额度用量进度条：放用户栏的位置选择、主进程代理而非 renderer 直连(零 token 暴露)、点开才刷新不轮询、三条已用%仅百分比的取舍、百分比放客户端纯函数、不显示货币/历史的轻量边界 |
 | [cross-host-session-import.md](./cross-host-session-import.md) | [handover/cross-host-session-import.md](../handover/cross-host-session-import.md) | 跨主机会话导入：「同一份 CLI 为何各跑各的」认知陷阱、bsApp 进程级 env 隔离（shadow HOME）的副作用、零配置自动发现 vs 让用户手填路径的设计权衡 |
 | [multimodal-model-guard.md](./multimodal-model-guard.md) | [handover/multimodal-model-guard.md](../handover/multimodal-model-guard.md) | 多模态模型标识 + 上传拦截：错误前移到上传那一刻、为何用 description 关键词而非结构化字段（务实可演进）、为何"无法判断时放行"、image-gen 绕过、通用组件只暴露机制不内置策略 |
+| [file-logging.md](./file-logging.md) | [handover/file-logging.md](../handover/file-logging.md) | 主进程文件日志：「线上崩了没日志可查」硬伤起因（真排障案例）、为何汇聚主进程零侵入服务端、为何同步写换崩溃安全、只脱密钥保路径的 recall/precision 取舍、设置页一键打开、对抗评审逼出的三个坑（Sentry 弹窗/精确脱敏形同虚设/chunk 拆分）、源头脱敏与「复制诊断信息」未来方向 |

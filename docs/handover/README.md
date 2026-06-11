@@ -43,3 +43,4 @@
 | usage-meter.md | 额度用量进度条：用户栏内三条已用%进度条(总/国内/国外)、主进程代理 apiRequest('/api/v1/usage')、点开菜单才刷新、usedPercent/levelOf 纯函数、409/503/网络错误态、token 不出主进程 |
 | cross-host-session-import.md | 跨主机会话导入：多 `projects/` 根目录合并扫描、自动发现 bsApp（claude-bs-agent）shadow HOME（`<userData>/claude-home`）、零配置导入 bsApp 历史、只改 claude-session-parser.ts 对列表/导入 API 透明 |
 | multimodal-model-guard.md | 多模态模型标识 + 上传拦截：description 含「多模态」判定（已落 notes 列，零后端改动）、useManagedMultimodal hook、PromptInput 通用 validateFile、非多模态 managed 模型拦截图片/音视频 + AlertDialog、未知放行 + image-gen 绕过边界 |
+| file-logging.md | 主进程文件日志：汇聚点设计（包裹主进程 console.* 同时捕获主进程 + 捆绑服务管道输出）、app.getPath('logs')/main.log 5MB×5 滚动、appendFileSync 崩溃安全、两层密钥脱敏（合并 env 精确值 + 形态匹配，保留路径/host/git SHA）、按完整行脱敏防 chunk 拆分绕过、uncaughtExceptionMonitor 避免吞掉 Sentry 弹窗、logs:open-folder IPC + 设置按钮、源头脱敏待办 |
