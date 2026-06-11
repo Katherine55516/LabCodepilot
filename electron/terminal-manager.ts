@@ -97,12 +97,26 @@ export class TerminalManager {
   kill(id: string): void {
     const terminal = this.terminals.get(id);
     if (!terminal) return;
+    const proc = terminal.process;
+    this.terminals.delete(id);
     try {
-      terminal.process.kill();
+      // SIGHUP, not SIGTERM: an interactive login shell (`zsh -il` / `bash -il`)
+      // IGNORES SIGTERM, so the default process.kill() left the shell running
+      // and orphaned. SIGHUP is the "terminal hung up" signal a shell exits on
+      // (and forwards to its jobs), which is exactly this scenario.
+      proc.kill('SIGHUP');
     } catch {
       // already dead
+      return;
     }
-    this.terminals.delete(id);
+    // Escalate to SIGKILL if the shell ignored SIGHUP (e.g. a foreground
+    // program trapping it) and is still alive after a short grace period.
+    const timer = setTimeout(() => {
+      if (proc.exitCode === null && proc.signalCode === null) {
+        try { proc.kill('SIGKILL'); } catch { /* already exited */ }
+      }
+    }, 2000);
+    timer.unref();
   }
 
   killAll(): void {

@@ -72,6 +72,8 @@ export class QQAdapter extends BaseChannelAdapter {
   private reconnectAttempts = 0;
   private maxReconnectAttempts = 10;
   private shouldReconnect = false;
+  private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private reconnectScheduled = false;
 
   // ── Lifecycle ───────────────────────────────────────────────
 
@@ -97,6 +99,14 @@ export class QQAdapter extends BaseChannelAdapter {
     if (!this._running) return;
     this._running = false;
     this.shouldReconnect = false;
+
+    // Cancel any pending reconnect so a flapping gateway can't resurrect the
+    // connection after stop() and leak a timer/socket.
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    this.reconnectScheduled = false;
 
     this.stopHeartbeat();
 
@@ -460,17 +470,27 @@ export class QQAdapter extends BaseChannelAdapter {
   // ── Reconnection ────────────────────────────────────────────
 
   private scheduleReconnect(): void {
+    // Guard against duplicate reconnect chains. A single failed connection can
+    // fire BOTH ws.on('error') (→ promise reject → caller's catch →
+    // scheduleReconnect) and ws.on('close') (→ scheduleReconnect). Without this
+    // guard each failure forks into two chains, and each of those forks again —
+    // exponential growth of concurrent WebSockets + timers during an outage.
+    if (this.reconnectScheduled) return;
+
     if (this.reconnectAttempts >= this.maxReconnectAttempts) {
       console.error('[qq-adapter] Max reconnect attempts reached, giving up');
       this._running = false;
       return;
     }
 
+    this.reconnectScheduled = true;
     this.reconnectAttempts++;
     const delay = Math.min(1000 * Math.pow(2, this.reconnectAttempts - 1), 60_000);
     console.log(`[qq-adapter] Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})`);
 
-    setTimeout(async () => {
+    this.reconnectTimer = setTimeout(async () => {
+      this.reconnectTimer = null;
+      this.reconnectScheduled = false;
       if (!this._running || !this.shouldReconnect) return;
       try {
         const appId = getSetting('bridge_qq_app_id') || '';

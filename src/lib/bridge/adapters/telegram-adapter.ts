@@ -76,6 +76,8 @@ export class TelegramAdapter extends BaseChannelAdapter {
 
   private running = false;
   private abortController: AbortController | null = null;
+  /** Resolves when the background poll loop has fully exited; awaited by stop(). */
+  private loopDone: Promise<void> | null = null;
   private queue: InboundMessage[] = [];
   private waiters: Array<(msg: InboundMessage | null) => void> = [];
   private typingIntervals = new Map<string, ReturnType<typeof setInterval>>();
@@ -113,8 +115,9 @@ export class TelegramAdapter extends BaseChannelAdapter {
     // Register bot commands menu with Telegram
     this.registerCommands().catch(() => {});
 
-    // Start polling in background (no await — runs until stop())
-    this.pollLoop().catch(err => {
+    // Start polling in background (no await — runs until stop()). Capture the
+    // completion promise so stop() can await the loop's actual termination.
+    this.loopDone = this.pollLoop().catch(err => {
       console.error('[telegram-adapter] Poll loop error:', err);
     });
 
@@ -126,6 +129,20 @@ export class TelegramAdapter extends BaseChannelAdapter {
     this.running = false;
     this.abortController?.abort();
     this.abortController = null;
+
+    // Wait for the poll loop to fully exit before returning. Otherwise a
+    // back-to-back restart() (triggered on every runtime config / account
+    // change) can start a second TelegramAdapter whose poll loop competes with
+    // this one for the same bot token + offset key — duplicate long-poll loops
+    // leaking until the old one happens to unblock.
+    if (this.loopDone) {
+      try {
+        await this.loopDone;
+      } catch {
+        /* loop errors are already logged in start() */
+      }
+      this.loopDone = null;
+    }
 
     // Persist committed offset before shutdown
     this.persistCommittedOffset();

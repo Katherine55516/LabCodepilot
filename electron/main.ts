@@ -1142,6 +1142,24 @@ function createWindow(url?: string) {
     }
   });
 
+  // Terminal shells are owned by the renderer session that opened them. When
+  // that session goes away — renderer crash, or a full document reload/cross-doc
+  // navigation — the renderer drops its terminal UI but the backing shell
+  // processes keep running and keep piping output to a dead webContents. Reap
+  // them on every such transition so they don't accumulate. (Window-close is
+  // handled in the 'closed' handler below; on macOS that path matters most
+  // because closing the window does not quit the app.)
+  mainWindow.webContents.on('render-process-gone', () => {
+    terminalManager.killAll();
+  });
+  mainWindow.webContents.on('did-start-navigation', (details) => {
+    // Only a real document swap in the main frame orphans the terminals;
+    // in-page same-document SPA navigation (Next.js client routing) does not.
+    if (details.isMainFrame && !details.isSameDocument) {
+      terminalManager.killAll();
+    }
+  });
+
   mainWindow.loadURL(url || LOADING_HTML);
 
   if (isDev) {
@@ -1149,6 +1167,9 @@ function createWindow(url?: string) {
   }
 
   mainWindow.on('closed', () => {
+    // Renderer session ended — reap any shells it left running so they don't
+    // linger in the background (notably on macOS, where the app stays alive).
+    terminalManager.killAll();
     mainWindow = null;
   });
 }
