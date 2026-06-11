@@ -64,8 +64,16 @@ interface ChatViewProps {
   initialEffort?: string;
 }
 
-/** Maximum messages kept in React state. Older messages are trimmed and reloaded on scroll. */
-const MAX_MESSAGES_IN_MEMORY = 300;
+/**
+ * Maximum messages kept in React state. Older messages are trimmed and reloaded
+ * on "Load earlier". Lowered 300→150: each mounted message can carry a live
+ * widget iframe (tens of MB) or a decoded image bitmap — costs the byte cap
+ * below does NOT bound (their content bytes are small). Capping the COUNT is what
+ * bounds those, so a smaller window directly reduces renderer memory in long,
+ * widget/image-heavy sessions. (Full per-viewport virtualization is the eventual
+ * ceiling fix; this is the cheap, low-risk approximation.)
+ */
+const MAX_MESSAGES_IN_MEMORY = 150;
 /**
  * Soft cap on total bytes of message.content kept in React state. A single
  * multi-MB tool_result (Read/Bash/WebFetch/Agent) otherwise stays fully

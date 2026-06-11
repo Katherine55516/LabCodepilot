@@ -166,8 +166,11 @@ const highlighterCache = new LRUMap<
   Promise<HighlighterGeneric<BundledLanguage, BundledTheme>>
 >(10);
 
-// Token cache — bounded to 200 entries
-const tokensCache = new LRUMap<string, TokenizedCode>(200);
+// Token cache — bounded to 100 entries. Each entry holds a full tokenized array
+// (per-token content + colors) which can be large for big code blocks; the LRU
+// caps COUNT only, so this is a fixed memory ceiling. Lowered 200→100 to halve
+// the worst case (a cache miss just re-highlights — no correctness change).
+const tokensCache = new LRUMap<string, TokenizedCode>(100);
 
 // Subscribers for async token updates
 const subscribers = new Map<string, Set<(result: TokenizedCode) => void>>();

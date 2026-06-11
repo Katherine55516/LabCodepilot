@@ -19,6 +19,8 @@ export function ImageThumbnail({ src, alt, onClick }: ImageThumbnailProps) {
       <img
         src={src}
         alt={alt}
+        loading="lazy"
+        decoding="async"
         className="max-h-32 w-full object-cover rounded-lg"
       />
     </Button>

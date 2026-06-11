@@ -101,6 +101,8 @@ export function ImageGenCard({
             <img
               src={imageUrl(img)}
               alt={`${t('imageGen.generated' as TranslationKey)} ${i + 1}`}
+              loading="lazy"
+              decoding="async"
               className="w-full h-auto object-cover transition-transform group-hover:scale-[1.02]"
             />
             <div className="absolute inset-0 bg-black/0 group-hover:bg-black/10 transition-colors" />
@@ -128,7 +130,7 @@ export function ImageGenCard({
               return (
                 <div key={i} className="w-12 h-12 rounded border border-border/30 overflow-hidden bg-muted/30">
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src={src} alt={`Reference ${i + 1}`} className="w-full h-full object-cover" />
+                  <img src={src} alt={`Reference ${i + 1}`} loading="lazy" decoding="async" className="w-full h-full object-cover" />
                 </div>
               );
             })}
