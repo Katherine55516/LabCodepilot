@@ -38,6 +38,12 @@ extraResources:
     filter:
       - "**/*"
       - "!node_modules"
+      # !dist-electron —— 去掉 NFT 误判塞进 standalone 的主进程产物重复拷贝。
+      # 主进程真正运行的 main.js 在 app.asar 内(preload 走 __dirname/preload.js),
+      # standalone 下这份 dist-electron/{main,preload}.js 是死代码 + 明文泄漏面。
+      # CI 干净构建(next build 在 build-electron 之前)本就不含它,加此项让本地
+      # 构建向 CI 看齐;运行时无任何代码引用 standalone/dist-electron。
+      - "!dist-electron"
       - "!release"
       - "!src"
       - "!electron"
