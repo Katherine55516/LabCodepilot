@@ -32,6 +32,17 @@ extraResources:
   - from: .next/standalone/node_modules/
     to: standalone/node_modules/
     filter: ["**/*"]
+  # Turbopack 把 instrumentation 的 external 模块(require-in-the-middle /
+  # import-in-the-middle —— server 启动期由 Sentry instrumentation hook 加载)
+  # 放在 .next/node_modules/ 这层【嵌套】node_modules 里。必须用 from 直接指向它
+  # 单独复制:electron-builder 会忽略 from 根【下】名为 node_modules 的子目录,
+  # 所以紧随其后的 from:.next/standalone/.next/(filter **/*)带不进它;缺了它
+  # server 起不来 —— health-check 500 + "Cannot find module
+  # 'require-in-the-middle-<hash>'" + "Server startup timeout after 30s"。
+  # (顶层 node_modules 也是出于同一原因由上面那条单独 from 复制。)
+  - from: .next/standalone/.next/node_modules/
+    to: standalone/.next/node_modules/
+    filter: ["**/*"]
   - from: .next/standalone/.next/
     to: standalone/.next/
     filter: ["**/*"]
