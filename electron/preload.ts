@@ -85,6 +85,32 @@ contextBridge.exposeInMainWorld('electronAPI', {
       return () => { ipcRenderer.removeListener('terminal:exit', listener); };
     },
   },
+  // 语音转文字（百炼实时 ASR）。仿 terminal 的 invoke + send + on 三种。
+  asr: {
+    requestMicPermission: (): Promise<{ granted: boolean; error?: string }> =>
+      ipcRenderer.invoke('asr:request-mic-permission'),
+    start: (): Promise<{ ok: boolean; status?: number; error?: string }> =>
+      ipcRenderer.invoke('asr:start'),
+    sendAudio: (chunk: ArrayBuffer): void => ipcRenderer.send('asr:audio', chunk),
+    stop: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('asr:stop'),
+    onTranscript: (
+      cb: (data: { kind: 'partial'; text: string; stash: string } | { kind: 'final'; transcript: string }) => void,
+    ) => {
+      const listener = (_e: unknown, data: unknown) => cb(data as never);
+      ipcRenderer.on('asr:transcript', listener);
+      return () => { ipcRenderer.removeListener('asr:transcript', listener); };
+    },
+    onState: (cb: (data: { state: string }) => void) => {
+      const listener = (_e: unknown, data: unknown) => cb(data as { state: string });
+      ipcRenderer.on('asr:state', listener);
+      return () => { ipcRenderer.removeListener('asr:state', listener); };
+    },
+    onError: (cb: (data: { code: string; message: string }) => void) => {
+      const listener = (_e: unknown, data: unknown) => cb(data as { code: string; message: string });
+      ipcRenderer.on('asr:error', listener);
+      return () => { ipcRenderer.removeListener('asr:error', listener); };
+    },
+  },
   notification: {
     show: (options: { title: string; body: string; onClick?: unknown }) =>
       ipcRenderer.invoke('notification:show', options),

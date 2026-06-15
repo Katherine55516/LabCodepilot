@@ -19,6 +19,7 @@ import { CliToolsPopover } from './CliToolsPopover';
 import { ModelSelectorDropdown } from './ModelSelectorDropdown';
 import { EffortSelectorDropdown } from './EffortSelectorDropdown';
 import { FileAwareSubmitButton, AttachFileButton, FileTreeAttachmentBridge, FileAttachmentsCapsules, CliBadge, ComposerBadgeRow } from './MessageInputParts';
+import { VoiceInputButton } from './VoiceInputButton';
 import {
   Tooltip,
   TooltipContent,
@@ -902,6 +903,12 @@ export function MessageInput({
               <PromptInputTools>
                 {/* Attach file button */}
                 <AttachFileButton />
+
+                {/* 语音输入按钮（仅 Electron 环境渲染） */}
+                <VoiceInputButton
+                  getBaseText={() => inputValue}
+                  onUpdate={(full) => setInputValue(full)}
+                />
 
                 {/* Slash command button */}
                 <SlashCommandButton onInsertSlash={slashCommands.handleInsertSlash} />

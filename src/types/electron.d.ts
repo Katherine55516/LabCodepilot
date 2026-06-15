@@ -211,6 +211,18 @@ interface ElectronAPI {
   auth?: ElectronAuthAPI;
   /** Vendor-bundled GSD plugin (gsd-build/get-shit-done, MIT). */
   gsd?: ElectronGsdAPI;
+  /** Voice-to-text input (Bailian realtime ASR). Electron-only (renderer falls back to hidden button). */
+  asr?: {
+    requestMicPermission: () => Promise<{ granted: boolean; error?: string }>;
+    start: () => Promise<{ ok: boolean; status?: number; error?: string }>;
+    sendAudio: (chunk: ArrayBuffer) => void;
+    stop: () => Promise<{ ok: boolean }>;
+    onTranscript: (
+      cb: (data: { kind: 'partial'; text: string; stash: string } | { kind: 'final'; transcript: string }) => void,
+    ) => () => void;
+    onState: (cb: (data: { state: string }) => void) => () => void;
+    onError: (cb: (data: { code: string; message: string }) => void) => () => void;
+  };
 }
 
 declare global {

@@ -18,7 +18,7 @@ if (!sentryDisabled) {
   });
 }
 
-import { app, BrowserWindow, Notification, nativeImage, dialog, session, utilityProcess, ipcMain, shell, Tray, Menu } from 'electron';
+import { app, BrowserWindow, Notification, nativeImage, dialog, session, utilityProcess, ipcMain, shell, Tray, Menu, systemPreferences } from 'electron';
 import path from 'path';
 import { execFileSync, spawn, ChildProcess } from 'child_process';
 import fs from 'fs';
@@ -57,6 +57,10 @@ import { clearAuthState } from './auth/storage';
 import { initMasterKey, getMasterKeyHex, logSafeStorageStatus } from './auth/secret-key';
 import { logInfo, logWarn, logError } from './auth/log';
 import { HttpError, AuthExpiredError, NetworkError, type MeInfo, type ModelConfig } from './auth/types';
+
+// ── Voice input (Bailian realtime ASR) ──
+import { RealtimeAsrSession } from './asr/realtime-session';
+import { getAsrToken, invalidateAsrToken } from './asr/token-cache';
 
 // File logger — persists main-process logs, the forked Next-server's piped
 // stdout/stderr (re-console.log'd below), and renderer console output to
@@ -1097,6 +1101,11 @@ function createWindow(url?: string) {
 
   mainWindow = new BrowserWindow(windowOptions);
 
+  // 麦克风：renderer getUserMedia 需 session 放行 'media'。本应用只加载第一方可信内容
+  // （本地 Next server），故全放行 —— 无 handler 时本就等于全放行，显式设置不引入回归。
+  mainWindow.webContents.session.setPermissionRequestHandler((_wc, _permission, callback) => callback(true));
+  mainWindow.webContents.session.setPermissionCheckHandler(() => true);
+
   // External links: open in system default browser instead of Electron
   mainWindow.webContents.setWindowOpenHandler(({ url: targetUrl }) => {
     if (targetUrl.startsWith('http://') || targetUrl.startsWith('https://')) {
@@ -1992,6 +2001,81 @@ app.whenReady().then(async () => {
   });
 
   // --- End terminal IPC handlers ---
+
+  // ===== 语音转文字（百炼实时 ASR）IPC =====
+  let asrSession: RealtimeAsrSession | null = null;
+
+  // macOS 需要系统级麦克风授权（TCC）；Win/Linux 直接放行。
+  const ensureMicPermission = async (): Promise<boolean> => {
+    if (process.platform !== 'darwin') return true;
+    const status = systemPreferences.getMediaAccessStatus('microphone');
+    if (status === 'granted') return true;
+    return systemPreferences.askForMediaAccess('microphone');
+  };
+
+  ipcMain.handle('asr:request-mic-permission', async () => {
+    try {
+      return { granted: await ensureMicPermission() };
+    } catch (e) {
+      return { granted: false, error: e instanceof Error ? e.message : String(e) };
+    }
+  });
+
+  ipcMain.handle('asr:start', async () => {
+    if (asrSession) { asrSession.stop(); asrSession = null; }
+
+    const sendTranscript = (p: unknown) => mainWindow?.webContents.send('asr:transcript', p);
+    const sendState = (state: string) => mainWindow?.webContents.send('asr:state', { state });
+    const sendError = (code: string, message: string) => mainWindow?.webContents.send('asr:error', { code, message });
+
+    // 开一个会话，并把「是否成功进入 listening」变成可 await 的结果（用于 401 重试）。
+    const attempt = (token: string) =>
+      new Promise<{ ok: true } | { ok: false; status?: number; error: string }>((resolve) => {
+        let settled = false;
+        const session = new RealtimeAsrSession(token, {
+          onPartial: (text, stash) => sendTranscript({ kind: 'partial', text, stash }),
+          onFinal: (transcript) => sendTranscript({ kind: 'final', transcript }),
+          onState: (s) => {
+            sendState(s);
+            if (s === 'listening' && !settled) { settled = true; resolve({ ok: true }); }
+            if (s === 'closed' && !settled) { settled = true; resolve({ ok: false, error: 'closed before ready' }); }
+          },
+          onError: (code, message, httpStatus) => {
+            if (!settled) { settled = true; resolve({ ok: false, status: httpStatus, error: `${code}: ${message}` }); }
+            else sendError(code, message);
+          },
+        }, 'zh');
+        asrSession = session;
+        session.start();
+      });
+
+    try {
+      let token = await getAsrToken();
+      let r = await attempt(token);
+      if (!r.ok && r.status === 401) { // 临时 token 失效 → 清缓存换新、重试一次
+        invalidateAsrToken();
+        token = await getAsrToken();
+        r = await attempt(token);
+      }
+      if (!r.ok) { asrSession?.stop(); asrSession = null; return { ok: false as const, status: r.status, error: r.error }; }
+      return { ok: true as const };
+    } catch (e) {
+      asrSession?.stop(); asrSession = null;
+      return { ok: false as const, error: e instanceof Error ? e.message : String(e) };
+    }
+  });
+
+  // 高频音频帧：fire-and-forget，仿 terminal:write
+  ipcMain.on('asr:audio', (_event, chunk: ArrayBuffer) => {
+    if (!asrSession) return;
+    asrSession.appendAudio(Buffer.from(chunk));
+  });
+
+  ipcMain.handle('asr:stop', async () => {
+    asrSession?.stop();
+    asrSession = null;
+    return { ok: true };
+  });
 
   // --- Notification IPC handler ---
   ipcMain.handle('notification:show', async (_event, options: {

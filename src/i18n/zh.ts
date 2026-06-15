@@ -1155,6 +1155,10 @@ const zh: Record<TranslationKey, string> = {
   'composer.multimodalSuffix': '（多模态）',
   'composer.nonMultimodalUploadTitle': '当前模型不支持多模态',
   'composer.nonMultimodalUploadDesc': '所选模型不是多模态模型，无法上传图片、音频、视频等附件。请切换到多模态模型后再试。',
+  'composer.voiceInput': '语音输入',
+  'composer.voiceInputStop': '停止录音',
+  'composer.voiceInputDenied': '麦克风权限被拒绝，请在系统设置 › 隐私与安全中开启。',
+  'composer.voiceInputError': '语音转录失败，请重试。',
 
   // ── Permission ────────────────────────────────────────────
   'permission.default': '默认权限',

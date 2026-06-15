@@ -259,3 +259,18 @@ export async function fetchUsage(): Promise<UsageInfo> {
   if (!r.json) throw new Error('/api/v1/usage returned empty body');
   return r.json;
 }
+
+// ── 8. /api/v1/asr/token ─────────────────────────────────────────────────────
+
+export interface AsrTokenResp {
+  token: string;
+  /** unix 秒；客户端据此缓存到近过期才再换 */
+  expiresAt: number;
+}
+
+/** 向自建服务器换一个百炼实时 ASR 的临时 token（服务器持真 key，token 不出主进程）。 */
+export async function fetchAsrToken(): Promise<AsrTokenResp> {
+  const r = await apiRequest<AsrTokenResp>('/api/v1/asr/token', { method: 'POST' });
+  if (!r.json) throw new Error('/api/v1/asr/token returned empty body');
+  return r.json;
+}

@@ -125,6 +125,9 @@ asarUnpack:
 mac:
   icon: build/icon.icns
   category: public.app-category.developer-tools
+  # 语音输入需要麦克风用途说明，缺这条调用麦克风会直接崩溃（Apple 强制）。
+  extendInfo:
+    NSMicrophoneUsageDescription: "AI Native Lab 需要使用麦克风，以支持语音输入（将你的说话实时转写为文字）。"
   artifactName: "${productName}-${version}-${arch}.${ext}"
   hardenedRuntime: true
   gatekeeperAssess: false

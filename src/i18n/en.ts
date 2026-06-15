@@ -1158,6 +1158,10 @@ const en = {
   'composer.multimodalSuffix': '(Multimodal)',
   'composer.nonMultimodalUploadTitle': "Model doesn't support multimodal input",
   'composer.nonMultimodalUploadDesc': 'The selected model is not multimodal and cannot accept image, audio or video attachments. Switch to a multimodal model and try again.',
+  'composer.voiceInput': 'Voice input',
+  'composer.voiceInputStop': 'Stop recording',
+  'composer.voiceInputDenied': 'Microphone permission denied. Enable it in System Settings › Privacy.',
+  'composer.voiceInputError': 'Voice transcription failed. Please try again.',
 
   // ── Permission ────────────────────────────────────────────
   'permission.default': 'Default',

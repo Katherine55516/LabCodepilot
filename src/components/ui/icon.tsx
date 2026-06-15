@@ -59,6 +59,8 @@ export {
   Lock,
   LockOpen,
   MagnifyingGlass,
+  Microphone,
+  MicrophoneSlash,
   Minus,
   Moon,
   NotePencil,

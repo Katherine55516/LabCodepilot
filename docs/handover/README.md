@@ -44,3 +44,5 @@
 | cross-host-session-import.md | 跨主机会话导入：多 `projects/` 根目录合并扫描、自动发现 bsApp（claude-bs-agent）shadow HOME（`<userData>/claude-home`）、零配置导入 bsApp 历史、只改 claude-session-parser.ts 对列表/导入 API 透明 |
 | multimodal-model-guard.md | 多模态模型标识 + 上传拦截：description 含「多模态」判定（已落 notes 列，零后端改动）、useManagedMultimodal hook、PromptInput 通用 validateFile、非多模态 managed 模型拦截图片/音视频 + AlertDialog、未知放行 + image-gen 绕过边界 |
 | file-logging.md | 主进程文件日志：汇聚点设计（包裹主进程 console.* 同时捕获主进程 + 捆绑服务管道输出）、app.getPath('logs')/main.log 5MB×5 滚动、appendFileSync 崩溃安全、两层密钥脱敏（合并 env 精确值 + 形态匹配，保留路径/host/git SHA）、按完整行脱敏防 chunk 拆分绕过、uncaughtExceptionMonitor 避免吞掉 Sentry 弹窗、logs:open-folder IPC + 设置按钮、源头脱敏待办 |
+| voice-input-client.md | 语音转文字输入（客户端，已实现/服务端 mock 联调）：百炼 qwen3-asr-flash-realtime 实时 WS、renderer AudioWorklet 抽 PCM16/16k + IPC、主进程 ws 持连直连百炼、临时 token 缓存(30min/复用)、麦克风按钮 + text/stash 回填、mac 权限/entitlement/Info.plist、逐文件完整代码 + 验证步骤。配套 voice-input-server.md |
+| voice-input-server.md | 语音转文字输入（服务端，另一项目/待实现）：仅 1 个接口 POST /api/v1/asr/token——用真 DASHSCOPE_API_KEY 换百炼临时 token 下发已登录用户；⚠️TTL 必走 query string(?expire_in_seconds=1800，放 body 只给 60s)；契约/错误码/配额/安全/Node 参考实现/curl 自测，服务端不经手音频。配套 voice-input-client.md |

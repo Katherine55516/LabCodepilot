@@ -1164,6 +1164,10 @@ const zhHK: Record<TranslationKey, string> = {
   'composer.multimodalSuffix': '（多模態）',
   'composer.nonMultimodalUploadTitle': '當前模型不支持多模態',
   'composer.nonMultimodalUploadDesc': '所選模型不是多模態模型，無法上載圖片、音頻、視頻等附件。請切換到多模態模型後再試。',
+  'composer.voiceInput': '語音輸入',
+  'composer.voiceInputStop': '停止錄音',
+  'composer.voiceInputDenied': '麥克風權限被拒絕，請在系統設定 › 私隱與安全性中開啟。',
+  'composer.voiceInputError': '語音轉錄失敗，請重試。',
 
   // ── Permission ────────────────────────────────────────────
   'permission.default': '預設權限',
