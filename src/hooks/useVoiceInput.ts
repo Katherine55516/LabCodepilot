@@ -1,5 +1,5 @@
 'use client';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 
 export type VoiceState = 'idle' | 'requesting' | 'connecting' | 'listening' | 'error';
 
@@ -11,6 +11,9 @@ interface Opts {
   onErrorMessage?: (msg: string) => void;
 }
 
+// useSyncExternalStore 的 subscribe：electronAPI.asr 加载后不再变，无需订阅变化。
+const SUBSCRIBE_NOOP = () => () => {};
+
 export function useVoiceInput({ getBaseText, onUpdate, onErrorMessage }: Opts) {
   const [state, setState] = useState<VoiceState>('idle');
   const streamRef = useRef<MediaStream | null>(null);
@@ -21,12 +24,15 @@ export function useVoiceInput({ getBaseText, onUpdate, onErrorMessage }: Opts) {
   const committedRef = useRef('');
   const listeningRef = useRef(false); // 仅在 WS listening 后才发音频
 
-  // mounted-gate 避免 SSR/hydration 不匹配：服务端与首屏客户端都先 false（按钮不渲染），
-  // 挂载后再探测 electronAPI（Electron 里 preload 已注入 → 变 true → 按钮出现）。
-  const [supported, setSupported] = useState(false);
-  useEffect(() => {
-    setSupported(typeof window !== 'undefined' && !!window.electronAPI?.asr);
-  }, []);
+  // electronAPI.asr 只读、且 SSR(无)与客户端(Electron 有)值不同。用 useSyncExternalStore
+  // 安全读取：服务端 + 首屏客户端都取 false（与 SSR 一致 → 不触发 hydration 不匹配），
+  // hydration 后切到真实值（Electron → true → 按钮出现）。不在 effect 里 setState
+  // （绕开 react-hooks/set-state-in-effect）。
+  const supported = useSyncExternalStore(
+    SUBSCRIBE_NOOP,
+    () => typeof window !== 'undefined' && !!window.electronAPI?.asr,
+    () => false,
+  );
 
   const teardownAudio = useCallback(() => {
     listeningRef.current = false;
