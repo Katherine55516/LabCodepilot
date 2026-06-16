@@ -1,7 +1,13 @@
 import WebSocket from 'ws';
 
-const MODEL = process.env.ASR_MODEL || 'qwen3-asr-flash-realtime-2026-02-10';
-const WS_BASE = 'wss://dashscope.aliyuncs.com/api-ws/v1/realtime';
+/** 连接百炼实时 ASR 所需的配置，全部由服务端下发（客户端不硬编码模型名/WS 地址）。 */
+export interface AsrSessionConfig {
+  token: string;
+  /** 百炼模型名，服务端下发 */
+  model: string;
+  /** 百炼 realtime WS 基址（不含 query），服务端下发 */
+  wsUrl: string;
+}
 
 export interface AsrCallbacks {
   /** 实时增量：text=已确认前缀, stash=暂定后缀 */
@@ -17,17 +23,17 @@ export class RealtimeAsrSession {
   private ws: WebSocket | null = null;
 
   constructor(
-    private token: string,
+    private cfg: AsrSessionConfig,
     private cb: AsrCallbacks,
     private lang: string = 'zh',
   ) {}
 
   start(): void {
-    const url = `${WS_BASE}?model=${encodeURIComponent(MODEL)}`;
+    const url = `${this.cfg.wsUrl}?model=${encodeURIComponent(this.cfg.model)}`;
     this.cb.onState('connecting');
     this.ws = new WebSocket(url, {
       headers: {
-        Authorization: `Bearer ${this.token}`,
+        Authorization: `Bearer ${this.cfg.token}`,
         'OpenAI-Beta': 'realtime=v1',
       },
     });

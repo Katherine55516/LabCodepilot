@@ -39,9 +39,11 @@ CodePilot 桌面端要做"语音输入"：用户说话 → 实时转文字进输
 | **Method / Path** | `POST /api/v1/asr/token` |
 | **鉴权** | 复用现有用户体系：`Authorization: Bearer <用户 session token>`（与 `/api/v1/usage`、`/api/v1/me` 等同一套中间件）。未登录/失效 → `401` |
 | **请求体** | 空（`{}` 或无）。预留可选 `{"ttl": <秒>}`，但**默认且建议固定 1800**，不开放客户端任意指定（防滥用） |
-| **成功响应 200** | `{ "token": "st-xxxxxxxx", "expiresAt": 1781512345 }` |
+| **成功响应 200** | `{ "token": "st-xxx", "expiresAt": 1781512345, "model": "qwen3-asr-flash-realtime-2026-02-10", "wsUrl": "wss://dashscope.aliyuncs.com/api-ws/v1/realtime" }` |
 | **`token`** | 百炼临时 token（`st-` 前缀字符串），原样透传 |
 | **`expiresAt`** | **unix 秒**时间戳（绝对过期时刻）。把百炼返回的 `expires_at` 原样改名为 `expiresAt` 返回 |
+| **`model`** | 百炼模型名，从**服务端配置**读取下发（客户端不硬编码——换模型不用发版客户端） |
+| **`wsUrl`** | 百炼 realtime WS 基址（不含 query），从服务端配置读取下发。客户端连接时拼成 `${wsUrl}?model=${model}` |
 
 **错误响应（建议带 HTTP status，便于客户端区分）：**
 | status | 含义 | body 示例 |
@@ -87,6 +89,9 @@ CodePilot 桌面端要做"语音输入"：用户说话 → 实时转文字进输
 const DASHSCOPE_API_KEY = process.env.DASHSCOPE_API_KEY; // 真 key，仅服务端持有
 const DASHSCOPE_TOKEN_URL = 'https://dashscope.aliyuncs.com/api/v1/tokens';
 const ASR_TOKEN_TTL = 1800; // 秒；务必走 query string
+// 下发给客户端的模型名 + WS 地址（客户端不硬编码；换模型/区域只改这里、不发版客户端）
+const ASR_MODEL = process.env.ASR_MODEL || 'qwen3-asr-flash-realtime-2026-02-10';
+const ASR_WS_URL = process.env.ASR_WS_URL || 'wss://dashscope.aliyuncs.com/api-ws/v1/realtime';
 
 app.post('/api/v1/asr/token', authMiddleware, rateLimit, async (req, res) => {
   try {
@@ -114,7 +119,12 @@ app.post('/api/v1/asr/token', authMiddleware, rateLimit, async (req, res) => {
     // 审计日志：只记 userId + 过期时刻，绝不记 token
     // logAsrMint(req.user.id, data.expires_at);
 
-    return res.json({ token: data.token, expiresAt: data.expires_at });
+    return res.json({
+      token: data.token,
+      expiresAt: data.expires_at,
+      model: ASR_MODEL,   // ← 下发模型名（客户端不硬编码）
+      wsUrl: ASR_WS_URL,  // ← 下发 WS 地址
+    });
   } catch (e) {
     console.error('[asr-token] error', e);
     return res.status(503).json({ error: 'upstream_error' });
@@ -129,9 +139,10 @@ app.post('/api/v1/asr/token', authMiddleware, rateLimit, async (req, res) => {
 | 配置 | 说明 |
 |---|---|
 | `DASHSCOPE_API_KEY` | 百炼真 key（`sk-` 前缀）。**仅服务端环境变量**，绝不进代码库/日志/响应 |
-| 区域端点 | 默认用**北京**：`dashscope.aliyuncs.com`。若你们百炼账号是**新加坡(国际)**区，换成 `dashscope-intl.aliyuncs.com`（换 token 与客户端 WS **必须同区**，见 §5 需同步告知客户端） |
+| 区域端点 | 默认**北京**：`dashscope.aliyuncs.com`。若百炼账号是**新加坡(国际)**区，换 token URL 用 `dashscope-intl.aliyuncs.com`，并把下面的 `ASR_WS_URL` 也改成国际区 —— 因 wsUrl 由服务端下发，客户端自动跟随，**无需单独通知客户端** |
 | TTL | `1800`（秒），见 §2.2 |
-| 模型名 | `qwen3-asr-flash-realtime-2026-02-10`（客户端用；服务端换 token 不需要传模型，仅供你了解全貌） |
+| `ASR_MODEL` | 百炼模型名（默认 `qwen3-asr-flash-realtime-2026-02-10`），**随响应下发给客户端**。换模型只改这里，客户端无需发版 |
+| `ASR_WS_URL` | 百炼 realtime WS 基址（默认 `wss://dashscope.aliyuncs.com/api-ws/v1/realtime`），**随响应下发**。换区域只改这里 |
 
 ---
 
@@ -149,13 +160,14 @@ app.post('/api/v1/asr/token', authMiddleware, rateLimit, async (req, res) => {
 
 ## 5. 与客户端的接口约定（联调对齐项）
 
-客户端（桌面端）拿到 `{token, expiresAt}` 后会：
-1. 缓存到内存，距 `expiresAt` <120s 才再来要新的（所以你们接口要保证 `expiresAt` 是**绝对 unix 秒**，不是相对秒）。
-2. 用该 token 直连：`wss://dashscope.aliyuncs.com/api-ws/v1/realtime?model=qwen3-asr-flash-realtime-2026-02-10`，握手头 `Authorization: Bearer <token>` + `OpenAI-Beta: realtime=v1`。
+客户端（桌面端）拿到 `{token, expiresAt, model, wsUrl}` 后会：
+1. 缓存到内存（含 model/wsUrl），距 `expiresAt` <120s 才再来要新的（所以 `expiresAt` 必须是**绝对 unix 秒**，不是相对秒）。
+2. 用下发的配置直连：`${wsUrl}?model=${model}`，握手头 `Authorization: Bearer <token>` + `OpenAI-Beta: realtime=v1`。**客户端不硬编码模型名/WS 地址，完全用你下发的。**
 3. 若 WS 握手返回 401（token 边界过期），客户端会丢弃缓存、再调一次本接口换新、重试一次。
+4. 若响应缺 `model` 或 `wsUrl`，客户端会直接报错（要求服务端必须下发这两项）。
 
 **需要你们和客户端对齐的两件事：**
-- **区域**：你们换 token 用哪个区（北京/新加坡），客户端的 WS 域名必须用**同一个区**。默认双方都用 `dashscope.aliyuncs.com`（北京）。若改国际区，需同时改客户端 `ASR_MODEL` 所在的 WS 域名。
+- **必须下发 `model` + `wsUrl`**：客户端已去掉硬编码、靠这两个字段连接。区域切换只改服务端的 `ASR_WS_URL`，客户端自动跟随、无需通知。
 - **`expiresAt` 单位**：unix **秒**（百炼 `expires_at` 原样）。务必不要改成毫秒。
 
 ---
@@ -174,7 +186,7 @@ curl -s -X POST "https://dashscope.aliyuncs.com/api/v1/tokens?expire_in_seconds=
 # ② 测你们的网关接口（带用户登录 bearer）
 curl -s -X POST "https://code-agent.ai-native-lab.com/api/v1/asr/token" \
   -H "Authorization: Bearer <用户登录token>" | jq .
-# 期望 {"token":"st-...","expiresAt":<unix秒>}
+# 期望 {"token":"st-...","expiresAt":<unix秒>,"model":"qwen3-asr-flash-realtime-...","wsUrl":"wss://dashscope.aliyuncs.com/api-ws/v1/realtime"}
 ```
 
 > 进阶（可选）端到端验证：用 ① 拿到的 token，按 §5 的 WS 地址 + header 连百炼、发 `session.update` 再推 PCM，能收到 `conversation.item.input_audio_transcription.completed`。该流程桌面端已实测通过，服务端无需实现，仅供联调参考。
@@ -185,6 +197,7 @@ curl -s -X POST "https://code-agent.ai-native-lab.com/api/v1/asr/token" \
 
 - [ ] `POST /api/v1/asr/token` 上线，复用现有用户鉴权中间件（未登录 401）。
 - [ ] 换 token 用 **query string** `?expire_in_seconds=1800`，实测返回 `expiresAt - now ≈ 1800`。
+- [ ] 响应包含 `model` + `wsUrl`（从服务端配置读取下发；客户端不硬编码，缺这两项客户端会报错）。
 - [ ] 真 `DASHSCOPE_API_KEY` 仅在服务端环境变量；响应/日志中无 key、无 token 明文。
 - [ ] 上游失败映射为 502/503，不泄漏上游细节。
 - [ ] （可选）接口限流 + 配额校验 + 审计日志（userId/时间/expiresAt）。

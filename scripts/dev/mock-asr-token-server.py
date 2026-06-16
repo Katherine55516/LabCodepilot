@@ -29,6 +29,9 @@ PORT = int(os.environ.get('MOCK_PORT', '8080'))
 REAL_BACKEND = os.environ.get('REAL_BACKEND', 'https://code-agent.ai-native-lab.com').rstrip('/')
 TTL = 1800  # ⚠️ 必须走 query string，放 body 会被忽略只给 60s
 DASHSCOPE_TOKENS_URL = f'https://dashscope.aliyuncs.com/api/v1/tokens?expire_in_seconds={TTL}'
+# 服务端下发给客户端的「模型名 + WS 地址」（真实服务端同样应从自己的配置下发，客户端不硬编码）
+ASR_MODEL = os.environ.get('ASR_MODEL', 'qwen3-asr-flash-realtime-2026-02-10')
+ASR_WS_URL = os.environ.get('ASR_WS_URL', 'wss://dashscope.aliyuncs.com/api-ws/v1/realtime')
 
 # 不转发的逐跳 / 由 urllib 自行管理的头
 HOP_BY_HOP = {'host', 'content-length', 'connection', 'keep-alive', 'transfer-encoding',
@@ -43,7 +46,7 @@ def mint_token():
     )
     with urllib.request.urlopen(req, timeout=10) as resp:
         data = json.loads(resp.read())
-    return {'token': data['token'], 'expiresAt': data['expires_at']}
+    return {'token': data['token'], 'expiresAt': data['expires_at'], 'model': ASR_MODEL, 'wsUrl': ASR_WS_URL}
 
 
 class Handler(BaseHTTPRequestHandler):

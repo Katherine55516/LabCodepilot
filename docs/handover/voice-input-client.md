@@ -123,12 +123,19 @@ export interface AsrTokenResp {
   token: string;
   /** unix 秒；客户端据此缓存到近过期才再换 */
   expiresAt: number;
+  /** 百炼模型名，服务端下发（客户端不硬编码） */
+  model: string;
+  /** 百炼 realtime WS 基址（不含 query），服务端下发 */
+  wsUrl: string;
 }
 
-/** 向自建服务器换一个百炼实时 ASR 的临时 token（服务器持真 key）。 */
+/** 向自建服务器换百炼临时 token + 下发配置（模型名/WS 地址）。token 不出主进程。 */
 export async function fetchAsrToken(): Promise<AsrTokenResp> {
   const r = await apiRequest<AsrTokenResp>('/api/v1/asr/token', { method: 'POST' });
   if (!r.json) throw new Error('/api/v1/asr/token returned empty body');
+  if (!r.json.token || !r.json.model || !r.json.wsUrl) {
+    throw new Error('/api/v1/asr/token 响应缺少 token/model/wsUrl —— 模型名与 WS 地址需由服务端下发');
+  }
   return r.json;
 }
 ```
@@ -138,19 +145,26 @@ export async function fetchAsrToken(): Promise<AsrTokenResp> {
 ```ts
 import { fetchAsrToken } from '../auth/client';
 
-let cached: { token: string; expiresAt: number } | null = null;
+/** 连接百炼所需配置：临时 token + 服务端下发的模型名/WS 地址。 */
+export interface AsrConfig {
+  token: string;
+  model: string;
+  wsUrl: string;
+}
+
+let cached: { config: AsrConfig; expiresAt: number } | null = null;
 // 距过期 <120s 就提前换，留出握手 + 时钟偏差余量
 const REFRESH_MARGIN_S = 120;
 
-/** 拿一个有效临时 token：命中缓存直接返回，否则向服务器换新。 */
-export async function getAsrToken(): Promise<string> {
+/** 拿一份有效配置（token + model + wsUrl）：命中缓存直接返回，否则向服务器换新。 */
+export async function getAsrConfig(): Promise<AsrConfig> {
   const now = Date.now() / 1000;
   if (cached && cached.expiresAt - now > REFRESH_MARGIN_S) {
-    return cached.token;
+    return cached.config;
   }
-  const fresh = await fetchAsrToken(); // { token, expiresAt }
-  cached = fresh;
-  return fresh.token;
+  const fresh = await fetchAsrToken(); // { token, expiresAt, model, wsUrl }
+  cached = { config: { token: fresh.token, model: fresh.model, wsUrl: fresh.wsUrl }, expiresAt: fresh.expiresAt };
+  return cached.config;
 }
 
 /** 握手被拒（401）时清缓存，下次强制换新。 */
@@ -164,8 +178,12 @@ export function invalidateAsrToken(): void {
 ```ts
 import WebSocket from 'ws';
 
-const MODEL = process.env.ASR_MODEL || 'qwen3-asr-flash-realtime-2026-02-10';
-const WS_BASE = 'wss://dashscope.aliyuncs.com/api-ws/v1/realtime';
+/** 连接百炼所需配置，全部由服务端下发（客户端不硬编码模型名/WS 地址）。 */
+export interface AsrSessionConfig {
+  token: string;
+  model: string;
+  wsUrl: string;
+}
 
 export interface AsrCallbacks {
   /** 实时增量：text=已确认前缀, stash=暂定后缀 */
@@ -181,17 +199,17 @@ export class RealtimeAsrSession {
   private ws: WebSocket | null = null;
 
   constructor(
-    private token: string,
+    private cfg: AsrSessionConfig,
     private cb: AsrCallbacks,
     private lang: string = 'zh',
   ) {}
 
   start(): void {
-    const url = `${WS_BASE}?model=${encodeURIComponent(MODEL)}`;
+    const url = `${this.cfg.wsUrl}?model=${encodeURIComponent(this.cfg.model)}`;
     this.cb.onState('connecting');
     this.ws = new WebSocket(url, {
       headers: {
-        Authorization: `Bearer ${this.token}`,
+        Authorization: `Bearer ${this.cfg.token}`,
         'OpenAI-Beta': 'realtime=v1',
       },
     });
@@ -266,7 +284,7 @@ export class RealtimeAsrSession {
 ```ts
 import { app, BrowserWindow, ipcMain, systemPreferences /* …现有… */ } from 'electron';
 import { RealtimeAsrSession } from './asr/realtime-session';
-import { getAsrToken, invalidateAsrToken } from './asr/token-cache';
+import { getAsrConfig, invalidateAsrToken, type AsrConfig } from './asr/token-cache';
 ```
 
 **(b) `createWindow()` 内、`mainWindow = new BrowserWindow(...)`（约 1098 行）之后，加媒体权限放行**（renderer 的 getUserMedia 要过 Electron 这层）：
@@ -311,10 +329,10 @@ ipcMain.handle('asr:start', async () => {
   const sendError = (code: string, message: string) => mainWindow?.webContents.send('asr:error', { code, message });
 
   // 开一个会话，并把「是否成功进入 listening」变成可 await 的结果（用于 401 重试）。
-  const attempt = (token: string) =>
+  const attempt = (cfg: AsrConfig) =>
     new Promise<{ ok: true } | { ok: false; status?: number; error: string }>((resolve) => {
       let settled = false;
-      const session = new RealtimeAsrSession(token, {
+      const session = new RealtimeAsrSession(cfg, {
         onPartial: (text, stash) => sendTranscript({ kind: 'partial', text, stash }),
         onFinal: (transcript) => sendTranscript({ kind: 'final', transcript }),
         onState: (s) => {
@@ -332,12 +350,12 @@ ipcMain.handle('asr:start', async () => {
     });
 
   try {
-    let token = await getAsrToken();
-    let r = await attempt(token);
+    let cfg = await getAsrConfig();
+    let r = await attempt(cfg);
     if (!r.ok && r.status === 401) {           // 临时 token 失效 → 清缓存换新、重试一次
       invalidateAsrToken();
-      token = await getAsrToken();
-      r = await attempt(token);
+      cfg = await getAsrConfig();
+      r = await attempt(cfg);
     }
     if (!r.ok) { asrSession?.stop(); asrSession = null; return { ok: false as const, status: r.status, error: r.error }; }
     return { ok: true as const };
@@ -712,7 +730,7 @@ idle ──点击──▶ requesting(系统授权) ──▶ connecting(开WS) 
 
 ## 9. 验证步骤（提交前必做）
 
-1. `npm run dev` 起 Next，`npm run electron:dev` 起桌面（本地无登录体系，换 token 接口会 401 —— 用 mock：临时把 `getAsrToken()` 改成直接用测试 `sk-` key 走 4.3 的逻辑连百炼，或 mock `fetchAsrToken` 返回 `POST /api/v1/tokens?expire_in_seconds=1800` 的结果；**验证完务必改回**）。
+1. 起本地 mock 换-token 服务：`DASHSCOPE_API_KEY=sk-xxx python3 scripts/dev/mock-asr-token-server.py`（监听 8080 = dev `getBackendBase()`；本地换百炼 token 并下发 `model`/`wsUrl`，其余请求代理到真实后端，故登录也能用）。再 `node scripts/build-electron.mjs && npm run electron:dev` 起桌面。
 2. 用 chrome-devtools MCP 打开页面，点击麦克风按钮，授权麦克风，说一句中文，确认：①按钮进入"聆听"态 ②输入框实时出现文字 ③停顿后文字落定 ④console 无报错。
 3. 打一次包（`npm run electron:pack:mac`），实机验证 macOS 授权弹框文案、签名后麦克风可用（dev 与签名包行为可能不同）。
 4. 提交前关闭 dev server，清理任何 mock 改动。
@@ -721,7 +739,7 @@ idle ──点击──▶ requesting(系统授权) ──▶ connecting(开WS) 
 
 | 变量 | 默认 | 位置 |
 |---|---|---|
-| `ASR_MODEL` | `qwen3-asr-flash-realtime-2026-02-10` | `electron/asr/realtime-session.ts` |
+| 模型名 `model` / WS 地址 `wsUrl` | **服务端下发**（客户端不硬编码） | `POST /api/v1/asr/token` 响应 |
 | 识别语种 | `zh` | `RealtimeAsrSession` 第三参 / `asr:start` |
 | VAD 阈值/静音 | `0.2` / `800ms` | `session.update` |
 | token 刷新余量 | `120s` | `token-cache.ts` |

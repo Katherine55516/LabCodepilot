@@ -60,7 +60,7 @@ import { HttpError, AuthExpiredError, NetworkError, type MeInfo, type ModelConfi
 
 // ── Voice input (Bailian realtime ASR) ──
 import { RealtimeAsrSession } from './asr/realtime-session';
-import { getAsrToken, invalidateAsrToken } from './asr/token-cache';
+import { getAsrConfig, invalidateAsrToken, type AsrConfig } from './asr/token-cache';
 
 // File logger — persists main-process logs, the forked Next-server's piped
 // stdout/stderr (re-console.log'd below), and renderer console output to
@@ -2029,10 +2029,10 @@ app.whenReady().then(async () => {
     const sendError = (code: string, message: string) => mainWindow?.webContents.send('asr:error', { code, message });
 
     // 开一个会话，并把「是否成功进入 listening」变成可 await 的结果（用于 401 重试）。
-    const attempt = (token: string) =>
+    const attempt = (cfg: AsrConfig) =>
       new Promise<{ ok: true } | { ok: false; status?: number; error: string }>((resolve) => {
         let settled = false;
-        const session = new RealtimeAsrSession(token, {
+        const session = new RealtimeAsrSession(cfg, {
           onPartial: (text, stash) => sendTranscript({ kind: 'partial', text, stash }),
           onFinal: (transcript) => sendTranscript({ kind: 'final', transcript }),
           onState: (s) => {
@@ -2050,12 +2050,12 @@ app.whenReady().then(async () => {
       });
 
     try {
-      let token = await getAsrToken();
-      let r = await attempt(token);
+      let cfg = await getAsrConfig();
+      let r = await attempt(cfg);
       if (!r.ok && r.status === 401) { // 临时 token 失效 → 清缓存换新、重试一次
         invalidateAsrToken();
-        token = await getAsrToken();
-        r = await attempt(token);
+        cfg = await getAsrConfig();
+        r = await attempt(cfg);
       }
       if (!r.ok) { asrSession?.stop(); asrSession = null; return { ok: false as const, status: r.status, error: r.error }; }
       return { ok: true as const };
