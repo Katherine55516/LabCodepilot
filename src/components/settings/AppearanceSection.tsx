@@ -115,19 +115,20 @@ function ShikiCodePreview({ isDark }: { isDark: boolean }) {
 // ── UI Token Preview ────────────────────────────────────────────────
 
 function UIPreview() {
+  const { t } = useTranslation();
   return (
     <div className="flex flex-wrap gap-2">
-      <Button size="sm" className="text-xs h-auto py-1">Primary</Button>
-      <Button size="sm" variant="secondary" className="text-xs h-auto py-1">Secondary</Button>
-      <Button size="sm" variant="destructive" className="text-xs h-auto py-1">Destructive</Button>
+      <Button size="sm" className="text-xs h-auto py-1">{t("settings.previewPrimary")}</Button>
+      <Button size="sm" variant="secondary" className="text-xs h-auto py-1">{t("settings.previewSecondary")}</Button>
+      <Button size="sm" variant="destructive" className="text-xs h-auto py-1">{t("settings.previewDestructive")}</Button>
       <span className="inline-flex items-center rounded-full bg-accent px-2.5 py-0.5 text-[10px] font-medium text-accent-foreground">
-        Badge
+        {t("settings.previewBadge")}
       </span>
       <span className="inline-flex items-center rounded-full border border-border bg-card px-2.5 py-0.5 text-[10px] text-card-foreground">
-        Card
+        {t("settings.previewCard")}
       </span>
       <span className="inline-flex items-center rounded-full bg-muted px-2.5 py-0.5 text-[10px] text-muted-foreground">
-        Muted
+        {t("settings.previewMuted")}
       </span>
     </div>
   );
@@ -227,7 +228,7 @@ export function AppearanceSection() {
 
       {/* Preview */}
       <div className="border-t border-border/30 pt-4 space-y-3">
-        <h3 className="text-xs font-medium text-muted-foreground">Preview</h3>
+        <h3 className="text-xs font-medium text-muted-foreground">{t("settings.preview")}</h3>
         <UIPreview />
         <ShikiCodePreview isDark={isDark} />
       </div>

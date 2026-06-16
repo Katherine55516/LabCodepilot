@@ -148,6 +148,13 @@ const en = {
   'settings.modeLight': 'Light',
   'settings.modeDark': 'Dark',
   'settings.modeSystem': 'System',
+  'settings.preview': 'Preview',
+  'settings.previewPrimary': 'Primary',
+  'settings.previewSecondary': 'Secondary',
+  'settings.previewDestructive': 'Destructive',
+  'settings.previewBadge': 'Badge',
+  'settings.previewCard': 'Card',
+  'settings.previewMuted': 'Muted',
 
   // ── Settings: Usage Stats ───────────────────────────────────
   'usage.totalTokens': 'Total Tokens',

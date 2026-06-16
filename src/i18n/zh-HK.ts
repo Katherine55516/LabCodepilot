@@ -154,6 +154,13 @@ const zhHK: Record<TranslationKey, string> = {
   'settings.modeLight': '淺色',
   'settings.modeDark': '深色',
   'settings.modeSystem': '跟隨系統',
+  'settings.preview': '預覽',
+  'settings.previewPrimary': '主要',
+  'settings.previewSecondary': '次要',
+  'settings.previewDestructive': '危險',
+  'settings.previewBadge': '徽章',
+  'settings.previewCard': '卡片',
+  'settings.previewMuted': '弱化',
 
   // ── Settings: Usage Stats ───────────────────────────────────
   'usage.totalTokens': '總 Token',
