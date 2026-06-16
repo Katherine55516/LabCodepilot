@@ -127,8 +127,6 @@ const zhHK: Record<TranslationKey, string> = {
   'settings.autoApproveTrustWarning': '僅在您完全信任當前任務時才啓用此選項。此設置適用於所有新的聊天會話。',
   'settings.cancel': '取消',
   'settings.enableAutoApprove': '啓用自動批准',
-  'settings.errorReporting': '匿名錯誤上報',
-  'settings.errorReportingDesc': '幫助改進 AI Native Lab - 研發平台：匿名上報錯誤信息，不包含對話內容和 API Key。更改後需重啓應用才能完全生效。',
   'settings.generativeUITitle': '生成式 UI',
   'settings.generativeUIDesc': '啓用聊天中的交互式可視化功能（圖表、流程圖、原型圖等）。關閉後可節省 token，但將無法生成可視化內容。',
   'settings.defaultPanelTitle': '預設側邊面板',

@@ -121,8 +121,6 @@ const en = {
   'settings.autoApproveTrustWarning': 'Only enable this if you fully trust the task at hand. This setting applies to all new chat sessions.',
   'settings.cancel': 'Cancel',
   'settings.enableAutoApprove': 'Enable Auto-approve',
-  'settings.errorReporting': 'Anonymous Error Reporting',
-  'settings.errorReportingDesc': 'Help improve AI Native Lab - 研发平台 by anonymously reporting errors. No conversation content or API keys are included. Restart the app for the change to fully take effect.',
   'settings.generativeUITitle': 'Generative UI',
   'settings.generativeUIDesc': 'Enable interactive visualizations (charts, diagrams, mockups) in chat responses. Disabling saves tokens but removes visual generation capability.',
   'settings.defaultPanelTitle': 'Default Side Panel',
