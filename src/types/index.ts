@@ -356,6 +356,13 @@ export interface TokenUsage {
   cache_read_input_tokens?: number;
   cache_creation_input_tokens?: number;
   cost_usd?: number;
+  /**
+   * Per-turn context window reported by the SDK result, when available.
+   * Preferred over the static model catalog by the context-usage card
+   * (see context-usage-walk.ts). Optional: not all runtimes report it, and
+   * the card falls back to the provider-models / catalog window when absent.
+   */
+  context_window?: number;
 }
 
 // ==========================================

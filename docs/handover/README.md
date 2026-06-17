@@ -24,6 +24,7 @@
 | memory-system-v3.md | 记忆系统 V3/V3.1：对话式 Onboarding、HEARTBEAT_OK 心跳协议、Memory Search MCP、时间衰减、Obsidian 感知、渐进式文件更新、Telegram 静默、transcript 裁剪 |
 | buddy-gamification.md | Buddy 游戏化系统：生成/进化/3D 视觉、心跳双模式（完整 tick + 软 hint）、定时任务调度器健壮性、通知队列/轮询/Electron IPC、symlink 安全、cron 4 年扫描 |
 | context-management.md | 上下文管理系统：token 预估、自动压缩（80% 阈值）、消息归一化 + microcompaction、PTL reactive compact、前端双指标可视化 |
+| run-cockpit-context-card.md | RunCockpit 上下文用量卡片：右下角迷你点阵触发器 + 弹窗（%/点阵/明细/本次运行/Total cost）、buildContextUsageBreakdown 10 类拆分 + computeAllocations 点阵分配 + walkContextUsage 倒推 baseline、cost_usd 替代 tokenlens、无 context_accounting → 工具/规则/MCP 隐藏（compiler 入参预留）、三分支（完整/容量未知/无数据）、窗口优先级链 |
 | compact-coverage-boundary.md | 压缩覆盖边界不变量：rowid 而非时间戳、boundary 只前进不后退、slash-command 反馈不入 DB、三条压缩路径的 boundary 写入规则、`_rowid` 端到端透传 |
 | cli-upgrade-proxy.md | CLI 版本检测 + 一键升级 + 系统代理透传 + WinGet 支持 + Git for Windows 自动安装 |
 | tool-call-ux.md | 工具调用 UX 优化：thinking 展示全链路、工具注册表、上下文归组、状态动画、流式缓冲/节流 |

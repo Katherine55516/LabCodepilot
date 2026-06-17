@@ -12,7 +12,7 @@ import { MessageInput } from './MessageInput';
 import { ChatComposerActionBar } from './ChatComposerActionBar';
 import { ModeIndicator } from './ModeIndicator';
 import { ChatPermissionSelector } from './ChatPermissionSelector';
-import { ContextUsageIndicator } from './ContextUsageIndicator';
+import { RunCockpit } from './RunCockpit';
 import { RuntimeBadge } from './RuntimeBadge';
 import { ImageGenToggle } from './ImageGenToggle';
 import { Button } from '@/components/ui/button';
@@ -177,6 +177,7 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
   // Bedrock/Vertex opus = 200K). /api/providers/models already returns
   // upstreamModelId per model on the returned groups.
   const [currentModelUpstream, setCurrentModelUpstream] = useState<string | undefined>(undefined);
+  const [currentModelContextWindow, setCurrentModelContextWindow] = useState<number | undefined>(undefined);
   useEffect(() => {
     const pid = currentProviderId || 'env';
     const controller = new AbortController();
@@ -185,8 +186,9 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
       .then(data => {
         if (controller.signal.aborted) return;
         const group = data?.groups?.find((g: { provider_id: string }) => g.provider_id === pid);
-        const model = group?.models?.find((m: { value: string }) => m.value === currentModel);
+        const model = group?.models?.find((m: { value: string; upstreamModelId?: string; contextWindow?: number }) => m.value === currentModel);
         setCurrentModelUpstream(model?.upstreamModelId);
+        setCurrentModelContextWindow(model?.contextWindow);
       })
       .catch(() => {});
     return () => controller.abort();
@@ -1041,24 +1043,6 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
         isAssistantProject={isAssistantProject}
         hasMessages={messages.length > 0}
       />
-      {/* RuntimeBadge ("Agent 引擎") + ContextUsageIndicator (百分比环) hidden —
-          RuntimeBadge / ContextUsageIndicator components + imports + context-usage
-          hooks (useContextUsage, hasSummary, currentModelUpstream) all preserved.
-          The `right` prop is simply omitted below; restore by re-adding:
-            right={
-              <div className="flex items-center gap-1">
-                <RuntimeBadge providerId={currentProviderId} />
-                <ContextUsageIndicator
-                  messages={messages}
-                  modelName={currentModel}
-                  context1m={context1m}
-                  hasSummary={hasSummary}
-                  upstreamModelId={currentModelUpstream}
-                  contextUsageSnapshot={streamSnapshot?.contextUsageSnapshot}
-                />
-              </div>
-            }
-      */}
       <ChatComposerActionBar
         left={<><ModeIndicator mode={mode} onModeChange={handleModeChange} disabled={isStreaming} />{/* ImageGenToggle hidden from UI — restore by uncommenting. Component + ImageGen logic kept intact. */}{/* <ImageGenToggle /> */}</>}
         center={
@@ -1066,6 +1050,19 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
             sessionId={sessionId}
             permissionProfile={permissionProfile}
             onPermissionChange={setPermissionProfile}
+          />
+        }
+        right={
+          <RunCockpit
+            providerId={currentProviderId}
+            messages={messages}
+            modelName={currentModel}
+            context1m={context1m}
+            hasSummary={hasSummary}
+            upstreamModelId={currentModelUpstream}
+            modelContextWindow={currentModelContextWindow}
+            permissionProfile={permissionProfile}
+            contextUsageSnapshot={streamSnapshot?.contextUsageSnapshot}
           />
         }
       />

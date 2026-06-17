@@ -123,6 +123,19 @@
   --terminal-accent: oklch(0.55 0.17 155);
   --terminal-hover-bg: oklch(0.25 0.005 49);
   --terminal-gradient-from: oklch(0.13 0.004 49.25);
+  /* Context-usage dot-matrix tokens — low-chroma OKLCH, shared by light/dark
+     (the .dark block intentionally does not override these; CSS variable
+     inheritance carries them into dark mode). See ContextDotMatrix. */
+  --context-dot-system-prompt: oklch(0.62 0.04 252);
+  --context-dot-tools: oklch(0.62 0.08 288);
+  --context-dot-rules: oklch(0.66 0.08 144);
+  --context-dot-skills: oklch(0.72 0.1 80);
+  --context-dot-mcp: oklch(0.66 0.1 0);
+  --context-dot-memory: oklch(0.66 0.08 200);
+  --context-dot-files-attachments: oklch(0.68 0.1 40);
+  --context-dot-conversation: oklch(0.55 0.07 70);
+  --context-dot-pending-next-turn: oklch(0.7 0.02 0);
+  --context-dot-cache-or-previous: oklch(0.78 0.05 220);
 }
 
 .dark {
