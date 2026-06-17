@@ -224,6 +224,74 @@ function mirrorEntry(realPath: string, shadowPath: string): void {
 }
 
 /**
+ * Remove a single symlink / junction WITHOUT following it into its target.
+ * - Unix symlink (file or dir): `unlink` removes the link.
+ * - Windows directory junction: `unlink` is rejected (EPERM); `rmdir` removes
+ *   the reparse point only — it never touches the target's contents.
+ */
+function detachLink(linkPath: string): void {
+  try {
+    fs.unlinkSync(linkPath);
+    return;
+  } catch {
+    /* Windows junction → unlink not permitted; fall through to rmdir */
+  }
+  try {
+    fs.rmdirSync(linkPath);
+  } catch {
+    /* Last resort: leave an orphan temp link rather than risk the real target. */
+  }
+}
+
+/**
+ * Recursively remove the shadow tree WITHOUT ever following a symlink or
+ * Windows directory junction into its target.
+ *
+ * Why this exists instead of `fs.rmSync(dir, { recursive: true })`: the shadow
+ * tree links the real `~/.claude/` subdirectories (skills, agents, plugins,
+ * commands, projects, ...) in via junctions on Windows. Node's recursive
+ * remover descends THROUGH directory junctions on Windows and deletes the
+ * user's real files — the shadow-cleanup data-loss bug. This walker `lstat`s
+ * every node and detaches links (removing only the link, never the target)
+ * instead of recursing into them. Unix was never affected by the original bug,
+ * but this implementation is correct on every platform.
+ *
+ * Exported for regression tests.
+ */
+export function safeRmRecursive(target: string): void {
+  let stat: fs.Stats;
+  try {
+    stat = fs.lstatSync(target);
+  } catch {
+    return; // already gone — behave like rm --force
+  }
+
+  // `lstat().isSymbolicLink()` is true for BOTH Unix symlinks and Windows
+  // junctions. Detach the link only; NEVER recurse into its target.
+  if (stat.isSymbolicLink()) {
+    detachLink(target);
+    return;
+  }
+
+  if (stat.isDirectory()) {
+    let children: string[];
+    try {
+      children = fs.readdirSync(target);
+    } catch {
+      children = [];
+    }
+    for (const name of children) {
+      safeRmRecursive(path.join(target, name));
+    }
+    try { fs.rmdirSync(target); } catch { /* best-effort */ }
+    return;
+  }
+
+  // Regular file (or other non-dir node) — remove it.
+  try { fs.unlinkSync(target); } catch { /* best-effort */ }
+}
+
+/**
  * Build a shadow HOME for the SDK subprocess.
  *
  * @param opts.stripAuth - true when the caller is a DB-provider request and
@@ -295,7 +363,7 @@ export function createShadowClaudeHome(opts: { stripAuth: boolean }): ShadowHome
     // (request fails entirely) is worse.
     console.warn('[shadow-home] Failed to materialize shadow tree, falling back to real HOME:',
       err instanceof Error ? err.message : err);
-    try { fs.rmSync(shadowRoot, { recursive: true, force: true }); } catch { /* ignore */ }
+    safeRmRecursive(shadowRoot);
     return passthrough();
   }
 
@@ -311,7 +379,7 @@ export function createShadowClaudeHome(opts: { stripAuth: boolean }): ShadowHome
       if (cleanedUp) return;
       cleanedUp = true;
       try {
-        fs.rmSync(shadowRoot, { recursive: true, force: true });
+        safeRmRecursive(shadowRoot);
       } catch (err) {
         // Best-effort cleanup; the OS will eventually GC tmpdir
         console.warn(`[shadow-home] Failed to clean up shadow dir ${id}:`, err instanceof Error ? err.message : err);

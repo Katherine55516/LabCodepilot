@@ -337,3 +337,103 @@ describe('settingsJsonHasAuthOverride — quick predicate', () => {
       'detector must inspect ~/.claude.json env block too — that file is also a documented user-scoped config source (mcp-loader.ts:46)');
   });
 });
+
+/**
+ * Regression guard for the shadow-cleanup data-loss bug.
+ *
+ * The shadow tree links real ~/.claude subdirectories (skills, agents, plugins,
+ * ...) in via symlinks (Unix) / junctions (Windows). The old cleanup did
+ * `fs.rmSync(shadowRoot, { recursive: true })`, which on Windows DESCENDS
+ * THROUGH directory junctions and deletes the user's real files. The fix uses
+ * `safeRmRecursive`, which lstat's every node and detaches links instead of
+ * recursing into them.
+ *
+ * Note on platform coverage: the original bug only manifests on Windows
+ * (junction-following). On macOS/Linux `fs.rmSync(recursive)` already does NOT
+ * follow symlinks, so the "preserve real data" tests pass for BOTH old and new
+ * code here — they are regression guards (they FAIL with the old code on
+ * Windows) and they positively exercise the new link-detachment logic. The
+ * source-guard test is platform-independent. Real Windows verification is
+ * documented in the handover doc.
+ */
+describe('shadow cleanup — must never delete through symlinks/junctions (data-loss regression)', () => {
+  function makeDirLink(realTarget: string, linkPath: string) {
+    // Mirror mirrorEntry(): junction for dirs on Windows, plain symlink elsewhere.
+    if (process.platform === 'win32') {
+      fs.symlinkSync(realTarget, linkPath, 'junction');
+    } else {
+      fs.symlinkSync(realTarget, linkPath);
+    }
+  }
+
+  it('safeRmRecursive removes a real nested tree completely (cleanup still works)', async () => {
+    const { safeRmRecursive } = await loadModule();
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'cp-saferm-tree-'));
+    fs.mkdirSync(path.join(root, 'a', 'b'), { recursive: true });
+    fs.writeFileSync(path.join(root, 'a', 'b', 'f.txt'), 'x');
+    fs.writeFileSync(path.join(root, 'top.txt'), 'y');
+    safeRmRecursive(root);
+    assert.ok(!fs.existsSync(root), 'safeRmRecursive must remove the whole real throwaway tree');
+  });
+
+  it('safeRmRecursive detaches a linked dir WITHOUT deleting the target contents', async () => {
+    const { safeRmRecursive } = await loadModule();
+    // The "real" user data we must never touch.
+    const realData = fs.mkdtempSync(path.join(os.tmpdir(), 'cp-saferm-real-'));
+    fs.mkdirSync(path.join(realData, 'skills', 'x'), { recursive: true });
+    fs.writeFileSync(path.join(realData, 'skills', 'x', 'SKILL.md'), '# do not delete me');
+
+    // The throwaway "shadow" that links the real skills dir in.
+    const shadow = fs.mkdtempSync(path.join(os.tmpdir(), 'cp-saferm-shadow-'));
+    makeDirLink(path.join(realData, 'skills'), path.join(shadow, 'skills'));
+    fs.writeFileSync(path.join(shadow, 'settings.json'), '{}'); // a real file we own
+
+    safeRmRecursive(shadow);
+
+    assert.ok(!fs.existsSync(shadow), 'shadow must be removed');
+    assert.ok(
+      fs.existsSync(path.join(realData, 'skills', 'x', 'SKILL.md')),
+      'real ~/.claude/skills content must NOT be deleted through the link',
+    );
+    assert.equal(
+      fs.readFileSync(path.join(realData, 'skills', 'x', 'SKILL.md'), 'utf-8'),
+      '# do not delete me',
+    );
+
+    fs.rmSync(realData, { recursive: true, force: true }); // fixture is a real dir (no links left)
+  });
+
+  it('full flow: createShadowClaudeHome().cleanup() preserves real ~/.claude subdirectories', async () => {
+    writeRealClaudeDir({
+      settings: { env: { ANTHROPIC_AUTH_TOKEN: 'sk-leak' } },
+      dirs: {
+        skills: { 'verifier-x/SKILL.md': '# Verifier X skill' },
+        agents: { 'planner.md': '# Planner agent' },
+        plugins: { 'foo/manifest.json': '{}' },
+      },
+    });
+    const { createShadowClaudeHome } = await loadModule();
+    const shadow = createShadowClaudeHome({ stripAuth: true });
+    assert.equal(shadow.isShadow, true);
+    shadow.cleanup();
+
+    const realClaude = path.join(tempHome, '.claude');
+    assert.ok(fs.existsSync(path.join(realClaude, 'skills', 'verifier-x', 'SKILL.md')),
+      'real skills must survive shadow cleanup');
+    assert.ok(fs.existsSync(path.join(realClaude, 'agents', 'planner.md')),
+      'real agents must survive shadow cleanup');
+    assert.ok(fs.existsSync(path.join(realClaude, 'plugins', 'foo', 'manifest.json')),
+      'real plugins must survive shadow cleanup');
+    assert.equal(
+      fs.readFileSync(path.join(realClaude, 'skills', 'verifier-x', 'SKILL.md'), 'utf-8'),
+      '# Verifier X skill', 'real skill content must be byte-for-byte intact');
+  });
+
+  it('source guard: cleanup must NOT fs.rmSync(shadowRoot) and MUST use safeRmRecursive', () => {
+    const src = fs.readFileSync(path.join(process.cwd(), 'src/lib/claude-home-shadow.ts'), 'utf-8');
+    assert.ok(!/fs\.rmSync\(\s*shadowRoot/.test(src),
+      'shadow cleanup must NOT call fs.rmSync(shadowRoot, ...) — it follows junctions on Windows and deletes real ~/.claude data');
+    assert.match(src, /safeRmRecursive\(shadowRoot\)/,
+      'cleanup must use safeRmRecursive(), which detaches links instead of recursing through them');
+  });
+});
