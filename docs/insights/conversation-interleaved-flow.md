@@ -47,7 +47,7 @@
 
 ## 旧消息的顺序：在导入时重建
 
-最初以为旧消息顺序"永久丢失"，其实只是丢在 CodePilot 自己的 SQLite 缓存里——Claude Code 的 JSONL 转录把每段 thinking/text/tool 都带时间戳独立存着，顺序完好。
+最初以为旧消息顺序"永久丢失"，其实只是丢在 AI Native Lab 自己的 SQLite 缓存里——Claude Code 的 JSONL 转录把每段 thinking/text/tool 都带时间戳独立存着，顺序完好。
 
 因为应用还没发布，没有线上老用户的旧消息，唯一会碰到旧 JSONL 的入口是**导入会话**。所以把交错重建放进导入流程：导入时把一个回合的多行 JSONL 合并成一条有序消息，顺带修了旧导入逻辑丢 thinking、丢 tool_result 的 bug。导入进来的历史会话现在和新对话一样是完整交错的。
 - 取消折叠后，超长工具序列（几十个 Read）会让消息变长。当前选择「忠实展示」优先于「紧凑」。若后续反馈太长，可考虑对连续只读工具做可选归组（技术上 `ContextGroup` 还在）。

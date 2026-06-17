@@ -5,7 +5,7 @@
 > 状态：✅ 已完成 — 详见 [docs/handover/gsd-bundle.md](../../handover/gsd-bundle.md) + [docs/insights/gsd-bundle.md](../../insights/gsd-bundle.md)
 > Phase 4 的"本地 DMG / NSIS 试装"未在本次完成，标注为发版前手动验证项
 
-把 [gsd-build/get-shit-done](https://github.com/gsd-build/get-shit-done)（MIT, archived）作为内置插件随 CodePilot Windows / macOS 安装包发布，让用户装完即用 67 个 `/gsd-*` 斜杠命令，不依赖任何手动安装步骤。
+把 [gsd-build/get-shit-done](https://github.com/gsd-build/get-shit-done)（MIT, archived）作为内置插件随 AI Native Lab Windows / macOS 安装包发布，让用户装完即用 67 个 `/gsd-*` 斜杠命令，不依赖任何手动安装步骤。
 
 ## 状态
 
@@ -19,14 +19,14 @@
 
 ## 决策日志
 
-- **2026-05-25**: **GSD 版本** = `gsd-build/get-shit-done`（原始归档版，非 Redux）。理由：用户指定，且原始版命令文件结构（commands/gsd/*.md + agents/gsd-*.md）与 CodePilot 现有扫描器最契合，无需引入 SKILL.md 模式。
+- **2026-05-25**: **GSD 版本** = `gsd-build/get-shit-done`（原始归档版，非 Redux）。理由：用户指定，且原始版命令文件结构（commands/gsd/*.md + agents/gsd-*.md）与 AI Native Lab 现有扫描器最契合，无需引入 SKILL.md 模式。
 - **2026-05-25**: **Vendor 方式** = 直接复制源文件到 `vendor/gsd-source/`，不使用 git submodule。理由：用户偏好；clone 项目无需 `--recursive`；体积可控（~1MB）。升级 GSD 时由维护者手动重新拉一遍。
 - **2026-05-25**: **安装位置** = `~/.claude/plugins/external_plugins/codepilot-gsd-vendor/`，目录名带 `-vendor` 后缀避免和用户手装的官方 GSD 混淆；命令文件名保持 hyphen 形式（`gsd-debug.md`），最终命令呈现 `/gsd-debug` 与 GSD 官方在 Claude Code 上的行为一致。
-- **2026-05-25**: **命名转换** = 构建期跑 `gsd:` → `gsd-` 替换（文件名、frontmatter `name:` 字段、命令体内的引用），与 GSD 官方 installer 在 Claude Code 上的行为一致。理由：CodePilot 扫描器（src/app/api/skills/route.ts:266-275）的子目录会拼成 colon 形式，必须平面化才能得到 hyphen 命令名。
+- **2026-05-25**: **命名转换** = 构建期跑 `gsd:` → `gsd-` 替换（文件名、frontmatter `name:` 字段、命令体内的引用），与 GSD 官方 installer 在 Claude Code 上的行为一致。理由：AI Native Lab 扫描器（src/app/api/skills/route.ts:266-275）的子目录会拼成 colon 形式，必须平面化才能得到 hyphen 命令名。
 - **2026-05-25**: **冲突策略** = 与用户已装的官方 GSD 共存，popover 同时显示两份（global + plugin），description 里标注来源；agents 镜像到 `~/.claude/agents/` 时，若目标已存在且 hash 不同则跳过 + 写警告日志，尊重用户改动。
 - **2026-05-25**: **同步时机** = 首次启动 + 版本变化时，后台异步（不阻塞主窗口加载）。版本戳 = `<gsd-source-snapshot-tag>-<transform-script-version>`。
 - **2026-05-25**: **Settings UI** = 完整面板（状态、版本、启用/禁用、重新同步、卸载），中英双语。
-- **2026-05-25**: **Subagent 同步策略** = 同时同步到插件目录的 `agents/` 和 `~/.claude/agents/` 两个位置。理由：Claude Code 的 subagent 约定位置是 `~/.claude/agents/`，CodePilot 跑的 Claude Agent SDK 也基于该约定查找；若仅放在插件目录子目录，`Agent` 工具调用子 agent 会失败。
+- **2026-05-25**: **Subagent 同步策略** = 同时同步到插件目录的 `agents/` 和 `~/.claude/agents/` 两个位置。理由：Claude Code 的 subagent 约定位置是 `~/.claude/agents/`，AI Native Lab 跑的 Claude Agent SDK 也基于该约定查找；若仅放在插件目录子目录，`Agent` 工具调用子 agent 会失败。
 
 ## 详细设计
 
@@ -51,7 +51,7 @@ gsd-build/get-shit-done   →   scripts/vendor-gsd-prepare.js   →   resources/
 
                               + 镜像到 ~/.claude/agents/gsd-*.md (hash 冲突时跳过)
                                                                          ↓
-                              CodePilot 扫描器 (src/app/api/skills/route.ts:33-75 getPluginCommandsDirs)
+                              AI Native Lab 扫描器 (src/app/api/skills/route.ts:33-75 getPluginCommandsDirs)
                               自动识别 → 斜杠菜单出现 /gsd-debug 等
 ```
 
@@ -251,7 +251,7 @@ electron/ipc/gsd.ts                     # IPC 桥接（status / resync / enable 
 
 **验收**：
 - CDP 验证：状态 / 版本 / 命令数 / agent 数 显示正确
-- 点禁用 → 斜杠菜单的 `/gsd-*` 消失（CodePilot 扫描器看到 disabled 标记不扫该目录）
+- 点禁用 → 斜杠菜单的 `/gsd-*` 消失（AI Native Lab 扫描器看到 disabled 标记不扫该目录）
 - 点启用 → 命令再次出现
 - 点重新同步 → 进度反馈 + 状态更新
 - 点卸载 → 二次确认弹窗 → 删除目录

@@ -117,14 +117,14 @@
 
 ## 五、竞品格局
 
-| 竞品 | 定位 | CodePilot 差异化 |
+| 竞品 | 定位 | AI Native Lab 差异化 |
 |------|------|-----------------|
 | **Claude Code Desktop**（Anthropic 官方） | 官方出品，CLI 功能对齐 | 多 Provider 支持（官方只支持 Anthropic） |
 | **Nimbalyst** | 可视化工作区，团队协作，session 编排 | 更轻量，更贴近个人开发者 |
 | **Opcode** | 轻量简洁 | 功能更全（MCP、IM 桥接、Skills） |
 | **Claude Code WebUI** (Austin2035) | 浏览器端，无需安装 | 原生桌面体验，离线可用 |
 
-Nimbalyst 在对比文章中对 CodePilot 的评价：
+Nimbalyst 在对比文章中对 AI Native Lab 的评价：
 - 优势：多 Provider、MCP 扩展、跨平台
 - 劣势：*"Emphasizes chat interaction rather than broader development workflow"*，*"Lacks visual planning tools or session orchestration"*
 
@@ -134,7 +134,7 @@ Nimbalyst 在对比文章中对 CodePilot 的评价：
 
 ### 数据揭示的真实定位
 
-CodePilot 的自我定位是 **"A desktop GUI for Claude Code"**，但数据显示真实用户画像是：
+AI Native Lab 的自我定位是 **"A desktop GUI for Claude Code"**，但数据显示真实用户画像是：
 
 > **面向中国开发者的多模型 AI 编程桌面客户端**
 
@@ -188,9 +188,9 @@ CodePilot 的自我定位是 **"A desktop GUI for Claude Code"**，但数据显�
 
 ### 决策：保留名称，改定位
 
-**改名暂不可行。** 5,000 stars 的品牌资产、搜索引擎索引、社区帖子全部绑在 "CodePilot" 上，改名等于归零。等热度更高、用户基数更大时再考虑。
+**改名暂不可行。** 5,000 stars 的品牌资产、搜索引擎索引、社区帖子全部绑在 "AI Native Lab" 上，改名等于归零。等热度更高、用户基数更大时再考虑。
 
-**当前行动：改定位叙事。** 保留 CodePilot 名称，去掉所有 "Claude Code GUI" 的表述，重新定位为 "多模型 AI Agent 桌面客户端"。
+**当前行动：改定位叙事。** 保留 AI Native Lab 名称，去掉所有 "Claude Code GUI" 的表述，重新定位为 "多模型 AI Agent 桌面客户端"。
 
 已完成的改动：
 - README (EN/CN/JA) tagline 从 "A desktop GUI for Claude Code" → "A multi-model AI agent desktop client"
@@ -223,19 +223,19 @@ CodePilot 的自我定位是 **"A desktop GUI for Claude Code"**，但数据显�
 
 > 技术细节见 [docs/handover/provider-architecture.md](../handover/provider-architecture.md)
 
-原始数据显示 100+ 个 Issue 与服务商适配相关。经源码审查和官方文档对照，问题**并非全部是 CodePilot 的责任**，归因为三类：
+原始数据显示 100+ 个 Issue 与服务商适配相关。经源码审查和官方文档对照，问题**并非全部是 AI Native Lab 的责任**，归因为三类：
 
-#### 1/3 — CodePilot preset 配置错误（我们的锅）
+#### 1/3 — AI Native Lab preset 配置错误（我们的锅）
 
 - 5 个高频服务商（OpenRouter、智谱 GLM x2、Moonshot、Kimi）的 `authStyle` 与官方文档要求不一致，导致环境变量注入方式错误，表现为 401/400
-- ~~未设置 `CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST`，导致用户终端 `~/.claude/settings.json` 中的配置覆盖 CodePilot 注入的 provider~~（**2026-04-15 修复**：该变量在 SDK 0.2.62 中从未被识别；现通过 `src/lib/claude-home-shadow.ts` 实现真正隔离——DB provider 请求时建剥离 ANTHROPIC_* 的临时 `~/.claude/`）
+- ~~未设置 `CLAUDE_CODE_PROVIDER_MANAGED_BY_HOST`，导致用户终端 `~/.claude/settings.json` 中的配置覆盖 AI Native Lab 注入的 provider~~（**2026-04-15 修复**：该变量在 SDK 0.2.62 中从未被识别；现通过 `src/lib/claude-home-shadow.ts` 实现真正隔离——DB provider 请求时建剥离 ANTHROPIC_* 的临时 `~/.claude/`）
 - **解法**：修代码——改 preset authStyle + per-request shadow HOME 隔离 provider 凭据归属
 
-#### 1/3 — 用户对 CodePilot 与 Claude Code 关系的误解（认知问题）
+#### 1/3 — 用户对 AI Native Lab 与 Claude Code 关系的误解（认知问题）
 
-- 用户以为在终端 `~/.claude/settings.json` 里配了环境变量，CodePilot 就能直接用
-- 实际上 CodePilot 有独立的 Provider 系统，和终端 Claude Code 是两套配置
-- 用户不理解为什么终端好使但 CodePilot 不好使
+- 用户以为在终端 `~/.claude/settings.json` 里配了环境变量，AI Native Lab 就能直接用
+- 实际上 AI Native Lab 有独立的 Provider 系统，和终端 Claude Code 是两套配置
+- 用户不理解为什么终端好使但 AI Native Lab 不好使
 - **解法**：改引导——在配置页面明确告知"请在此重新配置服务商，与终端 Claude Code 配置无关"
 
 #### 1/3 — 用户在服务商侧操作错误（服务商的锅 + 用户操作）
@@ -255,7 +255,7 @@ CodePilot 的自我定位是 **"A desktop GUI for Claude Code"**，但数据显�
 | ~~`PROVIDER_MANAGED_BY_HOST` 接入~~ → per-request shadow HOME | **已修复（2026-04-15）** | 核查 SDK 0.2.62 死代码已删；改用 `src/lib/claude-home-shadow.ts` 在 DB provider 请求里建剥离 ANTHROPIC_* 的临时 `~/.claude/`，user-level MCP/plugins/hooks 全部保留 |
 | api_key 模式不再双注入 | **已完成** | api_key 只设 ANTHROPIC_API_KEY，不再设 AUTH_TOKEN |
 | 配置时连通性验证 | **已完成** | POST /api/providers/test + 前端测试按钮 + 带 preset 默认模型 |
-| 配置引导优化 | **已完成** | meta 面板（API Key 链接 + 计费标签 + 注意事项 + CodePilot 文档链接） |
+| 配置引导优化 | **已完成** | meta 面板（API Key 链接 + 计费标签 + 注意事项 + AI Native Lab 文档链接） |
 | 错误恢复动作 | **已完成** | RecoveryAction 后端 + SSE + 前端渲染（URL 链接 + 应用内导航） |
 | QUICK_PRESETS 去重 | **已完成** | 从 VENDOR_PRESETS 自动生成，-181 行，单一数据源 |
 | authStyle 单一真相源 | **已完成** | ProviderManager badge + Doctor + PresetConnectDialog 均从 preset catalog 读取 |

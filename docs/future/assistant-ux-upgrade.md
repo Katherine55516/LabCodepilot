@@ -10,7 +10,7 @@
 
 参考 Vercel identicon prototype（https://identicon-prototype.labs.vercel.dev/）：
 - 用助理名字 hash → 确定性生成头像（同名字同头像）
-- OKLCH 色彩空间（与 CodePilot 设计系统一致）
+- OKLCH 色彩空间（与 AI Native Lab 设计系统一致）
 - 纯前端 Canvas 渲染，不需要外部服务
 
 可选的开源库：
@@ -59,7 +59,7 @@
 助理项目的聊天窗口视觉差异化：
 - AI 消息旁显示助理头像（普通项目用默认图标）
 - 顶部 bar 带主题色底边
-- 空状态显示助理头像 + 名字（而非通用的 CodePilot logo）
+- 空状态显示助理头像 + 名字（而非通用的 AI Native Lab logo）
 
 ## 二、文件树与状态面板
 
@@ -98,12 +98,12 @@
 
 ### 3.1 新用户首次引导
 
-首次打开 CodePilot 且没有任何会话时，空状态页：
+首次打开 AI Native Lab 且没有任何会话时，空状态页：
 
 ```
 ┌──────────────────────────────────────────┐
 │                                          │
-│          欢迎使用 CodePilot               │
+│          欢迎使用 AI Native Lab               │
 │                                          │
 │   ┌──────────────────┐  ┌──────────────────┐  │
 │   │                  │  │                  │  │

@@ -7,7 +7,7 @@
 
 ## 目标
 
-为 CodePilot 引入一套**与现有 BYOK Provider 体系并存**的登录账号机制：
+为 AI Native Lab 引入一套**与现有 BYOK Provider 体系并存**的登录账号机制：
 - 用户走系统浏览器 OAuth 登录后端账号
 - 服务端下发 `ModelConfig` 列表 → 镜像到 `api_providers` 表（`source='managed'`）
 - 与现有 OpenAI OAuth 模块**完全分离**（不同 token 存储、不同回调端口、不同 UI 入口）
@@ -67,7 +67,7 @@ ALTER TABLE api_providers ADD COLUMN managed_extra_json TEXT NOT NULL DEFAULT '{
 
 - `source`：`'local'`（BYOK）/ `'managed'`（账号下发）
 - `managed_config_id`：服务端 `ModelConfig.id` 原值，用作 upsert 的 lookup key（DB row id 用 `managed-{managed_config_id}` 前缀避免与本地 id 冲突）
-- `managed_extra_json`：保留 ModelConfig 中 CodePilot 字段无法覆盖的部分（`default_opus_model`/`default_sonnet_model`/`default_haiku_model`/`subagent_model`/`effort_level`/`extra`），存原始 JSON 以便协议演进
+- `managed_extra_json`：保留 ModelConfig 中 AI Native Lab 字段无法覆盖的部分（`default_opus_model`/`default_sonnet_model`/`default_haiku_model`/`subagent_model`/`effort_level`/`extra`），存原始 JSON 以便协议演进
 
 **Settings 表新增 keys**（KV，无需 schema 改动）：
 

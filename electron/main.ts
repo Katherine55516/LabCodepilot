@@ -576,7 +576,7 @@ function isPortFree(port: number): Promise<boolean> {
  *
  * We try this range in order so the origin stays consistent across restarts.
  * Range chosen: 47823–47830 (8 ports). These are unassigned by IANA and
- * uncommon in practice. 8 candidates handles up to 8 concurrent CodePilot
+ * uncommon in practice. 8 candidates handles up to 8 concurrent AI Native Lab
  * instances before falling back to OS-assigned, which is plenty for normal use.
  */
 const STABLE_PORTS = [47823, 47824, 47825, 47826, 47827, 47828, 47829, 47830];

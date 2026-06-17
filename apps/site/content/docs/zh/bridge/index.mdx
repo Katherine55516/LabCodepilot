@@ -5,7 +5,7 @@ description: 将 Claude 对话桥接到 Telegram、Discord、飞书和 QQ。
 
 # 消息桥接
 
-消息桥接让你从手机上的即时通讯应用与 Claude 对话。在桌面上启动 CodePilot，配置好 Bot 后，你可以通过 Telegram、Discord、飞书或 QQ 随时随地与 Claude 交互。
+消息桥接让你从手机上的即时通讯应用与 Claude 对话。在桌面上启动 AI Native Lab，配置好 Bot 后，你可以通过 Telegram、Discord、飞书或 QQ 随时随地与 Claude 交互。
 
 ## 支持的平台
 
@@ -19,11 +19,11 @@ description: 将 Claude 对话桥接到 Telegram、Discord、飞书和 QQ。
 ## 工作原理
 
 ```
-手机 IM → Bot 收到消息 → CodePilot 转发给 Claude → Claude 回复 → Bot 发回 IM
+手机 IM → Bot 收到消息 → AI Native Lab 转发给 Claude → Claude 回复 → Bot 发回 IM
 ```
 
 1. 你在消息平台上向 Bot 发送消息
-2. CodePilot 的 Bridge 服务接收消息并转发给 Claude
+2. AI Native Lab 的 Bridge 服务接收消息并转发给 Claude
 3. Claude 处理请求后生成回复
 4. 回复通过 Bot 发回你的消息平台
 5. 如果 Claude 需要权限确认（如写文件），会在 IM 中发送确认按钮
@@ -45,7 +45,7 @@ description: 将 Claude 对话桥接到 Telegram、Discord、飞书和 QQ。
 - **默认工作目录** — 新对话的默认项目路径
 - **默认模型** — 桥接对话使用的模型
 - **默认服务商** — 桥接对话使用的 API 服务商
-- **自动启动** — CodePilot 启动时自动开启桥接服务
+- **自动启动** — AI Native Lab 启动时自动开启桥接服务
 
 ### 桥接状态
 
@@ -58,12 +58,12 @@ description: 将 Claude 对话桥接到 Telegram、Discord、飞书和 QQ。
 
 ## 斜杠命令
 
-在 IM 中可以使用斜杠命令控制 CodePilot：
+在 IM 中可以使用斜杠命令控制 AI Native Lab：
 
 | 命令 | 参数 | 说明 |
 |------|------|------|
 | `/new` | `[路径]` | 新建对话，可指定工作目录 |
-| `/bind` | `<会话ID>` | 绑定当前 IM 聊天到已有的 CodePilot 对话 |
+| `/bind` | `<会话ID>` | 绑定当前 IM 聊天到已有的 AI Native Lab 对话 |
 | `/cwd` | `/path/to/dir` | 切换当前对话的工作目录 |
 | `/mode` | `plan\|code\|ask` | 切换对话模式 |
 | `/status` | — | 查看当前对话状态（ID、工作目录、模式、模型） |
@@ -73,7 +73,7 @@ description: 将 Claude 对话桥接到 Telegram、Discord、飞书和 QQ。
 
 ## 使用建议
 
-- **保持 CodePilot 运行** — 桥接依赖桌面端作为中转，关闭后 Bot 无法响应
+- **保持 AI Native Lab 运行** — 桥接依赖桌面端作为中转，关闭后 Bot 无法响应
 - **系统托盘模式** — 最小化到系统托盘，桥接保持活跃不占桌面空间
 - **私聊优先** — 建议在私聊中使用，群聊中可能被其他消息干扰
 - **权限确认** — Claude 需要执行敏感操作时会在 IM 中发送确认按钮，注意及时处理

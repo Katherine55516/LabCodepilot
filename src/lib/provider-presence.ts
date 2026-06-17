@@ -1,5 +1,5 @@
 /**
- * provider-presence.ts — Single-source-of-truth: "does CodePilot itself have
+ * provider-presence.ts — Single-source-of-truth: "does AI Native Lab itself have
  * a usable provider to talk to a model with?"
  *
  * Scope (intentionally narrow, by user requirement 2026-04-15):
@@ -10,9 +10,9 @@
  *
  * Out of scope (intentionally NOT checked):
  *   - ~/.claude/settings.json env block (cc-switch, hand-edit) — that file
- *     lives under the Claude Code CLI's ownership; CodePilot treats CLI login
+ *     lives under the Claude Code CLI's ownership; AI Native Lab treats CLI login
  *     state as "not our business". A user with only settings.json and no
- *     CodePilot-level provider will be intercepted and asked to add one.
+ *     AI Native Lab-level provider will be intercepted and asked to add one.
  *
  * Used by:
  *   - `/api/chat` entry precheck (412 + NEEDS_PROVIDER_SETUP when false)
@@ -27,7 +27,7 @@ import { getSetting, getAllProviders } from '@/lib/db';
 import { isOAuthUsable } from '@/lib/openai-oauth-manager';
 
 /**
- * True when a single DB provider has credentials CodePilot can dispatch on.
+ * True when a single DB provider has credentials AI Native Lab can dispatch on.
  *
  * Checks (in order):
  *   1. api_key non-empty
@@ -64,7 +64,7 @@ export function providerHasUsableCodePilotAuth(p: ApiProvider): boolean {
 }
 
 /**
- * True when CodePilot has at least one provider the backend can dispatch to.
+ * True when AI Native Lab has at least one provider the backend can dispatch to.
  *
  * fail-open on DB errors: if a read throws (e.g. not initialized yet in a
  * cold worker), we return `true` and let the downstream resolver produce the

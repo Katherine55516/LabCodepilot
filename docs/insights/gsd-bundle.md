@@ -4,7 +4,7 @@
 
 ## 用户问题
 
-CodePilot 的核心定位是降低 Claude Code 工作流的使用门槛。但 Claude Code 生态里很多"二阶能力"（结构化提示词系统、debug 工作流、spec-driven 开发流程）仍然需要用户：
+AI Native Lab 的核心定位是降低 Claude Code 工作流的使用门槛。但 Claude Code 生态里很多"二阶能力"（结构化提示词系统、debug 工作流、spec-driven 开发流程）仍然需要用户：
 1. 知道这些工具存在（信息差）
 2. 装 npm 包或 git clone（环境门槛，尤其国内网络）
 3. 命令行操作配置（学习成本）
@@ -12,7 +12,7 @@ CodePilot 的核心定位是降低 Claude Code 工作流的使用门槛。但 Cl
 
 GSD（Get-Shit-Done by TÂCHES）是社区里最完整的 Claude Code 元提示词系统之一——63.7k stars，67 个斜杠命令覆盖从 ideate / spec / debug / spike 到 ship 的完整开发流程，33 个专门子 agent 解决各类细分任务。但用户要用上它，得先 `npx @opengsd/get-shit-done-redux@latest` 装一遍，还得选对 runtime。我们的用户里大多数装到一半就放弃了。
 
-**"装完 CodePilot 就能用 GSD"** 是把生态产品力直接嵌进 CodePilot 的关键一步。
+**"装完 AI Native Lab 就能用 GSD"** 是把生态产品力直接嵌进 AI Native Lab 的关键一步。
 
 ## 为什么是 GSD 而不是其他
 
@@ -31,7 +31,7 @@ GSD 胜在：
 
 ## 为什么不是"用户自己装"
 
-实际上 CodePilot 现在已经支持 `~/.claude/commands/*.md` 全局扫描——用户完全可以自己 git clone GSD 然后放进去。我们也确实在 ChatListPanel 提示过这个能力。
+实际上 AI Native Lab 现在已经支持 `~/.claude/commands/*.md` 全局扫描——用户完全可以自己 git clone GSD 然后放进去。我们也确实在 ChatListPanel 提示过这个能力。
 
 但是观察用户实际行为：
 - 国内用户 git clone GitHub 经常被网络卡住，clone 完一遍 50MB git history 是负担
@@ -39,7 +39,7 @@ GSD 胜在：
 - 升级麻烦——很多用户装完一次就再也没动过
 - agents 文件要单独再放到 `~/.claude/agents/`，多一个步骤就丢一半用户
 
-**内置打包把"获取 → 安装 → 维护"三步合并到"安装 CodePilot"一步**。代价是 ~2MB 包体积和我们自己承担的维护责任（升级时手动 vendor）。这笔账划得来。
+**内置打包把"获取 → 安装 → 维护"三步合并到"安装 AI Native Lab"一步**。代价是 ~2MB 包体积和我们自己承担的维护责任（升级时手动 vendor）。这笔账划得来。
 
 ## 关键设计权衡
 
@@ -67,7 +67,7 @@ GSD 胜在：
 
 如果用户改了 `~/.claude/agents/gsd-debugger.md`（比如改了 prompt 来适应自己的 codebase），我们的同步逻辑会检测 hash 不同，跳过这个文件，把它记到 `.conflicts.json`。Settings 面板看到 conflict count > 0 时显示警告条幅。
 
-为什么不强制覆盖？因为这破坏了用户的预期——他们改的是 Claude 标准位置的文件，不是 CodePilot 内部资产。CodePilot 不该"知道"那个文件是给 GSD 用的、就有权擦掉用户改动。
+为什么不强制覆盖？因为这破坏了用户的预期——他们改的是 Claude 标准位置的文件，不是 AI Native Lab 内部资产。AI Native Lab 不该"知道"那个文件是给 GSD 用的、就有权擦掉用户改动。
 
 为什么不在卸载时也跳过用户改动？同样道理——uninstall 只清理 hash 还匹配 bundle 的 agent 副本，保留用户改过的。这样卸载内置 GSD 不会误伤用户为其他工作流写的同名 agent。
 
@@ -75,7 +75,7 @@ GSD 胜在：
 
 ### Description 字段是个普惠 bug
 
-实施过程中验证 `/api/skills` 返回时发现，所有带 frontmatter 的 .md 命令在 popover 里都显示 `---`（YAML 分隔符的第一行）。这不是 GSD 特有的——CodePilot 自己写的 `~/.claude/commands/` 用户文件、Claude Code 官方仓库示例命令，全都中招。
+实施过程中验证 `/api/skills` 返回时发现，所有带 frontmatter 的 .md 命令在 popover 里都显示 `---`（YAML 分隔符的第一行）。这不是 GSD 特有的——AI Native Lab 自己写的 `~/.claude/commands/` 用户文件、Claude Code 官方仓库示例命令，全都中招。
 
 顺手在 `src/app/api/skills/route.ts:scanDirectory` 改了：先读 frontmatter `description:`，否则跳过 frontmatter 块取第一个非空行。**一行 GSD 的工作捎带修复了一个跨产品的小 bug**。这种"副作用收益"是内置插件之外的额外回报。
 
@@ -105,8 +105,8 @@ GSD v1.40+ 的 namespace router 文件名（`ns-context.md`）和 frontmatter `n
 **为什么不装 hooks**——这是 archived 版自带的 13 个运行时 hook（statusline / prompt-guard / read-guard / context-monitor / check-update 等），它们注册到 `~/.claude/settings.json` 的 hooks 字段后会在 Claude Code 每次工具调用时介入。我做了一次 `@`-import 静态分析：**所有命令体和 workflow 文件里实际 `@`-import 的路径只有两个顶级目录** —— `@~/.claude/agents/` 和 `@~/.claude/get-shit-done/`。hooks 不在任何命令的依赖图里，它们是 GSD 的"附加体验层"，不是命令执行所需。
 
 三个反对装 hooks 的具体理由：
-1. **写入用户 `settings.json` 是侵入性的**——格式是 `"<absoluteNodePath> <scriptPath>"`，绝对路径在 CodePilot 升级/卸载后会失效，需要额外的清理流程，复杂度比收益高。
-2. **`gsd-check-update.js` 会绕过 vendor 版本控制**——它在用户机器上自动检查上游 GSD 更新并提示升级。但我们的模型是 CodePilot 内置版本锁定，让 hook 引导用户去 `npx` 升级反而打破设计假设。
+1. **写入用户 `settings.json` 是侵入性的**——格式是 `"<absoluteNodePath> <scriptPath>"`，绝对路径在 AI Native Lab 升级/卸载后会失效，需要额外的清理流程，复杂度比收益高。
+2. **`gsd-check-update.js` 会绕过 vendor 版本控制**——它在用户机器上自动检查上游 GSD 更新并提示升级。但我们的模型是 AI Native Lab 内置版本锁定，让 hook 引导用户去 `npx` 升级反而打破设计假设。
 3. **用户想要就并行装官方版**——我们的"命令名空间共享"设计支持和官方 GSD 共存。真正在意 statusline 提示的用户可以 `npx get-shit-done-cc@latest` 装一份，hooks 自动生效，两份共用同一份 `~/.claude/agents/`。
 
 如果未来出现"GSD 命令实际依赖某个 hook"的情况（GSD 升级后新的命令体引入了 hooks `@`-import），需要重新评估这个决策。校验脚本里建一个 `@-import 顶级目录白名单`断言可以在升级时第一时间发现。
@@ -118,7 +118,7 @@ GSD v1.40+ 的 namespace router 文件名（`ns-context.md`）和 frontmatter `n
 PluginsManager.tsx 已经设计成多卡片容器，目前只有 GSD 一张卡片。理论上可以再嵌：
 - **claude-flow / claude-swarm** 之类的多 agent 编排
 - **CCCC（Claude Code Commands Collection）** 之类的精品命令合集
-- 自家的"CodePilot 专属"工作流命令
+- 自家的"AI Native Lab 专属"工作流命令
 
 每个新插件只需要：
 1. vendor 一份源
@@ -136,7 +136,7 @@ GSD 自身有 `/gsd-config` 命令支持配置 plan 模式、verbose 程度等�
 
 ### 4. 项目级覆盖
 
-CodePilot 已经扫描项目级 `.claude/commands/`。如果用户在某个项目里需要禁用某个内置 GSD 命令（比如 `/gsd-debug` 和他们自家 debug 工具冲突），目前没法在项目级关掉。可以加项目级的"插件覆盖"配置。
+AI Native Lab 已经扫描项目级 `.claude/commands/`。如果用户在某个项目里需要禁用某个内置 GSD 命令（比如 `/gsd-debug` 和他们自家 debug 工具冲突），目前没法在项目级关掉。可以加项目级的"插件覆盖"配置。
 
 ## 外部参考
 

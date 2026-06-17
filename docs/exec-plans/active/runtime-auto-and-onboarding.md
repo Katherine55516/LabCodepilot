@@ -43,7 +43,7 @@ v0.50.2 release 已知活跃 issue 快照：2Z=9, 2X=2, 2Y=2, PA=1。2X/2Y 是 N
 - `src-tauri/src/services/proxy.rs:117-128` token 字段被替换为字符串 `"PROXY_MANAGED"`
 - 代理功能引入 commit：`Feat/proxy server (#355)`，日期 2025-12-05 11:26:41 +0800
 
-**CodePilot 版本时间线**
+**AI Native Lab 版本时间线**
 - v0.46.0 tag：2026-04-04（commit `89d3e97 feat: Ollama local model support...`）
 - v0.47.0 tag：2026-04-05（commit `ce9c1a3 chore: release v0.47.0 — provider governance`）
 - v0.48.0 tag：2026-04-09（commit `15ba536 chore: release v0.48.0 — Native Agent Runtime + OpenAI support`）
@@ -103,7 +103,7 @@ v0.50.2 release 已知活跃 issue 快照：2Z=9, 2X=2, 2Y=2, PA=1。2X/2Y 是 N
 
 **推断 1：Native runtime 是 NEXT-2Z 主路径（置信度高）**
 - 证据：抛错文件 `ai-provider.ts:76`（§ 二仓库事实），该文件只在 Native 路径被 import（SDK 路径用 `@anthropic-ai/claude-agent-sdk` 的 `query()`，不经过 createModel）
-- 推断：auto 模式在 cc-switch 用户 / 全新用户场景下**错选 Native**，Native 没有读 `~/.claude/settings.json` 的能力，遇到"DB 无 provider + env 无 ANTHROPIC_* + 用户未登录 CodePilot 但已装 cc-switch"时抛错
+- 推断：auto 模式在 cc-switch 用户 / 全新用户场景下**错选 Native**，Native 没有读 `~/.claude/settings.json` 的能力，遇到"DB 无 provider + env 无 ANTHROPIC_* + 用户未登录 AI Native Lab 但已装 cc-switch"时抛错
 
 **推断 2：PROXY_MANAGED 占位符被当真凭据（置信度高）**
 - 证据：`claude-settings.ts:50-57` `pick()` 只要非空字符串即返回；`hasClaudeSettingsCredentials()` 仅判 `!!(apiKey || authToken)`——二者串起来意味着字面字符串 `"PROXY_MANAGED"` 会通过
@@ -146,7 +146,7 @@ v0.50.2 release 已知活跃 issue 快照：2Z=9, 2X=2, 2Y=2, PA=1。2X/2Y 是 N
 **现象**：Doctor Live probe 跑真实 spawn 时，CLI 子进程 exit code 1，归类为 `PROCESS_CRASH`。用户实际发消息也发不出。
 
 **成因（未在 #493 用户环境重现，以下为推断）**：
-- 用户 `~/.claude/settings.json` 有 env 块（cc-switch 写入），CodePilot DB 里 0 个 provider
+- 用户 `~/.claude/settings.json` 有 env 块（cc-switch 写入），AI Native Lab DB 里 0 个 provider
 - auto 模式认为有凭据 → 选 SDK runtime → spawn CLI
 - CLI 启动后根据 settings.json 的 env 尝试访问上游。上游连不通的候选：
   1. cc-switch 代理模式但代理未运行（`ANTHROPIC_BASE_URL=http://localhost:<port>` 连拒绝）
@@ -157,7 +157,7 @@ v0.50.2 release 已知活跃 issue 快照：2Z=9, 2X=2, 2Y=2, PA=1。2X/2Y 是 N
 
 **触发条件（三者必须同时成立）**：
 1. 使用过 cc-switch 或手动写过 `~/.claude/settings.json` 的 env 块
-2. **没有**在 CodePilot 里添加任何 DB provider
+2. **没有**在 AI Native Lab 里添加任何 DB provider
 3. cc-switch 当前状态使 CLI 实际连不通上游
 
 **影响面（无法精确量化）**：
@@ -168,15 +168,15 @@ v0.50.2 release 已知活跃 issue 快照：2Z=9, 2X=2, 2Y=2, PA=1。2X/2Y 是 N
 **方案 A-D 对此的影响**：
 - 方案 A：无改善——用户装了 CLI 就走 SDK，本来就是 SDK 路径崩的
 - 方案 B：**会**触发（注意：之前文档旧版写的"不触发"是**错的**，与 Phase B 自己的 `hasCodePilotProvider()` 契约矛盾——Codex 核查结论 2026-04-15 指出并修正）。Phase B 契约明确规定 `hasCodePilotProvider()` **不**读 `~/.claude/settings.json`，只看 DB provider / process.env ANTHROPIC_\* / legacy `anthropic_auth_token` setting。纯 cc-switch 用户这三者都为空 → 会被入口拦截 → 弹 SetupCenter Provider 卡片。
-  - 对 cc-switch **正在挂掉**的用户（#493 问题二场景）：拦截引导他们"去 CodePilot 里加个 provider"——从**结果上恰好**绕开了 cc-switch 故障（只要他们按引导加了一个 DB provider，后续走 DB provider 路径就不再碰 cc-switch 代理了）。这是副作用不是有意识别，诊断意义为零但体验结果是正向的
-  - 对 cc-switch **正常工作**的用户：也会被拦截一次（这是 by design——符合用户"CLI 登录状态不管，只看 CodePilot provider"的明确约定），需要他们在 CodePilot 里显式加一个 provider。**这是 Phase B 的主要行为变化之一**，发版说明里要**明确告知**现有 cc-switch 用户
-- 方案 C：即便 Phase B 没拦住（例如用户已加 DB provider 但那个 provider 走 cc-switch 代理），SDK spawn 后仍会 `PROCESS_CRASH`。方案 C 能把此 crash 归一为"去设置 → 服务商"——但**这个引导对 cc-switch 代理挂掉的用户仍是错的答案**：他在 CodePilot 里有 provider，他缺的是"cc-switch 代理没跑"或"token 失效"这类信息
+  - 对 cc-switch **正在挂掉**的用户（#493 问题二场景）：拦截引导他们"去 AI Native Lab 里加个 provider"——从**结果上恰好**绕开了 cc-switch 故障（只要他们按引导加了一个 DB provider，后续走 DB provider 路径就不再碰 cc-switch 代理了）。这是副作用不是有意识别，诊断意义为零但体验结果是正向的
+  - 对 cc-switch **正常工作**的用户：也会被拦截一次（这是 by design——符合用户"CLI 登录状态不管，只看 AI Native Lab provider"的明确约定），需要他们在 AI Native Lab 里显式加一个 provider。**这是 Phase B 的主要行为变化之一**，发版说明里要**明确告知**现有 cc-switch 用户
+- 方案 C：即便 Phase B 没拦住（例如用户已加 DB provider 但那个 provider 走 cc-switch 代理），SDK spawn 后仍会 `PROCESS_CRASH`。方案 C 能把此 crash 归一为"去设置 → 服务商"——但**这个引导对 cc-switch 代理挂掉的用户仍是错的答案**：他在 AI Native Lab 里有 provider，他缺的是"cc-switch 代理没跑"或"token 失效"这类信息
 
 ### 方案之外：根治 #493 需要额外工作（未纳入 0.50.3）
 
 若要真正修问题二，最小工作量：
 1. `claude-settings.ts` 读到 `ANTHROPIC_BASE_URL` 指向 `localhost`/`127.0.0.1` **或** token 字面量等于 `PROXY_MANAGED` 时，打 tag 到错误上下文
-2. `error-classifier.ts` 新增分类 `CC_SWITCH_PROXY_UNREACHABLE`，pattern 识别 CLI `code 1` + 上述 tag，文案改成"检测到 cc-switch 代理模式，请确认 cc-switch App 正在运行且代理端口与 settings.json 匹配"——**不**引导去 CodePilot 设置
+2. `error-classifier.ts` 新增分类 `CC_SWITCH_PROXY_UNREACHABLE`，pattern 识别 CLI `code 1` + 上述 tag，文案改成"检测到 cc-switch 代理模式，请确认 cc-switch App 正在运行且代理端口与 settings.json 匹配"——**不**引导去 AI Native Lab 设置
 
 若要修问题一，最小工作量：
 - `provider-doctor.ts:runAuthProbe()` 内两条 finding 改为**同一条路径判定**，并把 `~/.claude/settings.json` 合并进 `auth.no-credentials` 的判定源。约 20 行
@@ -228,7 +228,7 @@ v0.50.2 release 已知活跃 issue 快照：2Z=9, 2X=2, 2Y=2, PA=1。2X/2Y 是 N
 **现状**：`src/app/api/chat/route.ts:24-48` 直接进入 session/lock 流程，缺失凭据错误要等到 streamClaude 内部才冒出来。
 
 **用户约定的判定口径**（2026-04-15 对话定案）：
-- **只看"CodePilot 是否有可用服务商"**，不看 CLI 登录状态
+- **只看"AI Native Lab 是否有可用服务商"**，不看 CLI 登录状态
 - 判定条件：DB 有 provider 记录 OR `process.env.ANTHROPIC_API_KEY` OR `process.env.ANTHROPIC_AUTH_TOKEN` OR `getSetting('anthropic_auth_token')`——**任一**成立即通过
 
 **改动点**：
@@ -241,7 +241,7 @@ v0.50.2 release 已知活跃 issue 快照：2Z=9, 2X=2, 2Y=2, PA=1。2X/2Y 是 N
      // OR legacy setting
    }
    ```
-   注意：**不包含** `hasClaudeSettingsCredentials()`——cc-switch 的 settings.json 不视作"CodePilot 的服务商"。
+   注意：**不包含** `hasClaudeSettingsCredentials()`——cc-switch 的 settings.json 不视作"AI Native Lab 的服务商"。
 
 2. `src/app/api/chat/route.ts:24-48` 在 `getSession` 之后、`acquireSessionLock` 之前插入：
    ```ts
@@ -275,9 +275,9 @@ v0.50.2 release 已知活跃 issue 快照：2Z=9, 2X=2, 2Y=2, PA=1。2X/2Y 是 N
    - 可选的小重构（长期）：把 `!response.ok` + structured error 识别抽成一个 `handleChatFetchError()` helper 供两处共用，避免下次再漏同步。Phase 3 先两处各自接线，helper 抽取可以放进后续迭代。
 
 **回归风险**：
-- **现有 cc-switch 用户升级后首次发消息一定会被拦截**（by design，但需要发版说明明确告知）。用户画像：只靠 `~/.claude/settings.json` 管 auth、从未在 CodePilot 里添加 provider。按 Phase B 契约 `hasCodePilotProvider()` 不读 settings.json，这部分用户会被拦去 SetupCenter Provider 卡片。缓解：0.50.3 发版说明加一段"如果你用 cc-switch 管 Claude Code 凭据，升级后 CodePilot 会要求你在 设置→服务商 里显式添加一个 provider——这是为了让 CodePilot 能正确处理第三方 provider 的隔离。你仍可以通过 cc-switch 管理 Claude Code CLI 本身的凭据"。
-- 极少数用户只装了 CLI、在 CLI 里登录了、**从未在 CodePilot 添加任何 provider**：按新判定会被拦截。
-  - 缓解：`/api/setup/route.ts` 当前判定把"装了 CLI"也算 provider `completed`——新拦截逻辑与此**有意不一致**（入口拦截要求 CodePilot 里有真正 provider）。两条口径要各自注释为什么。
+- **现有 cc-switch 用户升级后首次发消息一定会被拦截**（by design，但需要发版说明明确告知）。用户画像：只靠 `~/.claude/settings.json` 管 auth、从未在 AI Native Lab 里添加 provider。按 Phase B 契约 `hasCodePilotProvider()` 不读 settings.json，这部分用户会被拦去 SetupCenter Provider 卡片。缓解：0.50.3 发版说明加一段"如果你用 cc-switch 管 Claude Code 凭据，升级后 AI Native Lab 会要求你在 设置→服务商 里显式添加一个 provider——这是为了让 AI Native Lab 能正确处理第三方 provider 的隔离。你仍可以通过 cc-switch 管理 Claude Code CLI 本身的凭据"。
+- 极少数用户只装了 CLI、在 CLI 里登录了、**从未在 AI Native Lab 添加任何 provider**：按新判定会被拦截。
+  - 缓解：`/api/setup/route.ts` 当前判定把"装了 CLI"也算 provider `completed`——新拦截逻辑与此**有意不一致**（入口拦截要求 AI Native Lab 里有真正 provider）。两条口径要各自注释为什么。
   - 决策建议：**入口拦截不把 CLI 装存在视作可用 provider**（符合用户约定"CLI 登录状态不管"）。这会导致这部分用户升级后第一次发消息被拦。
   - **[Codex 核查结论 2026-04-15]**：`src/components/setup/ProviderCard.tsx` 当前**不支持"一键选 Claude Code 内建 env 组"**——env-detected 按钮只调 `onStatusChange('completed')` 更新卡片状态，**不**持久化 provider 选择、**不**写入 session/global provider、**不**跳到服务商设置页。所以本条原先设想的"被拦后去 Provider 卡片一键完成"是个 **gap**，不是既有能力。Phase 3 启动前要么扩 ProviderCard 新增真正写入 DB 的按钮，要么把这部分用户显式引导到完整服务商对话框（`/settings` 的 Providers 分段，让用户手动添加一个 provider）。
 - DB 挂了或 read 异常：拦截应 `try/catch` 失败时放行（fail-open），避免把所有用户拦死。
@@ -290,7 +290,7 @@ v0.50.2 release 已知活跃 issue 快照：2Z=9, 2X=2, 2Y=2, PA=1。2X/2Y 是 N
 
 **现状**：
 - Native runtime 抛 `No provider credentials available`（`ai-provider.ts:76`）
-- Claude Code CLI 抛 `Not logged in · Please run /login`（CLI 侧文案，CodePilot 原样透传）
+- Claude Code CLI 抛 `Not logged in · Please run /login`（CLI 侧文案，AI Native Lab 原样透传）
 - `error-classifier.ts` 已经对第一条匹配 `NO_CREDENTIALS`，但第二条目前不在 pattern 列表里
 
 **改动点**：
@@ -305,8 +305,8 @@ v0.50.2 release 已知活跃 issue 快照：2Z=9, 2X=2, 2Y=2, PA=1。2X/2Y 是 N
    ],
    ```
 
-2. `src/lib/error-classifier.ts:178-179` `userMessage` / `actionHint` 在 i18n 层面改成明确"CodePilot 语境"：
-   - `userMessage`: `No provider configured in CodePilot.`
+2. `src/lib/error-classifier.ts:178-179` `userMessage` / `actionHint` 在 i18n 层面改成明确"AI Native Lab 语境"：
+   - `userMessage`: `No provider configured in AI Native Lab.`
    - `actionHint`: `Open Settings → Providers and add a service, or run the setup wizard.`
    - 中文文案同步 `src/i18n/zh.ts`
    - **注意**：`error-classifier.ts` 目前是硬编码英文字符串，要么通过 error 消息 key 让前端 i18n 替换、要么把 message 改成 i18n key。与现有 pattern 保持一致选更小改动。
@@ -320,7 +320,7 @@ v0.50.2 release 已知活跃 issue 快照：2Z=9, 2X=2, 2Y=2, PA=1。2X/2Y 是 N
 
 **回归风险**：
 - pattern 匹配是子串匹配（见 `error-classifier.ts:349-410` `classifyError`），新加的 `'not logged in'` 可能误触发其他无关错误（例如第三方 provider 返回的"not logged in to XYZ"等）。**缓解**：patterns 加边界提示，或放到 `classifyError` 末尾的 fallback（优先级最低）
-- i18n 文案如果改成 "CodePilot-specific" 后，一些用英文 UI 的开发用户可能觉得文案不够技术化——需要平衡
+- i18n 文案如果改成 "AI Native Lab-specific" 后，一些用英文 UI 的开发用户可能觉得文案不够技术化——需要平衡
 
 **验证**：
 - 单测：`classifyError({ error: new Error('Not logged in · Please run /login') }).category === 'NO_CREDENTIALS'`
@@ -337,7 +337,7 @@ v0.50.2 release 已知活跃 issue 快照：2Z=9, 2X=2, 2Y=2, PA=1。2X/2Y 是 N
 **改动点**：**无**新组件。方案 B / C 中的"派发 open-setup-center 事件"直接复用。
 
 **需核实 / 可能的微调**：
-- 当前 `/api/setup/route.ts` 把"CLI 存在"也算 provider `completed`（第 40-46 行），这条口径与方案 B 入口拦截的判定**不一致**（B 不把 CLI 存在算作 "CodePilot provider"）
+- 当前 `/api/setup/route.ts` 把"CLI 存在"也算 provider `completed`（第 40-46 行），这条口径与方案 B 入口拦截的判定**不一致**（B 不把 CLI 存在算作 "AI Native Lab provider"）
 - **建议**：保持 `/api/setup` 现状不变（它控制 SetupCenter 的三个卡片状态，CLI 算 `completed` 是合理的），但新增一个 `/api/setup/provider-ready` 或在 `hasCodePilotProvider()` 函数里用更严格口径。两条判定口径要各自注释清楚为什么不同。
 
 ---
@@ -408,7 +408,7 @@ v0.50.2 release 已知活跃 issue 快照：2Z=9, 2X=2, 2Y=2, PA=1。2X/2Y 是 N
 
 - **2026-04-15**：方案确定
   - 用户否决"保留 auto 模式 + 打补丁"方向，采纳"二元判定"——auto = 看 CLI binary 是否存在
-  - 用户明确"CLI 登录状态不管"——入口拦截仅看 CodePilot provider 存在性
+  - 用户明确"CLI 登录状态不管"——入口拦截仅看 AI Native Lab provider 存在性
   - 放弃新建引导卡（已有 SetupCenter，之前误判为缺失）
   - 1M 上下文映射（#491）从本计划剥离——用户明确"先管 bug，不管功能请求"
   - 方案 D 合并进 B/C（不独立开发）

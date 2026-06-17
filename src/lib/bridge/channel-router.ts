@@ -1,5 +1,5 @@
 /**
- * Channel Router — resolves IM addresses to CodePilot sessions.
+ * Channel Router — resolves IM addresses to AI Native Lab sessions.
  *
  * When a message arrives from an IM channel, the router finds or creates
  * the corresponding ChannelBinding (and underlying chat_session).
@@ -102,7 +102,7 @@ export function resolve(address: ChannelAddress): ChannelBinding {
 }
 
 /**
- * Create a new binding with a fresh CodePilot session.
+ * Create a new binding with a fresh AI Native Lab session.
  */
 export function createBinding(
   address: ChannelAddress,
@@ -142,7 +142,7 @@ export function createBinding(
 }
 
 /**
- * Bind an IM chat to an existing CodePilot session.
+ * Bind an IM chat to an existing AI Native Lab session.
  */
 export function bindToSession(
   address: ChannelAddress,

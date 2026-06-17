@@ -42,13 +42,13 @@ export async function POST(request: NextRequest) {
       });
     }
 
-    // Precondition: CodePilot must have a provider configured. ~/.claude/settings.json
+    // Precondition: AI Native Lab must have a provider configured. ~/.claude/settings.json
     // (cc-switch, CLI login) is intentionally NOT counted — users with only that source
-    // are redirected to the setup flow to add a proper CodePilot provider.
+    // are redirected to the setup flow to add a proper AI Native Lab provider.
     if (!hasCodePilotProvider()) {
       return new Response(
         JSON.stringify({
-          error: 'No provider configured in CodePilot.',
+          error: 'No provider configured in AI Native Lab.',
           code: 'NEEDS_PROVIDER_SETUP',
           actionHint: 'open_setup_center',
           initialCard: 'provider',

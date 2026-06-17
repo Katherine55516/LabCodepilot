@@ -140,7 +140,7 @@ Legacy fallback `inferAuthStyleFromLegacy()` 仅作用于无法匹配 preset 的
 PresetConnectDialog 中显示：
 - 计费标签（Pay-as-you-go / Coding Plan / Token Plan / Free / Self-hosted）
 - "获取 API Key" 链接（指向 `meta.apiKeyUrl`）
-- "配置指南" 链接（指向 CodePilot 官网文档）
+- "配置指南" 链接（指向 AI Native Lab 官网文档）
 - 注意事项警告（amber callout，来自 `meta.notes`）
 
 ---

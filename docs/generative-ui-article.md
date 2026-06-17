@@ -26,9 +26,9 @@
 
 Claude.ai 官方的生成式 UI（artifacts/canvas）使用的是 **tool_use 机制**：模型调用一个专用 tool 来输出结构化的 widget 内容，前端解析 tool 调用的 input 参数来渲染。
 
-这个方案在 Claude.ai 的架构下工作得很好，但在 CodePilot 的场景下有几个问题：
+这个方案在 Claude.ai 的架构下工作得很好，但在 AI Native Lab 的场景下有几个问题：
 
-1. **SDK 限制**：CodePilot 使用 Claude Agent SDK 的 `preset: 'claude_code'` 模式，无法注册自定义 tool。SDK 暴露的是 text delta 流，不支持在 tool 层面扩展。
+1. **SDK 限制**：AI Native Lab 使用 Claude Agent SDK 的 `preset: 'claude_code'` 模式，无法注册自定义 tool。SDK 暴露的是 text delta 流，不支持在 tool 层面扩展。
 2. **流式体验**：tool_use 的结果需要完整的 `input_json_delta` 拼接完成后才能渲染，不支持 HTML 的增量渲染。而代码围栏方式下，HTML 随文本流式到达，可以做到边生成边预览。
 3. **渲染隔离**：Claude.ai 使用 Shadow DOM 做隔离，我们选择了 sandbox iframe。iframe 的隔离更彻底——完全独立的 JS 执行环境，CSP 可以精确控制资源加载，不存在样式泄漏和脚本逃逸的风险。
 
@@ -44,7 +44,7 @@ Claude.ai 官方的生成式 UI（artifacts/canvas）使用的是 **tool_use 机
 ```
 ````
 
-这个格式复用了 CodePilot 已有的代码围栏模式（`image-gen-request`、`batch-plan` 等），前端的 parser 链天然支持。
+这个格式复用了 AI Native Lab 已有的代码围栏模式（`image-gen-request`、`batch-plan` 等），前端的 parser 链天然支持。
 
 ### 渲染架构：Receiver iframe
 
@@ -58,9 +58,9 @@ Claude.ai 官方的生成式 UI（artifacts/canvas）使用的是 **tool_use 机
 
 ### CSS 变量桥接
 
-这是让 widget 与应用视觉融合的关键。CodePilot 使用 OKLCH 色彩空间的 CSS 变量，而 Anthropic 的 widget 设计指南使用 `--color-background-primary` 这样的标准变量名。
+这是让 widget 与应用视觉融合的关键。AI Native Lab 使用 OKLCH 色彩空间的 CSS 变量，而 Anthropic 的 widget 设计指南使用 `--color-background-primary` 这样的标准变量名。
 
-桥接层在 iframe 初始化时将 CodePilot 的变量值注入 iframe 的 `:root`，模型按指南写的 CSS 就能直接使用当前主题的颜色。深色模式切换时，父页面检测到 `class` 变化，重新计算变量值并推送给 iframe。
+桥接层在 iframe 初始化时将 AI Native Lab 的变量值注入 iframe 的 `:root`，模型按指南写的 CSS 就能直接使用当前主题的颜色。深色模式切换时，父页面检测到 `class` 变化，重新计算变量值并推送给 iframe。
 
 ### 流式渲染
 

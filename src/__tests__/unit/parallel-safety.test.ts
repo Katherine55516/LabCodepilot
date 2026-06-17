@@ -155,12 +155,12 @@ describe('parallel-safety — extractScopePath', () => {
     assert.equal(result, '/tmp/testcwd/foo/bar.txt');
   });
 
-  it('uses file_path for Write (CodePilot convention)', () => {
+  it('uses file_path for Write (AI Native Lab convention)', () => {
     const result = extractScopePath('Write', { file_path: '/abs/path.txt' }, cwd);
     assert.equal(result, '/abs/path.txt');
   });
 
-  it('uses file_path for Edit (CodePilot convention)', () => {
+  it('uses file_path for Edit (AI Native Lab convention)', () => {
     const result = extractScopePath('Edit', { file_path: 'relative.txt' }, cwd);
     assert.equal(result, '/tmp/testcwd/relative.txt');
   });

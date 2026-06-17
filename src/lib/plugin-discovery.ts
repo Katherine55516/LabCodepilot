@@ -14,7 +14,7 @@
  *     is gitignored. This requires a cwd parameter.
  *
  * Plugin loading into SDK sessions is handled by the SDK itself —
- * CodePilot does NOT explicitly inject plugins via queryOptions.plugins.
+ * AI Native Lab does NOT explicitly inject plugins via queryOptions.plugins.
  */
 
 import fs from 'fs';

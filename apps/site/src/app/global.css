@@ -24,7 +24,7 @@
   --color-3: 210 100% 63%;
   --color-4: 195 100% 63%;
   --color-5: 90 100% 63%;
-  /* Match main CodePilot app's stone neutrals, with blue primary for brand */
+  /* Match main AI Native Lab app's stone neutrals, with blue primary for brand */
   --background: oklch(1 0 0);
   --foreground: oklch(0.147 0.004 49.25);
   --card: oklch(1 0 0);
@@ -58,7 +58,7 @@
   --fd-primary: 217 80% 62%;
   --fd-background: 222 15% 6%;
 
-  /* Match main CodePilot app's dark stone palette */
+  /* Match main AI Native Lab app's dark stone palette */
   --background: oklch(0.147 0.004 49.25);
   --foreground: oklch(0.985 0.001 106.423);
   --card: oklch(0.147 0.004 49.25);

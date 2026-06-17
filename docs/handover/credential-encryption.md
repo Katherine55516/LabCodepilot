@@ -4,7 +4,7 @@
 >
 > 相关：[handover/login-system.md](./login-system.md)（用户体系下发 + managed providers）、[handover/builtin-claude-code.md](./builtin-claude-code.md)（内置 Claude Code 读取 env 凭证）
 
-把 CodePilot 落盘的 API 凭证从**明文**改为 **AES-256-GCM 密文**，信任根是 Electron `safeStorage`（Windows DPAPI / macOS Keychain / Linux libsecret）。加密只覆盖磁盘持久化层，**不改任何调用方签名**——所有读函数返回明文，写函数接收明文。
+把 AI Native Lab 落盘的 API 凭证从**明文**改为 **AES-256-GCM 密文**，信任根是 Electron `safeStorage`（Windows DPAPI / macOS Keychain / Linux libsecret）。加密只覆盖磁盘持久化层，**不改任何调用方签名**——所有读函数返回明文，写函数接收明文。
 
 ## 1. 威胁模型边界
 

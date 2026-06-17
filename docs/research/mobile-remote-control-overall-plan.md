@@ -2,11 +2,11 @@
 
 > 创建时间：2026-03-12
 > 最后更新：2026-03-13
-> 适用范围：CodePilot 桌面端 + Android Companion + 多设备控制 + Feishu 能力扩展
+> 适用范围：AI Native Lab 桌面端 + Android Companion + 多设备控制 + Feishu 能力扩展
 
 ## 一、这次更新后的结论
 
-在引入 OpenClaw 官方飞书插件和 `claude-to-im-skill` 作为参考后，CodePilot 的远程方案应从“桌面 Bridge + 移动端控制器”升级为三层结构：
+在引入 OpenClaw 官方飞书插件和 `claude-to-im-skill` 作为参考后，AI Native Lab 的远程方案应从“桌面 Bridge + 移动端控制器”升级为三层结构：
 
 - `Remote Core`
   负责 Host / Controller / Session / Lease、流式事件、审批、结果摘要、多设备接管。
@@ -26,7 +26,7 @@
 
 本次方案修订基于三条输入：
 
-- 当前 CodePilot 已有桌面 Bridge、远程审批、流式输出、文件预览和多 IM 通道
+- 当前 AI Native Lab 已有桌面 Bridge、远程审批、流式输出、文件预览和多 IM 通道
 - `claude-to-im-skill` 已经验证了“守护进程 + 配置映射 + 轻量桥接”的落地方式
 - OpenClaw 官方飞书插件已经把 Feishu 从“消息桥接”提升成“完整渠道插件 + 平台能力工具集”
 
@@ -76,7 +76,7 @@ OpenClaw 官方飞书插件最值得借的不是“功能数量”，而是能�
 - status / gateway
 - 平台工具集
 
-这说明飞书这条线在 CodePilot 中也不应继续停留在“一个 adapter 文件 + 几个设置项”的层级。
+这说明飞书这条线在 AI Native Lab 中也不应继续停留在“一个 adapter 文件 + 几个设置项”的层级。
 
 此外，它已经证明以下能力组合是合理且有用户价值的：
 
@@ -98,7 +98,7 @@ OpenClaw 官方飞书插件最值得借的不是“功能数量”，而是能�
 - 它用配置映射把自身配置转换成现有 bridge 设置
 - 它已经验证了多通道、SSE 流、权限等待、消息持久化这些基础机制
 
-这说明 CodePilot 后续在做远程能力升级时，应该把“桌面主产品”和“轻量守护进程/skill 包装层”视为两个不同交付面。
+这说明 AI Native Lab 后续在做远程能力升级时，应该把“桌面主产品”和“轻量守护进程/skill 包装层”视为两个不同交付面。
 
 ## 五、修订后的目标架构
 
@@ -106,7 +106,7 @@ OpenClaw 官方飞书插件最值得借的不是“功能数量”，而是能�
 
 ### Layer 1: Remote Core
 
-这是 CodePilot 下一阶段应重点建设的核心层。
+这是 AI Native Lab 下一阶段应重点建设的核心层。
 
 职责：
 
@@ -153,7 +153,7 @@ OpenClaw 官方飞书插件最值得借的不是“功能数量”，而是能�
 定义四个核心对象：
 
 - `Host`
-  一台运行 CodePilot 的执行主机。负责工作目录、数据库、Claude CLI、Provider 凭证和会话运行。
+  一台运行 AI Native Lab 的执行主机。负责工作目录、数据库、Claude CLI、Provider 凭证和会话运行。
 - `Controller`
   一个远程控制端，可以是 Android App，也可以是另一台桌面设备或 IM 渠道。
 - `Session`
@@ -236,7 +236,7 @@ OpenClaw 官方飞书插件最值得借的不是“功能数量”，而是能�
 
 ### 9.2 不应继承的假设
 
-以下假设不适合作为 CodePilot 远程总架构：
+以下假设不适合作为 AI Native Lab 远程总架构：
 
 - 单用户本地 daemon 是唯一运行模型
 - 无入站监听就是最终安全边界
@@ -251,7 +251,7 @@ OpenClaw 官方飞书插件最值得借的不是“功能数量”，而是能�
 
 - `Remote Core` 的一种轻量封装与运维入口
 - CLI / daemon 交付形态的参考实现
-- CodePilot 桌面产品之外的配套分发层
+- AI Native Lab 桌面产品之外的配套分发层
 
 而不是未来总架构的主导来源。
 
@@ -488,7 +488,7 @@ OpenClaw 官方飞书插件最值得借的不是“功能数量”，而是能�
 - 先借接口设计，再借高级工具
 - 先完成 Feishu V2 控制面，再做平台工具面
 
-### 风险三：`claude-to-im-skill` 的轻量假设和 CodePilot 主产品冲突
+### 风险三：`claude-to-im-skill` 的轻量假设和 AI Native Lab 主产品冲突
 
 控制策略：
 

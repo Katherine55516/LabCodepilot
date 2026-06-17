@@ -3,7 +3,7 @@
 > 创建时间：2026-04-06
 > 关联执行计划：[decouple-claude-code](../exec-plans/active/decouple-claude-code.md)
 
-## 1. CodePilot 当前 Agent Loop 完整事件流
+## 1. AI Native Lab 当前 Agent Loop 完整事件流
 
 ### 当前架构链路
 
@@ -39,7 +39,7 @@ let conversation = query({
 - `settingSources` — SDK 设置来源
 - `model` — 模型标识
 - `systemPrompt` — 系统提示（preset: 'claude_code' + append）
-- `mcpServers` — MCP 服务器配置（CodePilot 内置 + 用户配置）
+- `mcpServers` — MCP 服务器配置（AI Native Lab 内置 + 用户配置）
 - `canUseTool` — 权限回调函数
 - `thinking` / `effort` — 思考配置
 - `resume` — 会话恢复 ID
@@ -60,7 +60,7 @@ for await (const message of conversation) {
 }
 ```
 
-### SSE 事件类型（CodePilot 自定义格式）
+### SSE 事件类型（AI Native Lab 自定义格式）
 
 | SSE type | 含义 | 来源 SDK message type |
 |----------|------|----------------------|
@@ -93,7 +93,7 @@ for await (const message of conversation) {
 
 ## 2. Vercel AI SDK `streamText` 的 Agent Loop 能力
 
-### CodePilot 已有用法
+### AI Native Lab 已有用法
 
 `src/lib/text-generator.ts` 使用 `streamText` 进行纯文本生成（无 tools），支持 5 个 provider：
 - `@ai-sdk/anthropic`
@@ -215,7 +215,7 @@ if (result.denied) throw new PermissionNext.RejectedError()
 
 ### SSE 事件映射
 
-| fullStream event | CodePilot SSE type |
+| fullStream event | AI Native Lab SSE type |
 |------|------|
 | `text-delta` | `text` |
 | `reasoning-delta` | `thinking` |

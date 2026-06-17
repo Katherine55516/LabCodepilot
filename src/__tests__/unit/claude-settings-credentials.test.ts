@@ -3,7 +3,7 @@
  *
  * Background: External tools (cc-switch, manual edits) manage Claude Code CLI
  * credentials by writing an `env` block into ~/.claude/settings.json. Before
- * the fix, CodePilot's `hasCredentialsForRequest()` only checked shell env and
+ * the fix, AI Native Lab's `hasCredentialsForRequest()` only checked shell env and
  * its own DB — never the settings file — so auto mode fell back to native
  * runtime, which throws "No provider credentials available". See
  * docs/exec-plans/active/cc-switch-credential-bridge.md.
@@ -132,10 +132,10 @@ describe('claude-settings credential reader', () => {
   });
 });
 
-// ── End-to-end chain: cc-switch user, no CodePilot provider ──
+// ── End-to-end chain: cc-switch user, no AI Native Lab provider ──
 //
 // Simulates the exact production scenario from #461 / #478:
-//   1. Fresh CodePilot install — empty DB, no providers configured
+//   1. Fresh AI Native Lab install — empty DB, no providers configured
 //   2. No ANTHROPIC_* env vars (Electron app not launched from a shell with them)
 //   3. cc-switch has written ~/.claude/settings.json with the user's chosen relay
 //
@@ -145,7 +145,7 @@ describe('claude-settings credential reader', () => {
 //   ai-provider.createModel() → does NOT throw the legacy "No provider credentials" error
 //
 // Pre-fix this would all fail and route to native, which throws.
-describe('cc-switch end-to-end (no CodePilot provider, settings.json only)', () => {
+describe('cc-switch end-to-end (no AI Native Lab provider, settings.json only)', () => {
   // Each test gets its own DB dir so the migration runs in a clean slate
   let originalDataDir: string | undefined;
   let tempDataDir: string;

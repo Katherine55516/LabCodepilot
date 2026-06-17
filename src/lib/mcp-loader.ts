@@ -12,8 +12,8 @@
  * `~/.claude/settings.json` still owns the `mcpServerOverrides` map that
  * controls per-server enable/disable for project-scope MCPs.
  *
- * We only manually pass servers that need CodePilot-specific processing
- * (${...} env placeholder resolution from the CodePilot DB) — the SDK
+ * We only manually pass servers that need AI Native Lab-specific processing
+ * (${...} env placeholder resolution from the AI Native Lab DB) — the SDK
  * loads the rest natively via settingSources.
  */
 
@@ -217,10 +217,10 @@ function loadAndMerge(): CachedMcpConfig {
 // ── Public API ───────────────────────────────────────────────────────
 
 /**
- * Load MCP servers that need CodePilot-specific processing.
+ * Load MCP servers that need AI Native Lab-specific processing.
  *
  * Returns only servers with ${...} env placeholders that were resolved
- * against the CodePilot DB. Returns undefined when no such servers exist
+ * against the AI Native Lab DB. Returns undefined when no such servers exist
  * (the common case), letting the SDK load everything natively.
  *
  * Used by: route.ts, conversation-engine.ts — passed to streamClaude().
@@ -269,7 +269,7 @@ export function loadAllMcpServers(): Record<string, MCPServerConfig> | undefined
  * code path knows.
  *
  * Servers with `${...}` env placeholders are resolved against the
- * CodePilot DB the same way loadAndMerge does. Disabled servers are
+ * AI Native Lab DB the same way loadAndMerge does. Disabled servers are
  * filtered out.
  *
  * @param projectCwd - The user's actual working directory (NOT process.cwd())
@@ -286,7 +286,7 @@ export function loadProjectMcpServers(projectCwd: string | undefined): Record<st
     if (Object.keys(rawServers).length === 0) return undefined;
 
     // Apply user-level `mcpServerOverrides` from ~/.claude/settings.json.
-    // The CodePilot MCP Manager UI persists per-server enable/disable state
+    // The AI Native Lab MCP Manager UI persists per-server enable/disable state
     // there (see mcp-loader.ts:57-62 — original loadAndMerge does the same
     // for the cached path). Without this, a DB-provider session would
     // silently re-enable a project MCP the user toggled off (or fail to

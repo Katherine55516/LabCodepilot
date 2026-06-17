@@ -1,5 +1,5 @@
 /**
- * Telegram Bot notification module for CodePilot.
+ * Telegram Bot notification module for AI Native Lab.
  *
  * Sends task status notifications (start, complete, error, permission requests)
  * to a configured Telegram chat. Optionally listens for /status commands
@@ -235,7 +235,7 @@ export async function notifyPermissionRequest(
     `Tool: <code>${escapeHtml(toolName)}</code>`,
     `<pre>${escapeHtml(truncatedInput)}</pre>`,
     ``,
-    `⚠️ Please approve or deny in CodePilot.`,
+    `⚠️ Please approve or deny in AI Native Lab.`,
   ].filter(Boolean).join('\n');
 
   const result = await sendMessage(msg);
@@ -292,7 +292,7 @@ export async function verifyBot(
     if (chatId) {
       const testResult = await callTelegramApi(botToken, 'sendMessage', {
         chat_id: chatId,
-        text: `✅ CodePilot connected successfully!\n\nBot: @${botName}\nNotifications will be sent to this chat.`,
+        text: `✅ AI Native Lab connected successfully!\n\nBot: @${botName}\nNotifications will be sent to this chat.`,
         parse_mode: 'HTML',
       });
       if (!testResult.ok) {
@@ -359,7 +359,7 @@ export async function detectChatId(
 // ── Status Query ───────────────────────────────────────────────
 
 /**
- * Build a status summary of current CodePilot sessions.
+ * Build a status summary of current AI Native Lab sessions.
  * Used by the /status command handler.
  */
 export function buildStatusMessage(): string {
@@ -368,7 +368,7 @@ export function buildStatusMessage(): string {
   const recentSessions = allSessions.slice(0, 5);
 
   const lines: string[] = [
-    `📊 <b>CodePilot Status</b>`,
+    `📊 <b>AI Native Lab Status</b>`,
     ``,
   ];
 
@@ -458,7 +458,7 @@ function getPollerState(): PollerState {
 
 /**
  * Start the long-polling loop to listen for incoming Telegram commands.
- * Supports: /status — replies with current CodePilot session status.
+ * Supports: /status — replies with current AI Native Lab session status.
  * Only processes messages from the configured chat_id for security.
  *
  * This is idempotent — calling it multiple times won't create duplicate pollers.
@@ -533,9 +533,9 @@ async function pollLoop(botToken: string, chatId: string, state: PollerState): P
           await callTelegramApi(botToken, 'sendMessage', {
             chat_id: chatId,
             text: [
-              `👋 <b>CodePilot Bot</b>`,
+              `👋 <b>AI Native Lab Bot</b>`,
               ``,
-              `I'll send you notifications about your CodePilot tasks.`,
+              `I'll send you notifications about your AI Native Lab tasks.`,
               ``,
               `<b>Commands:</b>`,
               `/status — Show current task status`,
@@ -555,7 +555,7 @@ async function pollLoop(botToken: string, chatId: string, state: PollerState): P
           await callTelegramApi(botToken, 'sendMessage', {
             chat_id: chatId,
             text: [
-              `<b>CodePilot Bot Commands</b>`,
+              `<b>AI Native Lab Bot Commands</b>`,
               ``,
               `/status — Show current task status`,
               `/help — Show this help message`,

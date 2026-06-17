@@ -44,7 +44,7 @@ Regression：`context-compressor-handoff.test.ts` 里 `/compact handler — no D
 
 ### 5. 压缩后清 `sdk_session_id` + 走 fresh query
 
-CodePilot 生成 summary 后，如果 SDK session 还在 resume，SDK 会用**自己**的 pre-compaction transcript，我们的 summary 根本不会到模型。所以任何 CodePilot-side 压缩（手动 /compact 或 auto pre-compression）成功后必须：
+AI Native Lab 生成 summary 后，如果 SDK session 还在 resume，SDK 会用**自己**的 pre-compaction transcript，我们的 summary 根本不会到模型。所以任何 AI Native Lab-side 压缩（手动 /compact 或 auto pre-compression）成功后必须：
 - `updateSdkSessionId(session_id, '')`
 - 当轮 streamClaude 的 `sdkSessionId` 传 `undefined`
 - 当轮 `conversationHistory` 传 `messagesToKeep`（不是全量 historyMsgs）

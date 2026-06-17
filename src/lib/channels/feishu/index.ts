@@ -139,7 +139,7 @@ export class FeishuChannelPlugin implements ChannelPlugin<FeishuConfig> {
     // Register card action handler — converts button clicks to callback messages.
     // Gateway guarantees 3-second response; this handler should stay lightweight.
     // Supports two button value formats:
-    //   1. { callback_data: "perm:allow:xxx" }  — CodePilot permission buttons
+    //   1. { callback_data: "perm:allow:xxx" }  — AI Native Lab permission buttons
     //   2. { action: "app_auth_done", operation_id: "xxx" }  — OpenClaw-style buttons
     this.gateway.registerCardActionHandler(async (data: unknown) => {
       const event = data as CardActionEvent;

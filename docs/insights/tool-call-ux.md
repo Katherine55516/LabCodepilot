@@ -67,7 +67,7 @@ is_error 字段在 SSE 链路中被静默丢弃，成功和失败看起来完全
 
 - **Intermediate text**：CraftAgent 的工具调用间推理文本展示，需要先重构 `useSSEStream` 的文本累积为分段感知（目前单一字符串，无法区分 tool 前后的文本），改动量较大
 - **Diff viewer**：当前只有文件名列表，没有行级 diff 预览。项目里没有 diff 组件（Git 页面也是 `<pre>` 裸文本），需要引入 diff 渲染库
-- **工具审批 UI**：目前 CodePilot 没有工具审批流程，如果未来需要可参考 Opencode 的三选按钮（Deny / Allow Always / Allow Once）
+- **工具审批 UI**：目前 AI Native Lab 没有工具审批流程，如果未来需要可参考 Opencode 的三选按钮（Deny / Allow Always / Allow Once）
 
 ## 已知局限
 

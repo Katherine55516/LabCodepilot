@@ -264,7 +264,7 @@ Justin Poehnelt 提出的"响应净化"（`--sanitize` 通过 Model Armor 扫描
 
 一个有趣的观察：**AI Agent 的实际能力 = 它能调用的 CLI 工具的总和**。
 
-CodePilot 的 CLI 工具管理本质上是在管理 AI Agent 的能力边界。装了 ffmpeg，Agent 就能处理视频；装了 gws，Agent 就能操作 Google Workspace；装了 dreamina，Agent 就能生成图片。
+AI Native Lab 的 CLI 工具管理本质上是在管理 AI Agent 的能力边界。装了 ffmpeg，Agent 就能处理视频；装了 gws，Agent 就能操作 Google Workspace；装了 dreamina，Agent 就能生成图片。
 
 从这个角度看，我们做的不只是"工具管理"，而是**Agent 能力的扩展平台**。每添加一个 CLI 工具，就是给 Agent 增加了一个技能。5 星评分体系帮用户判断"这个技能被 Agent 用起来有多顺"。
 

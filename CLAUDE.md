@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-CodePilot — 多模型 AI Agent 桌面客户端，基于 Electron + Next.js。
+AI Native Lab — 多模型 AI Agent 桌面客户端，基于 Electron + Next.js。
 
 > 架构细节见 [ARCHITECTURE.md](./ARCHITECTURE.md)，本文件只包含规则和流程。
 
@@ -98,12 +98,12 @@ CodePilot — 多模型 AI Agent 桌面客户端，基于 Electron + Next.js。
 
 **Release Notes 格式（必须严格遵循）：**
 
-标题：`CodePilot v{版本号}`
+标题：`AI Native Lab v{版本号}`
 
 正文结构：
 
 ```markdown
-## CodePilot v{版本号}
+## AI Native Lab v{版本号}
 
 > 一句话版本摘要，说明这个版本的核心主题或推荐升级理由。
 

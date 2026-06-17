@@ -4,7 +4,7 @@
 > 最后更新：2026-06-03
 > 交接文档：[handover/credential-encryption.md](../../handover/credential-encryption.md) · 产品思考：[insights/credential-encryption.md](../../insights/credential-encryption.md)
 
-把 CodePilot 落盘的 API 凭证从明文改为 AES-256-GCM 密文，信任根 Electron `safeStorage`。参考 bsApp 的 `claude-配置加密-迁移指南.md`，适配本项目 Electron 主进程 + Next.js utility 子进程的双进程架构。
+把 AI Native Lab 落盘的 API 凭证从明文改为 AES-256-GCM 密文，信任根 Electron `safeStorage`。参考 bsApp 的 `claude-配置加密-迁移指南.md`，适配本项目 Electron 主进程 + Next.js utility 子进程的双进程架构。
 
 ## 状态
 

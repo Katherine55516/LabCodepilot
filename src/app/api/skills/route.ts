@@ -15,9 +15,9 @@ interface SkillFile {
   filePath: string;
   /**
    * True when this command comes from a plugin whose plugin.json has
-   * `builtIn: true` (i.e. CodePilot-bundled plugins like GSD). Bundled
+   * `builtIn: true` (i.e. AI Native Lab-bundled plugins like GSD). Bundled
    * plugins are always considered "loaded" — the SDK whitelist does not
-   * apply because CodePilot itself put the files there.
+   * apply because AI Native Lab itself put the files there.
    */
   builtInPlugin?: boolean;
 }
@@ -450,9 +450,9 @@ export async function GET(request: NextRequest) {
       // SDK capabilities not available
     }
 
-    // Annotate plugin skills with loaded status. CodePilot-bundled plugins
+    // Annotate plugin skills with loaded status. AI Native Lab-bundled plugins
     // (plugin.json has `builtIn: true`) are always treated as loaded — the
-    // Claude Code SDK doesn't actively register them, but CodePilot itself
+    // Claude Code SDK doesn't actively register them, but AI Native Lab itself
     // put the files there so they are guaranteed available. Without this
     // override, the two SDK-whitelist filters in useSlashCommands.ts strip
     // them out and the popover shows zero /gsd-* commands.

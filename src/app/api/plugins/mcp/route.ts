@@ -68,7 +68,7 @@ export async function GET(): Promise<NextResponse<MCPConfigResponse | ErrorRespo
     const userConfig = readJsonFile(userClaudeJsonPath());
     const userConfigServers = (userConfig.mcpServers || {}) as Record<string, MCPServerConfig>;
 
-    // Project-scope servers (read-only for CodePilot; the file is part of
+    // Project-scope servers (read-only for AI Native Lab; the file is part of
     // the project's source tree).
     const projectMcp = readJsonFile(path.join(process.cwd(), '.mcp.json'));
     const projectServers = (projectMcp.mcpServers || {}) as Record<string, MCPServerConfig>;

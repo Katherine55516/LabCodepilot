@@ -77,7 +77,7 @@ CLAUDE_SDK_POC=1 npm run test:sdk-poc
 
 | POC | 决定什么 | 如果失败 |
 |-----|---------|----------|
-| `hooks-poc` | Claude Code SDK 0.2.111 的 hook 通路能否在 CodePilot 真 queryOptions 组合下工作 | Phase 6 降级为流消息反推、Phase 7b 推迟 |
+| `hooks-poc` | Claude Code SDK 0.2.111 的 hook 通路能否在 AI Native Lab 真 queryOptions 组合下工作 | Phase 6 降级为流消息反推、Phase 7b 推迟 |
 | `warm-query-poc` | WarmQuery 预热能否让首字延迟 p50 下降 ≥30% | Phase 3 整体砍掉 |
 | `multi-defer-poc` | SDK 单轮能否产生多个并发 deferred_tool_use | Phase 7b 只做单 defer UI，不做合并 drawer |
 
@@ -160,18 +160,18 @@ CLAUDE_SDK_POC=1 npm run test:sdk-poc
 - 2026-04-17：**Hooks 在当前代码里是主动关闭的**（`src/lib/claude-client.ts:970-974` 注释：「No queryOptions.hooks — all hook types (Notification, PostToolUse) use the SDK's hook_callback control_request transport, which fails with "CLI output was not valid JSON" when the CLI mixes control frames with normal stdout」）。Phase 6 必须先在 Phase 0 里验证 0.2.111 是否修复了这个 bug，否则 Phase 6 直接作废或转而用流消息反推。
 - 2026-04-17：**不采纳**的能力先列出（见末尾「不在范围内」），避免 Phase 分裂
 - 2026-04-17（Codex 审核后校准）：原计划 7 条被 Codex 逐条质疑，全部在 `sdk.d.ts` 里核对后成立，现按双层重构：
-  - **WarmQuery**（`sdk.d.ts:4796-4801`）：`query(prompt)` 只能调一次，Options 在 `startup()` 时固化。CodePilot `claude-client.ts:395` 每次都动态组装 cwd/model/provider/permission/MCP/resume/canUseTool，不能按通用 provider 池预热。计划 Phase 3 收窄到「**同 cwd + 同 provider + 同 permission 的 resume 场景**」，且不把「Long Idle 空白」bug 的验收挂钩 WarmQuery（证据不足，root cause 更像客户端 snapshot/GC 生命周期）。
+  - **WarmQuery**（`sdk.d.ts:4796-4801`）：`query(prompt)` 只能调一次，Options 在 `startup()` 时固化。AI Native Lab `claude-client.ts:395` 每次都动态组装 cwd/model/provider/permission/MCP/resume/canUseTool，不能按通用 provider 池预热。计划 Phase 3 收窄到「**同 cwd + 同 provider + 同 permission 的 resume 场景**」，且不把「Long Idle 空白」bug 的验收挂钩 WarmQuery（证据不足，root cause 更像客户端 snapshot/GC 生命周期）。
   - **forkSession**（`sdk.d.ts:552-562`）：参数是 `_sessionId: string, _options?: { upToMessageId?: string, title?: string }`，sessionId 指 **SDK session UUID**（即 `chat_sessions.sdk_session_id`），不是 `chat_sessions.id`。原计划里的 `fromMessageId` 字段名错了，且把两个 id 混为一谈。Phase 4 新增「ID 映射设计」子任务。
   - **tagSession**（`sdk.d.ts:4627`）：`_tag: string | null` —— **单 tag**，不支持多对多。原计划新建 `session_tags` 多对多表会造成 SDK transcript metadata 与 DB 双源分裂。Phase 4 改为：SDK 作主写 tag，DB 仅做索引缓存（供搜索），或完全放弃多对多设计、遵从 SDK 单 tag 语义。
   - **getContextUsage**（`sdk.d.ts:1827`）：是 **Query 实例方法**，必须在 Query 初始化后才能调。`src/app/api/chat/route.ts` 的 preflight compression 决策在创建 Query 之前，存在时序悖论。Phase 5 收窄为「**活跃会话的展示 / 估算器校准**」，不替换 preflight estimator。
-  - **RateLimitInfo**（`sdk.d.ts:2699`）：注释明确「**for claude.ai subscription users**」。CodePilot 还有 API key / Native / OpenAI-compatible / OpenRouter / 三方代理路径，它们不会收到 `rate_limit_event`。Phase 2 收窄为「**Claude Code SDK + OAuth 订阅路径的 UI 增强**」，`error-classifier.ts` 的正则兜底保留为主干。同时删除「`/api/providers/models` 返回 group 级 rate limit hint」——限流是会话事件不是静态元数据。
+  - **RateLimitInfo**（`sdk.d.ts:2699`）：注释明确「**for claude.ai subscription users**」。AI Native Lab 还有 API key / Native / OpenAI-compatible / OpenRouter / 三方代理路径，它们不会收到 `rate_limit_event`。Phase 2 收窄为「**Claude Code SDK + OAuth 订阅路径的 UI 增强**」，`error-classifier.ts` 的正则兜底保留为主干。同时删除「`/api/providers/models` 返回 group 级 rate limit hint」——限流是会话事件不是静态元数据。
   - **TerminalReason**（`sdk.d.ts:2750`）：optional on `SDKResultMessage`。CLI spawn 失败、认证失败、网络断开、JSON 异常、provider 配置错误、native runtime 异常 —— 都不会有 result message。Phase 1 改为「**附加层**」：收到 result 且有 `terminal_reason` 时用它增强结束态 + Sentry tag；其余路径继续走 `error-classifier.ts`。
   - **Elicitation / Deferred / AskUserQuestion**（`sdk.d.ts:1163, 470-475, 2450-2454, 2749`）：
     - MCP Elicitation 的真入口是 `Options.onElicitation: OnElicitation`（callback），`ElicitationRequest.mode` 有 `'form' | 'url'` 两种；`SDKElicitationCompleteMessage` **只是 URL mode 完成通知**，不是表单交互请求入口。
     - Deferred tools 是另一套机制：PreToolUse hook 返回 defer → `SDKResultMessage.terminal_reason === 'tool_deferred'` + `deferred_tool_use: SDKDeferredToolUse` → 调用方注册 pending + await 用户响应 promise → 按相同权限模式 resume。
     - AskUserQuestion 是这套机制的一个具体应用，不是独立通道。
     - 三者必须拆三个 Phase 或至少三个独立子任务，不能写成「一条链」。Phase 7 拆成 7a / 7b。
-  - **Phase 0 Hook POC 不够真实**：原计划「临时工程最小复现」只能证明 SDK 基础通路，证明不了 CodePilot 原 bug（canUseTool + in-process MCP + stderr capture + resume + capability capture + stream parse 组合）是否修好。Phase 0 增加「repo 内真 queryOptions POC harness」子任务。
+  - **Phase 0 Hook POC 不够真实**：原计划「临时工程最小复现」只能证明 SDK 基础通路，证明不了 AI Native Lab 原 bug（canUseTool + in-process MCP + stderr capture + resume + capability capture + stream parse 组合）是否修好。Phase 0 增加「repo 内真 queryOptions POC harness」子任务。
 
 ---
 
@@ -179,7 +179,7 @@ CLAUDE_SDK_POC=1 npm run test:sdk-poc
 
 ### Phase 0 — 接入前置 POC（repo 内真环境验证）
 
-**目标：** 在写任何采纳代码前，用 **CodePilot 实际 queryOptions 组合**（而非最小复现）验证 0.2.111 的关键行为。
+**目标：** 在写任何采纳代码前，用 **AI Native Lab 实际 queryOptions 组合**（而非最小复现）验证 0.2.111 的关键行为。
 
 **👤 用户今天的痛点：** 无（这是可行性验证 Phase，不面向用户）
 
@@ -189,7 +189,7 @@ CLAUDE_SDK_POC=1 npm run test:sdk-poc
 
 **🔎 发现路径：** 纯工程内部 Phase，**承认无 UI 表现**。其结论决定 Phase 6 / 7b 的 go/no-go。
 
-**Codex 校准点：** 原计划的「临时工程最小复现」只能证明 SDK 基础 hook 通路能跑，证明不了 CodePilot 原 bug 条件（canUseTool permission prompt + in-process MCP servers + stderr capture + resume fallback + capability capture + stream 解析组合）下是否修好。
+**Codex 校准点：** 原计划的「临时工程最小复现」只能证明 SDK 基础 hook 通路能跑，证明不了 AI Native Lab 原 bug 条件（canUseTool permission prompt + in-process MCP servers + stderr capture + resume fallback + capability capture + stream 解析组合）下是否修好。
 
 **任务清单：**
 
@@ -234,7 +234,7 @@ CLAUDE_SDK_POC=1 npm run test:sdk-poc
 5. **输出：** `docs/research/agent-sdk-0-2-111-capabilities.md` — 能力全景 + 本次采纳映射 + bug 复核结论 + 类型 diff 摘要 + 多并发 defer 能力验证结果
 
 **验收标准：**
-- Hook bug 在 CodePilot 真实 queryOptions 下的结论明确（修复 / 未修 / 改变形态）
+- Hook bug 在 AI Native Lab 真实 queryOptions 下的结论明确（修复 / 未修 / 改变形态）
 - MCP tool API / Query 类型在升级后无回归
 - SDK 多并发 defer 能力有实测结论
 - Layer B 的每个 Phase 都能基于此文档判断是否 go/no-go
@@ -523,7 +523,7 @@ Codex 校准点：浮层**不可关闭 + 自动重发**是反模式——用户�
 
 **非订阅路径（API key / OpenRouter / OpenAI-compat / Native）**：**UI 完全不变**，保持现有 `error-classifier.ts` 的正则兜底文案。
 
-**Codex 校准点：** typings 里注释明确「**Rate limit information for claude.ai subscription users**」（`sdk.d.ts:2691, 2699`）。CodePilot 的 provider 矩阵里：
+**Codex 校准点：** typings 里注释明确「**Rate limit information for claude.ai subscription users**」（`sdk.d.ts:2691, 2699`）。AI Native Lab 的 provider 矩阵里：
 - ✅ 会收到：Claude Code SDK（OAuth 订阅路径）
 - ❌ 不会收到：API key / Native runtime / OpenAI-compatible / OpenRouter / 三方 Anthropic 代理
 
@@ -630,7 +630,7 @@ Codex 校准点：浮层**不可关闭 + 自动重发**是反模式——用户�
 |------|--------------|--------------|
 | WarmQuery 只能 `query(prompt)` **一次** | `sdk.d.ts:4800`「Can only be called once per WarmQuery」 | 不能做成共享池 |
 | Options 在 `startup()` 时**固化** | `sdk.d.ts:4550-4552` 签名 | 预热时锁定的 cwd/model/provider env/permissionMode/mcpServers/systemPrompt/resume/canUseTool 后续不能改 |
-| CodePilot 每次发送**动态组装** queryOptions | `src/lib/claude-client.ts:395` | 通用 provider 池会拿到错误 cwd / 凭据 / 权限 / MCP |
+| AI Native Lab 每次发送**动态组装** queryOptions | `src/lib/claude-client.ts:395` | 通用 provider 池会拿到错误 cwd / 凭据 / 权限 / MCP |
 | 「Long Idle 空白」bug 根因**未证** | memory 里只记了症状 | 不能把此 bug 的修复挂钩 WarmQuery 验收 |
 
 **重新界定范围：仅在「同 cwd + 同 provider + 同 permission + 同 model」的 resume 场景启用预热**
@@ -759,7 +759,7 @@ Subagent 的消息折叠为一张卡片插在主聊天流里：
 - sessionId 参数指 **SDK session UUID**（对应 `chat_sessions.sdk_session_id`），不是 `chat_sessions.id`
 - 参数是 `upToMessageId` 不是 `fromMessageId`
 - `tagSession` 单 tag 语义，原计划的多对多 `session_tags` 表会让 SDK transcript metadata 和 DB 状态双源分裂
-- **`upToMessageId` 是 Claude Code transcript 里的 message id**，但 CodePilot DB messages 只有本地 message id；现有 `rewind` 按位置把 SDK `userMessageId` 映射到可见 user message，**不覆盖 assistant message**。承诺「assistant 消息也能 fork + 按 upToMessageId 复制 DB messages」在没有 SDK↔DB message 映射表时会落空。
+- **`upToMessageId` 是 Claude Code transcript 里的 message id**，但 AI Native Lab DB messages 只有本地 message id；现有 `rewind` 按位置把 SDK `userMessageId` 映射到可见 user message，**不覆盖 assistant message**。承诺「assistant 消息也能 fork + 按 upToMessageId 复制 DB messages」在没有 SDK↔DB message 映射表时会落空。
 
 **前置子任务 A：SDK ↔ DB message id 映射**（阻塞 Fork 落地）
 
@@ -791,7 +791,7 @@ memory `Rewind Point Emission Rules` 的现状：
 产出 `docs/handover/session-id-mapping.md`，明确：
 
 1. **ID 语义**
-   - `chat_sessions.id`：CodePilot 本地 DB 主键，UI 用
+   - `chat_sessions.id`：AI Native Lab 本地 DB 主键，UI 用
    - `chat_sessions.sdk_session_id`：SDK 分配的 session UUID，调用 SDK API 用
    - `SDKResultMessage.session_id` / `forkSession` 结果：SDK UUID
    
@@ -803,7 +803,7 @@ memory `Rewind Point Emission Rules` 的现状：
    - **Title**：SDK 主写（`renameSession`），DB 镜像（订阅 `SDKSessionStateChangedMessage` 更新）
    - **Tag**：SDK 主写（`tagSession`），DB 镜像
    - **Messages**：按现状，DB 持有完整历史（用于渲染），SDK 持有 transcript（用于 resume）
-   - **Parent-child 关系**：DB 加 `parent_session_id` 列（SDK 侧没有这个概念，属 CodePilot 扩展）
+   - **Parent-child 关系**：DB 加 `parent_session_id` 列（SDK 侧没有这个概念，属 AI Native Lab 扩展）
 
 4. **DB migration**（遵循 `feedback_db_migration_safety`：永不 DELETE，只 backfill）
    - `chat_sessions` 加 `parent_session_id TEXT DEFAULT ''`
@@ -1218,7 +1218,7 @@ MCP 工具请求结构化输入时，聊天流里工具 card 之后插入一个�
 2. **Pending elicitation 注册表（Codex 校准后修正 id 来源 + resolve/reject 语义）**
    - 新建 `src/lib/elicitation-registry.ts`：`Map<localPromptId, { resolve, reject, request, sdkElicitationId? }>`
    - **id 来源分流（Codex 校准）：** SDK typings 里 `ElicitationRequest.elicitationId` 是**可选且只用于 URL mode 的 correlation**（`sdk.d.ts:480`）。form mode 很可能没这个 id，不能作为 key。
-     - **key 用 CodePilot 本地生成的 `localPromptId`**（每个 `onElicitation` 调用生成一个 UUID）
+     - **key 用 AI Native Lab 本地生成的 `localPromptId`**（每个 `onElicitation` 调用生成一个 UUID）
      - **URL mode** 额外保存 SDK 的 `elicitationId` 到 value，用于后续收到 `SDKElicitationCompleteMessage` 时做 correlation（match SDK id → 找到本地 promise → resolve）
      - **form mode** 的响应走 SSE/POST，携带 `localPromptId`，不依赖 SDK id
    - MCP 的 `ElicitResult` 有三种产品态：`{ action: 'accept', ... }` / `{ action: 'decline' }` / `{ action: 'cancel' }`
@@ -1268,7 +1268,7 @@ MCP 工具请求结构化输入时，聊天流里工具 card 之后插入一个�
 - **官方 docs 把工具 schema 延迟加载叫 Tool Search**（`CLAUDE_CODE_TOOL_SEARCH` 等环境变量控制），与 Deferred tools **不是同一概念**
 - **AskUserQuestion** 是 Deferred tools 机制的一个具体应用，不是独立通道
 
-**👤 用户今天的痛点：** 目前 CodePilot 里 AskUserQuestion 类工具（Claude 想停下来问用户问题）体验不连贯——工具「执行」完就结束本轮，用户回答后下一轮才 resume，中间有断层感。
+**👤 用户今天的痛点：** 目前 AI Native Lab 里 AskUserQuestion 类工具（Claude 想停下来问用户问题）体验不连贯——工具「执行」完就结束本轮，用户回答后下一轮才 resume，中间有断层感。
 
 **Codex 校准点（首版单 defer，多 defer 待 POC 验证）：**
 
@@ -1384,18 +1384,18 @@ SDK 0.2.111 `SDKResultSuccess.deferred_tool_use?: SDKDeferredToolUse`（`sdk.d.t
 
 | 风险 | 缓解 |
 |------|------|
-| Phase 0 POC 只用最小复现场景，证明不了真实 bug 修复 | 已改为 repo 内 integration test，使用 CodePilot 实际 queryOptions 组合；Phase 6 / 7b 的 go/no-go 必须基于 repo POC 结论 |
+| Phase 0 POC 只用最小复现场景，证明不了真实 bug 修复 | 已改为 repo 内 integration test，使用 AI Native Lab 实际 queryOptions 组合；Phase 6 / 7b 的 go/no-go 必须基于 repo POC 结论 |
 | Phase 0 发现 hook bug 未修，直接砍掉 Phase 6 / 7b | 保留后手：Phase 6 降级为 `SDKTaskUpdatedMessage` / `SDKSessionStateChangedMessage` 流消息反推；Phase 7b 若 hook 不可用则推迟至 SDK 修复 |
 | WarmQuery 被误用于宽场景（切 provider、idle 重热） | Phase 3 **强制窄场景**（同 cwd + provider + permission + model），宽场景明确标记为 out-of-scope；POC 必须证伪宽场景可行性 |
 | 「Long Idle 空白」bug 被错误归因到冷启动 | 已从 Phase 3 验收范围剔除；**另立 bug 工单**调查 `stream-session-manager` 的 snapshot/GC 生命周期 |
 | DB migration 破坏现有 session | 严格走 `feedback_db_migration_safety` 的 backfill；新列 NOT NULL DEFAULT ''；不新建多对多 session_tags 表 |
 | Fork / Tag 出现 SDK 与 DB 双源分裂 | Phase 4 前置的 `session-id-mapping.md` 明确 SoT：SDK 主写、DB 镜像；双写失败要 retry + 对账 |
-| `tagSession` 单 tag 与产品希望的多 tag 冲突 | 接受「功能弱化」换「SoT 一致」；如果产品一定要多 tag，另起 CodePilot 侧独立 tag 系统（不用 SDK tagSession） |
+| `tagSession` 单 tag 与产品希望的多 tag 冲突 | 接受「功能弱化」换「SoT 一致」；如果产品一定要多 tag，另起 AI Native Lab 侧独立 tag 系统（不用 SDK tagSession） |
 | `getContextUsage` 被误用于 preflight 压缩决策 | Phase 5 **强制**限定活跃会话展示/校准；preflight 主干继续用 estimator |
 | RateLimitInfo 在非订阅路径上缺失 → UI 空白 | Phase 2 **仅在订阅路径**启用 Banner；非订阅路径继续走 `error-classifier.ts` 正则主干 |
 | TerminalReason 覆盖不到无 result 的错误路径 | Phase 1 **附加层**定位，`error-classifier` 主干不动；未识别 reason 回退 `terminal.unknown` |
 | Elicitation / Deferred tools / AskUserQuestion 被写成一条链导致漏掉关键机制 | Phase 7 拆成 7a（elicitation callback + registry）/ 7b（defer + resume），各自独立 |
-| **Fork 的 `upToMessageId` 是 SDK transcript id，但 CodePilot DB messages 只有本地 id**；无完整 SDK↔DB message 映射会导致 fork 落不到实处 | Phase 4 首版走 Path A（仅 user turn fork + 复用现有 rewind point 的 `sdkUserMessageId`）；全消息 fork 放 Phase 4b 等用户反馈 |
+| **Fork 的 `upToMessageId` 是 SDK transcript id，但 AI Native Lab DB messages 只有本地 id**；无完整 SDK↔DB message 映射会导致 fork 落不到实处 | Phase 4 首版走 Path A（仅 user turn fork + 复用现有 rewind point 的 `sdkUserMessageId`）；全消息 fork 放 Phase 4b 等用户反馈 |
 | **限流自动重发 + 不可关闭浮层**替用户做决定，且上一轮可能已有工具副作用，重发到另一个模型可能重复执行 | Phase 2 阻断改为**可关闭恢复面板** + 替代模型可用性校验 + 「切换并重试」二次确认 + draft 保留 |
 | **URL elicitation 自动打开外部 MCP 提供的 URL**是 phishing/隐私风险 | Phase 7a 改为**安全授权卡片**：展示 domain + 来源 + 用途，用户显式点按钮才打开；协议 allowlist（仅 `https:`，拦 `file:/javascript:/data:/` 私网） |
 | **Phase 0 integration test 不会被 `npm run test` 自动跑**，可能被误以为已覆盖；塞默认跑又依赖本机凭据不稳定 | 新增 `test:sdk-poc` 脚本 + `CLAUDE_SDK_POC=1` env gate + fixture MCP server + 无凭据自动 skip + runbook |
@@ -1403,7 +1403,7 @@ SDK 0.2.111 `SDKResultSuccess.deferred_tool_use?: SDKDeferredToolUse`（`sdk.d.t
 | Fork API 签名只收 `upToMessageId` 但 DB messages 没这个 id，导致服务端不知道本地切到哪条 | Path A 入参改为 `{ dbSessionId, dbMessageId, title? }`；服务端由 dbMessageId 经现有 rewind point 映射推导 `sdkUserMessageId`；校验失败则 400 |
 | Rename / Tag 默认所有会话都有 `sdk_session_id`，忽略本地新会话 / Native runtime / 导入会话的空 UUID 状态 | 按 `sdk_session_id` 是否非空分流：SDK 会话走 SDK 主写 + DB 镜像；空 UUID 走 DB-only；首次拿到 UUID 时 reconcile |
 | `WorktreeCreate` hook 是 SDK runtime 专属，原计划的痛点写成 Native runtime 场景，hook 覆盖不到 | 本 Phase 明确只覆盖 SDK runtime；Native runtime 的 worktree 提示移到「不在范围内」，等 native-runtime 发等价 event 后另立任务 |
-| 用 SDK `elicitationId` 作为 form mode 注册表 key，而 typings 声明它**仅 URL mode correlation** 用 | Registry key 改用 CodePilot 本地生成的 `localPromptId`；URL mode 额外存 SDK `elicitationId` 做 correlation |
+| 用 SDK `elicitationId` 作为 form mode 注册表 key，而 typings 声明它**仅 URL mode correlation** 用 | Registry key 改用 AI Native Lab 本地生成的 `localPromptId`；URL mode 额外存 SDK `elicitationId` 做 correlation |
 | 设计多 deferred tool 合并 drawer，但 `SDKResultSuccess.deferred_tool_use` 是**单数**，SDK 能力未经证实 | 首版严格单 defer；Phase 0 POC 验证 SDK 是否支持多并发 defer；结论不支持则永久删除多 defer UI 设计，支持则另立 Phase 7b-future |
 
 ## 文档

@@ -37,7 +37,7 @@
 **OpenClaw 的 Heartbeat vs Cron 双轨制**：
 - Heartbeat：定期"醒来"检查一批事项（读 HEARTBEAT.md），context-aware，有事就说、没事沉默
 - Cron：精确时间点执行特定任务，isolated 模式不干扰主会话
-- CodePilot 现有的 daily check-in 本质就是 heartbeat 的雏形
+- AI Native Lab 现有的 daily check-in 本质就是 heartbeat 的雏形
 
 **OpenClaw 的 HEARTBEAT_OK 协议**：
 - AI 回复 `HEARTBEAT_OK` → 没事，不打扰用户
@@ -58,7 +58,7 @@
 
 ```
 ┌──────────────────────────────────────────────────────┐
-│  CodePilot 主进程 (Electron Main)                      │
+│  AI Native Lab 主进程 (Electron Main)                      │
 │                                                       │
 │  ┌─────────────────────────────────────────────────┐  │
 │  │ TaskScheduler                                    │  │

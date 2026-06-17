@@ -2,8 +2,8 @@ import type { MetadataRoute } from 'next';
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: 'CodePilot',
-    short_name: 'CodePilot',
+    name: 'AI Native Lab',
+    short_name: 'AI Native Lab',
     description: 'Desktop workspace for Claude Code',
     start_url: '/',
     display: 'browser',

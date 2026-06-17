@@ -5,7 +5,7 @@ description: Bridge Claude conversations to Telegram, Discord, Feishu / Lark, an
 
 # Message Bridge
 
-The Message Bridge lets you chat with Claude from instant messaging apps on your phone. Start CodePilot on your desktop, configure a Bot, and you can interact with Claude anytime through Telegram, Discord, Feishu / Lark, or QQ.
+The Message Bridge lets you chat with Claude from instant messaging apps on your phone. Start AI Native Lab on your desktop, configure a Bot, and you can interact with Claude anytime through Telegram, Discord, Feishu / Lark, or QQ.
 
 ## Supported Platforms
 
@@ -19,11 +19,11 @@ The Message Bridge lets you chat with Claude from instant messaging apps on your
 ## How It Works
 
 ```
-Phone IM → Bot receives message → CodePilot forwards to Claude → Claude replies → Bot sends reply back to IM
+Phone IM → Bot receives message → AI Native Lab forwards to Claude → Claude replies → Bot sends reply back to IM
 ```
 
 1. You send a message to the Bot in your messaging platform
-2. CodePilot's Bridge service receives the message and forwards it to Claude
+2. AI Native Lab's Bridge service receives the message and forwards it to Claude
 3. Claude processes the request and generates a reply
 4. The reply is sent back to your messaging platform via the Bot
 5. If Claude needs permission confirmation (e.g. writing a file), it sends a confirmation button in the IM
@@ -45,7 +45,7 @@ On the Bridge overview page you can configure:
 - **Default working directory** — Default project path for new conversations
 - **Default model** — Model used for bridge conversations
 - **Default provider** — API provider used for bridge conversations
-- **Auto-start** — Automatically start the bridge service when CodePilot launches
+- **Auto-start** — Automatically start the bridge service when AI Native Lab launches
 
 ### Bridge Status
 
@@ -58,12 +58,12 @@ The Bridge page shows real-time status:
 
 ## Slash Commands
 
-You can use slash commands in the IM to control CodePilot:
+You can use slash commands in the IM to control AI Native Lab:
 
 | Command | Arguments | Description |
 |---------|-----------|-------------|
 | `/new` | `[path]` | Start a new conversation, optionally specifying a working directory |
-| `/bind` | `<session-id>` | Bind the current IM chat to an existing CodePilot conversation |
+| `/bind` | `<session-id>` | Bind the current IM chat to an existing AI Native Lab conversation |
 | `/cwd` | `/path/to/dir` | Switch the working directory for the current conversation |
 | `/mode` | `plan\|code\|ask` | Switch conversation mode |
 | `/status` | — | View current conversation status (ID, working directory, mode, model) |
@@ -73,7 +73,7 @@ You can use slash commands in the IM to control CodePilot:
 
 ## Usage Tips
 
-- **Keep CodePilot running** — The bridge relies on the desktop app as a relay; the Bot cannot respond if CodePilot is closed
+- **Keep AI Native Lab running** — The bridge relies on the desktop app as a relay; the Bot cannot respond if AI Native Lab is closed
 - **System tray mode** — Minimize to the system tray so the bridge stays active without taking up desktop space
 - **Prefer DMs** — Using DMs is recommended; group chats may be noisy with other messages
 - **Permission confirmations** — When Claude needs to perform a sensitive operation it sends a confirmation button in the IM; make sure to respond promptly

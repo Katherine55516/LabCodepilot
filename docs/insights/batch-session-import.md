@@ -4,7 +4,7 @@
 
 ## 解决什么用户问题
 
-CodePilot 支持把 Claude Code CLI 的历史会话导入成 CodePilot 会话。配合 cross-host session import（扫描 bsApp 影子 HOME），一个用户在多台机器/多个 Agent 间产生的会话可能多达上百条（实测列表 184 条）。
+AI Native Lab 支持把 Claude Code CLI 的历史会话导入成 AI Native Lab 会话。配合 cross-host session import（扫描 bsApp 影子 HOME），一个用户在多台机器/多个 Agent 间产生的会话可能多达上百条（实测列表 184 条）。
 
 原来的对话框每行一个"导入"按钮，点了就立刻导入并跳转——**一次只能搬一条**。对"刚换机器、想把上一台的一批会话都搬过来"的用户，逐条点击 + 每次跳转打断，是明显的体力活。本次加多选/全选/批量导入，把"搬一批"变成一次操作。
 

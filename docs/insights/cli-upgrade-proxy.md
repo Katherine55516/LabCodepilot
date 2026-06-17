@@ -6,7 +6,7 @@
 
 ### P0：CLI 版本过旧导致 exit code 1
 
-11 个 issue 的共性根因。用户安装 CodePilot 后，里面的 SDK 调用的是系统上的 Claude Code CLI。如果 CLI 版本太旧（如 2.0.x），SDK 接口不兼容直接 exit code 1，用户看到的是"发送消息失败"。
+11 个 issue 的共性根因。用户安装 AI Native Lab 后，里面的 SDK 调用的是系统上的 Claude Code CLI。如果 CLI 版本太旧（如 2.0.x），SDK 接口不兼容直接 exit code 1，用户看到的是"发送消息失败"。
 
 用户不知道：
 - 问题出在 CLI 版本上（错误信息只有 exit code 1）
@@ -27,8 +27,8 @@ Windows 上 Claude Code 依赖 Git Bash 执行命令。官方只是在文档里�
 
 ### "可更新"状态而非"自动更新 CLI"
 
-考虑过让 CodePilot 自动更新 CLI，但放弃了：
-- CLI 是系统级工具，不属于 CodePilot 管理范畴
+考虑过让 AI Native Lab 自动更新 CLI，但放弃了：
+- CLI 是系统级工具，不属于 AI Native Lab 管理范畴
 - 自动更新可能打断正在进行的会话
 - 不同安装方式有不同的更新机制，强行统一会出问题
 - 用户应该知道自己的 CLI 在更新
@@ -65,10 +65,10 @@ Git 安装做成非致命步骤，因为：
 
 ## 已知局限
 
-1. **代理检测只在启动时执行一次** — 用户开关 VPN 后需要重启 CodePilot
+1. **代理检测只在启动时执行一次** — 用户开关 VPN 后需要重启 AI Native Lab
 2. **WinGet 检测有 5 秒超时** — 首次 status 检查可能略慢
 3. **Homebrew/WinGet 无法确认是否有新版本** — 只能提供升级入口
-4. **native 安装的"自动更新"可能不及时** — CodePilot 通过 SDK spawn 短生命周期子进程，自动更新机制来不及生效。用户仍可以手动运行 `claude update`
+4. **native 安装的"自动更新"可能不及时** — AI Native Lab 通过 SDK spawn 短生命周期子进程，自动更新机制来不及生效。用户仍可以手动运行 `claude update`
 
 ## 参考
 

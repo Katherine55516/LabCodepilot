@@ -1,37 +1,37 @@
 ---
 title: Provider Configuration
-description: Configure LLM providers to power CodePilot.
+description: Configure LLM providers to power AI Native Lab.
 ---
 
 # Provider Configuration
 
-CodePilot supports multiple LLM providers. You can configure several providers simultaneously and use different models in different conversations.
+AI Native Lab supports multiple LLM providers. You can configure several providers simultaneously and use different models in different conversations.
 
 ## Authentication Overview
 
-CodePilot has two ways to obtain API credentials:
+AI Native Lab has two ways to obtain API credentials:
 
 ### 1. CLI Environment Authentication (Auto-Detected)
 
-If you have the `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN` environment variable set in your shell, CodePilot **automatically detects** it on startup and uses it as a built-in provider. The Setup Center also checks for these credentials and marks the provider step as complete if found.
+If you have the `ANTHROPIC_API_KEY` or `ANTHROPIC_AUTH_TOKEN` environment variable set in your shell, AI Native Lab **automatically detects** it on startup and uses it as a built-in provider. The Setup Center also checks for these credentials and marks the provider step as complete if found.
 
 ```bash
 export ANTHROPIC_API_KEY="sk-ant-..."
 ```
 
-> **Note:** Configurations changed via `claude config set` or Claude Code's `/config` command are **not recognized by CodePilot**. CodePilot only reads shell environment variables and does not share Claude Code CLI's internal configuration. If you switched accounts/keys in the CLI via `cc switch` or similar methods, you need to manually reconfigure the corresponding key in CodePilot's **Settings > Providers**.
+> **Note:** Configurations changed via `claude config set` or Claude Code's `/config` command are **not recognized by AI Native Lab**. AI Native Lab only reads shell environment variables and does not share Claude Code CLI's internal configuration. If you switched accounts/keys in the CLI via `cc switch` or similar methods, you need to manually reconfigure the corresponding key in AI Native Lab's **Settings > Providers**.
 
-> After modifying environment variables, you need to **restart CodePilot** for changes to take effect.
+> After modifying environment variables, you need to **restart AI Native Lab** for changes to take effect.
 
 ### 2. Manually Adding Providers
 
-Manually add API keys in **Settings > Providers**. These credentials are stored in CodePilot's local database, independent of the CLI environment.
+Manually add API keys in **Settings > Providers**. These credentials are stored in AI Native Lab's local database, independent of the CLI environment.
 
 This is ideal for scenarios where you need multiple providers or non-Anthropic services.
 
 ### Priority
 
-When sending a message, CodePilot determines which provider to use in the following order:
+When sending a message, AI Native Lab determines which provider to use in the following order:
 
 1. **Conversation-specific** — The provider manually selected in the conversation header
 2. **Global default** — The provider marked as "Default" in the provider list
@@ -58,7 +58,7 @@ Connect to third-party endpoints compatible with the Anthropic API format.
 
 ### Chinese Providers
 
-CodePilot includes built-in configuration presets for major Chinese providers. After selecting one, the Base URL and default model are auto-filled:
+AI Native Lab includes built-in configuration presets for major Chinese providers. After selecting one, the Base URL and default model are auto-filled:
 
 | Provider | Description | Billing Model |
 |----------|-------------|---------------|
@@ -71,7 +71,7 @@ CodePilot includes built-in configuration presets for major Chinese providers. A
 | **小米 MiMo** | Xiaomi MiMo-V2.5-Pro (pay-as-you-go or Token Plan) | Pay-as-you-go / Token Plan |
 | **阿里云百炼 Coding Plan** | Alibaba Cloud (Qwen, GLM, Kimi, MiniMax) | Coding Plan |
 
-When adding a Chinese provider in CodePilot, the system automatically handles the authentication method — you just need to enter the key provided by the respective platform. Each provider card shows a direct link to obtain your API key.
+When adding a Chinese provider in AI Native Lab, the system automatically handles the authentication method — you just need to enter the key provided by the respective platform. Each provider card shows a direct link to obtain your API key.
 
 > **Important notes for specific providers:**
 > - **智谱 GLM**: Peak hours (14:00–18:00 UTC+8) consume 3x credits
@@ -92,7 +92,7 @@ Access multiple model providers (Anthropic, OpenAI, Google, Meta, etc.) through 
 Use Claude through AWS infrastructure.
 
 - **Auth**: Environment variables — requires `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION`
-- **Note**: After adding in CodePilot, the system reads your AWS environment variables for authentication. No need to enter keys in the UI.
+- **Note**: After adding in AI Native Lab, the system reads your AWS environment variables for authentication. No need to enter keys in the UI.
 
 ### Google Vertex
 
@@ -110,7 +110,7 @@ Gemini image generation API, used by the design Agent.
 
 ### Ollama (Local Models)
 
-Run local models through Ollama. Ollama provides an Anthropic-compatible API that CodePilot can connect to directly.
+Run local models through Ollama. Ollama provides an Anthropic-compatible API that AI Native Lab can connect to directly.
 
 - **Auth**: No API key needed (handled automatically)
 - **Prerequisite**: Ollama must be installed and running
@@ -143,10 +143,10 @@ Unified proxy supporting 100+ LLM providers.
 
 ## FAQ
 
-### Environment variables are set but CodePilot doesn't detect them
+### Environment variables are set but AI Native Lab doesn't detect them
 
-- Confirm the environment variables are available in the shell environment when CodePilot starts
-- If set via `.zshrc` / `.bashrc`, make sure you **restarted CodePilot** (not just refreshed) after the change
+- Confirm the environment variables are available in the shell environment when AI Native Lab starts
+- If set via `.zshrc` / `.bashrc`, make sure you **restarted AI Native Lab** (not just refreshed) after the change
 - Apps launched via macOS Launchpad may not inherit terminal environment variables — try launching from the terminal or manually adding the provider
 
 ### API key is valid but requests fail
@@ -183,11 +183,11 @@ ollama run gemma4:e4b
 
 The model will enter interactive chat mode. Once you confirm it responds normally, press `Ctrl+D` to exit. The Ollama service continues running in the background.
 
-> **Model names matter**: The model name you enter in CodePilot must **exactly match** the name shown by `ollama list` (including the tag after the colon). For example, `gemma4:e4b` — not just `gemma4`.
+> **Model names matter**: The model name you enter in AI Native Lab must **exactly match** the name shown by `ollama list` (including the tag after the colon). For example, `gemma4:e4b` — not just `gemma4`.
 
 For more models and usage, see the [Ollama documentation](https://docs.ollama.com/).
 
-### Step 2: Add Ollama in CodePilot
+### Step 2: Add Ollama in AI Native Lab
 
 1. Open **Settings > Providers**
 2. Find **Ollama** at the bottom of the provider list and click **+ Connect**

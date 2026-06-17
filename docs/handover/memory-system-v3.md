@@ -216,7 +216,7 @@ interface AssistantWorkspaceState {
 - ESLint error：48 → 0（47 个 no-explicit-any + 1 个 setState-in-effect）
 - CI lint：去掉 `continue-on-error`，lint 失败阻塞 build/release
 - Smoke 测试进 CI：`smoke-test` job 接入 build/release 依赖链
-- E2E 断言修复：品牌 Claude → CodePilot
+- E2E 断言修复：品牌 Claude → AI Native Lab
 - 外链行为：`shell.openExternal` 打开系统浏览器
 
 ## 未实现（后续）

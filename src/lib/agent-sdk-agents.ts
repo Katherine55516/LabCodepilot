@@ -2,7 +2,7 @@
  * Agent SDK Agents Registry — manages built-in agent definitions
  * that can be injected into SDK query options.
  *
- * Existing "Image Agent" and other special agents in CodePilot are
+ * Existing "Image Agent" and other special agents in AI Native Lab are
  * handled via system prompt injection, not SDK agents. This registry
  * is for future SDK-native agent integration.
  */

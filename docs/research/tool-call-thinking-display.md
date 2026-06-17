@@ -1,6 +1,6 @@
 # 工具调用思考过程展示 — 调研与方案
 
-> 目标：在 CodePilot 的工具调用区域展示 Claude 的 extended thinking 内容，让用户能看到模型在调用工具时的推理过程。
+> 目标：在 AI Native Lab 的工具调用区域展示 Claude 的 extended thinking 内容，让用户能看到模型在调用工具时的推理过程。
 
 ## 现状分析
 

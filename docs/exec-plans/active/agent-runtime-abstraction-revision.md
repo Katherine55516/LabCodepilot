@@ -358,7 +358,7 @@ Skills 发现（扫描 SKILL.md 文件）是通用的——所有 Runtime 都可
 
 ### 5.3 推荐策略
 
-**短期（现在）**：不内置。用户自行安装 CLI。CodePilot 提供一键安装按钮 + 安装引导。Native Runtime 作为无 CLI 时的 fallback，功能逐步追赶。
+**短期（现在）**：不内置。用户自行安装 CLI。AI Native Lab 提供一键安装按钮 + 安装引导。Native Runtime 作为无 CLI 时的 fallback，功能逐步追赶。
 
 **中期（Native Runtime 功能完备后）**：Native Runtime 成为默认。SDK Runtime 降级为可选增强。用户不安装 CLI 也能完整使用所有功能。
 

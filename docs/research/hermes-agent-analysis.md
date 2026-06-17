@@ -1,9 +1,9 @@
-# Hermes Agent 分析 — 与 CodePilot Native Runtime 的结合机会
+# Hermes Agent 分析 — 与 AI Native Lab Native Runtime 的结合机会
 
-> **本文采用三段式结构**：外部事实（Hermes）/ 本仓库事实（CodePilot, file:line）/ 推断与建议。
+> **本文采用三段式结构**：外部事实（Hermes）/ 本仓库事实（AI Native Lab, file:line）/ 推断与建议。
 > 每条陈述必须可追溯到具体来源；推断层不得与事实层混写。
 >
-> **⚠️ 对比基线说明**：本文的 CodePilot 现状以 [`docs/handover/decouple-native-runtime.md`](../handover/decouple-native-runtime.md) 为权威来源。
+> **⚠️ 对比基线说明**：本文的 AI Native Lab 现状以 [`docs/handover/decouple-native-runtime.md`](../handover/decouple-native-runtime.md) 为权威来源。
 > `ARCHITECTURE.md:3` 的总览描述仍把主链路写成 Claude Agent SDK，尚未同步到 native runtime 切换——
 > 读者遇到两者冲突时请以交接文档为准。
 
@@ -16,7 +16,7 @@
 - Hermes 上游真正的 tag 是日期制（`v2026.4.8` 等），**不存在 `v0.8.0` tag**，只有 `RELEASE_v0.8.0.md` 这个文件名
 - 本文 "Hermes 事实层" 的所有引用均基于此本地副本
 
-**CodePilot 基线**
+**AI Native Lab 基线**
 - 权威文档：`docs/handover/decouple-native-runtime.md`
 - 代码引用：`src/...:行号` 形式，便于复核
 
@@ -187,7 +187,7 @@ docstring 原文定位：`agent/auxiliary_client.py:1-43`。
 
 ---
 
-## 二、CodePilot 事实层（本仓库当前实现）
+## 二、AI Native Lab 事实层（本仓库当前实现）
 
 权威基线：[`docs/handover/decouple-native-runtime.md`](../handover/decouple-native-runtime.md)。
 所有引用形式为 `file:line`。
@@ -297,10 +297,10 @@ interface RoleModels {
 ```
 
 **关键事实**：
-- 每个 provider 预设都可以配 `roleModels.small` 或 `roleModels.haiku`——这些已经是 CodePilot 既有的架构约定，用户在 provider 编辑界面能直接改
+- 每个 provider 预设都可以配 `roleModels.small` 或 `roleModels.haiku`——这些已经是 AI Native Lab 既有的架构约定，用户在 provider 编辑界面能直接改
 - `src/lib/provider-resolver.ts:268-272` 已经在把 `roleModels.small` 写到 Claude Code SDK 的 `ANTHROPIC_SMALL_FAST_MODEL` 环境变量——**SDK 路径下 SDK 自己就会用它做内部副任务**（摘要、标题生成等）。Native Runtime 下这个槽位目前没被读，但数据本身是有的（`ResolvedProvider.roleModels` 位于 `provider-resolver.ts:51`）
 - 非 Anthropic provider 已有映射：GLM 把 `haiku → glm-4.5-air`、`sonnet → glm-5-turbo`、`opus → glm-5.1`（`provider-catalog.ts:262-266`）
-- **退化映射也被考虑过**：MiniMax / MiMo 这类无独立小模型的 provider 把 `haiku/sonnet/opus` 全部映射到同一个模型（`provider-catalog.ts:370-405`）——CodePilot 早就接受"不是所有 provider 都有便宜档"这个事实
+- **退化映射也被考虑过**：MiniMax / MiMo 这类无独立小模型的 provider 把 `haiku/sonnet/opus` 全部映射到同一个模型（`provider-catalog.ts:370-405`）——AI Native Lab 早就接受"不是所有 provider 都有便宜档"这个事实
 
 **意义**：
 设计辅助模型路由**不需要**硬编码"Anthropic → Haiku、OpenAI → gpt-mini"类映射。直接复用 `resolved.roleModels.small` / `.haiku` 即可——用户在 provider 预设里改了什么，辅助路由就自动跟着变。对没有独立小模型的 provider，自然退化为"主模型做副任务"，不引入新的故障模式。
@@ -315,7 +315,7 @@ interface RoleModels {
 
 ### 3.1 P0 — 并行安全调度器
 
-**依据**：Hermes §1.3（四层 whitelist-first 判定） + CodePilot §2.1（AI SDK 已并行但无安全判定）
+**依据**：Hermes §1.3（四层 whitelist-first 判定） + AI Native Lab §2.1（AI SDK 已并行但无安全判定）
 
 **建议实现路径**：
 在 `src/lib/agent-tools.ts` 的 tool 包装层插入并行前预检，保留 AI SDK 的 `Promise.all` 并行但对不安全组合强制串行化：
@@ -333,8 +333,8 @@ interface RoleModels {
 
 **依据**：
 - Hermes §1.4（统一路由 + per-task 覆盖 + 402 fallback）
-- CodePilot §2.6（sdkProxyOnly 硬约束）
-- CodePilot §2.7（`roleModels.small` / `.haiku` 槽位早已存在）
+- AI Native Lab §2.6（sdkProxyOnly 硬约束）
+- AI Native Lab §2.7（`roleModels.small` / `.haiku` 槽位早已存在）
 
 **建议实现**：
 在 `src/lib/provider-resolver.ts` 新增 `resolveAuxiliaryModel(task: 'compact' | 'vision' | 'summarize' | 'web_extract')`，返回 `{ providerId, modelId }`。
@@ -364,7 +364,7 @@ interface RoleModels {
 
 ### 3.3 P1 — 渐进式子目录 hint 发现（可 1:1 port）
 
-**依据**：Hermes §1.5（`SubdirectoryHintTracker` 参考实现）+ CodePilot §2.5（只有 cwd + parent 两级发现）
+**依据**：Hermes §1.5（`SubdirectoryHintTracker` 参考实现）+ AI Native Lab §2.5（只有 cwd + parent 两级发现）
 
 **建议实现**（几乎可以 1:1 port `agent/subdirectory_hints.py` 到 TS）：
 
@@ -383,7 +383,7 @@ interface RoleModels {
 
 **依据**：
 - Hermes §1.3 的 `_PARALLEL_SAFE_TOOLS` 白名单里赫然有 `session_search`
-- CodePilot §2.4：memory_search 已成熟但只搜工作区文件；messages 表完全没有搜索工具
+- AI Native Lab §2.4：memory_search 已成熟但只搜工作区文件；messages 表完全没有搜索工具
 
 **建议实现**：
 
@@ -395,13 +395,13 @@ interface RoleModels {
 5. 注册到 agent-tools.ts，与 memory_search 平级
 
 **排在 LLM 压缩之前的三个理由**：
-- CodePilot §2.3 的死代码信号：长上下文退化还不是活跃痛点
+- AI Native Lab §2.3 的死代码信号：长上下文退化还不是活跃痛点
 - 复用现有工具壳，成本比从零做 LLM 压缩低一个量级
 - 对"找回以前对话里讨论过什么"这种诉求，session 搜索是**直接答案**，不是迂回优化
 
 ### 3.5 P2 — LLM 驱动上下文压缩（分两步走）
 
-**依据**：Hermes §1.6（ContextCompressor 5 步算法）+ CodePilot §2.2-2.3（固定截断 + 死代码）
+**依据**：Hermes §1.6（ContextCompressor 5 步算法）+ AI Native Lab §2.2-2.3（固定截断 + 死代码）
 
 **建议分两步**：
 
@@ -426,7 +426,7 @@ interface RoleModels {
 
 ### 3.6 P2 — Skill 自动创建
 
-**依据**：Hermes 在复杂任务完成后主动 nudge 用户保存 Skill；CodePilot 有 Skill 系统但只做发现/执行
+**依据**：Hermes 在复杂任务完成后主动 nudge 用户保存 Skill；AI Native Lab 有 Skill 系统但只做发现/执行
 
 **建议实现**：
 在 agent-loop 结束时统计步数与工具使用复杂度，超过阈值时在 system prompt 中加
@@ -436,7 +436,7 @@ interface RoleModels {
 
 ### 3.7 Runtime 归属总览
 
-CodePilot 是双 runtime 架构（见 `docs/handover/decouple-native-runtime.md`）：
+AI Native Lab 是双 runtime 架构（见 `docs/handover/decouple-native-runtime.md`）：
 **Native Runtime** 基于 Vercel AI SDK + 手写 agent loop，**SDK Runtime** 调用 Claude Code CLI 子进程。
 本节澄清上述 6 项建议各自落地在哪个 runtime、原因何在——这直接决定 PR 要改哪些文件、要不要同时动两套代码。
 
@@ -500,7 +500,7 @@ Claude Code CLI 会读 `ANTHROPIC_SMALL_FAST_MODEL` 环境变量做它**自己**
 | Python 实现直接移植 | 我们是 TS/Next.js 栈 |
 | run_agent.py / cli.py 的单文件巨构风格（分别约 9.7K 行 / 约 400KB） | Hermes 自己的 `agent/` 目录拆分正在反向修正这条路；参考实现本来也不在单文件里 |
 | 完整 browser 工具套件 | 我们有 chrome-devtools MCP，功能重叠 |
-| 多平台 IM 网关（Telegram/Discord/Slack/WhatsApp/Signal/Matrix/钉钉/飞书 8 家） | CodePilot 有独立的 bridge 系统，架构不同；8 家支持不是 runtime 质量瓶颈 |
+| 多平台 IM 网关（Telegram/Discord/Slack/WhatsApp/Signal/Matrix/钉钉/飞书 8 家） | AI Native Lab 有独立的 bridge 系统，架构不同；8 家支持不是 runtime 质量瓶颈 |
 | RL 训练数据生成（`environments/hermes_base_env.py`） | 产品定位不同 |
 
 ---
@@ -525,7 +525,7 @@ Claude Code CLI 会读 `ANTHROPIC_SMALL_FAST_MODEL` 环境变量做它**自己**
 ### 2026-04-12 用户补充三点细化（§2.7 / §3.2 / §3.7）
 
 1. **辅助模型兜底应回到主模型而非跳过**：原 §3.2 step 4 写"链耗尽 → 返回 null，调用方跳过辅助任务"。修正为"链耗尽 → 用主 provider + 主模型做副任务"。理由：跳过会让用户感觉功能失效；回到主模型至少和现状持平。
-2. **复用 CodePilot 既有的 `roleModels.small` / `.haiku` 槽位**：原 §3.2 step 2 写"主 provider 的小模型（Anthropic → Haiku、OpenAI → gpt-mini）"，硬编码成 provider-specific 启发式。修正为直接读 `resolved.roleModels.small` / `.haiku`——这两个槽位早就存在于 `provider-catalog.ts:41, :73-75`，且 `provider-resolver.ts:268-272` 已经在为 SDK 路径把 `.small` 写到 `ANTHROPIC_SMALL_FAST_MODEL` 环境变量。Native Runtime 下只是没读。新增 §2.7 记录这个事实。
+2. **复用 AI Native Lab 既有的 `roleModels.small` / `.haiku` 槽位**：原 §3.2 step 2 写"主 provider 的小模型（Anthropic → Haiku、OpenAI → gpt-mini）"，硬编码成 provider-specific 启发式。修正为直接读 `resolved.roleModels.small` / `.haiku`——这两个槽位早就存在于 `provider-catalog.ts:41, :73-75`，且 `provider-resolver.ts:268-272` 已经在为 SDK 路径把 `.small` 写到 `ANTHROPIC_SMALL_FAST_MODEL` 环境变量。Native Runtime 下只是没读。新增 §2.7 记录这个事实。
 3. **补充 §3.7 Runtime 归属总览**：明确 6 项建议各自落在 Native Runtime / SDK Runtime / 两边，解释为什么多数"只能在 Native 做"（根因是 Native 持有 agent loop 控制权），并指出 SDK Runtime 其实**已经**通过 `ANTHROPIC_SMALL_FAST_MODEL` 隐式享受到一部分辅助模型优化——§3.2 的本质是让 Native 追平 SDK 既有的隐式能力，而不是引入全新功能。同时给出按 runtime 归属拆 PR 的建议。
 
 **建议后续动作**（不在本调研稿范围内）：

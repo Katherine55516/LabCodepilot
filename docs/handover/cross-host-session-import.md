@@ -4,7 +4,7 @@
 
 ## 核心思路
 
-CodePilot 的"从 Claude Code 导入会话"原本只扫 `~/.claude/projects/`，看不到其他基于 Claude Code 的桌面应用写出来的会话。本次改造让 parser 在多个 `projects/` 根目录之间合并扫描，**默认自动发现 bsApp（claude-bs-agent）的 shadow HOME**，所以用户能直接在 CodePilot 里导入 bsApp 生成的全部历史会话，零配置。
+AI Native Lab 的"从 Claude Code 导入会话"原本只扫 `~/.claude/projects/`，看不到其他基于 Claude Code 的桌面应用写出来的会话。本次改造让 parser 在多个 `projects/` 根目录之间合并扫描，**默认自动发现 bsApp（claude-bs-agent）的 shadow HOME**，所以用户能直接在 AI Native Lab 里导入 bsApp 生成的全部历史会话，零配置。
 
 实现只动了一个文件（`claude-session-parser.ts`），对外暴露的列表/导入 API 行为不变 —— 多目录扫描对调用方完全透明。
 
@@ -12,7 +12,7 @@ CodePilot 的"从 Claude Code 导入会话"原本只扫 `~/.claude/projects/`，
 
 bsApp（`claude-bs-agent` Electron 应用）在主进程 spawn server 子进程时，把 `HOME` / `USERPROFILE` 改写到 `app.getPath('userData')/claude-home`，让内置 Claude CLI 看到的 `os.homedir()` 不再是用户的真实 home。目的：防止用户机器上现有的 `~/.claude/settings.json`（apiKeyHelper、OAuth token 等）污染 bsApp 自带的鉴权。
 
-副作用是：bsApp 写出来的所有 jsonl 历史进了 `<userData>/claude-home/.claude/projects/`，与 CodePilot 读的 `~/.claude/projects/` 是两棵完全不同的目录树。详细分析见 [docs/insights/cross-host-session-import.md](../insights/cross-host-session-import.md#为什么底层接同一份-cli-却各跑各的)。
+副作用是：bsApp 写出来的所有 jsonl 历史进了 `<userData>/claude-home/.claude/projects/`，与 AI Native Lab 读的 `~/.claude/projects/` 是两棵完全不同的目录树。详细分析见 [docs/insights/cross-host-session-import.md](../insights/cross-host-session-import.md#为什么底层接同一份-cli-却各跑各的)。
 
 ## 数据流
 
@@ -34,7 +34,7 @@ src/app/api/claude-sessions/import/route.ts
     ↓ parseClaudeSession(sessionId)
     ↓ 同样的 getClaudeProjectsRoots() 遍历，定位 jsonl
     ↓ createSession + updateSdkSessionId + addMessage*N
-返回新的 CodePilot session.id，前端 router.push 进会话
+返回新的 AI Native Lab session.id，前端 router.push 进会话
 ```
 
 ## 关键函数 — `src/lib/claude-session-parser.ts`
@@ -133,6 +133,6 @@ ClaudeSessionInfo 不带 `source` 字段，导入弹窗看起来跟之前一样�
 
 ## 已知边界
 
-- **只读**：CodePilot 不会往 bsApp 的 shadow home 写任何东西，bsApp 的会话被 import 后写到 CodePilot 自己的 SQLite，原 jsonl 不动
-- **Resume 走 SDK**：import 时把 `sessionId` 存到 `sessions.sdk_session_id`；之后 resume 时 CodePilot SDK 会用真实 `os.homedir()` 解析 jsonl 位置 —— 也就是说，**resume 一条 bsApp 来源的会话需要先把对应 jsonl 复制到 `~/.claude/projects/<encoded-cwd>/` 下**，否则 SDK 找不到。这是 SDK 的硬约束，本次改动不解决；用户场景里主要是浏览/迁移历史而非继续对话，所以暂可接受
+- **只读**：AI Native Lab 不会往 bsApp 的 shadow home 写任何东西，bsApp 的会话被 import 后写到 AI Native Lab 自己的 SQLite，原 jsonl 不动
+- **Resume 走 SDK**：import 时把 `sessionId` 存到 `sessions.sdk_session_id`；之后 resume 时 AI Native Lab SDK 会用真实 `os.homedir()` 解析 jsonl 位置 —— 也就是说，**resume 一条 bsApp 来源的会话需要先把对应 jsonl 复制到 `~/.claude/projects/<encoded-cwd>/` 下**，否则 SDK 找不到。这是 SDK 的硬约束，本次改动不解决；用户场景里主要是浏览/迁移历史而非继续对话，所以暂可接受
 - **未来需要扩展**：若出现第三个类似 sibling 应用，复制 `getBsAppShadowHome()` 的模式新增一个 `getXxxShadowHome()` 并塞进 `getClaudeProjectsRoots()` 即可

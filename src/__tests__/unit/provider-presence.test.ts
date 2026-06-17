@@ -4,7 +4,7 @@
  * flow.
  *
  * Key contract: settings.json (cc-switch, manual edits) is NOT a credential
- * source for CodePilot's provider-presence check. The user must have either
+ * source for AI Native Lab's provider-presence check. The user must have either
  * a DB provider, process.env ANTHROPIC_*, or the legacy
  * `anthropic_auth_token` setting.
  */
@@ -119,7 +119,7 @@ describe('hasCodePilotProvider', () => {
     const { hasCodePilotProvider } = await import('../../lib/provider-presence');
     // Contract: ~/.claude/settings.json is the Claude Code CLI's config file;
     // hasCodePilotProvider() intentionally ignores it so users relying only on
-    // cc-switch get routed to the CodePilot setup wizard. This will intercept
+    // cc-switch get routed to the AI Native Lab setup wizard. This will intercept
     // first-time cc-switch users at /api/chat until they add a provider
     // explicitly — a deliberate behavior change documented in 0.50.3 release
     // notes (see docs/exec-plans/active/runtime-auto-and-onboarding.md).

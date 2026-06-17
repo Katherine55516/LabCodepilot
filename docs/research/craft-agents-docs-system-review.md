@@ -2,8 +2,8 @@
 
 > 调研日期：2026-04-16
 > 对标仓库：`/Users/op7418/Documents/code/资料/craft-agents-oss-main`（craft-agents-oss，Apache-2.0，Electron + Bun monorepo）
-> 目的：考察一个同品类开源项目（Agent 桌面客户端）如何组织文档，产出 CodePilot 文档体系可借鉴的具体动作清单。
-> 三层结构：**[craft 事实]** 带 `file:line`；**[CodePilot 事实]** 带仓库内路径；**[推断]** 标注。
+> 目的：考察一个同品类开源项目（Agent 桌面客户端）如何组织文档，产出 AI Native Lab 文档体系可借鉴的具体动作清单。
+> 三层结构：**[craft 事实]** 带 `file:line`；**[AI Native Lab 事实]** 带仓库内路径；**[推断]** 标注。
 >
 > **范围注记**：本文聚焦 craft 的**对外治理文档**（README / CONTRIBUTING / ISSUE_TEMPLATE 等）。craft 作为"文档驱动 Agent"在**运行时内部的 Markdown 实现**（渲染栈 / 编辑器 / Artifact 化代码块 / Tiptap 使用姿势），单独调研见 [craft-agents-markdown-internals.md](./craft-agents-markdown-internals.md)。
 
@@ -11,11 +11,11 @@
 
 ## 1. 调研动机
 
-CodePilot 已经形成相对完整的内部文档链（`exec-plans/` + `research/` + `handover/` + `insights/`），但面向**外部用户与社区贡献者**的文档尚薄弱（无 Issue 模板、无 PR 模板、README 未嵌入项目结构图）。本次对标选 craft-agents-oss，因为它与 CodePilot 定位几乎重合（Electron Agent 客户端 + CLI + 远程服务端），但走的是公开开源路线，面向外部读者的治理文档更完整。
+AI Native Lab 已经形成相对完整的内部文档链（`exec-plans/` + `research/` + `handover/` + `insights/`），但面向**外部用户与社区贡献者**的文档尚薄弱（无 Issue 模板、无 PR 模板、README 未嵌入项目结构图）。本次对标选 craft-agents-oss，因为它与 AI Native Lab 定位几乎重合（Electron Agent 客户端 + CLI + 远程服务端），但走的是公开开源路线，面向外部读者的治理文档更完整。
 
 对标目标：
-1. 抽出 craft 做得好而 CodePilot 缺失的"外部入口"文档形态。
-2. 确认 CodePilot 现有"内部研发"文档链是否真的更强（避免反向学习）。
+1. 抽出 craft 做得好而 AI Native Lab 缺失的"外部入口"文档形态。
+2. 确认 AI Native Lab 现有"内部研发"文档链是否真的更强（避免反向学习）。
 3. 产出可执行的借鉴清单。
 
 ---
@@ -123,7 +123,7 @@ docs/
 
 ---
 
-## 3. CodePilot 当前文档体系（本仓库事实）
+## 3. AI Native Lab 当前文档体系（本仓库事实）
 
 ### 3.1 根目录文档与 `docs/` 目录
 
@@ -160,7 +160,7 @@ docs/
 
 ### 3.2 内部研发文档链
 
-CodePilot 在"研发过程沉淀"上比 craft 明显更重：
+AI Native Lab 在"研发过程沉淀"上比 craft 明显更重：
 
 - `docs/exec-plans/` 把执行计划拆为 active/completed，且独立维护技术债务追踪文件。craft 无对应物。
 - `docs/research/` 已积累 26 份调研（见本目录 `README.md`），每份都遵循"外部事实 / 仓库事实（file:line）/ 推断"三层纪律。craft 无任何调研文档。
@@ -169,7 +169,7 @@ CodePilot 在"研发过程沉淀"上比 craft 明显更重：
 
 ### 3.3 外部入口文档链
 
-CodePilot 此侧明显弱于 craft：
+AI Native Lab 此侧明显弱于 craft：
 
 - `README.md` 内是否嵌入架构树、是否有"Quick Start"：[推断] 未在本次调研中核验，需后续对照。
 - 无 `CONTRIBUTING.md`、`SECURITY.md`、`CODE_OF_CONDUCT.md`、`TRADEMARK.md`、`NOTICE`。
@@ -180,9 +180,9 @@ CodePilot 此侧明显弱于 craft：
 
 ## 4. 双向对比
 
-### 4.1 craft 强于 CodePilot（应借鉴）
+### 4.1 craft 强于 AI Native Lab（应借鉴）
 
-| 维度 | craft 做法 | CodePilot 现状 |
+| 维度 | craft 做法 | AI Native Lab 现状 |
 |------|-----------|---------------|
 | YAML Issue 模板 | `.github/ISSUE_TEMPLATE/*.yml` 强制收集版本 / OS / Provider / 日志 | 无 |
 | 社区治理文件 | `CONTRIBUTING` / `SECURITY` / `CODE_OF_CONDUCT` / `TRADEMARK` | 全部缺失 |
@@ -190,9 +190,9 @@ CodePilot 此侧明显弱于 craft：
 | 关键子模块"Gotchas"段 | `apps/electron/README.md:49-125` 高浓度坑点速查 | 分散在 `handover/` 中，无快速入口 |
 | CLI 独立参考文档 | `docs/cli.md` 240 行按动词分类 | [推断] 需核验是否已有对应文档 |
 
-### 4.2 CodePilot 强于 craft（应保持）
+### 4.2 AI Native Lab 强于 craft（应保持）
 
-| 维度 | CodePilot 做法 | craft 现状 |
+| 维度 | AI Native Lab 做法 | craft 现状 |
 |------|---------------|-----------|
 | 执行计划体系 | `docs/exec-plans/{active,completed}` + tech-debt-tracker | 无 |
 | 调研文档三层纪律 | 已有 26 份，外部事实钉 URL + 仓库事实钉 file:line + 推断分层 | 无调研文档 |
@@ -200,12 +200,12 @@ CodePilot 此侧明显弱于 craft：
 | AI 开发纪律 | `CLAUDE.md` 改动自查 + 发版模板 + Worktree 规则 | 无 AI 场景规则 |
 | Release Notes 严格模板 | `CLAUDE.md` 明确规定正文结构、下载链接、用户可读语言 | 仅依赖 GitHub Release，格式自由 |
 
-**结论**：CodePilot 的"内功"文档链（研发过程沉淀）已显著强于 craft，**不需要向 craft 反向学习**。
+**结论**：AI Native Lab 的"内功"文档链（研发过程沉淀）已显著强于 craft，**不需要向 craft 反向学习**。
 
 ### 4.3 两边都缺的项
 
-- ADR（架构决策记录）独立目录。CodePilot 把决策散落在 `exec-plans/` 里，craft 完全不记。
-- CHANGELOG 机器可读化。CodePilot 有 `RELEASE_NOTES.md` 模板但仍是人工维护，craft 无。
+- ADR（架构决策记录）独立目录。AI Native Lab 把决策散落在 `exec-plans/` 里，craft 完全不记。
+- CHANGELOG 机器可读化。AI Native Lab 有 `RELEASE_NOTES.md` 模板但仍是人工维护，craft 无。
 - 文档链接失效校验。两边都没有 CI 去检查 `file:line` 引用是否还指向真实位置。
 
 ---
@@ -214,18 +214,18 @@ CodePilot 此侧明显弱于 craft：
 
 ### 5.1 P0 — 外部入口文档起步包
 
-目标：CodePilot 已公开发布（观察到 `RELEASE_NOTES.md` 正在用 GitHub Release 分发 DMG/Setup），但 Issue 质量与社区协作缺乏结构化约束。
+目标：AI Native Lab 已公开发布（观察到 `RELEASE_NOTES.md` 正在用 GitHub Release 分发 DMG/Setup），但 Issue 质量与社区协作缺乏结构化约束。
 
-1. **新增 `.github/ISSUE_TEMPLATE/bug_report.yml`**：模仿 `craft/.github/ISSUE_TEMPLATE/bug_report.yml:1-124` 的字段，收集 CodePilot 版本、OS（含 arm64/x64）、Provider、复现步骤、日志位置。
+1. **新增 `.github/ISSUE_TEMPLATE/bug_report.yml`**：模仿 `craft/.github/ISSUE_TEMPLATE/bug_report.yml:1-124` 的字段，收集 AI Native Lab 版本、OS（含 arm64/x64）、Provider、复现步骤、日志位置。
 2. **新增 `.github/ISSUE_TEMPLATE/feature_request.yml`**：结构 Problem / Proposed Solution / Alternatives / Additional Context。
-3. **新增 `.github/pull_request_template.md`**：列自查清单，对齐 `CLAUDE.md` 的"改动自查"五条（i18n、DB schema、类型、文档、功能文档）。这是 craft **没做** 但 CodePilot **应做** 的，因为我们有更细的自查纪律。
+3. **新增 `.github/pull_request_template.md`**：列自查清单，对齐 `CLAUDE.md` 的"改动自查"五条（i18n、DB schema、类型、文档、功能文档）。这是 craft **没做** 但 AI Native Lab **应做** 的，因为我们有更细的自查纪律。
 4. **新增根目录 `CONTRIBUTING.md`**：说明 Worktree 规则、commit 规范、如何跑 `npm run test` / `test:smoke`、文档更新约束。**必须引用 `CLAUDE.md`** 作为权威来源，避免双份维护。
 5. **新增根目录 `SECURITY.md`**：漏洞上报邮箱与流程。非社区项目也建议有。
 
 ### 5.2 P1 — 用户入门体验增强
 
 6. **README 嵌入项目结构树**：借鉴 `README.md:345-365` 的 ASCII 树手法。如果 `ARCHITECTURE.md` 已承担此职责，则在 README 放**精简版 10–15 行树** + 链接到 `ARCHITECTURE.md` 详版。
-7. **在 `src/` 主模块目录增加简短 README**（按需，不求全）：仅对外部读者最关心的模块（如 `agent-sdk`、`claude-client`、`chat`）写 50–100 行"本模块做什么 + 常见坑点 3 条"的聚焦文档，参考 `apps/electron/README.md:49-125` 浓缩风格。CodePilot 非 monorepo，不必覆盖所有目录。
+7. **在 `src/` 主模块目录增加简短 README**（按需，不求全）：仅对外部读者最关心的模块（如 `agent-sdk`、`claude-client`、`chat`）写 50–100 行"本模块做什么 + 常见坑点 3 条"的聚焦文档，参考 `apps/electron/README.md:49-125` 浓缩风格。AI Native Lab 非 monorepo，不必覆盖所有目录。
 8. **"Gotchas" 分类 index**：在 `docs/handover/README.md`（如无则新建）列一个按模块分类的"Known Pitfalls"索引，把 `handover/` 里各文档的坑点段聚合入口化。
 
 ### 5.3 P2 — 运营性文档补全（ROI 评估修订）
@@ -236,19 +236,19 @@ CodePilot 此侧明显弱于 craft：
 
 9. **决策日志（ADR）独立化**：从 `exec-plans/` 抽出纯技术决策条目，建 `docs/decisions/`，命名 `ADR-NNNN-topic.md`。不用大改动，把现有执行计划里的"决策日志"章节迁入即可。
 10. **`CHANGELOG.md` 或自动生成**：从 `RELEASE_NOTES.md` 归档历史版本入 `CHANGELOG.md`，方便用户无需翻 GitHub Release 就能看版本演进。[推断] 可写个简单脚本把历次 release notes 合并。
-11. **文档链接校验 CI**：用 `markdown-link-check` 或自建脚本，扫 `docs/` 下所有 `file:line` 引用是否仍存在。两边仓库都缺，CodePilot 率先补上。
+11. **文档链接校验 CI**：用 `markdown-link-check` 或自建脚本，扫 `docs/` 下所有 `file:line` 引用是否仍存在。两边仓库都缺，AI Native Lab 率先补上。
 
 ### 5.4 不采纳的 craft 做法
 
-- **`TRADEMARK.md`**：CodePilot 未明确开源路线，暂不需要。未来若对外开源再补。
-- **把所有内部库都免 README**：craft 对 `packages/shared` / `packages/server` 直接不写文档，不符合 CodePilot 的"每个核心模块要有可交接的文档"纪律。不借鉴。
-- **ASCII-only 图示**：craft 完全不用 Mermaid。CodePilot 的 `handover/` 已有 Mermaid 流程图惯例（[推断] 需核验），保持现状更清晰。
+- **`TRADEMARK.md`**：AI Native Lab 未明确开源路线，暂不需要。未来若对外开源再补。
+- **把所有内部库都免 README**：craft 对 `packages/shared` / `packages/server` 直接不写文档，不符合 AI Native Lab 的"每个核心模块要有可交接的文档"纪律。不借鉴。
+- **ASCII-only 图示**：craft 完全不用 Mermaid。AI Native Lab 的 `handover/` 已有 Mermaid 流程图惯例（[推断] 需核验），保持现状更清晰。
 
 ---
 
 ## 6. 未决事项
 
-1. CodePilot 根目录 `README.md` 当前结构是否已嵌入架构树 / Quick Start / Troubleshooting —— 本次调研未打开 `README.md`，P1 建议 6 落地前需先核验。
+1. AI Native Lab 根目录 `README.md` 当前结构是否已嵌入架构树 / Quick Start / Troubleshooting —— 本次调研未打开 `README.md`，P1 建议 6 落地前需先核验。
 2. `src/` 下哪些模块值得补 README（P1 建议 7）需要与产品对齐优先级。
 3. ADR 迁移（P2 建议 9）若执行，需要制定 ADR 编号规则与模板，并从 `exec-plans/` 抽取时避免破坏现有文档的引用。
 4. PR 模板（P0 建议 3）需要与 `CLAUDE.md` 的"改动自查"保持同源——建议模板里直接链接 `CLAUDE.md` 对应章节而非复制一份。
@@ -269,7 +269,7 @@ CodePilot 此侧明显弱于 craft：
 - `.github/ISSUE_TEMPLATE/feature_request.yml:1-37`
 - `.github/workflows/validate.yml:34`（`validate:ci`）
 
-### CodePilot 仓库
+### AI Native Lab 仓库
 
 - `CLAUDE.md`（开发规则与发版纪律）
 - `docs/CLAUDE.md`（目录约定）

@@ -3,7 +3,7 @@
  *
  * Cancel an in-progress Feishu App Registration session.
  * Removes the session from the server so a late browser confirmation
- * won't silently complete and leave an orphaned app tracked by CodePilot.
+ * won't silently complete and leave an orphaned app tracked by AI Native Lab.
  */
 
 import { NextResponse } from 'next/server';

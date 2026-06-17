@@ -5,7 +5,7 @@
 
 ## 我们相比 OpenClaw 的优势
 
-CodePilot 不应照搬 OpenClaw，而应发挥自身生态优势：
+AI Native Lab 不应照搬 OpenClaw，而应发挥自身生态优势：
 
 | 优势 | OpenClaw 做不了 | 我们能做 |
 |------|----------------|---------|

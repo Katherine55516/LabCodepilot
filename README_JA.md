@@ -1,4 +1,4 @@
-<img src="docs/icon-readme.png" width="32" height="32" alt="CodePilot" style="vertical-align: middle; margin-right: 8px;" /> CodePilot
+<img src="docs/icon-readme.png" width="32" height="32" alt="AI Native Lab" style="vertical-align: middle; margin-right: 8px;" /> AI Native Lab
 ===
 
 **マルチモデル AI エージェント デスクトップクライアント** -- 任意の AI プロバイダーに接続、MCP & スキルで拡張、スマートフォンからリモート制御、アシスタントがあなたのワークフローを学習。
@@ -11,7 +11,7 @@
 
 [English](./README.md) | [中文文档](./README_CN.md)
 
-![CodePilot](https://github.com/user-attachments/assets/9750450a-9f6f-49ce-acd4-c623a4e24281)
+![AI Native Lab](https://github.com/user-attachments/assets/9750450a-9f6f-49ce-acd4-c623a4e24281)
 
 ---
 
@@ -31,7 +31,7 @@
 
 ---
 
-## CodePilot を選ぶ理由
+## AI Native Lab を選ぶ理由
 
 ### マルチプロバイダー、ひとつのインターフェース
 
@@ -48,7 +48,7 @@
 
 ### コーディングだけじゃない — フル AI エージェント
 
-CodePilot はコーディングツールとして始まりましたが、**汎用 AI エージェント デスクトップ**へと進化しました：
+AI Native Lab はコーディングツールとして始まりましたが、**汎用 AI エージェント デスクトップ**へと進化しました：
 
 - **Assistant Workspace** — ペルソナファイル、永続メモリ、Onboarding フロー、デイリーチェックイン。アシスタントがあなたの好みを学び、適応し続けます。
 - **ジェネレーティブ UI** — AI がインタラクティブなダッシュボード、チャート、ビジュアルウィジェットを作成し、アプリ内でリアルタイムにレンダリング。
@@ -73,7 +73,7 @@ CodePilot はコーディングツールとして始まりましたが、**汎�
 ### パス A：リリース版をダウンロード（ほとんどのユーザー向け）
 
 1. 上の[ダウンロード](#ダウンロード)セクションからプラットフォームに合ったインストーラーをダウンロード
-2. CodePilot を起動
+2. AI Native Lab を起動
 3. **設定 > プロバイダー**でプロバイダーを設定 — 任意のサポートプロバイダーの API キーを追加
 4. 会話を開始
 
@@ -88,7 +88,7 @@ CodePilot はコーディングツールとして始まりましたが、**汎�
 
 ```bash
 git clone https://github.com/op7418/CodePilot.git
-cd CodePilot
+cd AI Native Lab
 npm install
 npm run dev              # ブラウザモード http://localhost:3000
 # -- または --
@@ -141,9 +141,9 @@ npm run electron:dev     # フルデスクトップアプリ
 
 ## 初回起動
 
-1. **プロバイダーを設定** — **設定 > プロバイダー**で使用するプロバイダーの認証情報を追加。CodePilot には主要プロバイダーのプリセットが内蔵 — 選んで API キーを入力するだけ。
+1. **プロバイダーを設定** — **設定 > プロバイダー**で使用するプロバイダーの認証情報を追加。AI Native Lab には主要プロバイダーのプリセットが内蔵 — 選んで API キーを入力するだけ。
 2. **会話を作成** — 作業ディレクトリ、モード（Code / Plan / Ask）、モデルを選択。
-3. **Assistant Workspace を設定**（任意）— **設定 > Assistant** でワークスペースディレクトリを選択し、Onboarding を有効化。CodePilot がワークスペースルートに `soul.md`、`user.md`、`claude.md`、`memory.md` を作成。
+3. **Assistant Workspace を設定**（任意）— **設定 > Assistant** でワークスペースディレクトリを選択し、Onboarding を有効化。AI Native Lab がワークスペースルートに `soul.md`、`user.md`、`claude.md`、`memory.md` を作成。
 4. **MCP サーバーを追加**（任意）— サイドバーの **MCP** ページで MCP サーバーを追加・管理。カスタムスキルは **Skills** ページで管理。
 5. **Claude Code CLI をインストール**（任意）— ファイル編集やターミナルコマンドなどの高度な機能には、CLI をインストール: `npm install -g @anthropic-ai/claude-code`
 
@@ -156,13 +156,13 @@ macOS ビルドは Developer ID 証明書で署名済みですが、公証（not
 <details>
 <summary>macOS: Gatekeeper の初回起動時警告</summary>
 
-**オプション 1** -- Finder で `CodePilot.app` を右クリック > 開く > 確認。
+**オプション 1** -- Finder で `AI Native Lab.app` を右クリック > 開く > 確認。
 
 **オプション 2** -- システム設定 > プライバシーとセキュリティ > セキュリティまでスクロール >「このまま開く」をクリック。
 
 **オプション 3** -- ターミナルで実行:
 ```bash
-xattr -cr /Applications/CodePilot.app
+xattr -cr /Applications/AI Native Lab.app
 ```
 </details>
 
@@ -205,7 +205,7 @@ xattr -cr /Applications/CodePilot.app
 <details>
 <summary>Claude Code CLI は必要ですか？</summary>
 
-不要です。CodePilot は任意のサポートプロバイダー（OpenRouter、Zhipu GLM、Volcengine、Ollama など）で Claude Code CLI なしで使用できます。CLI は Claude にファイルの直接編集、ターミナルコマンド実行、Git 操作を行わせる場合にのみ必要です。チャットやアシスタント機能は、プロバイダーを設定するだけで使えます。
+不要です。AI Native Lab は任意のサポートプロバイダー（OpenRouter、Zhipu GLM、Volcengine、Ollama など）で Claude Code CLI なしで使用できます。CLI は Claude にファイルの直接編集、ターミナルコマンド実行、Git 操作を行わせる場合にのみ必要です。チャットやアシスタント機能は、プロバイダーを設定するだけで使えます。
 </details>
 
 <details>
@@ -223,13 +223,13 @@ API キーが有効でエンドポイントに到達可能であることを確�
 <details>
 <summary>ワークスペースファイルの場所</summary>
 
-ワークスペース設定後、CodePilot は**ワークスペースルートディレクトリ**に 4 つの Markdown ファイルを作成: `soul.md`（パーソナリティ）、`user.md`（ユーザープロファイル）、`claude.md`（ルール）、`memory.md`（長期メモ）。状態管理（Onboarding 進捗、チェックイン日付）は `.assistant/` サブディレクトリに保存。デイリーメモリは `memory/daily/` に保存。
+ワークスペース設定後、AI Native Lab は**ワークスペースルートディレクトリ**に 4 つの Markdown ファイルを作成: `soul.md`（パーソナリティ）、`user.md`（ユーザープロファイル）、`claude.md`（ルール）、`memory.md`（長期メモ）。状態管理（Onboarding 進捗、チェックイン日付）は `.assistant/` サブディレクトリに保存。デイリーメモリは `memory/daily/` に保存。
 </details>
 
 <details>
 <summary>Bridge にはプラットフォームごとの追加設定が必要</summary>
 
-各 Bridge チャンネル（Telegram、Feishu、Discord、QQ、WeChat）には独自の Bot トークンまたはアプリ認証情報が必要です。サイドバーの **Bridge** ページでチャンネルを設定してください。ターゲットプラットフォームで先にボットを作成し、トークンを CodePilot に提供する必要があります。
+各 Bridge チャンネル（Telegram、Feishu、Discord、QQ、WeChat）には独自の Bot トークンまたはアプリ認証情報が必要です。サイドバーの **Bridge** ページでチャンネルを設定してください。ターゲットプラットフォームで先にボットを作成し、トークンを AI Native Lab に提供する必要があります。
 </details>
 
 ---

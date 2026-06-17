@@ -1,6 +1,6 @@
 ---
 title: Installation
-description: How to install and set up CodePilot on your system.
+description: How to install and set up AI Native Lab on your system.
 ---
 
 ## System Requirements
@@ -26,19 +26,19 @@ Download the latest release for your platform from [GitHub Releases](https://git
 ### macOS
 
 1. Download the `.dmg` file for your architecture
-2. Open the DMG and drag CodePilot to your Applications folder
-3. Launch CodePilot from Applications
+2. Open the DMG and drag AI Native Lab to your Applications folder
+3. Launch AI Native Lab from Applications
 4. On first launch, macOS may ask you to confirm opening an app from an unidentified developer — go to **System Settings > Privacy & Security** and click "Open Anyway"
 
 ### Windows
 
 1. Download the `.exe` installer
 2. Run the installer and follow the prompts
-3. CodePilot will be available in your Start menu
+3. AI Native Lab will be available in your Start menu
 
 ## First Launch & Setup Center
 
-On first launch, CodePilot automatically opens the **Setup Center** — a guided setup overlay that walks you through three prerequisites:
+On first launch, AI Native Lab automatically opens the **Setup Center** — a guided setup overlay that walks you through three prerequisites:
 
 ### 1. Claude Code CLI Detection
 
@@ -49,7 +49,7 @@ The Setup Center checks whether the Claude Code CLI is installed and accessible.
   - macOS/Linux: `curl -fsSL https://claude.ai/install.sh | bash`
   - Windows: `irm https://claude.ai/install.ps1 | iex`
   - After installing, click **Re-detect** to verify.
-- **Multiple installations detected** — If CodePilot finds more than one Claude Code binary (e.g., one installed via npm and another natively), it shows a warning with cleanup instructions. See [Claude Code Conflicts](#claude-code-conflicts) below.
+- **Multiple installations detected** — If AI Native Lab finds more than one Claude Code binary (e.g., one installed via npm and another natively), it shows a warning with cleanup instructions. See [Claude Code Conflicts](#claude-code-conflicts) below.
 - **Git not found (Windows)** — Claude Code requires Git. The Setup Center provides step-by-step instructions for installing Git for Windows.
 
 You can **skip** any step and continue — the app will still work if the CLI is available in your PATH.
@@ -64,7 +64,7 @@ The Setup Center checks for available API credentials in three locations:
 
 If credentials are found, the card is automatically marked as complete. Otherwise, you can click **Add Provider** to go to Settings, or **Skip** to configure later.
 
-> **Note:** Skipping the provider step doesn't mean you have a working provider. If you try to send a message without any configured provider, CodePilot will prompt you to set one up.
+> **Note:** Skipping the provider step doesn't mean you have a working provider. If you try to send a message without any configured provider, AI Native Lab will prompt you to set one up.
 
 ### 3. Default Project Directory
 
@@ -84,7 +84,7 @@ If multiple Claude Code installations exist on your system, they can cause versi
 - Old npm installation left behind after switching to the native installer
 - Multiple package managers (npm + homebrew, npm + bun)
 
-### How CodePilot detects conflicts
+### How AI Native Lab detects conflicts
 
 When the Setup Center (or the connection status indicator) detects Claude Code, it also scans for other installations. If multiple are found, it shows:
 
@@ -107,7 +107,7 @@ The **native installer** (`curl -fsSL https://claude.ai/install.sh | bash`) is r
 
 ## Configuring an API Provider
 
-CodePilot needs at least one API provider to function. Go to **Settings** and open the **Providers** section to add one:
+AI Native Lab needs at least one API provider to function. Go to **Settings** and open the **Providers** section to add one:
 
 - **Anthropic** — Direct API access to Claude models
 - **Custom API (OpenAI-compatible)** — Any OpenAI-compatible endpoint, including local LLMs
@@ -119,4 +119,4 @@ Enter your API key and select a default model. You can configure multiple provid
 
 ## Updating
 
-CodePilot includes an auto-updater. When a new version is available, you'll see a notification in the app. You can also manually check for updates in the **General** section of **Settings**.
+AI Native Lab includes an auto-updater. When a new version is available, you'll see a notification in the app. You can also manually check for updates in the **General** section of **Settings**.

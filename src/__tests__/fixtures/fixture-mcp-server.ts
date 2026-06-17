@@ -6,7 +6,7 @@
  *  - ask_user: triggers elicitation (form mode) requesting a `name` field
  *  - fail_always: always throws, for error-path testing
  *
- * Used by *-poc.test.ts to exercise CodePilot's real queryOptions combination
+ * Used by *-poc.test.ts to exercise AI Native Lab's real queryOptions combination
  * against Claude Agent SDK 0.2.111 without touching production MCP servers.
  */
 

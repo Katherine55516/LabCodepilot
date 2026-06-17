@@ -19,7 +19,7 @@
 
 ### 问题描述
 
-CodePilot 发展至今，积累了 6 套独立的"连接器"系统，各有自己的发现机制、注入方式、调用链路和 UI 入口：
+AI Native Lab 发展至今，积累了 6 套独立的"连接器"系统，各有自己的发现机制、注入方式、调用链路和 UI 入口：
 
 | 系统 | 发现方式 | 注入方式 | UI 入口 |
 |------|---------|---------|---------|
@@ -44,7 +44,7 @@ Moxt（[moxt.ai](https://moxt.ai)）的核心洞察：
 - 所有能力统一在"工作空间"概念下：文件系统、记忆、技能、AI 同事不是独立功能，而是同一空间的不同维度。
 - 用户不需要知道"这是 MCP 工具还是 Skill"，只需说"帮我做这件事"。
 
-映射到 CodePilot：应有一个统一的能力层（Capability Layer），所有扩展注册进去，Claude 按需调用。
+映射到 AI Native Lab：应有一个统一的能力层（Capability Layer），所有扩展注册进去，Claude 按需调用。
 
 ---
 
@@ -110,7 +110,7 @@ Moxt（[moxt.ai](https://moxt.ai)）的核心洞察：
 **问题**：`loadMcpServers()` 在 route.ts 和 conversation-engine.ts 中完全重复。且 SDK 通过 `settingSources: ['user', 'project', 'local']` 已自动加载所有 MCP 服务器，手动再传一遍是冗余的。
 
 **方案**：Delta 模式。
-- `loadCodePilotMcpServers()`：只返回有 `${...}` env placeholder 的服务器（需从 CodePilot DB 解析）。当前实际配置中无此类服务器，返回 undefined。
+- `loadCodePilotMcpServers()`：只返回有 `${...}` env placeholder 的服务器（需从 AI Native Lab DB 解析）。当前实际配置中无此类服务器，返回 undefined。
 - `loadAllMcpServers()`：全量合并，供 MCP Manager UI 展示。
 - 30 秒 TTL 缓存 + 配置变更时主动失效。
 
@@ -148,7 +148,7 @@ Action bar 三个组件（ModeIndicator、ImageGenToggle、ChatPermissionSelecto
 
 ### 4.1 产品定位
 
-参考 Perplexity 桌面版的"常驻后台 + 快捷键拉起"模式，CodePilot 的浮窗助理定位为：
+参考 Perplexity 桌面版的"常驻后台 + 快捷键拉起"模式，AI Native Lab 的浮窗助理定位为：
 
 **始终在身边的助理，不需要打开主窗口就能执行任务。**
 
@@ -163,7 +163,7 @@ Action bar 三个组件（ModeIndicator、ImageGenToggle、ChatPermissionSelecto
   → 用户关掉浮窗，继续工作
 ```
 
-全程不需要切换到 CodePilot 主窗口。
+全程不需要切换到 AI Native Lab 主窗口。
 
 ### 4.2 核心决策
 
@@ -234,7 +234,7 @@ Action bar 三个组件（ModeIndicator、ImageGenToggle、ChatPermissionSelecto
 
 | 项目 | 说明 | 优先级 |
 |------|------|--------|
-| Skills/Commands 双轨发现 | SDK 自动发现 + CodePilot 手动扫描不同步，UI 显示的能力 ≠ Claude 实际知道的 | P1 |
+| Skills/Commands 双轨发现 | SDK 自动发现 + AI Native Lab 手动扫描不同步，UI 显示的能力 ≠ Claude 实际知道的 | P1 |
 | Widget prompt 始终注入 | ~150 tokens，不大但无关对话也在。已做 keyword-gated MCP，prompt 本身可进一步按需注入 | P2 |
 | Bridge 缺 thinking/effort UI | 目前 Bridge 固定 thinking=disabled, effort=medium，未来可加 binding 级别配置 | P3 |
 | 统一能力注册表 | 长期目标：`AgentCapabilityRegistry` 让所有扩展统一注册，UI 有统一"能力面板" | P3 |

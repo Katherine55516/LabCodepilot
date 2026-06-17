@@ -4,14 +4,14 @@
  * to avoid drift across layout, marketing content, and documentation.
  */
 export const siteConfig = {
-  name: 'CodePilot',
+  name: 'AI Native Lab',
   description: 'A multi-model AI agent desktop client — connect any AI provider, extend with MCP & skills, control from your phone.',
   url: 'https://www.codepilot.sh',
 
   // Canonical repository
   repo: {
     owner: 'op7418',
-    name: 'CodePilot',
+    name: 'AI Native Lab',
     url: 'https://github.com/op7418/CodePilot',
     releases: 'https://github.com/op7418/CodePilot/releases',
     issues: 'https://github.com/op7418/CodePilot/issues',

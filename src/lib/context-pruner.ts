@@ -7,7 +7,7 @@
  *
  * This runs before every streamText() call in the agent loop.
  *
- * **Note on two-tier compression**: CodePilot has two distinct compression
+ * **Note on two-tier compression**: AI Native Lab has two distinct compression
  * paths. This module is the *micro* path — a cheap per-step truncation that
  * runs inside the agent loop. The *macro* path is LLM-driven summarization
  * in `context-compressor.ts`, triggered once per chat turn by the chat API

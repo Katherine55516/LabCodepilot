@@ -2,13 +2,13 @@
 
 > 产品思考见 [docs/insights/user-audience-analysis.md](../insights/user-audience-analysis.md)
 > 数据采集日期：2026-04-04
-> 数据来源：18 个服务商官方文档 + Claude Code 真实源码（/资料/src） + CodePilot 代码库
+> 数据来源：18 个服务商官方文档 + Claude Code 真实源码（/资料/src） + AI Native Lab 代码库
 
 ---
 
 ## 一、架构总览
 
-CodePilot 通过 **Provider Catalog → Provider Resolver → Claude Code SDK subprocess** 三层架构连接 AI 服务商：
+AI Native Lab 通过 **Provider Catalog → Provider Resolver → Claude Code SDK subprocess** 三层架构连接 AI 服务商：
 
 ```
 用户配置 Provider → DB (api_providers 表)
@@ -171,11 +171,11 @@ Bedrock 模型 ID 有特殊处理：运行时通过 `getBedrockInferenceProfiles
 
 ---
 
-## 三、CodePilot 如何桥接 Claude Code
+## 三、AI Native Lab 如何桥接 Claude Code
 
 ### 桥接核心：`toClaudeCodeEnv()`
 
-`toClaudeCodeEnv()`（`provider-resolver.ts`）把 CodePilot DB 里的 Provider 配置翻译成 Claude Code 期望的环境变量，注入给 SDK 子进程：
+`toClaudeCodeEnv()`（`provider-resolver.ts`）把 AI Native Lab DB 里的 Provider 配置翻译成 Claude Code 期望的环境变量，注入给 SDK 子进程：
 
 1. **凭证注入**：
    - `authStyle === 'api_key'` → 同时设置 `ANTHROPIC_API_KEY` + `ANTHROPIC_AUTH_TOKEN`
@@ -190,7 +190,7 @@ Bedrock 模型 ID 有特殊处理：运行时通过 `getBedrockInferenceProfiles
 
 ### 与 Claude Code 的差异
 
-| 方面 | Claude Code CLI | CodePilot |
+| 方面 | Claude Code CLI | AI Native Lab |
 |------|----------------|-----------|
 | 架构风格 | 扁平 if/else，无多态 | Catalog + Resolver + DB，分层抽象 |
 | Provider 数量 | 4 个（firstParty/bedrock/vertex/foundry） | 28+ 个预设 |
@@ -223,11 +223,11 @@ Bedrock 模型 ID 有特殊处理：运行时通过 `getBedrockInferenceProfiles
 
 ## 三、服务商配置对比矩阵（官方要求 vs 当前实现）
 
-> 下表分两列：**官方文档推荐配置** vs **CodePilot 当前 preset 实际行为**。标 ⚠️ 的表示两者不一致。
+> 下表分两列：**官方文档推荐配置** vs **AI Native Lab 当前 preset 实际行为**。标 ⚠️ 的表示两者不一致。
 
 ### 高频服务商对齐状态
 
-| 服务商 | 官方要求的认证方式 | CodePilot preset authStyle | 状态 | 差异说明 |
+| 服务商 | 官方要求的认证方式 | AI Native Lab preset authStyle | 状态 | 差异说明 |
 |--------|------------------|---------------------------|------|---------|
 | Anthropic 官方 | `ANTHROPIC_API_KEY` | `api_key` | ✅ | 一致 |
 | OpenRouter | `ANTHROPIC_AUTH_TOKEN` + `ANTHROPIC_API_KEY=""` | `api_key` | ⚠️ | preset 用 `api_key` 会同时设两个变量；`defaultEnvOverrides` 中的 `ANTHROPIC_API_KEY: ''` 被 AUTH_ENV_KEYS 跳过机制阻止生效 |
@@ -242,14 +242,14 @@ Bedrock 模型 ID 有特殊处理：运行时通过 `getBedrockInferenceProfiles
 | 阿里云百炼 | `ANTHROPIC_AUTH_TOKEN`（sk-sp-xxx） | `auth_token` | ✅ | 一致 |
 | Ollama | `ANTHROPIC_AUTH_TOKEN=ollama` + `ANTHROPIC_API_KEY=""` | `auth_token` | ✅ | 一致 |
 | AWS Bedrock | IAM / Bearer Token | `env_only` | ✅ | 一致 |
-| Google AI Studio | `GEMINI_API_KEY` | `api_key`（media category） | ✅ | 一致；注：CodePilot 选择 AI Studio 路线，不跟随上游 Vertex 方案 |
+| Google AI Studio | `GEMINI_API_KEY` | `api_key`（media category） | ✅ | 一致；注：AI Native Lab 选择 AI Studio 路线，不跟随上游 Vertex 方案 |
 
-### Issue 归因：服务商配置问题不全是 CodePilot 的责任
+### Issue 归因：服务商配置问题不全是 AI Native Lab 的责任
 
 GitHub 上 100+ 个服务商相关 Issue 的归因分三类：
 
-1. **~1/3 CodePilot preset 错误**（上表 ⚠️ 标注的项）— 修 preset authStyle 即可解决（历史版本也提 `PROVIDER_MANAGED_BY_HOST` 但已确认是死代码，见下方第四节 P0.1）
-2. **~1/3 用户认知差**（以为终端 settings.json 配置能被 CodePilot 继承）— 需在配置引导中明确说明两套系统独立
+1. **~1/3 AI Native Lab preset 错误**（上表 ⚠️ 标注的项）— 修 preset authStyle 即可解决（历史版本也提 `PROVIDER_MANAGED_BY_HOST` 但已确认是死代码，见下方第四节 P0.1）
+2. **~1/3 用户认知差**（以为终端 settings.json 配置能被 AI Native Lab 继承）— 需在配置引导中明确说明两套系统独立
 3. **~1/3 用户在服务商侧操作错误**（拿错 Key、未激活 endpoint 等）— 需配置向导放正确的 Key 获取链接 + 配置时立即验证
 
 > 产品侧分析见 [docs/insights/user-audience-analysis.md](../insights/user-audience-analysis.md) 第八节
@@ -269,7 +269,7 @@ GitHub 上 100+ 个服务商相关 Issue 的归因分三类：
 
 ### Google 路线说明
 
-CodePilot 的 Google 支持选择 **AI Studio (Gemini API)** 路线，不跟随上游 Claude Code 的 Vertex AI 方案。原因：Vertex 需要 GCP OAuth + 项目配置，门槛过高；AI Studio 只需一个 API Key。上游 Claude Code 原生支持 Vertex（`CLAUDE_CODE_USE_VERTEX`），这是上游能力，CodePilot 当前不实现。
+AI Native Lab 的 Google 支持选择 **AI Studio (Gemini API)** 路线，不跟随上游 Claude Code 的 Vertex AI 方案。原因：Vertex 需要 GCP OAuth + 项目配置，门槛过高；AI Studio 只需一个 API Key。上游 Claude Code 原生支持 Vertex（`CLAUDE_CODE_USE_VERTEX`），这是上游能力，AI Native Lab 当前不实现。
 
 ### 按计费模式分组
 
@@ -296,7 +296,7 @@ CodePilot 的 Google 支持选择 **AI Studio (Gemini API)** 路线，不跟随�
 - 建临时 HOME 目录
 - `.claude/settings.json` 写入剥离 `ANTHROPIC_*` keys 的副本（保留 mcpServers / hooks / enabledPlugins / permissions / apiKeyHelper / 非认证 env 等所有非认证字段）
 - 其余 `~/.claude/<entry>` 通过 symlink（Unix）/ junction（Windows 目录）/ copy（Windows 文件 fallback）镜像到 shadow 中
-- SDK 子进程的 HOME / USERPROFILE 指向 shadow root → SDK 的 `qZq()` 读到剥离版 settings.json → 不再覆盖 CodePilot 注入的 provider auth
+- SDK 子进程的 HOME / USERPROFILE 指向 shadow root → SDK 的 `qZq()` 读到剥离版 settings.json → 不再覆盖 AI Native Lab 注入的 provider auth
 - env 模式 / 未指定 provider 时 pass-through，cc-switch 路径完全不变
 
 效果：cc-switch 用户用 Claude Code group 时一切如旧；显式选 Kimi/GLM/OpenRouter 时 settings.json 的 ANTHROPIC_* 不再越权覆盖；user-level MCP / plugins / hooks / CLAUDE.md 仍然完整可用。
@@ -335,7 +335,7 @@ CodePilot 的 Google 支持选择 **AI Studio (Gemini API)** 路线，不跟随�
 3. `role_models_json`（角色映射额外条目）
 4. `env_overrides_json` 中的遗留 `ANTHROPIC_MODEL`
 
-但 preset 静态列表仍是大多数用户看到的来源，服务商出新模型后需要等 CodePilot 发版。
+但 preset 静态列表仍是大多数用户看到的来源，服务商出新模型后需要等 AI Native Lab 发版。
 
 - **优化方向**：优先复用现有 `provider_models` / `role_models_json` 路径改善 UI，不要先起独立的远程模型系统
 
@@ -489,11 +489,11 @@ CodePilot 的 Google 支持选择 **AI Studio (Gemini API)** 路线，不跟随�
 
 #### 8. Azure AI Foundry 支持
 
-Claude Code 上游已支持 `@anthropic-ai/foundry-sdk`（`CLAUDE_CODE_USE_FOUNDRY`），CodePilot 缺少 `foundry` 协议。
+Claude Code 上游已支持 `@anthropic-ai/foundry-sdk`（`CLAUDE_CODE_USE_FOUNDRY`），AI Native Lab 缺少 `foundry` 协议。
 
 #### 9. 3P 模型能力声明
 
-上游支持通过 `ANTHROPIC_DEFAULT_*_MODEL_SUPPORTED_CAPABILITIES` 声明第三方模型能力。CodePilot 可以在 preset 中预设这些值，让 SDK 知道哪些第三方模型支持 thinking/effort 等功能。
+上游支持通过 `ANTHROPIC_DEFAULT_*_MODEL_SUPPORTED_CAPABILITIES` 声明第三方模型能力。AI Native Lab 可以在 preset 中预设这些值，让 SDK 知道哪些第三方模型支持 thinking/effort 等功能。
 
 ---
 

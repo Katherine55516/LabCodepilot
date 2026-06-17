@@ -15,7 +15,7 @@
 
 ## 目标
 
-- 让 CodePilot 拥有类似 Codex 的“可观察、可控制、可审批”的终端执行层，而不是只显示 Claude SDK 工具输出。
+- 让 AI Native Lab 拥有类似 Codex 的“可观察、可控制、可审批”的终端执行层，而不是只显示 Claude SDK 工具输出。
 - 让 git 从“用户自己在外部终端运行命令”升级为应用内的一等工作区状态服务。
 - 保持现有桌面聊天主链路稳定：`remote disabled = current desktop behavior unchanged`。
 

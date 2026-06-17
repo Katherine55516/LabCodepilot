@@ -252,7 +252,7 @@ function startTaskScheduler() {
 
 但 Electron Main Process 不能直接调用 Next.js API——需要通过 HTTP localhost 或 IPC。
 
-**更简单的方案**：调度器跑在 Next.js API 层（Node.js），用 `setInterval` 在服务端轮询。因为 CodePilot 的 Next.js dev server 始终运行，这个方案更可靠。
+**更简单的方案**：调度器跑在 Next.js API 层（Node.js），用 `setInterval` 在服务端轮询。因为 AI Native Lab 的 Next.js dev server 始终运行，这个方案更可靠。
 
 ```typescript
 // src/lib/task-scheduler.ts

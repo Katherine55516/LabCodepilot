@@ -5,7 +5,7 @@
 
 ---
 
-## 1. CodePilot 当前会话存储结构
+## 1. AI Native Lab 当前会话存储结构
 
 ### 1.1 DB Schema（chat_sessions + messages）
 
@@ -65,7 +65,7 @@
 3. **Resume 失败处理** → 自动 fallback 到 `buildFallbackContext()`，从 DB 历史构建上下文
 4. **Crash/超时** → 清除 `sdk_session_id`，下次消息从 DB 历史重建
 
-**关键发现：CodePilot 已经有一个完整的 DB-based fallback 路径（`buildFallbackContext`），SDK resume 只是一个优化而非必需。**
+**关键发现：AI Native Lab 已经有一个完整的 DB-based fallback 路径（`buildFallbackContext`），SDK resume 只是一个优化而非必需。**
 
 ### 1.4 Fallback Context 构建流程
 
@@ -110,7 +110,7 @@
 #### c) 可压缩工具列表
 仅处理以下工具的结果：`FileRead`, `Shell/Bash`, `Grep`, `Glob`, `WebSearch`, `WebFetch`, `FileEdit`, `FileWrite`
 
-**CodePilot 参考价值**：CodePilot 已有 `microCompactMessage()` 函数（在 `buildFallbackContext` 中使用），但仅做简单截断。可以增强为基于工具名的选择性清理。
+**AI Native Lab 参考价值**：AI Native Lab 已有 `microCompactMessage()` 函数（在 `buildFallbackContext` 中使用），但仅做简单截断。可以增强为基于工具名的选择性清理。
 
 ### 2.2 Auto-Compact（自动全文压缩）
 
@@ -164,11 +164,11 @@ Summary:
 
 ### 2.3 Reactive Compact（413 错误触发的被动压缩）
 
-**位置**：CodePilot 的 `claude-client.ts` 已有实现
+**位置**：AI Native Lab 的 `claude-client.ts` 已有实现
 
 **触发条件**：API 返回 `CONTEXT_TOO_LONG` 错误
 
-**CodePilot 当前实现**：
+**AI Native Lab 当前实现**：
 1. 检测到 `CONTEXT_TOO_LONG`
 2. 调用 `compressConversation()`（在 `context-compressor.ts`）
 3. 将摘要写入 `context_summary` 字段
@@ -319,13 +319,13 @@ Be precise with file paths, function names, and code references. Preserve the us
 
 #### 层级 3：Reactive Compress（API 413 触发）
 
-CodePilot 已有此实现（`context-compressor.ts` + `claude-client.ts` 的 CONTEXT_TOO_LONG 处理）。脱离 SDK 后保持不变，但需要：
+AI Native Lab 已有此实现（`context-compressor.ts` + `claude-client.ts` 的 CONTEXT_TOO_LONG 处理）。脱离 SDK 后保持不变，但需要：
 - 改为直接调用 Anthropic API（而非 `generateTextViaSdk`）
 - 压缩后直接重建 messages 数组重试
 
-### 4.2 与 CodePilot 现有机制的关系
+### 4.2 与 AI Native Lab 现有机制的关系
 
-CodePilot 已经有：
+AI Native Lab 已经有：
 - `context-compressor.ts` — 基础压缩（层级 3）
 - `context-estimator.ts` — token 估算
 - `buildFallbackContext()` — 含 microCompact 的上下文构建
@@ -412,7 +412,7 @@ OpenCode 的 compaction 有几个值得借鉴的设计：
 
 ## 附录 A：各项目压缩方案对比
 
-| 维度 | Claude Code | OpenCode | Codex | CodePilot（当前） |
+| 维度 | Claude Code | OpenCode | Codex | AI Native Lab（当前） |
 |------|------------|---------|-------|-----------------|
 | 触发方式 | token 阈值自动 | token 阈值自动 | token 阈值自动 | 仅 413 被动 |
 | 压缩执行者 | forked agent（同模型） | 独立 agent 调用 | inline/remote compact | 小模型（haiku） |
@@ -425,7 +425,7 @@ OpenCode 的 compaction 有几个值得借鉴的设计：
 
 ## 附录 B：关键代码位置索引
 
-**CodePilot：**
+**AI Native Lab：**
 - DB schema + messages 操作：`src/lib/db.ts`
 - 流式会话管理：`src/lib/stream-session-manager.ts`
 - SDK 会话注册：`src/lib/conversation-registry.ts`

@@ -1,6 +1,6 @@
 # ARCHITECTURE.md
 
-CodePilot 是多模型 AI Agent 桌面客户端。Electron 40 做外壳，Next.js 16 (App Router) 做前端和 API 层，better-sqlite3 做本地持久化，通过 Claude Agent SDK 与 AI 服务商交互。
+AI Native Lab 是多模型 AI Agent 桌面客户端。Electron 40 做外壳，Next.js 16 (App Router) 做前端和 API 层，better-sqlite3 做本地持久化，通过 Claude Agent SDK 与 AI 服务商交互。
 
 ## 目录结构
 
@@ -71,7 +71,7 @@ electron/
 ```
 Telegram/Feishu 消息
   → Adapter 长轮询/WebSocket 接收
-  → channelRouter 路由到 CodePilot session
+  → channelRouter 路由到 AI Native Lab session
   → conversationEngine 调用 SDK
   → SDK SSE 响应
   → deliveryLayer 格式化 + 分片
@@ -94,14 +94,14 @@ Schema 定义在 `src/lib/db.ts`，12 张表：
 | `media_jobs` | 批量图片生成任务 |
 | `media_job_items` | 批量任务中的单个项 |
 | `media_context_events` | 批量任务上下文同步 |
-| `channel_bindings` | Bridge: IM 频道 → CodePilot 会话绑定 |
+| `channel_bindings` | Bridge: IM 频道 → AI Native Lab 会话绑定 |
 | `channel_offsets` | Bridge: 轮询偏移量水位线 |
 
 启用 WAL 模式 + 外键约束。数据目录：`~/.codepilot/`。
 
 ## Bridge 子系统
 
-`src/lib/bridge/` — 将外部 IM（Telegram、飞书）连接到 CodePilot 会话。
+`src/lib/bridge/` — 将外部 IM（Telegram、飞书）连接到 AI Native Lab 会话。
 
 **核心组件：**
 - `channel-adapter.ts` — 适配器抽象基类 + 注册工厂

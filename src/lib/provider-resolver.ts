@@ -320,7 +320,7 @@ export function toClaudeCodeEnv(
   // does not exist in the current SDK (@anthropic-ai/claude-agent-sdk 0.2.62) — it
   // was either aspirational or came from an older SDK spec. Removing it avoids
   // shipping misleading dead code. The SDK already filters its own env blocklist
-  // (model aliases, AWS/OTEL/Bedrock keys — see rG6 in cli.js), and when CodePilot
+  // (model aliases, AWS/OTEL/Bedrock keys — see rG6 in cli.js), and when AI Native Lab
   // has an active provider, toClaudeCodeEnv() already deletes all ANTHROPIC_* keys
   // from baseEnv above before injecting the provider's values, so settings.json
   // env cannot override the provider's auth/baseUrl for authenticated users.
@@ -826,7 +826,7 @@ function buildResolution(
   // Settings sources for DB-backed providers — KEEP 'user', DROP 'project'+'local'.
   //
   // Why 'user' stays: the SDK relies on `settingSources: ['user']` to
-  // automatically discover user-scoped features that CodePilot does NOT
+  // automatically discover user-scoped features that AI Native Lab does NOT
   // pass explicitly:
   //   - User-level MCP servers from ~/.claude.json / ~/.claude/settings.json
   //   - User-level plugins via `enabledPlugins` in settings.json
@@ -858,7 +858,7 @@ function buildResolution(
   //     the desktop app is the Next.js server's working dir (wrong).
   // Lost (rare): `<cwd>/.claude/settings.json` mcpServers / hooks / plugins
   // / permissions and `<cwd>/.claude/settings.local.json` overrides. Most
-  // users don't author project-level Claude Code config, and CodePilot has
+  // users don't author project-level Claude Code config, and AI Native Lab has
   // its own permission system, so this is an acceptable trade-off.
   //
   // Env mode (no DB provider) keeps all 3 sources — see buildResolution()
@@ -940,7 +940,7 @@ function safeParseCapabilities(json: string | undefined | null): CatalogModel['c
 //   4. First other non-sdkProxyOnly provider with .small or .haiku
 //   5. Main provider + main model (ultimate floor — never returns null)
 //
-// CodePilot background: provider preset's roleModels.small slot is
+// AI Native Lab background: provider preset's roleModels.small slot is
 // already populated for many providers (see provider-catalog.ts) and
 // already consumed by toClaudeCodeEnv() to set ANTHROPIC_SMALL_FAST_MODEL
 // for the SDK path. This routing extends the same slot to Native Runtime

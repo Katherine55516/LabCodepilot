@@ -4,7 +4,7 @@
 
 ## 概述
 
-为 CodePilot 新增可跳过的首次设置引导（Setup Center），替代原先被动的"失败后提示"模式。引导覆盖三个核心前置条件：Claude Code CLI 连接、API Provider 配置、默认项目目录。同时修复 Windows 顶栏重叠，统一错误反馈路径。
+为 AI Native Lab 新增可跳过的首次设置引导（Setup Center），替代原先被动的"失败后提示"模式。引导覆盖三个核心前置条件：Claude Code CLI 连接、API Provider 配置、默认项目目录。同时修复 Windows 顶栏重叠，统一错误反馈路径。
 
 ## 架构
 

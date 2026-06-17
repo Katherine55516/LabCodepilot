@@ -81,7 +81,7 @@ export class FeishuGateway {
    *   push heavy logic to fire-and-forget (setImmediate / queueMicrotask).
    *
    * Supports both button value formats:
-   * - value.callback_data  (CodePilot permission buttons)
+   * - value.callback_data  (AI Native Lab permission buttons)
    * - value.action / value.operation_id  (OpenClaw-style buttons)
    */
   registerCardActionHandler(handler: CardActionHandler): void {

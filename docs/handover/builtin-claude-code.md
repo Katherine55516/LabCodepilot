@@ -5,9 +5,9 @@
 
 ## 总览
 
-v0.55 起 CodePilot 把 Claude Code 原生二进制内置到安装包，用户安装应用即可使用完整功能，不再需要单独 `npm install -g @anthropic-ai/claude-code` 或 `curl install.sh | bash`。
+v0.55 起 AI Native Lab 把 Claude Code 原生二进制内置到安装包，用户安装应用即可使用完整功能，不再需要单独 `npm install -g @anthropic-ai/claude-code` 或 `curl install.sh | bash`。
 
-技术机制：`@anthropic-ai/claude-agent-sdk` 0.2.120 起采用**主包 + 8 个平台子包**架构（同 esbuild / sharp 模式）。`npm install` 时按 `os` × `cpu` 自动装当前平台对应的 `@anthropic-ai/claude-agent-sdk-<platform>-<arch>` optional dependency，子包内含 ~230MB 的 Bun-编译 self-contained native binary（`claude` / `claude.exe`）。SDK 主包内部通过 `require.resolve('@anthropic-ai/claude-agent-sdk-<platform>-<arch>')` 自动发现 binary 并 spawn。CodePilot 不再覆盖 `pathToClaudeCodeExecutable`，SDK 默认行为接管。
+技术机制：`@anthropic-ai/claude-agent-sdk` 0.2.120 起采用**主包 + 8 个平台子包**架构（同 esbuild / sharp 模式）。`npm install` 时按 `os` × `cpu` 自动装当前平台对应的 `@anthropic-ai/claude-agent-sdk-<platform>-<arch>` optional dependency，子包内含 ~230MB 的 Bun-编译 self-contained native binary（`claude` / `claude.exe`）。SDK 主包内部通过 `require.resolve('@anthropic-ai/claude-agent-sdk-<platform>-<arch>')` 自动发现 binary 并 spawn。AI Native Lab 不再覆盖 `pathToClaudeCodeExecutable`，SDK 默认行为接管。
 
 ## 关键文件
 
@@ -98,7 +98,7 @@ Native runtime 自身代码完全保留（`src/lib/runtime/native-runtime.ts`）
 A: 跑 `/api/claude-status` 看返回。如果不是 `connected: true, bundled: true`，说明 platform 子包没被打入安装包。检查 after-pack.js 输出有没有 `FATAL: No Claude Code native binary found`。
 
 **Q: 用户的 macOS 用 Rosetta 跑应用，spawn 失败**
-A: 检查 binary 架构是否匹配。`file /Applications/CodePilot.app/Contents/Resources/app.asar.unpacked/node_modules/@anthropic-ai/claude-agent-sdk-darwin-{arm64,x64}/claude` 看 Mach-O 架构是否对。
+A: 检查 binary 架构是否匹配。`file /Applications/AI Native Lab.app/Contents/Resources/app.asar.unpacked/node_modules/@anthropic-ai/claude-agent-sdk-darwin-{arm64,x64}/claude` 看 Mach-O 架构是否对。
 
 **Q: Windows 用户报杀软拦截**
 A: 临时方案：用户在 Settings 关闭「使用内置 Claude Code」开关 → 降级到 Native runtime。长期方案：申请 EV cert 签名 + 提交 Microsoft Defender SmartScreen 报白。

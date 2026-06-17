@@ -15,7 +15,7 @@
 
 ## 决策日志
 
-- 2026-03-21: 聊天界面的模式选择（如 CodePilot / Ask）可以删除，计划模式后续重做时再引入。
+- 2026-03-21: 聊天界面的模式选择（如 AI Native Lab / Ask）可以删除，计划模式后续重做时再引入。
 - 2026-03-21: 本轮不做 `mode` 字段和桥接 `/mode` 命令的彻底清理，先删除桌面主聊天入口并把桌面聊天统一收敛到 `code`，以控制范围和回归风险。
 - 2026-03-21: MCP 需要做成持久启停开关，默认开启，用户可以在 MCP 页面关闭某个 server。
 - 2026-03-21: 恢复旧会话时允许增加可见状态提示，优先解决“空白等待像卡死”的体感问题。
@@ -118,7 +118,7 @@
 **实现 A：runtime profile 显式默认值**
 
 - `src/lib/claude-client.ts`
-  - 当请求没有显式传 `thinking/effort` 时，由 CodePilot 统一设默认值，而不是继续继承用户本机 Claude 的高强度偏好。
+  - 当请求没有显式传 `thinking/effort` 时，由 AI Native Lab 统一设默认值，而不是继续继承用户本机 Claude 的高强度偏好。
   - 推荐默认 `effort: 'medium'`；是否显式关闭 thinking 取决于当前 UI 有没有独立的 thinking 控制，避免引入额外行为分叉。
 - `src/app/api/chat/route.ts`
   - 明确桌面主聊天的默认 runtime profile。
@@ -141,14 +141,14 @@
 
 **实现 D：项目自带 MCP 冷启动减负**
 
-- 项目级 [`.mcp.json`](/Users/guohao/Documents/code/codepilot/CodePilot/.mcp.json)
+- 项目级 [`.mcp.json`](.mcp.json)
   - 对项目自带的重型 server 避免使用 `npx -y ...@latest` 这类每次解析版本的冷启动方式。
   - 优先固定版本；若条件允许，改为本地已安装命令或更轻的启动路径。
 - 保留现有 generative UI 的按需挂载策略，不把 widget MCP 重新拉回所有会话的默认初始化路径。
 
 ## 验收标准
 
-- 主聊天界面不再出现 CodePilot / Ask 模式切换。
+- 主聊天界面不再出现 AI Native Lab / Ask 模式切换。
 - 新建或继续聊天时，桌面主聊天统一按 `code` 权限路径工作。
 - MCP 页面可以对单个 server 做持久启停，刷新页面后状态仍然正确。
 - 被关闭的 MCP server 不会出现在新聊天的初始化注入列表中。

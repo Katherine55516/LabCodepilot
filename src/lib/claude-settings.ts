@@ -8,7 +8,7 @@
  * skipping keys in its internal blocklist (which does NOT cover
  * ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN / ANTHROPIC_BASE_URL).
  *
- * CodePilot's runtime resolver needs the same visibility so auto mode can
+ * AI Native Lab's runtime resolver needs the same visibility so auto mode can
  * pick the SDK runtime (instead of falling back to native, which cannot read
  * this file at all).
  *

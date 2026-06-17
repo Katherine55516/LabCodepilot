@@ -6,7 +6,7 @@
 
 ## 解决什么用户问题
 
-CodePilot 是多模型桌面客户端，用户的 API 凭证有两类来源：
+AI Native Lab 是多模型桌面客户端，用户的 API 凭证有两类来源：
 
 1. **用户体系下发的 managed 凭证**——登录后公司后端下发 `ModelConfig[]`（含 `auth_token`），镜像进 `api_providers`（`source='managed'`）。这是**公司花钱买的网关额度**，泄露＝直接经济损失 + 可能波及整个团队。
 2. **用户自带的 BYOK key**——用户在设置里填的 Anthropic / OpenAI / 第三方网关 key。
@@ -37,7 +37,7 @@ keytar 需要 `@electron/rebuild`、macOS 首次访问弹钥匙串授权框、�
 
 ### 一把主密钥 + AES，而非每文件直接 safeStorage
 
-参考文档（bsApp）的世界里一切都在 Electron 主进程，可以每个文件直接 `safeStorage.encryptString`。但 CodePilot 是**双进程**：凭证的真正消费方（provider-resolver → SDK env）和 SQLite 读写都在 Next.js standalone server（`utilityProcess` 子进程），而 **safeStorage 在子进程不可用**。
+参考文档（bsApp）的世界里一切都在 Electron 主进程，可以每个文件直接 `safeStorage.encryptString`。但 AI Native Lab 是**双进程**：凭证的真正消费方（provider-resolver → SDK env）和 SQLite 读写都在 Next.js standalone server（`utilityProcess` 子进程），而 **safeStorage 在子进程不可用**。
 
 于是设计成：safeStorage 只守护一把 32 字节主密钥，主进程解封后通过环境变量把 hex 传给子进程，两侧都用同一把 key 做 AES-256-GCM。这把"safeStorage 不能跨进程"的硬约束，转化成了"safeStorage 守一把 key、key 经 env 过河"的统一模型——副作用是 anlcode 文件和 SQLite 列用的是同一套 `crypto-seal`，心智负担更低，也更好测（测试设个 env 就能跑真加密）。
 

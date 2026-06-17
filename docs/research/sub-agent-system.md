@@ -1,6 +1,6 @@
 # 子 Agent 系统深度调研
 
-> 调研目标：了解 Claude Code、OpenCode、Codex、Craft Agents 的子 Agent 实现，为 CodePilot 脱离 SDK 后自建子 Agent 系统提供方案。
+> 调研目标：了解 Claude Code、OpenCode、Codex、Craft Agents 的子 Agent 实现，为 AI Native Lab 脱离 SDK 后自建子 Agent 系统提供方案。
 
 ## 1. Claude Code AgentTool 完整实现细节
 
@@ -281,7 +281,7 @@ spawn_session({
 
 ### 5.1 核心架构：基于 Vercel AI SDK streamText 的子 Agent
 
-CodePilot 当前使用 Vercel AI SDK 的 `streamText` 进行 LLM 调用。子 Agent 本质上是：
+AI Native Lab 当前使用 Vercel AI SDK 的 `streamText` 进行 LLM 调用。子 Agent 本质上是：
 1. 一个独立的 `streamText` 调用循环（agentic loop）
 2. 使用不同的 system prompt
 3. 使用受限的 tool 集

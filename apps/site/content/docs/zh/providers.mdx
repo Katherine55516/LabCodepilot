@@ -1,37 +1,37 @@
 ---
 title: 服务商配置
-description: 配置 LLM 服务商以驱动 CodePilot。
+description: 配置 LLM 服务商以驱动 AI Native Lab。
 ---
 
 # 服务商配置
 
-CodePilot 支持多种 LLM 服务商。你可以同时配置多个服务商，在不同对话中使用不同的模型。
+AI Native Lab 支持多种 LLM 服务商。你可以同时配置多个服务商，在不同对话中使用不同的模型。
 
 ## 认证方式概览
 
-CodePilot 有两种获取 API 凭据的途径：
+AI Native Lab 有两种获取 API 凭据的途径：
 
 ### 1. CLI 环境认证（自动检测）
 
-如果你在 shell 环境中设置了 `ANTHROPIC_API_KEY` 或 `ANTHROPIC_AUTH_TOKEN` 环境变量，CodePilot 启动时会**自动检测**并作为内置服务商使用。设置中心也会检查这些凭据，如果检测到会自动将服务商步骤标记为已完成。
+如果你在 shell 环境中设置了 `ANTHROPIC_API_KEY` 或 `ANTHROPIC_AUTH_TOKEN` 环境变量，AI Native Lab 启动时会**自动检测**并作为内置服务商使用。设置中心也会检查这些凭据，如果检测到会自动将服务商步骤标记为已完成。
 
 ```bash
 export ANTHROPIC_API_KEY="sk-ant-..."
 ```
 
-> **注意：** 通过 `claude config set` 或 Claude Code 的 `/config` 命令切换的配置**不会被 CodePilot 识别**。CodePilot 只读取 shell 环境变量，不共享 Claude Code CLI 的内部配置。如果你在 CLI 中通过 `cc switch` 或类似方式切换了账号/密钥，需要在 CodePilot 的 **设置 > 服务商** 中重新手动配置对应的密钥。
+> **注意：** 通过 `claude config set` 或 Claude Code 的 `/config` 命令切换的配置**不会被 AI Native Lab 识别**。AI Native Lab 只读取 shell 环境变量，不共享 Claude Code CLI 的内部配置。如果你在 CLI 中通过 `cc switch` 或类似方式切换了账号/密钥，需要在 AI Native Lab 的 **设置 > 服务商** 中重新手动配置对应的密钥。
 
-> 修改环境变量后需要**重启 CodePilot** 才能生效。
+> 修改环境变量后需要**重启 AI Native Lab** 才能生效。
 
 ### 2. 手动添加服务商
 
-在 **设置 > 服务商** 中手动添加 API 密钥。这些凭据存储在 CodePilot 本地数据库中，与 CLI 环境相互独立。
+在 **设置 > 服务商** 中手动添加 API 密钥。这些凭据存储在 AI Native Lab 本地数据库中，与 CLI 环境相互独立。
 
 适合需要使用多个服务商、或使用非 Anthropic 服务的场景。
 
 ### 优先级
 
-当发送消息时，CodePilot 按以下顺序确定使用哪个服务商：
+当发送消息时，AI Native Lab 按以下顺序确定使用哪个服务商：
 
 1. **对话指定** — 对话头部手动选择的服务商
 2. **全局默认** — 在服务商列表中标记为"默认"的服务商
@@ -58,7 +58,7 @@ export ANTHROPIC_API_KEY="sk-ant-..."
 
 ### 国内服务商
 
-CodePilot 内置了国内主流服务商的配置预设，选择后自动填充基础 URL 和默认模型：
+AI Native Lab 内置了国内主流服务商的配置预设，选择后自动填充基础 URL 和默认模型：
 
 | 服务商 | 说明 | 计费模式 |
 |--------|------|----------|
@@ -71,7 +71,7 @@ CodePilot 内置了国内主流服务商的配置预设，选择后自动填充�
 | **小米 MiMo** | 小米 MiMo-V2.5-Pro（按量付费或 Token Plan） | 按量 / Token Plan |
 | **阿里云百炼 Coding Plan** | 阿里云（通义、GLM、Kimi、MiniMax） | Coding Plan |
 
-在 CodePilot 中添加国内服务商时，系统会自动处理认证方式，你只需填写对应平台提供的密钥。每个服务商卡片上都有直接获取 API Key 的链接。
+在 AI Native Lab 中添加国内服务商时，系统会自动处理认证方式，你只需填写对应平台提供的密钥。每个服务商卡片上都有直接获取 API Key 的链接。
 
 > **各服务商注意事项：**
 > - **智谱 GLM**：高峰时段（14:00–18:00 UTC+8）消耗 3 倍积分
@@ -92,7 +92,7 @@ CodePilot 内置了国内主流服务商的配置预设，选择后自动填充�
 通过 AWS 基础设施使用 Claude。
 
 - **认证**：环境变量方式，需要 `AWS_ACCESS_KEY_ID`、`AWS_SECRET_ACCESS_KEY`、`AWS_REGION`
-- **说明**：在 CodePilot 中添加后，系统会读取你的 AWS 环境变量进行认证。不需要在界面中填写密钥。
+- **说明**：在 AI Native Lab 中添加后，系统会读取你的 AWS 环境变量进行认证。不需要在界面中填写密钥。
 
 ### Google Vertex
 
@@ -110,7 +110,7 @@ Gemini 图片生成 API，供设计 Agent 使用。
 
 ### Ollama（本地模型）
 
-通过 Ollama 运行本地模型。Ollama 提供了 Anthropic 兼容的 API，CodePilot 可以直接连接。
+通过 Ollama 运行本地模型。Ollama 提供了 Anthropic 兼容的 API，AI Native Lab 可以直接连接。
 
 - **认证**：无需 API 密钥（系统自动处理）
 - **前提**：需要先安装并启动 Ollama
@@ -143,10 +143,10 @@ Gemini 图片生成 API，供设计 Agent 使用。
 
 ## 常见问题
 
-### 已设置环境变量但 CodePilot 没有检测到
+### 已设置环境变量但 AI Native Lab 没有检测到
 
-- 确认环境变量在 CodePilot 启动时的 shell 环境中可用
-- 如果通过 `.zshrc` / `.bashrc` 设置，确保修改后**重启了 CodePilot**（不是刷新）
+- 确认环境变量在 AI Native Lab 启动时的 shell 环境中可用
+- 如果通过 `.zshrc` / `.bashrc` 设置，确保修改后**重启了 AI Native Lab**（不是刷新）
 - macOS 通过 Launchpad 启动的应用可能不继承终端环境变量，建议从终端启动或使用手动添加服务商
 
 ### API 密钥有效但请求失败
@@ -183,11 +183,11 @@ ollama run gemma4:e4b
 
 运行后模型会进入交互对话模式，确认能正常回复后按 `Ctrl+D` 退出即可。Ollama 服务会在后台继续运行。
 
-> **模型名称很重要**：在 CodePilot 中填写的模型名称必须与 `ollama list` 显示的名称**完全一致**（包括冒号后的标签部分）。例如 `gemma4:e4b`，不能只写 `gemma4`。
+> **模型名称很重要**：在 AI Native Lab 中填写的模型名称必须与 `ollama list` 显示的名称**完全一致**（包括冒号后的标签部分）。例如 `gemma4:e4b`，不能只写 `gemma4`。
 
 更多模型和用法参见 [Ollama 官方文档](https://docs.ollama.com/)。
 
-### 第二步：在 CodePilot 中添加 Ollama
+### 第二步：在 AI Native Lab 中添加 Ollama
 
 1. 打开 **设置 > 服务商**
 2. 在服务商列表底部找到 **Ollama**，点击 **+ 连接**

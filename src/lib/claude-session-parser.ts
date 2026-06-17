@@ -148,7 +148,7 @@ export interface ClaudeProjectsRoot {
  * `HOME`/`USERPROFILE` rewritten to `<userData>/claude-home` so the embedded
  * CLI cannot read the user's global `~/.claude/settings.json`. This isolation
  * also moves every session JSONL out of `~/.claude/projects/`, which is why
- * CodePilot can't see those sessions by default.
+ * AI Native Lab can't see those sessions by default.
  *
  * `userData` is Electron's standard per-app data directory:
  *   - Windows: %APPDATA%\<productName>
@@ -177,7 +177,7 @@ function getBsAppShadowHome(): string | null {
 }
 
 /**
- * Return every Claude Code `projects/` directory CodePilot knows how to read.
+ * Return every Claude Code `projects/` directory AI Native Lab knows how to read.
  * Order matters: when the same session UUID appears in multiple roots, the
  * earlier root wins (so the user's real `~/.claude/projects/` is canonical).
  *

@@ -19,8 +19,8 @@ export async function generateMetadata({
   const isZh = lang === 'zh';
   return {
     title: isZh
-      ? 'CodePilot — 多模型 AI Agent 桌面客户端'
-      : 'CodePilot — Multi-Model AI Agent Desktop Client',
+      ? 'AI Native Lab — 多模型 AI Agent 桌面客户端'
+      : 'AI Native Lab — Multi-Model AI Agent Desktop Client',
     description: isZh
       ? '连接任意 AI 服务商，通过 MCP 和 Skills 扩展能力，手机远程控制，让你的助理学会你的工作方式。'
       : siteConfig.description,

@@ -129,7 +129,7 @@ const ERROR_PATTERNS: ErrorPattern[] = [
   //
   // `not logged in` / `please run /login` is the Claude Code CLI's native
   // error when settings.json is missing or its base URL/token combo is
-  // rejected. In the CodePilot UI the CLI's /login flow is a dead-end, so
+  // rejected. In the AI Native Lab UI the CLI's /login flow is a dead-end, so
   // we surface the same user-friendly guidance as a true credentials-missing
   // case — open the Providers setup instead of telling users to run a
   // command that doesn't exist in the desktop app.

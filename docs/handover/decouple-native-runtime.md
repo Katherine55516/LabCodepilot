@@ -4,7 +4,7 @@
 
 ## 概述
 
-CodePilot 原来完全依赖 `@anthropic-ai/claude-agent-sdk`（Claude Code CLI 子进程）驱动 AI 对话。本次重构引入 **Native Runtime**（基于 Vercel AI SDK），使 CodePilot 无需安装 Claude Code CLI 即可完整运行，同时保留 SDK Runtime 作为可选增强路径。
+AI Native Lab 原来完全依赖 `@anthropic-ai/claude-agent-sdk`（Claude Code CLI 子进程）驱动 AI 对话。本次重构引入 **Native Runtime**（基于 Vercel AI SDK），使 AI Native Lab 无需安装 Claude Code CLI 即可完整运行，同时保留 SDK Runtime 作为可选增强路径。
 
 ## 架构
 

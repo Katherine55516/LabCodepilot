@@ -1,14 +1,14 @@
-# Provider 注册表对比分析 — Hermes vs CodePilot
+# Provider 注册表对比分析 — Hermes vs AI Native Lab
 
 > 分析日期：2026-04-09
 
 ## 为什么这个问题重要
 
-CodePilot 的 provider 系统频繁出问题：新增 provider 时忘记更新多处代码、auth 方式判断散落在多个文件、模型能力（thinking/vision/tool use）靠硬编码猜测、第三方代理兼容性需要逐个调试。根本原因是**数据源和判断逻辑没有统一**。
+AI Native Lab 的 provider 系统频繁出问题：新增 provider 时忘记更新多处代码、auth 方式判断散落在多个文件、模型能力（thinking/vision/tool use）靠硬编码猜测、第三方代理兼容性需要逐个调试。根本原因是**数据源和判断逻辑没有统一**。
 
 ## 两套系统的核心区别
 
-### CodePilot 现状：一切硬编码在 VENDOR_PRESETS
+### AI Native Lab 现状：一切硬编码在 VENDOR_PRESETS
 
 ```
 provider-catalog.ts (VENDOR_PRESETS, 28 个 preset)
@@ -40,7 +40,7 @@ resolve_provider_full() → ProviderDef
 
 ### 1. 数据源
 
-| 维度 | CodePilot | Hermes |
+| 维度 | AI Native Lab | Hermes |
 |------|-----------|--------|
 | Provider 列表来源 | 硬编码 `VENDOR_PRESETS` (28 个) | models.dev API (109+) + 本地缓存 |
 | 模型列表来源 | 硬编码 `defaultModels` | models.dev 动态 + `/models` 端点探测 |
@@ -49,17 +49,17 @@ resolve_provider_full() → ProviderDef
 
 **Hermes 优势：** 不依赖代码发版来获取新 provider/model 信息。models.dev 作为社区维护的目录，覆盖面远超手工维护。
 
-**CodePilot 优势：** Zod schema 验证 preset 完整性；UI 引导式配置；DB 持久化。
+**AI Native Lab 优势：** Zod schema 验证 preset 完整性；UI 引导式配置；DB 持久化。
 
 ### 2. 传输协议（Wire Protocol）
 
-| 维度 | CodePilot | Hermes |
+| 维度 | AI Native Lab | Hermes |
 |------|-----------|--------|
 | 协议类型 | 7 种 Protocol enum | 3 种 transport |
 | 定义位置 | `provider-catalog.ts` Protocol type | `providers.py` HermesOverlay.transport |
 | 判断逻辑 | `inferProtocolFromLegacy()` 按 URL/type 推断 | 查表：`HERMES_OVERLAYS[provider_id].transport` |
 
-**CodePilot 的 7 种协议：**
+**AI Native Lab 的 7 种协议：**
 ```
 anthropic | openai-compatible | openrouter | bedrock | vertex | google | gemini-image
 ```
@@ -71,11 +71,11 @@ openai_chat | anthropic_messages | codex_responses
 
 **Hermes 优势：** 更简洁。不把 bedrock/vertex/openrouter 当独立协议，而是当做 `openai_chat` 的变体（通过 auth 和 base_url 区分）。减少了协议判断的复杂度。
 
-**CodePilot 优势：** bedrock/vertex 确实有特殊的 SDK（@ai-sdk/amazon-bedrock 等），需要独立处理，不能简单归入 openai_chat。
+**AI Native Lab 优势：** bedrock/vertex 确实有特殊的 SDK（@ai-sdk/amazon-bedrock 等），需要独立处理，不能简单归入 openai_chat。
 
 ### 3. 认证系统
 
-| 维度 | CodePilot | Hermes |
+| 维度 | AI Native Lab | Hermes |
 |------|-----------|--------|
 | Auth 类型 | 4 种 AuthStyle | 4 种 auth_type |
 | 定义位置 | `provider-catalog.ts` 每个 preset | `auth.py` ProviderConfig 注册表 |
@@ -83,7 +83,7 @@ openai_chat | anthropic_messages | codex_responses
 | 凭据存储 | DB settings 表 | `auth.json` + 文件锁 |
 | Claude Code 检测 | 手动检查 env vars | 自动读 `~/.claude/.credentials.json` + 刷新 |
 
-**CodePilot AuthStyle：**
+**AI Native Lab AuthStyle：**
 ```
 api_key | auth_token | env_only | custom_header
 ```
@@ -98,11 +98,11 @@ api_key | oauth_device_code | oauth_external | external_process
 - **OAuth token 自动刷新**：启动时检查过期，自动 refresh
 - **跨进程文件锁**：防止并发写 auth.json
 
-**CodePilot 问题：** auth 判断散落在 `inferAuthStyleFromLegacy()`、`resolveAnthropicAuth()`、`toClaudeCodeEnv()` 多处，新增 auth 方式需要改多个函数。
+**AI Native Lab 问题：** auth 判断散落在 `inferAuthStyleFromLegacy()`、`resolveAnthropicAuth()`、`toClaudeCodeEnv()` 多处，新增 auth 方式需要改多个函数。
 
 ### 4. 模型能力检测
 
-| 维度 | CodePilot | Hermes |
+| 维度 | AI Native Lab | Hermes |
 |------|-----------|--------|
 | Thinking/Reasoning | 前端 `supportsEffort` 字段 | models.dev `reasoning` bool + 模型名匹配 |
 | Vision | 无标记 | `attachment` bool + `input_modalities` |
@@ -113,11 +113,11 @@ api_key | oauth_device_code | oauth_external | external_process
 
 **Hermes 优势：** 能力是结构化数据（`ModelInfo` dataclass 有 15+ 字段），而非散落在各处的 if/else。新增能力维度只需加一个字段，不需要改判断逻辑。
 
-**CodePilot 问题：** `getContextWindow()` 是一个巨大的 switch/case，每次新模型都要手动加。`supportsEffort` 只在 models route 里某些模型手动标记。没有 vision/tool_call/structured_output 的统一标记。
+**AI Native Lab 问题：** `getContextWindow()` 是一个巨大的 switch/case，每次新模型都要手动加。`supportsEffort` 只在 models route 里某些模型手动标记。没有 vision/tool_call/structured_output 的统一标记。
 
 ### 5. 错误处理和降级
 
-| 维度 | CodePilot | Hermes |
+| 维度 | AI Native Lab | Hermes |
 |------|-----------|--------|
 | 错误分类 | `error-classifier.ts` (21 类) | `error_classifier.py` (类似) |
 | Provider 降级 | 无 fallback chain | `fallback_providers` 配置 |
@@ -178,7 +178,7 @@ model_info.context_window  # 1_000_000
 model_info.cost_input    # 15.0（美元/百万 token）
 ```
 
-## 对 CodePilot 的改进建议
+## 对 AI Native Lab 的改进建议
 
 ### 阶段 1：引入 models.dev 作为辅助数据源
 
@@ -263,7 +263,7 @@ async function probeProvider(apiKey: string, baseUrl: string): Promise<{
 
 ## 总结
 
-| 维度 | CodePilot 问题 | Hermes 解法 | 建议优先级 |
+| 维度 | AI Native Lab 问题 | Hermes 解法 | 建议优先级 |
 |------|---------------|------------|-----------|
 | 数据源 | 全靠硬编码，发版才能更新 | models.dev 动态 + 本地缓存 | P0 |
 | 能力检测 | 散落多处的 if/else | 结构化 ModelCapabilities | P0 |

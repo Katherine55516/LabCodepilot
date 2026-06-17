@@ -15,7 +15,7 @@
 
 1. **Artifact 支持更多网页预览** — 现只能预览 `.html`/`.htm`，希望扩展到 AI 生成/修改的 React（`.jsx`/`.tsx`）文件；交互模式是"聊天里出卡片 → 用户点击再拉起 PreviewPanel"，不做静默自动弹。
 2. **文件树中 Markdown 预览优化** — 当前后端 `readFilePreview` 硬 cap 1000 行（`src/app/api/files/preview/route.ts:52`），长 Markdown 文件被截断看不全。
-3. **新建和编辑 Markdown 文档** — 不用切到 Obsidian 即可在 CodePilot 内新建 `.md` 并以源码模式编辑，兼容已有 vault。
+3. **新建和编辑 Markdown 文档** — 不用切到 Obsidian 即可在 AI Native Lab 内新建 `.md` 并以源码模式编辑，兼容已有 vault。
 4. **Artifact 中的网页一键导出长图** — HTML / JSX 预览内容可一键导出为全页 PNG（超过视口高度也要完整）。
 
 ## 状态
@@ -879,7 +879,7 @@ Response: { path, trashed: true } | { error: 'path_unsafe' | 'not_found' | 'dir_
 
 ### 5.1 ShikiThemeContext 显式主题传递 — B 静默（**已合并到现有机制，不做**）
 
-**2026-04-21 复查结论：跳过。** craft-agents 的 `ShikiThemeContext` 解决的是"深色专属主题在浅色系统模式下 fallback 错乱"——CodePilot 的 `code-block.tsx:463-467` 已经走 `useThemeFamily` + `resolveShikiThemes` 显式传 [light, dark] 给 Shiki 的 `codeToTokens`，生成 dual-theme 输出后由 CSS 变量（`:root.dark`）切换，**不依赖 DOM class 嗅探**。额外加 Provider 是重复造轮子。若未来有新主题族引入，只需扩 `theme/code-themes.ts` 即可，无需新 Context。
+**2026-04-21 复查结论：跳过。** craft-agents 的 `ShikiThemeContext` 解决的是"深色专属主题在浅色系统模式下 fallback 错乱"——AI Native Lab 的 `code-block.tsx:463-467` 已经走 `useThemeFamily` + `resolveShikiThemes` 显式传 [light, dark] 给 Shiki 的 `codeToTokens`，生成 dual-theme 输出后由 CSS 变量（`:root.dark`）切换，**不依赖 DOM class 嗅探**。额外加 Provider 是重复造轮子。若未来有新主题族引入，只需扩 `theme/code-themes.ts` 即可，无需新 Context。
 
 ### 5.1 ShikiThemeContext（原文保留作历史参考）
 

@@ -72,7 +72,7 @@ const nextConfig: NextConfig = {
   // / apps/site content into every route's .nft.json and surfacing it as
   // "next.config.ts was unexpectedly traced" warnings on `npm run build`.
   // Runtime still reads those paths — exclusion only removes them from the
-  // static NFT manifest, which CodePilot doesn't consume for deployment
+  // static NFT manifest, which AI Native Lab doesn't consume for deployment
   // (Electron ships the whole project regardless).
   outputFileTracingExcludes: {
     // Key matches both app-router routes and instrumentation.js entry.

@@ -2,7 +2,7 @@ import type { MarketingContent } from './en';
 
 export const zh: MarketingContent = {
   hero: {
-    title: 'CodePilot',
+    title: 'AI Native Lab',
     tagline: '你的多模型 AI Agent，专注',
     cta: '下载',
     secondaryCta: '查看文档',
@@ -89,8 +89,8 @@ export const zh: MarketingContent = {
     titleLight: '开始使用前你可能想了解的一切。',
     items: [
       {
-        q: 'CodePilot 真的免费吗？',
-        a: '是的。CodePilot 完全免费且开源，你只需为所选 Provider 的 API 用量付费。',
+        q: 'AI Native Lab 真的免费吗？',
+        a: '是的。AI Native Lab 完全免费且开源，你只需为所选 Provider 的 API 用量付费。',
       },
       {
         q: '支持哪些 AI 服务商？',
@@ -98,15 +98,15 @@ export const zh: MarketingContent = {
       },
       {
         q: '需要 Claude Code 订阅吗？',
-        a: '不需要。CodePilot 直接使用你自己的 API Key，无需 Claude Code 订阅。',
+        a: '不需要。AI Native Lab 直接使用你自己的 API Key，无需 Claude Code 订阅。',
       },
       {
-        q: '我的数据会发送到 CodePilot 服务器吗？',
-        a: '不会。所有 API 调用从你的电脑直接发送到 Provider，CodePilot 不会接触你的代码或对话。',
+        q: '我的数据会发送到 AI Native Lab 服务器吗？',
+        a: '不会。所有 API 调用从你的电脑直接发送到 Provider，AI Native Lab 不会接触你的代码或对话。',
       },
       {
         q: '支持哪些平台？',
-        a: 'CodePilot 支持 macOS（Apple Silicon 和 Intel）、Windows（x64）以及 Linux（x64 和 arm64）。前往 GitHub Releases 页面下载对应平台的最新版本。',
+        a: 'AI Native Lab 支持 macOS（Apple Silicon 和 Intel）、Windows（x64）以及 Linux（x64 和 arm64）。前往 GitHub Releases 页面下载对应平台的最新版本。',
       },
     ],
   },
@@ -137,7 +137,7 @@ export const zh: MarketingContent = {
     steps: [
       {
         step: '1',
-        title: '下载 CodePilot',
+        title: '下载 AI Native Lab',
         description: '支持 macOS、Windows 和 Linux。',
       },
       {
@@ -168,13 +168,13 @@ export const zh: MarketingContent = {
     viewAll: '在 GitHub 上查看所有版本',
   },
   cta: {
-    title: '准备好试试 CodePilot 了吗？',
+    title: '准备好试试 AI Native Lab 了吗？',
     description: '下载并连接你喜欢的 AI 服务商，几分钟即可开始。',
     primary: '下载',
     secondary: '阅读文档',
   },
   footer: {
-    copyright: '\u00a9 2026 CodePilot',
+    copyright: '\u00a9 2026 AI Native Lab',
     links: [
       { text: 'GitHub', url: '' },
       { text: '文档', url: '/zh/docs' },

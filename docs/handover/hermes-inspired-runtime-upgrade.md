@@ -18,7 +18,7 @@
 |------|------|------|
 | `PARALLEL_SAFE_TOOLS` | `Read`, `Glob`, `Grep`, `WebFetch`, `codepilot_memory_search/get/recent` | 只读工具白名单，始终可并行 |
 | `PATH_SCOPED_TOOLS` | `Read`, `Write`, `Edit` | 路径范围工具，路径不重叠时可并行 |
-| `NEVER_PARALLEL_TOOLS` | （空集） | 强制串行工具（Hermes 中含 `clarify`，CodePilot 暂无对应） |
+| `NEVER_PARALLEL_TOOLS` | （空集） | 强制串行工具（Hermes 中含 `clarify`，AI Native Lab 暂无对应） |
 
 `Read` 同时出现在 `PARALLEL_SAFE_TOOLS` 和 `PATH_SCOPED_TOOLS` 中——与 Hermes 的 `read_file` 一致：两次读同一路径仍串行（保守策略）。
 

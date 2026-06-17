@@ -1,12 +1,12 @@
 # 上下文管理体系优化
 
-> 参考 Claude Code 源码的上下文管理体系，与 CodePilot 对比分析，提炼可借鉴和优化的方向。
+> 参考 Claude Code 源码的上下文管理体系，与 AI Native Lab 对比分析，提炼可借鉴和优化的方向。
 > 技术实现跟踪见 [docs/exec-plans/active/context-storage-migration.md](../exec-plans/active/context-storage-migration.md)
 > 最后更新：2026-04-02（实施完成）
 
 ## 架构对比总览（实施后）
 
-| 维度 | Claude Code | CodePilot (已实现) |
+| 维度 | Claude Code | AI Native Lab (已实现) |
 |------|-------------|-------------------|
 | 上下文窗口管理 | 精细的多级 token 预算系统 | `estimateContextTokens` 粗估 + 80% 阈值自动压缩 + token 预算截断 |
 | 压缩策略 | 4 级：Micro → Session Memory → Auto Compact → Context Collapse | 3 级：Microcompaction → Auto Compact (80%) → Reactive Compact (PTL) |
@@ -55,7 +55,7 @@
    - 90% 时开始 commit 上下文、95% 时阻塞新 spawn
    - 替代 auto compact 的更精细方案
 
-**CodePilot 现状：** 依赖 SDK session resume，resume 失败时 fallback 到最近 50 条消息文本拼接。没有任何主动压缩，长对话会丢失早期上下文。
+**AI Native Lab 现状：** 依赖 SDK session resume，resume 失败时 fallback 到最近 50 条消息文本拼接。没有任何主动压缩，长对话会丢失早期上下文。
 
 **建议：**
 - Phase 1：实现 Microcompaction — 对历史消息中的工具结果按类型裁剪（最低成本最高收益）
@@ -75,7 +75,7 @@
 - 预算倒计时：跟踪 continuation 次数，检测收益递减（500 token 阈值）
 - `calculateTokenWarningState()` 返回 percentLeft + 4 级布尔状态
 
-**CodePilot 现状：** 只记录 API 返回的 `input_tokens` / `output_tokens`，不做预估，不做预算管理。
+**AI Native Lab 现状：** 只记录 API 返回的 `input_tokens` / `output_tokens`，不做预估，不做预算管理。
 
 **建议：**
 - 添加 `roughTokenEstimate(text: string)` — 4 chars ≈ 1 token 的粗估
@@ -95,7 +95,7 @@
 - Cache-breaking instrumentation 追踪缓存命中率
 - **1-hour TTL prompt cache**：付费用户和内部用户可用（vs 默认 5 min）
 
-**CodePilot 现状：** 6 层 context-assembler 拼接后整体作为 `systemPrompt.append` 传入。每次请求可能因微小变化（dashboard summary、memory hint 日期）导致整个 prompt 缓存失效。
+**AI Native Lab 现状：** 6 层 context-assembler 拼接后整体作为 `systemPrompt.append` 传入。每次请求可能因微小变化（dashboard summary、memory hint 日期）导致整个 prompt 缓存失效。
 
 **建议：**
 - 将 system prompt 分为稳定部分（人格 soul.md、基础指令）和易变部分（dashboard summary、memory hint）
@@ -107,7 +107,7 @@
 
 ### P3: 记忆搜索的时间衰减 ✅ 已有
 
-**CodePilot 现状更正：** memory-search-mcp 已实现 30 天半衰期的指数时间衰减。此项在上次分析时有误，实际已完成。
+**AI Native Lab 现状更正：** memory-search-mcp 已实现 30 天半衰期的指数时间衰减。此项在上次分析时有误，实际已完成。
 
 ---
 
@@ -119,7 +119,7 @@
 - 图片 block 上限 2000 token
 - 旧工具结果替换为 `[Old tool result content cleared]`
 
-**CodePilot 现状：** 工具结果用 `tool_use_id` 做 last-wins 去重，但没有跨轮次的清理和裁剪。
+**AI Native Lab 现状：** 工具结果用 `tool_use_id` 做 last-wins 去重，但没有跨轮次的清理和裁剪。
 
 **建议：**
 - 在构建 history fallback 时，对旧轮次的工具结果做摘要化
@@ -134,7 +134,7 @@
 - `percentLeft` 百分比计算
 - 用户可手动触发 `/compact` 命令
 
-**CodePilot 现状：** 用户对 context 使用情况完全无感知。
+**AI Native Lab 现状：** 用户对 context 使用情况完全无感知。
 
 ---
 
@@ -164,7 +164,7 @@
 5. **重注入附件剥离**
    - `stripReinjectedAttachments()` — 移除 compact 后会重新注入的 skill_discovery/skill_listing 附件
 
-**CodePilot 现状：** `route.ts` 中只做了简单的 `role + content` 映射，无任何归一化。当 SDK resume 失败时，fallback 的 50 条消息只提取文本 block（跳过 tool_use/tool_result），这算是一种粗糙的归一化。
+**AI Native Lab 现状：** `route.ts` 中只做了简单的 `role + content` 映射，无任何归一化。当 SDK resume 失败时，fallback 的 50 条消息只提取文本 block（跳过 tool_use/tool_result），这算是一种粗糙的归一化。
 
 **建议：**
 - 实现基本的消息归一化函数
@@ -184,7 +184,7 @@
    - JSON/JSONL/JSONC 内容 2 bytes/token（密度更高）
    - `roughTokenCountEstimationForMessages()` 对消息数组求和
 
-**CodePilot 可以先实现第 3 级粗估**，成本几乎为零：
+**AI Native Lab 可以先实现第 3 级粗估**，成本几乎为零：
 ```typescript
 function roughTokenEstimate(text: string, isJson = false): number {
   const bytesPerToken = isJson ? 2 : 4;
@@ -205,7 +205,7 @@ function roughTokenEstimate(text: string, isJson = false): number {
 5. **Task 恢复** — 如果有 local agent task state，重新注入
 6. **Session 元数据恢复** — `reAppendSessionMetadata()` 重新注入 session 上下文
 
-**启发：** CodePilot 未来实现 compact 时，需要考虑 compact 后重新注入关键上下文（dashboard config、最近的 MCP 工具状态等）。
+**启发：** AI Native Lab 未来实现 compact 时，需要考虑 compact 后重新注入关键上下文（dashboard config、最近的 MCP 工具状态等）。
 
 ---
 
@@ -224,7 +224,7 @@ function DANGEROUS_uncachedSystemPromptSection(content: string): string
 - `/clear` 和 `/compact` 时通过 `clearBetaHeaderLatches()` 清理
 - 这让 Claude Code 能精确控制哪些部分可以跨请求缓存
 
-**CodePilot 对比：** context-assembler 每次都完整重算所有 6 层。虽然大部分内容（soul.md、claude.md）在文件没变时是一样的，但拼接方式意味着 API 层面很难命中 prompt cache。
+**AI Native Lab 对比：** context-assembler 每次都完整重算所有 6 层。虽然大部分内容（soul.md、claude.md）在文件没变时是一样的，但拼接方式意味着 API 层面很难命中 prompt cache。
 
 **建议：**
 - 分离 context-assembler 为 `getCachedLayers()` 和 `getVolatileLayers()`
@@ -243,7 +243,7 @@ function DANGEROUS_uncachedSystemPromptSection(content: string): string
 5. **PTL 回退裁剪** — compact 本身 PTL 时，按 API-round 分组从头部裁剪
 6. **熔断** — 连续 3 次失败后停止自动压缩，避免无限循环
 
-**CodePilot 现状：** 完全没有 PTL 处理。如果上下文超出窗口，API 直接报错，用户无法操作。
+**AI Native Lab 现状：** 完全没有 PTL 处理。如果上下文超出窗口，API 直接报错，用户无法操作。
 
 ---
 
@@ -260,13 +260,13 @@ function DANGEROUS_uncachedSystemPromptSection(content: string): string
 
 支持 `@include` 指令（带循环引用检测）。
 
-**CodePilot 对比：** 使用 `claude.md` + `soul.md` + `user.md` 三文件体系，更结构化但只在 assistant workspace 内生效。普通项目会话只有 session 级别的 system_prompt，没有项目级 CLAUDE.md 发现机制。
+**AI Native Lab 对比：** 使用 `claude.md` + `soul.md` + `user.md` 三文件体系，更结构化但只在 assistant workspace 内生效。普通项目会话只有 session 级别的 system_prompt，没有项目级 CLAUDE.md 发现机制。
 
 **启发：** 对于非 assistant-workspace 的普通项目会话，可以考虑支持从 `working_directory` 中自动发现 CLAUDE.md。
 
 ---
 
-## CodePilot 已有的优势（无需改动）
+## AI Native Lab 已有的优势（无需改动）
 
 | 能力 | 说明 |
 |------|------|
@@ -366,7 +366,7 @@ Phase 5 (高级优化) — ⏭ 暂不实施
 
 ## 总结
 
-CodePilot 在**记忆持久化**和**人格体系**上做得比 Claude Code 更精细，在**MCP 按需加载**上有独特优势。但在**上下文窗口管理**这个核心问题上几乎是空白。
+AI Native Lab 在**记忆持久化**和**人格体系**上做得比 Claude Code 更精细，在**MCP 按需加载**上有独特优势。但在**上下文窗口管理**这个核心问题上几乎是空白。
 
 **Claude Code 最值得学习的 5 件事：**
 

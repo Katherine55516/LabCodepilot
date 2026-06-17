@@ -4,11 +4,11 @@
  * Vendor-GSD prepare script.
  *
  * 读 vendor/gsd-source/（gsd-build/get-shit-done 固定快照），输出
- * vendor/gsd-bundle/ —— CodePilot 打包用的内置 GSD 插件资源。
+ * vendor/gsd-bundle/ —— AI Native Lab 打包用的内置 GSD 插件资源。
  *
  * 关键转换（与 GSD 官方 installer 在 Claude Code 上的行为一致）：
  *   1. commands/gsd/<name>.md 平面化为 commands/gsd-<name>.md
- *      —— 因为 CodePilot 扫描器（src/app/api/skills/route.ts:266-275）的子目录
+ *      —— 因为 AI Native Lab 扫描器（src/app/api/skills/route.ts:266-275）的子目录
  *         会拼成 colon 形式（commands/gsd/debug.md -> /gsd:debug）。
  *         我们要的是 hyphen 形式 /gsd-debug，所以必须平面化。
  *   2. 全文 \bgsd:[a-z][a-z0-9-]*\b -> gsd-...
@@ -312,7 +312,7 @@ function main() {
     displayName: "GSD (Get-Shit-Done)",
     description:
       "Get-Shit-Done meta-prompting system by TÂCHES, vendored from gsd-build/get-shit-done (MIT).",
-    // `builtIn: true` signals to CodePilot's /api/skills scanner that this
+    // `builtIn: true` signals to AI Native Lab's /api/skills scanner that this
     // plugin is bundled inside the desktop app and its commands should be
     // treated as loaded — i.e. surfaced in the slash-command popover even
     // though the Claude Code SDK didn't actively load it. Without this

@@ -113,7 +113,7 @@ describe('loadProjectMcpServers — explicit project .mcp.json injection', () =>
   // other 4 tests in this suite exercise the surrounding file loading /
   // override / filter behavior. Tracked as tech debt; placeholder resolution
   // is otherwise covered via the mcpServerOverrides parity test below.
-  (process.env.CI ? it.skip : it)('resolves ${...} env placeholders against CodePilot DB settings', async () => {
+  (process.env.CI ? it.skip : it)('resolves ${...} env placeholders against AI Native Lab DB settings', async () => {
     writeProjectMcpJson({
       mcpServers: {
         'team-mcp-with-token': {
@@ -126,7 +126,7 @@ describe('loadProjectMcpServers — explicit project .mcp.json injection', () =>
       },
     });
 
-    // Seed CodePilot DB with the secret value
+    // Seed AI Native Lab DB with the secret value
     const { setSetting } = await import('@/lib/db');
     setSetting('team_api_token', 'sk-team-secret');
 
@@ -136,7 +136,7 @@ describe('loadProjectMcpServers — explicit project .mcp.json injection', () =>
     assert.ok(servers);
     assert.equal(servers!['team-mcp-with-token'].env?.FIXED_VAR, 'literal-value', 'literal values pass through');
     assert.equal(servers!['team-mcp-with-token'].env?.TEAM_API_TOKEN, 'sk-team-secret',
-      '${...} placeholder must be resolved against CodePilot DB so team .mcp.json files can reference user-managed secrets');
+      '${...} placeholder must be resolved against AI Native Lab DB so team .mcp.json files can reference user-managed secrets');
   });
 
   it('resolves missing placeholder to empty string (matches loadAndMerge semantics)', async () => {
@@ -178,7 +178,7 @@ describe('loadProjectMcpServers — explicit project .mcp.json injection', () =>
 // mcpServerOverrides — UI-persisted enable/disable state must apply
 // ────────────────────────────────────────────────────────────────
 //
-// CodePilot's MCP Manager UI stores per-server enable/disable as
+// AI Native Lab's MCP Manager UI stores per-server enable/disable as
 // `mcpServerOverrides` in ~/.claude/settings.json. The original cached
 // loader (loadAndMerge) already applies these. The new per-cwd loader must
 // match — otherwise DB-provider sessions would silently re-enable a server

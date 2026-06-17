@@ -4,7 +4,7 @@
 >
 > 创建时间：2026-06-15 ｜ 状态：📋 待实现（已完成全链路实测验证）
 >
-> 本文覆盖 **CodePilot 桌面端（Electron + Next.js）** 的全部改动。配套的"换临时 token"后端接口在**另一个项目**（`code-agent.ai-native-lab.com`），见上面的服务端文档。
+> 本文覆盖 **AI Native Lab 桌面端（Electron + Next.js）** 的全部改动。配套的"换临时 token"后端接口在**另一个项目**（`code-agent.ai-native-lab.com`），见上面的服务端文档。
 
 ---
 
@@ -692,7 +692,7 @@ mac:
   icon: build/icon.icns
   # …现有字段…
   extendInfo:
-    NSMicrophoneUsageDescription: "CodePilot 需要使用麦克风，以支持语音输入（将你的说话实时转写为文字）。"
+    NSMicrophoneUsageDescription: "AI Native Lab 需要使用麦克风，以支持语音输入（将你的说话实时转写为文字）。"
 ```
 
 ---

@@ -10,7 +10,7 @@
 
 ## 0. 背景与职责边界（必读）
 
-CodePilot 桌面端要做"语音输入"：用户说话 → 实时转文字进输入框。识别用**阿里云百炼 `qwen3-asr-flash-realtime`**（WebSocket 实时 ASR）。
+AI Native Lab 桌面端要做"语音输入"：用户说话 → 实时转文字进输入框。识别用**阿里云百炼 `qwen3-asr-flash-realtime`**（WebSocket 实时 ASR）。
 
 - 桌面端**直连百炼** WebSocket 传音频、收文字（音频不过你们服务器）。
 - 但百炼 WS 握手要带 `Authorization: Bearer <key>`，而**真 `DASHSCOPE_API_KEY` 绝不能下发到 600+ 客户端**（会被扒出盗刷）。

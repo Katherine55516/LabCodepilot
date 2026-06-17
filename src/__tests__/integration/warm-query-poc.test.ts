@@ -77,7 +77,7 @@ test('warm-query POC — prewarm reduces first-token latency by ≥30% (p50)', {
   }
 
   // includePartialMessages must be true for stream_event deltas to be
-  // emitted (SDK typings require it; CodePilot's production code also
+  // emitted (SDK typings require it; AI Native Lab's production code also
   // sets it). Without this, measureLatencies falls through to the final
   // assistant message, which is time-to-message not time-to-first-text.
   const baseOptions = {

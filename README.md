@@ -1,4 +1,4 @@
-<img src="docs/icon-readme.png" width="32" height="32" alt="CodePilot" style="vertical-align: middle; margin-right: 8px;" /> CodePilot
+<img src="docs/icon-readme.png" width="32" height="32" alt="AI Native Lab" style="vertical-align: middle; margin-right: 8px;" /> AI Native Lab
 ===
 
 **A multi-model AI agent desktop client** -- connect any AI provider, extend with MCP & skills, control from your phone, and let your assistant learn your workflow.
@@ -11,7 +11,7 @@
 
 [中文文档](./README_CN.md) | [日本語](./README_JA.md)
 
-![CodePilot](https://github.com/user-attachments/assets/9750450a-9f6f-49ce-acd4-c623a4e24281)
+![AI Native Lab](https://github.com/user-attachments/assets/9750450a-9f6f-49ce-acd4-c623a4e24281)
 
 ---
 
@@ -31,7 +31,7 @@ Or visit the [Releases](https://github.com/op7418/CodePilot/releases) page for a
 
 ---
 
-## Why CodePilot
+## Why AI Native Lab
 
 ### Multi-provider, one interface
 
@@ -48,7 +48,7 @@ Connect to **17+ AI providers** out of the box. Switch providers and models mid-
 
 ### Beyond coding — a full AI agent
 
-CodePilot started as a coding tool but has grown into a **general-purpose AI agent desktop**:
+AI Native Lab started as a coding tool but has grown into a **general-purpose AI agent desktop**:
 
 - **Assistant Workspace** — Persona files, persistent memory, onboarding flows, and daily check-ins. Your assistant learns your preferences and adapts over time.
 - **Generative UI** — AI can create interactive dashboards, charts, and visual widgets rendered live in-app.
@@ -73,7 +73,7 @@ CodePilot started as a coding tool but has grown into a **general-purpose AI age
 ### Path A: Download a release (most users)
 
 1. Download the installer for your platform from the [Download](#download) section above
-2. Launch CodePilot
+2. Launch AI Native Lab
 3. **Configure a Provider** in **Settings > Providers** — add your API key for any supported provider
 4. Start a conversation
 
@@ -88,7 +88,7 @@ CodePilot started as a coding tool but has grown into a **general-purpose AI age
 
 ```bash
 git clone https://github.com/op7418/CodePilot.git
-cd CodePilot
+cd AI Native Lab
 npm install
 npm run dev              # browser mode at http://localhost:3000
 # -- or --
@@ -141,9 +141,9 @@ npm run electron:dev     # full desktop app
 
 ## First Launch
 
-1. **Configure a Provider** — Go to **Settings > Providers** and add credentials for the provider you want to use. CodePilot includes presets for all major providers — just pick one and enter your API key.
+1. **Configure a Provider** — Go to **Settings > Providers** and add credentials for the provider you want to use. AI Native Lab includes presets for all major providers — just pick one and enter your API key.
 2. **Create a conversation** — Pick a working directory, select a mode (Code / Plan / Ask), and choose a model.
-3. **Set up Assistant Workspace** (optional) — Go to **Settings > Assistant**, choose a workspace directory, and enable Onboarding. CodePilot creates `soul.md`, `user.md`, `claude.md`, and `memory.md` at the workspace root.
+3. **Set up Assistant Workspace** (optional) — Go to **Settings > Assistant**, choose a workspace directory, and enable Onboarding. AI Native Lab creates `soul.md`, `user.md`, `claude.md`, and `memory.md` at the workspace root.
 4. **Add MCP servers** (optional) — Go to the **MCP** page in the sidebar to add and manage MCP servers. Custom skills are managed on the separate **Skills** page.
 5. **Install Claude Code CLI** (optional) — For advanced features like file editing and terminal commands, install the CLI: `npm install -g @anthropic-ai/claude-code`
 
@@ -156,13 +156,13 @@ macOS builds are code-signed with a Developer ID certificate but not notarized, 
 <details>
 <summary>macOS: Gatekeeper warning on first launch</summary>
 
-**Option 1** -- Right-click `CodePilot.app` in Finder > Open > confirm.
+**Option 1** -- Right-click `AI Native Lab.app` in Finder > Open > confirm.
 
 **Option 2** -- System Settings > Privacy & Security > scroll to Security > click Open Anyway.
 
 **Option 3** -- Run in Terminal:
 ```bash
-xattr -cr /Applications/CodePilot.app
+xattr -cr /Applications/AI Native Lab.app
 ```
 </details>
 
@@ -205,7 +205,7 @@ xattr -cr /Applications/CodePilot.app
 <details>
 <summary>Do I need the Claude Code CLI?</summary>
 
-No. You can use CodePilot with any supported provider (OpenRouter, Zhipu GLM, Volcengine, Ollama, etc.) without the Claude Code CLI. The CLI is only needed if you want Claude to directly edit files, run terminal commands, or use git operations on your machine. For chat and assistant features, just configure a provider and start a conversation.
+No. You can use AI Native Lab with any supported provider (OpenRouter, Zhipu GLM, Volcengine, Ollama, etc.) without the Claude Code CLI. The CLI is only needed if you want Claude to directly edit files, run terminal commands, or use git operations on your machine. For chat and assistant features, just configure a provider and start a conversation.
 </details>
 
 <details>
@@ -217,19 +217,19 @@ Verify the API key is valid and the endpoint is reachable. Some providers (Bedro
 <details>
 <summary>What is the difference between <code>npm run dev</code> and <code>npm run electron:dev</code>?</summary>
 
-`npm run dev` starts only the Next.js dev server -- you use CodePilot in your browser at `http://localhost:3000`. `npm run electron:dev` starts both Next.js and the Electron shell, giving you the full desktop app experience with native window controls.
+`npm run dev` starts only the Next.js dev server -- you use AI Native Lab in your browser at `http://localhost:3000`. `npm run electron:dev` starts both Next.js and the Electron shell, giving you the full desktop app experience with native window controls.
 </details>
 
 <details>
 <summary>Where are the Assistant Workspace files?</summary>
 
-When you set up a workspace, CodePilot creates four Markdown files at the **workspace root directory**: `soul.md` (personality), `user.md` (user profile), `claude.md` (rules), and `memory.md` (long-term notes). State tracking (onboarding progress, check-in dates) is stored in the `.assistant/` subdirectory. Daily memories go to `memory/daily/`.
+When you set up a workspace, AI Native Lab creates four Markdown files at the **workspace root directory**: `soul.md` (personality), `user.md` (user profile), `claude.md` (rules), and `memory.md` (long-term notes). State tracking (onboarding progress, check-in dates) is stored in the `.assistant/` subdirectory. Daily memories go to `memory/daily/`.
 </details>
 
 <details>
 <summary>Bridge requires additional setup per platform</summary>
 
-Each Bridge channel (Telegram, Feishu, Discord, QQ, WeChat) requires its own bot token or app credentials. Go to the **Bridge** page in the sidebar to configure channels. You will need to create a bot on the target platform first and provide the token to CodePilot.
+Each Bridge channel (Telegram, Feishu, Discord, QQ, WeChat) requires its own bot token or app credentials. Go to the **Bridge** page in the sidebar to configure channels. You will need to create a bot on the target platform first and provide the token to AI Native Lab.
 </details>
 
 ---

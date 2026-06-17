@@ -35,7 +35,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // One-time duplicate map: sdk_session_id → existing CodePilot session id.
+    // One-time duplicate map: sdk_session_id → existing AI Native Lab session id.
     const dedupeMap = new Map<string, string>();
     for (const s of getAllSessions()) {
       if (s.sdk_session_id) dedupeMap.set(s.sdk_session_id, s.id);

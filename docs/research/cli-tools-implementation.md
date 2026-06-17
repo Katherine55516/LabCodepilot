@@ -633,7 +633,7 @@ async execute({ url, format = 'markdown' }) {
 **推荐方案：D（MCP）+ A（Anthropic 原生）**
 - 当使用 Anthropic 模型时，利用 `web_search` server tool（provider-defined tool）
 - 其他模型通过 MCP 服务器（如 Exa MCP）提供搜索能力
-- 这与 CodePilot 的多模型定位一致
+- 这与 AI Native Lab 的多模型定位一致
 
 ---
 
@@ -794,7 +794,7 @@ src/lib/tools/
 **推荐：直接用 AI SDK `tool()` + 闭包注入上下文**
 
 理由：
-- CodePilot 已经在用 AI SDK 的 streamText
+- AI Native Lab 已经在用 AI SDK 的 streamText
 - 减少一层抽象
 - OpenCode 的 Tool.define 主要为了 init 阶段的异步初始化，我们可以在 createTools() 中处理
 
@@ -819,9 +819,9 @@ Claude Code 和 OpenCode 都将工具 description 放在 `.txt` 文件中单独�
 
 ---
 
-## 8. 与现有 CodePilot 代码的关系
+## 8. 与现有 AI Native Lab 代码的关系
 
-CodePilot 当前有 `src/lib/cli-tools-mcp.ts`，这是 CLI 工具**管理**系统（安装/注册/更新系统上的命令行工具），不是 Agent 的内置工具。
+AI Native Lab 当前有 `src/lib/cli-tools-mcp.ts`，这是 CLI 工具**管理**系统（安装/注册/更新系统上的命令行工具），不是 Agent 的内置工具。
 
 自建的 Agent 工具系统是全新模块，与 cli-tools-mcp 无关。两者的区别：
 - **cli-tools-mcp**：管理用户机器上安装的命令行工具（brew install xxx 等）

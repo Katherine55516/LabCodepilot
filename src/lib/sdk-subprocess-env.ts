@@ -43,7 +43,7 @@ export interface SdkSubprocessSetup {
  *   returns a pass-through real-HOME setup. cc-switch settings.json supplies
  *   credentials normally.
  *
- * In both cases, the returned env has CodePilot's PATH expansion, Git Bash
+ * In both cases, the returned env has AI Native Lab's PATH expansion, Git Bash
  * detection (Windows), and the provider's auth/baseUrl/model env applied via
  * `toClaudeCodeEnv()`.
  */
@@ -61,7 +61,7 @@ export function prepareSdkSubprocessEnv(resolved: ResolvedProvider): SdkSubproce
   // find user-installed CLIs (npm global, brew, bun, etc.).
   sdkEnv.PATH = getExpandedPath();
 
-  // Drop CLAUDECODE so a CodePilot launched from inside a `claude` session
+  // Drop CLAUDECODE so a AI Native Lab launched from inside a `claude` session
   // doesn't trip the SDK's "nested session" guard.
   delete sdkEnv.CLAUDECODE;
 

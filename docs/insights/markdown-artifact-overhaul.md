@@ -16,7 +16,7 @@
 3. **新建和编辑 Markdown 文档** — 不用切到 Obsidian 即可新建 `.md` 并以源码模式编辑。
 4. **Artifact 一键导出长图** — HTML / JSX 预览内容可导出为全页 PNG。
 
-这四条对产品定位的启示：**CodePilot 的 Artifact 不是 Claude 那种"生成一次就扔"的一次性预览，而是和文件系统强绑定的持续编辑面板**。这个差异支配了后续所有设计。
+这四条对产品定位的启示：**AI Native Lab 的 Artifact 不是 Claude 那种"生成一次就扔"的一次性预览，而是和文件系统强绑定的持续编辑面板**。这个差异支配了后续所有设计。
 
 ---
 
@@ -32,7 +32,7 @@
 
 **选 (b)。理由：**
 - 自动弹是"静默 + 不可逆 + 跨面板"的三重副作用叠加。用户可能正在看其他面板内容，突然弹出会打断注意力。
-- Claude 的 Artifact 是单轮对话产物，弹了就弹；CodePilot 的场景是多轮迭代，AI 一个 session 可能改十几个文件，每次都自动弹等于洗屏。
+- Claude 的 Artifact 是单轮对话产物，弹了就弹；AI Native Lab 的场景是多轮迭代，AI 一个 session 可能改十几个文件，每次都自动弹等于洗屏。
 - 卡片提供一个**决策点**：用户看到"AI 修改了 App.tsx"后，自己决定"要不要现在看"。卡片可关闭、可延后点、可忽略，都是可逆的。
 
 **落地形态：** `DiffSummary` 原本是 MessageItem 里一行小字"Modified 3 files ›"，升级为每个可预览文件一张 Artifact 卡片（文件名 + Created/Modified chip + **Open preview** 按钮）。非可预览文件（`.ts`/`.yaml`）归入底部小字行 "Also modified: foo.ts"，不占卡片空间。
@@ -113,7 +113,7 @@
 **选 (c)。理由：**
 - 我们已经有 `widget:export-png`（Dashboard widget 导出用）。同一套 hidden BrowserWindow + 独立 session partition + data URL 加载的配方，把 4000px 上限去掉就能做长图。
 - (a) 增加二进制依赖 + 打包复杂度。
-- (b) 数据跑出本机是隐私敏感问题（用户可能在导出内含敏感信息的 HTML），违背 CodePilot 的"本地优先"定位。
+- (b) 数据跑出本机是隐私敏感问题（用户可能在导出内含敏感信息的 HTML），违背 AI Native Lab 的"本地优先"定位。
 - 隐藏窗口 + `webContents.debugger` + CDP `Page.captureScreenshot({ captureBeyondViewport: true })` 一次 API 拿全页，无需拼接。
 
 **TSX 导出的缺席：** 第一版只对 `.html`/`.htm` 开放导出按钮。因为把 Sandpack 渲染结果转成能送进 BrowserWindow 的 HTML 需要"Sandpack files → esbuild → 独立 HTML"这条链路，属于产品决策 5 的"虚拟文件系统"范畴，留作后续。
@@ -150,7 +150,7 @@
 
 - Phase 3 长图导出是 Electron IPC，dev server 模式不可用（`artifact.exportLongShot` 在 web 环境是 undefined）。
 - Web 环境下按钮点击 alert "unavailable"。
-- 这不是 bug，是 feature：CodePilot 本身是 Electron app，dev server 是开发便利。
+- 这不是 bug，是 feature：AI Native Lab 本身是 Electron app，dev server 是开发便利。
 
 ### 约束 2：Worktree 下 dev server 需要独立 node_modules
 

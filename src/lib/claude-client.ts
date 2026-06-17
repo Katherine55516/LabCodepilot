@@ -23,7 +23,7 @@ import { roughTokenEstimate } from './context-estimator';
 import { getSetting, updateSdkSessionId, createPermissionRequest } from './db';
 import { resolveForClaudeCode } from './provider-resolver';
 import { sanitizeClaudeModelOptions } from './claude-model-options';
-// platform.ts CLI binary lookup helpers were removed when CodePilot switched to
+// platform.ts CLI binary lookup helpers were removed when AI Native Lab switched to
 // the bundled platform-specific @anthropic-ai/claude-agent-sdk subpackage
 // (cli.js no longer needs to be resolved against the user's local install).
 import { notifyPermissionRequest, notifyGeneric } from './telegram-bot';
@@ -81,7 +81,7 @@ function sanitizeEnv(env: Record<string, string>): Record<string, string> {
 }
 
 /**
- * @deprecated Local CLI path lookup is no longer used since CodePilot switched
+ * @deprecated Local CLI path lookup is no longer used since AI Native Lab switched
  * to the bundled platform-specific @anthropic-ai/claude-agent-sdk subpackage.
  * Kept as a no-op for backwards compatibility with /api/claude-upgrade and
  * /api/claude-status/invalidate which still call this. Those routes will be
@@ -564,9 +564,9 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
           // CLAUDE.md, etc.). For DB providers settingSources is ['user'] only;
           // for env mode it's ['user', 'project', 'local']. See provider-resolver.ts.
           settingSources: resolved.settingSources as Options['settingSources'],
-          // Auto-allow all CodePilot built-in MCPs. These are host-defined
+          // Auto-allow all AI Native Lab built-in MCPs. These are host-defined
           // in-process servers (createSdkMcpServer in claude-client.ts below)
-          // that ship with CodePilot — they're not third-party plugins and
+          // that ship with AI Native Lab — they're not third-party plugins and
           // don't need per-tool user approval. Without this list, SDK's
           // default 'acceptEdits' mode prompts the user for each mcp__codepilot-*
           // invocation, which is the regression users reported after we
@@ -607,7 +607,7 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
           };
         }
 
-        // MCP servers: pass explicitly provided config (e.g. from CodePilot UI's
+        // MCP servers: pass explicitly provided config (e.g. from AI Native Lab UI's
         // ${...}-resolved servers + in-process SDK MCPs like memory/widget/...).
         //
         // User-scope MCP config from `~/.claude.json.mcpServers` is auto-loaded
@@ -633,7 +633,7 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
           const projectMcps = loadProjectMcpServers(resolvedWorkingDirectory.path);
           if (projectMcps) {
             const sdkProjectMcps = toSdkMcpConfig(projectMcps);
-            // Existing entries (CodePilot UI / placeholder-managed) take
+            // Existing entries (AI Native Lab UI / placeholder-managed) take
             // precedence on name collision — they're the user's currently-
             // chosen config layer, project file is the team default.
             queryOptions.mcpServers = {
@@ -817,7 +817,7 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
         }
 
         // Plugins: loaded by the SDK itself via enabledPlugins in ~/.claude/settings.json.
-        // CodePilot does NOT explicitly inject plugins — the SDK reads settingSources
+        // AI Native Lab does NOT explicitly inject plugins — the SDK reads settingSources
         // ['user', 'project', 'local'] and resolves enabledPlugins on its own,
         // ensuring parity with Claude CLI.
 
@@ -859,9 +859,9 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
 
         // Permission handler: sends SSE event and waits for user response
         queryOptions.canUseTool = async (toolName, input, opts) => {
-          // Auto-approve CodePilot's own in-process MCP tools — they are internal
+          // Auto-approve AI Native Lab's own in-process MCP tools — they are internal
           // and the user has already opted in by enabling the relevant mode.
-          // Auto-approve CodePilot's own in-process MCP tools — they are internal
+          // Auto-approve AI Native Lab's own in-process MCP tools — they are internal
           // and the user has already opted in by enabling the relevant mode.
           // Note: SDK prefixes MCP tool names with mcp__<server>__, so we check
           // both bare and prefixed names.

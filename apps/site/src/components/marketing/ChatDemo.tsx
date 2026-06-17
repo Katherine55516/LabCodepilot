@@ -119,7 +119,7 @@ const WORKSPACE_FILES = [
 /*
  * The demo uses the real product's purple primary color via CSS custom
  * properties scoped to the demo container, so it visually matches the
- * actual CodePilot app regardless of the site's blue brand primary.
+ * actual AI Native Lab app regardless of the site's blue brand primary.
  */
 const DEMO_THEME_VARS = {
   '--primary': 'oklch(0.546 0.245 262.881)',

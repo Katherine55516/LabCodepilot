@@ -2,7 +2,7 @@
 
 ## 核心思路
 
-让用户通过 Telegram、Discord、飞书、微信等 IM 通道远程操控 CodePilot 中的 Claude 会话。Bridge 复用现有 `streamClaude()` 管线，在服务端直接消费 SSE 流，而不是依赖浏览器标签页。
+让用户通过 Telegram、Discord、飞书、微信等 IM 通道远程操控 AI Native Lab 中的 Claude 会话。Bridge 复用现有 `streamClaude()` 管线，在服务端直接消费 SSE 流，而不是依赖浏览器标签页。
 
 ## 目录结构
 
@@ -219,7 +219,7 @@ Telegram 消息 → TelegramAdapter.pollLoop()
 
 | 表 | 用途 |
 |---|------|
-| channel_bindings | IM 地址 → CodePilot session 映射 |
+| channel_bindings | IM 地址 → AI Native Lab session 映射 |
 | channel_offsets | 轮询 offset 持久化（key 为 bot user ID，通过 getMe API 获取） |
 | channel_dedupe | 出站消息幂等去重 |
 | channel_outbound_refs | 平台消息 ID 映射 |

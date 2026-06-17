@@ -43,7 +43,7 @@ test.describe('Chat Page', () => {
       // heading level has shifted between h2 / h3 in recent layout work; use
       // role=heading so the level stops being load-bearing.
       await expect(
-        page.getByRole('heading', { name: /(CodePilot|对话)/i }).first(),
+        page.getByRole('heading', { name: /(AI Native Lab|对话)/i }).first(),
       ).toBeVisible();
       await expect(
         page.locator('p').filter({ hasText: /(Start a conversation|开始与)/i }).first(),

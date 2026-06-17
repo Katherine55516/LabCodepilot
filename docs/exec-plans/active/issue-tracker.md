@@ -103,7 +103,7 @@
   - 工作目录记忆（`codepilot:last-working-directory`）
   - 各类 announcement / banner dismiss 状态（已迁移 DB 的不受影响，未迁移的也不再丢）
 - **不解决的边缘情况：**
-  - 用户同时跑 8+ 个 CodePilot 实例 → 第 9 个会 fallback 到随机端口（极不常见）
+  - 用户同时跑 8+ 个 AI Native Lab 实例 → 第 9 个会 fallback 到随机端口（极不常见）
   - 系统上其他程序占用 `47823-47830` 全部 8 个端口（极不常见）
   - 这两种情况下都会 console.warn 提示用户 settings 可能不持久
 
@@ -122,7 +122,7 @@
 - **未修原因：**
   - 用户 #471 报告时间 2026-04-12，正是 v0.49.0 发布日；可能是 v0.49.0 早期 bug 被 v0.50.x 修了
   - 维护者两台机器 v0.50.1 复测 Generative UI 都正常，反向佐证不是当前代码 bug
-  - 第三方某些较弱模型（如部分 GLM/Kimi 变体）确实可能对 `show-widget` 格式遵循度低，但这是**模型能力问题**而非 CodePilot 代码 bug
+  - 第三方某些较弱模型（如部分 GLM/Kimi 变体）确实可能对 `show-widget` 格式遵循度低，但这是**模型能力问题**而非 AI Native Lab 代码 bug
 - **下一步:** 在 issue #471 回复请用户升 v0.50.1+ 重测；如果仍现，索取具体 provider/model 配置
 
 #### B-006 会话切换模型重置
@@ -220,7 +220,7 @@
 - **Issue:** [#501](https://github.com/op7418/CodePilot/issues/501)
 - **状态:** 🟡 非代码缺陷 + 有规避方案未落地（2026-04-16 诊断）
 - **现象:** v0.50.3 上部分 macOS 用户启动或点"新对话"时，系统弹 `Cannot find keychain to store 'apple'` 对话框；仅"取消/还原为默认"两选项，点取消后反复弹（3-5 次），不影响最终功能但体验阻塞
-- **维护者环境不复现**（两台机器均未触发）；报告者（vivi2886）使用第三方 API Key，CodePilot DB 无 OAuth token 记录也仍触发
+- **维护者环境不复现**（两台机器均未触发）；报告者（vivi2886）使用第三方 API Key，AI Native Lab DB 无 OAuth token 记录也仍触发
 - **根因诊断:**
   - 我们自己的代码**零处**调用 keychain / safeStorage / keytar（grep `'apple'` / `safeStorage` / `keytar` 于 `src/` 和 `electron/` 均无命中；仅 `claude-client.ts:1723` 的注释和 `main.ts:744` 的 CSS font-family 含 "apple"）
   - "apple" 这个 service name 是 **Electron 底层 Chromium 在 macOS 访问 login keychain 的默认行为**（Chromium 用 keychain 加密 cookie / password manager 数据）

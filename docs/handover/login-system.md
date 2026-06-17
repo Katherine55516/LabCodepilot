@@ -4,7 +4,7 @@
 >
 > 关联执行计划：[docs/exec-plans/active/login-system.md](../exec-plans/active/login-system.md)
 
-CodePilot 的远程账号登录体系。用户在系统浏览器完成 OAuth 后，服务端把 `ModelConfig[]` 推下来，镜像到 `api_providers` 表（`source='managed'`），与 BYOK provider 并存。**与现有 OpenAI OAuth 模块（src/lib/openai-oauth*.ts）完全隔离**。
+AI Native Lab 的远程账号登录体系。用户在系统浏览器完成 OAuth 后，服务端把 `ModelConfig[]` 推下来，镜像到 `api_providers` 表（`source='managed'`），与 BYOK provider 并存。**与现有 OpenAI OAuth 模块（src/lib/openai-oauth*.ts）完全隔离**。
 
 ## 架构
 

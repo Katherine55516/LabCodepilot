@@ -72,9 +72,9 @@ description: 配置飞书 / Lark 桥接。
 
 ### 国际版（Lark）
 
-流程与国内版相同，但在 [Lark Developer](https://open.larksuite.com) 上操作。在 CodePilot 配置时选择域名为 **Lark**。
+流程与国内版相同，但在 [Lark Developer](https://open.larksuite.com) 上操作。在 AI Native Lab 配置时选择域名为 **Lark**。
 
-## 在 CodePilot 中配置
+## 在 AI Native Lab 中配置
 
 1. 点击侧边栏 **桥接**，切换到 **飞书** 页面
 2. 选择域名：**飞书**（国内版）或 **Lark**（国际版）
@@ -134,10 +134,10 @@ description: 配置飞书 / Lark 桥接。
 
 1. 确认已在 **事件与回调** 中添加了 `card.action.trigger` 回调
 2. 确认使用的是 **长连接模式**（WSClient），非 HTTP Webhook 模式
-3. 检查 CodePilot 日志中是否有 `[feishu/gateway] handleEventData type: card` 输出
+3. 检查 AI Native Lab 日志中是否有 `[feishu/gateway] handleEventData type: card` 输出
 
 ### 流式卡片不显示
 
 1. 确认已申请 `cardkit:card:write` 和 `cardkit:card:read` 权限
 2. 确认应用已重新发布（权限变更后需要重新发布）
-3. 检查 CodePilot 日志中是否有 `[card-controller]` 相关输出
+3. 检查 AI Native Lab 日志中是否有 `[card-controller]` 相关输出

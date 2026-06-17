@@ -1,6 +1,6 @@
 # 工具调用 UX 竞品调研 — Claude Code / CraftAgent / Opencode / Codex
 
-> 目标：调研四个主流 AI Coding 客户端的工具调用展示与交互设计，提炼 CodePilot 可借鉴的优化方向。
+> 目标：调研四个主流 AI Coding 客户端的工具调用展示与交互设计，提炼 AI Native Lab 可借鉴的优化方向。
 > 关联文档：[thinking display 实现方案](./tool-call-thinking-display.md)
 
 ## 调研对象
@@ -41,7 +41,7 @@ function heading() {
 
 **CraftAgent 的 intermediate text**：不依赖 extended thinking API，利用模型在工具调用间的普通文本输出作为 chain-of-thought 显示。这是一个 fallback 方案——当 thinking 不可用时仍能提供推理可见性。
 
-### 1.3 对 CodePilot 的建议
+### 1.3 对 AI Native Lab 的建议
 
 在现有 thinking display 方案基础上增强：
 
@@ -62,7 +62,7 @@ function heading() {
 | **Opencode** | **ToolRegistry 注册表模式**，每个工具 `register({ name, render })`，渲染时查表分发 | `message-part.tsx` → `ToolRegistry` |
 | **Codex** | `HistoryCell` trait，每个 cell 类型实现 `display_lines()` | `history_cell.rs` + `exec_cell/render.rs` |
 
-**Opencode 的 ToolRegistry** 是最适合 CodePilot 参考的模式——声明式注册，新增工具只需一行 `register()`，比我们当前统一 `ToolCallBlock` 灵活得多，又比 Claude Code 的自包含 Tool 对象更轻量。
+**Opencode 的 ToolRegistry** 是最适合 AI Native Lab 参考的模式——声明式注册，新增工具只需一行 `register()`，比我们当前统一 `ToolCallBlock` 灵活得多，又比 Claude Code 的自包含 Tool 对象更轻量。
 
 **⚠️ 前置依赖：统一 tool view-model**。当前 `ToolActionsGroup`（`tool-actions-group.tsx:24-31`）的 `ToolAction` 接口只有 `id`/`name`/`input`/`result`/`isError`/`media` 这些通用字段，缺乏分类型渲染所需的结构化数据（diff 内容、URL、子任务链接、取消态等）。更关键的是 **`is_error` 在 SSE 到前端的链路中被丢弃**：`claude-client.ts:1139-1142` 发送的 `tool_result` SSE 包含 `is_error` 字段，但 `useSSEStream.ts:73-84` 解析时没有提取它，`ToolResultInfo`（`types/index.ts:953-957`）也没有 `is_error` 字段定义。因此前端目前 **无法区分工具成功和失败**。要做分类型渲染，需要先：
 1. 在 `ToolResultInfo` 类型中加入 `is_error?: boolean`
@@ -118,7 +118,7 @@ function heading() {
 
 **Claude Code**：`renderGroupedToolUse` 方法支持同类工具折叠渲染，但需要工具自行实现。
 
-**对 CodePilot 的建议**：实现上下文工具归组，当连续出现 3+ 个 Read/Glob/Grep 时自动折叠为"收集上下文"组，保留展开查看详情的能力。
+**对 AI Native Lab 的建议**：实现上下文工具归组，当连续出现 3+ 个 Read/Glob/Grep 时自动折叠为"收集上下文"组，保留展开查看详情的能力。
 
 ---
 
@@ -151,7 +151,7 @@ const BUFFER_CONFIG = {
 
 缓冲期间显示 "Preparing response..."，等内容足够有意义才 fade in。避免流式前几个字符的"抽搐"感。
 
-**⚠️ 不能直接套用到 CodePilot**：`StreamingMessage.tsx:267-448` 依赖原始增量文本实时识别 `show-widget`（部分 fence 解析）、`batch-plan`（Image Agent 批处理模式）、`image-gen-request`（图像生成确认卡）等结构化块，并据此提前渲染 widget 预览和确认卡。如果全局缓冲 500ms/40 词，这些结构化块的检测会明显变慢，半成品预览（如 show-widget 的 partial JSON 实时渲染）会失效。**正确做法**：缓冲仅应用于纯文本流，结构化块检测逻辑需要旁路绕过缓冲直接处理。
+**⚠️ 不能直接套用到 AI Native Lab**：`StreamingMessage.tsx:267-448` 依赖原始增量文本实时识别 `show-widget`（部分 fence 解析）、`batch-plan`（Image Agent 批处理模式）、`image-gen-request`（图像生成确认卡）等结构化块，并据此提前渲染 widget 预览和确认卡。如果全局缓冲 500ms/40 词，这些结构化块的检测会明显变慢，半成品预览（如 show-widget 的 partial JSON 实时渲染）会失效。**正确做法**：缓冲仅应用于纯文本流，结构化块检测逻辑需要旁路绕过缓冲直接处理。
 
 **Codex 的自适应两档变速：**
 
@@ -198,9 +198,9 @@ const BUFFER_CONFIG = {
 - Bash 出错会级联取消同批次兄弟工具（`siblingAbortController.abort`）
 - `contextModifier` 队列按原始顺序应用，防止并发竞态
 
-### 4.2 对 CodePilot 的启示
+### 4.2 对 AI Native Lab 的启示
 
-CodePilot 通过 SDK 调用工具，并发由 SDK 内部管理。但在前端展示层可以：
+AI Native Lab 通过 SDK 调用工具，并发由 SDK 内部管理。但在前端展示层可以：
 1. 识别并发执行的工具组，用 grouped rendering 折叠展示
 2. 某个工具出错时，视觉上标记同批次的其他工具被取消
 
@@ -217,7 +217,7 @@ CodePilot 通过 SDK 调用工具，并发由 SDK 内部管理。但在前端展
 | **Opencode** | Dock 底部弹出权限面板：Deny / Allow Always / Allow Once | 三选按钮，简洁直接 |
 | **Codex** | Overlay 弹窗：Yes(y) / Yes always(s) / No(n) + 单字母快捷键 | 键盘快捷键驱动，Ctrl+A 全屏查看 |
 
-### 5.2 对 CodePilot 的建议
+### 5.2 对 AI Native Lab 的建议
 
 如果后续需要实现工具审批：
 - 参考 Opencode 的三选按钮设计（最简洁）
@@ -243,7 +243,7 @@ CodePilot 通过 SDK 调用工具，并发由 SDK 内部管理。但在前端展
 - **Diff summary**：折叠的 "Modified N files"，展开为 Accordion diff view
 - **Timeline staging**：旧 turn 分批渲染（初始 1 个，后续每批 3 个），避免首屏阻塞
 
-### 6.3 对 CodePilot 的建议
+### 6.3 对 AI Native Lab 的建议
 
 Turn 级折叠是长对话可读性的关键——当一次回复包含 10+ 个工具调用时，折叠为 "8 steps" 摘要能大幅减少滚动距离。建议作为 P2 优化。
 
@@ -285,7 +285,7 @@ Turn 级折叠是长对话可读性的关键——当一次回复包含 10+ 个�
 
 ---
 
-## 八、CodePilot 现有链路缺陷（需优先修复）
+## 八、AI Native Lab 现有链路缺陷（需优先修复）
 
 > 以下问题在实现任何优化方案前需要先解决，否则会影响上层功能的正确性。
 

@@ -1,23 +1,23 @@
 ---
 title: 常见问题
-description: 关于 CodePilot 的常见问题解答。
+description: 关于 AI Native Lab 的常见问题解答。
 ---
 
 # 常见问题
 
 ## 基本问题
 
-### CodePilot 是什么？
+### AI Native Lab 是什么？
 
-CodePilot 是 Claude Code 的桌面工作区。它在 Claude Code CLI 的基础上提供图形界面，整合了多服务商管理、MCP 插件、技能、消息桥接和助理工作区等功能。基于 Electron + Next.js 构建。
+AI Native Lab 是 Claude Code 的桌面工作区。它在 Claude Code CLI 的基础上提供图形界面，整合了多服务商管理、MCP 插件、技能、消息桥接和助理工作区等功能。基于 Electron + Next.js 构建。
 
-### CodePilot 和 Claude Code CLI 是什么关系？
+### AI Native Lab 和 Claude Code CLI 是什么关系？
 
-CodePilot 是 Claude Code CLI 的图形前端。它通过 Claude Agent SDK 调用 Claude Code CLI 的能力，同时在上层添加了 GUI 专属的功能（多服务商切换、桥接、素材库等）。使用 CodePilot 需要先安装 Claude Code CLI。
+AI Native Lab 是 Claude Code CLI 的图形前端。它通过 Claude Agent SDK 调用 Claude Code CLI 的能力，同时在上层添加了 GUI 专属的功能（多服务商切换、桥接、素材库等）。使用 AI Native Lab 需要先安装 Claude Code CLI。
 
-### CodePilot 免费吗？
+### AI Native Lab 免费吗？
 
-CodePilot 本身开源且免费。你需要自备 API 密钥（来自 Anthropic、OpenRouter 或其他支持的服务商）。API 调用费用由服务商收取。
+AI Native Lab 本身开源且免费。你需要自备 API 密钥（来自 Anthropic、OpenRouter 或其他支持的服务商）。API 调用费用由服务商收取。
 
 ### 支持哪些操作系统？
 
@@ -28,14 +28,14 @@ CodePilot 本身开源且免费。你需要自备 API 密钥（来自 Anthropic�
 
 ### 首次启动提示找不到 Node.js
 
-CodePilot 需要 Node.js 18+。首次启动的设置向导会检测并提供自动安装。你也可以从 [nodejs.org](https://nodejs.org) 手动安装。
+AI Native Lab 需要 Node.js 18+。首次启动的设置向导会检测并提供自动安装。你也可以从 [nodejs.org](https://nodejs.org) 手动安装。
 
 ### Claude Code CLI 未被检测到
 
 如果设置中心显示"未找到 Claude Code"：
 
 1. 打开终端运行 `claude --version` 确认是否已安装
-2. 如果已安装但未被检测到，可能是二进制不在 CodePilot 的 PATH 中。尝试从终端启动 CodePilot（macOS 上运行 `open /Applications/CodePilot.app`），这样可以继承 shell 环境变量
+2. 如果已安装但未被检测到，可能是二进制不在 AI Native Lab 的 PATH 中。尝试从终端启动 AI Native Lab（macOS 上运行 `open /Applications/AI Native Lab.app`），这样可以继承 shell 环境变量
 3. 如果未安装，按照设置中心的指引操作，或运行 `curl -fsSL https://claude.ai/install.sh | bash`
 
 ### Claude Code 多版本冲突
@@ -76,7 +76,7 @@ CodePilot 需要 Node.js 18+。首次启动的设置向导会检测并提供自�
 
 ### macOS 提示"无法验证开发者"
 
-前往 **系统设置 > 隐私与安全性**，找到 CodePilot 相关提示，点击"仍要打开"。
+前往 **系统设置 > 隐私与安全性**，找到 AI Native Lab 相关提示，点击"仍要打开"。
 
 ## 使用问题
 
@@ -88,7 +88,7 @@ CodePilot 需要 Node.js 18+。首次启动的设置向导会检测并提供自�
 
 ### 如何在手机上与 Claude 对话？
 
-使用 [消息桥接](/zh/docs/bridge) 功能，将 CodePilot 连接到 Telegram、Discord、飞书或 QQ。桌面端保持运行即可从手机上与 Claude 对话。
+使用 [消息桥接](/zh/docs/bridge) 功能，将 AI Native Lab 连接到 Telegram、Discord、飞书或 QQ。桌面端保持运行即可从手机上与 Claude 对话。
 
 ### Claude 没有响应怎么办？
 
@@ -96,7 +96,7 @@ CodePilot 需要 Node.js 18+。首次启动的设置向导会检测并提供自�
 2. 检查网络连接
 3. 尝试切换到其他服务商
 4. 查看 MCP 页面是否有服务器报错
-5. 重启 CodePilot
+5. 重启 AI Native Lab
 
 ### 如何导入 CLI 的对话历史？
 
@@ -108,6 +108,6 @@ CodePilot 需要 Node.js 18+。首次启动的设置向导会检测并提供自�
 
 在 [GitHub Issues](https://github.com/op7418/CodePilot/issues) 提交，请包含：
 
-- 操作系统和 CodePilot 版本
+- 操作系统和 AI Native Lab 版本
 - 复现步骤
 - 相关错误日志

@@ -102,8 +102,8 @@ export function useSlashCommands(opts: {
         const skills = data.skills || [];
         apiSkills = skills
           .filter((s: { source?: string; loaded?: boolean; builtInPlugin?: boolean }) => {
-            // CodePilot-bundled plugins (plugin.json builtIn:true) are always
-            // surfaced regardless of SDK load state — CodePilot put the
+            // AI Native Lab-bundled plugins (plugin.json builtIn:true) are always
+            // surfaced regardless of SDK load state — AI Native Lab put the
             // files there itself.
             if (s.builtInPlugin) return true;
             // Exclude plugin-source skills that are not loaded in the current session
@@ -137,7 +137,7 @@ export function useSlashCommands(opts: {
       );
 
       // Only filter if SDK actually reported capabilities (non-empty arrays).
-      // CodePilot-bundled plugin commands (builtInPlugin:true) are exempted —
+      // AI Native Lab-bundled plugin commands (builtInPlugin:true) are exempted —
       // the SDK never registers them but they're guaranteed present on disk.
       if (sdkCommandNames.size > 0 || sdkSkillNames.size > 0) {
         apiSkills = apiSkills.filter(item => {

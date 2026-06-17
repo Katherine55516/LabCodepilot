@@ -3,7 +3,7 @@
 > 产品思考见 [docs/insights/markdown-artifact-overhaul.md](../insights/markdown-artifact-overhaul.md)
 > 执行计划归档于 [docs/exec-plans/completed/markdown-artifact-overhaul.md](../exec-plans/completed/markdown-artifact-overhaul.md)
 
-CodePilot 的 Markdown 渲染链 + Artifact 预览面板 + 文件读写链 的一次集中改造。五个阶段交付（Phase 1-5），覆盖 40 个源文件、~5600 行新增代码。目标读者：需要独立接手这块能力维护的开发者。
+AI Native Lab 的 Markdown 渲染链 + Artifact 预览面板 + 文件读写链 的一次集中改造。五个阶段交付（Phase 1-5），覆盖 40 个源文件、~5600 行新增代码。目标读者：需要独立接手这块能力维护的开发者。
 
 ---
 

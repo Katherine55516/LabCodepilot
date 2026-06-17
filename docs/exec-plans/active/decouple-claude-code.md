@@ -6,7 +6,7 @@
 
 ## 目标
 
-**让 CodePilot 在用户没有安装 Claude Code 的情况下，配置 API Key 即可完整使用。**
+**让 AI Native Lab 在用户没有安装 Claude Code 的情况下，配置 API Key 即可完整使用。**
 
 保留 Agent SDK 作为可选增强路径（用户装了 Claude Code 可继续走 SDK），但默认路径完全自主。
 
@@ -89,7 +89,7 @@ structured output 单测已对齐新实现。还需补充：
 - 2026-04-06: Agent Loop **不使用 Vercel AI SDK 的 maxSteps**，自建 while 循环。理由：需要在每步之间做权限检查、DB 持久化、context overflow 检测、doom loop 防护。（已验证：OpenCode 采用两层 while 循环，外层 `prompt.ts` 控制步数，内层 `processor.ts` 消费 stream，均不使用 maxSteps。）
 - 2026-04-06: 内置 MCP Server **直接转为 Vercel AI SDK tool**，不保留 MCP 协议包装。理由：**22** 个 tools 都是纯函数调用，无需 MCP 的 resources/prompts 高级特性。（复核修正：实际 22 个 tools，非 21 个——notification 有 5 个 tool 含 hatch_buddy。）
 - 2026-04-06: 权限系统采用 **三级模式（explore/normal/trust）+ OpenCode 风格规则引擎**。理由：Claude Code 有 7 种模式（5 外部 + 2 内部）过于复杂。（复核修正：Claude Code 实际有 7 种模式而非 6 种——含内部的 `auto` 和 `bubble`。）
-- 2026-04-06: Vercel AI SDK 是最优技术选择。对比了直接用 `@anthropic-ai/sdk`（仅单 Provider）、各原生 SDK（需自建统一层，维护极高）、LangChain（过度设计），Vercel AI SDK 在多 Provider、流式、tool use、thinking 支持上最均衡，且 CodePilot 已在 `text-generator.ts` 中使用。
+- 2026-04-06: Vercel AI SDK 是最优技术选择。对比了直接用 `@anthropic-ai/sdk`（仅单 Provider）、各原生 SDK（需自建统一层，维护极高）、LangChain（过度设计），Vercel AI SDK 在多 Provider、流式、tool use、thinking 支持上最均衡，且 AI Native Lab 已在 `text-generator.ts` 中使用。
 - 2026-04-06（复核后）: **权限核心提前到 Phase 2** 与工具同期。理由：工具的 `execute` 内部调用 `ctx.checkPermission()`，如果权限系统不存在，工具无法工作。
 - 2026-04-06（复核后）: **会话恢复基础并入 Phase 1**。理由：Agent Loop 需要从 DB 加载历史消息续聊，`message-builder.ts` 是 Phase 1 的前置依赖。
 - 2026-04-06（复核后）: **双路径切换最多保留 2 个版本周期**，之后默认自建路径。切换通过设置项控制（非自动检测 CLI）。
@@ -131,10 +131,10 @@ structured output 单测已对齐新实现。还需补充：
 
 | 问题 | 影响 | 对策 |
 |------|------|------|
-| **SSE 适配层**：fullStream 事件需映射为 CodePilot 的 17 种自定义 SSE 事件，其中 `permission_request`、`tool_timeout`、`mode_changed`、`task_update`、`rewind_point`、`keep_alive`、`status`（初始化元数据）在 Vercel AI SDK 中无直接对应 | agent-loop.ts 需要额外的事件合成逻辑 | 纳入 Phase 1 |
+| **SSE 适配层**：fullStream 事件需映射为 AI Native Lab 的 17 种自定义 SSE 事件，其中 `permission_request`、`tool_timeout`、`mode_changed`、`task_update`、`rewind_point`、`keep_alive`、`status`（初始化元数据）在 Vercel AI SDK 中无直接对应 | agent-loop.ts 需要额外的事件合成逻辑 | 纳入 Phase 1 |
 | **遗漏的 SDK 依赖点**：`provider-doctor.ts`（健康检查）、`structured/route.ts`（结构化输出）、`mode/route.ts`（模式切换）、`agent-sdk-capabilities.ts`（能力缓存）均依赖 SDK | 这些文件需要改写或提供自建替代 | 纳入 Phase 8 |
 | **DB 已存储完整 content blocks**（JSON 字符串），但 `buildFallbackContext` 展平为纯文本丢失结构 | message-builder.ts 需从 JSON 字符串还原 `{role, content}[]` 结构，而非复用 buildFallbackContext | 纳入 Phase 1 |
-| **Skill frontmatter 解析不完整**：CodePilot 当前只解析 name + description，不读 allowed-tools/context/when_to_use | skill-parser.ts 需要完整解析所有 frontmatter 字段 | 纳入 Phase 6 |
+| **Skill frontmatter 解析不完整**：AI Native Lab 当前只解析 name + description，不读 allowed-tools/context/when_to_use | skill-parser.ts 需要完整解析所有 frontmatter 字段 | 纳入 Phase 6 |
 
 ### 终审发现（开工前最终验证）
 
@@ -292,7 +292,7 @@ agentLoop(input: AgentLoopInput): AsyncGenerator<AgentEvent>
 
 **映射关系：**
 
-| Agent Loop (fullStream event) | CodePilot SSE type | 说明 |
+| Agent Loop (fullStream event) | AI Native Lab SSE type | 说明 |
 |------|------|------|
 | `text-delta` | `text` | 直接映射 |
 | `reasoning-delta` | `thinking` | Anthropic provider 特有 |
@@ -446,7 +446,7 @@ type PermissionRule = {
 |------|---------|------|
 | **Microcompact** | 每次 streamText 调用前 | 清理旧 tool_result（>5 步前替换为摘要） |
 | **Auto-compact** | 估算 token > 80% context window | LLM 生成结构化摘要替换旧消息 |
-| **Reactive compact** | API 返回 context_length_exceeded | 激进压缩 + 重试（CodePilot 已有基础实现） |
+| **Reactive compact** | API 返回 context_length_exceeded | 激进压缩 + 重试（AI Native Lab 已有基础实现） |
 
 **已验证（复核确认）：** Claude Code 实际有 5 种压缩（auto/micro/apiMicro/reactive/sessionMemory），报告的三层是合理的核心简化。
 
@@ -487,7 +487,7 @@ effort: high
 Skill prompt content here...
 ```
 
-**关键发现（复核确认）：** CodePilot 当前 `parseSkillFrontMatter()` 只提取 `name` 和 `description`。需要完整解析所有执行语义字段。
+**关键发现（复核确认）：** AI Native Lab 当前 `parseSkillFrontMatter()` 只提取 `name` 和 `description`。需要完整解析所有执行语义字段。
 
 ### 6.2 改动
 

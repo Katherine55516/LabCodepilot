@@ -103,7 +103,7 @@ extraResources:
   # Bundled GSD (gsd-build/get-shit-done, MIT) — packed at build time by
   # `npm run vendor:gsd`. Loaded by electron/gsd-installer.ts at first launch
   # (and on version drift) which copies it into
-  # ~/.claude/plugins/external_plugins/codepilot-gsd-vendor/ so CodePilot's
+  # ~/.claude/plugins/external_plugins/codepilot-gsd-vendor/ so AI Native Lab's
   # slash-command scanner picks up /gsd-* commands automatically, and mirrors
   # agents/ to ~/.claude/agents/ for Claude's subagent resolver.
   - from: vendor/gsd-bundle/
@@ -154,8 +154,8 @@ nsis:
   perMachine: false                  # Per-user install → no admin/UAC required
   packElevateHelper: false           # No elevate.exe needed since perMachine=false; explicit guarantee no UAC prompt
   # Show the "Choose Install Location" page in the NSIS wizard so users can
-  # pick where CodePilot installs. Default install dir is still per-user
-  # (%LOCALAPPDATA%\Programs\CodePilot) — if the user picks Program Files,
+  # pick where AI Native Lab installs. Default install dir is still per-user
+  # (%LOCALAPPDATA%\Programs\AI Native Lab) — if the user picks Program Files,
   # NSIS will fail the write because perMachine=false runs without elevation;
   # they should pick a writable per-user path.
   allowToChangeInstallationDirectory: true

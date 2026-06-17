@@ -11,7 +11,7 @@
  *    a stripped settings.json; the project/local layers can't be shadowed
  *    the same way without breaking file-creation tools (Edit/Write
  *    relative paths), so we exclude them from settingSources entirely.
- *    Project CLAUDE.md and `.mcp.json` are still loaded — by CodePilot's
+ *    Project CLAUDE.md and `.mcp.json` are still loaded — by AI Native Lab's
  *    context-assembler and mcp-loader respectively — independent of
  *    settingSources. Env mode keeps all 3 sources.
  *
@@ -99,7 +99,7 @@ describe('settingSources by provider group', () => {
         'But MUST drop "project" and "local" — the SDK qZq() env loader applies env from EVERY',
         'enabled settingSource layer, and project/local layers cannot be shadowed without breaking',
         'file-creation tools (relative paths). Project CLAUDE.md / .mcp.json are loaded',
-        "independently by CodePilot, so they don't need 'project' settingSource.",
+        "independently by AI Native Lab, so they don't need 'project' settingSource.",
       ].join(' '),
     );
   });

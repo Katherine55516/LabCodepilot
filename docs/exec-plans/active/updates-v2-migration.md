@@ -179,7 +179,7 @@ updater: {
 
 ## 7. 下载 / 避免重下 / 安装设计（内联自姊妹项目方案）
 
-> 来源：「AI-Native-Lab / bsApp」《自动更新-避免重下与自动安装设计》。该项目与本应用同源（同为 AI Native Lab、同用 `anlcode` 目录约定），设计经实战验证，本节按 CodePilot 的路径与目录做了映射。落点：下载器 `electron/updater/downloader.ts`、编排 `electron/updater/index.ts`、安装 `electron/updater/installer.ts`。
+> 来源：「AI-Native-Lab / bsApp」《自动更新-避免重下与自动安装设计》。该项目与本应用同源（同为 AI Native Lab、同用 `anlcode` 目录约定），设计经实战验证，本节按 AI Native Lab 的路径与目录做了映射。落点：下载器 `electron/updater/downloader.ts`、编排 `electron/updater/index.ts`、安装 `electron/updater/installer.ts`。
 
 ### 7.1 落地路径与避免重复下载（跨平台共用，sha256 为基石）
 

@@ -5,7 +5,7 @@
 
 ## 概述
 
-对 CodePilot 工具调用展示层的全面升级，覆盖 thinking 展示、工具分类渲染、上下文归组、状态动画、流式优化等。基于 Claude Code / CraftAgent / Opencode / Codex 四个竞品的调研结论实施。
+对 AI Native Lab 工具调用展示层的全面升级，覆盖 thinking 展示、工具分类渲染、上下文归组、状态动画、流式优化等。基于 Claude Code / CraftAgent / Opencode / Codex 四个竞品的调研结论实施。
 
 ## 改动清单
 

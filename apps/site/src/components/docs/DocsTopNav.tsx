@@ -39,12 +39,12 @@ export function DocsTopNav({ locale }: { locale: string }) {
         <Link href={`/${locale === 'en' ? '' : locale}`} className="flex items-center gap-3">
           <Image
             src="/logo.png"
-            alt="CodePilot"
+            alt="AI Native Lab"
             width={30}
             height={30}
             className="h-[30px] w-[30px]"
           />
-          <span className="text-lg font-bold">CodePilot</span>
+          <span className="text-lg font-bold">AI Native Lab</span>
         </Link>
 
         {/* Right: Search + GitHub + Language switcher */}

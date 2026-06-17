@@ -69,8 +69,8 @@ SSE 事件到达顺序天然等于内容顺序（`onToolUse` 里 `flushTextThrot
 
 ## 向后兼容
 
-- **历史旧消息**：改造前 CodePilot 把 content 持久化成旧硬编码顺序（thinking→text→tools）。改造后这些旧消息按**存储顺序**平铺渲染（思考→文字→工具，flat 但非真交错），可读不报错。**只有新消息**（改造后生成）从 SQLite 读出来就是真交错。
-- **顺序并非永久丢失**：丢的只是 CodePilot 的 SQLite 缓存（`messages.content`）。Claude Code SDK 的原始转录 JSONL（`~/.claude/projects/<sdk_cwd 编码>/<sdk_session_id>.jsonl`）**完整保留了带时间戳的交错顺序**——每个 thinking/text/tool_use/tool_result 都是独立一行。因此旧消息的真顺序**可以从 JSONL 回填**（见下方「已知后续」）。
+- **历史旧消息**：改造前 AI Native Lab 把 content 持久化成旧硬编码顺序（thinking→text→tools）。改造后这些旧消息按**存储顺序**平铺渲染（思考→文字→工具，flat 但非真交错），可读不报错。**只有新消息**（改造后生成）从 SQLite 读出来就是真交错。
+- **顺序并非永久丢失**：丢的只是 AI Native Lab 的 SQLite 缓存（`messages.content`）。Claude Code SDK 的原始转录 JSONL（`~/.claude/projects/<sdk_cwd 编码>/<sdk_session_id>.jsonl`）**完整保留了带时间戳的交错顺序**——每个 thinking/text/tool_use/tool_result 都是独立一行。因此旧消息的真顺序**可以从 JSONL 回填**（见下方「已知后续」）。
 - **持久化格式不变**：仍是 `MessageContentBlock[]` JSON，无 DB schema 迁移。
 - **legacy HTML-comment 格式**：`parseOrderedSegments` 保留兜底。
 

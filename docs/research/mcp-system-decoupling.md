@@ -3,9 +3,9 @@
 > 创建时间：2026-04-06
 > 关联执行计划：[decouple-claude-code](../exec-plans/active/decouple-claude-code.md)
 
-## 1. CodePilot 内置 MCP Server 功能清单
+## 1. AI Native Lab 内置 MCP Server 功能清单
 
-CodePilot 有 7 个内置 MCP Server（21 个 tools）：
+AI Native Lab 有 7 个内置 MCP Server（21 个 tools）：
 
 ### 1.1 codepilot-memory（memory-search-mcp.ts）
 - **注册条件**：Always-on，assistant 模式

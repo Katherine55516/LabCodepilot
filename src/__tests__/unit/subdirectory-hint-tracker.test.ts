@@ -207,7 +207,7 @@ describe('SubdirectoryHintTracker — ancestor walking', () => {
 // ────────────────────────────────────────────────────────────────
 
 describe('SubdirectoryHintTracker — argument keys', () => {
-  it('honors file_path key (CodePilot Write/Edit convention)', () => {
+  it('honors file_path key (AI Native Lab Write/Edit convention)', () => {
     const tracker = new SubdirectoryHintTracker(tmpRoot);
     const result = tracker.checkToolCall('Write', {
       file_path: 'src/utils/new-file.ts',

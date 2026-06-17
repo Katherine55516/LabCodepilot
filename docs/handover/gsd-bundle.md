@@ -2,7 +2,7 @@
 
 > 产品思考见 [docs/insights/gsd-bundle.md](../insights/gsd-bundle.md)
 
-把 [gsd-build/get-shit-done](https://github.com/gsd-build/get-shit-done)（MIT, archived 2026-05）作为 CodePilot 的"内置插件"随安装包发布：用户装完 → 启动 → 斜杠菜单立刻看到 67 个 `/gsd-*` 命令 + 33 个子 agent 可调用，零额外操作。
+把 [gsd-build/get-shit-done](https://github.com/gsd-build/get-shit-done)（MIT, archived 2026-05）作为 AI Native Lab 的"内置插件"随安装包发布：用户装完 → 启动 → 斜杠菜单立刻看到 67 个 `/gsd-*` 命令 + 33 个子 agent 可调用，零额外操作。
 
 ## 数据流
 
@@ -85,11 +85,11 @@ D:\CodePilot-main\
 
 ### 为什么选原始归档版而非 Redux
 
-用户指定 `gsd-build/get-shit-done`。原始版用 `commands/*.md` + `agents/*.md` 双目录结构，与 CodePilot 扫描器的"plugins/*/commands/" 约定（[`src/app/api/skills/route.ts:33-75`](../../src/app/api/skills/route.ts)）完美契合，无需引入 SKILL.md 模式。Redux 用层级 skill 路由，需要更多胶水代码。
+用户指定 `gsd-build/get-shit-done`。原始版用 `commands/*.md` + `agents/*.md` 双目录结构，与 AI Native Lab 扫描器的"plugins/*/commands/" 约定（[`src/app/api/skills/route.ts:33-75`](../../src/app/api/skills/route.ts)）完美契合，无需引入 SKILL.md 模式。Redux 用层级 skill 路由，需要更多胶水代码。
 
 ### 为什么文件名要平面化 + colon→hyphen 转换
 
-CodePilot 扫描器看到子目录会拼成 colon 形式（`commands/gsd/debug.md` → `/gsd:debug`），但 GSD 在 Claude Code 上的官方命令是 hyphen 形式（`/gsd-debug`）。要让命令呈现一致，必须把所有 `.md` 文件平铺到 `commands/` 顶层并改名为 `gsd-<base>.md`。同时把文件内所有 `\bgsd:[a-z][a-z0-9-]*\b` 替换为 hyphen 形式（98 + 96 处替换），与 GSD 官方 installer 在 Claude Code 上的行为一致。
+AI Native Lab 扫描器看到子目录会拼成 colon 形式（`commands/gsd/debug.md` → `/gsd:debug`），但 GSD 在 Claude Code 上的官方命令是 hyphen 形式（`/gsd-debug`）。要让命令呈现一致，必须把所有 `.md` 文件平铺到 `commands/` 顶层并改名为 `gsd-<base>.md`。同时把文件内所有 `\bgsd:[a-z][a-z0-9-]*\b` 替换为 hyphen 形式（98 + 96 处替换），与 GSD 官方 installer 在 Claude Code 上的行为一致。
 
 ### 为什么 6 个 ns-* 文件按 frontmatter 重命名
 
@@ -108,7 +108,7 @@ GSD v1.40+ 引入了 6 个 namespace meta-skill router 文件，文件名是 `ns
 
 ### 为什么 agents 要同时放两个位置
 
-- **插件目录 `<install>/agents/`**：作为插件资产的一部分，方便卸载时整体清理。CodePilot 扫描器不读这个目录（它只看 `commands/`）。
+- **插件目录 `<install>/agents/`**：作为插件资产的一部分，方便卸载时整体清理。AI Native Lab 扫描器不读这个目录（它只看 `commands/`）。
 - **`~/.claude/agents/gsd-*.md`（镜像）**：Claude Code 的 subagent 解析器的硬约定位置。命令文件里出现 `Spawn gsd-debugger agent` 时，Claude 的 Agent 工具查找名为 `gsd-debugger` 的 subagent，必须在 `~/.claude/agents/` 才能找到。
 
 镜像采用 hash 比对策略：目标不存在 → 直接写；hash 相同 → 跳过；hash 不同 → 跳过 + 记 conflict（写到 `<install>/.conflicts.json` 持久化，Settings UI 可显示给用户）。这样用户已装的官方 GSD agent 文件或本地修改不会被覆盖。
@@ -121,7 +121,7 @@ GSD v1.40+ 引入了 6 个 namespace meta-skill router 文件，文件名是 `ns
 
 - **首次启动 + 版本变化时**：`electron/main.ts` 在 `app.whenReady()` 后 fire-and-forget 调用 `installGsdBundle()`。版本戳一致时直接返回，不阻塞主窗口。
 - **手动**：Settings UI 的"立即重新同步"按钮调 `window.electronAPI.gsd.resync()`，强制全量同步。
-- **禁用时**：写 `.disabled` 标记 + 将 `commands/` 重命名为 `commands.disabled/`（CodePilot 扫描器看不到，命令消失）。re-enable 时反操作并触发 sync。
+- **禁用时**：写 `.disabled` 标记 + 将 `commands/` 重命名为 `commands.disabled/`（AI Native Lab 扫描器看不到，命令消失）。re-enable 时反操作并触发 sync。
 
 ## 关键 API
 
@@ -202,7 +202,7 @@ dev 模式（手动 mirror 后 `npx next dev`）+ `curl http://localhost:3055/ap
 ## 已知限制
 
 - **冲突日志只在 sync 时更新**：若用户手动改了 `~/.claude/agents/gsd-debugger.md` 但没触发 sync，UI 不会看到新的 conflict——直到下一次 install/resync 才检测到。
-- **没有自动升级 GSD**：依赖 CodePilot 主程序发版时一并 bump。GSD 官方仓库已归档，预期变化不频繁，可接受。
+- **没有自动升级 GSD**：依赖 AI Native Lab 主程序发版时一并 bump。GSD 官方仓库已归档，预期变化不频繁，可接受。
 - **打包验证未做**：本次开发未在本地实际打 DMG/NSIS（耗时较高）。CI 上的 electron-builder 流程未变（只是新增了 extraResources），破坏面有限，但首次发版需人工验证一次。
 
 ## 与其他模块的边界

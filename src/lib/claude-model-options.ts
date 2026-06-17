@@ -70,7 +70,7 @@ export function sanitizeClaudeModelOptions(
       thinking = { type: 'adaptive', display: 'summarized' };
     } else if (thinking.type === 'adaptive' && !thinking.display) {
       // Opus 4.7 adaptive thinking defaults display to 'omitted', which
-      // means the SDK will not emit thinking deltas and CodePilot's
+      // means the SDK will not emit thinking deltas and AI Native Lab's
       // reasoning block disappears. Explicitly request 'summarized' so
       // users still see the reasoning UI they saw on 4.6.
       thinking = { ...thinking, display: 'summarized' };

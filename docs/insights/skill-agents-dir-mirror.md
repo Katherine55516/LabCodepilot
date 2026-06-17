@@ -8,7 +8,7 @@
 
 ## 根因：位置契约不一致
 
-CodePilot 有两套技能发现面：
+AI Native Lab 有两套技能发现面：
 
 - **UI / 发现层**（斜杠面板、技能管理器、原生 Skill 工具）同时扫 `~/.claude/skills/` 和 `~/.agents/skills/`。
 - **内置 Claude Code 二进制**只认 `~/.claude/skills/`（+ 项目 + 插件）。
@@ -22,10 +22,10 @@ CodePilot 有两套技能发现面：
 | | MCP（已修） | Skill（本次） |
 |---|---|---|
 | binary 只读 | `~/.claude.json.mcpServers` | `~/.claude/skills/` |
-| CodePilot 还多读了 | `~/.claude/settings.json.mcpServers`（死字段） | `~/.agents/skills/` |
+| AI Native Lab 还多读了 | `~/.claude/settings.json.mcpServers`（死字段） | `~/.agents/skills/` |
 | 症状 | UI 显示已配置，agent 调不到 | 面板能列出，agent 报找不到 |
 
-抽象成一句话：**内置 binary 暴露了"UI 读取位置 ⊋ binary 读取位置"的裂缝。** 自托管/原生 runtime 时代，CodePilot 自己的 Skill 工具会去 `~/.agents/skills/` 兜底；切到内置 Claude Code 后这座桥没了，裂缝才显形。用户的直觉（"是不是打包导致的"）方向正确。
+抽象成一句话：**内置 binary 暴露了"UI 读取位置 ⊋ binary 读取位置"的裂缝。** 自托管/原生 runtime 时代，AI Native Lab 自己的 Skill 工具会去 `~/.agents/skills/` 兜底；切到内置 Claude Code 后这座桥没了，裂缝才显形。用户的直觉（"是不是打包导致的"）方向正确。
 
 ## 为什么选"复制到 `~/.claude/skills/`"而不是别的方案
 
@@ -35,6 +35,6 @@ CodePilot 有两套技能发现面：
 
 ## 已知局限与未来方向
 
-- 当前是单向镜像（agents → claude）。若用户在 CodePilot 里直接编辑镜像副本，源未变时保留、源再变则被覆盖。可接受，因为源（外部 CLI 装的）才是事实源。
+- 当前是单向镜像（agents → claude）。若用户在 AI Native Lab 里直接编辑镜像副本，源未变时保留、源再变则被覆盖。可接受，因为源（外部 CLI 装的）才是事实源。
 - 更彻底的方向：未来若把市场安装统一收口到只写 `~/.claude/skills/`（或让内置 binary 也扫 `~/.agents/skills/`），镜像层就能退役。在 `skills` CLI 行为稳定前，镜像是最稳妥的兼容层。
 - 这类"UI 读取面 ⊋ 内置 binary 读取面"的裂缝可能还会在别处出现（插件、agents、hooks 等）。值得有一个统一的"reconcile 到规范位置"心智模型，而不是每类配置各修一遍。

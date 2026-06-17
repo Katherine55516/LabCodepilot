@@ -145,7 +145,7 @@ describe('resolveReactiveCompactBoundaryRowid', () => {
   // The critical guard: a degraded reactive compact (no _rowid plumbed
   // through) must NOT reset a previously-established boundary to 0.
   // Otherwise the next turn's filterHistoryByCompactBoundary would silently
-  // regress to passthrough and CodePilot would re-feed summarized rows.
+  // regress to passthrough and AI Native Lab would re-feed summarized rows.
   it('preserves existing boundary when history has no _rowid at all', () => {
     const history: Array<{ _rowid?: number }> = [
       { /* no _rowid */ },

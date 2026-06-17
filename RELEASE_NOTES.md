@@ -1,4 +1,4 @@
-## CodePilot v0.55.0
+## AI Native Lab v0.55.0
 
 > Claude Code 现在随应用一同分发——用户安装应用即可获得完整 Claude Code 功能，无需再手动 `npm install -g @anthropic-ai/claude-code` 或下载 native installer。
 
@@ -22,7 +22,7 @@
 ### 已知变化
 
 - 安装包体积从 ~150MB 增加到 ~350MB（含 Claude Code 平台子包 ~230MB），与 VS Code（~300MB）/ Cursor（~400MB）同量级
-- Claude Code 版本现跟随应用版本统一升级，不再支持 `claude update` 单独升级 CLI——如需新版 Claude Code，请在应用内更新 CodePilot
+- Claude Code 版本现跟随应用版本统一升级，不再支持 `claude update` 单独升级 CLI——如需新版 Claude Code，请在应用内更新 AI Native Lab
 
 ## 下载地址
 

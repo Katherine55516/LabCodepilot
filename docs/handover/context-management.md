@@ -285,7 +285,7 @@ PTL reactive compact 期间，`stream-session-manager` 收到 `context_compressi
 1. **Token 估算是粗估** — 4B/tok 对非英文内容偏差较大（中文可能 2-3B/tok），但精确计数需要 API 调用，增加延迟
 2. **无 prompt cache 精细控制** — SDK preset append 模式不暴露 `cache_control` API，静态/动态分离只能提高命中概率，无法保证
 3. **压缩不可逆** — 一旦 summary 覆盖了旧 summary，原始对话细节永久丢失（DB 中原始消息仍保留，但不参与后续 context）
-4. **Compact 后无上下文恢复** — Claude Code 在 compact 后会恢复最近读取的文件、活跃的 plan 等。CodePilot 只有 summary + 最近消息
+4. **Compact 后无上下文恢复** — Claude Code 在 compact 后会恢复最近读取的文件、活跃的 plan 等。AI Native Lab 只有 summary + 最近消息
 5. **单模型压缩** — 压缩和主对话用同一个 provider 通道，如果 provider 限流可能影响压缩质量
 6. **无 blocking 阈值** — 没有阻止用户继续发送的硬限制，极端情况下可能连续触发 PTL
 

@@ -180,11 +180,11 @@ Parameters: { skill: string, args?: string }
 
 ---
 
-## 二、CodePilot 当前的 Skills 实现
+## 二、AI Native Lab 当前的 Skills 实现
 
 ### 2.1 现有架构
 
-CodePilot 有完整的 Skills 管理系统，但**大量依赖 SDK**：
+AI Native Lab 有完整的 Skills 管理系统，但**大量依赖 SDK**：
 
 **API 路由**：
 - `GET /api/skills` — 扫描本地文件 + 合并 SDK 报告的 commands/skills
@@ -374,7 +374,7 @@ interface LoadedSkill {
 
 ## 五、对比总结
 
-| 维度 | Claude Code | OpenCode | Craft Agent | CodePilot 现状 |
+| 维度 | Claude Code | OpenCode | Craft Agent | AI Native Lab 现状 |
 |------|------------|----------|-------------|---------------|
 | **格式** | SKILL.md + commands .md | SKILL.md | SKILL.md | 两种都支持 |
 | **解析** | 自建 frontmatter parser | gray-matter + 自建回退 | gray-matter | 手写正则 |
@@ -395,7 +395,7 @@ interface LoadedSkill {
 
 ### 6.1 存储格式设计
 
-保持与 Claude Code 兼容的 `SKILL.md` 格式，增加 CodePilot 特有扩展：
+保持与 Claude Code 兼容的 `SKILL.md` 格式，增加 AI Native Lab 特有扩展：
 
 ```yaml
 ---
@@ -414,8 +414,8 @@ model: inherit           # 模型覆盖
 effort: auto             # 思考力度
 user-invocable: true
 disable-model-invocation: false
-icon: "🔧"              # CodePilot 扩展：图标
-category: "git"          # CodePilot 扩展：分类
+icon: "🔧"              # AI Native Lab 扩展：图标
+category: "git"          # AI Native Lab 扩展：分类
 ---
 
 # Skill Body
@@ -538,7 +538,7 @@ const skillTool = {
 
 #### 6.3.5 Bundled Skills (`src/lib/skills/bundled/`)
 
-CodePilot 专属的内置 skills：
+AI Native Lab 专属的内置 skills：
 
 ```typescript
 // src/lib/skills/bundled/index.ts

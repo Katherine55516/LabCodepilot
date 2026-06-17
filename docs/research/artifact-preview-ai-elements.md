@@ -145,7 +145,7 @@ task, terminal, test-results, tool, toolbar, transcription, web-preview, ...
 
 ## 4. 对比矩阵：React 预览的三条路
 
-| 方案 | 能力 | 体积 | 复杂度 | 安全性 | 对 CodePilot 适配度 |
+| 方案 | 能力 | 体积 | 复杂度 | 安全性 | 对 AI Native Lab 适配度 |
 |------|------|------|-------|-------|---------------------|
 | `JSXPreview`（AI Elements 原生） | 白名单组件拼页面 | 低（~30KB） | 低 | 高（解释器，无执行） | **首选轻量档** |
 | Sandpack | 完整 React/Vite 多文件 + hooks + import | 高（~500KB + 运行时） | 中 | 中（iframe 隔离） | **完整档备选** |
@@ -171,7 +171,7 @@ npx ai-elements@latest add code-block   # 与现有 code-block.tsx 有冲突，�
 npx shadcn@latest add https://registry.ai-sdk.dev/api/registry/web-preview.json
 ```
 
-`artifact.tsx` 已存在，不重复 add。[推断] 升级时手动重 add 会覆盖本地魔改，需先把 CodePilot 侧的定制化改动抽到包裹层组件里。
+`artifact.tsx` 已存在，不重复 add。[推断] 升级时手动重 add 会覆盖本地魔改，需先把 AI Native Lab 侧的定制化改动抽到包裹层组件里。
 
 ### 5.2 `PreviewPanel` 格式扩展
 

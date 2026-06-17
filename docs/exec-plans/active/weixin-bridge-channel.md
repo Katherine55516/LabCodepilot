@@ -12,16 +12,16 @@
 ## 决策日志
 
 - 2026-03-22: 不直接依赖 `@tencent-weixin/openclaw-weixin` 运行时；只把它当协议样本和参考实现，因为它深度绑定 `openclaw/plugin-sdk` 与 OpenClaw runtime。
-- 2026-03-22: 微信通道按 CodePilot 现有 `BaseChannelAdapter` 原生实现，而不是走当前 CodePilot `ChannelPlugin` 接口；后者接口能力不足以承载微信的多账号登录、长轮询和 per-account 状态管理。
+- 2026-03-22: 微信通道按 AI Native Lab 现有 `BaseChannelAdapter` 原生实现，而不是走当前 AI Native Lab `ChannelPlugin` 接口；后者接口能力不足以承载微信的多账号登录、长轮询和 per-account 状态管理。
 - 2026-03-22: 多账号路由不修改 `channel_bindings` schema，改用合成 `chatId` 解决隔离问题，格式固定为 `weixin::<accountId>::<peerUserId>`。
 - 2026-03-22: `channel_offsets` 继续复用，但 offset key 不再等于单纯 channel name，而是 `weixin:<accountId>`，其 `offset_value` 保存 `get_updates_buf` 原文。
 - 2026-03-22: `context_token` 不能照搬 OpenClaw 插件的内存 `Map`，必须持久化进 SQLite，否则 Bridge 自动启动、冷启动回复和多账号轮询都会不稳定。
-- 2026-03-22: 本轮不做群聊、不做 OpenClaw 飞书插件里的平台工具集、不做 OpenClaw command/tool runtime 复刻；聚焦 CodePilot Bridge 通道能力本身。
+- 2026-03-22: 本轮不做群聊、不做 OpenClaw 飞书插件里的平台工具集、不做 OpenClaw command/tool runtime 复刻；聚焦 AI Native Lab Bridge 通道能力本身。
 - 2026-03-22: 权限审批走文本命令降级路径 `/perm allow|allow_session|deny <id>`，不做微信内联按钮。
 
 ## 目标
 
-- 在 CodePilot 中新增可真实使用的微信 Bridge 通道。
+- 在 AI Native Lab 中新增可真实使用的微信 Bridge 通道。
 - 支持二维码登录、多账号在线、私聊消息长轮询、文本收发、typing 指示、入站媒体解析。
 - 让微信通道完整接入现有 `Bridge -> Router -> ConversationEngine -> Delivery` 主链路。
 - 提供桌面设置页、账号列表、连接/断开和运行状态展示。
@@ -29,7 +29,7 @@
 
 ## 非目标
 
-- 不直接把 OpenClaw 微信 npm 包作为 CodePilot 运行时依赖。
+- 不直接把 OpenClaw 微信 npm 包作为 AI Native Lab 运行时依赖。
 - 不实现群聊、群策略、线程会话、@mention 触发。
 - 不移植 OpenClaw 飞书插件的 doc/wiki/drive/task/calendar 工具族。
 - 不在本轮做 AI 主动发送媒体的完整产品交互；若实现者顺手补齐底层能力可以接受，但不能因此拖慢主链路交付。
@@ -38,7 +38,7 @@
 
 Claude Code 在开工前，必须先通读以下本地资料，再写代码：
 
-### 1. CodePilot 现有架构
+### 1. AI Native Lab 现有架构
 
 - `AGENTS.md`
 - `ARCHITECTURE.md`
@@ -79,7 +79,7 @@ Claude Code 在开工前，必须先通读以下本地资料，再写代码：
 - `资料/feishu-openclaw-plugin/package/openclaw.plugin.json`
 - `资料/feishu-openclaw-plugin/package/src/commands/index.js`
 
-飞书插件在本任务中的作用不是“代码复用”，而是“组织方式参考”：诊断命令、onboarding、插件命令入口、能力分层。不要试图把其 OpenClaw runtime 逻辑直接复制进 CodePilot。
+飞书插件在本任务中的作用不是“代码复用”，而是“组织方式参考”：诊断命令、onboarding、插件命令入口、能力分层。不要试图把其 OpenClaw runtime 逻辑直接复制进 AI Native Lab。
 
 ## 单次交付约束
 
@@ -96,7 +96,7 @@ Claude Code 在开工前，必须先通读以下本地资料，再写代码：
 
 ### 1. 总体实现形态
 
-采用 **CodePilot 原生 `BaseChannelAdapter` 实现**：
+采用 **AI Native Lab 原生 `BaseChannelAdapter` 实现**：
 
 - 新建微信协议 helper、登录 helper、媒体 helper。
 - 新建 `WeixinAdapter` 负责多账号长轮询、消息标准化、文本出站、typing 指示和状态跟踪。
@@ -106,7 +106,7 @@ Claude Code 在开工前，必须先通读以下本地资料，再写代码：
 
 微信与 Telegram/QQ 最大不同在于：
 
-- 一个 CodePilot 实例可能同时登录多个微信 bot 账号。
+- 一个 AI Native Lab 实例可能同时登录多个微信 bot 账号。
 - 同一个 `peerUserId` 在不同 bot 账号下必须拥有不同上下文和不同 binding。
 
 因此必须采用合成路由键：
@@ -244,7 +244,7 @@ Claude Code 在开工前，必须先通读以下本地资料，再写代码：
 
 实现要求：
 
-- 参考 OpenClaw 的 `activeLogins` 思路，但状态放在 CodePilot 服务端的 `globalThis` 挂载，避免 Next dev HMR 丢失
+- 参考 OpenClaw 的 `activeLogins` 思路，但状态放在 AI Native Lab 服务端的 `globalThis` 挂载，避免 Next dev HMR 丢失
 - session 有 TTL
 - 支持二维码过期后刷新
 - `accountId` 正规化使用安全字符串，不在 DB key 中保留危险字符
@@ -270,7 +270,7 @@ Claude Code 在开工前，必须先通读以下本地资料，再写代码：
 
 建议实现方式：
 
-- 下载后的本地落盘可以先走临时文件，再转成 CodePilot 现有 `FileAttachment { data(base64), name, type }`
+- 下载后的本地落盘可以先走临时文件，再转成 AI Native Lab 现有 `FileAttachment { data(base64), name, type }`
 - 如果有现成统一媒体保存 helper，可复用；不要引入额外 native 依赖
 - 语音优先尝试转 WAV；若无稳定转码链路，允许先按原始音频附件传入，但要明确 MIME
 
@@ -535,7 +535,7 @@ UI 必须包含：
 - 用户可以发起二维码登录，并看到二维码或二维码链接。
 - 登录成功后账号写入 DB，并在设置页列表中可见。
 - 启动 Bridge 后，已启用的微信账号会开始长轮询。
-- 私聊文本消息能创建或命中正确的 CodePilot session，并收到回复。
+- 私聊文本消息能创建或命中正确的 AI Native Lab session，并收到回复。
 - 同一个 `peerUserId` 在不同微信账号下不会串 session。
 - 入站图片至少能作为 `FileAttachment` 进入 `conversation-engine.ts`。
 - `context_token` 在应用重启后仍可用于对同一 peer 的正常回复。

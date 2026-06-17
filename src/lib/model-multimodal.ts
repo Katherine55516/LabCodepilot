@@ -2,7 +2,7 @@
  * model-multimodal.ts — pure helpers for the "multimodal model" feature.
  *
  * The managed-account backend pushes a `ModelConfig.description` for every
- * model; CodePilot stores it in the provider row's `notes` column (see
+ * model; AI Native Lab stores it in the provider row's `notes` column (see
  * electron/auth/managed-providers.ts → notes: cfg.description). A model is
  * treated as multimodal when that description contains the keyword「多模态」.
  *

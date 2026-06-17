@@ -2,7 +2,7 @@
  * Widget design guidelines and system prompt for generative UI.
  *
  * Based on Anthropic's actual generative UI guidelines extracted from claude.ai,
- * adapted for CodePilot's code-fence trigger mechanism and CSS variable bridge.
+ * adapted for AI Native Lab's code-fence trigger mechanism and CSS variable bridge.
  *
  * The WIDGET_SYSTEM_PROMPT is a minimal capability declaration (~150 tokens),
  * always injected into the system prompt. Full module guidelines are loaded

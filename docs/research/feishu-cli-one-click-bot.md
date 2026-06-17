@@ -17,7 +17,7 @@
 ```
 用户点击"快速创建飞书应用"
   ↓
-CodePilot 调用 POST accounts.feishu.cn/oauth/v1/app/registration (action=begin)
+AI Native Lab 调用 POST accounts.feishu.cn/oauth/v1/app/registration (action=begin)
   ↓
 拿到 device_code + verification_uri_complete
   ↓
@@ -25,7 +25,7 @@ CodePilot 调用 POST accounts.feishu.cn/oauth/v1/app/registration (action=begin
   ↓
 用户在浏览器中选择工作区 → 确认创建
   ↓
-CodePilot 后端轮询 POST /oauth/v1/app/registration (action=poll)
+AI Native Lab 后端轮询 POST /oauth/v1/app/registration (action=poll)
   ↓
 拿到 app_id (client_id) + app_secret (client_secret)
   ↓
@@ -199,7 +199,7 @@ CLI 源码本身不能证明 PersonalAgent 会自动配置能力/事件/权限�
 
 ---
 
-## CodePilot 集成方案
+## AI Native Lab 集成方案
 
 ### 实施方案
 

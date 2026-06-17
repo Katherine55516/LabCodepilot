@@ -40,7 +40,7 @@ export const NEVER_PARALLEL_TOOLS: ReadonlySet<string> = new Set<string>([]);
 
 /**
  * Read-only tools with no shared mutable state — always safe to
- * parallelize. Matches CodePilot's core tool names plus built-in
+ * parallelize. Matches AI Native Lab's core tool names plus built-in
  * read-side MCP tools from `codepilot_*`.
  */
 export const PARALLEL_SAFE_TOOLS: ReadonlySet<string> = new Set<string>([
@@ -99,7 +99,7 @@ const REDIRECT_OVERWRITE = /[^>]>[^>]|^>[^>]/;
  * Heuristic: does this terminal command look like it modifies / deletes files?
  *
  * Exported as a standalone helper — not currently invoked by
- * `shouldParallelizeToolBatch` because CodePilot's `Bash` tool is not in
+ * `shouldParallelizeToolBatch` because AI Native Lab's `Bash` tool is not in
  * any of the parallel sets, so Bash calls always fall through to serial
  * execution via layer 4 regardless of destructiveness.
  *
@@ -157,7 +157,7 @@ export function pathsOverlap(left: string, right: string): boolean {
  * Mirrors Hermes' `_extract_parallel_scope_path`. Intentionally avoids
  * `fs.realpath` because the target file may not exist yet.
  *
- * CodePilot's Write / Edit tools use `file_path` as the arg key while
+ * AI Native Lab's Write / Edit tools use `file_path` as the arg key while
  * Read uses `path` — both are tried. If neither is present, returns
  * null and the caller will fall back to serial execution.
  */

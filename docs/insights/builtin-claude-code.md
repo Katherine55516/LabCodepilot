@@ -8,7 +8,7 @@
 v0.54 之前的体验路径：
 
 ```
-下载 CodePilot 安装 → 启动 → InstallWizard 弹出
+下载 AI Native Lab 安装 → 启动 → InstallWizard 弹出
   → "请安装 Claude Code CLI" → 用户去终端跑 npm install / curl 脚本
   → 装错版本 / PATH 问题 / npm 包装器需要 shell:true
   → 折腾 5-30 分钟 → 终于能用
@@ -16,10 +16,10 @@ v0.54 之前的体验路径：
 
 实际数据（Sentry，v0.54 之前 14 天）：
 - ~247 起 "Claude Code executable not found" 事件
-- 大量「装了 CLI 但 CodePilot 找不到」工单（Windows `.cmd` 包装器、Bun global 路径、homebrew 自定义 prefix...）
+- 大量「装了 CLI 但 AI Native Lab 找不到」工单（Windows `.cmd` 包装器、Bun global 路径、homebrew 自定义 prefix...）
 - Setup 流程在「安装 CLI」步骤的流失率显著高于其他步骤
 
-**根本问题**：把"装应用"和"装 CLI"分成两件事，本质上是把开发者环境的负担推给了用户。但 CodePilot 的用户画像并不全是熟练命令行用户——很多是希望桌面端图形界面的 PM、设计师、初学者。
+**根本问题**：把"装应用"和"装 CLI"分成两件事，本质上是把开发者环境的负担推给了用户。但 AI Native Lab 的用户画像并不全是熟练命令行用户——很多是希望桌面端图形界面的 PM、设计师、初学者。
 
 ## 为什么是「内置」而不是「自动安装」
 
@@ -31,8 +31,8 @@ InstallWizard 帮用户跑 npm install / 下载 native installer。问题：
 
 - npm 在中国大陆需要镜像，企业环境可能没 npm
 - macOS 上 native installer 需要 sudo，UI 给不了
-- 装出来的位置 PATH 不一定有，CodePilot 仍要做模糊探测（`getClaudeCandidatePaths` 有 6+ 候选路径）
-- 升级路径割裂：用户系统的 CLI 跟 CodePilot 应用是独立升级周期，版本会漂移
+- 装出来的位置 PATH 不一定有，AI Native Lab 仍要做模糊探测（`getClaudeCandidatePaths` 有 6+ 候选路径）
+- 升级路径割裂：用户系统的 CLI 跟 AI Native Lab 应用是独立升级周期，版本会漂移
 
 ### 方案 B：保留 CLI 但应用兜底（v0.50.3 → v0.54）
 
@@ -61,7 +61,7 @@ InstallWizard 帮用户跑 npm install / 下载 native installer。问题：
 - **v0.2.111 之前**：SDK 内置 `cli.js`（13.7MB Node 脚本），需要外部 Node runtime。Electron 应用打包后没有保证的 node 二进制。
 - **v0.2.120+**：SDK 拆出 `@anthropic-ai/claude-agent-sdk-<platform>-<arch>` 平台子包，里面是 **Bun 编译的 self-contained native binary**——不需要 Node runtime，可以直接 spawn。
 
-也就是说**官方在 SDK 层面就支持了「嵌入式分发」的需求**。CodePilot 只需要：(1) 让 npm install 装上对应平台子包、(2) 让 electron-builder 把子包打入安装包、(3) 删除「绕过 SDK 内置 cli 强制找用户本地 CLI」的代码。
+也就是说**官方在 SDK 层面就支持了「嵌入式分发」的需求**。AI Native Lab 只需要：(1) 让 npm install 装上对应平台子包、(2) 让 electron-builder 把子包打入安装包、(3) 删除「绕过 SDK 内置 cli 强制找用户本地 CLI」的代码。
 
 整个改动是「**减法**」而非「加法」：删除约 200 行 CLI 探测代码、删除 InstallWizard 的装机步骤、删除版本对照警告...
 
@@ -120,7 +120,7 @@ Native runtime 的代码本身不大（< 1000 行），保留下来的边际成�
 
 - SDK 主包许可证：`SEE LICENSE IN README.md`（指向 https://code.claude.com/docs/en/legal-and-compliance）
 - 当前打包行为：v0.54 已经在分发 SDK 主包（含 sdk.mjs 等），新方案只是顺势把对应平台的 native binary 也打入
-- 性质判断：CodePilot 通过 SDK API（`query()`）使用 Claude Code，**没有作为独立可执行入口暴露给用户**（用户不会在终端里直接跑 `claude` 命令——cli.js 不在 PATH 里）
+- 性质判断：AI Native Lab 通过 SDK API（`query()`）使用 Claude Code，**没有作为独立可执行入口暴露给用户**（用户不会在终端里直接跑 `claude` 命令——cli.js 不在 PATH 里）
 
 但这个"性质判断"需要 Anthropic 的商务/法务签字确认才能上线。**Phase 11 之前必须 must-do**。
 
@@ -129,7 +129,7 @@ Native runtime 的代码本身不大（< 1000 行），保留下来的边际成�
 - **Delta updates**：~230MB 的 binary 每次升级整体下载浪费带宽。electron-updater 支持 differential download，需要确认对 binary 的兼容性
 - **轻量版分发**：如果用户反馈"我只想要 Native runtime，能不能给我 150MB 版本"高频，可以做双轨发布
 - **跟随 Claude Code 上游**：当前 SDK 升级靠 weekly 手动 bump，未来可以做 Dependabot 之类自动 PR
-- **Bridge 远程 CLI**：未来如果 CodePilot Cloud / Bridge 模式需要在远端跑 Claude Code，可以反向用 SDK 0.2.111 时代的"用户本地 CLI"路径——把那段代码标 deprecated 而不是彻底删除
+- **Bridge 远程 CLI**：未来如果 AI Native Lab Cloud / Bridge 模式需要在远端跑 Claude Code，可以反向用 SDK 0.2.111 时代的"用户本地 CLI"路径——把那段代码标 deprecated 而不是彻底删除
 
 ## 参考
 

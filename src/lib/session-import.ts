@@ -1,5 +1,5 @@
 /**
- * Shared Claude Code → CodePilot session import logic.
+ * Shared Claude Code → AI Native Lab session import logic.
  *
  * Extracted so both the single-import route
  * (`/api/claude-sessions/import`) and the batch route
@@ -31,7 +31,7 @@ export interface ImportedSession {
 }
 
 /**
- * Parse one Claude Code session JSONL and persist it as a new CodePilot
+ * Parse one Claude Code session JSONL and persist it as a new AI Native Lab
  * session. Does NOT check for duplicates — callers handle that.
  *
  * Throws ImportSessionError(404) when the session can't be found/parsed,
@@ -70,7 +70,7 @@ export function importOneSession(sessionId: string): ImportedSession {
 
   for (const msg of messages) {
     // Assistant messages with tool blocks are stored as structured JSON;
-    // text-only messages as plain text (CodePilot convention).
+    // text-only messages as plain text (AI Native Lab convention).
     const content = msg.hasToolBlocks
       ? JSON.stringify(msg.contentBlocks)
       : msg.content;

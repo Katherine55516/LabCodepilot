@@ -22,9 +22,9 @@
 - 选为好友项目后，B 的 Agent 也能检索 A 的笔记来辅助讨论
 
 **场景 3：官方好友**
-- 每个用户默认有一个 "CodePilot" 官方好友
-- 它的好友项目就是 CodePilot 的文档和更新日志
-- 在里面问 CodePilot 使用问题，比翻文档快
+- 每个用户默认有一个 "AI Native Lab" 官方好友
+- 它的好友项目就是 AI Native Lab 的文档和更新日志
+- 在里面问 AI Native Lab 使用问题，比翻文档快
 
 ## 核心设计
 
@@ -112,10 +112,10 @@ Claude Code 自己的内置 skill 就用这种模式（debug skill 的 `allowedT
 
 `searchWorkspace(dir, query)` 是无副作用的纯函数，好友项目检索直接调用。
 
-### 官方好友 "CodePilot"
+### 官方好友 "AI Native Lab"
 
 - 每个用户安装后自动添加
-- 好友项目 = CodePilot 官方文档 + Release Notes + FAQ
+- 好友项目 = AI Native Lab 官方文档 + Release Notes + FAQ
 - Agent 人格 = 产品客服/向导
 - 文档可以远程更新（CDN 拉取最新版）
 - 也可以用来推送产品更新通知
@@ -161,7 +161,7 @@ Claude Code 自己的内置 skill 就用这种模式（debug skill 的 `allowedT
 - MCP 2026 路线图明确将 agent communication 列为优先方向，也许会出现标准化的 Agent 间通信协议
 - Google A2A 协议在演进，可能提供去中心化的 Agent 发现和通信机制
 - Coral Protocol（基于 MCP 的 A2A 开源实现）值得持续关注
-- 如果 CodePilot 未来有用户账号体系（比如官网 + 同步功能），可以顺带解决消息路由
+- 如果 AI Native Lab 未来有用户账号体系（比如官网 + 同步功能），可以顺带解决消息路由
 
 ## 核心价值（不受通信层阻塞）
 

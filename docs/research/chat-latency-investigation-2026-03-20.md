@@ -4,7 +4,7 @@
 
 这次“所有模型都要等十几秒才开始回”的问题，主因不是前端渲染，也不是 assistant workspace 的索引逻辑，而是聊天请求在真正进入模型生成前，继承了过重的 Claude Code 运行环境：
 
-1. **CodePilot 对所有 provider 都加载用户级 Claude 设置**，当前机器的 `~/.claude/settings.json` 开着：
+1. **AI Native Lab 对所有 provider 都加载用户级 Claude 设置**，当前机器的 `~/.claude/settings.json` 开着：
    - `alwaysThinkingEnabled: true`
    - `effortLevel: "high"`
 2. **每次请求还会带上 MCP / plugin / hook 生态**，其中项目级 `.mcp.json` 里有：
@@ -13,7 +13,7 @@
 
 综合判断：
 
-- **最高优先级根因**：用户级 Claude 设置泄漏进 CodePilot，会把所有 provider 都拉进高 effort / always-thinking 路径。
+- **最高优先级根因**：用户级 Claude 设置泄漏进 AI Native Lab，会把所有 provider 都拉进高 effort / always-thinking 路径。
 - **第二优先级放大器**：MCP server 初始化过重，尤其是 `npx -y ...@latest` 这种每次可能触发包解析/网络探测的配置。
 - **第三优先级体感问题**：resume / init 阶段没有尽早给 UI 可见状态，放大了“卡住”的感觉。
 
@@ -27,12 +27,12 @@
 
 位置：
 
-- [`src/lib/provider-resolver.ts`](/Users/guohao/Documents/code/codepilot/CodePilot/src/lib/provider-resolver.ts)
+- [`src/lib/provider-resolver.ts`](src/lib/provider-resolver.ts)
 
 同时 SDK 只在显式传入时才追加 `--effort`：
 
-- [`src/lib/claude-client.ts`](/Users/guohao/Documents/code/codepilot/CodePilot/src/lib/claude-client.ts)
-- [`node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs`](/Users/guohao/Documents/code/codepilot/CodePilot/node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs)
+- [`src/lib/claude-client.ts`](src/lib/claude-client.ts)
+- [`node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs`](node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs)
 
 本机实际用户设置：
 
@@ -45,7 +45,7 @@
 
 这意味着：
 
-- 即使 CodePilot UI 没主动把 effort 选到 high，只要没有显式覆盖，SDK 很可能仍继承用户级默认值。
+- 即使 AI Native Lab UI 没主动把 effort 选到 high，只要没有显式覆盖，SDK 很可能仍继承用户级默认值。
 - 这是**跨模型、跨 provider**都成立的统一慢路径。
 
 ### 2. assistant workspace 不是主要瓶颈
@@ -79,10 +79,10 @@
 
 相关位置：
 
-- [`src/app/api/chat/route.ts`](/Users/guohao/Documents/code/codepilot/CodePilot/src/app/api/chat/route.ts)
-- [`src/lib/assistant-workspace.ts`](/Users/guohao/Documents/code/codepilot/CodePilot/src/lib/assistant-workspace.ts)
-- [`src/lib/workspace-indexer.ts`](/Users/guohao/Documents/code/codepilot/CodePilot/src/lib/workspace-indexer.ts)
-- [`src/lib/workspace-retrieval.ts`](/Users/guohao/Documents/code/codepilot/CodePilot/src/lib/workspace-retrieval.ts)
+- [`src/app/api/chat/route.ts`](src/app/api/chat/route.ts)
+- [`src/lib/assistant-workspace.ts`](src/lib/assistant-workspace.ts)
+- [`src/lib/workspace-indexer.ts`](src/lib/workspace-indexer.ts)
+- [`src/lib/workspace-retrieval.ts`](src/lib/workspace-retrieval.ts)
 
 ### 3. CLI 工具探测也不是主要瓶颈
 
@@ -94,8 +94,8 @@
 
 相关位置：
 
-- [`src/lib/cli-tools-context.ts`](/Users/guohao/Documents/code/codepilot/CodePilot/src/lib/cli-tools-context.ts)
-- [`src/lib/cli-tools-detect.ts`](/Users/guohao/Documents/code/codepilot/CodePilot/src/lib/cli-tools-detect.ts)
+- [`src/lib/cli-tools-context.ts`](src/lib/cli-tools-context.ts)
+- [`src/lib/cli-tools-detect.ts`](src/lib/cli-tools-detect.ts)
 
 ### 4. MCP 配置明显存在重启动风险
 
@@ -116,7 +116,7 @@
 
 所以真实聊天环境里，SDK 可能同时面对多组 MCP 来源：
 
-1. CodePilot 显式注入的 `loadMcpServers()`
+1. AI Native Lab 显式注入的 `loadMcpServers()`
 2. SDK 通过 `settingSources: ['user','project','local']` 自己再读到的用户/项目配置
 
 尤其危险的是：
@@ -134,8 +134,8 @@ npx -y chrome-devtools-mcp@latest --help
 
 相关位置：
 
-- [`src/app/api/chat/route.ts`](/Users/guohao/Documents/code/codepilot/CodePilot/src/app/api/chat/route.ts)
-- [`.mcp.json`](/Users/guohao/Documents/code/codepilot/CodePilot/.mcp.json)
+- [`src/app/api/chat/route.ts`](src/app/api/chat/route.ts)
+- [`.mcp.json`](.mcp.json)
 
 ### 5. resume 路径会放大“没反应”的体感
 
@@ -152,9 +152,9 @@ npx -y chrome-devtools-mcp@latest --help
 
 而且内部 resume fallback status 又被 `_internal` 过滤掉，用户无感知：
 
-- [`src/lib/claude-client.ts`](/Users/guohao/Documents/code/codepilot/CodePilot/src/lib/claude-client.ts)
-- [`src/hooks/useSSEStream.ts`](/Users/guohao/Documents/code/codepilot/CodePilot/src/hooks/useSSEStream.ts)
-- [`docs/handover/provider-error-doctor.md`](/Users/guohao/Documents/code/codepilot/CodePilot/docs/handover/provider-error-doctor.md)
+- [`src/lib/claude-client.ts`](src/lib/claude-client.ts)
+- [`src/hooks/useSSEStream.ts`](src/hooks/useSSEStream.ts)
+- [`docs/handover/provider-error-doctor.md`](docs/handover/provider-error-doctor.md)
 
 ### 6. 数据库里的真实会话也符合“统一变慢”
 
@@ -174,7 +174,7 @@ npx -y chrome-devtools-mcp@latest --help
 
 ### P0
 
-**用户级 Claude 设置泄漏到 CodePilot**
+**用户级 Claude 设置泄漏到 AI Native Lab**
 
 - 症状匹配度最高
 - 影响范围最广
@@ -209,9 +209,9 @@ npx -y chrome-devtools-mcp@latest --help
 
 ### 方案 A：先止血
 
-1. **不要让 CodePilot 默认继承 `~/.claude/settings.json` 的 thinking / effort**
+1. **不要让 AI Native Lab 默认继承 `~/.claude/settings.json` 的 thinking / effort**
    - 最稳妥：对 provider 会话去掉 `user` setting source
-   - 或者在 CodePilot 里显式传默认值，例如：
+   - 或者在 AI Native Lab 里显式传默认值，例如：
      - `thinking: { type: 'disabled' }` 或明确的 UI 默认
      - `effort: 'low'` / `'medium'`
 2. **把项目 `.mcp.json` 的 `chrome-devtools-mcp@latest` 改成固定版本**

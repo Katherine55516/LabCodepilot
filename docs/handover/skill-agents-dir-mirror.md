@@ -7,9 +7,9 @@
 
 内置 Claude Code 二进制发现 user-scope 技能**只扫 `~/.claude/skills/`**（+ 项目 `.claude/skills/` + 插件）。但 `skills` CLI（skills.sh / vercel-labs）可能把技能装进 agent-中立的 `~/.agents/skills/`。
 
-后果：CodePilot 自己的发现层（[skill-discovery.ts](../../src/lib/skill-discovery.ts)、[api/skills/route.ts](../../src/app/api/skills/route.ts)）同时扫两个目录，所以斜杠面板**能列出**该技能；但 agent 实际是内置 Claude Code，加载不到 `~/.agents/skills/`，于是报"找不到该 skill"。
+后果：AI Native Lab 自己的发现层（[skill-discovery.ts](../../src/lib/skill-discovery.ts)、[api/skills/route.ts](../../src/app/api/skills/route.ts)）同时扫两个目录，所以斜杠面板**能列出**该技能；但 agent 实际是内置 Claude Code，加载不到 `~/.agents/skills/`，于是报"找不到该 skill"。
 
-> 这与已修复的 MCP 问题（`46caccd`）**是同一类**：CodePilot UI 读的是位置超集，内置 binary 只读其中一个规范位置，导致"UI 显示已配置/已安装，但 agent 用不了"。
+> 这与已修复的 MCP 问题（`46caccd`）**是同一类**：AI Native Lab UI 读的是位置超集，内置 binary 只读其中一个规范位置，导致"UI 显示已配置/已安装，但 agent 用不了"。
 
 ## 核心机制
 
@@ -71,5 +71,5 @@ invalidateSkillReconcileCache(): void
 
 ## 已知局限
 
-- 用户在 CodePilot 技能编辑器里**直接改镜像副本**而源未变时，副本编辑保留；但若源随后变更，refresh 会覆盖该编辑（源是事实源）。属罕见路径。
+- 用户在 AI Native Lab 技能编辑器里**直接改镜像副本**而源未变时，副本编辑保留；但若源随后变更，refresh 会覆盖该编辑（源是事实源）。属罕见路径。
 - 仅哈希文件内容，不跟踪文件权限位（chmod）；技能脚本可执行位在 Windows 上无意义，在 mac/linux 上由 SKILL.md 调用方式决定，目前未发现问题。

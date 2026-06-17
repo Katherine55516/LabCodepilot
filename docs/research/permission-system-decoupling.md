@@ -3,11 +3,11 @@
 > 调研时间：2026-04-06
 > 状态：完成
 
-## 1. CodePilot 当前权限流程的完整链路
+## 1. AI Native Lab 当前权限流程的完整链路
 
 ### 1.1 当前架构：完全依赖 SDK
 
-CodePilot 当前的权限系统 **100% 依赖 Claude Code SDK**。自身不做任何权限判定，仅负责"转发审批请求 + 收集用户决策 + 回传结果"。
+AI Native Lab 当前的权限系统 **100% 依赖 Claude Code SDK**。自身不做任何权限判定，仅负责"转发审批请求 + 收集用户决策 + 回传结果"。
 
 ```
 ┌─────────────────────────────────────────────────────────┐
@@ -132,7 +132,7 @@ canUseTool: async (toolName, input, opts) => {
    - `auto` 模式 → 先检查 acceptEdits 快速路径 → 再检查安全工具白名单 → 最后调用 AI 分类器
    - 其他模式 → 提示用户
 
-**复杂度评估：** 极高。涉及 AI 分类器、deny tracking、hook 系统、多来源规则合并、MCP 工具名前缀处理等。CodePilot 不需要复刻全部。
+**复杂度评估：** 极高。涉及 AI 分类器、deny tracking、hook 系统、多来源规则合并、MCP 工具名前缀处理等。AI Native Lab 不需要复刻全部。
 
 ### 2.2 OpenCode 的权限系统
 
@@ -210,7 +210,7 @@ canUseTool: async (toolName, input, opts) => {
 | **审批粒度** | allow/deny + updatedPermissions | once/always/reject | once/always/reject |
 | **规则持久化** | settings.json 多层 | 未实现（TODO） | 内存 + DB (ModeState) |
 | **复杂度** | 极高 | 中等 | 中高（Bash 验证复杂） |
-| **CodePilot 适用性** | 过于复杂 | 规则引擎可借鉴 | 整体架构最适合 |
+| **AI Native Lab 适用性** | 过于复杂 | 规则引擎可借鉴 | 整体架构最适合 |
 
 ---
 
@@ -221,7 +221,7 @@ canUseTool: async (toolName, input, opts) => {
 1. **三级模式**：借鉴 Craft Agents 的 `explore / ask / auto-approve` 三级（用户面命名可调整）
 2. **规则引擎**：借鉴 OpenCode 的 `{ permission, pattern, action }` 规则格式 + glob 匹配
 3. **Bash AST 验证**：移植 Craft Agents 的 `bash-parser` + regex 白名单方案
-4. **不搞 AI 分类器**：Claude Code 的 auto 模式分类器成本高、延迟大、对 CodePilot 场景价值有限
+4. **不搞 AI 分类器**：Claude Code 的 auto 模式分类器成本高、延迟大、对 AI Native Lab 场景价值有限
 
 ### 3.2 权限模式
 

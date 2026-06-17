@@ -131,12 +131,12 @@
 
 ## Phase 5：品牌一致性
 
-**目标：** 应用自身的 UI 文案使用 "CodePilot" 而非 "Claude"（Claude Code 连接部分除外）。
+**目标：** 应用自身的 UI 文案使用 "AI Native Lab" 而非 "Claude"（Claude Code 连接部分除外）。
 
 ### 已实现
 
-- `src/i18n/en.ts`：`Claude Chat` → `CodePilot Chat`，`conversation with Claude` → `conversation with CodePilot`
-- `src/i18n/zh.ts`：`Claude 对话` → `CodePilot 对话`，`与 Claude 对话` → `与 CodePilot 对话`
+- `src/i18n/en.ts`：`Claude Chat` → `AI Native Lab Chat`，`conversation with Claude` → `conversation with AI Native Lab`
+- `src/i18n/zh.ts`：`Claude 对话` → `AI Native Lab 对话`，`与 Claude 对话` → `与 AI Native Lab 对话`
 
 ### 保留 "Claude" 的场景（正确用法）
 

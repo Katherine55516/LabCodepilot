@@ -35,8 +35,8 @@ Issue 分析发现 P0 集群（11 个 issue）的共性根因：用户的 Claude
 | `unknown` | 建议用 native 方式重新安装 |
 
 **注意：**
-- Native 安装虽然文档说"自动后台更新"，但 CodePilot 通过 SDK spawn 短生命周期子进程，自动更新机制来不及生效。所以 native 也需要手动升级能力。
-- 升级完成后需要提示用户重启 CodePilot（CLI 和应用都需要重启）
+- Native 安装虽然文档说"自动后台更新"，但 AI Native Lab 通过 SDK spawn 短生命周期子进程，自动更新机制来不及生效。所以 native 也需要手动升级能力。
+- 升级完成后需要提示用户重启 AI Native Lab（CLI 和应用都需要重启）
 - 升级过程通过新 API endpoint `/api/claude-upgrade` POST 执行
 - 升级完成后调用 `/api/claude-status/invalidate` 刷新缓存
 
@@ -44,7 +44,7 @@ Issue 分析发现 P0 集群（11 个 issue）的共性根因：用户的 Claude
 1. 左上角"已连接"按钮变黄色"可更新"
 2. 点击打开 dialog，显示版本对比 + "一键升级"按钮
 3. 按钮点击后显示升级进度（命令输出）
-4. 升级成功后显示"请重启 CodePilot 以应用更新"
+4. 升级成功后显示"请重启 AI Native Lab 以应用更新"
 
 ### 3. 代理支持
 

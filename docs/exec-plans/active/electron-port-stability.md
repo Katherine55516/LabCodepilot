@@ -146,7 +146,7 @@ src/components/cli-tools/CliToolBatchDescribeDialog.tsx (n 处)
 需要在打包后的 Electron 实测。脚本如下：
 ```bash
 npm run electron:build
-open /Users/op7418/Documents/code/opus-4.6-test/release/CodePilot.app
+open "release/AI Native Lab.app"
 # 在 app 里设置主题为 dark + 保存
 # Cmd+Q 退出
 # 再次打开 app
@@ -167,6 +167,6 @@ open /Users/op7418/Documents/code/opus-4.6-test/release/CodePilot.app
 - **2026-04-15** — 排查中发现"输入框默认模型徽标 / 默认模型生效 / 主题持久化"三个问题用户描述独立，但代码追踪后归结为同一根因（localStorage 失效）
 - **2026-04-15** — 拒绝"逐个迁移 localStorage 到 DB"方案（30+ 调用点、高回归风险、不解决 race condition）
 - **2026-04-15** — 选择端口稳定化方案：1 个文件 2 个函数改动，根因层修复，所有衍生症状自动消失
-- **2026-04-15** — 端口范围选 `47823-47830` 而非更小（如单端口 + 失败 fallback），原因：单端口冲突时直接退回随机端口，会让相邻安装的两台 CodePilot 互相挤掉对方的 localStorage；8 个候选给多实例足够余量
-- **2026-04-15** — 不引入 `requestSingleInstanceLock()`，避免行为变更引发新的用户投诉（"为什么我打开第二个 CodePilot 它不开了"）
+- **2026-04-15** — 端口范围选 `47823-47830` 而非更小（如单端口 + 失败 fallback），原因：单端口冲突时直接退回随机端口，会让相邻安装的两台 AI Native Lab 互相挤掉对方的 localStorage；8 个候选给多实例足够余量
+- **2026-04-15** — 不引入 `requestSingleInstanceLock()`，避免行为变更引发新的用户投诉（"为什么我打开第二个 AI Native Lab 它不开了"）
 - **2026-04-15 review 后跟进** — 原方案是经典 TOCTOU：`getPort()` 探测端口空闲后释放，再让 Next 子进程绑定，两个实例同时启动可能都挑中 47823，第二个就 EADDRINUSE 直接退出。重写为 **`startServerOnStablePort()`：直接尝试用每个候选端口启动 subprocess，subprocess 因 EADDRINUSE 立即退出时 `waitForServer()` 会感知到并 throw**，外层 catch 后切下一个候选端口。`isPortFree()` 仅作为快速 pre-check 跳过明显被占的端口（不消除竞争窗口，只是让大多数情况下少一次 spawn）。配套：替换 boot path（`app.whenReady`）和 `app.on('activate')` 两处调用

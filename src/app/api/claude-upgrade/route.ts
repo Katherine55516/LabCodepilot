@@ -6,7 +6,7 @@ import { NextResponse } from 'next/server';
  * Since v0.55, Claude Code is bundled inside the application installer via
  * the @anthropic-ai/claude-agent-sdk-<platform>-<arch> subpackage. There is
  * no "upgrade the user's local CLI" action anymore — the only way to get a
- * newer Claude Code is to upgrade CodePilot itself (which pulls a newer SDK).
+ * newer Claude Code is to upgrade AI Native Lab itself (which pulls a newer SDK).
  *
  * This endpoint is kept as a no-op stub for backwards compatibility with the
  * existing UI; it returns success=false with a clear message so the UI can
@@ -19,6 +19,6 @@ export async function POST() {
     deprecated: true,
     message:
       'Claude Code is now bundled inside the application. To get a newer ' +
-      'version, update CodePilot itself via the in-app updater.',
+      'version, update AI Native Lab itself via the in-app updater.',
   });
 }

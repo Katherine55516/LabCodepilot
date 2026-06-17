@@ -77,7 +77,7 @@ macOS VPN 工具（Clash、Surge 等）通常只设置系统代理（macOS HTTP 
 
 ### 注意事项
 
-- 代理检测只在启动时执行一次，如果用户在应用运行期间开关 VPN，需要重启 CodePilot
+- 代理检测只在启动时执行一次，如果用户在应用运行期间开关 VPN，需要重启 AI Native Lab
 - `proxy:resolve` IPC 可以在运行时查询，但当前未用于动态更新 server env
 
 ## Git for Windows

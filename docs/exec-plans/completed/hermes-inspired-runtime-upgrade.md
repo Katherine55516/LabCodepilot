@@ -105,7 +105,7 @@
 - **对比调研**：[docs/research/hermes-agent-analysis.md](../../research/hermes-agent-analysis.md)
 - **Hermes 本地副本**：`/Users/op7418/Documents/code/资料/hermes-agent-main/`（非 git 仓库，v0.8.0 快照）
 - **Native Runtime 交接文档（基线）**：[docs/handover/decouple-native-runtime.md](../../handover/decouple-native-runtime.md)
-- **CodePilot 项目根约定**：`/Users/op7418/Documents/code/opus-4.6-test-hermes-impl/CLAUDE.md`
+- **AI Native Lab 项目根约定**：`/Users/op7418/Documents/code/opus-4.6-test-hermes-impl/CLAUDE.md`
 
 **关键上游源文件**（只读参考）：
 - Hermes 并行判定：`/Users/op7418/Documents/code/资料/hermes-agent-main/run_agent.py:213-336`
@@ -128,7 +128,7 @@
 ### 参考
 - 对比调研：`docs/research/hermes-agent-analysis.md` §1.3、§3.1
 - 上游源：`run_agent.py:213-336`（四层判定完整实现）
-- CodePilot agent-loop：`src/lib/agent-loop.ts:225`、`:353-387`（for await fullStream 消费 tool events）
+- AI Native Lab agent-loop：`src/lib/agent-loop.ts:225`、`:353-387`（for await fullStream 消费 tool events）
 
 ### Acceptance criteria
 - [ ] `PARALLEL_SAFE_TOOLS: Set<string>` — 至少包含 `Read`, `Glob`, `Grep`, `WebFetch`, `codepilot_memory_search`, `codepilot_memory_get`, `codepilot_memory_recent`
@@ -203,7 +203,7 @@ Body 内容：
 ### 参考
 - 对比调研：`docs/research/hermes-agent-analysis.md` §2.6、§2.7、§3.2
 - 上游源：`agent/auxiliary_client.py:1-43`（docstring 列出 7 档 fallback 链）
-- CodePilot 既有 roleModels：`src/lib/provider-catalog.ts:41, :73-75`、`provider-resolver.ts:262-278`
+- AI Native Lab 既有 roleModels：`src/lib/provider-catalog.ts:41, :73-75`、`provider-resolver.ts:262-278`
 
 ### Acceptance criteria
 - [ ] 函数签名：`resolveAuxiliaryModel(task: 'compact' | 'vision' | 'summarize' | 'web_extract'): { providerId: string; modelId: string }`
@@ -712,6 +712,6 @@ e51c9d5 feat(provider): add resolveAuxiliaryModel with sdkProxyOnly fallback
 ### 附：对原研究稿的修正建议
 
 执行过程中发现 `docs/research/hermes-agent-analysis.md` §2.3 关于 `shouldAutoCompact` 是死代码 → LLM 压缩未接线的判断不准。实际上 `context-compressor.ts` + chat/route.ts:273-341 已经完整实现了 LLM 压缩，`shouldAutoCompact` 只是遗留死代码。建议更新研究稿：
-- §2.3 改为 "CodePilot 有两层压缩：微观 per-step 的 `pruneOldToolResults`（context-pruner.ts）+ 宏观 per-chat-turn 的 `compressConversation`（context-compressor.ts，wire 在 chat/route.ts）"
+- §2.3 改为 "AI Native Lab 有两层压缩：微观 per-step 的 `pruneOldToolResults`（context-pruner.ts）+ 宏观 per-chat-turn 的 `compressConversation`（context-compressor.ts，wire 在 chat/route.ts）"
 - §3.5 的 P2 优先级可以降低——大部分已经做完，只剩 auxiliary 模型切换一小步（已经在本次完成）
 

@@ -169,7 +169,7 @@ function main() {
       err(`plugin.json commandPrefix = '${manifest.commandPrefix}', expected 'gsd-'`);
     }
     if (manifest.builtIn !== true) {
-      err("plugin.json builtIn must be true for CodePilot-bundled plugin");
+      err("plugin.json builtIn must be true for AI Native Lab-bundled plugin");
     }
     ok("plugin.json schema");
   } catch (e) {

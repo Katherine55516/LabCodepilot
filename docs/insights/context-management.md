@@ -43,7 +43,7 @@ LLM 压缩是重操作——需要额外 API 调用（用小模型），有延�
 
 Claude Code 用的是 `window - 13K` 作为阈值，接近 95%。这对 CLI 环境合理（用户能看到 warning 并手动 `/compact`）。
 
-CodePilot 是 GUI，用户没有 `/compact` 命令（虽然我们也实现了），也不会主动关注上下文用量。80% 是一个安全余量——给压缩操作本身留出足够的"跑道"，也给下一轮对话留出空间。
+AI Native Lab 是 GUI，用户没有 `/compact` 命令（虽然我们也实现了），也不会主动关注上下文用量。80% 是一个安全余量——给压缩操作本身留出足够的"跑道"，也给下一轮对话留出空间。
 
 如果设太高（如 95%），压缩操作本身可能因为剩余空间不够而失败，形成死锁。
 
@@ -58,9 +58,9 @@ Claude Code 有完整的四级压缩体系（Micro → Session Memory → Auto C
 - `roughTokenCountEstimation` 的 4B/tok 粗估方法
 
 **没有吸收的：**
-- **Session Memory Compaction** — Claude Code 用 session memory 做中间级压缩。CodePilot 的 memory-extractor 已经每 3 轮提取记忆到 workspace，功能重叠
+- **Session Memory Compaction** — Claude Code 用 session memory 做中间级压缩。AI Native Lab 的 memory-extractor 已经每 3 轮提取记忆到 workspace，功能重叠
 - **Context Collapse**（实验性功能）— 涉及 commit context / spawn 控制等 CLI 专属概念，GUI 场景不适用
-- **Compact 后文件/技能恢复** — 需要维护"最近读取的文件"列表，增加复杂度。CodePilot 的 SDK resume 路径已有完整上下文；fallback 路径用 summary + 最近消息足够
+- **Compact 后文件/技能恢复** — 需要维护"最近读取的文件"列表，增加复杂度。AI Native Lab 的 SDK resume 路径已有完整上下文；fallback 路径用 summary + 最近消息足够
 - **Prompt cache 精细控制** — SDK 的 preset append 模式不暴露 `cache_control` API。我们用静态/动态分离来提高命中概率，但无法做到 Claude Code 那样的精确标记
 - **精确 token 计数** — 需要额外 API 调用，增加延迟和费用。粗估对"是否需要压缩"的判断已足够准确
 

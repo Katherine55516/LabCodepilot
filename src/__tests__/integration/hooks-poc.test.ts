@@ -10,7 +10,7 @@
  *   - ANTHROPIC_API_KEY, or
  *   - Claude Code OAuth session (CLAUDE_CODE_OAUTH_TOKEN)
  *
- * Exercises the full CodePilot queryOptions combination:
+ * Exercises the full AI Native Lab queryOptions combination:
  *   hooks: { PreToolUse, PostToolUse, PermissionDenied } + canUseTool
  *   + in-process MCP + stderr capture + resume flag
  *

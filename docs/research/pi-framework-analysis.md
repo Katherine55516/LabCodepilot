@@ -271,7 +271,7 @@ Pi 的核心扩展机制——工具、命令、快捷键、UI 组件全部可�
 
 ---
 
-## 11. 与 CodePilot 执行计划的关系
+## 11. 与 AI Native Lab 执行计划的关系
 
 ### 值得纳入的方案
 
@@ -281,13 +281,13 @@ Pi 的核心扩展机制——工具、命令、快捷键、UI 组件全部可�
 | **懒加载 Provider 注册表** | 中——比静态 import 高效 | 参考用于 `ai-provider.ts` |
 | **beforeToolCall/afterToolCall** | 中——比单一 checkPermission 更灵活 | 参考用于权限增强 |
 | **Steering/Follow-up** | 中——执行期间插入消息 | 未来功能 |
-| **Session Tree 分支** | 中——当前 CodePilot 不支持分支 | 未来功能 |
+| **Session Tree 分支** | 中——当前 AI Native Lab 不支持分支 | 未来功能 |
 
 ### 不适用的方案
 
 | Pi 特性 | 原因 |
 |---------|------|
-| TypeBox + AJV | CodePilot 统一用 Zod + Vercel AI SDK |
-| 反 MCP 立场 | CodePilot 保留 MCP 支持 |
-| 无子 Agent | CodePilot 计划支持子 Agent |
-| TUI 渲染 | CodePilot 是桌面 GUI |
+| TypeBox + AJV | AI Native Lab 统一用 Zod + Vercel AI SDK |
+| 反 MCP 立场 | AI Native Lab 保留 MCP 支持 |
+| 无子 Agent | AI Native Lab 计划支持子 Agent |
+| TUI 渲染 | AI Native Lab 是桌面 GUI |

@@ -1,4 +1,4 @@
-# UI Governance — CodePilot Design System
+# UI Governance — AI Native Lab Design System
 
 ## 四层架构
 

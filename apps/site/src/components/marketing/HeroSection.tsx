@@ -24,7 +24,7 @@ export function HeroSection({
         <div className="mx-auto max-w-[800px] px-6 pt-8 text-center md:pt-10 lg:pt-12">
           <Image
             src="/logo.png"
-            alt="CodePilot"
+            alt="AI Native Lab"
             width={80}
             height={80}
             className="mx-auto h-24 w-24 md:h-28 md:w-28"

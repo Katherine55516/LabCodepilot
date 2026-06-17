@@ -4,7 +4,7 @@
  * Responsibility: synchronize the bundled GSD plugin
  * (vendor/gsd-bundle/ packed as extraResources/gsd-bundle/ at build time)
  * to the user's `~/.claude/plugins/external_plugins/codepilot-gsd-vendor/`
- * directory at app boot, so CodePilot's slash-command scanner picks up the
+ * directory at app boot, so AI Native Lab's slash-command scanner picks up the
  * `/gsd-*` commands automatically. Also mirrors agent definitions to
  * `~/.claude/agents/gsd-*.md` so Claude Code's subagent resolver can find
  * them when commands spawn agents via the Agent tool.
@@ -24,7 +24,7 @@
  *     modifications or installed official GSD), the file is left alone and
  *     a conflict is recorded.
  * - Disabling: writing `<installPath>/.disabled` flag causes install() to
- *   skip. To keep CodePilot's scanner from picking up the commands while
+ *   skip. To keep AI Native Lab's scanner from picking up the commands while
  *   disabled, we rename `commands/` -> `commands.disabled/` (scanner only
  *   reads `commands/`). Re-enabling renames back.
  */
@@ -106,7 +106,7 @@ export function getAgentsMirrorPath(homedir: string = os.homedir()): string {
  * `~/.claude/commands/` is the canonical location Claude Code (and the
  * Claude Agent SDK init scan) reads global slash commands from. Bundled
  * plugin commands MUST be mirrored here — otherwise `/gsd-debug` shows
- * up in CodePilot's popover but the SDK has no idea what to do with it
+ * up in AI Native Lab's popover but the SDK has no idea what to do with it
  * and the request returns instantly with no work performed.
  */
 export function getCommandsMirrorPath(homedir: string = os.homedir()): string {

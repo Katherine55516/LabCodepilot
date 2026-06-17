@@ -65,7 +65,7 @@ export function buildContextCompressedStatus(stats: {
  * Decide what (sdkSessionId, conversationHistory) to hand to streamClaude
  * after a compaction attempt.
  *
- * Rule: once CodePilot has produced a fresh context_summary (manual /compact or
+ * Rule: once AI Native Lab has produced a fresh context_summary (manual /compact or
  * auto pre-compression), we MUST stop resuming the old SDK session. Otherwise
  * the Claude Code SDK resumes with its own full transcript and ignores our
  * summary, defeating the whole point of compressing. On the next turn the
@@ -166,7 +166,7 @@ export function filterHistoryByCompactBoundary<T extends { _rowid?: number }>(in
  *      fall back to `existingBoundaryRowid`. A degraded reactive compact
  *      MUST NOT reset a previously-established boundary to 0, otherwise
  *      the next turn's filter silently regresses to passthrough and
- *      CodePilot re-feeds already-summarized rows.
+ *      AI Native Lab re-feeds already-summarized rows.
  *
  *   2. If some row DOES carry a `_rowid` but it's lower than
  *      `existingBoundaryRowid` (e.g. caller accidentally passed unfiltered

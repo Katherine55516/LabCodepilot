@@ -8,7 +8,7 @@
 
 /**
  * Color palette for assistant avatars.
- * Derived from CodePilot's OKLCH primary color family.
+ * Derived from AI Native Lab's OKLCH primary color family.
  */
 export const AVATAR_COLORS = [
   '#6C5CE7', // purple-blue (primary)

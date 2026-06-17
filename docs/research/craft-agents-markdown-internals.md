@@ -3,17 +3,17 @@
 > 调研日期：2026-04-16
 > 对标仓库：`/Users/op7418/Documents/code/资料/craft-agents-oss-main`（craft-agents-oss）
 > 姊妹文档：
-> - [markdown-editor-tiptap-evaluation.md](./markdown-editor-tiptap-evaluation.md) — CodePilot 自己的 Markdown 栈与 Tiptap 可行性
+> - [markdown-editor-tiptap-evaluation.md](./markdown-editor-tiptap-evaluation.md) — AI Native Lab 自己的 Markdown 栈与 Tiptap 可行性
 > - [artifact-preview-ai-elements.md](./artifact-preview-ai-elements.md) — Artifact 预览（本文发现的"代码块 language 拦截"是另一条轻量路径）
 > - [craft-agents-docs-system-review.md](./craft-agents-docs-system-review.md) — craft 对外治理文档对标
 >
-> 三层结构：**[craft 事实]** 带 `file:line`；**[CodePilot 事实]** 带本仓库路径；**[推断]** 标注。
+> 三层结构：**[craft 事实]** 带 `file:line`；**[AI Native Lab 事实]** 带本仓库路径；**[推断]** 标注。
 
 ---
 
 ## 1. 调研动机
 
-craft 是"文档驱动的 Agent"——Skills / Agent 配置 / Source Guides / Session 输出全部以 Markdown 文件承载；聊天窗口本身也是 Markdown 渲染器。和 CodePilot 现状高度可对照。前一份 Markdown 调研（`markdown-editor-tiptap-evaluation.md`）中留下的三个关键问题，正好能用 craft 的实战选型来交叉验证：
+craft 是"文档驱动的 Agent"——Skills / Agent 配置 / Source Guides / Session 输出全部以 Markdown 文件承载；聊天窗口本身也是 Markdown 渲染器。和 AI Native Lab 现状高度可对照。前一份 Markdown 调研（`markdown-editor-tiptap-evaluation.md`）中留下的三个关键问题，正好能用 craft 的实战选型来交叉验证：
 
 1. Tiptap 在"文档驱动 Agent"里到底用在哪里？渲染侧、编辑侧、还是两侧？
 2. 流式长文档卡顿有无工程化的 memo 策略参考？
@@ -106,7 +106,7 @@ math-options.ts                      9 行 — 仅启用双美元 $$ 避免货�
 
 - `Markdown.tsx:576-593` 的 `MemoizedMarkdown` 要求外部传 `id` prop（消息 ID 或段落 ID），memo 比较同时看 `id` 与 `children`。
 - [推断] 对流式场景的意义：同一条消息每次 chunk 来时 `id` 不变、`children` 变，触发重渲；**不同消息共享同一渲染器但 `id` 不同**，避免相邻消息误命中缓存。
-- 对比：CodePilot 现状 `src/components/ai-elements/message.tsx:349` 的 memo 只比 `children` 引用，没有 id 维度。长消息 + 多消息列表时缓存粒度偏粗。
+- 对比：AI Native Lab 现状 `src/components/ai-elements/message.tsx:349` 的 memo 只比 `children` 引用，没有 id 维度。长消息 + 多消息列表时缓存粒度偏粗。
 
 ### 3.2 Shiki LRU 缓存（200 项）
 
@@ -140,13 +140,13 @@ math-options.ts                      9 行 — 仅启用双美元 $$ 避免货�
 ### 3.5 Safe Proxy 防 LLM 输出乱 HTML
 
 - `safe-components.tsx:76-111` 的 `wrapWithSafeProxy` 用 JS Proxy 拦截所有未定义组件名；对含非法字符（`<sq+qr>`、`<user@foo>`）的标签，直接退化为 `UnknownTag` 文本组件。
-- [推断] 由于启用了 `rehype-raw`（允许原始 HTML），需要这层防御否则 LLM 一旦输出怪标签会炸。CodePilot 的 `streamdown` 对类似问题默认保守转义，严格性不同但都需要考虑。
+- [推断] 由于启用了 `rehype-raw`（允许原始 HTML），需要这层防御否则 LLM 一旦输出怪标签会炸。AI Native Lab 的 `streamdown` 对类似问题默认保守转义，严格性不同但都需要考虑。
 
 ### 3.6 自建 Collapsible remark 插件
 
 - `remarkCollapsibleSections.ts:1-130` 遍历 AST，按 heading 深度把后续节点包进 `<section data-section-id="...">`。
 - 前端 `CollapsibleMarkdownContext.tsx` + `CollapsibleSection.tsx` 消费 `data-section-id`，实现"按标题折叠"。
-- [推断] 很实用的长文档阅读体验，相当于 Obsidian / Notion 的折叠。CodePilot 的 Streamdown 默认无此能力，可作为独立扩展点。
+- [推断] 很实用的长文档阅读体验，相当于 Obsidian / Notion 的折叠。AI Native Lab 的 Streamdown 默认无此能力，可作为独立扩展点。
 
 ### 3.7 Tiptap 仅用于编辑器侧
 
@@ -161,7 +161,7 @@ math-options.ts                      9 行 — 仅启用双美元 $$ 避免货�
 - 解析：`gray-matter` 提取 YAML frontmatter，body 为 Markdown。
 - 必填字段：`name`、`description`；可选：`globs`、`alwaysAllow`、`icon`、`requiredSources`（`storage.ts:68-95`）。
 - Source Guides：`{workspace}/sources/{slug}/guide.md`。
-- [推断] 和 CodePilot 的 Skills 设计几乎一致，互相印证此模式是事实上的行业惯例。
+- [推断] 和 AI Native Lab 的 Skills 设计几乎一致，互相印证此模式是事实上的行业惯例。
 
 ### 3.9 未发现的能力（避免误学）
 
@@ -173,9 +173,9 @@ math-options.ts                      9 行 — 仅启用双美元 $$ 避免货�
 
 ---
 
-## 4. 与 CodePilot 现状对照
+## 4. 与 AI Native Lab 现状对照
 
-| 维度 | craft | CodePilot |
+| 维度 | craft | AI Native Lab |
 |------|-------|-----------|
 | 聊天渲染库 | `react-markdown` + `unified` 生态 | `streamdown`（专为流式设计） |
 | 代码高亮 | Shiki 3.21 + 200 项 LRU + 21 预加载 | **Shiki LRU 已存在**：`code-block.tsx:163-170` 的 `highlighterCache`（10 项）+ `tokensCache`（200 项）；[待核验] `MessageResponse` 这条 Streamdown 渲染链是否复用了该 LRU 未确认 |
@@ -201,7 +201,7 @@ math-options.ts                      9 行 — 仅启用双美元 $$ 避免货�
 
 - craft 选 Tiptap 做**编辑器**（斜杠菜单、浮动工具栏、富文本所见即所得），选 react-markdown 做**渲染**——与前文判断"Tiptap 不适合作渲染主栈"一致。
 - 但 craft 用 Tiptap 做编辑器而非 CodeMirror，说明在"文档驱动 Agent"场景下，**WYSIWYG 的 Markdown 编辑确实是一种可行选型**，不只有 CodeMirror 源码模式一条路。
-- [推断] 选型决策因子是**目标用户**：craft 面向偏产品向用户（类 Notion 体验），CodePilot 面向创作者 + 开发者（需要源码模式），两者不同。前文推荐 CodeMirror 6 对 CodePilot 仍然成立，但应补一句"若未来做面向非技术用户的笔记场景，Tiptap 是备选"。
+- [推断] 选型决策因子是**目标用户**：craft 面向偏产品向用户（类 Notion 体验），AI Native Lab 面向创作者 + 开发者（需要源码模式），两者不同。前文推荐 CodeMirror 6 对 AI Native Lab 仍然成立，但应补一句"若未来做面向非技术用户的笔记场景，Tiptap 是备选"。
 - craft 的 Tiptap 迁移留下**双引擎并存**（`tiptap-markdown` + `@tiptap/markdown`），说明升级成本不可忽视——对我方是警示。
 
 ### 5.2 对 `artifact-preview-ai-elements.md` 的修订
@@ -219,7 +219,7 @@ math-options.ts                      9 行 — 仅启用双美元 $$ 避免货�
   2. 魔法 language 需产品约定清单，LLM 训练/提示词得同步；
   3. 对大尺寸预览（React 工程、Sandpack）仍需独立面板。
 
-**结论**：推荐 CodePilot 采用**双轨制**——
+**结论**：推荐 AI Native Lab 采用**双轨制**——
 - **轨 A（内联富块，借鉴 craft）**：代码块 language 拦截，覆盖 Mermaid / Math / Diff / JSON / PDF / Image / DataTable 等内联场景，收益高成本低。
 - **轨 B（侧边 Artifact，前文方案）**：AI Elements `<Artifact>` + `WebPreview` + `JSXPreview`，覆盖 React 预览、URL 劫持、大尺寸 HTML。
 
@@ -227,7 +227,7 @@ math-options.ts                      9 行 — 仅启用双美元 $$ 避免货�
 
 前文 `markdown-editor-tiptap-evaluation.md` 第 2.4 节对根因候选做了三种推断。craft 的 `MemoizedMarkdown` 给出**第四种视角**，但**只是缓存边界修正，不是长文档重 parse 的核心解法**：
 
-- craft 的 memo 要求调用方传 `id`，形成"消息 ID 维度"的缓存边界。CodePilot 当前 `src/components/ai-elements/message.tsx:338-350` 的 memo 只比 `children` 引用。
+- craft 的 memo 要求调用方传 `id`，形成"消息 ID 维度"的缓存边界。AI Native Lab 当前 `src/components/ai-elements/message.tsx:338-350` 的 memo 只比 `children` 引用。
 - **关键纠正**（基于 Codex review）：同一条消息流式追加时，`children` 字符串每次都变，`messageId` 相同——加 `id` 维度**不能阻止整串重 parse**。它的真实价值是：**列表里多条消息共享 `<MessageResponse>` 实例时，确保相邻消息不会误命中缓存**；同时便于上层拆分"稳定前缀 + 流式尾部"两段时给每段独立 key。
 - **长文档重 parse 的真正核心解法**（按收益从高到低）：
   1. **稳定前缀 + 流式尾部分段渲染**：把已完成的上文段落独立 memo，只让尾部那几段随流追加重渲。`messageId` + 段落索引做复合 key。
@@ -246,13 +246,13 @@ math-options.ts                      9 行 — 仅启用双美元 $$ 避免货�
    - 证据：`Markdown.tsx:576-593` 的 `MemoizedMarkdown` 双键比较。
    - **注意**：单独做这一条**不能解决长文档流式重 parse**，需配合"稳定前缀 + 流式尾部分段"（本文 5.3 节）。
 2. **核对 Streamdown 渲染链是否复用 `code-block.tsx:163-170` 的 LRU 缓存**（先验证再决定动作）
-   - CodePilot 已有 `highlighterCache` + `tokensCache`，但不确定消息流里的代码块是否走同一条高亮通路。若未复用，则对齐；若已复用，本条无需改动。
+   - AI Native Lab 已有 `highlighterCache` + `tokensCache`，但不确定消息流里的代码块是否走同一条高亮通路。若未复用，则对齐；若已复用，本条无需改动。
 3. **`ShikiThemeContext` 显式主题传递**（1-2 人时，解决暗色主题 fallback）
    - 证据：`packages/ui/src/context/ShikiThemeContext.tsx:1-68`。
 4. **代码块 language 拦截框架**（1-2 天，基础）
    - 证据：`Markdown.tsx:226-283`，从最简单的 `mermaid` / `json` / `diff` 开始。
 5. **`MarkdownDiffBlock` 接入**（0.5 天）
-   - 证据：`MarkdownDiffBlock.tsx:1-60` + `@pierre/diffs`；CodePilot git diff 展示可直接复用。
+   - 证据：`MarkdownDiffBlock.tsx:1-60` + `@pierre/diffs`；AI Native Lab git diff 展示可直接复用。
 6. **`MarkdownJsonBlock` 接入**（0.5 天）
    - 证据：`MarkdownJsonBlock.tsx` + `@uiw/react-json-view`；LLM 返回 JSON 的展示体验显著改善。
 7. **Collapsible remark 插件**（1 人天）
@@ -260,7 +260,7 @@ math-options.ts                      9 行 — 仅启用双美元 $$ 避免货�
 8. **Safe HTML Proxy 防御**（0.5 天）
    - 证据：`safe-components.tsx:76-111`；只要项目支持原始 HTML 就应有一层此防御。
 9. **Skills frontmatter 字段规范对齐**（核对即可）
-   - 证据：`packages/shared/src/skills/storage.ts:68-95`；CodePilot 已有 frontmatter 解析，比对字段集查漏。
+   - 证据：`packages/shared/src/skills/storage.ts:68-95`；AI Native Lab 已有 frontmatter 解析，比对字段集查漏。
 10. **Datatable / Spreadsheet 富块**（各 1-2 天，可选）
     - 证据：`MarkdownDatatableBlock.tsx:1-718` / `MarkdownSpreadsheetBlock.tsx:1-317`。
 11. **表格导出 CSV/JSON**（0.5 天）
@@ -272,10 +272,10 @@ math-options.ts                      9 行 — 仅启用双美元 $$ 避免货�
 
 ## 7. 未决事项
 
-1. 代码块 language 拦截的完整语言清单需要与 CodePilot 产品侧对齐（哪些必要，哪些暂缓）。
+1. 代码块 language 拦截的完整语言清单需要与 AI Native Lab 产品侧对齐（哪些必要，哪些暂缓）。
 2. LLM 提示词需要同步学会输出魔法 language；需落一份 system prompt 说明。
-3. craft 的 `markitdown-js` 做"外部文档 → Markdown"转换，CodePilot 是否需要对应能力（PDF 拖进来自动转 Markdown）需产品判断。
-4. 长会话虚拟化 craft 也没做，此问题仍需 CodePilot 独立解决，参考前份 `markdown-editor-tiptap-evaluation.md` 第 5.2 节。
+3. craft 的 `markitdown-js` 做"外部文档 → Markdown"转换，AI Native Lab 是否需要对应能力（PDF 拖进来自动转 Markdown）需产品判断。
+4. 长会话虚拟化 craft 也没做，此问题仍需 AI Native Lab 独立解决，参考前份 `markdown-editor-tiptap-evaluation.md` 第 5.2 节。
 5. Tiptap 双引擎迁移（`tiptap-markdown` vs `@tiptap/markdown`）的成本教训需在任何未来 Tiptap 选型 POC 里留心。
 
 ---

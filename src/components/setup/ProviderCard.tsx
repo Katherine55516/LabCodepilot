@@ -36,7 +36,7 @@ export function ProviderCard({ status, onStatusChange, onBeforeNavigate }: Provi
   const fetchProviders = useCallback(async () => {
     setLoading(true);
     try {
-      // /api/setup is the single source of truth for "can CodePilot dispatch a
+      // /api/setup is the single source of truth for "can AI Native Lab dispatch a
       // chat?" — it delegates to hasCodePilotProvider() which includes the
       // OpenAI OAuth virtual provider that /api/providers does not surface.
       // We still fetch /api/providers in parallel purely for display detail

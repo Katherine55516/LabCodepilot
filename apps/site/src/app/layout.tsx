@@ -4,8 +4,8 @@ import type { Metadata } from 'next';
 import { siteConfig } from '@/lib/site.config';
 
 const title = {
-  default: 'CodePilot — Desktop Workspace for Claude Code',
-  template: '%s | CodePilot',
+  default: 'AI Native Lab — Desktop Workspace for Claude Code',
+  template: '%s | AI Native Lab',
 };
 
 const description = siteConfig.description;
@@ -24,8 +24,8 @@ export const metadata: Metadata = {
     'code assistant',
     'AI agent',
   ],
-  authors: [{ name: 'CodePilot' }],
-  creator: 'CodePilot',
+  authors: [{ name: 'AI Native Lab' }],
+  creator: 'AI Native Lab',
   openGraph: {
     type: 'website',
     locale: 'en_US',
@@ -38,7 +38,7 @@ export const metadata: Metadata = {
         url: '/og-image.png',
         width: 1200,
         height: 630,
-        alt: 'CodePilot — Desktop Workspace for Claude Code',
+        alt: 'AI Native Lab — Desktop Workspace for Claude Code',
       },
     ],
   },

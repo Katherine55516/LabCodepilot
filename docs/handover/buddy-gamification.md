@@ -234,7 +234,7 @@ const needsHeartbeat = !!data.needsHeartbeat && !!state.buddy && initialMessages
 | 场景 | 组件 | 有 Buddy | 无 Buddy |
 |------|------|---------|---------|
 | 聊天空（助理） | `MessageList.tsx` | 3D 物种图 + 渐变背景 + 名字 | 3D 蛋 + 领养提示 |
-| 聊天空（项目） | `MessageList.tsx` | — | CodePilot logo |
+| 聊天空（项目） | `MessageList.tsx` | — | AI Native Lab logo |
 | 新建聊天页 | `ChatEmptyState.tsx` | — | 3D 蛋图替代旧 Brain 图标 |
 | 侧栏推广卡 | `AssistantPromoCard` | — | 3D 蛋图 (20px) |
 | 看板 Buddy 卡 | `DashboardPanel.tsx` | 3D 物种图 + 渐变背景 + 状态行 | 3D 蛋 + 孵化按钮 |

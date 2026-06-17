@@ -6,7 +6,7 @@
 
 全局快捷键拉起浮窗，语音输入 → STT → 正常聊天流程 → TTS 播报回复。快进快出，不需要打开主窗口。
 
-语音能力作为 **MCP server** 实现，不依赖 Claude Code 的 Channel 协议。参考 Channel 的架构思路（MCP server 桥接外部 IO），但完全由 CodePilot 自己控制。
+语音能力作为 **MCP server** 实现，不依赖 Claude Code 的 Channel 协议。参考 Channel 的架构思路（MCP server 桥接外部 IO），但完全由 AI Native Lab 自己控制。
 
 ## 架构
 
@@ -29,7 +29,7 @@
 └──────────────────────────────────────────┘
         │ IPC
 ┌───────▼──────────────────────────────────┐
-│  CodePilot Main Process                   │
+│  AI Native Lab Main Process                   │
 │  Session Manager + Context Assembler      │
 │  entryPoint: 'floating'                   │
 │  → 只注入 workspace prompt（上下文小，快）   │
@@ -59,7 +59,7 @@
 
 Channel 是 Claude Code CLI 的私有协议（`notifications/claude/channel`），绑定 CLI 运行时。我们的场景：
 
-- CodePilot 自己就是客户端，不需要通过 CLI 中转
+- AI Native Lab 自己就是客户端，不需要通过 CLI 中转
 - Pull 模式（前端主动调 MCP tool）已经够用，不需要 push notification
 - 保持独立，不引入 Claude Code CLI 的运行时依赖
 

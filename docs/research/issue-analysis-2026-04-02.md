@@ -155,7 +155,7 @@ Log 2（macOS + MiniMax）：
 
 | Issue | 摘要 | 聚类 | 信息充分度 |
 |-------|------|------|-----------|
-| #408 | MCP 连接问题（CLI 能连 CodePilot 不行） | 独立 | 中 |
+| #408 | MCP 连接问题（CLI 能连 AI Native Lab 不行） | 独立 | 中 |
 | #389 | Mac 关闭窗口后 Telegram 断连 | 独立 | 中 |
 | #383 | chrome-devtools MCP 无法移除 | 独立 | 高 — 设计如此 |
 | #359 | AskUserQuestion 在 Discord 渲染问题 | 独立 | 中 |

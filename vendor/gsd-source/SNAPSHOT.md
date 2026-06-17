@@ -1,6 +1,6 @@
 # GSD Source Snapshot
 
-> 这是 [gsd-build/get-shit-done](https://github.com/gsd-build/get-shit-done)（archived, MIT）的固定快照，由 CodePilot 维护者手动同步。**请勿手动修改此目录下的文件**——若需升级，重新跑 `node scripts/vendor-gsd-fetch.js` 或按下方流程手动同步。
+> 这是 [gsd-build/get-shit-done](https://github.com/gsd-build/get-shit-done)（archived, MIT）的固定快照，由 AI Native Lab 维护者手动同步。**请勿手动修改此目录下的文件**——若需升级，重新跑 `node scripts/vendor-gsd-fetch.js` 或按下方流程手动同步。
 
 ## 当前快照
 
@@ -27,7 +27,7 @@
 
 ## 不复制的目录
 
-`docs/` `tests/` `sdk/` `scripts/`（仓库根）、`bin/`（仓库根 = npm 包 installer）、`assets/`、`hooks/` 等是 GSD 自身的构建工具与文档站，与"内置进 CodePilot 运行时"无关，不入库。注意区分：
+`docs/` `tests/` `sdk/` `scripts/`（仓库根）、`bin/`（仓库根 = npm 包 installer）、`assets/`、`hooks/` 等是 GSD 自身的构建工具与文档站，与"内置进 AI Native Lab 运行时"无关，不入库。注意区分：
 - 仓库根的 `bin/` **不复制**（npm installer 工具）
 - 仓库 `get-shit-done/bin/` **复制**（命令运行时引用 `~/.claude/get-shit-done/bin/...`）
 

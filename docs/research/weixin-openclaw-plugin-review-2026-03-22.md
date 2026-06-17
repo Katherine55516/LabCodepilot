@@ -1,4 +1,4 @@
-# OpenClaw 微信插件拆包与 CodePilot 逆向集成可行性调研
+# OpenClaw 微信插件拆包与 AI Native Lab 逆向集成可行性调研
 
 > 调研时间：2026-03-22
 > 调研方式：静态拆包 + 本地架构比对，未做真实微信账号登录联调
@@ -8,9 +8,9 @@
 
 ## 一句话结论
 
-可以集成，但不建议把 `@tencent-weixin/openclaw-weixin` 这个 npm 包直接塞进 CodePilot 运行。
+可以集成，但不建议把 `@tencent-weixin/openclaw-weixin` 这个 npm 包直接塞进 AI Native Lab 运行。
 
-更合适的做法是：把它当成协议说明和参考实现，按 CodePilot 现有 `Bridge` 架构原生实现一个 `weixin` adapter。
+更合适的做法是：把它当成协议说明和参考实现，按 AI Native Lab 现有 `Bridge` 架构原生实现一个 `weixin` adapter。
 
 原因很简单：
 
@@ -89,8 +89,8 @@ CLI 没有任何微信协议逻辑，只是一个薄安装器，流程只有四�
 
 结论：
 
-- **直接安装到 CodePilot 里当依赖运行：不现实**
-- **按协议和实现样本重写一个 CodePilot 原生 adapter：可行**
+- **直接安装到 AI Native Lab 里当依赖运行：不现实**
+- **按协议和实现样本重写一个 AI Native Lab 原生 adapter：可行**
 
 ## 四、微信后端协议已经暴露得足够清楚
 
@@ -153,7 +153,7 @@ CLI 没有任何微信协议逻辑，只是一个薄安装器，流程只有四�
 4. 图片/文件/视频直接保存
 5. 语音再尝试 SILK -> WAV 转码
 
-这部分对 CodePilot 的意义很大：
+这部分对 AI Native Lab 的意义很大：
 
 - 我们不用猜协议
 - 也不需要 native 依赖
@@ -179,7 +179,7 @@ CLI 没有任何微信协议逻辑，只是一个薄安装器，流程只有四�
 - 进程重启后，历史 peer 的 `context_token` 会丢
 - 任何“冷启动主动推送”都可能失败
 
-这对 CodePilot 很关键，因为我们已经有：
+这对 AI Native Lab 很关键，因为我们已经有：
 
 - 持久会话
 - bridge 自动启动
@@ -195,7 +195,7 @@ OpenClaw 微信插件支持：
 - 每个账号独立 token
 - 每个账号独立 sync buf
 
-而 CodePilot 当前 bridge 设置还是以平面 key-value 为主，例如：
+而 AI Native Lab 当前 bridge 设置还是以平面 key-value 为主，例如：
 
 - `bridge_qq_app_id`
 - `bridge_feishu_app_secret`
@@ -215,13 +215,13 @@ OpenClaw 微信插件支持：
 - 缺失它的 session/routing/reply/pairing 体系
 - 状态文件路径默认写在 `~/.openclaw`
 
-所以“npm install 然后 require 进 CodePilot”这条路不值得走。
+所以“npm install 然后 require 进 AI Native Lab”这条路不值得走。
 
-## 七、与 CodePilot 现状的匹配度
+## 七、与 AI Native Lab 现状的匹配度
 
 ### 1. 能直接复用的现有能力
 
-CodePilot 已有这些基础能力，能接住微信适配器：
+AI Native Lab 已有这些基础能力，能接住微信适配器：
 
 - `src/lib/bridge/` 的统一 adapter 生命周期
 - `consumeOne()` 队列消费模型
@@ -250,7 +250,7 @@ CodePilot 已有这些基础能力，能接住微信适配器：
 原因：
 
 - 运行时耦合太深
-- 会把 OpenClaw runtime 假设硬塞进 CodePilot
+- 会把 OpenClaw runtime 假设硬塞进 AI Native Lab
 - 后续调试成本会很高
 
 ### 方案 B：原生实现 `weixin` adapter
@@ -297,7 +297,7 @@ CodePilot 已有这些基础能力，能接住微信适配器：
 但这个“能做”的前提是：
 
 - **把腾讯这套包当协议参考，不当运行时依赖**
-- **用 CodePilot 自己的 bridge 架构重写微信 adapter**
+- **用 AI Native Lab 自己的 bridge 架构重写微信 adapter**
 
 如果只问“是否值得往前推进一个 POC”，我的结论是：
 

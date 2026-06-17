@@ -15,7 +15,7 @@ src/components/chat/
 
 src/lib/
 ├── widget-sanitizer.ts        # HTML 清理 + receiver iframe srcdoc 构建
-├── widget-css-bridge.ts       # CSS 变量桥接（CodePilot OKLCH → widget 标准变量名）
+├── widget-css-bridge.ts       # CSS 变量桥接（AI Native Lab OKLCH → widget 标准变量名）
 ├── widget-guidelines.ts       # 设计指南 system prompt + 按需模块组装
 ```
 
@@ -76,7 +76,7 @@ WidgetRenderer 内部：
 
 ### 代码围栏触发（非 tool_use）
 
-CodePilot 使用 Claude Agent SDK 的 preset 模式，无法注册自定义 tool。但已有成熟的"代码围栏 → 组件"模式。Widget 复用此模式：text delta 天然支持流式传输，无需处理 `input_json_delta`。
+AI Native Lab 使用 Claude Agent SDK 的 preset 模式，无法注册自定义 tool。但已有成熟的"代码围栏 → 组件"模式。Widget 复用此模式：text delta 天然支持流式传输，无需处理 `input_json_delta`。
 
 ### Receiver iframe 模式
 
@@ -89,13 +89,13 @@ CodePilot 使用 Claude Agent SDK 的 preset 模式，无法注册自定义 tool
 
 ### CSS 变量桥接
 
-`widget-css-bridge.ts` 将 CodePilot 的 OKLCH 主题变量映射为 Anthropic 指南中的标准变量名：
+`widget-css-bridge.ts` 将 AI Native Lab 的 OKLCH 主题变量映射为 Anthropic 指南中的标准变量名：
 ```
 --color-background-primary   → var(--background)
 --color-text-primary          → var(--foreground)
 --color-border-tertiary       → var(--border)
 ```
-模型按指南写的 CSS 直接使用 CodePilot 主题色，深色/浅色自动切换。
+模型按指南写的 CSS 直接使用 AI Native Lab 主题色，深色/浅色自动切换。
 
 ### System Prompt 注入
 

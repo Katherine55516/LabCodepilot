@@ -373,6 +373,6 @@ const AUTH_PATTERNS = [
 | 加新服务商 | 手写 preset 对象，没有校验，上线后用户报 bug 才发现错 | 写声明式配置 + meta，Schema 校验不过则 test 失败，不可能带错上线 |
 | 改模型名 | 改 catalog，不确定有没有破坏别的，祈祷 | 改配置，preset 测试自动验证所有服务商不受影响 |
 | 用户配置 GLM | 填 Key → 发消息 → 报错 401 → 截图发 Issue | 填 Key → 点测试 → 立即成功/立即看到"Key 无效，去这里重新获取" |
-| 终端 Claude Code 配了 Bedrock，打开 CodePilot 选 OpenRouter | 请求莫名跑到 Bedrock，用户完全无法理解 | ✅ 2026-04-15 通过 per-request shadow `~/.claude/` 实现真正隔离：DB provider 请求时自动剥离 settings.json 的 ANTHROPIC_*，其余 user-level MCP/plugins/hooks/CLAUDE.md 不受影响 |
+| 终端 Claude Code 配了 Bedrock，打开 AI Native Lab 选 OpenRouter | 请求莫名跑到 Bedrock，用户完全无法理解 | ✅ 2026-04-15 通过 per-request shadow `~/.claude/` 实现真正隔离：DB provider 请求时自动剥离 settings.json 的 ANTHROPIC_*，其余 user-level MCP/plugins/hooks/CLAUDE.md 不受影响 |
 | 运行时 API 报错 | "Error: 401 Unauthorized" | "智谱 GLM 认证失败，可能是 Key 过期。[重新获取 →]" |
 | 百炼用户拿错 Key | 模糊报错，来回沟通 5 条 Issue 评论 | 配置时提示"请使用 sk-sp- 开头的 Coding Plan Key"，测试时立即检出 |

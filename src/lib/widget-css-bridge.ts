@@ -1,5 +1,5 @@
 /**
- * CSS variable bridge — maps guideline variable names to CodePilot's OKLCH
+ * CSS variable bridge — maps guideline variable names to AI Native Lab's OKLCH
  * design tokens so model-generated widgets inherit the current theme.
  *
  * Also provides a scoped set of Tailwind-like utility classes inside
@@ -46,7 +46,7 @@ export const WIDGET_CSS_BRIDGE = /* css */ `
 --border-radius-lg:           12px;
 --border-radius-xl:           16px;
 
-/* ── Chart palette (mapped from CodePilot chart-1~5) ─ */
+/* ── Chart palette (mapped from AI Native Lab chart-1~5) ─ */
 --color-chart-1:              var(--chart-1);
 --color-chart-2:              var(--chart-2);
 --color-chart-3:              var(--chart-3);

@@ -63,7 +63,7 @@
 │   └── audio-capture/       # 6 平台二进制
 └── ...
 ```
-CodePilot 通过 `pathToClaudeCodeExecutable = findClaudeBinary()` 强制走用户本地 CLI（npm/native installer/bun/homebrew），SDK 内置 cli.js 被「绕过」。没装 CLI 的用户被路由到功能受限的 Native runtime。
+AI Native Lab 通过 `pathToClaudeCodeExecutable = findClaudeBinary()` 强制走用户本地 CLI（npm/native installer/bun/homebrew），SDK 内置 cli.js 被「绕过」。没装 CLI 的用户被路由到功能受限的 Native runtime。
 
 **v0.55+（新架构）**：
 ```
@@ -77,7 +77,7 @@ CodePilot 通过 `pathToClaudeCodeExecutable = findClaudeBinary()` 强制走用�
 ```
 8 个平台子包：`darwin-arm64` / `darwin-x64` / `linux-arm64` / `linux-arm64-musl` / `linux-x64` / `linux-x64-musl` / `win32-arm64` / `win32-x64`。npm install 时只装当前 OS/arch 匹配的子包。
 
-CodePilot **不再覆盖** `pathToClaudeCodeExecutable`，SDK 自动通过 `require.resolve('@anthropic-ai/claude-agent-sdk-<platform>-<arch>')` 找到内置 binary 并 spawn。
+AI Native Lab **不再覆盖** `pathToClaudeCodeExecutable`，SDK 自动通过 `require.resolve('@anthropic-ai/claude-agent-sdk-<platform>-<arch>')` 找到内置 binary 并 spawn。
 
 ### 触及文件清单（17 个）
 

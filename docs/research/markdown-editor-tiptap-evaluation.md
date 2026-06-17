@@ -15,7 +15,7 @@
 
 本文不做实现，只回答三个问题：
 - 根因是 Streamdown 吗，还是上层使用方式？
-- Tiptap 是否适合做 CodePilot 的 Markdown 渲染/编辑？
+- Tiptap 是否适合做 AI Native Lab 的 Markdown 渲染/编辑？
 - 如果不是 Tiptap，替代路径是什么？
 
 ---
@@ -104,7 +104,7 @@ export const MessageResponse = memo(
 - **来源**：<https://tiptap.dev/docs/content-ai/capabilities/generation/text-generation/stream>（访问日期 2026-04-16）。
 - `editor.commands.streamContent(range, cb)` **目前归属 Content AI 付费能力**，文档标 "Available in Start plan"，需通过 private registry 安装；**不是开源核心 API**。
 - 更高级的 `AiCaret`、`streamTool`、schema-aware 生成同样在 **Content AI Toolkit（付费）** 中。
-- **商业影响**：若要在 CodePilot 做 Tiptap + 流式 AI 写入，需订阅 Start plan。此前表述"streamContent 是开源核心"低估了商业风险，在此更正。
+- **商业影响**：若要在 AI Native Lab 做 Tiptap + 流式 AI 写入，需订阅 Start plan。此前表述"streamContent 是开源核心"低估了商业风险，在此更正。
 
 ### 3.5 商业化与协议
 
@@ -149,7 +149,7 @@ export const MessageResponse = memo(
 **不推荐作为 Markdown 渲染/编辑主栈**，理由三点：
 
 1. **不能解决长文档问题**：ProseMirror 同样无虚拟化，Tiptap 在 10 万字符级别同样卡。引入 Tiptap 反而新增 JSON ↔ Markdown 转换开销。
-2. **与"忠实展示 CLI / Obsidian 内容"的定位冲突**：Markdown 往返已知有损（frontmatter、callouts、嵌套、HTML 注释），CodePilot 作为面向开发者和创作者的客户端，不应在文件层引入 lossy 转换。
+2. **与"忠实展示 CLI / Obsidian 内容"的定位冲突**：Markdown 往返已知有损（frontmatter、callouts、嵌套、HTML 注释），AI Native Lab 作为面向开发者和创作者的客户端，不应在文件层引入 lossy 转换。
 3. **Obsidian 生态全部要自建**：wikilinks、callouts、dataview、双链图等扩展都得自己写 Node + Serializer，工作量远超收益。
 
 **仅在未来做"Canvas / 协作文档 / AI 可视化拼装 landing page"时才值得引入 Tiptap**，那是 WYSIWYG + 协作的独立场景。

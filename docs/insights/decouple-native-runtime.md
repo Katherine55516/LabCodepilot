@@ -4,13 +4,13 @@
 
 ## 解决了什么用户问题
 
-**核心痛点：CodePilot 无法独立运行。**
+**核心痛点：AI Native Lab 无法独立运行。**
 
-之前用户必须先安装 Claude Code CLI（需要 Anthropic 账号 + npm 全局安装），才能使用 CodePilot 的 AI 对话功能。这造成了几个问题：
+之前用户必须先安装 Claude Code CLI（需要 Anthropic 账号 + npm 全局安装），才能使用 AI Native Lab 的 AI 对话功能。这造成了几个问题：
 
 1. **新用户上手门槛高** — 安装 Claude Code 需要终端操作、npm 环境、Anthropic 认证，非开发者用户很难完成
 2. **单一服务商锁定** — 只能用 Anthropic 模型，想用 OpenAI/Google 等模型的用户被拒之门外
-3. **CLI 版本依赖** — Claude Code 更新可能影响 CodePilot 稳定性，用户无法控制
+3. **CLI 版本依赖** — Claude Code 更新可能影响 AI Native Lab 稳定性，用户无法控制
 
 ## 为什么这样设计
 

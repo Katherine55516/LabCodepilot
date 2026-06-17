@@ -1,4 +1,4 @@
-<img src="docs/icon-readme.png" width="32" height="32" alt="CodePilot" style="vertical-align: middle; margin-right: 8px;" /> CodePilot
+<img src="docs/icon-readme.png" width="32" height="32" alt="AI Native Lab" style="vertical-align: middle; margin-right: 8px;" /> AI Native Lab
 ===
 
 **多模型 AI Agent 桌面客户端** -- 连接任意 AI 服务商，通过 MCP 和 Skills 扩展能力，手机远程控制，让你的助理学会你的工作方式。
@@ -11,7 +11,7 @@
 
 [English](./README.md) | [日本語](./README_JA.md)
 
-![CodePilot](https://github.com/user-attachments/assets/9750450a-9f6f-49ce-acd4-c623a4e24281)
+![AI Native Lab](https://github.com/user-attachments/assets/9750450a-9f6f-49ce-acd4-c623a4e24281)
 
 ---
 
@@ -31,7 +31,7 @@
 
 ---
 
-## 为什么选择 CodePilot
+## 为什么选择 AI Native Lab
 
 ### 多服务商，统一界面
 
@@ -48,7 +48,7 @@
 
 ### 不只是写代码 — 全能 AI Agent
 
-CodePilot 从编程工具起步，已成长为**通用 AI Agent 桌面客户端**：
+AI Native Lab 从编程工具起步，已成长为**通用 AI Agent 桌面客户端**：
 
 - **Assistant Workspace** — 人设文件、持久记忆、Onboarding 引导和每日签到。你的助理会学习你的偏好并持续适应。
 - **生成式 UI** — AI 可以创建交互式仪表盘、图表和可视化组件，在应用内实时渲染。
@@ -73,7 +73,7 @@ CodePilot 从编程工具起步，已成长为**通用 AI Agent 桌面客户端*
 ### 路径 A：下载发布版（大多数用户）
 
 1. 从上方[下载](#下载)区域下载对应平台的安装包
-2. 启动 CodePilot
+2. 启动 AI Native Lab
 3. 在 **设置 > 服务商** 中配置服务商 — 添加任意支持的服务商的 API Key
 4. 开始对话
 
@@ -88,7 +88,7 @@ CodePilot 从编程工具起步，已成长为**通用 AI Agent 桌面客户端*
 
 ```bash
 git clone https://github.com/op7418/CodePilot.git
-cd CodePilot
+cd AI Native Lab
 npm install
 npm run dev              # 浏览器模式，访问 http://localhost:3000
 # -- 或者 --
@@ -141,9 +141,9 @@ npm run electron:dev     # 完整桌面应用
 
 ## 首次使用
 
-1. **配置服务商** — 前往 **设置 > 服务商**，为你要使用的服务商添加凭证。CodePilot 内置了所有主流服务商的预设 — 选择一个，填入 API Key 即可。
+1. **配置服务商** — 前往 **设置 > 服务商**，为你要使用的服务商添加凭证。AI Native Lab 内置了所有主流服务商的预设 — 选择一个，填入 API Key 即可。
 2. **创建对话** — 选择工作目录、交互模式（Code / Plan / Ask）和模型。
-3. **设置 Assistant Workspace**（可选）— 前往 **设置 > Assistant**，选择工作区目录并开启 Onboarding。CodePilot 会在工作区根目录创建 `soul.md`、`user.md`、`claude.md` 和 `memory.md`。
+3. **设置 Assistant Workspace**（可选）— 前往 **设置 > Assistant**，选择工作区目录并开启 Onboarding。AI Native Lab 会在工作区根目录创建 `soul.md`、`user.md`、`claude.md` 和 `memory.md`。
 4. **添加 MCP 服务器**（可选）— 在侧边栏的 **MCP** 页面添加和管理 MCP 服务器。自定义技能在单独的 **Skills** 页面管理。
 5. **安装 Claude Code CLI**（可选）— 如需文件编辑和终端命令等高级功能，安装 CLI：`npm install -g @anthropic-ai/claude-code`
 
@@ -156,13 +156,13 @@ macOS 构建已使用 Developer ID 证书签名，但未进行公证（notarize�
 <details>
 <summary>macOS：Gatekeeper 首次启动提示</summary>
 
-**方案一** -- 在访达中右键 `CodePilot.app` > 打开 > 确认。
+**方案一** -- 在访达中右键 `AI Native Lab.app` > 打开 > 确认。
 
 **方案二** -- 系统设置 > 隐私与安全性 > 滚动到安全性 > 点击「仍要打开」。
 
 **方案三** -- 在终端运行：
 ```bash
-xattr -cr /Applications/CodePilot.app
+xattr -cr /Applications/AI Native Lab.app
 ```
 </details>
 
@@ -205,7 +205,7 @@ xattr -cr /Applications/CodePilot.app
 <details>
 <summary>必须安装 Claude Code CLI 吗？</summary>
 
-不需要。你可以使用任何支持的服务商（OpenRouter、智谱 GLM、火山引擎、Ollama 等）直接使用 CodePilot，无需安装 Claude Code CLI。CLI 仅在你需要 Claude 直接编辑文件、执行终端命令或进行 Git 操作时才需要。对于聊天和助理功能，只需配置一个服务商即可开始使用。
+不需要。你可以使用任何支持的服务商（OpenRouter、智谱 GLM、火山引擎、Ollama 等）直接使用 AI Native Lab，无需安装 Claude Code CLI。CLI 仅在你需要 Claude 直接编辑文件、执行终端命令或进行 Git 操作时才需要。对于聊天和助理功能，只需配置一个服务商即可开始使用。
 </details>
 
 <details>
@@ -217,19 +217,19 @@ xattr -cr /Applications/CodePilot.app
 <details>
 <summary><code>npm run dev</code> 和 <code>npm run electron:dev</code> 的区别</summary>
 
-`npm run dev` 只启动 Next.js 开发服务器，在浏览器中访问 `http://localhost:3000` 使用 CodePilot。`npm run electron:dev` 同时启动 Next.js 和 Electron 外壳，提供完整的桌面应用体验，包含原生窗口控件。
+`npm run dev` 只启动 Next.js 开发服务器，在浏览器中访问 `http://localhost:3000` 使用 AI Native Lab。`npm run electron:dev` 同时启动 Next.js 和 Electron 外壳，提供完整的桌面应用体验，包含原生窗口控件。
 </details>
 
 <details>
 <summary>Workspace 文件在哪里</summary>
 
-设置工作区后，CodePilot 在**工作区根目录**创建四个 Markdown 文件：`soul.md`（人设）、`user.md`（用户档案）、`claude.md`（规则）、`memory.md`（长期笔记）。状态跟踪（Onboarding 进度、签到日期）保存在 `.assistant/` 子目录中。每日记忆保存在 `memory/daily/` 中。
+设置工作区后，AI Native Lab 在**工作区根目录**创建四个 Markdown 文件：`soul.md`（人设）、`user.md`（用户档案）、`claude.md`（规则）、`memory.md`（长期笔记）。状态跟踪（Onboarding 进度、签到日期）保存在 `.assistant/` 子目录中。每日记忆保存在 `memory/daily/` 中。
 </details>
 
 <details>
 <summary>Bridge 需要额外的平台配置</summary>
 
-每个 Bridge 通道（Telegram、飞书、Discord、QQ、微信）都需要各自的 Bot Token 或应用凭证。在侧边栏的 **Bridge** 页面配置通道。你需要先在目标平台创建 Bot 并获取 Token，然后提供给 CodePilot。
+每个 Bridge 通道（Telegram、飞书、Discord、QQ、微信）都需要各自的 Bot Token 或应用凭证。在侧边栏的 **Bridge** 页面配置通道。你需要先在目标平台创建 Bot 并获取 Token，然后提供给 AI Native Lab。
 </details>
 
 ---
