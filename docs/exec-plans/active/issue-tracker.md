@@ -197,7 +197,7 @@
 
 #### B-019 SDK runtime + 慢 provider 首包静默撞 330s Stream idle timeout
 - **Issue:** [#499](https://github.com/op7418/CodePilot/issues/499)
-- **状态:** 🔴 未修复（长期存在的架构盲点，v0.50.3 runtime auto 简化后暴露面扩大）
+- **状态:** 🟢 已治本（Phase 0 止血 990s `c7888dc` + Phase 1 按实质内容计时 `e9ddbc2`，2026-06-18）— 详见 [stream-idle-timeout-rework.md](./stream-idle-timeout-rework.md)
 - **现象:** Aliyun Bailian + `qwen3.6-plus`（及其他慢首包 provider）发消息后 330 秒固定报 `Stream idle timeout — no response for 330s`
 - **代码位置:**
   - `src/lib/stream-session-manager.ts:88` 硬编码 `STREAM_IDLE_TIMEOUT_MS = 330_000`
@@ -208,11 +208,12 @@
   - SDK runtime `src/lib/claude-client.ts:1451-1452` **只透传** Claude Code SDK 自己发的 `keep_alive`——SDK 与上游中间静默时，我们不补心跳，客户端就真的会 330s 后 abort
   - v0.50.3 的 runtime auto 改成 binary check，**装了 CLI 的用户默认走 SDK runtime**——扩大了暴露面。Bailian Coding Plan 后端有排队机制，首包可能静默几分钟，正好撞上
 - **为什么 v0.50.3 才集中爆出:** `STREAM_IDLE_TIMEOUT_MS = 330_000` 常量早就存在，不是本版引入的；但 qwen3.6-plus 是 v0.50.3 新加模型（commit `2d06f50`）+ 百炼首包排队慢 + SDK runtime 成为装了 CLI 用户的默认 = 三者叠加
-- **修复方向（二选一或都做）:**
-  1. **快修**：把 `STREAM_IDLE_TIMEOUT_MS` 提到 600s 或做成 provider 级可配置（UI 或 `options_json` 字段）
-  2. **根治**：在 SDK runtime 的 SSE pipe 侧也加 15s keepalive 定时器，对齐 Native runtime 的兜底节奏
-- **推荐:** 先做根治（#2），成本不大、一劳永逸；#1 作为 provider-level override 留给有异常慢后端的场景（少数）
-- **下一步:** 下个 hotfix 窗口处理
+- **已实施方案（取代下方原设想）:**
+  1. **Phase 0 止血** `c7888dc`：`STREAM_IDLE_TIMEOUT_MS` 330s → 990s（保留兜底、只推迟误杀）
+  2. **Phase 1 治本** `e9ddbc2`：改为**按「实质内容」计时**——keep_alive/状态不再重置掐断计时，慢首包只要最终吐内容就不被误杀，真卡死仍在硬上限后兜住；常量与纯判定移至 `src/lib/stream-timeout.ts`（`STREAM_NO_CONTENT_TIMEOUT_MS`）
+- **⚠️ 否决了原「补 15s 无条件心跳」根治方向**：对抗性分析确认它会让客户端 idle 计时器永不触发、废掉唯一卡死兜底（心跳无法区分「合法慢等」与「卡死但连接还在」）。详见 [insights/stream-idle-timeout.md](../../insights/stream-idle-timeout.md)
+- **残留:** `STREAM_NO_CONTENT_TIMEOUT_MS` 终值待实测最坏慢首包校准；服务端首包 keep_alive（连接保活/UX）与 UI 久等提示为可选（Phase 2/3，暂缓）
+- **注:** 上方「代码位置」行号为发现时旧值，现实现以 rework 计划与 `stream-timeout.ts` 为准
 
 ---
 

@@ -60,6 +60,7 @@
 | active/updates-v2-migration.md | 自动更新迁移到研发平台 V2 API：主进程自定义更新器（检查/CDN 下载/sha256 校验/安装）复用登录 `getBackendBase`+`apiRequest`+token，退役 GitHub op7418 旧检查 | Phase 0 待审核 |
 | active/v0.48-post-release-issues.md | v0.48.0/0.48.1 发版后问题追查（已归档至 issue-tracker.md，保留原始记录） | 已归档 |
 | active/security-audit-remediation.md | 安全审计修复方案：2 处无鉴权 RCE（Shell 注入）→ API 边界鉴权（middleware）→ 文件接口作用域 → Bridge 访问控制/凭证加密 → Electron CSP/sandbox → 依赖升级，共 7 Phase | Phase 1-7 待开始 |
+| active/stream-idle-timeout-rework.md | 对话流空闲超时改造：从「距上次任何事件」改为「距上次实质内容」计时，根治慢首包 provider 误杀（B-019），保留真卡死兜底 | Phase 0/1/4 已完成（c7888dc/e9ddbc2），Phase 2-3 可选暂缓 |
 ### Completed
 
 | 文件 | 主题 | 完成日期 |
