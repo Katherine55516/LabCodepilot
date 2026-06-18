@@ -105,7 +105,10 @@ export interface StartStreamParams {
 
 const GLOBAL_KEY = '__streamSessionManager__' as const;
 const LISTENERS_KEY = '__streamSessionListeners__' as const;
-const STREAM_IDLE_TIMEOUT_MS = 330_000;
+// 空闲超时：连续这么久收不到任何 SSE 事件就 abort 当前对话流（见 :347 轮询、:670 善后）。
+// 临时止血值——330s 会误杀慢首包 provider（首包前 SDK runtime 路径无 keep_alive，详见 issue B-019）。
+// 990s(16.5min) 仅推迟误杀、保留兜底；治本方案（首包前心跳 + 按实质内容计时的硬上限）见 docs/exec-plans/active/。
+const STREAM_IDLE_TIMEOUT_MS = 990_000;
 const GC_DELAY_MS = 5 * 60 * 1000; // 5 minutes
 
 function getStreamsMap(): Map<string, ActiveStream> {
