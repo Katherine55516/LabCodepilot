@@ -80,6 +80,7 @@ const en = {
   'streaming.thinkingDeep': 'Thinking deeply...',
   'streaming.preparing': 'Preparing response...',
   'streaming.generating': 'Generating',
+  'streaming.noContentTimeout': '**Error:** No response for {secs}s — the model returned no content. The connection may have stalled or dropped.',
   'streaming.allowForSession': 'Allow for Session',
   'streaming.allowed': 'Allowed',
   'streaming.denied': 'Denied',

@@ -12,6 +12,8 @@
 
 import { consumeSSEStream } from '@/hooks/useSSEStream';
 import { transferPendingToMessage } from '@/lib/image-ref-store';
+import { translate, type Locale } from '@/i18n';
+import { STREAM_NO_CONTENT_TIMEOUT_MS, shouldAbortForNoContent } from '@/lib/stream-timeout';
 import type {
   ToolUseInfo,
   ToolResultInfo,
@@ -34,7 +36,11 @@ interface ActiveStream {
   abortController: AbortController;
   snapshot: SessionStreamSnapshot;
   idleCheckTimer: ReturnType<typeof setInterval> | null;
+  /** Last time ANY SSE event arrived (incl. keep_alive) — connection liveness. */
   lastEventTime: number;
+  /** Last time a SUBSTANTIVE event arrived (real model/tool content, NOT
+   *  keep_alive/status). Drives the no-content timeout — see STREAM_NO_CONTENT_TIMEOUT_MS. */
+  lastSubstantiveEventTime: number;
   gcTimer: ReturnType<typeof setTimeout> | null;
   /** Tracked ad-hoc timeouts — cleaned up when the stream ends. */
   pendingTimers: Set<ReturnType<typeof setTimeout>>;
@@ -105,10 +111,8 @@ export interface StartStreamParams {
 
 const GLOBAL_KEY = '__streamSessionManager__' as const;
 const LISTENERS_KEY = '__streamSessionListeners__' as const;
-// 空闲超时：连续这么久收不到任何 SSE 事件就 abort 当前对话流（见 :347 轮询、:670 善后）。
-// 临时止血值——330s 会误杀慢首包 provider（首包前 SDK runtime 路径无 keep_alive，详见 issue B-019）。
-// 990s(16.5min) 仅推迟误杀、保留兜底；治本方案（首包前心跳 + 按实质内容计时的硬上限）见 docs/exec-plans/active/。
-const STREAM_IDLE_TIMEOUT_MS = 990_000;
+// STREAM_NO_CONTENT_TIMEOUT_MS + shouldAbortForNoContent 现集中在 @/lib/stream-timeout
+// (便于脱离浏览器依赖做单测)。keep_alive/状态心跳不重置该计时——详见该模块与 issue B-019。
 const GC_DELAY_MS = 5 * 60 * 1000; // 5 minutes
 
 function getStreamsMap(): Map<string, ActiveStream> {
@@ -241,6 +245,7 @@ export function startStream(params: StartStreamParams): void {
     },
     idleCheckTimer: null,
     lastEventTime: Date.now(),
+    lastSubstantiveEventTime: Date.now(),
     gcTimer: null,
     pendingTimers: new Set(),
     accumulatedText: '',
@@ -345,11 +350,28 @@ function buildFinalContentFromBlocks(stream: ActiveStream, fallbackText: string)
 }
 
 async function runStream(stream: ActiveStream, params: StartStreamParams): Promise<void> {
+  // Liveness ping — bumps lastEventTime only. For keep_alive / pure-status events
+  // that prove the connection is alive but carry NO model progress.
   const markActive = () => { stream.lastEventTime = Date.now(); };
+  // Real progress — bumps BOTH timers. Only substantive content (model text /
+  // thinking / tool activity) resets the no-content timeout. keep_alive must NOT
+  // call this, or a wedged-but-connected upstream would never time out.
+  const markSubstantive = () => {
+    const now = Date.now();
+    stream.lastEventTime = now;
+    stream.lastSubstantiveEventTime = now;
+  };
 
-  // Idle timeout checker
+  // No-content timeout checker — see @/lib/stream-timeout. Aborts only when no
+  // SUBSTANTIVE content has arrived for the ceiling AND not blocked on permission
+  // (keep_alive/status pings do not reset stream.lastSubstantiveEventTime).
   stream.idleCheckTimer = setInterval(() => {
-    if (Date.now() - stream.lastEventTime >= STREAM_IDLE_TIMEOUT_MS) {
+    if (shouldAbortForNoContent(
+      Date.now(),
+      stream.lastSubstantiveEventTime,
+      STREAM_NO_CONTENT_TIMEOUT_MS,
+      !!stream.snapshot.pendingPermission,
+    )) {
       cleanupTimers(stream);
       stream.isIdleTimeout = true;
       stream.abortController.abort();
@@ -429,14 +451,14 @@ async function runStream(stream: ActiveStream, params: StartStreamParams): Promi
 
     const result = await consumeSSEStream(reader, {
       onText: (acc) => {
-        markActive();
+        markSubstantive();
         stream.accumulatedText = acc;
         stream.thinkingPhaseEnded = true;
         appendOrderedText(stream, acc); // ordered: extend current text block
         throttledTextEmit();
       },
       onThinking: (delta) => {
-        markActive();
+        markSubstantive();
         // If non-thinking content has arrived since last thinking delta,
         // this is a new thinking phase (e.g. after a tool_use round-trip).
         // Reset the live accumulator so the UI shows only the current phase.
@@ -457,7 +479,7 @@ async function runStream(stream: ActiveStream, params: StartStreamParams): Promi
         emit(stream, 'snapshot-updated');
       },
       onToolUse: (tool) => {
-        markActive();
+        markSubstantive();
         flushTextThrottle(); // Ensure text is up-to-date before tool events
         stream.thinkingPhaseEnded = true;
         stream.toolOutputAccumulated = '';
@@ -470,7 +492,7 @@ async function runStream(stream: ActiveStream, params: StartStreamParams): Promi
         emit(stream, 'snapshot-updated');
       },
       onToolResult: (res) => {
-        markActive();
+        markSubstantive();
         stream.toolOutputAccumulated = '';
         const existingIdx = stream.toolResultsArray.findIndex(r => r.tool_use_id === res.tool_use_id);
         if (existingIdx >= 0) {
@@ -486,13 +508,13 @@ async function runStream(stream: ActiveStream, params: StartStreamParams): Promi
         window.dispatchEvent(new Event('refresh-file-tree'));
       },
       onToolOutput: (data) => {
-        markActive();
+        markSubstantive();
         const next = stream.toolOutputAccumulated + (stream.toolOutputAccumulated ? '\n' : '') + data;
         stream.toolOutputAccumulated = next.length > 2000 ? next.slice(-2000) : next;
         emit(stream, 'snapshot-updated');
       },
       onToolProgress: (toolName, elapsed) => {
-        markActive();
+        markSubstantive();
         stream.snapshot = { ...stream.snapshot, statusText: `Running ${toolName}... (${elapsed}s)` };
         emit(stream, 'snapshot-updated');
       },
@@ -507,7 +529,7 @@ async function runStream(stream: ActiveStream, params: StartStreamParams): Promi
         }
       },
       onContextCompressed: (data) => {
-        markActive();
+        markSubstantive();
         // Dispatch the 'context-compressed' window event that ChatView
         // uses to flip hasSummary state and show the context indicator.
         // Also show a brief human-readable status line so the user knows
@@ -553,7 +575,7 @@ async function runStream(stream: ActiveStream, params: StartStreamParams): Promi
         }
       },
       onResult: (usage, meta) => {
-        markActive();
+        markSubstantive();
         stream.snapshot = {
           ...stream.snapshot,
           tokenUsage: usage,
@@ -672,16 +694,20 @@ async function runStream(stream: ActiveStream, params: StartStreamParams): Promi
 
     if (error instanceof DOMException && error.name === 'AbortError') {
       if (stream.isIdleTimeout) {
-        // Idle timeout
-        const idleSecs = Math.round(STREAM_IDLE_TIMEOUT_MS / 1000);
+        // No-content timeout: connection was alive but no substantive model
+        // output arrived within the deadline (see the checker above).
+        const timeoutSecs = Math.round(STREAM_NO_CONTENT_TIMEOUT_MS / 1000);
+        const locale = (typeof document !== 'undefined'
+          ? document.documentElement.lang
+          : 'en') as Locale;
         // Text already lives in orderedBlocks; append only the error note.
-        const note = `**Error:** Stream idle timeout — no response for ${idleSecs}s. The connection may have dropped.`;
+        const note = translate(locale, 'streaming.noContentTimeout', { secs: timeoutSecs });
 
         stream.snapshot = {
           ...buildSnapshot(stream),
           phase: 'error',
           completedAt: Date.now(),
-          error: `Stream idle timeout (${idleSecs}s)`,
+          error: `Stream no-content timeout (${timeoutSecs}s)`,
           finalMessageContent: buildFinalContent(note),
           statusText: undefined,
           pendingPermission: null,
@@ -966,6 +992,7 @@ export function seedSnapshotPatch(
     abortController: new AbortController(),
     idleCheckTimer: null,
     lastEventTime: Date.now(),
+    lastSubstantiveEventTime: Date.now(),
     gcTimer: null,
     pendingTimers: new Set(),
     accumulatedText: '',

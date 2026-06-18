@@ -77,6 +77,7 @@ const zh: Record<TranslationKey, string> = {
   'streaming.thinkingDeep': '深度思考中...',
   'streaming.preparing': '组织回复中...',
   'streaming.generating': '生成中',
+  'streaming.noContentTimeout': '**错误：** {secs} 秒内未收到模型的任何实质响应，连接可能已卡住或中断。',
   'streaming.allowForSession': '本次会话允许',
   'streaming.allowed': '已允许',
   'streaming.denied': '已拒绝',
