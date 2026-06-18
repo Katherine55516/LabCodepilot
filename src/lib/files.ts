@@ -10,14 +10,18 @@ import type { FileTreeNode, FilePreview } from '@/types';
 // IGNORED_DIRS check below, so they appear and recurse normally in the
 // file tree. `.planning` is a user working dir; `.git` lets users browse
 // git internals (note: large repos can take time to expand on click since
-// objects/ may contain tens of thousands of files).
+// objects/ may contain tens of thousands of files); `.claude` holds the
+// project's Claude config (settings.json, agents, commands, skills, hooks).
 //
-// IMPORTANT: This is display-only. `.git` is still in BLOCKED_SEGMENTS
-// (write-protection) so users cannot mkdir/write/delete/rename inside it
-// through the file API — the git repo state is safe.
+// IMPORTANT — display vs. write-protection differ per entry:
+//   - `.git` is ALSO in BLOCKED_SEGMENTS (write-protected): users can browse
+//     but cannot mkdir/write/delete/rename inside it, so repo state is safe.
+//   - `.claude` is intentionally NOT in BLOCKED_SEGMENTS: it is user-authored
+//     config meant to be edited, so it stays browsable AND editable.
 const ALLOWED_HIDDEN_DIRS = new Set([
   '.planning',
   '.git',
+  '.claude',
 ]);
 
 const IGNORED_DIRS = new Set([
