@@ -3,6 +3,15 @@ import pkg from "./package.json" with { type: "json" };
 
 const nextConfig: NextConfig = {
   output: 'standalone',
+  // outputFileTracingRoot: pin the standalone tracing root to THIS project dir.
+  // Without it, Next.js infers the workspace root from the nearest lockfile and
+  // can be dragged up to a parent dir if a stray package-lock.json exists above
+  // the project (e.g. an accidental ~/package-lock.json). That misplaces the
+  // standalone output under .next/standalone/<rel-path>/ and leaves
+  // .next/standalone/node_modules empty, so the Anthropic SDK subpackages never
+  // land where after-pack.js looks → "FATAL: No Claude Code native binary found".
+  // Pinning to import.meta.dirname makes the layout deterministic everywhere.
+  outputFileTracingRoot: import.meta.dirname,
   // Electron loads dev server via http://127.0.0.1:3000 (hardcoded in
   // electron/main.ts), but Next.js 16 treats `127.0.0.1` and `localhost` as
   // different origins by default and blocks `_next/*` resources (HMR
