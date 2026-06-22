@@ -12,7 +12,7 @@
 |-------|------|------|------|
 | Phase 0 | 设计决策（作用域 / 模式 / 视图 / 布局模型） | 🔄 进行中 | 本文档 |
 | Phase 1 | 内嵌测试 **UI 骨架**：侧边栏测试入口 + 上半面板（看板/流程/报告）+ 弹窗，**空状态**、不接引擎 | ✅ 已完成 | 侧边栏入口 + 三视图空态 + 新建任务/环境配置弹窗 + i18n；入口状态走 PanelContext（无竞态）；已移除 /test 与 composer chip |
-| Phase 2 | **引擎落点调研 + POC**：用 LabCodepilot 的 claude-agent-sdk 运行时跑框架 5 步规则；Playwright 接入验证 | 📋 待开始 | 决定 80% 工作量的关键 |
+| Phase 2 | **引擎落点调研 + POC**：用 LabCodepilot 的 claude-agent-sdk 运行时跑框架规则；Playwright 接入验证 | 🔄 进行中 | 调研完成 + 2.0 POC 跑通（独立路由调 streamClaude，零聊天改动，止于 dev 无凭证）；待 2.0b Playwright 冒烟 + 后续步骤 |
 | Phase 3 | 看板（项目测试主页：任务列表 + 新建任务，**无代码分析/无模块自动发现**） | 📋 待开始 | 任务直接创建 |
 | Phase 4 | 步骤 1-2 需求/用例（含导入 .docx/.xlsx、门控批准） | 📋 待开始 | 工作流起点 |
 | Phase 5 | 步骤 3 执行（AI 驱动 Playwright + 四态自判 + 证据） | 📋 待开始 | 核心 |
@@ -21,6 +21,18 @@
 | Phase 8 | i18n 三件套 + 设计 token 映射 + 打磨 | 📋 待开始 | |
 
 ## 决策日志
+
+- **2026-06-22 / Phase 2.0b Playwright 冒烟通过（第二大未知证实）**：① Chromium 已由 `@playwright/test` 缓存，但版本不匹配 → `npx playwright install chromium`（下了 v1208，~91MB，在全局 ms-playwright 缓存，不入库）。② 装 `@playwright/mcp@0.0.76`（dependency，带 cli.js，支持 --browser/--headless/--isolated/--caps/--output-dir/--viewport-size）。③ 裸 chromium 冒烟：launch+navigate+read OK。④ **关键**：给 `/api/test/run` 加 `step:'execution'` 模式，按运行注入 Playwright MCP（`{type:'stdio', command:process.execPath, args:[node_modules/@playwright/mcp/cli.js, --browser chromium --headless --isolated --caps devtools,network --output-dir <AI_LabTest/report/_evidence> --viewport-size 1280,800]}`）。curl 实测：status 帧暴露 **38 个 `playwright__browser_*` 工具**、无 MCP 连接错误 → **LabCodepilot 运行时能 spawn+连上 Playwright MCP 并把浏览器工具给到 agent**。仅 LLM 步缺凭证（同边界）。注：打包版需 `ELECTRON_RUN_AS_NODE=1`（runner.js 同款，留待打包步）。**结论：Phase 2 两大未知全部可行。**
+- **2026-06-22 / Phase 2.0 POC 跑通（零聊天代码改动）**：新增独立路由 `src/app/api/test/run/route.ts`，用合成 sessionId 调 `streamClaude`（自定义 systemPrompt=需求分析规则 + workingDirectory=项目路径 + bypassPermissions），返回 SSE。**坑**：`streamClaude` 依赖运行时注册表，需 `import { predictNativeRuntime } from '@/lib/runtime'`（副作用注册），否则报 "No agent runtime registered"。面板流程视图加「运行任务」按钮 → fetch 该路由 → 解析 SSE 帧（text/tool_use/error）显示到日志。dev 实测：链路全通，provider 解析为 Qwen3.7-Max，仅止于 `No API credentials`（dev 无 key，与普通聊天同边界）——有凭证环境即可真跑。**结论：方案第一大未知（零侵入编程驱动 agent）证实可行。** 注：POC 用 bypassPermissions + prompt 约束写 AI_LabTest/；硬写白名单(包 canUseTool, 加 additive option)留待后续步骤。
+- **2026-06-22 / Phase 2.0 调研结论（方案确认：混合 = 复用 SDK 运行时 + 薄复刻执行胶水）**：
+  - **可编程跑 agent ✓**：`src/lib/claude-client.ts` 的 `streamClaude(options)` 可传自定义 `systemPrompt`/`workingDirectory`/`mcpServers`/`permissionMode`/`canUseTool` 并流式回传——这就是跑"测试步骤"的钩子（无需用户输入消息）。入口链：`/api/chat` → `streamClaude` → `streamClaudeSdk` → SDK `query()`。也有 `generateTextViaSdk()`(非流式、无 MCP) 备用。
+  - **MCP 可按运行注入 ✓**：`mcpServers` 参数 + `toSdkMcpConfig()`，可只为执行步加 `@playwright/mcp`。
+  - **Playwright 未打包 ✗（必须补）**：仅有 `@playwright/test` devDep，无 `@playwright/mcp`、无运行时 Chromium。Phase 2 需加 `@playwright/mcp` + Chromium 供给（注意打包：electron-builder extraResources / after-pack）。
+  - **写白名单可行 ✓**：包一层 `canUseTool`（claude-client.ts:861）即可——Write/Edit 限定 `AI_LabTest/`、并把截图/录像 filename 重写到 evidenceDir 绝对路径（和框架 runner.js 同招）。会话可扩展 `chat_sessions` schema(db.ts)。
+  - **可 vendoring 的（方法学，markdown 规则）**：requirement-discovery / requirement-review / requirement-completeness / test-case-completeness / test-execution / test-report / test-workflow（仿 `scripts/vendor-gsd-prepare.js`）。
+  - **必须复刻的（确定性引擎逻辑，非 LLM，源自 framework/app/src/main/engine/runner.js）**：① `buildMcpServer`(--browser chromium --isolated --caps devtools,network --output-dir --storage-state，headed/headless) ② `reduceResults` 四态归并 + `ENV_HINT` 重分类 + 401 熔断 ③ `@@RESULT {json}` 流式解析(harvestResults) ④ run.json schema ⑤ evidence 目录管理(清理/嗅探扩展名/视频关联) ⑥ 登录态注入(password/token/capture)。
+  - **数据格式**：cases.json(id/priority/caseType/steps[content,expected]/oracle/verification_nature/cleanup)、run.json(counts/passStr/tests[]/videos/circuitBroken/durationMs)、environments.json(allowedEnvs/accounts[]/tokenStorage)。
+  - **修订后 Phase 2 子步**：2.0 POC(需求步, 无浏览器, 跑通 streamClaude+规则+白名单+面板流式+写工件) → 2.0b Playwright MCP 冒烟(加依赖+Chromium, 能 navigate) → 2.1 vendoring 规则 → 2.2 需求/2.3 用例(门控+导入) → 2.4 执行(Playwright+四态+证据+@@RESULT 解析) → 2.5 报告(md+xlsx) → 2.6 持久化(任务/项目落库)+凭证 safeStorage+环境配置真接。
 
 - **2026-06-22 / 任务可点击 → 流程视图**：任务卡之前是静态 div（点了没反应）。改为：点任务 → `setSelectedTask` + 切到「流程」lens；流程视图按所选任务展示 4 步管线（需求→用例→执行→报告，未接引擎前各步"未开始"）+ "执行引擎接入中"占位 + ← 返回任务。切项目/返回会重置 selectedTask。已验证。
 - **2026-06-22 / 项目从文件夹选择（用户决策）**：「添加项目」不再手填名称，改为**选择文件夹**——复用 `useNativeFolderPicker`（Electron 原生对话框）+ `FolderPicker`（浏览器 `/api/files/browse` 浏览对话框，与聊天"选择文件夹"同一套）。选中后项目名 = 文件夹 basename、path = 完整路径。移除了手填的 `AddProjectModal`。已验证：dev 浏览到 `/Users/jiah/AILab/ai-lab-test-framework` 选中 → 项目卡含真实路径。

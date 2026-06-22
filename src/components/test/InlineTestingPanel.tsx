@@ -46,6 +46,9 @@ export function InlineTestingPanel({ onClose }: { onClose: () => void }) {
   const [projects, setProjects] = useState<Project[]>([]);
   const [selected, setSelected] = useState<number | null>(null);
   const [selectedTask, setSelectedTask] = useState<number | null>(null);
+  // Phase 2.0 POC: run state for the requirement step (streamed from /api/test/run).
+  const [running, setRunning] = useState(false);
+  const [runLog, setRunLog] = useState("");
 
   const current = selected !== null ? projects[selected] ?? null : null;
   const activeTask = current && selectedTask !== null ? current.tasks[selectedTask] ?? null : null;
@@ -68,6 +71,74 @@ export function InlineTestingPanel({ onClose }: { onClose: () => void }) {
       if (path) addProjectFromPath(path);
     } else {
       setFolderPickerOpen(true);
+    }
+  };
+
+  // Phase 2.0 POC: run the requirement step against the current project by
+  // streaming /api/test/run (which drives streamClaude). Parses the SSE frames
+  // and appends readable lines to runLog. Real per-step UX lands in Phase 2.2+.
+  const runRequirement = async () => {
+    const proj = selected !== null ? projects[selected] : null;
+    if (!proj?.path) return;
+    setRunning(true);
+    setRunLog("");
+    let model: string | undefined;
+    let providerId: string | undefined;
+    try {
+      model = localStorage.getItem("codepilot:last-model") || undefined;
+      providerId = localStorage.getItem("codepilot:last-provider-id") || undefined;
+    } catch {}
+    try {
+      const res = await fetch("/api/test/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectPath: proj.path, taskName: proj.tasks[selectedTask ?? -1]?.name, model, providerId }),
+      });
+      if (!res.body) {
+        setRunLog("无响应流");
+        return;
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const frames = buf.split("\n\n");
+        buf = frames.pop() || "";
+        for (const frame of frames) {
+          const line = frame.replace(/^data:\s?/, "").trim();
+          if (!line) continue;
+          let evt: { type?: string; data?: string } | null = null;
+          try {
+            evt = JSON.parse(line);
+          } catch {
+            continue;
+          }
+          if (!evt) continue;
+          if (evt.type === "text") {
+            setRunLog((s) => s + (evt!.data || ""));
+          } else if (evt.type === "tool_use") {
+            let name = "";
+            try {
+              name = JSON.parse(evt.data || "{}").name || "";
+            } catch {}
+            setRunLog((s) => s + `\n  → ${name}\n`);
+          } else if (evt.type === "error") {
+            let msg = evt.data || "";
+            try {
+              const d = JSON.parse(evt.data || "{}");
+              msg = d.userMessage || d.rawMessage || msg;
+            } catch {}
+            setRunLog((s) => s + `\n[错误] ${msg}\n`);
+          }
+        }
+      }
+    } catch (e) {
+      setRunLog((s) => s + `\n[请求失败] ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setRunning(false);
     }
   };
 
@@ -227,7 +298,27 @@ export function InlineTestingPanel({ onClose }: { onClose: () => void }) {
                     </div>
                   ))}
                 </div>
-                <EmptyState icon={Play} text={t("test.flow.engineSoon")} />
+                <div className="rounded-xl border border-border bg-card p-4">
+                  <div className="mb-2 flex items-center gap-2">
+                    <button
+                      onClick={runRequirement}
+                      disabled={running || !current?.path}
+                      className="flex h-7 items-center gap-1 rounded-md bg-accent px-2.5 text-[11px] font-medium text-accent-foreground disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      <Play size={12} /> {t("test.flow.runTask")}{running ? "…" : ""}
+                    </button>
+                    {!current?.path && (
+                      <span className="text-[11px] text-muted-foreground">项目无路径，无法运行</span>
+                    )}
+                  </div>
+                  {runLog ? (
+                    <pre className="max-h-72 overflow-auto whitespace-pre-wrap rounded-md bg-muted/40 p-3 text-[11px] leading-relaxed text-muted-foreground">
+                      {runLog}
+                    </pre>
+                  ) : (
+                    <p className="text-[11px] text-muted-foreground">{t("test.flow.engineSoon")}</p>
+                  )}
+                </div>
               </div>
             ) : (
               <EmptyState icon={ListChecks} text={t("test.flowEmpty")} />
