@@ -1227,6 +1227,28 @@ const zh: Record<TranslationKey, string> = {
   'linkSafety.copied': '已复制',
   'linkSafety.open': '打开链接',
 
+  // ── 权限提示 / AskUserQuestion / ExitPlanMode 交互 UI ──
+  'permissionPrompt.other': '其他',
+  'permissionPrompt.otherPlaceholder': '输入你的答案…',
+  'permissionPrompt.submit': '提交',
+  'permissionPrompt.deny': '拒绝',
+  'permissionPrompt.allowOnce': '仅本次允许',
+  'permissionPrompt.answerSubmitted': '答案已提交',
+  'permissionPrompt.collapse': '收起',
+  'permissionPrompt.showMore': '展开更多',
+  'permissionPrompt.planReady': '计划已完成，可以执行',
+  'permissionPrompt.requestedPermissions': '申请的权限：',
+  'permissionPrompt.reject': '拒绝',
+  'permissionPrompt.viewPlan': '查看计划',
+  'permissionPrompt.loadingPlan': '加载中…',
+  'permissionPrompt.approveExecute': '批准并执行',
+  'permissionPrompt.feedbackPlaceholder': '对计划提出修改意见…',
+  'permissionPrompt.doThisInstead': '改用这个方案',
+  'permissionPrompt.planTitle': '计划',
+  'permissionPrompt.planLoadFailed': '加载计划失败',
+  'permissionPrompt.planApproved': '计划已批准，执行中',
+  'permissionPrompt.planRejected': '计划已拒绝',
+
   // ── SDK Capabilities: Effort ──────────────────────────────
   'messageInput.effort.label': '推理力度',
   'messageInput.effort.auto': '默认',

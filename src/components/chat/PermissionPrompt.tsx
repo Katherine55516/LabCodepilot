@@ -52,6 +52,7 @@ function AskUserQuestionUI({
   toolInput: Record<string, unknown>;
   onSubmit: (decision: 'allow', updatedInput: Record<string, unknown>) => void;
 }) {
+  const { t } = useTranslation();
   const questions = (toolInput.questions || []) as Array<{
     question: string;
     options: Array<{ label: string; description?: string }>;
@@ -150,13 +151,13 @@ function AskUserQuestionUI({
                   : 'border-border bg-background text-foreground hover:bg-muted'
                 }
               >
-                Other
+                {t('permissionPrompt.other')}
               </Button>
             </div>
             {useOther[qIdx] && (
               <Input
                 type="text"
-                placeholder="Type your answer..."
+                placeholder={t('permissionPrompt.otherPlaceholder')}
                 value={otherTexts[qIdx] || ''}
                 onChange={(e) => setOtherTexts((prev) => ({ ...prev, [qIdx]: e.target.value }))}
                 className="text-xs"
@@ -171,7 +172,7 @@ function AskUserQuestionUI({
         disabled={!hasAnswer}
         size="sm"
       >
-        Submit
+        {t('permissionPrompt.submit')}
       </Button>
     </div>
   );
@@ -204,6 +205,7 @@ function ExitPlanModeUI({
   onDeny: () => void;
   onDenyWithMessage: (message: string) => void;
 }) {
+  const { t } = useTranslation();
   const [planOpen, setPlanOpen] = useState(false);
   const [planContent, setPlanContent] = useState<string | null>(null);
   const [planLoading, setPlanLoading] = useState(false);
@@ -218,11 +220,11 @@ function ExitPlanModeUI({
     <div className="space-y-3 rounded-lg border border-primary/30 bg-primary/5 p-4">
       <div className="flex items-center gap-2">
         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-primary"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
-        <span className="text-sm font-medium">Plan complete — ready to execute</span>
+        <span className="text-sm font-medium">{t('permissionPrompt.planReady')}</span>
       </div>
       {allowedPrompts.length > 0 && (
         <div className="space-y-1">
-          <p className="text-xs text-muted-foreground">Requested permissions:</p>
+          <p className="text-xs text-muted-foreground">{t('permissionPrompt.requestedPermissions')}</p>
           <ul className="space-y-0.5">
             {allowedPrompts.map((p, i) => (
               <li key={i} className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -240,7 +242,7 @@ function ExitPlanModeUI({
           onClick={onDeny}
           className="text-xs"
         >
-          Reject
+          {t('permissionPrompt.reject')}
         </Button>
         {planFilePath && (
           <Button
@@ -252,12 +254,12 @@ function ExitPlanModeUI({
                 const res = await fetch(`/api/files/preview?path=${encodeURIComponent(planFilePath)}&maxLines=1000`);
                 if (res.ok) {
                   const data = await res.json();
-                  setPlanContent(data.preview?.content || 'Failed to load plan');
+                  setPlanContent(data.preview?.content || t('permissionPrompt.planLoadFailed'));
                 } else {
-                  setPlanContent('Failed to load plan file');
+                  setPlanContent(t('permissionPrompt.planLoadFailed'));
                 }
               } catch {
-                setPlanContent('Failed to load plan file');
+                setPlanContent(t('permissionPrompt.planLoadFailed'));
               }
               setPlanLoading(false);
               setPlanOpen(true);
@@ -265,7 +267,7 @@ function ExitPlanModeUI({
             disabled={planLoading}
             className="border-primary/30 text-xs text-primary hover:bg-primary/10"
           >
-            {planLoading ? 'Loading...' : 'View Plan'}
+            {planLoading ? t('permissionPrompt.loadingPlan') : t('permissionPrompt.viewPlan')}
           </Button>
         )}
         <Button
@@ -273,13 +275,13 @@ function ExitPlanModeUI({
           onClick={onApprove}
           className="text-xs"
         >
-          Approve & Execute
+          {t('permissionPrompt.approveExecute')}
         </Button>
       </div>
       <div className="flex gap-2">
         <Input
           type="text"
-          placeholder="Provide feedback on the plan..."
+          placeholder={t('permissionPrompt.feedbackPlaceholder')}
           value={feedback}
           onChange={(e) => setFeedback(e.target.value)}
           onKeyDown={(e) => {
@@ -298,7 +300,7 @@ function ExitPlanModeUI({
           disabled={!feedback.trim()}
           className="text-xs"
         >
-          Do this instead
+          {t('permissionPrompt.doThisInstead')}
         </Button>
       </div>
 
@@ -306,7 +308,7 @@ function ExitPlanModeUI({
         <Dialog open={planOpen} onOpenChange={setPlanOpen}>
           <DialogContent className="max-w-4xl h-[80vh] flex flex-col">
             <DialogHeader>
-              <DialogTitle>Plan</DialogTitle>
+              <DialogTitle>{t('permissionPrompt.planTitle')}</DialogTitle>
             </DialogHeader>
             <div className="overflow-y-auto flex-1 min-h-0">
               <MessageResponse>{planContent}</MessageResponse>
@@ -323,6 +325,7 @@ function ExitPlanModeUI({
  * Collapsible tool input display with truncation for long content.
  */
 function ToolInputDisplay({ input }: { input: Record<string, unknown> }) {
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
 
   const formatToolInput = (inp: Record<string, unknown>): string => {
@@ -372,7 +375,7 @@ function ToolInputDisplay({ input }: { input: Record<string, unknown> }) {
           onClick={() => setExpanded(!expanded)}
           className="w-full border-t border-border/30 px-3 py-1 text-[10px] text-muted-foreground hover:bg-muted/80 transition-colors"
         >
-          {expanded ? '▲ Collapse' : '▼ Show more'}
+          {expanded ? `▲ ${t('permissionPrompt.collapse')}` : `▼ ${t('permissionPrompt.showMore')}`}
         </button>
       )}
     </div>
@@ -454,10 +457,10 @@ export function PermissionPrompt({
         />
       )}
       {pendingPermission?.toolName === 'ExitPlanMode' && permissionResolved === 'allow' && (
-        <p className="py-1 text-xs text-status-success-foreground">Plan approved — executing</p>
+        <p className="py-1 text-xs text-status-success-foreground">{t('permissionPrompt.planApproved')}</p>
       )}
       {pendingPermission?.toolName === 'ExitPlanMode' && permissionResolved === 'deny' && (
-        <p className="py-1 text-xs text-status-error-foreground">Plan rejected</p>
+        <p className="py-1 text-xs text-status-error-foreground">{t('permissionPrompt.planRejected')}</p>
       )}
 
       {/* AskUserQuestion */}
@@ -468,7 +471,7 @@ export function PermissionPrompt({
         />
       )}
       {pendingPermission?.toolName === 'AskUserQuestion' && isResolved && (
-        <p className="py-1 text-xs text-status-success-foreground">Answer submitted</p>
+        <p className="py-1 text-xs text-status-success-foreground">{t('permissionPrompt.answerSubmitted')}</p>
       )}
 
       {/* Generic confirmation for other tools — only show when not yet resolved */}
@@ -494,13 +497,13 @@ export function PermissionPrompt({
                 variant="outline"
                 onClick={() => onPermissionResponse('deny')}
               >
-                Deny
+                {t('permissionPrompt.deny')}
               </ConfirmationAction>
               <ConfirmationAction
                 variant="outline"
                 onClick={() => onPermissionResponse('allow')}
               >
-                Allow Once
+                {t('permissionPrompt.allowOnce')}
               </ConfirmationAction>
               {pendingPermission.suggestions && pendingPermission.suggestions.length > 0 && (
                 <ConfirmationAction

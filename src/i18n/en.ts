@@ -1230,6 +1230,28 @@ const en = {
   'linkSafety.copied': 'Copied',
   'linkSafety.open': 'Open link',
 
+  // ── Permission prompt / AskUserQuestion / ExitPlanMode interactive UI ──
+  'permissionPrompt.other': 'Other',
+  'permissionPrompt.otherPlaceholder': 'Type your answer...',
+  'permissionPrompt.submit': 'Submit',
+  'permissionPrompt.deny': 'Deny',
+  'permissionPrompt.allowOnce': 'Allow Once',
+  'permissionPrompt.answerSubmitted': 'Answer submitted',
+  'permissionPrompt.collapse': 'Collapse',
+  'permissionPrompt.showMore': 'Show more',
+  'permissionPrompt.planReady': 'Plan complete — ready to execute',
+  'permissionPrompt.requestedPermissions': 'Requested permissions:',
+  'permissionPrompt.reject': 'Reject',
+  'permissionPrompt.viewPlan': 'View Plan',
+  'permissionPrompt.loadingPlan': 'Loading...',
+  'permissionPrompt.approveExecute': 'Approve & Execute',
+  'permissionPrompt.feedbackPlaceholder': 'Provide feedback on the plan...',
+  'permissionPrompt.doThisInstead': 'Do this instead',
+  'permissionPrompt.planTitle': 'Plan',
+  'permissionPrompt.planLoadFailed': 'Failed to load plan',
+  'permissionPrompt.planApproved': 'Plan approved — executing',
+  'permissionPrompt.planRejected': 'Plan rejected',
+
   // ── SDK Capabilities: Effort ──────────────────────────────
   'messageInput.effort.label': 'Effort Level',
   'messageInput.effort.auto': 'Auto',
