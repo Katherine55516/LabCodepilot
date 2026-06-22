@@ -110,9 +110,18 @@ const isWindows = process.platform === 'win32';
  *
  * When HOME is redirected to the shadow root and these dirs are NOT mirrored,
  * any download lands inside the shadow tree and is destroyed by `cleanup()`
- * at the end of the request. Symptom: Playwright MCP "downloads" the browser
- * on every request and immediately loses it; next launch fails with
- * "Browser X is not installed".
+ * at the end of the request. Two observed symptoms:
+ *   1. Playwright MCP "downloads" the browser on every request and immediately
+ *      loses it (`$HOME/Library/Caches/ms-playwright`); next launch fails with
+ *      "Browser X is not installed".
+ *   2. npx-launched MCP servers (e.g. a project `.mcp.json` with
+ *      `npx -y @playwright/mcp@latest`) re-fetch the package into `$HOME/.npm`
+ *      every request. With a cold cache that download exceeds the SDK's 30s MCP
+ *      connection timeout, so the server never connects and the model reports
+ *      "no Playwright MCP configured". `~/.npm` is NOT under Library/Caches on
+ *      macOS/Linux, hence its own entry below. (Windows npm cache lives under
+ *      AppData and is already covered.) Empirically: cold-shadow npx connect
+ *      times out >30s; with `.npm` mirrored it connects in ~2.5s.
  *
  * Symlinking these into the shadow keeps writes flowing to the user's real
  * cache so artifacts persist across requests. This is NOT a security regression:
@@ -120,8 +129,8 @@ const isWindows = process.platform === 'win32';
  * subprocesses could already write to these paths via absolute paths.
  */
 const PERSIST_DIRS_BY_PLATFORM: Record<string, readonly string[]> = {
-  darwin: ['Library/Caches', 'Library/Application Support'],
-  linux: ['.cache', '.local/share'],
+  darwin: ['Library/Caches', 'Library/Application Support', '.npm'],
+  linux: ['.cache', '.local/share', '.npm'],
   win32: ['AppData/Local', 'AppData/Roaming'],
 };
 

@@ -404,6 +404,30 @@ describe('createShadowClaudeHome — provider-group ownership of credentials', (
     } finally { shadow.cleanup(); }
   });
 
+  it('Scenario 7e (darwin/linux): ~/.npm is symlinked so npx-launched MCP servers reuse the warm cache', async (t) => {
+    // Regression: a project .mcp.json using `npx -y @playwright/mcp@latest`
+    // re-downloads into $HOME/.npm under a cold shadow and exceeds the 30s MCP
+    // connection timeout. Mirroring ~/.npm makes npx hit the real warm cache.
+    if (process.platform === 'win32') {
+      t.skip('npm cache lives under AppData on win32, already covered by AppData/Local');
+      return;
+    }
+    const realNpm = path.join(tempHome, '.npm');
+    fs.mkdirSync(realNpm, { recursive: true });
+    fs.writeFileSync(path.join(realNpm, 'sentinel.txt'), 'real-npx-cache');
+
+    writeRealClaudeDir({ settings: { env: { ANTHROPIC_AUTH_TOKEN: 'sk-leak' } } });
+    const { createShadowClaudeHome } = await loadModule();
+    const shadow = createShadowClaudeHome({ stripAuth: true });
+    try {
+      assert.equal(shadow.isShadow, true);
+      const shadowNpm = path.join(shadow.home, '.npm');
+      assert.ok(fs.existsSync(shadowNpm), 'shadow .npm must exist via symlink so npx reuses the warm cache');
+      assert.ok(fs.lstatSync(shadowNpm).isSymbolicLink(), 'shadow .npm must be a symlink (not a copy)');
+      assert.equal(fs.readFileSync(path.join(shadowNpm, 'sentinel.txt'), 'utf-8'), 'real-npx-cache');
+    } finally { shadow.cleanup(); }
+  });
+
   it('Scenario 7d: missing persist dir is silently skipped (no error)', async () => {
     // Don't pre-create Library/Caches — should just skip, not crash
     writeRealClaudeDir({ settings: { env: { ANTHROPIC_AUTH_TOKEN: 'sk-leak' } } });
