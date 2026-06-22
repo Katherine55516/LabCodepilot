@@ -42,6 +42,9 @@ import { HttpError, AuthExpiredError, NetworkError, type MeInfo, type ModelConfi
 import { RealtimeAsrSession } from './asr/realtime-session';
 import { getAsrConfig, invalidateAsrToken, type AsrConfig } from './asr/token-cache';
 
+// ── Test Accounts: 获取登录态 capture (BrowserWindow → Playwright storageState) ──
+import { startCapture, finishCapture, cancelCapture, getCaptureStatus, clearCaptured } from './test-auth-capture/capture-window';
+
 // File logger — persists main-process logs, the forked Next-server's piped
 // stdout/stderr (re-console.log'd below), and renderer console output to
 // app.getPath('logs'). Secrets are scrubbed before writing. See electron/logger.ts.
@@ -1751,6 +1754,15 @@ app.whenReady().then(async () => {
     });
     return { canceled: result.canceled, filePaths: result.filePaths };
   });
+
+  // Test Accounts — 获取登录态 capture. Opens an isolated BrowserWindow, lets the
+  // user log in, then writes a Playwright storageState file into the AI_LabTest
+  // workspace for replay. See electron/test-auth-capture/capture-window.ts.
+  ipcMain.handle('test-auth-capture:start', (_e, params: { frontendBaseUrl: string; username?: string; password?: string }) => startCapture(params));
+  ipcMain.handle('test-auth-capture:finish', (_e, params: { projectRoot: string; env: string; accountKey: string }) => finishCapture(params));
+  ipcMain.handle('test-auth-capture:cancel', () => cancelCapture());
+  ipcMain.handle('test-auth-capture:status', (_e, params: { projectRoot: string; env: string; accountKey: string }) => getCaptureStatus(params));
+  ipcMain.handle('test-auth-capture:clear', (_e, params: { projectRoot: string; env: string; accountKey: string }) => clearCaptured(params));
 
   // --- Widget export IPC handler ---
   // Uses an isolated BrowserWindow for secure, high-fidelity widget screenshot.

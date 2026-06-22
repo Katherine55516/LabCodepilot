@@ -3,7 +3,7 @@ import path from 'path';
 import crypto from 'crypto';
 import fs from 'fs';
 import os from 'os';
-import type { ChatSession, Message, SettingsMap, TaskItem, TaskStatus, ApiProvider, CreateProviderRequest, UpdateProviderRequest, MediaJob, MediaJobStatus, MediaJobItem, MediaJobItemStatus, MediaContextEvent, BatchConfig, CustomCliTool, ScheduledTask } from '@/types';
+import type { ChatSession, Message, SettingsMap, TaskItem, TaskStatus, ApiProvider, CreateProviderRequest, UpdateProviderRequest, MediaJob, MediaJobStatus, MediaJobItem, MediaJobItemStatus, MediaContextEvent, BatchConfig, CustomCliTool, ScheduledTask, TestAccountSystem, TestAccountSystemView, TestSystemEnvironments, TestEnvironment, CreateTestAccountSystemRequest, UpdateTestAccountSystemRequest } from '@/types';
 import type { ChannelType, ChannelBinding } from './bridge/types';
 import { getLocalDateString, localDayStartAsUTC } from './utils';
 import { inferProtocolFromLegacy } from './provider-catalog';
@@ -900,6 +900,21 @@ function migrateDb(db: Database.Database): void {
       description_zh TEXT NOT NULL DEFAULT '',
       description_en TEXT NOT NULL DEFAULT '',
       structured_json TEXT NOT NULL DEFAULT '',
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+  `);
+
+  // Test Accounts: 多系统测试账号配置（明文）。一行一系统，environments_json 存
+  // { local, sit } 两个环境。导出到 {project_root}/AI_LabTest/environments.json。
+  // 设计/契约见 docs/exec-plans/active/test-account-settings.md。
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS test_account_systems (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      project_root TEXT NOT NULL DEFAULT '',
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      environments_json TEXT NOT NULL DEFAULT '{}',
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
   `);
@@ -2989,6 +3004,102 @@ export function createCustomCliTool(params: { name: string; binPath: string; bin
 export function deleteCustomCliTool(id: string): boolean {
   const db = getDb();
   const result = db.prepare('DELETE FROM cli_tools_custom WHERE id = ?').run(id);
+  return result.changes > 0;
+}
+
+// ==========================================
+// Test Accounts (测试账号设置)
+// 多系统测试账号配置（明文）。导出到 AI_LabTest/environments.json。
+// 契约见 docs/exec-plans/active/test-account-settings.md。
+// ==========================================
+
+/** 把可能残缺的环境对象补成完整 TestEnvironment（容错读旧/部分数据）。 */
+function normalizeTestEnv(raw: unknown, fallbackLabel: string): TestEnvironment {
+  const e = (raw && typeof raw === 'object') ? raw as Partial<TestEnvironment> : {};
+  return {
+    label: typeof e.label === 'string' ? e.label : fallbackLabel,
+    frontendBaseUrl: typeof e.frontendBaseUrl === 'string' ? e.frontendBaseUrl : '',
+    apiBaseUrl: typeof e.apiBaseUrl === 'string' ? e.apiBaseUrl : '',
+    healthEndpoint: typeof e.healthEndpoint === 'string' ? e.healthEndpoint : '/',
+    defaultAccountKey: typeof e.defaultAccountKey === 'string' ? e.defaultAccountKey : '',
+    accounts: Array.isArray(e.accounts) ? (e.accounts as TestEnvironment['accounts']) : [],
+  };
+}
+
+/** 新系统的默认两环境（标签对齐 AI_LabTest 默认值，可在 UI 改）。 */
+function defaultTestEnvironments(): TestSystemEnvironments {
+  return {
+    local: normalizeTestEnv(null, '本地开发环境'),
+    sit: normalizeTestEnv(null, 'SIT 集成测试环境'),
+  };
+}
+
+function rowToTestSystemView(r: TestAccountSystem): TestAccountSystemView {
+  let environments: TestSystemEnvironments;
+  try {
+    const parsed = JSON.parse(r.environments_json || '{}') as { local?: unknown; sit?: unknown };
+    environments = {
+      local: normalizeTestEnv(parsed.local, '本地开发环境'),
+      sit: normalizeTestEnv(parsed.sit, 'SIT 集成测试环境'),
+    };
+  } catch {
+    environments = defaultTestEnvironments();
+  }
+  return {
+    id: r.id,
+    name: r.name,
+    project_root: r.project_root,
+    sort_order: r.sort_order,
+    environments,
+    created_at: r.created_at,
+    updated_at: r.updated_at,
+  };
+}
+
+export function getAllTestAccountSystems(): TestAccountSystemView[] {
+  const db = getDb();
+  const rows = db.prepare('SELECT * FROM test_account_systems ORDER BY sort_order ASC, created_at ASC').all() as TestAccountSystem[];
+  return rows.map(rowToTestSystemView);
+}
+
+export function getTestAccountSystem(id: string): TestAccountSystemView | undefined {
+  const db = getDb();
+  const r = db.prepare('SELECT * FROM test_account_systems WHERE id = ?').get(id) as TestAccountSystem | undefined;
+  return r ? rowToTestSystemView(r) : undefined;
+}
+
+export function createTestAccountSystem(data: CreateTestAccountSystemRequest): TestAccountSystemView {
+  const db = getDb();
+  const id = crypto.randomBytes(16).toString('hex');
+  const now = new Date().toISOString().replace('T', ' ').split('.')[0];
+  const maxRow = db.prepare('SELECT MAX(sort_order) as max_order FROM test_account_systems').get() as { max_order: number | null };
+  const sortOrder = (maxRow.max_order ?? -1) + 1;
+  const environments = data.environments ?? defaultTestEnvironments();
+  db.prepare(
+    `INSERT INTO test_account_systems (id, name, project_root, sort_order, environments_json, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
+  ).run(id, data.name, data.project_root || '', sortOrder, JSON.stringify(environments), now, now);
+  return getTestAccountSystem(id)!;
+}
+
+export function updateTestAccountSystem(id: string, data: UpdateTestAccountSystemRequest): TestAccountSystemView | undefined {
+  const db = getDb();
+  const existing = getTestAccountSystem(id);
+  if (!existing) return undefined;
+  const now = new Date().toISOString().replace('T', ' ').split('.')[0];
+  const name = data.name ?? existing.name;
+  const projectRoot = data.project_root ?? existing.project_root;
+  const sortOrder = data.sort_order ?? existing.sort_order;
+  const environments = data.environments ?? existing.environments;
+  db.prepare(
+    `UPDATE test_account_systems SET name = ?, project_root = ?, sort_order = ?, environments_json = ?, updated_at = ? WHERE id = ?`
+  ).run(name, projectRoot, sortOrder, JSON.stringify(environments), now, id);
+  return getTestAccountSystem(id);
+}
+
+export function deleteTestAccountSystem(id: string): boolean {
+  const db = getDb();
+  const result = db.prepare('DELETE FROM test_account_systems WHERE id = ?').run(id);
   return result.changes > 0;
 }
 

@@ -223,6 +223,41 @@ interface ElectronAPI {
     onState: (cb: (data: { state: string }) => void) => () => void;
     onError: (cb: (data: { code: string; message: string }) => void) => () => void;
   };
+  /**
+   * 获取登录态（测试账号设置）。打开一个隔离的 BrowserWindow 让用户登录一次，
+   * 抓取 cookie + localStorage 组装成 Playwright storageState，写入
+   * {projectRoot}/AI_LabTest/.auth/{env}.{key}.storageState.json 供 AI_LabTest 重放。
+   * Electron-only（纯 npm run dev 下为 undefined）。契约见
+   * docs/handover/test-account-settings.md。
+   */
+  testAuthCapture?: {
+    /** 打开抓取窗口并导航到 frontendBaseUrl，best-effort 预填用户名/密码（不自动提交）。 */
+    start: (params: {
+      frontendBaseUrl: string;
+      username?: string;
+      password?: string;
+    }) => Promise<{ ok: boolean; prefilled?: boolean; error?: string }>;
+    /** 用户登录完成后调用：抓取并把 storageState 写入文件，返回 cookie/origin 计数。 */
+    finish: (params: {
+      projectRoot: string;
+      env: string;
+      accountKey: string;
+    }) => Promise<{ ok: boolean; path?: string; origins?: number; cookies?: number; error?: string }>;
+    /** 取消并关闭抓取窗口。 */
+    cancel: () => Promise<{ ok: boolean }>;
+    /** 查询某账号是否已捕获（storageState 文件是否存在）。 */
+    status: (params: {
+      projectRoot: string;
+      env: string;
+      accountKey: string;
+    }) => Promise<{ ok: boolean; captured: boolean; capturedAt?: string }>;
+    /** 删除某账号的 storageState 文件。 */
+    clear: (params: {
+      projectRoot: string;
+      env: string;
+      accountKey: string;
+    }) => Promise<{ ok: boolean; error?: string }>;
+  };
 }
 
 declare global {
