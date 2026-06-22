@@ -37,6 +37,14 @@ interface ModelSelectorDropdownProps {
   globalDefaultModel?: string;
   /** Global default model's provider ID */
   globalDefaultProvider?: string;
+  /** Which side the menu opens. 'top' (default) = upward, for the bottom composer.
+   *  'bottom' = downward, for triggers in a top header (e.g. the test workbench). */
+  menuSide?: 'top' | 'bottom';
+  /** Horizontal anchor. 'left' (default) anchors the menu's left edge to the
+   *  trigger (left-aligned composer). 'right' anchors the right edge, so a
+   *  right-aligned trigger (e.g. the test workbench header) doesn't overflow
+   *  the viewport's right edge. */
+  menuAlign?: 'left' | 'right';
 }
 
 export function ModelSelectorDropdown({
@@ -47,6 +55,8 @@ export function ModelSelectorDropdown({
   onProviderModelChange,
   globalDefaultModel,
   globalDefaultProvider,
+  menuSide = 'top',
+  menuAlign = 'left',
 }: ModelSelectorDropdownProps) {
   const { t, locale } = useTranslation();
   const modelMenuRef = useRef<HTMLDivElement>(null);
@@ -171,7 +181,7 @@ export function ModelSelectorDropdown({
       </PromptInputButton>
 
       {modelMenuOpen && (
-        <CommandList className="w-64 mb-1.5">
+        <CommandList className={cn("w-64", menuSide === 'bottom' ? "top-full bottom-auto mt-1.5 mb-0" : "mb-1.5", menuAlign === 'right' && "left-auto right-0")}>
           {/* Search input hidden — modelSearch state stays empty so
               flatItems filter is effectively a no-op (all managed providers
               shown). CommandListSearch import + Escape-to-close behaviour

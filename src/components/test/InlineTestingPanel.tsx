@@ -6,6 +6,8 @@ import { ListChecks, ChartBar, Gear, ArrowLeft, FolderPlus, CaretRight, Play, ty
 import type { TranslationKey } from "@/i18n";
 import { useNativeFolderPicker } from "@/hooks/useNativeFolderPicker";
 import { FolderPicker } from "@/components/chat/FolderPicker";
+import { ModelSelectorDropdown } from "@/components/chat/ModelSelectorDropdown";
+import { useProviderModels } from "@/hooks/useProviderModels";
 
 /**
  * Inline testing workbench (Phase 1 · 对话内嵌测试).
@@ -49,6 +51,25 @@ export function InlineTestingPanel({ onClose }: { onClose: () => void }) {
   // Phase 2.0 POC: run state for the requirement step (streamed from /api/test/run).
   const [running, setRunning] = useState(false);
   const [runLog, setRunLog] = useState("");
+  // Model selection for test runs — reuses the chat's managed-provider picker.
+  // In dev (no login) the list may be empty; after packaged-app login the
+  // account-delivered models populate it. Selection is remembered in localStorage.
+  const [model, setModel] = useState<string>(() => {
+    try { return localStorage.getItem("codepilot:last-model") || ""; } catch { return ""; }
+  });
+  const [providerId, setProviderId] = useState<string>(() => {
+    try { return localStorage.getItem("codepilot:last-provider-id") || ""; } catch { return ""; }
+  });
+  const { providerGroups, currentProviderIdValue, modelOptions, globalDefaultModel, globalDefaultProvider } =
+    useProviderModels(providerId || undefined, model || undefined);
+  const handleModelChange = (pid: string, m: string) => {
+    setProviderId(pid);
+    setModel(m);
+    try {
+      localStorage.setItem("codepilot:last-provider-id", pid);
+      localStorage.setItem("codepilot:last-model", m);
+    } catch {}
+  };
 
   const current = selected !== null ? projects[selected] ?? null : null;
   const activeTask = current && selectedTask !== null ? current.tasks[selectedTask] ?? null : null;
@@ -82,17 +103,16 @@ export function InlineTestingPanel({ onClose }: { onClose: () => void }) {
     if (!proj?.path) return;
     setRunning(true);
     setRunLog("");
-    let model: string | undefined;
-    let providerId: string | undefined;
-    try {
-      model = localStorage.getItem("codepilot:last-model") || undefined;
-      providerId = localStorage.getItem("codepilot:last-provider-id") || undefined;
-    } catch {}
     try {
       const res = await fetch("/api/test/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectPath: proj.path, taskName: proj.tasks[selectedTask ?? -1]?.name, model, providerId }),
+        body: JSON.stringify({
+          projectPath: proj.path,
+          taskName: proj.tasks[selectedTask ?? -1]?.name,
+          model: model || undefined,
+          providerId: providerId || undefined,
+        }),
       });
       if (!res.body) {
         setRunLog("无响应流");
@@ -167,6 +187,17 @@ export function InlineTestingPanel({ onClose }: { onClose: () => void }) {
           {segBtn("flow", t("test.view.flow"))}
           {segBtn("report", t("test.view.report"))}
         </div>
+        <ModelSelectorDropdown
+          currentModelValue={model || globalDefaultModel || ""}
+          currentProviderIdValue={providerId || currentProviderIdValue}
+          providerGroups={providerGroups}
+          modelOptions={modelOptions}
+          onProviderModelChange={handleModelChange}
+          globalDefaultModel={globalDefaultModel}
+          globalDefaultProvider={globalDefaultProvider}
+          menuSide="bottom"
+          menuAlign="right"
+        />
         <button
           onClick={onClose}
           className="flex h-7 items-center gap-1 rounded-md border border-border px-2 text-xs text-muted-foreground hover:text-foreground"
