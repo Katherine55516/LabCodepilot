@@ -238,6 +238,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [dashboardPanelOpen, setDashboardPanelOpen] = useState(false);
   const [assistantPanelOpen, setAssistantPanelOpen] = useState(false);
   const [isAssistantWorkspace, setIsAssistantWorkspace] = useState(false);
+  const [testPanelOpen, setTestPanelOpen] = useState(false);
 
   // --- Git summary (derived from polling hook, no setState needed) ---
   const [currentWorktreeLabel, setCurrentWorktreeLabel] = useState("");
@@ -514,6 +515,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       setAssistantPanelOpen,
       isAssistantWorkspace,
       setIsAssistantWorkspace,
+      testPanelOpen,
+      setTestPanelOpen,
       currentBranch,
       gitDirtyCount,
       currentWorktreeLabel,
@@ -537,7 +540,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       previewViewMode,
       setPreviewViewMode,
     }),
-    [fileTreeOpen, taskListOpen, gitPanelOpen, previewOpen, terminalOpen, dashboardPanelOpen, assistantPanelOpen, isAssistantWorkspace, currentBranch, gitDirtyCount, currentWorktreeLabel, workingDirectory, sessionId, sessionTitle, streamingSessionId, pendingApprovalSessionId, activeStreamingSessions, pendingApprovalSessionIds, previewSource, setPreviewSource, previewFile, setPreviewFile, previewViewMode]
+    [fileTreeOpen, taskListOpen, gitPanelOpen, previewOpen, terminalOpen, dashboardPanelOpen, assistantPanelOpen, isAssistantWorkspace, testPanelOpen, currentBranch, gitDirtyCount, currentWorktreeLabel, workingDirectory, sessionId, sessionTitle, streamingSessionId, pendingApprovalSessionId, activeStreamingSessions, pendingApprovalSessionIds, previewSource, setPreviewSource, previewFile, setPreviewFile, previewViewMode]
   );
 
   const imageGenValue = useImageGenState();

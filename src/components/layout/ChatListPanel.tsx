@@ -15,6 +15,7 @@ import {
   Image,
   WifiHigh,
   Gear,
+  ListChecks,
   type Icon,
 } from "@/components/ui/icon";
 import { Button } from "@/components/ui/button";
@@ -58,7 +59,16 @@ interface ChatListPanelProps {
 export function ChatListPanel({ open, width, hasUpdate, readyToInstall }: ChatListPanelProps) {
   const pathname = usePathname();
   const router = useRouter();
-  const { streamingSessionId, pendingApprovalSessionId, activeStreamingSessions, pendingApprovalSessionIds, workingDirectory } = usePanel();
+
+  const { streamingSessionId, pendingApprovalSessionId, activeStreamingSessions, pendingApprovalSessionIds, workingDirectory, setTestPanelOpen } = usePanel();
+
+  // "测试" entry (Routines-style sidebar button). Opens the inline testing panel
+  // by setting app-level PanelContext state (no transient event → no mount-timing
+  // race); navigates to /chat first when not already on a chat route. Additive.
+  const handleOpenTesting = useCallback(() => {
+    setTestPanelOpen(true);
+    if (!pathname.startsWith("/chat")) router.push("/chat");
+  }, [pathname, router, setTestPanelOpen]);
   const { splitSessions, isSplitActive, activeColumnId, addToSplit, removeFromSplit, setActiveColumn, isInSplit } = useSplit();
   const { t } = useTranslation();
   const { isElectron, openNativePicker } = useNativeFolderPicker();
@@ -426,6 +436,8 @@ export function ChatListPanel({ open, width, hasUpdate, readyToInstall }: ChatLi
   // Type annotation needed because the array is currently empty (every entry
   // commented out). When restoring any entry, drop the annotation if you like.
   const navItems: Array<{ href: string; label: string; icon: Icon }> = [
+    // Testing moved into the chat composer's "测试" mode (inline testing panel),
+    // so there's no top-level /test route anymore.
     // Skills / MCP / CLI Tools moved into Settings sub-sections — routes
     // still resolve, just no top-level entries here. Restore by uncommenting.
     // { href: "/skills", label: t('nav.skills' as TranslationKey), icon: Lightning },
@@ -477,6 +489,16 @@ export function ChatListPanel({ open, width, hasUpdate, readyToInstall }: ChatLi
       {/* Feature nav items */}
       <div className="px-3 pb-2">
         <div className="flex flex-col gap-0.5">
+          {/* 测试 — AI test framework entry (Routines-style). Opens the inline testing panel. */}
+          <Button
+            variant="ghost"
+            size="sm"
+            className="w-full justify-start gap-2 h-8 text-xs text-muted-foreground hover:text-foreground"
+            onClick={handleOpenTesting}
+          >
+            <ListChecks size={14} />
+            {t('nav.test')}
+          </Button>
           {navItems.map((item) => {
             const isActive = pathname.startsWith(item.href);
             return (
