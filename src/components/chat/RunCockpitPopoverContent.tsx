@@ -3,22 +3,16 @@
 // ============================================================================
 // RunCockpit popover body (lazy-loaded — mounted only when the user opens the
 // trigger). Composes: header (% + used/total) → dot matrix → detail list →
-// divider → "This run" (model / default / permission) → Total cost.
+// divider → "This run" (model / default / permission).
 //
 // Three render branches (spec §10):
-//   A. hasFullCtx (hasData && window>0)  → % + matrix + list + cost
+//   A. hasFullCtx (hasData && window>0)  → % + matrix + list
 //   B. capacity unknown (hasData, no win) → "Capacity unknown" + used + matrix
 //   C. no data                            → just "This run"
-//
-// Total cost uses the SDK-reported cost_usd (this project's token_usage
-// carries it) instead of tokenlens — no extra dependency, real numbers.
 // ============================================================================
 
-import { useRouter } from 'next/navigation';
-import { ArrowUpRight } from '@phosphor-icons/react';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useOverviewData } from '@/hooks/useOverviewData';
-import { findModelOption } from '@/lib/model-option-match';
 import {
   formatTokensCompact,
   formatContextPercent,
@@ -35,13 +29,6 @@ interface RunCockpitPopoverContentProps {
   usage: ContextUsageData;
 }
 
-function formatCost(costUsd?: number): string {
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-  }).format(costUsd ?? 0);
-}
-
 export function RunCockpitPopoverContent({
   providerId,
   modelName,
@@ -50,15 +37,14 @@ export function RunCockpitPopoverContent({
   usage,
 }: RunCockpitPopoverContentProps) {
   const { t } = useTranslation();
-  const router = useRouter();
   const overview = useOverviewData();
 
   const pid = providerId || 'env';
   const group = overview.groups.find((g) => g.provider_id === pid);
-  const modelOption = findModelOption(group?.models, modelName);
-  const modelLabel = modelOption?.label || modelName || t('runStatus.notConfigured');
-  const providerLabel = group?.provider_name || pid;
-  const modelText = `${providerLabel} · ${modelLabel}`;
+  // Show the provider display name only (e.g. "高阶模型-C48"); the model's own
+  // sub-label is intentionally omitted.
+  const modelText =
+    group?.provider_name || modelName || t('runStatus.notConfigured');
 
   const isPinned = !!overview.globalDefaultModel;
   const defaultModeValue = isPinned
@@ -75,11 +61,6 @@ export function RunCockpitPopoverContent({
       ? formatTokensCompact(usage.contextWindow)
       : '—'
   }`;
-
-  const goSettings = () => router.push('/settings#providers');
-
-  const linkBtnCls =
-    'shrink-0 inline-flex items-center gap-0.5 text-[11px] text-muted-foreground/40 transition-colors group-hover/row:text-muted-foreground hover:!text-foreground';
 
   return (
     <div className="flex flex-col gap-3 text-xs">
@@ -107,30 +88,22 @@ export function RunCockpitPopoverContent({
         ) : (
           <>
             {/* Model */}
-            <div className="group/row flex items-baseline gap-3">
+            <div className="flex items-baseline gap-3">
               <span className="shrink-0 text-muted-foreground">
                 {t('runStatus.model')}
               </span>
               <span className="min-w-0 flex-1 truncate text-right text-foreground">
                 {modelText}
               </span>
-              <button type="button" onClick={goSettings} className={linkBtnCls}>
-                {t('runStatus.switch')}
-                <ArrowUpRight size={11} />
-              </button>
             </div>
             {/* Default mode */}
-            <div className="group/row flex items-baseline gap-3">
+            <div className="flex items-baseline gap-3">
               <span className="shrink-0 text-muted-foreground">
                 {t('runStatus.defaultMode')}
               </span>
               <span className="min-w-0 flex-1 truncate text-right text-foreground">
                 {defaultModeValue}
               </span>
-              <button type="button" onClick={goSettings} className={linkBtnCls}>
-                {t('runStatus.modify')}
-                <ArrowUpRight size={11} />
-              </button>
             </div>
             {/* Permission */}
             <div className="flex items-baseline gap-3">
@@ -150,15 +123,6 @@ export function RunCockpitPopoverContent({
           </>
         )}
       </div>
-
-      {usage.hasData && (
-        <div className="flex w-full items-center justify-between gap-3">
-          <span className="text-muted-foreground">{t('runStatus.totalCost')}</span>
-          <span className="font-mono tabular-nums text-foreground">
-            {formatCost(usage.costUsd)}
-          </span>
-        </div>
-      )}
     </div>
   );
 }

@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import type { Message, MessagesResponse, FileAttachment, SessionStreamSnapshot, MentionRef } from '@/types';
 import { buildFilesDisplayContent } from '@/lib/file-utils';
 import { trimMessageWindow } from '@/lib/message-window';
+import { getManagedContextWindowByName } from '@/lib/model-context';
 import { MessageList } from './MessageList';
 import { TerminalReasonChip } from './TerminalReasonChip';
 import { RateLimitBanner } from './RateLimitBanner';
@@ -185,10 +186,13 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
       .then(r => r.ok ? r.json() : null)
       .then(data => {
         if (controller.signal.aborted) return;
-        const group = data?.groups?.find((g: { provider_id: string }) => g.provider_id === pid);
+        const group = data?.groups?.find((g: { provider_id: string; provider_name?: string }) => g.provider_id === pid);
         const model = group?.models?.find((m: { value: string; upstreamModelId?: string; contextWindow?: number }) => m.value === currentModel);
         setCurrentModelUpstream(model?.upstreamModelId);
-        setCurrentModelContextWindow(model?.contextWindow);
+        // Managed providers: resolve the window from the display name (the
+        // authoritative source per product config); fall back to the
+        // provider-models contextWindow when the name isn't in the table.
+        setCurrentModelContextWindow(getManagedContextWindowByName(group?.provider_name) ?? model?.contextWindow);
       })
       .catch(() => {});
     return () => controller.abort();

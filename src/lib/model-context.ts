@@ -58,3 +58,41 @@ export function getContextWindow(
   if (options?.context1m) return 1_000_000;
   return base;
 }
+
+// ── Managed-provider context windows keyed by DISPLAY NAME ──────────────────
+// Managed models are configured & dispatched by the account backend; their
+// model ids (e.g. claude-opus-4-8) don't reliably map to the real window via
+// the static catalog above (claude-opus-4-8 substring-matches `opus` → 200K,
+// but it's actually 1M). So for managed providers we resolve the window from
+// the human-facing display name instead. Names are normalized (lowercase +
+// strip spaces/hyphens/underscores/dots) so "高阶模型-C48" / "GLM5.2" /
+// "Qwen3.7-Max" all match regardless of punctuation.
+const MANAGED_CONTEXT_WINDOW_BY_NAME: Record<string, number> = {
+  // 1000K
+  '高阶模型c48': 1_000_000,
+  '高阶模型c47': 1_000_000,
+  '高阶模型g55': 1_000_000,
+  glm52: 1_000_000,
+  qwen37max: 1_000_000,
+  qwen37plus: 1_000_000,
+  minimaxm3: 1_000_000,
+  // 256K
+  kimik27code: 256_000,
+  kimik26: 256_000,
+  // 200K
+  glm51: 200_000,
+};
+
+function normalizeManagedName(name: string): string {
+  return name.toLowerCase().replace(/[\s\-_.]/g, '');
+}
+
+/**
+ * Resolve a managed provider's context window from its display name.
+ * Returns null when the name isn't in the table, so callers can fall back to
+ * the provider-models contextWindow / static catalog.
+ */
+export function getManagedContextWindowByName(displayName?: string): number | null {
+  if (!displayName) return null;
+  return MANAGED_CONTEXT_WINDOW_BY_NAME[normalizeManagedName(displayName)] ?? null;
+}
