@@ -669,6 +669,7 @@ export function ChatListPanel({ open, width, hasUpdate, readyToInstall }: ChatLi
                                   projectName: s.project_name || "",
                                   mode: s.mode,
                                 })}
+                                onNavigate={() => setTestPanelOpen(false)}
                               />
                             );
                           })}

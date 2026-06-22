@@ -41,6 +41,11 @@ interface SessionListItemProps {
   onDelete: (e: React.MouseEvent, sessionId: string) => void;
   onRename: (sessionId: string, newTitle: string) => void;
   onAddToSplit: (session: ChatSession) => void;
+  /** Fired when the session row is clicked. Runs even when the target is the
+   *  already-active session (Next.js Link to the same URL is a navigation no-op,
+   *  so a sessionId-change effect won't fire) — used to dismiss the test
+   *  workbench overlay so clicking a conversation always reveals it. */
+  onNavigate?: () => void;
 }
 
 export function SessionListItem({
@@ -59,6 +64,7 @@ export function SessionListItem({
   onDelete,
   onRename,
   onAddToSplit,
+  onNavigate,
 }: SessionListItemProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
@@ -72,6 +78,7 @@ export function SessionListItem({
     >
       <Link
         href={`/chat/${session.id}`}
+        onClick={() => onNavigate?.()}
         className={cn(
           "flex items-center gap-1.5 rounded-md pl-2 pr-2 py-1.5 transition-all duration-150 min-w-0",
           isWorkspace

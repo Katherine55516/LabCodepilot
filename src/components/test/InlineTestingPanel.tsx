@@ -43,6 +43,33 @@ const PIPELINE: { key: string; name: TranslationKey }[] = [
   { key: "report", name: "test.step.report.name" },
 ];
 
+// Turn an agent tool_use ({name, input}) into a readable Chinese run-log line.
+// The run log streams what the agent is actually doing while it works (the bare
+// tool name alone — "Bash"/"Read" — is opaque to a user watching a test run).
+function toolUseLabel(name: string, input: unknown): string {
+  const i = (input ?? {}) as Record<string, unknown>;
+  const str = (v: unknown) => (typeof v === "string" ? v : "");
+  const clip = (v: string, n = 90) => (v.length > n ? v.slice(0, n) + "…" : v);
+  switch (name) {
+    case "Bash": return `执行命令  ${clip(str(i.command))}`;
+    case "Read": return `读取文件  ${clip(str(i.file_path))}`;
+    case "Write": return `写入文件  ${clip(str(i.file_path))}`;
+    case "Edit":
+    case "MultiEdit": return `编辑文件  ${clip(str(i.file_path))}`;
+    case "Grep": return `搜索  ${clip(str(i.pattern))}`;
+    case "Glob": return `查找文件  ${clip(str(i.pattern))}`;
+    case "LS": return `列目录  ${clip(str(i.path))}`;
+    case "WebFetch": return `抓取网页  ${clip(str(i.url))}`;
+    case "TodoWrite": return "更新任务清单";
+    default: {
+      // Playwright MCP browser tools (execution step): playwright__browser_*.
+      const m = name.match(/browser_(\w+)/);
+      if (m) return `浏览器·${m[1]}${i.url ? `  ${clip(str(i.url))}` : ""}`;
+      return name;
+    }
+  }
+}
+
 export function InlineTestingPanel() {
   const { t } = useTranslation();
   const [view, setView] = useState<View>("dash");
@@ -142,11 +169,12 @@ export function InlineTestingPanel() {
           if (evt.type === "text") {
             setRunLog((s) => s + (evt!.data || ""));
           } else if (evt.type === "tool_use") {
-            let name = "";
+            let label = "";
             try {
-              name = JSON.parse(evt.data || "{}").name || "";
+              const tu = JSON.parse(evt.data || "{}");
+              label = toolUseLabel(tu.name || "", tu.input);
             } catch {}
-            setRunLog((s) => s + `\n  → ${name}\n`);
+            if (label) setRunLog((s) => s + `\n  → ${label}\n`);
           } else if (evt.type === "error") {
             let msg = evt.data || "";
             try {
