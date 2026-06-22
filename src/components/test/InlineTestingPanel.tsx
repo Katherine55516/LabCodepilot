@@ -41,7 +41,33 @@ interface CaseResult { id: string; status: string; actual?: string; error?: stri
 interface Project {
   name: string;
   path: string;
-  tasks: { name: string }[];
+  tasks: { id: string; name: string }[];
+}
+
+// Per-task run state — each task keeps its own progress (powers the 看板 step
+// dots + lets the user switch tasks without losing progress).
+interface TaskState {
+  stepStatus: Record<TestStep, StepStatus>;
+  convo: ConvoMsg[];
+  fourState: FourState;
+  currentCase: string;
+  caseResults: CaseResult[];
+  circuitBroken: boolean;
+}
+const DEFAULT_TASK_STATE: TaskState = {
+  stepStatus: { requirement: "idle", cases: "idle", execution: "idle", report: "idle" },
+  convo: [],
+  fourState: { total: 0, pass: 0, fail: 0, partial: 0, blocked: 0 },
+  currentCase: "",
+  caseResults: [],
+  circuitBroken: false,
+};
+function makeTaskId(): string {
+  try {
+    return globalThis.crypto?.randomUUID?.() ?? `t-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  } catch {
+    return `t-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+  }
 }
 
 const INPUT =
@@ -107,6 +133,26 @@ function stepStatusText(status: StepStatus, t: T): string {
   }
 }
 
+// 看板 task-card status chip from a task's per-step state + four-state tally.
+function taskChip(st: TaskState, t: T): { text: string; cls: string } {
+  const ss = STEPS.map((s) => st.stepStatus[s.step]);
+  const WARN = "bg-status-warning-muted text-status-warning-foreground";
+  const INFO = "bg-status-info-muted text-status-info-foreground";
+  const SUCCESS = "bg-status-success-muted text-status-success-foreground";
+  const ERROR = "bg-status-error-muted text-status-error-foreground";
+  const MUTED = "bg-muted text-muted-foreground";
+  if (ss.some((s) => s === "running")) return { text: t("test.stepStatus.running"), cls: INFO };
+  if (ss.some((s) => s === "review")) return { text: t("test.stepStatus.review"), cls: WARN };
+  if (ss.some((s) => s === "error")) return { text: t("test.stepStatus.error"), cls: ERROR };
+  if (ss.every((s) => s === "done")) {
+    return st.fourState.total > 0
+      ? { text: `✓ ${st.fourState.pass}/${st.fourState.total}`, cls: SUCCESS }
+      : { text: t("test.stepStatus.done"), cls: SUCCESS };
+  }
+  const done = ss.filter((s) => s === "done").length;
+  return done > 0 ? { text: `${done}/${STEPS.length}`, cls: MUTED } : { text: t("test.step.pending"), cls: MUTED };
+}
+
 export function InlineTestingPanel() {
   const { t } = useTranslation();
   const [view, setView] = useState<View>("dash");
@@ -114,20 +160,11 @@ export function InlineTestingPanel() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [selected, setSelected] = useState<number | null>(null);
   const [selectedTask, setSelectedTask] = useState<number | null>(null);
-  // Per-step status drives the pipeline strip badges + sequential gating.
-  const [stepStatus, setStepStatus] = useState<Record<TestStep, StepStatus>>({
-    requirement: "idle", cases: "idle", execution: "idle", report: "idle",
-  });
-  const [runningStep, setRunningStep] = useState<TestStep | null>(null);
-  // 测试对话 (lower half): the active task's run stream as bubbles, + execution
-  // four-state tally + current case (for the detail card). Reset on task entry.
-  const [convo, setConvo] = useState<ConvoMsg[]>([]);
+  // Per-task run state (source of truth), keyed by task id. The active task's
+  // values are derived below so the render reads the same names as before.
+  const [taskStates, setTaskStates] = useState<Record<string, TaskState>>({});
+  const [busyTaskId, setBusyTaskId] = useState<string | null>(null);
   const [composer, setComposer] = useState("");
-  const [fourState, setFourState] = useState<FourState>({ total: 0, pass: 0, fail: 0, partial: 0, blocked: 0 });
-  const [currentCase, setCurrentCase] = useState("");
-  const [caseResults, setCaseResults] = useState<CaseResult[]>([]);
-  // Set from the backend's deterministic run.json (401 circuit-breaker) → report warning.
-  const [circuitBroken, setCircuitBroken] = useState(false);
   const threadRef = useRef<HTMLDivElement>(null);
   // Model selection for test runs — reuses the chat's managed-provider picker.
   const [model, setModel] = useState<string>(() => {
@@ -150,9 +187,22 @@ export function InlineTestingPanel() {
   const current = selected !== null ? projects[selected] ?? null : null;
   const activeTask = current && selectedTask !== null ? current.tasks[selectedTask] ?? null : null;
 
+  // Active task's state, derived from the per-task map (render reads these names).
+  const aId = activeTask?.id ?? "";
+  const aState: TaskState = taskStates[aId] ?? DEFAULT_TASK_STATE;
+  const { stepStatus, convo, fourState, currentCase, caseResults, circuitBroken } = aState;
+  const runningStep: TestStep | null = STEPS.find((s) => stepStatus[s.step] === "running")?.step ?? null;
+  const busy = busyTaskId !== null;
+  // Patch a task's state BY ID (runStep captures its id, so switching tasks mid-run is safe).
+  const patchTask = (id: string, patch: (s: TaskState) => Partial<TaskState>) =>
+    setTaskStates((m) => {
+      const cur = m[id] ?? DEFAULT_TASK_STATE;
+      return { ...m, [id]: { ...cur, ...patch(cur) } };
+    });
+
   const addProject = (name: string, path: string) => setProjects((ps) => [...ps, { name, path, tasks: [] }]);
   const addTask = (name: string) =>
-    setProjects((ps) => ps.map((p, i) => (i === selected ? { ...p, tasks: [...p.tasks, { name }] } : p)));
+    setProjects((ps) => ps.map((p, i) => (i === selected ? { ...p, tasks: [...p.tasks, { id: makeTaskId(), name }] } : p)));
 
   // Projects are picked from a folder — native dialog in Electron, browse-dialog in browser.
   const { isElectron, openNativePicker } = useNativeFolderPicker();
@@ -175,16 +225,6 @@ export function InlineTestingPanel() {
     if (threadRef.current) threadRef.current.scrollTop = threadRef.current.scrollHeight;
   }, [convo]);
 
-  // Reset per-task state — called when entering a task's flow so each task starts fresh.
-  const resetSteps = () => {
-    setStepStatus({ requirement: "idle", cases: "idle", execution: "idle", report: "idle" });
-    setConvo([]);
-    setFourState({ total: 0, pass: 0, fail: 0, partial: 0, blocked: 0 });
-    setCurrentCase("");
-    setCaseResults([]);
-    setCircuitBroken(false);
-  };
-
   const stepUnlocked = (step: TestStep): boolean => {
     const idx = STEPS.findIndex((s) => s.step === step);
     if (idx <= 0) return true;
@@ -201,22 +241,25 @@ export function InlineTestingPanel() {
   const runStep = async (step: TestStep) => {
     const proj = selected !== null ? projects[selected] : null;
     const task = proj && selectedTask !== null ? proj.tasks[selectedTask] : null;
-    if (!proj?.path || !task || runningStep) return;
-    setRunningStep(step);
-    setStepStatus((m) => ({ ...m, [step]: "running" }));
+    if (!proj?.path || !task || busyTaskId) return;
+    const id = task.id; // capture — all updates patch THIS task even if the user switches away
+    setBusyTaskId(id);
+    patchTask(id, (s) => ({ stepStatus: { ...s.stepStatus, [step]: "running" } }));
     if (step === "execution") {
-      setFourState({ total: 0, pass: 0, fail: 0, partial: 0, blocked: 0 });
-      setCurrentCase("");
-      setCaseResults([]);
-      setCircuitBroken(false);
+      patchTask(id, () => ({
+        fourState: { total: 0, pass: 0, fail: 0, partial: 0, blocked: 0 },
+        currentCase: "",
+        caseResults: [],
+        circuitBroken: false,
+      }));
     }
     const stepName = t(STEPS.find((s) => s.step === step)!.name);
-    const push = (msg: ConvoMsg) => setConvo((c) => [...c, msg]);
+    const push = (msg: ConvoMsg) => patchTask(id, (s) => ({ convo: [...s.convo, msg] }));
     const appendAi = (chunk: string) =>
-      setConvo((c) => {
-        const last = c[c.length - 1];
-        if (last && last.role === "ai") return [...c.slice(0, -1), { role: "ai", text: last.text + chunk }];
-        return [...c, { role: "ai", text: chunk }];
+      patchTask(id, (s) => {
+        const last = s.convo[s.convo.length - 1];
+        if (last && last.role === "ai") return { convo: [...s.convo.slice(0, -1), { role: "ai", text: last.text + chunk }] };
+        return { convo: [...s.convo, { role: "ai", text: chunk }] };
       });
     push({ role: "user", text: `▶ ${t("test.flow.run")}「${stepName}」` });
     let sawError = false;
@@ -232,30 +275,32 @@ export function InlineTestingPanel() {
           try {
             const r = JSON.parse(line.slice(rIdx + 8).trim());
             const st = String(r.status || "").toLowerCase();
-            setFourState((f) => ({
-              total: f.total + 1,
-              pass: f.pass + (st === "pass" ? 1 : 0),
-              fail: f.fail + (st === "fail" ? 1 : 0),
-              partial: f.partial + (st === "partial" ? 1 : 0),
-              blocked: f.blocked + (st === "blocked" ? 1 : 0),
-            }));
-            setCaseResults((c) => [
-              ...c,
-              {
-                id: String(r.id || "用例"),
-                status: st,
-                actual: typeof r.actual === "string" ? r.actual : undefined,
-                error: typeof r.error === "string" ? r.error : undefined,
-                evidence: Array.isArray(r.evidence) ? r.evidence.map(String) : undefined,
+            patchTask(id, (s) => ({
+              fourState: {
+                total: s.fourState.total + 1,
+                pass: s.fourState.pass + (st === "pass" ? 1 : 0),
+                fail: s.fourState.fail + (st === "fail" ? 1 : 0),
+                partial: s.fourState.partial + (st === "partial" ? 1 : 0),
+                blocked: s.fourState.blocked + (st === "blocked" ? 1 : 0),
               },
-            ]);
+              caseResults: [
+                ...s.caseResults,
+                {
+                  id: String(r.id || "用例"),
+                  status: st,
+                  actual: typeof r.actual === "string" ? r.actual : undefined,
+                  error: typeof r.error === "string" ? r.error : undefined,
+                  evidence: Array.isArray(r.evidence) ? r.evidence.map(String) : undefined,
+                },
+              ],
+            }));
             push({ role: "tool", text: `■ ${r.id || "用例"} → ${st}` });
           } catch {
             appendAi(line + "\n");
           }
           continue;
         }
-        if (line.startsWith("▶")) setCurrentCase(line.replace(/^▶\s*/, ""));
+        if (line.startsWith("▶")) patchTask(id, () => ({ currentCase: line.replace(/^▶\s*/, "") }));
         if (line) appendAi(line + "\n");
       }
     };
@@ -306,27 +351,28 @@ export function InlineTestingPanel() {
             // 401 circuit-breaker) so the 报告 view shows the authoritative result.
             try {
               const rj = JSON.parse(evt.data || "{}");
-              if (rj.counts) {
-                setFourState({
-                  total: rj.counts.total || 0,
-                  pass: rj.counts.pass || 0,
-                  fail: rj.counts.fail || 0,
-                  partial: rj.counts.partial || 0,
-                  blocked: rj.counts.blocked || 0,
-                });
-              }
-              if (Array.isArray(rj.tests)) {
-                setCaseResults(
-                  rj.tests.map((tt: Record<string, unknown>) => ({
+              patchTask(id, () => {
+                const patch: Partial<TaskState> = { circuitBroken: !!rj.circuitBroken };
+                if (rj.counts) {
+                  patch.fourState = {
+                    total: rj.counts.total || 0,
+                    pass: rj.counts.pass || 0,
+                    fail: rj.counts.fail || 0,
+                    partial: rj.counts.partial || 0,
+                    blocked: rj.counts.blocked || 0,
+                  };
+                }
+                if (Array.isArray(rj.tests)) {
+                  patch.caseResults = rj.tests.map((tt: Record<string, unknown>) => ({
                     id: String(tt.id ?? "用例"),
                     status: String(tt.status ?? ""),
                     actual: typeof tt.actual === "string" ? tt.actual : undefined,
                     error: typeof tt.error === "string" ? tt.error : undefined,
                     evidence: Array.isArray(tt.evidence) ? tt.evidence.map(String) : undefined,
-                  })),
-                );
-              }
-              setCircuitBroken(!!rj.circuitBroken);
+                  }));
+                }
+                return patch;
+              });
             } catch {}
           } else if (evt.type === "error") {
             let msg = evt.data || "";
@@ -346,27 +392,29 @@ export function InlineTestingPanel() {
     } finally {
       // Human-gated steps (需求/用例) land in "review" (待批准); auto steps go "done".
       const finalStatus: StepStatus = sawError ? "error" : HUMAN_GATED.includes(step) ? "review" : "done";
-      setStepStatus((m) => ({ ...m, [step]: finalStatus }));
-      setRunningStep(null);
+      patchTask(id, (s) => ({ stepStatus: { ...s.stepStatus, [step]: finalStatus } }));
+      setBusyTaskId(null);
     }
   };
 
   // Approve a human-gated step (待批准 → 已完成). The auto-chain effect then picks
   // up any now-unlocked auto step (执行/报告).
-  const approveStep = (step: TestStep) => setStepStatus((m) => ({ ...m, [step]: "done" }));
+  const approveStep = (step: TestStep) => {
+    if (aId) patchTask(aId, (s) => ({ stepStatus: { ...s.stepStatus, [step]: "done" } }));
+  };
 
-  // Auto-chain: once an auto step (执行/报告) is unlocked + idle, run it. Fires when
-  // the prior step becomes "done" (incl. right after 用例 is approved). Keyed only
-  // on stepStatus/runningStep — runStep is intentionally excluded (stable enough;
-  // re-running on every render would be harmless but wasteful).
+  // Auto-chain: once an auto step (执行/报告) of the ACTIVE task is unlocked + idle,
+  // run it. Fires when the prior step becomes "done" (incl. right after 用例 is
+  // approved). Keyed on taskStates/busyTaskId/aId — runStep is intentionally
+  // excluded (the idle+unlocked guard + busy check prevent re-fire loops).
   useEffect(() => {
-    if (runningStep || !current?.path || !activeTask) return;
+    if (busy || !current?.path || !activeTask) return;
     const auto = STEPS.find(
       (s) => !HUMAN_GATED.includes(s.step) && stepStatus[s.step] === "idle" && stepUnlocked(s.step),
     );
     if (auto) runStep(auto.step);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stepStatus, runningStep]);
+  }, [taskStates, busyTaskId, aId]);
 
   const segBtn = (v: View, label: string) => (
     <button
@@ -432,7 +480,7 @@ export function InlineTestingPanel() {
                 <span className="flex-1" />
                 <button
                   onClick={() => runStep(focusStep)}
-                  disabled={!current?.path || !!runningStep || !stepUnlocked(focusStep)}
+                  disabled={!current?.path || busy || !stepUnlocked(focusStep)}
                   title={!stepUnlocked(focusStep) ? t("test.flow.locked") : undefined}
                   className="flex h-7 items-center gap-1 rounded-md bg-accent px-2.5 text-[11px] font-medium text-accent-foreground disabled:cursor-not-allowed disabled:opacity-40"
                 >
@@ -454,12 +502,12 @@ export function InlineTestingPanel() {
                   return (
                     <button
                       key={s.step}
-                      onClick={() => unlocked && !runningStep && runStep(s.step)}
-                      disabled={!current?.path || !!runningStep || !unlocked}
+                      onClick={() => unlocked && !busy && runStep(s.step)}
+                      disabled={!current?.path || busy || !unlocked}
                       title={!unlocked ? t("test.flow.locked") : t("test.flow.run")}
                       className={`min-w-[120px] flex-1 rounded-lg border bg-card p-2.5 text-left transition-colors disabled:cursor-not-allowed ${
                         isFocus ? "border-accent outline outline-1 outline-accent" : "border-border"
-                      } ${unlocked && !runningStep && current?.path ? "hover:border-accent/60" : ""}`}
+                      } ${unlocked && !busy && current?.path ? "hover:border-accent/60" : ""}`}
                     >
                       <div className="flex items-center gap-1.5">
                         <span className={`h-2 w-2 rounded-full ${stepDotClass(status)} ${status === "running" ? "animate-pulse" : ""}`} />
@@ -484,7 +532,7 @@ export function InlineTestingPanel() {
                   <span className="flex-1" />
                   <button
                     onClick={() => runStep(focusStep)}
-                    disabled={!current?.path || !!runningStep || !stepUnlocked(focusStep)}
+                    disabled={!current?.path || busy || !stepUnlocked(focusStep)}
                     className="flex h-7 items-center gap-1 rounded-md bg-accent px-2.5 text-[11px] font-medium text-accent-foreground disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     <Play size={12} /> {runningStep === focusStep ? t("test.flow.running") : stepStatus[focusStep] === "done" ? t("test.flow.rerun") : t("test.flow.run")}
@@ -618,20 +666,34 @@ export function InlineTestingPanel() {
                   <EmptyState icon={ListChecks} text={t("test.tasksEmpty")} />
                 ) : (
                   <div className="grid grid-cols-2 gap-2">
-                    {current.tasks.map((tk, i) => (
-                      <button
-                        key={i}
-                        onClick={() => {
-                          setSelectedTask(i);
-                          resetSteps();
-                          setView("flow");
-                        }}
-                        className="rounded-xl border border-border bg-card p-3 text-left hover:border-accent/60"
-                      >
-                        <span className="text-sm font-medium text-foreground">{tk.name}</span>
-                        <div className="mt-1 text-[11px] text-muted-foreground">{t("test.step.pending")}</div>
-                      </button>
-                    ))}
+                    {current.tasks.map((tk, i) => {
+                      const st = taskStates[tk.id] ?? DEFAULT_TASK_STATE;
+                      const chip = taskChip(st, t);
+                      return (
+                        <button
+                          key={tk.id}
+                          onClick={() => {
+                            setSelectedTask(i);
+                            setView("flow");
+                          }}
+                          className="rounded-xl border border-border bg-card p-3 text-left hover:border-accent/60"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="truncate text-sm font-medium text-foreground">{tk.name}</span>
+                            <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${chip.cls}`}>{chip.text}</span>
+                          </div>
+                          <div className="mt-2 flex items-center gap-1.5">
+                            {STEPS.map((s) => (
+                              <span
+                                key={s.step}
+                                title={t(s.name)}
+                                className={`h-2 w-2 rounded-full ${stepDotClass(st.stepStatus[s.step])}`}
+                              />
+                            ))}
+                          </div>
+                        </button>
+                      );
+                    })}
                   </div>
                 )}
               </div>
