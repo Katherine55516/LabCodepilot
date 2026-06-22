@@ -62,6 +62,7 @@
 | active/security-audit-remediation.md | 安全审计修复方案：2 处无鉴权 RCE（Shell 注入）→ API 边界鉴权（middleware）→ 文件接口作用域 → Bridge 访问控制/凭证加密 → Electron CSP/sandbox → 依赖升级，共 7 Phase | Phase 1-7 待开始 |
 | active/stream-idle-timeout-rework.md | 对话流空闲超时改造：从「距上次任何事件」改为「距上次实质内容」计时，根治慢首包 provider 误杀（B-019），保留真卡死兜底 | Phase 0/1/4 已完成（c7888dc/e9ddbc2），Phase 2-3 可选暂缓 |
 | active/test-framework-integration.md | 测试框架集成（对话内嵌测试）：把 ai-lab-test-framework 做成第三种对话模式（代码/计划/测试），上半结构化面板(看板/流程/报告)+下半对话流；锁定作用域/模式/视图模型，替换 Phase-1 的 /test 独立路由 | Phase 0 进行中，Phase 1-8 待开始 |
+| active/test-account-settings.md | 测试账号设置：设置内新增多系统测试账号面板（系统下拉 + local/SIT 标签 + 密码/token/获取登录态），导出到 AI_LabTest `environments.json` + `.auth/` storageState，Electron BrowserWindow 抓取登录态 | Phase 0 完成，Phase 1-6 待开始 |
 ### Completed
 
 | 文件 | 主题 | 完成日期 |

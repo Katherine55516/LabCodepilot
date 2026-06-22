@@ -167,4 +167,17 @@ contextBridge.exposeInMainWorld('electronAPI', {
   app: {
     quit: () => ipcRenderer.invoke('app:quit'),
   },
+  // Test Accounts — 获取登录态 capture (opens a BrowserWindow, harvests
+  // cookies + localStorage into a Playwright storageState file). Electron-only.
+  testAuthCapture: {
+    start: (params: { frontendBaseUrl: string; username?: string; password?: string }) =>
+      ipcRenderer.invoke('test-auth-capture:start', params),
+    finish: (params: { projectRoot: string; env: string; accountKey: string }) =>
+      ipcRenderer.invoke('test-auth-capture:finish', params),
+    cancel: () => ipcRenderer.invoke('test-auth-capture:cancel'),
+    status: (params: { projectRoot: string; env: string; accountKey: string }) =>
+      ipcRenderer.invoke('test-auth-capture:status', params),
+    clear: (params: { projectRoot: string; env: string; accountKey: string }) =>
+      ipcRenderer.invoke('test-auth-capture:clear', params),
+  },
 });

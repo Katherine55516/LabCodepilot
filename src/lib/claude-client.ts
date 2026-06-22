@@ -571,6 +571,9 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
           // default 'acceptEdits' mode prompts the user for each mcp__codepilot-*
           // invocation, which is the regression users reported after we
           // stopped silently allowing everything via project-level settings.
+          //
+          // Also auto-allow project-level MCP servers loaded from .mcp.json
+          // (e.g. Playwright for browser-driven test execution via ai-lab-test).
           allowedTools: [
             'mcp__codepilot-memory',
             'mcp__codepilot-notify',
@@ -580,6 +583,7 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
             'mcp__codepilot-image-gen',
             'mcp__codepilot-cli-tools',
             'mcp__codepilot-dashboard',
+            'mcp__playwright',
           ],
         };
 

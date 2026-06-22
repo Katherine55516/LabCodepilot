@@ -103,6 +103,70 @@ export interface ShadowHome {
 const REAL_HOME = (): string => os.homedir();
 const isWindows = process.platform === 'win32';
 
+/**
+ * Per-platform list of HOME-relative cache directories that subprocesses
+ * (especially MCP servers) commonly write large persistent artifacts to:
+ * browser binaries, model weights, package caches, etc.
+ *
+ * When HOME is redirected to the shadow root and these dirs are NOT mirrored,
+ * any download lands inside the shadow tree and is destroyed by `cleanup()`
+ * at the end of the request. Two observed symptoms:
+ *   1. Playwright MCP "downloads" the browser on every request and immediately
+ *      loses it (`$HOME/Library/Caches/ms-playwright`); next launch fails with
+ *      "Browser X is not installed".
+ *   2. npx-launched MCP servers (e.g. a project `.mcp.json` with
+ *      `npx -y @playwright/mcp@latest`) re-fetch the package into `$HOME/.npm`
+ *      every request. With a cold cache that download exceeds the SDK's 30s MCP
+ *      connection timeout, so the server never connects and the model reports
+ *      "no Playwright MCP configured". `~/.npm` is NOT under Library/Caches on
+ *      macOS/Linux, hence its own entry below. (Windows npm cache lives under
+ *      AppData and is already covered.) Empirically: cold-shadow npx connect
+ *      times out >30s; with `.npm` mirrored it connects in ~2.5s.
+ *
+ * Symlinking these into the shadow keeps writes flowing to the user's real
+ * cache so artifacts persist across requests. This is NOT a security regression:
+ * the shadow is explicitly "not a security boundary" (see file header), and
+ * subprocesses could already write to these paths via absolute paths.
+ */
+const PERSIST_DIRS_BY_PLATFORM: Record<string, readonly string[]> = {
+  darwin: ['Library/Caches', 'Library/Application Support', '.npm'],
+  linux: ['.cache', '.local/share', '.npm'],
+  win32: ['AppData/Local', 'AppData/Roaming'],
+};
+
+/**
+ * Symlink (or junction on Windows) each platform-appropriate persistent cache
+ * dir from the shadow root to the user's real HOME. Best-effort — failures are
+ * logged but do not abort shadow creation, because the shadow is still useful
+ * for its primary purpose (auth env stripping) even if some MCPs can't cache.
+ */
+function mirrorPersistDirs(shadowRoot: string): void {
+  const realHome = REAL_HOME();
+  const persistDirs = PERSIST_DIRS_BY_PLATFORM[process.platform] ?? [];
+  for (const rel of persistDirs) {
+    const realPath = path.join(realHome, rel);
+    const shadowPath = path.join(shadowRoot, rel);
+    try {
+      // Skip if the real dir doesn't exist — nothing to mirror, and creating
+      // a dangling symlink would just confuse later writes.
+      if (!fs.existsSync(realPath)) continue;
+      // Ensure parent dir exists (e.g. `Library/` before linking `Library/Caches`)
+      fs.mkdirSync(path.dirname(shadowPath), { recursive: true });
+      if (isWindows) {
+        fs.symlinkSync(realPath, shadowPath, 'junction');
+      } else {
+        fs.symlinkSync(realPath, shadowPath, 'dir');
+      }
+    } catch (err) {
+      // Symlink can fail on Windows without admin/Developer Mode, or if the
+      // path already exists. Either way, MCP downloads will be non-persistent
+      // for this request but everything else still works.
+      console.warn(`[shadow-home] Could not symlink persistent dir ${rel}:`,
+        err instanceof Error ? err.message : err);
+    }
+  }
+}
+
 function passthrough(): ShadowHome {
   return { home: REAL_HOME(), isShadow: false, cleanup: () => { /* nothing */ } };
 }
@@ -323,6 +387,12 @@ export function createShadowClaudeHome(opts: { stripAuth: boolean }): ShadowHome
 
   try {
     fs.mkdirSync(shadowClaudeDir, { recursive: true });
+
+    // Mirror platform-specific persistent cache dirs (~/Library/Caches on
+    // macOS, ~/.cache on Linux, ~/AppData/Local on Windows). Without this,
+    // MCP servers that download large binaries (Playwright browsers, model
+    // weights, etc.) lose them at shadow cleanup, breaking subsequent requests.
+    mirrorPersistDirs(shadowRoot);
 
     // Mirror everything inside ~/.claude/ except settings.json (we'll write a
     // stripped copy below). Subdirectories preserve user-level skills, agents,

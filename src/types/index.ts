@@ -1382,3 +1382,86 @@ export interface ScheduledTask {
   created_at: string;
   updated_at: string;
 }
+
+// ===== Test Accounts (测试账号设置) =====
+// 在设置中配置「测试时访问账号」，导出到 AI_LabTest 的 environments.json 供测试框架消费。
+// 对标 AI_LabTest「环境配置」对话框，但支持多个系统：每个系统 = 一个 AI_LabTest 工作区目录，
+// 环境固定 local + sit（AI_LabTest 白名单约束）。密钥明文存本地库（与 AI_LabTest 一致，DB 仅本机）。
+// 设计/契约见 docs/exec-plans/active/test-account-settings.md。
+
+export type TestEnvKey = 'local' | 'sit';
+export type TestAuthMethod = 'password' | 'token' | 'capture';
+/** token 注入位置 —— 映射 AI_LabTest 账号的 storageType 字段 */
+export type TestTokenStorage = 'header' | 'localStorage' | 'sessionStorage' | 'cookie';
+
+/** 单个登录账号。导出到 environments[env].accounts[]，三种形态字段不同（见 toEnvironmentsJson）。 */
+export interface TestLoginAccount {
+  /** 角色 key，env 内唯一，导出为 accounts[].key；storageState 文件名按其 sanitize 派生 */
+  key: string;
+  role: string;
+  authMethod: TestAuthMethod;
+  // password 方式（明文）
+  username?: string;
+  password?: string;
+  // token 方式（明文；header 类型不要预置 Bearer，AI_LabTest runner 自动加）
+  token?: string;
+  capturedAt?: string;
+  storageType?: TestTokenStorage;
+  storageKey?: string;
+  // capture（获取登录态）方式：登录态 blob 不入库，存为独立 storageState 文件；
+  // captured 仅作 UI 缓存提示，真值以 .auth 文件存在性为准（见 capture status 接口）。
+  captured?: boolean;
+}
+
+/** 单个环境（local / sit）。映射 environments[env]。 */
+export interface TestEnvironment {
+  label: string;
+  frontendBaseUrl: string;
+  apiBaseUrl: string;
+  healthEndpoint: string;
+  /** 导出为 environments[env].defaultAccount，必须等于某 account.key */
+  defaultAccountKey: string;
+  accounts: TestLoginAccount[];
+}
+
+/** 一个系统的两个环境配置（解析自 DB 的 environments_json 列）。 */
+export interface TestSystemEnvironments {
+  local: TestEnvironment;
+  sit: TestEnvironment;
+}
+
+/** DB 行：test_account_systems。environments_json 为 TestSystemEnvironments 的 stringify。 */
+export interface TestAccountSystem {
+  id: string;
+  name: string;
+  /** AI_LabTest 工作区目录；导出目标为 {project_root}/AI_LabTest/environments.json */
+  project_root: string;
+  sort_order: number;
+  environments_json: string;
+  created_at: string;
+  updated_at: string;
+}
+
+/** API/前端友好形态：environments 已解析。 */
+export interface TestAccountSystemView {
+  id: string;
+  name: string;
+  project_root: string;
+  sort_order: number;
+  environments: TestSystemEnvironments;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreateTestAccountSystemRequest {
+  name: string;
+  project_root?: string;
+  environments?: TestSystemEnvironments;
+}
+
+export interface UpdateTestAccountSystemRequest {
+  name?: string;
+  project_root?: string;
+  environments?: TestSystemEnvironments;
+  sort_order?: number;
+}
