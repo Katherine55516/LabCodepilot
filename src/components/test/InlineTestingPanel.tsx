@@ -29,11 +29,14 @@ type ModalKind = "none" | "newTask" | "env";
 type T = (key: TranslationKey, params?: Record<string, string | number>) => string;
 // Backend test-step keys (match /api/test/run + src/lib/test/prompts.ts).
 type TestStep = "requirement" | "cases" | "execution" | "report";
-type StepStatus = "idle" | "running" | "done" | "error";
+// "review" = 待批准 (human gate): step ran, awaiting user approval before the next.
+type StepStatus = "idle" | "running" | "review" | "done" | "error";
 // 测试对话 bubble roles (mirrors the prototype's ai/user/tool bubbles).
 type ConvoRole = "ai" | "tool" | "user" | "error";
 interface ConvoMsg { role: ConvoRole; text: string }
 interface FourState { total: number; pass: number; fail: number; partial: number; blocked: number }
+// One executed case parsed from an execution @@RESULT frame (drives 报告 table).
+interface CaseResult { id: string; status: string; actual?: string; error?: string; evidence?: string[] }
 
 interface Project {
   name: string;
@@ -53,6 +56,12 @@ const STEPS: { step: TestStep; name: TranslationKey; desc: TranslationKey }[] = 
   { step: "execution", name: "test.step.execution.name", desc: "test.step.execution.desc" },
   { step: "report", name: "test.step.report.name", desc: "test.step.report.desc" },
 ];
+
+// Gating model (ai-lab-test-framework / prototype): 需求分析 + 用例设计 are
+// human-gated — they run, then wait for the user to 批准 the output before the
+// next step unlocks. 测试执行 + 测试报告 are an auto-chain (run automatically once
+// 用例 is approved).
+const HUMAN_GATED: TestStep[] = ["requirement", "cases"];
 
 // Turn an agent tool_use ({name, input}) into a readable Chinese run-log line.
 function toolUseLabel(name: string, input: unknown): string {
@@ -83,6 +92,7 @@ function stepDotClass(status: StepStatus): string {
   switch (status) {
     case "done": return "bg-status-success";
     case "running": return "bg-accent";
+    case "review": return "bg-status-warning";
     case "error": return "bg-status-error";
     default: return "bg-muted-foreground/30";
   }
@@ -90,6 +100,7 @@ function stepDotClass(status: StepStatus): string {
 function stepStatusText(status: StepStatus, t: T): string {
   switch (status) {
     case "running": return t("test.stepStatus.running");
+    case "review": return t("test.stepStatus.review");
     case "done": return t("test.stepStatus.done");
     case "error": return t("test.stepStatus.error");
     default: return t("test.step.pending");
@@ -114,6 +125,7 @@ export function InlineTestingPanel() {
   const [composer, setComposer] = useState("");
   const [fourState, setFourState] = useState<FourState>({ total: 0, pass: 0, fail: 0, partial: 0, blocked: 0 });
   const [currentCase, setCurrentCase] = useState("");
+  const [caseResults, setCaseResults] = useState<CaseResult[]>([]);
   const threadRef = useRef<HTMLDivElement>(null);
   // Model selection for test runs — reuses the chat's managed-provider picker.
   const [model, setModel] = useState<string>(() => {
@@ -167,6 +179,7 @@ export function InlineTestingPanel() {
     setConvo([]);
     setFourState({ total: 0, pass: 0, fail: 0, partial: 0, blocked: 0 });
     setCurrentCase("");
+    setCaseResults([]);
   };
 
   const stepUnlocked = (step: TestStep): boolean => {
@@ -177,6 +190,8 @@ export function InlineTestingPanel() {
   // First not-done step = the "current" step the detail card focuses on.
   const nextPendingStep = (): TestStep | null => STEPS.find((s) => stepStatus[s.step] !== "done")?.step ?? null;
   const focusStep: TestStep = runningStep ?? nextPendingStep() ?? "report";
+  // A human-gated step awaiting approval → drives the conversation's gate bar.
+  const reviewStep = STEPS.find((s) => stepStatus[s.step] === "review")?.step ?? null;
 
   // Run one step: stream /api/test/run into the 测试对话 (bubbles) + tally four-state
   // (execution @@RESULT frames). One step at a time; status drives pipeline + gating.
@@ -189,6 +204,7 @@ export function InlineTestingPanel() {
     if (step === "execution") {
       setFourState({ total: 0, pass: 0, fail: 0, partial: 0, blocked: 0 });
       setCurrentCase("");
+      setCaseResults([]);
     }
     const stepName = t(STEPS.find((s) => s.step === step)!.name);
     const push = (msg: ConvoMsg) => setConvo((c) => [...c, msg]);
@@ -219,6 +235,16 @@ export function InlineTestingPanel() {
               partial: f.partial + (st === "partial" ? 1 : 0),
               blocked: f.blocked + (st === "blocked" ? 1 : 0),
             }));
+            setCaseResults((c) => [
+              ...c,
+              {
+                id: String(r.id || "用例"),
+                status: st,
+                actual: typeof r.actual === "string" ? r.actual : undefined,
+                error: typeof r.error === "string" ? r.error : undefined,
+                evidence: Array.isArray(r.evidence) ? r.evidence.map(String) : undefined,
+              },
+            ]);
             push({ role: "tool", text: `■ ${r.id || "用例"} → ${st}` });
           } catch {
             appendAi(line + "\n");
@@ -286,10 +312,29 @@ export function InlineTestingPanel() {
       push({ role: "error", text: `请求失败：${e instanceof Error ? e.message : String(e)}` });
       sawError = true;
     } finally {
-      setStepStatus((m) => ({ ...m, [step]: sawError ? "error" : "done" }));
+      // Human-gated steps (需求/用例) land in "review" (待批准); auto steps go "done".
+      const finalStatus: StepStatus = sawError ? "error" : HUMAN_GATED.includes(step) ? "review" : "done";
+      setStepStatus((m) => ({ ...m, [step]: finalStatus }));
       setRunningStep(null);
     }
   };
+
+  // Approve a human-gated step (待批准 → 已完成). The auto-chain effect then picks
+  // up any now-unlocked auto step (执行/报告).
+  const approveStep = (step: TestStep) => setStepStatus((m) => ({ ...m, [step]: "done" }));
+
+  // Auto-chain: once an auto step (执行/报告) is unlocked + idle, run it. Fires when
+  // the prior step becomes "done" (incl. right after 用例 is approved). Keyed only
+  // on stepStatus/runningStep — runStep is intentionally excluded (stable enough;
+  // re-running on every render would be harmless but wasteful).
+  useEffect(() => {
+    if (runningStep || !current?.path || !activeTask) return;
+    const auto = STEPS.find(
+      (s) => !HUMAN_GATED.includes(s.step) && stepStatus[s.step] === "idle" && stepUnlocked(s.step),
+    );
+    if (auto) runStep(auto.step);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stepStatus, runningStep]);
 
   const segBtn = (v: View, label: string) => (
     <button
@@ -386,7 +431,10 @@ export function InlineTestingPanel() {
                     >
                       <div className="flex items-center gap-1.5">
                         <span className={`h-2 w-2 rounded-full ${stepDotClass(status)} ${status === "running" ? "animate-pulse" : ""}`} />
-                        <span className="text-xs font-medium text-foreground">{i + 1}. {t(s.name)}</span>
+                        <span className="text-xs font-medium text-foreground">
+                          {i + 1}. {t(s.name)}
+                          {HUMAN_GATED.includes(s.step) && <span title={t("test.gate.auto")}> ✋</span>}
+                        </span>
                       </div>
                       <div className="mt-1 text-[11px] text-muted-foreground">{stepStatusText(status, t)}</div>
                     </button>
@@ -435,6 +483,19 @@ export function InlineTestingPanel() {
                 convo.map((m, i) => <ConvoBubble key={i} msg={m} />)
               )}
             </div>
+            {/* gate bar: a human-gated step (需求/用例) awaiting approval */}
+            {reviewStep && (
+              <div className="mx-3 mb-2 flex shrink-0 items-center gap-2 rounded-md border border-status-warning-border bg-status-warning-muted px-3 py-2 text-[11px] text-status-warning-foreground">
+                <span>✋ {t(STEPS.find((s) => s.step === reviewStep)!.name)}{t("test.gate.pending")}</span>
+                <span className="flex-1" />
+                <button
+                  onClick={() => approveStep(reviewStep)}
+                  className="rounded bg-accent px-2.5 py-1 text-[11px] font-medium text-accent-foreground"
+                >
+                  ✓ {t("test.gate.approve")}
+                </button>
+              </div>
+            )}
             <div className="shrink-0 border-t border-border bg-card p-3">
               <div className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2">
                 <input
@@ -545,7 +606,12 @@ export function InlineTestingPanel() {
             )}
 
             {view === "flow" && !activeTask && <EmptyState icon={ListChecks} text={t("test.flowEmpty")} />}
-            {view === "report" && <EmptyState icon={ChartBar} text={t("test.reportEmpty")} />}
+            {view === "report" &&
+              (caseResults.length > 0 ? (
+                <ReportView t={t} results={caseResults} four={fourState} taskName={activeTask?.name ?? current?.name ?? ""} />
+              ) : (
+                <EmptyState icon={ChartBar} text={t("test.reportEmpty")} />
+              ))}
           </div>
         </div>
       )}
@@ -575,6 +641,74 @@ function ConvoBubble({ msg }: { msg: ConvoMsg }) {
   if (msg.role === "error")
     return <div className={`${base} self-start bg-status-error-muted text-status-error-foreground`}>{msg.text}</div>;
   return <div className={`${base} self-start border border-border bg-card text-foreground`}>{msg.text}</div>;
+}
+
+// 报告 view (prototype): metrics row + per-case results table, from the execution
+// run's @@RESULT frames (caseResults) + four-state tally. Facts only.
+function ReportView({ t, results, four, taskName }: { t: T; results: CaseResult[]; four: FourState; taskName: string }) {
+  const total = four.total || results.length;
+  const execRate = total ? Math.round((four.pass / total) * 100) : 0;
+  const funcDenom = total - four.blocked; // blocked cases never ran functionally
+  const funcRate = funcDenom > 0 ? Math.round((four.pass / funcDenom) * 100) : 0;
+  const metric = (label: string, value: string, danger?: boolean) => (
+    <div className="rounded-lg bg-muted/40 p-3">
+      <div className="text-[11px] text-muted-foreground">{label}</div>
+      <div className={`text-2xl font-semibold ${danger ? "text-status-error-foreground" : "text-foreground"}`}>{value}</div>
+    </div>
+  );
+  const chipCls: Record<string, string> = {
+    pass: "bg-status-success-muted text-status-success-foreground",
+    fail: "bg-status-error-muted text-status-error-foreground",
+    partial: "bg-status-warning-muted text-status-warning-foreground",
+    blocked: "bg-status-info-muted text-status-info-foreground",
+  };
+  const chipLabel: Record<string, TranslationKey> = {
+    pass: "test.state.pass", fail: "test.state.fail", partial: "test.state.partial", blocked: "test.state.blocked",
+  };
+  return (
+    <div>
+      <div className="mb-3 flex items-center gap-2">
+        <ChartBar size={15} className="text-accent" />
+        <h3 className="text-sm font-semibold text-foreground">{taskName}</h3>
+        <span className="text-[11px] text-muted-foreground">· {t("test.view.report")}</span>
+      </div>
+      <div className="mb-3 grid grid-cols-2 gap-2 lg:grid-cols-4">
+        {metric(t("test.report.funcRate"), `${funcRate}%`)}
+        {metric(t("test.report.caseCount"), String(total))}
+        {metric(t("test.report.execRate"), `${execRate}%`)}
+        {metric(t("test.report.defects"), String(four.fail), four.fail > 0)}
+      </div>
+      <div className="overflow-hidden rounded-xl border border-border">
+        <table className="w-full border-collapse text-[11px]">
+          <thead>
+            <tr className="bg-muted/50 text-left text-muted-foreground">
+              <th className="px-2 py-1.5 font-medium">{t("test.report.colId")}</th>
+              <th className="px-2 py-1.5 font-medium">{t("test.report.colActual")}</th>
+              <th className="px-2 py-1.5 font-medium">{t("test.report.colStatus")}</th>
+              <th className="px-2 py-1.5 font-medium">{t("test.report.colEvidence")}</th>
+              <th className="px-2 py-1.5 font-medium">{t("test.report.colReason")}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {results.map((r, i) => (
+              <tr key={i} className="border-t border-border align-top">
+                <td className="px-2 py-1.5 font-mono text-foreground">{r.id}</td>
+                <td className="px-2 py-1.5 text-muted-foreground">{r.actual || "—"}</td>
+                <td className="px-2 py-1.5">
+                  <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${chipCls[r.status] || "bg-muted text-muted-foreground"}`}>
+                    {chipLabel[r.status] ? t(chipLabel[r.status]) : r.status}
+                  </span>
+                </td>
+                <td className="px-2 py-1.5 text-muted-foreground">{r.evidence?.length ? r.evidence.join(", ") : "—"}</td>
+                <td className="px-2 py-1.5 text-muted-foreground">{r.error || "—"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="mt-2 text-[11px] text-muted-foreground">ℹ️ {t("test.report.factsNote")}</p>
+    </div>
+  );
 }
 
 function EmptyState({ icon: IconCmp, text }: { icon: Icon; text: string }) {
