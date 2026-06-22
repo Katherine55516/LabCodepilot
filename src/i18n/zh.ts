@@ -1220,6 +1220,13 @@ const zh: Record<TranslationKey, string> = {
   'runStatus.breakdownPendingNextTurn': '本次待加入',
   'runStatus.breakdownCacheOrPrevious': '缓存 / 上轮',
 
+  // ── 外部链接确认弹窗（Streamdown linkSafety）──
+  'linkSafety.title': '打开外部链接？',
+  'linkSafety.description': '你即将访问一个外部网站。',
+  'linkSafety.copy': '复制链接',
+  'linkSafety.copied': '已复制',
+  'linkSafety.open': '打开链接',
+
   // ── SDK Capabilities: Effort ──────────────────────────────
   'messageInput.effort.label': '推理力度',
   'messageInput.effort.auto': '默认',

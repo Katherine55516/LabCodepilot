@@ -28,6 +28,7 @@ import { cn } from '@/lib/utils';
 import { Shimmer } from '@/components/ai-elements/shimmer';
 import { useStickToBottomContext } from 'use-stick-to-bottom';
 import { Streamdown } from 'streamdown';
+import { linkSafetyConfig } from './link-safety';
 import { cjk } from '@streamdown/cjk';
 import { math } from '@streamdown/math';
 import { mermaid } from '@streamdown/mermaid';
@@ -518,7 +519,7 @@ export function ThinkingRow({ content, isStreaming }: { content: string; isStrea
             style={{ overflow: 'hidden' }}
           >
             <div className="ml-6 px-2 py-1.5 text-xs text-muted-foreground/70 border-l-2 border-border/30 prose prose-sm dark:prose-invert max-w-none">
-              <Streamdown plugins={thinkingPlugins}>{content}</Streamdown>
+              <Streamdown plugins={thinkingPlugins} linkSafety={linkSafetyConfig}>{content}</Streamdown>
             </div>
           </motion.div>
         )}
@@ -662,7 +663,7 @@ function MarkdownResultView({ result }: { result: string }) {
         "[&_a]:text-primary",
       )}
     >
-      <Streamdown plugins={thinkingPlugins}>{result}</Streamdown>
+      <Streamdown plugins={thinkingPlugins} linkSafety={linkSafetyConfig}>{result}</Streamdown>
     </div>
   );
 }

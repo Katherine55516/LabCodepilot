@@ -1229,6 +1229,13 @@ const zhHK: Record<TranslationKey, string> = {
   'runStatus.breakdownPendingNextTurn': '本次待加入',
   'runStatus.breakdownCacheOrPrevious': '快取 / 上輪',
 
+  // ── 外部連結確認彈窗（Streamdown linkSafety）──
+  'linkSafety.title': '開啟外部連結？',
+  'linkSafety.description': '你即將造訪一個外部網站。',
+  'linkSafety.copy': '複製連結',
+  'linkSafety.copied': '已複製',
+  'linkSafety.open': '開啟連結',
+
   // ── SDK Capabilities: Effort ──────────────────────────────
   'messageInput.effort.label': '推理力度',
   'messageInput.effort.auto': '預設',

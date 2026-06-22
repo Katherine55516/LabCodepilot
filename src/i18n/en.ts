@@ -1223,6 +1223,13 @@ const en = {
   'runStatus.breakdownPendingNextTurn': 'Pending next turn',
   'runStatus.breakdownCacheOrPrevious': 'Cache / previous',
 
+  // ── Link safety modal (Streamdown external-link confirmation) ──
+  'linkSafety.title': 'Open external link?',
+  'linkSafety.description': "You're about to visit an external website.",
+  'linkSafety.copy': 'Copy link',
+  'linkSafety.copied': 'Copied',
+  'linkSafety.open': 'Open link',
+
   // ── SDK Capabilities: Effort ──────────────────────────────
   'messageInput.effort.label': 'Effort Level',
   'messageInput.effort.auto': 'Auto',
