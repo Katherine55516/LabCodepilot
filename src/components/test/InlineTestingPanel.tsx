@@ -25,6 +25,9 @@ import { useProviderModels } from "@/hooks/useProviderModels";
 type View = "dash" | "flow" | "report";
 type ModalKind = "none" | "newTask" | "env";
 type T = (key: TranslationKey, params?: Record<string, string | number>) => string;
+// Backend test-step keys (match /api/test/run + src/lib/test/prompts.ts).
+type TestStep = "requirement" | "cases" | "execution" | "report";
+type StepStatus = "idle" | "running" | "done" | "error";
 
 interface Project {
   name: string;
@@ -35,12 +38,14 @@ interface Project {
 const INPUT =
   "w-full h-9 rounded-md border border-border bg-background px-2.5 text-xs text-foreground outline-none focus:border-accent";
 
-// Per-task workflow (1-based, no code analysis): 需求→用例→执行→报告.
-const PIPELINE: { key: string; name: TranslationKey }[] = [
-  { key: "req", name: "test.step.requirements.name" },
-  { key: "cases", name: "test.step.cases.name" },
-  { key: "exec", name: "test.step.execution.name" },
-  { key: "report", name: "test.step.report.name" },
+// Per-task workflow (no code analysis), ported from ai-lab-test-framework V0.3:
+// 需求分析 → 用例设计 → 测试执行 → 测试报告. Steps run in order; each reads the
+// prior step's AI_LabTest/ artifact, so the UI gates step N on step N-1 being done.
+const STEPS: { step: TestStep; name: TranslationKey; desc: TranslationKey }[] = [
+  { step: "requirement", name: "test.step.requirements.name", desc: "test.step.requirements.desc" },
+  { step: "cases", name: "test.step.cases.name", desc: "test.step.cases.desc" },
+  { step: "execution", name: "test.step.execution.name", desc: "test.step.execution.desc" },
+  { step: "report", name: "test.step.report.name", desc: "test.step.report.desc" },
 ];
 
 // Turn an agent tool_use ({name, input}) into a readable Chinese run-log line.
@@ -70,6 +75,26 @@ function toolUseLabel(name: string, input: unknown): string {
   }
 }
 
+// Step index-circle color by status (semantic status tokens; no raw colors).
+function stepCircleClass(status: StepStatus): string {
+  switch (status) {
+    case "done": return "bg-status-success-muted text-status-success-foreground";
+    case "running": return "bg-status-info-muted text-status-info-foreground";
+    case "error": return "bg-status-error-muted text-status-error-foreground";
+    default: return "bg-muted text-muted-foreground";
+  }
+}
+
+// Status badge text + class; null for idle (the step description already reads as pending).
+function stepBadge(status: StepStatus, t: T): { text: string; cls: string } | null {
+  switch (status) {
+    case "running": return { text: t("test.stepStatus.running"), cls: "bg-status-info-muted text-status-info-foreground" };
+    case "done": return { text: t("test.stepStatus.done"), cls: "bg-status-success-muted text-status-success-foreground" };
+    case "error": return { text: t("test.stepStatus.error"), cls: "bg-status-error-muted text-status-error-foreground" };
+    default: return null;
+  }
+}
+
 export function InlineTestingPanel() {
   const { t } = useTranslation();
   const [view, setView] = useState<View>("dash");
@@ -77,9 +102,16 @@ export function InlineTestingPanel() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [selected, setSelected] = useState<number | null>(null);
   const [selectedTask, setSelectedTask] = useState<number | null>(null);
-  // Phase 2.0 POC: run state for the requirement step (streamed from /api/test/run).
-  const [running, setRunning] = useState(false);
-  const [runLog, setRunLog] = useState("");
+  // Per-step run state. Each step streams from /api/test/run; status drives the
+  // vertical pipeline's badges + sequential gating, log holds the streamed output.
+  const [stepStatus, setStepStatus] = useState<Record<TestStep, StepStatus>>({
+    requirement: "idle", cases: "idle", execution: "idle", report: "idle",
+  });
+  const [stepLog, setStepLog] = useState<Record<TestStep, string>>({
+    requirement: "", cases: "", execution: "", report: "",
+  });
+  const [runningStep, setRunningStep] = useState<TestStep | null>(null);
+  const [expandedStep, setExpandedStep] = useState<TestStep | null>(null);
   // Model selection for test runs — reuses the chat's managed-provider picker.
   // In dev (no login) the list may be empty; after packaged-app login the
   // account-delivered models populate it. Selection is remembered in localStorage.
@@ -124,27 +156,49 @@ export function InlineTestingPanel() {
     }
   };
 
-  // Phase 2.0 POC: run the requirement step against the current project by
-  // streaming /api/test/run (which drives streamClaude). Parses the SSE frames
-  // and appends readable lines to runLog. Real per-step UX lands in Phase 2.2+.
-  const runRequirement = async () => {
+  // Reset per-step state — called when entering a task's flow so each task starts
+  // fresh (Stage A keeps run state in memory, not persisted/per-task-keyed).
+  const resetSteps = () => {
+    setStepStatus({ requirement: "idle", cases: "idle", execution: "idle", report: "idle" });
+    setStepLog({ requirement: "", cases: "", execution: "", report: "" });
+    setExpandedStep(null);
+  };
+
+  // A step is unlocked when it's the first step or the previous step is done.
+  const stepUnlocked = (step: TestStep): boolean => {
+    const idx = STEPS.findIndex((s) => s.step === step);
+    if (idx <= 0) return true;
+    return stepStatus[STEPS[idx - 1].step] === "done";
+  };
+
+  // Run one test step: streams /api/test/run (framework step prompt + rules via
+  // streamClaude) into the step's log + status. One step at a time; status drives
+  // the vertical pipeline's badges + gating. SSE frame shape matches the chat path.
+  const runStep = async (step: TestStep) => {
     const proj = selected !== null ? projects[selected] : null;
-    if (!proj?.path) return;
-    setRunning(true);
-    setRunLog("");
+    const task = proj && selectedTask !== null ? proj.tasks[selectedTask] : null;
+    if (!proj?.path || !task || runningStep) return;
+    setRunningStep(step);
+    setExpandedStep(step);
+    setStepStatus((m) => ({ ...m, [step]: "running" }));
+    setStepLog((m) => ({ ...m, [step]: "" }));
+    const append = (chunk: string) => setStepLog((m) => ({ ...m, [step]: m[step] + chunk }));
+    let sawError = false;
     try {
       const res = await fetch("/api/test/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           projectPath: proj.path,
-          taskName: proj.tasks[selectedTask ?? -1]?.name,
+          taskName: task.name,
+          step,
           model: model || undefined,
           providerId: providerId || undefined,
         }),
       });
       if (!res.body) {
-        setRunLog("无响应流");
+        append("无响应流");
+        sawError = true;
         return;
       }
       const reader = res.body.getReader();
@@ -167,28 +221,31 @@ export function InlineTestingPanel() {
           }
           if (!evt) continue;
           if (evt.type === "text") {
-            setRunLog((s) => s + (evt!.data || ""));
+            append(evt.data || "");
           } else if (evt.type === "tool_use") {
             let label = "";
             try {
               const tu = JSON.parse(evt.data || "{}");
               label = toolUseLabel(tu.name || "", tu.input);
             } catch {}
-            if (label) setRunLog((s) => s + `\n  → ${label}\n`);
+            if (label) append(`\n  → ${label}\n`);
           } else if (evt.type === "error") {
             let msg = evt.data || "";
             try {
               const d = JSON.parse(evt.data || "{}");
               msg = d.userMessage || d.rawMessage || msg;
             } catch {}
-            setRunLog((s) => s + `\n[错误] ${msg}\n`);
+            append(`\n[错误] ${msg}\n`);
+            sawError = true;
           }
         }
       }
     } catch (e) {
-      setRunLog((s) => s + `\n[请求失败] ${e instanceof Error ? e.message : String(e)}`);
+      append(`\n[请求失败] ${e instanceof Error ? e.message : String(e)}`);
+      sawError = true;
     } finally {
-      setRunning(false);
+      setStepStatus((m) => ({ ...m, [step]: sawError ? "error" : "done" }));
+      setRunningStep(null);
     }
   };
 
@@ -312,6 +369,7 @@ export function InlineTestingPanel() {
                       key={i}
                       onClick={() => {
                         setSelectedTask(i);
+                        resetSteps();
                         setView("flow");
                       }}
                       className="rounded-xl border border-border bg-card p-3 text-left hover:border-accent/60"
@@ -338,42 +396,70 @@ export function InlineTestingPanel() {
                   <h3 className="text-sm font-semibold text-foreground">{activeTask.name}</h3>
                   {current && <span className="font-mono text-[11px] text-muted-foreground">{current.name}</span>}
                 </div>
-                <div className="mb-4 flex gap-2">
-                  {PIPELINE.map((s, i) => (
-                    <div key={s.key} className="flex flex-1 items-center gap-2">
-                      <div className="flex-1 rounded-lg border border-border bg-card p-2.5">
-                        <div className="flex items-center gap-1.5">
-                          <span className="h-2 w-2 rounded-full bg-muted-foreground/30" />
-                          <span className="text-xs font-medium text-foreground">
-                            {i + 1}. {t(s.name)}
-                          </span>
-                        </div>
-                        <div className="mt-1 text-[11px] text-muted-foreground">{t("test.step.pending")}</div>
-                      </div>
-                      {i < PIPELINE.length - 1 && <CaretRight size={12} className="shrink-0 text-muted-foreground/40" />}
-                    </div>
-                  ))}
-                </div>
-                <div className="rounded-xl border border-border bg-card p-4">
-                  <div className="mb-2 flex items-center gap-2">
-                    <button
-                      onClick={runRequirement}
-                      disabled={running || !current?.path}
-                      className="flex h-7 items-center gap-1 rounded-md bg-accent px-2.5 text-[11px] font-medium text-accent-foreground disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                      <Play size={12} /> {t("test.flow.runTask")}{running ? "…" : ""}
-                    </button>
-                    {!current?.path && (
-                      <span className="text-[11px] text-muted-foreground">项目无路径，无法运行</span>
-                    )}
+                {!current?.path && (
+                  <div className="mb-3 rounded-md border border-border bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground">
+                    {t("test.flow.noPath")}
                   </div>
-                  {runLog ? (
-                    <pre className="max-h-72 overflow-auto whitespace-pre-wrap rounded-md bg-muted/40 p-3 text-[11px] leading-relaxed text-muted-foreground">
-                      {runLog}
-                    </pre>
-                  ) : (
-                    <p className="text-[11px] text-muted-foreground">{t("test.flow.engineSoon")}</p>
-                  )}
+                )}
+                {/* Vertical step pipeline: 需求 → 用例 → 执行 → 报告, top to bottom.
+                    Each step gates on the previous being done; click 运行 to stream. */}
+                <div className="flex flex-col gap-3">
+                  {STEPS.map((s, i) => {
+                    const status = stepStatus[s.step];
+                    const unlocked = stepUnlocked(s.step);
+                    const isRunning = runningStep === s.step;
+                    const isExpanded = expandedStep === s.step;
+                    const log = stepLog[s.step];
+                    const badge = stepBadge(status, t);
+                    return (
+                      <div key={s.step} className="relative">
+                        {i < STEPS.length - 1 && (
+                          <span className="absolute left-[27px] top-[44px] h-[calc(100%-20px)] w-px bg-border" aria-hidden />
+                        )}
+                        <div className="rounded-xl border border-border bg-card">
+                          <div className="flex items-center gap-3 p-3">
+                            <span className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-xs font-semibold ${stepCircleClass(status)}`}>
+                              {status === "done" ? "✓" : i + 1}
+                            </span>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2">
+                                <span className="text-sm font-medium text-foreground">{t(s.name)}</span>
+                                {badge && (
+                                  <span className={`rounded px-1.5 py-0 text-[10px] font-medium ${badge.cls}`}>
+                                    {badge.text}
+                                  </span>
+                                )}
+                              </div>
+                              <div className="truncate text-[11px] text-muted-foreground">{t(s.desc)}</div>
+                            </div>
+                            <button
+                              onClick={() => runStep(s.step)}
+                              disabled={!current?.path || !!runningStep || !unlocked}
+                              title={!unlocked ? t("test.flow.locked") : undefined}
+                              className="flex h-7 shrink-0 items-center gap-1 rounded-md bg-accent px-2.5 text-[11px] font-medium text-accent-foreground disabled:cursor-not-allowed disabled:opacity-40"
+                            >
+                              <Play size={12} />
+                              {isRunning ? t("test.flow.running") : status === "done" ? t("test.flow.rerun") : t("test.flow.run")}
+                            </button>
+                            {log && (
+                              <button
+                                onClick={() => setExpandedStep(isExpanded ? null : s.step)}
+                                className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:text-foreground"
+                                title={isExpanded ? t("test.flow.collapseLog") : t("test.flow.expandLog")}
+                              >
+                                <CaretRight size={14} className={isExpanded ? "rotate-90 transition-transform" : "transition-transform"} />
+                              </button>
+                            )}
+                          </div>
+                          {isExpanded && log && (
+                            <pre className="mx-3 mb-3 max-h-72 overflow-auto whitespace-pre-wrap rounded-md bg-muted/40 p-3 text-[11px] leading-relaxed text-muted-foreground">
+                              {log}
+                            </pre>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             ) : (
