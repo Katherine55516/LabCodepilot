@@ -693,6 +693,12 @@ export default function NewChatPage() {
                 case 'status': {
                   try {
                     const statusData = JSON.parse(event.data);
+                    // step_complete — agent-loop 每步发出的 token 统计事件，无可
+                    // 显示文案，静默丢弃（与 useSSEStream 的 status 分支保持一致），
+                    // 否则会被下面的兜底原样打印到执行状态行。
+                    if (statusData.subtype === 'step_complete') {
+                      break;
+                    }
                     if (statusData.session_id) {
                       setStatusText(`Connected (${statusData.model || 'claude'})`);
                       setTimeout(() => setStatusText(undefined), 2000);
@@ -704,8 +710,10 @@ export default function NewChatPage() {
                       // (useSSEStream via stream-session-manager).
                       maybeShowStatusToast(statusData);
                       setStatusText(statusData.message || statusData.title || undefined);
-                    } else {
-                      setStatusText(event.data || undefined);
+                    } else if (typeof statusData === 'string') {
+                      // 仅纯字符串状态文案才显示；结构化对象（含未知 subtype）忽略，
+                      // 避免原始 JSON 泄漏到执行状态行。
+                      setStatusText(statusData || undefined);
                     }
                   } catch {
                     setStatusText(event.data || undefined);
