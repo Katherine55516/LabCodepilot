@@ -578,7 +578,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     )}
                   </main>
                 </div>
-                {isChatDetailRoute && <PanelZone />}
+                {/* Hide all side panels while the test workbench is open — it's a
+                    full-content takeover. PanelZone is a sibling of <main> (which
+                    holds the workbench overlay), so without this the file/git/etc.
+                    panel would stay visible to the right of the overlay. Panel
+                    open-state is preserved (only the render is gated), so closing
+                    the workbench restores the previous layout. */}
+                {isChatDetailRoute && !testPanelOpen && <PanelZone />}
               </div>
             </div>
           </div>

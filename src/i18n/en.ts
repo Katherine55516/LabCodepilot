@@ -41,8 +41,6 @@ const en = {
 
   // ── Inline testing panel (Phase 1 · 对话内嵌测试) ────────────
   'test.panel.currentProject': '(current project)',
-  'test.view.dash': 'Board',
-  'test.view.flow': 'Flow',
   'test.view.report': 'Report',
   'test.env': 'Env',
   'test.collapse': 'Collapse',

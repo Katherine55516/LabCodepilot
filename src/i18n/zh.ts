@@ -38,8 +38,6 @@ const zh: Record<TranslationKey, string> = {
 
   // ── 对话内嵌测试面板（Phase 1）────────────────────────────
   'test.panel.currentProject': '（当前项目）',
-  'test.view.dash': '看板',
-  'test.view.flow': '流程',
   'test.view.report': '报告',
   'test.env': '环境',
   'test.collapse': '收起',

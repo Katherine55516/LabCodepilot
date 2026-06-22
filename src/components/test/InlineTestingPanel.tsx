@@ -184,9 +184,10 @@ export function InlineTestingPanel() {
           {t("test.title")}
         </span>
         <span className="flex-1" />
+        {/* Top tabs: 项目 (the board/projects view) + 报告. The per-task 流程
+            (pipeline) is a drill-down reached by clicking a task, not a top tab. */}
         <div className="flex overflow-hidden rounded-md border border-border">
-          {segBtn("dash", t("test.view.dash"))}
-          {segBtn("flow", t("test.view.flow"))}
+          {segBtn("dash", t("test.projects"))}
           {segBtn("report", t("test.view.report"))}
         </div>
         <ModelSelectorDropdown

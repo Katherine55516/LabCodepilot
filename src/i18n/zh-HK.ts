@@ -47,8 +47,6 @@ const zhHK: Record<TranslationKey, string> = {
 
   // ── 對話內嵌測試面板（Phase 1）────────────────────────────
   'test.panel.currentProject': '（當前專案）',
-  'test.view.dash': '看板',
-  'test.view.flow': '流程',
   'test.view.report': '報告',
   'test.env': '環境',
   'test.collapse': '收起',
