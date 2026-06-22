@@ -10,6 +10,7 @@ import { predictNativeRuntime } from '@/lib/runtime';
 import { buildStep, buildPlaywrightMcp, artifactPaths, TEST_STEPS, type TestStep } from '@/lib/test/prompts';
 import { reduceFromText } from '@/lib/test/reduce';
 import { sweepStrayEvidence, normalizeEvidenceExt } from '@/lib/test/evidence';
+import { resolveProjectEnv } from '@/lib/test/env-config';
 
 // Reference the import so it isn't tree-shaken away (keeps the registration side-effect).
 void predictNativeRuntime;
@@ -107,8 +108,11 @@ function wrapExecutionStream(
  * 证据采集收口（已接）：MCP 垫片 chdir 到证据目录（buildPlaywrightMcp）+ 运行后
  * sweepStrayEvidence 扫散落 + normalizeEvidenceExt 补后缀（见 wrapExecutionStream
  * done 分支）。canUseTool 改写截图路径未做（streamClaude 自管 canUseTool，不便注入；
- * --output-dir + 垫片 + 扫散落已覆盖）。环境账号配置为下一轮。chdir/扫散落的真实
- * 效果需真跑浏览器验证；纯 fs 逻辑（sweep/normalize/sniff）已单测覆盖。
+ * --output-dir + 垫片 + 扫散落已覆盖）。chdir/扫散落的真实效果需真跑浏览器验证；
+ * 纯 fs 逻辑（sweep/normalize/sniff）已单测覆盖。
+ * 环境对接（已接）：执行步从 `{项目}/AI_LabTest/environments.json`（设置·测试账号
+ * 导出）解析目标 baseUrl + 登录态（resolveProjectEnv），baseUrl 进执行 prompt、
+ * storageState 经 --storage-state 注入 Playwright，让 AI 开跑即已登录。
  */
 
 export async function POST(req: Request): Promise<Response> {
@@ -118,8 +122,7 @@ export async function POST(req: Request): Promise<Response> {
     const taskName: string = body.taskName || '测试任务';
     const rawStep: string = body.step;
     const step: TestStep = (TEST_STEPS as string[]).includes(rawStep) ? (rawStep as TestStep) : 'requirement';
-    const env: string = body.env || 'local';
-    const baseUrl: string | undefined = body.baseUrl;
+    const envArg: string = body.env || 'local';
     const model: string | undefined = body.model;
     const providerId: string | undefined = body.providerId;
 
@@ -130,12 +133,20 @@ export async function POST(req: Request): Promise<Response> {
       });
     }
 
+    // Resolve the target env from the project's exported environments.json
+    // (configured in 设置·测试账号). That file is the source of truth for the
+    // execution baseUrl + captured login state; body.baseUrl is only a fallback.
+    const resolved = resolveProjectEnv(projectPath, envArg);
+    const env = resolved.env;
+    const baseUrl = resolved.frontendBaseUrl || (typeof body.baseUrl === 'string' ? body.baseUrl : undefined);
+
     const { systemPrompt, prompt, needsPlaywright } = buildStep(step, { taskName, env, baseUrl });
 
     let mcpServers: Record<string, MCPServerConfig> | undefined;
     if (needsPlaywright) {
       const evidenceDir = artifactPaths(taskName, env).evidenceDir;
-      mcpServers = { playwright: buildPlaywrightMcp(projectPath, evidenceDir) };
+      // Pass the captured storageState so the AI starts logged in (set up in 设置·测试账号).
+      mcpServers = { playwright: buildPlaywrightMcp(projectPath, evidenceDir, resolved.storageStatePath) };
     }
 
     const runStartMs = Date.now();

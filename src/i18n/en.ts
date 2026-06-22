@@ -100,6 +100,8 @@ const en = {
   'test.flow.collapseLog': 'Hide log',
   'test.convo.empty': 'Run a step — the AI execution will stream here.',
   'test.convo.placeholder': 'Answer a gate / add an instruction (coming soon)',
+  'test.env.unconfigured': 'No target — set up in Settings',
+  'test.env.targetLabel': 'Target',
   'test.stepStatus.running': 'Running',
   'test.stepStatus.done': 'Done',
   'test.stepStatus.error': 'Failed',

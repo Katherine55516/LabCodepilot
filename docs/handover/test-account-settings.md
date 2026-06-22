@@ -133,6 +133,24 @@ sanitize(key) = key.replace(/[^A-Za-z0-9_-]/g, '_')   // 必须与 runner 完全
 
 **为何用 Electron BrowserWindow 而非 Playwright**：`@playwright/test` 仅 devDependency，打包不含浏览器二进制；BrowserWindow 原生、零新增依赖，输出手工组装成 Playwright storageState 形状即可被 AI_LabTest 重放。
 
+## 测试工作台消费侧（本仓对接）
+
+> 设置·测试账号是**生产侧**（写 `environments.json` + `.auth/`）；测试工作台（侧栏「测试」/ `InlineTestingPanel`）是**消费侧**。两侧只通过 `{project_root}/AI_LabTest/environments.json` + `.auth/` 文件解耦——**无 DB 耦合**。一个工作台「项目」(文件夹) ↔ 一个系统（其 `project_root` == 该文件夹），用户在设置里把系统的「项目目录」设成同一文件夹并导出即对接成功。
+
+**解析器** `src/lib/test/env-config.ts` · `resolveProjectEnv(projectPath, env?)`：读 `{projectPath}/AI_LabTest/environments.json` → `{ configured, env, frontendBaseUrl(TBD→null), apiBaseUrl, defaultAccount, storageStatePath, allowedEnvs }`。
+- `env`：入参在 `allowedEnvs` 内则用之，否则回退文件 `default`，再否则 `allowedEnvs[0]`。
+- `storageStatePath`：`.auth/{env}.{sanitizeAccountKey(defaultAccount)}.storageState.json` **文件存在**时才返回；`sanitizeAccountKey` 直接复用导出侧 `test-accounts-export.ts` 同一函数，保证文件名一致。
+- `configured = !!frontendBaseUrl`（环境存在且 baseUrl 非 TBD）。纯 fs 读，单测 `test-env-config.test.ts` 6/6。
+
+**执行步消费**（`POST /api/test/run` step=execution）：
+- `baseUrl = resolved.frontendBaseUrl || body.baseUrl`（**文件为准**，body 仅兜底）→ 进执行 prompt 的测试目标。
+- `resolved.storageStatePath` → `buildPlaywrightMcp(projectPath, evidenceDir, storageStatePath)` 注入 `--storage-state`，AI 开跑即已登录（与 AI_LabTest runner 同机制）。
+- 产物路径 `artifactPaths`、run.json 的 `env` 字段均用解析后的 `env`。
+
+**展示用** `GET /api/test/env-config?projectPath=&env=` → 同一解析器结果，供前端 flow 头部显示目标。
+
+**前端**（`InlineTestingPanel.tsx` flow 视图头部）：env 选择器(local/SIT，来自 `allowedEnvs`) + 目标 chip `🎯 {frontendBaseUrl}`；未配置 → `未配置目标 · 去设置·测试账号` 按钮。切 env 触发重新拉取。任务页「环境配置」按钮 → `router.push('/settings#test-accounts')`（配置入口已收口到设置，工作台只读消费，原内嵌 EnvModal 已删）。
+
 ## 安全模型
 
 - 抓取窗口加载**第三方站点**：独立内存 partition（cookie/localStorage 不污染主会话、随窗口销毁）、`sandbox:true`、**无 preload**（页面拿不到 `electronAPI`/IPC）、`setPermissionRequestHandler` 全拒、`setWindowOpenHandler` deny。
@@ -144,9 +162,12 @@ sanitize(key) = key.replace(/[^A-Za-z0-9_-]/g, '_')   // 必须与 runner 完全
 - 获取登录态仅 Electron（`electron:dev` / 打包版）可用；纯 `npm run dev` 下按钮置灰 + 提示。
 - sessionStorage 不抓（Playwright storageState 不含，AI_LabTest 同限制）。
 - `captured`/`capturedAt` 是 UI 缓存：在 capture/clear 时更新，不在每次加载时与磁盘 status 对账（避免误标脏）。用户在应用外删了 `.auth` 文件时标志会过期。
+- 消费侧：执行步真跑浏览器需 `@playwright/mcp` + Chromium（打包未含、dev 无凭据），故 baseUrl/storageState 注入的**端到端登录态重放**待打包+Chromium 后实测；解析器（文件→baseUrl/storageState）纯 fs 逻辑已单测覆盖。
+- 消费侧对接靠「项目目录 == 工作台项目文件夹路径」约定：设置里项目目录设错 / 未点导出 → 工作台读不到 environments.json → 显示「未配置目标」。
 
 ## 验证
 
 - `npm run typecheck` ✅（root）；`npx tsx --test src/__tests__/unit/test-accounts-export.test.ts` ✅ 9/9；全量单测 1419/1419 ✅。
 - CDP（`npm run dev` @ PORT 3001 + chrome-devtools）：侧栏入口、建系统、local/SIT 标签、访问地址、增账号、三种登录方式切换、获取登录态置灰 + 桌面版提示、脏标记保存、实时导出预览 JSON 字段映射、console 无报错。
 - 获取登录态抓取流程需 `electron:dev` 实测（CDP 只连 `npm run dev` 网页）；storageState 组装逻辑由单测 + 契约文档约束。
+- 消费侧对接（`npm run dev` + CDP）：写样例 `environments.json` 到项目 `AI_LabTest/` → `GET /api/test/env-config` 返回解析结果 ✅；工作台 flow 头显示 `🎯 frontendBaseUrl` ✅；切 local↔SIT 重拉取换 baseUrl ✅；「环境配置」按钮跳设置·测试账号 ✅；console 无报错。`test-env-config.test.ts` 6/6。

@@ -228,7 +228,11 @@ export function buildStep(step: TestStep, opts: BuildStepOptions): BuiltStep {
  * Mirrors the framework runner.js launch flags (V0.3). Per-run injection — 普通
  * 对话不会看到它（不进全局 MCP 配置）。
  */
-export function buildPlaywrightMcp(projectPath: string, evidenceDir: string): MCPServerConfig {
+export function buildPlaywrightMcp(
+  projectPath: string,
+  evidenceDir: string,
+  storageStatePath?: string | null,
+): MCPServerConfig {
   const cli = path.join(process.cwd(), 'node_modules', '@playwright', 'mcp', 'cli.js');
   const evidenceAbs = path.join(projectPath, evidenceDir);
   // Ensure the evidence dir exists so the shim's chdir target is valid at launch.
@@ -247,6 +251,8 @@ export function buildPlaywrightMcp(projectPath: string, evidenceDir: string): MC
       '--viewport-size', '1280,800',
       '--output-dir', evidenceAbs,
       '--save-session',
+      // Preload the captured login state (from 测试账号设置) so the AI starts logged in.
+      ...(storageStatePath ? ['--storage-state', storageStatePath] : []),
       '--headless',
     ],
     env: {

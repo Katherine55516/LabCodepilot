@@ -106,6 +106,8 @@ const zhHK: Record<TranslationKey, string> = {
   'test.flow.collapseLog': '收起日誌',
   'test.convo.empty': '執行測試步驟後，AI 的執行過程會顯示在這裡。',
   'test.convo.placeholder': '門控應答 / 追加指令（接入中）',
+  'test.env.unconfigured': '未配置目標 · 去設定·測試帳號',
+  'test.env.targetLabel': '目標',
   'test.stepStatus.running': '執行中',
   'test.stepStatus.done': '已完成',
   'test.stepStatus.error': '失敗',

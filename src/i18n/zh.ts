@@ -97,6 +97,8 @@ const zh: Record<TranslationKey, string> = {
   'test.flow.collapseLog': '收起日志',
   'test.convo.empty': '运行测试步骤后，AI 的执行过程会显示在这里。',
   'test.convo.placeholder': '门控应答 / 追加指令（接入中）',
+  'test.env.unconfigured': '未配置目标 · 去设置·测试账号',
+  'test.env.targetLabel': '目标',
   'test.stepStatus.running': '运行中',
   'test.stepStatus.done': '已完成',
   'test.stepStatus.error': '失败',

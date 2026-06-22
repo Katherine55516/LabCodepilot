@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, type ReactNode } from "react";
+import { useRouter } from "next/navigation";
 import { useTranslation } from "@/hooks/useTranslation";
 import { ListChecks, ChartBar, Gear, ArrowLeft, FolderPlus, Play, type Icon } from "@/components/ui/icon";
 import type { TranslationKey } from "@/i18n";
@@ -25,7 +26,7 @@ import { useProviderModels } from "@/hooks/useProviderModels";
  */
 
 type View = "dash" | "flow" | "report";
-type ModalKind = "none" | "newTask" | "env";
+type ModalKind = "none" | "newTask";
 type T = (key: TranslationKey, params?: Record<string, string | number>) => string;
 // Backend test-step keys (match /api/test/run + src/lib/test/prompts.ts).
 type TestStep = "requirement" | "cases" | "execution" | "report";
@@ -155,6 +156,7 @@ function taskChip(st: TaskState, t: T): { text: string; cls: string } {
 
 export function InlineTestingPanel() {
   const { t } = useTranslation();
+  const router = useRouter();
   const [view, setView] = useState<View>("dash");
   const [modal, setModal] = useState<ModalKind>("none");
   const [projects, setProjects] = useState<Project[]>([]);
@@ -183,6 +185,12 @@ export function InlineTestingPanel() {
       localStorage.setItem("codepilot:last-model", m);
     } catch {}
   };
+
+  // Test environment (local/SIT) + the config resolved from the project's
+  // AI_LabTest/environments.json (exported from 设置·测试账号). Drives the
+  // execution target baseUrl + login; null/未configured → prompt to set it up.
+  const [env, setEnv] = useState("local");
+  const [envCfg, setEnvCfg] = useState<{ configured: boolean; env: string; frontendBaseUrl: string | null; allowedEnvs: string[] } | null>(null);
 
   const current = selected !== null ? projects[selected] ?? null : null;
   const activeTask = current && selectedTask !== null ? current.tasks[selectedTask] ?? null : null;
@@ -224,6 +232,18 @@ export function InlineTestingPanel() {
   useEffect(() => {
     if (threadRef.current) threadRef.current.scrollTop = threadRef.current.scrollHeight;
   }, [convo]);
+
+  // Resolve the active project's env config (target baseUrl) for display in the
+  // flow view. Refetches when entering a flow or switching env.
+  useEffect(() => {
+    if (view !== "flow" || !current?.path) { setEnvCfg(null); return; }
+    let cancelled = false;
+    fetch(`/api/test/env-config?projectPath=${encodeURIComponent(current.path)}&env=${encodeURIComponent(env)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (!cancelled && d && !d.error) setEnvCfg(d); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [view, current?.path, env]);
 
   const stepUnlocked = (step: TestStep): boolean => {
     const idx = STEPS.findIndex((s) => s.step === step);
@@ -312,6 +332,7 @@ export function InlineTestingPanel() {
           projectPath: proj.path,
           taskName: task.name,
           step,
+          env,
           model: model || undefined,
           providerId: providerId || undefined,
         }),
@@ -478,6 +499,31 @@ export function InlineTestingPanel() {
                 <h3 className="text-sm font-semibold text-foreground">{activeTask.name}</h3>
                 {current && <span className="font-mono text-[11px] text-muted-foreground">{current.name}</span>}
                 <span className="flex-1" />
+                {/* env (local/SIT) + resolved target from 设置·测试账号 → environments.json */}
+                <select
+                  value={env}
+                  onChange={(e) => setEnv(e.target.value)}
+                  className="h-7 rounded-md border border-border bg-background px-1.5 text-[11px] text-foreground outline-none"
+                >
+                  {(envCfg?.allowedEnvs ?? ["local", "sit"]).map((x) => (
+                    <option key={x} value={x}>{x === "sit" ? "SIT" : x}</option>
+                  ))}
+                </select>
+                {envCfg?.frontendBaseUrl ? (
+                  <span
+                    className="max-w-[200px] truncate font-mono text-[11px] text-muted-foreground"
+                    title={`${t("test.env.targetLabel")}: ${envCfg.frontendBaseUrl}`}
+                  >
+                    🎯 {envCfg.frontendBaseUrl}
+                  </span>
+                ) : (
+                  <button
+                    onClick={() => router.push("/settings#test-accounts")}
+                    className="rounded bg-status-warning-muted px-1.5 py-0.5 text-[10px] font-medium text-status-warning-foreground hover:opacity-80"
+                  >
+                    {t("test.env.unconfigured")}
+                  </button>
+                )}
                 <button
                   onClick={() => runStep(focusStep)}
                   disabled={!current?.path || busy || !stepUnlocked(focusStep)}
@@ -650,7 +696,8 @@ export function InlineTestingPanel() {
                   <h3 className="text-sm font-semibold text-foreground">{current.name}</h3>
                   <span className="flex-1" />
                   <button
-                    onClick={() => setModal("env")}
+                    onClick={() => router.push("/settings#test-accounts")}
+                    title={current?.path ? `${t("test.envModal.title")}（设置·测试账号；project_root = ${current.path}）` : undefined}
                     className="flex h-7 items-center gap-1 rounded-md border border-border px-2 text-[11px] text-muted-foreground hover:text-foreground"
                   >
                     <Gear size={12} /> {t("test.envModal.title")}
@@ -712,7 +759,6 @@ export function InlineTestingPanel() {
 
       {/* Modals + folder picker (browser fallback for project selection) */}
       {modal === "newTask" && <NewTaskModal t={t} onClose={() => setModal("none")} onAdd={addTask} />}
-      {modal === "env" && <EnvModal t={t} projectName={current?.name ?? ""} onClose={() => setModal("none")} />}
       <FolderPicker
         open={folderPickerOpen}
         onOpenChange={setFolderPickerOpen}
@@ -904,45 +950,3 @@ function NewTaskModal({ t, onClose, onAdd }: { t: T; onClose: () => void; onAdd:
   );
 }
 
-function EnvModal({ t, projectName, onClose }: { t: T; projectName: string; onClose: () => void }) {
-  const [tab, setTab] = useState<"local" | "sit">("local");
-  return (
-    <ModalShell
-      title={projectName ? `${t("test.envModal.title")} · ${projectName}` : t("test.envModal.title")}
-      onClose={onClose}
-      footer={
-        <>
-          <button onClick={onClose} className={CANCEL_BTN}>{t("test.cancel")}</button>
-          <button onClick={onClose} className={PRIMARY_BTN}>{t("test.envModal.save")}</button>
-        </>
-      }
-    >
-      <div className="mb-3 flex gap-1 border-b border-border">
-        {(["local", "sit"] as const).map((e) => (
-          <button
-            key={e}
-            onClick={() => setTab(e)}
-            className={`-mb-px border-b-2 px-3 py-1.5 text-xs ${
-              tab === e ? "border-accent text-accent" : "border-transparent text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            {e === "local" ? "local" : "SIT"}
-          </button>
-        ))}
-      </div>
-      <Field label={t("test.envModal.frontendLabel")}>
-        <input className={INPUT} placeholder="http://localhost:3000" />
-      </Field>
-      <Field label={t("test.envModal.apiLabel")}>
-        <input className={INPUT} placeholder="http://localhost:3000/api" />
-      </Field>
-      <Field label={t("test.envModal.userLabel")}>
-        <input className={INPUT} placeholder="test_user" />
-      </Field>
-      <Field label={t("test.envModal.adminLabel")}>
-        <input className={INPUT} placeholder={t("test.envModal.adminPlaceholder")} />
-      </Field>
-      <p className="text-[11px] leading-relaxed text-muted-foreground">{t("test.envModal.note")}</p>
-    </ModalShell>
-  );
-}
