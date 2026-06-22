@@ -199,6 +199,15 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
   // Restore session-scoped last-generated images from sessionStorage
   useEffect(() => { loadLastGenerated(sessionId); }, [sessionId]);
 
+  // Leave the inline testing workbench whenever the user opens a chat session.
+  // The test panel (sidebar "测试" toggle) has no in-panel 收起 button, so opening
+  // any conversation must dismiss the full-screen overlay to reveal the chat
+  // underneath. Keyed on sessionId: fires on navigation between chats (and on
+  // mount when arriving from the workbench's 新建对话 / session list), but NOT
+  // when the panel is opened while already viewing this session. No-op when the
+  // panel is already closed (the common case), so existing chat flow is unaffected.
+  useEffect(() => { setTestPanelOpen(false); }, [sessionId, setTestPanelOpen]);
+
   // Stream snapshot from the manager — drives all streaming UI
   const [streamSnapshot, setStreamSnapshot] = useState<SessionStreamSnapshot | null>(
     () => getSnapshot(sessionId)
@@ -885,7 +894,7 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
           </Button>
         </div>
       )}
-      {testPanelOpen && <InlineTestingPanel onClose={() => setTestPanelOpen(false)} />}
+      {testPanelOpen && <InlineTestingPanel />}
       <MessageList
         messages={messages}
         streamingContent={streamingContent}

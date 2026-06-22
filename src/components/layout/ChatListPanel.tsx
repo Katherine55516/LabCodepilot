@@ -60,15 +60,18 @@ export function ChatListPanel({ open, width, hasUpdate, readyToInstall }: ChatLi
   const pathname = usePathname();
   const router = useRouter();
 
-  const { streamingSessionId, pendingApprovalSessionId, activeStreamingSessions, pendingApprovalSessionIds, workingDirectory, setTestPanelOpen } = usePanel();
+  const { streamingSessionId, pendingApprovalSessionId, activeStreamingSessions, pendingApprovalSessionIds, workingDirectory, testPanelOpen, setTestPanelOpen } = usePanel();
 
-  // "测试" entry (Routines-style sidebar button). Opens the inline testing panel
-  // by setting app-level PanelContext state (no transient event → no mount-timing
-  // race); navigates to /chat first when not already on a chat route. Additive.
+  // "测试" entry (Routines-style sidebar button). Toggles the inline testing
+  // panel via app-level PanelContext state (no transient event → no mount-timing
+  // race). Toggle (not just open) because the panel no longer has its own 收起
+  // button — clicking 测试 again is the explicit way out. Navigates to /chat
+  // first when opening from a non-chat route. Additive.
   const handleOpenTesting = useCallback(() => {
-    setTestPanelOpen(true);
-    if (!pathname.startsWith("/chat")) router.push("/chat");
-  }, [pathname, router, setTestPanelOpen]);
+    const next = !testPanelOpen;
+    setTestPanelOpen(next);
+    if (next && !pathname.startsWith("/chat")) router.push("/chat");
+  }, [pathname, router, testPanelOpen, setTestPanelOpen]);
   const { splitSessions, isSplitActive, activeColumnId, addToSplit, removeFromSplit, setActiveColumn, isInSplit } = useSplit();
   const { t } = useTranslation();
   const { isElectron, openNativePicker } = useNativeFolderPicker();
@@ -489,14 +492,20 @@ export function ChatListPanel({ open, width, hasUpdate, readyToInstall }: ChatLi
       {/* Feature nav items */}
       <div className="px-3 pb-2">
         <div className="flex flex-col gap-0.5">
-          {/* 测试 — AI test framework entry (Routines-style). Opens the inline testing panel. */}
+          {/* 测试 — AI test framework entry (Routines-style). Toggles the inline
+              testing panel; active-highlighted while open (the panel itself has
+              no 收起 button — toggle here to exit). */}
           <Button
             variant="ghost"
             size="sm"
-            className="w-full justify-start gap-2 h-8 text-xs text-muted-foreground hover:text-foreground"
+            className={`w-full justify-start gap-2 h-8 text-xs ${
+              testPanelOpen
+                ? "bg-accent text-accent-foreground font-medium"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
             onClick={handleOpenTesting}
           >
-            <ListChecks size={14} />
+            <ListChecks size={14} weight={testPanelOpen ? "fill" : "regular"} />
             {t('nav.test')}
           </Button>
           {navItems.map((item) => {

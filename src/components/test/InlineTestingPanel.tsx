@@ -12,8 +12,10 @@ import { useProviderModels } from "@/hooks/useProviderModels";
 /**
  * Inline testing workbench (Phase 1 · 对话内嵌测试).
  *
- * Opened from the sidebar "测试" entry; fills the whole content area (covers the
- * chat) until 收起. Phase 1 is a UI skeleton — no engine. The 看板 is a two-level
+ * Opened from the sidebar "测试" entry (toggle); fills the whole content area
+ * (covers the chat). Exit by toggling the sidebar "测试" entry again, or by
+ * opening any chat (ChatView closes the panel on session change). No in-panel
+ * 收起 button. Phase 1 is a UI skeleton — no engine. The 看板 is a two-level
  * project manager: projects list (+ 添加项目) → click a project → its test tasks
  * (+ 新建任务). Data lives in local component state (real, user-entered, NOT mock
  * — just not persisted yet); the engine + persistence land in Phase 2+.
@@ -41,7 +43,7 @@ const PIPELINE: { key: string; name: TranslationKey }[] = [
   { key: "report", name: "test.step.report.name" },
 ];
 
-export function InlineTestingPanel({ onClose }: { onClose: () => void }) {
+export function InlineTestingPanel() {
   const { t } = useTranslation();
   const [view, setView] = useState<View>("dash");
   const [modal, setModal] = useState<ModalKind>("none");
@@ -198,12 +200,6 @@ export function InlineTestingPanel({ onClose }: { onClose: () => void }) {
           menuSide="bottom"
           menuAlign="right"
         />
-        <button
-          onClick={onClose}
-          className="flex h-7 items-center gap-1 rounded-md border border-border px-2 text-xs text-muted-foreground hover:text-foreground"
-        >
-          ✕ {t("test.collapse")}
-        </button>
       </div>
 
       {/* Body */}

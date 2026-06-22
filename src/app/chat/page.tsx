@@ -77,7 +77,7 @@ export default function NewChatPage() {
     const params = new URLSearchParams(window.location.search);
     return params.get('prefill') || '';
   }, []);
-  const { setPendingApprovalSessionId, testPanelOpen, setTestPanelOpen } = usePanel();
+  const { setPendingApprovalSessionId, testPanelOpen } = usePanel();
   const { t } = useTranslation();
   const { isElectron, openNativePicker } = useNativeFolderPicker();
   const [messages, setMessages] = useState<Message[]>([]);
@@ -893,7 +893,7 @@ export default function NewChatPage() {
 
   return (
     <div className="relative flex h-full min-h-0 flex-col">
-      {testPanelOpen && <InlineTestingPanel onClose={() => setTestPanelOpen(false)} />}
+      {testPanelOpen && <InlineTestingPanel />}
       {messages.length === 0 && !isStreaming && (!workingDir.trim() || !hasProvider) ? (
         <ChatEmptyState
           hasDirectory={!!workingDir.trim()}
