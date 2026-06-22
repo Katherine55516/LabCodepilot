@@ -1,9 +1,8 @@
 'use client';
 
-// Lightweight aggregation hook for the RunCockpit card's "This run" section.
-// Fetches provider/model groups (for friendly model labels) and the global
-// default mode (auto vs pinned). A trimmed version of the spec's full
-// useOverviewData — no issue detection / runtime resolution (out of scope).
+// Lightweight hook for the RunCockpit card's "This run" section: fetches the
+// provider/model groups so the card can show the friendly provider display
+// name. Refetches on the `provider-changed` event.
 
 import { useState, useEffect } from 'react';
 import type { ProviderModelGroup } from '@/types';
@@ -11,10 +10,6 @@ import type { ProviderModelGroup } from '@/types';
 export interface OverviewData {
   loading: boolean;
   groups: ProviderModelGroup[];
-  defaultProviderId?: string;
-  /** Global default model id (set → "pinned"; unset → "auto"). */
-  globalDefaultModel?: string;
-  globalDefaultProvider?: string;
 }
 
 export function useOverviewData(): OverviewData {
@@ -25,20 +20,10 @@ export function useOverviewData(): OverviewData {
 
     async function load() {
       try {
-        const [modelsRes, optionsRes] = await Promise.all([
-          fetch('/api/providers/models'),
-          fetch('/api/providers/options?providerId=__global__'),
-        ]);
-        const modelsData = modelsRes.ok ? await modelsRes.json() : null;
-        const optionsData = optionsRes.ok ? await optionsRes.json() : null;
+        const res = await fetch('/api/providers/models');
+        const modelsData = res.ok ? await res.json() : null;
         if (cancelled) return;
-        setData({
-          loading: false,
-          groups: modelsData?.groups ?? [],
-          defaultProviderId: modelsData?.default_provider_id,
-          globalDefaultModel: optionsData?.options?.default_model,
-          globalDefaultProvider: optionsData?.options?.default_model_provider,
-        });
+        setData({ loading: false, groups: modelsData?.groups ?? [] });
       } catch {
         if (!cancelled) setData((d) => ({ ...d, loading: false }));
       }

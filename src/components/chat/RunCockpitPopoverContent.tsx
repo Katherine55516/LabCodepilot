@@ -46,11 +46,6 @@ export function RunCockpitPopoverContent({
   const modelText =
     group?.provider_name || modelName || t('runStatus.notConfigured');
 
-  const isPinned = !!overview.globalDefaultModel;
-  const defaultModeValue = isPinned
-    ? t('runStatus.modePinned')
-    : t('runStatus.modeAuto');
-
   const isFullAccess = permissionProfile === 'full_access';
 
   const headerPercentText = hasFullCtx
@@ -94,15 +89,6 @@ export function RunCockpitPopoverContent({
               </span>
               <span className="min-w-0 flex-1 truncate text-right text-foreground">
                 {modelText}
-              </span>
-            </div>
-            {/* Default mode */}
-            <div className="flex items-baseline gap-3">
-              <span className="shrink-0 text-muted-foreground">
-                {t('runStatus.defaultMode')}
-              </span>
-              <span className="min-w-0 flex-1 truncate text-right text-foreground">
-                {defaultModeValue}
               </span>
             </div>
             {/* Permission */}
