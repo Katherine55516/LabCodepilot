@@ -265,16 +265,7 @@ export function UnifiedTopBar() {
                 <TooltipContent side="bottom">{t('topBar.taskList')}</TooltipContent>
               </Tooltip>
 
-              {/* [GENERATIVE-UI-OFFLINE] Dashboard button hidden — the dashboard hosts
-                  pinned generative-UI widgets. dashboardPanelOpen state, DashboardPanel
-                  render, ChartBar import and the topBar.dashboard i18n key stay live.
-                  ┌─ RESTORE (re-open generative UI to users) — 3 coordinated edits.
-                  │  grep "GENERATIVE-UI-OFFLINE" to jump to all three:
-                  │   1) src/lib/context-assembler.ts — change gate `=== 'true'` back to `!== 'false'`
-                  │   2) src/components/settings/GeneralSection.tsx — uncomment the 生成式 UI <FieldRow>
-                  │   3) HERE — uncomment the <Tooltip> block below
-                  └─ Nothing else to touch: DB key / i18n / types are all left intact. */}
-              {/* <Tooltip>
+              <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
                     variant={dashboardPanelOpen ? "secondary" : "ghost"}
@@ -294,7 +285,7 @@ export function UnifiedTopBar() {
                 <TooltipContent side="bottom">
                   {isAssistantWorkspace ? 'Assistant' : t('topBar.dashboard')}
                 </TooltipContent>
-              </Tooltip> */}
+              </Tooltip>
             </>
           )}
           {isWindows && <div style={{ width: 138 }} className="shrink-0" />}

@@ -4,10 +4,10 @@
  * Run with: npx tsx --test src/__tests__/unit/context-assembler.test.ts
  *
  * Tests verify:
- * 1. Generative UI is OPT-IN: desktop disables it by default (unset/empty),
- *    enables widget prompt only when generative_ui_enabled is explicitly 'true'
- * 2. Bridge entry point does NOT enable generativeUI
+ * 1. Desktop entry point includes widget prompt
+ * 2. Bridge entry point does NOT include widget prompt
  * 3. Workspace prompt only injected for assistant project sessions
+ * 4. generative_ui_enabled=false skips widget even on desktop
  */
 
 import { describe, it } from 'node:test';
@@ -40,9 +40,9 @@ function makeSession(overrides: Partial<ChatSession> = {}): ChatSession {
 
 describe('assembleContext', () => {
 
-  it('desktop default (opt-in): generativeUI disabled unless explicitly enabled', async () => {
+  it('desktop: includes session prompt and enables generativeUI', async () => {
     const { setSetting } = await import('../../lib/db');
-    setSetting('generative_ui_enabled', ''); // emulate a user who never enabled it
+    setSetting('generative_ui_enabled', ''); // default (opt-out): unset/empty is ON
     const { assembleContext } = await import('../../lib/context-assembler');
     const result = await assembleContext({
       session: makeSession(),
@@ -51,13 +51,13 @@ describe('assembleContext', () => {
     });
 
     assert.ok(result.systemPrompt?.includes('You are a helpful assistant.'));
-    assert.equal(result.generativeUIEnabled, false);
+    assert.equal(result.generativeUIEnabled, true);
     assert.equal(result.isAssistantProject, false);
   });
 
-  it('desktop + generative_ui_enabled=true: enables generativeUI', async () => {
+  it('desktop + generative_ui_enabled=false: skips widget even on desktop', async () => {
     const { setSetting } = await import('../../lib/db');
-    setSetting('generative_ui_enabled', 'true');
+    setSetting('generative_ui_enabled', 'false');
     try {
       const { assembleContext } = await import('../../lib/context-assembler');
       const result = await assembleContext({
@@ -66,9 +66,9 @@ describe('assembleContext', () => {
         userPrompt: 'hello',
       });
 
-      assert.equal(result.generativeUIEnabled, true);
+      assert.equal(result.generativeUIEnabled, false);
     } finally {
-      setSetting('generative_ui_enabled', ''); // restore opt-in default for other tests
+      setSetting('generative_ui_enabled', ''); // restore default for other tests
     }
   });
 
