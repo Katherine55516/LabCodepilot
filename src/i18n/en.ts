@@ -98,6 +98,8 @@ const en = {
   'test.flow.noPath': 'This project has no path — cannot run.',
   'test.flow.expandLog': 'Show log',
   'test.flow.collapseLog': 'Hide log',
+  'test.convo.empty': 'Run a step — the AI execution will stream here.',
+  'test.convo.placeholder': 'Answer a gate / add an instruction (coming soon)',
   'test.stepStatus.running': 'Running',
   'test.stepStatus.done': 'Done',
   'test.stepStatus.error': 'Failed',

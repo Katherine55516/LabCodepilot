@@ -95,6 +95,8 @@ const zh: Record<TranslationKey, string> = {
   'test.flow.noPath': '该项目无路径，无法运行。',
   'test.flow.expandLog': '展开日志',
   'test.flow.collapseLog': '收起日志',
+  'test.convo.empty': '运行测试步骤后，AI 的执行过程会显示在这里。',
+  'test.convo.placeholder': '门控应答 / 追加指令（接入中）',
   'test.stepStatus.running': '运行中',
   'test.stepStatus.done': '已完成',
   'test.stepStatus.error': '失败',
