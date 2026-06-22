@@ -126,6 +126,7 @@ const zhHK: Record<TranslationKey, string> = {
   'test.report.compareHistory': '對比歷史',
   'test.report.exportXlsx': '匯出 xlsx',
   'test.report.factsNote': '報告只列事實 —— 不給修復方案/優先級/發布決策。阻塞 ≠ 缺陷。',
+  'test.report.circuitBroken': '偵測到大量 401，登入態可能在執行中失效，本輪結果不可信。',
 
   // ── Chat list panel ─────────────────────────────────────────
   'chatList.justNow': '剛剛',

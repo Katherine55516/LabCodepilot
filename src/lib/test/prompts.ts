@@ -159,7 +159,7 @@ ${rule}
 2. **每条用例先打印进度** \`▶ 用例 N/总数：{标题}\`；结束**输出单行 JSON**：\`@@RESULT {"id":"...","status":"pass|fail|partial|blocked","actual":"观察现象","evidence":["TC-xxx.png"],"error":"失败/阻塞原因，pass留空"}\`（单行、严格 JSON、内层引号用「」或转义）。
 3. **四态**：pass=预期完全出现；fail=预期明确未出现且可复现（疑似应用缺陷，保留事实不放水）；partial=部分满足；blocked=前置/路径/登录态/地址不可达（**不是应用 bug**）。
 4. 绝不修改业务源码与配置，只在被测系统页面内操作；截图存到 \`${p.evidenceDir}\`。
-5. 全部执行完，用 Write 把汇总写入 \`${p.runJson}\`，schema：\`{"module":"${taskName}","env":"${env}","time":"ISO时间","status":"done|failed|blocked","counts":{"total":N,"pass":N,"fail":N,"partial":N,"blocked":N},"passStr":"N/M","tests":[{"id","title","status","actual","error","evidence":[]}]}\`。
+5. **不要自己写汇总文件**：每条用例的 \`@@RESULT\` 行就是唯一事实来源，平台会据此**确定性归约**出 \`${p.runJson}\`（计数 / 四态 / 环境错误重分类 / 401 熔断由平台代码计算，不由你汇总）。你只需保证**每条用例都输出一行规范的 @@RESULT**。
 
 完成后用一句话总结四态计数（pass/fail/partial/blocked）。`;
 }

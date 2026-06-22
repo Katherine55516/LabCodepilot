@@ -120,6 +120,7 @@ const en = {
   'test.report.compareHistory': 'Compare',
   'test.report.exportXlsx': 'Export xlsx',
   'test.report.factsNote': 'The report states facts only — no fixes, priorities, or release decisions. Blocked ≠ defect.',
+  'test.report.circuitBroken': 'Many 401s detected — the auth session likely broke mid-run, so these results are unreliable.',
 
   // ── Chat list panel ─────────────────────────────────────────
   'chatList.justNow': 'just now',

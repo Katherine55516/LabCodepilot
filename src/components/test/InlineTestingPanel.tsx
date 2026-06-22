@@ -126,6 +126,8 @@ export function InlineTestingPanel() {
   const [fourState, setFourState] = useState<FourState>({ total: 0, pass: 0, fail: 0, partial: 0, blocked: 0 });
   const [currentCase, setCurrentCase] = useState("");
   const [caseResults, setCaseResults] = useState<CaseResult[]>([]);
+  // Set from the backend's deterministic run.json (401 circuit-breaker) → report warning.
+  const [circuitBroken, setCircuitBroken] = useState(false);
   const threadRef = useRef<HTMLDivElement>(null);
   // Model selection for test runs — reuses the chat's managed-provider picker.
   const [model, setModel] = useState<string>(() => {
@@ -180,6 +182,7 @@ export function InlineTestingPanel() {
     setFourState({ total: 0, pass: 0, fail: 0, partial: 0, blocked: 0 });
     setCurrentCase("");
     setCaseResults([]);
+    setCircuitBroken(false);
   };
 
   const stepUnlocked = (step: TestStep): boolean => {
@@ -205,6 +208,7 @@ export function InlineTestingPanel() {
       setFourState({ total: 0, pass: 0, fail: 0, partial: 0, blocked: 0 });
       setCurrentCase("");
       setCaseResults([]);
+      setCircuitBroken(false);
     }
     const stepName = t(STEPS.find((s) => s.step === step)!.name);
     const push = (msg: ConvoMsg) => setConvo((c) => [...c, msg]);
@@ -296,6 +300,34 @@ export function InlineTestingPanel() {
               label = toolUseLabel(tu.name || "", tu.input);
             } catch {}
             if (label) push({ role: "tool", text: `→ ${label}` });
+          } else if (evt.type === "run_json") {
+            // Canonical deterministic reduction from the backend — overwrites the
+            // live four-state/caseResults with code-computed values (env-reclass,
+            // 401 circuit-breaker) so the 报告 view shows the authoritative result.
+            try {
+              const rj = JSON.parse(evt.data || "{}");
+              if (rj.counts) {
+                setFourState({
+                  total: rj.counts.total || 0,
+                  pass: rj.counts.pass || 0,
+                  fail: rj.counts.fail || 0,
+                  partial: rj.counts.partial || 0,
+                  blocked: rj.counts.blocked || 0,
+                });
+              }
+              if (Array.isArray(rj.tests)) {
+                setCaseResults(
+                  rj.tests.map((tt: Record<string, unknown>) => ({
+                    id: String(tt.id ?? "用例"),
+                    status: String(tt.status ?? ""),
+                    actual: typeof tt.actual === "string" ? tt.actual : undefined,
+                    error: typeof tt.error === "string" ? tt.error : undefined,
+                    evidence: Array.isArray(tt.evidence) ? tt.evidence.map(String) : undefined,
+                  })),
+                );
+              }
+              setCircuitBroken(!!rj.circuitBroken);
+            } catch {}
           } else if (evt.type === "error") {
             let msg = evt.data || "";
             try {
@@ -608,7 +640,7 @@ export function InlineTestingPanel() {
             {view === "flow" && !activeTask && <EmptyState icon={ListChecks} text={t("test.flowEmpty")} />}
             {view === "report" &&
               (caseResults.length > 0 ? (
-                <ReportView t={t} results={caseResults} four={fourState} taskName={activeTask?.name ?? current?.name ?? ""} />
+                <ReportView t={t} results={caseResults} four={fourState} circuitBroken={circuitBroken} taskName={activeTask?.name ?? current?.name ?? ""} />
               ) : (
                 <EmptyState icon={ChartBar} text={t("test.reportEmpty")} />
               ))}
@@ -645,7 +677,7 @@ function ConvoBubble({ msg }: { msg: ConvoMsg }) {
 
 // 报告 view (prototype): metrics row + per-case results table, from the execution
 // run's @@RESULT frames (caseResults) + four-state tally. Facts only.
-function ReportView({ t, results, four, taskName }: { t: T; results: CaseResult[]; four: FourState; taskName: string }) {
+function ReportView({ t, results, four, circuitBroken, taskName }: { t: T; results: CaseResult[]; four: FourState; circuitBroken?: boolean; taskName: string }) {
   const total = four.total || results.length;
   const execRate = total ? Math.round((four.pass / total) * 100) : 0;
   const funcDenom = total - four.blocked; // blocked cases never ran functionally
@@ -672,6 +704,11 @@ function ReportView({ t, results, four, taskName }: { t: T; results: CaseResult[
         <h3 className="text-sm font-semibold text-foreground">{taskName}</h3>
         <span className="text-[11px] text-muted-foreground">· {t("test.view.report")}</span>
       </div>
+      {circuitBroken && (
+        <div className="mb-3 rounded-md border border-status-error-border bg-status-error-muted px-3 py-2 text-[11px] text-status-error-foreground">
+          ⚠ {t("test.report.circuitBroken")}
+        </div>
+      )}
       <div className="mb-3 grid grid-cols-2 gap-2 lg:grid-cols-4">
         {metric(t("test.report.funcRate"), `${funcRate}%`)}
         {metric(t("test.report.caseCount"), String(total))}

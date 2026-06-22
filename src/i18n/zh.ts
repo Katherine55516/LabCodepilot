@@ -117,6 +117,7 @@ const zh: Record<TranslationKey, string> = {
   'test.report.compareHistory': '对比历史',
   'test.report.exportXlsx': '导出 xlsx',
   'test.report.factsNote': '报告只列事实 —— 不给修复方案/优先级/发布决策。阻塞 ≠ 缺陷。',
+  'test.report.circuitBroken': '检测到大量 401，登录态可能在执行中失效，本轮结果不可信。',
 
   // ── Chat list panel ─────────────────────────────────────────
   'chatList.justNow': '刚刚',
