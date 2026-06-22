@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import type { MCPServerConfig } from '@/types';
+import { writeMcpLauncherShim } from './evidence';
 
 /**
  * AI 测试工作台 · 步骤 prompts（移植自 ai-lab-test-framework V0.3 的执行流程）。
@@ -229,19 +230,32 @@ export function buildStep(step: TestStep, opts: BuildStepOptions): BuiltStep {
  */
 export function buildPlaywrightMcp(projectPath: string, evidenceDir: string): MCPServerConfig {
   const cli = path.join(process.cwd(), 'node_modules', '@playwright', 'mcp', 'cli.js');
+  const evidenceAbs = path.join(projectPath, evidenceDir);
+  // Ensure the evidence dir exists so the shim's chdir target is valid at launch.
+  try { fs.mkdirSync(evidenceAbs, { recursive: true }); } catch {}
+  // Launch via a shim that chdir's to the evidence dir before loading the CLI
+  // (stdio MCP servers can't take a `cwd`), so relative-named writes land there.
+  const shim = writeMcpLauncherShim();
   return {
     type: 'stdio',
     command: process.execPath,
     args: [
-      cli,
+      shim,
       '--browser', 'chromium',
       '--isolated',
       '--caps', 'devtools,network',
       '--viewport-size', '1280,800',
-      '--output-dir', path.join(projectPath, evidenceDir),
+      '--output-dir', evidenceAbs,
       '--save-session',
       '--headless',
     ],
-    // Packaged build will additionally need ELECTRON_RUN_AS_NODE=1 (handled later).
+    env: {
+      ...(process.env as Record<string, string>),
+      // Packaged build: process.execPath is Electron → run it as plain node.
+      ELECTRON_RUN_AS_NODE: '1',
+      // Read by the shim: chdir target + the real CLI to require after chdir.
+      AILAB_MCP_CWD: evidenceAbs,
+      AILAB_MCP_CLI: cli,
+    },
   };
 }

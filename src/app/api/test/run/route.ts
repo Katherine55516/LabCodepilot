@@ -9,6 +9,7 @@ import type { MCPServerConfig } from '@/types';
 import { predictNativeRuntime } from '@/lib/runtime';
 import { buildStep, buildPlaywrightMcp, artifactPaths, TEST_STEPS, type TestStep } from '@/lib/test/prompts';
 import { reduceFromText } from '@/lib/test/reduce';
+import { sweepStrayEvidence, normalizeEvidenceExt } from '@/lib/test/evidence';
 
 // Reference the import so it isn't tree-shaken away (keeps the registration side-effect).
 void predictNativeRuntime;
@@ -23,7 +24,7 @@ void predictNativeRuntime;
  */
 function wrapExecutionStream(
   src: ReadableStream<string>,
-  opts: { projectPath: string; taskName: string; env: string },
+  opts: { projectPath: string; taskName: string; env: string; runStartMs: number },
 ): ReadableStream<string> {
   const reader = src.getReader();
   let frameBuf = '';
@@ -33,14 +34,27 @@ function wrapExecutionStream(
       try {
         const { done, value } = await reader.read();
         if (done) {
+          const paths = artifactPaths(opts.taskName, opts.env);
+          const evidenceAbs = path.join(opts.projectPath, paths.evidenceDir);
+          // Evidence 收口: sweep stray screenshots/videos created this run into the
+          // evidence dir, then give extension-less files a real ext (magic-number).
+          try {
+            sweepStrayEvidence({
+              dirs: [opts.projectPath, path.join(opts.projectPath, 'AI_LabTest', 'report')],
+              evidenceDir: evidenceAbs,
+              sinceMs: opts.runStartMs,
+            });
+            normalizeEvidenceExt(evidenceAbs);
+          } catch {
+            // best-effort cleanup
+          }
           const reduced = reduceFromText(textAcc, {
             module: opts.taskName,
             env: opts.env,
             time: new Date().toISOString(),
           });
           try {
-            const runRel = artifactPaths(opts.taskName, opts.env).runJson;
-            const runAbs = path.join(opts.projectPath, runRel);
+            const runAbs = path.join(opts.projectPath, paths.runJson);
             await fs.promises.mkdir(path.dirname(runAbs), { recursive: true });
             await fs.promises.writeFile(runAbs, JSON.stringify(reduced, null, 2), 'utf-8');
           } catch {
@@ -90,8 +104,11 @@ function wrapExecutionStream(
  * 仅「测试执行」步注入 Playwright MCP（按运行注入，不进全局 MCP 配置），且其
  * SSE 流经 wrapExecutionStream 包装：服务端解析 @@RESULT → 确定性归约 → 落盘
  * run.json + 末尾补发 run_json 帧（见该函数）。
- * 说明：执行步的证据采集收口（MCP 垫片 / canUseTool 改写 / 扫散落）+ 环境账号
- * 配置为下一轮硬化项（需真跑浏览器验证）。
+ * 证据采集收口（已接）：MCP 垫片 chdir 到证据目录（buildPlaywrightMcp）+ 运行后
+ * sweepStrayEvidence 扫散落 + normalizeEvidenceExt 补后缀（见 wrapExecutionStream
+ * done 分支）。canUseTool 改写截图路径未做（streamClaude 自管 canUseTool，不便注入；
+ * --output-dir + 垫片 + 扫散落已覆盖）。环境账号配置为下一轮。chdir/扫散落的真实
+ * 效果需真跑浏览器验证；纯 fs 逻辑（sweep/normalize/sniff）已单测覆盖。
  */
 
 export async function POST(req: Request): Promise<Response> {
@@ -121,6 +138,7 @@ export async function POST(req: Request): Promise<Response> {
       mcpServers = { playwright: buildPlaywrightMcp(projectPath, evidenceDir) };
     }
 
+    const runStartMs = Date.now();
     const stream = streamClaude({
       prompt,
       // Synthetic id — used only as a label; streamClaudeSdk does not persist it.
@@ -137,9 +155,11 @@ export async function POST(req: Request): Promise<Response> {
       autoTrigger: true,
     });
 
-    // Execution step: wrap to reduce + persist run.json + emit the run_json frame.
+    // Execution step: wrap to sweep evidence + reduce/persist run.json + emit run_json.
     const finalStream =
-      step === 'execution' ? wrapExecutionStream(stream, { projectPath, taskName, env }) : stream;
+      step === 'execution'
+        ? wrapExecutionStream(stream, { projectPath, taskName, env, runStartMs })
+        : stream;
 
     return new Response(finalStream, {
       headers: {
