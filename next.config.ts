@@ -3,6 +3,17 @@ import pkg from "./package.json" with { type: "json" };
 
 const nextConfig: NextConfig = {
   output: 'standalone',
+  // Pin the file-tracing root to THIS project directory. Without it, Next.js
+  // infers the monorepo/workspace root from the nearest ancestor lockfile. On a
+  // dev machine that happens to have a stray ~/package-lock.json, the inferred
+  // root resolves to $HOME, and the standalone output gets nested under
+  // `.next/standalone/<relative-path-to-project>/` instead of being flat. That
+  // breaks electron-builder's extraResources, which hard-codes
+  // `from: .next/standalone/node_modules/` — the copy silently picks up nothing
+  // and after-pack.js fails with "No Claude Code native binary found".
+  // CI checks out at a path with no ancestor lockfile, so its root already
+  // resolves to the project dir; pinning here makes local builds match CI.
+  outputFileTracingRoot: import.meta.dirname,
   // Electron loads dev server via http://127.0.0.1:3000 (hardcoded in
   // electron/main.ts), but Next.js 16 treats `127.0.0.1` and `localhost` as
   // different origins by default and blocks `_next/*` resources (HMR
