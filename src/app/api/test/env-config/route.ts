@@ -1,10 +1,10 @@
-import { resolveProjectEnv } from '@/lib/test/env-config';
+import { resolveProjectEnvWithDb } from '@/lib/test/env-resolve';
 
 /**
- * Read a project's resolved test environment (from its exported
- * AI_LabTest/environments.json) for the workbench to display — target baseUrl,
- * which env, allowed envs, whether it's configured. The execution route reads the
- * same resolver internally; this GET is purely for showing it in the flow view.
+ * Read a project's resolved test environment for the workbench to display — target
+ * baseUrl, which env, allowed envs, whether it's configured, and the source (exported
+ * file vs. live 设置·测试账号 DB). Uses the same file-first / DB-fallback resolver the
+ * execution route uses; this GET is purely for showing it in the flow view.
  */
 export async function GET(req: Request): Promise<Response> {
   const url = new URL(req.url);
@@ -13,5 +13,5 @@ export async function GET(req: Request): Promise<Response> {
   if (!projectPath) {
     return Response.json({ error: 'projectPath is required' }, { status: 400 });
   }
-  return Response.json(resolveProjectEnv(projectPath, env));
+  return Response.json(resolveProjectEnvWithDb(projectPath, env));
 }

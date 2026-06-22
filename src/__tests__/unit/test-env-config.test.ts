@@ -11,7 +11,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
-import { resolveProjectEnv } from "../../lib/test/env-config";
+import { resolveProjectEnv, resolveFromRaw } from "../../lib/test/env-config";
 
 function writeEnvFile(root: string, json: unknown) {
   const dir = path.join(root, "AI_LabTest");
@@ -45,6 +45,7 @@ describe("resolveProjectEnv", () => {
     assert.equal(r.configured, false);
     assert.equal(r.frontendBaseUrl, null);
     assert.equal(r.env, "local");
+    assert.equal(r.source, "none");
   });
 
   it("resolves the default env (local) with its baseUrl", () => {
@@ -56,6 +57,7 @@ describe("resolveProjectEnv", () => {
     assert.equal(r.apiBaseUrl, "http://localhost:3000/api");
     assert.equal(r.defaultAccount, "user1");
     assert.deepEqual(r.allowedEnvs, ["local", "sit"]);
+    assert.equal(r.source, "file");
   });
 
   it("resolves a requested env (sit) and maps TBD apiBaseUrl to null", () => {
@@ -92,5 +94,34 @@ describe("resolveProjectEnv", () => {
     assert.ok(r.storageStatePath && r.storageStatePath.endsWith("sit.admin_x.storageState.json"));
     // local has no storageState file → null
     assert.equal(resolveProjectEnv(root, "local").storageStatePath, null);
+  });
+});
+
+// resolveFromRaw is the shared core the DB fallback (env-resolve.ts) feeds via
+// toEnvironmentsJson(system). Same resolution, source tagged 'db'.
+describe("resolveFromRaw (shared core — DB fallback path)", () => {
+  let root: string;
+  before(() => { root = fs.mkdtempSync(path.join(os.tmpdir(), "envraw-")); });
+  after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  it("resolves baseUrl from a parsed object and tags the source", () => {
+    const r = resolveFromRaw(SAMPLE, root, "local", "db");
+    assert.equal(r.configured, true);
+    assert.equal(r.frontendBaseUrl, "http://localhost:3000");
+    assert.equal(r.source, "db");
+  });
+
+  it("honors requested env over the file default", () => {
+    const r = resolveFromRaw(SAMPLE, root, "sit", "db");
+    assert.equal(r.env, "sit");
+    assert.equal(r.frontendBaseUrl, "https://sit.example.com");
+  });
+
+  it("returns unconfigured (source none) for null/empty", () => {
+    const r = resolveFromRaw(null, root, undefined, "none");
+    assert.equal(r.configured, false);
+    assert.equal(r.frontendBaseUrl, null);
+    assert.equal(r.source, "none");
+    assert.deepEqual(r.allowedEnvs, ["local", "sit"]);
   });
 });

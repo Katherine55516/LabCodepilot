@@ -10,7 +10,7 @@ import { predictNativeRuntime } from '@/lib/runtime';
 import { buildStep, buildPlaywrightMcp, artifactPaths, TEST_STEPS, type TestStep } from '@/lib/test/prompts';
 import { reduceFromText } from '@/lib/test/reduce';
 import { sweepStrayEvidence, normalizeEvidenceExt } from '@/lib/test/evidence';
-import { resolveProjectEnv } from '@/lib/test/env-config';
+import { resolveProjectEnvWithDb } from '@/lib/test/env-resolve';
 
 // Reference the import so it isn't tree-shaken away (keeps the registration side-effect).
 void predictNativeRuntime;
@@ -136,7 +136,7 @@ export async function POST(req: Request): Promise<Response> {
     // Resolve the target env from the project's exported environments.json
     // (configured in 设置·测试账号). That file is the source of truth for the
     // execution baseUrl + captured login state; body.baseUrl is only a fallback.
-    const resolved = resolveProjectEnv(projectPath, envArg);
+    const resolved = resolveProjectEnvWithDb(projectPath, envArg);
     const env = resolved.env;
     const baseUrl = resolved.frontendBaseUrl || (typeof body.baseUrl === 'string' ? body.baseUrl : undefined);
 

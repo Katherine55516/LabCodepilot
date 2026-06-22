@@ -108,6 +108,8 @@ const zhHK: Record<TranslationKey, string> = {
   'test.convo.placeholder': '門控應答 / 追加指令（接入中）',
   'test.env.unconfigured': '未配置目標 · 去設定·測試帳號',
   'test.env.targetLabel': '目標',
+  'test.env.fromSettings': '來自設定',
+  'test.env.fromSettingsTitle': '直接讀取 設定·測試帳號（未匯出）',
   'test.stepStatus.running': '執行中',
   'test.stepStatus.done': '已完成',
   'test.stepStatus.error': '失敗',

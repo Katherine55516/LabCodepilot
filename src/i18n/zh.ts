@@ -99,6 +99,8 @@ const zh: Record<TranslationKey, string> = {
   'test.convo.placeholder': '门控应答 / 追加指令（接入中）',
   'test.env.unconfigured': '未配置目标 · 去设置·测试账号',
   'test.env.targetLabel': '目标',
+  'test.env.fromSettings': '来自设置',
+  'test.env.fromSettingsTitle': '直接读取 设置·测试账号（未导出）',
   'test.stepStatus.running': '运行中',
   'test.stepStatus.done': '已完成',
   'test.stepStatus.error': '失败',

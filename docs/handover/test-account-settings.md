@@ -135,21 +135,22 @@ sanitize(key) = key.replace(/[^A-Za-z0-9_-]/g, '_')   // 必须与 runner 完全
 
 ## 测试工作台消费侧（本仓对接）
 
-> 设置·测试账号是**生产侧**（写 `environments.json` + `.auth/`）；测试工作台（侧栏「测试」/ `InlineTestingPanel`）是**消费侧**。两侧只通过 `{project_root}/AI_LabTest/environments.json` + `.auth/` 文件解耦——**无 DB 耦合**。一个工作台「项目」(文件夹) ↔ 一个系统（其 `project_root` == 该文件夹），用户在设置里把系统的「项目目录」设成同一文件夹并导出即对接成功。
+> 设置·测试账号是**生产侧**；测试工作台（侧栏「测试」/ `InlineTestingPanel`）是**消费侧**。一个工作台「项目」(文件夹) ↔ 一个系统（其 `project_root` == 该文件夹）。对接两条路（**file-first，DB 兜底**）：用户把系统「项目目录」设成同一文件夹即可——**点导出**生成 `environments.json`（框架真跑也读它），或**不导出**直接由工作台读库。
 
-**解析器** `src/lib/test/env-config.ts` · `resolveProjectEnv(projectPath, env?)`：读 `{projectPath}/AI_LabTest/environments.json` → `{ configured, env, frontendBaseUrl(TBD→null), apiBaseUrl, defaultAccount, storageStatePath, allowedEnvs }`。
-- `env`：入参在 `allowedEnvs` 内则用之，否则回退文件 `default`，再否则 `allowedEnvs[0]`。
-- `storageStatePath`：`.auth/{env}.{sanitizeAccountKey(defaultAccount)}.storageState.json` **文件存在**时才返回；`sanitizeAccountKey` 直接复用导出侧 `test-accounts-export.ts` 同一函数，保证文件名一致。
-- `configured = !!frontendBaseUrl`（环境存在且 baseUrl 非 TBD）。纯 fs 读，单测 `test-env-config.test.ts` 6/6。
+**两个数据源，同一形态**：
+- `src/lib/test/env-config.ts`（纯 fs，无 DB，单测 9/9）：`readEnvFile` 读 `{projectPath}/AI_LabTest/environments.json`；`resolveFromRaw(raw, projectPath, env?, source)` 把已解析对象 → `ResolvedTestEnv { configured, env, frontendBaseUrl(TBD→null), apiBaseUrl, defaultAccount, storageStatePath, allowedEnvs, source }`；`resolveProjectEnv` = file → resolveFromRaw（`source:'file'`）。
+- `src/lib/test/env-resolve.ts`（**server-only**，import `@/lib/db`）：`resolveProjectEnvWithDb` —— ①有文件 → 用文件（`'file'`，与框架 runner 读的一致，优先）；②无文件 → `getAllTestAccountSystems().find(s.project_root === projectPath)` → `toEnvironmentsJson(sys)` → resolveFromRaw（`'db'`，免导出）；③都没有 → 未配置（`'none'`）。
+- `env`：入参在 `allowedEnvs` 内则用之，否则回退 `default`，再否则 `allowedEnvs[0]`。
+- `storageStatePath`：`.auth/{env}.{sanitizeAccountKey(defaultAccount)}.storageState.json` **文件存在**时才返回（`.auth` 由 capture 写盘，与导出无关，两条路都从磁盘读）；`sanitizeAccountKey` 复用导出侧同一函数保文件名一致。
 
-**执行步消费**（`POST /api/test/run` step=execution）：
-- `baseUrl = resolved.frontendBaseUrl || body.baseUrl`（**文件为准**，body 仅兜底）→ 进执行 prompt 的测试目标。
-- `resolved.storageStatePath` → `buildPlaywrightMcp(projectPath, evidenceDir, storageStatePath)` 注入 `--storage-state`，AI 开跑即已登录（与 AI_LabTest runner 同机制）。
+**执行步消费**（`POST /api/test/run` step=execution，用 `resolveProjectEnvWithDb`）：
+- `baseUrl = resolved.frontendBaseUrl || body.baseUrl`（**配置为准**，body 仅兜底）→ 进执行 prompt 的测试目标。
+- `resolved.storageStatePath` → `buildPlaywrightMcp(projectPath, evidenceDir, storageStatePath)` 注入 `--storage-state`，AI 开跑即已登录。
 - 产物路径 `artifactPaths`、run.json 的 `env` 字段均用解析后的 `env`。
 
-**展示用** `GET /api/test/env-config?projectPath=&env=` → 同一解析器结果，供前端 flow 头部显示目标。
+**展示用** `GET /api/test/env-config?projectPath=&env=` → 同一 `resolveProjectEnvWithDb` 结果，供前端 flow 头部显示目标 + 来源。
 
-**前端**（`InlineTestingPanel.tsx` flow 视图头部）：env 选择器(local/SIT，来自 `allowedEnvs`) + 目标 chip `🎯 {frontendBaseUrl}`；未配置 → `未配置目标 · 去设置·测试账号` 按钮。切 env 触发重新拉取。任务页「环境配置」按钮 → `router.push('/settings#test-accounts')`（配置入口已收口到设置，工作台只读消费，原内嵌 EnvModal 已删）。
+**前端**（`InlineTestingPanel.tsx` flow 视图头部）：env 选择器(local/SIT，来自 `allowedEnvs`) + 目标 chip `🎯 {frontendBaseUrl}`（`source==='db'` 时附「来自设置」小标，提示是直接读库未导出）；未配置 → `未配置目标 · 去设置·测试账号` 按钮。切 env 触发重新拉取。任务页「环境配置」按钮 → `router.push('/settings#test-accounts')`（配置入口已收口到设置，工作台只读消费，原内嵌 EnvModal 已删）。
 
 ## 安全模型
 
@@ -163,11 +164,11 @@ sanitize(key) = key.replace(/[^A-Za-z0-9_-]/g, '_')   // 必须与 runner 完全
 - sessionStorage 不抓（Playwright storageState 不含，AI_LabTest 同限制）。
 - `captured`/`capturedAt` 是 UI 缓存：在 capture/clear 时更新，不在每次加载时与磁盘 status 对账（避免误标脏）。用户在应用外删了 `.auth` 文件时标志会过期。
 - 消费侧：执行步真跑浏览器需 `@playwright/mcp` + Chromium（打包未含、dev 无凭据），故 baseUrl/storageState 注入的**端到端登录态重放**待打包+Chromium 后实测；解析器（文件→baseUrl/storageState）纯 fs 逻辑已单测覆盖。
-- 消费侧对接靠「项目目录 == 工作台项目文件夹路径」约定：设置里项目目录设错 / 未点导出 → 工作台读不到 environments.json → 显示「未配置目标」。
+- 消费侧对接靠「项目目录 == 工作台项目文件夹路径」**字符串完全相等**约定：路径不一致（设错 / 末尾斜杠 / 软链）→ 既匹配不到文件也匹配不到 DB → 显示「未配置目标」。未导出**不再**导致未配置（DB 兜底覆盖）。
 
 ## 验证
 
 - `npm run typecheck` ✅（root）；`npx tsx --test src/__tests__/unit/test-accounts-export.test.ts` ✅ 9/9；全量单测 1419/1419 ✅。
 - CDP（`npm run dev` @ PORT 3001 + chrome-devtools）：侧栏入口、建系统、local/SIT 标签、访问地址、增账号、三种登录方式切换、获取登录态置灰 + 桌面版提示、脏标记保存、实时导出预览 JSON 字段映射、console 无报错。
 - 获取登录态抓取流程需 `electron:dev` 实测（CDP 只连 `npm run dev` 网页）；storageState 组装逻辑由单测 + 契约文档约束。
-- 消费侧对接（`npm run dev` + CDP）：写样例 `environments.json` 到项目 `AI_LabTest/` → `GET /api/test/env-config` 返回解析结果 ✅；工作台 flow 头显示 `🎯 frontendBaseUrl` ✅；切 local↔SIT 重拉取换 baseUrl ✅；「环境配置」按钮跳设置·测试账号 ✅；console 无报错。`test-env-config.test.ts` 6/6。
+- 消费侧对接（`npm run dev` + curl + CDP）：file 路 —— 写样例 `environments.json` → `GET /api/test/env-config` 返回 `source:'file'` + baseUrl ✅，flow 头 `🎯 baseUrl` ✅，切 local↔SIT 换 baseUrl ✅，「环境配置」跳设置 ✅。DB 兜底路 —— `POST /api/test-accounts`（project_root 指向无 environments.json 的目录）→ `GET /api/test/env-config` 返回 `source:'db'` + baseUrl ✅，flow 头 `🎯 baseUrl` + 「来自设置」小标 ✅；有文件时仍 `source:'file'`（文件优先）✅。`test-env-config.test.ts` 9/9（6 file + 3 resolveFromRaw 核心）。

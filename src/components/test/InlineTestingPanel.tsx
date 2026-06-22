@@ -190,7 +190,7 @@ export function InlineTestingPanel() {
   // AI_LabTest/environments.json (exported from 设置·测试账号). Drives the
   // execution target baseUrl + login; null/未configured → prompt to set it up.
   const [env, setEnv] = useState("local");
-  const [envCfg, setEnvCfg] = useState<{ configured: boolean; env: string; frontendBaseUrl: string | null; allowedEnvs: string[] } | null>(null);
+  const [envCfg, setEnvCfg] = useState<{ configured: boolean; env: string; frontendBaseUrl: string | null; allowedEnvs: string[]; source?: string } | null>(null);
 
   const current = selected !== null ? projects[selected] ?? null : null;
   const activeTask = current && selectedTask !== null ? current.tasks[selectedTask] ?? null : null;
@@ -510,11 +510,21 @@ export function InlineTestingPanel() {
                   ))}
                 </select>
                 {envCfg?.frontendBaseUrl ? (
-                  <span
-                    className="max-w-[200px] truncate font-mono text-[11px] text-muted-foreground"
-                    title={`${t("test.env.targetLabel")}: ${envCfg.frontendBaseUrl}`}
-                  >
-                    🎯 {envCfg.frontendBaseUrl}
+                  <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                    <span
+                      className="max-w-[180px] truncate font-mono"
+                      title={`${t("test.env.targetLabel")}: ${envCfg.frontendBaseUrl}`}
+                    >
+                      🎯 {envCfg.frontendBaseUrl}
+                    </span>
+                    {envCfg.source === "db" && (
+                      <span
+                        className="rounded bg-muted px-1 py-0.5 text-[10px]"
+                        title={t("test.env.fromSettingsTitle")}
+                      >
+                        {t("test.env.fromSettings")}
+                      </span>
+                    )}
                   </span>
                 ) : (
                   <button

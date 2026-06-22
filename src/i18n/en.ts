@@ -102,6 +102,8 @@ const en = {
   'test.convo.placeholder': 'Answer a gate / add an instruction (coming soon)',
   'test.env.unconfigured': 'No target — set up in Settings',
   'test.env.targetLabel': 'Target',
+  'test.env.fromSettings': 'From Settings',
+  'test.env.fromSettingsTitle': 'Read live from Settings · Test accounts (not exported)',
   'test.stepStatus.running': 'Running',
   'test.stepStatus.done': 'Done',
   'test.stepStatus.error': 'Failed',
