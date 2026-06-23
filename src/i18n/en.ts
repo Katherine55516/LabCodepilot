@@ -88,6 +88,7 @@ const en = {
   'test.state.blocked': 'Blocked',
   'test.flow.running': 'Running',
   'test.flow.runTask': 'Run task',
+  'test.flow.runAllHint': 'Run all steps end-to-end (gates auto-approve)',
   'test.flow.stop': 'Stop',
   'test.flow.visible': 'Visible',
   'test.flow.aiDriven': 'AI-driven Playwright',
@@ -128,6 +129,9 @@ const en = {
   'test.report.exportXlsx': 'Export xlsx',
   'test.report.factsNote': 'The report states facts only — no fixes, priorities, or release decisions. Blocked ≠ defect.',
   'test.report.circuitBroken': 'Many 401s detected — the auth session likely broke mid-run, so these results are unreliable.',
+  'test.report.loading': 'Loading reports…',
+  'test.report.reportsSuffix': 'reports',
+  'test.report.envsSuffix': 'envs',
 
   // ── Chat list panel ─────────────────────────────────────────
   'chatList.justNow': 'just now',

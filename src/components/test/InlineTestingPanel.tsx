@@ -39,6 +39,19 @@ interface FourState { total: number; pass: number; fail: number; partial: number
 // One executed case parsed from an execution @@RESULT frame (drives 报告 table).
 interface CaseResult { id: string; status: string; actual?: string; error?: string; evidence?: string[] }
 
+// A persisted report (one run.json on disk) — listed in the 报告 browser. A task can
+// have several (one per env). Shape mirrors GET /api/test/reports.
+interface ReportEntry {
+  task: string;
+  env: string;
+  time: string;
+  status: string;
+  passStr: string;
+  circuitBroken: boolean;
+  counts: FourState;
+  tests: CaseResult[];
+}
+
 interface Project {
   name: string;
   path: string;
@@ -196,6 +209,9 @@ export function InlineTestingPanel() {
   const [busyTaskId, setBusyTaskId] = useState<string | null>(null);
   const [composer, setComposer] = useState("");
   const threadRef = useRef<HTMLDivElement>(null);
+  // When set to a task id, that task is in "run all" mode (运行任务): gated steps
+  // auto-approve + the chain runs through to 报告 without waiting for 批准.
+  const autoRunRef = useRef<string | null>(null);
   // Model selection for test runs — reuses the chat's managed-provider picker.
   const [model, setModel] = useState<string>(() => {
     try { return localStorage.getItem("codepilot:last-model") || ""; } catch { return ""; }
@@ -463,9 +479,13 @@ export function InlineTestingPanel() {
       push({ role: "error", text: `请求失败：${e instanceof Error ? e.message : String(e)}` });
       sawError = true;
     } finally {
-      // Human-gated steps (需求/用例) land in "review" (待批准); auto steps go "done".
-      const finalStatus: StepStatus = sawError ? "error" : HUMAN_GATED.includes(step) ? "review" : "done";
+      // Human-gated steps (需求/用例) normally land in "review" (待批准) — UNLESS this
+      // task is in 运行任务 (run-all) mode, where gates auto-approve straight to "done".
+      const autoAll = autoRunRef.current === id;
+      const finalStatus: StepStatus = sawError ? "error" : HUMAN_GATED.includes(step) && !autoAll ? "review" : "done";
       patchTask(id, (s) => ({ stepStatus: { ...s.stepStatus, [step]: finalStatus } }));
+      // End run-all mode when the pipeline finishes (报告) or anything errors.
+      if (sawError || step === "report") autoRunRef.current = null;
       setBusyTaskId(null);
     }
   };
@@ -476,16 +496,31 @@ export function InlineTestingPanel() {
     if (aId) patchTask(aId, (s) => ({ stepStatus: { ...s.stepStatus, [step]: "done" } }));
   };
 
-  // Auto-chain: once an auto step (执行/报告) of the ACTIVE task is unlocked + idle,
-  // run it. Fires when the prior step becomes "done" (incl. right after 用例 is
-  // approved). Keyed on taskStates/busyTaskId/aId — runStep is intentionally
-  // excluded (the idle+unlocked guard + busy check prevent re-fire loops).
+  // Manual single-step run (pill / detail 运行 button): cancels any run-all mode so
+  // gates apply normally.
+  const runStepManual = (step: TestStep) => {
+    autoRunRef.current = null;
+    runStep(step);
+  };
+
+  // 运行任务: run the whole pipeline end-to-end, auto-approving gates (no 批准 clicks).
+  const runAll = () => {
+    if (!activeTask || busy || !current?.path) return;
+    autoRunRef.current = activeTask.id;
+    runStep(focusStep);
+  };
+
+  // Auto-chain: run the next unlocked+idle step of the ACTIVE task. Normally only
+  // auto steps (执行/报告) chain; in 运行任务 mode, gated steps (需求/用例) chain too.
+  // Fires when a step becomes "done". runStep excluded from deps (the idle+unlocked
+  // guard + busy check prevent re-fire loops).
   useEffect(() => {
     if (busy || !current?.path || !activeTask) return;
-    const auto = STEPS.find(
-      (s) => !HUMAN_GATED.includes(s.step) && stepStatus[s.step] === "idle" && stepUnlocked(s.step),
+    const autoAll = autoRunRef.current === activeTask.id;
+    const next = STEPS.find(
+      (s) => stepStatus[s.step] === "idle" && stepUnlocked(s.step) && (autoAll || !HUMAN_GATED.includes(s.step)),
     );
-    if (auto) runStep(auto.step);
+    if (next) runStep(next.step);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taskStates, busyTaskId, aId]);
 
@@ -587,9 +622,9 @@ export function InlineTestingPanel() {
                   </button>
                 )}
                 <button
-                  onClick={() => runStep(focusStep)}
+                  onClick={runAll}
                   disabled={!current?.path || busy || !stepUnlocked(focusStep)}
-                  title={!stepUnlocked(focusStep) ? t("test.flow.locked") : undefined}
+                  title={!stepUnlocked(focusStep) ? t("test.flow.locked") : t("test.flow.runAllHint")}
                   className="flex h-7 items-center gap-1 rounded-md bg-primary px-2.5 text-[11px] font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   <Play size={12} /> {runningStep ? t("test.flow.running") : t("test.flow.runTask")}
@@ -610,7 +645,7 @@ export function InlineTestingPanel() {
                   return (
                     <button
                       key={s.step}
-                      onClick={() => unlocked && !busy && runStep(s.step)}
+                      onClick={() => unlocked && !busy && runStepManual(s.step)}
                       disabled={!current?.path || busy || !unlocked}
                       title={!unlocked ? t("test.flow.locked") : t("test.flow.run")}
                       className={`min-w-[120px] flex-1 rounded-lg border p-2.5 text-left transition-colors disabled:cursor-not-allowed ${stepPillClass(status)} ${
@@ -641,19 +676,21 @@ export function InlineTestingPanel() {
                   )}
                   <span className="flex-1" />
                   <button
-                    onClick={() => runStep(focusStep)}
+                    onClick={() => runStepManual(focusStep)}
                     disabled={!current?.path || busy || !stepUnlocked(focusStep)}
                     className="flex h-7 items-center gap-1 rounded-md bg-primary px-2.5 text-[11px] font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     <Play size={12} /> {runningStep === focusStep ? t("test.flow.running") : stepStatus[focusStep] === "done" ? t("test.flow.rerun") : t("test.flow.run")}
                   </button>
                 </div>
-                {/* per-stage running progress — indeterminate (we don't know total cases up front) */}
-                {runningStep === focusStep && (
-                  <div className="mt-2 h-1 overflow-hidden rounded-full bg-muted" role="progressbar" aria-label={t("test.flow.running")}>
+                {/* per-stage running progress — height is ALWAYS reserved (no layout jump
+                    when it appears); the moving segment only shows while this step runs
+                    (indeterminate: total case count isn't known up front). */}
+                <div className={`mt-2 h-1 overflow-hidden rounded-full ${runningStep === focusStep ? "bg-muted" : ""}`} role="progressbar" aria-label={t("test.flow.running")}>
+                  {runningStep === focusStep && (
                     <div className="h-full w-1/3 rounded-full bg-primary animate-[test-bar-indeterminate_1.1s_ease-in-out_infinite]" />
-                  </div>
-                )}
+                  )}
+                </div>
                 {focusStep === "execution" && (
                   <>
                     {fourStateChips}
@@ -742,15 +779,19 @@ export function InlineTestingPanel() {
                           setSelected(i);
                           setSelectedTask(null);
                         }}
-                        className="flex flex-col gap-1 rounded-xl border border-border bg-card p-3 text-left hover:border-primary/60"
+                        className="group flex flex-col gap-2.5 rounded-xl border border-border bg-card p-3.5 text-left transition-colors hover:border-primary/50 hover:bg-muted/40"
                       >
-                        <div className="flex items-center gap-2">
-                          <FolderPlus size={16} className="text-primary" />
-                          <span className="truncate text-sm font-medium text-foreground">{p.name}</span>
+                        <div className="flex items-center gap-2.5">
+                          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                            <FolderPlus size={17} />
+                          </span>
+                          <div className="min-w-0 flex-1">
+                            <div className="truncate text-sm font-medium text-foreground">{p.name}</div>
+                            {p.path && <div className="truncate font-mono text-[10px] text-muted-foreground">{p.path}</div>}
+                          </div>
                         </div>
-                        {p.path && <div className="truncate font-mono text-[11px] text-muted-foreground">{p.path}</div>}
-                        <div className="mt-1 text-[11px] text-muted-foreground">
-                          {t("test.tasks")} · {p.tasks.length}
+                        <div className="flex items-center gap-1.5 border-t border-border/60 pt-2 text-[11px] text-muted-foreground">
+                          <ListChecks size={12} /> {p.tasks.length} {t("test.tasks")}
                         </div>
                       </button>
                     ))}
@@ -801,19 +842,18 @@ export function InlineTestingPanel() {
                             setSelectedTask(i);
                             setView("flow");
                           }}
-                          className="rounded-xl border border-border bg-card p-3 text-left hover:border-primary/60"
+                          className="group flex flex-col gap-3 rounded-xl border border-border bg-card p-3.5 text-left transition-colors hover:border-primary/50 hover:bg-muted/40"
                         >
                           <div className="flex items-center justify-between gap-2">
                             <span className="truncate text-sm font-medium text-foreground">{tk.name}</span>
-                            <span className={`shrink-0 rounded px-1.5 py-0.5 text-[10px] font-medium ${chip.cls}`}>{chip.text}</span>
+                            <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${chip.cls}`}>{chip.text}</span>
                           </div>
-                          <div className="mt-2 flex items-center gap-1.5">
-                            {STEPS.map((s) => (
-                              <span
-                                key={s.step}
-                                title={t(s.name)}
-                                className={`h-2 w-2 rounded-full ${stepDotClass(st.stepStatus[s.step])}`}
-                              />
+                          <div className="flex items-center gap-1" title={STEPS.map((s) => t(s.name)).join(" → ")}>
+                            {STEPS.map((s, idx) => (
+                              <div key={s.step} className="flex flex-1 items-center gap-1">
+                                <span className={`h-2 w-2 shrink-0 rounded-full ${stepDotClass(st.stepStatus[s.step])}`} />
+                                {idx < STEPS.length - 1 && <span className="h-px flex-1 bg-border" />}
+                              </div>
                             ))}
                           </div>
                         </button>
@@ -825,12 +865,7 @@ export function InlineTestingPanel() {
             )}
 
             {view === "flow" && !activeTask && <EmptyState icon={ListChecks} text={t("test.flowEmpty")} />}
-            {view === "report" &&
-              (caseResults.length > 0 ? (
-                <ReportView t={t} results={caseResults} four={fourState} circuitBroken={circuitBroken} taskName={activeTask?.name ?? current?.name ?? ""} />
-              ) : (
-                <EmptyState icon={ChartBar} text={t("test.reportEmpty")} />
-              ))}
+            {view === "report" && <ReportBrowser projects={projects} t={t} />}
           </div>
         </div>
       )}
@@ -945,6 +980,98 @@ function ReportView({ t, results, four, circuitBroken, taskName }: { t: T; resul
         </table>
       </div>
       <p className="mt-2 text-[11px] text-muted-foreground">ℹ️ {t("test.report.factsNote")}</p>
+    </div>
+  );
+}
+
+// 报告 view: browse persisted reports by 项目 → 任务 → 环境. A task can have multiple
+// reports (one per env); each row expands to the full ReportView. Reads from disk via
+// GET /api/test/reports (per project).
+function ReportBrowser({ projects, t }: { projects: Project[]; t: T }) {
+  const [loading, setLoading] = useState(true);
+  const [groups, setGroups] = useState<{ project: Project; reports: ReportEntry[] }[]>([]);
+  const [open, setOpen] = useState<string | null>(null);
+
+  useEffect(() => {
+    // All setState happens inside the async callback (Promise.all([]) resolves
+    // immediately for the empty case) — avoids synchronous setState in the effect.
+    let cancelled = false;
+    Promise.all(
+      projects
+        .filter((p) => p.path)
+        .map((p) =>
+          fetch(`/api/test/reports?projectPath=${encodeURIComponent(p.path)}`)
+            .then((r) => (r.ok ? r.json() : { reports: [] }))
+            .then((d) => ({ project: p, reports: (d.reports ?? []) as ReportEntry[] }))
+            .catch(() => ({ project: p, reports: [] as ReportEntry[] })),
+        ),
+    ).then((res) => {
+      if (cancelled) return;
+      setGroups(res.filter((g) => g.reports.length > 0));
+      setLoading(false);
+    });
+    return () => { cancelled = true; };
+  }, [projects]);
+
+  if (loading) return <p className="mt-6 text-center text-[11px] text-muted-foreground">{t("test.report.loading")}</p>;
+  if (!groups.length) return <EmptyState icon={ChartBar} text={t("test.reportEmpty")} />;
+
+  return (
+    <div className="flex flex-col gap-5">
+      {groups.map(({ project, reports }) => {
+        const tasks = new Map<string, ReportEntry[]>();
+        for (const r of reports) { const a = tasks.get(r.task) ?? []; a.push(r); tasks.set(r.task, a); }
+        return (
+          <div key={project.path}>
+            <div className="mb-2 flex items-center gap-2">
+              <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/10 text-primary"><FolderPlus size={14} /></span>
+              <h3 className="text-sm font-semibold text-foreground">{project.name}</h3>
+              <span className="text-[11px] text-muted-foreground">{reports.length} {t("test.report.reportsSuffix")}</span>
+            </div>
+            <div className="flex flex-col gap-3">
+              {[...tasks.entries()].map(([task, rs]) => (
+                <div key={task} className="rounded-xl border border-border bg-card p-3">
+                  <div className="mb-2 flex items-center gap-2">
+                    <span className="text-[12px] font-medium text-foreground">{task}</span>
+                    {rs.length > 1 && <span className="text-[10px] text-muted-foreground">{rs.length} {t("test.report.envsSuffix")}</span>}
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    {rs.map((r) => {
+                      const key = `${project.path}|${task}|${r.env}`;
+                      const isOpen = open === key;
+                      const bad = r.circuitBroken || r.counts.fail > 0;
+                      return (
+                        <div key={key} className="overflow-hidden rounded-lg border border-border">
+                          <button
+                            onClick={() => setOpen(isOpen ? null : key)}
+                            className="flex w-full items-center gap-2 bg-muted/40 px-3 py-1.5 text-left hover:bg-muted/70"
+                          >
+                            <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${bad ? "bg-status-error" : "bg-status-success"}`} />
+                            <span className="rounded-full bg-background px-2 py-0.5 text-[10px] font-medium text-foreground">{r.env || "—"}</span>
+                            <span className="text-[11px] text-muted-foreground">
+                              {t("test.state.pass")} {r.passStr || `${r.counts.pass}/${r.counts.total}`}
+                              {r.counts.fail > 0 ? ` · ${t("test.state.fail")} ${r.counts.fail}` : ""}
+                              {r.counts.blocked > 0 ? ` · ${t("test.state.blocked")} ${r.counts.blocked}` : ""}
+                            </span>
+                            <span className="flex-1" />
+                            {r.time && <span className="text-[10px] text-muted-foreground">{r.time}</span>}
+                            <span className="w-3 text-center text-[10px] text-muted-foreground">{isOpen ? "▲" : "▼"}</span>
+                          </button>
+                          {isOpen && (
+                            <div className="border-t border-border p-3">
+                              <ReportView t={t} results={r.tests} four={r.counts} circuitBroken={r.circuitBroken} taskName={task} />
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }

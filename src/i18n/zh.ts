@@ -85,6 +85,7 @@ const zh: Record<TranslationKey, string> = {
   'test.state.blocked': '阻塞',
   'test.flow.running': '运行中',
   'test.flow.runTask': '运行任务',
+  'test.flow.runAllHint': '一键跑完全部步骤（门控自动批准）',
   'test.flow.stop': '停止',
   'test.flow.visible': '可见',
   'test.flow.aiDriven': 'AI 驱动 Playwright',
@@ -125,6 +126,9 @@ const zh: Record<TranslationKey, string> = {
   'test.report.exportXlsx': '导出 xlsx',
   'test.report.factsNote': '报告只列事实 —— 不给修复方案/优先级/发布决策。阻塞 ≠ 缺陷。',
   'test.report.circuitBroken': '检测到大量 401，登录态可能在执行中失效，本轮结果不可信。',
+  'test.report.loading': '正在加载报告…',
+  'test.report.reportsSuffix': '份报告',
+  'test.report.envsSuffix': '个环境',
 
   // ── Chat list panel ─────────────────────────────────────────
   'chatList.justNow': '刚刚',

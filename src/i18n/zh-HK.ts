@@ -94,6 +94,7 @@ const zhHK: Record<TranslationKey, string> = {
   'test.state.blocked': '阻塞',
   'test.flow.running': '執行中',
   'test.flow.runTask': '執行任務',
+  'test.flow.runAllHint': '一鍵跑完全部步驟（門控自動批准）',
   'test.flow.stop': '停止',
   'test.flow.visible': '可見',
   'test.flow.aiDriven': 'AI 驅動 Playwright',
@@ -134,6 +135,9 @@ const zhHK: Record<TranslationKey, string> = {
   'test.report.exportXlsx': '匯出 xlsx',
   'test.report.factsNote': '報告只列事實 —— 不給修復方案/優先級/發布決策。阻塞 ≠ 缺陷。',
   'test.report.circuitBroken': '偵測到大量 401，登入態可能在執行中失效，本輪結果不可信。',
+  'test.report.loading': '正在載入報告…',
+  'test.report.reportsSuffix': '份報告',
+  'test.report.envsSuffix': '個環境',
 
   // ── Chat list panel ─────────────────────────────────────────
   'chatList.justNow': '剛剛',
