@@ -288,35 +288,43 @@ export function InlineTestingPanel() {
   };
 
   const addProject = (name: string, path: string) => setProjects((ps) => [...ps, { name, path, tasks: [] }]);
-  // Create a task. 新建任务 requires importing 用例 or 需求 (at least one) — those are
-  // saved to the project's AI_LabTest artifacts so the imported step lands in 待批准
-  // (cases) / 续生成用例 (requirement) instead of the AI generating from scratch.
-  const addTask = async (name: string, imports?: { requirement?: string; cases?: string }) => {
+  // Create a task. 新建任务 requires importing 用例 or 需求 (at least one). The file is
+  // parsed + written to the project's AI_LabTest artifacts (docx→需求.md / xlsx→cases.json)
+  // BEFORE the task is created — a parse failure returns an error and creates nothing.
+  // cases imported → 需求 skipped(done) + 用例 待批准; only 需求 → 需求 待批准.
+  const addTask = async (name: string, files?: NewTaskFiles): Promise<{ ok: boolean; error?: string }> => {
     const proj = selected !== null ? projects[selected] : null;
-    const id = makeTaskId();
-    setProjects((ps) => ps.map((p, i) => (i === selected ? { ...p, tasks: [...p.tasks, { id, name }] } : p)));
-    if (!proj?.path || !imports || (!imports.requirement && !imports.cases)) return;
-    const save = (kind: "requirement" | "cases", content: string) =>
-      fetch("/api/test/import", {
+    const postImport = async (kind: "requirement" | "cases", f: ImportFile): Promise<{ ok: boolean; error?: string }> => {
+      const res = await fetch("/api/test/import", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectPath: proj.path, taskName: name, kind, content }),
+        body: JSON.stringify({ projectPath: proj?.path, taskName: name, kind, filename: f.filename, dataBase64: f.dataBase64 }),
       });
-    try {
-      if (imports.requirement) await save("requirement", imports.requirement);
-      if (imports.cases) await save("cases", imports.cases);
-      // cases imported → 需求 skipped(done) + 用例 待批准; only 需求 → 需求 待批准.
+      const j = await res.json().catch(() => ({}));
+      return res.ok && j.ok ? { ok: true } : { ok: false, error: (j.error as string) || t("test.newTaskModal.importFailed") };
+    };
+    if (proj?.path && files?.requirement) {
+      const r = await postImport("requirement", files.requirement);
+      if (!r.ok) return r;
+    }
+    if (proj?.path && files?.cases) {
+      const r = await postImport("cases", files.cases);
+      if (!r.ok) return r;
+    }
+    const id = makeTaskId();
+    setProjects((ps) => ps.map((p, i) => (i === selected ? { ...p, tasks: [...p.tasks, { id, name }] } : p)));
+    const hasReq = !!files?.requirement, hasCases = !!files?.cases;
+    if (hasReq || hasCases) {
       patchTask(id, () => ({
         stepStatus: {
-          requirement: imports.cases ? "done" : "review",
-          cases: imports.cases ? "review" : "idle",
+          requirement: hasCases ? "done" : "review",
+          cases: hasCases ? "review" : "idle",
           execution: "idle",
           report: "idle",
         },
       }));
-    } catch {
-      /* import save failed → task stays a normal from-scratch task */
     }
+    return { ok: true };
   };
 
   // Persist the workbench so it survives the panel closing/reopening (switching
@@ -1296,6 +1304,10 @@ const CANCEL_BTN = "flex-1 h-9 rounded-md border border-border text-xs text-fore
 const PRIMARY_BTN =
   "flex-1 h-9 rounded-md bg-primary text-xs font-medium text-primary-foreground disabled:opacity-50 disabled:cursor-not-allowed";
 
+// 新建任务导入的材料（原始文件，base64；服务端按扩展名解析 docx/xlsx）。
+type ImportFile = { filename: string; dataBase64: string };
+type NewTaskFiles = { requirement?: ImportFile; cases?: ImportFile };
+
 // 运行任务 on a mid-progress task: continue from the current stage, or restart from scratch.
 function RunChoiceModal({ t, stage, onContinue, onRestart, onClose }: { t: T; stage: string; onContinue: () => void; onRestart: () => void; onClose: () => void }) {
   return (
@@ -1318,31 +1330,36 @@ function RunChoiceModal({ t, stage, onContinue, onRestart, onClose }: { t: T; st
   );
 }
 
-function NewTaskModal({ t, onClose, onAdd }: { t: T; onClose: () => void; onAdd: (name: string, imports?: { requirement?: string; cases?: string }) => void }) {
+function NewTaskModal({ t, onClose, onAdd }: { t: T; onClose: () => void; onAdd: (name: string, files?: NewTaskFiles) => Promise<{ ok: boolean; error?: string }> }) {
   const [name, setName] = useState("");
-  const [reqFile, setReqFile] = useState<{ name: string; content: string } | null>(null);
-  const [casesFile, setCasesFile] = useState<{ name: string; content: string } | null>(null);
+  const [reqFile, setReqFile] = useState<{ name: string; data: string } | null>(null);
+  const [casesFile, setCasesFile] = useState<{ name: string; data: string } | null>(null);
   const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
   const reqInputRef = useRef<HTMLInputElement>(null);
   const casesInputRef = useRef<HTMLInputElement>(null);
   // 新建任务必须至少导入 用例 或 需求 之一。
-  const canCreate = !!name.trim() && (!!reqFile || !!casesFile);
+  const ready = !!name.trim() && (!!reqFile || !!casesFile);
 
-  const pickReq = (f?: File) => {
+  // Read as base64 (docx/xlsx are binary; the server parses by extension).
+  const pick = (f: File | undefined, set: (v: { name: string; data: string }) => void) => {
     if (!f) return;
     const r = new FileReader();
-    r.onload = () => { setReqFile({ name: f.name, content: String(r.result || "") }); setErr(""); };
-    r.readAsText(f);
+    r.onload = () => { set({ name: f.name, data: String(r.result || "").split(",")[1] || "" }); setErr(""); };
+    r.readAsDataURL(f);
   };
-  const pickCases = (f?: File) => {
-    if (!f) return;
-    const r = new FileReader();
-    r.onload = () => {
-      const txt = String(r.result || "");
-      try { JSON.parse(txt); setCasesFile({ name: f.name, content: txt }); setErr(""); }
-      catch { setErr(t("test.newTaskModal.casesNeedJson")); }
-    };
-    r.readAsText(f);
+
+  const create = async () => {
+    if (!ready || busy) return;
+    setBusy(true);
+    setErr("");
+    const res = await onAdd(name.trim(), {
+      requirement: reqFile ? { filename: reqFile.name, dataBase64: reqFile.data } : undefined,
+      cases: casesFile ? { filename: casesFile.name, dataBase64: casesFile.data } : undefined,
+    });
+    setBusy(false);
+    if (res.ok) onClose();
+    else setErr(res.error || t("test.newTaskModal.importFailed"));
   };
 
   return (
@@ -1354,14 +1371,11 @@ function NewTaskModal({ t, onClose, onAdd }: { t: T; onClose: () => void; onAdd:
         <>
           <button onClick={onClose} className={CANCEL_BTN}>{t("test.cancel")}</button>
           <button
-            disabled={!canCreate}
-            onClick={() => {
-              onAdd(name.trim(), { requirement: reqFile?.content, cases: casesFile?.content });
-              onClose();
-            }}
+            disabled={!ready || busy}
+            onClick={create}
             className={PRIMARY_BTN}
           >
-            {t("test.newTaskModal.create")}
+            {busy ? t("test.newTaskModal.importing") : t("test.newTaskModal.create")}
           </button>
         </>
       }
@@ -1377,8 +1391,8 @@ function NewTaskModal({ t, onClose, onAdd }: { t: T; onClose: () => void; onAdd:
           <button onClick={() => casesInputRef.current?.click()} className="h-9 flex-1 rounded-md border border-border text-xs text-foreground hover:bg-muted">📊 {t("test.newTaskModal.importCases")}</button>
           <button onClick={() => reqInputRef.current?.click()} className="h-9 flex-1 rounded-md border border-border text-xs text-foreground hover:bg-muted">📄 {t("test.newTaskModal.importReqs")}</button>
         </div>
-        <input ref={casesInputRef} type="file" accept=".json" className="hidden" onChange={(e) => { pickCases(e.target.files?.[0]); e.target.value = ""; }} />
-        <input ref={reqInputRef} type="file" accept=".md,.txt,.markdown" className="hidden" onChange={(e) => { pickReq(e.target.files?.[0]); e.target.value = ""; }} />
+        <input ref={casesInputRef} type="file" accept=".json,.xlsx" className="hidden" onChange={(e) => { pick(e.target.files?.[0], setCasesFile); e.target.value = ""; }} />
+        <input ref={reqInputRef} type="file" accept=".md,.txt,.markdown,.docx" className="hidden" onChange={(e) => { pick(e.target.files?.[0], setReqFile); e.target.value = ""; }} />
         {(casesFile || reqFile) && (
           <div className="mt-2 flex flex-col gap-1">
             {casesFile && (
@@ -1398,7 +1412,7 @@ function NewTaskModal({ t, onClose, onAdd }: { t: T; onClose: () => void; onAdd:
         {err && <p className="mt-1 text-[11px] text-status-error-foreground">{err}</p>}
         <p className="mt-2 text-[11px] text-muted-foreground">{t("test.newTaskModal.importHint")}</p>
       </Field>
-      {!canCreate && (
+      {!ready && (
         <div className="rounded-md bg-status-warning-muted px-3 py-2 text-[11px] text-status-warning-foreground">
           ⚠ {t("test.newTaskModal.importRequired")}
         </div>
