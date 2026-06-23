@@ -75,7 +75,7 @@ function makeTaskId(): string {
 }
 
 const INPUT =
-  "w-full h-9 rounded-md border border-border bg-background px-2.5 text-xs text-foreground outline-none focus:border-accent";
+  "w-full h-9 rounded-md border border-border bg-background px-2.5 text-xs text-foreground outline-none focus:border-primary";
 
 // Per-task workflow (no code analysis), ported from ai-lab-test-framework V0.3:
 // 需求分析 → 用例设计 → 测试执行 → 测试报告. Steps run in order; each reads the
@@ -121,7 +121,7 @@ function toolUseLabel(name: string, input: unknown): string {
 function stepDotClass(status: StepStatus): string {
   switch (status) {
     case "done": return "bg-status-success";
-    case "running": return "bg-accent";
+    case "running": return "bg-primary";
     case "review": return "bg-status-warning";
     case "error": return "bg-status-error";
     default: return "bg-muted-foreground/30";
@@ -133,10 +133,10 @@ function stepDotClass(status: StepStatus): string {
 function stepPillClass(status: StepStatus): string {
   switch (status) {
     case "done": return "bg-status-success-muted border-status-success-border";
-    case "running": return "bg-accent/15 border-accent";
+    case "running": return "bg-primary/15 border-primary";
     case "review": return "bg-status-warning-muted border-status-warning-border";
     case "error": return "bg-status-error-muted border-status-error-border";
-    default: return "bg-card border-border";
+    default: return "bg-muted border-border"; // 未开始：浅灰填充（card=纯白，会和背景糊在一起）
   }
 }
 function stepStatusText(status: StepStatus, t: T): string {
@@ -493,7 +493,7 @@ export function InlineTestingPanel() {
     <button
       onClick={() => setView(v)}
       className={`px-2.5 py-1 text-xs border-r border-border last:border-r-0 transition-colors ${
-        view === v ? "bg-accent text-accent-foreground font-medium" : "text-muted-foreground hover:text-foreground"
+        view === v ? "bg-primary text-primary-foreground font-medium" : "text-muted-foreground hover:text-foreground"
       }`}
     >
       {label}
@@ -514,7 +514,7 @@ export function InlineTestingPanel() {
       {/* Header */}
       <div className="flex shrink-0 items-center gap-2 border-b border-border bg-card px-3 py-2">
         <span className="flex items-center gap-1.5 text-xs font-semibold text-foreground">
-          <ListChecks size={14} className="text-accent" />
+          <ListChecks size={14} className="text-primary" />
           {t("test.title")}
         </span>
         <span className="flex-1" />
@@ -590,7 +590,7 @@ export function InlineTestingPanel() {
                   onClick={() => runStep(focusStep)}
                   disabled={!current?.path || busy || !stepUnlocked(focusStep)}
                   title={!stepUnlocked(focusStep) ? t("test.flow.locked") : undefined}
-                  className="flex h-7 items-center gap-1 rounded-md bg-accent px-2.5 text-[11px] font-medium text-accent-foreground disabled:cursor-not-allowed disabled:opacity-40"
+                  className="flex h-7 items-center gap-1 rounded-md bg-primary px-2.5 text-[11px] font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   <Play size={12} /> {runningStep ? t("test.flow.running") : t("test.flow.runTask")}
                 </button>
@@ -614,19 +614,19 @@ export function InlineTestingPanel() {
                       disabled={!current?.path || busy || !unlocked}
                       title={!unlocked ? t("test.flow.locked") : t("test.flow.run")}
                       className={`min-w-[120px] flex-1 rounded-lg border p-2.5 text-left transition-colors disabled:cursor-not-allowed ${stepPillClass(status)} ${
-                        isFocus ? "ring-2 ring-accent ring-offset-1 ring-offset-background" : ""
-                      } ${unlocked && !busy && current?.path ? "hover:border-accent/60" : ""}`}
+                        isFocus ? "ring-2 ring-primary ring-offset-1 ring-offset-background" : ""
+                      } ${unlocked && !busy && current?.path ? "hover:border-primary/60" : ""}`}
                     >
                       <div className="flex items-center gap-1.5">
                         {status === "running"
-                          ? <SpinnerGap size={13} className="animate-spin text-accent" />
+                          ? <SpinnerGap size={13} className="animate-spin text-primary" />
                           : <span className={`h-2 w-2 rounded-full ${stepDotClass(status)}`} />}
-                        <span className={`text-xs font-medium ${status === "running" ? "text-accent" : "text-foreground"}`}>
+                        <span className={`text-xs font-medium ${status === "running" ? "text-primary" : "text-foreground"}`}>
                           {i + 1}. {t(s.name)}
                           {HUMAN_GATED.includes(s.step) && <span title={t("test.gate.auto")}> ✋</span>}
                         </span>
                       </div>
-                      <div className={`mt-1 text-[11px] ${status === "running" ? "text-accent" : "text-muted-foreground"}`}>{stepStatusText(status, t)}</div>
+                      <div className={`mt-1 text-[11px] ${status === "running" ? "text-primary" : "text-muted-foreground"}`}>{stepStatusText(status, t)}</div>
                     </button>
                   );
                 })}
@@ -637,13 +637,13 @@ export function InlineTestingPanel() {
                 <div className="mb-2 flex items-center gap-2">
                   <h4 className="text-xs font-semibold text-foreground">{t(STEPS.find((s) => s.step === focusStep)!.name)}</h4>
                   {focusStep === "execution" && (
-                    <span className="rounded bg-accent/10 px-1.5 py-0.5 text-[10px] font-medium text-accent">{t("test.flow.aiDriven")}</span>
+                    <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">{t("test.flow.aiDriven")}</span>
                   )}
                   <span className="flex-1" />
                   <button
                     onClick={() => runStep(focusStep)}
                     disabled={!current?.path || busy || !stepUnlocked(focusStep)}
-                    className="flex h-7 items-center gap-1 rounded-md bg-accent px-2.5 text-[11px] font-medium text-accent-foreground disabled:cursor-not-allowed disabled:opacity-40"
+                    className="flex h-7 items-center gap-1 rounded-md bg-primary px-2.5 text-[11px] font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-40"
                   >
                     <Play size={12} /> {runningStep === focusStep ? t("test.flow.running") : stepStatus[focusStep] === "done" ? t("test.flow.rerun") : t("test.flow.run")}
                   </button>
@@ -651,7 +651,7 @@ export function InlineTestingPanel() {
                 {/* per-stage running progress — indeterminate (we don't know total cases up front) */}
                 {runningStep === focusStep && (
                   <div className="mt-2 h-1 overflow-hidden rounded-full bg-muted" role="progressbar" aria-label={t("test.flow.running")}>
-                    <div className="h-full w-1/3 rounded-full bg-accent animate-[test-bar-indeterminate_1.1s_ease-in-out_infinite]" />
+                    <div className="h-full w-1/3 rounded-full bg-primary animate-[test-bar-indeterminate_1.1s_ease-in-out_infinite]" />
                   </div>
                 )}
                 {focusStep === "execution" && (
@@ -681,14 +681,14 @@ export function InlineTestingPanel() {
                 <span className="flex-1" />
                 <button
                   onClick={() => approveStep(reviewStep)}
-                  className="rounded bg-accent px-2.5 py-1 text-[11px] font-medium text-accent-foreground"
+                  className="rounded bg-primary px-2.5 py-1 text-[11px] font-medium text-primary-foreground"
                 >
                   ✓ {t("test.gate.approve")}
                 </button>
               </div>
             )}
             <div className="shrink-0 border-t border-border bg-card p-3">
-              <div className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 focus-within:border-accent">
+              <div className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 focus-within:border-primary">
                 <input
                   value={composer}
                   onChange={(e) => setComposer(e.target.value)}
@@ -704,7 +704,7 @@ export function InlineTestingPanel() {
                   disabled={busy || !composer.trim()}
                   title={t("test.convo.send")}
                   aria-label={t("test.convo.send")}
-                  className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-accent text-accent-foreground disabled:cursor-not-allowed disabled:opacity-40"
+                  className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-primary text-primary-foreground disabled:cursor-not-allowed disabled:opacity-40"
                 >
                   <ArrowUp size={13} />
                 </button>
@@ -726,7 +726,7 @@ export function InlineTestingPanel() {
                   <span className="flex-1" />
                   <button
                     onClick={handlePickProject}
-                    className="flex h-7 items-center gap-1 rounded-md bg-accent px-2.5 text-xs font-medium text-accent-foreground"
+                    className="flex h-7 items-center gap-1 rounded-md bg-primary px-2.5 text-xs font-medium text-primary-foreground"
                   >
                     <FolderPlus size={13} /> {t("test.addProject")}
                   </button>
@@ -742,10 +742,10 @@ export function InlineTestingPanel() {
                           setSelected(i);
                           setSelectedTask(null);
                         }}
-                        className="flex flex-col gap-1 rounded-xl border border-border bg-card p-3 text-left hover:border-accent/60"
+                        className="flex flex-col gap-1 rounded-xl border border-border bg-card p-3 text-left hover:border-primary/60"
                       >
                         <div className="flex items-center gap-2">
-                          <FolderPlus size={16} className="text-accent" />
+                          <FolderPlus size={16} className="text-primary" />
                           <span className="truncate text-sm font-medium text-foreground">{p.name}</span>
                         </div>
                         {p.path && <div className="truncate font-mono text-[11px] text-muted-foreground">{p.path}</div>}
@@ -782,7 +782,7 @@ export function InlineTestingPanel() {
                   </button>
                   <button
                     onClick={() => setModal("newTask")}
-                    className="flex h-7 items-center gap-1 rounded-md bg-accent px-2.5 text-[11px] font-medium text-accent-foreground"
+                    className="flex h-7 items-center gap-1 rounded-md bg-primary px-2.5 text-[11px] font-medium text-primary-foreground"
                   >
                     ＋ {t("test.newTask")}
                   </button>
@@ -801,7 +801,7 @@ export function InlineTestingPanel() {
                             setSelectedTask(i);
                             setView("flow");
                           }}
-                          className="rounded-xl border border-border bg-card p-3 text-left hover:border-accent/60"
+                          className="rounded-xl border border-border bg-card p-3 text-left hover:border-primary/60"
                         >
                           <div className="flex items-center justify-between gap-2">
                             <span className="truncate text-sm font-medium text-foreground">{tk.name}</span>
@@ -856,7 +856,7 @@ function ConvoBubble({ msg }: { msg: ConvoMsg }) {
   if (msg.role === "user")
     return (
       <div className="flex justify-end">
-        <div className={`${bubble} rounded-br-sm bg-accent text-accent-foreground`}>{msg.text}</div>
+        <div className={`${bubble} rounded-br-sm bg-primary text-primary-foreground`}>{msg.text}</div>
       </div>
     );
   const cfg =
@@ -864,7 +864,7 @@ function ConvoBubble({ msg }: { msg: ConvoMsg }) {
       ? { Icon: WarningCircle, avatar: "bg-status-error-muted text-status-error-foreground", body: "bg-status-error-muted text-status-error-foreground" }
       : msg.role === "tool"
         ? { Icon: Terminal, avatar: "bg-muted text-muted-foreground", body: "bg-muted font-mono text-[11px] text-muted-foreground" }
-        : { Icon: Sparkle, avatar: "bg-accent/15 text-accent", body: "border border-border bg-card text-foreground" };
+        : { Icon: Sparkle, avatar: "bg-primary/15 text-primary", body: "border border-border bg-card text-foreground" };
   const Cmp = cfg.Icon;
   return (
     <div className="flex items-start gap-2">
@@ -901,7 +901,7 @@ function ReportView({ t, results, four, circuitBroken, taskName }: { t: T; resul
   return (
     <div>
       <div className="mb-3 flex items-center gap-2">
-        <ChartBar size={15} className="text-accent" />
+        <ChartBar size={15} className="text-primary" />
         <h3 className="text-sm font-semibold text-foreground">{taskName}</h3>
         <span className="text-[11px] text-muted-foreground">· {t("test.view.report")}</span>
       </div>
@@ -997,7 +997,7 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 
 const CANCEL_BTN = "flex-1 h-9 rounded-md border border-border text-xs text-foreground hover:bg-muted";
 const PRIMARY_BTN =
-  "flex-1 h-9 rounded-md bg-accent text-xs font-medium text-accent-foreground disabled:opacity-50 disabled:cursor-not-allowed";
+  "flex-1 h-9 rounded-md bg-primary text-xs font-medium text-primary-foreground disabled:opacity-50 disabled:cursor-not-allowed";
 
 function NewTaskModal({ t, onClose, onAdd }: { t: T; onClose: () => void; onAdd: (name: string) => void }) {
   const [name, setName] = useState("");
