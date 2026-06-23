@@ -13,7 +13,7 @@
 |-------|------|------|------|
 | Phase 0 | POC：验证 server.json→MCPServerConfig 映射 + 内置二进制能拉起 | ✅ 已完成 | 脚本 `scripts/poc-mcp-marketplace.mjs`；挖出冷启动 prefetch 坑 |
 | Phase 1 | MVP：搜索 / 详情 / 动态表单 / 安全确认 / prefetch 安装 / 卸载 | ✅ 已完成 | 两 tab（我的 MCP / MCP 市场），CDP 验证安装→卸载完整往返通过 |
-| Phase 2 | 加固：密钥落地 / 信任分层 + 黑名单 / 危险模式 / 运行时预检 / Glama 兜底 / 版本钉死 | 📋 待开始 | |
+| Phase 2 | 加固：信任分层 + 黑名单 + 危险模式扫描 + 分级摩擦（密钥落地/版本钉死已在 P1 提前做）；运行时预检/Glama 兜底另列 | 🔄 进行中 | 安全核心：纵深防御四层，非 isSafe 判定 |
 | Phase 3 | 远程进阶：OAuth 2.1 环回 / 工具定义 TOFU / 与内置二进制冲突排查 | 📋 待开始 | |
 | Phase 4 | 可选增强：入站深链 / Smithery 托管 / mcp-scan 离线 / Docker 沙箱 / catalog 缓存同步 | 📋 待开始 | 任意顺序 |
 
@@ -27,8 +27,73 @@
 - 2026-06-23: **安全是必做项不是可选**。官方 Registry 只做命名空间验证、明确把安全扫描甩给下游（即本应用）；stdio 安装 = RCE。Phase 1 即落「安全确认屏障」，Phase 2 补黑名单/危险模式/信任分层。
 - 2026-06-23: **OAuth 客户端注册 CIMD 优先、DCR 仅兜底**（依 2025-11-25 授权规范）。
 - 2026-06-23: **mcp-scan 只用离线 `inspect`/`whitelist` 子命令**，绝不用默认 `scan`（会把工具描述发到美国 invariantlabs，违反「不向美国站点发数据」纪律）。
+- 2026-06-23（Phase 2）: **不做 `isSafe` 二元判定**。stdio MCP = 任意代码执行，无可靠静态分析能证明无害。改为「已知恶意硬拦 + 信任分层 + 风险标记 + 知情同意」四层纵深，应用永不替用户判定「安全」，只摊开风险。
+- 2026-06-23（Phase 2）: **黑名单这一版内置静态种子 JSON**（随版本更新），架构预留远程合并（后续接登录后端下发，呼应「自托管、不向美国站点发数据」与「官方 Registry 只人工下架、需自己快速止血」）。
+- 2026-06-23（Phase 2）: **信任 tier 只陈述可验证来源事实**（official-reviewed 手维护白名单 / namespace-verified github|domain / community）；**不按下载量排信任**（可刷、仿冒涨得快）。Docker 签名因需 docker CLI 才能机验，本版作为 `oci-container` 信号而非自动 tier。
+- 2026-06-23（Phase 2）: **风险扫描是启发式「提示」非判定**，对已映射的 command/args/env 跑纯函数；只挡显眼/懒的坏，挡不住有心人——明确写进 UI 与文档。
 
-## 详细设计
+## Phase 2 详细设计（安全加固）
+
+> 产品视角与「应用如何判断 MCP 是否安全」的讨论同对话；核心结论：**没有 `isSafe`**，是纵深防御 + 把人放回决策环。
+
+### 纵深防御四层（+ 运行后）
+
+| 层 | 作用 | 能否给「不安全」判定 | 落点 |
+|----|------|------------------|------|
+| ① 已知恶意拦截 denylist | 命中即硬拦 | ✅ 唯一高置信负判定 | `mcp-denylist.ts` + install 路由服务端强制 |
+| ② 信任分层 trust tier | 陈述可验证来源事实 | ❌ 只是 provenance | `mcp-trust.ts` → DTO `trust.tier` |
+| ③ 风险标记 risk scan | 危险模式启发式提示 | ❌ 提示非判定 | `mcp-trust.ts` 纯函数扫 config |
+| ④ 知情同意 + 分级摩擦 | 人做最终决定 | —（决策权归人） | 复用 Phase 1 确认屏障 + friction |
+| ＋运行后 工具定义 TOFU | 防装后变坏 rug-pull | 检测篡改 | Phase 3（`mcp-connection-manager` 拦 `tools/list`） |
+
+### 数据模型（types/index.ts）
+
+```ts
+type McpTrustTier = 'official-reviewed' | 'namespace-verified' | 'community';
+interface McpRiskFlag { code: string; detail: string; severity: 'warn' | 'high'; }
+interface McpTrustAssessment {
+  tier: McpTrustTier;
+  signals: string[];                 // 'github-verified'|'domain-verified'|'has-repo'|'version-pinned'|'oci-container'
+  risks: McpRiskFlag[];
+  blocked: boolean; blockReason?: string;
+  friction: 'normal' | 'extra-confirm' | 'blocked';
+}
+// MarketplaceMcpServer 增加 trust?: McpTrustAssessment
+```
+
+### 风险扫描规则（对已映射 MCPServerConfig）
+
+- `shell-exec`(high): command 为 bash/sh/zsh/cmd/powershell + `-c`，或 args 跑脚本
+- `dangerous-command`(high): `sudo` / `rm -rf` / `chmod +x` / `mkfs` / `dd`
+- `network-fetch-exec`(high): `curl`/`wget` 且管道入 shell（`| sh`/`| bash`）
+- `sensitive-path`(warn): `~/.ssh` `~/.aws` `~/.config` `/etc` `id_rsa`
+- `unpinned-version`(warn): stdio 包无钉版本（latest/缺失）→ 可静默变更
+- `no-repository`(warn): server.repository 缺失
+- `secret-injected`(warn): 存在 isSecret env（把密钥交给第三方代码，信息性提示）
+
+### friction 决策
+
+`blocked` → 安装禁用（设置里可 override，带二次警告）；任一 `high` 风险 → `extra-confirm`（红字 + 「我已理解会运行未受信代码」勾选才解锁）；否则 `normal`。tier 只调徽章不放宽。
+
+### Phase 2 任务拆分
+
+| # | 任务 | 文件 | 验收 |
+|---|------|------|------|
+| 1 | 黑名单（种子 + 版本区间匹配 + 预留远程合并） | `src/lib/mcp-denylist.ts` | 单测 |
+| 2 | 信任评估（tier + 风险扫描，纯函数） | `src/lib/mcp-trust.ts` | 单测覆盖每条规则 |
+| 3 | 类型 | `src/types/index.ts` | typecheck |
+| 4 | 灌进 DTO（search 批量 tier+blocked，detail 全量 risks） | search/detail 路由 | 真实数据 |
+| 5 | 服务端强制拦截 | install 路由 | blocked → 422 |
+| 6 | UI：卡片 tier/blocked 徽章 + 详情风险列 + 对话框分级摩擦 | 市场组件 | CDP 验证 |
+| 7 | i18n 三语 | `i18n/{en,zh,zh-HK}.ts` | typecheck |
+
+**Phase 2 验收**：denylist 命中的包卡片置灰且服务端拒装；含 high 风险的 server 安装对话框出现红字 + 强制勾选才能装；普通 server 不受影响；单测覆盖每条风险规则；CDP 截图确认。
+
+### 诚实局限（写入 UI/文档）
+
+命令扫描可被绕过（包跑起来想干啥干啥）；verified≠safe（postmark 是合法已验证发布者后来变坏）；下载量可刷；唯一真隔离是沙箱（Docker）。整套是「让风险可见 + 拦已知坏 + 能隔离就隔离 + 人拍板」。
+
+## 详细设计（Phase 1）
 
 ### 核心数据流（一键安装）
 

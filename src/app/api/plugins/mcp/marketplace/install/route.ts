@@ -4,6 +4,7 @@ import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import { getOfficialServer } from '@/lib/mcp-registry-client';
+import { assessMcp } from '@/lib/mcp-trust';
 import { buildConfig, prefetchCommand, mapServer } from '@/lib/server-json-mapper';
 import { setSetting } from '@/lib/db';
 import { invalidateMcpCache } from '@/lib/mcp-loader';
@@ -71,6 +72,15 @@ export async function POST(request: Request) {
   const server = await getOfficialServer(serverName);
   if (!server) {
     return NextResponse.json({ error: `未找到 server "${serverName}"` }, { status: 404 });
+  }
+
+  // 服务端强制黑名单拦截（纵深防御——不信任客户端，命中即拒装）
+  const assessment = assessMcp(server);
+  if (assessment.blocked) {
+    return NextResponse.json(
+      { error: `该 server 已被安全黑名单拦截：${assessment.blockReason || '已知风险'}` },
+      { status: 422 },
+    );
   }
 
   const opts = { prefer, packageIndex };

@@ -11,6 +11,7 @@ import {
   CheckCircle,
   ArrowSquareOut,
   SpinnerGap,
+  Warning,
 } from "@/components/ui/icon";
 import { useTranslation } from "@/hooks/useTranslation";
 import { McpInstallDialog, type MappedDetail } from "./McpInstallDialog";
@@ -121,7 +122,12 @@ export function McpMarketplaceServerDetail({
                 {t("mcp.uninstall")}
               </Button>
             ) : (
-              <Button size="sm" className="gap-1.5" disabled={loading || !mapped} onClick={() => setShowInstall(true)}>
+              <Button
+                size="sm"
+                className="gap-1.5"
+                disabled={loading || !mapped || !!server.trust?.blocked}
+                onClick={() => setShowInstall(true)}
+              >
                 <DownloadSimple size={14} />
                 {t("mcp.install")}
               </Button>
@@ -152,6 +158,35 @@ export function McpMarketplaceServerDetail({
               ))}
         </div>
         <p className="text-[11px] text-muted-foreground">{t("mcp.trustNote")}</p>
+
+        {/* 黑名单硬拦横幅 */}
+        {server.trust?.blocked && (
+          <div className="rounded-md border border-status-error-border bg-status-error/10 p-3">
+            <p className="text-xs font-medium text-status-error-foreground">{t("mcp.blockedHint")}</p>
+            {server.trust.blockReason && (
+              <p className="text-[11px] text-muted-foreground mt-1">{server.trust.blockReason}</p>
+            )}
+          </div>
+        )}
+
+        {/* 风险提示 */}
+        {!server.trust?.blocked && (server.trust?.risks?.length ?? 0) > 0 && (
+          <div className="space-y-1">
+            <p className="text-[11px] font-medium text-muted-foreground">{t("mcp.consentRisks")}</p>
+            {server.trust!.risks.map((r, idx) => (
+              <div
+                key={`${r.code}-${idx}`}
+                className={
+                  "flex items-start gap-1.5 text-xs " +
+                  (r.severity === "high" ? "text-status-error-foreground" : "text-status-warning-foreground")
+                }
+              >
+                <Warning size={13} className="shrink-0 mt-0.5" />
+                <span>{r.detail}</span>
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* 将安装的内容预览 */}
         {loading ? (

@@ -482,6 +482,54 @@ export interface MarketplaceMcpServer {
   isInstalled?: boolean;
   /** 已安装时在 mcpServers 里的 key。 */
   installedKey?: string;
+  /** 信任评估（Phase 2 安全加固）。 */
+  trust?: McpTrustAssessment;
+}
+
+// ── MCP 安全/信任（Phase 2） ────────────────────────────────────────────
+
+/**
+ * 信任 tier —— 只陈述「可验证的来源事实」，不代表安全。
+ * official-reviewed: 官方目录已审（手维护白名单）；
+ * namespace-verified: 命名空间已验证（github / 反向域名，官方 Registry 默认满足）；
+ * community: 无额外背书（Glama 等兜底源）。
+ */
+export type McpTrustTier = 'official-reviewed' | 'namespace-verified' | 'community';
+
+/** 风险标记 —— 启发式提示，不是「不安全」判定。 */
+export interface McpRiskFlag {
+  /** 规则码，如 'shell-exec' | 'dangerous-command' | 'network-fetch-exec' | 'sensitive-path' | 'unpinned-version' | 'no-repository' | 'secret-injected'。 */
+  code: string;
+  /** 人类可读细节（命中的 token / 字段）。 */
+  detail: string;
+  severity: 'warn' | 'high';
+}
+
+/** 一个 MCP 的纵深信任评估（不含 isSafe）。 */
+export interface McpTrustAssessment {
+  tier: McpTrustTier;
+  /** 正面可验证信号。 */
+  signals: string[];
+  /** 风险提示。 */
+  risks: McpRiskFlag[];
+  /** 命中已知恶意黑名单 → 硬拦。 */
+  blocked: boolean;
+  blockReason?: string;
+  /** 安装对话框摩擦力：normal 正常 / extra-confirm 强制勾选 / blocked 禁止。 */
+  friction: 'normal' | 'extra-confirm' | 'blocked';
+}
+
+/** 已知恶意/漏洞黑名单条目。 */
+export interface McpDenylistEntry {
+  /** 包类型；省略 = 任意。 */
+  registryType?: string;
+  /** 包标识（npm/pypi 包名、oci 镜像名，不含 tag/version）。 */
+  identifier: string;
+  /** 版本区间（'>=1.0.16' / '<0.1.16' / 精确 '1.2.3'）；省略 = 所有版本。 */
+  versionRange?: string;
+  reason: string;
+  /** 公告/参考链接。 */
+  ref?: string;
 }
 
 /** 市场安装台账条目（记录 marketplace server → 本地 mcpServers key 的来源映射）。 */

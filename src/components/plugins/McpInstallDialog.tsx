@@ -62,9 +62,15 @@ export function McpInstallDialog({
   const { t } = useTranslation();
   const [phase, setPhase] = useState<Phase>("form");
   const [values, setValues] = useState<Record<string, string>>({});
+  const [acked, setAcked] = useState(false);
   const [logs, setLogs] = useState<string[]>([]);
   const logsEndRef = useRef<HTMLDivElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+
+  const trust = server.trust;
+  const blocked = !!trust?.blocked;
+  const risks = trust?.risks ?? [];
+  const needsAck = trust?.friction === "extra-confirm";
 
   // Reset when (re)opened
   /* eslint-disable react-hooks/set-state-in-effect -- intentional reset on open */
@@ -72,6 +78,7 @@ export function McpInstallDialog({
     if (open) {
       setPhase("form");
       setLogs([]);
+      setAcked(false);
       const initial: Record<string, string> = {};
       for (const i of mapped.requiredInputs) if (i.default) initial[i.name] = i.default;
       setValues(initial);
@@ -192,6 +199,33 @@ export function McpInstallDialog({
               )}
             </div>
 
+            {/* 黑名单硬拦 */}
+            {blocked && (
+              <div className="rounded-md border border-status-error-border bg-status-error/10 p-3">
+                <p className="text-xs font-medium text-status-error-foreground">{t("mcp.blockedHint")}</p>
+                {trust?.blockReason && <p className="text-[11px] text-muted-foreground mt-1">{trust.blockReason}</p>}
+              </div>
+            )}
+
+            {/* 风险标记（启发式提示，非判定） */}
+            {risks.length > 0 && (
+              <div className="space-y-1.5">
+                <p className="text-xs font-medium">{t("mcp.consentRisks")}</p>
+                {risks.map((r, idx) => (
+                  <div
+                    key={`${r.code}-${idx}`}
+                    className={
+                      "flex items-start gap-1.5 text-xs " +
+                      (r.severity === "high" ? "text-status-error-foreground" : "text-status-warning-foreground")
+                    }
+                  >
+                    <Warning size={13} className="shrink-0 mt-0.5" />
+                    <span>{r.detail}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+
             {/* 动态表单 */}
             {mapped.requiredInputs.length > 0 && (
               <div className="space-y-3">
@@ -232,6 +266,19 @@ export function McpInstallDialog({
                 ))}
               </div>
             )}
+
+            {/* extra-confirm：高风险强制勾选才解锁安装 */}
+            {needsAck && !blocked && (
+              <label className="flex items-start gap-2 text-xs cursor-pointer select-none">
+                <input
+                  type="checkbox"
+                  className="mt-0.5 accent-primary"
+                  checked={acked}
+                  onChange={(e) => setAcked(e.target.checked)}
+                />
+                <span className="text-muted-foreground">{t("mcp.consentAck")}</span>
+              </label>
+            )}
           </div>
         ) : (
           <div className="bg-muted/50 rounded-md p-3 max-h-64 overflow-y-auto font-mono text-xs leading-relaxed">
@@ -249,7 +296,11 @@ export function McpInstallDialog({
           {phase === "form" ? (
             <>
               <Button variant="outline" onClick={handleClose}>{t("common.cancel")}</Button>
-              <Button className="gap-1.5" disabled={missingRequired} onClick={startInstall}>
+              <Button
+                className="gap-1.5"
+                disabled={missingRequired || blocked || (needsAck && !acked)}
+                onClick={startInstall}
+              >
                 <DownloadSimple size={14} />
                 {t("mcp.confirmInstall")}
               </Button>

@@ -12,6 +12,7 @@
 
 import type { MarketplaceMcpServer } from '@/types';
 import type { ServerJson } from '@/lib/server-json-mapper';
+import { assessMcp } from '@/lib/mcp-trust';
 
 const OFFICIAL_BASE = 'https://registry.modelcontextprotocol.io';
 const OFFICIAL_META_KEY = 'io.modelcontextprotocol.registry/official';
@@ -72,6 +73,7 @@ export function toMarketplaceDto(item: RawListItem): MarketplaceMcpServer {
     repositoryUrl: s.repository?.url,
     status: meta.status,
     source: 'official',
+    trust: assessMcp(s),
   };
 }
 

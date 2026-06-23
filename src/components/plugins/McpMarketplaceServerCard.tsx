@@ -59,6 +59,11 @@ export function McpMarketplaceServerCard({
               {t("mcp.deprecated")}
             </Badge>
           )}
+          {server.trust?.blocked && (
+            <Badge variant="outline" className="text-[10px] px-1.5 py-0 border-status-error-border text-status-error-foreground shrink-0">
+              {t("mcp.blocked")}
+            </Badge>
+          )}
         </div>
         <div className="flex items-center gap-2 text-xs text-muted-foreground">
           <span className="truncate">{server.namespace}</span>
