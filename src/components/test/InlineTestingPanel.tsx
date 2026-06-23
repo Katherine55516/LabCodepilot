@@ -146,7 +146,7 @@ function stepDotClass(status: StepStatus): string {
 function stepPillClass(status: StepStatus): string {
   switch (status) {
     case "done": return "bg-status-success-muted border-status-success-border";
-    case "running": return "bg-primary/15 border-primary";
+    case "running": return "bg-primary/15 border-primary/40";
     case "review": return "bg-status-warning-muted border-status-warning-border";
     case "error": return "bg-status-error-muted border-status-error-border";
     default: return "bg-muted border-border"; // 未开始：浅灰填充（card=纯白，会和背景糊在一起）
@@ -244,6 +244,9 @@ export function InlineTestingPanel() {
   const aState: TaskState = taskStates[aId] ?? DEFAULT_TASK_STATE;
   const { stepStatus, convo, fourState, currentCase, caseResults, circuitBroken } = aState;
   const runningStep: TestStep | null = STEPS.find((s) => stepStatus[s.step] === "running")?.step ?? null;
+  // Task progress % across the 4-step pipeline (a running step counts as half).
+  const doneStepCount = STEPS.filter((s) => stepStatus[s.step] === "done").length;
+  const progressPct = Math.round(((doneStepCount + (runningStep ? 0.5 : 0)) / STEPS.length) * 100);
   const busy = busyTaskId !== null;
   // Patch a task's state BY ID (runStep captures its id, so switching tasks mid-run is safe).
   const patchTask = (id: string, patch: (s: TaskState) => Partial<TaskState>) =>
@@ -649,8 +652,8 @@ export function InlineTestingPanel() {
                       disabled={!current?.path || busy || !unlocked}
                       title={!unlocked ? t("test.flow.locked") : t("test.flow.run")}
                       className={`min-w-[120px] flex-1 rounded-lg border p-2.5 text-left transition-colors disabled:cursor-not-allowed ${stepPillClass(status)} ${
-                        isFocus ? "ring-2 ring-primary ring-offset-1 ring-offset-background" : ""
-                      } ${unlocked && !busy && current?.path ? "hover:border-primary/60" : ""}`}
+                        isFocus ? "ring-1 ring-muted-foreground/40" : ""
+                      } ${unlocked && !busy && current?.path ? "hover:border-muted-foreground/40" : ""}`}
                     >
                       <div className="flex items-center gap-1.5">
                         {status === "running"
@@ -665,6 +668,14 @@ export function InlineTestingPanel() {
                     </button>
                   );
                 })}
+              </div>
+
+              {/* task progress — determinate %, fills as steps complete (running = half a step) */}
+              <div className="mb-3 flex items-center gap-2">
+                <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
+                  <div className="h-full rounded-full bg-primary transition-all duration-500" style={{ width: `${progressPct}%` }} />
+                </div>
+                <span className="w-9 shrink-0 text-right text-[10px] tabular-nums text-muted-foreground">{progressPct}%</span>
               </div>
 
               {/* current-step detail card */}
@@ -682,14 +693,6 @@ export function InlineTestingPanel() {
                   >
                     <Play size={12} /> {runningStep === focusStep ? t("test.flow.running") : stepStatus[focusStep] === "done" ? t("test.flow.rerun") : t("test.flow.run")}
                   </button>
-                </div>
-                {/* per-stage running progress — height is ALWAYS reserved (no layout jump
-                    when it appears); the moving segment only shows while this step runs
-                    (indeterminate: total case count isn't known up front). */}
-                <div className={`mt-2 h-1 overflow-hidden rounded-full ${runningStep === focusStep ? "bg-muted" : ""}`} role="progressbar" aria-label={t("test.flow.running")}>
-                  {runningStep === focusStep && (
-                    <div className="h-full w-1/3 rounded-full bg-primary animate-[test-bar-indeterminate_1.1s_ease-in-out_infinite]" />
-                  )}
                 </div>
                 {focusStep === "execution" && (
                   <>
