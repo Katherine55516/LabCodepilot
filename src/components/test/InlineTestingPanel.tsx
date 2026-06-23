@@ -124,6 +124,18 @@ function stepDotClass(status: StepStatus): string {
     default: return "bg-muted-foreground/30";
   }
 }
+// Step status → pill tint (pipeline strip). 方案A: color by STATE so progress reads
+// at a glance — done=green, running=accent (active pop), review=amber, error=red,
+// idle=neutral. Background + border only; the dot + text stay neutral for contrast.
+function stepPillClass(status: StepStatus): string {
+  switch (status) {
+    case "done": return "bg-status-success-muted border-status-success-border";
+    case "running": return "bg-accent/10 border-accent";
+    case "review": return "bg-status-warning-muted border-status-warning-border";
+    case "error": return "bg-status-error-muted border-status-error-border";
+    default: return "bg-card border-border";
+  }
+}
 function stepStatusText(status: StepStatus, t: T): string {
   switch (status) {
     case "running": return t("test.stepStatus.running");
@@ -479,7 +491,7 @@ export function InlineTestingPanel() {
       <span className="rounded px-1.5 py-0.5 text-[10px] font-medium bg-status-success-muted text-status-success-foreground">{t("test.state.pass")} {fourState.pass}</span>
       <span className="rounded px-1.5 py-0.5 text-[10px] font-medium bg-status-error-muted text-status-error-foreground">{t("test.state.fail")} {fourState.fail}</span>
       <span className="rounded px-1.5 py-0.5 text-[10px] font-medium bg-status-warning-muted text-status-warning-foreground">{t("test.state.partial")} {fourState.partial}</span>
-      <span className="rounded px-1.5 py-0.5 text-[10px] font-medium bg-status-info-muted text-status-info-foreground">{t("test.state.blocked")} {fourState.blocked}</span>
+      <span className="rounded px-1.5 py-0.5 text-[10px] font-medium bg-muted text-muted-foreground">{t("test.state.blocked")} {fourState.blocked}</span>
     </div>
   );
 
@@ -587,8 +599,8 @@ export function InlineTestingPanel() {
                       onClick={() => unlocked && !busy && runStep(s.step)}
                       disabled={!current?.path || busy || !unlocked}
                       title={!unlocked ? t("test.flow.locked") : t("test.flow.run")}
-                      className={`min-w-[120px] flex-1 rounded-lg border bg-card p-2.5 text-left transition-colors disabled:cursor-not-allowed ${
-                        isFocus ? "border-accent outline outline-1 outline-accent" : "border-border"
+                      className={`min-w-[120px] flex-1 rounded-lg border p-2.5 text-left transition-colors disabled:cursor-not-allowed ${stepPillClass(status)} ${
+                        isFocus ? "outline outline-1 outline-accent" : ""
                       } ${unlocked && !busy && current?.path ? "hover:border-accent/60" : ""}`}
                     >
                       <div className="flex items-center gap-1.5">
@@ -836,7 +848,7 @@ function ReportView({ t, results, four, circuitBroken, taskName }: { t: T; resul
     pass: "bg-status-success-muted text-status-success-foreground",
     fail: "bg-status-error-muted text-status-error-foreground",
     partial: "bg-status-warning-muted text-status-warning-foreground",
-    blocked: "bg-status-info-muted text-status-info-foreground",
+    blocked: "bg-muted text-muted-foreground",
   };
   const chipLabel: Record<string, TranslationKey> = {
     pass: "test.state.pass", fail: "test.state.fail", partial: "test.state.partial", blocked: "test.state.blocked",
