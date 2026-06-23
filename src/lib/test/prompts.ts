@@ -198,6 +198,8 @@ export interface BuildStepOptions {
   taskName: string;
   env?: string;
   baseUrl?: string;
+  /** Free-text instructions the user typed in the 测试对话 composer — appended to the step prompt. */
+  extraInstruction?: string;
 }
 
 export interface BuiltStep {
@@ -207,19 +209,27 @@ export interface BuiltStep {
   needsPlaywright: boolean;
 }
 
+/** Append the user's typed instructions (追加指令) to a step's prompt, if any. */
+function withNote(built: BuiltStep, note?: string): BuiltStep {
+  const n = note?.trim();
+  if (!n) return built;
+  return { ...built, prompt: `${built.prompt}\n\n## 用户补充要求（请在本步中一并遵循）\n${n}` };
+}
+
 /** Build the system + user prompt for one test step. */
 export function buildStep(step: TestStep, opts: BuildStepOptions): BuiltStep {
   const taskName = opts.taskName;
   const env = opts.env || 'local';
+  const note = opts.extraInstruction;
   switch (step) {
     case 'requirement':
-      return { systemPrompt: SYS.requirement, prompt: requirementPrompt(taskName), needsPlaywright: false };
+      return withNote({ systemPrompt: SYS.requirement, prompt: requirementPrompt(taskName), needsPlaywright: false }, note);
     case 'cases':
-      return { systemPrompt: SYS.cases, prompt: casesPrompt(taskName), needsPlaywright: false };
+      return withNote({ systemPrompt: SYS.cases, prompt: casesPrompt(taskName), needsPlaywright: false }, note);
     case 'execution':
-      return { systemPrompt: SYS.execution, prompt: executionPrompt(taskName, env, opts.baseUrl), needsPlaywright: true };
+      return withNote({ systemPrompt: SYS.execution, prompt: executionPrompt(taskName, env, opts.baseUrl), needsPlaywright: true }, note);
     case 'report':
-      return { systemPrompt: SYS.report, prompt: reportPrompt(taskName, env), needsPlaywright: false };
+      return withNote({ systemPrompt: SYS.report, prompt: reportPrompt(taskName, env), needsPlaywright: false }, note);
   }
 }
 

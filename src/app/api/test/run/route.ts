@@ -125,6 +125,9 @@ export async function POST(req: Request): Promise<Response> {
     const envArg: string = body.env || 'local';
     const model: string | undefined = body.model;
     const providerId: string | undefined = body.providerId;
+    // Free-text 追加指令 from the 测试对话 composer (additive; only affects this run's prompt).
+    const extraInstruction: string | undefined =
+      typeof body.extraInstruction === 'string' && body.extraInstruction.trim() ? body.extraInstruction : undefined;
 
     if (!projectPath || typeof projectPath !== 'string') {
       return new Response(JSON.stringify({ error: 'projectPath is required' }), {
@@ -140,7 +143,7 @@ export async function POST(req: Request): Promise<Response> {
     const env = resolved.env;
     const baseUrl = resolved.frontendBaseUrl || (typeof body.baseUrl === 'string' ? body.baseUrl : undefined);
 
-    const { systemPrompt, prompt, needsPlaywright } = buildStep(step, { taskName, env, baseUrl });
+    const { systemPrompt, prompt, needsPlaywright } = buildStep(step, { taskName, env, baseUrl, extraInstruction });
 
     let mcpServers: Record<string, MCPServerConfig> | undefined;
     if (needsPlaywright) {

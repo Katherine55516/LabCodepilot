@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslation } from "@/hooks/useTranslation";
-import { ListChecks, ChartBar, Gear, ArrowLeft, FolderPlus, Play, type Icon } from "@/components/ui/icon";
+import { ListChecks, ChartBar, Gear, ArrowLeft, FolderPlus, Play, ArrowUp, type Icon } from "@/components/ui/icon";
 import type { TranslationKey } from "@/i18n";
 import { useNativeFolderPicker } from "@/hooks/useNativeFolderPicker";
 import { FolderPicker } from "@/components/chat/FolderPicker";
@@ -54,6 +54,8 @@ interface TaskState {
   currentCase: string;
   caseResults: CaseResult[];
   circuitBroken: boolean;
+  /** Free-text 追加指令 the user typed — fed into subsequent step runs' prompts. */
+  notes: string[];
 }
 const DEFAULT_TASK_STATE: TaskState = {
   stepStatus: { requirement: "idle", cases: "idle", execution: "idle", report: "idle" },
@@ -62,6 +64,7 @@ const DEFAULT_TASK_STATE: TaskState = {
   currentCase: "",
   caseResults: [],
   circuitBroken: false,
+  notes: [],
 };
 function makeTaskId(): string {
   try {
@@ -233,6 +236,15 @@ export function InlineTestingPanel() {
       return { ...m, [id]: { ...cur, ...patch(cur) } };
     });
 
+  // 追加指令: record a typed instruction on the active task — shows as a user bubble
+  // and is fed into subsequent step runs' prompts (see runStep). Additive, test-only.
+  const submitNote = () => {
+    const text = composer.trim();
+    if (!text || !activeTask || busy) return;
+    patchTask(activeTask.id, (s) => ({ convo: [...s.convo, { role: "user", text }], notes: [...(s.notes ?? []), text] }));
+    setComposer("");
+  };
+
   const addProject = (name: string, path: string) => setProjects((ps) => [...ps, { name, path, tasks: [] }]);
   const addTask = (name: string) =>
     setProjects((ps) => ps.map((p, i) => (i === selected ? { ...p, tasks: [...p.tasks, { id: makeTaskId(), name }] } : p)));
@@ -371,6 +383,8 @@ export function InlineTestingPanel() {
           taskName: task.name,
           step,
           env,
+          // 追加指令: user-typed notes for this task, appended to the step prompt server-side.
+          extraInstruction: (taskStates[id]?.notes ?? []).join("\n") || undefined,
           model: model || undefined,
           providerId: providerId || undefined,
         }),
@@ -671,15 +685,28 @@ export function InlineTestingPanel() {
               </div>
             )}
             <div className="shrink-0 border-t border-border bg-card p-3">
-              <div className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2">
+              <div className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 focus-within:border-accent">
                 <input
                   value={composer}
                   onChange={(e) => setComposer(e.target.value)}
-                  disabled
-                  placeholder={t("test.convo.placeholder")}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitNote(); }
+                  }}
+                  disabled={busy}
+                  placeholder={busy ? t("test.convo.running") : t("test.convo.placeholder")}
                   className="flex-1 bg-transparent text-xs text-foreground outline-none disabled:cursor-not-allowed"
                 />
+                <button
+                  onClick={submitNote}
+                  disabled={busy || !composer.trim()}
+                  title={t("test.convo.send")}
+                  aria-label={t("test.convo.send")}
+                  className="flex h-6 w-6 shrink-0 items-center justify-center rounded-md bg-accent text-accent-foreground disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <ArrowUp size={13} />
+                </button>
               </div>
+              <div className="mt-1 px-1 text-[10px] text-muted-foreground">{t("test.convo.hint")}</div>
             </div>
           </div>
         </div>
