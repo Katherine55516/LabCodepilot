@@ -142,6 +142,7 @@ const zhHK: Record<TranslationKey, string> = {
   'test.report.circuitBroken': '偵測到大量 401，登入態可能在執行中失效，本輪結果不可信。',
   'test.report.loading': '正在載入報告…',
   'test.report.reportsSuffix': '份報告',
+  'test.report.docTitle': '測試報告文檔',
   'test.report.envsSuffix': '個環境',
 
   // ── Chat list panel ─────────────────────────────────────────

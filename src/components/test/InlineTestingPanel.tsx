@@ -2,6 +2,8 @@
 
 import { useState, useRef, useEffect, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import { useTranslation } from "@/hooks/useTranslation";
 import { ListChecks, ChartBar, Gear, ArrowLeft, FolderPlus, Play, ArrowUp, SpinnerGap, Sparkle, Terminal, WarningCircle, type Icon } from "@/components/ui/icon";
 import type { TranslationKey } from "@/i18n";
@@ -50,6 +52,8 @@ interface ReportEntry {
   circuitBroken: boolean;
   counts: FourState;
   tests: CaseResult[];
+  /** The full markdown report doc ({task}-{env}.md), if the report step wrote one. */
+  markdown: string;
 }
 
 interface Project {
@@ -254,9 +258,14 @@ export function InlineTestingPanel() {
   const aState: TaskState = taskStates[aId] ?? DEFAULT_TASK_STATE;
   const { stepStatus, convo, fourState, currentCase, caseResults, circuitBroken } = aState;
   const runningStep: TestStep | null = STEPS.find((s) => stepStatus[s.step] === "running")?.step ?? null;
-  // Task progress % across the 4-step pipeline (a running step counts as half).
-  const doneStepCount = STEPS.filter((s) => stepStatus[s.step] === "done").length;
-  const progressPct = Math.round(((doneStepCount + (runningStep ? 0.5 : 0)) / STEPS.length) * 100);
+  // Per-stage progress while a step runs (NOT overall task progress): the execution
+  // step shows cases done / total — total parsed from the AI's "▶ 用例 N/总数" line,
+  // done = @@RESULT count so far. Other steps have no sub-progress → indeterminate bar.
+  const execTotal = Number((currentCase.match(/\/\s*(\d+)/) || [])[1]) || 0;
+  const execPct =
+    runningStep === "execution" && execTotal > 0
+      ? Math.min(100, Math.round((fourState.total / execTotal) * 100))
+      : null;
   const busy = busyTaskId !== null;
   // Patch a task's state BY ID (runStep captures its id, so switching tasks mid-run is safe).
   const patchTask = (id: string, patch: (s: TaskState) => Partial<TaskState>) =>
@@ -706,12 +715,17 @@ export function InlineTestingPanel() {
                 })}
               </div>
 
-              {/* task progress — determinate %, fills as steps complete (running = half a step) */}
+              {/* current stage's progress (per-stage, not overall) — height always reserved
+                  (no jump). Execution = cases done/total %; other running steps = indeterminate. */}
               <div className="mb-3 flex items-center gap-2">
                 <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
-                  <div className="h-full rounded-full bg-primary transition-all duration-500" style={{ width: `${progressPct}%` }} />
+                  {runningStep && (execPct != null ? (
+                    <div className="h-full rounded-full bg-primary transition-all duration-300" style={{ width: `${execPct}%` }} />
+                  ) : (
+                    <div className="h-full w-1/3 rounded-full bg-primary animate-[test-bar-indeterminate_1.1s_ease-in-out_infinite]" />
+                  ))}
                 </div>
-                <span className="w-9 shrink-0 text-right text-[10px] tabular-nums text-muted-foreground">{progressPct}%</span>
+                <span className="w-9 shrink-0 text-right text-[10px] tabular-nums text-muted-foreground">{runningStep && execPct != null ? `${execPct}%` : ""}</span>
               </div>
 
               {/* current-step detail card */}
@@ -890,11 +904,11 @@ export function InlineTestingPanel() {
                               <span className="text-[10px] text-muted-foreground">{taskStageName(st, t)}</span>
                             </div>
                           </div>
-                          <div className="flex items-center gap-1" title={STEPS.map((s) => t(s.name)).join(" → ")}>
-                            {STEPS.map((s, idx) => (
-                              <div key={s.step} className="flex flex-1 items-center gap-1">
-                                <span className={`h-2 w-2 shrink-0 rounded-full ${stepDotClass(st.stepStatus[s.step])}`} />
-                                {idx < STEPS.length - 1 && <span className="h-px flex-1 bg-border" />}
+                          <div className="flex items-start gap-1">
+                            {STEPS.map((s) => (
+                              <div key={s.step} className="flex flex-1 flex-col items-center gap-1">
+                                <span className={`h-2 w-2 rounded-full ${stepDotClass(st.stepStatus[s.step])}`} />
+                                <span className="text-center text-[9px] leading-tight text-muted-foreground">{t(s.name)}</span>
                               </div>
                             ))}
                           </div>
@@ -1111,6 +1125,14 @@ function ReportBrowser({ projects, t }: { projects: Project[]; t: T }) {
                           {isOpen && (
                             <div className="border-t border-border p-3">
                               <ReportView t={t} results={r.tests} four={r.counts} circuitBroken={r.circuitBroken} taskName={task} />
+                              {r.markdown && (
+                                <div className="mt-3 border-t border-border pt-3">
+                                  <div className="mb-2 text-[11px] font-medium text-muted-foreground">{t("test.report.docTitle")}</div>
+                                  <div className="prose prose-sm dark:prose-invert max-w-none">
+                                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{r.markdown}</ReactMarkdown>
+                                  </div>
+                                </div>
+                              )}
                             </div>
                           )}
                         </div>

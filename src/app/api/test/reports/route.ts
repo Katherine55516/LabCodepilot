@@ -30,6 +30,10 @@ export async function GET(req: Request): Promise<Response> {
         try {
           const raw = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf-8')) as Record<string, unknown>;
           const counts = (raw.counts ?? {}) as Record<string, number>;
+          // The 报告 step also writes a markdown report doc next to the run.json
+          // ({task}-{env}.md) — include it so the 报告 view can show the full doc.
+          let markdown = '';
+          try { markdown = fs.readFileSync(path.join(dir, f.replace(/\.run\.json$/, '.md')), 'utf-8'); } catch { /* no .md */ }
           reports.push({
             task: taskDir.name,
             env: typeof raw.env === 'string' ? raw.env : '',
@@ -45,6 +49,7 @@ export async function GET(req: Request): Promise<Response> {
               blocked: counts.blocked ?? 0,
             },
             tests: Array.isArray(raw.tests) ? raw.tests : [],
+            markdown,
           });
         } catch {
           /* skip unreadable / malformed run.json */

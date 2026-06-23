@@ -136,6 +136,7 @@ const en = {
   'test.report.circuitBroken': 'Many 401s detected — the auth session likely broke mid-run, so these results are unreliable.',
   'test.report.loading': 'Loading reports…',
   'test.report.reportsSuffix': 'reports',
+  'test.report.docTitle': 'Report document',
   'test.report.envsSuffix': 'envs',
 
   // ── Chat list panel ─────────────────────────────────────────
