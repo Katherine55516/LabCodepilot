@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslation } from "@/hooks/useTranslation";
-import { ListChecks, ChartBar, Gear, ArrowLeft, FolderPlus, Play, ArrowUp, type Icon } from "@/components/ui/icon";
+import { ListChecks, ChartBar, Gear, ArrowLeft, FolderPlus, Play, ArrowUp, SpinnerGap, Sparkle, Terminal, WarningCircle, type Icon } from "@/components/ui/icon";
 import type { TranslationKey } from "@/i18n";
 import { useNativeFolderPicker } from "@/hooks/useNativeFolderPicker";
 import { FolderPicker } from "@/components/chat/FolderPicker";
@@ -133,7 +133,7 @@ function stepDotClass(status: StepStatus): string {
 function stepPillClass(status: StepStatus): string {
   switch (status) {
     case "done": return "bg-status-success-muted border-status-success-border";
-    case "running": return "bg-accent/10 border-accent";
+    case "running": return "bg-accent/15 border-accent";
     case "review": return "bg-status-warning-muted border-status-warning-border";
     case "error": return "bg-status-error-muted border-status-error-border";
     default: return "bg-card border-border";
@@ -614,17 +614,19 @@ export function InlineTestingPanel() {
                       disabled={!current?.path || busy || !unlocked}
                       title={!unlocked ? t("test.flow.locked") : t("test.flow.run")}
                       className={`min-w-[120px] flex-1 rounded-lg border p-2.5 text-left transition-colors disabled:cursor-not-allowed ${stepPillClass(status)} ${
-                        isFocus ? "outline outline-1 outline-accent" : ""
+                        isFocus ? "ring-2 ring-accent ring-offset-1 ring-offset-background" : ""
                       } ${unlocked && !busy && current?.path ? "hover:border-accent/60" : ""}`}
                     >
                       <div className="flex items-center gap-1.5">
-                        <span className={`h-2 w-2 rounded-full ${stepDotClass(status)} ${status === "running" ? "animate-pulse" : ""}`} />
-                        <span className="text-xs font-medium text-foreground">
+                        {status === "running"
+                          ? <SpinnerGap size={13} className="animate-spin text-accent" />
+                          : <span className={`h-2 w-2 rounded-full ${stepDotClass(status)}`} />}
+                        <span className={`text-xs font-medium ${status === "running" ? "text-accent" : "text-foreground"}`}>
                           {i + 1}. {t(s.name)}
                           {HUMAN_GATED.includes(s.step) && <span title={t("test.gate.auto")}> ✋</span>}
                         </span>
                       </div>
-                      <div className="mt-1 text-[11px] text-muted-foreground">{stepStatusText(status, t)}</div>
+                      <div className={`mt-1 text-[11px] ${status === "running" ? "text-accent" : "text-muted-foreground"}`}>{stepStatusText(status, t)}</div>
                     </button>
                   );
                 })}
@@ -646,14 +648,15 @@ export function InlineTestingPanel() {
                     <Play size={12} /> {runningStep === focusStep ? t("test.flow.running") : stepStatus[focusStep] === "done" ? t("test.flow.rerun") : t("test.flow.run")}
                   </button>
                 </div>
+                {/* per-stage running progress — indeterminate (we don't know total cases up front) */}
+                {runningStep === focusStep && (
+                  <div className="mt-2 h-1 overflow-hidden rounded-full bg-muted" role="progressbar" aria-label={t("test.flow.running")}>
+                    <div className="h-full w-1/3 rounded-full bg-accent animate-[test-bar-indeterminate_1.1s_ease-in-out_infinite]" />
+                  </div>
+                )}
                 {focusStep === "execution" && (
                   <>
                     {fourStateChips}
-                    {fourState.total > 0 && (
-                      <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-muted">
-                        <div className="h-full bg-accent" style={{ width: `${Math.round(((fourState.pass + fourState.fail + fourState.partial + fourState.blocked) / Math.max(fourState.total, 1)) * 100)}%` }} />
-                      </div>
-                    )}
                     {currentCase && <div className="mt-2 text-[11px] text-muted-foreground">▶ {currentCase}</div>}
                   </>
                 )}
@@ -846,16 +849,31 @@ export function InlineTestingPanel() {
   );
 }
 
-// 测试对话 bubble (mirrors the prototype's ai/user/tool/error bubbles).
+// 测试对话 bubble: user = right-aligned accent; ai/tool/error = left with an
+// avatar icon (Sparkle / Terminal / WarningCircle) + a role-tinted bubble.
 function ConvoBubble({ msg }: { msg: ConvoMsg }) {
-  const base = "w-fit max-w-[88%] whitespace-pre-wrap rounded-lg px-3 py-2 text-[12px] leading-relaxed";
+  const bubble = "max-w-[82%] whitespace-pre-wrap rounded-2xl px-3 py-2 text-[12px] leading-relaxed";
   if (msg.role === "user")
-    return <div className={`${base} self-end bg-accent/10 text-foreground`}>{msg.text}</div>;
-  if (msg.role === "tool")
-    return <div className={`${base} self-start bg-muted font-mono text-[11px] text-muted-foreground`}>{msg.text}</div>;
-  if (msg.role === "error")
-    return <div className={`${base} self-start bg-status-error-muted text-status-error-foreground`}>{msg.text}</div>;
-  return <div className={`${base} self-start border border-border bg-card text-foreground`}>{msg.text}</div>;
+    return (
+      <div className="flex justify-end">
+        <div className={`${bubble} rounded-br-sm bg-accent text-accent-foreground`}>{msg.text}</div>
+      </div>
+    );
+  const cfg =
+    msg.role === "error"
+      ? { Icon: WarningCircle, avatar: "bg-status-error-muted text-status-error-foreground", body: "bg-status-error-muted text-status-error-foreground" }
+      : msg.role === "tool"
+        ? { Icon: Terminal, avatar: "bg-muted text-muted-foreground", body: "bg-muted font-mono text-[11px] text-muted-foreground" }
+        : { Icon: Sparkle, avatar: "bg-accent/15 text-accent", body: "border border-border bg-card text-foreground" };
+  const Cmp = cfg.Icon;
+  return (
+    <div className="flex items-start gap-2">
+      <div className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${cfg.avatar}`}>
+        <Cmp size={13} />
+      </div>
+      <div className={`${bubble} rounded-tl-sm ${cfg.body}`}>{msg.text}</div>
+    </div>
+  );
 }
 
 // 报告 view (prototype): metrics row + per-case results table, from the execution
