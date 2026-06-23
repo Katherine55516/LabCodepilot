@@ -470,9 +470,15 @@ export function InlineTestingPanel() {
     if (idx <= 0) return true;
     return stepStatus[STEPS[idx - 1].step] === "done";
   };
+  // viewStep:用户点流水线节点选择"查看"的阶段(只切换查看、不触发执行);null = 跟随运行中/下一个待办。
+  const [viewStep, setViewStep] = useState<TestStep | null>(null);
+  // 切任务时清掉查看选中,让详情卡回到新任务的运行中/下一个待办阶段。
+  useEffect(() => { setViewStep(null); }, [aId]);
   // First not-done step = the "current" step the detail card focuses on.
   const nextPendingStep = (): TestStep | null => STEPS.find((s) => stepStatus[s.step] !== "done")?.step ?? null;
-  const focusStep: TestStep = runningStep ?? nextPendingStep() ?? "report";
+  // focusStep = 详情卡当前展示的阶段:viewStep 优先(用户点节点查看),否则跟随运行中/下一个待办。
+  // 真正触发执行/停止的是详情卡里的运行/停止按钮 —— 点流水线节点只切换查看。
+  const focusStep: TestStep = viewStep ?? runningStep ?? nextPendingStep() ?? "report";
   // A human-gated step awaiting approval → drives the conversation's gate bar.
   const reviewStep = STEPS.find((s) => stepStatus[s.step] === "review")?.step ?? null;
 
@@ -580,6 +586,9 @@ export function InlineTestingPanel() {
       const decoder = new TextDecoder();
       let buf = "";
       for (;;) {
+        // 停止: abort 后后端可能仍在吐数据(执行阶段逐用例输出),reader.read() 不会 reject,
+        // 循环退不出 → UI 不复位。每轮先查 abort 标志,主动停止处理并复位本步。
+        if (ctrl.signal.aborted) { stopped = true; break; }
         const { done, value } = await reader.read();
         if (done) break;
         buf += decoder.decode(value, { stream: true });
@@ -848,26 +857,16 @@ export function InlineTestingPanel() {
                     {t("test.env.unconfigured")}
                   </button>
                 )}
-                {runningStep ? (
-                  // 运行中 → 停止当前阶段 (问题②). Aborts the run; the step resets to idle
-                  // so it can be re-run.
-                  <button
-                    onClick={stopStep}
-                    title={t("test.flow.stop")}
-                    className="flex h-7 items-center gap-1 rounded-md bg-status-error px-2.5 text-[11px] font-medium text-white hover:opacity-90"
-                  >
-                    <Stop size={12} weight="fill" /> {t("test.flow.stop")}
-                  </button>
-                ) : (
-                  <button
-                    onClick={handleRunTask}
-                    disabled={!current?.path || busy || !stepUnlocked(focusStep)}
-                    title={!stepUnlocked(focusStep) ? t("test.flow.locked") : t("test.flow.runAllHint")}
-                    className="flex h-7 items-center gap-1 rounded-md bg-primary px-2.5 text-[11px] font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    <Play size={12} /> {t("test.flow.runTask")}
-                  </button>
-                )}
+                {/* 顶部「运行任务」按钮运行中不再变成停止 —— 停止只保留详情卡那一个,
+                    避免两处停止入口造成混淆;运行中此按钮直接禁用。 */}
+                <button
+                  onClick={handleRunTask}
+                  disabled={!current?.path || busy || !stepUnlocked(focusStep)}
+                  title={!stepUnlocked(focusStep) ? t("test.flow.locked") : t("test.flow.runAllHint")}
+                  className="flex h-7 items-center gap-1 rounded-md bg-primary px-2.5 text-[11px] font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <Play size={12} /> {t("test.flow.runTask")}
+                </button>
               </div>
               {!current?.path && (
                 <div className="mb-3 rounded-md border border-border bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground">
@@ -880,18 +879,17 @@ export function InlineTestingPanel() {
                 {STEPS.map((s, i) => {
                   const status = stepStatus[s.step];
                   const isFocus = s.step === focusStep;
-                  const unlocked = stepUnlocked(s.step);
                   const isRunning = status === "running";
-                  // The running pill stays clickable to 停止 (问题②); other pills lock while busy.
+                  // 点节点只切换"查看"(详情卡切到该阶段),不触发执行/停止 —— 执行/停止只走详情卡按钮。
                   return (
                     <button
                       key={s.step}
-                      onClick={() => (isRunning ? stopStep() : unlocked && !busy && runStepManual(s.step))}
-                      disabled={!current?.path || (busy && !isRunning) || (!unlocked && !isRunning)}
-                      title={isRunning ? t("test.flow.stop") : !unlocked ? t("test.flow.locked") : t("test.flow.run")}
+                      onClick={() => setViewStep(s.step)}
+                      disabled={!current?.path}
+                      title={t(s.name)}
                       className={`min-w-[120px] flex-1 rounded-lg border p-2.5 text-left transition-colors disabled:cursor-not-allowed ${stepPillClass(status)} ${
                         isFocus ? "ring-1 ring-muted-foreground/40" : ""
-                      } ${(unlocked && !busy && current?.path) || isRunning ? "hover:border-muted-foreground/40" : ""}`}
+                      } ${current?.path ? "hover:border-muted-foreground/40" : ""}`}
                     >
                       <div className="flex items-center gap-1.5">
                         {isRunning
@@ -903,7 +901,7 @@ export function InlineTestingPanel() {
                         </span>
                       </div>
                       <div className={`mt-1 text-[11px] ${isRunning ? "text-primary" : "text-muted-foreground"}`}>
-                        {isRunning ? t("test.flow.stop") : stepStatusText(status, t)}
+                        {stepStatusText(status, t)}
                       </div>
                     </button>
                   );
