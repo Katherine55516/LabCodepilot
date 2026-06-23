@@ -26,7 +26,7 @@ import { useProviderModels } from "@/hooks/useProviderModels";
  */
 
 type View = "dash" | "flow" | "report";
-type ModalKind = "none" | "newTask";
+type ModalKind = "none" | "newTask" | "runChoice";
 type T = (key: TranslationKey, params?: Record<string, string | number>) => string;
 // Backend test-step keys (match /api/test/run + src/lib/test/prompts.ts).
 type TestStep = "requirement" | "cases" | "execution" | "report";
@@ -517,10 +517,36 @@ export function InlineTestingPanel() {
   };
 
   // 运行任务: run the whole pipeline end-to-end, auto-approving gates (no 批准 clicks).
-  const runAll = () => {
+  // fromStart=true resets the task to a clean slate and runs from 需求 (重新执行);
+  // false continues from the current / next-pending step (从当前阶段继续).
+  const startRunAll = (fromStart: boolean) => {
     if (!activeTask || busy || !current?.path) return;
-    autoRunRef.current = activeTask.id;
-    runStep(focusStep);
+    const id = activeTask.id;
+    autoRunRef.current = id;
+    if (fromStart) {
+      patchTask(id, () => ({
+        stepStatus: { requirement: "idle", cases: "idle", execution: "idle", report: "idle" },
+        convo: [],
+        fourState: { total: 0, pass: 0, fail: 0, partial: 0, blocked: 0 },
+        currentCase: "",
+        caseResults: [],
+        circuitBroken: false,
+      }));
+      runStep("requirement");
+    } else {
+      runStep(focusStep);
+    }
+  };
+
+  // 运行任务 click: fresh task or already-finished workflow → run from the start;
+  // a task mid-progress → ask whether to continue from the current stage or restart.
+  const handleRunTask = () => {
+    if (!activeTask || busy || !current?.path) return;
+    const ss = aState.stepStatus;
+    const allIdle = STEPS.every((s) => ss[s.step] === "idle");
+    const allDone = STEPS.every((s) => ss[s.step] === "done");
+    if (allIdle || allDone) startRunAll(true);
+    else setModal("runChoice");
   };
 
   // Auto-chain: run the next unlocked+idle step of the ACTIVE task. Normally only
@@ -635,7 +661,7 @@ export function InlineTestingPanel() {
                   </button>
                 )}
                 <button
-                  onClick={runAll}
+                  onClick={handleRunTask}
                   disabled={!current?.path || busy || !stepUnlocked(focusStep)}
                   title={!stepUnlocked(focusStep) ? t("test.flow.locked") : t("test.flow.runAllHint")}
                   className="flex h-7 items-center gap-1 rounded-md bg-primary px-2.5 text-[11px] font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-40"
@@ -888,6 +914,15 @@ export function InlineTestingPanel() {
 
       {/* Modals + folder picker (browser fallback for project selection) */}
       {modal === "newTask" && <NewTaskModal t={t} onClose={() => setModal("none")} onAdd={addTask} />}
+      {modal === "runChoice" && activeTask && (
+        <RunChoiceModal
+          t={t}
+          stage={taskStageName(aState, t)}
+          onContinue={() => { setModal("none"); startRunAll(false); }}
+          onRestart={() => { setModal("none"); startRunAll(true); }}
+          onClose={() => setModal("none")}
+        />
+      )}
       <FolderPicker
         open={folderPickerOpen}
         onOpenChange={setFolderPickerOpen}
@@ -1141,6 +1176,28 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
 const CANCEL_BTN = "flex-1 h-9 rounded-md border border-border text-xs text-foreground hover:bg-muted";
 const PRIMARY_BTN =
   "flex-1 h-9 rounded-md bg-primary text-xs font-medium text-primary-foreground disabled:opacity-50 disabled:cursor-not-allowed";
+
+// 运行任务 on a mid-progress task: continue from the current stage, or restart from scratch.
+function RunChoiceModal({ t, stage, onContinue, onRestart, onClose }: { t: T; stage: string; onContinue: () => void; onRestart: () => void; onClose: () => void }) {
+  return (
+    <ModalShell
+      title={t("test.runChoice.title")}
+      onClose={onClose}
+      footer={
+        <>
+          <button onClick={onClose} className={CANCEL_BTN}>{t("test.cancel")}</button>
+          <button onClick={onRestart} className={CANCEL_BTN}>{t("test.runChoice.restart")}</button>
+          <button onClick={onContinue} className={PRIMARY_BTN}>{t("test.runChoice.continue")}</button>
+        </>
+      }
+    >
+      <p className="text-xs leading-relaxed text-muted-foreground">{t("test.runChoice.desc")}</p>
+      <div className="mt-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-foreground">
+        {t("test.runChoice.currentStage")}：<span className="font-medium">{stage}</span>
+      </div>
+    </ModalShell>
+  );
+}
 
 function NewTaskModal({ t, onClose, onAdd }: { t: T; onClose: () => void; onAdd: (name: string) => void }) {
   const [name, setName] = useState("");
