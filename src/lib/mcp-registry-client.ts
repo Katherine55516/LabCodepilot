@@ -15,7 +15,9 @@ import type { ServerJson } from '@/lib/server-json-mapper';
 
 const OFFICIAL_BASE = 'https://registry.modelcontextprotocol.io';
 const OFFICIAL_META_KEY = 'io.modelcontextprotocol.registry/official';
-const FETCH_TIMEOUT_MS = 10_000;
+// 调大超时：HK 网络下官方 registry 偶发慢响应（叠加 dev 首次路由编译），
+// 10s 会误报失败。生产侧 registry 更快，20s 留足容差。
+const FETCH_TIMEOUT_MS = 20_000;
 
 interface RawListItem {
   server: ServerJson;

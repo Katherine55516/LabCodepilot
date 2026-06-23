@@ -6,18 +6,18 @@ export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 /**
- * GET /api/plugins/mcp/marketplace/[serverName]
+ * GET /api/plugins/mcp/marketplace/detail?name=<serverName>
  *
- * 拉单个 server 的完整 server.json（最新版），并返回默认映射的预览配置 +
- * 安装表单 spec（requiredInputs）。serverName 在 path 中需 URL 编码。
+ * 用 query 参数传 serverName（而非路径段）——反向 DNS 名含 `/`，放路径段里
+ * 编码后的 `%2F` 会被 Next.js 解码成真斜杠、拆成两段导致路由匹配失败(404)。
+ * 返回完整 server.json（最新版）+ 默认映射预览配置 + 安装表单 spec。
  */
-export async function GET(
-  _request: NextRequest,
-  { params }: { params: Promise<{ serverName: string }> },
-) {
+export async function GET(request: NextRequest) {
   try {
-    const { serverName } = await params;
-    const name = decodeURIComponent(serverName);
+    const name = request.nextUrl.searchParams.get('name');
+    if (!name) {
+      return NextResponse.json({ error: 'name is required' }, { status: 400 });
+    }
 
     const server = await getOfficialServer(name);
     if (!server) {
@@ -25,7 +25,6 @@ export async function GET(
     }
 
     const mapped = mapServer(server);
-
     return NextResponse.json({
       server,
       mapped: {
