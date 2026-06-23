@@ -27,6 +27,7 @@ import type {
 } from 'ai';
 import type { Message, MessageContentBlock } from '@/types';
 import { parseMessageContent } from '@/types';
+import { sanitizeOrphanToolUses } from './tool-result-pairing';
 import fs from 'fs';
 
 interface FileMeta {
@@ -228,7 +229,12 @@ function buildUserMessage(content: string): ModelMessage {
  * When we hit tool_result blocks, flush the assistant message, then emit tool message(s).
  * Resume accumulating for the next assistant segment.
  */
-function convertAssistantBlocks(blocks: MessageContentBlock[]): ModelMessage[] {
+function convertAssistantBlocks(rawBlocks: MessageContentBlock[]): ModelMessage[] {
+  // Heal any orphan tool_use (a tool call with no paired result) before
+  // converting — otherwise the AI SDK rejects the rebuilt history at the
+  // streamText entry with AI_MissingToolResultsError. This repairs DB rows that
+  // were persisted with a missing result (e.g. an aborted / permission-hung turn).
+  const blocks = sanitizeOrphanToolUses(rawBlocks);
   const messages: ModelMessage[] = [];
 
   // AssistantContent = string | Array<TextPart | FilePart | ReasoningPart | ToolCallPart | ...>

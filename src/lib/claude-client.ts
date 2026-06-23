@@ -859,27 +859,18 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
 
         // Permission handler: sends SSE event and waits for user response
         queryOptions.canUseTool = async (toolName, input, opts) => {
-          // Auto-approve AI Native Lab's own in-process MCP tools — they are internal
-          // and the user has already opted in by enabling the relevant mode.
-          // Auto-approve AI Native Lab's own in-process MCP tools — they are internal
-          // and the user has already opted in by enabling the relevant mode.
-          // Note: SDK prefixes MCP tool names with mcp__<server>__, so we check
-          // both bare and prefixed names.
-          const autoApprovedTools = [
-            'codepilot_generate_image',
-            'codepilot_import_media',
-            'codepilot_load_widget_guidelines',
-            'codepilot_cli_tools_list',
-            'codepilot_cli_tools_add',
-            'codepilot_cli_tools_remove',
-            'codepilot_cli_tools_check_updates',
-            'codepilot_dashboard_pin',
-            'codepilot_dashboard_list',
-            'codepilot_dashboard_refresh',
-            'codepilot_dashboard_update',
-            'codepilot_dashboard_remove',
-          ];
-          if (autoApprovedTools.some(t => toolName === t || toolName.endsWith(`__${t}`))) {
+          // Auto-approve ALL of AI Native Lab's own in-process MCP tools. They are
+          // internal capabilities (memory / dashboard / widget / media / image-gen /
+          // cli-tools) and the user has already opted in by enabling the relevant
+          // mode. The SDK prefixes MCP tool names with mcp__<server>__, so match
+          // both the bare name (codepilot_*) and the prefixed form
+          // (mcp__codepilot-*__codepilot_*). This mirrors the native agent-loop
+          // policy (agent-tools.ts: a codepilot_ prefix bypasses the permission
+          // wrapper), keeping both runtimes consistent — and, critically, prevents
+          // any codepilot_ tool (notably codepilot_memory_*, which the old explicit
+          // list omitted) from falling into the ask branch and hanging forever on a
+          // permission prompt the generative-UI flow never surfaces.
+          if (/(?:^|__)codepilot_/.test(toolName)) {
             return { behavior: 'allow' as const, updatedInput: input };
           }
 
