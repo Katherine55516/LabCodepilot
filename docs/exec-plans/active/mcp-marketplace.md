@@ -14,7 +14,7 @@
 | Phase 0 | POC：验证 server.json→MCPServerConfig 映射 + 内置二进制能拉起 | ✅ 已完成 | 脚本 `scripts/poc-mcp-marketplace.mjs`；挖出冷启动 prefetch 坑 |
 | Phase 1 | MVP：搜索 / 详情 / 动态表单 / 安全确认 / prefetch 安装 / 卸载 | ✅ 已完成 | 两 tab（我的 MCP / MCP 市场），CDP 验证安装→卸载完整往返通过 |
 | Phase 2 | 加固：信任分层 + 黑名单 + 危险模式扫描 + 分级摩擦（密钥落地/版本钉死已在 P1 提前做） | ✅ 已完成 | 纵深防御四层非 isSafe；CDP 三态验证；运行时预检/Glama 兜底转 Phase 2b |
-| Phase 2b | 运行时预检（检测 npx/uvx/docker + 友好引导）；Glama 兜底 | 🔄 进行中 | PATH 增强已存在(main.ts)无需重做；Glama 经调研暂缓（无命令字段不能一键装） |
+| Phase 2b | 运行时预检（检测 npx/uvx/docker + 友好引导） | ✅ 已完成 | PATH 增强已存在(main.ts)无需重做；Glama 调研后暂缓（无命令字段不能一键装）；CDP 验证 |
 | Phase 3 | 远程进阶：OAuth 2.1 环回 / 工具定义 TOFU / 与内置二进制冲突排查 | 📋 待开始 | |
 | Phase 4 | 可选增强：入站深链 / Smithery 托管 / mcp-scan 离线 / Docker 沙箱 / catalog 缓存同步 | 📋 待开始 | 任意顺序 |
 
