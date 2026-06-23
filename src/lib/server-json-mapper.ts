@@ -135,8 +135,10 @@ export function suggestKey(name: string): string {
   return last.replace(/[^a-zA-Z0-9_-]+/g, '-').replace(/^-+|-+$/g, '') || slugify(name);
 }
 
+// 前缀 `mcp_secret_` 与 db.ts 的加密判定对齐：密钥写入 settings 时自动 AES-256-GCM 加密，
+// 配置里只留 ${mcp_secret_...} 占位符，由 mcp-loader 在 spawn 时解密回真值。
 function settingKeyFor(slug: string, inputName: string): string {
-  return `mcp_${slug}_${inputName}`;
+  return `mcp_secret_${slug}_${inputName}`;
 }
 
 /** 展平 runtimeArguments / packageArguments 成 argv 片段。 */
@@ -305,6 +307,34 @@ export function mapServer(server: ServerJson, opts: MapOptions = {}): MappedServ
   if (urlTemplateVars(url).length > 0) notes.push(`URL 含模板变量 {${urlTemplateVars(url).join(',')}}，需表单填充`);
 
   return { name: server.name, suggestedKey, slug, kind: 'remote', config, requiredInputs, notes };
+}
+
+/**
+ * 预热（prefetch）命令：在写入配置/首次连接前把包下载进缓存，规避「冷启动下载超
+ * 健康检查超时」（Phase-0 POC 实测的唯一真坑）。命令均「下载完即退出」，可流式显示进度。
+ * 远程/未知生态返回 null（无需预热）。
+ *
+ * - npm:  npx -y -p <id@ver> -- node --version   （装包入 _npx/_cacache 后跑 node 退出）
+ * - pypi: uvx --from <id@ver> python --version    （装包入 uv 缓存后跑 python 退出）
+ * - oci:  docker pull <image>                      （标准拉取，自带进度）
+ */
+export function prefetchCommand(server: ServerJson, opts: MapOptions = {}): { command: string; args: string[] } | null {
+  const choice = pickChoice(server, opts);
+  if (!choice || choice.kind !== 'package' || !choice.pkg) return null;
+  const pkg = choice.pkg;
+  const spec = packageSpec(pkg, opts.pinVersion);
+  if (!spec) return null;
+  const runner = pkg.runtimeHint || DEFAULT_RUNNER[pkg.registryType || ''];
+  switch (pkg.registryType) {
+    case 'npm':
+      return { command: runner || 'npx', args: ['-y', '-p', spec, '--', 'node', '--version'] };
+    case 'pypi':
+      return { command: runner || 'uvx', args: ['--from', spec, 'python', '--version'] };
+    case 'oci':
+      return { command: runner || 'docker', args: ['pull', pkg.identifier || ''] };
+    default:
+      return null; // nuget/dnx 等暂不预热
+  }
 }
 
 /**

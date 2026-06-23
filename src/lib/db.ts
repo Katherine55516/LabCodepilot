@@ -36,6 +36,15 @@ const SENSITIVE_SETTINGS = new Set<string>([
   'openai_oauth_id_token',
 ]);
 
+// MCP 市场安装时收集的密钥（API key / token 等）以此为前缀写入，加密落盘——
+// 与上面的精确白名单合并判定。占位符 ${mcp_secret_...} 由 mcp-loader 在 spawn 时解析。
+const SENSITIVE_SETTING_PREFIX = 'mcp_secret_';
+
+/** 该 settings key 是否需要加密（精确白名单 ∪ 前缀）。 */
+function isSensitiveSettingKey(key: string): boolean {
+  return SENSITIVE_SETTINGS.has(key) || key.startsWith(SENSITIVE_SETTING_PREFIX);
+}
+
 /** 解密一行 provider 的敏感列（原地修改并返回）。undefined 透传。 */
 function hydrateProvider<T extends ApiProvider | undefined>(row: T): T {
   if (!row) return row;
@@ -1491,12 +1500,12 @@ export function getSetting(key: string): string | undefined {
   const db = getDb();
   const row = db.prepare('SELECT value FROM settings WHERE key = ?').get(key) as { value: string } | undefined;
   if (row === undefined) return undefined;
-  return SENSITIVE_SETTINGS.has(key) ? open(row.value, getKey()) : row.value;
+  return isSensitiveSettingKey(key) ? open(row.value, getKey()) : row.value;
 }
 
 export function setSetting(key: string, value: string): void {
   const db = getDb();
-  const stored = SENSITIVE_SETTINGS.has(key) ? seal(value, getKey()) : value;
+  const stored = isSensitiveSettingKey(key) ? seal(value, getKey()) : value;
   db.prepare(
     'INSERT INTO settings (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value'
   ).run(key, stored);
@@ -1508,7 +1517,7 @@ export function getAllSettings(): SettingsMap {
   const k = getKey();
   const settings: SettingsMap = {};
   for (const row of rows) {
-    settings[row.key] = SENSITIVE_SETTINGS.has(row.key) ? open(row.value, k) : row.value;
+    settings[row.key] = isSensitiveSettingKey(row.key) ? open(row.value, k) : row.value;
   }
   return settings;
 }

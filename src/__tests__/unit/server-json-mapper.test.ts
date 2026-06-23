@@ -12,6 +12,7 @@ import assert from 'node:assert/strict';
 import {
   mapServer,
   buildConfig,
+  prefetchCommand,
   flattenArgs,
   packageSpec,
   suggestKey,
@@ -44,10 +45,10 @@ describe('mapServer — package (stdio)', () => {
     const r = mapServer(s);
     assert.equal(r.config?.command, 'npx');
     assert.deepEqual(r.config?.args, ['-y', '@agenttrust/mcp-server@1.1.1']);
-    assert.equal(r.config?.env?.AGENTTRUST_API_KEY, '${mcp_ai_agenttrust_mcp_server_AGENTTRUST_API_KEY}');
+    assert.equal(r.config?.env?.AGENTTRUST_API_KEY, '${mcp_secret_ai_agenttrust_mcp_server_AGENTTRUST_API_KEY}');
     assert.equal(r.requiredInputs.length, 1);
     assert.equal(r.requiredInputs[0].isSecret, true);
-    assert.equal(r.requiredInputs[0].settingKey, 'mcp_ai_agenttrust_mcp_server_AGENTTRUST_API_KEY');
+    assert.equal(r.requiredInputs[0].settingKey, 'mcp_secret_ai_agenttrust_mcp_server_AGENTTRUST_API_KEY');
   });
 
   it('pypi → uvx identifier@version', () => {
@@ -72,7 +73,7 @@ describe('mapServer — package (stdio)', () => {
     const r = mapServer(s);
     assert.equal(r.config?.command, 'docker');
     assert.deepEqual(r.config?.args, ['run', '-i', '--rm', '-e', 'X-API-Key', 'docker.io/aliengiraffe/spotdb:0.1.0']);
-    assert.equal(r.config?.env?.['X-API-Key'], '${mcp_ai_aliengiraffe_spotdb_X-API-Key}');
+    assert.equal(r.config?.env?.['X-API-Key'], '${mcp_secret_ai_aliengiraffe_spotdb_X-API-Key}');
   });
 
   it('runtimeHint 覆盖默认运行器；named/positional 参数按序展开', () => {
@@ -126,7 +127,7 @@ describe('mapServer — remote', () => {
     };
     const r = mapServer(s);
     assert.equal(r.config?.type, 'http');
-    assert.equal(r.config?.headers?.Authorization, '${mcp_ai_adadvisor_mcp_server_Authorization}');
+    assert.equal(r.config?.headers?.Authorization, '${mcp_secret_ai_adadvisor_mcp_server_Authorization}');
   });
 
   it('sse 类型保留', () => {
@@ -158,8 +159,8 @@ describe('buildConfig — 用用户值构建最终配置', () => {
       packages: [{ registryType: 'npm', identifier: '@agenttrust/mcp-server', version: '1.1.1', environmentVariables: [{ name: 'AGENTTRUST_API_KEY', isSecret: true, isRequired: true }] }],
     };
     const { config, secretsToStore } = buildConfig(s, { AGENTTRUST_API_KEY: 'sk-real-123' });
-    assert.equal(config.env?.AGENTTRUST_API_KEY, '${mcp_ai_agenttrust_mcp_server_AGENTTRUST_API_KEY}');
-    assert.equal(secretsToStore['mcp_ai_agenttrust_mcp_server_AGENTTRUST_API_KEY'], 'sk-real-123');
+    assert.equal(config.env?.AGENTTRUST_API_KEY, '${mcp_secret_ai_agenttrust_mcp_server_AGENTTRUST_API_KEY}');
+    assert.equal(secretsToStore['mcp_secret_ai_agenttrust_mcp_server_AGENTTRUST_API_KEY'], 'sk-real-123');
   });
 
   it('非密 env → 内联用户值', () => {
@@ -185,6 +186,28 @@ describe('buildConfig — 用用户值构建最终配置', () => {
     };
     const { config } = buildConfig(s, {});
     assert.equal(config.env?.MODE, 'fast');
+  });
+});
+
+describe('prefetchCommand — 预热下载命令', () => {
+  it('npm → npx -y -p id@ver -- node --version', () => {
+    const s: ServerJson = { name: 'a/b', version: '1.0.0', packages: [{ registryType: 'npm', identifier: '@x/y', version: '1.0.0' }] };
+    assert.deepEqual(prefetchCommand(s), { command: 'npx', args: ['-y', '-p', '@x/y@1.0.0', '--', 'node', '--version'] });
+  });
+
+  it('pypi → uvx --from id@ver python --version', () => {
+    const s: ServerJson = { name: 'a/b', version: '1.0.0', packages: [{ registryType: 'pypi', identifier: 'pkg', version: '2.0.0' }] };
+    assert.deepEqual(prefetchCommand(s), { command: 'uvx', args: ['--from', 'pkg@2.0.0', 'python', '--version'] });
+  });
+
+  it('oci → docker pull image', () => {
+    const s: ServerJson = { name: 'a/b', version: '1.0.0', packages: [{ registryType: 'oci', identifier: 'docker.io/x/y:1.0.0' }] };
+    assert.deepEqual(prefetchCommand(s), { command: 'docker', args: ['pull', 'docker.io/x/y:1.0.0'] });
+  });
+
+  it('远程 / 无包 → null（无需预热）', () => {
+    const remote: ServerJson = { name: 'a/b', version: '1.0.0', remotes: [{ type: 'streamable-http', url: 'https://x' }] };
+    assert.equal(prefetchCommand(remote), null);
   });
 });
 
