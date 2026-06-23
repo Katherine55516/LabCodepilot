@@ -159,12 +159,25 @@ export function InlineTestingPanel() {
   const router = useRouter();
   const [view, setView] = useState<View>("dash");
   const [modal, setModal] = useState<ModalKind>("none");
-  const [projects, setProjects] = useState<Project[]>([]);
+  // Persisted to localStorage (see effects below) so the workbench survives the
+  // panel unmounting — switching conversations closes the overlay, which would
+  // otherwise wipe this in-memory state.
+  const [projects, setProjects] = useState<Project[]>(() => {
+    try {
+      const v = JSON.parse(localStorage.getItem("codepilot:test-projects") || "[]");
+      return Array.isArray(v) ? (v as Project[]) : [];
+    } catch { return []; }
+  });
   const [selected, setSelected] = useState<number | null>(null);
   const [selectedTask, setSelectedTask] = useState<number | null>(null);
   // Per-task run state (source of truth), keyed by task id. The active task's
   // values are derived below so the render reads the same names as before.
-  const [taskStates, setTaskStates] = useState<Record<string, TaskState>>({});
+  const [taskStates, setTaskStates] = useState<Record<string, TaskState>>(() => {
+    try {
+      const v = JSON.parse(localStorage.getItem("codepilot:test-task-states") || "{}");
+      return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, TaskState>) : {};
+    } catch { return {}; }
+  });
   const [busyTaskId, setBusyTaskId] = useState<string | null>(null);
   const [composer, setComposer] = useState("");
   const threadRef = useRef<HTMLDivElement>(null);
@@ -211,6 +224,19 @@ export function InlineTestingPanel() {
   const addProject = (name: string, path: string) => setProjects((ps) => [...ps, { name, path, tasks: [] }]);
   const addTask = (name: string) =>
     setProjects((ps) => ps.map((p, i) => (i === selected ? { ...p, tasks: [...p.tasks, { id: makeTaskId(), name }] } : p)));
+
+  // Persist the workbench so it survives the panel closing/reopening (switching
+  // conversations unmounts it) and app restarts. Projects (folders + task names)
+  // save on every change. Per-task run state saves only when idle — during a run
+  // `convo` updates per streamed frame, so writing every frame would thrash
+  // localStorage; the final state is written when the run settles (busy → null).
+  useEffect(() => {
+    try { localStorage.setItem("codepilot:test-projects", JSON.stringify(projects)); } catch {}
+  }, [projects]);
+  useEffect(() => {
+    if (busyTaskId !== null) return;
+    try { localStorage.setItem("codepilot:test-task-states", JSON.stringify(taskStates)); } catch {}
+  }, [taskStates, busyTaskId]);
 
   // Projects are picked from a folder — native dialog in Electron, browse-dialog in browser.
   const { isElectron, openNativePicker } = useNativeFolderPicker();
