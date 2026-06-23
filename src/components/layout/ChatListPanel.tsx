@@ -642,7 +642,14 @@ export function ChatListPanel({ open, width, hasUpdate, readyToInstall }: ChatLi
                       >
                         <div className="mt-0.5 flex flex-col gap-0.5">
                           {visibleSessions.map((session) => {
-                            const isActive = pathname === `/chat/${session.id}`;
+                            // Route-derived active state, but suppressed while the
+                            // 测试 workbench overlay is open: in that view we're not
+                            // "in" any conversation (the chat is hidden behind the
+                            // test panel), so no row should keep the active highlight.
+                            // Toggling 测试 back off restores the pathname match; and
+                            // conversation→conversation switching already closes the
+                            // panel (ChatView resets testPanelOpen on sessionId change).
+                            const isActive = !testPanelOpen && pathname === `/chat/${session.id}`;
                             const canSplit = !isActive && !isInSplit(session.id);
 
                             return (

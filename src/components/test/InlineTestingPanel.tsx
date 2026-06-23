@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useTranslation } from "@/hooks/useTranslation";
-import { ListChecks, ChartBar, Gear, ArrowLeft, FolderPlus, Play, ArrowUp, SpinnerGap, Sparkle, Terminal, WarningCircle, Wrench, type Icon } from "@/components/ui/icon";
+import { ListChecks, ChartBar, Gear, ArrowLeft, FolderPlus, Play, Stop, ArrowUp, SpinnerGap, Sparkle, Terminal, WarningCircle, Wrench, type Icon } from "@/components/ui/icon";
 import type { TranslationKey } from "@/i18n";
 import { useNativeFolderPicker } from "@/hooks/useNativeFolderPicker";
 import { FolderPicker } from "@/components/chat/FolderPicker";
@@ -203,25 +203,18 @@ export function InlineTestingPanel() {
   const router = useRouter();
   const [view, setView] = useState<View>("dash");
   const [modal, setModal] = useState<ModalKind>("none");
-  // Persisted to localStorage (see effects below) so the workbench survives the
-  // panel unmounting — switching conversations closes the overlay, which would
-  // otherwise wipe this in-memory state.
-  const [projects, setProjects] = useState<Project[]>(() => {
-    try {
-      const v = JSON.parse(localStorage.getItem("codepilot:test-projects") || "[]");
-      return Array.isArray(v) ? (v as Project[]) : [];
-    } catch { return []; }
-  });
+  // 持久化迁移：projects/taskStates 改存主进程文件（GET/PUT /api/test/workbench），不再
+  // 同步读 localStorage —— 打包版端口漂移会让 localStorage（绑定 origin）丢数据。初值留空，
+  // 由下方 mount-time effect 异步从文件加载（含老用户 localStorage 一次性迁移）；loaded
+  // 守卫确保加载完成前不会用空初值 PUT 覆盖文件里的真实数据。
+  const [projects, setProjects] = useState<Project[]>([]);
   const [selected, setSelected] = useState<number | null>(null);
   const [selectedTask, setSelectedTask] = useState<number | null>(null);
   // Per-task run state (source of truth), keyed by task id. The active task's
   // values are derived below so the render reads the same names as before.
-  const [taskStates, setTaskStates] = useState<Record<string, TaskState>>(() => {
-    try {
-      const v = JSON.parse(localStorage.getItem("codepilot:test-task-states") || "{}");
-      return v && typeof v === "object" && !Array.isArray(v) ? (v as Record<string, TaskState>) : {};
-    } catch { return {}; }
-  });
+  const [taskStates, setTaskStates] = useState<Record<string, TaskState>>({});
+  // 文件加载是否完成。未完成前禁止持久化写（否则空初值会覆盖文件）—— 本次迁移最关键的守卫。
+  const [loaded, setLoaded] = useState(false);
   const [busyTaskId, setBusyTaskId] = useState<string | null>(null);
   const [composer, setComposer] = useState("");
   // Simulated progress % for non-execution running steps (no granular progress) — see effect below.
@@ -230,6 +223,15 @@ export function InlineTestingPanel() {
   // When set to a task id, that task is in "run all" mode (运行任务): gated steps
   // auto-approve + the chain runs through to 报告 without waiting for 批准.
   const autoRunRef = useRef<string | null>(null);
+  // The in-flight run's AbortController (问题②·停止): runStep stores its controller
+  // here so the 停止 button can abort the /api/test/run fetch (and the backend agent,
+  // which honors request.signal). Cleared when the run settles.
+  const abortRef = useRef<AbortController | null>(null);
+  // Steps the user 停止'd ("taskId:step"). A stopped step resets to idle, but the
+  // auto-chain treats idle+unlocked auto-steps (执行/报告) as runnable — without this
+  // guard it would instantly re-run the step the user just stopped. The entry clears
+  // when the user manually re-runs that step (runStep start) or restarts the task.
+  const stoppedStepRef = useRef<Set<string>>(new Set());
   // Model selection for test runs — reuses the chat's managed-provider picker.
   const [model, setModel] = useState<string>(() => {
     try { return localStorage.getItem("codepilot:last-model") || ""; } catch { return ""; }
@@ -251,8 +253,19 @@ export function InlineTestingPanel() {
   // Test environment (local/SIT) + the config resolved from the project's
   // AI_LabTest/environments.json (exported from 设置·测试账号). Drives the
   // execution target baseUrl + login; null/未configured → prompt to set it up.
-  const [env, setEnv] = useState("local");
+  // Persisted to localStorage (like model/providerId) so the choice survives the
+  // panel unmounting / app restart — restored value is validated against
+  // envCfg.allowedEnvs once the config loads (see effect below).
+  const [env, setEnv] = useState(() => {
+    try { return localStorage.getItem("codepilot:test-env") || "local"; } catch { return "local"; }
+  });
   const [envCfg, setEnvCfg] = useState<{ configured: boolean; env: string; frontendBaseUrl: string | null; allowedEnvs: string[]; source?: string } | null>(null);
+  // Change env + persist (mirrors handleModelChange). The select uses this so the
+  // user's local/SIT choice is remembered across sessions.
+  const handleEnvChange = (next: string) => {
+    setEnv(next);
+    try { localStorage.setItem("codepilot:test-env", next); } catch {}
+  };
 
   const current = selected !== null ? projects[selected] ?? null : null;
   const activeTask = current && selectedTask !== null ? current.tasks[selectedTask] ?? null : null;
@@ -293,7 +306,8 @@ export function InlineTestingPanel() {
   // Create a task. 新建任务 requires importing 用例 or 需求 (at least one). The file is
   // parsed + written to the project's AI_LabTest artifacts (docx→需求.md / xlsx→cases.json)
   // BEFORE the task is created — a parse failure returns an error and creates nothing.
-  // cases imported → 需求 skipped(done) + 用例 待批准; only 需求 → 需求 待批准.
+  // cases imported → 需求 + 用例 both skipped(done) → 直接进入「测试执行」(no 批准 gate,
+  // execution unlocked, auto-chains like an approved 用例); only 需求 → 需求 待批准.
   const addTask = async (name: string, files?: NewTaskFiles): Promise<{ ok: boolean; error?: string }> => {
     const proj = selected !== null ? projects[selected] : null;
     const postImport = async (kind: "requirement" | "cases", f: ImportFile): Promise<{ ok: boolean; error?: string; preview?: string }> => {
@@ -316,7 +330,7 @@ export function InlineTestingPanel() {
     if (proj?.path && files?.cases) {
       const r = await postImport("cases", files.cases);
       if (!r.ok) return r;
-      seeds.push({ role: "ai", text: `📊 已导入测试用例「${files.cases.filename}」（${r.preview || "已导入"}），待批准后可直接执行。` });
+      seeds.push({ role: "ai", text: `📊 已导入测试用例「${files.cases.filename}」（${r.preview || "已导入"}），需求分析与用例设计已跳过，可直接进入「测试执行」。` });
     }
     const id = makeTaskId();
     setProjects((ps) => ps.map((p, i) => (i === selected ? { ...p, tasks: [...p.tasks, { id, name }] } : p)));
@@ -324,8 +338,10 @@ export function InlineTestingPanel() {
     if (hasReq || hasCases) {
       patchTask(id, () => ({
         stepStatus: {
+          // 导入用例 → 需求 + 用例 都直接 done（跳过两阶段，无需批准），execution 解锁可执行；
+          // 仅导入需求 → 需求 待批准（保持原行为不变）。
           requirement: hasCases ? "done" : "review",
-          cases: hasCases ? "review" : "idle",
+          cases: hasCases ? "done" : "idle",
           execution: "idle",
           report: "idle",
         },
@@ -337,18 +353,62 @@ export function InlineTestingPanel() {
     return { ok: true };
   };
 
-  // Persist the workbench so it survives the panel closing/reopening (switching
-  // conversations unmounts it) and app restarts. Projects (folders + task names)
-  // save on every change. Per-task run state saves only when idle — during a run
-  // `convo` updates per streamed frame, so writing every frame would thrash
-  // localStorage; the final state is written when the run settles (busy → null).
+  // Mount 时从主进程文件异步加载 projects/taskStates（GET /api/test/workbench）。
+  // 老用户迁移：文件为空壳（projects 空 + taskStates 无键）时，回退读旧的 localStorage
+  // 两个 key —— 有就用它们完成一次性迁移（下方写 effect 会把它们 PUT 回文件）。
+  // 全程 try/catch；无论成败最后都 setLoaded(true)，否则写 effect 永远被守卫挡住不落盘。
   useEffect(() => {
-    try { localStorage.setItem("codepilot:test-projects", JSON.stringify(projects)); } catch {}
-  }, [projects]);
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/test/workbench");
+        const data = (await res.json().catch(() => ({}))) as {
+          projects?: Project[];
+          taskStates?: Record<string, TaskState>;
+        };
+        let nextProjects = Array.isArray(data.projects) ? data.projects : [];
+        let nextStates =
+          data.taskStates && typeof data.taskStates === "object" && !Array.isArray(data.taskStates)
+            ? data.taskStates
+            : {};
+        // 文件里没有任何数据 → 尝试从旧 localStorage 迁移（老用户首次升级到文件版）。
+        if (nextProjects.length === 0 && Object.keys(nextStates).length === 0) {
+          try {
+            const lp = JSON.parse(localStorage.getItem("codepilot:test-projects") || "[]");
+            if (Array.isArray(lp) && lp.length) nextProjects = lp as Project[];
+          } catch {}
+          try {
+            const lt = JSON.parse(localStorage.getItem("codepilot:test-task-states") || "{}");
+            if (lt && typeof lt === "object" && !Array.isArray(lt)) nextStates = lt as Record<string, TaskState>;
+          } catch {}
+        }
+        if (cancelled) return;
+        setProjects(nextProjects);
+        setTaskStates(nextStates);
+      } catch {
+        // 加载失败：保持空初值，但仍要放行 loaded，否则永远不写（用户后续新建的也存不下）。
+      } finally {
+        if (!cancelled) setLoaded(true);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  // 持久化：loaded 之后，debounce(~500ms) PUT 整份 { projects, taskStates } 到文件。
+  // ⚠️ 必须 if (!loaded) return —— 异步加载完成前若用空初值 PUT，会覆盖文件里的真实数据。
+  // 执行步运行中 taskStates 会随 SSE 帧频繁变（convo/four-state），debounce 已合并写入，
+  // 故不再用「busy 时不写」语义，避免运行中的最终状态写丢。
   useEffect(() => {
-    if (busyTaskId !== null) return;
-    try { localStorage.setItem("codepilot:test-task-states", JSON.stringify(taskStates)); } catch {}
-  }, [taskStates, busyTaskId]);
+    if (!loaded) return;
+    const id = setTimeout(() => {
+      fetch("/api/test/workbench", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projects, taskStates }),
+      }).catch(() => {});
+    }, 500);
+    return () => clearTimeout(id);
+  }, [projects, taskStates, loaded]);
 
   // Projects are picked from a folder — native dialog in Electron, browse-dialog in browser.
   const { isElectron, openNativePicker } = useNativeFolderPicker();
@@ -388,9 +448,21 @@ export function InlineTestingPanel() {
     let cancelled = false;
     fetch(`/api/test/env-config?projectPath=${encodeURIComponent(current.path)}&env=${encodeURIComponent(env)}`)
       .then((r) => (r.ok ? r.json() : null))
-      .then((d) => { if (!cancelled && d && !d.error) setEnvCfg(d); })
+      .then((d) => {
+        if (cancelled || !d || d.error) return;
+        setEnvCfg(d);
+        // The persisted env may be illegal for this project (allowedEnvs comes from
+        // the project's environments.json, resolved here async) — fall back to a
+        // valid value so the <select> isn't stuck on an out-of-range option.
+        const allowed: string[] = Array.isArray(d.allowedEnvs) ? d.allowedEnvs : [];
+        if (allowed.length && !allowed.includes(env)) {
+          handleEnvChange(allowed.includes("local") ? "local" : allowed[0]);
+        }
+      })
       .catch(() => {});
     return () => { cancelled = true; };
+    // handleEnvChange is stable enough (only writes localStorage); excluded to avoid re-fetch loops.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [view, current?.path, env]);
 
   const stepUnlocked = (step: TestStep): boolean => {
@@ -411,6 +483,11 @@ export function InlineTestingPanel() {
     const task = proj && selectedTask !== null ? proj.tasks[selectedTask] : null;
     if (!proj?.path || !task || busyTaskId) return;
     const id = task.id; // capture — all updates patch THIS task even if the user switches away
+    // 问题②·停止: a per-run AbortController. stopStep() aborts it → the fetch rejects
+    // with AbortError, which the catch/finally below treat as a clean stop (not error).
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+    stoppedStepRef.current.delete(`${id}:${step}`); // (re)running this step → clear any prior 停止 mark
     setBusyTaskId(id);
     patchTask(id, (s) => ({ stepStatus: { ...s.stepStatus, [step]: "running" } }));
     if (step === "execution") {
@@ -431,6 +508,7 @@ export function InlineTestingPanel() {
       });
     push({ role: "user", text: `▶ ${t("test.flow.run")}「${stepName}」` });
     let sawError = false;
+    let stopped = false; // set when the run is aborted via stopStep (停止)
     let lineBuf = "";
     const processText = (chunk: string) => {
       lineBuf += chunk;
@@ -475,6 +553,7 @@ export function InlineTestingPanel() {
     try {
       const res = await fetch("/api/test/run", {
         method: "POST",
+        signal: ctrl.signal,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           projectPath: proj.path,
@@ -563,24 +642,51 @@ export function InlineTestingPanel() {
       }
       if (lineBuf.trim()) appendAi(lineBuf);
     } catch (e) {
-      push({ role: "error", text: `请求失败：${e instanceof Error ? e.message : String(e)}` });
-      sawError = true;
+      // 停止 (AbortError) is a user action, not a failure — handle it cleanly below.
+      if (ctrl.signal.aborted || (e instanceof DOMException && e.name === "AbortError")) {
+        stopped = true;
+      } else {
+        push({ role: "error", text: `请求失败：${e instanceof Error ? e.message : String(e)}` });
+        sawError = true;
+      }
     } finally {
-      // Human-gated steps (需求/用例) normally land in "review" (待批准) — UNLESS this
-      // task is in 运行任务 (run-all) mode, where gates auto-approve straight to "done".
+      // 停止: reset the step to a clean idle so the 运行 button can re-run THIS node,
+      // and end run-all mode (don't chain onward). Otherwise: human-gated steps
+      // (需求/用例) land in "review" unless this task is in 运行任务 (run-all) mode,
+      // where gates auto-approve straight to "done".
       const autoAll = autoRunRef.current === id;
-      const finalStatus: StepStatus = sawError ? "error" : HUMAN_GATED.includes(step) && !autoAll ? "review" : "done";
+      const finalStatus: StepStatus = stopped ? "idle" : sawError ? "error" : HUMAN_GATED.includes(step) && !autoAll ? "review" : "done";
       patchTask(id, (s) => ({ stepStatus: { ...s.stepStatus, [step]: finalStatus } }));
-      // End run-all mode when the pipeline finishes (报告) or anything errors.
-      if (sawError || step === "report") autoRunRef.current = null;
+      if (stopped) {
+        // Mark so the auto-chain won't immediately re-run this just-stopped step.
+        stoppedStepRef.current.add(`${id}:${step}`);
+        push({ role: "user", text: `■ ${t("test.flow.stop")}「${stepName}」` });
+      }
+      // End run-all mode when stopped, when anything errors, or when the pipeline finishes (报告).
+      if (stopped || sawError || step === "report") autoRunRef.current = null;
+      // Only clear the shared abortRef if it's still ours (a fast re-run could have replaced it).
+      if (abortRef.current === ctrl) abortRef.current = null;
       setBusyTaskId(null);
     }
   };
 
-  // Approve a human-gated step (待批准 → 已完成). The auto-chain effect then picks
-  // up any now-unlocked auto step (执行/报告).
+  // 停止 (问题②): abort the in-flight run. The fetch rejects with AbortError →
+  // runStep's catch/finally reset the step to idle, clear run-all, and free busy,
+  // so the 运行 button can re-run this node. No-op if nothing is running.
+  const stopStep = () => {
+    abortRef.current?.abort();
+  };
+
+  // Approve a human-gated step (待批准 → 已完成) 并推进:批准后主动运行下一阶段。
+  // 下一步若是 gated(用例),下方 auto-chain effect 不会自动跑它(其 !HUMAN_GATED 条件),
+  // 故在此主动触发;execution/report 的后续接力仍交给 auto-chain effect。runStep 只看
+  // busyTaskId、不依赖 unlocked,批准时无运行中任务,直接驱动安全。
   const approveStep = (step: TestStep) => {
-    if (aId) patchTask(aId, (s) => ({ stepStatus: { ...s.stepStatus, [step]: "done" } }));
+    if (!aId) return;
+    patchTask(aId, (s) => ({ stepStatus: { ...s.stepStatus, [step]: "done" } }));
+    const idx = STEPS.findIndex((s) => s.step === step);
+    const next = STEPS[idx + 1];
+    if (next && !stoppedStepRef.current.has(`${aId}:${next.step}`)) runStep(next.step);
   };
 
   // Manual single-step run (pill / detail 运行 button): cancels any run-all mode so
@@ -597,6 +703,9 @@ export function InlineTestingPanel() {
     if (!activeTask || busy || !current?.path) return;
     const id = activeTask.id;
     autoRunRef.current = id;
+    // 运行任务 drives the whole pipeline → clear this task's 停止 marks so the
+    // auto-chain isn't blocked on a step the user stopped in a previous attempt.
+    for (const s of STEPS) stoppedStepRef.current.delete(`${id}:${s.step}`);
     if (fromStart) {
       patchTask(id, () => ({
         stepStatus: { requirement: "idle", cases: "idle", execution: "idle", report: "idle" },
@@ -630,8 +739,13 @@ export function InlineTestingPanel() {
   useEffect(() => {
     if (busy || !current?.path || !activeTask) return;
     const autoAll = autoRunRef.current === activeTask.id;
+    const tid = activeTask.id;
     const next = STEPS.find(
-      (s) => stepStatus[s.step] === "idle" && stepUnlocked(s.step) && (autoAll || !HUMAN_GATED.includes(s.step)),
+      (s) =>
+        stepStatus[s.step] === "idle" &&
+        stepUnlocked(s.step) &&
+        (autoAll || !HUMAN_GATED.includes(s.step)) &&
+        !stoppedStepRef.current.has(`${tid}:${s.step}`), // don't auto-rerun a 停止'd step
     );
     if (next) runStep(next.step);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -702,7 +816,7 @@ export function InlineTestingPanel() {
                 {/* env (local/SIT) + resolved target from 设置·测试账号 → environments.json */}
                 <select
                   value={env}
-                  onChange={(e) => setEnv(e.target.value)}
+                  onChange={(e) => handleEnvChange(e.target.value)}
                   className="h-7 rounded-md border border-border bg-background px-1.5 text-[11px] text-foreground outline-none"
                 >
                   {(envCfg?.allowedEnvs ?? ["local", "sit"]).map((x) => (
@@ -734,14 +848,26 @@ export function InlineTestingPanel() {
                     {t("test.env.unconfigured")}
                   </button>
                 )}
-                <button
-                  onClick={handleRunTask}
-                  disabled={!current?.path || busy || !stepUnlocked(focusStep)}
-                  title={!stepUnlocked(focusStep) ? t("test.flow.locked") : t("test.flow.runAllHint")}
-                  className="flex h-7 items-center gap-1 rounded-md bg-primary px-2.5 text-[11px] font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  <Play size={12} /> {runningStep ? t("test.flow.running") : t("test.flow.runTask")}
-                </button>
+                {runningStep ? (
+                  // 运行中 → 停止当前阶段 (问题②). Aborts the run; the step resets to idle
+                  // so it can be re-run.
+                  <button
+                    onClick={stopStep}
+                    title={t("test.flow.stop")}
+                    className="flex h-7 items-center gap-1 rounded-md bg-status-error px-2.5 text-[11px] font-medium text-white hover:opacity-90"
+                  >
+                    <Stop size={12} weight="fill" /> {t("test.flow.stop")}
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleRunTask}
+                    disabled={!current?.path || busy || !stepUnlocked(focusStep)}
+                    title={!stepUnlocked(focusStep) ? t("test.flow.locked") : t("test.flow.runAllHint")}
+                    className="flex h-7 items-center gap-1 rounded-md bg-primary px-2.5 text-[11px] font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    <Play size={12} /> {t("test.flow.runTask")}
+                  </button>
+                )}
               </div>
               {!current?.path && (
                 <div className="mb-3 rounded-md border border-border bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground">
@@ -755,26 +881,30 @@ export function InlineTestingPanel() {
                   const status = stepStatus[s.step];
                   const isFocus = s.step === focusStep;
                   const unlocked = stepUnlocked(s.step);
+                  const isRunning = status === "running";
+                  // The running pill stays clickable to 停止 (问题②); other pills lock while busy.
                   return (
                     <button
                       key={s.step}
-                      onClick={() => unlocked && !busy && runStepManual(s.step)}
-                      disabled={!current?.path || busy || !unlocked}
-                      title={!unlocked ? t("test.flow.locked") : t("test.flow.run")}
+                      onClick={() => (isRunning ? stopStep() : unlocked && !busy && runStepManual(s.step))}
+                      disabled={!current?.path || (busy && !isRunning) || (!unlocked && !isRunning)}
+                      title={isRunning ? t("test.flow.stop") : !unlocked ? t("test.flow.locked") : t("test.flow.run")}
                       className={`min-w-[120px] flex-1 rounded-lg border p-2.5 text-left transition-colors disabled:cursor-not-allowed ${stepPillClass(status)} ${
                         isFocus ? "ring-1 ring-muted-foreground/40" : ""
-                      } ${unlocked && !busy && current?.path ? "hover:border-muted-foreground/40" : ""}`}
+                      } ${(unlocked && !busy && current?.path) || isRunning ? "hover:border-muted-foreground/40" : ""}`}
                     >
                       <div className="flex items-center gap-1.5">
-                        {status === "running"
+                        {isRunning
                           ? <SpinnerGap size={13} className="animate-spin text-primary" />
                           : <span className={`h-2 w-2 rounded-full ${stepDotClass(status)}`} />}
-                        <span className={`text-xs font-medium ${status === "running" ? "text-primary" : "text-foreground"}`}>
+                        <span className={`text-xs font-medium ${isRunning ? "text-primary" : "text-foreground"}`}>
                           {i + 1}. {t(s.name)}
                           {HUMAN_GATED.includes(s.step) && <span title={t("test.gate.auto")}> ✋</span>}
                         </span>
                       </div>
-                      <div className={`mt-1 text-[11px] ${status === "running" ? "text-primary" : "text-muted-foreground"}`}>{stepStatusText(status, t)}</div>
+                      <div className={`mt-1 text-[11px] ${isRunning ? "text-primary" : "text-muted-foreground"}`}>
+                        {isRunning ? t("test.flow.stop") : stepStatusText(status, t)}
+                      </div>
                     </button>
                   );
                 })}
@@ -788,13 +918,24 @@ export function InlineTestingPanel() {
                     <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">{t("test.flow.aiDriven")}</span>
                   )}
                   <span className="flex-1" />
-                  <button
-                    onClick={() => runStepManual(focusStep)}
-                    disabled={!current?.path || busy || !stepUnlocked(focusStep)}
-                    className="flex h-7 items-center gap-1 rounded-md bg-primary px-2.5 text-[11px] font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-40"
-                  >
-                    <Play size={12} /> {runningStep === focusStep ? t("test.flow.running") : stepStatus[focusStep] === "done" ? t("test.flow.rerun") : t("test.flow.run")}
-                  </button>
+                  {runningStep === focusStep ? (
+                    // 运行中 → 停止 (问题②): aborts this step; it resets to idle so 运行 can re-run it.
+                    <button
+                      onClick={stopStep}
+                      title={t("test.flow.stop")}
+                      className="flex h-7 items-center gap-1 rounded-md bg-status-error px-2.5 text-[11px] font-medium text-white hover:opacity-90"
+                    >
+                      <Stop size={12} weight="fill" /> {t("test.flow.stop")}
+                    </button>
+                  ) : (
+                    <button
+                      onClick={() => runStepManual(focusStep)}
+                      disabled={!current?.path || busy || !stepUnlocked(focusStep)}
+                      className="flex h-7 items-center gap-1 rounded-md bg-primary px-2.5 text-[11px] font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      <Play size={12} /> {stepStatus[focusStep] === "done" ? t("test.flow.rerun") : t("test.flow.run")}
+                    </button>
+                  )}
                 </div>
                 {/* current stage's progress (%) — execution = cases done/total; other steps
                     trickle toward ~90%. Height always reserved (no jump). */}

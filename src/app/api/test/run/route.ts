@@ -154,6 +154,12 @@ export async function POST(req: Request): Promise<Response> {
       mcpServers = { playwright: buildPlaywrightMcp(projectPath, evidenceDir, resolved.storageStatePath) };
     }
 
+    // Wire client disconnect (panel 停止按钮 aborts the fetch) → abort the agent
+    // run so backend AI generation actually stops, not just the client read.
+    // Same pattern as /api/chat (route.ts): request.signal → AbortController.
+    const abortController = new AbortController();
+    req.signal.addEventListener('abort', () => abortController.abort());
+
     const runStartMs = Date.now();
     const stream = streamClaude({
       prompt,
@@ -164,6 +170,7 @@ export async function POST(req: Request): Promise<Response> {
       model,
       providerId,
       mcpServers,
+      abortController,
       // Headless run: no user to approve permission prompts. Writes are constrained
       // by the system prompt to AI_LabTest/; the hard canUseTool whitelist is a
       // later hardening step.

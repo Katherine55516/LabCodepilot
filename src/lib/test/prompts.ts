@@ -248,6 +248,41 @@ export function buildStep(step: TestStep, opts: BuildStepOptions): BuiltStep {
  * Mirrors the framework runner.js launch flags (V0.3). Per-run injection — 普通
  * 对话不会看到它（不进全局 MCP 配置）。
  */
+/**
+ * 打包态:定位随安装包分发的 chromium_headless_shell 二进制。scripts/bundle-chromium.mjs
+ * 在打包前把它装到项目 ms-playwright-bundle/,electron-builder 复制为 resources/
+ * ms-playwright;electron/main.ts fork standalone server 时注入 AILAB_RESOURCES_PATH=
+ * process.resourcesPath。dev 态没有该 env → 返回 null,buildPlaywrightMcp 不加
+ * --executable-path,沿用本机 ~/.cache/ms-playwright 里的浏览器。
+ *
+ * 动态扫描(不写死 revision,升级 playwright 后仍生效):
+ *   <resources>/ms-playwright/chromium_headless_shell-<rev>/chrome-headless-shell-<plat>/chrome-headless-shell[.exe]
+ */
+function resolveBundledHeadlessShell(): string | null {
+  const resourcesPath = process.env.AILAB_RESOURCES_PATH;
+  if (!resourcesPath) return null;
+  const browsersDir = path.join(resourcesPath, 'ms-playwright');
+  const exe = process.platform === 'win32' ? 'chrome-headless-shell.exe' : 'chrome-headless-shell';
+  let revDirs: string[];
+  try {
+    revDirs = fs.readdirSync(browsersDir).filter((d) => d.startsWith('chromium_headless_shell-'));
+  } catch {
+    return null;
+  }
+  for (const rev of revDirs) {
+    const revDir = path.join(browsersDir, rev);
+    let platDirs: string[] = [];
+    try {
+      platDirs = fs.readdirSync(revDir).filter((d) => d.startsWith('chrome-headless-shell-'));
+    } catch { continue; }
+    for (const pd of platDirs) {
+      const bin = path.join(revDir, pd, exe);
+      if (fs.existsSync(bin)) return bin;
+    }
+  }
+  return null;
+}
+
 export function buildPlaywrightMcp(
   projectPath: string,
   evidenceDir: string,
@@ -260,12 +295,18 @@ export function buildPlaywrightMcp(
   // Launch via a shim that chdir's to the evidence dir before loading the CLI
   // (stdio MCP servers can't take a `cwd`), so relative-named writes land there.
   const shim = writeMcpLauncherShim();
+  // 打包态:随包分发的 headless_shell 二进制路径(dev 态为 null,用本机浏览器)。
+  const headlessShell = resolveBundledHeadlessShell();
   return {
     type: 'stdio',
     command: process.execPath,
     args: [
       shim,
       '--browser', 'chromium',
+      // 打包态直指随包 headless_shell:playwright 1.49+ 默认 headless 走完整 chromium 的
+      // new-headless、不会自动用 headless_shell,故必须显式 --executable-path 指过去,
+      // 同时绕过 playwright 按 revision 目录发现浏览器的逻辑。dev 态(null)不加,用本机浏览器。
+      ...(headlessShell ? ['--executable-path', headlessShell] : []),
       '--isolated',
       '--caps', 'devtools,network',
       '--viewport-size', '1280,800',
@@ -282,6 +323,10 @@ export function buildPlaywrightMcp(
       // Read by the shim: chdir target + the real CLI to require after chdir.
       AILAB_MCP_CWD: evidenceAbs,
       AILAB_MCP_CLI: cli,
+      // 打包态:把浏览器根目录也指过去(executable-path 已直指,这是双保险)。
+      ...(headlessShell && process.env.AILAB_RESOURCES_PATH
+        ? { PLAYWRIGHT_BROWSERS_PATH: path.join(process.env.AILAB_RESOURCES_PATH, 'ms-playwright') }
+        : {}),
     },
   };
 }

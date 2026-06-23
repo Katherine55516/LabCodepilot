@@ -111,6 +111,14 @@ extraResources:
     filter:
       - "**/*"
       - "!transform-report.json"
+  # Playwright headless_shell —— 由 scripts/bundle-chromium.mjs 在 electron-builder
+  # 之前装到 ms-playwright-bundle/(当前打包平台的二进制)。测试执行阶段的 MCP server
+  # (src/lib/test/prompts.ts buildPlaywrightMcp)运行时经 AILAB_RESOURCES_PATH/ms-playwright
+  # 定位 chrome-headless-shell 并用 --executable-path 启动。
+  - from: ms-playwright-bundle/
+    to: ms-playwright/
+    filter:
+      - "**/*"
 afterPack: scripts/after-pack.js
 afterSign: scripts/after-sign.js
 asarUnpack:

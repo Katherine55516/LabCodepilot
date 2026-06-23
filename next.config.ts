@@ -74,6 +74,12 @@ const nextConfig: NextConfig = {
       'node_modules/@anthropic-ai/claude-agent-sdk-linux-x64-musl/**/*',
       'node_modules/@anthropic-ai/claude-agent-sdk-win32-arm64/**/*',
       'node_modules/@anthropic-ai/claude-agent-sdk-win32-x64/**/*',
+      // @playwright/mcp + 其自带的嵌套 playwright-core/playwright(1.61-alpha):测试执行
+      // 阶段把它当 stdio MCP server 启动(见 src/lib/test/prompts.ts buildPlaywrightMcp,
+      // 经 cli.js)。cli.js 在代码里是运行时拼接的字符串路径、不是静态 import,NFT 追不动,
+      // 只复制了孤零零的 cli.js —— 丢了 package.json/lib 和嵌套 node_modules,server 一
+      // require('playwright-core') 就崩 → 零工具注册。force-include 整包(含嵌套依赖)修复之。
+      'node_modules/@playwright/mcp/**/*',
     ],
   },
   // outputFileTracingExcludes: strip non-code dirs out of every route's NFT.
