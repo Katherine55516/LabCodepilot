@@ -182,6 +182,16 @@ function taskChip(st: TaskState, t: T): { text: string; cls: string } {
   return done > 0 ? { text: `${done}/${STEPS.length}`, cls: MUTED } : { text: t("test.step.pending"), cls: MUTED };
 }
 
+// The task's current stage name (which step the chip's status refers to) — running
+// / review / error step, else the next pending step, else the last (all done → 报告).
+function taskStageName(st: TaskState, t: T): string {
+  const find = (status: StepStatus) => STEPS.find((s) => st.stepStatus[s.step] === status);
+  const cur =
+    find("running") ?? find("review") ?? find("error") ??
+    STEPS.find((s) => st.stepStatus[s.step] !== "done") ?? STEPS[STEPS.length - 1];
+  return t(cur.name);
+}
+
 export function InlineTestingPanel() {
   const { t } = useTranslation();
   const router = useRouter();
@@ -847,9 +857,12 @@ export function InlineTestingPanel() {
                           }}
                           className="group flex flex-col gap-3 rounded-xl border border-border bg-card p-3.5 text-left transition-colors hover:border-primary/50 hover:bg-muted/40"
                         >
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="truncate text-sm font-medium text-foreground">{tk.name}</span>
-                            <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-medium ${chip.cls}`}>{chip.text}</span>
+                          <div className="flex items-start justify-between gap-2">
+                            <span className="truncate pt-0.5 text-sm font-medium text-foreground">{tk.name}</span>
+                            <div className="flex shrink-0 flex-col items-end gap-0.5">
+                              <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${chip.cls}`}>{chip.text}</span>
+                              <span className="text-[10px] text-muted-foreground">{taskStageName(st, t)}</span>
+                            </div>
                           </div>
                           <div className="flex items-center gap-1" title={STEPS.map((s) => t(s.name)).join(" → ")}>
                             {STEPS.map((s, idx) => (
