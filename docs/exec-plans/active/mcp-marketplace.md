@@ -1,0 +1,94 @@
+# MCP 市场（一键浏览 + 安装配置外部 MCP 服务器）
+
+> 创建时间：2026-06-23
+> 最后更新：2026-06-23
+
+对照「技能市场」（`/api/skills/marketplace/*`）做一个 MCP 市场：接入官方 MCP Registry（及兜底数据源），用户点击即可浏览、填表单、一键安装并连接外部 MCP 服务器，达到「点击即用」。
+
+调研档案见对话内研究输出；POC 结论见项目记忆 `mcp-marketplace-poc`。
+
+## 状态
+
+| Phase | 内容 | 状态 | 备注 |
+|-------|------|------|------|
+| Phase 0 | POC：验证 server.json→MCPServerConfig 映射 + 内置二进制能拉起 | ✅ 已完成 | 脚本 `scripts/poc-mcp-marketplace.mjs`；挖出冷启动 prefetch 坑 |
+| Phase 1 | MVP：搜索 / 详情 / 动态表单 / 安全确认 / prefetch 安装 / 卸载 | 🔄 进行中 | 第一个可发布版本 |
+| Phase 2 | 加固：密钥落地 / 信任分层 + 黑名单 / 危险模式 / 运行时预检 / Glama 兜底 / 版本钉死 | 📋 待开始 | |
+| Phase 3 | 远程进阶：OAuth 2.1 环回 / 工具定义 TOFU / 与内置二进制冲突排查 | 📋 待开始 | |
+| Phase 4 | 可选增强：入站深链 / Smithery 托管 / mcp-scan 离线 / Docker 沙箱 / catalog 缓存同步 | 📋 待开始 | 任意顺序 |
+
+## 决策日志
+
+- 2026-06-23: **数据源定为「官方 Registry 为主 + Glama 兜底」**。官方 `registry.modelcontextprotocol.io/v0.1/servers` 公开免登录、返回标准 server.json（含完整安装元数据），是上游 single source of truth；Glama 无鉴权 + 40k+ 广度兜底。放弃 PulseMCP（下线/B2B 化）、mcp.so 等（无公开 API）。
+- 2026-06-23: **server.json 定为内部归一化 schema**。所有数据源 adapter 都映射到它，将来换聚合器只是加 adapter。
+- 2026-06-23: **安装走「直接写 `~/.claude.json`」而非 CLI/deeplink/.mcpb**。复用既有 `/api/plugins/mcp` 原子写 + `invalidateMcpCache` + `${...}` 解析链路，零新增地基。
+- 2026-06-23: **POC 决定的硬约束——安装必须先 prefetch 预热包再判健康**。冷启动 `npx`/`uvx` 下载超过内置二进制健康检查超时窗（实测同配置暖缓存后 3/3 全连上），否则用户见「装好却连不上」假失败。安装流程复用技能市场 `InstallProgressDialog` 的 SSE 流式 UI 展示下载进度。
+- 2026-06-23: **CORS**：官方接口无 `Access-Control-Allow-Origin`，所有 catalog 请求走 Next.js `/api` 服务端代理（与 skills/marketplace/search 同构）。
+- 2026-06-23: **安全是必做项不是可选**。官方 Registry 只做命名空间验证、明确把安全扫描甩给下游（即本应用）；stdio 安装 = RCE。Phase 1 即落「安全确认屏障」，Phase 2 补黑名单/危险模式/信任分层。
+- 2026-06-23: **OAuth 客户端注册 CIMD 优先、DCR 仅兜底**（依 2025-11-25 授权规范）。
+- 2026-06-23: **mcp-scan 只用离线 `inspect`/`whitelist` 子命令**，绝不用默认 `scan`（会把工具描述发到美国 invariantlabs，违反「不向美国站点发数据」纪律）。
+
+## 详细设计
+
+### 核心数据流（一键安装）
+
+```
+浏览市场(官方 Registry, /api 代理)
+  → 选服务器 → 拉 server.json(version=latest)
+  → 生成安装表单(按 inputs 的 isRequired/isSecret/default/choices)
+  → ⚠️ 安全确认屏障(展示完整 command·args·env)
+  → 写入凭证(密钥→钥匙串, env/headers 仅存 ${KEY} 占位符)
+  → prefetch 预热包(SSE 进度) → 写 ~/.claude.json(复用 /api/plugins/mcp) → 连接并列出工具
+```
+
+### server.json → MCPServerConfig 映射（已 POC 验证）
+
+- 运行器兜底：`npm→npx`、`pypi→uvx`、`oci→docker`、`nuget→dnx`（`runtimeHint` 常缺失，仅作 override）。
+- stdio：`command=runner`；`args=[...runtimeArguments, packageSpec(identifier@version), ...packageArguments]`；npx 自注入 `-y`。
+- oci：`docker run -i --rm [-e NAME ...] <image-with-tag>`。
+- 远程：`type=streamable-http→'http' / sse→'sse'`；`url`（处理 `{var}` 模板）；`headers`。
+- 密钥（`isSecret`）→ `${mcp_<slug>_<NAME>}` 占位符，明文走 settings 加密列 + crypto-seal，由 `mcp-loader` spawn 时解析。
+
+### Phase 1 任务拆分（MVP）
+
+| # | 任务 | 文件 | 验收 |
+|---|------|------|------|
+| 1 | 晋升映射器 + 单测（覆盖 npm/pypi/oci/remote/remote+headers 5 类） | `src/lib/server-json-mapper.ts`、`src/__tests__/unit/server-json-mapper.test.ts` | `npm run test` 通过 |
+| 2 | Registry 客户端：拉取/分页/`isLatest` 去重/归一化 DTO | `src/lib/mcp-registry-client.ts` | 单测 + 真实拉取 |
+| 3 | 搜索 API（代理 + 标记已安装） | `src/app/api/plugins/mcp/marketplace/search/route.ts` | 返回 DTO，已装项打标 |
+| 4 | 详情 API（version=latest，返回表单 spec） | `.../marketplace/[serverName]/route.ts` | 返回 inputs 声明 |
+| 5 | 安装 API（SSE：prefetch→进度→写 `~/.claude.json`→连接） | `.../marketplace/install/route.ts` | 真实装 npm server 成功连接 |
+| 6 | 前端：marketplace tab + 浏览/卡片/详情 + 安装对话框（表单 + 确认屏障 + 进度） | `McpManager.tsx`、`McpMarketplace*.tsx`、`McpInstallDialog.tsx` | CDP 截图验证 |
+| 7 | 卸载：复用 `DELETE /api/plugins/mcp/[name]` + 清密钥 | 既有路由 + 小改 | 卸载干净 |
+| 8 | 类型 + 三语 i18n | `src/types/index.ts`、`src/i18n/{en,zh,zh-HK}.ts` | typecheck 通过 |
+
+**Phase 1 验收标准**：从官方 Registry 装一个真实 npm server → 看到下载进度 → `status` 显示 `connected` → 卸载干净；`npm run test` + `npm run test:smoke` 通过；CDP 截图确认 UI 渲染与无 console 报错。
+
+### 复用的既有地基（无需新造）
+
+- 写入真源 `~/.claude.json` + 原子写 + `invalidateMcpCache`：`src/lib/mcp-loader.ts`、`/api/plugins/mcp`。
+- `${SETTING_KEY}` 密钥间接引用解析：`mcp-loader.ts`。
+- 加密钥匙串：`src/lib/crypto-seal.ts`、`electron/auth/secret-key.ts`。
+- 运行期连接池 + `status`(`needs-auth`)/`reconnect`/`toggle`：`mcp-connection-manager.ts` + 对应路由。
+- SSE 流式安装进度 UI 范式：`src/components/skills/InstallProgressDialog.tsx`。
+- registry 包裹格式解析：`McpServerEditor.tsx`。
+
+### 依赖与节奏
+
+```
+Phase 1 (MVP, 可发布) → Phase 2 (加固) → Phase 3 (远程/OAuth)
+                                       └→ Phase 4 (增强, 任意顺序)
+```
+
+### 待验证（后续 POC）
+
+- OAuth 2.1 环回流程与内置二进制自带 OAuth/钥匙串是否冲突。
+- 打包版 macOS 最小 PATH 下 npx/uvx/docker 检测 + 子进程 PATH 增强。
+- uvx 的 `pkg@version` 语法是否被接受（Part A 已产出未实跑）。
+- 信任分层数据来源（Docker 签名可机验；Anthropic 目录无 API → 手维护白名单）。
+
+### 文档产出（功能完成后）
+
+- 技术交接：`docs/handover/mcp-marketplace.md`
+- 产品思考：`docs/insights/mcp-marketplace.md`
+- 两份互相反链。
