@@ -329,16 +329,6 @@
   }
 }
 
-/* 测试工作台：阶段运行中、进度未知时的不确定进度条（一段从左滑到右） */
-@keyframes test-bar-indeterminate {
-  0% {
-    transform: translateX(-100%);
-  }
-  100% {
-    transform: translateX(320%);
-  }
-}
-
 @utility animate-shimmer {
   animation: widget-shimmer 2s ease-in-out infinite;
   background-image: linear-gradient(

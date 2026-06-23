@@ -222,6 +222,8 @@ export function InlineTestingPanel() {
   });
   const [busyTaskId, setBusyTaskId] = useState<string | null>(null);
   const [composer, setComposer] = useState("");
+  // Simulated progress % for non-execution running steps (no granular progress) — see effect below.
+  const [simPct, setSimPct] = useState(0);
   const threadRef = useRef<HTMLDivElement>(null);
   // When set to a task id, that task is in "run all" mode (运行任务): gated steps
   // auto-approve + the chain runs through to 报告 without waiting for 批准.
@@ -258,14 +260,16 @@ export function InlineTestingPanel() {
   const aState: TaskState = taskStates[aId] ?? DEFAULT_TASK_STATE;
   const { stepStatus, convo, fourState, currentCase, caseResults, circuitBroken } = aState;
   const runningStep: TestStep | null = STEPS.find((s) => stepStatus[s.step] === "running")?.step ?? null;
-  // Per-stage progress while a step runs (NOT overall task progress): the execution
-  // step shows cases done / total — total parsed from the AI's "▶ 用例 N/总数" line,
-  // done = @@RESULT count so far. Other steps have no sub-progress → indeterminate bar.
+  // Per-stage progress % while a step runs (NOT overall task progress). Execution =
+  // cases done/total (total parsed from the AI's "▶ 用例 N/总数" line, done = @@RESULT
+  // count). Non-execution steps have no granular progress → a simulated trickle (simPct)
+  // toward ~90% so the bar still shows a moving percentage.
   const execTotal = Number((currentCase.match(/\/\s*(\d+)/) || [])[1]) || 0;
   const execPct =
     runningStep === "execution" && execTotal > 0
       ? Math.min(100, Math.round((fourState.total / execTotal) * 100))
       : null;
+  const barPct = !runningStep ? null : runningStep === "execution" ? execPct ?? 0 : simPct;
   const busy = busyTaskId !== null;
   // Patch a task's state BY ID (runStep captures its id, so switching tasks mid-run is safe).
   const patchTask = (id: string, patch: (s: TaskState) => Partial<TaskState>) =>
@@ -320,6 +324,16 @@ export function InlineTestingPanel() {
   useEffect(() => {
     if (threadRef.current) threadRef.current.scrollTop = threadRef.current.scrollHeight;
   }, [convo]);
+
+  // Non-execution steps have no granular progress → trickle a % toward ~90% while
+  // running so the progress bar still shows a moving percentage (execution uses the
+  // real case % instead). Resets per step.
+  useEffect(() => {
+    if (!runningStep || runningStep === "execution") { setSimPct(0); return; }
+    setSimPct(8);
+    const id = setInterval(() => setSimPct((p) => (p >= 90 ? p : p + Math.max(1, Math.round((90 - p) / 10)))), 350);
+    return () => clearInterval(id);
+  }, [runningStep]);
 
   // Resolve the active project's env config (target baseUrl) for display in the
   // flow view. Refetches when entering a flow or switching env.
@@ -731,17 +745,13 @@ export function InlineTestingPanel() {
                     <Play size={12} /> {runningStep === focusStep ? t("test.flow.running") : stepStatus[focusStep] === "done" ? t("test.flow.rerun") : t("test.flow.run")}
                   </button>
                 </div>
-                {/* current stage's progress — inside this card. Execution = cases done/total %;
-                    other running steps = indeterminate; height always reserved (no jump). */}
+                {/* current stage's progress (%) — execution = cases done/total; other steps
+                    trickle toward ~90%. Height always reserved (no jump). */}
                 <div className="mt-2 flex items-center gap-2">
                   <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
-                    {runningStep && (execPct != null ? (
-                      <div className="h-full rounded-full bg-primary transition-all duration-300" style={{ width: `${execPct}%` }} />
-                    ) : (
-                      <div className="h-full w-1/3 rounded-full bg-primary animate-[test-bar-indeterminate_1.1s_ease-in-out_infinite]" />
-                    ))}
+                    {runningStep && <div className="h-full rounded-full bg-primary transition-all duration-300" style={{ width: `${barPct}%` }} />}
                   </div>
-                  <span className="w-9 shrink-0 text-right text-[10px] tabular-nums text-muted-foreground">{runningStep && execPct != null ? `${execPct}%` : ""}</span>
+                  <span className="w-9 shrink-0 text-right text-[10px] tabular-nums text-muted-foreground">{runningStep ? `${barPct}%` : ""}</span>
                 </div>
                 {focusStep === "execution" && (
                   <>
@@ -903,11 +913,16 @@ export function InlineTestingPanel() {
                               <span className="text-[10px] text-muted-foreground">{taskStageName(st, t)}</span>
                             </div>
                           </div>
-                          <div className="flex items-start gap-1">
-                            {STEPS.map((s) => (
-                              <div key={s.step} className="flex flex-1 flex-col items-center gap-1">
-                                <span className={`h-2 w-2 rounded-full ${stepDotClass(st.stepStatus[s.step])}`} />
-                                <span className="text-center text-[9px] leading-tight text-muted-foreground">{t(s.name)}</span>
+                          <div className="flex items-start">
+                            {STEPS.map((s, idx) => (
+                              <div key={s.step} className="flex flex-1 flex-col items-center">
+                                {/* dot with connector lines on both sides (ends are hidden) */}
+                                <div className="flex w-full items-center">
+                                  <span className={`h-px flex-1 ${idx === 0 ? "opacity-0" : "bg-border"}`} />
+                                  <span className={`mx-1 h-2 w-2 shrink-0 rounded-full ${stepDotClass(st.stepStatus[s.step])}`} />
+                                  <span className={`h-px flex-1 ${idx === STEPS.length - 1 ? "opacity-0" : "bg-border"}`} />
+                                </div>
+                                <span className="mt-1 text-center text-[9px] leading-tight text-muted-foreground">{t(s.name)}</span>
                               </div>
                             ))}
                           </div>
