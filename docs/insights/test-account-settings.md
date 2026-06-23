@@ -49,4 +49,4 @@ AI_LabTest 自己用 Playwright Chromium 抓。但 CodePilot 打包不含 Playwr
 - **登录态对账**：`captured` 标志不在每次加载时与磁盘对账（避免误标「未保存」），应用外删文件会让标志过期。未来可在选目录/切系统时做一次 status 同步。
 - **抓取覆盖**：只抓 cookie + localStorage（80% 场景）。用 IndexedDB / Service Worker 存认证态的站点抓不到——与 AI_LabTest 同限制。
 - **单向导出**：目前 CodePilot → AI_LabTest 单向写。未来可考虑反向读回（已有 environments.json 导入到面板），让两端不必各填一遍。
-- **更紧耦合**：现在靠文件系统对接。若 CodePilot 内置测试编排，可直接读这些配置发起测试，省掉「导出」这一步。
+- **更紧耦合（已部分实现 2026-06-23）**：测试工作台现在 **file-first + DB 兜底** —— 有 `environments.json` 用文件（框架真跑也读它），没有则按 `project_root` 直接读库发起测试，所以「导出」对工作台**已变可选**（用户反馈「一定要点导出吗」驱动）。导出仍保留：给 AI_LabTest 框架独立真跑 + 产出明文 environments.json。反向读回（已有 environments.json 导入面板）仍未做。
