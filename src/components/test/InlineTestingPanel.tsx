@@ -288,8 +288,36 @@ export function InlineTestingPanel() {
   };
 
   const addProject = (name: string, path: string) => setProjects((ps) => [...ps, { name, path, tasks: [] }]);
-  const addTask = (name: string) =>
-    setProjects((ps) => ps.map((p, i) => (i === selected ? { ...p, tasks: [...p.tasks, { id: makeTaskId(), name }] } : p)));
+  // Create a task. 新建任务 requires importing 用例 or 需求 (at least one) — those are
+  // saved to the project's AI_LabTest artifacts so the imported step lands in 待批准
+  // (cases) / 续生成用例 (requirement) instead of the AI generating from scratch.
+  const addTask = async (name: string, imports?: { requirement?: string; cases?: string }) => {
+    const proj = selected !== null ? projects[selected] : null;
+    const id = makeTaskId();
+    setProjects((ps) => ps.map((p, i) => (i === selected ? { ...p, tasks: [...p.tasks, { id, name }] } : p)));
+    if (!proj?.path || !imports || (!imports.requirement && !imports.cases)) return;
+    const save = (kind: "requirement" | "cases", content: string) =>
+      fetch("/api/test/import", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectPath: proj.path, taskName: name, kind, content }),
+      });
+    try {
+      if (imports.requirement) await save("requirement", imports.requirement);
+      if (imports.cases) await save("cases", imports.cases);
+      // cases imported → 需求 skipped(done) + 用例 待批准; only 需求 → 需求 待批准.
+      patchTask(id, () => ({
+        stepStatus: {
+          requirement: imports.cases ? "done" : "review",
+          cases: imports.cases ? "review" : "idle",
+          execution: "idle",
+          report: "idle",
+        },
+      }));
+    } catch {
+      /* import save failed → task stays a normal from-scratch task */
+    }
+  };
 
   // Persist the workbench so it survives the panel closing/reopening (switching
   // conversations unmounts it) and app restarts. Projects (folders + task names)
@@ -1290,8 +1318,33 @@ function RunChoiceModal({ t, stage, onContinue, onRestart, onClose }: { t: T; st
   );
 }
 
-function NewTaskModal({ t, onClose, onAdd }: { t: T; onClose: () => void; onAdd: (name: string) => void }) {
+function NewTaskModal({ t, onClose, onAdd }: { t: T; onClose: () => void; onAdd: (name: string, imports?: { requirement?: string; cases?: string }) => void }) {
   const [name, setName] = useState("");
+  const [reqFile, setReqFile] = useState<{ name: string; content: string } | null>(null);
+  const [casesFile, setCasesFile] = useState<{ name: string; content: string } | null>(null);
+  const [err, setErr] = useState("");
+  const reqInputRef = useRef<HTMLInputElement>(null);
+  const casesInputRef = useRef<HTMLInputElement>(null);
+  // 新建任务必须至少导入 用例 或 需求 之一。
+  const canCreate = !!name.trim() && (!!reqFile || !!casesFile);
+
+  const pickReq = (f?: File) => {
+    if (!f) return;
+    const r = new FileReader();
+    r.onload = () => { setReqFile({ name: f.name, content: String(r.result || "") }); setErr(""); };
+    r.readAsText(f);
+  };
+  const pickCases = (f?: File) => {
+    if (!f) return;
+    const r = new FileReader();
+    r.onload = () => {
+      const txt = String(r.result || "");
+      try { JSON.parse(txt); setCasesFile({ name: f.name, content: txt }); setErr(""); }
+      catch { setErr(t("test.newTaskModal.casesNeedJson")); }
+    };
+    r.readAsText(f);
+  };
+
   return (
     <ModalShell
       title={t("test.newTaskModal.title")}
@@ -1301,9 +1354,9 @@ function NewTaskModal({ t, onClose, onAdd }: { t: T; onClose: () => void; onAdd:
         <>
           <button onClick={onClose} className={CANCEL_BTN}>{t("test.cancel")}</button>
           <button
-            disabled={!name.trim()}
+            disabled={!canCreate}
             onClick={() => {
-              onAdd(name.trim());
+              onAdd(name.trim(), { requirement: reqFile?.content, cases: casesFile?.content });
               onClose();
             }}
             className={PRIMARY_BTN}
@@ -1321,15 +1374,35 @@ function NewTaskModal({ t, onClose, onAdd }: { t: T; onClose: () => void; onAdd:
       </Field>
       <Field label={t("test.newTaskModal.importLabel")}>
         <div className="flex gap-2">
-          <button className="h-9 flex-1 rounded-md border border-border text-xs text-foreground hover:bg-muted">📊 {t("test.newTaskModal.importCases")}</button>
-          <button className="h-9 flex-1 rounded-md border border-border text-xs text-foreground hover:bg-muted">📄 {t("test.newTaskModal.importReqs")}</button>
-          <button className="h-9 rounded-md border border-border px-3 text-xs text-muted-foreground hover:bg-muted">⬇ {t("test.newTaskModal.template")}</button>
+          <button onClick={() => casesInputRef.current?.click()} className="h-9 flex-1 rounded-md border border-border text-xs text-foreground hover:bg-muted">📊 {t("test.newTaskModal.importCases")}</button>
+          <button onClick={() => reqInputRef.current?.click()} className="h-9 flex-1 rounded-md border border-border text-xs text-foreground hover:bg-muted">📄 {t("test.newTaskModal.importReqs")}</button>
         </div>
+        <input ref={casesInputRef} type="file" accept=".json" className="hidden" onChange={(e) => { pickCases(e.target.files?.[0]); e.target.value = ""; }} />
+        <input ref={reqInputRef} type="file" accept=".md,.txt,.markdown" className="hidden" onChange={(e) => { pickReq(e.target.files?.[0]); e.target.value = ""; }} />
+        {(casesFile || reqFile) && (
+          <div className="mt-2 flex flex-col gap-1">
+            {casesFile && (
+              <div className="flex items-center gap-2 rounded-md bg-muted px-2 py-1 text-[11px] text-foreground">
+                <span className="truncate">📊 {casesFile.name}</span><span className="flex-1" />
+                <button onClick={() => setCasesFile(null)} className="text-muted-foreground hover:text-foreground" aria-label={t("test.cancel")}>✕</button>
+              </div>
+            )}
+            {reqFile && (
+              <div className="flex items-center gap-2 rounded-md bg-muted px-2 py-1 text-[11px] text-foreground">
+                <span className="truncate">📄 {reqFile.name}</span><span className="flex-1" />
+                <button onClick={() => setReqFile(null)} className="text-muted-foreground hover:text-foreground" aria-label={t("test.cancel")}>✕</button>
+              </div>
+            )}
+          </div>
+        )}
+        {err && <p className="mt-1 text-[11px] text-status-error-foreground">{err}</p>}
         <p className="mt-2 text-[11px] text-muted-foreground">{t("test.newTaskModal.importHint")}</p>
       </Field>
-      <div className="rounded-md bg-status-warning-muted px-3 py-2 text-[11px] text-status-warning-foreground">
-        ⚠ {t("test.newTaskModal.envWarn")}
-      </div>
+      {!canCreate && (
+        <div className="rounded-md bg-status-warning-muted px-3 py-2 text-[11px] text-status-warning-foreground">
+          ⚠ {t("test.newTaskModal.importRequired")}
+        </div>
+      )}
     </ModalShell>
   );
 }
