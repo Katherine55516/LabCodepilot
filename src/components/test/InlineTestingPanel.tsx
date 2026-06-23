@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useTranslation } from "@/hooks/useTranslation";
-import { ListChecks, ChartBar, Gear, ArrowLeft, FolderPlus, Play, ArrowUp, SpinnerGap, Sparkle, Terminal, WarningCircle, type Icon } from "@/components/ui/icon";
+import { ListChecks, ChartBar, Gear, ArrowLeft, FolderPlus, Play, ArrowUp, SpinnerGap, Sparkle, Terminal, WarningCircle, Wrench, type Icon } from "@/components/ui/icon";
 import type { TranslationKey } from "@/i18n";
 import { useNativeFolderPicker } from "@/hooks/useNativeFolderPicker";
 import { FolderPicker } from "@/components/chat/FolderPicker";
@@ -935,7 +935,7 @@ export function InlineTestingPanel() {
             )}
 
             {view === "flow" && !activeTask && <EmptyState icon={ListChecks} text={t("test.flowEmpty")} />}
-            {view === "report" && <ReportBrowser projects={projects} t={t} />}
+            {view === "report" && <ReportBrowser projects={projects} t={t} model={model} providerId={providerId} />}
           </div>
         </div>
       )}
@@ -1066,10 +1066,54 @@ function ReportView({ t, results, four, circuitBroken, taskName }: { t: T; resul
 // 报告 view: browse persisted reports by 项目 → 任务 → 环境. A task can have multiple
 // reports (one per env); each row expands to the full ReportView. Reads from disk via
 // GET /api/test/reports (per project).
-function ReportBrowser({ projects, t }: { projects: Project[]; t: T }) {
+function ReportBrowser({ projects, t, model, providerId }: { projects: Project[]; t: T; model: string; providerId: string }) {
+  const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [groups, setGroups] = useState<{ project: Project; reports: ReportEntry[] }[]>([]);
   const [open, setOpen] = useState<string | null>(null);
+  const [handoffKey, setHandoffKey] = useState<string | null>(null);
+
+  // 交给研发修复: hand a failing report to the 研发平台 (coding chat). Creates a
+  // project-scoped session, seeds the bug report as a composer DRAFT (MessageInput
+  // reads codepilot:draft:{id} on mount), then navigates — the user reviews before
+  // sending, then the coding agent fixes in the same repo.
+  const handoff = async (project: Project, r: ReportEntry) => {
+    const key = `${project.path}|${r.task}|${r.env}`;
+    const failed = r.tests.filter((c) => String(c.status).toLowerCase() === "fail");
+    const lines = failed
+      .map((c) => `- ${c.id}：${c.actual || c.error || "（详见报告）"}${c.evidence?.length ? `（证据：${c.evidence.join("、")}）` : ""}`)
+      .join("\n");
+    const mdPath = `AI_LabTest/report/${r.task}/${r.task}-${r.env}.md`;
+    const msg = [
+      "请修复测试发现的缺陷。",
+      "",
+      `项目：${project.name}（${project.path}）`,
+      `测试任务：${r.task} · 环境：${r.env}`,
+      `结果：用例 ${r.counts.total}，通过 ${r.counts.pass}，失败 ${r.counts.fail}${r.counts.blocked ? `，阻塞 ${r.counts.blocked}` : ""}`,
+      "",
+      "失败用例（疑似应用缺陷）：",
+      lines || "（无结构化用例，详见报告）",
+      "",
+      `完整测试报告：${mdPath}`,
+      "",
+      "请先 Read 上面的测试报告和相关源码，定位每个失败用例的根因并修复；改完简述每处改动。阻塞类（环境问题）不在本次修复范围。",
+    ].join("\n");
+    setHandoffKey(key);
+    try {
+      const res = await fetch("/api/chat/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ working_directory: project.path, model: model || undefined, provider_id: providerId || undefined }),
+      });
+      const data = await res.json();
+      const id = data?.session?.id as string | undefined;
+      if (!id) throw new Error("no session");
+      try { sessionStorage.setItem(`codepilot:draft:${id}`, msg); } catch { /* quota */ }
+      router.push(`/chat/${id}`);
+    } catch {
+      setHandoffKey(null);
+    }
+  };
 
   useEffect(() => {
     // All setState happens inside the async callback (Promise.all([]) resolves
@@ -1138,6 +1182,17 @@ function ReportBrowser({ projects, t }: { projects: Project[]; t: T }) {
                           </button>
                           {isOpen && (
                             <div className="border-t border-border p-3">
+                              {r.counts.fail > 0 && (
+                                <div className="mb-3 flex justify-end">
+                                  <button
+                                    onClick={() => handoff(project, r)}
+                                    disabled={handoffKey === key}
+                                    className="flex h-7 items-center gap-1 rounded-md bg-primary px-2.5 text-[11px] font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                                  >
+                                    <Wrench size={12} /> {t("test.report.handoff")}（{r.counts.fail}）
+                                  </button>
+                                </div>
+                              )}
                               <ReportView t={t} results={r.tests} four={r.counts} circuitBroken={r.circuitBroken} taskName={task} />
                               {r.markdown && (
                                 <div className="mt-3 border-t border-border pt-3">

@@ -143,6 +143,7 @@ const zhHK: Record<TranslationKey, string> = {
   'test.report.loading': '正在載入報告…',
   'test.report.reportsSuffix': '份報告',
   'test.report.docTitle': '測試報告文檔',
+  'test.report.handoff': '交給研發修復',
   'test.report.envsSuffix': '個環境',
 
   // ── Chat list panel ─────────────────────────────────────────

@@ -134,6 +134,7 @@ const zh: Record<TranslationKey, string> = {
   'test.report.loading': '正在加载报告…',
   'test.report.reportsSuffix': '份报告',
   'test.report.docTitle': '测试报告文档',
+  'test.report.handoff': '交给研发修复',
   'test.report.envsSuffix': '个环境',
 
   // ── Chat list panel ─────────────────────────────────────────

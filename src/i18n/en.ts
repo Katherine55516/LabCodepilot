@@ -137,6 +137,7 @@ const en = {
   'test.report.loading': 'Loading reports…',
   'test.report.reportsSuffix': 'reports',
   'test.report.docTitle': 'Report document',
+  'test.report.handoff': 'Send to dev to fix',
   'test.report.envsSuffix': 'envs',
 
   // ── Chat list panel ─────────────────────────────────────────
