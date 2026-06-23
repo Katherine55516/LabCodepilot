@@ -715,19 +715,6 @@ export function InlineTestingPanel() {
                 })}
               </div>
 
-              {/* current stage's progress (per-stage, not overall) — height always reserved
-                  (no jump). Execution = cases done/total %; other running steps = indeterminate. */}
-              <div className="mb-3 flex items-center gap-2">
-                <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
-                  {runningStep && (execPct != null ? (
-                    <div className="h-full rounded-full bg-primary transition-all duration-300" style={{ width: `${execPct}%` }} />
-                  ) : (
-                    <div className="h-full w-1/3 rounded-full bg-primary animate-[test-bar-indeterminate_1.1s_ease-in-out_infinite]" />
-                  ))}
-                </div>
-                <span className="w-9 shrink-0 text-right text-[10px] tabular-nums text-muted-foreground">{runningStep && execPct != null ? `${execPct}%` : ""}</span>
-              </div>
-
               {/* current-step detail card */}
               <div className="rounded-xl border border-border bg-card p-3">
                 <div className="mb-2 flex items-center gap-2">
@@ -743,6 +730,18 @@ export function InlineTestingPanel() {
                   >
                     <Play size={12} /> {runningStep === focusStep ? t("test.flow.running") : stepStatus[focusStep] === "done" ? t("test.flow.rerun") : t("test.flow.run")}
                   </button>
+                </div>
+                {/* current stage's progress — inside this card. Execution = cases done/total %;
+                    other running steps = indeterminate; height always reserved (no jump). */}
+                <div className="mt-2 flex items-center gap-2">
+                  <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-muted">
+                    {runningStep && (execPct != null ? (
+                      <div className="h-full rounded-full bg-primary transition-all duration-300" style={{ width: `${execPct}%` }} />
+                    ) : (
+                      <div className="h-full w-1/3 rounded-full bg-primary animate-[test-bar-indeterminate_1.1s_ease-in-out_infinite]" />
+                    ))}
+                  </div>
+                  <span className="w-9 shrink-0 text-right text-[10px] tabular-nums text-muted-foreground">{runningStep && execPct != null ? `${execPct}%` : ""}</span>
                 </div>
                 {focusStep === "execution" && (
                   <>
