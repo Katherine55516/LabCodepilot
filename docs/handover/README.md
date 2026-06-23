@@ -35,6 +35,7 @@
 | markdown-artifact-overhaul.md | Markdown 渲染 × Artifact 预览体系：PreviewSource 联合、DiffSummary 卡片、Sandpack 单文件 React、CodeMirror 编辑+自动保存、长图导出 IPC、文件 I/O API 合同、loadedPath/freshPreview 防漂移 |
 | login-system.md | 登录账号体系：浏览器 OAuth + ModelConfig 下发镜像到 api_providers (source='managed') + 与 OpenAI OAuth 完全隔离、双进程 token 文件共享、broker.ts 桥接、字段映射矩阵、错误处理矩阵 |
 | gsd-bundle.md | 内置 GSD（gsd-build/get-shit-done, MIT）：vendor 流水线、平面化 + colon→hyphen 转换、Electron 同步 + IPC、agents 镜像 + hash 冲突跳过、Settings UI 完整面板、扫描器 frontmatter description 普惠修复 |
+| ailab-plugin.md | 内置 AI_LabTest（qitianersheng/ai-lab-test-agent, MIT）：参照 GSD 的 vendor 流水线，差异为命名空间用 commands/ai-lab-test/ 子目录、安装时改写 ${CLAUDE_PLUGIN_ROOT} 为插件目录绝对路径、默认关闭、停用真删命名空间目录、启用时经 /api/plugins/mcp 注册 playwright MCP |
 | skill-agents-dir-mirror.md | Skill 目录镜像（`~/.agents/skills/` → `~/.claude/skills/`）：内置 binary 只扫 `~/.claude/skills/` 导致 `~/.agents/skills/` 技能 agent 不可见、复制非搬移 + 标记 + 哈希刷新 + 孤儿清理、5 个调用点、与 MCP `46caccd` 同类问题 |
 | conversation-interleaved-flow.md | 对话流交错渲染：文字/工具/思考按时间序交错；orderedBlocks 累积 + segmentsFromBlocks 保序配对 + MessageSegments 共享渲染；流式 + 持久双路径；旧消息 back-compat 限制 |
 | batch-session-import.md | 批量会话导入：多选/全选/三态 checkbox、批量 endpoint（一次查重 Map vs 单条 N 次全表）、importOneSession 共用 helper、聚合 summary 永远 200、不跳转、嵌套 button hydration 修复 |

@@ -61,6 +61,13 @@ import {
   registerGsdIpc,
 } from './gsd-installer';
 
+// Vendor-bundled AI_LabTest plugin — synced to ~/.claude/plugins/external_plugins/
+// on first launch (default disabled) and version drift. See electron/ailab-installer.ts.
+import {
+  install as installAilabBundle,
+  registerAilabIpc,
+} from './ailab-installer';
+
 // Auto-inject `skipWebFetchPreflight: true` into ~/.claude/settings.json on
 // startup so users behind enterprise networks / GFW don't hit the
 // "Unable to verify if domain X is safe to fetch" error from Claude Code's
@@ -1230,6 +1237,28 @@ app.whenReady().then(async () => {
     })
     .catch((err) => {
       console.error('[gsd-installer] startup sync threw:', err);
+    });
+
+  // --- Vendor-bundled AI_LabTest: sync (fire-and-forget, never blocks startup) ---
+  // First launch lays down the plugin dir DISABLED; the user enables it from
+  // Settings → Plugins (which also registers the Playwright MCP). When already
+  // enabled, this re-mirrors commands + skill and picks up version drift.
+  registerAilabIpc(ipcMain);
+  Promise.resolve()
+    .then(() => {
+      const status = installAilabBundle({
+        log: (msg) => console.log(msg),
+      });
+      if (status.lastError) {
+        console.warn('[ailab-installer] startup sync had error:', status.lastError);
+      } else {
+        console.log(
+          `[ailab-installer] startup sync OK (installed=${status.installed}, enabled=${status.enabled})`,
+        );
+      }
+    })
+    .catch((err) => {
+      console.error('[ailab-installer] startup sync threw:', err);
     });
 
   // --- Auto-inject skipWebFetchPreflight into ~/.claude/settings.json ---

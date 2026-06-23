@@ -163,6 +163,51 @@ interface ElectronGsdAPI {
   uninstall: () => Promise<GsdInstallStatus>;
 }
 
+/**
+ * Vendor-bundled AI_LabTest plugin (qitianersheng/ai-lab-test-agent, MIT)
+ * installer API. See electron/ailab-installer.ts for the implementation.
+ */
+export interface AilabPluginManifest {
+  name: string;
+  displayName: string;
+  description: string;
+  source: string;
+  sourceUrl?: string;
+  sourceCommit: string;
+  sourcePluginVersion?: string;
+  transformVersion: number;
+  license: string;
+  licenseFile?: string;
+  commandCount: number;
+  skillCount: number;
+  ruleCount?: number;
+  commandPrefix: string;
+  requiresMcp?: string[];
+  bundledAt?: string;
+}
+
+export interface AilabInstallStatus {
+  enabled: boolean;
+  installed: boolean;
+  bundledVersion: string | null;
+  installedVersion: string | null;
+  needsSync: boolean;
+  manifest: AilabPluginManifest | null;
+  installPath: string;
+  commandsMirrorPath: string;
+  skillsMirrorPath: string;
+  lastError?: string;
+}
+
+interface ElectronAilabAPI {
+  getStatus: () => Promise<AilabInstallStatus>;
+  install: () => Promise<AilabInstallStatus>;
+  resync: () => Promise<AilabInstallStatus>;
+  enable: () => Promise<AilabInstallStatus>;
+  disable: () => Promise<AilabInstallStatus>;
+  uninstall: () => Promise<AilabInstallStatus>;
+}
+
 interface ElectronAPI {
   versions: {
     electron: string;
@@ -211,6 +256,8 @@ interface ElectronAPI {
   auth?: ElectronAuthAPI;
   /** Vendor-bundled GSD plugin (gsd-build/get-shit-done, MIT). */
   gsd?: ElectronGsdAPI;
+  /** Vendor-bundled AI_LabTest plugin (qitianersheng/ai-lab-test-agent, MIT). */
+  ailab?: ElectronAilabAPI;
   /** Voice-to-text input (Bailian realtime ASR). Electron-only (renderer falls back to hidden button). */
   asr?: {
     requestMicPermission: () => Promise<{ granted: boolean; error?: string }>;
