@@ -454,6 +454,47 @@ export interface SkillLockFile {
   skills: Record<string, SkillLockEntry>;
 }
 
+// ── MCP 市场 ───────────────────────────────────────────────────────────
+
+/** MCP 市场列表/详情卡片的归一化 DTO（数据源：官方 Registry / Glama 兜底）。 */
+export interface MarketplaceMcpServer {
+  /** 完整反向 DNS 名，如 `ai.agenttrust/mcp-server`（唯一标识）。 */
+  name: string;
+  title?: string;
+  description?: string;
+  version?: string;
+  /** 命名空间（name 中 `/` 之前），如 `ai.agenttrust`。 */
+  namespace: string;
+  /** 'github' = io.github.* GitHub 验证；'domain' = 反向域名验证。 */
+  namespaceKind: 'github' | 'domain';
+  hasPackages: boolean;
+  hasRemotes: boolean;
+  /** 可用的本地包类型，如 ['npm']。 */
+  registryTypes: string[];
+  /** 可用的远程传输类型，如 ['streamable-http']。 */
+  remoteTypes: string[];
+  repositoryUrl?: string;
+  /** registry 状态：active / deprecated / deleted。 */
+  status?: string;
+  /** 数据源。 */
+  source: 'official' | 'glama';
+  /** 是否已安装（按 ledger + ~/.claude.json 现存校验）。 */
+  isInstalled?: boolean;
+  /** 已安装时在 mcpServers 里的 key。 */
+  installedKey?: string;
+}
+
+/** 市场安装台账条目（记录 marketplace server → 本地 mcpServers key 的来源映射）。 */
+export interface McpMarketInstallEntry {
+  /** mcpServers 里的 key。 */
+  key: string;
+  version?: string;
+  source: 'official' | 'glama';
+  installedAt: string;
+  /** 该 server 写入的密钥 settingKey 列表（卸载时一并清除）。 */
+  secretKeys?: string[];
+}
+
 export interface SkillLockEntry {
   source: string;
   sourceType: string;
