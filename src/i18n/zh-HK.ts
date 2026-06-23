@@ -407,6 +407,8 @@ const zhHK: Record<TranslationKey, string> = {
   'mcp.consentAck': '我已理解這會在我的電腦上執行未受信任的程式碼。',
   'mcp.community': '社群',
   'mcp.tierReviewed': '官方已審',
+  'mcp.runtimeMissing': '未偵測到執行階段',
+  'mcp.runtimeMissingHint': '安裝後需先裝好它，伺服器才能連接：',
   'mcp.loadingServers': '加載 MCP 服務器中...',
   'mcp.serverConfig': 'MCP 服務器配置',
   'mcp.noServers': '未配置 MCP 服務器',

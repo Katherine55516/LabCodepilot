@@ -519,6 +519,20 @@ export interface McpTrustAssessment {
   friction: 'normal' | 'extra-confirm' | 'blocked';
 }
 
+/** 运行时预检结果（Phase 2b）：stdio server 需要的运行时是否就绪。 */
+export interface McpRuntimeRequirement {
+  /** 运行时类别。 */
+  kind: 'node' | 'uv' | 'docker' | 'dotnet' | 'unknown';
+  /** 实际要执行的命令（npx / uvx / docker …）。 */
+  command: string;
+  /** 展示名（Node.js / uv / Docker / .NET）。 */
+  name: string;
+  /** 安装指引链接。 */
+  url?: string;
+  /** 是否在 PATH（含扩展目录）中检测到。 */
+  available: boolean;
+}
+
 /** 已知恶意/漏洞黑名单条目。 */
 export interface McpDenylistEntry {
   /** 包类型；省略 = 任意。 */

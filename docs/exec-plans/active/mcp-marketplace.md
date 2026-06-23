@@ -14,6 +14,7 @@
 | Phase 0 | POC：验证 server.json→MCPServerConfig 映射 + 内置二进制能拉起 | ✅ 已完成 | 脚本 `scripts/poc-mcp-marketplace.mjs`；挖出冷启动 prefetch 坑 |
 | Phase 1 | MVP：搜索 / 详情 / 动态表单 / 安全确认 / prefetch 安装 / 卸载 | ✅ 已完成 | 两 tab（我的 MCP / MCP 市场），CDP 验证安装→卸载完整往返通过 |
 | Phase 2 | 加固：信任分层 + 黑名单 + 危险模式扫描 + 分级摩擦（密钥落地/版本钉死已在 P1 提前做） | ✅ 已完成 | 纵深防御四层非 isSafe；CDP 三态验证；运行时预检/Glama 兜底转 Phase 2b |
+| Phase 2b | 运行时预检（检测 npx/uvx/docker + 友好引导）；Glama 兜底 | 🔄 进行中 | PATH 增强已存在(main.ts)无需重做；Glama 经调研暂缓（无命令字段不能一键装） |
 | Phase 3 | 远程进阶：OAuth 2.1 环回 / 工具定义 TOFU / 与内置二进制冲突排查 | 📋 待开始 | |
 | Phase 4 | 可选增强：入站深链 / Smithery 托管 / mcp-scan 离线 / Docker 沙箱 / catalog 缓存同步 | 📋 待开始 | 任意顺序 |
 
@@ -31,6 +32,32 @@
 - 2026-06-23（Phase 2）: **黑名单这一版内置静态种子 JSON**（随版本更新），架构预留远程合并（后续接登录后端下发，呼应「自托管、不向美国站点发数据」与「官方 Registry 只人工下架、需自己快速止血」）。
 - 2026-06-23（Phase 2）: **信任 tier 只陈述可验证来源事实**（official-reviewed 手维护白名单 / namespace-verified github|domain / community）；**不按下载量排信任**（可刷、仿冒涨得快）。Docker 签名因需 docker CLI 才能机验，本版作为 `oci-container` 信号而非自动 tier。
 - 2026-06-23（Phase 2）: **风险扫描是启发式「提示」非判定**，对已映射的 command/args/env 跑纯函数；只挡显眼/懒的坏，挡不住有心人——明确写进 UI 与文档。
+
+## Phase 2b 详细设计（运行时预检）
+
+> 调研结论：**打包版 PATH 增强已存在**——`electron/main.ts` 已加载用户 shell 环境并构造 expanded
+> PATH（`/opt/homebrew/bin`、`~/.local/bin`、`.npm-global/bin`、nvm 等），传给 Next 服务进程
+> (line 731) 与内置二进制 (1258/1437)，`platform.ts:getExtraPathDirs()` 是现成的目录清单。
+> 故 Phase 2b 不重做 PATH，只补**预检 CHECK + 友好引导**这个真正的缺口。
+
+### 决策
+
+- 2026-06-23（Phase 2b）: **不重造 PATH 增强**（main.ts 已做），只加运行时检测 + 引导。
+- 2026-06-23（Phase 2b）: **Glama 暂缓**。实测其 API 只返回 `{name, repository.url, environmentVariablesJsonSchema, attributes}`，**无 packages/command/install 字段**，无法确定性拼出 `npx/uvx/docker` 命令 → 不能一键装，与「点击即用」核心目标冲突；官方 Registry 已有 1.5 万+ 可装 server。未来若做，只能「发现/广度 + 手动添加兜底」，不假装一键。
+- 2026-06-23（Phase 2b）: **缺运行时是软警告不硬拦**。用户可能装完再补运行时；安装照写配置，仅在详情/对话框醒目提示「缺 {Node.js/uv/Docker}，连接前需先装好」+ 安装链接。
+
+### 实现
+
+- `src/lib/runtime-check.ts`（纯逻辑，可单测）：
+  - `isCommandAvailable(command)`：解析二进制是否在 `process.env.PATH`（已 expanded）∪ `getExtraPathDirs()` 中；绝对路径直接 existsSync。
+  - `checkRuntimeForConfig(config)`：由 `config.command` 映射运行时（npx/node→Node.js、uvx/uv→uv、docker→Docker、dnx→.NET），返回 `{kind, command, name, url, available}`；远程（无 command）返回 null。
+- `detail` 路由响应增加 `runtime` 字段；详情组件存下并透传安装对话框。
+- UI：详情 body + 安装对话框，`runtime && !runtime.available` 时显示琥珀警告 + 运行时名 + 安装链接（不禁用安装）。
+- i18n 三语；`runtime-check.test.ts` 覆盖映射 + 解析逻辑。
+
+### Phase 2b 验收
+
+构造一个需 docker 的 server（或临时改 PATH），详情/对话框出现「缺 Docker」警告 + 链接；正常 npx server 无警告；typecheck + 单测通过；CDP 截图。
 
 ## Phase 2 详细设计（安全加固）
 

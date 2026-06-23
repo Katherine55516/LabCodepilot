@@ -14,7 +14,7 @@ import { Label } from "@/components/ui/label";
 import { Warning, SpinnerGap, CheckCircle, X, DownloadSimple } from "@/components/ui/icon";
 import { useTranslation } from "@/hooks/useTranslation";
 import { stripAnsi } from "@/lib/strip-ansi";
-import type { MarketplaceMcpServer, MCPServerConfig } from "@/types";
+import type { MarketplaceMcpServer, MCPServerConfig, McpRuntimeRequirement } from "@/types";
 
 /** 详情接口返回的映射结果（与 server-json-mapper 的 RequiredInput 对齐）。 */
 export interface MappedDetail {
@@ -39,6 +39,7 @@ interface McpInstallDialogProps {
   onOpenChange: (open: boolean) => void;
   server: MarketplaceMcpServer;
   mapped: MappedDetail;
+  runtime?: McpRuntimeRequirement | null;
   onComplete: () => void;
 }
 
@@ -57,6 +58,7 @@ export function McpInstallDialog({
   onOpenChange,
   server,
   mapped,
+  runtime,
   onComplete,
 }: McpInstallDialogProps) {
   const { t } = useTranslation();
@@ -198,6 +200,29 @@ export function McpInstallDialog({
                 </div>
               )}
             </div>
+
+            {/* 运行时预检：缺失给软警告 + 安装链接 */}
+            {runtime && !runtime.available && (
+              <div className="rounded-md border border-status-warning-border bg-status-warning/10 p-3">
+                <div className="flex items-start gap-2">
+                  <Warning size={14} className="text-status-warning-foreground shrink-0 mt-0.5" />
+                  <div className="text-xs">
+                    <p className="font-medium">{t("mcp.runtimeMissing")}：{runtime.name}</p>
+                    <p className="text-muted-foreground mt-0.5">
+                      {t("mcp.runtimeMissingHint")}
+                      {runtime.url && (
+                        <>
+                          {" "}
+                          <a href={runtime.url} target="_blank" rel="noopener noreferrer" className="underline hover:text-foreground">
+                            {runtime.url}
+                          </a>
+                        </>
+                      )}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* 黑名单硬拦 */}
             {blocked && (

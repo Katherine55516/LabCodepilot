@@ -398,6 +398,8 @@ const zh: Record<TranslationKey, string> = {
   'mcp.consentAck': '我已理解这会在我的电脑上运行未受信代码。',
   'mcp.community': '社区',
   'mcp.tierReviewed': '官方已审',
+  'mcp.runtimeMissing': '未检测到运行时',
+  'mcp.runtimeMissingHint': '安装后需先装好它，服务器才能连接：',
   'mcp.loadingServers': '加载 MCP 服务器中...',
   'mcp.serverConfig': 'MCP 服务器配置',
   'mcp.noServers': '未配置 MCP 服务器',

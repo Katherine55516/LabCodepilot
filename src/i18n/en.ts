@@ -401,6 +401,8 @@ const en = {
   'mcp.consentAck': 'I understand this runs untrusted code on my machine.',
   'mcp.community': 'Community',
   'mcp.tierReviewed': 'Reviewed',
+  'mcp.runtimeMissing': 'Runtime not found',
+  'mcp.runtimeMissingHint': 'Install it before this server can connect:',
   'mcp.loadingServers': 'Loading MCP servers...',
   'mcp.serverConfig': 'MCP Server Configuration',
   'mcp.noServers': 'No MCP servers configured',

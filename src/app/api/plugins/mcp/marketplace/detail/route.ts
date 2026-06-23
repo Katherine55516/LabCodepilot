@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getOfficialServer } from '@/lib/mcp-registry-client';
 import { mapServer } from '@/lib/server-json-mapper';
+import { checkRuntimeForConfig } from '@/lib/runtime-check';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -34,6 +35,8 @@ export async function GET(request: NextRequest) {
         requiredInputs: mapped.requiredInputs,
         notes: mapped.notes,
       },
+      // 运行时预检（缺失则 UI 给软警告 + 安装链接）
+      runtime: checkRuntimeForConfig(mapped.config),
     });
   } catch (error) {
     console.error('[mcp/marketplace/detail] Error:', error);

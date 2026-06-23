@@ -15,7 +15,7 @@ import {
 } from "@/components/ui/icon";
 import { useTranslation } from "@/hooks/useTranslation";
 import { McpInstallDialog, type MappedDetail } from "./McpInstallDialog";
-import type { MarketplaceMcpServer } from "@/types";
+import type { MarketplaceMcpServer, McpRuntimeRequirement } from "@/types";
 
 interface McpMarketplaceServerDetailProps {
   server: MarketplaceMcpServer;
@@ -32,6 +32,7 @@ export function McpMarketplaceServerDetail({
 }: McpMarketplaceServerDetailProps) {
   const { t } = useTranslation();
   const [mapped, setMapped] = useState<MappedDetail | null>(null);
+  const [runtime, setRuntime] = useState<McpRuntimeRequirement | null>(null);
   const [loading, setLoading] = useState(true);
   const [showInstall, setShowInstall] = useState(false);
   const [uninstalling, setUninstalling] = useState(false);
@@ -39,6 +40,7 @@ export function McpMarketplaceServerDetail({
   useEffect(() => {
     let cancelled = false;
     setMapped(null);
+    setRuntime(null);
     setLoading(true);
     (async () => {
       try {
@@ -46,6 +48,7 @@ export function McpMarketplaceServerDetail({
         if (!cancelled && res.ok) {
           const data = await res.json();
           setMapped(data.mapped || null);
+          setRuntime(data.runtime || null);
         }
       } catch {
         // ignore
@@ -188,6 +191,29 @@ export function McpMarketplaceServerDetail({
           </div>
         )}
 
+        {/* 运行时预检：缺失给软警告 + 安装链接 */}
+        {runtime && !runtime.available && (
+          <div className="rounded-md border border-status-warning-border bg-status-warning/10 p-3">
+            <div className="flex items-start gap-2">
+              <Warning size={14} className="text-status-warning-foreground shrink-0 mt-0.5" />
+              <div className="text-xs">
+                <p className="font-medium">{t("mcp.runtimeMissing")}：{runtime.name}</p>
+                <p className="text-muted-foreground mt-0.5">
+                  {t("mcp.runtimeMissingHint")}
+                  {runtime.url && (
+                    <>
+                      {" "}
+                      <a href={runtime.url} target="_blank" rel="noopener noreferrer" className="underline hover:text-foreground">
+                        {runtime.url}
+                      </a>
+                    </>
+                  )}
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
+
         {/* 将安装的内容预览 */}
         {loading ? (
           <div className="flex items-center justify-center py-8">
@@ -213,6 +239,7 @@ export function McpMarketplaceServerDetail({
           onOpenChange={setShowInstall}
           server={server}
           mapped={mapped}
+          runtime={runtime}
           onComplete={onInstallComplete}
         />
       )}
