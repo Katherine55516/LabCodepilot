@@ -73,6 +73,8 @@ interface TaskState {
   circuitBroken: boolean;
   /** Free-text 追加指令 the user typed — fed into subsequent step runs' prompts. */
   notes: string[];
+  /** Steps whose artifact was user-imported (新建任务) — a run reuses it, not regenerate. */
+  imported?: { requirement?: boolean; cases?: boolean };
 }
 const DEFAULT_TASK_STATE: TaskState = {
   stepStatus: { requirement: "idle", cases: "idle", execution: "idle", report: "idle" },
@@ -294,22 +296,27 @@ export function InlineTestingPanel() {
   // cases imported → 需求 skipped(done) + 用例 待批准; only 需求 → 需求 待批准.
   const addTask = async (name: string, files?: NewTaskFiles): Promise<{ ok: boolean; error?: string }> => {
     const proj = selected !== null ? projects[selected] : null;
-    const postImport = async (kind: "requirement" | "cases", f: ImportFile): Promise<{ ok: boolean; error?: string }> => {
+    const postImport = async (kind: "requirement" | "cases", f: ImportFile): Promise<{ ok: boolean; error?: string; preview?: string }> => {
       const res = await fetch("/api/test/import", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ projectPath: proj?.path, taskName: name, kind, filename: f.filename, dataBase64: f.dataBase64 }),
       });
       const j = await res.json().catch(() => ({}));
-      return res.ok && j.ok ? { ok: true } : { ok: false, error: (j.error as string) || t("test.newTaskModal.importFailed") };
+      return res.ok && j.ok ? { ok: true, preview: j.preview as string } : { ok: false, error: (j.error as string) || t("test.newTaskModal.importFailed") };
     };
+    // Seed the 测试对话 with what was imported — otherwise the stage looks empty (it
+    // renders the convo stream, not the artifact file) and the upload seems "missing".
+    const seeds: ConvoMsg[] = [];
     if (proj?.path && files?.requirement) {
       const r = await postImport("requirement", files.requirement);
       if (!r.ok) return r;
+      seeds.push({ role: "ai", text: `📄 已导入需求文档「${files.requirement.filename}」，已作为本任务的需求来源（待批准）。\n\n${r.preview || ""}` });
     }
     if (proj?.path && files?.cases) {
       const r = await postImport("cases", files.cases);
       if (!r.ok) return r;
+      seeds.push({ role: "ai", text: `📊 已导入测试用例「${files.cases.filename}」（${r.preview || "已导入"}），待批准后可直接执行。` });
     }
     const id = makeTaskId();
     setProjects((ps) => ps.map((p, i) => (i === selected ? { ...p, tasks: [...p.tasks, { id, name }] } : p)));
@@ -322,6 +329,9 @@ export function InlineTestingPanel() {
           execution: "idle",
           report: "idle",
         },
+        convo: seeds,
+        // Mark imported steps so a re-run REUSES the upload instead of regenerating over it.
+        imported: { requirement: hasReq, cases: hasCases },
       }));
     }
     return { ok: true };
@@ -473,6 +483,11 @@ export function InlineTestingPanel() {
           env,
           // 追加指令: user-typed notes for this task, appended to the step prompt server-side.
           extraInstruction: (taskStates[id]?.notes ?? []).join("\n") || undefined,
+          // Imported step → tell the AI to Read + reuse the uploaded artifact, not overwrite it.
+          reuseImported:
+            (step === "requirement" && !!taskStates[id]?.imported?.requirement) ||
+            (step === "cases" && !!taskStates[id]?.imported?.cases) ||
+            undefined,
           model: model || undefined,
           providerId: providerId || undefined,
         }),

@@ -77,16 +77,20 @@ function ruleBlock(title: string, content: string | null, fallback: string): str
     : `（未找到《${title}》规范文件，按内置精简执行：${fallback}）`;
 }
 
-function requirementPrompt(taskName: string): string {
+function requirementPrompt(taskName: string, reuseImported = false): string {
   const p = artifactPaths(taskName);
   const rule = ruleBlock(
     '需求发现规范',
     loadRule('requirement-discovery'),
     '先扫 /docs 等目录找该任务相关需求文档，命中则结构化归一并标 PROJECT_DOC；找不到从代码反推并标 REVERSE_ENGINEERED；每条需求含 描述/前置/验收(GWT)/异常分支/数据约束/涉及页面或API'
   );
+  // 新建任务时用户上传了需求文档，已写入产物路径 → 让本步以它为权威来源，绝不覆盖。
+  const importedBlock = reuseImported
+    ? `\n\n⚠️⚠️ 用户已上传需求文档，并已写入 \`${p.requirement}\`。请**第一步就 Read 该文件**，把它当作**权威需求来源（等同 PROJECT_DOC，标注来源为 USER_UPLOAD）**：在其内容基础上做结构化归一与补全（确有缺失再从代码反推补全并标 REVERSE_ENGINEERED），**严禁忽略它、也严禁从零生成覆盖用户上传的内容**。下面的「项目内扫描」此时仅作补充。最终仍只 Write 回 \`${p.requirement}\`。`
+    : '';
   return `请对以下测试任务做「需求分析」，产出可评审的需求清单。
 
-目标任务：${taskName}
+目标任务：${taskName}${importedBlock}
 
 ${rule}
 
@@ -110,16 +114,20 @@ ${rule}
 完成后用一句话总结：识别了多少条需求、来源分布（PROJECT_DOC / REVERSE_ENGINEERED 各几条）。`;
 }
 
-function casesPrompt(taskName: string): string {
+function casesPrompt(taskName: string, reuseImported = false): string {
   const p = artifactPaths(taskName);
   const rule = ruleBlock(
     '测试用例完整性规范',
     loadRule('test-case-completeness'),
     '每个「需求×维度」生成用例，字段含 ID/优先级/用例类型/需求引用/标题/前置/步骤(操作↔预期1:1)/断言级别/清理；CRUD 用 serial；多角色用隔离会话比较'
   );
+  // 新建任务时用户上传了用例（已转成 cases.json）→ 让本步复用它，绝不从零覆盖。
+  const importedBlock = reuseImported
+    ? `\n\n⚠️⚠️ 用户已上传测试用例，并已写入 \`${p.cases}\`。请**第一步就 Read 该文件**复用其中的用例，仅做规范化与必要补全（字段缺失、格式不合规、断言不具体时修正），**严禁忽略或从零生成覆盖用户上传的用例**。最终仍只 Write 回 \`${p.cases}\`。`
+    : '';
   return `请为以下测试任务设计测试用例。
 
-目标任务：${taskName}
+目标任务：${taskName}${importedBlock}
 输入产物（请先 Read）：已产出的需求清单 ${p.requirement}
 
 ${rule}
@@ -200,6 +208,8 @@ export interface BuildStepOptions {
   baseUrl?: string;
   /** Free-text instructions the user typed in the 测试对话 composer — appended to the step prompt. */
   extraInstruction?: string;
+  /** 新建任务 imported this step's artifact (需求/用例) — Read + reuse the upload, don't regenerate. */
+  reuseImported?: boolean;
 }
 
 export interface BuiltStep {
@@ -223,9 +233,9 @@ export function buildStep(step: TestStep, opts: BuildStepOptions): BuiltStep {
   const note = opts.extraInstruction;
   switch (step) {
     case 'requirement':
-      return withNote({ systemPrompt: SYS.requirement, prompt: requirementPrompt(taskName), needsPlaywright: false }, note);
+      return withNote({ systemPrompt: SYS.requirement, prompt: requirementPrompt(taskName, opts.reuseImported), needsPlaywright: false }, note);
     case 'cases':
-      return withNote({ systemPrompt: SYS.cases, prompt: casesPrompt(taskName), needsPlaywright: false }, note);
+      return withNote({ systemPrompt: SYS.cases, prompt: casesPrompt(taskName, opts.reuseImported), needsPlaywright: false }, note);
     case 'execution':
       return withNote({ systemPrompt: SYS.execution, prompt: executionPrompt(taskName, env, opts.baseUrl), needsPlaywright: true }, note);
     case 'report':

@@ -136,7 +136,14 @@ export async function POST(req: Request): Promise<Response> {
     const abs = path.join(projectPath, rel);
     fs.mkdirSync(path.dirname(abs), { recursive: true });
     fs.writeFileSync(abs, out, 'utf-8');
-    return Response.json({ ok: true, path: rel });
+    // Preview shown in the 测试对话 right after import, so the stage isn't empty.
+    let preview = '';
+    if (kind === 'requirement') {
+      preview = out.length > 1500 ? out.slice(0, 1500) + '\n\n…（已截断，完整内容见产物文件）' : out;
+    } else {
+      try { preview = `已解析 ${(JSON.parse(out).cases || []).length} 条用例`; } catch { preview = '用例已导入'; }
+    }
+    return Response.json({ ok: true, path: rel, preview });
   } catch (e) {
     return Response.json({ error: e instanceof Error ? e.message : 'import failed' }, { status: 500 });
   }

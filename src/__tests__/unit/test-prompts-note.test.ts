@@ -35,3 +35,28 @@ describe("buildStep extraInstruction (追加指令)", () => {
     assert.equal(b.prompt.includes("用户补充要求"), false);
   });
 });
+
+describe("buildStep reuseImported (新建任务导入产物)", () => {
+  it("requirement: no reuse block by default", () => {
+    const b = buildStep("requirement", { taskName: "登录验证" });
+    assert.equal(b.prompt.includes("用户已上传需求文档"), false);
+  });
+
+  it("requirement: injects the reuse block + the 需求.md path when reuseImported", () => {
+    const b = buildStep("requirement", { taskName: "登录验证", reuseImported: true });
+    assert.ok(b.prompt.includes("用户已上传需求文档"));
+    assert.ok(b.prompt.includes("登录验证-需求.md"));
+    assert.ok(b.prompt.includes("严禁") && b.prompt.includes("覆盖"));
+  });
+
+  it("cases: injects the reuse block + the cases.json path when reuseImported", () => {
+    const b = buildStep("cases", { taskName: "登录验证", reuseImported: true });
+    assert.ok(b.prompt.includes("用户已上传测试用例"));
+    assert.ok(b.prompt.includes("登录验证.cases.json"));
+  });
+
+  it("cases: no reuse block by default", () => {
+    const b = buildStep("cases", { taskName: "登录验证" });
+    assert.equal(b.prompt.includes("用户已上传测试用例"), false);
+  });
+});
