@@ -50,6 +50,34 @@ describe('denylist — matchDenylist', () => {
   it('无关包不命中', () => {
     assert.equal(matchDenylist({ registryType: 'npm', identifier: '@safe/server', version: '1.0.0' }), null);
   });
+
+  it('scoped 包 @scope/name 正确匹配（bareId 不被 @ 截断）', () => {
+    // @cyanheads/git-mcp-server <2.1.5
+    assert.ok(matchDenylist({ registryType: 'npm', identifier: '@cyanheads/git-mcp-server', version: '2.1.0' }));
+    assert.equal(matchDenylist({ registryType: 'npm', identifier: '@cyanheads/git-mcp-server', version: '2.1.5' }), null);
+    // @akoskm/create-mcp-server-stdio <0.0.13
+    assert.ok(matchDenylist({ registryType: 'npm', identifier: '@akoskm/create-mcp-server-stdio', version: '0.0.12' }));
+  });
+
+  it('flowise <3.1.0 命中；3.1.0 已修复不命中', () => {
+    assert.ok(matchDenylist({ registryType: 'npm', identifier: 'flowise', version: '3.0.13' }));
+    assert.equal(matchDenylist({ registryType: 'npm', identifier: 'flowise', version: '3.1.0' }), null);
+  });
+
+  it('无修复条目 adb-mcp <=0.1.0 命中', () => {
+    assert.ok(matchDenylist({ registryType: 'npm', identifier: 'adb-mcp', version: '0.1.0' }));
+  });
+
+  it('pypi CalVer mcp-server-git <2025.12.18 正确比较', () => {
+    assert.ok(matchDenylist({ registryType: 'pypi', identifier: 'mcp-server-git', version: '2025.9.25' }));
+    assert.equal(matchDenylist({ registryType: 'pypi', identifier: 'mcp-server-git', version: '2025.12.18' }), null);
+    assert.equal(matchDenylist({ registryType: 'pypi', identifier: 'mcp-server-git', version: '2026.1.1' }), null);
+  });
+
+  it('registryType 不一致不命中（npm 条目 ≠ 同名 pypi 包）', () => {
+    // flowise 是 npm 条目；构造一个同名 pypi 包不应命中
+    assert.equal(matchDenylist({ registryType: 'pypi', identifier: 'flowise', version: '1.0.0' }), null);
+  });
 });
 
 describe('scanConfigRisks — 命令风险规则', () => {
