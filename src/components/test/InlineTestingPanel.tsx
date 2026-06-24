@@ -583,17 +583,21 @@ export function InlineTestingPanel() {
         return;
       }
       const reader = res.body.getReader();
-      // 停止的关键: 执行阶段 AI 跑一个浏览器工具(可达几十秒)时后端不吐 SSE,循环就卡在
-      // await reader.read() 等下一帧 —— 仅 abort() 在本环境不一定能让 pending 的 read()
-      // 立刻 reject(这是前几次"停不掉"的根因)。所以 abort 时主动 reader.cancel(),强制让
-      // 卡住的 read() 立即返回,循环随即退出、复位本步。
-      ctrl.signal.addEventListener("abort", () => { reader.cancel().catch(() => {}); });
+      // 停止的关键(前几次没解决的根因): 执行阶段 AI 跑一个浏览器工具(可达几十秒)时后端
+      // 不吐 SSE,循环卡在 await reader.read();本环境里 abort() 既不让 pending 的 read()
+      // reject、reader.cancel() 也不一定能立刻唤醒它。所以改用 Promise.race —— abort 一
+      // 触发就立刻赢得 race、把循环掀出去并复位,【完全不等】卡住的 read() 返回。
+      const abortedSignal = new Promise<{ aborted: true }>((resolve) => {
+        const onAbort = () => { reader.cancel().catch(() => {}); resolve({ aborted: true }); };
+        if (ctrl.signal.aborted) onAbort();
+        else ctrl.signal.addEventListener("abort", onAbort, { once: true });
+      });
       const decoder = new TextDecoder();
       let buf = "";
       for (;;) {
-        const { done, value } = await reader.read();
-        // read() 返回后(正常帧 / done / 被 cancel 唤醒)立即查 abort → 干净停止本步。
-        if (ctrl.signal.aborted) { stopped = true; break; }
+        const chunk = await Promise.race([reader.read(), abortedSignal]);
+        if ("aborted" in chunk) { stopped = true; break; } // abort 赢得 race → 立即停止,不等 read
+        const { done, value } = chunk;
         if (done) break;
         buf += decoder.decode(value, { stream: true });
         const frames = buf.split("\n\n");
