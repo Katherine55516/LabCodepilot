@@ -476,9 +476,9 @@ export function InlineTestingPanel() {
   useEffect(() => { setViewStep(null); }, [aId]);
   // First not-done step = the "current" step the detail card focuses on.
   const nextPendingStep = (): TestStep | null => STEPS.find((s) => stepStatus[s.step] !== "done")?.step ?? null;
-  // focusStep = 详情卡当前展示的阶段:viewStep 优先(用户点节点查看),否则跟随运行中/下一个待办。
-  // 真正触发执行/停止的是详情卡里的运行/停止按钮 —— 点流水线节点只切换查看。
-  const focusStep: TestStep = viewStep ?? runningStep ?? nextPendingStep() ?? "report";
+  // focusStep = 详情卡当前展示的阶段。执行中(runningStep 存在)强制 focus 运行中的节点,
+  // 不让 viewStep 把详情卡切走;空闲时才用 viewStep(用户点节点查看)或下一个待办阶段。
+  const focusStep: TestStep = runningStep ?? viewStep ?? nextPendingStep() ?? "report";
   // A human-gated step awaiting approval → drives the conversation's gate bar.
   const reviewStep = STEPS.find((s) => stepStatus[s.step] === "review")?.step ?? null;
 
@@ -583,13 +583,21 @@ export function InlineTestingPanel() {
         return;
       }
       const reader = res.body.getReader();
+      // 停止的关键(前几次没解决的根因): 执行阶段 AI 跑一个浏览器工具(可达几十秒)时后端
+      // 不吐 SSE,循环卡在 await reader.read();本环境里 abort() 既不让 pending 的 read()
+      // reject、reader.cancel() 也不一定能立刻唤醒它。所以改用 Promise.race —— abort 一
+      // 触发就立刻赢得 race、把循环掀出去并复位,【完全不等】卡住的 read() 返回。
+      const abortedSignal = new Promise<{ aborted: true }>((resolve) => {
+        const onAbort = () => { reader.cancel().catch(() => {}); resolve({ aborted: true }); };
+        if (ctrl.signal.aborted) onAbort();
+        else ctrl.signal.addEventListener("abort", onAbort, { once: true });
+      });
       const decoder = new TextDecoder();
       let buf = "";
       for (;;) {
-        // 停止: abort 后后端可能仍在吐数据(执行阶段逐用例输出),reader.read() 不会 reject,
-        // 循环退不出 → UI 不复位。每轮先查 abort 标志,主动停止处理并复位本步。
-        if (ctrl.signal.aborted) { stopped = true; break; }
-        const { done, value } = await reader.read();
+        const chunk = await Promise.race([reader.read(), abortedSignal]);
+        if ("aborted" in chunk) { stopped = true; break; } // abort 赢得 race → 立即停止,不等 read
+        const { done, value } = chunk;
         if (done) break;
         buf += decoder.decode(value, { stream: true });
         const frames = buf.split("\n\n");
@@ -885,11 +893,12 @@ export function InlineTestingPanel() {
                     <button
                       key={s.step}
                       onClick={() => setViewStep(s.step)}
-                      disabled={!current?.path}
+                      // 执行中锁定:不能点其他节点(连查看切换也禁用),避免切走详情卡 + 误以为能运行别的节点。
+                      disabled={!current?.path || busy}
                       title={t(s.name)}
                       className={`min-w-[120px] flex-1 rounded-lg border p-2.5 text-left transition-colors disabled:cursor-not-allowed ${stepPillClass(status)} ${
                         isFocus ? "ring-1 ring-muted-foreground/40" : ""
-                      } ${current?.path ? "hover:border-muted-foreground/40" : ""}`}
+                      } ${current?.path && !busy ? "hover:border-muted-foreground/40" : ""}`}
                     >
                       <div className="flex items-center gap-1.5">
                         {isRunning
