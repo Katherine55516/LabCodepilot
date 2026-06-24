@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { Terminal, NotePencil, Brain, GlobeSimple, Lightning, Folder, File } from '@/components/ui/icon';
 import { useTranslation } from '@/hooks/useTranslation';
 import type { TranslationKey } from '@/i18n';
@@ -16,6 +16,11 @@ import {
   CommandListFooter,
   CommandListFooterAction,
 } from '@/components/patterns';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
 
 export type { PopoverItem, PopoverMode } from '@/types';
 
@@ -37,6 +42,40 @@ interface SlashCommandPopoverProps {
   onSetInputValue: (value: string) => void;
   onClosePopover: () => void;
   onFocusTextarea: () => void;
+}
+
+/**
+ * 描述文字:仅当被 truncate 截断(scrollWidth > clientWidth)时,hover 才弹出
+ * 完整文字的 tooltip;短文字已完整展示则不触发。鼠标移开自动消失。
+ * 复用全局 TooltipProvider(AppShell,delayDuration=300)。
+ */
+function OverflowTooltip({ text, className }: { text: string; className?: string }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  const [open, setOpen] = useState(false);
+
+  return (
+    <Tooltip
+      open={open}
+      onOpenChange={(next) => {
+        if (!next) {
+          setOpen(false);
+          return;
+        }
+        // 仅在文字确实被截断时才允许弹出(+1 容错亚像素差)。
+        const el = ref.current;
+        setOpen(!!el && el.scrollWidth > el.clientWidth + 1);
+      }}
+    >
+      <TooltipTrigger asChild>
+        <span ref={ref} className={className}>
+          {text}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent side="top" align="start" className="max-w-sm break-words">
+        {text}
+      </TooltipContent>
+    </Tooltip>
+  );
 }
 
 export function SlashCommandPopover({
@@ -120,16 +159,21 @@ export function SlashCommandPopover({
       <span className="font-mono text-xs shrink-0">{item.display || item.label}</span>
       {(item.descriptionKey || item.description) && (
         // Description fills the remaining row width (flex-1 min-w-0) and only
-        // ellipsizes at the row edge — no fixed 200px cap. Localization fallback
-        // chain: built-in descriptionKey (already localized) → zh override for
-        // external/plugin commands when locale==='zh' → raw English frontmatter.
-        <span className="text-xs text-muted-foreground truncate flex-1 min-w-0">
-          {item.descriptionKey
-            ? t(item.descriptionKey)
-            : (GSD_COMMAND_DESCRIPTIONS_ZH[item.label]
-                ? localize(locale, GSD_COMMAND_DESCRIPTIONS_ZH[item.label]!, item.description ?? '')
-                : item.description)}
-        </span>
+        // ellipsizes at the row edge — no fixed 200px cap. When it overflows,
+        // hovering reveals the full text in a tooltip (short, fully-shown
+        // descriptions don't trigger it). Localization fallback chain: built-in
+        // descriptionKey (already localized) → zh override for external/plugin
+        // commands when locale==='zh' → raw English frontmatter.
+        <OverflowTooltip
+          text={
+            (item.descriptionKey
+              ? t(item.descriptionKey)
+              : (GSD_COMMAND_DESCRIPTIONS_ZH[item.label]
+                  ? localize(locale, GSD_COMMAND_DESCRIPTIONS_ZH[item.label]!, item.description ?? '')
+                  : item.description)) ?? ''
+          }
+          className="text-xs text-muted-foreground truncate flex-1 min-w-0"
+        />
       )}
       {!item.builtIn && item.installedSource && (
         <span className="text-xs text-muted-foreground shrink-0 ml-auto">
