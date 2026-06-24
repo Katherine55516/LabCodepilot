@@ -15,7 +15,7 @@
 | Phase 1 | MVP：搜索 / 详情 / 动态表单 / 安全确认 / prefetch 安装 / 卸载 | ✅ 已完成 | 两 tab（我的 MCP / MCP 市场），CDP 验证安装→卸载完整往返通过 |
 | Phase 2 | 加固：信任分层 + 黑名单 + 危险模式扫描 + 分级摩擦（密钥落地/版本钉死已在 P1 提前做） | ✅ 已完成 | 纵深防御四层非 isSafe；CDP 三态验证；运行时预检/Glama 兜底转 Phase 2b |
 | Phase 2b | 运行时预检（检测 npx/uvx/docker + 友好引导） | ✅ 已完成 | PATH 增强已存在(main.ts)无需重做；Glama 调研后暂缓（无命令字段不能一键装）；CDP 验证 |
-| Phase 3 | 务实版：版本变更 rug-pull 复查（注册中心级，替代 live-TOFU）+ needs-auth UX | 🔄 进行中 | 调研后缩范围：OAuth 内置二进制已做不重造、live-TOFU 默认路径不可行 |
+| Phase 3 | 务实版：版本变更 rug-pull 复查（注册中心级，替代 live-TOFU）+ needs-auth UX | ✅ 已完成 | 调研后缩范围：OAuth 内置二进制已做不重造、live-TOFU 默认路径不可行；CDP 验证 |
 | Phase 4 | 可选增强：入站深链 / Smithery 托管 / mcp-scan 离线 / Docker 沙箱 / catalog 缓存同步 | 📋 待开始 | 任意顺序 |
 
 ## 决策日志
