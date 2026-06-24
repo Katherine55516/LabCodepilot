@@ -363,7 +363,7 @@ const zh: Record<TranslationKey, string> = {
   // ── MCP ─────────────────────────────────────────────────────
   'mcp.addServer': '添加服务器',
   'mcp.myMcp': '我的 MCP',
-  'mcp.market': 'MCP 市场',
+  'mcp.market': 'MCP 市场（外部）',
   'mcp.marketDesc': '从官方注册中心浏览并一键安装 MCP 服务器。',
   'mcp.marketSearch': '搜索 MCP 注册中心…',
   'mcp.marketError': '加载市场失败',

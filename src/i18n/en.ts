@@ -366,7 +366,7 @@ const en = {
   // ── MCP ─────────────────────────────────────────────────────
   'mcp.addServer': 'Add Server',
   'mcp.myMcp': 'My MCP',
-  'mcp.market': 'Marketplace',
+  'mcp.market': 'Marketplace (External)',
   'mcp.marketDesc': 'Browse and one-click install MCP servers from the official registry.',
   'mcp.marketSearch': 'Search MCP registry...',
   'mcp.marketError': 'Failed to load marketplace',
