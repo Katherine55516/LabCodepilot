@@ -189,6 +189,29 @@ function extractTokenUsage(msg: SDKResultMessage): TokenUsage | null {
 }
 
 /**
+ * FIX(占用口径): 从单条 assistant 消息（= 一次模型请求）提取其单次 usage。
+ * 与整轮累计的 result.usage 不同，这是「该次请求的真实 prompt 大小」——
+ * input + cache_read + cache_creation 不含跨内部请求累加，适合作为当前上下文占用。
+ * 探针实测：整轮 result.usage.cacheR 会随回合内 N 次工具调用累加（一次回合 17 次请求
+ * → cacheR 虚高 6.5×），而单条 assistant 请求的值是平的、等于真实驻留量。
+ */
+function extractAssistantTurnUsage(msg: SDKAssistantMessage): TokenUsage | null {
+  const u = msg.message?.usage as {
+    input_tokens?: number;
+    output_tokens?: number;
+    cache_read_input_tokens?: number;
+    cache_creation_input_tokens?: number;
+  } | undefined;
+  if (!u) return null;
+  return {
+    input_tokens: u.input_tokens ?? 0,
+    output_tokens: u.output_tokens ?? 0,
+    cache_read_input_tokens: u.cache_read_input_tokens ?? 0,
+    cache_creation_input_tokens: u.cache_creation_input_tokens ?? 0,
+  };
+}
+
+/**
  * Stream Claude responses using the Agent SDK.
  * Returns a ReadableStream of SSE-formatted strings.
  */
@@ -1139,6 +1162,8 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
         let capturePending = !isCacheFresh(capProviderId);
 
         let tokenUsage: TokenUsage | null = null;
+        // FIX(占用口径): 最后一条 assistant 请求的单次 usage（= 当前上下文真实占用基线）。
+        let lastAssistantUsage: TokenUsage | null = null;
         // Track pending TodoWrite tool_use_ids so we can sync after successful execution
         const pendingTodoWrites = new Map<string, Array<{ content: string; status: string; activeForm?: string }>>();
         for await (const message of conversation) {
@@ -1156,6 +1181,9 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
                 });
               }
               const assistantMsg = message as SDKAssistantMessage;
+              // FIX(占用口径): 记录最新一条 assistant 请求的单次 usage，回合结束用它覆盖累计值。
+              const turnUsage = extractAssistantTurnUsage(assistantMsg);
+              if (turnUsage) lastAssistantUsage = turnUsage;
               // Text deltas are handled by stream_event for real-time streaming.
               // Here we only process tool_use blocks.
 
@@ -1400,6 +1428,13 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
             case 'result': {
               const resultMsg = message as SDKResultMessage;
               tokenUsage = extractTokenUsage(resultMsg);
+              // FIX(占用口径): 用最后一条 assistant 请求的单次 usage 覆盖占用字段，避免整轮
+              // 累计 result.usage 的 cache_read 跨内部请求累加导致虚高（实测一个回合内
+              // cache_read 随工具调用次数累加，可虚高数倍——卡片曾因此一轮就“打满”窗口）。
+              // cost_usd 仍取整轮累计（整轮总成本）。无 assistant usage 时回退到累计值。
+              if (lastAssistantUsage) {
+                tokenUsage = { ...lastAssistantUsage, cost_usd: tokenUsage?.cost_usd };
+              }
               // terminal_reason is an optional field added in SDK 0.2.111.
               // When present, it enriches the end-of-turn UI chip (Phase 1 of
               // agent-sdk-0-2-111-adoption) without replacing error-classifier.
