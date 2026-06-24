@@ -1,0 +1,21 @@
+# ===== AI_LabTest 框架运行时（追加到目标项目 .gitignore）=====
+
+# 执行时写入的环境上下文（含本机路径，敏感）
+AI_LabTest/.last-run-env.json
+
+# Step 2 执行的中间机读产物（每次跑测试都会刷新；.md 报告是交付物，照常入库）
+AI_LabTest/report/*.results.json
+AI_LabTest/report/*.run.json
+AI_LabTest/report/*.run.log
+# 执行证据截图 / Playwright MCP 会话输出
+AI_LabTest/report/_evidence/
+
+# storageState / 登录态缓存（含 token，**绝对**禁止入库）
+AI_LabTest/.auth/
+
+# Playwright 失败时的截图/视频/trace（如手动跑 playwright 残留）
+test-results/
+playwright-report/
+
+# 测试证据 / 临时输出
+output/

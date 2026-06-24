@@ -1840,6 +1840,31 @@ const en = {
   'settings.gsd.cancel': 'Cancel',
   'settings.gsd.confirmUninstall': 'Uninstall',
 
+  // ─── Built-in plugins panel (AI_LabTest) ───
+  'settings.ailab.description': 'AI_LabTest QA automation framework — adds ai-lab-test:* slash commands and the test-workflow skill (case design → AI-driven Playwright execution → report). Vendored from qitianersheng/ai-lab-test-agent (MIT).',
+  'settings.ailab.loading': 'Loading…',
+  'settings.ailab.errorUnknown': 'Could not read AI_LabTest status.',
+  'settings.ailab.notInstalled': 'Not installed',
+  'settings.ailab.version': 'Version',
+  'settings.ailab.commandCount': 'Slash commands',
+  'settings.ailab.skillCount': 'Skills',
+  'settings.ailab.source': 'Source',
+  'settings.ailab.license': 'License',
+  'settings.ailab.installPath': 'Install path',
+  'settings.ailab.mcpNote': 'Enabling registers the Playwright MCP automatically so ai-lab-test:execute can drive a browser.',
+  'settings.ailab.mcpWarning': 'Plugin enabled, but registering the Playwright MCP failed ({error}). Slash commands work; add a "playwright" MCP server manually for ai-lab-test:execute.',
+  'settings.ailab.status.enabled': 'Enabled',
+  'settings.ailab.status.disabled': 'Disabled',
+  'settings.ailab.status.notInstalled': 'Not installed',
+  'settings.ailab.actions.enable': 'Enable',
+  'settings.ailab.actions.disable': 'Disable',
+  'settings.ailab.actions.uninstall': 'Uninstall',
+  'settings.ailab.actions.openDir': 'Open folder',
+  'settings.ailab.uninstallTitle': 'Uninstall built-in AI_LabTest?',
+  'settings.ailab.uninstallDesc': 'This removes the bundled AI_LabTest plugin directory and its mirrored command + skill files. The Playwright MCP server is left in place. You can re-install it later from this panel.',
+  'settings.ailab.cancel': 'Cancel',
+  'settings.ailab.confirmUninstall': 'Uninstall',
+
   // ── Error classifier ───────────────────────────────────────
   // Used by src/lib/error-classifier.ts via ClassifiedError.userMessageKey /
   // actionHintKey. The classifier runs server-side so it ships these keys

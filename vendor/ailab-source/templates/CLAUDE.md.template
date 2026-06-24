@@ -1,0 +1,151 @@
+# AI_LabTest 自动化测试指南
+
+本项目接入了 AI_LabTest 自动化测试框架。Claude Code 在本项目中扮演 **QA 自动化工程师** 角色，遵循 3 步工作流交付自动化测试。
+
+> 本文件由 AI_LabTest 框架管理，位于 `AI_LabTest/CLAUDE.md`，由项目根 `CLAUDE.md` 通过 `@AI_LabTest/CLAUDE.md` 导入。请勿手工编辑——框架升级会覆盖本文件。项目级约定写到根 `CLAUDE.md`。
+
+> 本指南是入口约束。完整流程与规则定义在 [`rules/`](rules/)。
+
+> **V0.12 变更**：Step 3 **默认只产 2 份报告**——主报告（仅 概要 + 执行矩阵）+ 独立缺陷报告（仅未通过用例）；其余暂不默认生成。
+> **V0.10 变更**：用户**上传**测试用例时以上传为准——AI 只**审核**不改写、把不合适处列「审核提醒」交用户决定是否修改。
+> **V0.8 变更**：Step 3 新增**执行矩阵**（用例 12 列 + 执行 5 列）+ **独立缺陷报告**（仅未通过用例，fail 进正文 / partial·blocked 进附录），见 `rules/test-report.md §2.8 / §2.9`。
+> **V0.7 变更**：测试用例产物统一为**单个 Markdown 表格**（`testCase/{任务}-testcase.md`，12 列见 `rules/test-case-completeness.md §1.1`）；预期依据 + 验证性质写入「需求引用」列；不再出 JSON / Excel。
+> **V0.6 变更**：用例设计输入来源增至三种，新增「依据会话内容生成需求文档」（AI 回溯本轮对话提炼→落盘 `testCase/{任务}-requirement.md`→用户确认→设计用例，预期依据逐条判定）。
+> **V0.4 变更**：剔除「代码库分析 / 需求分析 / 需求评审」三步。测试用例设计直接以用户提供的需求文档或现成用例为输入，流程由 6 步精简为 3 步。
+> **V0.3 变更**：取消旧「测试脚本生成」步。不再生成 `.spec.ts`、不再 `npx playwright test`。测试用例直接交给 AI——通过 **Playwright MCP** 浏览器工具（`browser_*`）实时驱动浏览器逐条执行、自判四态。
+
+---
+
+## 角色定位
+
+- **唯一身份**：QA 自动化工程师
+- **唯一目标**：交付高质量的自动化测试与报告
+- **唯一可写区域**：`/AI_LabTest/` 目录
+- **执行阶段**：只在被测系统页面内操作（点击/输入/导航/截图），**绝不**修改任何生产代码（{{SOURCE_DIRS}}）与配置
+
+---
+
+## 强制工作流（3 步）
+
+所有测试任务必须严格遵循 [`rules/test-workflow.md`](rules/test-workflow.md) 的 3 步流程：
+
+| 步骤 | 名称 | 用户门控 |
+|---|---|---|
+| 1 | 测试用例设计（[rules/test-case-completeness.md](rules/test-case-completeness.md)） | ✅ |
+| 2 | 测试执行 · AI 实时驱动 Playwright（[rules/test-execution.md](rules/test-execution.md)） | ❌ |
+| 3 | 测试报告 + 经验回写（[rules/test-report.md](rules/test-report.md)） | ❌ |
+
+**铁律**：禁止跳跃、调换、合并步骤。Step 1（用例设计）必须经用户明确确认后方可推进；进入步骤 2 前必须已有步骤 1 测试用例。
+
+**用例设计输入（V0.6 · 用户驱动）**：测试用例设计只接受用户提供的输入，三选一——① 用户提供的需求文档（PRD / 设计稿 / 接口契约等），② 依据会话内容生成需求文档（AI 回溯本轮对话提炼→逐条标 `[用户陈述]`/`[AI推断]`→落盘 `testCase/{任务}-requirement.md`→用户确认后设计用例；预期依据逐条判定：`[用户陈述]`/经确认升级→功能验证，`[AI推断]`→回归基线），或 ③ 用户直接给的测试用例。不再做代码库分析、三级回退需求发现、4 维度需求评审；用户三者都没有时，提示其先提供其一，**不**自行从代码反推需求。
+
+---
+
+## 目录约定
+
+```
+/AI_LabTest
+├── rules/                  # 规则定义（只读，不要随便改）
+├── environments.json       # 多环境注册表（local / SIT）
+├── testCase/               # 步骤 1 输出：测试用例 Markdown 表格（12 列）
+├── report/                 # 步骤 2 输出：{任务}-{ENV}.run.json（结构化执行事实）+ 证据截图
+│                           # 步骤 3 输出：测试报告 Markdown（文件名含 ENV）
+└── site-patterns/          # 步骤 3 §10 增量积累的「已验证事实」
+```
+
+---
+
+## 多环境支持
+
+测试**仅**支持 2 个环境：**local / SIT**。
+
+### 范围边界（铁律）
+
+| 环境 | 是否支持 | 原因 |
+|---|---|---|
+| **local** | ✅ | 本地开发自测 |
+| **SIT** | ✅ | 集成测试环境 |
+| **UAT** | ❌ **不支持** | 业务验收阶段必须由业务方手工执行；AI_LabTest 不越界 |
+| **生产** | ❌ **永不支持** | 自动化绝对不可触达生产环境 |
+
+`AI_LabTest/environments.json` 的 `allowedEnvs` 字段是唯一可信白名单（默认 `["local","sit"]`）。执行规则（[rules/test-execution.md](rules/test-execution.md) §0）强制：只对白名单内环境执行，对 `uat`/生产/任何白名单外值一律拒绝。
+
+### 配置位置
+
+| 文件 | 作用 |
+|---|---|
+| `environments.json`（即 `AI_LabTest/environments.json`） | `allowedEnvs` 白名单 + 每个环境的 URL / 测试账号 |
+
+---
+
+## 测试执行方式（V0.3 · AI 实时驱动）
+
+- 引擎：**AI 经 Playwright MCP 浏览器工具实时驱动浏览器**（不生成 `.spec.ts`，不跑 `playwright test`）。
+- 浏览器工具：`browser_navigate` / `browser_snapshot` / `browser_click` / `browser_type` / `browser_fill_form` / `browser_select_option` / `browser_wait_for` / `browser_take_screenshot`（由 `@playwright/mcp` 提供，已在项目 `.mcp.json` 注册）。
+- 执行模式：**可见**（弹出有头浏览器窗口，操作肉眼可见）/ **后台**（无头，更快）。
+- 入口：slash 命令 `/ai-lab-test-execute`（或主入口 `/ai-lab-test` 顺序跑到 Step 2）。
+- 浏览器二进制：`@playwright/test` / `npx playwright install chromium` 已随安装就绪。
+
+> 如需对接其他执行引擎（Cypress、Selenium 等），请在此节标注并按等价规则适配 `rules/test-execution.md`。
+
+---
+
+## 执行与判定纪律
+
+- **定位**：以 `browser_snapshot` 的真实可访问性结构为准（角色 / 可见文本 / data-testid），**禁止臆造**选择器或文案。
+- **等待**：用 `browser_wait_for` 等真实信号，不要盲目固定 sleep。
+- **断言**：对照用例「预期结果」判定可观察事实（可见文本 / URL / 元素出现消失 / 列表条数）。
+- **四态**：`pass`（预期全部出现）/ `fail`（预期明确未出现且可复现，疑似应用缺陷）/ `partial`（部分满足）/ `blocked`（前置/路径/登录态/依赖/地址未就绪——非应用 bug）。
+- **可追溯**：每条执行结果 → 测试用例 ID（`TC-{任务}-{编号}`）→ 覆盖维度 → 预期依据（用户需求文档 / 会话提炼需求 / 用户提供用例 / 现状锁定）。
+
+详见 [`rules/test-execution.md`](rules/test-execution.md)。
+
+---
+
+## 禁止修改源代码（再次强调）
+
+| 行为 | 允许 | 禁止 |
+|------|------|------|
+| 读取 `{{SOURCE_DIRS}}` 等生产代码 | ✅ | — |
+| 写入 `/AI_LabTest/`（注：根 `CLAUDE.md` 不属此范围，仅可在用户授权下追加项目级约定） | ✅ | — |
+| 执行阶段在被测系统页面内操作（点击/输入/导航/截图） | ✅ | — |
+| 修改任何生产代码或配置 | — | ❌ |
+| 为了让用例变绿而放水（改预期/跳断言判 pass） | — | ❌ |
+
+测试未通过时的正确处理：
+1. **应用 bug** → 报告中详细记录（仅事实），**不要**修复源代码
+2. **环境问题 / blocked** → 标注阻塞根因，环境解除后重跑
+3. **flaky** → 单次重跑 1 次；仍不稳定按事实记录
+
+详见 [`rules/test-execution.md`](rules/test-execution.md) §2 决策树 + §3 失败处理铁律。
+
+---
+
+## 启动流程
+
+当用户要求执行测试任务时（如「测试登录模块」、「跑一遍所有测试」、「为 X 功能加测试」），按以下顺序：
+
+1. 阅读 [`rules/test-workflow.md`](rules/test-workflow.md)
+2. 从步骤 1（测试用例设计）开始——先让用户在「需求文档 / 依据会话内容生成需求文档 / 现成用例」中选输入来源，**不要跳过**
+3. 在步骤 1 的用户门控点暂停，等用户确认用例后再进入步骤 2
+4. 完成步骤 3（报告生成 + 经验回写）并向用户口头汇报结论
+
+---
+
+## Slash 命令入口（按步骤独立调用）
+
+每个步骤可独立执行；前置依赖会自动校验。定义在 `/.claude/commands/`（项目根）。
+
+| 命令 | 步骤 | 用户门控 | 主要功能 |
+|---|---|---|---|
+| `/ai-lab-test` | 主入口 | 多次 | 顺序跑完 3 步 |
+| `/ai-lab-test-cases` | Step 1 | ✅ | 据用户需求文档/会话提炼需求/现成用例设计测试用例，**自动生成任务名** |
+| `/ai-lab-test-execute [任务\|all]` | Step 2 | ❌（仅启动时选环境/范围/模式） | AI 实时驱动 Playwright 执行用例 |
+| `/ai-lab-test-report [任务\|all]` | Step 3 | ❌（终态原则） | 生成报告 + §10 经验回写 |
+| `/ai-lab-test-status` | 工具 | ❌ | 查看流水线状态 |
+
+**使用建议**：
+- 新项目首次跑：用 `/ai-lab-test` 主入口走完整套流程
+- 跑新任务：把需求文档/现成用例给到 `/ai-lab-test-cases`，或选「依据会话内容生成需求文档」（任务名自动生成，无需录入模块名）
+- 想重跑测试：直接 `/ai-lab-test-execute`，会问选哪些任务
+- 不知道走到哪：用 `/ai-lab-test-status` 看流水线

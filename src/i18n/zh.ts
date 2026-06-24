@@ -1836,6 +1836,31 @@ const zh: Record<TranslationKey, string> = {
   'settings.gsd.cancel': '取消',
   'settings.gsd.confirmUninstall': '确认卸载',
 
+  // ─── 内置插件面板（AI_LabTest）───
+  'settings.ailab.description': 'AI_LabTest QA 自动化测试框架 —— 提供 ai-lab-test:* slash 命令与 test-workflow 技能（用例设计 → AI 实时驱动 Playwright 执行 → 报告）。源自 qitianersheng/ai-lab-test-agent（MIT）。',
+  'settings.ailab.loading': '加载中…',
+  'settings.ailab.errorUnknown': '无法读取 AI_LabTest 状态。',
+  'settings.ailab.notInstalled': '未安装',
+  'settings.ailab.version': '版本',
+  'settings.ailab.commandCount': 'Slash 命令',
+  'settings.ailab.skillCount': '技能',
+  'settings.ailab.source': '来源',
+  'settings.ailab.license': '许可证',
+  'settings.ailab.installPath': '安装路径',
+  'settings.ailab.mcpNote': '启用时会自动注册 Playwright MCP，以便 ai-lab-test:execute 能驱动浏览器。',
+  'settings.ailab.mcpWarning': '插件已启用，但注册 Playwright MCP 失败（{error}）。slash 命令可用；如需 ai-lab-test:execute，请手动添加名为 “playwright” 的 MCP 服务器。',
+  'settings.ailab.status.enabled': '已启用',
+  'settings.ailab.status.disabled': '已停用',
+  'settings.ailab.status.notInstalled': '未安装',
+  'settings.ailab.actions.enable': '启用',
+  'settings.ailab.actions.disable': '停用',
+  'settings.ailab.actions.uninstall': '卸载',
+  'settings.ailab.actions.openDir': '打开文件夹',
+  'settings.ailab.uninstallTitle': '卸载内置 AI_LabTest？',
+  'settings.ailab.uninstallDesc': '这会移除内置的 AI_LabTest 插件目录及其镜像的命令与技能文件。Playwright MCP 服务器会保留。之后可在本面板重新安装。',
+  'settings.ailab.cancel': '取消',
+  'settings.ailab.confirmUninstall': '确认卸载',
+
   // ── Error classifier ───────────────────────────────────────
   // 与 en.ts 同步；变量 {provider} / {baseUrl} / {hints} 由
   // src/lib/error-classifier.ts 在 server 端预先拼好。
