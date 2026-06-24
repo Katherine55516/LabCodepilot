@@ -254,12 +254,6 @@ export function McpManager() {
               {viewTab === "marketplace" ? t('mcp.marketDesc' as TranslationKey) : t('mcp.managerDesc' as TranslationKey)}
             </p>
           </div>
-          {viewTab === "local" && (
-            <Button size="sm" className="gap-1" onClick={handleAdd}>
-              <Plus size={14} />
-              {t('mcp.addServer')}
-            </Button>
-          )}
         </div>
         {/* Segmented control: 我的 MCP | MCP 市场 */}
         <div className="flex items-center bg-muted rounded-md p-0.5 mt-3 w-fit">
@@ -302,16 +296,22 @@ export function McpManager() {
       )}
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as "list" | "json")}>
-        <TabsList>
-          <TabsTrigger value="list" className="gap-1.5">
-            <List size={14} />
-            {t('mcp.listTab')}
-          </TabsTrigger>
-          <TabsTrigger value="json" className="gap-1.5">
-            <Code size={14} />
-            {t('mcp.jsonTab')}
-          </TabsTrigger>
-        </TabsList>
+        <div className="flex items-center justify-between">
+          <TabsList>
+            <TabsTrigger value="list" className="gap-1.5">
+              <List size={14} />
+              {t('mcp.listTab')}
+            </TabsTrigger>
+            <TabsTrigger value="json" className="gap-1.5">
+              <Code size={14} />
+              {t('mcp.jsonTab')}
+            </TabsTrigger>
+          </TabsList>
+          <Button size="sm" className="gap-1" onClick={handleAdd}>
+            <Plus size={14} />
+            {t('mcp.addServer')}
+          </Button>
+        </div>
 
         <TabsContent value="list" className="mt-4">
           {loading ? (
