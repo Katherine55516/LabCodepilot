@@ -11,6 +11,8 @@ import { useNativeFolderPicker } from "@/hooks/useNativeFolderPicker";
 import { FolderPicker } from "@/components/chat/FolderPicker";
 import { ModelSelectorDropdown } from "@/components/chat/ModelSelectorDropdown";
 import { useProviderModels } from "@/hooks/useProviderModels";
+import { diffRuns } from "@/lib/test/compare";
+import type { RunHistoryEntry } from "@/lib/test/history";
 
 /**
  * Inline testing workbench (Phase 2 · 对话内嵌测试).
@@ -1494,6 +1496,111 @@ function ReportView({ t, results, four, circuitBroken, taskName }: { t: T; resul
   );
 }
 
+// 报告多版本对比（regression analysis）：选两次执行 → 双口径通过率变化 + 逐用例状态
+// diff。数据来自 GET /api/test/reports/history（.history 快照）；diff 用纯函数 diffRuns。
+// 默认基线=上一版(history[1])、目标=最新(history[0])，可改选。
+function CompareView({ t, projectPath, taskName, env }: { t: T; projectPath: string; taskName: string; env: string }) {
+  const [history, setHistory] = useState<RunHistoryEntry[] | null>(null);
+  const [aIdx, setAIdx] = useState(1); // 基线（旧）
+  const [bIdx, setBIdx] = useState(0); // 目标（新）
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/test/reports/history?projectPath=${encodeURIComponent(projectPath)}&taskName=${encodeURIComponent(taskName)}&env=${encodeURIComponent(env)}`)
+      .then((r) => (r.ok ? r.json() : { history: [] }))
+      .then((d) => { if (!cancelled) setHistory((d.history ?? []) as RunHistoryEntry[]); })
+      .catch(() => { if (!cancelled) setHistory([]); });
+    return () => { cancelled = true; };
+  }, [projectPath, taskName, env]);
+
+  if (history === null) return <p className="text-[11px] text-muted-foreground">{t("test.report.loading")}</p>;
+  if (history.length < 2) return <p className="text-[11px] text-muted-foreground">{t("test.compare.needTwo")}</p>;
+
+  const a = history[Math.min(aIdx, history.length - 1)];
+  const b = history[Math.min(bIdx, history.length - 1)];
+  const diff = diffRuns(a, b); // a=基线(prev)，b=目标(curr)
+  const verLabel = (e: RunHistoryEntry) => `${e.time ? e.time.slice(0, 19).replace("T", " ") : e.stamp} · ${e.passStr || "—"}`;
+  const stLabel: Record<string, TranslationKey> = { pass: "test.state.pass", fail: "test.state.fail", partial: "test.state.partial", blocked: "test.state.blocked" };
+  const st = (s: string | null) => (s ? (stLabel[s] ? t(stLabel[s]) : s) : "—");
+
+  const rateCard = (title: string, rd: { prev: number | null; curr: number | null; delta: number | null }) => {
+    const fmt = (v: number | null) => (v === null ? "N/A" : `${v}%`);
+    const dColor = rd.delta === null || rd.delta === 0 ? "text-muted-foreground" : rd.delta > 0 ? "text-status-success-foreground" : "text-status-error-foreground";
+    const dStr = rd.delta === null ? "" : rd.delta > 0 ? `▲ +${rd.delta}` : rd.delta < 0 ? `▼ ${rd.delta}` : "±0";
+    return (
+      <div className="rounded-lg bg-muted/40 p-3">
+        <div className="text-[11px] text-muted-foreground">{title}</div>
+        <div className="text-base font-semibold text-foreground">
+          {fmt(rd.prev)} <span className="text-muted-foreground">→</span> {fmt(rd.curr)} <span className={`text-xs ${dColor}`}>{dStr}</span>
+        </div>
+      </div>
+    );
+  };
+
+  const changeCls: Record<string, string> = {
+    regressed: "bg-status-error-muted text-status-error-foreground",
+    improved: "bg-status-success-muted text-status-success-foreground",
+    added: "bg-status-info-muted text-status-info-foreground",
+    removed: "bg-muted text-muted-foreground",
+    unchanged: "bg-muted/50 text-muted-foreground",
+  };
+  const changeLabel: Record<string, TranslationKey> = {
+    regressed: "test.compare.regressed", improved: "test.compare.improved",
+    added: "test.compare.added", removed: "test.compare.removed", unchanged: "test.compare.unchanged",
+  };
+  const changed = diff.cases.filter((c) => c.change !== "unchanged");
+
+  return (
+    <div>
+      <div className="mb-3 flex flex-wrap items-center gap-1.5 text-[11px]">
+        <span className="text-muted-foreground">{t("test.compare.baseline")}</span>
+        <select value={aIdx} onChange={(e) => setAIdx(Number(e.target.value))} className="rounded border border-border bg-background px-1.5 py-0.5 text-foreground outline-none focus:border-primary">
+          {history.map((h, i) => <option key={h.file} value={i}>{verLabel(h)}</option>)}
+        </select>
+        <span className="text-muted-foreground">→ {t("test.compare.target")}</span>
+        <select value={bIdx} onChange={(e) => setBIdx(Number(e.target.value))} className="rounded border border-border bg-background px-1.5 py-0.5 text-foreground outline-none focus:border-primary">
+          {history.map((h, i) => <option key={h.file} value={i}>{verLabel(h)}</option>)}
+        </select>
+      </div>
+      <div className="mb-2 grid grid-cols-2 gap-2">
+        {rateCard(t("test.report.funcRate"), diff.funcRate)}
+        {rateCard(t("test.report.execRate"), diff.execRate)}
+      </div>
+      <div className="mb-3 flex flex-wrap gap-x-3 gap-y-1 text-[11px]">
+        <span className="text-status-error-foreground">⚠ {t("test.compare.regressed")} {diff.regressed}</span>
+        <span className="text-status-success-foreground">{t("test.compare.improved")} {diff.improved}</span>
+        {diff.added > 0 && <span className="text-muted-foreground">{t("test.compare.added")} {diff.added}</span>}
+        {diff.removed > 0 && <span className="text-muted-foreground">{t("test.compare.removed")} {diff.removed}</span>}
+      </div>
+      <div className="overflow-hidden rounded-xl border border-border">
+        <table className="w-full border-collapse text-[11px]">
+          <thead>
+            <tr className="bg-muted/50 text-left text-muted-foreground">
+              <th className="px-2 py-1.5 font-medium">{t("test.report.colId")}</th>
+              <th className="px-2 py-1.5 font-medium">{t("test.compare.baseline")}</th>
+              <th className="px-2 py-1.5 font-medium">{t("test.compare.target")}</th>
+              <th className="px-2 py-1.5 font-medium">{t("test.compare.change")}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {changed.length === 0 ? (
+              <tr><td colSpan={4} className="px-2 py-3 text-center text-muted-foreground">{t("test.compare.noChange")}</td></tr>
+            ) : (
+              changed.map((c) => (
+                <tr key={c.id} className="border-t border-border">
+                  <td className="px-2 py-1.5 font-mono text-foreground">{c.id}</td>
+                  <td className="px-2 py-1.5 text-muted-foreground">{st(c.prev)}</td>
+                  <td className="px-2 py-1.5 text-muted-foreground">{st(c.curr)}</td>
+                  <td className="px-2 py-1.5"><span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${changeCls[c.change]}`}>{t(changeLabel[c.change])}</span></td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 // 报告 view: browse persisted reports by 项目 → 任务 → 环境. A task can have multiple
 // reports (one per env); each row expands to the full ReportView. Reads from disk via
 // GET /api/test/reports (per project).
@@ -1502,6 +1609,7 @@ function ReportBrowser({ projects, t, model, providerId }: { projects: Project[]
   const [loading, setLoading] = useState(true);
   const [groups, setGroups] = useState<{ project: Project; reports: ReportEntry[] }[]>([]);
   const [open, setOpen] = useState<string | null>(null);
+  const [compareKey, setCompareKey] = useState<string | null>(null);
   const [handoffKey, setHandoffKey] = useState<string | null>(null);
 
   // 交给研发修复: hand a failing report to the 研发平台 (coding chat). Creates a
@@ -1613,8 +1721,11 @@ function ReportBrowser({ projects, t, model, providerId }: { projects: Project[]
                           </button>
                           {isOpen && (
                             <div className="border-t border-border p-3">
-                              {r.counts.fail > 0 && (
-                                <div className="mb-3 flex justify-end">
+                              <div className="mb-3 flex items-center gap-1.5">
+                                <button onClick={() => setCompareKey(null)} className={`rounded px-2 py-0.5 text-[11px] ${compareKey !== key ? "bg-primary text-primary-foreground" : "border border-border text-foreground hover:bg-muted"}`}>{t("test.compare.tabResult")}</button>
+                                <button onClick={() => setCompareKey(key)} className={`rounded px-2 py-0.5 text-[11px] ${compareKey === key ? "bg-primary text-primary-foreground" : "border border-border text-foreground hover:bg-muted"}`}>{t("test.compare.tabCompare")}</button>
+                                <span className="flex-1" />
+                                {compareKey !== key && r.counts.fail > 0 && (
                                   <button
                                     onClick={() => handoff(project, r)}
                                     disabled={handoffKey === key}
@@ -1622,16 +1733,22 @@ function ReportBrowser({ projects, t, model, providerId }: { projects: Project[]
                                   >
                                     <Wrench size={12} /> {t("test.report.handoff")}（{r.counts.fail}）
                                   </button>
-                                </div>
-                              )}
-                              <ReportView t={t} results={r.tests} four={r.counts} circuitBroken={r.circuitBroken} taskName={task} />
-                              {r.markdown && (
-                                <div className="mt-3 border-t border-border pt-3">
-                                  <div className="mb-2 text-[11px] font-medium text-muted-foreground">{t("test.report.docTitle")}</div>
-                                  <div className="prose prose-sm dark:prose-invert max-w-none">
-                                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{r.markdown}</ReactMarkdown>
-                                  </div>
-                                </div>
+                                )}
+                              </div>
+                              {compareKey === key ? (
+                                <CompareView t={t} projectPath={project.path} taskName={task} env={r.env} />
+                              ) : (
+                                <>
+                                  <ReportView t={t} results={r.tests} four={r.counts} circuitBroken={r.circuitBroken} taskName={task} />
+                                  {r.markdown && (
+                                    <div className="mt-3 border-t border-border pt-3">
+                                      <div className="mb-2 text-[11px] font-medium text-muted-foreground">{t("test.report.docTitle")}</div>
+                                      <div className="prose prose-sm dark:prose-invert max-w-none">
+                                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{r.markdown}</ReactMarkdown>
+                                      </div>
+                                    </div>
+                                  )}
+                                </>
                               )}
                             </div>
                           )}

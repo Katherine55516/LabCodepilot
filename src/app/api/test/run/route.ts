@@ -9,6 +9,7 @@ import type { MCPServerConfig } from '@/types';
 import { predictNativeRuntime } from '@/lib/runtime';
 import { buildStep, buildPlaywrightMcp, artifactPaths, TEST_STEPS, type TestStep } from '@/lib/test/prompts';
 import { reduceFromText } from '@/lib/test/reduce';
+import { snapshotRunJson } from '@/lib/test/history';
 import { sweepStrayEvidence, normalizeEvidenceExt } from '@/lib/test/evidence';
 import { resolveProjectEnvWithDb } from '@/lib/test/env-resolve';
 
@@ -74,10 +75,15 @@ function wrapExecutionStream(
             time: new Date().toISOString(),
             verificationById,
           });
+          const runContent = JSON.stringify(reduced, null, 2);
           try {
             const runAbs = path.join(opts.projectPath, paths.runJson);
-            await fs.promises.mkdir(path.dirname(runAbs), { recursive: true });
-            await fs.promises.writeFile(runAbs, JSON.stringify(reduced, null, 2), 'utf-8');
+            const reportTaskDir = path.dirname(runAbs);
+            await fs.promises.mkdir(reportTaskDir, { recursive: true });
+            await fs.promises.writeFile(runAbs, runContent, 'utf-8');
+            // 历史快照（报告多版本对比的数据基础）：除覆盖式 latest 外，再存一份带
+            // 时间戳的副本到 .history/（SHA-1 去重，与上一份相同则跳过）。best-effort。
+            snapshotRunJson({ reportTaskDir, taskName: opts.taskName, env: opts.env, content: runContent });
           } catch {
             // best-effort: still emit the reduced result even if the write fails
           }

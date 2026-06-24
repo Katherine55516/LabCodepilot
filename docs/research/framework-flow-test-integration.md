@@ -111,7 +111,7 @@ framework 仓库里有**两条产物线**：
 
 - **Phase 1（第一批，自包含亮点）**：用例编辑器+导出 → 报告查看器(证据/录像) → 缺陷报告 → 对话式修订。四项彼此解耦、不动主干编排，可独立增量交付，用户直接可感知。
 - **Phase 2（第二批，测试质量）✅ 已落地（2026-06-24）**：需求自审 + oracle 双轴 + 双口径通过率。价值最高但偏 prompt/方法论，单独一轮 + 真实项目实测。实现见 [handover/test-oracle-dual-rate.md](../handover/test-oracle-dual-rate.md)。
-- **Phase 3（第三批，按需）**：报告多版本对比、历史版本、ETA、并发。
+- **Phase 3（第三批，按需）**：报告多版本对比 ✅ 已落地（2026-06-24，见 [handover/test-report-compare.md](../handover/test-report-compare.md)）；产物历史行级 diff / ETA / 多任务并发暂缓（用户按需只选了对比）。
 
 ## 七、落地前待确认清单
 
