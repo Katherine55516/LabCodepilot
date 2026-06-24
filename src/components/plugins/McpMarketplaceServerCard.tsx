@@ -45,13 +45,21 @@ export function McpMarketplaceServerCard({
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium truncate">{displayName(server)}</span>
-          {server.isInstalled && (
+          {server.isInstalled && !server.updateAvailable && (
             <Badge
               variant="outline"
               className="text-[10px] px-1.5 py-0 border-status-success-border text-status-success-foreground shrink-0"
             >
               <CheckCircle size={10} className="mr-0.5" />
               {t("mcp.installed")}
+            </Badge>
+          )}
+          {server.isInstalled && server.updateAvailable && (
+            <Badge
+              variant="outline"
+              className="text-[10px] px-1.5 py-0 border-status-warning-border text-status-warning-foreground shrink-0"
+            >
+              {t("mcp.updateAvailable")}
             </Badge>
           )}
           {server.status === "deprecated" && (

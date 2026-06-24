@@ -168,6 +168,11 @@ export function McpServerList({ servers, onEdit, onDelete, onToggleEnabled, runt
                     {runtime.serverInfo.name} v{runtime.serverInfo.version}
                   </p>
                 )}
+                {runtime?.status === 'needs-auth' && (
+                  <p className="text-[10px] text-status-warning-foreground mt-0.5">
+                    {t('mcp.needsAuthHint' as TranslationKey)}
+                  </p>
+                )}
               </div>
               <div className="flex gap-1 shrink-0">
                 {/* Reconnect button — only for failed servers */}

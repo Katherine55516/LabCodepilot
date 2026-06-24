@@ -8,7 +8,7 @@ import { assessMcp } from '@/lib/mcp-trust';
 import { buildConfig, prefetchCommand, mapServer } from '@/lib/server-json-mapper';
 import { setSetting } from '@/lib/db';
 import { invalidateMcpCache } from '@/lib/mcp-loader';
-import { recordInstall } from '@/lib/mcp-market-ledger';
+import { recordInstall, readLedger } from '@/lib/mcp-market-ledger';
 import type { MCPServerConfig } from '@/types';
 
 export const runtime = 'nodejs';
@@ -89,14 +89,22 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: '该 server 无可用的本地包或远程端点' }, { status: 422 });
   }
 
-  // 决定写入 mcpServers 的 key（去重）
+  // 决定写入 mcpServers 的 key。
+  // 更新场景：该 marketplace server 已在台账 → 复用同 key 覆盖（不产生 key-2）。
+  // 新装场景：用建议 key，撞名则去重。
   const userConfig = readJsonFile(userClaudeJsonPath());
   const existing = (userConfig.mcpServers || {}) as Record<string, MCPServerConfig>;
-  let key = sanitizeKey(body.key || mapServer(server, opts).suggestedKey);
-  if (existing[key]) {
-    let n = 2;
-    while (existing[`${key}-${n}`]) n++;
-    key = `${key}-${n}`;
+  const ledgerEntry = readLedger()[serverName];
+  let key: string;
+  if (ledgerEntry?.key) {
+    key = ledgerEntry.key;
+  } else {
+    key = sanitizeKey(body.key || mapServer(server, opts).suggestedKey);
+    if (existing[key]) {
+      let n = 2;
+      while (existing[`${key}-${n}`]) n++;
+      key = `${key}-${n}`;
+    }
   }
 
   const prefetch = prefetchCommand(server, opts);

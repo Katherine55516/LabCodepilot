@@ -56,17 +56,28 @@ export function removeInstall(serverName: string): McpMarketInstallEntry | undef
  * @returns serverName → installedKey
  */
 export function getActiveInstalls(): Record<string, string> {
+  const info = getInstalledInfo();
+  const out: Record<string, string> = {};
+  for (const [name, v] of Object.entries(info)) out[name] = v.key;
+  return out;
+}
+
+/**
+ * 同 getActiveInstalls，但额外返回装时版本（用于版本变更 rug-pull 复查）。
+ * @returns serverName → { key, version }
+ */
+export function getInstalledInfo(): Record<string, { key: string; version?: string }> {
   const ledger = readLedger();
   const names = Object.keys(ledger);
   if (names.length === 0) return {};
 
   const all = loadAllMcpServers() || {};
-  const out: Record<string, string> = {};
+  const out: Record<string, { key: string; version?: string }> = {};
   let healed = false;
   for (const name of names) {
     const entry = ledger[name];
     if (entry?.key && all[entry.key]) {
-      out[name] = entry.key;
+      out[name] = { key: entry.key, version: entry.version };
     } else {
       delete ledger[name];
       healed = true;

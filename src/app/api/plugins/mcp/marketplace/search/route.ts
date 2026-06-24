@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { searchOfficialRegistry } from '@/lib/mcp-registry-client';
-import { getActiveInstalls } from '@/lib/mcp-market-ledger';
+import { getInstalledInfo } from '@/lib/mcp-market-ledger';
+import { compareVersions } from '@/lib/mcp-denylist';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -20,13 +21,18 @@ export async function GET(request: NextRequest) {
 
     const { servers, nextCursor } = await searchOfficialRegistry({ q, cursor, limit });
 
-    // 标记已安装（自愈：手动删除过的会从台账剔除）
-    const active = getActiveInstalls();
+    // 标记已安装（自愈：手动删除过的会从台账剔除）+ 版本变更复查
+    const installed = getInstalledInfo();
     for (const s of servers) {
-      const key = active[s.name];
-      if (key) {
+      const info = installed[s.name];
+      if (info) {
         s.isInstalled = true;
-        s.installedKey = key;
+        s.installedKey = info.key;
+        s.installedVersion = info.version;
+        // 注册中心 latest 比装时版本更新 → 提示更新前复查（rug-pull 防线）
+        if (info.version && s.version && compareVersions(s.version, info.version) > 0) {
+          s.updateAvailable = true;
+        }
       }
     }
 

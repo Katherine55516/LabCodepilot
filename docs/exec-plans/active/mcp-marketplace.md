@@ -15,7 +15,7 @@
 | Phase 1 | MVP：搜索 / 详情 / 动态表单 / 安全确认 / prefetch 安装 / 卸载 | ✅ 已完成 | 两 tab（我的 MCP / MCP 市场），CDP 验证安装→卸载完整往返通过 |
 | Phase 2 | 加固：信任分层 + 黑名单 + 危险模式扫描 + 分级摩擦（密钥落地/版本钉死已在 P1 提前做） | ✅ 已完成 | 纵深防御四层非 isSafe；CDP 三态验证；运行时预检/Glama 兜底转 Phase 2b |
 | Phase 2b | 运行时预检（检测 npx/uvx/docker + 友好引导） | ✅ 已完成 | PATH 增强已存在(main.ts)无需重做；Glama 调研后暂缓（无命令字段不能一键装）；CDP 验证 |
-| Phase 3 | 远程进阶：OAuth 2.1 环回 / 工具定义 TOFU / 与内置二进制冲突排查 | 📋 待开始 | |
+| Phase 3 | 务实版：版本变更 rug-pull 复查（注册中心级，替代 live-TOFU）+ needs-auth UX | 🔄 进行中 | 调研后缩范围：OAuth 内置二进制已做不重造、live-TOFU 默认路径不可行 |
 | Phase 4 | 可选增强：入站深链 / Smithery 托管 / mcp-scan 离线 / Docker 沙箱 / catalog 缓存同步 | 📋 待开始 | 任意顺序 |
 
 ## 决策日志
@@ -32,6 +32,31 @@
 - 2026-06-23（Phase 2）: **黑名单这一版内置静态种子 JSON**（随版本更新），架构预留远程合并（后续接登录后端下发，呼应「自托管、不向美国站点发数据」与「官方 Registry 只人工下架、需自己快速止血」）。
 - 2026-06-23（Phase 2）: **信任 tier 只陈述可验证来源事实**（official-reviewed 手维护白名单 / namespace-verified github|domain / community）；**不按下载量排信任**（可刷、仿冒涨得快）。Docker 签名因需 docker CLI 才能机验，本版作为 `oci-container` 信号而非自动 tier。
 - 2026-06-23（Phase 2）: **风险扫描是启发式「提示」非判定**，对已映射的 command/args/env 跑纯函数；只挡显眼/懒的坏，挡不住有心人——明确写进 UI 与文档。
+
+## Phase 3 详细设计（务实版：版本变更复查 + needs-auth UX）
+
+> 调研结论（决定缩范围，详见决策日志）：远程 OAuth 内置二进制/SDK 已处理（MCP SDK 自带
+> `client/auth.js` + `OAuthClientProvider`，`mcpServerStatus()` 报 needs-auth），重造会冲突；
+> live-TOFU 不可行——SDK 的 `McpServerStatus` 只暴露 `{name,status,serverInfo,error,config}`，
+> **无工具描述**，默认路径上无处哈希工具定义。故改做注册中心级的版本变更复查。
+
+### 决策
+
+- 2026-06-24（Phase 3）: **不自建 OAuth**。内置二进制/SDK 已完整处理远程 server OAuth（auth.js/OAuthClientProvider），`claude auth` 管 Anthropic 账号、连接时自动跑 MCP OAuth；重造冲突且本地无远程 OAuth server/无登录，端到端测不了。
+- 2026-06-24（Phase 3）: **放弃 live-TOFU**。SDK `McpServerStatus` 不含工具描述，默认路径拿不到工具定义无法哈希；Native runtime（fallback，少数用户）虽能 listTools 但覆盖面小，不值得。
+- 2026-06-24（Phase 3）: **改做版本变更 rug-pull 复查**（注册中心级，默认路径有效、可测）。台账记装时版本，注册中心 latest 变了就提示复查——这是 TOFU「装时干净、之后变坏」意图的可落地替代（postmark 式：clean 15 版、v16 投毒 → 新版出现即提示复查 + 新版重新过信任/黑名单）。
+
+### 实现
+
+- 台账已有 `version`；`mcp-market-ledger.ts` 加 `getInstalledInfo()` 返回 serverName→{key,version}。
+- DTO 加 `installedVersion?` + `updateAvailable?`（注册中心 latest > 台账版本，用 mcp-denylist 的 `compareVersions`）。search 路由标记时填充。
+- **更新即复查**：已装 server 的 latest 重新过 `assessMcp`（信任/黑名单），UI 卡片/详情显示「有新版本 vX→vY，更新前复查」；点更新走安装对话框（含安全屏障/风险），install 路由对已在台账的 serverName **复用同 key 覆盖**（而非去重成 key-2）。
+- needs-auth UX（My MCP）：`McpServerList` 的 needs-auth 分支加清晰文案 + helper（授权由内置二进制在使用/浏览器中完成），不假装一键 OAuth。
+- 单测（compareVersions 已测；新增 updateAvailable 逻辑 + 同 key 覆盖）；CDP mock 旧版台账验证「有新版本」提示。
+
+### Phase 3 验收
+
+mock 台账装了旧版 → 卡片/详情显示「有新版本，更新前复查」→ 点更新走安全屏障 → 覆盖同 key（不产生 key-2）；needs-auth 文案更清晰；typecheck + 单测通过；CDP 截图。
 
 ## Phase 2b 详细设计（运行时预检）
 

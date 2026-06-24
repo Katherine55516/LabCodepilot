@@ -482,6 +482,10 @@ export interface MarketplaceMcpServer {
   isInstalled?: boolean;
   /** 已安装时在 mcpServers 里的 key。 */
   installedKey?: string;
+  /** 安装时记录的版本（Phase 3 版本变更复查）。 */
+  installedVersion?: string;
+  /** 注册中心 latest 比安装时版本更新 → 提示更新前复查（rug-pull 防线）。 */
+  updateAvailable?: boolean;
   /** 信任评估（Phase 2 安全加固）。 */
   trust?: McpTrustAssessment;
 }

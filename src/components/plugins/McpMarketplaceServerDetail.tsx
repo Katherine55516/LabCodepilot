@@ -118,7 +118,18 @@ export function McpMarketplaceServerDetail({
               )}
             </div>
           </div>
-          <div className="shrink-0">
+          <div className="shrink-0 flex items-center gap-2">
+            {server.isInstalled && server.updateAvailable && (
+              <Button
+                size="sm"
+                className="gap-1.5"
+                disabled={loading || !mapped || !!server.trust?.blocked}
+                onClick={() => setShowInstall(true)}
+              >
+                <DownloadSimple size={14} />
+                {t("mcp.update")}
+              </Button>
+            )}
             {server.isInstalled ? (
               <Button variant="destructive" size="sm" className="gap-1.5" onClick={handleUninstall} disabled={uninstalling}>
                 {uninstalling ? <SpinnerGap size={14} className="animate-spin" /> : <Trash size={14} />}
@@ -142,6 +153,21 @@ export function McpMarketplaceServerDetail({
       {/* Body */}
       <div className="flex-1 overflow-y-auto min-h-0 px-6 py-4 space-y-4">
         {server.description && <p className="text-sm text-foreground/90">{server.description}</p>}
+
+        {/* 版本变更复查（rug-pull 防线）：已装版本 < 注册中心 latest */}
+        {server.isInstalled && server.updateAvailable && (
+          <div className="rounded-md border border-status-warning-border bg-status-warning/10 p-3">
+            <div className="flex items-start gap-2">
+              <Warning size={14} className="text-status-warning-foreground shrink-0 mt-0.5" />
+              <div className="text-xs">
+                <p className="font-medium">
+                  {t("mcp.updateAvailable")}：v{server.installedVersion} → v{server.version}
+                </p>
+                <p className="text-muted-foreground mt-0.5">{t("mcp.updateReviewHint")}</p>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* 信任信号 */}
         <div className="flex flex-wrap items-center gap-2">
