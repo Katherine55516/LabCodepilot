@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { Input } from "@/components/ui/input";
 import { MagnifyingGlass, SpinnerGap, Storefront } from "@/components/ui/icon";
 import { useTranslation } from "@/hooks/useTranslation";
+import { useInfiniteScroll } from "@/hooks/useInfiniteScroll";
 import { McpMarketplaceServerCard } from "./McpMarketplaceServerCard";
 import { McpMarketplaceServerDetail } from "./McpMarketplaceServerDetail";
 import type { MarketplaceMcpServer } from "@/types";
@@ -12,47 +13,106 @@ interface McpMarketplaceBrowserProps {
   onInstalled: () => void;
 }
 
+// 每页条数(registry 上限 100)。MCP 用真·游标分页:带 cursor 取下一页并 append,
+// nextCursor 为空即为到底。
+const PAGE_SIZE = 50;
+
 export function McpMarketplaceBrowser({ onInstalled }: McpMarketplaceBrowserProps) {
   const { t } = useTranslation();
   const [search, setSearch] = useState("");
   const [results, setResults] = useState<MarketplaceMcpServer[]>([]);
   const [selected, setSelected] = useState<MarketplaceMcpServer | null>(null);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(null);
-  // 请求序号守卫：只有最新一次请求的结果/错误能落地，避免慢响应覆盖新结果。
+  // 请求序号守卫:只有最新一次查询的结果/错误能落地,避免慢响应覆盖新结果。
   const seqRef = useRef(0);
+  // 游标 + 已见 name 集合(registry 把不同版本拆成多行,跨页边界可能重名)。
+  const nextCursorRef = useRef<string | undefined>(undefined);
+  const seenNamesRef = useRef<Set<string>>(new Set());
+  // 加载更多的重入锁(observer 可能在 state 更新前连续触发)。
+  const loadingMoreRef = useRef(false);
 
-  const doSearch = useCallback(async (query: string): Promise<MarketplaceMcpServer[]> => {
-    const seq = ++seqRef.current;
-    setLoading(true);
-    setError(null);
-    try {
+  // 纯请求,不触碰 state。
+  const fetchPage = useCallback(
+    async (query: string, cursor?: string): Promise<{ servers: MarketplaceMcpServer[]; nextCursor?: string }> => {
       const params = new URLSearchParams();
       if (query) params.set("q", query);
-      params.set("limit", "50");
+      if (cursor) params.set("cursor", cursor);
+      params.set("limit", String(PAGE_SIZE));
       const res = await fetch(`/api/plugins/mcp/marketplace/search?${params}`);
       if (!res.ok) {
         const data = await res.json().catch(() => ({}));
         throw new Error(data.error || `HTTP ${res.status}`);
       }
       const data = await res.json();
-      const servers: MarketplaceMcpServer[] = data.servers || [];
-      if (seq === seqRef.current) setResults(servers);
-      return servers;
-    } catch (err) {
-      if (seq === seqRef.current) {
-        setError((err as Error).message);
-        setResults([]);
-      }
-      return [];
-    } finally {
-      if (seq === seqRef.current) setLoading(false);
-    }
-  }, []);
+      return {
+        servers: (data.servers || []) as MarketplaceMcpServer[],
+        nextCursor: data.nextCursor as string | undefined,
+      };
+    },
+    [],
+  );
 
-  // 单一来源：防抖 effect 在 mount 时即以 search="" 触发首次加载，
-  // 不再单独发初始请求（否则与防抖并发双调用，慢的那次会覆盖结果）。
+  // 首屏 / 查询变化 / 安装后刷新:重置到第一页。
+  const doSearch = useCallback(
+    async (query: string): Promise<MarketplaceMcpServer[]> => {
+      const seq = ++seqRef.current;
+      setLoading(true);
+      setError(null);
+      try {
+        const { servers, nextCursor } = await fetchPage(query);
+        if (seq === seqRef.current) {
+          setResults(servers);
+          seenNamesRef.current = new Set(servers.map((s) => s.name));
+          nextCursorRef.current = nextCursor;
+          setHasMore(!!nextCursor);
+        }
+        return servers;
+      } catch (err) {
+        if (seq === seqRef.current) {
+          setError((err as Error).message);
+          setResults([]);
+          setHasMore(false);
+          seenNamesRef.current = new Set();
+          nextCursorRef.current = undefined;
+        }
+        return [];
+      } finally {
+        if (seq === seqRef.current) setLoading(false);
+      }
+    },
+    [fetchPage],
+  );
+
+  // 加载更多:带游标取下一页,按 name 去重后 append。
+  const loadMore = useCallback(async () => {
+    if (loadingMoreRef.current || loading || !hasMore || !nextCursorRef.current) return;
+    loadingMoreRef.current = true;
+    setLoadingMore(true);
+    const seq = seqRef.current; // 沿用当前查询序号;查询变化会令其失效。
+    try {
+      const { servers, nextCursor } = await fetchPage(search, nextCursorRef.current);
+      if (seq === seqRef.current) {
+        const fresh = servers.filter((s) => !seenNamesRef.current.has(s.name));
+        fresh.forEach((s) => seenNamesRef.current.add(s.name));
+        setResults((prev) => [...prev, ...fresh]);
+        nextCursorRef.current = nextCursor;
+        setHasMore(!!nextCursor);
+      }
+    } catch {
+      // 加载更多失败:保留已有结果,仅停止继续加载。
+      if (seq === seqRef.current) setHasMore(false);
+    } finally {
+      loadingMoreRef.current = false;
+      if (seq === seqRef.current) setLoadingMore(false);
+    }
+  }, [fetchPage, search, loading, hasMore]);
+
+  // 单一来源:防抖 effect 在 mount 时即以 search="" 触发首次加载,
+  // 不再单独发初始请求(否则与防抖并发双调用,慢的那次会覆盖结果)。
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
     debounceRef.current = setTimeout(() => doSearch(search), 300);
@@ -66,6 +126,12 @@ export function McpMarketplaceBrowser({ onInstalled }: McpMarketplaceBrowserProp
     setSelected((prev) => (prev ? fresh.find((s) => s.name === prev.name) ?? prev : prev));
     onInstalled();
   }, [search, doSearch, onInstalled]);
+
+  const sentinelRef = useInfiniteScroll({
+    hasMore,
+    loading: loading || loadingMore,
+    onLoadMore: loadMore,
+  });
 
   return (
     <div className="flex flex-1 min-h-0">
@@ -109,6 +175,13 @@ export function McpMarketplaceBrowser({ onInstalled }: McpMarketplaceBrowserProp
                 onSelect={() => setSelected(s)}
               />
             ))}
+            {results.length > 0 && hasMore && (
+              <div ref={sentinelRef} className="flex justify-center py-3">
+                {loadingMore && (
+                  <SpinnerGap size={16} className="animate-spin text-muted-foreground" />
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>

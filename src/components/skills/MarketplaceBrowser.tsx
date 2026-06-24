@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { Input } from "@/components/ui/input";
 import { MagnifyingGlass, SpinnerGap, Storefront } from "@/components/ui/icon";
 import { useTranslation } from "@/hooks/useTranslation";
+import { useInfiniteScroll } from "@/hooks/useInfiniteScroll";
 import { MarketplaceSkillCard } from "./MarketplaceSkillCard";
 import { MarketplaceSkillDetail } from "./MarketplaceSkillDetail";
 import type { MarketplaceSkill } from "@/types";
@@ -12,65 +13,116 @@ interface MarketplaceBrowserProps {
   onInstalled: () => void;
 }
 
+// 每页步长。skills.sh 不支持 offset/cursor,只能加大 limit 重取;其结果按相关度
+// 排序且前缀稳定(limit=2N 的前 N 条 === limit=N),故"加载更多"= 用更大的 limit
+// 整体替换,无需去重、key 稳定不跳滚动。返回数 < 请求 limit 即为到底。
+const PAGE_SIZE = 20;
+
 export function MarketplaceBrowser({ onInstalled }: MarketplaceBrowserProps) {
   const { t } = useTranslation();
   const [search, setSearch] = useState("");
   const [results, setResults] = useState<MarketplaceSkill[]>([]);
   const [selected, setSelected] = useState<MarketplaceSkill | null>(null);
   const [loading, setLoading] = useState(false);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(null);
+  // 请求序号守卫:只有最新一次查询的结果能落地,避免慢响应覆盖新结果。
+  const seqRef = useRef(0);
+  // 当前已加载到的 limit(= 列表深度)。
+  const limitRef = useRef(PAGE_SIZE);
+  // 加载更多的重入锁(observer 可能在 state 更新前连续触发)。
+  const loadingMoreRef = useRef(false);
 
-  const doSearch = useCallback(async (query: string): Promise<MarketplaceSkill[]> => {
-    setLoading(true);
-    setError(null);
-    try {
-      const params = new URLSearchParams();
-      if (query) params.set("q", query);
-      params.set("limit", "20");
-      const res = await fetch(`/api/skills/marketplace/search?${params}`);
-      if (!res.ok) {
-        const data = await res.json().catch(() => ({}));
-        throw new Error(data.error || `HTTP ${res.status}`);
-      }
-      const data = await res.json();
-      const skills: MarketplaceSkill[] = data.skills || [];
-      setResults(skills);
-      return skills;
-    } catch (err) {
-      setError((err as Error).message);
-      setResults([]);
-      return [];
-    } finally {
-      setLoading(false);
+  // 纯请求,不触碰 state。
+  const fetchPage = useCallback(async (query: string, limit: number): Promise<MarketplaceSkill[]> => {
+    const params = new URLSearchParams();
+    if (query) params.set("q", query);
+    params.set("limit", String(limit));
+    const res = await fetch(`/api/skills/marketplace/search?${params}`);
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.error || `HTTP ${res.status}`);
     }
+    const data = await res.json();
+    return (data.skills || []) as MarketplaceSkill[];
   }, []);
 
-  // Initial load — fetch popular skills
-  useEffect(() => {
-    doSearch("");
-  }, [doSearch]);
+  // 首屏 / 查询变化 / 安装后刷新:整体替换。
+  const doSearch = useCallback(
+    async (query: string, limit: number = PAGE_SIZE): Promise<MarketplaceSkill[]> => {
+      const seq = ++seqRef.current;
+      setLoading(true);
+      setError(null);
+      try {
+        const skills = await fetchPage(query, limit);
+        if (seq === seqRef.current) {
+          setResults(skills);
+          limitRef.current = limit;
+          setHasMore(skills.length >= limit);
+        }
+        return skills;
+      } catch (err) {
+        if (seq === seqRef.current) {
+          setError((err as Error).message);
+          setResults([]);
+          setHasMore(false);
+        }
+        return [];
+      } finally {
+        if (seq === seqRef.current) setLoading(false);
+      }
+    },
+    [fetchPage],
+  );
 
-  // Debounced search
+  // 加载更多:加大 limit 重取,前缀稳定 → 整体替换。
+  const loadMore = useCallback(async () => {
+    if (loadingMoreRef.current || loading || !hasMore) return;
+    loadingMoreRef.current = true;
+    setLoadingMore(true);
+    const seq = seqRef.current; // 沿用当前查询序号;查询变化会令其失效。
+    const nextLimit = limitRef.current + PAGE_SIZE;
+    try {
+      const skills = await fetchPage(search, nextLimit);
+      if (seq === seqRef.current) {
+        setResults(skills);
+        limitRef.current = nextLimit;
+        setHasMore(skills.length >= nextLimit);
+      }
+    } catch {
+      // 加载更多失败:保留已有结果,仅停止继续加载。
+      if (seq === seqRef.current) setHasMore(false);
+    } finally {
+      loadingMoreRef.current = false;
+      if (seq === seqRef.current) setLoadingMore(false);
+    }
+  }, [fetchPage, search, loading, hasMore]);
+
+  // 单一来源:防抖 effect 在 mount 时即以 search="" 触发首次加载,
+  // 不再单独发初始请求(否则与防抖并发双调用,慢的那次会覆盖结果)。
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => {
-      doSearch(search);
-    }, 300);
+    debounceRef.current = setTimeout(() => doSearch(search, PAGE_SIZE), 300);
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
   }, [search, doSearch]);
 
   const handleInstallComplete = useCallback(async () => {
-    // Refresh results to update installed status, then re-sync the detail
-    // pane's selected skill from the fresh list so its Install/Uninstall button
-    // flips immediately (otherwise it keeps showing the stale pre-action state,
-    // e.g. still "已安装/卸载" right after a successful uninstall).
-    const fresh = await doSearch(search);
+    // 重拉当前深度(而非回到第一页),保留滚动位置;再同步详情页选中项,
+    // 让其安装/卸载按钮即时翻转(否则仍显示操作前的旧状态)。
+    const fresh = await doSearch(search, limitRef.current);
     setSelected((prev) => (prev ? fresh.find((s) => s.id === prev.id) ?? prev : prev));
     onInstalled();
   }, [search, doSearch, onInstalled]);
+
+  const sentinelRef = useInfiniteScroll({
+    hasMore,
+    loading: loading || loadingMore,
+    onLoadMore: loadMore,
+  });
 
   return (
     <div className="flex flex-1 min-h-0">
@@ -117,6 +169,13 @@ export function MarketplaceBrowser({ onInstalled }: MarketplaceBrowserProps) {
                 onSelect={() => setSelected(skill)}
               />
             ))}
+            {results.length > 0 && hasMore && (
+              <div ref={sentinelRef} className="flex justify-center py-3">
+                {loadingMore && (
+                  <SpinnerGap size={16} className="animate-spin text-muted-foreground" />
+                )}
+              </div>
+            )}
           </div>
         </div>
       </div>
