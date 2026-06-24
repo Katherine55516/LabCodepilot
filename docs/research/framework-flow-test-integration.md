@@ -89,6 +89,7 @@ framework 仓库里有**两条产物线**：
   - 报告阶段：`report` prompt + `reduce.ts` 计算双口径通过率。
   - 工作量：**中-大**（prompt/规则工程 + reduce 双口径 + cases.json 字段）。
   - **风险**：纯 prompt/方法论改造，效果需实测；触及测试质量核心，要专门一轮 + 真实项目验证，不可草率。
+  - **✅ 已落地（2026-06-24）**：见 [handover/test-oracle-dual-rate.md](../handover/test-oracle-dual-rate.md) / [insights/test-oracle-dual-rate.md](../insights/test-oracle-dual-rate.md)。规则已导入、prompts/reduce/UI/导出已改、reduce 双口径单测 16/16、UI dev 实测通过；prompt 方法论效果待真实项目（有模型）实测校准。
 
 ### 第三批 · 回归与体验（锦上添花，按需）
 
@@ -109,7 +110,7 @@ framework 仓库里有**两条产物线**：
 ## 六、分期路线建议
 
 - **Phase 1（第一批，自包含亮点）**：用例编辑器+导出 → 报告查看器(证据/录像) → 缺陷报告 → 对话式修订。四项彼此解耦、不动主干编排，可独立增量交付，用户直接可感知。
-- **Phase 2（第二批，测试质量）**：需求自审 + oracle 双轴 + 双口径通过率。价值最高但偏 prompt/方法论，单独一轮 + 真实项目实测。
+- **Phase 2（第二批，测试质量）✅ 已落地（2026-06-24）**：需求自审 + oracle 双轴 + 双口径通过率。价值最高但偏 prompt/方法论，单独一轮 + 真实项目实测。实现见 [handover/test-oracle-dual-rate.md](../handover/test-oracle-dual-rate.md)。
 - **Phase 3（第三批，按需）**：报告多版本对比、历史版本、ETA、并发。
 
 ## 七、落地前待确认清单

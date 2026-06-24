@@ -49,10 +49,30 @@ function wrapExecutionStream(
           } catch {
             // best-effort cleanup
           }
+          // Join cases.json's oracle 双轴 (verification field) so the reduction can
+          // compute the dual-rate pass (功能验证 vs 回归基线). best-effort: missing /
+          // unparseable cases → undefined map → reduce falls back to single-rate.
+          let verificationById: Record<string, string> | undefined;
+          try {
+            const casesAbs = path.join(opts.projectPath, artifactPaths(opts.taskName).cases);
+            const parsed = JSON.parse(await fs.promises.readFile(casesAbs, 'utf-8'));
+            if (Array.isArray((parsed as { cases?: unknown })?.cases)) {
+              const map: Record<string, string> = {};
+              for (const c of (parsed as { cases: Array<{ id?: unknown; verification?: unknown }> }).cases) {
+                if (c && typeof c.id === 'string' && typeof c.verification === 'string') {
+                  map[c.id] = c.verification;
+                }
+              }
+              if (Object.keys(map).length) verificationById = map;
+            }
+          } catch {
+            // no cases / parse fail → reduce falls back to single-rate
+          }
           const reduced = reduceFromText(textAcc, {
             module: opts.taskName,
             env: opts.env,
             time: new Date().toISOString(),
+            verificationById,
           });
           try {
             const runAbs = path.join(opts.projectPath, paths.runJson);

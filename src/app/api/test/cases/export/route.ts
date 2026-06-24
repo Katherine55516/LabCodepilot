@@ -23,6 +23,8 @@ const COLUMNS: { key: string; header: string; width: number }[] = [
   { key: 'steps', header: '测试操作', width: 42 },
   { key: 'expected', header: '预期结果', width: 42 },
   { key: 'assertion', header: '断言级别', width: 10 },
+  { key: 'oracle', header: 'oracle来源', width: 14 },
+  { key: 'verification', header: '验证性质', width: 10 },
   { key: 'cleanup', header: '清理', width: 22 },
 ];
 
@@ -35,7 +37,8 @@ function caseRow(c: Record<string, unknown>): Record<string, string> {
   return {
     id: cell(c.id), priority: cell(c.priority), caseType: cell(c.caseType), module: cell(c.module),
     requirement: cell(c.requirement), purpose: cell(c.purpose), precondition: cell(c.precondition),
-    steps: stepsText, expected: expectedText, assertion: cell(c.assertion), cleanup: cell(c.cleanup),
+    steps: stepsText, expected: expectedText, assertion: cell(c.assertion),
+    oracle: cell(c.oracle), verification: cell(c.verification), cleanup: cell(c.cleanup),
   };
 }
 
@@ -43,6 +46,7 @@ const EXAMPLE: Record<string, unknown> = {
   id: 'TC-01', priority: 'P0', caseType: '功能', module: '登录', requirement: 'REQ-001',
   purpose: '正常登录', precondition: '已注册账号',
   steps: [{ content: '输入账号密码', expected: '输入框正确显示' }, { content: '点击登录', expected: '跳转到首页' }],
+  oracle: 'PRD', verification: '功能验证',
 };
 
 export async function GET(req: Request): Promise<Response> {
