@@ -234,8 +234,6 @@ export function McpManager() {
     }
   }
 
-  const serverCount = Object.keys(servers).length;
-
   return (
     <div className="flex h-full flex-col">
       {/* Fixed header */}
@@ -244,15 +242,12 @@ export function McpManager() {
           <div>
             <h1 className="text-xl font-semibold">
               {t('extensions.mcpServers')}
-              {viewTab === "local" && serverCount > 0 && (
-                <span className="text-sm font-normal text-muted-foreground ml-2">
-                  ({serverCount})
-                </span>
-              )}
             </h1>
-            <p className="text-sm text-muted-foreground mt-1">
-              {viewTab === "marketplace" ? t('mcp.marketDesc' as TranslationKey) : t('mcp.managerDesc' as TranslationKey)}
-            </p>
+            {viewTab === "marketplace" && (
+              <p className="text-sm text-muted-foreground mt-1">
+                {t('mcp.marketDesc' as TranslationKey)}
+              </p>
+            )}
           </div>
         </div>
         {/* Segmented control: 我的 MCP | MCP 市场 */}
@@ -312,6 +307,10 @@ export function McpManager() {
             {t('mcp.addServer')}
           </Button>
         </div>
+
+        <p className="text-sm text-muted-foreground mt-3">
+          {t('mcp.managerDesc' as TranslationKey)}
+        </p>
 
         <TabsContent value="list" className="mt-4">
           {loading ? (
