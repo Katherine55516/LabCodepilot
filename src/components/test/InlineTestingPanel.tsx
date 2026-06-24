@@ -40,6 +40,20 @@ interface ConvoMsg { role: ConvoRole; text: string }
 interface FourState { total: number; pass: number; fail: number; partial: number; blocked: number }
 // One executed case parsed from an execution @@RESULT frame (drives 报告 table).
 interface CaseResult { id: string; status: string; actual?: string; error?: string; evidence?: string[] }
+// 用例设计阶段生成的一条测试用例(读 cases.json,镜像 ai-lab-test-framework)。在用例
+// 阶段详情卡展示。字段全可选 —— AI 产出可能有出入,渲染时按需兜底。
+interface GeneratedCase {
+  id?: string;
+  priority?: string;
+  caseType?: string;
+  module?: string;
+  requirement?: string;
+  purpose?: string;        // 用例标题
+  precondition?: string;
+  steps?: { content?: string; expected?: string }[];
+  assertion?: string;
+  cleanup?: string;
+}
 
 // A persisted report (one run.json on disk) — listed in the 报告 browser. A task can
 // have several (one per env). Shape mirrors GET /api/test/reports.
@@ -474,6 +488,46 @@ export function InlineTestingPanel() {
   const [viewStep, setViewStep] = useState<TestStep | null>(null);
   // 切任务时清掉查看选中,让详情卡回到新任务的运行中/下一个待办阶段。
   useEffect(() => { setViewStep(null); }, [aId]);
+  // 用例设计阶段生成的用例(读 AI_LabTest/testCase/.data/{task}.cases.json),在用例阶段
+  // 详情卡展示。不进 TaskState/持久化(用例可能很大),按需从文件读 —— 文件是 source of truth。
+  const [casesPreview, setCasesPreview] = useState<GeneratedCase[]>([]);
+  useEffect(() => {
+    const cs = stepStatus.cases;
+    if (!current?.path || !activeTask || (cs !== "done" && cs !== "review")) { setCasesPreview([]); return; }
+    let cancelled = false;
+    fetch(`/api/test/cases?projectPath=${encodeURIComponent(current.path)}&taskName=${encodeURIComponent(activeTask.name)}`)
+      .then((r) => r.json())
+      .then((d) => { if (!cancelled && Array.isArray(d?.cases)) setCasesPreview(d.cases as GeneratedCase[]); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aId, current?.path, stepStatus.cases]);
+  // 用例编辑器:casesDraft 非 null = 编辑态(编辑副本);null = 只读态。保存时整份 PUT 回 cases.json。
+  const [casesDraft, setCasesDraft] = useState<GeneratedCase[] | null>(null);
+  const [casesSaving, setCasesSaving] = useState(false);
+  useEffect(() => { setCasesDraft(null); }, [aId]); // 切任务退出编辑态,不带过上个任务的草稿
+  const updateCase = (i: number, patch: Partial<GeneratedCase>) =>
+    setCasesDraft((d) => (d ? d.map((c, k) => (k === i ? { ...c, ...patch } : c)) : d));
+  const updateStep = (i: number, j: number, patch: Partial<{ content: string; expected: string }>) =>
+    setCasesDraft((d) => (d ? d.map((c, k) => (k === i ? { ...c, steps: (c.steps ?? []).map((s, m) => (m === j ? { ...s, ...patch } : s)) } : c)) : d));
+  const exportCases = (template: boolean) => {
+    if (template) { window.open("/api/test/cases/export?template=1", "_blank"); return; }
+    if (!current?.path || !activeTask) return;
+    window.open(`/api/test/cases/export?projectPath=${encodeURIComponent(current.path)}&taskName=${encodeURIComponent(activeTask.name)}`, "_blank");
+  };
+  const saveCases = async () => {
+    if (!current?.path || !activeTask || casesDraft === null) return;
+    setCasesSaving(true);
+    try {
+      const r = await fetch("/api/test/cases", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ projectPath: current.path, taskName: activeTask.name, cases: casesDraft }),
+      }).then((res) => res.json());
+      if (r?.ok) { setCasesPreview(casesDraft); setCasesDraft(null); }
+    } catch { /* 保存失败保留编辑态,用户可重试 */ }
+    setCasesSaving(false);
+  };
   // First not-done step = the "current" step the detail card focuses on.
   const nextPendingStep = (): TestStep | null => STEPS.find((s) => stepStatus[s.step] !== "done")?.step ?? null;
   // focusStep = 详情卡当前展示的阶段。执行中(runningStep 存在)强制 focus 运行中的节点,
@@ -958,7 +1012,87 @@ export function InlineTestingPanel() {
                     {currentCase && <div className="mt-2 text-[11px] text-muted-foreground">▶ {currentCase}</div>}
                   </>
                 )}
-                <div className="mt-2 text-[11px] text-muted-foreground">{t("test.flow.evidenceNote")}</div>
+                {/* 用例设计阶段:展示生成的测试用例(参考 ai-lab-test-framework 的用例字段)。 */}
+                {focusStep === "cases" && (
+                  <div className="mt-2">
+                    <div className="mb-1.5 flex items-center gap-1">
+                      <span className="text-[11px] text-muted-foreground">{t("test.cases.total")} · {(casesDraft ?? casesPreview).length}</span>
+                      <span className="flex-1" />
+                      {casesDraft === null ? (
+                        <>
+                          {casesPreview.length > 0 && <button onClick={() => setCasesDraft(structuredClone(casesPreview))} className="rounded border border-border px-1.5 py-0.5 text-[10px] text-foreground hover:bg-muted">{t("test.cases.edit")}</button>}
+                          {casesPreview.length > 0 && <button onClick={() => exportCases(false)} className="rounded border border-border px-1.5 py-0.5 text-[10px] text-foreground hover:bg-muted">{t("test.cases.export")}</button>}
+                          <button onClick={() => exportCases(true)} className="rounded border border-border px-1.5 py-0.5 text-[10px] text-foreground hover:bg-muted">{t("test.cases.template")}</button>
+                        </>
+                      ) : (
+                        <>
+                          <button onClick={() => setCasesDraft([...(casesDraft ?? []), { id: "", purpose: "", steps: [{ content: "", expected: "" }] }])} className="rounded border border-border px-1.5 py-0.5 text-[10px] text-foreground hover:bg-muted">+ {t("test.cases.add")}</button>
+                          <button onClick={saveCases} disabled={casesSaving} className="rounded bg-primary px-1.5 py-0.5 text-[10px] text-primary-foreground disabled:opacity-40">{casesSaving ? t("test.cases.saving") : t("test.cases.save")}</button>
+                          <button onClick={() => setCasesDraft(null)} className="rounded border border-border px-1.5 py-0.5 text-[10px] text-foreground hover:bg-muted">{t("test.cases.cancel")}</button>
+                        </>
+                      )}
+                    </div>
+                    <div className="max-h-[34vh] space-y-1.5 overflow-auto">
+                      {casesDraft === null ? (
+                        casesPreview.length === 0 ? (
+                          <p className="text-[11px] text-muted-foreground">{t("test.cases.empty")}</p>
+                        ) : (
+                          casesPreview.map((c, i) => (
+                            <div key={c.id || i} className="rounded-lg border border-border bg-background p-2">
+                              <div className="flex flex-wrap items-center gap-1.5">
+                                <span className="text-[11px] font-medium text-foreground">{c.id || `#${i + 1}`}</span>
+                                {c.priority && <span className="rounded bg-muted px-1 py-0.5 text-[10px] text-muted-foreground">{c.priority}</span>}
+                                {c.module && <span className="text-[10px] text-muted-foreground">{c.module}</span>}
+                                {c.requirement && <span className="text-[10px] text-muted-foreground">· {c.requirement}</span>}
+                              </div>
+                              {c.purpose && <div className="mt-0.5 text-xs font-medium text-foreground">{c.purpose}</div>}
+                              {c.precondition && (
+                                <div className="mt-1 text-[11px] text-muted-foreground">
+                                  <span className="text-foreground/70">{t("test.cases.precondition")}</span>{c.precondition}
+                                </div>
+                              )}
+                              {!!c.steps?.length && (
+                                <ol className="mt-1 list-decimal space-y-0.5 pl-4 text-[11px] text-muted-foreground">
+                                  {c.steps.map((s, j) => (
+                                    <li key={j}>
+                                      {s.content}
+                                      {s.expected && <span className="text-foreground/60"> → {t("test.cases.expected")}{s.expected}</span>}
+                                    </li>
+                                  ))}
+                                </ol>
+                              )}
+                            </div>
+                          ))
+                        )
+                      ) : (
+                        casesDraft.map((c, i) => (
+                          <div key={i} className="space-y-1 rounded-lg border border-border bg-background p-2">
+                            <div className="flex items-center gap-1">
+                              <input value={c.id ?? ""} onChange={(e) => updateCase(i, { id: e.target.value })} placeholder="ID" className="w-24 rounded border border-border bg-background px-1.5 py-0.5 text-[11px] text-foreground outline-none focus:border-primary" />
+                              <input value={c.priority ?? ""} onChange={(e) => updateCase(i, { priority: e.target.value })} placeholder={t("test.cases.priority")} className="w-16 rounded border border-border bg-background px-1.5 py-0.5 text-[11px] text-foreground outline-none focus:border-primary" />
+                              <span className="flex-1" />
+                              <button onClick={() => setCasesDraft((casesDraft ?? []).filter((_, k) => k !== i))} title={t("test.cases.delCase")} className="px-1 text-[11px] text-status-error hover:opacity-80">✕</button>
+                            </div>
+                            <input value={c.purpose ?? ""} onChange={(e) => updateCase(i, { purpose: e.target.value })} placeholder={t("test.cases.purpose")} className="w-full rounded border border-border bg-background px-1.5 py-0.5 text-[11px] text-foreground outline-none focus:border-primary" />
+                            <input value={c.precondition ?? ""} onChange={(e) => updateCase(i, { precondition: e.target.value })} placeholder={t("test.cases.precondition")} className="w-full rounded border border-border bg-background px-1.5 py-0.5 text-[11px] text-foreground outline-none focus:border-primary" />
+                            {(c.steps ?? []).map((s, j) => (
+                              <div key={j} className="flex items-center gap-1">
+                                <span className="w-4 shrink-0 text-[10px] text-muted-foreground">{j + 1}.</span>
+                                <input value={s.content ?? ""} onChange={(e) => updateStep(i, j, { content: e.target.value })} placeholder={t("test.cases.step")} className="min-w-0 flex-1 rounded border border-border bg-background px-1.5 py-0.5 text-[11px] text-foreground outline-none focus:border-primary" />
+                                <input value={s.expected ?? ""} onChange={(e) => updateStep(i, j, { expected: e.target.value })} placeholder={t("test.cases.expected")} className="min-w-0 flex-1 rounded border border-border bg-background px-1.5 py-0.5 text-[11px] text-foreground outline-none focus:border-primary" />
+                                <button onClick={() => updateCase(i, { steps: (c.steps ?? []).filter((_, k) => k !== j) })} className="shrink-0 px-0.5 text-[10px] text-muted-foreground hover:text-status-error">✕</button>
+                              </div>
+                            ))}
+                            <button onClick={() => updateCase(i, { steps: [...(c.steps ?? []), { content: "", expected: "" }] })} className="text-[10px] text-primary hover:opacity-80">+ {t("test.cases.addStep")}</button>
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                )}
+                {focusStep !== "cases" && (
+                  <div className="mt-2 text-[11px] text-muted-foreground">{t("test.flow.evidenceNote")}</div>
+                )}
               </div>
             </div>
           </div>
