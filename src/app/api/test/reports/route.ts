@@ -34,6 +34,9 @@ export async function GET(req: Request): Promise<Response> {
           // ({task}-{env}.md) — include it so the 报告 view can show the full doc.
           let markdown = '';
           try { markdown = fs.readFileSync(path.join(dir, f.replace(/\.run\.json$/, '.md')), 'utf-8'); } catch { /* no .md */ }
+          // 缺陷报告（第三交付物，按需生成）：{task}-{env}-缺陷报告.md
+          let defectMarkdown = '';
+          try { defectMarkdown = fs.readFileSync(path.join(dir, f.replace(/\.run\.json$/, '-缺陷报告.md')), 'utf-8'); } catch { /* none */ }
           reports.push({
             task: taskDir.name,
             env: typeof raw.env === 'string' ? raw.env : '',
@@ -50,6 +53,7 @@ export async function GET(req: Request): Promise<Response> {
             },
             tests: Array.isArray(raw.tests) ? raw.tests : [],
             markdown,
+            defectMarkdown,
           });
         } catch {
           /* skip unreadable / malformed run.json */

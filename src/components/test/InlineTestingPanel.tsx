@@ -72,6 +72,8 @@ interface ReportEntry {
   tests: CaseResult[];
   /** The full markdown report doc ({task}-{env}.md), if the report step wrote one. */
   markdown: string;
+  /** The defect report ({task}-{env}-缺陷报告.md), if generated (第三交付物). */
+  defectMarkdown: string;
 }
 
 interface Project {
@@ -318,6 +320,90 @@ export function InlineTestingPanel() {
     if (!text || !activeTask || busy) return;
     patchTask(activeTask.id, (s) => ({ convo: [...s.convo, { role: "user", text }], notes: [...(s.notes ?? []), text] }));
     setComposer("");
+  };
+
+  // 对话式定向修订（区别于 submitNote 追加指令）：调 /api/test/revise 让 AI 读当前
+  // 需求/用例产物 + 按指令精准改写并覆盖，流式进 convo；用例改完重新拉取展示。仅
+  // 需求/用例步、且产物已存在（done/review）时可用。复用 runStep 的 SSE 帧解析。
+  const reviseStep = async (step: TestStep, instruction: string) => {
+    const proj = selected !== null ? projects[selected] : null;
+    const task = proj && selectedTask !== null ? proj.tasks[selectedTask] : null;
+    const text = instruction.trim();
+    if (!proj?.path || !task || busyTaskId || !text) return;
+    const id = task.id;
+    const stepName = t(STEPS.find((s) => s.step === step)!.name);
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+    setBusyTaskId(id);
+    const push = (msg: ConvoMsg) => patchTask(id, (s) => ({ convo: [...s.convo, msg] }));
+    const appendAi = (chunk: string) =>
+      patchTask(id, (s) => {
+        const last = s.convo[s.convo.length - 1];
+        if (last && last.role === "ai") return { convo: [...s.convo.slice(0, -1), { role: "ai", text: last.text + chunk }] };
+        return { convo: [...s.convo, { role: "ai", text: chunk }] };
+      });
+    push({ role: "user", text: `✏️ ${t("test.revise.action")}「${stepName}」：${text}` });
+    setComposer("");
+    let sawError = false;
+    let lineBuf = "";
+    try {
+      const res = await fetch("/api/test/revise", {
+        method: "POST",
+        signal: ctrl.signal,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectPath: proj.path, taskName: task.name, step, instruction: text, model: model || undefined, providerId: providerId || undefined }),
+      });
+      if (!res.ok || !res.body) {
+        const j = await res.json().catch(() => ({}));
+        push({ role: "error", text: (j.error as string) || "修订失败" });
+        sawError = true;
+        return;
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const frames = buf.split("\n\n");
+        buf = frames.pop() || "";
+        for (const frame of frames) {
+          const fline = frame.replace(/^data:\s?/, "").trim();
+          if (!fline) continue;
+          let evt: { type?: string; data?: string } | null = null;
+          try { evt = JSON.parse(fline); } catch { continue; }
+          if (!evt) continue;
+          if (evt.type === "text") {
+            lineBuf += evt.data || "";
+            const ls = lineBuf.split("\n");
+            lineBuf = ls.pop() || "";
+            for (const l of ls) if (l.trim()) appendAi(l + "\n");
+          } else if (evt.type === "tool_use") {
+            try { const tu = JSON.parse(evt.data || "{}"); const label = toolUseLabel(tu.name || "", tu.input); if (label) push({ role: "tool", text: `→ ${label}` }); } catch {}
+          } else if (evt.type === "error") {
+            let msg = evt.data || "";
+            try { const d = JSON.parse(evt.data || "{}"); msg = d.userMessage || d.rawMessage || msg; } catch {}
+            push({ role: "error", text: msg });
+            sawError = true;
+          }
+        }
+      }
+      if (lineBuf.trim()) appendAi(lineBuf);
+    } catch (e) {
+      if (ctrl.signal.aborted || (e instanceof DOMException && e.name === "AbortError")) push({ role: "user", text: `■ ${t("test.flow.stop")}` });
+      else { push({ role: "error", text: `请求失败：${e instanceof Error ? e.message : String(e)}` }); sawError = true; }
+    } finally {
+      if (abortRef.current === ctrl) abortRef.current = null;
+      setBusyTaskId(null);
+      // 用例改完 → 重新拉取展示（需求步无 inline 展示，跳过）。
+      if (!sawError && step === "cases" && proj.path) {
+        try {
+          const d = await fetch(`/api/test/cases?projectPath=${encodeURIComponent(proj.path)}&taskName=${encodeURIComponent(task.name)}`).then((r) => r.json());
+          if (Array.isArray(d?.cases)) setCasesPreview(d.cases as GeneratedCase[]);
+        } catch { /* keep current preview */ }
+      }
+    }
   };
 
   const addProject = (name: string, path: string) => setProjects((ps) => [...ps, { name, path, tasks: [] }]);
@@ -1190,6 +1276,16 @@ export function InlineTestingPanel() {
                   placeholder={busy ? t("test.convo.running") : t("test.convo.placeholder")}
                   className="flex-1 bg-transparent text-xs text-foreground outline-none disabled:cursor-not-allowed"
                 />
+                {(focusStep === "requirement" || focusStep === "cases") && (stepStatus[focusStep] === "done" || stepStatus[focusStep] === "review") && (
+                  <button
+                    onClick={() => reviseStep(focusStep, composer)}
+                    disabled={busy || !composer.trim()}
+                    title={t("test.revise.action")}
+                    className="flex h-6 shrink-0 items-center gap-1 rounded-md border border-border px-2 text-[10px] text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    <Sparkle size={11} /> {t("test.revise.btn")}
+                  </button>
+                )}
                 <button
                   onClick={submitNote}
                   disabled={busy || !composer.trim()}
@@ -1200,7 +1296,11 @@ export function InlineTestingPanel() {
                   <ArrowUp size={13} />
                 </button>
               </div>
-              <div className="mt-1 px-1 text-[10px] text-muted-foreground">{t("test.convo.hint")}</div>
+              <div className="mt-1 px-1 text-[10px] text-muted-foreground">
+                {(focusStep === "requirement" || focusStep === "cases") && (stepStatus[focusStep] === "done" || stepStatus[focusStep] === "review")
+                  ? t("test.revise.hint")
+                  : t("test.convo.hint")}
+              </div>
             </div>
           </div>
         </div>
@@ -1425,7 +1525,12 @@ function ConvoBubble({ msg }: { msg: ConvoMsg }) {
 
 // 报告 view (prototype): metrics row + per-case results table, from the execution
 // run's @@RESULT frames (caseResults) + four-state tally. Facts only.
-function ReportView({ t, results, four, circuitBroken, taskName }: { t: T; results: CaseResult[]; four: FourState; circuitBroken?: boolean; taskName: string }) {
+function ReportView({ t, results, four, circuitBroken, taskName, projectPath, env }: { t: T; results: CaseResult[]; four: FourState; circuitBroken?: boolean; taskName: string; projectPath?: string; env?: string }) {
+  // 证据媒体（图片灯箱 + 录像内联回放）：经 /api/test/media 白名单流式取证据；
+  // lightbox=当前放大查看的文件名。无 projectPath（如流程内调用）时退化为文件名文本。
+  const [lightbox, setLightbox] = useState<string | null>(null);
+  const mediaUrl = (file: string) => `/api/test/media?projectPath=${encodeURIComponent(projectPath || "")}&taskName=${encodeURIComponent(taskName)}&env=${encodeURIComponent(env || "local")}&file=${encodeURIComponent(file)}`;
+  const isVid = (f: string) => /\.(webm|mp4|mov)$/i.test(f);
   const total = four.total || results.length;
   const execRate = total ? Math.round((four.pass / total) * 100) : 0;
   const funcDenom = total - four.blocked; // blocked cases never ran functionally
@@ -1484,7 +1589,20 @@ function ReportView({ t, results, four, circuitBroken, taskName }: { t: T; resul
                     {chipLabel[r.status] ? t(chipLabel[r.status]) : r.status}
                   </span>
                 </td>
-                <td className="px-2 py-1.5 text-muted-foreground">{r.evidence?.length ? r.evidence.join(", ") : "—"}</td>
+                <td className="px-2 py-1.5">
+                  {r.evidence?.length && projectPath ? (
+                    <div className="flex flex-wrap gap-1">
+                      {r.evidence.map((f, k) => isVid(f) ? (
+                        <button key={k} onClick={() => setLightbox(f)} title={f} className="rounded border border-border px-1 py-0.5 text-[10px] text-primary hover:bg-muted">🎬 {t("test.media.video")}</button>
+                      ) : (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img key={k} src={mediaUrl(f)} alt={f} title={f} onClick={() => setLightbox(f)} className="h-10 w-10 cursor-pointer rounded border border-border object-cover transition hover:opacity-80" />
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="text-muted-foreground">{r.evidence?.length ? r.evidence.join(", ") : "—"}</span>
+                  )}
+                </td>
                 <td className="px-2 py-1.5 text-muted-foreground">{r.error || "—"}</td>
               </tr>
             ))}
@@ -1492,6 +1610,16 @@ function ReportView({ t, results, four, circuitBroken, taskName }: { t: T; resul
         </table>
       </div>
       <p className="mt-2 text-[11px] text-muted-foreground">ℹ️ {t("test.report.factsNote")}</p>
+      {lightbox && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-6" onClick={() => setLightbox(null)}>
+          {isVid(lightbox) ? (
+            <video src={mediaUrl(lightbox)} controls autoPlay className="max-h-full max-w-full" onClick={(e) => e.stopPropagation()} />
+          ) : (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={mediaUrl(lightbox)} alt={lightbox} className="max-h-full max-w-full object-contain" onClick={(e) => e.stopPropagation()} />
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -1609,7 +1737,9 @@ function ReportBrowser({ projects, t, model, providerId }: { projects: Project[]
   const [loading, setLoading] = useState(true);
   const [groups, setGroups] = useState<{ project: Project; reports: ReportEntry[] }[]>([]);
   const [open, setOpen] = useState<string | null>(null);
-  const [compareKey, setCompareKey] = useState<string | null>(null);
+  const [rowTab, setRowTab] = useState<Record<string, "result" | "compare" | "defect">>({});
+  const [defectBusy, setDefectBusy] = useState<string | null>(null);
+  const [reloadTick, setReloadTick] = useState(0);
   const [handoffKey, setHandoffKey] = useState<string | null>(null);
 
   // 交给研发修复: hand a failing report to the 研发平台 (coding chat). Creates a
@@ -1654,6 +1784,30 @@ function ReportBrowser({ projects, t, model, providerId }: { projects: Project[]
     }
   };
 
+  // 生成缺陷报告（第三交付物）：调 /api/test/defect 流式跑（读到结束即可），完成后触发
+  // reload 让 reports 重新拉取拿到新写的 {task}-{env}-缺陷报告.md（r.defectMarkdown）。
+  const defectGen = async (project: Project, r: ReportEntry) => {
+    const key = `${project.path}|${r.task}|${r.env}`;
+    setDefectBusy(key);
+    try {
+      const res = await fetch("/api/test/defect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectPath: project.path, taskName: r.task, env: r.env, model: model || undefined, providerId: providerId || undefined }),
+      });
+      if (res.body) {
+        const reader = res.body.getReader();
+        for (;;) { const { done } = await reader.read(); if (done) break; } // drain to completion
+      }
+      setReloadTick((n) => n + 1); // re-fetch reports → picks up the new 缺陷报告.md
+      setRowTab((m) => ({ ...m, [key]: "defect" }));
+    } catch {
+      /* leave as-is */
+    } finally {
+      setDefectBusy(null);
+    }
+  };
+
   useEffect(() => {
     // All setState happens inside the async callback (Promise.all([]) resolves
     // immediately for the empty case) — avoids synchronous setState in the effect.
@@ -1673,7 +1827,7 @@ function ReportBrowser({ projects, t, model, providerId }: { projects: Project[]
       setLoading(false);
     });
     return () => { cancelled = true; };
-  }, [projects]);
+  }, [projects, reloadTick]);
 
   if (loading) return <p className="mt-6 text-center text-[11px] text-muted-foreground">{t("test.report.loading")}</p>;
   if (!groups.length) return <EmptyState icon={ChartBar} text={t("test.reportEmpty")} />;
@@ -1722,10 +1876,15 @@ function ReportBrowser({ projects, t, model, providerId }: { projects: Project[]
                           {isOpen && (
                             <div className="border-t border-border p-3">
                               <div className="mb-3 flex items-center gap-1.5">
-                                <button onClick={() => setCompareKey(null)} className={`rounded px-2 py-0.5 text-[11px] ${compareKey !== key ? "bg-primary text-primary-foreground" : "border border-border text-foreground hover:bg-muted"}`}>{t("test.compare.tabResult")}</button>
-                                <button onClick={() => setCompareKey(key)} className={`rounded px-2 py-0.5 text-[11px] ${compareKey === key ? "bg-primary text-primary-foreground" : "border border-border text-foreground hover:bg-muted"}`}>{t("test.compare.tabCompare")}</button>
+                                {(["result", "compare", "defect"] as const).map((tab) => {
+                                  const cur = rowTab[key] || "result";
+                                  const label = tab === "result" ? t("test.compare.tabResult") : tab === "compare" ? t("test.compare.tabCompare") : t("test.defect.tab");
+                                  return (
+                                    <button key={tab} onClick={() => setRowTab((m) => ({ ...m, [key]: tab }))} className={`rounded px-2 py-0.5 text-[11px] ${cur === tab ? "bg-primary text-primary-foreground" : "border border-border text-foreground hover:bg-muted"}`}>{label}</button>
+                                  );
+                                })}
                                 <span className="flex-1" />
-                                {compareKey !== key && r.counts.fail > 0 && (
+                                {(rowTab[key] || "result") === "result" && r.counts.fail > 0 && (
                                   <button
                                     onClick={() => handoff(project, r)}
                                     disabled={handoffKey === key}
@@ -1735,11 +1894,31 @@ function ReportBrowser({ projects, t, model, providerId }: { projects: Project[]
                                   </button>
                                 )}
                               </div>
-                              {compareKey === key ? (
+                              {(rowTab[key] || "result") === "compare" ? (
                                 <CompareView t={t} projectPath={project.path} taskName={task} env={r.env} />
+                              ) : (rowTab[key] || "result") === "defect" ? (
+                                <div>
+                                  <div className="mb-2 flex items-center gap-2">
+                                    <button
+                                      onClick={() => defectGen(project, r)}
+                                      disabled={defectBusy === key}
+                                      className="flex h-7 items-center gap-1 rounded-md bg-primary px-2.5 text-[11px] font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                                    >
+                                      <WarningCircle size={12} /> {defectBusy === key ? t("test.defect.generating") : r.defectMarkdown ? t("test.defect.regen") : t("test.defect.gen")}
+                                    </button>
+                                    <span className="text-[10px] text-muted-foreground">{t("test.defect.hint")}</span>
+                                  </div>
+                                  {r.defectMarkdown ? (
+                                    <div className="prose prose-sm dark:prose-invert max-w-none rounded-lg border border-border bg-card p-3">
+                                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{r.defectMarkdown}</ReactMarkdown>
+                                    </div>
+                                  ) : (
+                                    <p className="text-[11px] text-muted-foreground">{defectBusy === key ? t("test.defect.generating") : t("test.defect.empty")}</p>
+                                  )}
+                                </div>
                               ) : (
                                 <>
-                                  <ReportView t={t} results={r.tests} four={r.counts} circuitBroken={r.circuitBroken} taskName={task} />
+                                  <ReportView t={t} results={r.tests} four={r.counts} circuitBroken={r.circuitBroken} taskName={task} projectPath={project.path} env={r.env} />
                                   {r.markdown && (
                                     <div className="mt-3 border-t border-border pt-3">
                                       <div className="mb-2 text-[11px] font-medium text-muted-foreground">{t("test.report.docTitle")}</div>
