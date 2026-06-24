@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useTranslation } from "@/hooks/useTranslation";
-import { ListChecks, ChartBar, Gear, ArrowLeft, FolderPlus, Play, Stop, ArrowUp, SpinnerGap, Sparkle, Terminal, WarningCircle, Wrench, type Icon } from "@/components/ui/icon";
+import { ListChecks, ChartBar, Gear, ArrowLeft, FolderPlus, Play, Stop, ArrowUp, SpinnerGap, Sparkle, Terminal, WarningCircle, Wrench, Trash, type Icon } from "@/components/ui/icon";
 import type { TranslationKey } from "@/i18n";
 import { useNativeFolderPicker } from "@/hooks/useNativeFolderPicker";
 import { FolderPicker } from "@/components/chat/FolderPicker";
@@ -52,6 +52,8 @@ interface GeneratedCase {
   precondition?: string;
   steps?: { content?: string; expected?: string }[];
   assertion?: string;
+  oracle?: string;         // 预期结果来源:PRD/设计稿/API契约/产品确认/现状锁定
+  verification?: string;   // 验证性质:功能验证 / 回归基线（oracle 双轴,决定通过率口径）
   cleanup?: string;
 }
 
@@ -748,6 +750,41 @@ export function InlineTestingPanel() {
     abortRef.current?.abort();
   };
 
+  // 删除项目/任务:删前检查是否有正在执行的任务(busyTaskId),有则在确认弹窗里做二次强提醒。
+  const [deleteTarget, setDeleteTarget] = useState<
+    { kind: "project" | "task"; pIdx: number; tIdx?: number; name: string; running: boolean } | null
+  >(null);
+  const requestDeleteProject = (pIdx: number) => {
+    const p = projects[pIdx];
+    if (!p) return;
+    setDeleteTarget({ kind: "project", pIdx, name: p.name, running: !!busyTaskId && p.tasks.some((tk) => tk.id === busyTaskId) });
+  };
+  const requestDeleteTask = (tIdx: number) => {
+    if (selected === null) return;
+    const tk = projects[selected]?.tasks[tIdx];
+    if (!tk) return;
+    setDeleteTarget({ kind: "task", pIdx: selected, tIdx, name: tk.name, running: busyTaskId === tk.id });
+  };
+  const confirmDelete = () => {
+    if (!deleteTarget) return;
+    const { kind, pIdx, tIdx, running } = deleteTarget;
+    if (running) { abortRef.current?.abort(); setBusyTaskId(null); } // 删除正在执行的目标 → 先中断当前运行
+    if (kind === "project") {
+      const ids = new Set((projects[pIdx]?.tasks ?? []).map((tk) => tk.id));
+      setTaskStates((m) => { const n = { ...m }; ids.forEach((id) => delete n[id]); return n; });
+      setProjects((ps) => ps.filter((_, i) => i !== pIdx));
+      if (selected === pIdx) { setSelected(null); setSelectedTask(null); }
+      else if (selected !== null && selected > pIdx) setSelected(selected - 1);
+    } else {
+      const tk = projects[pIdx]?.tasks[tIdx!];
+      if (tk) setTaskStates((m) => { const n = { ...m }; delete n[tk.id]; return n; });
+      setProjects((ps) => ps.map((p, i) => (i === pIdx ? { ...p, tasks: p.tasks.filter((_, j) => j !== tIdx) } : p)));
+      if (selected === pIdx && selectedTask === tIdx) { setSelectedTask(null); setView("dash"); }
+      else if (selected === pIdx && selectedTask !== null && selectedTask > tIdx!) setSelectedTask(selectedTask - 1);
+    }
+    setDeleteTarget(null);
+  };
+
   // Approve a human-gated step (待批准 → 已完成) 并推进:批准后主动运行下一阶段。
   // 下一步若是 gated(用例),下方 auto-chain effect 不会自动跑它(其 !HUMAN_GATED 条件),
   // 故在此主动触发;execution/report 的后续接力仍交给 auto-chain effect。runStep 只看
@@ -1044,6 +1081,11 @@ export function InlineTestingPanel() {
                                 {c.priority && <span className="rounded bg-muted px-1 py-0.5 text-[10px] text-muted-foreground">{c.priority}</span>}
                                 {c.module && <span className="text-[10px] text-muted-foreground">{c.module}</span>}
                                 {c.requirement && <span className="text-[10px] text-muted-foreground">· {c.requirement}</span>}
+                                {c.verification && (
+                                  <span className={`rounded px-1 py-0.5 text-[10px] ${c.verification.includes("回归") ? "bg-muted text-muted-foreground" : "bg-status-success-muted text-status-success-foreground"}`}>
+                                    {c.verification}{c.oracle ? ` · ${c.oracle}` : ""}
+                                  </span>
+                                )}
                               </div>
                               {c.purpose && <div className="mt-0.5 text-xs font-medium text-foreground">{c.purpose}</div>}
                               {c.precondition && (
@@ -1075,6 +1117,21 @@ export function InlineTestingPanel() {
                             </div>
                             <input value={c.purpose ?? ""} onChange={(e) => updateCase(i, { purpose: e.target.value })} placeholder={t("test.cases.purpose")} className="w-full rounded border border-border bg-background px-1.5 py-0.5 text-[11px] text-foreground outline-none focus:border-primary" />
                             <input value={c.precondition ?? ""} onChange={(e) => updateCase(i, { precondition: e.target.value })} placeholder={t("test.cases.precondition")} className="w-full rounded border border-border bg-background px-1.5 py-0.5 text-[11px] text-foreground outline-none focus:border-primary" />
+                            <div className="flex items-center gap-1">
+                              <select value={c.verification ?? ""} onChange={(e) => updateCase(i, { verification: e.target.value })} className="rounded border border-border bg-background px-1 py-0.5 text-[11px] text-foreground outline-none focus:border-primary">
+                                <option value="">{t("test.cases.verification")}</option>
+                                <option value="功能验证">功能验证</option>
+                                <option value="回归基线">回归基线</option>
+                              </select>
+                              <select value={c.oracle ?? ""} onChange={(e) => updateCase(i, { oracle: e.target.value })} className="rounded border border-border bg-background px-1 py-0.5 text-[11px] text-foreground outline-none focus:border-primary">
+                                <option value="">{t("test.cases.oracle")}</option>
+                                <option value="PRD">PRD</option>
+                                <option value="设计稿">设计稿</option>
+                                <option value="API契约">API契约</option>
+                                <option value="产品确认">产品确认</option>
+                                <option value="现状锁定">现状锁定</option>
+                              </select>
+                            </div>
                             {(c.steps ?? []).map((s, j) => (
                               <div key={j} className="flex items-center gap-1">
                                 <span className="w-4 shrink-0 text-[10px] text-muted-foreground">{j + 1}.</span>
@@ -1168,27 +1225,35 @@ export function InlineTestingPanel() {
                 ) : (
                   <div className="grid grid-cols-2 gap-2 lg:grid-cols-3">
                     {projects.map((p, i) => (
-                      <button
-                        key={i}
-                        onClick={() => {
-                          setSelected(i);
-                          setSelectedTask(null);
-                        }}
-                        className="group flex flex-col gap-2.5 rounded-xl border border-border bg-card p-3.5 text-left transition-colors hover:border-primary/50 hover:bg-muted/40"
-                      >
-                        <div className="flex items-center gap-2.5">
-                          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                            <FolderPlus size={17} />
-                          </span>
-                          <div className="min-w-0 flex-1">
-                            <div className="truncate text-sm font-medium text-foreground">{p.name}</div>
-                            {p.path && <div className="truncate font-mono text-[10px] text-muted-foreground">{p.path}</div>}
+                      <div key={i} className="group relative">
+                        <button
+                          onClick={() => {
+                            setSelected(i);
+                            setSelectedTask(null);
+                          }}
+                          className="flex w-full flex-col gap-2.5 rounded-xl border border-border bg-card p-3.5 text-left transition-colors hover:border-primary/50 hover:bg-muted/40"
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                              <FolderPlus size={17} />
+                            </span>
+                            <div className="min-w-0 flex-1">
+                              <div className="truncate text-sm font-medium text-foreground">{p.name}</div>
+                              {p.path && <div className="truncate font-mono text-[10px] text-muted-foreground">{p.path}</div>}
+                            </div>
                           </div>
-                        </div>
-                        <div className="flex items-center gap-1.5 border-t border-border/60 pt-2 text-[11px] text-muted-foreground">
-                          <ListChecks size={12} /> {p.tasks.length} {t("test.tasks")}
-                        </div>
-                      </button>
+                          <div className="flex items-center gap-1.5 border-t border-border/60 pt-2 text-[11px] text-muted-foreground">
+                            <ListChecks size={12} /> {p.tasks.length} {t("test.tasks")}
+                          </div>
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); requestDeleteProject(i); }}
+                          title={t("test.del.delete")}
+                          className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-status-error-muted hover:text-status-error group-hover:opacity-100"
+                        >
+                          <Trash size={13} />
+                        </button>
+                      </div>
                     ))}
                   </div>
                 )}
@@ -1231,35 +1296,43 @@ export function InlineTestingPanel() {
                       const st = taskStates[tk.id] ?? DEFAULT_TASK_STATE;
                       const chip = taskChip(st, t);
                       return (
-                        <button
-                          key={tk.id}
-                          onClick={() => {
-                            setSelectedTask(i);
-                            setView("flow");
-                          }}
-                          className="group flex flex-col gap-3 rounded-xl border border-border bg-card p-3.5 text-left transition-colors hover:border-primary/50 hover:bg-muted/40"
-                        >
-                          <div className="flex items-start justify-between gap-2">
-                            <span className="truncate pt-0.5 text-sm font-medium text-foreground">{tk.name}</span>
-                            <div className="flex shrink-0 flex-col items-end gap-0.5">
-                              <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${chip.cls}`}>{chip.text}</span>
-                              <span className="text-[10px] text-muted-foreground">{taskStageName(st, t)}</span>
-                            </div>
-                          </div>
-                          <div className="flex items-start">
-                            {STEPS.map((s, idx) => (
-                              <div key={s.step} className="flex flex-1 flex-col items-center">
-                                {/* dot with connector lines on both sides (ends are hidden) */}
-                                <div className="flex w-full items-center">
-                                  <span className={`h-px flex-1 ${idx === 0 ? "opacity-0" : "bg-border"}`} />
-                                  <span className={`mx-1 h-2 w-2 shrink-0 rounded-full ${stepDotClass(st.stepStatus[s.step])}`} />
-                                  <span className={`h-px flex-1 ${idx === STEPS.length - 1 ? "opacity-0" : "bg-border"}`} />
-                                </div>
-                                <span className="mt-1 text-center text-[9px] leading-tight text-muted-foreground">{t(s.name)}</span>
+                        <div key={tk.id} className="group relative">
+                          <button
+                            onClick={() => {
+                              setSelectedTask(i);
+                              setView("flow");
+                            }}
+                            className="flex w-full flex-col gap-3 rounded-xl border border-border bg-card p-3.5 text-left transition-colors hover:border-primary/50 hover:bg-muted/40"
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <span className="truncate pt-0.5 text-sm font-medium text-foreground">{tk.name}</span>
+                              <div className="flex shrink-0 flex-col items-end gap-0.5">
+                                <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${chip.cls}`}>{chip.text}</span>
+                                <span className="text-[10px] text-muted-foreground">{taskStageName(st, t)}</span>
                               </div>
-                            ))}
-                          </div>
-                        </button>
+                            </div>
+                            <div className="flex items-start">
+                              {STEPS.map((s, idx) => (
+                                <div key={s.step} className="flex flex-1 flex-col items-center">
+                                  {/* dot with connector lines on both sides (ends are hidden) */}
+                                  <div className="flex w-full items-center">
+                                    <span className={`h-px flex-1 ${idx === 0 ? "opacity-0" : "bg-border"}`} />
+                                    <span className={`mx-1 h-2 w-2 shrink-0 rounded-full ${stepDotClass(st.stepStatus[s.step])}`} />
+                                    <span className={`h-px flex-1 ${idx === STEPS.length - 1 ? "opacity-0" : "bg-border"}`} />
+                                  </div>
+                                  <span className="mt-1 text-center text-[9px] leading-tight text-muted-foreground">{t(s.name)}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); requestDeleteTask(i); }}
+                            title={t("test.del.delete")}
+                            className="absolute right-2 bottom-2 flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-status-error-muted hover:text-status-error group-hover:opacity-100"
+                          >
+                            <Trash size={13} />
+                          </button>
+                        </div>
                       );
                     })}
                   </div>
@@ -1274,6 +1347,31 @@ export function InlineTestingPanel() {
       )}
 
       {/* Modals + folder picker (browser fallback for project selection) */}
+      {deleteTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setDeleteTarget(null)}>
+          <div className="w-[400px] max-w-[92vw] rounded-xl border border-border bg-card p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-sm font-semibold text-foreground">{t("test.del.title")}</h3>
+            <p className="mt-2.5 text-xs leading-relaxed text-muted-foreground">
+              {t(deleteTarget.kind === "project" ? "test.del.msgProject" : "test.del.msgTask")}
+            </p>
+            <p className="mt-1 truncate text-sm font-medium text-foreground">「{deleteTarget.name}」</p>
+            {deleteTarget.running && (
+              <p className="mt-2.5 flex items-start gap-1.5 rounded-md bg-status-error-muted px-2.5 py-2 text-[11px] font-medium text-status-error">
+                <WarningCircle size={14} className="mt-px shrink-0" />
+                {t("test.del.runningWarn")}
+              </p>
+            )}
+            <div className="mt-4 flex justify-end gap-2">
+              <button onClick={() => setDeleteTarget(null)} className="h-8 rounded-md border border-border px-3 text-xs text-foreground hover:bg-muted">
+                {t("test.cancel")}
+              </button>
+              <button onClick={confirmDelete} className="h-8 rounded-md bg-status-error px-3 text-xs font-medium text-white hover:opacity-90">
+                {deleteTarget.running ? t("test.del.stopDelete") : t("test.del.confirm")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {modal === "newTask" && <NewTaskModal t={t} onClose={() => setModal("none")} onAdd={addTask} />}
       {modal === "runChoice" && activeTask && (
         <RunChoiceModal
