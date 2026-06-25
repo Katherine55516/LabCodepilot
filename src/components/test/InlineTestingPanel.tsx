@@ -11,7 +11,7 @@ import { useNativeFolderPicker } from "@/hooks/useNativeFolderPicker";
 import { FolderPicker } from "@/components/chat/FolderPicker";
 import { ModelSelectorDropdown } from "@/components/chat/ModelSelectorDropdown";
 import { useProviderModels } from "@/hooks/useProviderModels";
-import { diffRuns } from "@/lib/test/compare";
+import { diffRuns, funcPassRateStr } from "@/lib/test/compare";
 import type { RunHistoryEntry } from "@/lib/test/history";
 
 /**
@@ -69,6 +69,11 @@ interface ReportEntry {
   passStr: string;
   circuitBroken: boolean;
   counts: FourState;
+  /** 功能验证四态（oracle 双轴，排除回归基线）— 功能验证通过率的权威口径。 */
+  funcCounts?: FourState;
+  /** 功能验证通过率 "pass/total"，全回归基线为 "N/A"（来自 run.json，见 reduce.ts）。 */
+  funcPassStr?: string;
+  regressionTotal?: number;
   tests: CaseResult[];
   /** The full markdown report doc ({task}-{env}.md), if the report step wrote one. */
   markdown: string;
@@ -1553,7 +1558,7 @@ function ConvoBubble({ msg }: { msg: ConvoMsg }) {
 
 // 报告 view (prototype): metrics row + per-case results table, from the execution
 // run's @@RESULT frames (caseResults) + four-state tally. Facts only.
-function ReportView({ t, results, four, circuitBroken, taskName, projectPath, env }: { t: T; results: CaseResult[]; four: FourState; circuitBroken?: boolean; taskName: string; projectPath?: string; env?: string }) {
+function ReportView({ t, results, four, funcCounts, funcPassStr, circuitBroken, taskName, projectPath, env }: { t: T; results: CaseResult[]; four: FourState; funcCounts?: FourState; funcPassStr?: string; circuitBroken?: boolean; taskName: string; projectPath?: string; env?: string }) {
   // 证据媒体（图片灯箱 + 录像内联回放）：经 /api/test/media 白名单流式取证据；
   // lightbox=当前放大查看的文件名。无 projectPath（如流程内调用）时退化为文件名文本。
   const [lightbox, setLightbox] = useState<string | null>(null);
@@ -1561,8 +1566,9 @@ function ReportView({ t, results, four, circuitBroken, taskName, projectPath, en
   const isVid = (f: string) => /\.(webm|mp4|mov)$/i.test(f);
   const total = four.total || results.length;
   const execRate = total ? Math.round((four.pass / total) * 100) : 0;
-  const funcDenom = total - four.blocked; // blocked cases never ran functionally
-  const funcRate = funcDenom > 0 ? Math.round((four.pass / funcDenom) * 100) : 0;
+  // 功能验证通过率（oracle 双轴，排除回归基线）：用后端权威 funcCounts/funcPassStr，
+  // 缺失（legacy 报告）回退「扣除 blocked」执行口径；全回归基线 → "N/A"，不报「100%」。
+  const funcRateStr = funcPassRateStr({ total, pass: four.pass, blocked: four.blocked }, funcCounts, funcPassStr);
   const metric = (label: string, value: string, danger?: boolean) => (
     <div className="rounded-lg bg-muted/40 p-3">
       <div className="text-[11px] text-muted-foreground">{label}</div>
@@ -1591,7 +1597,7 @@ function ReportView({ t, results, four, circuitBroken, taskName, projectPath, en
         </div>
       )}
       <div className="mb-3 grid grid-cols-2 gap-2 lg:grid-cols-4">
-        {metric(t("test.report.funcRate"), `${funcRate}%`)}
+        {metric(t("test.report.funcRate"), funcRateStr)}
         {metric(t("test.report.caseCount"), String(total))}
         {metric(t("test.report.execRate"), `${execRate}%`)}
         {metric(t("test.report.defects"), String(four.fail), four.fail > 0)}
@@ -1946,7 +1952,7 @@ function ReportBrowser({ projects, t, model, providerId }: { projects: Project[]
                                 </div>
                               ) : (
                                 <>
-                                  <ReportView t={t} results={r.tests} four={r.counts} circuitBroken={r.circuitBroken} taskName={task} projectPath={project.path} env={r.env} />
+                                  <ReportView t={t} results={r.tests} four={r.counts} funcCounts={r.funcCounts} funcPassStr={r.funcPassStr} circuitBroken={r.circuitBroken} taskName={task} projectPath={project.path} env={r.env} />
                                   {r.markdown && (
                                     <div className="mt-3 border-t border-border pt-3">
                                       <div className="mb-2 text-[11px] font-medium text-muted-foreground">{t("test.report.docTitle")}</div>

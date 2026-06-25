@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { artifactPaths } from '@/lib/test/prompts';
+import { isUnsafeSegment } from '@/lib/test/path-safety';
 
 export const runtime = 'nodejs';
 
@@ -22,7 +23,7 @@ export async function GET(req: Request): Promise<Response> {
     const url = new URL(req.url);
     const projectPath = url.searchParams.get('projectPath');
     const taskName = url.searchParams.get('taskName');
-    if (!projectPath || !taskName) return Response.json({ cases: [] });
+    if (!projectPath || !taskName || isUnsafeSegment(taskName)) return Response.json({ cases: [] });
 
     const raw = await fs.promises.readFile(casesFile(projectPath, taskName), 'utf-8');
     const parsed = JSON.parse(raw) as unknown;
@@ -41,8 +42,8 @@ export async function PUT(req: Request): Promise<Response> {
   try {
     const body = (await req.json().catch(() => ({}))) as { projectPath?: string; taskName?: string; cases?: unknown };
     const { projectPath, taskName } = body;
-    if (!projectPath || !taskName) {
-      return Response.json({ error: 'projectPath, taskName required' }, { status: 400 });
+    if (!projectPath || !taskName || isUnsafeSegment(taskName)) {
+      return Response.json({ error: 'projectPath, taskName required (taskName must be a safe path segment)' }, { status: 400 });
     }
     const cases = Array.isArray(body.cases) ? body.cases : [];
     const file = casesFile(projectPath, taskName);

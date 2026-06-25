@@ -12,6 +12,7 @@ import { reduceFromText } from '@/lib/test/reduce';
 import { snapshotRunJson } from '@/lib/test/history';
 import { sweepStrayEvidence, normalizeEvidenceExt } from '@/lib/test/evidence';
 import { resolveProjectEnvWithDb } from '@/lib/test/env-resolve';
+import { isUnsafeSegment } from '@/lib/test/path-safety';
 
 // Reference the import so it isn't tree-shaken away (keeps the registration side-effect).
 void predictNativeRuntime;
@@ -159,6 +160,14 @@ export async function POST(req: Request): Promise<Response> {
 
     if (!projectPath || typeof projectPath !== 'string') {
       return new Response(JSON.stringify({ error: 'projectPath is required' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    // taskName composes the AI_LabTest/ artifact paths (artifactPaths) — reject a
+    // traversal value so a run can't write/read outside the project.
+    if (isUnsafeSegment(taskName)) {
+      return new Response(JSON.stringify({ error: 'invalid taskName' }), {
         status: 400,
         headers: { 'Content-Type': 'application/json' },
       });

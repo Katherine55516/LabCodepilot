@@ -82,3 +82,22 @@ export function diffRuns(prev: ComparableRun, curr: ComparableRun): RunDiff {
     funcRate: delta(pct(fcPrev.pass, fcPrev.total), pct(fcCurr.pass, fcCurr.total)),
   };
 }
+
+/**
+ * 报告卡片「功能验证通过率」显示字符串（oracle 双轴口径，给 ReportView 用）。
+ * 优先用后端权威 funcCounts/funcPassStr（排除回归基线，见 reduce.ts）；缺失（legacy
+ * 报告）时回退到「扣除 blocked」的执行口径。全回归基线（funcPassStr==="N/A"）→ "N/A"，
+ * 绝不报「100% 通过」(reduce.ts 核心契约：回归基线只锁现状、不代表功能正确)。
+ */
+export function funcPassRateStr(
+  four: { total: number; pass: number; blocked: number },
+  funcCounts?: { total: number; pass: number } | null,
+  funcPassStr?: string,
+): string {
+  if (funcPassStr === 'N/A') return 'N/A';
+  if (funcCounts && funcCounts.total > 0) {
+    return `${Math.round((funcCounts.pass / funcCounts.total) * 100)}%`;
+  }
+  const denom = four.total - four.blocked;
+  return denom > 0 ? `${Math.round((four.pass / denom) * 100)}%` : 'N/A';
+}

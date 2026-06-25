@@ -28,10 +28,13 @@ export function sniffExt(buf: Buffer): string | null {
   return null;
 }
 
-// A file is "evidence-shaped" if it has a media ext or a TC- case-id prefix.
+// A file is "evidence-shaped" if it has a media ext, OR it's a TC- case-id-prefixed
+// file with no extension yet (a raw screenshot normalizeEvidenceExt will sniff). A
+// TC- file that already has a NON-media extension (TC-spec.md, TC-notes.txt) is a
+// user file — never sweep it.
 const MEDIA_EXT_RE = /\.(png|jpe?g|webm|gif)$/i;
 function isEvidenceName(name: string): boolean {
-  return MEDIA_EXT_RE.test(name) || /^TC-/i.test(name);
+  return MEDIA_EXT_RE.test(name) || (/^TC-/i.test(name) && !path.extname(name));
 }
 
 /**

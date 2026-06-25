@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { Readable } from 'stream';
 import { artifactPaths } from '@/lib/test/prompts';
+import { isUnsafeSegment } from '@/lib/test/path-safety';
 
 export const runtime = 'nodejs';
 
@@ -34,6 +35,12 @@ export async function GET(req: Request): Promise<Response> {
   if (!projectPath || !taskName || !file) {
     return new Response('projectPath, taskName, file are required', { status: 400 });
   }
+  // taskName / env are NOT basename-stripped like `file` — they flow straight into
+  // the evidence root, so a traversal value (../) would let the root escape the
+  // project. Reject non-segment values up front.
+  if (isUnsafeSegment(taskName) || isUnsafeSegment(env)) {
+    return new Response('invalid taskName or env', { status: 400 });
+  }
 
   // 白名单根 = 项目的证据目录；只取 basename（证据在该目录平铺），杜绝路径穿越。
   const evidenceRoot = path.resolve(projectPath, artifactPaths(taskName, env).evidenceDir);
@@ -58,8 +65,17 @@ export async function GET(req: Request): Promise<Response> {
   // 视频 + Range → 206 partial（seek 支持），用 Node stream 避免整文件入内存。
   if (isVideo && range) {
     const m = /bytes=(\d*)-(\d*)/.exec(range);
-    const start = m && m[1] ? parseInt(m[1], 10) : 0;
-    const end = m && m[2] ? parseInt(m[2], 10) : stat.size - 1;
+    // Three forms: bytes=START-END, bytes=START- (open-ended), bytes=-N (suffix =
+    // the LAST N bytes). The suffix form must anchor to EOF, not to byte 0.
+    let start: number;
+    let end: number;
+    if (m && m[1] === '' && m[2]) {
+      start = Math.max(0, stat.size - parseInt(m[2], 10));
+      end = stat.size - 1;
+    } else {
+      start = m && m[1] ? parseInt(m[1], 10) : 0;
+      end = m && m[2] ? parseInt(m[2], 10) : stat.size - 1;
+    }
     if (start >= stat.size || end >= stat.size || start > end) {
       return new Response('range not satisfiable', { status: 416, headers: { 'Content-Range': `bytes */${stat.size}` } });
     }

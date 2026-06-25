@@ -1,6 +1,7 @@
 import path from 'path';
 import { artifactPaths } from '@/lib/test/prompts';
 import { listRunHistory } from '@/lib/test/history';
+import { isUnsafeSegment } from '@/lib/test/path-safety';
 
 /**
  * List run.json history snapshots for one task+env (报告多版本对比).
@@ -16,8 +17,8 @@ export async function GET(req: Request): Promise<Response> {
   const projectPath = url.searchParams.get('projectPath');
   const taskName = url.searchParams.get('taskName');
   const env = url.searchParams.get('env') || 'local';
-  if (!projectPath || !taskName) {
-    return Response.json({ error: 'projectPath and taskName are required' }, { status: 400 });
+  if (!projectPath || !taskName || isUnsafeSegment(taskName) || isUnsafeSegment(env)) {
+    return Response.json({ error: 'projectPath and taskName are required (safe segments)' }, { status: 400 });
   }
   // artifactPaths(taskName, env).runJson = AI_LabTest/report/{task}/{task}-{env}.run.json
   // → its dir = the report task dir that holds .history/.

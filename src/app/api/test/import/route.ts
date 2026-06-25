@@ -3,6 +3,7 @@ import path from 'path';
 import mammoth from 'mammoth';
 import ExcelJS from 'exceljs';
 import { artifactPaths } from '@/lib/test/prompts';
+import { isUnsafeSegment } from '@/lib/test/path-safety';
 
 export const runtime = 'nodejs';
 
@@ -114,6 +115,9 @@ export async function POST(req: Request): Promise<Response> {
     if (!projectPath || !taskName || (kind !== 'requirement' && kind !== 'cases')) {
       return Response.json({ error: 'projectPath, taskName, kind(requirement|cases) required' }, { status: 400 });
     }
+    if (isUnsafeSegment(taskName)) {
+      return Response.json({ error: 'invalid taskName' }, { status: 400 });
+    }
 
     let out: string;
     if (kind === 'requirement') {
@@ -131,6 +135,10 @@ export async function POST(req: Request): Promise<Response> {
       }
     }
 
+    // 空内容（空文件/前端 FileReader 偶发空结果）→ 不静默写空产物，明确报错。
+    if (!out.trim()) {
+      return Response.json({ error: '导入内容为空，未写入产物' }, { status: 400 });
+    }
     const paths = artifactPaths(taskName);
     const rel = kind === 'requirement' ? paths.requirement : paths.cases;
     const abs = path.join(projectPath, rel);
