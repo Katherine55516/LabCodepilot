@@ -23,6 +23,7 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { CaretDown, CaretLeft, X } from '@phosphor-icons/react';
 import { cn } from '@/lib/utils';
 import type { ToolUIPart } from 'ai';
 import type { PermissionRequestEvent } from '@/types';
@@ -53,9 +54,15 @@ const MAX_PANEL_HEIGHT_RATIO = 0.85;
 function AskUserQuestionUI({
   toolInput,
   onSubmit,
+  collapsed,
+  onToggleCollapse,
+  onClose,
 }: {
   toolInput: Record<string, unknown>;
   onSubmit: (decision: 'allow', updatedInput: Record<string, unknown>) => void;
+  collapsed: boolean;
+  onToggleCollapse: () => void;
+  onClose: () => void;
 }) {
   const { t } = useTranslation();
   const questions = (toolInput.questions || []) as Array<{
@@ -65,120 +72,212 @@ function AskUserQuestionUI({
     header?: string;
   }>;
 
-  const [selections, setSelections] = useState<Record<string, Set<string>>>({});
-  const [otherTexts, setOtherTexts] = useState<Record<string, string>>({});
-  const [useOther, setUseOther] = useState<Record<string, boolean>>({});
+  // One question per screen (Claude-desktop style). `current` is the page index;
+  // selections / otherTexts / useOther are keyed by question index so answers
+  // persist when paging back and forth.
+  const [current, setCurrent] = useState(0);
+  const [selections, setSelections] = useState<Record<number, Set<string>>>({});
+  const [otherTexts, setOtherTexts] = useState<Record<number, string>>({});
+  const [useOther, setUseOther] = useState<Record<number, boolean>>({});
 
-  const toggleOption = (qIdx: string, label: string, multi: boolean) => {
+  const total = questions.length;
+  const q = questions[current];
+  const isLast = current >= total - 1;
+  const isMulti = !!q?.multiSelect;
+
+  const selectOption = (label: string) => {
     setSelections((prev) => {
-      const current = new Set(prev[qIdx] || []);
-      if (multi) {
-        if (current.has(label)) { current.delete(label); } else { current.add(label); }
+      const cur = new Set(prev[current] || []);
+      if (isMulti) {
+        if (cur.has(label)) cur.delete(label); else cur.add(label);
       } else {
-        current.clear();
-        current.add(label);
+        cur.clear();
+        cur.add(label);
       }
-      return { ...prev, [qIdx]: current };
+      return { ...prev, [current]: cur };
     });
-    setUseOther((prev) => ({ ...prev, [qIdx]: false }));
+    setUseOther((prev) => ({ ...prev, [current]: false }));
   };
 
-  const toggleOther = (qIdx: string, multi: boolean) => {
-    if (!multi) {
-      setSelections((prev) => ({ ...prev, [qIdx]: new Set() }));
-    }
-    setUseOther((prev) => ({ ...prev, [qIdx]: !prev[qIdx] }));
+  const selectOther = () => {
+    if (!isMulti) setSelections((prev) => ({ ...prev, [current]: new Set() }));
+    setUseOther((prev) => ({ ...prev, [current]: !prev[current] }));
   };
 
-  const handleSubmit = () => {
+  // Collect answers from EVERY question (not just the current page). Unanswered
+  // questions are omitted so the model can tell what the user actually chose.
+  const submitAll = () => {
     const answers: Record<string, string> = {};
-    questions.forEach((q, i) => {
-      const qIdx = String(i);
-      const selected = Array.from(selections[qIdx] || []);
-      if (useOther[qIdx] && otherTexts[qIdx]?.trim()) {
-        selected.push(otherTexts[qIdx].trim());
-      }
-      answers[q.question] = selected.join(', ');
+    questions.forEach((qq, i) => {
+      const sel = Array.from(selections[i] || []);
+      if (useOther[i] && otherTexts[i]?.trim()) sel.push(otherTexts[i].trim());
+      if (sel.length > 0) answers[qq.question] = sel.join(', ');
     });
     onSubmit('allow', { questions: toolInput.questions, answers });
   };
 
-  // Require ALL questions to be answered before enabling Submit.
-  // `some` would allow partial submissions where unanswered questions
-  // produce empty-string answers — the model would continue as if the
-  // interview completed when it actually didn't.
-  const hasAnswer = questions.length > 0 && questions.every((_, i) => {
-    const qIdx = String(i);
-    return (selections[qIdx]?.size || 0) > 0 || (useOther[qIdx] && !!otherTexts[qIdx]?.trim());
-  });
+  const curAnswered =
+    (selections[current]?.size || 0) > 0 ||
+    (!!useOther[current] && !!otherTexts[current]?.trim());
+
+  // Skip and Next/Submit both advance; the only difference is that Next/Submit
+  // is disabled on the last page until it's answered, while Skip always works.
+  const goNext = () => {
+    if (isLast) submitAll();
+    else setCurrent((c) => Math.min(total - 1, c + 1));
+  };
+  const goPrev = () => setCurrent((c) => Math.max(0, c - 1));
+
+  // Keyboard: 1..N pick the matching option, N+1 toggles Other, Enter advances.
+  // Digits are ignored while typing in the Other box so the field works normally.
+  useEffect(() => {
+    if (collapsed || !q) return;
+    const onKey = (e: KeyboardEvent) => {
+      const el = document.activeElement;
+      const typing = el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement;
+      if (e.key === 'Enter' && !typing) {
+        if (!isLast || curAnswered) { e.preventDefault(); goNext(); }
+        return;
+      }
+      if (typing) return;
+      const n = parseInt(e.key, 10);
+      if (Number.isNaN(n)) return;
+      if (n >= 1 && n <= q.options.length) { e.preventDefault(); selectOption(q.options[n - 1].label); }
+      else if (n === q.options.length + 1) { e.preventDefault(); selectOther(); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [collapsed, current, q, curAnswered, isLast]);
+
+  if (!q) return null;
+
+  const header = (
+    <div className="flex items-center gap-2 px-4 pt-3 pb-2 shrink-0">
+      {total > 1 ? (
+        <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-muted-foreground">
+          {current + 1}/{total}
+        </span>
+      ) : (
+        <span className="h-2 w-2 shrink-0 rounded-full bg-primary/70" />
+      )}
+      <span className="flex-1 truncate text-sm font-semibold">{q.question}</span>
+      <button
+        type="button"
+        onClick={onToggleCollapse}
+        aria-label={t('permissionPrompt.collapse')}
+        className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+      >
+        <CaretDown size={16} className={cn('transition-transform', collapsed && 'rotate-180')} />
+      </button>
+      <button
+        type="button"
+        onClick={onClose}
+        aria-label={t('permissionPrompt.close')}
+        className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+      >
+        <X size={16} />
+      </button>
+    </div>
+  );
+
+  if (collapsed) return <div className="flex flex-col">{header}</div>;
+
+  const selected = selections[current] || new Set<string>();
 
   return (
-    <div className="space-y-4 py-2">
-      {questions.map((q, i) => {
-        const qIdx = String(i);
-        const selected = selections[qIdx] || new Set<string>();
-        return (
-          <div key={qIdx} className="space-y-2">
-            {q.header && (
-              <span className="inline-block rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
-                {q.header}
-              </span>
-            )}
-            <p className="text-sm font-medium">{q.question}</p>
-            <div className="flex flex-wrap gap-2">
-              {q.options.map((opt) => {
-                const isSelected = selected.has(opt.label);
-                return (
-                  <Button
-                    key={opt.label}
-                    variant="outline"
-                    size="sm"
-                    onClick={() => toggleOption(qIdx, opt.label, q.multiSelect)}
-                    className={isSelected
-                      ? 'border-primary bg-primary/10 text-primary'
-                      : 'border-border bg-background text-foreground hover:bg-muted'
-                    }
-                    title={opt.description}
-                  >
-                    {q.multiSelect && (
-                      <span className="mr-1.5">{isSelected ? '☑' : '☐'}</span>
-                    )}
-                    {opt.label}
-                  </Button>
-                );
-              })}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => toggleOther(qIdx, q.multiSelect)}
-                className={useOther[qIdx]
-                  ? 'border-primary bg-primary/10 text-primary'
-                  : 'border-border bg-background text-foreground hover:bg-muted'
-                }
+    <div className="flex min-h-0 flex-1 flex-col">
+      {header}
+
+      {/* Options — vertical rows: label + description + number badge */}
+      <div className="min-h-0 flex-1 overflow-y-auto px-4">
+        <div className="space-y-1.5 py-1">
+          {q.options.map((opt, i) => {
+            const isSel = selected.has(opt.label);
+            return (
+              <button
+                type="button"
+                key={opt.label}
+                onClick={() => selectOption(opt.label)}
+                className={cn(
+                  'flex w-full items-center gap-3 rounded-lg px-4 py-3 text-left transition-colors',
+                  isSel ? 'bg-primary/10 ring-1 ring-inset ring-primary/40' : 'bg-muted/40 hover:bg-muted/70',
+                )}
               >
-                {t('permissionPrompt.other')}
-              </Button>
-            </div>
-            {useOther[qIdx] && (
-              <Input
-                type="text"
-                placeholder={t('permissionPrompt.otherPlaceholder')}
-                value={otherTexts[qIdx] || ''}
-                onChange={(e) => setOtherTexts((prev) => ({ ...prev, [qIdx]: e.target.value }))}
-                className="text-xs"
-                autoFocus
-              />
+                <div className="min-w-0 flex-1">
+                  <div className={cn('text-sm font-medium', isSel ? 'text-primary' : 'text-foreground')}>
+                    {opt.label}
+                  </div>
+                  {opt.description && (
+                    <div className="mt-0.5 break-words text-xs text-muted-foreground">{opt.description}</div>
+                  )}
+                </div>
+                <span className="shrink-0 rounded border border-border bg-background px-1.5 py-0.5 text-[11px] tabular-nums text-muted-foreground">
+                  {i + 1}
+                </span>
+              </button>
+            );
+          })}
+
+          {/* Other — free-text answer */}
+          <button
+            type="button"
+            onClick={selectOther}
+            className={cn(
+              'flex w-full items-center gap-3 rounded-lg px-4 py-3 text-left transition-colors',
+              useOther[current] ? 'bg-primary/10 ring-1 ring-inset ring-primary/40' : 'bg-muted/40 hover:bg-muted/70',
             )}
-          </div>
-        );
-      })}
-      <Button
-        onClick={handleSubmit}
-        disabled={!hasAnswer}
-        size="sm"
-      >
-        {t('permissionPrompt.submit')}
-      </Button>
+          >
+            <div className={cn('flex-1 text-sm font-medium', useOther[current] ? 'text-primary' : 'text-foreground')}>
+              {t('permissionPrompt.other')}
+            </div>
+            <span className="shrink-0 rounded border border-border bg-background px-1.5 py-0.5 text-[11px] tabular-nums text-muted-foreground">
+              {q.options.length + 1}
+            </span>
+          </button>
+          {useOther[current] && (
+            <Input
+              type="text"
+              placeholder={t('permissionPrompt.otherPlaceholder')}
+              value={otherTexts[current] || ''}
+              onChange={(e) => setOtherTexts((prev) => ({ ...prev, [current]: e.target.value }))}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && curAnswered) { e.preventDefault(); goNext(); }
+              }}
+              className="text-sm"
+              autoFocus
+            />
+          )}
+        </div>
+      </div>
+
+      {/* Footer — Back (paging) on the left, Skip + Next/Submit on the right */}
+      <div className="flex items-center gap-2 border-t border-border/60 px-4 py-2.5 shrink-0">
+        {current > 0 && (
+          <button
+            type="button"
+            onClick={goPrev}
+            aria-label={t('permissionPrompt.back')}
+            className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          >
+            <CaretLeft size={16} />
+          </button>
+        )}
+        <div className="ml-auto flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={goNext} className="text-xs">
+            {t('permissionPrompt.skip')}
+          </Button>
+          <Button
+            size="sm"
+            onClick={goNext}
+            disabled={isLast && !curAnswered}
+            className="gap-1.5 text-xs"
+          >
+            {isLast ? t('permissionPrompt.submit') : t('permissionPrompt.next')}
+            <span className="text-[11px] opacity-70">↵</span>
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -403,11 +502,14 @@ export function PermissionPrompt({
   const panelRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef<{ startY: number; startH: number } | null>(null);
   const [panelHeight, setPanelHeight] = useState<number | null>(null);
+  // AskUserQuestion can collapse to just its header (caret in the panel header).
+  const [panelCollapsed, setPanelCollapsed] = useState(false);
 
-  // A new permission request resets the height, so a size dragged for the
-  // previous prompt doesn't carry over to an unrelated one.
+  // A new permission request resets height + collapse, so state dragged/toggled
+  // for the previous prompt doesn't carry over to an unrelated one.
   useEffect(() => {
     setPanelHeight(null);
+    setPanelCollapsed(false);
   }, [pendingPermission?.permissionRequestId]);
 
   const handleResizeDown = (e: React.PointerEvent) => {
@@ -491,15 +593,19 @@ export function PermissionPrompt({
     return { id: pendingPermission?.permissionRequestId || '' };
   };
 
-  const showResizeHandle = !!pendingPermission && !isResolved;
+  const isAskQuestion = pendingPermission?.toolName === 'AskUserQuestion' && !isResolved;
+  const askCollapsed = isAskQuestion && panelCollapsed;
+  const showResizeHandle = !!pendingPermission && !isResolved && !askCollapsed;
 
   return (
     <div
       ref={panelRef}
       className="relative mx-auto flex w-full max-w-3xl flex-col overflow-hidden border-t border-border bg-background"
-      style={panelHeight != null && showResizeHandle
-        ? { height: panelHeight, maxHeight: `${MAX_PANEL_HEIGHT_RATIO * 100}vh` }
-        : { maxHeight: '50vh' }}
+      style={askCollapsed
+        ? { maxHeight: 'none' }
+        : panelHeight != null && showResizeHandle
+          ? { height: panelHeight, maxHeight: `${MAX_PANEL_HEIGHT_RATIO * 100}vh` }
+          : { maxHeight: '50vh' }}
     >
       {showResizeHandle && (
         <div
@@ -515,7 +621,7 @@ export function PermissionPrompt({
           <div className="h-1 w-10 rounded-full bg-border transition-colors group-hover:bg-muted-foreground/50" />
         </div>
       )}
-      <div className="flex-1 overflow-y-auto px-4 pb-3 pt-1">
+      <div className={isAskQuestion ? 'flex min-h-0 flex-1 flex-col' : 'flex-1 overflow-y-auto px-4 pb-3 pt-1'}>
       {/* ExitPlanMode */}
       {pendingPermission?.toolName === 'ExitPlanMode' && !isResolved && (
         <ExitPlanModeUI
@@ -538,6 +644,12 @@ export function PermissionPrompt({
         <AskUserQuestionUI
           toolInput={pendingPermission.toolInput as Record<string, unknown>}
           onSubmit={(decision, updatedInput) => onPermissionResponse(decision, updatedInput)}
+          collapsed={panelCollapsed}
+          onToggleCollapse={() => setPanelCollapsed((c) => !c)}
+          onClose={() => onPermissionResponse('allow', {
+            questions: (pendingPermission.toolInput as Record<string, unknown>).questions,
+            answers: {},
+          })}
         />
       )}
       {pendingPermission?.toolName === 'AskUserQuestion' && isResolved && (
