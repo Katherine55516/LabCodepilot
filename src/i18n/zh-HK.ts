@@ -113,6 +113,7 @@ const zhHK: Record<TranslationKey, string> = {
   'test.cases.precondition': '前置：',
   'test.cases.expected': '預期：',
   'test.cases.edit': '編輯',
+  'test.cases.editTitle': '編輯用例',
   'test.cases.export': '匯出',
   'test.cases.template': '範本',
   'test.cases.add': '用例',

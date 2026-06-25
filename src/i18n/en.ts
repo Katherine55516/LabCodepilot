@@ -107,6 +107,7 @@ const en = {
   'test.cases.precondition': 'Pre: ',
   'test.cases.expected': 'Expected: ',
   'test.cases.edit': 'Edit',
+  'test.cases.editTitle': 'Edit cases',
   'test.cases.export': 'Export',
   'test.cases.template': 'Template',
   'test.cases.add': 'Case',

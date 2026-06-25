@@ -104,6 +104,7 @@ const zh: Record<TranslationKey, string> = {
   'test.cases.precondition': '前置：',
   'test.cases.expected': '预期：',
   'test.cases.edit': '编辑',
+  'test.cases.editTitle': '编辑用例',
   'test.cases.export': '导出',
   'test.cases.template': '模板',
   'test.cases.add': '用例',

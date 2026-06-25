@@ -1141,94 +1141,45 @@ export function InlineTestingPanel() {
                 {focusStep === "cases" && (
                   <div className="mt-2">
                     <div className="mb-1.5 flex items-center gap-1">
-                      <span className="text-[11px] text-muted-foreground">{t("test.cases.total")} · {(casesDraft ?? casesPreview).length}</span>
+                      <span className="text-[11px] text-muted-foreground">{t("test.cases.total")} · {casesPreview.length}</span>
                       <span className="flex-1" />
-                      {casesDraft === null ? (
-                        <>
-                          {casesPreview.length > 0 && <button onClick={() => setCasesDraft(structuredClone(casesPreview))} className="rounded border border-border px-1.5 py-0.5 text-[10px] text-foreground hover:bg-muted">{t("test.cases.edit")}</button>}
-                          {casesPreview.length > 0 && <button onClick={() => exportCases(false)} className="rounded border border-border px-1.5 py-0.5 text-[10px] text-foreground hover:bg-muted">{t("test.cases.export")}</button>}
-                          <button onClick={() => exportCases(true)} className="rounded border border-border px-1.5 py-0.5 text-[10px] text-foreground hover:bg-muted">{t("test.cases.template")}</button>
-                        </>
-                      ) : (
-                        <>
-                          <button onClick={() => setCasesDraft([...(casesDraft ?? []), { id: "", purpose: "", steps: [{ content: "", expected: "" }] }])} className="rounded border border-border px-1.5 py-0.5 text-[10px] text-foreground hover:bg-muted">+ {t("test.cases.add")}</button>
-                          <button onClick={saveCases} disabled={casesSaving} className="rounded bg-primary px-1.5 py-0.5 text-[10px] text-primary-foreground disabled:opacity-40">{casesSaving ? t("test.cases.saving") : t("test.cases.save")}</button>
-                          <button onClick={() => setCasesDraft(null)} className="rounded border border-border px-1.5 py-0.5 text-[10px] text-foreground hover:bg-muted">{t("test.cases.cancel")}</button>
-                        </>
-                      )}
+                      {casesPreview.length > 0 && <button onClick={() => setCasesDraft(structuredClone(casesPreview))} className="rounded border border-border px-1.5 py-0.5 text-[10px] text-foreground hover:bg-muted">{t("test.cases.edit")}</button>}
+                      {casesPreview.length > 0 && <button onClick={() => exportCases(false)} className="rounded border border-border px-1.5 py-0.5 text-[10px] text-foreground hover:bg-muted">{t("test.cases.export")}</button>}
+                      <button onClick={() => exportCases(true)} className="rounded border border-border px-1.5 py-0.5 text-[10px] text-foreground hover:bg-muted">{t("test.cases.template")}</button>
                     </div>
                     <div className="max-h-[34vh] space-y-1.5 overflow-auto">
-                      {casesDraft === null ? (
-                        casesPreview.length === 0 ? (
-                          <p className="text-[11px] text-muted-foreground">{t("test.cases.empty")}</p>
-                        ) : (
-                          casesPreview.map((c, i) => (
-                            <div key={c.id || i} className="rounded-lg border border-border bg-background p-2">
-                              <div className="flex flex-wrap items-center gap-1.5">
-                                <span className="text-[11px] font-medium text-foreground">{c.id || `#${i + 1}`}</span>
-                                {c.priority && <span className="rounded bg-muted px-1 py-0.5 text-[10px] text-muted-foreground">{c.priority}</span>}
-                                {c.module && <span className="text-[10px] text-muted-foreground">{c.module}</span>}
-                                {c.requirement && <span className="text-[10px] text-muted-foreground">· {c.requirement}</span>}
-                                {c.verification && (
-                                  <span className={`rounded px-1 py-0.5 text-[10px] ${c.verification.includes("回归") ? "bg-muted text-muted-foreground" : "bg-status-success-muted text-status-success-foreground"}`}>
-                                    {c.verification}{c.oracle ? ` · ${c.oracle}` : ""}
-                                  </span>
-                                )}
-                              </div>
-                              {c.purpose && <div className="mt-0.5 text-xs font-medium text-foreground">{c.purpose}</div>}
-                              {c.precondition && (
-                                <div className="mt-1 text-[11px] text-muted-foreground">
-                                  <span className="text-foreground/70">{t("test.cases.precondition")}</span>{c.precondition}
-                                </div>
-                              )}
-                              {!!c.steps?.length && (
-                                <ol className="mt-1 list-decimal space-y-0.5 pl-4 text-[11px] text-muted-foreground">
-                                  {c.steps.map((s, j) => (
-                                    <li key={j}>
-                                      {s.content}
-                                      {s.expected && <span className="text-foreground/60"> → {t("test.cases.expected")}{s.expected}</span>}
-                                    </li>
-                                  ))}
-                                </ol>
-                              )}
-                            </div>
-                          ))
-                        )
+                      {casesPreview.length === 0 ? (
+                        <p className="text-[11px] text-muted-foreground">{t("test.cases.empty")}</p>
                       ) : (
-                        casesDraft.map((c, i) => (
-                          <div key={i} className="space-y-1 rounded-lg border border-border bg-background p-2">
-                            <div className="flex items-center gap-1">
-                              <input value={c.id ?? ""} onChange={(e) => updateCase(i, { id: e.target.value })} placeholder="ID" className="w-24 rounded border border-border bg-background px-1.5 py-0.5 text-[11px] text-foreground outline-none focus:border-primary" />
-                              <input value={c.priority ?? ""} onChange={(e) => updateCase(i, { priority: e.target.value })} placeholder={t("test.cases.priority")} className="w-16 rounded border border-border bg-background px-1.5 py-0.5 text-[11px] text-foreground outline-none focus:border-primary" />
-                              <span className="flex-1" />
-                              <button onClick={() => setCasesDraft((casesDraft ?? []).filter((_, k) => k !== i))} title={t("test.cases.delCase")} className="px-1 text-[11px] text-status-error hover:opacity-80">✕</button>
+                        casesPreview.map((c, i) => (
+                          <div key={c.id || i} className="rounded-lg border border-border bg-background p-2">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="text-[11px] font-medium text-foreground">{c.id || `#${i + 1}`}</span>
+                              {c.priority && <span className="rounded bg-muted px-1 py-0.5 text-[10px] text-muted-foreground">{c.priority}</span>}
+                              {c.module && <span className="text-[10px] text-muted-foreground">{c.module}</span>}
+                              {c.requirement && <span className="text-[10px] text-muted-foreground">· {c.requirement}</span>}
+                              {c.verification && (
+                                <span className={`rounded px-1 py-0.5 text-[10px] ${c.verification.includes("回归") ? "bg-muted text-muted-foreground" : "bg-status-success-muted text-status-success-foreground"}`}>
+                                  {c.verification}{c.oracle ? ` · ${c.oracle}` : ""}
+                                </span>
+                              )}
                             </div>
-                            <input value={c.purpose ?? ""} onChange={(e) => updateCase(i, { purpose: e.target.value })} placeholder={t("test.cases.purpose")} className="w-full rounded border border-border bg-background px-1.5 py-0.5 text-[11px] text-foreground outline-none focus:border-primary" />
-                            <input value={c.precondition ?? ""} onChange={(e) => updateCase(i, { precondition: e.target.value })} placeholder={t("test.cases.precondition")} className="w-full rounded border border-border bg-background px-1.5 py-0.5 text-[11px] text-foreground outline-none focus:border-primary" />
-                            <div className="flex items-center gap-1">
-                              <select value={c.verification ?? ""} onChange={(e) => updateCase(i, { verification: e.target.value })} className="rounded border border-border bg-background px-1 py-0.5 text-[11px] text-foreground outline-none focus:border-primary">
-                                <option value="">{t("test.cases.verification")}</option>
-                                <option value="功能验证">功能验证</option>
-                                <option value="回归基线">回归基线</option>
-                              </select>
-                              <select value={c.oracle ?? ""} onChange={(e) => updateCase(i, { oracle: e.target.value })} className="rounded border border-border bg-background px-1 py-0.5 text-[11px] text-foreground outline-none focus:border-primary">
-                                <option value="">{t("test.cases.oracle")}</option>
-                                <option value="PRD">PRD</option>
-                                <option value="设计稿">设计稿</option>
-                                <option value="API契约">API契约</option>
-                                <option value="产品确认">产品确认</option>
-                                <option value="现状锁定">现状锁定</option>
-                              </select>
-                            </div>
-                            {(c.steps ?? []).map((s, j) => (
-                              <div key={j} className="flex items-center gap-1">
-                                <span className="w-4 shrink-0 text-[10px] text-muted-foreground">{j + 1}.</span>
-                                <input value={s.content ?? ""} onChange={(e) => updateStep(i, j, { content: e.target.value })} placeholder={t("test.cases.step")} className="min-w-0 flex-1 rounded border border-border bg-background px-1.5 py-0.5 text-[11px] text-foreground outline-none focus:border-primary" />
-                                <input value={s.expected ?? ""} onChange={(e) => updateStep(i, j, { expected: e.target.value })} placeholder={t("test.cases.expected")} className="min-w-0 flex-1 rounded border border-border bg-background px-1.5 py-0.5 text-[11px] text-foreground outline-none focus:border-primary" />
-                                <button onClick={() => updateCase(i, { steps: (c.steps ?? []).filter((_, k) => k !== j) })} className="shrink-0 px-0.5 text-[10px] text-muted-foreground hover:text-status-error">✕</button>
+                            {c.purpose && <div className="mt-0.5 text-xs font-medium text-foreground">{c.purpose}</div>}
+                            {c.precondition && (
+                              <div className="mt-1 text-[11px] text-muted-foreground">
+                                <span className="text-foreground/70">{t("test.cases.precondition")}</span>{c.precondition}
                               </div>
-                            ))}
-                            <button onClick={() => updateCase(i, { steps: [...(c.steps ?? []), { content: "", expected: "" }] })} className="text-[10px] text-primary hover:opacity-80">+ {t("test.cases.addStep")}</button>
+                            )}
+                            {!!c.steps?.length && (
+                              <ol className="mt-1 list-decimal space-y-0.5 pl-4 text-[11px] text-muted-foreground">
+                                {c.steps.map((s, j) => (
+                                  <li key={j}>
+                                    {s.content}
+                                    {s.expected && <span className="text-foreground/60"> → {t("test.cases.expected")}{s.expected}</span>}
+                                  </li>
+                                ))}
+                              </ol>
+                            )}
                           </div>
                         ))
                       )}
@@ -1449,6 +1400,63 @@ export function InlineTestingPanel() {
       )}
 
       {/* Modals + folder picker (browser fallback for project selection) */}
+      {/* 用例编辑弹窗：从详情卡「编辑」打开，大空间增删改用例 + 字段 + 步骤 + oracle 双轴。 */}
+      {casesDraft !== null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setCasesDraft(null)}>
+          <div className="flex max-h-[85vh] w-[680px] max-w-[94vw] flex-col rounded-xl border border-border bg-card shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-2 border-b border-border px-4 py-3">
+              <h3 className="text-sm font-semibold text-foreground">{t("test.cases.editTitle")}</h3>
+              <span className="text-[11px] text-muted-foreground">· {casesDraft.length}</span>
+              <span className="flex-1" />
+              <button onClick={() => setCasesDraft([...(casesDraft ?? []), { id: "", purpose: "", steps: [{ content: "", expected: "" }] }])} className="rounded border border-border px-2 py-1 text-[11px] text-foreground hover:bg-muted">+ {t("test.cases.add")}</button>
+              <button onClick={saveCases} disabled={casesSaving} className="rounded bg-primary px-2.5 py-1 text-[11px] font-medium text-primary-foreground disabled:opacity-40">{casesSaving ? t("test.cases.saving") : t("test.cases.save")}</button>
+              <button onClick={() => setCasesDraft(null)} className="rounded border border-border px-2 py-1 text-[11px] text-foreground hover:bg-muted">{t("test.cases.cancel")}</button>
+            </div>
+            <div className="flex-1 space-y-2 overflow-auto p-4">
+              {casesDraft.length === 0 ? (
+                <p className="text-center text-[11px] text-muted-foreground">{t("test.cases.empty")}</p>
+              ) : (
+                casesDraft.map((c, i) => (
+                  <div key={i} className="space-y-1.5 rounded-lg border border-border bg-background p-2.5">
+                    <div className="flex items-center gap-1">
+                      <input value={c.id ?? ""} onChange={(e) => updateCase(i, { id: e.target.value })} placeholder="ID" className="w-28 rounded border border-border bg-background px-1.5 py-0.5 text-[11px] text-foreground outline-none focus:border-primary" />
+                      <input value={c.priority ?? ""} onChange={(e) => updateCase(i, { priority: e.target.value })} placeholder={t("test.cases.priority")} className="w-20 rounded border border-border bg-background px-1.5 py-0.5 text-[11px] text-foreground outline-none focus:border-primary" />
+                      <span className="flex-1" />
+                      <button onClick={() => setCasesDraft((casesDraft ?? []).filter((_, k) => k !== i))} title={t("test.cases.delCase")} className="px-1 text-[11px] text-status-error hover:opacity-80">✕</button>
+                    </div>
+                    <input value={c.purpose ?? ""} onChange={(e) => updateCase(i, { purpose: e.target.value })} placeholder={t("test.cases.purpose")} className="w-full rounded border border-border bg-background px-1.5 py-0.5 text-[11px] text-foreground outline-none focus:border-primary" />
+                    <input value={c.precondition ?? ""} onChange={(e) => updateCase(i, { precondition: e.target.value })} placeholder={t("test.cases.precondition")} className="w-full rounded border border-border bg-background px-1.5 py-0.5 text-[11px] text-foreground outline-none focus:border-primary" />
+                    <div className="flex items-center gap-1">
+                      <select value={c.verification ?? ""} onChange={(e) => updateCase(i, { verification: e.target.value })} className="rounded border border-border bg-background px-1 py-0.5 text-[11px] text-foreground outline-none focus:border-primary">
+                        <option value="">{t("test.cases.verification")}</option>
+                        <option value="功能验证">功能验证</option>
+                        <option value="回归基线">回归基线</option>
+                      </select>
+                      <select value={c.oracle ?? ""} onChange={(e) => updateCase(i, { oracle: e.target.value })} className="rounded border border-border bg-background px-1 py-0.5 text-[11px] text-foreground outline-none focus:border-primary">
+                        <option value="">{t("test.cases.oracle")}</option>
+                        <option value="PRD">PRD</option>
+                        <option value="设计稿">设计稿</option>
+                        <option value="API契约">API契约</option>
+                        <option value="产品确认">产品确认</option>
+                        <option value="现状锁定">现状锁定</option>
+                      </select>
+                    </div>
+                    {(c.steps ?? []).map((s, j) => (
+                      <div key={j} className="flex items-center gap-1">
+                        <span className="w-4 shrink-0 text-[10px] text-muted-foreground">{j + 1}.</span>
+                        <input value={s.content ?? ""} onChange={(e) => updateStep(i, j, { content: e.target.value })} placeholder={t("test.cases.step")} className="min-w-0 flex-1 rounded border border-border bg-background px-1.5 py-0.5 text-[11px] text-foreground outline-none focus:border-primary" />
+                        <input value={s.expected ?? ""} onChange={(e) => updateStep(i, j, { expected: e.target.value })} placeholder={t("test.cases.expected")} className="min-w-0 flex-1 rounded border border-border bg-background px-1.5 py-0.5 text-[11px] text-foreground outline-none focus:border-primary" />
+                        <button onClick={() => updateCase(i, { steps: (c.steps ?? []).filter((_, k) => k !== j) })} className="shrink-0 px-0.5 text-[10px] text-muted-foreground hover:text-status-error">✕</button>
+                      </div>
+                    ))}
+                    <button onClick={() => updateCase(i, { steps: [...(c.steps ?? []), { content: "", expected: "" }] })} className="text-[10px] text-primary hover:opacity-80">+ {t("test.cases.addStep")}</button>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
       {deleteTarget && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setDeleteTarget(null)}>
           <div className="w-[400px] max-w-[92vw] rounded-xl border border-border bg-card p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
