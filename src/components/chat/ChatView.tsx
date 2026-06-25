@@ -142,7 +142,7 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
     });
   }, []);
   const [mode, setMode] = useState<string>(initialMode || 'code');
-  const [currentModel, setCurrentModel] = useState(() => modelName || (typeof window !== 'undefined' ? localStorage.getItem('codepilot:last-model') : null) || 'sonnet');
+  const [currentModel, setCurrentModel] = useState(() => modelName || (typeof window !== 'undefined' ? localStorage.getItem('codepilot:last-model') : null) || '');
   const [currentProviderId, setCurrentProviderId] = useState(() => providerId || (typeof window !== 'undefined' ? localStorage.getItem('codepilot:last-provider-id') : null) || '');
   // Restore per-session reasoning effort from the DB. ''→undefined so the
   // MessageInput selector falls back to its 'auto' default display.
@@ -179,6 +179,9 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
   // upstreamModelId per model on the returned groups.
   const [currentModelUpstream, setCurrentModelUpstream] = useState<string | undefined>(undefined);
   const [currentModelContextWindow, setCurrentModelContextWindow] = useState<number | undefined>(undefined);
+  // Models available for the current provider — used to pick a real rate-limit
+  // downgrade target instead of hardcoding the 'sonnet' alias.
+  const [availableModels, setAvailableModels] = useState<Array<{ value: string }>>([]);
   useEffect(() => {
     const pid = currentProviderId || 'env';
     const controller = new AbortController();
@@ -187,6 +190,7 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
       .then(data => {
         if (controller.signal.aborted) return;
         const group = data?.groups?.find((g: { provider_id: string; provider_name?: string }) => g.provider_id === pid);
+        setAvailableModels(group?.models?.map((m: { value: string }) => ({ value: m.value })) || []);
         const model = group?.models?.find((m: { value: string; upstreamModelId?: string; contextWindow?: number }) => m.value === currentModel);
         setCurrentModelUpstream(model?.upstreamModelId);
         // Managed providers: resolve the window from the display name (the
@@ -472,11 +476,16 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
         }).catch(() => {});
         setTimeout(() => sendMessageRef.current?.(lastUserMessage), 50);
         break;
-      case 'switch_to_sonnet':
+      case 'switch_to_sonnet': {
         if (!lastUserMessage) return;
-        setCurrentModel('sonnet');
+        // Only downgrade to 'sonnet' if it actually exists in the current
+        // provider's catalog. In managed deployments without sonnet, keep the
+        // current model (don't pin a phantom) and just retry.
+        const sonnetTarget = availableModels.find(m => m.value === 'sonnet')?.value;
+        if (sonnetTarget) setCurrentModel(sonnetTarget);
         setTimeout(() => sendMessageRef.current?.(lastUserMessage), 50);
         break;
+      }
       case 'continue_max_turns':
         sendMessageRef.current?.('continue');
         break;
@@ -496,7 +505,7 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
         }).catch(() => {});
         break;
     }
-  }, [currentProviderId, router, t]);
+  }, [currentProviderId, router, t, availableModels]);
 
   // Entry point from the chip. Destructive actions route through confirm
   // dialog; non-destructive ones run immediately.
@@ -1021,7 +1030,8 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
             if (lastUserMessage) {
               setPendingTerminalAction({ actionId: 'switch_to_sonnet', lastUserMessage });
             } else {
-              setCurrentModel('sonnet');
+              const sonnetTarget = availableModels.find(m => m.value === 'sonnet')?.value;
+              if (sonnetTarget) setCurrentModel(sonnetTarget);
             }
           }}
           onDismiss={() => setRateLimitDismissed(true)}

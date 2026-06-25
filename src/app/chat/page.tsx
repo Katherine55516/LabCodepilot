@@ -157,7 +157,7 @@ export default function NewChatPage() {
     Promise.all([modelsP, globalP]).then(([modelsData, globalData]) => {
       if (cancelled || !modelsData?.groups || modelsData.groups.length === 0) {
         // No provider data — fall back to localStorage best-effort
-        const savedModel = localStorage.getItem('codepilot:last-model') || 'sonnet';
+        const savedModel = localStorage.getItem('codepilot:last-model') || '';
         const savedProvider = localStorage.getItem('codepilot:last-provider-id') || '';
         setCurrentModel(savedModel);
         setCurrentProviderId(savedProvider);
@@ -213,7 +213,7 @@ export default function NewChatPage() {
           setCurrentModel(resolvedGroup.models[0].value);
         }
       } else {
-        setCurrentModel(savedModel || 'sonnet');
+        setCurrentModel(savedModel || '');
       }
       setModelReady(true);
     }).catch(() => {
@@ -700,7 +700,11 @@ export default function NewChatPage() {
                       break;
                     }
                     if (statusData.session_id) {
-                      setStatusText(`Connected (${statusData.model || 'claude'})`);
+                      // Don't surface bare env aliases (sonnet/opus/haiku) in
+                      // managed deployments — show a real model or just "Connected".
+                      const m = statusData.requested_model || statusData.model || '';
+                      const isEnvAlias = m === 'sonnet' || m === 'opus' || m === 'haiku';
+                      setStatusText(m && !isEnvAlias ? `Connected (${m})` : 'Connected');
                       setTimeout(() => setStatusText(undefined), 2000);
                     } else if (statusData.notification) {
                       // Shared toast routing so code-driven notifications

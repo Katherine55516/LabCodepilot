@@ -218,7 +218,12 @@ function handleSSEEvent(
           return accumulated;
         }
         if (statusData.session_id) {
-          callbacks.onStatus(`Connected (${statusData.requested_model || statusData.model || 'claude'})`);
+          // Don't surface bare env aliases (sonnet/opus/haiku) — in managed
+          // deployments they aren't real catalog models. Show the model only
+          // when it's a real (non-alias) value; otherwise just "Connected".
+          const m = statusData.requested_model || statusData.model || '';
+          const isEnvAlias = m === 'sonnet' || m === 'opus' || m === 'haiku';
+          callbacks.onStatus(m && !isEnvAlias ? `Connected (${m})` : 'Connected');
           callbacks.onInitMeta?.({
             tools: statusData.tools,
             slash_commands: statusData.slash_commands,

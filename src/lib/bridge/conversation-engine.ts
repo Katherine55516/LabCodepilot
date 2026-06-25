@@ -20,7 +20,6 @@ import {
   releaseSessionLock,
   setSessionRuntimeStatus,
   updateSdkSessionId,
-  updateSessionModel,
   syncSdkTasks,
   getSession,
   getSetting,
@@ -416,9 +415,10 @@ async function consumeStream(
                 capturedSdkSessionId = statusData.session_id;
                 updateSdkSessionId(sessionId, statusData.session_id);
               }
-              if (statusData.model) {
-                updateSessionModel(sessionId, statusData.model);
-              }
+              // Do NOT persist statusData.model: the SDK reports the model it
+              // ran, which is the bare 'sonnet' env alias on credential fallback
+              // and would pin this bridge session to a phantom model not in the
+              // managed provider list. (Mirrors the chat route's status handler.)
               // Skill-nudge: agent loop emits this at end-of-run when the
               // workflow is complex enough to warrant saving as a Skill.
               // Append as a separated text block so IM users see the
