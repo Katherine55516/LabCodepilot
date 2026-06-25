@@ -297,9 +297,13 @@ export function MessageInput({
   // text token) to match the picker's convention (see resolveItemSelection).
   useEffect(() => {
     const handler = (e: Event) => {
-      const detail = (e as CustomEvent<{ path: string; nodeType?: 'file' | 'directory' }>).detail;
+      const detail = (e as CustomEvent<{ path: string; nodeType?: 'file' | 'directory'; targetSessionId?: string }>).detail;
       const rawPath = detail?.path;
       if (!rawPath) return;
+      // Split mode: only the targeted pane inserts the mention. A missing
+      // targetSessionId, or an input without its own sessionId (new chat /
+      // single pane), is treated as "no specific target" → still handled.
+      if (detail.targetSessionId && sessionId && detail.targetSessionId !== sessionId) return;
       const normalizedPath = rawPath.replace(/\/+$/, '');
       if (!normalizedPath) return;
       const nodeType = detail.nodeType ?? 'file';
@@ -313,7 +317,7 @@ export function MessageInput({
     };
     window.addEventListener('insert-file-mention', handler);
     return () => window.removeEventListener('insert-file-mention', handler);
-  }, [setInputValue, setMentionNodeTypes, ensureMentionOrder]);
+  }, [setInputValue, setMentionNodeTypes, ensureMentionOrder, sessionId]);
 
   const normalizeMentionPath = useCallback((rawPath: string): string => {
     const normalizedRaw = rawPath.replace(/\\/g, '/').replace(/^\/+/, '');
@@ -740,10 +744,10 @@ export function MessageInput({
       if (!rawPath) continue;
       const normalized = normalizeMentionPath(rawPath);
       window.dispatchEvent(new CustomEvent('insert-file-mention', {
-        detail: { path: normalized, nodeType: 'directory' },
+        detail: { path: normalized, nodeType: 'directory', targetSessionId: sessionId },
       }));
     }
-  }, [normalizeMentionPath]);
+  }, [normalizeMentionPath, sessionId]);
 
   // Effort selector state — guard against undefined when model not found in current provider's list
   const currentModelMeta = currentModelOption as (typeof currentModelOption & { supportsEffort?: boolean; supportedEffortLevels?: string[] }) | undefined;
@@ -867,7 +871,7 @@ export function MessageInput({
             onDirectoriesDropped={handleDirectoriesDropped}
           >
             {/* Bridge: listens for file tree "+" button events */}
-            <FileTreeAttachmentBridge />
+            <FileTreeAttachmentBridge sessionId={sessionId} />
             {/* Unified command + mention badges row */}
             <ComposerBadgeRow
               badges={badges}
