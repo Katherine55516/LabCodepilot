@@ -1592,8 +1592,8 @@ function ReportView({ t, results, four, circuitBroken, taskName, projectPath, en
               <tr key={i} className="border-t border-border align-top">
                 <td className="px-2 py-1.5 font-mono text-foreground">{r.id}</td>
                 <td className="px-2 py-1.5 text-muted-foreground">{r.actual || "—"}</td>
-                <td className="px-2 py-1.5">
-                  <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${chipCls[r.status] || "bg-muted text-muted-foreground"}`}>
+                <td className="whitespace-nowrap px-2 py-1.5">
+                  <span className={`inline-block whitespace-nowrap rounded px-1.5 py-0.5 text-[10px] font-medium ${chipCls[r.status] || "bg-muted text-muted-foreground"}`}>
                     {chipLabel[r.status] ? t(chipLabel[r.status]) : r.status}
                   </span>
                 </td>
@@ -1724,9 +1724,9 @@ function CompareView({ t, projectPath, taskName, env }: { t: T; projectPath: str
               changed.map((c) => (
                 <tr key={c.id} className="border-t border-border">
                   <td className="px-2 py-1.5 font-mono text-foreground">{c.id}</td>
-                  <td className="px-2 py-1.5 text-muted-foreground">{st(c.prev)}</td>
-                  <td className="px-2 py-1.5 text-muted-foreground">{st(c.curr)}</td>
-                  <td className="px-2 py-1.5"><span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${changeCls[c.change]}`}>{t(changeLabel[c.change])}</span></td>
+                  <td className="whitespace-nowrap px-2 py-1.5 text-muted-foreground">{st(c.prev)}</td>
+                  <td className="whitespace-nowrap px-2 py-1.5 text-muted-foreground">{st(c.curr)}</td>
+                  <td className="whitespace-nowrap px-2 py-1.5"><span className={`inline-block whitespace-nowrap rounded px-1.5 py-0.5 text-[10px] font-medium ${changeCls[c.change]}`}>{t(changeLabel[c.change])}</span></td>
                 </tr>
               ))
             )}
