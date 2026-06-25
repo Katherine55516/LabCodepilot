@@ -1276,6 +1276,7 @@ const en = {
   'permissionPrompt.other': 'Other',
   'permissionPrompt.otherPlaceholder': 'Type your answer...',
   'permissionPrompt.submit': 'Submit',
+  'permissionPrompt.resizeHint': 'Drag to resize',
   'permissionPrompt.deny': 'Deny',
   'permissionPrompt.allowOnce': 'Allow Once',
   'permissionPrompt.answerSubmitted': 'Answer submitted',

@@ -1273,6 +1273,7 @@ const zh: Record<TranslationKey, string> = {
   'permissionPrompt.other': '其他',
   'permissionPrompt.otherPlaceholder': '输入你的答案…',
   'permissionPrompt.submit': '提交',
+  'permissionPrompt.resizeHint': '拖动调整高度',
   'permissionPrompt.deny': '拒绝',
   'permissionPrompt.allowOnce': '仅本次允许',
   'permissionPrompt.answerSubmitted': '答案已提交',

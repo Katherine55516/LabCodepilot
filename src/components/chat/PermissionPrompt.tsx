@@ -45,6 +45,11 @@ interface PermissionPromptProps {
 const MAX_INPUT_LINES = 8;
 const MAX_INPUT_CHARS = 500;
 
+/** Bottom permission panel resize bounds: min drag height (px) and max as a
+ *  fraction of the viewport height. */
+const MIN_PANEL_HEIGHT = 120;
+const MAX_PANEL_HEIGHT_RATIO = 0.85;
+
 function AskUserQuestionUI({
   toolInput,
   onSubmit,
@@ -391,6 +396,48 @@ export function PermissionPrompt({
 }: PermissionPromptProps) {
   const { t } = useTranslation();
 
+  // Drag-to-resize for the bottom panel. `panelHeight === null` means auto
+  // (content height, capped at 50vh). Dragging the top edge switches to an
+  // explicit pixel height (capped at 85vh) so a long question list can be
+  // enlarged to read in full, or shrunk to free the conversation above it.
+  const panelRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<{ startY: number; startH: number } | null>(null);
+  const [panelHeight, setPanelHeight] = useState<number | null>(null);
+
+  // A new permission request resets the height, so a size dragged for the
+  // previous prompt doesn't carry over to an unrelated one.
+  useEffect(() => {
+    setPanelHeight(null);
+  }, [pendingPermission?.permissionRequestId]);
+
+  const handleResizeDown = (e: React.PointerEvent) => {
+    const el = panelRef.current;
+    if (!el) return;
+    e.preventDefault();
+    dragRef.current = { startY: e.clientY, startH: el.getBoundingClientRect().height };
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    document.body.style.cursor = 'ns-resize';
+    document.body.style.userSelect = 'none';
+  };
+
+  const handleResizeMove = (e: React.PointerEvent) => {
+    if (!dragRef.current) return;
+    // Handle sits on top of a bottom-anchored panel: dragging up (smaller
+    // clientY) grows it, dragging down shrinks it.
+    const delta = dragRef.current.startY - e.clientY;
+    const maxH = window.innerHeight * MAX_PANEL_HEIGHT_RATIO;
+    const next = Math.min(maxH, Math.max(MIN_PANEL_HEIGHT, dragRef.current.startH + delta));
+    setPanelHeight(next);
+  };
+
+  const handleResizeUp = (e: React.PointerEvent) => {
+    if (!dragRef.current) return;
+    dragRef.current = null;
+    (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+  };
+
   // Tools that require user interaction even in full_access mode.
   // AskUserQuestion's entire purpose is to get user input — auto-approving
   // would return empty answers, defeating the purpose.
@@ -444,8 +491,31 @@ export function PermissionPrompt({
     return { id: pendingPermission?.permissionRequestId || '' };
   };
 
+  const showResizeHandle = !!pendingPermission && !isResolved;
+
   return (
-    <div className="mx-auto w-full max-w-3xl border-t border-border bg-background px-4 py-3 max-h-[50vh] overflow-y-auto">
+    <div
+      ref={panelRef}
+      className="relative mx-auto flex w-full max-w-3xl flex-col overflow-hidden border-t border-border bg-background"
+      style={panelHeight != null && showResizeHandle
+        ? { height: panelHeight, maxHeight: `${MAX_PANEL_HEIGHT_RATIO * 100}vh` }
+        : { maxHeight: '50vh' }}
+    >
+      {showResizeHandle && (
+        <div
+          role="separator"
+          aria-orientation="horizontal"
+          title={t('permissionPrompt.resizeHint')}
+          aria-label={t('permissionPrompt.resizeHint')}
+          onPointerDown={handleResizeDown}
+          onPointerMove={handleResizeMove}
+          onPointerUp={handleResizeUp}
+          className="group flex h-3 shrink-0 cursor-ns-resize touch-none items-center justify-center"
+        >
+          <div className="h-1 w-10 rounded-full bg-border transition-colors group-hover:bg-muted-foreground/50" />
+        </div>
+      )}
+      <div className="flex-1 overflow-y-auto px-4 pb-3 pt-1">
       {/* ExitPlanMode */}
       {pendingPermission?.toolName === 'ExitPlanMode' && !isResolved && (
         <ExitPlanModeUI
@@ -535,6 +605,7 @@ export function PermissionPrompt({
           {permissionResolved === 'allow' ? t('streaming.allowed') : t('streaming.denied')}
         </p>
       )}
+      </div>
     </div>
   );
 }
