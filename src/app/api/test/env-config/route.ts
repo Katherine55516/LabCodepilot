@@ -1,4 +1,5 @@
 import { resolveProjectEnvWithDb } from '@/lib/test/env-resolve';
+import { isUnsafeSegment } from '@/lib/test/path-safety';
 
 /**
  * Read a project's resolved test environment for the workbench to display — target
@@ -12,6 +13,10 @@ export async function GET(req: Request): Promise<Response> {
   const env = url.searchParams.get('env') || undefined;
   if (!projectPath) {
     return Response.json({ error: 'projectPath is required' }, { status: 400 });
+  }
+  // env composes the storageState path (.auth/{env}.{key}.storageState.json) — reject traversal.
+  if (env !== undefined && isUnsafeSegment(env)) {
+    return Response.json({ error: 'invalid env' }, { status: 400 });
   }
   return Response.json(resolveProjectEnvWithDb(projectPath, env));
 }

@@ -2,7 +2,7 @@
 
 > 测试对象：LabCodepilot（V2.2_test 分支）内嵌的 **AI 驱动测试平台**（"测试" workbench）
 > 测试日期：2026-06-25 ｜ 测试方法：自动化测试（单元 + 集成）+ 系统性代码审查 + TDD 式修复
-> 结论：**发现 6 类确定缺陷，已全部修复并回归通过；另列 8 项改进建议待产品决策。**
+> 结论：**6 类确定缺陷已全部修复；自动化测试 55→151 全绿（A/B 两类已补全，L1 顺带修复）；C 类手动测试指南另附；其余改进建议待产品决策。**
 
 ---
 
@@ -161,7 +161,30 @@
 
 ---
 
-## 八、附录
+## 八、补充：A/B 类测试扩展（114 → 151）
+
+应用户要求，在第一批（114）基础上继续补全此前列为「未覆盖」的 A/B 两类：
+
+**A 类（能自动化、不需登录）—— 新增 21 例：**
+- `test-exec-stream`(6)：执行核心 `wrapExecutionStream` 用 mock SSE 流验证 归约→run.json→快照→证据收口 + funcCounts join + run POST 守卫（为此把该函数 export）
+- `test-cases-export-route`(4)：用例导出 xlsx 往返（列映射、steps 派生操作/预期、模板、缺文件退化）
+- `test-import-route` +2：真实 xlsx 解析 + **L1 重复 id 去重（顺带修复）**
+- `test-workbench-route`(5)：projects/taskStates 持久化（空壳/往返/容错/类型强转/原子写）
+- `test-env-config-route`(4)：env 解析 + **env 穿越守卫（H2 延伸）**
+
+**B 类（需 DB / mock）—— 新增 16 例：**
+- `test-accounts-route`(9)：测试账号 CRUD + 导出 environments.json + **env DB-fallback（source=db）**；DB 隔离到临时库（顶层设 `CLAUDE_GUI_DATA_DIR` + `before()` 动态 import，绝不碰真实 `~/.codepilot`）
+- `test-revise-defect-route`(7)：修订/缺陷路由守卫（缺参/产物缺失/步骤不支持）+ **给两者补漏掉的 H2 校验**；核心 streamClaude 调用属 C 类（真实 AI）
+
+**附带改进/修复**：L1（xlsx 重复 id 去重）、env-config/revise/defect 补 H2 校验、`better-sqlite3` 重编译回 Node ABI（修复打包后 dev 起不了 DB 的副作用）。
+
+> ⚠️ 跑含 DB 的全套测试需隔离库：`CLAUDE_GUI_DATA_DIR=$(mktemp -d) npx tsx --test src/__tests__/unit/test-*.test.ts`（否则 test-accounts 会写真实库）。
+
+**C 类（无法有意义自动化）**：UI 交互 / 4 步 AI flow / Playwright 真实执行 / 打包态 —— 见 [手动测试指南](test-workbench-manual-test-guide.md)，由你登录后人工验收。
+
+---
+
+## 九、附录
 
 ### 测试文件清单（`src/__tests__/unit/`）
 - 原有：`test-reduce` `test-compare` `test-env-config` `test-evidence` `test-accounts-export` `test-flow-stop` `test-prompts-note`

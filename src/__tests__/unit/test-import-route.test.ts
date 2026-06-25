@@ -12,6 +12,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import ExcelJS from "exceljs";
 import { POST } from "../../app/api/test/import/route";
 
 let proj: string;
@@ -68,5 +69,35 @@ describe("POST /api/test/import — validation", () => {
   it("400 on missing projectPath/taskName", async () => {
     const res = await post({ kind: "requirement", filename: "x.md", dataBase64: b64("x") });
     assert.equal(res.status, 400);
+  });
+});
+
+async function makeXlsxB64(headers: string[], rows: string[][]): Promise<string> {
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet("用例");
+  ws.addRow(headers);
+  for (const r of rows) ws.addRow(r);
+  const buf = await wb.xlsx.writeBuffer();
+  return Buffer.from(buf).toString("base64");
+}
+
+describe("POST /api/test/import — xlsx parsing", () => {
+  it("maps an xlsx (header + rows) to cases.json", async () => {
+    const b = await makeXlsxB64(["ID", "标题", "测试步骤", "预期结果"], [["TC-1", "登录", "输入账号", "跳首页"]]);
+    const res = await post({ projectPath: proj, taskName: "订单", kind: "cases", filename: "c.xlsx", dataBase64: b });
+    assert.equal((await res.json()).ok, true);
+    const cases = JSON.parse(fs.readFileSync(casesFile("订单"), "utf-8")).cases;
+    assert.equal(cases[0].id, "TC-1");
+    assert.equal(cases[0].purpose, "登录");
+    assert.equal(cases[0].steps[0].content, "输入账号");
+    assert.equal(cases[0].steps[0].expected, "跳首页");
+  });
+  it("de-dups duplicate ids from the xlsx (L1)", async () => {
+    const b = await makeXlsxB64(["ID", "标题"], [["TC-1", "用例A"], ["TC-1", "用例B"]]);
+    const res = await post({ projectPath: proj, taskName: "订单", kind: "cases", filename: "c.xlsx", dataBase64: b });
+    assert.equal((await res.json()).ok, true);
+    const ids = JSON.parse(fs.readFileSync(casesFile("订单"), "utf-8")).cases.map((c: { id: string }) => c.id);
+    assert.equal(new Set(ids).size, ids.length, "ids unique after de-dup");
+    assert.deepEqual(ids, ["TC-1", "TC-1#2"]);
   });
 });

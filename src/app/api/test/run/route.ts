@@ -25,7 +25,7 @@ void predictNativeRuntime;
  * LLM), write it to AI_LabTest/report/{task}/{task}-{env}.run.json, and emit a
  * final `{type:'run_json'}` frame so the panel shows the authoritative result.
  */
-function wrapExecutionStream(
+export function wrapExecutionStream(
   src: ReadableStream<string>,
   opts: { projectPath: string; taskName: string; env: string; runStartMs: number },
 ): ReadableStream<string> {
