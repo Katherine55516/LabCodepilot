@@ -83,6 +83,8 @@ export function CliSettingsSection() {
   // ── Model options (env provider) ──
   const [thinkingMode, setThinkingMode] = useState("adaptive");
   const [context1m, setContext1m] = useState(false);
+  // 1M 上下文开关已隐藏（保留底层读写逻辑；如需恢复 UI，置为 true）。
+  const SHOW_CONTEXT_1M_TOGGLE = false;
 
   // ── Dialogs ──
   const [importDialogOpen, setImportDialogOpen] = useState(false);
@@ -425,12 +427,14 @@ export function CliSettingsSection() {
             </Select>
           </FieldRow>
 
+          {SHOW_CONTEXT_1M_TOGGLE && (
           <FieldRow label={t('cli.context1m')} description={t('cli.context1mDesc')} separator>
             <Switch
               checked={context1m}
               onCheckedChange={(checked) => saveModelOption('context_1m', checked)}
             />
           </FieldRow>
+          )}
         </SettingsCard>
       )}
 
