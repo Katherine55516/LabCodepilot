@@ -57,17 +57,17 @@ export function RunCockpitPopoverContent({
     usage.contextWindow && usage.contextWindow > 0
       ? formatTokensCompact(usage.contextWindow)
       : '—'
-  }`;
+  }（${headerPercentText}）`;
 
   return (
     <div className="flex flex-col gap-3 text-xs">
       {usage.hasData && (
         <div className="space-y-3">
           <div className="flex items-center justify-between gap-3 text-xs">
-            <p className={hasFullCtx ? 'text-foreground' : 'text-muted-foreground'}>
-              {headerPercentText}
+            <p className="text-muted-foreground">
+              {t('runStatus.contextUsageLabel')}
             </p>
-            <p className="font-mono text-muted-foreground">{headerTokensText}</p>
+            <p className="font-mono text-foreground">{headerTokensText}</p>
           </div>
           <ContextDotMatrix breakdown={usage.breakdown} />
         </div>

@@ -1258,6 +1258,7 @@ const zhHK: Record<TranslationKey, string> = {
   'runStatus.triggerLabel': '查看本次運行狀態',
   'runStatus.loading': '正在載入運行狀態…',
   'runStatus.contextCapacityUnknown': '容量未知',
+  'runStatus.contextUsageLabel': '上下文用量',
   'runStatus.notConfigured': '未設定',
   'runStatus.totalCost': '本次花費',
   'runStatus.breakdownSystemPrompt': '系統提示',

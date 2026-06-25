@@ -1252,6 +1252,7 @@ const en = {
   'runStatus.triggerLabel': 'View this run',
   'runStatus.loading': 'Loading run status...',
   'runStatus.contextCapacityUnknown': 'Capacity unknown',
+  'runStatus.contextUsageLabel': 'Context usage',
   'runStatus.notConfigured': 'Not configured',
   'runStatus.totalCost': 'Total cost',
   'runStatus.breakdownSystemPrompt': 'System prompt',
