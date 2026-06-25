@@ -76,10 +76,9 @@ const MANAGED_CONTEXT_WINDOW_BY_NAME: Record<string, number> = {
   qwen37max: 1_000_000,
   qwen37plus: 1_000_000,
   minimaxm3: 1_000_000,
-  // 256K
-  kimik27code: 256_000,
-  kimik26: 256_000,
-  // 200K
+  // 200K（两个 Kimi 经逐模型探针实测后端真实窗口均为 200K，modelUsage.contextWindow=200000，非 256K）
+  kimik27code: 200_000,
+  kimik26: 200_000,
   glm51: 200_000,
 };
 

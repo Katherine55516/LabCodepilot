@@ -98,13 +98,10 @@ describe('getManagedContextWindowByName — window by managed display name', () 
     assert.equal(getManagedContextWindowByName('MiniMax-M3'), 1_000_000);
   });
 
-  it('maps 256K Kimi models', () => {
-    assert.equal(getManagedContextWindowByName('Kimi-K2.6'), 256_000);
-    assert.equal(getManagedContextWindowByName('Kimi-K2.7-Code'), 256_000);
-  });
-
-  it('maps GLM5.1 to 200K and does not collide with GLM5.2', () => {
+  it('maps 200K models (GLM5.1, Kimi-K2.6, Kimi-K2.7-Code) and GLM5.1 does not collide with GLM5.2', () => {
     assert.equal(getManagedContextWindowByName('GLM5.1'), 200_000);
+    assert.equal(getManagedContextWindowByName('Kimi-K2.6'), 200_000);
+    assert.equal(getManagedContextWindowByName('Kimi-K2.7-Code'), 200_000);
     assert.notEqual(
       getManagedContextWindowByName('GLM5.1'),
       getManagedContextWindowByName('GLM5.2'),
