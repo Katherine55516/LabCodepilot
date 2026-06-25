@@ -5,12 +5,14 @@ import { useRouter } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useTranslation } from "@/hooks/useTranslation";
-import { ListChecks, ChartBar, Gear, ArrowLeft, FolderPlus, Play, Stop, ArrowUp, SpinnerGap, Sparkle, Terminal, WarningCircle, Wrench, type Icon } from "@/components/ui/icon";
+import { ListChecks, ChartBar, Gear, ArrowLeft, FolderPlus, Play, Stop, ArrowUp, SpinnerGap, Sparkle, Terminal, WarningCircle, Wrench, Trash, type Icon } from "@/components/ui/icon";
 import type { TranslationKey } from "@/i18n";
 import { useNativeFolderPicker } from "@/hooks/useNativeFolderPicker";
 import { FolderPicker } from "@/components/chat/FolderPicker";
 import { ModelSelectorDropdown } from "@/components/chat/ModelSelectorDropdown";
 import { useProviderModels } from "@/hooks/useProviderModels";
+import { diffRuns, funcPassRateStr } from "@/lib/test/compare";
+import type { RunHistoryEntry } from "@/lib/test/history";
 
 /**
  * Inline testing workbench (Phase 2 · 对话内嵌测试).
@@ -40,6 +42,22 @@ interface ConvoMsg { role: ConvoRole; text: string }
 interface FourState { total: number; pass: number; fail: number; partial: number; blocked: number }
 // One executed case parsed from an execution @@RESULT frame (drives 报告 table).
 interface CaseResult { id: string; status: string; actual?: string; error?: string; evidence?: string[] }
+// 用例设计阶段生成的一条测试用例(读 cases.json,镜像 ai-lab-test-framework)。在用例
+// 阶段详情卡展示。字段全可选 —— AI 产出可能有出入,渲染时按需兜底。
+interface GeneratedCase {
+  id?: string;
+  priority?: string;
+  caseType?: string;
+  module?: string;
+  requirement?: string;
+  purpose?: string;        // 用例标题
+  precondition?: string;
+  steps?: { content?: string; expected?: string }[];
+  assertion?: string;
+  oracle?: string;         // 预期结果来源:PRD/设计稿/API契约/产品确认/现状锁定
+  verification?: string;   // 验证性质:功能验证 / 回归基线（oracle 双轴,决定通过率口径）
+  cleanup?: string;
+}
 
 // A persisted report (one run.json on disk) — listed in the 报告 browser. A task can
 // have several (one per env). Shape mirrors GET /api/test/reports.
@@ -51,9 +69,16 @@ interface ReportEntry {
   passStr: string;
   circuitBroken: boolean;
   counts: FourState;
+  /** 功能验证四态（oracle 双轴，排除回归基线）— 功能验证通过率的权威口径。 */
+  funcCounts?: FourState;
+  /** 功能验证通过率 "pass/total"，全回归基线为 "N/A"（来自 run.json，见 reduce.ts）。 */
+  funcPassStr?: string;
+  regressionTotal?: number;
   tests: CaseResult[];
   /** The full markdown report doc ({task}-{env}.md), if the report step wrote one. */
   markdown: string;
+  /** The defect report ({task}-{env}-缺陷报告.md), if generated (第三交付物). */
+  defectMarkdown: string;
 }
 
 interface Project {
@@ -302,6 +327,90 @@ export function InlineTestingPanel() {
     setComposer("");
   };
 
+  // 对话式定向修订（区别于 submitNote 追加指令）：调 /api/test/revise 让 AI 读当前
+  // 需求/用例产物 + 按指令精准改写并覆盖，流式进 convo；用例改完重新拉取展示。仅
+  // 需求/用例步、且产物已存在（done/review）时可用。复用 runStep 的 SSE 帧解析。
+  const reviseStep = async (step: TestStep, instruction: string) => {
+    const proj = selected !== null ? projects[selected] : null;
+    const task = proj && selectedTask !== null ? proj.tasks[selectedTask] : null;
+    const text = instruction.trim();
+    if (!proj?.path || !task || busyTaskId || !text) return;
+    const id = task.id;
+    const stepName = t(STEPS.find((s) => s.step === step)!.name);
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+    setBusyTaskId(id);
+    const push = (msg: ConvoMsg) => patchTask(id, (s) => ({ convo: [...s.convo, msg] }));
+    const appendAi = (chunk: string) =>
+      patchTask(id, (s) => {
+        const last = s.convo[s.convo.length - 1];
+        if (last && last.role === "ai") return { convo: [...s.convo.slice(0, -1), { role: "ai", text: last.text + chunk }] };
+        return { convo: [...s.convo, { role: "ai", text: chunk }] };
+      });
+    push({ role: "user", text: `✏️ ${t("test.revise.action")}「${stepName}」：${text}` });
+    setComposer("");
+    let sawError = false;
+    let lineBuf = "";
+    try {
+      const res = await fetch("/api/test/revise", {
+        method: "POST",
+        signal: ctrl.signal,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectPath: proj.path, taskName: task.name, step, instruction: text, model: model || undefined, providerId: providerId || undefined }),
+      });
+      if (!res.ok || !res.body) {
+        const j = await res.json().catch(() => ({}));
+        push({ role: "error", text: (j.error as string) || "修订失败" });
+        sawError = true;
+        return;
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const frames = buf.split("\n\n");
+        buf = frames.pop() || "";
+        for (const frame of frames) {
+          const fline = frame.replace(/^data:\s?/, "").trim();
+          if (!fline) continue;
+          let evt: { type?: string; data?: string } | null = null;
+          try { evt = JSON.parse(fline); } catch { continue; }
+          if (!evt) continue;
+          if (evt.type === "text") {
+            lineBuf += evt.data || "";
+            const ls = lineBuf.split("\n");
+            lineBuf = ls.pop() || "";
+            for (const l of ls) if (l.trim()) appendAi(l + "\n");
+          } else if (evt.type === "tool_use") {
+            try { const tu = JSON.parse(evt.data || "{}"); const label = toolUseLabel(tu.name || "", tu.input); if (label) push({ role: "tool", text: `→ ${label}` }); } catch {}
+          } else if (evt.type === "error") {
+            let msg = evt.data || "";
+            try { const d = JSON.parse(evt.data || "{}"); msg = d.userMessage || d.rawMessage || msg; } catch {}
+            push({ role: "error", text: msg });
+            sawError = true;
+          }
+        }
+      }
+      if (lineBuf.trim()) appendAi(lineBuf);
+    } catch (e) {
+      if (ctrl.signal.aborted || (e instanceof DOMException && e.name === "AbortError")) push({ role: "user", text: `■ ${t("test.flow.stop")}` });
+      else { push({ role: "error", text: `请求失败：${e instanceof Error ? e.message : String(e)}` }); sawError = true; }
+    } finally {
+      if (abortRef.current === ctrl) abortRef.current = null;
+      setBusyTaskId(null);
+      // 用例改完 → 重新拉取展示（需求步无 inline 展示，跳过）。
+      if (!sawError && step === "cases" && proj.path) {
+        try {
+          const d = await fetch(`/api/test/cases?projectPath=${encodeURIComponent(proj.path)}&taskName=${encodeURIComponent(task.name)}`).then((r) => r.json());
+          if (Array.isArray(d?.cases)) setCasesPreview(d.cases as GeneratedCase[]);
+        } catch { /* keep current preview */ }
+      }
+    }
+  };
+
   const addProject = (name: string, path: string) => setProjects((ps) => [...ps, { name, path, tasks: [] }]);
   // Create a task. 新建任务 requires importing 用例 or 需求 (at least one). The file is
   // parsed + written to the project's AI_LabTest artifacts (docx→需求.md / xlsx→cases.json)
@@ -383,6 +492,14 @@ export function InlineTestingPanel() {
           } catch {}
         }
         if (cancelled) return;
+        // 僵尸 running 规整：重启后没有 in-flight 执行，持久化的 "running" 是上次关闭应用时
+        // 被中断的瞬时态 → 恢复成 "error"（中断未完成），避免任务永远卡在「运行中」、且因无
+        // AbortController 而停不掉（实际早已无进展）。用 error 而非 idle 是为了**不触发 auto-chain
+        // effect 自动重跑**（它只跑 idle 步）——重启后应由用户主动点「运行」重跑，不擅自执行。
+        for (const st of Object.values(nextStates)) {
+          const ss = st?.stepStatus;
+          if (ss) for (const k of Object.keys(ss) as Array<keyof typeof ss>) if (ss[k] === "running") ss[k] = "error";
+        }
         setProjects(nextProjects);
         setTaskStates(nextStates);
       } catch {
@@ -474,6 +591,46 @@ export function InlineTestingPanel() {
   const [viewStep, setViewStep] = useState<TestStep | null>(null);
   // 切任务时清掉查看选中,让详情卡回到新任务的运行中/下一个待办阶段。
   useEffect(() => { setViewStep(null); }, [aId]);
+  // 用例设计阶段生成的用例(读 AI_LabTest/testCase/.data/{task}.cases.json),在用例阶段
+  // 详情卡展示。不进 TaskState/持久化(用例可能很大),按需从文件读 —— 文件是 source of truth。
+  const [casesPreview, setCasesPreview] = useState<GeneratedCase[]>([]);
+  useEffect(() => {
+    const cs = stepStatus.cases;
+    if (!current?.path || !activeTask || (cs !== "done" && cs !== "review")) { setCasesPreview([]); return; }
+    let cancelled = false;
+    fetch(`/api/test/cases?projectPath=${encodeURIComponent(current.path)}&taskName=${encodeURIComponent(activeTask.name)}`)
+      .then((r) => r.json())
+      .then((d) => { if (!cancelled && Array.isArray(d?.cases)) setCasesPreview(d.cases as GeneratedCase[]); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aId, current?.path, stepStatus.cases]);
+  // 用例编辑器:casesDraft 非 null = 编辑态(编辑副本);null = 只读态。保存时整份 PUT 回 cases.json。
+  const [casesDraft, setCasesDraft] = useState<GeneratedCase[] | null>(null);
+  const [casesSaving, setCasesSaving] = useState(false);
+  useEffect(() => { setCasesDraft(null); }, [aId]); // 切任务退出编辑态,不带过上个任务的草稿
+  const updateCase = (i: number, patch: Partial<GeneratedCase>) =>
+    setCasesDraft((d) => (d ? d.map((c, k) => (k === i ? { ...c, ...patch } : c)) : d));
+  const updateStep = (i: number, j: number, patch: Partial<{ content: string; expected: string }>) =>
+    setCasesDraft((d) => (d ? d.map((c, k) => (k === i ? { ...c, steps: (c.steps ?? []).map((s, m) => (m === j ? { ...s, ...patch } : s)) } : c)) : d));
+  const exportCases = (template: boolean) => {
+    if (template) { window.open("/api/test/cases/export?template=1", "_blank"); return; }
+    if (!current?.path || !activeTask) return;
+    window.open(`/api/test/cases/export?projectPath=${encodeURIComponent(current.path)}&taskName=${encodeURIComponent(activeTask.name)}`, "_blank");
+  };
+  const saveCases = async () => {
+    if (!current?.path || !activeTask || casesDraft === null) return;
+    setCasesSaving(true);
+    try {
+      const r = await fetch("/api/test/cases", {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ projectPath: current.path, taskName: activeTask.name, cases: casesDraft }),
+      }).then((res) => res.json());
+      if (r?.ok) { setCasesPreview(casesDraft); setCasesDraft(null); }
+    } catch { /* 保存失败保留编辑态,用户可重试 */ }
+    setCasesSaving(false);
+  };
   // First not-done step = the "current" step the detail card focuses on.
   const nextPendingStep = (): TestStep | null => STEPS.find((s) => stepStatus[s.step] !== "done")?.step ?? null;
   // focusStep = 详情卡当前展示的阶段。执行中(runningStep 存在)强制 focus 运行中的节点,
@@ -691,7 +848,54 @@ export function InlineTestingPanel() {
   // runStep's catch/finally reset the step to idle, clear run-all, and free busy,
   // so the 运行 button can re-run this node. No-op if nothing is running.
   const stopStep = () => {
-    abortRef.current?.abort();
+    // 正常运行：abort in-flight 请求，runStep 的 catch/finally 会把该步复位为 idle。
+    if (abortRef.current) { abortRef.current.abort(); return; }
+    // 僵尸 running（无 in-flight：如关闭应用后重启恢复的 running，已无对应请求，abort 无效）
+    // → 主动把运行中的步复位为 idle 并清 busy，让停止按钮对这种状态也生效、可重新运行。
+    if (activeTask) {
+      patchTask(activeTask.id, (s) => {
+        const ss = { ...s.stepStatus };
+        let changed = false;
+        for (const k of Object.keys(ss) as Array<keyof typeof ss>) if (ss[k] === "running") { ss[k] = "idle"; changed = true; }
+        return changed ? { stepStatus: ss } : {};
+      });
+    }
+    setBusyTaskId(null);
+  };
+
+  // 删除项目/任务:删前检查是否有正在执行的任务(busyTaskId),有则在确认弹窗里做二次强提醒。
+  const [deleteTarget, setDeleteTarget] = useState<
+    { kind: "project" | "task"; pIdx: number; tIdx?: number; name: string; running: boolean } | null
+  >(null);
+  const requestDeleteProject = (pIdx: number) => {
+    const p = projects[pIdx];
+    if (!p) return;
+    setDeleteTarget({ kind: "project", pIdx, name: p.name, running: !!busyTaskId && p.tasks.some((tk) => tk.id === busyTaskId) });
+  };
+  const requestDeleteTask = (tIdx: number) => {
+    if (selected === null) return;
+    const tk = projects[selected]?.tasks[tIdx];
+    if (!tk) return;
+    setDeleteTarget({ kind: "task", pIdx: selected, tIdx, name: tk.name, running: busyTaskId === tk.id });
+  };
+  const confirmDelete = () => {
+    if (!deleteTarget) return;
+    const { kind, pIdx, tIdx, running } = deleteTarget;
+    if (running) { abortRef.current?.abort(); setBusyTaskId(null); } // 删除正在执行的目标 → 先中断当前运行
+    if (kind === "project") {
+      const ids = new Set((projects[pIdx]?.tasks ?? []).map((tk) => tk.id));
+      setTaskStates((m) => { const n = { ...m }; ids.forEach((id) => delete n[id]); return n; });
+      setProjects((ps) => ps.filter((_, i) => i !== pIdx));
+      if (selected === pIdx) { setSelected(null); setSelectedTask(null); }
+      else if (selected !== null && selected > pIdx) setSelected(selected - 1);
+    } else {
+      const tk = projects[pIdx]?.tasks[tIdx!];
+      if (tk) setTaskStates((m) => { const n = { ...m }; delete n[tk.id]; return n; });
+      setProjects((ps) => ps.map((p, i) => (i === pIdx ? { ...p, tasks: p.tasks.filter((_, j) => j !== tIdx) } : p)));
+      if (selected === pIdx && selectedTask === tIdx) { setSelectedTask(null); setView("dash"); }
+      else if (selected === pIdx && selectedTask !== null && selectedTask > tIdx!) setSelectedTask(selectedTask - 1);
+    }
+    setDeleteTarget(null);
   };
 
   // Approve a human-gated step (待批准 → 已完成) 并推进:批准后主动运行下一阶段。
@@ -958,7 +1162,58 @@ export function InlineTestingPanel() {
                     {currentCase && <div className="mt-2 text-[11px] text-muted-foreground">▶ {currentCase}</div>}
                   </>
                 )}
-                <div className="mt-2 text-[11px] text-muted-foreground">{t("test.flow.evidenceNote")}</div>
+                {/* 用例设计阶段:展示生成的测试用例(参考 ai-lab-test-framework 的用例字段)。 */}
+                {focusStep === "cases" && (
+                  <div className="mt-2">
+                    <div className="mb-1.5 flex items-center gap-1">
+                      <span className="text-[11px] text-muted-foreground">{t("test.cases.total")} · {casesPreview.length}</span>
+                      <span className="flex-1" />
+                      {casesPreview.length > 0 && <button onClick={() => setCasesDraft(structuredClone(casesPreview))} className="rounded border border-border px-1.5 py-0.5 text-[10px] text-foreground hover:bg-muted">{t("test.cases.edit")}</button>}
+                      {casesPreview.length > 0 && <button onClick={() => exportCases(false)} className="rounded border border-border px-1.5 py-0.5 text-[10px] text-foreground hover:bg-muted">{t("test.cases.export")}</button>}
+                      <button onClick={() => exportCases(true)} className="rounded border border-border px-1.5 py-0.5 text-[10px] text-foreground hover:bg-muted">{t("test.cases.template")}</button>
+                    </div>
+                    <div className="max-h-[34vh] space-y-1.5 overflow-auto">
+                      {casesPreview.length === 0 ? (
+                        <p className="text-[11px] text-muted-foreground">{t("test.cases.empty")}</p>
+                      ) : (
+                        casesPreview.map((c, i) => (
+                          <div key={c.id || i} className="rounded-lg border border-border bg-background p-2">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className="text-[11px] font-medium text-foreground">{c.id || `#${i + 1}`}</span>
+                              {c.priority && <span className="rounded bg-muted px-1 py-0.5 text-[10px] text-muted-foreground">{c.priority}</span>}
+                              {c.module && <span className="text-[10px] text-muted-foreground">{c.module}</span>}
+                              {c.requirement && <span className="text-[10px] text-muted-foreground">· {c.requirement}</span>}
+                              {c.verification && (
+                                <span className={`rounded px-1 py-0.5 text-[10px] ${c.verification.includes("回归") ? "bg-muted text-muted-foreground" : "bg-status-success-muted text-status-success-foreground"}`}>
+                                  {c.verification}{c.oracle ? ` · ${c.oracle}` : ""}
+                                </span>
+                              )}
+                            </div>
+                            {c.purpose && <div className="mt-0.5 text-xs font-medium text-foreground">{c.purpose}</div>}
+                            {c.precondition && (
+                              <div className="mt-1 text-[11px] text-muted-foreground">
+                                <span className="text-foreground/70">{t("test.cases.precondition")}</span>{c.precondition}
+                              </div>
+                            )}
+                            {!!c.steps?.length && (
+                              <ol className="mt-1 list-decimal space-y-0.5 pl-4 text-[11px] text-muted-foreground">
+                                {c.steps.map((s, j) => (
+                                  <li key={j}>
+                                    {s.content}
+                                    {s.expected && <span className="text-foreground/60"> → {t("test.cases.expected")}{s.expected}</span>}
+                                  </li>
+                                ))}
+                              </ol>
+                            )}
+                          </div>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                )}
+                {focusStep !== "cases" && (
+                  <div className="mt-2 text-[11px] text-muted-foreground">{t("test.flow.evidenceNote")}</div>
+                )}
               </div>
             </div>
           </div>
@@ -997,6 +1252,16 @@ export function InlineTestingPanel() {
                   placeholder={busy ? t("test.convo.running") : t("test.convo.placeholder")}
                   className="flex-1 bg-transparent text-xs text-foreground outline-none disabled:cursor-not-allowed"
                 />
+                {(focusStep === "requirement" || focusStep === "cases") && (stepStatus[focusStep] === "done" || stepStatus[focusStep] === "review") && (
+                  <button
+                    onClick={() => reviseStep(focusStep, composer)}
+                    disabled={busy || !composer.trim()}
+                    title={t("test.revise.action")}
+                    className="flex h-6 shrink-0 items-center gap-1 rounded-md border border-border px-2 text-[10px] text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    <Sparkle size={11} /> {t("test.revise.btn")}
+                  </button>
+                )}
                 <button
                   onClick={submitNote}
                   disabled={busy || !composer.trim()}
@@ -1007,7 +1272,11 @@ export function InlineTestingPanel() {
                   <ArrowUp size={13} />
                 </button>
               </div>
-              <div className="mt-1 px-1 text-[10px] text-muted-foreground">{t("test.convo.hint")}</div>
+              <div className="mt-1 px-1 text-[10px] text-muted-foreground">
+                {(focusStep === "requirement" || focusStep === "cases") && (stepStatus[focusStep] === "done" || stepStatus[focusStep] === "review")
+                  ? t("test.revise.hint")
+                  : t("test.convo.hint")}
+              </div>
             </div>
           </div>
         </div>
@@ -1034,27 +1303,35 @@ export function InlineTestingPanel() {
                 ) : (
                   <div className="grid grid-cols-2 gap-2 lg:grid-cols-3">
                     {projects.map((p, i) => (
-                      <button
-                        key={i}
-                        onClick={() => {
-                          setSelected(i);
-                          setSelectedTask(null);
-                        }}
-                        className="group flex flex-col gap-2.5 rounded-xl border border-border bg-card p-3.5 text-left transition-colors hover:border-primary/50 hover:bg-muted/40"
-                      >
-                        <div className="flex items-center gap-2.5">
-                          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                            <FolderPlus size={17} />
-                          </span>
-                          <div className="min-w-0 flex-1">
-                            <div className="truncate text-sm font-medium text-foreground">{p.name}</div>
-                            {p.path && <div className="truncate font-mono text-[10px] text-muted-foreground">{p.path}</div>}
+                      <div key={i} className="group relative">
+                        <button
+                          onClick={() => {
+                            setSelected(i);
+                            setSelectedTask(null);
+                          }}
+                          className="flex w-full flex-col gap-2.5 rounded-xl border border-border bg-card p-3.5 text-left transition-colors hover:border-primary/50 hover:bg-muted/40"
+                        >
+                          <div className="flex items-center gap-2.5">
+                            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                              <FolderPlus size={17} />
+                            </span>
+                            <div className="min-w-0 flex-1">
+                              <div className="truncate text-sm font-medium text-foreground">{p.name}</div>
+                              {p.path && <div className="truncate font-mono text-[10px] text-muted-foreground">{p.path}</div>}
+                            </div>
                           </div>
-                        </div>
-                        <div className="flex items-center gap-1.5 border-t border-border/60 pt-2 text-[11px] text-muted-foreground">
-                          <ListChecks size={12} /> {p.tasks.length} {t("test.tasks")}
-                        </div>
-                      </button>
+                          <div className="flex items-center gap-1.5 border-t border-border/60 pt-2 text-[11px] text-muted-foreground">
+                            <ListChecks size={12} /> {p.tasks.length} {t("test.tasks")}
+                          </div>
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); requestDeleteProject(i); }}
+                          title={t("test.del.delete")}
+                          className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-status-error-muted hover:text-status-error group-hover:opacity-100"
+                        >
+                          <Trash size={13} />
+                        </button>
+                      </div>
                     ))}
                   </div>
                 )}
@@ -1097,35 +1374,43 @@ export function InlineTestingPanel() {
                       const st = taskStates[tk.id] ?? DEFAULT_TASK_STATE;
                       const chip = taskChip(st, t);
                       return (
-                        <button
-                          key={tk.id}
-                          onClick={() => {
-                            setSelectedTask(i);
-                            setView("flow");
-                          }}
-                          className="group flex flex-col gap-3 rounded-xl border border-border bg-card p-3.5 text-left transition-colors hover:border-primary/50 hover:bg-muted/40"
-                        >
-                          <div className="flex items-start justify-between gap-2">
-                            <span className="truncate pt-0.5 text-sm font-medium text-foreground">{tk.name}</span>
-                            <div className="flex shrink-0 flex-col items-end gap-0.5">
-                              <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${chip.cls}`}>{chip.text}</span>
-                              <span className="text-[10px] text-muted-foreground">{taskStageName(st, t)}</span>
-                            </div>
-                          </div>
-                          <div className="flex items-start">
-                            {STEPS.map((s, idx) => (
-                              <div key={s.step} className="flex flex-1 flex-col items-center">
-                                {/* dot with connector lines on both sides (ends are hidden) */}
-                                <div className="flex w-full items-center">
-                                  <span className={`h-px flex-1 ${idx === 0 ? "opacity-0" : "bg-border"}`} />
-                                  <span className={`mx-1 h-2 w-2 shrink-0 rounded-full ${stepDotClass(st.stepStatus[s.step])}`} />
-                                  <span className={`h-px flex-1 ${idx === STEPS.length - 1 ? "opacity-0" : "bg-border"}`} />
-                                </div>
-                                <span className="mt-1 text-center text-[9px] leading-tight text-muted-foreground">{t(s.name)}</span>
+                        <div key={tk.id} className="group relative">
+                          <button
+                            onClick={() => {
+                              setSelectedTask(i);
+                              setView("flow");
+                            }}
+                            className="flex w-full flex-col gap-3 rounded-xl border border-border bg-card p-3.5 text-left transition-colors hover:border-primary/50 hover:bg-muted/40"
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <span className="truncate pt-0.5 text-sm font-medium text-foreground">{tk.name}</span>
+                              <div className="flex shrink-0 flex-col items-end gap-0.5">
+                                <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${chip.cls}`}>{chip.text}</span>
+                                <span className="text-[10px] text-muted-foreground">{taskStageName(st, t)}</span>
                               </div>
-                            ))}
-                          </div>
-                        </button>
+                            </div>
+                            <div className="flex items-start">
+                              {STEPS.map((s, idx) => (
+                                <div key={s.step} className="flex flex-1 flex-col items-center">
+                                  {/* dot with connector lines on both sides (ends are hidden) */}
+                                  <div className="flex w-full items-center">
+                                    <span className={`h-px flex-1 ${idx === 0 ? "opacity-0" : "bg-border"}`} />
+                                    <span className={`mx-1 h-2 w-2 shrink-0 rounded-full ${stepDotClass(st.stepStatus[s.step])}`} />
+                                    <span className={`h-px flex-1 ${idx === STEPS.length - 1 ? "opacity-0" : "bg-border"}`} />
+                                  </div>
+                                  <span className="mt-1 text-center text-[9px] leading-tight text-muted-foreground">{t(s.name)}</span>
+                                </div>
+                              ))}
+                            </div>
+                          </button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); requestDeleteTask(i); }}
+                            title={t("test.del.delete")}
+                            className="absolute right-2 bottom-2 flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-status-error-muted hover:text-status-error group-hover:opacity-100"
+                          >
+                            <Trash size={13} />
+                          </button>
+                        </div>
                       );
                     })}
                   </div>
@@ -1140,6 +1425,88 @@ export function InlineTestingPanel() {
       )}
 
       {/* Modals + folder picker (browser fallback for project selection) */}
+      {/* 用例编辑弹窗：从详情卡「编辑」打开，大空间增删改用例 + 字段 + 步骤 + oracle 双轴。 */}
+      {casesDraft !== null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setCasesDraft(null)}>
+          <div className="flex max-h-[85vh] w-[680px] max-w-[94vw] flex-col rounded-xl border border-border bg-card shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-2 border-b border-border px-4 py-3">
+              <h3 className="text-sm font-semibold text-foreground">{t("test.cases.editTitle")}</h3>
+              <span className="text-[11px] text-muted-foreground">· {casesDraft.length}</span>
+              <span className="flex-1" />
+              <button onClick={() => setCasesDraft([...(casesDraft ?? []), { id: "", purpose: "", steps: [{ content: "", expected: "" }] }])} className="rounded border border-border px-2 py-1 text-[11px] text-foreground hover:bg-muted">+ {t("test.cases.add")}</button>
+              <button onClick={saveCases} disabled={casesSaving} className="rounded bg-primary px-2.5 py-1 text-[11px] font-medium text-primary-foreground disabled:opacity-40">{casesSaving ? t("test.cases.saving") : t("test.cases.save")}</button>
+              <button onClick={() => setCasesDraft(null)} className="rounded border border-border px-2 py-1 text-[11px] text-foreground hover:bg-muted">{t("test.cases.cancel")}</button>
+            </div>
+            <div className="flex-1 space-y-2 overflow-auto p-4">
+              {casesDraft.length === 0 ? (
+                <p className="text-center text-[11px] text-muted-foreground">{t("test.cases.empty")}</p>
+              ) : (
+                casesDraft.map((c, i) => (
+                  <div key={i} className="space-y-1.5 rounded-lg border border-border bg-background p-2.5">
+                    <div className="flex items-center gap-1">
+                      <input value={c.id ?? ""} onChange={(e) => updateCase(i, { id: e.target.value })} placeholder="ID" className="w-28 rounded border border-border bg-background px-1.5 py-0.5 text-[11px] text-foreground outline-none focus:border-primary" />
+                      <input value={c.priority ?? ""} onChange={(e) => updateCase(i, { priority: e.target.value })} placeholder={t("test.cases.priority")} className="w-20 rounded border border-border bg-background px-1.5 py-0.5 text-[11px] text-foreground outline-none focus:border-primary" />
+                      <span className="flex-1" />
+                      <button onClick={() => setCasesDraft((casesDraft ?? []).filter((_, k) => k !== i))} title={t("test.cases.delCase")} className="px-1 text-[11px] text-status-error hover:opacity-80">✕</button>
+                    </div>
+                    <input value={c.purpose ?? ""} onChange={(e) => updateCase(i, { purpose: e.target.value })} placeholder={t("test.cases.purpose")} className="w-full rounded border border-border bg-background px-1.5 py-0.5 text-[11px] text-foreground outline-none focus:border-primary" />
+                    <input value={c.precondition ?? ""} onChange={(e) => updateCase(i, { precondition: e.target.value })} placeholder={t("test.cases.precondition")} className="w-full rounded border border-border bg-background px-1.5 py-0.5 text-[11px] text-foreground outline-none focus:border-primary" />
+                    <div className="flex items-center gap-1">
+                      <select value={c.verification ?? ""} onChange={(e) => updateCase(i, { verification: e.target.value })} className="rounded border border-border bg-background px-1 py-0.5 text-[11px] text-foreground outline-none focus:border-primary">
+                        <option value="">{t("test.cases.verification")}</option>
+                        <option value="功能验证">功能验证</option>
+                        <option value="回归基线">回归基线</option>
+                      </select>
+                      <select value={c.oracle ?? ""} onChange={(e) => updateCase(i, { oracle: e.target.value })} className="rounded border border-border bg-background px-1 py-0.5 text-[11px] text-foreground outline-none focus:border-primary">
+                        <option value="">{t("test.cases.oracle")}</option>
+                        <option value="PRD">PRD</option>
+                        <option value="设计稿">设计稿</option>
+                        <option value="API契约">API契约</option>
+                        <option value="产品确认">产品确认</option>
+                        <option value="现状锁定">现状锁定</option>
+                      </select>
+                    </div>
+                    {(c.steps ?? []).map((s, j) => (
+                      <div key={j} className="flex items-center gap-1">
+                        <span className="w-4 shrink-0 text-[10px] text-muted-foreground">{j + 1}.</span>
+                        <input value={s.content ?? ""} onChange={(e) => updateStep(i, j, { content: e.target.value })} placeholder={t("test.cases.step")} className="min-w-0 flex-1 rounded border border-border bg-background px-1.5 py-0.5 text-[11px] text-foreground outline-none focus:border-primary" />
+                        <input value={s.expected ?? ""} onChange={(e) => updateStep(i, j, { expected: e.target.value })} placeholder={t("test.cases.expected")} className="min-w-0 flex-1 rounded border border-border bg-background px-1.5 py-0.5 text-[11px] text-foreground outline-none focus:border-primary" />
+                        <button onClick={() => updateCase(i, { steps: (c.steps ?? []).filter((_, k) => k !== j) })} className="shrink-0 px-0.5 text-[10px] text-muted-foreground hover:text-status-error">✕</button>
+                      </div>
+                    ))}
+                    <button onClick={() => updateCase(i, { steps: [...(c.steps ?? []), { content: "", expected: "" }] })} className="text-[10px] text-primary hover:opacity-80">+ {t("test.cases.addStep")}</button>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+      {deleteTarget && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setDeleteTarget(null)}>
+          <div className="w-[400px] max-w-[92vw] rounded-xl border border-border bg-card p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <h3 className="text-sm font-semibold text-foreground">{t("test.del.title")}</h3>
+            <p className="mt-2.5 text-xs leading-relaxed text-muted-foreground">
+              {t(deleteTarget.kind === "project" ? "test.del.msgProject" : "test.del.msgTask")}
+            </p>
+            <p className="mt-1 truncate text-sm font-medium text-foreground">「{deleteTarget.name}」</p>
+            {deleteTarget.running && (
+              <p className="mt-2.5 flex items-start gap-1.5 rounded-md bg-status-error-muted px-2.5 py-2 text-[11px] font-medium text-status-error">
+                <WarningCircle size={14} className="mt-px shrink-0" />
+                {t("test.del.runningWarn")}
+              </p>
+            )}
+            <div className="mt-4 flex justify-end gap-2">
+              <button onClick={() => setDeleteTarget(null)} className="h-8 rounded-md border border-border px-3 text-xs text-foreground hover:bg-muted">
+                {t("test.cancel")}
+              </button>
+              <button onClick={confirmDelete} className="h-8 rounded-md bg-status-error px-3 text-xs font-medium text-white hover:opacity-90">
+                {deleteTarget.running ? t("test.del.stopDelete") : t("test.del.confirm")}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {modal === "newTask" && <NewTaskModal t={t} onClose={() => setModal("none")} onAdd={addTask} />}
       {modal === "runChoice" && activeTask && (
         <RunChoiceModal
@@ -1191,11 +1558,17 @@ function ConvoBubble({ msg }: { msg: ConvoMsg }) {
 
 // 报告 view (prototype): metrics row + per-case results table, from the execution
 // run's @@RESULT frames (caseResults) + four-state tally. Facts only.
-function ReportView({ t, results, four, circuitBroken, taskName }: { t: T; results: CaseResult[]; four: FourState; circuitBroken?: boolean; taskName: string }) {
+function ReportView({ t, results, four, funcCounts, funcPassStr, circuitBroken, taskName, projectPath, env }: { t: T; results: CaseResult[]; four: FourState; funcCounts?: FourState; funcPassStr?: string; circuitBroken?: boolean; taskName: string; projectPath?: string; env?: string }) {
+  // 证据媒体（图片灯箱 + 录像内联回放）：经 /api/test/media 白名单流式取证据；
+  // lightbox=当前放大查看的文件名。无 projectPath（如流程内调用）时退化为文件名文本。
+  const [lightbox, setLightbox] = useState<string | null>(null);
+  const mediaUrl = (file: string) => `/api/test/media?projectPath=${encodeURIComponent(projectPath || "")}&taskName=${encodeURIComponent(taskName)}&env=${encodeURIComponent(env || "local")}&file=${encodeURIComponent(file)}`;
+  const isVid = (f: string) => /\.(webm|mp4|mov)$/i.test(f);
   const total = four.total || results.length;
   const execRate = total ? Math.round((four.pass / total) * 100) : 0;
-  const funcDenom = total - four.blocked; // blocked cases never ran functionally
-  const funcRate = funcDenom > 0 ? Math.round((four.pass / funcDenom) * 100) : 0;
+  // 功能验证通过率（oracle 双轴，排除回归基线）：用后端权威 funcCounts/funcPassStr，
+  // 缺失（legacy 报告）回退「扣除 blocked」执行口径；全回归基线 → "N/A"，不报「100%」。
+  const funcRateStr = funcPassRateStr({ total, pass: four.pass, blocked: four.blocked }, funcCounts, funcPassStr);
   const metric = (label: string, value: string, danger?: boolean) => (
     <div className="rounded-lg bg-muted/40 p-3">
       <div className="text-[11px] text-muted-foreground">{label}</div>
@@ -1224,7 +1597,7 @@ function ReportView({ t, results, four, circuitBroken, taskName }: { t: T; resul
         </div>
       )}
       <div className="mb-3 grid grid-cols-2 gap-2 lg:grid-cols-4">
-        {metric(t("test.report.funcRate"), `${funcRate}%`)}
+        {metric(t("test.report.funcRate"), funcRateStr)}
         {metric(t("test.report.caseCount"), String(total))}
         {metric(t("test.report.execRate"), `${execRate}%`)}
         {metric(t("test.report.defects"), String(four.fail), four.fail > 0)}
@@ -1245,12 +1618,25 @@ function ReportView({ t, results, four, circuitBroken, taskName }: { t: T; resul
               <tr key={i} className="border-t border-border align-top">
                 <td className="px-2 py-1.5 font-mono text-foreground">{r.id}</td>
                 <td className="px-2 py-1.5 text-muted-foreground">{r.actual || "—"}</td>
-                <td className="px-2 py-1.5">
-                  <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${chipCls[r.status] || "bg-muted text-muted-foreground"}`}>
+                <td className="whitespace-nowrap px-2 py-1.5">
+                  <span className={`inline-block whitespace-nowrap rounded px-1.5 py-0.5 text-[10px] font-medium ${chipCls[r.status] || "bg-muted text-muted-foreground"}`}>
                     {chipLabel[r.status] ? t(chipLabel[r.status]) : r.status}
                   </span>
                 </td>
-                <td className="px-2 py-1.5 text-muted-foreground">{r.evidence?.length ? r.evidence.join(", ") : "—"}</td>
+                <td className="px-2 py-1.5">
+                  {r.evidence?.length && projectPath ? (
+                    <div className="flex flex-wrap gap-1">
+                      {r.evidence.map((f, k) => isVid(f) ? (
+                        <button key={k} onClick={() => setLightbox(f)} title={f} className="rounded border border-border px-1 py-0.5 text-[10px] text-primary hover:bg-muted">🎬 {t("test.media.video")}</button>
+                      ) : (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img key={k} src={mediaUrl(f)} alt={f} title={f} onClick={() => setLightbox(f)} className="h-10 w-10 cursor-pointer rounded border border-border object-cover transition hover:opacity-80" />
+                      ))}
+                    </div>
+                  ) : (
+                    <span className="text-muted-foreground">{r.evidence?.length ? r.evidence.join(", ") : "—"}</span>
+                  )}
+                </td>
                 <td className="px-2 py-1.5 text-muted-foreground">{r.error || "—"}</td>
               </tr>
             ))}
@@ -1258,6 +1644,121 @@ function ReportView({ t, results, four, circuitBroken, taskName }: { t: T; resul
         </table>
       </div>
       <p className="mt-2 text-[11px] text-muted-foreground">ℹ️ {t("test.report.factsNote")}</p>
+      {lightbox && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-6" onClick={() => setLightbox(null)}>
+          {isVid(lightbox) ? (
+            <video src={mediaUrl(lightbox)} controls autoPlay className="max-h-full max-w-full" onClick={(e) => e.stopPropagation()} />
+          ) : (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={mediaUrl(lightbox)} alt={lightbox} className="max-h-full max-w-full object-contain" onClick={(e) => e.stopPropagation()} />
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// 报告多版本对比（regression analysis）：选两次执行 → 双口径通过率变化 + 逐用例状态
+// diff。数据来自 GET /api/test/reports/history（.history 快照）；diff 用纯函数 diffRuns。
+// 默认基线=上一版(history[1])、目标=最新(history[0])，可改选。
+function CompareView({ t, projectPath, taskName, env }: { t: T; projectPath: string; taskName: string; env: string }) {
+  const [history, setHistory] = useState<RunHistoryEntry[] | null>(null);
+  const [aIdx, setAIdx] = useState(1); // 基线（旧）
+  const [bIdx, setBIdx] = useState(0); // 目标（新）
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/test/reports/history?projectPath=${encodeURIComponent(projectPath)}&taskName=${encodeURIComponent(taskName)}&env=${encodeURIComponent(env)}`)
+      .then((r) => (r.ok ? r.json() : { history: [] }))
+      .then((d) => { if (!cancelled) setHistory((d.history ?? []) as RunHistoryEntry[]); })
+      .catch(() => { if (!cancelled) setHistory([]); });
+    return () => { cancelled = true; };
+  }, [projectPath, taskName, env]);
+
+  if (history === null) return <p className="text-[11px] text-muted-foreground">{t("test.report.loading")}</p>;
+  if (history.length < 2) return <p className="text-[11px] text-muted-foreground">{t("test.compare.needTwo")}</p>;
+
+  const a = history[Math.min(aIdx, history.length - 1)];
+  const b = history[Math.min(bIdx, history.length - 1)];
+  const diff = diffRuns(a, b); // a=基线(prev)，b=目标(curr)
+  const verLabel = (e: RunHistoryEntry) => `${e.time ? e.time.slice(0, 19).replace("T", " ") : e.stamp} · ${e.passStr || "—"}`;
+  const stLabel: Record<string, TranslationKey> = { pass: "test.state.pass", fail: "test.state.fail", partial: "test.state.partial", blocked: "test.state.blocked" };
+  const st = (s: string | null) => (s ? (stLabel[s] ? t(stLabel[s]) : s) : "—");
+
+  const rateCard = (title: string, rd: { prev: number | null; curr: number | null; delta: number | null }) => {
+    const fmt = (v: number | null) => (v === null ? "N/A" : `${v}%`);
+    const dColor = rd.delta === null || rd.delta === 0 ? "text-muted-foreground" : rd.delta > 0 ? "text-status-success-foreground" : "text-status-error-foreground";
+    const dStr = rd.delta === null ? "" : rd.delta > 0 ? `▲ +${rd.delta}` : rd.delta < 0 ? `▼ ${rd.delta}` : "±0";
+    return (
+      <div className="rounded-lg bg-muted/40 p-3">
+        <div className="text-[11px] text-muted-foreground">{title}</div>
+        <div className="text-base font-semibold text-foreground">
+          {fmt(rd.prev)} <span className="text-muted-foreground">→</span> {fmt(rd.curr)} <span className={`text-xs ${dColor}`}>{dStr}</span>
+        </div>
+      </div>
+    );
+  };
+
+  const changeCls: Record<string, string> = {
+    regressed: "bg-status-error-muted text-status-error-foreground",
+    improved: "bg-status-success-muted text-status-success-foreground",
+    added: "bg-status-info-muted text-status-info-foreground",
+    removed: "bg-muted text-muted-foreground",
+    unchanged: "bg-muted/50 text-muted-foreground",
+  };
+  const changeLabel: Record<string, TranslationKey> = {
+    regressed: "test.compare.regressed", improved: "test.compare.improved",
+    added: "test.compare.added", removed: "test.compare.removed", unchanged: "test.compare.unchanged",
+  };
+  const changed = diff.cases.filter((c) => c.change !== "unchanged");
+
+  return (
+    <div>
+      <div className="mb-3 flex flex-wrap items-center gap-1.5 text-[11px]">
+        <span className="text-muted-foreground">{t("test.compare.baseline")}</span>
+        <select value={aIdx} onChange={(e) => setAIdx(Number(e.target.value))} className="rounded border border-border bg-background px-1.5 py-0.5 text-foreground outline-none focus:border-primary">
+          {history.map((h, i) => <option key={h.file} value={i}>{verLabel(h)}</option>)}
+        </select>
+        <span className="text-muted-foreground">→ {t("test.compare.target")}</span>
+        <select value={bIdx} onChange={(e) => setBIdx(Number(e.target.value))} className="rounded border border-border bg-background px-1.5 py-0.5 text-foreground outline-none focus:border-primary">
+          {history.map((h, i) => <option key={h.file} value={i}>{verLabel(h)}</option>)}
+        </select>
+      </div>
+      <div className="mb-2 grid grid-cols-2 gap-2">
+        {rateCard(t("test.report.funcRate"), diff.funcRate)}
+        {rateCard(t("test.report.execRate"), diff.execRate)}
+      </div>
+      <div className="mb-3 flex flex-wrap gap-x-3 gap-y-1 text-[11px]">
+        <span className="text-status-error-foreground">⚠ {t("test.compare.regressed")} {diff.regressed}</span>
+        <span className="text-status-success-foreground">{t("test.compare.improved")} {diff.improved}</span>
+        {diff.added > 0 && <span className="text-muted-foreground">{t("test.compare.added")} {diff.added}</span>}
+        {diff.removed > 0 && <span className="text-muted-foreground">{t("test.compare.removed")} {diff.removed}</span>}
+      </div>
+      <div className="overflow-hidden rounded-xl border border-border">
+        <table className="w-full border-collapse text-[11px]">
+          <thead>
+            <tr className="bg-muted/50 text-left text-muted-foreground">
+              <th className="px-2 py-1.5 font-medium">{t("test.report.colId")}</th>
+              <th className="px-2 py-1.5 font-medium">{t("test.compare.baseline")}</th>
+              <th className="px-2 py-1.5 font-medium">{t("test.compare.target")}</th>
+              <th className="px-2 py-1.5 font-medium">{t("test.compare.change")}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {changed.length === 0 ? (
+              <tr><td colSpan={4} className="px-2 py-3 text-center text-muted-foreground">{t("test.compare.noChange")}</td></tr>
+            ) : (
+              changed.map((c) => (
+                <tr key={c.id} className="border-t border-border">
+                  <td className="px-2 py-1.5 font-mono text-foreground">{c.id}</td>
+                  <td className="whitespace-nowrap px-2 py-1.5 text-muted-foreground">{st(c.prev)}</td>
+                  <td className="whitespace-nowrap px-2 py-1.5 text-muted-foreground">{st(c.curr)}</td>
+                  <td className="whitespace-nowrap px-2 py-1.5"><span className={`inline-block whitespace-nowrap rounded px-1.5 py-0.5 text-[10px] font-medium ${changeCls[c.change]}`}>{t(changeLabel[c.change])}</span></td>
+                </tr>
+              ))
+            )}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }
@@ -1270,6 +1771,9 @@ function ReportBrowser({ projects, t, model, providerId }: { projects: Project[]
   const [loading, setLoading] = useState(true);
   const [groups, setGroups] = useState<{ project: Project; reports: ReportEntry[] }[]>([]);
   const [open, setOpen] = useState<string | null>(null);
+  const [rowTab, setRowTab] = useState<Record<string, "result" | "compare" | "defect">>({});
+  const [defectBusy, setDefectBusy] = useState<string | null>(null);
+  const [reloadTick, setReloadTick] = useState(0);
   const [handoffKey, setHandoffKey] = useState<string | null>(null);
 
   // 交给研发修复: hand a failing report to the 研发平台 (coding chat). Creates a
@@ -1314,6 +1818,30 @@ function ReportBrowser({ projects, t, model, providerId }: { projects: Project[]
     }
   };
 
+  // 生成缺陷报告（第三交付物）：调 /api/test/defect 流式跑（读到结束即可），完成后触发
+  // reload 让 reports 重新拉取拿到新写的 {task}-{env}-缺陷报告.md（r.defectMarkdown）。
+  const defectGen = async (project: Project, r: ReportEntry) => {
+    const key = `${project.path}|${r.task}|${r.env}`;
+    setDefectBusy(key);
+    try {
+      const res = await fetch("/api/test/defect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectPath: project.path, taskName: r.task, env: r.env, model: model || undefined, providerId: providerId || undefined }),
+      });
+      if (res.body) {
+        const reader = res.body.getReader();
+        for (;;) { const { done } = await reader.read(); if (done) break; } // drain to completion
+      }
+      setReloadTick((n) => n + 1); // re-fetch reports → picks up the new 缺陷报告.md
+      setRowTab((m) => ({ ...m, [key]: "defect" }));
+    } catch {
+      /* leave as-is */
+    } finally {
+      setDefectBusy(null);
+    }
+  };
+
   useEffect(() => {
     // All setState happens inside the async callback (Promise.all([]) resolves
     // immediately for the empty case) — avoids synchronous setState in the effect.
@@ -1333,7 +1861,7 @@ function ReportBrowser({ projects, t, model, providerId }: { projects: Project[]
       setLoading(false);
     });
     return () => { cancelled = true; };
-  }, [projects]);
+  }, [projects, reloadTick]);
 
   if (loading) return <p className="mt-6 text-center text-[11px] text-muted-foreground">{t("test.report.loading")}</p>;
   if (!groups.length) return <EmptyState icon={ChartBar} text={t("test.reportEmpty")} />;
@@ -1381,8 +1909,16 @@ function ReportBrowser({ projects, t, model, providerId }: { projects: Project[]
                           </button>
                           {isOpen && (
                             <div className="border-t border-border p-3">
-                              {r.counts.fail > 0 && (
-                                <div className="mb-3 flex justify-end">
+                              <div className="mb-3 flex items-center gap-1.5">
+                                {(["result", "compare", "defect"] as const).map((tab) => {
+                                  const cur = rowTab[key] || "result";
+                                  const label = tab === "result" ? t("test.compare.tabResult") : tab === "compare" ? t("test.compare.tabCompare") : t("test.defect.tab");
+                                  return (
+                                    <button key={tab} onClick={() => setRowTab((m) => ({ ...m, [key]: tab }))} className={`rounded px-2 py-0.5 text-[11px] ${cur === tab ? "bg-primary text-primary-foreground" : "border border-border text-foreground hover:bg-muted"}`}>{label}</button>
+                                  );
+                                })}
+                                <span className="flex-1" />
+                                {(rowTab[key] || "result") === "result" && r.counts.fail > 0 && (
                                   <button
                                     onClick={() => handoff(project, r)}
                                     disabled={handoffKey === key}
@@ -1390,16 +1926,42 @@ function ReportBrowser({ projects, t, model, providerId }: { projects: Project[]
                                   >
                                     <Wrench size={12} /> {t("test.report.handoff")}（{r.counts.fail}）
                                   </button>
-                                </div>
-                              )}
-                              <ReportView t={t} results={r.tests} four={r.counts} circuitBroken={r.circuitBroken} taskName={task} />
-                              {r.markdown && (
-                                <div className="mt-3 border-t border-border pt-3">
-                                  <div className="mb-2 text-[11px] font-medium text-muted-foreground">{t("test.report.docTitle")}</div>
-                                  <div className="prose prose-sm dark:prose-invert max-w-none">
-                                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{r.markdown}</ReactMarkdown>
+                                )}
+                              </div>
+                              {(rowTab[key] || "result") === "compare" ? (
+                                <CompareView t={t} projectPath={project.path} taskName={task} env={r.env} />
+                              ) : (rowTab[key] || "result") === "defect" ? (
+                                <div>
+                                  <div className="mb-2 flex items-center gap-2">
+                                    <button
+                                      onClick={() => defectGen(project, r)}
+                                      disabled={defectBusy === key}
+                                      className="flex h-7 items-center gap-1 rounded-md bg-primary px-2.5 text-[11px] font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                                    >
+                                      <WarningCircle size={12} /> {defectBusy === key ? t("test.defect.generating") : r.defectMarkdown ? t("test.defect.regen") : t("test.defect.gen")}
+                                    </button>
+                                    <span className="text-[10px] text-muted-foreground">{t("test.defect.hint")}</span>
                                   </div>
+                                  {r.defectMarkdown ? (
+                                    <div className="prose prose-sm dark:prose-invert max-w-none rounded-lg border border-border bg-card p-3">
+                                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{r.defectMarkdown}</ReactMarkdown>
+                                    </div>
+                                  ) : (
+                                    <p className="text-[11px] text-muted-foreground">{defectBusy === key ? t("test.defect.generating") : t("test.defect.empty")}</p>
+                                  )}
                                 </div>
+                              ) : (
+                                <>
+                                  <ReportView t={t} results={r.tests} four={r.counts} funcCounts={r.funcCounts} funcPassStr={r.funcPassStr} circuitBroken={r.circuitBroken} taskName={task} projectPath={project.path} env={r.env} />
+                                  {r.markdown && (
+                                    <div className="mt-3 border-t border-border pt-3">
+                                      <div className="mb-2 text-[11px] font-medium text-muted-foreground">{t("test.report.docTitle")}</div>
+                                      <div className="prose prose-sm dark:prose-invert max-w-none">
+                                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{r.markdown}</ReactMarkdown>
+                                      </div>
+                                    </div>
+                                  )}
+                                </>
                               )}
                             </div>
                           )}

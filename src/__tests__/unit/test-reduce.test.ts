@@ -137,3 +137,52 @@ describe("reduceFromText", () => {
     assert.equal(run.tests[0].evidence[0], "TC-001.png");
   });
 });
+
+describe("reduceResults — dual-rate (oracle 双轴)", () => {
+  it("no verification map ⇒ degrades to single-rate (funcCounts === counts)", () => {
+    const run = reduceResults(
+      [{ id: "A", status: "pass" }, { id: "B", status: "fail", error: "x" }],
+      OPTS,
+    );
+    assert.deepEqual(run.funcCounts, run.counts);
+    assert.equal(run.funcPassStr, run.passStr);
+    assert.equal(run.regressionTotal, 0);
+  });
+
+  it("excludes 回归基线 cases from the functional pass rate", () => {
+    const run = reduceResults(
+      [
+        { id: "A", status: "pass" }, // 功能验证 pass
+        { id: "B", status: "fail", error: "真实缺陷" }, // 功能验证 fail
+        { id: "C", status: "pass" }, // 回归基线 pass — must NOT inflate functional rate
+        { id: "D", status: "pass" }, // 回归基线 pass
+      ],
+      { ...OPTS, verificationById: { A: "功能验证", B: "功能验证", C: "回归基线", D: "回归基线" } },
+    );
+    assert.equal(run.passStr, "3/4"); // execution rate counts everything
+    assert.deepEqual(run.funcCounts, { total: 2, pass: 1, fail: 1, partial: 0, blocked: 0 });
+    assert.equal(run.funcPassStr, "1/2"); // functional rate excludes the 2 regression passes
+    assert.equal(run.regressionTotal, 2);
+  });
+
+  it("all 回归基线 ⇒ funcPassStr is N/A (never report 100% functional)", () => {
+    const run = reduceResults(
+      [{ id: "A", status: "pass" }, { id: "B", status: "pass" }],
+      { ...OPTS, verificationById: { A: "回归基线", B: "回归基线" } },
+    );
+    assert.equal(run.passStr, "2/2"); // execution rate is still 100%
+    assert.equal(run.funcPassStr, "N/A"); // but functional rate is N/A — only locks status quo
+    assert.equal(run.funcCounts.total, 0);
+    assert.equal(run.regressionTotal, 2);
+  });
+
+  it("a test id absent from the map defaults to 功能验证 (lineage-safe)", () => {
+    const run = reduceResults(
+      [{ id: "A", status: "pass" }, { id: "B", status: "pass" }],
+      { ...OPTS, verificationById: { A: "回归基线" } }, // B not in the map
+    );
+    assert.equal(run.regressionTotal, 1);
+    assert.deepEqual(run.funcCounts, { total: 1, pass: 1, fail: 0, partial: 0, blocked: 0 });
+    assert.equal(run.funcPassStr, "1/1");
+  });
+});

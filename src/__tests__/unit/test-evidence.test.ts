@@ -90,6 +90,32 @@ describe("normalizeEvidenceExt", () => {
   });
 });
 
+// Regression for M2: a user file that merely starts with "TC-" but has a non-media
+// extension (TC-spec.md) must NOT be swept out of the project root; only media files
+// and extension-less TC- screenshots are evidence.
+describe("sweepStrayEvidence — leaves TC-prefixed user files (non-media ext) alone (M2)", () => {
+  let root: string;
+  let evidenceDir: string;
+  before(() => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), "ev-m2-"));
+    evidenceDir = path.join(root, "_evidence");
+    fs.writeFileSync(path.join(root, "TC-spec.md"), "user design notes");
+    fs.writeFileSync(path.join(root, "TC-plan.txt"), "user file");
+    fs.writeFileSync(path.join(root, "TC-001.png"), PNG); // real evidence (media ext)
+    fs.writeFileSync(path.join(root, "TC-shot"), PNG); // ext-less screenshot → still evidence
+  });
+  after(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  it("sweeps media + ext-less TC- screenshots, but leaves TC-*.md/.txt user files", () => {
+    const moved = sweepStrayEvidence({ dirs: [root], evidenceDir, sinceMs: Date.now() - 5000 })
+      .map((p) => path.basename(p))
+      .sort();
+    assert.deepEqual(moved, ["TC-001.png", "TC-shot"]);
+    assert.ok(fs.existsSync(path.join(root, "TC-spec.md")), "TC-spec.md must NOT be swept");
+    assert.ok(fs.existsSync(path.join(root, "TC-plan.txt")), "TC-plan.txt must NOT be swept");
+  });
+});
+
 describe("writeMcpLauncherShim", () => {
   it("writes a chdir shim that loads the CLI from env", () => {
     const p = writeMcpLauncherShim();

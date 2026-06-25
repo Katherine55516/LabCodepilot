@@ -30,10 +30,14 @@ export async function GET(req: Request): Promise<Response> {
         try {
           const raw = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf-8')) as Record<string, unknown>;
           const counts = (raw.counts ?? {}) as Record<string, number>;
+          const fc = (raw.funcCounts ?? {}) as Record<string, number>;
           // The 报告 step also writes a markdown report doc next to the run.json
           // ({task}-{env}.md) — include it so the 报告 view can show the full doc.
           let markdown = '';
           try { markdown = fs.readFileSync(path.join(dir, f.replace(/\.run\.json$/, '.md')), 'utf-8'); } catch { /* no .md */ }
+          // 缺陷报告（第三交付物，按需生成）：{task}-{env}-缺陷报告.md
+          let defectMarkdown = '';
+          try { defectMarkdown = fs.readFileSync(path.join(dir, f.replace(/\.run\.json$/, '-缺陷报告.md')), 'utf-8'); } catch { /* none */ }
           reports.push({
             task: taskDir.name,
             env: typeof raw.env === 'string' ? raw.env : '',
@@ -48,8 +52,25 @@ export async function GET(req: Request): Promise<Response> {
               partial: counts.partial ?? 0,
               blocked: counts.blocked ?? 0,
             },
+            // 双口径（oracle 双轴）：功能验证四态 + 通过率字符串。legacy run.json 无此
+            // 字段时回退 counts/passStr（单口径），保持旧报告可读、不虚报功能验证率。
+            funcCounts: {
+              total: fc.total ?? counts.total ?? 0,
+              pass: fc.pass ?? counts.pass ?? 0,
+              fail: fc.fail ?? counts.fail ?? 0,
+              partial: fc.partial ?? counts.partial ?? 0,
+              blocked: fc.blocked ?? counts.blocked ?? 0,
+            },
+            funcPassStr:
+              typeof raw.funcPassStr === 'string'
+                ? raw.funcPassStr
+                : typeof raw.passStr === 'string'
+                  ? raw.passStr
+                  : '',
+            regressionTotal: typeof raw.regressionTotal === 'number' ? raw.regressionTotal : 0,
             tests: Array.isArray(raw.tests) ? raw.tests : [],
             markdown,
+            defectMarkdown,
           });
         } catch {
           /* skip unreadable / malformed run.json */

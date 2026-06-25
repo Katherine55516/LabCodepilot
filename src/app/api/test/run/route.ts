@@ -9,8 +9,10 @@ import type { MCPServerConfig } from '@/types';
 import { predictNativeRuntime } from '@/lib/runtime';
 import { buildStep, buildPlaywrightMcp, artifactPaths, TEST_STEPS, type TestStep } from '@/lib/test/prompts';
 import { reduceFromText } from '@/lib/test/reduce';
+import { snapshotRunJson } from '@/lib/test/history';
 import { sweepStrayEvidence, normalizeEvidenceExt } from '@/lib/test/evidence';
 import { resolveProjectEnvWithDb } from '@/lib/test/env-resolve';
+import { isUnsafeSegment } from '@/lib/test/path-safety';
 
 // Reference the import so it isn't tree-shaken away (keeps the registration side-effect).
 void predictNativeRuntime;
@@ -49,15 +51,40 @@ function wrapExecutionStream(
           } catch {
             // best-effort cleanup
           }
+          // Join cases.json's oracle 双轴 (verification field) so the reduction can
+          // compute the dual-rate pass (功能验证 vs 回归基线). best-effort: missing /
+          // unparseable cases → undefined map → reduce falls back to single-rate.
+          let verificationById: Record<string, string> | undefined;
+          try {
+            const casesAbs = path.join(opts.projectPath, artifactPaths(opts.taskName).cases);
+            const parsed = JSON.parse(await fs.promises.readFile(casesAbs, 'utf-8'));
+            if (Array.isArray((parsed as { cases?: unknown })?.cases)) {
+              const map: Record<string, string> = {};
+              for (const c of (parsed as { cases: Array<{ id?: unknown; verification?: unknown }> }).cases) {
+                if (c && typeof c.id === 'string' && typeof c.verification === 'string') {
+                  map[c.id] = c.verification;
+                }
+              }
+              if (Object.keys(map).length) verificationById = map;
+            }
+          } catch {
+            // no cases / parse fail → reduce falls back to single-rate
+          }
           const reduced = reduceFromText(textAcc, {
             module: opts.taskName,
             env: opts.env,
             time: new Date().toISOString(),
+            verificationById,
           });
+          const runContent = JSON.stringify(reduced, null, 2);
           try {
             const runAbs = path.join(opts.projectPath, paths.runJson);
-            await fs.promises.mkdir(path.dirname(runAbs), { recursive: true });
-            await fs.promises.writeFile(runAbs, JSON.stringify(reduced, null, 2), 'utf-8');
+            const reportTaskDir = path.dirname(runAbs);
+            await fs.promises.mkdir(reportTaskDir, { recursive: true });
+            await fs.promises.writeFile(runAbs, runContent, 'utf-8');
+            // 历史快照（报告多版本对比的数据基础）：除覆盖式 latest 外，再存一份带
+            // 时间戳的副本到 .history/（SHA-1 去重，与上一份相同则跳过）。best-effort。
+            snapshotRunJson({ reportTaskDir, taskName: opts.taskName, env: opts.env, content: runContent });
           } catch {
             // best-effort: still emit the reduced result even if the write fails
           }
@@ -133,6 +160,14 @@ export async function POST(req: Request): Promise<Response> {
 
     if (!projectPath || typeof projectPath !== 'string') {
       return new Response(JSON.stringify({ error: 'projectPath is required' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    // taskName composes the AI_LabTest/ artifact paths (artifactPaths) — reject a
+    // traversal value so a run can't write/read outside the project.
+    if (isUnsafeSegment(taskName)) {
+      return new Response(JSON.stringify({ error: 'invalid taskName' }), {
         status: 400,
         headers: { 'Content-Type': 'application/json' },
       });

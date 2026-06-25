@@ -47,6 +47,12 @@ export interface RunJson {
   status: "done" | "failed" | "blocked";
   counts: RunCounts;
   passStr: string;
+  // Dual-rate (oracle 双轴): 功能验证用例的四态计数 + 通过率字符串。回归基线用例（oracle =
+  // 现状锁定）只锁现状、不计入功能验证通过率。无 cases 映射时 funcCounts 退化为全部用例
+  // (== counts)、funcPassStr == passStr，向后兼容旧 run.json 消费方。
+  funcCounts: RunCounts;
+  funcPassStr: string; // 功能验证 pass/total；全为回归基线 → "N/A"（不得报「100% 通过」）
+  regressionTotal: number; // 回归基线用例数
   circuitBroken: boolean;
   tests: ReducedTest[];
 }
@@ -87,7 +93,7 @@ export function harvestResults(text: string): RawResult[] {
  */
 export function reduceResults(
   raw: RawResult[],
-  opts: { module: string; env: string; time: string },
+  opts: { module: string; env: string; time: string; verificationById?: Record<string, string> },
 ): RunJson {
   const tests: ReducedTest[] = raw.map((r) => {
     let status: FourStateStatus = STATE_ALIASES[String(r.status ?? "").toLowerCase()] ?? "fail";
@@ -112,6 +118,27 @@ export function reduceResults(
   const fails401 = fails.filter((t) => /\b401\b/.test(`${t.error} ${t.actual}`));
   const circuitBroken = fails.length > 0 && fails401.length / fails.length > 0.5;
 
+  // Dual-rate (oracle 双轴): split tests into 功能验证 vs 回归基线 by the cases.json
+  // `verification` field (joined by id via opts.verificationById). 回归基线 cases only
+  // lock the status quo (oracle = 现状锁定) — their pass must NOT inflate the functional
+  // pass rate, so they're excluded from funcCounts. A test whose id is absent from the
+  // map (no cases join, or legacy cases without the field) defaults to 功能验证 — so with
+  // no map at all this degrades gracefully to single-rate (funcCounts === counts).
+  const vById = opts.verificationById ?? {};
+  const isRegression = (id: string) => /回归基线|regression/i.test(vById[id] ?? "");
+  const funcCounts: RunCounts = { total: 0, pass: 0, fail: 0, partial: 0, blocked: 0 };
+  let regressionTotal = 0;
+  for (const t of tests) {
+    if (isRegression(t.id)) {
+      regressionTotal++;
+    } else {
+      funcCounts.total++;
+      funcCounts[t.status]++;
+    }
+  }
+  // 全为回归基线 → 功能验证通过率记 N/A（仅锁现状，不得报「100% 通过」）。
+  const funcPassStr = funcCounts.total > 0 ? `${funcCounts.pass}/${funcCounts.total}` : "N/A";
+
   // Overall status: any real fail ⇒ failed; else all-blocked (nothing ran) ⇒ blocked; else done.
   const status: RunJson["status"] =
     counts.fail > 0
@@ -127,6 +154,9 @@ export function reduceResults(
     status,
     counts,
     passStr: `${counts.pass}/${counts.total}`,
+    funcCounts,
+    funcPassStr,
+    regressionTotal,
     circuitBroken,
     tests,
   };
@@ -135,7 +165,7 @@ export function reduceResults(
 /** Convenience: harvest @@RESULT from raw stream text, then reduce. */
 export function reduceFromText(
   text: string,
-  opts: { module: string; env: string; time: string },
+  opts: { module: string; env: string; time: string; verificationById?: Record<string, string> },
 ): RunJson {
   return reduceResults(harvestResults(text), opts);
 }
