@@ -15,10 +15,6 @@ import {
 } from '@/lib/context-breakdown';
 import { computeAllocations } from '@/lib/context-dot-allocations';
 
-function dotVar(kind: ContextBreakdownKind): string {
-  return `var(--context-dot-${kind.replace(/_/g, '-')})`;
-}
-
 interface ContextDotMatrixProps {
   breakdown: ContextUsageBreakdown;
   /** Total cells. Default 100. */
@@ -91,11 +87,13 @@ export function ContextDotMatrix({
             />
           );
         }
+        // Simplified bar: every "used" cell renders the same light blue —
+        // no per-category coloring (see --context-dot-used).
         return (
           <span
             key={cell.key}
             className="aspect-square rounded-[2px]"
-            style={{ backgroundColor: dotVar(cell.kind) }}
+            style={{ backgroundColor: 'var(--context-dot-used)' }}
           />
         );
       })}

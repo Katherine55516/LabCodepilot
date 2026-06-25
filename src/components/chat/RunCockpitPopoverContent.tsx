@@ -2,11 +2,14 @@
 
 // ============================================================================
 // RunCockpit popover body (lazy-loaded — mounted only when the user opens the
-// trigger). Composes: header (% + used/total) → dot matrix → detail list →
-// divider → "This run" (model / default / permission).
+// trigger). Composes: header (% + used/total) → dot matrix → divider →
+// "This run" (model / default / permission).
+//
+// The per-category detail list (conversation / cache / …) was intentionally
+// removed — the bar is a single-color used/total indicator now.
 //
 // Three render branches (spec §10):
-//   A. hasFullCtx (hasData && window>0)  → % + matrix + list
+//   A. hasFullCtx (hasData && window>0)  → % + matrix
 //   B. capacity unknown (hasData, no win) → "Capacity unknown" + used + matrix
 //   C. no data                            → just "This run"
 // ============================================================================
@@ -19,7 +22,6 @@ import {
 } from '@/lib/context-breakdown';
 import type { ContextUsageData } from '@/hooks/useContextUsage';
 import { ContextDotMatrix } from './context-breakdown/ContextDotMatrix';
-import { ContextBreakdownList } from './context-breakdown/ContextBreakdownList';
 
 interface RunCockpitPopoverContentProps {
   providerId?: string;
@@ -68,7 +70,6 @@ export function RunCockpitPopoverContent({
             <p className="font-mono text-muted-foreground">{headerTokensText}</p>
           </div>
           <ContextDotMatrix breakdown={usage.breakdown} />
-          <ContextBreakdownList breakdown={usage.breakdown} />
         </div>
       )}
 

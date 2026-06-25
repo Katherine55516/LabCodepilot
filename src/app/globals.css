@@ -136,6 +136,9 @@
   --context-dot-conversation: oklch(0.55 0.07 70);
   --context-dot-pending-next-turn: oklch(0.7 0.02 0);
   --context-dot-cache-or-previous: oklch(0.78 0.05 220);
+  /* Single fill color for the simplified usage bar — all "used" cells render
+     this light blue regardless of category (no per-kind coloring). */
+  --context-dot-used: oklch(0.78 0.05 220);
 }
 
 .dark {
