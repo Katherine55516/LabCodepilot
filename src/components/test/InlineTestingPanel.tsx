@@ -487,6 +487,14 @@ export function InlineTestingPanel() {
           } catch {}
         }
         if (cancelled) return;
+        // 僵尸 running 规整：重启后没有 in-flight 执行，持久化的 "running" 是上次关闭应用时
+        // 被中断的瞬时态 → 恢复成 "error"（中断未完成），避免任务永远卡在「运行中」、且因无
+        // AbortController 而停不掉（实际早已无进展）。用 error 而非 idle 是为了**不触发 auto-chain
+        // effect 自动重跑**（它只跑 idle 步）——重启后应由用户主动点「运行」重跑，不擅自执行。
+        for (const st of Object.values(nextStates)) {
+          const ss = st?.stepStatus;
+          if (ss) for (const k of Object.keys(ss) as Array<keyof typeof ss>) if (ss[k] === "running") ss[k] = "error";
+        }
         setProjects(nextProjects);
         setTaskStates(nextStates);
       } catch {
@@ -835,7 +843,19 @@ export function InlineTestingPanel() {
   // runStep's catch/finally reset the step to idle, clear run-all, and free busy,
   // so the 运行 button can re-run this node. No-op if nothing is running.
   const stopStep = () => {
-    abortRef.current?.abort();
+    // 正常运行：abort in-flight 请求，runStep 的 catch/finally 会把该步复位为 idle。
+    if (abortRef.current) { abortRef.current.abort(); return; }
+    // 僵尸 running（无 in-flight：如关闭应用后重启恢复的 running，已无对应请求，abort 无效）
+    // → 主动把运行中的步复位为 idle 并清 busy，让停止按钮对这种状态也生效、可重新运行。
+    if (activeTask) {
+      patchTask(activeTask.id, (s) => {
+        const ss = { ...s.stepStatus };
+        let changed = false;
+        for (const k of Object.keys(ss) as Array<keyof typeof ss>) if (ss[k] === "running") { ss[k] = "idle"; changed = true; }
+        return changed ? { stepStatus: ss } : {};
+      });
+    }
+    setBusyTaskId(null);
   };
 
   // 删除项目/任务:删前检查是否有正在执行的任务(busyTaskId),有则在确认弹窗里做二次强提醒。
