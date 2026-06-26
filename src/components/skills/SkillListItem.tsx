@@ -18,6 +18,10 @@ export interface SkillItem {
   source: "global" | "project" | "plugin" | "installed";
   installedSource?: "agents" | "claude";
   filePath: string;
+  /** Working directory of the owning project (project-scoped skills only). */
+  projectCwd?: string;
+  /** Display name of the owning project (project-scoped skills only). */
+  projectName?: string;
 }
 
 interface SkillListItemProps {
@@ -26,9 +30,8 @@ interface SkillListItemProps {
   onSelect: () => void;
   onDelete: (skill: SkillItem) => void;
   /**
-   * Basename of the current project's working directory. Rendered as a badge
-   * on project-scoped skills so the user can tell which project a skill
-   * belongs to. Global/installed/plugin skills carry no badge.
+   * Fallback project display name. Prefer `skill.projectName`; this prop is a
+   * fallback for callers that don't tag skills per-project.
    */
   projectName?: string;
 }
@@ -75,12 +78,12 @@ export function SkillListItem({
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-1.5">
           <span className="text-sm font-medium truncate">/{skill.name}</span>
-          {skill.source === "project" && projectName && (
+          {skill.source === "project" && (skill.projectName || projectName) && (
             <span
               className="shrink-0 rounded border border-primary/30 bg-primary/5 px-1 py-0 text-[9px] font-medium leading-tight text-primary/80"
-              title={`Project: ${projectName}`}
+              title={`Project: ${skill.projectName || projectName}`}
             >
-              {projectName}
+              {skill.projectName || projectName}
             </span>
           )}
         </div>

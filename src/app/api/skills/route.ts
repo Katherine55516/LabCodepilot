@@ -14,6 +14,13 @@ interface SkillFile {
   installedSource?: "agents" | "claude";
   filePath: string;
   /**
+   * For project-scoped skills, the working directory of the project they
+   * belong to. Set when the request enumerates multiple projects via the
+   * `cwds` param (Skills settings aggregate view) so the client can group by
+   * project and target the right cwd for save/delete.
+   */
+  projectCwd?: string;
+  /**
    * True when this command comes from a plugin whose plugin.json has
    * `builtIn: true` (i.e. AI Native Lab-bundled plugins like GSD). Bundled
    * plugins are always considered "loaded" — the SDK whitelist does not
@@ -374,8 +381,25 @@ export async function GET(request: NextRequest) {
       // non-fatal — listing still proceeds
     }
 
-    // Accept optional cwd query param for project-level skills
+    // Accept optional cwd query param for project-level skills.
+    // `cwds` (JSON array) enables the Skills-settings aggregate view: scan
+    // project-level skills for EVERY project working directory at once, tagging
+    // each with its projectCwd. Falls back to single `cwd` (or process.cwd()).
     const cwd = request.nextUrl.searchParams.get("cwd") || undefined;
+    const cwdsParam = request.nextUrl.searchParams.get("cwds");
+    let projectCwdList: (string | undefined)[];
+    if (cwdsParam) {
+      try {
+        const parsed = JSON.parse(cwdsParam);
+        projectCwdList = Array.isArray(parsed)
+          ? parsed.filter((x): x is string => typeof x === "string" && x.length > 0)
+          : [];
+      } catch {
+        projectCwdList = [];
+      }
+    } else {
+      projectCwdList = [cwd];
+    }
 
     // Resolve provider ID from session for correct capability cache lookup.
     // Falls back to 'env' when no session is specified.
@@ -391,26 +415,34 @@ export async function GET(request: NextRequest) {
       }
     }
     const globalDir = getGlobalCommandsDir();
-    const projectDir = getProjectCommandsDir(cwd);
-
     console.log(`[skills] Scanning global: ${globalDir} (exists: ${fs.existsSync(globalDir)})`);
-    console.log(`[skills] Scanning project: ${projectDir} (exists: ${fs.existsSync(projectDir)})`);
     console.log(`[skills] HOME=${process.env.HOME}, homedir=${os.homedir()}`);
 
     const globalSkills = scanDirectory(globalDir, "global");
-    const projectSkills = scanDirectory(projectDir, "project");
 
-    // Scan project-level skills (.claude/skills/*/SKILL.md)
-    const projectSkillsDir = getProjectSkillsDir(cwd);
-    console.log(`[skills] Scanning project skills: ${projectSkillsDir} (exists: ${fs.existsSync(projectSkillsDir)})`);
-    const projectLevelSkills = scanProjectSkills(projectSkillsDir);
-    console.log(`[skills] Found ${projectLevelSkills.length} project-level skills`);
+    // Scan project-level skills for each requested project working directory.
+    // Each item is tagged with projectCwd so the aggregate view can group by
+    // project and so save/delete can target the right directory.
+    const projectScanned: SkillFile[] = [];
+    for (const projectCwd of projectCwdList) {
+      const projectDir = getProjectCommandsDir(projectCwd);
+      const projectCmds = scanDirectory(projectDir, "project");
 
-    // Deduplicate: project commands take priority over project skills with the same name
-    const projectCommandNames = new Set(projectSkills.map((s) => s.name));
-    const dedupedProjectSkills = projectLevelSkills.filter(
-      (s) => !projectCommandNames.has(s.name)
-    );
+      const projectSkillsDir = getProjectSkillsDir(projectCwd);
+      const projectLevelSkills = scanProjectSkills(projectSkillsDir);
+
+      // Deduplicate within a project: project commands take priority over
+      // project skills with the same name.
+      const projectCommandNames = new Set(projectCmds.map((s) => s.name));
+      const dedupedProjectSkills = projectLevelSkills.filter(
+        (s) => !projectCommandNames.has(s.name)
+      );
+
+      for (const s of [...projectCmds, ...dedupedProjectSkills]) {
+        projectScanned.push(projectCwd ? { ...s, projectCwd } : s);
+      }
+    }
+    console.log(`[skills] Scanned ${projectScanned.length} project-level items across ${projectCwdList.length} project dir(s)`);
 
     const agentsSkillsDir = getInstalledSkillsDir();
     const claudeSkillsDir = getClaudeSkillsDir();
@@ -477,9 +509,9 @@ export async function GET(request: NextRequest) {
     });
 
     const all: Array<SkillFile & { loaded?: boolean }> = [
-      ...globalSkills, ...projectSkills, ...dedupedProjectSkills, ...installedSkills, ...annotatedPluginSkills,
+      ...globalSkills, ...projectScanned, ...installedSkills, ...annotatedPluginSkills,
     ];
-    console.log(`[skills] Found: global=${globalSkills.length}, project=${projectSkills.length}, projectSkills=${dedupedProjectSkills.length}, installed=${installedSkills.length}, plugin=${pluginSkills.length}`);
+    console.log(`[skills] Found: global=${globalSkills.length}, project=${projectScanned.length}, installed=${installedSkills.length}, plugin=${pluginSkills.length}`);
 
     // Merge SDK slash commands if available
     try {

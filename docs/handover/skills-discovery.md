@@ -52,8 +52,8 @@
 
 ## 数据流
 
-创建：CreateSkillDialog → `POST /api/skills {name,scope,cwd}` → 写 `.claude/commands/<name>.md`。
-列表：SkillsManager → `GET /api/skills?cwd=` → 扫描全部来源（含 `scanProjectSkills` 读 `.claude/skills`）。
+创建：CreateSkillDialog（项目作用域时从下拉选目标项目）→ `POST /api/skills {name,scope,cwd}` → 写 `.claude/commands/<name>.md`。
+设置列表（跨项目聚合）：SkillsManager → `GET /api/chat/sessions` → `groupSessionsByProject` 得全部项目 → `GET /api/skills?cwds=[...]`（每项目级技能带 `projectCwd`）→ 按项目分区展示；保存/删除按 `skill.projectCwd` 定位。聊天斜杠面板仍用单 `cwd`（当前对话项目）。
 调用(斜杠)：badge → handleSubmit → `GET /api/skills/<name>?cwd=`（取正文）→ 展开 → onSend。
 调用(自主)：模型 → `codepilot_skill` MCP → discoverSkills/getSkill → 返回正文。
 

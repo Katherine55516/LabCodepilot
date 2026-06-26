@@ -339,6 +339,8 @@ const zhHK: Record<TranslationKey, string> = {
   'skills.scope': '作用域',
   'skills.global': '全局',
   'skills.project': '項目',
+  'skills.selectProject': '選擇項目',
+  'skills.selectProjectRequired': '請選擇一個項目',
   'skills.template': '模板',
   'skills.blank': '空白',
   'skills.commitHelper': '提交助手',

@@ -333,6 +333,8 @@ const en = {
   'skills.scope': 'Scope',
   'skills.global': 'Global',
   'skills.project': 'Project',
+  'skills.selectProject': 'Select a project',
+  'skills.selectProjectRequired': 'Please select a project',
   'skills.template': 'Template',
   'skills.blank': 'Blank',
   'skills.commitHelper': 'Commit Helper',

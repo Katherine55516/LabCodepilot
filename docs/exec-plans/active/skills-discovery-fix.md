@@ -22,14 +22,22 @@
 | 根治 | SDK 运行时注册 codepilot-skill in-process MCP | ✅ 已完成 | 文件系统直扫项目技能，绕开 settingSources，所有服务商一致 |
 | Phase 3 | 无项目时禁用 project 作用域 | ✅ 已完成 | CreateSkillDialog 默认/禁用逻辑 |
 | 测试 | 单元 + smoke + E2E + CDP | ✅ 已完成 | unit 1542、smoke 6、e2e 28(0 fail)、CDP 验证 PROJECT 分区渲染 |
+| Phase 5 | Skills 设置跨项目聚合 + 新建选项目 | ✅ 已完成 | 设置-Skills 不再绑定当前对话项目；按项目分区展示全部项目技能 + 新建时下拉选项目；CDP 验证 fac/satisFac/demo 分区 + 写入正确目录 |
 
 ## 决策日志
 
 - 2026-06-26: 放弃「shadow 镜像项目命令」方案。对抗核查确认 shadow 仅在 `~/.claude` 含 cc-switch 鉴权 env 时才构建，多数托管用户走 passthrough → 镜像不执行；要补全须「每轮都建 shadow」，爆炸半径覆盖 MCP/credentials/transcripts + 把数据丢失风险的清理逻辑加到每轮托管对话。
 - 2026-06-26: 斜杠命令（应用内创建）用 **Option C 客户端展开**；自主发现（手动拖入 Agent Skill）用 **codepilot-skill MCP**。二者互补：前者保留 `/命令` 交互，后者让 agent 自主发现执行，均绕开 settingSources，对所有服务商生效。
 - 2026-06-26: MCP 仅暴露 **项目级**（`<cwd>/.claude` 下）技能 —— 用户级 `~/.claude/skills` 已由 SDK 经 `user` 层 + shadow 软链原生加载，避免与原生 Skill 工具重复。
+- 2026-06-26 (Phase 5): 设置-Skills 旧逻辑绑定 `usePanel().workingDirectory`（当前对话所属项目），导致切到 B 项目对话就看不到 A 项目技能、且新建无法选项目。改为：拉取所有 session 经 `groupSessionsByProject` 得到全部项目，`GET /api/skills?cwds=[...]` 一次性返回各项目级技能（每项带 `projectCwd`），按项目分区展示；新建对话框加项目下拉，保存/删除按各技能自身 `projectCwd` 定位。复用现有 /api/skills（加 `cwds` 批量参数），无新端点。
 
 ## 详细设计
+
+### Phase 5（Skills 设置跨项目聚合）
+- [route.ts](../../../src/app/api/skills/route.ts)：GET 新增 `cwds`（JSON 数组）批量参数，逐项目扫描 commands+skills 并打 `projectCwd` 标签；`cwds=[]` 时不扫任何项目（避免误扫服务器 process.cwd()）。
+- [SkillsManager.tsx](../../../src/components/skills/SkillsManager.tsx)：`fetchSkills` 先 `GET /api/chat/sessions` → `groupSessionsByProject` 得项目列表 → `GET /api/skills?cwds=` 聚合；按项目分区渲染；`buildSkillUrl`/`handleSave`/`handleDelete` 用 `skill.projectCwd` 定位；不再依赖 `usePanel().workingDirectory`（仅用于新建默认项目）。
+- [CreateSkillDialog.tsx](../../../src/components/skills/CreateSkillDialog.tsx)：`projects` 列表 + 项目 `<Select>`（`skills.selectProject` i18n），项目作用域必选其一；`onCreate(name, scope, content, projectCwd?)`。
+- [SkillListItem.tsx](../../../src/components/skills/SkillListItem.tsx)：`SkillItem` 加 `projectCwd`/`projectName`，徽章用每项自身 `projectName`。
 
 ### Phase 1（前端）
 - [SkillsManager.tsx](../../../src/components/skills/SkillsManager.tsx)：`fetchSkills` 不再过滤 project；新增 `projectSkills` 分组 + PROJECT 分区；`projectName = basename(workingDirectory)`。
