@@ -7,7 +7,6 @@ import { MessageList } from '@/components/chat/MessageList';
 import { MessageInput } from '@/components/chat/MessageInput';
 import { ChatComposerActionBar } from '@/components/chat/ChatComposerActionBar';
 import { ModeIndicator } from '@/components/chat/ModeIndicator';
-import { InlineTestingPanel } from '@/components/test/InlineTestingPanel';
 import { ChatPermissionSelector } from '@/components/chat/ChatPermissionSelector';
 import { ImageGenToggle } from '@/components/chat/ImageGenToggle';
 import { PermissionPrompt } from '@/components/chat/PermissionPrompt';
@@ -77,7 +76,7 @@ export default function NewChatPage() {
     const params = new URLSearchParams(window.location.search);
     return params.get('prefill') || '';
   }, []);
-  const { setPendingApprovalSessionId, testPanelOpen } = usePanel();
+  const { setPendingApprovalSessionId } = usePanel();
   const { t } = useTranslation();
   const { isElectron, openNativePicker } = useNativeFolderPicker();
   const [messages, setMessages] = useState<Message[]>([]);
@@ -893,7 +892,6 @@ export default function NewChatPage() {
 
   return (
     <div className="relative flex h-full min-h-0 flex-col">
-      {testPanelOpen && <InlineTestingPanel />}
       {messages.length === 0 && !isStreaming && (!workingDir.trim() || !hasProvider) ? (
         <ChatEmptyState
           hasDirectory={!!workingDir.trim()}
