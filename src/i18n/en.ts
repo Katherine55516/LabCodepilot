@@ -91,6 +91,7 @@ const en = {
   'test.state.partial': 'Partial',
   'test.state.blocked': 'Blocked',
   'test.flow.running': 'Running',
+  'test.flow.preparing': 'Preparing…',
   'test.flow.runTask': 'Run task',
   'test.flow.runAllHint': 'Run all steps end-to-end (gates auto-approve)',
   'test.runChoice.title': 'Run task',

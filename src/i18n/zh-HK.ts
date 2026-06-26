@@ -97,6 +97,7 @@ const zhHK: Record<TranslationKey, string> = {
   'test.state.partial': '部分',
   'test.state.blocked': '阻塞',
   'test.flow.running': '執行中',
+  'test.flow.preparing': '準備中…',
   'test.flow.runTask': '執行任務',
   'test.flow.runAllHint': '一鍵跑完全部步驟（門控自動批准）',
   'test.runChoice.title': '執行任務',

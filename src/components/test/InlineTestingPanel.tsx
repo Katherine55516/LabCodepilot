@@ -13,6 +13,7 @@ import { FolderPicker } from "@/components/chat/FolderPicker";
 import { ModelSelectorDropdown } from "@/components/chat/ModelSelectorDropdown";
 import { useProviderModels } from "@/hooks/useProviderModels";
 import { diffRuns, funcPassRateStr } from "@/lib/test/compare";
+import { parseExecProgress } from "@/lib/test/exec-progress";
 import type { RunHistoryEntry } from "@/lib/test/history";
 
 /**
@@ -321,16 +322,8 @@ export function InlineTestingPanel() {
   const aState: TaskState = taskStates[aId] ?? DEFAULT_TASK_STATE;
   const { stepStatus, convo, fourState, currentCase, caseResults, circuitBroken } = aState;
   const runningStep: TestStep | null = STEPS.find((s) => stepStatus[s.step] === "running")?.step ?? null;
-  // Per-stage progress % while a step runs (NOT overall task progress). Execution =
-  // cases done/total (total parsed from the AI's "▶ 用例 N/总数" line, done = @@RESULT
-  // count). Non-execution steps have no granular progress → a simulated trickle (simPct)
-  // toward ~90% so the bar still shows a moving percentage.
-  const execTotal = Number((currentCase.match(/\/\s*(\d+)/) || [])[1]) || 0;
-  const execPct =
-    runningStep === "execution" && execTotal > 0
-      ? Math.min(100, Math.round((fourState.total / execTotal) * 100))
-      : null;
-  const barPct = !runningStep ? null : runningStep === "execution" ? execPct ?? 0 : simPct;
+  // 执行进度衍生值（execTotal / execIdx / execCaseTitle / execPct / barPct）下移到 casesPreview
+  // 声明之后 —— 「总数」要回落到 cases.json 用例数（首条进度行到达前也能显示总数）。见下方。
   const busy = busyTaskId !== null;
   // Patch a task's state BY ID (runStep captures its id, so switching tasks mid-run is safe).
   const patchTask = (id: string, patch: (s: TaskState) => Partial<TaskState>) =>
@@ -626,6 +619,17 @@ export function InlineTestingPanel() {
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [aId, current?.path, stepStatus.cases]);
+
+  // 执行进度衍生值（放在 casesPreview 之后：总数要回落到 cases.json 用例数）。
+  // 进度行「用例 N/总数：标题」→ {第几个, 总数, 标题}（解析逻辑抽成纯函数，已单测）。
+  const { idx: execIdx, total: execTotal, title: execCaseTitle } = parseExecProgress(currentCase, casesPreview.length);
+  // 进度条 %：已判完（=@@RESULT 计数 fourState.total）/ 总数；非执行步用模拟 simPct。
+  const execPct =
+    runningStep === "execution" && execTotal > 0
+      ? Math.min(100, Math.round((fourState.total / execTotal) * 100))
+      : null;
+  const barPct = !runningStep ? null : runningStep === "execution" ? execPct ?? 0 : simPct;
+
   // 用例编辑器:casesDraft 非 null = 编辑态(编辑副本);null = 只读态。保存时整份 PUT 回 cases.json。
   const [casesDraft, setCasesDraft] = useState<GeneratedCase[] | null>(null);
   const [casesSaving, setCasesSaving] = useState(false);
@@ -1237,7 +1241,18 @@ export function InlineTestingPanel() {
                 {focusStep === "execution" && (
                   <>
                     {fourStateChips}
-                    {currentCase && <div className="mt-2 text-[11px] text-muted-foreground">▶ {currentCase}</div>}
+                    {/* 执行进展：「N/总数 用例标题」—— N=当前跑到第几个，总数=用例总数（来自进度行或 cases 数）。
+                        运行中实时显示；首条进度行到达前显示「0/总数 准备中…」。 */}
+                    {runningStep === "execution" && (
+                      <div className="mt-2 flex items-center gap-2 text-xs">
+                        <span className="shrink-0 rounded bg-primary/10 px-1.5 py-0.5 font-medium tabular-nums text-primary">
+                          {execIdx || 0}/{execTotal || "?"}
+                        </span>
+                        <span className="min-w-0 flex-1 truncate text-foreground" title={execCaseTitle || undefined}>
+                          {execCaseTitle || t("test.flow.preparing")}
+                        </span>
+                      </div>
+                    )}
                   </>
                 )}
                 {/* 用例设计阶段:展示生成的测试用例(参考 ai-lab-test-framework 的用例字段)。 */}

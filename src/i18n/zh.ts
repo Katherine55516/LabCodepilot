@@ -88,6 +88,7 @@ const zh: Record<TranslationKey, string> = {
   'test.state.partial': '部分',
   'test.state.blocked': '阻塞',
   'test.flow.running': '运行中',
+  'test.flow.preparing': '准备中…',
   'test.flow.runTask': '运行任务',
   'test.flow.runAllHint': '一键跑完全部步骤（门控自动批准）',
   'test.runChoice.title': '运行任务',
