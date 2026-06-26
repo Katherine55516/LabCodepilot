@@ -1881,7 +1881,7 @@ function CompareView({ t, projectPath, taskName, env }: { t: T; projectPath: str
 // 产物预览的目标：md（测试报告/缺陷报告，预览/编辑切换）或 xlsx（执行矩阵只读表格）。
 type PreviewState =
   | { kind: "md"; titleKey: TranslationKey; rel: string; content: string; editable: boolean }
-  | { kind: "xlsx"; rel: string; file: string };
+  | { kind: "xlsx" };
 
 // 报告步「就地展示」面板（替换报告节点的占位符）。报告步 done 时拉 GET /api/test/reports
 // 取当前 task+env 的 ReportEntry，展示：概览条（复用 funcPassRateStr 口径）+ 产出资料列表
@@ -1904,7 +1904,7 @@ function ReportStepPanel({
   const [reloadTick, setReloadTick] = useState(0);
   const [defectBusy, setDefectBusy] = useState(false);
   const [handoffBusy, setHandoffBusy] = useState(false);
-  const [docOpen, setDocOpen] = useState(true);
+  const [docOpen, setDocOpen] = useState(false);
   const [preview, setPreview] = useState<PreviewState | null>(null);
 
   useEffect(() => {
@@ -1944,7 +1944,6 @@ function ReportStepPanel({
   // 产物相对路径（与 reports/route.ts、artifactPaths 命名一致）。
   const reportMdRel = `AI_LabTest/report/${taskName}/${taskName}-${env}.md`;
   const defectMdRel = `AI_LabTest/report/${taskName}/${taskName}-${env}-缺陷报告.md`;
-  const xlsxRel = entry?.xlsxFile ? `AI_LabTest/report/${taskName}/${entry.xlsxFile}` : "";
 
   // 生成缺陷报告（第三交付物）：调 /api/test/defect 跑完后 reload 拿到新写的 defectMarkdown。
   const defectGen = async () => {
@@ -2005,13 +2004,22 @@ function ReportStepPanel({
     </div>
   );
 
-  const editBtn = (titleKey: TranslationKey, rel: string, content: string) => (
-    <button
-      onClick={() => setPreview({ kind: "md", titleKey, rel, content, editable: false })}
-      className="flex shrink-0 items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[10px] text-foreground hover:bg-muted"
-    >
-      <NotePencil size={12} /> {t("test.report.openEdit")}
-    </button>
+  // md 产物两动作：预览（点开后才渲染 markdown）+ 点开修改（CodeMirror 编辑存回）。
+  const mdActions = (titleKey: TranslationKey, rel: string, content: string) => (
+    <div className="flex shrink-0 items-center gap-1">
+      <button
+        onClick={() => setPreview({ kind: "md", titleKey, rel, content, editable: false })}
+        className="flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[10px] text-foreground hover:bg-muted"
+      >
+        <Eye size={12} /> {t("test.report.tabPreview")}
+      </button>
+      <button
+        onClick={() => setPreview({ kind: "md", titleKey, rel, content, editable: true })}
+        className="flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[10px] text-foreground hover:bg-muted"
+      >
+        <NotePencil size={12} /> {t("test.report.openEdit")}
+      </button>
+    </div>
   );
 
   return (
@@ -2054,16 +2062,17 @@ function ReportStepPanel({
             t("test.step.report.name"),
             `${taskName}-${env}.md`,
             entry?.markdown
-              ? editBtn("test.step.report.name", reportMdRel, entry.markdown)
+              ? mdActions("test.step.report.name", reportMdRel, entry.markdown)
               : <span className="shrink-0 text-[10px] text-muted-foreground">{t("test.report.docEmpty")}</span>,
           )}
-          {entry?.xlsxFile && fileRow(
+          {/* Excel 执行矩阵：从 run.json 派生，始终可预览/导出（不依赖磁盘 .xlsx）。 */}
+          {fileRow(
             <FileArrowDown size={14} className="shrink-0 text-muted-foreground" />,
             t("test.report.fileXlsx"),
-            entry.xlsxFile,
+            `${taskName}-${env}-执行矩阵.xlsx`,
             <div className="flex shrink-0 items-center gap-1">
-              <button onClick={() => setPreview({ kind: "xlsx", rel: xlsxRel, file: entry.xlsxFile! })} className="rounded border border-border px-1.5 py-0.5 text-[10px] text-foreground hover:bg-muted">{t("test.report.tabPreview")}</button>
-              <a href={`/api/test/report-xlsx?projectPath=${encodeURIComponent(projectPath)}&taskName=${encodeURIComponent(taskName)}&file=${encodeURIComponent(entry.xlsxFile)}&download=1`} className="flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[10px] text-foreground hover:bg-muted"><DownloadSimple size={12} /> {t("test.report.exportFile")}</a>
+              <button onClick={() => setPreview({ kind: "xlsx" })} className="flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[10px] text-foreground hover:bg-muted"><Eye size={12} /> {t("test.report.tabPreview")}</button>
+              <a href={`/api/test/report-xlsx?projectPath=${encodeURIComponent(projectPath)}&taskName=${encodeURIComponent(taskName)}&env=${encodeURIComponent(env)}&download=1`} className="flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[10px] text-foreground hover:bg-muted"><DownloadSimple size={12} /> {t("test.report.exportFile")}</a>
             </div>,
           )}
           {fileRow(
@@ -2071,9 +2080,9 @@ function ReportStepPanel({
             t("test.defect.tab"),
             entry?.defectMarkdown ? `${taskName}-${env}-缺陷报告.md` : t("test.defect.empty"),
             entry?.defectMarkdown
-              ? editBtn("test.defect.tab", defectMdRel, entry.defectMarkdown)
+              ? mdActions("test.defect.tab", defectMdRel, entry.defectMarkdown)
               : (
-                <button onClick={defectGen} disabled={defectBusy || fail === 0} className="flex shrink-0 items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[10px] text-foreground hover:bg-muted disabled:opacity-50">
+                <button onClick={defectGen} disabled={defectBusy} className="flex shrink-0 items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[10px] text-foreground hover:bg-muted disabled:opacity-50">
                   {defectBusy ? <SpinnerGap size={12} className="animate-spin" /> : <WarningCircle size={12} />} {defectBusy ? t("test.defect.generating") : t("test.defect.gen")}
                 </button>
               ),
@@ -2132,7 +2141,7 @@ function PreviewModal({ t, preview, projectPath, taskName, env, onClose, onSaved
         {preview.kind === "md" ? (
           <MdPreview t={t} preview={preview} projectPath={projectPath} onClose={onClose} onSaved={onSaved} setEditable={setEditable} />
         ) : (
-          <XlsxPreview t={t} preview={preview} projectPath={projectPath} taskName={taskName} env={env} onClose={onClose} />
+          <XlsxPreview t={t} projectPath={projectPath} taskName={taskName} env={env} onClose={onClose} />
         )}
       </div>
     </div>
@@ -2205,9 +2214,8 @@ function MdPreview({ t, preview, projectPath, onClose, onSaved, setEditable }: {
 
 // xlsx 产物预览：调 /api/test/report-xlsx 解析为表格；证据单元格（.png/.webm 等）渲染成
 // 可点开的 chip → 截图灯箱 / 录像内联播放（经 /api/test/media，与 ReportView 同口径）。
-function XlsxPreview({ t, preview, projectPath, taskName, env, onClose }: {
+function XlsxPreview({ t, projectPath, taskName, env, onClose }: {
   t: T;
-  preview: Extract<PreviewState, { kind: "xlsx" }>;
   projectPath: string;
   taskName: string;
   env: string;
@@ -2219,12 +2227,12 @@ function XlsxPreview({ t, preview, projectPath, taskName, env, onClose }: {
 
   useEffect(() => {
     let cancelled = false;
-    fetch(`/api/test/report-xlsx?projectPath=${encodeURIComponent(projectPath)}&taskName=${encodeURIComponent(taskName)}&file=${encodeURIComponent(preview.file)}`)
+    fetch(`/api/test/report-xlsx?projectPath=${encodeURIComponent(projectPath)}&taskName=${encodeURIComponent(taskName)}&env=${encodeURIComponent(env)}`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error("fetch failed"))))
       .then((d) => { if (!cancelled) { if (d.error) setErr(true); else setData(d); } })
       .catch(() => { if (!cancelled) setErr(true); });
     return () => { cancelled = true; };
-  }, [projectPath, taskName, preview.file]);
+  }, [projectPath, taskName, env]);
 
   const mediaUrl = (file: string) => `/api/test/media?projectPath=${encodeURIComponent(projectPath)}&taskName=${encodeURIComponent(taskName)}&env=${encodeURIComponent(env)}&file=${encodeURIComponent(file)}`;
   const mediaRe = /\.(png|jpe?g|webp|gif|webm|mp4|mov)$/i;
@@ -2251,9 +2259,9 @@ function XlsxPreview({ t, preview, projectPath, taskName, env, onClose }: {
       <div className="flex items-center gap-2 border-b border-border px-3 py-2">
         <FileArrowDown size={14} className="shrink-0 text-muted-foreground" />
         <span className="shrink-0 text-[11px] font-medium text-foreground">{t("test.report.fileXlsx")}</span>
-        <span className="truncate font-mono text-[10px] text-muted-foreground">{preview.file}</span>
+        <span className="truncate font-mono text-[10px] text-muted-foreground">{`${taskName}-${env}-执行矩阵.xlsx`}</span>
         <span className="flex-1" />
-        <a href={`/api/test/report-xlsx?projectPath=${encodeURIComponent(projectPath)}&taskName=${encodeURIComponent(taskName)}&file=${encodeURIComponent(preview.file)}&download=1`} className="flex shrink-0 items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[10px] text-foreground hover:bg-muted"><DownloadSimple size={12} /> {t("test.report.exportFile")}</a>
+        <a href={`/api/test/report-xlsx?projectPath=${encodeURIComponent(projectPath)}&taskName=${encodeURIComponent(taskName)}&env=${encodeURIComponent(env)}&download=1`} className="flex shrink-0 items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[10px] text-foreground hover:bg-muted"><DownloadSimple size={12} /> {t("test.report.exportFile")}</a>
         <button onClick={onClose} className="shrink-0 text-muted-foreground hover:text-foreground" aria-label={t("test.report.close")}><X size={14} /></button>
       </div>
       <div className="min-h-0 flex-1 overflow-auto p-3">
