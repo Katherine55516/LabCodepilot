@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useTranslation } from "@/hooks/useTranslation";
-import { ListChecks, ChartBar, Gear, ArrowLeft, FolderPlus, Play, Stop, ArrowUp, SpinnerGap, Sparkle, Terminal, WarningCircle, Wrench, Trash, type Icon } from "@/components/ui/icon";
+import { ListChecks, ChartBar, Gear, ArrowLeft, FolderPlus, Play, Stop, ArrowUp, SpinnerGap, Sparkle, Terminal, WarningCircle, Wrench, Trash, Desktop, Lightning, Plug, CheckCircle, type Icon } from "@/components/ui/icon";
 import type { TranslationKey } from "@/i18n";
 import { useNativeFolderPicker } from "@/hooks/useNativeFolderPicker";
 import { FolderPicker } from "@/components/chat/FolderPicker";
@@ -30,7 +30,9 @@ import type { RunHistoryEntry } from "@/lib/test/history";
  */
 
 type View = "dash" | "flow" | "report";
-type ModalKind = "none" | "newTask" | "runChoice";
+type ModalKind = "none" | "newTask" | "runChoice" | "execConfirm";
+// 执行方式:visible=独立窗口可见运行(有头),headless=后台无头运行(默认,更快)。
+type ExecMode = "headless" | "visible";
 type T = (key: TranslationKey, params?: Record<string, string | number>) => string;
 // Backend test-step keys (match /api/test/run + src/lib/test/prompts.ts).
 type TestStep = "requirement" | "cases" | "execution" | "report";
@@ -290,6 +292,20 @@ export function InlineTestingPanel() {
   const handleEnvChange = (next: string) => {
     setEnv(next);
     try { localStorage.setItem("codepilot:test-env", next); } catch {}
+  };
+
+  // 执行方式(独立窗口可见 / 后台无头)。默认无头 —— 与原行为一致、更快。执行前确认弹窗
+  // (ExecConfirmModal)记下用户选择并持久化;非弹窗触发(运行任务 / auto-chain 接力执行)
+  // 复用上次选择。用 ref 让 runStep / auto-chain effect 读到最新值,避免闭包取到旧值。
+  const [execMode, setExecMode] = useState<ExecMode>(() => {
+    try { return localStorage.getItem("codepilot:test-exec-mode") === "visible" ? "visible" : "headless"; } catch { return "headless"; }
+  });
+  const execModeRef = useRef(execMode);
+  useEffect(() => { execModeRef.current = execMode; }, [execMode]);
+  const persistExecMode = (next: ExecMode) => {
+    setExecMode(next);
+    execModeRef.current = next;
+    try { localStorage.setItem("codepilot:test-exec-mode", next); } catch {}
   };
 
   const current = selected !== null ? projects[selected] ?? null : null;
@@ -641,10 +657,15 @@ export function InlineTestingPanel() {
 
   // Run one step: stream /api/test/run into the 测试对话 (bubbles) + tally four-state
   // (execution @@RESULT frames). One step at a time; status drives pipeline + gating.
-  const runStep = async (step: TestStep) => {
+  const runStep = async (step: TestStep, opts?: { headed?: boolean; baseUrl?: string }) => {
     const proj = selected !== null ? projects[selected] : null;
     const task = proj && selectedTask !== null ? proj.tasks[selectedTask] : null;
     if (!proj?.path || !task || busyTaskId) return;
+    // 执行方式仅对「测试执行」步有意义(只有它注入 Playwright)。弹窗触发会显式带 opts.headed;
+    // 非弹窗触发(运行任务 / auto-chain)回落到上次选择(execModeRef)。其它步恒为无头无关。
+    const headed = step === "execution" ? (opts?.headed ?? execModeRef.current === "visible") : false;
+    // 被测链接覆盖:仅执行步、且弹窗显式给了地址时透传,让用户在弹窗里确认/改写的地址生效。
+    const baseUrlOverride = step === "execution" && opts?.baseUrl?.trim() ? opts.baseUrl.trim() : undefined;
     const id = task.id; // capture — all updates patch THIS task even if the user switches away
     // 问题②·停止: a per-run AbortController. stopStep() aborts it → the fetch rejects
     // with AbortError, which the catch/finally below treat as a clean stop (not error).
@@ -732,8 +753,32 @@ export function InlineTestingPanel() {
             undefined,
           model: model || undefined,
           providerId: providerId || undefined,
+          // 执行方式 + 被测链接覆盖(见上)。headed 仅执行步透传;baseUrl 缺省时后端回落 environments.json。
+          headed: step === "execution" ? headed : undefined,
+          baseUrl: baseUrlOverride,
         }),
       });
+      // 非 2xx(如 /api/test/run 抛错走 500 + JSON {error})：之前直接进流式解析，500 的
+      // JSON body 没有 SSE 分帧 → 一帧都解析不出 → 既不报错也不计入，最终 finally 把步当成
+      // "done"(已完成) —— 用户看到「点了测试并执行却什么都没发生」。这里显式把非 2xx 的
+      // 错误正文取出、报成错误气泡并标记失败，让失败可见(而不是静默吞掉)。
+      if (!res.ok) {
+        let msg = `${t("test.flow.run")} 失败（HTTP ${res.status}）`;
+        try {
+          const txt = await res.text();
+          try {
+            const j = JSON.parse(txt);
+            msg = (j.userMessage as string) || (j.error as string) || (j.rawMessage as string) || msg;
+          } catch {
+            if (txt.trim()) msg = txt.trim().slice(0, 800);
+          }
+        } catch {
+          /* body unreadable — keep the HTTP-status message */
+        }
+        push({ role: "error", text: msg });
+        sawError = true;
+        return;
+      }
       if (!res.body) {
         push({ role: "error", text: "无响应流" });
         sawError = true;
@@ -803,6 +848,11 @@ export function InlineTestingPanel() {
                 return patch;
               });
             } catch {}
+          } else if (evt.type === "exec_notice") {
+            // 后端系统提示(非 AI 输出 / 非错误):目前仅「有头自动回落无头」。映射成本地化系统气泡。
+            const code = evt.data || "";
+            const msg = code === "headed_downgraded_no_chrome" ? t("test.execConfirm.downgradedNoChrome") : "";
+            if (msg) push({ role: "tool", text: `⚠️ ${msg}` });
           } else if (evt.type === "error") {
             let msg = evt.data || "";
             try {
@@ -915,6 +965,20 @@ export function InlineTestingPanel() {
   const runStepManual = (step: TestStep) => {
     autoRunRef.current = null;
     runStep(step);
+  };
+
+  // 详情卡「运行 / 重跑」点击:测试执行步先弹「执行前确认被测链接」(确认地址 + 选执行方式
+  // + 测试连接),其余步直接跑。运行任务 / auto-chain 不走这里,用上次选择不打断流水线。
+  const handleRunFocusStep = () => {
+    if (focusStep === "execution") { setModal("execConfirm"); return; }
+    runStepManual(focusStep);
+  };
+  // 弹窗「测试并执行」:记下执行方式(持久化),用确认后的地址 + 模式手动跑测试执行步。
+  const runExecutionConfirmed = (baseUrl: string, headed: boolean) => {
+    persistExecMode(headed ? "visible" : "headless");
+    setModal("none");
+    autoRunRef.current = null;
+    runStep("execution", { headed, baseUrl });
   };
 
   // 运行任务: run the whole pipeline end-to-end, auto-approving gates (no 批准 clicks).
@@ -1128,6 +1192,15 @@ export function InlineTestingPanel() {
                   {focusStep === "execution" && (
                     <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">{t("test.flow.aiDriven")}</span>
                   )}
+                  {focusStep === "execution" && (
+                    <span
+                      className="flex items-center gap-1 rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground"
+                      title={execMode === "visible" ? t("test.execConfirm.hintVisible") : t("test.execConfirm.hintHeadless")}
+                    >
+                      {execMode === "visible" ? <Desktop size={10} /> : <Lightning size={10} />}
+                      {execMode === "visible" ? t("test.execConfirm.modeVisible") : t("test.execConfirm.modeHeadless")}
+                    </span>
+                  )}
                   <span className="flex-1" />
                   {runningStep === focusStep ? (
                     // 运行中 → 停止 (问题②): aborts this step; it resets to idle so 运行 can re-run it.
@@ -1140,7 +1213,7 @@ export function InlineTestingPanel() {
                     </button>
                   ) : (
                     <button
-                      onClick={() => runStepManual(focusStep)}
+                      onClick={handleRunFocusStep}
                       disabled={!current?.path || busy || !stepUnlocked(focusStep)}
                       className="flex h-7 items-center gap-1 rounded-md bg-primary px-2.5 text-[11px] font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-40"
                     >
@@ -1514,6 +1587,15 @@ export function InlineTestingPanel() {
           stage={taskStageName(aState, t)}
           onContinue={() => { setModal("none"); startRunAll(false); }}
           onRestart={() => { setModal("none"); startRunAll(true); }}
+          onClose={() => setModal("none")}
+        />
+      )}
+      {modal === "execConfirm" && activeTask && (
+        <ExecConfirmModal
+          t={t}
+          initialUrl={envCfg?.frontendBaseUrl || ""}
+          initialMode={execMode}
+          onRun={runExecutionConfirmed}
           onClose={() => setModal("none")}
         />
       )}
@@ -2050,6 +2132,126 @@ function RunChoiceModal({ t, stage, onContinue, onRestart, onClose }: { t: T; st
       <p className="text-xs leading-relaxed text-muted-foreground">{t("test.runChoice.desc")}</p>
       <div className="mt-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-foreground">
         {t("test.runChoice.currentStage")}：<span className="font-medium">{stage}</span>
+      </div>
+    </ModalShell>
+  );
+}
+
+// 执行前确认弹窗(对应设计稿截图2):确认/改写被测链接 + 选执行方式(独立窗口可见 / 后台
+// 无头) + 测试连接探活,最后「测试并执行」用所选模式手动跑「测试执行」步。被测链接由服务端
+// /api/test/probe 探活(避开浏览器端跨源限制)。
+function ExecConfirmModal({
+  t,
+  initialUrl,
+  initialMode,
+  onRun,
+  onClose,
+}: {
+  t: T;
+  initialUrl: string;
+  initialMode: ExecMode;
+  onRun: (baseUrl: string, headed: boolean) => void;
+  onClose: () => void;
+}) {
+  const [url, setUrl] = useState(initialUrl);
+  const [headed, setHeaded] = useState(initialMode === "visible");
+  const [probing, setProbing] = useState(false);
+  // null = 未测;否则带可达性 + 状态码 / 错误。改地址即清空,避免显示过期结果。
+  const [probe, setProbe] = useState<{ reachable: boolean; status?: number; latencyMs?: number; error?: string } | null>(null);
+  const trimmed = url.trim();
+
+  const testConn = async () => {
+    if (!trimmed || probing) return;
+    setProbing(true);
+    setProbe(null);
+    try {
+      const res = await fetch("/api/test/probe", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: trimmed }),
+      });
+      const j = await res.json().catch(() => ({}));
+      setProbe({ reachable: !!j.reachable, status: j.status, latencyMs: j.latencyMs, error: j.error });
+    } catch (e) {
+      setProbe({ reachable: false, error: e instanceof Error ? e.message : String(e) });
+    } finally {
+      setProbing(false);
+    }
+  };
+
+  // 执行方式分段按钮(选中=主色描边/底色)。
+  const modeBtn = (active: boolean, onClick: () => void, Cmp: Icon, label: string) => (
+    <button
+      onClick={onClick}
+      className={`flex flex-1 items-center justify-center gap-1.5 rounded-md border px-2 py-2 text-[11px] font-medium transition-colors ${
+        active
+          ? "border-primary bg-primary text-primary-foreground"
+          : "border-border bg-background text-foreground hover:bg-muted"
+      }`}
+    >
+      <Cmp size={13} /> {label}
+    </button>
+  );
+
+  return (
+    <ModalShell
+      title={t("test.execConfirm.title")}
+      subtitle={t("test.execConfirm.subtitle")}
+      onClose={onClose}
+      footer={
+        <>
+          <button onClick={onClose} className={CANCEL_BTN}>{t("test.cancel")}</button>
+          <button
+            disabled={!trimmed}
+            onClick={() => onRun(trimmed, headed)}
+            className={PRIMARY_BTN}
+          >
+            {t("test.execConfirm.run")}
+          </button>
+        </>
+      }
+    >
+      <Field label={t("test.execConfirm.urlLabel")}>
+        <input
+          value={url}
+          onChange={(e) => { setUrl(e.target.value); setProbe(null); }}
+          placeholder={t("test.execConfirm.urlPlaceholder")}
+          className="w-full rounded-md border border-border bg-background px-3 py-2 font-mono text-xs text-foreground outline-none focus:border-primary"
+        />
+      </Field>
+
+      <Field label={t("test.execConfirm.modeLabel")}>
+        <div className="flex gap-2">
+          {modeBtn(headed, () => setHeaded(true), Desktop, t("test.execConfirm.modeVisible"))}
+          {modeBtn(!headed, () => setHeaded(false), Lightning, t("test.execConfirm.modeHeadless"))}
+        </div>
+        <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">
+          {headed ? t("test.execConfirm.hintVisible") : t("test.execConfirm.hintHeadless")}
+        </p>
+      </Field>
+
+      <div className="flex items-center gap-2">
+        <button
+          onClick={testConn}
+          disabled={!trimmed || probing}
+          className="flex h-8 items-center gap-1.5 rounded-md border border-border px-3 text-[11px] font-medium text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {probing ? <SpinnerGap size={12} className="animate-spin" /> : <Plug size={12} />}
+          {probing ? t("test.execConfirm.testing") : t("test.execConfirm.testConn")}
+        </button>
+        {probe && (
+          probe.reachable ? (
+            <span className="flex items-center gap-1 text-[11px] font-medium text-status-success-foreground">
+              <CheckCircle size={13} weight="fill" />
+              {t("test.execConfirm.reachable")}{typeof probe.status === "number" ? ` · ${probe.status}` : ""}{typeof probe.latencyMs === "number" ? ` · ${probe.latencyMs}ms` : ""}
+            </span>
+          ) : (
+            <span className="flex items-center gap-1 text-[11px] font-medium text-status-error-foreground" title={probe.error || ""}>
+              <WarningCircle size={13} weight="fill" />
+              {t("test.execConfirm.unreachable")}{probe.error ? ` · ${probe.error}` : ""}
+            </span>
+          )
+        )}
       </div>
     </ModalShell>
   );

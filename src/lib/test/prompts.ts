@@ -318,10 +318,59 @@ function resolveBundledHeadlessShell(): string | null {
   return null;
 }
 
+/**
+ * 定位一个可用于「有头(可见窗口)」运行的完整 Google Chrome 二进制。
+ *
+ * 为什么需要它:打包态随包只分发 chrome-headless-shell(仅无头),要弹可见窗口必须有完整
+ * 浏览器。本机完整 chromium 也没随包,故复用系统已装的 Chrome —— 直接拿到它的可执行路径,
+ * 用 --executable-path 指过去(不走 playwright 的 `chrome` channel:channel 只认死的标准
+ * 安装路径,Linux 的 snap/flatpak/自定义前缀一律找不到,会在 MCP 进程里抛错崩掉整轮)。
+ *
+ * 解析顺序:
+ *  1. AILAB_CHROME_PATH 显式覆盖(power-user 自定义安装 / 测试桩):
+ *     - 设为有效存在路径 → 用它;设为空 / "none" → 显式判定「无 Chrome」(不再探标准路径)。
+ *  2. 各平台标准安装路径(镜像 playwright-core 的探测点)。
+ * 找不到返回 null —— 调用方据此自动回落无头,绝不让有头请求把执行步打崩。
+ */
+export function resolveSystemChrome(): string | null {
+  const override = process.env.AILAB_CHROME_PATH;
+  if (override != null) {
+    const v = override.trim();
+    if (!v || v.toLowerCase() === 'none') return null;
+    try { return fs.existsSync(v) ? v : null; } catch { return null; }
+  }
+  let candidates: string[];
+  if (process.platform === 'darwin') {
+    candidates = ['/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'];
+  } else if (process.platform === 'win32') {
+    candidates = [process.env.LOCALAPPDATA, process.env.PROGRAMFILES, process.env['PROGRAMFILES(X86)']]
+      .filter((p): p is string => !!p)
+      .map((p) => path.join(p, 'Google', 'Chrome', 'Application', 'chrome.exe'));
+  } else {
+    candidates = ['/opt/google/chrome/chrome', '/usr/bin/google-chrome', '/usr/bin/google-chrome-stable'];
+  }
+  for (const c of candidates) {
+    try { if (fs.existsSync(c)) return c; } catch { /* keep probing */ }
+  }
+  return null;
+}
+
+/**
+ * 本次执行最终是否真的会有头跑。打包态请求有头但定位不到完整浏览器(随包只有无头 shell、
+ * 系统又没装 Chrome)→ 自动回落无头,此函数返回 false。路由据此给用户一条「已改无头」提示。
+ */
+export function willRunHeaded(headed: boolean): boolean {
+  if (!headed) return false;
+  const headlessShell = resolveBundledHeadlessShell();
+  if (!headlessShell) return true; // dev 态:用本机完整 chromium,可有头
+  return !!resolveSystemChrome();  // 打包态:仅当系统/自定义 Chrome 可定位
+}
+
 export function buildPlaywrightMcp(
   projectPath: string,
   evidenceDir: string,
   storageStatePath?: string | null,
+  opts?: { headed?: boolean },
 ): MCPServerConfig {
   const cli = path.join(process.cwd(), 'node_modules', '@playwright', 'mcp', 'cli.js');
   const evidenceAbs = path.join(projectPath, evidenceDir);
@@ -332,16 +381,29 @@ export function buildPlaywrightMcp(
   const shim = writeMcpLauncherShim();
   // 打包态:随包分发的 headless_shell 二进制路径(dev 态为 null,用本机浏览器)。
   const headlessShell = resolveBundledHeadlessShell();
+  // 可见(有头)模式:用户选「独立窗口可见运行」时弹出真实浏览器窗口。
+  const headed = opts?.headed === true;
+  // 打包态有头需要一个完整浏览器(随包 shell 仅无头)。定位系统/自定义 Chrome;定位不到则
+  // 自动回落无头 —— 绝不让有头请求把执行步打崩。dev 态(headlessShell=null)有头用本机 chromium。
+  const systemChrome = headed && headlessShell ? resolveSystemChrome() : null;
+  const effectiveHeaded = headed && (!headlessShell || !!systemChrome);
+  // --executable-path 选择:
+  //   有头 + 打包(且定位到 Chrome) → 直指 Chrome 完整二进制(不走 `chrome` channel:channel 只认
+  //     死的标准路径,snap/flatpak/自定义装法找不到会崩;直指路径还能honor AILAB_CHROME_PATH)。
+  //   有头 + dev → 不指(用本机完整 chromium)。
+  //   无头 + 打包 → 直指随包 headless_shell(playwright 默认 headless 走完整 chromium 的 new-headless、
+  //     不会自动用 shell,故必须显式指过去并绕过 revision 目录发现)。
+  //   无头 + dev → 不指(用本机浏览器)。
+  const executablePath = effectiveHeaded ? systemChrome : headlessShell;
+  // 仅「无头 + 用随包 shell」时把浏览器根目录也指过去(双保险);有头/dev 不注入。
+  const usePackagedBrowsersPath = !!headlessShell && !effectiveHeaded;
   return {
     type: 'stdio',
     command: process.execPath,
     args: [
       shim,
       '--browser', 'chromium',
-      // 打包态直指随包 headless_shell:playwright 1.49+ 默认 headless 走完整 chromium 的
-      // new-headless、不会自动用 headless_shell,故必须显式 --executable-path 指过去,
-      // 同时绕过 playwright 按 revision 目录发现浏览器的逻辑。dev 态(null)不加,用本机浏览器。
-      ...(headlessShell ? ['--executable-path', headlessShell] : []),
+      ...(executablePath ? ['--executable-path', executablePath] : []),
       '--isolated',
       '--caps', 'devtools,network',
       '--viewport-size', '1280,800',
@@ -349,7 +411,8 @@ export function buildPlaywrightMcp(
       '--save-session',
       // Preload the captured login state (from 测试账号设置) so the AI starts logged in.
       ...(storageStatePath ? ['--storage-state', storageStatePath] : []),
-      '--headless',
+      // 无头模式加 --headless;有头(且真能有头)省略 → playwright 默认弹出可见窗口。
+      ...(effectiveHeaded ? [] : ['--headless']),
     ],
     env: {
       ...(process.env as Record<string, string>),
@@ -358,8 +421,9 @@ export function buildPlaywrightMcp(
       // Read by the shim: chdir target + the real CLI to require after chdir.
       AILAB_MCP_CWD: evidenceAbs,
       AILAB_MCP_CLI: cli,
-      // 打包态:把浏览器根目录也指过去(executable-path 已直指,这是双保险)。
-      ...(headlessShell && process.env.AILAB_RESOURCES_PATH
+      // 打包态【无头】:把浏览器根目录也指过去(executable-path 已直指,这是双保险)。有头用
+      // 系统 Chrome,不能指向随包目录(那里只有 headless_shell),故仅无头时注入。
+      ...(usePackagedBrowsersPath && process.env.AILAB_RESOURCES_PATH
         ? { PLAYWRIGHT_BROWSERS_PATH: path.join(process.env.AILAB_RESOURCES_PATH, 'ms-playwright') }
         : {}),
     },

@@ -7,7 +7,7 @@ import type { MCPServerConfig } from '@/types';
 // route fails with "No agent runtime registered" (the chat route gets it via its
 // own `@/lib/runtime` import).
 import { predictNativeRuntime } from '@/lib/runtime';
-import { buildStep, buildPlaywrightMcp, artifactPaths, TEST_STEPS, type TestStep } from '@/lib/test/prompts';
+import { buildStep, buildPlaywrightMcp, willRunHeaded, artifactPaths, TEST_STEPS, type TestStep } from '@/lib/test/prompts';
 import { reduceFromText } from '@/lib/test/reduce';
 import { snapshotRunJson } from '@/lib/test/history';
 import { sweepStrayEvidence, normalizeEvidenceExt } from '@/lib/test/evidence';
@@ -27,12 +27,16 @@ void predictNativeRuntime;
  */
 function wrapExecutionStream(
   src: ReadableStream<string>,
-  opts: { projectPath: string; taskName: string; env: string; runStartMs: number },
+  opts: { projectPath: string; taskName: string; env: string; runStartMs: number; leadingFrame?: string },
 ): ReadableStream<string> {
   const reader = src.getReader();
   let frameBuf = '';
   let textAcc = '';
   return new ReadableStream<string>({
+    start(controller) {
+      // 有头被自动回落无头时,先补发一条提示帧让用户在对话里看到「已改无头」(见 POST 内)。
+      if (opts.leadingFrame) controller.enqueue(opts.leadingFrame);
+    },
     async pull(controller) {
       try {
         const { done, value } = await reader.read();
@@ -157,6 +161,9 @@ export async function POST(req: Request): Promise<Response> {
       typeof body.extraInstruction === 'string' && body.extraInstruction.trim() ? body.extraInstruction : undefined;
     // 新建任务 imported this step's artifact → reuse the upload as authoritative source.
     const reuseImported: boolean = body.reuseImported === true;
+    // 执行方式(执行前确认弹窗):true=独立窗口可见运行(有头),false/缺省=后台无头运行。
+    // 仅「测试执行」步注入 Playwright,故只对该步生效。
+    const headed: boolean = body.headed === true;
 
     if (!projectPath || typeof projectPath !== 'string') {
       return new Response(JSON.stringify({ error: 'projectPath is required' }), {
@@ -178,7 +185,12 @@ export async function POST(req: Request): Promise<Response> {
     // execution baseUrl + captured login state; body.baseUrl is only a fallback.
     const resolved = resolveProjectEnvWithDb(projectPath, envArg);
     const env = resolved.env;
-    const baseUrl = resolved.frontendBaseUrl || (typeof body.baseUrl === 'string' ? body.baseUrl : undefined);
+    // 执行前确认弹窗允许用户编辑「被测链接」(尤其 local 指向本机任意端口)。用户显式给出的
+    // baseUrl 对本次运行有最高优先级;未给出则回落到 environments.json 解析出的目标。其它步
+    // (需求/用例/报告)不传 baseUrl,仍走解析值,行为不变。
+    const overrideUrl =
+      typeof body.baseUrl === 'string' && body.baseUrl.trim() ? body.baseUrl.trim() : undefined;
+    const baseUrl = overrideUrl || resolved.frontendBaseUrl || undefined;
 
     const { systemPrompt, prompt, needsPlaywright } = buildStep(step, { taskName, env, baseUrl, extraInstruction, reuseImported });
 
@@ -186,7 +198,8 @@ export async function POST(req: Request): Promise<Response> {
     if (needsPlaywright) {
       const evidenceDir = artifactPaths(taskName, env).evidenceDir;
       // Pass the captured storageState so the AI starts logged in (set up in 设置·测试账号).
-      mcpServers = { playwright: buildPlaywrightMcp(projectPath, evidenceDir, resolved.storageStatePath) };
+      // headed: 用户在执行前确认弹窗选了「独立窗口可见运行」→ 弹出可见浏览器窗口(打包态走系统 Chrome)。
+      mcpServers = { playwright: buildPlaywrightMcp(projectPath, evidenceDir, resolved.storageStatePath, { headed }) };
     }
 
     // Wire client disconnect (panel 停止按钮 aborts the fetch) → abort the agent
@@ -213,10 +226,17 @@ export async function POST(req: Request): Promise<Response> {
       autoTrigger: true,
     });
 
+    // 有头请求但本机定位不到完整浏览器(打包态随包仅无头 shell + 没装 Chrome)→ buildPlaywrightMcp
+    // 已自动回落无头;这里据同一判定补发一条提示帧,让用户知道本次未弹可见窗口、为什么。
+    const headedDowngraded = step === 'execution' && headed && !willRunHeaded(headed);
+    const leadingFrame = headedDowngraded
+      ? `data: ${JSON.stringify({ type: 'exec_notice', data: 'headed_downgraded_no_chrome' })}\n\n`
+      : undefined;
+
     // Execution step: wrap to sweep evidence + reduce/persist run.json + emit run_json.
     const finalStream =
       step === 'execution'
-        ? wrapExecutionStream(stream, { projectPath, taskName, env, runStartMs })
+        ? wrapExecutionStream(stream, { projectPath, taskName, env, runStartMs, leadingFrame })
         : stream;
 
     return new Response(finalStream, {
