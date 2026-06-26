@@ -11,7 +11,6 @@ import { RateLimitBanner } from './RateLimitBanner';
 import { MessageInput } from './MessageInput';
 import { ChatComposerActionBar } from './ChatComposerActionBar';
 import { ModeIndicator } from './ModeIndicator';
-import { InlineTestingPanel } from '@/components/test/InlineTestingPanel';
 import { ChatPermissionSelector } from './ChatPermissionSelector';
 import { RunCockpit } from './RunCockpit';
 import { RuntimeBadge } from './RuntimeBadge';
@@ -84,7 +83,7 @@ const MAX_MESSAGES_IN_MEMORY = 150;
 const MAX_CONTENT_BYTES_IN_MEMORY = 24 * 1024 * 1024; // ~24MB
 
 export function ChatView({ sessionId, initialMessages = [], initialHasMore = false, modelName, providerId, initialPermissionProfile, initialMode, initialHasSummary, initialEffort }: ChatViewProps) {
-  const { setStreamingSessionId, workingDirectory, setPendingApprovalSessionId, setDashboardPanelOpen, setFileTreeOpen, setIsAssistantWorkspace, testPanelOpen, setTestPanelOpen } = usePanel();
+  const { setStreamingSessionId, workingDirectory, setPendingApprovalSessionId, setDashboardPanelOpen, setFileTreeOpen, setIsAssistantWorkspace, setTestPanelOpen } = usePanel();
   const { t } = useTranslation();
   const router = useRouter();
   const [messages, setMessages] = useState<Message[]>(initialMessages);
@@ -894,7 +893,6 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
           </Button>
         </div>
       )}
-      {testPanelOpen && <InlineTestingPanel />}
       <MessageList
         messages={messages}
         streamingContent={streamingContent}

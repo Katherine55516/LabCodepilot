@@ -55,7 +55,7 @@ interface GeneratedCase {
   priority?: string;
   caseType?: string;
   module?: string;
-  requirement?: string;
+  requirement?: string;    // 关联故事 / 需求引用(REQ-ID)——表格「关联故事」列复用此字段
   purpose?: string;        // 用例标题
   precondition?: string;
   steps?: { content?: string; expected?: string }[];
@@ -63,7 +63,13 @@ interface GeneratedCase {
   oracle?: string;         // 预期结果来源:PRD/设计稿/API契约/产品确认/现状锁定
   verification?: string;   // 验证性质:功能验证 / 回归基线（oracle 双轴,决定通过率口径）
   cleanup?: string;
+  tags?: string[];         // 用例标签(冒烟测试/回归测试,多选)——前端新增,后端 PUT 整份透传保存
 }
+
+// 用例设计 Excel 表格的下拉枚举(存储用中文值,与 AI 产物 / 导出列保持一致)。用例类型
+// 仅作建议项:AI 仍按八类维度生成,落到这 5 类之外的旧值在 select 里原样保留、可见可改。
+const CASE_TYPES = ["正向", "反向", "边界", "用户体验", "其他"] as const;
+const CASE_TAGS = ["冒烟测试", "回归测试"] as const;
 
 // A persisted report (one run.json on disk) — listed in the 报告 browser. A task can
 // have several (one per env). Shape mirrors GET /api/test/reports.
@@ -227,6 +233,16 @@ function taskStageName(st: TaskState, t: T): string {
     find("running") ?? find("review") ?? find("error") ??
     STEPS.find((s) => st.stepStatus[s.step] !== "done") ?? STEPS[STEPS.length - 1];
   return t(cur.name);
+}
+
+// 把 run.json 的 ISO 时间（UTC）格式化为本地「YYYY年MM月DD日 HH:mm:ss」。
+// 空值返回 ""；非法时间原样返回（兜底，不抛错）。
+function fmtCnDateTime(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return String(iso);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}年${p(d.getMonth() + 1)}月${p(d.getDate())}日 ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
 export function InlineTestingPanel() {
@@ -591,7 +607,7 @@ export function InlineTestingPanel() {
       .catch(() => {});
     return () => { cancelled = true; };
     // handleEnvChange is stable enough (only writes localStorage); excluded to avoid re-fetch loops.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [view, current?.path, env]);
 
   const stepUnlocked = (step: TestStep): boolean => {
@@ -636,6 +652,9 @@ export function InlineTestingPanel() {
     setCasesDraft((d) => (d ? d.map((c, k) => (k === i ? { ...c, ...patch } : c)) : d));
   const updateStep = (i: number, j: number, patch: Partial<{ content: string; expected: string }>) =>
     setCasesDraft((d) => (d ? d.map((c, k) => (k === i ? { ...c, steps: (c.steps ?? []).map((s, m) => (m === j ? { ...s, ...patch } : s)) } : c)) : d));
+  // 用例标签多选:点同一标签切换增删(冒烟测试/回归测试可同时存在)。
+  const toggleTag = (i: number, tag: string) =>
+    setCasesDraft((d) => (d ? d.map((c, k) => (k === i ? { ...c, tags: (c.tags ?? []).includes(tag) ? (c.tags ?? []).filter((x) => x !== tag) : [...(c.tags ?? []), tag] } : c)) : d));
   const exportCases = (template: boolean) => {
     if (template) { window.open("/api/test/cases/export?template=1", "_blank"); return; }
     if (!current?.path || !activeTask) return;
@@ -1259,47 +1278,15 @@ export function InlineTestingPanel() {
                     <div className="mb-1.5 flex items-center gap-1">
                       <span className="text-[11px] text-muted-foreground">{t("test.cases.total")} · {casesPreview.length}</span>
                       <span className="flex-1" />
-                      {casesPreview.length > 0 && <button onClick={() => setCasesDraft(structuredClone(casesPreview))} className="rounded border border-border px-1.5 py-0.5 text-[10px] text-foreground hover:bg-muted">{t("test.cases.edit")}</button>}
+                      {casesPreview.length > 0 && <button onClick={() => setCasesDraft(structuredClone(casesPreview))} className="rounded bg-primary px-2 py-0.5 text-[10px] font-medium text-primary-foreground hover:opacity-90">{t("test.cases.viewEdit")}</button>}
                       {casesPreview.length > 0 && <button onClick={() => exportCases(false)} className="rounded border border-border px-1.5 py-0.5 text-[10px] text-foreground hover:bg-muted">{t("test.cases.export")}</button>}
                       <button onClick={() => exportCases(true)} className="rounded border border-border px-1.5 py-0.5 text-[10px] text-foreground hover:bg-muted">{t("test.cases.template")}</button>
                     </div>
-                    <div className="max-h-[34vh] space-y-1.5 overflow-auto">
-                      {casesPreview.length === 0 ? (
-                        <p className="text-[11px] text-muted-foreground">{t("test.cases.empty")}</p>
-                      ) : (
-                        casesPreview.map((c, i) => (
-                          <div key={c.id || i} className="rounded-lg border border-border bg-background p-2">
-                            <div className="flex flex-wrap items-center gap-1.5">
-                              <span className="text-[11px] font-medium text-foreground">{c.id || `#${i + 1}`}</span>
-                              {c.priority && <span className="rounded bg-muted px-1 py-0.5 text-[10px] text-muted-foreground">{c.priority}</span>}
-                              {c.module && <span className="text-[10px] text-muted-foreground">{c.module}</span>}
-                              {c.requirement && <span className="text-[10px] text-muted-foreground">· {c.requirement}</span>}
-                              {c.verification && (
-                                <span className={`rounded px-1 py-0.5 text-[10px] ${c.verification.includes("回归") ? "bg-muted text-muted-foreground" : "bg-status-success-muted text-status-success-foreground"}`}>
-                                  {c.verification}{c.oracle ? ` · ${c.oracle}` : ""}
-                                </span>
-                              )}
-                            </div>
-                            {c.purpose && <div className="mt-0.5 text-xs font-medium text-foreground">{c.purpose}</div>}
-                            {c.precondition && (
-                              <div className="mt-1 text-[11px] text-muted-foreground">
-                                <span className="text-foreground/70">{t("test.cases.precondition")}</span>{c.precondition}
-                              </div>
-                            )}
-                            {!!c.steps?.length && (
-                              <ol className="mt-1 list-decimal space-y-0.5 pl-4 text-[11px] text-muted-foreground">
-                                {c.steps.map((s, j) => (
-                                  <li key={j}>
-                                    {s.content}
-                                    {s.expected && <span className="text-foreground/60"> → {t("test.cases.expected")}{s.expected}</span>}
-                                  </li>
-                                ))}
-                              </ol>
-                            )}
-                          </div>
-                        ))
-                      )}
-                    </div>
+                    {/* 详情卡不再内联展示用例 —— 查看与编辑统一进「查看 / 编辑」弹窗(Excel 用例表)。
+                        这里只留统计 + 入口;仅在尚无用例时给一句占位提示。 */}
+                    {casesPreview.length === 0 && (
+                      <p className="text-[11px] text-muted-foreground">{t("test.cases.empty")}</p>
+                    )}
                   </div>
                 )}
                 {/* 测试报告步：报告完成后就地展示概览+产出资料+全文（替换占位提示）。 */}
@@ -1529,58 +1516,109 @@ export function InlineTestingPanel() {
       )}
 
       {/* Modals + folder picker (browser fallback for project selection) */}
-      {/* 用例编辑弹窗：从详情卡「编辑」打开，大空间增删改用例 + 字段 + 步骤 + oracle 双轴。 */}
+      {/* 用例表弹窗（Excel 形式）：从详情卡「查看 / 编辑」打开，查看与编辑合一。9 列——
+          ID / 用例标题 / 用例类型(5类下拉,兼容八类旧值) / 用例标签(冒烟·回归,多选) / 关联故事(=requirement) /
+          前置条件 / 操作步骤 / 期望结果 / 优先级。oracle 双轴等次要字段不在表内,saveCases 整份透传保留。 */}
       {casesDraft !== null && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={() => setCasesDraft(null)}>
-          <div className="flex max-h-[85vh] w-[680px] max-w-[94vw] flex-col rounded-xl border border-border bg-card shadow-xl" onClick={(e) => e.stopPropagation()}>
+          <div className="flex max-h-[88vh] w-[1240px] max-w-[97vw] flex-col rounded-xl border border-border bg-card shadow-xl" onClick={(e) => e.stopPropagation()}>
             <div className="flex items-center gap-2 border-b border-border px-4 py-3">
-              <h3 className="text-sm font-semibold text-foreground">{t("test.cases.editTitle")}</h3>
+              <h3 className="text-sm font-semibold text-foreground">{t("test.cases.tableTitle")}</h3>
               <span className="text-[11px] text-muted-foreground">· {casesDraft.length}</span>
               <span className="flex-1" />
-              <button onClick={() => setCasesDraft([...(casesDraft ?? []), { id: "", purpose: "", steps: [{ content: "", expected: "" }] }])} className="rounded border border-border px-2 py-1 text-[11px] text-foreground hover:bg-muted">+ {t("test.cases.add")}</button>
+              <button onClick={() => exportCases(false)} className="rounded border border-border px-2 py-1 text-[11px] text-foreground hover:bg-muted">{t("test.cases.export")}</button>
+              <button onClick={() => setCasesDraft([...(casesDraft ?? []), { id: "", purpose: "", caseType: "", tags: [], steps: [{ content: "", expected: "" }] }])} className="rounded border border-border px-2 py-1 text-[11px] text-foreground hover:bg-muted">+ {t("test.cases.add")}</button>
               <button onClick={saveCases} disabled={casesSaving} className="rounded bg-primary px-2.5 py-1 text-[11px] font-medium text-primary-foreground disabled:opacity-40">{casesSaving ? t("test.cases.saving") : t("test.cases.save")}</button>
               <button onClick={() => setCasesDraft(null)} className="rounded border border-border px-2 py-1 text-[11px] text-foreground hover:bg-muted">{t("test.cases.cancel")}</button>
             </div>
-            <div className="flex-1 space-y-2 overflow-auto p-4">
+            <div className="flex-1 overflow-auto p-3">
               {casesDraft.length === 0 ? (
-                <p className="text-center text-[11px] text-muted-foreground">{t("test.cases.empty")}</p>
+                <p className="py-8 text-center text-[11px] text-muted-foreground">{t("test.cases.empty")}</p>
               ) : (
-                casesDraft.map((c, i) => (
-                  <div key={i} className="space-y-1.5 rounded-lg border border-border bg-background p-2.5">
-                    <div className="flex items-center gap-1">
-                      <input value={c.id ?? ""} onChange={(e) => updateCase(i, { id: e.target.value })} placeholder="ID" className="w-28 rounded border border-border bg-background px-1.5 py-0.5 text-[11px] text-foreground outline-none focus:border-primary" />
-                      <input value={c.priority ?? ""} onChange={(e) => updateCase(i, { priority: e.target.value })} placeholder={t("test.cases.priority")} className="w-20 rounded border border-border bg-background px-1.5 py-0.5 text-[11px] text-foreground outline-none focus:border-primary" />
-                      <span className="flex-1" />
-                      <button onClick={() => setCasesDraft((casesDraft ?? []).filter((_, k) => k !== i))} title={t("test.cases.delCase")} className="px-1 text-[11px] text-status-error hover:opacity-80">✕</button>
-                    </div>
-                    <input value={c.purpose ?? ""} onChange={(e) => updateCase(i, { purpose: e.target.value })} placeholder={t("test.cases.purpose")} className="w-full rounded border border-border bg-background px-1.5 py-0.5 text-[11px] text-foreground outline-none focus:border-primary" />
-                    <input value={c.precondition ?? ""} onChange={(e) => updateCase(i, { precondition: e.target.value })} placeholder={t("test.cases.precondition")} className="w-full rounded border border-border bg-background px-1.5 py-0.5 text-[11px] text-foreground outline-none focus:border-primary" />
-                    <div className="flex items-center gap-1">
-                      <select value={c.verification ?? ""} onChange={(e) => updateCase(i, { verification: e.target.value })} className="rounded border border-border bg-background px-1 py-0.5 text-[11px] text-foreground outline-none focus:border-primary">
-                        <option value="">{t("test.cases.verification")}</option>
-                        <option value="功能验证">功能验证</option>
-                        <option value="回归基线">回归基线</option>
-                      </select>
-                      <select value={c.oracle ?? ""} onChange={(e) => updateCase(i, { oracle: e.target.value })} className="rounded border border-border bg-background px-1 py-0.5 text-[11px] text-foreground outline-none focus:border-primary">
-                        <option value="">{t("test.cases.oracle")}</option>
-                        <option value="PRD">PRD</option>
-                        <option value="设计稿">设计稿</option>
-                        <option value="API契约">API契约</option>
-                        <option value="产品确认">产品确认</option>
-                        <option value="现状锁定">现状锁定</option>
-                      </select>
-                    </div>
-                    {(c.steps ?? []).map((s, j) => (
-                      <div key={j} className="flex items-center gap-1">
-                        <span className="w-4 shrink-0 text-[10px] text-muted-foreground">{j + 1}.</span>
-                        <input value={s.content ?? ""} onChange={(e) => updateStep(i, j, { content: e.target.value })} placeholder={t("test.cases.step")} className="min-w-0 flex-1 rounded border border-border bg-background px-1.5 py-0.5 text-[11px] text-foreground outline-none focus:border-primary" />
-                        <input value={s.expected ?? ""} onChange={(e) => updateStep(i, j, { expected: e.target.value })} placeholder={t("test.cases.expected")} className="min-w-0 flex-1 rounded border border-border bg-background px-1.5 py-0.5 text-[11px] text-foreground outline-none focus:border-primary" />
-                        <button onClick={() => updateCase(i, { steps: (c.steps ?? []).filter((_, k) => k !== j) })} className="shrink-0 px-0.5 text-[10px] text-muted-foreground hover:text-status-error">✕</button>
-                      </div>
+                <table className="w-full border-collapse text-[11px]" style={{ minWidth: 1180 }}>
+                  <colgroup>
+                    <col style={{ width: 96 }} />
+                    <col style={{ width: 176 }} />
+                    <col style={{ width: 104 }} />
+                    <col style={{ width: 132 }} />
+                    <col style={{ width: 110 }} />
+                    <col style={{ width: 156 }} />
+                    <col style={{ width: 232 }} />
+                    <col style={{ width: 232 }} />
+                    <col style={{ width: 72 }} />
+                    <col style={{ width: 36 }} />
+                  </colgroup>
+                  <thead className="sticky top-0 z-10">
+                    <tr>
+                      {["ID", t("test.cases.purpose"), t("test.cases.colType"), t("test.cases.colTags"), t("test.cases.colStory"), t("test.cases.colPre"), t("test.cases.colSteps"), t("test.cases.colExpected"), t("test.cases.priority"), ""].map((h, hi) => (
+                        <th key={hi} className="whitespace-nowrap border border-border bg-muted px-2 py-1.5 text-left font-medium text-foreground">{h}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {casesDraft.map((c, i) => (
+                      <tr key={i} className="align-top">
+                        <td className="border border-border p-1">
+                          <input value={c.id ?? ""} onChange={(e) => updateCase(i, { id: e.target.value })} placeholder="ID" className="w-full rounded border border-border bg-background px-1.5 py-0.5 text-[11px] text-foreground outline-none focus:border-primary" />
+                        </td>
+                        <td className="border border-border p-1">
+                          <textarea value={c.purpose ?? ""} onChange={(e) => updateCase(i, { purpose: e.target.value })} rows={2} placeholder={t("test.cases.purpose")} className="w-full resize-y rounded border border-border bg-background px-1.5 py-0.5 text-[11px] text-foreground outline-none focus:border-primary" />
+                        </td>
+                        <td className="border border-border p-1">
+                          <select value={c.caseType ?? ""} onChange={(e) => updateCase(i, { caseType: e.target.value })} className="w-full rounded border border-border bg-background px-1 py-0.5 text-[11px] text-foreground outline-none focus:border-primary">
+                            <option value="">{t("test.cases.colType")}</option>
+                            {CASE_TYPES.map((tp) => <option key={tp} value={tp}>{tp}</option>)}
+                            {c.caseType && !(CASE_TYPES as readonly string[]).includes(c.caseType) && <option value={c.caseType}>{c.caseType}</option>}
+                          </select>
+                        </td>
+                        <td className="border border-border p-1">
+                          <div className="flex flex-wrap gap-1">
+                            {CASE_TAGS.map((tg) => {
+                              const on = (c.tags ?? []).includes(tg);
+                              return (
+                                <button key={tg} onClick={() => toggleTag(i, tg)} className={`rounded px-1.5 py-0.5 text-[10px] ${on ? "bg-primary text-primary-foreground" : "border border-border text-muted-foreground hover:bg-muted"}`}>{tg}</button>
+                              );
+                            })}
+                          </div>
+                        </td>
+                        <td className="border border-border p-1">
+                          <input value={c.requirement ?? ""} onChange={(e) => updateCase(i, { requirement: e.target.value })} placeholder={t("test.cases.colStory")} className="w-full rounded border border-border bg-background px-1.5 py-0.5 text-[11px] text-foreground outline-none focus:border-primary" />
+                        </td>
+                        <td className="border border-border p-1">
+                          <textarea value={c.precondition ?? ""} onChange={(e) => updateCase(i, { precondition: e.target.value })} rows={2} placeholder={t("test.cases.colPre")} className="w-full resize-y rounded border border-border bg-background px-1.5 py-0.5 text-[11px] text-foreground outline-none focus:border-primary" />
+                        </td>
+                        <td className="border border-border p-1">
+                          <div className="space-y-1">
+                            {(c.steps ?? []).map((s, j) => (
+                              <div key={j} className="flex items-start gap-1">
+                                <span className="mt-1 w-4 shrink-0 text-[10px] text-muted-foreground">{j + 1}.</span>
+                                <textarea value={s.content ?? ""} onChange={(e) => updateStep(i, j, { content: e.target.value })} rows={2} placeholder={t("test.cases.step")} className="min-w-0 flex-1 resize-y rounded border border-border bg-background px-1.5 py-0.5 text-[11px] text-foreground outline-none focus:border-primary" />
+                                <button onClick={() => updateCase(i, { steps: (c.steps ?? []).filter((_, k) => k !== j) })} title={t("test.cases.delCase")} className="mt-1 shrink-0 px-0.5 text-[10px] text-muted-foreground hover:text-status-error">✕</button>
+                              </div>
+                            ))}
+                            <button onClick={() => updateCase(i, { steps: [...(c.steps ?? []), { content: "", expected: "" }] })} className="text-[10px] text-primary hover:opacity-80">+ {t("test.cases.addStep")}</button>
+                          </div>
+                        </td>
+                        <td className="border border-border p-1">
+                          <div className="space-y-1">
+                            {(c.steps ?? []).map((s, j) => (
+                              <div key={j} className="flex items-start gap-1">
+                                <span className="mt-1 w-4 shrink-0 text-[10px] text-muted-foreground">{j + 1}.</span>
+                                <textarea value={s.expected ?? ""} onChange={(e) => updateStep(i, j, { expected: e.target.value })} rows={2} placeholder={t("test.cases.expected")} className="min-w-0 flex-1 resize-y rounded border border-border bg-background px-1.5 py-0.5 text-[11px] text-foreground outline-none focus:border-primary" />
+                              </div>
+                            ))}
+                          </div>
+                        </td>
+                        <td className="border border-border p-1">
+                          <input value={c.priority ?? ""} onChange={(e) => updateCase(i, { priority: e.target.value })} placeholder="P0" className="w-full rounded border border-border bg-background px-1.5 py-0.5 text-[11px] text-foreground outline-none focus:border-primary" />
+                        </td>
+                        <td className="border border-border p-1 text-center">
+                          <button onClick={() => setCasesDraft((casesDraft ?? []).filter((_, k) => k !== i))} title={t("test.cases.delCase")} className="px-0.5 text-[11px] text-status-error hover:opacity-80">✕</button>
+                        </td>
+                      </tr>
                     ))}
-                    <button onClick={() => updateCase(i, { steps: [...(c.steps ?? []), { content: "", expected: "" }] })} className="text-[10px] text-primary hover:opacity-80">+ {t("test.cases.addStep")}</button>
-                  </div>
-                ))
+                  </tbody>
+                </table>
               )}
             </div>
           </div>
@@ -1793,7 +1831,7 @@ function CompareView({ t, projectPath, taskName, env }: { t: T; projectPath: str
   const a = history[Math.min(aIdx, history.length - 1)];
   const b = history[Math.min(bIdx, history.length - 1)];
   const diff = diffRuns(a, b); // a=基线(prev)，b=目标(curr)
-  const verLabel = (e: RunHistoryEntry) => `${e.time ? e.time.slice(0, 19).replace("T", " ") : e.stamp} · ${e.passStr || "—"}`;
+  const verLabel = (e: RunHistoryEntry) => `${e.time ? fmtCnDateTime(e.time) : e.stamp} · ${e.passStr || "—"}`;
   const stLabel: Record<string, TranslationKey> = { pass: "test.state.pass", fail: "test.state.fail", partial: "test.state.partial", blocked: "test.state.blocked" };
   const st = (s: string | null) => (s ? (stLabel[s] ? t(stLabel[s]) : s) : "—");
 
@@ -2443,7 +2481,7 @@ function ReportBrowser({ projects, t, model, providerId }: { projects: Project[]
                               {r.counts.blocked > 0 ? ` · ${t("test.state.blocked")} ${r.counts.blocked}` : ""}
                             </span>
                             <span className="flex-1" />
-                            {r.time && <span className="text-[10px] text-muted-foreground">{r.time}</span>}
+                            {r.time && <span className="text-[10px] text-muted-foreground">{fmtCnDateTime(r.time)}</span>}
                             <span className="w-3 text-center text-[10px] text-muted-foreground">{isOpen ? "▲" : "▼"}</span>
                           </button>
                           {isOpen && (

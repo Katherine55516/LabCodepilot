@@ -4,6 +4,7 @@ import { streamClaude } from '@/lib/claude-client';
 import { predictNativeRuntime } from '@/lib/runtime';
 import { artifactPaths } from '@/lib/test/prompts';
 import { resolveProjectEnvWithDb } from '@/lib/test/env-resolve';
+import { isUnsafeSegment } from '@/lib/test/path-safety';
 
 // Side-effect import registers the agent runtimes (see run/route.ts for why).
 void predictNativeRuntime;
@@ -34,6 +35,9 @@ export async function POST(req: Request): Promise<Response> {
 
     if (!projectPath) {
       return new Response(JSON.stringify({ error: 'projectPath is required' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+    }
+    if (isUnsafeSegment(taskName) || isUnsafeSegment(envArg)) {
+      return new Response(JSON.stringify({ error: 'invalid taskName or env' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
     }
 
     const resolved = resolveProjectEnvWithDb(projectPath, envArg);

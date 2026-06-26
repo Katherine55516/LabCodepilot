@@ -3,6 +3,7 @@ import path from 'path';
 import { streamClaude } from '@/lib/claude-client';
 import { predictNativeRuntime } from '@/lib/runtime';
 import { artifactPaths } from '@/lib/test/prompts';
+import { isUnsafeSegment } from '@/lib/test/path-safety';
 
 // Side-effect import registers the agent runtimes (see run/route.ts for why).
 void predictNativeRuntime;
@@ -41,6 +42,9 @@ export async function POST(req: Request): Promise<Response> {
 
     if (!projectPath || !instruction) {
       return new Response(JSON.stringify({ error: 'projectPath and instruction are required' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+    }
+    if (isUnsafeSegment(taskName)) {
+      return new Response(JSON.stringify({ error: 'invalid taskName' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
     }
     const target = targetArtifact(step, taskName);
     if (!target) {

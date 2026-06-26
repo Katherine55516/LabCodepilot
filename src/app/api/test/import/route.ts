@@ -57,6 +57,7 @@ function rowsToCases(rows: string[][]): { cases: unknown[] } {
 
   const splitLines = (s: string): string[] => s.split(/\r?\n|；|;/).map((x) => x.trim()).filter(Boolean);
   const cases: unknown[] = [];
+  const seenIds = new Set<string>();
   for (let i = 1; i < rows.length; i++) {
     const r = rows[i] || [];
     if (r.every((c) => !c || !c.trim())) continue; // skip blank rows
@@ -69,8 +70,17 @@ function rowsToCases(rows: string[][]): { cases: unknown[] } {
       stepLines.length > 0
         ? stepLines.map((content, idx) => ({ content, expected: expectLines[idx] || expectLines[0] || '' }))
         : [{ content: purpose, expected: expectText }];
+    // De-dup ids (L1): a duplicate id in the Excel would break the run.json↔cases id
+    // join (oracle 双轴 verification map) downstream — suffix collisions with #N.
+    let id = (idC >= 0 ? r[idC] : '') || `TC-${String(cases.length + 1).padStart(2, '0')}`;
+    if (seenIds.has(id)) {
+      let n = 2;
+      while (seenIds.has(`${id}#${n}`)) n++;
+      id = `${id}#${n}`;
+    }
+    seenIds.add(id);
     const c: Record<string, unknown> = {
-      id: (idC >= 0 ? r[idC] : '') || `TC-${String(cases.length + 1).padStart(2, '0')}`,
+      id,
       purpose,
       steps,
     };

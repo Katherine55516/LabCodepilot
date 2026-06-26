@@ -26,6 +26,7 @@ import { Toaster } from '@/components/ui/toast';
 import { useNotificationPoll } from '@/hooks/useNotificationPoll';
 import { useGlobalSearchShortcut } from '@/hooks/useGlobalSearchShortcut';
 import { GlobalSearchDialog } from './GlobalSearchDialog';
+import { InlineTestingPanel } from '@/components/test/InlineTestingPanel';
 
 const SPLIT_SESSIONS_KEY = "codepilot:split-sessions";
 const SPLIT_ACTIVE_COLUMN_KEY = "codepilot:split-active-column";
@@ -239,6 +240,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [assistantPanelOpen, setAssistantPanelOpen] = useState(false);
   const [isAssistantWorkspace, setIsAssistantWorkspace] = useState(false);
   const [testPanelOpen, setTestPanelOpen] = useState(false);
+  // 测试工作台「保活」：一旦打开过就保持挂载（不随路由切换卸载），避免执行进行中切到
+  // 设置页再切回时，InlineTestingPanel 卸载导致 SSE 中断 + 重挂载时把持久化的 running
+  // 僵尸态规整成 error（显示「失败」）。可见性由下方 testPanelOpen && isChatRoute 用 CSS
+  // 控制（display:contents ↔ hidden），组件实例与内部 state、in-flight fetch 全程保留。
+  const [testEverOpened, setTestEverOpened] = useState(false);
 
   // --- Git summary (derived from polling hook, no setState needed) ---
   const [currentWorktreeLabel, setCurrentWorktreeLabel] = useState("");
@@ -456,6 +462,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     setPreviewSourceRaw(null);
     setPreviewOpen(false);
   }, [pathname]);
+  // 测试工作台首次打开后置位「曾打开」，之后常驻挂载（不再随 testPanelOpen 卸载）。
+  useEffect(() => {
+    if (testPanelOpen) setTestEverOpened(true);
+  }, [testPanelOpen]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   // Keep chat list state in sync when resizing across the breakpoint
@@ -575,6 +585,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                       <SplitChatContainer />
                     ) : (
                       <ErrorBoundary>{children}</ErrorBoundary>
+                    )}
+                    {/* 测试工作台常驻（保活）：一旦打开过就保持挂载，跨路由不卸载。可见性
+                        用 CSS 切换 —— 显示时 display:contents（面板自身 absolute inset-0
+                        盖满本 relative main），隐藏时 display:none（组件实例、内部 state、
+                        in-flight 执行全程保留，仅不渲染视觉）。非 chat 路由（如设置页）隐藏，
+                        让 children 正常显示；切回 chat 再显示，执行进度不丢。 */}
+                    {testEverOpened && (
+                      <div className={testPanelOpen && isChatRoute ? "contents" : "hidden"}>
+                        <InlineTestingPanel />
+                      </div>
                     )}
                   </main>
                 </div>
