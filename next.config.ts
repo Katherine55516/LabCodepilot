@@ -40,6 +40,11 @@ const nextConfig: NextConfig = {
   ],
   env: {
     NEXT_PUBLIC_APP_VERSION: pkg.version,
+    // Bailian image api key is injected at BUILD time (not committed to source).
+    // next.config `env` inlines the build-time value into the bundle, so the
+    // packaged app has it at runtime while git keeps no plaintext key. Build with:
+    //   BAILIAN_IMAGE_API_KEY=sk-... npm run electron:pack:mac
+    BAILIAN_IMAGE_API_KEY: process.env.BAILIAN_IMAGE_API_KEY ?? '',
   },
   // outputFileTracingIncludes: force Next.js NFT to copy the Anthropic SDK
   // platform-specific subpackages into .next/standalone/node_modules/ so the

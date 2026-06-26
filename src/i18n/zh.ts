@@ -14,6 +14,27 @@ const zh: Record<TranslationKey, string> = {
   'nav.skills': 'Skills',
   'nav.mcp': 'MCP',
   'nav.gallery': '素材库',
+  'nav.imageStudio': '文生图',
+
+  // ── 文生图（独立模块）──────────────────────────────────────
+  'imageStudio.sidebarButton': '文生图',
+  'imageStudio.title': '文生图',
+  'imageStudio.subtitle': '输入提示词即可生成图片 —— 由 qwen-image-2.0-pro 驱动',
+  'imageStudio.promptPlaceholder': '描述你想生成的画面……',
+  'imageStudio.generate': '生成',
+  'imageStudio.generating': '生成中……',
+  'imageStudio.model': '模型',
+  'imageStudio.aspectRatio': '比例',
+  'imageStudio.size': '尺寸',
+  'imageStudio.count': '数量',
+  'imageStudio.emptyTitle': '还没有生成任何图片',
+  'imageStudio.emptyHint': '在下方输入提示词并点击「生成」，创建你的第一张图片。',
+  'imageStudio.history': '历史',
+  'imageStudio.download': '下载',
+  'imageStudio.openInGallery': '打开素材库',
+  'imageStudio.failed': '生成失败',
+  'imageStudio.promptRequired': '请先输入提示词。',
+  'imageStudio.result': '生成结果',
 
   // ── Chat list panel ─────────────────────────────────────────
   'chatList.justNow': '刚刚',
@@ -684,6 +705,7 @@ const zh: Record<TranslationKey, string> = {
 
   // ── Gallery ─────────────────────────────────────────────────
   'gallery.title': '素材库',
+  'gallery.backToImageStudio': '返回文生图',
   'gallery.description': '管理 AI 生成和导入的图片、视频、音频素材',
   'gallery.empty': '暂无生成的图片',
   'gallery.emptyHint': '在对话中生成图片后即可在此查看。',

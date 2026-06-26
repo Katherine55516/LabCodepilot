@@ -17,6 +17,27 @@ const en = {
   'nav.skills': 'Skills',
   'nav.mcp': 'MCP',
   'nav.gallery': 'Gallery',
+  'nav.imageStudio': 'Image',
+
+  // ── Image Studio (standalone text-to-image) ─────────────────
+  'imageStudio.sidebarButton': 'Image Studio',
+  'imageStudio.title': 'Image Studio',
+  'imageStudio.subtitle': 'Generate images from a prompt — powered by qwen-image-2.0-pro',
+  'imageStudio.promptPlaceholder': 'Describe the image you want to generate…',
+  'imageStudio.generate': 'Generate',
+  'imageStudio.generating': 'Generating…',
+  'imageStudio.model': 'Model',
+  'imageStudio.aspectRatio': 'Ratio',
+  'imageStudio.size': 'Size',
+  'imageStudio.count': 'Count',
+  'imageStudio.emptyTitle': 'Nothing generated yet',
+  'imageStudio.emptyHint': 'Type a prompt below and hit Generate to create your first image.',
+  'imageStudio.history': 'History',
+  'imageStudio.download': 'Download',
+  'imageStudio.openInGallery': 'Open Gallery',
+  'imageStudio.failed': 'Generation failed',
+  'imageStudio.promptRequired': 'Please enter a prompt first.',
+  'imageStudio.result': 'Result',
 
   // ── Chat list panel ─────────────────────────────────────────
   'chatList.justNow': 'just now',
@@ -687,6 +708,7 @@ const en = {
 
   // ── Gallery ─────────────────────────────────────────────────
   'gallery.title': 'Gallery',
+  'gallery.backToImageStudio': 'Back to Image Studio',
   'gallery.description': 'Manage AI-generated and imported images, videos, and audio',
   'gallery.empty': 'No images generated yet',
   'gallery.emptyHint': 'Generate images in chat to see them here.',

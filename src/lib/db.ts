@@ -34,6 +34,9 @@ const SENSITIVE_SETTINGS = new Set<string>([
   'openai_oauth_access_token',
   'openai_oauth_refresh_token',
   'openai_oauth_id_token',
+  // Bailian (DashScope) text-to-image credentials blob — JSON { apiKey, workspaceId, model, region }.
+  // Sealed at rest so the embedded api key isn't stored plaintext in the DB.
+  'bailian_image_config',
 ]);
 
 // MCP 市场安装时收集的密钥（API key / token 等）以此为前缀写入，加密落盘——

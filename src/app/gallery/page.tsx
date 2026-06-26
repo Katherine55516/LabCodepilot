@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect, useCallback, useRef } from 'react';
-import { PaintBrush, SortDescending, Funnel, SpinnerGap, Heart } from '@/components/ui/icon';
+import Link from 'next/link';
+import { PaintBrush, SortDescending, Funnel, SpinnerGap, Heart, ArrowLeft } from '@/components/ui/icon';
 import { cn } from '@/lib/utils';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -134,8 +135,14 @@ export default function GalleryPage() {
 
   return (
     <div className="flex h-full flex-col overflow-hidden">
-      {/* Fixed header — page identity only */}
+      {/* Fixed header — page identity + back to Image Studio */}
       <div className="shrink-0 border-b border-border/50 px-6 pt-4 pb-4">
+        <Link href="/image">
+          <Button variant="ghost" size="sm" className="mb-2 -ml-2 h-7 gap-1.5 text-xs text-muted-foreground hover:text-foreground">
+            <ArrowLeft size={14} />
+            {t('gallery.backToImageStudio' as TranslationKey)}
+          </Button>
+        </Link>
         <h1 className="text-xl font-semibold">
           {t('gallery.title' as TranslationKey)}
         </h1>
