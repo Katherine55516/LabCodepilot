@@ -9,7 +9,7 @@
 
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { harvestResults, reduceResults, reduceFromText } from "../../lib/test/reduce";
+import { harvestResults, reduceResults, reduceFromText, sanitizeApi } from "../../lib/test/reduce";
 
 const OPTS = { module: "订单", env: "local", time: "2026-06-22T10:00:00.000Z" };
 
@@ -184,5 +184,53 @@ describe("reduceResults — dual-rate (oracle 双轴)", () => {
     assert.equal(run.regressionTotal, 1);
     assert.deepEqual(run.funcCounts, { total: 1, pass: 1, fail: 0, partial: 0, blocked: 0 });
     assert.equal(run.funcPassStr, "1/1");
+  });
+});
+
+describe("api passthrough + sanitizeApi (缺陷报告接口信息地基)", () => {
+  it("threads a well-formed api object from a result into the reduced test", () => {
+    const run = reduceResults(
+      [
+        {
+          id: "TC-007",
+          status: "fail",
+          error: "金额为 0",
+          api: { method: "POST", url: "/api/mealAllowance/calc", status: 200, requestBody: "{p:1}", responseBody: '{"amount":0}' },
+        },
+      ],
+      OPTS,
+    );
+    assert.equal(run.tests[0].api?.method, "POST");
+    assert.equal(run.tests[0].api?.url, "/api/mealAllowance/calc");
+    assert.equal(run.tests[0].api?.status, 200);
+    assert.equal(run.tests[0].api?.responseBody, '{"amount":0}');
+  });
+
+  it("omits api on cases without it (pass cases stay clean)", () => {
+    const run = reduceResults([{ id: "A", status: "pass" }], OPTS);
+    assert.equal(run.tests[0].api, undefined);
+  });
+
+  it("sanitizeApi drops non-objects and empty captures", () => {
+    assert.equal(sanitizeApi(undefined), undefined);
+    assert.equal(sanitizeApi("nope"), undefined);
+    assert.equal(sanitizeApi({}), undefined);
+    assert.equal(sanitizeApi({ method: "", url: "" }), undefined);
+  });
+
+  it("sanitizeApi truncates oversized bodies (~4000 chars + ellipsis)", () => {
+    const big = "x".repeat(9000);
+    const api = sanitizeApi({ url: "/api/x", requestBody: big, responseBody: big });
+    assert.ok(api);
+    assert.ok((api!.requestBody?.length ?? 0) <= 4001);
+    assert.ok(api!.requestBody!.endsWith("…"));
+    assert.ok(api!.responseBody!.endsWith("…"));
+  });
+
+  it("reduceFromText carries api end-to-end", () => {
+    const text = '@@RESULT {"id":"TC-9","status":"fail","error":"e","api":{"method":"GET","url":"/x","status":500}}';
+    const run = reduceFromText(text, OPTS);
+    assert.equal(run.tests[0].api?.status, 500);
+    assert.equal(run.tests[0].api?.method, "GET");
   });
 });

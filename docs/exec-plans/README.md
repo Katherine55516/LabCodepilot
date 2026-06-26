@@ -63,6 +63,7 @@
 | active/stream-idle-timeout-rework.md | 对话流空闲超时改造：从「距上次任何事件」改为「距上次实质内容」计时，根治慢首包 provider 误杀（B-019），保留真卡死兜底 | Phase 0/1/4 已完成（c7888dc/e9ddbc2），Phase 2-3 可选暂缓 |
 | active/test-framework-integration.md | 测试框架集成（对话内嵌测试）：把 ai-lab-test-framework 做成第三种对话模式（代码/计划/测试），上半结构化面板(看板/流程/报告)+下半对话流；锁定作用域/模式/视图模型，替换 Phase-1 的 /test 独立路由 | Phase 0 进行中，Phase 1-8 待开始 |
 | active/test-account-settings.md | 测试账号设置：设置内新增多系统测试账号面板（系统下拉 + local/SIT 标签 + 密码/token/获取登录态），导出到 AI_LabTest `environments.json` + `.auth/` storageState，Electron BrowserWindow 抓取登录态 | Phase 0 完成，Phase 1-6 待开始 |
+| active/test-report-display-and-evidence.md | 测试报告就地展示 + 产物预览 + 缺陷结构化 + 执行端接口/录像采集：报告节点完成后工作台流程页展示「概览+产物列表+内嵌全文」，md 渲染/编辑、xlsx 表格、证据截图+录像（每用例一段、留 fail/partial）、缺陷报告结构化模板、`@@RESULT` 加 `api` 字段穿透 run.json | Phase 0-6 代码完成（typecheck/单测 + CDP mock 验证通过），录像/接口真跑 POC 待验证 |
 ### Completed
 
 | 文件 | 主题 | 完成日期 |

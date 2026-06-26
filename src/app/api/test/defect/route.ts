@@ -52,7 +52,7 @@ export async function POST(req: Request): Promise<Response> {
     const prompt = `请为测试任务「${taskName}」（环境 ${env}）生成**缺陷报告**（Markdown，给开发平台作修复依据）。
 
 输入产物（请先 Read）：
-- 执行结果（权威事实）：${p.runJson}（失败用例的 actual / error / evidence / 可能的 api 字段）
+- 执行结果（权威事实）：${p.runJson}（失败用例的 actual / error / evidence 截图+录像 / 结构化 api 字段：方法·URL·状态码·请求体·响应体）
 - 测试用例：${p.cases}（含 ID / 需求引用 / 前置条件 / 测试步骤 / 预期结果）
 ${baseUrl ? `被测前端地址：${baseUrl}` : '（未配置被测地址）'}
 
@@ -72,8 +72,13 @@ ${baseUrl ? `被测前端地址：${baseUrl}` : '（未配置被测地址）'}
 - **预期结果**：{用例预期结果}
 - **实际结果**：{run.json 该用例 actual}
 - **错误信息**：{run.json 该用例 error，无则「—」}
-- **证据**：{run.json 该用例 evidence 截图路径，无则「—」}
-- **接口信息**：{若该用例有 api 字段则写 method/URL/状态码/响应；无则「—（未捕获接口 / 纯前端缺陷）」}
+- **证据**：{run.json 该用例 evidence 截图 / 录像路径，无则「—」}
+- **接口信息**：若该用例有 \`api\` 字段，按子项逐行列出（整项无该字段则写「—（未捕获接口 / 纯前端缺陷）」）：
+  - 方法：{api.method}
+  - URL：{api.url}
+  - 状态码：{api.status}
+  - 请求体：{api.requestBody，无则「—」}
+  - 响应体：{api.responseBody，无则「—」}
 - **期望行为 / 验收标准**：{用一两句写正确行为应是什么 + 怎样验证算修好，例：「重新执行上述步骤应{预期结果}；对应接口应返回 2xx 且响应符合预期」}
 
 无缺陷留痕格式（当没有任何应用缺陷时，整篇就这样）：

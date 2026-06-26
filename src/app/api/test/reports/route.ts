@@ -38,6 +38,15 @@ export async function GET(req: Request): Promise<Response> {
           // 缺陷报告（第三交付物，按需生成）：{task}-{env}-缺陷报告.md
           let defectMarkdown = '';
           try { defectMarkdown = fs.readFileSync(path.join(dir, f.replace(/\.run\.json$/, '-缺陷报告.md')), 'utf-8'); } catch { /* none */ }
+          // 可选交付物 XLSX（执行矩阵，按需由 anthropic-skills:xlsx 生成；命名规则与 .md 不同，
+          // 见 rules/test-report.md §9）。在同任务目录里找一个含本 env 标签的 .xlsx，存在才回传
+          // basename，供产物列表「测试报告(Excel)」行显隐 + 表格预览定位。
+          const envLabel = typeof raw.env === 'string' ? raw.env : '';
+          let xlsxFile = '';
+          try {
+            const x = files.find((fn) => fn.toLowerCase().endsWith('.xlsx') && (!envLabel || fn.includes(envLabel)));
+            if (x) xlsxFile = x;
+          } catch { /* none */ }
           reports.push({
             task: taskDir.name,
             env: typeof raw.env === 'string' ? raw.env : '',
@@ -71,6 +80,7 @@ export async function GET(req: Request): Promise<Response> {
             tests: Array.isArray(raw.tests) ? raw.tests : [],
             markdown,
             defectMarkdown,
+            xlsxFile,
           });
         } catch {
           /* skip unreadable / malformed run.json */

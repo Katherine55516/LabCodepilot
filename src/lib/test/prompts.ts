@@ -195,10 +195,12 @@ ${rule}
 
 执行：
 1. Read ${p.cases}，逐条用例：用浏览器工具（browser_navigate / browser_click / browser_type / browser_fill_form / browser_snapshot / browser_wait_for / browser_take_screenshot）满足前置条件（如登录）→ 执行测试操作 → 对照用例「预期结果」判定四态。
-2. **每条用例先打印进度** \`▶ 用例 N/总数：{标题}\`；结束**输出单行 JSON**：\`@@RESULT {"id":"...","status":"pass|fail|partial|blocked","actual":"观察现象","evidence":["TC-xxx.png"],"error":"失败/阻塞原因，pass留空"}\`（单行、严格 JSON、内层引号用「」或转义）。
-3. **四态**：pass=预期完全出现；fail=预期明确未出现且可复现（疑似应用缺陷，保留事实不放水）；partial=部分满足；blocked=前置/路径/登录态/地址不可达（**不是应用 bug**）。
-4. 绝不修改业务源码与配置，只在被测系统页面内操作；截图存到 \`${p.evidenceDir}\`。
-5. **不要自己写汇总文件**：每条用例的 \`@@RESULT\` 行就是唯一事实来源，平台会据此**确定性归约**出 \`${p.runJson}\`（计数 / 四态 / 环境错误重分类 / 401 熔断由平台代码计算，不由你汇总）。你只需保证**每条用例都输出一行规范的 @@RESULT**。
+2. **录像（每条用例一段）**：每条用例开始操作前调 \`browser_start_video({filename:"{用例ID}.webm"})\` 开录，用例结束（判完四态、补完证据后）调 \`browser_stop_video\` 停录。**pass 用例：录像不写进 evidence**（平台会清理未被引用的录像）；**fail / partial 用例：把 \`{用例ID}.webm\` 写进该用例 evidence**。录像与截图都落 \`${p.evidenceDir}\`。
+3. **失败用例采集接口信息**：对 fail / partial 用例，先用 \`browser_network_requests\` 列出本页请求、定位与失败现象相关的关键请求，再用 \`browser_network_request\` 取其完整 方法 / URL / 状态码 / 请求体 / 响应体；请求体、响应体过长时各自截断到约 ≤4000 字符。pass / blocked 用例无需采集。
+4. **每条用例先打印进度** \`▶ 用例 N/总数：{标题}\`；结束**输出单行 JSON**：\`@@RESULT {"id":"...","status":"pass|fail|partial|blocked","actual":"观察现象","evidence":["TC-xxx.png","TC-xxx.webm"],"error":"失败/阻塞原因，pass留空","api":{"method":"POST","url":"/api/...","status":200,"requestBody":"...","responseBody":"..."}}\`（单行、严格 JSON、内层引号用「」或转义）。\`api\` **仅 fail / partial 且定位到关键请求时给出**，pass 省略该字段；\`evidence\` 含截图与（fail/partial 时）录像文件名。
+5. **四态**：pass=预期完全出现；fail=预期明确未出现且可复现（疑似应用缺陷，保留事实不放水）；partial=部分满足；blocked=前置/路径/登录态/地址不可达（**不是应用 bug**）。
+6. 绝不修改业务源码与配置，只在被测系统页面内操作；截图与录像存到 \`${p.evidenceDir}\`。
+7. **不要自己写汇总文件**：每条用例的 \`@@RESULT\` 行就是唯一事实来源，平台会据此**确定性归约**出 \`${p.runJson}\`（计数 / 四态 / 环境错误重分类 / 401 熔断由平台代码计算，不由你汇总）。你只需保证**每条用例都输出一行规范的 @@RESULT**。
 
 完成后用一句话总结四态计数（pass/fail/partial/blocked）。`;
 }

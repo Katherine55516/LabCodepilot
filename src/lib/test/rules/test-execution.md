@@ -78,15 +78,20 @@
 | `browser_select_option` | 下拉选择 |
 | `browser_wait_for` | 等待文本出现/消失或超时 |
 | `browser_take_screenshot` | 截图留证（保存到执行引擎指定的 output-dir） |
+| `browser_start_video` / `browser_stop_video` | 录像起停（每条用例一段，命名 `{用例ID}.webm`，存到 output-dir） |
+| `browser_network_requests` / `browser_network_request` | 列出网络请求 / 取单条完整方法·URL·状态码·请求体·响应体（失败用例采集接口信息） |
 | `browser_navigate_back` / `browser_press_key` | 后退 / 键盘操作 |
 
 **逐条用例的执行循环**：
 
 1. 读测试用例的「前置条件 / 测试操作 / 预期结果 / 断言级别」。
 2. 满足前置：需要登录态的用例，先用 `environments.json` 的账号在被测系统里登录建立会话。
-3. 执行测试操作：按用例步骤在真实页面上操作；用 `browser_snapshot` 观察真实结构，不要凭空臆测元素。
-4. 对照「预期结果」判定四态（见 §2）。
-5. `browser_take_screenshot` 截一张图留证。
+3. **开录**：操作前 `browser_start_video({filename:"{用例ID}.webm"})` 开始录像。
+4. 执行测试操作：按用例步骤在真实页面上操作；用 `browser_snapshot` 观察真实结构，不要凭空臆测元素。
+5. 对照「预期结果」判定四态（见 §2）。
+6. `browser_take_screenshot` 截一张图留证。
+7. **失败采集接口**：fail / partial 用例用 `browser_network_requests` + `browser_network_request` 取关键请求的 方法/URL/状态码/请求体/响应体（请求体、响应体过长各截断 ≤4000 字符）。
+8. **停录**：`browser_stop_video` 停止录像。**pass 用例录像不写进 evidence**（平台清理未引用录像）；**fail / partial 把 `{用例ID}.webm` 写进 evidence**。
 
 **定位与判断纪律**：
 
@@ -157,7 +162,7 @@
 
 ### 3.2 应用 bug 事实记录（仅事实，不给修复方案）
 
-记录：测试用例 ID、重现步骤、预期、实际、证据（截图路径）。**禁止**写修复方案/改哪行/优先级/发布与否（属开发范畴）。
+记录：测试用例 ID、重现步骤、预期、实际、证据（截图 / 录像路径）、接口信息（方法/URL/状态码/请求体/响应体，若有）。**禁止**写修复方案/改哪行/优先级/发布与否（属开发范畴）。
 
 ---
 
@@ -170,7 +175,8 @@
   "tests": [
     { "id": "TC-{模块}-001", "title": "用例标题", "status": "pass|fail|partial|blocked",
       "expected": "预期结果", "actual": "实际观察到的现象",
-      "evidence": ["截图相对路径或文件名"], "error": "失败/阻塞的简短原因（pass 留空）" }
+      "evidence": ["截图.png", "录像.webm（仅 fail/partial）"], "error": "失败/阻塞的简短原因（pass 留空）",
+      "api": { "method": "POST", "url": "/api/...", "status": 200, "requestBody": "...", "responseBody": "..." } }
   ],
   "notes": "可选：整体说明"
 }

@@ -16,12 +16,26 @@
 
 export type FourStateStatus = "pass" | "fail" | "partial" | "blocked";
 
+/**
+ * 失败/部分通过用例的关键请求接口信息——执行阶段经 browser_network_requests/
+ * browser_network_request 采集（见 prompts.ts 执行 prompt），随 @@RESULT 带回，穿透
+ * run.json 供缺陷报告引用。pass/blocked 用例通常无此字段。
+ */
+export interface ApiInfo {
+  method?: string;
+  url?: string;
+  status?: number | string;
+  requestBody?: string;
+  responseBody?: string;
+}
+
 export interface RawResult {
   id?: string;
   status?: string;
   actual?: string;
   error?: string;
   evidence?: string[];
+  api?: ApiInfo;
 }
 
 export interface ReducedTest {
@@ -30,6 +44,7 @@ export interface ReducedTest {
   actual: string;
   error: string;
   evidence: string[];
+  api?: ApiInfo;
 }
 
 export interface RunCounts {
@@ -87,6 +102,28 @@ export function harvestResults(text: string): RawResult[] {
 }
 
 /**
+ * Normalize a raw `api` field (from @@RESULT) into ApiInfo. Drops non-objects and
+ * defensively truncates bodies (the prompt asks the agent to cap at ~4000, but we
+ * re-clamp server-side so a chatty agent can't bloat run.json). Returns undefined
+ * when nothing meaningful was captured, so the field stays absent on pass cases.
+ */
+export function sanitizeApi(raw: unknown): ApiInfo | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const a = raw as Record<string, unknown>;
+  const str = (v: unknown, max: number): string | undefined =>
+    typeof v === "string" ? (v.length > max ? v.slice(0, max) + "…" : v) : undefined;
+  const out: ApiInfo = {
+    method: str(a.method, 16),
+    url: str(a.url, 2048),
+    status: typeof a.status === "number" ? a.status : str(a.status, 16),
+    requestBody: str(a.requestBody, 4000),
+    responseBody: str(a.responseBody, 4000),
+  };
+  if (!out.method && !out.url && out.status === undefined && !out.requestBody && !out.responseBody) return undefined;
+  return out;
+}
+
+/**
  * Deterministically reduce raw per-case results into a canonical run.json.
  * @param raw  parsed @@RESULT objects (from harvestResults)
  * @param opts module/env labels + an ISO timestamp (passed in — keeps this pure)
@@ -101,12 +138,14 @@ export function reduceResults(
     const actual = typeof r.actual === "string" ? r.actual : "";
     // ENV_HINT reclass: an environment/connection failure is "blocked", not a bug.
     if (status === "fail" && ENV_HINT.test(`${error} ${actual}`)) status = "blocked";
+    const api = sanitizeApi(r.api);
     return {
       id: String(r.id ?? "用例"),
       status,
       actual,
       error,
       evidence: Array.isArray(r.evidence) ? r.evidence.map(String) : [],
+      ...(api ? { api } : {}),
     };
   });
 

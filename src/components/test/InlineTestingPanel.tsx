@@ -5,7 +5,8 @@ import { useRouter } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useTranslation } from "@/hooks/useTranslation";
-import { ListChecks, ChartBar, Gear, ArrowLeft, FolderPlus, Play, Stop, ArrowUp, SpinnerGap, Sparkle, Terminal, WarningCircle, Wrench, Trash, Desktop, Lightning, Plug, CheckCircle, type Icon } from "@/components/ui/icon";
+import { ListChecks, ChartBar, Gear, ArrowLeft, FolderPlus, Play, Stop, ArrowUp, SpinnerGap, Sparkle, Terminal, WarningCircle, Wrench, Trash, Desktop, Lightning, Plug, CheckCircle, File as FileIcon, FileArrowDown, NotePencil, DownloadSimple, Eye, X, CaretDown, CaretUp, Check, type Icon } from "@/components/ui/icon";
+import { MarkdownEditor } from "@/components/editor/MarkdownEditor.lazy";
 import type { TranslationKey } from "@/i18n";
 import { useNativeFolderPicker } from "@/hooks/useNativeFolderPicker";
 import { FolderPicker } from "@/components/chat/FolderPicker";
@@ -42,8 +43,10 @@ type StepStatus = "idle" | "running" | "review" | "done" | "error";
 type ConvoRole = "ai" | "tool" | "user" | "error";
 interface ConvoMsg { role: ConvoRole; text: string }
 interface FourState { total: number; pass: number; fail: number; partial: number; blocked: number }
+// 失败/部分通过用例的关键请求接口信息（执行阶段采集，进缺陷报告；镜像 reduce.ts ApiInfo）。
+interface ApiInfo { method?: string; url?: string; status?: number | string; requestBody?: string; responseBody?: string }
 // One executed case parsed from an execution @@RESULT frame (drives 报告 table).
-interface CaseResult { id: string; status: string; actual?: string; error?: string; evidence?: string[] }
+interface CaseResult { id: string; status: string; actual?: string; error?: string; evidence?: string[]; api?: ApiInfo }
 // 用例设计阶段生成的一条测试用例(读 cases.json,镜像 ai-lab-test-framework)。在用例
 // 阶段详情卡展示。字段全可选 —— AI 产出可能有出入,渲染时按需兜底。
 interface GeneratedCase {
@@ -81,6 +84,8 @@ interface ReportEntry {
   markdown: string;
   /** The defect report ({task}-{env}-缺陷报告.md), if generated (第三交付物). */
   defectMarkdown: string;
+  /** 可选 XLSX 执行矩阵 basename（按需生成，存在才有）— 产物列表 Excel 行显隐 + 表格预览定位。 */
+  xlsxFile?: string;
 }
 
 interface Project {
@@ -1284,7 +1289,20 @@ export function InlineTestingPanel() {
                     </div>
                   </div>
                 )}
-                {focusStep !== "cases" && (
+                {/* 测试报告步：报告完成后就地展示概览+产出资料+全文（替换占位提示）。 */}
+                {focusStep === "report" && (
+                  <ReportStepPanel
+                    t={t}
+                    projectPath={current?.path ?? ""}
+                    taskName={activeTask?.name ?? ""}
+                    env={env}
+                    reportStatus={stepStatus.report}
+                    live={{ caseResults, fourState, circuitBroken }}
+                    model={model}
+                    providerId={providerId}
+                  />
+                )}
+                {focusStep !== "cases" && focusStep !== "report" && (
                   <div className="mt-2 text-[11px] text-muted-foreground">{t("test.flow.evidenceNote")}</div>
                 )}
               </div>
@@ -1842,6 +1860,424 @@ function CompareView({ t, projectPath, taskName, env }: { t: T; projectPath: str
         </table>
       </div>
     </div>
+  );
+}
+
+// 产物预览的目标：md（测试报告/缺陷报告，预览/编辑切换）或 xlsx（执行矩阵只读表格）。
+type PreviewState =
+  | { kind: "md"; titleKey: TranslationKey; rel: string; content: string; editable: boolean }
+  | { kind: "xlsx"; rel: string; file: string };
+
+// 报告步「就地展示」面板（替换报告节点的占位符）。报告步 done 时拉 GET /api/test/reports
+// 取当前 task+env 的 ReportEntry，展示：概览条（复用 funcPassRateStr 口径）+ 产出资料列表
+// （测试报告.md / Excel / 缺陷报告.md，可「点开修改」或预览）+ 内嵌报告全文（ReactMarkdown）。
+// 失败态给提示、不渲染空报告。指标在 entry 到达前回退实时执行 tally，避免空白。
+function ReportStepPanel({
+  t, projectPath, taskName, env, reportStatus, live, model, providerId,
+}: {
+  t: T;
+  projectPath: string;
+  taskName: string;
+  env: string;
+  reportStatus: StepStatus;
+  live: { caseResults: CaseResult[]; fourState: FourState; circuitBroken: boolean };
+  model: string;
+  providerId: string;
+}) {
+  const router = useRouter();
+  const [entry, setEntry] = useState<ReportEntry | null>(null);
+  const [reloadTick, setReloadTick] = useState(0);
+  const [defectBusy, setDefectBusy] = useState(false);
+  const [handoffBusy, setHandoffBusy] = useState(false);
+  const [docOpen, setDocOpen] = useState(true);
+  const [preview, setPreview] = useState<PreviewState | null>(null);
+
+  useEffect(() => {
+    if (reportStatus !== "done" || !projectPath) { setEntry(null); return; }
+    let cancelled = false;
+    fetch(`/api/test/reports?projectPath=${encodeURIComponent(projectPath)}`)
+      .then((r) => (r.ok ? r.json() : { reports: [] }))
+      .then((d) => {
+        if (cancelled) return;
+        const list = (d.reports ?? []) as ReportEntry[];
+        setEntry(list.find((x) => x.task === taskName && x.env === env) ?? null);
+      })
+      .catch(() => { if (!cancelled) setEntry(null); });
+    return () => { cancelled = true; };
+  }, [reportStatus, projectPath, taskName, env, reloadTick]);
+
+  // 失败态：报告步执行失败 → 提示重跑，不渲染空报告。
+  if (reportStatus === "error") {
+    return (
+      <div className="mt-3 rounded-lg border border-status-error-border bg-status-error-muted/40 p-3 text-[11px] text-status-error-foreground">
+        {t("test.report.stepFailed")}
+      </div>
+    );
+  }
+  // 非 done（idle/running/review）→ 维持「详细执行过程见下方对话」提示。
+  if (reportStatus !== "done") {
+    return <div className="mt-2 text-[11px] text-muted-foreground">{t("test.flow.evidenceNote")}</div>;
+  }
+
+  // 指标优先持久化 entry，pre-fetch 时回退实时执行 tally。
+  const counts = entry?.counts ?? live.fourState;
+  const total = counts.total || live.caseResults.length;
+  const execRate = total ? Math.round((counts.pass / total) * 100) : 0;
+  const funcRateStr = funcPassRateStr({ total, pass: counts.pass, blocked: counts.blocked }, entry?.funcCounts, entry?.funcPassStr);
+  const fail = counts.fail ?? 0;
+
+  // 产物相对路径（与 reports/route.ts、artifactPaths 命名一致）。
+  const reportMdRel = `AI_LabTest/report/${taskName}/${taskName}-${env}.md`;
+  const defectMdRel = `AI_LabTest/report/${taskName}/${taskName}-${env}-缺陷报告.md`;
+  const xlsxRel = entry?.xlsxFile ? `AI_LabTest/report/${taskName}/${entry.xlsxFile}` : "";
+
+  // 生成缺陷报告（第三交付物）：调 /api/test/defect 跑完后 reload 拿到新写的 defectMarkdown。
+  const defectGen = async () => {
+    setDefectBusy(true);
+    try {
+      const res = await fetch("/api/test/defect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectPath, taskName, env, model: model || undefined, providerId: providerId || undefined }),
+      });
+      if (res.body) { const reader = res.body.getReader(); for (;;) { const { done } = await reader.read(); if (done) break; } }
+      setReloadTick((n) => n + 1);
+    } catch { /* leave as-is */ } finally { setDefectBusy(false); }
+  };
+
+  // 交给研发修复：建项目内对话会话，把缺陷摘要写入 composer 草稿，跳转让用户审阅后发送。
+  const handoff = async () => {
+    const failed = (entry?.tests ?? []).filter((c) => String(c.status).toLowerCase() === "fail");
+    const lines = failed.map((c) => `- ${c.id}：${c.actual || c.error || "（详见报告）"}`).join("\n");
+    const msg = [
+      "请修复测试发现的缺陷。", "",
+      `项目路径：${projectPath}`,
+      `测试任务：${taskName} · 环境：${env}`,
+      `结果：用例 ${counts.total}，通过 ${counts.pass}，失败 ${counts.fail}${counts.blocked ? `，阻塞 ${counts.blocked}` : ""}`,
+      "", "失败用例（疑似应用缺陷）：", lines || "（详见报告）", "",
+      `完整测试报告：${reportMdRel}`, "",
+      "请先 Read 上面的测试报告和相关源码，定位每个失败用例的根因并修复；改完简述每处改动。阻塞类（环境问题）不在本次修复范围。",
+    ].join("\n");
+    setHandoffBusy(true);
+    try {
+      const res = await fetch("/api/chat/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ working_directory: projectPath, model: model || undefined, provider_id: providerId || undefined }),
+      });
+      const data = await res.json();
+      const id = data?.session?.id as string | undefined;
+      if (!id) throw new Error("no session");
+      try { sessionStorage.setItem(`codepilot:draft:${id}`, msg); } catch { /* quota */ }
+      router.push(`/chat/${id}`);
+    } catch { setHandoffBusy(false); }
+  };
+
+  const metric = (label: string, value: string, danger?: boolean) => (
+    <div className="rounded-lg bg-muted/40 p-2.5">
+      <div className="text-[10px] text-muted-foreground">{label}</div>
+      <div className={`text-lg font-semibold ${danger ? "text-status-error-foreground" : "text-foreground"}`}>{value}</div>
+    </div>
+  );
+
+  const fileRow = (icon: ReactNode, label: string, sub: string, action: ReactNode) => (
+    <div className="flex items-center gap-2 rounded-lg border border-border bg-background px-2.5 py-1.5">
+      {icon}
+      <span className="shrink-0 text-[11px] text-foreground">{label}</span>
+      <span className="truncate font-mono text-[10px] text-muted-foreground">{sub}</span>
+      <span className="flex-1" />
+      {action}
+    </div>
+  );
+
+  const editBtn = (titleKey: TranslationKey, rel: string, content: string) => (
+    <button
+      onClick={() => setPreview({ kind: "md", titleKey, rel, content, editable: false })}
+      className="flex shrink-0 items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[10px] text-foreground hover:bg-muted"
+    >
+      <NotePencil size={12} /> {t("test.report.openEdit")}
+    </button>
+  );
+
+  return (
+    <div className="mt-2 space-y-3">
+      {entry?.circuitBroken && (
+        <div className="rounded-md border border-status-error-border bg-status-error-muted px-2.5 py-1.5 text-[11px] text-status-error-foreground">
+          ⚠ {t("test.report.circuitBroken")}
+        </div>
+      )}
+
+      {/* 概览条 */}
+      <div className="flex items-stretch gap-2">
+        <div className="grid flex-1 grid-cols-4 gap-2">
+          {metric(t("test.report.funcRate"), funcRateStr)}
+          {metric(t("test.report.execRate"), `${execRate}%`)}
+          {metric(t("test.report.defects"), String(fail), fail > 0)}
+          {metric(t("test.report.caseCount"), String(total))}
+        </div>
+        {fail > 0 && (
+          <button
+            onClick={handoff}
+            disabled={handoffBusy}
+            className="flex shrink-0 items-center gap-1 self-center rounded-md bg-primary px-2.5 py-1.5 text-[11px] font-medium text-primary-foreground disabled:opacity-50"
+          >
+            <Wrench size={12} /> {t("test.report.handoff")}（{fail}）
+          </button>
+        )}
+      </div>
+
+      {/* 产出资料列表 */}
+      <div>
+        <div className="mb-1.5 flex items-center gap-1.5">
+          <FolderPlus size={13} className="text-muted-foreground" />
+          <span className="text-[11px] font-medium text-foreground">{t("test.report.deliverables")}</span>
+          <span className="text-[10px] text-muted-foreground">{t("test.report.deliverablesHint")}</span>
+        </div>
+        <div className="space-y-1.5">
+          {fileRow(
+            <FileIcon size={14} className="shrink-0 text-muted-foreground" />,
+            t("test.step.report.name"),
+            `${taskName}-${env}.md`,
+            entry?.markdown
+              ? editBtn("test.step.report.name", reportMdRel, entry.markdown)
+              : <span className="shrink-0 text-[10px] text-muted-foreground">{t("test.report.docEmpty")}</span>,
+          )}
+          {entry?.xlsxFile && fileRow(
+            <FileArrowDown size={14} className="shrink-0 text-muted-foreground" />,
+            t("test.report.fileXlsx"),
+            entry.xlsxFile,
+            <div className="flex shrink-0 items-center gap-1">
+              <button onClick={() => setPreview({ kind: "xlsx", rel: xlsxRel, file: entry.xlsxFile! })} className="rounded border border-border px-1.5 py-0.5 text-[10px] text-foreground hover:bg-muted">{t("test.report.tabPreview")}</button>
+              <a href={`/api/test/report-xlsx?projectPath=${encodeURIComponent(projectPath)}&taskName=${encodeURIComponent(taskName)}&file=${encodeURIComponent(entry.xlsxFile)}&download=1`} className="flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[10px] text-foreground hover:bg-muted"><DownloadSimple size={12} /> {t("test.report.exportFile")}</a>
+            </div>,
+          )}
+          {fileRow(
+            <WarningCircle size={14} className="shrink-0 text-muted-foreground" />,
+            t("test.defect.tab"),
+            entry?.defectMarkdown ? `${taskName}-${env}-缺陷报告.md` : t("test.defect.empty"),
+            entry?.defectMarkdown
+              ? editBtn("test.defect.tab", defectMdRel, entry.defectMarkdown)
+              : (
+                <button onClick={defectGen} disabled={defectBusy || fail === 0} className="flex shrink-0 items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[10px] text-foreground hover:bg-muted disabled:opacity-50">
+                  {defectBusy ? <SpinnerGap size={12} className="animate-spin" /> : <WarningCircle size={12} />} {defectBusy ? t("test.defect.generating") : t("test.defect.gen")}
+                </button>
+              ),
+          )}
+        </div>
+      </div>
+
+      {/* 内嵌报告全文 */}
+      {entry?.markdown && (
+        <div className="border-t border-border pt-2">
+          <button onClick={() => setDocOpen((v) => !v)} className="mb-1.5 flex w-full items-center gap-1.5 text-left">
+            <Eye size={13} className="text-muted-foreground" />
+            <span className="text-[11px] font-medium text-foreground">{t("test.report.docTitle")}</span>
+            <span className="flex-1" />
+            {docOpen ? <CaretUp size={12} className="text-muted-foreground" /> : <CaretDown size={12} className="text-muted-foreground" />}
+          </button>
+          {docOpen && (
+            <div className="prose prose-sm dark:prose-invert max-h-[40vh] max-w-none overflow-auto rounded-lg bg-muted/30 p-3">
+              <ReactMarkdown remarkPlugins={[remarkGfm]}>{entry.markdown}</ReactMarkdown>
+            </div>
+          )}
+        </div>
+      )}
+
+      {preview && (
+        <PreviewModal
+          t={t}
+          preview={preview}
+          projectPath={projectPath}
+          taskName={taskName}
+          env={env}
+          onClose={() => setPreview(null)}
+          onSaved={() => { setPreview(null); setReloadTick((n) => n + 1); }}
+          setEditable={(editable) => setPreview((p) => (p && p.kind === "md" ? { ...p, editable } : p))}
+        />
+      )}
+    </div>
+  );
+}
+
+// 产物预览弹窗壳（复刻用例编辑器的 fixed inset-0 模态）：md 走 MdPreview（渲染/编辑），
+// xlsx 走 XlsxPreview（只读表格 + 证据截图灯箱/录像内联）。
+function PreviewModal({ t, preview, projectPath, taskName, env, onClose, onSaved, setEditable }: {
+  t: T;
+  preview: PreviewState;
+  projectPath: string;
+  taskName: string;
+  env: string;
+  onClose: () => void;
+  onSaved: () => void;
+  setEditable: (editable: boolean) => void;
+}) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+      <div className="flex max-h-[85vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-border bg-card" onClick={(e) => e.stopPropagation()}>
+        {preview.kind === "md" ? (
+          <MdPreview t={t} preview={preview} projectPath={projectPath} onClose={onClose} onSaved={onSaved} setEditable={setEditable} />
+        ) : (
+          <XlsxPreview t={t} preview={preview} projectPath={projectPath} taskName={taskName} env={env} onClose={onClose} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+// md 产物预览：默认 ReactMarkdown 渲染；切「编辑」用 CodeMirror MarkdownEditor，⌘S / 保存
+// 按钮经 POST /api/files/write 写回（overwrite）。draft 本地态，预览模式也渲染 draft 以反映改动。
+function MdPreview({ t, preview, projectPath, onClose, onSaved, setEditable }: {
+  t: T;
+  preview: Extract<PreviewState, { kind: "md" }>;
+  projectPath: string;
+  onClose: () => void;
+  onSaved: () => void;
+  setEditable: (editable: boolean) => void;
+}) {
+  const [draft, setDraft] = useState(preview.content);
+  const [saving, setSaving] = useState(false);
+  const [err, setErr] = useState(false);
+  useEffect(() => { setDraft(preview.content); }, [preview.rel, preview.content]);
+
+  const save = async () => {
+    setSaving(true);
+    setErr(false);
+    try {
+      const res = await fetch("/api/files/write", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ path: preview.rel, baseDir: projectPath, content: draft, overwrite: true, createParents: true }),
+      });
+      if (!res.ok) throw new Error("write failed");
+      onSaved();
+    } catch {
+      setErr(true);
+      setSaving(false);
+    }
+  };
+
+  return (
+    <>
+      <div className="flex items-center gap-2 border-b border-border px-3 py-2">
+        <FileIcon size={14} className="shrink-0 text-muted-foreground" />
+        <span className="shrink-0 text-[11px] font-medium text-foreground">{t(preview.titleKey)}</span>
+        <span className="truncate font-mono text-[10px] text-muted-foreground">{preview.rel.split("/").pop()}</span>
+        <span className="flex-1" />
+        <div className="flex shrink-0 overflow-hidden rounded border border-border text-[10px]">
+          <button onClick={() => setEditable(false)} className={`px-2 py-0.5 ${!preview.editable ? "bg-primary text-primary-foreground" : "text-foreground hover:bg-muted"}`}>{t("test.report.tabPreview")}</button>
+          <button onClick={() => setEditable(true)} className={`px-2 py-0.5 ${preview.editable ? "bg-primary text-primary-foreground" : "text-foreground hover:bg-muted"}`}>{t("test.report.tabEdit")}</button>
+        </div>
+        {preview.editable && (
+          <button onClick={save} disabled={saving} className="flex shrink-0 items-center gap-1 rounded bg-primary px-2 py-0.5 text-[10px] font-medium text-primary-foreground disabled:opacity-50">
+            {saving ? <SpinnerGap size={11} className="animate-spin" /> : <Check size={11} />} {saving ? t("test.report.saving") : t("test.report.save")}
+          </button>
+        )}
+        <button onClick={onClose} className="shrink-0 text-muted-foreground hover:text-foreground" aria-label={t("test.report.close")}><X size={14} /></button>
+      </div>
+      {err && <div className="bg-status-error-muted px-3 py-1 text-[10px] text-status-error-foreground">{t("test.report.saveFailed")}</div>}
+      <div className="min-h-0 flex-1 overflow-auto">
+        {preview.editable ? (
+          <div className="h-[60vh]"><MarkdownEditor value={draft} onChange={setDraft} onSave={save} /></div>
+        ) : (
+          <div className="prose prose-sm dark:prose-invert max-w-none p-4">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{draft}</ReactMarkdown>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+// xlsx 产物预览：调 /api/test/report-xlsx 解析为表格；证据单元格（.png/.webm 等）渲染成
+// 可点开的 chip → 截图灯箱 / 录像内联播放（经 /api/test/media，与 ReportView 同口径）。
+function XlsxPreview({ t, preview, projectPath, taskName, env, onClose }: {
+  t: T;
+  preview: Extract<PreviewState, { kind: "xlsx" }>;
+  projectPath: string;
+  taskName: string;
+  env: string;
+  onClose: () => void;
+}) {
+  const [data, setData] = useState<{ sheets: { name: string; rows: string[][] }[] } | null>(null);
+  const [err, setErr] = useState(false);
+  const [lightbox, setLightbox] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/test/report-xlsx?projectPath=${encodeURIComponent(projectPath)}&taskName=${encodeURIComponent(taskName)}&file=${encodeURIComponent(preview.file)}`)
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error("fetch failed"))))
+      .then((d) => { if (!cancelled) { if (d.error) setErr(true); else setData(d); } })
+      .catch(() => { if (!cancelled) setErr(true); });
+    return () => { cancelled = true; };
+  }, [projectPath, taskName, preview.file]);
+
+  const mediaUrl = (file: string) => `/api/test/media?projectPath=${encodeURIComponent(projectPath)}&taskName=${encodeURIComponent(taskName)}&env=${encodeURIComponent(env)}&file=${encodeURIComponent(file)}`;
+  const mediaRe = /\.(png|jpe?g|webp|gif|webm|mp4|mov)$/i;
+  const isVid = (f: string) => /\.(webm|mp4|mov)$/i.test(f);
+  const cellNode = (text: string) => {
+    const tok = text.trim();
+    if (mediaRe.test(tok)) {
+      const base = tok.split(/[\\/]/).pop() || tok;
+      return (
+        <button onClick={() => setLightbox(base)} title={base} className="rounded border border-border px-1 py-0.5 text-[10px] text-primary hover:bg-muted">
+          {isVid(base) ? `🎬 ${t("test.media.video")}` : `🖼 ${t("test.media.image")}`}
+        </button>
+      );
+    }
+    return <span>{text}</span>;
+  };
+
+  const sheet = data?.sheets?.[0];
+  const header = sheet?.rows?.[0] ?? [];
+  const body = sheet?.rows?.slice(1) ?? [];
+
+  return (
+    <>
+      <div className="flex items-center gap-2 border-b border-border px-3 py-2">
+        <FileArrowDown size={14} className="shrink-0 text-muted-foreground" />
+        <span className="shrink-0 text-[11px] font-medium text-foreground">{t("test.report.fileXlsx")}</span>
+        <span className="truncate font-mono text-[10px] text-muted-foreground">{preview.file}</span>
+        <span className="flex-1" />
+        <a href={`/api/test/report-xlsx?projectPath=${encodeURIComponent(projectPath)}&taskName=${encodeURIComponent(taskName)}&file=${encodeURIComponent(preview.file)}&download=1`} className="flex shrink-0 items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[10px] text-foreground hover:bg-muted"><DownloadSimple size={12} /> {t("test.report.exportFile")}</a>
+        <button onClick={onClose} className="shrink-0 text-muted-foreground hover:text-foreground" aria-label={t("test.report.close")}><X size={14} /></button>
+      </div>
+      <div className="min-h-0 flex-1 overflow-auto p-3">
+        {err ? (
+          <p className="text-[11px] text-status-error-foreground">{t("test.report.xlsxLoadFailed")}</p>
+        ) : !data ? (
+          <p className="text-[11px] text-muted-foreground">{t("test.report.loading")}</p>
+        ) : !sheet || sheet.rows.length === 0 ? (
+          <p className="text-[11px] text-muted-foreground">{t("test.report.xlsxEmpty")}</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full border-collapse text-[11px]">
+              <thead>
+                <tr className="bg-muted/50 text-left text-muted-foreground">
+                  {header.map((h, i) => <th key={i} className="whitespace-nowrap px-2 py-1.5 font-medium">{h}</th>)}
+                </tr>
+              </thead>
+              <tbody>
+                {body.map((row, ri) => (
+                  <tr key={ri} className="border-t border-border align-top">
+                    {header.map((_, ci) => <td key={ci} className="px-2 py-1.5 text-foreground">{cellNode(row[ci] ?? "")}</td>)}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+      {lightbox && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-6" onClick={() => setLightbox(null)}>
+          {isVid(lightbox) ? (
+            <video src={mediaUrl(lightbox)} controls autoPlay className="max-h-full max-w-full" onClick={(e) => e.stopPropagation()} />
+          ) : (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={mediaUrl(lightbox)} alt={lightbox} className="max-h-full max-w-full object-contain" onClick={(e) => e.stopPropagation()} />
+          )}
+        </div>
+      )}
+    </>
   );
 }
 
