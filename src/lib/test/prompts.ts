@@ -183,7 +183,7 @@ function executionPrompt(taskName: string, env: string, baseUrl?: string): strin
   const rule = ruleBlock(
     '测试执行规范',
     loadRule('test-execution'),
-    '逐条用例用浏览器工具满足前置→执行操作→对照预期判四态(pass/fail/partial/blocked)；环境/连接/登录态无法建立归 blocked（非应用 bug）；每条截图留证'
+    '逐条用例用浏览器工具满足前置→执行操作→对照预期判四态(pass/fail/partial/blocked)；前置卡在非被测第三方依赖可按 §1.1 受控桩(browser_route)绕过、桩须留痕；仅被测接口/地址/账号本身不可建立才归 blocked（非应用 bug）；每条截图留证'
   );
   return `请对测试任务「${taskName}」执行测试用例（AI 通过 Playwright MCP 浏览器工具实时驱动浏览器逐条执行）。
 
@@ -194,9 +194,9 @@ ${baseUrl ? `被测地址：${baseUrl}` : '（未配置被测地址：若无法�
 ${rule}
 
 执行：
-1. Read ${p.cases}，逐条用例：用浏览器工具（browser_navigate / browser_click / browser_type / browser_fill_form / browser_snapshot / browser_wait_for / browser_take_screenshot）满足前置条件（如登录）→ 执行测试操作 → 对照用例「预期结果」判定四态。
+1. Read ${p.cases}，逐条用例：用浏览器工具（browser_navigate / browser_click / browser_type / browser_fill_form / browser_snapshot / browser_wait_for / browser_take_screenshot）满足前置条件（如登录）→ 执行测试操作 → 对照用例「预期结果」判定四态。前置若卡在**非被测的第三方依赖**（三方 OAuth 回调 / 验证码 / 外部 SDK / 无关外部 API），可用 \`browser_route\` 受控桩绕过（见《测试执行规范》§1.1：先真实后桩、被测接口绝不桩、桩须在 actual 留痕、用完 browser_unroute 清理）。
 2. **每条用例先打印进度** \`▶ 用例 N/总数：{标题}\`；结束**输出单行 JSON**：\`@@RESULT {"id":"...","status":"pass|fail|partial|blocked","actual":"观察现象","evidence":["TC-xxx.png"],"error":"失败/阻塞原因，pass留空"}\`（单行、严格 JSON、内层引号用「」或转义）。
-3. **四态**：pass=预期完全出现；fail=预期明确未出现且可复现（疑似应用缺陷，保留事实不放水）；partial=部分满足；blocked=前置/路径/登录态/地址不可达（**不是应用 bug**）。
+3. **四态**：pass=预期完全出现；fail=预期明确未出现且可复现（疑似应用缺陷，保留事实不放水）；partial=部分满足；blocked=前置/路径/登录态/地址不可达（**不是应用 bug**）。判 blocked 前：若挡路的是**非被测前置依赖**，先按 §1.1 受控桩重试；仅当**被测接口/地址/账号本身**无法建立才判 blocked。桩过的用例 \`actual\` 须注明「已桩 mock <依赖>」，被桩部分不计入验证。
 4. 绝不修改业务源码与配置，只在被测系统页面内操作；截图存到 \`${p.evidenceDir}\`。
 5. **不要自己写汇总文件**：每条用例的 \`@@RESULT\` 行就是唯一事实来源，平台会据此**确定性归约**出 \`${p.runJson}\`（计数 / 四态 / 环境错误重分类 / 401 熔断由平台代码计算，不由你汇总）。你只需保证**每条用例都输出一行规范的 @@RESULT**。
 
