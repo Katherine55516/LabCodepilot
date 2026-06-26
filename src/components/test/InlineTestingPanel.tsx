@@ -85,8 +85,6 @@ interface ReportEntry {
   markdown: string;
   /** The defect report ({task}-{env}-缺陷报告.md), if generated (第三交付物). */
   defectMarkdown: string;
-  /** 可选 XLSX 执行矩阵 basename（按需生成，存在才有）— 产物列表 Excel 行显隐 + 表格预览定位。 */
-  xlsxFile?: string;
 }
 
 interface Project {

@@ -32,8 +32,8 @@ reduce.ts  harvestResults → reduceResults
   ├─ sanitizeApi(r.api)：丢非对象/空捕获，服务端再次截断 body(~4000)
   └─ ReducedTest 带 api? + evidence(含 .webm) → run.json
        │
-GET /api/test/reports  （读 run.json + 同目录 .md / -缺陷报告.md / .xlsx）
-  → ReportEntry { …, tests[].api, markdown, defectMarkdown, xlsxFile }
+GET /api/test/reports  （读 run.json + 同目录 .md / -缺陷报告.md）
+  → ReportEntry { …, tests[].api, markdown, defectMarkdown }
        │
 ReportStepPanel（报告步 done 时 fetch）→ 概览/产物/全文 + 预览弹窗
 ```
@@ -52,8 +52,8 @@ ReportStepPanel（报告步 done 时 fetch）→ 概览/产物/全文 + 预览�
 
 | 路由 | 变更 | 说明 |
 |------|------|------|
-| `GET /api/test/reports` | 改 | `tests` 自动带出 `api`；新增 `xlsxFile`（同任务目录里含本 env 标签的 `.xlsx` basename，存在才回传） |
-| `GET /api/test/report-xlsx` | **新增** | `?projectPath&taskName&file` → exceljs 解析为 `{sheets:[{name,rows:string[][]}]}`；`?download=1` → 回传原 .xlsx（attachment）。路径加固：`isUnsafeSegment(taskName)` + `file` 取 basename，白名单到 `AI_LabTest/report/{taskName}/` |
+| `GET /api/test/reports` | 改 | `tests` 自动带出 `api`（每用例接口信息），供报告步面板与缺陷报告消费 |
+| `GET /api/test/report-xlsx` | **新增** | `?projectPath&taskName&env` → **从 run.json + cases.json 确定性派生**执行矩阵（序号/用例ID/标题/状态/期望/实际/结论/证据），返回 `{sheets:[{name,rows:string[][]}]}`；`?download=1` → exceljs 即时生成 .xlsx（attachment）。**不依赖磁盘 .xlsx**。路径加固：`isUnsafeSegment(taskName/env)` |
 | `POST /api/files/write` | 复用 | md「点开修改」保存：`{path: rel, baseDir: projectPath, content, overwrite:true, createParents:true}` |
 | `GET /api/test/media` | 复用 | 证据截图/录像流式服务，已支持 webm/mp4 + Range（拖动播放） |
 | `POST /api/test/defect` | 改 prompt | 结构化缺陷模板，接口信息读 `tests[].api`（见下） |
@@ -95,11 +95,18 @@ ReportStepPanel（报告步 done 时 fetch）→ 概览/产物/全文 + 预览�
 
 - **录像起停可靠性**：`browser_start_video`/`stop_video` 多次起停 + 按 filename 落盘 + 「pass 段丢弃」的实际行为，需一次真实执行验证（POC）。若 MCP 不支持丢弃 pass 段，退化为「全部保留 + 前端只展示 fail/partial」，并由平台侧清理未被任何 `evidence` 引用的录像。
 - **接口 body 截断/脱敏**：prompt 要求 ≤4000 字符；`sanitizeApi` 服务端再次截断。敏感数据（token/密码）脱敏策略未实现（开放问题）。
-- **xlsx 是按需交付物**：报告步默认只写 .md，xlsx 由 `anthropic-skills:xlsx` 按需生成、命名 `{模块}-report-{ENV}-{date}.xlsx`，reports API 用「含 env 标签的 .xlsx」启发式检测，多份取首个。
-- **大报告渲染**：超长 markdown 内嵌渲染未做懒加载/虚拟化。
+- **Excel 矩阵从 run.json 派生**（不再依赖磁盘 .xlsx，见 §十一）：列内容受限于 run.json + cases.json 字段；若用户另用 `anthropic-skills:xlsx` 生成过更丰富的 AI 版 .xlsx，本视图不读取它（两者独立）。
+- **大报告渲染**：超长 markdown 渲染未做虚拟化（内嵌全文已改为展开才渲染、见 §十一）。
 
 ## 十、验证
 
 - `npm run test`（typecheck + 单测）：通过；新增 `sanitizeApi`/`api` 透传单测（`src/__tests__/unit/test-reduce.test.ts`）。
 - CDP（chrome-devtools MCP，dev `--webpack` 端口隔离 + fetch mock 注入报告 done 态）：报告面板三段渲染正确、md 点开修改的预览/编辑（CodeMirror）正常、xlsx 预览表格 + 证据截图/录像 chip 正常、无 console 报错、无 error boundary。
 - 真实执行链路（录像/接口实采）需一次带失败用例的真跑验证（同时作为录像 POC）。
+
+## 十一、真机反馈迭代（2026-06-26）
+
+首次真机跑通后按用户反馈调整三处（已合并进 V2.2_test）：
+- **Excel 执行矩阵常显**：原「磁盘有 .xlsx 才显示」→ 改为 `report-xlsx` route **从 run.json + cases.json 确定性派生**矩阵，产物列表 Excel 行**始终显示**；预览=表格、导出=即时生成 .xlsx。废弃 reports API 的 `xlsxFile` 检测与 `ReportEntry.xlsxFile` 字段。
+- **产物预览点开才渲染**：md 产物拆成「预览」(ReactMarkdown 渲染) +「点开修改」(CodeMirror 编辑) 两动作（`mdActions`）；「测试报告文档」内嵌全文默认折叠、展开才渲染（`docOpen` 默认 false）。
+- **缺陷报告直接生成**：去掉 `fail===0` 禁用，「生成缺陷报告」按钮始终可点（0 缺陷时由 defect route 生成「未发现应用缺陷」留痕）。
