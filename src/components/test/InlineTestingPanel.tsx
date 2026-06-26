@@ -229,6 +229,16 @@ function taskStageName(st: TaskState, t: T): string {
   return t(cur.name);
 }
 
+// 把 run.json 的 ISO 时间（UTC）格式化为本地「YYYY年MM月DD日 HH:mm:ss」。
+// 空值返回 ""；非法时间原样返回（兜底，不抛错）。
+function fmtCnDateTime(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return String(iso);
+  const p = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}年${p(d.getMonth() + 1)}月${p(d.getDate())}日 ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
+}
+
 export function InlineTestingPanel() {
   const { t } = useTranslation();
   const router = useRouter();
@@ -585,7 +595,7 @@ export function InlineTestingPanel() {
       .catch(() => {});
     return () => { cancelled = true; };
     // handleEnvChange is stable enough (only writes localStorage); excluded to avoid re-fetch loops.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+     
   }, [view, current?.path, env]);
 
   const stepUnlocked = (step: TestStep): boolean => {
@@ -1708,7 +1718,7 @@ function CompareView({ t, projectPath, taskName, env }: { t: T; projectPath: str
   const a = history[Math.min(aIdx, history.length - 1)];
   const b = history[Math.min(bIdx, history.length - 1)];
   const diff = diffRuns(a, b); // a=基线(prev)，b=目标(curr)
-  const verLabel = (e: RunHistoryEntry) => `${e.time ? e.time.slice(0, 19).replace("T", " ") : e.stamp} · ${e.passStr || "—"}`;
+  const verLabel = (e: RunHistoryEntry) => `${e.time ? fmtCnDateTime(e.time) : e.stamp} · ${e.passStr || "—"}`;
   const stLabel: Record<string, TranslationKey> = { pass: "test.state.pass", fail: "test.state.fail", partial: "test.state.partial", blocked: "test.state.blocked" };
   const st = (s: string | null) => (s ? (stLabel[s] ? t(stLabel[s]) : s) : "—");
 
@@ -1932,7 +1942,7 @@ function ReportBrowser({ projects, t, model, providerId }: { projects: Project[]
                               {r.counts.blocked > 0 ? ` · ${t("test.state.blocked")} ${r.counts.blocked}` : ""}
                             </span>
                             <span className="flex-1" />
-                            {r.time && <span className="text-[10px] text-muted-foreground">{r.time}</span>}
+                            {r.time && <span className="text-[10px] text-muted-foreground">{fmtCnDateTime(r.time)}</span>}
                             <span className="w-3 text-center text-[10px] text-muted-foreground">{isOpen ? "▲" : "▼"}</span>
                           </button>
                           {isOpen && (
