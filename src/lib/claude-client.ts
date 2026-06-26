@@ -603,6 +603,7 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
             'mcp__codepilot-image-gen',
             'mcp__codepilot-cli-tools',
             'mcp__codepilot-dashboard',
+            'mcp__codepilot-skill',
           ],
         };
 
@@ -692,6 +693,27 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
           };
           if (queryOptions.systemPrompt && typeof queryOptions.systemPrompt === 'object' && 'append' in queryOptions.systemPrompt) {
             queryOptions.systemPrompt.append = (queryOptions.systemPrompt.append || '') + '\n\n' + NOTIFICATION_MCP_SYSTEM_PROMPT;
+          }
+        }
+
+        // Skill MCP: surfaces PROJECT-level skills/commands to the agent. Under
+        // DB/managed providers the SDK drops the 'project' settingSource, so
+        // skills in <cwd>/.claude/{skills,commands} are otherwise invisible —
+        // whether the user created them in-app or dropped them in manually. This
+        // in-process server reads them directly from disk (provider-independent)
+        // and only registers when the project actually has skills, so projects
+        // without any pay no tool-discovery overhead. See src/lib/skill-mcp.ts.
+        {
+          const { createSkillMcpServer, buildSkillSystemPrompt } = await import('@/lib/skill-mcp');
+          const skillPrompt = buildSkillSystemPrompt(resolvedWorkingDirectory.path);
+          if (skillPrompt) {
+            queryOptions.mcpServers = {
+              ...(queryOptions.mcpServers || {}),
+              'codepilot-skill': createSkillMcpServer(resolvedWorkingDirectory.path),
+            };
+            if (queryOptions.systemPrompt && typeof queryOptions.systemPrompt === 'object' && 'append' in queryOptions.systemPrompt) {
+              queryOptions.systemPrompt.append = (queryOptions.systemPrompt.append || '') + '\n\n' + skillPrompt;
+            }
           }
         }
 

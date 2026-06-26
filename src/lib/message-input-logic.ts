@@ -131,6 +131,7 @@ export function resolveItemSelection(
         description: item.description || '',
         kind: item.kind || 'slash_command',
         installedSource: item.installedSource,
+        source: item.source,
       },
       newInputValue: before + after,
     };
@@ -200,6 +201,34 @@ export function dispatchBadge(
       return { prompt: finalPrompt, displayLabel };
     }
   }
+}
+
+/**
+ * Expand a project-scoped slash command's markdown body into a plain prompt.
+ *
+ * Project slash commands live in <cwd>/.claude/commands and are NOT loaded by
+ * the Claude Agent SDK under DB/managed providers (the 'project' settingSource
+ * is dropped — see provider-resolver.ts). Sending the literal `/command` would
+ * therefore not resolve. Instead the app reads the command body and sends it as
+ * a normal prompt, which works for every provider.
+ *
+ * Supports the common `$ARGUMENTS` placeholder (Claude Code's primary slash
+ * command token); when absent, any user context is appended after the body.
+ * Advanced native tokens (frontmatter, $1..$9, !`bash`, @file) are intentionally
+ * NOT interpreted — app-authored skills are plain prompt templates.
+ */
+export function expandSkillBody(rawBody: string, userContent: string): string {
+  // Drop YAML frontmatter — it is metadata, not prompt content.
+  const body = (rawBody || '').replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, '').trim();
+  const trimmedUser = (userContent || '').trim();
+
+  if (/\$ARGUMENTS\b/.test(body)) {
+    return body.replace(/\$ARGUMENTS\b/g, trimmedUser);
+  }
+  if (trimmedUser) {
+    return body ? `${body}\n\n${trimmedUser}` : trimmedUser;
+  }
+  return body;
 }
 
 /**

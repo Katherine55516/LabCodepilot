@@ -47,3 +47,4 @@
 | voice-input-client.md | 语音转文字输入（客户端，已实现/服务端 mock 联调）：百炼 qwen3-asr-flash-realtime 实时 WS、renderer AudioWorklet 抽 PCM16/16k + IPC、主进程 ws 持连直连百炼、临时 token 缓存(30min/复用)、麦克风按钮 + text/stash 回填、mac 权限/entitlement/Info.plist、逐文件完整代码 + 验证步骤。配套 voice-input-server.md |
 | voice-input-server.md | 语音转文字输入（服务端，另一项目/待实现）：仅 1 个接口 POST /api/v1/asr/token——用真 DASHSCOPE_API_KEY 换百炼临时 token 下发已登录用户；⚠️TTL 必走 query string(?expire_in_seconds=1800，放 body 只给 60s)；契约/错误码/配额/安全/Node 参考实现/curl 自测，服务端不经手音频。配套 voice-input-client.md |
 | stream-idle-timeout.md | 对话流空闲超时改按「实质内容」计时：lastSubstantiveEventTime + markSubstantive 回调分类、shouldAbortForNoContent 纯判定（stream-timeout.ts 可单测）、keep_alive/状态不重置掐断、权限期间暂停、与工具超时/真断线正交、:1475 死代码说明、i18n 文案 |
+| skills-discovery.md | 技能创建与发现（应用内创建 + 手动拖入）：两套运行时 × settingSources 约束、列表 PROJECT 分区 + 项目徽章、Option C 项目斜杠命令客户端展开（expandSkillBody + displayLabel 保 `/命令`）、codepilot-skill in-process MCP 文件系统直扫绕开 settingSources、磁盘格式识别矩阵、零开销注册、非原生执行语义局限 |

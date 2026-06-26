@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Dialog,
   DialogContent,
@@ -20,6 +20,12 @@ interface CreateSkillDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onCreate: (name: string, scope: "global" | "project", content: string) => Promise<void>;
+  /**
+   * Whether a project working directory is selected. When false, the "project"
+   * scope is disabled and creation defaults to global — otherwise a project
+   * skill would be written to the server's process.cwd() (an orphan location).
+   */
+  hasProject?: boolean;
 }
 
 const TEMPLATES: { label: string; content: string }[] = [
@@ -57,13 +63,20 @@ export function CreateSkillDialog({
   open,
   onOpenChange,
   onCreate,
+  hasProject = true,
 }: CreateSkillDialogProps) {
   const { t } = useTranslation();
   const [name, setName] = useState("");
-  const [scope, setScope] = useState<"global" | "project">("project");
+  const [scope, setScope] = useState<"global" | "project">(hasProject ? "project" : "global");
   const [templateIdx, setTemplateIdx] = useState(0);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState("");
+
+  // Without a selected project, "project" scope has nowhere valid to write —
+  // force global whenever the dialog opens in that state.
+  useEffect(() => {
+    if (open && !hasProject) setScope("global");
+  }, [open, hasProject]);
 
   const handleCreate = async () => {
     const trimmed = name.trim();
@@ -82,7 +95,7 @@ export function CreateSkillDialog({
       await onCreate(trimmed, scope, TEMPLATES[templateIdx].content);
       // Reset on success
       setName("");
-      setScope("project");
+      setScope(hasProject ? "project" : "global");
       setTemplateIdx(0);
       onOpenChange(false);
     } catch (err) {
@@ -129,12 +142,14 @@ export function CreateSkillDialog({
             <div className="flex gap-2">
               <Button
                 variant="outline"
-                onClick={() => setScope("project")}
+                disabled={!hasProject}
+                onClick={() => hasProject && setScope("project")}
                 className={cn(
                   "flex-1 justify-start",
                   scope === "project"
                     ? "border-primary/50 bg-primary/10 text-primary"
-                    : "border-border hover:bg-accent"
+                    : "border-border hover:bg-accent",
+                  !hasProject && "opacity-50 cursor-not-allowed"
                 )}
               >
                 <FolderOpen size={16} />
@@ -155,9 +170,11 @@ export function CreateSkillDialog({
               </Button>
             </div>
             <p className="text-xs text-muted-foreground">
-              {scope === "project"
-                ? "Saved in .claude/commands/ (this project only)"
-                : "Saved in ~/.claude/commands/ (available everywhere)"}
+              {!hasProject
+                ? "No project selected — saved globally in ~/.claude/commands/ (available everywhere)"
+                : scope === "project"
+                  ? "Saved in .claude/commands/ (this project only)"
+                  : "Saved in ~/.claude/commands/ (available everywhere)"}
             </p>
           </div>
 

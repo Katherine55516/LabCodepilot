@@ -117,6 +117,13 @@ export interface CommandBadge {
   description: string;
   kind: SkillKind;
   installedSource?: 'agents' | 'claude';
+  /**
+   * Scope of the skill this badge represents. Carried from the popover item so
+   * the submit path can expand project-scoped slash commands client-side
+   * (project commands are not loaded by the SDK under DB/managed providers —
+   * see message-input-logic.ts expandSkillBody and MessageInput handleSubmit).
+   */
+  source?: 'global' | 'project' | 'plugin' | 'installed' | 'sdk';
 }
 
 /** Active CLI tool badge shown above the textarea. */

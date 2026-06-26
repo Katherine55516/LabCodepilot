@@ -12,7 +12,7 @@ import {
   PromptInputButton,
 } from '@/components/ai-elements/prompt-input';
 import type { ChatStatus } from 'ai';
-import type { FileAttachment, MentionRef } from '@/types';
+import type { FileAttachment, MentionRef, CommandBadge } from '@/types';
 import { SlashCommandButton } from './SlashCommandButton';
 import { SlashCommandPopover } from './SlashCommandPopover';
 import { CliToolsPopover } from './CliToolsPopover';
@@ -45,10 +45,49 @@ import {
 import { useCommandBadge } from '@/hooks/useCommandBadge';
 import { useCliToolsFetch } from '@/hooks/useCliToolsFetch';
 import { useSlashCommands } from '@/hooks/useSlashCommands';
-import { resolveKeyAction, cycleIndex, resolveDirectSlash, dispatchBadge, buildCliAppend, parseMentionRefs, dedupeMentionsByPath } from '@/lib/message-input-logic';
+import { resolveKeyAction, cycleIndex, resolveDirectSlash, dispatchBadge, expandSkillBody, buildCliAppend, parseMentionRefs, dedupeMentionsByPath } from '@/lib/message-input-logic';
+import type { BadgeDispatchResult } from '@/lib/message-input-logic';
 import { QuickActions } from './QuickActions';
 
 const MAX_MENTION_FILE_BYTES = 256 * 1024; // 256KB per @file mention
+
+/**
+ * Expand a project-scoped slash command into a prompt by reading its body from
+ * the skills API and substituting `$ARGUMENTS`. Returns null when the badge is
+ * not a project filesystem slash command (caller falls back to the literal
+ * /command via dispatchBadge). Project commands are not loaded by the SDK under
+ * DB/managed providers, so the literal token would not resolve — see
+ * docs/exec-plans/active/skills-discovery-fix.md.
+ */
+async function expandProjectSlashCommand(
+  badge: CommandBadge,
+  userContent: string,
+  cwd?: string,
+): Promise<BadgeDispatchResult | null> {
+  const name = badge.command.replace(/^\//, '');
+  if (!name) return null;
+  try {
+    const params = new URLSearchParams();
+    if (cwd) params.set('cwd', cwd);
+    const qs = params.toString();
+    const res = await fetch(`/api/skills/${encodeURIComponent(name)}${qs ? `?${qs}` : ''}`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    const skill = data.skill;
+    // Only expand project-scoped filesystem slash commands. Agent skills
+    // (SKILL.md) and non-project sources are handled elsewhere.
+    if (!skill || skill.source !== 'project') return null;
+    if (skill.kind && skill.kind !== 'slash_command') return null;
+    const trimmedUser = (userContent || '').trim();
+    const baseLabel = `/${badge.label}`;
+    return {
+      prompt: expandSkillBody(skill.content || '', userContent),
+      displayLabel: trimmedUser ? `${baseLabel}\n${trimmedUser}` : baseLabel,
+    };
+  } catch {
+    return null;
+  }
+}
 const MAX_MENTION_FILE_COUNT = 6;
 const MAX_DIRECTORY_MENTION_COUNT = 3;
 const MAX_DIRECTORY_PREVIEW_ITEMS = 30;
@@ -501,7 +540,23 @@ export function MessageInput({
       const uploadedFiles = await convertFiles();
       const mentionPayload = await resolveMentionPayload();
       const files = [...uploadedFiles, ...mentionPayload.files];
-      const { prompt, displayLabel } = dispatchBadge(badges, content);
+      // Project-scoped slash commands are not loaded by the SDK under DB/managed
+      // providers, so the literal /command would not resolve. Expand the command
+      // body client-side and send it as the prompt; the displayLabel keeps the
+      // /command chip in the transcript. Falls back to dispatchBadge on any miss.
+      let dispatched = dispatchBadge(badges, content);
+      if (
+        badges.length === 1 &&
+        badges[0].kind === 'slash_command' &&
+        badges[0].source !== 'global' &&
+        badges[0].source !== 'sdk' &&
+        badges[0].source !== 'plugin' &&
+        badges[0].source !== 'installed'
+      ) {
+        const expanded = await expandProjectSlashCommand(badges[0], content, workingDirectory);
+        if (expanded) dispatched = expanded;
+      }
+      const { prompt, displayLabel } = dispatched;
       const mentionSections: string[] = [];
       if (mentionPayload.directoryNotes.length > 0) {
         mentionSections.push(`[Referenced Directories]\n${mentionPayload.directoryNotes.join('\n\n')}`);
@@ -573,7 +628,7 @@ export function MessageInput({
       mentionPayload.mentions.length > 0 ? mentionPayload.mentions : undefined,
     );
     setInputValue('');
-  }, [inputValue, mentionNodeTypes, onSend, onCommand, disabled, isStreaming, popover, badges, cliBadge, imageGen, addBadgeWithOrder, clearBadgesWithOrder, setCliBadge, setInputValue, fetchDirectorySummary, fetchMentionFileAttachment]);
+  }, [inputValue, mentionNodeTypes, onSend, onCommand, disabled, isStreaming, popover, badges, cliBadge, imageGen, addBadgeWithOrder, clearBadgesWithOrder, setCliBadge, setInputValue, fetchDirectorySummary, fetchMentionFileAttachment, workingDirectory]);
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLTextAreaElement>) => {

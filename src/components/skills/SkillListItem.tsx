@@ -25,6 +25,12 @@ interface SkillListItemProps {
   selected: boolean;
   onSelect: () => void;
   onDelete: (skill: SkillItem) => void;
+  /**
+   * Basename of the current project's working directory. Rendered as a badge
+   * on project-scoped skills so the user can tell which project a skill
+   * belongs to. Global/installed/plugin skills carry no badge.
+   */
+  projectName?: string;
 }
 
 export function SkillListItem({
@@ -32,6 +38,7 @@ export function SkillListItem({
   selected,
   onSelect,
   onDelete,
+  projectName,
 }: SkillListItemProps) {
   const { t } = useTranslation();
   const [hovered, setHovered] = useState(false);
@@ -66,7 +73,17 @@ export function SkillListItem({
     >
       <Lightning size={16} className="shrink-0 text-muted-foreground" />
       <div className="flex-1 min-w-0">
-        <span className="text-sm font-medium truncate block">/{skill.name}</span>
+        <div className="flex items-center gap-1.5">
+          <span className="text-sm font-medium truncate">/{skill.name}</span>
+          {skill.source === "project" && projectName && (
+            <span
+              className="shrink-0 rounded border border-primary/30 bg-primary/5 px-1 py-0 text-[9px] font-medium leading-tight text-primary/80"
+              title={`Project: ${projectName}`}
+            >
+              {projectName}
+            </span>
+          )}
+        </div>
         <p className="text-xs text-muted-foreground truncate">
           {skill.description}
         </p>

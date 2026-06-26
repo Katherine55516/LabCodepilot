@@ -28,6 +28,7 @@ import {
   buildCliAppend,
   parseMentionRefs,
   dedupeMentionsByPath,
+  expandSkillBody,
 } from '../../lib/message-input-logic';
 
 // =====================================================================
@@ -878,5 +879,69 @@ describe('Built-in commands data integrity (real BUILT_IN_COMMANDS)', () => {
     for (const cmd of BUILT_IN_COMMANDS) {
       assert.equal(cmd.builtIn, true, `command "${cmd.value}" should have builtIn=true`);
     }
+  });
+});
+
+// --- Option C: project slash command client-side expansion -----------
+
+describe('expandSkillBody (project slash command expansion)', () => {
+  it('strips YAML frontmatter from the body', () => {
+    const raw = '---\nname: foo\ndescription: bar\n---\nDo the thing.';
+    assert.equal(expandSkillBody(raw, ''), 'Do the thing.');
+  });
+
+  it('substitutes $ARGUMENTS with the user content', () => {
+    const raw = 'Summarize this: $ARGUMENTS';
+    assert.equal(expandSkillBody(raw, 'the README'), 'Summarize this: the README');
+  });
+
+  it('substitutes every $ARGUMENTS occurrence', () => {
+    const raw = '$ARGUMENTS then again $ARGUMENTS';
+    assert.equal(expandSkillBody(raw, 'X'), 'X then again X');
+  });
+
+  it('appends user content when there is no $ARGUMENTS placeholder', () => {
+    const raw = 'Review the code.';
+    assert.equal(expandSkillBody(raw, 'focus on auth'), 'Review the code.\n\nfocus on auth');
+  });
+
+  it('returns the body unchanged when there is no user content and no placeholder', () => {
+    assert.equal(expandSkillBody('Just do it.', ''), 'Just do it.');
+  });
+
+  it('substitutes $ARGUMENTS with empty string when no user content given', () => {
+    assert.equal(expandSkillBody('before $ARGUMENTS after', ''), 'before  after');
+  });
+
+  it('handles empty body gracefully', () => {
+    assert.equal(expandSkillBody('', 'hi'), 'hi');
+    assert.equal(expandSkillBody('', ''), '');
+  });
+});
+
+describe('resolveItemSelection threads source onto the badge', () => {
+  it('carries source="project" from the popover item into the badge', () => {
+    const item: PopoverItem = {
+      label: 'mytest',
+      value: '/mytest',
+      description: 'a project skill',
+      kind: 'slash_command',
+      source: 'project',
+    };
+    const result = resolveItemSelection(item, 'skill', 0, '/mytest', 'mytest');
+    assert.equal(result.action, 'set_badge');
+    assert.equal(result.badge?.source, 'project');
+    assert.equal(result.badge?.kind, 'slash_command');
+  });
+
+  it('leaves source undefined when the popover item has none', () => {
+    const item: PopoverItem = {
+      label: 'foo',
+      value: '/foo',
+      description: '',
+      kind: 'slash_command',
+    };
+    const result = resolveItemSelection(item, 'skill', 0, '/foo', 'foo');
+    assert.equal(result.badge?.source, undefined);
   });
 });
