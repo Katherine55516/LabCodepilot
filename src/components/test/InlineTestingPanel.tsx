@@ -10,10 +10,13 @@ import { MarkdownEditor } from "@/components/editor/MarkdownEditor.lazy";
 import type { TranslationKey } from "@/i18n";
 import { useNativeFolderPicker } from "@/hooks/useNativeFolderPicker";
 import { FolderPicker } from "@/components/chat/FolderPicker";
+import { showToast } from "@/hooks/useToast";
+import { normalizeProjectPath, dedupeProjectsByPath } from "@/lib/projectDedupe";
 import { ModelSelectorDropdown } from "@/components/chat/ModelSelectorDropdown";
 import { useProviderModels } from "@/hooks/useProviderModels";
 import { diffRuns, funcPassRateStr } from "@/lib/test/compare";
 import { parseExecProgress } from "@/lib/test/exec-progress";
+import { withDownstreamReset } from "@/lib/test/step-status";
 import type { RunHistoryEntry } from "@/lib/test/history";
 
 /**
@@ -142,6 +145,8 @@ const STEPS: { step: TestStep; name: TranslationKey; desc: TranslationKey }[] = 
   { step: "execution", name: "test.step.execution.name", desc: "test.step.execution.desc" },
   { step: "report", name: "test.step.report.name", desc: "test.step.report.desc" },
 ];
+// 步骤顺序（传给 withDownstreamReset 等纯函数，避免它们 import 服务端的 prompts.ts）。
+const STEP_ORDER: TestStep[] = STEPS.map((s) => s.step);
 
 // Gating model (ai-lab-test-framework / prototype): 需求分析 + 用例设计 are
 // human-gated — they run, then wait for the user to 批准 the output before the
@@ -656,6 +661,9 @@ export function InlineTestingPanel() {
           const ss = st?.stepStatus;
           if (ss) for (const k of Object.keys(ss) as Array<keyof typeof ss>) if (ss[k] === "running") ss[k] = "error";
         }
+        // 历史遗留去重：早期无防重逻辑可能产生同路径的重复项目（如两个 mealAllowance）→
+        // 按路径合并，保留任务最多的那张卡片。去重结果会被下方持久化 effect 写回文件，一次性清理现状。
+        nextProjects = dedupeProjectsByPath(nextProjects);
         setProjects(nextProjects);
         setTaskStates(nextStates);
       } catch {
@@ -687,8 +695,14 @@ export function InlineTestingPanel() {
   const { isElectron, openNativePicker } = useNativeFolderPicker();
   const [folderPickerOpen, setFolderPickerOpen] = useState(false);
   const addProjectFromPath = (path: string) => {
-    const name = path.split(/[/\\]+/).filter(Boolean).pop() || path;
-    addProject(name, path);
+    const normalized = normalizeProjectPath(path);
+    // 防重复：同一路径已在列表中 → 弹警告 Toast 并阻止新增，不再生成重复卡片。
+    if (projects.some((p) => normalizeProjectPath(p.path) === normalized)) {
+      showToast({ type: "warning", message: t("test.duplicateProject") });
+      return;
+    }
+    const name = normalized.split(/[/\\]+/).filter(Boolean).pop() || normalized;
+    addProject(name, normalized);
   };
   const handlePickProject = async () => {
     if (isElectron) {
@@ -827,7 +841,11 @@ export function InlineTestingPanel() {
     abortRef.current = ctrl;
     stoppedStepRef.current.delete(`${id}:${step}`); // (re)running this step → clear any prior 停止 mark
     setBusyTaskId(id);
-    patchTask(id, (s) => ({ stepStatus: { ...s.stepStatus, [step]: "running" } }));
+    // 重跑某步 → 其下游各步产物失效：当前步置 running，其后所有步骤复位 idle(未开始)，
+    // 避免重跑时下游残留上次的「已完成」(如重跑「测试执行」后「测试报告」仍显示已完成)。
+    // 规则收敛在 withDownstreamReset；所有重跑入口都经此处，四节点统一生效。
+    // 正向跑流水线时下游本就 idle，复位是 no-op，不影响正常流程。
+    patchTask(id, (s) => ({ stepStatus: withDownstreamReset(s.stepStatus, step, STEP_ORDER, "running", "idle") }));
     if (step === "execution") {
       patchTask(id, () => ({
         fourState: { total: 0, pass: 0, fail: 0, partial: 0, blocked: 0 },

@@ -62,6 +62,7 @@ const zhHK: Record<TranslationKey, string> = {
   'test.projects': '專案',
   'test.addProject': '新增專案',
   'test.projectsEmpty': '還沒有專案 —— 新增一個開始。',
+  'test.duplicateProject': '此專案已新增，請勿重複新增。',
   'test.addProjectModal.title': '新增專案',
   'test.addProjectModal.nameLabel': '專案名稱',
   'test.addProjectModal.namePlaceholder': '例如：learning-system',

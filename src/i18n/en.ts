@@ -56,6 +56,7 @@ const en = {
   'test.projects': 'Projects',
   'test.addProject': 'Add project',
   'test.projectsEmpty': 'No projects yet — add one to start.',
+  'test.duplicateProject': 'This project has already been added.',
   'test.addProjectModal.title': 'Add Project',
   'test.addProjectModal.nameLabel': 'Project name',
   'test.addProjectModal.namePlaceholder': 'e.g. learning-system',
