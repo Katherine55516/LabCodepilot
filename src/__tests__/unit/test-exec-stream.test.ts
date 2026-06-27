@@ -12,7 +12,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { wrapExecutionStream, POST } from "../../app/api/test/run/route";
+import { wrapExecutionStream, wrapReportStream, POST } from "../../app/api/test/run/route";
 
 let proj: string;
 beforeEach(() => { proj = fs.mkdtempSync(path.join(os.tmpdir(), "exec-stream-")); });
@@ -82,6 +82,25 @@ describe("wrapExecutionStream", () => {
     const run = readRun();
     assert.deepEqual(run.funcCounts, run.counts);
     assert.equal(run.regressionTotal, 0);
+  });
+});
+
+// 报告步收口：报告 .md 全靠 AI 用 Write 落盘；wrapReportStream 在流末校验文件存在，
+// 缺失就补发 error 帧（前端据此标「失败」而非误报已完成）。
+describe("wrapReportStream — 报告 .md 落盘校验", () => {
+  const reportMd = () => path.join(proj, "AI_LabTest", "report", "订单", "订单-local.md");
+  it("报告 .md 存在 → 原样转发、不补 error 帧", async () => {
+    fs.mkdirSync(path.dirname(reportMd()), { recursive: true });
+    fs.writeFileSync(reportMd(), "# 报告", "utf-8");
+    const out = (await drain(wrapReportStream(mockStream([textFrame("完成")]), { projectPath: proj, taskName: "订单", env: "local" }))).join("");
+    assert.ok(out.includes("完成"));
+    assert.ok(!out.includes('"type":"error"'));
+  });
+  it("报告 .md 缺失 → 末尾补发 error 帧", async () => {
+    const out = (await drain(wrapReportStream(mockStream([textFrame("只产了摘要没写文件")]), { projectPath: proj, taskName: "订单", env: "local" }))).join("");
+    assert.ok(out.includes("只产了摘要没写文件")); // 原始帧仍转发
+    assert.ok(out.includes('"type":"error"')); // 末尾补了 error
+    assert.ok(out.includes("未生成"));
   });
 });
 

@@ -1214,7 +1214,7 @@ export function InlineTestingPanel() {
               {/* current-step detail card */}
               <div className="rounded-xl border border-border bg-card p-3">
                 <div className="mb-2 flex items-center gap-2">
-                  <h4 className="text-xs font-semibold text-foreground">{t(STEPS.find((s) => s.step === focusStep)!.name)}</h4>
+                  <h4 className="text-xs font-semibold text-foreground">{focusStep === "report" ? t("test.report.overviewTitle") : t(STEPS.find((s) => s.step === focusStep)!.name)}</h4>
                   {focusStep === "execution" && (
                     <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">{t("test.flow.aiDriven")}</span>
                   )}

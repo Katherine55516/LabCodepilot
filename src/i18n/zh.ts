@@ -215,6 +215,7 @@ const zh: Record<TranslationKey, string> = {
   'test.report.docTitle': '测试报告文档',
   'test.report.handoff': '交给研发修复',
   'test.report.envsSuffix': '个环境',
+  'test.report.overviewTitle': '测试报告总览',
   'test.report.deliverables': '产出资料',
   'test.report.deliverablesHint': '本步产物 · 点开修改',
   'test.report.fileXlsx': '测试报告（Excel）',

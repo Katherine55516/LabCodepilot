@@ -224,6 +224,7 @@ const zhHK: Record<TranslationKey, string> = {
   'test.report.docTitle': '測試報告文檔',
   'test.report.handoff': '交給研發修復',
   'test.report.envsSuffix': '個環境',
+  'test.report.overviewTitle': '測試報告總覽',
   'test.report.deliverables': '產出資料',
   'test.report.deliverablesHint': '本步產物 · 點開修改',
   'test.report.fileXlsx': '測試報告（Excel）',

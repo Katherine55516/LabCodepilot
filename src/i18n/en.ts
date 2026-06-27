@@ -218,6 +218,7 @@ const en = {
   'test.report.docTitle': 'Report document',
   'test.report.handoff': 'Send to dev to fix',
   'test.report.envsSuffix': 'envs',
+  'test.report.overviewTitle': 'Test report overview',
   'test.report.deliverables': 'Deliverables',
   'test.report.deliverablesHint': 'Step outputs · click to edit',
   'test.report.fileXlsx': 'Test report (Excel)',

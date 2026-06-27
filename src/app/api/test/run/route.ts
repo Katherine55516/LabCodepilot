@@ -122,6 +122,40 @@ export function wrapExecutionStream(
 }
 
 /**
+ * 报告步收口：报告 .md 全靠 report 步的 AI 用 Write 落盘（见 reportPrompt 落点）。AI 偶发
+ * 只产摘要不调 Write → 步骤照样以「流结束无 error」标 done，结果「已完成」却无报告文档。
+ * 这里在流结束时校验 `{task}-{env}.md` 是否真存在，缺失就补发一条 error 帧——前端据此把
+ * 报告步标「失败」（而非误报已完成），面板转入失败态提示「重跑」，让用户能重试。
+ */
+export function wrapReportStream(
+  src: ReadableStream<string>,
+  opts: { projectPath: string; taskName: string; env: string },
+): ReadableStream<string> {
+  const reader = src.getReader();
+  return new ReadableStream<string>({
+    async pull(controller) {
+      try {
+        const { done, value } = await reader.read();
+        if (done) {
+          const reportAbs = path.join(opts.projectPath, artifactPaths(opts.taskName, opts.env).report);
+          if (!fs.existsSync(reportAbs)) {
+            controller.enqueue(`data: ${JSON.stringify({ type: 'error', data: '测试报告文档未生成（AI 未写出 .md），请点「重跑」重试。' })}\n\n`);
+          }
+          controller.close();
+          return;
+        }
+        controller.enqueue(value);
+      } catch (e) {
+        controller.error(e);
+      }
+    },
+    cancel(reason) {
+      reader.cancel(reason);
+    },
+  });
+}
+
+/**
  * AI 测试工作台 · 步骤执行路由（Phase 2 · 移植 ai-lab-test-framework 执行流程）。
  *
  * 单步执行：按 step 用框架的角色 system prompt + 规则跑一步，产物落到项目根
@@ -234,10 +268,13 @@ export async function POST(req: Request): Promise<Response> {
       : undefined;
 
     // Execution step: wrap to sweep evidence + reduce/persist run.json + emit run_json.
+    // Report step: wrap to verify the .md was actually written (else emit error → 失败).
     const finalStream =
       step === 'execution'
         ? wrapExecutionStream(stream, { projectPath, taskName, env, runStartMs, leadingFrame })
-        : stream;
+        : step === 'report'
+          ? wrapReportStream(stream, { projectPath, taskName, env })
+          : stream;
 
     return new Response(finalStream, {
       headers: {
