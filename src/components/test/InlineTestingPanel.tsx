@@ -245,6 +245,15 @@ function fmtCnDateTime(iso: string | null | undefined): string {
   return `${d.getFullYear()}年${p(d.getMonth() + 1)}月${p(d.getDate())}日 ${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`;
 }
 
+// 把前端对话气泡转成 streamClaude 的多轮历史：丢 tool/error（噪声、省 token），
+// ai→assistant、user→user，只保留最近 20 条（后端 fallbackTokenBudget 再兜底）。
+function toConversationHistory(convo: ConvoMsg[]): { role: "user" | "assistant"; content: string }[] {
+  return convo
+    .filter((m) => m.role === "user" || m.role === "ai")
+    .slice(-20)
+    .map((m) => ({ role: m.role === "ai" ? ("assistant" as const) : ("user" as const), content: m.text }));
+}
+
 export function InlineTestingPanel() {
   const { t } = useTranslation();
   const router = useRouter();
@@ -264,6 +273,9 @@ export function InlineTestingPanel() {
   const [loaded, setLoaded] = useState(false);
   const [busyTaskId, setBusyTaskId] = useState<string | null>(null);
   const [composer, setComposer] = useState("");
+  // 真对话里 AI 通过 @@ACTION 行建议重跑某步 → 存这里 → composer 上方渲染确认条，
+  // 用户点「运行此步」才真正 runStepManual（不自动跑，重跑会覆盖产物且耗时）。
+  const [pendingAction, setPendingAction] = useState<{ step: TestStep; reason: string } | null>(null);
   // Simulated progress % for non-execution running steps (no granular progress) — see effect below.
   const [simPct, setSimPct] = useState(0);
   const threadRef = useRef<HTMLDivElement>(null);
@@ -431,6 +443,122 @@ export function InlineTestingPanel() {
       setBusyTaskId(null);
       // 用例改完 → 重新拉取展示（需求步无 inline 展示，跳过）。
       if (!sawError && step === "cases" && proj.path) {
+        try {
+          const d = await fetch(`/api/test/cases?projectPath=${encodeURIComponent(proj.path)}&taskName=${encodeURIComponent(task.name)}`).then((r) => r.json());
+          if (Array.isArray(d?.cases)) setCasesPreview(d.cases as GeneratedCase[]);
+        } catch { /* keep current preview */ }
+      }
+    }
+  };
+
+  // 真对话：发送即让 AI 在当前任务上下文响应（答疑/改产物/建议触发步骤）。复用 reviseStep
+  // 的 SSE 解析骨架；text 行先过 @@ACTION 解析（命中→确认条，不显示该行）；tool_use 若写了
+  // cases.json → 结束后刷新 casesPreview。与 runStep/reviseStep 共用 abortRef+busyTaskId 串行。
+  const chatSend = async () => {
+    const proj = selected !== null ? projects[selected] : null;
+    const task = proj && selectedTask !== null ? proj.tasks[selectedTask] : null;
+    const text = composer.trim();
+    if (!proj?.path || !task || busyTaskId || !text) return;
+    const id = task.id;
+    const ctrl = new AbortController();
+    abortRef.current = ctrl;
+    setBusyTaskId(id);
+    const push = (msg: ConvoMsg) => patchTask(id, (s) => ({ convo: [...s.convo, msg] }));
+    const appendAi = (chunk: string) =>
+      patchTask(id, (s) => {
+        const last = s.convo[s.convo.length - 1];
+        if (last && last.role === "ai") return { convo: [...s.convo.slice(0, -1), { role: "ai", text: last.text + chunk }] };
+        return { convo: [...s.convo, { role: "ai", text: chunk }] };
+      });
+    // history 快照必须在 push 用户气泡【之前】取，否则这条 message 会重复进历史。
+    const history = toConversationHistory(taskStates[id]?.convo ?? []);
+    push({ role: "user", text });
+    setComposer("");
+    setPendingAction(null); // 新一轮对话 → 清掉上一轮未处理的动作建议
+    let sawError = false;
+    let casesDirty = false;
+    let lineBuf = "";
+    // 逐行：先认 @@ACTION（命中则存 pendingAction、不显示该行），否则当普通文本累积。
+    const handleLine = (l: string) => {
+      const idx = l.indexOf("@@ACTION");
+      if (idx >= 0) {
+        try {
+          const a = JSON.parse(l.slice(idx + 8).trim());
+          if (a && a.type === "runStep" && STEPS.some((s) => s.step === a.step)) {
+            setPendingAction({ step: a.step as TestStep, reason: typeof a.reason === "string" ? a.reason : "" });
+            return;
+          }
+        } catch { /* 非法 → 落到下面当普通文本 */ }
+      }
+      if (l.trim()) appendAi(l + "\n");
+    };
+    try {
+      const res = await fetch("/api/test/chat", {
+        method: "POST",
+        signal: ctrl.signal,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          projectPath: proj.path,
+          taskName: task.name,
+          focusStep,
+          message: text,
+          history,
+          env,
+          model: model || undefined,
+          providerId: providerId || undefined,
+        }),
+      });
+      if (!res.ok || !res.body) {
+        const j = await res.json().catch(() => ({}));
+        push({ role: "error", text: (j.error as string) || t("test.chat.failed") });
+        sawError = true;
+        return;
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const frames = buf.split("\n\n");
+        buf = frames.pop() || "";
+        for (const frame of frames) {
+          const fline = frame.replace(/^data:\s?/, "").trim();
+          if (!fline) continue;
+          let evt: { type?: string; data?: string } | null = null;
+          try { evt = JSON.parse(fline); } catch { continue; }
+          if (!evt) continue;
+          if (evt.type === "text") {
+            lineBuf += evt.data || "";
+            const ls = lineBuf.split("\n");
+            lineBuf = ls.pop() || "";
+            for (const l of ls) handleLine(l);
+          } else if (evt.type === "tool_use") {
+            try {
+              const tu = JSON.parse(evt.data || "{}");
+              const label = toolUseLabel(tu.name || "", tu.input);
+              if (label) push({ role: "tool", text: `→ ${label}` });
+              const fp = String(tu.input?.file_path ?? "");
+              if (/^(Write|Edit|MultiEdit)$/.test(tu.name || "") && fp.endsWith(".cases.json")) casesDirty = true;
+            } catch {}
+          } else if (evt.type === "error") {
+            let msg = evt.data || "";
+            try { const d = JSON.parse(evt.data || "{}"); msg = d.userMessage || d.rawMessage || msg; } catch {}
+            push({ role: "error", text: msg });
+            sawError = true;
+          }
+        }
+      }
+      if (lineBuf.trim()) handleLine(lineBuf);
+    } catch (e) {
+      if (ctrl.signal.aborted || (e instanceof DOMException && e.name === "AbortError")) push({ role: "user", text: `■ ${t("test.flow.stop")}` });
+      else { push({ role: "error", text: `请求失败：${e instanceof Error ? e.message : String(e)}` }); sawError = true; }
+    } finally {
+      if (abortRef.current === ctrl) abortRef.current = null;
+      setBusyTaskId(null);
+      // AI 改了用例 → 重新拉取展示（与 reviseStep 同款刷新）。
+      if (!sawError && casesDirty && proj.path) {
         try {
           const d = await fetch(`/api/test/cases?projectPath=${encodeURIComponent(proj.path)}&taskName=${encodeURIComponent(task.name)}`).then((r) => r.json());
           if (Array.isArray(d?.cases)) setCasesPreview(d.cases as GeneratedCase[]);
@@ -1331,16 +1459,36 @@ export function InlineTestingPanel() {
                 </button>
               </div>
             )}
+            {/* AI 通过 @@ACTION 建议重跑某步 → 用户确认才跑（不自动触发，重跑会覆盖产物/耗时） */}
+            {pendingAction && (
+              <div className="mx-3 mb-2 flex shrink-0 items-center gap-2 rounded-md border border-primary/40 bg-primary/5 px-3 py-2 text-[11px] text-foreground">
+                <span>💡 {t("test.chat.action.title")}「{t(STEPS.find((s) => s.step === pendingAction.step)!.name)}」{pendingAction.reason ? `：${pendingAction.reason}` : ""}</span>
+                <span className="flex-1" />
+                <button
+                  onClick={() => { const st = pendingAction.step; setPendingAction(null); runStepManual(st); }}
+                  disabled={busy}
+                  className="rounded bg-primary px-2.5 py-1 text-[11px] font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  {t("test.chat.action.run")}
+                </button>
+                <button
+                  onClick={() => setPendingAction(null)}
+                  className="rounded border border-border px-2 py-1 text-[11px] text-foreground hover:bg-muted"
+                >
+                  {t("test.chat.action.ignore")}
+                </button>
+              </div>
+            )}
             <div className="shrink-0 border-t border-border bg-card p-3">
               <div className="flex items-center gap-2 rounded-lg border border-border bg-background px-3 py-2 focus-within:border-primary">
                 <input
                   value={composer}
                   onChange={(e) => setComposer(e.target.value)}
                   onKeyDown={(e) => {
-                    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submitNote(); }
+                    if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); chatSend(); }
                   }}
                   disabled={busy}
-                  placeholder={busy ? t("test.convo.running") : t("test.convo.placeholder")}
+                  placeholder={busy ? t("test.convo.running") : t("test.chat.placeholder")}
                   className="flex-1 bg-transparent text-xs text-foreground outline-none disabled:cursor-not-allowed"
                 />
                 {(focusStep === "requirement" || focusStep === "cases") && (stepStatus[focusStep] === "done" || stepStatus[focusStep] === "review") && (
@@ -1354,7 +1502,7 @@ export function InlineTestingPanel() {
                   </button>
                 )}
                 <button
-                  onClick={submitNote}
+                  onClick={chatSend}
                   disabled={busy || !composer.trim()}
                   title={t("test.convo.send")}
                   aria-label={t("test.convo.send")}
@@ -1364,9 +1512,7 @@ export function InlineTestingPanel() {
                 </button>
               </div>
               <div className="mt-1 px-1 text-[10px] text-muted-foreground">
-                {(focusStep === "requirement" || focusStep === "cases") && (stepStatus[focusStep] === "done" || stepStatus[focusStep] === "review")
-                  ? t("test.revise.hint")
-                  : t("test.convo.hint")}
+                {t("test.chat.hint")}
               </div>
             </div>
           </div>
