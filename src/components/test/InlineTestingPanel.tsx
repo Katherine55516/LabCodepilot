@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useTranslation } from "@/hooks/useTranslation";
-import { ListChecks, ChartBar, Gear, ArrowLeft, FolderPlus, Play, Stop, ArrowUp, SpinnerGap, Sparkle, Terminal, WarningCircle, Wrench, Trash, Desktop, Lightning, Plug, CheckCircle, File as FileIcon, FileArrowDown, NotePencil, DownloadSimple, Eye, X, CaretDown, CaretUp, Check, type Icon } from "@/components/ui/icon";
+import { ListChecks, ChartBar, Gear, ArrowLeft, ArrowRight, FolderPlus, Play, Stop, ArrowUp, SpinnerGap, Sparkle, Terminal, WarningCircle, Wrench, Trash, Desktop, Lightning, Plug, CheckCircle, File as FileIcon, FileArrowDown, NotePencil, DownloadSimple, Eye, X, CaretDown, CaretUp, Check, type Icon } from "@/components/ui/icon";
 import { MarkdownEditor } from "@/components/editor/MarkdownEditor.lazy";
 import type { TranslationKey } from "@/i18n";
 import { useNativeFolderPicker } from "@/hooks/useNativeFolderPicker";
@@ -580,6 +580,12 @@ export function InlineTestingPanel() {
   // execution unlocked, auto-chains like an approved 用例); only 需求 → 需求 待批准.
   const addTask = async (name: string, files?: NewTaskFiles): Promise<{ ok: boolean; error?: string }> => {
     const proj = selected !== null ? projects[selected] : null;
+    // 防重名：同一项目内任务名唯一（trim 后精确比较、区分大小写）。弹窗已实时校验+禁用创建，
+    // 此处兜底防绕过；命中则不创建，返回错误供弹窗内联展示。
+    const trimmedName = name.trim();
+    if (proj && proj.tasks.some((tk) => tk.name.trim() === trimmedName)) {
+      return { ok: false, error: t("test.newTaskModal.duplicateName") };
+    }
     const postImport = async (kind: "requirement" | "cases", f: ImportFile): Promise<{ ok: boolean; error?: string; preview?: string }> => {
       const res = await fetch("/api/test/import", {
         method: "POST",
@@ -1674,7 +1680,15 @@ export function InlineTestingPanel() {
             )}
 
             {view === "flow" && !activeTask && <EmptyState icon={ListChecks} text={t("test.flowEmpty")} />}
-            {view === "report" && <ReportBrowser projects={projects} t={t} model={model} providerId={providerId} />}
+            {view === "report" && (
+              <ReportBrowser
+                projects={projects}
+                t={t}
+                model={model}
+                providerId={providerId}
+                onOpenTask={(pIdx, tIdx) => { setSelected(pIdx); setSelectedTask(tIdx); setView("flow"); }}
+              />
+            )}
           </div>
         </div>
       )}
@@ -1813,7 +1827,14 @@ export function InlineTestingPanel() {
           </div>
         </div>
       )}
-      {modal === "newTask" && <NewTaskModal t={t} onClose={() => setModal("none")} onAdd={addTask} />}
+      {modal === "newTask" && (
+        <NewTaskModal
+          t={t}
+          onClose={() => setModal("none")}
+          onAdd={addTask}
+          existingNames={(selected !== null ? projects[selected]?.tasks : undefined)?.map((tk) => tk.name) ?? []}
+        />
+      )}
       {modal === "runChoice" && activeTask && (
         <RunChoiceModal
           t={t}
@@ -2507,7 +2528,7 @@ function XlsxPreview({ t, projectPath, taskName, env, onClose }: {
 // 报告 view: browse persisted reports by 项目 → 任务 → 环境. A task can have multiple
 // reports (one per env); each row expands to the full ReportView. Reads from disk via
 // GET /api/test/reports (per project).
-function ReportBrowser({ projects, t, model, providerId }: { projects: Project[]; t: T; model: string; providerId: string }) {
+function ReportBrowser({ projects, t, model, providerId, onOpenTask }: { projects: Project[]; t: T; model: string; providerId: string; onOpenTask: (projectIndex: number, taskIndex: number) => void }) {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [groups, setGroups] = useState<{ project: Project; reports: ReportEntry[] }[]>([]);
@@ -2622,9 +2643,32 @@ function ReportBrowser({ projects, t, model, providerId }: { projects: Project[]
             <div className="flex flex-col gap-3">
               {[...tasks.entries()].map(([task, rs]) => (
                 <div key={task} className="rounded-xl border border-border bg-card p-3">
-                  <div className="mb-2 flex items-center gap-2">
-                    <span className="text-[12px] font-medium text-foreground">{task}</span>
-                    {rs.length > 1 && <span className="text-[10px] text-muted-foreground">{rs.length} {t("test.report.envsSuffix")}</span>}
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className="flex h-[22px] w-[22px] flex-none items-center justify-center rounded-md bg-primary/10 text-primary"><ListChecks size={12} /></span>
+                      <span className="truncate text-[13px] font-medium text-foreground">{task}</span>
+                      <span className="flex-none rounded-full border border-border px-1.5 py-px text-[10px] text-muted-foreground">{t("test.report.taskTag")}</span>
+                      {(() => {
+                        const latest = rs.reduce((a, b) => ((Date.parse(b.time) || 0) > (Date.parse(a.time) || 0) ? b : a), rs[0]);
+                        const latestBad = !!latest && (latest.circuitBroken || latest.counts.fail > 0);
+                        return (
+                          <span className={`flex-none rounded px-1.5 py-px text-[10px] ${latestBad ? "bg-status-error-muted text-status-error-foreground" : "bg-status-success-muted text-status-success-foreground"}`}>
+                            {t(latestBad ? "test.report.latestFail" : "test.report.latestPass")}
+                          </span>
+                        );
+                      })()}
+                      {rs.length > 1 && <span className="flex-none text-[10px] text-muted-foreground">{rs.length} {t("test.report.envsSuffix")}</span>}
+                    </div>
+                    {(() => {
+                      const taskIdx = project.tasks.findIndex((tk) => tk.name === task);
+                      if (taskIdx < 0) return <span className="flex-none text-[10px] text-muted-foreground">{t("test.report.taskDeleted")}</span>;
+                      const projIdx = projects.findIndex((p) => p.path === project.path);
+                      return (
+                        <button onClick={() => onOpenTask(projIdx, taskIdx)} className="flex flex-none items-center gap-1 text-[11px] text-primary hover:underline">
+                          {t("test.report.viewTask")} <ArrowRight size={11} />
+                        </button>
+                      );
+                    })()}
                   </div>
                   <div className="flex flex-col gap-1.5">
                     {rs.map((r) => {
@@ -2916,7 +2960,7 @@ function ExecConfirmModal({
   );
 }
 
-function NewTaskModal({ t, onClose, onAdd }: { t: T; onClose: () => void; onAdd: (name: string, files?: NewTaskFiles) => Promise<{ ok: boolean; error?: string }> }) {
+function NewTaskModal({ t, onClose, onAdd, existingNames }: { t: T; onClose: () => void; onAdd: (name: string, files?: NewTaskFiles) => Promise<{ ok: boolean; error?: string }>; existingNames: string[] }) {
   const [name, setName] = useState("");
   const [reqFile, setReqFile] = useState<{ name: string; data: string } | null>(null);
   const [casesFile, setCasesFile] = useState<{ name: string; data: string } | null>(null);
@@ -2924,8 +2968,11 @@ function NewTaskModal({ t, onClose, onAdd }: { t: T; onClose: () => void; onAdd:
   const [busy, setBusy] = useState(false);
   const reqInputRef = useRef<HTMLInputElement>(null);
   const casesInputRef = useRef<HTMLInputElement>(null);
-  // 新建任务必须至少导入 用例 或 需求 之一。
-  const ready = !!name.trim() && (!!reqFile || !!casesFile);
+  // 重名实时校验：trim 后精确比较、区分大小写（与 addTask 兜底一致）。
+  const trimmedName = name.trim();
+  const isDuplicateName = !!trimmedName && existingNames.some((n) => n.trim() === trimmedName);
+  // 新建任务必须至少导入 用例 或 需求 之一，且任务名不与同项目已有任务重名。
+  const ready = !!trimmedName && (!!reqFile || !!casesFile) && !isDuplicateName;
 
   // Read as base64 (docx/xlsx are binary; the server parses by extension).
   const pick = (f: File | undefined, set: (v: { name: string; data: string }) => void) => {
@@ -2967,7 +3014,15 @@ function NewTaskModal({ t, onClose, onAdd }: { t: T; onClose: () => void; onAdd:
       }
     >
       <Field label={t("test.newTaskModal.nameLabel")}>
-        <input className={INPUT} value={name} onChange={(e) => setName(e.target.value)} placeholder={t("test.newTaskModal.namePlaceholder")} />
+        <input
+          className={isDuplicateName ? INPUT.replace("border-border", "border-status-error-border") : INPUT}
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+          placeholder={t("test.newTaskModal.namePlaceholder")}
+        />
+        {isDuplicateName && (
+          <p className="mt-1 text-[11px] text-status-error-foreground">⚠ {t("test.newTaskModal.duplicateName")}</p>
+        )}
       </Field>
       <Field label={t("test.newTaskModal.targetLabel")}>
         <input className={INPUT} placeholder="http://localhost:3000/..." />
