@@ -107,3 +107,14 @@
 - **(重)跑时清下游标记**：runStep 起跑处清掉该步**及下游**的停止标记（与 withDownstreamReset「下游产物失效」一致）→ 停止后再「运行/重跑」该步，报告仍能正常自动接力。
 - 单测：[test-flow-stop.test.ts](../../src/__tests__/unit/test-flow-stop.test.ts) 新增「done 与 abort 同刻竞争按停止处理」+ 守卫表达式两例。
 - CDP 验证（mock 可停/可完成的执行流）：B1 正常跑完→报告自动接力 ✓；B2 执行中停止→停在测试执行(idle)、报告未开始、不发起 report 请求 ✓；B3 停止后重跑执行→报告再次自动接力 ✓。
+
+## 十一、访问地址自动刷新（env-config 重拉）
+
+修复「在设置·测试账号改了访问地址 / 重新导出 environments.json，切回工作台仍显示旧地址」。根因：工作台面板常驻不卸载，env-config 只在 `[view, current?.path, env]` 变化时拉取，从设置切回不触发重拉。
+
+- env-config 拉取 effect（[InlineTestingPanel.tsx](../../src/components/test/InlineTestingPanel.tsx)）：
+  - 抽出 `load()`，依赖加入 **`pathname`**（`usePathname()`）→ 从 `/settings` 切回 `/chat` 时 pathname 变 → 重拉。
+  - 监听 **`window 'focus'` + `document 'visibilitychange'(visible)`** → 外部切走再回来 / 窗口重新聚焦时也重拉。
+  - fetch 加 **`cache: "no-store"`** → 重拉必拿最新值，避免浏览器回放缓存的旧地址。
+- 仍是「文件优先」：访问地址以项目 `AI_LabTest/environments.json` 为准，改了设置(DB)要**点「导出到 AI_LabTest」**覆盖该文件才生效；此修复保证覆盖后切回工作台会自动刷新显示。
+- CDP 验证（mock 项目，环境文件 3001→3002）：进入流程显示 3001 → 改文件为 3002 → 触发 focus → 单次重拉(no-store)返回 3002、🎯 徽标即时更新为 3002 ✓。

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, type ReactNode } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -263,6 +263,9 @@ function toConversationHistory(convo: ConvoMsg[]): { role: "user" | "assistant";
 export function InlineTestingPanel() {
   const { t } = useTranslation();
   const router = useRouter();
+  // 路由路径：从「设置·测试账号」改完配置切回工作台(/chat)时，pathname 变化 → 触发 env-config
+  // 重拉(见下方 effect)，避免面板常驻不刷新、仍显示旧的访问地址。
+  const pathname = usePathname();
   const [view, setView] = useState<View>("dash");
   const [modal, setModal] = useState<ModalKind>("none");
   // 持久化迁移：projects/taskStates 改存主进程文件（GET/PUT /api/test/workbench），不再
@@ -837,29 +840,45 @@ export function InlineTestingPanel() {
     return () => clearInterval(id);
   }, [runningStep]);
 
-  // Resolve the active project's env config (target baseUrl) for display in the
-  // flow view. Refetches when entering a flow or switching env.
+  // Resolve the active project's env config (target baseUrl) for display in the flow
+  // view. Refetches when entering a flow / switching env / 路由切回工作台(pathname)，并在
+  // 窗口重新聚焦 / 页面重新可见时也重拉 —— 这样在「设置·测试账号」改完配置(或重新导出
+  // environments.json)切回工作台时，访问地址会自动刷新，不再显示缓存的旧地址。
   useEffect(() => {
     if (view !== "flow" || !current?.path) { setEnvCfg(null); return; }
+    const projectPath = current.path;
     let cancelled = false;
-    fetch(`/api/test/env-config?projectPath=${encodeURIComponent(current.path)}&env=${encodeURIComponent(env)}`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        if (cancelled || !d || d.error) return;
-        setEnvCfg(d);
-        // The persisted env may be illegal for this project (allowedEnvs comes from
-        // the project's environments.json, resolved here async) — fall back to a
-        // valid value so the <select> isn't stuck on an out-of-range option.
-        const allowed: string[] = Array.isArray(d.allowedEnvs) ? d.allowedEnvs : [];
-        if (allowed.length && !allowed.includes(env)) {
-          handleEnvChange(allowed.includes("local") ? "local" : allowed[0]);
-        }
-      })
-      .catch(() => {});
-    return () => { cancelled = true; };
+    const load = () => {
+      // no-store：重拉时必须拿最新值（否则浏览器可能回放缓存的旧地址，自动刷新就失效了）。
+      fetch(`/api/test/env-config?projectPath=${encodeURIComponent(projectPath)}&env=${encodeURIComponent(env)}`, { cache: "no-store" })
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => {
+          if (cancelled || !d || d.error) return;
+          setEnvCfg(d);
+          // The persisted env may be illegal for this project (allowedEnvs comes from
+          // the project's environments.json, resolved here async) — fall back to a
+          // valid value so the <select> isn't stuck on an out-of-range option.
+          const allowed: string[] = Array.isArray(d.allowedEnvs) ? d.allowedEnvs : [];
+          if (allowed.length && !allowed.includes(env)) {
+            handleEnvChange(allowed.includes("local") ? "local" : allowed[0]);
+          }
+        })
+        .catch(() => {});
+    };
+    load();
+    // 自动重拉：窗口重新聚焦 / 标签页重新可见时（覆盖外部切走再回来、改完配置切回等场景）。
+    const onVisible = () => { if (document.visibilityState === "visible") load(); };
+    window.addEventListener("focus", load);
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("focus", load);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
     // handleEnvChange is stable enough (only writes localStorage); excluded to avoid re-fetch loops.
-     
-  }, [view, current?.path, env]);
+    // pathname 入依赖：从 /settings 改完配置切回 /chat 时 pathname 变 → 重拉最新访问地址。
+
+  }, [view, current?.path, env, pathname]);
 
   // 解锁判定可传显式 stepStatus(后台任务用)；stepUnlocked 是活动任务的便捷包装。
   const stepUnlockedFor = (ss: Record<TestStep, StepStatus>, step: TestStep): boolean => {
