@@ -17,6 +17,7 @@ import { useProviderModels } from "@/hooks/useProviderModels";
 import { diffRuns, funcPassRateStr } from "@/lib/test/compare";
 import { parseExecProgress } from "@/lib/test/exec-progress";
 import { withDownstreamReset } from "@/lib/test/step-status";
+import type { LoginStateInfo } from "@/lib/test/env-config";
 import type { RunHistoryEntry } from "@/lib/test/history";
 
 /**
@@ -35,7 +36,7 @@ import type { RunHistoryEntry } from "@/lib/test/history";
  */
 
 type View = "dash" | "flow" | "report";
-type ModalKind = "none" | "newTask" | "runChoice" | "execConfirm";
+type ModalKind = "none" | "newTask" | "runChoice" | "execConfirm" | "loginGate";
 // 执行方式:visible=独立窗口可见运行(有头),headless=后台无头运行(默认,更快)。
 type ExecMode = "headless" | "visible";
 type T = (key: TranslationKey, params?: Record<string, string | number>) => string;
@@ -271,12 +272,28 @@ export function InlineTestingPanel() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [selected, setSelected] = useState<number | null>(null);
   const [selectedTask, setSelectedTask] = useState<number | null>(null);
+  // 看板多选(批量执行用)：选中的任务 id 集合。切项目时清空(下方 effect)。
+  const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
+  const toggleTaskSel = (id: string) =>
+    setSelectedTaskIds((prev) => {
+      const n = new Set(prev);
+      if (n.has(id)) n.delete(id); else n.add(id);
+      return n;
+    });
   // Per-task run state (source of truth), keyed by task id. The active task's
   // values are derived below so the render reads the same names as before.
   const [taskStates, setTaskStates] = useState<Record<string, TaskState>>({});
   // 文件加载是否完成。未完成前禁止持久化写（否则空初值会覆盖文件）—— 本次迁移最关键的守卫。
   const [loaded, setLoaded] = useState(false);
-  const [busyTaskId, setBusyTaskId] = useState<string | null>(null);
+  // 运行中的任务集合(去单例化)：渲染用 state + 同步读 ref(异步闭包/调度防竞态)，markRunning/
+  // markIdle 同步两者。原来是单个 busyTaskId，现支持多任务并行各自有 in-flight 运行。
+  const [runningTaskIds, setRunningTaskIds] = useState<Set<string>>(new Set());
+  const runningIdsRef = useRef<Set<string>>(new Set());
+  const markRunning = (id: string) => { runningIdsRef.current.add(id); setRunningTaskIds(new Set(runningIdsRef.current)); };
+  const markIdle = (id: string) => { runningIdsRef.current.delete(id); setRunningTaskIds(new Set(runningIdsRef.current)); };
+  // 批量排队(Phase 3): 等待队列(FIFO)。ref 为权威源(同步出入队)，state 仅供渲染「排队中·第 K 位」。
+  const waitingQueueRef = useRef<string[]>([]);
+  const [waitingTaskIds, setWaitingTaskIds] = useState<Set<string>>(new Set());
   const [composer, setComposer] = useState("");
   // 真对话里 AI 通过 @@ACTION 行建议重跑某步 → 存这里 → composer 上方渲染确认条，
   // 用户点「运行此步」才真正 runStepManual（不自动跑，重跑会覆盖产物且耗时）。
@@ -284,13 +301,16 @@ export function InlineTestingPanel() {
   // Simulated progress % for non-execution running steps (no granular progress) — see effect below.
   const [simPct, setSimPct] = useState(0);
   const threadRef = useRef<HTMLDivElement>(null);
-  // When set to a task id, that task is in "run all" mode (运行任务): gated steps
-  // auto-approve + the chain runs through to 报告 without waiting for 批准.
-  const autoRunRef = useRef<string | null>(null);
-  // The in-flight run's AbortController (问题②·停止): runStep stores its controller
-  // here so the 停止 button can abort the /api/test/run fetch (and the backend agent,
-  // which honors request.signal). Cleared when the run settles.
-  const abortRef = useRef<AbortController | null>(null);
+  // Tasks in "run all" mode (运行任务/批量): gated steps auto-approve + the chain runs
+  // through to 报告 without waiting for 批准. Was a single id; now a set for parallel tasks.
+  const autoRunIdsRef = useRef<Set<string>>(new Set());
+  // Tasks forced headless (批量执行): the execution step ignores execMode and runs 无头,
+  // so N parallel runs never pop N browser windows. Single-task 运行任务 still honors execMode.
+  const forceHeadlessIdsRef = useRef<Set<string>>(new Set());
+  // Per-task in-flight AbortControllers (问题②·停止), keyed by task id. stopTask aborts a
+  // task's controller → its /api/test/run fetch (and backend agent) stops. Was a single
+  // controller; now a map so parallel runs each carry their own abort handle.
+  const abortMapRef = useRef<Map<string, AbortController>>(new Map());
   // Steps the user 停止'd ("taskId:step"). A stopped step resets to idle, but the
   // auto-chain treats idle+unlocked auto-steps (执行/报告) as runnable — without this
   // guard it would instantly re-run the step the user just stopped. The entry clears
@@ -323,7 +343,9 @@ export function InlineTestingPanel() {
   const [env, setEnv] = useState(() => {
     try { return localStorage.getItem("codepilot:test-env") || "local"; } catch { return "local"; }
   });
-  const [envCfg, setEnvCfg] = useState<{ configured: boolean; env: string; frontendBaseUrl: string | null; allowedEnvs: string[]; source?: string } | null>(null);
+  const [envCfg, setEnvCfg] = useState<{ configured: boolean; env: string; frontendBaseUrl: string | null; allowedEnvs: string[]; source?: string; loginState?: LoginStateInfo } | null>(null);
+  // 执行前登录态预检门(Phase 4)：待执行的任务 id + 检查结果，弹警告让用户决定去捕获 / 仍执行。
+  const [loginGate, setLoginGate] = useState<{ ids: string[]; info: LoginStateInfo } | null>(null);
   // Change env + persist (mirrors handleModelChange). The select uses this so the
   // user's local/SIT choice is remembered across sessions.
   const handleEnvChange = (next: string) => {
@@ -345,6 +367,22 @@ export function InlineTestingPanel() {
     try { localStorage.setItem("codepilot:test-exec-mode", next); } catch {}
   };
 
+  // 并发数(批量执行的并行上限,1–5)。本机设置 —— 存 localStorage、不随项目共享(每人按自己电脑)。
+  // ref 让 pumpQueue / finally 读到最新值,避免闭包陈旧。
+  const clampConcurrency = (n: number) => Math.min(5, Math.max(1, Math.round(Number.isFinite(n) ? n : 2)));
+  const [concurrency, setConcurrency] = useState<number>(() => {
+    try { return clampConcurrency(parseInt(localStorage.getItem("codepilot:test-concurrency") || "2", 10)); } catch { return 2; }
+  });
+  const concurrencyRef = useRef(concurrency);
+  useEffect(() => { concurrencyRef.current = concurrency; }, [concurrency]);
+  const persistConcurrency = (next: number) => {
+    const v = clampConcurrency(next);
+    setConcurrency(v);
+    concurrencyRef.current = v;
+    try { localStorage.setItem("codepilot:test-concurrency", String(v)); } catch {}
+    pumpQueue(); // 调大并发 → 立即尝试放更多排队任务进来
+  };
+
   const current = selected !== null ? projects[selected] ?? null : null;
   const activeTask = current && selectedTask !== null ? current.tasks[selectedTask] ?? null : null;
 
@@ -355,13 +393,78 @@ export function InlineTestingPanel() {
   const runningStep: TestStep | null = STEPS.find((s) => stepStatus[s.step] === "running")?.step ?? null;
   // 执行进度衍生值（execTotal / execIdx / execCaseTitle / execPct / barPct）下移到 casesPreview
   // 声明之后 —— 「总数」要回落到 cases.json 用例数（首条进度行到达前也能显示总数）。见下方。
-  const busy = busyTaskId !== null;
+  // 活动任务是否在跑(渲染用)：禁用活动任务的输入/按钮。其它任务后台并行跑不影响这里。
+  const busy = !!aId && runningTaskIds.has(aId);
   // Patch a task's state BY ID (runStep captures its id, so switching tasks mid-run is safe).
   const patchTask = (id: string, patch: (s: TaskState) => Partial<TaskState>) =>
     setTaskStates((m) => {
       const cur = m[id] ?? DEFAULT_TASK_STATE;
       return { ...m, [id]: { ...cur, ...patch(cur) } };
     });
+  // Locate a task by id across all projects → its project path + task. Lets the auto-chain
+  // / 批量调度 drive a background task that isn't the active selection.
+  const findTaskLoc = (tid: string): { projPath: string; task: { id: string; name: string } } | null => {
+    for (const p of projects) {
+      const tk = p.tasks.find((t) => t.id === tid);
+      if (tk && p.path) return { projPath: p.path, task: tk };
+    }
+    return null;
+  };
+
+  // 排队调度(Phase 3): 槽位 = 并发数 − 当前 autoRun(运行任务/批量)任务数。有空槽就把队首任务
+  // 提升为 autoRun(并强制无头)，由 auto-chain effect 读「最新」taskStates 起跑它的下一步 —— 用
+  // effect 而非在此直接 runStep，避免从 runStep.finally 回调进来时闭包里的 taskStates 陈旧。
+  const pumpQueue = () => {
+    let slots = concurrencyRef.current - autoRunIdsRef.current.size;
+    const before = waitingQueueRef.current.length;
+    const promoted: string[] = [];
+    while (slots > 0 && waitingQueueRef.current.length > 0) {
+      const tid = waitingQueueRef.current.shift()!;
+      if (!findTaskLoc(tid)) continue; // 任务已删 → 丢弃(已 shift 出队)
+      autoRunIdsRef.current.add(tid);
+      forceHeadlessIdsRef.current.add(tid);
+      for (const s of STEPS) stoppedStepRef.current.delete(`${tid}:${s.step}`);
+      promoted.push(tid);
+      slots--;
+    }
+    if (waitingQueueRef.current.length !== before) setWaitingTaskIds(new Set(waitingQueueRef.current));
+    if (promoted.length) {
+      // 批量=自动批准：把新晋任务里「待批准(review)」的步直接标 done，让 auto-chain 续跑到执行/报告
+      // （否则它停在 review、auto-chain 只推进 idle 步，批量任务会卡住）。functional 更新读最新 state，
+      // 不受 finally 回调闭包陈旧影响。
+      setTaskStates((m) => {
+        const n = { ...m };
+        let touched = false;
+        for (const tid of promoted) {
+          const st = n[tid];
+          if (!st) continue;
+          const ss = { ...st.stepStatus };
+          let ch = false;
+          for (const k of Object.keys(ss) as TestStep[]) if (ss[k] === "review") { ss[k] = "done"; ch = true; }
+          if (ch) { n[tid] = { ...st, stepStatus: ss }; touched = true; }
+        }
+        return touched ? n : m;
+      });
+      // 触发 auto-chain effect 给新晋 autoRun 任务起跑(它读最新 taskStates)。
+      setRunningTaskIds(new Set(runningIdsRef.current));
+    }
+  };
+
+  // 批量执行: 把所选任务排队(去重、跳过在跑/已排队/不存在/已全部完成)，交给 pumpQueue 按并发起跑。
+  // 语义同单任务「运行任务」的「从当前进度续跑」: 未跑过的从需求起，跑过一半的续跑，已完成的跳过。
+  const startBatch = (ids: string[]) => {
+    const fresh = ids.filter(
+      (id) =>
+        findTaskLoc(id) &&
+        !runningIdsRef.current.has(id) &&
+        !autoRunIdsRef.current.has(id) &&
+        !waitingQueueRef.current.includes(id) &&
+        !STEPS.every((s) => (taskStates[id]?.stepStatus[s.step] ?? "idle") === "done"),
+    );
+    if (!fresh.length) return;
+    waitingQueueRef.current = [...waitingQueueRef.current, ...fresh];
+    pumpQueue();
+  };
 
   // 追加指令: record a typed instruction on the active task — shows as a user bubble
   // and is fed into subsequent step runs' prompts (see runStep). Additive, test-only.
@@ -379,12 +482,12 @@ export function InlineTestingPanel() {
     const proj = selected !== null ? projects[selected] : null;
     const task = proj && selectedTask !== null ? proj.tasks[selectedTask] : null;
     const text = instruction.trim();
-    if (!proj?.path || !task || busyTaskId || !text) return;
+    if (!proj?.path || !task || !text || runningIdsRef.current.has(task.id)) return;
     const id = task.id;
     const stepName = t(STEPS.find((s) => s.step === step)!.name);
     const ctrl = new AbortController();
-    abortRef.current = ctrl;
-    setBusyTaskId(id);
+    abortMapRef.current.set(id, ctrl);
+    markRunning(id);
     const push = (msg: ConvoMsg) => patchTask(id, (s) => ({ convo: [...s.convo, msg] }));
     const appendAi = (chunk: string) =>
       patchTask(id, (s) => {
@@ -444,8 +547,8 @@ export function InlineTestingPanel() {
       if (ctrl.signal.aborted || (e instanceof DOMException && e.name === "AbortError")) push({ role: "user", text: `■ ${t("test.flow.stop")}` });
       else { push({ role: "error", text: `请求失败：${e instanceof Error ? e.message : String(e)}` }); sawError = true; }
     } finally {
-      if (abortRef.current === ctrl) abortRef.current = null;
-      setBusyTaskId(null);
+      if (abortMapRef.current.get(id) === ctrl) abortMapRef.current.delete(id);
+      markIdle(id);
       // 用例改完 → 重新拉取展示（需求步无 inline 展示，跳过）。
       if (!sawError && step === "cases" && proj.path) {
         try {
@@ -458,16 +561,16 @@ export function InlineTestingPanel() {
 
   // 真对话：发送即让 AI 在当前任务上下文响应（答疑/改产物/建议触发步骤）。复用 reviseStep
   // 的 SSE 解析骨架；text 行先过 @@ACTION 解析（命中→确认条，不显示该行）；tool_use 若写了
-  // cases.json → 结束后刷新 casesPreview。与 runStep/reviseStep 共用 abortRef+busyTaskId 串行。
+  // cases.json → 结束后刷新 casesPreview。与 runStep/reviseStep 经 abortMap + running 集合按任务串行。
   const chatSend = async () => {
     const proj = selected !== null ? projects[selected] : null;
     const task = proj && selectedTask !== null ? proj.tasks[selectedTask] : null;
     const text = composer.trim();
-    if (!proj?.path || !task || busyTaskId || !text) return;
+    if (!proj?.path || !task || !text || runningIdsRef.current.has(task.id)) return;
     const id = task.id;
     const ctrl = new AbortController();
-    abortRef.current = ctrl;
-    setBusyTaskId(id);
+    abortMapRef.current.set(id, ctrl);
+    markRunning(id);
     const push = (msg: ConvoMsg) => patchTask(id, (s) => ({ convo: [...s.convo, msg] }));
     const appendAi = (chunk: string) =>
       patchTask(id, (s) => {
@@ -560,8 +663,8 @@ export function InlineTestingPanel() {
       if (ctrl.signal.aborted || (e instanceof DOMException && e.name === "AbortError")) push({ role: "user", text: `■ ${t("test.flow.stop")}` });
       else { push({ role: "error", text: `请求失败：${e instanceof Error ? e.message : String(e)}` }); sawError = true; }
     } finally {
-      if (abortRef.current === ctrl) abortRef.current = null;
-      setBusyTaskId(null);
+      if (abortMapRef.current.get(id) === ctrl) abortMapRef.current.delete(id);
+      markIdle(id);
       // AI 改了用例 → 重新拉取展示（与 reviseStep 同款刷新）。
       if (!sawError && casesDirty && proj.path) {
         try {
@@ -758,15 +861,19 @@ export function InlineTestingPanel() {
      
   }, [view, current?.path, env]);
 
-  const stepUnlocked = (step: TestStep): boolean => {
+  // 解锁判定可传显式 stepStatus(后台任务用)；stepUnlocked 是活动任务的便捷包装。
+  const stepUnlockedFor = (ss: Record<TestStep, StepStatus>, step: TestStep): boolean => {
     const idx = STEPS.findIndex((s) => s.step === step);
     if (idx <= 0) return true;
-    return stepStatus[STEPS[idx - 1].step] === "done";
+    return ss[STEPS[idx - 1].step] === "done";
   };
+  const stepUnlocked = (step: TestStep): boolean => stepUnlockedFor(stepStatus, step);
   // viewStep:用户点流水线节点选择"查看"的阶段(只切换查看、不触发执行);null = 跟随运行中/下一个待办。
   const [viewStep, setViewStep] = useState<TestStep | null>(null);
   // 切任务时清掉查看选中,让详情卡回到新任务的运行中/下一个待办阶段。
   useEffect(() => { setViewStep(null); }, [aId]);
+  // 切项目时清空看板多选(避免跨项目误选；批量只在当前项目内)。
+  useEffect(() => { setSelectedTaskIds(new Set()); }, [selected]);
   // 用例设计阶段生成的用例(读 AI_LabTest/testCase/.data/{task}.cases.json),在用例阶段
   // 详情卡展示。不进 TaskState/持久化(用例可能很大),按需从文件读 —— 文件是 source of truth。
   const [casesPreview, setCasesPreview] = useState<GeneratedCase[]>([]);
@@ -831,22 +938,35 @@ export function InlineTestingPanel() {
 
   // Run one step: stream /api/test/run into the 测试对话 (bubbles) + tally four-state
   // (execution @@RESULT frames). One step at a time; status drives pipeline + gating.
-  const runStep = async (step: TestStep, opts?: { headed?: boolean; baseUrl?: string }) => {
-    const proj = selected !== null ? projects[selected] : null;
-    const task = proj && selectedTask !== null ? proj.tasks[selectedTask] : null;
-    if (!proj?.path || !task || busyTaskId) return;
-    // 执行方式仅对「测试执行」步有意义(只有它注入 Playwright)。弹窗触发会显式带 opts.headed;
-    // 非弹窗触发(运行任务 / auto-chain)回落到上次选择(execModeRef)。其它步恒为无头无关。
-    const headed = step === "execution" ? (opts?.headed ?? execModeRef.current === "visible") : false;
+  const runStep = async (
+    step: TestStep,
+    opts?: { headed?: boolean; baseUrl?: string; target?: { projPath: string; task: { id: string; name: string } } },
+  ) => {
+    // target 缺省 = 活动选择(原行为)；传入 = 跑指定后台任务(批量 / auto-chain 接力其它任务)。
+    const projPath = opts?.target ? opts.target.projPath : selected !== null ? projects[selected]?.path : undefined;
+    const task = opts?.target
+      ? opts.target.task
+      : selected !== null && selectedTask !== null
+        ? projects[selected]?.tasks[selectedTask] ?? null
+        : null;
+    if (!projPath || !task || runningIdsRef.current.has(task.id)) return;
+    const id = task.id; // capture — all updates patch THIS task even if the user switches away
+    // 执行方式仅对「测试执行」步有意义(只有它注入 Playwright)。批量任务(forceHeadless)恒无头;
+    // 否则弹窗触发带 opts.headed,非弹窗触发(运行任务 / auto-chain)回落到上次选择(execModeRef)。
+    const headed =
+      step === "execution"
+        ? forceHeadlessIdsRef.current.has(id)
+          ? false
+          : opts?.headed ?? execModeRef.current === "visible"
+        : false;
     // 被测链接覆盖:仅执行步、且弹窗显式给了地址时透传,让用户在弹窗里确认/改写的地址生效。
     const baseUrlOverride = step === "execution" && opts?.baseUrl?.trim() ? opts.baseUrl.trim() : undefined;
-    const id = task.id; // capture — all updates patch THIS task even if the user switches away
-    // 问题②·停止: a per-run AbortController. stopStep() aborts it → the fetch rejects
+    // 问题②·停止: a per-run AbortController. stopTask() aborts it → the fetch rejects
     // with AbortError, which the catch/finally below treat as a clean stop (not error).
     const ctrl = new AbortController();
-    abortRef.current = ctrl;
+    abortMapRef.current.set(id, ctrl);
     stoppedStepRef.current.delete(`${id}:${step}`); // (re)running this step → clear any prior 停止 mark
-    setBusyTaskId(id);
+    markRunning(id);
     // 重跑某步 → 其下游各步产物失效：当前步置 running，其后所有步骤复位 idle(未开始)，
     // 避免重跑时下游残留上次的「已完成」(如重跑「测试执行」后「测试报告」仍显示已完成)。
     // 规则收敛在 withDownstreamReset；所有重跑入口都经此处，四节点统一生效。
@@ -918,7 +1038,7 @@ export function InlineTestingPanel() {
         signal: ctrl.signal,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          projectPath: proj.path,
+          projectPath: projPath,
           taskName: task.name,
           step,
           env,
@@ -1056,7 +1176,7 @@ export function InlineTestingPanel() {
       // and end run-all mode (don't chain onward). Otherwise: human-gated steps
       // (需求/用例) land in "review" unless this task is in 运行任务 (run-all) mode,
       // where gates auto-approve straight to "done".
-      const autoAll = autoRunRef.current === id;
+      const autoAll = autoRunIdsRef.current.has(id);
       const finalStatus: StepStatus = stopped ? "idle" : sawError ? "error" : HUMAN_GATED.includes(step) && !autoAll ? "review" : "done";
       patchTask(id, (s) => ({ stepStatus: { ...s.stepStatus, [step]: finalStatus } }));
       if (stopped) {
@@ -1064,52 +1184,74 @@ export function InlineTestingPanel() {
         stoppedStepRef.current.add(`${id}:${step}`);
         push({ role: "user", text: `■ ${t("test.flow.stop")}「${stepName}」` });
       }
-      // End run-all mode when stopped, when anything errors, or when the pipeline finishes (报告).
-      if (stopped || sawError || step === "report") autoRunRef.current = null;
-      // Only clear the shared abortRef if it's still ours (a fast re-run could have replaced it).
-      if (abortRef.current === ctrl) abortRef.current = null;
-      setBusyTaskId(null);
+      // End run-all / 批量 mode when stopped, when anything errors, or when the pipeline
+      // finishes (报告) — release the auto-chain + the forced-headless mark for this task.
+      if (stopped || sawError || step === "report") {
+        autoRunIdsRef.current.delete(id);
+        forceHeadlessIdsRef.current.delete(id);
+      }
+      // Only clear this task's abort controller if it's still ours (a fast re-run could have replaced it).
+      if (abortMapRef.current.get(id) === ctrl) abortMapRef.current.delete(id);
+      markIdle(id);
+      // 槽位空出 → 尝试从排队队列启动下一个(批量排队，见 pumpQueue)。
+      pumpQueue();
     }
   };
 
   // 停止 (问题②): abort the in-flight run. The fetch rejects with AbortError →
   // runStep's catch/finally reset the step to idle, clear run-all, and free busy,
   // so the 运行 button can re-run this node. No-op if nothing is running.
-  const stopStep = () => {
-    // 正常运行：abort in-flight 请求，runStep 的 catch/finally 会把该步复位为 idle。
-    if (abortRef.current) { abortRef.current.abort(); return; }
-    // 僵尸 running（无 in-flight：如关闭应用后重启恢复的 running，已无对应请求，abort 无效）
-    // → 主动把运行中的步复位为 idle 并清 busy，让停止按钮对这种状态也生效、可重新运行。
-    if (activeTask) {
-      patchTask(activeTask.id, (s) => {
-        const ss = { ...s.stepStatus };
-        let changed = false;
-        for (const k of Object.keys(ss) as Array<keyof typeof ss>) if (ss[k] === "running") { ss[k] = "idle"; changed = true; }
-        return changed ? { stepStatus: ss } : {};
-      });
+  const stopTask = (tid: string) => {
+    if (!tid) return;
+    // 停止 = 退出该任务的 run-all / 批量 / 排队，并中断 in-flight。
+    autoRunIdsRef.current.delete(tid);
+    forceHeadlessIdsRef.current.delete(tid);
+    if (waitingQueueRef.current.includes(tid)) {
+      waitingQueueRef.current = waitingQueueRef.current.filter((x) => x !== tid); // 排队中 → 直接出队
+      setWaitingTaskIds(new Set(waitingQueueRef.current));
     }
-    setBusyTaskId(null);
+    // 正常运行：abort in-flight 请求，runStep 的 catch/finally 会把该步复位为 idle。
+    const ctrl = abortMapRef.current.get(tid);
+    if (ctrl) { ctrl.abort(); return; }
+    // 僵尸 running（无 in-flight：如关闭应用后重启恢复的 running，已无对应请求，abort 无效）
+    // → 主动把运行中的步复位为 idle 并清 running，让停止按钮对这种状态也生效、可重新运行。
+    patchTask(tid, (s) => {
+      const ss = { ...s.stepStatus };
+      let changed = false;
+      for (const k of Object.keys(ss) as Array<keyof typeof ss>) if (ss[k] === "running") { ss[k] = "idle"; changed = true; }
+      return changed ? { stepStatus: ss } : {};
+    });
+    markIdle(tid);
   };
+  // 详情卡「停止」= 停活动任务。
+  const stopStep = () => { if (aId) stopTask(aId); };
 
-  // 删除项目/任务:删前检查是否有正在执行的任务(busyTaskId),有则在确认弹窗里做二次强提醒。
+  // 删除项目/任务:删前检查是否有正在执行的任务(runningTaskIds),有则在确认弹窗里做二次强提醒。
   const [deleteTarget, setDeleteTarget] = useState<
     { kind: "project" | "task"; pIdx: number; tIdx?: number; name: string; running: boolean } | null
   >(null);
   const requestDeleteProject = (pIdx: number) => {
     const p = projects[pIdx];
     if (!p) return;
-    setDeleteTarget({ kind: "project", pIdx, name: p.name, running: !!busyTaskId && p.tasks.some((tk) => tk.id === busyTaskId) });
+    setDeleteTarget({ kind: "project", pIdx, name: p.name, running: p.tasks.some((tk) => runningTaskIds.has(tk.id)) });
   };
   const requestDeleteTask = (tIdx: number) => {
     if (selected === null) return;
     const tk = projects[selected]?.tasks[tIdx];
     if (!tk) return;
-    setDeleteTarget({ kind: "task", pIdx: selected, tIdx, name: tk.name, running: busyTaskId === tk.id });
+    setDeleteTarget({ kind: "task", pIdx: selected, tIdx, name: tk.name, running: runningTaskIds.has(tk.id) });
   };
   const confirmDelete = () => {
     if (!deleteTarget) return;
     const { kind, pIdx, tIdx, running } = deleteTarget;
-    if (running) { abortRef.current?.abort(); setBusyTaskId(null); } // 删除正在执行的目标 → 先中断当前运行
+    if (running) {
+      // 删除正在执行的目标 → 先中断其所有在跑/排队任务
+      const victims =
+        kind === "project"
+          ? (projects[pIdx]?.tasks ?? []).map((tk) => tk.id)
+          : ([projects[pIdx]?.tasks[tIdx!]?.id].filter(Boolean) as string[]);
+      for (const vid of victims) stopTask(vid);
+    }
     if (kind === "project") {
       const ids = new Set((projects[pIdx]?.tasks ?? []).map((tk) => tk.id));
       setTaskStates((m) => { const n = { ...m }; ids.forEach((id) => delete n[id]); return n; });
@@ -1129,7 +1271,7 @@ export function InlineTestingPanel() {
   // Approve a human-gated step (待批准 → 已完成) 并推进:批准后主动运行下一阶段。
   // 下一步若是 gated(用例),下方 auto-chain effect 不会自动跑它(其 !HUMAN_GATED 条件),
   // 故在此主动触发;execution/report 的后续接力仍交给 auto-chain effect。runStep 只看
-  // busyTaskId、不依赖 unlocked,批准时无运行中任务,直接驱动安全。
+  // 运行集合、不依赖 unlocked,批准时该任务无运行中步,直接驱动安全。
   const approveStep = (step: TestStep) => {
     if (!aId) return;
     patchTask(aId, (s) => ({ stepStatus: { ...s.stepStatus, [step]: "done" } }));
@@ -1141,7 +1283,7 @@ export function InlineTestingPanel() {
   // Manual single-step run (pill / detail 运行 button): cancels any run-all mode so
   // gates apply normally.
   const runStepManual = (step: TestStep) => {
-    autoRunRef.current = null;
+    if (aId) autoRunIdsRef.current.delete(aId);
     runStep(step);
   };
 
@@ -1155,7 +1297,7 @@ export function InlineTestingPanel() {
   const runExecutionConfirmed = (baseUrl: string, headed: boolean) => {
     persistExecMode(headed ? "visible" : "headless");
     setModal("none");
-    autoRunRef.current = null;
+    if (aId) autoRunIdsRef.current.delete(aId);
     runStep("execution", { headed, baseUrl });
   };
 
@@ -1165,7 +1307,7 @@ export function InlineTestingPanel() {
   const startRunAll = (fromStart: boolean) => {
     if (!activeTask || busy || !current?.path) return;
     const id = activeTask.id;
-    autoRunRef.current = id;
+    autoRunIdsRef.current.add(id);
     // 运行任务 drives the whole pipeline → clear this task's 停止 marks so the
     // auto-chain isn't blocked on a step the user stopped in a previous attempt.
     for (const s of STEPS) stoppedStepRef.current.delete(`${id}:${s.step}`);
@@ -1195,24 +1337,67 @@ export function InlineTestingPanel() {
     else setModal("runChoice");
   };
 
+  // 批量执行点击：先做执行前登录态预检(Phase 4)，确认后排队执行所选任务(强制无头)。
+  const handleBatchRun = () => {
+    const ids = [...selectedTaskIds];
+    if (!ids.length || !current?.path) return;
+    runBatchLoginGate(ids);
+  };
+  // 登录态预检门(Phase 4)：拉当前项目+环境的登录态信号；仅当「配了默认账号但缺/过期登录态」
+  // 才弹警告(去捕获 / 仍执行)；没配账号(无需登录)或接口失败 → 不挡，直接排队。
+  const runBatchLoginGate = async (ids: string[]) => {
+    if (!current?.path) { startBatch(ids); return; }
+    let info: LoginStateInfo | null = null;
+    try {
+      const d = await fetch(
+        `/api/test/env-config?projectPath=${encodeURIComponent(current.path)}&env=${encodeURIComponent(env)}`,
+      ).then((r) => (r.ok ? r.json() : null));
+      info = (d?.loginState as LoginStateInfo | undefined) ?? null;
+    } catch {
+      /* 接口失败 → 不挡 */
+    }
+    if (info && info.account && (!info.hasState || info.expired)) {
+      setLoginGate({ ids, info });
+      setModal("loginGate");
+      return;
+    }
+    startBatch(ids);
+  };
+
   // Auto-chain: run the next unlocked+idle step of the ACTIVE task. Normally only
   // auto steps (执行/报告) chain; in 运行任务 mode, gated steps (需求/用例) chain too.
   // Fires when a step becomes "done". runStep excluded from deps (the idle+unlocked
   // guard + busy check prevent re-fire loops).
   useEffect(() => {
-    if (busy || !current?.path || !activeTask) return;
-    const autoAll = autoRunRef.current === activeTask.id;
-    const tid = activeTask.id;
-    const next = STEPS.find(
-      (s) =>
-        stepStatus[s.step] === "idle" &&
-        stepUnlocked(s.step) &&
-        (autoAll || !HUMAN_GATED.includes(s.step)) &&
-        !stoppedStepRef.current.has(`${tid}:${s.step}`), // don't auto-rerun a 停止'd step
-    );
-    if (next) runStep(next.step);
+    // 候选集 = 活动任务(详情卡手动流程：执行/报告自动接力) ∪ autoRun 任务(运行任务/批量：
+    // 门控也自动接力)。每个任务独立推进、互不阻塞；runningIdsRef 防止给正在跑的任务重复发起。
+    const candidates = new Set<string>(autoRunIdsRef.current);
+    if (activeTask) candidates.add(activeTask.id);
+    let freed = false; // 有 autoRun 任务跑完释放了槽位 → 末尾再 pumpQueue 放下一个排队任务
+    for (const tid of candidates) {
+      if (runningIdsRef.current.has(tid)) continue; // 该任务有步在跑 → 等它结束
+      const st = taskStates[tid];
+      const loc = st ? findTaskLoc(tid) : null;
+      const autoAll = autoRunIdsRef.current.has(tid);
+      if (!st || !loc) {
+        // 任务状态/位置丢了(被删等) → 从 autoRun 释放，免得空占槽位。
+        if (autoRunIdsRef.current.delete(tid)) { forceHeadlessIdsRef.current.delete(tid); freed = true; }
+        continue;
+      }
+      const next = STEPS.find(
+        (s) =>
+          st.stepStatus[s.step] === "idle" &&
+          stepUnlockedFor(st.stepStatus, s.step) &&
+          (autoAll || !HUMAN_GATED.includes(s.step)) &&
+          !stoppedStepRef.current.has(`${tid}:${s.step}`), // don't auto-rerun a 停止'd step
+      );
+      if (next) { runStep(next.step, { target: loc }); continue; }
+      // autoRun 任务已无可执行步(整条跑完 / 全 done / 卡在门控外) → 释放槽位(活动手动任务不强释放)。
+      if (autoAll && autoRunIdsRef.current.delete(tid)) { forceHeadlessIdsRef.current.delete(tid); freed = true; }
+    }
+    if (freed) pumpQueue();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [taskStates, busyTaskId, aId]);
+  }, [taskStates, runningTaskIds, aId]);
 
   const segBtn = (v: View, label: string) => (
     <button
@@ -1627,6 +1812,53 @@ export function InlineTestingPanel() {
                     ＋ {t("test.newTask")}
                   </button>
                 </div>
+                {current.tasks.length > 0 && (
+                  <>
+                    <div className="mb-2 flex flex-wrap items-center gap-2">
+                      <button
+                        onClick={() => {
+                          const allIds = current.tasks.map((tk) => tk.id);
+                          const allSel = allIds.length > 0 && allIds.every((id) => selectedTaskIds.has(id));
+                          setSelectedTaskIds(allSel ? new Set() : new Set(allIds));
+                        }}
+                        className="flex h-7 items-center gap-1 rounded-md border border-border px-2 text-[11px] text-muted-foreground hover:text-foreground"
+                      >
+                        <Check size={12} /> {t("test.batch.selectAll")}
+                      </button>
+                      <span className="text-[11px] text-muted-foreground">{t("test.batch.selected", { n: selectedTaskIds.size })}</span>
+                      <span className="flex-1" />
+                      <span className="flex items-center gap-1 text-[11px] text-status-info">
+                        <Lightning size={11} /> {t("test.batch.running")} {runningTaskIds.size}
+                      </span>
+                      <span className="flex items-center gap-1 text-[11px] text-status-warning">
+                        <SpinnerGap size={11} /> {t("test.batch.queued")} {waitingTaskIds.size}
+                      </span>
+                      <label className="flex items-center gap-1 text-[11px] text-muted-foreground" title={t("test.batch.concurrencyHint")}>
+                        {t("test.batch.concurrency")}
+                        <select
+                          value={concurrency}
+                          onChange={(e) => persistConcurrency(Number(e.target.value))}
+                          className="h-7 rounded-md border border-border bg-background px-1 text-[11px] text-foreground outline-none focus:border-primary"
+                        >
+                          {[1, 2, 3, 4, 5].map((n) => (
+                            <option key={n} value={n}>{n}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <button
+                        onClick={handleBatchRun}
+                        disabled={selectedTaskIds.size === 0}
+                        title={selectedTaskIds.size === 0 ? t("test.batch.none") : undefined}
+                        className="flex h-7 items-center gap-1 rounded-md bg-primary px-2.5 text-[11px] font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                      >
+                        <Play size={12} /> {t("test.batch.run")}
+                      </button>
+                    </div>
+                    <div className="mb-2 flex items-center gap-1 text-[10px] text-muted-foreground">
+                      <WarningCircle size={11} /> {t("test.batch.bgHint")}
+                    </div>
+                  </>
+                )}
                 {current.tasks.length === 0 ? (
                   <EmptyState icon={ListChecks} text={t("test.tasksEmpty")} />
                 ) : (
@@ -1634,19 +1866,36 @@ export function InlineTestingPanel() {
                     {current.tasks.map((tk, i) => {
                       const st = taskStates[tk.id] ?? DEFAULT_TASK_STATE;
                       const chip = taskChip(st, t);
+                      const sel = selectedTaskIds.has(tk.id);
+                      const inWait = waitingTaskIds.has(tk.id);
+                      const qpos = inWait ? waitingQueueRef.current.indexOf(tk.id) + 1 : 0;
+                      const isRunningNow = runningTaskIds.has(tk.id);
+                      const isBatch = forceHeadlessIdsRef.current.has(tk.id);
+                      const badge = inWait
+                        ? { text: t("test.batch.queuePos", { n: qpos }), cls: "bg-status-warning-muted text-status-warning-foreground" }
+                        : isRunningNow && isBatch
+                          ? { text: t("test.batch.cardRunning"), cls: "bg-status-info-muted text-status-info-foreground" }
+                          : chip;
                       return (
                         <div key={tk.id} className="group relative">
+                          <button
+                            onClick={(e) => { e.stopPropagation(); toggleTaskSel(tk.id); }}
+                            aria-label={t("test.batch.selectAll")}
+                            className={`absolute left-2 top-2 z-10 flex h-5 w-5 items-center justify-center rounded border transition-colors ${sel ? "border-primary bg-primary text-primary-foreground" : "border-border bg-card text-transparent hover:border-primary/60"}`}
+                          >
+                            <Check size={12} />
+                          </button>
                           <button
                             onClick={() => {
                               setSelectedTask(i);
                               setView("flow");
                             }}
-                            className="flex w-full flex-col gap-3 rounded-xl border border-border bg-card p-3.5 text-left transition-colors hover:border-primary/50 hover:bg-muted/40"
+                            className={`flex w-full flex-col gap-3 rounded-xl border bg-card p-3.5 text-left transition-colors hover:border-primary/50 hover:bg-muted/40 ${sel ? "border-primary" : "border-border"}`}
                           >
                             <div className="flex items-start justify-between gap-2">
-                              <span className="truncate pt-0.5 text-sm font-medium text-foreground">{tk.name}</span>
+                              <span className="truncate pl-6 pt-0.5 text-sm font-medium text-foreground">{tk.name}</span>
                               <div className="flex shrink-0 flex-col items-end gap-0.5">
-                                <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${chip.cls}`}>{chip.text}</span>
+                                <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${badge.cls}`}>{badge.text}</span>
                                 <span className="text-[10px] text-muted-foreground">{taskStageName(st, t)}</span>
                               </div>
                             </div>
@@ -1852,6 +2101,49 @@ export function InlineTestingPanel() {
           onRun={runExecutionConfirmed}
           onClose={() => setModal("none")}
         />
+      )}
+      {modal === "loginGate" && loginGate && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
+          onClick={() => { setModal("none"); setLoginGate(null); }}
+        >
+          <div className="w-[440px] max-w-[92vw] rounded-xl border border-border bg-card p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
+            <h3 className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
+              <WarningCircle size={16} className="text-status-warning" /> {t("test.login.title")}
+            </h3>
+            <p className="mt-2.5 rounded-md bg-status-warning-muted px-2.5 py-2 text-[11px] leading-relaxed text-status-warning-foreground">
+              {!loginGate.info.hasState
+                ? t("test.login.missingLine", { env })
+                : t("test.login.expiredLine", {
+                    env,
+                    when: loginGate.info.capturedAtMs
+                      ? t("test.login.capturedAgo", { n: Math.max(0, Math.round((Date.now() - loginGate.info.capturedAtMs) / 86400000)) })
+                      : "—",
+                  })}
+            </p>
+            <p className="mt-2.5 text-xs leading-relaxed text-muted-foreground">{t("test.login.warn")}</p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                onClick={() => { setModal("none"); setLoginGate(null); }}
+                className="h-8 rounded-md border border-border px-3 text-xs text-foreground hover:bg-muted"
+              >
+                {t("test.login.cancel")}
+              </button>
+              <button
+                onClick={() => { setModal("none"); setLoginGate(null); router.push("/settings#test-accounts"); }}
+                className="h-8 rounded-md border border-border px-3 text-xs text-foreground hover:bg-muted"
+              >
+                {t("test.login.goCapture")}
+              </button>
+              <button
+                onClick={() => { const ids = loginGate.ids; setModal("none"); setLoginGate(null); startBatch(ids); }}
+                className="h-8 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:opacity-90"
+              >
+                {t("test.login.runAnyway")}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
       <FolderPicker
         open={folderPickerOpen}

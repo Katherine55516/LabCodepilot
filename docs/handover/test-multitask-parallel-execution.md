@@ -1,0 +1,84 @@
+# 测试工作台 · 多任务并行执行（交接文档）
+
+> 产品思考见 [docs/insights/test-multitask-parallel-execution.md](../insights/test-multitask-parallel-execution.md)
+> 执行计划见 [docs/exec-plans/active/test-multitask-parallel-execution.md](../exec-plans/active/test-multitask-parallel-execution.md)
+
+把测试工作台从「一次只能跑一个任务」升级为「可勾选多任务、按并发数并行、超出排队、执行前查登录态」。改动几乎全集中在 [src/components/test/InlineTestingPanel.tsx](../../src/components/test/InlineTestingPanel.tsx)（客户端编排），外加一处纯函数 + 一处 GET 路由 + i18n。
+
+## 一、四个需求 → 落点
+
+| 需求 | 落点 |
+|------|------|
+| 多任务执行，执行节点默认后台无头 | 看板多选 + 批量执行；批量任务进 `forceHeadlessIdsRef` → `runStep` 对执行步强制 `headed=false` |
+| 执行前查登录态 | `inspectLoginState`（纯函数）+ env-config GET 带出 `loginState` + 批量启动前 `runBatchLoginGate` 弹门 |
+| 并发数 1–5 可配置（本机） | `concurrency` state，存 `localStorage['codepilot:test-concurrency']`，看板工具条下拉 |
+| 排队机制 | `waitingQueueRef` + `pumpQueue()` 槽位调度（槽位 = 并发 − autoRun 任务数） |
+
+## 二、核心架构变更：编排去单例化
+
+改动前是**严格单任务串行**：单个 `busyTaskId` 锁 + 单个 `abortRef` + 单个 `autoRunRef` + 只推进活动任务的 auto-chain。改动后按任务集合并行。
+
+| 改动前（单例） | 改动后（按任务） | 作用 |
+|------|------|------|
+| `busyTaskId: string\|null` | `runningTaskIds: Set` (state) + `runningIdsRef` (ref) | 哪些任务有 in-flight 运行；ref 供异步闭包同步读防竞态 |
+| `abortRef: AbortController` | `abortMapRef: Map<taskId, AbortController>` | 每任务独立中断句柄 |
+| `autoRunRef: string\|null` | `autoRunIdsRef: Set<taskId>` | 哪些任务在「运行任务/批量」自动接力模式 |
+| —（新增） | `forceHeadlessIdsRef: Set<taskId>` | 批量任务强制无头（单任务「运行任务」仍按 execMode） |
+| —（新增） | `waitingQueueRef: string[]` + `waitingTaskIds: Set` | 排队队列（ref 权威 FIFO，state 供渲染） |
+
+辅助：`markRunning/markIdle(id)` 同步 ref+state；`busy = runningTaskIds.has(aId)`（活动任务是否在跑，保持单任务 UX）。
+
+### runStep 参数化
+
+`runStep(step, opts?)` 新增 `opts.target?: { projPath, task }`：
+- 缺省 → 走活动选择（`selected`/`selectedTask`），与原行为完全一致；
+- 传入 → 跑指定后台任务（批量 / auto-chain 接力非活动任务）。
+
+守卫从「全局 busy」改为 `runningIdsRef.current.has(task.id)`（按任务）。执行步 `headed`：`forceHeadlessIdsRef.has(id) ? false : (opts.headed ?? execModeRef=='visible')`。`finally` 里：错误/停止/报告完成时 `autoRunIdsRef.delete(id)` + `forceHeadlessIdsRef.delete(id)`，并调 `pumpQueue()` 放下一个排队任务。
+
+`reviseStep` / `chatSend` 同样改为按 `task.id` 走 `abortMapRef` + `markRunning/markIdle`（它们只作用于活动任务，天然与该任务的 runStep 串行）。
+
+### auto-chain effect（多任务独立推进）
+
+`useEffect([taskStates, runningTaskIds, aId])`：候选集 = `{活动任务} ∪ autoRunIdsRef`。对每个**未在跑**、且有「下一可执行步」的任务调 `runStep(next, {target})`；`stepUnlockedFor(ss, step)` 抽出可传显式 stepStatus 的解锁判定。autoRun 任务跑完（无可执行步）时从集合释放并 `pumpQueue()`，避免空占槽位。
+
+## 三、排队调度（pumpQueue / startBatch）
+
+- `startBatch(ids)`：入队（去重，跳过在跑/已排队/不存在/已全部 done 的），调 `pumpQueue`。语义 = 单任务「运行任务」的「从当前进度续跑」。
+- `pumpQueue()`：`slots = 并发 − autoRunIdsRef.size`；有空槽就把队首任务提升进 `autoRunIdsRef` + `forceHeadlessIdsRef`，清其停止标记。**批量 = 自动批准**：新晋任务里 `review`（待批准）步直接标 `done`（functional `setTaskStates`，不受 finally 回调闭包陈旧影响），让 auto-chain 续跑到执行/报告。提升后 `setRunningTaskIds(...)` 触发 auto-chain effect 起跑（effect 读最新 taskStates，规避从 `runStep.finally` 回调进来的闭包陈旧问题）。
+- 触发点：批量启动、`runStep.finally`（槽位空出）、`persistConcurrency`（调大并发）、auto-chain 释放。
+
+「运行中流水线数」用 `autoRunIdsRef.size` 计（每个 autoRun 任务跨其各步直到 report 占一个槽位）；活动任务的手动接力（非 autoRun）不计入槽位，属用户当前焦点，允许轻微超订 1。
+
+## 四、登录态预检
+
+- `src/lib/test/env-config.ts` 新增 `inspectLoginState(resolved, nowMs?) → { account, hasState, expired, capturedAtMs }`：纯 fs 读 `.auth/{env}.{账号}.storageState.json`，按 cookie `expires`（epoch 秒，-1=会话 cookie 忽略）判过期——全部过期才算 `expired`，单个未过期即有效；`nowMs` 可注入便于单测。单测 [src/__tests__/unit/test-login-state.test.ts](../../src/__tests__/unit/test-login-state.test.ts)（7 例）。
+- [src/app/api/test/env-config/route.ts](../../src/app/api/test/env-config/route.ts) GET 在 `resolved` 上附 `loginState`（best-effort，失败不阻断）。
+- `runBatchLoginGate(ids)`：批量启动前拉当前项目+环境的 `loginState`；仅当「配了 `account` 但 `!hasState || expired`」才弹 `loginGate` 模态（取消 / 去捕获 / 仍要执行）；没配账号或接口失败 → 不挡直接排队。
+- **深度探活（真起浏览器导航判断会话有效）刻意未做**，留作后续「深度检查」开关——见 insights。
+- 客户端队列，没有在 `/api/test/run` 加服务端阻断（会干扰单步 SSE 与 auto-chain）。
+
+## 五、UI 触点（看板）
+
+- 工具条（`current.tasks.length > 0` 时）：`全选`、`已选 N`、`运行中 X`、`排队中 Y`、`并发 [1–5]` 下拉、`批量执行`；下方一行 `多任务在后台无头执行…` 说明。
+- 任务卡：左上角勾选框（`toggleTaskSel`，选中高亮 primary 边框）；状态徽标按优先级 = 排队中（`排队中·第K位`，amber）> 运行中且批量（`运行中·无头`，info）> 原 `taskChip`。
+- 多选状态 `selectedTaskIds: Set`，切项目时清空。
+
+## 六、改动文件清单
+
+- [src/components/test/InlineTestingPanel.tsx](../../src/components/test/InlineTestingPanel.tsx) — 编排去单例化 + 调度器 + 多选/工具条/登录门 UI
+- [src/lib/test/env-config.ts](../../src/lib/test/env-config.ts) — `inspectLoginState` + `LoginStateInfo`
+- [src/app/api/test/env-config/route.ts](../../src/app/api/test/env-config/route.ts) — GET 返回 `loginState`
+- [src/i18n/en.ts](../../src/i18n/en.ts) / [zh.ts](../../src/i18n/zh.ts) / [zh-HK.ts](../../src/i18n/zh-HK.ts) — `test.batch.*` + `test.login.*`
+- [src/__tests__/unit/test-login-state.test.ts](../../src/__tests__/unit/test-login-state.test.ts) — 新增单测
+
+## 七、验证
+
+- `npm run test`（typecheck + 1653 单测，含新增 7 例）通过。
+- CDP（chrome-devtools，dev `PORT=3001 --webpack` + 隔离 `CLAUDE_GUI_DATA_DIR` + mock workbench/.auth 数据，登录捕获是 Electron 专属、dev 跑不了，故用 mock）验证：多选/全选、并发下拉、批量执行触发登录门（local 未捕获登录态）、`仍要执行` 后并发 2 起跑 + 排队、强制无头徽标、批量自动批准（待批准任务自动越过用例步）、已完成任务被排除、队列耗尽归零、单任务流程页无回归、console 无 React 报错（运行失败因 dev 无有效 provider，属预期，以任务内错误气泡呈现）。
+
+## 八、已知边界
+
+- **客户端队列**：批量跑到一半若切走测试页/刷新应用会中断在跑任务（「后台」=无头浏览器，已满足；跨页面存活不在本期）。后续可升级服务端 globalThis 队列（参照 `src/lib/job-executor.ts` + media-jobs 的 fire-and-forget start + 独立 SSE progress 路由）。
+- 登录态只查文件存在 + cookie 过期，查不到「服务端已使会话失效」；配合执行阶段既有的 401 熔断兜底。
+- 并发计数用 autoRunIdsRef.size，活动手动接力任务可能让瞬时并发超订 1。

@@ -131,3 +131,58 @@ export function resolveProjectEnv(projectPath: string, envArg?: string): Resolve
   if (raw == null) return emptyResolved(envArg || 'local', 'none');
   return resolveFromRaw(raw, projectPath, envArg, 'file');
 }
+
+/** 执行前登录态预检结果(Phase 4 · 多任务批量执行的登录态门)。 */
+export interface LoginStateInfo {
+  /** Whether the chosen env has a default account configured (so login is expected). */
+  account: string | null;
+  /** The captured storageState file exists on disk. */
+  hasState: boolean;
+  /**
+   * All cookies that carry an expiry are in the past (epoch-seconds `expires` > 0;
+   * session cookies use -1 and are ignored). false when there's no expiry signal
+   * (only session cookies / token-or-localStorage auth) — we can't prove staleness.
+   */
+  expired: boolean;
+  /** storageState file mtime (ms) — a proxy for when the login was captured. */
+  capturedAtMs: number | null;
+}
+
+/**
+ * Inspect a resolved env's captured login state for the execution pre-flight gate.
+ *
+ * Pure-ish (fs read of the storageState JSON): checks the `.auth/...storageState.json`
+ * file's existence + cookie expiry. Reserves the heavier "real probe navigation"
+ * (launch Playwright, detect login redirect) for a future deep-check toggle — see
+ * docs/exec-plans/active/test-multitask-parallel-execution.md.
+ *
+ * `nowMs` is injectable so this stays deterministic under unit test.
+ */
+export function inspectLoginState(resolved: ResolvedTestEnv, nowMs: number = Date.now()): LoginStateInfo {
+  const account = resolved.defaultAccount;
+  const p = resolved.storageStatePath;
+  if (!p) return { account, hasState: false, expired: false, capturedAtMs: null };
+
+  let capturedAtMs: number | null = null;
+  try {
+    capturedAtMs = fs.statSync(p).mtimeMs;
+  } catch {
+    /* file vanished between resolve and inspect — treat as no capturedAt */
+  }
+
+  let expired = false;
+  try {
+    const data = JSON.parse(fs.readFileSync(p, 'utf-8')) as { cookies?: Array<{ expires?: number }> };
+    const cookies = Array.isArray(data.cookies) ? data.cookies : [];
+    // expires: epoch SECONDS; -1 (or <=0) = session cookie (no expiry signal) → ignore.
+    const expiring = cookies.filter((c) => typeof c.expires === 'number' && c.expires > 0);
+    if (expiring.length > 0) {
+      // Expired only when EVERY expiring cookie is past — a single live cookie keeps it valid.
+      expired = expiring.every((c) => (c.expires as number) * 1000 <= nowMs);
+    }
+  } catch {
+    /* unreadable JSON → can't validate expiry; leave expired=false (hasState still true) */
+  }
+
+  return { account, hasState: true, expired, capturedAtMs };
+}
