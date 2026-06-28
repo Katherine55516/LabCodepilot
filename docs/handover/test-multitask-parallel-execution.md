@@ -82,3 +82,18 @@
 - **客户端队列**：批量跑到一半若切走测试页/刷新应用会中断在跑任务（「后台」=无头浏览器，已满足；跨页面存活不在本期）。后续可升级服务端 globalThis 队列（参照 `src/lib/job-executor.ts` + media-jobs 的 fire-and-forget start + 独立 SSE progress 路由）。
 - 登录态只查文件存在 + cookie 过期，查不到「服务端已使会话失效」；配合执行阶段既有的 401 熔断兜底。
 - 并发计数用 autoRunIdsRef.size，活动手动接力任务可能让瞬时并发超订 1。
+
+## 九、「运行任务」选择起点（后续增强）
+
+把单任务顶部「运行任务」从「全 idle/全 done → 静默清空从需求重跑；部分 → 继续/重新执行二选一」改为**统一的「选择起点」弹窗**，让用户自选从哪一步重跑、覆盖前给确认。
+
+- **分流**（`handleRunTask`，[InlineTestingPanel.tsx](../../src/components/test/InlineTestingPanel.tsx)）：全新任务（4 步全 idle）→ 直接 `startRunAllFrom("requirement")`，不弹窗；其余（部分/已完成）→ `setModal("runStart")`。
+- **`startRunAllFrom(step)`**：加 autoRun + 清停止标记 + 清四态/用例结果 + `runStep(step)`（runStep 自身把起点置 running、下游复位 idle，上游产物保留）。**不再清空对话**（一律保留、追加新一轮）——取代了原 `startRunAll(true)` 的清空行为。
+- **纯函数 `runStartOptions(status, order, startSteps)`**（[step-status.ts](../../src/lib/test/step-status.ts)，单测见 [test-step-status.test.ts](../../src/__tests__/unit/test-step-status.test.ts)）→ 每个起点 `{ unlocked, willOverwrite, isNext }`：
+  - `unlocked` = 上一步为 done（首步恒可）；否则锁定灰显（「需先完成上一步」）。
+  - `willOverwrite` = 此步或其下游有产物（done/review）→ 选它会覆盖 → 弹窗给红字提示 + 按钮变「确认重跑」。
+  - `isNext` = 第一个未 done 的步 → 弹窗默认高亮（＝「继续」入口，不覆盖时按钮为「从X运行」）。
+- **`RunStartModal`**：起点 = 需求分析 / 用例设计 / 测试执行（**不含测试报告**——仅重生成报告用报告面板已有的「重跑」按钮）。默认选中：下一个待办且可选 → 否则最后一个可选（已完成任务→测试执行）。
+- 映射两种情况：**已完成任务** 4 步全 done → 3 起点都可选、都「确认重跑」；**未完成任务** → 下一个待办＝继续（不覆盖时直接运行），已完成的更早节点＝重跑（确认）。
+- i18n：`test.runStart.*`（替换原 `test.runChoice.*`）三语同步。
+- CDP 验证（dev 3001 + mock 三种态：完成/部分/全新）：已完成→3 起点默认测试执行+覆盖提示+确认重跑；部分→默认用例设计(下一步)+覆盖提示+测试执行锁定；全新→无弹窗直接开跑；console 无 React 报错。

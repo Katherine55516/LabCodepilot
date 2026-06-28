@@ -39,6 +39,7 @@
 | Phase 3 | 客户端排队 | ✅ 已完成 | waitingQueueRef + pumpQueue 槽位调度(并发−autoRun 数)+ 批量自动批准 review→done；卡片「排队中·第 K 位」/「运行中·无头」徽标 |
 | Phase 4 | 登录态预检 | ✅ 已完成 | inspectLoginState 纯函数(+7 单测)；env-config GET 带 loginState；runBatchLoginGate 批量启动前弹门 |
 | Phase 5 | 自检 + 文档 | ✅ 已完成 | npm run test 通过(1653 单测)；CDP(dev 3001 + mock)全流程验证；handover + insights 文档互链；i18n 三语同步 |
+| Phase 6 | 「运行任务」选择起点（增强） | ✅ 已完成 | handleRunTask 分流(全新→直跑/其余→弹窗)；startRunAllFrom(step)；纯函数 runStartOptions(+5 单测)；RunStartModal(3 起点+锁定+覆盖确认+默认下一步)；不再清空对话；i18n test.runStart.* 替换 runChoice.*；CDP 三态验证。见交接文档「九」 |
 
 > 代码 + 验证完成，待用户验收 / 合并后移至 `completed/`。客户端队列「跨页面存活」与登录态「深度探活」为已知后续方向（见详细设计末与 insights）。
 

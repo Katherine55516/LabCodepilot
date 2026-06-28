@@ -9,7 +9,7 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { withDownstreamReset } from '@/lib/test/step-status';
+import { withDownstreamReset, runStartOptions } from '@/lib/test/step-status';
 import type { TestStep } from '@/lib/test/prompts';
 
 type Status = 'idle' | 'running' | 'review' | 'done' | 'error';
@@ -109,5 +109,52 @@ describe('withDownstreamReset', () => {
       0,
     );
     assert.deepEqual(next, { requirement: 1, cases: 9, execution: 0, report: 0 });
+  });
+});
+
+// 「运行任务 · 选择起点」可选起点计算。起点排除「测试报告」(仅前 3 步)。
+const STARTS: TestStep[] = ['requirement', 'cases', 'execution'];
+const opt = (s: Record<TestStep, Status>) =>
+  Object.fromEntries(runStartOptions(s, ORDER, STARTS).map((o) => [o.step, o]));
+
+describe('runStartOptions', () => {
+  it('已完成任务：三个起点都可选、都会覆盖、无 next（默认落到测试执行由组件定）', () => {
+    const o = opt(allDone);
+    for (const s of STARTS) {
+      assert.equal(o[s].unlocked, true, `${s} unlocked`);
+      assert.equal(o[s].willOverwrite, true, `${s} willOverwrite`);
+      assert.equal(o[s].isNext, false, `${s} isNext`);
+    }
+  });
+
+  it('部分完成（需求✓/用例✓/执行待办）：执行=下一步且不覆盖；需求/用例可选但会覆盖', () => {
+    const o = opt({ requirement: 'done', cases: 'done', execution: 'idle', report: 'idle' });
+    assert.deepEqual(o.execution, { step: 'execution', unlocked: true, willOverwrite: false, isNext: true });
+    assert.equal(o.requirement.unlocked, true);
+    assert.equal(o.requirement.willOverwrite, true);
+    assert.equal(o.cases.willOverwrite, true);
+    assert.equal(o.requirement.isNext, false);
+  });
+
+  it('全新任务：仅需求可选(=下一步、不覆盖)，用例/执行锁定', () => {
+    const o = opt({ requirement: 'idle', cases: 'idle', execution: 'idle', report: 'idle' });
+    assert.deepEqual(o.requirement, { step: 'requirement', unlocked: true, willOverwrite: false, isNext: true });
+    assert.equal(o.cases.unlocked, false);
+    assert.equal(o.execution.unlocked, false);
+  });
+
+  it('需求待批准(review)：算「有产物」(重跑覆盖)，但不解锁下游(用例锁定)', () => {
+    const o = opt({ requirement: 'review', cases: 'idle', execution: 'idle', report: 'idle' });
+    assert.equal(o.requirement.unlocked, true); // 首步恒可
+    assert.equal(o.requirement.willOverwrite, true); // review 有产物
+    assert.equal(o.requirement.isNext, true); // 第一个未 done
+    assert.equal(o.cases.unlocked, false); // 上一步是 review 非 done → 不解锁
+  });
+
+  it('用例待批准、执行待办：执行因上一步未 done 而锁定', () => {
+    const o = opt({ requirement: 'done', cases: 'review', execution: 'idle', report: 'idle' });
+    assert.equal(o.cases.unlocked, true);
+    assert.equal(o.cases.isNext, true); // cases 是第一个未 done
+    assert.equal(o.execution.unlocked, false); // cases 是 review 非 done
   });
 });

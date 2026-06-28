@@ -29,3 +29,45 @@ export function withDownstreamReset<K extends string, S>(
   for (let i = idx + 1; i < order.length; i++) next[order[i]] = idle;
   return next;
 }
+
+/** 「运行任务 · 选择起点」每个候选起点的可用性（纯函数，便于单测，无服务端依赖）。 */
+export interface RunStartOption<K extends string> {
+  step: K;
+  /** 上游已完成 → 可作为起点（首步恒可）。否则锁定（需先完成上一步）。 */
+  unlocked: boolean;
+  /** 从此步起跑会重置「此步或其下游里已产出的步骤」(done/review) → 覆盖产物，需确认。 */
+  willOverwrite: boolean;
+  /** 此步是「下一个待办步」(第一个未 done 的步) → 弹窗默认高亮、作为「继续」入口。 */
+  isNext: boolean;
+}
+
+/**
+ * 计算「运行任务」可选起点的状态。
+ *
+ * @param status        当前各步状态（done/review/idle/running/error 字符串）
+ * @param order         步骤顺序（首→尾，与 STEP_ORDER 对齐）
+ * @param startSteps    作为起点提供给用户的步骤（如排除「测试报告」）
+ * @param doneValues    视为「上游已完成」的状态（默认仅 done）
+ * @param artifactValues 视为「已有产物、重跑会覆盖」的状态（默认 done + review）
+ */
+export function runStartOptions<K extends string>(
+  status: Record<K, string>,
+  order: readonly K[],
+  startSteps: readonly K[],
+  doneValues: readonly string[] = ['done'],
+  artifactValues: readonly string[] = ['done', 'review'],
+): RunStartOption<K>[] {
+  const isDone = (s: string) => doneValues.includes(s);
+  const hasArtifact = (s: string) => artifactValues.includes(s);
+  // 下一个待办步 = order 中第一个未 done 的步（可能不在 startSteps 内，如 report）。
+  const nextPending = order.find((k) => !isDone(status[k]));
+  return startSteps.map((step) => {
+    const idx = order.indexOf(step);
+    const unlocked = idx <= 0 || isDone(status[order[idx - 1]]);
+    let willOverwrite = false;
+    for (let i = idx; i < order.length; i++) {
+      if (hasArtifact(status[order[i]])) { willOverwrite = true; break; }
+    }
+    return { step, unlocked, willOverwrite, isNext: step === nextPending };
+  });
+}

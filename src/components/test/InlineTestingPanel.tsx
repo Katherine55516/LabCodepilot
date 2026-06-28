@@ -16,7 +16,7 @@ import { ModelSelectorDropdown } from "@/components/chat/ModelSelectorDropdown";
 import { useProviderModels } from "@/hooks/useProviderModels";
 import { diffRuns, funcPassRateStr } from "@/lib/test/compare";
 import { parseExecProgress } from "@/lib/test/exec-progress";
-import { withDownstreamReset } from "@/lib/test/step-status";
+import { withDownstreamReset, runStartOptions } from "@/lib/test/step-status";
 import type { LoginStateInfo } from "@/lib/test/env-config";
 import type { RunHistoryEntry } from "@/lib/test/history";
 
@@ -36,7 +36,7 @@ import type { RunHistoryEntry } from "@/lib/test/history";
  */
 
 type View = "dash" | "flow" | "report";
-type ModalKind = "none" | "newTask" | "runChoice" | "execConfirm" | "loginGate";
+type ModalKind = "none" | "newTask" | "runStart" | "execConfirm" | "loginGate";
 // 执行方式:visible=独立窗口可见运行(有头),headless=后台无头运行(默认,更快)。
 type ExecMode = "headless" | "visible";
 type T = (key: TranslationKey, params?: Record<string, string | number>) => string;
@@ -1301,40 +1301,32 @@ export function InlineTestingPanel() {
     runStep("execution", { headed, baseUrl });
   };
 
-  // 运行任务: run the whole pipeline end-to-end, auto-approving gates (no 批准 clicks).
-  // fromStart=true resets the task to a clean slate and runs from 需求 (重新执行);
-  // false continues from the current / next-pending step (从当前阶段继续).
-  const startRunAll = (fromStart: boolean) => {
+  // 运行任务: 从指定起点把整条流水线自动跑到报告(auto-approve 门控)。runStep 自身会把起点置
+  // running、其下游复位 idle；起点之前的产物/状态保留。对话历史保留(不清空、追加新一轮)。
+  const startRunAllFrom = (step: TestStep) => {
     if (!activeTask || busy || !current?.path) return;
     const id = activeTask.id;
     autoRunIdsRef.current.add(id);
     // 运行任务 drives the whole pipeline → clear this task's 停止 marks so the
     // auto-chain isn't blocked on a step the user stopped in a previous attempt.
     for (const s of STEPS) stoppedStepRef.current.delete(`${id}:${s.step}`);
-    if (fromStart) {
-      patchTask(id, () => ({
-        stepStatus: { requirement: "idle", cases: "idle", execution: "idle", report: "idle" },
-        convo: [],
-        fourState: { total: 0, pass: 0, fail: 0, partial: 0, blocked: 0 },
-        currentCase: "",
-        caseResults: [],
-        circuitBroken: false,
-      }));
-      runStep("requirement");
-    } else {
-      runStep(focusStep);
-    }
+    // 起点(需求/用例/执行)及之后都会重跑到「测试执行」→ 清掉上轮四态/用例结果，避免 stale 残留。
+    patchTask(id, () => ({
+      fourState: { total: 0, pass: 0, fail: 0, partial: 0, blocked: 0 },
+      currentCase: "",
+      caseResults: [],
+      circuitBroken: false,
+    }));
+    runStep(step);
   };
 
-  // 运行任务 click: fresh task or already-finished workflow → run from the start;
-  // a task mid-progress → ask whether to continue from the current stage or restart.
+  // 运行任务 click: 全新任务(全 idle)直接从需求分析开跑；其余(部分完成 / 已完成)弹「选择起点」。
   const handleRunTask = () => {
     if (!activeTask || busy || !current?.path) return;
     const ss = aState.stepStatus;
     const allIdle = STEPS.every((s) => ss[s.step] === "idle");
-    const allDone = STEPS.every((s) => ss[s.step] === "done");
-    if (allIdle || allDone) startRunAll(true);
-    else setModal("runChoice");
+    if (allIdle) { startRunAllFrom("requirement"); return; }
+    setModal("runStart");
   };
 
   // 批量执行点击：先做执行前登录态预检(Phase 4)，确认后排队执行所选任务(强制无头)。
@@ -2084,12 +2076,11 @@ export function InlineTestingPanel() {
           existingNames={(selected !== null ? projects[selected]?.tasks : undefined)?.map((tk) => tk.name) ?? []}
         />
       )}
-      {modal === "runChoice" && activeTask && (
-        <RunChoiceModal
+      {modal === "runStart" && activeTask && (
+        <RunStartModal
           t={t}
-          stage={taskStageName(aState, t)}
-          onContinue={() => { setModal("none"); startRunAll(false); }}
-          onRestart={() => { setModal("none"); startRunAll(true); }}
+          stepStatus={aState.stepStatus}
+          onRun={(step) => { setModal("none"); startRunAllFrom(step); }}
           onClose={() => setModal("none")}
         />
       )}
@@ -3120,23 +3111,96 @@ const PRIMARY_BTN =
 type ImportFile = { filename: string; dataBase64: string };
 type NewTaskFiles = { requirement?: ImportFile; cases?: ImportFile };
 
-// 运行任务 on a mid-progress task: continue from the current stage, or restart from scratch.
-function RunChoiceModal({ t, stage, onContinue, onRestart, onClose }: { t: T; stage: string; onContinue: () => void; onRestart: () => void; onClose: () => void }) {
+// 运行任务 · 选择起点：列出 需求分析 / 用例设计 / 测试执行 三个起点（不含测试报告）。
+// 上游已完成才可选(否则锁定)；默认高亮「下一个待办步」；选「会覆盖产物」的步则按钮变「确认重跑」
+// 并给红字提示。选中即从该步把整条流水线自动跑到报告。
+const RUN_START_STEPS: TestStep[] = ["requirement", "cases", "execution"];
+const RUN_START_SUBKEY: Record<TestStep, TranslationKey> = {
+  requirement: "test.runStart.fromRequirement",
+  cases: "test.runStart.fromCases",
+  execution: "test.runStart.fromExecution",
+  report: "test.runStart.fromExecution", // 不作起点，占位满足类型
+};
+function RunStartModal({
+  t,
+  stepStatus,
+  onRun,
+  onClose,
+}: {
+  t: T;
+  stepStatus: Record<TestStep, StepStatus>;
+  onRun: (step: TestStep) => void;
+  onClose: () => void;
+}) {
+  const opts = runStartOptions(stepStatus, STEP_ORDER, RUN_START_STEPS);
+  const byStep = Object.fromEntries(opts.map((o) => [o.step, o])) as Record<TestStep, (typeof opts)[number]>;
+  // 默认：下一个待办且可选 → 否则最后一个可选(已完成任务→测试执行) → 兜底需求。
+  const defaultStep =
+    opts.find((o) => o.isNext && o.unlocked)?.step ??
+    [...opts].reverse().find((o) => o.unlocked)?.step ??
+    "requirement";
+  const [sel, setSel] = useState<TestStep>(defaultStep);
+  const selOpt = byStep[sel];
+  const stepName = (s: TestStep) => t(STEPS.find((x) => x.step === s)!.name);
+  const willOverwrite = !!selOpt?.willOverwrite;
   return (
     <ModalShell
-      title={t("test.runChoice.title")}
+      title={t("test.runStart.title")}
+      subtitle={t("test.runStart.subtitle")}
       onClose={onClose}
       footer={
         <>
           <button onClick={onClose} className={CANCEL_BTN}>{t("test.cancel")}</button>
-          <button onClick={onRestart} className={CANCEL_BTN}>{t("test.runChoice.restart")}</button>
-          <button onClick={onContinue} className={PRIMARY_BTN}>{t("test.runChoice.continue")}</button>
+          <button
+            onClick={() => selOpt?.unlocked && onRun(sel)}
+            disabled={!selOpt?.unlocked}
+            className={PRIMARY_BTN}
+          >
+            {willOverwrite ? t("test.runStart.rerun") : t("test.runStart.start", { step: stepName(sel) })}
+          </button>
         </>
       }
     >
-      <p className="text-xs leading-relaxed text-muted-foreground">{t("test.runChoice.desc")}</p>
-      <div className="mt-2 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs text-foreground">
-        {t("test.runChoice.currentStage")}：<span className="font-medium">{stage}</span>
+      <div className="flex flex-col gap-2">
+        {opts.map((o) => {
+          const selected = o.step === sel;
+          const base = "w-full rounded-md border px-3 py-2.5 text-left transition-colors";
+          const cls = !o.unlocked
+            ? "border-border bg-muted/30 opacity-50 cursor-not-allowed"
+            : selected
+              ? "border-primary bg-primary/10"
+              : "border-border hover:border-primary/50";
+          return (
+            <button
+              key={o.step}
+              type="button"
+              disabled={!o.unlocked}
+              onClick={() => o.unlocked && setSel(o.step)}
+              className={`${base} ${cls}`}
+            >
+              <div className="flex items-center gap-2">
+                <span className={`h-3.5 w-3.5 shrink-0 rounded-full border-2 ${selected ? "border-primary" : "border-border"}`} style={selected ? { borderWidth: 4 } : undefined} />
+                <span className={`flex-1 text-xs font-medium ${selected ? "text-primary" : "text-foreground"}`}>
+                  {stepName(o.step)}
+                  <span className="ml-1 font-normal text-muted-foreground">· {t(RUN_START_SUBKEY[o.step])}</span>
+                </span>
+                {o.isNext ? (
+                  <span className="rounded-full bg-muted px-2 py-0.5 text-[10px] text-muted-foreground">{t("test.runStart.next")}</span>
+                ) : (
+                  <span className="text-[10px] text-muted-foreground">{stepStatusText(stepStatus[o.step], t)}</span>
+                )}
+              </div>
+              {!o.unlocked && (
+                <div className="mt-1.5 pl-[22px] text-[10px] text-muted-foreground">{t("test.runStart.locked")}</div>
+              )}
+              {selected && o.unlocked && o.willOverwrite && (
+                <div className="mt-1.5 flex items-center gap-1 pl-[22px] text-[10px] text-status-warning">
+                  <WarningCircle size={12} /> {t("test.runStart.overwrite")}
+                </div>
+              )}
+            </button>
+          );
+        })}
       </div>
     </ModalShell>
   );
