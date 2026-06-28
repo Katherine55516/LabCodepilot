@@ -2183,15 +2183,22 @@ function ReportStepPanel({
   // 交给研发修复：建项目内对话会话，把缺陷摘要写入 composer 草稿，跳转让用户审阅后发送。
   const handoff = async () => {
     const failed = (entry?.tests ?? []).filter((c) => String(c.status).toLowerCase() === "fail");
-    const lines = failed.map((c) => `- ${c.id}：${c.actual || c.error || "（详见报告）"}`).join("\n");
+    const lines = failed.map((c) => `- ${c.id}：${c.actual || c.error || "（详见缺陷报告）"}`).join("\n");
+    // 修复依据改用「缺陷报告」（不再给测试报告）：已生成 → 内嵌缺陷报告 md 全文 + 路径；
+    // 未生成 → 回退失败用例清单（用户可在报告页先生成缺陷报告再交接）。
+    const body = entry?.defectMarkdown
+      ? [`缺陷报告：${defectMdRel}`, "", "===== 缺陷报告（md 全文）=====", entry.defectMarkdown, "===== 缺陷报告结束 ====="]
+      : ["失败用例（疑似应用缺陷）：", lines || "（详见缺陷报告）"];
+    const readHint = entry?.defectMarkdown ? "请先 Read 上面的缺陷报告和相关源码" : "请先结合上面的失败用例与相关源码";
     const msg = [
       "请修复测试发现的缺陷。", "",
       `项目路径：${projectPath}`,
       `测试任务：${taskName} · 环境：${env}`,
       `结果：用例 ${counts.total}，通过 ${counts.pass}，失败 ${counts.fail}${counts.blocked ? `，阻塞 ${counts.blocked}` : ""}`,
-      "", "失败用例（疑似应用缺陷）：", lines || "（详见报告）", "",
-      `完整测试报告：${reportMdRel}`, "",
-      "请先 Read 上面的测试报告和相关源码，定位每个失败用例的根因并修复；改完简述每处改动。阻塞类（环境问题）不在本次修复范围。",
+      "",
+      ...body,
+      "",
+      `${readHint}，定位每个失败用例的根因并修复；改完简述每处改动。阻塞类（环境问题）不在本次修复范围。`,
     ].join("\n");
     setHandoffBusy(true);
     try {
@@ -2546,9 +2553,15 @@ function ReportBrowser({ projects, t, model, providerId, onOpenTask }: { project
     const key = `${project.path}|${r.task}|${r.env}`;
     const failed = r.tests.filter((c) => String(c.status).toLowerCase() === "fail");
     const lines = failed
-      .map((c) => `- ${c.id}：${c.actual || c.error || "（详见报告）"}${c.evidence?.length ? `（证据：${c.evidence.join("、")}）` : ""}`)
+      .map((c) => `- ${c.id}：${c.actual || c.error || "（详见缺陷报告）"}${c.evidence?.length ? `（证据：${c.evidence.join("、")}）` : ""}`)
       .join("\n");
-    const mdPath = `AI_LabTest/report/${r.task}/${r.task}-${r.env}.md`;
+    // 修复依据改用「缺陷报告」（不再给测试报告）：已生成 → 内嵌缺陷报告 md 全文 + 路径；
+    // 未生成 → 回退失败用例清单，保证仍有可定位信息（用户可在报告页先生成缺陷报告再交接）。
+    const defectPath = `AI_LabTest/report/${r.task}/${r.task}-${r.env}-缺陷报告.md`;
+    const body = r.defectMarkdown
+      ? [`缺陷报告：${defectPath}`, "", "===== 缺陷报告（md 全文）=====", r.defectMarkdown, "===== 缺陷报告结束 ====="]
+      : ["失败用例（疑似应用缺陷）：", lines || "（无结构化用例）"];
+    const readHint = r.defectMarkdown ? "请先 Read 上面的缺陷报告和相关源码" : "请先结合上面的失败用例与相关源码";
     const msg = [
       "请修复测试发现的缺陷。",
       "",
@@ -2556,12 +2569,9 @@ function ReportBrowser({ projects, t, model, providerId, onOpenTask }: { project
       `测试任务：${r.task} · 环境：${r.env}`,
       `结果：用例 ${r.counts.total}，通过 ${r.counts.pass}，失败 ${r.counts.fail}${r.counts.blocked ? `，阻塞 ${r.counts.blocked}` : ""}`,
       "",
-      "失败用例（疑似应用缺陷）：",
-      lines || "（无结构化用例，详见报告）",
+      ...body,
       "",
-      `完整测试报告：${mdPath}`,
-      "",
-      "请先 Read 上面的测试报告和相关源码，定位每个失败用例的根因并修复；改完简述每处改动。阻塞类（环境问题）不在本次修复范围。",
+      `${readHint}，定位每个失败用例的根因并修复；改完简述每处改动。阻塞类（环境问题）不在本次修复范围。`,
     ].join("\n");
     setHandoffKey(key);
     try {
