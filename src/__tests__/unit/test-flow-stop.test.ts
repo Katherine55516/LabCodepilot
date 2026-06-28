@@ -47,6 +47,43 @@ test("停止: read() 卡住时, abort 能让读流循环立即跳出并标记 st
   assert.strictEqual(cancelled, true, "abort 时应同时 cancel 底层 reader");
 });
 
+// 停止与流自然 done 同刻竞争：即便 read() 的 done 抢先返回，只要信号已 abort，也必须按
+// 「停止」处理，绝不让该步落到 clean done（否则会触发下游「测试报告」自动接力 —— 即用户报的
+// 「停止测试执行却流转到测试报告」）。验证源码新增的 `|| ctrl.signal.aborted` 守卫。
+test("停止: done 与 abort 同刻竞争时按停止处理(不落 clean done)", async () => {
+  const ctrl = new AbortController();
+  const reader = {
+    read: (): Promise<{ done: boolean; value: Uint8Array | undefined }> =>
+      Promise.resolve({ done: true, value: undefined }), // 流已自然 done
+    cancel: (): Promise<void> => Promise.resolve(),
+  };
+  const abortedSignal = new Promise<{ aborted: true }>((resolve) => {
+    const onAbort = () => { reader.cancel().catch(() => {}); resolve({ aborted: true }); };
+    if (ctrl.signal.aborted) onAbort();
+    else ctrl.signal.addEventListener("abort", onAbort, { once: true });
+  });
+  ctrl.abort(); // 用户点停止：此刻 done 与 abort 同时具备
+
+  let stopped = false;
+  let cleanDone = false;
+  for (;;) {
+    const chunk = await Promise.race([reader.read(), abortedSignal]);
+    if ("aborted" in chunk || ctrl.signal.aborted) { stopped = true; break; }
+    if (chunk.done) { cleanDone = true; break; }
+  }
+  assert.strictEqual(stopped, true, "信号已 abort → 应判停止");
+  assert.strictEqual(cleanDone, false, "不应按 clean done 退出(否则下游报告会被接力)");
+});
+
+// 守卫表达式本身(确定性)：信号已 abort 时，即便拿到 done 帧也判停止。
+test("停止守卫: aborted 信号下 done 帧也判 stopped", () => {
+  const ctrl = new AbortController();
+  ctrl.abort();
+  const chunkDone = { done: true, value: undefined } as { done: boolean; value: undefined };
+  const isStop = "aborted" in chunkDone || ctrl.signal.aborted;
+  assert.strictEqual(isStop, true);
+});
+
 // 边界:abort 在进入循环前就已触发,也必须立刻停止(不进入任何一次 read 等待)。
 test("停止: 进入循环前已 abort, 第一轮 race 即停止", async () => {
   const ctrl = new AbortController();

@@ -97,3 +97,13 @@
 - 映射两种情况：**已完成任务** 4 步全 done → 3 起点都可选、都「确认重跑」；**未完成任务** → 下一个待办＝继续（不覆盖时直接运行），已完成的更早节点＝重跑（确认）。
 - i18n：`test.runStart.*`（替换原 `test.runChoice.*`）三语同步。
 - CDP 验证（dev 3001 + mock 三种态：完成/部分/全新）：已完成→3 起点默认测试执行+覆盖提示+确认重跑；部分→默认用例设计(下一步)+覆盖提示+测试执行锁定；全新→无弹窗直接开跑；console 无 React 报错。
+
+## 十、停止 = 停在当前节点（不向下游接力）
+
+修复「停止测试执行却自动流转到测试报告」。根因：执行步停止与流自然 `done` 同刻竞争时，`reader.read()` 的 `done` 可能抢先于 abort 信号被处理 → `stopped` 仍为 false → 该步落 `done` → auto-chain 接力到测试报告。
+
+- **abort 守卫**（runStep 读流循环，[InlineTestingPanel.tsx](../../src/components/test/InlineTestingPanel.tsx)）：`if ("aborted" in chunk || ctrl.signal.aborted) { stopped = true; break; }` —— 只要信号已 abort，即便 `done` 抢先也按「停止」处理，该步落 idle 而非 done。
+- **停止标记扩到下游**：`finally` 里 `stopped` 时，把该步**及其所有下游步**都加入 `stoppedStepRef`（`${id}:${step}`）；auto-chain 跳过带标记的步 → 停在该节点、不流转报告。
+- **(重)跑时清下游标记**：runStep 起跑处清掉该步**及下游**的停止标记（与 withDownstreamReset「下游产物失效」一致）→ 停止后再「运行/重跑」该步，报告仍能正常自动接力。
+- 单测：[test-flow-stop.test.ts](../../src/__tests__/unit/test-flow-stop.test.ts) 新增「done 与 abort 同刻竞争按停止处理」+ 守卫表达式两例。
+- CDP 验证（mock 可停/可完成的执行流）：B1 正常跑完→报告自动接力 ✓；B2 执行中停止→停在测试执行(idle)、报告未开始、不发起 report 请求 ✓；B3 停止后重跑执行→报告再次自动接力 ✓。

@@ -965,7 +965,12 @@ export function InlineTestingPanel() {
     // with AbortError, which the catch/finally below treat as a clean stop (not error).
     const ctrl = new AbortController();
     abortMapRef.current.set(id, ctrl);
-    stoppedStepRef.current.delete(`${id}:${step}`); // (re)running this step → clear any prior 停止 mark
+    // (re)running this step → 清掉该步【及其下游】的停止标记：重跑会重做下游，故下游的「停止」
+    // 标记也应失效，否则停过执行后重跑执行，报告会被旧标记挡住不自动接力。
+    {
+      const sidx = STEP_ORDER.indexOf(step);
+      for (let i = sidx; i < STEP_ORDER.length; i++) stoppedStepRef.current.delete(`${id}:${STEP_ORDER[i]}`);
+    }
     markRunning(id);
     // 重跑某步 → 其下游各步产物失效：当前步置 running，其后所有步骤复位 idle(未开始)，
     // 避免重跑时下游残留上次的「已完成」(如重跑「测试执行」后「测试报告」仍显示已完成)。
@@ -1096,7 +1101,10 @@ export function InlineTestingPanel() {
       let buf = "";
       for (;;) {
         const chunk = await Promise.race([reader.read(), abortedSignal]);
-        if ("aborted" in chunk) { stopped = true; break; } // abort 赢得 race → 立即停止,不等 read
+        // abort 赢得 race，或这一拍解析出来时信号已 abort（停止与流自然 done 同刻竞争时，
+        // 即便 read() 的 done 抢先返回，也按「停止」处理）→ 立即停止，绝不让该步落到 done
+        // 而触发下游(测试报告)自动接力。
+        if ("aborted" in chunk || ctrl.signal.aborted) { stopped = true; break; }
         const { done, value } = chunk;
         if (done) break;
         buf += decoder.decode(value, { stream: true });
@@ -1180,8 +1188,11 @@ export function InlineTestingPanel() {
       const finalStatus: StepStatus = stopped ? "idle" : sawError ? "error" : HUMAN_GATED.includes(step) && !autoAll ? "review" : "done";
       patchTask(id, (s) => ({ stepStatus: { ...s.stepStatus, [step]: finalStatus } }));
       if (stopped) {
-        // Mark so the auto-chain won't immediately re-run this just-stopped step.
-        stoppedStepRef.current.add(`${id}:${step}`);
+        // 停止 = 在此节点停住，不再向下游接力。标记该步【及其下游】为已停止，auto-chain 便不会
+        // 把流水线推进到下一步（如停「测试执行」时不流转到「测试报告」）。标记在该步被(重)跑或
+        // 「运行任务」时清除（见 runStep 起跑处 + startRunAllFrom）。
+        const sidx = STEP_ORDER.indexOf(step);
+        for (let i = sidx; i < STEP_ORDER.length; i++) stoppedStepRef.current.add(`${id}:${STEP_ORDER[i]}`);
         push({ role: "user", text: `■ ${t("test.flow.stop")}「${stepName}」` });
       }
       // End run-all / 批量 mode when stopped, when anything errors, or when the pipeline
