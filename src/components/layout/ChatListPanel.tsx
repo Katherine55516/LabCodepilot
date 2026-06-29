@@ -15,7 +15,7 @@ import {
   Image,
   WifiHigh,
   Gear,
-  ListChecks,
+  MagnifyingGlassCheck,
   Sparkle,
   type Icon,
 } from "@/components/ui/icon";
@@ -490,46 +490,34 @@ export function ChatListPanel({ open, width, hasUpdate, readyToInstall }: ChatLi
         </Tooltip>
       </div>
 
-      {/* Feature nav items */}
-      <div className="px-3 pb-2">
-        <div className="flex flex-col gap-0.5">
-          {/* 测试 — AI test framework entry (Routines-style). Toggles the inline
-              testing panel; active-highlighted while open (the panel itself has
-              no 收起 button — toggle here to exit). */}
-          <Button
-            variant="ghost"
-            size="sm"
-            className={`w-full justify-start gap-2 h-8 text-xs ${
-              testPanelOpen
-                ? "bg-accent text-accent-foreground font-medium"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-            onClick={handleOpenTesting}
-          >
-            <ListChecks size={14} weight={testPanelOpen ? "fill" : "regular"} />
-            {t('nav.test')}
-          </Button>
-          {navItems.map((item) => {
-            const isActive = pathname.startsWith(item.href);
-            return (
-              <Link key={item.href} href={item.href}>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className={`w-full justify-start gap-2 h-8 text-xs ${
-                    isActive
-                      ? "bg-accent text-accent-foreground font-medium"
-                      : "text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  <item.icon size={14} weight={isActive ? "fill" : "regular"} />
-                  {item.label}
-                </Button>
-              </Link>
-            );
-          })}
+      {/* Feature nav items — 测试 moved next to 文生图 above the account row (see bottom).
+          navItems is empty today (entries live in Settings); render the block only when
+          some are restored so it leaves no empty gap below the search bar. */}
+      {navItems.length > 0 && (
+        <div className="px-3 pb-2">
+          <div className="flex flex-col gap-0.5">
+            {navItems.map((item) => {
+              const isActive = pathname.startsWith(item.href);
+              return (
+                <Link key={item.href} href={item.href}>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className={`w-full justify-start gap-2 h-8 text-xs ${
+                      isActive
+                        ? "bg-accent text-accent-foreground font-medium"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    <item.icon size={14} weight={isActive ? "fill" : "regular"} />
+                    {item.label}
+                  </Button>
+                </Link>
+              );
+            })}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Separator */}
       <div className="mx-3 border-t border-border/40" />
@@ -713,23 +701,37 @@ export function ChatListPanel({ open, width, hasUpdate, readyToInstall }: ChatLi
         </div>
       </ScrollArea>
 
-      {/* Image Studio — standalone text-to-image entry, sits above the account row */}
-      <div className="shrink-0 px-3 pt-2">
+      {/* Feature entries — 测试 + 文生图 stacked above the account row. Both use the
+          neutral ghost style (transparent at rest, accent highlight when active) so they
+          match the rest of the sidebar nav; 测试 sits directly above 文生图. */}
+      <div className="shrink-0 px-3 pt-2 flex flex-col gap-0.5">
+        {/* 测试 — toggles the inline testing panel; active-highlighted while open
+            (the panel has no 收起 button — toggle here to exit). */}
+        <Button
+          variant="ghost"
+          size="sm"
+          className={`w-full justify-start gap-2 h-8 text-xs ${
+            testPanelOpen
+              ? "bg-accent text-accent-foreground font-medium"
+              : "text-muted-foreground hover:text-foreground"
+          }`}
+          onClick={handleOpenTesting}
+        >
+          <MagnifyingGlassCheck size={14} weight={testPanelOpen ? "fill" : "regular"} />
+          {t('nav.test')}
+        </Button>
+        {/* 文生图 — text-to-image entry */}
         <Link href="/image">
           <Button
-            variant="outline"
+            variant="ghost"
             size="sm"
-            className={`w-full justify-start gap-2 h-9 text-xs border-primary/30 ${
+            className={`w-full justify-start gap-2 h-8 text-xs ${
               pathname.startsWith("/image")
-                ? "bg-primary/10 text-primary font-medium"
-                : "bg-primary/5 text-foreground hover:bg-primary/10"
+                ? "bg-accent text-accent-foreground font-medium"
+                : "text-muted-foreground hover:text-foreground"
             }`}
           >
-            <Sparkle
-              size={15}
-              weight={pathname.startsWith("/image") ? "fill" : "regular"}
-              className="text-primary"
-            />
+            <Sparkle size={14} weight={pathname.startsWith("/image") ? "fill" : "regular"} />
             {t('imageStudio.sidebarButton' as TranslationKey)}
           </Button>
         </Link>
