@@ -30,6 +30,13 @@ const MIME_TYPES: Record<string, string> = {
   '.ogg': 'audio/ogg',
   '.flac': 'audio/flac',
   '.aac': 'audio/aac',
+  // Documents (应用内预览：PdfViewer/DocxViewer/XlsxViewer/PptxViewer 走
+  // fetch().arrayBuffer() 取字节，不依赖 Content-Type；这里规范化是为了
+  // 响应头正确，并为日后 <iframe>/<embed> 兜底预览留余地。)
+  '.pdf': 'application/pdf',
+  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
 };
 
 /**

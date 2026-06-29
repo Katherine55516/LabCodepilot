@@ -163,6 +163,48 @@ function isMediaPreview(filePath: string): boolean {
   return isImagePreview(filePath) || isVideoPreview(filePath) || isAudioPreview(filePath);
 }
 
+/**
+ * 二进制文档预览扩展集合（Phase 0 骨架，Phase 1-3 接渲染器）。
+ *
+ * 这四类是 OOXML / PDF 二进制，**不能走 /api/files/preview 文本通道**
+ * （二进制检测返回 415 binary_not_previewable）。统一走 fileServeUrl 取
+ * arrayBuffer 喂给各自的懒加载渲染器：
+ *   .pdf  → PdfViewer   (react-pdf,    Phase 1)
+ *   .xlsx → XlsxViewer  (SheetJS → 复用 DataTableViewer, Phase 1)
+ *   .docx → DocxViewer  (docx-preview + DOMPurify,        Phase 2)
+ *   .pptx → PptxViewer  (@aiden0z/pptx-renderer,          Phase 3)
+ *
+ * 老二进制 .doc/.ppt/.xls（OLE2/BIFF）纯前端无解，仍由 FileTreePanel 的
+ * NON_PREVIEWABLE 拦截，不在此列。
+ */
+const PDF_EXTENSIONS = new Set([".pdf"]);
+const DOCX_EXTENSIONS = new Set([".docx"]);
+const XLSX_EXTENSIONS = new Set([".xlsx"]);
+const PPTX_EXTENSIONS = new Set([".pptx"]);
+
+function isPdfPreview(filePath: string): boolean {
+  return PDF_EXTENSIONS.has(getExtension(filePath));
+}
+function isDocxPreview(filePath: string): boolean {
+  return DOCX_EXTENSIONS.has(getExtension(filePath));
+}
+function isXlsxPreview(filePath: string): boolean {
+  return XLSX_EXTENSIONS.has(getExtension(filePath));
+}
+function isPptxPreview(filePath: string): boolean {
+  return PPTX_EXTENSIONS.has(getExtension(filePath));
+}
+
+/** 任一二进制文档类型 —— useEffect 短路（跳过文本 fetch）+ 渲染分发判定。 */
+function isDocumentPreview(filePath: string): boolean {
+  return (
+    isPdfPreview(filePath) ||
+    isDocxPreview(filePath) ||
+    isXlsxPreview(filePath) ||
+    isPptxPreview(filePath)
+  );
+}
+
 function isHtml(filePath: string): boolean {
   const ext = getExtension(filePath);
   return ext === ".html" || ext === ".htm";
@@ -189,7 +231,7 @@ export function PreviewPanel() {
   const filePath = previewFile || "";
 
   useEffect(() => {
-    if (!filePath || isMediaPreview(filePath)) {
+    if (!filePath || isMediaPreview(filePath) || isDocumentPreview(filePath)) {
       setLoading(false);
       return;
     }
@@ -458,6 +500,11 @@ export function PreviewPanel() {
 
   const canRender = isRenderable(filePath);
   const isMedia = isMediaPreview(filePath);
+  // Phase 0 骨架：二进制文档（pdf/docx/xlsx/pptx）走专用渲染分支，不走
+  // 文本 preview 通道。Phase 1-3 把 DocumentPlaceholder 换成各自的懒加载
+  // 渲染器。当前 FileTreePanel 仍拦截这四类（NON_PREVIEWABLE），所以此
+  // 分支在 Phase 1 放开拦截前不会被触发——是预铺的分发骨架。
+  const isDocument = isDocumentPreview(filePath);
   // Single derived flag for "this file can enter edit mode". Combines:
   //   1. previewSource is a real file (not inline-html / inline-jsx / table)
   //   2. extension is in EDITABLE_EXTENSIONS
@@ -600,6 +647,8 @@ export function PreviewPanel() {
             header={previewSource.header}
             filename={previewSource.virtualName ?? "table"}
           />
+        ) : isDocument ? (
+          <DocumentPlaceholder filePath={filePath} />
         ) : isMedia ? (
           <MediaView filePath={filePath} fileServeUrl={fileServeUrl} />
         ) : loading ? (
@@ -782,6 +831,29 @@ function InlinePlaceholder({ phase, kind }: { phase: string; kind: string }) {
       </p>
       <p className="text-xs text-muted-foreground/60">
         The data channel (PreviewSource → PreviewPanel) is wired; renderer is pending.
+      </p>
+    </div>
+  );
+}
+
+/**
+ * Phase 0 文档预览占位 —— Phase 1-3 替换为真实懒加载渲染器
+ * （PdfViewer / XlsxViewer / DocxViewer / PptxViewer）。
+ *
+ * 当前 FileTreePanel 的 NON_PREVIEWABLE 仍拦截 pdf/docx/xlsx/pptx，所以这个
+ * 占位在 Phase 1 放开拦截前不会出现在 UI；它的作用是让 PreviewPanel 的分发
+ * 骨架完整、类型自洽，给后续 Phase 一个明确的替换锚点（与 InlinePlaceholder
+ * 同样的「数据通道已通、渲染器待补」定位）。
+ */
+function DocumentPlaceholder({ filePath }: { filePath: string }) {
+  const ext = getExtension(filePath).replace(".", "").toUpperCase();
+  return (
+    <div className="flex h-full flex-col items-center justify-center gap-2 p-8 text-center">
+      <p className="text-sm font-medium text-muted-foreground">
+        {ext} preview coming soon
+      </p>
+      <p className="text-xs text-muted-foreground/60">
+        Renderer lands in an upcoming phase. (Phase 0 dispatch scaffold)
       </p>
     </div>
   );

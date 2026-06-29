@@ -17,6 +17,9 @@
 /.next/
 /out/
 
+# pdfjs 离线资产（由 scripts/copy-doc-assets.js 从 node_modules/pdfjs-dist 生成）
+/public/pdf/
+
 # production
 /build-next
 
@@ -49,6 +52,7 @@ next-env.d.ts
 # electron
 /dist-electron/
 /release/
+/release-win/
 
 # test artifacts
 /playwright-report/
