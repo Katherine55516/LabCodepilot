@@ -2662,9 +2662,11 @@ function ReportStepPanel({
             entry?.defectMarkdown
               ? mdActions("test.defect.tab", defectMdRel, entry.defectMarkdown)
               : (
-                <button onClick={defectGen} disabled={defectBusy} className="flex shrink-0 items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[10px] text-foreground hover:bg-muted disabled:opacity-50">
-                  {defectBusy ? <SpinnerGap size={12} className="animate-spin" /> : <WarningCircle size={12} />} {defectBusy ? t("test.defect.generating") : t("test.defect.gen")}
-                </button>
+                // 问题4：缺陷报告改为自动生成（fetch effect 里 fail>0 时触发），不再手动按钮；
+                // 自动生成中显示「生成中」，无缺陷则显示空态文案。
+                <span className="flex shrink-0 items-center gap-1 text-[10px] text-muted-foreground">
+                  {defectBusy ? <><SpinnerGap size={12} className="animate-spin" /> {t("test.defect.generating")}</> : t("test.defect.empty")}
+                </span>
               ),
           )}
         </div>
@@ -3044,7 +3046,7 @@ function ReportBrowser({ projects, t, model, providerId, onOpenTask, reloadSigna
                                   const cur = rowTab[key] || "result";
                                   const label = tab === "result" ? t("test.compare.tabResult") : tab === "compare" ? t("test.compare.tabCompare") : t("test.defect.tab");
                                   return (
-                                    <button key={tab} onClick={() => setRowTab((m) => ({ ...m, [key]: tab }))} className={`rounded px-2 py-0.5 text-[11px] ${cur === tab ? "bg-primary text-primary-foreground" : "border border-border text-foreground hover:bg-muted"}`}>{label}</button>
+                                    <button key={tab} onClick={() => { setRowTab((m) => ({ ...m, [key]: tab })); if (tab === "defect" && r.counts.fail > 0 && !r.defectMarkdown && defectBusy !== key) void defectGen(project, r); }} className={`rounded px-2 py-0.5 text-[11px] ${cur === tab ? "bg-primary text-primary-foreground" : "border border-border text-foreground hover:bg-muted"}`}>{label}</button>
                                   );
                                 })}
                                 <span className="flex-1" />
@@ -3062,22 +3064,13 @@ function ReportBrowser({ projects, t, model, providerId, onOpenTask, reloadSigna
                                 <CompareView t={t} projectPath={project.path} taskName={task} env={r.env} />
                               ) : (rowTab[key] || "result") === "defect" ? (
                                 <div>
-                                  <div className="mb-2 flex items-center gap-2">
-                                    <button
-                                      onClick={() => defectGen(project, r)}
-                                      disabled={defectBusy === key}
-                                      className="flex h-7 items-center gap-1 rounded-md bg-primary px-2.5 text-[11px] font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
-                                    >
-                                      <WarningCircle size={12} /> {defectBusy === key ? t("test.defect.generating") : r.defectMarkdown ? t("test.defect.regen") : t("test.defect.gen")}
-                                    </button>
-                                    <span className="text-[10px] text-muted-foreground">{t("test.defect.hint")}</span>
-                                  </div>
+                                  {/* 问题4：缺陷报告自动生成（切到本 tab 时若有缺陷且未生成则触发），不再手动按钮。 */}
                                   {r.defectMarkdown ? (
                                     <div className="prose prose-sm dark:prose-invert max-w-none rounded-lg border border-border bg-card p-3">
                                       <ReactMarkdown remarkPlugins={[remarkGfm]}>{r.defectMarkdown}</ReactMarkdown>
                                     </div>
                                   ) : (
-                                    <p className="text-[11px] text-muted-foreground">{defectBusy === key ? t("test.defect.generating") : t("test.defect.empty")}</p>
+                                    <p className="flex items-center gap-1 text-[11px] text-muted-foreground">{defectBusy === key ? <><SpinnerGap size={12} className="animate-spin" /> {t("test.defect.generating")}</> : t("test.defect.empty")}</p>
                                   )}
                                 </div>
                               ) : (
