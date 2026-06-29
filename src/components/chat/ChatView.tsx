@@ -84,7 +84,7 @@ const MAX_MESSAGES_IN_MEMORY = 150;
 const MAX_CONTENT_BYTES_IN_MEMORY = 24 * 1024 * 1024; // ~24MB
 
 export function ChatView({ sessionId, initialMessages = [], initialHasMore = false, modelName, providerId, initialPermissionProfile, initialMode, initialHasSummary, initialEffort }: ChatViewProps) {
-  const { setStreamingSessionId, workingDirectory, setPendingApprovalSessionId, setDashboardPanelOpen, setFileTreeOpen, setIsAssistantWorkspace } = usePanel();
+  const { setStreamingSessionId, workingDirectory, setPendingApprovalSessionId, setDashboardPanelOpen, setFileTreeOpen, setIsAssistantWorkspace, setTestPanelOpen } = usePanel();
   const { t } = useTranslation();
   const router = useRouter();
   const [messages, setMessages] = useState<Message[]>(initialMessages);
@@ -205,6 +205,15 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
 
   // Restore session-scoped last-generated images from sessionStorage
   useEffect(() => { loadLastGenerated(sessionId); }, [sessionId]);
+
+  // Leave the inline testing workbench whenever the user opens a chat session.
+  // The test panel (sidebar "测试" toggle) has no in-panel 收起 button, so opening
+  // any conversation must dismiss the full-screen overlay to reveal the chat
+  // underneath. Keyed on sessionId: fires on navigation between chats (and on
+  // mount when arriving from the workbench's 新建对话 / session list), but NOT
+  // when the panel is opened while already viewing this session. No-op when the
+  // panel is already closed (the common case), so existing chat flow is unaffected.
+  useEffect(() => { setTestPanelOpen(false); }, [sessionId, setTestPanelOpen]);
 
   // Stream snapshot from the manager — drives all streaming UI
   const [streamSnapshot, setStreamSnapshot] = useState<SessionStreamSnapshot | null>(
@@ -882,7 +891,7 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
   }, [sessionId]);
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="relative flex h-full min-h-0 flex-col">
       {/* Workspace mismatch banner */}
       {workspaceMismatchPath && (
         <div className="flex items-center justify-between gap-3 border-b border-status-warning/30 bg-status-warning-muted px-4 py-2">

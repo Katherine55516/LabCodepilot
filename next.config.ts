@@ -3,6 +3,17 @@ import pkg from "./package.json" with { type: "json" };
 
 const nextConfig: NextConfig = {
   output: 'standalone',
+  // Pin the file-tracing root to THIS project directory. Without it, Next.js
+  // infers the monorepo/workspace root from the nearest ancestor lockfile. On a
+  // dev machine that happens to have a stray ~/package-lock.json, the inferred
+  // root resolves to $HOME, and the standalone output gets nested under
+  // `.next/standalone/<relative-path-to-project>/` instead of being flat. That
+  // breaks electron-builder's extraResources, which hard-codes
+  // `from: .next/standalone/node_modules/` — the copy silently picks up nothing
+  // and after-pack.js fails with "No Claude Code native binary found".
+  // CI checks out at a path with no ancestor lockfile, so its root already
+  // resolves to the project dir; pinning here makes local builds match CI.
+  outputFileTracingRoot: import.meta.dirname,
   // Electron loads dev server via http://127.0.0.1:3000 (hardcoded in
   // electron/main.ts), but Next.js 16 treats `127.0.0.1` and `localhost` as
   // different origins by default and blocks `_next/*` resources (HMR
@@ -68,6 +79,12 @@ const nextConfig: NextConfig = {
       'node_modules/@anthropic-ai/claude-agent-sdk-linux-x64-musl/**/*',
       'node_modules/@anthropic-ai/claude-agent-sdk-win32-arm64/**/*',
       'node_modules/@anthropic-ai/claude-agent-sdk-win32-x64/**/*',
+      // @playwright/mcp + 其自带的嵌套 playwright-core/playwright(1.61-alpha):测试执行
+      // 阶段把它当 stdio MCP server 启动(见 src/lib/test/prompts.ts buildPlaywrightMcp,
+      // 经 cli.js)。cli.js 在代码里是运行时拼接的字符串路径、不是静态 import,NFT 追不动,
+      // 只复制了孤零零的 cli.js —— 丢了 package.json/lib 和嵌套 node_modules,server 一
+      // require('playwright-core') 就崩 → 零工具注册。force-include 整包(含嵌套依赖)修复之。
+      'node_modules/@playwright/mcp/**/*',
     ],
   },
   // outputFileTracingExcludes: strip non-code dirs out of every route's NFT.

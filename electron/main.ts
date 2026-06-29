@@ -42,6 +42,9 @@ import { HttpError, AuthExpiredError, NetworkError, type MeInfo, type ModelConfi
 import { RealtimeAsrSession } from './asr/realtime-session';
 import { getAsrConfig, invalidateAsrToken, type AsrConfig } from './asr/token-cache';
 
+// ── Test Accounts: 获取登录态 capture (BrowserWindow → Playwright storageState) ──
+import { startCapture, finishCapture, cancelCapture, getCaptureStatus, clearCaptured } from './test-auth-capture/capture-window';
+
 // File logger — persists main-process logs, the forked Next-server's piped
 // stdout/stderr (re-console.log'd below), and renderer console output to
 // app.getPath('logs'). Secrets are scrubbed before writing. See electron/logger.ts.
@@ -57,6 +60,13 @@ import {
   install as installGsdBundle,
   registerGsdIpc,
 } from './gsd-installer';
+
+// Vendor-bundled AI_LabTest plugin — synced to ~/.claude/plugins/external_plugins/
+// on first launch (default disabled) and version drift. See electron/ailab-installer.ts.
+import {
+  install as installAilabBundle,
+  registerAilabIpc,
+} from './ailab-installer';
 
 // Auto-inject `skipWebFetchPreflight: true` into ~/.claude/settings.json on
 // startup so users behind enterprise networks / GFW don't hit the
@@ -128,6 +138,140 @@ const terminalManager = new TerminalManager();
 
 const isDev = !app.isPackaged;
 
+// ──────────────────────────────────────────────────────────────────────────
+// Server pidfile —— 解决"端口漂移导致 localStorage 丢失"的根因。
+//
+// 背景：renderer 的 localStorage 按 origin(localhost:端口)隔离。打包版每次
+// 启动都尽量绑定固定端口(STABLE_PORTS 首个 47823)以保证 origin 一致。但
+// **非正常退出**(崩溃 / 任务管理器强杀 / 断电)不会走 before-quit →
+// killServer() 没机会执行 → 上次 fork 的 Next server 残留进程继续占着 47823 →
+// 本次启动探测到 47823 被占、跳到 47824…… origin 变化 → 用户的测试项目等
+// localStorage 数据"消失"。残留累积占满 8 个稳定端口后还会回退随机端口(每次都丢)。
+//
+// 方案:fork 成功后把 server pid 写到固定文件;下次启动在探测端口之前先读这个
+// 文件,若进程仍存活就杀掉它(释放上次占用的端口),从而稳定回到 47823。
+//
+// pidfile 路径与注入 server 的 CLAUDE_GUI_DATA_DIR(见 startServer)保持一致:
+//   <os.homedir()>/.codepilot/.server.pid
+const SERVER_PID_FILE = path.join(os.homedir(), '.codepilot', '.server.pid');
+
+/** 把当前 server 进程的 pid 写入 pidfile(目录不存在则创建)。失败仅告警,不影响启动。 */
+function writeServerPidFile(pid: number): void {
+  try {
+    fs.mkdirSync(path.dirname(SERVER_PID_FILE), { recursive: true });
+    fs.writeFileSync(SERVER_PID_FILE, String(pid), 'utf8');
+  } catch (err) {
+    console.warn(`[pidfile] 写入 ${SERVER_PID_FILE} 失败: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+/** 删除 pidfile(正常退出 / 清理残留后调用),避免下次误判。文件不存在不报错。 */
+function removeServerPidFile(): void {
+  try {
+    fs.rmSync(SERVER_PID_FILE, { force: true });
+  } catch { /* 不存在或无权限,忽略 */ }
+}
+
+/** 进程是否存活:用信号 0 探测(不真正发信号),包 try/catch。 */
+function isPidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    // ESRCH = 进程不存在 → false;EPERM = 进程存在但无权限发信号 → 视为存活。
+    // (我方 server 与主进程同一用户,正常不会出现 EPERM,这里只是保险。)
+    return (err as NodeJS.ErrnoException)?.code === 'EPERM';
+  }
+}
+
+/**
+ * 校验某 pid 看起来确实是我们 fork 的 Next server,降低 pid 被系统复用后误杀的概率。
+ *
+ * 取舍:跨平台精确校验(读 /proc、解析命令行)实现成本高。这里做轻量校验:
+ *  - Windows: 用 `tasklist /FI "PID eq <pid>"`,输出里含 node/electron/codepilot
+ *    才认为可杀;拿不到输出时保守返回 false(不杀)。
+ *  - 非 Windows: 用 `ps -p <pid> -o command=` 读命令行,含 server.js / codepilot /
+ *    node / electron 才可杀;`ps` 不可用或异常时退而返回 true(允许杀)——因为
+ *    pidfile 是我们自己写的、且紧接着会删除,复用窗口极小,残留误杀的风险可接受。
+ */
+function looksLikeOurServer(pid: number): boolean {
+  try {
+    if (process.platform === 'win32') {
+      const out = execFileSync('tasklist', ['/FI', `PID eq ${pid}`, '/NH'], {
+        encoding: 'utf8',
+        timeout: 3000,
+      }).toLowerCase();
+      // 无匹配进程时 tasklist 输出 "INFO: No tasks..." —— 不含进程名,自然返回 false。
+      return /node|electron|codepilot/.test(out);
+    }
+    const out = execFileSync('ps', ['-p', String(pid), '-o', 'command='], {
+      encoding: 'utf8',
+      timeout: 3000,
+    }).toLowerCase();
+    return /server\.js|codepilot|node|electron/.test(out);
+  } catch {
+    // 校验命令本身失败(ps/tasklist 不可用、超时等):非 Windows 放行(见上方取舍说明),
+    // Windows 保守不杀,避免在拿不到信息时误杀其它进程。
+    return process.platform !== 'win32';
+  }
+}
+
+/**
+ * 启动前清理上次残留的 server 进程。
+ *
+ * 读 pidfile;若 pid 仍存活且校验像我们的 server,就杀掉它(Windows 用
+ * `taskkill /T /F /PID` 杀进程树,其它平台 process.kill SIGKILL),释放它占用的端口,
+ * 让本次启动稳定回到 STABLE_PORTS 首个(47823)、保持 localStorage origin 一致。
+ * 最后删除 pidfile。整个过程包 try/catch,任何异常都不应阻塞正常启动。
+ */
+function reapOrphanServer(): void {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(SERVER_PID_FILE, 'utf8').trim();
+  } catch {
+    return; // 没有 pidfile —— 上次正常退出或首次启动,无需清理。
+  }
+
+  const pid = Number.parseInt(raw, 10);
+  if (!Number.isInteger(pid) || pid <= 0) {
+    console.warn(`[pidfile] 内容非法(${JSON.stringify(raw)}),直接删除`);
+    removeServerPidFile();
+    return;
+  }
+
+  if (pid === process.pid) {
+    // 极端兜底:pidfile 写的是当前主进程自身,绝不能自杀。
+    removeServerPidFile();
+    return;
+  }
+
+  if (!isPidAlive(pid)) {
+    console.log(`[pidfile] 残留 pid ${pid} 已不存在,清理 pidfile`);
+    removeServerPidFile();
+    return;
+  }
+
+  if (!looksLikeOurServer(pid)) {
+    // pid 可能已被系统复用为无关进程,放弃杀它,只清理 pidfile。
+    console.warn(`[pidfile] pid ${pid} 仍存活但校验不像本应用 server,跳过清理(可能 pid 已被复用)`);
+    removeServerPidFile();
+    return;
+  }
+
+  console.warn(`[pidfile] 发现残留 server 进程 pid ${pid}(上次非正常退出),正在清理以释放端口`);
+  try {
+    if (process.platform === 'win32') {
+      // /T 连同子进程树一起杀,/F 强杀。
+      spawn('taskkill', ['/T', '/F', '/PID', String(pid)], { stdio: 'ignore' });
+    } else {
+      process.kill(pid, 'SIGKILL');
+    }
+  } catch (err) {
+    console.warn(`[pidfile] 杀残留进程 ${pid} 失败: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  removeServerPidFile();
+}
+
 /**
  * Gracefully shut down the server process.
  * Sends kill() (SIGTERM) first, waits up to 3s for exit,
@@ -154,12 +298,16 @@ function killServer(): Promise<void> {
         } catch { /* already dead */ }
       }
       serverProcess = null;
+      // 进程已被强杀,删除 pidfile,避免下次启动误判为残留(见 SERVER_PID_FILE 注释)。
+      removeServerPidFile();
       resolve();
     }, 3000);
 
     serverProcess.on('exit', () => {
       clearTimeout(timeout);
       serverProcess = null;
+      // 进程已正常退出,删除 pidfile。
+      removeServerPidFile();
       resolve();
     });
 
@@ -613,6 +761,10 @@ async function getDynamicPort(): Promise<number> {
  * Throws only if every candidate AND the OS-assigned fallback fail.
  */
 async function startServerOnStablePort(): Promise<number> {
+  // 探测端口之前:先清理上次非正常退出残留的 server 进程,释放它占用的端口,
+  // 让本次启动稳定回到 47823、保持 localStorage origin 一致(见 SERVER_PID_FILE 注释)。
+  reapOrphanServer();
+
   for (const candidate of STABLE_PORTS) {
     // Quick pre-check skips obviously-occupied ports without spawning.
     // Not a guarantee — but cheap, and avoids a process spawn for the common
@@ -733,6 +885,10 @@ function startServer(port: number): Electron.UtilityProcess {
     // spreads so a stray shell var can't shadow it. Empty when safeStorage is
     // unavailable → server-side crypto-seal falls back to plaintext passthrough.
     CLAUDE_GUI_SECRET_KEY: getMasterKeyHex(),
+    // 打包资源根目录 —— 测试执行阶段的 Playwright MCP(src/lib/test/prompts.ts
+    // buildPlaywrightMcp)据此定位随包分发的 chromium_headless_shell。dev 态(next dev)
+    // 不经此 fork、该 env 不存在 → 回退用本机 ~/.cache/ms-playwright 的浏览器。
+    AILAB_RESOURCES_PATH: process.resourcesPath,
   };
 
   // Register every credential the forked server will hold (master key + the
@@ -749,6 +905,12 @@ function startServer(port: number): Electron.UtilityProcess {
     stdio: 'pipe',
     serviceName: 'codepilot-server',
   });
+
+  // 记录 pid 到固定 pidfile —— 供下次启动清理本次的残留进程(见 reapOrphanServer)。
+  // utilityProcess.fork 同步返回,pid 此时已可用。
+  if (child.pid) {
+    writeServerPidFile(child.pid);
+  }
 
   // Buffer piped output and emit COMPLETE lines. Logging per logical line (not
   // per arbitrary pipe chunk) keeps the file log readable AND lets the logger's
@@ -1227,6 +1389,28 @@ app.whenReady().then(async () => {
     })
     .catch((err) => {
       console.error('[gsd-installer] startup sync threw:', err);
+    });
+
+  // --- Vendor-bundled AI_LabTest: sync (fire-and-forget, never blocks startup) ---
+  // First launch lays down the plugin dir DISABLED; the user enables it from
+  // Settings → Plugins (which also registers the Playwright MCP). When already
+  // enabled, this re-mirrors commands + skill and picks up version drift.
+  registerAilabIpc(ipcMain);
+  Promise.resolve()
+    .then(() => {
+      const status = installAilabBundle({
+        log: (msg) => console.log(msg),
+      });
+      if (status.lastError) {
+        console.warn('[ailab-installer] startup sync had error:', status.lastError);
+      } else {
+        console.log(
+          `[ailab-installer] startup sync OK (installed=${status.installed}, enabled=${status.enabled})`,
+        );
+      }
+    })
+    .catch((err) => {
+      console.error('[ailab-installer] startup sync threw:', err);
     });
 
   // --- Auto-inject skipWebFetchPreflight into ~/.claude/settings.json ---
@@ -1751,6 +1935,15 @@ app.whenReady().then(async () => {
     });
     return { canceled: result.canceled, filePaths: result.filePaths };
   });
+
+  // Test Accounts — 获取登录态 capture. Opens an isolated BrowserWindow, lets the
+  // user log in, then writes a Playwright storageState file into the AI_LabTest
+  // workspace for replay. See electron/test-auth-capture/capture-window.ts.
+  ipcMain.handle('test-auth-capture:start', (_e, params: { frontendBaseUrl: string; username?: string; password?: string }) => startCapture(params));
+  ipcMain.handle('test-auth-capture:finish', (_e, params: { projectRoot: string; env: string; accountKey: string }) => finishCapture(params));
+  ipcMain.handle('test-auth-capture:cancel', () => cancelCapture());
+  ipcMain.handle('test-auth-capture:status', (_e, params: { projectRoot: string; env: string; accountKey: string }) => getCaptureStatus(params));
+  ipcMain.handle('test-auth-capture:clear', (_e, params: { projectRoot: string; env: string; accountKey: string }) => clearCaptured(params));
 
   // --- Widget export IPC handler ---
   // Uses an isolated BrowserWindow for secure, high-fidelity widget screenshot.
@@ -2366,6 +2559,8 @@ app.on('before-quit', async (e) => {
     // Stop bridge gracefully before killing the server
     await stopBridge();
     await killServer();
+    // 兜底:确保正常退出后不留 pidfile(killServer 的 early-return 路径不会删)。
+    removeServerPidFile();
     app.quit();
   }
 });

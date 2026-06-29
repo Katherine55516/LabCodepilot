@@ -131,6 +131,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
     disable: () => ipcRenderer.invoke('gsd:disable'),
     uninstall: () => ipcRenderer.invoke('gsd:uninstall'),
   },
+  // Vendor-bundled AI_LabTest plugin (qitianersheng/ai-lab-test-agent, MIT).
+  // Installer in electron/ailab-installer.ts. Default-disabled on first launch;
+  // enabling mirrors ai-lab-test:* commands + the test-workflow skill. The
+  // Playwright MCP is registered separately by the renderer card via the
+  // /api/plugins/mcp HTTP API. See docs/handover/ailab-plugin.md.
+  ailab: {
+    getStatus: () => ipcRenderer.invoke('ailab:status'),
+    install: () => ipcRenderer.invoke('ailab:install'),
+    resync: () => ipcRenderer.invoke('ailab:resync'),
+    enable: () => ipcRenderer.invoke('ailab:enable'),
+    disable: () => ipcRenderer.invoke('ailab:disable'),
+    uninstall: () => ipcRenderer.invoke('ailab:uninstall'),
+  },
   // Managed-account login system. Strictly isolated from the OpenAI OAuth
   // module — different IPC channels, different storage, different callback
   // port. Never read or surface a session token to the renderer.
@@ -166,5 +179,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // App-level controls. quit() backs the forced-upgrade "退出应用" button.
   app: {
     quit: () => ipcRenderer.invoke('app:quit'),
+  },
+  // Test Accounts — 获取登录态 capture (opens a BrowserWindow, harvests
+  // cookies + localStorage into a Playwright storageState file). Electron-only.
+  testAuthCapture: {
+    start: (params: { frontendBaseUrl: string; username?: string; password?: string }) =>
+      ipcRenderer.invoke('test-auth-capture:start', params),
+    finish: (params: { projectRoot: string; env: string; accountKey: string }) =>
+      ipcRenderer.invoke('test-auth-capture:finish', params),
+    cancel: () => ipcRenderer.invoke('test-auth-capture:cancel'),
+    status: (params: { projectRoot: string; env: string; accountKey: string }) =>
+      ipcRenderer.invoke('test-auth-capture:status', params),
+    clear: (params: { projectRoot: string; env: string; accountKey: string }) =>
+      ipcRenderer.invoke('test-auth-capture:clear', params),
   },
 });

@@ -35,3 +35,4 @@
 | craft-agents-docs-system-review.md | Craft Agents 文档体系对标调研 — craft 外部入口文档（Issue 模板 / CONTRIBUTING / 嵌入式架构树）更完整；AI Native Lab 内部研发文档链（exec-plans / research / handover-insights 互链）显著更强；P0 借鉴清单：YAML Issue 模板 + PR 模板 + CONTRIBUTING + SECURITY |
 | craft-agents-markdown-internals.md | Craft Agents 内部 Markdown 实现调研 — 渲染走 react-markdown + unified + Shiki LRU；Tiptap 仅用于编辑器；**代码块 language 拦截 = 10 个 MarkdownXxxBlock 轻量 Artifact**（Mermaid/Diff/JSON/Datatable/HTML/PDF/Image）；`id + children` 双键 memo 可修复 AI Native Lab 长文档重渲；修订了 Tiptap 评估与 AI Elements Artifact 路径 |
 | review-packet-opus-4-7-and-sdk-0-2-111.md | **Codex 审查包**：Opus 4.7 升级 + Agent SDK 0.2.111 采纳本轮迭代的范围、commit 分组、关键架构决策、已知 out-of-scope、测试状态、希望重点审的 7 个点 |
+| framework-flow-test-integration.md | ai-lab-test-framework 流程测试能力集成评估方案 — 认知校准（app 裁剪版才是参照系）+ 能力对照 + 分批集成设计（用例编辑器/报告查看器含录像/缺陷报告/对话修订 + 需求评审oracle双轴双口径 + 报告对比），含每项技术设计、工作量与分期 |

@@ -59,6 +59,11 @@ export interface PanelContextValue {
   setAssistantPanelOpen: (open: boolean) => void;
   isAssistantWorkspace: boolean;
   setIsAssistantWorkspace: (is: boolean) => void;
+  // Inline testing panel (对话内嵌测试) — opened from the sidebar "测试" entry,
+  // closed via the panel's 收起. App-level so the sidebar can toggle it directly
+  // (no transient event → no mount-timing race).
+  testPanelOpen: boolean;
+  setTestPanelOpen: (open: boolean) => void;
 
   // --- Git summary (for top bar, derived — no setters) ---
   currentBranch: string;

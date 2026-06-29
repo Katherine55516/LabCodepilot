@@ -1,0 +1,108 @@
+import { defineConfig, devices } from '@playwright/test';
+import * as fs from 'fs';
+import * as path from 'path';
+
+/**
+ * 环境感知配置 — 由 AI_LabTest 框架管理
+ *
+ * 优先级（从高到低）：
+ * 1. 命令行环境变量 BASE_URL 直接注入（CI / 临时覆盖）
+ * 2. TEST_ENV=local|sit → 从 AI_LabTest/environments.json 读取
+ * 3. 默认 local
+ *
+ * 防御：UAT / 生产环境永不在白名单内，强制抛错中断。
+ *
+ * 注：用 process.cwd() 而非 import.meta.url，以兼容 CJS / ESM 两种 package.json type。
+ */
+type EnvEntry = {
+  frontendBaseUrl: string;
+  apiBaseUrl?: string;
+  healthEndpoint?: string;
+  tag: string;
+};
+
+function resolveBaseURL(): { baseURL: string; envTag: string } {
+  const envName = (process.env.TEST_ENV || 'local').toLowerCase();
+
+  if (envName === 'uat' || envName === 'prod' || envName === 'production') {
+    throw new Error(
+      `[AI_LabTest] TEST_ENV="${envName}" 不被允许。\n` +
+      `本框架仅支持 local 与 SIT 两个环境。\n` +
+      `UAT 是业务验收阶段，必须由业务方手工执行；生产环境永不可被自动化触达。\n` +
+      `如需调整，请修改 AI_LabTest/environments.json 的 allowedEnvs 数组。`
+    );
+  }
+
+  if (process.env.BASE_URL) {
+    return { baseURL: process.env.BASE_URL, envTag: process.env.TEST_ENV?.toUpperCase() || 'CUSTOM' };
+  }
+
+  const registryPath = path.resolve(process.cwd(), 'AI_LabTest/environments.json');
+
+  if (!fs.existsSync(registryPath)) {
+    return { baseURL: 'http://localhost:{{LOCAL_FRONTEND_PORT}}', envTag: 'local' };
+  }
+
+  try {
+    const registry = JSON.parse(fs.readFileSync(registryPath, 'utf-8')) as {
+      allowedEnvs?: string[];
+      environments: Record<string, EnvEntry>;
+    };
+
+    const allowed = registry.allowedEnvs ?? ['local', 'sit'];
+    if (!allowed.includes(envName)) {
+      throw new Error(
+        `[AI_LabTest] TEST_ENV="${envName}" 不在 allowedEnvs 白名单 ${JSON.stringify(allowed)} 内。`
+      );
+    }
+
+    const entry = registry.environments[envName];
+    if (!entry || entry.frontendBaseUrl === 'TBD') {
+      const fallback = registry.environments.local;
+      console.warn(`[AI_LabTest] 环境 "${envName}" 未配置，回退到 local。`);
+      return { baseURL: fallback.frontendBaseUrl, envTag: 'local' };
+    }
+    return { baseURL: entry.frontendBaseUrl, envTag: entry.tag };
+  } catch (err) {
+    if (err instanceof Error && err.message.includes('[AI_LabTest]')) throw err;
+    return { baseURL: 'http://localhost:{{LOCAL_FRONTEND_PORT}}', envTag: 'local' };
+  }
+}
+
+const { baseURL, envTag } = resolveBaseURL();
+process.env.RESOLVED_ENV_TAG = envTag;
+
+export default defineConfig({
+  testDir: './AI_LabTest/tests',
+  fullyParallel: true,
+  forbidOnly: !!process.env.CI,
+  retries: process.env.CI ? 2 : 0,
+  workers: process.env.CI ? 1 : undefined,
+  reporter: [
+    ['line'],
+    ['html', { open: 'never', outputFolder: './playwright-report' }],
+  ],
+  use: {
+    baseURL,
+    trace: 'on-first-retry',
+    screenshot: 'only-on-failure',
+    video: 'retain-on-failure',
+  },
+  projects: [
+    {
+      // V0.3：测试执行已改为 AI 经 Playwright MCP 实时驱动浏览器，不再通过本配置跑 spec。
+      // 本文件保留为「环境白名单」的防御性护栏（见上方 TEST_ENV 校验）+ 供任何手动 playwright 使用。
+      name: 'chromium',
+      use: { ...devices['Desktop Chrome'], launchOptions: { slowMo: 1000 } },
+    },
+  ],
+  // 仅 local 环境自启动前端 dev server（SIT 是远端，不自启）
+  webServer:
+    envTag === 'local'
+      ? {
+          command: '{{LOCAL_START_CMD}}',
+          url: 'http://localhost:{{LOCAL_FRONTEND_PORT}}',
+          reuseExistingServer: true,
+        }
+      : undefined,
+});

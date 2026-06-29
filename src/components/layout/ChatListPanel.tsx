@@ -15,6 +15,7 @@ import {
   Image,
   WifiHigh,
   Gear,
+  ListChecks,
   Sparkle,
   type Icon,
 } from "@/components/ui/icon";
@@ -59,7 +60,19 @@ interface ChatListPanelProps {
 export function ChatListPanel({ open, width, hasUpdate, readyToInstall }: ChatListPanelProps) {
   const pathname = usePathname();
   const router = useRouter();
-  const { streamingSessionId, pendingApprovalSessionId, activeStreamingSessions, pendingApprovalSessionIds, workingDirectory } = usePanel();
+
+  const { streamingSessionId, pendingApprovalSessionId, activeStreamingSessions, pendingApprovalSessionIds, workingDirectory, testPanelOpen, setTestPanelOpen } = usePanel();
+
+  // "测试" entry (Routines-style sidebar button). Toggles the inline testing
+  // panel via app-level PanelContext state (no transient event → no mount-timing
+  // race). Toggle (not just open) because the panel no longer has its own 收起
+  // button — clicking 测试 again is the explicit way out. Navigates to /chat
+  // first when opening from a non-chat route. Additive.
+  const handleOpenTesting = useCallback(() => {
+    const next = !testPanelOpen;
+    setTestPanelOpen(next);
+    if (next && !pathname.startsWith("/chat")) router.push("/chat");
+  }, [pathname, router, testPanelOpen, setTestPanelOpen]);
   const { splitSessions, isSplitActive, activeColumnId, addToSplit, removeFromSplit, setActiveColumn, isInSplit } = useSplit();
   const { t } = useTranslation();
   const { isElectron, openNativePicker } = useNativeFolderPicker();
@@ -427,6 +440,8 @@ export function ChatListPanel({ open, width, hasUpdate, readyToInstall }: ChatLi
   // Type annotation needed because the array is currently empty (every entry
   // commented out). When restoring any entry, drop the annotation if you like.
   const navItems: Array<{ href: string; label: string; icon: Icon }> = [
+    // Testing moved into the chat composer's "测试" mode (inline testing panel),
+    // so there's no top-level /test route anymore.
     // Skills / MCP / CLI Tools moved into Settings sub-sections — routes
     // still resolve, just no top-level entries here. Restore by uncommenting.
     // { href: "/skills", label: t('nav.skills' as TranslationKey), icon: Lightning },
@@ -478,6 +493,22 @@ export function ChatListPanel({ open, width, hasUpdate, readyToInstall }: ChatLi
       {/* Feature nav items */}
       <div className="px-3 pb-2">
         <div className="flex flex-col gap-0.5">
+          {/* 测试 — AI test framework entry (Routines-style). Toggles the inline
+              testing panel; active-highlighted while open (the panel itself has
+              no 收起 button — toggle here to exit). */}
+          <Button
+            variant="ghost"
+            size="sm"
+            className={`w-full justify-start gap-2 h-8 text-xs ${
+              testPanelOpen
+                ? "bg-accent text-accent-foreground font-medium"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+            onClick={handleOpenTesting}
+          >
+            <ListChecks size={14} weight={testPanelOpen ? "fill" : "regular"} />
+            {t('nav.test')}
+          </Button>
           {navItems.map((item) => {
             const isActive = pathname.startsWith(item.href);
             return (
@@ -612,7 +643,14 @@ export function ChatListPanel({ open, width, hasUpdate, readyToInstall }: ChatLi
                       >
                         <div className="mt-0.5 flex flex-col gap-0.5">
                           {visibleSessions.map((session) => {
-                            const isActive = pathname === `/chat/${session.id}`;
+                            // Route-derived active state, but suppressed while the
+                            // 测试 workbench overlay is open: in that view we're not
+                            // "in" any conversation (the chat is hidden behind the
+                            // test panel), so no row should keep the active highlight.
+                            // Toggling 测试 back off restores the pathname match; and
+                            // conversation→conversation switching already closes the
+                            // panel (ChatView resets testPanelOpen on sessionId change).
+                            const isActive = !testPanelOpen && pathname === `/chat/${session.id}`;
                             const canSplit = !isActive && !isInSplit(session.id);
 
                             return (
@@ -639,6 +677,7 @@ export function ChatListPanel({ open, width, hasUpdate, readyToInstall }: ChatLi
                                   projectName: s.project_name || "",
                                   mode: s.mode,
                                 })}
+                                onNavigate={() => setTestPanelOpen(false)}
                               />
                             );
                           })}
