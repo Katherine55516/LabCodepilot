@@ -109,7 +109,8 @@
     "trash": "^10.1.1",
     "use-stick-to-bottom": "^1.1.2",
     "uuid": "^13.0.0",
-    "ws": "^8.19.0"
+    "ws": "^8.19.0",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
   },
   "optionalDependencies": {
     "zlib-sync": "^0.1.10"

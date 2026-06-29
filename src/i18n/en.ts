@@ -225,6 +225,7 @@ const en = {
   'test.chat.action.run': 'Run step',
   'test.chat.action.ignore': 'Dismiss',
   'test.chat.failed': 'Chat failed',
+  'test.task.importedTag': 'Imported cases',
   'test.env.unconfigured': 'No target — set up in Settings',
   'test.env.targetLabel': 'Target',
   'test.env.fromSettings': 'From Settings',

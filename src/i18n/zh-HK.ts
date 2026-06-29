@@ -231,6 +231,7 @@ const zhHK: Record<TranslationKey, string> = {
   'test.chat.action.run': '運行此步',
   'test.chat.action.ignore': '忽略',
   'test.chat.failed': '對話失敗',
+  'test.task.importedTag': '導入用例',
   'test.env.unconfigured': '未配置目標 · 去設定·測試帳號',
   'test.env.targetLabel': '目標',
   'test.env.fromSettings': '來自設定',

@@ -260,6 +260,15 @@ function toConversationHistory(convo: ConvoMsg[]): { role: "user" | "assistant";
     .map((m) => ({ role: m.role === "ai" ? ("assistant" as const) : ("user" as const), content: m.text }));
 }
 
+// 问题6：删任务/项目时一并删除该任务的磁盘报告产物（best-effort，失败不阻断 UI 删除）。
+function deleteTaskReports(projectPath: string, taskName: string) {
+  void fetch("/api/test/reports/delete", {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ projectPath, taskName }),
+  }).catch(() => {});
+}
+
 export function InlineTestingPanel() {
   const { t } = useTranslation();
   const router = useRouter();
@@ -359,9 +368,9 @@ export function InlineTestingPanel() {
   // 执行方式(独立窗口可见 / 后台无头)。默认无头 —— 与原行为一致、更快。执行前确认弹窗
   // (ExecConfirmModal)记下用户选择并持久化;非弹窗触发(运行任务 / auto-chain 接力执行)
   // 复用上次选择。用 ref 让 runStep / auto-chain effect 读到最新值,避免闭包取到旧值。
-  const [execMode, setExecMode] = useState<ExecMode>(() => {
-    try { return localStorage.getItem("codepilot:test-exec-mode") === "visible" ? "visible" : "headless"; } catch { return "headless"; }
-  });
+  // 问题7：测试执行默认无头。每次都从「无头」起步、不再记忆上次的「有头」选择
+  //（用户仍可在执行确认弹窗里当次切为有头；切换只在本次会话内生效，刷新后回落无头）。
+  const [execMode, setExecMode] = useState<ExecMode>("headless");
   const execModeRef = useRef(execMode);
   useEffect(() => { execModeRef.current = execMode; }, [execMode]);
   const persistExecMode = (next: ExecMode) => {
@@ -1283,13 +1292,19 @@ export function InlineTestingPanel() {
       for (const vid of victims) stopTask(vid);
     }
     if (kind === "project") {
-      const ids = new Set((projects[pIdx]?.tasks ?? []).map((tk) => tk.id));
+      const proj = projects[pIdx];
+      // 问题6：删项目 → 一并删除该项目所有任务的磁盘报告产物。
+      if (proj?.path) for (const tk of proj.tasks) deleteTaskReports(proj.path, tk.name);
+      const ids = new Set((proj?.tasks ?? []).map((tk) => tk.id));
       setTaskStates((m) => { const n = { ...m }; ids.forEach((id) => delete n[id]); return n; });
       setProjects((ps) => ps.filter((_, i) => i !== pIdx));
       if (selected === pIdx) { setSelected(null); setSelectedTask(null); }
       else if (selected !== null && selected > pIdx) setSelected(selected - 1);
     } else {
-      const tk = projects[pIdx]?.tasks[tIdx!];
+      const proj = projects[pIdx];
+      const tk = proj?.tasks[tIdx!];
+      // 问题6：删任务 → 一并删除该任务的磁盘报告产物。
+      if (proj?.path && tk) deleteTaskReports(proj.path, tk.name);
       if (tk) setTaskStates((m) => { const n = { ...m }; delete n[tk.id]; return n; });
       setProjects((ps) => ps.map((p, i) => (i === pIdx ? { ...p, tasks: p.tasks.filter((_, j) => j !== tIdx) } : p)));
       if (selected === pIdx && selectedTask === tIdx) { setSelectedTask(null); setView("dash"); }
@@ -1535,9 +1550,10 @@ export function InlineTestingPanel() {
                 </div>
               )}
 
-              {/* pipeline strip (horizontal): 需求 → 用例 → 执行 → 报告 */}
+              {/* pipeline strip (horizontal): 需求 → 用例 → 执行 → 报告。
+                  问题1：导入用例的任务跳过需求分析，隐藏需求节点。 */}
               <div className="mb-3 flex flex-wrap gap-2">
-                {STEPS.map((s, i) => {
+                {STEPS.filter((s) => !(aState.imported?.cases && s.step === "requirement")).map((s, i) => {
                   const status = stepStatus[s.step];
                   const isFocus = s.step === focusStep;
                   const isRunning = status === "running";
@@ -1918,17 +1934,18 @@ export function InlineTestingPanel() {
                               <span className="truncate pl-6 pt-0.5 text-sm font-medium text-foreground">{tk.name}</span>
                               <div className="flex shrink-0 flex-col items-end gap-0.5">
                                 <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${badge.cls}`}>{badge.text}</span>
+                                {st.imported?.cases && <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-medium text-primary">{t("test.task.importedTag")}</span>}
                                 <span className="text-[10px] text-muted-foreground">{taskStageName(st, t)}</span>
                               </div>
                             </div>
                             <div className="flex items-start">
-                              {STEPS.map((s, idx) => (
+                              {STEPS.filter((s) => !(st.imported?.cases && s.step === "requirement")).map((s, idx, arr) => (
                                 <div key={s.step} className="flex flex-1 flex-col items-center">
                                   {/* dot with connector lines on both sides (ends are hidden) */}
                                   <div className="flex w-full items-center">
                                     <span className={`h-px flex-1 ${idx === 0 ? "opacity-0" : "bg-border"}`} />
                                     <span className={`mx-1 h-2 w-2 shrink-0 rounded-full ${stepDotClass(st.stepStatus[s.step])}`} />
-                                    <span className={`h-px flex-1 ${idx === STEPS.length - 1 ? "opacity-0" : "bg-border"}`} />
+                                    <span className={`h-px flex-1 ${idx === arr.length - 1 ? "opacity-0" : "bg-border"}`} />
                                   </div>
                                   <span className="mt-1 text-center text-[9px] leading-tight text-muted-foreground">{t(s.name)}</span>
                                 </div>
@@ -2296,7 +2313,7 @@ function ReportView({ t, results, four, funcCounts, funcPassStr, circuitBroken, 
       {lightbox && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-6" onClick={() => setLightbox(null)}>
           {isVid(lightbox) ? (
-            <video src={mediaUrl(lightbox)} controls autoPlay className="max-h-full max-w-full" onClick={(e) => e.stopPropagation()} />
+            <video src={mediaUrl(lightbox)} controls autoPlay muted playsInline preload="metadata" className="max-h-full max-w-full" onClick={(e) => e.stopPropagation()} />
           ) : (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={mediaUrl(lightbox)} alt={lightbox} className="max-h-full max-w-full object-contain" onClick={(e) => e.stopPropagation()} />
@@ -2438,8 +2455,9 @@ function ReportStepPanel({
   const [reloadTick, setReloadTick] = useState(0);
   const [defectBusy, setDefectBusy] = useState(false);
   const [handoffBusy, setHandoffBusy] = useState(false);
-  const [docOpen, setDocOpen] = useState(false);
   const [preview, setPreview] = useState<PreviewState | null>(null);
+  // 问题4：自动缺陷生成的一次性守卫——执行有 fail 且尚无缺陷报告时自动生成一次，防重复触发。
+  const autoDefectRef = useRef(false);
 
   useEffect(() => {
     if (reportStatus !== "done" || !projectPath) { setEntry(null); return; }
@@ -2449,10 +2467,18 @@ function ReportStepPanel({
       .then((d) => {
         if (cancelled) return;
         const list = (d.reports ?? []) as ReportEntry[];
-        setEntry(list.find((x) => x.task === taskName && x.env === env) ?? null);
+        const e = list.find((x) => x.task === taskName && x.env === env) ?? null;
+        setEntry(e);
+        // 问题4：执行有缺陷(fail>0)且尚未生成缺陷报告 → 自动生成一次（用户无需手点）。
+        if (e && (e.counts?.fail ?? 0) > 0 && !e.defectMarkdown && !autoDefectRef.current) {
+          autoDefectRef.current = true;
+          void defectGen();
+        }
       })
       .catch(() => { if (!cancelled) setEntry(null); });
     return () => { cancelled = true; };
+    // defectGen 闭包仅用 props/setter、稳定；有意不入 deps 以免重建 effect。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reportStatus, projectPath, taskName, env, reloadTick]);
 
   // 失败态：报告步执行失败 → 提示重跑，不渲染空报告。
@@ -2630,23 +2656,6 @@ function ReportStepPanel({
           )}
         </div>
       </div>
-
-      {/* 内嵌报告全文 */}
-      {entry?.markdown && (
-        <div className="border-t border-border pt-2">
-          <button onClick={() => setDocOpen((v) => !v)} className="mb-1.5 flex w-full items-center gap-1.5 text-left">
-            <Eye size={13} className="text-muted-foreground" />
-            <span className="text-[11px] font-medium text-foreground">{t("test.report.docTitle")}</span>
-            <span className="flex-1" />
-            {docOpen ? <CaretUp size={12} className="text-muted-foreground" /> : <CaretDown size={12} className="text-muted-foreground" />}
-          </button>
-          {docOpen && (
-            <div className="prose prose-sm dark:prose-invert max-h-[40vh] max-w-none overflow-auto rounded-lg bg-muted/30 p-3">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{entry.markdown}</ReactMarkdown>
-            </div>
-          )}
-        </div>
-      )}
 
       {preview && (
         <PreviewModal
@@ -2834,7 +2843,7 @@ function XlsxPreview({ t, projectPath, taskName, env, onClose }: {
       {lightbox && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-6" onClick={() => setLightbox(null)}>
           {isVid(lightbox) ? (
-            <video src={mediaUrl(lightbox)} controls autoPlay className="max-h-full max-w-full" onClick={(e) => e.stopPropagation()} />
+            <video src={mediaUrl(lightbox)} controls autoPlay muted playsInline preload="metadata" className="max-h-full max-w-full" onClick={(e) => e.stopPropagation()} />
           ) : (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={mediaUrl(lightbox)} alt={lightbox} className="max-h-full max-w-full object-contain" onClick={(e) => e.stopPropagation()} />
@@ -3428,7 +3437,7 @@ function NewTaskModal({ t, onClose, onAdd, existingNames }: { t: T; onClose: () 
           <button onClick={() => casesInputRef.current?.click()} className="h-9 flex-1 rounded-md border border-border text-xs text-foreground hover:bg-muted">📊 {t("test.newTaskModal.importCases")}</button>
           <button onClick={() => reqInputRef.current?.click()} className="h-9 flex-1 rounded-md border border-border text-xs text-foreground hover:bg-muted">📄 {t("test.newTaskModal.importReqs")}</button>
         </div>
-        <input ref={casesInputRef} type="file" accept=".json,.xlsx" className="hidden" onChange={(e) => { pick(e.target.files?.[0], setCasesFile); e.target.value = ""; }} />
+        <input ref={casesInputRef} type="file" accept=".json,.xlsx,.xls" className="hidden" onChange={(e) => { pick(e.target.files?.[0], setCasesFile); e.target.value = ""; }} />
         <input ref={reqInputRef} type="file" accept=".md,.txt,.markdown,.docx" className="hidden" onChange={(e) => { pick(e.target.files?.[0], setReqFile); e.target.value = ""; }} />
         {(casesFile || reqFile) && (
           <div className="mt-2 flex flex-col gap-1">
