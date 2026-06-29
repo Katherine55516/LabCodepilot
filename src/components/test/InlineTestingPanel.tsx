@@ -36,7 +36,7 @@ import type { RunHistoryEntry } from "@/lib/test/history";
  */
 
 type View = "dash" | "flow" | "report";
-type ModalKind = "none" | "newTask" | "runStart" | "execConfirm";
+type ModalKind = "none" | "newTask" | "runStart" | "execConfirm" | "envWarn";
 // 执行方式:visible=独立窗口可见运行(有头),headless=后台无头运行(默认,更快)。
 type ExecMode = "headless" | "visible";
 type T = (key: TranslationKey, params?: Record<string, string | number>) => string;
@@ -101,6 +101,8 @@ interface Project {
   name: string;
   path: string;
   tasks: { id: string; name: string }[];
+  /** R1：该项目记住的测试环境(local/SIT)，随项目切换各自恢复；缺省→迁移旧的全局值。 */
+  selectedEnv?: string;
 }
 
 // Per-task run state — each task keeps its own progress (powers the 看板 step
@@ -348,19 +350,32 @@ export function InlineTestingPanel() {
   // Test environment (local/SIT) + the config resolved from the project's
   // AI_LabTest/environments.json (exported from 设置·测试账号). Drives the
   // execution target baseUrl + login; null/未configured → prompt to set it up.
-  // Persisted to localStorage (like model/providerId) so the choice survives the
-  // panel unmounting / app restart — restored value is validated against
-  // envCfg.allowedEnvs once the config loads (see effect below).
+  // R1：选择**按项目独立记忆**（存 project.selectedEnv，随 workbench 文件持久化），
+  // 取代旧的单一全局 localStorage['codepilot:test-env']——这样「项目A=local、项目B=SIT」
+  // 各记各的，切项目自动恢复。初值仍读旧全局值，仅作首屏 + 老用户迁移种子（见下方同步 effect）。
   const [env, setEnv] = useState(() => {
     try { return localStorage.getItem("codepilot:test-env") || "local"; } catch { return "local"; }
   });
   const [envCfg, setEnvCfg] = useState<{ configured: boolean; env: string; frontendBaseUrl: string | null; allowedEnvs: string[]; source?: string; loginState?: LoginStateInfo } | null>(null);
-  // Change env + persist (mirrors handleModelChange). The select uses this so the
-  // user's local/SIT choice is remembered across sessions.
+  // Change env + persist to the ACTIVE project entry（不再写全局 localStorage）。allowedEnvs
+  // 越界回落也走这里，于是回落值也会落到该项目，下次切回稳定。
   const handleEnvChange = (next: string) => {
     setEnv(next);
-    try { localStorage.setItem("codepilot:test-env", next); } catch {}
+    setProjects((ps) => (selected === null ? ps : ps.map((p, i) => (i === selected ? { ...p, selectedEnv: next } : p))));
   };
+  // R1：切换项目时把所选环境恢复为该项目自己记住的值；项目无记录 → 回落旧的全局值
+  // （老用户一次性迁移）或 local。projects 入依赖配合 setEnv 的等值守卫：handleEnvChange
+  // 改 selectedEnv 触发本 effect 时读到的就是新值，setEnv 同值 no-op，不会成环。
+  useEffect(() => {
+    if (selected === null) return;
+    const proj = projects[selected];
+    if (!proj) return;
+    const remembered = typeof proj.selectedEnv === "string" && proj.selectedEnv ? proj.selectedEnv : null;
+    let legacy = "local";
+    try { legacy = localStorage.getItem("codepilot:test-env") || "local"; } catch {}
+    const next = remembered ?? legacy;
+    setEnv((prev) => (prev === next ? prev : next));
+  }, [selected, projects]);
 
   // 执行方式(独立窗口可见 / 后台无头)。默认无头 —— 与原行为一致、更快。执行前确认弹窗
   // (ExecConfirmModal)记下用户选择并持久化;非弹窗触发(运行任务 / auto-chain 接力执行)
@@ -1358,12 +1373,18 @@ export function InlineTestingPanel() {
   };
 
   // 运行任务 click: 全新任务(全 idle)直接从需求分析开跑；其余(部分完成 / 已完成)弹「选择起点」。
-  const handleRunTask = () => {
-    if (!activeTask || busy || !current?.path) return;
+  const doRunTask = () => {
     const ss = aState.stepStatus;
     const allIdle = STEPS.every((s) => ss[s.step] === "idle");
     if (allIdle) { startRunAllFrom("requirement"); return; }
     setModal("runStart");
+  };
+  const handleRunTask = () => {
+    if (!activeTask || busy || !current?.path) return;
+    // R2 软提醒：整条流水线含「测试执行」步、但项目未配置环境地址(无被测目标)→ 先弹提醒，
+    // 仍可「仍要运行」。envCfg 为 null(配置加载中)时不打断，避免误报。
+    if (envCfg && !envCfg.configured) { setModal("envWarn"); return; }
+    doRunTask();
   };
 
   // Auto-chain: run the next unlocked+idle step of the ACTIVE task. Normally only
@@ -2138,8 +2159,19 @@ export function InlineTestingPanel() {
         <ExecConfirmModal
           t={t}
           initialUrl={envCfg?.frontendBaseUrl || ""}
+          unconfigured={!!envCfg && !envCfg.configured}
           initialMode={execMode}
           onRun={runExecutionConfirmed}
+          onClose={() => setModal("none")}
+        />
+      )}
+      {modal === "envWarn" && activeTask && (
+        <EnvWarnModal
+          t={t}
+          source={envCfg?.source}
+          env={env}
+          onGoConfigure={() => { setModal("none"); router.push("/settings#test-accounts"); }}
+          onRunAnyway={() => { setModal("none"); doRunTask(); }}
           onClose={() => setModal("none")}
         />
       )}
@@ -3213,12 +3245,15 @@ function RunStartModal({
 function ExecConfirmModal({
   t,
   initialUrl,
+  unconfigured,
   initialMode,
   onRun,
   onClose,
 }: {
   t: T;
   initialUrl: string;
+  /** R2：该项目未在 设置·测试账号 配置可用地址 → 顶部给软提示（运行不禁用，可临时填地址）。 */
+  unconfigured?: boolean;
   initialMode: ExecMode;
   onRun: (baseUrl: string, headed: boolean) => void;
   onClose: () => void;
@@ -3281,6 +3316,12 @@ function ExecConfirmModal({
         </>
       }
     >
+      {unconfigured && (
+        <div className="mb-3 flex items-start gap-2 rounded-md border border-status-warning-border bg-status-warning-muted px-3 py-2 text-[11px] leading-relaxed text-status-warning-foreground">
+          <WarningCircle size={13} className="mt-0.5 shrink-0" />
+          <span>{t("test.execConfirm.unconfiguredHint")}</span>
+        </div>
+      )}
       <Field label={t("test.execConfirm.urlLabel")}>
         <input
           value={url}
@@ -3322,6 +3363,46 @@ function ExecConfirmModal({
             </span>
           )
         )}
+      </div>
+    </ModalShell>
+  );
+}
+
+// R2 软提醒弹窗：运行整条流水线但项目未配置环境地址时弹出。区分两种未配置：
+// source==='none'（该项目没有测试账号系统）vs 地址为空（有系统但该环境 frontendBaseUrl 缺失）。
+// 「去配置」深链到 设置·测试账号；「仍要运行」遵从用户意图继续（软提醒、不阻断）。
+function EnvWarnModal({
+  t,
+  source,
+  env,
+  onGoConfigure,
+  onRunAnyway,
+  onClose,
+}: {
+  t: T;
+  source?: string;
+  env: string;
+  onGoConfigure: () => void;
+  onRunAnyway: () => void;
+  onClose: () => void;
+}) {
+  const envLabel = env === "sit" ? "SIT" : env;
+  const body = source === "none" ? t("test.env.runWarn.none") : t("test.env.runWarn.empty", { env: envLabel });
+  return (
+    <ModalShell
+      title={t("test.env.runWarn.title")}
+      subtitle={t("test.env.runWarn.subtitle")}
+      onClose={onClose}
+      footer={
+        <>
+          <button onClick={onGoConfigure} className={CANCEL_BTN}>{t("test.env.runWarn.goConfigure")}</button>
+          <button onClick={onRunAnyway} className={PRIMARY_BTN}>{t("test.env.runWarn.runAnyway")}</button>
+        </>
+      }
+    >
+      <div className="flex items-start gap-2 rounded-md border border-status-warning-border bg-status-warning-muted px-3 py-2.5 text-[11px] leading-relaxed text-status-warning-foreground">
+        <WarningCircle size={14} className="mt-0.5 shrink-0" />
+        <span>{body}</span>
       </div>
     </ModalShell>
   );

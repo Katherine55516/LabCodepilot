@@ -204,6 +204,20 @@ export function TestAccountsSection() {
       if (!res.ok) throw new Error(String(res.status));
       const { system } = (await res.json()) as { system: TestAccountSystemView };
       setSavedSnapshots((prev) => ({ ...prev, [system.id]: snapshot(system) }));
+      // R3 保存即自动同步：已设项目目录 → 自动写 {project_root}/AI_LabTest/environments.json，
+      // 工作台与 AI_LabTest 框架始终读到最新地址，无需手动「导出」。同步失败不回滚保存（软提示）。
+      if (system.project_root.trim()) {
+        try {
+          const exp = await fetch(`/api/test-accounts/${system.id}/export`, { method: "POST" });
+          const data = (await exp.json().catch(() => ({}))) as { success?: boolean; error?: string };
+          if (exp.ok && data.success) flash("ok", t("testAccounts.savedAndSynced"));
+          else flash("info", t("testAccounts.savedSyncFailed", { error: data.error || String(exp.status) }));
+        } catch (e) {
+          flash("info", t("testAccounts.savedSyncFailed", { error: e instanceof Error ? e.message : "" }));
+        }
+      } else {
+        flash("ok", t("testAccounts.saved"));
+      }
       return true;
     } catch {
       flash("err", t("testAccounts.saveFailed"));
@@ -235,13 +249,10 @@ export function TestAccountsSection() {
       flash("err", t("testAccounts.exportNeedsRoot"));
       return;
     }
+    // dirty → saveActive 已会保存并自动同步(写 environments.json)，直接复用，避免重复导出与重复提示。
+    if (dirty) { await saveActive(); return; }
     setExporting(true);
     try {
-      // 先保存未提交的改动，确保导出用的是最新配置。
-      if (dirty) {
-        const ok = await saveActive();
-        if (!ok) return;
-      }
       const res = await fetch(`/api/test-accounts/${activeSystem.id}/export`, { method: "POST" });
       const data = (await res.json()) as { success?: boolean; path?: string; error?: string };
       if (!res.ok || !data.success) throw new Error(data.error || String(res.status));
