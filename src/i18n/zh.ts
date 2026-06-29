@@ -124,19 +124,17 @@ const zh: Record<TranslationKey, string> = {
   'test.execConfirm.unreachable': '不可访问',
   'test.execConfirm.noUrl': '请先填写被测链接',
   'test.execConfirm.run': '测试并执行',
-  // 多任务批量执行 + 并发排队（看板工具条 / 任务卡状态）
-  'test.batch.selected': '已选 {n} 个',
-  'test.batch.run': '批量执行',
-  'test.batch.selectAll': '全选',
-  'test.batch.clear': '清除',
+  // 多任务并发排队（看板并发选择器 / 任务卡状态）
   'test.batch.concurrency': '并发',
-  'test.batch.concurrencyHint': '同时并行执行的任务数（1–5，按你电脑性能设置）。超出的自动排队。',
-  'test.batch.running': '运行中',
+  'test.batch.concurrencyHint': '同时并行执行的任务数（1–5，按你电脑性能设置）。「运行任务」超出上限的自动排队。',
   'test.batch.queued': '排队中',
-  'test.batch.bgHint': '多任务在后台无头执行，不弹浏览器窗口；空出槽位自动开跑下一个。',
   'test.batch.queuePos': '排队中·第 {n} 位',
-  'test.batch.cardRunning': '运行中·无头',
-  'test.batch.none': '请先勾选要执行的任务',
+  'test.batch.cancelQueue': '取消排队',
+  // 任务按状态分组（顶部概览 chip + 分组堆叠区标题）
+  'test.batch.cat.running': '运行中',
+  'test.batch.cat.queued': '排队中',
+  'test.batch.cat.pending': '待处理',
+  'test.batch.cat.done': '已完成',
   // 执行前登录态预检
   'test.login.title': '执行前登录态检查',
   'test.login.checking': '检查登录态…',

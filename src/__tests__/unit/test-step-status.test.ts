@@ -9,7 +9,7 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { withDownstreamReset, runStartOptions } from '@/lib/test/step-status';
+import { withDownstreamReset, runStartOptions, taskCategory, occupiedSlots, TASK_CATEGORY_ORDER } from '@/lib/test/step-status';
 import type { TestStep } from '@/lib/test/prompts';
 
 type Status = 'idle' | 'running' | 'review' | 'done' | 'error';
@@ -156,5 +156,92 @@ describe('runStartOptions', () => {
     assert.equal(o.cases.unlocked, true);
     assert.equal(o.cases.isNext, true); // cases 是第一个未 done
     assert.equal(o.execution.unlocked, false); // cases 是 review 非 done
+  });
+});
+
+// 看板任务状态分类（顶部概览 chip + 分组堆叠）。运行/排队来自运行时集合，已完成/待处理由步状态派生。
+const cat = (s: Record<TestStep, Status>, isRunning = false, isQueued = false) =>
+  taskCategory(s, ORDER, isRunning, isQueued);
+
+describe('taskCategory', () => {
+  it('运行中优先级最高：在跑就是 running（哪怕步全 idle 或全 done）', () => {
+    assert.equal(cat({ requirement: 'idle', cases: 'idle', execution: 'idle', report: 'idle' }, true, false), 'running');
+    assert.equal(cat(allDone, true, false), 'running');
+  });
+
+  it('排队中：未在跑但在等待队列 → queued', () => {
+    assert.equal(cat({ requirement: 'idle', cases: 'idle', execution: 'idle', report: 'idle' }, false, true), 'queued');
+  });
+
+  it('瞬时双态（既在跑又在队列）按优先级取 running', () => {
+    assert.equal(cat(allDone, true, true), 'running');
+  });
+
+  it('四步全 done 且不在跑/不排队 → done', () => {
+    assert.equal(cat(allDone, false, false), 'done');
+  });
+
+  it('全新任务（全 idle）→ pending', () => {
+    assert.equal(cat({ requirement: 'idle', cases: 'idle', execution: 'idle', report: 'idle' }, false, false), 'pending');
+  });
+
+  it('部分完成（k/4）→ pending', () => {
+    assert.equal(cat({ requirement: 'done', cases: 'done', execution: 'idle', report: 'idle' }, false, false), 'pending');
+  });
+
+  it('待批准（review）归入 pending（卡片徽标再区分）', () => {
+    assert.equal(cat({ requirement: 'done', cases: 'review', execution: 'idle', report: 'idle' }, false, false), 'pending');
+  });
+
+  it('失败（error）归入 pending（卡片徽标再区分）', () => {
+    assert.equal(cat({ requirement: 'done', cases: 'done', execution: 'error', report: 'idle' }, false, false), 'pending');
+  });
+
+  it('每个任务恰好落入一个分类（互斥且穷尽）', () => {
+    const samples: Array<[Record<TestStep, Status>, boolean, boolean]> = [
+      [{ requirement: 'idle', cases: 'idle', execution: 'idle', report: 'idle' }, false, false],
+      [{ requirement: 'done', cases: 'review', execution: 'idle', report: 'idle' }, false, false],
+      [{ requirement: 'done', cases: 'done', execution: 'error', report: 'idle' }, false, false],
+      [allDone, false, false],
+      [allDone, false, true],
+      [allDone, true, false],
+    ];
+    for (const [s, r, q] of samples) {
+      const c = cat(s, r, q);
+      assert.ok(TASK_CATEGORY_ORDER.includes(c), `${c} in order`);
+    }
+  });
+
+  it('空 order 不会误判为 done', () => {
+    assert.equal(taskCategory<TestStep>({} as Record<TestStep, Status>, [], false, false), 'pending');
+  });
+});
+
+// 全局并发占用槽位（运行任务超并发自动排队的判定依据）。
+describe('occupiedSlots', () => {
+  it('空集合 → 0', () => {
+    assert.equal(occupiedSlots(new Set(), new Set()), 0);
+  });
+
+  it('仅在跑（无 autoRun）也计入 —— 修复点：手动单跑任务不能漏算', () => {
+    assert.equal(occupiedSlots(new Set(['a']), new Set()), 1);
+  });
+
+  it('仅 autoRun（已认领、可能瞬间不在跑）也计入', () => {
+    assert.equal(occupiedSlots(new Set(), new Set(['a'])), 1);
+  });
+
+  it('既在跑又被认领的同一任务只占一个槽位（并集去重，不重复计数）', () => {
+    assert.equal(occupiedSlots(new Set(['a']), new Set(['a'])), 1);
+  });
+
+  it('运行+认领的并集：{a,b} 在跑、{b,c} 认领 → 3 个不同任务', () => {
+    assert.equal(occupiedSlots(new Set(['a', 'b']), new Set(['b', 'c'])), 3);
+  });
+
+  it('并发=1 时：占用 1 → 已满（occupied >= concurrency），应排队', () => {
+    const concurrency = 1;
+    assert.equal(occupiedSlots(new Set(['a']), new Set(['a'])) < concurrency, false); // 满
+    assert.equal(occupiedSlots(new Set(), new Set()) < concurrency, true); // 空 → 可跑
   });
 });
