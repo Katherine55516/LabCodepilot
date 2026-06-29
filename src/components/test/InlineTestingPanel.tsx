@@ -16,7 +16,7 @@ import { ModelSelectorDropdown } from "@/components/chat/ModelSelectorDropdown";
 import { useProviderModels } from "@/hooks/useProviderModels";
 import { diffRuns, funcPassRateStr } from "@/lib/test/compare";
 import { parseExecProgress } from "@/lib/test/exec-progress";
-import { withDownstreamReset, runStartOptions } from "@/lib/test/step-status";
+import { withDownstreamReset, runStartOptions, taskCategory, occupiedSlots, TASK_CATEGORY_ORDER, type TaskCategory } from "@/lib/test/step-status";
 import type { LoginStateInfo } from "@/lib/test/env-config";
 import type { RunHistoryEntry } from "@/lib/test/history";
 
@@ -36,7 +36,7 @@ import type { RunHistoryEntry } from "@/lib/test/history";
  */
 
 type View = "dash" | "flow" | "report";
-type ModalKind = "none" | "newTask" | "runStart" | "execConfirm" | "loginGate";
+type ModalKind = "none" | "newTask" | "runStart" | "execConfirm";
 // 执行方式:visible=独立窗口可见运行(有头),headless=后台无头运行(默认,更快)。
 type ExecMode = "headless" | "visible";
 type T = (key: TranslationKey, params?: Record<string, string | number>) => string;
@@ -275,12 +275,12 @@ export function InlineTestingPanel() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [selected, setSelected] = useState<number | null>(null);
   const [selectedTask, setSelectedTask] = useState<number | null>(null);
-  // 看板多选(批量执行用)：选中的任务 id 集合。切项目时清空(下方 effect)。
-  const [selectedTaskIds, setSelectedTaskIds] = useState<Set<string>>(new Set());
-  const toggleTaskSel = (id: string) =>
-    setSelectedTaskIds((prev) => {
+  // 看板按状态分组后，被用户手动折叠的分组（默认空 = 全部展开，含已完成）。本版不持久化。
+  const [collapsedCats, setCollapsedCats] = useState<Set<TaskCategory>>(new Set());
+  const toggleCat = (c: TaskCategory) =>
+    setCollapsedCats((prev) => {
       const n = new Set(prev);
-      if (n.has(id)) n.delete(id); else n.add(id);
+      if (n.has(c)) n.delete(c); else n.add(c);
       return n;
     });
   // Per-task run state (source of truth), keyed by task id. The active task's
@@ -307,9 +307,6 @@ export function InlineTestingPanel() {
   // Tasks in "run all" mode (运行任务/批量): gated steps auto-approve + the chain runs
   // through to 报告 without waiting for 批准. Was a single id; now a set for parallel tasks.
   const autoRunIdsRef = useRef<Set<string>>(new Set());
-  // Tasks forced headless (批量执行): the execution step ignores execMode and runs 无头,
-  // so N parallel runs never pop N browser windows. Single-task 运行任务 still honors execMode.
-  const forceHeadlessIdsRef = useRef<Set<string>>(new Set());
   // Per-task in-flight AbortControllers (问题②·停止), keyed by task id. stopTask aborts a
   // task's controller → its /api/test/run fetch (and backend agent) stops. Was a single
   // controller; now a map so parallel runs each carry their own abort handle.
@@ -347,8 +344,6 @@ export function InlineTestingPanel() {
     try { return localStorage.getItem("codepilot:test-env") || "local"; } catch { return "local"; }
   });
   const [envCfg, setEnvCfg] = useState<{ configured: boolean; env: string; frontendBaseUrl: string | null; allowedEnvs: string[]; source?: string; loginState?: LoginStateInfo } | null>(null);
-  // 执行前登录态预检门(Phase 4)：待执行的任务 id + 检查结果，弹警告让用户决定去捕获 / 仍执行。
-  const [loginGate, setLoginGate] = useState<{ ids: string[]; info: LoginStateInfo } | null>(null);
   // Change env + persist (mirrors handleModelChange). The select uses this so the
   // user's local/SIT choice is remembered across sessions.
   const handleEnvChange = (next: string) => {
@@ -398,6 +393,8 @@ export function InlineTestingPanel() {
   // 声明之后 —— 「总数」要回落到 cases.json 用例数（首条进度行到达前也能显示总数）。见下方。
   // 活动任务是否在跑(渲染用)：禁用活动任务的输入/按钮。其它任务后台并行跑不影响这里。
   const busy = !!aId && runningTaskIds.has(aId);
+  // 活动任务是否在排队(达全局并发上限被「运行任务」排入队列、等空槽起跑)：按钮显示「排队中」并禁用。
+  const aQueued = !!aId && waitingTaskIds.has(aId);
   // Patch a task's state BY ID (runStep captures its id, so switching tasks mid-run is safe).
   const patchTask = (id: string, patch: (s: TaskState) => Partial<TaskState>) =>
     setTaskStates((m) => {
@@ -414,18 +411,18 @@ export function InlineTestingPanel() {
     return null;
   };
 
-  // 排队调度(Phase 3): 槽位 = 并发数 − 当前 autoRun(运行任务/批量)任务数。有空槽就把队首任务
-  // 提升为 autoRun(并强制无头)，由 auto-chain effect 读「最新」taskStates 起跑它的下一步 —— 用
-  // effect 而非在此直接 runStep，避免从 runStep.finally 回调进来时闭包里的 taskStates 陈旧。
+  // 排队调度: 槽位 = 并发数 − 占用数。占用 = 在跑(running) ∪ 已认领(autoRun) 的任务数 —— 用真实
+  // 在跑数而非仅 autoRun，避免「运行任务」正在跑(running 但可能不在 autoRun)时漏算导致超并发。
+  // 有空槽就把队首任务提升为 autoRun，由 auto-chain effect 读「最新」taskStates 起跑它的下一步
+  // —— 用 effect 而非在此直接 runStep，避免从 runStep.finally 回调进来时闭包里的 taskStates 陈旧。
   const pumpQueue = () => {
-    let slots = concurrencyRef.current - autoRunIdsRef.current.size;
+    let slots = concurrencyRef.current - occupiedSlots(runningIdsRef.current, autoRunIdsRef.current);
     const before = waitingQueueRef.current.length;
     const promoted: string[] = [];
     while (slots > 0 && waitingQueueRef.current.length > 0) {
       const tid = waitingQueueRef.current.shift()!;
       if (!findTaskLoc(tid)) continue; // 任务已删 → 丢弃(已 shift 出队)
       autoRunIdsRef.current.add(tid);
-      forceHeadlessIdsRef.current.add(tid);
       for (const s of STEPS) stoppedStepRef.current.delete(`${tid}:${s.step}`);
       promoted.push(tid);
       slots--;
@@ -453,21 +450,6 @@ export function InlineTestingPanel() {
     }
   };
 
-  // 批量执行: 把所选任务排队(去重、跳过在跑/已排队/不存在/已全部完成)，交给 pumpQueue 按并发起跑。
-  // 语义同单任务「运行任务」的「从当前进度续跑」: 未跑过的从需求起，跑过一半的续跑，已完成的跳过。
-  const startBatch = (ids: string[]) => {
-    const fresh = ids.filter(
-      (id) =>
-        findTaskLoc(id) &&
-        !runningIdsRef.current.has(id) &&
-        !autoRunIdsRef.current.has(id) &&
-        !waitingQueueRef.current.includes(id) &&
-        !STEPS.every((s) => (taskStates[id]?.stepStatus[s.step] ?? "idle") === "done"),
-    );
-    if (!fresh.length) return;
-    waitingQueueRef.current = [...waitingQueueRef.current, ...fresh];
-    pumpQueue();
-  };
 
   // 追加指令: record a typed instruction on the active task — shows as a user bubble
   // and is fed into subsequent step runs' prompts (see runStep). Additive, test-only.
@@ -891,8 +873,6 @@ export function InlineTestingPanel() {
   const [viewStep, setViewStep] = useState<TestStep | null>(null);
   // 切任务时清掉查看选中,让详情卡回到新任务的运行中/下一个待办阶段。
   useEffect(() => { setViewStep(null); }, [aId]);
-  // 切项目时清空看板多选(避免跨项目误选；批量只在当前项目内)。
-  useEffect(() => { setSelectedTaskIds(new Set()); }, [selected]);
   // 用例设计阶段生成的用例(读 AI_LabTest/testCase/.data/{task}.cases.json),在用例阶段
   // 详情卡展示。不进 TaskState/持久化(用例可能很大),按需从文件读 —— 文件是 source of truth。
   const [casesPreview, setCasesPreview] = useState<GeneratedCase[]>([]);
@@ -970,14 +950,9 @@ export function InlineTestingPanel() {
         : null;
     if (!projPath || !task || runningIdsRef.current.has(task.id)) return;
     const id = task.id; // capture — all updates patch THIS task even if the user switches away
-    // 执行方式仅对「测试执行」步有意义(只有它注入 Playwright)。批量任务(forceHeadless)恒无头;
-    // 否则弹窗触发带 opts.headed,非弹窗触发(运行任务 / auto-chain)回落到上次选择(execModeRef)。
-    const headed =
-      step === "execution"
-        ? forceHeadlessIdsRef.current.has(id)
-          ? false
-          : opts?.headed ?? execModeRef.current === "visible"
-        : false;
+    // 执行方式仅对「测试执行」步有意义(只有它注入 Playwright)。弹窗触发带 opts.headed,
+    // 非弹窗触发(运行任务 / auto-chain / 队列起跑)回落到上次选择(execModeRef)。
+    const headed = step === "execution" ? (opts?.headed ?? execModeRef.current === "visible") : false;
     // 被测链接覆盖:仅执行步、且弹窗显式给了地址时透传,让用户在弹窗里确认/改写的地址生效。
     const baseUrlOverride = step === "execution" && opts?.baseUrl?.trim() ? opts.baseUrl.trim() : undefined;
     // 问题②·停止: a per-run AbortController. stopTask() aborts it → the fetch rejects
@@ -1214,16 +1189,15 @@ export function InlineTestingPanel() {
         for (let i = sidx; i < STEP_ORDER.length; i++) stoppedStepRef.current.add(`${id}:${STEP_ORDER[i]}`);
         push({ role: "user", text: `■ ${t("test.flow.stop")}「${stepName}」` });
       }
-      // End run-all / 批量 mode when stopped, when anything errors, or when the pipeline
-      // finishes (报告) — release the auto-chain + the forced-headless mark for this task.
+      // End run-all mode when stopped, when anything errors, or when the pipeline
+      // finishes (报告) — release the auto-chain claim for this task.
       if (stopped || sawError || step === "report") {
         autoRunIdsRef.current.delete(id);
-        forceHeadlessIdsRef.current.delete(id);
       }
       // Only clear this task's abort controller if it's still ours (a fast re-run could have replaced it).
       if (abortMapRef.current.get(id) === ctrl) abortMapRef.current.delete(id);
       markIdle(id);
-      // 槽位空出 → 尝试从排队队列启动下一个(批量排队，见 pumpQueue)。
+      // 槽位空出 → 尝试从排队队列启动下一个(见 pumpQueue)。
       pumpQueue();
     }
   };
@@ -1233,9 +1207,8 @@ export function InlineTestingPanel() {
   // so the 运行 button can re-run this node. No-op if nothing is running.
   const stopTask = (tid: string) => {
     if (!tid) return;
-    // 停止 = 退出该任务的 run-all / 批量 / 排队，并中断 in-flight。
+    // 停止 = 退出该任务的 run-all / 排队，并中断 in-flight。
     autoRunIdsRef.current.delete(tid);
-    forceHeadlessIdsRef.current.delete(tid);
     if (waitingQueueRef.current.includes(tid)) {
       waitingQueueRef.current = waitingQueueRef.current.filter((x) => x !== tid); // 排队中 → 直接出队
       setWaitingTaskIds(new Set(waitingQueueRef.current));
@@ -1331,12 +1304,14 @@ export function InlineTestingPanel() {
     runStep("execution", { headed, baseUrl });
   };
 
-  // 运行任务: 从指定起点把整条流水线自动跑到报告(auto-approve 门控)。runStep 自身会把起点置
-  // running、其下游复位 idle；起点之前的产物/状态保留。对话历史保留(不清空、追加新一轮)。
+  // 运行任务: 从指定起点把整条流水线自动跑到报告(auto-approve 门控)。受全局并发约束 ——
+  // 未达上限则立即从起点起跑(runStep 把起点置 running、下游复位 idle，起点之前产物保留)；
+  // 已达上限则把起点及其下游复位 idle 后进排队，空出槽位时由 pumpQueue 提升、auto-chain 从该
+  // 起点起跑。对话历史保留(不清空、追加新一轮)。
   const startRunAllFrom = (step: TestStep) => {
     if (!activeTask || busy || !current?.path) return;
     const id = activeTask.id;
-    autoRunIdsRef.current.add(id);
+    if (waitingQueueRef.current.includes(id)) return; // 已在排队 → 不重复入队
     // 运行任务 drives the whole pipeline → clear this task's 停止 marks so the
     // auto-chain isn't blocked on a step the user stopped in a previous attempt.
     for (const s of STEPS) stoppedStepRef.current.delete(`${id}:${s.step}`);
@@ -1347,7 +1322,16 @@ export function InlineTestingPanel() {
       caseResults: [],
       circuitBroken: false,
     }));
-    runStep(step);
+    // 全局并发：占用 = 在跑(running) ∪ 已认领(autoRun)。未达上限立即跑；达上限进排队。
+    if (occupiedSlots(runningIdsRef.current, autoRunIdsRef.current) < concurrencyRef.current) {
+      autoRunIdsRef.current.add(id);
+      runStep(step);
+      return;
+    }
+    // 排队：把起点及其下游复位为 idle，使空槽后 auto-chain 从该起点起跑(起点之前的产物保留)。
+    patchTask(id, (s) => ({ stepStatus: withDownstreamReset(s.stepStatus, step, STEP_ORDER, "idle", "idle") }));
+    waitingQueueRef.current = [...waitingQueueRef.current, id];
+    setWaitingTaskIds(new Set(waitingQueueRef.current));
   };
 
   // 运行任务 click: 全新任务(全 idle)直接从需求分析开跑；其余(部分完成 / 已完成)弹「选择起点」。
@@ -1359,51 +1343,25 @@ export function InlineTestingPanel() {
     setModal("runStart");
   };
 
-  // 批量执行点击：先做执行前登录态预检(Phase 4)，确认后排队执行所选任务(强制无头)。
-  const handleBatchRun = () => {
-    const ids = [...selectedTaskIds];
-    if (!ids.length || !current?.path) return;
-    runBatchLoginGate(ids);
-  };
-  // 登录态预检门(Phase 4)：拉当前项目+环境的登录态信号；仅当「配了默认账号但缺/过期登录态」
-  // 才弹警告(去捕获 / 仍执行)；没配账号(无需登录)或接口失败 → 不挡，直接排队。
-  const runBatchLoginGate = async (ids: string[]) => {
-    if (!current?.path) { startBatch(ids); return; }
-    let info: LoginStateInfo | null = null;
-    try {
-      const d = await fetch(
-        `/api/test/env-config?projectPath=${encodeURIComponent(current.path)}&env=${encodeURIComponent(env)}`,
-      ).then((r) => (r.ok ? r.json() : null));
-      info = (d?.loginState as LoginStateInfo | undefined) ?? null;
-    } catch {
-      /* 接口失败 → 不挡 */
-    }
-    if (info && info.account && (!info.hasState || info.expired)) {
-      setLoginGate({ ids, info });
-      setModal("loginGate");
-      return;
-    }
-    startBatch(ids);
-  };
-
   // Auto-chain: run the next unlocked+idle step of the ACTIVE task. Normally only
   // auto steps (执行/报告) chain; in 运行任务 mode, gated steps (需求/用例) chain too.
   // Fires when a step becomes "done". runStep excluded from deps (the idle+unlocked
   // guard + busy check prevent re-fire loops).
   useEffect(() => {
-    // 候选集 = 活动任务(详情卡手动流程：执行/报告自动接力) ∪ autoRun 任务(运行任务/批量：
-    // 门控也自动接力)。每个任务独立推进、互不阻塞；runningIdsRef 防止给正在跑的任务重复发起。
+    // 候选集 = 活动任务(详情卡手动流程：执行/报告自动接力) ∪ autoRun 任务(运行任务：门控也
+    // 自动接力)。每个任务独立推进、互不阻塞；runningIdsRef 防止给正在跑的任务重复发起。
     const candidates = new Set<string>(autoRunIdsRef.current);
     if (activeTask) candidates.add(activeTask.id);
     let freed = false; // 有 autoRun 任务跑完释放了槽位 → 末尾再 pumpQueue 放下一个排队任务
     for (const tid of candidates) {
       if (runningIdsRef.current.has(tid)) continue; // 该任务有步在跑 → 等它结束
+      if (waitingQueueRef.current.includes(tid)) continue; // 排队中 → 等 pumpQueue 提升，别抢跑
       const st = taskStates[tid];
       const loc = st ? findTaskLoc(tid) : null;
       const autoAll = autoRunIdsRef.current.has(tid);
       if (!st || !loc) {
         // 任务状态/位置丢了(被删等) → 从 autoRun 释放，免得空占槽位。
-        if (autoRunIdsRef.current.delete(tid)) { forceHeadlessIdsRef.current.delete(tid); freed = true; }
+        if (autoRunIdsRef.current.delete(tid)) { freed = true; }
         continue;
       }
       const next = STEPS.find(
@@ -1413,9 +1371,16 @@ export function InlineTestingPanel() {
           (autoAll || !HUMAN_GATED.includes(s.step)) &&
           !stoppedStepRef.current.has(`${tid}:${s.step}`), // don't auto-rerun a 停止'd step
       );
-      if (next) { runStep(next.step, { target: loc }); continue; }
+      if (next) {
+        // 全局并发护栏：autoRun 任务是已认领的流水线(占着槽位)，照常接力；非 autoRun 的活动任务
+        // 续跑(如手动批准门控后自动跑执行)算「新起跑」，达并发上限时先按住，空出槽位后本 effect
+        // 会因 runningTaskIds 变化重跑并自动放行 —— 不死锁。
+        if (!autoAll && occupiedSlots(runningIdsRef.current, autoRunIdsRef.current) >= concurrencyRef.current) continue;
+        runStep(next.step, { target: loc });
+        continue;
+      }
       // autoRun 任务已无可执行步(整条跑完 / 全 done / 卡在门控外) → 释放槽位(活动手动任务不强释放)。
-      if (autoAll && autoRunIdsRef.current.delete(tid)) { forceHeadlessIdsRef.current.delete(tid); freed = true; }
+      if (autoAll && autoRunIdsRef.current.delete(tid)) { freed = true; }
     }
     if (freed) pumpQueue();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1522,11 +1487,11 @@ export function InlineTestingPanel() {
                     避免两处停止入口造成混淆;运行中此按钮直接禁用。 */}
                 <button
                   onClick={handleRunTask}
-                  disabled={!current?.path || busy || !stepUnlocked(focusStep)}
-                  title={!stepUnlocked(focusStep) ? t("test.flow.locked") : t("test.flow.runAllHint")}
+                  disabled={!current?.path || busy || aQueued || !stepUnlocked(focusStep)}
+                  title={aQueued ? t("test.batch.queued") : !stepUnlocked(focusStep) ? t("test.flow.locked") : t("test.flow.runAllHint")}
                   className="flex h-7 items-center gap-1 rounded-md bg-primary px-2.5 text-[11px] font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-40"
                 >
-                  <Play size={12} /> {t("test.flow.runTask")}
+                  {aQueued ? <SpinnerGap size={12} /> : <Play size={12} />} {aQueued ? t("test.batch.queued") : t("test.flow.runTask")}
                 </button>
               </div>
               {!current?.path && (
@@ -1595,6 +1560,15 @@ export function InlineTestingPanel() {
                       className="flex h-7 items-center gap-1 rounded-md bg-status-error px-2.5 text-[11px] font-medium text-white hover:opacity-90"
                     >
                       <Stop size={12} weight="fill" /> {t("test.flow.stop")}
+                    </button>
+                  ) : aQueued ? (
+                    // 排队中 → 取消排队 (出队、不起跑)。也避免手动单步运行抢跑、绕过全局并发。
+                    <button
+                      onClick={() => { if (aId) stopTask(aId); }}
+                      title={t("test.batch.cancelQueue")}
+                      className="flex h-7 items-center gap-1 rounded-md border border-border px-2.5 text-[11px] font-medium text-muted-foreground hover:text-foreground"
+                    >
+                      <X size={12} /> {t("test.batch.cancelQueue")}
                     </button>
                   ) : (
                     <button
@@ -1835,118 +1809,135 @@ export function InlineTestingPanel() {
                   </button>
                 </div>
                 {current.tasks.length > 0 && (
-                  <>
-                    <div className="mb-2 flex flex-wrap items-center gap-2">
-                      <button
-                        onClick={() => {
-                          const allIds = current.tasks.map((tk) => tk.id);
-                          const allSel = allIds.length > 0 && allIds.every((id) => selectedTaskIds.has(id));
-                          setSelectedTaskIds(allSel ? new Set() : new Set(allIds));
-                        }}
-                        className="flex h-7 items-center gap-1 rounded-md border border-border px-2 text-[11px] text-muted-foreground hover:text-foreground"
+                  <div className="mb-3 flex items-center gap-2">
+                    <span className="flex-1" />
+                    <label className="flex items-center gap-1 text-[11px] text-muted-foreground" title={t("test.batch.concurrencyHint")}>
+                      {t("test.batch.concurrency")}
+                      <select
+                        value={concurrency}
+                        onChange={(e) => persistConcurrency(Number(e.target.value))}
+                        className="h-7 rounded-md border border-border bg-background px-1 text-[11px] text-foreground outline-none focus:border-primary"
                       >
-                        <Check size={12} /> {t("test.batch.selectAll")}
-                      </button>
-                      <span className="text-[11px] text-muted-foreground">{t("test.batch.selected", { n: selectedTaskIds.size })}</span>
-                      <span className="flex-1" />
-                      <span className="flex items-center gap-1 text-[11px] text-status-info">
-                        <Lightning size={11} /> {t("test.batch.running")} {runningTaskIds.size}
-                      </span>
-                      <span className="flex items-center gap-1 text-[11px] text-status-warning">
-                        <SpinnerGap size={11} /> {t("test.batch.queued")} {waitingTaskIds.size}
-                      </span>
-                      <label className="flex items-center gap-1 text-[11px] text-muted-foreground" title={t("test.batch.concurrencyHint")}>
-                        {t("test.batch.concurrency")}
-                        <select
-                          value={concurrency}
-                          onChange={(e) => persistConcurrency(Number(e.target.value))}
-                          className="h-7 rounded-md border border-border bg-background px-1 text-[11px] text-foreground outline-none focus:border-primary"
-                        >
-                          {[1, 2, 3, 4, 5].map((n) => (
-                            <option key={n} value={n}>{n}</option>
-                          ))}
-                        </select>
-                      </label>
-                      <button
-                        onClick={handleBatchRun}
-                        disabled={selectedTaskIds.size === 0}
-                        title={selectedTaskIds.size === 0 ? t("test.batch.none") : undefined}
-                        className="flex h-7 items-center gap-1 rounded-md bg-primary px-2.5 text-[11px] font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
-                      >
-                        <Play size={12} /> {t("test.batch.run")}
-                      </button>
-                    </div>
-                    <div className="mb-2 flex items-center gap-1 text-[10px] text-muted-foreground">
-                      <WarningCircle size={11} /> {t("test.batch.bgHint")}
-                    </div>
-                  </>
+                        {[1, 2, 3, 4, 5].map((n) => (
+                          <option key={n} value={n}>{n}</option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
                 )}
                 {current.tasks.length === 0 ? (
                   <EmptyState icon={ListChecks} text={t("test.tasksEmpty")} />
-                ) : (
-                  <div className="grid grid-cols-2 gap-2">
-                    {current.tasks.map((tk, i) => {
-                      const st = taskStates[tk.id] ?? DEFAULT_TASK_STATE;
-                      const chip = taskChip(st, t);
-                      const sel = selectedTaskIds.has(tk.id);
-                      const inWait = waitingTaskIds.has(tk.id);
-                      const qpos = inWait ? waitingQueueRef.current.indexOf(tk.id) + 1 : 0;
-                      const isRunningNow = runningTaskIds.has(tk.id);
-                      const isBatch = forceHeadlessIdsRef.current.has(tk.id);
-                      const badge = inWait
-                        ? { text: t("test.batch.queuePos", { n: qpos }), cls: "bg-status-warning-muted text-status-warning-foreground" }
-                        : isRunningNow && isBatch
-                          ? { text: t("test.batch.cardRunning"), cls: "bg-status-info-muted text-status-info-foreground" }
-                          : chip;
-                      return (
-                        <div key={tk.id} className="group relative">
-                          <button
-                            onClick={(e) => { e.stopPropagation(); toggleTaskSel(tk.id); }}
-                            aria-label={t("test.batch.selectAll")}
-                            className={`absolute left-2 top-2 z-10 flex h-5 w-5 items-center justify-center rounded border transition-colors ${sel ? "border-primary bg-primary text-primary-foreground" : "border-border bg-card text-transparent hover:border-primary/60"}`}
-                          >
-                            <Check size={12} />
-                          </button>
-                          <button
-                            onClick={() => {
-                              setSelectedTask(i);
-                              setView("flow");
-                            }}
-                            className={`flex w-full flex-col gap-3 rounded-xl border bg-card p-3.5 text-left transition-colors hover:border-primary/50 hover:bg-muted/40 ${sel ? "border-primary" : "border-border"}`}
-                          >
-                            <div className="flex items-start justify-between gap-2">
-                              <span className="truncate pl-6 pt-0.5 text-sm font-medium text-foreground">{tk.name}</span>
-                              <div className="flex shrink-0 flex-col items-end gap-0.5">
-                                <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${badge.cls}`}>{badge.text}</span>
-                                <span className="text-[10px] text-muted-foreground">{taskStageName(st, t)}</span>
-                              </div>
+                ) : (() => {
+                  // 单张任务卡（抽出闭包以便各分组复用）。i = 任务原始下标（点开进详情 / 删除按 index 操作）。
+                  const renderTaskCard = (tk: { id: string; name: string }, i: number) => {
+                    const st = taskStates[tk.id] ?? DEFAULT_TASK_STATE;
+                    const chip = taskChip(st, t);
+                    const inWait = waitingTaskIds.has(tk.id);
+                    const qpos = inWait ? waitingQueueRef.current.indexOf(tk.id) + 1 : 0;
+                    const badge = inWait
+                      ? { text: t("test.batch.queuePos", { n: qpos }), cls: "bg-status-warning-muted text-status-warning-foreground" }
+                      : chip;
+                    return (
+                      <div key={tk.id} className="group relative">
+                        <button
+                          onClick={() => {
+                            setSelectedTask(i);
+                            setView("flow");
+                          }}
+                          className="flex w-full flex-col gap-3 rounded-xl border border-border bg-card p-3.5 text-left transition-colors hover:border-primary/50 hover:bg-muted/40"
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <span className="truncate pt-0.5 text-sm font-medium text-foreground">{tk.name}</span>
+                            <div className="flex shrink-0 flex-col items-end gap-0.5">
+                              <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${badge.cls}`}>{badge.text}</span>
+                              <span className="text-[10px] text-muted-foreground">{taskStageName(st, t)}</span>
                             </div>
-                            <div className="flex items-start">
-                              {STEPS.map((s, idx) => (
-                                <div key={s.step} className="flex flex-1 flex-col items-center">
-                                  {/* dot with connector lines on both sides (ends are hidden) */}
-                                  <div className="flex w-full items-center">
-                                    <span className={`h-px flex-1 ${idx === 0 ? "opacity-0" : "bg-border"}`} />
-                                    <span className={`mx-1 h-2 w-2 shrink-0 rounded-full ${stepDotClass(st.stepStatus[s.step])}`} />
-                                    <span className={`h-px flex-1 ${idx === STEPS.length - 1 ? "opacity-0" : "bg-border"}`} />
-                                  </div>
-                                  <span className="mt-1 text-center text-[9px] leading-tight text-muted-foreground">{t(s.name)}</span>
+                          </div>
+                          <div className="flex items-start">
+                            {STEPS.map((s, idx) => (
+                              <div key={s.step} className="flex flex-1 flex-col items-center">
+                                {/* dot with connector lines on both sides (ends are hidden) */}
+                                <div className="flex w-full items-center">
+                                  <span className={`h-px flex-1 ${idx === 0 ? "opacity-0" : "bg-border"}`} />
+                                  <span className={`mx-1 h-2 w-2 shrink-0 rounded-full ${stepDotClass(st.stepStatus[s.step])}`} />
+                                  <span className={`h-px flex-1 ${idx === STEPS.length - 1 ? "opacity-0" : "bg-border"}`} />
                                 </div>
-                              ))}
-                            </div>
-                          </button>
+                                <span className="mt-1 text-center text-[9px] leading-tight text-muted-foreground">{t(s.name)}</span>
+                              </div>
+                            ))}
+                          </div>
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); requestDeleteTask(i); }}
+                          title={t("test.del.delete")}
+                          className="absolute right-2 bottom-2 flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-status-error-muted hover:text-status-error group-hover:opacity-100"
+                        >
+                          <Trash size={13} />
+                        </button>
+                      </div>
+                    );
+                  };
+                  // 每个任务落入唯一分类（运行中 > 排队中 > 已完成 > 待处理），保留原始下标。
+                  const groups: Record<TaskCategory, { tk: { id: string; name: string }; i: number }[]> =
+                    { running: [], queued: [], pending: [], done: [] };
+                  current.tasks.forEach((tk, i) => {
+                    const st = taskStates[tk.id] ?? DEFAULT_TASK_STATE;
+                    const c = taskCategory(st.stepStatus, STEP_ORDER, runningTaskIds.has(tk.id), waitingTaskIds.has(tk.id));
+                    groups[c].push({ tk, i });
+                  });
+                  // 排队中按队列序号升序；其余保持任务原序（状态变化时不跳动）。
+                  groups.queued.sort((a, b) => waitingQueueRef.current.indexOf(a.tk.id) - waitingQueueRef.current.indexOf(b.tk.id));
+                  const CAT_META: Record<TaskCategory, { dot: string; text: string; label: TranslationKey }> = {
+                    running: { dot: "bg-status-info", text: "text-status-info", label: "test.batch.cat.running" },
+                    queued: { dot: "bg-status-warning", text: "text-status-warning", label: "test.batch.cat.queued" },
+                    pending: { dot: "bg-muted-foreground/50", text: "text-muted-foreground", label: "test.batch.cat.pending" },
+                    done: { dot: "bg-status-success", text: "text-status-success", label: "test.batch.cat.done" },
+                  };
+                  return (
+                    <>
+                      {/* 顶部概览 chip：始终显示 4 类计数；点击滚动到对应分组并展开 */}
+                      <div className="mb-3 flex flex-wrap gap-1.5">
+                        {TASK_CATEGORY_ORDER.map((c) => (
                           <button
-                            onClick={(e) => { e.stopPropagation(); requestDeleteTask(i); }}
-                            title={t("test.del.delete")}
-                            className="absolute right-2 bottom-2 flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-status-error-muted hover:text-status-error group-hover:opacity-100"
+                            key={c}
+                            onClick={() => {
+                              if (collapsedCats.has(c)) toggleCat(c);
+                              document.getElementById(`taskcat-${c}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+                            }}
+                            className={`flex items-center gap-1.5 rounded-full border border-border px-2.5 py-1 text-[11px] ${CAT_META[c].text} hover:bg-muted/50`}
                           >
-                            <Trash size={13} />
+                            <span className={`h-1.5 w-1.5 rounded-full ${CAT_META[c].dot}`} />
+                            {t(CAT_META[c].label)} {groups[c].length}
                           </button>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
+                        ))}
+                      </div>
+                      {/* 按 运行中 → 排队中 → 待处理 → 已完成 分组堆叠；空组不渲染 */}
+                      {TASK_CATEGORY_ORDER.map((c) => {
+                        const items = groups[c];
+                        if (items.length === 0) return null;
+                        const collapsed = collapsedCats.has(c);
+                        return (
+                          <div key={c} id={`taskcat-${c}`} className="mb-4 scroll-mt-2">
+                            <button
+                              onClick={() => toggleCat(c)}
+                              className="mb-2 flex w-full items-center gap-2 text-left"
+                            >
+                              <CaretDown size={13} className={`text-muted-foreground transition-transform ${collapsed ? "-rotate-90" : ""}`} />
+                              <span className={`h-2 w-2 rounded-full ${CAT_META[c].dot}`} />
+                              <span className="text-[13px] font-medium text-foreground">{t(CAT_META[c].label)}</span>
+                              <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{items.length}</span>
+                            </button>
+                            {!collapsed && (
+                              <div className="grid grid-cols-2 gap-2">
+                                {items.map(({ tk, i }) => renderTaskCard(tk, i))}
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </>
+                  );
+                })()}
               </div>
             )}
 
@@ -2122,49 +2113,6 @@ export function InlineTestingPanel() {
           onRun={runExecutionConfirmed}
           onClose={() => setModal("none")}
         />
-      )}
-      {modal === "loginGate" && loginGate && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4"
-          onClick={() => { setModal("none"); setLoginGate(null); }}
-        >
-          <div className="w-[440px] max-w-[92vw] rounded-xl border border-border bg-card p-5 shadow-xl" onClick={(e) => e.stopPropagation()}>
-            <h3 className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
-              <WarningCircle size={16} className="text-status-warning" /> {t("test.login.title")}
-            </h3>
-            <p className="mt-2.5 rounded-md bg-status-warning-muted px-2.5 py-2 text-[11px] leading-relaxed text-status-warning-foreground">
-              {!loginGate.info.hasState
-                ? t("test.login.missingLine", { env })
-                : t("test.login.expiredLine", {
-                    env,
-                    when: loginGate.info.capturedAtMs
-                      ? t("test.login.capturedAgo", { n: Math.max(0, Math.round((Date.now() - loginGate.info.capturedAtMs) / 86400000)) })
-                      : "—",
-                  })}
-            </p>
-            <p className="mt-2.5 text-xs leading-relaxed text-muted-foreground">{t("test.login.warn")}</p>
-            <div className="mt-4 flex justify-end gap-2">
-              <button
-                onClick={() => { setModal("none"); setLoginGate(null); }}
-                className="h-8 rounded-md border border-border px-3 text-xs text-foreground hover:bg-muted"
-              >
-                {t("test.login.cancel")}
-              </button>
-              <button
-                onClick={() => { setModal("none"); setLoginGate(null); router.push("/settings#test-accounts"); }}
-                className="h-8 rounded-md border border-border px-3 text-xs text-foreground hover:bg-muted"
-              >
-                {t("test.login.goCapture")}
-              </button>
-              <button
-                onClick={() => { const ids = loginGate.ids; setModal("none"); setLoginGate(null); startBatch(ids); }}
-                className="h-8 rounded-md bg-primary px-3 text-xs font-medium text-primary-foreground hover:opacity-90"
-              >
-                {t("test.login.runAnyway")}
-              </button>
-            </div>
-          </div>
-        </div>
       )}
       <FolderPicker
         open={folderPickerOpen}

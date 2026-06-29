@@ -30,6 +30,57 @@ export function withDownstreamReset<K extends string, S>(
   return next;
 }
 
+/** 看板任务的状态分类（顶部概览 chip + 分组堆叠用）。互斥且穷尽。 */
+export type TaskCategory = 'running' | 'queued' | 'pending' | 'done';
+
+/** 分组的展示顺序：运行中 → 排队中 → 待处理 → 已完成。 */
+export const TASK_CATEGORY_ORDER: readonly TaskCategory[] = ['running', 'queued', 'pending', 'done'];
+
+/**
+ * 计算一个看板任务落到哪个分类（纯函数，便于单测，无服务端依赖）。
+ *
+ * 优先级（从高到低）：
+ *   1. running —— 有步在跑（`isRunning`，来自 runningTaskIds，含批量无头）
+ *   2. queued  —— 在批量等待队列里（`isQueued`，来自 waitingTaskIds）
+ *   3. done    —— 四步全部完成（终态）
+ *   4. pending —— 其余（未开始 / 部分完成 k/4 / 待批准 review / 失败 error）
+ *
+ * running/queued 互斥（pumpQueue 出队即入跑），但若出现瞬时双态，按优先级取 running。
+ *
+ * @param status    当前各步状态（done/review/idle/running/error 字符串）
+ * @param order     步骤顺序（首→尾，与 STEP_ORDER 对齐）
+ * @param isRunning 该任务是否有步在执行
+ * @param isQueued  该任务是否在批量等待队列中
+ * @param doneValue 视为「已完成」的步状态值（默认 'done'）
+ */
+export function taskCategory<K extends string>(
+  status: Record<K, string>,
+  order: readonly K[],
+  isRunning: boolean,
+  isQueued: boolean,
+  doneValue: string = 'done',
+): TaskCategory {
+  if (isRunning) return 'running';
+  if (isQueued) return 'queued';
+  if (order.length > 0 && order.every((k) => status[k] === doneValue)) return 'done';
+  return 'pending';
+}
+
+/**
+ * 全局并发占用的槽位数（纯函数，便于单测）。
+ *
+ * 占用 = 在跑(running) ∪ 已认领(autoRun) 的去重任务数。两集合可能重叠（一个任务既在跑又被
+ * 认领），并集去重保证同一任务只占一个槽位。用并集而非单看 autoRun，是为了把「正在跑但未被
+ * 认领」的任务（如手动单步运行）也算进占用 —— 否则会漏算导致排队调度超过并发上限。
+ *
+ * 调度判定：`occupiedSlots(...) < concurrency` → 还有空槽，可立即起跑；否则进排队。
+ */
+export function occupiedSlots(running: Iterable<string>, autoRun: Iterable<string>): number {
+  const seen = new Set<string>(running);
+  for (const id of autoRun) seen.add(id);
+  return seen.size;
+}
+
 /** 「运行任务 · 选择起点」每个候选起点的可用性（纯函数，便于单测，无服务端依赖）。 */
 export interface RunStartOption<K extends string> {
   step: K;
