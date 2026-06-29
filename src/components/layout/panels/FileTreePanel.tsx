@@ -168,9 +168,9 @@ export function FileTreePanel() {
     const ext = path.split(".").pop()?.toLowerCase() || "";
     const NON_PREVIEWABLE = new Set([
       "zip", "tar", "gz", "rar", "7z", "bz2",
-      // pdf/xlsx 已接入应用内预览（Phase 1）；docx/pptx 待 Phase 2/3 放开。
+      // pdf/xlsx/docx 已接入应用内预览（Phase 1-2）；pptx 待 Phase 3 放开。
       // doc/xls/ppt 是老二进制格式（OLE2/BIFF），纯前端无解，保留拦截。
-      "doc", "docx", "xls", "ppt", "pptx",
+      "doc", "xls", "ppt", "pptx",
       "exe", "dll", "so", "dylib", "bin", "dmg", "iso",
       "woff", "woff2", "ttf", "otf", "eot",
       "flv", "wmv", "wma",
