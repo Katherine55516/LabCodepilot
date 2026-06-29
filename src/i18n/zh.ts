@@ -331,6 +331,10 @@ const zh: Record<TranslationKey, string> = {
 
   // ── Doc preview ─────────────────────────────────────────────
   'docPreview.htmlPreview': 'HTML 预览',
+  'docPreview.error': '无法预览此文档',
+  'docPreview.pages': '{count} 页',
+  'docPreview.zoomIn': '放大',
+  'docPreview.zoomOut': '缩小',
 
   // ── Extensions page ─────────────────────────────────────────
   'extensions.title': '扩展',

@@ -109,6 +109,7 @@
     "use-stick-to-bottom": "^1.1.2",
     "uuid": "^13.0.0",
     "ws": "^8.19.0",
+    "xlsx": "^0.18.5",
     "zlib-sync": "^0.1.10"
   },
   "devDependencies": {

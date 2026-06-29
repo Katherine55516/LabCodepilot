@@ -33,6 +33,19 @@ const DataTableViewer = dynamic(
   { ssr: false, loading: () => <div className="flex h-full items-center justify-center py-12"><SpinnerGap size={20} className="animate-spin text-muted-foreground" /></div> },
 );
 
+// 文档预览渲染器（Phase 1）。react-pdf / SheetJS 各自体积较大，独立懒加载
+// chunk，只有点开对应文档才拉取，首屏零成本。worker/资产离线化见
+// scripts/copy-doc-assets.js + PdfViewer 注释。
+const PdfViewer = dynamic(
+  () => import("@/components/editor/PdfViewer").then((m) => m.PdfViewer),
+  { ssr: false, loading: () => <div className="flex h-full items-center justify-center py-12"><SpinnerGap size={20} className="animate-spin text-muted-foreground" /></div> },
+);
+
+const XlsxViewer = dynamic(
+  () => import("@/components/editor/XlsxViewer").then((m) => m.XlsxViewer),
+  { ssr: false, loading: () => <div className="flex h-full items-center justify-center py-12"><SpinnerGap size={20} className="animate-spin text-muted-foreground" /></div> },
+);
+
 // Lazy-load Streamdown and plugins — only loaded when rendered markdown is needed
 let _StreamdownComponent: typeof import("streamdown").Streamdown | null = null;
 let _streamdownPlugins: Record<string, unknown> | null = null;
@@ -574,7 +587,7 @@ export function PreviewPanel() {
           </>
         )}
 
-        {!isMedia && (
+        {!isMedia && !isDocument && (
           <Button variant="ghost" size="icon-sm" onClick={handleCopyContent}>
             {copied ? (
               <Check size={14} className="text-status-success-foreground" />
@@ -647,7 +660,12 @@ export function PreviewPanel() {
             header={previewSource.header}
             filename={previewSource.virtualName ?? "table"}
           />
+        ) : isPdfPreview(filePath) ? (
+          <PdfViewer fileServeUrl={fileServeUrl} />
+        ) : isXlsxPreview(filePath) ? (
+          <XlsxViewer fileServeUrl={fileServeUrl} filename={fileName} />
         ) : isDocument ? (
+          // docx/pptx 仍占位（Phase 2/3 替换为 DocxViewer/PptxViewer）。
           <DocumentPlaceholder filePath={filePath} />
         ) : isMedia ? (
           <MediaView filePath={filePath} fileServeUrl={fileServeUrl} />

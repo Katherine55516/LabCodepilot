@@ -334,6 +334,10 @@ const en = {
 
   // ── Doc preview ─────────────────────────────────────────────
   'docPreview.htmlPreview': 'HTML Preview',
+  'docPreview.error': 'Failed to load document',
+  'docPreview.pages': '{count} pages',
+  'docPreview.zoomIn': 'Zoom in',
+  'docPreview.zoomOut': 'Zoom out',
 
   // ── Extensions page ─────────────────────────────────────────
   'extensions.title': 'Extensions',

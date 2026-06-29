@@ -340,6 +340,10 @@ const zhHK: Record<TranslationKey, string> = {
 
   // ── Doc preview ─────────────────────────────────────────────
   'docPreview.htmlPreview': 'HTML 預覽',
+  'docPreview.error': '無法預覽此文件',
+  'docPreview.pages': '{count} 頁',
+  'docPreview.zoomIn': '放大',
+  'docPreview.zoomOut': '縮小',
 
   // ── Extensions page ─────────────────────────────────────────
   'extensions.title': '擴展',

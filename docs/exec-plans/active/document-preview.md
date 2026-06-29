@@ -133,7 +133,7 @@ PPTX 同理叠 `DOMPurify`（aiden0z 自带协议过滤，但纵深防御仍做�
 | Phase | 内容 | 状态 | 验收标准 |
 |-------|------|------|---------|
 | **P0** | 基础设施：`copy-doc-assets.js` + `package.json` 脚本挂载 + serve MIME + `.gitignore` + `PreviewPanel` 分发骨架与短路逻辑 | ✅ 已完成 | `npm run vendor:doc-assets` 生成 `public/pdf/{worker,cmaps,standard_fonts,wasm,iccs}`（5 类）+ 幂等；`npm run test` 1542 单测全绿；CDP 实测 worker MIME + 资产可达 + 现有预览无回归 |
-| **P1** | MVP：**PDF + XLSX**（易档优先，感知价值最高） | 📋 待开始 | CDP 起 dev → 点 PDF/XLSX 截图渲染正确；**重点测一个中文 PDF**（验 cmaps）+ 多 sheet xlsx；console 无 worker/wasm 404 |
+| **P1** | MVP：**PDF + XLSX**（易档优先，感知价值最高） | ✅ 已完成 | CDP dev 实测：中文 PDF（2 页/缩放/文本层/工具条）渲染正确无空白、多 sheet xlsx 切换正确（复用 DataTableViewer）、console 零报错；typecheck + 1542 单测全绿 |
 | **P2** | **DOCX**（中档，重在 XSS） | 📋 待开始 | docx 渲染版式正确；构造带 `onerror`/`javascript:` href 的恶意 docx，确认脚本不执行 |
 | **P3** | **PPTX**（难档，管理预期） | 📋 待开始 | 常规文字/表格 PPT 体面；含图表 PPT 确认 echarts 进独立 chunk；坏文件不白屏；UI 标注「排版可能有差异」 |
 | **P4** | 文档：交接 `docs/handover/document-preview.md` + 产品思考 `docs/insights/document-preview.md`（互相反向链接） | 📋 待开始 | 两份文档互链；handover 含 4 渲染器/serve 取字节/离线资产/XSS 防护全貌 |
@@ -147,6 +147,7 @@ PPTX 同理叠 `DOMPurify`（aiden0z 自带协议过滤，但纵深防御仍做�
 - 2026-06-27：多智能体可行性调研（10 agent，含 PDF 离线/PPTX 保真/XSS 三项对抗验证）完成，结论存项目记忆 `doc-preview-feasibility.md`。
 - 2026-06-29：核实本仓硬事实——`vendor-gsd-prepare.js` 拷资产脚本范式存在、`electron:build` 链含 `vendor:gsd && vendor:gsd:verify && next build`、`electron-builder.yml:93` public 拷贝规则、`DataTableViewerProps` 的 `rows+header` 复用入口、`useVoiceInput.ts:75` public-worker 范式、`dompurify`/`papaparse` 已在依赖。发现 **dev 链不含 vendor:gsd** 的坑，定 D5 双挂载方案。撰写本执行计划待审。
 - 2026-06-29：**P0 执行完成**。装 react-pdf 10.4.1（pin pdfjs-dist 5.4.296）；新建 `scripts/copy-doc-assets.js`（拷 worker/cmaps/standard_fonts/wasm/**iccs** 5 类资产 4.2MB + 版本断言 + `.version` 幂等戳记）；`package.json` 挂 `predev`/`prebuild` + `electron:dev`/`electron:build` 链（四入口全覆盖）；serve 补 4 条 MIME；PreviewPanel 加 `isDocumentPreview` 短路 + `DocumentPlaceholder` 占位分发骨架（**未放开 FileTreePanel，零回归**）。验证：typecheck + 1542 单测全绿；CDP dev 实测 worker=`application/javascript`、中文 cmap/wasm（`openjpeg.wasm`+`qcms_bg.wasm`）/icc/字体全部 200 可达、现有 markdown 预览无回归、console 零报错。新增发现并修正计划：① **iccs 是 pdfjs 5.x 第 5 类资产**（对抗验证只列了 4 类），已纳入拷贝并设 `iccUrl`；② `.version` 戳记是 dot-file，Next 不经 HTTP 服务（无害，仅构建期 fs 读，不影响 worker/cmaps 等非 dot 资产）；③ react-pdf 引入 `@napi-rs/canvas` 全平台子包（Node 端 canvas，浏览器不用）→ **P1 待办：确认它不进前端 bundle/standalone（体积巡检）**。
+- 2026-06-29：**P1 执行完成**（PDF + XLSX MVP）。装 xlsx 0.18.5（SheetJS CE，锁 registry 版）；新建 `PdfViewer.tsx`（react-pdf + 5 类资产 URL 含 `iccUrl` + 宽度自适应 + 缩放 + 多页 + serve 取字节）、`XlsxViewer.tsx`（SheetJS 解析 → sheet 切换 tab → `sheet_to_json(header:1)` + 表头唯一化 → 复用 `DataTableViewer`）；PreviewPanel 用 `next/dynamic` 接两个渲染器替换占位、header copy 排除文档；FileTreePanel 放开 pdf/xlsx 拦截（保留 docx/pptx 待 P2/P3，doc/xls/ppt 老格式永久拦截）；i18n 三语加 `docPreview.error/pages/zoomIn/zoomOut`。验证：typecheck + 1542 单测全绿；CDP dev 实测——中文 PDF 2 页渲染清晰无空白（cmaps 生效）、文本层可提取、缩放/页数工具条正常；xlsx 双 sheet（员工名单/销售数据）切换数据正确、复用 DataTableViewer 的导出/斑马纹；两类预览 console 均零报错。**@napi-rs/canvas 巡检结论**：pdfjs `NodeCanvasFactory._createCanvas` 用 `createRequire` 运行时 require（非静态 import），浏览器走 `DOMCanvasFactory` 永不触及，dev 实测无报错佐证 → **不进 client bundle**；standalone 体积（NFT 是否误拷平台二进制）留待正式 `electron:pack` 时一并巡检。
 
 ---
 
