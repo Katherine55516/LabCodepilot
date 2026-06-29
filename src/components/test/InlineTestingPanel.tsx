@@ -260,6 +260,15 @@ function toConversationHistory(convo: ConvoMsg[]): { role: "user" | "assistant";
     .map((m) => ({ role: m.role === "ai" ? ("assistant" as const) : ("user" as const), content: m.text }));
 }
 
+// 问题6：删任务/项目时一并删除该任务的磁盘报告产物（best-effort，失败不阻断 UI 删除）。
+async function deleteTaskReports(projectPath: string, taskName: string): Promise<void> {
+  await fetch("/api/test/reports/delete", {
+    method: "DELETE",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ projectPath, taskName }),
+  }).catch(() => {});
+}
+
 export function InlineTestingPanel() {
   const { t } = useTranslation();
   const router = useRouter();
@@ -301,6 +310,8 @@ export function InlineTestingPanel() {
   // 真对话里 AI 通过 @@ACTION 行建议重跑某步 → 存这里 → composer 上方渲染确认条，
   // 用户点「运行此步」才真正 runStepManual（不自动跑，重跑会覆盖产物且耗时）。
   const [pendingAction, setPendingAction] = useState<{ step: TestStep; reason: string } | null>(null);
+  // 报告 tab 刷新信号：删任务的磁盘报告删完后 bump，让 ReportBrowser 二次拉取（避开时序竞争）。
+  const [reportsReload, setReportsReload] = useState(0);
   // Simulated progress % for non-execution running steps (no granular progress) — see effect below.
   const [simPct, setSimPct] = useState(0);
   const threadRef = useRef<HTMLDivElement>(null);
@@ -354,9 +365,9 @@ export function InlineTestingPanel() {
   // 执行方式(独立窗口可见 / 后台无头)。默认无头 —— 与原行为一致、更快。执行前确认弹窗
   // (ExecConfirmModal)记下用户选择并持久化;非弹窗触发(运行任务 / auto-chain 接力执行)
   // 复用上次选择。用 ref 让 runStep / auto-chain effect 读到最新值,避免闭包取到旧值。
-  const [execMode, setExecMode] = useState<ExecMode>(() => {
-    try { return localStorage.getItem("codepilot:test-exec-mode") === "visible" ? "visible" : "headless"; } catch { return "headless"; }
-  });
+  // 问题7：测试执行默认无头。每次都从「无头」起步、不再记忆上次的「有头」选择
+  //（用户仍可在执行确认弹窗里当次切为有头；切换只在本次会话内生效，刷新后回落无头）。
+  const [execMode, setExecMode] = useState<ExecMode>("headless");
   const execModeRef = useRef(execMode);
   useEffect(() => { execModeRef.current = execMode; }, [execMode]);
   const persistExecMode = (next: ExecMode) => {
@@ -1244,7 +1255,7 @@ export function InlineTestingPanel() {
     if (!tk) return;
     setDeleteTarget({ kind: "task", pIdx: selected, tIdx, name: tk.name, running: runningTaskIds.has(tk.id) });
   };
-  const confirmDelete = () => {
+  const confirmDelete = async () => {
     if (!deleteTarget) return;
     const { kind, pIdx, tIdx, running } = deleteTarget;
     if (running) {
@@ -1255,20 +1266,32 @@ export function InlineTestingPanel() {
           : ([projects[pIdx]?.tasks[tIdx!]?.id].filter(Boolean) as string[]);
       for (const vid of victims) stopTask(vid);
     }
+    // 问题6：先收集要删报告的 (项目路径, 任务名)，UI 删除会改 projects，必须在删之前读。
+    const toDelete: { path: string; name: string }[] = [];
     if (kind === "project") {
-      const ids = new Set((projects[pIdx]?.tasks ?? []).map((tk) => tk.id));
+      const proj = projects[pIdx];
+      if (proj?.path) for (const tk of proj.tasks) toDelete.push({ path: proj.path, name: tk.name });
+      const ids = new Set((proj?.tasks ?? []).map((tk) => tk.id));
       setTaskStates((m) => { const n = { ...m }; ids.forEach((id) => delete n[id]); return n; });
       setProjects((ps) => ps.filter((_, i) => i !== pIdx));
       if (selected === pIdx) { setSelected(null); setSelectedTask(null); }
       else if (selected !== null && selected > pIdx) setSelected(selected - 1);
     } else {
-      const tk = projects[pIdx]?.tasks[tIdx!];
+      const proj = projects[pIdx];
+      const tk = proj?.tasks[tIdx!];
+      if (proj?.path && tk) toDelete.push({ path: proj.path, name: tk.name });
       if (tk) setTaskStates((m) => { const n = { ...m }; delete n[tk.id]; return n; });
       setProjects((ps) => ps.map((p, i) => (i === pIdx ? { ...p, tasks: p.tasks.filter((_, j) => j !== tIdx) } : p)));
       if (selected === pIdx && selectedTask === tIdx) { setSelectedTask(null); setView("dash"); }
       else if (selected === pIdx && selectedTask !== null && selectedTask > tIdx!) setSelectedTask(selectedTask - 1);
     }
     setDeleteTarget(null);
+    // 问题6 时序修复：磁盘报告删【完成后】再刷新报告 tab。否则 setProjects 触发的 ReportBrowser
+    // re-fetch 可能早于 DELETE 完成、又扫到没删的报告（用户报「删任务后报告还在」的根因）。
+    if (toDelete.length) {
+      await Promise.all(toDelete.map((r) => deleteTaskReports(r.path, r.name)));
+      setReportsReload((n) => n + 1);
+    }
   };
 
   // Approve a human-gated step (待批准 → 已完成) 并推进:批准后主动运行下一阶段。
@@ -1500,9 +1523,10 @@ export function InlineTestingPanel() {
                 </div>
               )}
 
-              {/* pipeline strip (horizontal): 需求 → 用例 → 执行 → 报告 */}
+              {/* pipeline strip (horizontal): 需求 → 用例 → 执行 → 报告。
+                  问题1：导入用例的任务跳过需求分析，隐藏需求节点。 */}
               <div className="mb-3 flex flex-wrap gap-2">
-                {STEPS.map((s, i) => {
+                {STEPS.filter((s) => !(aState.imported?.cases && s.step === "requirement")).map((s, i) => {
                   const status = stepStatus[s.step];
                   const isFocus = s.step === focusStep;
                   const isRunning = status === "running";
@@ -1847,20 +1871,24 @@ export function InlineTestingPanel() {
                           className="flex w-full flex-col gap-3 rounded-xl border border-border bg-card p-3.5 text-left transition-colors hover:border-primary/50 hover:bg-muted/40"
                         >
                           <div className="flex items-start justify-between gap-2">
-                            <span className="truncate pt-0.5 text-sm font-medium text-foreground">{tk.name}</span>
+                            {/* 标签放标题行（taskName 旁），不占右列额外一行 —— 导入用例卡片才显示，避免撑高同行卡片 */}
+                            <div className="flex min-w-0 items-center gap-1.5 pt-0.5">
+                              <span className="truncate text-sm font-medium text-foreground">{tk.name}</span>
+                              {st.imported?.cases && <span className="shrink-0 rounded-full bg-primary/15 px-1.5 py-0.5 text-[9px] font-medium text-primary">{t("test.task.importedTag")}</span>}
+                            </div>
                             <div className="flex shrink-0 flex-col items-end gap-0.5">
                               <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${badge.cls}`}>{badge.text}</span>
                               <span className="text-[10px] text-muted-foreground">{taskStageName(st, t)}</span>
                             </div>
                           </div>
                           <div className="flex items-start">
-                            {STEPS.map((s, idx) => (
+                            {STEPS.filter((s) => !(st.imported?.cases && s.step === "requirement")).map((s, idx, arr) => (
                               <div key={s.step} className="flex flex-1 flex-col items-center">
                                 {/* dot with connector lines on both sides (ends are hidden) */}
                                 <div className="flex w-full items-center">
                                   <span className={`h-px flex-1 ${idx === 0 ? "opacity-0" : "bg-border"}`} />
                                   <span className={`mx-1 h-2 w-2 shrink-0 rounded-full ${stepDotClass(st.stepStatus[s.step])}`} />
-                                  <span className={`h-px flex-1 ${idx === STEPS.length - 1 ? "opacity-0" : "bg-border"}`} />
+                                  <span className={`h-px flex-1 ${idx === arr.length - 1 ? "opacity-0" : "bg-border"}`} />
                                 </div>
                                 <span className="mt-1 text-center text-[9px] leading-tight text-muted-foreground">{t(s.name)}</span>
                               </div>
@@ -1949,6 +1977,7 @@ export function InlineTestingPanel() {
                 model={model}
                 providerId={providerId}
                 onOpenTask={(pIdx, tIdx) => { setSelected(pIdx); setSelectedTask(tIdx); setView("flow"); }}
+                reloadSignal={reportsReload}
               />
             )}
           </div>
@@ -2244,7 +2273,7 @@ function ReportView({ t, results, four, funcCounts, funcPassStr, circuitBroken, 
       {lightbox && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-6" onClick={() => setLightbox(null)}>
           {isVid(lightbox) ? (
-            <video src={mediaUrl(lightbox)} controls autoPlay className="max-h-full max-w-full" onClick={(e) => e.stopPropagation()} />
+            <video src={mediaUrl(lightbox)} controls autoPlay muted playsInline preload="metadata" className="max-h-full max-w-full" onClick={(e) => e.stopPropagation()} />
           ) : (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={mediaUrl(lightbox)} alt={lightbox} className="max-h-full max-w-full object-contain" onClick={(e) => e.stopPropagation()} />
@@ -2386,8 +2415,9 @@ function ReportStepPanel({
   const [reloadTick, setReloadTick] = useState(0);
   const [defectBusy, setDefectBusy] = useState(false);
   const [handoffBusy, setHandoffBusy] = useState(false);
-  const [docOpen, setDocOpen] = useState(false);
   const [preview, setPreview] = useState<PreviewState | null>(null);
+  // 问题4：自动缺陷生成的一次性守卫——执行有 fail 且尚无缺陷报告时自动生成一次，防重复触发。
+  const autoDefectRef = useRef(false);
 
   useEffect(() => {
     if (reportStatus !== "done" || !projectPath) { setEntry(null); return; }
@@ -2397,10 +2427,18 @@ function ReportStepPanel({
       .then((d) => {
         if (cancelled) return;
         const list = (d.reports ?? []) as ReportEntry[];
-        setEntry(list.find((x) => x.task === taskName && x.env === env) ?? null);
+        const e = list.find((x) => x.task === taskName && x.env === env) ?? null;
+        setEntry(e);
+        // 问题4：执行有缺陷(fail>0)且尚未生成缺陷报告 → 自动生成一次（用户无需手点）。
+        if (e && (e.counts?.fail ?? 0) > 0 && !e.defectMarkdown && !autoDefectRef.current) {
+          autoDefectRef.current = true;
+          void defectGen();
+        }
       })
       .catch(() => { if (!cancelled) setEntry(null); });
     return () => { cancelled = true; };
+    // defectGen 闭包仅用 props/setter、稳定；有意不入 deps 以免重建 effect。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reportStatus, projectPath, taskName, env, reloadTick]);
 
   // 失败态：报告步执行失败 → 提示重跑，不渲染空报告。
@@ -2571,30 +2609,15 @@ function ReportStepPanel({
             entry?.defectMarkdown
               ? mdActions("test.defect.tab", defectMdRel, entry.defectMarkdown)
               : (
-                <button onClick={defectGen} disabled={defectBusy} className="flex shrink-0 items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[10px] text-foreground hover:bg-muted disabled:opacity-50">
-                  {defectBusy ? <SpinnerGap size={12} className="animate-spin" /> : <WarningCircle size={12} />} {defectBusy ? t("test.defect.generating") : t("test.defect.gen")}
-                </button>
+                // 问题4：缺陷报告改为自动生成（fetch effect 里 fail>0 时触发），不再手动按钮；
+                // 自动生成中显示「生成中」，无缺陷则显示空态文案。
+                <span className="flex shrink-0 items-center gap-1 text-[10px] text-muted-foreground">
+                  {defectBusy ? <><SpinnerGap size={12} className="animate-spin" /> {t("test.defect.generating")}</> : t("test.defect.empty")}
+                </span>
               ),
           )}
         </div>
       </div>
-
-      {/* 内嵌报告全文 */}
-      {entry?.markdown && (
-        <div className="border-t border-border pt-2">
-          <button onClick={() => setDocOpen((v) => !v)} className="mb-1.5 flex w-full items-center gap-1.5 text-left">
-            <Eye size={13} className="text-muted-foreground" />
-            <span className="text-[11px] font-medium text-foreground">{t("test.report.docTitle")}</span>
-            <span className="flex-1" />
-            {docOpen ? <CaretUp size={12} className="text-muted-foreground" /> : <CaretDown size={12} className="text-muted-foreground" />}
-          </button>
-          {docOpen && (
-            <div className="prose prose-sm dark:prose-invert max-h-[40vh] max-w-none overflow-auto rounded-lg bg-muted/30 p-3">
-              <ReactMarkdown remarkPlugins={[remarkGfm]}>{entry.markdown}</ReactMarkdown>
-            </div>
-          )}
-        </div>
-      )}
 
       {preview && (
         <PreviewModal
@@ -2782,7 +2805,7 @@ function XlsxPreview({ t, projectPath, taskName, env, onClose }: {
       {lightbox && (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-6" onClick={() => setLightbox(null)}>
           {isVid(lightbox) ? (
-            <video src={mediaUrl(lightbox)} controls autoPlay className="max-h-full max-w-full" onClick={(e) => e.stopPropagation()} />
+            <video src={mediaUrl(lightbox)} controls autoPlay muted playsInline preload="metadata" className="max-h-full max-w-full" onClick={(e) => e.stopPropagation()} />
           ) : (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={mediaUrl(lightbox)} alt={lightbox} className="max-h-full max-w-full object-contain" onClick={(e) => e.stopPropagation()} />
@@ -2796,7 +2819,7 @@ function XlsxPreview({ t, projectPath, taskName, env, onClose }: {
 // 报告 view: browse persisted reports by 项目 → 任务 → 环境. A task can have multiple
 // reports (one per env); each row expands to the full ReportView. Reads from disk via
 // GET /api/test/reports (per project).
-function ReportBrowser({ projects, t, model, providerId, onOpenTask }: { projects: Project[]; t: T; model: string; providerId: string; onOpenTask: (projectIndex: number, taskIndex: number) => void }) {
+function ReportBrowser({ projects, t, model, providerId, onOpenTask, reloadSignal }: { projects: Project[]; t: T; model: string; providerId: string; onOpenTask: (projectIndex: number, taskIndex: number) => void; reloadSignal: number }) {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [groups, setGroups] = useState<{ project: Project; reports: ReportEntry[] }[]>([]);
@@ -2890,11 +2913,20 @@ function ReportBrowser({ projects, t, model, providerId, onOpenTask }: { project
         ),
     ).then((res) => {
       if (cancelled) return;
-      setGroups(res.filter((g) => g.reports.length > 0));
+      // 清理孤儿报告：报告对应的任务已从任务列表删除（r.task 不在该项目的 project.tasks）→
+      // 删掉磁盘报告产物并从列表移除。兜底旧包/历史遗留（删任务时没删干净）的孤儿报告。
+      // projects 为空时上面 filter(p.path) 不会 fetch，res 为空，故不会误删。
+      const cleaned = res.map(({ project, reports }) => {
+        const liveNames = new Set(project.tasks.map((tk) => tk.name));
+        const orphans = reports.filter((r) => !liveNames.has(r.task));
+        orphans.forEach((o) => deleteTaskReports(project.path, o.task));
+        return { project, reports: reports.filter((r) => liveNames.has(r.task)) };
+      });
+      setGroups(cleaned.filter((g) => g.reports.length > 0));
       setLoading(false);
     });
     return () => { cancelled = true; };
-  }, [projects, reloadTick]);
+  }, [projects, reloadTick, reloadSignal]);
 
   if (loading) return <p className="mt-6 text-center text-[11px] text-muted-foreground">{t("test.report.loading")}</p>;
   if (!groups.length) return <EmptyState icon={ChartBar} text={t("test.reportEmpty")} />;
@@ -2970,7 +3002,7 @@ function ReportBrowser({ projects, t, model, providerId, onOpenTask }: { project
                                   const cur = rowTab[key] || "result";
                                   const label = tab === "result" ? t("test.compare.tabResult") : tab === "compare" ? t("test.compare.tabCompare") : t("test.defect.tab");
                                   return (
-                                    <button key={tab} onClick={() => setRowTab((m) => ({ ...m, [key]: tab }))} className={`rounded px-2 py-0.5 text-[11px] ${cur === tab ? "bg-primary text-primary-foreground" : "border border-border text-foreground hover:bg-muted"}`}>{label}</button>
+                                    <button key={tab} onClick={() => { setRowTab((m) => ({ ...m, [key]: tab })); if (tab === "defect" && r.counts.fail > 0 && !r.defectMarkdown && defectBusy !== key) void defectGen(project, r); }} className={`rounded px-2 py-0.5 text-[11px] ${cur === tab ? "bg-primary text-primary-foreground" : "border border-border text-foreground hover:bg-muted"}`}>{label}</button>
                                   );
                                 })}
                                 <span className="flex-1" />
@@ -2988,22 +3020,13 @@ function ReportBrowser({ projects, t, model, providerId, onOpenTask }: { project
                                 <CompareView t={t} projectPath={project.path} taskName={task} env={r.env} />
                               ) : (rowTab[key] || "result") === "defect" ? (
                                 <div>
-                                  <div className="mb-2 flex items-center gap-2">
-                                    <button
-                                      onClick={() => defectGen(project, r)}
-                                      disabled={defectBusy === key}
-                                      className="flex h-7 items-center gap-1 rounded-md bg-primary px-2.5 text-[11px] font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
-                                    >
-                                      <WarningCircle size={12} /> {defectBusy === key ? t("test.defect.generating") : r.defectMarkdown ? t("test.defect.regen") : t("test.defect.gen")}
-                                    </button>
-                                    <span className="text-[10px] text-muted-foreground">{t("test.defect.hint")}</span>
-                                  </div>
+                                  {/* 问题4：缺陷报告自动生成（切到本 tab 时若有缺陷且未生成则触发），不再手动按钮。 */}
                                   {r.defectMarkdown ? (
                                     <div className="prose prose-sm dark:prose-invert max-w-none rounded-lg border border-border bg-card p-3">
                                       <ReactMarkdown remarkPlugins={[remarkGfm]}>{r.defectMarkdown}</ReactMarkdown>
                                     </div>
                                   ) : (
-                                    <p className="text-[11px] text-muted-foreground">{defectBusy === key ? t("test.defect.generating") : t("test.defect.empty")}</p>
+                                    <p className="flex items-center gap-1 text-[11px] text-muted-foreground">{defectBusy === key ? <><SpinnerGap size={12} className="animate-spin" /> {t("test.defect.generating")}</> : t("test.defect.empty")}</p>
                                   )}
                                 </div>
                               ) : (
@@ -3376,7 +3399,7 @@ function NewTaskModal({ t, onClose, onAdd, existingNames }: { t: T; onClose: () 
           <button onClick={() => casesInputRef.current?.click()} className="h-9 flex-1 rounded-md border border-border text-xs text-foreground hover:bg-muted">📊 {t("test.newTaskModal.importCases")}</button>
           <button onClick={() => reqInputRef.current?.click()} className="h-9 flex-1 rounded-md border border-border text-xs text-foreground hover:bg-muted">📄 {t("test.newTaskModal.importReqs")}</button>
         </div>
-        <input ref={casesInputRef} type="file" accept=".json,.xlsx" className="hidden" onChange={(e) => { pick(e.target.files?.[0], setCasesFile); e.target.value = ""; }} />
+        <input ref={casesInputRef} type="file" accept=".json,.xlsx,.xls" className="hidden" onChange={(e) => { pick(e.target.files?.[0], setCasesFile); e.target.value = ""; }} />
         <input ref={reqInputRef} type="file" accept=".md,.txt,.markdown,.docx" className="hidden" onChange={(e) => { pick(e.target.files?.[0], setReqFile); e.target.value = ""; }} />
         {(casesFile || reqFile) && (
           <div className="mt-2 flex flex-col gap-1">

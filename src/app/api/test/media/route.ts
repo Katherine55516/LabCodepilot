@@ -1,6 +1,5 @@
 import fs from 'fs';
 import path from 'path';
-import { Readable } from 'stream';
 import { artifactPaths } from '@/lib/test/prompts';
 import { isUnsafeSegment } from '@/lib/test/path-safety';
 
@@ -62,7 +61,9 @@ export async function GET(req: Request): Promise<Response> {
   const isVideo = mime.startsWith('video/');
   const range = req.headers.get('range');
 
-  // 视频 + Range → 206 partial（seek 支持），用 Node stream 避免整文件入内存。
+  // 视频 + Range → 206 partial。读片段为 buffer 直接返回（不用 Readable.toWeb 流式——它在
+  // Next standalone + Electron 打包环境对 <video> 的 Range 请求不兼容，是录像走 Range 分支
+  // 黑屏的根因；截图走整文件分支故正常。证据文件不大，整片段入内存可接受）。
   if (isVideo && range) {
     const m = /bytes=(\d*)-(\d*)/.exec(range);
     // Three forms: bytes=START-END, bytes=START- (open-ended), bytes=-N (suffix =
@@ -79,14 +80,17 @@ export async function GET(req: Request): Promise<Response> {
     if (start >= stat.size || end >= stat.size || start > end) {
       return new Response('range not satisfiable', { status: 416, headers: { 'Content-Range': `bytes */${stat.size}` } });
     }
-    const nodeStream = fs.createReadStream(target, { start, end });
-    return new Response(Readable.toWeb(nodeStream) as unknown as ReadableStream, {
+    const len = end - start + 1;
+    const fd = fs.openSync(target, 'r');
+    const chunk = Buffer.alloc(len);
+    try { fs.readSync(fd, chunk, 0, len, start); } finally { fs.closeSync(fd); }
+    return new Response(new Uint8Array(chunk), {
       status: 206,
       headers: {
         'Content-Type': mime,
         'Content-Range': `bytes ${start}-${end}/${stat.size}`,
         'Accept-Ranges': 'bytes',
-        'Content-Length': String(end - start + 1),
+        'Content-Length': String(len),
       },
     });
   }

@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import mammoth from 'mammoth';
 import ExcelJS from 'exceljs';
+import * as XLSX from 'xlsx';
 import { artifactPaths } from '@/lib/test/prompts';
 import { isUnsafeSegment } from '@/lib/test/path-safety';
 
@@ -92,6 +93,15 @@ function rowsToCases(rows: string[][]): { cases: unknown[] } {
   return { cases };
 }
 
+// .xls（老二进制 BIFF）exceljs 读不了 → 用 sheetjs 读成行矩阵，复用 rowsToCases 映射。
+function xlsToRows(buf: Buffer): string[][] {
+  const wb = XLSX.read(buf, { type: 'buffer' });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  if (!ws) throw new Error('Excel 没有可读工作表');
+  const rows = XLSX.utils.sheet_to_json<unknown[]>(ws, { header: 1, defval: '', raw: false });
+  return rows.map((r) => (Array.isArray(r) ? r.map((c) => String(c ?? '').trim()) : []));
+}
+
 async function xlsxToCasesJson(buf: Buffer): Promise<string> {
   const wb = new ExcelJS.Workbook();
   await wb.xlsx.load(buf as unknown as ArrayBuffer);
@@ -135,13 +145,16 @@ export async function POST(req: Request): Promise<Response> {
       if (ext === 'doc') return Response.json({ error: '.doc（旧版二进制 Word）暂不支持，请另存为 .docx 再导入' }, { status: 400 });
       out = ext === 'docx' ? (await mammoth.extractRawText({ buffer: buf })).value : buf.toString('utf-8');
     } else {
-      // cases: .json validated as-is; .xlsx mapped to cases.json; .xls (legacy) unsupported.
-      if (ext === 'xls') return Response.json({ error: '.xls（旧版二进制 Excel）暂不支持，请另存为 .xlsx 再导入' }, { status: 400 });
+      // cases: .json 原样校验；.xlsx 走 exceljs；.xls（老二进制 BIFF）走 sheetjs。
       if (ext === 'xlsx') {
         out = await xlsxToCasesJson(buf);
+      } else if (ext === 'xls') {
+        const rows = xlsToRows(buf);
+        if (rows.length < 2) throw new Error('Excel 至少需要表头行 + 一行用例');
+        out = JSON.stringify(rowsToCases(rows), null, 2);
       } else {
         out = buf.toString('utf-8');
-        try { JSON.parse(out); } catch { return Response.json({ error: '用例文件需为合法 JSON 或 .xlsx' }, { status: 400 }); }
+        try { JSON.parse(out); } catch { return Response.json({ error: '用例文件需为合法 JSON / .xlsx / .xls' }, { status: 400 }); }
       }
     }
 

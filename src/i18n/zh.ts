@@ -220,6 +220,7 @@ const zh: Record<TranslationKey, string> = {
   'test.chat.action.run': '运行此步',
   'test.chat.action.ignore': '忽略',
   'test.chat.failed': '对话失败',
+  'test.task.importedTag': '导入用例',
   'test.env.unconfigured': '未配置目标 · 去设置·测试账号',
   'test.env.targetLabel': '目标',
   'test.env.fromSettings': '来自设置',
