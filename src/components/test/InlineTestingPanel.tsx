@@ -2966,7 +2966,16 @@ function ReportBrowser({ projects, t, model, providerId, onOpenTask, reloadSigna
         ),
     ).then((res) => {
       if (cancelled) return;
-      setGroups(res.filter((g) => g.reports.length > 0));
+      // 清理孤儿报告：报告对应的任务已从任务列表删除（r.task 不在该项目的 project.tasks）→
+      // 删掉磁盘报告产物并从列表移除。兜底旧包/历史遗留（删任务时没删干净）的孤儿报告。
+      // projects 为空时上面 filter(p.path) 不会 fetch，res 为空，故不会误删。
+      const cleaned = res.map(({ project, reports }) => {
+        const liveNames = new Set(project.tasks.map((tk) => tk.name));
+        const orphans = reports.filter((r) => !liveNames.has(r.task));
+        orphans.forEach((o) => deleteTaskReports(project.path, o.task));
+        return { project, reports: reports.filter((r) => liveNames.has(r.task)) };
+      });
+      setGroups(cleaned.filter((g) => g.reports.length > 0));
       setLoading(false);
     });
     return () => { cancelled = true; };
