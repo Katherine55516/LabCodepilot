@@ -23,6 +23,9 @@ interface ProviderOptionsSectionProps {
  * Per-provider options: thinking mode + 1M context toggle.
  * Only rendered when `showThinkingOptions` is true.
  */
+// 1M 上下文开关已隐藏（保留底层读写逻辑；如需恢复 UI，置为 true）。
+const SHOW_CONTEXT_1M_TOGGLE = false;
+
 export function ProviderOptionsSection({ providerId, showThinkingOptions = false }: ProviderOptionsSectionProps) {
   const { t } = useTranslation();
   const [options, setOptions] = useState<ProviderOptions>({
@@ -84,7 +87,8 @@ export function ProviderOptionsSection({ providerId, showThinkingOptions = false
         </Select>
       </div>
 
-      {/* 1M context */}
+      {/* 1M context — 开关已隐藏，置 SHOW_CONTEXT_1M_TOGGLE=true 可恢复 */}
+      {SHOW_CONTEXT_1M_TOGGLE && (
       <div className="flex items-center justify-between gap-3">
         <div className="min-w-0">
           <p className="text-[11px] font-medium text-foreground/80">
@@ -100,6 +104,7 @@ export function ProviderOptionsSection({ providerId, showThinkingOptions = false
           className="scale-[0.85]"
         />
       </div>
+      )}
     </div>
   );
 }

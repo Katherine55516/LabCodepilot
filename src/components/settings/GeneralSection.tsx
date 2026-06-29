@@ -246,15 +246,8 @@ export function GeneralSection() {
           </StatusBanner>
         )}
 
-        {/* [GENERATIVE-UI-OFFLINE] 生成式 UI toggle hidden — feature temporarily
-            disabled for all users. The state + handler above stay live.
-            ┌─ RESTORE (re-open generative UI to users) — 3 coordinated edits.
-            │  grep "GENERATIVE-UI-OFFLINE" to jump to all three:
-            │   1) src/lib/context-assembler.ts — change gate `=== 'true'` back to `!== 'false'`
-            │   2) HERE — uncomment the <FieldRow> block below
-            │   3) src/components/layout/UnifiedTopBar.tsx — uncomment the dashboard <Tooltip>
-            └─ Nothing else to touch: DB key / i18n / types are all left intact. */}
-        {/* <FieldRow
+        {/* Generative UI toggle */}
+        <FieldRow
           label={t('settings.generativeUITitle')}
           description={t('settings.generativeUIDesc')}
           separator
@@ -264,7 +257,7 @@ export function GeneralSection() {
             onCheckedChange={handleGenerativeUIToggle}
             disabled={generativeUISaving}
           />
-        </FieldRow> */}
+        </FieldRow>
 
         {/* Default panel — hidden. Hardcoded to 'file_tree' in
             src/app/chat/[id]/page.tsx so the choice is invisible AND

@@ -16,6 +16,7 @@ import {
   WifiHigh,
   Gear,
   ListChecks,
+  Sparkle,
   type Icon,
 } from "@/components/ui/icon";
 import { Button } from "@/components/ui/button";
@@ -711,6 +712,28 @@ export function ChatListPanel({ open, width, hasUpdate, readyToInstall }: ChatLi
           )}
         </div>
       </ScrollArea>
+
+      {/* Image Studio — standalone text-to-image entry, sits above the account row */}
+      <div className="shrink-0 px-3 pt-2">
+        <Link href="/image">
+          <Button
+            variant="outline"
+            size="sm"
+            className={`w-full justify-start gap-2 h-9 text-xs border-primary/30 ${
+              pathname.startsWith("/image")
+                ? "bg-primary/10 text-primary font-medium"
+                : "bg-primary/5 text-foreground hover:bg-primary/10"
+            }`}
+          >
+            <Sparkle
+              size={15}
+              weight={pathname.startsWith("/image") ? "fill" : "regular"}
+              className="text-primary"
+            />
+            {t('imageStudio.sidebarButton' as TranslationKey)}
+          </Button>
+        </Link>
+      </div>
 
       {/* Bottom: account chip + settings gear (horizontal row) */}
       <div className="shrink-0 px-3 py-2 flex items-center gap-1">

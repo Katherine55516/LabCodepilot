@@ -26,6 +26,7 @@ import type {
   MentionRef,
   MessageContentBlock,
 } from '@/types';
+import { sanitizeOrphanToolUses } from '@/lib/tool-result-pairing';
 
 // ==========================================
 // Internal types
@@ -334,7 +335,10 @@ function pushOrderedToolResult(stream: ActiveStream, res: ToolResultInfo) {
 
 /** Serialize ordered blocks → final persisted message content. */
 function buildFinalContentFromBlocks(stream: ActiveStream, fallbackText: string): string {
-  const cleaned = stream.orderedBlocks.filter(
+  // Pair every tool_use with a result before persisting, so an interrupted /
+  // permission-hung turn never writes an orphan tool_use into the DB (which
+  // would later break history replay with AI_MissingToolResultsError).
+  const cleaned = sanitizeOrphanToolUses(stream.orderedBlocks).filter(
     b => b.type !== 'text' || (b.text != null && b.text.trim().length > 0),
   );
   if (cleaned.length === 0) return fallbackText.trim();
@@ -683,7 +687,9 @@ async function runStream(stream: ActiveStream, params: StartStreamParams): Promi
     // thinking the user already saw, in order — previously the error/stop path
     // only serialized merged text + thinking and dropped the tool calls.
     const buildFinalContent = (note: string | null): string | null => {
-      const blocks: MessageContentBlock[] = stream.orderedBlocks.filter(
+      // Same orphan-tool_use guard as the success path — the error/abort/timeout
+      // path is in fact the most likely to leave a tool_use without a result.
+      const blocks: MessageContentBlock[] = sanitizeOrphanToolUses(stream.orderedBlocks).filter(
         b => b.type !== 'text' || (b.text != null && b.text.trim().length > 0),
       );
       if (note) blocks.push({ type: 'text', text: note });

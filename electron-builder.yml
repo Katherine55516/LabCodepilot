@@ -16,6 +16,7 @@ files:
   - "!scripts"
   - "!docs"
   - "!release"
+  - "!release-win"
   - "!data"
 extraResources:
   # 用 "**/*" 减源码黑名单复制 standalone 顶层。
@@ -45,6 +46,10 @@ extraResources:
       # 构建向 CI 看齐;运行时无任何代码引用 standalone/dist-electron。
       - "!dist-electron"
       - "!release"
+      # !release-win —— Windows 打包产物(release-win/),与 release/ 同理是 NFT
+      # 误判塞进 standalone 的构建产物。漏了它会把整个 Windows 包(~700MB,含 .exe
+      # + portable.zip)塞进 macOS DMG,体积暴涨 3 倍多;CI 跨平台构建同样受影响。
+      - "!release-win"
       - "!src"
       - "!electron"
       - "!apps"

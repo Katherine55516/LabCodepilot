@@ -1,6 +1,10 @@
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { getContextWindow, MODEL_CONTEXT_WINDOWS } from '../../lib/model-context';
+import {
+  getContextWindow,
+  MODEL_CONTEXT_WINDOWS,
+  getManagedContextWindowByName,
+} from '../../lib/model-context';
 
 describe('getContextWindow — alias disambiguation', () => {
   it('bare opus alias resolves to 200K (Bedrock/Vertex-safe default)', () => {
@@ -79,5 +83,34 @@ describe('getContextWindow — alias disambiguation', () => {
     assert.ok('opus' in MODEL_CONTEXT_WINDOWS);
     assert.ok('claude-opus-4-7' in MODEL_CONTEXT_WINDOWS);
     assert.ok('claude-opus-4-20250514' in MODEL_CONTEXT_WINDOWS);
+  });
+});
+
+describe('getManagedContextWindowByName — window by managed display name', () => {
+  it('maps 1000K models, punctuation-insensitive', () => {
+    assert.equal(getManagedContextWindowByName('高阶模型-C48'), 1_000_000);
+    assert.equal(getManagedContextWindowByName('高阶模型C48'), 1_000_000); // no hyphen
+    assert.equal(getManagedContextWindowByName('高阶模型-C47'), 1_000_000);
+    assert.equal(getManagedContextWindowByName('高阶模型-G55'), 1_000_000);
+    assert.equal(getManagedContextWindowByName('GLM5.2'), 1_000_000);
+    assert.equal(getManagedContextWindowByName('Qwen3.7-Max'), 1_000_000);
+    assert.equal(getManagedContextWindowByName('Qwen3.7-Plus'), 1_000_000);
+    assert.equal(getManagedContextWindowByName('MiniMax-M3'), 1_000_000);
+  });
+
+  it('maps 200K models (GLM5.1, Kimi-K2.6, Kimi-K2.7-Code) and GLM5.1 does not collide with GLM5.2', () => {
+    assert.equal(getManagedContextWindowByName('GLM5.1'), 200_000);
+    assert.equal(getManagedContextWindowByName('Kimi-K2.6'), 200_000);
+    assert.equal(getManagedContextWindowByName('Kimi-K2.7-Code'), 200_000);
+    assert.notEqual(
+      getManagedContextWindowByName('GLM5.1'),
+      getManagedContextWindowByName('GLM5.2'),
+    );
+  });
+
+  it('returns null for unknown / empty names so callers can fall back', () => {
+    assert.equal(getManagedContextWindowByName('Some-Unknown-Model'), null);
+    assert.equal(getManagedContextWindowByName(''), null);
+    assert.equal(getManagedContextWindowByName(undefined), null);
   });
 });

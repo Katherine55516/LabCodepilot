@@ -18,6 +18,10 @@ export interface SkillItem {
   source: "global" | "project" | "plugin" | "installed";
   installedSource?: "agents" | "claude";
   filePath: string;
+  /** Working directory of the owning project (project-scoped skills only). */
+  projectCwd?: string;
+  /** Display name of the owning project (project-scoped skills only). */
+  projectName?: string;
 }
 
 interface SkillListItemProps {
@@ -25,6 +29,11 @@ interface SkillListItemProps {
   selected: boolean;
   onSelect: () => void;
   onDelete: (skill: SkillItem) => void;
+  /**
+   * Fallback project display name. Prefer `skill.projectName`; this prop is a
+   * fallback for callers that don't tag skills per-project.
+   */
+  projectName?: string;
 }
 
 export function SkillListItem({
@@ -32,6 +41,7 @@ export function SkillListItem({
   selected,
   onSelect,
   onDelete,
+  projectName,
 }: SkillListItemProps) {
   const { t } = useTranslation();
   const [hovered, setHovered] = useState(false);
@@ -66,7 +76,17 @@ export function SkillListItem({
     >
       <Lightning size={16} className="shrink-0 text-muted-foreground" />
       <div className="flex-1 min-w-0">
-        <span className="text-sm font-medium truncate block">/{skill.name}</span>
+        <div className="flex items-center gap-1.5">
+          <span className="text-sm font-medium truncate">/{skill.name}</span>
+          {skill.source === "project" && (skill.projectName || projectName) && (
+            <span
+              className="shrink-0 rounded border border-primary/30 bg-primary/5 px-1 py-0 text-[9px] font-medium leading-tight text-primary/80"
+              title={`Project: ${skill.projectName || projectName}`}
+            >
+              {skill.projectName || projectName}
+            </span>
+          )}
+        </div>
         <p className="text-xs text-muted-foreground truncate">
           {skill.description}
         </p>

@@ -13,14 +13,36 @@ import { MarketplaceBrowser } from "./MarketplaceBrowser";
 import { useTranslation } from "@/hooks/useTranslation";
 import type { TranslationKey } from "@/i18n";
 import { cn } from "@/lib/utils";
+import { groupSessionsByProject } from "@/components/layout/chat-list-utils";
+import type { ChatSession } from "@/types";
 import type { SkillItem } from "./SkillListItem";
 
 type ViewTab = "local" | "marketplace";
 
+/** A project the user can scope skills to — derived from conversation groups. */
+export interface SkillProject {
+  cwd: string;
+  name: string;
+}
+
+/** Match two skills as the same entry (project skills disambiguate by cwd). */
+function sameSkill(a: SkillItem, b: SkillItem): boolean {
+  return (
+    a.name === b.name &&
+    a.source === b.source &&
+    a.installedSource === b.installedSource &&
+    a.projectCwd === b.projectCwd
+  );
+}
+
 export function SkillsManager() {
+  // workingDirectory is only used to pre-select the current project in the
+  // create dialog — the skill list itself spans ALL projects, independent of
+  // which conversation is selected.
   const { workingDirectory } = usePanel();
   const { t } = useTranslation();
   const [skills, setSkills] = useState<SkillItem[]>([]);
+  const [projects, setProjects] = useState<SkillProject[]>([]);
   const [selected, setSelected] = useState<SkillItem | null>(null);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState("");
@@ -29,39 +51,86 @@ export function SkillsManager() {
 
   const fetchSkills = useCallback(async () => {
     try {
-      const cwdParam = workingDirectory ? `?cwd=${encodeURIComponent(workingDirectory)}` : '';
-      const res = await fetch(`/api/skills${cwdParam}`);
+      // 1. Enumerate all projects from the conversation list (grouped by cwd).
+      let projList: SkillProject[] = [];
+      try {
+        const sessRes = await fetch("/api/chat/sessions");
+        if (sessRes.ok) {
+          const { sessions } = (await sessRes.json()) as { sessions: ChatSession[] };
+          projList = groupSessionsByProject(sessions || [])
+            .filter((g) => g.workingDirectory)
+            .map((g) => ({ cwd: g.workingDirectory, name: g.displayName }));
+        }
+      } catch {
+        // sessions unavailable — fall back to no projects
+      }
+      setProjects(projList);
+
+      // 2. Fetch skills across every project at once (cwds=[] → no project
+      //    items, never the server's own process.cwd()).
+      const cwds = projList.map((p) => p.cwd);
+      const res = await fetch(`/api/skills?cwds=${encodeURIComponent(JSON.stringify(cwds))}`);
       if (res.ok) {
         const data = await res.json();
-        setSkills((data.skills || []).filter((s: SkillItem) => s.source !== "project"));
+        const nameByCwd = new Map(projList.map((p) => [p.cwd, p.name]));
+        const items: SkillItem[] = (data.skills || []).map((s: SkillItem) =>
+          s.source === "project" && s.projectCwd
+            ? {
+                ...s,
+                projectName:
+                  nameByCwd.get(s.projectCwd) ||
+                  s.projectCwd.split(/[\\/]/).filter(Boolean).pop() ||
+                  s.projectCwd,
+              }
+            : s
+        );
+        setSkills(items);
       }
     } catch {
       // ignore
     } finally {
       setLoading(false);
     }
-  }, [workingDirectory]);
+  }, []);
 
   useEffect(() => {
     fetchSkills();
   }, [fetchSkills]);
 
   const handleCreate = useCallback(
-    async (name: string, scope: "global" | "project", content: string) => {
+    async (
+      name: string,
+      scope: "global" | "project",
+      content: string,
+      projectCwd?: string
+    ) => {
+      const cwd = scope === "project" ? projectCwd : undefined;
       const res = await fetch("/api/skills", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, content, scope, cwd: workingDirectory || undefined }),
+        body: JSON.stringify({ name, content, scope, cwd }),
       });
       if (!res.ok) {
         const data = await res.json();
         throw new Error(data.error || "Failed to create skill");
       }
       const data = await res.json();
-      setSkills((prev) => [...prev, data.skill]);
-      setSelected(data.skill);
+      const created: SkillItem =
+        scope === "project" && projectCwd
+          ? {
+              ...data.skill,
+              projectCwd,
+              projectName:
+                projects.find((p) => p.cwd === projectCwd)?.name ||
+                projectCwd.split(/[\\/]/).filter(Boolean).pop() ||
+                projectCwd,
+            }
+          : data.skill;
+      // Refresh the aggregate so the new skill lands in the right section.
+      await fetchSkills();
+      setSelected(created);
     },
-    [workingDirectory]
+    [projects, fetchSkills]
   );
 
   const buildSkillUrl = useCallback((skill: SkillItem) => {
@@ -69,12 +138,14 @@ export function SkillsManager() {
     if (skill.source === "installed" && skill.installedSource) {
       params.set("source", skill.installedSource);
     }
-    if (workingDirectory) {
-      params.set("cwd", workingDirectory);
+    // Project skills must target their OWN project directory, not whatever
+    // conversation happens to be selected.
+    if (skill.source === "project" && skill.projectCwd) {
+      params.set("cwd", skill.projectCwd);
     }
     const qs = params.toString();
     return `/api/skills/${encodeURIComponent(skill.name)}${qs ? `?${qs}` : ""}`;
-  }, [workingDirectory]);
+  }, []);
 
   const handleSave = useCallback(
     async (skill: SkillItem, content: string) => {
@@ -88,18 +159,15 @@ export function SkillsManager() {
         throw new Error(data.error || "Failed to save skill");
       }
       const data = await res.json();
-      // Update in list
-      setSkills((prev) =>
-        prev.map((s) =>
-          s.name === skill.name &&
-          s.source === data.skill.source &&
-          s.installedSource === data.skill.installedSource
-            ? data.skill
-            : s
-        )
-      );
-      // Update selected
-      setSelected(data.skill);
+      // PUT response doesn't carry project tagging — preserve it from the
+      // original item.
+      const updated: SkillItem = {
+        ...data.skill,
+        projectCwd: skill.projectCwd,
+        projectName: skill.projectName,
+      };
+      setSkills((prev) => prev.map((s) => (sameSkill(s, skill) ? updated : s)));
+      setSelected(updated);
     },
     [buildSkillUrl]
   );
@@ -108,21 +176,8 @@ export function SkillsManager() {
     async (skill: SkillItem) => {
       const res = await fetch(buildSkillUrl(skill), { method: "DELETE" });
       if (res.ok) {
-        setSkills((prev) =>
-          prev.filter(
-            (s) =>
-              !(
-                s.name === skill.name &&
-                s.source === skill.source &&
-                s.installedSource === skill.installedSource
-              )
-          )
-        );
-        if (
-          selected?.name === skill.name &&
-          selected?.source === skill.source &&
-          selected?.installedSource === skill.installedSource
-        ) {
+        setSkills((prev) => prev.filter((s) => !sameSkill(s, skill)));
+        if (selected && sameSkill(selected, skill)) {
           setSelected(null);
         }
       }
@@ -139,6 +194,16 @@ export function SkillsManager() {
   const globalSkills = filtered.filter((s) => s.source === "global");
   const installedSkills = filtered.filter((s) => s.source === "installed");
   const pluginSkills = filtered.filter((s) => s.source === "plugin");
+
+  // Group project skills by their owning project, preserving project order.
+  const projectSections = projects
+    .map((p) => ({
+      project: p,
+      skills: filtered.filter((s) => s.source === "project" && s.projectCwd === p.cwd),
+    }))
+    .filter((g) => g.skills.length > 0);
+
+  const isSelected = (skill: SkillItem) => !!selected && sameSkill(selected, skill);
 
   if (loading) {
     return (
@@ -218,6 +283,26 @@ export function SkillsManager() {
           </div>
           <div className="flex-1 overflow-y-auto min-h-0">
             <div className="p-1">
+              {/* One section per project that has skills */}
+              {projectSections.map(({ project, skills: projSkills }) => (
+                <div className="mb-1" key={`proj:${project.cwd}`}>
+                  <span
+                    className="block truncate px-3 py-1 text-[10px] font-medium uppercase text-muted-foreground"
+                    title={project.cwd}
+                  >
+                    {project.name}
+                  </span>
+                  {projSkills.map((skill) => (
+                    <SkillListItem
+                      key={`${skill.projectCwd}:${skill.name}`}
+                      skill={skill}
+                      selected={isSelected(skill)}
+                      onSelect={() => setSelected(skill)}
+                      onDelete={handleDelete}
+                    />
+                  ))}
+                </div>
+              ))}
               {globalSkills.length > 0 && (
                 <div className="mb-1">
                   <span className="px-3 py-1 text-[10px] font-medium uppercase text-muted-foreground">
@@ -227,11 +312,7 @@ export function SkillsManager() {
                     <SkillListItem
                       key={`${skill.source}:${skill.installedSource ?? "default"}:${skill.name}`}
                       skill={skill}
-                      selected={
-                        selected?.name === skill.name &&
-                        selected?.source === skill.source &&
-                        selected?.installedSource === skill.installedSource
-                      }
+                      selected={isSelected(skill)}
                       onSelect={() => setSelected(skill)}
                       onDelete={handleDelete}
                     />
@@ -247,11 +328,7 @@ export function SkillsManager() {
                     <SkillListItem
                       key={`${skill.source}:${skill.installedSource ?? "default"}:${skill.name}`}
                       skill={skill}
-                      selected={
-                        selected?.name === skill.name &&
-                        selected?.source === skill.source &&
-                        selected?.installedSource === skill.installedSource
-                      }
+                      selected={isSelected(skill)}
                       onSelect={() => setSelected(skill)}
                       onDelete={handleDelete}
                     />
@@ -267,11 +344,7 @@ export function SkillsManager() {
                     <SkillListItem
                       key={skill.filePath || `${skill.source}:${skill.installedSource ?? "default"}:${skill.name}`}
                       skill={skill}
-                      selected={
-                        selected?.name === skill.name &&
-                        selected?.source === skill.source &&
-                        selected?.installedSource === skill.installedSource
-                      }
+                      selected={isSelected(skill)}
                       onSelect={() => setSelected(skill)}
                       onDelete={handleDelete}
                     />
@@ -308,7 +381,7 @@ export function SkillsManager() {
         <div className="flex-1 min-w-0 overflow-hidden">
           {selected ? (
             <SkillEditor
-              key={`${selected.source}:${selected.name}`}
+              key={`${selected.source}:${selected.projectCwd ?? ""}:${selected.name}`}
               skill={selected}
               onSave={handleSave}
               onDelete={handleDelete}
@@ -341,6 +414,8 @@ export function SkillsManager() {
         open={showCreate}
         onOpenChange={setShowCreate}
         onCreate={handleCreate}
+        projects={projects}
+        defaultProjectCwd={workingDirectory || undefined}
       />
     </div>
   );

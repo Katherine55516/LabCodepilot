@@ -741,14 +741,18 @@ async function collectStreamResponse(
                 // skip malformed tool_result data
               }
             } else if (event.type === 'status') {
-              // Capture SDK session_id and model from init event and persist them
+              // Capture the SDK session_id from the init event. We deliberately
+              // do NOT persist statusData.model here: the SDK reports the model
+              // it actually ran, which on env/credential fallback is the bare
+              // 'sonnet' alias. Writing that back pins the session to a phantom
+              // model that isn't in the managed provider list (root cause of
+              // "switch conversation → always Connected (sonnet)"). session.model
+              // is owned by the user's request — already persisted from
+              // effectiveModel near the top of this handler.
               try {
                 const statusData = JSON.parse(event.data);
                 if (statusData.session_id) {
                   updateSdkSessionId(sessionId, statusData.session_id);
-                }
-                if (statusData.model) {
-                  updateSessionModel(sessionId, statusData.model);
                 }
               } catch {
                 // skip malformed status data

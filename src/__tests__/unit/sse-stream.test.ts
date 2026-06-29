@@ -293,3 +293,69 @@ describe('SSE Stream — skill_nudge events', () => {
     assert.equal(statusCalls.length, 0, 'skill_nudge must not leak into onStatus');
   });
 });
+
+// ────────────────────────────────────────────────────────────────
+// step_complete SSE events
+// Regression guard: agent-loop's onStepFinish emits a type='status' event
+// carrying { subtype:'step_complete', step, usage, finishReason, toolsUsed }
+// purely for token accounting. The frontend has no consumer for it, so it
+// must be swallowed — never surfaced as status-bar text. Before the fix it
+// fell through the status branch's else and the raw JSON string was printed
+// verbatim onto the execution-status line (next to the elapsed timer).
+// ────────────────────────────────────────────────────────────────
+
+describe('SSE Stream — step_complete events', () => {
+  it('does NOT leak step_complete payload into onStatus', async () => {
+    const statusCalls: Array<string | undefined> = [];
+    const reader = mockReader([
+      sseData({
+        type: 'status',
+        data: JSON.stringify({
+          subtype: 'step_complete',
+          step: 2,
+          usage: { input_tokens: 9495, output_tokens: 457 },
+          finishReason: 'tool-calls',
+          toolsUsed: ['Read', 'Read', 'Read', 'Read', 'Read'],
+        }),
+      }),
+      sseData({ type: 'done', data: '' }),
+    ]);
+
+    await consumeSSEStream(reader, noopCallbacks({
+      onStatus: (t) => statusCalls.push(t),
+    }));
+
+    assert.equal(statusCalls.length, 0, 'step_complete must not leak into onStatus');
+  });
+
+  it('does NOT leak unknown structured status objects into onStatus (defense-in-depth)', async () => {
+    // Any JSON-parseable object that matches no known status type must be
+    // ignored, not printed verbatim. Only plain-string payloads surface.
+    const statusCalls: Array<string | undefined> = [];
+    const reader = mockReader([
+      sseData({ type: 'status', data: JSON.stringify({ subtype: 'some_future_event', foo: 'bar' }) }),
+      sseData({ type: 'done', data: '' }),
+    ]);
+
+    await consumeSSEStream(reader, noopCallbacks({
+      onStatus: (t) => statusCalls.push(t),
+    }));
+
+    assert.equal(statusCalls.length, 0, 'unknown structured status objects must not leak into onStatus');
+  });
+
+  it('still surfaces a plain-string status payload', async () => {
+    // The hardened else branch must keep showing genuine string status text.
+    const statusCalls: Array<string | undefined> = [];
+    const reader = mockReader([
+      sseData({ type: 'status', data: JSON.stringify('Reconnecting…') }),
+      sseData({ type: 'done', data: '' }),
+    ]);
+
+    await consumeSSEStream(reader, noopCallbacks({
+      onStatus: (t) => statusCalls.push(t),
+    }));
+
+    assert.deepEqual(statusCalls, ['Reconnecting…'], 'plain-string status must still surface');
+  });
+});

@@ -84,10 +84,13 @@ describe('resolveSessionModelPure', () => {
     assert.deepEqual(result, { model: 'haiku', providerId: 'anthropic' });
   });
 
-  it('falls back to sonnet when nothing is available', async () => {
+  it('falls back to the first managed model (not the bare sonnet alias) when nothing else is set', async () => {
     const { resolveSessionModelPure } = await import('../../lib/resolve-session-model');
     const result = resolveSessionModelPure('', '', ctx());
-    assert.deepEqual(result, { model: 'sonnet', providerId: '' });
+    // No session/global/localStorage — use the first real managed provider's
+    // first model (anthropic/sonnet here) WITH its provider id, never a bare
+    // alias paired with an empty provider.
+    assert.deepEqual(result, { model: 'sonnet', providerId: 'anthropic' });
   });
 
   it('skips global default if model not in provider catalog', async () => {
@@ -126,5 +129,27 @@ describe('resolveSessionModelPure', () => {
     }));
     // No group found for anthropic, no global default → localStorage
     assert.deepEqual(result, { model: 'haiku', providerId: 'anthropic' });
+  });
+
+  it('drops a stale env-alias session model not in the managed catalog', async () => {
+    const { resolveSessionModelPure } = await import('../../lib/resolve-session-model');
+    // Session pinned to 'sonnet' but its provider 'openrouter' has no sonnet —
+    // the phantom-model bug. Re-resolve to openrouter's first real model.
+    const result = resolveSessionModelPure('sonnet', 'openrouter', ctx());
+    assert.deepEqual(result, { model: 'gpt-4o', providerId: 'openrouter' });
+  });
+
+  it('keeps an env-alias session model in env mode (no managed provider)', async () => {
+    const { resolveSessionModelPure } = await import('../../lib/resolve-session-model');
+    const result = resolveSessionModelPure('sonnet', 'env', ctx({
+      groups: [{ provider_id: 'env', models: [{ value: 'sonnet' }, { value: 'opus' }] }],
+    }));
+    assert.deepEqual(result, { model: 'sonnet', providerId: 'env' });
+  });
+
+  it('ignores a stale env-alias in localStorage, using the first managed model', async () => {
+    const { resolveSessionModelPure } = await import('../../lib/resolve-session-model');
+    const result = resolveSessionModelPure('', '', ctx({ lsModel: 'opus', lsProvider: '' }));
+    assert.deepEqual(result, { model: 'sonnet', providerId: 'anthropic' });
   });
 });

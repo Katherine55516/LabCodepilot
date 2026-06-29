@@ -180,22 +180,8 @@ export async function assembleContext(config: ContextAssemblyConfig): Promise<As
   const volatileParts: string[] = [];
 
   // [STATIC 1] Widget system prompt (desktop only) — compile-time constant
-  // [GENERATIVE-UI-OFFLINE] Generative UI is temporarily disabled for ALL users.
-  // This gate is OPT-IN (`=== 'true'`); it was opt-out (`!== 'false'`, on-by-default).
-  // Opt-in is deliberate: an overwrite install keeps the user's DB, and the old
-  // check treated empty/unset as ON, so merely changing a default would NOT disable
-  // it for users who never touched the toggle. As the single source of truth, a
-  // `false` result here means no WIDGET_SYSTEM_PROMPT is injected and the
-  // widget-guidelines MCP is not registered, so the model cannot generate widgets.
-  //
-  // ┌─ RESTORE (re-open generative UI to users) — 3 coordinated edits.
-  // │  grep "GENERATIVE-UI-OFFLINE" to jump to all three:
-  // │   1) HERE — change `=== 'true'` back to `!== 'false'` (the line below)
-  // │   2) src/components/settings/GeneralSection.tsx — uncomment the 生成式 UI <FieldRow>
-  // │   3) src/components/layout/UnifiedTopBar.tsx — uncomment the dashboard <Tooltip>
-  // └─ Nothing else to touch: DB key / i18n / types are all left intact.
   const generativeUISetting = getSetting('generative_ui_enabled');
-  const generativeUIEnabled = entryPoint === 'desktop' && generativeUISetting === 'true';
+  const generativeUIEnabled = entryPoint === 'desktop' && generativeUISetting !== 'false';
 
   if (generativeUIEnabled) {
     try {

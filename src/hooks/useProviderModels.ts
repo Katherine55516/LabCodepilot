@@ -102,7 +102,10 @@ export function useProviderModels(
     ? currentGroup.models
     : DEFAULT_MODEL_OPTIONS;
 
-  const currentModelValue = modelName || 'sonnet';
+  // Project to the current provider's first model when the session has no model
+  // (managed mode) rather than the bare 'sonnet' alias, which may not exist in
+  // the managed catalog. env mode keeps sonnet via DEFAULT_MODEL_OPTIONS[0].
+  const currentModelValue = modelName || modelOptions[0]?.value || 'sonnet';
   const currentModelOption = useMemo(
     () => modelOptions.find((m) => m.value === currentModelValue) || modelOptions[0],
     [modelOptions, currentModelValue],

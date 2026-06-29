@@ -189,6 +189,29 @@ function extractTokenUsage(msg: SDKResultMessage): TokenUsage | null {
 }
 
 /**
+ * FIX(占用口径): 从单条 assistant 消息（= 一次模型请求）提取其单次 usage。
+ * 与整轮累计的 result.usage 不同，这是「该次请求的真实 prompt 大小」——
+ * input + cache_read + cache_creation 不含跨内部请求累加，适合作为当前上下文占用。
+ * 探针实测：整轮 result.usage.cacheR 会随回合内 N 次工具调用累加（一次回合 17 次请求
+ * → cacheR 虚高 6.5×），而单条 assistant 请求的值是平的、等于真实驻留量。
+ */
+function extractAssistantTurnUsage(msg: SDKAssistantMessage): TokenUsage | null {
+  const u = msg.message?.usage as {
+    input_tokens?: number;
+    output_tokens?: number;
+    cache_read_input_tokens?: number;
+    cache_creation_input_tokens?: number;
+  } | undefined;
+  if (!u) return null;
+  return {
+    input_tokens: u.input_tokens ?? 0,
+    output_tokens: u.output_tokens ?? 0,
+    cache_read_input_tokens: u.cache_read_input_tokens ?? 0,
+    cache_creation_input_tokens: u.cache_creation_input_tokens ?? 0,
+  };
+}
+
+/**
  * Stream Claude responses using the Agent SDK.
  * Returns a ReadableStream of SSE-formatted strings.
  */
@@ -584,6 +607,7 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
             'mcp__codepilot-cli-tools',
             'mcp__codepilot-dashboard',
             'mcp__playwright',
+            'mcp__codepilot-skill',
           ],
         };
 
@@ -673,6 +697,27 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
           };
           if (queryOptions.systemPrompt && typeof queryOptions.systemPrompt === 'object' && 'append' in queryOptions.systemPrompt) {
             queryOptions.systemPrompt.append = (queryOptions.systemPrompt.append || '') + '\n\n' + NOTIFICATION_MCP_SYSTEM_PROMPT;
+          }
+        }
+
+        // Skill MCP: surfaces PROJECT-level skills/commands to the agent. Under
+        // DB/managed providers the SDK drops the 'project' settingSource, so
+        // skills in <cwd>/.claude/{skills,commands} are otherwise invisible —
+        // whether the user created them in-app or dropped them in manually. This
+        // in-process server reads them directly from disk (provider-independent)
+        // and only registers when the project actually has skills, so projects
+        // without any pay no tool-discovery overhead. See src/lib/skill-mcp.ts.
+        {
+          const { createSkillMcpServer, buildSkillSystemPrompt } = await import('@/lib/skill-mcp');
+          const skillPrompt = buildSkillSystemPrompt(resolvedWorkingDirectory.path);
+          if (skillPrompt) {
+            queryOptions.mcpServers = {
+              ...(queryOptions.mcpServers || {}),
+              'codepilot-skill': createSkillMcpServer(resolvedWorkingDirectory.path),
+            };
+            if (queryOptions.systemPrompt && typeof queryOptions.systemPrompt === 'object' && 'append' in queryOptions.systemPrompt) {
+              queryOptions.systemPrompt.append = (queryOptions.systemPrompt.append || '') + '\n\n' + skillPrompt;
+            }
           }
         }
 
@@ -863,27 +908,18 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
 
         // Permission handler: sends SSE event and waits for user response
         queryOptions.canUseTool = async (toolName, input, opts) => {
-          // Auto-approve AI Native Lab's own in-process MCP tools — they are internal
-          // and the user has already opted in by enabling the relevant mode.
-          // Auto-approve AI Native Lab's own in-process MCP tools — they are internal
-          // and the user has already opted in by enabling the relevant mode.
-          // Note: SDK prefixes MCP tool names with mcp__<server>__, so we check
-          // both bare and prefixed names.
-          const autoApprovedTools = [
-            'codepilot_generate_image',
-            'codepilot_import_media',
-            'codepilot_load_widget_guidelines',
-            'codepilot_cli_tools_list',
-            'codepilot_cli_tools_add',
-            'codepilot_cli_tools_remove',
-            'codepilot_cli_tools_check_updates',
-            'codepilot_dashboard_pin',
-            'codepilot_dashboard_list',
-            'codepilot_dashboard_refresh',
-            'codepilot_dashboard_update',
-            'codepilot_dashboard_remove',
-          ];
-          if (autoApprovedTools.some(t => toolName === t || toolName.endsWith(`__${t}`))) {
+          // Auto-approve ALL of AI Native Lab's own in-process MCP tools. They are
+          // internal capabilities (memory / dashboard / widget / media / image-gen /
+          // cli-tools) and the user has already opted in by enabling the relevant
+          // mode. The SDK prefixes MCP tool names with mcp__<server>__, so match
+          // both the bare name (codepilot_*) and the prefixed form
+          // (mcp__codepilot-*__codepilot_*). This mirrors the native agent-loop
+          // policy (agent-tools.ts: a codepilot_ prefix bypasses the permission
+          // wrapper), keeping both runtimes consistent — and, critically, prevents
+          // any codepilot_ tool (notably codepilot_memory_*, which the old explicit
+          // list omitted) from falling into the ask branch and hanging forever on a
+          // permission prompt the generative-UI flow never surfaces.
+          if (/(?:^|__)codepilot_/.test(toolName)) {
             return { behavior: 'allow' as const, updatedInput: input };
           }
 
@@ -1152,6 +1188,8 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
         let capturePending = !isCacheFresh(capProviderId);
 
         let tokenUsage: TokenUsage | null = null;
+        // FIX(占用口径): 最后一条 assistant 请求的单次 usage（= 当前上下文真实占用基线）。
+        let lastAssistantUsage: TokenUsage | null = null;
         // Track pending TodoWrite tool_use_ids so we can sync after successful execution
         const pendingTodoWrites = new Map<string, Array<{ content: string; status: string; activeForm?: string }>>();
         for await (const message of conversation) {
@@ -1169,6 +1207,9 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
                 });
               }
               const assistantMsg = message as SDKAssistantMessage;
+              // FIX(占用口径): 记录最新一条 assistant 请求的单次 usage，回合结束用它覆盖累计值。
+              const turnUsage = extractAssistantTurnUsage(assistantMsg);
+              if (turnUsage) lastAssistantUsage = turnUsage;
               // Text deltas are handled by stream_event for real-time streaming.
               // Here we only process tool_use blocks.
 
@@ -1413,6 +1454,13 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
             case 'result': {
               const resultMsg = message as SDKResultMessage;
               tokenUsage = extractTokenUsage(resultMsg);
+              // FIX(占用口径): 用最后一条 assistant 请求的单次 usage 覆盖占用字段，避免整轮
+              // 累计 result.usage 的 cache_read 跨内部请求累加导致虚高（实测一个回合内
+              // cache_read 随工具调用次数累加，可虚高数倍——卡片曾因此一轮就“打满”窗口）。
+              // cost_usd 仍取整轮累计（整轮总成本）。无 assistant usage 时回退到累计值。
+              if (lastAssistantUsage) {
+                tokenUsage = { ...lastAssistantUsage, cost_usd: tokenUsage?.cost_usd };
+              }
               // terminal_reason is an optional field added in SDK 0.2.111.
               // When present, it enriches the end-of-turn UI chip (Phase 1 of
               // agent-sdk-0-2-111-adoption) without replacing error-classifier.

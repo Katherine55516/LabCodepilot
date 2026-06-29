@@ -117,6 +117,13 @@ export interface CommandBadge {
   description: string;
   kind: SkillKind;
   installedSource?: 'agents' | 'claude';
+  /**
+   * Scope of the skill this badge represents. Carried from the popover item so
+   * the submit path can expand project-scoped slash commands client-side
+   * (project commands are not loaded by the SDK under DB/managed providers —
+   * see message-input-logic.ts expandSkillBody and MessageInput handleSubmit).
+   */
+  source?: 'global' | 'project' | 'plugin' | 'installed' | 'sdk';
 }
 
 /** Active CLI tool badge shown above the textarea. */
@@ -452,6 +459,113 @@ export interface MarketplaceSkill {
 export interface SkillLockFile {
   version: number;
   skills: Record<string, SkillLockEntry>;
+}
+
+// ── MCP 市场 ───────────────────────────────────────────────────────────
+
+/** MCP 市场列表/详情卡片的归一化 DTO（数据源：官方 Registry / Glama 兜底）。 */
+export interface MarketplaceMcpServer {
+  /** 完整反向 DNS 名，如 `ai.agenttrust/mcp-server`（唯一标识）。 */
+  name: string;
+  title?: string;
+  description?: string;
+  version?: string;
+  /** 命名空间（name 中 `/` 之前），如 `ai.agenttrust`。 */
+  namespace: string;
+  /** 'github' = io.github.* GitHub 验证；'domain' = 反向域名验证。 */
+  namespaceKind: 'github' | 'domain';
+  hasPackages: boolean;
+  hasRemotes: boolean;
+  /** 可用的本地包类型，如 ['npm']。 */
+  registryTypes: string[];
+  /** 可用的远程传输类型，如 ['streamable-http']。 */
+  remoteTypes: string[];
+  repositoryUrl?: string;
+  /** registry 状态：active / deprecated / deleted。 */
+  status?: string;
+  /** 数据源。 */
+  source: 'official' | 'glama';
+  /** 是否已安装（按 ledger + ~/.claude.json 现存校验）。 */
+  isInstalled?: boolean;
+  /** 已安装时在 mcpServers 里的 key。 */
+  installedKey?: string;
+  /** 安装时记录的版本（Phase 3 版本变更复查）。 */
+  installedVersion?: string;
+  /** 注册中心 latest 比安装时版本更新 → 提示更新前复查（rug-pull 防线）。 */
+  updateAvailable?: boolean;
+  /** 信任评估（Phase 2 安全加固）。 */
+  trust?: McpTrustAssessment;
+}
+
+// ── MCP 安全/信任（Phase 2） ────────────────────────────────────────────
+
+/**
+ * 信任 tier —— 只陈述「可验证的来源事实」，不代表安全。
+ * official-reviewed: 官方目录已审（手维护白名单）；
+ * namespace-verified: 命名空间已验证（github / 反向域名，官方 Registry 默认满足）；
+ * community: 无额外背书（Glama 等兜底源）。
+ */
+export type McpTrustTier = 'official-reviewed' | 'namespace-verified' | 'community';
+
+/** 风险标记 —— 启发式提示，不是「不安全」判定。 */
+export interface McpRiskFlag {
+  /** 规则码，如 'shell-exec' | 'dangerous-command' | 'network-fetch-exec' | 'sensitive-path' | 'unpinned-version' | 'no-repository' | 'secret-injected'。 */
+  code: string;
+  /** 人类可读细节（命中的 token / 字段）。 */
+  detail: string;
+  severity: 'warn' | 'high';
+}
+
+/** 一个 MCP 的纵深信任评估（不含 isSafe）。 */
+export interface McpTrustAssessment {
+  tier: McpTrustTier;
+  /** 正面可验证信号。 */
+  signals: string[];
+  /** 风险提示。 */
+  risks: McpRiskFlag[];
+  /** 命中已知恶意黑名单 → 硬拦。 */
+  blocked: boolean;
+  blockReason?: string;
+  /** 安装对话框摩擦力：normal 正常 / extra-confirm 强制勾选 / blocked 禁止。 */
+  friction: 'normal' | 'extra-confirm' | 'blocked';
+}
+
+/** 运行时预检结果（Phase 2b）：stdio server 需要的运行时是否就绪。 */
+export interface McpRuntimeRequirement {
+  /** 运行时类别。 */
+  kind: 'node' | 'uv' | 'docker' | 'dotnet' | 'unknown';
+  /** 实际要执行的命令（npx / uvx / docker …）。 */
+  command: string;
+  /** 展示名（Node.js / uv / Docker / .NET）。 */
+  name: string;
+  /** 安装指引链接。 */
+  url?: string;
+  /** 是否在 PATH（含扩展目录）中检测到。 */
+  available: boolean;
+}
+
+/** 已知恶意/漏洞黑名单条目。 */
+export interface McpDenylistEntry {
+  /** 包类型；省略 = 任意。 */
+  registryType?: string;
+  /** 包标识（npm/pypi 包名、oci 镜像名，不含 tag/version）。 */
+  identifier: string;
+  /** 版本区间（'>=1.0.16' / '<0.1.16' / 精确 '1.2.3'）；省略 = 所有版本。 */
+  versionRange?: string;
+  reason: string;
+  /** 公告/参考链接。 */
+  ref?: string;
+}
+
+/** 市场安装台账条目（记录 marketplace server → 本地 mcpServers key 的来源映射）。 */
+export interface McpMarketInstallEntry {
+  /** mcpServers 里的 key。 */
+  key: string;
+  version?: string;
+  source: 'official' | 'glama';
+  installedAt: string;
+  /** 该 server 写入的密钥 settingKey 列表（卸载时一并清除）。 */
+  secretKeys?: string[];
 }
 
 export interface SkillLockEntry {

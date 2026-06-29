@@ -94,15 +94,16 @@ export function AttachFileButton() {
  * from the file tree and adds the file as a proper attachment (capsule).
  * Uses /api/files/raw to fetch the real file binary, preserving type and content.
  */
-export function FileTreeAttachmentBridge() {
+export function FileTreeAttachmentBridge({ sessionId }: { sessionId?: string }) {
   const attachments = usePromptInputAttachments();
 
   const handleAttach = useCallback(async (filePath: string) => {
     try {
       const res = await fetch(`/api/files/raw?path=${encodeURIComponent(filePath)}`);
       if (!res.ok) {
-        // Fallback: insert as @mention if the raw API fails
-        window.dispatchEvent(new CustomEvent('insert-file-mention', { detail: { path: filePath } }));
+        // Fallback: insert as @mention if the raw API fails (keep it scoped to
+        // this pane via targetSessionId so split mode doesn't fan out).
+        window.dispatchEvent(new CustomEvent('insert-file-mention', { detail: { path: filePath, targetSessionId: sessionId } }));
         return;
       }
       const blob = await res.blob();
@@ -113,21 +114,26 @@ export function FileTreeAttachmentBridge() {
       attachments.add([file]);
     } catch {
       // Fallback: insert as @mention if fetch fails
-      window.dispatchEvent(new CustomEvent('insert-file-mention', { detail: { path: filePath } }));
+      window.dispatchEvent(new CustomEvent('insert-file-mention', { detail: { path: filePath, targetSessionId: sessionId } }));
     }
-  }, [attachments]);
+  }, [attachments, sessionId]);
 
   useEffect(() => {
     const handler = (e: Event) => {
-      const customEvent = e as CustomEvent<{ path: string }>;
-      const filePath = customEvent.detail?.path;
+      const customEvent = e as CustomEvent<{ path: string; targetSessionId?: string }>;
+      const detail = customEvent.detail;
+      const filePath = detail?.path;
       if (!filePath) return;
+      // Split mode: only the active pane (matching targetSessionId) attaches.
+      // A missing targetSessionId, or a bridge without its own sessionId (new
+      // chat / single pane), means "no specific target" → still handle it.
+      if (detail.targetSessionId && sessionId && detail.targetSessionId !== sessionId) return;
       handleAttach(filePath);
     };
 
     window.addEventListener('attach-file-to-chat', handler);
     return () => window.removeEventListener('attach-file-to-chat', handler);
-  }, [handleAttach]);
+  }, [handleAttach, sessionId]);
 
   return null;
 }

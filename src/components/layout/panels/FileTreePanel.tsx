@@ -19,7 +19,7 @@ const TREE_DEFAULT_WIDTH = 280;
 type NewItemMode = "file" | "folder";
 
 export function FileTreePanel() {
-  const { workingDirectory, previewFile, setPreviewFile, setPreviewOpen, setFileTreeOpen } = usePanel();
+  const { workingDirectory, previewFile, setPreviewFile, setPreviewOpen, setFileTreeOpen, sessionId } = usePanel();
   const { t } = useTranslation();
   const searchParams = useSearchParams();
   const [width, setWidth] = useState(TREE_DEFAULT_WIDTH);
@@ -67,8 +67,12 @@ export function FileTreePanel() {
   }, []);
 
   const handleFileAdd = useCallback((path: string) => {
-    window.dispatchEvent(new CustomEvent("attach-file-to-chat", { detail: { path } }));
-  }, []);
+    // Tag the active session so in split mode only the focused pane (the one
+    // with the blue border) receives the file — not every visible conversation.
+    // PanelContext.sessionId always tracks the active/selected session (set by
+    // the single-pane page and by the active SplitColumn).
+    window.dispatchEvent(new CustomEvent("attach-file-to-chat", { detail: { path, targetSessionId: sessionId } }));
+  }, [sessionId]);
 
   /**
    * Open the new-item input in the given mode, targeting a specific

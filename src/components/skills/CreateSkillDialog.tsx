@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   Dialog,
   DialogContent,
@@ -12,14 +12,31 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { SpinnerGap, Globe, FolderOpen } from "@/components/ui/icon";
 import { useTranslation } from "@/hooks/useTranslation";
 import { cn } from "@/lib/utils";
+import type { SkillProject } from "./SkillsManager";
 
 interface CreateSkillDialogProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onCreate: (name: string, scope: "global" | "project", content: string) => Promise<void>;
+  onCreate: (
+    name: string,
+    scope: "global" | "project",
+    content: string,
+    projectCwd?: string
+  ) => Promise<void>;
+  /** All projects in the app (conversation groups). Project scope targets one. */
+  projects: SkillProject[];
+  /** Working directory of the current conversation's project, pre-selected. */
+  defaultProjectCwd?: string;
 }
 
 const TEMPLATES: { label: string; content: string }[] = [
@@ -57,13 +74,29 @@ export function CreateSkillDialog({
   open,
   onOpenChange,
   onCreate,
+  projects,
+  defaultProjectCwd,
 }: CreateSkillDialogProps) {
   const { t } = useTranslation();
+  const hasProjects = projects.length > 0;
   const [name, setName] = useState("");
-  const [scope, setScope] = useState<"global" | "project">("project");
+  const [scope, setScope] = useState<"global" | "project">(hasProjects ? "project" : "global");
+  const [projectCwd, setProjectCwd] = useState<string>("");
   const [templateIdx, setTemplateIdx] = useState(0);
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState("");
+
+  // On open: reset scope (project only if projects exist) and pre-select the
+  // current conversation's project if it's among the list, else the first one.
+  useEffect(() => {
+    if (!open) return;
+    setScope(hasProjects ? "project" : "global");
+    const preferred =
+      defaultProjectCwd && projects.some((p) => p.cwd === defaultProjectCwd)
+        ? defaultProjectCwd
+        : projects[0]?.cwd || "";
+    setProjectCwd(preferred);
+  }, [open, hasProjects, defaultProjectCwd, projects]);
 
   const handleCreate = async () => {
     const trimmed = name.trim();
@@ -75,14 +108,23 @@ export function CreateSkillDialog({
       setError(t('skills.nameInvalid'));
       return;
     }
+    if (scope === "project" && !projectCwd) {
+      setError(t('skills.selectProjectRequired'));
+      return;
+    }
 
     setCreating(true);
     setError("");
     try {
-      await onCreate(trimmed, scope, TEMPLATES[templateIdx].content);
+      await onCreate(
+        trimmed,
+        scope,
+        TEMPLATES[templateIdx].content,
+        scope === "project" ? projectCwd : undefined
+      );
       // Reset on success
       setName("");
-      setScope("project");
+      setScope(hasProjects ? "project" : "global");
       setTemplateIdx(0);
       onOpenChange(false);
     } catch (err) {
@@ -129,12 +171,14 @@ export function CreateSkillDialog({
             <div className="flex gap-2">
               <Button
                 variant="outline"
-                onClick={() => setScope("project")}
+                disabled={!hasProjects}
+                onClick={() => hasProjects && setScope("project")}
                 className={cn(
                   "flex-1 justify-start",
                   scope === "project"
                     ? "border-primary/50 bg-primary/10 text-primary"
-                    : "border-border hover:bg-accent"
+                    : "border-border hover:bg-accent",
+                  !hasProjects && "opacity-50 cursor-not-allowed"
                 )}
               >
                 <FolderOpen size={16} />
@@ -154,10 +198,31 @@ export function CreateSkillDialog({
                 {t('skills.global')}
               </Button>
             </div>
+
+            {/* Project picker — only for project scope */}
+            {scope === "project" && hasProjects && (
+              <div className="pt-1">
+                <Select value={projectCwd} onValueChange={setProjectCwd}>
+                  <SelectTrigger className="w-full h-9 text-sm">
+                    <SelectValue placeholder={t('skills.selectProject')} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {projects.map((p) => (
+                      <SelectItem key={p.cwd} value={p.cwd}>
+                        <span className="truncate" title={p.cwd}>{p.name}</span>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
             <p className="text-xs text-muted-foreground">
-              {scope === "project"
-                ? "Saved in .claude/commands/ (this project only)"
-                : "Saved in ~/.claude/commands/ (available everywhere)"}
+              {!hasProjects
+                ? "No project available — saved globally in ~/.claude/commands/ (available everywhere)"
+                : scope === "project"
+                  ? "Saved in the selected project's .claude/commands/ (that project only)"
+                  : "Saved in ~/.claude/commands/ (available everywhere)"}
             </p>
           </div>
 

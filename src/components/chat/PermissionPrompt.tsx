@@ -23,6 +23,7 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { CaretDown, CaretLeft, X } from '@phosphor-icons/react';
 import { cn } from '@/lib/utils';
 import type { ToolUIPart } from 'ai';
 import type { PermissionRequestEvent } from '@/types';
@@ -45,13 +46,25 @@ interface PermissionPromptProps {
 const MAX_INPUT_LINES = 8;
 const MAX_INPUT_CHARS = 500;
 
+/** Bottom permission panel resize bounds: min drag height (px) and max as a
+ *  fraction of the viewport height. */
+const MIN_PANEL_HEIGHT = 120;
+const MAX_PANEL_HEIGHT_RATIO = 0.85;
+
 function AskUserQuestionUI({
   toolInput,
   onSubmit,
+  collapsed,
+  onToggleCollapse,
+  onClose,
 }: {
   toolInput: Record<string, unknown>;
   onSubmit: (decision: 'allow', updatedInput: Record<string, unknown>) => void;
+  collapsed: boolean;
+  onToggleCollapse: () => void;
+  onClose: () => void;
 }) {
+  const { t } = useTranslation();
   const questions = (toolInput.questions || []) as Array<{
     question: string;
     options: Array<{ label: string; description?: string }>;
@@ -59,120 +72,212 @@ function AskUserQuestionUI({
     header?: string;
   }>;
 
-  const [selections, setSelections] = useState<Record<string, Set<string>>>({});
-  const [otherTexts, setOtherTexts] = useState<Record<string, string>>({});
-  const [useOther, setUseOther] = useState<Record<string, boolean>>({});
+  // One question per screen (Claude-desktop style). `current` is the page index;
+  // selections / otherTexts / useOther are keyed by question index so answers
+  // persist when paging back and forth.
+  const [current, setCurrent] = useState(0);
+  const [selections, setSelections] = useState<Record<number, Set<string>>>({});
+  const [otherTexts, setOtherTexts] = useState<Record<number, string>>({});
+  const [useOther, setUseOther] = useState<Record<number, boolean>>({});
 
-  const toggleOption = (qIdx: string, label: string, multi: boolean) => {
+  const total = questions.length;
+  const q = questions[current];
+  const isLast = current >= total - 1;
+  const isMulti = !!q?.multiSelect;
+
+  const selectOption = (label: string) => {
     setSelections((prev) => {
-      const current = new Set(prev[qIdx] || []);
-      if (multi) {
-        if (current.has(label)) { current.delete(label); } else { current.add(label); }
+      const cur = new Set(prev[current] || []);
+      if (isMulti) {
+        if (cur.has(label)) cur.delete(label); else cur.add(label);
       } else {
-        current.clear();
-        current.add(label);
+        cur.clear();
+        cur.add(label);
       }
-      return { ...prev, [qIdx]: current };
+      return { ...prev, [current]: cur };
     });
-    setUseOther((prev) => ({ ...prev, [qIdx]: false }));
+    setUseOther((prev) => ({ ...prev, [current]: false }));
   };
 
-  const toggleOther = (qIdx: string, multi: boolean) => {
-    if (!multi) {
-      setSelections((prev) => ({ ...prev, [qIdx]: new Set() }));
-    }
-    setUseOther((prev) => ({ ...prev, [qIdx]: !prev[qIdx] }));
+  const selectOther = () => {
+    if (!isMulti) setSelections((prev) => ({ ...prev, [current]: new Set() }));
+    setUseOther((prev) => ({ ...prev, [current]: !prev[current] }));
   };
 
-  const handleSubmit = () => {
+  // Collect answers from EVERY question (not just the current page). Unanswered
+  // questions are omitted so the model can tell what the user actually chose.
+  const submitAll = () => {
     const answers: Record<string, string> = {};
-    questions.forEach((q, i) => {
-      const qIdx = String(i);
-      const selected = Array.from(selections[qIdx] || []);
-      if (useOther[qIdx] && otherTexts[qIdx]?.trim()) {
-        selected.push(otherTexts[qIdx].trim());
-      }
-      answers[q.question] = selected.join(', ');
+    questions.forEach((qq, i) => {
+      const sel = Array.from(selections[i] || []);
+      if (useOther[i] && otherTexts[i]?.trim()) sel.push(otherTexts[i].trim());
+      if (sel.length > 0) answers[qq.question] = sel.join(', ');
     });
     onSubmit('allow', { questions: toolInput.questions, answers });
   };
 
-  // Require ALL questions to be answered before enabling Submit.
-  // `some` would allow partial submissions where unanswered questions
-  // produce empty-string answers — the model would continue as if the
-  // interview completed when it actually didn't.
-  const hasAnswer = questions.length > 0 && questions.every((_, i) => {
-    const qIdx = String(i);
-    return (selections[qIdx]?.size || 0) > 0 || (useOther[qIdx] && !!otherTexts[qIdx]?.trim());
-  });
+  const curAnswered =
+    (selections[current]?.size || 0) > 0 ||
+    (!!useOther[current] && !!otherTexts[current]?.trim());
+
+  // Skip and Next/Submit both advance; the only difference is that Next/Submit
+  // is disabled on the last page until it's answered, while Skip always works.
+  const goNext = () => {
+    if (isLast) submitAll();
+    else setCurrent((c) => Math.min(total - 1, c + 1));
+  };
+  const goPrev = () => setCurrent((c) => Math.max(0, c - 1));
+
+  // Keyboard: 1..N pick the matching option, N+1 toggles Other, Enter advances.
+  // Digits are ignored while typing in the Other box so the field works normally.
+  useEffect(() => {
+    if (collapsed || !q) return;
+    const onKey = (e: KeyboardEvent) => {
+      const el = document.activeElement;
+      const typing = el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement;
+      if (e.key === 'Enter' && !typing) {
+        if (!isLast || curAnswered) { e.preventDefault(); goNext(); }
+        return;
+      }
+      if (typing) return;
+      const n = parseInt(e.key, 10);
+      if (Number.isNaN(n)) return;
+      if (n >= 1 && n <= q.options.length) { e.preventDefault(); selectOption(q.options[n - 1].label); }
+      else if (n === q.options.length + 1) { e.preventDefault(); selectOther(); }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [collapsed, current, q, curAnswered, isLast]);
+
+  if (!q) return null;
+
+  const header = (
+    <div className="flex items-center gap-2 px-4 pt-3 pb-2 shrink-0">
+      {total > 1 ? (
+        <span className="shrink-0 rounded bg-muted px-1.5 py-0.5 text-[11px] font-medium tabular-nums text-muted-foreground">
+          {current + 1}/{total}
+        </span>
+      ) : (
+        <span className="h-2 w-2 shrink-0 rounded-full bg-primary/70" />
+      )}
+      <span className="flex-1 truncate text-sm font-semibold">{q.question}</span>
+      <button
+        type="button"
+        onClick={onToggleCollapse}
+        aria-label={t('permissionPrompt.collapse')}
+        className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+      >
+        <CaretDown size={16} className={cn('transition-transform', collapsed && 'rotate-180')} />
+      </button>
+      <button
+        type="button"
+        onClick={onClose}
+        aria-label={t('permissionPrompt.close')}
+        className="shrink-0 rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+      >
+        <X size={16} />
+      </button>
+    </div>
+  );
+
+  if (collapsed) return <div className="flex flex-col">{header}</div>;
+
+  const selected = selections[current] || new Set<string>();
 
   return (
-    <div className="space-y-4 py-2">
-      {questions.map((q, i) => {
-        const qIdx = String(i);
-        const selected = selections[qIdx] || new Set<string>();
-        return (
-          <div key={qIdx} className="space-y-2">
-            {q.header && (
-              <span className="inline-block rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">
-                {q.header}
-              </span>
-            )}
-            <p className="text-sm font-medium">{q.question}</p>
-            <div className="flex flex-wrap gap-2">
-              {q.options.map((opt) => {
-                const isSelected = selected.has(opt.label);
-                return (
-                  <Button
-                    key={opt.label}
-                    variant="outline"
-                    size="sm"
-                    onClick={() => toggleOption(qIdx, opt.label, q.multiSelect)}
-                    className={isSelected
-                      ? 'border-primary bg-primary/10 text-primary'
-                      : 'border-border bg-background text-foreground hover:bg-muted'
-                    }
-                    title={opt.description}
-                  >
-                    {q.multiSelect && (
-                      <span className="mr-1.5">{isSelected ? '☑' : '☐'}</span>
-                    )}
-                    {opt.label}
-                  </Button>
-                );
-              })}
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => toggleOther(qIdx, q.multiSelect)}
-                className={useOther[qIdx]
-                  ? 'border-primary bg-primary/10 text-primary'
-                  : 'border-border bg-background text-foreground hover:bg-muted'
-                }
+    <div className="flex min-h-0 flex-1 flex-col">
+      {header}
+
+      {/* Options — vertical rows: label + description + number badge */}
+      <div className="min-h-0 flex-1 overflow-y-auto px-4">
+        <div className="space-y-1.5 py-1">
+          {q.options.map((opt, i) => {
+            const isSel = selected.has(opt.label);
+            return (
+              <button
+                type="button"
+                key={opt.label}
+                onClick={() => selectOption(opt.label)}
+                className={cn(
+                  'flex w-full items-center gap-3 rounded-lg px-4 py-3 text-left transition-colors',
+                  isSel ? 'bg-primary/10 ring-1 ring-inset ring-primary/40' : 'bg-muted/40 hover:bg-muted/70',
+                )}
               >
-                Other
-              </Button>
-            </div>
-            {useOther[qIdx] && (
-              <Input
-                type="text"
-                placeholder="Type your answer..."
-                value={otherTexts[qIdx] || ''}
-                onChange={(e) => setOtherTexts((prev) => ({ ...prev, [qIdx]: e.target.value }))}
-                className="text-xs"
-                autoFocus
-              />
+                <div className="min-w-0 flex-1">
+                  <div className={cn('text-sm font-medium', isSel ? 'text-primary' : 'text-foreground')}>
+                    {opt.label}
+                  </div>
+                  {opt.description && (
+                    <div className="mt-0.5 break-words text-xs text-muted-foreground">{opt.description}</div>
+                  )}
+                </div>
+                <span className="shrink-0 rounded border border-border bg-background px-1.5 py-0.5 text-[11px] tabular-nums text-muted-foreground">
+                  {i + 1}
+                </span>
+              </button>
+            );
+          })}
+
+          {/* Other — free-text answer */}
+          <button
+            type="button"
+            onClick={selectOther}
+            className={cn(
+              'flex w-full items-center gap-3 rounded-lg px-4 py-3 text-left transition-colors',
+              useOther[current] ? 'bg-primary/10 ring-1 ring-inset ring-primary/40' : 'bg-muted/40 hover:bg-muted/70',
             )}
-          </div>
-        );
-      })}
-      <Button
-        onClick={handleSubmit}
-        disabled={!hasAnswer}
-        size="sm"
-      >
-        Submit
-      </Button>
+          >
+            <div className={cn('flex-1 text-sm font-medium', useOther[current] ? 'text-primary' : 'text-foreground')}>
+              {t('permissionPrompt.other')}
+            </div>
+            <span className="shrink-0 rounded border border-border bg-background px-1.5 py-0.5 text-[11px] tabular-nums text-muted-foreground">
+              {q.options.length + 1}
+            </span>
+          </button>
+          {useOther[current] && (
+            <Input
+              type="text"
+              placeholder={t('permissionPrompt.otherPlaceholder')}
+              value={otherTexts[current] || ''}
+              onChange={(e) => setOtherTexts((prev) => ({ ...prev, [current]: e.target.value }))}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && curAnswered) { e.preventDefault(); goNext(); }
+              }}
+              className="text-sm"
+              autoFocus
+            />
+          )}
+        </div>
+      </div>
+
+      {/* Footer — Back (paging) on the left, Skip + Next/Submit on the right */}
+      <div className="flex items-center gap-2 border-t border-border/60 px-4 py-2.5 shrink-0">
+        {current > 0 && (
+          <button
+            type="button"
+            onClick={goPrev}
+            aria-label={t('permissionPrompt.back')}
+            className="rounded p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+          >
+            <CaretLeft size={16} />
+          </button>
+        )}
+        <div className="ml-auto flex items-center gap-2">
+          <Button variant="outline" size="sm" onClick={goNext} className="text-xs">
+            {t('permissionPrompt.skip')}
+          </Button>
+          <Button
+            size="sm"
+            onClick={goNext}
+            disabled={isLast && !curAnswered}
+            className="gap-1.5 text-xs"
+          >
+            {isLast ? t('permissionPrompt.submit') : t('permissionPrompt.next')}
+            <span className="text-[11px] opacity-70">↵</span>
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -204,6 +309,7 @@ function ExitPlanModeUI({
   onDeny: () => void;
   onDenyWithMessage: (message: string) => void;
 }) {
+  const { t } = useTranslation();
   const [planOpen, setPlanOpen] = useState(false);
   const [planContent, setPlanContent] = useState<string | null>(null);
   const [planLoading, setPlanLoading] = useState(false);
@@ -218,11 +324,11 @@ function ExitPlanModeUI({
     <div className="space-y-3 rounded-lg border border-primary/30 bg-primary/5 p-4">
       <div className="flex items-center gap-2">
         <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="text-primary"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
-        <span className="text-sm font-medium">Plan complete — ready to execute</span>
+        <span className="text-sm font-medium">{t('permissionPrompt.planReady')}</span>
       </div>
       {allowedPrompts.length > 0 && (
         <div className="space-y-1">
-          <p className="text-xs text-muted-foreground">Requested permissions:</p>
+          <p className="text-xs text-muted-foreground">{t('permissionPrompt.requestedPermissions')}</p>
           <ul className="space-y-0.5">
             {allowedPrompts.map((p, i) => (
               <li key={i} className="flex items-center gap-1.5 text-xs text-muted-foreground">
@@ -240,7 +346,7 @@ function ExitPlanModeUI({
           onClick={onDeny}
           className="text-xs"
         >
-          Reject
+          {t('permissionPrompt.reject')}
         </Button>
         {planFilePath && (
           <Button
@@ -252,12 +358,12 @@ function ExitPlanModeUI({
                 const res = await fetch(`/api/files/preview?path=${encodeURIComponent(planFilePath)}&maxLines=1000`);
                 if (res.ok) {
                   const data = await res.json();
-                  setPlanContent(data.preview?.content || 'Failed to load plan');
+                  setPlanContent(data.preview?.content || t('permissionPrompt.planLoadFailed'));
                 } else {
-                  setPlanContent('Failed to load plan file');
+                  setPlanContent(t('permissionPrompt.planLoadFailed'));
                 }
               } catch {
-                setPlanContent('Failed to load plan file');
+                setPlanContent(t('permissionPrompt.planLoadFailed'));
               }
               setPlanLoading(false);
               setPlanOpen(true);
@@ -265,7 +371,7 @@ function ExitPlanModeUI({
             disabled={planLoading}
             className="border-primary/30 text-xs text-primary hover:bg-primary/10"
           >
-            {planLoading ? 'Loading...' : 'View Plan'}
+            {planLoading ? t('permissionPrompt.loadingPlan') : t('permissionPrompt.viewPlan')}
           </Button>
         )}
         <Button
@@ -273,13 +379,13 @@ function ExitPlanModeUI({
           onClick={onApprove}
           className="text-xs"
         >
-          Approve & Execute
+          {t('permissionPrompt.approveExecute')}
         </Button>
       </div>
       <div className="flex gap-2">
         <Input
           type="text"
-          placeholder="Provide feedback on the plan..."
+          placeholder={t('permissionPrompt.feedbackPlaceholder')}
           value={feedback}
           onChange={(e) => setFeedback(e.target.value)}
           onKeyDown={(e) => {
@@ -298,7 +404,7 @@ function ExitPlanModeUI({
           disabled={!feedback.trim()}
           className="text-xs"
         >
-          Do this instead
+          {t('permissionPrompt.doThisInstead')}
         </Button>
       </div>
 
@@ -306,7 +412,7 @@ function ExitPlanModeUI({
         <Dialog open={planOpen} onOpenChange={setPlanOpen}>
           <DialogContent className="max-w-4xl h-[80vh] flex flex-col">
             <DialogHeader>
-              <DialogTitle>Plan</DialogTitle>
+              <DialogTitle>{t('permissionPrompt.planTitle')}</DialogTitle>
             </DialogHeader>
             <div className="overflow-y-auto flex-1 min-h-0">
               <MessageResponse>{planContent}</MessageResponse>
@@ -323,6 +429,7 @@ function ExitPlanModeUI({
  * Collapsible tool input display with truncation for long content.
  */
 function ToolInputDisplay({ input }: { input: Record<string, unknown> }) {
+  const { t } = useTranslation();
   const [expanded, setExpanded] = useState(false);
 
   const formatToolInput = (inp: Record<string, unknown>): string => {
@@ -372,7 +479,7 @@ function ToolInputDisplay({ input }: { input: Record<string, unknown> }) {
           onClick={() => setExpanded(!expanded)}
           className="w-full border-t border-border/30 px-3 py-1 text-[10px] text-muted-foreground hover:bg-muted/80 transition-colors"
         >
-          {expanded ? '▲ Collapse' : '▼ Show more'}
+          {expanded ? `▲ ${t('permissionPrompt.collapse')}` : `▼ ${t('permissionPrompt.showMore')}`}
         </button>
       )}
     </div>
@@ -387,6 +494,51 @@ export function PermissionPrompt({
   permissionProfile,
 }: PermissionPromptProps) {
   const { t } = useTranslation();
+
+  // Drag-to-resize for the bottom panel. `panelHeight === null` means auto
+  // (content height, capped at 50vh). Dragging the top edge switches to an
+  // explicit pixel height (capped at 85vh) so a long question list can be
+  // enlarged to read in full, or shrunk to free the conversation above it.
+  const panelRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<{ startY: number; startH: number } | null>(null);
+  const [panelHeight, setPanelHeight] = useState<number | null>(null);
+  // AskUserQuestion can collapse to just its header (caret in the panel header).
+  const [panelCollapsed, setPanelCollapsed] = useState(false);
+
+  // A new permission request resets height + collapse, so state dragged/toggled
+  // for the previous prompt doesn't carry over to an unrelated one.
+  useEffect(() => {
+    setPanelHeight(null);
+    setPanelCollapsed(false);
+  }, [pendingPermission?.permissionRequestId]);
+
+  const handleResizeDown = (e: React.PointerEvent) => {
+    const el = panelRef.current;
+    if (!el) return;
+    e.preventDefault();
+    dragRef.current = { startY: e.clientY, startH: el.getBoundingClientRect().height };
+    (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
+    document.body.style.cursor = 'ns-resize';
+    document.body.style.userSelect = 'none';
+  };
+
+  const handleResizeMove = (e: React.PointerEvent) => {
+    if (!dragRef.current) return;
+    // Handle sits on top of a bottom-anchored panel: dragging up (smaller
+    // clientY) grows it, dragging down shrinks it.
+    const delta = dragRef.current.startY - e.clientY;
+    const maxH = window.innerHeight * MAX_PANEL_HEIGHT_RATIO;
+    const next = Math.min(maxH, Math.max(MIN_PANEL_HEIGHT, dragRef.current.startH + delta));
+    setPanelHeight(next);
+  };
+
+  const handleResizeUp = (e: React.PointerEvent) => {
+    if (!dragRef.current) return;
+    dragRef.current = null;
+    (e.currentTarget as HTMLElement).releasePointerCapture(e.pointerId);
+    document.body.style.cursor = '';
+    document.body.style.userSelect = '';
+  };
 
   // Tools that require user interaction even in full_access mode.
   // AskUserQuestion's entire purpose is to get user input — auto-approving
@@ -441,8 +593,35 @@ export function PermissionPrompt({
     return { id: pendingPermission?.permissionRequestId || '' };
   };
 
+  const isAskQuestion = pendingPermission?.toolName === 'AskUserQuestion' && !isResolved;
+  const askCollapsed = isAskQuestion && panelCollapsed;
+  const showResizeHandle = !!pendingPermission && !isResolved && !askCollapsed;
+
   return (
-    <div className="mx-auto w-full max-w-3xl border-t border-border bg-background px-4 py-3 max-h-[50vh] overflow-y-auto">
+    <div
+      ref={panelRef}
+      className="relative mx-auto flex w-full max-w-3xl flex-col overflow-hidden border-t border-border bg-background"
+      style={askCollapsed
+        ? { maxHeight: 'none' }
+        : panelHeight != null && showResizeHandle
+          ? { height: panelHeight, maxHeight: `${MAX_PANEL_HEIGHT_RATIO * 100}vh` }
+          : { maxHeight: '50vh' }}
+    >
+      {showResizeHandle && (
+        <div
+          role="separator"
+          aria-orientation="horizontal"
+          title={t('permissionPrompt.resizeHint')}
+          aria-label={t('permissionPrompt.resizeHint')}
+          onPointerDown={handleResizeDown}
+          onPointerMove={handleResizeMove}
+          onPointerUp={handleResizeUp}
+          className="group flex h-3 shrink-0 cursor-ns-resize touch-none items-center justify-center"
+        >
+          <div className="h-1 w-10 rounded-full bg-border transition-colors group-hover:bg-muted-foreground/50" />
+        </div>
+      )}
+      <div className={isAskQuestion ? 'flex min-h-0 flex-1 flex-col' : 'flex-1 overflow-y-auto px-4 pb-3 pt-1'}>
       {/* ExitPlanMode */}
       {pendingPermission?.toolName === 'ExitPlanMode' && !isResolved && (
         <ExitPlanModeUI
@@ -454,10 +633,10 @@ export function PermissionPrompt({
         />
       )}
       {pendingPermission?.toolName === 'ExitPlanMode' && permissionResolved === 'allow' && (
-        <p className="py-1 text-xs text-status-success-foreground">Plan approved — executing</p>
+        <p className="py-1 text-xs text-status-success-foreground">{t('permissionPrompt.planApproved')}</p>
       )}
       {pendingPermission?.toolName === 'ExitPlanMode' && permissionResolved === 'deny' && (
-        <p className="py-1 text-xs text-status-error-foreground">Plan rejected</p>
+        <p className="py-1 text-xs text-status-error-foreground">{t('permissionPrompt.planRejected')}</p>
       )}
 
       {/* AskUserQuestion */}
@@ -465,10 +644,16 @@ export function PermissionPrompt({
         <AskUserQuestionUI
           toolInput={pendingPermission.toolInput as Record<string, unknown>}
           onSubmit={(decision, updatedInput) => onPermissionResponse(decision, updatedInput)}
+          collapsed={panelCollapsed}
+          onToggleCollapse={() => setPanelCollapsed((c) => !c)}
+          onClose={() => onPermissionResponse('allow', {
+            questions: (pendingPermission.toolInput as Record<string, unknown>).questions,
+            answers: {},
+          })}
         />
       )}
       {pendingPermission?.toolName === 'AskUserQuestion' && isResolved && (
-        <p className="py-1 text-xs text-status-success-foreground">Answer submitted</p>
+        <p className="py-1 text-xs text-status-success-foreground">{t('permissionPrompt.answerSubmitted')}</p>
       )}
 
       {/* Generic confirmation for other tools — only show when not yet resolved */}
@@ -494,13 +679,13 @@ export function PermissionPrompt({
                 variant="outline"
                 onClick={() => onPermissionResponse('deny')}
               >
-                Deny
+                {t('permissionPrompt.deny')}
               </ConfirmationAction>
               <ConfirmationAction
                 variant="outline"
                 onClick={() => onPermissionResponse('allow')}
               >
-                Allow Once
+                {t('permissionPrompt.allowOnce')}
               </ConfirmationAction>
               {pendingPermission.suggestions && pendingPermission.suggestions.length > 0 && (
                 <ConfirmationAction
@@ -532,6 +717,7 @@ export function PermissionPrompt({
           {permissionResolved === 'allow' ? t('streaming.allowed') : t('streaming.denied')}
         </p>
       )}
+      </div>
     </div>
   );
 }

@@ -160,7 +160,13 @@ export async function checkForUpdates(): Promise<UpdaterStatusEvent> {
   try {
     const result = await checkUpdateV2(params);
     const meta = metaFromCheck(result);
-    if (meta) {
+    const installed = app.getVersion();
+    // Defensive client-side guard: only surface an update when the server's
+    // latest is STRICTLY newer than the installed build. The server's has_update
+    // can be true while latest_version is older or equal to what's installed
+    // (e.g. a local / manual build ahead of the version the platform currently
+    // hosts) — in that case we must NOT prompt, let alone force, a "downgrade".
+    if (meta && isNewerVersion(meta.version, installed)) {
       current = meta;
       pushStatus(availableEvent(meta));
       if (
@@ -177,7 +183,13 @@ export async function checkForUpdates(): Promise<UpdaterStatusEvent> {
       readyPath = null;
       return lastStatus ?? availableEvent(meta);
     }
-    // Server says no update — discard any stale cache and report.
+    if (meta) {
+      logInfo(
+        `[updater] server offered ${meta.version} but installed ${installed} is newer or equal — ignoring`,
+      );
+    }
+    // No applicable update (server reported none, or offered a non-newer
+    // version) — discard any stale cache and report.
     current = null;
     if (cachedInstaller) dropCache();
     const ev: UpdaterStatusEvent = { status: 'not-available' };

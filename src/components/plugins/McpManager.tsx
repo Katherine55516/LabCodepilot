@@ -8,9 +8,11 @@ import { Plus, List, Code, SpinnerGap, ArrowsClockwise, WifiHigh } from "@/compo
 import { McpServerList } from "@/components/plugins/McpServerList";
 import { McpServerEditor } from "@/components/plugins/McpServerEditor";
 import { ConfigEditor } from "@/components/plugins/ConfigEditor";
+import { McpMarketplaceBrowser } from "@/components/plugins/McpMarketplaceBrowser";
 import { useTranslation } from "@/hooks/useTranslation";
 import type { TranslationKey } from "@/i18n";
 import type { MCPServer } from "@/types";
+import { cn } from "@/lib/utils";
 
 interface McpRuntimeStatus {
   name: string;
@@ -28,6 +30,7 @@ export function McpManager() {
   const [editingName, setEditingName] = useState<string | undefined>();
   const [editingServer, setEditingServer] = useState<MCPServer | undefined>();
   const [tab, setTab] = useState<"list" | "json">("list");
+  const [viewTab, setViewTab] = useState<"local" | "marketplace">("local");
   const [error, setError] = useState<string | null>(null);
   const [runtimeStatus, setRuntimeStatus] = useState<McpRuntimeStatus[]>([]);
   const [runtimeLoading, setRuntimeLoading] = useState(false);
@@ -231,8 +234,6 @@ export function McpManager() {
     }
   }
 
-  const serverCount = Object.keys(servers).length;
-
   return (
     <div className="flex h-full flex-col">
       {/* Fixed header */}
@@ -241,23 +242,45 @@ export function McpManager() {
           <div>
             <h1 className="text-xl font-semibold">
               {t('extensions.mcpServers')}
-              {serverCount > 0 && (
-                <span className="text-sm font-normal text-muted-foreground ml-2">
-                  ({serverCount})
-                </span>
-              )}
             </h1>
-            <p className="text-sm text-muted-foreground mt-1">
-              {t('mcp.managerDesc' as TranslationKey)}
-            </p>
+            {viewTab === "marketplace" && (
+              <p className="text-sm text-muted-foreground mt-1">
+                {t('mcp.marketDesc' as TranslationKey)}
+              </p>
+            )}
           </div>
-          <Button size="sm" className="gap-1" onClick={handleAdd}>
-            <Plus size={14} />
-            {t('mcp.addServer')}
+        </div>
+        {/* Segmented control: 我的 MCP | MCP 市场 */}
+        <div className="flex items-center bg-muted rounded-md p-0.5 mt-3 w-fit">
+          <Button
+            variant="ghost"
+            size="sm"
+            className={cn(
+              "px-3 py-1 text-xs font-medium rounded h-auto",
+              viewTab === "local" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+            )}
+            onClick={() => setViewTab("local")}
+          >
+            {t('mcp.myMcp')}
+          </Button>
+          <Button
+            variant="ghost"
+            size="sm"
+            className={cn(
+              "px-3 py-1 text-xs font-medium rounded h-auto",
+              viewTab === "marketplace" ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
+            )}
+            onClick={() => setViewTab("marketplace")}
+          >
+            {t('mcp.market')}
           </Button>
         </div>
       </div>
 
+      {viewTab === "marketplace" ? (
+        <McpMarketplaceBrowser onInstalled={fetchServers} />
+      ) : (
+      <>
       {/* Scrollable content */}
       <div className="flex-1 overflow-y-auto p-6">
 
@@ -268,16 +291,26 @@ export function McpManager() {
       )}
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as "list" | "json")}>
-        <TabsList>
-          <TabsTrigger value="list" className="gap-1.5">
-            <List size={14} />
-            {t('mcp.listTab')}
-          </TabsTrigger>
-          <TabsTrigger value="json" className="gap-1.5">
-            <Code size={14} />
-            {t('mcp.jsonTab')}
-          </TabsTrigger>
-        </TabsList>
+        <div className="flex items-center justify-between">
+          <TabsList>
+            <TabsTrigger value="list" className="gap-1.5">
+              <List size={14} />
+              {t('mcp.listTab')}
+            </TabsTrigger>
+            <TabsTrigger value="json" className="gap-1.5">
+              <Code size={14} />
+              {t('mcp.jsonTab')}
+            </TabsTrigger>
+          </TabsList>
+          <Button size="sm" className="gap-1" onClick={handleAdd}>
+            <Plus size={14} />
+            {t('mcp.addServer')}
+          </Button>
+        </div>
+
+        <p className="text-sm text-muted-foreground mt-3">
+          {t('mcp.managerDesc' as TranslationKey)}
+        </p>
 
         <TabsContent value="list" className="mt-4">
           {loading ? (
@@ -380,6 +413,8 @@ export function McpManager() {
         onSave={handleSave}
       />
       </div>
+      </>
+      )}
     </div>
   );
 }

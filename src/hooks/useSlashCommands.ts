@@ -142,6 +142,12 @@ export function useSlashCommands(opts: {
       if (sdkCommandNames.size > 0 || sdkSkillNames.size > 0) {
         apiSkills = apiSkills.filter(item => {
           if (item.builtInPlugin) return true;
+          // Project-scoped skills/commands are dropped from the SDK's
+          // settingSources under DB/managed providers, so they never appear in
+          // sdkCommandNames/sdkSkillNames. Keep them in the popover regardless —
+          // they are invoked via client-side expansion (slash commands) or the
+          // codepilot-skill MCP (agent skills), not native SDK resolution.
+          if (item.source === 'project') return true;
           if (item.kind === 'agent_skill') return sdkSkillNames.has(item.label);
           return sdkCommandNames.has(item.label);
         });

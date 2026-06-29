@@ -88,7 +88,7 @@ function getToolGroups(options: { workspacePath?: string }): BuiltinToolGroup[] 
       name: 'codepilot-dashboard',
       systemPrompt: DASHBOARD_SYSTEM_PROMPT,
       condition: 'always',
-      tools: createDashboardTools(),
+      tools: createDashboardTools(options.workspacePath),
     });
   } catch { /* module not available */ }
 

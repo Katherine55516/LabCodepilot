@@ -209,8 +209,21 @@ function handleSSEEvent(
           });
           return accumulated;
         }
+        // step_complete — agent-loop 的 onStepFinish 在每个 step 结束时发出，
+        // 仅携带 usage/finishReason/toolsUsed，不含任何可显示文案。token 用量
+        // 已由下方的 'result' 事件统一上报，前端没有该事件的消费者，故在此静默
+        // 丢弃。否则它会落入下面的 else 兜底，被原样当作状态文案显示在执行状态
+        // 行（曾导致原始 step_complete JSON 直接打印到界面的回归）。
+        if (statusData.subtype === 'step_complete') {
+          return accumulated;
+        }
         if (statusData.session_id) {
-          callbacks.onStatus(`Connected (${statusData.requested_model || statusData.model || 'claude'})`);
+          // Don't surface bare env aliases (sonnet/opus/haiku) — in managed
+          // deployments they aren't real catalog models. Show the model only
+          // when it's a real (non-alias) value; otherwise just "Connected".
+          const m = statusData.requested_model || statusData.model || '';
+          const isEnvAlias = m === 'sonnet' || m === 'opus' || m === 'haiku';
+          callbacks.onStatus(m && !isEnvAlias ? `Connected (${m})` : 'Connected');
           callbacks.onInitMeta?.({
             tools: statusData.tools,
             slash_commands: statusData.slash_commands,
@@ -226,8 +239,12 @@ function handleSSEEvent(
           // whitelist without duplicating the toast import logic.
           maybeShowStatusToast(statusData);
           callbacks.onStatus(statusData.message || statusData.title || undefined);
-        } else {
-          callbacks.onStatus(typeof event.data === 'string' ? event.data : undefined);
+        } else if (typeof statusData === 'string') {
+          // 仅当 payload 本身是纯字符串状态文案时才显示。能 JSON.parse 成结构化
+          // 对象、却不匹配上述任何已知类型的 status 事件（如未来新增的带 subtype
+          // 事件），不应被当作人类可读文案——原样透传会把原始 JSON 打印到执行
+          // 状态行。这类结构化对象在此静默忽略。
+          callbacks.onStatus(statusData || undefined);
         }
       } catch {
         callbacks.onStatus(event.data || undefined);

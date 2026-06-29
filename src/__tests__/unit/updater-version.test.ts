@@ -70,4 +70,14 @@ describe('isNewerVersion', () => {
     assert.equal(isNewerVersion('0.55.0', '0.55.1'), false);
     assert.equal(isNewerVersion('0.55.2', '0.55.1'), true);
   });
+
+  it('does not offer an update when the hosted release is older or equal (update-checker downgrade guard)', () => {
+    // Repro: a local/manual install is ahead of the version the platform
+    // currently hosts. checkForUpdates() in electron/updater/index.ts gates the
+    // "available" prompt on isNewerVersion(latest, app.getVersion()), so these
+    // must be false — no prompt, and certainly no forced "must upgrade".
+    assert.equal(isNewerVersion('2.1.0', '2.2.0'), false); // hosted older than installed
+    assert.equal(isNewerVersion('2.2.0', '2.2.0'), false); // hosted equal to installed
+    assert.equal(isNewerVersion('2.3.0', '2.2.0'), true);  // genuine upgrade still offered
+  });
 });
