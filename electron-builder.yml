@@ -105,6 +105,13 @@ extraResources:
   - from: electron/login/
     to: login/
     filter: ["**/*"]
+  # 获取登录态抓取窗口的工具条静态资源。由
+  # electron/test-auth-capture/capture-window.ts:getToolbarHtmlPath() 在打包模式下经
+  # path.join(process.resourcesPath, 'test-auth-capture', 'toolbar.html') 加载。
+  # ⚠️ 只复制静态资源 —— 不要用 **/*，否则会把 capture-window.ts 源码一并打进 Resources。
+  - from: electron/test-auth-capture/
+    to: test-auth-capture/
+    filter: ["*.html", "*.css", "*.js"]
   # Bundled GSD (gsd-build/get-shit-done, MIT) — packed at build time by
   # `npm run vendor:gsd`. Loaded by electron/gsd-installer.ts at first launch
   # (and on version drift) which copies it into

@@ -278,19 +278,21 @@ interface ElectronAPI {
    * docs/handover/test-account-settings.md。
    */
   testAuthCapture?: {
-    /** 打开抓取窗口并导航到 frontendBaseUrl，best-effort 预填用户名/密码（不自动提交）。 */
+    /**
+     * 打开抓取窗口（BaseWindow + 顶部工具条 + 下方第三方站点），导航到 frontendBaseUrl，
+     * best-effort 预填用户名/密码（不自动提交）。projectRoot/env/accountKey/systemLabel
+     * 在此固化，供工具条「登录完成」就地写盘 + 工具条显示。
+     */
     start: (params: {
       frontendBaseUrl: string;
       username?: string;
       password?: string;
-    }) => Promise<{ ok: boolean; prefilled?: boolean; error?: string }>;
-    /** 用户登录完成后调用：抓取并把 storageState 写入文件，返回 cookie/origin 计数。 */
-    finish: (params: {
       projectRoot: string;
       env: string;
       accountKey: string;
-    }) => Promise<{ ok: boolean; path?: string; origins?: number; cookies?: number; error?: string }>;
-    /** 取消并关闭抓取窗口。 */
+      systemLabel?: string;
+    }) => Promise<{ ok: boolean; prefilled?: boolean; error?: string }>;
+    /** 程序化取消并关闭抓取窗口（静默，不触发 onCancelled）。 */
     cancel: () => Promise<{ ok: boolean }>;
     /** 查询某账号是否已捕获（storageState 文件是否存在）。 */
     status: (params: {
@@ -304,6 +306,16 @@ interface ElectronAPI {
       env: string;
       accountKey: string;
     }) => Promise<{ ok: boolean; error?: string }>;
+    /** 工具条内部用：就地抓取写盘（用 start 时固化的目标）。抓到空返回 ok:false 且不关窗。 */
+    toolbarFinish: () => Promise<{ ok: boolean; path?: string; origins?: number; cookies?: number; env?: string; accountKey?: string; capturedAt?: string; error?: string }>;
+    /** 工具条内部用：用户取消并关窗（触发 onCancelled）。 */
+    toolbarCancel: () => Promise<{ ok: boolean }>;
+    /** 工具条内部用：接收主进程下发的抓取目标（系统 · 环境 · 账号），返回取消订阅函数。 */
+    onToolbarInit: (cb: (data: { systemLabel: string; env: string; accountKey: string }) => void) => () => void;
+    /** 设置页订阅：抓取写盘完成（徽章变绿）。返回取消订阅函数。 */
+    onDone: (cb: (data: { env: string; accountKey: string; path: string; cookies: number; origins: number; capturedAt: string }) => void) => () => void;
+    /** 设置页订阅：用户取消或关窗。返回取消订阅函数。 */
+    onCancelled: (cb: (data: { env: string; accountKey: string }) => void) => () => void;
   };
 }
 

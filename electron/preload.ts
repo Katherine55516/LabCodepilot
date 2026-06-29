@@ -180,17 +180,43 @@ contextBridge.exposeInMainWorld('electronAPI', {
   app: {
     quit: () => ipcRenderer.invoke('app:quit'),
   },
-  // Test Accounts — 获取登录态 capture (opens a BrowserWindow, harvests
-  // cookies + localStorage into a Playwright storageState file). Electron-only.
+  // Test Accounts — 获取登录态 capture. Opens an isolated window (BaseWindow +
+  // toolbar/site WebContentsView) and harvests cookies + localStorage into a
+  // Playwright storageState file. The in-window toolbar finishes/cancels via the
+  // toolbar* methods; the settings page listens for onDone/onCancelled. Electron-only.
   testAuthCapture: {
-    start: (params: { frontendBaseUrl: string; username?: string; password?: string }) =>
-      ipcRenderer.invoke('test-auth-capture:start', params),
-    finish: (params: { projectRoot: string; env: string; accountKey: string }) =>
-      ipcRenderer.invoke('test-auth-capture:finish', params),
+    start: (params: {
+      frontendBaseUrl: string;
+      username?: string;
+      password?: string;
+      projectRoot: string;
+      env: string;
+      accountKey: string;
+      systemLabel?: string;
+    }) => ipcRenderer.invoke('test-auth-capture:start', params),
     cancel: () => ipcRenderer.invoke('test-auth-capture:cancel'),
     status: (params: { projectRoot: string; env: string; accountKey: string }) =>
       ipcRenderer.invoke('test-auth-capture:status', params),
     clear: (params: { projectRoot: string; env: string; accountKey: string }) =>
       ipcRenderer.invoke('test-auth-capture:clear', params),
+    // 工具条内部用（toolbar.js）：就地完成 / 取消当前抓取会话。
+    toolbarFinish: () => ipcRenderer.invoke('test-auth-capture:toolbar-finish'),
+    toolbarCancel: () => ipcRenderer.invoke('test-auth-capture:toolbar-cancel'),
+    onToolbarInit: (callback: (data: unknown) => void) => {
+      const listener = (_event: unknown, data: unknown) => callback(data);
+      ipcRenderer.on('test-auth-capture:toolbar-init', listener);
+      return () => { ipcRenderer.removeListener('test-auth-capture:toolbar-init', listener); };
+    },
+    // 设置页订阅：抓取写盘完成 / 用户取消（含关窗）。
+    onDone: (callback: (data: unknown) => void) => {
+      const listener = (_event: unknown, data: unknown) => callback(data);
+      ipcRenderer.on('test-auth-capture:done', listener);
+      return () => { ipcRenderer.removeListener('test-auth-capture:done', listener); };
+    },
+    onCancelled: (callback: (data: unknown) => void) => {
+      const listener = (_event: unknown, data: unknown) => callback(data);
+      ipcRenderer.on('test-auth-capture:cancelled', listener);
+      return () => { ipcRenderer.removeListener('test-auth-capture:cancelled', listener); };
+    },
   },
 });
