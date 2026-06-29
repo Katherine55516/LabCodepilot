@@ -261,8 +261,8 @@ function toConversationHistory(convo: ConvoMsg[]): { role: "user" | "assistant";
 }
 
 // 问题6：删任务/项目时一并删除该任务的磁盘报告产物（best-effort，失败不阻断 UI 删除）。
-function deleteTaskReports(projectPath: string, taskName: string) {
-  void fetch("/api/test/reports/delete", {
+async function deleteTaskReports(projectPath: string, taskName: string): Promise<void> {
+  await fetch("/api/test/reports/delete", {
     method: "DELETE",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ projectPath, taskName }),
@@ -310,6 +310,8 @@ export function InlineTestingPanel() {
   // 真对话里 AI 通过 @@ACTION 行建议重跑某步 → 存这里 → composer 上方渲染确认条，
   // 用户点「运行此步」才真正 runStepManual（不自动跑，重跑会覆盖产物且耗时）。
   const [pendingAction, setPendingAction] = useState<{ step: TestStep; reason: string } | null>(null);
+  // 报告 tab 刷新信号：删任务的磁盘报告删完后 bump，让 ReportBrowser 二次拉取（避开时序竞争）。
+  const [reportsReload, setReportsReload] = useState(0);
   // Simulated progress % for non-execution running steps (no granular progress) — see effect below.
   const [simPct, setSimPct] = useState(0);
   const threadRef = useRef<HTMLDivElement>(null);
@@ -1280,7 +1282,7 @@ export function InlineTestingPanel() {
     if (!tk) return;
     setDeleteTarget({ kind: "task", pIdx: selected, tIdx, name: tk.name, running: runningTaskIds.has(tk.id) });
   };
-  const confirmDelete = () => {
+  const confirmDelete = async () => {
     if (!deleteTarget) return;
     const { kind, pIdx, tIdx, running } = deleteTarget;
     if (running) {
@@ -1291,10 +1293,11 @@ export function InlineTestingPanel() {
           : ([projects[pIdx]?.tasks[tIdx!]?.id].filter(Boolean) as string[]);
       for (const vid of victims) stopTask(vid);
     }
+    // 问题6：先收集要删报告的 (项目路径, 任务名)，UI 删除会改 projects，必须在删之前读。
+    const toDelete: { path: string; name: string }[] = [];
     if (kind === "project") {
       const proj = projects[pIdx];
-      // 问题6：删项目 → 一并删除该项目所有任务的磁盘报告产物。
-      if (proj?.path) for (const tk of proj.tasks) deleteTaskReports(proj.path, tk.name);
+      if (proj?.path) for (const tk of proj.tasks) toDelete.push({ path: proj.path, name: tk.name });
       const ids = new Set((proj?.tasks ?? []).map((tk) => tk.id));
       setTaskStates((m) => { const n = { ...m }; ids.forEach((id) => delete n[id]); return n; });
       setProjects((ps) => ps.filter((_, i) => i !== pIdx));
@@ -1303,14 +1306,19 @@ export function InlineTestingPanel() {
     } else {
       const proj = projects[pIdx];
       const tk = proj?.tasks[tIdx!];
-      // 问题6：删任务 → 一并删除该任务的磁盘报告产物。
-      if (proj?.path && tk) deleteTaskReports(proj.path, tk.name);
+      if (proj?.path && tk) toDelete.push({ path: proj.path, name: tk.name });
       if (tk) setTaskStates((m) => { const n = { ...m }; delete n[tk.id]; return n; });
       setProjects((ps) => ps.map((p, i) => (i === pIdx ? { ...p, tasks: p.tasks.filter((_, j) => j !== tIdx) } : p)));
       if (selected === pIdx && selectedTask === tIdx) { setSelectedTask(null); setView("dash"); }
       else if (selected === pIdx && selectedTask !== null && selectedTask > tIdx!) setSelectedTask(selectedTask - 1);
     }
     setDeleteTarget(null);
+    // 问题6 时序修复：磁盘报告删【完成后】再刷新报告 tab。否则 setProjects 触发的 ReportBrowser
+    // re-fetch 可能早于 DELETE 完成、又扫到没删的报告（用户报「删任务后报告还在」的根因）。
+    if (toDelete.length) {
+      await Promise.all(toDelete.map((r) => deleteTaskReports(r.path, r.name)));
+      setReportsReload((n) => n + 1);
+    }
   };
 
   // Approve a human-gated step (待批准 → 已完成) 并推进:批准后主动运行下一阶段。
@@ -1931,10 +1939,14 @@ export function InlineTestingPanel() {
                             className={`flex w-full flex-col gap-3 rounded-xl border bg-card p-3.5 text-left transition-colors hover:border-primary/50 hover:bg-muted/40 ${sel ? "border-primary" : "border-border"}`}
                           >
                             <div className="flex items-start justify-between gap-2">
-                              <span className="truncate pl-6 pt-0.5 text-sm font-medium text-foreground">{tk.name}</span>
+                              {/* 标签放标题行（taskName 旁），不占右列额外一行 —— 否则导入用例卡片
+                                  会比普通卡片高一行，grid 同行被撑高导致任务列表高度参差。 */}
+                              <div className="flex min-w-0 items-center gap-1.5 pl-6 pt-0.5">
+                                <span className="truncate text-sm font-medium text-foreground">{tk.name}</span>
+                                {st.imported?.cases && <span className="shrink-0 rounded-full bg-primary/15 px-1.5 py-0.5 text-[9px] font-medium text-primary">{t("test.task.importedTag")}</span>}
+                              </div>
                               <div className="flex shrink-0 flex-col items-end gap-0.5">
                                 <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${badge.cls}`}>{badge.text}</span>
-                                {st.imported?.cases && <span className="rounded-full bg-primary/15 px-2 py-0.5 text-[10px] font-medium text-primary">{t("test.task.importedTag")}</span>}
                                 <span className="text-[10px] text-muted-foreground">{taskStageName(st, t)}</span>
                               </div>
                             </div>
@@ -1975,6 +1987,7 @@ export function InlineTestingPanel() {
                 model={model}
                 providerId={providerId}
                 onOpenTask={(pIdx, tIdx) => { setSelected(pIdx); setSelectedTask(tIdx); setView("flow"); }}
+                reloadSignal={reportsReload}
               />
             )}
           </div>
@@ -2857,7 +2870,7 @@ function XlsxPreview({ t, projectPath, taskName, env, onClose }: {
 // 报告 view: browse persisted reports by 项目 → 任务 → 环境. A task can have multiple
 // reports (one per env); each row expands to the full ReportView. Reads from disk via
 // GET /api/test/reports (per project).
-function ReportBrowser({ projects, t, model, providerId, onOpenTask }: { projects: Project[]; t: T; model: string; providerId: string; onOpenTask: (projectIndex: number, taskIndex: number) => void }) {
+function ReportBrowser({ projects, t, model, providerId, onOpenTask, reloadSignal }: { projects: Project[]; t: T; model: string; providerId: string; onOpenTask: (projectIndex: number, taskIndex: number) => void; reloadSignal: number }) {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [groups, setGroups] = useState<{ project: Project; reports: ReportEntry[] }[]>([]);
@@ -2955,7 +2968,7 @@ function ReportBrowser({ projects, t, model, providerId, onOpenTask }: { project
       setLoading(false);
     });
     return () => { cancelled = true; };
-  }, [projects, reloadTick]);
+  }, [projects, reloadTick, reloadSignal]);
 
   if (loading) return <p className="mt-6 text-center text-[11px] text-muted-foreground">{t("test.report.loading")}</p>;
   if (!groups.length) return <EmptyState icon={ChartBar} text={t("test.reportEmpty")} />;
