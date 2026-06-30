@@ -18,7 +18,7 @@
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import { anlcodePath, getAnlcodeDir } from './paths';
-import type { ModelConfig } from './types';
+import type { ImageProviderConfig, ModelConfig } from './types';
 import { logWarn } from './log';
 import { seal, open, isSealed, getKey } from './crypto-seal';
 
@@ -115,6 +115,38 @@ export function loadConfigsHash(): string | null {
   } catch {
     return null;
   }
+}
+
+// ── Image config (文生图凭证下发离线缓存) ─────────────────────────────────────
+
+/**
+ * 缓存下发的百炼文生图配置。含 apiKey（明文，已在 client 解密），整体 crypto-seal
+ * 加密落盘。供网络失败时降级使用（同 configs 的离线策略）。
+ */
+export function saveImageConfig(cfg: ImageProviderConfig): void {
+  fs.writeFileSync(anlcodePath('imageConfig'), seal(JSON.stringify(cfg), getKey()), 'utf-8');
+}
+
+export function loadImageConfig(): ImageProviderConfig | null {
+  try {
+    const raw = fs.readFileSync(anlcodePath('imageConfig'), 'utf-8').trim();
+    const key = getKey();
+    const json = open(raw, key);
+    if (!json) return null; // 解密失败/空 → 触发重新拉取
+    const parsed = JSON.parse(json) as ImageProviderConfig;
+    if (!parsed || typeof parsed !== 'object') return null;
+    // 静默迁移：老明文 → 重写为密文
+    if (key && !isSealed(raw)) {
+      try { saveImageConfig(parsed); } catch { /* best effort */ }
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+export function clearImageConfig(): void {
+  safeUnlink(anlcodePath('imageConfig'));
 }
 
 // ── Selected Config ──────────────────────────────────────────────────────────

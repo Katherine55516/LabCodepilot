@@ -59,6 +59,36 @@ export interface UsageInfo {
   quota_per_unit: number;
 }
 
+// ── /api/v1/image/config response (文生图凭证下发) ───────────────────────────
+
+/** 文生图页可选模型的一项；服务端下发，客户端不硬编码。 */
+export interface ImageModelOption {
+  /** 模型 id（如 qwen-image-2.0-pro），直接作为生成请求的 model */
+  id: string;
+  /** 展示名（如「通义万相 2.0 Pro」）；缺省时前端回退用 id */
+  label: string;
+  /** 是否默认选中（与顶层 model 一致） */
+  default?: boolean;
+}
+
+/**
+ * 百炼文生图配置——本期全局一份，所有登录用户下发相同内容。
+ * `/encrypted` 变体里 apiKey 为密文（同 configs 的 auth_token），客户端解密后使用。
+ * apiKey 永不出主进程 + 嵌入式 Next 服务，绝不下行 renderer。
+ */
+export interface ImageProviderConfig {
+  /** 百炼 DashScope key（image scope，sk-...）。空串=未配置/未登录 */
+  apiKey: string;
+  /** 百炼工作空间 id（ws-...），用作端点子域 */
+  workspaceId: string;
+  /** 默认模型 id */
+  model: string;
+  /** DashScope MaaS region，如 cn-beijing */
+  region: string;
+  /** 文生图页可选模型列表 */
+  models: ImageModelOption[];
+}
+
 // ── /api/v1/me response ────────────────────────────────────────────────────
 
 export interface MeInfo {

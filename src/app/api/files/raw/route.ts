@@ -130,6 +130,13 @@ export async function GET(request: NextRequest) {
   const ext = path.extname(resolved).toLowerCase();
   const contentType = MIME_TYPES[ext] || 'application/octet-stream';
 
+  // Content-Disposition 的 filename 必须是 latin1（ByteString）——中文等非 ASCII
+  // 文件名直接放进 header 会抛 "Cannot convert argument to a ByteString"。用
+  // RFC 5987：ASCII 回退名走 filename=，原始 UTF-8 名走 filename*=UTF-8''<pct-encoded>。
+  const basename = path.basename(resolved);
+  const asciiFallback = basename.replace(/[^\x20-\x7E]/g, '_').replace(/["\\]/g, '');
+  const contentDisposition = `inline; filename="${asciiFallback}"; filename*=UTF-8''${encodeURIComponent(basename)}`;
+
   // Stream large files (>10 MB) to avoid buffering into memory
   const MAX_BUFFERED_SIZE = 10 * 1024 * 1024;
 
@@ -152,7 +159,7 @@ export async function GET(request: NextRequest) {
       headers: {
         'Content-Type': contentType,
         'Content-Length': String(stat.size),
-        'Content-Disposition': `inline; filename="${path.basename(resolved)}"`,
+        'Content-Disposition': contentDisposition,
       },
     });
   }
@@ -162,7 +169,7 @@ export async function GET(request: NextRequest) {
   return new Response(buffer, {
     headers: {
       'Content-Type': contentType,
-      'Content-Disposition': `inline; filename="${path.basename(resolved)}"`,
+      'Content-Disposition': contentDisposition,
     },
   });
 }

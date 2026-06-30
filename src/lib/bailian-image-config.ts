@@ -24,6 +24,13 @@ import { getSetting, setSetting } from '@/lib/db';
 
 const SETTING_KEY = 'bailian_image_config';
 
+/** 文生图页可选模型的一项；由账号服务端下发。 */
+export interface ImageModelOption {
+  id: string;
+  label: string;
+  default?: boolean;
+}
+
 export interface BailianImageConfig {
   /** DashScope API key (sk-...). Image generation uses a key with image scope. */
   apiKey: string;
@@ -33,14 +40,20 @@ export interface BailianImageConfig {
   model: string;
   /** DashScope region for the MaaS endpoint host, e.g. 'cn-beijing'. */
   region: string;
+  /** 文生图页可选模型列表（账号下发；为空时前端回退仅显示默认 model）。 */
+  models: ImageModelOption[];
 }
 
+const DEFAULT_IMAGE_MODEL = process.env.BAILIAN_IMAGE_MODEL || 'qwen-image-2.0-pro';
+
 const BAILIAN_IMAGE_DEFAULTS: BailianImageConfig = {
-  // Injected at build time via next.config env — never hardcoded in source.
+  // dev/自测兜底：仍读 BAILIAN_IMAGE_* env；正式 release 走账号下发覆盖（见
+  // docs/exec-plans/active/image-model-managed-delivery-client.md）。
   apiKey: process.env.BAILIAN_IMAGE_API_KEY || '',
   workspaceId: process.env.BAILIAN_IMAGE_WORKSPACE_ID || 'ws-10a6dp04so0g3te6',
-  model: process.env.BAILIAN_IMAGE_MODEL || 'qwen-image-2.0-pro',
+  model: DEFAULT_IMAGE_MODEL,
   region: process.env.BAILIAN_IMAGE_REGION || 'cn-beijing',
+  models: [{ id: DEFAULT_IMAGE_MODEL, label: DEFAULT_IMAGE_MODEL, default: true }],
 };
 
 /**
@@ -61,6 +74,9 @@ export function getBailianImageConfig(): BailianImageConfig {
       workspaceId: parsed.workspaceId || BAILIAN_IMAGE_DEFAULTS.workspaceId,
       model: parsed.model || BAILIAN_IMAGE_DEFAULTS.model,
       region: parsed.region || BAILIAN_IMAGE_DEFAULTS.region,
+      // 账号下发后 models 由服务端决定；显式空数组（已下发但无模型）也尊重，
+      // 仅在字段缺失（老数据/从未下发）时回退默认。
+      models: Array.isArray(parsed.models) ? parsed.models : BAILIAN_IMAGE_DEFAULTS.models,
     };
   } catch {
     return { ...BAILIAN_IMAGE_DEFAULTS };
@@ -72,4 +88,16 @@ export function setBailianImageConfig(patch: Partial<BailianImageConfig>): Baili
   const next = { ...getBailianImageConfig(), ...patch };
   setSetting(SETTING_KEY, JSON.stringify(next));
   return next;
+}
+
+/**
+ * 清空下发的图片配置（登出 / 401）。写入全空标记：apiKey 空 → 文生图触发
+ * NoImageProviderError（登录态降级）。dev 下若设了 BAILIAN_IMAGE_* env，getter 仍会
+ * 用 env 兜底回填——属本地自测便利，打包 release 无 env 故真正清空。
+ */
+export function clearBailianImageConfig(): void {
+  setSetting(
+    SETTING_KEY,
+    JSON.stringify({ apiKey: '', workspaceId: '', model: '', region: '', models: [] } satisfies BailianImageConfig),
+  );
 }

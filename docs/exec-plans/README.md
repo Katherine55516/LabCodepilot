@@ -65,10 +65,17 @@
 | active/test-account-settings.md | 测试账号设置：设置内新增多系统测试账号面板（系统下拉 + local/SIT 标签 + 密码/token/获取登录态），导出到 AI_LabTest `environments.json` + `.auth/` storageState，Electron BrowserWindow 抓取登录态 | Phase 0 完成，Phase 1-6 待开始 |
 | active/test-report-display-and-evidence.md | 测试报告就地展示 + 产物预览 + 缺陷结构化 + 执行端接口/录像采集：报告节点完成后工作台流程页展示「概览+产物列表+内嵌全文」，md 渲染/编辑、xlsx 表格、证据截图+录像（每用例一段、留 fail/partial）、缺陷报告结构化模板、`@@RESULT` 加 `api` 字段穿透 run.json | Phase 0-6 代码完成（typecheck/单测 + CDP mock 验证通过），录像/接口真跑 POC 待验证 |
 | active/test-multitask-parallel-execution.md | 测试工作台多任务并行执行：看板多选 + 批量执行（强制无头）+ 并发数 1–5（本机设置）+ 客户端排队（running/waiting 槽位调度）+ 执行前登录态预检（storageState 存在性/过期）；编排去单例化（busyTaskId/abortRef/autoRunRef → 按任务集合） | Phase 0 完成，Phase 1-5 进行中 |
+| active/uploads-storage-relocation.md | 上传附件（截图/@文件）存储从用户工作目录迁到统一缓存 `~/.codepilot/` + 存储治理（会话级联清理 + 容量/TTL）+ `/api/uploads` 锚定根校验 + 存量迁移；连带 `.codepilot-images` 同迁 | Phase 0 完成，Phase 1-6 待开始 |
+| active/mcp-marketplace.md | MCP 市场（对照技能市场）：接官方 Registry + Glama 兜底，server.json→MCPServerConfig 确定性映射，一键安装（prefetch 预热 + 安全确认屏障 + 密钥钥匙串），复用 `~/.claude.json` 写入链路 | Phase 0 完成（POC），Phase 1 进行中，Phase 2-4 待开始 |
+| active/skills-discovery-fix.md | 技能创建与发现修复（应用内创建 + 手动拖入）：列表显示项目级 + 项目徽章、Option C 项目斜杠命令客户端展开、codepilot-skill in-process MCP 让 agent 自主发现项目技能（绕开 settingSources，全服务商一致） | Phase 1/Option C/根治/Phase 3/测试 全部完成；Phase 4 原生对齐待立项 |
+| active/btw-side-question.md | `/btw` 会话内临时问答浮层（对标 Claude Code CLI /btw）：无状态端点 native generateText（无工具/不取锁/不落库）+ 前端 `/btw <arg>` 解析 + BtwDialog 浮层 + 前端内存上下文快照（含 in-flight），主对话流式期间不打断 | Phase 0 完成，Phase 1-6 待开始 |
+| active/image-model-managed-delivery-client.md | **文生图模型账号下发（客户端层）**：去编译期 key 注入，改登录后服务端下发百炼凭证+模型列表；以 `settings.bailian_image_config` 落地（不进 api_providers，结构上隔离对话下拉框），复刻 ASR 下发范式 + broker 写入嵌入式 Next | Phase 0-6 待开始 |
+| active/image-model-managed-delivery-server.md | **文生图模型账号下发（服务端层）**：新增 `GET /api/v1/image/config(/encrypted/hash)`，apiKey 复用 configs 的 AES-256-GCM 加密口令；图片配置独立于 configs 列表避免泄漏进对话下拉框 | S1-S5 待开始 |
 ### Completed
 
 | 文件 | 主题 | 完成日期 |
 |------|------|----------|
+| completed/document-preview.md | 应用内文档预览（PDF/DOCX/XLSX/PPTX）：复用 PreviewPanel 分发骨架 + serve 取 arrayBuffer + next/dynamic 懒加载四渲染器（react-pdf/SheetJS+DataTableViewer/docx-preview/aiden0z-pptx）、PDF 5 类离线资产管线（含 wasm+cmaps+iccs）、DOCX 三层强制 XSS vs PPTX 差异化安全、raw 路由中文名 RFC 5987 修复；老二进制 .doc/.ppt/.xls 不做 | 2026-06-30 |
 | completed/credential-encryption.md | 凭证本地加密落盘：safeStorage 主密钥 + AES-256-GCM 列加密（双进程 env 过河）、anlcode 文件 + SQLite 敏感列 seal/hydrate、静默迁移 + fail-safe、image-generator 绕过修复 | 2026-06-03 |
 | completed/gsd-bundle.md | 内置打包 GSD（gsd-build/get-shit-done, MIT）：vendor + 转换脚本 + Electron 同步 + Settings UI + 普惠修复 frontmatter description | 2026-05-25 |
 | completed/markdown-artifact-overhaul.md | Markdown 渲染/编辑 × Artifact 网页预览扩展（DiffSummary 卡片 + Sandpack TSX + 长图导出 + 文件树新建 .md + CodeMirror 编辑 + DataTable + 文件 I/O API） | 2026-04-21 |
