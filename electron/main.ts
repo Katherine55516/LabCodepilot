@@ -43,7 +43,7 @@ import { RealtimeAsrSession } from './asr/realtime-session';
 import { getAsrConfig, invalidateAsrToken, type AsrConfig } from './asr/token-cache';
 
 // ── Test Accounts: 获取登录态 capture (BrowserWindow → Playwright storageState) ──
-import { startCapture, finishCapture, cancelCapture, getCaptureStatus, clearCaptured } from './test-auth-capture/capture-window';
+import { startCapture, finishCaptureSelf, cancelCapture, cancelCaptureByUser, getCaptureStatus, clearCaptured, registerCaptureNotifier } from './test-auth-capture/capture-window';
 
 // File logger — persists main-process logs, the forked Next-server's piped
 // stdout/stderr (re-console.log'd below), and renderer console output to
@@ -1936,14 +1936,33 @@ app.whenReady().then(async () => {
     return { canceled: result.canceled, filePaths: result.filePaths };
   });
 
-  // Test Accounts — 获取登录态 capture. Opens an isolated BrowserWindow, lets the
-  // user log in, then writes a Playwright storageState file into the AI_LabTest
-  // workspace for replay. See electron/test-auth-capture/capture-window.ts.
-  ipcMain.handle('test-auth-capture:start', (_e, params: { frontendBaseUrl: string; username?: string; password?: string }) => startCapture(params));
-  ipcMain.handle('test-auth-capture:finish', (_e, params: { projectRoot: string; env: string; accountKey: string }) => finishCapture(params));
+  // Test Accounts — 获取登录态 capture. Opens an isolated window (BaseWindow +
+  // toolbar/site WebContentsView), lets the user log in, then the in-window toolbar
+  // writes a Playwright storageState file into the AI_LabTest workspace for replay.
+  // See electron/test-auth-capture/capture-window.ts.
+  //
+  // done/cancelled are pushed to the settings page so its "captured" badge updates
+  // without the user switching back. Notifier reads the live mainWindow each call.
+  registerCaptureNotifier((channel, payload) => {
+    mainWindow?.webContents.send(channel, payload);
+  });
+  ipcMain.handle('test-auth-capture:start', (_e, params: {
+    frontendBaseUrl: string;
+    username?: string;
+    password?: string;
+    projectRoot: string;
+    env: string;
+    accountKey: string;
+    systemLabel?: string;
+  }) => startCapture(params));
   ipcMain.handle('test-auth-capture:cancel', () => cancelCapture());
   ipcMain.handle('test-auth-capture:status', (_e, params: { projectRoot: string; env: string; accountKey: string }) => getCaptureStatus(params));
   ipcMain.handle('test-auth-capture:clear', (_e, params: { projectRoot: string; env: string; accountKey: string }) => clearCaptured(params));
+  // 工具条「登录完成」：就地抓取写盘（用 start 时存的目标），成功后由 capture-window
+  // 通知设置页并关窗；抓到空则返回失败、不关窗（工具条红字提示）。
+  ipcMain.handle('test-auth-capture:toolbar-finish', () => finishCaptureSelf());
+  // 工具条「取消」：关窗，由 'closed' 触发 cancelled 通知给设置页。
+  ipcMain.handle('test-auth-capture:toolbar-cancel', () => cancelCaptureByUser());
 
   // --- Widget export IPC handler ---
   // Uses an isolated BrowserWindow for secure, high-fidelity widget screenshot.

@@ -20,7 +20,8 @@
 | `src/app/api/test-accounts/[id]/route.ts` | `GET` / `PUT` / `DELETE`（单系统） |
 | `src/app/api/test-accounts/[id]/export/route.ts` | `POST`：写 `{project_root}/AI_LabTest/environments.json` |
 | `src/lib/test-accounts-export.ts` | 纯函数：内部模型 → environments.json（`toEnvironmentsJson`）+ `sanitizeAccountKey`。**前端预览与后端导出同源**，无逻辑漂移 |
-| `electron/test-auth-capture/capture-window.ts` | 获取登录态：BrowserWindow 抓取 cookie+localStorage → Playwright storageState 文件 |
+| `electron/test-auth-capture/capture-window.ts` | 获取登录态：`BaseWindow` + 两个 `WebContentsView`（工具条 + 站点）抓取 cookie+localStorage → Playwright storageState 文件 |
+| `electron/test-auth-capture/toolbar.html` / `toolbar.css` / `toolbar.js` | 抓取窗口顶部工具条（「登录完成 / 取消」+ 系统·环境·账号显示）；静态资源，复用主 `preload.js` |
 | `src/__tests__/unit/test-accounts-export.test.ts` | 锁死 environments.json 契约的单测（9 用例） |
 
 **修改**
@@ -31,8 +32,9 @@
 | `src/types/index.ts` | `// ===== Test Accounts =====` 类型区块 |
 | `src/types/electron.d.ts` | `testAuthCapture` namespace 类型 |
 | `src/i18n/en.ts` / `zh.ts` / `zh-HK.ts` | `settings.testAccounts` + `testAccounts.*` 命名空间 |
-| `electron/main.ts` | `test-auth-capture:*` 五个 ipcMain handler + 导入 |
-| `electron/preload.ts` | `testAuthCapture` contextBridge namespace |
+| `electron/main.ts` | `test-auth-capture:*` ipcMain handler（`start`/`cancel`/`status`/`clear`/`toolbar-finish`/`toolbar-cancel`）+ `registerCaptureNotifier` 推送 done/cancelled + 导入 |
+| `electron/preload.ts` | `testAuthCapture` contextBridge namespace（`start`/`cancel`/`status`/`clear` + `toolbarFinish`/`toolbarCancel`/`onToolbarInit` + `onDone`/`onCancelled`） |
+| `electron-builder.yml` | extraResources：`electron/test-auth-capture/` 静态资源 → `Resources/test-auth-capture/`（仅 `*.html/*.css/*.js`） |
 
 ## 数据模型与持久化
 
@@ -63,8 +65,9 @@ DB 仅本机（`~/.codepilot/codepilot.db`），密码/token **明文**存储（
   ├─ POST /api/test-accounts/[id]/export   写 environments.json（先自动保存脏改动）
   │     └─ db.getTestAccountSystem → toEnvironmentsJson → fs.writeFile({root}/AI_LabTest/environments.json)
   └─ window.electronAPI.testAuthCapture.*  获取登录态（仅 Electron）
-        └─ ipcMain test-auth-capture:* → electron/test-auth-capture/capture-window.ts
-              └─ BrowserWindow 抓取 → fs.writeFile({root}/AI_LabTest/.auth/{env}.{key}.storageState.json
+        ├─ start → ipcMain test-auth-capture:start → capture-window.ts 开 BaseWindow（工具条 + 站点视图）
+        ├─ 工具条「登录完成」→ test-auth-capture:toolbar-finish → 抓取 → fs.writeFile({root}/AI_LabTest/.auth/{env}.{key}.storageState.json
+        └─ 主进程推 test-auth-capture:done/:cancelled → 设置页 onDone/onCancelled 刷新徽章
 ```
 
 ## API 路由
@@ -121,17 +124,29 @@ sanitize(key) = key.replace(/[^A-Za-z0-9_-]/g, '_')   // 必须与 runner 完全
 ```
 形状：`{ cookies: [{name,value,domain,path,expires,httpOnly,secure,sameSite}], origins: [{origin, localStorage:[{name,value}]}] }`。
 
-**抓取流程**（`electron/test-auth-capture/capture-window.ts`）：
-1. `start({frontendBaseUrl, username?, password?})` —— 开一个隔离 BrowserWindow（独立内存 partition、sandbox、**无 preload**、拒绝所有权限请求、阻止 `window.open` 但放行就地导航），导航到 frontendBaseUrl，best-effort 预填账号密码（**不自动提交**，留给用户处理验证码/2FA）。
-2. 用户在弹窗里手动登录 → 回到 CodePilot 面板点「完成」。
-3. `finish({projectRoot, env, accountKey})` —— 抓 `session.fromPartition().cookies.get({})` + 各 origin 的 localStorage（`did-finish-load` 累积，覆盖 SSO 多 origin），组装 storageState 写文件。cookie+origin 全空视为失败。
-4. `cancel()` / `status()`（文件存在性）/ `clear()`（删文件）。
+**窗口结构**（v2.2 起，原 BrowserWindow 改为）：`BaseWindow` + 两个 `WebContentsView`：
+- `toolbarView`（顶部固定 48px）—— 本地可信 HTML（`toolbar.html`/`.css`/`.js`），**复用主 `preload.js`**（与登录窗口一致；esbuild 把主进程全 bundle 进 `dist-electron/main.js`，故 `__dirname` 指向 `dist-electron/`）。承载「登录完成 / 取消」+ 显示「系统 · 环境 · 账号」。
+- `siteView`（下方其余高度）—— 第三方登录页：独立内存 partition、`sandbox:true`、**无 preload**、拒绝所有权限请求、阻止 `window.open` 但放行就地导航。
+- `win.on('resize')` → `layoutViews()` 按 `getContentBounds()` 重排两视图。
 
-**IPC**（preload `window.electronAPI.testAuthCapture`，main `test-auth-capture:*`）：`start` / `finish` / `cancel` / `status` / `clear`。同一时刻只允许一个抓取会话（模块级单例，`start` 先 `cancel`）。
+**抓取流程**（`electron/test-auth-capture/capture-window.ts`）：
+1. `start({frontendBaseUrl, username?, password?, projectRoot, env, accountKey, systemLabel?})` —— 开窗，导航 siteView 到 frontendBaseUrl，best-effort 预填账号密码（**不自动提交**，留给用户处理验证码/2FA）；`projectRoot/env/accountKey/systemLabel` 固化在模块状态（`captureTarget`），供工具条就地写盘 + 工具条显示。
+2. 用户**在窗口内**登录 → 直接点顶部工具条「登录完成」（**无需切回设置页**，这是相对旧版的核心改进）。
+3. `toolbarFinish()`（IPC `test-auth-capture:toolbar-finish`）—— 用 `captureTarget` 抓 `session.fromPartition().cookies.get({})` + 各 origin 的 localStorage（`did-finish-load` 累积，覆盖 SSO 多 origin），组装 storageState 写文件。成功 → 推 `test-auth-capture:done` 给设置页刷新徽章 + 关窗；**cookie+origin 全空** → 返回 `ok:false`、**不关窗**，工具条红字提示「先登录再点登录完成」。
+4. 工具条「取消」(`toolbar-cancel` → `cancelCaptureByUser`) 或用户关窗(X) → `'closed'` 推 `test-auth-capture:cancelled` 给设置页清「抓取中」态。
+5. `cancel()`（静默，仅 re-entry 守卫 / 程序化关闭，不通知）/ `status()`（文件存在性）/ `clear()`（删文件）。
+
+**IPC**（preload `window.electronAPI.testAuthCapture`）：
+- 设置页调用：`start` / `cancel` / `status` / `clear`；订阅推送 `onDone` / `onCancelled`。
+- 工具条调用（`toolbar.js`，复用同一 preload）：`toolbarFinish` / `toolbarCancel` / `onToolbarInit`。
+- main → 渲染端推送：`test-auth-capture:done` / `:cancelled`（经 `registerCaptureNotifier` 注入的 `(ch,p)=>mainWindow?.webContents.send(ch,p)`，避免 capture-window 反向 import main.ts 造成循环依赖）；main → 工具条：`:toolbar-init`（下发系统·环境·账号显示文案）。
+同一时刻只允许一个抓取会话（模块级单例，`start` 先 `cancel`）。
 
 **Electron cookie → Playwright cookie 映射**：`expirationDate`→`expires`（session/缺失→`-1`，否则 `Math.round`）；sameSite：`no_restriction`→`None`、`strict`→`Strict`、`lax`/`unspecified`→`Lax`。
 
-**为何用 Electron BrowserWindow 而非 Playwright**：`@playwright/test` 仅 devDependency，打包不含浏览器二进制；BrowserWindow 原生、零新增依赖，输出手工组装成 Playwright storageState 形状即可被 AI_LabTest 重放。
+**为何 BaseWindow + WebContentsView**：工具条需要可信 IPC（自带 preload），第三方站点需要零 preload 隔离 —— 两者必须分属不同 `webContents`，无法在单个 BrowserWindow 里共存。`BaseWindow` + 两个 `WebContentsView`（Electron 30+ 官方多视图范式，本项目 40）既给工具条可信通道、又保持站点隔离，比旧版「整窗无 preload、完成按钮留在设置页」更干净。仍用 Electron 原生窗口而非 Playwright：`@playwright/test` 仅 devDependency，打包不含浏览器二进制；原生窗口零新增依赖，输出手工组装成 Playwright storageState 形状即可被 AI_LabTest 重放。
+
+**工具条静态资源打包**：`electron-builder.yml` 把 `electron/test-auth-capture/` 的 `*.html/*.css/*.js` 复制到 `Resources/test-auth-capture/`（**filter 只列静态文件，不可用 `**/*`，否则 `capture-window.ts` 源码会被打进 Resources**）；dev 下从 `process.cwd()/electron/test-auth-capture/` 读，与登录窗口同一约定。
 
 ## 测试工作台消费侧（本仓对接）
 
@@ -171,4 +186,5 @@ sanitize(key) = key.replace(/[^A-Za-z0-9_-]/g, '_')   // 必须与 runner 完全
 - `npm run typecheck` ✅（root）；`npx tsx --test src/__tests__/unit/test-accounts-export.test.ts` ✅ 9/9；全量单测 1419/1419 ✅。
 - CDP（`npm run dev` @ PORT 3001 + chrome-devtools）：侧栏入口、建系统、local/SIT 标签、访问地址、增账号、三种登录方式切换、获取登录态置灰 + 桌面版提示、脏标记保存、实时导出预览 JSON 字段映射、console 无报错。
 - 获取登录态抓取流程需 `electron:dev` 实测（CDP 只连 `npm run dev` 网页）；storageState 组装逻辑由单测 + 契约文档约束。
+- 工具条版（v2.2）验证：`tsc -p electron/tsconfig.json` + root `tsc` 对改动文件均 0 error；`build-electron.mjs` 产物含新通道；3 个 Electron POC（scratchpad，已删）实测——① `BaseWindow`+双 `WebContentsView` 构造/布局/resize；② 隔离 partition 真 http 源 cookie+localStorage 抓取 + 默认会话不串；③ **真** `toolbar.html`+**真** `preload.js`：API 暴露、`onToolbarInit` 渲染、抓空→红字不关窗、成功→关窗。全量单测较基线**新增 0 失败**（109 失败均为 better-sqlite3 ABI 环境问题，与本改动无关）。**全 app 端到端**（开应用→点获取登录态→登录→登录完成）受 dev 登录门控限制未跑，构成机制已逐项 POC 覆盖。
 - 消费侧对接（`npm run dev` + curl + CDP）：file 路 —— 写样例 `environments.json` → `GET /api/test/env-config` 返回 `source:'file'` + baseUrl ✅，flow 头 `🎯 baseUrl` ✅，切 local↔SIT 换 baseUrl ✅，「环境配置」跳设置 ✅。DB 兜底路 —— `POST /api/test-accounts`（project_root 指向无 environments.json 的目录）→ `GET /api/test/env-config` 返回 `source:'db'` + baseUrl ✅，flow 头 `🎯 baseUrl` + 「来自设置」小标 ✅；有文件时仍 `source:'file'`（文件优先）✅。`test-env-config.test.ts` 9/9（6 file + 3 resolveFromRaw 核心）。

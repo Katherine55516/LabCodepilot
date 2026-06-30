@@ -13,6 +13,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import ExcelJS from "exceljs";
+import * as XLSX from "xlsx";
 import { POST } from "../../app/api/test/import/route";
 
 let proj: string;
@@ -55,9 +56,14 @@ describe("POST /api/test/import — cases", () => {
     const res = await post({ projectPath: proj, taskName: "订单", kind: "cases", filename: "c.txt", dataBase64: b64("not json at all") });
     assert.equal(res.status, 400);
   });
-  it("rejects legacy .xls binary", async () => {
-    const res = await post({ projectPath: proj, taskName: "订单", kind: "cases", filename: "old.xls", dataBase64: b64("x") });
-    assert.equal(res.status, 400);
+  it("maps a legacy .xls (sheetjs) to cases.json", async () => {
+    const b = makeXlsB64(["ID", "标题", "测试步骤", "预期结果"], [["TC-1", "登录", "输入账号", "跳首页"]]);
+    const res = await post({ projectPath: proj, taskName: "订单", kind: "cases", filename: "old.xls", dataBase64: b });
+    assert.equal((await res.json()).ok, true);
+    const cases = JSON.parse(fs.readFileSync(casesFile("订单"), "utf-8")).cases;
+    assert.equal(cases[0].id, "TC-1");
+    assert.equal(cases[0].purpose, "登录");
+    assert.equal(cases[0].steps[0].content, "输入账号");
   });
 });
 
@@ -71,6 +77,14 @@ describe("POST /api/test/import — validation", () => {
     assert.equal(res.status, 400);
   });
 });
+
+// 老二进制 .xls（BIFF8）由 sheetjs 写，对应 import route 的 sheetjs 读路径。
+function makeXlsB64(headers: string[], rows: string[][]): string {
+  const ws = XLSX.utils.aoa_to_sheet([headers, ...rows]);
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, "用例");
+  return Buffer.from(XLSX.write(wb, { type: "buffer", bookType: "xls" })).toString("base64");
+}
 
 async function makeXlsxB64(headers: string[], rows: string[][]): Promise<string> {
   const wb = new ExcelJS.Workbook();

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "@/hooks/useTranslation";
 import type {
   TestAccountSystemView,
@@ -80,9 +80,13 @@ export function TestAccountsSection() {
   const [exporting, setExporting] = useState(false);
   const [feedback, setFeedback] = useState<Feedback>(null);
   const [showPreview, setShowPreview] = useState(false);
-  // 当前正在抓取登录态的账号（env 内 key 唯一）；为 null 表示无进行中的抓取。
-  const [capturing, setCapturing] = useState<{ env: TestEnvKey; key: string } | null>(null);
+  // 当前正在抓取登录态的账号；为 null 表示无进行中的抓取。抓取在独立窗口里进行，
+  // 完成/取消由主进程通过 onDone/onCancelled 推送回来（见下方订阅）。
+  const [capturing, setCapturing] = useState<{ systemId: string; env: TestEnvKey; key: string } | null>(null);
   const [captureAvailable, setCaptureAvailable] = useState(false);
+  // 推送回调里要读到最新的 capturing（拿 systemId 定位账号），用 ref 避免闭包过期。
+  const capturingRef = useRef(capturing);
+  useEffect(() => { capturingRef.current = capturing; }, [capturing]);
 
   useEffect(() => {
     setCaptureAvailable(typeof window !== "undefined" && !!window.electronAPI?.testAuthCapture);
@@ -200,6 +204,20 @@ export function TestAccountsSection() {
       if (!res.ok) throw new Error(String(res.status));
       const { system } = (await res.json()) as { system: TestAccountSystemView };
       setSavedSnapshots((prev) => ({ ...prev, [system.id]: snapshot(system) }));
+      // R3 保存即自动同步：已设项目目录 → 自动写 {project_root}/AI_LabTest/environments.json，
+      // 工作台与 AI_LabTest 框架始终读到最新地址，无需手动「导出」。同步失败不回滚保存（软提示）。
+      if (system.project_root.trim()) {
+        try {
+          const exp = await fetch(`/api/test-accounts/${system.id}/export`, { method: "POST" });
+          const data = (await exp.json().catch(() => ({}))) as { success?: boolean; error?: string };
+          if (exp.ok && data.success) flash("ok", t("testAccounts.savedAndSynced"));
+          else flash("info", t("testAccounts.savedSyncFailed", { error: data.error || String(exp.status) }));
+        } catch (e) {
+          flash("info", t("testAccounts.savedSyncFailed", { error: e instanceof Error ? e.message : "" }));
+        }
+      } else {
+        flash("ok", t("testAccounts.saved"));
+      }
       return true;
     } catch {
       flash("err", t("testAccounts.saveFailed"));
@@ -231,13 +249,10 @@ export function TestAccountsSection() {
       flash("err", t("testAccounts.exportNeedsRoot"));
       return;
     }
+    // dirty → saveActive 已会保存并自动同步(写 environments.json)，直接复用，避免重复导出与重复提示。
+    if (dirty) { await saveActive(); return; }
     setExporting(true);
     try {
-      // 先保存未提交的改动，确保导出用的是最新配置。
-      if (dirty) {
-        const ok = await saveActive();
-        if (!ok) return;
-      }
       const res = await fetch(`/api/test-accounts/${activeSystem.id}/export`, { method: "POST" });
       const data = (await res.json()) as { success?: boolean; path?: string; error?: string };
       if (!res.ok || !data.success) throw new Error(data.error || String(res.status));
@@ -264,39 +279,53 @@ export function TestAccountsSection() {
         frontendBaseUrl: env.frontendBaseUrl,
         username: acct.username,
         password: acct.password,
+        projectRoot: activeSystem.project_root,
+        env: activeEnv,
+        accountKey: acct.key,
+        systemLabel: activeSystem.name,
       });
       if (!res.ok) throw new Error(res.error || "start failed");
-      setCapturing({ env: activeEnv, key: acct.key });
+      setCapturing({ systemId: activeSystem.id, env: activeEnv, key: acct.key });
       flash("info", t("testAccounts.capturing"));
     } catch (e) {
       flash("err", t("testAccounts.captureFailed", { error: e instanceof Error ? e.message : "" }));
     }
   }, [activeSystem, env, activeEnv, flash, t]);
 
-  const finishCapture = useCallback(async (idx: number) => {
-    if (!activeSystem || !env) return;
+  // 抓取在独立窗口内完成 —— 主进程推送 done/cancelled 回来，这里更新徽章 / 清理「抓取中」态。
+  useEffect(() => {
     const api = window.electronAPI?.testAuthCapture;
-    if (!api) return;
-    const acct = env.accounts[idx];
-    try {
-      const res = await api.finish({
-        projectRoot: activeSystem.project_root,
-        env: activeEnv,
-        accountKey: acct.key,
-      });
-      if (!res.ok) throw new Error(res.error || "finish failed");
-      mutateAccount(idx, (a) => ({ ...a, captured: true, capturedAt: nowStamp() }));
+    if (!api?.onDone || !api?.onCancelled) return;
+    const offDone = api.onDone((data) => {
+      const cap = capturingRef.current;
+      const targetId = cap?.systemId;
+      setSystems((prev) =>
+        prev.map((s) => {
+          if (targetId ? s.id !== targetId : false) return s;
+          const e = s.environments[data.env as TestEnvKey];
+          if (!e) return s;
+          return {
+            ...s,
+            environments: {
+              ...s.environments,
+              [data.env]: {
+                ...e,
+                accounts: e.accounts.map((a) =>
+                  a.key === data.accountKey ? { ...a, captured: true, capturedAt: nowStamp() } : a,
+                ),
+              },
+            },
+          };
+        }),
+      );
       setCapturing(null);
       flash("ok", t("testAccounts.captureSuccess"));
-    } catch (e) {
-      flash("err", t("testAccounts.captureFailed", { error: e instanceof Error ? e.message : "" }));
-    }
-  }, [activeSystem, env, activeEnv, mutateAccount, flash, t]);
-
-  const cancelCapture = useCallback(async () => {
-    await window.electronAPI?.testAuthCapture?.cancel().catch(() => {});
-    setCapturing(null);
-  }, []);
+    });
+    const offCancelled = api.onCancelled((data) => {
+      setCapturing((cur) => (cur && cur.env === data.env && cur.key === data.accountKey ? null : cur));
+    });
+    return () => { offDone(); offCancelled(); };
+  }, [flash, t]);
 
   const clearCapture = useCallback(async (idx: number) => {
     if (!activeSystem || !env) return;
@@ -495,7 +524,7 @@ export function TestAccountsSection() {
               )}
 
               {env.accounts.map((acct, idx) => {
-                const isCapturing = capturing?.env === activeEnv && capturing?.key === acct.key;
+                const isCapturing = capturing?.systemId === activeSystem?.id && capturing?.env === activeEnv && capturing?.key === acct.key;
                 const isDefault = env.defaultAccountKey === acct.key && acct.key !== "";
                 return (
                   <div key={idx} className="rounded-md border border-border/50 bg-muted/30 p-3 space-y-3">
@@ -616,12 +645,9 @@ export function TestAccountsSection() {
                             </span>
                           )}
                           {isCapturing ? (
-                            <>
-                              <Button size="sm" onClick={() => finishCapture(idx)} className="gap-1.5">
-                                <CheckCircle size={14} /> {t("testAccounts.saved")}
-                              </Button>
-                              <Button size="sm" variant="outline" onClick={cancelCapture}>{t("testAccounts.clearCapture")}</Button>
-                            </>
+                            <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
+                              <Lock size={14} /> {t("testAccounts.captureInWindow")}
+                            </span>
                           ) : (
                             <>
                               <Button
