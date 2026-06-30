@@ -279,6 +279,8 @@ const zhHK: Record<TranslationKey, string> = {
   'test.report.openEdit': '點開修改',
   'test.report.exportFile': '匯出',
   'test.report.tabPreview': '預覽',
+  'test.requirement.previewDoc': '預覽需求文件',
+  'test.requirement.previewFailed': '讀取需求文件失敗',
   'test.report.tabEdit': '編輯',
   'test.report.save': '儲存',
   'test.report.saving': '儲存中…',

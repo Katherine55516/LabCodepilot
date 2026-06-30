@@ -271,6 +271,8 @@ const zh: Record<TranslationKey, string> = {
   'test.report.openEdit': '点开修改',
   'test.report.exportFile': '导出',
   'test.report.tabPreview': '预览',
+  'test.requirement.previewDoc': '预览需求文档',
+  'test.requirement.previewFailed': '读取需求文档失败',
   'test.report.tabEdit': '编辑',
   'test.report.save': '保存',
   'test.report.saving': '保存中…',

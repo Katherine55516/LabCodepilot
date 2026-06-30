@@ -273,6 +273,8 @@ const en = {
   'test.report.openEdit': 'Open & edit',
   'test.report.exportFile': 'Export',
   'test.report.tabPreview': 'Preview',
+  'test.requirement.previewDoc': 'Preview Requirement',
+  'test.requirement.previewFailed': 'Failed to read the requirement document',
   'test.report.tabEdit': 'Edit',
   'test.report.save': 'Save',
   'test.report.saving': 'Saving…',

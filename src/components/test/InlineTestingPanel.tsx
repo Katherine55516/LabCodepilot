@@ -954,6 +954,27 @@ export function InlineTestingPanel() {
     } catch { /* 保存失败保留编辑态,用户可重试 */ }
     setCasesSaving(false);
   };
+  // 需求文档预览（问题①）：用户在「需求分析」阶段点「预览需求文档」→ 按需读 {task}-需求.md，
+  // 复用报告步的 PreviewModal/MdPreview 弹窗渲染（独立状态，与报告步互不影响）。
+  const [reqPreview, setReqPreview] = useState<PreviewState | null>(null);
+  const [reqPreviewLoading, setReqPreviewLoading] = useState(false);
+  useEffect(() => { setReqPreview(null); }, [aId]); // 切任务关掉残留的需求预览弹窗
+  const openRequirementPreview = async () => {
+    if (!current?.path || !activeTask) return;
+    // rel 相对项目根（与 MdPreview 保存口径一致：baseDir=projectPath + rel）。
+    const rel = `AI_LabTest/requirements/${activeTask.name}-需求.md`;
+    setReqPreviewLoading(true);
+    try {
+      const res = await fetch(`/api/files/raw?path=${encodeURIComponent(`${current.path}/${rel}`)}`);
+      if (!res.ok) throw new Error("read failed");
+      const content = await res.text();
+      setReqPreview({ kind: "md", titleKey: "test.step.requirements.name", rel, content, editable: false });
+    } catch {
+      showToast({ type: "error", message: t("test.requirement.previewFailed") });
+    } finally {
+      setReqPreviewLoading(false);
+    }
+  };
   // First not-done step = the "current" step the detail card focuses on.
   const nextPendingStep = (): TestStep | null => STEPS.find((s) => stepStatus[s.step] !== "done")?.step ?? null;
   // focusStep = 详情卡当前展示的阶段。执行中(runningStep 存在)强制 focus 运行中的节点,
@@ -1700,8 +1721,37 @@ export function InlineTestingPanel() {
                     providerId={providerId}
                   />
                 )}
-                {focusStep !== "cases" && focusStep !== "report" && (
+                {focusStep === "requirement" && (
+                  <div className="mt-2 flex items-center gap-2">
+                    {(stepStatus.requirement === "done" || stepStatus.requirement === "review") && (
+                      <button
+                        onClick={openRequirementPreview}
+                        disabled={reqPreviewLoading || !current?.path || !activeTask}
+                        title={t("test.requirement.previewDoc")}
+                        className="flex items-center gap-1 rounded border border-border px-2 py-1 text-[10px] text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        {reqPreviewLoading ? <SpinnerGap size={12} className="animate-spin" /> : <Eye size={12} />} {t("test.requirement.previewDoc")}
+                      </button>
+                    )}
+                    <span className="text-[11px] text-muted-foreground">{t("test.flow.evidenceNote")}</span>
+                  </div>
+                )}
+                {focusStep === "execution" && (
                   <div className="mt-2 text-[11px] text-muted-foreground">{t("test.flow.evidenceNote")}</div>
+                )}
+                {/* 需求文档预览弹窗（问题①）：复用报告步 PreviewModal/MdPreview，按需读
+                    {task}-需求.md 渲染；独立状态，不影响报告步预览。 */}
+                {reqPreview && (
+                  <PreviewModal
+                    t={t}
+                    preview={reqPreview}
+                    projectPath={current?.path ?? ""}
+                    taskName={activeTask?.name ?? ""}
+                    env={env}
+                    onClose={() => setReqPreview(null)}
+                    onSaved={() => setReqPreview(null)}
+                    setEditable={(editable) => setReqPreview((p) => (p && p.kind === "md" ? { ...p, editable } : p))}
+                  />
                 )}
               </div>
             </div>
