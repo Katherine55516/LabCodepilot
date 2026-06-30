@@ -51,6 +51,11 @@ const DocxViewer = dynamic(
   { ssr: false, loading: () => <div className="flex h-full items-center justify-center py-12"><SpinnerGap size={20} className="animate-spin text-muted-foreground" /></div> },
 );
 
+const PptxViewer = dynamic(
+  () => import("@/components/editor/PptxViewer").then((m) => m.PptxViewer),
+  { ssr: false, loading: () => <div className="flex h-full items-center justify-center py-12"><SpinnerGap size={20} className="animate-spin text-muted-foreground" /></div> },
+);
+
 // Lazy-load Streamdown and plugins — only loaded when rendered markdown is needed
 let _StreamdownComponent: typeof import("streamdown").Streamdown | null = null;
 let _streamdownPlugins: Record<string, unknown> | null = null;
@@ -671,8 +676,9 @@ export function PreviewPanel() {
           <XlsxViewer fileServeUrl={fileServeUrl} filename={fileName} />
         ) : isDocxPreview(filePath) ? (
           <DocxViewer fileServeUrl={fileServeUrl} />
+        ) : isPptxPreview(filePath) ? (
+          <PptxViewer fileServeUrl={fileServeUrl} />
         ) : isDocument ? (
-          // pptx 仍占位（Phase 3 替换为 PptxViewer）。
           <DocumentPlaceholder filePath={filePath} />
         ) : isMedia ? (
           <MediaView filePath={filePath} fileServeUrl={fileServeUrl} />

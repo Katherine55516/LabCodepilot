@@ -338,6 +338,7 @@ const en = {
   'docPreview.pages': '{count} pages',
   'docPreview.zoomIn': 'Zoom in',
   'docPreview.zoomOut': 'Zoom out',
+  'docPreview.pptxNotice': 'Preview — layout may differ from the original file',
 
   // ── Extensions page ─────────────────────────────────────────
   'extensions.title': 'Extensions',

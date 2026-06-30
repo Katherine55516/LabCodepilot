@@ -344,6 +344,7 @@ const zhHK: Record<TranslationKey, string> = {
   'docPreview.pages': '{count} 頁',
   'docPreview.zoomIn': '放大',
   'docPreview.zoomOut': '縮小',
+  'docPreview.pptxNotice': '預覽 — 排版可能與原檔案有差異',
 
   // ── Extensions page ─────────────────────────────────────────
   'extensions.title': '擴展',

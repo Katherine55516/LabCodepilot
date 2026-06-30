@@ -51,6 +51,7 @@
     "@ai-sdk/google": "^3.0.31",
     "@ai-sdk/google-vertex": "^4.0.80",
     "@ai-sdk/openai": "^3.0.34",
+    "@aiden0z/pptx-renderer": "^1.2.2",
     "@anthropic-ai/claude-agent-sdk": "^0.2.141",
     "@codemirror/lang-markdown": "^6.5.0",
     "@codemirror/lang-yaml": "^6.1.3",
