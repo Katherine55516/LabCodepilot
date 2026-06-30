@@ -283,6 +283,7 @@ const en = {
   'test.report.docEmpty': 'Report document not generated yet',
   'test.report.xlsxEmpty': 'Empty spreadsheet',
   'test.report.xlsxLoadFailed': 'Failed to parse spreadsheet',
+  'test.report.retry': 'Retry',
   'nav.imageStudio': 'Image',
 
   // ── Image Studio (standalone text-to-image) ─────────────────

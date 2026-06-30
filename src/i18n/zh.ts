@@ -281,6 +281,7 @@ const zh: Record<TranslationKey, string> = {
   'test.report.docEmpty': '报告文档尚未生成',
   'test.report.xlsxEmpty': 'Excel 无数据',
   'test.report.xlsxLoadFailed': 'Excel 解析失败',
+  'test.report.retry': '重试',
   'nav.imageStudio': '文生图',
 
   // ── 文生图（独立模块）──────────────────────────────────────

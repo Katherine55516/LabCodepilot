@@ -289,6 +289,7 @@ const zhHK: Record<TranslationKey, string> = {
   'test.report.docEmpty': '報告文件尚未生成',
   'test.report.xlsxEmpty': 'Excel 無數據',
   'test.report.xlsxLoadFailed': 'Excel 解析失敗',
+  'test.report.retry': '重試',
   'nav.imageStudio': '文生圖',
 
   // ── 文生圖（獨立模塊）──────────────────────────────────────

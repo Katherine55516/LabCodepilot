@@ -2781,15 +2781,18 @@ function XlsxPreview({ t, projectPath, taskName, env, onClose }: {
   const [data, setData] = useState<{ sheets: { name: string; rows: string[][] }[] } | null>(null);
   const [err, setErr] = useState(false);
   const [lightbox, setLightbox] = useState<string | null>(null);
+  const [reloadTick, setReloadTick] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
-    fetch(`/api/test/report-xlsx?projectPath=${encodeURIComponent(projectPath)}&taskName=${encodeURIComponent(taskName)}&env=${encodeURIComponent(env)}`)
+    // cache:"no-store" —— 第一次预览成功后浏览器可能缓存响应，第二次 from cache 在打包
+    // standalone 环境偶发取到坏/空缓存 → 解析失败。强制每次走网络，杜绝这条路。
+    fetch(`/api/test/report-xlsx?projectPath=${encodeURIComponent(projectPath)}&taskName=${encodeURIComponent(taskName)}&env=${encodeURIComponent(env)}`, { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error("fetch failed"))))
       .then((d) => { if (!cancelled) { if (d.error) setErr(true); else setData(d); } })
       .catch(() => { if (!cancelled) setErr(true); });
     return () => { cancelled = true; };
-  }, [projectPath, taskName, env]);
+  }, [projectPath, taskName, env, reloadTick]);
 
   const mediaUrl = (file: string) => `/api/test/media?projectPath=${encodeURIComponent(projectPath)}&taskName=${encodeURIComponent(taskName)}&env=${encodeURIComponent(env)}&file=${encodeURIComponent(file)}`;
   const mediaRe = /\.(png|jpe?g|webp|gif|webm|mp4|mov)$/i;
@@ -2823,7 +2826,10 @@ function XlsxPreview({ t, projectPath, taskName, env, onClose }: {
       </div>
       <div className="min-h-0 flex-1 overflow-auto p-3">
         {err ? (
-          <p className="text-[11px] text-status-error-foreground">{t("test.report.xlsxLoadFailed")}</p>
+          <div className="flex items-center gap-2 text-[11px] text-status-error-foreground">
+            {t("test.report.xlsxLoadFailed")}
+            <button onClick={() => { setErr(false); setData(null); setReloadTick((n) => n + 1); }} className="rounded border border-border px-1.5 py-0.5 text-foreground hover:bg-muted">{t("test.report.retry")}</button>
+          </div>
         ) : !data ? (
           <p className="text-[11px] text-muted-foreground">{t("test.report.loading")}</p>
         ) : !sheet || sheet.rows.length === 0 ? (
