@@ -213,6 +213,7 @@ const en = {
   'test.flow.expandLog': 'Show log',
   'test.flow.collapseLog': 'Hide log',
   'test.convo.empty': 'Run a step — the AI execution will stream here.',
+  'test.convo.thinking': 'Processing…',
   'test.convo.placeholder': 'Add a test instruction, Enter to send',
   'test.convo.running': 'Running… input paused',
   'test.convo.send': 'Send',

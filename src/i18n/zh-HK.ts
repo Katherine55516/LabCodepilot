@@ -219,6 +219,7 @@ const zhHK: Record<TranslationKey, string> = {
   'test.flow.expandLog': '展開日誌',
   'test.flow.collapseLog': '收起日誌',
   'test.convo.empty': '執行測試步驟後，AI 的執行過程會顯示在這裡。',
+  'test.convo.thinking': '正在處理…',
   'test.convo.placeholder': '追加測試指令，輸入後按 Enter 發送',
   'test.convo.running': '執行中…暫不可輸入',
   'test.convo.send': '發送',

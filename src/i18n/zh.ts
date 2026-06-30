@@ -211,6 +211,7 @@ const zh: Record<TranslationKey, string> = {
   'test.flow.expandLog': '展开日志',
   'test.flow.collapseLog': '收起日志',
   'test.convo.empty': '运行测试步骤后，AI 的执行过程会显示在这里。',
+  'test.convo.thinking': '正在处理…',
   'test.convo.placeholder': '追加测试指令，回车发送',
   'test.convo.running': '运行中…暂不可输入',
   'test.convo.send': '发送',

@@ -1691,10 +1691,22 @@ export function InlineTestingPanel() {
           {/* lower: 测试对话 (run stream) */}
           <div className="flex min-h-0 flex-1 flex-col bg-background">
             <div ref={threadRef} className="flex flex-1 flex-col gap-2 overflow-auto p-4">
-              {convo.length === 0 ? (
+              {convo.length === 0 && !busy ? (
                 <p className="mt-6 text-center text-[11px] text-muted-foreground">{t("test.convo.empty")}</p>
               ) : (
                 convo.map((m, i) => <ConvoBubble key={i} msg={m} />)
+              )}
+              {/* 等待动画：任务运行中 / 等待 AI 响应时，对话末尾显示「正在处理」跳动点，
+                  让用户知道系统在处理、不是卡死。busy 结束即消失。 */}
+              {busy && (
+                <div className="flex items-center gap-2 px-1 py-1">
+                  <span className="flex gap-1">
+                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-primary/60" style={{ animationDelay: "-0.3s" }} />
+                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-primary/60" style={{ animationDelay: "-0.15s" }} />
+                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-primary/60" />
+                  </span>
+                  <span className="text-[10px] text-muted-foreground">{t("test.convo.thinking")}</span>
+                </div>
               )}
             </div>
             {/* gate bar: a human-gated step (需求/用例) awaiting approval */}
