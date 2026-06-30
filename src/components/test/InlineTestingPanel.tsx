@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { useRouter, usePathname } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -2834,7 +2835,10 @@ function XlsxPreview({ t, projectPath, taskName, env, onClose }: {
           </div>
         )}
       </div>
-      {lightbox && (
+      {/* lightbox 用 Portal 渲染到 body —— 否则它在 PreviewModal 的 overflow-hidden +
+          rounded-xl 容器内，<video> 的硬件合成层会黑屏（录像加载了、控件和 0:00 都在、画面黑的
+          根因；报告 tab 的 ReportView 录像不在这层嵌套故正常）。 */}
+      {lightbox && createPortal(
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-6" onClick={() => setLightbox(null)}>
           {isVid(lightbox) ? (
             <video src={mediaUrl(lightbox)} controls autoPlay muted playsInline preload="metadata" className="max-h-full max-w-full" onClick={(e) => e.stopPropagation()} />
@@ -2842,7 +2846,8 @@ function XlsxPreview({ t, projectPath, taskName, env, onClose }: {
             // eslint-disable-next-line @next/next/no-img-element
             <img src={mediaUrl(lightbox)} alt={lightbox} className="max-h-full max-w-full object-contain" onClick={(e) => e.stopPropagation()} />
           )}
-        </div>
+        </div>,
+        document.body,
       )}
     </>
   );
