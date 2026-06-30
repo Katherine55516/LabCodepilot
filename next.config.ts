@@ -39,6 +39,11 @@ const nextConfig: NextConfig = {
     'discord.js',
     '@discordjs/ws',
     'zlib-sync',
+    // xlsx (sheetjs CDN 0.20.3)：exports 字段受限 + 体积大，交给 Next bundle 进 route chunk
+    // 时在 standalone（尤其 Windows）容易追踪不全。标记 external 不 bundle，配合下方
+    // force-include 整包复制到 standalone/node_modules，由 import 路由的动态 import('xlsx')
+    // 在运行时直接 require —— 避免 .xls 解析依赖被打包漏收。
+    'xlsx',
     '@anthropic-ai/claude-agent-sdk',
     '@anthropic-ai/claude-agent-sdk-darwin-arm64',
     '@anthropic-ai/claude-agent-sdk-darwin-x64',
@@ -85,6 +90,10 @@ const nextConfig: NextConfig = {
       // 只复制了孤零零的 cli.js —— 丢了 package.json/lib 和嵌套 node_modules,server 一
       // require('playwright-core') 就崩 → 零工具注册。force-include 整包(含嵌套依赖)修复之。
       'node_modules/@playwright/mcp/**/*',
+      // xlsx (sheetjs)：上方 serverExternalPackages 标记 external 后 Next 不再 bundle 它，
+      // 必须显式把整包复制进 standalone/node_modules，否则导入 .xls 用例时 import 路由里的
+      // 动态 import('xlsx') 在运行时找不到包而报错。
+      'node_modules/xlsx/**/*',
     ],
   },
   // outputFileTracingExcludes: strip non-code dirs out of every route's NFT.

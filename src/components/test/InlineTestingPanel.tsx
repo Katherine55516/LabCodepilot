@@ -1284,10 +1284,16 @@ export function InlineTestingPanel() {
     }
     // 问题6：先收集要删报告的 (项目路径, 任务名)，UI 删除会改 projects，必须在删之前读。
     const toDelete: { path: string; name: string }[] = [];
+    // 删除后的新状态副本：用于本函数结尾「立即同步 PUT」(不等 debounce)。setState 仍走函数式
+    // (基于最新 m，避免覆盖删除期间其它在跑任务的 SSE 更新)，副本只用来立刻把已删结果落盘。
+    let nextProjects = projects;
+    let nextTaskStates = taskStates;
     if (kind === "project") {
       const proj = projects[pIdx];
       if (proj?.path) for (const tk of proj.tasks) toDelete.push({ path: proj.path, name: tk.name });
       const ids = new Set((proj?.tasks ?? []).map((tk) => tk.id));
+      nextTaskStates = (() => { const n = { ...taskStates }; ids.forEach((id) => delete n[id]); return n; })();
+      nextProjects = projects.filter((_, i) => i !== pIdx);
       setTaskStates((m) => { const n = { ...m }; ids.forEach((id) => delete n[id]); return n; });
       setProjects((ps) => ps.filter((_, i) => i !== pIdx));
       if (selected === pIdx) { setSelected(null); setSelectedTask(null); }
@@ -1296,7 +1302,11 @@ export function InlineTestingPanel() {
       const proj = projects[pIdx];
       const tk = proj?.tasks[tIdx!];
       if (proj?.path && tk) toDelete.push({ path: proj.path, name: tk.name });
-      if (tk) setTaskStates((m) => { const n = { ...m }; delete n[tk.id]; return n; });
+      if (tk) {
+        nextTaskStates = (() => { const n = { ...taskStates }; delete n[tk.id]; return n; })();
+        setTaskStates((m) => { const n = { ...m }; delete n[tk.id]; return n; });
+      }
+      nextProjects = projects.map((p, i) => (i === pIdx ? { ...p, tasks: p.tasks.filter((_, j) => j !== tIdx) } : p));
       setProjects((ps) => ps.map((p, i) => (i === pIdx ? { ...p, tasks: p.tasks.filter((_, j) => j !== tIdx) } : p)));
       if (selected === pIdx && selectedTask === tIdx) { setSelectedTask(null); setView("dash"); }
       else if (selected === pIdx && selectedTask !== null && selectedTask > tIdx!) setSelectedTask(selectedTask - 1);
@@ -1307,6 +1317,15 @@ export function InlineTestingPanel() {
     if (toDelete.length) {
       await Promise.all(toDelete.map((r) => deleteTaskReports(r.path, r.name)));
       setReportsReload((n) => n + 1);
+    }
+    // 问题3 修复：删除完成后【立即同步 PUT】最新状态到文件，不依赖上方 ~500ms 的 debounce
+    // 持久化。否则用户在 debounce 触发前就关闭应用 → 删除从未落盘 → 重启又把已删项目/任务读回。
+    if (loaded) {
+      fetch("/api/test/workbench", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projects: nextProjects, taskStates: nextTaskStates }),
+      }).catch(() => {});
     }
   };
 
@@ -3457,13 +3476,21 @@ function NewTaskModal({ t, onClose, onAdd, existingNames }: { t: T; onClose: () 
     if (!ready || busy) return;
     setBusy(true);
     setErr("");
-    const res = await onAdd(name.trim(), {
-      requirement: reqFile ? { filename: reqFile.name, dataBase64: reqFile.data } : undefined,
-      cases: casesFile ? { filename: casesFile.name, dataBase64: casesFile.data } : undefined,
-    });
-    setBusy(false);
-    if (res.ok) onClose();
-    else setErr(res.error || t("test.newTaskModal.importFailed"));
+    try {
+      const res = await onAdd(name.trim(), {
+        requirement: reqFile ? { filename: reqFile.name, dataBase64: reqFile.data } : undefined,
+        cases: casesFile ? { filename: casesFile.name, dataBase64: casesFile.data } : undefined,
+      });
+      if (res.ok) onClose();
+      else setErr(res.error || t("test.newTaskModal.importFailed"));
+    } catch (e) {
+      // onAdd(=addTask) 内部任一 await（postImport 的 fetch、网络异常、import 路由 500）
+      // 抛错时必须在这里兜住 —— 否则下面的 setBusy(false) 永不执行，按钮一直卡在「导入中」、
+      // 整个弹窗禁用死锁。这正是 Windows 包反馈「导需求/用例后点创建一直导入中」的直接原因。
+      setErr(e instanceof Error ? e.message : t("test.newTaskModal.importFailed"));
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (

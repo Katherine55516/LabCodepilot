@@ -2,7 +2,6 @@ import fs from 'fs';
 import path from 'path';
 import mammoth from 'mammoth';
 import ExcelJS from 'exceljs';
-import * as XLSX from 'xlsx';
 import { artifactPaths } from '@/lib/test/prompts';
 import { isUnsafeSegment } from '@/lib/test/path-safety';
 
@@ -94,7 +93,12 @@ function rowsToCases(rows: string[][]): { cases: unknown[] } {
 }
 
 // .xls（老二进制 BIFF）exceljs 读不了 → 用 sheetjs 读成行矩阵，复用 rowsToCases 映射。
-function xlsToRows(buf: Buffer): string[][] {
+// sheetjs 走「函数内动态 import」而非顶部静态 import：① 把 sheetjs 隔离在 .xls 这一条
+// 路径上，导需求(mammoth)/导 .xlsx(exceljs)/导 .json 都不会加载它；② 避免顶部硬 import
+// 让整个 import 路由在 standalone（NFT 可能漏收 xlsx）模块加载阶段就失败、把所有导入一起
+// 拖挂——这正是 Windows 打包后「新建任务导需求/用例都卡在导入中」的根因。
+async function xlsToRows(buf: Buffer): Promise<string[][]> {
+  const XLSX = await import('xlsx');
   const wb = XLSX.read(buf, { type: 'buffer' });
   const ws = wb.Sheets[wb.SheetNames[0]];
   if (!ws) throw new Error('Excel 没有可读工作表');
@@ -149,7 +153,7 @@ export async function POST(req: Request): Promise<Response> {
       if (ext === 'xlsx') {
         out = await xlsxToCasesJson(buf);
       } else if (ext === 'xls') {
-        const rows = xlsToRows(buf);
+        const rows = await xlsToRows(buf);
         if (rows.length < 2) throw new Error('Excel 至少需要表头行 + 一行用例');
         out = JSON.stringify(rowsToCases(rows), null, 2);
       } else {
