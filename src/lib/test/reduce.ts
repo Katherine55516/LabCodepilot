@@ -84,6 +84,10 @@ const STATE_ALIASES: Record<string, FourStateStatus> = {
 const ENV_HINT =
   /(econnrefused|enotfound|eai_again|net::err|err_connection|err_name_not_resolved|connection refused|拒绝连接|无法连接|无法访问|打不开|超时|timed?\s?out|dns)/i;
 
+// 兜底补全的「未执行」用例说明（问题②）：执行阶段未对该用例产出 @@RESULT → 报告以 cases
+// 全集为准把它补成 blocked，并附此说明，提示用户重跑执行步补齐（避免用例被静默丢失）。
+const NOT_EXECUTED_MSG = "用例未执行：执行阶段未产出该用例的结果，请重跑「执行」步补齐。";
+
 /** Extract every `@@RESULT {json}` object from streamed agent text. */
 export function harvestResults(text: string): RawResult[] {
   const out: RawResult[] = [];
@@ -130,7 +134,7 @@ export function sanitizeApi(raw: unknown): ApiInfo | undefined {
  */
 export function reduceResults(
   raw: RawResult[],
-  opts: { module: string; env: string; time: string; verificationById?: Record<string, string> },
+  opts: { module: string; env: string; time: string; verificationById?: Record<string, string>; caseIds?: string[] },
 ): RunJson {
   const tests: ReducedTest[] = raw.map((r) => {
     let status: FourStateStatus = STATE_ALIASES[String(r.status ?? "").toLowerCase()] ?? "fail";
@@ -148,6 +152,20 @@ export function reduceResults(
       ...(api ? { api } : {}),
     };
   });
+
+  // 兜底补全（问题②修复）：报告用例数应以 cases.json 用例全集为准。执行阶段 AI 可能漏对
+  // 部分用例输出 @@RESULT（用例多时尤甚），导致下游报告「静默」少用例（用户感知为「25 个
+  // 用例报告只显示 16 个」）。这里把 caseIds 中没有对应结果的用例补成 blocked（未执行），让
+  // 报告完整反映全集、漏跑显式可见，且不虚报通过率（未执行计入 total/blocked，不算 pass）。
+  // 不传 caseIds 时行为不变（向后兼容旧调用与单测）。
+  if (opts.caseIds && opts.caseIds.length) {
+    const seen = new Set(tests.map((t) => t.id));
+    for (const id of opts.caseIds) {
+      if (!id || seen.has(id)) continue;
+      seen.add(id);
+      tests.push({ id, status: "blocked", actual: "", error: NOT_EXECUTED_MSG, evidence: [] });
+    }
+  }
 
   const counts: RunCounts = { total: tests.length, pass: 0, fail: 0, partial: 0, blocked: 0 };
   for (const t of tests) counts[t.status]++;
@@ -204,7 +222,7 @@ export function reduceResults(
 /** Convenience: harvest @@RESULT from raw stream text, then reduce. */
 export function reduceFromText(
   text: string,
-  opts: { module: string; env: string; time: string; verificationById?: Record<string, string> },
+  opts: { module: string; env: string; time: string; verificationById?: Record<string, string>; caseIds?: string[] },
 ): RunJson {
   return reduceResults(harvestResults(text), opts);
 }

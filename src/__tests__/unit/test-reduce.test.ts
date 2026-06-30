@@ -234,3 +234,51 @@ describe("api passthrough + sanitizeApi (缺陷报告接口信息地基)", () =>
     assert.equal(run.tests[0].api?.method, "GET");
   });
 });
+
+describe("reduceResults — caseIds 兜底补全（漏执行用例 → 报告以用例全集为准）", () => {
+  it("backfills caseIds missing from results as blocked (未执行)", () => {
+    const run = reduceResults(
+      [{ id: "A", status: "pass" }, { id: "B", status: "fail", error: "真实缺陷" }],
+      { ...OPTS, caseIds: ["A", "B", "C", "D"] },
+    );
+    // 报告用例数 = cases 全集 4，而非仅执行出结果的 2（问题②的核心修复）。
+    assert.deepEqual(run.counts, { total: 4, pass: 1, fail: 1, partial: 0, blocked: 2 });
+    assert.equal(run.tests.length, 4);
+    const c = run.tests.find((t) => t.id === "C");
+    assert.equal(c?.status, "blocked");
+    assert.ok(c?.error.includes("未执行"));
+  });
+
+  it("no caseIds ⇒ behavior unchanged (向后兼容)", () => {
+    const run = reduceResults([{ id: "A", status: "pass" }], OPTS);
+    assert.equal(run.counts.total, 1);
+    assert.equal(run.tests.length, 1);
+  });
+
+  it("does not duplicate when every caseId already has a result", () => {
+    const run = reduceResults(
+      [{ id: "A", status: "pass" }, { id: "B", status: "pass" }],
+      { ...OPTS, caseIds: ["A", "B"] },
+    );
+    assert.equal(run.tests.length, 2);
+    assert.equal(run.counts.total, 2);
+  });
+
+  it("backfilled 未执行 cases count toward funcCounts (不虚报功能通过率)", () => {
+    const run = reduceResults(
+      [{ id: "A", status: "pass" }],
+      { ...OPTS, caseIds: ["A", "B"], verificationById: { A: "功能验证", B: "功能验证" } },
+    );
+    // B 未执行 → blocked，计入功能验证 total，通过率 1/2 不虚高。
+    assert.deepEqual(run.funcCounts, { total: 2, pass: 1, fail: 0, partial: 0, blocked: 1 });
+    assert.equal(run.funcPassStr, "1/2");
+  });
+
+  it("backfilled blocked does not trip the 401 circuit-breaker", () => {
+    const run = reduceResults(
+      [{ id: "A", status: "pass" }],
+      { ...OPTS, caseIds: ["A", "B", "C"] },
+    );
+    assert.equal(run.circuitBroken, false);
+  });
+});
