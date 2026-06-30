@@ -139,7 +139,15 @@ export function getDb(): Database.Database {
     db.pragma('journal_mode = WAL');
     db.pragma('busy_timeout = 5000');
     db.pragma('foreign_keys = ON');
-    withMigrationLock(db, initDb);
+    try {
+      withMigrationLock(db, initDb);
+    } catch (err: unknown) {
+      // initDb→migrateDb 若仍在中途抛错(非 safeAddColumn 的迁移、如 UPDATE/DELETE 在异常
+      // DB 状态失败)，靠后的建表会被跳过，而 db 模块变量上面已赋值 → 后续 getDb 直接返回
+      // 这个「半初始化」库，导致靠后的表(如 test_account_systems)永久缺失、对应功能静默失败。
+      // 记录出来便于打包后从 main.log 定位；不 re-throw，保留「其它功能仍可用」的优雅降级。
+      console.error('[db] initDb failed (schema may be incomplete):', err instanceof Error ? err.message : String(err));
+    }
   }
   return db;
 }
@@ -374,7 +382,11 @@ function safeAddColumn(db: Database.Database, sql: string): void {
     db.exec(sql);
   } catch (err: unknown) {
     if (err instanceof Error && err.message.includes('duplicate column name')) return;
-    throw err;
+    // 非 duplicate 错误以前直接 throw —— 会让整个 migrateDb 在此中断，它后面的建表
+    // (含 test_account_systems 等靠后的表)全被跳过；而 db 模块变量此时已赋值，后续 getDb
+    // 直接返回这个半初始化库 → 那些表永久缺失(测试账号「添加系统」点了没反应的根因)。
+    // 改为记录并跳过这一列，让后续迁移/建表继续，保证 schema 尽量建全。
+    console.error('[db] safeAddColumn skipped:', sql, '→', err instanceof Error ? err.message : String(err));
   }
 }
 
