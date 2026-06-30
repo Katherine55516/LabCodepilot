@@ -64,11 +64,11 @@
 | active/uploads-storage-relocation.md | 上传附件（截图/@文件）存储从用户工作目录迁到统一缓存 `~/.codepilot/` + 存储治理（会话级联清理 + 容量/TTL）+ `/api/uploads` 锚定根校验 + 存量迁移；连带 `.codepilot-images` 同迁 | Phase 0 完成，Phase 1-6 待开始 |
 | active/mcp-marketplace.md | MCP 市场（对照技能市场）：接官方 Registry + Glama 兜底，server.json→MCPServerConfig 确定性映射，一键安装（prefetch 预热 + 安全确认屏障 + 密钥钥匙串），复用 `~/.claude.json` 写入链路 | Phase 0 完成（POC），Phase 1 进行中，Phase 2-4 待开始 |
 | active/skills-discovery-fix.md | 技能创建与发现修复（应用内创建 + 手动拖入）：列表显示项目级 + 项目徽章、Option C 项目斜杠命令客户端展开、codepilot-skill in-process MCP 让 agent 自主发现项目技能（绕开 settingSources，全服务商一致） | Phase 1/Option C/根治/Phase 3/测试 全部完成；Phase 4 原生对齐待立项 |
-| active/document-preview.md | 应用内文档预览（PDF/DOCX/XLSX/PPTX）：复用 PreviewPanel 分发骨架 + serve 取字节 + next/dynamic 懒加载，四类纯前端离线渲染（react-pdf/SheetJS+DataTableViewer/docx-preview/aiden0z-pptx）；离线坑=pdf 4 类资产含 wasm+cmaps、dev 链不含 vendor、文档注入 XSS 强制 DOMPurify；老二进制 .doc/.ppt/.xls 不做 | Phase 0-4 待开始 |
 ### Completed
 
 | 文件 | 主题 | 完成日期 |
 |------|------|----------|
+| completed/document-preview.md | 应用内文档预览（PDF/DOCX/XLSX/PPTX）：复用 PreviewPanel 分发骨架 + serve 取 arrayBuffer + next/dynamic 懒加载四渲染器（react-pdf/SheetJS+DataTableViewer/docx-preview/aiden0z-pptx）、PDF 5 类离线资产管线（含 wasm+cmaps+iccs）、DOCX 三层强制 XSS vs PPTX 差异化安全、raw 路由中文名 RFC 5987 修复；老二进制 .doc/.ppt/.xls 不做 | 2026-06-30 |
 | completed/credential-encryption.md | 凭证本地加密落盘：safeStorage 主密钥 + AES-256-GCM 列加密（双进程 env 过河）、anlcode 文件 + SQLite 敏感列 seal/hydrate、静默迁移 + fail-safe、image-generator 绕过修复 | 2026-06-03 |
 | completed/gsd-bundle.md | 内置打包 GSD（gsd-build/get-shit-done, MIT）：vendor + 转换脚本 + Electron 同步 + Settings UI + 普惠修复 frontmatter description | 2026-05-25 |
 | completed/markdown-artifact-overhaul.md | Markdown 渲染/编辑 × Artifact 网页预览扩展（DiffSummary 卡片 + Sandpack TSX + 长图导出 + 文件树新建 .md + CodeMirror 编辑 + DataTable + 文件 I/O API） | 2026-04-21 |

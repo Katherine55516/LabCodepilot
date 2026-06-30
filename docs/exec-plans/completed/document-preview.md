@@ -1,8 +1,9 @@
 # 执行计划：应用内文档预览（PDF / DOCX / XLSX / PPTX）
 
-> 状态：📋 待开始（计划待审阅）｜ 负责人：（待定）｜ 创建：2026-06-29｜ 最后更新：2026-06-29
+> 状态：✅ 已完成（P0-P4 全部交付）｜ 负责人：（待定）｜ 创建：2026-06-29｜ 最后更新：2026-06-30
 
-> 产品思考见 [docs/insights/document-preview.md](../../insights/document-preview.md)（待 Phase 完成后补）
+> 产品思考见 [docs/insights/document-preview.md](../../insights/document-preview.md)
+> 技术交接见 [docs/handover/document-preview.md](../../handover/document-preview.md)
 > 完整可行性调研（选型对比 + 对抗验证全文）浓缩在本计划 §2–§3 与项目记忆 `doc-preview-feasibility.md`
 
 ---
@@ -136,7 +137,7 @@ PPTX 同理叠 `DOMPurify`（aiden0z 自带协议过滤，但纵深防御仍做�
 | **P1** | MVP：**PDF + XLSX**（易档优先，感知价值最高） | ✅ 已完成 | CDP dev 实测：中文 PDF（2 页/缩放/文本层/工具条）渲染正确无空白、多 sheet xlsx 切换正确（复用 DataTableViewer）、console 零报错；typecheck + 1542 单测全绿 |
 | **P2** | **DOCX**（中档，重在 XSS） | ✅ 已完成 | docx-preview 渲染 + 三层防护；CDP 实测正常 docx 渲染正确、恶意 docx 的 `javascript:` href 被 DOMPurify 清除、sandbox 隔离、主文档未注入、正常内容不误伤；typecheck + 1542 单测全绿 |
 | **P3** | **PPTX**（难档，管理预期） | ✅ 已完成 | aiden0z 渲染 + echarts 懒加载 + try/catch 兜底 + 差异提示；CDP 实测正常 pptx（标题/要点/表格/多 slide/中文）渲染体面、坏 pptx 显示「无法预览」不白屏、console 零报错；typecheck + 1542 单测全绿 |
-| **P4** | 文档：交接 `docs/handover/document-preview.md` + 产品思考 `docs/insights/document-preview.md`（互相反向链接） | 📋 待开始 | 两份文档互链；handover 含 4 渲染器/serve 取字节/离线资产/XSS 防护全貌 |
+| **P4** | 文档：交接 `docs/handover/document-preview.md` + 产品思考 `docs/insights/document-preview.md`（互相反向链接） | ✅ 已完成 | 两份文档互链；handover 含 4 渲染器/serve 取字节/离线资产/XSS 防护全貌 |
 
 **总工作量约 8–12 人天**（含测试 + 两份功能文档）。每个 Phase 独立可交付、独立 commit。
 
@@ -150,8 +151,10 @@ PPTX 同理叠 `DOMPurify`（aiden0z 自带协议过滤，但纵深防御仍做�
 - 2026-06-29：**P1 执行完成**（PDF + XLSX MVP）。装 xlsx 0.18.5（SheetJS CE，锁 registry 版）；新建 `PdfViewer.tsx`（react-pdf + 5 类资产 URL 含 `iccUrl` + 宽度自适应 + 缩放 + 多页 + serve 取字节）、`XlsxViewer.tsx`（SheetJS 解析 → sheet 切换 tab → `sheet_to_json(header:1)` + 表头唯一化 → 复用 `DataTableViewer`）；PreviewPanel 用 `next/dynamic` 接两个渲染器替换占位、header copy 排除文档；FileTreePanel 放开 pdf/xlsx 拦截（保留 docx/pptx 待 P2/P3，doc/xls/ppt 老格式永久拦截）；i18n 三语加 `docPreview.error/pages/zoomIn/zoomOut`。验证：typecheck + 1542 单测全绿；CDP dev 实测——中文 PDF 2 页渲染清晰无空白（cmaps 生效）、文本层可提取、缩放/页数工具条正常；xlsx 双 sheet（员工名单/销售数据）切换数据正确、复用 DataTableViewer 的导出/斑马纹；两类预览 console 均零报错。**@napi-rs/canvas 巡检结论**：pdfjs `NodeCanvasFactory._createCanvas` 用 `createRequire` 运行时 require（非静态 import），浏览器走 `DOMCanvasFactory` 永不触及，dev 实测无报错佐证 → **不进 client bundle**；standalone 体积（NFT 是否误拷平台二进制）留待正式 `electron:pack` 时一并巡检。
 - 2026-06-29：**P2 执行完成**（DOCX）。装 docx-preview 0.3.7（+ jszip 3.10.1 传递依赖）；新建 `DocxViewer.tsx` 三层 XSS 防护：① offscreen 渲染设 `renderAltChunks:false` ② 渲染后 `DOMPurify.sanitize` 清洗正文 ③ 结果（含 docx-preview 生成的 `<style>`）注入 `sandbox=""` iframe srcdoc（图片用 `useBase64URL` 内联,因 sandbox 无 allow-same-origin 时 blob: 不可达）；PreviewPanel `next/dynamic` 接入、FileTreePanel 放开 docx。验证：typecheck + 1542 单测全绿；CDP 实测正常 docx 渲染出标题/正文、恶意 docx（jszip 构造含 `javascript:` 超链接）的 `javascript:` href 被 DOMPurify 清除（srcdoc 不含）、sandbox 隔离、`window.__XSS_FIRED__` 未定义（主文档未注入）、正常文本与链接文字仍渲染（防护不误伤）。
 - 2026-06-30：**P3 执行完成**（PPTX）。装 `@aiden0z/pptx-renderer` 1.2.2（deps echarts + jszip；peerDep pdfjs-dist ^5 已由 react-pdf 满足）；新建 `PptxViewer.tsx`：`PptxViewer.open(bytes, container, { fitMode:'contain', zipLimits:RECOMMENDED_ZIP_LIMITS, pdfjs:false, renderMode:'list' })`，echarts 随组件 `next/dynamic` chunk 二级懒加载（不进主 bundle）、try/catch 兜底（坏文件落 error 态不白屏）、顶部固定「排版可能有差异」提示；PreviewPanel 接入、FileTreePanel 放开 pptx（doc/xls/ppt 老格式永久拦截）；i18n 三语加 `docPreview.pptxNotice`。验证：typecheck + 1542 单测全绿；CDP 实测正常 pptx（python-pptx 生成，标题页/要点列表/表格/多 slide 竖排/中文）渲染体面 + 差异提示横幅显示、坏 pptx（非 zip）显示「无法预览」不白屏、console 零报错。**安全决策（与 docx 不同）**：aiden0z 是结构化渲染（解析 OOXML 节点后 DOM API 绘制，无 innerHTML 注入面）+ 自带外链协议过滤 + `zipLimits` 限制 ZIP 解析（DoS 防护），故不叠 DOMPurify/sandbox iframe（会破坏 echarts canvas 与 IntersectionObserver 滚动）。**待巡检**：echarts 进独立 chunk 是 dynamic import 架构保证，正式 `electron:pack` 时与 `@napi-rs/canvas` 一起核对未进主 bundle/standalone 体积。
+- 2026-06-30：**arm64 打包 + 体积巡检通过**。`electron-builder --mac --arm64` 产出 `AI Native Lab-2.2.0-arm64.dmg`（197M），ad-hoc 签名 + `--deep --strict` 验证通过。巡检确认前述待办闭环：① `@napi-rs/canvas` **未进** standalone（0 个 `.node`，NFT 未误拷，印证 client-only `DOMCanvasFactory` 路径）② echarts **不在** standalone 服务端（0 条目，仅 client chunk）③ react-pdf/docx-preview/@aiden0z/xlsx 均不在服务端 node_modules（client bundle）④ `public/pdf/` 五类资产正确打进 `standalone/public/pdf/`（4.4M）。
 - 2026-06-29：**顺带修复既有 bug** `src/app/api/files/raw/route.ts`：`Content-Disposition` 直接放 `path.basename`（中文文件名）→ HTTP header 非 latin1 抛 `Cannot convert argument to a ByteString`（中文名文件经 raw 取字节 500）。改用 RFC 5987：ASCII 回退名走 `filename=`、原始 UTF-8 名走 `filename*=UTF-8''<pct>`。此 bug 影响所有中文名文件走 raw 通道（DocxViewer 在 PreviewPanel sessionId 为空时 fallback 到 raw 即命中；PDF/XLSX 同理受益）。serve 路由无 `Content-Disposition`，不受影响。
 - 2026-06-29：**测试方法备忘**（非产品问题）：CDP 用 `evaluate` 的 `element.click()` 点文件树时，`textContent.includes(名)` 会先匹配到**文件夹 treeitem**（其 textContent 含所有子文件名），点中只 toggle 展开、不打开预览。应按 textContent 最短匹配选真正的文件 treeitem，或用 CDP 原生 `click(uid)`。
+- 2026-06-30：**P4 执行完成**（功能文档）。基于本计划 + 四个实现 commit 的 diff + 源码逐一核实，输出两份功能文档并互相反向链接：交接 `docs/handover/document-preview.md`（目录结构 / 架构总览 / 数据流 / 4 渲染器逐一 / PDF 5 类离线资产管线 / 三档安全对比 / raw 路由中文名修复 / 局限与待巡检）、产品思考 `docs/insights/document-preview.md`（用户问题 / 纯前端离线 vs LibreOffice 的体积·隐私·架构三约束 / 分阶段排序 / 选型纠偏 / 诚实保真度分级 / Word 安全一等公民 vs PPT 差异化防护 / LibreOffice 按需启用方向）；更新 `docs/handover/README.md` 与 `docs/insights/README.md` 索引。至此 P0-P4 全部完成，本计划由 `active/` 移至 `completed/` 并更新 `docs/exec-plans/README.md`。
 
 ---
 
