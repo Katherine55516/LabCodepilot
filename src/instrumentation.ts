@@ -4,6 +4,19 @@
  */
 export async function register() {
   if (process.env.NEXT_RUNTIME === 'nodejs') {
+    // 全局崩溃捕获(尽早挂,先于下面的 scheduler/reconcile)——把崩溃栈写进 stderr→main.log,
+    // 用于定位「内嵌 server ready 后约 12s 异常退出(code -36616)、之前无栈可查」的根因。
+    process.on('uncaughtException', (err: unknown) => {
+      console.error('[server:uncaughtException]', err instanceof Error ? (err.stack || err.message) : String(err));
+      // 保持「未捕获异常 = 致命」语义:记录后退出,由 electron 侧自动重启(重启后状态干净)。
+      process.exit(1);
+    });
+    process.on('unhandledRejection', (reason: unknown) => {
+      // 只记录、不退出:① 拿到栈用于定位;② 顺带挡掉 Node 默认对未处理 rejection 的 crash——
+      // 若 server 崩溃源恰是某个 fire-and-forget 的 rejection,这能直接缓解。
+      console.error('[server:unhandledRejection]', reason instanceof Error ? (reason.stack || reason.message) : String(reason));
+    });
+
     const { initRuntimeLog } = await import('@/lib/runtime-log');
     initRuntimeLog();
 
