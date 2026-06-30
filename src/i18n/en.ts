@@ -22,7 +22,7 @@ const en = {
   // ── Image Studio (standalone text-to-image) ─────────────────
   'imageStudio.sidebarButton': 'Image Studio',
   'imageStudio.title': 'Image Studio',
-  'imageStudio.subtitle': 'Generate images from a prompt — powered by qwen-image-2.0-pro',
+  'imageStudio.subtitle': 'Generate images from a prompt',
   'imageStudio.promptPlaceholder': 'Describe the image you want to generate…',
   'imageStudio.generate': 'Generate',
   'imageStudio.generating': 'Generating…',
@@ -37,6 +37,8 @@ const en = {
   'imageStudio.openInGallery': 'Open Gallery',
   'imageStudio.failed': 'Generation failed',
   'imageStudio.promptRequired': 'Please enter a prompt first.',
+  'imageStudio.loginRequired': 'Please sign in to use Image Studio.',
+  'imageStudio.goLogin': 'Sign in',
   'imageStudio.result': 'Result',
 
   // ── Chat list panel ─────────────────────────────────────────
@@ -84,6 +86,9 @@ const en = {
   // ── Message input ───────────────────────────────────────────
   'messageInput.attachFiles': 'Attach files',
   'messageInput.helpDesc': 'Show available commands and tips',
+  'btw.title': 'Quick side question',
+  'btw.thinking': 'Thinking…',
+  'btw.emptyHint': 'Type your question after /btw — e.g. "/btw why did we pick this approach?"',
   'messageInput.clearDesc': 'Clear conversation history',
   'messageInput.costDesc': 'Show token usage statistics',
   'messageInput.compactDesc': 'Compress conversation context',

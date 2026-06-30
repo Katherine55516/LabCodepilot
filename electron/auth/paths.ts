@@ -32,6 +32,7 @@ export const ANLCODE_FILES = {
   configs: 'configs.json',
   configsHash: 'configs.hash',
   selectedConfigId: 'selected_config_id',
+  imageConfig: 'image_config.json',
 } as const;
 
 export function anlcodePath(file: keyof typeof ANLCODE_FILES): string {
