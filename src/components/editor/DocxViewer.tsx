@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import DOMPurify from "dompurify";
 import { SpinnerGap } from "@/components/ui/icon";
 import { useTranslation } from "@/hooks/useTranslation";
+import { ZoomToolbar } from "./ZoomToolbar";
 
 /**
  * DocxViewer — Phase 2。docx-preview 渲染 Word(.docx），三层强制 XSS 防护。
@@ -31,6 +32,7 @@ export function DocxViewer({ fileServeUrl }: { fileServeUrl: string }) {
   const { t } = useTranslation();
   const [srcDoc, setSrcDoc] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [zoom, setZoom] = useState(100);
   // 跟踪 offscreen 节点，effect 清理时确保移除（即便渲染中途切换文件）。
   const offscreenRef = useRef<HTMLDivElement | null>(null);
 
@@ -108,19 +110,26 @@ export function DocxViewer({ fileServeUrl }: { fileServeUrl: string }) {
       </div>
     );
   }
-  if (srcDoc === null) {
-    return (
-      <div className="flex h-full items-center justify-center py-12">
-        <SpinnerGap size={20} className="animate-spin text-muted-foreground" />
-      </div>
-    );
-  }
   return (
-    <iframe
-      srcDoc={srcDoc}
-      sandbox=""
-      className="h-full w-full border-0"
-      title="Document preview"
-    />
+    <div className="flex h-full flex-col">
+      {srcDoc !== null && <ZoomToolbar percent={zoom} onChange={setZoom} />}
+      <div className="min-h-0 flex-1 overflow-auto bg-muted/30">
+        {srcDoc === null ? (
+          <div className="flex h-full items-center justify-center py-12">
+            <SpinnerGap size={20} className="animate-spin text-muted-foreground" />
+          </div>
+        ) : (
+          // CSS zoom（Electron/Chromium 原生支持）缩放整个 iframe，外层容器滚动。
+          // zoom 不破坏 sandbox 隔离（仅渲染层缩放，不注入脚本）。
+          <iframe
+            srcDoc={srcDoc}
+            sandbox=""
+            title="Document preview"
+            className="w-full border-0"
+            style={{ height: "100%", zoom: zoom / 100 }}
+          />
+        )}
+      </div>
+    </div>
   );
 }

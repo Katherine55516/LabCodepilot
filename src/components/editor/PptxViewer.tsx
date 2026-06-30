@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { SpinnerGap } from "@/components/ui/icon";
 import { useTranslation } from "@/hooks/useTranslation";
+import { ZoomToolbar } from "./ZoomToolbar";
 
 /**
  * PptxViewer — Phase 3。@aiden0z/pptx-renderer 应用内 PowerPoint(.pptx）预览。
@@ -24,13 +25,14 @@ import { useTranslation } from "@/hooks/useTranslation";
  * 绝不让单个坏文件白屏整个预览面板。
  */
 
-type ViewerInstance = { destroy: () => void };
+type ViewerInstance = { destroy: () => void; setZoom: (percent: number) => Promise<void> };
 
 export function PptxViewer({ fileServeUrl }: { fileServeUrl: string }) {
   const { t } = useTranslation();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const viewerRef = useRef<ViewerInstance | null>(null);
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
+  const [zoom, setZoom] = useState(100);
 
   useEffect(() => {
     let cancelled = false;
@@ -85,12 +87,16 @@ export function PptxViewer({ fileServeUrl }: { fileServeUrl: string }) {
     };
   }, [fileServeUrl]);
 
+  // 缩放：调 aiden0z 的 setZoom（percent）。viewer 就绪前的变更被忽略，
+  // 就绪后渲染完成会以当前 zoom 生效。
+  useEffect(() => {
+    viewerRef.current?.setZoom?.(zoom).catch(() => {});
+  }, [zoom, status]);
+
   return (
     <div className="flex h-full flex-col">
       {status === "ready" && (
-        <div className="shrink-0 border-b border-border/40 bg-muted/40 px-3 py-1 text-center text-[10px] text-muted-foreground">
-          {t("docPreview.pptxNotice")}
-        </div>
+        <ZoomToolbar percent={zoom} onChange={setZoom} left={t("docPreview.pptxNotice")} />
       )}
       <div className="relative min-h-0 flex-1 overflow-auto bg-muted/30">
         <div ref={containerRef} className="min-h-full p-2" />
