@@ -287,9 +287,18 @@ export async function fetchAsrToken(): Promise<AsrTokenResp> {
 
 // ── 9. /api/v1/image/config（文生图凭证下发）─────────────────────────────────
 
-/** 归一化下发的图片配置：encrypted 变体解密 apiKey；缺字段回填，避免部分缺失致不可用。 */
-function normalizeImageConfig(raw: ImageProviderConfig, encrypted: boolean): ImageProviderConfig {
-  let apiKey = raw.apiKey || '';
+/** 服务端原始下发体：容忍 camelCase 与 snake_case 两种字段命名（managed API 惯用 snake_case）。 */
+interface RawImageConfig {
+  apiKey?: string; api_key?: string;
+  workspaceId?: string; workspace_id?: string;
+  model?: string;
+  region?: string;
+  models?: unknown;
+}
+
+/** 归一化下发的图片配置：兼容两种命名；encrypted 变体解密 apiKey；缺字段回填。 */
+function normalizeImageConfig(raw: RawImageConfig, encrypted: boolean): ImageProviderConfig {
+  let apiKey = raw.apiKey || raw.api_key || '';
   if (encrypted && apiKey) {
     try {
       apiKey = decryptAuthToken(apiKey);
@@ -299,12 +308,21 @@ function normalizeImageConfig(raw: ImageProviderConfig, encrypted: boolean): Ima
       apiKey = '';
     }
   }
+  const rawModels = Array.isArray(raw.models) ? raw.models : [];
+  const models = rawModels
+    .map((m) => {
+      const o = (m ?? {}) as Record<string, unknown>;
+      const id = typeof o.id === 'string' ? o.id : '';
+      const label = typeof o.label === 'string' ? o.label : id;
+      return id ? { id, label, default: o.default === true } : null;
+    })
+    .filter((m): m is { id: string; label: string; default: boolean } => m !== null);
   return {
     apiKey,
-    workspaceId: raw.workspaceId || '',
+    workspaceId: raw.workspaceId || raw.workspace_id || '',
     model: raw.model || '',
     region: raw.region || '',
-    models: Array.isArray(raw.models) ? raw.models : [],
+    models,
   };
 }
 
@@ -317,15 +335,15 @@ function normalizeImageConfig(raw: ImageProviderConfig, encrypted: boolean): Ima
  */
 export async function fetchImageConfig(): Promise<ImageProviderConfig> {
   try {
-    let r: ApiResponse<ImageProviderConfig>;
+    let r: ApiResponse<RawImageConfig>;
     let encrypted = true;
     try {
-      r = await apiRequest<ImageProviderConfig>('/api/v1/image/config/encrypted');
+      r = await apiRequest<RawImageConfig>('/api/v1/image/config/encrypted');
     } catch (e) {
       if (e instanceof HttpError && e.status === 503) {
         logWarn('encrypted image config unavailable (503) — falling back to plaintext /api/v1/image/config');
         encrypted = false;
-        r = await apiRequest<ImageProviderConfig>('/api/v1/image/config');
+        r = await apiRequest<RawImageConfig>('/api/v1/image/config');
       } else {
         throw e;
       }

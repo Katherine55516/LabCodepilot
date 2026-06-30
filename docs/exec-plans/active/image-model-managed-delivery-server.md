@@ -61,6 +61,10 @@ If-None-Match: "<hash>"        # 可选，命中则回 304
 | `region` | string | 是 | DashScope MaaS region，如 `cn-beijing`（端点：`https://{workspaceId}.{region}.maas.aliyuncs.com/...`） |
 | `models` | ImageModelOption[] | 是 | 文生图页下拉的可选模型；至少一项；`default:true` 的项作为默认（与顶层 `model` 一致） |
 
+> 🔌 **字段命名兼容**：客户端 `normalizeImageConfig` 同时接受 camelCase（`apiKey`/`workspaceId`）与
+> snake_case（`api_key`/`workspace_id`），两种都能连上——服务端按现有 managed API 的 snake_case 习惯返回也可。
+> `model`/`region`/`models` 无下划线变体，按上表原样。`models[]` 每项 `{ id, label, default? }`。
+
 **响应码**
 
 | 码 | 含义 | 客户端行为 |
