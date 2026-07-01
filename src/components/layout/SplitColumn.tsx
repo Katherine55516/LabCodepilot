@@ -191,6 +191,7 @@ export function SplitColumn({ sessionId, isActive, onClose, onFocus }: SplitColu
           initialHasMore={hasMore}
           modelName={sessionModel}
           providerId={sessionProviderId}
+          isSplitColumn
         />
       </div>
     </div>

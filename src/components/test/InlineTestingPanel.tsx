@@ -2931,11 +2931,13 @@ function XlsxPreview({ t, projectPath, taskName, env, onClose }: {
         ) : !sheet || sheet.rows.length === 0 ? (
           <p className="text-[11px] text-muted-foreground">{t("test.report.xlsxEmpty")}</p>
         ) : (
-          <div className="overflow-x-scroll [&::-webkit-scrollbar]:h-3 [&::-webkit-scrollbar]:[-webkit-appearance:none] [&::-webkit-scrollbar-thumb]:rounded-md [&::-webkit-scrollbar-thumb]:bg-muted-foreground/40">
-            {/* overflow-x-scroll 让横向滚动条【常驻可见】——不用 auto：auto 在 macOS/Electron
-                overlay 模式下静止时会隐藏，用户报「测试报告弹框 X 轴滚动条没有」。arbitrary
-                variant 设 12px 高 + -webkit-appearance:none 强制经典(非 overlay)滚动条。
-                table minWidth 1080 保证宽表格横向溢出、有内容可滚。 */}
+          <div className="overflow-x-scroll">
+            {/* overflow-x-scroll 让横向滚动条【常驻可见】(不用 auto:mac overlay 静止会隐藏)。
+                ⚠️ 不再用 -webkit-appearance:none + 局部自定义滚动条:它关掉滚动条原生外观、却只
+                给了 height 没给 width/track —— mac overlay 容错高看似正常,但 Windows 经典(常驻)
+                滚动条强依赖完整 track 几何,会整条塌陷消失(用户报「Windows 报告弹框 X 轴滚动条
+                没有、右边列看不全也拉不动」)。改为复用 globals.css 那套完整的 12px webkit 滚动条
+                样式(track+thumb 齐全,注释亦为 Windows 加宽)。table minWidth 1080 保证宽表格横向溢出。 */}
             <table className="w-full border-collapse text-[11px]" style={{ minWidth: 1080 }}>
               <thead>
                 <tr className="bg-muted/50 text-left text-muted-foreground">

@@ -63,6 +63,15 @@ interface ChatViewProps {
   initialHasSummary?: boolean;
   /** Per-session reasoning effort restored from the DB ('' = no explicit effort). */
   initialEffort?: string;
+  /**
+   * True when this ChatView is a BACKGROUND column inside the split-view container
+   * (SplitColumn), not a chat the user actively navigated to. Split columns stay
+   * mounted UNDER the full-screen testing workbench overlay; without this flag their
+   * mount-time effect (see the setTestPanelOpen effect below) would flip
+   * testPanelOpen→false and bounce the user out of the workbench a few seconds after
+   * opening it. Only the foreground chat should dismiss the workbench.
+   */
+  isSplitColumn?: boolean;
 }
 
 /**
@@ -83,7 +92,7 @@ const MAX_MESSAGES_IN_MEMORY = 150;
  */
 const MAX_CONTENT_BYTES_IN_MEMORY = 24 * 1024 * 1024; // ~24MB
 
-export function ChatView({ sessionId, initialMessages = [], initialHasMore = false, modelName, providerId, initialPermissionProfile, initialMode, initialHasSummary, initialEffort }: ChatViewProps) {
+export function ChatView({ sessionId, initialMessages = [], initialHasMore = false, modelName, providerId, initialPermissionProfile, initialMode, initialHasSummary, initialEffort, isSplitColumn = false }: ChatViewProps) {
   const { setStreamingSessionId, workingDirectory, setPendingApprovalSessionId, setDashboardPanelOpen, setFileTreeOpen, setIsAssistantWorkspace, setTestPanelOpen } = usePanel();
   const { t } = useTranslation();
   const router = useRouter();
@@ -213,7 +222,16 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
   // mount when arriving from the workbench's 新建对话 / session list), but NOT
   // when the panel is opened while already viewing this session. No-op when the
   // panel is already closed (the common case), so existing chat flow is unaffected.
-  useEffect(() => { setTestPanelOpen(false); }, [sessionId, setTestPanelOpen]);
+  //
+  // EXCEPTION — split columns (isSplitColumn): when split-view is active, 1~2
+  // SplitColumn→ChatView instances stay mounted UNDERNEATH the workbench overlay.
+  // Their fetch finishes a few SECONDS after the user opens the workbench, and this
+  // effect would then fire on mount and flip testPanelOpen→false, un-gating the
+  // AppShell URL-sync effect which router.replace()s the user back into a chat
+  // ("点开报告过几秒自动跳回对话" on Windows, where the fetch is slow enough to make
+  // it reliably reproduce). Background columns must NOT dismiss the workbench — only
+  // a foreground chat the user actually navigated to should.
+  useEffect(() => { if (!isSplitColumn) setTestPanelOpen(false); }, [sessionId, setTestPanelOpen, isSplitColumn]);
 
   // Stream snapshot from the manager — drives all streaming UI
   const [streamSnapshot, setStreamSnapshot] = useState<SessionStreamSnapshot | null>(
