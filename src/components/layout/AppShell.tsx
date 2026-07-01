@@ -240,7 +240,28 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [dashboardPanelOpen, setDashboardPanelOpen] = useState(false);
   const [assistantPanelOpen, setAssistantPanelOpen] = useState(false);
   const [isAssistantWorkspace, setIsAssistantWorkspace] = useState(false);
-  const [testPanelOpen, setTestPanelOpen] = useState(false);
+  const [testPanelOpen, setTestPanelOpenRaw] = useState(false);
+  // 打开测试工作台时锚定「当前对话」。修复用户单栏「点报告过几秒自动跳回同一对话」：底下
+  // /chat/[id] page 在 loading→加载完才【首次挂载】ChatView，其 setTestPanelOpen(false)
+  // effect 挂载即无条件关掉了几秒前打开的工作台。有了 baseSession，ChatView 只在【导航到别的
+  // 对话】(sessionId≠base) 时才关工作台，同一对话的异步首次挂载不再误关。
+  const [testPanelBaseSession, setTestPanelBaseSession] = useState("");
+  const setTestPanelOpen = useCallback((v: boolean) => {
+    if (v) {
+      const m = window.location.pathname.match(/^\/chat\/([^/]+)/);
+      setTestPanelBaseSession(m ? decodeURIComponent(m[1]) : "");
+    } else {
+      // [排障·临时] 记录每次【关闭工作台】的调用栈到 jumpTrace，供 JumpTraceBadge 显示；
+      // 定位/验证根因后连同 JumpTraceBadge 一并移除。
+      try {
+        const stack = (new Error().stack || "").split("\n").slice(2, 9).map((s) => s.trim()).join("  |  ");
+        const arr = JSON.parse(sessionStorage.getItem("jumpTrace") || "[]");
+        arr.unshift({ src: "setTestPanelOpen(false) 关工作台", to: "(露出底下对话)", extra: stack, t: new Date().toLocaleTimeString() });
+        sessionStorage.setItem("jumpTrace", JSON.stringify(arr.slice(0, 15)));
+      } catch {}
+    }
+    setTestPanelOpenRaw(v);
+  }, []);
   // 测试工作台「保活」：一旦打开过就保持挂载（不随路由切换卸载），避免执行进行中切到
   // 设置页再切回时，InlineTestingPanel 卸载导致 SSE 中断 + 重挂载时把持久化的 running
   // 僵尸态规整成 error（显示「失败」）。可见性由下方 testPanelOpen && isChatRoute 用 CSS
@@ -552,6 +573,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       setIsAssistantWorkspace,
       testPanelOpen,
       setTestPanelOpen,
+      testPanelBaseSession,
       currentBranch,
       gitDirtyCount,
       currentWorktreeLabel,
@@ -575,7 +597,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       previewViewMode,
       setPreviewViewMode,
     }),
-    [fileTreeOpen, taskListOpen, gitPanelOpen, previewOpen, terminalOpen, dashboardPanelOpen, assistantPanelOpen, isAssistantWorkspace, testPanelOpen, currentBranch, gitDirtyCount, currentWorktreeLabel, workingDirectory, sessionId, sessionTitle, streamingSessionId, pendingApprovalSessionId, activeStreamingSessions, pendingApprovalSessionIds, previewSource, setPreviewSource, previewFile, setPreviewFile, previewViewMode]
+    [fileTreeOpen, taskListOpen, gitPanelOpen, previewOpen, terminalOpen, dashboardPanelOpen, assistantPanelOpen, isAssistantWorkspace, testPanelOpen, testPanelBaseSession, currentBranch, gitDirtyCount, currentWorktreeLabel, workingDirectory, sessionId, sessionTitle, streamingSessionId, pendingApprovalSessionId, activeStreamingSessions, pendingApprovalSessionIds, previewSource, setPreviewSource, previewFile, setPreviewFile, previewViewMode]
   );
 
   const imageGenValue = useImageGenState();
