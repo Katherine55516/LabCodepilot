@@ -298,17 +298,30 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   // URL sync: when activeColumn changes, update router
   useEffect(() => {
-    // 测试工作台打开时不做分屏 URL 同步：它常驻在全屏覆盖层（同样挂在 /chat 路由下），
-    // 若分屏处于激活态，这里会把 /chat 强制 replace 成 /chat/{activeColumn}，把用户从
-    // 「测试报告」等测试页面自动弹回对话列表里的那个对话（用户报的「点报告过几秒自动跳走」）。
+    // 分屏激活时把 URL 纠偏到 activeColumn 那一列。但测试工作台常驻在全屏覆盖层（同样挂在
+    // /chat 路由下、不改 pathname），这个纠偏会把用户从「测试报告」等页面自动弹回对话
+    // （用户报的「点报告过几秒自动跳走」）。
+    //
+    // 第一道守卫（软）：工作台开着就不同步。它依赖 testPanelOpen 的【瞬时值】——有几条路径
+    // 能在它恰为 false 的一拍让本 effect 重跑并绕过它：①用户点主会话列表某条 → onNavigate
+    // 同步 setTestPanelOpen(false)；②应用启动/刷新时从 localStorage 恢复出 isSplitActive=true
+    // 但 pathname 还没对上、而 testPanelOpen 初值就是 false。用户重打新包后仍复现，正是这道
+    // 软守卫挡不住这些时序。
     if (testPanelOpen) return;
     if (isSplitActive && activeColumnId) {
+      // 第二道守卫（强、对 testPanelOpen 时序免疫）：只有当【当前 pathname 已经是分屏里某一
+      // 成员的对话页】时，才把 URL 纠偏到 activeColumn —— 这是分屏内切换聚焦列的正常同步。
+      // 若当前不在任何分屏成员页上（例如停在 /chat 根：测试工作台覆盖层就挂在这里；或用户刚
+      // 导航到分屏之外的新对话），一律尊重现状、绝不 replace。这样无论 testPanelOpen 瞬时是
+      // true 还是 false，只要人不在分屏成员页上就不会被弹走，从根上堵住「点报告过几秒跳回对话」。
+      const onSplitMemberPage = splitSessions.some((s) => pathname === `/chat/${s.sessionId}`);
+      if (!onSplitMemberPage) return;
       const target = `/chat/${activeColumnId}`;
       if (pathname !== target) {
         router.replace(target);
       }
     }
-  }, [isSplitActive, activeColumnId, pathname, router, testPanelOpen]);
+  }, [isSplitActive, activeColumnId, pathname, router, testPanelOpen, splitSessions]);
 
   const setActiveColumn = useCallback((sessionId: string) => {
     setActiveColumnIdRaw(sessionId);

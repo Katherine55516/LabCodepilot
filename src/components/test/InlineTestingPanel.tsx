@@ -2939,7 +2939,7 @@ function XlsxPreview({ t, projectPath, taskName, env, onClose }: {
         <a href={`/api/test/report-xlsx?projectPath=${encodeURIComponent(projectPath)}&taskName=${encodeURIComponent(taskName)}&env=${encodeURIComponent(env)}&download=1`} className="flex shrink-0 items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[10px] text-foreground hover:bg-muted"><DownloadSimple size={12} /> {t("test.report.exportFile")}</a>
         <button onClick={onClose} className="shrink-0 text-muted-foreground hover:text-foreground" aria-label={t("test.report.close")}><X size={14} /></button>
       </div>
-      <div className="min-h-0 flex-1 overflow-auto p-3">
+      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-scroll p-3">
         {err ? (
           <div className="flex items-center gap-2 text-[11px] text-status-error-foreground">
             {t("test.report.xlsxLoadFailed")}
@@ -2950,13 +2950,14 @@ function XlsxPreview({ t, projectPath, taskName, env, onClose }: {
         ) : !sheet || sheet.rows.length === 0 ? (
           <p className="text-[11px] text-muted-foreground">{t("test.report.xlsxEmpty")}</p>
         ) : (
-          <div className="overflow-x-scroll">
-            {/* overflow-x-scroll 让横向滚动条【常驻可见】(不用 auto:mac overlay 静止会隐藏)。
-                ⚠️ 不再用 -webkit-appearance:none + 局部自定义滚动条:它关掉滚动条原生外观、却只
-                给了 height 没给 width/track —— mac overlay 容错高看似正常,但 Windows 经典(常驻)
-                滚动条强依赖完整 track 几何,会整条塌陷消失(用户报「Windows 报告弹框 X 轴滚动条
-                没有、右边列看不全也拉不动」)。改为复用 globals.css 那套完整的 12px webkit 滚动条
-                样式(track+thumb 齐全,注释亦为 Windows 加宽)。table minWidth 1080 保证宽表格横向溢出。 */}
+          <div className="w-max">
+            {/* 单层滚动：纵向 + 横向溢出都交给【外层】overflow-y-auto + overflow-x-scroll（见上），
+                横向滚动条因此常驻在弹框【可视区底部】。此前套了一层内层 overflow-x-scroll，它的高度
+                =整表全高、横向条落在表格【最底部】，用户须把 Y 轴滚到最底才看得到 X 轴滚动条 —— 故
+                去掉内层滚动，这层 div 仅用 w-max 撑到 table 宽度、不再自己横向滚。外层用 scroll 而非
+                auto 让横向条常驻（mac overlay 静止会隐藏）；此前的 -webkit-appearance:none 局部自定义
+                会让 Windows 经典滚动条塌陷，已删除、改复用 globals.css 完整 12px 滚动条样式。
+                table minWidth 1080 撑出横向溢出。 */}
             <table className="w-full border-collapse text-[11px]" style={{ minWidth: 1080 }}>
               <thead>
                 <tr className="bg-muted/50 text-left text-muted-foreground">
