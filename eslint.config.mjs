@@ -12,8 +12,12 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "release/**",
+    "release-win/**",
     "dist-electron/**",
-    "next-env.d.ts",
+    // Static assets (vendored pdf.js worker + wasm, etc.) — not source to lint
+    "public/**",
+    // next-env.d.ts is generated (root + any sub-app like apps/site)
+    "**/next-env.d.ts",
     // apps/site generated artifacts
     "apps/site/.next/**",
     "apps/site/.source/**",
