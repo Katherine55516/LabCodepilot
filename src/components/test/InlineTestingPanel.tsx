@@ -2917,9 +2917,11 @@ function XlsxPreview({ t, projectPath, taskName, env, onClose }: {
         ) : !sheet || sheet.rows.length === 0 ? (
           <p className="text-[11px] text-muted-foreground">{t("test.report.xlsxEmpty")}</p>
         ) : (
-          <div className="overflow-x-auto">
-            {/* minWidth 让表格按内容宽度展开、超出弹窗宽度 → overflow-x-auto 出现底部横向
-                滚动条（原来 w-full 使表格恰好填满容器、列被挤压换行、无滚动条可拖）。 */}
+          <div className="overflow-x-scroll [&::-webkit-scrollbar]:h-3 [&::-webkit-scrollbar]:[-webkit-appearance:none] [&::-webkit-scrollbar-thumb]:rounded-md [&::-webkit-scrollbar-thumb]:bg-muted-foreground/40">
+            {/* overflow-x-scroll 让横向滚动条【常驻可见】——不用 auto：auto 在 macOS/Electron
+                overlay 模式下静止时会隐藏，用户报「测试报告弹框 X 轴滚动条没有」。arbitrary
+                variant 设 12px 高 + -webkit-appearance:none 强制经典(非 overlay)滚动条。
+                table minWidth 1080 保证宽表格横向溢出、有内容可滚。 */}
             <table className="w-full border-collapse text-[11px]" style={{ minWidth: 1080 }}>
               <thead>
                 <tr className="bg-muted/50 text-left text-muted-foreground">
