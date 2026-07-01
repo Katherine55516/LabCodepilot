@@ -298,13 +298,17 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   // URL sync: when activeColumn changes, update router
   useEffect(() => {
+    // 测试工作台打开时不做分屏 URL 同步：它常驻在全屏覆盖层（同样挂在 /chat 路由下），
+    // 若分屏处于激活态，这里会把 /chat 强制 replace 成 /chat/{activeColumn}，把用户从
+    // 「测试报告」等测试页面自动弹回对话列表里的那个对话（用户报的「点报告过几秒自动跳走」）。
+    if (testPanelOpen) return;
     if (isSplitActive && activeColumnId) {
       const target = `/chat/${activeColumnId}`;
       if (pathname !== target) {
         router.replace(target);
       }
     }
-  }, [isSplitActive, activeColumnId, pathname, router]);
+  }, [isSplitActive, activeColumnId, pathname, router, testPanelOpen]);
 
   const setActiveColumn = useCallback((sessionId: string) => {
     setActiveColumnIdRaw(sessionId);
