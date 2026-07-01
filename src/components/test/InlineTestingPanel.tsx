@@ -2384,7 +2384,12 @@ function ReportView({ t, results, four, funcCounts, funcPassStr, circuitBroken, 
         </table>
       </div>
       <p className="mt-2 text-[11px] text-muted-foreground">ℹ️ {t("test.report.factsNote")}</p>
-      {lightbox && (
+      {/* lightbox 用 Portal 渲染到 body —— 这个 ReportView 挂在「报告」顶部 tab 的报告行
+          手风琴展开区里，其祖先是 overflow-hidden rounded-lg（accordion 行容器）；<video>
+          嵌套在 overflow-hidden + 圆角祖先内会硬件合成黑屏（录像已加载、控件/时长都在，
+          画面是黑的——与 XlsxPreview 此前同一根因，那边已用 Portal 修过，这里当时漏了、
+          没有实测覆盖到）。用户报「报告 tab 中的录像播放不了」命中的正是这条路径。 */}
+      {lightbox && createPortal(
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-6" onClick={() => setLightbox(null)}>
           {isVid(lightbox) ? (
             <video src={mediaUrl(lightbox)} controls autoPlay muted playsInline preload="metadata" className="max-h-full max-w-full" onClick={(e) => e.stopPropagation()} />
@@ -2392,7 +2397,8 @@ function ReportView({ t, results, four, funcCounts, funcPassStr, circuitBroken, 
             // eslint-disable-next-line @next/next/no-img-element
             <img src={mediaUrl(lightbox)} alt={lightbox} className="max-h-full max-w-full object-contain" onClick={(e) => e.stopPropagation()} />
           )}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
