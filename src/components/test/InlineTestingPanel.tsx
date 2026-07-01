@@ -1499,6 +1499,14 @@ export function InlineTestingPanel() {
           <ListChecks size={14} className="text-primary" />
           {t("test.title")}
         </span>
+        {process.env.NEXT_PUBLIC_BUILD_ID ? (
+          <span
+            className="select-text font-mono text-[10px] leading-none text-muted-foreground/60"
+            title="当前运行包的构建标记（commit · 构建时间）—— 用于核对界面是否为最新打包版本"
+          >
+            {process.env.NEXT_PUBLIC_BUILD_ID}
+          </span>
+        ) : null}
         <span className="flex-1" />
         <div className="flex overflow-hidden rounded-md border border-border">
           {segBtn("dash", t("test.projects"))}

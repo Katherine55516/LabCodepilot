@@ -1,5 +1,25 @@
 import type { NextConfig } from "next";
+import { execSync } from "node:child_process";
 import pkg from "./package.json" with { type: "json" };
+
+// 构建标记：短 commit + 构建时间。在打包/构建时求值，经 env 内联进前端 bundle，
+// 让用户无需 F12/git 就能在界面上核对「当前运行的这个包」用的是哪个版本的代码——
+// 反复出现「已修复但用户仍复现」时，用它一眼区分是代码问题还是包版本落后。
+// git 不可用的极少数环境退化为仅构建时间，保证始终有一个可辨识的标记。
+const BUILD_ID = (() => {
+  const at = new Date().toISOString().slice(0, 16).replace("T", " ");
+  try {
+    const sha = execSync("git rev-parse --short HEAD", {
+      cwd: import.meta.dirname,
+      stdio: ["ignore", "pipe", "ignore"],
+    })
+      .toString()
+      .trim();
+    return `${sha} · ${at}`;
+  } catch {
+    return at;
+  }
+})();
 
 const nextConfig: NextConfig = {
   output: 'standalone',
@@ -56,6 +76,8 @@ const nextConfig: NextConfig = {
   ],
   env: {
     NEXT_PUBLIC_APP_VERSION: pkg.version,
+    // 构建标记（短 commit · 构建时间），供界面自助核对包版本，见文件顶部 BUILD_ID。
+    NEXT_PUBLIC_BUILD_ID: BUILD_ID,
     // Bailian image api key is injected at BUILD time (not committed to source).
     // next.config `env` inlines the build-time value into the bundle, so the
     // packaged app has it at runtime while git keeps no plaintext key. Build with:
