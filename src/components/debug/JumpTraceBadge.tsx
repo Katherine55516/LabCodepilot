@@ -1,5 +1,6 @@
 "use client";
 import { useEffect, useState } from "react";
+import { createPortal } from "react-dom";
 
 type Jump = { src: string; from?: string; to: string; extra?: string; t: string };
 
@@ -60,7 +61,7 @@ export function JumpTraceBadge() {
   }, []);
 
   if (!jumps.length) return null;
-  return (
+  return createPortal(
     <div className="fixed bottom-2 right-2 z-[999] max-w-[92vw] font-mono text-[10px] leading-tight">
       <button
         onClick={() => setOpen((o) => !o)}
@@ -93,6 +94,7 @@ export function JumpTraceBadge() {
           ))}
         </div>
       )}
-    </div>
+    </div>,
+    document.body,
   );
 }

@@ -286,6 +286,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         for (const e of events) arr.unshift({ src: "AppShell诊断", to: e, extra: `now pathname=${pathname}`, t: new Date().toLocaleTimeString() });
         sessionStorage.setItem("jumpTrace", JSON.stringify(arr.slice(0, 25)));
       } catch {}
+      // [排障·临时] 右下角浮层可能被带 transform 的祖先 / overflow-hidden 困住而不显示，这里
+      // 用 alert 兜底——仅在工作台开着(或刚从可见塌陷)时弹，避免正常切对话也弹，保证用户一定
+      // 看到真凶、能截图。定位后连同其余 [排障·临时] 代码一并移除。
+      if (wbVisibleDiagRef.current || testPanelOpen) {
+        try {
+          window.alert("【跳转诊断 / 定位后会移除】\n" + events.join("\n") + "\n当前 pathname=" + pathname);
+        } catch {}
+      }
     }
     pathnameDiagRef.current = pathname;
     wbVisibleDiagRef.current = wbVisibleDiag;
