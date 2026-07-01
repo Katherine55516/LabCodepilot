@@ -141,6 +141,11 @@ const nextConfig: NextConfig = {
       'README_JA.md',
       'RELEASE_NOTES.md',
       '.codepilot/**',
+      // `.claude/` holds agent/editor state — incl. git worktrees under
+      // `.claude/worktrees/` that may contain their own node_modules/.next/
+      // release/. NFT would otherwise sweep a worktree's `release/*.app` into
+      // standalone and break electron-builder codesign (nested .app bundle).
+      '.claude/**',
       'apps/**',
       'docs/**',
       'release/**',
