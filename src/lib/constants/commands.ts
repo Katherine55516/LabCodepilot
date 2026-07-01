@@ -19,6 +19,7 @@ export const BUILT_IN_COMMANDS: PopoverItem[] = [
   { label: 'help', value: '/help', description: 'Show available commands and tips', descriptionKey: 'messageInput.helpDesc', builtIn: true, immediate: true },
   { label: 'clear', value: '/clear', description: 'Clear conversation history', descriptionKey: 'messageInput.clearDesc', builtIn: true, immediate: true },
   { label: 'cost', value: '/cost', description: 'Show token usage statistics', descriptionKey: 'messageInput.costDesc', builtIn: true, immediate: true },
+  { label: 'btw', value: '/btw', description: 'Ask a quick side question (ephemeral popup)', descriptionKey: 'messageInput.btwDesc', builtIn: true },
   { label: 'compact', value: '/compact', description: 'Compress conversation context', descriptionKey: 'messageInput.compactDesc', builtIn: true, kind: 'sdk_command' },
   { label: 'doctor', value: '/doctor', description: 'Diagnose project health', descriptionKey: 'messageInput.doctorDesc', builtIn: true, kind: 'codepilot_command' },
   { label: 'init', value: '/init', description: 'Initialize CLAUDE.md for project', descriptionKey: 'messageInput.initDesc', builtIn: true, kind: 'sdk_command' },

@@ -11,7 +11,7 @@ import type { PopoverItem, PopoverMode, CommandBadge, CliBadge, MentionNodeType,
 // ─── Result types ────────────────────────────────────────────────
 
 export interface InsertResult {
-  action: 'immediate_command' | 'set_badge' | 'insert_file_mention';
+  action: 'immediate_command' | 'set_badge' | 'insert_file_mention' | 'insert_command_text';
   commandValue?: string;
   badge?: CommandBadge;
   newInputValue?: string;
@@ -120,6 +120,14 @@ export function resolveItemSelection(
   // Immediate built-in commands
   if (item.builtIn && item.immediate) {
     return { action: 'immediate_command', commandValue: item.value };
+  }
+
+  // /btw carries a free-text question, so selecting it fills the input with
+  // "/btw " for the user to keep typing — it must NOT fire immediately or turn
+  // into a badge. Submit-time parsing (resolveDirectSlash) routes it to the popup.
+  if (item.value === '/btw') {
+    const { before, after } = splitAroundTrigger(inputValue, triggerPos, popoverFilter);
+    return { action: 'insert_command_text', newInputValue: `${before}/btw ${after}` };
   }
 
   // Non-immediate commands: show as badge, preserving any text outside the trigger

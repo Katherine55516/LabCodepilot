@@ -3,23 +3,22 @@
  * CURRENT conversation as context, without ever touching the main conversation.
  *
  * Mirrors Claude Code CLI's /btw command semantics:
- *   - No tools: native generateText with no tools wired. It can only answer from
- *     the context it's handed (no file reads, no commands, no web).
- *   - Single response, stateless: one completion, no follow-up thread.
- *   - Ephemeral: does NOT persist anything — no addMessage, no session row,
- *     no sdk_session_id, and crucially NO session lock. Because it never takes
- *     the per-session lock that /api/chat uses, it runs concurrently with the
- *     main stream and never interrupts it.
+ *   - No tools / single response / stateless / ephemeral: persists nothing and
+ *     takes NO session lock, so it runs concurrently with the main stream and
+ *     never interrupts it.
  *   - Context comes from the client's in-memory snapshot (messages + in-flight
- *     streaming text), so the side question can see content that hasn't been
- *     persisted to the DB yet.
+ *     streaming text), so the aside can see content not yet persisted to the DB.
  *
- * Uses the Vercel AI SDK via the unified provider factory (createModel) — the
- * same path as /api/chat/structured. No Claude Code SDK dependency.
+ * Runs through the Claude Code SDK (generateTextViaSdk) — the SAME subprocess
+ * path as the main conversation — NOT the Vercel AI SDK. This matters for model
+ * resolution: managed models arrive as CLI aliases like `claude-opus-4-7[1m]`
+ * (the `[1m]` = 1M-context variant is a Claude Code alias suffix). Only the SDK
+ * subprocess resolves those aliases; a direct @ai-sdk/anthropic call sends
+ * `claude-opus-4-7[1m]` verbatim to the proxy → 503 model_not_found. Going
+ * through the SDK keeps /btw's model handling identical to the main stream.
  */
 import { NextRequest, NextResponse } from 'next/server';
-import { generateText, type ModelMessage } from 'ai';
-import { createModel } from '@/lib/ai-provider';
+import { generateTextViaSdk } from '@/lib/claude-client';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -36,14 +35,16 @@ Rules:
 /** Cap how much history we forward, to bound token cost of the aside. */
 const MAX_CONTEXT_MESSAGES = 60;
 
+type CtxMessage = { role: 'user' | 'assistant'; content: string };
+
 /**
- * Normalize the client-supplied context snapshot into typed ModelMessage[].
- * Drops anything that isn't a plain text user/assistant turn, then keeps only
- * the most recent N messages.
+ * Normalize the client-supplied context snapshot into plain user/assistant
+ * turns. Drops anything that isn't a plain text turn, then keeps only the most
+ * recent N messages.
  */
-function sanitizeContext(raw: unknown): ModelMessage[] {
+function sanitizeContext(raw: unknown): CtxMessage[] {
   if (!Array.isArray(raw)) return [];
-  const cleaned: ModelMessage[] = [];
+  const cleaned: CtxMessage[] = [];
   for (const m of raw) {
     if (!m || typeof m !== 'object') continue;
     const role = (m as { role?: unknown }).role;
@@ -64,35 +65,28 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'question is required' }, { status: 400 });
     }
 
+    // generateTextViaSdk takes a single prompt string (not a messages array),
+    // so fold the context snapshot into the prompt as a plain transcript.
     const context = sanitizeContext(contextMessages);
-    const messages: ModelMessage[] = [
-      ...context,
-      { role: 'user', content: question.trim() },
-    ];
+    const historyText = context
+      .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
+      .join('\n\n');
+    const prompt = historyText
+      ? `Conversation so far (for context):\n\n${historyText}\n\n---\n\nSide question: ${question.trim()}`
+      : question.trim();
 
-    // Unified provider factory — same as /api/chat/structured. No tools wired.
-    const { languageModel } = createModel({ providerId, model });
+    // Single-turn, no session, no lock — runs concurrently with the main stream.
+    // Provider/model resolution (incl. CLI alias like [1m]), the 60s timeout and
+    // abort handling all live inside generateTextViaSdk.
+    const answer = await generateTextViaSdk({
+      providerId,
+      model,
+      system: BTW_SYSTEM_PROMPT,
+      prompt,
+      abortSignal: request.signal,
+    });
 
-    // Honor client aborts (popup closed) and add a 45s safety timeout so a
-    // hung provider can't pin the request open.
-    const abortController = new AbortController();
-    const onClientAbort = () => abortController.abort();
-    request.signal?.addEventListener('abort', onClientAbort);
-    const timeoutId = setTimeout(() => abortController.abort(), 45_000);
-
-    try {
-      const result = await generateText({
-        model: languageModel,
-        system: BTW_SYSTEM_PROMPT,
-        messages,
-        maxOutputTokens: 1024,
-        abortSignal: abortController.signal,
-      });
-      return NextResponse.json({ answer: result.text ?? '' });
-    } finally {
-      clearTimeout(timeoutId);
-      request.signal?.removeEventListener('abort', onClientAbort);
-    }
+    return NextResponse.json({ answer: answer ?? '' });
   } catch (error) {
     console.error('[btw] side question failed:', error);
     return NextResponse.json({ error: String(error) }, { status: 500 });

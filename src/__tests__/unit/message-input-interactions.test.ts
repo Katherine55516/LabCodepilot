@@ -229,6 +229,14 @@ describe('Popover item selection (Enter/Tab)', () => {
     assert.ok(result.badge);
     assert.equal(result.badge.kind, 'slash_command');
   });
+
+  it('selecting /btw fills the input with "/btw " (not immediate, not a badge)', () => {
+    const btwItem = BUILT_IN_COMMANDS.find((c) => c.label === 'btw')!;
+    assert.ok(btwItem, 'btw command must exist in BUILT_IN_COMMANDS');
+    const result = resolveItemSelection(btwItem, 'skill', 0, '/b', 'b');
+    assert.equal(result.action, 'insert_command_text');
+    assert.equal(result.newInputValue, '/btw ');
+  });
 });
 
 describe('Escape closes popover', () => {
@@ -840,8 +848,12 @@ describe('Built-in commands data integrity (real BUILT_IN_COMMANDS)', () => {
     }
   });
 
-  it('all non-immediate commands have a kind', () => {
-    const nonImmediates = BUILT_IN_COMMANDS.filter((c) => !c.immediate);
+  it('all non-immediate commands have a kind (except /btw, which fills text)', () => {
+    // /btw is special: non-immediate, but it fills the input for the user to keep
+    // typing (resolveItemSelection → insert_command_text) rather than dispatching
+    // as a badge, so it intentionally has no kind. All OTHER non-immediate
+    // commands are badge commands and must carry a kind.
+    const nonImmediates = BUILT_IN_COMMANDS.filter((c) => !c.immediate && c.value !== '/btw');
     assert.ok(nonImmediates.length > 0, 'there should be at least one non-immediate command');
     for (const cmd of nonImmediates) {
       assert.ok(cmd.kind, `non-immediate command "${cmd.value}" should have a kind`);

@@ -34,7 +34,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Create model via unified provider factory
+    // Create model via unified provider factory.
+    // ⚠️ Known limitation: this goes through @ai-sdk/anthropic, which does NOT
+    // resolve Claude Code CLI model aliases. If a caller passes a managed model
+    // whose id is a CLI alias (e.g. `claude-opus-4-7[1m]`), createModel forwards
+    // it verbatim → proxy 503 model_not_found. The main stream and /btw avoid
+    // this by going through the SDK subprocess (see api/chat/btw/route.ts). This
+    // route currently has no callers; if it gains one that passes managed CLI
+    // aliases, switch it to generateTextViaSdk or normalize the model first.
     const { languageModel } = createModel({
       providerId: options?.providerId,
       model: options?.model,

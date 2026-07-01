@@ -87,6 +87,7 @@ const zh: Record<TranslationKey, string> = {
   'btw.thinking': '思考中…',
   'btw.emptyHint': '在 /btw 后输入你的问题，例如「/btw 我们为什么选这个方案？」',
   'messageInput.clearDesc': '清除对话历史',
+  'messageInput.btwDesc': '快速侧问（临时弹窗，不进对话）',
   'messageInput.costDesc': '显示 Token 用量统计',
   'messageInput.compactDesc': '压缩对话上下文',
   'messageInput.doctorDesc': '诊断项目健康状况',

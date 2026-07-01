@@ -96,6 +96,7 @@ const zhHK: Record<TranslationKey, string> = {
   'btw.thinking': '思考中…',
   'btw.emptyHint': '在 /btw 後輸入你的問題，例如「/btw 我們為什麼選這個方案？」',
   'messageInput.clearDesc': '清除對話歷史',
+  'messageInput.btwDesc': '快速側問（臨時彈窗，不入對話）',
   'messageInput.costDesc': '顯示 Token 用量統計',
   'messageInput.compactDesc': '壓縮對話上下文',
   'messageInput.doctorDesc': '診斷項目健康狀況',

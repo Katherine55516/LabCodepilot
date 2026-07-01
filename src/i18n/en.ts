@@ -90,6 +90,7 @@ const en = {
   'btw.thinking': 'Thinking…',
   'btw.emptyHint': 'Type your question after /btw — e.g. "/btw why did we pick this approach?"',
   'messageInput.clearDesc': 'Clear conversation history',
+  'messageInput.btwDesc': 'Ask a quick side question (ephemeral)',
   'messageInput.costDesc': 'Show token usage statistics',
   'messageInput.compactDesc': 'Compress conversation context',
   'messageInput.doctorDesc': 'Diagnose project health',
