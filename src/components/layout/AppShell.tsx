@@ -19,6 +19,7 @@ import { BatchImageGenContext, useBatchImageGenState } from "@/hooks/useBatchIma
 import { SplitContext, type SplitSession } from "@/hooks/useSplit";
 import { SplitChatContainer } from "./SplitChatContainer";
 import { ErrorBoundary } from "./ErrorBoundary";
+import { JumpTraceBadge } from "@/components/debug/JumpTraceBadge";
 import { getActiveSessionIds, getSnapshot } from "@/lib/stream-session-manager";
 import { useGitStatus } from "@/hooks/useGitStatus";
 import { SetupCenter } from '@/components/setup/SetupCenter';
@@ -318,6 +319,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       if (!onSplitMemberPage) return;
       const target = `/chat/${activeColumnId}`;
       if (pathname !== target) {
+        // [排障·临时] 记录本次自动 URL 纠偏的来源与状态，供 JumpTraceBadge 在无 F12 的
+        // 打包版里显示；定位完这个跳转 bug 后连同 JumpTraceBadge 一并移除。
+        try {
+          const arr = JSON.parse(sessionStorage.getItem("jumpTrace") || "[]");
+          arr.unshift({ src: "AppShell.URLSync", from: pathname, to: target, extra: `isSplitActive=${isSplitActive} activeCol=${activeColumnId} testPanelOpen=${testPanelOpen} onSplitMember=${onSplitMemberPage}`, t: new Date().toLocaleTimeString() });
+          sessionStorage.setItem("jumpTrace", JSON.stringify(arr.slice(0, 15)));
+        } catch {}
         router.replace(target);
       }
     }
@@ -613,6 +621,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                         <InlineTestingPanel />
                       </div>
                     )}
+                    {/* [排障·临时] 跳转诊断浮层：抓「点报告过几秒自动跳回对话」的真凶，定位后移除 */}
+                    <JumpTraceBadge />
                   </main>
                 </div>
                 {/* Hide all side panels while the test workbench is open — it's a
