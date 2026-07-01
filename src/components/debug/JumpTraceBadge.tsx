@@ -29,27 +29,32 @@ export function JumpTraceBadge() {
 
   useEffect(() => {
     setJumps(readJumps());
-    const orig = history.replaceState;
-    history.replaceState = function (this: History, data: unknown, unused: string, url?: string | URL | null) {
-      const u = String(url ?? "");
-      if (/\/chat\/[^/]/.test(u)) {
-        try {
-          const stack = (new Error().stack || "")
-            .split("\n")
-            .slice(2, 8)
-            .map((s) => s.trim())
-            .join("  |  ");
-          const arr = readJumps();
-          arr.unshift({ src: "history.replaceState", to: u, extra: stack, t: new Date().toLocaleTimeString() });
-          sessionStorage.setItem("jumpTrace", JSON.stringify(arr.slice(0, 15)));
-          setJumps(arr.slice(0, 15));
-        } catch {}
-      }
-      return orig.call(this, data, unused, url);
+    const origReplace = history.replaceState;
+    const origPush = history.pushState;
+    // 记录所有程序式导航（pushState=router.push / replaceState=router.replace），带调用栈。
+    // 这次不再只过滤 /chat —— 工作台"消失"也可能是 pathname 变成非 /chat 让 isChatRoute=false，
+    // 需要看到跳去了哪。栈能指出是哪个文件/函数触发的导航。
+    const record = (method: string, url: unknown) => {
+      try {
+        const stack = (new Error().stack || "").split("\n").slice(3, 9).map((s) => s.trim()).join("  |  ");
+        const arr = readJumps();
+        arr.unshift({ src: `history.${method}`, to: String(url ?? ""), extra: stack, t: new Date().toLocaleTimeString() });
+        sessionStorage.setItem("jumpTrace", JSON.stringify(arr.slice(0, 20)));
+        setJumps(arr.slice(0, 20));
+      } catch {}
+    };
+    history.replaceState = function (this: History, d: unknown, un: string, url?: string | URL | null) {
+      record("replaceState", url);
+      return origReplace.call(this, d, un, url);
     } as typeof history.replaceState;
+    history.pushState = function (this: History, d: unknown, un: string, url?: string | URL | null) {
+      record("pushState", url);
+      return origPush.call(this, d, un, url);
+    } as typeof history.pushState;
     const iv = setInterval(() => setJumps(readJumps()), 800);
     return () => {
-      history.replaceState = orig;
+      history.replaceState = origReplace;
+      history.pushState = origPush;
       clearInterval(iv);
     };
   }, []);

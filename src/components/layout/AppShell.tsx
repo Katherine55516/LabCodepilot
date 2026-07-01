@@ -268,6 +268,29 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // 控制（display:contents ↔ hidden），组件实例与内部 state、in-flight fetch 全程保留。
   const [testEverOpened, setTestEverOpened] = useState(false);
 
+  // [排障·临时] 总闸诊断：记录 pathname 的每次变化 + 测试工作台【从可见变隐藏】的瞬间。
+  // 用户单栏、构建标记确认新包、点报告后几秒自动跳回同一对话，但 wrap(setTestPanelOpen 关闭)
+  // 与 replaceState 都没抓到 → 跳转是第三种机制。这里补齐：任何 pathname 变化(含 router.push)
+  // 和工作台可见性(testEverOpened && testPanelOpen && isChatRoute)塌陷都写进 jumpTrace，直接
+  // 指出是「导航到了哪」还是「哪个条件让工作台隐藏」。定位后连同 JumpTraceBadge 一并移除。
+  const wbVisibleDiag = testEverOpened && testPanelOpen && isChatRoute;
+  const pathnameDiagRef = useRef(pathname);
+  const wbVisibleDiagRef = useRef(wbVisibleDiag);
+  useEffect(() => {
+    const events: string[] = [];
+    if (pathnameDiagRef.current !== pathname) events.push(`pathname 变化: ${pathnameDiagRef.current} → ${pathname}`);
+    if (wbVisibleDiagRef.current && !wbVisibleDiag) events.push(`工作台隐藏: testPanelOpen=${testPanelOpen} isChatRoute=${isChatRoute} testEverOpened=${testEverOpened}`);
+    if (events.length) {
+      try {
+        const arr = JSON.parse(sessionStorage.getItem("jumpTrace") || "[]");
+        for (const e of events) arr.unshift({ src: "AppShell诊断", to: e, extra: `now pathname=${pathname}`, t: new Date().toLocaleTimeString() });
+        sessionStorage.setItem("jumpTrace", JSON.stringify(arr.slice(0, 25)));
+      } catch {}
+    }
+    pathnameDiagRef.current = pathname;
+    wbVisibleDiagRef.current = wbVisibleDiag;
+  }, [pathname, wbVisibleDiag, testPanelOpen, isChatRoute, testEverOpened]);
+
   // --- Git summary (derived from polling hook, no setState needed) ---
   const [currentWorktreeLabel, setCurrentWorktreeLabel] = useState("");
 
