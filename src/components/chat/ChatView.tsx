@@ -4,7 +4,7 @@ import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Message, MessagesResponse, FileAttachment, SessionStreamSnapshot, MentionRef } from '@/types';
 import { parseMessageContent } from '@/types';
-import { BtwDialog } from './BtwDialog';
+import { BtwPanel } from './BtwPanel';
 import { useBtw } from '@/hooks/useBtw';
 import { buildFilesDisplayContent } from '@/lib/file-utils';
 import { trimMessageWindow } from '@/lib/message-window';
@@ -1109,14 +1109,17 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
           />
         }
       />
-      <BtwDialog
-        open={btw.open}
-        onOpenChange={btw.setOpen}
-        question={btw.question}
-        answer={btw.answer}
-        loading={btw.loading}
-        error={btw.error}
-      />
+      {btw.open && (
+        <BtwPanel
+          messages={btw.messages}
+          loading={btw.loading}
+          error={btw.error}
+          onAsk={btw.ask}
+          onStop={btw.stop}
+          onClear={btw.clear}
+          onClose={() => btw.setOpen(false)}
+        />
+      )}
     </div>
   );
 }

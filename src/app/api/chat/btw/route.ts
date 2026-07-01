@@ -24,14 +24,14 @@ import { streamTextViaSdk } from '@/lib/claude-client';
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const BTW_SYSTEM_PROMPT = `You are answering a quick "by the way" side question raised during an ongoing conversation.
+const BTW_SYSTEM_PROMPT = `You are the assistant in a "side chat" — a quick, ongoing aside running alongside the user's main conversation.
 
 Rules:
-- Answer ONLY from information already present in the conversation context provided below. You have NO tools: you cannot read files, run commands, search the web, or access anything outside this conversation.
-- If the answer is not in the context, say so briefly instead of guessing.
-- Be concise and direct. This is a quick aside, not a deep dive — a sentence or a few is usually right.
-- Reply in the same language the user used for the question.
-- This exchange is ephemeral and will not be saved to the conversation history.`;
+- Use the main conversation (provided for context) and the side-chat history to answer the user's LATEST question. You have NO tools: you cannot read files, run commands, search the web, or access anything outside what's provided here.
+- If the answer isn't in the provided context, say so briefly instead of guessing.
+- Be concise and direct — this is a quick aside, usually a sentence or a few. Follow-up questions are expected.
+- Reply in the same language the user used.
+- This side chat is ephemeral and is not saved to the main conversation history.`;
 
 /** Cap how much history we forward, to bound token cost of the aside. */
 const MAX_CONTEXT_MESSAGES = 60;
@@ -60,21 +60,26 @@ function sanitizeContext(raw: unknown): CtxMessage[] {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json().catch(() => ({}));
-    const { question, contextMessages, model, providerId } = body ?? {};
+    const { question, contextMessages, sideMessages, model, providerId } = body ?? {};
 
     if (!question || typeof question !== 'string' || !question.trim()) {
       return NextResponse.json({ error: 'question is required' }, { status: 400 });
     }
 
-    // streamTextViaSdk takes a single prompt string (not a messages array),
-    // so fold the context snapshot into the prompt as a plain transcript.
-    const context = sanitizeContext(contextMessages);
-    const historyText = context
+    // streamTextViaSdk takes a single prompt string (not a messages array), so
+    // fold both transcripts into one prompt: the MAIN conversation snapshot (for
+    // context, re-sent every turn) + the SIDE-CHAT's own prior turns + the new
+    // question.
+    const mainText = sanitizeContext(contextMessages)
       .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
       .join('\n\n');
-    const prompt = historyText
-      ? `Conversation so far (for context):\n\n${historyText}\n\n---\n\nSide question: ${question.trim()}`
-      : question.trim();
+    const sideText = sanitizeContext(sideMessages)
+      .map((m) => `${m.role === 'user' ? 'User' : 'Assistant'}: ${m.content}`)
+      .join('\n\n');
+    let prompt = '';
+    if (mainText) prompt += `Main conversation so far (for context):\n\n${mainText}\n\n---\n\n`;
+    if (sideText) prompt += `Side chat so far:\n\n${sideText}\n\n`;
+    prompt += `Latest side question: ${question.trim()}`;
 
     // Single-turn, no session, no lock — runs concurrently with the main stream.
     // Stream the answer token-by-token as SSE (`data: {"delta"|"done"|"error"}`)

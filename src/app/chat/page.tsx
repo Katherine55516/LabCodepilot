@@ -22,7 +22,7 @@ import { seedSnapshotPatch } from '@/lib/stream-session-manager';
 import { NEW_CHAT_PREFILL_KEY } from '@/lib/constants/chat-prefill';
 import { buildFilesDisplayContent } from '@/lib/file-utils';
 import { parseMessageContent } from '@/types';
-import { BtwDialog } from '@/components/chat/BtwDialog';
+import { BtwPanel } from '@/components/chat/BtwPanel';
 import { useBtw } from '@/hooks/useBtw';
 
 interface ToolUseInfo {
@@ -1006,14 +1006,17 @@ export default function NewChatPage() {
         onEffortChange={setSelectedEffort}
         initialValue={prefillText}
       />
-      <BtwDialog
-        open={btw.open}
-        onOpenChange={btw.setOpen}
-        question={btw.question}
-        answer={btw.answer}
-        loading={btw.loading}
-        error={btw.error}
-      />
+      {btw.open && (
+        <BtwPanel
+          messages={btw.messages}
+          loading={btw.loading}
+          error={btw.error}
+          onAsk={btw.ask}
+          onStop={btw.stop}
+          onClear={btw.clear}
+          onClose={() => btw.setOpen(false)}
+        />
+      )}
       <ChatComposerActionBar
         left={<><ModeIndicator mode={mode} onModeChange={setMode} disabled={isStreaming} />{/* ImageGenToggle hidden from UI — restore by uncommenting. Component + ImageGen logic kept intact. */}{/* <ImageGenToggle /> */}</>}
         center={
