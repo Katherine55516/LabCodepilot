@@ -400,6 +400,82 @@ export async function generateTextViaSdk(params: {
 }
 
 /**
+ * Streaming variant of generateTextViaSdk — yields assistant text deltas as they
+ * arrive. Same single-turn / no-session / no-lock / SDK-subprocess path (so it
+ * resolves CLI model aliases like `[1m]` identically to the main stream), but
+ * with includePartialMessages so callers can render token-by-token. Used by /btw
+ * to match the CLI's streaming feel.
+ *
+ * Fallback: if the provider never emits partial deltas, the whole `result` text
+ * is yielded once at the end so the caller still gets an answer (never empty).
+ * The `finally` cleans up the shadow home even if the consumer stops early
+ * (popup closed → generator aborted).
+ */
+export async function* streamTextViaSdk(params: {
+  providerId?: string;
+  model?: string;
+  system: string;
+  prompt: string;
+  abortSignal?: AbortSignal;
+}): AsyncGenerator<string> {
+  const resolved = resolveForClaudeCode(undefined, {
+    providerId: params.providerId,
+  });
+  const setup = prepareSdkSubprocessEnv(resolved);
+  const sdkEnv = setup.env;
+
+  const abortController = new AbortController();
+  if (params.abortSignal) {
+    params.abortSignal.addEventListener('abort', () => abortController.abort());
+  }
+  const timeoutId = setTimeout(() => abortController.abort(), 60_000);
+
+  const queryOptions: Options = {
+    cwd: os.homedir(),
+    abortController,
+    permissionMode: 'bypassPermissions',
+    allowDangerouslySkipPermissions: true,
+    env: sanitizeEnv(sdkEnv),
+    settingSources: resolved.settingSources as Options['settingSources'],
+    systemPrompt: params.system,
+    maxTurns: 1,
+    includePartialMessages: true,
+  };
+  if (params.model) {
+    queryOptions.model = params.model;
+  }
+
+  try {
+    const conversation = query({ prompt: params.prompt, options: queryOptions });
+    let sawDelta = false;
+    let resultText = '';
+    for await (const msg of conversation) {
+      if (msg.type === 'stream_event') {
+        const se = msg as { type: 'stream_event'; event: { type: string; delta?: { text?: string } } };
+        if (se.event.type === 'content_block_delta' && se.event.delta?.text) {
+          sawDelta = true;
+          yield se.event.delta.text;
+        }
+      } else if (msg.type === 'result' && 'result' in msg) {
+        resultText = (msg as SDKResultSuccess).result || '';
+      }
+    }
+    // Provider didn't stream partials → emit the whole result once.
+    if (!sawDelta && resultText) {
+      yield resultText;
+    }
+  } catch (err) {
+    if (abortController.signal.aborted && !(params.abortSignal?.aborted)) {
+      throw new Error('SDK query timed out after 60s');
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+    setup.shadow.cleanup();
+  }
+}
+
+/**
  * Main entry point for streaming chat. Dispatches to the resolved AgentRuntime.
  *
  * All callers (chat route, bridge, onboarding) call this function.

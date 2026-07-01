@@ -9,8 +9,9 @@
  *   - Context comes from the client's in-memory snapshot (messages + in-flight
  *     streaming text), so the aside can see content not yet persisted to the DB.
  *
- * Runs through the Claude Code SDK (generateTextViaSdk) — the SAME subprocess
- * path as the main conversation — NOT the Vercel AI SDK. This matters for model
+ * Streams token-by-token (SSE) through the Claude Code SDK (streamTextViaSdk) —
+ * the SAME subprocess path as the main conversation — NOT the Vercel AI SDK. The
+ * SDK path also matters for model
  * resolution: managed models arrive as CLI aliases like `claude-opus-4-7[1m]`
  * (the `[1m]` = 1M-context variant is a Claude Code alias suffix). Only the SDK
  * subprocess resolves those aliases; a direct @ai-sdk/anthropic call sends
@@ -18,7 +19,7 @@
  * through the SDK keeps /btw's model handling identical to the main stream.
  */
 import { NextRequest, NextResponse } from 'next/server';
-import { generateTextViaSdk } from '@/lib/claude-client';
+import { streamTextViaSdk } from '@/lib/claude-client';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -65,7 +66,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'question is required' }, { status: 400 });
     }
 
-    // generateTextViaSdk takes a single prompt string (not a messages array),
+    // streamTextViaSdk takes a single prompt string (not a messages array),
     // so fold the context snapshot into the prompt as a plain transcript.
     const context = sanitizeContext(contextMessages);
     const historyText = context
@@ -76,17 +77,35 @@ export async function POST(request: NextRequest) {
       : question.trim();
 
     // Single-turn, no session, no lock — runs concurrently with the main stream.
-    // Provider/model resolution (incl. CLI alias like [1m]), the 60s timeout and
-    // abort handling all live inside generateTextViaSdk.
-    const answer = await generateTextViaSdk({
-      providerId,
-      model,
-      system: BTW_SYSTEM_PROMPT,
-      prompt,
-      abortSignal: request.signal,
+    // Stream the answer token-by-token as SSE (`data: {"delta"|"done"|"error"}`)
+    // to match the CLI's feel. Provider/model resolution (incl. CLI aliases like
+    // [1m]), the 60s timeout, abort and shadow-home cleanup all live inside
+    // streamTextViaSdk.
+    const stream = new ReadableStream<string>({
+      async start(controller) {
+        try {
+          for await (const delta of streamTextViaSdk({
+            providerId,
+            model,
+            system: BTW_SYSTEM_PROMPT,
+            prompt,
+            abortSignal: request.signal,
+          })) {
+            controller.enqueue(`data: ${JSON.stringify({ delta })}\n\n`);
+          }
+          controller.enqueue(`data: ${JSON.stringify({ done: true })}\n\n`);
+        } catch (error) {
+          console.error('[btw] side question failed:', error);
+          controller.enqueue(`data: ${JSON.stringify({ error: String(error) })}\n\n`);
+        } finally {
+          controller.close();
+        }
+      },
     });
 
-    return NextResponse.json({ answer: answer ?? '' });
+    return new Response(stream, {
+      headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' },
+    });
   } catch (error) {
     console.error('[btw] side question failed:', error);
     return NextResponse.json({ error: String(error) }, { status: 500 });

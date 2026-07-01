@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import type { Message, MessagesResponse, FileAttachment, SessionStreamSnapshot, MentionRef } from '@/types';
 import { parseMessageContent } from '@/types';
 import { BtwDialog } from './BtwDialog';
+import { useBtw } from '@/hooks/useBtw';
 import { buildFilesDisplayContent } from '@/lib/file-utils';
 import { trimMessageWindow } from '@/lib/message-window';
 import { getManagedContextWindowByName } from '@/lib/model-context';
@@ -855,29 +856,14 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
 
   const handleCommand = useChatCommands({ sessionId, messages, setMessages: cappedSetMessages, sendMessage });
 
-  // ── /btw side question ──────────────────────────────────────────
-  // Ephemeral popup answered from the CURRENT conversation. It hits
-  // /api/chat/btw, which takes no session lock and persists nothing, so it runs
-  // concurrently with the main stream (never interrupts it) and leaves no trace
-  // in the transcript. Context is a snapshot of in-memory messages plus any
-  // in-flight streaming text, so the aside can see content not yet in the DB.
-  const [btwOpen, setBtwOpen] = useState(false);
-  const [btwQuestion, setBtwQuestion] = useState('');
-  const [btwAnswer, setBtwAnswer] = useState('');
-  const [btwLoading, setBtwLoading] = useState(false);
-  const [btwError, setBtwError] = useState<string | null>(null);
-  const btwReqId = useRef(0);
-
-  const handleBtw = useCallback(async (question: string) => {
-    const reqId = ++btwReqId.current;
-    setBtwQuestion(question);
-    setBtwAnswer('');
-    setBtwError(null);
-    setBtwOpen(true);
-    if (!question.trim()) { setBtwLoading(false); return; }
-    setBtwLoading(true);
-
-    const contextMessages = messages
+  // ── /btw side question (ephemeral popup, shared via useBtw) ──────
+  // Answered from the CURRENT conversation without a session lock and without
+  // persisting anything, so it runs concurrently with the main stream and leaves
+  // no trace. Context = snapshot of in-memory messages + in-flight streaming text
+  // (so the aside sees content not yet in the DB). The same hook powers the
+  // new-chat screen (app/chat/page.tsx) so /btw behaves identically there.
+  const btwGetContext = useCallback(() => {
+    const ctx = messages
       .map((m) => ({
         role: m.role,
         content: parseMessageContent(m.content)
@@ -889,25 +875,11 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
       .filter((m) => m.content)
       .slice(-40);
     if (streamingContent && streamingContent.trim()) {
-      contextMessages.push({ role: 'assistant', content: streamingContent });
+      ctx.push({ role: 'assistant', content: streamingContent });
     }
-
-    try {
-      const res = await fetch('/api/chat/btw', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question, contextMessages, model: currentModel, providerId: currentProviderId }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (btwReqId.current !== reqId) return; // superseded by a newer /btw
-      if (!res.ok || data.error) setBtwError(data.error || `HTTP ${res.status}`);
-      else setBtwAnswer(data.answer || '');
-    } catch (e) {
-      if (btwReqId.current === reqId) setBtwError(String(e));
-    } finally {
-      if (btwReqId.current === reqId) setBtwLoading(false);
-    }
-  }, [messages, streamingContent, currentModel, currentProviderId]);
+    return ctx;
+  }, [messages, streamingContent]);
+  const btw = useBtw({ getContext: btwGetContext, model: currentModel, providerId: currentProviderId });
 
   // Listen for image generation completion
   useEffect(() => {
@@ -1097,7 +1069,7 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
         key={sessionId}
         onSend={sendMessage}
         onCommand={handleCommand}
-        onBtw={handleBtw}
+        onBtw={btw.ask}
         onStop={stopStreaming}
         disabled={false}
         isStreaming={isStreaming}
@@ -1138,12 +1110,12 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
         }
       />
       <BtwDialog
-        open={btwOpen}
-        onOpenChange={setBtwOpen}
-        question={btwQuestion}
-        answer={btwAnswer}
-        loading={btwLoading}
-        error={btwError}
+        open={btw.open}
+        onOpenChange={btw.setOpen}
+        question={btw.question}
+        answer={btw.answer}
+        loading={btw.loading}
+        error={btw.error}
       />
     </div>
   );

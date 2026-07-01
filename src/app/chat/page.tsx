@@ -21,6 +21,9 @@ import { maybeShowStatusToast } from '@/hooks/useSSEStream';
 import { seedSnapshotPatch } from '@/lib/stream-session-manager';
 import { NEW_CHAT_PREFILL_KEY } from '@/lib/constants/chat-prefill';
 import { buildFilesDisplayContent } from '@/lib/file-utils';
+import { parseMessageContent } from '@/types';
+import { BtwDialog } from '@/components/chat/BtwDialog';
+import { useBtw } from '@/hooks/useBtw';
 
 interface ToolUseInfo {
   id: string;
@@ -868,6 +871,28 @@ export default function NewChatPage() {
     [isStreaming, router, workingDir, mode, currentModel, currentProviderId, permissionProfile, selectedEffort, thinkingMode, context1m, setPendingApprovalSessionId, t, hasProvider, modelReady]
   );
 
+  // ── /btw side question — same hook as ChatView so the new-chat screen behaves
+  // identically. Context is the (usually empty) in-memory snapshot; on the
+  // welcome screen /btw is a quick no-context aside that never enters a session.
+  const btwGetContext = useCallback(() => {
+    const ctx = messages
+      .map((m) => ({
+        role: m.role,
+        content: parseMessageContent(m.content)
+          .filter((b) => b.type === 'text')
+          .map((b) => (b as { text: string }).text)
+          .join('\n')
+          .trim(),
+      }))
+      .filter((m) => m.content)
+      .slice(-40);
+    if (streamingContent && streamingContent.trim()) {
+      ctx.push({ role: 'assistant', content: streamingContent });
+    }
+    return ctx;
+  }, [messages, streamingContent]);
+  const btw = useBtw({ getContext: btwGetContext, model: currentModel, providerId: currentProviderId });
+
   const handleCommand = useCallback((command: string) => {
     switch (command) {
       case '/help': {
@@ -963,6 +988,7 @@ export default function NewChatPage() {
       <MessageInput
         onSend={sendFirstMessage}
         onCommand={handleCommand}
+        onBtw={btw.ask}
         onStop={stopStreaming}
         disabled={!modelReady}
         isStreaming={isStreaming}
@@ -979,6 +1005,14 @@ export default function NewChatPage() {
         effort={selectedEffort}
         onEffortChange={setSelectedEffort}
         initialValue={prefillText}
+      />
+      <BtwDialog
+        open={btw.open}
+        onOpenChange={btw.setOpen}
+        question={btw.question}
+        answer={btw.answer}
+        loading={btw.loading}
+        error={btw.error}
       />
       <ChatComposerActionBar
         left={<><ModeIndicator mode={mode} onModeChange={setMode} disabled={isStreaming} />{/* ImageGenToggle hidden from UI — restore by uncommenting. Component + ImageGen logic kept intact. */}{/* <ImageGenToggle /> */}</>}
