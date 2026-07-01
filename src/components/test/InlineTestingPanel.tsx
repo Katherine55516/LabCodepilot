@@ -2310,6 +2310,10 @@ function ReportView({ t, results, four, funcCounts, funcPassStr, circuitBroken, 
   // 证据媒体（图片灯箱 + 录像内联回放）：经 /api/test/media 白名单流式取证据；
   // lightbox=当前放大查看的文件名。无 projectPath（如流程内调用）时退化为文件名文本。
   const [lightbox, setLightbox] = useState<string | null>(null);
+  // 录像诊断信息（加载成功→尺寸/时长；失败→MediaError code + HTTP 状态）。用户在打包版
+  // 无 F12 时，靠它在界面里看清「黑屏」到底是文件缺失(404)、文件损坏(decode) 还是渲染层问题。
+  const [vidDiag, setVidDiag] = useState<string>("");
+  useEffect(() => { setVidDiag(""); }, [lightbox]);
   const mediaUrl = (file: string) => `/api/test/media?projectPath=${encodeURIComponent(projectPath || "")}&taskName=${encodeURIComponent(taskName)}&env=${encodeURIComponent(env || "local")}&file=${encodeURIComponent(file)}`;
   const isVid = (f: string) => /\.(webm|mp4|mov)$/i.test(f);
   const total = four.total || results.length;
@@ -2400,10 +2404,22 @@ function ReportView({ t, results, four, funcCounts, funcPassStr, circuitBroken, 
       {lightbox && createPortal(
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-6" onClick={() => setLightbox(null)}>
           {isVid(lightbox) ? (
-            <video src={mediaUrl(lightbox)} controls autoPlay muted playsInline preload="metadata" className="max-h-full max-w-full" onClick={(e) => e.stopPropagation()} />
+            <video
+              src={mediaUrl(lightbox)}
+              controls autoPlay muted playsInline preload="metadata"
+              className="max-h-full max-w-full"
+              onClick={(e) => e.stopPropagation()}
+              onLoadedMetadata={(e) => { const v = e.currentTarget; setVidDiag(`✅ 已加载 ${v.videoWidth}×${v.videoHeight} · ${Math.round(v.duration)}s（能解码；若此时画面仍黑=渲染层问题）`); }}
+              onError={(e) => { const err = e.currentTarget.error; const m: Record<number, string> = { 1: "ABORTED", 2: "NETWORK", 3: "DECODE 文件损坏/编码不支持", 4: "SRC 不支持(404 或非法源)" }; setVidDiag(`❌ 播放失败 code=${err?.code}（${m[err?.code ?? 0] ?? "?"}）`); fetch(mediaUrl(lightbox), { method: "HEAD" }).then((r) => setVidDiag((d) => `${d} · HTTP ${r.status} ${r.headers.get("content-type") || "?"} ${r.headers.get("content-length") ?? "?"}B`)).catch((e2) => setVidDiag((d) => `${d} · HEAD 失败:${String(e2)}`)); }}
+            />
           ) : (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={mediaUrl(lightbox)} alt={lightbox} className="max-h-full max-w-full object-contain" onClick={(e) => e.stopPropagation()} />
+          )}
+          {vidDiag && (
+            <div className="absolute bottom-4 left-1/2 max-w-[90%] -translate-x-1/2 rounded-md bg-black/85 px-3 py-1.5 text-center font-mono text-[11px] leading-relaxed text-white ring-1 ring-white/20" onClick={(e) => e.stopPropagation()}>
+              {vidDiag}
+            </div>
           )}
         </div>,
         document.body,
@@ -2865,6 +2881,9 @@ function XlsxPreview({ t, projectPath, taskName, env, onClose }: {
   const [err, setErr] = useState(false);
   const [lightbox, setLightbox] = useState<string | null>(null);
   const [reloadTick, setReloadTick] = useState(0);
+  // 录像诊断信息（同 ReportView，供打包版无 F12 时定位「黑屏」根因）
+  const [vidDiag, setVidDiag] = useState<string>("");
+  useEffect(() => { setVidDiag(""); }, [lightbox]);
 
   useEffect(() => {
     let cancelled = false;
@@ -2961,10 +2980,22 @@ function XlsxPreview({ t, projectPath, taskName, env, onClose }: {
       {lightbox && createPortal(
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-6" onClick={() => setLightbox(null)}>
           {isVid(lightbox) ? (
-            <video src={mediaUrl(lightbox)} controls autoPlay muted playsInline preload="metadata" className="max-h-full max-w-full" onClick={(e) => e.stopPropagation()} />
+            <video
+              src={mediaUrl(lightbox)}
+              controls autoPlay muted playsInline preload="metadata"
+              className="max-h-full max-w-full"
+              onClick={(e) => e.stopPropagation()}
+              onLoadedMetadata={(e) => { const v = e.currentTarget; setVidDiag(`✅ 已加载 ${v.videoWidth}×${v.videoHeight} · ${Math.round(v.duration)}s（能解码；若此时画面仍黑=渲染层问题）`); }}
+              onError={(e) => { const err = e.currentTarget.error; const m: Record<number, string> = { 1: "ABORTED", 2: "NETWORK", 3: "DECODE 文件损坏/编码不支持", 4: "SRC 不支持(404 或非法源)" }; setVidDiag(`❌ 播放失败 code=${err?.code}（${m[err?.code ?? 0] ?? "?"}）`); fetch(mediaUrl(lightbox), { method: "HEAD" }).then((r) => setVidDiag((d) => `${d} · HTTP ${r.status} ${r.headers.get("content-type") || "?"} ${r.headers.get("content-length") ?? "?"}B`)).catch((e2) => setVidDiag((d) => `${d} · HEAD 失败:${String(e2)}`)); }}
+            />
           ) : (
             // eslint-disable-next-line @next/next/no-img-element
             <img src={mediaUrl(lightbox)} alt={lightbox} className="max-h-full max-w-full object-contain" onClick={(e) => e.stopPropagation()} />
+          )}
+          {vidDiag && (
+            <div className="absolute bottom-4 left-1/2 max-w-[90%] -translate-x-1/2 rounded-md bg-black/85 px-3 py-1.5 text-center font-mono text-[11px] leading-relaxed text-white ring-1 ring-white/20" onClick={(e) => e.stopPropagation()}>
+              {vidDiag}
+            </div>
           )}
         </div>,
         document.body,
