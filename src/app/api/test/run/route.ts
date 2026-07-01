@@ -8,6 +8,7 @@ import type { MCPServerConfig } from '@/types';
 // own `@/lib/runtime` import).
 import { predictNativeRuntime } from '@/lib/runtime';
 import { buildStep, buildPlaywrightMcp, willRunHeaded, artifactPaths, TEST_STEPS, type TestStep } from '@/lib/test/prompts';
+import { probeUrlWithRetry } from '@/lib/test/probe';
 import { reduceFromText } from '@/lib/test/reduce';
 import { snapshotRunJson } from '@/lib/test/history';
 import { sweepStrayEvidence, normalizeEvidenceExt } from '@/lib/test/evidence';
@@ -237,7 +238,28 @@ export async function POST(req: Request): Promise<Response> {
       typeof body.baseUrl === 'string' && body.baseUrl.trim() ? body.baseUrl.trim() : undefined;
     const baseUrl = overrideUrl || resolved.frontendBaseUrl || undefined;
 
-    const { systemPrompt, prompt, needsPlaywright } = buildStep(step, { taskName, env, baseUrl, extraInstruction, reuseImported });
+    // 可达性闸门(仅执行步 + 给了 http/https 被测地址)：开跑前先探活，最多 3 次；连续 3 次
+    // 仍不可达就直接拦下、不启动 AI —— 否则被测系统没起时 AI 会按规则 §0.3 反复 curl 探活、
+    // 永不终止(用户反馈的「无限重试」缺陷)。返回非 2xx JSON{error}，前端(runStep 的 !res.ok
+    // 分支)会渲染成错误气泡并把该步标失败，用户排查好被测系统后点「重跑」即可。未配置地址 /
+    // 非 http(s) 地址不在此拦，仍交由 AI 按「地址不可达→blocked」处理，行为不变。
+    if (step === 'execution' && baseUrl && /^https?:\/\//i.test(baseUrl)) {
+      const gate = await probeUrlWithRetry(baseUrl, { attempts: 3, timeoutMs: 5000, delayMs: 800, signal: req.signal });
+      if (!gate.reachable) {
+        const reason = gate.last.error ? `（${gate.last.error}）` : '';
+        const msg = `被测系统无法访问：已连续尝试 ${gate.attempts} 次仍无法连接 ${baseUrl}${reason}。请检查被测系统是否已正常启动、被测链接是否正确，确认可访问后再点「重跑」重试。`;
+        return new Response(JSON.stringify({ error: msg }), {
+          status: 503,
+          headers: { 'Content-Type': 'application/json' },
+        });
+      }
+    }
+
+    // 登录态提示(执行步)：本项目该环境是否已捕获 storageState。未配置 → 执行 prompt 提醒 AI
+    // 「遇登录墙判 blocked 并引导用户去设置·测试账号配置」，而非(非交互运行里)用 AskUserQuestion
+    // 向用户要凭证——那会卡死(用户反馈的「询问弹不出来」缺陷)。
+    const hasLoginState = !!resolved.storageStatePath;
+    const { systemPrompt, prompt, needsPlaywright } = buildStep(step, { taskName, env, baseUrl, extraInstruction, reuseImported, hasLoginState });
 
     let mcpServers: Record<string, MCPServerConfig> | undefined;
     if (needsPlaywright) {

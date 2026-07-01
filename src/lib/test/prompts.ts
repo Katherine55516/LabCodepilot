@@ -178,7 +178,7 @@ ${rule}
 完成后用一句话总结：生成了多少条用例、覆盖了多少需求维度、其中功能验证 / 回归基线各几条；**若全部为回归基线**，显式提示「本任务用例仅锁定现状、未验证正确性，建议补充权威需求来源（PRD / 产品确认）」。`;
 }
 
-function executionPrompt(taskName: string, env: string, baseUrl?: string): string {
+function executionPrompt(taskName: string, env: string, baseUrl?: string, hasLoginState = false): string {
   const p = artifactPaths(taskName, env);
   const rule = ruleBlock(
     '测试执行规范',
@@ -188,8 +188,18 @@ function executionPrompt(taskName: string, env: string, baseUrl?: string): strin
   return `请对测试任务「${taskName}」执行测试用例（AI 通过 Playwright MCP 浏览器工具实时驱动浏览器逐条执行）。
 
 环境：${env}
-${baseUrl ? `被测地址：${baseUrl}` : '（未配置被测地址：若无法确定目标系统地址或地址不可达，相应用例判 blocked 并在结果中说明，不要臆造结果。）'}
+${baseUrl ? `被测地址：${baseUrl}（平台已在执行前完成可达性探测、确认可达才会进入本步——**无需再用 curl/请求工具反复探活**；若执行中途发现地址不可达，最多重试探活 3 次即停止并在结果中说明，**切勿无限重试**。）` : '（未配置被测地址：若无法确定目标系统地址或地址不可达，相应用例判 blocked 并在结果中说明，不要臆造结果。）'}
 输入产物（请先 Read）：测试用例 ${p.cases}
+
+⚠️ **本步为非交互自动化执行（交互端无人应答）**：**严禁使用 \`AskUserQuestion\`，也严禁以任何方式向用户提问 / 等待用户输入 / 暂停等待确认**——问了永远不会有人回答，会让执行永久卡死。目标环境已由平台指定为 \`${env}\`，直接使用，**不要再反问用户选环境**。
+
+🔐 **登录态处理（重要，替代"向用户要账号"）**：${hasLoginState
+  ? '平台已为本项目注入登录态（storageState），正常情况下开跑即已登录。'
+  : '**本项目未配置登录态**（未捕获 storageState），若被测系统需要登录你将无法建立会话。'}若访问被测系统时被**登录页 / 企业 SSO / 401** 拦住、无法建立会话：
+- **不要**手动输入账号密码登录，**更不要**用 \`AskUserQuestion\` 向用户索取凭证；
+- 把受影响的用例判 \`blocked\`，\`error\` 写明「未检测到登录态，被登录页 / SSO 拦截」；
+- 若**整个被测系统都需要登录**（首个用例即被登录页挡住）→ **立即停止、不要逐条空跑**，其余用例一并判 \`blocked\`（原因同上，未输出的由平台补全为「未执行」）；
+- 在收尾总结里**明确提示用户**：请前往「**设置 · 测试账号**」为本项目配置 / 重新捕获登录态（即项目的环境配置），配置好后再重跑本步。
 
 ${rule}
 
@@ -248,6 +258,8 @@ export interface BuildStepOptions {
   extraInstruction?: string;
   /** 新建任务 imported this step's artifact (需求/用例) — Read + reuse the upload, don't regenerate. */
   reuseImported?: boolean;
+  /** 执行步：本项目/该环境是否已捕获登录态(storageState)。false → 执行 prompt 提示 AI「未配置登录态，遇登录墙判 blocked 并引导去设置·测试账号」，且非交互运行严禁向用户提问。 */
+  hasLoginState?: boolean;
 }
 
 export interface BuiltStep {
@@ -275,7 +287,7 @@ export function buildStep(step: TestStep, opts: BuildStepOptions): BuiltStep {
     case 'cases':
       return withNote({ systemPrompt: SYS.cases, prompt: casesPrompt(taskName, opts.reuseImported), needsPlaywright: false }, note);
     case 'execution':
-      return withNote({ systemPrompt: SYS.execution, prompt: executionPrompt(taskName, env, opts.baseUrl), needsPlaywright: true }, note);
+      return withNote({ systemPrompt: SYS.execution, prompt: executionPrompt(taskName, env, opts.baseUrl, opts.hasLoginState), needsPlaywright: true }, note);
     case 'report':
       return withNote({ systemPrompt: SYS.report, prompt: reportPrompt(taskName, env), needsPlaywright: false }, note);
   }
