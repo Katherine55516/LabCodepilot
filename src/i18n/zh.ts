@@ -289,7 +289,7 @@ const zh: Record<TranslationKey, string> = {
   // ── 文生图（独立模块）──────────────────────────────────────
   'imageStudio.sidebarButton': '文生图',
   'imageStudio.title': '文生图',
-  'imageStudio.subtitle': '输入提示词即可生成图片 —— 由 qwen-image-2.0-pro 驱动',
+  'imageStudio.subtitle': '输入提示词即可生成图片',
   'imageStudio.promptPlaceholder': '描述你想生成的画面……',
   'imageStudio.generate': '生成',
   'imageStudio.generating': '生成中……',
@@ -304,6 +304,8 @@ const zh: Record<TranslationKey, string> = {
   'imageStudio.openInGallery': '打开素材库',
   'imageStudio.failed': '生成失败',
   'imageStudio.promptRequired': '请先输入提示词。',
+  'imageStudio.loginRequired': '请登录账号以使用文生图。',
+  'imageStudio.goLogin': '去登录',
   'imageStudio.result': '生成结果',
 
   // ── Chat list panel ─────────────────────────────────────────
@@ -351,6 +353,9 @@ const zh: Record<TranslationKey, string> = {
   // ── Message input ───────────────────────────────────────────
   'messageInput.attachFiles': '附加文件',
   'messageInput.helpDesc': '显示可用命令和提示',
+  'btw.title': '快速追问',
+  'btw.thinking': '思考中…',
+  'btw.emptyHint': '在 /btw 后输入你的问题，例如「/btw 我们为什么选这个方案？」',
   'messageInput.clearDesc': '清除对话历史',
   'messageInput.costDesc': '显示 Token 用量统计',
   'messageInput.compactDesc': '压缩对话上下文',
@@ -601,6 +606,11 @@ const zh: Record<TranslationKey, string> = {
 
   // ── Doc preview ─────────────────────────────────────────────
   'docPreview.htmlPreview': 'HTML 预览',
+  'docPreview.error': '无法预览此文档',
+  'docPreview.pages': '{count} 页',
+  'docPreview.zoomIn': '放大',
+  'docPreview.zoomOut': '缩小',
+  'docPreview.pptxNotice': '预览 — 排版可能与原文件有差异',
 
   // ── Extensions page ─────────────────────────────────────────
   'extensions.title': '扩展',

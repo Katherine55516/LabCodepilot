@@ -74,7 +74,7 @@ export interface TextToImageResult {
 
 /** Thrown when the image service has no usable credentials configured. */
 export class NoImageProviderError extends Error {
-  constructor(message = '未配置百炼图片服务的 API Key。') {
+  constructor(message = '请登录账号以使用文生图。') {
     super(message);
     this.name = 'NoImageProviderError';
   }

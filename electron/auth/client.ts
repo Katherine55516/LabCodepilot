@@ -23,18 +23,21 @@ import {
   loadConfigsHash,
   saveSelectedConfigId,
   loadSelectedConfigId,
+  saveImageConfig,
+  loadImageConfig,
 } from './storage';
 import {
   AuthExpiredError,
   HttpError,
   NetworkError,
   type AuthProbeResult,
+  type ImageProviderConfig,
   type MeInfo,
   type ModelConfig,
   type UsageInfo,
 } from './types';
 import { logInfo, logWarn, maskToken, maskConfigsForLog } from './log';
-import { decryptConfigAuthTokens } from './config-crypto';
+import { decryptAuthToken, decryptConfigAuthTokens } from './config-crypto';
 
 // The maximum time we'll wait for the user to complete the OAuth dance in the
 // browser. 10 minutes leaves time for legit cases (e.g. user goes to look up
@@ -280,4 +283,87 @@ export async function fetchAsrToken(): Promise<AsrTokenResp> {
     throw new Error('/api/v1/asr/token 响应缺少 token/model/wsUrl —— 模型名与 WS 地址需由服务端下发');
   }
   return r.json;
+}
+
+// ── 9. /api/v1/image/config（文生图凭证下发）─────────────────────────────────
+
+/** 服务端原始下发体：容忍 camelCase 与 snake_case 两种字段命名（managed API 惯用 snake_case）。 */
+interface RawImageConfig {
+  apiKey?: string; api_key?: string;
+  workspaceId?: string; workspace_id?: string;
+  model?: string;
+  region?: string;
+  models?: unknown;
+}
+
+/** 归一化下发的图片配置：兼容两种命名；encrypted 变体解密 apiKey；缺字段回填。 */
+function normalizeImageConfig(raw: RawImageConfig, encrypted: boolean): ImageProviderConfig {
+  let apiKey = raw.apiKey || raw.api_key || '';
+  if (encrypted && apiKey) {
+    try {
+      apiKey = decryptAuthToken(apiKey);
+    } catch (e) {
+      // fail-safe：解密失败置空（视为无凭证），不 crash —— 同 configs 的 auth_token 容错。
+      logWarn('[image config] decrypt apiKey failed — treating as no-key:', (e as Error).message);
+      apiKey = '';
+    }
+  }
+  const rawModels = Array.isArray(raw.models) ? raw.models : [];
+  const models = rawModels
+    .map((m) => {
+      const o = (m ?? {}) as Record<string, unknown>;
+      const id = typeof o.id === 'string' ? o.id : '';
+      const label = typeof o.label === 'string' ? o.label : id;
+      return id ? { id, label, default: o.default === true } : null;
+    })
+    .filter((m): m is { id: string; label: string; default: boolean } => m !== null);
+  return {
+    apiKey,
+    workspaceId: raw.workspaceId || raw.workspace_id || '',
+    model: raw.model || '',
+    region: raw.region || '',
+    models,
+  };
+}
+
+/**
+ * 拉取全局百炼文生图配置（本期所有用户同一份）。镜像 getConfigs：
+ *   - 优先 `/api/v1/image/config/encrypted`（apiKey 为 AES-256-GCM 密文）；
+ *   - 503 回退明文 `/api/v1/image/config`；
+ *   - 解密 apiKey → 加密缓存落盘 → 网络失败时降级用缓存。
+ * apiKey 仅在主进程内解出，随后经 broker 推送到嵌入式 Next 服务密封落盘，绝不下行 renderer。
+ */
+export async function fetchImageConfig(): Promise<ImageProviderConfig> {
+  try {
+    let r: ApiResponse<RawImageConfig>;
+    let encrypted = true;
+    try {
+      r = await apiRequest<RawImageConfig>('/api/v1/image/config/encrypted');
+    } catch (e) {
+      if (e instanceof HttpError && e.status === 503) {
+        logWarn('encrypted image config unavailable (503) — falling back to plaintext /api/v1/image/config');
+        encrypted = false;
+        r = await apiRequest<RawImageConfig>('/api/v1/image/config');
+      } else {
+        throw e;
+      }
+    }
+    if (!r.json) throw new Error('/api/v1/image/config returned empty body');
+    const cfg = normalizeImageConfig(r.json, encrypted);
+    saveImageConfig(cfg);
+    logInfo(
+      'image config fetched & cached: model=', cfg.model,
+      'models=', cfg.models.length, 'hasKey=', !!cfg.apiKey,
+    );
+    return cfg;
+  } catch (e) {
+    if (e instanceof NetworkError) {
+      const cached = loadImageConfig();
+      if (cached) {
+        logWarn('image config fetch failed (network) — falling back to local cache');
+        return cached;
+      }
+    }
+    throw e;
+  }
 }

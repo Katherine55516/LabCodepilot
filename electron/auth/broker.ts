@@ -16,6 +16,7 @@
 import * as http from 'http';
 import { logWarn } from './log';
 import type { ManagedProviderRow } from './managed-providers';
+import type { ImageProviderConfig } from './types';
 
 let serverPort: number | null = null;
 
@@ -140,5 +141,32 @@ export async function getManagedProviderCountFromServer(): Promise<number> {
   } catch (e) {
     logWarn('broker: managed provider count fetch failed:', (e as Error).message);
     return 0;
+  }
+}
+
+/**
+ * Push the global Bailian image config to the embedded server so it writes the
+ * `bailian_image_config` settings row (SENSITIVE → sealed at rest). The apiKey
+ * travels plaintext only over 127.0.0.1 loopback, same model as the managed
+ * provider api_key in /managed-providers/sync.
+ */
+export async function syncImageConfigToServer(config: ImageProviderConfig): Promise<void> {
+  const r = await postJson<{ ok: boolean; error?: string }>(
+    '/api/auth/image-config/sync',
+    { config },
+  );
+  if (!r.ok) {
+    throw new Error(`image-config sync failed: status=${r.status} body=${JSON.stringify(r.body)}`);
+  }
+}
+
+/** Clear the delivered image config (logout / 401). */
+export async function purgeImageConfigOnServer(): Promise<void> {
+  const r = await postJson<{ ok: boolean; error?: string }>(
+    '/api/auth/image-config/purge',
+    {},
+  );
+  if (!r.ok) {
+    throw new Error(`image-config purge failed: status=${r.status} body=${JSON.stringify(r.body)}`);
   }
 }

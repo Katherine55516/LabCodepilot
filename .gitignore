@@ -17,6 +17,9 @@
 /.next/
 /out/
 
+# pdfjs 离线资产（由 scripts/copy-doc-assets.js 从 node_modules/pdfjs-dist 生成）
+/public/pdf/
+
 # production
 /build-next
 
@@ -52,6 +55,7 @@ next-env.d.ts
 # Playwright headless_shell —— 打包时由 scripts/bundle-chromium.mjs 生成、
 # electron-builder 复制进安装包的平台相关浏览器二进制(~192MB),绝不提交。
 /ms-playwright-bundle/
+/release-win/
 
 # test artifacts
 /playwright-report/

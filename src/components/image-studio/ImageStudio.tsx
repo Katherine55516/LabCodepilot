@@ -21,14 +21,21 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useTranslation } from "@/hooks/useTranslation";
+import { useAccount } from "@/hooks/useAccount";
 import { showToast } from "@/hooks/useToast";
 import { cn } from "@/lib/utils";
 
-const MODELS = ["qwen-image-2.0-pro"] as const;
 const ASPECT_RATIOS = ["1:1", "16:9", "9:16", "4:3", "3:4"] as const;
 const COUNTS = [1, 2, 3, 4] as const;
 // Models whose outputs belong in this studio's conversation history.
 const STUDIO_MODEL_PREFIXES = ["qwen-image", "gpt-image"];
+
+/** 账号下发的可选图片模型（来自 GET /api/image/config）。 */
+interface ImageModelOption {
+  id: string;
+  label: string;
+  default?: boolean;
+}
 
 interface GeneratedImage {
   mimeType: string;
@@ -64,9 +71,12 @@ function nextId(): string {
 
 export function ImageStudio() {
   const { t } = useTranslation();
+  const { authenticated, triggerLogin } = useAccount();
 
   const [prompt, setPrompt] = useState("");
-  const [model, setModel] = useState<string>(MODELS[0]);
+  const [models, setModels] = useState<ImageModelOption[]>([]);
+  const [model, setModel] = useState<string>("");
+  const [configured, setConfigured] = useState<boolean>(true); // 乐观默认，fetch 后校正
   const [aspectRatio, setAspectRatio] = useState<string>(ASPECT_RATIOS[0]);
   const [count, setCount] = useState<number>(1);
 
@@ -75,6 +85,32 @@ export function ImageStudio() {
   const [lightbox, setLightbox] = useState<string | null>(null);
 
   const bottomRef = useRef<HTMLDivElement>(null);
+
+  // 账号下发的图片模型列表 + 是否已配置可用凭证。登录态变化后重新拉取（登录后即生效）。
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/image/config");
+        if (!res.ok) return;
+        const data = await res.json();
+        if (cancelled) return;
+        const list: ImageModelOption[] = Array.isArray(data.models) ? data.models : [];
+        setModels(list);
+        setConfigured(!!data.configured);
+        setModel((prev) => {
+          if (prev && list.some((m) => m.id === prev)) return prev;
+          const def = list.find((m) => m.default) ?? list[0];
+          return def?.id ?? (typeof data.model === "string" ? data.model : "");
+        });
+      } catch {
+        /* best-effort — 下拉留空时禁用生成 */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [authenticated]);
 
   // Load past generations as a conversation (oldest → newest). Rows from a
   // single multi-image generation share prompt + created_at, so we group them.
@@ -134,6 +170,10 @@ export function ImageStudio() {
       showToast({ type: "warning", message: t("imageStudio.promptRequired") });
       return;
     }
+    if (!configured) {
+      showToast({ type: "warning", message: t("imageStudio.loginRequired") });
+      return;
+    }
     const id = nextId();
     setMessages((prev) => [...prev, { id, prompt: p, count, status: "loading", images: [] }]);
     setPrompt("");
@@ -145,7 +185,14 @@ export function ImageStudio() {
         body: JSON.stringify({ prompt: p, model, aspectRatio, n: count }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data?.error || t("imageStudio.failed"));
+      if (!res.ok) {
+        // 412 = 无可用凭证（未登录/未下发）→ 同步降级态，提示登录（本地化文案）。
+        if (res.status === 412) {
+          setConfigured(false);
+          throw new Error(t("imageStudio.loginRequired"));
+        }
+        throw new Error(data?.error || t("imageStudio.failed"));
+      }
       setMessages((prev) =>
         prev.map((m) =>
           m.id === id ? { ...m, status: "done", images: Array.isArray(data.images) ? data.images : [] } : m,
@@ -158,7 +205,7 @@ export function ImageStudio() {
     } finally {
       setLoading(false);
     }
-  }, [prompt, model, aspectRatio, count, t]);
+  }, [prompt, model, aspectRatio, count, configured, t]);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
@@ -270,6 +317,24 @@ export function ImageStudio() {
       <div className="shrink-0 border-t border-border/40 bg-background/80 px-6 py-3 backdrop-blur">
         <div className="mx-auto w-full max-w-3xl">
           <div className="rounded-xl border border-border bg-card/60 p-2 shadow-sm focus-within:border-primary/40">
+            {!configured && (
+              <div className="mb-2 flex items-center justify-between gap-2 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-400">
+                <span className="flex items-center gap-1.5">
+                  <Warning size={14} className="shrink-0" />
+                  {t("imageStudio.loginRequired")}
+                </span>
+                {!authenticated && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-6 px-2 text-[11px]"
+                    onClick={() => void triggerLogin()}
+                  >
+                    {t("imageStudio.goLogin")}
+                  </Button>
+                )}
+              </div>
+            )}
             <Textarea
               value={prompt}
               onChange={(e) => setPrompt(e.target.value)}
@@ -279,15 +344,15 @@ export function ImageStudio() {
               className="min-h-[44px] resize-none border-0 bg-transparent px-2 py-1.5 text-sm shadow-none focus-visible:ring-0"
             />
             <div className="flex flex-wrap items-center gap-2 px-1 pt-1">
-              {/* Model selector — single hard-wired option, kept for future models */}
-              <Select value={model} onValueChange={setModel}>
+              {/* Model selector — 账号下发的可选模型；列表为空时禁用 */}
+              <Select value={model} onValueChange={setModel} disabled={models.length === 0}>
                 <SelectTrigger size="sm" className="h-8 w-auto gap-1.5 text-xs">
-                  <SelectValue />
+                  <SelectValue placeholder={t("imageStudio.model")} />
                 </SelectTrigger>
                 <SelectContent>
-                  {MODELS.map((m) => (
-                    <SelectItem key={m} value={m} className="text-xs">
-                      {m}
+                  {models.map((m) => (
+                    <SelectItem key={m.id} value={m.id} className="text-xs">
+                      {m.label || m.id}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -310,7 +375,7 @@ export function ImageStudio() {
                 <Button
                   size="sm"
                   className="h-8 gap-1.5 px-4 text-xs"
-                  disabled={loading || !prompt.trim()}
+                  disabled={loading || !prompt.trim() || !configured || !model}
                   onClick={handleGenerate}
                 >
                   {loading ? <Spinner className="size-3.5" /> : <Sparkle size={14} weight="fill" />}

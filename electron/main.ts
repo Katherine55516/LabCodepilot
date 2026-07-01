@@ -14,6 +14,7 @@ import {
   registerDevice,
   getConfigs,
   fetchUsage,
+  fetchImageConfig,
   anlLogout,
 } from './auth/client';
 import {
@@ -32,6 +33,8 @@ import {
   setBrokerServerPort,
   syncManagedProvidersToServer,
   purgeManagedProvidersOnServer,
+  syncImageConfigToServer,
+  purgeImageConfigOnServer,
 } from './auth/broker';
 import { clearAuthState } from './auth/storage';
 import { initMasterKey, getMasterKeyHex, logSafeStorageStatus } from './auth/secret-key';
@@ -1037,6 +1040,23 @@ async function syncManagedFromConfigs(configs: ModelConfig[]): Promise<void> {
 }
 
 /**
+ * Fetch the global Bailian image config (文生图凭证) and push it to the embedded
+ * server (writes the bailian_image_config settings row). Best-effort: a failure
+ * must not block the login/boot flow. The credential stays in main + the Next
+ * server — it never reaches the renderer, and it is NEVER written to
+ * api_providers, so the image model can't leak into the chat dropdown.
+ */
+async function refreshImageConfig(): Promise<void> {
+  try {
+    const img = await fetchImageConfig();
+    await syncImageConfigToServer(img);
+    logInfo('image config synced: model=', img.model, 'models=', img.models.length, 'hasKey=', !!img.apiKey);
+  } catch (err) {
+    logWarn('failed to refresh image config:', (err as Error).message);
+  }
+}
+
+/**
  * Initial boot pass — runs once after the embedded server is ready.
  *
  * Behaviour matrix (also documented in docs/exec-plans/active/login-system.md):
@@ -1107,11 +1127,14 @@ async function bootAccountState(): Promise<void> {
     } catch (e) {
       logWarn('getConfigs failed at boot:', (e as Error).message);
     }
+    // 文生图凭证下发：与 configs 并列，独立 try（失败不影响对话配置）。
+    await refreshImageConfig();
 
     if (!isOfflineMode) {
       startBackgroundPolling({
         onConfigsChanged: (configs) => {
           void syncManagedFromConfigs(configs);
+          void refreshImageConfig();
           broadcastAuthChange();
         },
       });
@@ -1142,9 +1165,11 @@ async function postLoginSequence(): Promise<void> {
   } catch (e) {
     logWarn('postLogin getConfigs failed:', (e as Error).message);
   }
+  await refreshImageConfig();
   startBackgroundPolling({
     onConfigsChanged: (configs) => {
       void syncManagedFromConfigs(configs);
+      void refreshImageConfig();
       broadcastAuthChange();
     },
   });
@@ -1158,6 +1183,11 @@ async function postLogoutSequence(): Promise<void> {
     await purgeManagedProvidersOnServer();
   } catch (e) {
     logWarn('postLogout purge failed:', (e as Error).message);
+  }
+  try {
+    await purgeImageConfigOnServer();
+  } catch (e) {
+    logWarn('postLogout image-config purge failed:', (e as Error).message);
   }
   currentMe = null;
   isOfflineMode = false;
@@ -2401,6 +2431,8 @@ app.whenReady().then(async () => {
     try {
       const configs = await getConfigs({ force: true });
       await syncManagedFromConfigs(configs);
+      // 手动「刷新配置」按钮同时刷新文生图凭证；失败不阻断对话配置刷新结果。
+      await refreshImageConfig();
       broadcastAuthChange();
       return { ok: true as const, count: configs.length };
     } catch (e) {
@@ -2418,6 +2450,9 @@ app.whenReady().then(async () => {
       isOfflineMode = false;
       try {
         await purgeManagedProvidersOnServer();
+      } catch { /* ignore */ }
+      try {
+        await purgeImageConfigOnServer();
       } catch { /* ignore */ }
       managedConfigCount = 0;
       broadcastAuthChange();
