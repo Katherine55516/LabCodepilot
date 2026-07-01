@@ -152,7 +152,10 @@ export async function GET(request: NextRequest) {
       headers: {
         'Content-Type': contentType,
         'Content-Length': String(stat.size),
-        'Content-Disposition': `inline; filename="${path.basename(resolved)}"`,
+        // 文件名含非 ASCII（如中文「xxx-需求.md」）时，HTTP header 不能直接放（ByteString 限制
+      // → 500）。用 RFC 5987 的 filename*（UTF-8 百分号编码）承载真实名，filename 退化为 ASCII
+      // 兜底（非 ASCII 字符替为 _）兼容旧客户端。
+      'Content-Disposition': `inline; filename="${path.basename(resolved).replace(/[^\x20-\x7e]/g, '_')}"; filename*=UTF-8''${encodeURIComponent(path.basename(resolved))}`,
       },
     });
   }
@@ -162,7 +165,10 @@ export async function GET(request: NextRequest) {
   return new Response(buffer, {
     headers: {
       'Content-Type': contentType,
-      'Content-Disposition': `inline; filename="${path.basename(resolved)}"`,
+      // 文件名含非 ASCII（如中文「xxx-需求.md」）时，HTTP header 不能直接放（ByteString 限制
+      // → 500）。用 RFC 5987 的 filename*（UTF-8 百分号编码）承载真实名，filename 退化为 ASCII
+      // 兜底（非 ASCII 字符替为 _）兼容旧客户端。
+      'Content-Disposition': `inline; filename="${path.basename(resolved).replace(/[^\x20-\x7e]/g, '_')}"; filename*=UTF-8''${encodeURIComponent(path.basename(resolved))}`,
     },
   });
 }

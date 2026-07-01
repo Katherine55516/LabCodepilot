@@ -213,6 +213,7 @@ const en = {
   'test.flow.expandLog': 'Show log',
   'test.flow.collapseLog': 'Hide log',
   'test.convo.empty': 'Run a step — the AI execution will stream here.',
+  'test.convo.thinking': 'Processing…',
   'test.convo.placeholder': 'Add a test instruction, Enter to send',
   'test.convo.running': 'Running… input paused',
   'test.convo.send': 'Send',
@@ -272,6 +273,8 @@ const en = {
   'test.report.openEdit': 'Open & edit',
   'test.report.exportFile': 'Export',
   'test.report.tabPreview': 'Preview',
+  'test.requirement.previewDoc': 'Preview Requirement',
+  'test.requirement.previewFailed': 'Failed to read the requirement document',
   'test.report.tabEdit': 'Edit',
   'test.report.save': 'Save',
   'test.report.saving': 'Saving…',
@@ -282,6 +285,7 @@ const en = {
   'test.report.docEmpty': 'Report document not generated yet',
   'test.report.xlsxEmpty': 'Empty spreadsheet',
   'test.report.xlsxLoadFailed': 'Failed to parse spreadsheet',
+  'test.report.retry': 'Retry',
   'nav.imageStudio': 'Image',
 
   // ── Image Studio (standalone text-to-image) ─────────────────

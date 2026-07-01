@@ -219,6 +219,7 @@ const zhHK: Record<TranslationKey, string> = {
   'test.flow.expandLog': '展開日誌',
   'test.flow.collapseLog': '收起日誌',
   'test.convo.empty': '執行測試步驟後，AI 的執行過程會顯示在這裡。',
+  'test.convo.thinking': '正在處理…',
   'test.convo.placeholder': '追加測試指令，輸入後按 Enter 發送',
   'test.convo.running': '執行中…暫不可輸入',
   'test.convo.send': '發送',
@@ -278,6 +279,8 @@ const zhHK: Record<TranslationKey, string> = {
   'test.report.openEdit': '點開修改',
   'test.report.exportFile': '匯出',
   'test.report.tabPreview': '預覽',
+  'test.requirement.previewDoc': '預覽需求文件',
+  'test.requirement.previewFailed': '讀取需求文件失敗',
   'test.report.tabEdit': '編輯',
   'test.report.save': '儲存',
   'test.report.saving': '儲存中…',
@@ -288,6 +291,7 @@ const zhHK: Record<TranslationKey, string> = {
   'test.report.docEmpty': '報告文件尚未生成',
   'test.report.xlsxEmpty': 'Excel 無數據',
   'test.report.xlsxLoadFailed': 'Excel 解析失敗',
+  'test.report.retry': '重試',
   'nav.imageStudio': '文生圖',
 
   // ── 文生圖（獨立模塊）──────────────────────────────────────

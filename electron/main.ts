@@ -102,6 +102,12 @@ let serverExitCode: number | null = null;
 let userShellEnv: Record<string, string> = {};
 let resolvedProxyEnv: Record<string, string> = {};
 let isQuitting = false;
+// server 崩溃自动重启:崩溃后 respawn,限次避免确定性崩溃导致的无限重启烧 CPU。
+let serverRestartCount = 0;
+let serverStartedAt = 0;
+const MAX_SERVER_RESTARTS = 3;
+const SERVER_RESTART_DELAY_MS = 1500;
+const SERVER_STABLE_MS = 90_000; // server 稳定运行超过此时长 → 视为已恢复,重置重启计数
 let tray: Tray | null = null;
 let bgNotifyTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -864,6 +870,7 @@ function startServer(port: number): Electron.UtilityProcess {
   serverErrors = [];
   serverExited = false;
   serverExitCode = null;
+  serverStartedAt = Date.now();
 
   const home = os.homedir();
   const constructedPath = getExpandedShellPath();
@@ -945,6 +952,31 @@ function startServer(port: number): Electron.UtilityProcess {
     serverExited = true;
     serverExitCode = code;
     serverProcess = null;
+    // 内嵌 server 异常退出(崩溃)且 app 没在主动退出 → 诊断 + 限次自动重启。
+    // 背景:实测 server ready 后约 12s 会异常退出(code≠0),之前无重启 → 之后所有请求
+    // (导入/页面/RSC)全 Failed to fetch。这里兜底恢复 + dump 崩溃前输出帮定位根因。
+    if (code !== 0 && code !== null && !isQuitting) {
+      const ranMs = serverStartedAt ? Date.now() - serverStartedAt : 0;
+      console.error(`[server] 异常退出 code=${code},本次运行约 ${Math.round(ranMs / 1000)}s。崩溃前最后输出:`);
+      for (const line of serverErrors.slice(-30)) console.error(`[server:crash-tail] ${line}`);
+      // 稳定运行过(>SERVER_STABLE_MS)再崩 → 视为偶发,重置计数让其可持续恢复;
+      // 启动即快崩则累计到上限后停,避免无限重启循环。
+      if (ranMs > SERVER_STABLE_MS) serverRestartCount = 0;
+      if (serverRestartCount < MAX_SERVER_RESTARTS && serverPort != null) {
+        serverRestartCount++;
+        const port = serverPort;
+        console.error(`[server] ${SERVER_RESTART_DELAY_MS}ms 后自动重启 (${serverRestartCount}/${MAX_SERVER_RESTARTS})…`);
+        setTimeout(() => {
+          if (isQuitting) return;
+          serverProcess = startServer(port);
+          waitForServer(port)
+            .then(() => { console.log('[server] 重启成功,刷新窗口'); mainWindow?.webContents.reload(); })
+            .catch((e) => console.error('[server] 重启后等待就绪失败:', e instanceof Error ? e.message : String(e)));
+        }, SERVER_RESTART_DELAY_MS);
+      } else if (serverRestartCount >= MAX_SERVER_RESTARTS) {
+        console.error(`[server] 已达自动重启上限(${MAX_SERVER_RESTARTS}次),停止重启。这是确定性崩溃,请查上面的 [server:crash-tail] 定位根因。`);
+      }
+    }
   });
 
   return child;

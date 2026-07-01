@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { useRouter, usePathname } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -953,6 +954,27 @@ export function InlineTestingPanel() {
     } catch { /* 保存失败保留编辑态,用户可重试 */ }
     setCasesSaving(false);
   };
+  // 需求文档预览（问题①）：用户在「需求分析」阶段点「预览需求文档」→ 按需读 {task}-需求.md，
+  // 复用报告步的 PreviewModal/MdPreview 弹窗渲染（独立状态，与报告步互不影响）。
+  const [reqPreview, setReqPreview] = useState<PreviewState | null>(null);
+  const [reqPreviewLoading, setReqPreviewLoading] = useState(false);
+  useEffect(() => { setReqPreview(null); }, [aId]); // 切任务关掉残留的需求预览弹窗
+  const openRequirementPreview = async () => {
+    if (!current?.path || !activeTask) return;
+    // rel 相对项目根（与 MdPreview 保存口径一致：baseDir=projectPath + rel）。
+    const rel = `AI_LabTest/requirements/${activeTask.name}-需求.md`;
+    setReqPreviewLoading(true);
+    try {
+      const res = await fetch(`/api/files/raw?path=${encodeURIComponent(`${current.path}/${rel}`)}`);
+      if (!res.ok) throw new Error("read failed");
+      const content = await res.text();
+      setReqPreview({ kind: "md", titleKey: "test.step.requirements.name", rel, content, editable: false });
+    } catch {
+      showToast({ type: "error", message: t("test.requirement.previewFailed") });
+    } finally {
+      setReqPreviewLoading(false);
+    }
+  };
   // First not-done step = the "current" step the detail card focuses on.
   const nextPendingStep = (): TestStep | null => STEPS.find((s) => stepStatus[s.step] !== "done")?.step ?? null;
   // focusStep = 详情卡当前展示的阶段。执行中(runningStep 存在)强制 focus 运行中的节点,
@@ -1283,10 +1305,16 @@ export function InlineTestingPanel() {
     }
     // 问题6：先收集要删报告的 (项目路径, 任务名)，UI 删除会改 projects，必须在删之前读。
     const toDelete: { path: string; name: string }[] = [];
+    // 删除后的新状态副本：用于本函数结尾「立即同步 PUT」(不等 debounce)。setState 仍走函数式
+    // (基于最新 m，避免覆盖删除期间其它在跑任务的 SSE 更新)，副本只用来立刻把已删结果落盘。
+    let nextProjects = projects;
+    let nextTaskStates = taskStates;
     if (kind === "project") {
       const proj = projects[pIdx];
       if (proj?.path) for (const tk of proj.tasks) toDelete.push({ path: proj.path, name: tk.name });
       const ids = new Set((proj?.tasks ?? []).map((tk) => tk.id));
+      nextTaskStates = (() => { const n = { ...taskStates }; ids.forEach((id) => delete n[id]); return n; })();
+      nextProjects = projects.filter((_, i) => i !== pIdx);
       setTaskStates((m) => { const n = { ...m }; ids.forEach((id) => delete n[id]); return n; });
       setProjects((ps) => ps.filter((_, i) => i !== pIdx));
       if (selected === pIdx) { setSelected(null); setSelectedTask(null); }
@@ -1295,7 +1323,11 @@ export function InlineTestingPanel() {
       const proj = projects[pIdx];
       const tk = proj?.tasks[tIdx!];
       if (proj?.path && tk) toDelete.push({ path: proj.path, name: tk.name });
-      if (tk) setTaskStates((m) => { const n = { ...m }; delete n[tk.id]; return n; });
+      if (tk) {
+        nextTaskStates = (() => { const n = { ...taskStates }; delete n[tk.id]; return n; })();
+        setTaskStates((m) => { const n = { ...m }; delete n[tk.id]; return n; });
+      }
+      nextProjects = projects.map((p, i) => (i === pIdx ? { ...p, tasks: p.tasks.filter((_, j) => j !== tIdx) } : p));
       setProjects((ps) => ps.map((p, i) => (i === pIdx ? { ...p, tasks: p.tasks.filter((_, j) => j !== tIdx) } : p)));
       if (selected === pIdx && selectedTask === tIdx) { setSelectedTask(null); setView("dash"); }
       else if (selected === pIdx && selectedTask !== null && selectedTask > tIdx!) setSelectedTask(selectedTask - 1);
@@ -1306,6 +1338,15 @@ export function InlineTestingPanel() {
     if (toDelete.length) {
       await Promise.all(toDelete.map((r) => deleteTaskReports(r.path, r.name)));
       setReportsReload((n) => n + 1);
+    }
+    // 问题3 修复：删除完成后【立即同步 PUT】最新状态到文件，不依赖上方 ~500ms 的 debounce
+    // 持久化。否则用户在 debounce 触发前就关闭应用 → 删除从未落盘 → 重启又把已删项目/任务读回。
+    if (loaded) {
+      fetch("/api/test/workbench", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projects: nextProjects, taskStates: nextTaskStates }),
+      }).catch(() => {});
     }
   };
 
@@ -1680,8 +1721,37 @@ export function InlineTestingPanel() {
                     providerId={providerId}
                   />
                 )}
-                {focusStep !== "cases" && focusStep !== "report" && (
+                {focusStep === "requirement" && (
+                  <div className="mt-2 flex items-center gap-2">
+                    {(stepStatus.requirement === "done" || stepStatus.requirement === "review") && (
+                      <button
+                        onClick={openRequirementPreview}
+                        disabled={reqPreviewLoading || !current?.path || !activeTask}
+                        title={t("test.requirement.previewDoc")}
+                        className="flex items-center gap-1 rounded border border-border px-2 py-1 text-[10px] text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        {reqPreviewLoading ? <SpinnerGap size={12} className="animate-spin" /> : <Eye size={12} />} {t("test.requirement.previewDoc")}
+                      </button>
+                    )}
+                    <span className="text-[11px] text-muted-foreground">{t("test.flow.evidenceNote")}</span>
+                  </div>
+                )}
+                {focusStep === "execution" && (
                   <div className="mt-2 text-[11px] text-muted-foreground">{t("test.flow.evidenceNote")}</div>
+                )}
+                {/* 需求文档预览弹窗（问题①）：复用报告步 PreviewModal/MdPreview，按需读
+                    {task}-需求.md 渲染；独立状态，不影响报告步预览。 */}
+                {reqPreview && (
+                  <PreviewModal
+                    t={t}
+                    preview={reqPreview}
+                    projectPath={current?.path ?? ""}
+                    taskName={activeTask?.name ?? ""}
+                    env={env}
+                    onClose={() => setReqPreview(null)}
+                    onSaved={() => setReqPreview(null)}
+                    setEditable={(editable) => setReqPreview((p) => (p && p.kind === "md" ? { ...p, editable } : p))}
+                  />
                 )}
               </div>
             </div>
@@ -1690,10 +1760,22 @@ export function InlineTestingPanel() {
           {/* lower: 测试对话 (run stream) */}
           <div className="flex min-h-0 flex-1 flex-col bg-background">
             <div ref={threadRef} className="flex flex-1 flex-col gap-2 overflow-auto p-4">
-              {convo.length === 0 ? (
+              {convo.length === 0 && !busy ? (
                 <p className="mt-6 text-center text-[11px] text-muted-foreground">{t("test.convo.empty")}</p>
               ) : (
                 convo.map((m, i) => <ConvoBubble key={i} msg={m} />)
+              )}
+              {/* 等待动画：任务运行中 / 等待 AI 响应时，对话末尾显示「正在处理」跳动点，
+                  让用户知道系统在处理、不是卡死。busy 结束即消失。 */}
+              {busy && (
+                <div className="flex items-center gap-2 px-1 py-1">
+                  <span className="flex gap-1">
+                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-primary/60" style={{ animationDelay: "-0.3s" }} />
+                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-primary/60" style={{ animationDelay: "-0.15s" }} />
+                    <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-primary/60" />
+                  </span>
+                  <span className="text-[10px] text-muted-foreground">{t("test.convo.thinking")}</span>
+                </div>
               )}
             </div>
             {/* gate bar: a human-gated step (需求/用例) awaiting approval */}
@@ -2768,15 +2850,18 @@ function XlsxPreview({ t, projectPath, taskName, env, onClose }: {
   const [data, setData] = useState<{ sheets: { name: string; rows: string[][] }[] } | null>(null);
   const [err, setErr] = useState(false);
   const [lightbox, setLightbox] = useState<string | null>(null);
+  const [reloadTick, setReloadTick] = useState(0);
 
   useEffect(() => {
     let cancelled = false;
-    fetch(`/api/test/report-xlsx?projectPath=${encodeURIComponent(projectPath)}&taskName=${encodeURIComponent(taskName)}&env=${encodeURIComponent(env)}`)
+    // cache:"no-store" —— 第一次预览成功后浏览器可能缓存响应，第二次 from cache 在打包
+    // standalone 环境偶发取到坏/空缓存 → 解析失败。强制每次走网络，杜绝这条路。
+    fetch(`/api/test/report-xlsx?projectPath=${encodeURIComponent(projectPath)}&taskName=${encodeURIComponent(taskName)}&env=${encodeURIComponent(env)}`, { cache: "no-store" })
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error("fetch failed"))))
       .then((d) => { if (!cancelled) { if (d.error) setErr(true); else setData(d); } })
       .catch(() => { if (!cancelled) setErr(true); });
     return () => { cancelled = true; };
-  }, [projectPath, taskName, env]);
+  }, [projectPath, taskName, env, reloadTick]);
 
   const mediaUrl = (file: string) => `/api/test/media?projectPath=${encodeURIComponent(projectPath)}&taskName=${encodeURIComponent(taskName)}&env=${encodeURIComponent(env)}&file=${encodeURIComponent(file)}`;
   const mediaRe = /\.(png|jpe?g|webp|gif|webm|mp4|mov)$/i;
@@ -2810,7 +2895,10 @@ function XlsxPreview({ t, projectPath, taskName, env, onClose }: {
       </div>
       <div className="min-h-0 flex-1 overflow-auto p-3">
         {err ? (
-          <p className="text-[11px] text-status-error-foreground">{t("test.report.xlsxLoadFailed")}</p>
+          <div className="flex items-center gap-2 text-[11px] text-status-error-foreground">
+            {t("test.report.xlsxLoadFailed")}
+            <button onClick={() => { setErr(false); setData(null); setReloadTick((n) => n + 1); }} className="rounded border border-border px-1.5 py-0.5 text-foreground hover:bg-muted">{t("test.report.retry")}</button>
+          </div>
         ) : !data ? (
           <p className="text-[11px] text-muted-foreground">{t("test.report.loading")}</p>
         ) : !sheet || sheet.rows.length === 0 ? (
@@ -2834,7 +2922,10 @@ function XlsxPreview({ t, projectPath, taskName, env, onClose }: {
           </div>
         )}
       </div>
-      {lightbox && (
+      {/* lightbox 用 Portal 渲染到 body —— 否则它在 PreviewModal 的 overflow-hidden +
+          rounded-xl 容器内，<video> 的硬件合成层会黑屏（录像加载了、控件和 0:00 都在、画面黑的
+          根因；报告 tab 的 ReportView 录像不在这层嵌套故正常）。 */}
+      {lightbox && createPortal(
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-6" onClick={() => setLightbox(null)}>
           {isVid(lightbox) ? (
             <video src={mediaUrl(lightbox)} controls autoPlay muted playsInline preload="metadata" className="max-h-full max-w-full" onClick={(e) => e.stopPropagation()} />
@@ -2842,7 +2933,8 @@ function XlsxPreview({ t, projectPath, taskName, env, onClose }: {
             // eslint-disable-next-line @next/next/no-img-element
             <img src={mediaUrl(lightbox)} alt={lightbox} className="max-h-full max-w-full object-contain" onClick={(e) => e.stopPropagation()} />
           )}
-        </div>
+        </div>,
+        document.body,
       )}
     </>
   );
@@ -3434,13 +3526,21 @@ function NewTaskModal({ t, onClose, onAdd, existingNames }: { t: T; onClose: () 
     if (!ready || busy) return;
     setBusy(true);
     setErr("");
-    const res = await onAdd(name.trim(), {
-      requirement: reqFile ? { filename: reqFile.name, dataBase64: reqFile.data } : undefined,
-      cases: casesFile ? { filename: casesFile.name, dataBase64: casesFile.data } : undefined,
-    });
-    setBusy(false);
-    if (res.ok) onClose();
-    else setErr(res.error || t("test.newTaskModal.importFailed"));
+    try {
+      const res = await onAdd(name.trim(), {
+        requirement: reqFile ? { filename: reqFile.name, dataBase64: reqFile.data } : undefined,
+        cases: casesFile ? { filename: casesFile.name, dataBase64: casesFile.data } : undefined,
+      });
+      if (res.ok) onClose();
+      else setErr(res.error || t("test.newTaskModal.importFailed"));
+    } catch (e) {
+      // onAdd(=addTask) 内部任一 await（postImport 的 fetch、网络异常、import 路由 500）
+      // 抛错时必须在这里兜住 —— 否则下面的 setBusy(false) 永不执行，按钮一直卡在「导入中」、
+      // 整个弹窗禁用死锁。这正是 Windows 包反馈「导需求/用例后点创建一直导入中」的直接原因。
+      setErr(e instanceof Error ? e.message : t("test.newTaskModal.importFailed"));
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (

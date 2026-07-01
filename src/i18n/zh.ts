@@ -211,6 +211,7 @@ const zh: Record<TranslationKey, string> = {
   'test.flow.expandLog': '展开日志',
   'test.flow.collapseLog': '收起日志',
   'test.convo.empty': '运行测试步骤后，AI 的执行过程会显示在这里。',
+  'test.convo.thinking': '正在处理…',
   'test.convo.placeholder': '追加测试指令，回车发送',
   'test.convo.running': '运行中…暂不可输入',
   'test.convo.send': '发送',
@@ -270,6 +271,8 @@ const zh: Record<TranslationKey, string> = {
   'test.report.openEdit': '点开修改',
   'test.report.exportFile': '导出',
   'test.report.tabPreview': '预览',
+  'test.requirement.previewDoc': '预览需求文档',
+  'test.requirement.previewFailed': '读取需求文档失败',
   'test.report.tabEdit': '编辑',
   'test.report.save': '保存',
   'test.report.saving': '保存中…',
@@ -280,6 +283,7 @@ const zh: Record<TranslationKey, string> = {
   'test.report.docEmpty': '报告文档尚未生成',
   'test.report.xlsxEmpty': 'Excel 无数据',
   'test.report.xlsxLoadFailed': 'Excel 解析失败',
+  'test.report.retry': '重试',
   'nav.imageStudio': '文生图',
 
   // ── 文生图（独立模块）──────────────────────────────────────
