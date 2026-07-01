@@ -2868,12 +2868,25 @@ function XlsxPreview({ t, projectPath, taskName, env, onClose }: {
   const isVid = (f: string) => /\.(webm|mp4|mov)$/i.test(f);
   const cellNode = (text: string) => {
     const tok = text.trim();
-    if (mediaRe.test(tok)) {
-      const base = tok.split(/[\\/]/).pop() || tok;
+    // 证据单元格常是多个文件用 ", " 拼接（fail/partial 用例的 截图.png + 录像.webm——
+    // report-xlsx 用 evidence.join(', ') 生成）。必须按分隔符拆成【多个独立 chip】，每个只把
+    // 【单个文件名】传给 /api/test/media。否则整串「a.png, b.webm」被当成一个文件名（且因整串
+    // 以 .webm 结尾被误判为视频）→ media 404 → <video> Format error 黑屏。这是「录像预览黑屏」
+    // 反复修不好的真根因（占位单文件数据碰不到，只有真实的「截图+录像」多证据用例才触发）。
+    const parts = tok.split(/,\s*/).map((s) => s.trim()).filter(Boolean);
+    const mediaParts = parts.filter((p) => mediaRe.test(p));
+    if (mediaParts.length > 0) {
       return (
-        <button onClick={() => setLightbox(base)} title={base} className="rounded border border-border px-1 py-0.5 text-[10px] text-primary hover:bg-muted">
-          {isVid(base) ? `🎬 ${t("test.media.video")}` : `🖼 ${t("test.media.image")}`}
-        </button>
+        <span className="flex flex-wrap items-center gap-1">
+          {mediaParts.map((p, i) => {
+            const base = p.split(/[\\/]/).pop() || p;
+            return (
+              <button key={i} onClick={() => setLightbox(base)} title={base} className="rounded border border-border px-1 py-0.5 text-[10px] text-primary hover:bg-muted">
+                {isVid(base) ? `🎬 ${t("test.media.video")}` : `🖼 ${t("test.media.image")}`}
+              </button>
+            );
+          })}
+        </span>
       );
     }
     return <span>{text}</span>;
@@ -2905,7 +2918,9 @@ function XlsxPreview({ t, projectPath, taskName, env, onClose }: {
           <p className="text-[11px] text-muted-foreground">{t("test.report.xlsxEmpty")}</p>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full border-collapse text-[11px]">
+            {/* minWidth 让表格按内容宽度展开、超出弹窗宽度 → overflow-x-auto 出现底部横向
+                滚动条（原来 w-full 使表格恰好填满容器、列被挤压换行、无滚动条可拖）。 */}
+            <table className="w-full border-collapse text-[11px]" style={{ minWidth: 1080 }}>
               <thead>
                 <tr className="bg-muted/50 text-left text-muted-foreground">
                   {header.map((h, i) => <th key={i} className="whitespace-nowrap px-2 py-1.5 font-medium">{h}</th>)}
