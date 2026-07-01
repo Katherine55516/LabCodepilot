@@ -153,18 +153,20 @@ export function reduceResults(
     };
   });
 
-  // 兜底补全（问题②修复）：报告用例数应以 cases.json 用例全集为准。执行阶段 AI 可能漏对
-  // 部分用例输出 @@RESULT（用例多时尤甚），导致下游报告「静默」少用例（用户感知为「25 个
-  // 用例报告只显示 16 个」）。这里把 caseIds 中没有对应结果的用例补成 blocked（未执行），让
-  // 报告完整反映全集、漏跑显式可见，且不虚报通过率（未执行计入 total/blocked，不算 pass）。
-  // 不传 caseIds 时行为不变（向后兼容旧调用与单测）。
+  // 报告以 cases.json 用例全集为准：严格按 caseIds 一一对应（既不多也不少）。
+  //  - caseIds 中【有】对应 @@RESULT 的用例 → 用其结果（同 id 多条取第一条）；
+  //  - caseIds 中【无】对应结果的用例 → 补 blocked「未执行」（问题②：25→16 漏跑可见，
+  //    不虚报通过率——未执行计入 total/blocked、不算 pass）；
+  //  - AI 产出的、【不在】caseIds 中的多余结果 → 丢弃（本问题：设计 1 条用例、报告却出现
+  //    2 条——AI 编造 / 把一条拆成多条 / 写错 id 产生的额外条目，报告不应超出用户设计的用例集）。
+  // 不传 caseIds 时行为不变（向后兼容旧调用与单测——不做任何对齐，tests 即 @@RESULT 原样）。
   if (opts.caseIds && opts.caseIds.length) {
-    const seen = new Set(tests.map((t) => t.id));
-    for (const id of opts.caseIds) {
-      if (!id || seen.has(id)) continue;
-      seen.add(id);
-      tests.push({ id, status: "blocked", actual: "", error: NOT_EXECUTED_MSG, evidence: [] });
-    }
+    const byId = new Map<string, ReducedTest>();
+    for (const t of tests) if (!byId.has(t.id)) byId.set(t.id, t);
+    const aligned: ReducedTest[] = opts.caseIds.map(
+      (id) => byId.get(id) ?? { id, status: "blocked", actual: "", error: NOT_EXECUTED_MSG, evidence: [] },
+    );
+    tests.splice(0, tests.length, ...aligned);
   }
 
   const counts: RunCounts = { total: tests.length, pass: 0, fail: 0, partial: 0, blocked: 0 };

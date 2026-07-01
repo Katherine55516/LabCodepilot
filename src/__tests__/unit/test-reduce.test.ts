@@ -281,4 +281,34 @@ describe("reduceResults — caseIds 兜底补全（漏执行用例 → 报告以
     );
     assert.equal(run.circuitBroken, false);
   });
+
+  it("以 cases 为准：丢弃不在 caseIds 中的多余结果（设计 1 条用例不出 2 条报告）", () => {
+    const run = reduceResults(
+      [{ id: "A", status: "pass" }, { id: "GHOST", status: "fail", error: "AI 编造的额外用例" }],
+      { ...OPTS, caseIds: ["A"] },
+    );
+    assert.equal(run.tests.length, 1);
+    assert.equal(run.counts.total, 1);
+    assert.equal(run.tests[0].id, "A");
+    assert.ok(!run.tests.some((t) => t.id === "GHOST"));
+  });
+
+  it("严格一一对应：缺失补全 + 多余丢弃同时生效，且按 caseIds 顺序", () => {
+    const run = reduceResults(
+      [{ id: "X-ghost", status: "fail" }, { id: "A", status: "pass" }],
+      { ...OPTS, caseIds: ["A", "B"] },
+    );
+    assert.deepEqual(run.tests.map((t) => t.id), ["A", "B"]);
+    assert.equal(run.tests[1].status, "blocked"); // B 未执行
+    assert.ok(!run.tests.some((t) => t.id === "X-ghost"));
+  });
+
+  it("同 id 多条结果取第一条（AI 对一条用例重复产出）", () => {
+    const run = reduceResults(
+      [{ id: "A", status: "pass", actual: "第一次" }, { id: "A", status: "fail", actual: "第二次" }],
+      { ...OPTS, caseIds: ["A"] },
+    );
+    assert.equal(run.tests.length, 1);
+    assert.equal(run.tests[0].actual, "第一次");
+  });
 });
