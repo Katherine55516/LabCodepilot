@@ -622,6 +622,29 @@ describe('Direct slash command typed in input', () => {
     const result = resolveDirectSlash('hello world');
     assert.equal(result.action, 'not_slash');
   });
+
+  it('/btw <question> is a btw_command carrying the question', () => {
+    const result = resolveDirectSlash('/btw why did we pick this approach?');
+    assert.equal(result.action, 'btw_command');
+    assert.equal(result.question, 'why did we pick this approach?');
+  });
+
+  it('bare /btw is a btw_command with empty question', () => {
+    const result = resolveDirectSlash('/btw');
+    assert.equal(result.action, 'btw_command');
+    assert.equal(result.question, '');
+  });
+
+  it('/btw trims surrounding whitespace from the question', () => {
+    const result = resolveDirectSlash('/btw    spaced out   ');
+    assert.equal(result.action, 'btw_command');
+    assert.equal(result.question, 'spaced out');
+  });
+
+  it('/btwfoo (no space) is NOT a btw_command — falls through to slash badge', () => {
+    const result = resolveDirectSlash('/btwfoo');
+    assert.equal(result.action, 'unknown_slash_badge');
+  });
 });
 
 // --- 6. CLI Badge ----------------------------------------------------

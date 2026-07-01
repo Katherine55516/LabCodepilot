@@ -95,6 +95,8 @@ const MAX_DIRECTORY_PREVIEW_ITEMS = 30;
 interface MessageInputProps {
   onSend: (content: string, files?: FileAttachment[], systemPromptAppend?: string, displayOverride?: string, mentions?: MentionRef[]) => void;
   onCommand?: (command: string) => void;
+  /** /btw side question — opens an ephemeral popup; never enters the main conversation. */
+  onBtw?: (question: string) => void;
   onStop?: () => void;
   disabled?: boolean;
   isStreaming?: boolean;
@@ -154,6 +156,7 @@ async function fileResponseToAttachment(
 export function MessageInput({
   onSend,
   onCommand,
+  onBtw,
   onStop,
   disabled,
   isStreaming,
@@ -597,6 +600,14 @@ export function MessageInput({
     // Check if it's a direct slash command typed in the input.
     if (!hasFiles) {
       const slashResult = resolveDirectSlash(finalContent);
+      // /btw opens an ephemeral side-question popup. Unlike other slash commands
+      // it is intentionally allowed DURING streaming — asking mid-stream without
+      // interrupting the main turn is the whole point of /btw.
+      if (slashResult.action === 'btw_command') {
+        setInputValue('');
+        onBtw?.(slashResult.question ?? '');
+        return;
+      }
       if (slashResult.action === 'immediate_command' || slashResult.action === 'set_badge' || slashResult.action === 'unknown_slash_badge') {
         // Slash commands must NOT execute or queue during streaming —
         // destructive commands (e.g. /clear) would race with the active stream.
@@ -628,7 +639,7 @@ export function MessageInput({
       mentionPayload.mentions.length > 0 ? mentionPayload.mentions : undefined,
     );
     setInputValue('');
-  }, [inputValue, mentionNodeTypes, onSend, onCommand, disabled, isStreaming, popover, badges, cliBadge, imageGen, addBadgeWithOrder, clearBadgesWithOrder, setCliBadge, setInputValue, fetchDirectorySummary, fetchMentionFileAttachment, workingDirectory]);
+  }, [inputValue, mentionNodeTypes, onSend, onCommand, onBtw, disabled, isStreaming, popover, badges, cliBadge, imageGen, addBadgeWithOrder, clearBadgesWithOrder, setCliBadge, setInputValue, fetchDirectorySummary, fetchMentionFileAttachment, workingDirectory]);
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLTextAreaElement>) => {

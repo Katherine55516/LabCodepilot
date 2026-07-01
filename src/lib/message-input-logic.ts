@@ -31,9 +31,11 @@ export type KeyAction =
   | { type: 'passthrough' };
 
 export interface DirectSlashResult {
-  action: 'immediate_command' | 'set_badge' | 'unknown_slash_badge' | 'not_slash';
+  action: 'immediate_command' | 'set_badge' | 'unknown_slash_badge' | 'btw_command' | 'not_slash';
   commandValue?: string;
   badge?: CommandBadge;
+  /** For 'btw_command': the free-text question after "/btw " (may be empty). */
+  question?: string;
 }
 
 // ─── Functions ───────────────────────────────────────────────────
@@ -304,6 +306,14 @@ export function resolveKeyAction(
  */
 export function resolveDirectSlash(content: string): DirectSlashResult {
   if (!content.startsWith('/')) return { action: 'not_slash' };
+
+  // /btw <question> — side question. Handled before the exact-value lookup
+  // because it carries a free-text argument (so "/btw foo" never matches a
+  // BUILT_IN_COMMANDS entry), and the caller intentionally bypasses the
+  // isStreaming guard for it — asking mid-stream is the whole point.
+  if (content === '/btw' || content.startsWith('/btw ')) {
+    return { action: 'btw_command', question: content.slice('/btw'.length).trim() };
+  }
 
   const cmd = BUILT_IN_COMMANDS.find((c) => c.value === content);
   if (cmd) {
