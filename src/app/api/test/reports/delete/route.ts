@@ -26,9 +26,6 @@ export async function DELETE(req: Request): Promise<Response> {
     }
 
     const reportDir = path.join(projectPath, 'AI_LabTest', 'report', taskName);
-    // [排障·临时] 面包屑:报告 tab 打开时会自动清理孤儿报告(ReportBrowser),该 rmSync 也在
-    // Windows native 崩溃的嫌疑路径上。stderr 进 crash-tail 指认。定位后移除。
-    console.error(`[test:diag] reports delete ${reportDir}`);
     if (fs.existsSync(reportDir)) fs.rmSync(reportDir, { recursive: true, force: true });
 
     // 证据目录命名为 {taskName}-{env}，是 report/_evidence 下的兄弟目录 → 按前缀清理本任务全部 env。

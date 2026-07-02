@@ -19,10 +19,6 @@ export async function GET(req: Request): Promise<Response> {
 
   const reportRoot = path.join(projectPath, 'AI_LabTest', 'report');
   const reports: unknown[] = [];
-  // [排障·临时] 面包屑:Windows 打包版「点报告 tab → 服务 native 崩溃」发生在报告 tab 触发的
-  // fs 批量读取路径上,但崩溃无栈。stderr 面包屑会进 main.log 的 crash-tail(死前最后 30 行),
-  // 下次崩溃时最后一条面包屑即指认凶手文件/目录。定位后移除。
-  console.error(`[test:diag] reports scan ${reportRoot}`);
   try {
     for (const taskDir of fs.readdirSync(reportRoot, { withFileTypes: true })) {
       if (!taskDir.isDirectory() || taskDir.name.startsWith('_')) continue; // skip _evidence
@@ -32,7 +28,6 @@ export async function GET(req: Request): Promise<Response> {
       for (const f of files) {
         if (!f.endsWith('.run.json')) continue;
         try {
-          console.error(`[test:diag] reports read ${path.join(dir, f)}`);
           const raw = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf-8')) as Record<string, unknown>;
           const counts = (raw.counts ?? {}) as Record<string, number>;
           const fc = (raw.funcCounts ?? {}) as Record<string, number>;
@@ -93,7 +88,5 @@ export async function GET(req: Request): Promise<Response> {
     return ax.task.localeCompare(bx.task) || ax.env.localeCompare(bx.env);
   });
 
-  // [排障·临时] 出现这行 = 本次扫描完整走完(崩溃不在本 route);缺这行 = 死在上面某次 read。
-  console.error(`[test:diag] reports done ${reportRoot} n=${reports.length}`);
   return Response.json({ reports });
 }
