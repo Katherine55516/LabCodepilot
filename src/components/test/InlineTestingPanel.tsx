@@ -119,6 +119,16 @@ interface TaskState {
   notes: string[];
   /** Steps whose artifact was user-imported (新建任务) — a run reuses it, not regenerate. */
   imported?: { requirement?: boolean; cases?: boolean };
+  /**
+   * 导入需求的处理方式（在需求分析节点二选一）：
+   *  - undefined 且 imported.requirement=true → 「待选择」：阻塞自动接力，等用户在节点选卡片；
+   *  - 'generate-md'  → AI 读原文归一产 需求.md（原始 + md 两份都保留）；
+   *  - 'use-original' → 跳过 AI，用例设计直接读原始文档。
+   * 旧任务（有旧 需求.md、无 requirementOriginal）加载时回填 'use-original'，不弹待选择。
+   */
+  requirementMode?: "generate-md" | "use-original";
+  /** 保留的原始需求文档信息（导入需求时写入）：原文件名 + 扩展名，用于预览与定位需求来源文件。 */
+  requirementOriginal?: { filename: string; ext: string };
 }
 const DEFAULT_TASK_STATE: TaskState = {
   stepStatus: { requirement: "idle", cases: "idle", execution: "idle", report: "idle" },
@@ -467,7 +477,12 @@ export function InlineTestingPanel() {
           if (!st) continue;
           const ss = { ...st.stepStatus };
           let ch = false;
-          for (const k of Object.keys(ss) as TestStep[]) if (ss[k] === "review") { ss[k] = "done"; ch = true; }
+          for (const k of Object.keys(ss) as TestStep[]) {
+            if (ss[k] !== "review") continue;
+            // 导入需求且未选处理方式(待选择) → Q3：批量/自动也停下等用户在节点选卡片，不自动批准。
+            if (k === "requirement" && st.imported?.requirement && !st.requirementMode) continue;
+            ss[k] = "done"; ch = true;
+          }
           if (ch) { n[tid] = { ...st, stepStatus: ss }; touched = true; }
         }
         return touched ? n : m;
@@ -701,22 +716,24 @@ export function InlineTestingPanel() {
     if (proj && proj.tasks.some((tk) => tk.name.trim() === trimmedName)) {
       return { ok: false, error: t("test.newTaskModal.duplicateName") };
     }
-    const postImport = async (kind: "requirement" | "cases", f: ImportFile): Promise<{ ok: boolean; error?: string; preview?: string }> => {
+    const postImport = async (kind: "requirement" | "cases", f: ImportFile): Promise<{ ok: boolean; error?: string; preview?: string; ext?: string }> => {
       const res = await fetch("/api/test/import", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ projectPath: proj?.path, taskName: name, kind, filename: f.filename, dataBase64: f.dataBase64 }),
       });
       const j = await res.json().catch(() => ({}));
-      return res.ok && j.ok ? { ok: true, preview: j.preview as string } : { ok: false, error: (j.error as string) || t("test.newTaskModal.importFailed") };
+      return res.ok && j.ok ? { ok: true, preview: j.preview as string, ext: j.ext as string | undefined } : { ok: false, error: (j.error as string) || t("test.newTaskModal.importFailed") };
     };
     // Seed the 测试对话 with what was imported — otherwise the stage looks empty (it
     // renders the convo stream, not the artifact file) and the upload seems "missing".
     const seeds: ConvoMsg[] = [];
+    let reqOriginal: { filename: string; ext: string } | undefined;
     if (proj?.path && files?.requirement) {
       const r = await postImport("requirement", files.requirement);
       if (!r.ok) return r;
-      seeds.push({ role: "ai", text: `📄 已导入需求文档「${files.requirement.filename}」，已作为本任务的需求来源（待批准）。\n\n${r.preview || ""}` });
+      reqOriginal = { filename: files.requirement.filename, ext: r.ext || "" };
+      seeds.push({ role: "ai", text: `📄 已导入需求文档「${files.requirement.filename}」，原始文档已保留。请在「需求分析」节点选择：**生成需求分析文档**（AI 归一，保留原始+md），或**直接使用导入文档**生成用例。\n\n${r.preview || ""}` });
     }
     if (proj?.path && files?.cases) {
       const r = await postImport("cases", files.cases);
@@ -730,7 +747,7 @@ export function InlineTestingPanel() {
       patchTask(id, () => ({
         stepStatus: {
           // 导入用例 → 需求 + 用例 都直接 done（跳过两阶段，无需批准），execution 解锁可执行；
-          // 仅导入需求 → 需求 待批准（保持原行为不变）。
+          // 仅导入需求 → 需求 置 review 但 requirementMode 未定 → 需求分析节点「待选择」二选一。
           requirement: hasCases ? "done" : "review",
           cases: hasCases ? "done" : "idle",
           execution: "idle",
@@ -739,6 +756,8 @@ export function InlineTestingPanel() {
         convo: seeds,
         // Mark imported steps so a re-run REUSES the upload instead of regenerating over it.
         imported: { requirement: hasReq, cases: hasCases },
+        // 保留的原始需求文档信息（仅导入需求时）。requirementMode 故意留空 → 触发「待选择」。
+        requirementOriginal: hasReq ? reqOriginal : undefined,
       }));
     }
     return { ok: true };
@@ -781,6 +800,11 @@ export function InlineTestingPanel() {
         for (const st of Object.values(nextStates)) {
           const ss = st?.stepStatus;
           if (ss) for (const k of Object.keys(ss) as Array<keyof typeof ss>) if (ss[k] === "running") ss[k] = "error";
+          // 向后兼容：旧「导入需求」任务把内容直接写进了 需求.md（无 requirementOriginal、无 requirementMode）。
+          // 加载时回填 requirementMode='use-original'，避免它们进入新的「待选择」闸门卡住——它们本就用 需求.md。
+          if (st?.imported?.requirement && !st.requirementMode && !st.requirementOriginal) {
+            st.requirementMode = "use-original";
+          }
         }
         // 历史遗留去重：早期无防重逻辑可能产生同路径的重复项目（如两个 mealAllowance）→
         // 按路径合并，保留任务最多的那张卡片。去重结果会被下方持久化 effect 写回文件，一次性清理现状。
@@ -959,10 +983,17 @@ export function InlineTestingPanel() {
   const [reqPreview, setReqPreview] = useState<PreviewState | null>(null);
   const [reqPreviewLoading, setReqPreviewLoading] = useState(false);
   useEffect(() => { setReqPreview(null); }, [aId]); // 切任务关掉残留的需求预览弹窗
-  const openRequirementPreview = async () => {
+  const openRequirementPreview = async (which: "md" | "original" = "md") => {
     if (!current?.path || !activeTask) return;
     // rel 相对项目根（与 MdPreview 保存口径一致：baseDir=projectPath + rel）。
-    const rel = `AI_LabTest/requirements/${activeTask.name}-需求.md`;
+    const ext = taskStates[activeTask.id]?.requirementOriginal?.ext || "";
+    const rel =
+      which === "original"
+        // 原始文档：docx 是二进制、预览器只渲染文本 → 读抽取文本；md/txt 读保留的原文件本身。
+        ? ext === "docx"
+          ? `AI_LabTest/requirements/.data/${activeTask.name}-导入原文.txt`
+          : `AI_LabTest/requirements/${activeTask.name}-需求-原始.${ext || "txt"}`
+        : `AI_LabTest/requirements/${activeTask.name}-需求.md`;
     setReqPreviewLoading(true);
     try {
       const res = await fetch(`/api/files/raw?path=${encodeURIComponent(`${current.path}/${rel}`)}`);
@@ -982,12 +1013,23 @@ export function InlineTestingPanel() {
   const focusStep: TestStep = runningStep ?? viewStep ?? nextPendingStep() ?? "report";
   // A human-gated step awaiting approval → drives the conversation's gate bar.
   const reviewStep = STEPS.find((s) => stepStatus[s.step] === "review")?.step ?? null;
+  // 导入需求且未选处理方式 → 需求分析节点「待选择」：用二选一卡片替代普通「批准」闸门（Q3）。
+  const requirementChoosePending =
+    !!aState.imported?.requirement && !aState.requirementMode && stepStatus.requirement === "review";
+  // 是否有保留的原始需求文档（新导入任务才有；旧任务无）——决定是否显示「预览原始文档」。
+  const hasRequirementOriginal = !!aState.requirementOriginal?.ext;
 
   // Run one step: stream /api/test/run into the 测试对话 (bubbles) + tally four-state
   // (execution @@RESULT frames). One step at a time; status drives pipeline + gating.
   const runStep = async (
     step: TestStep,
-    opts?: { headed?: boolean; baseUrl?: string; target?: { projPath: string; task: { id: string; name: string } } },
+    opts?: {
+      headed?: boolean;
+      baseUrl?: string;
+      target?: { projPath: string; task: { id: string; name: string } };
+      // 需求分析节点刚二选一时 taskStates 尚未落地(setState 异步) → 用这个即时值覆盖，避免读到旧 state。
+      requirementModeOverride?: "generate-md" | "use-original";
+    },
   ) => {
     // target 缺省 = 活动选择(原行为)；传入 = 跑指定后台任务(批量 / auto-chain 接力其它任务)。
     const projPath = opts?.target ? opts.target.projPath : selected !== null ? projects[selected]?.path : undefined;
@@ -1096,6 +1138,9 @@ export function InlineTestingPanel() {
             (step === "requirement" && !!taskStates[id]?.imported?.requirement) ||
             (step === "cases" && !!taskStates[id]?.imported?.cases) ||
             undefined,
+          // 导入需求的处理模式 + 保留原文扩展名 → 后端据此定位需求来源文件（原文/抽取文本 vs 需求.md）。
+          requirementMode: opts?.requirementModeOverride ?? taskStates[id]?.requirementMode ?? undefined,
+          requirementOriginalExt: taskStates[id]?.requirementOriginal?.ext || undefined,
           model: model || undefined,
           providerId: providerId || undefined,
           // 执行方式 + 被测链接覆盖(见上)。headed 仅执行步透传;baseUrl 缺省时后端回落 environments.json。
@@ -1367,6 +1412,23 @@ export function InlineTestingPanel() {
   const runStepManual = (step: TestStep) => {
     if (aId) autoRunIdsRef.current.delete(aId);
     runStep(step);
+  };
+
+  // 需求分析节点·二选一（导入需求且 requirementMode 未定 = 「待选择」时展示）。选择即人工接管
+  // (退出 autoRun)，之后按正常门控推进。requirementModeOverride 即时透传，避免读到未落地的 state。
+  // A) 生成需求分析文档：AI 读原文归一 → 需求.md（原始 + md 两份都保留），完成后进入待批准。
+  const chooseGenerateReqMd = () => {
+    if (!aId || busy) return;
+    autoRunIdsRef.current.delete(aId);
+    patchTask(aId, () => ({ requirementMode: "generate-md" }));
+    runStep("requirement", { requirementModeOverride: "generate-md" });
+  };
+  // B) 直接使用导入文档：跳过 AI，需求步直接完成 → 用例设计读原始文档/抽取文本。
+  const chooseUseOriginalReq = () => {
+    if (!aId || busy) return;
+    autoRunIdsRef.current.delete(aId);
+    patchTask(aId, (s) => ({ requirementMode: "use-original", stepStatus: { ...s.stepStatus, requirement: "done" } }));
+    if (!stoppedStepRef.current.has(`${aId}:cases`)) runStep("cases", { requirementModeOverride: "use-original" });
   };
 
   // 详情卡「运行 / 重跑」点击:测试执行步先弹「执行前确认被测链接」(确认地址 + 选执行方式
@@ -1729,16 +1791,69 @@ export function InlineTestingPanel() {
                     providerId={providerId}
                   />
                 )}
-                {focusStep === "requirement" && (
-                  <div className="mt-2 flex items-center gap-2">
-                    {(stepStatus.requirement === "done" || stepStatus.requirement === "review") && (
+                {focusStep === "requirement" && requirementChoosePending && (
+                  // 「待选择」二选一：导入需求后，用户选生成 md 或直接用原文档。原始文档已保留。
+                  <div className="mt-2 rounded-lg border border-border bg-muted/30 p-3">
+                    <div className="mb-2 flex items-center gap-1.5 text-[11px] font-medium text-foreground">
+                      <FileIcon size={13} className="text-primary" />
+                      {t("test.requirement.chooseTitle")}
+                      <span className="font-normal text-muted-foreground">· {t("test.requirement.chooseHint")}</span>
+                      <span className="flex-1" />
+                      {hasRequirementOriginal && (
+                        <button
+                          onClick={() => openRequirementPreview("original")}
+                          disabled={reqPreviewLoading || !current?.path || !activeTask}
+                          className="flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[10px] text-foreground hover:bg-muted disabled:opacity-40"
+                        >
+                          {reqPreviewLoading ? <SpinnerGap size={11} className="animate-spin" /> : <Eye size={11} />} {t("test.requirement.previewOriginal")}
+                        </button>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
                       <button
-                        onClick={openRequirementPreview}
+                        onClick={chooseGenerateReqMd}
+                        disabled={busy}
+                        className="flex flex-col items-start gap-1 rounded-md border-2 border-primary/60 p-2 text-left hover:bg-primary/5 disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        <span className="flex items-center gap-1 text-[11px] font-medium text-foreground">
+                          <Sparkle size={12} className="text-primary" /> {t("test.requirement.genMd")}
+                        </span>
+                        <span className="text-[10px] leading-snug text-muted-foreground">{t("test.requirement.genMdDesc")}</span>
+                      </button>
+                      <button
+                        onClick={chooseUseOriginalReq}
+                        disabled={busy}
+                        className="flex flex-col items-start gap-1 rounded-md border border-border p-2 text-left hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        <span className="flex items-center gap-1 text-[11px] font-medium text-foreground">
+                          <FileIcon size={12} /> {t("test.requirement.useOriginal")}
+                        </span>
+                        <span className="text-[10px] leading-snug text-muted-foreground">{t("test.requirement.useOriginalDesc")}</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {focusStep === "requirement" && !requirementChoosePending && (
+                  <div className="mt-2 flex items-center gap-2">
+                    {(stepStatus.requirement === "done" || stepStatus.requirement === "review") &&
+                      !(hasRequirementOriginal && aState.requirementMode === "use-original") && (
+                        <button
+                          onClick={() => openRequirementPreview("md")}
+                          disabled={reqPreviewLoading || !current?.path || !activeTask}
+                          title={t("test.requirement.previewDoc")}
+                          className="flex items-center gap-1 rounded border border-border px-2 py-1 text-[10px] text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+                        >
+                          {reqPreviewLoading ? <SpinnerGap size={12} className="animate-spin" /> : <Eye size={12} />} {t("test.requirement.previewDoc")}
+                        </button>
+                      )}
+                    {hasRequirementOriginal && (
+                      <button
+                        onClick={() => openRequirementPreview("original")}
                         disabled={reqPreviewLoading || !current?.path || !activeTask}
-                        title={t("test.requirement.previewDoc")}
+                        title={t("test.requirement.previewOriginal")}
                         className="flex items-center gap-1 rounded border border-border px-2 py-1 text-[10px] text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
                       >
-                        {reqPreviewLoading ? <SpinnerGap size={12} className="animate-spin" /> : <Eye size={12} />} {t("test.requirement.previewDoc")}
+                        {reqPreviewLoading ? <SpinnerGap size={12} className="animate-spin" /> : <Eye size={12} />} {t("test.requirement.previewOriginal")}
                       </button>
                     )}
                     <span className="text-[11px] text-muted-foreground">{t("test.flow.evidenceNote")}</span>
@@ -1786,8 +1901,9 @@ export function InlineTestingPanel() {
                 </div>
               )}
             </div>
-            {/* gate bar: a human-gated step (需求/用例) awaiting approval */}
-            {reviewStep && (
+            {/* gate bar: a human-gated step (需求/用例) awaiting approval.
+                需求「待选择」时不显示普通「批准」——由节点内二选一卡片代替。 */}
+            {reviewStep && !requirementChoosePending && (
               <div className="mx-3 mb-2 flex shrink-0 items-center gap-2 rounded-md border border-status-warning-border bg-status-warning-muted px-3 py-2 text-[11px] text-status-warning-foreground">
                 <span>✋ {t(STEPS.find((s) => s.step === reviewStep)!.name)}{t("test.gate.pending")}</span>
                 <span className="flex-1" />

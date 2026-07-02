@@ -61,6 +61,41 @@ describe("buildStep reuseImported (新建任务导入产物)", () => {
   });
 });
 
+// 导入需求「保留原文 + 二选一」：requirement(生成 md) 读保留原文、写 需求.md；
+// cases(直接用原文) 读原文而非 需求.md，并带 raw-source 提示。
+describe("buildStep 导入需求来源模式 (requirementMode / requirementSourcePath)", () => {
+  it("requirement generate-md: reads the preserved original, still writes 需求.md, never overwrites the original", () => {
+    const src = "AI_LabTest/requirements/登录验证-需求-原始.md";
+    const b = buildStep("requirement", {
+      taskName: "登录验证",
+      reuseImported: true,
+      requirementMode: "generate-md",
+      requirementSourcePath: src,
+    });
+    assert.ok(b.prompt.includes("用户已上传需求文档"));
+    assert.ok(b.prompt.includes(src), "reads the preserved original as source");
+    assert.ok(b.prompt.includes("登录验证-需求.md"), "still writes the AI product 需求.md");
+    assert.ok(b.prompt.includes("只读输入"), "declares the original read-only (not overwritten)");
+  });
+
+  it("cases use-original: reads the original doc as requirement source (not 需求.md) + raw-source note", () => {
+    const src = "AI_LabTest/requirements/登录验证-需求-原始.txt";
+    const b = buildStep("cases", {
+      taskName: "登录验证",
+      requirementMode: "use-original",
+      requirementSourcePath: src,
+    });
+    assert.ok(b.prompt.includes(src), "cases read the original source path");
+    assert.equal(b.prompt.includes("登录验证-需求.md"), false, "cases do NOT read the AI md in use-original mode");
+    assert.ok(b.prompt.includes("直接使用") && b.prompt.includes("原始需求文档"), "raw-source note present");
+  });
+
+  it("cases generate-md (no source override): defaults to reading 需求.md", () => {
+    const b = buildStep("cases", { taskName: "登录验证", requirementMode: "generate-md" });
+    assert.ok(b.prompt.includes("登录验证-需求.md"), "defaults to the AI product 需求.md");
+  });
+});
+
 // 缺陷修复：执行步撞登录墙时 AI 调 AskUserQuestion → 非交互运行弹不出、卡死。
 // 执行 prompt 必须(1)禁用 AskUserQuestion/提问，(2)遇登录墙判 blocked 并引导用户去
 // 「设置 · 测试账号」配置登录态。

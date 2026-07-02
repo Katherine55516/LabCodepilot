@@ -23,20 +23,31 @@ afterEach(() => { fs.rmSync(proj, { recursive: true, force: true }); });
 const post = (body: unknown) =>
   POST(new Request("http://x/api/test/import", { method: "POST", body: JSON.stringify(body) }));
 const b64 = (s: string) => Buffer.from(s, "utf-8").toString("base64");
-const reqFile = (taskName: string) => path.join(proj, "AI_LabTest", "requirements", `${taskName}-需求.md`);
+// AI 需求分析产物（生成 md 模式才写；导入本身不写它）。
+const reqMdFile = (taskName: string) => path.join(proj, "AI_LabTest", "requirements", `${taskName}-需求.md`);
+// 保留的原始需求文档（导入需求时按原扩展名字节级保存）。
+const reqOriginalFile = (taskName: string, ext: string) => path.join(proj, "AI_LabTest", "requirements", `${taskName}-需求-原始.${ext}`);
 const casesFile = (taskName: string) => path.join(proj, "AI_LabTest", "testCase", ".data", `${taskName}.cases.json`);
 
 describe("POST /api/test/import — requirement", () => {
-  it("imports a markdown requirement file", async () => {
+  it("preserves the imported markdown as ORIGINAL and does NOT write the AI product 需求.md", async () => {
     const res = await post({ projectPath: proj, taskName: "订单", kind: "requirement", filename: "req.md", dataBase64: b64("# 需求\n登录功能") });
     const j = await res.json();
     assert.equal(j.ok, true);
-    assert.match(fs.readFileSync(reqFile("订单"), "utf-8"), /登录功能/);
+    assert.equal(j.ext, "md");
+    // 原始文档保留（含内容）
+    assert.match(fs.readFileSync(reqOriginalFile("订单", "md"), "utf-8"), /登录功能/);
+    // 导入不再写 AI 产物 需求.md（留给「生成需求分析文档」模式产出）
+    assert.ok(!fs.existsSync(reqMdFile("订单")), "import must not write the AI product 需求.md");
+    // path 指向可读来源：md 即原文件本身；docx 无抽取文本
+    assert.equal(j.path, "AI_LabTest/requirements/订单-需求-原始.md");
+    assert.equal(j.sourceTextPath, undefined);
   });
-  it("rejects an EMPTY requirement instead of silently writing a blank file (M3)", async () => {
+  it("rejects an EMPTY requirement without writing any file (M3)", async () => {
     const res = await post({ projectPath: proj, taskName: "订单", kind: "requirement", filename: "req.md" }); // no dataBase64
     assert.equal(res.status, 400);
-    assert.ok(!fs.existsSync(reqFile("订单")), "no blank artifact should be written");
+    assert.ok(!fs.existsSync(reqOriginalFile("订单", "md")), "no blank original should be written");
+    assert.ok(!fs.existsSync(reqMdFile("订单")), "no blank 需求.md should be written");
   });
   it("rejects legacy .doc binary", async () => {
     const res = await post({ projectPath: proj, taskName: "订单", kind: "requirement", filename: "old.doc", dataBase64: b64("x") });
