@@ -63,15 +63,30 @@ export function ChatListPanel({ open, width, hasUpdate, readyToInstall }: ChatLi
 
   const { streamingSessionId, pendingApprovalSessionId, activeStreamingSessions, pendingApprovalSessionIds, workingDirectory, testPanelOpen, setTestPanelOpen } = usePanel();
 
+  // 工作台只在 chat 路由的覆盖层显示（见 AppShell：testPanelOpen && isChatRoute）。测试按钮的
+  // active 高亮应与「工作台是否真的可见」一致——否则点文生图/设置导航到非 chat 路由后，工作台
+  // 已隐藏、按钮却还亮着（用户报「点测试再点其他模块，测试按钮 active 没取消」）。testPanelOpen
+  // 保持不变（保活：切回 chat 工作台仍在），只是按钮高亮跟随实际可见性。
+  const isChatRoute = pathname.startsWith("/chat/") || pathname === "/chat";
+
   // "测试" entry (Routines-style sidebar button). Toggles the inline testing
   // panel via app-level PanelContext state (no transient event → no mount-timing
   // race). Toggle (not just open) because the panel no longer has its own 收起
   // button — clicking 测试 again is the explicit way out. Navigates to /chat
   // first when opening from a non-chat route. Additive.
   const handleOpenTesting = useCallback(() => {
-    const next = !testPanelOpen;
-    setTestPanelOpen(next);
-    if (next && !pathname.startsWith("/chat")) router.push("/chat");
+    // 工作台「可见」= testPanelOpen 且在 chat 路由（工作台是 /chat 覆盖层）——与测试按钮 active
+    // 的判断保持一致。toggle 必须按【可见性】而非纯 testPanelOpen：否则在文生图/设置等非 chat
+    // 路由时 testPanelOpen 可能仍为 true（保活、只是隐藏），此刻点测试会被 toggle 成 false（先
+    // 关一次、用户看「没反应」），得点第二次才开。改为：可见→关；不可见(没开 / 在非 chat 路由)
+    // →开 + 导航回 /chat 让它显示。
+    const visible = testPanelOpen && pathname.startsWith("/chat");
+    if (visible) {
+      setTestPanelOpen(false);
+    } else {
+      setTestPanelOpen(true);
+      if (!pathname.startsWith("/chat")) router.push("/chat");
+    }
   }, [pathname, router, testPanelOpen, setTestPanelOpen]);
   const { splitSessions, isSplitActive, activeColumnId, addToSplit, removeFromSplit, setActiveColumn, isInSplit } = useSplit();
   const { t } = useTranslation();
@@ -711,13 +726,13 @@ export function ChatListPanel({ open, width, hasUpdate, readyToInstall }: ChatLi
           variant="ghost"
           size="sm"
           className={`w-full justify-start gap-2 h-8 text-xs ${
-            testPanelOpen
+            testPanelOpen && isChatRoute
               ? "bg-accent text-accent-foreground font-medium"
               : "text-muted-foreground hover:text-foreground"
           }`}
           onClick={handleOpenTesting}
         >
-          <MagnifyingGlassCheck size={14} weight={testPanelOpen ? "fill" : "regular"} />
+          <MagnifyingGlassCheck size={14} weight={testPanelOpen && isChatRoute ? "fill" : "regular"} />
           {t('nav.test')}
         </Button>
         {/* 文生图 — text-to-image entry */}

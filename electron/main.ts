@@ -1,6 +1,6 @@
 import { app, BrowserWindow, Notification, nativeImage, dialog, session, utilityProcess, ipcMain, shell, Tray, Menu, systemPreferences } from 'electron';
 import path from 'path';
-import { execFileSync, spawn, ChildProcess } from 'child_process';
+import { execFileSync, spawn, fork, ChildProcess } from 'child_process';
 import fs from 'fs';
 import net from 'net';
 import os from 'os';
@@ -97,7 +97,8 @@ function sanitizedProcessEnv(): Record<string, string> {
 }
 
 let mainWindow: BrowserWindow | null = null;
-let serverProcess: Electron.UtilityProcess | null = null;
+// Windows 下是 child_process.fork 的纯 Node 子进程,macOS/Linux 下是 utilityProcess —— 见 startServer。
+let serverProcess: Electron.UtilityProcess | ChildProcess | null = null;
 let serverPort: number | null = null;
 let serverErrors: string[] = [];
 let serverExited = false;
@@ -312,7 +313,9 @@ function killServer(): Promise<void> {
       resolve();
     }, 3000);
 
-    serverProcess.on('exit', () => {
+    // UtilityProcess 与 ChildProcess 都有 'exit' 事件,但 TS 对联合类型的 .on 重载取交集后
+    // 收窄到只剩 'spawn'/'message',故显式收窄到 ChildProcess 形态调用(运行时两者行为一致)。
+    (serverProcess as ChildProcess).on('exit', () => {
       clearTimeout(timeout);
       serverProcess = null;
       // 进程已正常退出,删除 pidfile。
@@ -863,7 +866,7 @@ async function waitForServer(port: number, timeout = 30000): Promise<void> {
   );
 }
 
-function startServer(port: number): Electron.UtilityProcess {
+function startServer(port: number): Electron.UtilityProcess | ChildProcess {
   const standaloneDir = path.join(process.resourcesPath, 'standalone');
   const serverPath = path.join(standaloneDir, 'server.js');
 
@@ -907,21 +910,6 @@ function startServer(port: number): Electron.UtilityProcess {
   // ever surface in the server's piped output.
   registerKnownSecretsFromEnv(env);
 
-  // Use Electron's utilityProcess to run the server in a child process
-  // without spawning a separate Dock icon on macOS.
-  const child = utilityProcess.fork(serverPath, [], {
-    env,
-    cwd: standaloneDir,
-    stdio: 'pipe',
-    serviceName: 'codepilot-server',
-  });
-
-  // 记录 pid 到固定 pidfile —— 供下次启动清理本次的残留进程(见 reapOrphanServer)。
-  // utilityProcess.fork 同步返回,pid 此时已可用。
-  if (child.pid) {
-    writeServerPidFile(child.pid);
-  }
-
   // Buffer piped output and emit COMPLETE lines. Logging per logical line (not
   // per arbitrary pipe chunk) keeps the file log readable AND lets the logger's
   // secret scrubber see whole tokens — a value split across two 'data' events
@@ -947,10 +935,8 @@ function startServer(port: number): Electron.UtilityProcess {
       }
     };
   };
-  child.stdout?.on('data', makeLineHandler('[server]', false));
-  child.stderr?.on('data', makeLineHandler('[server:err]', true));
-
-  child.on('exit', (code) => {
+  // 服务退出处理 —— 两种宿主进程(见下方分支)共用。child_process 语义下被信号杀时 code 为 null。
+  const handleExit = (code: number | null) => {
     console.log(`Server process exited with code ${code}`);
     serverExited = true;
     serverExitCode = code;
@@ -980,7 +966,47 @@ function startServer(port: number): Electron.UtilityProcess {
         console.error(`[server] 已达自动重启上限(${MAX_SERVER_RESTARTS}次),停止重启。这是确定性崩溃,请查上面的 [server:crash-tail] 定位根因。`);
       }
     }
-  });
+  };
+
+  let child: Electron.UtilityProcess | ChildProcess;
+  if (process.platform === 'win32') {
+    // [Windows] 用 child_process.fork(ELECTRON_RUN_AS_NODE=纯 Node 运行时)而非 utilityProcess。
+    // utilityProcess 是 Chromium utility 进程,自带 crashpad/mojo/沙箱机制,对企业 EDR/杀软的
+    // DLL 注入极其敏感 —— 实测(域机器)服务进程在应用层零错误的情况下周期性被 native 终结:
+    // 退出码 -36616 / 0x40010004(DBG_TERMINATE_PROCESS=被外部按调试器方式终结),死前必现
+    // crashpad not connected,且 Windows 事件查看器无 ID1000 崩溃记录(说明不是自身崩溃、
+    // 是被外部干净终结)。每次被杀触发下方自动重启+reload,把用户正在看的页面(如测试工作台
+    // 报告)刷回初始态。纯 Node 子进程没有这些敏感机制,对注入的耐受性好得多。
+    // native 模块 ABI 不变:ELECTRON_RUN_AS_NODE 与 utilityProcess 用的是同一个内嵌 Node,
+    // better-sqlite3 仍按 after-pack 重编译的 Electron ABI 正常加载。
+    const nodeChild = fork(serverPath, [], {
+      env: { ...env, ELECTRON_RUN_AS_NODE: '1' },
+      cwd: standaloneDir,
+      stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+    });
+    nodeChild.stdout?.on('data', makeLineHandler('[server]', false));
+    nodeChild.stderr?.on('data', makeLineHandler('[server:err]', true));
+    nodeChild.on('exit', (code) => handleExit(code));
+    child = nodeChild;
+  } else {
+    // macOS/Linux 维持 utilityProcess —— 不会在 macOS 多出一个 Dock 图标。
+    const utilChild = utilityProcess.fork(serverPath, [], {
+      env,
+      cwd: standaloneDir,
+      stdio: 'pipe',
+      serviceName: 'codepilot-server',
+    });
+    utilChild.stdout?.on('data', makeLineHandler('[server]', false));
+    utilChild.stderr?.on('data', makeLineHandler('[server:err]', true));
+    utilChild.on('exit', (code) => handleExit(code));
+    child = utilChild;
+  }
+
+  // 记录 pid 到固定 pidfile —— 供下次启动清理本次的残留进程(见 reapOrphanServer)。
+  // 两种 fork 都同步返回,pid 此时已可用。
+  if (child.pid) {
+    writeServerPidFile(child.pid);
+  }
 
   return child;
 }
@@ -1386,6 +1412,12 @@ function createWindow(url?: string) {
     mainWindow = null;
   });
 }
+
+// [稳定性] 禁用 crashpad/crash-reporter。Windows 打包版内嵌 Next 服务(utilityProcess)里 spawn
+// 子进程(尤其经 cmd.exe)时，crashpad 在 utility 进程内「not connected」会参与把服务进程整体
+// native 崩溃(code -36616)。显式禁用崩溃上报，切断这条崩溃链，作为 platform.ts 去 shell:true
+// 之外的防御纵深。
+app.commandLine.appendSwitch('disable-crash-reporter');
 
 app.whenReady().then(async () => {
   // Initialise file logging FIRST so every subsequent console.* in main — and

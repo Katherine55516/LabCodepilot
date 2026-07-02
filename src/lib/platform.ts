@@ -9,6 +9,16 @@ const execFileAsync = promisify(execFile);
 export const isWindows = process.platform === 'win32';
 export const isMac = process.platform === 'darwin';
 
+// Windows 上探测命令用 where.exe 的【绝对路径 + shell:false】，而不是 {shell:true}。
+// shell:true 会派生 cmd.exe 去解析命令，而在 Electron utilityProcess 内嵌服务里 spawn cmd.exe
+// 会撞 crashpad(not connected) 触发 native 崩溃(code -36616) 并带崩整个服务 —— 这是 Windows 打包
+// 版「常驻 ConnectionStatus 轮询 /api/claude-status → findGitBash/findClaudeBinary」每十几秒崩一次
+// 的根因。where.exe 是可直接执行的 .exe，绝对路径 + shell:false 即可正常探测、且绝不派生 cmd.exe。
+// (直接去 shell 不行：Node 在 Windows 对无扩展名的 'where' 不解析 PATHEXT 会 ENOENT，故用绝对路径。)
+const WHERE_EXE = isWindows
+  ? `${process.env.SystemRoot || 'C:\\Windows'}\\System32\\where.exe`
+  : 'where';
+
 export interface RuntimeArchitectureInfo {
   platform: NodeJS.Platform;
   processArch: string;
@@ -216,13 +226,13 @@ export function findAllClaudeBinaries(): ClaudeInstallInfo[] {
 
   // Also scan PATH via which/where to catch bun, custom, or other non-standard installs
   try {
-    const cmd = isWindows ? 'where' : '/usr/bin/which';
+    const cmd = isWindows ? WHERE_EXE : '/usr/bin/which';
     const args = isWindows ? ['claude'] : ['-a', 'claude']; // -a = show ALL matches
     const result = execFileSync(cmd, args, {
       timeout: 3000,
       stdio: 'pipe',
       env: { ...process.env, PATH: getExpandedPath() },
-      shell: isWindows,
+      shell: false,
       encoding: 'utf-8',
     });
     for (const line of result.trim().split(/\r?\n/)) {
@@ -335,13 +345,13 @@ function _findClaudeBinaryUncached(): string | undefined {
 
   // Fallback: use `where` (Windows) or `which` (Unix) with expanded PATH
   try {
-    const cmd = isWindows ? 'where' : '/usr/bin/which';
+    const cmd = isWindows ? WHERE_EXE : '/usr/bin/which';
     const args = isWindows ? ['claude'] : ['claude'];
     const result = execFileSync(cmd, args, {
       timeout: TIMEOUT_MS,
       stdio: 'pipe',
       env: { ...process.env, PATH: getExpandedPath() },
-      shell: isWindows,
+      shell: false,
     });
     // where.exe may return multiple lines; try each with --version validation
     const lines = result.toString().trim().split(/\r?\n/);
@@ -469,10 +479,10 @@ export function findGitBash(): string | null {
 
   // 3. Try to locate git.exe via `where git` and derive bash.exe path
   try {
-    const result = execFileSync('where', ['git'], {
+    const result = execFileSync(WHERE_EXE, ['git'], {
       timeout: 3000,
       stdio: 'pipe',
-      shell: true,
+      shell: false,
     });
     const lines = result.toString().trim().split(/\r?\n/);
     for (const line of lines) {

@@ -67,18 +67,53 @@ found` 把整轮执行打崩。改为先用 `resolveSystemChrome()` 自己定位
   其它步不传 → 行为不变。
 
 ### `POST /api/test/probe`（新增路由）
-被测链接探活，服务端发起（避开浏览器端跨源限制）。
+被测链接探活，服务端发起（避开浏览器端跨源限制）。探活本体在 `@/lib/test/probe`（`probeUrl`）。
 - 入参 `{ url: string }`；只允许 `http/https`，否则 `{ reachable:false, error }`。
 - 出参 `{ ok, reachable, status?, latencyMs?, error? }`。**任意 HTTP 响应（含 4xx/5xx）都算可达**
   ——服务在监听、握手成功即不该白跑一整轮（对齐执行规则 §0.3）。超时 6s → `reachable:false, error:'timeout'`。
+
+### 执行步「可达性闸门」（防被测系统没起时 AI 无限 curl 探活）
+`POST /api/test/run` 在 `step==='execution'` 且被测地址为 `http/https` 时，开跑前先用
+`probeUrlWithRetry(baseUrl, { attempts:3, timeoutMs:5000, delayMs:800 })` 探活：
+- **可达**（任一次成功）→ 正常进入执行（注入 Playwright + `streamClaude`）。
+- **连续 3 次仍不可达** → **不启动 AI**，直接返回 `503 { error: '被测系统无法访问：已连续尝试 3 次…请检查…后再点「重跑」重试。' }`。
+  前端 `runStep` 的 `!res.ok` 分支把它渲染成错误气泡并把该步标「失败」，用户排查好被测系统再「重跑」。
+- 根因：此前无代码级探活闸门 + `bypassPermissions:true`，被测系统没起时 AI 会按规则 §0.3
+  反复 `Bash("curl … %{http_code} … ")` 探活、**永不终止**（用户反馈的缺陷）。闸门 + §0.3
+  的「探活 3 次上限」+ 执行 prompt 的「平台已探活、勿再反复探活」三处联防。
+- 未配置地址 / 非 `http(s)` 地址不在此拦，仍交由 AI 按「地址不可达→blocked」处理（行为不变）。
+
+### 执行步「非交互 + 登录墙」处置（防 AI 调 `AskUserQuestion` 卡死）
+现象：被测系统跳转企业 SSO 登录页，AI 判断需要登录 → 调 `AskUserQuestion` 向用户要凭证。
+但本步是**非交互 SSE 流**（`bypassPermissions:true`，无应答通道），问题弹不出来、执行**卡死**在
+「→ AskUserQuestion」。
+- 根因：框架规则 §0.1/§0.2 原文要求用 `AskUserQuestion` 选环境 / 补配置（交互式流程），移植到
+  非交互执行步后成了「问了没人答」。执行 prompt 此前也未禁用提问。
+- 修复（**纯 prompt/规则，运行时无关、不碰共享 chat 客户端**）：
+  - 执行 prompt（`executionPrompt`）加**非交互横幅**：严禁 `AskUserQuestion` / 任何提问；目标环境由平台经
+    `环境：${env}` 指定，不反问。
+  - 执行 prompt 加**登录态处理块**：`buildStep` 新增 `hasLoginState`（由 run 路由按
+    `!!resolved.storageStatePath` 传入）。遇登录页 / SSO / 401 → 判 `blocked`、注明「未检测到登录态」，
+    整站需登录则立即停止逐条空跑，收尾**提示用户去「设置 · 测试账号」配置 / 重新捕获登录态**（项目环境配置）。
+  - 规则 `test-execution.md` §0.1/§0.2 改写：环境由平台指定、缺项不提问、一律引导去「设置 · 测试账号」。
+- 为什么不在 SDK 层 `disallowedTools` 硬禁：运行时（native / SDK）由 provider/设置决定，native 无工具限制
+  机制，且本 worktree 因 better-sqlite3 ABI 无法起真机验证；prompt/规则修复运行时无关、零回归面，已足够。
 
 ## 涉及文件
 
 | 文件 | 改动 |
 |---|---|
 | `src/lib/test/prompts.ts` | `buildPlaywrightMcp` 增 `opts?: { headed }`；按上表条件拼 `--browser`/`--executable-path`/`--headless`/`PLAYWRIGHT_BROWSERS_PATH` |
-| `src/app/api/test/run/route.ts` | 读 `body.headed`；`baseUrl` 改为 `overrideUrl || resolved.frontendBaseUrl`；透传 `{ headed }` 给 `buildPlaywrightMcp` |
-| `src/app/api/test/probe/route.ts` | **新增** 探活路由 |
+| `src/app/api/test/run/route.ts` | 读 `body.headed`；`baseUrl` 改为 `overrideUrl || resolved.frontendBaseUrl`；透传 `{ headed }` 给 `buildPlaywrightMcp`；**执行步开跑前加「可达性闸门」**（`probeUrlWithRetry` 3 次，不可达→503，不启动 AI） |
+| `src/app/api/test/probe/route.ts` | **新增** 探活路由；探活本体抽到 `@/lib/test/probe`（与执行步闸门共用） |
+| `src/lib/test/probe.ts` | **新增** 共享可达性探测：`probeUrl`（单次）+ `probeUrlWithRetry`（带重试，供执行步闸门） |
+| `src/lib/test/prompts.ts`（执行 prompt） | 被测地址分支加提示：平台已探活、勿再反复 `curl` 探活；中途遇不可达最多探 3 次即停 |
+| `src/lib/test/rules/test-execution.md`（§0.3） | 加「探活 3 次上限、禁止无限重试」；修正「引擎会自动探活」的误导注释 |
+| `src/lib/test/prompts.ts`（执行 prompt + `BuildStepOptions`） | `executionPrompt` 增 `hasLoginState` 参数 + 非交互横幅（禁 `AskUserQuestion`）+ 登录墙处置块；`BuildStepOptions.hasLoginState` 透传 |
+| `src/app/api/test/run/route.ts`（登录态提示） | 传 `hasLoginState = !!resolved.storageStatePath` 给 `buildStep` |
+| `src/lib/test/rules/test-execution.md`（§0.1/§0.2） | 去掉 `AskUserQuestion` 强制；环境由平台指定、缺项不提问、引导去「设置 · 测试账号」 |
+| `src/__tests__/unit/test-probe.test.ts` | **新增** 覆盖 `probeUrl`/`probeUrlWithRetry`（含 3 次封顶）+ 执行步 503 闸门 |
+| `src/__tests__/unit/test-prompts-note.test.ts` | 加 4 例：执行 prompt 禁 `AskUserQuestion` + 登录态处置（`hasLoginState` 真/假） |
 | `src/components/test/InlineTestingPanel.tsx` | `ExecMode` 类型 + `execMode`/`execModeRef`/`persistExecMode` 状态；`runStep(step, opts?)` 透传 `headed`/`baseUrl`；`handleRunFocusStep`（execution→弹窗）+ `runExecutionConfirmed`；详情卡模式 chip；`ExecConfirmModal` 组件 |
 | `src/i18n/{en,zh,zh-HK}.ts` | `test.execConfirm.*` 文案（en 为类型源） |
 | `src/__tests__/unit/test-playwright-mcp-headed.test.ts` | **新增** 6 例覆盖 dev/打包 × 有头/无头的旗标矩阵 |

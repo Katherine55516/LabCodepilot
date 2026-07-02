@@ -7,9 +7,11 @@
  *
  * 与执行阶段规则 §0.3「被测地址探活」一致:可达→放行;连接被拒/超时/DNS 失败→不可达。
  * 任意 HTTP 响应(含 4xx/5xx)都算「可达」—— 服务在监听、能握手,就不该白跑一整轮。
+ *
+ * 探活逻辑本体在 @/lib/test/probe（probeUrl），与执行步开跑前的可达性闸门
+ * (POST /api/test/run 的 probeUrlWithRetry) 共用同一「是否可达」定义。
  */
-
-const TIMEOUT_MS = 6000;
+import { probeUrl } from '@/lib/test/probe';
 
 export async function POST(req: Request): Promise<Response> {
   let url: string | undefined;
@@ -22,39 +24,16 @@ export async function POST(req: Request): Promise<Response> {
   if (!url) {
     return Response.json({ ok: false, reachable: false, error: 'url is required' }, { status: 400 });
   }
-  // 只允许 http/https，挡掉 file:// 等本地协议探测（SSRF 面收敛 + 语义正确）。
-  let parsed: URL;
-  try {
-    parsed = new URL(url);
-  } catch {
-    return Response.json({ ok: false, reachable: false, error: 'invalid url' });
-  }
-  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-    return Response.json({ ok: false, reachable: false, error: 'unsupported protocol' });
-  }
 
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
-  const startedMs = Date.now();
-  try {
-    // 先 GET（HEAD 常被 dev server 401/405，GET 更能反映真实可达性）。redirect: 'manual'
-    // 不追跳转 —— 拿到首个响应即证明握手成功。no-store 避免任何缓存层。
-    const res = await fetch(parsed.toString(), {
-      method: 'GET',
-      redirect: 'manual',
-      signal: controller.signal,
-      cache: 'no-store',
-      headers: { 'User-Agent': 'AI-Native-Lab/probe' },
-    });
-    const latencyMs = Date.now() - startedMs;
-    // 任意响应（含 3xx/4xx/5xx）都算可达：服务在监听、TCP/HTTP 握手成功。
-    return Response.json({ ok: true, reachable: true, status: res.status, latencyMs });
-  } catch (e) {
-    const latencyMs = Date.now() - startedMs;
-    const aborted = controller.signal.aborted;
-    const message = aborted ? 'timeout' : e instanceof Error ? e.message : String(e);
-    return Response.json({ ok: true, reachable: false, error: message, latencyMs });
-  } finally {
-    clearTimeout(timer);
+  const r = await probeUrl(url);
+  // 非法地址 / 不支持协议：保持原语义（ok:false，不代表「探到不可达」而是入参问题）。
+  if (r.error === 'invalid url' || r.error === 'unsupported protocol') {
+    return Response.json({ ok: false, reachable: false, error: r.error });
   }
+  // 可达：带回状态码 + 时延（不带 error 键，保持原响应形状）。
+  if (r.reachable) {
+    return Response.json({ ok: true, reachable: true, status: r.status, latencyMs: r.latencyMs });
+  }
+  // 探到不可达（连接被拒 / 超时 / DNS 失败）：ok:true（探测本身成功），reachable:false + 原因。
+  return Response.json({ ok: true, reachable: false, error: r.error, latencyMs: r.latencyMs });
 }

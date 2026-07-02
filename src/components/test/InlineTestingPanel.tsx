@@ -1499,6 +1499,14 @@ export function InlineTestingPanel() {
           <ListChecks size={14} className="text-primary" />
           {t("test.title")}
         </span>
+        {process.env.NEXT_PUBLIC_BUILD_ID ? (
+          <span
+            className="select-text font-mono text-[10px] leading-none text-muted-foreground/60"
+            title="当前运行包的构建标记（commit · 构建时间）—— 用于核对界面是否为最新打包版本"
+          >
+            {process.env.NEXT_PUBLIC_BUILD_ID}
+          </span>
+        ) : null}
         <span className="flex-1" />
         <div className="flex overflow-hidden rounded-md border border-border">
           {segBtn("dash", t("test.projects"))}
@@ -2384,7 +2392,12 @@ function ReportView({ t, results, four, funcCounts, funcPassStr, circuitBroken, 
         </table>
       </div>
       <p className="mt-2 text-[11px] text-muted-foreground">ℹ️ {t("test.report.factsNote")}</p>
-      {lightbox && (
+      {/* lightbox 用 Portal 渲染到 body —— 这个 ReportView 挂在「报告」顶部 tab 的报告行
+          手风琴展开区里，其祖先是 overflow-hidden rounded-lg（accordion 行容器）；<video>
+          嵌套在 overflow-hidden + 圆角祖先内会硬件合成黑屏（录像已加载、控件/时长都在，
+          画面是黑的——与 XlsxPreview 此前同一根因，那边已用 Portal 修过，这里当时漏了、
+          没有实测覆盖到）。用户报「报告 tab 中的录像播放不了」命中的正是这条路径。 */}
+      {lightbox && createPortal(
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-6" onClick={() => setLightbox(null)}>
           {isVid(lightbox) ? (
             <video src={mediaUrl(lightbox)} controls autoPlay muted playsInline preload="metadata" className="max-h-full max-w-full" onClick={(e) => e.stopPropagation()} />
@@ -2392,7 +2405,8 @@ function ReportView({ t, results, four, funcCounts, funcPassStr, circuitBroken, 
             // eslint-disable-next-line @next/next/no-img-element
             <img src={mediaUrl(lightbox)} alt={lightbox} className="max-h-full max-w-full object-contain" onClick={(e) => e.stopPropagation()} />
           )}
-        </div>
+        </div>,
+        document.body,
       )}
     </div>
   );
@@ -2906,7 +2920,7 @@ function XlsxPreview({ t, projectPath, taskName, env, onClose }: {
         <a href={`/api/test/report-xlsx?projectPath=${encodeURIComponent(projectPath)}&taskName=${encodeURIComponent(taskName)}&env=${encodeURIComponent(env)}&download=1`} className="flex shrink-0 items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[10px] text-foreground hover:bg-muted"><DownloadSimple size={12} /> {t("test.report.exportFile")}</a>
         <button onClick={onClose} className="shrink-0 text-muted-foreground hover:text-foreground" aria-label={t("test.report.close")}><X size={14} /></button>
       </div>
-      <div className="min-h-0 flex-1 overflow-auto p-3">
+      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-scroll p-3">
         {err ? (
           <div className="flex items-center gap-2 text-[11px] text-status-error-foreground">
             {t("test.report.xlsxLoadFailed")}
@@ -2917,11 +2931,14 @@ function XlsxPreview({ t, projectPath, taskName, env, onClose }: {
         ) : !sheet || sheet.rows.length === 0 ? (
           <p className="text-[11px] text-muted-foreground">{t("test.report.xlsxEmpty")}</p>
         ) : (
-          <div className="overflow-x-scroll [&::-webkit-scrollbar]:h-3 [&::-webkit-scrollbar]:[-webkit-appearance:none] [&::-webkit-scrollbar-thumb]:rounded-md [&::-webkit-scrollbar-thumb]:bg-muted-foreground/40">
-            {/* overflow-x-scroll 让横向滚动条【常驻可见】——不用 auto：auto 在 macOS/Electron
-                overlay 模式下静止时会隐藏，用户报「测试报告弹框 X 轴滚动条没有」。arbitrary
-                variant 设 12px 高 + -webkit-appearance:none 强制经典(非 overlay)滚动条。
-                table minWidth 1080 保证宽表格横向溢出、有内容可滚。 */}
+          <div className="w-max">
+            {/* 单层滚动：纵向 + 横向溢出都交给【外层】overflow-y-auto + overflow-x-scroll（见上），
+                横向滚动条因此常驻在弹框【可视区底部】。此前套了一层内层 overflow-x-scroll，它的高度
+                =整表全高、横向条落在表格【最底部】，用户须把 Y 轴滚到最底才看得到 X 轴滚动条 —— 故
+                去掉内层滚动，这层 div 仅用 w-max 撑到 table 宽度、不再自己横向滚。外层用 scroll 而非
+                auto 让横向条常驻（mac overlay 静止会隐藏）；此前的 -webkit-appearance:none 局部自定义
+                会让 Windows 经典滚动条塌陷，已删除、改复用 globals.css 完整 12px 滚动条样式。
+                table minWidth 1080 撑出横向溢出。 */}
             <table className="w-full border-collapse text-[11px]" style={{ minWidth: 1080 }}>
               <thead>
                 <tr className="bg-muted/50 text-left text-muted-foreground">
@@ -3054,13 +3071,16 @@ function ReportBrowser({ projects, t, model, providerId, onOpenTask, reloadSigna
         ),
     ).then((res) => {
       if (cancelled) return;
-      // 清理孤儿报告：报告对应的任务已从任务列表删除（r.task 不在该项目的 project.tasks）→
-      // 删掉磁盘报告产物并从列表移除。兜底旧包/历史遗留（删任务时没删干净）的孤儿报告。
-      // projects 为空时上面 filter(p.path) 不会 fetch，res 为空，故不会误删。
+      // 孤儿报告（任务已从任务列表删除、磁盘报告残留）：【只从列表过滤隐藏，绝不在查看
+      // 路径上删除磁盘文件】。此处原先对孤儿逐个 deleteTaskReports（rmSync 递归删除报告+
+      // 证据目录）——Windows 企业机上，进程高速批量删文件正中 EDR 反勒索启发式，整个内嵌
+      // 服务被 native 终结（面包屑坐实：崩溃精确发生在 delete 序列中、exit -36861、死前
+      // crashpad 遗言），服务重启+刷新窗口 = 用户报的「点报告 tab 过几秒跳回新建对话页」；
+      // 且删除半途被杀 → 孤儿目录残留 → 下次打开报告 tab 再删再崩，死循环。
+      // 查看是只读操作，不该有删除副作用；已删任务的磁盘清理由「删除任务」流程负责
+      // （confirmDelete → deleteTaskReports），历史残留留在磁盘无害。
       const cleaned = res.map(({ project, reports }) => {
         const liveNames = new Set(project.tasks.map((tk) => tk.name));
-        const orphans = reports.filter((r) => !liveNames.has(r.task));
-        orphans.forEach((o) => deleteTaskReports(project.path, o.task));
         return { project, reports: reports.filter((r) => liveNames.has(r.task)) };
       });
       setGroups(cleaned.filter((g) => g.reports.length > 0));
