@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import type { Message } from '@/types';
-import { getContextWindow } from '@/lib/model-context';
+import { getContextWindow, is1mContextModelName } from '@/lib/model-context';
 import { walkContextUsage } from '@/lib/context-usage-walk';
 import {
   buildContextUsageBreakdown,
@@ -80,15 +80,19 @@ export function useContextUsage(
     // eslint-disable-next-line react-hooks/purity
     const snapFresh = !!snap && Date.now() - snap.capturedAt < SNAPSHOT_FRESHNESS_MS;
 
-    // Window priority: fresh snapshot → this record's SDK window → latest SDK
-    // window seen → provider-models window → static catalog → unknown.
-    const contextWindow: number | null =
-      (snapFresh && snap!.maxTokens > 0 ? snap!.maxTokens : null) ||
-      baseline?.sdkContextWindow ||
-      walk.latestSdkContextWindow ||
-      options?.modelContextWindow ||
-      catalogWindow ||
-      null;
+    // Window priority: [1m] runtime model name (highest — the name shown in
+    // the "Connected (…)" status line marks the 1M CLI variant; overrides
+    // every other source) → fresh snapshot → this record's SDK window →
+    // latest SDK window seen → provider-models window → static catalog →
+    // unknown.
+    const contextWindow: number | null = is1mContextModelName(walk.latestModel)
+      ? 1_000_000
+      : (snapFresh && snap!.maxTokens > 0 ? snap!.maxTokens : null) ||
+        baseline?.sdkContextWindow ||
+        walk.latestSdkContextWindow ||
+        options?.modelContextWindow ||
+        catalogWindow ||
+        null;
 
     const hasData = snapFresh || baseline !== null;
 

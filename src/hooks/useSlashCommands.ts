@@ -222,6 +222,20 @@ export function useSlashCommands(opts: {
         }, 0);
         return;
 
+      case 'insert_command_text':
+        // /btw and similar: drop the completed command text into the input and
+        // let the user keep typing (e.g. the question after "/btw ").
+        setInputValue(result.newInputValue ?? '');
+        closePopover();
+        setTimeout(() => {
+          const el = textareaRef.current;
+          if (!el) return;
+          el.focus();
+          const pos = el.value.length;
+          el.setSelectionRange(pos, pos);
+        }, 0);
+        return;
+
       case 'insert_file_mention':
         setInputValue(result.newInputValue!);
         onMentionInserted?.({

@@ -400,6 +400,82 @@ export async function generateTextViaSdk(params: {
 }
 
 /**
+ * Streaming variant of generateTextViaSdk — yields assistant text deltas as they
+ * arrive. Same single-turn / no-session / no-lock / SDK-subprocess path (so it
+ * resolves CLI model aliases like `[1m]` identically to the main stream), but
+ * with includePartialMessages so callers can render token-by-token. Used by /btw
+ * to match the CLI's streaming feel.
+ *
+ * Fallback: if the provider never emits partial deltas, the whole `result` text
+ * is yielded once at the end so the caller still gets an answer (never empty).
+ * The `finally` cleans up the shadow home even if the consumer stops early
+ * (popup closed → generator aborted).
+ */
+export async function* streamTextViaSdk(params: {
+  providerId?: string;
+  model?: string;
+  system: string;
+  prompt: string;
+  abortSignal?: AbortSignal;
+}): AsyncGenerator<string> {
+  const resolved = resolveForClaudeCode(undefined, {
+    providerId: params.providerId,
+  });
+  const setup = prepareSdkSubprocessEnv(resolved);
+  const sdkEnv = setup.env;
+
+  const abortController = new AbortController();
+  if (params.abortSignal) {
+    params.abortSignal.addEventListener('abort', () => abortController.abort());
+  }
+  const timeoutId = setTimeout(() => abortController.abort(), 60_000);
+
+  const queryOptions: Options = {
+    cwd: os.homedir(),
+    abortController,
+    permissionMode: 'bypassPermissions',
+    allowDangerouslySkipPermissions: true,
+    env: sanitizeEnv(sdkEnv),
+    settingSources: resolved.settingSources as Options['settingSources'],
+    systemPrompt: params.system,
+    maxTurns: 1,
+    includePartialMessages: true,
+  };
+  if (params.model) {
+    queryOptions.model = params.model;
+  }
+
+  try {
+    const conversation = query({ prompt: params.prompt, options: queryOptions });
+    let sawDelta = false;
+    let resultText = '';
+    for await (const msg of conversation) {
+      if (msg.type === 'stream_event') {
+        const se = msg as { type: 'stream_event'; event: { type: string; delta?: { text?: string } } };
+        if (se.event.type === 'content_block_delta' && se.event.delta?.text) {
+          sawDelta = true;
+          yield se.event.delta.text;
+        }
+      } else if (msg.type === 'result' && 'result' in msg) {
+        resultText = (msg as SDKResultSuccess).result || '';
+      }
+    }
+    // Provider didn't stream partials → emit the whole result once.
+    if (!sawDelta && resultText) {
+      yield resultText;
+    }
+  } catch (err) {
+    if (abortController.signal.aborted && !(params.abortSignal?.aborted)) {
+      throw new Error('SDK query timed out after 60s');
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeoutId);
+    setup.shadow.cleanup();
+  }
+}
+
+/**
  * Main entry point for streaming chat. Dispatches to the resolved AgentRuntime.
  *
  * All callers (chat route, bridge, onboarding) call this function.
@@ -1190,6 +1266,10 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
         let tokenUsage: TokenUsage | null = null;
         // FIX(占用口径): 最后一条 assistant 请求的单次 usage（= 当前上下文真实占用基线）。
         let lastAssistantUsage: TokenUsage | null = null;
+        // 本回合实际请求的模型名 —— 与状态行 "Connected (…)" 括号里同源
+        // （requested_model || init.model），随 result usage 持久化到
+        // token_usage.model，供上下文卡片做 [1m] → 1M 窗口判断。
+        let connectedModel: string | undefined = model || undefined;
         // Track pending TodoWrite tool_use_ids so we can sync after successful execution
         const pendingTodoWrites = new Map<string, Array<{ content: string; status: string; activeForm?: string }>>();
         for await (const message of conversation) {
@@ -1375,6 +1455,8 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
                     mcp_servers?: unknown;
                     output_style?: string;
                   };
+                  // 与前端状态行的取值逻辑一致（requested_model || model）。
+                  connectedModel = model || sysMsg.model || connectedModel;
                   controller.enqueue(formatSSE({
                     type: 'status',
                     data: JSON.stringify({
@@ -1460,6 +1542,10 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
               // cost_usd 仍取整轮累计（整轮总成本）。无 assistant usage 时回退到累计值。
               if (lastAssistantUsage) {
                 tokenUsage = { ...lastAssistantUsage, cost_usd: tokenUsage?.cost_usd };
+              }
+              // 把 Connected 模型名并入 usage，随消息 token_usage 落库。
+              if (tokenUsage && connectedModel) {
+                tokenUsage = { ...tokenUsage, model: connectedModel };
               }
               // terminal_reason is an optional field added in SDK 0.2.111.
               // When present, it enriches the end-of-turn UI chip (Phase 1 of
@@ -1673,6 +1759,10 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
 
             const retryConversation = query({ prompt: retryPrompt, options: retryOptions });
 
+            // 与主路径同源的 Connected 模型名（requested_model || init.model），
+            // 供重试回合的 result usage 携带 token_usage.model。
+            let retryConnectedModel: string | undefined = model || undefined;
+
             // Forward retry stream events (simplified — covers the critical path)
             for await (const msg of retryConversation) {
               if (abortController?.signal.aborted) break;
@@ -1685,6 +1775,7 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
                   // re-exposing prior-tool-call history to the model.
                   const sysMsg = msg as SDKSystemMessage;
                   if ('subtype' in sysMsg && sysMsg.subtype === 'init') {
+                    retryConnectedModel = model || sysMsg.model || retryConnectedModel;
                     controller.enqueue(formatSSE({
                       type: 'status',
                       data: JSON.stringify({
@@ -1778,7 +1869,10 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
                 }
                 case 'result': {
                   const rMsg = msg as SDKResultMessage;
-                  const usage = 'result' in rMsg ? extractTokenUsage(rMsg as SDKResultSuccess) : undefined;
+                  let usage = 'result' in rMsg ? extractTokenUsage(rMsg as SDKResultSuccess) : undefined;
+                  if (usage && retryConnectedModel) {
+                    usage = { ...usage, model: retryConnectedModel };
+                  }
                   // Match main-path result shape so the chat route can persist
                   // the new sdk_session_id (route reads result.session_id as a
                   // safety net when status init was missed).

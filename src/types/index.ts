@@ -370,6 +370,13 @@ export interface TokenUsage {
    * the card falls back to the provider-models / catalog window when absent.
    */
   context_window?: number;
+  /**
+   * 本回合实际请求的模型名 —— 与执行状态行 "Connected (…)" 括号里显示的是同
+   * 一个值（requested_model || SDK init 的 model），可能是 CLI 别名（如
+   * claude-opus-4-7[1m]）。上下文卡片用它做 [1m] → 1M 窗口的最高优先级判断
+   * （见 useContextUsage / model-context.ts）。注意它不是下拉框里的展示名。
+   */
+  model?: string;
 }
 
 // ==========================================

@@ -11,7 +11,7 @@ import type { PopoverItem, PopoverMode, CommandBadge, CliBadge, MentionNodeType,
 // ─── Result types ────────────────────────────────────────────────
 
 export interface InsertResult {
-  action: 'immediate_command' | 'set_badge' | 'insert_file_mention';
+  action: 'immediate_command' | 'set_badge' | 'insert_file_mention' | 'insert_command_text';
   commandValue?: string;
   badge?: CommandBadge;
   newInputValue?: string;
@@ -31,9 +31,11 @@ export type KeyAction =
   | { type: 'passthrough' };
 
 export interface DirectSlashResult {
-  action: 'immediate_command' | 'set_badge' | 'unknown_slash_badge' | 'not_slash';
+  action: 'immediate_command' | 'set_badge' | 'unknown_slash_badge' | 'btw_command' | 'not_slash';
   commandValue?: string;
   badge?: CommandBadge;
+  /** For 'btw_command': the free-text question after "/btw " (may be empty). */
+  question?: string;
 }
 
 // ─── Functions ───────────────────────────────────────────────────
@@ -118,6 +120,14 @@ export function resolveItemSelection(
   // Immediate built-in commands
   if (item.builtIn && item.immediate) {
     return { action: 'immediate_command', commandValue: item.value };
+  }
+
+  // /btw carries a free-text question, so selecting it fills the input with
+  // "/btw " for the user to keep typing — it must NOT fire immediately or turn
+  // into a badge. Submit-time parsing (resolveDirectSlash) routes it to the popup.
+  if (item.value === '/btw') {
+    const { before, after } = splitAroundTrigger(inputValue, triggerPos, popoverFilter);
+    return { action: 'insert_command_text', newInputValue: `${before}/btw ${after}` };
   }
 
   // Non-immediate commands: show as badge, preserving any text outside the trigger
@@ -304,6 +314,14 @@ export function resolveKeyAction(
  */
 export function resolveDirectSlash(content: string): DirectSlashResult {
   if (!content.startsWith('/')) return { action: 'not_slash' };
+
+  // /btw <question> — side question. Handled before the exact-value lookup
+  // because it carries a free-text argument (so "/btw foo" never matches a
+  // BUILT_IN_COMMANDS entry), and the caller intentionally bypasses the
+  // isStreaming guard for it — asking mid-stream is the whole point.
+  if (content === '/btw' || content.startsWith('/btw ')) {
+    return { action: 'btw_command', question: content.slice('/btw'.length).trim() };
+  }
 
   const cmd = BUILT_IN_COMMANDS.find((c) => c.value === content);
   if (cmd) {

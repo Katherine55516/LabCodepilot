@@ -40,6 +40,16 @@ function resolveWindow(key: string): number | null {
   return match ? MODEL_CONTEXT_WINDOWS[match] : null;
 }
 
+/**
+ * CLI 1M 上下文别名判断：模型名带 "[1m]" 后缀（如 claude-opus-4-7[1m]）即为
+ * 1M 窗口变体。判断对象必须是运行时实际请求的模型名（"Connected (…)" 括号里
+ * 那个，随 result usage 持久化在 token_usage.model），不是下拉框展示名 ——
+ * 同一模型在这两处的名字不同，只有前者带 [1m] 标记。
+ */
+export function is1mContextModelName(name?: string | null): boolean {
+  return !!name && name.includes('[1m]');
+}
+
 export function getContextWindow(
   model: string,
   options?: { context1m?: boolean; upstream?: string },
