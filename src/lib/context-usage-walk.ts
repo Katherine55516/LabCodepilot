@@ -31,6 +31,12 @@ export interface WalkResult {
   baseline: WalkBaseline | null;
   /** Latest (newest) positive SDK context_window seen during the walk. */
   latestSdkContextWindow: number | null;
+  /**
+   * Latest runtime-requested model name seen (token_usage.model) — the same
+   * value the "Connected (…)" status line shows, possibly a CLI alias like
+   * claude-opus-4-7[1m]. Drives the top-priority [1m] → 1M window override.
+   */
+  latestModel: string | null;
   /** Latest SDK total_cost_usd seen — drives the card's Total cost line. */
   latestCostUsd?: number;
   /**
@@ -43,6 +49,7 @@ export interface WalkResult {
 
 export function walkContextUsage(messages: Message[]): WalkResult {
   let latestSdkContextWindow: number | null = null;
+  let latestModel: string | null = null;
   let latestContextAccounting: unknown | null = null;
   let latestCostUsd: number | undefined;
   let weakBaseline: WalkBaseline | null = null;
@@ -77,6 +84,13 @@ export function walkContextUsage(messages: Message[]): WalkResult {
       latestSdkContextWindow = ctxWindowField;
     }
 
+    // Like context_window, the model name is captured latest-wins even from
+    // records that get skipped as baseline candidates.
+    const modelField = usage.model;
+    if (latestModel === null && typeof modelField === 'string' && modelField) {
+      latestModel = modelField;
+    }
+
     const accountingField = usage.context_accounting;
     if (
       latestContextAccounting === null &&
@@ -108,6 +122,7 @@ export function walkContextUsage(messages: Message[]): WalkResult {
           sdkContextWindow: baselineSdkContextWindow,
         },
         latestSdkContextWindow,
+        latestModel,
         latestCostUsd,
         contextAccounting: latestContextAccounting,
       };
@@ -127,6 +142,7 @@ export function walkContextUsage(messages: Message[]): WalkResult {
   return {
     baseline: weakBaseline,
     latestSdkContextWindow,
+    latestModel,
     latestCostUsd,
     contextAccounting: latestContextAccounting,
   };

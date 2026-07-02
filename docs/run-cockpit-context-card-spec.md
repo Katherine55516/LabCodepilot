@@ -255,7 +255,8 @@ export interface ContextSchema {
         │      { baseline, latestSdkContextWindow,        │
         │        contextAccounting }                      │
         │ 4) contextWindow =                              │
-        │      baseline.sdkContextWindow                  │
+        │      is1m(walk.latestModel) ? 1M（最高优先级）   │
+        │      : baseline.sdkContextWindow                │
         │      ?? latestSdkContextWindow ?? catalogWindow │
         │ 5) compiler = snapshotToCompilerInputs(         │   ← 工具/规则/Skills…真实值
         │                 contextAccounting)              │
@@ -286,7 +287,9 @@ export interface ContextSchema {
         └──────────────────────────────────────────────┘
 ```
 
-数据来源链（窗口大小优先级）：`本条 baseline 记录自带的 SDK 窗口` → `walk 过程中见过的最新 SDK 窗口` → `静态目录 getContextWindow`。
+数据来源链（窗口大小优先级）：`[1m] 运行时模型名（token_usage.model 带 "[1m]" 后缀 → 恒 1M，最高优先级，压过快照/SDK/账号/目录全部来源）` → `新鲜 snapshot 的 maxTokens` → `本条 baseline 记录自带的 SDK 窗口` → `walk 过程中见过的最新 SDK 窗口` → `账号下发 modelContextWindow` → `静态目录 getContextWindow`。
+
+> `token_usage.model` 是本回合实际请求的模型名，与执行状态行 "Connected (…)" 括号里显示的同源（后端在 result usage 里携带，落库到消息 token_usage），**不是**模型下拉框的展示名 —— 同一模型两套名称，只有前者带 `[1m]` 标记（如 `claude-opus-4-7[1m]`）。判断入口：`is1mContextModelName`（model-context.ts）。
 
 ---
 

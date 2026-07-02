@@ -1262,6 +1262,10 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
         let tokenUsage: TokenUsage | null = null;
         // FIX(占用口径): 最后一条 assistant 请求的单次 usage（= 当前上下文真实占用基线）。
         let lastAssistantUsage: TokenUsage | null = null;
+        // 本回合实际请求的模型名 —— 与状态行 "Connected (…)" 括号里同源
+        // （requested_model || init.model），随 result usage 持久化到
+        // token_usage.model，供上下文卡片做 [1m] → 1M 窗口判断。
+        let connectedModel: string | undefined = model || undefined;
         // Track pending TodoWrite tool_use_ids so we can sync after successful execution
         const pendingTodoWrites = new Map<string, Array<{ content: string; status: string; activeForm?: string }>>();
         for await (const message of conversation) {
@@ -1447,6 +1451,8 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
                     mcp_servers?: unknown;
                     output_style?: string;
                   };
+                  // 与前端状态行的取值逻辑一致（requested_model || model）。
+                  connectedModel = model || sysMsg.model || connectedModel;
                   controller.enqueue(formatSSE({
                     type: 'status',
                     data: JSON.stringify({
@@ -1532,6 +1538,10 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
               // cost_usd 仍取整轮累计（整轮总成本）。无 assistant usage 时回退到累计值。
               if (lastAssistantUsage) {
                 tokenUsage = { ...lastAssistantUsage, cost_usd: tokenUsage?.cost_usd };
+              }
+              // 把 Connected 模型名并入 usage，随消息 token_usage 落库。
+              if (tokenUsage && connectedModel) {
+                tokenUsage = { ...tokenUsage, model: connectedModel };
               }
               // terminal_reason is an optional field added in SDK 0.2.111.
               // When present, it enriches the end-of-turn UI chip (Phase 1 of
@@ -1745,6 +1755,10 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
 
             const retryConversation = query({ prompt: retryPrompt, options: retryOptions });
 
+            // 与主路径同源的 Connected 模型名（requested_model || init.model），
+            // 供重试回合的 result usage 携带 token_usage.model。
+            let retryConnectedModel: string | undefined = model || undefined;
+
             // Forward retry stream events (simplified — covers the critical path)
             for await (const msg of retryConversation) {
               if (abortController?.signal.aborted) break;
@@ -1757,6 +1771,7 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
                   // re-exposing prior-tool-call history to the model.
                   const sysMsg = msg as SDKSystemMessage;
                   if ('subtype' in sysMsg && sysMsg.subtype === 'init') {
+                    retryConnectedModel = model || sysMsg.model || retryConnectedModel;
                     controller.enqueue(formatSSE({
                       type: 'status',
                       data: JSON.stringify({
@@ -1850,7 +1865,10 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
                 }
                 case 'result': {
                   const rMsg = msg as SDKResultMessage;
-                  const usage = 'result' in rMsg ? extractTokenUsage(rMsg as SDKResultSuccess) : undefined;
+                  let usage = 'result' in rMsg ? extractTokenUsage(rMsg as SDKResultSuccess) : undefined;
+                  if (usage && retryConnectedModel) {
+                    usage = { ...usage, model: retryConnectedModel };
+                  }
                   // Match main-path result shape so the chat route can persist
                   // the new sdk_session_id (route reads result.session_id as a
                   // safety net when status init was missed).

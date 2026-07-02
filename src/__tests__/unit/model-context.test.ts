@@ -4,6 +4,7 @@ import {
   getContextWindow,
   MODEL_CONTEXT_WINDOWS,
   getManagedContextWindowByName,
+  is1mContextModelName,
 } from '../../lib/model-context';
 
 describe('getContextWindow — alias disambiguation', () => {
@@ -83,6 +84,21 @@ describe('getContextWindow — alias disambiguation', () => {
     assert.ok('opus' in MODEL_CONTEXT_WINDOWS);
     assert.ok('claude-opus-4-7' in MODEL_CONTEXT_WINDOWS);
     assert.ok('claude-opus-4-20250514' in MODEL_CONTEXT_WINDOWS);
+  });
+});
+
+describe('is1mContextModelName — [1m] CLI alias detection', () => {
+  it('matches runtime model names carrying the [1m] suffix', () => {
+    assert.equal(is1mContextModelName('claude-opus-4-7[1m]'), true);
+    assert.equal(is1mContextModelName('claude-sonnet-4-6[1m]'), true);
+  });
+
+  it('does not match names without the marker', () => {
+    assert.equal(is1mContextModelName('claude-opus-4-7'), false);
+    assert.equal(is1mContextModelName('高阶模型-C47'), false); // 下拉框展示名不带 [1m]
+    assert.equal(is1mContextModelName(''), false);
+    assert.equal(is1mContextModelName(null), false);
+    assert.equal(is1mContextModelName(undefined), false);
   });
 });
 

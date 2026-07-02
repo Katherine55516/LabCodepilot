@@ -525,10 +525,13 @@ export function runAgentLoop(options: AgentLoopOptions): ReadableStream<string> 
         }
 
         // 6. Emit result event
+        // usage.model 与本文件 status init 的 requested_model 同源（= 状态行
+        // "Connected (…)" 展示的名字），落库到 token_usage.model 供上下文卡片
+        // 做 [1m] → 1M 窗口判断。
         controller.enqueue(formatSSE({
           type: 'result',
           data: JSON.stringify({
-            usage: totalUsage,
+            usage: { ...totalUsage, model: modelOverride || sessionModel || modelId },
             session_id: sessionId,
             num_turns: step,
           }),

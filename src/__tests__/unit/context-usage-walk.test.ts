@@ -64,6 +64,22 @@ describe('walkContextUsage — latest-wins capture', () => {
     assert.equal(r.baseline?.sdkContextWindow, 200_000); // baseline record's own window
   });
 
+  it('captures the newest usage.model even from a skipped record', () => {
+    const r = walkContextUsage([
+      asMsg('assistant', { input_tokens: 50_000, output_tokens: 800, model: 'claude-opus-4-7' }),
+      asMsg('assistant', { input_tokens: 0, output_tokens: 120, model: 'claude-opus-4-7[1m]' }),
+    ]);
+    assert.equal(r.latestModel, 'claude-opus-4-7[1m]'); // newest wins, even if skipped as baseline
+    assert.equal(r.baseline?.used, 50_000);
+  });
+
+  it('latestModel is null when no record carries usage.model', () => {
+    const r = walkContextUsage([
+      asMsg('assistant', { input_tokens: 10_000, output_tokens: 200 }),
+    ]);
+    assert.equal(r.latestModel, null);
+  });
+
   it('captures the newest cost_usd', () => {
     const r = walkContextUsage([
       asMsg('assistant', { input_tokens: 10_000, output_tokens: 200, cost_usd: 0.01 }),
