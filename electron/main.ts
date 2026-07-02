@@ -401,11 +401,11 @@ function createTray(): void {
   const iconPath = getIconPath();
   const trayIcon = nativeImage.createFromPath(iconPath).resize({ width: 16, height: 16 });
   tray = new Tray(trayIcon);
-  tray.setToolTip('AI Native Lab - 研发平台 — Bridge Active');
+  tray.setToolTip('AI Native Lab - 工作平台 — Bridge Active');
 
   const contextMenu = Menu.buildFromTemplate([
     {
-      label: 'Open AI Native Lab - 研发平台',
+      label: 'Open AI Native Lab - 工作平台',
       click: () => {
         if (BrowserWindow.getAllWindows().length === 0) {
           createWindow(`http://127.0.0.1:${serverPort || 3000}`);
@@ -565,7 +565,7 @@ function checkNativeModuleABI(): void {
     if (msg.includes('NODE_MODULE_VERSION')) {
       console.error(`[ABI check] ABI mismatch detected: ${msg}`);
       dialog.showErrorBox(
-        'AI Native Lab - 研发平台 - Native Module ABI Mismatch',
+        'AI Native Lab - 工作平台 - Native Module ABI Mismatch',
         `The bundled better-sqlite3 native module was compiled for a different Node.js version.\n\n` +
         `${msg}\n\n` +
         `This usually means the build process did not correctly recompile native modules for Electron.\n` +
@@ -1298,7 +1298,7 @@ const LOADING_HTML = `data:text/html;charset=utf-8,${encodeURIComponent(`<!DOCTY
 <body>
 <div class="container">
   <div class="spinner"></div>
-  <p>Starting AI Native Lab - 研发平台...</p>
+  <p>Starting AI Native Lab - 工作平台...</p>
 </div>
 </body>
 </html>`)}`;
@@ -2596,7 +2596,7 @@ app.whenReady().then(async () => {
   } catch (err) {
     console.error('Failed to start:', err);
     dialog.showErrorBox(
-      'AI Native Lab - 研发平台 - Failed to Start',
+      'AI Native Lab - 工作平台 - Failed to Start',
       `The internal server could not start.\n\n${err instanceof Error ? err.message : String(err)}\n\nPlease try restarting the application.`
     );
     app.quit();

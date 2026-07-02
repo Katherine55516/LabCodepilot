@@ -82,8 +82,8 @@ export function FeatureAnnouncementDialog() {
 
           <>
             <p>{localize(locale,
-              'AI Native Lab - 研发平台 现在可以脱离 Claude Code CLI 独立运行了。',
-              'AI Native Lab - 研发平台 can now run independently without the Claude Code CLI.'
+              'AI Native Lab - 工作平台 现在可以脱离 Claude Code CLI 独立运行了。',
+              'AI Native Lab - 工作平台 can now run independently without the Claude Code CLI.'
             )}</p>
             <div className="space-y-2 text-muted-foreground">
               <p>
