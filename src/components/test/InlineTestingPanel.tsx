@@ -3102,13 +3102,16 @@ function ReportBrowser({ projects, t, model, providerId, onOpenTask, reloadSigna
         ),
     ).then((res) => {
       if (cancelled) return;
-      // 清理孤儿报告：报告对应的任务已从任务列表删除（r.task 不在该项目的 project.tasks）→
-      // 删掉磁盘报告产物并从列表移除。兜底旧包/历史遗留（删任务时没删干净）的孤儿报告。
-      // projects 为空时上面 filter(p.path) 不会 fetch，res 为空，故不会误删。
+      // 孤儿报告（任务已从任务列表删除、磁盘报告残留）：【只从列表过滤隐藏，绝不在查看
+      // 路径上删除磁盘文件】。此处原先对孤儿逐个 deleteTaskReports（rmSync 递归删除报告+
+      // 证据目录）——Windows 企业机上，进程高速批量删文件正中 EDR 反勒索启发式，整个内嵌
+      // 服务被 native 终结（面包屑坐实：崩溃精确发生在 delete 序列中、exit -36861、死前
+      // crashpad 遗言），服务重启+刷新窗口 = 用户报的「点报告 tab 过几秒跳回新建对话页」；
+      // 且删除半途被杀 → 孤儿目录残留 → 下次打开报告 tab 再删再崩，死循环。
+      // 查看是只读操作，不该有删除副作用；已删任务的磁盘清理由「删除任务」流程负责
+      // （confirmDelete → deleteTaskReports），历史残留留在磁盘无害。
       const cleaned = res.map(({ project, reports }) => {
         const liveNames = new Set(project.tasks.map((tk) => tk.name));
-        const orphans = reports.filter((r) => !liveNames.has(r.task));
-        orphans.forEach((o) => deleteTaskReports(project.path, o.task));
         return { project, reports: reports.filter((r) => liveNames.has(r.task)) };
       });
       setGroups(cleaned.filter((g) => g.reports.length > 0));
