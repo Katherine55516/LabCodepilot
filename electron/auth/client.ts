@@ -98,7 +98,7 @@ export async function fetchMe(): Promise<MeInfo> {
 export async function registerDevice(): Promise<void> {
   const payload = {
     device_id: getOrCreateDeviceId(),
-    device_name: `${os.hostname()} (AI Native Lab - 研发平台)`,
+    device_name: `${os.hostname()} (AI Native Lab - 工作平台)`,
     os: process.platform,
     os_version: os.release(),
     app_version: app.getVersion(),
