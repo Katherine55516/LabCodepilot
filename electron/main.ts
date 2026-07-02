@@ -1357,6 +1357,12 @@ function createWindow(url?: string) {
   });
 }
 
+// [稳定性] 禁用 crashpad/crash-reporter。Windows 打包版内嵌 Next 服务(utilityProcess)里 spawn
+// 子进程(尤其经 cmd.exe)时，crashpad 在 utility 进程内「not connected」会参与把服务进程整体
+// native 崩溃(code -36616)。显式禁用崩溃上报，切断这条崩溃链，作为 platform.ts 去 shell:true
+// 之外的防御纵深。
+app.commandLine.appendSwitch('disable-crash-reporter');
+
 app.whenReady().then(async () => {
   // Initialise file logging FIRST so every subsequent console.* in main — and
   // the forked server's piped output we re-log below — is persisted to disk,

@@ -19,7 +19,6 @@ import { BatchImageGenContext, useBatchImageGenState } from "@/hooks/useBatchIma
 import { SplitContext, type SplitSession } from "@/hooks/useSplit";
 import { SplitChatContainer } from "./SplitChatContainer";
 import { ErrorBoundary } from "./ErrorBoundary";
-import { JumpTraceBadge } from "@/components/debug/JumpTraceBadge";
 import { getActiveSessionIds, getSnapshot } from "@/lib/stream-session-manager";
 import { useGitStatus } from "@/hooks/useGitStatus";
 import { SetupCenter } from '@/components/setup/SetupCenter';
@@ -250,15 +249,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     if (v) {
       const m = window.location.pathname.match(/^\/chat\/([^/]+)/);
       setTestPanelBaseSession(m ? decodeURIComponent(m[1]) : "");
-    } else {
-      // [排障·临时] 记录每次【关闭工作台】的调用栈到 jumpTrace，供 JumpTraceBadge 显示；
-      // 定位/验证根因后连同 JumpTraceBadge 一并移除。
-      try {
-        const stack = (new Error().stack || "").split("\n").slice(2, 9).map((s) => s.trim()).join("  |  ");
-        const arr = JSON.parse(sessionStorage.getItem("jumpTrace") || "[]");
-        arr.unshift({ src: "setTestPanelOpen(false) 关工作台", to: "(露出底下对话)", extra: stack, t: new Date().toLocaleTimeString() });
-        sessionStorage.setItem("jumpTrace", JSON.stringify(arr.slice(0, 15)));
-      } catch {}
     }
     setTestPanelOpenRaw(v);
   }, []);
@@ -267,37 +257,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // 僵尸态规整成 error（显示「失败」）。可见性由下方 testPanelOpen && isChatRoute 用 CSS
   // 控制（display:contents ↔ hidden），组件实例与内部 state、in-flight fetch 全程保留。
   const [testEverOpened, setTestEverOpened] = useState(false);
-
-  // [排障·临时] 总闸诊断：记录 pathname 的每次变化 + 测试工作台【从可见变隐藏】的瞬间。
-  // 用户单栏、构建标记确认新包、点报告后几秒自动跳回同一对话，但 wrap(setTestPanelOpen 关闭)
-  // 与 replaceState 都没抓到 → 跳转是第三种机制。这里补齐：任何 pathname 变化(含 router.push)
-  // 和工作台可见性(testEverOpened && testPanelOpen && isChatRoute)塌陷都写进 jumpTrace，直接
-  // 指出是「导航到了哪」还是「哪个条件让工作台隐藏」。定位后连同 JumpTraceBadge 一并移除。
-  const wbVisibleDiag = testEverOpened && testPanelOpen && isChatRoute;
-  const pathnameDiagRef = useRef(pathname);
-  const wbVisibleDiagRef = useRef(wbVisibleDiag);
-  useEffect(() => {
-    const events: string[] = [];
-    if (pathnameDiagRef.current !== pathname) events.push(`pathname 变化: ${pathnameDiagRef.current} → ${pathname}`);
-    if (wbVisibleDiagRef.current && !wbVisibleDiag) events.push(`工作台隐藏: testPanelOpen=${testPanelOpen} isChatRoute=${isChatRoute} testEverOpened=${testEverOpened}`);
-    if (events.length) {
-      try {
-        const arr = JSON.parse(sessionStorage.getItem("jumpTrace") || "[]");
-        for (const e of events) arr.unshift({ src: "AppShell诊断", to: e, extra: `now pathname=${pathname}`, t: new Date().toLocaleTimeString() });
-        sessionStorage.setItem("jumpTrace", JSON.stringify(arr.slice(0, 25)));
-      } catch {}
-      // [排障·临时] 右下角浮层可能被带 transform 的祖先 / overflow-hidden 困住而不显示，这里
-      // 用 alert 兜底——仅在工作台开着(或刚从可见塌陷)时弹，避免正常切对话也弹，保证用户一定
-      // 看到真凶、能截图。定位后连同其余 [排障·临时] 代码一并移除。
-      if (wbVisibleDiagRef.current || testPanelOpen) {
-        try {
-          window.alert("【跳转诊断 / 定位后会移除】\n" + events.join("\n") + "\n当前 pathname=" + pathname);
-        } catch {}
-      }
-    }
-    pathnameDiagRef.current = pathname;
-    wbVisibleDiagRef.current = wbVisibleDiag;
-  }, [pathname, wbVisibleDiag, testPanelOpen, isChatRoute, testEverOpened]);
 
   // --- Git summary (derived from polling hook, no setState needed) ---
   const [currentWorktreeLabel, setCurrentWorktreeLabel] = useState("");
@@ -371,13 +330,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       if (!onSplitMemberPage) return;
       const target = `/chat/${activeColumnId}`;
       if (pathname !== target) {
-        // [排障·临时] 记录本次自动 URL 纠偏的来源与状态，供 JumpTraceBadge 在无 F12 的
-        // 打包版里显示；定位完这个跳转 bug 后连同 JumpTraceBadge 一并移除。
-        try {
-          const arr = JSON.parse(sessionStorage.getItem("jumpTrace") || "[]");
-          arr.unshift({ src: "AppShell.URLSync", from: pathname, to: target, extra: `isSplitActive=${isSplitActive} activeCol=${activeColumnId} testPanelOpen=${testPanelOpen} onSplitMember=${onSplitMemberPage}`, t: new Date().toLocaleTimeString() });
-          sessionStorage.setItem("jumpTrace", JSON.stringify(arr.slice(0, 15)));
-        } catch {}
         router.replace(target);
       }
     }
@@ -674,8 +626,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                         <InlineTestingPanel />
                       </div>
                     )}
-                    {/* [排障·临时] 跳转诊断浮层：抓「点报告过几秒自动跳回对话」的真凶，定位后移除 */}
-                    <JumpTraceBadge />
                   </main>
                 </div>
                 {/* Hide all side panels while the test workbench is open — it's a
