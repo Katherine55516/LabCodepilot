@@ -17,6 +17,18 @@ export async function register() {
       console.error('[server:unhandledRejection]', reason instanceof Error ? (reason.stack || reason.message) : String(reason));
     });
 
+    // [排障·临时] native 崩溃取证:上面两个 handler 只能捕 JS 层异常,而 Windows 打包版
+    // 「点报告 tab → 服务 native 崩溃(死前 crashpad not connected、exit -36616/-36861 族、
+    // 无任何 JS 栈)」发生在 native 层。开启 Node 诊断报告:V8/OOM 级致命错误时写出含
+    // 原生调用栈/已加载模块列表的 report.*.json 到数据目录(~/.codepilot,恒可写),
+    // 直接指认崩溃所在的 native 模块。定位后移除。
+    try {
+      if (process.report) {
+        process.report.reportOnFatalError = true;
+        if (process.env.CLAUDE_GUI_DATA_DIR) process.report.directory = process.env.CLAUDE_GUI_DATA_DIR;
+      }
+    } catch { /* process.report 不可用则跳过 */ }
+
     const { initRuntimeLog } = await import('@/lib/runtime-log');
     initRuntimeLog();
 

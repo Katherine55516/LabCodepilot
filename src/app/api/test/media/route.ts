@@ -61,6 +61,10 @@ export async function GET(req: Request): Promise<Response> {
   const isVideo = mime.startsWith('video/');
   const range = req.headers.get('range');
 
+  // [排障·临时] 面包屑:报告 tab 展开行会并发加载大量证据缩略图,Windows 打包版在该路径上
+  // native 崩溃且无栈。stderr 面包屑进 crash-tail,死前最后一条即指认凶手文件。定位后移除。
+  console.error(`[test:diag] media ${range ? 'range' : 'full'} ${target} size=${stat.size}`);
+
   // 视频 + Range → 206 partial。读片段为 buffer 直接返回（不用 Readable.toWeb 流式——它在
   // Next standalone + Electron 打包环境对 <video> 的 Range 请求不兼容，是录像走 Range 分支
   // 黑屏的根因；截图走整文件分支故正常。证据文件不大，整片段入内存可接受）。
