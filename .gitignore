@@ -52,6 +52,9 @@ next-env.d.ts
 # electron
 /dist-electron/
 /release/
+# Playwright headless_shell —— 打包时由 scripts/bundle-chromium.mjs 生成、
+# electron-builder 复制进安装包的平台相关浏览器二进制(~192MB),绝不提交。
+/ms-playwright-bundle/
 /release-win/
 
 # test artifacts

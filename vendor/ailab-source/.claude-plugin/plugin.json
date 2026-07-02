@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-plugin-manifest.json",
+  "name": "ai-lab-test",
+  "displayName": "AI_LabTest QA 自动化测试框架",
+  "version": "0.14.0",
+  "description": "把 Claude Code 当成 QA 自动化工程师，按 3 步强制工作流（用例设计→AI 实时驱动 Playwright 执行→报告）交付自动化测试。用例设计以用户提供的需求文档、会话提炼需求或现成用例为输入，用例以单页 Markdown 表格交付；报告出执行矩阵 + 独立缺陷报告。四态结果、用户门控、零源码修改、可追溯。",
+  "author": { "name": "yeqb001" },
+  "license": "MIT",
+  "keywords": ["qa", "testing", "test-automation", "playwright", "playwright-mcp", "e2e", "ai-lab-test"]
+}

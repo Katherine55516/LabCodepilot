@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useSyncExternalStore } from "react";
-import { type Icon, Gear, Code, UserCircle, Plug, ChartBar, Lightning, Terminal, Sparkle, WifiHigh } from "@/components/ui/icon";
+import { type Icon, Gear, Code, UserCircle, Plug, ChartBar, Lightning, Terminal, Sparkle, WifiHigh, ListChecks } from "@/components/ui/icon";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { GeneralSection } from "./GeneralSection";
@@ -9,6 +9,7 @@ import { ProviderManager } from "./ProviderManager";
 import { CliSettingsSection } from "./CliSettingsSection";
 import { UsageStatsSection } from "./UsageStatsSection";
 import { AssistantWorkspaceSection } from "./AssistantWorkspaceSection";
+import { TestAccountsSection } from "./TestAccountsSection";
 import { AccountSection } from "@/components/account/AccountSection";
 // Skills / MCP / CLI Tools managers — embedded as settings sub-sections so
 // users have a single panel for everything customizable. The /skills, /mcp,
@@ -25,7 +26,7 @@ import { BridgeLayout } from "@/components/bridge/BridgeLayout";
 import { useTranslation } from "@/hooks/useTranslation";
 import type { TranslationKey } from "@/i18n";
 
-type Section = "general" | "account" | "providers" | "cli" | "usage" | "assistant" | "skills" | "mcp" | "cli-tools" | "bridge" | "plugins";
+type Section = "general" | "account" | "providers" | "cli" | "usage" | "assistant" | "skills" | "mcp" | "cli-tools" | "bridge" | "plugins" | "test-accounts";
 
 interface SidebarItem {
   id: Section;
@@ -62,6 +63,9 @@ const sidebarItems: SidebarItem[] = [
   // Built-in plugins panel — currently hosts vendor-bundled GSD.
   // See electron/gsd-installer.ts + docs/handover/gsd-bundle.md.
   { id: "plugins", label: "Plugins", icon: Sparkle },
+  // Test Accounts — multi-system test credentials, exported to AI_LabTest
+  // environments.json. See docs/handover/test-account-settings.md.
+  { id: "test-accounts", label: "Test Accounts", icon: ListChecks },
 ];
 
 function getSectionFromHash(): Section {
@@ -105,6 +109,7 @@ export function SettingsLayout() {
     'CLI Tools': 'nav.cliTools',
     'Bridge': 'settings.bridge',
     'Plugins': 'settings.plugins.title',
+    'Test Accounts': 'settings.testAccounts',
   };
 
   const handleSectionChange = useCallback((section: Section) => {
@@ -158,6 +163,7 @@ export function SettingsLayout() {
           {activeSection === "cli-tools" && <CliToolsManager />}
           {activeSection === "bridge" && <BridgeLayout embedded />}
           {activeSection === "plugins" && <PluginsManager />}
+          {activeSection === "test-accounts" && <TestAccountsSection />}
         </div>
       </div>
     </div>

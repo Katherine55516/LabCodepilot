@@ -115,13 +115,27 @@ export function UnifiedTopBar() {
   // Extract project name from working directory
   const projectName = workingDirectory ? workingDirectory.split(/[\\/]/).filter(Boolean).pop() || '' : '';
 
-  // On non-chat routes, render only a thin drag region (no visible bar)
+  // On non-chat routes (incl. the /chat index, where the 测试工作台 overlay can
+  // render), draw only a drag region — no visible bar.
+  //
+  // On Windows the frameless window stamps the system controls (min/max/close,
+  // ~138px wide) into the top-right of the viewport via titleBarOverlay
+  // (electron/main.ts, height 44). Content rendered below this strip — e.g. the
+  // 测试工作台 header's model picker, which lives in an `absolute inset-0`
+  // overlay mounted just under this bar — would otherwise sit *under* those
+  // buttons and become unclickable. So on Windows reserve the full overlay
+  // height (via the Window-Controls-Overlay env var, with a 44px fallback that
+  // matches titleBarOverlay.height) to push that content clear of the buttons.
+  // mac (traffic light, top-left) and linux (no overlay) keep the thin 12px
+  // strip — just enough for window dragging.
   if (!isChatRoute) {
-    // Thin drag region for macOS window dragging — just enough for traffic light area
     return (
       <div
-        className="h-3 shrink-0"
-        style={{ WebkitAppRegion: 'drag' } as React.CSSProperties}
+        className="shrink-0"
+        style={{
+          WebkitAppRegion: 'drag',
+          height: isWindows ? 'env(titlebar-area-height, 44px)' : '0.75rem',
+        } as React.CSSProperties}
       />
     );
   }
@@ -288,7 +302,20 @@ export function UnifiedTopBar() {
               </Tooltip>
             </>
           )}
-          {isWindows && <div style={{ width: 138 }} className="shrink-0" />}
+          {/* Windows: reserve the top-right strip occupied by the frameless
+              window's system controls (min/max/close) so the right-hand actions
+              above aren't covered. Width tracks the actual controls via the
+              Window-Controls-Overlay env vars (controls width = viewport −
+              titlebar-area width − its x offset); 138px fallback matches the
+              default control cluster when the env vars aren't resolved. mac's
+              traffic light is top-left (handled by hiddenInset), linux has no
+              overlay — so this is Windows-only. */}
+          {isWindows && (
+            <div
+              className="shrink-0"
+              style={{ width: 'calc(100vw - env(titlebar-area-width, calc(100vw - 138px)) - env(titlebar-area-x, 0px))' }}
+            />
+          )}
         </div>
       </div>
     </>

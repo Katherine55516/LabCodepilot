@@ -27,18 +27,20 @@
     "test:e2e": "npx playwright test",
     "test:visual": "npx playwright test --grep @visual",
     "test:sdk-poc": "CLAUDE_SDK_POC=1 tsx --test src/__tests__/integration/*-poc.test.ts",
-    "test": "npm run typecheck && npm run vendor:gsd && npm run test:unit",
+    "test": "npm run typecheck && npm run vendor:gsd && npm run vendor:ailab && npm run test:unit",
     "lint:colors": "! grep -rn --include='*.tsx' --include='*.ts' -E '(bg|text|border)-(green|emerald|red|orange|yellow|amber|blue)-(400|500|600|700)' src/components/ src/app/ --exclude-dir=ui --exclude-dir=ai-elements | grep -v 'lint-allow-raw-color'",
     "prepare": "node -e \"try{require('husky')()}catch(e){}\"",
     "vendor:gsd": "node scripts/vendor-gsd-prepare.js",
     "vendor:gsd:verify": "node scripts/vendor-gsd-verify.js",
+    "vendor:ailab": "node scripts/vendor-ailab-prepare.js",
+    "vendor:ailab:verify": "node scripts/vendor-ailab-verify.js",
     "vendor:doc-assets": "node scripts/copy-doc-assets.js",
     "electron:dev": "npm run vendor:doc-assets && concurrently -k \"next dev\" \"wait-on http://localhost:3000 && electron .\"",
-    "electron:build": "npm run vendor:gsd && npm run vendor:gsd:verify && npm run vendor:doc-assets && next build && node scripts/build-electron.mjs",
-    "electron:pack": "npm run electron:build && electron-builder --config electron-builder.yml",
-    "electron:pack:mac": "npm run electron:build && electron-builder --mac --config electron-builder.yml",
-    "electron:pack:win": "npm run electron:build && electron-builder --win --config electron-builder.yml",
-    "electron:pack:linux": "npm run electron:build && electron-builder --linux --config electron-builder.yml"
+    "electron:build": "npm run vendor:gsd && npm run vendor:gsd:verify && npm run vendor:ailab && npm run vendor:ailab:verify && npm run vendor:doc-assets && next build && node scripts/build-electron.mjs",
+    "electron:pack": "npm run electron:build && node scripts/bundle-chromium.mjs && electron-builder --config electron-builder.yml",
+    "electron:pack:mac": "npm run electron:build && node scripts/bundle-chromium.mjs && electron-builder --mac --config electron-builder.yml",
+    "electron:pack:win": "npm run electron:build && node scripts/bundle-chromium.mjs && electron-builder --win --config electron-builder.yml",
+    "electron:pack:linux": "npm run electron:build && node scripts/bundle-chromium.mjs && electron-builder --linux --config electron-builder.yml"
   },
   "lint-staged": {
     "*.{ts,tsx}": [
@@ -64,6 +66,7 @@
     "@larksuiteoapi/node-sdk": "^1.59.0",
     "@lobehub/icons": "^4.6.0",
     "@phosphor-icons/react": "^2.1.10",
+    "@playwright/mcp": "^0.0.76",
     "@radix-ui/react-use-controllable-state": "^1.2.2",
     "@streamdown/cjk": "^1.0.1",
     "@streamdown/code": "^1.0.1",
@@ -83,8 +86,10 @@
     "docx-preview": "^0.3.7",
     "dompurify": "^3.3.3",
     "electron-updater": "^6.8.3",
+    "exceljs": "^4.4.0",
     "html-to-image": "^1.11.13",
     "jdenticon": "^3.3.0",
+    "mammoth": "^1.12.0",
     "markdown-it": "^14.1.1",
     "morphdom": "^2.7.8",
     "motion": "^12.33.0",
@@ -111,7 +116,9 @@
     "use-stick-to-bottom": "^1.1.2",
     "uuid": "^13.0.0",
     "ws": "^8.19.0",
-    "xlsx": "^0.18.5",
+    "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz"
+  },
+  "optionalDependencies": {
     "zlib-sync": "^0.1.10"
   },
   "devDependencies": {

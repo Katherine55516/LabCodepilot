@@ -59,6 +59,17 @@ export interface PanelContextValue {
   setAssistantPanelOpen: (open: boolean) => void;
   isAssistantWorkspace: boolean;
   setIsAssistantWorkspace: (is: boolean) => void;
+  // Inline testing panel (对话内嵌测试) — opened from the sidebar "测试" entry,
+  // closed via the panel's 收起. App-level so the sidebar can toggle it directly
+  // (no transient event → no mount-timing race).
+  testPanelOpen: boolean;
+  setTestPanelOpen: (open: boolean) => void;
+  /**
+   * 打开测试工作台时锚定的对话 sessionId（从 pathname 提取）。用于让 ChatView 区分
+   * 「工作台开着时底下【同一】对话数据异步加载完、首次挂载 ChatView」（不该关工作台）与
+   * 「用户【导航到别的】对话」（该关）。见 ChatView 的 setTestPanelOpen effect 与 AppShell 的 wrap。
+   */
+  testPanelBaseSession: string;
 
   // --- Git summary (for top bar, derived — no setters) ---
   currentBranch: string;

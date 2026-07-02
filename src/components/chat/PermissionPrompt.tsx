@@ -506,11 +506,16 @@ export function PermissionPrompt({
   const [panelCollapsed, setPanelCollapsed] = useState(false);
 
   // A new permission request resets height + collapse, so state dragged/toggled
-  // for the previous prompt doesn't carry over to an unrelated one.
-  useEffect(() => {
+  // for the previous prompt doesn't carry over to an unrelated one. Reset during
+  // render (React's "adjust state when a prop changes" pattern) rather than in an
+  // effect — a synchronous setState in an effect trips react-hooks/set-state-in-effect
+  // and adds an extra commit + re-render round-trip.
+  const [prevReqId, setPrevReqId] = useState(pendingPermission?.permissionRequestId);
+  if (prevReqId !== pendingPermission?.permissionRequestId) {
+    setPrevReqId(pendingPermission?.permissionRequestId);
     setPanelHeight(null);
     setPanelCollapsed(false);
-  }, [pendingPermission?.permissionRequestId]);
+  }
 
   const handleResizeDown = (e: React.PointerEvent) => {
     const el = panelRef.current;

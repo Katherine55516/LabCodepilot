@@ -27,8 +27,13 @@ export function useInfiniteScroll<T extends HTMLElement = HTMLDivElement>({
 }: UseInfiniteScrollOptions) {
   const sentinelRef = useRef<T>(null);
   // 始终调用最新的 onLoadMore,避免它频繁变化时反复重建 observer。
+  // 在 effect 里更新 ref(而非渲染期间)——渲染期间写 ref.current 会触发
+  // react-hooks/refs 且可能与并发渲染不同步。observer 回调是异步触发,
+  // 那时 effect 早已执行,读到的 current 始终是最新值。
   const onLoadMoreRef = useRef(onLoadMore);
-  onLoadMoreRef.current = onLoadMore;
+  useEffect(() => {
+    onLoadMoreRef.current = onLoadMore;
+  });
 
   useEffect(() => {
     const el = sentinelRef.current;

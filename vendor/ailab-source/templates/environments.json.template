@@ -1,0 +1,36 @@
+{
+  "$schema": "环境注册表 — 由 /ai-lab-test-execute 读取以决定测试目标。Step 2（测试执行）启动时让用户在 allowedEnvs 中二选一。",
+  "default": "local",
+  "allowedEnvs": ["local", "sit"],
+  "outOfScope": {
+    "uat": "UAT 是业务验收阶段，必须由业务方手工执行验收测试。AI_LabTest 框架不支持也不应执行 UAT 测试。"
+  },
+  "environments": {
+    "local": {
+      "label": "本地开发环境",
+      "frontendBaseUrl": "http://localhost:{{LOCAL_FRONTEND_PORT}}",
+      "apiBaseUrl": "http://127.0.0.1:{{LOCAL_API_PORT}}",
+      "healthEndpoint": "{{HEALTH_ENDPOINT}}",
+      "testAccount": {
+        "username": "{{TEST_USERNAME}}",
+        "password": "{{TEST_PASSWORD}}",
+        "role": "{{TEST_ROLE}}"
+      },
+      "tag": "local",
+      "notes": "本地 {{LOCAL_START_CMD}}"
+    },
+    "sit": {
+      "label": "SIT 集成测试环境",
+      "frontendBaseUrl": "TBD",
+      "apiBaseUrl": "TBD",
+      "healthEndpoint": "{{HEALTH_ENDPOINT}}",
+      "testAccount": {
+        "username": "TBD",
+        "password": "TBD",
+        "role": "TBD"
+      },
+      "tag": "SIT",
+      "notes": "首次使用时由 /ai-lab-test-execute 引导填写 URL 与测试账号"
+    }
+  }
+}

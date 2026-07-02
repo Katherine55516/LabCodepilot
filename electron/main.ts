@@ -1,6 +1,6 @@
 import { app, BrowserWindow, Notification, nativeImage, dialog, session, utilityProcess, ipcMain, shell, Tray, Menu, systemPreferences } from 'electron';
 import path from 'path';
-import { execFileSync, spawn, ChildProcess } from 'child_process';
+import { execFileSync, spawn, fork, ChildProcess } from 'child_process';
 import fs from 'fs';
 import net from 'net';
 import os from 'os';
@@ -45,6 +45,9 @@ import { HttpError, AuthExpiredError, NetworkError, type MeInfo, type ModelConfi
 import { RealtimeAsrSession } from './asr/realtime-session';
 import { getAsrConfig, invalidateAsrToken, type AsrConfig } from './asr/token-cache';
 
+// ── Test Accounts: 获取登录态 capture (BrowserWindow → Playwright storageState) ──
+import { startCapture, finishCaptureSelf, cancelCapture, cancelCaptureByUser, getCaptureStatus, clearCaptured, registerCaptureNotifier } from './test-auth-capture/capture-window';
+
 // File logger — persists main-process logs, the forked Next-server's piped
 // stdout/stderr (re-console.log'd below), and renderer console output to
 // app.getPath('logs'). Secrets are scrubbed before writing. See electron/logger.ts.
@@ -60,6 +63,13 @@ import {
   install as installGsdBundle,
   registerGsdIpc,
 } from './gsd-installer';
+
+// Vendor-bundled AI_LabTest plugin — synced to ~/.claude/plugins/external_plugins/
+// on first launch (default disabled) and version drift. See electron/ailab-installer.ts.
+import {
+  install as installAilabBundle,
+  registerAilabIpc,
+} from './ailab-installer';
 
 // Auto-inject `skipWebFetchPreflight: true` into ~/.claude/settings.json on
 // startup so users behind enterprise networks / GFW don't hit the
@@ -87,7 +97,8 @@ function sanitizedProcessEnv(): Record<string, string> {
 }
 
 let mainWindow: BrowserWindow | null = null;
-let serverProcess: Electron.UtilityProcess | null = null;
+// Windows 下是 child_process.fork 的纯 Node 子进程,macOS/Linux 下是 utilityProcess —— 见 startServer。
+let serverProcess: Electron.UtilityProcess | ChildProcess | null = null;
 let serverPort: number | null = null;
 let serverErrors: string[] = [];
 let serverExited = false;
@@ -95,6 +106,12 @@ let serverExitCode: number | null = null;
 let userShellEnv: Record<string, string> = {};
 let resolvedProxyEnv: Record<string, string> = {};
 let isQuitting = false;
+// server 崩溃自动重启:崩溃后 respawn,限次避免确定性崩溃导致的无限重启烧 CPU。
+let serverRestartCount = 0;
+let serverStartedAt = 0;
+const MAX_SERVER_RESTARTS = 3;
+const SERVER_RESTART_DELAY_MS = 1500;
+const SERVER_STABLE_MS = 90_000; // server 稳定运行超过此时长 → 视为已恢复,重置重启计数
 let tray: Tray | null = null;
 let bgNotifyTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -131,6 +148,140 @@ const terminalManager = new TerminalManager();
 
 const isDev = !app.isPackaged;
 
+// ──────────────────────────────────────────────────────────────────────────
+// Server pidfile —— 解决"端口漂移导致 localStorage 丢失"的根因。
+//
+// 背景：renderer 的 localStorage 按 origin(localhost:端口)隔离。打包版每次
+// 启动都尽量绑定固定端口(STABLE_PORTS 首个 47823)以保证 origin 一致。但
+// **非正常退出**(崩溃 / 任务管理器强杀 / 断电)不会走 before-quit →
+// killServer() 没机会执行 → 上次 fork 的 Next server 残留进程继续占着 47823 →
+// 本次启动探测到 47823 被占、跳到 47824…… origin 变化 → 用户的测试项目等
+// localStorage 数据"消失"。残留累积占满 8 个稳定端口后还会回退随机端口(每次都丢)。
+//
+// 方案:fork 成功后把 server pid 写到固定文件;下次启动在探测端口之前先读这个
+// 文件,若进程仍存活就杀掉它(释放上次占用的端口),从而稳定回到 47823。
+//
+// pidfile 路径与注入 server 的 CLAUDE_GUI_DATA_DIR(见 startServer)保持一致:
+//   <os.homedir()>/.codepilot/.server.pid
+const SERVER_PID_FILE = path.join(os.homedir(), '.codepilot', '.server.pid');
+
+/** 把当前 server 进程的 pid 写入 pidfile(目录不存在则创建)。失败仅告警,不影响启动。 */
+function writeServerPidFile(pid: number): void {
+  try {
+    fs.mkdirSync(path.dirname(SERVER_PID_FILE), { recursive: true });
+    fs.writeFileSync(SERVER_PID_FILE, String(pid), 'utf8');
+  } catch (err) {
+    console.warn(`[pidfile] 写入 ${SERVER_PID_FILE} 失败: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+/** 删除 pidfile(正常退出 / 清理残留后调用),避免下次误判。文件不存在不报错。 */
+function removeServerPidFile(): void {
+  try {
+    fs.rmSync(SERVER_PID_FILE, { force: true });
+  } catch { /* 不存在或无权限,忽略 */ }
+}
+
+/** 进程是否存活:用信号 0 探测(不真正发信号),包 try/catch。 */
+function isPidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    // ESRCH = 进程不存在 → false;EPERM = 进程存在但无权限发信号 → 视为存活。
+    // (我方 server 与主进程同一用户,正常不会出现 EPERM,这里只是保险。)
+    return (err as NodeJS.ErrnoException)?.code === 'EPERM';
+  }
+}
+
+/**
+ * 校验某 pid 看起来确实是我们 fork 的 Next server,降低 pid 被系统复用后误杀的概率。
+ *
+ * 取舍:跨平台精确校验(读 /proc、解析命令行)实现成本高。这里做轻量校验:
+ *  - Windows: 用 `tasklist /FI "PID eq <pid>"`,输出里含 node/electron/codepilot
+ *    才认为可杀;拿不到输出时保守返回 false(不杀)。
+ *  - 非 Windows: 用 `ps -p <pid> -o command=` 读命令行,含 server.js / codepilot /
+ *    node / electron 才可杀;`ps` 不可用或异常时退而返回 true(允许杀)——因为
+ *    pidfile 是我们自己写的、且紧接着会删除,复用窗口极小,残留误杀的风险可接受。
+ */
+function looksLikeOurServer(pid: number): boolean {
+  try {
+    if (process.platform === 'win32') {
+      const out = execFileSync('tasklist', ['/FI', `PID eq ${pid}`, '/NH'], {
+        encoding: 'utf8',
+        timeout: 3000,
+      }).toLowerCase();
+      // 无匹配进程时 tasklist 输出 "INFO: No tasks..." —— 不含进程名,自然返回 false。
+      return /node|electron|codepilot/.test(out);
+    }
+    const out = execFileSync('ps', ['-p', String(pid), '-o', 'command='], {
+      encoding: 'utf8',
+      timeout: 3000,
+    }).toLowerCase();
+    return /server\.js|codepilot|node|electron/.test(out);
+  } catch {
+    // 校验命令本身失败(ps/tasklist 不可用、超时等):非 Windows 放行(见上方取舍说明),
+    // Windows 保守不杀,避免在拿不到信息时误杀其它进程。
+    return process.platform !== 'win32';
+  }
+}
+
+/**
+ * 启动前清理上次残留的 server 进程。
+ *
+ * 读 pidfile;若 pid 仍存活且校验像我们的 server,就杀掉它(Windows 用
+ * `taskkill /T /F /PID` 杀进程树,其它平台 process.kill SIGKILL),释放它占用的端口,
+ * 让本次启动稳定回到 STABLE_PORTS 首个(47823)、保持 localStorage origin 一致。
+ * 最后删除 pidfile。整个过程包 try/catch,任何异常都不应阻塞正常启动。
+ */
+function reapOrphanServer(): void {
+  let raw: string;
+  try {
+    raw = fs.readFileSync(SERVER_PID_FILE, 'utf8').trim();
+  } catch {
+    return; // 没有 pidfile —— 上次正常退出或首次启动,无需清理。
+  }
+
+  const pid = Number.parseInt(raw, 10);
+  if (!Number.isInteger(pid) || pid <= 0) {
+    console.warn(`[pidfile] 内容非法(${JSON.stringify(raw)}),直接删除`);
+    removeServerPidFile();
+    return;
+  }
+
+  if (pid === process.pid) {
+    // 极端兜底:pidfile 写的是当前主进程自身,绝不能自杀。
+    removeServerPidFile();
+    return;
+  }
+
+  if (!isPidAlive(pid)) {
+    console.log(`[pidfile] 残留 pid ${pid} 已不存在,清理 pidfile`);
+    removeServerPidFile();
+    return;
+  }
+
+  if (!looksLikeOurServer(pid)) {
+    // pid 可能已被系统复用为无关进程,放弃杀它,只清理 pidfile。
+    console.warn(`[pidfile] pid ${pid} 仍存活但校验不像本应用 server,跳过清理(可能 pid 已被复用)`);
+    removeServerPidFile();
+    return;
+  }
+
+  console.warn(`[pidfile] 发现残留 server 进程 pid ${pid}(上次非正常退出),正在清理以释放端口`);
+  try {
+    if (process.platform === 'win32') {
+      // /T 连同子进程树一起杀,/F 强杀。
+      spawn('taskkill', ['/T', '/F', '/PID', String(pid)], { stdio: 'ignore' });
+    } else {
+      process.kill(pid, 'SIGKILL');
+    }
+  } catch (err) {
+    console.warn(`[pidfile] 杀残留进程 ${pid} 失败: ${err instanceof Error ? err.message : String(err)}`);
+  }
+  removeServerPidFile();
+}
+
 /**
  * Gracefully shut down the server process.
  * Sends kill() (SIGTERM) first, waits up to 3s for exit,
@@ -157,12 +308,18 @@ function killServer(): Promise<void> {
         } catch { /* already dead */ }
       }
       serverProcess = null;
+      // 进程已被强杀,删除 pidfile,避免下次启动误判为残留(见 SERVER_PID_FILE 注释)。
+      removeServerPidFile();
       resolve();
     }, 3000);
 
-    serverProcess.on('exit', () => {
+    // UtilityProcess 与 ChildProcess 都有 'exit' 事件,但 TS 对联合类型的 .on 重载取交集后
+    // 收窄到只剩 'spawn'/'message',故显式收窄到 ChildProcess 形态调用(运行时两者行为一致)。
+    (serverProcess as ChildProcess).on('exit', () => {
       clearTimeout(timeout);
       serverProcess = null;
+      // 进程已正常退出,删除 pidfile。
+      removeServerPidFile();
       resolve();
     });
 
@@ -616,6 +773,10 @@ async function getDynamicPort(): Promise<number> {
  * Throws only if every candidate AND the OS-assigned fallback fail.
  */
 async function startServerOnStablePort(): Promise<number> {
+  // 探测端口之前:先清理上次非正常退出残留的 server 进程,释放它占用的端口,
+  // 让本次启动稳定回到 47823、保持 localStorage origin 一致(见 SERVER_PID_FILE 注释)。
+  reapOrphanServer();
+
   for (const candidate of STABLE_PORTS) {
     // Quick pre-check skips obviously-occupied ports without spawning.
     // Not a guarantee — but cheap, and avoids a process spawn for the common
@@ -705,7 +866,7 @@ async function waitForServer(port: number, timeout = 30000): Promise<void> {
   );
 }
 
-function startServer(port: number): Electron.UtilityProcess {
+function startServer(port: number): Electron.UtilityProcess | ChildProcess {
   const standaloneDir = path.join(process.resourcesPath, 'standalone');
   const serverPath = path.join(standaloneDir, 'server.js');
 
@@ -715,6 +876,7 @@ function startServer(port: number): Electron.UtilityProcess {
   serverErrors = [];
   serverExited = false;
   serverExitCode = null;
+  serverStartedAt = Date.now();
 
   const home = os.homedir();
   const constructedPath = getExpandedShellPath();
@@ -736,6 +898,10 @@ function startServer(port: number): Electron.UtilityProcess {
     // spreads so a stray shell var can't shadow it. Empty when safeStorage is
     // unavailable → server-side crypto-seal falls back to plaintext passthrough.
     CLAUDE_GUI_SECRET_KEY: getMasterKeyHex(),
+    // 打包资源根目录 —— 测试执行阶段的 Playwright MCP(src/lib/test/prompts.ts
+    // buildPlaywrightMcp)据此定位随包分发的 chromium_headless_shell。dev 态(next dev)
+    // 不经此 fork、该 env 不存在 → 回退用本机 ~/.cache/ms-playwright 的浏览器。
+    AILAB_RESOURCES_PATH: process.resourcesPath,
   };
 
   // Register every credential the forked server will hold (master key + the
@@ -743,15 +909,6 @@ function startServer(port: number): Electron.UtilityProcess {
   // process.env) so the file logger redacts those exact values verbatim if they
   // ever surface in the server's piped output.
   registerKnownSecretsFromEnv(env);
-
-  // Use Electron's utilityProcess to run the server in a child process
-  // without spawning a separate Dock icon on macOS.
-  const child = utilityProcess.fork(serverPath, [], {
-    env,
-    cwd: standaloneDir,
-    stdio: 'pipe',
-    serviceName: 'codepilot-server',
-  });
 
   // Buffer piped output and emit COMPLETE lines. Logging per logical line (not
   // per arbitrary pipe chunk) keeps the file log readable AND lets the logger's
@@ -778,15 +935,78 @@ function startServer(port: number): Electron.UtilityProcess {
       }
     };
   };
-  child.stdout?.on('data', makeLineHandler('[server]', false));
-  child.stderr?.on('data', makeLineHandler('[server:err]', true));
-
-  child.on('exit', (code) => {
+  // 服务退出处理 —— 两种宿主进程(见下方分支)共用。child_process 语义下被信号杀时 code 为 null。
+  const handleExit = (code: number | null) => {
     console.log(`Server process exited with code ${code}`);
     serverExited = true;
     serverExitCode = code;
     serverProcess = null;
-  });
+    // 内嵌 server 异常退出(崩溃)且 app 没在主动退出 → 诊断 + 限次自动重启。
+    // 背景:实测 server ready 后约 12s 会异常退出(code≠0),之前无重启 → 之后所有请求
+    // (导入/页面/RSC)全 Failed to fetch。这里兜底恢复 + dump 崩溃前输出帮定位根因。
+    if (code !== 0 && code !== null && !isQuitting) {
+      const ranMs = serverStartedAt ? Date.now() - serverStartedAt : 0;
+      console.error(`[server] 异常退出 code=${code},本次运行约 ${Math.round(ranMs / 1000)}s。崩溃前最后输出:`);
+      for (const line of serverErrors.slice(-30)) console.error(`[server:crash-tail] ${line}`);
+      // 稳定运行过(>SERVER_STABLE_MS)再崩 → 视为偶发,重置计数让其可持续恢复;
+      // 启动即快崩则累计到上限后停,避免无限重启循环。
+      if (ranMs > SERVER_STABLE_MS) serverRestartCount = 0;
+      if (serverRestartCount < MAX_SERVER_RESTARTS && serverPort != null) {
+        serverRestartCount++;
+        const port = serverPort;
+        console.error(`[server] ${SERVER_RESTART_DELAY_MS}ms 后自动重启 (${serverRestartCount}/${MAX_SERVER_RESTARTS})…`);
+        setTimeout(() => {
+          if (isQuitting) return;
+          serverProcess = startServer(port);
+          waitForServer(port)
+            .then(() => { console.log('[server] 重启成功,刷新窗口'); mainWindow?.webContents.reload(); })
+            .catch((e) => console.error('[server] 重启后等待就绪失败:', e instanceof Error ? e.message : String(e)));
+        }, SERVER_RESTART_DELAY_MS);
+      } else if (serverRestartCount >= MAX_SERVER_RESTARTS) {
+        console.error(`[server] 已达自动重启上限(${MAX_SERVER_RESTARTS}次),停止重启。这是确定性崩溃,请查上面的 [server:crash-tail] 定位根因。`);
+      }
+    }
+  };
+
+  let child: Electron.UtilityProcess | ChildProcess;
+  if (process.platform === 'win32') {
+    // [Windows] 用 child_process.fork(ELECTRON_RUN_AS_NODE=纯 Node 运行时)而非 utilityProcess。
+    // utilityProcess 是 Chromium utility 进程,自带 crashpad/mojo/沙箱机制,对企业 EDR/杀软的
+    // DLL 注入极其敏感 —— 实测(域机器)服务进程在应用层零错误的情况下周期性被 native 终结:
+    // 退出码 -36616 / 0x40010004(DBG_TERMINATE_PROCESS=被外部按调试器方式终结),死前必现
+    // crashpad not connected,且 Windows 事件查看器无 ID1000 崩溃记录(说明不是自身崩溃、
+    // 是被外部干净终结)。每次被杀触发下方自动重启+reload,把用户正在看的页面(如测试工作台
+    // 报告)刷回初始态。纯 Node 子进程没有这些敏感机制,对注入的耐受性好得多。
+    // native 模块 ABI 不变:ELECTRON_RUN_AS_NODE 与 utilityProcess 用的是同一个内嵌 Node,
+    // better-sqlite3 仍按 after-pack 重编译的 Electron ABI 正常加载。
+    const nodeChild = fork(serverPath, [], {
+      env: { ...env, ELECTRON_RUN_AS_NODE: '1' },
+      cwd: standaloneDir,
+      stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
+    });
+    nodeChild.stdout?.on('data', makeLineHandler('[server]', false));
+    nodeChild.stderr?.on('data', makeLineHandler('[server:err]', true));
+    nodeChild.on('exit', (code) => handleExit(code));
+    child = nodeChild;
+  } else {
+    // macOS/Linux 维持 utilityProcess —— 不会在 macOS 多出一个 Dock 图标。
+    const utilChild = utilityProcess.fork(serverPath, [], {
+      env,
+      cwd: standaloneDir,
+      stdio: 'pipe',
+      serviceName: 'codepilot-server',
+    });
+    utilChild.stdout?.on('data', makeLineHandler('[server]', false));
+    utilChild.stderr?.on('data', makeLineHandler('[server:err]', true));
+    utilChild.on('exit', (code) => handleExit(code));
+    child = utilChild;
+  }
+
+  // 记录 pid 到固定 pidfile —— 供下次启动清理本次的残留进程(见 reapOrphanServer)。
+  // 两种 fork 都同步返回,pid 此时已可用。
+  if (child.pid) {
+    writeServerPidFile(child.pid);
+  }
 
   return child;
 }
@@ -1193,6 +1413,12 @@ function createWindow(url?: string) {
   });
 }
 
+// [稳定性] 禁用 crashpad/crash-reporter。Windows 打包版内嵌 Next 服务(utilityProcess)里 spawn
+// 子进程(尤其经 cmd.exe)时，crashpad 在 utility 进程内「not connected」会参与把服务进程整体
+// native 崩溃(code -36616)。显式禁用崩溃上报，切断这条崩溃链，作为 platform.ts 去 shell:true
+// 之外的防御纵深。
+app.commandLine.appendSwitch('disable-crash-reporter');
+
 app.whenReady().then(async () => {
   // Initialise file logging FIRST so every subsequent console.* in main — and
   // the forked server's piped output we re-log below — is persisted to disk,
@@ -1257,6 +1483,28 @@ app.whenReady().then(async () => {
     })
     .catch((err) => {
       console.error('[gsd-installer] startup sync threw:', err);
+    });
+
+  // --- Vendor-bundled AI_LabTest: sync (fire-and-forget, never blocks startup) ---
+  // First launch lays down the plugin dir DISABLED; the user enables it from
+  // Settings → Plugins (which also registers the Playwright MCP). When already
+  // enabled, this re-mirrors commands + skill and picks up version drift.
+  registerAilabIpc(ipcMain);
+  Promise.resolve()
+    .then(() => {
+      const status = installAilabBundle({
+        log: (msg) => console.log(msg),
+      });
+      if (status.lastError) {
+        console.warn('[ailab-installer] startup sync had error:', status.lastError);
+      } else {
+        console.log(
+          `[ailab-installer] startup sync OK (installed=${status.installed}, enabled=${status.enabled})`,
+        );
+      }
+    })
+    .catch((err) => {
+      console.error('[ailab-installer] startup sync threw:', err);
     });
 
   // --- Auto-inject skipWebFetchPreflight into ~/.claude/settings.json ---
@@ -1781,6 +2029,34 @@ app.whenReady().then(async () => {
     });
     return { canceled: result.canceled, filePaths: result.filePaths };
   });
+
+  // Test Accounts — 获取登录态 capture. Opens an isolated window (BaseWindow +
+  // toolbar/site WebContentsView), lets the user log in, then the in-window toolbar
+  // writes a Playwright storageState file into the AI_LabTest workspace for replay.
+  // See electron/test-auth-capture/capture-window.ts.
+  //
+  // done/cancelled are pushed to the settings page so its "captured" badge updates
+  // without the user switching back. Notifier reads the live mainWindow each call.
+  registerCaptureNotifier((channel, payload) => {
+    mainWindow?.webContents.send(channel, payload);
+  });
+  ipcMain.handle('test-auth-capture:start', (_e, params: {
+    frontendBaseUrl: string;
+    username?: string;
+    password?: string;
+    projectRoot: string;
+    env: string;
+    accountKey: string;
+    systemLabel?: string;
+  }) => startCapture(params));
+  ipcMain.handle('test-auth-capture:cancel', () => cancelCapture());
+  ipcMain.handle('test-auth-capture:status', (_e, params: { projectRoot: string; env: string; accountKey: string }) => getCaptureStatus(params));
+  ipcMain.handle('test-auth-capture:clear', (_e, params: { projectRoot: string; env: string; accountKey: string }) => clearCaptured(params));
+  // 工具条「登录完成」：就地抓取写盘（用 start 时存的目标），成功后由 capture-window
+  // 通知设置页并关窗；抓到空则返回失败、不关窗（工具条红字提示）。
+  ipcMain.handle('test-auth-capture:toolbar-finish', () => finishCaptureSelf());
+  // 工具条「取消」：关窗，由 'closed' 触发 cancelled 通知给设置页。
+  ipcMain.handle('test-auth-capture:toolbar-cancel', () => cancelCaptureByUser());
 
   // --- Widget export IPC handler ---
   // Uses an isolated BrowserWindow for secure, high-fidelity widget screenshot.
@@ -2401,6 +2677,8 @@ app.on('before-quit', async (e) => {
     // Stop bridge gracefully before killing the server
     await stopBridge();
     await killServer();
+    // 兜底:确保正常退出后不留 pidfile(killServer 的 early-return 路径不会删)。
+    removeServerPidFile();
     app.quit();
   }
 });

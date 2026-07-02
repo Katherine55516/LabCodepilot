@@ -66,6 +66,15 @@ interface ChatViewProps {
   initialHasSummary?: boolean;
   /** Per-session reasoning effort restored from the DB ('' = no explicit effort). */
   initialEffort?: string;
+  /**
+   * True when this ChatView is a BACKGROUND column inside the split-view container
+   * (SplitColumn), not a chat the user actively navigated to. Split columns stay
+   * mounted UNDER the full-screen testing workbench overlay; without this flag their
+   * mount-time effect (see the setTestPanelOpen effect below) would flip
+   * testPanelOpen→false and bounce the user out of the workbench a few seconds after
+   * opening it. Only the foreground chat should dismiss the workbench.
+   */
+  isSplitColumn?: boolean;
 }
 
 /**
@@ -86,8 +95,8 @@ const MAX_MESSAGES_IN_MEMORY = 150;
  */
 const MAX_CONTENT_BYTES_IN_MEMORY = 24 * 1024 * 1024; // ~24MB
 
-export function ChatView({ sessionId, initialMessages = [], initialHasMore = false, modelName, providerId, initialPermissionProfile, initialMode, initialHasSummary, initialEffort }: ChatViewProps) {
-  const { setStreamingSessionId, workingDirectory, setPendingApprovalSessionId, setDashboardPanelOpen, setFileTreeOpen, setIsAssistantWorkspace } = usePanel();
+export function ChatView({ sessionId, initialMessages = [], initialHasMore = false, modelName, providerId, initialPermissionProfile, initialMode, initialHasSummary, initialEffort, isSplitColumn = false }: ChatViewProps) {
+  const { setStreamingSessionId, workingDirectory, setPendingApprovalSessionId, setDashboardPanelOpen, setFileTreeOpen, setIsAssistantWorkspace, setTestPanelOpen, testPanelOpen, testPanelBaseSession } = usePanel();
   const { t } = useTranslation();
   const router = useRouter();
   const [messages, setMessages] = useState<Message[]>(initialMessages);
@@ -208,6 +217,25 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
 
   // Restore session-scoped last-generated images from sessionStorage
   useEffect(() => { loadLastGenerated(sessionId); }, [sessionId]);
+
+  // Dismiss the full-screen testing workbench when the user NAVIGATES to a
+  // different chat (the panel has no in-panel 收起 button, so revealing a newly
+  // opened chat requires closing the overlay — e.g. the workbench's 交接/新建对话
+  // that router.push()es to a new session).
+  //
+  // 关键陷阱（用户报单栏「点报告过几秒自动跳回同一对话」的真正根因）：/chat/[id] page 在
+  // `loading || !sessionInfoLoaded` 时只渲染 spinner，数据加载完才【首次挂载】ChatView。
+  // 若用户先打开工作台、底下同一对话的数据几秒后才加载完，ChatView 首次挂载就会触发本
+  // effect，把几秒前打开的工作台无条件关掉、露出底下那个【同一】对话 —— 看起来就是「自动跳
+  // 回对话」。(分屏 SplitColumn 的 ChatView 也是同样的异步挂载；此前 isSplitColumn 只挡住了
+  // 分屏那一路，单栏 /chat/[id] 这一路没挡住，所以改两次仍复现。)
+  //
+  // 修复：只有 sessionId ≠ 打开工作台时锚定的 testPanelBaseSession（即用户【导航到了别的
+  // 对话】）才关工作台；同一对话的异步首次挂载 sessionId===base，不关。分屏后台列
+  // (isSplitColumn) 一律不关；仅在工作台开着 (testPanelOpen) 时才需要动作。
+  useEffect(() => {
+    if (!isSplitColumn && testPanelOpen && sessionId !== testPanelBaseSession) setTestPanelOpen(false);
+  }, [sessionId, setTestPanelOpen, isSplitColumn, testPanelOpen, testPanelBaseSession]);
 
   // Stream snapshot from the manager — drives all streaming UI
   const [streamSnapshot, setStreamSnapshot] = useState<SessionStreamSnapshot | null>(
@@ -910,7 +938,7 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
   }, [sessionId]);
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="relative flex h-full min-h-0 flex-col">
       {/* Workspace mismatch banner */}
       {workspaceMismatchPath && (
         <div className="flex items-center justify-between gap-3 border-b border-status-warning/30 bg-status-warning-muted px-4 py-2">

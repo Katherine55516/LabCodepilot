@@ -928,7 +928,7 @@ export default function NewChatPage() {
   }, [sendFirstMessage]);
 
   return (
-    <div className="flex h-full min-h-0 flex-col">
+    <div className="relative flex h-full min-h-0 flex-col">
       {messages.length === 0 && !isStreaming && (!workingDir.trim() || !hasProvider) ? (
         <ChatEmptyState
           hasDirectory={!!workingDir.trim()}

@@ -15,6 +15,7 @@ import {
   Image,
   WifiHigh,
   Gear,
+  MagnifyingGlassCheck,
   Sparkle,
   type Icon,
 } from "@/components/ui/icon";
@@ -59,7 +60,34 @@ interface ChatListPanelProps {
 export function ChatListPanel({ open, width, hasUpdate, readyToInstall }: ChatListPanelProps) {
   const pathname = usePathname();
   const router = useRouter();
-  const { streamingSessionId, pendingApprovalSessionId, activeStreamingSessions, pendingApprovalSessionIds, workingDirectory } = usePanel();
+
+  const { streamingSessionId, pendingApprovalSessionId, activeStreamingSessions, pendingApprovalSessionIds, workingDirectory, testPanelOpen, setTestPanelOpen } = usePanel();
+
+  // 工作台只在 chat 路由的覆盖层显示（见 AppShell：testPanelOpen && isChatRoute）。测试按钮的
+  // active 高亮应与「工作台是否真的可见」一致——否则点文生图/设置导航到非 chat 路由后，工作台
+  // 已隐藏、按钮却还亮着（用户报「点测试再点其他模块，测试按钮 active 没取消」）。testPanelOpen
+  // 保持不变（保活：切回 chat 工作台仍在），只是按钮高亮跟随实际可见性。
+  const isChatRoute = pathname.startsWith("/chat/") || pathname === "/chat";
+
+  // "测试" entry (Routines-style sidebar button). Toggles the inline testing
+  // panel via app-level PanelContext state (no transient event → no mount-timing
+  // race). Toggle (not just open) because the panel no longer has its own 收起
+  // button — clicking 测试 again is the explicit way out. Navigates to /chat
+  // first when opening from a non-chat route. Additive.
+  const handleOpenTesting = useCallback(() => {
+    // 工作台「可见」= testPanelOpen 且在 chat 路由（工作台是 /chat 覆盖层）——与测试按钮 active
+    // 的判断保持一致。toggle 必须按【可见性】而非纯 testPanelOpen：否则在文生图/设置等非 chat
+    // 路由时 testPanelOpen 可能仍为 true（保活、只是隐藏），此刻点测试会被 toggle 成 false（先
+    // 关一次、用户看「没反应」），得点第二次才开。改为：可见→关；不可见(没开 / 在非 chat 路由)
+    // →开 + 导航回 /chat 让它显示。
+    const visible = testPanelOpen && pathname.startsWith("/chat");
+    if (visible) {
+      setTestPanelOpen(false);
+    } else {
+      setTestPanelOpen(true);
+      if (!pathname.startsWith("/chat")) router.push("/chat");
+    }
+  }, [pathname, router, testPanelOpen, setTestPanelOpen]);
   const { splitSessions, isSplitActive, activeColumnId, addToSplit, removeFromSplit, setActiveColumn, isInSplit } = useSplit();
   const { t } = useTranslation();
   const { isElectron, openNativePicker } = useNativeFolderPicker();
@@ -427,6 +455,8 @@ export function ChatListPanel({ open, width, hasUpdate, readyToInstall }: ChatLi
   // Type annotation needed because the array is currently empty (every entry
   // commented out). When restoring any entry, drop the annotation if you like.
   const navItems: Array<{ href: string; label: string; icon: Icon }> = [
+    // Testing moved into the chat composer's "测试" mode (inline testing panel),
+    // so there's no top-level /test route anymore.
     // Skills / MCP / CLI Tools moved into Settings sub-sections — routes
     // still resolve, just no top-level entries here. Restore by uncommenting.
     // { href: "/skills", label: t('nav.skills' as TranslationKey), icon: Lightning },
@@ -475,30 +505,34 @@ export function ChatListPanel({ open, width, hasUpdate, readyToInstall }: ChatLi
         </Tooltip>
       </div>
 
-      {/* Feature nav items */}
-      <div className="px-3 pb-2">
-        <div className="flex flex-col gap-0.5">
-          {navItems.map((item) => {
-            const isActive = pathname.startsWith(item.href);
-            return (
-              <Link key={item.href} href={item.href}>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className={`w-full justify-start gap-2 h-8 text-xs ${
-                    isActive
-                      ? "bg-accent text-accent-foreground font-medium"
-                      : "text-muted-foreground hover:text-foreground"
-                  }`}
-                >
-                  <item.icon size={14} weight={isActive ? "fill" : "regular"} />
-                  {item.label}
-                </Button>
-              </Link>
-            );
-          })}
+      {/* Feature nav items — 测试 moved next to 文生图 above the account row (see bottom).
+          navItems is empty today (entries live in Settings); render the block only when
+          some are restored so it leaves no empty gap below the search bar. */}
+      {navItems.length > 0 && (
+        <div className="px-3 pb-2">
+          <div className="flex flex-col gap-0.5">
+            {navItems.map((item) => {
+              const isActive = pathname.startsWith(item.href);
+              return (
+                <Link key={item.href} href={item.href}>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className={`w-full justify-start gap-2 h-8 text-xs ${
+                      isActive
+                        ? "bg-accent text-accent-foreground font-medium"
+                        : "text-muted-foreground hover:text-foreground"
+                    }`}
+                  >
+                    <item.icon size={14} weight={isActive ? "fill" : "regular"} />
+                    {item.label}
+                  </Button>
+                </Link>
+              );
+            })}
+          </div>
         </div>
-      </div>
+      )}
 
       {/* Separator */}
       <div className="mx-3 border-t border-border/40" />
@@ -612,7 +646,14 @@ export function ChatListPanel({ open, width, hasUpdate, readyToInstall }: ChatLi
                       >
                         <div className="mt-0.5 flex flex-col gap-0.5">
                           {visibleSessions.map((session) => {
-                            const isActive = pathname === `/chat/${session.id}`;
+                            // Route-derived active state, but suppressed while the
+                            // 测试 workbench overlay is open: in that view we're not
+                            // "in" any conversation (the chat is hidden behind the
+                            // test panel), so no row should keep the active highlight.
+                            // Toggling 测试 back off restores the pathname match; and
+                            // conversation→conversation switching already closes the
+                            // panel (ChatView resets testPanelOpen on sessionId change).
+                            const isActive = !testPanelOpen && pathname === `/chat/${session.id}`;
                             const canSplit = !isActive && !isInSplit(session.id);
 
                             return (
@@ -639,6 +680,7 @@ export function ChatListPanel({ open, width, hasUpdate, readyToInstall }: ChatLi
                                   projectName: s.project_name || "",
                                   mode: s.mode,
                                 })}
+                                onNavigate={() => setTestPanelOpen(false)}
                               />
                             );
                           })}
@@ -674,23 +716,37 @@ export function ChatListPanel({ open, width, hasUpdate, readyToInstall }: ChatLi
         </div>
       </ScrollArea>
 
-      {/* Image Studio — standalone text-to-image entry, sits above the account row */}
-      <div className="shrink-0 px-3 pt-2">
+      {/* Feature entries — 测试 + 文生图 stacked above the account row. Both use the
+          neutral ghost style (transparent at rest, accent highlight when active) so they
+          match the rest of the sidebar nav; 测试 sits directly above 文生图. */}
+      <div className="shrink-0 px-3 pt-2 flex flex-col gap-0.5">
+        {/* 测试 — toggles the inline testing panel; active-highlighted while open
+            (the panel has no 收起 button — toggle here to exit). */}
+        <Button
+          variant="ghost"
+          size="sm"
+          className={`w-full justify-start gap-2 h-8 text-xs ${
+            testPanelOpen && isChatRoute
+              ? "bg-accent text-accent-foreground font-medium"
+              : "text-muted-foreground hover:text-foreground"
+          }`}
+          onClick={handleOpenTesting}
+        >
+          <MagnifyingGlassCheck size={14} weight={testPanelOpen && isChatRoute ? "fill" : "regular"} />
+          {t('nav.test')}
+        </Button>
+        {/* 文生图 — text-to-image entry */}
         <Link href="/image">
           <Button
-            variant="outline"
+            variant="ghost"
             size="sm"
-            className={`w-full justify-start gap-2 h-9 text-xs border-primary/30 ${
+            className={`w-full justify-start gap-2 h-8 text-xs ${
               pathname.startsWith("/image")
-                ? "bg-primary/10 text-primary font-medium"
-                : "bg-primary/5 text-foreground hover:bg-primary/10"
+                ? "bg-accent text-accent-foreground font-medium"
+                : "text-muted-foreground hover:text-foreground"
             }`}
           >
-            <Sparkle
-              size={15}
-              weight={pathname.startsWith("/image") ? "fill" : "regular"}
-              className="text-primary"
-            />
+            <Sparkle size={14} weight={pathname.startsWith("/image") ? "fill" : "regular"} />
             {t('imageStudio.sidebarButton' as TranslationKey)}
           </Button>
         </Link>

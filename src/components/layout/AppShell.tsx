@@ -26,6 +26,7 @@ import { Toaster } from '@/components/ui/toast';
 import { useNotificationPoll } from '@/hooks/useNotificationPoll';
 import { useGlobalSearchShortcut } from '@/hooks/useGlobalSearchShortcut';
 import { GlobalSearchDialog } from './GlobalSearchDialog';
+import { InlineTestingPanel } from '@/components/test/InlineTestingPanel';
 
 const SPLIT_SESSIONS_KEY = "codepilot:split-sessions";
 const SPLIT_ACTIVE_COLUMN_KEY = "codepilot:split-active-column";
@@ -238,6 +239,24 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [dashboardPanelOpen, setDashboardPanelOpen] = useState(false);
   const [assistantPanelOpen, setAssistantPanelOpen] = useState(false);
   const [isAssistantWorkspace, setIsAssistantWorkspace] = useState(false);
+  const [testPanelOpen, setTestPanelOpenRaw] = useState(false);
+  // 打开测试工作台时锚定「当前对话」。修复用户单栏「点报告过几秒自动跳回同一对话」：底下
+  // /chat/[id] page 在 loading→加载完才【首次挂载】ChatView，其 setTestPanelOpen(false)
+  // effect 挂载即无条件关掉了几秒前打开的工作台。有了 baseSession，ChatView 只在【导航到别的
+  // 对话】(sessionId≠base) 时才关工作台，同一对话的异步首次挂载不再误关。
+  const [testPanelBaseSession, setTestPanelBaseSession] = useState("");
+  const setTestPanelOpen = useCallback((v: boolean) => {
+    if (v) {
+      const m = window.location.pathname.match(/^\/chat\/([^/]+)/);
+      setTestPanelBaseSession(m ? decodeURIComponent(m[1]) : "");
+    }
+    setTestPanelOpenRaw(v);
+  }, []);
+  // 测试工作台「保活」：一旦打开过就保持挂载（不随路由切换卸载），避免执行进行中切到
+  // 设置页再切回时，InlineTestingPanel 卸载导致 SSE 中断 + 重挂载时把持久化的 running
+  // 僵尸态规整成 error（显示「失败」）。可见性由下方 testPanelOpen && isChatRoute 用 CSS
+  // 控制（display:contents ↔ hidden），组件实例与内部 state、in-flight fetch 全程保留。
+  const [testEverOpened, setTestEverOpened] = useState(false);
 
   // --- Git summary (derived from polling hook, no setState needed) ---
   const [currentWorktreeLabel, setCurrentWorktreeLabel] = useState("");
@@ -291,13 +310,30 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   // URL sync: when activeColumn changes, update router
   useEffect(() => {
+    // 分屏激活时把 URL 纠偏到 activeColumn 那一列。但测试工作台常驻在全屏覆盖层（同样挂在
+    // /chat 路由下、不改 pathname），这个纠偏会把用户从「测试报告」等页面自动弹回对话
+    // （用户报的「点报告过几秒自动跳走」）。
+    //
+    // 第一道守卫（软）：工作台开着就不同步。它依赖 testPanelOpen 的【瞬时值】——有几条路径
+    // 能在它恰为 false 的一拍让本 effect 重跑并绕过它：①用户点主会话列表某条 → onNavigate
+    // 同步 setTestPanelOpen(false)；②应用启动/刷新时从 localStorage 恢复出 isSplitActive=true
+    // 但 pathname 还没对上、而 testPanelOpen 初值就是 false。用户重打新包后仍复现，正是这道
+    // 软守卫挡不住这些时序。
+    if (testPanelOpen) return;
     if (isSplitActive && activeColumnId) {
+      // 第二道守卫（强、对 testPanelOpen 时序免疫）：只有当【当前 pathname 已经是分屏里某一
+      // 成员的对话页】时，才把 URL 纠偏到 activeColumn —— 这是分屏内切换聚焦列的正常同步。
+      // 若当前不在任何分屏成员页上（例如停在 /chat 根：测试工作台覆盖层就挂在这里；或用户刚
+      // 导航到分屏之外的新对话），一律尊重现状、绝不 replace。这样无论 testPanelOpen 瞬时是
+      // true 还是 false，只要人不在分屏成员页上就不会被弹走，从根上堵住「点报告过几秒跳回对话」。
+      const onSplitMemberPage = splitSessions.some((s) => pathname === `/chat/${s.sessionId}`);
+      if (!onSplitMemberPage) return;
       const target = `/chat/${activeColumnId}`;
       if (pathname !== target) {
         router.replace(target);
       }
     }
-  }, [isSplitActive, activeColumnId, pathname, router]);
+  }, [isSplitActive, activeColumnId, pathname, router, testPanelOpen, splitSessions]);
 
   const setActiveColumn = useCallback((sessionId: string) => {
     setActiveColumnIdRaw(sessionId);
@@ -455,6 +491,10 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     setPreviewSourceRaw(null);
     setPreviewOpen(false);
   }, [pathname]);
+  // 测试工作台首次打开后置位「曾打开」，之后常驻挂载（不再随 testPanelOpen 卸载）。
+  useEffect(() => {
+    if (testPanelOpen) setTestEverOpened(true);
+  }, [testPanelOpen]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   // Keep chat list state in sync when resizing across the breakpoint
@@ -514,6 +554,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       setAssistantPanelOpen,
       isAssistantWorkspace,
       setIsAssistantWorkspace,
+      testPanelOpen,
+      setTestPanelOpen,
+      testPanelBaseSession,
       currentBranch,
       gitDirtyCount,
       currentWorktreeLabel,
@@ -537,7 +580,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       previewViewMode,
       setPreviewViewMode,
     }),
-    [fileTreeOpen, taskListOpen, gitPanelOpen, previewOpen, terminalOpen, dashboardPanelOpen, assistantPanelOpen, isAssistantWorkspace, currentBranch, gitDirtyCount, currentWorktreeLabel, workingDirectory, sessionId, sessionTitle, streamingSessionId, pendingApprovalSessionId, activeStreamingSessions, pendingApprovalSessionIds, previewSource, setPreviewSource, previewFile, setPreviewFile, previewViewMode]
+    [fileTreeOpen, taskListOpen, gitPanelOpen, previewOpen, terminalOpen, dashboardPanelOpen, assistantPanelOpen, isAssistantWorkspace, testPanelOpen, testPanelBaseSession, currentBranch, gitDirtyCount, currentWorktreeLabel, workingDirectory, sessionId, sessionTitle, streamingSessionId, pendingApprovalSessionId, activeStreamingSessions, pendingApprovalSessionIds, previewSource, setPreviewSource, previewFile, setPreviewFile, previewViewMode]
   );
 
   const imageGenValue = useImageGenState();
@@ -573,9 +616,25 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     ) : (
                       <ErrorBoundary>{children}</ErrorBoundary>
                     )}
+                    {/* 测试工作台常驻（保活）：一旦打开过就保持挂载，跨路由不卸载。可见性
+                        用 CSS 切换 —— 显示时 display:contents（面板自身 absolute inset-0
+                        盖满本 relative main），隐藏时 display:none（组件实例、内部 state、
+                        in-flight 执行全程保留，仅不渲染视觉）。非 chat 路由（如设置页）隐藏，
+                        让 children 正常显示；切回 chat 再显示，执行进度不丢。 */}
+                    {testEverOpened && (
+                      <div className={testPanelOpen && isChatRoute ? "contents" : "hidden"}>
+                        <InlineTestingPanel />
+                      </div>
+                    )}
                   </main>
                 </div>
-                {isChatDetailRoute && <PanelZone />}
+                {/* Hide all side panels while the test workbench is open — it's a
+                    full-content takeover. PanelZone is a sibling of <main> (which
+                    holds the workbench overlay), so without this the file/git/etc.
+                    panel would stay visible to the right of the overlay. Panel
+                    open-state is preserved (only the render is gated), so closing
+                    the workbench restores the previous layout. */}
+                {isChatDetailRoute && !testPanelOpen && <PanelZone />}
               </div>
             </div>
           </div>

@@ -131,6 +131,19 @@ contextBridge.exposeInMainWorld('electronAPI', {
     disable: () => ipcRenderer.invoke('gsd:disable'),
     uninstall: () => ipcRenderer.invoke('gsd:uninstall'),
   },
+  // Vendor-bundled AI_LabTest plugin (qitianersheng/ai-lab-test-agent, MIT).
+  // Installer in electron/ailab-installer.ts. Default-disabled on first launch;
+  // enabling mirrors ai-lab-test:* commands + the test-workflow skill. The
+  // Playwright MCP is registered separately by the renderer card via the
+  // /api/plugins/mcp HTTP API. See docs/handover/ailab-plugin.md.
+  ailab: {
+    getStatus: () => ipcRenderer.invoke('ailab:status'),
+    install: () => ipcRenderer.invoke('ailab:install'),
+    resync: () => ipcRenderer.invoke('ailab:resync'),
+    enable: () => ipcRenderer.invoke('ailab:enable'),
+    disable: () => ipcRenderer.invoke('ailab:disable'),
+    uninstall: () => ipcRenderer.invoke('ailab:uninstall'),
+  },
   // Managed-account login system. Strictly isolated from the OpenAI OAuth
   // module — different IPC channels, different storage, different callback
   // port. Never read or surface a session token to the renderer.
@@ -166,5 +179,44 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // App-level controls. quit() backs the forced-upgrade "退出应用" button.
   app: {
     quit: () => ipcRenderer.invoke('app:quit'),
+  },
+  // Test Accounts — 获取登录态 capture. Opens an isolated window (BaseWindow +
+  // toolbar/site WebContentsView) and harvests cookies + localStorage into a
+  // Playwright storageState file. The in-window toolbar finishes/cancels via the
+  // toolbar* methods; the settings page listens for onDone/onCancelled. Electron-only.
+  testAuthCapture: {
+    start: (params: {
+      frontendBaseUrl: string;
+      username?: string;
+      password?: string;
+      projectRoot: string;
+      env: string;
+      accountKey: string;
+      systemLabel?: string;
+    }) => ipcRenderer.invoke('test-auth-capture:start', params),
+    cancel: () => ipcRenderer.invoke('test-auth-capture:cancel'),
+    status: (params: { projectRoot: string; env: string; accountKey: string }) =>
+      ipcRenderer.invoke('test-auth-capture:status', params),
+    clear: (params: { projectRoot: string; env: string; accountKey: string }) =>
+      ipcRenderer.invoke('test-auth-capture:clear', params),
+    // 工具条内部用（toolbar.js）：就地完成 / 取消当前抓取会话。
+    toolbarFinish: () => ipcRenderer.invoke('test-auth-capture:toolbar-finish'),
+    toolbarCancel: () => ipcRenderer.invoke('test-auth-capture:toolbar-cancel'),
+    onToolbarInit: (callback: (data: unknown) => void) => {
+      const listener = (_event: unknown, data: unknown) => callback(data);
+      ipcRenderer.on('test-auth-capture:toolbar-init', listener);
+      return () => { ipcRenderer.removeListener('test-auth-capture:toolbar-init', listener); };
+    },
+    // 设置页订阅：抓取写盘完成 / 用户取消（含关窗）。
+    onDone: (callback: (data: unknown) => void) => {
+      const listener = (_event: unknown, data: unknown) => callback(data);
+      ipcRenderer.on('test-auth-capture:done', listener);
+      return () => { ipcRenderer.removeListener('test-auth-capture:done', listener); };
+    },
+    onCancelled: (callback: (data: unknown) => void) => {
+      const listener = (_event: unknown, data: unknown) => callback(data);
+      ipcRenderer.on('test-auth-capture:cancelled', listener);
+      return () => { ipcRenderer.removeListener('test-auth-capture:cancelled', listener); };
+    },
   },
 });

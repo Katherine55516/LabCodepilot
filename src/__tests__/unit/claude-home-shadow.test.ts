@@ -300,6 +300,148 @@ describe('createShadowClaudeHome — provider-group ownership of credentials', (
         'when ~/.claude.json absent, shadow must NOT fabricate one — SDK should see the same "no file" state as real HOME');
     } finally { shadow.cleanup(); }
   });
+
+  // Scenario 7 series: persistent cache dir mirroring (MCP browser/model downloads).
+  // Without these, Playwright MCP downloads chrome-for-testing every request,
+  // loses it at cleanup, and the next browser_navigate call fails with
+  // "Browser X is not installed". See the file header for the full failure chain.
+  it('Scenario 7a (darwin): ~/Library/Caches/ is symlinked into shadow root', async (t) => {
+    if (process.platform !== 'darwin') {
+      t.skip('darwin-only path layout');
+      return;
+    }
+    // Pre-create the real cache dir with a sentinel file
+    const realCaches = path.join(tempHome, 'Library', 'Caches');
+    fs.mkdirSync(realCaches, { recursive: true });
+    fs.writeFileSync(path.join(realCaches, 'sentinel.txt'), 'real-content');
+
+    writeRealClaudeDir({ settings: { env: { ANTHROPIC_AUTH_TOKEN: 'sk-leak' } } });
+    const { createShadowClaudeHome } = await loadModule();
+    const shadow = createShadowClaudeHome({ stripAuth: true });
+    try {
+      assert.equal(shadow.isShadow, true);
+
+      // The shadow root should have Library/Caches reachable via symlink
+      const shadowCaches = path.join(shadow.home, 'Library', 'Caches');
+      assert.ok(fs.existsSync(shadowCaches),
+        'shadow Library/Caches must exist (via symlink) so MCP downloads land in real cache');
+
+      // The sentinel from real cache must be readable through the shadow path
+      const sentinel = fs.readFileSync(path.join(shadowCaches, 'sentinel.txt'), 'utf-8');
+      assert.equal(sentinel, 'real-content',
+        'reading through shadow path must show real cache contents');
+
+      // Writes through the shadow path must land in real cache
+      fs.writeFileSync(path.join(shadowCaches, 'new-from-shadow.txt'), 'written-via-shadow');
+      const fromReal = fs.readFileSync(path.join(realCaches, 'new-from-shadow.txt'), 'utf-8');
+      assert.equal(fromReal, 'written-via-shadow',
+        'writes through shadow path must persist to real cache (this is the whole point of the symlink)');
+
+      // Verify it's actually a symlink, not a copy
+      const stat = fs.lstatSync(shadowCaches);
+      assert.ok(stat.isSymbolicLink(),
+        'shadow Library/Caches must be a symlink (not a copy) — otherwise writes don\'t reach real cache');
+    } finally { shadow.cleanup(); }
+  });
+
+  it('Scenario 7b (darwin, CRITICAL): cleanup does NOT delete real ~/Library/Caches contents', async (t) => {
+    if (process.platform !== 'darwin') {
+      t.skip('darwin-only path layout');
+      return;
+    }
+    // Set up real cache with a file that MUST survive cleanup
+    const realCaches = path.join(tempHome, 'Library', 'Caches');
+    fs.mkdirSync(realCaches, { recursive: true });
+    const survivor = path.join(realCaches, 'must-survive.txt');
+    fs.writeFileSync(survivor, 'real-data-that-must-not-be-deleted');
+
+    writeRealClaudeDir({ settings: { env: { ANTHROPIC_AUTH_TOKEN: 'sk-leak' } } });
+    const { createShadowClaudeHome } = await loadModule();
+    const shadow = createShadowClaudeHome({ stripAuth: true });
+    assert.equal(shadow.isShadow, true);
+    const shadowRoot = shadow.home;
+
+    // Write something through the shadow symlink (simulates MCP browser install)
+    fs.writeFileSync(path.join(shadowRoot, 'Library', 'Caches', 'from-mcp.txt'), 'browser-binary-proxy');
+
+    // CRITICAL: cleanup must remove only the shadow root, NOT follow symlinks
+    shadow.cleanup();
+    assert.ok(!fs.existsSync(shadowRoot), 'shadow root removed');
+
+    // The sentinel in real cache MUST survive
+    assert.ok(fs.existsSync(survivor),
+      'cleanup() recursive remove must NOT follow the symlink and destroy real ~/Library/Caches/. ' +
+      'If this fails, the entire user cache is being wiped each request — catastrophic data loss.');
+    const surviving = fs.readFileSync(survivor, 'utf-8');
+    assert.equal(surviving, 'real-data-that-must-not-be-deleted',
+      'survivor content unchanged');
+
+    // The file written through shadow must ALSO survive (it's in real cache now)
+    const writtenViaShadow = path.join(realCaches, 'from-mcp.txt');
+    assert.ok(fs.existsSync(writtenViaShadow),
+      'writes through shadow symlink must persist in real cache after cleanup ' +
+      '(this is the whole point — MCP browser binaries must outlive the request)');
+  });
+
+  it('Scenario 7c (linux): ~/.cache/ is symlinked into shadow root', async (t) => {
+    if (process.platform !== 'linux') {
+      t.skip('linux-only path layout');
+      return;
+    }
+    const realCache = path.join(tempHome, '.cache');
+    fs.mkdirSync(realCache, { recursive: true });
+    fs.writeFileSync(path.join(realCache, 'sentinel.txt'), 'real-content');
+
+    writeRealClaudeDir({ settings: { env: { ANTHROPIC_AUTH_TOKEN: 'sk-leak' } } });
+    const { createShadowClaudeHome } = await loadModule();
+    const shadow = createShadowClaudeHome({ stripAuth: true });
+    try {
+      assert.equal(shadow.isShadow, true);
+      const shadowCache = path.join(shadow.home, '.cache');
+      assert.ok(fs.existsSync(shadowCache), 'shadow .cache must exist via symlink');
+      assert.equal(fs.readFileSync(path.join(shadowCache, 'sentinel.txt'), 'utf-8'), 'real-content');
+      assert.ok(fs.lstatSync(shadowCache).isSymbolicLink(), 'shadow .cache must be a symlink');
+    } finally { shadow.cleanup(); }
+  });
+
+  it('Scenario 7e (darwin/linux): ~/.npm is symlinked so npx-launched MCP servers reuse the warm cache', async (t) => {
+    // Regression: a project .mcp.json using `npx -y @playwright/mcp@latest`
+    // re-downloads into $HOME/.npm under a cold shadow and exceeds the 30s MCP
+    // connection timeout. Mirroring ~/.npm makes npx hit the real warm cache.
+    if (process.platform === 'win32') {
+      t.skip('npm cache lives under AppData on win32, already covered by AppData/Local');
+      return;
+    }
+    const realNpm = path.join(tempHome, '.npm');
+    fs.mkdirSync(realNpm, { recursive: true });
+    fs.writeFileSync(path.join(realNpm, 'sentinel.txt'), 'real-npx-cache');
+
+    writeRealClaudeDir({ settings: { env: { ANTHROPIC_AUTH_TOKEN: 'sk-leak' } } });
+    const { createShadowClaudeHome } = await loadModule();
+    const shadow = createShadowClaudeHome({ stripAuth: true });
+    try {
+      assert.equal(shadow.isShadow, true);
+      const shadowNpm = path.join(shadow.home, '.npm');
+      assert.ok(fs.existsSync(shadowNpm), 'shadow .npm must exist via symlink so npx reuses the warm cache');
+      assert.ok(fs.lstatSync(shadowNpm).isSymbolicLink(), 'shadow .npm must be a symlink (not a copy)');
+      assert.equal(fs.readFileSync(path.join(shadowNpm, 'sentinel.txt'), 'utf-8'), 'real-npx-cache');
+    } finally { shadow.cleanup(); }
+  });
+
+  it('Scenario 7d: missing persist dir is silently skipped (no error)', async () => {
+    // Don't pre-create Library/Caches — should just skip, not crash
+    writeRealClaudeDir({ settings: { env: { ANTHROPIC_AUTH_TOKEN: 'sk-leak' } } });
+    const { createShadowClaudeHome } = await loadModule();
+    const shadow = createShadowClaudeHome({ stripAuth: true });
+    try {
+      assert.equal(shadow.isShadow, true, 'shadow still built even if persist dirs are missing');
+      // No symlinks should exist for missing dirs
+      if (process.platform === 'darwin') {
+        assert.ok(!fs.existsSync(path.join(shadow.home, 'Library', 'Caches')),
+          'no symlink created for non-existent real dir');
+      }
+    } finally { shadow.cleanup(); }
+  });
 });
 
 describe('settingsJsonHasAuthOverride — quick predicate', () => {
