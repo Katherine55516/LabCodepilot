@@ -8,6 +8,7 @@
 
 | 文件 | 主题 |
 |------|------|
+| requirement-import-modes.md | 导入需求保留原文 + 需求分析节点二选一（生成 md / 直接用原文）：三文件模型（原始件 / docx 抽取文本 / AI 归一 md）、待选择闸门、批量停下等选、docx 必经抽取、需求来源路径穿透、向后兼容 |
 | updates-v2.md | 自动更新（研发平台 V2）：主进程自定义更新器（检查/CDN 下载/sha256 校验/win+mac 安装）复用登录 getBackendBase+apiRequest+token、三层避免重下+pending、强制升级阻断、kill-switch 回滚、退役旧 GitHub 检查 |
 | agent-tooling-todo-bridge.md | SDK → SSE → DB 事件流、TodoWrite 字段映射、去重策略 |
 | bridge-system.md | 多 IM 远程桥接系统架构（目录结构、数据流、设计决策） |

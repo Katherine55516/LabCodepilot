@@ -47,6 +47,24 @@ export function artifactPaths(taskName: string, env: string = 'local') {
   };
 }
 
+/**
+ * 导入需求「保留原始文档」的落点（相对项目根）：原样保存用户上传件，按原扩展名存，
+ * 永不被 AI 需求分析覆盖（那个产物走 artifactPaths().requirement = {任务}-需求.md）。
+ */
+export function requirementOriginalPath(taskName: string, ext: string): string {
+  const safeExt = (ext || 'txt').replace(/[^a-z0-9]/gi, '').toLowerCase() || 'txt';
+  return `AI_LabTest/requirements/${taskName}-需求-原始.${safeExt}`;
+}
+
+/**
+ * 仅 .docx 导入时的内部工作文本（隐藏 .data 目录，不作产物展示）：Agent SDK 的 Read
+ * 工具读不了二进制 docx，故导入时用 mammoth 抽一份纯文本供 AI 读；原始 .docx 仍保留。
+ * .md/.txt 导入无需此文件（原文本身即可 Read）。
+ */
+export function requirementImportedTextPath(taskName: string): string {
+  return `AI_LabTest/requirements/.data/${taskName}-导入原文.txt`;
+}
+
 // ── 角色 system prompts（逐字搬自框架引擎 V0.3）────────────────────────────
 const SYS: Record<TestStep, string> = {
   // requirements.js:12
@@ -77,8 +95,15 @@ function ruleBlock(title: string, content: string | null, fallback: string): str
     : `（未找到《${title}》规范文件，按内置精简执行：${fallback}）`;
 }
 
-function requirementPrompt(taskName: string, reuseImported = false): string {
+function requirementPrompt(
+  taskName: string,
+  opts: { reuseImported?: boolean; sourcePath?: string } = {},
+): string {
   const p = artifactPaths(taskName);
+  const reuseImported = opts.reuseImported ?? false;
+  // 权威原文的 Read 落点：导入需求(生成 md 模式)时指向「保留的原始文档/抽取文本」，
+  // 缺省(旧任务/无导入)回退到 需求.md 本身(与旧行为一致：读它、归一后覆盖它)。
+  const sourcePath = opts.sourcePath || p.requirement;
   const rule = ruleBlock(
     '需求发现规范',
     loadRule('requirement-discovery'),
@@ -95,9 +120,10 @@ function requirementPrompt(taskName: string, reuseImported = false): string {
     loadRule('requirement-completeness'),
     '每条需求覆盖 正常/空/无效/边界/错误反馈/状态恢复 六路径；涉及鉴权/数据生命周期再加对应维度'
   );
-  // 新建任务时用户上传了需求文档，已写入产物路径 → 让本步以它为权威来源，绝不覆盖。
+  // 新建任务时用户上传了需求文档，原文已保留 → 让本步以它为权威来源，只读不覆盖；
+  // 结构化归一结果写到分离的产物 需求.md（sourcePath 与 p.requirement 不同一文件时，原文安全保留）。
   const importedBlock = reuseImported
-    ? `\n\n⚠️⚠️ 用户已上传需求文档，并已写入 \`${p.requirement}\`。请**第一步就 Read 该文件**，把它当作**权威需求来源（等同 PROJECT_DOC，标注来源为 USER_UPLOAD）**：在其内容基础上做结构化归一与补全（确有缺失再从代码反推补全并标 REVERSE_ENGINEERED），**严禁忽略它、也严禁从零生成覆盖用户上传的内容**。下面的「项目内扫描」此时仅作补充。最终仍只 Write 回 \`${p.requirement}\`。`
+    ? `\n\n⚠️⚠️ 用户已上传需求文档，原文已保留在 \`${sourcePath}\`。请**第一步就 Read 该文件**，把它当作**权威需求来源（等同 PROJECT_DOC，标注来源为 USER_UPLOAD）**：在其内容基础上做结构化归一与补全（确有缺失再从代码反推补全并标 REVERSE_ENGINEERED），**严禁忽略它、也严禁从零生成覆盖用户上传的内容**。下面的「项目内扫描」此时仅作补充。⚠️ **原文 \`${sourcePath}\` 是只读输入，绝不写入/覆盖它**；把结构化归一后的需求清单 Write 到产物文件 \`${p.requirement}\`。`
     : '';
   return `请对以下测试任务做「需求分析」，产出可评审的需求清单。
 
@@ -139,8 +165,15 @@ ${completenessRule}
 完成后用一句话总结：识别了多少条需求、来源分布（PROJECT_DOC / REVERSE_ENGINEERED 各几条），以及自审修订了哪些点（澄清/补全/拆分/补缺各几处）。`;
 }
 
-function casesPrompt(taskName: string, reuseImported = false): string {
+function casesPrompt(
+  taskName: string,
+  opts: { reuseImported?: boolean; requirementSourcePath?: string } = {},
+): string {
   const p = artifactPaths(taskName);
+  const reuseImported = opts.reuseImported ?? false;
+  // 需求来源文件：缺省 需求.md（AI 归一产物）；「直接使用导入文档」模式下指向保留的原文/抽取文本。
+  const reqSource = opts.requirementSourcePath || p.requirement;
+  const usingRawSource = !!opts.requirementSourcePath && opts.requirementSourcePath !== p.requirement;
   const rule = ruleBlock(
     '测试用例完整性规范',
     loadRule('test-case-completeness'),
@@ -150,15 +183,19 @@ function casesPrompt(taskName: string, reuseImported = false): string {
   const importedBlock = reuseImported
     ? `\n\n⚠️⚠️ 用户已上传测试用例，并已写入 \`${p.cases}\`。请**第一步就 Read 该文件**复用其中的用例，仅做规范化与必要补全（字段缺失、格式不合规、断言不具体时修正），**严禁忽略或从零生成覆盖用户上传的用例**。最终仍只 Write 回 \`${p.cases}\`。`
     : '';
+  // 「直接使用导入文档」：需求来源是用户原始文档（未经 AI 结构化归一，通常无 REQ-ID / 无来源标注）。
+  const rawSourceNote = usingRawSource
+    ? `\n\n⚠️ 本任务**直接使用用户导入的原始需求文档**作为需求来源（未经结构化归一，可能无 REQ-ID、无来源标注、为长文本）：生成用例时**为每条需求就地编号 REQ-NNN** 以支撑 TC↔REQ 追溯与需求覆盖矩阵；来源统一按 \`USER_UPLOAD\` 处理，oracle 取「产品确认」+ \`verification:"功能验证"\`（除非原文明显只是照抄现状，才用 现状锁定 + 回归基线）。`
+    : '';
   return `请为以下测试任务设计测试用例。
 
-目标任务：${taskName}${importedBlock}
-输入产物（请先 Read）：已产出的需求清单 ${p.requirement}
+目标任务：${taskName}${importedBlock}${rawSourceNote}
+输入产物（请先 Read）：需求来源 ${reqSource}
 
 ${rule}
 
 执行：
-1. Read 需求清单 ${p.requirement}；必要时从相关代码理解页面真实结构与行为。
+1. Read 需求来源 ${reqSource}；必要时从相关代码理解页面真实结构与行为。
 2. **先建「需求 × 适用维度」覆盖矩阵，再逐格生成**（让条数由需求决定、可复现、不漏需求）：对每条需求从八类维度（正向/异常/边界/状态转换/权限/业务规则/数据一致性/用户体验）判定哪些适用，每个适用格子恰好 1 条用例；**每条需求至少 1 条，一条都不能漏**。
 3. 每条用例必含字段：ID（TC-NNN）/ 优先级（P0-P3）/ 用例类型（八类之一）/ 需求引用（REQ-ID）/ 标题（purpose）/ 前置条件 / **测试步骤 steps（操作↔预期 1:1 的数组）** / 断言级别（L1可见/L2内容/L3状态/L4行为）/ **oracle 来源 + 验证性质（见第 4 步「oracle 双轴」铁律）** / 清理（如需要）。
    - steps:[{content,expected}]：每个操作配且仅配一条预期，每条 expected **以【检查点类别】开头**（仅用：【UI检查】【业务功能检查】【数据检查】【通知检查】【异常检查】【权限检查】）。
@@ -258,6 +295,17 @@ export interface BuildStepOptions {
   extraInstruction?: string;
   /** 新建任务 imported this step's artifact (需求/用例) — Read + reuse the upload, don't regenerate. */
   reuseImported?: boolean;
+  /**
+   * 导入需求的来源模式：'generate-md' = AI 读原文归一产 需求.md（保留原始 + md 两份）；
+   * 'use-original' = 跳过 AI，用例步直接读原始文档。缺省(旧任务/无导入)按 需求.md。
+   */
+  requirementMode?: 'generate-md' | 'use-original';
+  /**
+   * 本步应读取的需求来源文件（相对项目根）：
+   *  - requirement 步(generate-md)：保留的原始文档 / docx 抽取文本（Read 它，Write 到 需求.md）；
+   *  - cases 步(use-original)：同上原始来源；cases 步(generate-md/旧任务)：留空 → 回退 需求.md。
+   */
+  requirementSourcePath?: string;
   /** 执行步：本项目/该环境是否已捕获登录态(storageState)。false → 执行 prompt 提示 AI「未配置登录态，遇登录墙判 blocked 并引导去设置·测试账号」，且非交互运行严禁向用户提问。 */
   hasLoginState?: boolean;
 }
@@ -283,9 +331,9 @@ export function buildStep(step: TestStep, opts: BuildStepOptions): BuiltStep {
   const note = opts.extraInstruction;
   switch (step) {
     case 'requirement':
-      return withNote({ systemPrompt: SYS.requirement, prompt: requirementPrompt(taskName, opts.reuseImported), needsPlaywright: false }, note);
+      return withNote({ systemPrompt: SYS.requirement, prompt: requirementPrompt(taskName, { reuseImported: opts.reuseImported, sourcePath: opts.requirementSourcePath }), needsPlaywright: false }, note);
     case 'cases':
-      return withNote({ systemPrompt: SYS.cases, prompt: casesPrompt(taskName, opts.reuseImported), needsPlaywright: false }, note);
+      return withNote({ systemPrompt: SYS.cases, prompt: casesPrompt(taskName, { reuseImported: opts.reuseImported, requirementSourcePath: opts.requirementSourcePath }), needsPlaywright: false }, note);
     case 'execution':
       return withNote({ systemPrompt: SYS.execution, prompt: executionPrompt(taskName, env, opts.baseUrl, opts.hasLoginState), needsPlaywright: true }, note);
     case 'report':

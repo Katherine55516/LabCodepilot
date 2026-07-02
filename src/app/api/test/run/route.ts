@@ -7,7 +7,7 @@ import type { MCPServerConfig } from '@/types';
 // route fails with "No agent runtime registered" (the chat route gets it via its
 // own `@/lib/runtime` import).
 import { predictNativeRuntime } from '@/lib/runtime';
-import { buildStep, buildPlaywrightMcp, willRunHeaded, artifactPaths, TEST_STEPS, type TestStep } from '@/lib/test/prompts';
+import { buildStep, buildPlaywrightMcp, willRunHeaded, artifactPaths, requirementOriginalPath, requirementImportedTextPath, TEST_STEPS, type TestStep } from '@/lib/test/prompts';
 import { probeUrlWithRetry } from '@/lib/test/probe';
 import { reduceFromText } from '@/lib/test/reduce';
 import { snapshotRunJson } from '@/lib/test/history';
@@ -207,6 +207,12 @@ export async function POST(req: Request): Promise<Response> {
       typeof body.extraInstruction === 'string' && body.extraInstruction.trim() ? body.extraInstruction : undefined;
     // 新建任务 imported this step's artifact → reuse the upload as authoritative source.
     const reuseImported: boolean = body.reuseImported === true;
+    // 导入需求的来源模式（用户在需求分析节点选择后透传）+ 保留原文的扩展名，用于定位需求来源文件。
+    const requirementMode: 'generate-md' | 'use-original' | undefined =
+      body.requirementMode === 'generate-md' || body.requirementMode === 'use-original' ? body.requirementMode : undefined;
+    const requirementOriginalExt: string | undefined =
+      typeof body.requirementOriginalExt === 'string' && body.requirementOriginalExt.trim()
+        ? body.requirementOriginalExt.trim() : undefined;
     // 执行方式(执行前确认弹窗):true=独立窗口可见运行(有头),false/缺省=后台无头运行。
     // 仅「测试执行」步注入 Playwright,故只对该步生效。
     const headed: boolean = body.headed === true;
@@ -259,7 +265,17 @@ export async function POST(req: Request): Promise<Response> {
     // 「遇登录墙判 blocked 并引导用户去设置·测试账号配置」，而非(非交互运行里)用 AskUserQuestion
     // 向用户要凭证——那会卡死(用户反馈的「询问弹不出来」缺陷)。
     const hasLoginState = !!resolved.storageStatePath;
-    const { systemPrompt, prompt, needsPlaywright } = buildStep(step, { taskName, env, baseUrl, extraInstruction, reuseImported, hasLoginState });
+    // 需求来源文件（相对项目根）：requirement 步(生成 md)读保留原文/抽取文本、写 需求.md；
+    // cases 步(直接用原文)直接读原文/抽取文本；其余(生成 md 的 cases / 旧任务无 ext)留空 → prompts 回退 需求.md。
+    let requirementSourcePath: string | undefined;
+    if (requirementOriginalExt) {
+      const origSource = requirementOriginalExt === 'docx'
+        ? requirementImportedTextPath(taskName)
+        : requirementOriginalPath(taskName, requirementOriginalExt);
+      if (step === 'requirement' && requirementMode === 'generate-md') requirementSourcePath = origSource;
+      else if (step === 'cases' && requirementMode === 'use-original') requirementSourcePath = origSource;
+    }
+    const { systemPrompt, prompt, needsPlaywright } = buildStep(step, { taskName, env, baseUrl, extraInstruction, reuseImported, requirementMode, requirementSourcePath, hasLoginState });
 
     let mcpServers: Record<string, MCPServerConfig> | undefined;
     if (needsPlaywright) {
