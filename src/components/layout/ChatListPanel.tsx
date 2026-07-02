@@ -63,6 +63,12 @@ export function ChatListPanel({ open, width, hasUpdate, readyToInstall }: ChatLi
 
   const { streamingSessionId, pendingApprovalSessionId, activeStreamingSessions, pendingApprovalSessionIds, workingDirectory, testPanelOpen, setTestPanelOpen } = usePanel();
 
+  // 工作台只在 chat 路由的覆盖层显示（见 AppShell：testPanelOpen && isChatRoute）。测试按钮的
+  // active 高亮应与「工作台是否真的可见」一致——否则点文生图/设置导航到非 chat 路由后，工作台
+  // 已隐藏、按钮却还亮着（用户报「点测试再点其他模块，测试按钮 active 没取消」）。testPanelOpen
+  // 保持不变（保活：切回 chat 工作台仍在），只是按钮高亮跟随实际可见性。
+  const isChatRoute = pathname.startsWith("/chat/") || pathname === "/chat";
+
   // "测试" entry (Routines-style sidebar button). Toggles the inline testing
   // panel via app-level PanelContext state (no transient event → no mount-timing
   // race). Toggle (not just open) because the panel no longer has its own 收起
@@ -711,13 +717,13 @@ export function ChatListPanel({ open, width, hasUpdate, readyToInstall }: ChatLi
           variant="ghost"
           size="sm"
           className={`w-full justify-start gap-2 h-8 text-xs ${
-            testPanelOpen
+            testPanelOpen && isChatRoute
               ? "bg-accent text-accent-foreground font-medium"
               : "text-muted-foreground hover:text-foreground"
           }`}
           onClick={handleOpenTesting}
         >
-          <MagnifyingGlassCheck size={14} weight={testPanelOpen ? "fill" : "regular"} />
+          <MagnifyingGlassCheck size={14} weight={testPanelOpen && isChatRoute ? "fill" : "regular"} />
           {t('nav.test')}
         </Button>
         {/* 文生图 — text-to-image entry */}
