@@ -75,9 +75,18 @@ export function ChatListPanel({ open, width, hasUpdate, readyToInstall }: ChatLi
   // button — clicking 测试 again is the explicit way out. Navigates to /chat
   // first when opening from a non-chat route. Additive.
   const handleOpenTesting = useCallback(() => {
-    const next = !testPanelOpen;
-    setTestPanelOpen(next);
-    if (next && !pathname.startsWith("/chat")) router.push("/chat");
+    // 工作台「可见」= testPanelOpen 且在 chat 路由（工作台是 /chat 覆盖层）——与测试按钮 active
+    // 的判断保持一致。toggle 必须按【可见性】而非纯 testPanelOpen：否则在文生图/设置等非 chat
+    // 路由时 testPanelOpen 可能仍为 true（保活、只是隐藏），此刻点测试会被 toggle 成 false（先
+    // 关一次、用户看「没反应」），得点第二次才开。改为：可见→关；不可见(没开 / 在非 chat 路由)
+    // →开 + 导航回 /chat 让它显示。
+    const visible = testPanelOpen && pathname.startsWith("/chat");
+    if (visible) {
+      setTestPanelOpen(false);
+    } else {
+      setTestPanelOpen(true);
+      if (!pathname.startsWith("/chat")) router.push("/chat");
+    }
   }, [pathname, router, testPanelOpen, setTestPanelOpen]);
   const { splitSessions, isSplitActive, activeColumnId, addToSplit, removeFromSplit, setActiveColumn, isInSplit } = useSplit();
   const { t } = useTranslation();
