@@ -84,6 +84,32 @@ describe("resolveProjectEnv", () => {
     assert.equal(r.frontendBaseUrl, null);
   });
 
+  it("carries the default account's 密码 credentials for auto-login (loginAccount)", () => {
+    writeEnvFile(root, SAMPLE); // local default account user1 → username u / password p
+    const r = resolveProjectEnv(root, "local");
+    assert.ok(r.loginAccount, "loginAccount resolved");
+    assert.equal(r.loginAccount?.key, "user1");
+    assert.equal(r.loginAccount?.authType, "password");
+    assert.equal(r.loginAccount?.username, "u");
+    assert.equal(r.loginAccount?.password, "p");
+  });
+
+  it("marks a capture account authType=capture with no password creds", () => {
+    writeEnvFile(root, SAMPLE); // sit default account admin@x → authType capture
+    const r = resolveProjectEnv(root, "sit");
+    assert.equal(r.loginAccount?.authType, "capture");
+    assert.equal(r.loginAccount?.username, null);
+    assert.equal(r.loginAccount?.password, null);
+  });
+
+  it("loginAccount is null when the env has no accounts", () => {
+    writeEnvFile(root, {
+      default: "local", allowedEnvs: ["local", "sit"],
+      environments: { local: { frontendBaseUrl: "http://x", defaultAccount: "", accounts: [] }, sit: {} },
+    });
+    assert.equal(resolveProjectEnv(root, "local").loginAccount, null);
+  });
+
   it("detects the captured storageState file (sanitized account key)", () => {
     writeEnvFile(root, SAMPLE);
     // sit defaultAccount "admin@x" → sanitized "admin_x"
@@ -123,5 +149,36 @@ describe("resolveFromRaw (shared core — DB fallback path)", () => {
     assert.equal(r.frontendBaseUrl, null);
     assert.equal(r.source, "none");
     assert.deepEqual(r.allowedEnvs, ["local", "sit"]);
+    assert.equal(r.loginAccount, null);
+  });
+
+  it("infers token authType by shape (token present, no password)", () => {
+    const raw = {
+      default: "local", allowedEnvs: ["local"],
+      environments: {
+        local: {
+          frontendBaseUrl: "http://x", defaultAccount: "t1",
+          accounts: [{ key: "t1", role: "r", token: "jwt" }],
+        },
+      },
+    };
+    const r = resolveFromRaw(raw, root, "local", "db");
+    assert.equal(r.loginAccount?.authType, "token");
+    assert.equal(r.loginAccount?.password, null);
+  });
+
+  it("falls back to the first account when defaultAccount is empty", () => {
+    const raw = {
+      default: "local", allowedEnvs: ["local"],
+      environments: {
+        local: {
+          frontendBaseUrl: "http://x", defaultAccount: "",
+          accounts: [{ key: "only", role: "r", username: "un", password: "pw" }],
+        },
+      },
+    };
+    const r = resolveFromRaw(raw, root, "local", "db");
+    assert.equal(r.loginAccount?.key, "only");
+    assert.equal(r.loginAccount?.username, "un");
   });
 });

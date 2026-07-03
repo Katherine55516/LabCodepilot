@@ -120,6 +120,34 @@ describe("buildStep execution — 非交互 + 登录态处理", () => {
     assert.ok(b.prompt.includes("已为本项目注入登录态"));
   });
 
+  it("injects 密码 auto-login guidance (username/password + fill instructions) when loginCredentials given", () => {
+    const b = buildStep("execution", {
+      taskName: "项目列表", env: "local",
+      loginCredentials: { username: "200001807", password: "Pass@word123" },
+    });
+    assert.ok(b.prompt.includes("200001807"), "embeds the configured username");
+    assert.ok(b.prompt.includes("Pass@word123"), "embeds the configured password");
+    assert.ok(
+      b.prompt.includes("browser_fill_form") || b.prompt.includes("browser_type"),
+      "instructs the agent to fill the login form",
+    );
+    assert.ok(b.prompt.includes("自动登录"), "frames it as auto-login, not blocked");
+    // 非交互护栏仍在：即便下发了凭据，也不许向用户提问。
+    assert.ok(b.prompt.includes("AskUserQuestion"));
+    // 密码分支不是「未配置登录态」那套 blocked 引导文案。
+    assert.equal(b.prompt.includes("未配置登录态"), false);
+  });
+
+  it("storageState wins over credentials (hasLoginState=true suppresses the 密码 block)", () => {
+    const b = buildStep("execution", {
+      taskName: "x", env: "local", hasLoginState: true,
+      loginCredentials: { username: "u", password: "p" },
+    });
+    assert.ok(b.prompt.includes("已为本项目注入登录态"));
+    // storageState 分支不渲染密码自动登录指引。
+    assert.equal(b.prompt.includes("请自动登录"), false);
+  });
+
   it("non-execution steps carry no execution login block", () => {
     const b = buildStep("requirement", { taskName: "项目列表" });
     assert.equal(b.prompt.includes("登录态处理"), false);

@@ -273,6 +273,15 @@ export async function POST(req: Request): Promise<Response> {
     // 「遇登录墙判 blocked 并引导用户去设置·测试账号配置」，而非(非交互运行里)用 AskUserQuestion
     // 向用户要凭证——那会卡死(用户反馈的「询问弹不出来」缺陷)。
     const hasLoginState = !!resolved.storageStatePath;
+    // 密码方式自动登录（问题修复：配了「密码」账号却在被测登录页无法自动填充）：本项目该环境
+    // 配的是「密码」账号(有用户名+密码)、且没有已捕获的 storageState 时，把凭据下发给执行智能体，
+    // 让它在登录页 browser_fill_form/browser_type 填入并提交(替代旧的「遇登录墙一律 blocked」)。
+    // storageState 更稳、优先：capture 抓过就走登录态注入，不再重复自动登录(hasLoginState 分支)。
+    const cred = resolved.loginAccount;
+    const loginCredentials =
+      step === 'execution' && !hasLoginState && cred?.authType === 'password' && cred.username && cred.password
+        ? { username: cred.username, password: cred.password }
+        : undefined;
     // 需求来源文件（相对项目根）：requirement 步(生成 md)读保留原文/抽取文本、写 需求.md；
     // cases 步(直接用原文)直接读原文/抽取文本；其余(生成 md 的 cases / 旧任务无 ext)留空 → prompts 回退 需求.md。
     let requirementSourcePath: string | undefined;
@@ -283,7 +292,7 @@ export async function POST(req: Request): Promise<Response> {
       if (step === 'requirement' && requirementMode === 'generate-md') requirementSourcePath = origSource;
       else if (step === 'cases' && requirementMode === 'use-original') requirementSourcePath = origSource;
     }
-    const { systemPrompt, prompt, needsPlaywright } = buildStep(step, { taskName, env, baseUrl, extraInstruction, reuseImported, requirementMode, requirementSourcePath, hasLoginState });
+    const { systemPrompt, prompt, needsPlaywright } = buildStep(step, { taskName, env, baseUrl, extraInstruction, reuseImported, requirementMode, requirementSourcePath, hasLoginState, loginCredentials });
 
     let mcpServers: Record<string, MCPServerConfig> | undefined;
     if (needsPlaywright) {

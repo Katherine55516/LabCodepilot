@@ -215,7 +215,46 @@ ${rule}
 完成后用一句话总结：生成了多少条用例、覆盖了多少需求维度、其中功能验证 / 回归基线各几条；**若全部为回归基线**，显式提示「本任务用例仅锁定现状、未验证正确性，建议补充权威需求来源（PRD / 产品确认）」。`;
 }
 
-function executionPrompt(taskName: string, env: string, baseUrl?: string, hasLoginState = false): string {
+/**
+ * 登录处理指引（执行 prompt 的🔐块）。三态，优先级 storageState > 密码凭据 > 无：
+ *  1. hasLoginState：平台已注入 storageState（capture 抓过）→ 开跑即已登录。
+ *  2. loginCredentials：配了「密码」账号且无 storageState → 下发用户名/密码，指示 AI
+ *     在登录页自动填充并提交（替代旧的「遇登录墙一律 blocked」）。
+ *  3. 都没有：既无密码账号又无 storageState → 遇登录墙判 blocked 并引导去设置。
+ * 三个分支各自保留「严禁 AskUserQuestion 向用户索取凭证/输入」的非交互护栏。
+ */
+function loginHandlingBlock(
+  hasLoginState: boolean,
+  loginCredentials?: { username: string; password: string },
+): string {
+  if (hasLoginState) {
+    return `🔐 **登录态处理**：平台已为本项目注入登录态（storageState），正常情况下开跑即已登录。若仍被**登录页 / 企业 SSO / 401** 拦住、无法建立会话：把受影响用例判 \`blocked\`、\`error\` 写明「登录态失效 / 未生效」，并在收尾总结**明确提示用户**前往「**设置 · 测试账号**」重新获取登录态后重跑；**严禁**用 \`AskUserQuestion\` 向用户索取任何输入。`;
+  }
+  if (loginCredentials) {
+    // 凭据来自「设置·测试账号」平台下发，不是向用户索取 —— 明文进 prompt，与 DB /
+    // environments.json 的明文存储模型一致（见 docs/handover/test-account-settings.md）。
+    return `🔐 **登录处理（平台已下发登录账号，请自动登录）**：本项目已在「设置 · 测试账号」配置了「密码」登录账号，以下凭据由平台下发（**非**向用户索取，可直接使用）：
+- 用户名：\`${loginCredentials.username}\`
+- 密码：\`${loginCredentials.password}\`
+当访问被测系统被**登录页**拦住、需要登录时：先用 \`browser_snapshot\` 观察登录页结构，定位「账号 / 用户名 / 域账号」输入框与「密码」输入框（按可见文案 / placeholder / label 识别，中文系统常见 placeholder 如「请输入域账号」「请输入密码」），用 \`browser_fill_form\` 或 \`browser_type\` 把上面的用户名、密码填进对应输入框，再点击「登录」按钮提交；登录成功（跳出登录页、进入系统主界面）后再继续执行用例。
+- **登录只做一次**：会话建立后其余用例复用同一登录态，不要每条用例都重新登录。
+- 若遇**图形验证码 / 短信验证码 / 企业 SSO 二次跳转 / 2FA** 等用上述凭据无法自动完成的校验 → 该用例（及后续需登录用例）判 \`blocked\`，\`error\` 写明「需人工二次校验，密码自动登录无法完成」，并在收尾总结提示用户改用「**设置 · 测试账号 → 获取登录态**」抓取登录态后重跑；
+- **严禁**用 \`AskUserQuestion\` 向用户索取账号 / 密码 / 验证码或任何输入（下发的凭据已足够；缺失信息一律判 \`blocked\` 而非提问）。`;
+  }
+  return `🔐 **登录态处理（重要，替代"向用户要账号"）**：**本项目未配置登录态**（既未配置「密码」登录账号、也未捕获 storageState），若被测系统需要登录你将无法建立会话。若访问被测系统时被**登录页 / 企业 SSO / 401** 拦住、无法建立会话：
+- **不要**手动编造账号密码登录，**更不要**用 \`AskUserQuestion\` 向用户索取凭证；
+- 把受影响的用例判 \`blocked\`，\`error\` 写明「未检测到登录态，被登录页 / SSO 拦截」；
+- 若**整个被测系统都需要登录**（首个用例即被登录页挡住）→ **立即停止、不要逐条空跑**，其余用例一并判 \`blocked\`（原因同上，未输出的由平台补全为「未执行」）；
+- 在收尾总结里**明确提示用户**：请前往「**设置 · 测试账号**」为本项目配置登录账号（密码）或获取登录态（即项目的环境配置），配置好后再重跑本步。`;
+}
+
+function executionPrompt(
+  taskName: string,
+  env: string,
+  baseUrl?: string,
+  hasLoginState = false,
+  loginCredentials?: { username: string; password: string },
+): string {
   const p = artifactPaths(taskName, env);
   const rule = ruleBlock(
     '测试执行规范',
@@ -230,13 +269,7 @@ ${baseUrl ? `被测地址：${baseUrl}（平台已在执行前完成可达性探
 
 ⚠️ **本步为非交互自动化执行（交互端无人应答）**：**严禁使用 \`AskUserQuestion\`，也严禁以任何方式向用户提问 / 等待用户输入 / 暂停等待确认**——问了永远不会有人回答，会让执行永久卡死。目标环境已由平台指定为 \`${env}\`，直接使用，**不要再反问用户选环境**。
 
-🔐 **登录态处理（重要，替代"向用户要账号"）**：${hasLoginState
-  ? '平台已为本项目注入登录态（storageState），正常情况下开跑即已登录。'
-  : '**本项目未配置登录态**（未捕获 storageState），若被测系统需要登录你将无法建立会话。'}若访问被测系统时被**登录页 / 企业 SSO / 401** 拦住、无法建立会话：
-- **不要**手动输入账号密码登录，**更不要**用 \`AskUserQuestion\` 向用户索取凭证；
-- 把受影响的用例判 \`blocked\`，\`error\` 写明「未检测到登录态，被登录页 / SSO 拦截」；
-- 若**整个被测系统都需要登录**（首个用例即被登录页挡住）→ **立即停止、不要逐条空跑**，其余用例一并判 \`blocked\`（原因同上，未输出的由平台补全为「未执行」）；
-- 在收尾总结里**明确提示用户**：请前往「**设置 · 测试账号**」为本项目配置 / 重新捕获登录态（即项目的环境配置），配置好后再重跑本步。
+${loginHandlingBlock(hasLoginState, loginCredentials)}
 
 ${rule}
 
@@ -308,6 +341,11 @@ export interface BuildStepOptions {
   requirementSourcePath?: string;
   /** 执行步：本项目/该环境是否已捕获登录态(storageState)。false → 执行 prompt 提示 AI「未配置登录态，遇登录墙判 blocked 并引导去设置·测试账号」，且非交互运行严禁向用户提问。 */
   hasLoginState?: boolean;
+  /**
+   * 执行步：本项目/该环境配的「密码」登录账号（平台下发的用户名/密码），仅在无 storageState
+   * 时用于让执行智能体在登录页自动填充并提交登录。缺省 → 不注入凭据（走 hasLoginState 分支）。
+   */
+  loginCredentials?: { username: string; password: string };
 }
 
 export interface BuiltStep {
@@ -335,7 +373,7 @@ export function buildStep(step: TestStep, opts: BuildStepOptions): BuiltStep {
     case 'cases':
       return withNote({ systemPrompt: SYS.cases, prompt: casesPrompt(taskName, { reuseImported: opts.reuseImported, requirementSourcePath: opts.requirementSourcePath }), needsPlaywright: false }, note);
     case 'execution':
-      return withNote({ systemPrompt: SYS.execution, prompt: executionPrompt(taskName, env, opts.baseUrl, opts.hasLoginState), needsPlaywright: true }, note);
+      return withNote({ systemPrompt: SYS.execution, prompt: executionPrompt(taskName, env, opts.baseUrl, opts.hasLoginState, opts.loginCredentials), needsPlaywright: true }, note);
     case 'report':
       return withNote({ systemPrompt: SYS.report, prompt: reportPrompt(taskName, env), needsPlaywright: false }, note);
   }
