@@ -2660,8 +2660,12 @@ function ReportStepPanel({
   const [defectBusy, setDefectBusy] = useState(false);
   const [handoffBusy, setHandoffBusy] = useState(false);
   const [preview, setPreview] = useState<PreviewState | null>(null);
-  // 问题4：自动缺陷生成的一次性守卫——执行有 fail 且尚无缺陷报告时自动生成一次，防重复触发。
-  const autoDefectRef = useRef(false);
+  // 缺陷报告随执行更新：自动缺陷生成守卫按【本次执行时间】记忆——同一份 run 只自动生成一次
+  // (防 effect 重复触发)，但【重新执行任务 = 新 run.json(新 time)】时允许再生成一次。配合
+  // run route 写新 run.json 时删旧缺陷报告，实现「重跑后缺陷报告随之更新：全通过→无缺陷报告、
+  // 仍有 fail→重新生成」(修用户反馈:重跑全通过后仍显示上次缺陷报告)。key 用 e.time(reports
+  // 返回的 run.json time)。
+  const autoDefectForTimeRef = useRef<string>("");
 
   useEffect(() => {
     if (reportStatus !== "done" || !projectPath) { setEntry(null); return; }
@@ -2674,8 +2678,8 @@ function ReportStepPanel({
         const e = list.find((x) => x.task === taskName && x.env === env) ?? null;
         setEntry(e);
         // 问题4：执行有缺陷(fail>0)且尚未生成缺陷报告 → 自动生成一次（用户无需手点）。
-        if (e && (e.counts?.fail ?? 0) > 0 && !e.defectMarkdown && !autoDefectRef.current) {
-          autoDefectRef.current = true;
+        if (e && (e.counts?.fail ?? 0) > 0 && !e.defectMarkdown && autoDefectForTimeRef.current !== e.time) {
+          autoDefectForTimeRef.current = e.time;
           void defectGen();
         }
       })

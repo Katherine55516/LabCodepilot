@@ -98,6 +98,14 @@ export function wrapExecutionStream(
             const reportTaskDir = path.dirname(runAbs);
             await fs.promises.mkdir(reportTaskDir, { recursive: true });
             await fs.promises.writeFile(runAbs, runContent, 'utf-8');
+            // 缺陷报告是【上一次执行】的产物（仅在有 fail 时条件生成、非每次覆盖）。本次重新
+            // 执行已写新 run.json，旧缺陷报告随即作废：删掉它，否则会出现「本次全部通过/缺陷
+            // 已修，却仍显示上一次的缺陷报告」（用户反馈的 bug）。本次若仍有 fail，前端 ReportView
+            // 会按新 run.json 重新自动生成缺陷报告(见 autoDefectForTimeRef)。单文件删除、非批量，
+            // 不触发 EDR 反勒索。best-effort，无旧文件则忽略。
+            try {
+              await fs.promises.unlink(path.join(reportTaskDir, `${opts.taskName}-${opts.env}-缺陷报告.md`));
+            } catch { /* 无旧缺陷报告则忽略 */ }
             // 历史快照（报告多版本对比的数据基础）：除覆盖式 latest 外，再存一份带
             // 时间戳的副本到 .history/（SHA-1 去重，与上一份相同则跳过）。best-effort。
             snapshotRunJson({ reportTaskDir, taskName: opts.taskName, env: opts.env, content: runContent });
