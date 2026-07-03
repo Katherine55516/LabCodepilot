@@ -3024,7 +3024,7 @@ function PreviewModal({ t, preview, projectPath, taskName, env, onClose, onSaved
 }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
-      <div className="flex max-h-[85vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-border bg-card" onClick={(e) => e.stopPropagation()}>
+      <div className={`flex max-h-[85vh] w-full flex-col overflow-hidden rounded-xl border border-border bg-card ${preview.kind === "xlsx" ? "max-w-[1040px]" : "max-w-3xl"}`} onClick={(e) => e.stopPropagation()}>
         {preview.kind === "md" ? (
           <MdPreview t={t} preview={preview} projectPath={projectPath} onClose={onClose} onSaved={onSaved} setEditable={setEditable} />
         ) : (
@@ -3101,6 +3101,13 @@ function MdPreview({ t, preview, projectPath, onClose, onSaved, setEditable }: {
 
 // xlsx 产物预览：调 /api/test/report-xlsx 解析为表格；证据单元格（.png/.webm 等）渲染成
 // 可点开的 chip → 截图灯箱 / 录像内联播放（经 /api/test/media，与 ReportView 同口径）。
+// 执行矩阵预览的列宽/换行规则（列头来自 report-xlsx 的 HEADER）。长文本列换行、短列紧凑。
+const XLSX_WRAP_COLS = new Set(["标题", "期望结果", "实际结果"]);
+const XLSX_COL_PCT: Record<string, string> = {
+  "序号": "4%", "用例ID": "6.5%", "标题": "13%",
+  "期望结果": "30.5%", "实际结果": "30.5%", "状态": "6.5%", "证据": "9%",
+};
+
 function XlsxPreview({ t, projectPath, taskName, env, onClose }: {
   t: T;
   projectPath: string;
@@ -3167,7 +3174,7 @@ function XlsxPreview({ t, projectPath, taskName, env, onClose }: {
         <a href={`/api/test/report-xlsx?projectPath=${encodeURIComponent(projectPath)}&taskName=${encodeURIComponent(taskName)}&env=${encodeURIComponent(env)}&download=1`} className="flex shrink-0 items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[10px] text-foreground hover:bg-muted"><DownloadSimple size={12} /> {t("test.report.exportFile")}</a>
         <button onClick={onClose} className="shrink-0 text-muted-foreground hover:text-foreground" aria-label={t("test.report.close")}><X size={14} /></button>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-scroll p-3">
+      <div className="min-h-0 flex-1 overflow-y-auto overflow-x-auto p-3">
         {err ? (
           <div className="flex items-center gap-2 text-[11px] text-status-error-foreground">
             {t("test.report.xlsxLoadFailed")}
@@ -3178,29 +3185,30 @@ function XlsxPreview({ t, projectPath, taskName, env, onClose }: {
         ) : !sheet || sheet.rows.length === 0 ? (
           <p className="text-[11px] text-muted-foreground">{t("test.report.xlsxEmpty")}</p>
         ) : (
-          <div className="w-max">
-            {/* 单层滚动：纵向 + 横向溢出都交给【外层】overflow-y-auto + overflow-x-scroll（见上），
-                横向滚动条因此常驻在弹框【可视区底部】。此前套了一层内层 overflow-x-scroll，它的高度
-                =整表全高、横向条落在表格【最底部】，用户须把 Y 轴滚到最底才看得到 X 轴滚动条 —— 故
-                去掉内层滚动，这层 div 仅用 w-max 撑到 table 宽度、不再自己横向滚。外层用 scroll 而非
-                auto 让横向条常驻（mac overlay 静止会隐藏）；此前的 -webkit-appearance:none 局部自定义
-                会让 Windows 经典滚动条塌陷，已删除、改复用 globals.css 完整 12px 滚动条样式。
-                table minWidth 1080 撑出横向溢出。 */}
-            <table className="w-full border-collapse text-[11px]" style={{ minWidth: 1080 }}>
-              <thead>
-                <tr className="bg-muted/50 text-left text-muted-foreground">
-                  {header.map((h, i) => <th key={i} className="whitespace-nowrap px-2 py-1.5 font-medium">{h}</th>)}
+          <table className="w-full table-fixed border-collapse text-[11px]">
+            {/* table-fixed + 百分比列宽（XLSX_COL_PCT，合计≈100%）：整表贴合弹窗宽度、不横向溢出。
+                长文本列（标题/期望结果/实际结果）whitespace-normal 换行、纵向堆叠；短列 nowrap 保持紧凑。
+                证据单元格内 cellNode 用 flex-wrap，多个截图/录像 chip 自动换行。列头未知时列宽回退 auto。 */}
+            <colgroup>
+              {header.map((h, i) => <col key={i} style={XLSX_COL_PCT[h] ? { width: XLSX_COL_PCT[h] } : undefined} />)}
+            </colgroup>
+            <thead>
+              <tr className="bg-muted/50 text-left text-muted-foreground">
+                {header.map((h, i) => <th key={i} className="whitespace-nowrap px-2 py-1.5 font-medium">{h}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {body.map((row, ri) => (
+                <tr key={ri} className="border-t border-border align-top">
+                  {header.map((h, ci) => (
+                    <td key={ci} className={`px-2 py-1.5 text-foreground ${XLSX_WRAP_COLS.has(h) ? "whitespace-normal [overflow-wrap:anywhere]" : "whitespace-nowrap"}`}>
+                      {cellNode(row[ci] ?? "")}
+                    </td>
+                  ))}
                 </tr>
-              </thead>
-              <tbody>
-                {body.map((row, ri) => (
-                  <tr key={ri} className="border-t border-border align-top">
-                    {header.map((_, ci) => <td key={ci} className="px-2 py-1.5 text-foreground">{cellNode(row[ci] ?? "")}</td>)}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+              ))}
+            </tbody>
+          </table>
         )}
       </div>
       {/* lightbox 用 Portal 渲染到 body —— 否则它在 PreviewModal 的 overflow-hidden +

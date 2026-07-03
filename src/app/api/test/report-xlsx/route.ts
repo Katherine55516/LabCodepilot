@@ -14,11 +14,13 @@ export const runtime = 'nodejs';
  *   - 默认：返回 { sheets: [{ name, rows: string[][] }] } 供产物预览的只读表格。
  *   - ?download=1：用 exceljs 即时生成 .xlsx 并回传（attachment），用于「导出」。
  *
- * 列：序号 / 用例ID / 标题 / 状态 / 期望 / 实际 / 结论 / 证据。
- * 标题、期望来自 cases.json（按 id join）；状态/实际/证据来自 run.json；结论 = pass→符合预期，
- * 否则取 error。安全：taskName/env 经 isUnsafeSegment 校验（它们组成路径，不能穿越）。
+ * 列：序号 / 用例ID / 标题 / 期望结果 / 实际结果 / 状态 / 证据。
+ * 标题、期望结果来自 cases.json（按 id join）；实际结果/状态/证据来自 run.json。
+ * 安全：taskName/env 经 isUnsafeSegment 校验（它们组成路径，不能穿越）。
  */
-const HEADER = ['序号', '用例ID', '标题', '状态', '期望', '实际', '结论', '证据'];
+const HEADER = ['序号', '用例ID', '标题', '期望结果', '实际结果', '状态', '证据'];
+// 下载 xlsx 的列宽（字符数，与 HEADER 对齐）：长文本列（期望结果/实际结果）加宽。
+const COL_WIDTHS = [6, 12, 26, 48, 48, 10, 22];
 
 type RunTest = { id?: string; status?: string; actual?: string; error?: string; evidence?: string[] };
 type CaseDef = { id?: string; purpose?: string; steps?: { expected?: string }[] };
@@ -61,16 +63,14 @@ export async function GET(req: Request): Promise<Response> {
   tests.forEach((t, i) => {
     const c = t.id ? caseById.get(t.id) : undefined;
     const expected = c?.steps?.map((s) => s.expected).filter(Boolean).join('；') ?? '';
-    const status = String(t.status ?? '');
-    const conclusion = status === 'pass' ? '符合预期' : (t.error ?? '');
+    // 列序：序号 / 用例ID / 标题 / 期望结果 / 实际结果 / 状态 / 证据（状态移到实际结果之后，去掉结论列）。
     rows.push([
       String(i + 1),
       String(t.id ?? ''),
       c?.purpose ?? '',
-      status,
       expected,
       t.actual ?? '',
-      conclusion,
+      String(t.status ?? ''),
       Array.isArray(t.evidence) ? t.evidence.join(', ') : '',
     ]);
   });
@@ -84,7 +84,9 @@ export async function GET(req: Request): Promise<Response> {
   const ws = wb.addWorksheet('执行矩阵');
   ws.addRows(rows);
   ws.getRow(1).font = { bold: true };
-  ws.columns.forEach((col) => { col.width = 18; });
+  ws.columns.forEach((col, i) => { col.width = COL_WIDTHS[i] ?? 18; });
+  // 期望结果(第4列)/实际结果(第5列)在导出的 xlsx 里自动换行，避免撑成超长单行。
+  [4, 5].forEach((n) => { ws.getColumn(n).alignment = { wrapText: true, vertical: 'top' }; });
   const buf = await wb.xlsx.writeBuffer();
   return new Response(new Uint8Array(buf as ArrayBuffer), {
     headers: {
