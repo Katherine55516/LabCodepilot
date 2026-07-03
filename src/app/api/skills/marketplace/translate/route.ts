@@ -3,6 +3,7 @@ import { getProvidersBySource, getModelsForProvider } from "@/lib/db";
 import { generateTextViaSdk } from "@/lib/claude-client";
 import {
   buildTranslateSystemPrompt,
+  buildTranslateUserPrompt,
   pickFirstManagedModel,
   truncateForTranslate,
   truncationNotice,
@@ -45,13 +46,16 @@ export async function POST(req: NextRequest) {
   }
 
   const { content: clipped, truncated } = truncateForTranslate(content);
+  // Sandwich structure — task framing brackets the untrusted document in the
+  // user turn (system prompt alone loses to instruction-shaped READMEs).
+  const userPrompt = buildTranslateUserPrompt(clipped, targetLocale)!;
 
   try {
     const translated = await generateTextViaSdk({
       providerId: pick.providerId,
       model: pick.model,
       system,
-      prompt: clipped,
+      prompt: userPrompt,
     });
     const final = truncated
       ? `${translated}\n\n${truncationNotice(targetLocale)}`
