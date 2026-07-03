@@ -2842,33 +2842,73 @@ function ReportStepPanel({
     </div>
   );
 
-  const fileRow = (icon: ReactNode, label: string, sub: string, action: ReactNode) => (
-    <div className="flex items-center gap-2 rounded-lg border border-border bg-background px-2.5 py-1.5">
-      {icon}
-      <span className="shrink-0 text-[11px] text-foreground">{label}</span>
-      <span className="truncate font-mono text-[10px] text-muted-foreground">{sub}</span>
-      <span className="flex-1" />
-      {action}
+  // 产出资料卡片（方案 B v3：三卡等大）——主/次按钮样式常量。
+  const btnPrimary = "inline-flex items-center gap-1 rounded-md bg-primary px-2.5 py-1 text-[11px] font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50";
+  const btnGhost = "inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-[11px] text-foreground hover:bg-muted disabled:opacity-50";
+
+  // 状态徽章：ok=绿(通过/无缺陷) · err=红(未通过/缺陷计数) · mut=灰(用例计数)。
+  const chip = (text: string, tone: "ok" | "err" | "mut") => (
+    <span className={`shrink-0 rounded-full border px-2 py-0.5 text-[10px] font-medium ${
+      tone === "ok" ? "border-status-success-border bg-status-success-muted text-status-success-foreground"
+        : tone === "err" ? "border-status-error-border bg-status-error-muted text-status-error-foreground"
+        : "border-border bg-muted text-muted-foreground"
+    }`}>{text}</span>
+  );
+
+  // 一张等大产出卡：图标块 + 名称/文件 + 信息区（flex-1 撑满使三卡等高）+ 动作区。
+  const deliverableCard = (
+    tile: ReactNode, name: ReactNode, file: string, info: ReactNode, actions: ReactNode,
+    variant?: "dim" | "alert",
+  ) => (
+    <div className={`flex min-w-0 flex-col gap-2 rounded-lg border p-3 transition ${
+      variant === "alert" ? "border-status-error-border bg-status-error-muted/40"
+        : variant === "dim" ? "border-border bg-muted/30"
+        : "border-border bg-background hover:border-primary/40"
+    }`}>
+      <div className="flex min-w-0 items-center gap-2.5">
+        {tile}
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5 text-[12.5px] font-semibold text-foreground">{name}</div>
+          <div className="truncate font-mono text-[10px] text-muted-foreground">{file}</div>
+        </div>
+      </div>
+      <div className={`min-h-0 flex-1 rounded-lg px-3 py-2 text-[11px] leading-relaxed ${
+        variant === "dim" ? "border border-dashed border-border text-muted-foreground"
+          : "border border-muted bg-muted/40 text-foreground/80"
+      }`}>{info}</div>
+      {actions && <div className="flex flex-wrap gap-1.5">{actions}</div>}
     </div>
   );
 
-  // md 产物两动作：预览（点开后才渲染 markdown）+ 点开修改（CodeMirror 编辑存回）。
-  const mdActions = (titleKey: TranslationKey, rel: string, content: string) => (
-    <div className="flex shrink-0 items-center gap-1">
-      <button
-        onClick={() => setPreview({ kind: "md", titleKey, rel, content, editable: false })}
-        className="flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[10px] text-foreground hover:bg-muted"
-      >
-        <Eye size={12} /> {t("test.report.tabPreview")}
-      </button>
-      <button
-        onClick={() => setPreview({ kind: "md", titleKey, rel, content, editable: true })}
-        className="flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[10px] text-foreground hover:bg-muted"
-      >
-        <NotePencil size={12} /> {t("test.report.openEdit")}
-      </button>
-    </div>
-  );
+  // 图标色块（区分文件类型：蓝=报告 · 绿=Excel · 红=缺陷）。
+  const tileDoc = <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary"><FileIcon size={18} /></span>;
+  const tileXls = <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-status-success-muted text-status-success"><FileArrowDown size={18} /></span>;
+  const tileBug = (dim?: boolean) => <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${dim ? "bg-muted text-muted-foreground" : "bg-status-error-muted text-status-error"}`}><WarningCircle size={18} /></span>;
+
+  // 缺陷卡「导出」：md 已在内存（entry.defectMarkdown），客户端直接下载 .md 原文件。
+  const downloadMd = (filename: string, content: string) => {
+    const blob = new Blob([content], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
+
+  // 缺陷卡信息区：取缺陷 md 的首个标题作摘要（报告 md 无固定结论行，故只对缺陷做提取）。
+  const firstDefectTitle = (md: string): string => {
+    const lines = md.split("\n").map((l) => l.trim());
+    const h2 = lines.find((l) => /^##\s+/.test(l));
+    const anyH = lines.find((l) => /^#{1,6}\s+/.test(l));
+    const line = h2 ?? anyH ?? lines.find((l) => l.length > 0) ?? "";
+    return line.replace(/^#{1,6}\s+/, "").trim();
+  };
+
+  // 结论徽章 + 摘要（按权威指标派生，稳健：报告 md 概要是四态表格、无固定结论句可提取）。
+  const passed = fail === 0;
+  const summaryText = passed
+    ? t("test.report.summaryPass", { func: funcRateStr, exec: execRate })
+    : t("test.report.summaryFail", { func: funcRateStr, fail });
 
   return (
     <div className="mt-2 space-y-3">
@@ -2897,45 +2937,59 @@ function ReportStepPanel({
         )}
       </div>
 
-      {/* 产出资料列表 */}
+      {/* 产出资料：三张等大卡片（方案 B v3：结论摘要 + 蓝底预览 + 缺陷卡三按钮） */}
       <div>
         <div className="mb-1.5 flex items-center gap-1.5">
           <FolderPlus size={13} className="text-muted-foreground" />
           <span className="text-[11px] font-medium text-foreground">{t("test.report.deliverables")}</span>
           <span className="text-[10px] text-muted-foreground">{t("test.report.deliverablesHint")}</span>
         </div>
-        <div className="space-y-1.5">
-          {fileRow(
-            <FileIcon size={14} className="shrink-0 text-muted-foreground" />,
-            t("test.step.report.name"),
+        <div className="grid grid-cols-3 gap-3">
+          {/* 卡1：测试结果总览（报告 md）——预览 / 编辑 */}
+          {deliverableCard(
+            tileDoc,
+            <>{t("test.report.resultOverview")} {chip(passed ? t("test.report.verdictPass") : t("test.report.verdictFail"), passed ? "ok" : "err")}</>,
             `${taskName}-${env}.md`,
-            entry?.markdown
-              ? mdActions("test.step.report.name", reportMdRel, entry.markdown)
-              : <span className="shrink-0 text-[10px] text-muted-foreground">{t("test.report.docEmpty")}</span>,
+            entry?.markdown ? summaryText : t("test.report.docEmpty"),
+            entry?.markdown ? (
+              <>
+                <button onClick={() => setPreview({ kind: "md", titleKey: "test.report.resultOverview", rel: reportMdRel, content: entry.markdown, editable: false })} className={btnPrimary}><Eye size={12} /> {t("test.report.tabPreview")}</button>
+                <button onClick={() => setPreview({ kind: "md", titleKey: "test.report.resultOverview", rel: reportMdRel, content: entry.markdown, editable: true })} className={btnGhost}><NotePencil size={12} /> {t("test.report.tabEdit")}</button>
+              </>
+            ) : null,
           )}
-          {/* Excel 执行矩阵：从 run.json 派生，始终可预览/导出（不依赖磁盘 .xlsx）。 */}
-          {fileRow(
-            <FileArrowDown size={14} className="shrink-0 text-muted-foreground" />,
-            t("test.report.fileXlsx"),
+          {/* 卡2：执行矩阵 Excel（从 run.json 派生，始终可预览/导出）——预览 / 导出 */}
+          {deliverableCard(
+            tileXls,
+            <>{t("test.report.fileXlsx")} {chip(t("test.report.casesChip", { n: total }), "mut")}</>,
             `${taskName}-${env}-执行矩阵.xlsx`,
-            <div className="flex shrink-0 items-center gap-1">
-              <button onClick={() => setPreview({ kind: "xlsx" })} className="flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[10px] text-foreground hover:bg-muted"><Eye size={12} /> {t("test.report.tabPreview")}</button>
-              <a href={`/api/test/report-xlsx?projectPath=${encodeURIComponent(projectPath)}&taskName=${encodeURIComponent(taskName)}&env=${encodeURIComponent(env)}&download=1`} className="flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[10px] text-foreground hover:bg-muted"><DownloadSimple size={12} /> {t("test.report.exportFile")}</a>
-            </div>,
+            t("test.report.xlsxInfo", { total, pass: counts.pass, fail }),
+            <>
+              <button onClick={() => setPreview({ kind: "xlsx" })} className={btnPrimary}><Eye size={12} /> {t("test.report.tabPreview")}</button>
+              <a href={`/api/test/report-xlsx?projectPath=${encodeURIComponent(projectPath)}&taskName=${encodeURIComponent(taskName)}&env=${encodeURIComponent(env)}&download=1`} className={btnGhost}><DownloadSimple size={12} /> {t("test.report.exportFile")}</a>
+            </>,
           )}
-          {fileRow(
-            <WarningCircle size={14} className="shrink-0 text-muted-foreground" />,
-            t("test.defect.tab"),
-            entry?.defectMarkdown ? `${taskName}-${env}-缺陷报告.md` : t("test.defect.empty"),
-            entry?.defectMarkdown
-              ? mdActions("test.defect.tab", defectMdRel, entry.defectMarkdown)
-              : (
-                // 问题4：缺陷报告改为自动生成（fetch effect 里 fail>0 时触发），不再手动按钮；
-                // 自动生成中显示「生成中」，无缺陷则显示空态文案。
-                <span className="flex shrink-0 items-center gap-1 text-[10px] text-muted-foreground">
-                  {defectBusy ? <><SpinnerGap size={12} className="animate-spin" /> {t("test.defect.generating")}</> : t("test.defect.empty")}
-                </span>
-              ),
+          {/* 卡3：缺陷报告——有缺陷→预览/导出/修复（修复复用 handoff）；否则空态卡（生成中 / 无缺陷） */}
+          {entry?.defectMarkdown ? deliverableCard(
+            tileBug(),
+            <>{t("test.defect.tab")} {chip(String(fail || 1), "err")}</>,
+            `${taskName}-${env}-缺陷报告.md`,
+            firstDefectTitle(entry.defectMarkdown) || t("test.report.defectSummary", { n: fail || 1 }),
+            <>
+              <button onClick={() => setPreview({ kind: "md", titleKey: "test.defect.tab", rel: defectMdRel, content: entry.defectMarkdown, editable: false })} className={btnPrimary}><Eye size={12} /> {t("test.report.tabPreview")}</button>
+              <button onClick={() => downloadMd(`${taskName}-${env}-缺陷报告.md`, entry.defectMarkdown)} className={btnGhost}><DownloadSimple size={12} /> {t("test.report.exportFile")}</button>
+              <button onClick={handoff} disabled={handoffBusy} className={btnGhost}><Wrench size={12} /> {t("test.report.fix")}</button>
+            </>,
+            "alert",
+          ) : deliverableCard(
+            tileBug(true),
+            <>{t("test.defect.tab")} {fail > 0 ? chip(t("test.defect.generating"), "mut") : chip(t("test.report.noDefect"), "ok")}</>,
+            t("test.report.defectNone"),
+            fail > 0
+              ? <span className="inline-flex items-center gap-1">{defectBusy && <SpinnerGap size={12} className="animate-spin" />}{t("test.report.defectGenerating")}</span>
+              : t("test.report.noDefectHint"),
+            null,
+            "dim",
           )}
         </div>
       </div>
