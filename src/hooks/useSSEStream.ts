@@ -1,5 +1,6 @@
 import { useRef, useCallback } from 'react';
 import type { SSEEvent, TokenUsage, PermissionRequestEvent, MediaBlock } from '@/types';
+import { saveCachedSdkInitMeta } from '@/lib/sdk-init-cache';
 
 interface ToolUseInfo {
   id: string;
@@ -231,6 +232,14 @@ function handleSSEEvent(
             plugins: statusData.plugins,
             mcp_servers: statusData.mcp_servers,
             output_style: statusData.output_style,
+          });
+          // Persist for the slash popover: before a session's first init,
+          // CLI-built-in commands (embedded in the claude binary, invisible
+          // to the filesystem scan) are only knowable from a previous
+          // session's init. See sdk-init-cache.ts.
+          saveCachedSdkInitMeta({
+            slash_commands: statusData.slash_commands,
+            skills: statusData.skills,
           });
         } else if (statusData.notification) {
           // Code-driven toasts (e.g. Opus 4.7 native-runtime

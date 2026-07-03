@@ -28,6 +28,7 @@
 - 单个 `slash_command` badge 且 source ∈ {project, undefined} → `expandProjectSlashCommand` 取 `GET /api/skills/<name>?cwd=`，确认 `source==='project' && kind==='slash_command'` 后用纯函数 `expandSkillBody`（剥 frontmatter + 替换 `$ARGUMENTS`，无占位符则追加用户输入）得到 prompt；`displayLabel` 仍 `/名`（气泡显示 `/命令`，agent 收正文）。
 - 失败/非项目 → 回退 `dispatchBadge`（原样 `/命令`）。
 - [useSlashCommands.ts](../../src/hooks/useSlashCommands.ts)：SDK init 白名单过滤豁免 `source==='project'`，保证项目命令在托管下仍进 popover。
+- **init 元数据缓存回退**（[sdk-init-cache.ts](../../src/lib/sdk-init-cache.ts)）：CLI 内置命令（如 `/simplify`）内嵌在 `claude` 二进制里、磁盘无文件，只能靠 SDK init 消息上报；新会话首条消息发出前没有 init，popover 会缺失这类命令。修复：init 到达时（[useSSEStream.ts](../../src/hooks/useSSEStream.ts)）把 `slash_commands`/`skills` 写入 localStorage（`codepilot:sdk-init-meta:v1`），`fetchSkills` 无 live 元数据时回退读缓存。**缓存只做增量补充，不做白名单过滤**（可能过期，不得隐藏磁盘上确实存在的命令）；live 元数据仍是唯一 truth source。
 
 发送语义对照（[ChatView.tsx](../../src/components/chat/ChatView.tsx) `sendMessage` 用 `displayOverride||content` 渲染气泡）：用户看 `/命令`，模型收展开正文。
 
