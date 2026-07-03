@@ -1744,12 +1744,18 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
 
             // Rebuild minimal query options from closure variables
             // (queryOptions is scoped to the try block and not accessible here)
+            // NOTE: this path bypasses prepareSdkSubprocessEnv(), so replicate
+            // its NODE_ENV strip here — otherwise the host Next-server
+            // production NODE_ENV leaks into the retry subprocess and its Bash
+            // tool (see sdk-subprocess-env.ts for the full rationale).
+            const retryEnv = { ...process.env as Record<string, string> };
+            delete retryEnv.NODE_ENV;
             const retryOptions: Options = {
               cwd: options.workingDirectory || os.homedir(),
               abortController,
               permissionMode: 'bypassPermissions' as Options['permissionMode'],
               allowDangerouslySkipPermissions: true,
-              env: { ...process.env as Record<string, string> },
+              env: retryEnv,
               maxTurns: undefined,
             };
             if (model) retryOptions.model = model;
