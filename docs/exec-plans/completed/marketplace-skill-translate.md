@@ -179,6 +179,7 @@
 - `npm run test` 1829 过；`test:smoke` 6/6；console 零报错。
 - CDP 实测：README 加载中按钮置灰→加载后可点；mock 成功态验证完整状态机（译文替换/「显示原文」⇄「显示译文」/切技能复位/切回缓存命中，全程仅 1 次 API 调用）；`locale=en` 按钮不渲染（Install 正常在）；502 分支真实触发（本地 DB 有 managed 残留行但无登录态，SDK 报 Not logged in），toast「翻译失败，请重试」正确。
 - **验证前提**：本地无登录态，真实链路验证到「模型挑选 → SDK 子进程调起」为止；409 分支由单测覆盖；完整成功链路待打包登录后人工确认一次。
+- **补充（同日二次核查）**：dev 环境四条凭证路径逐一实测均不可用——managed 行密钥为 AES 加密列（主密钥 `CLAUDE_GUI_SECRET_KEY` 仅打包版 Electron 注入）、DB 无 local/BYOK 行、shell 无 ANTHROPIC key、CLI keychain OAuth 不透传给子进程（直连 query() 同报 Not logged in）。**「模型真实产出译文」只能在打包登录版验证**，属环境边界而非代码缺陷。
 
 ## 决策日志
 
