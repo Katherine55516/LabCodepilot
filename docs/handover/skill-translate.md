@@ -58,6 +58,10 @@
 - CDP 实测(本地 dev):置灰→就绪流转、mock 成功态全状态机(译文替换/来回切换/切技能复位/缓存零请求)、`locale=en` 按钮隐藏、502 分支真实触发(toast 文案正确)。
 - **验证前提**:本地 DB 有 managed 残留行但无登录态,真实链路验证到「模型挑选成功 → SDK 子进程被调起 → Not logged in 502」为止;409 分支由单测覆盖(空列表→null)。**完整成功链路需打包登录后人工点一次确认**。
 
+## 修复记录
+
+- **2026-07-03 打包实测「Reached maximum number of turns (1)」**:`generateTextViaSdk` 只设 `maxTurns:1` 但未禁工具,子进程带全套内置工具 + settingSources 加载的 MCP;tool-eager 模型(实测 qwen3.7-max)翻译长文时第一轮先调工具 → 单轮上限掐断。修复:`generateTextViaSdk`/`generateTextStreamViaSdk` 统一加 `tools: []`(禁全部内置工具)+ `strictMcpConfig: true`(不加载 settings 的 MCP)——纯文本单轮契约本就是两函数所有调用方(/btw、上下文压缩、工具描述、翻译)的本意,顺带修掉了它们的同款潜伏问题。
+
 ## 已知局限
 
 - `generateTextViaSdk` 固定 60s 超时:接近 30K 的输入可能贴边,若实测超时给它加可选 `timeoutMs`(向后兼容)。

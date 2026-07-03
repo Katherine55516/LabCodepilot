@@ -357,6 +357,14 @@ export async function generateTextViaSdk(params: {
     settingSources: resolved.settingSources as Options['settingSources'],
     systemPrompt: params.system,
     maxTurns: 1,
+    // Text-only single-turn contract: strip ALL tools. With tools available,
+    // a tool-eager model (e.g. qwen3.7-max asked to translate a long doc)
+    // spends turn 1 on a tool call and maxTurns(1) kills the run with
+    // "Reached maximum number of turns". tools:[] disables built-ins;
+    // strictMcpConfig keeps settings-file MCP servers (loaded via
+    // settingSources) out of the subprocess.
+    tools: [],
+    strictMcpConfig: true,
   };
 
   if (params.model) {
@@ -491,6 +499,9 @@ export async function* streamTextViaSdk(params: {
     systemPrompt: params.system,
     maxTurns: 1,
     includePartialMessages: true,
+    // Same text-only contract as generateTextViaSdk — see comment there.
+    tools: [],
+    strictMcpConfig: true,
   };
   if (params.model) {
     queryOptions.model = params.model;
