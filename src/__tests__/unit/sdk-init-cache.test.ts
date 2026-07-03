@@ -60,4 +60,35 @@ describe('sdk-init-cache', () => {
     saveCachedSdkInitMeta({ slash_commands: ['simplify', 'security-review'], skills: [] });
     assert.deepEqual(loadCachedSdkInitMeta()?.slash_commands, ['simplify', 'security-review']);
   });
+
+  it('keeps rich object entries when a later save has only bare names', () => {
+    // warmup (/api/sdk-commands) writes objects with descriptions...
+    saveCachedSdkInitMeta({
+      slash_commands: [{ name: 'simplify', description: 'Review changed code' }],
+      skills: [],
+    });
+    // ...then a live init reports the same command as a bare string
+    saveCachedSdkInitMeta({ slash_commands: ['simplify', 'compact'], skills: [] });
+    assert.deepEqual(loadCachedSdkInitMeta()?.slash_commands, [
+      { name: 'simplify', description: 'Review changed code' },
+      'compact',
+    ]);
+  });
+
+  it('drops object entries absent from a later save (stale command removed)', () => {
+    saveCachedSdkInitMeta({
+      slash_commands: [{ name: 'gone-cmd', description: 'removed upstream' }],
+      skills: [],
+    });
+    saveCachedSdkInitMeta({ slash_commands: ['simplify'], skills: [] });
+    assert.deepEqual(loadCachedSdkInitMeta()?.slash_commands, ['simplify']);
+  });
+
+  it('preserves skills when a commands-only save arrives (per-field merge)', () => {
+    saveCachedSdkInitMeta({ slash_commands: [], skills: [{ name: 'pdf' }] });
+    saveCachedSdkInitMeta({ slash_commands: ['simplify'] });
+    const loaded = loadCachedSdkInitMeta();
+    assert.deepEqual(loaded?.slash_commands, ['simplify']);
+    assert.deepEqual(loaded?.skills, [{ name: 'pdf' }]);
+  });
 });

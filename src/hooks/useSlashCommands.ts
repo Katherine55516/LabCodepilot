@@ -142,6 +142,18 @@ export function useSlashCommands(opts: {
       const sdkCommandNames = new Set(
         Array.isArray(rawCmds) ? rawCmds.map(c => typeof c === 'string' ? c : (c as { name?: string })?.name).filter(Boolean) as string[] : []
       );
+      // Real descriptions when the entry is an object (/api/sdk-commands
+      // warmup shape); init messages carry bare names and get the generic
+      // "SDK command: /x" fallback below.
+      const sdkCommandDescriptions = new Map<string, string>();
+      if (Array.isArray(rawCmds)) {
+        for (const c of rawCmds) {
+          const entry = c as { name?: string; description?: string };
+          if (typeof c === 'object' && c && entry.name && entry.description) {
+            sdkCommandDescriptions.set(entry.name, entry.description);
+          }
+        }
+      }
       const sdkSkillNames = new Set(
         Array.isArray(rawSkills) ? rawSkills.map(s => typeof s === 'string' ? s : (s as { name?: string })?.name).filter(Boolean) as string[] : []
       );
@@ -172,7 +184,7 @@ export function useSlashCommands(opts: {
           apiSkills.push({
             label: cmdName,
             value: `/${cmdName}`,
-            description: `SDK command: /${cmdName}`,
+            description: sdkCommandDescriptions.get(cmdName) || `SDK command: /${cmdName}`,
             builtIn: false,
             source: 'sdk',
             kind: 'sdk_command',

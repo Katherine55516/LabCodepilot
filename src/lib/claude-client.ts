@@ -400,6 +400,57 @@ export async function generateTextViaSdk(params: {
 }
 
 /**
+ * Enumerate the CLI's supported slash commands WITHOUT running a turn.
+ *
+ * Streaming-input mode with a never-yielding iterable keeps the subprocess
+ * idle; supportedCommands() is a control-channel request the CLI answers
+ * locally — no model call, no tokens, no API key validation (~500ms cold).
+ *
+ * Why: CLI built-ins like /simplify are embedded in the claude binary and
+ * invisible to the /api/skills filesystem scan; without this, they're only
+ * knowable from a live session's init message (i.e. after the first message
+ * of a conversation). Used by /api/sdk-commands to prewarm the slash popover
+ * cache at app startup. Same provider/env isolation as generateTextViaSdk.
+ */
+export async function enumerateSdkSlashCommands(params?: {
+  providerId?: string;
+}): Promise<Array<{ name: string; description: string; argumentHint?: string }>> {
+  const resolved = resolveForClaudeCode(undefined, { providerId: params?.providerId });
+  const setup = prepareSdkSubprocessEnv(resolved);
+
+  const abortController = new AbortController();
+  const timeoutId = setTimeout(() => abortController.abort(), 15_000);
+
+  // Never yields: keeps stdin open until we abort after reading the list.
+  async function* noMessages(): AsyncGenerator<never> {
+    await new Promise<never>(() => {});
+  }
+
+  try {
+    const conversation = query({
+      prompt: noMessages() as AsyncIterable<SDKUserMessage>,
+      options: {
+        cwd: os.homedir(),
+        abortController,
+        env: sanitizeEnv(setup.env),
+        settingSources: resolved.settingSources as Options['settingSources'],
+        maxTurns: 1,
+      },
+    });
+    const commands = await conversation.supportedCommands();
+    return commands.map((c) => ({
+      name: c.name,
+      description: c.description,
+      argumentHint: c.argumentHint || undefined,
+    }));
+  } finally {
+    clearTimeout(timeoutId);
+    abortController.abort();
+    setup.shadow.cleanup();
+  }
+}
+
+/**
  * Streaming variant of generateTextViaSdk — yields assistant text deltas as they
  * arrive. Same single-turn / no-session / no-lock / SDK-subprocess path (so it
  * resolves CLI model aliases like `[1m]` identically to the main stream), but
