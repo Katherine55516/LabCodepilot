@@ -691,6 +691,12 @@ const en = {
   'skills.marketplaceHint': 'Browse the Skills Marketplace',
   'skills.marketplaceHintDesc': 'Search and install community skills from Skills.sh',
   'skills.noReadme': 'No description available for this skill',
+  'skills.aiTranslate': 'AI Translate',
+  'skills.translating': 'Translating…',
+  'skills.showOriginal': 'Show original',
+  'skills.showTranslation': 'Show translation',
+  'skills.translateFailed': 'Translation failed, please retry',
+  'skills.translateNoProvider': 'No account-delivered model available, please sign in first',
 
   // ── MCP ─────────────────────────────────────────────────────
   'mcp.addServer': 'Add Server',

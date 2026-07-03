@@ -689,6 +689,12 @@ const zh: Record<TranslationKey, string> = {
   'skills.marketplaceHint': '浏览技能市场',
   'skills.marketplaceHintDesc': '搜索并安装来自 Skills.sh 的社区技能',
   'skills.noReadme': '暂无技能描述',
+  'skills.aiTranslate': 'AI翻译简介',
+  'skills.translating': '翻译中…',
+  'skills.showOriginal': '显示原文',
+  'skills.showTranslation': '显示译文',
+  'skills.translateFailed': '翻译失败，请重试',
+  'skills.translateNoProvider': '未获取到账号下发的模型，请先登录后重试',
 
   // ── MCP ─────────────────────────────────────────────────────
   'mcp.addServer': '添加服务器',

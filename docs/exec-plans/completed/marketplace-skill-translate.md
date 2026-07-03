@@ -2,16 +2,16 @@
 
 > 创建时间：2026-07-03
 > 最后更新：2026-07-03
-> 状态：设计完成，待用户评审后开工
+> 状态：✅ 全部完成（交接文档见 [docs/handover/skill-translate.md](../../handover/skill-translate.md)）
 
 ## 状态
 
 | Phase | 内容 | 状态 | 备注 |
 |-------|------|------|------|
-| Phase 0 | 设计文档（本文） | ✅ 已完成 | 待用户评审 |
-| Phase 1 | 服务端：翻译 API + 模型挑选 + 系统提示词 | 📋 待开始 | |
-| Phase 2 | 前端：按钮 + 状态机 + i18n | 📋 待开始 | |
-| Phase 3 | 验证（unit + CDP mock）+ 收尾文档 | 📋 待开始 | |
+| Phase 0 | 设计文档（本文） | ✅ 已完成 | 用户已评审通过 |
+| Phase 1 | 服务端：翻译 API + 模型挑选 + 系统提示词 | ✅ 已完成 | skill-translate.ts 纯函数 + route；14 条单测 |
+| Phase 2 | 前端：按钮 + 状态机 + i18n | ✅ 已完成 | 含 Translate 图标导出、i18n 三语（zh-HK 手工） |
+| Phase 3 | 验证（unit + CDP mock）+ 收尾文档 | ✅ 已完成 | 1829 单测 + smoke 6/6 + CDP 全状态机；见下方验证记录 |
 
 ## 需求（用户原述归纳）
 
@@ -173,6 +173,12 @@
 - **流式翻译**（`generateTextStreamViaSdk` 已存在，可让译文逐段replace）——v1 用整段返回 + 按钮 loading，简单可靠；长文等待体验差再升级。
 - 分段翻译突破 30K 上限；译文持久缓存（sessionStorage/DB）；「我的技能」列表页描述翻译；译文顶部加「AI 翻译，可能存在误差」小标识。
 - 完成后按 CLAUDE.md 输出 handover/insights 两份文档并将本文移至 `completed/`。
+
+## 验证记录（2026-07-03，Phase 3）
+
+- `npm run test` 1829 过；`test:smoke` 6/6；console 零报错。
+- CDP 实测：README 加载中按钮置灰→加载后可点；mock 成功态验证完整状态机（译文替换/「显示原文」⇄「显示译文」/切技能复位/切回缓存命中，全程仅 1 次 API 调用）；`locale=en` 按钮不渲染（Install 正常在）；502 分支真实触发（本地 DB 有 managed 残留行但无登录态，SDK 报 Not logged in），toast「翻译失败，请重试」正确。
+- **验证前提**：本地无登录态，真实链路验证到「模型挑选 → SDK 子进程调起」为止；409 分支由单测覆盖；完整成功链路待打包登录后人工确认一次。
 
 ## 决策日志
 

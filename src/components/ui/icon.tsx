@@ -83,6 +83,7 @@ export {
   Sun,
   TelegramLogo,
   Terminal,
+  Translate,
   Trash,
   TreeStructure,
   UserCircle,
