@@ -2,18 +2,23 @@ import fs from 'fs';
 import path from 'path';
 import mammoth from 'mammoth';
 import ExcelJS from 'exceljs';
-import { artifactPaths } from '@/lib/test/prompts';
+import { artifactPaths, requirementOriginalPath, requirementImportedTextPath } from '@/lib/test/prompts';
 import { isUnsafeSegment } from '@/lib/test/path-safety';
 
 export const runtime = 'nodejs';
 
 /**
- * Save imported material for a test task into the project's AI_LabTest artifacts so
- * the flow consumes it directly (no AI generation for that step):
- *  - kind=requirement → {task}-需求.md   (用例 step reads it). Accepts .md/.txt/.markdown
- *    (raw) and .docx (Word → Markdown via mammoth).
- *  - kind=cases       → {task}.cases.json (执行/报告 read it). Accepts .json (validated)
- *    and .xlsx (Excel → cases.json via exceljs, best-effort column mapping).
+ * Save imported material for a test task into the project's AI_LabTest artifacts:
+ *  - kind=requirement → PRESERVES the raw upload at {task}-需求-原始.{ext} (byte-for-byte,
+ *    never overwritten by AI). For .docx, also extracts plain text to
+ *    requirements/.data/{task}-导入原文.txt (the Agent SDK Read tool can't parse binary
+ *    docx). .md/.txt/.markdown keep the original file as the readable source. It does NOT
+ *    write {task}-需求.md — that path is now reserved for the AI's 需求分析 product, produced
+ *    only when the user picks 生成需求分析文档 at the requirement node. Accepts .md/.txt/
+ *    .markdown/.docx. Returns { originalPath, ext, sourceTextPath?, path } where `path` is
+ *    the readable source (extracted text for docx, else the original file).
+ *  - kind=cases       → {task}.cases.json (执行/报告 read it). Accepts .json (validated),
+ *    .xlsx (exceljs) and .xls (sheetjs), best-effort column mapping.
  *
  * Body: { projectPath, taskName, kind, filename, dataBase64 } — dataBase64 is the raw
  * file; we parse by filename extension. (Legacy `content` text is still accepted.)
@@ -143,41 +148,56 @@ export async function POST(req: Request): Promise<Response> {
       return Response.json({ error: 'invalid taskName' }, { status: 400 });
     }
 
-    let out: string;
     if (kind === 'requirement') {
-      // .docx → Markdown; .doc (legacy binary) is not OOXML and can't be parsed here.
+      // 「保留原始文档」：原样保存用户上传件（字节级，按原扩展名），永不被 AI 需求分析覆盖。
+      // .doc（旧版二进制 Word）不是 OOXML，无法抽文本 → 拒绝。
       if (ext === 'doc') return Response.json({ error: '.doc（旧版二进制 Word）暂不支持，请另存为 .docx 再导入' }, { status: 400 });
-      out = ext === 'docx' ? (await mammoth.extractRawText({ buffer: buf })).value : buf.toString('utf-8');
-    } else {
-      // cases: .json 原样校验；.xlsx 走 exceljs；.xls（老二进制 BIFF）走 sheetjs。
-      if (ext === 'xlsx') {
-        out = await xlsxToCasesJson(buf);
-      } else if (ext === 'xls') {
-        const rows = await xlsToRows(buf);
-        if (rows.length < 2) throw new Error('Excel 至少需要表头行 + 一行用例');
-        out = JSON.stringify(rowsToCases(rows), null, 2);
-      } else {
-        out = buf.toString('utf-8');
-        try { JSON.parse(out); } catch { return Response.json({ error: '用例文件需为合法 JSON / .xlsx / .xls' }, { status: 400 }); }
+      // 先算可读文本（docx 用 mammoth 抽，其余原样）→ 空内容直接 400，不落任何文件（含原始件）。
+      // docx 是二进制 ZIP，Agent SDK 的 Read 工具读不了它 → 抽一份纯文本供 AI 读，原始 .docx 仍保留。
+      const text = ext === 'docx' ? (await mammoth.extractRawText({ buffer: buf })).value : buf.toString('utf-8');
+      if (!text.trim()) return Response.json({ error: '导入内容为空，未写入产物' }, { status: 400 });
+
+      const originalRel = requirementOriginalPath(taskName, ext);
+      const originalAbs = path.join(projectPath, originalRel);
+      fs.mkdirSync(path.dirname(originalAbs), { recursive: true });
+      fs.writeFileSync(originalAbs, buf); // 原始字节，不做任何转换
+
+      // .md/.txt 本身即可 Read（来源就是原文件）；仅 docx 需要额外落一份抽取文本供 AI 读。
+      let sourceTextRel: string | undefined;
+      if (ext === 'docx') {
+        sourceTextRel = requirementImportedTextPath(taskName);
+        const sourceTextAbs = path.join(projectPath, sourceTextRel);
+        fs.mkdirSync(path.dirname(sourceTextAbs), { recursive: true });
+        fs.writeFileSync(sourceTextAbs, text, 'utf-8');
       }
+      // Preview shown in the 测试对话 right after import, so the stage isn't empty.
+      const preview = text.length > 1500 ? text.slice(0, 1500) + '\n\n…（已截断，完整内容见产物文件）' : text;
+      // path = 供预览/用例读取的可读来源：docx→抽取文本，md/txt→原文件本身。
+      return Response.json({ ok: true, kind: 'requirement', path: sourceTextRel || originalRel, originalPath: originalRel, ext, sourceTextPath: sourceTextRel, preview });
     }
 
+    // cases: .json 原样校验；.xlsx 走 exceljs；.xls（老二进制 BIFF）走 sheetjs。
+    let out: string;
+    if (ext === 'xlsx') {
+      out = await xlsxToCasesJson(buf);
+    } else if (ext === 'xls') {
+      const rows = await xlsToRows(buf);
+      if (rows.length < 2) throw new Error('Excel 至少需要表头行 + 一行用例');
+      out = JSON.stringify(rowsToCases(rows), null, 2);
+    } else {
+      out = buf.toString('utf-8');
+      try { JSON.parse(out); } catch { return Response.json({ error: '用例文件需为合法 JSON / .xlsx / .xls' }, { status: 400 }); }
+    }
     // 空内容（空文件/前端 FileReader 偶发空结果）→ 不静默写空产物，明确报错。
     if (!out.trim()) {
       return Response.json({ error: '导入内容为空，未写入产物' }, { status: 400 });
     }
-    const paths = artifactPaths(taskName);
-    const rel = kind === 'requirement' ? paths.requirement : paths.cases;
+    const rel = artifactPaths(taskName).cases;
     const abs = path.join(projectPath, rel);
     fs.mkdirSync(path.dirname(abs), { recursive: true });
     fs.writeFileSync(abs, out, 'utf-8');
-    // Preview shown in the 测试对话 right after import, so the stage isn't empty.
     let preview = '';
-    if (kind === 'requirement') {
-      preview = out.length > 1500 ? out.slice(0, 1500) + '\n\n…（已截断，完整内容见产物文件）' : out;
-    } else {
-      try { preview = `已解析 ${(JSON.parse(out).cases || []).length} 条用例`; } catch { preview = '用例已导入'; }
-    }
+    try { preview = `已解析 ${(JSON.parse(out).cases || []).length} 条用例`; } catch { preview = '用例已导入'; }
     return Response.json({ ok: true, path: rel, preview });
   } catch (e) {
     return Response.json({ error: e instanceof Error ? e.message : 'import failed' }, { status: 500 });
