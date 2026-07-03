@@ -75,6 +75,25 @@ AI 测试工作台「新建任务 → 导入需求」的改造：**保留用户�
 
 需求/用例步由 Claude Agent SDK 驱动，靠内置 `Read` 工具读本地文件。`Read` 支持 text/PDF/图片，但 `.docx` 是 OOXML（二进制 ZIP）读不了——所以导入路由用 `mammoth` 抽一份文本给 AI 读，原始 `.docx` 仍字节级保留。这与聊天产品「上传 docx 能分析」不同：那是服务端文档抽取管线，不是本地 Read 工具。
 
+## 原文档预览（第二轮迭代）
+
+「预览原始文档」对 docx 不再展示 mammoth 抽取文本（抽取文本降级为纯 AI 工作输入），改为**按原版式渲染原件本身**：
+
+- 复用文件树预览体系的 `DocxViewer`（`src/components/editor/DocxViewer.tsx`，docx-preview + DOMPurify + sandbox iframe 三层 XSS 防护），`next/dynamic` 懒加载，`fileServeUrl=/api/files/raw?path={项目}/AI_LabTest/requirements/{任务}-需求-原始.docx`（raw 路由本就按 `.docx` MIME 流式返回二进制）。
+- 弹窗（Portal 到 body，防祖先 transform 困住）另配「**用系统应用打开**」按钮：`window.electronAPI.shell.openPath(原件绝对路径)` 用 Word/WPS 打开，作为 docx-preview 渲染保真度的兜底；浏览器 dev（无 electronAPI）自动隐藏。
+- md/txt 原件本身即文本，仍走原文本弹窗（读 `{任务}-需求-原始.{ext}`）。
+- 弹窗状态 `origDocPreview` 独立于 `reqPreview`，切任务同 effect 一并清空。
+
+## mammoth 打包修复（Windows docx 导入失败根因）
+
+打包版（standalone）「导入 docx 需求」失败而 dev 正常的根因：`mammoth` 被 Next bundle 进 route chunk 后，其依赖链在 NFT 追踪时收不全（xlsx 曾在 Windows 同因翻车）。修法与 `xlsx` 完全一致：
+
+1. `next.config.ts` `serverExternalPackages` 加 `'mammoth'`（不 bundle，运行时 require）；
+2. `outputFileTracingIncludes` 显式收录 mammoth 的**完整传递闭包 22 包**（脚本实测枚举：mammoth、@xmldom/xmldom、argparse、base64-js、bluebird、dingbat-to-unicode、duck、immediate、inherits、jszip、lie、lop、option、pako、path-is-absolute、readable-stream、safe-buffer、setimmediate、string_decoder、underscore、util-deprecate、xmlbuilder）；
+3. `import/route.ts` 顶部静态 `import mammoth` 改为 `docxToText()` 内动态 `import('mammoth')`——与 `.xls` 的 sheetjs 同纪律，把重解析库隔离在 docx 一条路径上，且模块加载失败不再拖挂整个导入路由。
+
+⚠️ 此修复的最终验证只能在打包产物上做（dev 无 standalone）。
+
 ## 测试
 
 - `src/__tests__/unit/test-import-route.test.ts`：md 保留为原始件、不写 需求.md、空件 400 不落盘。

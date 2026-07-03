@@ -274,6 +274,8 @@ const zh: Record<TranslationKey, string> = {
   'test.requirement.previewDoc': '预览需求文档',
   'test.requirement.previewFailed': '读取需求文档失败',
   'test.requirement.previewOriginal': '预览原始文档',
+  'test.requirement.openWithSystem': '用系统应用打开',
+  'test.requirement.openFailed': '打开文件失败',
   'test.requirement.chooseTitle': '选择需求分析方式',
   'test.requirement.chooseHint': '原始文档已保留，不会被覆盖',
   'test.requirement.genMd': '生成需求分析文档',

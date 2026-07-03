@@ -1,6 +1,5 @@
 import fs from 'fs';
 import path from 'path';
-import mammoth from 'mammoth';
 import ExcelJS from 'exceljs';
 import { artifactPaths, requirementOriginalPath, requirementImportedTextPath } from '@/lib/test/prompts';
 import { isUnsafeSegment } from '@/lib/test/path-safety';
@@ -24,6 +23,16 @@ export const runtime = 'nodejs';
  * file; we parse by filename extension. (Legacy `content` text is still accepted.)
  * Used by 新建任务 when the user imports 需求 / 用例 (see InlineTestingPanel.addTask).
  */
+
+// mammoth（docx→文本）走「函数内动态 import」，与下方 xlsToRows 的 sheetjs 同一纪律：
+// ① 把重解析库隔离在 docx 这一条路径上，导 .md/.txt 需求、导用例都不会加载它；
+// ② 避免顶部硬 import 让整个 import 路由在 standalone（NFT 可能漏收 mammoth 依赖链）
+// 模块加载阶段就失败、把所有导入一起拖挂——这正是 Windows 打包后「docx 导入失败」的
+// 根因。配合 next.config 的 serverExternalPackages + outputFileTracingIncludes 强制收录。
+async function docxToText(buf: Buffer): Promise<string> {
+  const mammoth = (await import('mammoth')).default;
+  return (await mammoth.extractRawText({ buffer: buf })).value;
+}
 
 function extOf(name: string): string {
   const m = /\.([a-z0-9]+)$/i.exec(name || '');
@@ -154,7 +163,7 @@ export async function POST(req: Request): Promise<Response> {
       if (ext === 'doc') return Response.json({ error: '.doc（旧版二进制 Word）暂不支持，请另存为 .docx 再导入' }, { status: 400 });
       // 先算可读文本（docx 用 mammoth 抽，其余原样）→ 空内容直接 400，不落任何文件（含原始件）。
       // docx 是二进制 ZIP，Agent SDK 的 Read 工具读不了它 → 抽一份纯文本供 AI 读，原始 .docx 仍保留。
-      const text = ext === 'docx' ? (await mammoth.extractRawText({ buffer: buf })).value : buf.toString('utf-8');
+      const text = ext === 'docx' ? await docxToText(buf) : buf.toString('utf-8');
       if (!text.trim()) return Response.json({ error: '导入内容为空，未写入产物' }, { status: 400 });
 
       const originalRel = requirementOriginalPath(taskName, ext);

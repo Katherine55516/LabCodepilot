@@ -282,6 +282,8 @@ const zhHK: Record<TranslationKey, string> = {
   'test.requirement.previewDoc': '預覽需求文件',
   'test.requirement.previewFailed': '讀取需求文件失敗',
   'test.requirement.previewOriginal': '預覽原始文件',
+  'test.requirement.openWithSystem': '用系統應用開啟',
+  'test.requirement.openFailed': '開啟檔案失敗',
   'test.requirement.chooseTitle': '選擇需求分析方式',
   'test.requirement.chooseHint': '原始文件已保留，不會被覆蓋',
   'test.requirement.genMd': '生成需求分析文件',

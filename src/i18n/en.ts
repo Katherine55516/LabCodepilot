@@ -276,6 +276,8 @@ const en = {
   'test.requirement.previewDoc': 'Preview Requirement',
   'test.requirement.previewFailed': 'Failed to read the requirement document',
   'test.requirement.previewOriginal': 'Preview Original',
+  'test.requirement.openWithSystem': 'Open with system app',
+  'test.requirement.openFailed': 'Failed to open the file',
   'test.requirement.chooseTitle': 'Choose how to handle the requirement',
   'test.requirement.chooseHint': 'Original document kept, never overwritten',
   'test.requirement.genMd': 'Generate requirement doc',

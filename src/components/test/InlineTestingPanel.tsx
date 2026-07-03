@@ -3,6 +3,7 @@
 import { useState, useRef, useEffect, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useRouter, usePathname } from "next/navigation";
+import dynamic from "next/dynamic";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useTranslation } from "@/hooks/useTranslation";
@@ -42,6 +43,18 @@ type ModalKind = "none" | "newTask" | "runStart" | "execConfirm" | "envWarn";
 type ExecMode = "headless" | "visible";
 type T = (key: TranslationKey, params?: Record<string, string | number>) => string;
 // Backend test-step keys (match /api/test/run + src/lib/test/prompts.ts).
+// docx 原文档预览：复用文件树预览体系的 DocxViewer（docx-preview + DOMPurify + sandbox
+// iframe 三层 XSS 防护，见 src/components/editor/DocxViewer.tsx）。懒加载——只有真正点开
+// docx 原件预览才拉这个 chunk（docx-preview/jszip 体积不小），与 PreviewPanel 同模式。
+const DocxViewer = dynamic(() => import("@/components/editor/DocxViewer").then((m) => m.DocxViewer), {
+  ssr: false,
+  loading: () => (
+    <div className="flex flex-1 items-center justify-center">
+      <SpinnerGap size={20} className="animate-spin text-muted-foreground" />
+    </div>
+  ),
+});
+
 type TestStep = "requirement" | "cases" | "execution" | "report";
 // "review" = 待批准 (human gate): step ran, awaiting user approval before the next.
 type StepStatus = "idle" | "running" | "review" | "done" | "error";
@@ -982,17 +995,27 @@ export function InlineTestingPanel() {
   // 复用报告步的 PreviewModal/MdPreview 弹窗渲染（独立状态，与报告步互不影响）。
   const [reqPreview, setReqPreview] = useState<PreviewState | null>(null);
   const [reqPreviewLoading, setReqPreviewLoading] = useState(false);
-  useEffect(() => { setReqPreview(null); }, [aId]); // 切任务关掉残留的需求预览弹窗
+  // docx 原件预览弹窗（独立于 reqPreview 的文本弹窗）：DocxViewer 按原版式渲染二进制原件。
+  const [origDocPreview, setOrigDocPreview] = useState<{ abs: string; filename: string } | null>(null);
+  useEffect(() => { setReqPreview(null); setOrigDocPreview(null); }, [aId]); // 切任务关掉残留的需求预览弹窗
   const openRequirementPreview = async (which: "md" | "original" = "md") => {
     if (!current?.path || !activeTask) return;
     // rel 相对项目根（与 MdPreview 保存口径一致：baseDir=projectPath + rel）。
     const ext = taskStates[activeTask.id]?.requirementOriginal?.ext || "";
+    // docx 原件：二进制不走文本读取 → DocxViewer 按原版式（标题/表格/缩进）渲染保留的
+    // 原始文件本身，而不是 mammoth 抽取文本（抽取文本只作 AI 工作输入）。
+    if (which === "original" && ext === "docx") {
+      const rel = `AI_LabTest/requirements/${activeTask.name}-需求-原始.docx`;
+      setOrigDocPreview({
+        abs: `${current.path}/${rel}`,
+        filename: taskStates[activeTask.id]?.requirementOriginal?.filename || `${activeTask.name}-需求-原始.docx`,
+      });
+      return;
+    }
     const rel =
       which === "original"
-        // 原始文档：docx 是二进制、预览器只渲染文本 → 读抽取文本；md/txt 读保留的原文件本身。
-        ? ext === "docx"
-          ? `AI_LabTest/requirements/.data/${activeTask.name}-导入原文.txt`
-          : `AI_LabTest/requirements/${activeTask.name}-需求-原始.${ext || "txt"}`
+        // md/txt 的原件本身就是文本，直接读原文件。
+        ? `AI_LabTest/requirements/${activeTask.name}-需求-原始.${ext || "txt"}`
         : `AI_LabTest/requirements/${activeTask.name}-需求.md`;
     setReqPreviewLoading(true);
     try {
@@ -1004,6 +1027,17 @@ export function InlineTestingPanel() {
       showToast({ type: "error", message: t("test.requirement.previewFailed") });
     } finally {
       setReqPreviewLoading(false);
+    }
+  };
+  // 用系统应用（Word/WPS…）打开原件——保真兜底（docx-preview 对复杂表格/图片渲染可能有出入）。
+  // 仅 Electron 下可用（window.electronAPI 存在）；shell.openPath 成功返回 ''、失败返回错误串。
+  const openOriginalWithSystem = async () => {
+    if (!origDocPreview) return;
+    try {
+      const err = await window.electronAPI?.shell?.openPath?.(origDocPreview.abs);
+      if (err) showToast({ type: "error", message: err });
+    } catch {
+      showToast({ type: "error", message: t("test.requirement.openFailed") });
     }
   };
   // First not-done step = the "current" step the detail card focuses on.
@@ -1876,6 +1910,45 @@ export function InlineTestingPanel() {
                     setEditable={(editable) => setReqPreview((p) => (p && p.kind === "md" ? { ...p, editable } : p))}
                   />
                 )}
+                {/* docx 原件预览弹窗：DocxViewer 原版式渲染 + 「用系统应用打开」保真兜底。
+                    Portal 到 body——避免被带 transform/overflow 的祖先困住（历史教训）。 */}
+                {origDocPreview &&
+                  createPortal(
+                    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40" onClick={() => setOrigDocPreview(null)}>
+                      <div
+                        className="flex h-[82vh] w-[760px] max-w-[94vw] flex-col overflow-hidden rounded-lg border border-border bg-card shadow-xl"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <div className="flex shrink-0 items-center gap-2 border-b border-border px-4 py-2.5">
+                          <FileIcon size={16} className="shrink-0 text-primary" />
+                          <div className="min-w-0 flex-1">
+                            <div className="text-xs font-medium text-foreground">{t("test.requirement.previewOriginal")}</div>
+                            <div className="truncate text-[10px] text-muted-foreground">{origDocPreview.filename}</div>
+                          </div>
+                          {!!(typeof window !== "undefined" && window.electronAPI?.shell?.openPath) && (
+                            <button
+                              onClick={openOriginalWithSystem}
+                              className="flex shrink-0 items-center gap-1 rounded border border-border px-2 py-1 text-[10px] text-foreground hover:bg-muted"
+                              title={t("test.requirement.openWithSystem")}
+                            >
+                              <Desktop size={12} /> {t("test.requirement.openWithSystem")}
+                            </button>
+                          )}
+                          <button
+                            onClick={() => setOrigDocPreview(null)}
+                            aria-label={t("common.close")}
+                            className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-muted-foreground hover:bg-muted hover:text-foreground"
+                          >
+                            <X size={14} />
+                          </button>
+                        </div>
+                        <div className="flex min-h-0 flex-1 flex-col">
+                          <DocxViewer fileServeUrl={`/api/files/raw?path=${encodeURIComponent(origDocPreview.abs)}`} />
+                        </div>
+                      </div>
+                    </div>,
+                    document.body
+                  )}
               </div>
             </div>
           </div>
