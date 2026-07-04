@@ -686,6 +686,8 @@ const en = {
   'skills.installedAt': 'Installed At',
   'skills.installSuccess': 'Installation Complete',
   'skills.installFailed': 'Installation Failed',
+  'skills.installNodeRequiredTitle': 'Node.js required',
+  'skills.installNodeRequiredDesc': 'Skills install via npm. Without Node.js on your machine, installation will fail — please install it first, then retry.',
   'skills.searchNoResults': 'No skills found',
   'skills.marketplaceError': 'Failed to load marketplace',
   'skills.marketplaceHint': 'Browse the Skills Marketplace',

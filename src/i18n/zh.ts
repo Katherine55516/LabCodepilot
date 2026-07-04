@@ -684,6 +684,8 @@ const zh: Record<TranslationKey, string> = {
   'skills.installedAt': '安装时间',
   'skills.installSuccess': '安装完成',
   'skills.installFailed': '安装失败',
+  'skills.installNodeRequiredTitle': '需要 Node.js 环境',
+  'skills.installNodeRequiredDesc': '技能通过 npm 安装，本机未安装 Node.js 会导致安装失败，请先安装后重试。',
   'skills.searchNoResults': '未找到技能',
   'skills.marketplaceError': '加载技能市场失败',
   'skills.marketplaceHint': '浏览技能市场',
