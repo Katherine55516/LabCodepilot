@@ -3,7 +3,8 @@ import { createReadStream } from 'fs';
 import { createInterface } from 'readline';
 import path from 'path';
 import os from 'os';
-import type { FileTreeNode, FilePreview } from '@/types';
+import iconv from 'iconv-lite';
+import type { FileTreeNode, FilePreview, TextFileEncoding } from '@/types';
 
 // User-requested whitelist for directories starting with `.` — these
 // bypass BOTH the "skip hidden" filter in scanDirectoryRecursive AND the
@@ -249,6 +250,55 @@ function looksBinary(buf: Buffer): boolean {
     nonText++;
   }
   return nonText / buf.length > 0.3;
+}
+
+/**
+ * Validate that a byte sample is well-formed UTF-8 (lead-byte class +
+ * continuation-byte check; overlong/surrogate pedantry intentionally
+ * skipped — GBK text fails within a couple of bytes anyway).
+ *
+ * `allowTruncatedTail` tolerates one incomplete multi-byte sequence at the
+ * very end of the sample: the fixed-size detection window can cut a
+ * character in half, which must not misclassify the file as non-UTF-8.
+ */
+function isValidUtf8(buf: Buffer, allowTruncatedTail: boolean): boolean {
+  let i = 0;
+  while (i < buf.length) {
+    const b = buf[i];
+    if (b <= 0x7f) { i++; continue; }
+    let continuations: number;
+    if ((b & 0xe0) === 0xc0) continuations = 1;
+    else if ((b & 0xf0) === 0xe0) continuations = 2;
+    else if ((b & 0xf8) === 0xf0) continuations = 3;
+    else return false;
+    if (i + continuations >= buf.length) return allowTruncatedTail;
+    for (let j = 1; j <= continuations; j++) {
+      if ((buf[i + j] & 0xc0) !== 0x80) return false;
+    }
+    i += continuations + 1;
+  }
+  return true;
+}
+
+/**
+ * Detect the text encoding of a file from its leading byte sample.
+ * Strategy: pure ASCII / valid UTF-8 (incl. BOM) → utf-8; anything with
+ * high bytes that fails strict UTF-8 validation → gbk. GBK/GB2312 is the
+ * dominant non-UTF-8 encoding for this app's user base; files in other
+ * legacy encodings (Big5, Shift_JIS, Latin-1) will decode wrong either
+ * way, so the misclassification does not regress them vs. the old
+ * hardcoded-UTF-8 behavior.
+ */
+function detectEncoding(sample: Buffer, sampleIsWholeFile: boolean): TextFileEncoding {
+  if (sample.length >= 3 && sample[0] === 0xef && sample[1] === 0xbb && sample[2] === 0xbf) {
+    return 'utf-8';  // UTF-8 BOM
+  }
+  let hasHighBytes = false;
+  for (let i = 0; i < sample.length; i++) {
+    if (sample[i] >= 0x80) { hasHighBytes = true; break; }
+  }
+  if (!hasHighBytes) return 'utf-8';  // pure ASCII
+  return isValidUtf8(sample, !sampleIsWholeFile) ? 'utf-8' : 'gbk';
 }
 
 /**
@@ -543,7 +593,10 @@ export async function readFilePreview(filePath: string, userMaxLines?: number): 
 
   // Guard 2: binary detection on the first 4KB. Must run before we commit to
   // UTF-8 stream decoding; otherwise binary files produce garbage + may throw
-  // deep inside createInterface.
+  // deep inside createInterface. The same sample doubles as the encoding
+  // detection window: GBK high-byte pairs pass looksBinary (both bytes are
+  // ≥0x40 and NUL-free) but fail strict UTF-8 validation.
+  let encoding: TextFileEncoding = 'utf-8';
   try {
     const fd = await fs.open(/*turbopackIgnore: true*/ resolvedPath, 'r');
     try {
@@ -557,6 +610,7 @@ export async function readFilePreview(filePath: string, userMaxLines?: number): 
           { bytes_total: bytesTotal },
         );
       }
+      encoding = detectEncoding(sample, sampleSize === bytesTotal);
     } finally {
       await fd.close();
     }
@@ -570,38 +624,62 @@ export async function readFilePreview(filePath: string, userMaxLines?: number): 
   const maxLines = getLineCap(ext, userMaxLines);
 
   // Stream-read only up to maxLines to avoid loading entire large files.
-  const collectedLines: string[] = [];
+  let collectedLines: string[] = [];
   let scannedLineCount = 0;
   let hitLimit = false;
-  let bytesRead = 0;
 
-  await new Promise<void>((resolve, reject) => {
-    const stream = createReadStream(/*turbopackIgnore: true*/ resolvedPath, { encoding: 'utf-8' });
-    const rl = createInterface({ input: stream, crlfDelay: Infinity });
+  if (encoding === 'gbk') {
+    // Non-UTF-8 path: Node streams cannot decode GBK natively, and the
+    // byte ceiling above already guarantees ≤10MB, so a whole-file read +
+    // decode is affordable and far simpler than a hand-rolled streaming
+    // decoder. gb18030 is a strict superset of GBK/GB2312 — identical for
+    // the GBK range, and rare four-byte chars decode instead of breaking.
+    let decoded: string;
+    try {
+      const raw = await fs.readFile(/*turbopackIgnore: true*/ resolvedPath);
+      decoded = iconv.decode(raw, 'gb18030');
+    } catch (err) {
+      throw new FilePreviewError('read_failed', `Failed to read file: ${String(err)}`);
+    }
+    const allLines = decoded.split(/\r\n|\r|\n/);
+    // split() yields a trailing '' when the text ends with a line
+    // terminator; readline does not emit that phantom line — match it.
+    if (allLines.length > 1 && (decoded.endsWith('\n') || decoded.endsWith('\r'))) {
+      allLines.pop();
+    }
+    scannedLineCount = allLines.length;
+    hitLimit = allLines.length > maxLines;
+    collectedLines = hitLimit ? allLines.slice(0, maxLines) : allLines;
+  } else {
+    await new Promise<void>((resolve, reject) => {
+      const stream = createReadStream(/*turbopackIgnore: true*/ resolvedPath, { encoding: 'utf-8' });
+      const rl = createInterface({ input: stream, crlfDelay: Infinity });
 
-    rl.on('line', (line) => {
-      scannedLineCount++;
-      if (collectedLines.length < maxLines) {
-        collectedLines.push(line);
-        bytesRead += Buffer.byteLength(line, 'utf-8') + 1;  // +1 for newline
-      } else {
-        hitLimit = true;
-        rl.close();
-        stream.destroy();
-      }
+      rl.on('line', (line) => {
+        scannedLineCount++;
+        if (collectedLines.length < maxLines) {
+          collectedLines.push(line);
+        } else {
+          hitLimit = true;
+          rl.close();
+          stream.destroy();
+        }
+      });
+
+      rl.on('close', () => resolve());
+      rl.on('error', reject);
+      stream.on('error', reject);
     });
+  }
 
-    rl.on('close', () => resolve());
-    rl.on('error', reject);
-    stream.on('error', reject);
-  });
-
-  // If we read the entire file, scannedLineCount is exact.
-  // If we hit the limit early, estimate total from size (heuristic: ~60 bytes/line).
+  // Whole-file (gbk) path counts every line, so the count is always exact.
+  // The streaming path is exact only when it read to EOF; on early stop,
+  // estimate total from size (heuristic: ~60 bytes/line).
   const estimatedTotalLines = Math.max(1, Math.ceil(bytesTotal / 60));
-  const lineCount = hitLimit
-    ? Math.max(scannedLineCount, estimatedTotalLines)
-    : scannedLineCount;
+  const lineCountExact = encoding === 'gbk' || !hitLimit;
+  const lineCount = lineCountExact
+    ? scannedLineCount
+    : Math.max(scannedLineCount, estimatedTotalLines);
 
   const content = collectedLines.join('\n');
 
@@ -609,8 +687,9 @@ export async function readFilePreview(filePath: string, userMaxLines?: number): 
     path: resolvedPath,
     content,
     language,
+    encoding,
     line_count: lineCount,
-    line_count_exact: !hitLimit,
+    line_count_exact: lineCountExact,
     truncated: hitLimit,
     bytes_read: Buffer.byteLength(content, 'utf-8'),
     bytes_total: bytesTotal,

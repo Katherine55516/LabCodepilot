@@ -48,10 +48,24 @@ export interface FileTreeNode {
   extension?: string;
 }
 
+/**
+ * Text encodings the preview/write pipeline can round-trip. 'gbk' covers
+ * GB2312/GBK legacy files (decoded and re-encoded via the gb18030 codec,
+ * a strict superset, so rare four-byte chars survive the round trip).
+ */
+export type TextFileEncoding = 'utf-8' | 'gbk';
+
 export interface FilePreview {
   path: string;
   content: string;
   language: string;
+  /**
+   * Detected on-disk encoding. Clients editing the file must pass this
+   * back to /api/files/write so a GBK file is not silently re-saved as
+   * UTF-8 (which would break e.g. javac's platform-default decoding on
+   * Chinese-locale Windows).
+   */
+  encoding: TextFileEncoding;
   line_count: number;
   /** When true, line_count is exact; when false it is a best-effort estimate. */
   line_count_exact: boolean;

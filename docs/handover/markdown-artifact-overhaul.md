@@ -201,8 +201,8 @@ electron/main.ts 'artifact:export-long-shot' IPC 处理器
 
 | 路由 | 方法 | 入参（query 或 body） | 返回 | 关键安全 |
 |------|------|---------------------|------|---------|
-| `/api/files/preview` | GET | `path`, `limit?` | `FilePreview` | assertRealPathInBase + 分档行数/字节上限 + 二进制拒 |
-| `/api/files/write` | POST | `path`, `content`, `base_dir?` | `{ ok, bytes_written }` | rejectIfSymlink + mkdir -p + allowMissing |
+| `/api/files/preview` | GET | `path`, `limit?` | `FilePreview`（含 `encoding`） | assertRealPathInBase + 分档行数/字节上限 + 二进制拒 |
+| `/api/files/write` | POST | `path`, `content`, `encoding?`, `base_dir?` | `{ ok, bytes_written }` | rejectIfSymlink + mkdir -p + allowMissing |
 | `/api/files/mkdir` | POST | `path`, `base_dir?` | `{ ok, created }` | assertRealPathInBase + recursive |
 | `/api/files/rename` | POST | `old_path`, `new_path`, `base_dir?` | `{ ok, from, to }` | 两端 rejectIfSymlink + `cross_base_dir` 校验 + 类型一致性 |
 | `/api/files/delete` | POST | `path`, `base_dir?`, `is_directory?` | `{ ok, trashed }` | rejectIfSymlink + `trash` 包（系统回收站，拒降级真删）+ 文件夹需 `recursive:true` |
