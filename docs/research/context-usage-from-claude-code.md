@@ -123,3 +123,11 @@ CLI 2.1.201 实测可用，无需登录态、无 API 调用，输出 markdown �
 验证：单测 1854 全过；本地 Anthropic 协议 stub（managed 凭据 dev 无主密钥解不开，按 CLAUDE.md 用 mock）跑通真实回合——result 事件与 DB `token_usage` 均携带 `context_used_tokens:12345 / cli_context_window:200000`，回合生命周期正常（`terminal_reason: completed`）。
 
 待真实环境复核（打包版或有凭据环境）：成功回合后快照 categories 是否含 System prompt / System tools 行（stub 回合 CLI 的 Messages 估算与 API input 一致，分类完整性未在真实网关下复核）。
+
+### 打包版实测修正（2026-07-06 当天，41c64e6）
+
+打包版实测暴露本调研的一个误判：**"太慢"与"死锁"是两个独立问题，POC 只推翻了后者。** 打包环境（大上下文 + MCP/skills 全量加载）下 CLI 的 getContextUsage 计算实测可达几十秒（旧记录 ~57s 属实），且算完之前不处理 stdin 关闭、不退出——阻塞式等快照（哪怕 2s 超时，超时只是放弃等待）会拖住 SSE 流的 close，而前端"生成中"和后端落库都以流 close 为终点 → 回答完成后仍"生成中"卡几十秒。
+
+修正后的落地形态：**快照 fire-and-forget（60s 上限）**，result/done 立即发出、流立即 close（回合零延迟结束）；快照迟到后经 `patchLatestAssistantTokenUsage`（db.ts）后补 UPDATE 该回合消息的 token_usage（match input/output 防串扰）；本回合卡片显示旧口径，下回合/重开会话显示权威值。dev + stub 已验证异步链路（result 事件不含快照字段、done 紧跟 result、DB 最终含 context_used_tokens）。
+
+推论回填通道 ①③ 的评估：打包环境下"回合内取快照"的真实成本不是 10ms 而是几十秒（CLI 对该 options 组合的估算成本），任何同步消费该值的设计都不可行；异步后补是唯一不伤交互的形态。慢的内因（tokenizer? MCP 工具清单? skills 扫描?）在 CLI 侧，应用无法优化，只能等上游改善。
