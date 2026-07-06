@@ -20,7 +20,7 @@ import { registerConversation, unregisterConversation } from './conversation-reg
 import { captureCapabilities, isCacheFresh, setCachedPlugins } from './agent-sdk-capabilities';
 import { normalizeMessageContent, microCompactMessage } from './message-normalizer';
 import { roughTokenEstimate } from './context-estimator';
-import { getSetting, updateSdkSessionId, createPermissionRequest } from './db';
+import { getSetting, updateSdkSessionId, createPermissionRequest, patchLatestAssistantTokenUsage } from './db';
 import { resolveForClaudeCode } from './provider-resolver';
 import { sanitizeClaudeModelOptions } from './claude-model-options';
 // platform.ts CLI binary lookup helpers were removed when AI Native Lab switched to
@@ -243,17 +243,20 @@ function wrapPromptWithTurnGate(
 
 /**
  * FIX(权威分子): 回合末从仍存活的 Query 取 /context 同源快照。
- * 实测热调 6–10ms；2s 超时或任何异常都静默返回 null——快照是增强而非回合
- * 依赖，取不到时卡片回退旧口径（input + cacheR + cacheC）。
+ * 小上下文热调 6–10ms，但打包环境（大上下文 + MCP/skills 全量）实测 CLI
+ * 计算可达几十秒——所以调用方必须异步消费本函数，绝不能阻塞回合收尾。
+ * 超时或任何异常都静默返回 null——快照是增强而非回合依赖，取不到时卡片
+ * 回退旧口径（input + cacheR + cacheC）。
  */
-async function fetchContextUsageSnapshot(q: {
-  getContextUsage(): Promise<{ totalTokens: number; maxTokens: number }>;
-}): Promise<{ totalTokens: number; maxTokens: number } | null> {
+async function fetchContextUsageSnapshot(
+  q: { getContextUsage(): Promise<{ totalTokens: number; maxTokens: number }> },
+  timeoutMs: number,
+): Promise<{ totalTokens: number; maxTokens: number } | null> {
   try {
     const cu = await Promise.race([
       q.getContextUsage(),
       new Promise<never>((_, reject) => {
-        const t = setTimeout(() => reject(new Error('getContextUsage timeout')), 2000);
+        const t = setTimeout(() => reject(new Error('getContextUsage timeout')), timeoutMs);
         if (typeof t.unref === 'function') t.unref();
       }),
     ]);
@@ -1676,20 +1679,6 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
               if (tokenUsage && connectedModel) {
                 tokenUsage = { ...tokenUsage, model: connectedModel };
               }
-              // FIX(权威分子): 趁回合门未放行、Query 仍存活，取 /context 同源
-              // 快照。totalTokens 随 token_usage 落库，context-usage-walk 的
-              // 分子优先消费；maxTokens 只存诊断字段 cli_context_window——
-              // 分母刻意保留应用侧解析（[1m]/托管表/目录，见 useContextUsage），
-              // 不写 context_window 以免进入窗口解析链。
-              const ctxSnapshot = await fetchContextUsageSnapshot(controlQuery);
-              if (ctxSnapshot && tokenUsage) {
-                tokenUsage = {
-                  ...tokenUsage,
-                  context_used_tokens: ctxSnapshot.totalTokens,
-                  cli_context_window: ctxSnapshot.maxTokens,
-                };
-              }
-              releaseTurnGate();
               // terminal_reason is an optional field added in SDK 0.2.111.
               // When present, it enriches the end-of-turn UI chip (Phase 1 of
               // agent-sdk-0-2-111-adoption) without replacing error-classifier.
@@ -1720,6 +1709,44 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
                 }
               }
 
+              // FIX(权威分子): 快照异步后补，绝不阻塞回合收尾。打包环境实测
+              // CLI 对大上下文的 getContextUsage 计算可达几十秒，且算完之前
+              // 不处理 stdin 关闭、不退出——阻塞式等待（哪怕带短超时）会拖住
+              // 整条 SSE 流，前端"生成中"迟迟不结束。改为：
+              //   1. 上面 result 已发出；下面立即发 done 并 close 流——回合
+              //      零延迟结束，route 侧随即用旧口径 usage 落库
+              //   2. 快照（上限 60s）返回后补 UPDATE 该回合 assistant 消息的
+              //      token_usage，下一次读取（下回合/重开会话）生效；小上下文
+              //      时快照可能先于落库到达，未命中则 1s 后重试一次
+              //   3. 无论成败放行回合门 → CLI 退出 → 循环自然收尾（循环后的
+              //      二次 done/close 由 wrapController 幂等吞掉）
+              const turnUsageAtResult = tokenUsage;
+              fetchContextUsageSnapshot(controlQuery, 60_000)
+                .then((snap) => {
+                  if (!snap || !sessionId) return;
+                  const patch = {
+                    context_used_tokens: snap.totalTokens,
+                    cli_context_window: snap.maxTokens,
+                  };
+                  const match = turnUsageAtResult
+                    ? {
+                        input_tokens: turnUsageAtResult.input_tokens,
+                        output_tokens: turnUsageAtResult.output_tokens,
+                      }
+                    : null;
+                  if (!patchLatestAssistantTokenUsage(sessionId, match, patch)) {
+                    setTimeout(() => {
+                      try {
+                        patchLatestAssistantTokenUsage(sessionId, match, patch);
+                      } catch { /* 放弃后补，卡片走旧口径 */ }
+                    }, 1000);
+                  }
+                })
+                .catch(() => { /* 快照失败：保持旧口径 */ })
+                .finally(() => releaseTurnGate());
+
+              controller.enqueue(formatSSE({ type: 'done', data: '' }));
+              controller.close();
               break;
             }
 
@@ -1996,16 +2023,6 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
                   if (usage && retryConnectedModel) {
                     usage = { ...usage, model: retryConnectedModel };
                   }
-                  // FIX(权威分子): 重试回合末取权威快照（同主路径 result 分支）。
-                  const retryCtxSnapshot = await fetchContextUsageSnapshot(retryConversation);
-                  if (retryCtxSnapshot && usage) {
-                    usage = {
-                      ...usage,
-                      context_used_tokens: retryCtxSnapshot.totalTokens,
-                      cli_context_window: retryCtxSnapshot.maxTokens,
-                    };
-                  }
-                  retryWrap.release();
                   // Match main-path result shape so the chat route can persist
                   // the new sdk_session_id (route reads result.session_id as a
                   // safety net when status init was missed).
@@ -2030,6 +2047,34 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
                       tokensSaved: compResult.estimatedTokensSaved,
                     })),
                   }));
+                  // FIX(权威分子): 重试回合的快照同样异步后补，不阻塞收尾
+                  // （机制与主路径 result 分支一致）。
+                  const retryUsageAtResult = usage;
+                  fetchContextUsageSnapshot(retryConversation, 60_000)
+                    .then((snap) => {
+                      if (!snap || !sessionId) return;
+                      const patch = {
+                        context_used_tokens: snap.totalTokens,
+                        cli_context_window: snap.maxTokens,
+                      };
+                      const match = retryUsageAtResult
+                        ? {
+                            input_tokens: retryUsageAtResult.input_tokens,
+                            output_tokens: retryUsageAtResult.output_tokens,
+                          }
+                        : null;
+                      if (!patchLatestAssistantTokenUsage(sessionId, match, patch)) {
+                        setTimeout(() => {
+                          try {
+                            patchLatestAssistantTokenUsage(sessionId, match, patch);
+                          } catch { /* 放弃后补 */ }
+                        }, 1000);
+                      }
+                    })
+                    .catch(() => { /* 快照失败：保持旧口径 */ })
+                    .finally(() => retryWrap.release());
+                  controller.enqueue(formatSSE({ type: 'done', data: '' }));
+                  controller.close();
                   break;
                 }
               }
