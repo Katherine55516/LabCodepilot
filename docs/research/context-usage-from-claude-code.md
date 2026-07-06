@@ -109,3 +109,17 @@ CLI 2.1.201 实测可用，无需登录态、无 API 调用，输出 markdown �
 ## POC 复现
 
 脚本未入库（临时验证件）。复现要点：streaming-input 生成器 `yield` 后以未决 Promise 挂起保持 Query 存活；`initializationResult()` 后即可调 `getContextUsage()`；resume 场景加 `forkSession: true` 避免写原会话。注意 SDK 默认 options 与应用真实 options 的上下文构成差异（见通道 ③）。
+
+## 落地记录（2026-07-06，同日实现）
+
+按用户决策落地了一个变体：**分子（已用）取 Claude Code 权威值，分母（窗口）保留应用侧解析逻辑**（`[1m]` 别名/托管表/目录），即通道 ① 的分子部分 + 刻意不采用其 `maxTokens` 做分母。
+
+实现（`FIX(权威分子)` 注释锚点）：
+
+- `claude-client.ts`：`wrapPromptWithTurnGate()` 把 string/AsyncIterable prompt 统一包成"回合门"streaming-input（yield 完消息后挂起，result 分支取完快照再放行；`finally` 兜底放行）；`fetchContextUsageSnapshot()` 带 2s 超时静默回退；主路径 + resume-fallback + 压缩重试路径三处覆盖。
+- 快照 `totalTokens` → `token_usage.context_used_tokens` 落库；`maxTokens` → 仅诊断字段 `cli_context_window`，**刻意不写 `context_window`**（后者会进入 useContextUsage 的窗口解析链）。
+- `context-usage-walk.ts`：分子优先 `context_used_tokens`，缺失（旧记录/快照失败）回退 `input+cacheR+cacheC` 旧口径。前端零改动（走既有 token_usage 链路，重开会话也生效；Phase 5 的 SSE `context_usage` 通道保持休眠）。
+
+验证：单测 1854 全过；本地 Anthropic 协议 stub（managed 凭据 dev 无主密钥解不开，按 CLAUDE.md 用 mock）跑通真实回合——result 事件与 DB `token_usage` 均携带 `context_used_tokens:12345 / cli_context_window:200000`，回合生命周期正常（`terminal_reason: completed`）。
+
+待真实环境复核（打包版或有凭据环境）：成功回合后快照 categories 是否含 System prompt / System tools 行（stub 回合 CLI 的 Messages 估算与 API input 一致，分类完整性未在真实网关下复核）。

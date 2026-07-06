@@ -212,6 +212,61 @@ function extractAssistantTurnUsage(msg: SDKAssistantMessage): TokenUsage | null 
 }
 
 /**
+ * FIX(权威分子): 把 prompt 包装成"回合门"streaming-input。
+ * string prompt 模式下 CLI 发出 result 后立即退出，getContextUsage() 的控制
+ * 响应来不及返回（旧注释 "Query closed before response received" 的真正根因，
+ * POC 复测见 docs/research/context-usage-from-claude-code.md）。包装后生成器
+ * yield 完用户消息即挂起，等 result 分支取完快照调用 release() 才结束——
+ * stdin 关闭、CLI 正常退出，回合生命周期不变。
+ */
+function wrapPromptWithTurnGate(
+  prompt: string | AsyncIterable<SDKUserMessage>,
+  sessionIdForMessage: string,
+): { iterable: AsyncIterable<SDKUserMessage>; release: () => void } {
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => { release = resolve; });
+  const iterable = (async function* () {
+    if (typeof prompt === 'string') {
+      yield {
+        type: 'user',
+        message: { role: 'user', content: prompt },
+        parent_tool_use_id: null,
+        session_id: sessionIdForMessage,
+      } as SDKUserMessage;
+    } else {
+      yield* prompt;
+    }
+    await gate;
+  })();
+  return { iterable, release };
+}
+
+/**
+ * FIX(权威分子): 回合末从仍存活的 Query 取 /context 同源快照。
+ * 实测热调 6–10ms；2s 超时或任何异常都静默返回 null——快照是增强而非回合
+ * 依赖，取不到时卡片回退旧口径（input + cacheR + cacheC）。
+ */
+async function fetchContextUsageSnapshot(q: {
+  getContextUsage(): Promise<{ totalTokens: number; maxTokens: number }>;
+}): Promise<{ totalTokens: number; maxTokens: number } | null> {
+  try {
+    const cu = await Promise.race([
+      q.getContextUsage(),
+      new Promise<never>((_, reject) => {
+        const t = setTimeout(() => reject(new Error('getContextUsage timeout')), 2000);
+        if (typeof t.unref === 'function') t.unref();
+      }),
+    ]);
+    if (cu && typeof cu.totalTokens === 'number' && cu.totalTokens > 0) {
+      return { totalTokens: cu.totalTokens, maxTokens: cu.maxTokens };
+    }
+  } catch {
+    // 静默回退
+  }
+  return null;
+}
+
+/**
  * Stream Claude responses using the Agent SDK.
  * Returns a ReadableStream of SSE-formatted strings.
  */
@@ -664,6 +719,9 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
       // below once we know whether we have an explicit DB provider; cleaned up
       // in the outer finally block. See src/lib/claude-home-shadow.ts.
       let shadowHome: ShadowHome | null = null;
+      // FIX(权威分子): 回合门的放行函数。声明在 try 外，finally 兜底调用，
+      // 保证异常/中断路径不悬挂 prompt 生成器。
+      let releaseTurnGate: () => void = () => {};
 
       // Resolve provider via the unified resolver. The caller may pass an explicit
       // provider (from resolveProvider().provider), or undefined when 'env' mode is
@@ -1254,13 +1312,19 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
           return textPrompt;
         }
 
-        const finalPrompt = buildFinalPrompt(!shouldResume);
+        // FIX(权威分子): 回合门包装——保证 result 到达时 Query 仍存活，
+        // 可取 getContextUsage() 快照后再放行结束回合。
+        const initialWrap = wrapPromptWithTurnGate(
+          buildFinalPrompt(!shouldResume),
+          sdkSessionId || '',
+        );
+        releaseTurnGate = initialWrap.release;
 
         // Try to start the conversation. If resuming a previous session fails
         // (e.g. stale/corrupt session file, CLI version mismatch), automatically
         // fall back to starting a fresh conversation without resume.
         let conversation = query({
-          prompt: finalPrompt,
+          prompt: initialWrap.iterable,
           options: queryOptions,
         });
         // Keep a handle to the underlying Query instance for control-API
@@ -1308,8 +1372,11 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
             }));
             // Remove resume and try again as a fresh conversation with history context
             delete queryOptions.resume;
+            releaseTurnGate(); // 放行旧生成器（其 Query 已失败）
+            const fallbackWrap = wrapPromptWithTurnGate(buildFinalPrompt(true), '');
+            releaseTurnGate = fallbackWrap.release;
             conversation = query({
-              prompt: buildFinalPrompt(true),
+              prompt: fallbackWrap.iterable,
               options: queryOptions,
             });
             // Fresh Query replaces the old handle — control-API calls
@@ -1609,6 +1676,20 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
               if (tokenUsage && connectedModel) {
                 tokenUsage = { ...tokenUsage, model: connectedModel };
               }
+              // FIX(权威分子): 趁回合门未放行、Query 仍存活，取 /context 同源
+              // 快照。totalTokens 随 token_usage 落库，context-usage-walk 的
+              // 分子优先消费；maxTokens 只存诊断字段 cli_context_window——
+              // 分母刻意保留应用侧解析（[1m]/托管表/目录，见 useContextUsage），
+              // 不写 context_window 以免进入窗口解析链。
+              const ctxSnapshot = await fetchContextUsageSnapshot(controlQuery);
+              if (ctxSnapshot && tokenUsage) {
+                tokenUsage = {
+                  ...tokenUsage,
+                  context_used_tokens: ctxSnapshot.totalTokens,
+                  cli_context_window: ctxSnapshot.maxTokens,
+                };
+              }
+              releaseTurnGate();
               // terminal_reason is an optional field added in SDK 0.2.111.
               // When present, it enriches the end-of-turn UI chip (Phase 1 of
               // agent-sdk-0-2-111-adoption) without replacing error-classifier.
@@ -1639,34 +1720,6 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
                 }
               }
 
-              // Phase 5 — context-usage snapshot via Query.getContextUsage()
-              // is intentionally NOT called here.
-              //
-              // getContextUsage() is a SDK control-API request that shares
-              // the same message channel as the for-await-of iterator we're
-              // inside. Awaiting it blocks the iterator from advancing,
-              // which prevents the control-response frame from arriving —
-              // the Query then closes on result and the call errors out
-              // with "Query closed before response received". There's no
-              // stable place outside the iteration loop where the Query
-              // is still alive.
-              //
-              // The chat-page indicator doesn't suffer from this: it
-              // already computes used-tokens from the SDKResultMessage's
-              // own `usage` field (input + cache_read + cache_creation),
-              // which is SDK-authoritative and carries <5% drift against
-              // what getContextUsage would report. The snapshot would
-              // only add category-level breakdown (system prompt / tools
-              // / user / memory) that the current UI doesn't surface.
-              //
-              // The SSE 'context_usage' event type and stream-session-
-              // manager snapshot field stay in place as extension points
-              // — a future Phase that needs category breakdown can fire
-              // them from a different point in the SDK lifecycle (e.g.
-              // from a background control-channel timer, or from a
-              // lifecycle hook the SDK may expose later).
-              // eslint-disable-next-line @typescript-eslint/no-unused-vars
-              const _unusedControlQuery = controlQuery;
               break;
             }
 
@@ -1825,7 +1878,9 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
               retryOptions.systemPrompt = { type: 'preset', preset: 'claude_code', append: systemPrompt };
             }
 
-            const retryConversation = query({ prompt: retryPrompt, options: retryOptions });
+            // FIX(权威分子): 与主路径同理的回合门，让重试回合末也能取权威快照。
+            const retryWrap = wrapPromptWithTurnGate(retryPrompt, '');
+            const retryConversation = query({ prompt: retryWrap.iterable, options: retryOptions });
 
             // 与主路径同源的 Connected 模型名（requested_model || init.model），
             // 供重试回合的 result usage 携带 token_usage.model。
@@ -1941,6 +1996,16 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
                   if (usage && retryConnectedModel) {
                     usage = { ...usage, model: retryConnectedModel };
                   }
+                  // FIX(权威分子): 重试回合末取权威快照（同主路径 result 分支）。
+                  const retryCtxSnapshot = await fetchContextUsageSnapshot(retryConversation);
+                  if (retryCtxSnapshot && usage) {
+                    usage = {
+                      ...usage,
+                      context_used_tokens: retryCtxSnapshot.totalTokens,
+                      cli_context_window: retryCtxSnapshot.maxTokens,
+                    };
+                  }
+                  retryWrap.release();
                   // Match main-path result shape so the chat route can persist
                   // the new sdk_session_id (route reads result.session_id as a
                   // safety net when status init was missed).
@@ -1969,6 +2034,7 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
                 }
               }
             }
+            retryWrap.release(); // 兜底（无 result 的中断路径）；重复 resolve 无害
             controller.enqueue(formatSSE({ type: 'done', data: '' }));
             controller.close();
             return; // Retry succeeded — skip normal error path
@@ -2013,6 +2079,7 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
 
         controller.close();
       } finally {
+        releaseTurnGate(); // 兜底放行回合门（异常/中断路径不悬挂 prompt 生成器）
         unregisterConversation(sessionId);
         // Tear down shadow ~/.claude/ if we built one. Best-effort — the OS
         // will eventually GC tmpdir even if this fails.

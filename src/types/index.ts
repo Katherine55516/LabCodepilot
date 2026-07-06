@@ -385,6 +385,19 @@ export interface TokenUsage {
    */
   context_window?: number;
   /**
+   * FIX(权威分子): 回合末 Query.getContextUsage() 的 totalTokens —— Claude Code
+   * 对"当前上下文占用"的权威口径（/context 同源，auto-compact 按它触发）。
+   * context-usage-walk 的分子优先用它；缺失（快照超时/失败）时回退
+   * input + cache_read + cache_creation 的旧口径。
+   */
+  context_used_tokens?: number;
+  /**
+   * 同一快照里 CLI 报的窗口（maxTokens）。仅作诊断留档——分母刻意不用它，
+   * 窗口仍走应用侧解析（[1m] 别名/托管表/目录，见 useContextUsage），所以
+   * 不写入 context_window 字段，避免进入窗口解析链。
+   */
+  cli_context_window?: number;
+  /**
    * 本回合实际请求的模型名 —— 与执行状态行 "Connected (…)" 括号里显示的是同
    * 一个值（requested_model || SDK init 的 model），可能是 CLI 别名（如
    * claude-opus-4-7[1m]）。上下文卡片用它做 [1m] → 1M 窗口的最高优先级判断
