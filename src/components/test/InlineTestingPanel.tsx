@@ -1476,7 +1476,11 @@ export function InlineTestingPanel() {
     logAudit("approve", { step, detail: resumedRunAll ? "运行任务·用例门控批准,恢复自动接力" : undefined });
     const idx = STEPS.findIndex((s) => s.step === step);
     const next = STEPS[idx + 1];
-    if (next && !stoppedStepRef.current.has(`${aId}:${next.step}`)) runStep(next.step);
+    if (next && !stoppedStepRef.current.has(`${aId}:${next.step}`)) {
+      // 批准直接起跑的下一步不经 auto-chain,审计补 run 记录(否则执行步在链路里缺一环)。
+      logAudit("run", { step: next.step, mode: "auto", detail: "批准后接力" });
+      runStep(next.step);
+    }
   };
 
   // Manual single-step run (pill / detail 运行 button): cancels any run-all mode so
