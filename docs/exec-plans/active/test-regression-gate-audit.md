@@ -1,6 +1,7 @@
 # 测试工作台:回归集标签 + 步骤门控 + 操作审计 实施计划
 
-> 状态:**待开工** | 分支:V3.0.1_dev | 创建:2026-07-06
+> 状态:**开发完成,待打包验收** | 分支:V3.0.1_dev | 创建:2026-07-06 | 完成:2026-07-07
+> 交接文档:[docs/handover/test-regression-suite.md](../../handover/test-regression-suite.md)
 > 三个需求:①生成用例打回归标签 ②步骤门控+记录用户操作 ③AI 推荐回归用例(生成时+存量)
 
 ## 0. 决策日志(已拍板)
@@ -186,13 +187,18 @@
 
 | 项 | 状态 | commit |
 |----|------|--------|
-| A1 生成打标(prompts/rules/revise schema) | 待开工 | |
-| A2 导入/导出标签列 | 待开工 | |
-| A3 「运行任务」用例门控 | 待开工 | |
-| A4 审计地基(lib+API+埋点) | 待开工 | |
-| A5 单测+i18n | 待开工 | |
-| B1 reduce 回归集口径+单测 | 待开工 | |
-| B2 报告展示口径(UI/xlsx/prompt/rules) | 待开工 | |
-| B3 存量 AI 推荐(API+按钮) | 待开工 | |
-| B4 操作记录 UI | 待开工 | |
-| 打包验收(mac+Win) | 待开工 | |
+| A1 生成打标(prompts/rules/revise schema) | ✅ 完成 | 09f10d8 |
+| A2 导入/导出标签列 | ✅ 完成 | debd834 |
+| A3 「运行任务」用例门控 | ✅ 完成 | 273d3ea |
+| A4 审计地基(lib+API+12埋点) | ✅ 完成 | 3179e33 |
+| A5 单测+i18n+CDP mock 全链路验证 | ✅ 完成 | 2541164 |
+| B1 reduce 回归集口径+单测 | ✅ 完成 | 949f124 |
+| B2 报告展示口径(UI/xlsx/prompt/rules) | ✅ 完成 | c8ec748 |
+| B3 存量 AI 推荐(API+按钮+单测) | ✅ 完成 | c11f519 |
+| B4 操作记录 UI + 批次B CDP 验证 | ✅ 完成 | eef5a96 |
+| 打包验收(mac+Win) | ⏳ 待用户发起 | |
+
+**验证记录(2026-07-07)**:单测 1828 pass / 1 fail(project-mcp-injection 预存环境问题);
+CDP mock 全链路(真实数据零接触):门控停批→批准→接力→审计链 4 条完整;SuiteBanner
+红线横幅两处渲染;操作记录弹窗 i18n 映射正确;console 零错误。better-sqlite3 已
+rebuild 为 Node ABI(dev 用;打包 after-pack 自动改回),原 109 个 db 预存失败一并恢复。
