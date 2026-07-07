@@ -249,6 +249,8 @@ const zhHK: Record<TranslationKey, string> = {
   'test.gate.pending': '已完成，請審閱產物後批准以繼續。',
   'test.gate.auto': '批准後「測試執行 + 測試報告」自動連跑。',
   'test.report.funcRate': '功能驗證通過率',
+  'test.report.suitePass': '回歸集全過（{s}）—— 發版紅線通過',
+  'test.report.suiteFail': '回歸集未全過（{s}）—— 存在阻塞級失敗，不可發版',
   'test.report.caseCount': '用例總數',
   'test.report.execRate': '執行通過率',
   'test.report.defects': '缺陷',

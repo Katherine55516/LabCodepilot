@@ -243,6 +243,8 @@ const en = {
   'test.gate.pending': 'completed — review the output, then approve to continue.',
   'test.gate.auto': 'Execution + report run automatically after approval.',
   'test.report.funcRate': 'Functional pass rate',
+  'test.report.suitePass': 'Regression suite all passed ({s}) — release gate OK',
+  'test.report.suiteFail': 'Regression suite NOT fully passed ({s}) — blocking failures, do NOT release',
   'test.report.caseCount': 'Total cases',
   'test.report.execRate': 'Execution pass rate',
   'test.report.defects': 'Defects',

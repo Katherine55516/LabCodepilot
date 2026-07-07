@@ -14,14 +14,14 @@ export const runtime = 'nodejs';
  *   - 默认：返回 { sheets: [{ name, rows: string[][] }] } 供产物预览的只读表格。
  *   - ?download=1：用 exceljs 即时生成 .xlsx 并回传（attachment），用于「导出」。
  *
- * 列：序号 / 用例ID / 标题 / 状态 / 期望 / 实际 / 结论 / 证据。
- * 标题、期望来自 cases.json（按 id join）；状态/实际/证据来自 run.json；结论 = pass→符合预期，
+ * 列：序号 / 用例ID / 标题 / 用例标签 / 状态 / 期望 / 实际 / 结论 / 证据。
+ * 标题、标签、期望来自 cases.json（按 id join）；状态/实际/证据来自 run.json；结论 = pass→符合预期，
  * 否则取 error。安全：taskName/env 经 isUnsafeSegment 校验（它们组成路径，不能穿越）。
  */
-const HEADER = ['序号', '用例ID', '标题', '状态', '期望', '实际', '结论', '证据'];
+const HEADER = ['序号', '用例ID', '标题', '用例标签', '状态', '期望', '实际', '结论', '证据'];
 
 type RunTest = { id?: string; status?: string; actual?: string; error?: string; evidence?: string[] };
-type CaseDef = { id?: string; purpose?: string; steps?: { expected?: string }[] };
+type CaseDef = { id?: string; purpose?: string; steps?: { expected?: string }[]; tags?: string[] };
 
 export async function GET(req: Request): Promise<Response> {
   const url = new URL(req.url);
@@ -67,6 +67,7 @@ export async function GET(req: Request): Promise<Response> {
       String(i + 1),
       String(t.id ?? ''),
       c?.purpose ?? '',
+      Array.isArray(c?.tags) ? c.tags.join('、') : '',
       status,
       expected,
       t.actual ?? '',

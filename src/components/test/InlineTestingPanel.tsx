@@ -91,6 +91,10 @@ interface ReportEntry {
   /** 功能验证通过率 "pass/total"，全回归基线为 "N/A"（来自 run.json，见 reduce.ts）。 */
   funcPassStr?: string;
   regressionTotal?: number;
+  /** 回归集口径（tags 含「回归测试」，与 regressionTotal 的回归基线口径正交）；旧 run.json 缺省。 */
+  suiteCounts?: FourState;
+  /** 回归集 "pass/total"；pass < total 即未全过（发版红线）。 */
+  suitePassStr?: string;
   tests: CaseResult[];
   /** The full markdown report doc ({task}-{env}.md), if the report step wrote one. */
   markdown: string;
@@ -2503,7 +2507,25 @@ function ConvoBubble({ msg }: { msg: ConvoMsg }) {
 
 // 报告 view (prototype): metrics row + per-case results table, from the execution
 // run's @@RESULT frames (caseResults) + four-state tally. Facts only.
-function ReportView({ t, results, four, funcCounts, funcPassStr, circuitBroken, taskName, projectPath, env }: { t: T; results: CaseResult[]; four: FourState; funcCounts?: FourState; funcPassStr?: string; circuitBroken?: boolean; taskName: string; projectPath?: string; env?: string }) {
+// 回归集（发版红线）横幅：全过→绿；有 fail/partial/blocked（含漏跑补的 blocked）→红
+// 「不可发版」。无 suiteCounts（旧报告 / 用例无「回归测试」标签）→ 不渲染。
+// suite = tags 口径（§1.7），与回归基线（verification/oracle 口径）无关。
+function SuiteBanner({ t, suiteCounts, suitePassStr }: { t: T; suiteCounts?: FourState; suitePassStr?: string }) {
+  if (!suiteCounts || !suiteCounts.total) return null;
+  const allPass = suiteCounts.pass === suiteCounts.total;
+  const s = suitePassStr || `${suiteCounts.pass}/${suiteCounts.total}`;
+  return allPass ? (
+    <div className="rounded-md border border-status-success-border bg-status-success-muted px-3 py-2 text-[11px] text-status-success-foreground">
+      ✓ {t("test.report.suitePass", { s })}
+    </div>
+  ) : (
+    <div className="rounded-md border border-status-error-border bg-status-error-muted px-3 py-2 text-[11px] font-medium text-status-error-foreground">
+      ⚠ {t("test.report.suiteFail", { s })}
+    </div>
+  );
+}
+
+function ReportView({ t, results, four, funcCounts, funcPassStr, suiteCounts, suitePassStr, circuitBroken, taskName, projectPath, env }: { t: T; results: CaseResult[]; four: FourState; funcCounts?: FourState; funcPassStr?: string; suiteCounts?: FourState; suitePassStr?: string; circuitBroken?: boolean; taskName: string; projectPath?: string; env?: string }) {
   // 证据媒体（图片灯箱 + 录像内联回放）：经 /api/test/media 白名单流式取证据；
   // lightbox=当前放大查看的文件名。无 projectPath（如流程内调用）时退化为文件名文本。
   const [lightbox, setLightbox] = useState<string | null>(null);
@@ -2541,6 +2563,9 @@ function ReportView({ t, results, four, funcCounts, funcPassStr, circuitBroken, 
           ⚠ {t("test.report.circuitBroken")}
         </div>
       )}
+      <div className="mb-3 empty:hidden">
+        <SuiteBanner t={t} suiteCounts={suiteCounts} suitePassStr={suitePassStr} />
+      </div>
       <div className="mb-3 grid grid-cols-2 gap-2 lg:grid-cols-4">
         {metric(t("test.report.funcRate"), funcRateStr)}
         {metric(t("test.report.caseCount"), String(total))}
@@ -2885,6 +2910,7 @@ function ReportStepPanel({
           ⚠ {t("test.report.circuitBroken")}
         </div>
       )}
+      <SuiteBanner t={t} suiteCounts={entry?.suiteCounts} suitePassStr={entry?.suitePassStr} />
 
       {/* 概览条 */}
       <div className="flex items-stretch gap-2">
@@ -3393,7 +3419,7 @@ function ReportBrowser({ projects, t, model, providerId, onOpenTask, reloadSigna
                                 </div>
                               ) : (
                                 <>
-                                  <ReportView t={t} results={r.tests} four={r.counts} funcCounts={r.funcCounts} funcPassStr={r.funcPassStr} circuitBroken={r.circuitBroken} taskName={task} projectPath={project.path} env={r.env} />
+                                  <ReportView t={t} results={r.tests} four={r.counts} funcCounts={r.funcCounts} funcPassStr={r.funcPassStr} suiteCounts={r.suiteCounts} suitePassStr={r.suitePassStr} circuitBroken={r.circuitBroken} taskName={task} projectPath={project.path} env={r.env} />
                                   {r.markdown && (
                                     <div className="mt-3 border-t border-border pt-3">
                                       <div className="mb-2 text-[11px] font-medium text-muted-foreground">{t("test.report.docTitle")}</div>
