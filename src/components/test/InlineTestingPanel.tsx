@@ -340,6 +340,11 @@ export function InlineTestingPanel() {
   // guard it would instantly re-run the step the user just stopped. The entry clears
   // when the user manually re-runs that step (runStep start) or restarts the task.
   const stoppedStepRef = useRef<Set<string>>(new Set());
+  // 用例门控(需求:生成完用例必须人审后才进执行):「运行任务」跑到用例设计完成时停「待批准」
+  // 并释放 autoRun,任务 id 记入本集合;用户点批准(approveStep)时凭它恢复 autoRun,让
+  // 执行→报告继续自动接力(切走任务也后台跑完,保持「运行任务」一键到报告的语义)。
+  // stopTask / 新一轮 startRunAllFrom 时清除。
+  const gatedRunAllRef = useRef<Set<string>>(new Set());
   // Model selection for test runs — reuses the chat's managed-provider picker.
   const [model, setModel] = useState<string>(() => {
     try { return localStorage.getItem("codepilot:last-model") || ""; } catch { return ""; }
@@ -1272,7 +1277,13 @@ export function InlineTestingPanel() {
       // (需求/用例) land in "review" unless this task is in 运行任务 (run-all) mode,
       // where gates auto-approve straight to "done".
       const autoAll = autoRunIdsRef.current.has(id);
-      const finalStatus: StepStatus = stopped ? "idle" : sawError ? "error" : HUMAN_GATED.includes(step) && !autoAll ? "review" : "done";
+      // 用例门控:「运行任务」(autoRun)也在用例设计完成后停「待批准」——生成完用例必须
+      // 人审(回归集标签/用例内容),点批准才进入执行(见 gatedRunAllRef;批准时恢复 autoRun
+      // 续跑 执行→报告)。需求分析在 autoRun 下仍直通;排队提升时对旧 review 的自动批准
+      // (pumpQueue)不受影响——那是「入队前已存在的产物」的隐含确认,本门控只拦本次新生成的用例。
+      const gateCases = step === "cases" && autoAll && !stopped && !sawError;
+      const finalStatus: StepStatus =
+        stopped ? "idle" : sawError ? "error" : gateCases || (HUMAN_GATED.includes(step) && !autoAll) ? "review" : "done";
       patchTask(id, (s) => ({ stepStatus: { ...s.stepStatus, [step]: finalStatus } }));
       if (stopped) {
         // 停止 = 在此节点停住，不再向下游接力。标记该步【及其下游】为已停止，auto-chain 便不会
@@ -1283,9 +1294,11 @@ export function InlineTestingPanel() {
         push({ role: "user", text: `■ ${t("test.flow.stop")}「${stepName}」` });
       }
       // End run-all mode when stopped, when anything errors, or when the pipeline
-      // finishes (报告) — release the auto-chain claim for this task.
-      if (stopped || sawError || step === "report") {
+      // finishes (报告) — release the auto-chain claim for this task. 用例门控同样释放
+      // (槽位空出、排队任务可提升),但记入 gatedRunAllRef 供批准时恢复接力。
+      if (stopped || sawError || step === "report" || gateCases) {
         autoRunIdsRef.current.delete(id);
+        if (gateCases) gatedRunAllRef.current.add(id);
       }
       // Only clear this task's abort controller if it's still ours (a fast re-run could have replaced it).
       if (abortMapRef.current.get(id) === ctrl) abortMapRef.current.delete(id);
@@ -1300,8 +1313,10 @@ export function InlineTestingPanel() {
   // so the 运行 button can re-run this node. No-op if nothing is running.
   const stopTask = (tid: string) => {
     if (!tid) return;
-    // 停止 = 退出该任务的 run-all / 排队，并中断 in-flight。
+    // 停止 = 退出该任务的 run-all / 排队，并中断 in-flight。用例门控的恢复标记一并清除
+    // (停止后再批准用例走手动语义,不再自动接力到报告)。
     autoRunIdsRef.current.delete(tid);
+    gatedRunAllRef.current.delete(tid);
     if (waitingQueueRef.current.includes(tid)) {
       waitingQueueRef.current = waitingQueueRef.current.filter((x) => x !== tid); // 排队中 → 直接出队
       setWaitingTaskIds(new Set(waitingQueueRef.current));
@@ -1402,6 +1417,9 @@ export function InlineTestingPanel() {
   const approveStep = (step: TestStep) => {
     if (!aId) return;
     patchTask(aId, (s) => ({ stepStatus: { ...s.stepStatus, [step]: "done" } }));
+    // 「运行任务」在用例门控停下的任务:批准 = 恢复流水线,重新认领 autoRun,执行→报告
+    // 自动接力(切走任务也后台跑完,保持「运行任务」语义)。手动流程(不在集合)行为不变。
+    if (step === "cases" && gatedRunAllRef.current.delete(aId)) autoRunIdsRef.current.add(aId);
     const idx = STEPS.findIndex((s) => s.step === step);
     const next = STEPS[idx + 1];
     if (next && !stoppedStepRef.current.has(`${aId}:${next.step}`)) runStep(next.step);
@@ -1456,6 +1474,8 @@ export function InlineTestingPanel() {
     // 运行任务 drives the whole pipeline → clear this task's 停止 marks so the
     // auto-chain isn't blocked on a step the user stopped in a previous attempt.
     for (const s of STEPS) stoppedStepRef.current.delete(`${id}:${s.step}`);
+    gatedRunAllRef.current.delete(id); // 新一轮运行:清上一轮用例门控的恢复标记
+
     // 起点(需求/用例/执行)及之后都会重跑到「测试执行」→ 清掉上轮四态/用例结果，避免 stale 残留。
     patchTask(id, () => ({
       fourState: { total: 0, pass: 0, fail: 0, partial: 0, blocked: 0 },
