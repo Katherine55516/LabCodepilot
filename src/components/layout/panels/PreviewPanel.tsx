@@ -425,6 +425,11 @@ export function PreviewPanel() {
           path: targetPath,
           baseDir: workingDirectory || undefined,
           content: editContent,
+          // Round-trip the encoding detected at preview time. Without
+          // this, editing (or 1s-autosaving) a GBK file would silently
+          // rewrite it as UTF-8 on disk. The loadedPath gate above
+          // guarantees freshPreview belongs to targetPath.
+          encoding: freshPreview?.encoding ?? "utf-8",
           overwrite: true,
           createParents: false,
         }),
@@ -451,7 +456,7 @@ export function PreviewPanel() {
     } finally {
       setSavingEdit(false);
     }
-  }, [editDirty, savingEdit, previewSource, editContent, loadedPath, workingDirectory]);
+  }, [editDirty, savingEdit, previewSource, editContent, loadedPath, workingDirectory, freshPreview?.encoding]);
 
   // Debounced autosave. Fires 1 second after the user stops typing, as
   // long as the buffer is dirty, we're not already saving, and the

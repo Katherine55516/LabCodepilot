@@ -1336,6 +1336,42 @@ export function updateMessageContent(messageId: string, content: string): number
   return result.changes;
 }
 
+/**
+ * FIX(权威分子): 快照迟到后补 —— 给会话最新一条 assistant 消息的 token_usage
+ * 合并补丁字段。打包环境下 getContextUsage 可能比回合结束晚几十秒返回（CLI
+ * 对大上下文的本地估算慢），回合不等它；拿到后走这里落库，下一次读取（下
+ * 回合/重开会话）生效。match 防串扰：仅当现存 usage 的 input/output 与本
+ * 回合一致才补，避免用户已进入下一回合时打到新消息上。
+ */
+export function patchLatestAssistantTokenUsage(
+  sessionId: string,
+  match: { input_tokens?: number; output_tokens?: number } | null,
+  patch: Record<string, unknown>,
+): boolean {
+  const db = getDb();
+  const row = db.prepare(
+    "SELECT id, token_usage FROM messages WHERE session_id = ? AND role = 'assistant' ORDER BY rowid DESC LIMIT 1"
+  ).get(sessionId) as { id: string; token_usage: string | null } | undefined;
+  if (!row) return false;
+
+  let usage: Record<string, unknown> = {};
+  if (row.token_usage) {
+    try {
+      usage = JSON.parse(row.token_usage) as Record<string, unknown>;
+    } catch {
+      usage = {};
+    }
+  }
+  if (match) {
+    if (match.input_tokens !== undefined && usage.input_tokens !== match.input_tokens) return false;
+    if (match.output_tokens !== undefined && usage.output_tokens !== match.output_tokens) return false;
+  }
+
+  const merged = JSON.stringify({ ...usage, ...patch });
+  const result = db.prepare('UPDATE messages SET token_usage = ? WHERE id = ?').run(merged, row.id);
+  return result.changes > 0;
+}
+
 export function updateMessageHeartbeatAck(messageId: string, isAck: boolean): void {
   const db = getDb();
   db.prepare('UPDATE messages SET is_heartbeat_ack = ? WHERE id = ?').run(isAck ? 1 : 0, messageId);
