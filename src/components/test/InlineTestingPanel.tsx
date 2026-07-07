@@ -1125,6 +1125,8 @@ export function InlineTestingPanel() {
   // 复用报告步的 PreviewModal/MdPreview 弹窗渲染（独立状态，与报告步互不影响）。
   const [reqPreview, setReqPreview] = useState<PreviewState | null>(null);
   const [reqPreviewLoading, setReqPreviewLoading] = useState(false);
+  // 操作记录弹窗(需求②审计的查看端):展示当前任务的 AI_LabTest/audit/{task}.jsonl。
+  const [auditOpen, setAuditOpen] = useState(false);
   useEffect(() => { setReqPreview(null); }, [aId]); // 切任务关掉残留的需求预览弹窗
   const openRequirementPreview = async (which: "md" | "original" = "md") => {
     if (!current?.path || !activeTask) return;
@@ -1811,6 +1813,13 @@ export function InlineTestingPanel() {
                 {/* 顶部「运行任务」按钮运行中不再变成停止 —— 停止只保留详情卡那一个,
                     避免两处停止入口造成混淆;运行中此按钮直接禁用。 */}
                 <button
+                  onClick={() => setAuditOpen(true)}
+                  title={t("test.audit.title")}
+                  className="flex h-7 items-center gap-1 rounded-md border border-border px-2 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground"
+                >
+                  <ListChecks size={12} /> {t("test.audit.title")}
+                </button>
+                <button
                   onClick={handleRunTask}
                   disabled={!current?.path || busy || aQueued || !stepUnlocked(focusStep)}
                   title={aQueued ? t("test.batch.queued") : !stepUnlocked(focusStep) ? t("test.flow.locked") : t("test.flow.runAllHint")}
@@ -2383,6 +2392,10 @@ export function InlineTestingPanel() {
       )}
 
       {/* Modals + folder picker (browser fallback for project selection) */}
+      {/* 操作记录弹窗(审计查看端):当前任务的门控批准/运行/修订等全部留痕。 */}
+      {auditOpen && current?.path && activeTask && (
+        <AuditModal t={t} projectPath={current.path} taskName={activeTask.name} onClose={() => setAuditOpen(false)} />
+      )}
       {/* 用例表弹窗（Excel 形式）：从详情卡「查看 / 编辑」打开，查看与编辑合一。9 列——
           ID / 用例标题 / 用例类型(5类下拉,兼容八类旧值) / 用例标签(冒烟·回归,多选) / 关联故事(=requirement) /
           前置条件 / 操作步骤 / 期望结果 / 优先级。oracle 双轴等次要字段不在表内,saveCases 整份透传保留。 */}
@@ -3162,6 +3175,91 @@ function MdPreview({ t, preview, projectPath, onClose, onSaved, setEditable }: {
         )}
       </div>
     </>
+  );
+}
+
+// 操作记录弹窗（需求②审计的查看端）：GET /api/test/audit 拉当前任务事件（最新在前，服务端
+// 已倒序），展示 时间(fmtCnDateTime 本地化)/步骤/动作/方式/详情。动作与方式经 i18n 映射；
+// 未知动作原样显示（审计文件是数据，向前兼容新动作）。审计文件删任务留痕，故已删任务的
+// 记录也能在同名新任务里看到——detail 里的 delete-task 行即分界。
+interface AuditEvt { time?: string; step?: string; action?: string; mode?: string; detail?: string }
+const AUDIT_ACTION_KEYS: Record<string, TranslationKey> = {
+  "approve": "test.audit.action.approve",
+  "run": "test.audit.action.run",
+  "run-task": "test.audit.action.runTask",
+  "chat-action": "test.audit.action.chatAction",
+  "revise": "test.audit.action.revise",
+  "stop": "test.audit.action.stop",
+  "auto-approve": "test.audit.action.autoApprove",
+  "import": "test.audit.action.import",
+  "edit-cases": "test.audit.action.editCases",
+  "delete-task": "test.audit.action.deleteTask",
+  "recommend-suite": "test.audit.action.recommend",
+};
+const AUDIT_MODE_KEYS: Record<string, TranslationKey> = {
+  manual: "test.audit.mode.manual",
+  batch: "test.audit.mode.batch",
+  auto: "test.audit.mode.auto",
+};
+function AuditModal({ t, projectPath, taskName, onClose }: { t: T; projectPath: string; taskName: string; onClose: () => void }) {
+  const [events, setEvents] = useState<AuditEvt[] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/test/audit?projectPath=${encodeURIComponent(projectPath)}&taskName=${encodeURIComponent(taskName)}`)
+      .then((r) => r.json())
+      .then((d) => { if (!cancelled) setEvents(Array.isArray(d?.events) ? (d.events as AuditEvt[]) : []); })
+      .catch(() => { if (!cancelled) setEvents([]); });
+    return () => { cancelled = true; };
+  }, [projectPath, taskName]);
+  const stepName = (s?: string) => {
+    const def = STEPS.find((x) => x.step === s);
+    return def ? t(def.name) : "—";
+  };
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+      <div className="flex max-h-[80vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-border bg-background shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center gap-2 border-b border-border px-3 py-2">
+          <ListChecks size={14} className="text-primary" />
+          <span className="text-xs font-semibold text-foreground">{t("test.audit.title")} · {taskName}</span>
+          <span className="flex-1" />
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground" aria-label={t("test.report.close")}><X size={14} /></button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-auto">
+          {events === null ? (
+            <div className="p-4 text-center text-[11px] text-muted-foreground"><SpinnerGap size={14} className="mx-auto animate-spin" /></div>
+          ) : events.length === 0 ? (
+            <div className="p-4 text-center text-[11px] text-muted-foreground">{t("test.audit.empty")}</div>
+          ) : (
+            <table className="w-full border-collapse text-[11px]">
+              <thead className="sticky top-0 bg-muted/80 backdrop-blur">
+                <tr className="text-left text-muted-foreground">
+                  <th className="whitespace-nowrap px-3 py-1.5 font-medium">{t("test.audit.colTime")}</th>
+                  <th className="whitespace-nowrap px-2 py-1.5 font-medium">{t("test.audit.colStep")}</th>
+                  <th className="whitespace-nowrap px-2 py-1.5 font-medium">{t("test.audit.colAction")}</th>
+                  <th className="whitespace-nowrap px-2 py-1.5 font-medium">{t("test.audit.colMode")}</th>
+                  <th className="px-2 py-1.5 font-medium">{t("test.audit.colDetail")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {events.map((e, i) => (
+                  <tr key={i} className="border-t border-border align-top">
+                    <td className="whitespace-nowrap px-3 py-1.5 font-mono text-[10px] text-muted-foreground">{e.time ? fmtCnDateTime(e.time) : "—"}</td>
+                    <td className="whitespace-nowrap px-2 py-1.5 text-foreground">{stepName(e.step)}</td>
+                    <td className="whitespace-nowrap px-2 py-1.5 text-foreground">{AUDIT_ACTION_KEYS[e.action ?? ""] ? t(AUDIT_ACTION_KEYS[e.action!]) : e.action || "—"}</td>
+                    <td className="whitespace-nowrap px-2 py-1.5">
+                      <span className={`rounded px-1.5 py-0.5 text-[10px] ${e.mode === "manual" ? "bg-status-info-muted text-status-info-foreground" : "bg-muted text-muted-foreground"}`}>
+                        {AUDIT_MODE_KEYS[e.mode ?? ""] ? t(AUDIT_MODE_KEYS[e.mode!]) : e.mode || "—"}
+                      </span>
+                    </td>
+                    <td className="px-2 py-1.5 text-muted-foreground">{e.detail || ""}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }
 
