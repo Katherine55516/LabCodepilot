@@ -453,6 +453,36 @@ export function InlineTestingPanel() {
     return null;
   };
 
+  // 操作审计埋点(需求:门控与关键操作留痕):fire-and-forget POST /api/test/audit,落
+  // <project>/AI_LabTest/audit/<task>.jsonl(独立于 report/,删任务留痕)。失败静默、
+  // 绝不阻塞交互;time 由服务端生成。taskId 缺省取活动任务,路径/任务名自动解析。
+  const logAudit = (
+    action: string,
+    opts: {
+      taskId?: string;
+      step?: TestStep;
+      mode?: "manual" | "batch" | "auto";
+      detail?: string;
+      projPath?: string;
+      taskName?: string;
+    } = {},
+  ) => {
+    const tid = opts.taskId ?? aId;
+    const loc = tid ? findTaskLoc(tid) : null;
+    const projectPath = opts.projPath ?? loc?.projPath ?? current?.path;
+    const taskName = opts.taskName ?? loc?.task.name ?? activeTask?.name;
+    if (!projectPath || !taskName) return;
+    fetch("/api/test/audit", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        projectPath,
+        taskName,
+        event: { taskId: tid || undefined, step: opts.step, action, mode: opts.mode ?? "manual", detail: opts.detail },
+      }),
+    }).catch(() => {});
+  };
+
   // 排队调度: 槽位 = 并发数 − 占用数。占用 = 在跑(running) ∪ 已认领(autoRun) 的任务数 —— 用真实
   // 在跑数而非仅 autoRun，避免「运行任务」正在跑(running 但可能不在 autoRun)时漏算导致超并发。
   // 有空槽就把队首任务提升为 autoRun，由 auto-chain effect 读「最新」taskStates 起跑它的下一步
@@ -471,6 +501,18 @@ export function InlineTestingPanel() {
     }
     if (waitingQueueRef.current.length !== before) setWaitingTaskIds(new Set(waitingQueueRef.current));
     if (promoted.length) {
+      // 审计:排队提升伴随旧「待批准」产物的自动确认(batch)。用渲染闭包的 taskStates 判定
+      // 哪些 review 步会被下方 updater 自动批准——从 finally 回调进来时闭包可能略旧,
+      // 边缘场景漏记一条(best-effort);人工操作的审计不受影响。
+      for (const tid of promoted) {
+        const st0 = taskStates[tid];
+        if (!st0) continue;
+        for (const k of Object.keys(st0.stepStatus) as TestStep[]) {
+          if (st0.stepStatus[k] !== "review") continue;
+          if (k === "requirement" && st0.imported?.requirement && !st0.requirementMode) continue;
+          logAudit("auto-approve", { taskId: tid, step: k, mode: "batch", detail: "排队提升,旧待批准产物自动确认" });
+        }
+      }
       // 批量=自动批准：把新晋任务里「待批准(review)」的步直接标 done，让 auto-chain 续跑到执行/报告
       // （否则它停在 review、auto-chain 只推进 idle 步，批量任务会卡住）。functional 更新读最新 state，
       // 不受 finally 回调闭包陈旧影响。
@@ -528,6 +570,7 @@ export function InlineTestingPanel() {
         return { convo: [...s.convo, { role: "ai", text: chunk }] };
       });
     push({ role: "user", text: `✏️ ${t("test.revise.action")}「${stepName}」：${text}` });
+    logAudit("revise", { taskId: id, step, detail: text.slice(0, 80), projPath: proj.path, taskName: task.name });
     setComposer("");
     let sawError = false;
     let lineBuf = "";
@@ -728,7 +771,9 @@ export function InlineTestingPanel() {
         body: JSON.stringify({ projectPath: proj?.path, taskName: name, kind, filename: f.filename, dataBase64: f.dataBase64 }),
       });
       const j = await res.json().catch(() => ({}));
-      return res.ok && j.ok ? { ok: true, preview: j.preview as string, ext: j.ext as string | undefined } : { ok: false, error: (j.error as string) || t("test.newTaskModal.importFailed") };
+      const ok = res.ok && j.ok;
+      if (ok && proj?.path) logAudit("import", { projPath: proj.path, taskName: name, detail: `${kind}:${f.filename}` });
+      return ok ? { ok: true, preview: j.preview as string, ext: j.ext as string | undefined } : { ok: false, error: (j.error as string) || t("test.newTaskModal.importFailed") };
     };
     // Seed the 测试对话 with what was imported — otherwise the stage looks empty (it
     // renders the convo stream, not the artifact file) and the upload seems "missing".
@@ -979,7 +1024,11 @@ export function InlineTestingPanel() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ projectPath: current.path, taskName: activeTask.name, cases: casesDraft }),
       }).then((res) => res.json());
-      if (r?.ok) { setCasesPreview(casesDraft); setCasesDraft(null); }
+      if (r?.ok) {
+        setCasesPreview(casesDraft);
+        setCasesDraft(null);
+        logAudit("edit-cases", { detail: `用例编辑保存(${casesDraft.length} 条)` });
+      }
     } catch { /* 保存失败保留编辑态,用户可重试 */ }
     setCasesSaving(false);
   };
@@ -1317,6 +1366,7 @@ export function InlineTestingPanel() {
     // (停止后再批准用例走手动语义,不再自动接力到报告)。
     autoRunIdsRef.current.delete(tid);
     gatedRunAllRef.current.delete(tid);
+    logAudit("stop", { taskId: tid });
     if (waitingQueueRef.current.includes(tid)) {
       waitingQueueRef.current = waitingQueueRef.current.filter((x) => x !== tid); // 排队中 → 直接出队
       setWaitingTaskIds(new Set(waitingQueueRef.current));
@@ -1396,6 +1446,8 @@ export function InlineTestingPanel() {
     // 问题6 时序修复：磁盘报告删【完成后】再刷新报告 tab。否则 setProjects 触发的 ReportBrowser
     // re-fetch 可能早于 DELETE 完成、又扫到没删的报告（用户报「删任务后报告还在」的根因）。
     if (toDelete.length) {
+      // 审计(删除动作前写):audit 文件在 AI_LabTest/audit/ 下、不在报告目录,删除后留痕。
+      for (const r of toDelete) logAudit("delete-task", { projPath: r.path, taskName: r.name, detail: "删除任务(报告已清理,审计留痕)" });
       await Promise.all(toDelete.map((r) => deleteTaskReports(r.path, r.name)));
       setReportsReload((n) => n + 1);
     }
@@ -1419,7 +1471,9 @@ export function InlineTestingPanel() {
     patchTask(aId, (s) => ({ stepStatus: { ...s.stepStatus, [step]: "done" } }));
     // 「运行任务」在用例门控停下的任务:批准 = 恢复流水线,重新认领 autoRun,执行→报告
     // 自动接力(切走任务也后台跑完,保持「运行任务」语义)。手动流程(不在集合)行为不变。
-    if (step === "cases" && gatedRunAllRef.current.delete(aId)) autoRunIdsRef.current.add(aId);
+    const resumedRunAll = step === "cases" && gatedRunAllRef.current.delete(aId);
+    if (resumedRunAll) autoRunIdsRef.current.add(aId);
+    logAudit("approve", { step, detail: resumedRunAll ? "运行任务·用例门控批准,恢复自动接力" : undefined });
     const idx = STEPS.findIndex((s) => s.step === step);
     const next = STEPS[idx + 1];
     if (next && !stoppedStepRef.current.has(`${aId}:${next.step}`)) runStep(next.step);
@@ -1429,6 +1483,7 @@ export function InlineTestingPanel() {
   // gates apply normally.
   const runStepManual = (step: TestStep) => {
     if (aId) autoRunIdsRef.current.delete(aId);
+    logAudit("run", { step });
     runStep(step);
   };
 
@@ -1475,6 +1530,7 @@ export function InlineTestingPanel() {
     // auto-chain isn't blocked on a step the user stopped in a previous attempt.
     for (const s of STEPS) stoppedStepRef.current.delete(`${id}:${s.step}`);
     gatedRunAllRef.current.delete(id); // 新一轮运行:清上一轮用例门控的恢复标记
+    logAudit("run-task", { taskId: id, step, detail: "运行任务(流水线起点)" });
 
     // 起点(需求/用例/执行)及之后都会重跑到「测试执行」→ 清掉上轮四态/用例结果，避免 stale 残留。
     patchTask(id, () => ({
@@ -1543,6 +1599,7 @@ export function InlineTestingPanel() {
         // 续跑(如手动批准门控后自动跑执行)算「新起跑」，达并发上限时先按住，空出槽位后本 effect
         // 会因 runningTaskIds 变化重跑并自动放行 —— 不死锁。
         if (!autoAll && occupiedSlots(runningIdsRef.current, autoRunIdsRef.current) >= concurrencyRef.current) continue;
+        logAudit("run", { taskId: tid, step: next.step, mode: "auto", projPath: loc.projPath, taskName: loc.task.name });
         runStep(next.step, { target: loc });
         continue;
       }
@@ -1941,7 +1998,7 @@ export function InlineTestingPanel() {
                 <span>💡 {t("test.chat.action.title")}「{t(STEPS.find((s) => s.step === pendingAction.step)!.name)}」{pendingAction.reason ? `：${pendingAction.reason}` : ""}</span>
                 <span className="flex-1" />
                 <button
-                  onClick={() => { const st = pendingAction.step; setPendingAction(null); runStepManual(st); }}
+                  onClick={() => { const st = pendingAction.step; logAudit("chat-action", { step: st, detail: pendingAction.reason || undefined }); setPendingAction(null); runStepManual(st); }}
                   disabled={busy}
                   className="rounded bg-primary px-2.5 py-1 text-[11px] font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-40"
                 >
