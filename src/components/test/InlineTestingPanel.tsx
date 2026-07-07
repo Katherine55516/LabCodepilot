@@ -638,6 +638,91 @@ export function InlineTestingPanel() {
     }
   };
 
+  // AI 推荐回归集（需求③存量侧）：调 /api/test/cases/recommend——AI 只读用例+需求、逐条
+  // 输出 @@RECOMMEND 判定行，后端按行精确 merge（只动 tags 里的「回归测试」，防 AI 重写整份
+  // 丢字段）。复用 reviseStep 的 SSE 解析骨架；@@RECOMMEND 行不上屏（细节吵，AI 总结句里有
+  // 数目）；cases_updated 帧 → tool 气泡展示统计 + 刷新 casesPreview。审计由后端记 recommend-suite。
+  const recommendSuite = async () => {
+    const proj = selected !== null ? projects[selected] : null;
+    const task = proj && selectedTask !== null ? proj.tasks[selectedTask] : null;
+    if (!proj?.path || !task || runningIdsRef.current.has(task.id) || casesPreview.length === 0) return;
+    const id = task.id;
+    const ctrl = new AbortController();
+    abortMapRef.current.set(id, ctrl);
+    markRunning(id);
+    const push = (msg: ConvoMsg) => patchTask(id, (s) => ({ convo: [...s.convo, msg] }));
+    const appendAi = (chunk: string) =>
+      patchTask(id, (s) => {
+        const last = s.convo[s.convo.length - 1];
+        if (last && last.role === "ai") return { convo: [...s.convo.slice(0, -1), { role: "ai", text: last.text + chunk }] };
+        return { convo: [...s.convo, { role: "ai", text: chunk }] };
+      });
+    push({ role: "user", text: `🎯 ${t("test.cases.recommend")}` });
+    let lineBuf = "";
+    const emitLine = (l: string) => {
+      if (l.includes("@@RECOMMEND")) return; // 判定行不上屏
+      if (l.trim()) appendAi(l + "\n");
+    };
+    try {
+      const res = await fetch("/api/test/cases/recommend", {
+        method: "POST",
+        signal: ctrl.signal,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectPath: proj.path, taskName: task.name, model: model || undefined, providerId: providerId || undefined }),
+      });
+      if (!res.ok || !res.body) {
+        const j = await res.json().catch(() => ({}));
+        push({ role: "error", text: (j.error as string) || `HTTP ${res.status}` });
+        return;
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buf = "";
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buf += decoder.decode(value, { stream: true });
+        const frames = buf.split("\n\n");
+        buf = frames.pop() || "";
+        for (const frame of frames) {
+          const fline = frame.replace(/^data:\s?/, "").trim();
+          if (!fline) continue;
+          let evt: { type?: string; data?: string } | null = null;
+          try { evt = JSON.parse(fline); } catch { continue; }
+          if (!evt) continue;
+          if (evt.type === "text") {
+            lineBuf += evt.data || "";
+            const ls = lineBuf.split("\n");
+            lineBuf = ls.pop() || "";
+            for (const l of ls) emitLine(l);
+          } else if (evt.type === "tool_use") {
+            try { const tu = JSON.parse(evt.data || "{}"); const label = toolUseLabel(tu.name || "", tu.input); if (label) push({ role: "tool", text: `→ ${label}` }); } catch {}
+          } else if (evt.type === "cases_updated") {
+            let s = { changed: 0, total: 0, suiteTotal: 0 };
+            try { s = JSON.parse(evt.data || "{}"); } catch { /* keep zeros */ }
+            push({ role: "tool", text: `🎯 ${t("test.cases.recommendDone", { changed: s.changed, suite: s.suiteTotal, total: s.total })}` });
+          } else if (evt.type === "error") {
+            let msg = evt.data || "";
+            try { const d = JSON.parse(evt.data || "{}"); msg = d.userMessage || d.rawMessage || msg; } catch {}
+            push({ role: "error", text: msg });
+          }
+        }
+      }
+      if (lineBuf.trim()) emitLine(lineBuf);
+    } catch (e) {
+      if (ctrl.signal.aborted || (e instanceof DOMException && e.name === "AbortError")) push({ role: "user", text: `■ ${t("test.flow.stop")}` });
+      else push({ role: "error", text: `请求失败：${e instanceof Error ? e.message : String(e)}` });
+    } finally {
+      if (abortMapRef.current.get(id) === ctrl) abortMapRef.current.delete(id);
+      markIdle(id);
+      // 标签已被后端 merge → 重新拉取用例展示（弹窗表格/回归集角标都基于 casesPreview）。
+      try {
+        const d = await fetch(`/api/test/cases?projectPath=${encodeURIComponent(proj.path)}&taskName=${encodeURIComponent(task.name)}`).then((r) => r.json());
+        if (Array.isArray(d?.cases)) setCasesPreview(d.cases as GeneratedCase[]);
+      } catch { /* keep current preview */ }
+    }
+  };
+
   // 真对话：发送即让 AI 在当前任务上下文响应（答疑/改产物/建议触发步骤）。复用 reviseStep
   // 的 SSE 解析骨架；text 行先过 @@ACTION 解析（命中→确认条，不显示该行）；tool_use 若写了
   // cases.json → 结束后刷新 casesPreview。与 runStep/reviseStep 经 abortMap + running 集合按任务串行。
@@ -1853,6 +1938,7 @@ export function InlineTestingPanel() {
                       <span className="text-[11px] text-muted-foreground">{t("test.cases.total")} · {casesPreview.length}</span>
                       <span className="flex-1" />
                       {casesPreview.length > 0 && <button onClick={() => setCasesDraft(structuredClone(casesPreview))} className="rounded bg-primary px-2 py-0.5 text-[10px] font-medium text-primary-foreground hover:opacity-90">{t("test.cases.viewEdit")}</button>}
+                      {casesPreview.length > 0 && <button onClick={recommendSuite} disabled={busy} title={t("test.cases.recommendHint")} className="rounded border border-primary/40 px-1.5 py-0.5 text-[10px] text-primary hover:bg-primary/10 disabled:opacity-50">🎯 {t("test.cases.recommend")}</button>}
                       {casesPreview.length > 0 && <button onClick={() => exportCases(false)} className="rounded border border-border px-1.5 py-0.5 text-[10px] text-foreground hover:bg-muted">{t("test.cases.export")}</button>}
                       <button onClick={() => exportCases(true)} className="rounded border border-border px-1.5 py-0.5 text-[10px] text-foreground hover:bg-muted">{t("test.cases.template")}</button>
                     </div>
