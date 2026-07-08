@@ -131,3 +131,15 @@ CLI 2.1.201 实测可用，无需登录态、无 API 调用，输出 markdown �
 修正后的落地形态：**快照 fire-and-forget（60s 上限）**，result/done 立即发出、流立即 close（回合零延迟结束）；快照迟到后经 `patchLatestAssistantTokenUsage`（db.ts）后补 UPDATE 该回合消息的 token_usage（match input/output 防串扰）；本回合卡片显示旧口径，下回合/重开会话显示权威值。dev + stub 已验证异步链路（result 事件不含快照字段、done 紧跟 result、DB 最终含 context_used_tokens）。
 
 推论回填通道 ①③ 的评估：打包环境下"回合内取快照"的真实成本不是 10ms 而是几十秒（CLI 对该 options 组合的估算成本），任何同步消费该值的设计都不可行；异步后补是唯一不伤交互的形态。慢的内因（tokenizer? MCP 工具清单? skills 扫描?）在 CLI 侧，应用无法优化，只能等上游改善。
+
+### 第二次打包版实测修正（2026-07-07）——"慢"的真正内因 = count_tokens API 风暴
+
+用户网关侧观察到"一次对话大量非流式请求"，决定性实验（记录型 stub 作 ANTHROPIC_BASE_URL）定位：
+
+**`getContextUsage` 在有凭据时不是本地估算——CLI 对上下文逐组件调 `POST /v1/messages/count_tokens`，resume 一个 113K 会话一次快照 = 82 个非流式请求。** 无凭据时回退纯本地估算：零请求、~200ms。"打包环境慢几十秒" = 82 个请求串行过公司网关的 RTT，不是本地计算慢；此前 POC 全在无登录态环境跑，行为分叉未暴露（调研盲区）。
+
+**关键结构发现：totalTokens 与凭据无关**（分类明细才依赖 count_tokens）。证据：同一会话在无凭据 ×2 / 假凭据+stub ×1 / 打包版真实网关落库值四种来源下 totalTokens 恒等（116842；第二会话 46342 同样逐位一致）；分类中 Messages 是残差项（total − 其他类，逐次吻合）。即 total 独立锚定 transcript 真实 usage，count_tokens 只影响卡片用不到的分类拆分精度。
+
+**最终形态（方案 A，"临时 HOME 无凭据探针"）**：回合门整体拆除（恢复 string prompt），聊天进程内不再调 getContextUsage；result 时 fire `context-usage-probe.ts`：延迟 1.5s → mkdtemp 假 HOME → 按 cwd slug 拷贝 transcript 副本 → 剥离全部凭据 resume → 本地估算 getContextUsage（~200ms）→ patchLatestAssistantTokenUsage 后补 → 整个临时 HOME 删除。收益：网关 82 请求/回合 → 0；后补命中率从约一半（60s 超时+串轮）升到接近全部；真实 ~/.claude 零写入（直连 resume 实测会 +266B 追加、forkSession 会留副本且挂起输入模式下 init 不进 iterator 拿不到 forked id——两条路都被临时 HOME 形态绕开）。
+
+**升级回归项（SDK/CLI 升级时必跑）**：① 无凭据探针对任意历史会话的 totalTokens 是否仍与带凭据一致（5 分钟：`ANTHROPIC_BASE_URL` 指向记录 stub 对照）；② transcript slug 规则（`'-' + cwd.replace(/\//g,'-')`，仅 POSIX 实测；Windows 未验证故探针在 win32 禁用）；③ 挂起输入模式下 getContextUsage 控制通道仍可用。
