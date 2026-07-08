@@ -68,6 +68,15 @@ export interface RunJson {
   funcCounts: RunCounts;
   funcPassStr: string; // 功能验证 pass/total；全为回归基线 → "N/A"（不得报「100% 通过」）
   regressionTotal: number; // 回归基线用例数
+  /**
+   * 回归集（cases.json `tags` 含「回归测试」——发版必跑、失败即阻塞系统）四态计数与
+   * 通过率。与 regressionTotal（回归基线，oracle 口径）【正交】：回归集看「失败后果」，
+   * 回归基线看「预期来源」，一条用例可同属两者，两套口径分别统计（详见
+   * rules/test-case-completeness.md §1.7）。无回归集（未传 suiteIds / 用例无标签）时
+   * 两字段缺省——旧 run.json 与既有消费方不受影响。
+   */
+  suiteCounts?: RunCounts;
+  suitePassStr?: string; // 回归集 "pass/total"；pass < total 即回归集未全过（发版红线）
   circuitBroken: boolean;
   tests: ReducedTest[];
 }
@@ -134,7 +143,15 @@ export function sanitizeApi(raw: unknown): ApiInfo | undefined {
  */
 export function reduceResults(
   raw: RawResult[],
-  opts: { module: string; env: string; time: string; verificationById?: Record<string, string>; caseIds?: string[] },
+  opts: {
+    module: string;
+    env: string;
+    time: string;
+    verificationById?: Record<string, string>;
+    caseIds?: string[];
+    /** 回归集用例 id（cases.json `tags` 含「回归测试」，由 run 路由收集传入）。 */
+    suiteIds?: string[];
+  },
 ): RunJson {
   const tests: ReducedTest[] = raw.map((r) => {
     let status: FourStateStatus = STATE_ALIASES[String(r.status ?? "").toLowerCase()] ?? "fail";
@@ -198,6 +215,21 @@ export function reduceResults(
   // 全为回归基线 → 功能验证通过率记 N/A（仅锁现状，不得报「100% 通过」）。
   const funcPassStr = funcCounts.total > 0 ? `${funcCounts.pass}/${funcCounts.total}` : "N/A";
 
+  // 回归集口径（suite = tags 含「回归测试」）：独立于 oracle 双轴的第三组计数。caseIds
+  // 对齐时未执行补的 blocked 同样计入——回归集必须全过，漏跑不算过、不虚报发版可行。
+  let suiteCounts: RunCounts | undefined;
+  let suitePassStr: string | undefined;
+  if (opts.suiteIds && opts.suiteIds.length) {
+    const suite = new Set(opts.suiteIds);
+    suiteCounts = { total: 0, pass: 0, fail: 0, partial: 0, blocked: 0 };
+    for (const t of tests) {
+      if (!suite.has(t.id)) continue;
+      suiteCounts.total++;
+      suiteCounts[t.status]++;
+    }
+    suitePassStr = `${suiteCounts.pass}/${suiteCounts.total}`;
+  }
+
   // Overall status: any real fail ⇒ failed; else all-blocked (nothing ran) ⇒ blocked; else done.
   const status: RunJson["status"] =
     counts.fail > 0
@@ -216,6 +248,7 @@ export function reduceResults(
     funcCounts,
     funcPassStr,
     regressionTotal,
+    ...(suiteCounts ? { suiteCounts, suitePassStr } : {}),
     circuitBroken,
     tests,
   };
@@ -224,7 +257,7 @@ export function reduceResults(
 /** Convenience: harvest @@RESULT from raw stream text, then reduce. */
 export function reduceFromText(
   text: string,
-  opts: { module: string; env: string; time: string; verificationById?: Record<string, string>; caseIds?: string[] },
+  opts: { module: string; env: string; time: string; verificationById?: Record<string, string>; caseIds?: string[]; suiteIds?: string[] },
 ): RunJson {
   return reduceResults(harvestResults(text), opts);
 }
