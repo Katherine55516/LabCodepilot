@@ -544,7 +544,7 @@ export function InlineTestingPanel() {
         method: "POST",
         signal: ctrl.signal,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectPath: proj.path, taskName: task.name, step, instruction: text, model: model || undefined, providerId: providerId || undefined }),
+        body: JSON.stringify({ projectPath: proj.path, taskName: task.name, taskId: task.id, step, instruction: text, model: model || undefined, providerId: providerId || undefined }),
       });
       if (!res.ok || !res.body) {
         const j = await res.json().catch(() => ({}));
@@ -985,7 +985,7 @@ export function InlineTestingPanel() {
       const r = await fetch("/api/test/cases", {
         method: "PUT",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ projectPath: current.path, taskName: activeTask.name, cases: casesDraft }),
+        body: JSON.stringify({ projectPath: current.path, taskName: activeTask.name, taskId: activeTask.id, cases: casesDraft }),
       }).then((res) => res.json());
       if (r?.ok) { setCasesPreview(casesDraft); setCasesDraft(null); }
     } catch { /* 保存失败保留编辑态,用户可重试 */ }
@@ -1163,6 +1163,8 @@ export function InlineTestingPanel() {
         body: JSON.stringify({
           projectPath: projPath,
           taskName: task.name,
+          // 使用统计的任务身份（workbench 任务 UUID）；服务端埋点按它归档事件
+          taskId: task.id,
           step,
           env,
           // 追加指令: user-typed notes for this task, appended to the step prompt server-side.

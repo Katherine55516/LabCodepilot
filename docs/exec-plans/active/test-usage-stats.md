@@ -10,7 +10,7 @@
 |-------|------|------|------|
 | Phase 0 | 执行计划 + 口径冻结（本文档） | ✅ 已完成 | 三个决策点已由用户确认走推荐项 |
 | Phase 1 | 数据层：`test_stats_events` 表 + 类型 + 采集/聚合 API 骨架 | ✅ 已完成 | 34 条单测；Electron-ABI 闭环通过；三视角对抗评审 4 项发现全部修复 |
-| Phase 2 | 服务端埋点与计时：run/revise/cases 路由事件、进度行时间戳、run.json `durationMs` | 📋 待开始 | 不改提示词 |
+| Phase 2 | 服务端埋点与计时：run/revise/cases 路由事件、进度行时间戳、run.json `durationMs` | ✅ 已完成 | 8 条计时单测；三视角评审 3 项发现全部修复；真实全流程验收并入 Phase 3 CDP 走查（同需 electron:dev） |
 | Phase 3 | 前端埋点 + 复核 UI + 节点徽标：新建/批准事件、ReportView 复核条、流程节点用时+模型、报告矩阵用时列 | 📋 待开始 | 复核是唯一新增用户操作 |
 | Phase 4 | 统计视图 + 任务详情 + 导出：`TestStatsView`（第 4 个 view）、模型效果表、节点轮次对比矩阵、XLSX 导出 | 📋 待开始 | 新组件独立文件 |
 | Phase 5 | 测试验证 + i18n + 文档收尾 | 📋 待开始 | handover/insights 双文档 |
@@ -22,6 +22,7 @@
 - 2026-07-08: 执行时长 = **服务端计时**：执行步利用现有进度行「▶ 用例 N/总数：标题」（`exec-progress.ts` 已解析）在 SSE 转发处打时间戳求差，逐用例耗时不采信 AI 自报；步骤级用时按流起止计。模型归因利用 run 请求体现成的 `model/providerId`（`run/route.ts:211`），零新增传递链路。
 - 2026-07-08: 任务详情的节点轮次采用**横向对比矩阵**（每节点一卡、指标做行、轮次做列、Δ 标记），四个节点全覆盖（需求/用例/执行/报告每次运行各记一轮）。
 - 2026-07-08: 统计视图新建独立文件 `TestStatsView.tsx`，不再往 `InlineTestingPanel.tsx`（~3.9k 行）里塞大块 UI；面板内只加视图路由与埋点调用。
+- 2026-07-09（Phase 2 实现与评审后）: ① run/revise/cases 请求体新增 **taskId**（workbench 任务 UUID）；服务端缺 taskId 时**跳过埋点**（宁缺毋错，taskName 仅项目内唯一不能冒充 id）。② **错误/中断轮不记事件**：wrapper 跟踪 `error` 帧、**`result{is_error:true}` 帧**（SDK 会话级失败不发 error 帧，评审发现）与 abort 信号，只有干净收尾才落 step_completed / cases_generated / execution_completed / report_generated。③ cases_generated 加 **mtime 门**：文件 mtime 早于本轮开跑则跳过（AI 只产摘要不调 Write 时不能记幻影返工轮）。④ revise 修订轮只记 cases_generated 不记 step_completed；**chat 路径改写 cases.json v1 不计轮**（批准 diff 以首轮为基线，采纳率不失真；记为已知局限）。⑤ 逐用例计时的 id **刻意不归一化**，与 reduce.harvestResults 完全同键——两侧归一不一致会让时长错挂到「未执行」补全条目，同键最坏只是缺省。⑥ run.json 的 tests[] 增加可选 durationMs，在 stringify 前合入 → runHash（=sha1(runContent)，与 .history 快照去重同源导出 sha1Hex）覆盖时长；对快照去重零影响（run.json 本含 time 字段跨轮必不同）。
 - 2026-07-08（Phase 1 对抗评审后）: ① `execution_completed` 增补 **runHash** 字段（Phase 2 落点强制携带，与 report_generated 同源）；聚合层同时实现**时序回填**（report_generated 的 runHash 回溯关联其前最近一次执行），事件缺失时熔断排除与模型归因不静默失效。② **时间窗口语义冻结**：路由对窗口查询补齐涉及任务的全量事件上下文，聚合层按窗口做"计入门控"（任务按创建时间、采纳按批准时间、执行按执行时间、复核按其所属执行轮是否在窗内）——窗外执行轮的归因上下文不丢失、覆盖率不越界。③ 查询超限时保留**最新** N 条（DESC 取数后反转回升序），截断只丢最旧数据。④ 任务详情节点轮次改**时间就近配对**（±120s），revise 轮不再错绑整步重跑的用时。
 
 ## 详细设计

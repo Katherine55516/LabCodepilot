@@ -45,6 +45,8 @@ export interface ReducedTest {
   error: string;
   evidence: string[];
   api?: ApiInfo;
+  /** 单用例执行耗时（服务端按进度行/@@RESULT 时间戳计，见 exec-timing.ts）；缺省=未测得 */
+  durationMs?: number;
 }
 
 export interface RunCounts {

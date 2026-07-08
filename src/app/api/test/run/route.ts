@@ -10,13 +10,27 @@ import { predictNativeRuntime } from '@/lib/runtime';
 import { buildStep, buildPlaywrightMcp, willRunHeaded, artifactPaths, requirementOriginalPath, requirementImportedTextPath, TEST_STEPS, type TestStep } from '@/lib/test/prompts';
 import { probeUrlWithRetry } from '@/lib/test/probe';
 import { reduceFromText } from '@/lib/test/reduce';
-import { snapshotRunJson } from '@/lib/test/history';
+import { snapshotRunJson, sha1Hex } from '@/lib/test/history';
 import { sweepStrayEvidence, normalizeEvidenceExt } from '@/lib/test/evidence';
 import { resolveProjectEnvWithDb } from '@/lib/test/env-resolve';
 import { isUnsafeSegment } from '@/lib/test/path-safety';
+import { createCaseTimer } from '@/lib/test/exec-timing';
+import { buildStepCompleted, observeStream, recordCasesGenerated, recordStatsEvents } from '@/lib/test/stats-recorder';
 
 // Reference the import so it isn't tree-shaken away (keeps the registration side-effect).
 void predictNativeRuntime;
+
+/**
+ * 使用统计上下文（body 携带 taskId 时才构造；缺失 → 全部埋点跳过，宁缺毋错）。
+ * abort/error 收尾的运行不记事件——错误轮不能被记成完成（口径见执行计划）。
+ */
+interface StepStats {
+  taskId: string;
+  model?: string;
+  providerId?: string;
+  stepStartMs: number;
+  aborted: () => boolean;
+}
 
 /**
  * Wrap the execution step's SSE stream: forward every frame to the client
@@ -28,11 +42,14 @@ void predictNativeRuntime;
  */
 export function wrapExecutionStream(
   src: ReadableStream<string>,
-  opts: { projectPath: string; taskName: string; env: string; runStartMs: number; leadingFrame?: string },
+  opts: { projectPath: string; taskName: string; env: string; runStartMs: number; leadingFrame?: string; stats?: StepStats },
 ): ReadableStream<string> {
   const reader = src.getReader();
   let frameBuf = '';
   let textAcc = '';
+  let sawError = false;
+  // 逐用例计时：对 text 增量做行缓冲，▶ 行 → 下一条 @@RESULT 行的挂钟差（见 exec-timing.ts）
+  const timer = createCaseTimer();
   return new ReadableStream<string>({
     start(controller) {
       // 有头被自动回落无头时,先补发一条提示帧让用户在对话里看到「已改无头」(见 POST 内)。
@@ -92,6 +109,13 @@ export function wrapExecutionStream(
             verificationById,
             caseIds,
           });
+          // 逐用例耗时合入 tests[]（在 stringify 之前 → run.json 与 runHash 都覆盖 durations）。
+          // 对齐补全的「未执行」条目天然测不到时长，保持缺省。
+          const durations = timer.finish(Date.now());
+          for (const t of reduced.tests) {
+            const d = durations[t.id];
+            if (typeof d === 'number' && d > 0) t.durationMs = d;
+          }
           const runContent = JSON.stringify(reduced, null, 2);
           try {
             const runAbs = path.join(opts.projectPath, paths.runJson);
@@ -112,6 +136,40 @@ export function wrapExecutionStream(
           } catch {
             // best-effort: still emit the reduced result even if the write fails
           }
+          // 使用统计：执行轮干净收尾（无 error 帧、未中断）才记 execution_completed +
+          // step_completed；runHash 与快照去重同源（sha1(runContent)，已含 durations）。
+          const stats = opts.stats;
+          if (stats && !sawError && !stats.aborted()) {
+            recordStatsEvents([
+              {
+                eventType: 'execution_completed',
+                projectPath: opts.projectPath,
+                taskId: stats.taskId,
+                taskName: opts.taskName,
+                env: opts.env,
+                payload: {
+                  env: opts.env,
+                  model: stats.model ?? null,
+                  counts: reduced.counts,
+                  funcCounts: reduced.funcCounts,
+                  circuitBroken: reduced.circuitBroken,
+                  durationMs: Date.now() - stats.stepStartMs,
+                  runHash: sha1Hex(runContent),
+                  tests: reduced.tests.map((t) => ({ id: t.id, durationMs: t.durationMs ?? null })),
+                },
+              },
+              buildStepCompleted({
+                taskId: stats.taskId,
+                projectPath: opts.projectPath,
+                taskName: opts.taskName,
+                env: opts.env,
+                step: 'execution',
+                stepStartMs: stats.stepStartMs,
+                model: stats.model,
+                providerId: stats.providerId,
+              }),
+            ]);
+          }
           controller.enqueue(`data: ${JSON.stringify({ type: 'run_json', data: JSON.stringify(reduced) })}\n\n`);
           controller.close();
           return;
@@ -126,7 +184,19 @@ export function wrapExecutionStream(
           if (!line) continue;
           try {
             const evt = JSON.parse(line);
-            if (evt?.type === 'text') textAcc += evt.data || '';
+            if (evt?.type === 'text') {
+              textAcc += evt.data || '';
+              timer.feedText(evt.data || '', Date.now());
+            } else if (evt?.type === 'error') {
+              // SDK 报错路径先发 error 帧再发 done 帧——错误轮不得记成完成
+              sawError = true;
+            } else if (evt?.type === 'result') {
+              // SDK 会话级失败（限流/鉴权/额度）只发 result{is_error:true}，无 error 帧
+              try {
+                const r = JSON.parse(evt.data || '{}') as { is_error?: unknown };
+                if (r?.is_error === true) sawError = true;
+              } catch { /* native result 帧无 is_error → 非错误 */ }
+            }
           } catch {
             // ignore non-JSON frames
           }
@@ -149,22 +219,78 @@ export function wrapExecutionStream(
  */
 export function wrapReportStream(
   src: ReadableStream<string>,
-  opts: { projectPath: string; taskName: string; env: string },
+  opts: { projectPath: string; taskName: string; env: string; stats?: StepStats },
 ): ReadableStream<string> {
   const reader = src.getReader();
+  let frameBuf = '';
+  let sawError = false;
   return new ReadableStream<string>({
     async pull(controller) {
       try {
         const { done, value } = await reader.read();
         if (done) {
           const reportAbs = path.join(opts.projectPath, artifactPaths(opts.taskName, opts.env).report);
-          if (!fs.existsSync(reportAbs)) {
+          const reportExists = fs.existsSync(reportAbs);
+          if (!reportExists) {
             controller.enqueue(`data: ${JSON.stringify({ type: 'error', data: '测试报告文档未生成（AI 未写出 .md），请点「重跑」重试。' })}\n\n`);
+          }
+          // 使用统计：报告真的写出来了、且流干净收尾才记 report_generated + step_completed。
+          // runHash 读 run.json 内容重算（与执行步 sha1(runContent) 同源同值）。
+          const stats = opts.stats;
+          if (stats && reportExists && !sawError && !stats.aborted()) {
+            let runHash: string | null = null;
+            try {
+              runHash = sha1Hex(
+                fs.readFileSync(path.join(opts.projectPath, artifactPaths(opts.taskName, opts.env).runJson), 'utf-8'),
+              );
+            } catch {
+              /* run.json 缺失 → runHash 缺省，聚合按时序回填兜底 */
+            }
+            recordStatsEvents([
+              {
+                eventType: 'report_generated',
+                projectPath: opts.projectPath,
+                taskId: stats.taskId,
+                taskName: opts.taskName,
+                env: opts.env,
+                payload: { env: opts.env, runHash, model: stats.model ?? null },
+              },
+              buildStepCompleted({
+                taskId: stats.taskId,
+                projectPath: opts.projectPath,
+                taskName: opts.taskName,
+                env: opts.env,
+                step: 'report',
+                stepStartMs: stats.stepStartMs,
+                model: stats.model,
+                providerId: stats.providerId,
+              }),
+            ]);
           }
           controller.close();
           return;
         }
         controller.enqueue(value);
+        // 观察 error 帧（SDK 报错后仍会发 done 帧，错误轮不得记成完成）
+        frameBuf += value;
+        const frames = frameBuf.split('\n\n');
+        frameBuf = frames.pop() || '';
+        for (const f of frames) {
+          const line = f.replace(/^data:\s?/, '').trim();
+          if (!line) continue;
+          try {
+            const evt = JSON.parse(line) as { type?: string; data?: string };
+            if (evt?.type === 'error') sawError = true;
+            else if (evt?.type === 'result') {
+              try {
+                const r = JSON.parse(evt.data || '{}') as { is_error?: unknown };
+                if (r?.is_error === true) sawError = true;
+              } catch { /* native result 帧无 is_error → 非错误 */ }
+            }
+          } catch {
+            /* ignore non-JSON frames */
+          }
+        }
       } catch (e) {
         controller.error(e);
       }
@@ -210,6 +336,10 @@ export async function POST(req: Request): Promise<Response> {
     const envArg: string = body.env || 'local';
     const model: string | undefined = body.model;
     const providerId: string | undefined = body.providerId;
+    // 使用统计的任务身份（workbench 任务 UUID）。旧前端不带 → 跳过埋点（宁缺毋错，
+    // taskName 仅项目内唯一、不能冒充 id）。
+    const taskId: string | null =
+      typeof body.taskId === 'string' && body.taskId.trim() ? body.taskId.trim().slice(0, 128) : null;
     // Free-text 追加指令 from the 测试对话 composer (additive; only affects this run's prompt).
     const extraInstruction: string | undefined =
       typeof body.extraInstruction === 'string' && body.extraInstruction.trim() ? body.extraInstruction : undefined;
@@ -333,14 +463,42 @@ export async function POST(req: Request): Promise<Response> {
       ? `data: ${JSON.stringify({ type: 'exec_notice', data: 'headed_downgraded_no_chrome' })}\n\n`
       : undefined;
 
+    // 使用统计上下文（缺 taskId 则为 undefined → 所有埋点跳过）
+    const stats: StepStats | undefined = taskId
+      ? { taskId, model, providerId, stepStartMs: runStartMs, aborted: () => abortController.signal.aborted }
+      : undefined;
+
     // Execution step: wrap to sweep evidence + reduce/persist run.json + emit run_json.
     // Report step: wrap to verify the .md was actually written (else emit error → 失败).
+    // Requirement/cases steps: 仅观测包装（step_completed / cases_generated 埋点），
+    // 不改变任何对客户端可见的行为；无 taskId 时保持原样直通。
     const finalStream =
       step === 'execution'
-        ? wrapExecutionStream(stream, { projectPath, taskName, env, runStartMs, leadingFrame })
+        ? wrapExecutionStream(stream, { projectPath, taskName, env, runStartMs, leadingFrame, stats })
         : step === 'report'
-          ? wrapReportStream(stream, { projectPath, taskName, env })
-          : stream;
+          ? wrapReportStream(stream, { projectPath, taskName, env, stats })
+          : stats
+            ? observeStream(stream, {
+                aborted: stats.aborted,
+                onCleanDone: () => {
+                  recordStatsEvents([
+                    buildStepCompleted({
+                      taskId: stats.taskId,
+                      projectPath,
+                      taskName,
+                      env,
+                      step,
+                      stepStartMs: stats.stepStartMs,
+                      model,
+                      providerId,
+                    }),
+                  ]);
+                  if (step === 'cases') {
+                    recordCasesGenerated({ taskId: stats.taskId, projectPath, taskName, sinceMs: stats.stepStartMs, model });
+                  }
+                },
+              })
+            : stream;
 
     return new Response(finalStream, {
       headers: {
