@@ -516,6 +516,66 @@ describe("windowed aggregation keeps full-context attribution", () => {
   });
 });
 
+describe("cases_approved re-fire keeps earliest approval time (M1)", () => {
+  // 重跑执行会重复发 cases_approved：内容取最新、时间取最早，否则窗口/周趋势把采纳量挪走。
+  const finalSnap = snapshotCases([mkCase("TC-1", "a"), mkCase("TC-2", "b")]);
+  const base = snapshotCases([mkCase("TC-1", "a"), mkCase("TC-2", "b"), mkCase("TC-3", "c")]);
+  const diff = diffCases(base, finalSnap); // kept 2, removed 1
+  const events: TestStatsEvent[] = [
+    ev("task_created", "T", "2026-06-01 09:00:00", { source: "imported_requirement" }),
+    ev("cases_generated", "T", "2026-06-01 09:10:00", { round: 1, caseCount: 3, model: "m1", cases: base }),
+    ev("cases_approved", "T", "2026-06-01 10:00:00", { finalCount: 2, final: finalSnap, diff, aiRounds: 1 }), // 第 1 周批准
+    ev("execution_completed", "T", "2026-06-01 11:00:00", { env: "sit", model: "m1", counts: { total: 2, pass: 2, fail: 0, partial: 0, blocked: 0 }, circuitBroken: false, runHash: "r1", tests: [] }, { env: "sit" }),
+    // 第 5 周重跑执行 → 再发一次 cases_approved（内容相同）
+    ev("cases_approved", "T", "2026-07-01 10:00:00", { finalCount: 2, final: finalSnap, diff, aiRounds: 1 }),
+    ev("execution_completed", "T", "2026-07-01 11:00:00", { env: "sit", model: "m1", counts: { total: 2, pass: 2, fail: 0, partial: 0, blocked: 0 }, circuitBroken: false, runHash: "r2", tests: [] }, { env: "sit" }),
+  ];
+  it("adoption stays in the FIRST approval's week window, not the re-run week", () => {
+    const wkFirst = aggregateGlobal(events, { from: "2026-06-01 00:00:00", to: "2026-06-07 23:59:59" });
+    assert.equal(wkFirst.adoption.generated, 3, "首周窗口应含采纳");
+    assert.equal(wkFirst.adoption.kept, 2);
+    const wkRerun = aggregateGlobal(events, { from: "2026-06-29 00:00:00", to: "2026-07-05 23:59:59" });
+    assert.equal(wkRerun.adoption.generated, 0, "重跑周窗口不应重复计采纳");
+  });
+  it("all-time totals count adoption exactly once", () => {
+    const g = aggregateGlobal(events);
+    assert.equal(g.adoption.eligibleTasks, 1);
+    assert.equal(g.adoption.generated, 3);
+    assert.equal(g.adoption.kept, 2);
+  });
+});
+
+describe("review undo via 'cleared' sentinel (M2)", () => {
+  const base: TestStatsEvent[] = [
+    ev("execution_completed", "U", "2026-07-06 11:00:00", { env: "sit", model: "m1", counts: { total: 2, pass: 1, fail: 1, partial: 0, blocked: 0 }, circuitBroken: false, runHash: "rh", tests: [] }, { env: "sit" }),
+    ev("report_reviewed", "U", "2026-07-06 12:00:00", { caseId: "TC-1", verdict: "accurate", runHash: "rh" }),
+    ev("report_reviewed", "U", "2026-07-06 12:01:00", { caseId: "TC-2", verdict: "false_fail", runHash: "rh" }),
+  ];
+  it("counts both reviews before undo", () => {
+    const g = aggregateGlobal(base);
+    assert.equal(g.review.reviewed, 2);
+    assert.equal(g.review.accurate, 1);
+    assert.equal(g.review.falseFail, 1);
+  });
+  it("a later 'cleared' removes the review from the denominator (last-wins)", () => {
+    const withUndo = [...base, ev("report_reviewed", "U", "2026-07-06 12:05:00", { caseId: "TC-2", verdict: "cleared", runHash: "rh" })];
+    const g = aggregateGlobal(withUndo);
+    assert.equal(g.review.reviewed, 1, "撤销后只剩 1 条");
+    assert.equal(g.review.falseFail, 0);
+    assert.equal(g.review.accuracy, 1); // 剩下的 TC-1 accurate
+  });
+  it("re-reviewing after clear counts again", () => {
+    const reReview = [
+      ...base,
+      ev("report_reviewed", "U", "2026-07-06 12:05:00", { caseId: "TC-2", verdict: "cleared", runHash: "rh" }),
+      ev("report_reviewed", "U", "2026-07-06 12:10:00", { caseId: "TC-2", verdict: "accurate", runHash: "rh" }),
+    ];
+    const g = aggregateGlobal(reReview);
+    assert.equal(g.review.reviewed, 2);
+    assert.equal(g.review.accurate, 2);
+  });
+});
+
 describe("aggregateTask pairs rounds by time, not index", () => {
   it("revise round (no step_completed) does not steal the next full run's duration", () => {
     const events = [

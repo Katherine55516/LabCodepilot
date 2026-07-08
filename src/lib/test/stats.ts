@@ -425,8 +425,12 @@ function buildTaskAccs(events: TestStatsEvent[]): Map<string, TaskAcc> {
         });
         break;
       case 'cases_approved':
+        // cases_approved 在每次进入执行时都发（重跑/多环境）。内容（diff/final）取最新一次
+        // ——捕获用户在轮次间对用例的编辑；但时间 at 取**最早一次**（首次批准），用于窗口/
+        // 周趋势归属——否则第 5 周重跑会把第 1 周的采纳量错误地挪到第 5 周（评审 M1）。
+        // 事件按时间升序，acc.approved?.at 即已记录的最早值。
         acc.approved = {
-          at: ev.createdAt,
+          at: acc.approved?.at ?? ev.createdAt,
           finalCount: asNum(p.finalCount),
           diff: payloadDiff(p.diff),
           aiRounds: asNum(p.aiRounds),
@@ -465,15 +469,19 @@ function buildTaskAccs(events: TestStatsEvent[]): Map<string, TaskAcc> {
       case 'report_reviewed': {
         const caseId = asStr(p.caseId) ?? '';
         const verdict = p.verdict;
-        if (
-          caseId &&
-          (verdict === 'accurate' ||
-            verdict === 'false_fail' ||
-            verdict === 'missed_fail' ||
-            verdict === 'severity_mismatch')
+        if (!caseId) break;
+        const runHash = asStr(p.runHash);
+        const key = `${runHash ?? ''}|${caseId}`;
+        if (verdict === 'cleared') {
+          // 撤销：last-wins 删除该条复核，不计入准确度/覆盖率（评审 M2）
+          acc.reviews.delete(key);
+        } else if (
+          verdict === 'accurate' ||
+          verdict === 'false_fail' ||
+          verdict === 'missed_fail' ||
+          verdict === 'severity_mismatch'
         ) {
-          const runHash = asStr(p.runHash);
-          acc.reviews.set(`${runHash ?? ''}|${caseId}`, { verdict, runHash, at: ev.createdAt });
+          acc.reviews.set(key, { verdict, runHash, at: ev.createdAt });
         }
         break;
       }

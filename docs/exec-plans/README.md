@@ -71,7 +71,7 @@
 | active/btw-side-question.md | `/btw` 会话内临时问答浮层（对标 Claude Code CLI /btw）：无状态端点 native generateText（无工具/不取锁/不落库）+ 前端 `/btw <arg>` 解析 + BtwDialog 浮层 + 前端内存上下文快照（含 in-flight），主对话流式期间不打断 | Phase 0 完成，Phase 1-6 待开始 |
 | active/image-model-managed-delivery-client.md | **文生图模型账号下发（客户端层）**：去编译期 key 注入，改登录后服务端下发百炼凭证+模型列表；以 `settings.bailian_image_config` 落地（不进 api_providers，结构上隔离对话下拉框），复刻 ASR 下发范式 + broker 写入嵌入式 Next | Phase 0-6 待开始 |
 | active/image-model-managed-delivery-server.md | **文生图模型账号下发（服务端层）**：新增 `GET /api/v1/image/config(/encrypted/hash)`，apiKey 复用 configs 的 AES-256-GCM 加密口令；图片配置独立于 configs 列表避免泄漏进对话下拉框 | S1-S5 待开始 |
-| active/test-usage-stats.md | **测试模块使用统计**：test_stats_events 事件流水（SQLite）+ 用例采纳率（首轮基线自动 diff）/ 报告复核准确度（逐条+一键全准）/ 执行时长（进度行服务端计时）/ 模型归因 + 统计视图（面板第 4 view）与 XLSX 导出 | Phase 0-2 已完成，Phase 3-5 待开始 |
+| active/test-usage-stats.md | **测试模块使用统计**：test_stats_events 事件流水（SQLite）+ 用例采纳率（首轮基线自动 diff）/ 报告复核准确度（逐条+一键全准）/ 执行时长（进度行服务端计时）/ 模型归因 + 统计视图（面板第 4 view）与 XLSX 导出 | Phase 0-3 已完成，Phase 4-5 待开始 |
 ### Completed
 
 | 文件 | 主题 | 完成日期 |

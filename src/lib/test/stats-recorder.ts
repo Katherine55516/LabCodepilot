@@ -104,7 +104,12 @@ export function recordCasesGenerated(args: {
  */
 export function observeStream(
   src: ReadableStream<string>,
-  opts: { aborted?: () => boolean; onCleanDone: () => void },
+  opts: {
+    aborted?: () => boolean;
+    onCleanDone: () => void;
+    /** 干净收尾时在 close 前补发的一帧（如 step_stats，前端写节点用时/模型徽标）。 */
+    cleanDoneFrame?: () => string;
+  },
 ): ReadableStream<string> {
   const reader = src.getReader();
   let frameBuf = '';
@@ -115,6 +120,11 @@ export function observeStream(
         const { done, value } = await reader.read();
         if (done) {
           if (!sawError && !(opts.aborted?.() ?? false)) {
+            if (opts.cleanDoneFrame) {
+              try {
+                controller.enqueue(opts.cleanDoneFrame());
+              } catch { /* 帧构造失败不影响收尾 */ }
+            }
             try {
               opts.onCleanDone();
             } catch (e) {

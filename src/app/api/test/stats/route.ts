@@ -5,6 +5,7 @@ import {
   aggregateGlobal,
   aggregateModels,
   aggregateTask,
+  classifyVerdict,
   diffCases,
   readCaseKeys,
   sanitizeEventInput,
@@ -78,6 +79,22 @@ function enrichCasesApproved(ev: TestStatsEventInput): TestStatsEventInput {
   return { ...ev, payload };
 }
 
+/**
+ * report_reviewed 服务端归类：前端「✗ 有误」只回答"实际结果是什么"（actual: ok/broken/severity），
+ * verdict（误报/漏报/程度不符）由服务端按 AI 结论统一判定，避免分类逻辑在前端重复实现而漂移。
+ * 「✓ 准确」与「一键全准」前端直接带 verdict:'accurate'，原样透传。
+ */
+function enrichReviewed(ev: TestStatsEventInput): TestStatsEventInput {
+  const p = ev.payload ?? {};
+  if (typeof p.verdict === 'string') return ev; // 已带 verdict（accurate / 直接指定）
+  const aiStatus = typeof p.aiStatus === 'string' ? p.aiStatus : '';
+  const actual = p.actual;
+  if (aiStatus && (actual === 'ok' || actual === 'broken' || actual === 'severity')) {
+    return { ...ev, payload: { ...p, verdict: classifyVerdict(aiStatus, actual) } };
+  }
+  return ev; // 无法归类 → 原样（聚合端对无 verdict 的 report_reviewed 忽略）
+}
+
 export async function POST(req: Request): Promise<Response> {
   try {
     const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
@@ -97,7 +114,13 @@ export async function POST(req: Request): Promise<Response> {
         skipped++;
         continue;
       }
-      accepted.push(ev.eventType === 'cases_approved' ? enrichCasesApproved(ev) : ev);
+      accepted.push(
+        ev.eventType === 'cases_approved'
+          ? enrichCasesApproved(ev)
+          : ev.eventType === 'report_reviewed'
+            ? enrichReviewed(ev)
+            : ev,
+      );
     }
     const stored = accepted.length > 0 ? insertTestStatsEvents(accepted) : 0;
     return Response.json({ ok: true, stored, skipped });
@@ -145,6 +168,36 @@ export async function GET(req: Request): Promise<Response> {
       }
       const events = queryTestStatsEvents({ taskId });
       return Response.json({ scope, data: aggregateTask(events) });
+    }
+    if (scope === 'reviews') {
+      // 报告复核回显：返回某任务(+可选 runHash)当前每条用例的复核结论（last-wins）。
+      // 前端打开报告时据此把已复核的行标出，未复核的显示复核按钮。
+      const taskId = url.searchParams.get('taskId');
+      if (!taskId) {
+        return Response.json({ error: 'taskId is required for scope=reviews' }, { status: 400 });
+      }
+      const runHash = url.searchParams.get('runHash') || undefined;
+      const events = queryTestStatsEvents({
+        taskId,
+        eventTypes: ['report_reviewed', 'report_review_bulk'],
+      });
+      const byCaseId: Record<string, string> = {};
+      for (const ev of events) {
+        // 事件按时间升序 → 后写覆盖先写（last-wins）
+        const p = ev.payload;
+        if (runHash && typeof p.runHash === 'string' && p.runHash !== runHash) continue;
+        if (ev.eventType === 'report_reviewed') {
+          const caseId = typeof p.caseId === 'string' ? p.caseId : '';
+          const verdict = typeof p.verdict === 'string' ? p.verdict : '';
+          if (!caseId) continue;
+          if (verdict === 'cleared') delete byCaseId[caseId]; // 撤销：last-wins 移除
+          else if (verdict) byCaseId[caseId] = verdict;
+        } else {
+          const ids = Array.isArray(p.caseIds) ? p.caseIds : [];
+          for (const cid of ids) if (typeof cid === 'string') byCaseId[cid] = 'accurate';
+        }
+      }
+      return Response.json({ scope, data: { byCaseId } });
     }
     if (scope === 'model') {
       const events = queryEventsWithContext(from, to);

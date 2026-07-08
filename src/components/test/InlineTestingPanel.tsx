@@ -65,7 +65,7 @@ interface FourState { total: number; pass: number; fail: number; partial: number
 // 失败/部分通过用例的关键请求接口信息（执行阶段采集，进缺陷报告；镜像 reduce.ts ApiInfo）。
 interface ApiInfo { method?: string; url?: string; status?: number | string; requestBody?: string; responseBody?: string }
 // One executed case parsed from an execution @@RESULT frame (drives 报告 table).
-interface CaseResult { id: string; status: string; actual?: string; error?: string; evidence?: string[]; api?: ApiInfo }
+interface CaseResult { id: string; status: string; actual?: string; error?: string; evidence?: string[]; api?: ApiInfo; durationMs?: number }
 // 用例设计阶段生成的一条测试用例(读 cases.json,镜像 ai-lab-test-framework)。在用例
 // 阶段详情卡展示。字段全可选 —— AI 产出可能有出入,渲染时按需兜底。
 interface GeneratedCase {
@@ -105,6 +105,8 @@ interface ReportEntry {
   funcPassStr?: string;
   regressionTotal?: number;
   tests: CaseResult[];
+  /** run.json 全文 SHA-1（与执行埋点同源）：把人工复核关联到确切执行轮。 */
+  runHash?: string;
   /** The full markdown report doc ({task}-{env}.md), if the report step wrote one. */
   markdown: string;
   /** The defect report ({task}-{env}-缺陷报告.md), if generated (第三交付物). */
@@ -142,6 +144,9 @@ interface TaskState {
   requirementMode?: "generate-md" | "use-original";
   /** 保留的原始需求文档信息（导入需求时写入）：原文件名 + 扩展名，用于预览与定位需求来源文件。 */
   requirementOriginal?: { filename: string; ext: string };
+  /** 使用统计：各节点最近一次运行的服务端权威用时（ms）+ 所用模型（step_stats 帧写入，随 workbench 持久化）。 */
+  stepDurations?: Partial<Record<TestStep, number>>;
+  stepModels?: Partial<Record<TestStep, string>>;
 }
 const DEFAULT_TASK_STATE: TaskState = {
   stepStatus: { requirement: "idle", cases: "idle", execution: "idle", report: "idle" },
@@ -160,8 +165,48 @@ function makeTaskId(): string {
   }
 }
 
+/**
+ * 使用统计 · 前端埋点上报（fire-and-forget）。任何失败只吞掉，绝不影响测试主流程 /
+ * 用户操作。服务端 sanitize 会丢弃不合法条目（见 /api/test/stats POST）。
+ */
+function recordTestStat(events: Array<{
+  eventType: string;
+  projectPath: string;
+  taskId: string;
+  taskName?: string;
+  env?: string;
+  payload?: Record<string, unknown>;
+}>): void {
+  if (!events.length) return;
+  try {
+    // 服务端单请求上限 200（见 /api/test/stats POST）——删除大项目可能一次几十上百条
+    // task_deleted，分批发避免整批 400 全丢。
+    for (let i = 0; i < events.length; i += 200) {
+      void fetch("/api/test/stats", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ events: events.slice(i, i + 200) }),
+        keepalive: true, // 允许在页面卸载/导航时仍把事件发出去
+      }).catch(() => {});
+    }
+  } catch {
+    /* 上报失败静默 */
+  }
+}
+
 const INPUT =
   "w-full h-9 rounded-md border border-border bg-background px-2.5 text-xs text-foreground outline-none focus:border-primary";
+
+/** 毫秒 → 紧凑用时（1m 05s / 47s / 320ms）。使用统计的用时徽标 / 报告矩阵共用。 */
+function fmtDuration(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return "—";
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  const s = Math.round(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  const rem = s % 60;
+  return `${m}m ${String(rem).padStart(2, "0")}s`;
+}
 
 // Per-task workflow (no code analysis), ported from ai-lab-test-framework V0.3:
 // 需求分析 → 用例设计 → 测试执行 → 测试报告. Steps run in order; each reads the
@@ -341,6 +386,10 @@ export function InlineTestingPanel() {
   // Simulated progress % for non-execution running steps (no granular progress) — see effect below.
   const [simPct, setSimPct] = useState(0);
   const threadRef = useRef<HTMLDivElement>(null);
+  // 使用统计 · 流程节点运行中用时实时累计：记录每个 (taskId:step) 的起跑时刻 + 1s ticker
+  // 驱动重渲染。完成后展示服务端权威用时（stepDurations），运行中展示这里的本地累计。
+  const stepStartRef = useRef<Record<string, number>>({});
+  const [nowTick, setNowTick] = useState(0);
   // Tasks in "run all" mode (运行任务/批量): gated steps auto-approve + the chain runs
   // through to 报告 without waiting for 批准. Was a single id; now a set for parallel tasks.
   const autoRunIdsRef = useRef<Set<string>>(new Set());
@@ -773,6 +822,13 @@ export function InlineTestingPanel() {
         requirementOriginal: hasReq ? reqOriginal : undefined,
       }));
     }
+    // 使用统计：新建任务。source 标注导入来源（采纳率只统计 imported_requirement 的 AI 生成流）。
+    if (proj?.path) {
+      const source = hasReq && hasCases ? "both" : hasCases ? "imported_cases" : "imported_requirement";
+      recordTestStat([
+        { eventType: "task_created", projectPath: proj.path, taskId: id, taskName: name, payload: { source } },
+      ]);
+    }
     return { ok: true };
   };
 
@@ -883,6 +939,13 @@ export function InlineTestingPanel() {
     if (!runningStep || runningStep === "execution") { setSimPct(0); return; }
     setSimPct(8);
     const id = setInterval(() => setSimPct((p) => (p >= 90 ? p : p + Math.max(1, Math.round((90 - p) / 10)))), 350);
+    return () => clearInterval(id);
+  }, [runningStep]);
+
+  // 运行中节点用时的 1s ticker（仅当前活动任务有步在跑时才计）。
+  useEffect(() => {
+    if (!runningStep) return;
+    const id = setInterval(() => setNowTick((n) => n + 1), 1000);
     return () => clearInterval(id);
   }, [runningStep]);
 
@@ -1090,6 +1153,14 @@ export function InlineTestingPanel() {
       for (let i = sidx; i < STEP_ORDER.length; i++) stoppedStepRef.current.delete(`${id}:${STEP_ORDER[i]}`);
     }
     markRunning(id);
+    stepStartRef.current[`${id}:${step}`] = Date.now(); // 使用统计：运行中用时累计起点
+    // 清掉该步上一次的用时/模型徽标：运行中显示实时累计，若本轮失败/中断（无 step_stats
+    // 补发）则徽标为空而非残留旧值（评审 L6）；成功时 step_stats 会重新写入。
+    patchTask(id, (s) => {
+      const d = { ...(s.stepDurations ?? {}) }; delete d[step];
+      const m = { ...(s.stepModels ?? {}) }; delete m[step];
+      return { stepDurations: d, stepModels: m };
+    });
     // 重跑某步 → 其下游各步产物失效：当前步置 running，其后所有步骤复位 idle(未开始)，
     // 避免重跑时下游残留上次的「已完成」(如重跑「测试执行」后「测试报告」仍显示已完成)。
     // 规则收敛在 withDownstreamReset；所有重跑入口都经此处，四节点统一生效。
@@ -1102,6 +1173,9 @@ export function InlineTestingPanel() {
         caseResults: [],
         circuitBroken: false,
       }));
+      // 使用统计：进入执行 = 用例已被批准（手动门控 / 运行任务 / 批量三条路径的汇聚点）。
+      // 服务端据此读 cases.json 拍终态快照、对首轮基线做 diff 算采纳率（last-wins，重跑重新快照无害）。
+      recordTestStat([{ eventType: "cases_approved", projectPath: projPath, taskId: id, taskName: task.name, env }]);
     }
     const stepName = t(STEPS.find((s) => s.step === step)!.name);
     const push = (msg: ConvoMsg) => patchTask(id, (s) => ({ convo: [...s.convo, msg] }));
@@ -1272,10 +1346,24 @@ export function InlineTestingPanel() {
                     actual: typeof tt.actual === "string" ? tt.actual : undefined,
                     error: typeof tt.error === "string" ? tt.error : undefined,
                     evidence: Array.isArray(tt.evidence) ? tt.evidence.map(String) : undefined,
+                    durationMs: typeof tt.durationMs === "number" ? tt.durationMs : undefined,
                   }));
                 }
                 return patch;
               });
+            } catch {}
+          } else if (evt.type === "step_stats") {
+            // 使用统计：服务端在步骤干净收尾时补发的节点用时/模型（权威值），写进 TaskState
+            // 供流程节点徽标展示 + 随 workbench 持久化。未知帧旧前端静默忽略、零影响。
+            try {
+              const ss = JSON.parse(evt.data || "{}") as { step?: string; durationMs?: number; model?: string | null };
+              const stStep = ss.step as TestStep | undefined;
+              if (stStep && STEP_ORDER.includes(stStep)) {
+                patchTask(id, (s) => ({
+                  stepDurations: { ...(s.stepDurations ?? {}), ...(typeof ss.durationMs === "number" ? { [stStep]: ss.durationMs } : {}) },
+                  stepModels: { ...(s.stepModels ?? {}), ...(ss.model ? { [stStep]: ss.model } : {}) },
+                }));
+              }
             } catch {}
           } else if (evt.type === "exec_notice") {
             // 后端系统提示(非 AI 输出 / 非错误):目前仅「有头自动回落无头」。映射成本地化系统气泡。
@@ -1393,6 +1481,10 @@ export function InlineTestingPanel() {
     if (kind === "project") {
       const proj = projects[pIdx];
       if (proj?.path) for (const tk of proj.tasks) toDelete.push({ path: proj.path, name: tk.name });
+      // 使用统计：删除项目 → 逐任务记 task_deleted
+      if (proj?.path) {
+        recordTestStat(proj.tasks.map((tk) => ({ eventType: "task_deleted", projectPath: proj.path, taskId: tk.id, taskName: tk.name })));
+      }
       const ids = new Set((proj?.tasks ?? []).map((tk) => tk.id));
       nextTaskStates = (() => { const n = { ...taskStates }; ids.forEach((id) => delete n[id]); return n; })();
       nextProjects = projects.filter((_, i) => i !== pIdx);
@@ -1404,6 +1496,10 @@ export function InlineTestingPanel() {
       const proj = projects[pIdx];
       const tk = proj?.tasks[tIdx!];
       if (proj?.path && tk) toDelete.push({ path: proj.path, name: tk.name });
+      // 使用统计：删除单个任务
+      if (proj?.path && tk) {
+        recordTestStat([{ eventType: "task_deleted", projectPath: proj.path, taskId: tk.id, taskName: tk.name }]);
+      }
       if (tk) {
         nextTaskStates = (() => { const n = { ...taskStates }; delete n[tk.id]; return n; })();
         setTaskStates((m) => { const n = { ...m }; delete n[tk.id]; return n; });
@@ -1722,6 +1818,24 @@ export function InlineTestingPanel() {
                       <div className={`mt-1 text-[11px] ${isRunning ? "text-primary" : "text-muted-foreground"}`}>
                         {stepStatusText(status, t)}
                       </div>
+                      {/* 使用统计：用时徽标（运行中本地实时累计 / 完成后服务端权威值）+ 所用模型 */}
+                      {(() => {
+                        void nowTick; // 依赖 1s ticker 触发运行中用时的重渲染
+                        const started = aId ? stepStartRef.current[`${aId}:${s.step}`] : undefined;
+                        const liveMs = isRunning && started ? Date.now() - started : null;
+                        const doneMs = aState.stepDurations?.[s.step];
+                        const durText = liveMs !== null ? `${fmtDuration(liveMs)}…` : typeof doneMs === "number" ? fmtDuration(doneMs) : null;
+                        const model = aState.stepModels?.[s.step];
+                        if (!durText && !model) return null;
+                        return (
+                          <div className="mt-1 flex flex-col gap-0.5">
+                            {durText && (
+                              <span className={`font-mono text-[10px] ${isRunning ? "text-primary" : "text-muted-foreground"}`}>⏱ {durText}</span>
+                            )}
+                            {model && <span className="truncate font-mono text-[9px] text-muted-foreground" title={model}>{model}</span>}
+                          </div>
+                        );
+                      })()}
                     </button>
                   );
                 })}
@@ -2497,7 +2611,9 @@ function ConvoBubble({ msg }: { msg: ConvoMsg }) {
 
 // 报告 view (prototype): metrics row + per-case results table, from the execution
 // run's @@RESULT frames (caseResults) + four-state tally. Facts only.
-function ReportView({ t, results, four, funcCounts, funcPassStr, circuitBroken, taskName, projectPath, env }: { t: T; results: CaseResult[]; four: FourState; funcCounts?: FourState; funcPassStr?: string; circuitBroken?: boolean; taskName: string; projectPath?: string; env?: string }) {
+// 使用统计（Phase 3）：taskId + runHash 就位时，执行矩阵每行加人工复核（✓准确/✗有误→选
+// 实际结果，误报/漏报/程度不符由服务端归类）+ 用时列 + 一键全准；打开时回显已复核状态。
+function ReportView({ t, results, four, funcCounts, funcPassStr, circuitBroken, taskName, projectPath, env, taskId, runHash }: { t: T; results: CaseResult[]; four: FourState; funcCounts?: FourState; funcPassStr?: string; circuitBroken?: boolean; taskName: string; projectPath?: string; env?: string; taskId?: string; runHash?: string }) {
   // 证据媒体（图片灯箱 + 录像内联回放）：经 /api/test/media 白名单流式取证据；
   // lightbox=当前放大查看的文件名。无 projectPath（如流程内调用）时退化为文件名文本。
   const [lightbox, setLightbox] = useState<string | null>(null);
@@ -2508,6 +2624,54 @@ function ReportView({ t, results, four, funcCounts, funcPassStr, circuitBroken, 
   // 功能验证通过率（oracle 双轴，排除回归基线）：用后端权威 funcCounts/funcPassStr，
   // 缺失（legacy 报告）回退「扣除 blocked」执行口径；全回归基线 → "N/A"，不报「100%」。
   const funcRateStr = funcPassRateStr({ total, pass: four.pass, blocked: four.blocked }, funcCounts, funcPassStr);
+
+  // 人工复核：caseId → verdict（accurate/false_fail/missed_fail/severity_mismatch）。
+  // 仅当 taskId + runHash 就位（报告浏览器场景）才开放复核；流程内联预览无这两者时只读。
+  const canReview = !!taskId && !!runHash;
+  const [reviews, setReviews] = useState<Record<string, string>>({});
+  const [badFor, setBadFor] = useState<string | null>(null); // 正在选「实际结果」的 caseId
+  useEffect(() => {
+    if (!canReview) return;
+    let cancelled = false;
+    fetch(`/api/test/stats?scope=reviews&taskId=${encodeURIComponent(taskId!)}&runHash=${encodeURIComponent(runHash!)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (!cancelled && d?.data?.byCaseId) setReviews(d.data.byCaseId as Record<string, string>); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [canReview, taskId, runHash]);
+
+  const postReview = (events: Array<Record<string, unknown>>) => {
+    if (!taskId || !projectPath) return;
+    recordTestStat(events.map((p) => ({ eventType: p.eventType as string, projectPath, taskId, taskName, env, payload: p.payload as Record<string, unknown> })));
+  };
+  const markAccurate = (caseId: string) => {
+    setReviews((m) => ({ ...m, [caseId]: "accurate" }));
+    postReview([{ eventType: "report_reviewed", payload: { caseId, verdict: "accurate", runHash } }]);
+  };
+  const markBad = (caseId: string, aiStatus: string, actual: "ok" | "broken" | "severity") => {
+    // verdict 由服务端按 aiStatus + actual 归类（enrichReviewed）；本地先乐观按同规则显示。
+    const verdict = actual === "severity" ? "severity_mismatch" : actual === "ok" ? (aiStatus === "pass" ? "accurate" : "false_fail") : (aiStatus === "fail" || aiStatus === "blocked" ? "accurate" : "missed_fail");
+    setReviews((m) => ({ ...m, [caseId]: verdict }));
+    setBadFor(null);
+    postReview([{ eventType: "report_reviewed", payload: { caseId, aiStatus, actual, runHash } }]);
+  };
+  const undoReview = (caseId: string) => {
+    setReviews((m) => { const n = { ...m }; delete n[caseId]; return n; });
+    // 撤销必须落库（否则重开报告会从 DB 回显、且仍计入准确度分母 —— 评审 M2）。
+    // 用 verdict:'cleared' 哨兵，聚合层与回显按 last-wins 移除该条。
+    postReview([{ eventType: "report_reviewed", payload: { caseId, verdict: "cleared", runHash } }]);
+  };
+  const bulkAccurate = () => {
+    const rest = results.map((r) => r.id).filter((id) => !reviews[id]);
+    if (!rest.length) return;
+    setReviews((m) => { const n = { ...m }; rest.forEach((id) => { n[id] = "accurate"; }); return n; });
+    postReview([{ eventType: "report_review_bulk", payload: { caseIds: rest, count: rest.length, runHash } }]);
+  };
+  const reviewedCount = results.filter((r) => reviews[r.id]).length;
+  const verdictLabel: Record<string, TranslationKey> = {
+    accurate: "test.review.accurate", false_fail: "test.review.falseFail", missed_fail: "test.review.missedFail", severity_mismatch: "test.review.severityMismatch",
+  };
+
   const metric = (label: string, value: string, danger?: boolean) => (
     <div className="rounded-lg bg-muted/40 p-3">
       <div className="text-[11px] text-muted-foreground">{label}</div>
@@ -2541,6 +2705,21 @@ function ReportView({ t, results, four, funcCounts, funcPassStr, circuitBroken, 
         {metric(t("test.report.execRate"), `${execRate}%`)}
         {metric(t("test.report.defects"), String(four.fail), four.fail > 0)}
       </div>
+      {/* 使用统计：人工复核工具条（仅报告浏览器场景，taskId+runHash 就位）。circuitBroken
+          轮结果不可信，复核无意义 → 不开放。 */}
+      {canReview && !circuitBroken && (
+        <div className="mb-2 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+          <span>{t("test.review.progress")}：<b className="text-foreground">{reviewedCount}</b>/{results.length}</span>
+          <span className="flex-1" />
+          <button
+            onClick={bulkAccurate}
+            disabled={reviewedCount >= results.length}
+            className="rounded-md border border-border px-2 py-1 text-[11px] text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {t("test.review.bulkAccurate")}
+          </button>
+        </div>
+      )}
       <div className="overflow-hidden rounded-xl border border-border">
         <table className="w-full border-collapse text-[11px]">
           <thead>
@@ -2548,8 +2727,10 @@ function ReportView({ t, results, four, funcCounts, funcPassStr, circuitBroken, 
               <th className="px-2 py-1.5 font-medium">{t("test.report.colId")}</th>
               <th className="px-2 py-1.5 font-medium">{t("test.report.colActual")}</th>
               <th className="px-2 py-1.5 font-medium">{t("test.report.colStatus")}</th>
+              <th className="whitespace-nowrap px-2 py-1.5 font-medium">{t("test.report.colDuration")}</th>
               <th className="px-2 py-1.5 font-medium">{t("test.report.colEvidence")}</th>
               <th className="px-2 py-1.5 font-medium">{t("test.report.colReason")}</th>
+              {canReview && !circuitBroken && <th className="whitespace-nowrap px-2 py-1.5 font-medium">{t("test.report.colReview")}</th>}
             </tr>
           </thead>
           <tbody>
@@ -2562,6 +2743,7 @@ function ReportView({ t, results, four, funcCounts, funcPassStr, circuitBroken, 
                     {chipLabel[r.status] ? t(chipLabel[r.status]) : r.status}
                   </span>
                 </td>
+                <td className="whitespace-nowrap px-2 py-1.5 font-mono text-muted-foreground">{typeof r.durationMs === "number" ? fmtDuration(r.durationMs) : "—"}</td>
                 <td className="px-2 py-1.5">
                   {r.evidence?.length && projectPath ? (
                     <div className="flex flex-wrap gap-1">
@@ -2577,6 +2759,33 @@ function ReportView({ t, results, four, funcCounts, funcPassStr, circuitBroken, 
                   )}
                 </td>
                 <td className="px-2 py-1.5 text-muted-foreground">{r.error || "—"}</td>
+                {canReview && !circuitBroken && (
+                  <td className="whitespace-nowrap px-2 py-1.5">
+                    {reviews[r.id] ? (
+                      <span className="flex items-center gap-1.5">
+                        <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${reviews[r.id] === "accurate" ? "bg-status-success-muted text-status-success-foreground" : "bg-status-error-muted text-status-error-foreground"}`}>
+                          {reviews[r.id] === "accurate" ? "✓ " : "✗ "}{verdictLabel[reviews[r.id]] ? t(verdictLabel[reviews[r.id]]) : reviews[r.id]}
+                        </span>
+                        <button onClick={() => undoReview(r.id)} className="text-[10px] text-muted-foreground underline hover:text-foreground">{t("test.review.undo")}</button>
+                      </span>
+                    ) : badFor === r.id ? (
+                      <span className="flex flex-col gap-1">
+                        <span className="text-[10px] text-muted-foreground">{t("test.review.actualPrompt")}</span>
+                        <span className="flex flex-wrap gap-1">
+                          <button onClick={() => markBad(r.id, r.status, "ok")} className="rounded border border-border px-1.5 py-0.5 text-[10px] hover:bg-muted">{t("test.review.actualOk")}</button>
+                          <button onClick={() => markBad(r.id, r.status, "broken")} className="rounded border border-border px-1.5 py-0.5 text-[10px] hover:bg-muted">{t("test.review.actualBroken")}</button>
+                          <button onClick={() => markBad(r.id, r.status, "severity")} className="rounded border border-border px-1.5 py-0.5 text-[10px] hover:bg-muted">{t("test.review.actualSeverity")}</button>
+                          <button onClick={() => setBadFor(null)} className="px-1 text-[10px] text-muted-foreground hover:text-foreground">{t("common.cancel")}</button>
+                        </span>
+                      </span>
+                    ) : (
+                      <span className="flex gap-1">
+                        <button onClick={() => markAccurate(r.id)} title={t("test.review.accurate")} className="rounded border border-border px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground hover:border-status-success-border hover:text-status-success-foreground">✓ {t("test.review.ok")}</button>
+                        <button onClick={() => setBadFor(r.id)} title={t("test.review.markBad")} className="rounded border border-border px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground hover:border-status-error-border hover:text-status-error-foreground">✗ {t("test.review.bad")}</button>
+                      </span>
+                    )}
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>
@@ -3449,7 +3658,7 @@ function ReportBrowser({ projects, t, model, providerId, onOpenTask, reloadSigna
                                 </div>
                               ) : (
                                 <>
-                                  <ReportView t={t} results={r.tests} four={r.counts} funcCounts={r.funcCounts} funcPassStr={r.funcPassStr} circuitBroken={r.circuitBroken} taskName={task} projectPath={project.path} env={r.env} />
+                                  <ReportView t={t} results={r.tests} four={r.counts} funcCounts={r.funcCounts} funcPassStr={r.funcPassStr} circuitBroken={r.circuitBroken} taskName={task} projectPath={project.path} env={r.env} taskId={project.tasks.find((tk) => tk.name === task)?.id} runHash={r.runHash} />
                                   {r.markdown && (
                                     <div className="mt-3 border-t border-border pt-3">
                                       <div className="mb-2 text-[11px] font-medium text-muted-foreground">{t("test.report.docTitle")}</div>

@@ -33,6 +33,18 @@ interface StepStats {
 }
 
 /**
+ * 干净收尾时补发的 step_stats 帧（沿用 run_json 手写帧先例，不进 SSEEventType 联合，
+ * 前端未知类型静默忽略 → 旧前端零影响）：前端据此把节点用时/模型写进 TaskState
+ * 并随 test-workbench.json 持久化（流程节点徽标的数据源）。
+ */
+function stepStatsFrame(step: TestStep, stats: StepStats): string {
+  return `data: ${JSON.stringify({
+    type: 'step_stats',
+    data: JSON.stringify({ step, durationMs: Date.now() - stats.stepStartMs, model: stats.model ?? null }),
+  })}\n\n`;
+}
+
+/**
  * Wrap the execution step's SSE stream: forward every frame to the client
  * unchanged AND accumulate the agent's `text` frames server-side. When the stream
  * ends, deterministically reduce the harvested `@@RESULT` lines into the canonical
@@ -170,6 +182,9 @@ export function wrapExecutionStream(
               }),
             ]);
           }
+          if (stats && !sawError && !stats.aborted()) {
+            controller.enqueue(stepStatsFrame('execution', stats));
+          }
           controller.enqueue(`data: ${JSON.stringify({ type: 'run_json', data: JSON.stringify(reduced) })}\n\n`);
           controller.close();
           return;
@@ -266,6 +281,7 @@ export function wrapReportStream(
                 providerId: stats.providerId,
               }),
             ]);
+            controller.enqueue(stepStatsFrame('report', stats));
           }
           controller.close();
           return;
@@ -480,6 +496,7 @@ export async function POST(req: Request): Promise<Response> {
           : stats
             ? observeStream(stream, {
                 aborted: stats.aborted,
+                cleanDoneFrame: () => stepStatsFrame(step, stats),
                 onCleanDone: () => {
                   recordStatsEvents([
                     buildStepCompleted({
