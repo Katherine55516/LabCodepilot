@@ -3,7 +3,7 @@ import path from 'path';
 import crypto from 'crypto';
 import fs from 'fs';
 import os from 'os';
-import type { ChatSession, Message, SettingsMap, TaskItem, TaskStatus, ApiProvider, CreateProviderRequest, UpdateProviderRequest, MediaJob, MediaJobStatus, MediaJobItem, MediaJobItemStatus, MediaContextEvent, BatchConfig, CustomCliTool, ScheduledTask, TestAccountSystem, TestAccountSystemView, TestSystemEnvironments, TestEnvironment, CreateTestAccountSystemRequest, UpdateTestAccountSystemRequest } from '@/types';
+import type { ChatSession, Message, SettingsMap, TaskItem, TaskStatus, ApiProvider, CreateProviderRequest, UpdateProviderRequest, MediaJob, MediaJobStatus, MediaJobItem, MediaJobItemStatus, MediaContextEvent, BatchConfig, CustomCliTool, ScheduledTask, TestAccountSystem, TestAccountSystemView, TestSystemEnvironments, TestEnvironment, CreateTestAccountSystemRequest, UpdateTestAccountSystemRequest, TestStatsEvent, TestStatsEventInput, TestStatsEventType } from '@/types';
 import type { ChannelType, ChannelBinding } from './bridge/types';
 import { getLocalDateString, localDayStartAsUTC } from './utils';
 import { inferProtocolFromLegacy } from './provider-catalog';
@@ -1036,6 +1036,25 @@ function migrateDb(db: Database.Database): void {
       FOREIGN KEY (task_id) REFERENCES scheduled_tasks(id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_task_run_logs_task_id ON task_run_logs(task_id);
+  `);
+
+  // Test Usage Stats: 测试模块使用统计事件流水（追加式）。payload 为开放 JSON，
+  // 字段随 event_type 而异；聚合口径可对历史事件随时重算。事件字典 / 冻结口径见
+  // docs/exec-plans/active/test-usage-stats.md。
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS test_stats_events (
+      id TEXT PRIMARY KEY,
+      event_type TEXT NOT NULL,
+      project_path TEXT NOT NULL,
+      task_id TEXT NOT NULL,
+      task_name TEXT NOT NULL DEFAULT '',
+      env TEXT,
+      payload TEXT NOT NULL DEFAULT '{}',
+      schema_version INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_tse_type_time ON test_stats_events(event_type, created_at);
+    CREATE INDEX IF NOT EXISTS idx_tse_task ON test_stats_events(task_id);
   `);
 
   // 凭证列加密迁移：把历史明文敏感列就地重封为密文。必须放在所有列迁移之后。
@@ -3214,6 +3233,130 @@ export function bulkUpsertCliToolDescriptions(entries: Array<{ toolId: string; z
     }
   });
   tx(entries);
+}
+
+// ==========================================
+// Test Usage Stats Operations (测试模块使用统计)
+// ==========================================
+// 追加式事件流水的薄 CRUD；校验与聚合都在 src/lib/test/stats.ts（纯函数，可单测）。
+// 埋点写入必须 fail-safe：调用方自行 try/catch，统计失败不得影响测试主流程。
+
+// 与 src/lib/test/stats.ts 的 TEST_STATS_SCHEMA_VERSION 保持一致；db.ts 不做值导入
+// （单测经 tsx 直接 require 本文件，@/ 别名的值导入会解析失败，type-only 导入则会被擦除）。
+const TEST_STATS_SCHEMA_VERSION = 1;
+
+/** 批量插入统计事件（单事务）。返回写入条数。 */
+export function insertTestStatsEvents(inputs: TestStatsEventInput[]): number {
+  if (inputs.length === 0) return 0;
+  const db = getDb();
+  const now = new Date().toISOString().replace('T', ' ').split('.')[0];
+  const stmt = db.prepare(
+    `INSERT INTO test_stats_events (id, event_type, project_path, task_id, task_name, env, payload, schema_version, created_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+  );
+  const tx = db.transaction((items: TestStatsEventInput[]) => {
+    for (const it of items) {
+      stmt.run(
+        crypto.randomBytes(16).toString('hex'),
+        it.eventType,
+        it.projectPath,
+        it.taskId,
+        it.taskName || '',
+        it.env ?? null,
+        JSON.stringify(it.payload ?? {}),
+        TEST_STATS_SCHEMA_VERSION,
+        now,
+      );
+    }
+  });
+  tx(inputs);
+  return inputs.length;
+}
+
+/**
+ * 按条件查询统计事件，返回 payload 已解析的视图，按 (created_at, rowid) 升序 ——
+ * 聚合层（aggregateGlobal/aggregateTask/aggregateModels）依赖这一顺序做 last-wins。
+ * from/to 为 UTC 'YYYY-MM-DD HH:MM:SS'（与 created_at 同构，字符串比较即时间比较）。
+ * 超过 limit 时保留**最新** N 条（DESC 取数后反转回升序）：截断只该丢最旧数据，
+ * 否则看板会永久停在最旧的 N 条上、复核改判等新事件被静默丢弃。
+ */
+export function queryTestStatsEvents(filter: {
+  taskId?: string;
+  taskIds?: string[];
+  projectPath?: string;
+  eventTypes?: TestStatsEventType[];
+  from?: string;
+  to?: string;
+  limit?: number;
+} = {}): TestStatsEvent[] {
+  const db = getDb();
+  const where: string[] = [];
+  const params: unknown[] = [];
+  if (filter.taskId) {
+    where.push('task_id = ?');
+    params.push(filter.taskId);
+  }
+  if (filter.taskIds && filter.taskIds.length > 0) {
+    where.push(`task_id IN (${filter.taskIds.map(() => '?').join(', ')})`);
+    params.push(...filter.taskIds);
+  }
+  if (filter.projectPath) {
+    where.push('project_path = ?');
+    params.push(filter.projectPath);
+  }
+  if (filter.eventTypes && filter.eventTypes.length > 0) {
+    where.push(`event_type IN (${filter.eventTypes.map(() => '?').join(', ')})`);
+    params.push(...filter.eventTypes);
+  }
+  if (filter.from) {
+    where.push('created_at >= ?');
+    params.push(filter.from);
+  }
+  if (filter.to) {
+    where.push('created_at <= ?');
+    params.push(filter.to);
+  }
+  const limit = Math.min(Math.max(filter.limit ?? 100000, 1), 200000);
+  const sql = `SELECT id, event_type, project_path, task_id, task_name, env, payload, schema_version, created_at
+     FROM test_stats_events
+     ${where.length ? `WHERE ${where.join(' AND ')}` : ''}
+     ORDER BY created_at DESC, rowid DESC
+     LIMIT ?`;
+  const rows = db.prepare(sql).all(...params, limit) as Array<{
+    id: string;
+    event_type: string;
+    project_path: string;
+    task_id: string;
+    task_name: string;
+    env: string | null;
+    payload: string;
+    schema_version: number;
+    created_at: string;
+  }>;
+  // DESC 取数（截断保最新）→ 反转回升序，维持聚合层的 last-wins 契约
+  rows.reverse();
+  return rows.map((r) => {
+    let payload: Record<string, unknown> = {};
+    try {
+      const parsed = JSON.parse(r.payload || '{}') as unknown;
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        payload = parsed as Record<string, unknown>;
+      }
+    } catch {
+      /* 损坏 payload → 空对象，聚合按缺省处理 */
+    }
+    return {
+      id: r.id,
+      eventType: r.event_type as TestStatsEventType,
+      projectPath: r.project_path,
+      taskId: r.task_id,
+      taskName: r.task_name,
+      env: r.env,
+      payload,
+      schemaVersion: r.schema_version,
+      createdAt: r.created_at,
+    };
+  });
 }
 
 // ==========================================
