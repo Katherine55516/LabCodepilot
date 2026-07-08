@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import fs from 'fs/promises';
 import path from 'path';
+import iconv from 'iconv-lite';
 import {
   FileIOError,
   assertNoSymlinkInChain,
@@ -19,7 +20,10 @@ import type { ErrorResponse } from '@/types';
  *   {
  *     path: string;              // absolute, or relative under baseDir
  *     baseDir?: string;          // scope cap; defaults to ~ (user home)
- *     content: string;           // UTF-8 source
+ *     content: string;           // text content (JSON string, i.e. UTF-16 in transit)
+ *     encoding?: 'utf-8'|'gbk';  // on-disk encoding; default utf-8. Pass the
+ *                                //   encoding reported by /api/files/preview so
+ *                                //   GBK files are not silently transcoded.
  *     overwrite?: boolean;       // default false — 409 if target exists
  *     createParents?: boolean;   // default false — 404 if parent missing
  *   }
@@ -34,6 +38,7 @@ interface WriteBody {
   path?: unknown;
   baseDir?: unknown;
   content?: unknown;
+  encoding?: unknown;
   overwrite?: unknown;
   createParents?: unknown;
 }
@@ -54,6 +59,16 @@ export async function POST(request: NextRequest) {
   const content = typeof body.content === 'string' ? body.content : '';
   const overwrite = body.overwrite === true;
   const createParents = body.createParents === true;
+
+  // Reject unknown encodings loudly instead of silently defaulting to
+  // utf-8 — a typo'd value falling through would transcode the file.
+  const encoding = typeof body.encoding === 'string' ? body.encoding.toLowerCase() : 'utf-8';
+  if (encoding !== 'utf-8' && encoding !== 'gbk') {
+    return NextResponse.json<ErrorResponse>(
+      { error: `Unsupported encoding: ${String(body.encoding)}`, code: 'invalid_encoding' },
+      { status: 400 },
+    );
+  }
 
   if (!filePath) {
     return NextResponse.json<ErrorResponse>(
@@ -98,9 +113,19 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // Write. Using utf-8 byte length so callers see an accurate size back.
-    await fs.writeFile(resolvedPath, content, { encoding: 'utf-8' });
-    const bytesWritten = Buffer.byteLength(content, 'utf-8');
+    // Write in the caller-declared on-disk encoding so a GBK file edited
+    // via the preview panel round-trips instead of flipping to UTF-8.
+    // gb18030 codec: strict superset of GBK — byte-identical for the GBK
+    // range, and chars outside it get valid 4-byte sequences, not '?'.
+    let bytesWritten: number;
+    if (encoding === 'gbk') {
+      const encoded = iconv.encode(content, 'gb18030');
+      await fs.writeFile(resolvedPath, encoded);
+      bytesWritten = encoded.length;
+    } else {
+      await fs.writeFile(resolvedPath, content, { encoding: 'utf-8' });
+      bytesWritten = Buffer.byteLength(content, 'utf-8');
+    }
 
     return NextResponse.json({ path: resolvedPath, bytes_written: bytesWritten });
   } catch (error) {

@@ -53,6 +53,49 @@ describe('walkContextUsage — baseline selection', () => {
   });
 });
 
+describe('walkContextUsage — authoritative numerator (context_used_tokens)', () => {
+  it('prefers context_used_tokens over input+cache when present', () => {
+    const r = walkContextUsage([
+      asMsg('assistant', {
+        input_tokens: 50_000,
+        cache_read_input_tokens: 20_000,
+        output_tokens: 800,
+        context_used_tokens: 65_432, // CLI getContextUsage().totalTokens
+      }),
+    ]);
+    assert.equal(r.baseline?.used, 65_432);
+    assert.equal(r.baseline?.cacheReadTokens, 20_000); // cache detail preserved
+  });
+
+  it('falls back to input+cache when context_used_tokens is absent (old records)', () => {
+    const r = walkContextUsage([
+      asMsg('assistant', { input_tokens: 50_000, cache_read_input_tokens: 20_000, output_tokens: 800 }),
+    ]);
+    assert.equal(r.baseline?.used, 70_000);
+  });
+
+  it('a snapshot-only record (zero API usage) still forms a strong baseline', () => {
+    const r = walkContextUsage([
+      asMsg('assistant', { input_tokens: 40_000, output_tokens: 500 }),
+      asMsg('assistant', { input_tokens: 0, output_tokens: 0, context_used_tokens: 91_000 }),
+    ]);
+    assert.equal(r.baseline?.used, 91_000); // newest record wins via snapshot numerator
+  });
+
+  it('cli_context_window is diagnostics-only: it must NOT feed sdkContextWindow', () => {
+    const r = walkContextUsage([
+      asMsg('assistant', {
+        input_tokens: 50_000,
+        output_tokens: 800,
+        context_used_tokens: 65_000,
+        cli_context_window: 1_000_000, // diagnostics field, not the resolver chain
+      }),
+    ]);
+    assert.equal(r.baseline?.sdkContextWindow, null);
+    assert.equal(r.latestSdkContextWindow, null);
+  });
+});
+
 describe('walkContextUsage — latest-wins capture', () => {
   it('captures the newest positive context_window even from a skipped record', () => {
     const r = walkContextUsage([

@@ -161,9 +161,10 @@ sanitize(key) = key.replace(/[^A-Za-z0-9_-]/g, '_')   // 必须与 runner 完全
 **执行步消费**（`POST /api/test/run` step=execution，用 `resolveProjectEnvWithDb`）：
 - `baseUrl = resolved.frontendBaseUrl || body.baseUrl`（**配置为准**，body 仅兜底）→ 进执行 prompt 的测试目标。
 - `resolved.storageStatePath` → `buildPlaywrightMcp(projectPath, evidenceDir, storageStatePath)` 注入 `--storage-state`，AI 开跑即已登录。
+- **密码方式自动登录（登录三态，优先级 storageState > 密码 > 无）**：`resolveFromRaw` 现顺带解析 `defaultAccount`（回退 accounts[0]）对应的账号对象为 `resolved.loginAccount`（`{key,authType,username,password}`，authType 按形状推断）。执行步在**无 storageState、且账号为「密码」形态（有用户名+密码）**时，把凭据经 `buildStep({loginCredentials})` 下发进执行 prompt 的🔐块（`prompts.ts` 的 `loginHandlingBlock`），指示执行智能体在被测登录页用 `browser_fill_form`/`browser_type` 自动填充并提交（一次即可、复用会话）；遇验证码/2FA 等二次校验 → 判 `blocked` 并提示改用「获取登录态」。capture 抓过（有 storageState）时仍走登录态注入，不重复自动登录。**凭据明文进 prompt**，与 DB/environments.json 明文模型一致；仅执行路由服务端消费，**不**随展示用 GET 回传渲染端。修复的是「配了密码却在被测登录页无法自动填充」——此前执行侧只认 storageState，密码凭据从不送达浏览器智能体。
 - 产物路径 `artifactPaths`、run.json 的 `env` 字段均用解析后的 `env`。
 
-**展示用** `GET /api/test/env-config?projectPath=&env=` → 同一 `resolveProjectEnvWithDb` 结果，供前端 flow 头部显示目标 + 来源。
+**展示用** `GET /api/test/env-config?projectPath=&env=` → 同一 `resolveProjectEnvWithDb` 结果**去掉明文 `loginAccount`**（改只回传非敏感的 `loginAuthType`），供前端 flow 头部显示目标 + 来源。
 
 **前端**（`InlineTestingPanel.tsx` flow 视图头部）：env 选择器(local/SIT，来自 `allowedEnvs`) + 目标 chip `🎯 {frontendBaseUrl}`（`source==='db'` 时附「来自设置」小标，提示是直接读库未导出）；未配置 → `未配置目标 · 去设置·测试账号` 按钮。切 env 触发重新拉取。任务页「环境配置」按钮 → `router.push('/settings#test-accounts')`（配置入口已收口到设置，工作台只读消费，原内嵌 EnvModal 已删）。
 

@@ -28,5 +28,9 @@ export async function GET(req: Request): Promise<Response> {
   } catch {
     loginState = undefined;
   }
-  return Response.json({ ...resolved, loginState });
+  // 展示端不需要明文凭据：loginAccount 含用户名/密码，只在执行路由服务端(resolveProjectEnvWithDb)
+  // 消费、用于登录页自动填充，绝不随展示用 GET 回传渲染端。仅暴露非敏感的登录方式提示。
+  const { loginAccount, ...display } = resolved;
+  const loginAuthType = loginAccount?.authType ?? null;
+  return Response.json({ ...display, loginAuthType, loginState });
 }

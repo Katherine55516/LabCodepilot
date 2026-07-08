@@ -3,7 +3,11 @@
 //
 // Pure function (no React). See docs/run-cockpit-context-card-spec.md §5.2.
 //
-// Two non-obvious rules:
+// Three non-obvious rules:
+//   0. Numerator priority: token_usage.context_used_tokens (per-turn
+//      getContextUsage() snapshot — Claude Code's authoritative measure)
+//      wins over input+cacheRead+cacheCreation; the sum remains the
+//      fallback for old records / snapshot failures.
 //   1. Skip output-only / all-zero tail records. The trailing accounting
 //      record is sometimes `{input:0, cache:0, output:N}`; treating used=0
 //      would zero the progress bar even though last turn's input+cache is
@@ -73,7 +77,14 @@ export function walkContextUsage(messages: Message[]): WalkResult {
     const cacheRead = (usage.cache_read_input_tokens as number) || 0;
     const cacheCreation = (usage.cache_creation_input_tokens as number) || 0;
     const outputTokens = (usage.output_tokens as number) || 0;
-    const used = inputTokens + cacheRead + cacheCreation;
+    // FIX(权威分子): context_used_tokens = 回合末 getContextUsage() 的
+    // totalTokens（Claude Code /context 同源口径，auto-compact 按它触发）。
+    // 优先用它；缺失（快照超时/旧记录）时回退 API usage 推导的旧口径。
+    // 注意分母不在此处：cli_context_window 仅诊断留档，窗口仍走应用侧解析。
+    const contextUsed = (usage.context_used_tokens as number) || 0;
+    const used = contextUsed > 0
+      ? contextUsed
+      : inputTokens + cacheRead + cacheCreation;
 
     const ctxWindowField = usage.context_window;
     if (

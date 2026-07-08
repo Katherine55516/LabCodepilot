@@ -76,6 +76,7 @@
 
 | 文件 | 主题 | 完成日期 |
 |------|------|----------|
+| completed/marketplace-skill-translate.md | 技能市场「AI 翻译简介」：详情页一键翻译 README 到应用语言（非英语才显示），managed 第一个模型 + generateTextViaSdk 单轮（别名坑规避）、11 条规则系统提示词（含提示注入防线）、译文/原文可回切 + 模块级缓存、30K 截断 | 2026-07-03 |
 | completed/document-preview.md | 应用内文档预览（PDF/DOCX/XLSX/PPTX）：复用 PreviewPanel 分发骨架 + serve 取 arrayBuffer + next/dynamic 懒加载四渲染器（react-pdf/SheetJS+DataTableViewer/docx-preview/aiden0z-pptx）、PDF 5 类离线资产管线（含 wasm+cmaps+iccs）、DOCX 三层强制 XSS vs PPTX 差异化安全、raw 路由中文名 RFC 5987 修复；老二进制 .doc/.ppt/.xls 不做 | 2026-06-30 |
 | completed/credential-encryption.md | 凭证本地加密落盘：safeStorage 主密钥 + AES-256-GCM 列加密（双进程 env 过河）、anlcode 文件 + SQLite 敏感列 seal/hydrate、静默迁移 + fail-safe、image-generator 绕过修复 | 2026-06-03 |
 | completed/gsd-bundle.md | 内置打包 GSD（gsd-build/get-shit-done, MIT）：vendor + 转换脚本 + Electron 同步 + Settings UI + 普惠修复 frontmatter description | 2026-05-25 |
