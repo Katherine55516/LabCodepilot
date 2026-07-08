@@ -312,3 +312,49 @@ describe("reduceResults — caseIds 兜底补全（漏执行用例 → 报告以
     assert.equal(run.tests[0].actual, "第一次");
   });
 });
+
+describe("reduceResults — 回归集口径（suiteIds = tags 含「回归测试」,发版红线）", () => {
+  it("按 suiteIds 独立计数,与全量/功能验证口径并存", () => {
+    const run = reduceResults(
+      [
+        { id: "A", status: "pass" },
+        { id: "B", status: "fail", error: "按钮点不动" },
+        { id: "C", status: "pass" },
+      ],
+      { ...OPTS, caseIds: ["A", "B", "C"], suiteIds: ["A", "B"] },
+    );
+    assert.deepEqual(run.suiteCounts, { total: 2, pass: 1, fail: 1, partial: 0, blocked: 0 });
+    assert.equal(run.suitePassStr, "1/2"); // 回归集未全过 → 发版红线
+    assert.equal(run.counts.total, 3); // 全量口径不受影响
+  });
+
+  it("回归集与回归基线（verification 口径）正交:同一条用例两套口径各自独立计数", () => {
+    const run = reduceResults(
+      [{ id: "A", status: "pass" }, { id: "B", status: "pass" }],
+      {
+        ...OPTS,
+        caseIds: ["A", "B"],
+        // A:功能验证 + 回归集;B:回归基线 + 非回归集 —— 两轴交叉。
+        verificationById: { A: "功能验证", B: "回归基线" },
+        suiteIds: ["A"],
+      },
+    );
+    assert.equal(run.regressionTotal, 1); // 回归基线口径:B
+    assert.equal(run.funcCounts.total, 1); // 功能验证口径:A
+    assert.deepEqual(run.suiteCounts, { total: 1, pass: 1, fail: 0, partial: 0, blocked: 0 }); // 回归集口径:A
+    assert.equal(run.suitePassStr, "1/1");
+  });
+
+  it("回归集用例未执行 → caseIds 补全的 blocked 计入回归集(漏跑不算过,不虚报发版可行)", () => {
+    const run = reduceResults([{ id: "A", status: "pass" }], { ...OPTS, caseIds: ["A", "B"], suiteIds: ["B"] });
+    assert.deepEqual(run.suiteCounts, { total: 1, pass: 0, fail: 0, partial: 0, blocked: 1 });
+    assert.equal(run.suitePassStr, "0/1");
+  });
+
+  it("无 suiteIds（旧调用/无标签用例）→ suite 字段缺省,run.json 序列化后不含该键(向后兼容)", () => {
+    const run = reduceResults([{ id: "A", status: "pass" }], { ...OPTS, caseIds: ["A"] });
+    assert.equal(run.suiteCounts, undefined);
+    assert.equal(run.suitePassStr, undefined);
+    assert.ok(!JSON.stringify(run).includes("suiteCounts"));
+  });
+});

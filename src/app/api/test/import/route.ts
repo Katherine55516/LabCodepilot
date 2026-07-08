@@ -68,6 +68,7 @@ function rowsToCases(rows: string[][]): { cases: unknown[] } {
   const preC = findCol(headers, /前置|预置|precondition/i);
   const stepC = findCol(headers, /步骤|操作|测试步骤|step|action/i);
   const expectC = findCol(headers, /预期|期望|期待|预期结果|expected|result/i);
+  const tagsC = findCol(headers, /标签|tags?/i);
 
   const splitLines = (s: string): string[] => s.split(/\r?\n|；|;/).map((x) => x.trim()).filter(Boolean);
   const cases: unknown[] = [];
@@ -101,6 +102,11 @@ function rowsToCases(rows: string[][]): { cases: unknown[] } {
     if (priorityC >= 0 && r[priorityC]) c.priority = r[priorityC];
     if (typeC >= 0 && r[typeC]) c.caseType = r[typeC];
     if (preC >= 0 && r[preC]) c.precondition = r[preC];
+    // 用例标签（冒烟测试/回归测试等，回归集口径的载体）：多值按常见分隔符拆数组。
+    if (tagsC >= 0 && r[tagsC]) {
+      const tags = r[tagsC].split(/[、,，;；/]/).map((x) => x.trim()).filter(Boolean);
+      if (tags.length) c.tags = tags;
+    }
     cases.push(c);
   }
   return { cases };

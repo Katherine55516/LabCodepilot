@@ -69,6 +69,11 @@ export async function GET(req: Request): Promise<Response> {
                   ? raw.passStr
                   : '',
             regressionTotal: typeof raw.regressionTotal === 'number' ? raw.regressionTotal : 0,
+            // 回归集口径（tags 含「回归测试」,与上面 regressionTotal 的回归基线口径正交）:
+            // 可选透传——旧 run.json 无此字段 → undefined,前端不渲染回归集区块。
+            ...(raw.suiteCounts && typeof raw.suiteCounts === 'object'
+              ? { suiteCounts: raw.suiteCounts, suitePassStr: typeof raw.suitePassStr === 'string' ? raw.suitePassStr : '' }
+              : {}),
             tests: Array.isArray(raw.tests) ? raw.tests : [],
             markdown,
             defectMarkdown,
