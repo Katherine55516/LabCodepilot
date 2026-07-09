@@ -20,7 +20,8 @@ import { registerConversation, unregisterConversation } from './conversation-reg
 import { captureCapabilities, isCacheFresh, setCachedPlugins } from './agent-sdk-capabilities';
 import { normalizeMessageContent, microCompactMessage } from './message-normalizer';
 import { roughTokenEstimate } from './context-estimator';
-import { getSetting, updateSdkSessionId, createPermissionRequest, patchLatestAssistantTokenUsage } from './db';
+import { getSetting, updateSdkSessionId, createPermissionRequest } from './db';
+import { fireContextUsageProbe } from './context-usage-probe';
 import { resolveForClaudeCode } from './provider-resolver';
 import { sanitizeClaudeModelOptions } from './claude-model-options';
 // platform.ts CLI binary lookup helpers were removed when AI Native Lab switched to
@@ -209,64 +210,6 @@ function extractAssistantTurnUsage(msg: SDKAssistantMessage): TokenUsage | null 
     cache_read_input_tokens: u.cache_read_input_tokens ?? 0,
     cache_creation_input_tokens: u.cache_creation_input_tokens ?? 0,
   };
-}
-
-/**
- * FIX(权威分子): 把 prompt 包装成"回合门"streaming-input。
- * string prompt 模式下 CLI 发出 result 后立即退出，getContextUsage() 的控制
- * 响应来不及返回（旧注释 "Query closed before response received" 的真正根因，
- * POC 复测见 docs/research/context-usage-from-claude-code.md）。包装后生成器
- * yield 完用户消息即挂起，等 result 分支取完快照调用 release() 才结束——
- * stdin 关闭、CLI 正常退出，回合生命周期不变。
- */
-function wrapPromptWithTurnGate(
-  prompt: string | AsyncIterable<SDKUserMessage>,
-  sessionIdForMessage: string,
-): { iterable: AsyncIterable<SDKUserMessage>; release: () => void } {
-  let release!: () => void;
-  const gate = new Promise<void>((resolve) => { release = resolve; });
-  const iterable = (async function* () {
-    if (typeof prompt === 'string') {
-      yield {
-        type: 'user',
-        message: { role: 'user', content: prompt },
-        parent_tool_use_id: null,
-        session_id: sessionIdForMessage,
-      } as SDKUserMessage;
-    } else {
-      yield* prompt;
-    }
-    await gate;
-  })();
-  return { iterable, release };
-}
-
-/**
- * FIX(权威分子): 回合末从仍存活的 Query 取 /context 同源快照。
- * 小上下文热调 6–10ms，但打包环境（大上下文 + MCP/skills 全量）实测 CLI
- * 计算可达几十秒——所以调用方必须异步消费本函数，绝不能阻塞回合收尾。
- * 超时或任何异常都静默返回 null——快照是增强而非回合依赖，取不到时卡片
- * 回退旧口径（input + cacheR + cacheC）。
- */
-async function fetchContextUsageSnapshot(
-  q: { getContextUsage(): Promise<{ totalTokens: number; maxTokens: number }> },
-  timeoutMs: number,
-): Promise<{ totalTokens: number; maxTokens: number } | null> {
-  try {
-    const cu = await Promise.race([
-      q.getContextUsage(),
-      new Promise<never>((_, reject) => {
-        const t = setTimeout(() => reject(new Error('getContextUsage timeout')), timeoutMs);
-        if (typeof t.unref === 'function') t.unref();
-      }),
-    ]);
-    if (cu && typeof cu.totalTokens === 'number' && cu.totalTokens > 0) {
-      return { totalTokens: cu.totalTokens, maxTokens: cu.maxTokens };
-    }
-  } catch {
-    // 静默回退
-  }
-  return null;
 }
 
 /**
@@ -722,9 +665,6 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
       // below once we know whether we have an explicit DB provider; cleaned up
       // in the outer finally block. See src/lib/claude-home-shadow.ts.
       let shadowHome: ShadowHome | null = null;
-      // FIX(权威分子): 回合门的放行函数。声明在 try 外，finally 兜底调用，
-      // 保证异常/中断路径不悬挂 prompt 生成器。
-      let releaseTurnGate: () => void = () => {};
 
       // Resolve provider via the unified resolver. The caller may pass an explicit
       // provider (from resolveProvider().provider), or undefined when 'env' mode is
@@ -1315,28 +1255,15 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
           return textPrompt;
         }
 
-        // FIX(权威分子): 回合门包装——保证 result 到达时 Query 仍存活，
-        // 可取 getContextUsage() 快照后再放行结束回合。
-        const initialWrap = wrapPromptWithTurnGate(
-          buildFinalPrompt(!shouldResume),
-          sdkSessionId || '',
-        );
-        releaseTurnGate = initialWrap.release;
+        const finalPrompt = buildFinalPrompt(!shouldResume);
 
         // Try to start the conversation. If resuming a previous session fails
         // (e.g. stale/corrupt session file, CLI version mismatch), automatically
         // fall back to starting a fresh conversation without resume.
         let conversation = query({
-          prompt: initialWrap.iterable,
+          prompt: finalPrompt,
           options: queryOptions,
         });
-        // Keep a handle to the underlying Query instance for control-API
-        // calls (getContextUsage etc.). When we peek-and-rewrap below to
-        // detect resume failures, `conversation` becomes a plain async
-        // generator that loses the Query prototype's methods — we need
-        // this original reference to call .getContextUsage() at result
-        // time. Reassigned on resume-fallback to point at the fresh Query.
-        let controlQuery = conversation;
 
         // Wrap the iterator so we can detect resume failures on the first message
         if (shouldResume) {
@@ -1354,8 +1281,6 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
                 yield next.value;
               }
             })() as ReturnType<typeof query>;
-            // controlQuery still points at the original Query with
-            // getContextUsage() available.
           } catch (resumeError) {
             const errMsg = resumeError instanceof Error ? resumeError.message : String(resumeError);
             console.warn('[claude-client] Resume failed, retrying without resume:', errMsg);
@@ -1375,16 +1300,10 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
             }));
             // Remove resume and try again as a fresh conversation with history context
             delete queryOptions.resume;
-            releaseTurnGate(); // 放行旧生成器（其 Query 已失败）
-            const fallbackWrap = wrapPromptWithTurnGate(buildFinalPrompt(true), '');
-            releaseTurnGate = fallbackWrap.release;
             conversation = query({
-              prompt: fallbackWrap.iterable,
+              prompt: buildFinalPrompt(true),
               options: queryOptions,
             });
-            // Fresh Query replaces the old handle — control-API calls
-            // now go through this one.
-            controlQuery = conversation;
           }
         }
 
@@ -1404,6 +1323,27 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
         let connectedModel: string | undefined = model || undefined;
         // Track pending TodoWrite tool_use_ids so we can sync after successful execution
         const pendingTodoWrites = new Map<string, Array<{ content: string; status: string; activeForm?: string }>>();
+        // Task* → 任务清单投影：内置 Claude Code 2.1.20x 起系统提示把任务管理导向
+        // TaskCreate/TaskUpdate（TodoWrite 类型仍在但模型不再调用）。把 Task* 的增量
+        // 变更投影成 todos 快照，复用 TodoWrite 的 task_update SSE 事件与前端组件。
+        // 注册表是流级状态：resume 后由前端从 DB 恢复历史面板，与 TodoWrite 行为一致。
+        const sdkTaskRegistry = new Map<string, { content: string; status: string; activeForm: string }>();
+        const pendingTaskCreates = new Map<string, { subject: string; activeForm?: string }>();
+        const pendingTaskUpdates = new Map<string, { taskId: string; subject?: string; status?: string; activeForm?: string }>();
+        const emitTaskSnapshot = () => {
+          controller.enqueue(formatSSE({
+            type: 'task_update',
+            data: JSON.stringify({
+              session_id: sessionId,
+              todos: [...sdkTaskRegistry.values()].map((t, i) => ({
+                id: String(i),
+                content: t.content,
+                status: t.status,
+                activeForm: t.activeForm,
+              })),
+            }),
+          }));
+        };
         for await (const message of conversation) {
           if (abortController?.signal.aborted) {
             break;
@@ -1448,6 +1388,17 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
                       }
                     } catch (e) {
                       console.warn('[claude-client] Failed to parse TodoWrite input:', e);
+                    }
+                  } else if (block.name === 'TaskCreate') {
+                    // Task* 同 TodoWrite：暂存，等 tool_result 确认成功再同步
+                    const taskInput = block.input as { subject?: string; activeForm?: string };
+                    if (taskInput?.subject) {
+                      pendingTaskCreates.set(block.id, { subject: taskInput.subject, activeForm: taskInput.activeForm });
+                    }
+                  } else if (block.name === 'TaskUpdate') {
+                    const taskInput = block.input as { taskId?: string; subject?: string; status?: string; activeForm?: string };
+                    if (taskInput?.taskId) {
+                      pendingTaskUpdates.set(block.id, taskInput as { taskId: string; subject?: string; status?: string; activeForm?: string });
                     }
                   }
                 }
@@ -1540,6 +1491,44 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
                           })),
                         }),
                       }));
+                    } else if (!block.is_error && pendingTaskCreates.has(block.tool_use_id)) {
+                      // Deferred TaskCreate sync → 注册并投影 todos 快照
+                      const taskInput = pendingTaskCreates.get(block.tool_use_id)!;
+                      pendingTaskCreates.delete(block.tool_use_id);
+                      // 2.1.203 实测 result 为纯文本 "Task #4 created successfully: <subject>"，
+                      // 其中编号即后续 TaskUpdate 引用的 taskId；JSON 解析留作兜底
+                      // （sdk-tools.d.ts 声明的 TaskCreateOutput 为 { task: { id } } 结构）。
+                      let taskId = '';
+                      const idMatch = /Task #(\S+) created/.exec(resultContent);
+                      if (idMatch) {
+                        taskId = idMatch[1];
+                      } else {
+                        try {
+                          taskId = (JSON.parse(resultContent) as { task?: { id?: string } })?.task?.id || '';
+                        } catch { /* 非 JSON → 落合成 id */ }
+                      }
+                      if (!taskId) taskId = `synthetic-${block.tool_use_id}`;
+                      sdkTaskRegistry.set(taskId, {
+                        content: taskInput.subject,
+                        status: 'pending',
+                        activeForm: taskInput.activeForm || '',
+                      });
+                      emitTaskSnapshot();
+                    } else if (!block.is_error && pendingTaskUpdates.has(block.tool_use_id)) {
+                      // Deferred TaskUpdate sync → 更新注册表并投影
+                      const taskInput = pendingTaskUpdates.get(block.tool_use_id)!;
+                      pendingTaskUpdates.delete(block.tool_use_id);
+                      const entry = sdkTaskRegistry.get(taskInput.taskId);
+                      if (entry) {
+                        if (taskInput.status === 'deleted') {
+                          sdkTaskRegistry.delete(taskInput.taskId);
+                        } else {
+                          if (taskInput.status) entry.status = taskInput.status;
+                          if (taskInput.subject) entry.content = taskInput.subject;
+                          if (taskInput.activeForm) entry.activeForm = taskInput.activeForm;
+                        }
+                        emitTaskSnapshot();
+                      }
                     }
                   }
                 }
@@ -1709,44 +1698,24 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
                 }
               }
 
-              // FIX(权威分子): 快照异步后补，绝不阻塞回合收尾。打包环境实测
-              // CLI 对大上下文的 getContextUsage 计算可达几十秒，且算完之前
-              // 不处理 stdin 关闭、不退出——阻塞式等待（哪怕带短超时）会拖住
-              // 整条 SSE 流，前端"生成中"迟迟不结束。改为：
-              //   1. 上面 result 已发出；下面立即发 done 并 close 流——回合
-              //      零延迟结束，route 侧随即用旧口径 usage 落库
-              //   2. 快照（上限 60s）返回后补 UPDATE 该回合 assistant 消息的
-              //      token_usage，下一次读取（下回合/重开会话）生效；小上下文
-              //      时快照可能先于落库到达，未命中则 1s 后重试一次
-              //   3. 无论成败放行回合门 → CLI 退出 → 循环自然收尾（循环后的
-              //      二次 done/close 由 wrapController 幂等吞掉）
-              const turnUsageAtResult = tokenUsage;
-              fetchContextUsageSnapshot(controlQuery, 60_000)
-                .then((snap) => {
-                  if (!snap || !sessionId) return;
-                  const patch = {
-                    context_used_tokens: snap.totalTokens,
-                    cli_context_window: snap.maxTokens,
-                  };
-                  const match = turnUsageAtResult
+              // FIX(权威分子): 占用快照由无凭据探针进程后补(context-usage-probe.ts)。
+              // 不在本进程调 getContextUsage —— 有凭据时 CLI 会对上下文逐组件
+              // 发 ~82 个 count_tokens 非流式请求(网关请求风暴 + 几十秒延迟的
+              // 根因);探针无凭据走本地估算,totalTokens 实测与 API 计数逐位
+              // 一致。探针自带 1.5s 延迟,晚于 route 落库,match 防串扰。
+              if (sessionId) {
+                fireContextUsageProbe({
+                  appSessionId: sessionId,
+                  sdkSessionId: resultMsg.session_id,
+                  cwd: resolvedWorkingDirectory.path,
+                  match: tokenUsage
                     ? {
-                        input_tokens: turnUsageAtResult.input_tokens,
-                        output_tokens: turnUsageAtResult.output_tokens,
+                        input_tokens: tokenUsage.input_tokens,
+                        output_tokens: tokenUsage.output_tokens,
                       }
-                    : null;
-                  if (!patchLatestAssistantTokenUsage(sessionId, match, patch)) {
-                    setTimeout(() => {
-                      try {
-                        patchLatestAssistantTokenUsage(sessionId, match, patch);
-                      } catch { /* 放弃后补，卡片走旧口径 */ }
-                    }, 1000);
-                  }
-                })
-                .catch(() => { /* 快照失败：保持旧口径 */ })
-                .finally(() => releaseTurnGate());
-
-              controller.enqueue(formatSSE({ type: 'done', data: '' }));
-              controller.close();
+                    : null,
+                });
+              }
               break;
             }
 
@@ -1905,9 +1874,7 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
               retryOptions.systemPrompt = { type: 'preset', preset: 'claude_code', append: systemPrompt };
             }
 
-            // FIX(权威分子): 与主路径同理的回合门，让重试回合末也能取权威快照。
-            const retryWrap = wrapPromptWithTurnGate(retryPrompt, '');
-            const retryConversation = query({ prompt: retryWrap.iterable, options: retryOptions });
+            const retryConversation = query({ prompt: retryPrompt, options: retryOptions });
 
             // 与主路径同源的 Connected 模型名（requested_model || init.model），
             // 供重试回合的 result usage 携带 token_usage.model。
@@ -2047,39 +2014,24 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
                       tokensSaved: compResult.estimatedTokensSaved,
                     })),
                   }));
-                  // FIX(权威分子): 重试回合的快照同样异步后补，不阻塞收尾
-                  // （机制与主路径 result 分支一致）。
-                  const retryUsageAtResult = usage;
-                  fetchContextUsageSnapshot(retryConversation, 60_000)
-                    .then((snap) => {
-                      if (!snap || !sessionId) return;
-                      const patch = {
-                        context_used_tokens: snap.totalTokens,
-                        cli_context_window: snap.maxTokens,
-                      };
-                      const match = retryUsageAtResult
+                  // FIX(权威分子): 重试回合同样交给无凭据探针后补(同主路径)。
+                  if (sessionId) {
+                    fireContextUsageProbe({
+                      appSessionId: sessionId,
+                      sdkSessionId: rMsg.session_id,
+                      cwd: retryOptions.cwd as string,
+                      match: usage
                         ? {
-                            input_tokens: retryUsageAtResult.input_tokens,
-                            output_tokens: retryUsageAtResult.output_tokens,
+                            input_tokens: usage.input_tokens,
+                            output_tokens: usage.output_tokens,
                           }
-                        : null;
-                      if (!patchLatestAssistantTokenUsage(sessionId, match, patch)) {
-                        setTimeout(() => {
-                          try {
-                            patchLatestAssistantTokenUsage(sessionId, match, patch);
-                          } catch { /* 放弃后补 */ }
-                        }, 1000);
-                      }
-                    })
-                    .catch(() => { /* 快照失败：保持旧口径 */ })
-                    .finally(() => retryWrap.release());
-                  controller.enqueue(formatSSE({ type: 'done', data: '' }));
-                  controller.close();
+                        : null,
+                    });
+                  }
                   break;
                 }
               }
             }
-            retryWrap.release(); // 兜底（无 result 的中断路径）；重复 resolve 无害
             controller.enqueue(formatSSE({ type: 'done', data: '' }));
             controller.close();
             return; // Retry succeeded — skip normal error path
@@ -2124,7 +2076,6 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
 
         controller.close();
       } finally {
-        releaseTurnGate(); // 兜底放行回合门（异常/中断路径不悬挂 prompt 生成器）
         unregisterConversation(sessionId);
         // Tear down shadow ~/.claude/ if we built one. Best-effort — the OS
         // will eventually GC tmpdir even if this fails.

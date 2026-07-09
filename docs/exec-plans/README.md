@@ -44,7 +44,8 @@
 
 | 文件 | 主题 | 状态 |
 |------|------|------|
-| active/test-regression-gate-audit.md | 测试工作台:回归集标签 + 用例门控 + 操作审计 | 开发完成(9 commit),待打包验收 mac+Win |
+| active/regression-library.md | 测试工作台:回归用例库(用例设计后自动沉淀「回归测试」标签用例 + 项目级库查看/管理 + 跨任务一键重跑) | 设计完成,待实现(批 A-E) |
+| active/test-regression-gate-audit.md | 测试工作台:回归集标签 + 用例门控 + 操作审计 | 开发完成(合并 PR #8),待打包验收 mac+Win |
 | active/chat-latency-remediation.md | 聊天链路提速 + 模式入口收敛 + MCP 持久开关 | Phase 0 完成，Phase 1-4 待开始 |
 | active/context-storage-migration.md | 上下文共享与存储迁移 | Phase 0 部分完成，Phase 1-3 待开始 |
 | active/site-and-docs.md | 官网 + 文档站（apps/site） | Phase 0-1 进行中 |
