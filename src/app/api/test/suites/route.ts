@@ -34,14 +34,20 @@ export async function GET(req: Request): Promise<Response> {
     const data = readSuites(projectPath);
     const lastResultOf = buildLastResultLookup(projectPath);
     const opts = { pinned: data.pinned, lastResultOf };
-    const suites = data.suites.map((s) => ({ ...s, hits: evalSuite(lib, s, opts).length }));
+    const tasksOf = (hits: ReturnType<typeof evalSuite>) => new Set(hits.map((e) => e._source.task)).size;
+    const suites = data.suites.map((s) => {
+      const hit = evalSuite(lib, s, opts);
+      return { ...s, hits: hit.length, hitTasks: tasksOf(hit) };
+    });
+    const full = evalSuite(lib, null, opts);
     return Response.json({
       pinned: data.pinned,
-      fullHits: evalSuite(lib, null, opts).length,
+      fullHits: full.length,
+      fullTasks: tasksOf(full),
       suites,
     });
   } catch {
-    return Response.json({ pinned: [], fullHits: 0, suites: [] });
+    return Response.json({ pinned: [], fullHits: 0, fullTasks: 0, suites: [] });
   }
 }
 

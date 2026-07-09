@@ -1226,6 +1226,8 @@ export function InlineTestingPanel() {
   const [libraryOpen, setLibraryOpen] = useState(false);
   // 回归套件管理弹窗(v2 批 C):套件列表/构建器/必跑白名单。从库弹窗头部入口打开。
   const [suitesOpen, setSuitesOpen] = useState(false);
+  // 发起回归弹窗(v2 批 D):套件/环境/预检确认后才真正 runLibrary。
+  const [launchOpen, setLaunchOpen] = useState(false);
   // 跨任务一键重跑进行中(聚合→执行→报告)。禁用重复触发,按钮显示「重跑中…」。
   const [libraryRunning, setLibraryRunning] = useState(false);
   // 重跑状态提示(库不属于任何任务对话,故用独立状态在弹窗内展示,不走任务对话 push)。
@@ -2636,7 +2638,7 @@ export function InlineTestingPanel() {
           reloadSignal={libraryReload}
           onChanged={() => setLibraryReload((n) => n + 1)}
           onClose={() => setLibraryOpen(false)}
-          onRun={runLibrary}
+          onRun={() => setLaunchOpen(true)}
           running={libraryRunning}
           runStatus={libraryRunStatus}
           onOpenSuites={() => setSuitesOpen(true)}
@@ -2644,6 +2646,14 @@ export function InlineTestingPanel() {
       )}
       {suitesOpen && current?.path && (
         <RegressionSuitesModal t={t} projectPath={current.path} onClose={() => setSuitesOpen(false)} />
+      )}
+      {launchOpen && current?.path && (
+        <StartRegressionModal
+          t={t}
+          projectPath={current.path}
+          onClose={() => setLaunchOpen(false)}
+          onStart={(suiteName, env) => { setLaunchOpen(false); void runLibrary({ suiteName, env }); }}
+        />
       )}
       {recommendOpen && current?.path && activeTask && (
         <RecommendReviewModal
@@ -3809,6 +3819,144 @@ function RegressionLibraryModal({ t, projectPath, reloadSignal, onChanged, onClo
             </div>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+// 发起回归轮次弹窗(v2 批 D,替代 v1 直接一键全量):套件下拉(实时命中数)+ 环境下拉
+// (env-config allowedEnvs,显示所选环境被测地址)+ 预检(条数/来源任务数/近 3 轮均值时长
+// 估算,无历史诚实显示「暂无估算」)+ 红线口径说明。确认后调 runLibrary({suiteName, env}),
+// 进度仍在库弹窗状态行展示(轮次收口由 runLibrary 负责)。
+function StartRegressionModal({ t, projectPath, onClose, onStart }: {
+  t: T;
+  projectPath: string;
+  onClose: () => void;
+  onStart: (suiteName: string, env: string) => void;
+}) {
+  const [suites, setSuites] = useState<Array<{ name: string; hits: number; hitTasks: number; builtin?: boolean }> | null>(null);
+  const [envs, setEnvs] = useState<string[] | null>(null);
+  const [envInfo, setEnvInfo] = useState<{ configured?: boolean; frontendBaseUrl?: string | null } | null>(null);
+  const [suiteName, setSuiteName] = useState<string>("全量");
+  const [env, setEnv] = useState<string>("local");
+  const [estimate, setEstimate] = useState<{ minutes: number; rounds: number } | null | undefined>(undefined); // undefined=加载中
+
+  // 套件列表(内置全量置顶)+ 环境列表 + 时长估算(近 3 个 done 轮的 (finish-start)/total 均值)。
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/test/suites?projectPath=${encodeURIComponent(projectPath)}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (cancelled) return;
+        const list = [{ name: "全量", hits: d?.fullHits ?? 0, hitTasks: d?.fullTasks ?? 0, builtin: true },
+          ...(Array.isArray(d?.suites) ? d.suites.map((x: { name: string; hits: number; hitTasks?: number }) => ({ name: x.name, hits: x.hits ?? 0, hitTasks: x.hitTasks ?? 0 })) : [])];
+        setSuites(list);
+      })
+      .catch(() => { if (!cancelled) setSuites([]); });
+    fetch(`/api/test/env-config?projectPath=${encodeURIComponent(projectPath)}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (cancelled) return;
+        const allowed: string[] = Array.isArray(d?.allowedEnvs) && d.allowedEnvs.length ? d.allowedEnvs.map(String) : ["local"];
+        setEnvs(allowed);
+        if (typeof d?.env === "string" && allowed.includes(d.env)) setEnv(d.env);
+      })
+      .catch(() => { if (!cancelled) setEnvs(["local"]); });
+    fetch(`/api/test/library/rounds?projectPath=${encodeURIComponent(projectPath)}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (cancelled) return;
+        const done = (Array.isArray(d?.rounds) ? d.rounds : []).filter(
+          (r: { status?: string; startedAt?: string; finishedAt?: string; total?: number }) =>
+            r.status === "done" && r.startedAt && r.finishedAt && typeof r.total === "number" && r.total > 0,
+        ).slice(0, 3);
+        if (!done.length) { setEstimate(null); return; }
+        const perCaseMs = done.reduce((acc: number, r: { startedAt: string; finishedAt: string; total: number }) =>
+          acc + (Date.parse(r.finishedAt) - Date.parse(r.startedAt)) / r.total, 0) / done.length;
+        setEstimate(perCaseMs > 0 ? { minutes: perCaseMs / 60000, rounds: done.length } : null);
+      })
+      .catch(() => { if (!cancelled) setEstimate(null); });
+    return () => { cancelled = true; };
+  }, [projectPath]);
+
+  // 所选环境的被测地址展示(切换环境时刷新;仅展示用,执行时 run 路由自行解析)。
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/test/env-config?projectPath=${encodeURIComponent(projectPath)}&env=${encodeURIComponent(env)}`)
+      .then((r) => r.json())
+      .then((d) => { if (!cancelled) setEnvInfo({ configured: d?.configured, frontendBaseUrl: d?.frontendBaseUrl ?? null }); })
+      .catch(() => { if (!cancelled) setEnvInfo(null); });
+    return () => { cancelled = true; };
+  }, [projectPath, env]);
+
+  const sel = suites?.find((x) => x.name === suiteName) ?? suites?.[0];
+  const hits = sel?.hits ?? 0;
+  const loading = suites === null || envs === null;
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+      <div className="flex max-h-[84vh] w-full max-w-md flex-col overflow-hidden rounded-xl border border-border bg-background shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center gap-2 border-b border-border px-3 py-2">
+          <Play size={13} className="text-primary" />
+          <span className="text-xs font-semibold text-foreground">{t("test.launch.title")}</span>
+          <span className="flex-1" />
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground" aria-label={t("test.launch.cancel")}><X size={14} /></button>
+        </div>
+        {loading ? (
+          <div className="p-4 text-center text-[11px] text-muted-foreground"><SpinnerGap size={14} className="mx-auto animate-spin" /></div>
+        ) : (
+          <div className="space-y-3 p-3">
+            <div className="flex items-center gap-2">
+              <span className="w-12 flex-shrink-0 text-[10px] text-muted-foreground">{t("test.launch.suite")}</span>
+              <select
+                value={suiteName}
+                onChange={(e) => setSuiteName(e.target.value)}
+                className="h-7 flex-1 rounded border border-border bg-background px-1.5 text-[11px] outline-none focus:border-primary"
+              >
+                {(suites ?? []).map((x) => (
+                  <option key={x.name} value={x.name}>{x.builtin ? `${x.name}（内置）` : x.name} — {t("test.suites.hits", { n: x.hits })}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="w-12 flex-shrink-0 text-[10px] text-muted-foreground">{t("test.launch.env")}</span>
+              <select
+                value={env}
+                onChange={(e) => setEnv(e.target.value)}
+                className="h-7 flex-1 rounded border border-border bg-background px-1.5 text-[11px] outline-none focus:border-primary"
+              >
+                {(envs ?? []).map((e2) => <option key={e2} value={e2}>{e2}</option>)}
+              </select>
+            </div>
+            <div className="flex items-start gap-2 text-[10px] text-muted-foreground">
+              <span className="w-12 flex-shrink-0">{t("test.launch.baseUrl")}</span>
+              {envInfo?.frontendBaseUrl ? (
+                <span className="min-w-0 flex-1 truncate font-mono" title={envInfo.frontendBaseUrl}>{envInfo.frontendBaseUrl}</span>
+              ) : (
+                <span className="flex-1 text-status-warning-foreground">{t("test.launch.envUnconfigured")}</span>
+              )}
+            </div>
+            <div className="space-y-1 rounded border border-border bg-muted/30 px-2.5 py-2 text-[11px] text-foreground">
+              <div>{t("test.launch.precheck", { n: hits, m: sel?.hitTasks ?? 0 })}</div>
+              <div className="text-[10px] text-muted-foreground">
+                {estimate === undefined ? "…" : estimate === null
+                  ? t("test.launch.estimateNone")
+                  : t("test.launch.estimate", { min: Math.max(1, Math.round(estimate.minutes * hits)), rounds: estimate.rounds })}
+              </div>
+            </div>
+            <div className="rounded bg-muted px-2.5 py-1.5 text-[10px] leading-relaxed text-muted-foreground">{t("test.launch.redline")}</div>
+            {hits === 0 && <div className="text-[11px] text-status-warning-foreground">{t("test.launch.emptySuite")}</div>}
+            <div className="flex justify-end gap-2">
+              <button onClick={onClose} className="flex h-6 items-center rounded border border-border px-2 text-[11px] text-muted-foreground hover:text-foreground">{t("test.launch.cancel")}</button>
+              <button
+                onClick={() => onStart(suiteName, env)}
+                disabled={hits === 0}
+                className="flex h-6 items-center gap-1 rounded bg-primary px-2.5 text-[11px] font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <Play size={11} /> {t("test.launch.start", { n: hits })}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
