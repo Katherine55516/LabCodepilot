@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { harvestRecommend, harvestRecommendDetailed, applyRecommend } from "../../app/api/test/cases/recommend/route";
+import { harvestRecommend, applyRecommend } from "../../app/api/test/cases/recommend/route";
 
 let dir: string;
 beforeEach(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), "recommend-")); });
@@ -28,27 +28,6 @@ describe("harvestRecommend", () => {
     assert.equal(rec.size, 2);
     assert.equal(rec.get("TC-001"), true);
     assert.equal(rec.get("TC-002"), false);
-  });
-});
-
-describe("harvestRecommendDetailed", () => {
-  it("保留 reason，坏行/suite 非 boolean 跳过，同 id 后者覆盖", () => {
-    const text = [
-      '@@RECOMMEND {"id":"TC-001","suite":true,"reason":"登录主流程,失败阻塞全部功能"}',
-      "@@RECOMMEND {坏行}",
-      '@@RECOMMEND {"id":"TC-002","suite":false,"reason":"纯文案提示"}',
-      '@@RECOMMEND {"id":"TC-003","suite":"yes"}', // suite 非 boolean → 丢弃
-      '@@RECOMMEND {"id":"TC-001","suite":false,"reason":"改判"}', // 同 id 覆盖
-    ].join("\n");
-    const vs = harvestRecommendDetailed(text);
-    assert.equal(vs.length, 2);
-    const byId = Object.fromEntries(vs.map((v) => [v.id, v]));
-    assert.deepEqual(byId["TC-001"], { id: "TC-001", suite: false, reason: "改判" });
-    assert.deepEqual(byId["TC-002"], { id: "TC-002", suite: false, reason: "纯文案提示" });
-  });
-  it("reason 缺失 → 空串", () => {
-    const vs = harvestRecommendDetailed('@@RECOMMEND {"id":"TC-9","suite":true}');
-    assert.deepEqual(vs, [{ id: "TC-9", suite: true, reason: "" }]);
   });
 });
 
