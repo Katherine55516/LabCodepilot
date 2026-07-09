@@ -191,7 +191,8 @@ export async function GET(req: Request): Promise<Response> {
           const verdict = typeof p.verdict === 'string' ? p.verdict : '';
           if (!caseId) continue;
           if (verdict === 'cleared') delete byCaseId[caseId]; // 撤销：last-wins 移除
-          else if (verdict) byCaseId[caseId] = verdict;
+          // verdict 白名单与聚合层 buildTaskAccs 一致（词表外的值不回显，防御性）
+          else if (verdict === 'accurate' || verdict === 'false_fail' || verdict === 'missed_fail' || verdict === 'severity_mismatch') byCaseId[caseId] = verdict;
         } else {
           const ids = Array.isArray(p.caseIds) ? p.caseIds : [];
           for (const cid of ids) if (typeof cid === 'string') byCaseId[cid] = 'accurate';

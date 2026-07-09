@@ -21,6 +21,7 @@ import { parseExecProgress } from "@/lib/test/exec-progress";
 import { withDownstreamReset, runStartOptions, taskCategory, occupiedSlots, TASK_CATEGORY_ORDER, type TaskCategory } from "@/lib/test/step-status";
 import type { LoginStateInfo } from "@/lib/test/env-config";
 import type { RunHistoryEntry } from "@/lib/test/history";
+import { TestStatsView } from "@/components/test/TestStatsView";
 
 /**
  * Inline testing workbench (Phase 2 · 对话内嵌测试).
@@ -37,7 +38,7 @@ import type { RunHistoryEntry } from "@/lib/test/history";
  * Projects/tasks live in local component state (real input, not persisted yet).
  */
 
-type View = "dash" | "flow" | "report";
+type View = "dash" | "flow" | "report" | "stats";
 type ModalKind = "none" | "newTask" | "runStart" | "execConfirm" | "envWarn";
 // 执行方式:visible=独立窗口可见运行(有头),headless=后台无头运行(默认,更快)。
 type ExecMode = "headless" | "visible";
@@ -1705,6 +1706,7 @@ export function InlineTestingPanel() {
         <div className="flex overflow-hidden rounded-md border border-border">
           {segBtn("dash", t("test.projects"))}
           {segBtn("report", t("test.view.report"))}
+          {segBtn("stats", t("test.stats.tab"))}
         </div>
         <ModelSelectorDropdown
           currentModelValue={model || globalDefaultModel || ""}
@@ -2396,6 +2398,7 @@ export function InlineTestingPanel() {
                 reloadSignal={reportsReload}
               />
             )}
+            {view === "stats" && <TestStatsView t={t} />}
           </div>
         </div>
       )}

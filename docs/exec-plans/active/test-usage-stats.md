@@ -12,11 +12,13 @@
 | Phase 1 | 数据层：`test_stats_events` 表 + 类型 + 采集/聚合 API 骨架 | ✅ 已完成 | 34 条单测；Electron-ABI 闭环通过；三视角对抗评审 4 项发现全部修复 |
 | Phase 2 | 服务端埋点与计时：run/revise/cases 路由事件、进度行时间戳、run.json `durationMs` | ✅ 已完成 | 8 条计时单测；三视角评审 3 项发现全部修复；真实全流程验收并入 Phase 3 CDP 走查（同需 electron:dev） |
 | Phase 3 | 前端埋点 + 复核 UI + 节点徽标：新建/批准事件、ReportView 复核条、流程节点用时+模型、报告矩阵用时列 | ✅ 已完成 | CDP 端到端跑通（electron-as-node 通 DB）；对抗评审 2 中 + 5 低，M1/M2/L4/L6 已修，L3/L5/L7 记为已知局限 |
-| Phase 4 | 统计视图 + 任务详情 + 导出：`TestStatsView`（第 4 个 view）、模型效果表、节点轮次对比矩阵、XLSX 导出 | 📋 待开始 | 新组件独立文件 |
+| Phase 4 | 统计视图 + 任务详情 + 导出：`TestStatsView`（第 4 个 view）、模型效果表、节点轮次对比矩阵、XLSX 导出 | ✅ 已完成 | CDP 端到端（4 任务多轮多模型数据集）：KPI/六图/模型表/节点轮次矩阵渲染且数字对、零 console error；XLSX 4 Sheet + JSON 导出验证 |
 | Phase 5 | 测试验证 + i18n + 文档收尾 | 📋 待开始 | handover/insights 双文档 |
 
 ## 决策日志
 
+- 2026-07-09（Phase 4 评审后 L1-L4 修复）: L1 时长直方图标题改用「已计时条数」（柱子只统计有 durationMs 的用例，AI 漏打进度行时与 results.total 不符）；L2 空态判定改按 taskRows/models 是否为空（task_created fire-and-forget 失败但有执行/复核数据时不误显空态）；L3 导出复核明细排除熔断轮复核 + verdict 白名单（与 KPI 分母口径一致；UI 本就禁止复核熔断轮）；L4 scope=reviews echo 加 verdict 白名单（与 buildTaskAccs 一致，防御词表外值）。无高/中危。
+- 2026-07-09（Phase 4 实现）: ① 统计视图独立文件 `TestStatsView.tsx`，通过 `view === "stats"` 接入面板（顶部分段控件加「统计」段，不新开路由）。② 六图全部**内联 SVG 自绘**（BarChart/StackChart/LineChart/Donut/HBars），零新依赖；数据全来自 `/api/test/stats` 三种 scope（global 挂载拉、model 挂载拉、task 行展开按需拉）。③ 节点轮次横向对比矩阵按原型 v7：每节点一卡、指标做行、轮次做列、Δ 徽标；每轮采纳构成 = 该轮生成集 vs 最终批准集的独立 diff（同一任务不同轮 diff 可不同）。④ 导出 `/api/test/stats/export`：4 Sheet（汇总指标含口径说明 / 任务明细全量 / 复核明细 last-wins+cleared 移除 / 事件流水原始）+ `?format=json`，复用 exceljs；窗口上下文补齐与看板同款。⑤ report-xlsx 执行矩阵加「用时」列（第 7 列，wrapText 列索引不受影响）。⑥ SVG 除零/空值保护：maxV 用 `Math.max(1, ...)`、slot 用 `Math.max(1, len)`、Donut total 保护；单点折线只画点可接受。
 - 2026-07-09（Phase 3 实现与评审后）: ① cases_approved 埋点锚在**执行步开始**（手动批准 / 运行任务 / 批量三条路径的汇聚点），而非逐一挂三处批准 handler——更稳、不漏。重跑会重复发：内容（diff/final）取最新捕获用户编辑，**时间 at 取最早一次**（评审 M1：否则窗口/周趋势把采纳量从首批周挪到重跑周）。② 复核**撤销**用 `verdict:'cleared'` 哨兵事件落库（评审 M2：仅本地删会在重开时从 DB 回显、且仍占准确度分母）；聚合层与 scope=reviews echo 按 last-wins 移除。③ runHash = sha1(run.json 全文)，reports 路由回填，把复核关联到确切执行轮（重跑即失效）。④ 复核归类在**服务端**（enrichReviewed 调 classifyVerdict），前端仅乐观显示（逐状态与服务端一致，已核）。⑤ step_stats 帧（干净收尾补发）写 TaskState.stepDurations/stepModels，节点徽标运行中本地 1s ticker 累计、失败重跑清空不残留（评审 L6）。⑥ 埋点上报 recordTestStat 分批 ≤200 条（评审 L4：删大项目一次几十上百 task_deleted 不被整批 400）。**已知局限**（评审 L3/L5/L7，暂不修）：批量/运行任务的 cases_approved 记 ~100% 采纳（用户未逐条 review，"运行=接受"语义，偏乐观）；CaseResult.status 为空的极端下 ✗有误 无 aiStatus 归类会被丢（正常四态无碍）；磁盘报告按 taskName 存，重命名任务复核禁用、删后重建同名任务复核落到旧 runHash 走 loose 兜底。
 - 2026-07-08: **三个决策点定稿**（用户确认按推荐项执行）：① 统计范围 P1 本地采集+本地看板、不上报，schema 带 `schema_version` 为 P2 账号体系上报预留；② 采纳率基线 = **AI 首轮生成**，用户要求重新生成的次数单独记「返工轮数」；③ 复核粒度 = **逐条复核 + 一键全准**，误判自动归类（误报/漏报/程度不符）。
 - 2026-07-08: 存储选 **SQLite 事件流水**（`test_stats_events`）而非 workbench.json 或项目内文件：聚合查询方便、不依赖项目目录存活、追加式事件可随时按新口径重算、P2 上报直接复用。展示层聚合，**只给指标、不列具体用例**（用户明确要求），但底层事件保留用例粒度（id+hash），这是自动 diff 与误判归类的基础。
