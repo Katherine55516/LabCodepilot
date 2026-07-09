@@ -104,10 +104,6 @@ interface ReportEntry {
   /** 功能验证通过率 "pass/total"，全回归基线为 "N/A"（来自 run.json，见 reduce.ts）。 */
   funcPassStr?: string;
   regressionTotal?: number;
-  /** 回归集口径（tags 含「回归测试」，与 regressionTotal 的回归基线口径正交）；旧 run.json 缺省。 */
-  suiteCounts?: FourState;
-  /** 回归集 "pass/total"；pass < total 即未全过（发版红线）。 */
-  suitePassStr?: string;
   tests: CaseResult[];
   /** The full markdown report doc ({task}-{env}.md), if the report step wrote one. */
   markdown: string;
@@ -357,11 +353,6 @@ export function InlineTestingPanel() {
   // guard it would instantly re-run the step the user just stopped. The entry clears
   // when the user manually re-runs that step (runStep start) or restarts the task.
   const stoppedStepRef = useRef<Set<string>>(new Set());
-  // 用例门控(需求:生成完用例必须人审后才进执行):「运行任务」跑到用例设计完成时停「待批准」
-  // 并释放 autoRun,任务 id 记入本集合;用户点批准(approveStep)时凭它恢复 autoRun,让
-  // 执行→报告继续自动接力(切走任务也后台跑完,保持「运行任务」一键到报告的语义)。
-  // stopTask / 新一轮 startRunAllFrom 时清除。
-  const gatedRunAllRef = useRef<Set<string>>(new Set());
   // Model selection for test runs — reuses the chat's managed-provider picker.
   const [model, setModel] = useState<string>(() => {
     try { return localStorage.getItem("codepilot:last-model") || ""; } catch { return ""; }
@@ -470,36 +461,6 @@ export function InlineTestingPanel() {
     return null;
   };
 
-  // 操作审计埋点(需求:门控与关键操作留痕):fire-and-forget POST /api/test/audit,落
-  // <project>/AI_LabTest/audit/<task>.jsonl(独立于 report/,删任务留痕)。失败静默、
-  // 绝不阻塞交互;time 由服务端生成。taskId 缺省取活动任务,路径/任务名自动解析。
-  const logAudit = (
-    action: string,
-    opts: {
-      taskId?: string;
-      step?: TestStep;
-      mode?: "manual" | "batch" | "auto";
-      detail?: string;
-      projPath?: string;
-      taskName?: string;
-    } = {},
-  ) => {
-    const tid = opts.taskId ?? aId;
-    const loc = tid ? findTaskLoc(tid) : null;
-    const projectPath = opts.projPath ?? loc?.projPath ?? current?.path;
-    const taskName = opts.taskName ?? loc?.task.name ?? activeTask?.name;
-    if (!projectPath || !taskName) return;
-    fetch("/api/test/audit", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        projectPath,
-        taskName,
-        event: { taskId: tid || undefined, step: opts.step, action, mode: opts.mode ?? "manual", detail: opts.detail },
-      }),
-    }).catch(() => {});
-  };
-
   // 排队调度: 槽位 = 并发数 − 占用数。占用 = 在跑(running) ∪ 已认领(autoRun) 的任务数 —— 用真实
   // 在跑数而非仅 autoRun，避免「运行任务」正在跑(running 但可能不在 autoRun)时漏算导致超并发。
   // 有空槽就把队首任务提升为 autoRun，由 auto-chain effect 读「最新」taskStates 起跑它的下一步
@@ -518,18 +479,6 @@ export function InlineTestingPanel() {
     }
     if (waitingQueueRef.current.length !== before) setWaitingTaskIds(new Set(waitingQueueRef.current));
     if (promoted.length) {
-      // 审计:排队提升伴随旧「待批准」产物的自动确认(batch)。用渲染闭包的 taskStates 判定
-      // 哪些 review 步会被下方 updater 自动批准——从 finally 回调进来时闭包可能略旧,
-      // 边缘场景漏记一条(best-effort);人工操作的审计不受影响。
-      for (const tid of promoted) {
-        const st0 = taskStates[tid];
-        if (!st0) continue;
-        for (const k of Object.keys(st0.stepStatus) as TestStep[]) {
-          if (st0.stepStatus[k] !== "review") continue;
-          if (k === "requirement" && st0.imported?.requirement && !st0.requirementMode) continue;
-          logAudit("auto-approve", { taskId: tid, step: k, mode: "batch", detail: "排队提升,旧待批准产物自动确认" });
-        }
-      }
       // 批量=自动批准：把新晋任务里「待批准(review)」的步直接标 done，让 auto-chain 续跑到执行/报告
       // （否则它停在 review、auto-chain 只推进 idle 步，批量任务会卡住）。functional 更新读最新 state，
       // 不受 finally 回调闭包陈旧影响。
@@ -587,7 +536,6 @@ export function InlineTestingPanel() {
         return { convo: [...s.convo, { role: "ai", text: chunk }] };
       });
     push({ role: "user", text: `✏️ ${t("test.revise.action")}「${stepName}」：${text}` });
-    logAudit("revise", { taskId: id, step, detail: text.slice(0, 80), projPath: proj.path, taskName: task.name });
     setComposer("");
     let sawError = false;
     let lineBuf = "";
@@ -648,91 +596,6 @@ export function InlineTestingPanel() {
           if (Array.isArray(d?.cases)) setCasesPreview(d.cases as GeneratedCase[]);
         } catch { /* keep current preview */ }
       }
-    }
-  };
-
-  // AI 推荐回归集（需求③存量侧）：调 /api/test/cases/recommend——AI 只读用例+需求、逐条
-  // 输出 @@RECOMMEND 判定行，后端按行精确 merge（只动 tags 里的「回归测试」，防 AI 重写整份
-  // 丢字段）。复用 reviseStep 的 SSE 解析骨架；@@RECOMMEND 行不上屏（细节吵，AI 总结句里有
-  // 数目）；cases_updated 帧 → tool 气泡展示统计 + 刷新 casesPreview。审计由后端记 recommend-suite。
-  const recommendSuite = async () => {
-    const proj = selected !== null ? projects[selected] : null;
-    const task = proj && selectedTask !== null ? proj.tasks[selectedTask] : null;
-    if (!proj?.path || !task || runningIdsRef.current.has(task.id) || casesPreview.length === 0) return;
-    const id = task.id;
-    const ctrl = new AbortController();
-    abortMapRef.current.set(id, ctrl);
-    markRunning(id);
-    const push = (msg: ConvoMsg) => patchTask(id, (s) => ({ convo: [...s.convo, msg] }));
-    const appendAi = (chunk: string) =>
-      patchTask(id, (s) => {
-        const last = s.convo[s.convo.length - 1];
-        if (last && last.role === "ai") return { convo: [...s.convo.slice(0, -1), { role: "ai", text: last.text + chunk }] };
-        return { convo: [...s.convo, { role: "ai", text: chunk }] };
-      });
-    push({ role: "user", text: `🎯 ${t("test.cases.recommend")}` });
-    let lineBuf = "";
-    const emitLine = (l: string) => {
-      if (l.includes("@@RECOMMEND")) return; // 判定行不上屏
-      if (l.trim()) appendAi(l + "\n");
-    };
-    try {
-      const res = await fetch("/api/test/cases/recommend", {
-        method: "POST",
-        signal: ctrl.signal,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectPath: proj.path, taskName: task.name, model: model || undefined, providerId: providerId || undefined }),
-      });
-      if (!res.ok || !res.body) {
-        const j = await res.json().catch(() => ({}));
-        push({ role: "error", text: (j.error as string) || `HTTP ${res.status}` });
-        return;
-      }
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buf = "";
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, { stream: true });
-        const frames = buf.split("\n\n");
-        buf = frames.pop() || "";
-        for (const frame of frames) {
-          const fline = frame.replace(/^data:\s?/, "").trim();
-          if (!fline) continue;
-          let evt: { type?: string; data?: string } | null = null;
-          try { evt = JSON.parse(fline); } catch { continue; }
-          if (!evt) continue;
-          if (evt.type === "text") {
-            lineBuf += evt.data || "";
-            const ls = lineBuf.split("\n");
-            lineBuf = ls.pop() || "";
-            for (const l of ls) emitLine(l);
-          } else if (evt.type === "tool_use") {
-            try { const tu = JSON.parse(evt.data || "{}"); const label = toolUseLabel(tu.name || "", tu.input); if (label) push({ role: "tool", text: `→ ${label}` }); } catch {}
-          } else if (evt.type === "cases_updated") {
-            let s = { changed: 0, total: 0, suiteTotal: 0 };
-            try { s = JSON.parse(evt.data || "{}"); } catch { /* keep zeros */ }
-            push({ role: "tool", text: `🎯 ${t("test.cases.recommendDone", { changed: s.changed, suite: s.suiteTotal, total: s.total })}` });
-          } else if (evt.type === "error") {
-            let msg = evt.data || "";
-            try { const d = JSON.parse(evt.data || "{}"); msg = d.userMessage || d.rawMessage || msg; } catch {}
-            push({ role: "error", text: msg });
-          }
-        }
-      }
-      if (lineBuf.trim()) emitLine(lineBuf);
-    } catch (e) {
-      if (ctrl.signal.aborted || (e instanceof DOMException && e.name === "AbortError")) push({ role: "user", text: `■ ${t("test.flow.stop")}` });
-      else push({ role: "error", text: `请求失败：${e instanceof Error ? e.message : String(e)}` });
-    } finally {
-      if (abortMapRef.current.get(id) === ctrl) abortMapRef.current.delete(id);
-      markIdle(id);
-      // 标签已被后端 merge → 重新拉取用例展示（弹窗表格/回归集角标都基于 casesPreview）。
-      try {
-        const d = await fetch(`/api/test/cases?projectPath=${encodeURIComponent(proj.path)}&taskName=${encodeURIComponent(task.name)}`).then((r) => r.json());
-        if (Array.isArray(d?.cases)) setCasesPreview(d.cases as GeneratedCase[]);
-      } catch { /* keep current preview */ }
     }
   };
 
@@ -873,9 +736,7 @@ export function InlineTestingPanel() {
         body: JSON.stringify({ projectPath: proj?.path, taskName: name, kind, filename: f.filename, dataBase64: f.dataBase64 }),
       });
       const j = await res.json().catch(() => ({}));
-      const ok = res.ok && j.ok;
-      if (ok && proj?.path) logAudit("import", { projPath: proj.path, taskName: name, detail: `${kind}:${f.filename}` });
-      return ok ? { ok: true, preview: j.preview as string, ext: j.ext as string | undefined } : { ok: false, error: (j.error as string) || t("test.newTaskModal.importFailed") };
+      return res.ok && j.ok ? { ok: true, preview: j.preview as string, ext: j.ext as string | undefined } : { ok: false, error: (j.error as string) || t("test.newTaskModal.importFailed") };
     };
     // Seed the 测试对话 with what was imported — otherwise the stage looks empty (it
     // renders the convo stream, not the artifact file) and the upload seems "missing".
@@ -1126,11 +987,7 @@ export function InlineTestingPanel() {
         headers: { "content-type": "application/json" },
         body: JSON.stringify({ projectPath: current.path, taskName: activeTask.name, cases: casesDraft }),
       }).then((res) => res.json());
-      if (r?.ok) {
-        setCasesPreview(casesDraft);
-        setCasesDraft(null);
-        logAudit("edit-cases", { detail: `用例编辑保存(${casesDraft.length} 条)` });
-      }
+      if (r?.ok) { setCasesPreview(casesDraft); setCasesDraft(null); }
     } catch { /* 保存失败保留编辑态,用户可重试 */ }
     setCasesSaving(false);
   };
@@ -1138,9 +995,7 @@ export function InlineTestingPanel() {
   // 复用报告步的 PreviewModal/MdPreview 弹窗渲染（独立状态，与报告步互不影响）。
   const [reqPreview, setReqPreview] = useState<PreviewState | null>(null);
   const [reqPreviewLoading, setReqPreviewLoading] = useState(false);
-  // 操作记录弹窗(需求②审计的查看端):展示当前任务的 AI_LabTest/audit/{task}.jsonl。
-  const [auditOpen, setAuditOpen] = useState(false);
-  // docx 原件预览弹窗(独立于 reqPreview 的文本弹窗):DocxViewer 按原版式渲染二进制原件。
+  // docx 原件预览弹窗（独立于 reqPreview 的文本弹窗）：DocxViewer 按原版式渲染二进制原件。
   const [origDocPreview, setOrigDocPreview] = useState<{ abs: string; filename: string } | null>(null);
   useEffect(() => { setReqPreview(null); setOrigDocPreview(null); }, [aId]); // 切任务关掉残留的需求预览弹窗
   const openRequirementPreview = async (which: "md" | "original" = "md") => {
@@ -1451,13 +1306,7 @@ export function InlineTestingPanel() {
       // (需求/用例) land in "review" unless this task is in 运行任务 (run-all) mode,
       // where gates auto-approve straight to "done".
       const autoAll = autoRunIdsRef.current.has(id);
-      // 用例门控:「运行任务」(autoRun)也在用例设计完成后停「待批准」——生成完用例必须
-      // 人审(回归集标签/用例内容),点批准才进入执行(见 gatedRunAllRef;批准时恢复 autoRun
-      // 续跑 执行→报告)。需求分析在 autoRun 下仍直通;排队提升时对旧 review 的自动批准
-      // (pumpQueue)不受影响——那是「入队前已存在的产物」的隐含确认,本门控只拦本次新生成的用例。
-      const gateCases = step === "cases" && autoAll && !stopped && !sawError;
-      const finalStatus: StepStatus =
-        stopped ? "idle" : sawError ? "error" : gateCases || (HUMAN_GATED.includes(step) && !autoAll) ? "review" : "done";
+      const finalStatus: StepStatus = stopped ? "idle" : sawError ? "error" : HUMAN_GATED.includes(step) && !autoAll ? "review" : "done";
       patchTask(id, (s) => ({ stepStatus: { ...s.stepStatus, [step]: finalStatus } }));
       if (stopped) {
         // 停止 = 在此节点停住，不再向下游接力。标记该步【及其下游】为已停止，auto-chain 便不会
@@ -1468,11 +1317,9 @@ export function InlineTestingPanel() {
         push({ role: "user", text: `■ ${t("test.flow.stop")}「${stepName}」` });
       }
       // End run-all mode when stopped, when anything errors, or when the pipeline
-      // finishes (报告) — release the auto-chain claim for this task. 用例门控同样释放
-      // (槽位空出、排队任务可提升),但记入 gatedRunAllRef 供批准时恢复接力。
-      if (stopped || sawError || step === "report" || gateCases) {
+      // finishes (报告) — release the auto-chain claim for this task.
+      if (stopped || sawError || step === "report") {
         autoRunIdsRef.current.delete(id);
-        if (gateCases) gatedRunAllRef.current.add(id);
       }
       // Only clear this task's abort controller if it's still ours (a fast re-run could have replaced it).
       if (abortMapRef.current.get(id) === ctrl) abortMapRef.current.delete(id);
@@ -1487,11 +1334,8 @@ export function InlineTestingPanel() {
   // so the 运行 button can re-run this node. No-op if nothing is running.
   const stopTask = (tid: string) => {
     if (!tid) return;
-    // 停止 = 退出该任务的 run-all / 排队，并中断 in-flight。用例门控的恢复标记一并清除
-    // (停止后再批准用例走手动语义,不再自动接力到报告)。
+    // 停止 = 退出该任务的 run-all / 排队，并中断 in-flight。
     autoRunIdsRef.current.delete(tid);
-    gatedRunAllRef.current.delete(tid);
-    logAudit("stop", { taskId: tid });
     if (waitingQueueRef.current.includes(tid)) {
       waitingQueueRef.current = waitingQueueRef.current.filter((x) => x !== tid); // 排队中 → 直接出队
       setWaitingTaskIds(new Set(waitingQueueRef.current));
@@ -1571,8 +1415,6 @@ export function InlineTestingPanel() {
     // 问题6 时序修复：磁盘报告删【完成后】再刷新报告 tab。否则 setProjects 触发的 ReportBrowser
     // re-fetch 可能早于 DELETE 完成、又扫到没删的报告（用户报「删任务后报告还在」的根因）。
     if (toDelete.length) {
-      // 审计(删除动作前写):audit 文件在 AI_LabTest/audit/ 下、不在报告目录,删除后留痕。
-      for (const r of toDelete) logAudit("delete-task", { projPath: r.path, taskName: r.name, detail: "删除任务(报告已清理,审计留痕)" });
       await Promise.all(toDelete.map((r) => deleteTaskReports(r.path, r.name)));
       setReportsReload((n) => n + 1);
     }
@@ -1594,25 +1436,15 @@ export function InlineTestingPanel() {
   const approveStep = (step: TestStep) => {
     if (!aId) return;
     patchTask(aId, (s) => ({ stepStatus: { ...s.stepStatus, [step]: "done" } }));
-    // 「运行任务」在用例门控停下的任务:批准 = 恢复流水线,重新认领 autoRun,执行→报告
-    // 自动接力(切走任务也后台跑完,保持「运行任务」语义)。手动流程(不在集合)行为不变。
-    const resumedRunAll = step === "cases" && gatedRunAllRef.current.delete(aId);
-    if (resumedRunAll) autoRunIdsRef.current.add(aId);
-    logAudit("approve", { step, detail: resumedRunAll ? "运行任务·用例门控批准,恢复自动接力" : undefined });
     const idx = STEPS.findIndex((s) => s.step === step);
     const next = STEPS[idx + 1];
-    if (next && !stoppedStepRef.current.has(`${aId}:${next.step}`)) {
-      // 批准直接起跑的下一步不经 auto-chain,审计补 run 记录(否则执行步在链路里缺一环)。
-      logAudit("run", { step: next.step, mode: "auto", detail: "批准后接力" });
-      runStep(next.step);
-    }
+    if (next && !stoppedStepRef.current.has(`${aId}:${next.step}`)) runStep(next.step);
   };
 
   // Manual single-step run (pill / detail 运行 button): cancels any run-all mode so
   // gates apply normally.
   const runStepManual = (step: TestStep) => {
     if (aId) autoRunIdsRef.current.delete(aId);
-    logAudit("run", { step });
     runStep(step);
   };
 
@@ -1658,9 +1490,6 @@ export function InlineTestingPanel() {
     // 运行任务 drives the whole pipeline → clear this task's 停止 marks so the
     // auto-chain isn't blocked on a step the user stopped in a previous attempt.
     for (const s of STEPS) stoppedStepRef.current.delete(`${id}:${s.step}`);
-    gatedRunAllRef.current.delete(id); // 新一轮运行:清上一轮用例门控的恢复标记
-    logAudit("run-task", { taskId: id, step, detail: "运行任务(流水线起点)" });
-
     // 起点(需求/用例/执行)及之后都会重跑到「测试执行」→ 清掉上轮四态/用例结果，避免 stale 残留。
     patchTask(id, () => ({
       fourState: { total: 0, pass: 0, fail: 0, partial: 0, blocked: 0 },
@@ -1728,7 +1557,6 @@ export function InlineTestingPanel() {
         // 续跑(如手动批准门控后自动跑执行)算「新起跑」，达并发上限时先按住，空出槽位后本 effect
         // 会因 runningTaskIds 变化重跑并自动放行 —— 不死锁。
         if (!autoAll && occupiedSlots(runningIdsRef.current, autoRunIdsRef.current) >= concurrencyRef.current) continue;
-        logAudit("run", { taskId: tid, step: next.step, mode: "auto", projPath: loc.projPath, taskName: loc.task.name });
         runStep(next.step, { target: loc });
         continue;
       }
@@ -1846,13 +1674,6 @@ export function InlineTestingPanel() {
                 )}
                 {/* 顶部「运行任务」按钮运行中不再变成停止 —— 停止只保留详情卡那一个,
                     避免两处停止入口造成混淆;运行中此按钮直接禁用。 */}
-                <button
-                  onClick={() => setAuditOpen(true)}
-                  title={t("test.audit.title")}
-                  className="flex h-7 items-center gap-1 rounded-md border border-border px-2 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground"
-                >
-                  <ListChecks size={12} /> {t("test.audit.title")}
-                </button>
                 <button
                   onClick={handleRunTask}
                   disabled={!current?.path || busy || aQueued || !stepUnlocked(focusStep)}
@@ -1981,7 +1802,6 @@ export function InlineTestingPanel() {
                       <span className="text-[11px] text-muted-foreground">{t("test.cases.total")} · {casesPreview.length}</span>
                       <span className="flex-1" />
                       {casesPreview.length > 0 && <button onClick={() => setCasesDraft(structuredClone(casesPreview))} className="rounded bg-primary px-2 py-0.5 text-[10px] font-medium text-primary-foreground hover:opacity-90">{t("test.cases.viewEdit")}</button>}
-                      {casesPreview.length > 0 && <button onClick={recommendSuite} disabled={busy} title={t("test.cases.recommendHint")} className="rounded border border-primary/40 px-1.5 py-0.5 text-[10px] text-primary hover:bg-primary/10 disabled:opacity-50">🎯 {t("test.cases.recommend")}</button>}
                       {casesPreview.length > 0 && <button onClick={() => exportCases(false)} className="rounded border border-border px-1.5 py-0.5 text-[10px] text-foreground hover:bg-muted">{t("test.cases.export")}</button>}
                       <button onClick={() => exportCases(true)} className="rounded border border-border px-1.5 py-0.5 text-[10px] text-foreground hover:bg-muted">{t("test.cases.template")}</button>
                     </div>
@@ -2174,7 +1994,7 @@ export function InlineTestingPanel() {
                 <span>💡 {t("test.chat.action.title")}「{t(STEPS.find((s) => s.step === pendingAction.step)!.name)}」{pendingAction.reason ? `：${pendingAction.reason}` : ""}</span>
                 <span className="flex-1" />
                 <button
-                  onClick={() => { const st = pendingAction.step; logAudit("chat-action", { step: st, detail: pendingAction.reason || undefined }); setPendingAction(null); runStepManual(st); }}
+                  onClick={() => { const st = pendingAction.step; setPendingAction(null); runStepManual(st); }}
                   disabled={busy}
                   className="rounded bg-primary px-2.5 py-1 text-[11px] font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-40"
                 >
@@ -2465,10 +2285,6 @@ export function InlineTestingPanel() {
       )}
 
       {/* Modals + folder picker (browser fallback for project selection) */}
-      {/* 操作记录弹窗(审计查看端):当前任务的门控批准/运行/修订等全部留痕。 */}
-      {auditOpen && current?.path && activeTask && (
-        <AuditModal t={t} projectPath={current.path} taskName={activeTask.name} onClose={() => setAuditOpen(false)} />
-      )}
       {/* 用例表弹窗（Excel 形式）：从详情卡「查看 / 编辑」打开，查看与编辑合一。9 列——
           ID / 用例标题 / 用例类型(5类下拉,兼容八类旧值) / 用例标签(冒烟·回归,多选) / 关联故事(=requirement) /
           前置条件 / 操作步骤 / 期望结果 / 优先级。oracle 双轴等次要字段不在表内,saveCases 整份透传保留。 */}
@@ -2679,25 +2495,7 @@ function ConvoBubble({ msg }: { msg: ConvoMsg }) {
 
 // 报告 view (prototype): metrics row + per-case results table, from the execution
 // run's @@RESULT frames (caseResults) + four-state tally. Facts only.
-// 回归集（发版红线）横幅：全过→绿；有 fail/partial/blocked（含漏跑补的 blocked）→红
-// 「不可发版」。无 suiteCounts（旧报告 / 用例无「回归测试」标签）→ 不渲染。
-// suite = tags 口径（§1.7），与回归基线（verification/oracle 口径）无关。
-function SuiteBanner({ t, suiteCounts, suitePassStr }: { t: T; suiteCounts?: FourState; suitePassStr?: string }) {
-  if (!suiteCounts || !suiteCounts.total) return null;
-  const allPass = suiteCounts.pass === suiteCounts.total;
-  const s = suitePassStr || `${suiteCounts.pass}/${suiteCounts.total}`;
-  return allPass ? (
-    <div className="rounded-md border border-status-success-border bg-status-success-muted px-3 py-2 text-[11px] text-status-success-foreground">
-      ✓ {t("test.report.suitePass", { s })}
-    </div>
-  ) : (
-    <div className="rounded-md border border-status-error-border bg-status-error-muted px-3 py-2 text-[11px] font-medium text-status-error-foreground">
-      ⚠ {t("test.report.suiteFail", { s })}
-    </div>
-  );
-}
-
-function ReportView({ t, results, four, funcCounts, funcPassStr, suiteCounts, suitePassStr, circuitBroken, taskName, projectPath, env }: { t: T; results: CaseResult[]; four: FourState; funcCounts?: FourState; funcPassStr?: string; suiteCounts?: FourState; suitePassStr?: string; circuitBroken?: boolean; taskName: string; projectPath?: string; env?: string }) {
+function ReportView({ t, results, four, funcCounts, funcPassStr, circuitBroken, taskName, projectPath, env }: { t: T; results: CaseResult[]; four: FourState; funcCounts?: FourState; funcPassStr?: string; circuitBroken?: boolean; taskName: string; projectPath?: string; env?: string }) {
   // 证据媒体（图片灯箱 + 录像内联回放）：经 /api/test/media 白名单流式取证据；
   // lightbox=当前放大查看的文件名。无 projectPath（如流程内调用）时退化为文件名文本。
   const [lightbox, setLightbox] = useState<string | null>(null);
@@ -2735,9 +2533,6 @@ function ReportView({ t, results, four, funcCounts, funcPassStr, suiteCounts, su
           ⚠ {t("test.report.circuitBroken")}
         </div>
       )}
-      <div className="mb-3 empty:hidden">
-        <SuiteBanner t={t} suiteCounts={suiteCounts} suitePassStr={suitePassStr} />
-      </div>
       <div className="mb-3 grid grid-cols-2 gap-2 lg:grid-cols-4">
         {metric(t("test.report.funcRate"), funcRateStr)}
         {metric(t("test.report.caseCount"), String(total))}
@@ -3122,7 +2917,6 @@ function ReportStepPanel({
           ⚠ {t("test.report.circuitBroken")}
         </div>
       )}
-      <SuiteBanner t={t} suiteCounts={entry?.suiteCounts} suitePassStr={entry?.suitePassStr} />
 
       {/* 概览条 */}
       <div className="flex items-stretch gap-2">
@@ -3302,91 +3096,6 @@ function MdPreview({ t, preview, projectPath, onClose, onSaved, setEditable }: {
         )}
       </div>
     </>
-  );
-}
-
-// 操作记录弹窗（需求②审计的查看端）：GET /api/test/audit 拉当前任务事件（最新在前，服务端
-// 已倒序），展示 时间(fmtCnDateTime 本地化)/步骤/动作/方式/详情。动作与方式经 i18n 映射；
-// 未知动作原样显示（审计文件是数据，向前兼容新动作）。审计文件删任务留痕，故已删任务的
-// 记录也能在同名新任务里看到——detail 里的 delete-task 行即分界。
-interface AuditEvt { time?: string; step?: string; action?: string; mode?: string; detail?: string }
-const AUDIT_ACTION_KEYS: Record<string, TranslationKey> = {
-  "approve": "test.audit.action.approve",
-  "run": "test.audit.action.run",
-  "run-task": "test.audit.action.runTask",
-  "chat-action": "test.audit.action.chatAction",
-  "revise": "test.audit.action.revise",
-  "stop": "test.audit.action.stop",
-  "auto-approve": "test.audit.action.autoApprove",
-  "import": "test.audit.action.import",
-  "edit-cases": "test.audit.action.editCases",
-  "delete-task": "test.audit.action.deleteTask",
-  "recommend-suite": "test.audit.action.recommend",
-};
-const AUDIT_MODE_KEYS: Record<string, TranslationKey> = {
-  manual: "test.audit.mode.manual",
-  batch: "test.audit.mode.batch",
-  auto: "test.audit.mode.auto",
-};
-function AuditModal({ t, projectPath, taskName, onClose }: { t: T; projectPath: string; taskName: string; onClose: () => void }) {
-  const [events, setEvents] = useState<AuditEvt[] | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    fetch(`/api/test/audit?projectPath=${encodeURIComponent(projectPath)}&taskName=${encodeURIComponent(taskName)}`)
-      .then((r) => r.json())
-      .then((d) => { if (!cancelled) setEvents(Array.isArray(d?.events) ? (d.events as AuditEvt[]) : []); })
-      .catch(() => { if (!cancelled) setEvents([]); });
-    return () => { cancelled = true; };
-  }, [projectPath, taskName]);
-  const stepName = (s?: string) => {
-    const def = STEPS.find((x) => x.step === s);
-    return def ? t(def.name) : "—";
-  };
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
-      <div className="flex max-h-[80vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-border bg-background shadow-xl" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center gap-2 border-b border-border px-3 py-2">
-          <ListChecks size={14} className="text-primary" />
-          <span className="text-xs font-semibold text-foreground">{t("test.audit.title")} · {taskName}</span>
-          <span className="flex-1" />
-          <button onClick={onClose} className="text-muted-foreground hover:text-foreground" aria-label={t("test.report.close")}><X size={14} /></button>
-        </div>
-        <div className="min-h-0 flex-1 overflow-auto">
-          {events === null ? (
-            <div className="p-4 text-center text-[11px] text-muted-foreground"><SpinnerGap size={14} className="mx-auto animate-spin" /></div>
-          ) : events.length === 0 ? (
-            <div className="p-4 text-center text-[11px] text-muted-foreground">{t("test.audit.empty")}</div>
-          ) : (
-            <table className="w-full border-collapse text-[11px]">
-              <thead className="sticky top-0 bg-muted/80 backdrop-blur">
-                <tr className="text-left text-muted-foreground">
-                  <th className="whitespace-nowrap px-3 py-1.5 font-medium">{t("test.audit.colTime")}</th>
-                  <th className="whitespace-nowrap px-2 py-1.5 font-medium">{t("test.audit.colStep")}</th>
-                  <th className="whitespace-nowrap px-2 py-1.5 font-medium">{t("test.audit.colAction")}</th>
-                  <th className="whitespace-nowrap px-2 py-1.5 font-medium">{t("test.audit.colMode")}</th>
-                  <th className="px-2 py-1.5 font-medium">{t("test.audit.colDetail")}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {events.map((e, i) => (
-                  <tr key={i} className="border-t border-border align-top">
-                    <td className="whitespace-nowrap px-3 py-1.5 font-mono text-[10px] text-muted-foreground">{e.time ? fmtCnDateTime(e.time) : "—"}</td>
-                    <td className="whitespace-nowrap px-2 py-1.5 text-foreground">{stepName(e.step)}</td>
-                    <td className="whitespace-nowrap px-2 py-1.5 text-foreground">{AUDIT_ACTION_KEYS[e.action ?? ""] ? t(AUDIT_ACTION_KEYS[e.action!]) : e.action || "—"}</td>
-                    <td className="whitespace-nowrap px-2 py-1.5">
-                      <span className={`rounded px-1.5 py-0.5 text-[10px] ${e.mode === "manual" ? "bg-status-info-muted text-status-info-foreground" : "bg-muted text-muted-foreground"}`}>
-                        {AUDIT_MODE_KEYS[e.mode ?? ""] ? t(AUDIT_MODE_KEYS[e.mode!]) : e.mode || "—"}
-                      </span>
-                    </td>
-                    <td className="px-2 py-1.5 text-muted-foreground">{e.detail || ""}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-      </div>
-    </div>
   );
 }
 
@@ -3738,7 +3447,7 @@ function ReportBrowser({ projects, t, model, providerId, onOpenTask, reloadSigna
                                 </div>
                               ) : (
                                 <>
-                                  <ReportView t={t} results={r.tests} four={r.counts} funcCounts={r.funcCounts} funcPassStr={r.funcPassStr} suiteCounts={r.suiteCounts} suitePassStr={r.suitePassStr} circuitBroken={r.circuitBroken} taskName={task} projectPath={project.path} env={r.env} />
+                                  <ReportView t={t} results={r.tests} four={r.counts} funcCounts={r.funcCounts} funcPassStr={r.funcPassStr} circuitBroken={r.circuitBroken} taskName={task} projectPath={project.path} env={r.env} />
                                   {r.markdown && (
                                     <div className="mt-3 border-t border-border pt-3">
                                       <div className="mb-2 text-[11px] font-medium text-muted-foreground">{t("test.report.docTitle")}</div>

@@ -61,32 +61,27 @@ export function wrapExecutionStream(
           // unparseable cases → undefined map → reduce falls back to single-rate.
           let verificationById: Record<string, string> | undefined;
           let caseIds: string[] | undefined;
-          let suiteIds: string[] | undefined;
           try {
             const casesAbs = path.join(opts.projectPath, artifactPaths(opts.taskName).cases);
             const parsed = JSON.parse(await fs.promises.readFile(casesAbs, 'utf-8')) as unknown;
             // cases.json 可能是 { cases: [...] } 或顶层数组 [...]（与 report-xlsx 同口径兼容）。
             const list = Array.isArray((parsed as { cases?: unknown })?.cases)
-              ? (parsed as { cases: Array<{ id?: unknown; verification?: unknown; tags?: unknown }> }).cases
+              ? (parsed as { cases: Array<{ id?: unknown; verification?: unknown }> }).cases
               : Array.isArray(parsed)
-                ? (parsed as Array<{ id?: unknown; verification?: unknown; tags?: unknown }>)
+                ? (parsed as Array<{ id?: unknown; verification?: unknown }>)
                 : [];
             const map: Record<string, string> = {};
             const ids: string[] = [];
-            const suite: string[] = [];
             for (const c of list) {
               if (c && typeof c.id === 'string') {
                 ids.push(c.id);
                 if (typeof c.verification === 'string') map[c.id] = c.verification;
-                // 回归集 = tags 含「回归测试」（§1.7,与 verification 回归基线正交）。
-                if (Array.isArray(c.tags) && c.tags.some((tg) => tg === '回归测试')) suite.push(c.id);
               }
             }
             if (Object.keys(map).length) verificationById = map;
             // 用例全集 id（按 cases.json 顺序）→ 交给 reduce 兜底补全漏执行的用例（问题②修复：
             // 报告以用例全集为准，AI 漏跑的用例补成「未执行」blocked，而非静默丢失）。
             if (ids.length) caseIds = ids;
-            if (suite.length) suiteIds = suite;
           } catch {
             // no cases / parse fail → reduce falls back to single-rate + 不补全
           }
@@ -96,7 +91,6 @@ export function wrapExecutionStream(
             time: new Date().toISOString(),
             verificationById,
             caseIds,
-            suiteIds,
           });
           const runContent = JSON.stringify(reduced, null, 2);
           try {

@@ -20,7 +20,7 @@ const SYSTEM_PROMPT = `你是 QA 自动化测试平台的「产物修订助手�
 任务：根据用户的修改要求，对指定步骤已生成的产物文档做精准修改，保持其既有结构与规范，只改必要部分。
 要求：基于真实证据（产物原文 + 代码/文档）；只读源码与文档；只把结果写入 AI_LabTest/ 目录，绝不修改任何业务源码与配置文件。`;
 
-const CASES_SCHEMA = '{"cases":[{"id","caseType","requirement","priority","purpose","precondition","steps":[{"content","expected"}],"assertion","oracle","verification","cleanup","tags"}]}';
+const CASES_SCHEMA = '{"cases":[{"id","caseType","requirement","priority","purpose","precondition","steps":[{"content","expected"}],"assertion","oracle","verification","cleanup"}]}';
 
 /** 支持修订的步骤 → 产物相对路径 + 是否 JSON + 中文步名。其余步返回 null（不支持）。 */
 function targetArtifact(step: string, taskName: string): { rel: string; json: boolean; label: string } | null {

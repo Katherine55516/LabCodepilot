@@ -125,15 +125,4 @@ describe("POST /api/test/import — xlsx parsing", () => {
     assert.equal(new Set(ids).size, ids.length, "ids unique after de-dup");
     assert.deepEqual(ids, ["TC-1", "TC-1#2"]);
   });
-  it("maps a 用例标签 column to tags[] (回归集载体), split on 、", async () => {
-    const b = await makeXlsxB64(
-      ["ID", "标题", "用例标签"],
-      [["TC-1", "登录", "冒烟测试、回归测试"], ["TC-2", "改昵称", ""]],
-    );
-    const res = await post({ projectPath: proj, taskName: "订单", kind: "cases", filename: "c.xlsx", dataBase64: b });
-    assert.equal((await res.json()).ok, true);
-    const cases = JSON.parse(fs.readFileSync(casesFile("订单"), "utf-8")).cases;
-    assert.deepEqual(cases[0].tags, ["冒烟测试", "回归测试"]);
-    assert.equal(cases[1].tags, undefined, "空标签单元格不写 tags 字段");
-  });
 });
