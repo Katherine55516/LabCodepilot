@@ -228,3 +228,15 @@
 - CLI 行为：`anthropics/claude-code` 官方 CHANGELOG.md 原文，2.1.142–2.1.204 区间 47 个版本逐条筛查（MCP / SDK / headless / stream-json / stdio / 别名 / 信任 / 权限 关键词族）
 - 项目集成面：全仓扫描 SDK import（22 处）、Options 字段使用、消息循环结构、打包链路五件套、版本硬编码点
 - 已证伪的传闻（避免后续误导）：「TodoWrite 工具被移除」（类型两版本并存）、「permissionMode default 改名 manual 破坏 API」（类型取值不变、2.1.200 明确向后兼容）、「MCP 非阻塞启动是破坏性变更」（实为 2.1.144 的启动提速优化）
+
+## 11. 实施记录（2026-07-09，Phase 0–3 完成）
+
+落点 **0.3.203** 已实施（分支 `feat/agent-sdk-0-3-203`）。实测结论对照 §5 风险登记册：
+
+- **R1 证实并已修复**（commit 23af5ec）：2.1.203 下模型确实改用 TaskCreate/TaskUpdate（实测三轮多步任务，TodoWrite 零调用），任务清单 UI 静默失效。已按预案在 claude-client.ts 补 Task* → todos 投影（复用 task_update SSE，chat route 的 syncSdkTasks 与前端面板零改动）。实测细节：TaskCreate 的 tool_result 是**纯文本** `"Task #N created successfully: <subject>"`（非 sdk-tools.d.ts 声明的 `{task:{id}}` 结构），taskId 用正则提取、JSON 解析留作兜底。端到端验证：TaskCreate×3 注册落库（tasks 表 sdk- 前缀）→ TaskUpdate 状态全部流转 completed → 右侧任务列表面板勾选渲染。
+- **R2 复测后降级为「无回归」**：用 2.1.203 二进制 + 隔离 HOME 三来源实验复测——① settings.json.mcpServers 仍是 dead field（断言成立）；② `~/.claude.json` 正常读取；③ 未批准目录的 `<cwd>/.mcp.json` 在 CLI 场景显示 `⏸ Pending approval` 不自动 spawn（2.1.196 收紧确认生效）。但对本应用无影响：standalone 自带 MCP 与 DB-provider 模式的项目 .mcp.json 均由 mcp-loader 程序化注入 `options.mcpServers`（--mcp-config 通道），不经批准门控；仅 env 模式的 SDK 原生加载受影响（与官方 CLI 一致，属预期安全行为）。
+- **R8 佐证**：dev+CDP 实测多轮对话 console 零 error/warn。
+- **新版行为记录**：`bypassPermissions` + `canUseTool` 组合下 SDK 打 stderr 警告 `CLAUDE_SDK_CAN_USE_TOOL_SHADOWED`（行为与旧版一致——bypass 优先，仅新增显式警告）；「自动批准所有操作」开启的用户 stderr 里会看到此行，无功能影响。
+- **通过项**：设置页版本显示 v2.1.203；capabilities 控制通道（supportedModels=5/supportedCommands=110/accountInfo/mcpServerStatus=7 servers）；managed provider + `qwen3.7-max[1m]` 别名主链路真实对话；上下文占用指示器动态更新；thinking 渲染；同会话多轮 resume；`npm run test` 1873 pass；`test:smoke` 6/6。
+- **dev 验证环境备忘**：本地 dev 的 managed 凭证为密文（enc:v1，主密钥 `CLAUDE_GUI_SECRET_KEY` 仅打包版 Electron 主进程注入 fork 的 server）。本次借道本机打包版 server 进程的同一密钥直起 `npm run dev` 完成真实调用验证；纯 dev 无密钥时 provider 判定为空属环境限制而非升级回归。
+- **待办（Phase 4）**：macOS 打包验证（R3 managed 全模型清单、打包版冒烟）；Windows 走 CI。权限弹窗路径（canUseTool，非 bypass 模式）留待打包版补测（P1）。

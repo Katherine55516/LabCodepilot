@@ -1,7 +1,8 @@
 /**
  * Migration: `~/.claude/settings.json.mcpServers` → `~/.claude.json.mcpServers`.
  *
- * The bundled Claude Code 2.1.141 binary only reads user-scope MCP servers
+ * The bundled Claude Code binary (2.1.203; first verified on 2.1.141) only
+ * reads user-scope MCP servers
  * from `~/.claude.json` — settings.json.mcpServers is a dead field that
  * was the legacy write target of the MCP Manager UI. The migration
  * function moves any stragglers and clears the dead field so the SDK
