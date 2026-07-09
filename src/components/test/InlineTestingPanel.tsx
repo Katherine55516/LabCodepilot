@@ -569,23 +569,38 @@ export function InlineTestingPanel() {
       .catch(() => {});
   };
 
-  // 跨任务一键重跑:①聚合库→写 `回归用例库.cases.json`(POST /api/test/library/run);②③复用现有
-  // /api/test/run 依次跑 execution→report(taskName=保留名),env 走项目 environments.json。产物落
-  // report/回归用例库/,自动出现在【报告区】(reports 列举扫全 report/ 目录),故这里跑完只需 bump
-  // reportsReload。执行/报告的详细进度不在弹窗内逐行渲染(MVP);弹窗按钮显示「重跑中…」。
-  const runLibrary = async () => {
+  // 发起回归轮次(v2):①圈选聚合→建轮次+快照(POST /api/test/library/run,返回 roundId);②③复用
+  // 现有 /api/test/run 依次跑 execution→report(taskName=保留名,带 roundId → 产物落
+  // report/回归用例库/{roundId}/,同环境多轮互不覆盖);④收口轮次(PATCH rounds,done 时后端从
+  // run.json 摘录口径,异常/中断按 aborted)。报告自动出现在【报告区】(reports 扫描含轮次子目录)。
+  // suiteName/env 由批 D 的发起弹窗传入;缺省 = 内置「全量」+ local(等价 v1 行为)。
+  const runLibrary = async (opts?: { suiteName?: string; env?: string }) => {
     const p = current?.path;
     if (!p || libraryRunning) return;
+    const env = opts?.env || "local";
     setLibraryRunning(true);
     setLibraryRunStatus(null);
+    let roundId: string | undefined;
+    // 轮次收口(best-effort,fire-and-forget 语义但等待返回以便刷新列表)。
+    const settle = async (outcome: "done" | "aborted") => {
+      if (!roundId) return;
+      try {
+        await fetch("/api/test/library/rounds", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ projectPath: p, roundId, outcome }),
+        });
+      } catch { /* 收口失败 → 读侧惰性 aborted 兜底 */ }
+    };
     try {
       const agg = await fetch("/api/test/library/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectPath: p }),
+        body: JSON.stringify({ projectPath: p, suiteName: opts?.suiteName, env }),
       }).then((r) => r.json()).catch(() => null);
-      if (!agg?.ok) { setLibraryRunStatus(t("test.library.runFailed")); return; }
+      if (!agg?.ok) { setLibraryRunStatus(agg?.error || t("test.library.runFailed")); return; }
       if (!agg.total) { setLibraryRunStatus(t("test.library.runEmpty")); return; }
+      roundId = typeof agg.roundId === "string" ? agg.roundId : undefined;
       setLibraryRunStatus(t("test.library.runStarted", { total: agg.total }));
       // 依次驱动 execution → report,消费 SSE 到 done(不逐行渲染)。任一步 !res.ok(如 503
       // 被测地址不可达 / NO_CREDENTIALS)则中止并把后端 error 展示在弹窗状态行。
@@ -593,7 +608,7 @@ export function InlineTestingPanel() {
         const res = await fetch("/api/test/run", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ projectPath: p, taskName: REGRESSION_LIBRARY_TASK, step, env: "local", model: model || undefined, providerId: providerId || undefined }),
+          body: JSON.stringify({ projectPath: p, taskName: REGRESSION_LIBRARY_TASK, step, env, roundId, model: model || undefined, providerId: providerId || undefined }),
         });
         if (!res.ok) {
           let msg = t("test.library.runFailed");
@@ -611,12 +626,16 @@ export function InlineTestingPanel() {
       };
       if (await drive("execution")) {
         await drive("report");
+        await settle("done");
         setReportsReload((n) => n + 1);
         setLibraryReload((n) => n + 1);
         setLibraryRunStatus(t("test.library.runDone"));
+      } else {
+        await settle("aborted");
       }
     } catch {
       setLibraryRunStatus(t("test.library.runFailed"));
+      await settle("aborted");
     } finally {
       setLibraryRunning(false);
     }

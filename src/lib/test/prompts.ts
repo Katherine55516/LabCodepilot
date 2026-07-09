@@ -35,15 +35,24 @@ function loadRule(name: string): string | null {
   }
 }
 
-/** 产物路径约定（镜像框架；相对项目根）。 */
-export function artifactPaths(taskName: string, env: string = 'local') {
+/**
+ * 产物路径约定（镜像框架；相对项目根）。
+ *
+ * `roundId`（v2 回归轮次）：仅回归用例库的轮次化执行传入——执行/报告产物改落
+ * `report/{taskName}/{roundId}/` 子目录、证据落 `_evidence/{taskName}-{env}-{roundId}`，
+ * 同环境多轮互不覆盖（与 rounds.ts roundArtifactPaths 口径一致）。普通任务不传，
+ * 路径与 v1 完全相同。requirement/cases 与轮次无关（聚合输入共享最新一份）。
+ */
+export function artifactPaths(taskName: string, env: string = 'local', roundId?: string) {
   const base = 'AI_LabTest';
+  const reportDir = roundId ? `${base}/report/${taskName}/${roundId}` : `${base}/report/${taskName}`;
+  const evidenceSeg = roundId ? `${taskName}-${env}-${roundId}` : `${taskName}-${env}`;
   return {
     requirement: `${base}/requirements/${taskName}-需求.md`,
     cases: `${base}/testCase/.data/${taskName}.cases.json`,
-    runJson: `${base}/report/${taskName}/${taskName}-${env}.run.json`,
-    report: `${base}/report/${taskName}/${taskName}-${env}.md`,
-    evidenceDir: `${base}/report/_evidence/${taskName}-${env}`,
+    runJson: `${reportDir}/${taskName}-${env}.run.json`,
+    report: `${reportDir}/${taskName}-${env}.md`,
+    evidenceDir: `${base}/report/_evidence/${evidenceSeg}`,
   };
 }
 
@@ -257,8 +266,9 @@ function executionPrompt(
   baseUrl?: string,
   hasLoginState = false,
   loginCredentials?: { username: string; password: string },
+  roundId?: string,
 ): string {
-  const p = artifactPaths(taskName, env);
+  const p = artifactPaths(taskName, env, roundId);
   const rule = ruleBlock(
     '测试执行规范',
     loadRule('test-execution'),
@@ -289,8 +299,8 @@ ${rule}
 完成后用一句话总结：用例总数 N、已输出 @@RESULT 行数、以及四态计数（pass/fail/partial/blocked）；若行数 < N 必须显式说明哪些用例未覆盖。`;
 }
 
-function reportPrompt(taskName: string, env: string): string {
-  const p = artifactPaths(taskName, env);
+function reportPrompt(taskName: string, env: string, roundId?: string): string {
+  const p = artifactPaths(taskName, env, roundId);
   const rule = ruleBlock(
     '测试报告规范',
     loadRule('test-report'),
@@ -350,6 +360,8 @@ export interface BuildStepOptions {
    * 时用于让执行智能体在登录页自动填充并提交登录。缺省 → 不注入凭据（走 hasLoginState 分支）。
    */
   loginCredentials?: { username: string; password: string };
+  /** 回归轮次号（v2，仅回归用例库任务）：执行/报告产物落 report/{task}/{roundId}/ 子目录。 */
+  roundId?: string;
 }
 
 export interface BuiltStep {
@@ -377,9 +389,9 @@ export function buildStep(step: TestStep, opts: BuildStepOptions): BuiltStep {
     case 'cases':
       return withNote({ systemPrompt: SYS.cases, prompt: casesPrompt(taskName, { reuseImported: opts.reuseImported, requirementSourcePath: opts.requirementSourcePath }), needsPlaywright: false }, note);
     case 'execution':
-      return withNote({ systemPrompt: SYS.execution, prompt: executionPrompt(taskName, env, opts.baseUrl, opts.hasLoginState, opts.loginCredentials), needsPlaywright: true }, note);
+      return withNote({ systemPrompt: SYS.execution, prompt: executionPrompt(taskName, env, opts.baseUrl, opts.hasLoginState, opts.loginCredentials, opts.roundId), needsPlaywright: true }, note);
     case 'report':
-      return withNote({ systemPrompt: SYS.report, prompt: reportPrompt(taskName, env), needsPlaywright: false }, note);
+      return withNote({ systemPrompt: SYS.report, prompt: reportPrompt(taskName, env, opts.roundId), needsPlaywright: false }, note);
   }
 }
 

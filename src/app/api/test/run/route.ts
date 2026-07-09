@@ -56,7 +56,7 @@ function stepStatsFrame(step: TestStep, stats: StepStats): string {
  */
 export function wrapExecutionStream(
   src: ReadableStream<string>,
-  opts: { projectPath: string; taskName: string; env: string; runStartMs: number; leadingFrame?: string; stats?: StepStats },
+  opts: { projectPath: string; taskName: string; env: string; runStartMs: number; leadingFrame?: string; stats?: StepStats; roundId?: string },
 ): ReadableStream<string> {
   const reader = src.getReader();
   let frameBuf = '';
@@ -73,7 +73,7 @@ export function wrapExecutionStream(
       try {
         const { done, value } = await reader.read();
         if (done) {
-          const paths = artifactPaths(opts.taskName, opts.env);
+          const paths = artifactPaths(opts.taskName, opts.env, opts.roundId);
           const evidenceAbs = path.join(opts.projectPath, paths.evidenceDir);
           // Evidence 收口: sweep stray screenshots/videos created this run into the
           // evidence dir, then give extension-less files a real ext (magic-number).
@@ -242,7 +242,7 @@ export function wrapExecutionStream(
  */
 export function wrapReportStream(
   src: ReadableStream<string>,
-  opts: { projectPath: string; taskName: string; env: string; stats?: StepStats },
+  opts: { projectPath: string; taskName: string; env: string; stats?: StepStats; roundId?: string },
 ): ReadableStream<string> {
   const reader = src.getReader();
   let frameBuf = '';
@@ -252,7 +252,7 @@ export function wrapReportStream(
       try {
         const { done, value } = await reader.read();
         if (done) {
-          const reportAbs = path.join(opts.projectPath, artifactPaths(opts.taskName, opts.env).report);
+          const reportAbs = path.join(opts.projectPath, artifactPaths(opts.taskName, opts.env, opts.roundId).report);
           const reportExists = fs.existsSync(reportAbs);
           if (!reportExists) {
             controller.enqueue(`data: ${JSON.stringify({ type: 'error', data: '测试报告文档未生成（AI 未写出 .md），请点「重跑」重试。' })}\n\n`);
@@ -264,7 +264,7 @@ export function wrapReportStream(
             let runHash: string | null = null;
             try {
               runHash = sha1Hex(
-                fs.readFileSync(path.join(opts.projectPath, artifactPaths(opts.taskName, opts.env).runJson), 'utf-8'),
+                fs.readFileSync(path.join(opts.projectPath, artifactPaths(opts.taskName, opts.env, opts.roundId).runJson), 'utf-8'),
               );
             } catch {
               /* run.json 缺失 → runHash 缺省，聚合按时序回填兜底 */
@@ -429,6 +429,10 @@ export async function POST(req: Request): Promise<Response> {
     // 执行方式(执行前确认弹窗):true=独立窗口可见运行(有头),false/缺省=后台无头运行。
     // 仅「测试执行」步注入 Playwright,故只对该步生效。
     const headed: boolean = body.headed === true;
+    // 回归轮次号(v2):仅回归用例库的轮次化执行传入——执行/报告产物落 report/{task}/{roundId}/
+    // 子目录,同环境多轮互不覆盖。普通任务禁止传(避免任意任务产物被改道)。
+    const roundId: string | undefined =
+      typeof body.roundId === 'string' && body.roundId.trim() ? body.roundId.trim() : undefined;
 
     if (!projectPath || typeof projectPath !== 'string') {
       return new Response(JSON.stringify({ error: 'projectPath is required' }), {
@@ -440,6 +444,14 @@ export async function POST(req: Request): Promise<Response> {
     // traversal value so a run can't write/read outside the project.
     if (isUnsafeSegment(taskName)) {
       return new Response(JSON.stringify({ error: 'invalid taskName' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    // roundId 同样进产物路径(report/{task}/{roundId}/) → 同 taskName 一样做段安全校验;
+    // 且只允许保留任务名使用(轮次是回归用例库的概念)。
+    if (roundId && (isUnsafeSegment(roundId) || taskName !== REGRESSION_LIBRARY_TASK)) {
+      return new Response(JSON.stringify({ error: 'invalid roundId' }), {
         status: 400,
         headers: { 'Content-Type': 'application/json' },
       });
@@ -497,11 +509,11 @@ export async function POST(req: Request): Promise<Response> {
       if (step === 'requirement' && requirementMode === 'generate-md') requirementSourcePath = origSource;
       else if (step === 'cases' && requirementMode === 'use-original') requirementSourcePath = origSource;
     }
-    const { systemPrompt, prompt, needsPlaywright } = buildStep(step, { taskName, env, baseUrl, extraInstruction, reuseImported, requirementMode, requirementSourcePath, hasLoginState, loginCredentials });
+    const { systemPrompt, prompt, needsPlaywright } = buildStep(step, { taskName, env, baseUrl, extraInstruction, reuseImported, requirementMode, requirementSourcePath, hasLoginState, loginCredentials, roundId });
 
     let mcpServers: Record<string, MCPServerConfig> | undefined;
     if (needsPlaywright) {
-      const evidenceDir = artifactPaths(taskName, env).evidenceDir;
+      const evidenceDir = artifactPaths(taskName, env, roundId).evidenceDir;
       // Pass the captured storageState so the AI starts logged in (set up in 设置·测试账号).
       // headed: 用户在执行前确认弹窗选了「独立窗口可见运行」→ 弹出可见浏览器窗口(打包态走系统 Chrome)。
       mcpServers = { playwright: buildPlaywrightMcp(projectPath, evidenceDir, resolved.storageStatePath, { headed }) };
@@ -549,9 +561,9 @@ export async function POST(req: Request): Promise<Response> {
     // 不改变任何对客户端可见的行为；无 taskId 时保持原样直通。
     const finalStream =
       step === 'execution'
-        ? wrapExecutionStream(stream, { projectPath, taskName, env, runStartMs, leadingFrame, stats })
+        ? wrapExecutionStream(stream, { projectPath, taskName, env, runStartMs, leadingFrame, stats, roundId })
         : step === 'report'
-          ? wrapReportStream(stream, { projectPath, taskName, env, stats })
+          ? wrapReportStream(stream, { projectPath, taskName, env, stats, roundId })
           : stats
             ? observeStream(
                 step === 'cases' ? wrapCasesStream(stream, { projectPath, taskName }) : stream,

@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { REGRESSION_LIBRARY_TASK } from './library-constants';
+import type { SuiteKey, LastResult } from './suites';
 
 /**
  * 测试工作台 · 回归轮次(v2 批 A)。
@@ -203,4 +204,59 @@ export function normalizeStaleRounds(rounds: RegressionRound[], now: Date = new 
     const stale = Number.isNaN(started) || now.getTime() - started > STALE_RUNNING_MS;
     return stale ? { ...r, status: 'aborted' as const } : r;
   });
+}
+
+/** 当轮用例快照文件结构(cases.snapshot.json;idMap 随快照持久化,报告分组/复测/上次结果反查都靠它)。 */
+export interface RoundSnapshot {
+  version: number;
+  roundId: string;
+  suiteName: string;
+  env: string;
+  mode: RoundMode;
+  generatedAt: string;
+  total: number;
+  idMap: Record<string, { task: string; originalId: string }>;
+  cases: unknown[];
+}
+
+/** 读某轮快照(缺失/损坏 → null)。 */
+export function readRoundSnapshot(projectPath: string, roundId: string): RoundSnapshot | null {
+  try {
+    const abs = path.join(projectPath, roundDirRel(roundId), 'cases.snapshot.json');
+    const parsed = JSON.parse(fs.readFileSync(abs, 'utf-8')) as RoundSnapshot;
+    if (!parsed || typeof parsed !== 'object' || typeof parsed.roundId !== 'string') return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * 「上次结果」反查(套件 last 条件的数据源,批 A 的 evalSuite 以注入方式消费):
+ * 取最近一个已收口轮(done/partial,按 startedAt 倒序),读其 run.json tests[] + 快照 idMap,
+ * 把 runId 反解回 (task, originalId) → pass/fail;未出现的条目 → 'none'。
+ * 任何缺失/损坏 → 一律 'none'(条件退化为「只命中从未执行」,不误伤)。
+ */
+export function buildLastResultLookup(projectPath: string): (k: SuiteKey) => LastResult {
+  try {
+    const finished = normalizeStaleRounds(readRounds(projectPath).rounds)
+      .filter((r) => r.status === 'done' || r.status === 'partial')
+      .sort((a, b) => (b.startedAt || '').localeCompare(a.startedAt || ''));
+    const latest = finished[0];
+    if (!latest) return () => 'none';
+    const snap = readRoundSnapshot(projectPath, latest.roundId);
+    if (!snap?.idMap) return () => 'none';
+    const runAbs = path.join(projectPath, roundArtifactPaths(latest.roundId, latest.env).runJson);
+    const runRaw = JSON.parse(fs.readFileSync(runAbs, 'utf-8')) as { tests?: Array<{ id?: unknown; status?: unknown }> };
+    const map = new Map<string, LastResult>();
+    for (const t of runRaw.tests ?? []) {
+      if (!t || typeof t.id !== 'string') continue;
+      const src = snap.idMap[t.id];
+      if (!src) continue;
+      map.set(`${src.task}\u0000${src.originalId}`, t.status === 'pass' ? 'pass' : 'fail');
+    }
+    return (k) => map.get(`${k.task}\u0000${k.originalId}`) ?? 'none';
+  } catch {
+    return () => 'none';
+  }
 }
