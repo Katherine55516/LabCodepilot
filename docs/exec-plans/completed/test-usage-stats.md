@@ -13,7 +13,9 @@
 | Phase 2 | 服务端埋点与计时：run/revise/cases 路由事件、进度行时间戳、run.json `durationMs` | ✅ 已完成 | 8 条计时单测；三视角评审 3 项发现全部修复；真实全流程验收并入 Phase 3 CDP 走查（同需 electron:dev） |
 | Phase 3 | 前端埋点 + 复核 UI + 节点徽标：新建/批准事件、ReportView 复核条、流程节点用时+模型、报告矩阵用时列 | ✅ 已完成 | CDP 端到端跑通（electron-as-node 通 DB）；对抗评审 2 中 + 5 低，M1/M2/L4/L6 已修，L3/L5/L7 记为已知局限 |
 | Phase 4 | 统计视图 + 任务详情 + 导出：`TestStatsView`（第 4 个 view）、模型效果表、节点轮次对比矩阵、XLSX 导出 | ✅ 已完成 | CDP 端到端（4 任务多轮多模型数据集）：KPI/六图/模型表/节点轮次矩阵渲染且数字对、零 console error；XLSX 4 Sheet + JSON 导出验证 |
-| Phase 5 | 测试验证 + i18n + 文档收尾 | 📋 待开始 | handover/insights 双文档 |
+| Phase 5 | 测试验证 + i18n + 文档收尾 | ✅ 已完成 | handover + insights 双文档互链；ARCHITECTURE + 三索引更新；全量单测 1900（+47 通过、失败数不变） |
+
+**P1（本地采集 + 看板 + 导出）全部完成。** P2（接账号体系后匿名批量上报 + 全体用户聚合看板）为独立后续里程碑，事件 schema 已带 `schema_version` 预留，采集层零改动即可复用。
 
 ## 决策日志
 
