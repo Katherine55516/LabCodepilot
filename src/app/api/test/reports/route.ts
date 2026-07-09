@@ -1,5 +1,6 @@
 import fs from 'fs';
 import path from 'path';
+import { sha1Hex } from '@/lib/test/history';
 
 /**
  * List a project's persisted test reports for the 报告 view.
@@ -28,7 +29,11 @@ export async function GET(req: Request): Promise<Response> {
       for (const f of files) {
         if (!f.endsWith('.run.json')) continue;
         try {
-          const raw = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf-8')) as Record<string, unknown>;
+          const runContent = fs.readFileSync(path.join(dir, f), 'utf-8');
+          const raw = JSON.parse(runContent) as Record<string, unknown>;
+          // runHash = sha1(run.json 全文)，与执行/报告步埋点、.history 去重同源同值，
+          // 把人工复核（report_reviewed）关联到确切执行轮（重跑即失效）。
+          const runHash = sha1Hex(runContent);
           const counts = (raw.counts ?? {}) as Record<string, number>;
           const fc = (raw.funcCounts ?? {}) as Record<string, number>;
           // The 报告 step also writes a markdown report doc next to the run.json
@@ -75,6 +80,7 @@ export async function GET(req: Request): Promise<Response> {
               ? { suiteCounts: raw.suiteCounts, suitePassStr: typeof raw.suitePassStr === 'string' ? raw.suitePassStr : '' }
               : {}),
             tests: Array.isArray(raw.tests) ? raw.tests : [],
+            runHash,
             markdown,
             defectMarkdown,
           });

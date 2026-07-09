@@ -11,7 +11,9 @@ import path from 'path';
 import crypto from 'crypto';
 import type { RunCounts } from './reduce';
 
-const sha1 = (s: string) => crypto.createHash('sha1').update(s, 'utf-8').digest('hex');
+/** 内容 SHA-1（hex）。快照去重与统计的 runHash 共用同一实现，保证同源一致。 */
+export const sha1Hex = (s: string): string => crypto.createHash('sha1').update(s, 'utf-8').digest('hex');
+const sha1 = sha1Hex;
 
 /** 本地时间 YYYYMMDD-HHmmss-SSS（字典序 = 时间序；毫秒避免同秒不同内容同名）。 */
 export function stampNow(d: Date = new Date()): string {

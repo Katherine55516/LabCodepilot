@@ -80,7 +80,7 @@ Telegram/Feishu 消息
 
 ## 数据库（SQLite）
 
-Schema 定义在 `src/lib/db.ts`，12 张表：
+Schema 定义在 `src/lib/db.ts`，主要表（完整清单以 db.ts 为准）：
 
 | 表 | 用途 |
 |----|------|
@@ -96,6 +96,7 @@ Schema 定义在 `src/lib/db.ts`，12 张表：
 | `media_context_events` | 批量任务上下文同步 |
 | `channel_bindings` | Bridge: IM 频道 → AI Native Lab 会话绑定 |
 | `channel_offsets` | Bridge: 轮询偏移量水位线 |
+| `test_stats_events` | 测试模块使用统计事件流水（追加式，聚合口径可重算） |
 
 启用 WAL 模式 + 外键约束。数据目录：`~/.codepilot/`。
 
@@ -175,6 +176,8 @@ Schema 定义在 `src/lib/db.ts`，12 张表：
 | 额度用量进度条（产品） | `docs/insights/usage-meter.md` | 位置选择、主进程代理零 token 暴露、点开才刷新不轮询、三条已用%仅百分比、轻量边界 |
 | 主进程文件日志 | `docs/handover/file-logging.md` | 汇聚主进程 console.* 捕获主进程+捆绑服务、main.log 5MB×5 滚动、appendFileSync 崩溃安全、两层密钥脱敏、按完整行防 chunk 绕过、uncaughtExceptionMonitor、logs:open-folder + 设置按钮 |
 | 主进程文件日志（产品） | `docs/insights/file-logging.md` | 「崩了没日志」硬伤起因、汇聚主进程零侵入、同步写换崩溃安全、只脱密钥保路径取舍、对抗评审三个坑、源头脱敏未来方向 |
+| 测试模块使用统计 | `docs/handover/test-usage-stats.md` | 事件流水表 + 纯函数聚合口径层、10 类事件字典、四 scope API + 4 Sheet 导出、TestStatsView 看板、服务端逐用例计时、模型节点级归因、fail-safe 埋点、electron-as-node 验证法 |
+| 测试模块使用统计（产品） | `docs/insights/test-usage-stats.md` | 量 AI 用例/判断/效率三把尺、采纳率首轮基线、准确度必配覆盖率、事件流水而非聚合表（口径可重算+二期上报）、只给指标不列用例、对抗评审驱动质量、已知局限 |
 
 ## 技术栈
 
