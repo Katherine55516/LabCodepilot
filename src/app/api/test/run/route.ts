@@ -14,8 +14,6 @@ import { snapshotRunJson } from '@/lib/test/history';
 import { sweepStrayEvidence, normalizeEvidenceExt } from '@/lib/test/evidence';
 import { resolveProjectEnvWithDb } from '@/lib/test/env-resolve';
 import { isUnsafeSegment } from '@/lib/test/path-safety';
-import { appendAudit } from '@/lib/test/audit';
-import { depositTask, readTaskCases, REGRESSION_LIBRARY_TASK } from '@/lib/test/library';
 
 // Reference the import so it isn't tree-shaken away (keeps the registration side-effect).
 void predictNativeRuntime;
@@ -168,57 +166,6 @@ export function wrapReportStream(
           const reportAbs = path.join(opts.projectPath, artifactPaths(opts.taskName, opts.env).report);
           if (!fs.existsSync(reportAbs)) {
             controller.enqueue(`data: ${JSON.stringify({ type: 'error', data: '测试报告文档未生成（AI 未写出 .md），请点「重跑」重试。' })}\n\n`);
-          }
-          controller.close();
-          return;
-        }
-        controller.enqueue(value);
-      } catch (e) {
-        controller.error(e);
-      }
-    },
-    cancel(reason) {
-      reader.cancel(reason);
-    },
-  });
-}
-
-/**
- * 用例设计步收口:透传全部帧;流结束时把该任务【打了「回归测试」标签的用例】自动 upsert 进
- * 项目级回归用例库(需求:每个任务在「用例设计完成后」自动沉淀回归用例;详见
- * docs/exec-plans/active/regression-library.md)。
- *
- * best-effort:入库失败一律静默,绝不阻塞用例设计步本身完成(库是增强特性)。upsert by 来源
- * 任务(depositTask 内)保证重复跑/修订不产生重复。保留任务名 `回归用例库` 自身不入库(它是
- * 重跑聚合的产物、不是真实测试任务),避免库自我递归。
- */
-export function wrapCasesStream(
-  src: ReadableStream<string>,
-  opts: { projectPath: string; taskName: string },
-): ReadableStream<string> {
-  const reader = src.getReader();
-  return new ReadableStream<string>({
-    async pull(controller) {
-      try {
-        const { done, value } = await reader.read();
-        if (done) {
-          try {
-            if (opts.taskName !== REGRESSION_LIBRARY_TASK) {
-              const casesAbs = path.join(opts.projectPath, artifactPaths(opts.taskName).cases);
-              const cases = readTaskCases(casesAbs);
-              if (cases.length) {
-                const r = depositTask(opts.projectPath, opts.taskName, cases);
-                void appendAudit(opts.projectPath, opts.taskName, {
-                  action: 'deposit-library',
-                  mode: 'auto',
-                  step: 'cases',
-                  detail: `回归用例库自动入库:新增 ${r.added} 条、替换旧 ${r.removed} 条,库共 ${r.total} 条`,
-                });
-                controller.enqueue(`data: ${JSON.stringify({ type: 'library_updated', data: JSON.stringify(r) })}\n\n`);
-              }
-            }
-          } catch {
-            // 入库 best-effort:失败不影响用例设计步完成
           }
           controller.close();
           return;
@@ -399,9 +346,7 @@ export async function POST(req: Request): Promise<Response> {
         ? wrapExecutionStream(stream, { projectPath, taskName, env, runStartMs, leadingFrame })
         : step === 'report'
           ? wrapReportStream(stream, { projectPath, taskName, env })
-          : step === 'cases'
-            ? wrapCasesStream(stream, { projectPath, taskName })
-            : stream;
+          : stream;
 
     return new Response(finalStream, {
       headers: {
