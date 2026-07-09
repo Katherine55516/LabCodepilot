@@ -239,4 +239,8 @@
 - **新版行为记录**：`bypassPermissions` + `canUseTool` 组合下 SDK 打 stderr 警告 `CLAUDE_SDK_CAN_USE_TOOL_SHADOWED`（行为与旧版一致——bypass 优先，仅新增显式警告）；「自动批准所有操作」开启的用户 stderr 里会看到此行，无功能影响。
 - **通过项**：设置页版本显示 v2.1.203；capabilities 控制通道（supportedModels=5/supportedCommands=110/accountInfo/mcpServerStatus=7 servers）；managed provider + `qwen3.7-max[1m]` 别名主链路真实对话；上下文占用指示器动态更新；thinking 渲染；同会话多轮 resume；`npm run test` 1873 pass；`test:smoke` 6/6。
 - **dev 验证环境备忘**：本地 dev 的 managed 凭证为密文（enc:v1，主密钥 `CLAUDE_GUI_SECRET_KEY` 仅打包版 Electron 主进程注入 fork 的 server）。本次借道本机打包版 server 进程的同一密钥直起 `npm run dev` 完成真实调用验证；纯 dev 无密钥时 provider 判定为空属环境限制而非升级回归。
-- **待办（Phase 4）**：macOS 打包验证（R3 managed 全模型清单、打包版冒烟）；Windows 走 CI。权限弹窗路径（canUseTool，非 bypass 模式）留待打包版补测（P1）。
+- **Phase 4 完成（macOS 打包验证，2026-07-09）**：
+  - 静态：`electron:pack:mac` 全流程成功产出 DMG（415MB）+ ZIP（347MB）；after-pack 校验通过（claude 二进制 2.1.203 就位并 chmod、better-sqlite3 Electron ABI 替换 ×2）；ad-hoc 签名 20 组件 `--deep --strict` 验证通过；体积与旧版同量级（app 1.0G→1.1G，SDK 二进制本身 -7MB，增量来自应用近期功能非本升级）。
+  - 动态（release 产物直启新实例，与旧版实例共存互不干扰）：`/api/claude-status` 返回 `{connected:true, version:"2.1.203", bundled:true}`，设置页显示 v2.1.203；登录态共享下 11 个 managed provider 完整；managed `qwen3.7-max[1m]` 真实对话通过；Task* 任务清单映射在打包产物中工作（2 任务落库并流转 completed）；会话内可见 7 个 MCP servers。
+  - chrome-devtools 未出现在会话可见列表一事已排除升级嫌疑：隔离 HOME 用新旧两个二进制对同一配置跑 `mcp list`，**两个版本均 Connected**——属应用层注入时序/门控行为，两版本对等，非回归。
+  - Windows 侧按方案走 CI windows-2022 构建（本地不做）。权限弹窗路径（canUseTool，非 bypass 模式）为剩余 P1 项，建议随日常使用观察。
