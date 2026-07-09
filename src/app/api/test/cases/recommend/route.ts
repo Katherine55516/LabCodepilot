@@ -66,6 +66,34 @@ export function harvestRecommend(text: string): Map<string, boolean> {
   return out;
 }
 
+/** 一条推荐判定(可视化审阅用:比 harvestRecommend 多带 reason)。 */
+export interface RecommendVerdict {
+  id: string;
+  suite: boolean;
+  reason: string;
+}
+
+/**
+ * 提取 @@RECOMMEND 行 → [{id, suite, reason}]（审阅模式用；保留理由供可视化表格展示）。
+ * 同 id 多行时后者覆盖前者（与 harvestRecommend 的 Map 语义一致）。坏行跳过。
+ */
+export function harvestRecommendDetailed(text: string): RecommendVerdict[] {
+  const byId = new Map<string, RecommendVerdict>();
+  for (const line of text.split('\n')) {
+    const idx = line.indexOf('@@RECOMMEND');
+    if (idx < 0) continue;
+    try {
+      const obj = JSON.parse(line.slice(idx + '@@RECOMMEND'.length).trim());
+      if (obj && typeof obj.id === 'string' && typeof obj.suite === 'boolean') {
+        byId.set(obj.id, { id: obj.id, suite: obj.suite, reason: typeof obj.reason === 'string' ? obj.reason : '' });
+      }
+    } catch {
+      // ignore malformed lines
+    }
+  }
+  return [...byId.values()];
+}
+
 /**
  * 按推荐结果 merge cases.json：只增删各条 tags 里的「回归测试」，其余字段与文件结构
  * （{cases:[...]} 或顶层数组）原样保留；.tmp+rename 原子写。返回统计供前端提示。
@@ -107,10 +135,15 @@ export function applyRecommend(
   return { changed, total: list.length, suiteTotal };
 }
 
-/** 透传 SSE + 累积 text 帧；流尾 harvest→merge→审计→补发 cases_updated 帧（仿 wrapExecutionStream）。 */
+/**
+ * 透传 SSE + 累积 text 帧；流尾按模式收口：
+ *  - 默认(auto-apply):harvest→merge→审计→补发 cases_updated 帧(旧行为)。
+ *  - review 模式(可视化审阅,不写盘):harvest 详细判定→补发 recommend_verdicts 帧;【不】改 cases.json、
+ *    【不】记审计——真正写盘与审计留到用户在弹窗点「应用」时走 /apply 接口。
+ */
 function wrapRecommendStream(
   src: ReadableStream<string>,
-  opts: { projectPath: string; taskName: string },
+  opts: { projectPath: string; taskName: string; review?: boolean },
 ): ReadableStream<string> {
   const reader = src.getReader();
   let frameBuf = '';
@@ -120,6 +153,14 @@ function wrapRecommendStream(
       try {
         const { done, value } = await reader.read();
         if (done) {
+          if (opts.review) {
+            // 只推荐、不写盘：把详细判定(含 reason)发给前端弹窗渲染,由用户审阅后再决定应用。
+            let verdicts: ReturnType<typeof harvestRecommendDetailed> = [];
+            try { verdicts = harvestRecommendDetailed(textAcc); } catch { /* 坏流→空判定,前端提示无结果 */ }
+            controller.enqueue(`data: ${JSON.stringify({ type: 'recommend_verdicts', data: JSON.stringify(verdicts) })}\n\n`);
+            controller.close();
+            return;
+          }
           let summary = { changed: 0, total: 0, suiteTotal: 0 };
           try {
             const rec = harvestRecommend(textAcc);
@@ -170,6 +211,8 @@ export async function POST(req: Request): Promise<Response> {
     const taskName: string = typeof body.taskName === 'string' ? body.taskName : '';
     const model: string | undefined = body.model;
     const providerId: string | undefined = body.providerId;
+    // review=true:可视化审阅模式——只推荐(发 recommend_verdicts 帧)不写盘,用户在弹窗审阅后走 /apply。
+    const review: boolean = body.review === true;
     if (!projectPath || !taskName) {
       return Response.json({ error: 'projectPath, taskName required' }, { status: 400 });
     }
@@ -191,7 +234,7 @@ export async function POST(req: Request): Promise<Response> {
       bypassPermissions: true,
       autoTrigger: true,
     });
-    return new Response(wrapRecommendStream(stream, { projectPath, taskName }), {
+    return new Response(wrapRecommendStream(stream, { projectPath, taskName, review }), {
       headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' },
     });
   } catch (error) {
