@@ -2,7 +2,8 @@
  * MCP Server Loader — shared module for loading MCP server configurations.
  *
  * Source-of-truth for user-scope MCP servers is `~/.claude.json`'s `mcpServers`
- * field. This matches what the bundled Claude Code binary (2.1.141) actually
+ * field. This matches what the bundled Claude Code binary (2.1.203; first
+ * verified on 2.1.141) actually
  * reads when `--setting-sources=user` is passed — see the implementation note
  * at the bottom of this file for why `~/.claude/settings.json.mcpServers`
  * is NOT a valid source despite the field name suggesting otherwise.
@@ -328,7 +329,7 @@ export function loadProjectMcpServers(projectCwd: string | undefined): Record<st
 
 // ── Why settings.json.mcpServers is a dead field ─────────────────────
 //
-// The bundled Claude Code 2.1.141 binary (which ships inside the
+// The bundled Claude Code 2.1.203 binary (which ships inside the
 // `@anthropic-ai/claude-agent-sdk-<platform>` subpackage) reads MCP
 // servers from these locations only:
 //
@@ -345,7 +346,16 @@ export function loadProjectMcpServers(projectCwd: string | undefined): Record<st
 // `--setting-sources` combination: settings.json.mcpServers never
 // appears, .claude.json.mcpServers always does (under any flag that
 // includes 'user', or the no-flag default).
+// (首次实证于 2.1.141；升级 2.1.203 时用隔离 HOME 三来源实验复测，结论不变。)
 //
 // `claude mcp add -s user <name> -- <cmd>` confirms this from the other
 // direction: the binary itself writes to `~/.claude.json`, never to
 // settings.json. So we follow the same convention.
+//
+// ⚠️ 2.1.196 起 `.mcp.json` 信任收紧（实证于 2.1.203）：CLI 场景下未批准
+// 目录的 `<cwd>/.mcp.json` 显示 "⏸ Pending approval" 且不自动 spawn（批准
+// 记录在 ~/.claude.json 的 projects[cwd]）。对本应用无回归：standalone
+// 自带 MCP 与 DB-provider 模式的项目 .mcp.json 都由本模块读出后经
+// queryOptions.mcpServers（--mcp-config 通道，上面第 3 条）程序化注入，
+// 不经过该批准门控；仅 env 模式（settingSources 含 project）的 SDK 原生
+// 加载路径受影响，与官方 CLI 行为一致，属预期安全行为而非本应用回归。

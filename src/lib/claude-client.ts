@@ -1323,6 +1323,27 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
         let connectedModel: string | undefined = model || undefined;
         // Track pending TodoWrite tool_use_ids so we can sync after successful execution
         const pendingTodoWrites = new Map<string, Array<{ content: string; status: string; activeForm?: string }>>();
+        // Task* → 任务清单投影：内置 Claude Code 2.1.20x 起系统提示把任务管理导向
+        // TaskCreate/TaskUpdate（TodoWrite 类型仍在但模型不再调用）。把 Task* 的增量
+        // 变更投影成 todos 快照，复用 TodoWrite 的 task_update SSE 事件与前端组件。
+        // 注册表是流级状态：resume 后由前端从 DB 恢复历史面板，与 TodoWrite 行为一致。
+        const sdkTaskRegistry = new Map<string, { content: string; status: string; activeForm: string }>();
+        const pendingTaskCreates = new Map<string, { subject: string; activeForm?: string }>();
+        const pendingTaskUpdates = new Map<string, { taskId: string; subject?: string; status?: string; activeForm?: string }>();
+        const emitTaskSnapshot = () => {
+          controller.enqueue(formatSSE({
+            type: 'task_update',
+            data: JSON.stringify({
+              session_id: sessionId,
+              todos: [...sdkTaskRegistry.values()].map((t, i) => ({
+                id: String(i),
+                content: t.content,
+                status: t.status,
+                activeForm: t.activeForm,
+              })),
+            }),
+          }));
+        };
         for await (const message of conversation) {
           if (abortController?.signal.aborted) {
             break;
@@ -1367,6 +1388,17 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
                       }
                     } catch (e) {
                       console.warn('[claude-client] Failed to parse TodoWrite input:', e);
+                    }
+                  } else if (block.name === 'TaskCreate') {
+                    // Task* 同 TodoWrite：暂存，等 tool_result 确认成功再同步
+                    const taskInput = block.input as { subject?: string; activeForm?: string };
+                    if (taskInput?.subject) {
+                      pendingTaskCreates.set(block.id, { subject: taskInput.subject, activeForm: taskInput.activeForm });
+                    }
+                  } else if (block.name === 'TaskUpdate') {
+                    const taskInput = block.input as { taskId?: string; subject?: string; status?: string; activeForm?: string };
+                    if (taskInput?.taskId) {
+                      pendingTaskUpdates.set(block.id, taskInput as { taskId: string; subject?: string; status?: string; activeForm?: string });
                     }
                   }
                 }
@@ -1459,6 +1491,44 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
                           })),
                         }),
                       }));
+                    } else if (!block.is_error && pendingTaskCreates.has(block.tool_use_id)) {
+                      // Deferred TaskCreate sync → 注册并投影 todos 快照
+                      const taskInput = pendingTaskCreates.get(block.tool_use_id)!;
+                      pendingTaskCreates.delete(block.tool_use_id);
+                      // 2.1.203 实测 result 为纯文本 "Task #4 created successfully: <subject>"，
+                      // 其中编号即后续 TaskUpdate 引用的 taskId；JSON 解析留作兜底
+                      // （sdk-tools.d.ts 声明的 TaskCreateOutput 为 { task: { id } } 结构）。
+                      let taskId = '';
+                      const idMatch = /Task #(\S+) created/.exec(resultContent);
+                      if (idMatch) {
+                        taskId = idMatch[1];
+                      } else {
+                        try {
+                          taskId = (JSON.parse(resultContent) as { task?: { id?: string } })?.task?.id || '';
+                        } catch { /* 非 JSON → 落合成 id */ }
+                      }
+                      if (!taskId) taskId = `synthetic-${block.tool_use_id}`;
+                      sdkTaskRegistry.set(taskId, {
+                        content: taskInput.subject,
+                        status: 'pending',
+                        activeForm: taskInput.activeForm || '',
+                      });
+                      emitTaskSnapshot();
+                    } else if (!block.is_error && pendingTaskUpdates.has(block.tool_use_id)) {
+                      // Deferred TaskUpdate sync → 更新注册表并投影
+                      const taskInput = pendingTaskUpdates.get(block.tool_use_id)!;
+                      pendingTaskUpdates.delete(block.tool_use_id);
+                      const entry = sdkTaskRegistry.get(taskInput.taskId);
+                      if (entry) {
+                        if (taskInput.status === 'deleted') {
+                          sdkTaskRegistry.delete(taskInput.taskId);
+                        } else {
+                          if (taskInput.status) entry.status = taskInput.status;
+                          if (taskInput.subject) entry.content = taskInput.subject;
+                          if (taskInput.activeForm) entry.activeForm = taskInput.activeForm;
+                        }
+                        emitTaskSnapshot();
+                      }
                     }
                   }
                 }
