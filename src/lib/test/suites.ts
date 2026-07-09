@@ -81,6 +81,32 @@ function sanitizeStrArr(v: unknown): string[] | undefined {
   return arr.length ? arr : undefined;
 }
 
+/**
+ * 清洗一个「疑似套件」输入 → 合法 RegressionSuite 或 null。文件解析与 API 入参共用同一
+ * 口径(缺名/占用内置名/未知类型 → null;keys/filter 逐项清洗)。
+ */
+export function sanitizeSuite(s: unknown): RegressionSuite | null {
+  if (!s || typeof s !== 'object') return null;
+  const { name, type } = s as { name?: unknown; type?: unknown };
+  if (typeof name !== 'string' || !name.trim() || name.trim() === REGRESSION_FULL_SUITE) return null;
+  const cleanName = name.trim();
+  if (type === 'static') {
+    const keysRaw = (s as { keys?: unknown }).keys;
+    return { name: cleanName, type, keys: Array.isArray(keysRaw) ? keysRaw.filter(isSuiteKey) : [] };
+  }
+  if (type === 'query') {
+    const f = ((s as { filter?: unknown }).filter ?? {}) as Record<string, unknown>;
+    const filter: SuiteFilter = {
+      pri: sanitizeStrArr(f.pri),
+      module: sanitizeStrArr(f.module),
+      task: sanitizeStrArr(f.task),
+      last: sanitizeStrArr(f.last)?.filter((x): x is LastResult => x === 'pass' || x === 'fail' || x === 'none'),
+    };
+    return { name: cleanName, type, filter };
+  }
+  return null;
+}
+
 /** 读套件文件。缺文件/坏 JSON → 空;坏套件条目(缺名/未知类型/结构不符)跳过;内置名条目忽略。 */
 export function readSuites(projectPath: string): SuitesFile {
   let raw: string;
@@ -101,22 +127,8 @@ export function readSuites(projectPath: string): SuitesFile {
     const suitesRaw = (parsed as { suites?: unknown }).suites;
     if (Array.isArray(suitesRaw)) {
       for (const s of suitesRaw) {
-        if (!s || typeof s !== 'object') continue;
-        const { name, type } = s as { name?: unknown; type?: unknown };
-        if (typeof name !== 'string' || !name || name === REGRESSION_FULL_SUITE) continue;
-        if (type === 'static') {
-          const keysRaw = (s as { keys?: unknown }).keys;
-          out.suites.push({ name, type, keys: Array.isArray(keysRaw) ? keysRaw.filter(isSuiteKey) : [] });
-        } else if (type === 'query') {
-          const f = ((s as { filter?: unknown }).filter ?? {}) as Record<string, unknown>;
-          const filter: SuiteFilter = {
-            pri: sanitizeStrArr(f.pri),
-            module: sanitizeStrArr(f.module),
-            task: sanitizeStrArr(f.task),
-            last: sanitizeStrArr(f.last)?.filter((x): x is LastResult => x === 'pass' || x === 'fail' || x === 'none'),
-          };
-          out.suites.push({ name, type, filter });
-        }
+        const clean = sanitizeSuite(s);
+        if (clean) out.suites.push(clean);
       }
     }
     return out;
