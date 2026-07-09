@@ -1,13 +1,13 @@
 "use client";
 
-import { useState, useRef, useEffect, type ReactNode } from "react";
+import { useState, useRef, useEffect, useMemo, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useRouter, usePathname } from "next/navigation";
 import dynamic from "next/dynamic";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useTranslation } from "@/hooks/useTranslation";
-import { ListChecks, ChartBar, Gear, ArrowLeft, ArrowRight, FolderPlus, Play, Stop, ArrowUp, SpinnerGap, Sparkle, Terminal, WarningCircle, Wrench, Trash, Desktop, Lightning, Plug, CheckCircle, File as FileIcon, FileArrowDown, NotePencil, DownloadSimple, Eye, X, CaretDown, CaretUp, Check, type Icon } from "@/components/ui/icon";
+import { ListChecks, ChartBar, Gear, ArrowLeft, ArrowRight, FolderPlus, FolderOpen, Play, Stop, ArrowUp, SpinnerGap, Sparkle, Terminal, WarningCircle, Wrench, Trash, Desktop, Lightning, Plug, CheckCircle, File as FileIcon, FileArrowDown, NotePencil, DownloadSimple, Eye, X, CaretDown, CaretUp, Check, type Icon } from "@/components/ui/icon";
 import { MarkdownEditor } from "@/components/editor/MarkdownEditor.lazy";
 import type { TranslationKey } from "@/i18n";
 import { useNativeFolderPicker } from "@/hooks/useNativeFolderPicker";
@@ -19,6 +19,7 @@ import { useProviderModels } from "@/hooks/useProviderModels";
 import { diffRuns, funcPassRateStr } from "@/lib/test/compare";
 import { parseExecProgress } from "@/lib/test/exec-progress";
 import { withDownstreamReset, runStartOptions, taskCategory, occupiedSlots, TASK_CATEGORY_ORDER, type TaskCategory } from "@/lib/test/step-status";
+import { REGRESSION_LIBRARY_TASK } from "@/lib/test/library-constants";
 import type { LoginStateInfo } from "@/lib/test/env-config";
 import type { RunHistoryEntry } from "@/lib/test/history";
 
@@ -342,6 +343,8 @@ export function InlineTestingPanel() {
   const [pendingAction, setPendingAction] = useState<{ step: TestStep; reason: string } | null>(null);
   // 报告 tab 刷新信号：删任务的磁盘报告删完后 bump，让 ReportBrowser 二次拉取（避开时序竞争）。
   const [reportsReload, setReportsReload] = useState(0);
+  // 回归用例库刷新信号：自动入库 / 编辑 / 推荐 re-sync 后 bump，让库查看弹窗重新拉取。
+  const [libraryReload, setLibraryReload] = useState(0);
   // Simulated progress % for non-execution running steps (no granular progress) — see effect below.
   const [simPct, setSimPct] = useState(0);
   const threadRef = useRef<HTMLDivElement>(null);
@@ -500,6 +503,75 @@ export function InlineTestingPanel() {
     }).catch(() => {});
   };
 
+  // 回归用例库 re-sync(fire-and-forget):用例设计【之后】用户改了用例(编辑保存 / AI 推荐回归集)
+  // → 按当前 cases.json 重新 upsert 该任务的回归集入库,保证库不 stale;成功后 bump 库刷新信号。
+  // 后端 upsert by 来源任务,幂等、不产生重复。失败静默(库是增强特性,不打断主流程)。
+  const resyncLibrary = (projPath?: string, taskName?: string) => {
+    const p = projPath ?? current?.path;
+    const tn = taskName ?? activeTask?.name;
+    if (!p || !tn) return;
+    fetch("/api/test/library/deposit", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectPath: p, taskName: tn }),
+    })
+      .then(() => setLibraryReload((n) => n + 1))
+      .catch(() => {});
+  };
+
+  // 跨任务一键重跑:①聚合库→写 `回归用例库.cases.json`(POST /api/test/library/run);②③复用现有
+  // /api/test/run 依次跑 execution→report(taskName=保留名),env 走项目 environments.json。产物落
+  // report/回归用例库/,自动出现在【报告区】(reports 列举扫全 report/ 目录),故这里跑完只需 bump
+  // reportsReload。执行/报告的详细进度不在弹窗内逐行渲染(MVP);弹窗按钮显示「重跑中…」。
+  const runLibrary = async () => {
+    const p = current?.path;
+    if (!p || libraryRunning) return;
+    setLibraryRunning(true);
+    setLibraryRunStatus(null);
+    try {
+      const agg = await fetch("/api/test/library/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectPath: p }),
+      }).then((r) => r.json()).catch(() => null);
+      if (!agg?.ok) { setLibraryRunStatus(t("test.library.runFailed")); return; }
+      if (!agg.total) { setLibraryRunStatus(t("test.library.runEmpty")); return; }
+      setLibraryRunStatus(t("test.library.runStarted", { total: agg.total }));
+      // 依次驱动 execution → report,消费 SSE 到 done(不逐行渲染)。任一步 !res.ok(如 503
+      // 被测地址不可达 / NO_CREDENTIALS)则中止并把后端 error 展示在弹窗状态行。
+      const drive = async (step: TestStep): Promise<boolean> => {
+        const res = await fetch("/api/test/run", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ projectPath: p, taskName: REGRESSION_LIBRARY_TASK, step, env: "local", model: model || undefined, providerId: providerId || undefined }),
+        });
+        if (!res.ok) {
+          let msg = t("test.library.runFailed");
+          try { const d = await res.json(); if (d?.error) msg = d.error; } catch {}
+          setLibraryRunStatus(msg);
+          return false;
+        }
+        const reader = res.body?.getReader();
+        if (!reader) return true;
+        for (;;) {
+          const { done } = await reader.read();
+          if (done) break;
+        }
+        return true;
+      };
+      if (await drive("execution")) {
+        await drive("report");
+        setReportsReload((n) => n + 1);
+        setLibraryReload((n) => n + 1);
+        setLibraryRunStatus(t("test.library.runDone"));
+      }
+    } catch {
+      setLibraryRunStatus(t("test.library.runFailed"));
+    } finally {
+      setLibraryRunning(false);
+    }
+  };
+
   // 排队调度: 槽位 = 并发数 − 占用数。占用 = 在跑(running) ∪ 已认领(autoRun) 的任务数 —— 用真实
   // 在跑数而非仅 autoRun，避免「运行任务」正在跑(running 但可能不在 autoRun)时漏算导致超并发。
   // 有空槽就把队首任务提升为 autoRun，由 auto-chain effect 读「最新」taskStates 起跑它的下一步
@@ -651,89 +723,12 @@ export function InlineTestingPanel() {
     }
   };
 
-  // AI 推荐回归集（需求③存量侧）：调 /api/test/cases/recommend——AI 只读用例+需求、逐条
-  // 输出 @@RECOMMEND 判定行，后端按行精确 merge（只动 tags 里的「回归测试」，防 AI 重写整份
-  // 丢字段）。复用 reviseStep 的 SSE 解析骨架；@@RECOMMEND 行不上屏（细节吵，AI 总结句里有
-  // 数目）；cases_updated 帧 → tool 气泡展示统计 + 刷新 casesPreview。审计由后端记 recommend-suite。
-  const recommendSuite = async () => {
-    const proj = selected !== null ? projects[selected] : null;
-    const task = proj && selectedTask !== null ? proj.tasks[selectedTask] : null;
-    if (!proj?.path || !task || runningIdsRef.current.has(task.id) || casesPreview.length === 0) return;
-    const id = task.id;
-    const ctrl = new AbortController();
-    abortMapRef.current.set(id, ctrl);
-    markRunning(id);
-    const push = (msg: ConvoMsg) => patchTask(id, (s) => ({ convo: [...s.convo, msg] }));
-    const appendAi = (chunk: string) =>
-      patchTask(id, (s) => {
-        const last = s.convo[s.convo.length - 1];
-        if (last && last.role === "ai") return { convo: [...s.convo.slice(0, -1), { role: "ai", text: last.text + chunk }] };
-        return { convo: [...s.convo, { role: "ai", text: chunk }] };
-      });
-    push({ role: "user", text: `🎯 ${t("test.cases.recommend")}` });
-    let lineBuf = "";
-    const emitLine = (l: string) => {
-      if (l.includes("@@RECOMMEND")) return; // 判定行不上屏
-      if (l.trim()) appendAi(l + "\n");
-    };
-    try {
-      const res = await fetch("/api/test/cases/recommend", {
-        method: "POST",
-        signal: ctrl.signal,
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectPath: proj.path, taskName: task.name, model: model || undefined, providerId: providerId || undefined }),
-      });
-      if (!res.ok || !res.body) {
-        const j = await res.json().catch(() => ({}));
-        push({ role: "error", text: (j.error as string) || `HTTP ${res.status}` });
-        return;
-      }
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buf = "";
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, { stream: true });
-        const frames = buf.split("\n\n");
-        buf = frames.pop() || "";
-        for (const frame of frames) {
-          const fline = frame.replace(/^data:\s?/, "").trim();
-          if (!fline) continue;
-          let evt: { type?: string; data?: string } | null = null;
-          try { evt = JSON.parse(fline); } catch { continue; }
-          if (!evt) continue;
-          if (evt.type === "text") {
-            lineBuf += evt.data || "";
-            const ls = lineBuf.split("\n");
-            lineBuf = ls.pop() || "";
-            for (const l of ls) emitLine(l);
-          } else if (evt.type === "tool_use") {
-            try { const tu = JSON.parse(evt.data || "{}"); const label = toolUseLabel(tu.name || "", tu.input); if (label) push({ role: "tool", text: `→ ${label}` }); } catch {}
-          } else if (evt.type === "cases_updated") {
-            let s = { changed: 0, total: 0, suiteTotal: 0 };
-            try { s = JSON.parse(evt.data || "{}"); } catch { /* keep zeros */ }
-            push({ role: "tool", text: `🎯 ${t("test.cases.recommendDone", { changed: s.changed, suite: s.suiteTotal, total: s.total })}` });
-          } else if (evt.type === "error") {
-            let msg = evt.data || "";
-            try { const d = JSON.parse(evt.data || "{}"); msg = d.userMessage || d.rawMessage || msg; } catch {}
-            push({ role: "error", text: msg });
-          }
-        }
-      }
-      if (lineBuf.trim()) emitLine(lineBuf);
-    } catch (e) {
-      if (ctrl.signal.aborted || (e instanceof DOMException && e.name === "AbortError")) push({ role: "user", text: `■ ${t("test.flow.stop")}` });
-      else push({ role: "error", text: `请求失败：${e instanceof Error ? e.message : String(e)}` });
-    } finally {
-      if (abortMapRef.current.get(id) === ctrl) abortMapRef.current.delete(id);
-      markIdle(id);
-      // 标签已被后端 merge → 重新拉取用例展示（弹窗表格/回归集角标都基于 casesPreview）。
-      try {
-        const d = await fetch(`/api/test/cases?projectPath=${encodeURIComponent(proj.path)}&taskName=${encodeURIComponent(task.name)}`).then((r) => r.json());
-        if (Array.isArray(d?.cases)) setCasesPreview(d.cases as GeneratedCase[]);
-      } catch { /* keep current preview */ }
-    }
+  // AI 推荐回归集（可视化审阅）：点按钮 → 打开审阅弹窗 RecommendReviewModal（不再流进对话框）。
+  // 弹窗内调 /api/test/cases/recommend?review=true（AI 只推荐、不写盘），逐条可视化展示推荐
+  // （回归集 ✓/否 + 理由），用户勾选调整后点「应用」→ /recommend/apply 精确 merge 标签 + 同步库。
+  const recommendSuite = () => {
+    if (casesPreview.length === 0) return;
+    setRecommendOpen(true);
   };
 
   // 真对话：发送即让 AI 在当前任务上下文响应（答疑/改产物/建议触发步骤）。复用 reviseStep
@@ -1130,6 +1125,8 @@ export function InlineTestingPanel() {
         setCasesPreview(casesDraft);
         setCasesDraft(null);
         logAudit("edit-cases", { detail: `用例编辑保存(${casesDraft.length} 条)` });
+        // 用例改了 → 回归集可能变,重新 upsert 该任务贡献进回归用例库(保持库不 stale)。
+        resyncLibrary(current.path, activeTask.name);
       }
     } catch { /* 保存失败保留编辑态,用户可重试 */ }
     setCasesSaving(false);
@@ -1140,6 +1137,14 @@ export function InlineTestingPanel() {
   const [reqPreviewLoading, setReqPreviewLoading] = useState(false);
   // 操作记录弹窗(需求②审计的查看端):展示当前任务的 AI_LabTest/audit/{task}.jsonl。
   const [auditOpen, setAuditOpen] = useState(false);
+  // AI 推荐回归集 · 可视化审阅弹窗(用例设计阶段;取代旧的对话框流式推荐)。
+  const [recommendOpen, setRecommendOpen] = useState(false);
+  // 回归用例库弹窗(项目级):查看/管理沉淀的回归用例 + 跨任务一键重跑。
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  // 跨任务一键重跑进行中(聚合→执行→报告)。禁用重复触发,按钮显示「重跑中…」。
+  const [libraryRunning, setLibraryRunning] = useState(false);
+  // 重跑状态提示(库不属于任何任务对话,故用独立状态在弹窗内展示,不走任务对话 push)。
+  const [libraryRunStatus, setLibraryRunStatus] = useState<string | null>(null);
   // docx 原件预览弹窗(独立于 reqPreview 的文本弹窗):DocxViewer 按原版式渲染二进制原件。
   const [origDocPreview, setOrigDocPreview] = useState<{ abs: string; filename: string } | null>(null);
   useEffect(() => { setReqPreview(null); setOrigDocPreview(null); }, [aId]); // 切任务关掉残留的需求预览弹窗
@@ -1425,6 +1430,14 @@ export function InlineTestingPanel() {
             const code = evt.data || "";
             const msg = code === "headed_downgraded_no_chrome" ? t("test.execConfirm.downgradedNoChrome") : "";
             if (msg) push({ role: "tool", text: `⚠️ ${msg}` });
+          } else if (evt.type === "library_updated") {
+            // 用例设计步完成 → 后端已把该任务回归用例自动 upsert 进回归用例库,提示入库结果并刷新库视图。
+            let s = { added: 0, removed: 0, total: 0 };
+            try { s = JSON.parse(evt.data || "{}"); } catch { /* keep zeros */ }
+            if (s.added > 0 || s.removed > 0) {
+              push({ role: "tool", text: `📥 ${t("test.library.deposited", { added: s.added, total: s.total })}` });
+              setLibraryReload((n) => n + 1);
+            }
           } else if (evt.type === "error") {
             let msg = evt.data || "";
             try {
@@ -2299,6 +2312,13 @@ export function InlineTestingPanel() {
                   <h3 className="text-sm font-semibold text-foreground">{current.name}</h3>
                   <span className="flex-1" />
                   <button
+                    onClick={() => setLibraryOpen(true)}
+                    title={t("test.library.runHint")}
+                    className="flex h-7 items-center gap-1 rounded-md border border-border px-2 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground"
+                  >
+                    <FolderOpen size={12} /> {t("test.library.open")}
+                  </button>
+                  <button
                     onClick={() => router.push("/settings#test-accounts")}
                     title={current?.path ? `${t("test.envModal.title")}（设置·测试账号；project_root = ${current.path}）` : undefined}
                     className="flex h-7 items-center gap-1 rounded-md border border-border px-2 text-[11px] text-muted-foreground hover:text-foreground"
@@ -2468,6 +2488,38 @@ export function InlineTestingPanel() {
       {/* 操作记录弹窗(审计查看端):当前任务的门控批准/运行/修订等全部留痕。 */}
       {auditOpen && current?.path && activeTask && (
         <AuditModal t={t} projectPath={current.path} taskName={activeTask.name} onClose={() => setAuditOpen(false)} />
+      )}
+      {libraryOpen && current?.path && (
+        <RegressionLibraryModal
+          t={t}
+          projectPath={current.path}
+          reloadSignal={libraryReload}
+          onChanged={() => setLibraryReload((n) => n + 1)}
+          onClose={() => setLibraryOpen(false)}
+          onRun={runLibrary}
+          running={libraryRunning}
+          runStatus={libraryRunStatus}
+        />
+      )}
+      {recommendOpen && current?.path && activeTask && (
+        <RecommendReviewModal
+          t={t}
+          projectPath={current.path}
+          taskName={activeTask.name}
+          cases={casesPreview}
+          model={model}
+          providerId={providerId}
+          onClose={() => setRecommendOpen(false)}
+          onApplied={() => {
+            // 应用后刷新用例展示 + 库同步信号(apply 接口已 deposit,这里只 bump UI)。
+            fetch(`/api/test/cases?projectPath=${encodeURIComponent(current.path!)}&taskName=${encodeURIComponent(activeTask.name)}`)
+              .then((r) => r.json())
+              .then((d) => { if (Array.isArray(d?.cases)) setCasesPreview(d.cases as GeneratedCase[]); })
+              .catch(() => {});
+            setLibraryReload((n) => n + 1);
+            setRecommendOpen(false);
+          }}
+        />
       )}
       {/* 用例表弹窗（Excel 形式）：从详情卡「查看 / 编辑」打开，查看与编辑合一。9 列——
           ID / 用例标题 / 用例类型(5类下拉,兼容八类旧值) / 用例标签(冒烟·回归,多选) / 关联故事(=requirement) /
@@ -3322,6 +3374,9 @@ const AUDIT_ACTION_KEYS: Record<string, TranslationKey> = {
   "edit-cases": "test.audit.action.editCases",
   "delete-task": "test.audit.action.deleteTask",
   "recommend-suite": "test.audit.action.recommend",
+  "deposit-library": "test.audit.action.depositLibrary",
+  "run-library": "test.audit.action.runLibrary",
+  "library-remove": "test.audit.action.libraryRemove",
 };
 const AUDIT_MODE_KEYS: Record<string, TranslationKey> = {
   manual: "test.audit.mode.manual",
@@ -3385,6 +3440,303 @@ function AuditModal({ t, projectPath, taskName, onClose }: { t: T; projectPath: 
             </table>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+// 回归用例库弹窗(项目级):按来源任务分组展示沉淀的回归用例;支持移除单条 / 移除某任务全部。
+// 「一键重跑」按钮 + 报告查看在批 D 接线(onRun 由父组件在批 D 传入)。
+interface LibEntry { id?: string; purpose?: string; priority?: string; caseType?: string; tags?: string[]; _source?: { task?: string; originalId?: string; depositedAt?: string } }
+interface LibGroup { task: string; count: number; entries: LibEntry[] }
+function RegressionLibraryModal({ t, projectPath, reloadSignal, onChanged, onClose, onRun, running, runStatus }: {
+  t: T;
+  projectPath: string;
+  reloadSignal: number;
+  onChanged: () => void;
+  onClose: () => void;
+  onRun?: () => void;
+  running?: boolean;
+  runStatus?: string | null;
+}) {
+  // null = 加载中(初次挂载即 null → 显示 spinner;reloadSignal 变化时保留旧数据直到新数据到达,
+  // 不在 effect 体里同步 setData(null)——避免 react-hooks/set-state-in-effect 级联渲染告警)。
+  const [data, setData] = useState<{ total: number; updatedAt: string; tasks: LibGroup[] } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/test/library?projectPath=${encodeURIComponent(projectPath)}`)
+      .then((r) => r.json())
+      .then((d) => { if (!cancelled) setData({ total: d?.total ?? 0, updatedAt: d?.updatedAt ?? "", tasks: Array.isArray(d?.tasks) ? d.tasks : [] }); })
+      .catch(() => { if (!cancelled) setData({ total: 0, updatedAt: "", tasks: [] }); });
+    return () => { cancelled = true; };
+  }, [projectPath, reloadSignal]);
+
+  const del = async (task: string, originalId?: string, count?: number) => {
+    const ok = originalId
+      ? window.confirm(t("test.library.confirmRemove"))
+      : window.confirm(t("test.library.confirmRemoveTask", { task, count: count ?? 0 }));
+    if (!ok) return;
+    try {
+      await fetch("/api/test/library", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectPath, task, originalId }),
+      });
+      onChanged();
+    } catch { /* keep current view; user can retry */ }
+  };
+
+  const taskCount = data?.tasks.length ?? 0;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+      <div className="flex max-h-[82vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-border bg-background shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center gap-2 border-b border-border px-3 py-2">
+          <FolderOpen size={14} className="text-primary" />
+          <span className="text-xs font-semibold text-foreground">{t("test.library.title")}</span>
+          {data && data.total > 0 && (
+            <span className="text-[10px] text-muted-foreground">{t("test.library.summary", { total: data.total, tasks: taskCount })}</span>
+          )}
+          <span className="flex-1" />
+          {onRun && (
+            <button
+              onClick={onRun}
+              disabled={running || !data || data.total === 0}
+              title={t("test.library.runHint")}
+              className="flex h-6 items-center gap-1 rounded bg-primary px-2 text-[11px] font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              {running ? <SpinnerGap size={11} className="animate-spin" /> : <Play size={11} />} {running ? t("test.library.running") : t("test.library.run")}
+            </button>
+          )}
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground" aria-label={t("test.library.close")}><X size={14} /></button>
+        </div>
+        {runStatus && (
+          <div className="flex items-center gap-1.5 border-b border-border bg-muted/30 px-3 py-1.5 text-[11px] text-muted-foreground">
+            {running && <SpinnerGap size={11} className="animate-spin" />}
+            {runStatus}
+          </div>
+        )}
+        <div className="min-h-0 flex-1 overflow-auto">
+          {data === null ? (
+            <div className="p-4 text-center text-[11px] text-muted-foreground"><SpinnerGap size={14} className="mx-auto animate-spin" /></div>
+          ) : data.total === 0 ? (
+            <div className="p-6 text-center text-[11px] leading-relaxed text-muted-foreground">{t("test.library.empty")}</div>
+          ) : (
+            <div className="divide-y divide-border">
+              {data.tasks.map((g) => (
+                <div key={g.task} className="px-3 py-2">
+                  <div className="mb-1.5 flex items-center gap-2">
+                    <span className="text-[11px] font-semibold text-foreground">{g.task}</span>
+                    <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{g.count}</span>
+                    <span className="flex-1" />
+                    <button
+                      onClick={() => del(g.task, undefined, g.count)}
+                      className="flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-status-danger-muted hover:text-status-danger-foreground"
+                    >
+                      <Trash size={10} /> {t("test.library.removeTask")}
+                    </button>
+                  </div>
+                  <div className="space-y-1">
+                    {g.entries.map((e, i) => (
+                      <div key={i} className="flex items-center gap-2 rounded border border-border/60 bg-muted/20 px-2 py-1">
+                        <span className="font-mono text-[10px] text-muted-foreground">{e._source?.originalId || e.id}</span>
+                        {e.priority && <span className="rounded bg-muted px-1 text-[9px] text-muted-foreground">{e.priority}</span>}
+                        <span className="min-w-0 flex-1 truncate text-[11px] text-foreground" title={e.purpose}>{e.purpose || "—"}</span>
+                        <button
+                          onClick={() => del(g.task, e._source?.originalId || e.id)}
+                          className="text-muted-foreground hover:text-status-danger-foreground"
+                          title={t("test.library.remove")}
+                          aria-label={t("test.library.remove")}
+                        >
+                          <Trash size={11} />
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// AI 推荐回归集 · 可视化审阅弹窗(用例设计阶段)。取代旧的「流式打进对话框 + 自动应用」:
+// 打开即调 /api/test/cases/recommend?review=true(AI 只推荐、不写盘)→ 收 recommend_verdicts 帧 →
+// 逐条用表格展示(用例标题 / AI 建议回归集✓或否 / 理由 + 复选框),用户审阅勾选后点「应用」→
+// /recommend/apply 精确 merge 标签(只动「回归测试」)+ 同步回归用例库。全程不碰任务对话流。
+interface RecommendVerdictUI { id: string; suite: boolean; reason: string }
+function RecommendReviewModal({ t, projectPath, taskName, cases, model, providerId, onClose, onApplied }: {
+  t: T;
+  projectPath: string;
+  taskName: string;
+  cases: GeneratedCase[];
+  model: string;
+  providerId: string;
+  onClose: () => void;
+  onApplied: () => void;
+}) {
+  const [phase, setPhase] = useState<"running" | "review" | "applying" | "error">("running");
+  const [verdicts, setVerdicts] = useState<RecommendVerdictUI[]>([]);
+  const [accepted, setAccepted] = useState<Record<string, boolean>>({});
+  const [errorMsg, setErrorMsg] = useState("");
+
+  // 标题/当前标签映射(按 id join casesPreview)。
+  const caseById = useMemo(() => {
+    const m = new Map<string, GeneratedCase>();
+    for (const c of cases) if (c?.id) m.set(c.id, c);
+    return m;
+  }, [cases]);
+  const isCurrentlySuite = (id: string) => (caseById.get(id)?.tags ?? []).includes("回归测试");
+
+  useEffect(() => {
+    const ctrl = new AbortController();
+    (async () => {
+      try {
+        const res = await fetch("/api/test/cases/recommend", {
+          method: "POST",
+          signal: ctrl.signal,
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ projectPath, taskName, review: true, model: model || undefined, providerId: providerId || undefined }),
+        });
+        if (!res.ok || !res.body) {
+          const j = await res.json().catch(() => ({}));
+          setErrorMsg((j.error as string) || `HTTP ${res.status}`);
+          setPhase("error");
+          return;
+        }
+        const reader = res.body.getReader();
+        const decoder = new TextDecoder();
+        let buf = "";
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          buf += decoder.decode(value, { stream: true });
+          const frames = buf.split("\n\n");
+          buf = frames.pop() || "";
+          for (const frame of frames) {
+            const fline = frame.replace(/^data:\s?/, "").trim();
+            if (!fline) continue;
+            let evt: { type?: string; data?: string } | null = null;
+            try { evt = JSON.parse(fline); } catch { continue; }
+            if (evt?.type === "recommend_verdicts") {
+              let vs: RecommendVerdictUI[] = [];
+              try { vs = JSON.parse(evt.data || "[]"); } catch { vs = []; }
+              setVerdicts(vs);
+              setAccepted(Object.fromEntries(vs.map((v) => [v.id, v.suite]))); // 默认采纳 AI 建议
+              setPhase("review");
+            } else if (evt?.type === "error") {
+              let msg = evt.data || "";
+              try { const d = JSON.parse(evt.data || "{}"); msg = d.userMessage || d.rawMessage || msg; } catch {}
+              setErrorMsg(msg); setPhase("error");
+            }
+          }
+        }
+      } catch (e) {
+        if (!(e instanceof DOMException && e.name === "AbortError")) {
+          setErrorMsg(e instanceof Error ? e.message : String(e));
+          setPhase("error");
+        }
+      }
+    })();
+    return () => ctrl.abort();
+  }, [projectPath, taskName, model, providerId]);
+
+  const suiteCount = verdicts.filter((v) => accepted[v.id]).length;
+  const apply = async () => {
+    setPhase("applying");
+    try {
+      const res = await fetch("/api/test/cases/recommend/apply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectPath, taskName, verdicts: verdicts.map((v) => ({ id: v.id, suite: !!accepted[v.id] })) }),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok || !j.ok) { setErrorMsg((j.error as string) || `HTTP ${res.status}`); setPhase("error"); return; }
+      onApplied();
+    } catch (e) {
+      setErrorMsg(e instanceof Error ? e.message : String(e)); setPhase("error");
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+      <div className="flex max-h-[82vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-border bg-background shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center gap-2 border-b border-border px-3 py-2">
+          <span className="text-sm">🎯</span>
+          <span className="text-xs font-semibold text-foreground">{t("test.cases.recommend")}</span>
+          {phase === "review" && (
+            <span className="text-[10px] text-muted-foreground">{t("test.recommend.summary", { suite: suiteCount, total: verdicts.length })}</span>
+          )}
+          <span className="flex-1" />
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground" aria-label={t("test.library.close")}><X size={14} /></button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-auto">
+          {phase === "running" && (
+            <div className="flex flex-col items-center gap-2 p-8 text-[11px] text-muted-foreground">
+              <SpinnerGap size={18} className="animate-spin" /> {t("test.recommend.analyzing")}
+            </div>
+          )}
+          {phase === "error" && (
+            <div className="p-6 text-center text-[11px] text-status-error-foreground">{errorMsg || t("test.recommend.failed")}</div>
+          )}
+          {(phase === "review" || phase === "applying") && verdicts.length === 0 && (
+            <div className="p-6 text-center text-[11px] text-muted-foreground">{t("test.recommend.empty")}</div>
+          )}
+          {(phase === "review" || phase === "applying") && verdicts.length > 0 && (
+            <table className="w-full border-collapse text-[11px]">
+              <thead className="sticky top-0 bg-muted/80 backdrop-blur">
+                <tr className="text-left text-muted-foreground">
+                  <th className="w-10 px-3 py-1.5 text-center font-medium">{t("test.recommend.colSuite")}</th>
+                  <th className="px-2 py-1.5 font-medium">{t("test.recommend.colCase")}</th>
+                  <th className="whitespace-nowrap px-2 py-1.5 font-medium">{t("test.recommend.colAi")}</th>
+                  <th className="px-2 py-1.5 font-medium">{t("test.recommend.colReason")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {verdicts.map((v) => {
+                  const c = caseById.get(v.id);
+                  const changed = !!accepted[v.id] !== isCurrentlySuite(v.id);
+                  return (
+                    <tr key={v.id} className="border-t border-border align-top">
+                      <td className="px-3 py-1.5 text-center">
+                        <input
+                          type="checkbox"
+                          checked={!!accepted[v.id]}
+                          disabled={phase === "applying"}
+                          onChange={(e) => setAccepted((a) => ({ ...a, [v.id]: e.target.checked }))}
+                          className="h-3.5 w-3.5 accent-primary"
+                        />
+                      </td>
+                      <td className="px-2 py-1.5">
+                        <span className="font-mono text-[10px] text-muted-foreground">{v.id}</span>
+                        <span className="ml-1 text-foreground">{c?.purpose || ""}</span>
+                        {changed && <span className="ml-1 rounded bg-status-warning-muted px-1 text-[9px] text-status-warning-foreground">{t("test.recommend.changed")}</span>}
+                      </td>
+                      <td className="whitespace-nowrap px-2 py-1.5">
+                        <span className={`rounded px-1.5 py-0.5 text-[10px] ${v.suite ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"}`}>
+                          {v.suite ? t("test.recommend.aiYes") : t("test.recommend.aiNo")}
+                        </span>
+                      </td>
+                      <td className="px-2 py-1.5 text-muted-foreground">{v.reason || ""}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </div>
+        {(phase === "review" || phase === "applying") && verdicts.length > 0 && (
+          <div className="flex items-center gap-2 border-t border-border px-3 py-2">
+            <span className="text-[10px] text-muted-foreground">{t("test.recommend.applyHint", { suite: suiteCount })}</span>
+            <span className="flex-1" />
+            <button onClick={onClose} disabled={phase === "applying"} className="rounded border border-border px-2.5 py-1 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-40">{t("test.recommend.cancel")}</button>
+            <button onClick={apply} disabled={phase === "applying"} className="flex items-center gap-1 rounded bg-primary px-2.5 py-1 text-[11px] font-medium text-primary-foreground disabled:opacity-40">
+              {phase === "applying" ? <SpinnerGap size={11} className="animate-spin" /> : <Check size={11} />} {t("test.recommend.apply")}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
