@@ -173,6 +173,21 @@ function parseJsonResult(text: string): unknown {
   throw new Error('generator returned invalid JSON');
 }
 
+/**
+ * `@playwright/test` is the specifier every model reaches for, but the script
+ * runner only symlinks the `playwright` package bundled with @playwright/mcp —
+ * `@playwright/test` is not resolvable there, so the validator rejects it and
+ * the whole case fails. `playwright/test` re-exports the same `test`/`expect`
+ * (see playwright/test.js), making this rewrite a semantic no-op that turns an
+ * otherwise-good script into a valid one.
+ */
+export function normalizePlaywrightImport(source: string): string {
+  return source.replace(
+    /((?:\bfrom\s+|\bimport\s*\(\s*|\brequire\s*\(\s*)["'])@playwright\/test(["'])/g,
+    '$1playwright/test$2',
+  );
+}
+
 function validateGeneratedPayload(raw: unknown, expected: EligibleScriptCase[]): GeneratedScript[] {
   const scripts = raw && typeof raw === 'object' && Array.isArray((raw as { scripts?: unknown }).scripts)
     ? (raw as { scripts: unknown[] }).scripts : [];
@@ -186,7 +201,7 @@ function validateGeneratedPayload(raw: unknown, expected: EligibleScriptCase[]):
     const target = expectedById.get(item.caseId);
     if (!target || seen.has(item.caseId) || item.fileName !== target.fileName) continue;
     seen.add(item.caseId);
-    out.push({ caseId: item.caseId, fileName: item.fileName, content: item.content });
+    out.push({ caseId: item.caseId, fileName: item.fileName, content: normalizePlaywrightImport(item.content) });
   }
   return out;
 }
@@ -218,7 +233,8 @@ export async function generateScriptsBatch(params: {
   const system = `你是 Playwright 自动化脚本工程师。把已经真实执行并通过的回归用例沉淀为可独立运行的 TypeScript 测试。
 只返回符合 JSON Schema 的对象，不输出 Markdown，不调用任何工具。
 每条输入必须恰好返回一个脚本，caseId/fileName 原样返回。
-脚本必须 import { test, expect } from "playwright/test"，每文件恰好一个 test，标题包含 scriptCaseId，至少一个 expect。
+脚本必须 import { test, expect } from "playwright/test"（注意：不是 "@playwright/test"，运行环境里不存在该包），
+每文件恰好一个 test，标题包含 scriptCaseId，至少一个 expect。除此之外禁止任何 import/require。
 只能使用相对 URL 或 process.env.BASE_URL；账号密码只能引用 process.env.TEST_USERNAME/TEST_PASSWORD，禁止写真实秘密、storageState 路径和本机绝对路径。
 优先 getByTestId/getByRole/getByLabel，其次 getByText/getByPlaceholder；不得使用 MCP ref。脚本必须建立自身前置条件，不依赖上一条用例状态，并按用例 cleanup 清理。`;
   const text = await generateTextViaSdk({
