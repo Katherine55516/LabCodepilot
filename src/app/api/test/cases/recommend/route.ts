@@ -6,6 +6,9 @@ import { predictNativeRuntime } from '@/lib/runtime';
 import { artifactPaths } from '@/lib/test/prompts';
 import { isUnsafeSegment } from '@/lib/test/path-safety';
 import { appendAudit } from '@/lib/test/audit';
+// harvest/apply 纯逻辑（原先定义在本文件内）：Next.js 构建期路由类型校验只允许 route.ts
+// 导出 HTTP method handler，故抽至 lib（见 recommend.ts 模块头）。
+import { harvestRecommend, harvestRecommendDetailed, applyRecommend } from '@/lib/test/recommend';
 
 export const runtime = 'nodejs';
 
@@ -48,91 +51,6 @@ function buildPrompt(taskName: string): string {
    —— \`suite\`: true=应打「回归测试」标签；false=不应打（已打的会被移除）。\`reason\` 一句话，内层引用一律用中文引号「」。
 3. **只读不写**：禁止修改任何文件。
 4. 输出完后自检条数（判定行数 == 用例总数），再用一句话总结：共 N 条用例，推荐回归集 M 条。`;
-}
-
-/** 提取 @@RECOMMEND 行 → id → suite。坏行跳过（仿 reduce.ts harvestResults）。 */
-export function harvestRecommend(text: string): Map<string, boolean> {
-  const out = new Map<string, boolean>();
-  for (const line of text.split('\n')) {
-    const idx = line.indexOf('@@RECOMMEND');
-    if (idx < 0) continue;
-    try {
-      const obj = JSON.parse(line.slice(idx + '@@RECOMMEND'.length).trim());
-      if (obj && typeof obj.id === 'string' && typeof obj.suite === 'boolean') out.set(obj.id, obj.suite);
-    } catch {
-      // ignore malformed lines
-    }
-  }
-  return out;
-}
-
-/** 一条推荐判定(可视化审阅用:比 harvestRecommend 多带 reason)。 */
-export interface RecommendVerdict {
-  id: string;
-  suite: boolean;
-  reason: string;
-}
-
-/**
- * 提取 @@RECOMMEND 行 → [{id, suite, reason}]（审阅模式用；保留理由供可视化表格展示）。
- * 同 id 多行时后者覆盖前者（与 harvestRecommend 的 Map 语义一致）。坏行跳过。
- */
-export function harvestRecommendDetailed(text: string): RecommendVerdict[] {
-  const byId = new Map<string, RecommendVerdict>();
-  for (const line of text.split('\n')) {
-    const idx = line.indexOf('@@RECOMMEND');
-    if (idx < 0) continue;
-    try {
-      const obj = JSON.parse(line.slice(idx + '@@RECOMMEND'.length).trim());
-      if (obj && typeof obj.id === 'string' && typeof obj.suite === 'boolean') {
-        byId.set(obj.id, { id: obj.id, suite: obj.suite, reason: typeof obj.reason === 'string' ? obj.reason : '' });
-      }
-    } catch {
-      // ignore malformed lines
-    }
-  }
-  return [...byId.values()];
-}
-
-/**
- * 按推荐结果 merge cases.json：只增删各条 tags 里的「回归测试」，其余字段与文件结构
- * （{cases:[...]} 或顶层数组）原样保留；.tmp+rename 原子写。返回统计供前端提示。
- */
-export function applyRecommend(
-  casesAbs: string,
-  rec: Map<string, boolean>,
-): { changed: number; total: number; suiteTotal: number } {
-  const raw = JSON.parse(fs.readFileSync(casesAbs, 'utf-8')) as unknown;
-  const list: Array<Record<string, unknown>> = Array.isArray((raw as { cases?: unknown })?.cases)
-    ? ((raw as { cases: Array<Record<string, unknown>> }).cases)
-    : Array.isArray(raw)
-      ? (raw as Array<Record<string, unknown>>)
-      : [];
-  let changed = 0;
-  let suiteTotal = 0;
-  for (const c of list) {
-    const id = typeof c?.id === 'string' ? c.id : '';
-    const tags: string[] = Array.isArray(c?.tags) ? (c.tags as unknown[]).filter((t): t is string => typeof t === 'string') : [];
-    const has = tags.includes('回归测试');
-    if (!id || !rec.has(id)) {
-      if (has) suiteTotal++;
-      continue;
-    }
-    const want = rec.get(id)!;
-    if (want && !has) {
-      c.tags = [...tags, '回归测试'];
-      changed++;
-    } else if (!want && has) {
-      c.tags = tags.filter((t) => t !== '回归测试');
-      changed++;
-    }
-    if (want) suiteTotal++;
-  }
-  const out = Array.isArray(raw) ? list : { ...(raw as Record<string, unknown>), cases: list };
-  const tmp = casesAbs + '.tmp';
-  fs.writeFileSync(tmp, JSON.stringify(out, null, 2), 'utf-8');
-  fs.renameSync(tmp, casesAbs);
-  return { changed, total: list.length, suiteTotal };
 }
 
 /**

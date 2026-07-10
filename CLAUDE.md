@@ -94,7 +94,7 @@ AI Native Lab — 多模型 AI Agent 桌面客户端，基于 Electron + Next.js
 
 **发版纪律：** 禁止自动发版。`git push` + `git tag` 必须等用户明确指示后才执行。commit 可以正常进行。
 
-**构建：** macOS 产出 DMG（arm64 + x64），Windows 产出 NSIS 安装包。`scripts/after-pack.js` 重编译 better-sqlite3 为 Electron ABI。构建前清理 `rm -rf release/ .next/`。
+**构建：** macOS 产出 DMG（仅 arm64，Intel 已放弃支持，见 electron-builder.yml 注释），Windows 产出 NSIS 安装包。`scripts/after-pack.js` 重编译 better-sqlite3 为 Electron ABI。构建前清理 `rm -rf release/ .next/`。Next 16 起 `electron:build` 必须走 `next build --webpack`（Turbopack 无法将 Agent SDK 保持 external，产物会坏；route.ts 禁止导出 handler 以外的值，否则 webpack 构建期路由校验报错）。
 
 **Release Notes 格式（必须严格遵循）：**
 

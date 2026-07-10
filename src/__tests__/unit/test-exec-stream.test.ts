@@ -1,6 +1,7 @@
 /**
  * Integration tests for the execution-step stream wrapper (wrapExecutionStream in
- * src/app/api/test/run/route.ts) — the deterministic reduce/persist/evidence glue.
+ * src/lib/test/exec-stream.ts，由 src/app/api/test/run/route.ts 使用) — the
+ * deterministic reduce/persist/evidence glue.
  *
  * Run with: npx tsx --test src/__tests__/unit/test-exec-stream.test.ts
  *
@@ -12,7 +13,8 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { wrapExecutionStream, wrapReportStream, POST } from "../../app/api/test/run/route";
+import { wrapExecutionStream, wrapReportStream } from "../../lib/test/exec-stream";
+import { POST } from "../../app/api/test/run/route";
 
 let proj: string;
 beforeEach(() => { proj = fs.mkdtempSync(path.join(os.tmpdir(), "exec-stream-")); });
