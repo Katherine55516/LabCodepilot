@@ -358,3 +358,34 @@ describe("reduceResults — 回归集口径（suiteIds = tags 含「回归测试
     assert.ok(!JSON.stringify(run).includes("suiteCounts"));
   });
 });
+
+describe("reduceResults — taskCounts 按来源任务小计（v2 回归轮次分组）", () => {
+  it("传 taskOf → 按任务分组四态;缺映射的 runId 归「未知来源」;不传 → 字段缺省", () => {
+    const raw = [
+      { id: "TC-001", status: "pass" },
+      { id: "设备预约::TC-001", status: "fail" },
+      { id: "TC-002", status: "pass" },
+      { id: "野生ID", status: "pass" },
+    ];
+    const withTask = reduceResults(raw, {
+      module: "回归用例库", env: "local", time: "t",
+      taskOf: { "TC-001": "登录鉴权", "设备预约::TC-001": "设备预约", "TC-002": "设备预约" },
+    });
+    assert.ok(withTask.taskCounts);
+    assert.deepEqual(withTask.taskCounts!["登录鉴权"], { total: 1, pass: 1, fail: 0, partial: 0, blocked: 0 });
+    assert.deepEqual(withTask.taskCounts!["设备预约"], { total: 2, pass: 1, fail: 1, partial: 0, blocked: 0 });
+    assert.deepEqual(withTask.taskCounts!["未知来源"], { total: 1, pass: 1, fail: 0, partial: 0, blocked: 0 });
+    // 不传 taskOf → 无 taskCounts(普通任务/旧消费方零影响)
+    const without = reduceResults(raw, { module: "m", env: "local", time: "t" });
+    assert.equal(without.taskCounts, undefined);
+  });
+
+  it("caseIds 对齐补全的「未执行」blocked 同样计入所属任务小计", () => {
+    const out = reduceResults([{ id: "TC-001", status: "pass" }], {
+      module: "回归用例库", env: "local", time: "t",
+      caseIds: ["TC-001", "TC-002"],
+      taskOf: { "TC-001": "登录鉴权", "TC-002": "登录鉴权" },
+    });
+    assert.deepEqual(out.taskCounts!["登录鉴权"], { total: 2, pass: 1, fail: 0, partial: 0, blocked: 1 });
+  });
+});

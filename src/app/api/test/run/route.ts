@@ -18,6 +18,7 @@ import { createCaseTimer } from '@/lib/test/exec-timing';
 import { buildStepCompleted, observeStream, recordCasesGenerated, recordStatsEvents } from '@/lib/test/stats-recorder';
 import { appendAudit } from '@/lib/test/audit';
 import { depositTask, readTaskCases, REGRESSION_LIBRARY_TASK } from '@/lib/test/library';
+import { readRoundSnapshot } from '@/lib/test/rounds';
 
 // Reference the import so it isn't tree-shaken away (keeps the registration side-effect).
 void predictNativeRuntime;
@@ -121,6 +122,18 @@ export function wrapExecutionStream(
           } catch {
             // no cases / parse fail → reduce falls back to single-rate + 不补全
           }
+          // 回归轮次:当轮快照 idMap(runId→来源任务)注入归约 → run.json 带 taskCounts
+          // 按来源任务分组小计(「哪个功能的回归挂了」一眼可见)。快照缺损 → 不分组,不阻塞。
+          let taskOf: Record<string, string> | undefined;
+          if (opts.roundId) {
+            try {
+              const snap = readRoundSnapshot(opts.projectPath, opts.roundId);
+              if (snap?.idMap) {
+                taskOf = {};
+                for (const [rid, src] of Object.entries(snap.idMap)) taskOf[rid] = src.task;
+              }
+            } catch { /* best-effort */ }
+          }
           const reduced = reduceFromText(textAcc, {
             module: opts.taskName,
             env: opts.env,
@@ -128,6 +141,7 @@ export function wrapExecutionStream(
             verificationById,
             caseIds,
             suiteIds,
+            taskOf,
           });
           // 逐用例耗时合入 tests[]（在 stringify 之前 → run.json 与 runHash 都覆盖 durations）。
           // 对齐补全的「未执行」条目天然测不到时长，保持缺省。

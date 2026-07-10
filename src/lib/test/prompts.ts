@@ -301,6 +301,11 @@ ${rule}
 
 function reportPrompt(taskName: string, env: string, roundId?: string): string {
   const p = artifactPaths(taskName, env, roundId);
+  // 回归轮次报告(v2):run.json 带 taskCounts(按来源任务小计,快照 idMap 反解)。报告主体
+  // 必须按来源任务分节,让「哪个功能的回归挂了」一眼可见,替代 runId 平铺。
+  const roundBlock = roundId
+    ? `\n⚠️ **本报告为回归轮次报告（轮次 ${roundId}）**：run.json 含 \`taskCounts\`（按来源任务的四态小计）。报告主体的「模块结果」与「失败明细」**必须按【来源任务】分节**（每节标题 = 来源任务名 + 该任务 x/y 通过小计，直接采用 taskCounts 数据），不要按用例 id 平铺；概要须列出各来源任务的通过小计一览。\n`
+    : '';
   const rule = ruleBlock(
     '测试报告规范',
     loadRule('test-report'),
@@ -312,7 +317,7 @@ function reportPrompt(taskName: string, env: string, roundId?: string): string {
 输入产物（请先 Read）：
 - 执行结果（权威事实，四态计数/逐条状态以此为准，不要自行改数）：${p.runJson}
 - 测试用例（含 TC↔REQ 引用、断言级别）：${p.cases}
-
+${roundBlock}
 ⚠️ 本步**不读需求文档**：需求覆盖矩阵只依据**测试用例中的 REQ 引用**，不要去找/读需求文档，也不要臆造未在用例中出现的需求。
 
 ${rule}

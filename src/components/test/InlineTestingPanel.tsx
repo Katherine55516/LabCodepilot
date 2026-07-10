@@ -7,7 +7,7 @@ import dynamic from "next/dynamic";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useTranslation } from "@/hooks/useTranslation";
-import { ListChecks, ChartBar, Gear, ArrowLeft, ArrowRight, FolderPlus, FolderOpen, Play, Stop, ArrowUp, SpinnerGap, Sparkle, Terminal, WarningCircle, Wrench, Trash, Desktop, Lightning, Plug, CheckCircle, File as FileIcon, FileArrowDown, NotePencil, DownloadSimple, Eye, X, CaretDown, CaretUp, Check, Lock, PencilSimple, Plus, PushPin, type Icon } from "@/components/ui/icon";
+import { ListChecks, ChartBar, Gear, ArrowLeft, ArrowRight, FolderPlus, FolderOpen, Play, Stop, ArrowUp, SpinnerGap, Sparkle, Terminal, WarningCircle, Wrench, Trash, Desktop, Lightning, Plug, CheckCircle, File as FileIcon, FileArrowDown, NotePencil, DownloadSimple, Eye, X, CaretDown, CaretUp, Check, Lock, PencilSimple, Plus, PushPin, Clock, MagnifyingGlass, type Icon } from "@/components/ui/icon";
 import { MarkdownEditor } from "@/components/editor/MarkdownEditor.lazy";
 import type { TranslationKey } from "@/i18n";
 import { useNativeFolderPicker } from "@/hooks/useNativeFolderPicker";
@@ -1228,6 +1228,8 @@ export function InlineTestingPanel() {
   const [suitesOpen, setSuitesOpen] = useState(false);
   // 发起回归弹窗(v2 批 D):套件/环境/预检确认后才真正 runLibrary。
   const [launchOpen, setLaunchOpen] = useState(false);
+  // 轮次历史弹窗(v2 批 E):轮次列表 + 详情(任务分组 + delta)。
+  const [roundsOpen, setRoundsOpen] = useState(false);
   // 跨任务一键重跑进行中(聚合→执行→报告)。禁用重复触发,按钮显示「重跑中…」。
   const [libraryRunning, setLibraryRunning] = useState(false);
   // 重跑状态提示(库不属于任何任务对话,故用独立状态在弹窗内展示,不走任务对话 push)。
@@ -2642,10 +2644,14 @@ export function InlineTestingPanel() {
           running={libraryRunning}
           runStatus={libraryRunStatus}
           onOpenSuites={() => setSuitesOpen(true)}
+          onOpenRounds={() => setRoundsOpen(true)}
         />
       )}
       {suitesOpen && current?.path && (
         <RegressionSuitesModal t={t} projectPath={current.path} onClose={() => setSuitesOpen(false)} />
+      )}
+      {roundsOpen && current?.path && (
+        <RegressionRoundsModal t={t} projectPath={current.path} onClose={() => setRoundsOpen(false)} />
       )}
       {launchOpen && current?.path && (
         <StartRegressionModal
@@ -3702,7 +3708,7 @@ function AuditModal({ t, projectPath, taskName, onClose }: { t: T; projectPath: 
 // 「一键重跑」按钮 + 报告查看在批 D 接线(onRun 由父组件在批 D 传入)。
 interface LibEntry { id?: string; purpose?: string; priority?: string; caseType?: string; tags?: string[]; _source?: { task?: string; originalId?: string; depositedAt?: string } }
 interface LibGroup { task: string; count: number; entries: LibEntry[] }
-function RegressionLibraryModal({ t, projectPath, reloadSignal, onChanged, onClose, onRun, running, runStatus, onOpenSuites }: {
+function RegressionLibraryModal({ t, projectPath, reloadSignal, onChanged, onClose, onRun, running, runStatus, onOpenSuites, onOpenRounds }: {
   t: T;
   projectPath: string;
   reloadSignal: number;
@@ -3712,10 +3718,15 @@ function RegressionLibraryModal({ t, projectPath, reloadSignal, onChanged, onClo
   running?: boolean;
   runStatus?: string | null;
   onOpenSuites?: () => void;
+  onOpenRounds?: () => void;
 }) {
   // null = 加载中(初次挂载即 null → 显示 spinner;reloadSignal 变化时保留旧数据直到新数据到达,
   // 不在 effect 体里同步 setData(null)——避免 react-hooks/set-state-in-effect 级联渲染告警)。
   const [data, setData] = useState<{ total: number; updatedAt: string; tasks: LibGroup[] } | null>(null);
+  // 库检索(v2 批 E):搜索(ID/标题)+ 来源任务/优先级过滤,纯前端内存过滤,API 零改动。
+  const [libQ, setLibQ] = useState("");
+  const [libTask, setLibTask] = useState("");
+  const [libPri, setLibPri] = useState("");
   useEffect(() => {
     let cancelled = false;
     fetch(`/api/test/library?projectPath=${encodeURIComponent(projectPath)}`)
@@ -3741,6 +3752,30 @@ function RegressionLibraryModal({ t, projectPath, reloadSignal, onChanged, onClo
   };
 
   const taskCount = data?.tasks.length ?? 0;
+  // 过滤视图:组内条目过滤,空组隐藏;命中数用于工具条反馈。
+  const priOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const g of data?.tasks ?? []) for (const e of g.entries) if (e.priority) set.add(e.priority);
+    return [...set].sort();
+  }, [data]);
+  const filteredTasks = useMemo(() => {
+    if (!data) return [];
+    const q = libQ.trim().toLowerCase();
+    return data.tasks
+      .filter((g) => !libTask || g.task === libTask)
+      .map((g) => ({
+        ...g,
+        entries: g.entries.filter((e) => {
+          if (libPri && e.priority !== libPri) return false;
+          if (!q) return true;
+          const id = (e._source?.originalId || e.id || "").toLowerCase();
+          return id.includes(q) || (e.purpose ?? "").toLowerCase().includes(q);
+        }),
+      }))
+      .filter((g) => g.entries.length > 0);
+  }, [data, libQ, libTask, libPri]);
+  const filteredCount = filteredTasks.reduce((n, g) => n + g.entries.length, 0);
+  const filterActive = !!(libQ.trim() || libTask || libPri);
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
       <div className="flex max-h-[82vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-border bg-background shadow-xl" onClick={(e) => e.stopPropagation()}>
@@ -3751,6 +3786,14 @@ function RegressionLibraryModal({ t, projectPath, reloadSignal, onChanged, onClo
             <span className="text-[10px] text-muted-foreground">{t("test.library.summary", { total: data.total, tasks: taskCount })}</span>
           )}
           <span className="flex-1" />
+          {onOpenRounds && (
+            <button
+              onClick={onOpenRounds}
+              className="flex h-6 items-center gap-1 rounded border border-border px-2 text-[11px] text-muted-foreground hover:text-foreground"
+            >
+              <Clock size={11} /> {t("test.rounds.open")}
+            </button>
+          )}
           {onOpenSuites && (
             <button
               onClick={onOpenSuites}
@@ -3777,6 +3820,28 @@ function RegressionLibraryModal({ t, projectPath, reloadSignal, onChanged, onClo
             {runStatus}
           </div>
         )}
+        {data && data.total > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5 border-b border-border px-3 py-1.5">
+            <div className="flex h-6 min-w-[160px] flex-1 items-center gap-1 rounded border border-border bg-background px-1.5">
+              <MagnifyingGlass size={11} className="flex-shrink-0 text-muted-foreground" />
+              <input
+                value={libQ}
+                onChange={(e) => setLibQ(e.target.value)}
+                placeholder={t("test.library.searchPh")}
+                className="w-full bg-transparent text-[11px] outline-none placeholder:text-muted-foreground"
+              />
+            </div>
+            <select value={libTask} onChange={(e) => setLibTask(e.target.value)} className="h-6 rounded border border-border bg-background px-1 text-[10px] text-muted-foreground outline-none">
+              <option value="">{t("test.library.filterTask")}：{t("test.library.filterAll")}</option>
+              {(data?.tasks ?? []).map((g) => <option key={g.task} value={g.task}>{g.task}</option>)}
+            </select>
+            <select value={libPri} onChange={(e) => setLibPri(e.target.value)} className="h-6 rounded border border-border bg-background px-1 text-[10px] text-muted-foreground outline-none">
+              <option value="">{t("test.library.filterPri")}：{t("test.library.filterAll")}</option>
+              {priOptions.map((v) => <option key={v} value={v}>{v}</option>)}
+            </select>
+            {filterActive && <span className="text-[10px] text-primary">{t("test.library.filterHit", { n: filteredCount })}</span>}
+          </div>
+        )}
         <div className="min-h-0 flex-1 overflow-auto">
           {data === null ? (
             <div className="p-4 text-center text-[11px] text-muted-foreground"><SpinnerGap size={14} className="mx-auto animate-spin" /></div>
@@ -3784,7 +3849,7 @@ function RegressionLibraryModal({ t, projectPath, reloadSignal, onChanged, onClo
             <div className="p-6 text-center text-[11px] leading-relaxed text-muted-foreground">{t("test.library.empty")}</div>
           ) : (
             <div className="divide-y divide-border">
-              {data.tasks.map((g) => (
+              {filteredTasks.map((g) => (
                 <div key={g.task} className="px-3 py-2">
                   <div className="mb-1.5 flex items-center gap-2">
                     <span className="text-[11px] font-semibold text-foreground">{g.task}</span>
@@ -3792,7 +3857,7 @@ function RegressionLibraryModal({ t, projectPath, reloadSignal, onChanged, onClo
                     <span className="flex-1" />
                     <button
                       onClick={() => del(g.task, undefined, g.count)}
-                      className="flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-status-danger-muted hover:text-status-danger-foreground"
+                      className="flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-status-error-muted hover:text-status-error-foreground"
                     >
                       <Trash size={10} /> {t("test.library.removeTask")}
                     </button>
@@ -3805,7 +3870,7 @@ function RegressionLibraryModal({ t, projectPath, reloadSignal, onChanged, onClo
                         <span className="min-w-0 flex-1 truncate text-[11px] text-foreground" title={e.purpose}>{e.purpose || "—"}</span>
                         <button
                           onClick={() => del(g.task, e._source?.originalId || e.id)}
-                          className="text-muted-foreground hover:text-status-danger-foreground"
+                          className="text-muted-foreground hover:text-status-error-foreground"
                           title={t("test.library.remove")}
                           aria-label={t("test.library.remove")}
                         >
@@ -3816,6 +3881,167 @@ function RegressionLibraryModal({ t, projectPath, reloadSignal, onChanged, onClo
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// 轮次历史弹窗(v2 批 E):轮次 = 一次回归执行实例(TestRail Run 语义)。列表(时间/环境/
+// 套件/模式/状态/通过/红线)+ 行内展开详情(按来源任务分组结果 + 与上一全量轮的 delta 三类,
+// 交集口径)+ 删单轮(报告/快照/证据一并删)。数据全部来自 rounds / rounds/detail 只读 API。
+interface RoundUI {
+  roundId: string; startedAt?: string; env?: string; suiteName?: string; mode?: string;
+  status?: string; total?: number; counts?: Record<string, number>; suitePassStr?: string;
+}
+interface RoundDetailUI {
+  groups: Array<{ task: string; counts: Record<string, number>; tests: Array<{ task: string; originalId: string; purpose: string; status: string }> }>;
+  delta: { baseRoundId: string; newFail: unknown[]; fixed: unknown[]; stillFail: unknown[] } | null;
+}
+function RegressionRoundsModal({ t, projectPath, onClose }: { t: T; projectPath: string; onClose: () => void }) {
+  const [rounds, setRounds] = useState<RoundUI[] | null>(null);
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [details, setDetails] = useState<Record<string, RoundDetailUI | null>>({});
+  const [reload, setReload] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/test/library/rounds?projectPath=${encodeURIComponent(projectPath)}`)
+      .then((r) => r.json())
+      .then((d) => { if (!cancelled) setRounds(Array.isArray(d?.rounds) ? d.rounds : []); })
+      .catch(() => { if (!cancelled) setRounds([]); });
+    return () => { cancelled = true; };
+  }, [projectPath, reload]);
+
+  const toggleDetail = (roundId: string) => {
+    if (openId === roundId) { setOpenId(null); return; }
+    setOpenId(roundId);
+    if (details[roundId] !== undefined) return;
+    fetch(`/api/test/library/rounds/detail?projectPath=${encodeURIComponent(projectPath)}&roundId=${encodeURIComponent(roundId)}`)
+      .then((r) => r.json())
+      .then((d) => setDetails((m) => ({ ...m, [roundId]: d?.groups ? { groups: d.groups, delta: d.delta ?? null } : null })))
+      .catch(() => setDetails((m) => ({ ...m, [roundId]: null })));
+  };
+
+  const delRound = async (roundId: string) => {
+    if (!window.confirm(t("test.rounds.confirmDelete", { round: roundId }))) return;
+    try {
+      await fetch("/api/test/library/rounds", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectPath, roundId }),
+      });
+      setReload((n) => n + 1);
+    } catch { /* keep view */ }
+  };
+
+  const fmtTime = (iso?: string) => {
+    if (!iso) return "—";
+    const d = new Date(iso);
+    return Number.isNaN(d.getTime()) ? iso : `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  };
+  const passOf = (r: RoundUI) => {
+    if (r.suitePassStr) return r.suitePassStr;
+    if (r.counts && typeof r.counts.total === "number") return `${r.counts.pass ?? 0}/${r.counts.total}`;
+    return null;
+  };
+  const redline = (r: RoundUI) => {
+    if (r.status === "running") return <span className="flex items-center gap-1 rounded bg-muted px-1.5 text-[9px] text-muted-foreground"><SpinnerGap size={9} className="animate-spin" /> {t("test.rounds.statusRunning")}</span>;
+    if (r.status === "aborted") return <span className="rounded bg-muted px-1.5 text-[9px] text-muted-foreground">{t("test.rounds.statusAborted")}</span>;
+    const p = passOf(r);
+    if (!p) return null;
+    const [a, b] = p.split("/").map((x) => parseInt(x, 10));
+    const ok = Number.isFinite(a) && Number.isFinite(b) && b > 0 && a === b;
+    return <span className={`rounded px-1.5 text-[9px] ${ok ? "bg-status-success-muted text-status-success-foreground" : "bg-status-error-muted text-status-error-foreground"}`}>{ok ? t("test.rounds.redlineOk") : t("test.rounds.redlineBlocked")}</span>;
+  };
+  const dot = (status: string) => (
+    <span className={`inline-block h-1.5 w-1.5 flex-shrink-0 rounded-full ${status === "pass" ? "bg-status-success-foreground" : "bg-status-error-foreground"}`} />
+  );
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+      <div className="flex max-h-[84vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-border bg-background shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center gap-2 border-b border-border px-3 py-2">
+          <Clock size={14} className="text-primary" />
+          <span className="text-xs font-semibold text-foreground">{t("test.rounds.title")}</span>
+          {rounds && rounds.length > 0 && <span className="text-[10px] text-muted-foreground">{rounds.length}</span>}
+          <span className="flex-1" />
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground" aria-label={t("test.library.close")}><X size={14} /></button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-auto">
+          {rounds === null ? (
+            <div className="p-4 text-center text-[11px] text-muted-foreground"><SpinnerGap size={14} className="mx-auto animate-spin" /></div>
+          ) : rounds.length === 0 ? (
+            <div className="p-6 text-center text-[11px] leading-relaxed text-muted-foreground">{t("test.rounds.empty")}</div>
+          ) : (
+            <div className="divide-y divide-border">
+              {rounds.map((r) => {
+                const detail = details[r.roundId];
+                const open = openId === r.roundId;
+                return (
+                  <div key={r.roundId} className="px-3 py-1.5">
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-[10px] text-muted-foreground">{r.roundId}</span>
+                      <span className="text-[10px] text-muted-foreground">{fmtTime(r.startedAt)}</span>
+                      <span className="rounded border border-border px-1 text-[9px] text-muted-foreground">{r.env || "—"}</span>
+                      <span className="min-w-0 flex-1 truncate text-[11px] text-foreground">{r.suiteName || "—"}</span>
+                      {r.mode === "failed-only" && <span className="rounded bg-status-warning-muted px-1.5 text-[9px] text-status-warning-foreground">{t("test.rounds.modeRetest")}</span>}
+                      {passOf(r) && <span className="font-mono text-[10px] text-foreground">{passOf(r)}</span>}
+                      {redline(r)}
+                      <button onClick={() => toggleDetail(r.roundId)} className="flex items-center gap-0.5 rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground hover:text-foreground">
+                        {open ? <CaretUp size={9} /> : <CaretDown size={9} />} {open ? t("test.rounds.collapse") : t("test.rounds.detail")}
+                      </button>
+                      <button onClick={() => delRound(r.roundId)} className="text-muted-foreground hover:text-status-error-foreground" title={t("test.rounds.delete")} aria-label={t("test.rounds.delete")}>
+                        <Trash size={11} />
+                      </button>
+                    </div>
+                    {open && (
+                      <div className="mt-1.5 rounded border border-border/60 bg-muted/20 p-2">
+                        {detail === undefined ? (
+                          <div className="p-2 text-center"><SpinnerGap size={12} className="mx-auto animate-spin text-muted-foreground" /></div>
+                        ) : detail === null || detail.groups.length === 0 ? (
+                          <div className="p-1 text-[10px] text-muted-foreground">{t("test.rounds.detailEmpty")}</div>
+                        ) : (
+                          <div className="space-y-2">
+                            {detail.delta ? (
+                              <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
+                                <span className="text-muted-foreground">{t("test.rounds.deltaBase", { round: detail.delta.baseRoundId })}</span>
+                                <span className="rounded bg-status-error-muted px-1.5 py-0.5 text-status-error-foreground">{t("test.rounds.deltaNewFail")} {detail.delta.newFail.length}</span>
+                                <span className="rounded bg-status-success-muted px-1.5 py-0.5 text-status-success-foreground">{t("test.rounds.deltaFixed")} {detail.delta.fixed.length}</span>
+                                <span className="rounded bg-status-warning-muted px-1.5 py-0.5 text-status-warning-foreground">{t("test.rounds.deltaStillFail")} {detail.delta.stillFail.length}</span>
+                              </div>
+                            ) : (
+                              <div className="text-[10px] text-muted-foreground">{t("test.rounds.deltaNone")}</div>
+                            )}
+                            {detail.groups.map((g) => (
+                              <div key={g.task}>
+                                <div className="mb-0.5 flex items-center gap-1.5">
+                                  <span className="text-[10px] font-semibold text-foreground">{g.task}</span>
+                                  <span className={`rounded px-1 text-[9px] ${g.counts.pass === g.counts.total ? "bg-status-success-muted text-status-success-foreground" : "bg-status-error-muted text-status-error-foreground"}`}>
+                                    {g.counts.pass ?? 0}/{g.counts.total ?? 0}
+                                  </span>
+                                </div>
+                                <div className="space-y-0.5">
+                                  {g.tests.map((c) => (
+                                    <div key={`${g.task}-${c.originalId}`} className="flex items-center gap-1.5 pl-1">
+                                      {dot(c.status)}
+                                      <span className="font-mono text-[9px] text-muted-foreground">{c.originalId}</span>
+                                      <span className="min-w-0 flex-1 truncate text-[10px] text-foreground" title={c.purpose}>{c.purpose || "—"}</span>
+                                      <span className="text-[9px] text-muted-foreground">{c.status}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
