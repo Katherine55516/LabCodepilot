@@ -33,6 +33,13 @@ export interface ScriptJobRequest {
   model?: string;
   providerId?: string;
   forceCaseIds?: string[];
+  /**
+   * 跳过 done/partial 的幂等去重、重新排一次任务（executeJob 内部的指纹复用仍生效：
+   * 没变的用例不再调模型）。手动「重试缺口」必须置 true —— 否则用例改了（指纹变了）、
+   * 或上轮有 failed 用例时，同 runHash 的重试会被去重静默吞掉，按钮等于空转。
+   * 报告流的自动触发不置此值，保持重复报告幂等。
+   */
+  forceRefresh?: boolean;
   /** 生成后自动运行 + 失败自动修的流水线（被测应用可达时才跑）。默认关闭；报告触发的自动生成默认开启。 */
   runPipeline?: boolean;
   /** 修复轮次上限，默认 3。 */
@@ -489,7 +496,7 @@ function drain(): void {
 export async function enqueueScriptJob(request: ScriptJobRequest): Promise<EnqueueResult> {
   const key = jobKey(request.projectPath, request.taskName, request.env, request.runHash);
   const current = readManifest(request.projectPath, request.taskName, request.env);
-  if (!request.forceCaseIds?.length && current?.latestRunHash === request.runHash
+  if (!request.forceCaseIds?.length && !request.forceRefresh && current?.latestRunHash === request.runHash
     && (current.jobStatus === 'queued' || current.jobStatus === 'running' || current.jobStatus === 'done' || current.jobStatus === 'partial')) {
     if ((current.jobStatus === 'queued' || current.jobStatus === 'running') && !queuedKeys.has(key) && !activeKeys.has(key)) {
       queue.push({ ...request, key });

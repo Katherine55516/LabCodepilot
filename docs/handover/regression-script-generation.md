@@ -74,7 +74,7 @@ manifest job 状态：`queued/running/done/partial/error/stale`；单用例状�
 - `POST /api/test/scripts/repair`：**AI 修复**（手动单点）。把 `lastRunError` + 当前脚本 + 原用例喂回模型定向修（`repairScriptsBatch`），修复稿走生成同款校验/重放管线（`validateAndPublish`），全部通过才原子覆盖旧文件；未通过则旧脚本原样保留。与生成共用 `.generation.lock`。**红线**：prompt 要求只修技术缺陷（定位器/等待/前置），断言如实失败（页面行为 ≠ 用例预期）时必须 `fixed=false` 并给出测试人员能懂的解释——该解释持久化到 `repairNote`，防止"修复"掩盖真缺陷。生成期失败（无落盘脚本）不归 repair 管，走 retry。
 - `POST /api/test/scripts/pipeline`：**自动跑通流水线**（`runPipelineForTask`）。运行→失败自动修→再跑，直至全部可修复的脚本通过。入口先探测被测应用可达性（`isSutReachable` 打 `frontendBaseUrl`，4s 超时），不可达直接报错。**终止条件**（`runAndRepairLoop`，`DEFAULT_MAX_REPAIR_ROUNDS=3` 兜底）：① 没有可修复的失败了；② 轮次上限；③ 每条用例只给**一次**定向修复机会——一次带确切失败原因的修复仍跑不通就 park 为「需人工」，不管模型自评 fixed 与否（结构性重跑守红线，不信模型嘴上说的）。**分类**：环境问题（连接被拒，`isEnvironmentFailure`）→ 不喂 AI、归「环境阻塞」；如实失败/修不好 → 归「需人工」并覆盖乐观 repairNote 讲真话。**自动触发**：报告流 `enqueueScriptJob({runPipeline:true})`，生成后在 `executeJob` 内（持锁）接着跑；被测应用不可达则跳过运行、只停在生成态。best-effort：流水线抛错落终态、不抹掉已生成脚本、不卡 `running`。
 
-`ReportStepPanel` 的“产出资料”新增第四张“回归自动化脚本”卡，queued/running 每 2 秒轮询；可查看脚本和每条状态、重试缺口、运行单条或全部。运行失败时卡片红字显示 `N 个脚本运行失败：<原因>` 并出现「AI 修复」按钮；脚本弹框内按条显示 `lastRunError`（红）与 `repairNote`（蓝），可单条修复。它不是流程节点。
+`ReportStepPanel` 的“产出资料”新增第四张“回归自动化脚本”卡，queued/running 每 2 秒轮询。**卡片只留一条动作主线**：查看脚本 + 「自动跑通」（流水线）+「重试缺口」（仅当存在【生成】缺口——无 manifest / job error/stale / 有用例 failed/outdated 时出现；刻意不含 partial，运行失败置 partial 但重新生成解决不了）。卡片重试完成后自动接流水线（retry 传 `runPipeline:true`）。原卡片级「运行全部」「AI 修复」已删——是流水线的子集，测试人员面对四个按钮会犯选择困难；单条精修（重试/运行所选/AI 修复）收在脚本弹框里。运行失败时卡片红字显示 `N 个脚本运行失败：<原因>`；弹框内按条显示 `lastRunError`（红）与 `repairNote`（蓝）。它不是流程节点。
 
 ## 生成/校验的关键决策（按踩坑顺序）
 
@@ -84,6 +84,7 @@ manifest job 状态：`queued/running/done/partial/error/stale`；单用例状�
 - `isSafeForAutomaticReplay` 只扫 `steps[].content`（动作），不扫 expected/purpose——否则「+ 新建学科」这类按钮名会把只读用例误判成写操作、永久挡在自动验证外。无结构化 steps 时保守回退扫全文。
 - 生成 prompt 要求定位器唯一：`getByRole/getByText` 传字符串 name 必须 `{ exact: true }`（Playwright 默认子串匹配，列表卡片文案极易撞词造成 strict mode violation）；不许用 `.first()` 掩盖歧义。
 - `.generation.lock` 僵尸锁判定：除 30 分钟兜底外，额外检查锁记录的 `pid` 是否存活（`process.kill(pid,0)`）——桌面应用被强退/崩溃留下的锁，持有进程已死即立刻抢占，不必等 30 分钟堵死后续任务。
+- `enqueueScriptJob` 幂等去重 vs 手动重试：done/partial + 同 runHash + 无 forceCaseIds 的入队会被去重短路（保证报告流重复触发幂等）。**手动「重试缺口」必须传 `forceRefresh:true`**（retry 路由已固定传）——否则用例改了（指纹变了）或上轮有 failed 用例时，重试被静默吞掉、按钮空转（真机踩坑：改完用例预期点重试无任何反应）。forceRefresh 只跳过去重，executeJob 内指纹复用仍生效，没变的用例不烧模型。
 - 运行/修复核心（`runScriptCases`/`repairScriptCases`）抽成 lock-free，手动路由（自持锁）与自动流水线（在 `executeJob` 锁内）共用同一份逻辑；`run`/`repair`/`pipeline` 三个手动路由各自 `acquireLock`，与后台生成互斥。
 
 ## 运维与验证

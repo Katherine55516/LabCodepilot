@@ -3405,13 +3405,15 @@ function ReportStepPanel({
     } catch { setHandoffBusy(false); }
   };
 
+  // 重试缺口 = 重新生成没有脚本/生成失败的用例。生成完接着自动跑通（runPipeline），
+  // 测试人员不必再点一次——单条精修（重试/运行/修复）在脚本弹框里。
   const retryScripts = async (caseIds?: string[]) => {
     setScriptBusy(true);
     try {
       const res = await fetch("/api/test/scripts/retry", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectPath, taskName, env, caseIds, model: model || undefined, providerId: providerId || undefined }),
+        body: JSON.stringify({ projectPath, taskName, env, caseIds, model: model || undefined, providerId: providerId || undefined, runPipeline: true }),
       });
       if (!res.ok) throw new Error("retry failed");
       setScriptReloadTick((n) => n + 1);
@@ -3419,58 +3421,6 @@ function ReportStepPanel({
       showToast({ type: "error", message: t("test.scripts.error") });
     } finally {
       setScriptBusy(false);
-    }
-  };
-
-  const runScripts = async (caseIds?: string[]) => {
-    setScriptBusy(true);
-    try {
-      const res = await fetch("/api/test/scripts/run", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectPath, taskName, env, caseIds }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "run failed");
-      if (data.manifest) setScriptManifest(data.manifest as ScriptManifestView);
-      const results = Array.isArray(data.results) ? data.results as Array<{ ok?: boolean }> : [];
-      showToast({
-        type: data.ok ? "success" : "warning",
-        message: `${t("test.scripts.output")}：${results.filter((item) => item.ok).length}/${results.length}`,
-      });
-    } catch (error) {
-      showToast({ type: "error", message: error instanceof Error ? error.message : t("test.scripts.error") });
-    } finally {
-      setScriptBusy(false);
-      setScriptReloadTick((n) => n + 1);
-    }
-  };
-
-  // AI 修复：把 lastRunError 喂回模型定向修脚本（测试人员不写代码，这是失败后唯一
-  // 不需要人手改 .spec.ts 的出路）。修复稿走生成同款校验/重放管线，失败不动旧文件。
-  const repairScripts = async (caseIds?: string[]) => {
-    setScriptBusy(true);
-    try {
-      const res = await fetch("/api/test/scripts/repair", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectPath, taskName, env, caseIds, model: model || undefined, providerId: providerId || undefined }),
-      });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "repair failed");
-      if (data.manifest) setScriptManifest(data.manifest as ScriptManifestView);
-      const results = Array.isArray(data.results) ? data.results as Array<{ fixed?: boolean; reason?: string }> : [];
-      const fixed = results.filter((item) => item.fixed).length;
-      const firstUnfixed = results.find((item) => !item.fixed)?.reason;
-      showToast({
-        type: data.ok ? "success" : "warning",
-        message: `${t("test.scripts.repairResult", { fixed, total: results.length })}${firstUnfixed ? `：${firstUnfixed.slice(0, 120)}` : ""}`,
-      });
-    } catch (error) {
-      showToast({ type: "error", message: error instanceof Error ? error.message : t("test.scripts.error") });
-    } finally {
-      setScriptBusy(false);
-      setScriptReloadTick((n) => n + 1);
     }
   };
 
@@ -3585,7 +3535,13 @@ function ReportStepPanel({
     partial: "test.scripts.partial", error: "test.scripts.error", stale: "test.scripts.stale",
   };
   const scriptRunnable = scriptManifest?.cases.filter((item) => item.status === "verified" || item.status === "needs_review") ?? [];
-  const scriptHasGaps = !scriptManifest || scriptManifest.jobStatus === "partial" || scriptManifest.jobStatus === "error" || scriptManifest.jobStatus === "stale";
+  // 「重试缺口」只管【生成】缺口：没 manifest（旧报告）、整个 job 挂了/过期、或有用例
+  // 生成失败（failed/outdated）。刻意不含 jobStatus==='partial'——流水线后运行失败也会
+  // 置 partial，但那不是生成缺口，重试(重新生成)解决不了，会误导用户空点。
+  const scriptHasGaps = !scriptManifest
+    || scriptManifest.jobStatus === "error"
+    || scriptManifest.jobStatus === "stale"
+    || scriptManifest.cases.some((item) => item.status === "failed" || item.status === "outdated");
   const scriptWorking = scriptManifest?.jobStatus === "queued" || scriptManifest?.jobStatus === "running";
   // 错误/进行中优先于空态：任务中途失败时 counts 仍是初始零值，
   // 按 eligible===0 渲染会误报「本轮没有符合条件的用例」。
@@ -3726,19 +3682,11 @@ function ReportStepPanel({
                   <ArrowUp size={12} /> {t("test.scripts.retry")}
                 </button>
               )}
+              {/* 卡片只留一个动作主线：自动跑通（运行→失败自动修→再跑）。原「运行全部」
+                  「AI 修复」是它的子集，收进弹框做单条精修，避免测试人员面对四个按钮犯选择困难。 */}
               {scriptRunnable.length > 0 && !scriptWorking && (
                 <button onClick={() => void runPipeline()} disabled={scriptBusy} className={btnPrimary} title={t("test.scripts.pipelineHint")}>
                   {scriptBusy ? <SpinnerGap size={12} className="animate-spin" /> : <Wrench size={12} />} {t("test.scripts.pipeline")}
-                </button>
-              )}
-              {scriptRunnable.length > 0 && !scriptWorking && (
-                <button onClick={() => void runScripts(scriptRunnable.map((item) => item.caseId))} disabled={scriptBusy} className={btnGhost}>
-                  <Play size={12} /> {t("test.scripts.runAll")}
-                </button>
-              )}
-              {scriptRunFailures.length > 0 && !scriptWorking && (
-                <button onClick={() => void repairScripts(scriptRunFailures.map((item) => item.caseId))} disabled={scriptBusy} className={btnGhost}>
-                  <Wrench size={12} /> {t("test.scripts.repair")}
                 </button>
               )}
             </>,
