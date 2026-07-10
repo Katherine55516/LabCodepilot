@@ -53,6 +53,11 @@ export function libraryFile(projectPath: string): string {
   return path.join(projectPath, 'AI_LabTest', 'testCase', `${REGRESSION_LIBRARY_TASK}.json`);
 }
 
+/** Exact runId → source snapshot used by the latest aggregate library execution. */
+export function libraryRunMapFile(projectPath: string): string {
+  return path.join(projectPath, 'AI_LabTest', 'testCase', '.data', `${REGRESSION_LIBRARY_TASK}.id-map.json`);
+}
+
 /** 空库。 */
 function emptyLibrary(): RegressionLibrary {
   return { version: LIBRARY_VERSION, updatedAt: '', entries: [] };

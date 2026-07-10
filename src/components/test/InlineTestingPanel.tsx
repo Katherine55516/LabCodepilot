@@ -119,6 +119,27 @@ interface ReportEntry {
   defectMarkdown: string;
 }
 
+type ScriptJobStatusView = "queued" | "running" | "done" | "partial" | "error" | "stale";
+type ScriptCaseStatusView = "verified" | "needs_review" | "failed" | "stale" | "outdated";
+interface ScriptManifestCaseView {
+  caseId: string;
+  file: string;
+  sourceTask?: string;
+  sourceCaseId?: string;
+  status: ScriptCaseStatusView;
+  usesMock: boolean;
+  error?: string;
+  validation?: { syntax: boolean; collected: boolean; replayed: boolean; warnings: string[]; error?: string };
+}
+interface ScriptManifestView {
+  latestRunHash: string;
+  updatedAt?: string;
+  jobStatus: ScriptJobStatusView;
+  counts: { eligible: number; generated: number; verified: number; needsReview: number; failed: number };
+  cases: ScriptManifestCaseView[];
+  error?: string;
+}
+
 interface Project {
   name: string;
   path: string;
@@ -3181,7 +3202,8 @@ function CompareView({ t, projectPath, taskName, env }: { t: T; projectPath: str
 // 产物预览的目标：md（测试报告/缺陷报告，预览/编辑切换）或 xlsx（执行矩阵只读表格）。
 type PreviewState =
   | { kind: "md"; titleKey: TranslationKey; rel: string; content: string; editable: boolean }
-  | { kind: "xlsx" };
+  | { kind: "xlsx" }
+  | { kind: "scripts"; manifest: ScriptManifestView };
 
 // 报告步「就地展示」面板（替换报告节点的占位符）。报告步 done 时拉 GET /api/test/reports
 // 取当前 task+env 的 ReportEntry，展示：概览条（复用 funcPassRateStr 口径）+ 产出资料列表
@@ -3204,6 +3226,9 @@ function ReportStepPanel({
   const [reloadTick, setReloadTick] = useState(0);
   const [defectBusy, setDefectBusy] = useState(false);
   const [handoffBusy, setHandoffBusy] = useState(false);
+  const [scriptBusy, setScriptBusy] = useState(false);
+  const [scriptManifest, setScriptManifest] = useState<ScriptManifestView | null>(null);
+  const [scriptReloadTick, setScriptReloadTick] = useState(0);
   const [preview, setPreview] = useState<PreviewState | null>(null);
   // 缺陷报告随执行更新：自动缺陷生成守卫按【本次执行时间】记忆——同一份 run 只自动生成一次
   // (防 effect 重复触发)，但【重新执行任务 = 新 run.json(新 time)】时允许再生成一次。配合
@@ -3233,6 +3258,31 @@ function ReportStepPanel({
     // defectGen 闭包仅用 props/setter、稳定；有意不入 deps 以免重建 effect。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reportStatus, projectPath, taskName, env, reloadTick]);
+
+  // 脚本生成是报告成功后的后台任务，不占用流程节点。manifest 为持久化真相；queued/running
+  // 时短轮询，终态后停止。旧报告没有 manifest 时显示“尚未生成”，允许用户手动补触发。
+  useEffect(() => {
+    if (reportStatus !== "done" || !projectPath) { setScriptManifest(null); return; }
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const load = async () => {
+      try {
+        const query = new URLSearchParams({ projectPath, taskName, env });
+        const res = await fetch(`/api/test/scripts?${query.toString()}`);
+        const data = res.ok ? await res.json() : { manifest: null };
+        if (cancelled) return;
+        const manifest = (data.manifest ?? null) as ScriptManifestView | null;
+        setScriptManifest(manifest);
+        if (manifest && (manifest.jobStatus === "queued" || manifest.jobStatus === "running")) {
+          timer = setTimeout(load, 2_000);
+        }
+      } catch {
+        if (!cancelled) setScriptManifest(null);
+      }
+    };
+    void load();
+    return () => { cancelled = true; if (timer) clearTimeout(timer); };
+  }, [reportStatus, projectPath, taskName, env, scriptReloadTick]);
 
   // 失败态：报告步执行失败 → 提示重跑，不渲染空报告。
   if (reportStatus === "error") {
@@ -3307,6 +3357,47 @@ function ReportStepPanel({
     } catch { setHandoffBusy(false); }
   };
 
+  const retryScripts = async (caseIds?: string[]) => {
+    setScriptBusy(true);
+    try {
+      const res = await fetch("/api/test/scripts/retry", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectPath, taskName, env, caseIds, model: model || undefined, providerId: providerId || undefined }),
+      });
+      if (!res.ok) throw new Error("retry failed");
+      setScriptReloadTick((n) => n + 1);
+    } catch {
+      showToast({ type: "error", message: t("test.scripts.error") });
+    } finally {
+      setScriptBusy(false);
+    }
+  };
+
+  const runScripts = async (caseIds?: string[]) => {
+    setScriptBusy(true);
+    try {
+      const res = await fetch("/api/test/scripts/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectPath, taskName, env, caseIds }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "run failed");
+      if (data.manifest) setScriptManifest(data.manifest as ScriptManifestView);
+      const results = Array.isArray(data.results) ? data.results as Array<{ ok?: boolean }> : [];
+      showToast({
+        type: data.ok ? "success" : "warning",
+        message: `${t("test.scripts.output")}：${results.filter((item) => item.ok).length}/${results.length}`,
+      });
+    } catch (error) {
+      showToast({ type: "error", message: error instanceof Error ? error.message : t("test.scripts.error") });
+    } finally {
+      setScriptBusy(false);
+      setScriptReloadTick((n) => n + 1);
+    }
+  };
+
   const metric = (label: string, value: string, danger?: boolean) => (
     <div className="rounded-lg bg-muted/40 p-2.5">
       <div className="text-[10px] text-muted-foreground">{label}</div>
@@ -3314,7 +3405,7 @@ function ReportStepPanel({
     </div>
   );
 
-  // 产出资料卡片（方案 B v3：三卡等大）——主/次按钮样式常量。
+  // 产出资料卡片（报告、矩阵、缺陷、回归脚本）——主/次按钮样式常量。
   const btnPrimary = "inline-flex items-center gap-1 rounded-md bg-primary px-2.5 py-1 text-[11px] font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50";
   const btnGhost = "inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-[11px] text-foreground hover:bg-muted disabled:opacity-50";
 
@@ -3356,6 +3447,7 @@ function ReportStepPanel({
   const tileDoc = <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary"><FileIcon size={18} /></span>;
   const tileXls = <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-status-success-muted text-status-success"><FileArrowDown size={18} /></span>;
   const tileBug = (dim?: boolean) => <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${dim ? "bg-muted text-muted-foreground" : "bg-status-error-muted text-status-error"}`}><WarningCircle size={18} /></span>;
+  const tileScript = <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-status-info-muted text-status-info-foreground"><Terminal size={18} /></span>;
 
   // 缺陷卡「导出」：md 已在内存（entry.defectMarkdown），客户端直接下载 .md 原文件。
   const downloadMd = (filename: string, content: string) => {
@@ -3381,6 +3473,23 @@ function ReportStepPanel({
   const summaryText = passed
     ? t("test.report.summaryPass", { func: funcRateStr, exec: execRate })
     : t("test.report.summaryFail", { func: funcRateStr, fail });
+  const scriptJobLabel: Record<ScriptJobStatusView, TranslationKey> = {
+    queued: "test.scripts.queued", running: "test.scripts.running", done: "test.scripts.done",
+    partial: "test.scripts.partial", error: "test.scripts.error", stale: "test.scripts.stale",
+  };
+  const scriptRunnable = scriptManifest?.cases.filter((item) => item.status === "verified" || item.status === "needs_review") ?? [];
+  const scriptHasGaps = !scriptManifest || scriptManifest.jobStatus === "partial" || scriptManifest.jobStatus === "error" || scriptManifest.jobStatus === "stale";
+  const scriptWorking = scriptManifest?.jobStatus === "queued" || scriptManifest?.jobStatus === "running";
+  const scriptInfo = !scriptManifest
+    ? t("test.scripts.notGenerated")
+    : scriptManifest.counts.eligible === 0
+      ? t("test.scripts.empty")
+      : t("test.scripts.summary", {
+        generated: scriptManifest.counts.generated,
+        eligible: scriptManifest.counts.eligible,
+        verified: scriptManifest.counts.verified,
+        review: scriptManifest.counts.needsReview,
+      });
 
   return (
     <div className="mt-2 space-y-3">
@@ -3410,14 +3519,14 @@ function ReportStepPanel({
         )}
       </div>
 
-      {/* 产出资料：三张等大卡片（方案 B v3：结论摘要 + 蓝底预览 + 缺陷卡三按钮） */}
+      {/* 产出资料：报告完成后展示四类产物；脚本是后台副产物，不进入流程节点。 */}
       <div>
         <div className="mb-1.5 flex items-center gap-1.5">
           <FolderPlus size={13} className="text-muted-foreground" />
           <span className="text-[11px] font-medium text-foreground">{t("test.report.deliverables")}</span>
           <span className="text-[10px] text-muted-foreground">{t("test.report.deliverablesHint")}</span>
         </div>
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 2xl:grid-cols-4">
           {/* 卡1：测试结果总览（报告 md）——预览 / 编辑 */}
           {deliverableCard(
             tileDoc,
@@ -3464,6 +3573,40 @@ function ReportStepPanel({
             null,
             "dim",
           )}
+          {/* 卡4：成功回归用例的 Playwright 脚本——后台生成、指纹复用、失败项可重试。 */}
+          {deliverableCard(
+            tileScript,
+            <>
+              {t("test.scripts.title")}
+              {scriptManifest && chip(
+                t(scriptJobLabel[scriptManifest.jobStatus]),
+                scriptManifest.jobStatus === "done" ? "ok" : scriptManifest.jobStatus === "error" || scriptManifest.jobStatus === "partial" ? "err" : "mut",
+              )}
+            </>,
+            `AI_LabTest/scripts/${taskName}/${env}/`,
+            <span className="inline-flex items-center gap-1.5">
+              {(scriptWorking || scriptBusy) && <SpinnerGap size={12} className="shrink-0 animate-spin" />}
+              {scriptInfo}
+            </span>,
+            <>
+              {scriptManifest && scriptManifest.cases.length > 0 && (
+                <button onClick={() => setPreview({ kind: "scripts", manifest: scriptManifest })} className={btnPrimary}>
+                  <Eye size={12} /> {t("test.scripts.view")}
+                </button>
+              )}
+              {scriptHasGaps && !scriptWorking && (
+                <button onClick={() => void retryScripts()} disabled={scriptBusy} className={btnGhost}>
+                  <ArrowUp size={12} /> {t("test.scripts.retry")}
+                </button>
+              )}
+              {scriptRunnable.length > 0 && !scriptWorking && (
+                <button onClick={() => void runScripts(scriptRunnable.map((item) => item.caseId))} disabled={scriptBusy} className={btnGhost}>
+                  <Play size={12} /> {t("test.scripts.runAll")}
+                </button>
+              )}
+            </>,
+            !scriptManifest || scriptManifest.counts.eligible === 0 ? "dim" : undefined,
+          )}
         </div>
       </div>
 
@@ -3476,6 +3619,7 @@ function ReportStepPanel({
           env={env}
           onClose={() => setPreview(null)}
           onSaved={() => { setPreview(null); setReloadTick((n) => n + 1); }}
+          onScriptsChanged={(manifest) => { setScriptManifest(manifest); setScriptReloadTick((n) => n + 1); }}
           setEditable={(editable) => setPreview((p) => (p && p.kind === "md" ? { ...p, editable } : p))}
         />
       )}
@@ -3485,7 +3629,7 @@ function ReportStepPanel({
 
 // 产物预览弹窗壳（复刻用例编辑器的 fixed inset-0 模态）：md 走 MdPreview（渲染/编辑），
 // xlsx 走 XlsxPreview（只读表格 + 证据截图灯箱/录像内联）。
-function PreviewModal({ t, preview, projectPath, taskName, env, onClose, onSaved, setEditable }: {
+function PreviewModal({ t, preview, projectPath, taskName, env, onClose, onSaved, onScriptsChanged, setEditable }: {
   t: T;
   preview: PreviewState;
   projectPath: string;
@@ -3493,15 +3637,26 @@ function PreviewModal({ t, preview, projectPath, taskName, env, onClose, onSaved
   env: string;
   onClose: () => void;
   onSaved: () => void;
+  onScriptsChanged?: (manifest: ScriptManifestView) => void;
   setEditable: (editable: boolean) => void;
 }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
-      <div className={`flex max-h-[85vh] w-full flex-col overflow-hidden rounded-xl border border-border bg-card ${preview.kind === "xlsx" ? "max-w-[1040px]" : "max-w-3xl"}`} onClick={(e) => e.stopPropagation()}>
+      <div className={`flex max-h-[85vh] w-full flex-col overflow-hidden rounded-xl border border-border bg-card ${preview.kind === "md" ? "max-w-3xl" : "max-w-[1040px]"}`} onClick={(e) => e.stopPropagation()}>
         {preview.kind === "md" ? (
           <MdPreview t={t} preview={preview} projectPath={projectPath} onClose={onClose} onSaved={onSaved} setEditable={setEditable} />
-        ) : (
+        ) : preview.kind === "xlsx" ? (
           <XlsxPreview t={t} projectPath={projectPath} taskName={taskName} env={env} onClose={onClose} />
+        ) : (
+          <ScriptPreview
+            t={t}
+            projectPath={projectPath}
+            taskName={taskName}
+            env={env}
+            initialManifest={preview.manifest}
+            onChanged={onScriptsChanged ?? (() => undefined)}
+            onClose={onClose}
+          />
         )}
       </div>
     </div>
@@ -3567,6 +3722,197 @@ function MdPreview({ t, preview, projectPath, onClose, onSaved, setEditable }: {
             <ReactMarkdown remarkPlugins={[remarkGfm]}>{draft}</ReactMarkdown>
           </div>
         )}
+      </div>
+    </>
+  );
+}
+
+// 回归脚本预览：manifest 左侧列出每条成功回归用例及验证状态，右侧只读展示脚本；
+// 可对失败/旧版本单独重试，也可在隔离的 Playwright runner 中手动运行当前脚本。
+function ScriptPreview({ t, projectPath, taskName, env, initialManifest, onChanged, onClose }: {
+  t: T;
+  projectPath: string;
+  taskName: string;
+  env: string;
+  initialManifest: ScriptManifestView;
+  onChanged: (manifest: ScriptManifestView) => void;
+  onClose: () => void;
+}) {
+  const [manifest, setManifest] = useState(initialManifest);
+  const [selectedId, setSelectedId] = useState(initialManifest.cases[0]?.caseId ?? "");
+  const [content, setContent] = useState<string | null>(null);
+  const [contentError, setContentError] = useState(false);
+  const [busy, setBusy] = useState<"retry" | "run" | null>(null);
+  const [output, setOutput] = useState("");
+  const selected = manifest.cases.find((item) => item.caseId === selectedId) ?? manifest.cases[0];
+
+  const statusLabel: Record<ScriptCaseStatusView, TranslationKey> = {
+    verified: "test.scripts.verified",
+    needs_review: "test.scripts.needsReview",
+    failed: "test.scripts.failed",
+    stale: "test.scripts.stale",
+    outdated: "test.scripts.outdated",
+  };
+  const statusClass: Record<ScriptCaseStatusView, string> = {
+    verified: "border-status-success-border bg-status-success-muted text-status-success-foreground",
+    needs_review: "border-status-warning-border bg-status-warning-muted text-status-warning-foreground",
+    failed: "border-status-error-border bg-status-error-muted text-status-error-foreground",
+    stale: "border-border bg-muted text-muted-foreground",
+    outdated: "border-status-warning-border bg-status-warning-muted text-status-warning-foreground",
+  };
+
+  useEffect(() => {
+    if (!selected?.caseId) { setContent(null); return; }
+    let cancelled = false;
+    setContent(null);
+    setContentError(false);
+    const query = new URLSearchParams({ projectPath, taskName, env, caseId: selected.caseId });
+    fetch(`/api/test/scripts?${query.toString()}`)
+      .then(async (res) => {
+        if (!res.ok) throw new Error("load failed");
+        return res.json();
+      })
+      .then((data) => { if (!cancelled) setContent(typeof data.content === "string" ? data.content : ""); })
+      .catch(() => { if (!cancelled) setContentError(true); });
+    return () => { cancelled = true; };
+  }, [projectPath, taskName, env, selected?.caseId, manifest.updatedAt]);
+
+  // 在弹窗内也跟随后台任务；这样单项重试后不必关闭弹窗等待产物卡刷新。
+  useEffect(() => {
+    if (manifest.jobStatus !== "queued" && manifest.jobStatus !== "running") return;
+    let cancelled = false;
+    const timer = setInterval(() => {
+      const query = new URLSearchParams({ projectPath, taskName, env });
+      void fetch(`/api/test/scripts?${query.toString()}`)
+        .then((res) => res.json())
+        .then((data) => {
+          if (cancelled || !data.manifest) return;
+          const next = data.manifest as ScriptManifestView;
+          setManifest(next);
+          onChanged(next);
+        })
+        .catch(() => undefined);
+    }, 2_000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [manifest.jobStatus, projectPath, taskName, env, onChanged]);
+
+  const retrySelected = async () => {
+    if (!selected) return;
+    setBusy("retry");
+    setOutput("");
+    try {
+      const res = await fetch("/api/test/scripts/retry", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectPath, taskName, env, caseIds: [selected.caseId] }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "retry failed");
+      const queued: ScriptManifestView = { ...manifest, jobStatus: "queued" };
+      setManifest(queued);
+      onChanged(queued);
+      setOutput(t("test.scripts.queued"));
+    } catch (error) {
+      setOutput(error instanceof Error ? error.message : t("test.scripts.error"));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const runSelected = async () => {
+    if (!selected) return;
+    setBusy("run");
+    setOutput("");
+    try {
+      const res = await fetch("/api/test/scripts/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectPath, taskName, env, caseIds: [selected.caseId] }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "run failed");
+      if (data.manifest) {
+        const next = data.manifest as ScriptManifestView;
+        setManifest(next);
+        onChanged(next);
+      }
+      const result = Array.isArray(data.results) ? data.results[0] as { output?: string } | undefined : undefined;
+      setOutput(result?.output || "");
+    } catch (error) {
+      setOutput(error instanceof Error ? error.message : t("test.scripts.error"));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const runnable = selected?.status === "verified" || selected?.status === "needs_review";
+  const working = manifest.jobStatus === "queued" || manifest.jobStatus === "running";
+
+  return (
+    <>
+      <div className="flex items-center gap-2 border-b border-border px-3 py-2">
+        <Terminal size={14} className="shrink-0 text-primary" />
+        <span className="text-[11px] font-medium text-foreground">{t("test.scripts.title")}</span>
+        <span className="font-mono text-[10px] text-muted-foreground">{taskName}/{env}</span>
+        {working && <SpinnerGap size={12} className="animate-spin text-muted-foreground" />}
+        <span className="flex-1" />
+        <button onClick={onClose} className="text-muted-foreground hover:text-foreground" aria-label={t("test.report.close")}><X size={14} /></button>
+      </div>
+      <div className="flex min-h-0 flex-1 flex-col md:flex-row">
+        <aside className="max-h-44 shrink-0 overflow-auto border-b border-border bg-muted/20 p-2 md:max-h-none md:w-64 md:border-b-0 md:border-r">
+          <div className="space-y-1">
+            {manifest.cases.map((item) => (
+              <button
+                key={item.caseId}
+                onClick={() => { setSelectedId(item.caseId); setOutput(""); }}
+                className={`w-full rounded-md border px-2 py-1.5 text-left transition ${selected?.caseId === item.caseId ? "border-primary/50 bg-primary/5" : "border-transparent hover:bg-muted"}`}
+              >
+                <div className="flex min-w-0 items-center gap-1.5">
+                  <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-foreground">
+                    {item.sourceTask ? `${item.sourceTask} · ${item.sourceCaseId || item.caseId}` : item.caseId}
+                  </span>
+                  <span className={`shrink-0 rounded-full border px-1.5 py-0.5 text-[9px] ${statusClass[item.status]}`}>{t(statusLabel[item.status])}</span>
+                </div>
+                <div className="mt-0.5 truncate font-mono text-[9px] text-muted-foreground">{item.file}</div>
+              </button>
+            ))}
+          </div>
+        </aside>
+        <section className="flex min-h-[55vh] min-w-0 flex-1 flex-col">
+          <div className="flex flex-wrap items-center gap-1.5 border-b border-border px-3 py-2">
+            <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-muted-foreground">{selected?.file ?? "—"}</span>
+            {selected && (
+              <button onClick={retrySelected} disabled={busy !== null || working} className="inline-flex items-center gap-1 rounded border border-border px-2 py-0.5 text-[10px] text-foreground hover:bg-muted disabled:opacity-40">
+                {busy === "retry" ? <SpinnerGap size={10} className="animate-spin" /> : <ArrowUp size={10} />} {t("test.scripts.retry")}
+              </button>
+            )}
+            {runnable && (
+              <button onClick={runSelected} disabled={busy !== null || working} className="inline-flex items-center gap-1 rounded bg-primary px-2 py-0.5 text-[10px] text-primary-foreground disabled:opacity-40">
+                {busy === "run" ? <SpinnerGap size={10} className="animate-spin" /> : <Play size={10} />} {t("test.scripts.runOne")}
+              </button>
+            )}
+          </div>
+          {(Boolean(selected?.error) || (selected?.validation?.warnings?.length ?? 0) > 0) && (
+            <div className="border-b border-border bg-status-warning-muted/40 px-3 py-1.5 text-[10px] text-status-warning-foreground">
+              {selected.error || selected.validation?.warnings.join(" · ")}
+            </div>
+          )}
+          <div className="min-h-0 flex-1 overflow-auto bg-muted/15">
+            {contentError ? (
+              <div className="p-6 text-center text-[11px] text-status-error-foreground">{t("test.scripts.loadFailed")}</div>
+            ) : content === null ? (
+              <div className="p-6 text-center"><SpinnerGap size={14} className="mx-auto animate-spin text-muted-foreground" /></div>
+            ) : (
+              <pre className="min-w-max p-3 font-mono text-[11px] leading-relaxed text-foreground"><code>{content}</code></pre>
+            )}
+          </div>
+          {output && (
+            <div className="max-h-36 overflow-auto border-t border-border bg-background px-3 py-2">
+              <div className="mb-1 text-[10px] font-medium text-muted-foreground">{t("test.scripts.output")}</div>
+              <pre className="whitespace-pre-wrap break-all font-mono text-[10px] leading-relaxed text-foreground">{output}</pre>
+            </div>
+          )}
+        </section>
       </div>
     </>
   );
@@ -4759,4 +5105,3 @@ function NewTaskModal({ t, onClose, onAdd, existingNames }: { t: T; onClose: () 
     </ModalShell>
   );
 }
-

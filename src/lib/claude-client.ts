@@ -329,6 +329,7 @@ export async function generateTextViaSdk(params: {
   system: string;
   prompt: string;
   abortSignal?: AbortSignal;
+  outputFormat?: { type: 'json_schema'; schema: Record<string, unknown> };
 }): Promise<string> {
   const resolved = resolveForClaudeCode(undefined, {
     providerId: params.providerId,
@@ -370,6 +371,9 @@ export async function generateTextViaSdk(params: {
 
   if (params.model) {
     queryOptions.model = params.model;
+  }
+  if (params.outputFormat) {
+    queryOptions.outputFormat = params.outputFormat;
   }
 
   // pathToClaudeCodeExecutable is intentionally not set — the SDK auto-discovers

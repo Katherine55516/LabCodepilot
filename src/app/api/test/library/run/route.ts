@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { artifactPaths } from '@/lib/test/prompts';
 import { appendAudit } from '@/lib/test/audit';
-import { readLibrary, buildRunnableCases, REGRESSION_LIBRARY_TASK } from '@/lib/test/library';
+import { readLibrary, buildRunnableCases, libraryRunMapFile, REGRESSION_LIBRARY_TASK } from '@/lib/test/library';
 
 export const runtime = 'nodejs';
 
@@ -29,7 +29,7 @@ export async function POST(req: Request): Promise<Response> {
     if (!lib.entries.length) {
       return Response.json({ ok: true, total: 0 });
     }
-    const { cases } = buildRunnableCases(lib);
+    const { cases, idMap } = buildRunnableCases(lib);
     // 写保留任务的 cases.json(execution 步会 Read 它);沿用 artifactPaths 口径,落
     // AI_LabTest/testCase/.data/回归用例库.cases.json。.tmp + rename 原子写。
     const casesAbs = path.join(projectPath, artifactPaths(REGRESSION_LIBRARY_TASK).cases);
@@ -37,6 +37,12 @@ export async function POST(req: Request): Promise<Response> {
     const tmp = casesAbs + '.tmp';
     fs.writeFileSync(tmp, JSON.stringify({ cases }, null, 2), 'utf-8');
     fs.renameSync(tmp, casesAbs);
+    // Persist the same snapshot used to build cases. Script generation happens
+    // after the report and must not remap against a library that changed mid-run.
+    const mapAbs = libraryRunMapFile(projectPath);
+    const mapTmp = mapAbs + '.tmp';
+    fs.writeFileSync(mapTmp, JSON.stringify({ version: 1, createdAt: new Date().toISOString(), idMap }, null, 2), 'utf-8');
+    fs.renameSync(mapTmp, mapAbs);
 
     void appendAudit(projectPath, REGRESSION_LIBRARY_TASK, {
       action: 'run-library',
