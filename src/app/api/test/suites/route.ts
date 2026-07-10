@@ -7,6 +7,7 @@ import {
   setPinned,
   evalSuite,
   sanitizeSuite,
+  isQuarantined,
   REGRESSION_FULL_SUITE,
   type SuiteKey,
 } from '@/lib/test/suites';
@@ -44,10 +45,12 @@ export async function GET(req: Request): Promise<Response> {
       pinned: data.pinned,
       fullHits: full.length,
       fullTasks: tasksOf(full),
+      // 发起弹窗预检卡与健康度页要曝光「隔离排除 N 条」——隔离不计红线,但必须可见(护栏)。
+      quarantinedCount: lib.entries.filter(isQuarantined).length,
       suites,
     });
   } catch {
-    return Response.json({ pinned: [], fullHits: 0, fullTasks: 0, suites: [] });
+    return Response.json({ pinned: [], fullHits: 0, fullTasks: 0, quarantinedCount: 0, suites: [] });
   }
 }
 

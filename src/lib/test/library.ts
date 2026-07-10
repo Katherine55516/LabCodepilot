@@ -81,6 +81,17 @@ export interface EntryKey {
 /** rev 时间线保留上限(超出丢弃最旧的)。 */
 const HISTORY_MAX = 20;
 
+/** 清洗路由入参里的条目身份数组(非对象/缺 task/originalId 非字符串 → 丢弃)。 */
+export function sanitizeEntryKeys(v: unknown): EntryKey[] {
+  if (!Array.isArray(v)) return [];
+  return v.filter(
+    (k): k is EntryKey =>
+      !!k && typeof k === 'object'
+      && typeof (k as EntryKey).task === 'string' && !!(k as EntryKey).task
+      && typeof (k as EntryKey).originalId === 'string',
+  );
+}
+
 function isHistoryEntry(h: unknown): h is LibHistoryEntry {
   return !!h && typeof h === 'object'
     && typeof (h as LibHistoryEntry).rev === 'number'

@@ -20,6 +20,7 @@ import {
   tailFails,
   lastRunIdx,
   health,
+  roundStats,
   mergedStats,
   type CaseRes,
   type CaseHistoryRow,
@@ -208,6 +209,30 @@ describe("派生函数 — 与交互原型逐行等价", () => {
     assert.equal(health(R("pfff"), false), "streak");
     assert.equal(health(R("pf"), false), "ok", "翻转 1 次");
     assert.equal(health(R("pfp"), false), "flaky", "翻转 2 次");
+  });
+});
+
+describe("roundStats — 单轮口径", () => {
+  const row = (originalId: string, res: string, quarantined = false): CaseHistoryRow => ({
+    task: "T", originalId, purpose: "", priority: "", module: "",
+    meta: { reviewState: "approved", rev: 1, history: [], quarantined },
+    res: [...res] as CaseRes[],
+  });
+
+  it("只统计该轮跑到的用例;未执行不计入 total", () => {
+    const cases = [row("TC-001", "pf"), row("TC-002", "-p"), row("TC-003", "f-")];
+    assert.deepEqual(roundStats(cases, 0), { pass: 1, fail: 1, total: 2 });
+    assert.deepEqual(roundStats(cases, 1), { pass: 1, fail: 1, total: 2 });
+  });
+
+  it("与 mergedStats 相反:单轮口径【不】排除隔离条目(趋势线要反映真实执行)", () => {
+    const cases = [row("TC-001", "p"), row("TC-002", "f", true)];
+    assert.deepEqual(roundStats(cases, 0), { pass: 1, fail: 1, total: 2 });
+    assert.deepEqual(mergedStats(cases, 0), { pass: 1, fail: 0, total: 1 });
+  });
+
+  it("越界下标 → 全零,不抛", () => {
+    assert.deepEqual(roundStats([row("TC-001", "p")], 5), { pass: 0, fail: 0, total: 0 });
   });
 });
 

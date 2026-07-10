@@ -45,6 +45,8 @@ export const FLAKY_FLIPS = 2;
 export const STREAK_FAILS = 3;
 /** 久未执行判据:距最新一轮 ≥ 此值轮没跑到。 */
 export const STALE_ROUNDS = 3;
+/** 隔离占比超过此值 → 健康度页顶部告警(护栏:防止用隔离掩盖真实回归)。 */
+export const QUARANTINE_ALERT_RATIO = 0.1;
 
 /** 矩阵列(轮次摘要,旧→新)。 */
 export interface HistoryRound {
@@ -213,6 +215,24 @@ export function health(res: readonly CaseRes[], quarantined: boolean): HealthKin
   if (last < 0) return 'never';
   if (res.length - 1 - last >= STALE_ROUNDS) return 'stale';
   return 'ok';
+}
+
+/**
+ * 单轮口径统计(只看该轮跑到的用例;未执行不计入)。通过率趋势线与报告横幅用它。
+ * 与 mergedStats 的区别:这里回答「这一轮跑了什么、过了多少」,不回答「现在能不能发版」。
+ */
+export function roundStats(
+  cases: readonly CaseHistoryRow[],
+  idx: number,
+): { pass: number; fail: number; total: number } {
+  let pass = 0;
+  let fail = 0;
+  for (const c of cases) {
+    const r = c.res[idx];
+    if (r === 'p') pass++;
+    else if (r === 'f') fail++;
+  }
+  return { pass, fail, total: pass + fail };
 }
 
 /**
