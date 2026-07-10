@@ -227,6 +227,8 @@ export async function generateScriptsBatch(params: {
     system,
     prompt: `为以下 ${candidates.length} 条用例生成脚本。执行轨迹是事实依据；用例 expected 用于生成断言。\n\n${cleanPayload}`,
     abortSignal: params.abortSignal,
+    // 每条用例要产出一个完整 Playwright 文件，默认 60s 在满批（5 条）时必然超时。
+    timeoutMs: Math.max(120_000, candidates.length * 60_000),
     outputFormat: { type: 'json_schema', schema: OUTPUT_SCHEMA },
   });
   return validateGeneratedPayload(parseJsonResult(text), candidates);

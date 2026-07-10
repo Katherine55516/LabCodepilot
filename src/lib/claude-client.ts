@@ -329,6 +329,8 @@ export async function generateTextViaSdk(params: {
   system: string;
   prompt: string;
   abortSignal?: AbortSignal;
+  /** Auto-abort deadline; defaults to 60s. Long-form generations (multi-file scripts) need more. */
+  timeoutMs?: number;
   outputFormat?: { type: 'json_schema'; schema: Record<string, unknown> };
 }): Promise<string> {
   const resolved = resolveForClaudeCode(undefined, {
@@ -347,8 +349,9 @@ export async function generateTextViaSdk(params: {
     params.abortSignal.addEventListener('abort', () => abortController.abort());
   }
 
-  // Auto-timeout after 60s to prevent indefinite hangs
-  const timeoutId = setTimeout(() => abortController.abort(), 60_000);
+  // Auto-timeout to prevent indefinite hangs
+  const timeoutMs = params.timeoutMs ?? 60_000;
+  const timeoutId = setTimeout(() => abortController.abort(), timeoutMs);
 
   const queryOptions: Options = {
     cwd: os.homedir(),
@@ -397,7 +400,7 @@ export async function generateTextViaSdk(params: {
     clearTimeout(timeoutId);
     setup.shadow.cleanup();
     if (abortController.signal.aborted && !(params.abortSignal?.aborted)) {
-      throw new Error('SDK query timed out after 60s');
+      throw new Error(`SDK query timed out after ${Math.round(timeoutMs / 1000)}s`);
     }
     throw err;
   }

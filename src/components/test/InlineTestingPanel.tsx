@@ -3523,16 +3523,22 @@ function ReportStepPanel({
   const scriptRunnable = scriptManifest?.cases.filter((item) => item.status === "verified" || item.status === "needs_review") ?? [];
   const scriptHasGaps = !scriptManifest || scriptManifest.jobStatus === "partial" || scriptManifest.jobStatus === "error" || scriptManifest.jobStatus === "stale";
   const scriptWorking = scriptManifest?.jobStatus === "queued" || scriptManifest?.jobStatus === "running";
+  // 错误/进行中优先于空态：任务中途失败时 counts 仍是初始零值，
+  // 按 eligible===0 渲染会误报「本轮没有符合条件的用例」。
   const scriptInfo = !scriptManifest
     ? t("test.scripts.notGenerated")
-    : scriptManifest.counts.eligible === 0
-      ? t("test.scripts.empty")
-      : t("test.scripts.summary", {
-        generated: scriptManifest.counts.generated,
-        eligible: scriptManifest.counts.eligible,
-        verified: scriptManifest.counts.verified,
-        review: scriptManifest.counts.needsReview,
-      });
+    : scriptManifest.jobStatus === "error"
+      ? (scriptManifest.error?.slice(0, 200) || t("test.scripts.error"))
+      : scriptWorking && scriptManifest.counts.eligible === 0
+        ? t("test.scripts.busy")
+        : scriptManifest.counts.eligible === 0
+          ? t("test.scripts.empty")
+          : t("test.scripts.summary", {
+            generated: scriptManifest.counts.generated,
+            eligible: scriptManifest.counts.eligible,
+            verified: scriptManifest.counts.verified,
+            review: scriptManifest.counts.needsReview,
+          });
 
   return (
     <div className="mt-2 space-y-3">
@@ -3648,7 +3654,8 @@ function ReportStepPanel({
                 </button>
               )}
             </>,
-            !scriptManifest || scriptManifest.counts.eligible === 0 ? "dim" : undefined,
+            scriptManifest?.jobStatus === "error" ? "alert"
+              : !scriptManifest || scriptManifest.counts.eligible === 0 ? "dim" : undefined,
           )}
         </div>
       </div>
