@@ -1624,6 +1624,8 @@ const zh: Record<TranslationKey, string> = {
   'sandbox.tooltip': '沙箱模式：AI 在隔离虚拟机内处理文件，不接触真机文件（实验功能）',
   'sandbox.artifacts.title': '沙箱产物',
   'sandbox.artifacts.downloadAll': '全部下载',
+  'sandbox.artifacts.sleeping': '沙箱休眠中',
+  'sandbox.artifacts.sleepingHint': '文件列表来自上次记录;点击下载会自动唤醒沙箱,首次稍慢几秒',
 
   // ── Context Usage ─────────────────────────────────────────
   'context.usage': '上下文占用',

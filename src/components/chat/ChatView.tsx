@@ -108,8 +108,10 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
   const [permissionProfile, setPermissionProfile] = useState<'default' | 'full_access'>(initialPermissionProfile || 'default');
   const [sandboxEnabled, setSandboxEnabled] = useState(!!initialSandbox);
   // Cowork sandbox: session-level artifact list (files in the VM workspace).
-  // Sources: mount-time restore fetch + per-turn vm_artifacts SSE merges.
+  // Sources: mount-time restore fetch (DB-backed, works while VM sleeps) +
+  // per-turn vm_artifacts SSE merges. vmOnline drives the sleeping badge.
   const [vmArtifacts, setVmArtifacts] = useState<VmArtifactFile[]>([]);
+  const [vmOnline, setVmOnline] = useState(true);
 
   // Whether this session's working directory matches the configured assistant workspace
   const [isAssistantProject, setIsAssistantProject] = useState(false);
@@ -226,14 +228,17 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
   useEffect(() => { setSandboxEnabled(!!initialSandbox); }, [initialSandbox]);
 
   // Cowork sandbox — restore the artifact list on mount/toggle (covers page
-  // reload where per-turn SSE events are gone). VM not running → 503 → ignore.
+  // reload where per-turn SSE events are gone). The list endpoint is DB-backed
+  // so it works even while the VM is asleep; vmOnline drives the sleeping badge.
   useEffect(() => {
     if (!sandboxEnabled) { setVmArtifacts([]); return; }
     let cancelled = false;
     fetch(`/api/cowork/artifacts?sessionId=${encodeURIComponent(sessionId)}&list=1`)
       .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
-        if (!cancelled && Array.isArray(data?.files)) setVmArtifacts(data.files);
+        if (cancelled || !data) return;
+        if (Array.isArray(data.files)) setVmArtifacts(data.files);
+        if (typeof data.vmOnline === 'boolean') setVmOnline(data.vmOnline);
       })
       .catch(() => {});
     return () => { cancelled = true; };
@@ -400,7 +405,9 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
       fetch(`/api/cowork/artifacts?sessionId=${encodeURIComponent(sessionId)}&list=1`)
         .then((r) => (r.ok ? r.json() : null))
         .then((data) => {
-          if (Array.isArray(data?.files) && data.files.length > 0) setVmArtifacts(data.files);
+          if (!data) return;
+          if (Array.isArray(data.files) && data.files.length > 0) setVmArtifacts(data.files);
+          if (typeof data.vmOnline === 'boolean') setVmOnline(data.vmOnline);
         })
         .catch(() => {});
     }
@@ -1149,7 +1156,7 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
       )}
       {/* Cowork sandbox — downloadable artifacts produced inside the VM */}
       {sandboxEnabled && vmArtifacts.length > 0 && (
-        <VmArtifactsCard sessionId={sessionId} files={vmArtifacts} />
+        <VmArtifactsCard sessionId={sessionId} files={vmArtifacts} vmOnline={vmOnline} />
       )}
       <MessageInput
         key={sessionId}

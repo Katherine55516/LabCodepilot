@@ -17,6 +17,7 @@
 | Phase | 内容 | 状态 | 备注 |
 |-------|------|------|------|
 | P1-A | **文件通道**:上传进 VM(会话隔离工作区 `/home/agent/sessions/<id>/workspace`)+ 回合产物 diff + 产物卡片下载(单文件/打包) | ✅ 已完成(2026-07-10) | E2E:CSV 附件→VM 内修改→vm_artifacts 事件→卡片下载,内容验证通过;逃逸请求 403/404 且错误脱敏(不泄漏 SSH 命令行);传输走 SSH,P1-C 平替 |
+| P1-A+ | **产物持久化**:产物清单落库(`vm_artifacts_json`),历史会话 VM 休眠时仍显示卡片(列表读库不依赖 VM),下载时按需唤醒 VM + 休眠徽标 | ✅ 已完成(2026-07-10) | 修用户反馈"打开旧会话看不到产物";E2E:VM 停机→list 读库返回文件+vmOnline:false 不唤醒→下载自动 ensureRunning(6.5s)→内容正确;旧会话(落库前)VM 在线时懒迁移 |
 | P1-B | **VM 生命周期管理器**(server 侧单例):懒启动 / 空闲回收 / 健康检查 / 崩溃重建 / 退出清理;去掉手动 vm-up.sh | ✅ 已完成(2026-07-10) | 落 server 侧(dev 无 main 进程,dev/打包共用);沙箱首条消息 ensureRunning 自动 spawn vfkit;E2E 验证冷启动自动起 VM、kill vfkit 后自愈重建、dev SIGTERM 连带关 VM 无孤儿;UI 状态态留 P1-D |
 | P1-C | **通道产品化**:guest-daemon(Go 静态二进制,vsock)替代 SSH;exec/writeFile/readFile/listFiles/health RPC | 📋 待开始 | vfkit vsock→unix socket;转发器改连 daemon;SSH 退役 |
 | P1-D | **就绪状态机 + 消息先行入队**:provisioning→vm_ready→ready→failed;未就绪时消息/附件入队,就绪自动发出 | 📋 待开始 | 设计见调研文档 §7.1;P1 范围内"下载镜像"仍为手动预置,状态机先覆盖 VM 启动窗口 |

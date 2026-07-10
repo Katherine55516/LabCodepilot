@@ -35,14 +35,33 @@ export async function GET(request: NextRequest) {
   if (!session.sandbox_enabled) {
     return Response.json({ error: 'Session is not a sandbox session' }, { status: 400 });
   }
-  if (!(await vmChannelReady())) {
-    return Response.json({ error: 'Sandbox VM is not running' }, { status: 503 });
-  }
 
   try {
     if (wantList) {
-      const files = await listNewFiles(sessionId, 0);
-      return Response.json({ files });
+      // List reads from the DB first — always available, even while the VM is
+      // asleep (the VM is only needed to download file contents). Sessions
+      // predating persistence (empty DB list) migrate lazily: if the VM is
+      // online, pull the live list once and persist it.
+      const { getSessionVmArtifacts, setSessionVmArtifacts } = await import('@/lib/db');
+      let files = getSessionVmArtifacts(sessionId);
+      const vmOnline = await vmChannelReady();
+      if (files.length === 0 && vmOnline) {
+        try {
+          files = await listNewFiles(sessionId, 0);
+          if (files.length > 0) setSessionVmArtifacts(sessionId, files);
+        } catch { /* live migration is best-effort */ }
+      }
+      return Response.json({ files, vmOnline });
+    }
+
+    // Download paths genuinely need the VM — wake it on demand (user explicitly
+    // asked for a file, so a few seconds of cold start is expected here).
+    if (!(await vmChannelReady())) {
+      const { ensureRunning } = await import('@/lib/cowork-vm-manager');
+      const vm = await ensureRunning();
+      if (vm.phase !== 'running') {
+        return Response.json({ error: 'Sandbox VM is not available' }, { status: 503 });
+      }
     }
 
     if (wantArchive) {

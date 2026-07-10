@@ -1774,6 +1774,15 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
                     new Promise<never>((_, reject) => setTimeout(() => reject(new Error('vm diff timeout')), 8000)),
                   ]);
                   if (artifacts.length > 0) {
+                    // Persist the merged artifact list so history sessions can
+                    // render the card while the VM is asleep (list from DB;
+                    // the VM is only needed at download time).
+                    try {
+                      const { mergeSessionVmArtifacts } = await import('./db');
+                      mergeSessionVmArtifacts(sessionId, artifacts);
+                    } catch (persistErr) {
+                      console.warn('[claude-client] cowork artifacts persist failed:', persistErr);
+                    }
                     controller.enqueue(formatSSE({
                       type: 'vm_artifacts',
                       data: JSON.stringify({ sessionId, files: artifacts }),

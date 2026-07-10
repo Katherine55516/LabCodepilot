@@ -456,6 +456,12 @@ function migrateDb(db: Database.Database): void {
   if (!colNames.includes('sandbox_enabled')) {
     safeAddColumn(db, "ALTER TABLE chat_sessions ADD COLUMN sandbox_enabled INTEGER NOT NULL DEFAULT 0");
   }
+  // Cowork: last-known artifact list (JSON VmArtifactFile[]) for the session's
+  // VM workspace. Persisted at end of turn so history sessions can render the
+  // artifacts card while the VM is asleep — the VM is only needed to download.
+  if (!colNames.includes('vm_artifacts_json')) {
+    safeAddColumn(db, "ALTER TABLE chat_sessions ADD COLUMN vm_artifacts_json TEXT NOT NULL DEFAULT ''");
+  }
   if (!colNames.includes('context_summary')) {
     safeAddColumn(db, "ALTER TABLE chat_sessions ADD COLUMN context_summary TEXT NOT NULL DEFAULT ''");
   }
@@ -1290,6 +1296,64 @@ export function updateSessionSandboxEnabled(id: string, enabled: boolean): void 
   const db = getDb();
   db.prepare('UPDATE chat_sessions SET sandbox_enabled = ?, sdk_session_id = ? WHERE id = ?')
     .run(enabled ? 1 : 0, '', id);
+}
+
+/** Cowork: shape persisted in chat_sessions.vm_artifacts_json (VmArtifactFile). */
+export interface SessionVmArtifact {
+  path: string;
+  name: string;
+  size: number;
+  mtime: number;
+}
+
+export function getSessionVmArtifacts(id: string): SessionVmArtifact[] {
+  const db = getDb();
+  const row = db.prepare('SELECT vm_artifacts_json FROM chat_sessions WHERE id = ?').get(id) as
+    | { vm_artifacts_json?: string }
+    | undefined;
+  if (!row?.vm_artifacts_json) return [];
+  try {
+    const parsed = JSON.parse(row.vm_artifacts_json);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Cowork: merge this turn's artifact diff into the session's persisted list.
+ * Dedupe by path, newer mtime wins. Exported pure helper + DB writer so the
+ * merge semantics are unit-testable without a database.
+ */
+export function mergeVmArtifactLists(
+  existing: SessionVmArtifact[],
+  incoming: SessionVmArtifact[],
+): SessionVmArtifact[] {
+  const byPath = new Map<string, SessionVmArtifact>();
+  for (const f of existing) {
+    if (f && typeof f.path === 'string') byPath.set(f.path, f);
+  }
+  for (const f of incoming) {
+    if (!f || typeof f.path !== 'string') continue;
+    const prev = byPath.get(f.path);
+    if (!prev || (f.mtime ?? 0) >= (prev.mtime ?? 0)) byPath.set(f.path, f);
+  }
+  return [...byPath.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export function mergeSessionVmArtifacts(id: string, incoming: SessionVmArtifact[]): SessionVmArtifact[] {
+  const db = getDb();
+  const merged = mergeVmArtifactLists(getSessionVmArtifacts(id), incoming);
+  db.prepare('UPDATE chat_sessions SET vm_artifacts_json = ? WHERE id = ?')
+    .run(JSON.stringify(merged), id);
+  return merged;
+}
+
+/** Cowork: overwrite the persisted artifact list (used by the live-list migration path). */
+export function setSessionVmArtifacts(id: string, files: SessionVmArtifact[]): void {
+  const db = getDb();
+  db.prepare('UPDATE chat_sessions SET vm_artifacts_json = ? WHERE id = ?')
+    .run(JSON.stringify(files), id);
 }
 
 // ==========================================

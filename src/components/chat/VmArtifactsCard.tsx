@@ -9,6 +9,8 @@ import { ShieldCheck, DownloadSimple, Package } from '@/components/ui/icon';
 interface VmArtifactsCardProps {
   sessionId: string;
   files: VmArtifactFile[];
+  /** VM 在线状态:false 时显示"沙箱休眠"徽标(列表来自持久化,下载会自动唤醒 VM)。 */
+  vmOnline?: boolean;
 }
 
 function formatSize(bytes: number): string {
@@ -22,7 +24,7 @@ function formatSize(bytes: number): string {
  * 单文件下载与整包下载(经 /api/cowork/artifacts 流式拉出)。
  * 下载是用户主动导出动作,也是沙箱会话中唯一落真机的路径。
  */
-export function VmArtifactsCard({ sessionId, files }: VmArtifactsCardProps) {
+export function VmArtifactsCard({ sessionId, files, vmOnline = true }: VmArtifactsCardProps) {
   const { t } = useTranslation();
 
   const sorted = useMemo(
@@ -41,6 +43,14 @@ export function VmArtifactsCard({ sessionId, files }: VmArtifactsCardProps) {
         <ShieldCheck size={14} />
         <span>{t('sandbox.artifacts.title')}</span>
         <span className="text-muted-foreground font-normal">· {sorted.length}</span>
+        {!vmOnline && (
+          <span
+            className="ml-1 rounded-full border border-border/60 bg-background px-2 py-0.5 text-[11px] font-normal text-muted-foreground"
+            title={t('sandbox.artifacts.sleepingHint')}
+          >
+            {t('sandbox.artifacts.sleeping')}
+          </span>
+        )}
         <div className="flex-1" />
         {sorted.length > 1 && (
           <a href={`/api/cowork/artifacts?sessionId=${encodeURIComponent(sessionId)}&archive=1`} download>

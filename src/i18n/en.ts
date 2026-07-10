@@ -1626,6 +1626,8 @@ const en = {
   'sandbox.tooltip': 'Sandbox mode: the AI works on files inside an isolated VM and never touches your real files (experimental)',
   'sandbox.artifacts.title': 'Sandbox files',
   'sandbox.artifacts.downloadAll': 'Download all',
+  'sandbox.artifacts.sleeping': 'Sandbox sleeping',
+  'sandbox.artifacts.sleepingHint': 'List from last known state; downloading wakes the sandbox automatically (first download may take a few seconds)',
 
   // ── Context Usage ─────────────────────────────────────────
   'context.usage': 'Context Usage',

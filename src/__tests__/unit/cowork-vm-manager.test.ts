@@ -83,6 +83,43 @@ describe('cowork-poc: decideCowork gate (safe early-returns, no VM start)', () =
   });
 });
 
+describe('db: mergeVmArtifactLists (pure merge semantics)', () => {
+  it('dedupes by path with newer mtime winning, sorted by name', async () => {
+    const { mergeVmArtifactLists } = await import(path.resolve(__dirname, '../../lib/db.ts'));
+    const existing = [
+      { path: '/ws/b.txt', name: 'b.txt', size: 10, mtime: 1000 },
+      { path: '/ws/a.txt', name: 'a.txt', size: 5, mtime: 2000 },
+    ];
+    const incoming = [
+      { path: '/ws/b.txt', name: 'b.txt', size: 22, mtime: 3000 }, // newer → replaces
+      { path: '/ws/c.txt', name: 'c.txt', size: 7, mtime: 1500 },  // new file
+    ];
+    const merged = mergeVmArtifactLists(existing, incoming);
+    assert.deepEqual(merged.map((f: { name: string }) => f.name), ['a.txt', 'b.txt', 'c.txt']);
+    assert.equal(merged.find((f: { name: string }) => f.name === 'b.txt')!.size, 22);
+  });
+
+  it('keeps the existing entry when incoming is older', async () => {
+    const { mergeVmArtifactLists } = await import(path.resolve(__dirname, '../../lib/db.ts'));
+    const merged = mergeVmArtifactLists(
+      [{ path: '/ws/x', name: 'x', size: 1, mtime: 5000 }],
+      [{ path: '/ws/x', name: 'x', size: 99, mtime: 100 }],
+    );
+    assert.equal(merged[0].size, 1);
+  });
+
+  it('ignores malformed entries and handles empty inputs', async () => {
+    const { mergeVmArtifactLists } = await import(path.resolve(__dirname, '../../lib/db.ts'));
+    assert.deepEqual(mergeVmArtifactLists([], []), []);
+    const malformed = [null, { name: 'no-path', size: 2, mtime: 2 }] as unknown as Array<{ path: string; name: string; size: number; mtime: number }>;
+    const merged = mergeVmArtifactLists(
+      [{ path: '/ws/ok', name: 'ok', size: 1, mtime: 1 }],
+      malformed,
+    );
+    assert.equal(merged.length, 1);
+  });
+});
+
 describe('cowork-vm-manager: isImageProvisioned + getStatus surface', () => {
   it('exposes a stopped status before any start', async () => {
     const mod = await import(path.resolve(__dirname, '../../lib/cowork-vm-manager.ts'));
