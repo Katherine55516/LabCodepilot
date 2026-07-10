@@ -1630,6 +1630,8 @@ const zhHK: Record<TranslationKey, string> = {
   'sandbox.on': '沙箱',
   'sandbox.off': '沙箱',
   'sandbox.tooltip': '沙箱模式：AI 在隔離虛擬機內處理檔案，唔會接觸真機檔案（實驗功能）',
+  'sandbox.artifacts.title': '沙箱產物',
+  'sandbox.artifacts.downloadAll': '全部下載',
 
   // ── Context Usage ─────────────────────────────────────────
   'context.usage': '上下文佔用',

@@ -596,6 +596,11 @@ async function runStream(stream: ActiveStream, params: StartStreamParams): Promi
         stream.snapshot = { ...stream.snapshot, contextUsageSnapshot: snap };
         emit(stream, 'snapshot-updated');
       },
+      onVmArtifacts: (files) => {
+        markActive();
+        stream.snapshot = { ...stream.snapshot, vmArtifacts: files };
+        emit(stream, 'snapshot-updated');
+      },
       onPermissionRequest: (permData) => {
         markActive();
         stream.snapshot = {

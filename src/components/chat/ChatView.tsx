@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import type { Message, MessagesResponse, FileAttachment, SessionStreamSnapshot, MentionRef } from '@/types';
+import type { Message, MessagesResponse, FileAttachment, SessionStreamSnapshot, MentionRef, VmArtifactFile } from '@/types';
 import { parseMessageContent } from '@/types';
 import { BtwPanel } from './BtwPanel';
 import { useBtw } from '@/hooks/useBtw';
@@ -17,6 +17,7 @@ import { ChatComposerActionBar } from './ChatComposerActionBar';
 import { ModeIndicator } from './ModeIndicator';
 import { ChatPermissionSelector } from './ChatPermissionSelector';
 import { SandboxToggle } from './SandboxToggle';
+import { VmArtifactsCard } from './VmArtifactsCard';
 import { RunCockpit } from './RunCockpit';
 import { RuntimeBadge } from './RuntimeBadge';
 import { ImageGenToggle } from './ImageGenToggle';
@@ -106,6 +107,9 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
   const [messages, setMessages] = useState<Message[]>(initialMessages);
   const [permissionProfile, setPermissionProfile] = useState<'default' | 'full_access'>(initialPermissionProfile || 'default');
   const [sandboxEnabled, setSandboxEnabled] = useState(!!initialSandbox);
+  // Cowork sandbox: session-level artifact list (files in the VM workspace).
+  // Sources: mount-time restore fetch + per-turn vm_artifacts SSE merges.
+  const [vmArtifacts, setVmArtifacts] = useState<VmArtifactFile[]>([]);
 
   // Whether this session's working directory matches the configured assistant workspace
   const [isAssistantProject, setIsAssistantProject] = useState(false);
@@ -221,6 +225,21 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
   useEffect(() => { if (initialPermissionProfile) setPermissionProfile(initialPermissionProfile); }, [initialPermissionProfile]);
   useEffect(() => { setSandboxEnabled(!!initialSandbox); }, [initialSandbox]);
 
+  // Cowork sandbox — restore the artifact list on mount/toggle (covers page
+  // reload where per-turn SSE events are gone). VM not running → 503 → ignore.
+  useEffect(() => {
+    if (!sandboxEnabled) { setVmArtifacts([]); return; }
+    let cancelled = false;
+    fetch(`/api/cowork/artifacts?sessionId=${encodeURIComponent(sessionId)}&list=1`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!cancelled && Array.isArray(data?.files)) setVmArtifacts(data.files);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [sessionId, sandboxEnabled]);
+
+
   // Restore session-scoped last-generated images from sessionStorage
   useEffect(() => { loadLastGenerated(sessionId); }, [sessionId]);
 
@@ -266,6 +285,18 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
   const pendingPermission = streamSnapshot?.pendingPermission ?? null;
   const permissionResolved = streamSnapshot?.permissionResolved ?? null;
   const rewindPoints = getRewindPoints(sessionId);
+
+  // Cowork sandbox — merge per-turn artifacts from the stream snapshot
+  // (vm_artifacts SSE event) into the session-level list, deduped by path.
+  const snapshotVmArtifacts = streamSnapshot?.vmArtifacts;
+  useEffect(() => {
+    if (!snapshotVmArtifacts || snapshotVmArtifacts.length === 0) return;
+    setVmArtifacts((prev) => {
+      const byPath = new Map(prev.map((f) => [f.path, f]));
+      for (const f of snapshotVmArtifacts) byPath.set(f.path, f);
+      return [...byPath.values()];
+    });
+  }, [snapshotVmArtifacts]);
 
   // ── Skill nudge banner ──
   // Listens for 'skill-nudge' window events dispatched by stream-session-manager
@@ -1103,6 +1134,10 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
           }}
           onDismiss={() => setRateLimitDismissed(true)}
         />
+      )}
+      {/* Cowork sandbox — downloadable artifacts produced inside the VM */}
+      {sandboxEnabled && vmArtifacts.length > 0 && (
+        <VmArtifactsCard sessionId={sessionId} files={vmArtifacts} />
       )}
       <MessageInput
         key={sessionId}

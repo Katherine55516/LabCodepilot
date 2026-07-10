@@ -1,5 +1,5 @@
 import { useRef, useCallback } from 'react';
-import type { SSEEvent, TokenUsage, PermissionRequestEvent, MediaBlock } from '@/types';
+import type { SSEEvent, TokenUsage, PermissionRequestEvent, MediaBlock, VmArtifactFile } from '@/types';
 import { saveCachedSdkInitMeta } from '@/lib/sdk-init-cache';
 
 interface ToolUseInfo {
@@ -37,6 +37,8 @@ export interface SSECallbacks {
    *  page's indicator to replace char:token estimation for ~60s after
    *  capture. */
   onContextUsage?: (snapshot: ContextUsageSnapshot) => void;
+  /** Cowork sandbox: files the agent created/modified in the VM this turn. */
+  onVmArtifacts?: (files: VmArtifactFile[]) => void;
   onPermissionRequest: (data: PermissionRequestEvent) => void;
   onToolTimeout: (toolName: string, elapsedSeconds: number) => void;
   onModeChanged: (mode: string) => void;
@@ -293,6 +295,18 @@ function handleSSEEvent(
         const snap = JSON.parse(event.data) as ContextUsageSnapshot;
         callbacks.onContextUsage?.(snap);
       } catch { /* estimator still applies */ }
+      return accumulated;
+    }
+
+    case 'vm_artifacts': {
+      // Cowork sandbox turn artifacts. Malformed payload → skip; the
+      // session-level artifact list refetch still covers recovery.
+      try {
+        const payload = JSON.parse(event.data) as { files?: VmArtifactFile[] };
+        if (Array.isArray(payload.files) && payload.files.length > 0) {
+          callbacks.onVmArtifacts?.(payload.files);
+        }
+      } catch { /* skip malformed artifacts payload */ }
       return accumulated;
     }
 

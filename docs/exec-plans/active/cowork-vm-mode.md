@@ -16,7 +16,7 @@
 
 | Phase | 内容 | 状态 | 备注 |
 |-------|------|------|------|
-| P1-A | **文件通道**:上传进 VM(会话隔离工作区 `/home/agent/sessions/<id>/workspace`)+ 回合产物 diff + 产物卡片下载(单文件/打包) | 🔄 进行中 | 传输暂走 SSH(scp/cat),P1-C 落地后切 daemon RPC |
+| P1-A | **文件通道**:上传进 VM(会话隔离工作区 `/home/agent/sessions/<id>/workspace`)+ 回合产物 diff + 产物卡片下载(单文件/打包) | ✅ 已完成(2026-07-10) | E2E:CSV 附件→VM 内修改→vm_artifacts 事件→卡片下载,内容验证通过;逃逸请求 403/404 且错误脱敏(不泄漏 SSH 命令行);传输走 SSH,P1-C 平替 |
 | P1-B | **VM 生命周期管理器**(electron main):懒启动 / 空闲回收 / 健康检查 / 崩溃重建;去掉手动 vm-up.sh | 📋 待开始 | vfkit spawn + restful-uri;沙箱会话首条消息触发启动,UI「沙箱启动中」态 |
 | P1-C | **通道产品化**:guest-daemon(Go 静态二进制,vsock)替代 SSH;exec/writeFile/readFile/listFiles/health RPC | 📋 待开始 | vfkit vsock→unix socket;转发器改连 daemon;SSH 退役 |
 | P1-D | **就绪状态机 + 消息先行入队**:provisioning→vm_ready→ready→failed;未就绪时消息/附件入队,就绪自动发出 | 📋 待开始 | 设计见调研文档 §7.1;P1 范围内"下载镜像"仍为手动预置,状态机先覆盖 VM 启动窗口 |
@@ -28,6 +28,7 @@
 - 2026-07-10: P1-A 文件传输先走 SSH 通道(复用 POC 链路),不阻塞在 daemon 上——文件通道的**产品语义**(会话隔离目录/diff/下载 UI/路径校验)与**传输机制**(SSH→vsock)解耦,后者 P1-C 平替
 - 2026-07-10: 会话工作区定为 `/home/agent/sessions/<sessionId>/workspace`(uploads 直接放 workspace 内,agent 视角一个目录,简化 prompt 引用;调研文档的 uploads/ 只读分离留给 P3 安全强化配合非特权用户做)
 - 2026-07-10: sessionId 经 `COWORK_SESSION_ID` env 传给转发器(SDK 的 argv 不可控,env 白名单是既有过河机制)
+- 2026-07-10: 产物 diff 用 `find -newermt @<turnStart>` + `stat`,排除本回合上传的原文件;下载 API 错误统一脱敏(SSH 命令行含 VM IP/密钥路径,绝不回显),仅 403/404/500 通用消息;路径校验用 VM 内 `realpath -e` + workspace 前缀判定(防 `../` 与符号链接逃逸,已 E2E 验证)
 
 ## 详细设计
 

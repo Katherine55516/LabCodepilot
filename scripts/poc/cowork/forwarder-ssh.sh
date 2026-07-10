@@ -18,10 +18,18 @@ fi
 ENV_PREFIX=()
 while IFS='=' read -r k v; do
   case "$k" in
-    ANTHROPIC_*|CLAUDE_*|API_TIMEOUT_MS|HTTP_PROXY|HTTPS_PROXY|NO_PROXY)
+    ANTHROPIC_*|CLAUDE_*|COWORK_*|API_TIMEOUT_MS|HTTP_PROXY|HTTPS_PROXY|NO_PROXY)
       ENV_PREFIX+=("$k=$v");;
   esac
 done < <(env)
+
+# 会话隔离工作区:claude-client 注入 COWORK_SESSION_ID(hex 校验防注入),
+# 每个沙箱会话独立 /home/agent/sessions/<id>/workspace。未注入(裸跑探针
+# 等场景)退回共享 ~/workspace。
+WORKDIR="\$HOME/workspace"
+if [[ "${COWORK_SESSION_ID:-}" =~ ^[a-fA-F0-9]{8,64}$ ]]; then
+  WORKDIR="/home/agent/sessions/$COWORK_SESSION_ID/workspace"
+fi
 
 # argv 逐参转义(模型名含 [1m] 等 shell 元字符,必须 %q)
 QUOTED_ARGS=""
@@ -39,4 +47,4 @@ exec ssh -i "$POC/ssh/id_ed25519" \
   -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o LogLevel=ERROR \
   -o ServerAliveInterval=15 -o ExitOnForwardFailure=yes \
   "agent@$VM_IP" \
-  "cd ~/workspace && exec env$QUOTED_ENV ~/bin/claude$QUOTED_ARGS"
+  "mkdir -p $WORKDIR && cd $WORKDIR && exec env$QUOTED_ENV ~/bin/claude$QUOTED_ARGS"

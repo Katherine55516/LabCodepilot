@@ -666,6 +666,13 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
       // in the outer finally block. See src/lib/claude-home-shadow.ts.
       let shadowHome: ShadowHome | null = null;
 
+      // Cowork sandbox state for this turn. When active, attachments are pushed
+      // into the VM session workspace (host path → VM path map) and the end of
+      // turn diffs the workspace to emit a vm_artifacts SSE event.
+      let coworkActive = false;
+      const coworkVmPathByHostPath = new Map<string, string>();
+      const coworkTurnStartMs = Date.now();
+
       // Resolve provider via the unified resolver. The caller may pass an explicit
       // provider (from resolveProvider().provider), or undefined when 'env' mode is
       // intended. We do NOT fall back to getActiveProvider() here — that's handled
@@ -772,7 +779,28 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
           const decision = decideCowork(sess?.sandbox_enabled);
           if (decision.useSandbox && decision.executablePath) {
             queryOptions.pathToClaudeCodeExecutable = decision.executablePath;
-            console.log(`[claude-client] cowork sandbox ON for session ${sessionId} → forwarder ${decision.executablePath}`);
+            // Session-scoped VM workspace: the forwarder reads COWORK_SESSION_ID
+            // and cd's to /home/agent/sessions/<id>/workspace before exec'ing claude.
+            (queryOptions.env as Record<string, string>).COWORK_SESSION_ID = sessionId;
+            const transfer = await import('./cowork-transfer');
+            await transfer.ensureSessionWorkspace(sessionId);
+            // Push attachments (all types — the agent may process images with
+            // scripts too) into the VM workspace; prompt references are rewritten
+            // to VM paths in buildFinalPrompt via coworkVmPathByHostPath.
+            if (files && files.length > 0) {
+              const hostPaths = getUploadedFilePaths(files, resolvedWorkingDirectory.path);
+              for (let i = 0; i < hostPaths.length; i++) {
+                try {
+                  const vmPath = await transfer.pushFileToVm(sessionId, hostPaths[i], files[i].name);
+                  coworkVmPathByHostPath.set(hostPaths[i], vmPath);
+                } catch (pushErr) {
+                  // Keep the host path reference; the agent will report the miss.
+                  console.warn(`[claude-client] cowork: failed to push ${files[i].name} into VM:`, pushErr);
+                }
+              }
+            }
+            coworkActive = true;
+            console.log(`[claude-client] cowork sandbox ON for session ${sessionId} → forwarder ${decision.executablePath}, pushed ${coworkVmPathByHostPath.size} file(s)`);
           } else if (sess?.sandbox_enabled && decision.reason) {
             console.warn(`[claude-client] cowork sandbox requested but falling back to host: ${decision.reason}`);
           }
@@ -1195,7 +1223,10 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
           if (nonImageFiles.length > 0) {
             const workDir = resolvedWorkingDirectory.path;
             const savedPaths = getUploadedFilePaths(nonImageFiles, workDir);
-            const fileReferences = savedPaths
+            // Cowork sandbox: attachments were pushed into the VM workspace —
+            // reference the in-VM path so the CLI (running inside the VM) can Read it.
+            const refPaths = savedPaths.map((p) => coworkVmPathByHostPath.get(p) || p);
+            const fileReferences = refPaths
               .map((p, i) => `[User attached file: ${p} (${nonImageFiles[i].name})]`)
               .join('\n');
             textPrompt = `${fileReferences}\n\nPlease read the attached file(s) above using your Read tool, then respond to the user's message:\n\n${basePrompt}`;
@@ -1219,7 +1250,8 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
               ? textPrompt
               : (() => {
                   const workDir = resolvedWorkingDirectory.path;
-                  const imagePaths = getUploadedFilePaths(limitedImages, workDir);
+                  const imagePaths = getUploadedFilePaths(limitedImages, workDir)
+                    .map((p) => coworkVmPathByHostPath.get(p) || p);
                   const imageReferences = imagePaths
                     .map((p, i) => `[User attached image: ${p} (${limitedImages[i].name})]`)
                     .join('\n');
@@ -1715,6 +1747,28 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
                 // Skip Telegram for auto-trigger turns (onboarding/heartbeat)
                 if (!autoTrigger) {
                   notifyGeneric(errTitle, errMsg, telegramOpts).catch(() => {});
+                }
+              }
+
+              // Cowork sandbox: diff the VM session workspace for files the agent
+              // created/modified this turn and surface them as downloadable
+              // artifacts. Bounded by a 8s race so a wedged VM can never stall
+              // stream close; uploads pushed at turn start are excluded.
+              if (coworkActive && !resultMsg.is_error) {
+                try {
+                  const { listNewFiles } = await import('./cowork-transfer');
+                  const artifacts = await Promise.race([
+                    listNewFiles(sessionId, coworkTurnStartMs, [...coworkVmPathByHostPath.values()]),
+                    new Promise<never>((_, reject) => setTimeout(() => reject(new Error('vm diff timeout')), 8000)),
+                  ]);
+                  if (artifacts.length > 0) {
+                    controller.enqueue(formatSSE({
+                      type: 'vm_artifacts',
+                      data: JSON.stringify({ sessionId, files: artifacts }),
+                    }));
+                  }
+                } catch (diffErr) {
+                  console.warn('[claude-client] cowork artifacts diff failed:', diffErr);
                 }
               }
 

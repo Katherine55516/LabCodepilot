@@ -64,6 +64,7 @@ export {
   Minus,
   Moon,
   NotePencil,
+  Package,
   PaintBrush,
   PencilLine,
   PencilSimple,

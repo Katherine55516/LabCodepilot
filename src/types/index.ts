@@ -719,11 +719,22 @@ export type SSEEventType =
   | 'rewind_point'       // SDK user message with rewind checkpoint
   | 'rate_limit'         // SDK 0.2.111 subscription rate-limit telemetry
   | 'context_usage'      // SDK 0.2.111 post-turn context usage snapshot
+  | 'vm_artifacts'       // cowork sandbox: files created/modified in the VM this turn
   | 'done';              // stream complete
 
 export interface SSEEvent {
   type: SSEEventType;
   data: string;
+}
+
+/** Cowork sandbox: one file the agent created/modified inside the VM this turn. */
+export interface VmArtifactFile {
+  /** Absolute path inside the VM (under the session workspace). */
+  path: string;
+  name: string;
+  size: number;
+  /** Epoch millis of last modification (VM clock). */
+  mtime: number;
 }
 
 // ==========================================
@@ -1263,6 +1274,12 @@ export interface SessionStreamSnapshot {
     /** Epoch ms at which the snapshot was taken */
     capturedAt: number;
   };
+  /**
+   * Cowork sandbox: files the agent created/modified inside the VM this
+   * turn (emitted after result via the vm_artifacts SSE event). ChatView
+   * merges these into its session-level artifact list for download cards.
+   */
+  vmArtifacts?: VmArtifactFile[];
 }
 
 export interface StreamEvent {

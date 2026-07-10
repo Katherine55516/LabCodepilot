@@ -1624,6 +1624,8 @@ const en = {
   'sandbox.on': 'Sandbox',
   'sandbox.off': 'Sandbox',
   'sandbox.tooltip': 'Sandbox mode: the AI works on files inside an isolated VM and never touches your real files (experimental)',
+  'sandbox.artifacts.title': 'Sandbox files',
+  'sandbox.artifacts.downloadAll': 'Download all',
 
   // ── Context Usage ─────────────────────────────────────────
   'context.usage': 'Context Usage',
