@@ -1223,13 +1223,12 @@ export function InlineTestingPanel() {
   // AI 推荐回归集 · 可视化审阅弹窗(用例设计阶段;取代旧的对话框流式推荐)。
   const [recommendOpen, setRecommendOpen] = useState(false);
   // 回归用例库弹窗(项目级):查看/管理沉淀的回归用例 + 跨任务一键重跑。
-  const [libraryOpen, setLibraryOpen] = useState(false);
-  // 回归套件管理弹窗(v2 批 C):套件列表/构建器/必跑白名单。从库弹窗头部入口打开。
-  const [suitesOpen, setSuitesOpen] = useState(false);
-  // 发起回归弹窗(v2 批 D):套件/环境/预检确认后才真正 runLibrary。
+  // 测试类型(批 H,用户确认的信息架构):项目下两种平级测试类型——功能测试(现有任务流)/
+  // 回归测试(整页工作区:用例库/回归套件/轮次历史 页内子页签,不再用弹窗)。切换项目时重置。
+  const [testType, setTestType] = useState<"func" | "regression">("func");
+  const [regTab, setRegTab] = useState<"library" | "suites" | "rounds">("library");
+  // 发起回归弹窗(v2 批 D):套件/环境/预检确认后才真正 runLibrary(保留为确认对话框)。
   const [launchOpen, setLaunchOpen] = useState(false);
-  // 轮次历史弹窗(v2 批 E):轮次列表 + 详情(任务分组 + delta)。
-  const [roundsOpen, setRoundsOpen] = useState(false);
   // 跨任务一键重跑进行中(聚合→执行→报告)。禁用重复触发,按钮显示「重跑中…」。
   const [libraryRunning, setLibraryRunning] = useState(false);
   // 重跑状态提示(库不属于任何任务对话,故用独立状态在弹窗内展示,不走任务对话 push)。
@@ -2409,6 +2408,8 @@ export function InlineTestingPanel() {
                         <button
                           onClick={() => {
                             setSelected(i);
+                            setTestType("func");
+                            setRegTab("library");
                             setSelectedTask(null);
                           }}
                           className="flex w-full flex-col gap-2.5 rounded-xl border border-border bg-card p-3.5 text-left transition-colors hover:border-primary/50 hover:bg-muted/40"
@@ -2453,14 +2454,19 @@ export function InlineTestingPanel() {
                     <ArrowLeft size={12} /> {t("test.projects")}
                   </button>
                   <h3 className="text-sm font-semibold text-foreground">{current.name}</h3>
+                  {/* 测试类型切换(批 H):功能测试=现有任务流;回归测试=整页工作区(库/套件/轮次) */}
+                  <div className="ml-1 flex items-center gap-0.5 rounded-lg border border-border bg-muted p-0.5">
+                    {([["func", t("test.type.func")], ["regression", t("test.type.regression")]] as const).map(([k, label]) => (
+                      <button
+                        key={k}
+                        onClick={() => setTestType(k)}
+                        className={`rounded-md px-3 py-1 text-[11px] transition-colors ${testType === k ? "bg-background font-semibold text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
                   <span className="flex-1" />
-                  <button
-                    onClick={() => setLibraryOpen(true)}
-                    title={t("test.library.runHint")}
-                    className="flex h-7 items-center gap-1 rounded-md border border-border px-2 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground"
-                  >
-                    <FolderOpen size={12} /> {t("test.library.open")}
-                  </button>
                   <button
                     onClick={() => router.push("/settings#test-accounts")}
                     title={current?.path ? `${t("test.envModal.title")}（设置·测试账号；project_root = ${current.path}）` : undefined}
@@ -2468,14 +2474,30 @@ export function InlineTestingPanel() {
                   >
                     <Gear size={12} /> {t("test.envModal.title")}
                   </button>
-                  <button
-                    onClick={() => setModal("newTask")}
-                    className="flex h-7 items-center gap-1 rounded-md bg-primary px-2.5 text-[11px] font-medium text-primary-foreground"
-                  >
-                    ＋ {t("test.newTask")}
-                  </button>
+                  {testType === "func" && (
+                    <button
+                      onClick={() => setModal("newTask")}
+                      className="flex h-7 items-center gap-1 rounded-md bg-primary px-2.5 text-[11px] font-medium text-primary-foreground"
+                    >
+                      ＋ {t("test.newTask")}
+                    </button>
+                  )}
                 </div>
-                {current.tasks.length > 0 && (
+                {/* 回归测试整页工作区(批 H):子页签 + 发起回归 + 状态行 + 页内区块 */}
+                {testType === "regression" && current?.path && (
+                  <RegressionWorkspace
+                    t={t}
+                    projectPath={current.path}
+                    regTab={regTab}
+                    setRegTab={setRegTab}
+                    reloadSignal={libraryReload}
+                    onChanged={() => setLibraryReload((n) => n + 1)}
+                    onLaunch={() => setLaunchOpen(true)}
+                    running={libraryRunning}
+                    runStatus={libraryRunStatus}
+                  />
+                )}
+                {testType === "func" && current.tasks.length > 0 && (
                   <div className="mb-3 flex items-center gap-2">
                     <span className="flex-1" />
                     <label className="flex items-center gap-1 text-[11px] text-muted-foreground" title={t("test.batch.concurrencyHint")}>
@@ -2492,7 +2514,7 @@ export function InlineTestingPanel() {
                     </label>
                   </div>
                 )}
-                {current.tasks.length === 0 ? (
+                {testType !== "func" ? null : current.tasks.length === 0 ? (
                   <EmptyState icon={ListChecks} text={t("test.tasksEmpty")} />
                 ) : (() => {
                   // 单张任务卡（抽出闭包以便各分组复用）。i = 任务原始下标（点开进详情 / 删除按 index 操作）。
@@ -2632,26 +2654,6 @@ export function InlineTestingPanel() {
       {/* 操作记录弹窗(审计查看端):当前任务的门控批准/运行/修订等全部留痕。 */}
       {auditOpen && current?.path && activeTask && (
         <AuditModal t={t} projectPath={current.path} taskName={activeTask.name} onClose={() => setAuditOpen(false)} />
-      )}
-      {libraryOpen && current?.path && (
-        <RegressionLibraryModal
-          t={t}
-          projectPath={current.path}
-          reloadSignal={libraryReload}
-          onChanged={() => setLibraryReload((n) => n + 1)}
-          onClose={() => setLibraryOpen(false)}
-          onRun={() => setLaunchOpen(true)}
-          running={libraryRunning}
-          runStatus={libraryRunStatus}
-          onOpenSuites={() => setSuitesOpen(true)}
-          onOpenRounds={() => setRoundsOpen(true)}
-        />
-      )}
-      {suitesOpen && current?.path && (
-        <RegressionSuitesModal t={t} projectPath={current.path} onClose={() => setSuitesOpen(false)} />
-      )}
-      {roundsOpen && current?.path && (
-        <RegressionRoundsModal t={t} projectPath={current.path} onClose={() => setRoundsOpen(false)} />
       )}
       {launchOpen && current?.path && (
         <StartRegressionModal
@@ -3704,21 +3706,68 @@ function AuditModal({ t, projectPath, taskName, onClose }: { t: T; projectPath: 
   );
 }
 
-// 回归用例库弹窗(项目级):按来源任务分组展示沉淀的回归用例;支持移除单条 / 移除某任务全部。
-// 「一键重跑」按钮 + 报告查看在批 D 接线(onRun 由父组件在批 D 传入)。
+// 回归用例库区块(批 H 页面化,项目级):按来源任务分组展示沉淀的回归用例;检索/过滤;
+// 支持移除单条 / 移除某任务全部。发起回归与运行状态行在 RegressionWorkspace 层。
 interface LibEntry { id?: string; purpose?: string; priority?: string; caseType?: string; tags?: string[]; _source?: { task?: string; originalId?: string; depositedAt?: string } }
 interface LibGroup { task: string; count: number; entries: LibEntry[] }
-function RegressionLibraryModal({ t, projectPath, reloadSignal, onChanged, onClose, onRun, running, runStatus, onOpenSuites, onOpenRounds }: {
+// 回归测试整页工作区(批 H):子页签(用例库/回归套件/轮次历史)+「发起回归」+ 运行状态行。
+// 三个区块由原弹窗内容页面化而来,数据链路(reloadSignal/deposit/rounds API)不变。
+function RegressionWorkspace({ t, projectPath, regTab, setRegTab, reloadSignal, onChanged, onLaunch, running, runStatus }: {
+  t: T;
+  projectPath: string;
+  regTab: "library" | "suites" | "rounds";
+  setRegTab: (v: "library" | "suites" | "rounds") => void;
+  reloadSignal: number;
+  onChanged: () => void;
+  onLaunch: () => void;
+  running: boolean;
+  runStatus: string | null;
+}) {
+  const TABS = [
+    { id: "library" as const, label: t("test.regression.tabLibrary") },
+    { id: "suites" as const, label: t("test.suites.open") },
+    { id: "rounds" as const, label: t("test.rounds.open") },
+  ];
+  return (
+    <div>
+      <div className="mb-3 flex items-center gap-1 border-b border-border">
+        {TABS.map((tb) => (
+          <button
+            key={tb.id}
+            onClick={() => setRegTab(tb.id)}
+            className={`-mb-px border-b-2 px-3 py-1.5 text-[12px] transition-colors ${regTab === tb.id ? "border-primary font-semibold text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}
+          >
+            {tb.label}
+          </button>
+        ))}
+        <span className="flex-1" />
+        <button
+          onClick={onLaunch}
+          disabled={running}
+          title={t("test.library.runHint")}
+          className="mb-1 flex h-7 items-center gap-1 rounded-md bg-primary px-2.5 text-[11px] font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {running ? <SpinnerGap size={11} className="animate-spin" /> : <Play size={11} />} {running ? t("test.library.running") : t("test.launch.open")}
+        </button>
+      </div>
+      {runStatus && (
+        <div className="mb-3 flex items-center gap-1.5 rounded-md border border-border bg-muted/30 px-3 py-1.5 text-[11px] text-muted-foreground">
+          {running && <SpinnerGap size={11} className="animate-spin" />}
+          {runStatus}
+        </div>
+      )}
+      {regTab === "library" && <RegressionLibrarySection t={t} projectPath={projectPath} reloadSignal={reloadSignal} onChanged={onChanged} />}
+      {regTab === "suites" && <RegressionSuitesSection t={t} projectPath={projectPath} />}
+      {regTab === "rounds" && <RegressionRoundsSection t={t} projectPath={projectPath} reloadSignal={reloadSignal} />}
+    </div>
+  );
+}
+
+function RegressionLibrarySection({ t, projectPath, reloadSignal, onChanged }: {
   t: T;
   projectPath: string;
   reloadSignal: number;
   onChanged: () => void;
-  onClose: () => void;
-  onRun?: () => void;
-  running?: boolean;
-  runStatus?: string | null;
-  onOpenSuites?: () => void;
-  onOpenRounds?: () => void;
 }) {
   // null = 加载中(初次挂载即 null → 显示 spinner;reloadSignal 变化时保留旧数据直到新数据到达,
   // 不在 effect 体里同步 setData(null)——避免 react-hooks/set-state-in-effect 级联渲染告警)。
@@ -3777,47 +3826,11 @@ function RegressionLibraryModal({ t, projectPath, reloadSignal, onChanged, onClo
   const filteredCount = filteredTasks.reduce((n, g) => n + g.entries.length, 0);
   const filterActive = !!(libQ.trim() || libTask || libPri);
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
-      <div className="flex max-h-[82vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-border bg-background shadow-xl" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center gap-2 border-b border-border px-3 py-2">
-          <FolderOpen size={14} className="text-primary" />
-          <span className="text-xs font-semibold text-foreground">{t("test.library.title")}</span>
-          {data && data.total > 0 && (
-            <span className="text-[10px] text-muted-foreground">{t("test.library.summary", { total: data.total, tasks: taskCount })}</span>
-          )}
-          <span className="flex-1" />
-          {onOpenRounds && (
-            <button
-              onClick={onOpenRounds}
-              className="flex h-6 items-center gap-1 rounded border border-border px-2 text-[11px] text-muted-foreground hover:text-foreground"
-            >
-              <Clock size={11} /> {t("test.rounds.open")}
-            </button>
-          )}
-          {onOpenSuites && (
-            <button
-              onClick={onOpenSuites}
-              className="flex h-6 items-center gap-1 rounded border border-border px-2 text-[11px] text-muted-foreground hover:text-foreground"
-            >
-              <ListChecks size={11} /> {t("test.suites.open")}
-            </button>
-          )}
-          {onRun && (
-            <button
-              onClick={onRun}
-              disabled={running || !data || data.total === 0}
-              title={t("test.library.runHint")}
-              className="flex h-6 items-center gap-1 rounded bg-primary px-2 text-[11px] font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              {running ? <SpinnerGap size={11} className="animate-spin" /> : <Play size={11} />} {running ? t("test.library.running") : t("test.library.run")}
-            </button>
-          )}
-          <button onClick={onClose} className="text-muted-foreground hover:text-foreground" aria-label={t("test.library.close")}><X size={14} /></button>
-        </div>
-        {runStatus && (
-          <div className="flex items-center gap-1.5 border-b border-border bg-muted/30 px-3 py-1.5 text-[11px] text-muted-foreground">
-            {running && <SpinnerGap size={11} className="animate-spin" />}
-            {runStatus}
+    <div className="flex flex-col overflow-hidden rounded-xl border border-border bg-card">
+        {data && data.total > 0 && (
+          <div className="flex items-center gap-2 border-b border-border px-3 py-1.5">
+            <FolderOpen size={13} className="text-primary" />
+            <span className="text-[11px] text-muted-foreground">{t("test.library.summary", { total: data.total, tasks: taskCount })}</span>
           </div>
         )}
         {data && data.total > 0 && (
@@ -3884,12 +3897,11 @@ function RegressionLibraryModal({ t, projectPath, reloadSignal, onChanged, onClo
             </div>
           )}
         </div>
-      </div>
     </div>
   );
 }
 
-// 轮次历史弹窗(v2 批 E):轮次 = 一次回归执行实例(TestRail Run 语义)。列表(时间/环境/
+// 轮次历史区块(批 H 页面化,原弹窗):轮次 = 一次回归执行实例(TestRail Run 语义)。列表(时间/环境/
 // 套件/模式/状态/通过/红线)+ 行内展开详情(按来源任务分组结果 + 与上一全量轮的 delta 三类,
 // 交集口径)+ 删单轮(报告/快照/证据一并删)。数据全部来自 rounds / rounds/detail 只读 API。
 interface RoundUI {
@@ -3900,7 +3912,7 @@ interface RoundDetailUI {
   groups: Array<{ task: string; counts: Record<string, number>; tests: Array<{ task: string; originalId: string; purpose: string; status: string }> }>;
   delta: { baseRoundId: string; newFail: unknown[]; fixed: unknown[]; stillFail: unknown[] } | null;
 }
-function RegressionRoundsModal({ t, projectPath, onClose }: { t: T; projectPath: string; onClose: () => void }) {
+function RegressionRoundsSection({ t, projectPath, reloadSignal }: { t: T; projectPath: string; reloadSignal: number }) {
   const [rounds, setRounds] = useState<RoundUI[] | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const [details, setDetails] = useState<Record<string, RoundDetailUI | null>>({});
@@ -3913,7 +3925,7 @@ function RegressionRoundsModal({ t, projectPath, onClose }: { t: T; projectPath:
       .then((d) => { if (!cancelled) setRounds(Array.isArray(d?.rounds) ? d.rounds : []); })
       .catch(() => { if (!cancelled) setRounds([]); });
     return () => { cancelled = true; };
-  }, [projectPath, reload]);
+  }, [projectPath, reload, reloadSignal]);
 
   const toggleDetail = (roundId: string) => {
     if (openId === roundId) { setOpenId(null); return; }
@@ -3961,14 +3973,11 @@ function RegressionRoundsModal({ t, projectPath, onClose }: { t: T; projectPath:
   );
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
-      <div className="flex max-h-[84vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-border bg-background shadow-xl" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center gap-2 border-b border-border px-3 py-2">
-          <Clock size={14} className="text-primary" />
-          <span className="text-xs font-semibold text-foreground">{t("test.rounds.title")}</span>
+    <div className="flex flex-col overflow-hidden rounded-xl border border-border bg-card">
+        <div className="flex items-center gap-2 border-b border-border px-3 py-1.5">
+          <Clock size={13} className="text-primary" />
+          <span className="text-[11px] font-semibold text-foreground">{t("test.rounds.title")}</span>
           {rounds && rounds.length > 0 && <span className="text-[10px] text-muted-foreground">{rounds.length}</span>}
-          <span className="flex-1" />
-          <button onClick={onClose} className="text-muted-foreground hover:text-foreground" aria-label={t("test.library.close")}><X size={14} /></button>
         </div>
         <div className="min-h-0 flex-1 overflow-auto">
           {rounds === null ? (
@@ -4045,7 +4054,6 @@ function RegressionRoundsModal({ t, projectPath, onClose }: { t: T; projectPath:
             </div>
           )}
         </div>
-      </div>
     </div>
   );
 }
@@ -4188,7 +4196,7 @@ function StartRegressionModal({ t, projectPath, onClose, onStart }: {
   );
 }
 
-// 回归套件管理弹窗(v2 批 C):套件 = 「本轮跑什么」的圈选器。列表(内置全量 + 用户套件,
+// 回归套件区块(批 H 页面化,原 v2 批 C 弹窗):套件 = 「本轮跑什么」的圈选器。列表(内置全量 + 用户套件,
 // 实时命中数)+ 构建器(查询条件 chips / 静态勾选树,eval API 实时预览,口径与发起执行一致)
 // + 核心必跑白名单(pinned,任何套件执行始终并入)。套件是引用不是复制——落 回归套件.json。
 interface SuiteKeyUI { task: string; originalId: string }
@@ -4206,7 +4214,7 @@ interface SuiteEditState {
 }
 const suiteKeyEnc = (k: SuiteKeyUI) => JSON.stringify([k.task, k.originalId]);
 const suiteKeyDec = (s: string): SuiteKeyUI => { const [task, originalId] = JSON.parse(s) as [string, string]; return { task, originalId }; };
-function RegressionSuitesModal({ t, projectPath, onClose }: { t: T; projectPath: string; onClose: () => void }) {
+function RegressionSuitesSection({ t, projectPath }: { t: T; projectPath: string }) {
   const [data, setData] = useState<{ pinned: SuiteKeyUI[]; fullHits: number; suites: SuiteDTO[] } | null>(null);
   const [lib, setLib] = useState<LibGroup[] | null>(null);
   const [editing, setEditing] = useState<SuiteEditState | null>(null);
@@ -4502,19 +4510,15 @@ function RegressionSuitesModal({ t, projectPath, onClose }: { t: T; projectPath:
   };
 
   return (
-    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
-      <div className="flex max-h-[84vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-border bg-background shadow-xl" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center gap-2 border-b border-border px-3 py-2">
-          <ListChecks size={14} className="text-primary" />
-          <span className="text-xs font-semibold text-foreground">{t("test.suites.title")}</span>
+    <div className="flex flex-col overflow-hidden rounded-xl border border-border bg-card">
+        <div className="flex items-center gap-2 border-b border-border px-3 py-1.5">
+          <ListChecks size={13} className="text-primary" />
+          <span className="text-[11px] font-semibold text-foreground">{t("test.suites.title")}</span>
           {data && (
             <span className="text-[10px] text-muted-foreground">{t("test.suites.summary", { count: data.suites.length, full: data.fullHits })}</span>
           )}
-          <span className="flex-1" />
-          <button onClick={onClose} className="text-muted-foreground hover:text-foreground" aria-label={t("test.library.close")}><X size={14} /></button>
         </div>
         <div className="min-h-0 flex-1 overflow-auto">{body()}</div>
-      </div>
     </div>
   );
 }

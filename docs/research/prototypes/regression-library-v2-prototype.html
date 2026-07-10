@@ -231,6 +231,25 @@
   .fail-detail { background: var(--muted); border-radius: 8px; padding: 9px 12px; font-size: 11px; margin: 4px 0 6px; display: flex; flex-direction: column; gap: 6px; }
   .thumb { width: 76px; height: 46px; border-radius: 6px; border: 1px solid var(--border); background: repeating-linear-gradient(45deg, var(--muted), var(--muted) 6px, var(--card) 6px, var(--card) 12px); display: grid; place-items: center; font-size: 9px; color: var(--muted-fg); flex-shrink: 0; }
   .empty { text-align: center; color: var(--muted-fg); padding: 30px 0; font-size: 12px; }
+  .typebar { display: flex; align-items: center; gap: 10px; padding: 10px 0 0; flex-wrap: wrap; }
+  .typebar .proj { font-size: 15px; font-weight: 650; }
+  .typetabs { display: inline-flex; border: 1px solid var(--border); border-radius: 9px; padding: 2px; background: var(--muted); gap: 2px; }
+  .typetab { padding: 4px 14px; font-size: 12px; border-radius: 7px; color: var(--muted-fg); font-weight: 500; }
+  .typetab:hover { color: var(--fg); }
+  .typetab.on { background: var(--card); color: var(--fg); font-weight: 650; box-shadow: 0 1px 3px oklch(0 0 0 / 0.12); }
+  .taskcard { border: 1px solid var(--border); border-radius: 10px; background: var(--card); padding: 12px 14px; display: flex; flex-direction: column; gap: 10px; }
+  .taskcard .tname { font-size: 12.5px; font-weight: 650; display: flex; align-items: center; gap: 8px; }
+  .stepflow { display: flex; align-items: center; gap: 0; }
+  .stepflow .st { display: flex; flex-direction: column; align-items: center; gap: 4px; flex: 1; position: relative; font-size: 9.5px; color: var(--muted-fg); }
+  .stepflow .st::before { content: ""; position: absolute; top: 5px; left: -50%; width: 100%; height: 2px; background: var(--border); z-index: 0; }
+  .stepflow .st:first-child::before { display: none; }
+  .stepflow .sdot { width: 10px; height: 10px; border-radius: 50%; background: var(--border); z-index: 1; }
+  .stepflow .st.done .sdot { background: var(--ok); }
+  .stepflow .st.done::before { background: var(--ok); }
+  .stepflow .st.cur .sdot { background: var(--primary); box-shadow: 0 0 0 3px oklch(from var(--primary) l c h / 0.2); }
+  .statchips { display: flex; gap: 8px; flex-wrap: wrap; }
+  .statchip { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--border); border-radius: 999px; padding: 3px 10px; font-size: 10.5px; color: var(--muted-fg); }
+  .statchip i { width: 7px; height: 7px; border-radius: 50%; display: inline-block; }
 </style>
 
 <div class="wrap" id="app">
@@ -242,6 +261,13 @@
     <button class="btn sm" id="annoBtn" onclick="toggleAnno()">标注：开</button>
     <button class="btn sm" onclick="toggleTheme()">☾ 主题</button>
   </header>
+  <div class="typebar">
+    <button class="btn sm" onclick="toast('原型:返回项目列表')">← 项目</button>
+    <span class="proj">实验室预约系统</span>
+    <div class="typetabs" id="typetabs"></div>
+    <div style="flex:1"></div>
+    <button class="btn sm" onclick="toast('原型:环境配置(现有功能)')">⚙ 环境配置</button>
+  </div>
   <nav class="tabs" id="tabs"></nav>
   <main id="screen"></main>
 </div>
@@ -348,6 +374,8 @@ const esc = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(
 
 /* ============ 全局状态 ============ */
 const state = {
+  // 测试类型(用户确认的信息架构):项目下两种平级测试类型——功能测试(现有任务流)/回归测试(本原型主体,整页非弹窗)
+  testType: "regression",
   screen: "library",
   filters: { q: "", module: "", pri: "", task: "", review: "", health: "" },
   sel: new Set(),
@@ -369,16 +397,59 @@ const NAV = [
   { id: "health",  label: "健康度",    phase: "三期", pc: "p3" },
 ];
 function renderTabs() {
-  document.getElementById("tabs").innerHTML = NAV.map(n =>
+  document.getElementById("typetabs").innerHTML = [
+    { id: "func", label: "功能测试" },
+    { id: "regression", label: "回归测试" },
+  ].map(x => `<button class="typetab ${state.testType === x.id ? "on" : ""}" onclick="goType('${x.id}')">${x.label}</button>`).join("");
+  const tabs = document.getElementById("tabs");
+  if (state.testType === "func") { tabs.innerHTML = ""; tabs.style.display = "none"; return; }
+  tabs.style.display = "";
+  tabs.innerHTML = NAV.map(n =>
     `<button class="tab ${state.screen === n.id ? "on" : ""}" onclick="go('${n.id}')">${n.label}<span class="phase ${n.pc}">${n.phase}</span></button>`
   ).join("") + `<div style="flex:1"></div><button class="tab" style="color:var(--primary);font-weight:600" onclick="openRunModal()">▶ 发起回归</button>`;
 }
+function goType(t) { state.testType = t; render(); }
 function go(s) { state.screen = s; render(); }
 function render() {
   renderTabs();
   const el = document.getElementById("screen");
-  el.innerHTML = ({ library: rLibrary, suites: rSuites, rounds: rRounds, report: rReport, matrix: rMatrix, health: rHealth })[state.screen]();
+  el.innerHTML = state.testType === "func"
+    ? rFunc()
+    : ({ library: rLibrary, suites: rSuites, rounds: rRounds, report: rReport, matrix: rMatrix, health: rHealth })[state.screen]();
   window.scrollTo(0, 0);
+}
+
+/* ============ 功能测试(现有任务流,示意) ============ */
+function rFunc() {
+  const TASKS = [
+    { name: "需求分析", steps: 4, cur: 4, state: "已完成", cls: "ok", note: "21 条回归用例已自动入库" },
+    { name: "登录鉴权", steps: 4, cur: 4, state: "已完成", cls: "ok", note: "4 条回归用例已自动入库" },
+    { name: "设备预约", steps: 4, cur: 3, state: "执行中", cls: "info", note: "" },
+    { name: "报表导出", steps: 4, cur: 2, state: "待处理", cls: "", note: "" },
+  ];
+  const STEPS = ["需求分析", "用例设计", "测试执行", "测试报告"];
+  let html = anno(`<b>功能测试</b> = 现有任务四步流(本页仅示意,交互不变)。与右侧类型切换里的<b>回归测试</b>是项目下两种平级测试类型:功能测试里打了「回归测试」标签的用例,用例设计完成后<b>自动沉淀</b>到回归测试的用例库(v1 机制不变,入库链路不动)。`);
+  html += `<div class="toolrow" style="margin-top:14px">
+    <div class="statchips">
+      <span class="statchip"><i style="background:var(--primary)"></i>运行中 1</span>
+      <span class="statchip"><i style="background:var(--warn)"></i>排队中 0</span>
+      <span class="statchip"><i style="background:var(--border)"></i>待处理 1</span>
+      <span class="statchip"><i style="background:var(--ok)"></i>已完成 2</span>
+    </div>
+    <div style="flex:1"></div>
+    <button class="btn primary" onclick="toast('原型:新建功能测试任务(现有交互)')">＋ 新建任务</button>
+  </div>
+  <div class="cards" style="grid-template-columns:repeat(auto-fit,minmax(300px,1fr))">`;
+  TASKS.forEach(t => {
+    html += `<div class="taskcard">
+      <div class="tname">📋 ${t.name}<span class="badge ${t.cls}">${t.state}</span><div style="flex:1"></div>
+        ${t.note ? `<span class="badge info" title="入库机制:用例设计完成后自动 upsert">📥 ${t.note}</span>` : ""}</div>
+      <div class="stepflow">${STEPS.map((sn, i) => `<div class="st ${i < t.cur - 1 || t.cur === 4 && i === 3 ? "done" : i === t.cur - 1 ? "cur" : ""}"><span class="sdot"></span>${sn}</div>`).join("")}</div>
+    </div>`;
+  });
+  html += `</div>
+  <div style="margin-top:10px;font-size:11px;color:var(--muted-fg)">💡 提示:切到「<b style="color:var(--fg)">回归测试</b>」类型查看沉淀的用例库、圈选套件并发起回归轮次。</div>`;
+  return html;
 }
 function toast(msg) {
   const r = document.getElementById("toastRoot");
@@ -417,7 +488,7 @@ function rLibrary() {
   const quarN = CASES.filter(c => c.quar).length;
   const pendN = CASES.filter(c => c.review === "pending").length;
   const opts = (arr, cur) => arr.map(o => `<option ${o === cur ? "selected" : ""}>${o}</option>`).join("");
-  let html = anno(`<b>相对 v1 的升级</b>：v1 弹窗只有「按来源任务平铺 + 移除」。v2 增加 <b>搜索/多维过滤/排序（一期）</b>、<b>评审状态与批量确认（二期）</b>、<b>健康度徽标（三期）</b>、行点击进<b>详情抽屉</b>（字段 + 变更记录 + 执行历史）。数据仍是项目级 回归用例库.json，upsert by 来源任务的机制不变。`);
+  let html = anno(`<b>信息架构（用户 2026-07-10 确认方向）</b>：回归测试与功能测试是项目下两种<b>平级测试类型</b>——回归用例库从弹窗升级为<b>整页工作区</b>（顶部类型切换进入，库/套件/轮次/报告/矩阵/健康度为页内子导航，不再叠弹窗；仅「发起回归」保留为确认对话框）。数据与入库机制不变：仍是项目级 回归用例库.json，功能测试侧打标自动沉淀、upsert by 来源任务。本页保留 v2 能力：搜索/过滤（一期）、评审与批量（二期）、健康度徽标（三期）、行点击详情抽屉。`);
   html += `<div class="toolrow">
     <div class="search">🔍<input placeholder="搜索用例 ID / 标题…" value="${esc(state.filters.q)}" oninput="state.filters.q=this.value;render()"></div>
     <select class="sel" onchange="state.filters.task=this.value==='来源任务'?'':this.value;render()"><option>来源任务</option>${opts([...new Set(CASES.map(c=>c.task))], state.filters.task)}</select>

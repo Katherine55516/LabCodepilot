@@ -147,6 +147,7 @@
 | 批 E | 报告分组(taskCounts+prompt) + delta + 轮次历史弹窗 + 库检索 + status-danger 修复 | ✅ 完成（curl delta 精确 + CDP 四弹窗全链路 0 errors；mock 仅拦 workbench 列表防污染真实数据） | 1f45388 |
 | 批 F | 打包版执行可用性验证（#13 已解，收缩为打包验收项） | ⬜ 待打包验收（用户发起；含新 roundId 产物路径复核） | |
 | 批 G | 收尾：单测/i18n/双文档 v2 章节/README 索引/tracker 修正(#13 移已解决+补 15-17) | ✅ 完成 | |
+| 批 H | 回归测试页面化（用户 07-10 拍板信息架构：项目下功能测试/回归测试平级类型；三弹窗→页内区块，仅发起回归留对话框；next.config dev watch 忽略 .playwright-mcp 根治重编译死循环） | ✅ 完成（CDP 全链路 0 errors：类型切换/三子页签/delta 页内展开/发起对话框） | |
 
 **一期整体状态**：批 A-E 代码全部完成并逐批提交，`npm run test` 1968/0；**待用户发起打包验收（mac+Win，含真实 AI 执行）后一期收口**。已知偏差：预检 token 估算因无按轮 token 数据源暂缓（时长估算已实现）。
 **dev 排障记**：playwright MCP 往仓库根写 `.playwright-mcp/` 快照/console 日志会触发 Tailwind/webpack 监听重编译死循环（页面反复刷新）——CDP 验证时把该目录软链到仓库外，提交前移除。
