@@ -563,6 +563,7 @@ const en = {
   'test.scripts.busy': 'Working…',
   'test.scripts.loadFailed': 'Failed to load script',
   'test.scripts.output': 'Run output',
+  'test.scripts.runFailed': '{n} script(s) failed to run: {reason}',
   'nav.imageStudio': 'Image',
 
   // ── Image Studio (standalone text-to-image) ─────────────────

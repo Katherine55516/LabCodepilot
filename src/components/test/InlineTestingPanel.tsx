@@ -130,6 +130,9 @@ interface ScriptManifestCaseView {
   usesMock: boolean;
   error?: string;
   validation?: { syntax: boolean; collected: boolean; replayed: boolean; warnings: string[]; error?: string };
+  /** 最近一次手动运行的失败原因（运行失败不改 status，故卡片只能靠它显示"为什么没变绿"）。 */
+  lastRunError?: string;
+  lastRunAt?: string;
 }
 interface ScriptManifestView {
   latestRunHash: string;
@@ -3539,6 +3542,12 @@ function ReportStepPanel({
             verified: scriptManifest.counts.verified,
             review: scriptManifest.counts.needsReview,
           });
+  // 运行失败不改 case.status，counts 也不变 —— 不显式渲染出来，点「运行全部」后卡片
+  // 与点击前逐字节相同，用户只会看到一个转瞬即逝的 toast（"点了没反应"）。
+  const scriptRunFailures = scriptManifest?.cases.filter((item) => item.lastRunError) ?? [];
+  const scriptRunFailureText = scriptRunFailures.length > 0
+    ? t("test.scripts.runFailed", { n: scriptRunFailures.length, reason: scriptRunFailures[0].lastRunError!.slice(0, 160) })
+    : "";
 
   return (
     <div className="mt-2 space-y-3">
@@ -3633,9 +3642,17 @@ function ReportStepPanel({
               )}
             </>,
             `AI_LabTest/scripts/${taskName}/${env}/`,
-            <span className="inline-flex items-center gap-1.5">
-              {(scriptWorking || scriptBusy) && <SpinnerGap size={12} className="shrink-0 animate-spin" />}
-              {scriptInfo}
+            <span className="flex flex-col gap-1">
+              <span className="inline-flex items-center gap-1.5">
+                {(scriptWorking || scriptBusy) && <SpinnerGap size={12} className="shrink-0 animate-spin" />}
+                {scriptInfo}
+              </span>
+              {scriptRunFailureText && (
+                <span className="inline-flex items-start gap-1 text-status-error-foreground">
+                  <WarningCircle size={12} className="mt-0.5 shrink-0" />
+                  <span className="min-w-0 break-words">{scriptRunFailureText}</span>
+                </span>
+              )}
             </span>,
             <>
               {scriptManifest && scriptManifest.cases.length > 0 && (
@@ -3942,6 +3959,12 @@ function ScriptPreview({ t, projectPath, taskName, env, initialManifest, onChang
               </button>
             )}
           </div>
+          {/* 运行失败是持久化的（manifest.lastRunError），重开弹框仍可见；上方的 output 只是本次运行的瞬时输出。 */}
+          {selected?.lastRunError && (
+            <div className="border-b border-border bg-status-error-muted/40 px-3 py-1.5 text-[10px] text-status-error-foreground">
+              {selected.lastRunError}
+            </div>
+          )}
           {(Boolean(selected?.error) || (selected?.validation?.warnings?.length ?? 0) > 0) && (
             <div className="border-b border-border bg-status-warning-muted/40 px-3 py-1.5 text-[10px] text-status-warning-foreground">
               {selected.error || selected.validation?.warnings.join(" · ")}

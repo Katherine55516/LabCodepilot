@@ -3,7 +3,7 @@ import path from 'path';
 import { isUnsafeSegment } from '@/lib/test/path-safety';
 import { resolveProjectEnvWithDb } from '@/lib/test/env-resolve';
 import { manifestCounts, readManifest, scriptsDir, writeManifest } from '@/lib/test/script-artifacts';
-import { runGeneratedScript } from '@/lib/test/script-runner';
+import { runGeneratedScript, summarizeRunFailure } from '@/lib/test/script-runner';
 import { appendAudit } from '@/lib/test/audit';
 
 export const runtime = 'nodejs';
@@ -30,15 +30,20 @@ export async function POST(req: Request): Promise<Response> {
     const resolved = resolveProjectEnvWithDb(projectPath, env);
     const results: Array<{ caseId: string; ok: boolean; output: string; timedOut: boolean }> = [];
     for (const item of runnable) {
+      const failRun = (reason: string) => {
+        item.lastRunError = reason;
+        item.lastRunAt = new Date().toISOString();
+        results.push({ caseId: item.caseId, ok: false, output: reason, timedOut: false });
+      };
       const ownerTask = item.sourceTask ?? taskName;
       if (isUnsafeSegment(ownerTask)) {
-        results.push({ caseId: item.caseId, ok: false, output: 'script owner is invalid', timedOut: false });
+        failRun('script owner is invalid');
         continue;
       }
       const root = scriptsDir(projectPath, ownerTask, env);
       const file = path.resolve(root, item.file);
       if (!file.startsWith(path.resolve(root) + path.sep) || !fs.existsSync(file)) {
-        results.push({ caseId: item.caseId, ok: false, output: 'script file missing', timedOut: false });
+        failRun('script file missing');
         continue;
       }
       const result = await runGeneratedScript({
@@ -52,9 +57,17 @@ export async function POST(req: Request): Promise<Response> {
         timeoutMs: 120_000,
       });
       results.push({ caseId: item.caseId, ok: result.ok, output: result.output.slice(-4000), timedOut: result.timedOut });
-      if (result.ok && !item.usesMock) {
+      item.lastRunAt = new Date().toISOString();
+      if (!result.ok) {
+        // A failed run leaves `status` alone — the script may be sound and the
+        // app under test simply down. Record why, so the card can say so.
+        item.lastRunError = summarizeRunFailure(result.output, result.timedOut);
+        continue;
+      }
+      item.lastRunError = undefined;
+      if (!item.usesMock) {
         item.status = 'verified';
-        item.lastVerifiedAt = new Date().toISOString();
+        item.lastVerifiedAt = item.lastRunAt;
         item.validation = { ...(item.validation ?? { syntax: true, collected: true, replayed: false, warnings: [] }), replayed: true, error: undefined };
         item.error = undefined;
       }

@@ -570,6 +570,7 @@ const zhHK: Record<TranslationKey, string> = {
   'test.scripts.busy': '處理中…',
   'test.scripts.loadFailed': '腳本讀取失敗',
   'test.scripts.output': '運行輸出',
+  'test.scripts.runFailed': '{n} 個腳本運行失敗：{reason}',
   'nav.imageStudio': '文生圖',
 
   // ── 文生圖（獨立模塊）──────────────────────────────────────

@@ -61,9 +61,40 @@ export function validateScriptSource(source: string, expectedCaseId: string): St
   return { ok: errors.length === 0, needsReview: warnings.length > 0, warnings, errors };
 }
 
+const MUTATION_VERB = /(新建|创建|删除|提交|保存|发布|支付|下单|修改|更新|上传|导入|绑定|解绑|create|delete|submit|save|publish|payment|upload|update)/i;
+
+/**
+ * The text of what the case *does*, i.e. its action steps — not what it expects
+ * to see. Returns null when the case has no structured steps, so the caller can
+ * fall back to scanning everything.
+ */
+function actionText(testCase: Record<string, unknown>): string | null {
+  const steps = testCase.steps;
+  if (!Array.isArray(steps)) return null;
+  const parts = steps.map((step) => {
+    if (typeof step === 'string') return step;
+    if (step && typeof step === 'object') {
+      const content = (step as { content?: unknown }).content;
+      if (typeof content === 'string') return content;
+    }
+    return '';
+  });
+  return parts.join('\n');
+}
+
+/**
+ * Whether the generated script may be replayed unattended right after generation.
+ *
+ * Only the case's ACTIONS are scanned for mutation verbs. Scanning the whole
+ * JSON (the original behaviour) misread UI element names quoted in `expected` /
+ * `purpose` as writes: a read-only case that merely asserts a button labelled
+ * 「+ 新建学科」 is visible was permanently barred from automatic verification.
+ * A case that declares `cleanup` is replayable regardless — it says how to undo
+ * itself. Cases without structured steps stay conservative and scan everything.
+ */
 export function isSafeForAutomaticReplay(testCase: Record<string, unknown>): boolean {
   const cleanup = typeof testCase.cleanup === 'string' ? testCase.cleanup.trim() : '';
   if (cleanup) return true;
-  const text = JSON.stringify(testCase);
-  return !/(新建|创建|删除|提交|保存|发布|支付|下单|修改|更新|上传|导入|绑定|解绑|create|delete|submit|save|publish|payment|upload|update)/i.test(text);
+  const actions = actionText(testCase);
+  return !MUTATION_VERB.test(actions ?? JSON.stringify(testCase));
 }

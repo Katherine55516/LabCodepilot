@@ -561,6 +561,7 @@ const zh: Record<TranslationKey, string> = {
   'test.scripts.busy': '处理中…',
   'test.scripts.loadFailed': '脚本读取失败',
   'test.scripts.output': '运行输出',
+  'test.scripts.runFailed': '{n} 个脚本运行失败：{reason}',
   'nav.imageStudio': '文生图',
 
   // ── 文生图（独立模块）──────────────────────────────────────

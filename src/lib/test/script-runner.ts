@@ -197,3 +197,21 @@ export async function runGeneratedScript(opts: ScriptRunnerOptions): Promise<Scr
     });
   });
 }
+
+/**
+ * One line a human can act on, pulled out of Playwright's multi-hundred-line
+ * report. The full output stays available in the scripts modal; this is what the
+ * report card shows so a failed run stops looking like nothing happened.
+ *
+ * `output` is already redacted by runGeneratedScript.
+ */
+export function summarizeRunFailure(output: string, timedOut: boolean): string {
+  if (timedOut) return 'script run timed out';
+  const lines = output.split('\n').map((line) => line.trim()).filter(Boolean);
+  const picked =
+    lines.find((line) => /net::ERR_[A-Z_]+/.test(line))
+    ?? lines.find((line) => /^(?:\d+\)\s*)?(?:\w*Error):/.test(line))
+    ?? lines.find((line) => /\bError:/.test(line))
+    ?? lines[lines.length - 1];
+  return (picked ?? 'script run failed').slice(0, 300);
+}
