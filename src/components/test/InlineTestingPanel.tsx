@@ -1,13 +1,13 @@
 "use client";
 
-import { useState, useRef, useEffect, useMemo, type ReactNode } from "react";
+import { useState, useRef, useEffect, useMemo, Fragment, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useRouter, usePathname } from "next/navigation";
 import dynamic from "next/dynamic";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useTranslation } from "@/hooks/useTranslation";
-import { ListChecks, ChartBar, Gear, ArrowLeft, ArrowRight, FolderPlus, FolderOpen, Play, Stop, ArrowUp, SpinnerGap, Sparkle, Terminal, WarningCircle, Wrench, Trash, Desktop, Lightning, Plug, CheckCircle, File as FileIcon, FileArrowDown, NotePencil, DownloadSimple, Eye, X, CaretDown, CaretUp, Check, Lock, PencilSimple, Plus, PushPin, Clock, MagnifyingGlass, Prohibit, ArrowClockwise, ArrowsClockwise, Bug, type Icon } from "@/components/ui/icon";
+import { ListChecks, ChartBar, Gear, ArrowLeft, ArrowRight, FolderPlus, FolderOpen, Play, Stop, ArrowUp, SpinnerGap, Sparkle, Terminal, WarningCircle, Wrench, Trash, Desktop, Lightning, Plug, CheckCircle, File as FileIcon, FileArrowDown, NotePencil, DownloadSimple, Eye, X, CaretDown, CaretUp, Check, Lock, PencilSimple, Plus, PushPin, Clock, MagnifyingGlass, Prohibit, ArrowClockwise, ArrowsClockwise, Bug, Warning, type Icon } from "@/components/ui/icon";
 import { MarkdownEditor } from "@/components/editor/MarkdownEditor.lazy";
 import type { TranslationKey } from "@/i18n";
 import { useNativeFolderPicker } from "@/hooks/useNativeFolderPicker";
@@ -4132,7 +4132,7 @@ function LastResultDot({ t, res }: { t: T; res: CaseRes[] }) {
 }
 
 /** 回归测试整页工作区的子页签。 */
-type RegTab = "library" | "suites" | "rounds" | "report";
+type RegTab = "library" | "suites" | "rounds" | "report" | "matrix" | "health";
 
 // 回归测试整页工作区(批 H):子页签(用例库/回归套件/轮次历史/轮次报告)+「发起回归」+ 运行状态行。
 // 三个区块由原弹窗内容页面化而来,数据链路(reloadSignal/deposit/rounds API)不变。
@@ -4149,11 +4149,15 @@ function RegressionWorkspace({ t, projectPath, regTab, setRegTab, reloadSignal, 
   model: string;
   providerId: string;
 }) {
+  // 矩阵单元格点击 → 跳报告页并选中该轮。
+  const [jumpRound, setJumpRound] = useState<string | undefined>(undefined);
   const TABS: Array<{ id: RegTab; label: string }> = [
     { id: "library", label: t("test.regression.tabLibrary") },
     { id: "suites", label: t("test.suites.open") },
     { id: "rounds", label: t("test.rounds.open") },
     { id: "report", label: t("test.report.tab") },
+    { id: "matrix", label: t("test.matrix.tab") },
+    { id: "health", label: t("test.health.tab") },
   ];
   return (
     <div>
@@ -4194,7 +4198,18 @@ function RegressionWorkspace({ t, projectPath, regTab, setRegTab, reloadSignal, 
         />
       )}
       {regTab === "report" && (
-        <RegressionReportSection t={t} projectPath={projectPath} reloadSignal={reloadSignal} model={model} providerId={providerId} />
+        <RegressionReportSection t={t} projectPath={projectPath} reloadSignal={reloadSignal} model={model} providerId={providerId} initialRoundId={jumpRound} />
+      )}
+      {regTab === "matrix" && (
+        <RegressionMatrixSection
+          t={t}
+          projectPath={projectPath}
+          reloadSignal={reloadSignal}
+          onOpenRound={(rid) => { setJumpRound(rid); setRegTab("report"); }}
+        />
+      )}
+      {regTab === "health" && (
+        <RegressionHealthSection t={t} projectPath={projectPath} reloadSignal={reloadSignal} onChanged={onChanged} />
       )}
     </div>
   );
@@ -5041,6 +5056,291 @@ function RegressionRoundsSection({ t, projectPath, reloadSignal, onRetest }: {
   );
 }
 
+// 屏 5「对比矩阵」+ 屏 6「健康度」共用的数据钩子:一次 GET /api/test/library/history 拿全。
+// 矩阵与健康度是同一份跨轮矩阵的两种读法——徽标、翻转/连败、队列分类必须来自同一处派生,
+// 否则「库总览说 flaky、健康度说健康」这类不一致迟早出现。
+function useCaseHistory(projectPath: string, reloadSignal: number, localReload: number) {
+  const [data, setData] = useState<HistoryDTO | null | undefined>(undefined); // undefined=加载中
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/test/library/history?projectPath=${encodeURIComponent(projectPath)}`)
+      .then((r) => r.json())
+      .then((d) => { if (!cancelled) setData(d?.cases ? (d as HistoryDTO) : null); })
+      .catch(() => { if (!cancelled) setData(null); });
+    return () => { cancelled = true; };
+  }, [projectPath, reloadSignal, localReload]);
+  return data;
+}
+
+/** 按来源任务分组(保持库序)。 */
+function groupByTask<X extends { task: string }>(list: X[]): Array<[string, X[]]> {
+  const m = new Map<string, X[]>();
+  for (const c of list) { if (!m.has(c.task)) m.set(c.task, []); m.get(c.task)!.push(c); }
+  return [...m.entries()];
+}
+
+const fmtDay = (iso?: string) => (iso ? iso.slice(5, 10) : "—");
+
+// 对比矩阵(屏 5,二期):行 = 用例(按来源任务分组,首列 sticky) × 列 = 轮次。
+// 对标 TestRail「Comparison for Cases」。全部由本地轮次索引 + 各轮 run.json 只读拼装。
+function RegressionMatrixSection({ t, projectPath, reloadSignal, onOpenRound }: {
+  t: T; projectPath: string; reloadSignal: number; onOpenRound: (roundId: string) => void;
+}) {
+  const hist = useCaseHistory(projectPath, reloadSignal, 0);
+  const [failOnly, setFailOnly] = useState(false);
+
+  if (hist === undefined) return <div className="p-4 text-center"><SpinnerGap size={14} className="mx-auto animate-spin text-muted-foreground" /></div>;
+  if (!hist || hist.rounds.length === 0) {
+    return <div className="rounded-xl border border-border bg-card p-6 text-center text-[11px] leading-relaxed text-muted-foreground">{t("test.matrix.empty")}</div>;
+  }
+
+  const rows = failOnly ? hist.cases.filter((c) => c.res.some((r) => r === "f")) : hist.cases;
+  const cell = (r: CaseRes) =>
+    r === "p" ? "bg-status-success-foreground/75" : r === "f" ? "bg-status-error-foreground/80" : "border border-border bg-muted";
+  const resText = (r: CaseRes) => (r === "p" ? t("test.matrix.pass") : r === "f" ? t("test.matrix.fail") : t("test.matrix.none"));
+
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-3">
+        <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+          <input type="checkbox" checked={failOnly} onChange={(e) => setFailOnly(e.target.checked)} className="accent-primary" />
+          {t("test.matrix.failOnly")}
+        </label>
+        <span className="flex-1" />
+        <span className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+          {t("test.matrix.legend")}
+          <span className={`inline-block h-3 w-5 rounded ${cell("p")}`} /> {t("test.matrix.pass")}
+          <span className={`inline-block h-3 w-5 rounded ${cell("f")}`} /> {t("test.matrix.fail")}
+          <span className={`inline-block h-3 w-5 rounded ${cell("-")}`} /> {t("test.matrix.none")}
+        </span>
+      </div>
+      <div className="overflow-x-auto rounded-xl border border-border bg-card">
+        <table className="min-w-full border-collapse text-[11px]">
+          <thead>
+            <tr>
+              <th className="sticky left-0 z-10 max-w-[280px] border-b border-border bg-card px-2 py-1.5 text-left text-[9.5px] font-semibold text-muted-foreground">
+                {t("test.matrix.case")}
+              </th>
+              {hist.rounds.map((r) => (
+                <th key={r.roundId} title={`${r.roundId} · ${r.env}`} className="whitespace-nowrap border-b border-border px-2 py-1.5 text-center text-[9.5px] font-semibold text-muted-foreground">
+                  {fmtDay(r.startedAt)}<br />
+                  <span className="font-normal">{r.env}</span>
+                  {r.mode === "failed-only" && <><br /><span className="font-normal">{t("test.rounds.modeRetest")}</span></>}
+                </th>
+              ))}
+              <th className="border-b border-border px-2 py-1.5 text-center text-[9.5px] font-semibold text-muted-foreground">{t("test.matrix.flips")}</th>
+              <th className="border-b border-border px-2 py-1.5 text-center text-[9.5px] font-semibold text-muted-foreground">{t("test.matrix.streak")}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {groupByTask(rows).map(([task, cs]) => (
+              <Fragment key={task}>
+                <tr>
+                  <td colSpan={hist.rounds.length + 3} className="sticky left-0 border-b border-border bg-muted px-2 py-1 text-[10.5px] font-semibold text-foreground">
+                    {task}
+                  </td>
+                </tr>
+                {cs.map((c) => (
+                  <tr key={`${c.task}-${c.originalId}`} className="hover:bg-muted/50">
+                    <td className="sticky left-0 z-10 max-w-[280px] truncate border-b border-border bg-card px-2 py-1" title={c.purpose}>
+                      <span className="font-mono text-[10px] text-muted-foreground">{c.originalId}</span>{" "}
+                      <span className="text-foreground">{c.purpose || "—"}</span>
+                    </td>
+                    {c.res.map((r, i) => (
+                      <td key={hist.rounds[i].roundId} className="border-b border-border px-2 py-1 text-center">
+                        <button
+                          onClick={() => onOpenRound(hist.rounds[i].roundId)}
+                          title={t("test.matrix.cellTitle", { round: hist.rounds[i].roundId, result: resText(r) })}
+                          aria-label={t("test.matrix.cellTitle", { round: hist.rounds[i].roundId, result: resText(r) })}
+                          className={`inline-block h-3.5 w-5 rounded ${cell(r)}`}
+                        />
+                      </td>
+                    ))}
+                    <td className="border-b border-border px-2 py-1 text-center tabular-nums text-muted-foreground">{c.flips || ""}</td>
+                    <td className={`border-b border-border px-2 py-1 text-center tabular-nums ${c.tailFails >= 3 ? "font-bold text-status-error-foreground" : "text-muted-foreground"}`}>
+                      {c.tailFails || ""}
+                    </td>
+                  </tr>
+                ))}
+              </Fragment>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// 健康度(屏 6,三期):统计卡 + 三条治理队列(flaky / 连败 / 久未跑)+ 隔离区 + 护栏。
+//
+// ⚠️ 跨轮翻转 ≠ 真 flaky(版本一直在变)。这些队列只是**候选**,最终判定依赖「AI 就地复核:
+// 同版本连跑 3 次」——尚未实现,入口置灰。判定阈值集中在 lib/test/case-history.ts。
+function RegressionHealthSection({ t, projectPath, reloadSignal, onChanged }: {
+  t: T; projectPath: string; reloadSignal: number; onChanged: () => void;
+}) {
+  const [localReload, setLocalReload] = useState(0);
+  const hist = useCaseHistory(projectPath, reloadSignal, localReload);
+  const [queue, setQueue] = useState<"flaky" | "streak" | "stale">("flaky");
+  const [busy, setBusy] = useState(false);
+
+  const setQuarantine = async (c: HistCase, quarantined: boolean) => {
+    const reason = quarantined ? window.prompt(t("test.library.quarantinePrompt", { n: 1 })) : "";
+    if (quarantined && reason === null) return;
+    setBusy(true);
+    try {
+      await fetch("/api/test/library/quarantine", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectPath, keys: [{ task: c.task, originalId: c.originalId }], quarantined, reason }),
+      });
+      setLocalReload((n) => n + 1);
+      onChanged();
+    } catch { /* keep view */ } finally { setBusy(false); }
+  };
+
+  if (hist === undefined) return <div className="p-4 text-center"><SpinnerGap size={14} className="mx-auto animate-spin text-muted-foreground" /></div>;
+  if (!hist || hist.summary.total === 0) {
+    return <div className="rounded-xl border border-border bg-card p-6 text-center text-[11px] leading-relaxed text-muted-foreground">{t("test.health.empty")}</div>;
+  }
+
+  const s = hist.summary;
+  const rates = hist.passRates.filter((p) => p.total > 0).map((p) => Math.round((p.pass / p.total) * 100));
+  const byHealth = (k: HealthKind) => hist.cases.filter((c) => c.health === k);
+  const queues = { flaky: byHealth("flaky"), streak: byHealth("streak"), stale: [...byHealth("stale"), ...byHealth("never")] };
+  const quarantined = byHealth("quar");
+  const rows = queues[queue];
+
+  const card = (label: string, value: ReactNode, hint?: ReactNode, color = "text-foreground") => (
+    <div className="rounded-xl border border-border bg-card px-3.5 py-3">
+      <div className="text-[10.5px] tracking-wide text-muted-foreground">{label}</div>
+      <div className={`mt-0.5 flex items-baseline gap-1.5 text-xl font-semibold tabular-nums ${color}`}>
+        {value}
+        {hint && <small className="text-[10.5px] font-normal text-muted-foreground">{hint}</small>}
+      </div>
+    </div>
+  );
+
+  const dots = (c: HistCase) => (
+    <span className="flex flex-wrap items-center gap-0.5">
+      {c.res.map((r, i) => (
+        <span
+          key={hist.rounds[i]?.roundId ?? i}
+          title={hist.rounds[i]?.roundId}
+          className={`inline-block h-2 w-2 rounded-full ${r === "p" ? "bg-status-success-foreground" : r === "f" ? "bg-status-error-foreground" : "bg-border"}`}
+        />
+      ))}
+    </span>
+  );
+
+  return (
+    <div className="space-y-3">
+      {s.quarantineAlert && (
+        <div className="flex items-start gap-2 rounded-lg border border-status-warning-foreground/40 bg-status-warning-muted/40 px-3 py-2 text-[11px] text-status-warning-foreground">
+          <Warning size={13} className="mt-0.5 flex-shrink-0" />
+          <span>{t("test.health.guardrailAlert", { pct: Math.round(s.quarantineRatio * 100) })}</span>
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+        {card(t("test.health.cardTotal"), s.total)}
+        {card(
+          t("test.health.cardPassRate", { n: rates.length }),
+          rates.length ? `${rates[rates.length - 1]}%` : "—",
+          rates.length > 1 ? <Sparkline values={rates} width={64} height={18} /> : undefined,
+        )}
+        {card(t("test.health.cardFlaky"), s.flaky, t("test.health.cardFlakyHint"), "text-status-warning-foreground")}
+        {card(t("test.health.cardStreak"), s.streak, t("test.health.cardStreakHint"), "text-status-error-foreground")}
+        {card(t("test.health.cardQuarantine"), s.quarantined, t("test.health.cardQuarantineHint"), "text-status-info-foreground")}
+      </div>
+
+      <div className="flex flex-wrap gap-1.5">
+        {([
+          ["flaky", t("test.health.queueFlaky", { n: queues.flaky.length })],
+          ["streak", t("test.health.queueStreak", { n: queues.streak.length })],
+          ["stale", t("test.health.queueStale", { n: queues.stale.length })],
+        ] as const).map(([k, label]) => (
+          <button
+            key={k}
+            onClick={() => setQueue(k)}
+            className={`rounded-full border px-2.5 py-1 text-[11px] transition-colors ${queue === k ? "border-foreground bg-foreground font-semibold text-background" : "border-border text-muted-foreground hover:text-foreground"}`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      <div className="overflow-hidden rounded-xl border border-border bg-card">
+        {rows.length === 0 ? (
+          <div className="p-6 text-center text-[11px] text-muted-foreground">{t("test.health.queueEmpty")}</div>
+        ) : (
+          <div className="divide-y divide-border">
+            {rows.map((c) => (
+              <div key={`${c.task}-${c.originalId}`} className="flex flex-wrap items-center gap-2 px-3 py-2">
+                <span className="font-mono text-[10px] text-muted-foreground">{c.originalId}</span>
+                <span className="min-w-0 flex-1 truncate text-[11px] text-foreground" title={c.purpose}>{c.purpose || "—"}</span>
+                <span className="rounded bg-muted px-1 text-[9px] text-muted-foreground">{c.task}</span>
+                {dots(c)}
+                {queue === "flaky" && (
+                  <>
+                    <button disabled title={t("test.case.recheckSoon")} className="flex h-6 cursor-not-allowed items-center gap-1 rounded border border-border px-1.5 text-[10px] text-muted-foreground opacity-50">
+                      <ArrowsClockwise size={9} /> {t("test.health.recheck")}
+                    </button>
+                    <button disabled={busy} onClick={() => setQuarantine(c, true)} className="flex h-6 items-center gap-1 rounded border border-border px-1.5 text-[10px] text-muted-foreground hover:text-foreground disabled:opacity-40">
+                      <Prohibit size={9} /> {t("test.case.quarantine")}
+                    </button>
+                  </>
+                )}
+                {queue === "streak" && (
+                  <>
+                    <span className="rounded bg-status-error-muted px-1.5 text-[9px] text-status-error-foreground">{t("test.health.streak", { n: c.tailFails })}</span>
+                    {/* 连败的正解是转缺陷跟踪,不是隔离——隔离会把真实回归藏起来。 */}
+                    <span className="text-[9.5px] text-muted-foreground">→ {t("test.health.toDefect")}</span>
+                  </>
+                )}
+                {queue === "stale" && (
+                  <span className="rounded border border-border px-1.5 text-[9px] text-muted-foreground">
+                    {c.health === "never"
+                      ? t("test.health.neverRun")
+                      : t("test.health.lastRun", { at: fmtDay(hist.rounds[c.res.reduce((last, r, i) => (r !== "-" ? i : last), -1)]?.startedAt) })}
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{t("test.health.quarantineSection")}</div>
+      <div className="overflow-hidden rounded-xl border border-border bg-card">
+        {quarantined.length === 0 ? (
+          <div className="p-6 text-center text-[11px] text-muted-foreground">{t("test.health.quarantineEmpty")}</div>
+        ) : (
+          <div className="divide-y divide-border">
+            {quarantined.map((c) => (
+              <div key={`${c.task}-${c.originalId}`} className="flex flex-wrap items-center gap-2 px-3 py-2">
+                <span className="font-mono text-[10px] text-muted-foreground">{c.originalId}</span>
+                <span className="min-w-0 truncate text-[11px] text-foreground" title={c.purpose}>{c.purpose || "—"}</span>
+                <span className="rounded bg-muted px-1 text-[9px] text-muted-foreground">{c.task}</span>
+                <span className="rounded bg-status-info-muted px-1.5 text-[9px] text-status-info-foreground">
+                  {t("test.health.quarantineAt", { at: fmtDay(c.meta.quarantinedAt) })}
+                </span>
+                <span className="min-w-0 flex-1 truncate text-[10.5px] text-muted-foreground">{c.meta.quarantineReason}</span>
+                <button disabled={busy} onClick={() => setQuarantine(c, false)} className="flex h-6 items-center gap-1 rounded border border-border px-1.5 text-[10px] text-muted-foreground hover:text-foreground disabled:opacity-40">
+                  <ArrowClockwise size={9} /> {t("test.health.restore")}
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className="flex items-start gap-1.5 text-[10px] leading-relaxed text-muted-foreground">
+        <WarningCircle size={12} className="mt-0.5 flex-shrink-0" />
+        <span>{t("test.health.guardrail")}</span>
+      </div>
+    </div>
+  );
+}
+
 // 轮次报告(屏 4,二期):红/绿横幅 + delta 三卡(点击过滤)+ 按来源任务分组 + 失败行展开
 // (AI 归因 / 证据缩略图 / 转缺陷)。
 //
@@ -5062,8 +5362,10 @@ interface RoundReportUI {
 }
 type DeltaFilter = "" | "new" | "fixed" | "still";
 
-function RegressionReportSection({ t, projectPath, reloadSignal, model, providerId }: {
+function RegressionReportSection({ t, projectPath, reloadSignal, model, providerId, initialRoundId }: {
   t: T; projectPath: string; reloadSignal: number; model: string; providerId: string;
+  /** 从对比矩阵单元格跳转过来时预选该轮。 */
+  initialRoundId?: string;
 }) {
   const [rounds, setRounds] = useState<RoundUI[] | null>(null);
   const [roundId, setRoundId] = useState<string>("");
@@ -5082,11 +5384,14 @@ function RegressionReportSection({ t, projectPath, reloadSignal, model, provider
         if (cancelled) return;
         const list: RoundUI[] = (Array.isArray(d?.rounds) ? d.rounds : []).filter((r: RoundUI) => r.status !== "running");
         setRounds(list);
-        setRoundId((cur) => (cur && list.some((r) => r.roundId === cur) ? cur : list[0]?.roundId ?? ""));
+        setRoundId((cur) => {
+          const want = cur || initialRoundId;
+          return want && list.some((r) => r.roundId === want) ? want : list[0]?.roundId ?? "";
+        });
       })
       .catch(() => { if (!cancelled) setRounds([]); });
     return () => { cancelled = true; };
-  }, [projectPath, reloadSignal]);
+  }, [projectPath, reloadSignal, initialRoundId]);
 
   useEffect(() => {
     if (!roundId) return;
