@@ -63,4 +63,43 @@ describe('interpretSdkResult', () => {
   it('从未收到 result 消息时报告该事实', () => {
     assert.throws(() => interpretSdkResult(null, false), /without a result message/);
   });
+
+  // CLI 以退出码 0 静默结束时 SDK 既不抛异常也不发 result 消息
+  // （sdk.mjs getProcessExitError：code===0 && !signal → 返回 undefined）。
+  describe('CLI 未发 result 消息', () => {
+    const trace = (o: Partial<{ assistantText: string; seenTypes: string[]; stderrTail: string }>) => ({
+      assistantText: '', seenTypes: [], stderrTail: '', ...o,
+    });
+
+    it('有 assistant 文本时用它兜底，而不是失败', () => {
+      const fenced = '```json\n{"scripts":[]}\n```';
+      const text = interpretSdkResult(null, true, trace({ assistantText: fenced, seenTypes: ['system', 'assistant'] }));
+      assert.equal(text, fenced);
+    });
+
+    it('无任何可用输出时，错误里带上见到的消息类型与 CLI stderr', () => {
+      assert.throws(
+        () => interpretSdkResult(null, true, trace({ seenTypes: ['system'], stderrTail: 'Failed to parse structured output' })),
+        (err: unknown) => {
+          const msg = (err as Error).message;
+          assert.match(msg, /messages seen: system/);
+          assert.match(msg, /CLI stderr: Failed to parse structured output/);
+          return true;
+        },
+      );
+    });
+
+    it('assistant 文本全是空白时不当作有效结果', () => {
+      assert.throws(() => interpretSdkResult(null, false, trace({ assistantText: '  \n ' })), /without a result message/);
+    });
+  });
+
+  it('success 但结构化输出缺失且 result 为空时，回退到 assistant 文本', () => {
+    const text = interpretSdkResult(
+      success({ result: '', structured_output: null }),
+      true,
+      { assistantText: '{"scripts":[]}', seenTypes: ['assistant', 'result'], stderrTail: '' },
+    );
+    assert.equal(text, '{"scripts":[]}');
+  });
 });
