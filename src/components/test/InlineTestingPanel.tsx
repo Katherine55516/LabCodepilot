@@ -7,7 +7,7 @@ import dynamic from "next/dynamic";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useTranslation } from "@/hooks/useTranslation";
-import { ListChecks, ChartBar, Gear, ArrowLeft, ArrowRight, FolderPlus, FolderOpen, Play, Stop, ArrowUp, SpinnerGap, Sparkle, Terminal, WarningCircle, Wrench, Trash, Desktop, Lightning, Plug, CheckCircle, File as FileIcon, FileArrowDown, NotePencil, DownloadSimple, Eye, X, CaretDown, CaretUp, Check, Lock, PencilSimple, Plus, PushPin, Clock, MagnifyingGlass, Prohibit, ArrowClockwise, ArrowsClockwise, Bug, Warning, type Icon } from "@/components/ui/icon";
+import { ListChecks, ChartBar, Gear, ArrowLeft, ArrowRight, FolderPlus, FolderOpen, Play, Stop, ArrowUp, SpinnerGap, Sparkle, Terminal, WarningCircle, Wrench, Trash, Desktop, Lightning, Plug, CheckCircle, File as FileIcon, FileArrowDown, NotePencil, DownloadSimple, Eye, X, CaretDown, CaretUp, Check, Lock, PencilSimple, Plus, PushPin, Clock, MagnifyingGlass, Prohibit, ArrowClockwise, ArrowsClockwise, Bug, Warning, CaretRight, type Icon } from "@/components/ui/icon";
 import { MarkdownEditor } from "@/components/editor/MarkdownEditor.lazy";
 import type { TranslationKey } from "@/i18n";
 import { useNativeFolderPicker } from "@/hooks/useNativeFolderPicker";
@@ -18,8 +18,9 @@ import { ModelSelectorDropdown } from "@/components/chat/ModelSelectorDropdown";
 import { useProviderModels } from "@/hooks/useProviderModels";
 import { diffRuns, funcPassRateStr } from "@/lib/test/compare";
 import { parseExecProgress } from "@/lib/test/exec-progress";
+import { createExecLineBuffer, type ExecLine, type LiveResult, type LiveStatus } from "@/lib/test/exec-live";
 import { withDownstreamReset, runStartOptions, taskCategory, occupiedSlots, TASK_CATEGORY_ORDER, type TaskCategory } from "@/lib/test/step-status";
-import { REGRESSION_LIBRARY_TASK } from "@/lib/test/library-constants";
+import { REGRESSION_LIBRARY_TASK, REGRESSION_FULL_SUITE as REGRESSION_FULL_SUITE_NAME } from "@/lib/test/library-constants";
 import type { LoginStateInfo } from "@/lib/test/env-config";
 import type { RunHistoryEntry } from "@/lib/test/history";
 import { TestStatsView } from "@/components/test/TestStatsView";
@@ -68,6 +69,59 @@ interface FourState { total: number; pass: number; fail: number; partial: number
 interface ApiInfo { method?: string; url?: string; status?: number | string; requestBody?: string; responseBody?: string }
 // One executed case parsed from an execution @@RESULT frame (drives 报告 table).
 interface CaseResult { id: string; status: string; actual?: string; error?: string; evidence?: string[]; api?: ApiInfo; durationMs?: number }
+// ── 回归执行进展面板的实时状态(v2 二/三期后续) ────────────────────────────────
+// 数据全部来自执行步的 SSE 帧;**只活在内存**,切走/刷新即消失(用户明确要求不保留历史)。
+// 收口后的事实去「轮次报告」页看。
+//
+// ⚠ 对账锚点是 `tools`(tool_use 帧计数),不是 @@CASE_START/@@RESULT 的计数。后两者都是模型
+// 自由文本,同一次 markdown 装饰会把它们一起污染、让「背离」被掩盖;tool_use 是 SDK 结构化帧,
+// 与模型的格式漂移无关。这是 2026-07-10 事故留下的教训(见 lib/test/markers.ts)。
+type LiveEvtKind = "tool" | "ai" | "err" | "sys";
+interface LiveEvt { k: LiveEvtKind; text: string; status?: LiveStatus; lost?: boolean }
+
+interface LiveCase {
+  /** 执行结果里的 id(= @@CASE_START / @@RESULT 的 id)。缺 @@CASE_START 时按进度行序号兜底。 */
+  id: string;
+  index: number;
+  title: string;
+  events: LiveEvt[];
+  result?: LiveResult;
+  /** 跑完了却没收到可解析的判定 —— 不是「待执行」,这个区分正是事故难查的关键。 */
+  lost?: boolean;
+  startedAt: number;
+  ms?: number;
+}
+
+interface LibraryLive {
+  step: TestStep;
+  suiteName: string;
+  env: string;
+  /** 发起时确定的圈选条数(agg.total),进度分母。 */
+  total: number;
+  pre: LiveEvt[];
+  cases: LiveCase[];
+  curIdx: number;
+  /** tool_use 帧计数 —— 对账锚点。 */
+  tools: number;
+  started: number;
+  verdicts: number;
+  malformed: number;
+  four: FourState;
+  /** 执行步流末的权威归约(报告步那条必须忽略,否则会把盘面清零)。 */
+  runJson: FourState | null;
+  errored: boolean;
+  errorText?: string;
+  /** 最后一帧的时刻 —— 用于推断「收口中」(服务端做证据归集与归约时不发任何帧)。 */
+  lastFrameAt: number;
+  finished: boolean;
+}
+
+const EMPTY_FOUR: FourState = { total: 0, pass: 0, fail: 0, partial: 0, blocked: 0 };
+/** 最后一帧起超过这个时长仍无 run_json → 判定为「收口中」(服务端在归约,无帧)。 */
+const LIVE_SETTLE_MS = 1500;
+/** 收口态持续超过这个时长 → 提示「疑似卡住」。 */
+const LIVE_STUCK_MS = 90_000;
+
 // 用例设计阶段生成的一条测试用例(读 cases.json,镜像 ai-lab-test-framework)。在用例
 // 阶段详情卡展示。字段全可选 —— AI 产出可能有出入,渲染时按需兜底。
 interface GeneratedCase {
@@ -602,6 +656,7 @@ export function InlineTestingPanel() {
     const env = opts?.env || "local";
     setLibraryRunning(true);
     setLibraryRunStatus(null);
+    setLibraryLive(null);   // 上一轮的面板不留存
     let roundId: string | undefined;
     // 轮次收口(best-effort,fire-and-forget 语义但等待返回以便刷新列表)。
     const settle = async (outcome: "done" | "aborted") => {
@@ -631,9 +686,91 @@ export function InlineTestingPanel() {
       if (!agg.total) { setLibraryRunStatus(t("test.library.runEmpty")); return; }
       roundId = typeof agg.roundId === "string" ? agg.roundId : undefined;
       setLibraryRunStatus(t("test.library.runStarted", { total: agg.total }));
-      // 依次驱动 execution → report,消费 SSE 到 done(不逐行渲染)。任一步 !res.ok(如 503
-      // 被测地址不可达 / NO_CREDENTIALS)则中止并把后端 error 展示在弹窗状态行。
+      setLibraryLive({
+        step: "execution",
+        suiteName: opts?.suiteName || REGRESSION_FULL_SUITE_NAME,
+        env,
+        total: agg.total,
+        pre: [], cases: [], curIdx: -1,
+        tools: 0, started: 0, verdicts: 0, malformed: 0,
+        four: { ...EMPTY_FOUR },
+        runJson: null, errored: false, lastFrameAt: Date.now(), finished: false,
+      });
+
+      /** live 状态的唯一写入口。所有分支都走它,便于一处维护「最后一帧时刻」。 */
+      const patchLive = (fn: (s: LibraryLive) => LibraryLive) =>
+        setLibraryLive((s) => (s ? { ...fn(s), lastFrameAt: Date.now() } : s));
+
+      /** 事件落到当前用例;还没有用例时落 pre(读用例文件、建证据目录那几步)。 */
+      const pushEvt = (evt: LiveEvt) =>
+        patchLive((s) => {
+          if (s.curIdx < 0) return { ...s, pre: [...s.pre, evt] };
+          const cases = s.cases.slice();
+          cases[s.curIdx] = { ...cases[s.curIdx], events: [...cases[s.curIdx].events, evt] };
+          return { ...s, cases };
+        });
+
+      /** 一条用例开始。上一条若还没收到判定 → 标记「无判定」(它跑完了,不是没跑)。 */
+      const openCase = (id: string, index?: number) =>
+        patchLive((s) => {
+          const cases = s.cases.slice();
+          if (s.curIdx >= 0 && !cases[s.curIdx].result) cases[s.curIdx] = { ...cases[s.curIdx], lost: true };
+          cases.push({ id, index: index ?? cases.length + 1, title: "", events: [], startedAt: Date.now() });
+          return { ...s, cases, curIdx: cases.length - 1, started: s.started + 1 };
+        });
+
+      const applyLine = (e: ExecLine) => {
+        if (e.kind === "caseStart") { openCase(e.id, e.index); return; }
+        if (e.kind === "progress") {
+          // 进度行既给标题(已剥掉「用例 N/总数：」前缀)，也在缺 @@CASE_START 时兜底切段
+          // ——模型可能漏输出机器标记，此时序号变化就是新用例的唯一信号。
+          patchLive((s) => {
+            const cases = s.cases.slice();
+            if (s.curIdx < 0 || (e.idx > 0 && cases[s.curIdx]?.index !== e.idx)) {
+              if (s.curIdx >= 0 && !cases[s.curIdx].result) cases[s.curIdx] = { ...cases[s.curIdx], lost: true };
+              cases.push({ id: `#${e.idx || cases.length + 1}`, index: e.idx || cases.length + 1, title: e.title, events: [], startedAt: Date.now() });
+              return { ...s, cases, curIdx: cases.length - 1, started: s.started + 1 };
+            }
+            cases[s.curIdx] = { ...cases[s.curIdx], title: e.title };
+            return { ...s, cases };
+          });
+          return;
+        }
+        if (e.kind === "result") {
+          const r = e.result;
+          patchLive((s) => {
+            const cases = s.cases.slice();
+            let i = cases.findIndex((c) => c.id === r.id);
+            if (i < 0) i = s.curIdx;                       // id 对不上 → 挂当前用例
+            if (i < 0) return s;
+            cases[i] = { ...cases[i], result: r, lost: false, ms: Date.now() - cases[i].startedAt, title: cases[i].title || r.id };
+            return {
+              ...s, cases, verdicts: s.verdicts + 1,
+              four: {
+                total: s.four.total + 1,
+                pass: s.four.pass + (r.status === "pass" ? 1 : 0),
+                fail: s.four.fail + (r.status === "fail" ? 1 : 0),
+                partial: s.four.partial + (r.status === "partial" ? 1 : 0),
+                blocked: s.four.blocked + (r.status === "blocked" ? 1 : 0),
+              },
+            };
+          });
+          pushEvt({ k: "sys", text: `■ ${r.id} → ${r.status}`, status: r.status });
+          return;
+        }
+        if (e.kind === "resultMalformed") {
+          patchLive((s) => ({ ...s, malformed: s.malformed + 1 }));
+          pushEvt({ k: "sys", text: e.raw, lost: true });
+          return;
+        }
+        pushEvt({ k: "ai", text: e.text });
+      };
+
+      // 依次驱动 execution → report。执行步逐帧解析并画进面板;报告步**不流详情**(用户拍板:
+      // 执行步收口即冻结),只把面板头切成「生成报告中」。任一步 !res.ok(如 503 被测地址不可达 /
+      // NO_CREDENTIALS)则中止并把后端 error 展示在面板与状态行。
       const drive = async (step: TestStep): Promise<boolean> => {
+        if (step !== "execution") patchLive((s) => ({ ...s, step }));
         const res = await fetch("/api/test/run", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -643,14 +780,69 @@ export function InlineTestingPanel() {
           let msg = t("test.library.runFailed");
           try { const d = await res.json(); if (d?.error) msg = d.error; } catch {}
           setLibraryRunStatus(msg);
+          patchLive((s) => ({ ...s, errored: true, errorText: msg, finished: true }));
           return false;
         }
         const reader = res.body?.getReader();
         if (!reader) return true;
-        for (;;) {
-          const { done } = await reader.read();
-          if (done) break;
+        // 报告步不解析详情,只排空(冻结执行步的快照)。
+        if (step !== "execution") {
+          for (;;) { const { done } = await reader.read(); if (done) break; }
+          return true;
         }
+        const dec = new TextDecoder();
+        const lineBuf = createExecLineBuffer();
+        let frameBuf = "";
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          frameBuf += dec.decode(value, { stream: true });
+          const frames = frameBuf.split("\n\n");
+          frameBuf = frames.pop() || "";
+          for (const f of frames) {
+            const line = f.replace(/^data:\s?/, "").trim();
+            if (!line) continue;
+            let evt: { type?: string; data?: string } | null = null;
+            try { evt = JSON.parse(line); } catch { continue; }
+            if (!evt) continue;
+            if (evt.type === "text") {
+              for (const e of lineBuf.feed(evt.data || "")) applyLine(e);
+            } else if (evt.type === "tool_use") {
+              // tool_use 是【结构化】帧 —— 对账锚点,不受模型 markdown 装饰影响。
+              patchLive((s) => ({ ...s, tools: s.tools + 1 }));
+              try {
+                const tu = JSON.parse(evt.data || "{}");
+                const label = toolUseLabel(tu.name || "", tu.input);
+                if (label) pushEvt({ k: "tool", text: `→ ${label}` });
+              } catch { /* 坏帧忽略 */ }
+            } else if (evt.type === "run_json") {
+              // 只认【执行步】这条。报告步流末也发一条 run_json,套用它会把盘面清零。
+              try {
+                const rj = JSON.parse(evt.data || "{}") as { counts?: FourState };
+                if (rj.counts) patchLive((s) => ({ ...s, runJson: rj.counts! }));
+              } catch { /* 坏帧忽略 */ }
+            } else if (evt.type === "error") {
+              let msg = "";
+              try { const d = JSON.parse(evt.data || "{}"); msg = d.userMessage || d.rawMessage || ""; } catch { msg = evt.data || ""; }
+              patchLive((s) => ({ ...s, errored: true, errorText: msg || s.errorText }));
+              pushEvt({ k: "err", text: msg || t("test.library.runFailed") });
+            } else if (evt.type === "result") {
+              // 会话级失败(限流/鉴权)只发 result{is_error:true}、没有 error 帧 —— 不解析它
+              // 面板会一路假绿到收口。
+              try {
+                const r = JSON.parse(evt.data || "{}") as { is_error?: unknown };
+                if (r?.is_error === true) patchLive((s) => ({ ...s, errored: true }));
+              } catch { /* native result 帧无 is_error → 非错误 */ }
+            }
+          }
+        }
+        for (const e of lineBuf.flush()) applyLine(e);
+        // 流末:最后一条用例若始终没有判定,标记「无判定」而不是留在「执行中」。
+        patchLive((s) => {
+          const cases = s.cases.slice();
+          if (s.curIdx >= 0 && !cases[s.curIdx].result) cases[s.curIdx] = { ...cases[s.curIdx], lost: true };
+          return { ...s, cases, curIdx: -1 };
+        });
         return true;
       };
       if (await drive("execution")) {
@@ -659,11 +851,14 @@ export function InlineTestingPanel() {
         setReportsReload((n) => n + 1);
         setLibraryReload((n) => n + 1);
         setLibraryRunStatus(t("test.library.runDone"));
+        setLibraryLive((s) => (s ? { ...s, finished: true } : s));
       } else {
         await settle("aborted");
+        setLibraryLive((s) => (s ? { ...s, errored: true, finished: true } : s));
       }
     } catch {
       setLibraryRunStatus(t("test.library.runFailed"));
+      setLibraryLive((s) => (s ? { ...s, errored: true, finished: true } : s));
       await settle("aborted");
     } finally {
       setLibraryRunning(false);
@@ -1263,6 +1458,8 @@ export function InlineTestingPanel() {
   const [libraryRunning, setLibraryRunning] = useState(false);
   // 重跑状态提示(库不属于任何任务对话,故用独立状态在弹窗内展示,不走任务对话 push)。
   const [libraryRunStatus, setLibraryRunStatus] = useState<string | null>(null);
+  // 回归执行的实时详情（内存态，不保留历史：切走/刷新即消失，收口后的事实见「轮次报告」页）。
+  const [libraryLive, setLibraryLive] = useState<LibraryLive | null>(null);
   // docx 原件预览弹窗(独立于 reqPreview 的文本弹窗):DocxViewer 按原版式渲染二进制原件。
   const [origDocPreview, setOrigDocPreview] = useState<{ abs: string; filename: string } | null>(null);
   useEffect(() => { setReqPreview(null); setOrigDocPreview(null); }, [aId]); // 切任务关掉残留的需求预览弹窗
@@ -1393,47 +1590,38 @@ export function InlineTestingPanel() {
     push({ role: "user", text: `▶ ${t("test.flow.run")}「${stepName}」` });
     let sawError = false;
     let stopped = false; // set when the run is aborted via stopStep (停止)
-    let lineBuf = "";
-    const processText = (chunk: string) => {
-      lineBuf += chunk;
-      const lines = lineBuf.split("\n");
-      lineBuf = lines.pop() || "";
-      for (const raw of lines) {
-        const line = raw.trimEnd();
-        const rIdx = line.indexOf("@@RESULT");
-        if (rIdx >= 0) {
-          try {
-            const r = JSON.parse(line.slice(rIdx + 8).trim());
-            const st = String(r.status || "").toLowerCase();
-            patchTask(id, (s) => ({
-              fourState: {
-                total: s.fourState.total + 1,
-                pass: s.fourState.pass + (st === "pass" ? 1 : 0),
-                fail: s.fourState.fail + (st === "fail" ? 1 : 0),
-                partial: s.fourState.partial + (st === "partial" ? 1 : 0),
-                blocked: s.fourState.blocked + (st === "blocked" ? 1 : 0),
-              },
-              caseResults: [
-                ...s.caseResults,
-                {
-                  id: String(r.id || "用例"),
-                  status: st,
-                  actual: typeof r.actual === "string" ? r.actual : undefined,
-                  error: typeof r.error === "string" ? r.error : undefined,
-                  evidence: Array.isArray(r.evidence) ? r.evidence.map(String) : undefined,
-                },
-              ],
-            }));
-            push({ role: "tool", text: `■ ${r.id || "用例"} → ${st}` });
-          } catch {
-            appendAi(line + "\n");
-          }
-          continue;
-        }
-        if (line.startsWith("▶")) patchTask(id, () => ({ currentCase: line.replace(/^▶\s*/, "") }));
-        if (line) appendAi(line + "\n");
+    // 逐行解析执行步的 AI 文本(@@RESULT / @@CASE_START / ▶ 进度行)。
+    // 解析下沉到 lib/test/exec-live.ts,与服务端归约共用 markers.ts —— 原来这里用
+    // 「indexOf + slice 到行尾 + JSON.parse」,模型一旦把判定行包成 `**@@RESULT {…}**`
+    // 就整条解析失败、实时四态与用例列表全空(与 2026-07-10 服务端那次事故同源)。
+    const lineBuf = createExecLineBuffer();
+    const applyLine = (e: ExecLine) => {
+      if (e.kind === "result") {
+        const r = e.result;
+        patchTask(id, (s) => ({
+          fourState: {
+            total: s.fourState.total + 1,
+            pass: s.fourState.pass + (r.status === "pass" ? 1 : 0),
+            fail: s.fourState.fail + (r.status === "fail" ? 1 : 0),
+            partial: s.fourState.partial + (r.status === "partial" ? 1 : 0),
+            blocked: s.fourState.blocked + (r.status === "blocked" ? 1 : 0),
+          },
+          caseResults: [...s.caseResults, { id: r.id, status: r.status, actual: r.actual, error: r.error, evidence: r.evidence }],
+        }));
+        push({ role: "tool", text: `■ ${r.id} → ${r.status}` });
+      } else if (e.kind === "resultMalformed") {
+        // 含判定标记却解不出 —— 不静默吞掉,原样放进对话流让用户看得见。
+        appendAi(e.raw + "\n");
+      } else if (e.kind === "progress") {
+        // currentCase 保留原始文本（parseExecProgress 会再解一次，向后兼容既有渲染）。
+        patchTask(id, () => ({ currentCase: e.text }));
+        appendAi(`▶ ${e.text}\n`);
+      } else if (e.kind === "text") {
+        appendAi(e.text + "\n");
       }
+      // caseStart 是纯机器标记,不进对话流(服务端用它给工具轨迹归属用例)。
     };
+    const processText = (chunk: string) => { for (const e of lineBuf.feed(chunk)) applyLine(e); };
     try {
       const res = await fetch("/api/test/run", {
         method: "POST",
@@ -1594,7 +1782,8 @@ export function InlineTestingPanel() {
           }
         }
       }
-      if (lineBuf.trim()) appendAi(lineBuf);
+      // 流末冲刷:最后一行可能没有换行符,漏了它会丢掉一条判定或总结。
+      for (const e of lineBuf.flush()) applyLine(e);
     } catch (e) {
       // 停止 (AbortError) is a user action, not a failure — handle it cleanly below.
       if (ctrl.signal.aborted || (e instanceof DOMException && e.name === "AbortError")) {
@@ -2519,6 +2708,7 @@ export function InlineTestingPanel() {
                     t={t}
                     projectPath={current.path}
                     regTab={regTab}
+                    live={libraryLive}
                     model={model}
                     providerId={providerId}
                     setRegTab={setRegTab}
@@ -4131,12 +4321,268 @@ function LastResultDot({ t, res }: { t: T; res: CaseRes[] }) {
   return <span className={`inline-block h-2 w-2 flex-shrink-0 rounded-full ${cls}`} title={title} />;
 }
 
+// 回归执行进展面板：就地下拉的执行详情（替换原来只有一句话的运行状态行）。
+//
+// 折叠 = 一行摘要（跑到哪、有没有挂）。展开 = 左侧用例进度 + 右侧按用例分段的执行流：
+// 通过的用例自动收起，失败/无判定的保持展开并挂红边，工具轨迹折叠成「N 步」。
+//
+// **不保留历史**：状态活在内存，跑完定格为本次快照，切走/刷新即消失（用户拍板）。
+// 收口后的事实在「轮次报告」页。
+//
+// 对账条：正常时一行安静的 ✓；背离时展开三源读数。**锚点是 tool_use 计数**——@@CASE_START
+// 与 @@RESULT 都是模型自由文本，同一次 markdown 装饰会把两者一起污染、让背离被掩盖；
+// tool_use 是 SDK 结构化帧，与格式漂移无关（2026-07-10 事故的教训，见 lib/test/markers.ts）。
+type LiveFilter = "all" | "tool" | "ai" | "key";
+
+const LIVE_DOT: Record<LiveStatus, string> = {
+  pass: "bg-status-success-foreground",
+  fail: "bg-status-error-foreground",
+  partial: "bg-status-warning-foreground",
+  blocked: "bg-muted-foreground",
+};
+const LIVE_TEXT: Record<LiveStatus, string> = {
+  pass: "text-status-success-foreground",
+  fail: "text-status-error-foreground",
+  partial: "text-status-warning-foreground",
+  blocked: "text-muted-foreground",
+};
+
+function RegressionLivePanel({ t, live, running, runStatus, onOpenReport }: {
+  t: T;
+  live: LibraryLive;
+  running: boolean;
+  runStatus: string | null;
+  onOpenReport: () => void;
+}) {
+  const [open, setOpen] = useState(true);
+  const [filter, setFilter] = useState<LiveFilter>("all");
+  const [expanded, setExpanded] = useState<Record<number, boolean>>({});
+  const [foldedTools, setFoldedTools] = useState<Record<string, boolean>>({});
+  // 「收口中 / 疑似卡住」是【推断态】——服务端在做证据归集与归约时不发任何帧。用一个秒级
+  // ticker 让面板能自己判断「多久没收到帧了」。
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!running || live.finished) return;
+    const h = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(h);
+  }, [running, live.finished]);
+  const logRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (running && logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
+  }, [live.cases.length, live.tools, live.verdicts, running]);
+
+  const fin = !!live.runJson || live.finished;
+  const counts = live.runJson ?? live.four;
+  const lostCases = live.cases.filter((c) => c.lost).length;
+  const lostAll = fin && live.verdicts === 0 && live.tools > 0 && !live.errored;
+  const aborting = live.errored;
+  const idle = now - live.lastFrameAt;
+  const settling = !fin && live.step === "execution" && live.started > 0 && idle > LIVE_SETTLE_MS;
+  const stuck = settling && idle > LIVE_STUCK_MS;
+  // 背离 = 「浏览器确有活动，却收不到判定」。中断的轮天然缺判定，那是【中断】不是【判定丢失】——
+  // 混为一谈会让真事故淹没在噪音里。
+  const inflight = live.curIdx >= 0 ? 1 : 0;
+  const diverged = !aborting && (live.malformed > 0 || (live.tools > 0 && live.started - inflight > live.verdicts));
+
+  const cur = live.curIdx >= 0 ? live.cases[live.curIdx] : undefined;
+  let headline: string;
+  let sub: string;
+  if (fin) {
+    headline = aborting ? t("test.live.doneAborted") : lostAll ? t("test.live.doneLost")
+      : counts.fail || counts.blocked ? t("test.live.doneFail") : t("test.live.doneOk");
+    sub = t("test.live.passOf", { pass: counts.pass, total: counts.total || live.total });
+  } else if (live.step === "report") {
+    headline = t("test.live.report"); sub = t("test.live.reportSub");
+  } else if (stuck) { headline = t("test.live.settling"); sub = t("test.live.stuck"); }
+  else if (settling) { headline = t("test.live.settling"); sub = t("test.live.settlingSub"); }
+  else if (cur) { headline = t("test.live.running", { idx: cur.index, total: live.total }); sub = cur.title || cur.id; }
+  else { headline = t("test.live.startingUp"); sub = t("test.live.startingUpSub"); }
+
+  const pct = fin ? 100 : live.total ? Math.round((live.verdicts / live.total) * 100) : 0;
+  const barCls = fin ? (counts.fail || counts.blocked ? "bg-status-error-foreground" : "bg-status-success-foreground") : "bg-primary";
+
+  const chip = (label: string, n: number, cls: string) =>
+    n > 0 ? <span key={label} className={`rounded-full px-1.5 text-[9.5px] tabular-nums ${cls}`}>{label} {n}</span> : null;
+
+  const keep = (e: LiveEvt) =>
+    filter === "all" || (filter === "tool" && e.k === "tool") || (filter === "ai" && e.k === "ai") || (filter === "key" && e.k !== "tool");
+
+  const renderEvents = (events: LiveEvt[], key: string) => {
+    const list = events.filter(keep);
+    if (!list.length) return null;
+    const tools = list.filter((e) => e.k === "tool");
+    const foldable = tools.length > 4 && filter !== "tool";
+    const showTools = !foldable || foldedTools[key] === false;
+    const shown = showTools ? list : list.filter((e) => e.k !== "tool");
+    const bubble = (e: LiveEvt, i: number) => {
+      if (e.k === "tool") return <div key={i} className="truncate rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground" title={e.text}>{e.text}</div>;
+      if (e.k === "err") return <div key={i} className="rounded bg-status-error-muted px-2 py-1 text-[10.5px] text-status-error-foreground">{e.text}</div>;
+      if (e.k === "sys") return <div key={i} className={`font-mono text-[10.5px] font-semibold ${e.lost ? "font-sans font-medium text-status-error-foreground" : e.status ? LIVE_TEXT[e.status] : "text-muted-foreground"}`}>{e.text}</div>;
+      return <div key={i} className="whitespace-pre-wrap rounded-md bg-muted px-2 py-1 text-[11px] text-foreground">{e.text}</div>;
+    };
+    return (
+      <div className="flex flex-col gap-1 px-2.5 py-1.5">
+        {shown.map(bubble)}
+        {foldable && (
+          <button
+            onClick={(ev) => { ev.stopPropagation(); setFoldedTools((m) => ({ ...m, [key]: !(m[key] === false) })); }}
+            className="self-start rounded-full border border-dashed border-border px-2 text-[10px] text-muted-foreground hover:text-foreground"
+          >
+            {showTools ? t("test.live.collapseTools") : t("test.live.expandTools", { n: tools.length })}
+          </button>
+        )}
+      </div>
+    );
+  };
+
+  return (
+    <div className={`mb-3 overflow-hidden rounded-lg border bg-card ${diverged || lostAll ? "border-status-error-foreground/50" : "border-border"}`}>
+      {/* 折叠头 */}
+      <button
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-muted"
+      >
+        {open ? <CaretDown size={9} className="flex-shrink-0 text-muted-foreground" /> : <CaretRight size={9} className="flex-shrink-0 text-muted-foreground" />}
+        {fin ? <span className={`h-2 w-2 flex-shrink-0 rounded-full ${counts.fail || counts.blocked || aborting ? "bg-status-error-foreground" : "bg-status-success-foreground"}`} />
+             : <SpinnerGap size={11} className="flex-shrink-0 animate-spin text-primary" />}
+        <span className="whitespace-nowrap text-[11.5px] font-semibold text-foreground">{headline}</span>
+        <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">{sub}</span>
+        <span className="h-1 w-24 flex-shrink-0 overflow-hidden rounded-full bg-border">
+          <span className={`block h-full transition-all ${barCls}`} style={{ width: `${pct}%` }} />
+        </span>
+        <span className="flex flex-shrink-0 gap-1">
+          {chip(t("test.state.pass"), counts.pass, "bg-status-success-muted text-status-success-foreground")}
+          {chip(t("test.state.fail"), counts.fail, "bg-status-error-muted text-status-error-foreground")}
+          {chip(t("test.state.partial"), counts.partial, "bg-status-warning-muted text-status-warning-foreground")}
+          {chip(t("test.state.blocked"), counts.blocked, "bg-muted text-muted-foreground")}
+        </span>
+      </button>
+
+      {/* 对账条：正常安静，背离/中断时响 */}
+      {live.started > 0 && (
+        aborting ? (
+          <div className="flex flex-wrap items-center gap-1.5 border-t border-border bg-status-error-muted px-3 py-1.5 text-[11px] font-medium text-status-error-foreground">
+            <Warning size={11} /> <span>{t("test.live.reconAborted")}</span>
+            <span className="ml-auto font-normal">{live.errorText || t("test.live.reconAbortedWhy")}</span>
+          </div>
+        ) : diverged ? (
+          <div className="flex flex-wrap items-center gap-1.5 border-t border-border bg-status-error-muted px-3 py-1.5 text-[11px] font-medium text-status-error-foreground">
+            <Warning size={11} />
+            <span>{t("test.live.reconToolActivity", { n: live.tools })}</span>·
+            <span>{t("test.live.reconStarted", { n: live.started })}</span>·
+            <span>{t("test.live.reconVerdicts", { n: live.verdicts })}</span>
+            {live.malformed > 0 && <>·<span>{t("test.live.reconMalformed", { n: live.malformed })}</span></>}
+            <span className="ml-auto font-normal">{t("test.live.reconBad")}</span>
+          </div>
+        ) : (
+          <div className="flex flex-wrap items-center gap-1.5 border-t border-border bg-muted px-3 py-1 text-[10.5px] text-muted-foreground">
+            <Check size={10} /> <span>{t("test.live.reconOk", { verdicts: live.verdicts, started: live.started })}</span>
+            <span className="ml-auto">{t("test.live.reconAnchor")}</span>
+          </div>
+        )
+      )}
+
+      {open && (
+        <div className="grid grid-cols-1 border-t border-border md:grid-cols-[280px_1fr]">
+          {/* 左：用例进度 */}
+          <div className="min-w-0 border-b border-border md:border-b-0 md:border-r">
+            <div className="flex items-center gap-1.5 bg-muted px-3 py-1 text-[9.5px] font-semibold uppercase tracking-wide text-muted-foreground">
+              {t("test.live.caseSect")}
+              <span className="flex-1" />
+              <span className={`text-[10px] font-normal normal-case tracking-normal ${lostCases ? "text-status-error-foreground" : ""}`}>
+                {t("test.live.caseDone", { done: live.verdicts, total: live.total })}
+                {lostCases > 0 && t("test.live.caseLost", { n: lostCases })}
+              </span>
+            </div>
+            <div className="max-h-[320px] divide-y divide-border overflow-auto">
+              {live.cases.length === 0 && <div className="p-4 text-center text-[11px] text-muted-foreground">{t("test.live.waiting")}</div>}
+              {live.cases.map((c, i) => (
+                <button
+                  key={`${c.id}-${i}`}
+                  onClick={() => { setExpanded((m) => ({ ...m, [i]: true })); document.getElementById(`live-seg-${i}`)?.scrollIntoView({ block: "center", behavior: "smooth" }); }}
+                  className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] hover:bg-muted ${c.lost ? "bg-status-error-muted" : live.curIdx === i ? "bg-primary/[0.07] shadow-[inset_2px_0_0_var(--primary)]" : ""}`}
+                >
+                  {c.result ? <span className={`h-2 w-2 flex-shrink-0 rounded-full ${LIVE_DOT[c.result.status]}`} />
+                    : c.lost ? <span className="h-2 w-2 flex-shrink-0 rounded-full bg-status-error-foreground" />
+                    : live.curIdx === i ? <SpinnerGap size={9} className="flex-shrink-0 animate-spin text-primary" />
+                    : <span className="h-2 w-2 flex-shrink-0 rounded-full bg-border" />}
+                  <span className="flex-shrink-0 font-mono text-[10px] text-muted-foreground">{c.id}</span>
+                  <span className="min-w-0 flex-1 truncate text-foreground" title={c.title}>{c.title || "—"}</span>
+                  {c.result ? (
+                    <span className="font-mono text-[9.5px] tabular-nums text-muted-foreground" title={live.runJson ? t("test.live.durFinal") : t("test.live.durLive")}>
+                      {live.runJson ? "" : "~"}{((c.ms ?? 0) / 1000).toFixed(1)}s
+                    </span>
+                  ) : c.lost ? (
+                    <span className="text-[9.5px] font-semibold text-status-error-foreground" title={t("test.live.noVerdictHint")}>⚠ {t("test.live.noVerdict")}</span>
+                  ) : (
+                    <span className="text-[9.5px] text-muted-foreground">{live.curIdx === i ? t("test.live.executing") : t("test.live.pending")}</span>
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* 右：按用例分段的执行流 */}
+          <div className="flex min-w-0 flex-col">
+            <div className="flex flex-wrap items-center gap-1 border-b border-border bg-muted px-2.5 py-1">
+              {([["all", t("test.live.filterAll")], ["tool", t("test.live.filterTool")], ["ai", t("test.live.filterAi")], ["key", t("test.live.filterKey")]] as const).map(([k, label]) => (
+                <button key={k} onClick={() => setFilter(k)} className={`rounded-full px-2 py-0.5 text-[10px] ${filter === k ? "border border-border bg-card font-semibold text-foreground" : "text-muted-foreground hover:text-foreground"}`}>{label}</button>
+              ))}
+              <span className="flex-1" />
+              <span className="text-[10px] text-muted-foreground">{t("test.live.toolActivity", { n: live.tools })}</span>
+            </div>
+            <div ref={logRef} className="flex h-[320px] flex-col gap-1.5 overflow-auto p-2">
+              {live.pre.length > 0 && <div className="overflow-hidden rounded-md border border-border">{renderEvents(live.pre, "pre")}</div>}
+              {live.cases.map((c, i) => {
+                const isOpen = expanded[i] ?? (live.curIdx === i || !!c.lost || c.result?.status === "fail" || c.result?.status === "partial" || !c.result);
+                const toolCount = c.events.filter((e) => e.k === "tool").length;
+                const border = c.lost || c.result?.status === "fail" ? "border-status-error-foreground/45" : live.curIdx === i ? "border-primary/40" : "border-border";
+                return (
+                  <div key={`${c.id}-${i}`} id={`live-seg-${i}`} className={`overflow-hidden rounded-md border ${border} ${c.lost ? "bg-status-error-muted/40" : ""}`}>
+                    <button onClick={() => setExpanded((m) => ({ ...m, [i]: !isOpen }))} className="flex w-full items-center gap-2 bg-muted px-2.5 py-1 text-left text-[11px] hover:brightness-[1.03]">
+                      {isOpen ? <CaretDown size={9} className="text-muted-foreground" /> : <CaretRight size={9} className="text-muted-foreground" />}
+                      <span className="font-mono text-[9.5px] text-muted-foreground">{c.index}/{live.total}</span>
+                      <span className="min-w-0 flex-1 truncate text-foreground" title={c.title}>{c.title || c.id}</span>
+                      <span className="text-[9.5px] tabular-nums text-muted-foreground">{t("test.live.steps", { n: toolCount })}</span>
+                      {c.result ? <span className={`font-mono text-[9.5px] font-bold ${LIVE_TEXT[c.result.status]}`}>{c.result.status}</span>
+                        : c.lost ? <span className="font-mono text-[9.5px] font-bold text-status-error-foreground">{t("test.live.noVerdict")}</span>
+                        : <SpinnerGap size={10} className="animate-spin text-primary" />}
+                    </button>
+                    {isOpen && renderEvents(c.events, String(i))}
+                    {c.result?.error && <div className="border-t border-status-error-foreground/20 bg-status-error-muted px-2.5 py-1 text-[10.5px] text-status-error-foreground">{c.result.error}</div>}
+                  </div>
+                );
+              })}
+              {live.cases.length === 0 && live.pre.length === 0 && <div className="py-8 text-center text-[11px] text-muted-foreground">{t("test.live.waiting")}</div>}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 收口 */}
+      {fin && (
+        <div className="flex flex-wrap items-center gap-2 border-t border-border px-3 py-1.5 text-[11px] text-muted-foreground">
+          {aborting ? <span className="font-medium text-status-error-foreground">{t("test.live.footAborted")}</span>
+            : lostAll ? <><span className="font-medium text-status-error-foreground">{t("test.live.footLost", { n: counts.blocked || live.total })}</span><span>{t("test.live.footLostWhy")}</span></>
+            : counts.fail ? <span className="font-medium text-status-warning-foreground">{t("test.live.footFail", { n: counts.fail })}</span>
+            : <span className="font-medium text-status-success-foreground">{t("test.live.footOk", { pass: counts.pass, total: counts.total })}</span>}
+          <span className="flex-1" />
+          <button onClick={onOpenReport} className="flex h-6 items-center rounded border border-border bg-primary px-2 text-[11px] font-medium text-primary-foreground">{t("test.live.viewReport")}</button>
+          <span className="w-full text-[10px] leading-relaxed">{t("test.live.corrected")}</span>
+        </div>
+      )}
+      {!fin && runStatus && <div className="border-t border-border px-3 py-1 text-[10px] text-muted-foreground">{runStatus}</div>}
+    </div>
+  );
+}
+
 /** 回归测试整页工作区的子页签。 */
 type RegTab = "library" | "suites" | "rounds" | "report" | "matrix" | "health";
 
 // 回归测试整页工作区(批 H):子页签(用例库/回归套件/轮次历史/轮次报告)+「发起回归」+ 运行状态行。
 // 三个区块由原弹窗内容页面化而来,数据链路(reloadSignal/deposit/rounds API)不变。
-function RegressionWorkspace({ t, projectPath, regTab, setRegTab, reloadSignal, onChanged, onLaunch, running, runStatus, model, providerId }: {
+function RegressionWorkspace({ t, projectPath, regTab, setRegTab, reloadSignal, onChanged, onLaunch, running, runStatus, live, model, providerId }: {
   t: T;
   projectPath: string;
   regTab: RegTab;
@@ -4146,6 +4592,8 @@ function RegressionWorkspace({ t, projectPath, regTab, setRegTab, reloadSignal, 
   onLaunch: (preset?: { mode?: "failed-only"; parentRoundId?: string }) => void;
   running: boolean;
   runStatus: string | null;
+  /** 执行中的实时详情；null = 没有正在跑的轮次（面板不显示）。 */
+  live: LibraryLive | null;
   model: string;
   providerId: string;
 }) {
@@ -4181,12 +4629,14 @@ function RegressionWorkspace({ t, projectPath, regTab, setRegTab, reloadSignal, 
           {running ? <SpinnerGap size={11} className="animate-spin" /> : <Play size={11} />} {running ? t("test.library.running") : t("test.launch.open")}
         </button>
       </div>
-      {runStatus && (
+      {live ? (
+        <RegressionLivePanel t={t} live={live} running={running} runStatus={runStatus} onOpenReport={() => setRegTab("report")} />
+      ) : runStatus ? (
         <div className="mb-3 flex items-center gap-1.5 rounded-md border border-border bg-muted/30 px-3 py-1.5 text-[11px] text-muted-foreground">
           {running && <SpinnerGap size={11} className="animate-spin" />}
           {runStatus}
         </div>
-      )}
+      ) : null}
       {regTab === "library" && <RegressionLibrarySection t={t} projectPath={projectPath} reloadSignal={reloadSignal} onChanged={onChanged} />}
       {regTab === "suites" && <RegressionSuitesSection t={t} projectPath={projectPath} />}
       {regTab === "rounds" && (
