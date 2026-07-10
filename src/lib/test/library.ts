@@ -222,12 +222,22 @@ export interface RunnableCases {
  * (执行/归约按 id 索引 @@RESULT,跨任务 TC-001 撞号会串结果)。
  *   - runId 首选原 id;已占用 → `{task}::{originalId}`;仍占用 → 追加 `#n`。
  *   - 用例体去掉 `_source`(执行 prompt 只需标准用例字段);id 换成 runId。
+ *   - `include`(v2):圈选集——只聚合命中 {task, originalId} 的条目(套件求值结果 /
+ *     二期失败复测集都走这个口)。缺省 = 全库(v1 行为)。
  */
-export function buildRunnableCases(lib: RegressionLibrary): RunnableCases {
+export function buildRunnableCases(
+  lib: RegressionLibrary,
+  include?: Array<{ task: string; originalId: string }>,
+): RunnableCases {
+  let entries = lib.entries;
+  if (include) {
+    const want = new Set(include.map((k) => `${k.task}\u0000${k.originalId}`));
+    entries = entries.filter((e) => want.has(`${e._source.task}\u0000${e._source.originalId}`));
+  }
   const used = new Set<string>();
   const cases: TestCase[] = [];
   const idMap: Record<string, { task: string; originalId: string }> = {};
-  for (const e of lib.entries) {
+  for (const e of entries) {
     const { task, originalId } = e._source;
     let rid = originalId || 'TC';
     if (used.has(rid)) rid = `${task}::${originalId}`;

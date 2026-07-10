@@ -103,3 +103,70 @@
 - 重跑报告目前按 runId(命名空间后)呈现,未按 `_source.task` 视觉分组(idMap 已具备,留作后续)。
 - 库导出(xlsx)未做(批 C 只做查看+移除);可后续复用 report-xlsx 派生。
 - 保留任务名 `回归用例库` 与用户真实同名任务的冲突校验未加(记 tech-debt)。
+
+---
+
+# v2 一期：轮次 + 套件 + 报告分组（2026-07-10）
+
+> 方案与竞品对标见 [docs/research/regression-library-v2-benchmark-proposal.md](../research/regression-library-v2-benchmark-proposal.md)；执行计划(决策日志/设计默认/验证记录)见 [docs/exec-plans/active/regression-library-v2.md](../exec-plans/active/regression-library-v2.md)；交互原型 `docs/research/prototypes/regression-library-v2-prototype.html`
+
+## 一句话
+
+在 v1「自动沉淀 + 全量一键重跑」之上：**轮次实体化**(同环境多轮互不覆盖 + 当轮快照)、**套件圈选**(静态/查询双型 + pinned 必跑)、**发起弹窗**(套件/环境/预检)、**报告按来源任务分组 + 轮次 delta**、**库检索**。全部本地 JSON,零中心服务;「全量」内置套件保证 v1 行为向后兼容。
+
+## 概念模型(读代码前必知)
+
+| 概念 | 是什么 | 落点 |
+|---|---|---|
+| 套件(Suite) | 「本轮跑什么」的圈选**规则**(引用不复制) | `testCase/回归套件.json` |
+| 轮次(Round) | 一次回归执行**实例**(一轮=一套件×一环境×一模式,原子) | 索引 `testCase/.data/回归轮次.json`,产物 `report/回归用例库/{roundId}/` |
+| 快照(Snapshot) | 发起时该轮实际执行用例集的不可变副本(含 idMap) | `{roundId}/cases.snapshot.json` |
+| pinned 白名单 | 项目级核心必跑,任何套件执行始终并入 | 回归套件.json 顶层 `pinned` |
+
+标签管「进不进库」(v1 不变),套件管「这轮跑不跑」;报告挂轮次不挂套件。
+
+## 核心模块
+
+- **`src/lib/test/rounds.ts`**:轮次索引读写(宽松解析)、`generateRoundId`(RND-YYYYMMDD-HHmm+冲突后缀)、状态机 running→done/aborted/partial、`finishRound` 收口摘要、`normalizeStaleRounds` **惰性收口**(running 超 2h 视图归一 aborted,不回写)、`roundArtifactPaths`、`readRoundSnapshot`、`buildLastResultLookup`(最近已收口轮 run.json × 快照 idMap → 套件「上次结果」条件数据源)。
+- **`src/lib/test/suites.ts`**:套件读写、`sanitizeSuite`(文件/API 共用清洗)、`evalSuite`(query 四字段 AND/值 OR/空不限制;static keys;pinned 并入去重;`quarantined===true` 前置排除——三期字段兼容)、内置 `REGRESSION_FULL_SUITE='全量'` 不落盘不可改删。
+- **并发写保护(两文件同款)**:`seq` 写入序号 + mutate 在 rename 前重读比对,冲突在最新内容上重放一次——updatedAt 毫秒粒度同刻写入无法区分,故用 seq。
+- **`library.ts`**:`buildRunnableCases(lib, include?)` 加圈选集参数(套件求值/二期复测共用),缺省=v1 全库。
+- **`reduce.ts`**:`taskCounts`(opts.taskOf=runId→来源任务,来自快照 idMap)——按来源任务四态小计入 run.json;不传字段缺省。
+
+## API 路由(新增/改造)
+
+| 路由 | 说明 |
+|---|---|
+| POST `/api/test/library/run` | v2 重写:`{projectPath, suiteName?, env?}` → readSuites→evalSuite(pinned+lastResult)→buildRunnableCases(include)→写聚合 cases.json→**建轮次(running)+写快照**→返回 `{ok,total,roundId}`。未知套件 400;快照写失败不阻塞。 |
+| POST `/api/test/run` | 接受 `roundId`(段安全校验+仅保留任务名);穿透 buildStep/evidenceDir/两个 wrap→产物落 `report/回归用例库/{roundId}/`、证据 `_evidence/{task}-{env}-{roundId}`;执行归约注入快照 idMap 出 taskCounts;reportPrompt 注入「按来源任务分节」要求。 |
+| GET/PATCH/DELETE `/api/test/library/rounds` | 列轮次(惰性收口视图,倒序)/收口(done 从该轮 run.json 摘录 counts/suitePassStr,缺 run.json 按 aborted)/删单轮(索引+产物目录+该轮证据;审计 delete-round)。 |
+| GET `/api/test/library/rounds/detail` | 单轮按来源任务分组 + 与上一全量轮 delta(新增失败/已修复/持续失败,**交集口径**,复测轮不作基准)。只读拼装。 |
+| GET/POST/DELETE `/api/test/suites` | 列套件(hits=执行范围口径:求值+pinned 并入+隔离排除,含 hitTasks/fullHits/fullTasks)/新建更新套件或覆盖 pinned(内置名 400;审计 suite-save)/删套件(内置 400;审计 suite-delete)。 |
+| POST `/api/test/suites/eval` | 构建器【未保存】套件实时命中预览(口径与发起执行完全一致)。 |
+| GET `/api/test/reports` | 扫描下钻轮次子目录(跳过 `.history`),条目透传 `roundId`。 |
+
+## UI(InlineTestingPanel,四个弹窗)
+
+- **RegressionLibraryModal**(v1 升级):头部加「轮次历史」「回归套件」入口;「一键重跑」改开发起弹窗;检索工具条(搜索 ID/标题+来源任务/优先级过滤,纯前端,空组隐藏+命中计数);修复 `status-danger-*`→`status-error-*`(未定义 token,删除 hover 红色此前静默失效)。
+- **RegressionSuitesModal**:套件列表(内置全量🔒+类型 badge+实时命中+编辑/删除)+构建器(名称/类型 radio/查询条件 chips 四字段 300ms 防抖实时预览/静态分组勾选树组全选)+pinned 白名单查看与勾选树编辑。
+- **StartRegressionModal**:套件下拉(命中数)/环境下拉(env-config allowedEnvs)/被测地址展示(未配置警示)/预检卡(条数+任务数+近 3 个 done 轮均值时长估算,无历史显「暂无估算」)/红线说明/空套件禁用。确认→`runLibrary({suiteName, env})`。
+- **RegressionRoundsModal**:轮次表(时间/环境/套件/红线 badge/中断态/单轮删除)+行内展开详情(delta 三卡+任务分组红绿小计)。
+- runLibrary(面板):发起带 suiteName/env→驱动 /api/test/run 带 roundId→完成 PATCH done/失败 PATCH aborted(读侧惰性兜底)。
+
+## i18n / 审计
+
+`test.suites.*`(41)+`test.launch.*`(15)+`test.rounds.*`(19)+库检索 5 键;zh/en 手写,zh-HK `gen-zh-hk.mjs` 生成。审计新动作:`suite-save`/`suite-delete`/`delete-round`(标签映射齐)。
+
+## 验证状态(2026-07-10,dev)
+
+- `npm run test` 1968/0(新增 27 条:rounds/suites 25 + reduce taskCounts 2)。
+- curl 端到端:同环境两轮互不覆盖(冲突后缀)/快照 idMap 命名空间/未知套件 400/PATCH 收口摘录/缺 run.json 转 aborted/last=fail 查询套件精确命中/单轮删除/detail delta(新增失败/已修复精确)。
+- CDP 实测(mock 仅拦 workbench 项目列表 GET/PUT 防污染真实数据,业务 API 真调、数据落隔离项目):四弹窗全链路+检索过滤+构建器实时预览(pinned 去重)+发起预检(近 2 轮时长估算)+轮次 delta 展开,console 0 errors。
+- ⚠️ 未验证(需凭证/打包):真实 AI 执行(dev NO_CREDENTIALS);打包验收含新 roundId 产物路径(tech-debt 旧 #13 的 bundle-chromium 链路一并复核)。
+
+## 已知偏差与局限
+
+- 预检 **token 估算未做**(方案含此项):现状无按轮 token 数据源,一期仅时长估算;待 usage-stats 打通后补。
+- 复测轮(failed-only)/评审门禁/缺陷闭环/rev 版本号=二期;健康度/隔离区/stats=三期(quarantined 排除已前置兼容)。
+- 旧平铺重跑产物兼容显示、不折算轮次(设计默认 #3)。
+- dev 排障记:playwright MCP 往仓库根写 `.playwright-mcp/` 会触发 Tailwind/webpack 监听重编译死循环——验证时把该目录软链到仓库外。

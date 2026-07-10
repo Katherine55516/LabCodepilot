@@ -7,7 +7,7 @@ import dynamic from "next/dynamic";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useTranslation } from "@/hooks/useTranslation";
-import { ListChecks, ChartBar, Gear, ArrowLeft, ArrowRight, FolderPlus, FolderOpen, Play, Stop, ArrowUp, SpinnerGap, Sparkle, Terminal, WarningCircle, Wrench, Trash, Desktop, Lightning, Plug, CheckCircle, File as FileIcon, FileArrowDown, NotePencil, DownloadSimple, Eye, X, CaretDown, CaretUp, Check, type Icon } from "@/components/ui/icon";
+import { ListChecks, ChartBar, Gear, ArrowLeft, ArrowRight, FolderPlus, FolderOpen, Play, Stop, ArrowUp, SpinnerGap, Sparkle, Terminal, WarningCircle, Wrench, Trash, Desktop, Lightning, Plug, CheckCircle, File as FileIcon, FileArrowDown, NotePencil, DownloadSimple, Eye, X, CaretDown, CaretUp, Check, Lock, PencilSimple, Plus, PushPin, Clock, MagnifyingGlass, type Icon } from "@/components/ui/icon";
 import { MarkdownEditor } from "@/components/editor/MarkdownEditor.lazy";
 import type { TranslationKey } from "@/i18n";
 import { useNativeFolderPicker } from "@/hooks/useNativeFolderPicker";
@@ -569,23 +569,38 @@ export function InlineTestingPanel() {
       .catch(() => {});
   };
 
-  // 跨任务一键重跑:①聚合库→写 `回归用例库.cases.json`(POST /api/test/library/run);②③复用现有
-  // /api/test/run 依次跑 execution→report(taskName=保留名),env 走项目 environments.json。产物落
-  // report/回归用例库/,自动出现在【报告区】(reports 列举扫全 report/ 目录),故这里跑完只需 bump
-  // reportsReload。执行/报告的详细进度不在弹窗内逐行渲染(MVP);弹窗按钮显示「重跑中…」。
-  const runLibrary = async () => {
+  // 发起回归轮次(v2):①圈选聚合→建轮次+快照(POST /api/test/library/run,返回 roundId);②③复用
+  // 现有 /api/test/run 依次跑 execution→report(taskName=保留名,带 roundId → 产物落
+  // report/回归用例库/{roundId}/,同环境多轮互不覆盖);④收口轮次(PATCH rounds,done 时后端从
+  // run.json 摘录口径,异常/中断按 aborted)。报告自动出现在【报告区】(reports 扫描含轮次子目录)。
+  // suiteName/env 由批 D 的发起弹窗传入;缺省 = 内置「全量」+ local(等价 v1 行为)。
+  const runLibrary = async (opts?: { suiteName?: string; env?: string }) => {
     const p = current?.path;
     if (!p || libraryRunning) return;
+    const env = opts?.env || "local";
     setLibraryRunning(true);
     setLibraryRunStatus(null);
+    let roundId: string | undefined;
+    // 轮次收口(best-effort,fire-and-forget 语义但等待返回以便刷新列表)。
+    const settle = async (outcome: "done" | "aborted") => {
+      if (!roundId) return;
+      try {
+        await fetch("/api/test/library/rounds", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ projectPath: p, roundId, outcome }),
+        });
+      } catch { /* 收口失败 → 读侧惰性 aborted 兜底 */ }
+    };
     try {
       const agg = await fetch("/api/test/library/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectPath: p }),
+        body: JSON.stringify({ projectPath: p, suiteName: opts?.suiteName, env }),
       }).then((r) => r.json()).catch(() => null);
-      if (!agg?.ok) { setLibraryRunStatus(t("test.library.runFailed")); return; }
+      if (!agg?.ok) { setLibraryRunStatus(agg?.error || t("test.library.runFailed")); return; }
       if (!agg.total) { setLibraryRunStatus(t("test.library.runEmpty")); return; }
+      roundId = typeof agg.roundId === "string" ? agg.roundId : undefined;
       setLibraryRunStatus(t("test.library.runStarted", { total: agg.total }));
       // 依次驱动 execution → report,消费 SSE 到 done(不逐行渲染)。任一步 !res.ok(如 503
       // 被测地址不可达 / NO_CREDENTIALS)则中止并把后端 error 展示在弹窗状态行。
@@ -593,7 +608,7 @@ export function InlineTestingPanel() {
         const res = await fetch("/api/test/run", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ projectPath: p, taskName: REGRESSION_LIBRARY_TASK, step, env: "local", model: model || undefined, providerId: providerId || undefined }),
+          body: JSON.stringify({ projectPath: p, taskName: REGRESSION_LIBRARY_TASK, step, env, roundId, model: model || undefined, providerId: providerId || undefined }),
         });
         if (!res.ok) {
           let msg = t("test.library.runFailed");
@@ -611,12 +626,16 @@ export function InlineTestingPanel() {
       };
       if (await drive("execution")) {
         await drive("report");
+        await settle("done");
         setReportsReload((n) => n + 1);
         setLibraryReload((n) => n + 1);
         setLibraryRunStatus(t("test.library.runDone"));
+      } else {
+        await settle("aborted");
       }
     } catch {
       setLibraryRunStatus(t("test.library.runFailed"));
+      await settle("aborted");
     } finally {
       setLibraryRunning(false);
     }
@@ -1205,6 +1224,12 @@ export function InlineTestingPanel() {
   const [recommendOpen, setRecommendOpen] = useState(false);
   // 回归用例库弹窗(项目级):查看/管理沉淀的回归用例 + 跨任务一键重跑。
   const [libraryOpen, setLibraryOpen] = useState(false);
+  // 回归套件管理弹窗(v2 批 C):套件列表/构建器/必跑白名单。从库弹窗头部入口打开。
+  const [suitesOpen, setSuitesOpen] = useState(false);
+  // 发起回归弹窗(v2 批 D):套件/环境/预检确认后才真正 runLibrary。
+  const [launchOpen, setLaunchOpen] = useState(false);
+  // 轮次历史弹窗(v2 批 E):轮次列表 + 详情(任务分组 + delta)。
+  const [roundsOpen, setRoundsOpen] = useState(false);
   // 跨任务一键重跑进行中(聚合→执行→报告)。禁用重复触发,按钮显示「重跑中…」。
   const [libraryRunning, setLibraryRunning] = useState(false);
   // 重跑状态提示(库不属于任何任务对话,故用独立状态在弹窗内展示,不走任务对话 push)。
@@ -2615,9 +2640,25 @@ export function InlineTestingPanel() {
           reloadSignal={libraryReload}
           onChanged={() => setLibraryReload((n) => n + 1)}
           onClose={() => setLibraryOpen(false)}
-          onRun={runLibrary}
+          onRun={() => setLaunchOpen(true)}
           running={libraryRunning}
           runStatus={libraryRunStatus}
+          onOpenSuites={() => setSuitesOpen(true)}
+          onOpenRounds={() => setRoundsOpen(true)}
+        />
+      )}
+      {suitesOpen && current?.path && (
+        <RegressionSuitesModal t={t} projectPath={current.path} onClose={() => setSuitesOpen(false)} />
+      )}
+      {roundsOpen && current?.path && (
+        <RegressionRoundsModal t={t} projectPath={current.path} onClose={() => setRoundsOpen(false)} />
+      )}
+      {launchOpen && current?.path && (
+        <StartRegressionModal
+          t={t}
+          projectPath={current.path}
+          onClose={() => setLaunchOpen(false)}
+          onStart={(suiteName, env) => { setLaunchOpen(false); void runLibrary({ suiteName, env }); }}
         />
       )}
       {recommendOpen && current?.path && activeTask && (
@@ -3592,6 +3633,9 @@ const AUDIT_ACTION_KEYS: Record<string, TranslationKey> = {
   "deposit-library": "test.audit.action.depositLibrary",
   "run-library": "test.audit.action.runLibrary",
   "library-remove": "test.audit.action.libraryRemove",
+  "suite-save": "test.audit.action.suiteSave",
+  "suite-delete": "test.audit.action.suiteDelete",
+  "delete-round": "test.audit.action.deleteRound",
 };
 const AUDIT_MODE_KEYS: Record<string, TranslationKey> = {
   manual: "test.audit.mode.manual",
@@ -3664,7 +3708,7 @@ function AuditModal({ t, projectPath, taskName, onClose }: { t: T; projectPath: 
 // 「一键重跑」按钮 + 报告查看在批 D 接线(onRun 由父组件在批 D 传入)。
 interface LibEntry { id?: string; purpose?: string; priority?: string; caseType?: string; tags?: string[]; _source?: { task?: string; originalId?: string; depositedAt?: string } }
 interface LibGroup { task: string; count: number; entries: LibEntry[] }
-function RegressionLibraryModal({ t, projectPath, reloadSignal, onChanged, onClose, onRun, running, runStatus }: {
+function RegressionLibraryModal({ t, projectPath, reloadSignal, onChanged, onClose, onRun, running, runStatus, onOpenSuites, onOpenRounds }: {
   t: T;
   projectPath: string;
   reloadSignal: number;
@@ -3673,10 +3717,16 @@ function RegressionLibraryModal({ t, projectPath, reloadSignal, onChanged, onClo
   onRun?: () => void;
   running?: boolean;
   runStatus?: string | null;
+  onOpenSuites?: () => void;
+  onOpenRounds?: () => void;
 }) {
   // null = 加载中(初次挂载即 null → 显示 spinner;reloadSignal 变化时保留旧数据直到新数据到达,
   // 不在 effect 体里同步 setData(null)——避免 react-hooks/set-state-in-effect 级联渲染告警)。
   const [data, setData] = useState<{ total: number; updatedAt: string; tasks: LibGroup[] } | null>(null);
+  // 库检索(v2 批 E):搜索(ID/标题)+ 来源任务/优先级过滤,纯前端内存过滤,API 零改动。
+  const [libQ, setLibQ] = useState("");
+  const [libTask, setLibTask] = useState("");
+  const [libPri, setLibPri] = useState("");
   useEffect(() => {
     let cancelled = false;
     fetch(`/api/test/library?projectPath=${encodeURIComponent(projectPath)}`)
@@ -3702,6 +3752,30 @@ function RegressionLibraryModal({ t, projectPath, reloadSignal, onChanged, onClo
   };
 
   const taskCount = data?.tasks.length ?? 0;
+  // 过滤视图:组内条目过滤,空组隐藏;命中数用于工具条反馈。
+  const priOptions = useMemo(() => {
+    const set = new Set<string>();
+    for (const g of data?.tasks ?? []) for (const e of g.entries) if (e.priority) set.add(e.priority);
+    return [...set].sort();
+  }, [data]);
+  const filteredTasks = useMemo(() => {
+    if (!data) return [];
+    const q = libQ.trim().toLowerCase();
+    return data.tasks
+      .filter((g) => !libTask || g.task === libTask)
+      .map((g) => ({
+        ...g,
+        entries: g.entries.filter((e) => {
+          if (libPri && e.priority !== libPri) return false;
+          if (!q) return true;
+          const id = (e._source?.originalId || e.id || "").toLowerCase();
+          return id.includes(q) || (e.purpose ?? "").toLowerCase().includes(q);
+        }),
+      }))
+      .filter((g) => g.entries.length > 0);
+  }, [data, libQ, libTask, libPri]);
+  const filteredCount = filteredTasks.reduce((n, g) => n + g.entries.length, 0);
+  const filterActive = !!(libQ.trim() || libTask || libPri);
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
       <div className="flex max-h-[82vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-border bg-background shadow-xl" onClick={(e) => e.stopPropagation()}>
@@ -3712,6 +3786,22 @@ function RegressionLibraryModal({ t, projectPath, reloadSignal, onChanged, onClo
             <span className="text-[10px] text-muted-foreground">{t("test.library.summary", { total: data.total, tasks: taskCount })}</span>
           )}
           <span className="flex-1" />
+          {onOpenRounds && (
+            <button
+              onClick={onOpenRounds}
+              className="flex h-6 items-center gap-1 rounded border border-border px-2 text-[11px] text-muted-foreground hover:text-foreground"
+            >
+              <Clock size={11} /> {t("test.rounds.open")}
+            </button>
+          )}
+          {onOpenSuites && (
+            <button
+              onClick={onOpenSuites}
+              className="flex h-6 items-center gap-1 rounded border border-border px-2 text-[11px] text-muted-foreground hover:text-foreground"
+            >
+              <ListChecks size={11} /> {t("test.suites.open")}
+            </button>
+          )}
           {onRun && (
             <button
               onClick={onRun}
@@ -3730,6 +3820,28 @@ function RegressionLibraryModal({ t, projectPath, reloadSignal, onChanged, onClo
             {runStatus}
           </div>
         )}
+        {data && data.total > 0 && (
+          <div className="flex flex-wrap items-center gap-1.5 border-b border-border px-3 py-1.5">
+            <div className="flex h-6 min-w-[160px] flex-1 items-center gap-1 rounded border border-border bg-background px-1.5">
+              <MagnifyingGlass size={11} className="flex-shrink-0 text-muted-foreground" />
+              <input
+                value={libQ}
+                onChange={(e) => setLibQ(e.target.value)}
+                placeholder={t("test.library.searchPh")}
+                className="w-full bg-transparent text-[11px] outline-none placeholder:text-muted-foreground"
+              />
+            </div>
+            <select value={libTask} onChange={(e) => setLibTask(e.target.value)} className="h-6 rounded border border-border bg-background px-1 text-[10px] text-muted-foreground outline-none">
+              <option value="">{t("test.library.filterTask")}：{t("test.library.filterAll")}</option>
+              {(data?.tasks ?? []).map((g) => <option key={g.task} value={g.task}>{g.task}</option>)}
+            </select>
+            <select value={libPri} onChange={(e) => setLibPri(e.target.value)} className="h-6 rounded border border-border bg-background px-1 text-[10px] text-muted-foreground outline-none">
+              <option value="">{t("test.library.filterPri")}：{t("test.library.filterAll")}</option>
+              {priOptions.map((v) => <option key={v} value={v}>{v}</option>)}
+            </select>
+            {filterActive && <span className="text-[10px] text-primary">{t("test.library.filterHit", { n: filteredCount })}</span>}
+          </div>
+        )}
         <div className="min-h-0 flex-1 overflow-auto">
           {data === null ? (
             <div className="p-4 text-center text-[11px] text-muted-foreground"><SpinnerGap size={14} className="mx-auto animate-spin" /></div>
@@ -3737,7 +3849,7 @@ function RegressionLibraryModal({ t, projectPath, reloadSignal, onChanged, onClo
             <div className="p-6 text-center text-[11px] leading-relaxed text-muted-foreground">{t("test.library.empty")}</div>
           ) : (
             <div className="divide-y divide-border">
-              {data.tasks.map((g) => (
+              {filteredTasks.map((g) => (
                 <div key={g.task} className="px-3 py-2">
                   <div className="mb-1.5 flex items-center gap-2">
                     <span className="text-[11px] font-semibold text-foreground">{g.task}</span>
@@ -3745,7 +3857,7 @@ function RegressionLibraryModal({ t, projectPath, reloadSignal, onChanged, onClo
                     <span className="flex-1" />
                     <button
                       onClick={() => del(g.task, undefined, g.count)}
-                      className="flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-status-danger-muted hover:text-status-danger-foreground"
+                      className="flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-status-error-muted hover:text-status-error-foreground"
                     >
                       <Trash size={10} /> {t("test.library.removeTask")}
                     </button>
@@ -3758,7 +3870,7 @@ function RegressionLibraryModal({ t, projectPath, reloadSignal, onChanged, onClo
                         <span className="min-w-0 flex-1 truncate text-[11px] text-foreground" title={e.purpose}>{e.purpose || "—"}</span>
                         <button
                           onClick={() => del(g.task, e._source?.originalId || e.id)}
-                          className="text-muted-foreground hover:text-status-danger-foreground"
+                          className="text-muted-foreground hover:text-status-error-foreground"
                           title={t("test.library.remove")}
                           aria-label={t("test.library.remove")}
                         >
@@ -3772,6 +3884,636 @@ function RegressionLibraryModal({ t, projectPath, reloadSignal, onChanged, onClo
             </div>
           )}
         </div>
+      </div>
+    </div>
+  );
+}
+
+// 轮次历史弹窗(v2 批 E):轮次 = 一次回归执行实例(TestRail Run 语义)。列表(时间/环境/
+// 套件/模式/状态/通过/红线)+ 行内展开详情(按来源任务分组结果 + 与上一全量轮的 delta 三类,
+// 交集口径)+ 删单轮(报告/快照/证据一并删)。数据全部来自 rounds / rounds/detail 只读 API。
+interface RoundUI {
+  roundId: string; startedAt?: string; env?: string; suiteName?: string; mode?: string;
+  status?: string; total?: number; counts?: Record<string, number>; suitePassStr?: string;
+}
+interface RoundDetailUI {
+  groups: Array<{ task: string; counts: Record<string, number>; tests: Array<{ task: string; originalId: string; purpose: string; status: string }> }>;
+  delta: { baseRoundId: string; newFail: unknown[]; fixed: unknown[]; stillFail: unknown[] } | null;
+}
+function RegressionRoundsModal({ t, projectPath, onClose }: { t: T; projectPath: string; onClose: () => void }) {
+  const [rounds, setRounds] = useState<RoundUI[] | null>(null);
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [details, setDetails] = useState<Record<string, RoundDetailUI | null>>({});
+  const [reload, setReload] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/test/library/rounds?projectPath=${encodeURIComponent(projectPath)}`)
+      .then((r) => r.json())
+      .then((d) => { if (!cancelled) setRounds(Array.isArray(d?.rounds) ? d.rounds : []); })
+      .catch(() => { if (!cancelled) setRounds([]); });
+    return () => { cancelled = true; };
+  }, [projectPath, reload]);
+
+  const toggleDetail = (roundId: string) => {
+    if (openId === roundId) { setOpenId(null); return; }
+    setOpenId(roundId);
+    if (details[roundId] !== undefined) return;
+    fetch(`/api/test/library/rounds/detail?projectPath=${encodeURIComponent(projectPath)}&roundId=${encodeURIComponent(roundId)}`)
+      .then((r) => r.json())
+      .then((d) => setDetails((m) => ({ ...m, [roundId]: d?.groups ? { groups: d.groups, delta: d.delta ?? null } : null })))
+      .catch(() => setDetails((m) => ({ ...m, [roundId]: null })));
+  };
+
+  const delRound = async (roundId: string) => {
+    if (!window.confirm(t("test.rounds.confirmDelete", { round: roundId }))) return;
+    try {
+      await fetch("/api/test/library/rounds", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectPath, roundId }),
+      });
+      setReload((n) => n + 1);
+    } catch { /* keep view */ }
+  };
+
+  const fmtTime = (iso?: string) => {
+    if (!iso) return "—";
+    const d = new Date(iso);
+    return Number.isNaN(d.getTime()) ? iso : `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  };
+  const passOf = (r: RoundUI) => {
+    if (r.suitePassStr) return r.suitePassStr;
+    if (r.counts && typeof r.counts.total === "number") return `${r.counts.pass ?? 0}/${r.counts.total}`;
+    return null;
+  };
+  const redline = (r: RoundUI) => {
+    if (r.status === "running") return <span className="flex items-center gap-1 rounded bg-muted px-1.5 text-[9px] text-muted-foreground"><SpinnerGap size={9} className="animate-spin" /> {t("test.rounds.statusRunning")}</span>;
+    if (r.status === "aborted") return <span className="rounded bg-muted px-1.5 text-[9px] text-muted-foreground">{t("test.rounds.statusAborted")}</span>;
+    const p = passOf(r);
+    if (!p) return null;
+    const [a, b] = p.split("/").map((x) => parseInt(x, 10));
+    const ok = Number.isFinite(a) && Number.isFinite(b) && b > 0 && a === b;
+    return <span className={`rounded px-1.5 text-[9px] ${ok ? "bg-status-success-muted text-status-success-foreground" : "bg-status-error-muted text-status-error-foreground"}`}>{ok ? t("test.rounds.redlineOk") : t("test.rounds.redlineBlocked")}</span>;
+  };
+  const dot = (status: string) => (
+    <span className={`inline-block h-1.5 w-1.5 flex-shrink-0 rounded-full ${status === "pass" ? "bg-status-success-foreground" : "bg-status-error-foreground"}`} />
+  );
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+      <div className="flex max-h-[84vh] w-full max-w-3xl flex-col overflow-hidden rounded-xl border border-border bg-background shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center gap-2 border-b border-border px-3 py-2">
+          <Clock size={14} className="text-primary" />
+          <span className="text-xs font-semibold text-foreground">{t("test.rounds.title")}</span>
+          {rounds && rounds.length > 0 && <span className="text-[10px] text-muted-foreground">{rounds.length}</span>}
+          <span className="flex-1" />
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground" aria-label={t("test.library.close")}><X size={14} /></button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-auto">
+          {rounds === null ? (
+            <div className="p-4 text-center text-[11px] text-muted-foreground"><SpinnerGap size={14} className="mx-auto animate-spin" /></div>
+          ) : rounds.length === 0 ? (
+            <div className="p-6 text-center text-[11px] leading-relaxed text-muted-foreground">{t("test.rounds.empty")}</div>
+          ) : (
+            <div className="divide-y divide-border">
+              {rounds.map((r) => {
+                const detail = details[r.roundId];
+                const open = openId === r.roundId;
+                return (
+                  <div key={r.roundId} className="px-3 py-1.5">
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-[10px] text-muted-foreground">{r.roundId}</span>
+                      <span className="text-[10px] text-muted-foreground">{fmtTime(r.startedAt)}</span>
+                      <span className="rounded border border-border px-1 text-[9px] text-muted-foreground">{r.env || "—"}</span>
+                      <span className="min-w-0 flex-1 truncate text-[11px] text-foreground">{r.suiteName || "—"}</span>
+                      {r.mode === "failed-only" && <span className="rounded bg-status-warning-muted px-1.5 text-[9px] text-status-warning-foreground">{t("test.rounds.modeRetest")}</span>}
+                      {passOf(r) && <span className="font-mono text-[10px] text-foreground">{passOf(r)}</span>}
+                      {redline(r)}
+                      <button onClick={() => toggleDetail(r.roundId)} className="flex items-center gap-0.5 rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground hover:text-foreground">
+                        {open ? <CaretUp size={9} /> : <CaretDown size={9} />} {open ? t("test.rounds.collapse") : t("test.rounds.detail")}
+                      </button>
+                      <button onClick={() => delRound(r.roundId)} className="text-muted-foreground hover:text-status-error-foreground" title={t("test.rounds.delete")} aria-label={t("test.rounds.delete")}>
+                        <Trash size={11} />
+                      </button>
+                    </div>
+                    {open && (
+                      <div className="mt-1.5 rounded border border-border/60 bg-muted/20 p-2">
+                        {detail === undefined ? (
+                          <div className="p-2 text-center"><SpinnerGap size={12} className="mx-auto animate-spin text-muted-foreground" /></div>
+                        ) : detail === null || detail.groups.length === 0 ? (
+                          <div className="p-1 text-[10px] text-muted-foreground">{t("test.rounds.detailEmpty")}</div>
+                        ) : (
+                          <div className="space-y-2">
+                            {detail.delta ? (
+                              <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
+                                <span className="text-muted-foreground">{t("test.rounds.deltaBase", { round: detail.delta.baseRoundId })}</span>
+                                <span className="rounded bg-status-error-muted px-1.5 py-0.5 text-status-error-foreground">{t("test.rounds.deltaNewFail")} {detail.delta.newFail.length}</span>
+                                <span className="rounded bg-status-success-muted px-1.5 py-0.5 text-status-success-foreground">{t("test.rounds.deltaFixed")} {detail.delta.fixed.length}</span>
+                                <span className="rounded bg-status-warning-muted px-1.5 py-0.5 text-status-warning-foreground">{t("test.rounds.deltaStillFail")} {detail.delta.stillFail.length}</span>
+                              </div>
+                            ) : (
+                              <div className="text-[10px] text-muted-foreground">{t("test.rounds.deltaNone")}</div>
+                            )}
+                            {detail.groups.map((g) => (
+                              <div key={g.task}>
+                                <div className="mb-0.5 flex items-center gap-1.5">
+                                  <span className="text-[10px] font-semibold text-foreground">{g.task}</span>
+                                  <span className={`rounded px-1 text-[9px] ${g.counts.pass === g.counts.total ? "bg-status-success-muted text-status-success-foreground" : "bg-status-error-muted text-status-error-foreground"}`}>
+                                    {g.counts.pass ?? 0}/{g.counts.total ?? 0}
+                                  </span>
+                                </div>
+                                <div className="space-y-0.5">
+                                  {g.tests.map((c) => (
+                                    <div key={`${g.task}-${c.originalId}`} className="flex items-center gap-1.5 pl-1">
+                                      {dot(c.status)}
+                                      <span className="font-mono text-[9px] text-muted-foreground">{c.originalId}</span>
+                                      <span className="min-w-0 flex-1 truncate text-[10px] text-foreground" title={c.purpose}>{c.purpose || "—"}</span>
+                                      <span className="text-[9px] text-muted-foreground">{c.status}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// 发起回归轮次弹窗(v2 批 D,替代 v1 直接一键全量):套件下拉(实时命中数)+ 环境下拉
+// (env-config allowedEnvs,显示所选环境被测地址)+ 预检(条数/来源任务数/近 3 轮均值时长
+// 估算,无历史诚实显示「暂无估算」)+ 红线口径说明。确认后调 runLibrary({suiteName, env}),
+// 进度仍在库弹窗状态行展示(轮次收口由 runLibrary 负责)。
+function StartRegressionModal({ t, projectPath, onClose, onStart }: {
+  t: T;
+  projectPath: string;
+  onClose: () => void;
+  onStart: (suiteName: string, env: string) => void;
+}) {
+  const [suites, setSuites] = useState<Array<{ name: string; hits: number; hitTasks: number; builtin?: boolean }> | null>(null);
+  const [envs, setEnvs] = useState<string[] | null>(null);
+  const [envInfo, setEnvInfo] = useState<{ configured?: boolean; frontendBaseUrl?: string | null } | null>(null);
+  const [suiteName, setSuiteName] = useState<string>("全量");
+  const [env, setEnv] = useState<string>("local");
+  const [estimate, setEstimate] = useState<{ minutes: number; rounds: number } | null | undefined>(undefined); // undefined=加载中
+
+  // 套件列表(内置全量置顶)+ 环境列表 + 时长估算(近 3 个 done 轮的 (finish-start)/total 均值)。
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/test/suites?projectPath=${encodeURIComponent(projectPath)}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (cancelled) return;
+        const list = [{ name: "全量", hits: d?.fullHits ?? 0, hitTasks: d?.fullTasks ?? 0, builtin: true },
+          ...(Array.isArray(d?.suites) ? d.suites.map((x: { name: string; hits: number; hitTasks?: number }) => ({ name: x.name, hits: x.hits ?? 0, hitTasks: x.hitTasks ?? 0 })) : [])];
+        setSuites(list);
+      })
+      .catch(() => { if (!cancelled) setSuites([]); });
+    fetch(`/api/test/env-config?projectPath=${encodeURIComponent(projectPath)}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (cancelled) return;
+        const allowed: string[] = Array.isArray(d?.allowedEnvs) && d.allowedEnvs.length ? d.allowedEnvs.map(String) : ["local"];
+        setEnvs(allowed);
+        if (typeof d?.env === "string" && allowed.includes(d.env)) setEnv(d.env);
+      })
+      .catch(() => { if (!cancelled) setEnvs(["local"]); });
+    fetch(`/api/test/library/rounds?projectPath=${encodeURIComponent(projectPath)}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (cancelled) return;
+        const done = (Array.isArray(d?.rounds) ? d.rounds : []).filter(
+          (r: { status?: string; startedAt?: string; finishedAt?: string; total?: number }) =>
+            r.status === "done" && r.startedAt && r.finishedAt && typeof r.total === "number" && r.total > 0,
+        ).slice(0, 3);
+        if (!done.length) { setEstimate(null); return; }
+        const perCaseMs = done.reduce((acc: number, r: { startedAt: string; finishedAt: string; total: number }) =>
+          acc + (Date.parse(r.finishedAt) - Date.parse(r.startedAt)) / r.total, 0) / done.length;
+        setEstimate(perCaseMs > 0 ? { minutes: perCaseMs / 60000, rounds: done.length } : null);
+      })
+      .catch(() => { if (!cancelled) setEstimate(null); });
+    return () => { cancelled = true; };
+  }, [projectPath]);
+
+  // 所选环境的被测地址展示(切换环境时刷新;仅展示用,执行时 run 路由自行解析)。
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/test/env-config?projectPath=${encodeURIComponent(projectPath)}&env=${encodeURIComponent(env)}`)
+      .then((r) => r.json())
+      .then((d) => { if (!cancelled) setEnvInfo({ configured: d?.configured, frontendBaseUrl: d?.frontendBaseUrl ?? null }); })
+      .catch(() => { if (!cancelled) setEnvInfo(null); });
+    return () => { cancelled = true; };
+  }, [projectPath, env]);
+
+  const sel = suites?.find((x) => x.name === suiteName) ?? suites?.[0];
+  const hits = sel?.hits ?? 0;
+  const loading = suites === null || envs === null;
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+      <div className="flex max-h-[84vh] w-full max-w-md flex-col overflow-hidden rounded-xl border border-border bg-background shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center gap-2 border-b border-border px-3 py-2">
+          <Play size={13} className="text-primary" />
+          <span className="text-xs font-semibold text-foreground">{t("test.launch.title")}</span>
+          <span className="flex-1" />
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground" aria-label={t("test.launch.cancel")}><X size={14} /></button>
+        </div>
+        {loading ? (
+          <div className="p-4 text-center text-[11px] text-muted-foreground"><SpinnerGap size={14} className="mx-auto animate-spin" /></div>
+        ) : (
+          <div className="space-y-3 p-3">
+            <div className="flex items-center gap-2">
+              <span className="w-12 flex-shrink-0 text-[10px] text-muted-foreground">{t("test.launch.suite")}</span>
+              <select
+                value={suiteName}
+                onChange={(e) => setSuiteName(e.target.value)}
+                className="h-7 flex-1 rounded border border-border bg-background px-1.5 text-[11px] outline-none focus:border-primary"
+              >
+                {(suites ?? []).map((x) => (
+                  <option key={x.name} value={x.name}>{x.builtin ? `${x.name}（内置）` : x.name} — {t("test.suites.hits", { n: x.hits })}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="w-12 flex-shrink-0 text-[10px] text-muted-foreground">{t("test.launch.env")}</span>
+              <select
+                value={env}
+                onChange={(e) => setEnv(e.target.value)}
+                className="h-7 flex-1 rounded border border-border bg-background px-1.5 text-[11px] outline-none focus:border-primary"
+              >
+                {(envs ?? []).map((e2) => <option key={e2} value={e2}>{e2}</option>)}
+              </select>
+            </div>
+            <div className="flex items-start gap-2 text-[10px] text-muted-foreground">
+              <span className="w-12 flex-shrink-0">{t("test.launch.baseUrl")}</span>
+              {envInfo?.frontendBaseUrl ? (
+                <span className="min-w-0 flex-1 truncate font-mono" title={envInfo.frontendBaseUrl}>{envInfo.frontendBaseUrl}</span>
+              ) : (
+                <span className="flex-1 text-status-warning-foreground">{t("test.launch.envUnconfigured")}</span>
+              )}
+            </div>
+            <div className="space-y-1 rounded border border-border bg-muted/30 px-2.5 py-2 text-[11px] text-foreground">
+              <div>{t("test.launch.precheck", { n: hits, m: sel?.hitTasks ?? 0 })}</div>
+              <div className="text-[10px] text-muted-foreground">
+                {estimate === undefined ? "…" : estimate === null
+                  ? t("test.launch.estimateNone")
+                  : t("test.launch.estimate", { min: Math.max(1, Math.round(estimate.minutes * hits)), rounds: estimate.rounds })}
+              </div>
+            </div>
+            <div className="rounded bg-muted px-2.5 py-1.5 text-[10px] leading-relaxed text-muted-foreground">{t("test.launch.redline")}</div>
+            {hits === 0 && <div className="text-[11px] text-status-warning-foreground">{t("test.launch.emptySuite")}</div>}
+            <div className="flex justify-end gap-2">
+              <button onClick={onClose} className="flex h-6 items-center rounded border border-border px-2 text-[11px] text-muted-foreground hover:text-foreground">{t("test.launch.cancel")}</button>
+              <button
+                onClick={() => onStart(suiteName, env)}
+                disabled={hits === 0}
+                className="flex h-6 items-center gap-1 rounded bg-primary px-2.5 text-[11px] font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <Play size={11} /> {t("test.launch.start", { n: hits })}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// 回归套件管理弹窗(v2 批 C):套件 = 「本轮跑什么」的圈选器。列表(内置全量 + 用户套件,
+// 实时命中数)+ 构建器(查询条件 chips / 静态勾选树,eval API 实时预览,口径与发起执行一致)
+// + 核心必跑白名单(pinned,任何套件执行始终并入)。套件是引用不是复制——落 回归套件.json。
+interface SuiteKeyUI { task: string; originalId: string }
+interface SuiteDTO {
+  name: string; type: "static" | "query"; hits: number;
+  keys?: SuiteKeyUI[];
+  filter?: { pri?: string[]; module?: string[]; task?: string[]; last?: ("pass" | "fail" | "none")[] };
+}
+interface SuiteEditState {
+  orig?: string; // 编辑既有套件时的原名(重命名 = 存新删旧)
+  name: string;
+  type: "static" | "query";
+  pri: string[]; module: string[]; task: string[]; last: string[];
+  keys: Set<string>; // JSON.stringify([task, originalId])
+}
+const suiteKeyEnc = (k: SuiteKeyUI) => JSON.stringify([k.task, k.originalId]);
+const suiteKeyDec = (s: string): SuiteKeyUI => { const [task, originalId] = JSON.parse(s) as [string, string]; return { task, originalId }; };
+function RegressionSuitesModal({ t, projectPath, onClose }: { t: T; projectPath: string; onClose: () => void }) {
+  const [data, setData] = useState<{ pinned: SuiteKeyUI[]; fullHits: number; suites: SuiteDTO[] } | null>(null);
+  const [lib, setLib] = useState<LibGroup[] | null>(null);
+  const [editing, setEditing] = useState<SuiteEditState | null>(null);
+  const [pinnedEdit, setPinnedEdit] = useState<Set<string> | null>(null);
+  const [preview, setPreview] = useState<{ hits: number } | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [errMsg, setErrMsg] = useState("");
+  const [reload, setReload] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/test/suites?projectPath=${encodeURIComponent(projectPath)}`)
+      .then((r) => r.json())
+      .then((d) => { if (!cancelled) setData({ pinned: Array.isArray(d?.pinned) ? d.pinned : [], fullHits: d?.fullHits ?? 0, suites: Array.isArray(d?.suites) ? d.suites : [] }); })
+      .catch(() => { if (!cancelled) setData({ pinned: [], fullHits: 0, suites: [] }); });
+    fetch(`/api/test/library?projectPath=${encodeURIComponent(projectPath)}`)
+      .then((r) => r.json())
+      .then((d) => { if (!cancelled) setLib(Array.isArray(d?.tasks) ? d.tasks : []); })
+      .catch(() => { if (!cancelled) setLib([]); });
+    return () => { cancelled = true; };
+  }, [projectPath, reload]);
+
+  // 字段候选值(来自库现存条目;确保已选值即使库里已不存在也仍可见可取消)。
+  const fieldValues = useMemo(() => {
+    const pri = new Set<string>(); const mod = new Set<string>(); const task = new Set<string>();
+    for (const g of lib ?? []) { task.add(g.task); for (const e of g.entries) { if (e.priority) pri.add(e.priority); const m = (e as { module?: unknown }).module; if (typeof m === "string" && m) mod.add(m); } }
+    for (const v of editing?.pri ?? []) pri.add(v);
+    for (const v of editing?.module ?? []) mod.add(v);
+    for (const v of editing?.task ?? []) task.add(v);
+    return { pri: [...pri].sort(), module: [...mod].sort(), task: [...task] };
+  }, [lib, editing]);
+
+  const editingSuitePayload = (e: SuiteEditState) =>
+    e.type === "query"
+      ? { name: e.name.trim(), type: "query", filter: { pri: e.pri, module: e.module, task: e.task, last: e.last } }
+      : { name: e.name.trim(), type: "static", keys: [...e.keys].map(suiteKeyDec) };
+
+  // 构建器实时命中预览(300ms 防抖;名称不参与求值,用占位名避免空名 400)。
+  useEffect(() => {
+    if (!editing) { setPreview(null); return; }
+    const payload = { ...editingSuitePayload(editing), name: editing.name.trim() || "预览" };
+    const timer = setTimeout(() => {
+      fetch("/api/test/suites/eval", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectPath, suite: payload }),
+      })
+        .then((r) => r.json())
+        .then((d) => setPreview({ hits: typeof d?.hits === "number" ? d.hits : 0 }))
+        .catch(() => setPreview(null));
+    }, 300);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectPath, editing]);
+
+  const startNew = () => { setErrMsg(""); setEditing({ name: "", type: "query", pri: [], module: [], task: [], last: [], keys: new Set() }); };
+  const startEdit = (s: SuiteDTO) => {
+    setErrMsg("");
+    setEditing({
+      orig: s.name, name: s.name, type: s.type,
+      pri: s.filter?.pri ?? [], module: s.filter?.module ?? [], task: s.filter?.task ?? [], last: s.filter?.last ?? [],
+      keys: new Set((s.keys ?? []).map(suiteKeyEnc)),
+    });
+  };
+  const toggleArr = (arr: string[], v: string) => (arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v]);
+
+  const saveSuite = async () => {
+    if (!editing) return;
+    if (!editing.name.trim()) { setErrMsg(t("test.suites.nameRequired")); return; }
+    if (editing.type === "static" && editing.keys.size === 0) { setErrMsg(t("test.suites.emptyStatic")); return; }
+    setSaving(true); setErrMsg("");
+    try {
+      const res = await fetch("/api/test/suites", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectPath, suite: editingSuitePayload(editing) }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { setErrMsg((d?.error as string) || t("test.suites.saveFailed")); return; }
+      // 重命名 = 存新删旧(name 是主键)。
+      if (editing.orig && editing.orig !== editing.name.trim()) {
+        await fetch("/api/test/suites", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ projectPath, name: editing.orig }),
+        }).catch(() => {});
+      }
+      setEditing(null); setReload((n) => n + 1);
+    } catch { setErrMsg(t("test.suites.saveFailed")); } finally { setSaving(false); }
+  };
+
+  const delSuite = async (name: string) => {
+    if (!window.confirm(t("test.suites.confirmDelete", { name }))) return;
+    try {
+      await fetch("/api/test/suites", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectPath, name }),
+      });
+      setReload((n) => n + 1);
+    } catch { /* keep view */ }
+  };
+
+  const savePinned = async () => {
+    if (!pinnedEdit) return;
+    setSaving(true);
+    try {
+      await fetch("/api/test/suites", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectPath, pinned: [...pinnedEdit].map(suiteKeyDec) }),
+      });
+      setPinnedEdit(null); setReload((n) => n + 1);
+    } catch { /* keep editing state so user can retry */ } finally { setSaving(false); }
+  };
+
+  // 静态勾选树(按来源任务分组;pinned 编辑复用同一渲染)。
+  const renderTree = (checked: Set<string>, toggle: (k: string) => void, toggleGroup: (ks: string[]) => void) => (
+    <div className="space-y-2">
+      {(lib ?? []).map((g) => {
+        const ks = g.entries.map((e) => suiteKeyEnc({ task: g.task, originalId: e._source?.originalId || e.id || "" }));
+        const allOn = ks.length > 0 && ks.every((k) => checked.has(k));
+        return (
+          <div key={g.task} className="rounded border border-border/60">
+            <label className="flex cursor-pointer items-center gap-2 border-b border-border/60 bg-muted/40 px-2 py-1">
+              <input type="checkbox" checked={allOn} onChange={() => toggleGroup(ks)} className="accent-primary" />
+              <span className="text-[11px] font-semibold text-foreground">{g.task}</span>
+              <span className="rounded bg-muted px-1.5 text-[9px] text-muted-foreground">{ks.filter((k) => checked.has(k)).length}/{ks.length}</span>
+            </label>
+            <div className="space-y-0.5 p-1">
+              {g.entries.map((e, i) => {
+                const k = ks[i];
+                return (
+                  <label key={k} className="flex cursor-pointer items-center gap-2 rounded px-1.5 py-0.5 hover:bg-muted/40">
+                    <input type="checkbox" checked={checked.has(k)} onChange={() => toggle(k)} className="accent-primary" />
+                    <span className="font-mono text-[10px] text-muted-foreground">{e._source?.originalId || e.id}</span>
+                    <span className="min-w-0 flex-1 truncate text-[11px] text-foreground" title={e.purpose}>{e.purpose || "—"}</span>
+                    {e.priority && <span className="rounded bg-muted px-1 text-[9px] text-muted-foreground">{e.priority}</span>}
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+
+  // 查询条件行:字段标签 + 值 chips(选中高亮;不选 = 不限制)。
+  const condRow = (label: string, values: string[], selected: string[], onToggle: (v: string) => void, renderVal?: (v: string) => string) => (
+    <div className="flex items-start gap-2">
+      <span className="w-14 flex-shrink-0 pt-0.5 text-[10px] text-muted-foreground">{label}</span>
+      <div className="flex flex-1 flex-wrap gap-1">
+        {values.map((v) => (
+          <button
+            key={v}
+            onClick={() => onToggle(v)}
+            className={`rounded-full border px-2 py-0.5 text-[10px] ${selected.includes(v) ? "border-primary bg-primary/10 font-semibold text-primary" : "border-border text-muted-foreground hover:text-foreground"}`}
+          >
+            {renderVal ? renderVal(v) : v}
+          </button>
+        ))}
+        {values.length === 0 && <span className="pt-0.5 text-[10px] text-muted-foreground">—</span>}
+      </div>
+    </div>
+  );
+
+  const lastLabel = (v: string) => (v === "pass" ? t("test.suites.lastPass") : v === "fail" ? t("test.suites.lastFail") : t("test.suites.lastNone"));
+  const body = () => {
+    if (data === null || lib === null) {
+      return <div className="p-4 text-center text-[11px] text-muted-foreground"><SpinnerGap size={14} className="mx-auto animate-spin" /></div>;
+    }
+    if (pinnedEdit) {
+      return (
+        <div className="space-y-2 p-3">
+          <div className="text-[11px] text-muted-foreground">{t("test.suites.pinnedHint")}</div>
+          {lib.length === 0 ? <div className="p-4 text-center text-[11px] text-muted-foreground">{t("test.suites.libEmpty")}</div> :
+            renderTree(pinnedEdit, (k) => setPinnedEdit((s) => { const n = new Set(s); if (n.has(k)) n.delete(k); else n.add(k); return n; }),
+              (ks) => setPinnedEdit((s) => { const n = new Set(s); const all = ks.every((k) => n.has(k)); ks.forEach((k) => (all ? n.delete(k) : n.add(k))); return n; }))}
+          <div className="flex justify-end gap-2 pt-1">
+            <button onClick={() => setPinnedEdit(null)} className="flex h-6 items-center rounded border border-border px-2 text-[11px] text-muted-foreground hover:text-foreground">{t("test.suites.cancel")}</button>
+            <button onClick={savePinned} disabled={saving} className="flex h-6 items-center gap-1 rounded bg-primary px-2.5 text-[11px] font-medium text-primary-foreground disabled:opacity-40">
+              {saving && <SpinnerGap size={11} className="animate-spin" />} {t("test.suites.save")}
+            </button>
+          </div>
+        </div>
+      );
+    }
+    if (editing) {
+      return (
+        <div className="space-y-3 p-3">
+          <div className="flex items-center gap-2">
+            <span className="w-14 flex-shrink-0 text-[10px] text-muted-foreground">{t("test.suites.name")}</span>
+            <input
+              value={editing.name}
+              onChange={(e) => setEditing({ ...editing, name: e.target.value })}
+              placeholder={t("test.suites.namePh")}
+              className="h-7 flex-1 rounded border border-border bg-background px-2 text-[11px] outline-none focus:border-primary"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="w-14 flex-shrink-0 text-[10px] text-muted-foreground">{t("test.suites.type")}</span>
+            <label className="flex cursor-pointer items-center gap-1 text-[11px]">
+              <input type="radio" checked={editing.type === "query"} onChange={() => setEditing({ ...editing, type: "query" })} className="accent-primary" />
+              {t("test.suites.queryType")}
+            </label>
+            <label className="flex cursor-pointer items-center gap-1 text-[11px]">
+              <input type="radio" checked={editing.type === "static"} onChange={() => setEditing({ ...editing, type: "static" })} className="accent-primary" />
+              {t("test.suites.staticType")}
+            </label>
+          </div>
+          {editing.type === "query" ? (
+            <div className="space-y-2 rounded border border-border/60 bg-muted/20 p-2">
+              {condRow(t("test.suites.condPri"), fieldValues.pri, editing.pri, (v) => setEditing({ ...editing, pri: toggleArr(editing.pri, v) }))}
+              {condRow(t("test.suites.condModule"), fieldValues.module, editing.module, (v) => setEditing({ ...editing, module: toggleArr(editing.module, v) }))}
+              {condRow(t("test.suites.condTask"), fieldValues.task, editing.task, (v) => setEditing({ ...editing, task: toggleArr(editing.task, v) }))}
+              {condRow(t("test.suites.condLast"), ["pass", "fail", "none"], editing.last, (v) => setEditing({ ...editing, last: toggleArr(editing.last, v) }), lastLabel)}
+              <div className="text-[10px] leading-relaxed text-muted-foreground">{t("test.suites.queryHint")}</div>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <div className="text-[10px] text-muted-foreground">{t("test.suites.staticHint")}</div>
+              {lib.length === 0 ? <div className="p-4 text-center text-[11px] text-muted-foreground">{t("test.suites.libEmpty")}</div> :
+                renderTree(editing.keys, (k) => setEditing((s) => { if (!s) return s; const n = new Set(s.keys); if (n.has(k)) n.delete(k); else n.add(k); return { ...s, keys: n }; }),
+                  (ks) => setEditing((s) => { if (!s) return s; const n = new Set(s.keys); const all = ks.every((k) => n.has(k)); ks.forEach((k) => (all ? n.delete(k) : n.add(k))); return { ...s, keys: n }; }))}
+            </div>
+          )}
+          <div className="flex items-center gap-2 rounded border border-border bg-muted/30 px-2 py-1.5 text-[11px] text-muted-foreground">
+            {preview === null ? <SpinnerGap size={11} className="animate-spin" /> : preview.hits > 0 ? t("test.suites.preview", { n: preview.hits }) : t("test.suites.previewEmpty")}
+          </div>
+          {errMsg && <div className="text-[11px] text-status-error-foreground">{errMsg}</div>}
+          <div className="flex justify-end gap-2">
+            <button onClick={() => setEditing(null)} className="flex h-6 items-center rounded border border-border px-2 text-[11px] text-muted-foreground hover:text-foreground">{t("test.suites.cancel")}</button>
+            <button onClick={saveSuite} disabled={saving} className="flex h-6 items-center gap-1 rounded bg-primary px-2.5 text-[11px] font-medium text-primary-foreground disabled:opacity-40">
+              {saving && <SpinnerGap size={11} className="animate-spin" />} {saving ? t("test.suites.saving") : t("test.suites.save")}
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return (
+      <div className="space-y-3 p-3">
+        <div className="overflow-hidden rounded border border-border/60">
+          <div className="flex items-center gap-2 border-b border-border/60 bg-muted/20 px-2 py-1.5">
+            <Lock size={11} className="text-muted-foreground" />
+            <span className="text-[11px] font-semibold text-foreground">{t("test.suites.builtinFull")}</span>
+            <span className="rounded bg-muted px-1.5 text-[9px] text-muted-foreground">{t("test.suites.hits", { n: data.fullHits })}</span>
+            <span className="min-w-0 flex-1 truncate text-[10px] text-muted-foreground" title={t("test.suites.builtinHint")}>{t("test.suites.builtinHint")}</span>
+          </div>
+          {data.suites.map((s) => (
+            <div key={s.name} className="flex items-center gap-2 border-b border-border/60 px-2 py-1.5 last:border-b-0">
+              <span className="min-w-0 flex-1 truncate text-[11px] text-foreground">{s.name}</span>
+              <span className={`rounded px-1.5 text-[9px] ${s.type === "query" ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"}`}>
+                {s.type === "query" ? t("test.suites.typeQuery") : t("test.suites.typeStatic")}
+              </span>
+              <span className="rounded bg-muted px-1.5 text-[9px] text-muted-foreground">{t("test.suites.hits", { n: s.hits })}</span>
+              <button onClick={() => startEdit(s)} className="flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground hover:text-foreground">
+                <PencilSimple size={10} /> {t("test.suites.edit")}
+              </button>
+              <button onClick={() => delSuite(s.name)} className="text-muted-foreground hover:text-status-error-foreground" title={t("test.suites.delete")} aria-label={t("test.suites.delete")}>
+                <Trash size={11} />
+              </button>
+            </div>
+          ))}
+          <button onClick={startNew} className="flex w-full items-center gap-1.5 px-2 py-1.5 text-[11px] text-muted-foreground hover:bg-muted/40 hover:text-foreground">
+            <Plus size={11} /> {t("test.suites.new")}
+          </button>
+        </div>
+        <div className="rounded border border-border/60 p-2">
+          <div className="mb-1 flex items-center gap-2">
+            <PushPin size={11} className="text-muted-foreground" />
+            <span className="text-[11px] font-semibold text-foreground">{t("test.suites.pinned")}</span>
+            <span className="flex-1" />
+            <button onClick={() => setPinnedEdit(new Set(data.pinned.map(suiteKeyEnc)))} className="flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground hover:text-foreground">
+              <PencilSimple size={10} /> {t("test.suites.pinnedEdit")}
+            </button>
+          </div>
+          <div className="text-[10px] text-muted-foreground">{t("test.suites.pinnedHint")}</div>
+          <div className="mt-1.5 flex flex-wrap gap-1">
+            {data.pinned.length === 0 ? (
+              <span className="text-[10px] text-muted-foreground">{t("test.suites.pinnedEmpty")}</span>
+            ) : (
+              data.pinned.map((k) => (
+                <span key={suiteKeyEnc(k)} className="rounded border border-border bg-muted/30 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+                  📌 {k.task} · {k.originalId}
+                </span>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+      <div className="flex max-h-[84vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-border bg-background shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center gap-2 border-b border-border px-3 py-2">
+          <ListChecks size={14} className="text-primary" />
+          <span className="text-xs font-semibold text-foreground">{t("test.suites.title")}</span>
+          {data && (
+            <span className="text-[10px] text-muted-foreground">{t("test.suites.summary", { count: data.suites.length, full: data.fullHits })}</span>
+          )}
+          <span className="flex-1" />
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground" aria-label={t("test.library.close")}><X size={14} /></button>
+        </div>
+        <div className="min-h-0 flex-1 overflow-auto">{body()}</div>
       </div>
     </div>
   );

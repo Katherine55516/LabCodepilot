@@ -1,0 +1,960 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>回归用例库 v2 · 交互原型</title>
+</head>
+<body>
+<style>
+  :root {
+    --bg: oklch(0.99 0.002 106);
+    --fg: oklch(0.147 0.004 49.25);
+    --card: oklch(1 0 0);
+    --muted: oklch(0.962 0.002 106);
+    --muted-fg: oklch(0.553 0.013 58.071);
+    --border: oklch(0.923 0.003 48.717);
+    --primary: oklch(0.546 0.245 262.881);
+    --primary-fg: oklch(0.985 0.001 106.423);
+    --ok: oklch(0.577 0.17 149);
+    --warn: oklch(0.65 0.19 47.6);
+    --err: oklch(0.577 0.215 27.3);
+    --purple: oklch(0.558 0.2 293);
+    --shadow: 0 10px 40px oklch(0 0 0 / 0.18);
+    --sans: ui-sans-serif, -apple-system, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Segoe UI", sans-serif;
+    --mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: oklch(0.147 0.004 49.25);
+      --fg: oklch(0.985 0.001 106.423);
+      --card: oklch(0.196 0.005 52);
+      --muted: oklch(0.245 0.006 50);
+      --muted-fg: oklch(0.709 0.01 56.259);
+      --border: oklch(1 0 0 / 0.11);
+      --ok: oklch(0.72 0.17 149);
+      --warn: oklch(0.75 0.17 55);
+      --err: oklch(0.66 0.2 25);
+      --purple: oklch(0.7 0.16 293);
+    }
+  }
+  :root[data-theme="light"] {
+    --bg: oklch(0.99 0.002 106);
+    --fg: oklch(0.147 0.004 49.25);
+    --card: oklch(1 0 0);
+    --muted: oklch(0.962 0.002 106);
+    --muted-fg: oklch(0.553 0.013 58.071);
+    --border: oklch(0.923 0.003 48.717);
+    --ok: oklch(0.577 0.17 149);
+    --warn: oklch(0.65 0.19 47.6);
+    --err: oklch(0.577 0.215 27.3);
+    --purple: oklch(0.558 0.2 293);
+  }
+  :root[data-theme="dark"] {
+    --bg: oklch(0.147 0.004 49.25);
+    --fg: oklch(0.985 0.001 106.423);
+    --card: oklch(0.196 0.005 52);
+    --muted: oklch(0.245 0.006 50);
+    --muted-fg: oklch(0.709 0.01 56.259);
+    --border: oklch(1 0 0 / 0.11);
+    --ok: oklch(0.72 0.17 149);
+    --warn: oklch(0.75 0.17 55);
+    --err: oklch(0.66 0.2 25);
+    --purple: oklch(0.7 0.16 293);
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 13px/1.55 var(--sans); -webkit-font-smoothing: antialiased; }
+  button { font: inherit; color: inherit; background: none; border: none; cursor: pointer; padding: 0; }
+  button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--primary); outline-offset: 1px; border-radius: 6px; }
+  input, select { font: inherit; color: inherit; }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation: none !important; transition: none !important; } }
+
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 0 20px 80px; }
+  .appbar { display: flex; align-items: center; gap: 10px; padding: 14px 0 10px; border-bottom: 1px solid var(--border); flex-wrap: wrap; }
+  .appbar .logo { width: 22px; height: 22px; border-radius: 6px; background: var(--primary); color: var(--primary-fg); display: grid; place-items: center; font-size: 12px; font-weight: 700; }
+  .crumb { color: var(--muted-fg); font-size: 12px; }
+  .crumb b { color: var(--fg); font-weight: 600; }
+  .appbar .sp { flex: 1; }
+  .proto-tag { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--muted-fg); border: 1px dashed var(--border); border-radius: 999px; padding: 2px 8px; }
+
+  .btn { display: inline-flex; align-items: center; gap: 5px; height: 28px; padding: 0 10px; border-radius: 7px; font-size: 11px; white-space: nowrap; border: 1px solid var(--border); color: var(--muted-fg); background: transparent; transition: color .12s, background .12s, border-color .12s; }
+  .btn:hover { color: var(--fg); background: var(--muted); }
+  .btn.primary { background: var(--primary); border-color: transparent; color: var(--primary-fg); font-weight: 500; }
+  .btn.primary:hover { background: oklch(from var(--primary) calc(l - 0.05) c h); color: var(--primary-fg); }
+  .btn.sm { height: 24px; padding: 0 8px; font-size: 10.5px; border-radius: 6px; }
+  .btn.danger:hover { color: var(--err); background: oklch(from var(--err) l c h / 0.1); border-color: oklch(from var(--err) l c h / 0.25); }
+  .btn[disabled] { opacity: 0.45; cursor: not-allowed; }
+
+  .tabs { display: flex; gap: 2px; margin: 14px 0 0; border-bottom: 1px solid var(--border); overflow-x: auto; }
+  .tab { padding: 7px 12px 9px; font-size: 12px; color: var(--muted-fg); border-bottom: 2px solid transparent; margin-bottom: -1px; display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+  .tab:hover { color: var(--fg); }
+  .tab.on { color: var(--fg); font-weight: 600; border-bottom-color: var(--primary); }
+  .phase { font-size: 9px; padding: 1px 5px; border-radius: 999px; font-weight: 600; letter-spacing: 0.02em; }
+  .phase.p1 { background: oklch(from var(--primary) l c h / 0.12); color: var(--primary); }
+  .phase.p2 { background: oklch(from var(--purple) l c h / 0.14); color: var(--purple); }
+  .phase.p3 { background: oklch(from var(--warn) l c h / 0.15); color: var(--warn); }
+
+  .anno { display: flex; gap: 8px; align-items: flex-start; margin: 12px 0; padding: 9px 12px; border: 1px dashed oklch(from var(--primary) l c h / 0.4); border-radius: 9px; background: oklch(from var(--primary) l c h / 0.05); font-size: 11.5px; color: var(--muted-fg); }
+  .anno b { color: var(--fg); }
+  .hidden-anno .anno { display: none; }
+
+  .toolrow { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin: 14px 0 10px; }
+  .search { display: flex; align-items: center; gap: 6px; height: 28px; padding: 0 9px; border: 1px solid var(--border); border-radius: 7px; background: var(--card); min-width: 200px; flex: 1; max-width: 300px; }
+  .search input { border: none; outline: none; background: none; width: 100%; font-size: 11.5px; }
+  .sel { height: 28px; border: 1px solid var(--border); border-radius: 7px; background: var(--card); font-size: 11px; color: var(--muted-fg); padding: 0 6px; }
+  .stat-line { font-size: 11px; color: var(--muted-fg); display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+  .stat-line .n { font-variant-numeric: tabular-nums; color: var(--fg); font-weight: 600; }
+
+  .grp { border: 1px solid var(--border); border-radius: 10px; background: var(--card); margin-bottom: 10px; overflow: hidden; }
+  .grp-head { display: flex; align-items: center; gap: 8px; padding: 7px 12px; background: var(--muted); font-size: 11.5px; font-weight: 600; }
+  .grp-head .cnt { font-size: 10px; font-weight: 500; background: var(--bg); border: 1px solid var(--border); border-radius: 999px; padding: 0 7px; color: var(--muted-fg); font-variant-numeric: tabular-nums; }
+  .grp-head .sp { flex: 1; }
+  .crow { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-top: 1px solid var(--border); cursor: pointer; font-size: 11.5px; }
+  .crow:hover { background: var(--muted); }
+  .crow input[type=checkbox] { accent-color: var(--primary); margin: 0; }
+  .cid { font-family: var(--mono); font-size: 10.5px; color: var(--muted-fg); width: 52px; flex-shrink: 0; }
+  .ctitle { flex: 1; min-width: 120px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .badge { font-size: 9.5px; padding: 1px 6px; border-radius: 5px; background: var(--muted); color: var(--muted-fg); white-space: nowrap; font-weight: 500; }
+  .badge.pri-P0 { background: oklch(from var(--err) l c h / 0.12); color: var(--err); }
+  .badge.pri-P1 { background: oklch(from var(--warn) l c h / 0.14); color: var(--warn); }
+  .badge.ok { background: oklch(from var(--ok) l c h / 0.13); color: var(--ok); }
+  .badge.err { background: oklch(from var(--err) l c h / 0.12); color: var(--err); }
+  .badge.warn { background: oklch(from var(--warn) l c h / 0.15); color: var(--warn); }
+  .badge.info { background: oklch(from var(--primary) l c h / 0.12); color: var(--primary); }
+  .badge.purple { background: oklch(from var(--purple) l c h / 0.13); color: var(--purple); }
+  .badge.outline { background: none; border: 1px solid var(--border); }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; display: inline-block; }
+  .dot.p { background: var(--ok); } .dot.f { background: var(--err); } .dot.n { background: var(--border); }
+  .rev { font-family: var(--mono); font-size: 9.5px; color: var(--muted-fg); }
+  .icon-btn { width: 22px; height: 22px; display: grid; place-items: center; border-radius: 5px; color: var(--muted-fg); flex-shrink: 0; }
+  .icon-btn:hover { background: oklch(from var(--err) l c h / 0.12); color: var(--err); }
+
+  .batchbar { position: sticky; bottom: 14px; display: flex; gap: 8px; align-items: center; padding: 8px 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); box-shadow: var(--shadow); font-size: 11.5px; margin-top: 12px; }
+
+  .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; margin: 12px 0; }
+  .card { border: 1px solid var(--border); border-radius: 10px; background: var(--card); padding: 12px 14px; }
+  .card .k { font-size: 10.5px; color: var(--muted-fg); letter-spacing: 0.03em; }
+  .card .v { font-size: 21px; font-weight: 650; font-variant-numeric: tabular-nums; margin-top: 2px; display: flex; align-items: baseline; gap: 6px; }
+  .card .v small { font-size: 10.5px; font-weight: 400; color: var(--muted-fg); }
+
+  table.tbl { width: 100%; border-collapse: collapse; font-size: 11.5px; }
+  .tbl th { text-align: left; font-size: 10px; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted-fg); font-weight: 600; padding: 7px 10px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  .tbl td { padding: 7px 10px; border-bottom: 1px solid var(--border); vertical-align: middle; font-variant-numeric: tabular-nums; }
+  .tbl tr:last-child td { border-bottom: none; }
+  .tbl tbody tr:hover { background: var(--muted); }
+  .tblwrap { border: 1px solid var(--border); border-radius: 10px; background: var(--card); overflow-x: auto; }
+
+  .pass-bar { width: 90px; height: 6px; border-radius: 999px; background: oklch(from var(--err) l c h / 0.25); overflow: hidden; display: inline-block; vertical-align: middle; }
+  .pass-bar i { display: block; height: 100%; background: var(--ok); border-radius: 999px; }
+
+  .banner { border-radius: 12px; padding: 14px 18px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin: 12px 0; border: 1px solid; }
+  .banner.red { background: oklch(from var(--err) l c h / 0.08); border-color: oklch(from var(--err) l c h / 0.3); }
+  .banner.green { background: oklch(from var(--ok) l c h / 0.08); border-color: oklch(from var(--ok) l c h / 0.3); }
+  .banner .verdict { font-size: 16px; font-weight: 700; }
+  .banner.red .verdict { color: var(--err); }
+  .banner.green .verdict { color: var(--ok); }
+  .banner .meta { font-size: 11px; color: var(--muted-fg); }
+  .banner .big { font-size: 24px; font-weight: 700; font-variant-numeric: tabular-nums; }
+
+  .delta { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 10px 0 14px; }
+  .delta .card { cursor: pointer; }
+  .delta .card:hover { border-color: var(--primary); }
+  .delta .card.on { border-color: var(--primary); box-shadow: 0 0 0 1px var(--primary); }
+
+  .matrix-wrap { border: 1px solid var(--border); border-radius: 10px; background: var(--card); overflow-x: auto; }
+  .matrix { border-collapse: collapse; font-size: 11px; min-width: 100%; }
+  .matrix th, .matrix td { padding: 5px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  .matrix thead th { font-size: 9.5px; color: var(--muted-fg); text-transform: none; font-weight: 600; text-align: center; }
+  .matrix .sticky { position: sticky; left: 0; background: var(--card); z-index: 1; text-align: left; max-width: 280px; overflow: hidden; text-overflow: ellipsis; }
+  .matrix tbody tr:hover td { background: var(--muted); }
+  .cell { width: 22px; height: 14px; border-radius: 4px; display: inline-block; }
+  .cell.p { background: oklch(from var(--ok) l c h / 0.75); }
+  .cell.f { background: oklch(from var(--err) l c h / 0.8); }
+  .cell.n { background: var(--muted); border: 1px solid var(--border); }
+  .mgrp td { background: var(--muted) !important; font-weight: 600; font-size: 10.5px; }
+
+  .drawer-mask, .modal-mask { position: fixed; inset: 0; background: oklch(0 0 0 / 0.5); z-index: 40; }
+  .drawer { position: fixed; top: 0; right: 0; bottom: 0; width: min(480px, 92vw); background: var(--bg); border-left: 1px solid var(--border); z-index: 50; overflow-y: auto; padding: 18px 20px 40px; box-shadow: var(--shadow); }
+  .drawer h3 { margin: 0 0 4px; font-size: 14px; }
+  .kv { display: grid; grid-template-columns: 84px 1fr; gap: 5px 10px; font-size: 11.5px; margin: 12px 0; }
+  .kv .k { color: var(--muted-fg); }
+  .sect { font-size: 10px; letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted-fg); font-weight: 650; margin: 18px 0 8px; }
+  .steps { border: 1px solid var(--border); border-radius: 8px; overflow: hidden; font-size: 11px; }
+  .steps .st { display: grid; grid-template-columns: 22px 1fr 1fr; border-top: 1px solid var(--border); }
+  .steps .st:first-child { border-top: none; background: var(--muted); font-weight: 600; color: var(--muted-fg); font-size: 10px; }
+  .steps .st > div { padding: 5px 8px; border-left: 1px solid var(--border); }
+  .steps .st > div:first-child { border-left: none; color: var(--muted-fg); font-family: var(--mono); }
+  .tl { border-left: 2px solid var(--border); padding-left: 12px; display: flex; flex-direction: column; gap: 8px; font-size: 11px; }
+  .tl .t { position: relative; }
+  .tl .t::before { content: ""; position: absolute; left: -16.5px; top: 4px; width: 7px; height: 7px; border-radius: 50%; background: var(--border); }
+  .tl .t.hl::before { background: var(--primary); }
+  .histdots { display: flex; gap: 4px; align-items: center; flex-wrap: wrap; }
+
+  .modal { position: fixed; z-index: 50; top: 50%; left: 50%; transform: translate(-50%, -50%); width: min(560px, 94vw); max-height: 86vh; overflow-y: auto; background: var(--bg); border: 1px solid var(--border); border-radius: 14px; box-shadow: var(--shadow); }
+  .modal .mhead { display: flex; align-items: center; gap: 8px; padding: 13px 18px; border-bottom: 1px solid var(--border); font-weight: 650; font-size: 13px; }
+  .modal .mbody { padding: 14px 18px 18px; }
+  .frow { display: flex; align-items: center; gap: 10px; margin-bottom: 11px; font-size: 12px; flex-wrap: wrap; }
+  .frow > label { width: 70px; color: var(--muted-fg); font-size: 11.5px; flex-shrink: 0; }
+  .radio { display: inline-flex; align-items: center; gap: 5px; font-size: 11.5px; }
+  .radio input { accent-color: var(--primary); margin: 0; }
+  .precheck { border: 1px solid var(--border); border-radius: 9px; background: var(--card); padding: 10px 13px; font-size: 11.5px; display: flex; flex-direction: column; gap: 5px; margin: 12px 0; }
+  .precheck .warn-line { color: var(--warn); }
+  .redline-note { background: var(--muted); border-radius: 7px; padding: 7px 11px; font-size: 10.5px; color: var(--muted-fg); margin-bottom: 12px; }
+  .runstat { display: flex; align-items: center; gap: 8px; background: var(--muted); border-radius: 8px; padding: 8px 12px; font-size: 11.5px; margin-top: 10px; }
+  .spin { width: 12px; height: 12px; border: 2px solid var(--border); border-top-color: var(--primary); border-radius: 50%; animation: spin 0.8s linear infinite; flex-shrink: 0; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .prog { flex: 1; height: 5px; border-radius: 999px; background: var(--border); overflow: hidden; }
+  .prog i { display: block; height: 100%; background: var(--primary); transition: width 0.3s; }
+
+  .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%); background: var(--fg); color: var(--bg); padding: 8px 16px; border-radius: 9px; font-size: 12px; z-index: 90; box-shadow: var(--shadow); max-width: 90vw; }
+
+  .suite-layout { display: grid; grid-template-columns: 230px 1fr; gap: 12px; align-items: start; }
+  @media (max-width: 760px) { .suite-layout { grid-template-columns: 1fr; } }
+  .suite-item { display: flex; align-items: center; gap: 8px; padding: 9px 12px; border-top: 1px solid var(--border); cursor: pointer; font-size: 12px; }
+  .suite-item:first-child { border-top: none; }
+  .suite-item:hover { background: var(--muted); }
+  .suite-item.on { background: oklch(from var(--primary) l c h / 0.08); box-shadow: inset 2px 0 0 var(--primary); }
+  .cond { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--border); background: var(--muted); border-radius: 6px; padding: 3px 8px; font-size: 11px; font-family: var(--mono); }
+  .qtabs { display: flex; gap: 6px; margin: 12px 0 10px; }
+  .qtab { font-size: 11px; padding: 4px 10px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted-fg); }
+  .qtab.on { background: var(--fg); color: var(--bg); border-color: var(--fg); font-weight: 600; }
+  .queue-row { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-top: 1px solid var(--border); font-size: 11.5px; }
+  .queue-row:first-child { border-top: none; }
+  .chipv { font-size: 10.5px; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--border); color: var(--muted-fg); background: var(--card); }
+  .chipv:hover { color: var(--fg); }
+  .chipv.on { background: oklch(from var(--primary) l c h / 0.12); border-color: var(--primary); color: var(--primary); font-weight: 600; }
+  .edit-mini { width: 20px; height: 20px; display: grid; place-items: center; border-radius: 5px; color: var(--muted-fg); flex-shrink: 0; font-size: 11px; }
+  .edit-mini:hover { background: var(--muted); color: var(--fg); }
+  .sparkline { display: inline-block; vertical-align: middle; }
+  .toggle { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--muted-fg); cursor: pointer; }
+  .toggle input { accent-color: var(--primary); margin: 0; }
+  .fail-detail { background: var(--muted); border-radius: 8px; padding: 9px 12px; font-size: 11px; margin: 4px 0 6px; display: flex; flex-direction: column; gap: 6px; }
+  .thumb { width: 76px; height: 46px; border-radius: 6px; border: 1px solid var(--border); background: repeating-linear-gradient(45deg, var(--muted), var(--muted) 6px, var(--card) 6px, var(--card) 12px); display: grid; place-items: center; font-size: 9px; color: var(--muted-fg); flex-shrink: 0; }
+  .empty { text-align: center; color: var(--muted-fg); padding: 30px 0; font-size: 12px; }
+</style>
+
+<div class="wrap" id="app">
+  <header class="appbar">
+    <div class="logo">AI</div>
+    <span class="crumb">AI Native Lab · 测试工作台 › 项目 <b>实验室预约系统</b> › <b>回归用例库</b></span>
+    <span class="proto-tag">v2 交互原型 · mock 数据</span>
+    <div class="sp"></div>
+    <button class="btn sm" id="annoBtn" onclick="toggleAnno()">标注：开</button>
+    <button class="btn sm" onclick="toggleTheme()">☾ 主题</button>
+  </header>
+  <nav class="tabs" id="tabs"></nav>
+  <main id="screen"></main>
+</div>
+<div id="overlay"></div>
+<div id="toastRoot"></div>
+
+<script>
+"use strict";
+/* ============ Mock 数据 ============ */
+// 轮次（旧→新）。results 由各用例 res 数组按同下标对齐。
+const ROUNDS = [
+  { code: "RND-0625-0900", date: "06-25 09:00", env: "local",   suite: "全量",     mode: "full" },
+  { code: "RND-0628-1030", date: "06-28 10:30", env: "local",   suite: "全量",     mode: "full" },
+  { code: "RND-0701-1400", date: "07-01 14:00", env: "local",   suite: "全量",     mode: "full" },
+  { code: "RND-0703-1830", date: "07-03 18:30", env: "staging", suite: "发版精选", mode: "full" },
+  { code: "RND-0703-2210", date: "07-03 22:10", env: "staging", suite: "—",        mode: "failed", parent: "RND-0703-1830" },
+  { code: "RND-0706-0940", date: "07-06 09:40", env: "staging", suite: "发版精选", mode: "full" },
+  { code: "RND-0708-1502", date: "07-08 15:02", env: "staging", suite: "发版精选", mode: "full" },
+];
+// res: 'p'=通过 'f'=失败 '-'=该轮未执行（未入选/隔离/未入库）
+const CASES = [
+  { task:"登录鉴权", id:"TC-001", title:"正确账号密码登录成功进入工作台", module:"登录", pri:"P0", type:"正向", req:"REQ-AUTH-01", review:"approved", rev:2, pinned:true,  quar:false, dep:"06-20", res:["p","p","p","p","-","p","p"] },
+  { task:"登录鉴权", id:"TC-002", title:"连续输错密码 5 次触发账号锁定", module:"登录", pri:"P1", type:"反向", req:"REQ-AUTH-02", review:"approved", rev:1, pinned:false, quar:false, dep:"06-20", res:["p","p","p","p","-","p","p"] },
+  { task:"登录鉴权", id:"TC-003", title:"验证码过期后提交提示刷新重试", module:"登录", pri:"P2", type:"边界", req:"REQ-AUTH-02", review:"pending",  rev:2, pinned:false, quar:false, dep:"06-20", res:["p","f","p","f","p","p","p"] },
+  { task:"登录鉴权", id:"TC-004", title:"会话超时后操作自动跳转登录页", module:"会话", pri:"P1", type:"边界", req:"REQ-AUTH-03", review:"approved", rev:3, pinned:false, quar:false, dep:"06-20", res:["p","p","p","f","f","f","f"],
+    steps:[{c:"登录后保持页面空闲 31 分钟（会话超时阈值 30 分钟）",e:"页面维持展示，无报错"},{c:"点击「新建预约」按钮",e:"拦截操作并跳转登录页，提示「会话已过期」"},{c:"重新登录",e:"回到原页面，草稿数据保留"}],
+    hist:[{rev:3,at:"07-02",note:"AI 重生成：步骤 2 预期由「弹窗提示」改为「跳转登录页」"},{rev:2,at:"06-25",note:"断言补充会话 cookie 失效校验"},{rev:1,at:"06-20",note:"首次入库（来源任务：登录鉴权）"}] },
+  { task:"设备预约", id:"TC-001", title:"选择空闲时段提交预约成功", module:"预约", pri:"P0", type:"正向", req:"REQ-BOOK-01", review:"approved", rev:1, pinned:false, quar:false, dep:"06-22", res:["p","p","p","p","-","p","p"] },
+  { task:"设备预约", id:"TC-002", title:"相同时段重复预约被冲突拦截", module:"预约", pri:"P0", type:"反向", req:"REQ-BOOK-02", review:"approved", rev:2, pinned:false, quar:false, dep:"06-22", res:["p","p","p","p","-","p","f"],
+    steps:[{c:"账号 A 预约设备 X 的 10:00-11:00 时段",e:"预约成功"},{c:"账号 B 预约同设备同时段",e:"提交被拦截，提示「时段已被占用」"}] },
+  { task:"设备预约", id:"TC-003", title:"取消预约后时段即时释放可再约", module:"预约", pri:"P1", type:"正向", req:"REQ-BOOK-03", review:"approved", rev:1, pinned:false, quar:false, dep:"06-22", res:["p","p","p","p","-","p","p"] },
+  { task:"设备预约", id:"TC-004", title:"预约成功后站内信与邮件双通知", module:"预约", pri:"P2", type:"正向", req:"REQ-BOOK-04", review:"pending",  rev:1, pinned:false, quar:false, dep:"07-07", res:["-","-","-","-","-","-","-"] },
+  { task:"设备预约", id:"TC-005", title:"跨天预约时段边界（23:30-00:30）处理", module:"预约", pri:"P2", type:"边界", req:"REQ-BOOK-05", review:"pending", rev:1, pinned:false, quar:true, quarAt:"07-01", quarWhy:"三轮内两次翻转，疑似时区相关不稳定", dep:"06-22", res:["f","p","f","-","-","-","-"] },
+  { task:"报表导出", id:"TC-001", title:"导出使用统计 xlsx 列头与数据正确", module:"报表", pri:"P1", type:"正向", req:"REQ-RPT-01", review:"approved", rev:1, pinned:false, quar:false, dep:"06-24", res:["p","p","p","p","-","p","p"] },
+  { task:"报表导出", id:"TC-002", title:"空数据区间导出提示无数据", module:"报表", pri:"P2", type:"反向", req:"REQ-RPT-01", review:"approved", rev:1, pinned:false, quar:false, dep:"07-01", res:["-","-","p","p","-","p","p"] },
+  { task:"报表导出", id:"TC-003", title:"万级数据量导出进度与超时重试", module:"报表", pri:"P2", type:"边界", req:"REQ-RPT-02", review:"pending",  rev:2, pinned:false, quar:false, dep:"06-24", res:["p","f","f","p","-","f","p"] },
+  { task:"用户管理", id:"TC-001", title:"新增用户默认角色与首次登录改密", module:"用户", pri:"P1", type:"正向", req:"REQ-USER-01", review:"approved", rev:1, pinned:false, quar:false, dep:"06-26", res:["p","p","p","p","-","p","p"] },
+  { task:"用户管理", id:"TC-002", title:"禁用用户后登录被拒并提示", module:"用户", pri:"P0", type:"反向", req:"REQ-USER-02", review:"approved", rev:1, pinned:true, quar:false, dep:"06-26", res:["p","p","p","p","-","p","p"] },
+  { task:"用户管理", id:"TC-003", title:"角色权限变更后无需重登即时生效", module:"用户", pri:"P1", type:"正向", req:"REQ-USER-03", review:"pending", rev:1, pinned:false, quar:false, dep:"07-01", res:["-","-","p","p","-","p","p"] },
+  { task:"用户管理", id:"TC-004", title:"Excel 批量导入用户容错与回执", module:"用户", pri:"P2", type:"边界", req:"REQ-USER-04", review:"approved", rev:1, pinned:false, quar:false, dep:"06-26", res:["p","p","p","-","-","-","-"] },
+];
+const ENVS = [
+  { name: "local",    url: "http://localhost:3001",          ok: true },
+  { name: "staging",  url: "https://staging.lab-reserve.cn", ok: true },
+  { name: "生产镜像", url: "https://mirror.lab-reserve.cn",  ok: false },
+];
+const SUITES = [
+  { name: "全量",       type: "builtin", desc: "库内全部用例，隔离用例自动排除" },
+  { name: "发版精选",   type: "static",  keys: ["登录鉴权|TC-001","登录鉴权|TC-002","登录鉴权|TC-003","登录鉴权|TC-004","设备预约|TC-001","设备预约|TC-002","设备预约|TC-003","报表导出|TC-001","报表导出|TC-002","报表导出|TC-003","用户管理|TC-001","用户管理|TC-002","用户管理|TC-003"] },
+  { name: "P0 冒烟",    type: "query",   filter: { pri: ["P0"] } },
+  { name: "预约模块回归", type: "query", filter: { module: ["预约"] } },
+];
+const AI_VERDICTS = { // 报告页失败归因（AI 产出，mock）
+  "设备预约|TC-002": { cls: "产品缺陷", act: "生成结构化缺陷并跟踪修复", why: "步骤 2 断言失败：冲突拦截弹窗未出现，预约被重复创建（上轮通过，本轮新增失败，与 07-08 时段服务改动相关）" },
+  "登录鉴权|TC-004": { cls: "产品缺陷", act: "已关联缺陷 BUG-0703-01，建议本轮复测后回归验证", why: "连续 4 轮失败：超时后未跳转登录页，停留原页且接口 401 无提示" },
+};
+
+/* ============ 派生逻辑 ============ */
+const key = c => c.task + "|" + c.id;
+const execSeq = c => c.res.filter(r => r !== "-");
+function flips(c) { const s = execSeq(c); let n = 0; for (let i = 1; i < s.length; i++) if (s[i] !== s[i-1]) n++; return n; }
+function tailFails(c) { const s = execSeq(c); let n = 0; for (let i = s.length - 1; i >= 0 && s[i] === "f"; i--) n++; return n; }
+function lastRunIdx(c) { for (let i = c.res.length - 1; i >= 0; i--) if (c.res[i] !== "-") return i; return -1; }
+function health(c) {
+  if (c.quar) return { k: "quar",  label: "隔离中",   cls: "purple" };
+  if (tailFails(c) >= 3) return { k: "streak", label: "连败 " + tailFails(c) + " 轮", cls: "err" };
+  if (flips(c) >= 2) return { k: "flaky", label: "flaky", cls: "warn" };
+  if (lastRunIdx(c) < 0) return { k: "never", label: "从未执行", cls: "outline" };
+  if (c.res.length - 1 - lastRunIdx(c) >= 3) return { k: "stale", label: "久未执行", cls: "outline" };
+  return { k: "okc", label: "", cls: "" };
+}
+function lastResult(c) { const i = lastRunIdx(c); return i < 0 ? "n" : c.res[i]; }
+function roundStats(idx) {
+  let pass = 0, fail = 0;
+  CASES.forEach(c => { const r = c.res[idx]; if (r === "p") pass++; else if (r === "f") fail++; });
+  return { pass, fail, total: pass + fail };
+}
+function mergedStats(uptoIdx) { // 合并口径：每条用例截至该轮的最新结果（Xray Plan 语义）
+  let pass = 0, fail = 0;
+  CASES.forEach(c => {
+    if (c.quar) return;
+    for (let i = uptoIdx; i >= 0; i--) { const r = c.res[i]; if (r !== "-") { r === "p" ? pass++ : fail++; return; } }
+  });
+  return { pass, fail, total: pass + fail };
+}
+function suiteHits(s) {
+  const alive = CASES.filter(c => !c.quar);
+  if (s.type === "builtin") return alive;
+  if (s.type === "static") return alive.filter(c => s.keys.includes(key(c)));
+  const f = s.filter || {};
+  return alive.filter(c =>
+    (!f.pri || !f.pri.length || f.pri.includes(c.pri)) &&
+    (!f.module || !f.module.length || f.module.includes(c.module)) &&
+    (!f.task || !f.task.length || f.task.includes(c.task)) &&
+    (!f.review || !f.review.length || f.review.includes(c.review)) &&
+    (!f.last || !f.last.length || f.last.includes(lastResult(c))));
+}
+function taskGroups(list) {
+  const m = new Map();
+  list.forEach(c => { if (!m.has(c.task)) m.set(c.task, []); m.get(c.task).push(c); });
+  return m;
+}
+const esc = s => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+/* ============ 全局状态 ============ */
+const state = {
+  screen: "library",
+  filters: { q: "", module: "", pri: "", task: "", review: "", health: "" },
+  sel: new Set(),
+  reportRound: 6,
+  deltaFilter: "",
+  suiteSel: 0,
+  qtab: "flaky",
+  matrixFailOnly: false,
+  running: null, // {done,total,suite,env}
+};
+
+/* ============ 框架 ============ */
+const NAV = [
+  { id: "library", label: "库总览",    phase: "一期", pc: "p1" },
+  { id: "suites",  label: "回归套件",  phase: "一期", pc: "p1" },
+  { id: "rounds",  label: "轮次历史",  phase: "一期", pc: "p1" },
+  { id: "report",  label: "轮次报告",  phase: "一期", pc: "p1" },
+  { id: "matrix",  label: "对比矩阵",  phase: "二期", pc: "p2" },
+  { id: "health",  label: "健康度",    phase: "三期", pc: "p3" },
+];
+function renderTabs() {
+  document.getElementById("tabs").innerHTML = NAV.map(n =>
+    `<button class="tab ${state.screen === n.id ? "on" : ""}" onclick="go('${n.id}')">${n.label}<span class="phase ${n.pc}">${n.phase}</span></button>`
+  ).join("") + `<div style="flex:1"></div><button class="tab" style="color:var(--primary);font-weight:600" onclick="openRunModal()">▶ 发起回归</button>`;
+}
+function go(s) { state.screen = s; render(); }
+function render() {
+  renderTabs();
+  const el = document.getElementById("screen");
+  el.innerHTML = ({ library: rLibrary, suites: rSuites, rounds: rRounds, report: rReport, matrix: rMatrix, health: rHealth })[state.screen]();
+  window.scrollTo(0, 0);
+}
+function toast(msg) {
+  const r = document.getElementById("toastRoot");
+  r.innerHTML = `<div class="toast">${msg}</div>`;
+  clearTimeout(toast._t); toast._t = setTimeout(() => r.innerHTML = "", 2600);
+}
+function toggleTheme() {
+  const el = document.documentElement;
+  const dark = el.dataset.theme ? el.dataset.theme === "dark" : matchMedia("(prefers-color-scheme: dark)").matches;
+  el.dataset.theme = dark ? "light" : "dark";
+}
+function toggleAnno() {
+  document.body.classList.toggle("hidden-anno");
+  document.getElementById("annoBtn").textContent = document.body.classList.contains("hidden-anno") ? "标注：关" : "标注：开";
+}
+const anno = html => `<div class="anno"><span>💡</span><span>${html}</span></div>`;
+
+/* ============ 屏 1：库总览 ============ */
+function libFiltered() {
+  const f = state.filters;
+  return CASES.filter(c => {
+    if (f.q && !(c.id.toLowerCase().includes(f.q.toLowerCase()) || c.title.includes(f.q))) return false;
+    if (f.module && c.module !== f.module) return false;
+    if (f.pri && c.pri !== f.pri) return false;
+    if (f.task && c.task !== f.task) return false;
+    if (f.review && c.review !== f.review) return false;
+    if (f.health && health(c).k !== f.health) return false;
+    return true;
+  });
+}
+function rLibrary() {
+  const list = libFiltered();
+  const groups = taskGroups(list);
+  const flakyN = CASES.filter(c => health(c).k === "flaky").length;
+  const neverN = CASES.filter(c => ["never", "stale"].includes(health(c).k)).length;
+  const quarN = CASES.filter(c => c.quar).length;
+  const pendN = CASES.filter(c => c.review === "pending").length;
+  const opts = (arr, cur) => arr.map(o => `<option ${o === cur ? "selected" : ""}>${o}</option>`).join("");
+  let html = anno(`<b>相对 v1 的升级</b>：v1 弹窗只有「按来源任务平铺 + 移除」。v2 增加 <b>搜索/多维过滤/排序（一期）</b>、<b>评审状态与批量确认（二期）</b>、<b>健康度徽标（三期）</b>、行点击进<b>详情抽屉</b>（字段 + 变更记录 + 执行历史）。数据仍是项目级 回归用例库.json，upsert by 来源任务的机制不变。`);
+  html += `<div class="toolrow">
+    <div class="search">🔍<input placeholder="搜索用例 ID / 标题…" value="${esc(state.filters.q)}" oninput="state.filters.q=this.value;render()"></div>
+    <select class="sel" onchange="state.filters.task=this.value==='来源任务'?'':this.value;render()"><option>来源任务</option>${opts([...new Set(CASES.map(c=>c.task))], state.filters.task)}</select>
+    <select class="sel" onchange="state.filters.module=this.value==='模块'?'':this.value;render()"><option>模块</option>${opts([...new Set(CASES.map(c=>c.module))], state.filters.module)}</select>
+    <select class="sel" onchange="state.filters.pri=this.value==='优先级'?'':this.value;render()"><option>优先级</option>${opts(["P0","P1","P2"], state.filters.pri)}</select>
+    <select class="sel" onchange="state.filters.review=this.value==='评审态'?'':(this.value==='已确认'?'approved':'pending');render()"><option>评审态</option><option ${state.filters.review==='approved'?'selected':''}>已确认</option><option ${state.filters.review==='pending'?'selected':''}>待确认</option></select>
+    <select class="sel" onchange="state.filters.health={'健康度':'','flaky':'flaky','连续失败':'streak','久未执行':'stale','从未执行':'never','隔离中':'quar'}[this.value];render()"><option>健康度</option><option>flaky</option><option>连续失败</option><option>久未执行</option><option>从未执行</option><option>隔离中</option></select>
+    <div style="flex:1"></div>
+    <button class="btn" onclick="toast('原型：导出 xlsx（复用 report-xlsx 通路，二期）')">⤓ 导出</button>
+    <button class="btn primary" onclick="openRunModal()">▶ 发起回归</button>
+  </div>
+  <div class="stat-line" style="margin-bottom:10px">
+    <span><span class="n">${CASES.length}</span> 条回归用例</span>·<span><span class="n">${new Set(CASES.map(c=>c.task)).size}</span> 个来源任务</span>·
+    <span style="color:var(--warn)">flaky <span class="n">${flakyN}</span></span>·<span>久未跑/未跑 <span class="n">${neverN}</span></span>·
+    <span style="color:var(--purple)">隔离 <span class="n">${quarN}</span></span>·<span>待确认 <span class="n">${pendN}</span></span>
+    ${list.length !== CASES.length ? `<span style="color:var(--primary)">（过滤命中 ${list.length} 条）</span>` : ""}
+  </div>`;
+  if (!list.length) return html + `<div class="empty">没有命中过滤条件的用例</div>`;
+  groups.forEach((cs, task) => {
+    html += `<div class="grp"><div class="grp-head">📁 ${task}<span class="cnt">${cs.length} 条</span><div class="sp"></div>
+      <button class="btn sm danger" onclick="event.stopPropagation();toast('原型：移除任务「${task}」的全部贡献（v1 已有，二次确认）')">移除整组</button></div>`;
+    cs.forEach(c => {
+      const h = health(c), lr = lastResult(c), k = key(c);
+      html += `<div class="crow" onclick="openDrawer('${k}')">
+        <input type="checkbox" ${state.sel.has(k) ? "checked" : ""} onclick="event.stopPropagation();toggleSel('${k}')">
+        <span class="cid">${c.id}</span>
+        <span class="ctitle">${c.pinned ? "📌 " : ""}${esc(c.title)}</span>
+        <span class="badge pri-${c.pri}">${c.pri}</span>
+        <span class="badge">${c.module}</span>
+        <span class="badge ${c.review === "approved" ? "ok" : "warn"}">${c.review === "approved" ? "已确认" : "待确认"}</span>
+        ${h.label ? `<span class="badge ${h.cls}">${h.label}</span>` : ""}
+        <span class="dot ${lr}" title="上次结果"></span>
+        <span class="rev">r${c.rev}</span>
+        <button class="icon-btn" title="移除" onclick="event.stopPropagation();toast('原型：移除单条（v1 已有，二次确认）')">✕</button>
+      </div>`;
+    });
+    html += `</div>`;
+  });
+  if (state.sel.size) html += `<div class="batchbar">已选 <b>${state.sel.size}</b> 条<div style="flex:1"></div>
+    <button class="btn sm" onclick="batchApprove()">✓ 批量确认</button>
+    <button class="btn sm" onclick="openAddToSuite()">＋加入套件</button>
+    <button class="btn sm" onclick="batchQuar()">⛔ 批量隔离</button>
+    <button class="btn sm danger" onclick="toast('原型：批量移除（二次确认）')">移除</button></div>`;
+  return html;
+}
+function toggleSel(k) { state.sel.has(k) ? state.sel.delete(k) : state.sel.add(k); render(); }
+function batchApprove() { CASES.forEach(c => { if (state.sel.has(key(c))) c.review = "approved"; }); toast(`已确认 ${state.sel.size} 条（写回库 reviewState，记审计）`); state.sel.clear(); render(); }
+function batchQuar() { CASES.forEach(c => { if (state.sel.has(key(c))) { c.quar = true; c.quarAt = "07-09"; c.quarWhy = "手动批量隔离"; } }); toast(`已隔离 ${state.sel.size} 条：聚合排除、不计发版红线（审计 library-quarantine）`); state.sel.clear(); render(); }
+
+/* ============ 详情抽屉 ============ */
+function openDrawer(k) {
+  const c = CASES.find(x => key(x) === k); if (!c) return;
+  const steps = c.steps || [{ c: "进入" + c.module + "相关页面，准备前置数据", e: "页面加载正常，前置数据就绪" }, { c: "执行「" + c.title.slice(0, 14) + "…」主操作", e: "行为与断言预期一致" }];
+  const hist = c.hist || [{ rev: c.rev, at: c.dep, note: "首次入库（来源任务：" + c.task + "）" }];
+  const dotRow = c.res.map((r, i) => `<span class="dot ${r === "-" ? "n" : r}" title="${ROUNDS[i].code} ${r === "-" ? "未执行" : r === "p" ? "通过" : "失败"}"></span>`).join("");
+  const h = health(c);
+  document.getElementById("overlay").innerHTML = `
+    <div class="drawer-mask" onclick="closeOverlay()"></div>
+    <div class="drawer" role="dialog" aria-label="用例详情">
+      <div style="display:flex;align-items:center;gap:8px">
+        <span class="cid" style="width:auto">${c.id}</span><span class="badge pri-${c.pri}">${c.pri}</span>
+        ${h.label ? `<span class="badge ${h.cls}">${h.label}</span>` : ""}
+        <div style="flex:1"></div><button class="btn sm" onclick="closeOverlay()">✕ 关闭</button>
+      </div>
+      <h3>${c.pinned ? "📌 " : ""}${esc(c.title)}</h3>
+      <div style="font-size:11px;color:var(--muted-fg)">来源 <b>${c.task} · ${c.id}</b> · 入库 ${c.dep} · 当前 r${c.rev} · ${c.review === "approved" ? "已确认 ✓" : "待确认"}</div>
+      <div class="kv">
+        <span class="k">模块</span><span>${c.module}</span>
+        <span class="k">用例类型</span><span>${c.type}</span>
+        <span class="k">关联需求</span><span class="cid" style="width:auto">${c.req}</span>
+        <span class="k">预期来源</span><span>PRD</span>
+        <span class="k">验证性质</span><span>功能验证</span>
+        <span class="k">标签</span><span><span class="badge info">回归测试</span>${c.pinned ? ' <span class="badge outline">📌 核心必跑</span>' : ""}</span>
+      </div>
+      <div class="sect">步骤（content / expected）</div>
+      <div class="steps"><div class="st"><div>#</div><div>操作</div><div>预期</div></div>
+        ${steps.map((s, i) => `<div class="st"><div>${i + 1}</div><div>${esc(s.c)}</div><div>${esc(s.e)}</div></div>`).join("")}
+      </div>
+      <div class="sect">执行历史（近 ${c.res.length} 轮）<span class="phase p3" style="margin-left:6px">三期</span></div>
+      <div class="histdots">${dotRow}<span style="font-size:10px;color:var(--muted-fg);margin-left:6px">翻转 ${flips(c)} 次 · 尾部连败 ${tailFails(c)} 轮</span></div>
+      ${c.quar ? `<div class="fail-detail" style="margin-top:8px">⛔ <b>隔离中</b>（${c.quarAt}）：${esc(c.quarWhy || "")}——聚合执行自动排除，不计发版红线。<button class="btn sm" style="align-self:flex-start" onclick="unquar('${key(c)}')">恢复（人工确认）</button></div>` : ""}
+      <div class="sect">变更记录（rev 时间线）<span class="phase p2" style="margin-left:6px">二期</span></div>
+      <div class="tl">${hist.map((hh, i) => `<div class="t ${i === 0 ? "hl" : ""}"><b>r${hh.rev}</b> · ${hh.at} — ${esc(hh.note)}</div>`).join("")}</div>
+      <div class="sect">操作</div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        ${c.review === "pending" ? `<button class="btn sm primary" onclick="approveOne('${key(c)}')">✓ 确认入回归池</button>` : ""}
+        <button class="btn sm" onclick="toast('原型：AI 就地复核——同版本连续重跑 3 次给出 flaky 判定（三期差异化）')">🔁 AI 就地复核</button>
+        ${!c.quar ? `<button class="btn sm" onclick="quarOne('${key(c)}')">⛔ 隔离</button>` : ""}
+        <button class="btn sm danger" onclick="toast('原型：从库移除（二次确认）')">移除</button>
+      </div>
+    </div>`;
+}
+function closeOverlay() { document.getElementById("overlay").innerHTML = ""; }
+function approveOne(k) { const c = CASES.find(x => key(x) === k); c.review = "approved"; closeOverlay(); toast("已确认：写回 reviewState=approved，记审计"); render(); }
+function quarOne(k) { const c = CASES.find(x => key(x) === k); c.quar = true; c.quarAt = "07-09"; c.quarWhy = "手动隔离"; closeOverlay(); toast("已隔离：聚合排除，不计发版红线（审计 library-quarantine）"); render(); }
+function unquar(k) { const c = CASES.find(x => key(x) === k); c.quar = false; closeOverlay(); toast("已恢复：重新计入聚合与红线"); render(); }
+document.addEventListener("keydown", e => { if (e.key === "Escape") closeOverlay(); });
+
+/* ============ 屏 2：回归套件 ============ */
+function rSuites() {
+  const s = SUITES[state.suiteSel];
+  const hits = suiteHits(s);
+  const pinned = CASES.filter(c => c.pinned);
+  let right = "";
+  if (s.type === "query") {
+    const conds = Object.entries(s.filter).map(([f, v]) => {
+      const d = FIELD_DEFS[f];
+      return `${d.label} ∈ [${v.map(x => d.names ? d.names[x] : x).join(", ")}]`;
+    });
+    right = `<div class="sect" style="margin-top:0">查询条件（保存的查询 · 命中自动同步）</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">${conds.map(c => `<span class="cond">${c}</span>`).join(`<span style="font-size:10px;color:var(--muted-fg);align-self:center">AND</span>`)}
+      <button class="btn sm" onclick="openSuiteBuilder(state.suiteSel)">✎ 编辑条件</button></div>
+      <div style="font-size:11px;color:var(--muted-fg);margin-bottom:10px">✨ <b>AI 生成条件</b>（三期）：输入「只跑上轮挂过的预约相关 P0」自动转为过滤条件保存</div>`;
+  } else if (s.type === "static") {
+    right = `<div class="sect" style="margin-top:0">静态勾选（按来源任务树形选择）</div>
+      <div style="font-size:11px;color:var(--muted-fg);margin-bottom:10px">本套件已固化 ${s.keys.length} 条；新入库用例<b>不会</b>自动进入（区别于查询套件）。<button class="btn sm" onclick="openSuiteBuilder(state.suiteSel)">✎ 编辑勾选</button></div>`;
+  } else {
+    right = `<div class="sect" style="margin-top:0">内置套件</div><div style="font-size:11px;color:var(--muted-fg);margin-bottom:10px">${s.desc}；等价于 v1 的一键重跑范围，保持向后兼容。</div>`;
+  }
+  right += `<div class="sect">命中预览 <span class="cnt" style="font-size:10px;border:1px solid var(--border);border-radius:999px;padding:0 7px">${hits.length} 条</span></div>
+    <div class="grp">${hits.slice(0, 8).map(c => `<div class="crow" style="cursor:default"><span class="cid">${c.id}</span><span class="ctitle">${esc(c.title)}</span><span class="badge pri-${c.pri}">${c.pri}</span><span class="badge">${c.task}</span></div>`).join("")}
+    ${hits.length > 8 ? `<div class="crow" style="cursor:default;color:var(--muted-fg)">… 其余 ${hits.length - 8} 条</div>` : ""}</div>
+    <div class="sect">核心必跑白名单（📌 pinned）</div>
+    <div style="font-size:11px;color:var(--muted-fg);margin-bottom:6px">任何套件/复测模式执行时<b>始终并入</b>下列用例（即使未命中条件），保证核心链路每轮必验：</div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap">${pinned.map(c => `<span class="cond">📌 ${c.task}·${c.id} ${esc(c.title.slice(0, 12))}…</span>`).join("")}</div>
+    <div style="margin-top:14px;display:flex;gap:8px"><button class="btn primary" onclick="openRunModal(${state.suiteSel})">▶ 用此套件发起回归</button><button class="btn" onclick="toast('原型：保存套件到 回归套件.json')">保存</button></div>`;
+  return anno(`<b>对标</b>：Azure DevOps <b>Query-based Suite</b>（查询即套件、自动同步）+ TestRail <b>Dynamic Filter</b> + 静态勾选。落地为本地 <span class="cid" style="width:auto">回归套件.json</span>，发起执行时内存求值圈选，<b>无需服务端</b>。内置「全量」= v1 行为，向后兼容。<b>「＋ 新建套件」与 ✎ 编辑可实际操作</b>：起名 → 选类型 → 拖条件或勾选用例 → 实时命中预览 → 保存。`) +
+  `<div class="suite-layout">
+    <div class="grp" style="margin:0">${SUITES.map((x, i) => {
+      const n = suiteHits(x).length;
+      return `<div class="suite-item ${i === state.suiteSel ? "on" : ""}" onclick="state.suiteSel=${i};render()">
+        <span style="flex:1">${x.name}${x.type === "builtin" ? " 🔒" : ""}</span>
+        <span class="badge ${x.type === "query" ? "info" : x.type === "static" ? "purple" : ""}">${{ builtin: "内置", static: "静态", query: "查询" }[x.type]}</span>
+        <span class="cnt" style="font-size:9.5px;border:1px solid var(--border);border-radius:999px;padding:0 6px">${n}</span>
+        ${x.type !== "builtin" ? `<button class="edit-mini" title="编辑套件" onclick="event.stopPropagation();openSuiteBuilder(${i})">✎</button>` : ""}</div>`;
+    }).join("")}
+    <div class="suite-item" style="color:var(--muted-fg)" onclick="openSuiteBuilder()">＋ 新建套件</div></div>
+    <div class="grp" style="margin:0;padding:14px">${right}</div>
+  </div>`;
+}
+
+/* ============ 套件构建器（新建/编辑） ============ */
+const FIELD_DEFS = {
+  pri:    { label: "优先级",   values: () => ["P0", "P1", "P2"] },
+  module: { label: "模块",     values: () => [...new Set(CASES.map(c => c.module))] },
+  task:   { label: "来源任务", values: () => [...new Set(CASES.map(c => c.task))] },
+  review: { label: "评审态",   values: () => ["approved", "pending"], names: { approved: "已确认", pending: "待确认" } },
+  last:   { label: "上次结果", values: () => ["p", "f", "n"], names: { p: "通过", f: "失败", n: "未跑" } },
+};
+let builder = null;
+function openSuiteBuilder(editIdx) {
+  if (typeof editIdx === "number") {
+    const s = SUITES[editIdx];
+    if (s.type === "builtin") return;
+    builder = { edit: editIdx, name: s.name, type: s.type,
+      conds: s.type === "query" ? Object.entries(s.filter).map(([f, v]) => ({ field: f, values: [...v] })) : [{ field: "pri", values: [] }],
+      checked: new Set(s.type === "static" ? s.keys : []) };
+  } else {
+    builder = { edit: null, name: "", type: "query", conds: [{ field: "pri", values: [] }], checked: new Set() };
+  }
+  renderSuiteBuilder();
+}
+function builderFilter() { const f = {}; builder.conds.forEach(c => { if (c.values.length) f[c.field] = c.values; }); return f; }
+function builderHits() {
+  return builder.type === "query"
+    ? suiteHits({ type: "query", filter: builderFilter() })
+    : CASES.filter(c => !c.quar && builder.checked.has(key(c)));
+}
+function bSetType(t) { builder.type = t; renderSuiteBuilder(); }
+function bSetField(i, f) { builder.conds[i].field = f; builder.conds[i].values = []; renderSuiteBuilder(); }
+function bToggleVal(i, v) { const a = builder.conds[i].values; const j = a.indexOf(v); j >= 0 ? a.splice(j, 1) : a.push(v); renderSuiteBuilder(); }
+function bAddCond() { const used = builder.conds.map(c => c.field); const free = Object.keys(FIELD_DEFS).find(f => !used.includes(f)); if (free) { builder.conds.push({ field: free, values: [] }); renderSuiteBuilder(); } else toast("五类条件字段已全部用上"); }
+function bDelCond(i) { builder.conds.splice(i, 1); if (!builder.conds.length) builder.conds.push({ field: "pri", values: [] }); renderSuiteBuilder(); }
+function bToggleKey(k) { builder.checked.has(k) ? builder.checked.delete(k) : builder.checked.add(k); renderSuiteBuilder(); }
+function bToggleTask(task) {
+  const ks = CASES.filter(c => c.task === task && !c.quar).map(key);
+  const all = ks.every(k => builder.checked.has(k));
+  ks.forEach(k => all ? builder.checked.delete(k) : builder.checked.add(k));
+  renderSuiteBuilder();
+}
+function renderSuiteBuilder() {
+  const hits = builderHits();
+  const isQ = builder.type === "query";
+  let body = "";
+  if (isQ) {
+    body = builder.conds.map((c, i) => {
+      const def = FIELD_DEFS[c.field];
+      return `<div class="frow" style="align-items:flex-start;margin-bottom:6px">
+        <select class="sel" onchange="bSetField(${i}, this.value)">
+          ${Object.entries(FIELD_DEFS).map(([f, d]) => `<option value="${f}" ${f === c.field ? "selected" : ""}>${d.label}</option>`).join("")}
+        </select>
+        <div style="display:flex;gap:5px;flex-wrap:wrap;flex:1;padding-top:3px">
+          ${def.values().map(v => `<button class="chipv ${c.values.includes(v) ? "on" : ""}" onclick="bToggleVal(${i}, '${v}')">${def.names ? def.names[v] : v}</button>`).join("")}
+        </div>
+        ${builder.conds.length > 1 ? `<button class="edit-mini" title="删除条件" onclick="bDelCond(${i})">✕</button>` : ""}
+      </div>`;
+    }).join(`<div style="font-size:10px;color:var(--muted-fg);margin:0 0 6px 4px">AND（同时满足）</div>`);
+    body += `<button class="btn sm" onclick="bAddCond()">＋ 条件</button>
+      <div style="font-size:10.5px;color:var(--muted-fg);margin-top:8px">条件不选值 = 该条件不限制。查询套件保存的是<b>条件本身</b>——之后新入库的命中用例自动进入，零维护。</div>`;
+  } else {
+    body = `<div style="font-size:10.5px;color:var(--muted-fg);margin-bottom:8px">静态套件固化<b>当前勾选清单</b>，新入库用例不会自动进入；适合精挑细选的发版集。</div>`;
+    taskGroups(CASES.filter(c => !c.quar)).forEach((cs, task) => {
+      const all = cs.every(c => builder.checked.has(key(c)));
+      const sel = cs.filter(c => builder.checked.has(key(c))).length;
+      body += `<div class="grp" style="margin-bottom:8px"><div class="grp-head" style="cursor:pointer" onclick="bToggleTask('${task}')">
+        <input type="checkbox" ${all ? "checked" : ""} onclick="event.stopPropagation();bToggleTask('${task}')">📁 ${task}<span class="cnt">${sel}/${cs.length}</span></div>
+        ${cs.map(c => `<div class="crow" onclick="bToggleKey('${key(c)}')">
+          <input type="checkbox" ${builder.checked.has(key(c)) ? "checked" : ""} onclick="event.stopPropagation();bToggleKey('${key(c)}')">
+          <span class="cid">${c.id}</span><span class="ctitle">${esc(c.title)}</span><span class="badge pri-${c.pri}">${c.pri}</span><span class="badge">${c.module}</span></div>`).join("")}
+      </div>`;
+    });
+  }
+  document.getElementById("overlay").innerHTML = `
+    <div class="modal-mask" onclick="closeOverlay()"></div>
+    <div class="modal" style="width:min(660px,94vw)" role="dialog" aria-label="套件构建器">
+      <div class="mhead">${builder.edit != null ? "✎ 编辑套件" : "＋ 新建套件"}<div style="flex:1"></div><button class="btn sm" onclick="closeOverlay()">✕</button></div>
+      <div class="mbody">
+        <div class="frow"><label>名称</label><input class="sel" style="flex:1;padding:0 9px" placeholder="如：预约链路 P0 / 发版精选二组" value="${esc(builder.name)}" oninput="builder.name=this.value"></div>
+        <div class="frow"><label>类型</label>
+          <span class="radio"><input type="radio" name="btype" ${isQ ? "checked" : ""} onchange="bSetType('query')">查询套件（保存条件 · 自动同步）</span>
+          <span class="radio"><input type="radio" name="btype" ${!isQ ? "checked" : ""} onchange="bSetType('static')">静态套件（固定清单）</span></div>
+        <div class="sect" style="margin-top:6px">${isQ ? "圈选条件" : "勾选用例（按来源任务分组）"}</div>
+        ${body}
+        <div class="precheck" style="margin-top:12px">
+          <div>实时${isQ ? "命中" : "已选"} <b>${hits.length}</b> 条 · 覆盖 <b>${new Set(hits.map(c => c.task)).size}</b> 个来源任务（隔离用例已排除）</div>
+          <div style="display:flex;gap:5px;flex-wrap:wrap">${hits.slice(0, 6).map(c => `<span class="cond">${c.id} ${esc(c.title.slice(0, 10))}…</span>`).join("")}${hits.length > 6 ? `<span style="font-size:10px;color:var(--muted-fg);align-self:center">… 等 ${hits.length} 条</span>` : ""}</div>
+        </div>
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+          <button class="btn" onclick="closeOverlay()">取消</button>
+          <button class="btn primary" onclick="saveSuite()">保存套件</button>
+        </div>
+      </div>
+    </div>`;
+}
+function saveSuite() {
+  const name = (builder.name || "").trim();
+  if (!name) { toast("请先给套件起个名字"); return; }
+  const dup = SUITES.findIndex(s => s.name === name);
+  if (dup >= 0 && dup !== builder.edit) { toast("已存在同名套件"); return; }
+  const hits = builderHits();
+  if (!hits.length) { toast("套件为空：查询未命中或未勾选任何用例"); return; }
+  const s = builder.type === "query"
+    ? { name, type: "query", filter: builderFilter() }
+    : { name, type: "static", keys: [...builder.checked] };
+  if (builder.edit != null) { SUITES[builder.edit] = s; state.suiteSel = builder.edit; }
+  else { SUITES.push(s); state.suiteSel = SUITES.length - 1; }
+  closeOverlay();
+  state.screen = "suites";
+  render();
+  toast(`套件「${name}」已保存（写入 回归套件.json）：${s.type === "query" ? "条件命中 " + hits.length + " 条，自动同步" : "固化 " + hits.length + " 条"}`);
+}
+function openAddToSuite() {
+  const statics = SUITES.map((s, i) => ({ s, i })).filter(x => x.s.type === "static");
+  document.getElementById("overlay").innerHTML = `
+    <div class="modal-mask" onclick="closeOverlay()"></div>
+    <div class="modal" style="width:min(420px,94vw)" role="dialog" aria-label="加入套件">
+      <div class="mhead">＋ 加入套件<div style="flex:1"></div><button class="btn sm" onclick="closeOverlay()">✕</button></div>
+      <div class="mbody">
+        <div style="font-size:11px;color:var(--muted-fg);margin-bottom:10px">把已选 <b>${state.sel.size}</b> 条加入<b>静态</b>套件（查询套件由条件自动圈选，不支持手工塞入）：</div>
+        <div class="grp" style="margin:0">${statics.map(x => `<div class="suite-item" onclick="addSelToSuite(${x.i})"><span style="flex:1">${x.s.name}</span><span class="badge purple">静态</span><span class="cnt" style="font-size:9.5px;border:1px solid var(--border);border-radius:999px;padding:0 6px">${x.s.keys.length}</span></div>`).join("")}
+        <div class="suite-item" style="color:var(--muted-fg)" onclick="newSuiteFromSel()">＋ 以所选新建静态套件</div></div>
+      </div></div>`;
+}
+function addSelToSuite(i) {
+  const s = SUITES[i]; let n = 0;
+  state.sel.forEach(k => { if (!s.keys.includes(k)) { s.keys.push(k); n++; } });
+  state.sel.clear(); closeOverlay(); render();
+  toast(`已加入「${s.name}」：新增 ${n} 条（重复自动去重）`);
+}
+function newSuiteFromSel() {
+  builder = { edit: null, name: "", type: "static", conds: [{ field: "pri", values: [] }], checked: new Set(state.sel) };
+  state.sel.clear();
+  renderSuiteBuilder();
+}
+
+/* ============ 发起回归弹窗 ============ */
+const runForm = { suite: 0, env: 1, mode: "full", approvedOnly: false };
+function openRunModal(suiteIdx) {
+  if (typeof suiteIdx === "number") runForm.suite = suiteIdx;
+  renderRunModal();
+}
+function runCount() {
+  const s = SUITES[runForm.suite];
+  let list = suiteHits(s);
+  if (runForm.mode === "failed") {
+    const lastFullIdx = ROUNDS.length - 1;
+    list = CASES.filter(c => !c.quar && c.res[lastFullIdx] === "f");
+    CASES.filter(c => c.pinned && !c.quar).forEach(p => { if (!list.includes(p)) list.push(p); });
+  }
+  if (runForm.approvedOnly) list = list.filter(c => c.review === "approved");
+  return list;
+}
+function renderRunModal() {
+  const s = SUITES[runForm.suite];
+  const list = runCount();
+  const pend = list.filter(c => c.review === "pending").length;
+  const quarN = CASES.filter(c => c.quar).length;
+  const lastFails = CASES.filter(c => !c.quar && c.res[ROUNDS.length - 1] === "f").length;
+  const est = list.length;
+  document.getElementById("overlay").innerHTML = `
+    <div class="modal-mask" onclick="closeOverlay()"></div>
+    <div class="modal" role="dialog" aria-label="发起回归">
+      <div class="mhead">▶ 发起回归轮次<div style="flex:1"></div><button class="btn sm" onclick="closeOverlay()">✕</button></div>
+      <div class="mbody">
+        <div class="frow"><label>套件</label>
+          <select class="sel" onchange="runForm.suite=this.selectedIndex;renderRunModal()">
+            ${SUITES.map((x, i) => `<option ${i === runForm.suite ? "selected" : ""}>${x.name}（${suiteHits(x).length} 条）</option>`).join("")}
+          </select></div>
+        <div class="frow"><label>环境</label>
+          <select class="sel" onchange="runForm.env=this.selectedIndex;renderRunModal()">
+            ${ENVS.map((e, i) => `<option ${i === runForm.env ? "selected" : ""} ${!e.ok ? "disabled" : ""}>${e.ok ? "🟢" : "🔴"} ${e.name} — ${e.url}${e.ok ? "" : "（不可达）"}</option>`).join("")}
+          </select></div>
+        <div class="frow"><label>模式</label>
+          <span class="radio"><input type="radio" name="mode" ${runForm.mode === "full" ? "checked" : ""} onchange="runForm.mode='full';renderRunModal()">全量执行</span>
+          <span class="radio"><input type="radio" name="mode" ${runForm.mode === "failed" ? "checked" : ""} ${!lastFails ? "disabled" : ""} onchange="runForm.mode='failed';renderRunModal()">仅复测上轮失败（${lastFails} 条 + 📌必跑）</span></div>
+        <div class="frow"><label></label>
+          <label class="toggle"><input type="checkbox" ${runForm.approvedOnly ? "checked" : ""} onchange="runForm.approvedOnly=this.checked;renderRunModal()">仅执行已确认用例</label>
+          ${pend ? `<span style="font-size:10.5px;color:var(--warn)">当前圈选含待确认 ${pend} 条${runForm.approvedOnly ? "（已排除）" : "，建议先评审"}</span>` : ""}</div>
+        <div class="precheck">
+          <div>将执行 <b>${list.length}</b> 条用例 · 涉及 <b>${new Set(list.map(c => c.task)).size}</b> 个来源任务${quarN ? ` · <span style="color:var(--purple)">隔离排除 ${quarN} 条</span>` : ""}</div>
+          <div>预计耗时 <b>≈ ${Math.max(1, Math.round(est * 1.2))} 分钟</b> · 预估消耗 <b>≈ ${(est * 1.4).toFixed(0)}万 tokens</b>（按近 3 轮均值估算）</div>
+          ${runForm.mode === "failed" ? `<div class="warn-line">复测轮红线按「与上轮全量合并后的最新状态」评估，不单独给出可发版结论</div>` : ""}
+        </div>
+        <div class="redline-note">红线口径：回归集未全过 = 不可发版（suitePassStr）。执行产物落 report/回归用例库/{roundId}/，当轮用例快照随轮留存。</div>
+        <div style="display:flex;gap:8px;justify-content:flex-end">
+          <button class="btn" onclick="closeOverlay()">取消</button>
+          <button class="btn primary" ${!list.length ? "disabled" : ""} onclick="startRun()">开始执行（${list.length} 条）</button>
+        </div>
+        <div id="runProg"></div>
+      </div>
+    </div>`;
+}
+function startRun() {
+  const list = runCount(), total = list.length;
+  let done = 0;
+  const prog = document.getElementById("runProg");
+  const step = () => {
+    done++;
+    const cur = list[Math.min(done, total) - 1];
+    prog.innerHTML = `<div class="runstat"><span class="spin"></span><span>正在执行 ${cur.task}·${cur.id}（${done}/${total}）…</span><div class="prog"><i style="width:${Math.round(done / total * 100)}%"></i></div></div>`;
+    if (done < total) { runTimer = setTimeout(step, 2400 / total * 10 > 300 ? 300 : 220); }
+    else finishRun(list);
+  };
+  let runTimer = setTimeout(step, 200);
+}
+function finishRun(list) {
+  const idx = ROUNDS.length;
+  ROUNDS.push({ code: "RND-0709-新轮", date: "07-09 10:30", env: ENVS[runForm.env].name, suite: runForm.mode === "failed" ? "—" : SUITES[runForm.suite].name, mode: runForm.mode, parent: runForm.mode === "failed" ? ROUNDS[ROUNDS.length - 1].code : undefined });
+  CASES.forEach(c => {
+    if (!list.includes(c)) { c.res.push("-"); return; }
+    // 演示剧本：设备预约 TC-002 修复通过；登录鉴权 TC-004 持续失败；其余保持通过
+    c.res.push(key(c) === "登录鉴权|TC-004" ? "f" : "p");
+  });
+  closeOverlay();
+  state.reportRound = idx;
+  toast("轮次完成：产物落 report/回归用例库/RND-0709-新轮/，快照已留存");
+  go("rounds");
+}
+
+/* ============ 屏 3：轮次历史 ============ */
+function sparkSvg(vals, w, h, color) {
+  if (!vals.length) return "";
+  const min = Math.min(...vals) - 3, max = Math.max(...vals) + 3;
+  const pts = vals.map((v, i) => `${(i / (vals.length - 1)) * (w - 6) + 3},${h - 3 - (v - min) / (max - min) * (h - 6)}`).join(" ");
+  const last = pts.split(" ").pop().split(",");
+  return `<svg class="sparkline" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-hidden="true">
+    <polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>
+    <circle cx="${last[0]}" cy="${last[1]}" r="2.2" fill="${color}"/></svg>`;
+}
+function rRounds() {
+  const rates = ROUNDS.map((r, i) => { const s = roundStats(i); return s.total ? Math.round(s.pass / s.total * 100) : 0; });
+  let html = anno(`<b>对标</b>：TestRail Run / Xray Test Execution——<b>结果挂轮次实例而非用例本身</b>。每轮产物落 <span class="cid" style="width:auto">report/回归用例库/{roundId}/</span> 子目录（run.json + 报告 + 证据 + <b>当轮用例快照</b>），同环境重跑不再互相覆盖。复测轮的红线按<b>合并口径</b>（每用例最新状态）评估，避免「2/2 通过=可发版」的误判。`);
+  html += `<div class="toolrow"><div class="stat-line">近 ${ROUNDS.length} 轮通过率 ${sparkSvg(rates, 120, 26, "var(--primary)")} <span class="n">${rates[rates.length - 1]}%</span></div>
+    <div style="flex:1"></div>
+    <select class="sel" onchange="toast('原型：按环境过滤轮次')"><option>全部环境</option><option>staging</option><option>local</option></select>
+    <button class="btn primary" onclick="openRunModal()">▶ 发起回归</button></div>`;
+  html += `<div class="tblwrap"><table class="tbl"><thead><tr>
+    <th>轮次</th><th>时间</th><th>环境</th><th>套件</th><th>模式</th><th>通过</th><th>红线</th><th style="text-align:right">操作</th></tr></thead><tbody>`;
+  for (let i = ROUNDS.length - 1; i >= 0; i--) {
+    const r = ROUNDS[i], s = roundStats(i);
+    const rate = s.total ? s.pass / s.total : 0;
+    const merged = mergedStats(i);
+    const isRetest = r.mode === "failed";
+    const redline = isRetest
+      ? `<span class="badge ${merged.fail ? "err" : "ok"}" title="复测轮按合并口径评估">合并 ${merged.pass}/${merged.total} · ${merged.fail ? "不可发版" : "可发版"}</span>`
+      : `<span class="badge ${s.fail ? "err" : "ok"}">${s.fail ? "不可发版" : "可发版"}</span>`;
+    html += `<tr>
+      <td><span class="cid" style="width:auto">${r.code}</span></td>
+      <td style="white-space:nowrap">${r.date}</td>
+      <td><span class="badge outline">${r.env}</span></td>
+      <td>${r.suite}</td>
+      <td>${isRetest ? `<span class="badge warn">复测轮</span> <span style="font-size:9.5px;color:var(--muted-fg)">源 ${r.parent}</span>` : `<span class="badge">全量</span>`}</td>
+      <td style="white-space:nowrap"><span class="pass-bar"><i style="width:${rate * 100}%"></i></span> <b>${s.pass}/${s.total}</b></td>
+      <td>${redline}</td>
+      <td style="text-align:right;white-space:nowrap">
+        <button class="btn sm" onclick="state.reportRound=${i};state.deltaFilter='';go('report')">报告</button>
+        ${s.fail ? `<button class="btn sm" onclick="runForm.mode='failed';openRunModal()">复测 ${s.fail} 条</button>` : ""}
+        <button class="btn sm" onclick="toast('原型：查看当轮 cases.snapshot.json（TestRail Close 即快照）')">快照</button>
+      </td></tr>`;
+  }
+  return html + `</tbody></table></div>`;
+}
+
+/* ============ 屏 4：轮次报告 ============ */
+function prevFullIdx(idx) { for (let i = idx - 1; i >= 0; i--) if (ROUNDS[i].mode !== "failed") return i; return -1; }
+function rReport() {
+  const idx = Math.min(state.reportRound, ROUNDS.length - 1);
+  const r = ROUNDS[idx], s = roundStats(idx);
+  const pidx = prevFullIdx(idx);
+  const quarN = CASES.filter(c => c.quar).length;
+  const newFail = [], fixed = [], stillFail = [];
+  if (pidx >= 0) CASES.forEach(c => {
+    const a = c.res[pidx], b = c.res[idx];
+    if (a === "p" && b === "f") newFail.push(c);
+    if (a === "f" && b === "p") fixed.push(c);
+    if (a === "f" && b === "f") stillFail.push(c);
+  });
+  let html = anno(`<b>对标</b>：Xray Test Plan Board / TestRail 按 Section 分组报告。消费 v1 已具备但未用的 <b>idMap 反解</b>：runId（命名空间化）反解回「来源任务 · 原 ID」，run.json 增加 taskCounts 小计——「<b>哪个功能的回归挂了</b>」一眼可见。Delta 卡对比上一全量轮。`);
+  html += `<div class="toolrow"><div class="stat-line">轮次
+    <select class="sel" onchange="state.reportRound=+this.value;state.deltaFilter='';render()">
+      ${ROUNDS.map((x, i) => `<option value="${i}" ${i === idx ? "selected" : ""}>${x.code} · ${x.env}${x.mode === "failed" ? " · 复测轮" : ""}</option>`).join("")}
+    </select></div><div style="flex:1"></div>
+    <button class="btn" onclick="toast('原型：导出报告 md / xlsx')">⤓ 导出</button>
+    <button class="btn" onclick="toast('原型：查看当轮用例快照')">📄 快照</button></div>`;
+  html += `<div class="banner ${s.fail ? "red" : "green"}">
+    <span class="big">${s.pass}/${s.total}</span>
+    <span class="verdict">${s.fail ? "✖ 不可发版" : "✔ 可发版"}</span>
+    <span class="meta">回归集口径：未全过 = 不可发版${r.mode === "failed" ? `（复测轮 · 合并后 ${mergedStats(idx).pass}/${mergedStats(idx).total}）` : ""}</span>
+    <div style="flex:1"></div>
+    <span class="meta">${r.code} · ${r.date} · 环境 ${r.env} · 套件 ${r.suite}${quarN ? ` · ⛔ 隔离中 ${quarN} 条未计入` : ""}</span>
+  </div>`;
+  if (pidx >= 0) {
+    const card = (k, label, arr, color) => `<div class="card ${state.deltaFilter === k ? "on" : ""}" onclick="state.deltaFilter=state.deltaFilter==='${k}'?'':'${k}';render()">
+      <div class="k">${label}</div><div class="v" style="color:${color}">${arr.length}<small>条</small></div></div>`;
+    html += `<div class="delta">${card("new", "较上轮新增失败", newFail, "var(--err)")}${card("fixed", "较上轮已修复", fixed, "var(--ok)")}${card("still", "持续失败", stillFail, "var(--warn)")}</div>`;
+  }
+  const inRound = CASES.filter(c => c.res[idx] !== "-");
+  let shown = inRound;
+  if (state.deltaFilter === "new") shown = newFail;
+  if (state.deltaFilter === "fixed") shown = fixed;
+  if (state.deltaFilter === "still") shown = stillFail;
+  taskGroups(shown).forEach((cs, task) => {
+    const p = cs.filter(c => c.res[idx] === "p").length;
+    const groupFail = cs.length - p;
+    html += `<div class="grp"><div class="grp-head">📁 ${task}<span class="badge ${groupFail && state.deltaFilter !== "fixed" ? "err" : "ok"}">${p}/${cs.length} 通过</span><div class="sp"></div></div>`;
+    cs.forEach(c => {
+      const res = c.res[idx];
+      const v = AI_VERDICTS[key(c)];
+      html += `<div class="crow" style="cursor:default">
+        <span class="dot ${res}"></span><span class="cid">${c.id}</span><span class="ctitle">${esc(c.title)}</span>
+        <span class="badge pri-${c.pri}">${c.pri}</span>
+        <span class="badge ${res === "p" ? "ok" : "err"}">${res === "p" ? "通过" : "失败"}</span></div>`;
+      if (res === "f") html += `<div style="padding:0 12px 8px 30px"><div class="fail-detail">
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+          <span class="badge err">AI 归因：${v ? v.cls : "待归因"}</span>
+          <span class="badge outline">建议：${v ? v.act : "—"}</span>
+          <div style="flex:1"></div>
+          <button class="btn sm" onclick="toast('原型：AI 拼装重现步骤+截图+环境信息，生成结构化缺陷（二期缺陷闭环）')">🐞 转缺陷</button>
+        </div>
+        <div style="color:var(--muted-fg)">${v ? esc(v.why) : ""}</div>
+        <div style="display:flex;gap:8px;align-items:center"><span class="thumb">📷 失败截图</span><span class="thumb">🎬 执行录像</span><span style="font-size:10px;color:var(--muted-fg)">证据落 report/_evidence/，点击查看</span></div>
+      </div></div>`;
+    });
+    html += `</div>`;
+  });
+  if (!shown.length) html += `<div class="empty">该过滤条件下没有用例</div>`;
+  return html;
+}
+
+/* ============ 屏 5：对比矩阵 ============ */
+function rMatrix() {
+  let rows = CASES;
+  if (state.matrixFailOnly) rows = rows.filter(c => c.res.some(x => x === "f"));
+  let html = anno(`<b>对标</b>：TestRail <b>Comparison for Cases</b>（行=用例 × 列=轮次）。全部由本地 回归轮次.json 索引 + 各轮 run.json 只读拼装。行身份 = (来源任务, 原ID)，行尾派生「翻转/连败」直通健康度。`);
+  html += `<div class="toolrow"><label class="toggle"><input type="checkbox" ${state.matrixFailOnly ? "checked" : ""} onchange="state.matrixFailOnly=this.checked;render()">只看有失败的行</label>
+    <div style="flex:1"></div><span class="stat-line">图例 <span class="cell p"></span> 通过 <span class="cell f"></span> 失败 <span class="cell n"></span> 未执行</span></div>`;
+  html += `<div class="matrix-wrap"><table class="matrix"><thead><tr><th class="sticky">用例</th>`;
+  ROUNDS.forEach(r => { html += `<th title="${r.code} · ${r.env}">${r.date.split(" ")[0]}<br><span style="font-weight:400">${r.env}</span>${r.mode === "failed" ? "<br>复测" : ""}</th>`; });
+  html += `<th>翻转</th><th>连败</th></tr></thead><tbody>`;
+  taskGroups(rows).forEach((cs, task) => {
+    html += `<tr class="mgrp"><td class="sticky" colspan="${ROUNDS.length + 3}">📁 ${task}</td></tr>`;
+    cs.forEach(c => {
+      html += `<tr><td class="sticky"><span class="cid">${c.id}</span> ${esc(c.title.length > 16 ? c.title.slice(0, 16) + "…" : c.title)}</td>`;
+      c.res.forEach((r, i) => {
+        html += `<td style="text-align:center"><span class="cell ${r === "-" ? "n" : r}" title="${ROUNDS[i].code}：${r === "-" ? "未执行" : r === "p" ? "通过" : "失败"}" onclick="toast('${ROUNDS[i].code} · ${c.task}·${c.id}：${r === "-" ? "该轮未执行" : r === "p" ? "通过" : "失败——点击查看该轮详情与证据"}')"></span></td>`;
+      });
+      const tf = tailFails(c);
+      html += `<td style="text-align:center">${flips(c) || ""}</td><td style="text-align:center;${tf >= 3 ? "color:var(--err);font-weight:700" : ""}">${tf || ""}</td></tr>`;
+    });
+  });
+  return html + `</tbody></table></div>`;
+}
+
+/* ============ 屏 6：健康度 ============ */
+function rHealth() {
+  const flaky = CASES.filter(c => !c.quar && health(c).k === "flaky");
+  const streak = CASES.filter(c => !c.quar && health(c).k === "streak");
+  const stale = CASES.filter(c => !c.quar && ["stale", "never"].includes(health(c).k));
+  const quar = CASES.filter(c => c.quar);
+  const rates = ROUNDS.map((r, i) => { const s = roundStats(i); return s.total ? Math.round(s.pass / s.total * 100) : 0; });
+  const dots = c => `<span class="histdots">${c.res.map((r, i) => `<span class="dot ${r === "-" ? "n" : r}" title="${ROUNDS[i].code}"></span>`).join("")}</span>`;
+  let html = anno(`<b>差异化</b>：TestRail / Xray / MeterSphere / 禅道均无原生 flaky·stale 治理——本产品自有执行引擎，可从 <span class="cid" style="width:auto">回归用例库.stats.json</span>（逐用例近 20 轮结果）自动派生。⚠️ 跨轮翻转 ≠ flaky（版本在变），最终判定依赖「<b>AI 就地复核</b>：同版本连跑 3 次」。隔离不是删除：不计红线但每轮横幅强制曝光隔离数。`);
+  const q = { flaky, streak, stale }[state.qtab] || flaky;
+  html += `<div class="cards">
+    <div class="card"><div class="k">库总用例</div><div class="v">${CASES.length}<small>条 · 4 任务</small></div></div>
+    <div class="card"><div class="k">近 ${ROUNDS.length} 轮通过率</div><div class="v">${rates[rates.length - 1]}%<small>${sparkSvg(rates, 72, 20, "var(--primary)")}</small></div></div>
+    <div class="card"><div class="k">疑似 flaky</div><div class="v" style="color:var(--warn)">${flaky.length}<small>待复核</small></div></div>
+    <div class="card"><div class="k">连续失败</div><div class="v" style="color:var(--err)">${streak.length}<small>≥3 轮</small></div></div>
+    <div class="card"><div class="k">隔离区</div><div class="v" style="color:var(--purple)">${quar.length}<small>不计红线</small></div></div>
+  </div>`;
+  html += `<div class="qtabs">
+    <button class="qtab ${state.qtab === "flaky" ? "on" : ""}" onclick="state.qtab='flaky';render()">疑似 flaky（${flaky.length}）</button>
+    <button class="qtab ${state.qtab === "streak" ? "on" : ""}" onclick="state.qtab='streak';render()">连续失败（${streak.length}）</button>
+    <button class="qtab ${state.qtab === "stale" ? "on" : ""}" onclick="state.qtab='stale';render()">久未跑 / 未跑（${stale.length}）</button>
+  </div><div class="grp">`;
+  if (!q.length) html += `<div class="empty">该队列为空 ✓</div>`;
+  q.forEach(c => {
+    html += `<div class="queue-row"><span class="cid">${c.id}</span><span class="ctitle" style="cursor:pointer" onclick="openDrawer('${key(c)}')">${esc(c.title)}</span><span class="badge">${c.task}</span>${dots(c)}`;
+    if (state.qtab === "flaky") html += `<button class="btn sm" onclick="toast('原型：AI 就地复核——同版本连跑 3 次，3/3 通过→摘除 flaky；翻转→建议隔离')">🔁 就地复核</button><button class="btn sm" onclick="quarOne('${key(c)}')">⛔ 隔离</button>`;
+    if (state.qtab === "streak") html += `<span class="badge err">连败 ${tailFails(c)}</span><button class="btn sm" onclick="toast('原型：AI 建议——归因为产品缺陷，转缺陷跟踪；勿隔离掩盖回归')">🐞 转缺陷</button>`;
+    if (state.qtab === "stale") html += `<span class="badge outline">${lastRunIdx(c) < 0 ? "从未执行" : "上次 " + ROUNDS[lastRunIdx(c)].date}</span><button class="btn sm" onclick="toast('原型：加入下一轮执行')">＋下轮必跑</button><button class="btn sm" onclick="toast('原型：AI 预判退役理由，人工确认后归档（不删除）')">归档建议</button>`;
+    html += `</div>`;
+  });
+  html += `</div><div class="sect">隔离区（quarantine）</div><div class="grp">`;
+  if (!quar.length) html += `<div class="empty">隔离区为空</div>`;
+  quar.forEach(c => {
+    html += `<div class="queue-row"><span class="cid">${c.id}</span><span class="ctitle" style="cursor:pointer" onclick="openDrawer('${key(c)}')">${esc(c.title)}</span><span class="badge">${c.task}</span>
+      <span class="badge purple">隔离于 ${c.quarAt}</span><span style="font-size:10.5px;color:var(--muted-fg);flex:1">${esc(c.quarWhy || "")}</span>
+      <button class="btn sm" onclick="unquar('${key(c)}')">恢复</button></div>`;
+  });
+  html += `</div><div style="font-size:10.5px;color:var(--muted-fg);margin-top:8px">⚠️ 护栏：隔离用例不计发版红线，但报告横幅<b>强制显示</b>「隔离中 N 条未计入」；隔离占比超 10% 时顶部告警，防止用隔离掩盖真实回归。</div>`;
+  return html;
+}
+
+/* ============ 启动 ============ */
+render();
+</script>
+
+</body>
+</html>

@@ -79,6 +79,12 @@ export interface RunJson {
    */
   suiteCounts?: RunCounts;
   suitePassStr?: string; // 回归集 "pass/total"；pass < total 即回归集未全过（发版红线）
+  /**
+   * 按【来源任务】的四态小计（v2 回归轮次报告分组）：仅当调用方传入 taskOf(runId→来源
+   * 任务名,来自当轮快照 idMap)时输出——「哪个功能的回归挂了」一眼可见。普通任务执行
+   * 不传,字段缺省,旧 run.json 消费方不受影响。
+   */
+  taskCounts?: Record<string, RunCounts>;
   circuitBroken: boolean;
   tests: ReducedTest[];
 }
@@ -153,6 +159,8 @@ export function reduceResults(
     caseIds?: string[];
     /** 回归集用例 id（cases.json `tags` 含「回归测试」，由 run 路由收集传入）。 */
     suiteIds?: string[];
+    /** runId → 来源任务名（回归轮次:快照 idMap 反解;传入即输出 taskCounts 分组小计）。 */
+    taskOf?: Record<string, string>;
   },
 ): RunJson {
   const tests: ReducedTest[] = raw.map((r) => {
@@ -232,6 +240,19 @@ export function reduceResults(
     suitePassStr = `${suiteCounts.pass}/${suiteCounts.total}`;
   }
 
+  // 按来源任务的四态小计（v2 轮次报告分组）:taskOf 缺失的 runId 归入「未知来源」——
+  // 快照与执行集理论上一致,兜底桶只在快照缺损时出现,不静默丢数。
+  let taskCounts: Record<string, RunCounts> | undefined;
+  if (opts.taskOf) {
+    taskCounts = {};
+    for (const t of tests) {
+      const task = opts.taskOf[t.id] ?? "未知来源";
+      const c = (taskCounts[task] ??= { total: 0, pass: 0, fail: 0, partial: 0, blocked: 0 });
+      c.total++;
+      c[t.status]++;
+    }
+  }
+
   // Overall status: any real fail ⇒ failed; else all-blocked (nothing ran) ⇒ blocked; else done.
   const status: RunJson["status"] =
     counts.fail > 0
@@ -251,6 +272,7 @@ export function reduceResults(
     funcPassStr,
     regressionTotal,
     ...(suiteCounts ? { suiteCounts, suitePassStr } : {}),
+    ...(taskCounts ? { taskCounts } : {}),
     circuitBroken,
     tests,
   };
@@ -259,7 +281,7 @@ export function reduceResults(
 /** Convenience: harvest @@RESULT from raw stream text, then reduce. */
 export function reduceFromText(
   text: string,
-  opts: { module: string; env: string; time: string; verificationById?: Record<string, string>; caseIds?: string[]; suiteIds?: string[] },
+  opts: { module: string; env: string; time: string; verificationById?: Record<string, string>; caseIds?: string[]; suiteIds?: string[]; taskOf?: Record<string, string> },
 ): RunJson {
   return reduceResults(harvestResults(text), opts);
 }

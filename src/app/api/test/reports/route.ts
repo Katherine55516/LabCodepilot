@@ -20,17 +20,17 @@ export async function GET(req: Request): Promise<Response> {
 
   const reportRoot = path.join(projectPath, 'AI_LabTest', 'report');
   const reports: unknown[] = [];
-  try {
-    for (const taskDir of fs.readdirSync(reportRoot, { withFileTypes: true })) {
-      if (!taskDir.isDirectory() || taskDir.name.startsWith('_')) continue; // skip _evidence
-      const dir = path.join(reportRoot, taskDir.name);
-      let files: string[] = [];
-      try { files = fs.readdirSync(dir); } catch { continue; }
-      for (const f of files) {
-        if (!f.endsWith('.run.json')) continue;
-        try {
-          const runContent = fs.readFileSync(path.join(dir, f), 'utf-8');
-          const raw = JSON.parse(runContent) as Record<string, unknown>;
+  // 收集一个目录里的 run.json 报告条目。roundId(v2 回归轮次):回归用例库的轮次化产物落
+  // report/回归用例库/{roundId}/ 子目录,扫描时下钻一层并把子目录名作为 roundId 透传——
+  // 前端仍按 task 分组,轮次报告归在「回归用例库」组内、带轮次标识。
+  const collectDir = (dir: string, taskName: string, roundId?: string) => {
+    let files: string[] = [];
+    try { files = fs.readdirSync(dir); } catch { return; }
+    for (const f of files) {
+      if (!f.endsWith('.run.json')) continue;
+      try {
+        const runContent = fs.readFileSync(path.join(dir, f), 'utf-8');
+        const raw = JSON.parse(runContent) as Record<string, unknown>;
           // runHash = sha1(run.json 全文)，与执行/报告步埋点、.history 去重同源同值，
           // 把人工复核（report_reviewed）关联到确切执行轮（重跑即失效）。
           const runHash = sha1Hex(runContent);
@@ -45,7 +45,8 @@ export async function GET(req: Request): Promise<Response> {
           try { defectMarkdown = fs.readFileSync(path.join(dir, f.replace(/\.run\.json$/, '-缺陷报告.md')), 'utf-8'); } catch { /* none */ }
           // 注：Excel 执行矩阵不再依赖磁盘 .xlsx —— 由 /api/test/report-xlsx 从 run.json 即时派生（见该 route）。
           reports.push({
-            task: taskDir.name,
+            task: taskName,
+            ...(roundId ? { roundId } : {}),
             env: typeof raw.env === 'string' ? raw.env : '',
             time: typeof raw.time === 'string' ? raw.time : '',
             status: typeof raw.status === 'string' ? raw.status : '',
@@ -84,9 +85,23 @@ export async function GET(req: Request): Promise<Response> {
             markdown,
             defectMarkdown,
           });
-        } catch {
-          /* skip unreadable / malformed run.json */
-        }
+      } catch {
+        /* skip unreadable / malformed run.json */
+      }
+    }
+  };
+  try {
+    for (const taskDir of fs.readdirSync(reportRoot, { withFileTypes: true })) {
+      if (!taskDir.isDirectory() || taskDir.name.startsWith('_')) continue; // skip _evidence
+      const dir = path.join(reportRoot, taskDir.name);
+      collectDir(dir, taskDir.name);
+      // 下钻一层:轮次子目录(report/{task}/{roundId}/*.run.json)。跳过 .history(执行步
+      // 的多版本快照目录,不是独立报告)。
+      let subs: fs.Dirent[] = [];
+      try { subs = fs.readdirSync(dir, { withFileTypes: true }); } catch { subs = []; }
+      for (const sub of subs) {
+        if (!sub.isDirectory() || sub.name.startsWith('.')) continue;
+        collectDir(path.join(dir, sub.name), taskDir.name, sub.name);
       }
     }
   } catch {
