@@ -65,9 +65,11 @@ describe("harvestVerdicts — AI 输出解析容错", () => {
     assert.equal(out["TC-001"].cls, "产品缺陷");
   });
 
-  it("行首必须是 @@VERDICT(正文里提到的示例不会被误采)", () => {
+  it("标记不在行首也采;编造的 id 由路由按快照 idMap 白名单过滤掉", () => {
+    // 位置宽容是刻意的:漏采一条 = 该用例判定丢失(灾难),多采一条 = 下游白名单丢弃(无害)。
+    // 见 markers.ts 模块头「宁可多采,不可漏采」。
     const out = harvestVerdicts(`格式示例：@@VERDICT {"id":"TC-999","cls":"产品缺陷","act":"a","why":"w"}`);
-    assert.deepEqual(Object.keys(out), []);
+    assert.deepEqual(Object.keys(out), ["TC-999"]);
   });
 
   it("空输入 / 无判定行 → 空对象", () => {

@@ -32,6 +32,8 @@ export interface TraceRedaction {
   replacement: string;
 }
 
+// NOTE: 与 markers.ts 的口径保持一致(容忍 `**@@CASE_START {...}**` 这类装饰)。这里贪婪
+// 到行内最后一个 `}`,对本模块只取 `id` 的用途足够;严格的 JSON 收割一律走 markers.ts。
 const TRACE_MARKER = /@@(CASE_START|RESULT)\s+(\{[^\r\n]*\})/g;
 
 export function extractPlaywrightCode(content: string): string | undefined {

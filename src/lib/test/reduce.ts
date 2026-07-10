@@ -14,6 +14,8 @@
  * Pure functions — unit-tested in src/__tests__/unit/test-reduce.test.ts.
  */
 
+import { harvestMarkers } from "./markers";
+
 export type FourStateStatus = "pass" | "fail" | "partial" | "blocked";
 
 /**
@@ -107,19 +109,13 @@ const NOT_EXECUTED_MSG = "用例未执行：执行阶段未产出该用例的结
 
 /** Extract every `@@RESULT {json}` object from streamed agent text. */
 export function harvestResults(text: string): RawResult[] {
-  const out: RawResult[] = [];
-  for (const line of text.split("\n")) {
-    const idx = line.indexOf("@@RESULT");
-    if (idx < 0) continue;
-    const jsonStr = line.slice(idx + "@@RESULT".length).trim();
-    try {
-      const obj = JSON.parse(jsonStr);
-      if (obj && typeof obj === "object") out.push(obj as RawResult);
-    } catch {
-      // ignore malformed result lines
-    }
+  const { items, malformed } = harvestMarkers<RawResult>(text, "RESULT");
+  if (malformed > 0) {
+    // 静默丢弃曾让「模型判 2 通过 1 失败」被报成「0/3 全阻塞」(见 markers.ts 模块头)。
+    // 解析器现在容忍 markdown 装饰;仍解析不了说明模型输出严重跑偏,必须留声。
+    console.warn(`[test-reduce] ${malformed} 行 @@RESULT 无法解析为 JSON,已丢弃`);
   }
-  return out;
+  return items;
 }
 
 /**

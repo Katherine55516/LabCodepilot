@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import { roundDirRel } from './rounds';
+import { harvestMarkerObjects } from './markers';
 
 /**
  * 测试工作台 · 回归轮次的 AI 失败归因(v2 二期)。
@@ -80,21 +81,18 @@ export function writeVerdicts(projectPath: string, roundId: string, verdicts: Re
  * 从 AI 输出里 harvest `@@VERDICT {json}` 行(与 recommend 路由同款「AI 只读、代码落盘」范式:
  * 模型没有 Write 权限,平台按它的输出行精确写文件)。
  *
- * 容错:非 JSON 行跳过;缺字段/分类不在枚举内的整条丢弃;同一 id 后出现的覆盖先出现的。
+ * 解析口径统一走 markers.ts:容忍模型把标记行包成 `**…**` / 反引号 / 尾随文字(原来用
+ * `^@@VERDICT` 锚定行首,一加粗就整行匹配不上,归因会静默全空)。
+ * 缺字段/分类不在枚举内的整条丢弃;同一 id 后出现的覆盖先出现的。
  * 返回 runId → verdict(runId 反解回 (task, originalId) 由调用方用当轮快照 idMap 完成)。
  */
 export function harvestVerdicts(text: string): Record<string, CaseVerdict> {
   const out: Record<string, CaseVerdict> = {};
-  const re = /^@@VERDICT\s+(\{.*\})\s*$/gm;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(text)) !== null) {
-    try {
-      const o = JSON.parse(m[1]) as { id?: unknown; cls?: unknown; act?: unknown; why?: unknown };
-      if (typeof o.id !== 'string' || !o.id) continue;
-      const v = { cls: o.cls, act: o.act ?? '', why: o.why ?? '' } as CaseVerdict;
-      if (!isVerdict(v)) continue;
-      out[o.id] = v;
-    } catch { /* 坏行跳过 */ }
+  for (const o of harvestMarkerObjects<{ id?: unknown; cls?: unknown; act?: unknown; why?: unknown }>(text, 'VERDICT')) {
+    if (typeof o.id !== 'string' || !o.id) continue;
+    const v = { cls: o.cls, act: o.act ?? '', why: o.why ?? '' } as CaseVerdict;
+    if (!isVerdict(v)) continue;
+    out[o.id] = v;
   }
   return out;
 }
@@ -158,5 +156,7 @@ ${cases}
 对**每一条**输出一行（共 ${failures.length} 行，按上面顺序，一行一条）：
 @@VERDICT {"id":"<原样照抄上面的 id>","cls":"<四类之一>","act":"<一句话动作建议>","why":"<一句话理由，引用真实证据；内层引用用中文引号「」>"}
 
-**只读不写**：禁止修改任何文件——平台按你的输出行落盘。输出完后自检行数是否等于 ${failures.length}。`;
+**只读不写**：禁止修改任何文件——平台按你的输出行落盘。
+**标记行必须裸写**：以 @@VERDICT 开头，整行只有标记与 JSON，不得加粗、不得套反引号或代码块、不得在 JSON 后补文字。
+输出完后自检行数是否等于 ${failures.length}。`;
 }

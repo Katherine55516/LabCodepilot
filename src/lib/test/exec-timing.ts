@@ -11,6 +11,8 @@
  * AI 偶发不按格式输出时，相应用例只是缺 durationMs，不抛错、不阻塞（口径允许缺省）。
  */
 
+import { harvestMarkerObjects, isProgressLine } from './markers';
+
 export interface CaseTimer {
   /** 喂入一段 text 增量；nowMs 为该增量到达服务端的挂钟时刻。 */
   feedText(chunk: string, nowMs: number): void;
@@ -26,22 +28,17 @@ export function createCaseTimer(): CaseTimer {
   const onLine = (rawLine: string, nowMs: number) => {
     const line = rawLine.trim();
     if (!line) return;
-    if (line.startsWith('▶')) {
+    if (isProgressLine(line)) {
       // 新用例开跑；上一条 ▶ 若没等到 @@RESULT（AI 漏输出）则直接丢弃其计时
       openStartMs = nowMs;
       return;
     }
-    const idx = line.indexOf('@@RESULT');
-    if (idx === -1) return;
+    if (!line.includes('@@RESULT')) return;
     let id = '';
-    try {
-      const parsed = JSON.parse(line.slice(idx + '@@RESULT'.length).trim()) as { id?: unknown };
-      // 刻意不 trim：与 reduce.harvestResults 完全同键。若两侧归一化不一致，带空白的
-      // id 会让时长错挂到 caseIds 对齐补全出的「未执行」条目上；同键则最坏只是时长缺省。
-      if (typeof parsed.id === 'string') id = parsed.id;
-    } catch {
-      // 坏行忽略（与 reduce.harvestResults 同款容错）
-    }
+    // 与 reduce.harvestResults 共用 markers.ts 的解析器——两侧宽严必须完全一致,否则带
+    // markdown 装饰的行会一边解析成功、一边失败,时长错挂到兜底补全的「未执行」条目上。
+    const [parsed] = harvestMarkerObjects<{ id?: unknown }>(line, 'RESULT');
+    if (parsed && typeof parsed.id === 'string') id = parsed.id;
     if (id && openStartMs !== null && !(id in durations)) {
       const d = nowMs - openStartMs;
       if (d > 0) durations[id] = d;

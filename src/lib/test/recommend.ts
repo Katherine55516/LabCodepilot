@@ -1,3 +1,4 @@
+import { harvestMarkerObjects } from './markers';
 import fs from 'fs';
 
 /**
@@ -8,18 +9,11 @@ import fs from 'fs';
  * 从本模块导入。
  */
 
-/** 提取 @@RECOMMEND 行 → id → suite。坏行跳过（仿 reduce.ts harvestResults）。 */
+/** 提取 @@RECOMMEND 行 → id → suite。解析口径见 markers.ts(容忍模型的 markdown 装饰)。 */
 export function harvestRecommend(text: string): Map<string, boolean> {
   const out = new Map<string, boolean>();
-  for (const line of text.split('\n')) {
-    const idx = line.indexOf('@@RECOMMEND');
-    if (idx < 0) continue;
-    try {
-      const obj = JSON.parse(line.slice(idx + '@@RECOMMEND'.length).trim());
-      if (obj && typeof obj.id === 'string' && typeof obj.suite === 'boolean') out.set(obj.id, obj.suite);
-    } catch {
-      // ignore malformed lines
-    }
+  for (const obj of harvestMarkerObjects<{ id?: unknown; suite?: unknown }>(text, 'RECOMMEND')) {
+    if (typeof obj.id === 'string' && typeof obj.suite === 'boolean') out.set(obj.id, obj.suite);
   }
   return out;
 }
@@ -37,16 +31,9 @@ export interface RecommendVerdict {
  */
 export function harvestRecommendDetailed(text: string): RecommendVerdict[] {
   const byId = new Map<string, RecommendVerdict>();
-  for (const line of text.split('\n')) {
-    const idx = line.indexOf('@@RECOMMEND');
-    if (idx < 0) continue;
-    try {
-      const obj = JSON.parse(line.slice(idx + '@@RECOMMEND'.length).trim());
-      if (obj && typeof obj.id === 'string' && typeof obj.suite === 'boolean') {
-        byId.set(obj.id, { id: obj.id, suite: obj.suite, reason: typeof obj.reason === 'string' ? obj.reason : '' });
-      }
-    } catch {
-      // ignore malformed lines
+  for (const obj of harvestMarkerObjects<{ id?: unknown; suite?: unknown; reason?: unknown }>(text, 'RECOMMEND')) {
+    if (typeof obj.id === 'string' && typeof obj.suite === 'boolean') {
+      byId.set(obj.id, { id: obj.id, suite: obj.suite, reason: typeof obj.reason === 'string' ? obj.reason : '' });
     }
   }
   return [...byId.values()];
