@@ -29,6 +29,9 @@
 | 20 | 跨轮矩阵行身份 = `(来源任务, originalId)`。AI 重新生成用例改了 `id` → 该用例的跨轮历史断开、健康度重新计数，且**无任何提示**。需在重生成链路做身份继承或至少告警 | 中 | 历史断裂静默发生，flaky/连败判定被重置 | 2026-07-10 |
 | 21 | `npm run test:smoke` 在 worktree 内跑不了：playwright.config 的 webServer 用 `npm run dev`（Next 16 默认 Turbopack），而 worktree 的 `node_modules` 是指向主仓的符号链接，Turbopack 直接拒绝（"Symlink points out of the filesystem root"）。绕过办法是手动 `PORT=3000 next dev --webpack` 后复用（`reuseExistingServer`）。长期应让 webServer 命令可配置或改用 `--webpack` | 低 | worktree 内 UI 批次无法按纪律跑 smoke，需手工绕过 | 2026-07-10 |
 | 22 | 回归用例库批量移除走「逐条 DELETE」循环（`/api/test/library` 的 DELETE 是单条/单任务口径）。条数量级为个位数~百时可接受，选中上千条会产生同等数量的请求与落盘 | 低 | 大批量移除慢；每条都触发一次原子写 | 2026-07-10 |
+| 23 | 回归执行无法中途停止：`runLibrary`(InlineTestingPanel.tsx) 的两处 fetch 没有 AbortController（功能测试的 `runStep` 有 `Promise.race` + signal）。执行进展面板只读进度、不能取消；长跑的大套件只能等它跑完 | 中 | 误发起的大套件无法叫停，浪费时间与 token | 2026-07-10 |
+| 24 | 执行进展面板的「收口中 / 疑似卡住」是**推断态**：最后一条 @@RESULT 到 run_json 之间服务端在做证据归集与归约，不发任何 SSE 帧。面板靠「多久没收到帧」推断，无心跳帧兜底。服务端若真卡死，面板只能靠 90s 超时提示，无法区分「归约慢」与「进程挂了」 | 低 | 收口阶段的可观测性依赖启发式 | 2026-07-10 |
+| 25 | 执行流事件在内存中无界增长：大回归套件（十几条用例 × 几百条工具调用）的 `libraryLive.cases[].events` 会持续膨胀。按用例分段 + 工具轨迹折叠缓解了渲染压力，但数组本身未封顶/虚拟化 | 低 | 超大套件长跑后滚动可能卡顿 | 2026-07-10 |
 
 ## 已解决
 
@@ -38,3 +41,5 @@
 | 13(旧,编号曾与上传条目重复) | 测试工作台「执行」步在打包版跑不起来（@playwright/mcp 不在 asarUnpack + Chromium 未随包） | 2026-07-09 确认 | `scripts/bundle-chromium.mjs`（electron:pack* 链内）用 @playwright/mcp 自带 revision 装 chromium-headless-shell → electron-builder extraResources 复制进包内 `resources/ms-playwright`，运行时经 `AILAB_RESOURCES_PATH` 定位 `--executable-path` 启动（见 electron-builder.yml:127-133、prompts.ts buildPlaywrightMcp）。回归用例库 v2 打包验收时一并复核真跑 |
 | 18(新增,与上表 18 不同类) | `GET /api/test/media` 与 `POST /api/test/defect` 不接受 `roundId` —— v2 一期把产物迁进 `report/{task}/{roundId}/`、证据迁进 `_evidence/{task}-{env}-{roundId}` 之后，轮次维度的证据**根本取不到**，缺陷单也会读错（平铺的）run.json | 2026-07-10 | 两处均补 `roundId` 参数 + `isUnsafeSegment` 段安全校验（穿越返回 400，已验证）；缺省行为不变，普通任务零影响 |
 | 19(新增) | `writeLibrary` 无 `seq` 写入序号，`updatedAt` 毫秒粒度下同一毫秒的两次写入无法区分 → 依赖它做失效判断的读侧缓存会漏更新 | 2026-07-10 | 补 `seq`（与 `rounds.ts`/`suites.ts` 同款），`case-history` 缓存改用 `seq` 作变更令牌；单测捕获并钉死 |
+| 20(新增) | AI 输出的机器标记行解析脆弱：`harvestResults` / `harvestRecommend` / `harvestVerdicts` / `exec-timing` 以及前端 `processText` 全用「indexOf + slice 到行尾 + JSON.parse」。模型把判定行包成 `**@@RESULT {…}**` → 整行解析失败并被 catch 静默丢弃 → 整轮回归被误报为 0/3 全阻塞（模型判的是 2 通过 1 失败）。同一份文本里 script-trace 用宽容正则，故 trace 完整、结果为空，极难排查 | 2026-07-10 | 新增 `lib/test/markers.ts` 作唯一实现（大括号配对 + 字符串/转义感知，容忍 markdown 装饰；解析失败计入 `malformed` 不再静默）。五处解析全部接入；新增 `lib/test/exec-live.ts` 让客户端与服务端同口径。prompt 加「标记行必须裸写」。以线上真实输出作夹具 +44 单测 |
+| 21(新增) | 回归轮次的自动化脚本生成**从来没成功过**：`script-job-manager.currentInputs` 用 `artifactPaths(task, env)` 读平铺路径的 run.json，而 v2 起回归产物落 `report/{task}/{roundId}/` → ENOENT，被软失败咽掉（审计里只留一行 `generate-scripts 失败`） | 2026-07-10 | `ScriptJobRequest` 加 `roundId`，`exec-stream` 透传。与 #18/#19(已解决区) 的 media/defect 同源：v2 一期迁移产物路径时漏改的三个调用方，全都用 try/catch 或软失败把错误咽了下去 |
