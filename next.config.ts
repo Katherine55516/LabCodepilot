@@ -89,6 +89,14 @@ const nextConfig: NextConfig = {
     // 打包版「导入 docx 需求」失败而 dev 正常。标记 external + 下方 force-include 完整依赖
     // 闭包，配合 import 路由的动态 import('mammoth') 在运行时直接 require。
     'mammoth',
+    // @playwright/mcp：script-runner.ts 里 `createRequire(...).resolve('@playwright/mcp')`
+    // 只为拿到包所在目录（再拼 node_modules/playwright/cli.js 去 spawn），从不真正加载它。
+    // 但 webpack 把 createRequire 的 .resolve() 当静态依赖跟了进去，一路解析到嵌套的
+    // playwright-core/lib/coreBundle.js，那里 require 的 'chromium-bidi/lib/cjs/...' 只在
+    // playwright 自己 bundle 后才存在 → `next build --webpack` 报 Module not found 而失败。
+    // dev 用 Turbopack 不做这层解析，所以只在打包时炸。标记 external 让 webpack 不进包，
+    // 运行时按真实 node_modules 解析；整包已由下方 outputFileTracingIncludes 复制进 standalone。
+    '@playwright/mcp',
     '@anthropic-ai/claude-agent-sdk',
     '@anthropic-ai/claude-agent-sdk-darwin-arm64',
     '@anthropic-ai/claude-agent-sdk-darwin-x64',
