@@ -6,6 +6,7 @@ import path from 'node:path';
 import { manifestCounts, scriptFileName } from '../../lib/test/script-artifacts';
 import { retargetLibraryCandidates, selectEligibleCases } from '../../lib/test/script-generator';
 import { ScriptTraceCollector, extractPlaywrightCode, redactTraceText } from '../../lib/test/script-trace';
+import { artifactPaths } from '../../lib/test/prompts';
 import { validateScriptSource } from '../../lib/test/script-validator';
 import { resolveScriptPlaywrightRuntime, runGeneratedScript } from '../../lib/test/script-runner';
 import type { RunJson } from '../../lib/test/reduce';
@@ -171,5 +172,28 @@ describe('bundled Playwright runner POC', () => {
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('回归轮次的脚本生成:run.json 路径必须带 roundId', () => {
+  // v2 起回归执行的产物落 report/{task}/{roundId}/。script-job-manager 原来读 artifactPaths(task, env)
+  // 的平铺路径 → ENOENT,回归轮次的脚本生成从来没成功过(审计里那条 generate-scripts 失败)。
+  it('不传 roundId → 平铺路径;传 roundId → 轮次子目录', () => {
+    const flat = artifactPaths('回归用例库', 'local').runJson;
+    const round = artifactPaths('回归用例库', 'local', 'RND-20260710-2116').runJson;
+    assert.equal(flat, 'AI_LabTest/report/回归用例库/回归用例库-local.run.json');
+    assert.equal(round, 'AI_LabTest/report/回归用例库/RND-20260710-2116/回归用例库-local.run.json');
+    assert.notEqual(flat, round);
+  });
+
+  it('cases.json 与轮次无关(聚合输入共享最新一份),不得被 roundId 改写', () => {
+    assert.equal(
+      artifactPaths('回归用例库', 'local', 'RND-20260710-2116').cases,
+      artifactPaths('回归用例库', 'local').cases,
+    );
+  });
+
+  it('普通任务不传 roundId,路径与 v1 完全相同', () => {
+    assert.equal(artifactPaths('员工信息', 'local').runJson, 'AI_LabTest/report/员工信息/员工信息-local.run.json');
   });
 });

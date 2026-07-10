@@ -339,6 +339,8 @@ export function wrapReportStream(
                 projectPath: opts.projectPath,
                 taskName: opts.taskName,
                 env: opts.env,
+                // 回归轮次的 run.json 在 report/{task}/{roundId}/ 下,不传 roundId 会 ENOENT。
+                roundId: opts.roundId,
                 runHash: reportRunHash,
                 model: opts.model,
                 providerId: opts.providerId,

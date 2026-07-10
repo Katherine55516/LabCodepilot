@@ -32,6 +32,12 @@ export interface ScriptJobRequest {
   model?: string;
   providerId?: string;
   forceCaseIds?: string[];
+  /**
+   * 回归轮次号。v2 起回归执行的产物落 `report/{task}/{roundId}/`,不带它就会去平铺目录找
+   * run.json 并 ENOENT —— 回归轮次的脚本生成因此**从来没成功过**(审计里那条
+   * 「回归脚本后台生成失败:ENOENT ... 回归用例库-local.run.json」)。普通任务不传,路径不变。
+   */
+  roundId?: string;
 }
 
 export interface EnqueueResult {
@@ -156,7 +162,7 @@ function currentInputs(request: ScriptJobRequest): {
   traceActions: NonNullable<ReturnType<typeof readTraceFile>>['actions'];
   runContent: string;
 } {
-  const p = artifactPaths(request.taskName, request.env);
+  const p = artifactPaths(request.taskName, request.env, request.roundId);
   const runContent = fs.readFileSync(path.join(request.projectPath, p.runJson), 'utf-8');
   if (sha1Hex(runContent) !== request.runHash) throw new Error('superseded by a newer execution');
   const run = JSON.parse(runContent) as RunJson;
