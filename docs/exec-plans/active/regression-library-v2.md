@@ -144,6 +144,9 @@
 | 批 B | 轮次落盘 + 快照 + 状态收口 + rounds API | ✅ 完成（curl 端到端：双轮不覆盖/快照 idMap/收口/删除/reports 含 roundId） | 6509f4b |
 | 批 C | 套件 API + 构建器 UI | ✅ 完成（curl：hits 含 pinned 并入/内置名 400/eval 预览） | 1fd20d5 |
 | 批 D | 发起回归弹窗（套件/env/预检时长估算；token 估算缺数据源暂缓，见 commit 说明） | ✅ 完成 | 8728476 |
-| 批 E | 报告分组(taskCounts+prompt) + delta + 轮次历史弹窗 + 库检索 + status-danger 修复 | 🔄 代码完成（detail API curl 验证 delta 正确），CDP UI 走查进行中 | |
-| 批 F | 打包版执行可用性验证（#13 已解，收缩为打包验收项） | ⬜ 待打包验收（用户发起） | |
-| 批 G | 收尾：单测/i18n/CDP/双文档/索引 | ⬜ 待开始 | |
+| 批 E | 报告分组(taskCounts+prompt) + delta + 轮次历史弹窗 + 库检索 + status-danger 修复 | ✅ 完成（curl delta 精确 + CDP 四弹窗全链路 0 errors；mock 仅拦 workbench 列表防污染真实数据） | 1f45388 |
+| 批 F | 打包版执行可用性验证（#13 已解，收缩为打包验收项） | ⬜ 待打包验收（用户发起；含新 roundId 产物路径复核） | |
+| 批 G | 收尾：单测/i18n/双文档 v2 章节/README 索引/tracker 修正(#13 移已解决+补 15-17) | ✅ 完成 | |
+
+**一期整体状态**：批 A-E 代码全部完成并逐批提交，`npm run test` 1968/0；**待用户发起打包验收（mac+Win，含真实 AI 执行）后一期收口**。已知偏差：预检 token 估算因无按轮 token 数据源暂缓（时长估算已实现）。
+**dev 排障记**：playwright MCP 往仓库根写 `.playwright-mcp/` 快照/console 日志会触发 Tailwind/webpack 监听重编译死循环（页面反复刷新）——CDP 验证时把该目录软链到仓库外，提交前移除。

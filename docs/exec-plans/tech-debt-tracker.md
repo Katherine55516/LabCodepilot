@@ -22,10 +22,12 @@
 | 12 | v0.55 切换到内置 Claude Code 后，`InstallWizard`、`ConnectionStatus`（install/upgrade 子流程）、`CliSettingsSection`（installType 显示、其他装机冲突警告）、`useClaudeStatus` 仍保留了「未连接 / 引导安装」分支，但运行时永远走不到（API 永远返回 `connected: true`）。`src/lib/platform.ts` 也仍导出 `findClaudeBinary`、`findAllClaudeBinaries`、`classifyClaudePath`、`getClaudeCandidatePaths`、`getUpgradeCommand`、`isWingetInstall` 一组本地 CLI 探测函数，但只剩文档 / debug 入口在引用。建议下一次清理 PR 时统一删除，可净减约 200 行 | 低 | 死代码膨胀；冷启动加载多 ~5KB | 2026-05-19 |
 | 13 | 上传附件（截图/@文件）落盘到 `session.working_directory/.codepilot-uploads`，污染用户工程、被用户工程 git 跟踪，且无任何清理（无 TTL/容量上限/会话级联，只增不减）。AI 生成图 `.codepilot-images` 同病。`/api/uploads` 安全校验用子串 `includes` 而非锚定根。**已有执行计划** [active/uploads-storage-relocation.md](./active/uploads-storage-relocation.md)：迁到统一缓存 `~/.codepilot/` + 存储治理 + 安全收口 + 存量迁移。另含未来优化：@文件引用工作区已有文件却仍落第二份副本（去重需配合「清理不删原件」隔离） | 中 | 用户工程目录被污染 + git 跟踪异常；缓存无限膨胀 | 2026-06-23 |
 | 14 | 技能调用非原生语义（[skills-discovery-fix](./active/skills-discovery-fix.md) 已知局限）：项目级斜杠命令走客户端展开、项目技能走 codepilot-skill MCP 返回正文，均非 Claude Code 原生 slash command / Agent Skill 的系统级执行，不支持 `$1..$9`/frontmatter allowed-tools/`` !`bash` ``/`@file`。原生对齐 = Phase 4：按官方文档把 Agent Skills(`.claude/skills`) 与 Slash Commands(`.claude/commands`) 拆成两条链路 + 用 SDK `skills` 选项加载 + `system:init` 下发真实 inventory 作为 UI 真源。参考 [research/skills-agent-sdk-review-2026-03-10.md](../research/skills-agent-sdk-review-2026-03-10.md) | 中 | 用户手写带原生模板语法的命令会降级（不报错但 token 不展开）；与 Claude Code 本体有差异 | 2026-06-26 |
-| 13 | 测试工作台「执行」步在打包版跑不起来：`@playwright/mcp` 不在 `electron-builder.yml` 的 `asarUnpack` 白名单内 + Chromium 二进制未随包分发（仅 `npx playwright install` 落全局 ms-playwright 缓存）。dev 下可跑（差的只是凭据），打包版差浏览器运行时。需求/用例/报告步 + 环境配置展示不受影响。修复：asarUnpack `@playwright/mcp` + 打包内置或首次运行 provision Chromium + `ELECTRON_RUN_AS_NODE=1` 启动校验 | 中 | 打包桌面版无法真跑浏览器测试执行步 | 2026-06-23 |
+| 15 | 回归用例库保留任务名「回归用例库」与用户真实同名任务无冲突校验（新建任务/导入入口不拦截），撞名会被轮次聚合覆盖 cases.json。已排入 [regression-library-v2](./active/regression-library-v2.md) 二期（前后端双拦截） | 低 | 撞名任务的用例文件被聚合覆盖等未定义行为 | 2026-07-10 |
+| 16 | 回归轮次产物（report/回归用例库/{roundId}/ 报告+快照+证据）随轮次只增不减，无保留 N 轮/归档策略；已支持单轮手动删除作逃生通道。计划三期与 stats 环形口径（近 20 轮）对齐 | 低 | 长期使用后项目目录磁盘膨胀 | 2026-07-10 |
+| 17 | 回归轮次/套件 JSON 的并发写保护为「seq 写前比对 + 冲突重放一次」（同进程内可靠）；跨进程（主目录+worktree 双 dev server 写同一项目）极端时序仍可能丢更新，长期方案需文件锁（lockfile）或 OS advisory lock | 低 | 双 dev server 同时操作同一项目库的极端场景 | 2026-07-10 |
 
 ## 已解决
 
 | # | 描述 | 解决日期 | 解决方式 |
 |---|------|----------|----------|
-| — | （暂无） | | |
+| 13(旧,编号曾与上传条目重复) | 测试工作台「执行」步在打包版跑不起来（@playwright/mcp 不在 asarUnpack + Chromium 未随包） | 2026-07-09 确认 | `scripts/bundle-chromium.mjs`（electron:pack* 链内）用 @playwright/mcp 自带 revision 装 chromium-headless-shell → electron-builder extraResources 复制进包内 `resources/ms-playwright`，运行时经 `AILAB_RESOURCES_PATH` 定位 `--executable-path` 启动（见 electron-builder.yml:127-133、prompts.ts buildPlaywrightMcp）。回归用例库 v2 打包验收时一并复核真跑 |
