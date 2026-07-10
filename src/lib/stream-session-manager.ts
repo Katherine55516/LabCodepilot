@@ -156,6 +156,12 @@ function buildSnapshot(stream: ActiveStream): SessionStreamSnapshot {
     terminalReason: stream.snapshot.terminalReason,
     rateLimitInfo: stream.snapshot.rateLimitInfo,
     contextUsageSnapshot: stream.snapshot.contextUsageSnapshot,
+    // buildSnapshot is a field WHITELIST — every emit() rebuilds the snapshot
+    // from scratch, so any field patched onto stream.snapshot by a callback
+    // MUST be re-listed here or it is silently dropped before broadcast.
+    // (vmArtifacts was missing at first: the realtime artifacts card never
+    // showed until a remount refetched the list.)
+    vmArtifacts: stream.snapshot.vmArtifacts,
   };
 }
 

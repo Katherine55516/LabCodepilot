@@ -392,7 +392,19 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
       tailTrimmedRef.current = false;
       reconcileWithDb();
     }
-  }, [reconcileWithDb]);
+    // Cowork sandbox — refetch the artifact list at end of turn. Belt-and-
+    // braces for the realtime vm_artifacts SSE path: completion clears the
+    // manager snapshot, and event batching around done/completed has already
+    // eaten the realtime update once. The list endpoint is authoritative.
+    if (sandboxEnabled) {
+      fetch(`/api/cowork/artifacts?sessionId=${encodeURIComponent(sessionId)}&list=1`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          if (Array.isArray(data?.files) && data.files.length > 0) setVmArtifacts(data.files);
+        })
+        .catch(() => {});
+    }
+  }, [reconcileWithDb, sandboxEnabled, sessionId]);
 
   useStreamSubscription({
     sessionId,
