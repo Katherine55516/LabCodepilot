@@ -1,7 +1,8 @@
 import fs from 'fs';
 import path from 'path';
 import { REGRESSION_FULL_SUITE } from './library-constants';
-import type { LibraryEntry, RegressionLibrary } from './library';
+import { readLibMeta } from './library';
+import type { LibraryEntry, RegressionLibrary, ReviewState } from './library';
 
 /**
  * 测试工作台 · 回归套件(v2 批 A)。
@@ -42,6 +43,8 @@ export interface SuiteFilter {
   task?: string[];
   /** 上次结果(依赖注入的 lookup;未注入时该条件不命中 pass/fail,只命中 none)。 */
   last?: LastResult[];
+  /** 评审态(二期第五类条件字段;缺 `_lib` 的存量条目视为 approved)。 */
+  review?: ReviewState[];
 }
 
 export type RegressionSuite =
@@ -101,6 +104,7 @@ export function sanitizeSuite(s: unknown): RegressionSuite | null {
       module: sanitizeStrArr(f.module),
       task: sanitizeStrArr(f.task),
       last: sanitizeStrArr(f.last)?.filter((x): x is LastResult => x === 'pass' || x === 'fail' || x === 'none'),
+      review: sanitizeStrArr(f.review)?.filter((x): x is ReviewState => x === 'approved' || x === 'pending'),
     };
     return { name: cleanName, type, filter };
   }
@@ -208,9 +212,12 @@ function entryKey(e: LibraryEntry): string {
   return keyOf(e._source.task, e._source.originalId);
 }
 
-/** 条目是否被隔离(三期字段,此处前置兼容:任何求值都排除 quarantined===true 的条目)。 */
-function isQuarantined(e: LibraryEntry): boolean {
-  return (e as { quarantined?: unknown }).quarantined === true;
+/**
+ * 条目是否被隔离:任何求值都排除。读 `_lib.quarantined`(二期口径),兼容 v2 一期写在顶层的
+ * `quarantined` 布尔(readLibMeta 内部已 OR 两者)。
+ */
+export function isQuarantined(e: LibraryEntry): boolean {
+  return readLibMeta(e).quarantined;
 }
 
 export interface EvalSuiteOptions {
@@ -218,6 +225,11 @@ export interface EvalSuiteOptions {
   lastResultOf?: (key: SuiteKey) => LastResult;
   /** 核心必跑白名单;缺省从不并入。 */
   pinned?: SuiteKey[];
+  /**
+   * 「仅执行已确认用例」(发起回归弹窗的开关,非套件条件)。在 pinned 并入【之后】生效——
+   * 与原型 runCount() 一致:待确认的 pinned 用例同样被排除,评审是硬闸门。
+   */
+  approvedOnly?: boolean;
 }
 
 /**
@@ -244,6 +256,7 @@ export function evalSuite(
       if (f.module?.length && !f.module.includes(String((e as { module?: unknown }).module ?? ''))) return false;
       if (f.task?.length && !f.task.includes(e._source.task)) return false;
       if (f.last?.length && !f.last.includes(lastOf({ task: e._source.task, originalId: e._source.originalId }))) return false;
+      if (f.review?.length && !f.review.includes(readLibMeta(e).reviewState)) return false;
       return true;
     });
   }
@@ -259,6 +272,7 @@ export function evalSuite(
       }
     }
   }
+  if (opts.approvedOnly) hit = hit.filter((e) => readLibMeta(e).reviewState === 'approved');
   return hit;
 }
 
