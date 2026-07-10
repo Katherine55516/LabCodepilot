@@ -7,7 +7,7 @@ import dynamic from "next/dynamic";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useTranslation } from "@/hooks/useTranslation";
-import { ListChecks, ChartBar, Gear, ArrowLeft, ArrowRight, FolderPlus, FolderOpen, Play, Stop, ArrowUp, SpinnerGap, Sparkle, Terminal, WarningCircle, Wrench, Trash, Desktop, Lightning, Plug, CheckCircle, File as FileIcon, FileArrowDown, NotePencil, DownloadSimple, Eye, X, CaretDown, CaretUp, Check, Lock, PencilSimple, Plus, PushPin, Clock, MagnifyingGlass, type Icon } from "@/components/ui/icon";
+import { ListChecks, ChartBar, Gear, ArrowLeft, ArrowRight, FolderPlus, FolderOpen, Play, Stop, ArrowUp, SpinnerGap, Sparkle, Terminal, WarningCircle, Wrench, Trash, Desktop, Lightning, Plug, CheckCircle, File as FileIcon, FileArrowDown, NotePencil, DownloadSimple, Eye, X, CaretDown, CaretUp, Check, Lock, PencilSimple, Plus, PushPin, Clock, MagnifyingGlass, Prohibit, ArrowClockwise, ArrowsClockwise, type Icon } from "@/components/ui/icon";
 import { MarkdownEditor } from "@/components/editor/MarkdownEditor.lazy";
 import type { TranslationKey } from "@/i18n";
 import { useNativeFolderPicker } from "@/hooks/useNativeFolderPicker";
@@ -4054,8 +4054,70 @@ function AuditModal({ t, projectPath, taskName, onClose }: { t: T; projectPath: 
 
 // 回归用例库区块(批 H 页面化,项目级):按来源任务分组展示沉淀的回归用例;检索/过滤;
 // 支持移除单条 / 移除某任务全部。发起回归与运行状态行在 RegressionWorkspace 层。
-interface LibEntry { id?: string; purpose?: string; priority?: string; caseType?: string; tags?: string[]; _source?: { task?: string; originalId?: string; depositedAt?: string } }
+interface LibMetaUI {
+  reviewState: "approved" | "pending";
+  rev: number;
+  history: Array<{ rev: number; at: string; note: string }>;
+  quarantined: boolean;
+  quarantinedAt?: string;
+  quarantineReason?: string;
+}
+interface LibEntry {
+  id?: string; purpose?: string; priority?: string; caseType?: string; module?: string;
+  requirement?: string; tags?: string[];
+  steps?: Array<{ content?: string; expected?: string }>;
+  _source?: { task?: string; originalId?: string; depositedAt?: string };
+  _lib?: LibMetaUI;
+}
 interface LibGroup { task: string; count: number; entries: LibEntry[] }
+
+// 跨轮历史(GET /api/test/library/history):矩阵 + 健康度派生。库总览徽标、详情抽屉的执行
+// 历史圆点、对比矩阵、健康度页共用同一份数据。
+type CaseRes = "p" | "f" | "-";
+type HealthKind = "quar" | "streak" | "flaky" | "never" | "stale" | "ok";
+interface HistRound { roundId: string; startedAt: string; env: string; suiteName: string; mode: string; status: string }
+interface HistCase {
+  task: string; originalId: string; purpose: string; priority: string; module: string;
+  meta: LibMetaUI; res: CaseRes[]; pinned: boolean; flips: number; tailFails: number; health: HealthKind;
+}
+interface HistSummary {
+  total: number; flaky: number; streak: number; stale: number; never: number;
+  quarantined: number; pending: number; quarantineRatio: number; quarantineAlert: boolean;
+}
+interface HistoryDTO {
+  rounds: HistRound[]; cases: HistCase[];
+  passRates: Array<{ roundId: string; pass: number; fail: number; total: number }>;
+  summary: HistSummary;
+}
+
+/** 条目身份键(任务名可含空格,用 JSON 数组做无歧义键)。 */
+const caseKey = (task: string, originalId: string) => JSON.stringify([task, originalId]);
+const caseKeyDec = (s: string): { task: string; originalId: string } => {
+  const [task, originalId] = JSON.parse(s) as [string, string];
+  return { task, originalId };
+};
+
+/** 健康度徽标文案与配色(与 case-history.ts 的 health() 一一对应)。 */
+function healthBadge(t: T, c: Pick<HistCase, "health" | "tailFails">): { label: string; cls: string } | null {
+  switch (c.health) {
+    case "quar": return { label: t("test.health.quarantined"), cls: "bg-status-info-muted text-status-info-foreground" };
+    case "streak": return { label: t("test.health.streak", { n: c.tailFails }), cls: "bg-status-error-muted text-status-error-foreground" };
+    case "flaky": return { label: t("test.health.flaky"), cls: "bg-status-warning-muted text-status-warning-foreground" };
+    case "never": return { label: t("test.health.never"), cls: "border border-border text-muted-foreground" };
+    case "stale": return { label: t("test.health.stale"), cls: "border border-border text-muted-foreground" };
+    default: return null;
+  }
+}
+
+/** 上次执行结果圆点(p/f/未跑)。 */
+function LastResultDot({ t, res }: { t: T; res: CaseRes[] }) {
+  let last: CaseRes = "-";
+  for (let i = res.length - 1; i >= 0; i--) if (res[i] !== "-") { last = res[i]; break; }
+  const cls = last === "p" ? "bg-status-success-foreground" : last === "f" ? "bg-status-error-foreground" : "bg-border";
+  const title = last === "p" ? t("test.library.lastResultPass") : last === "f" ? t("test.library.lastResultFail") : t("test.library.lastResultNone");
+  return <span className={`inline-block h-2 w-2 flex-shrink-0 rounded-full ${cls}`} title={title} />;
+}
+
 // 回归测试整页工作区(批 H):子页签(用例库/回归套件/轮次历史)+「发起回归」+ 运行状态行。
 // 三个区块由原弹窗内容页面化而来,数据链路(reloadSignal/deposit/rounds API)不变。
 function RegressionWorkspace({ t, projectPath, regTab, setRegTab, reloadSignal, onChanged, onLaunch, running, runStatus }: {
@@ -4109,6 +4171,11 @@ function RegressionWorkspace({ t, projectPath, regTab, setRegTab, reloadSignal, 
   );
 }
 
+// 库总览(屏 1,v2 二/三期):在 v1 的「按来源任务分组 + 检索」之上，叠加治理视图——
+// 评审态 / 健康度徽标 / 上次结果 / rev / 📌必跑，多选批量条(确认·加入套件·隔离·移除)，
+// 以及行点击打开的详情抽屉。数据来自两个只读 API 的合并:
+//   /api/test/library         → 用例全字段(步骤、需求、_lib 治理元数据)
+//   /api/test/library/history → 跨轮结果矩阵 + 健康度派生 + pinned
 function RegressionLibrarySection({ t, projectPath, reloadSignal, onChanged }: {
   t: T;
   projectPath: string;
@@ -4118,18 +4185,41 @@ function RegressionLibrarySection({ t, projectPath, reloadSignal, onChanged }: {
   // null = 加载中(初次挂载即 null → 显示 spinner;reloadSignal 变化时保留旧数据直到新数据到达,
   // 不在 effect 体里同步 setData(null)——避免 react-hooks/set-state-in-effect 级联渲染告警)。
   const [data, setData] = useState<{ total: number; updatedAt: string; tasks: LibGroup[] } | null>(null);
-  // 库检索(v2 批 E):搜索(ID/标题)+ 来源任务/优先级过滤,纯前端内存过滤,API 零改动。
+  const [hist, setHist] = useState<HistoryDTO | null>(null);
+  // 库检索:搜索(ID/标题)+ 来源任务/模块/优先级/评审态/健康度 过滤,纯前端内存过滤。
   const [libQ, setLibQ] = useState("");
   const [libTask, setLibTask] = useState("");
+  const [libModule, setLibModule] = useState("");
   const [libPri, setLibPri] = useState("");
+  const [libReview, setLibReview] = useState("");
+  const [libHealth, setLibHealth] = useState("");
+  const [sel, setSel] = useState<Set<string>>(new Set());
+  const [drawerKey, setDrawerKey] = useState<string | null>(null);
+  const [addToSuite, setAddToSuite] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [localReload, setLocalReload] = useState(0);
+
   useEffect(() => {
     let cancelled = false;
     fetch(`/api/test/library?projectPath=${encodeURIComponent(projectPath)}`)
       .then((r) => r.json())
       .then((d) => { if (!cancelled) setData({ total: d?.total ?? 0, updatedAt: d?.updatedAt ?? "", tasks: Array.isArray(d?.tasks) ? d.tasks : [] }); })
       .catch(() => { if (!cancelled) setData({ total: 0, updatedAt: "", tasks: [] }); });
+    fetch(`/api/test/library/history?projectPath=${encodeURIComponent(projectPath)}`)
+      .then((r) => r.json())
+      .then((d) => { if (!cancelled) setHist(d?.cases ? (d as HistoryDTO) : null); })
+      .catch(() => { if (!cancelled) setHist(null); });
     return () => { cancelled = true; };
-  }, [projectPath, reloadSignal]);
+  }, [projectPath, reloadSignal, localReload]);
+
+  const refresh = () => { setSel(new Set()); setLocalReload((n) => n + 1); onChanged(); };
+
+  // 历史侧按身份索引;库侧条目 join 上去。history 未就绪时以安全默认渲染(不闪徽标)。
+  const histByKey = useMemo(() => {
+    const m = new Map<string, HistCase>();
+    for (const c of hist?.cases ?? []) m.set(caseKey(c.task, c.originalId), c);
+    return m;
+  }, [hist]);
 
   const del = async (task: string, originalId?: string, count?: number) => {
     const ok = originalId
@@ -4142,17 +4232,67 @@ function RegressionLibrarySection({ t, projectPath, reloadSignal, onChanged }: {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ projectPath, task, originalId }),
       });
-      onChanged();
+      refresh();
     } catch { /* keep current view; user can retry */ }
   };
 
+  const selKeys = () => [...sel].map(caseKeyDec);
+
+  const batchReview = async () => {
+    setBusy(true);
+    try {
+      await fetch("/api/test/library/review", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectPath, keys: selKeys(), reviewState: "approved" }),
+      });
+      refresh();
+    } catch { /* keep view */ } finally { setBusy(false); }
+  };
+
+  const batchQuarantine = async () => {
+    const reason = window.prompt(t("test.library.quarantinePrompt", { n: sel.size }));
+    if (reason === null) return; // 取消
+    setBusy(true);
+    try {
+      await fetch("/api/test/library/quarantine", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectPath, keys: selKeys(), quarantined: true, reason }),
+      });
+      refresh();
+    } catch { /* keep view */ } finally { setBusy(false); }
+  };
+
+  const batchRemove = async () => {
+    if (!window.confirm(t("test.library.confirmBatchRemove", { n: sel.size }))) return;
+    setBusy(true);
+    try {
+      // 库 DELETE 是单条/单任务口径,批量按条目逐个删(条数量级为个位数~百,可接受)。
+      for (const k of selKeys()) {
+        await fetch("/api/test/library", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ projectPath, task: k.task, originalId: k.originalId }),
+        });
+      }
+      refresh();
+    } catch { /* keep view */ } finally { setBusy(false); }
+  };
+
   const taskCount = data?.tasks.length ?? 0;
-  // 过滤视图:组内条目过滤,空组隐藏;命中数用于工具条反馈。
-  const priOptions = useMemo(() => {
-    const set = new Set<string>();
-    for (const g of data?.tasks ?? []) for (const e of g.entries) if (e.priority) set.add(e.priority);
-    return [...set].sort();
+  // 过滤下拉的候选值(来自库现存条目)。
+  const { priOptions, moduleOptions } = useMemo(() => {
+    const pri = new Set<string>();
+    const mod = new Set<string>();
+    for (const g of data?.tasks ?? []) for (const e of g.entries) {
+      if (e.priority) pri.add(e.priority);
+      if (e.module) mod.add(e.module);
+    }
+    return { priOptions: [...pri].sort(), moduleOptions: [...mod].sort() };
   }, [data]);
+
+  // 过滤视图:组内条目过滤,空组隐藏;命中数用于工具条反馈。
   const filteredTasks = useMemo(() => {
     if (!data) return [];
     const q = libQ.trim().toLowerCase();
@@ -4161,74 +4301,141 @@ function RegressionLibrarySection({ t, projectPath, reloadSignal, onChanged }: {
       .map((g) => ({
         ...g,
         entries: g.entries.filter((e) => {
+          const oid = e._source?.originalId || e.id || "";
+          const h = histByKey.get(caseKey(g.task, oid));
           if (libPri && e.priority !== libPri) return false;
+          if (libModule && e.module !== libModule) return false;
+          if (libReview && (e._lib?.reviewState ?? "approved") !== libReview) return false;
+          if (libHealth && (h?.health ?? "ok") !== libHealth) return false;
           if (!q) return true;
-          const id = (e._source?.originalId || e.id || "").toLowerCase();
-          return id.includes(q) || (e.purpose ?? "").toLowerCase().includes(q);
+          return oid.toLowerCase().includes(q) || (e.purpose ?? "").toLowerCase().includes(q);
         }),
       }))
       .filter((g) => g.entries.length > 0);
-  }, [data, libQ, libTask, libPri]);
+  }, [data, histByKey, libQ, libTask, libModule, libPri, libReview, libHealth]);
   const filteredCount = filteredTasks.reduce((n, g) => n + g.entries.length, 0);
-  const filterActive = !!(libQ.trim() || libTask || libPri);
+  const filterActive = !!(libQ.trim() || libTask || libModule || libPri || libReview || libHealth);
+
+  const summary = hist?.summary;
+  const drawerCase = useMemo(() => {
+    if (!drawerKey) return null;
+    const { task, originalId } = caseKeyDec(drawerKey);
+    const g = data?.tasks.find((x) => x.task === task);
+    const entry = g?.entries.find((e) => (e._source?.originalId || e.id) === originalId);
+    return entry ? { task, originalId, entry, hist: histByKey.get(drawerKey) ?? null } : null;
+  }, [drawerKey, data, histByKey]);
+
+  const selectClass = "h-6 rounded border border-border bg-background px-1 text-[10px] text-muted-foreground outline-none";
   return (
     <div className="flex flex-col overflow-hidden rounded-xl border border-border bg-card">
-        {data && data.total > 0 && (
-          <div className="flex items-center gap-2 border-b border-border px-3 py-1.5">
-            <FolderOpen size={13} className="text-primary" />
-            <span className="text-[11px] text-muted-foreground">{t("test.library.summary", { total: data.total, tasks: taskCount })}</span>
+      {data && data.total > 0 && (
+        <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-1.5 text-[11px] text-muted-foreground">
+          <FolderOpen size={13} className="text-primary" />
+          <span>{t("test.library.summary", { total: data.total, tasks: taskCount })}</span>
+          {summary && (
+            <>
+              {summary.flaky > 0 && <span className="text-status-warning-foreground">flaky {summary.flaky}</span>}
+              {summary.streak > 0 && <span className="text-status-error-foreground">{t("test.health.streak", { n: summary.streak })}</span>}
+              {summary.quarantined > 0 && <span className="text-status-info-foreground">{t("test.health.quarantined")} {summary.quarantined}</span>}
+              {summary.pending > 0 && <span>{t("test.library.reviewPending")} {summary.pending}</span>}
+            </>
+          )}
+        </div>
+      )}
+      {data && data.total > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5 border-b border-border px-3 py-1.5">
+          <div className="flex h-6 min-w-[150px] flex-1 items-center gap-1 rounded border border-border bg-background px-1.5">
+            <MagnifyingGlass size={11} className="flex-shrink-0 text-muted-foreground" />
+            <input
+              value={libQ}
+              onChange={(e) => setLibQ(e.target.value)}
+              placeholder={t("test.library.searchPh")}
+              className="w-full bg-transparent text-[11px] outline-none placeholder:text-muted-foreground"
+            />
           </div>
-        )}
-        {data && data.total > 0 && (
-          <div className="flex flex-wrap items-center gap-1.5 border-b border-border px-3 py-1.5">
-            <div className="flex h-6 min-w-[160px] flex-1 items-center gap-1 rounded border border-border bg-background px-1.5">
-              <MagnifyingGlass size={11} className="flex-shrink-0 text-muted-foreground" />
-              <input
-                value={libQ}
-                onChange={(e) => setLibQ(e.target.value)}
-                placeholder={t("test.library.searchPh")}
-                className="w-full bg-transparent text-[11px] outline-none placeholder:text-muted-foreground"
-              />
-            </div>
-            <select value={libTask} onChange={(e) => setLibTask(e.target.value)} className="h-6 rounded border border-border bg-background px-1 text-[10px] text-muted-foreground outline-none">
-              <option value="">{t("test.library.filterTask")}：{t("test.library.filterAll")}</option>
-              {(data?.tasks ?? []).map((g) => <option key={g.task} value={g.task}>{g.task}</option>)}
-            </select>
-            <select value={libPri} onChange={(e) => setLibPri(e.target.value)} className="h-6 rounded border border-border bg-background px-1 text-[10px] text-muted-foreground outline-none">
-              <option value="">{t("test.library.filterPri")}：{t("test.library.filterAll")}</option>
-              {priOptions.map((v) => <option key={v} value={v}>{v}</option>)}
-            </select>
-            {filterActive && <span className="text-[10px] text-primary">{t("test.library.filterHit", { n: filteredCount })}</span>}
-          </div>
-        )}
-        <div className="min-h-0 flex-1 overflow-auto">
-          {data === null ? (
-            <div className="p-4 text-center text-[11px] text-muted-foreground"><SpinnerGap size={14} className="mx-auto animate-spin" /></div>
-          ) : data.total === 0 ? (
-            <div className="p-6 text-center text-[11px] leading-relaxed text-muted-foreground">{t("test.library.empty")}</div>
-          ) : (
-            <div className="divide-y divide-border">
-              {filteredTasks.map((g) => (
-                <div key={g.task} className="px-3 py-2">
-                  <div className="mb-1.5 flex items-center gap-2">
-                    <span className="text-[11px] font-semibold text-foreground">{g.task}</span>
-                    <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{g.count}</span>
-                    <span className="flex-1" />
-                    <button
-                      onClick={() => del(g.task, undefined, g.count)}
-                      className="flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-status-error-muted hover:text-status-error-foreground"
-                    >
-                      <Trash size={10} /> {t("test.library.removeTask")}
-                    </button>
-                  </div>
-                  <div className="space-y-1">
-                    {g.entries.map((e, i) => (
-                      <div key={i} className="flex items-center gap-2 rounded border border-border/60 bg-muted/20 px-2 py-1">
-                        <span className="font-mono text-[10px] text-muted-foreground">{e._source?.originalId || e.id}</span>
+          <select value={libTask} onChange={(e) => setLibTask(e.target.value)} className={selectClass} aria-label={t("test.library.filterTask")}>
+            <option value="">{t("test.library.filterTask")}：{t("test.library.filterAll")}</option>
+            {(data?.tasks ?? []).map((g) => <option key={g.task} value={g.task}>{g.task}</option>)}
+          </select>
+          <select value={libModule} onChange={(e) => setLibModule(e.target.value)} className={selectClass} aria-label={t("test.library.filterModule")}>
+            <option value="">{t("test.library.filterModule")}：{t("test.library.filterAll")}</option>
+            {moduleOptions.map((v) => <option key={v} value={v}>{v}</option>)}
+          </select>
+          <select value={libPri} onChange={(e) => setLibPri(e.target.value)} className={selectClass} aria-label={t("test.library.filterPri")}>
+            <option value="">{t("test.library.filterPri")}：{t("test.library.filterAll")}</option>
+            {priOptions.map((v) => <option key={v} value={v}>{v}</option>)}
+          </select>
+          <select value={libReview} onChange={(e) => setLibReview(e.target.value)} className={selectClass} aria-label={t("test.library.filterReview")}>
+            <option value="">{t("test.library.filterReview")}：{t("test.library.filterAll")}</option>
+            <option value="approved">{t("test.library.reviewApproved")}</option>
+            <option value="pending">{t("test.library.reviewPending")}</option>
+          </select>
+          <select value={libHealth} onChange={(e) => setLibHealth(e.target.value)} className={selectClass} aria-label={t("test.library.filterHealth")}>
+            <option value="">{t("test.library.filterHealth")}：{t("test.library.filterAll")}</option>
+            <option value="flaky">{t("test.health.flaky")}</option>
+            <option value="streak">{t("test.health.streakFilter")}</option>
+            <option value="stale">{t("test.health.stale")}</option>
+            <option value="never">{t("test.health.never")}</option>
+            <option value="quar">{t("test.health.quarantined")}</option>
+          </select>
+          {filterActive && <span className="text-[10px] text-primary">{t("test.library.filterHit", { n: filteredCount })}</span>}
+        </div>
+      )}
+      <div className="min-h-0 flex-1 overflow-auto">
+        {data === null ? (
+          <div className="p-4 text-center text-[11px] text-muted-foreground"><SpinnerGap size={14} className="mx-auto animate-spin" /></div>
+        ) : data.total === 0 ? (
+          <div className="p-6 text-center text-[11px] leading-relaxed text-muted-foreground">{t("test.library.empty")}</div>
+        ) : (
+          <div className="divide-y divide-border">
+            {filteredTasks.map((g) => (
+              <div key={g.task} className="px-3 py-2">
+                <div className="mb-1.5 flex items-center gap-2">
+                  <span className="text-[11px] font-semibold text-foreground">{g.task}</span>
+                  <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{g.count}</span>
+                  <span className="flex-1" />
+                  <button
+                    onClick={() => del(g.task, undefined, g.count)}
+                    className="flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-status-error-muted hover:text-status-error-foreground"
+                  >
+                    <Trash size={10} /> {t("test.library.removeTask")}
+                  </button>
+                </div>
+                <div className="space-y-1">
+                  {g.entries.map((e, i) => {
+                    const oid = e._source?.originalId || e.id || "";
+                    const k = caseKey(g.task, oid);
+                    const h = histByKey.get(k);
+                    const badge = h ? healthBadge(t, h) : null;
+                    const review = e._lib?.reviewState ?? "approved";
+                    const rev = e._lib?.rev ?? 1;
+                    return (
+                      <div
+                        key={i}
+                        onClick={() => setDrawerKey(k)}
+                        className="flex cursor-pointer items-center gap-2 rounded border border-border/60 bg-muted/20 px-2 py-1 hover:bg-muted/50"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={sel.has(k)}
+                          onClick={(ev) => ev.stopPropagation()}
+                          onChange={() => setSel((s) => { const n = new Set(s); if (n.has(k)) n.delete(k); else n.add(k); return n; })}
+                          className="accent-primary"
+                          aria-label={oid}
+                        />
+                        {h?.pinned && <PushPin size={10} weight="fill" className="flex-shrink-0 text-primary" aria-label={t("test.library.pinned")} />}
+                        <span className="font-mono text-[10px] text-muted-foreground">{oid}</span>
                         {e.priority && <span className="rounded bg-muted px-1 text-[9px] text-muted-foreground">{e.priority}</span>}
                         <span className="min-w-0 flex-1 truncate text-[11px] text-foreground" title={e.purpose}>{e.purpose || "—"}</span>
+                        {e.module && <span className="hidden rounded bg-muted px-1 text-[9px] text-muted-foreground sm:inline">{e.module}</span>}
+                        <span className={`rounded px-1 text-[9px] ${review === "approved" ? "bg-status-success-muted text-status-success-foreground" : "bg-status-warning-muted text-status-warning-foreground"}`}>
+                          {review === "approved" ? t("test.library.reviewApproved") : t("test.library.reviewPending")}
+                        </span>
+                        {badge && <span className={`rounded px-1 text-[9px] ${badge.cls}`}>{badge.label}</span>}
+                        {h && <LastResultDot t={t} res={h.res} />}
+                        <span className="font-mono text-[9px] text-muted-foreground" title={t("test.library.rev", { n: rev })}>r{rev}</span>
                         <button
-                          onClick={() => del(g.task, e._source?.originalId || e.id)}
+                          onClick={(ev) => { ev.stopPropagation(); del(g.task, oid); }}
                           className="text-muted-foreground hover:text-status-error-foreground"
                           title={t("test.library.remove")}
                           aria-label={t("test.library.remove")}
@@ -4236,17 +4443,332 @@ function RegressionLibrarySection({ t, projectPath, reloadSignal, onChanged }: {
                           <Trash size={11} />
                         </button>
                       </div>
-                    ))}
-                  </div>
+                    );
+                  })}
                 </div>
-              ))}
-            </div>
-          )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      {sel.size > 0 && (
+        <div className="sticky bottom-0 flex flex-wrap items-center gap-2 border-t border-border bg-card px-3 py-2 shadow-lg">
+          <span className="text-[11px] text-foreground">{t("test.library.selected", { n: sel.size })}</span>
+          <span className="flex-1" />
+          <button disabled={busy} onClick={batchReview} className="flex h-6 items-center gap-1 rounded border border-border px-2 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-40">
+            <Check size={10} /> {t("test.library.batchApprove")}
+          </button>
+          <button disabled={busy} onClick={() => setAddToSuite(true)} className="flex h-6 items-center gap-1 rounded border border-border px-2 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-40">
+            <Plus size={10} /> {t("test.library.batchAddSuite")}
+          </button>
+          <button disabled={busy} onClick={batchQuarantine} className="flex h-6 items-center gap-1 rounded border border-border px-2 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-40">
+            <Prohibit size={10} /> {t("test.library.batchQuarantine")}
+          </button>
+          <button disabled={busy} onClick={batchRemove} className="flex h-6 items-center gap-1 rounded border border-border px-2 text-[11px] text-muted-foreground hover:bg-status-error-muted hover:text-status-error-foreground disabled:opacity-40">
+            <Trash size={10} /> {t("test.library.batchRemove")}
+          </button>
+          <button onClick={() => setSel(new Set())} className="text-muted-foreground hover:text-foreground" title={t("test.library.clearSelection")} aria-label={t("test.library.clearSelection")}>
+            <X size={12} />
+          </button>
         </div>
+      )}
+      {drawerCase && (
+        <CaseDrawer
+          t={t}
+          projectPath={projectPath}
+          task={drawerCase.task}
+          originalId={drawerCase.originalId}
+          entry={drawerCase.entry}
+          hist={drawerCase.hist}
+          rounds={hist?.rounds ?? []}
+          onClose={() => setDrawerKey(null)}
+          onChanged={() => { setDrawerKey(null); refresh(); }}
+        />
+      )}
+      {addToSuite && (
+        <AddToSuiteModal
+          t={t}
+          projectPath={projectPath}
+          keys={selKeys()}
+          onClose={() => setAddToSuite(false)}
+          onDone={() => { setAddToSuite(false); refresh(); }}
+        />
+      )}
     </div>
   );
 }
 
+// 用例详情抽屉(屏 1 行点击):步骤表、跨轮执行历史圆点(含翻转/连败)、rev 变更时间线、
+// 隔离说明与恢复、操作区。数据全部来自父级已取的两个 API,抽屉本身不再发请求(除写操作)。
+function CaseDrawer({ t, projectPath, task, originalId, entry, hist, rounds, onClose, onChanged }: {
+  t: T;
+  projectPath: string;
+  task: string;
+  originalId: string;
+  entry: LibEntry;
+  hist: HistCase | null;
+  rounds: HistRound[];
+  onClose: () => void;
+  onChanged: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const meta = entry._lib;
+  const review = meta?.reviewState ?? "approved";
+  const rev = meta?.rev ?? 1;
+  const quarantined = meta?.quarantined ?? false;
+  const steps = entry.steps ?? [];
+  // 存量条目没有 rev 时间线 → 用入库时间兜一条「首次入库」，与原型一致。
+  const history = meta?.history?.length
+    ? meta.history
+    : [{ rev, at: entry._source?.depositedAt ?? "", note: t("test.library.fromTask") + "：" + task }];
+  const badge = hist ? healthBadge(t, hist) : null;
+
+  const post = async (url: string, body: Record<string, unknown>) => {
+    setBusy(true);
+    try {
+      await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ projectPath, ...body }) });
+      onChanged();
+    } catch { setBusy(false); }
+  };
+  const keys = [{ task, originalId }];
+  const fmtAt = (iso: string) => (iso ? iso.slice(0, 10) : "—");
+
+  return (
+    <div className="fixed inset-0 z-[60] flex justify-end bg-black/50" onClick={onClose}>
+      <div
+        role="dialog"
+        aria-label={t("test.case.title")}
+        className="flex h-full w-full max-w-md flex-col overflow-y-auto border-l border-border bg-background p-4 shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center gap-2">
+          <span className="font-mono text-[11px] text-muted-foreground">{originalId}</span>
+          {entry.priority && <span className="rounded bg-muted px-1 text-[9px] text-muted-foreground">{entry.priority}</span>}
+          {badge && <span className={`rounded px-1 text-[9px] ${badge.cls}`}>{badge.label}</span>}
+          <span className="flex-1" />
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground" aria-label={t("test.case.close")}><X size={14} /></button>
+        </div>
+        <h3 className="mt-1 flex items-start gap-1.5 text-[13px] font-semibold text-foreground">
+          {hist?.pinned && <PushPin size={12} weight="fill" className="mt-0.5 flex-shrink-0 text-primary" />}
+          {entry.purpose || originalId}
+        </h3>
+        <div className="mt-1 text-[10px] text-muted-foreground">
+          {t("test.case.source", { task, id: originalId, at: fmtAt(entry._source?.depositedAt ?? "") })}
+          {" · r"}{rev}
+          {" · "}{review === "approved" ? t("test.library.reviewApproved") : t("test.library.reviewPending")}
+        </div>
+
+        <dl className="mt-3 grid grid-cols-[80px_1fr] gap-x-2 gap-y-1 text-[11px]">
+          {entry.module && (<><dt className="text-muted-foreground">{t("test.case.module")}</dt><dd className="text-foreground">{entry.module}</dd></>)}
+          {entry.caseType && (<><dt className="text-muted-foreground">{t("test.case.caseType")}</dt><dd className="text-foreground">{entry.caseType}</dd></>)}
+          {entry.requirement && (<><dt className="text-muted-foreground">{t("test.case.requirement")}</dt><dd className="font-mono text-foreground">{entry.requirement}</dd></>)}
+          {entry.tags?.length ? (<><dt className="text-muted-foreground">{t("test.case.tags")}</dt><dd className="flex flex-wrap gap-1">{entry.tags.map((tg) => <span key={tg} className="rounded bg-status-info-muted px-1 text-[9px] text-status-info-foreground">{tg}</span>)}</dd></>) : null}
+        </dl>
+
+        <div className="mt-4 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{t("test.case.steps")}</div>
+        {steps.length === 0 ? (
+          <div className="mt-1 text-[11px] text-muted-foreground">{t("test.case.noSteps")}</div>
+        ) : (
+          <div className="mt-1 overflow-hidden rounded border border-border text-[11px]">
+            <div className="grid grid-cols-[24px_1fr_1fr] bg-muted text-[9px] font-semibold text-muted-foreground">
+              <div className="px-2 py-1">{t("test.case.stepNo")}</div>
+              <div className="border-l border-border px-2 py-1">{t("test.case.stepAction")}</div>
+              <div className="border-l border-border px-2 py-1">{t("test.case.stepExpected")}</div>
+            </div>
+            {steps.map((s, i) => (
+              <div key={i} className="grid grid-cols-[24px_1fr_1fr] border-t border-border">
+                <div className="px-2 py-1 font-mono text-muted-foreground">{i + 1}</div>
+                <div className="border-l border-border px-2 py-1 text-foreground">{s.content || "—"}</div>
+                <div className="border-l border-border px-2 py-1 text-foreground">{s.expected || "—"}</div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="mt-4 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          {t("test.case.execHistory", { n: rounds.length })}
+        </div>
+        {!hist || rounds.length === 0 ? (
+          <div className="mt-1 text-[11px] text-muted-foreground">{t("test.case.execHistoryEmpty")}</div>
+        ) : (
+          <div className="mt-1 flex flex-wrap items-center gap-1">
+            {hist.res.map((r, i) => (
+              <span
+                key={rounds[i]?.roundId ?? i}
+                title={`${rounds[i]?.roundId ?? ""} · ${r === "p" ? t("test.library.lastResultPass") : r === "f" ? t("test.library.lastResultFail") : t("test.library.lastResultNone")}`}
+                className={`inline-block h-2 w-2 rounded-full ${r === "p" ? "bg-status-success-foreground" : r === "f" ? "bg-status-error-foreground" : "bg-border"}`}
+              />
+            ))}
+            <span className="ml-1 text-[10px] text-muted-foreground">
+              {t("test.case.flips", { n: hist.flips })} · {t("test.case.tailFails", { n: hist.tailFails })}
+            </span>
+          </div>
+        )}
+
+        {quarantined && (
+          <div className="mt-3 rounded border border-border bg-muted/40 px-2.5 py-2 text-[11px]">
+            <div className="font-medium text-status-info-foreground">{t("test.case.quarantinedAt", { at: fmtAt(meta?.quarantinedAt ?? "") })}</div>
+            {meta?.quarantineReason && <div className="mt-0.5 text-muted-foreground">{meta.quarantineReason}</div>}
+            <div className="mt-1 text-[10px] leading-relaxed text-muted-foreground">{t("test.case.quarantineNote")}</div>
+            <button
+              disabled={busy}
+              onClick={() => post("/api/test/library/quarantine", { keys, quarantined: false })}
+              className="mt-1.5 flex h-6 items-center gap-1 rounded border border-border px-2 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-40"
+            >
+              <ArrowClockwise size={10} /> {t("test.case.unquarantine")}
+            </button>
+          </div>
+        )}
+
+        <div className="mt-4 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{t("test.case.revTimeline")}</div>
+        <div className="mt-1 flex flex-col gap-1.5 border-l-2 border-border pl-3 text-[11px]">
+          {history.map((h, i) => (
+            <div key={i} className="relative">
+              <span className={`absolute -left-[17px] top-1.5 h-1.5 w-1.5 rounded-full ${i === 0 ? "bg-primary" : "bg-border"}`} />
+              <span className="font-mono font-semibold text-foreground">r{h.rev}</span>
+              <span className="text-muted-foreground"> · {fmtAt(h.at)} — {h.note}</span>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-4 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{t("test.case.actions")}</div>
+        <div className="mt-1.5 flex flex-wrap gap-2">
+          {review === "pending" && (
+            <button
+              disabled={busy}
+              onClick={() => post("/api/test/library/review", { keys, reviewState: "approved" })}
+              className="flex h-6 items-center gap-1 rounded bg-primary px-2 text-[11px] font-medium text-primary-foreground disabled:opacity-40"
+            >
+              <Check size={10} /> {t("test.case.approve")}
+            </button>
+          )}
+          <button
+            disabled
+            title={t("test.case.recheckSoon")}
+            className="flex h-6 cursor-not-allowed items-center gap-1 rounded border border-border px-2 text-[11px] text-muted-foreground opacity-50"
+          >
+            <ArrowsClockwise size={10} /> {t("test.case.recheck")}
+          </button>
+          {!quarantined && (
+            <button
+              disabled={busy}
+              onClick={() => {
+                const reason = window.prompt(t("test.library.quarantinePrompt", { n: 1 }));
+                if (reason === null) return;
+                void post("/api/test/library/quarantine", { keys, quarantined: true, reason });
+              }}
+              className="flex h-6 items-center gap-1 rounded border border-border px-2 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-40"
+            >
+              <Prohibit size={10} /> {t("test.case.quarantine")}
+            </button>
+          )}
+          <button
+            disabled={busy}
+            onClick={async () => {
+              if (!window.confirm(t("test.library.confirmRemove"))) return;
+              setBusy(true);
+              try {
+                await fetch("/api/test/library", {
+                  method: "DELETE",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ projectPath, task, originalId }),
+                });
+                onChanged();
+              } catch { setBusy(false); }
+            }}
+            className="flex h-6 items-center gap-1 rounded border border-border px-2 text-[11px] text-muted-foreground hover:bg-status-error-muted hover:text-status-error-foreground disabled:opacity-40"
+          >
+            <Trash size={10} /> {t("test.case.remove")}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// 「加入套件」弹窗(库总览批量条):只列静态套件——查询套件保存的是【条件】,由条件自动圈选,
+// 手工塞入会让「条件即真相」的语义失效(与原型 openAddToSuite 一致)。
+function AddToSuiteModal({ t, projectPath, keys, onClose, onDone }: {
+  t: T;
+  projectPath: string;
+  keys: Array<{ task: string; originalId: string }>;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [suites, setSuites] = useState<SuiteDTO[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/test/suites?projectPath=${encodeURIComponent(projectPath)}`)
+      .then((r) => r.json())
+      .then((d) => { if (!cancelled) setSuites((Array.isArray(d?.suites) ? d.suites : []).filter((s: SuiteDTO) => s.type === "static")); })
+      .catch(() => { if (!cancelled) setSuites([]); });
+    return () => { cancelled = true; };
+  }, [projectPath]);
+
+  const add = async (s: SuiteDTO) => {
+    setBusy(true);
+    setMsg("");
+    // 静态套件是固定清单:并集去重后整体覆盖保存(套件 POST 是 upsert by name)。
+    const have = new Set((s.keys ?? []).map((k) => caseKey(k.task, k.originalId)));
+    const merged = [...(s.keys ?? [])];
+    let added = 0;
+    for (const k of keys) if (!have.has(caseKey(k.task, k.originalId))) { merged.push(k); added++; }
+    try {
+      const r = await fetch("/api/test/suites", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectPath, suite: { name: s.name, type: "static", keys: merged } }),
+      }).then((x) => x.json());
+      if (r?.ok) { setMsg(t("test.library.addToSuiteDone", { suite: s.name, n: added })); setTimeout(onDone, 900); }
+      else { setMsg(r?.error || "failed"); setBusy(false); }
+    } catch { setMsg("failed"); setBusy(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+      <div className="flex max-h-[80vh] w-full max-w-sm flex-col overflow-hidden rounded-xl border border-border bg-background shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center gap-2 border-b border-border px-3 py-2">
+          <Plus size={13} className="text-primary" />
+          <span className="text-xs font-semibold text-foreground">{t("test.library.addToSuiteTitle")}</span>
+          <span className="flex-1" />
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground" aria-label={t("test.case.close")}><X size={14} /></button>
+        </div>
+        <div className="space-y-2 p-3">
+          <div className="text-[10px] leading-relaxed text-muted-foreground">{t("test.library.addToSuiteHint", { n: keys.length })}</div>
+          {suites === null ? (
+            <div className="p-3 text-center"><SpinnerGap size={14} className="mx-auto animate-spin text-muted-foreground" /></div>
+          ) : suites.length === 0 ? (
+            <div className="p-3 text-center text-[11px] text-muted-foreground">{t("test.library.addToSuiteNone")}</div>
+          ) : (
+            <div className="divide-y divide-border overflow-hidden rounded border border-border">
+              {suites.map((s) => (
+                <button
+                  key={s.name}
+                  disabled={busy}
+                  onClick={() => add(s)}
+                  className="flex w-full items-center gap-2 px-2.5 py-2 text-left text-[11px] hover:bg-muted disabled:opacity-40"
+                >
+                  <span className="flex-1 truncate text-foreground">{s.name}</span>
+                  <span className="rounded border border-border px-1 text-[9px] text-muted-foreground">{s.keys?.length ?? 0}</span>
+                </button>
+              ))}
+            </div>
+          )}
+          {msg && <div className="text-[10px] text-primary">{msg}</div>}
+        </div>
+      </div>
+    </div>
+  );
+}
 // 轮次历史区块(批 H 页面化,原弹窗):轮次 = 一次回归执行实例(TestRail Run 语义)。列表(时间/环境/
 // 套件/模式/状态/通过/红线)+ 行内展开详情(按来源任务分组结果 + 与上一全量轮的 delta 三类,
 // 交集口径)+ 删单轮(报告/快照/证据一并删)。数据全部来自 rounds / rounds/detail 只读 API。
