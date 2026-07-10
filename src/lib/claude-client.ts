@@ -383,18 +383,19 @@ export async function generateTextViaSdk(params: {
   // the native binary from the bundled platform subpackage
   // (@anthropic-ai/claude-agent-sdk-<platform>-<arch>).
 
-  let resultText = '';
+  let resultMessage: SDKResultMessage | null = null;
   try {
     const conversation = query({
       prompt: params.prompt,
       options: queryOptions,
     });
 
-    // Iterate through all messages; the last one with type 'result' has the answer
+    // Keep the whole result message, not just its `result` field: the error
+    // subtypes carry no `result` at all, and json_schema answers arrive in
+    // `structured_output`. Both were previously dropped on the floor and
+    // surfaced as a bare "SDK query returned no result".
     for await (const msg of conversation) {
-      if (msg.type === 'result' && 'result' in msg) {
-        resultText = (msg as SDKResultSuccess).result || '';
-      }
+      if (msg.type === 'result') resultMessage = msg as SDKResultMessage;
     }
   } catch (err) {
     clearTimeout(timeoutId);
@@ -408,11 +409,49 @@ export async function generateTextViaSdk(params: {
   clearTimeout(timeoutId);
   setup.shadow.cleanup();
 
-  if (!resultText) {
+  return interpretSdkResult(resultMessage, !!params.outputFormat);
+}
+
+/**
+ * Turn a terminal SDK result message into the text `generateTextViaSdk` promises,
+ * or throw an error that names the real reason.
+ *
+ * Exported for unit tests: the SDK's result envelope has four shapes and only
+ * one of them puts the answer in `result`. Reading `result` unconditionally
+ * (the original code) collapsed every other shape into a bare
+ * "SDK query returned no result".
+ */
+export function interpretSdkResult(
+  resultMessage: SDKResultMessage | null,
+  hasOutputFormat: boolean,
+): string {
+  if (!resultMessage) {
+    throw new Error('SDK query ended without a result message');
+  }
+  // error_max_turns / error_during_execution / error_max_budget_usd /
+  // error_max_structured_output_retries — these carry no `result`; the reason
+  // lives in `errors`.
+  if (resultMessage.subtype !== 'success') {
+    const detail = resultMessage.errors?.join('; ');
+    throw new Error(`SDK query failed (${resultMessage.subtype})${detail ? `: ${detail}` : ''}`);
+  }
+  const success = resultMessage as SDKResultSuccess;
+  // With outputFormat: json_schema the validated object lands in
+  // structured_output and `result` may be empty. Re-serialize it so callers
+  // keep the "returns text" contract.
+  if (hasOutputFormat && success.structured_output != null) {
+    return JSON.stringify(success.structured_output);
+  }
+  // A `success` subtype can still be an error envelope: the CLI reports e.g.
+  // "Not logged in · Please run /login" as `result` with is_error set. Without
+  // this, that sentence is handed back as if the model had written it.
+  if (success.is_error) {
+    throw new Error(`SDK query failed: ${success.result || 'unknown error'}`);
+  }
+  if (!success.result) {
     throw new Error('SDK query returned no result');
   }
-
-  return resultText;
+  return success.result;
 }
 
 /**
