@@ -7,7 +7,7 @@ import dynamic from "next/dynamic";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useTranslation } from "@/hooks/useTranslation";
-import { ListChecks, ChartBar, Gear, ArrowLeft, ArrowRight, FolderPlus, FolderOpen, Play, Stop, ArrowUp, SpinnerGap, Sparkle, Terminal, WarningCircle, Wrench, Trash, Desktop, Lightning, Plug, CheckCircle, File as FileIcon, FileArrowDown, NotePencil, DownloadSimple, Eye, X, CaretDown, CaretUp, Check, Lock, PencilSimple, Plus, PushPin, Clock, MagnifyingGlass, Prohibit, ArrowClockwise, ArrowsClockwise, type Icon } from "@/components/ui/icon";
+import { ListChecks, ChartBar, Gear, ArrowLeft, ArrowRight, FolderPlus, FolderOpen, Play, Stop, ArrowUp, SpinnerGap, Sparkle, Terminal, WarningCircle, Wrench, Trash, Desktop, Lightning, Plug, CheckCircle, File as FileIcon, FileArrowDown, NotePencil, DownloadSimple, Eye, X, CaretDown, CaretUp, Check, Lock, PencilSimple, Plus, PushPin, Clock, MagnifyingGlass, Prohibit, ArrowClockwise, ArrowsClockwise, Bug, type Icon } from "@/components/ui/icon";
 import { MarkdownEditor } from "@/components/editor/MarkdownEditor.lazy";
 import type { TranslationKey } from "@/i18n";
 import { useNativeFolderPicker } from "@/hooks/useNativeFolderPicker";
@@ -1255,7 +1255,7 @@ export function InlineTestingPanel() {
   // 测试类型(批 H,用户确认的信息架构):项目下两种平级测试类型——功能测试(现有任务流)/
   // 回归测试(整页工作区:用例库/回归套件/轮次历史 页内子页签,不再用弹窗)。切换项目时重置。
   const [testType, setTestType] = useState<"func" | "regression">("func");
-  const [regTab, setRegTab] = useState<"library" | "suites" | "rounds">("library");
+  const [regTab, setRegTab] = useState<RegTab>("library");
   // 发起回归弹窗(v2 批 D):套件/环境/预检确认后才真正 runLibrary(保留为确认对话框)。
   // 发起回归弹窗:null=关闭。带 preset 打开时(轮次历史的「复测 N 条」)预置复测模式与基准轮。
   const [launchOpen, setLaunchOpen] = useState<null | { mode?: "failed-only"; parentRoundId?: string }>(null);
@@ -2519,6 +2519,8 @@ export function InlineTestingPanel() {
                     t={t}
                     projectPath={current.path}
                     regTab={regTab}
+                    model={model}
+                    providerId={providerId}
                     setRegTab={setRegTab}
                     reloadSignal={libraryReload}
                     onChanged={() => setLibraryReload((n) => n + 1)}
@@ -4129,23 +4131,29 @@ function LastResultDot({ t, res }: { t: T; res: CaseRes[] }) {
   return <span className={`inline-block h-2 w-2 flex-shrink-0 rounded-full ${cls}`} title={title} />;
 }
 
-// 回归测试整页工作区(批 H):子页签(用例库/回归套件/轮次历史)+「发起回归」+ 运行状态行。
+/** 回归测试整页工作区的子页签。 */
+type RegTab = "library" | "suites" | "rounds" | "report";
+
+// 回归测试整页工作区(批 H):子页签(用例库/回归套件/轮次历史/轮次报告)+「发起回归」+ 运行状态行。
 // 三个区块由原弹窗内容页面化而来,数据链路(reloadSignal/deposit/rounds API)不变。
-function RegressionWorkspace({ t, projectPath, regTab, setRegTab, reloadSignal, onChanged, onLaunch, running, runStatus }: {
+function RegressionWorkspace({ t, projectPath, regTab, setRegTab, reloadSignal, onChanged, onLaunch, running, runStatus, model, providerId }: {
   t: T;
   projectPath: string;
-  regTab: "library" | "suites" | "rounds";
-  setRegTab: (v: "library" | "suites" | "rounds") => void;
+  regTab: RegTab;
+  setRegTab: (v: RegTab) => void;
   reloadSignal: number;
   onChanged: () => void;
   onLaunch: (preset?: { mode?: "failed-only"; parentRoundId?: string }) => void;
   running: boolean;
   runStatus: string | null;
+  model: string;
+  providerId: string;
 }) {
-  const TABS = [
-    { id: "library" as const, label: t("test.regression.tabLibrary") },
-    { id: "suites" as const, label: t("test.suites.open") },
-    { id: "rounds" as const, label: t("test.rounds.open") },
+  const TABS: Array<{ id: RegTab; label: string }> = [
+    { id: "library", label: t("test.regression.tabLibrary") },
+    { id: "suites", label: t("test.suites.open") },
+    { id: "rounds", label: t("test.rounds.open") },
+    { id: "report", label: t("test.report.tab") },
   ];
   return (
     <div>
@@ -4184,6 +4192,9 @@ function RegressionWorkspace({ t, projectPath, regTab, setRegTab, reloadSignal, 
           reloadSignal={reloadSignal}
           onRetest={(parentRoundId) => onLaunch({ mode: "failed-only", parentRoundId })}
         />
+      )}
+      {regTab === "report" && (
+        <RegressionReportSection t={t} projectPath={projectPath} reloadSignal={reloadSignal} model={model} providerId={providerId} />
       )}
     </div>
   );
@@ -5026,6 +5037,297 @@ function RegressionRoundsSection({ t, projectPath, reloadSignal, onRetest }: {
             </div>
           )}
         </div>
+    </div>
+  );
+}
+
+// 轮次报告(屏 4,二期):红/绿横幅 + delta 三卡(点击过滤)+ 按来源任务分组 + 失败行展开
+// (AI 归因 / 证据缩略图 / 转缺陷)。
+//
+// 两条不可动摇的口径:
+//   1. **复测轮看合并口径**——它只跑上轮失败子集,自身全过不代表可发版(mergedPassStr)。
+//   2. **隔离条数强制曝光**——隔离不计红线,但横幅必须写「隔离中 N 条未计入」,否则隔离就成了
+//      发版前把挂掉的用例扫到地毯下的工具。
+interface VerdictUI { cls: string; act: string; why: string }
+interface RoundTestUI {
+  task: string; originalId: string; purpose: string; status: string;
+  actual?: string; error?: string; evidence?: string[]; verdict?: VerdictUI;
+}
+interface RoundReportUI {
+  round: RoundUI;
+  groups: Array<{ task: string; counts: Record<string, number>; tests: RoundTestUI[] }>;
+  delta: { baseRoundId: string; newFail: Array<{ task: string; originalId: string }>; fixed: Array<{ task: string; originalId: string }>; stillFail: Array<{ task: string; originalId: string }> } | null;
+  quarantined: number;
+  hasVerdicts: boolean;
+}
+type DeltaFilter = "" | "new" | "fixed" | "still";
+
+function RegressionReportSection({ t, projectPath, reloadSignal, model, providerId }: {
+  t: T; projectPath: string; reloadSignal: number; model: string; providerId: string;
+}) {
+  const [rounds, setRounds] = useState<RoundUI[] | null>(null);
+  const [roundId, setRoundId] = useState<string>("");
+  const [data, setData] = useState<RoundReportUI | null | undefined>(undefined); // undefined=加载中
+  const [deltaFilter, setDeltaFilter] = useState<DeltaFilter>("");
+  const [analysing, setAnalysing] = useState(false);
+  const [defectMsg, setDefectMsg] = useState("");
+  const [lightbox, setLightbox] = useState<string | null>(null);
+  const [reload, setReload] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/test/library/rounds?projectPath=${encodeURIComponent(projectPath)}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (cancelled) return;
+        const list: RoundUI[] = (Array.isArray(d?.rounds) ? d.rounds : []).filter((r: RoundUI) => r.status !== "running");
+        setRounds(list);
+        setRoundId((cur) => (cur && list.some((r) => r.roundId === cur) ? cur : list[0]?.roundId ?? ""));
+      })
+      .catch(() => { if (!cancelled) setRounds([]); });
+    return () => { cancelled = true; };
+  }, [projectPath, reloadSignal]);
+
+  useEffect(() => {
+    if (!roundId) return;
+    let cancelled = false;
+    fetch(`/api/test/library/rounds/detail?projectPath=${encodeURIComponent(projectPath)}&roundId=${encodeURIComponent(roundId)}`)
+      .then((r) => r.json())
+      .then((d) => { if (!cancelled) setData(d?.groups ? (d as RoundReportUI) : null); })
+      .catch(() => { if (!cancelled) setData(null); });
+    return () => { cancelled = true; };
+  }, [projectPath, roundId, reload]);
+
+  const round = rounds?.find((r) => r.roundId === roundId);
+  const counts = useMemo(() => {
+    let pass = 0, total = 0;
+    for (const g of data?.groups ?? []) for (const c of g.tests) { total++; if (c.status === "pass") pass++; }
+    return { pass, total };
+  }, [data]);
+  const isRetest = round?.mode === "failed-only";
+  // 红线:复测轮看合并口径,全量轮看本轮口径。
+  const verdictOk = isRetest
+    ? (() => { const m = round?.mergedPassStr?.split("/").map(Number); return !!m && m.length === 2 && m[0] === m[1]; })()
+    : counts.total > 0 && counts.pass === counts.total;
+
+  const analyse = async () => {
+    setAnalysing(true);
+    try {
+      const res = await fetch("/api/test/library/verdict", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectPath, roundId, model: model || undefined, providerId: providerId || undefined }),
+      });
+      if (res.body) { const rd = res.body.getReader(); for (;;) { const { done } = await rd.read(); if (done) break; } }
+      setReload((n) => n + 1);
+    } catch { /* 归因失败不影响报告主体 */ } finally { setAnalysing(false); }
+  };
+
+  const toDefect = async () => {
+    setDefectMsg(t("test.report.defectRunning"));
+    try {
+      const res = await fetch("/api/test/defect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectPath, taskName: REGRESSION_LIBRARY_TASK, env: round?.env || "local", roundId, model: model || undefined, providerId: providerId || undefined }),
+      });
+      if (!res.ok) {
+        let msg = String(res.status);
+        try { const d = await res.json(); if (d?.error) msg = d.error; } catch {}
+        setDefectMsg(t("test.report.defectFailed", { msg }));
+        return;
+      }
+      if (res.body) { const rd = res.body.getReader(); for (;;) { const { done } = await rd.read(); if (done) break; } }
+      setDefectMsg(t("test.report.defectDone"));
+    } catch (e) {
+      setDefectMsg(t("test.report.defectFailed", { msg: e instanceof Error ? e.message : "error" }));
+    }
+  };
+
+  // delta 过滤:三卡各自的 key 集合;点击同一张卡取消过滤。
+  const deltaKeys = useMemo(() => {
+    const mk = (arr?: Array<{ task: string; originalId: string }>) => new Set((arr ?? []).map((x) => caseKey(x.task, x.originalId)));
+    return { new: mk(data?.delta?.newFail), fixed: mk(data?.delta?.fixed), still: mk(data?.delta?.stillFail) };
+  }, [data]);
+  const shownGroups = useMemo(() => {
+    if (!data) return [];
+    if (!deltaFilter) return data.groups;
+    const want = deltaKeys[deltaFilter];
+    return data.groups
+      .map((g) => ({ ...g, tests: g.tests.filter((c) => want.has(caseKey(c.task, c.originalId))) }))
+      .filter((g) => g.tests.length > 0);
+  }, [data, deltaFilter, deltaKeys]);
+
+  const mediaUrl = (file: string) =>
+    `/api/test/media?projectPath=${encodeURIComponent(projectPath)}&taskName=${encodeURIComponent(REGRESSION_LIBRARY_TASK)}&env=${encodeURIComponent(round?.env || "local")}&roundId=${encodeURIComponent(roundId)}&file=${encodeURIComponent(file)}`;
+  const isVid = (f: string) => /\.(webm|mp4|mov)$/i.test(f);
+  const hasFailures = (data?.groups ?? []).some((g) => g.tests.some((c) => c.status !== "pass"));
+
+  if (rounds !== null && rounds.length === 0) {
+    return <div className="rounded-xl border border-border bg-card p-6 text-center text-[11px] leading-relaxed text-muted-foreground">{t("test.report.noRounds")}</div>;
+  }
+
+  const deltaCard = (k: Exclude<DeltaFilter, "">, label: string, n: number, color: string) => (
+    <button
+      onClick={() => setDeltaFilter((cur) => (cur === k ? "" : k))}
+      className={`rounded-lg border bg-card px-3 py-2 text-left transition-colors ${deltaFilter === k ? "border-primary ring-1 ring-primary" : "border-border hover:border-primary"}`}
+    >
+      <div className="text-[10px] text-muted-foreground">{label}</div>
+      <div className={`text-lg font-semibold tabular-nums ${color}`}>{n}<span className="ml-1 text-[10px] font-normal text-muted-foreground">条</span></div>
+    </button>
+  );
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-[10px] text-muted-foreground">{t("test.report.round")}</span>
+        <select
+          value={roundId}
+          onChange={(e) => { setRoundId(e.target.value); setDeltaFilter(""); setDefectMsg(""); }}
+          className="h-7 rounded border border-border bg-background px-1.5 text-[11px] outline-none focus:border-primary"
+        >
+          {(rounds ?? []).map((r) => (
+            <option key={r.roundId} value={r.roundId}>
+              {r.roundId} · {r.env}{r.mode === "failed-only" ? ` · ${t("test.rounds.modeRetest")}` : ""}
+            </option>
+          ))}
+        </select>
+        <span className="flex-1" />
+        {hasFailures && (
+          <button
+            onClick={analyse}
+            disabled={analysing}
+            className="flex h-7 items-center gap-1 rounded border border-border px-2 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-40"
+          >
+            {analysing ? <SpinnerGap size={11} className="animate-spin" /> : <Sparkle size={11} />}
+            {analysing ? t("test.report.analysing") : data?.hasVerdicts ? t("test.report.reanalyse") : t("test.report.analyse")}
+          </button>
+        )}
+      </div>
+
+      {data === undefined ? (
+        <div className="p-4 text-center"><SpinnerGap size={14} className="mx-auto animate-spin text-muted-foreground" /></div>
+      ) : data === null ? (
+        <div className="rounded-xl border border-border bg-card p-6 text-center text-[11px] text-muted-foreground">{t("test.rounds.detailEmpty")}</div>
+      ) : (
+        <>
+          {counts.total === 0 ? (
+            // 中断/无产物的轮**不给发版结论**:0/0 既不是「可发版」也不是「不可发版」,
+            // 而是「这轮没跑出结果」。把它渲染成红色红线徽标会误导发版决策。
+            <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-muted/40 px-4 py-3 text-[11px] text-muted-foreground">
+              <WarningCircle size={14} />
+              <span>{t("test.report.noResults", { status: round?.status === "running" ? t("test.rounds.statusRunning") : t("test.rounds.statusAborted") })}</span>
+              <span className="flex-1" />
+              <span className="text-[10px]">{round?.roundId} · {round?.env} · {round?.suiteName || "—"}</span>
+            </div>
+          ) : (
+            <div className={`flex flex-wrap items-center gap-3 rounded-xl border px-4 py-3 ${verdictOk ? "border-status-success-foreground/30 bg-status-success-muted/40" : "border-status-error-foreground/30 bg-status-error-muted/40"}`}>
+              <span className="font-mono text-xl font-bold tabular-nums text-foreground">{counts.pass}/{counts.total}</span>
+              <span className={`text-sm font-bold ${verdictOk ? "text-status-success-foreground" : "text-status-error-foreground"}`}>
+                {verdictOk ? t("test.report.shippable") : t("test.report.blocked")}
+              </span>
+              <span className="text-[10px] text-muted-foreground">
+                {t("test.report.redlineNote")}
+                {isRetest && round?.mergedPassStr && ` ${t("test.report.mergedNote", { pass: round.mergedPassStr })}`}
+              </span>
+              <span className="flex-1" />
+              <span className="text-[10px] text-muted-foreground">
+                {round?.roundId} · {round?.env} · {round?.suiteName || "—"}
+                {data.quarantined > 0 && (
+                  <span className="ml-1.5 text-status-info-foreground">⛔ {t("test.report.quarantineNote", { n: data.quarantined })}</span>
+                )}
+              </span>
+            </div>
+          )}
+
+          {data.delta && (
+            <>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                {deltaCard("new", t("test.report.deltaNewFail"), data.delta.newFail.length, "text-status-error-foreground")}
+                {deltaCard("fixed", t("test.report.deltaFixed"), data.delta.fixed.length, "text-status-success-foreground")}
+                {deltaCard("still", t("test.report.deltaStillFail"), data.delta.stillFail.length, "text-status-warning-foreground")}
+              </div>
+              <div className="text-[10px] text-muted-foreground">
+                {t("test.report.deltaBase", { round: data.delta.baseRoundId })}
+                {deltaFilter && (
+                  <button onClick={() => setDeltaFilter("")} className="ml-2 text-primary hover:underline">{t("test.report.filterCleared")}</button>
+                )}
+              </div>
+            </>
+          )}
+
+          {shownGroups.length === 0 ? (
+            <div className="rounded-xl border border-border bg-card p-6 text-center text-[11px] text-muted-foreground">{t("test.report.empty")}</div>
+          ) : (
+            shownGroups.map((g) => {
+              const pass = g.tests.filter((c) => c.status === "pass").length;
+              const allPass = pass === g.tests.length;
+              return (
+                <div key={g.task} className="overflow-hidden rounded-xl border border-border bg-card">
+                  <div className="flex items-center gap-2 border-b border-border bg-muted/40 px-3 py-1.5">
+                    <span className="text-[11px] font-semibold text-foreground">{g.task}</span>
+                    <span className={`rounded px-1.5 text-[9px] ${allPass ? "bg-status-success-muted text-status-success-foreground" : "bg-status-error-muted text-status-error-foreground"}`}>
+                      {t("test.report.groupPass", { pass, total: g.tests.length })}
+                    </span>
+                  </div>
+                  <div className="divide-y divide-border">
+                    {g.tests.map((c) => (
+                      <div key={`${c.task}-${c.originalId}`} className="px-3 py-1.5">
+                        <div className="flex items-center gap-2">
+                          <span className={`inline-block h-2 w-2 flex-shrink-0 rounded-full ${c.status === "pass" ? "bg-status-success-foreground" : "bg-status-error-foreground"}`} />
+                          <span className="font-mono text-[10px] text-muted-foreground">{c.originalId}</span>
+                          <span className="min-w-0 flex-1 truncate text-[11px] text-foreground" title={c.purpose}>{c.purpose || "—"}</span>
+                          <span className={`rounded px-1 text-[9px] ${c.status === "pass" ? "bg-status-success-muted text-status-success-foreground" : "bg-status-error-muted text-status-error-foreground"}`}>{c.status}</span>
+                        </div>
+                        {c.status !== "pass" && (
+                          <div className="mt-1 flex flex-col gap-1.5 rounded bg-muted/50 px-2.5 py-2 text-[10px]">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className={`rounded px-1.5 py-0.5 ${c.verdict ? "bg-status-error-muted text-status-error-foreground" : "border border-border text-muted-foreground"}`}>
+                                {c.verdict ? t("test.report.verdict", { cls: c.verdict.cls }) : t("test.report.verdictNone")}
+                              </span>
+                              {c.verdict && <span className="rounded border border-border px-1.5 py-0.5 text-muted-foreground">{t("test.report.suggest", { act: c.verdict.act })}</span>}
+                              <span className="flex-1" />
+                              <button onClick={toDefect} className="flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-muted-foreground hover:text-foreground">
+                                <Bug size={10} /> {t("test.report.toDefect")}
+                              </button>
+                            </div>
+                            {c.verdict?.why && <div className="leading-relaxed text-muted-foreground">{c.verdict.why}</div>}
+                            {c.actual && <div className="text-muted-foreground"><b className="text-foreground">{t("test.report.actual")}：</b>{c.actual}</div>}
+                            {c.error && <div className="text-status-error-foreground">{t("test.report.error")}：{c.error}</div>}
+                            {!!c.evidence?.length && (
+                              <div className="flex flex-wrap items-center gap-2">
+                                {c.evidence.map((f) => (
+                                  <button key={f} onClick={() => setLightbox(f)} className="overflow-hidden rounded border border-border" title={f}>
+                                    {isVid(f)
+                                      ? <span className="flex h-[46px] w-[76px] items-center justify-center bg-muted text-[9px] text-muted-foreground">🎬</span>
+                                      // eslint-disable-next-line @next/next/no-img-element
+                                      : <img src={mediaUrl(f)} alt={f} className="h-[46px] w-[76px] object-cover" />}
+                                  </button>
+                                ))}
+                                <span className="text-[9px] text-muted-foreground">{t("test.report.evidence")}</span>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })
+          )}
+          {defectMsg && <div className="text-[10px] text-primary">{defectMsg}</div>}
+        </>
+      )}
+
+      {lightbox && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 p-6" onClick={() => setLightbox(null)}>
+          {isVid(lightbox)
+            ? <video src={mediaUrl(lightbox)} controls autoPlay className="max-h-full max-w-full" onClick={(e) => e.stopPropagation()} />
+            // eslint-disable-next-line @next/next/no-img-element
+            : <img src={mediaUrl(lightbox)} alt={lightbox} className="max-h-full max-w-full object-contain" onClick={(e) => e.stopPropagation()} />}
+        </div>
+      )}
     </div>
   );
 }
