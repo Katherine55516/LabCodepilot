@@ -25,6 +25,7 @@ export default function ChatSessionPage({ params }: ChatSessionPageProps) {
   const [sessionEffort, setSessionEffort] = useState<string>('');
   const [sessionInfoLoaded, setSessionInfoLoaded] = useState(false);
   const [sessionPermissionProfile, setSessionPermissionProfile] = useState<'default' | 'full_access'>('default');
+  const [sessionSandbox, setSessionSandbox] = useState(false);
   const [sessionMode, setSessionMode] = useState<'code' | 'plan'>('code');
   const [sessionHasSummary, setSessionHasSummary] = useState(false);
   const { setWorkingDirectory, setSessionId, setSessionTitle: setPanelSessionTitle, setFileTreeOpen, setGitPanelOpen, setDashboardPanelOpen } = usePanel();
@@ -67,6 +68,7 @@ export default function ChatSessionPage({ params }: ChatSessionPageProps) {
           setSessionProviderId(resolved.providerId);
           setSessionEffort(data.session.effort || '');
           setSessionPermissionProfile(data.session.permission_profile || 'default');
+          setSessionSandbox(!!data.session.sandbox_enabled);
           setSessionMode((data.session.mode as 'code' | 'plan') || 'code');
           setSessionHasSummary(!!data.session.context_summary);
         }
@@ -196,7 +198,7 @@ export default function ChatSessionPage({ params }: ChatSessionPageProps) {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <ChatView key={id} sessionId={id} initialMessages={messages} initialHasMore={hasMore} modelName={sessionModel} providerId={sessionProviderId} initialPermissionProfile={sessionPermissionProfile} initialMode={sessionMode} initialHasSummary={sessionHasSummary} initialEffort={sessionEffort} />
+      <ChatView key={id} sessionId={id} initialMessages={messages} initialHasMore={hasMore} modelName={sessionModel} providerId={sessionProviderId} initialPermissionProfile={sessionPermissionProfile} initialSandbox={sessionSandbox} initialMode={sessionMode} initialHasSummary={sessionHasSummary} initialEffort={sessionEffort} />
     </div>
   );
 }

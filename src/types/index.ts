@@ -22,6 +22,8 @@ export interface ChatSession {
   runtime_updated_at: string;
   runtime_error: string;
   permission_profile?: 'default' | 'full_access';
+  /** Cowork POC: 1 = SDK CLI runs inside an isolated VM, 0 = host runtime. */
+  sandbox_enabled?: number;
   /** Per-session reasoning effort (e.g. 'low'|'medium'|'high'|'max'); ''/undefined = no explicit effort */
   effort?: string;
   context_summary?: string;

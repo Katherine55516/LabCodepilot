@@ -16,6 +16,7 @@ import { MessageInput } from './MessageInput';
 import { ChatComposerActionBar } from './ChatComposerActionBar';
 import { ModeIndicator } from './ModeIndicator';
 import { ChatPermissionSelector } from './ChatPermissionSelector';
+import { SandboxToggle } from './SandboxToggle';
 import { RunCockpit } from './RunCockpit';
 import { RuntimeBadge } from './RuntimeBadge';
 import { ImageGenToggle } from './ImageGenToggle';
@@ -63,6 +64,8 @@ interface ChatViewProps {
   modelName?: string;
   providerId?: string;
   initialPermissionProfile?: 'default' | 'full_access';
+  /** Cowork POC: whether this session runs the agent inside an isolated VM. */
+  initialSandbox?: boolean;
   initialMode?: 'code' | 'plan';
   initialHasSummary?: boolean;
   /** Per-session reasoning effort restored from the DB ('' = no explicit effort). */
@@ -96,12 +99,13 @@ const MAX_MESSAGES_IN_MEMORY = 150;
  */
 const MAX_CONTENT_BYTES_IN_MEMORY = 24 * 1024 * 1024; // ~24MB
 
-export function ChatView({ sessionId, initialMessages = [], initialHasMore = false, modelName, providerId, initialPermissionProfile, initialMode, initialHasSummary, initialEffort, isSplitColumn = false }: ChatViewProps) {
+export function ChatView({ sessionId, initialMessages = [], initialHasMore = false, modelName, providerId, initialPermissionProfile, initialSandbox, initialMode, initialHasSummary, initialEffort, isSplitColumn = false }: ChatViewProps) {
   const { setStreamingSessionId, workingDirectory, setPendingApprovalSessionId, setDashboardPanelOpen, setFileTreeOpen, setIsAssistantWorkspace, setTestPanelOpen, testPanelOpen, testPanelBaseSession } = usePanel();
   const { t } = useTranslation();
   const router = useRouter();
   const [messages, setMessages] = useState<Message[]>(initialMessages);
   const [permissionProfile, setPermissionProfile] = useState<'default' | 'full_access'>(initialPermissionProfile || 'default');
+  const [sandboxEnabled, setSandboxEnabled] = useState(!!initialSandbox);
 
   // Whether this session's working directory matches the configured assistant workspace
   const [isAssistantProject, setIsAssistantProject] = useState(false);
@@ -215,6 +219,7 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
     return () => controller.abort();
   }, [currentProviderId, currentModel]);
   useEffect(() => { if (initialPermissionProfile) setPermissionProfile(initialPermissionProfile); }, [initialPermissionProfile]);
+  useEffect(() => { setSandboxEnabled(!!initialSandbox); }, [initialSandbox]);
 
   // Restore session-scoped last-generated images from sessionStorage
   useEffect(() => { loadLastGenerated(sessionId); }, [sessionId]);
@@ -1123,11 +1128,19 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
       <ChatComposerActionBar
         left={<><ModeIndicator mode={mode} onModeChange={handleModeChange} disabled={isStreaming} />{/* ImageGenToggle hidden from UI — restore by uncommenting. Component + ImageGen logic kept intact. */}{/* <ImageGenToggle /> */}</>}
         center={
-          <ChatPermissionSelector
-            sessionId={sessionId}
-            permissionProfile={permissionProfile}
-            onPermissionChange={setPermissionProfile}
-          />
+          <div className="flex items-center gap-1.5">
+            <ChatPermissionSelector
+              sessionId={sessionId}
+              permissionProfile={permissionProfile}
+              onPermissionChange={setPermissionProfile}
+            />
+            <SandboxToggle
+              sessionId={sessionId}
+              enabled={sandboxEnabled}
+              onChange={setSandboxEnabled}
+              disabled={isStreaming}
+            />
+          </div>
         }
         right={
           <RunCockpit

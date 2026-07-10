@@ -754,11 +754,31 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
           queryOptions.allowDangerouslySkipPermissions = true;
         }
 
-        // pathToClaudeCodeExecutable is intentionally not set — the SDK
-        // auto-discovers the native binary from the bundled platform subpackage
+        // pathToClaudeCodeExecutable is normally NOT set — the SDK auto-discovers
+        // the native binary from the bundled platform subpackage
         // (@anthropic-ai/claude-agent-sdk-<platform>-<arch>). This is the same
         // claude.exe / claude binary that the official native installer ships,
         // but distributed via npm so it's bundled at install/build time.
+        //
+        // Cowork POC: when the session has sandbox enabled (and the global
+        // cowork_enabled gate is on + VM is ready), point the SDK at a forwarder
+        // that runs the linux claude binary INSIDE an isolated VM. The SDK is
+        // unaware — it just spawns what it thinks is claude and talks stream-json
+        // over the forwarded stdio. See src/lib/cowork-poc.ts.
+        try {
+          const { getSession } = await import('./db');
+          const { decideCowork } = await import('./cowork-poc');
+          const sess = getSession(sessionId);
+          const decision = decideCowork(sess?.sandbox_enabled);
+          if (decision.useSandbox && decision.executablePath) {
+            queryOptions.pathToClaudeCodeExecutable = decision.executablePath;
+            console.log(`[claude-client] cowork sandbox ON for session ${sessionId} → forwarder ${decision.executablePath}`);
+          } else if (sess?.sandbox_enabled && decision.reason) {
+            console.warn(`[claude-client] cowork sandbox requested but falling back to host: ${decision.reason}`);
+          }
+        } catch (err) {
+          console.warn('[claude-client] cowork decision failed, using host runtime:', err);
+        }
 
         if (model) {
           queryOptions.model = model;

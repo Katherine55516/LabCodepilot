@@ -1,7 +1,28 @@
 # Cowork 模式(本地虚拟机隔离)实现方案调研
 
-> 调研日期:2026-07-09。状态:**调研完成,待立项**。
+> 调研日期:2026-07-09。状态:**P0 POC 已通过(2026-07-10),转发桥拓扑证实可行**。
 > 需求:参考 Claude 官方 Cowork,新增一种会话模式——底层仍走 Claude Agent SDK,但 agent **不能读写用户真机文件**;应用在用户本机部署一个虚拟机,用户通过对话框发送文件 → 自动放入 VM → agent 在 VM 内读改建 → 完成后用户从 VM 下载产物。全程不动真机文件。
+> POC 脚手架与复现步骤:[scripts/poc/cowork/README.md](../../scripts/poc/cowork/README.md)。
+
+---
+
+## POC 验证结论(2026-07-10)
+
+**核心赌注"stream-json 经转发桥跨 VM 边界无损透传"已证实,无阻塞点。** 环境:macOS 26 / Apple Silicon,vfkit 0.6.4 + Debian 13 云镜像 + 官方 `claude-agent-sdk-linux-arm64@0.3.203` binary(guest 内报 `2.1.203`),宿主 SDK 走本项目内置 0.3.203。
+
+| 验证项 | 方法 | 结果 |
+|---|---|---|
+| Step A:SDK 容忍中间转发层 | 转发器用「子进程+管道」透传到本机 darwin claude,SDK `pathToClaudeCodeExecutable` 指向它 | init 握手 / 工具调用(Write+Read)/ result 全 PASS;真实 managed 凭证(gpt-5.6-sol[1m]) |
+| Step A:中断 kill 链 | `abortController.abort()` 5s 后触发 | 转发器收 SIGTERM,子进程 exit 143,SDK 收到 aborted,PASS |
+| Step B:跨 VM 转发 + 隔离 | vfkit 起 VM,SSH 转发器让 VM 内 linux claude 干活 | `cwd=/home/agent/workspace`;文件写在 VM;**宿主全盘搜索无残留**(host isolation PASS);SSH 回查 VM 内文件存在;含一次 api_retry 后仍 success |
+| 应用端到端 | dev server + CDP:开沙箱开关 → 发消息 → 观察落点 | 日志 `cowork sandbox ON → forwarder`;文件落 VM `~/workspace/app-e2e.txt`;真机 `find` 无残留;UI 正常渲染工具调用与结果 |
+| 模型别名转义 | `[1m]` 等 shell 元字符经 `printf %q` 过 SSH | 无损,PASS(佐证 win 侧 wsl.exe 同法可行) |
+
+**已合入应用的最小集成**(gated,默认关):`chat_sessions.sandbox_enabled` 列 + 输入条沙箱开关(权限选择器右侧)+ `cowork-poc.ts` 三重门决策 + claude-client 分支设 `pathToClaudeCodeExecutable`。切换开关连带清 `sdk_session_id`(执行目标变更,跨界 resume 会失败)。全局 `cowork_enabled` 设置未开时开关点了也安全回退宿主。
+
+**POC 明确未做(留给 P1)**:vsock 替代 SSH、guest-daemon、vfkit 生命周期管理器、文件 push/pull 拷贝语义(现走 SSH 直连)、就绪状态机、Windows/WSL2 侧。POC 的 `vmReady()` 仅查 vm-ip 文件存在,VM 未运行时开关开着会 SSH 失败——开发者自测需先 `vm-up.sh start`。
+
+**下一步**:据此进入 P1(macOS MVP,见 §8)。转发桥可行性已消除,P1 不再有未验证的技术赌注。
 
 ---
 

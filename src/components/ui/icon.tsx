@@ -76,6 +76,7 @@ export {
   SortDescending,
   Sparkle,
   SpinnerGap,
+  ShieldCheck,
   Star,
   Stethoscope,
   Stop,

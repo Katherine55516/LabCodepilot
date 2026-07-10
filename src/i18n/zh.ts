@@ -1618,6 +1618,11 @@ const zh: Record<TranslationKey, string> = {
   'permission.fullAccessWarning': '完全访问模式将自动批准此对话的所有权限请求，包括文件写入、命令执行等潜在危险操作。确定要开启吗？',
   'permission.sessionPermission': '对话权限',
 
+  // ── Sandbox (Cowork POC) ──────────────────────────────────
+  'sandbox.on': '沙箱',
+  'sandbox.off': '沙箱',
+  'sandbox.tooltip': '沙箱模式：AI 在隔离虚拟机内处理文件，不接触真机文件（实验功能）',
+
   // ── Context Usage ─────────────────────────────────────────
   'context.usage': '上下文占用',
   'context.model': '模型',

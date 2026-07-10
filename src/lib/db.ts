@@ -450,6 +450,12 @@ function migrateDb(db: Database.Database): void {
   if (!colNames.includes('permission_profile')) {
     safeAddColumn(db, "ALTER TABLE chat_sessions ADD COLUMN permission_profile TEXT NOT NULL DEFAULT 'default'");
   }
+  // Cowork POC: when 1, the SDK CLI runs inside an isolated VM (see
+  // scripts/poc/cowork). Gated behind the cowork_enabled setting; default 0
+  // keeps every existing session on the host runtime.
+  if (!colNames.includes('sandbox_enabled')) {
+    safeAddColumn(db, "ALTER TABLE chat_sessions ADD COLUMN sandbox_enabled INTEGER NOT NULL DEFAULT 0");
+  }
   if (!colNames.includes('context_summary')) {
     safeAddColumn(db, "ALTER TABLE chat_sessions ADD COLUMN context_summary TEXT NOT NULL DEFAULT ''");
   }
@@ -1273,6 +1279,17 @@ export function updateSessionEffort(id: string, effort: string): void {
 export function updateSessionPermissionProfile(id: string, profile: string): void {
   const db = getDb();
   db.prepare('UPDATE chat_sessions SET permission_profile = ? WHERE id = ?').run(profile, id);
+}
+
+// Cowork POC: flip the sandbox execution target. Toggling MUST clear
+// sdk_session_id — the SDK session file lives on whichever machine last ran
+// the CLI (host vs VM), so a resume across the boundary would fail. Clearing
+// forces the next message to start a fresh SDK session; conversation context
+// is preserved via the existing conversationHistory replay path.
+export function updateSessionSandboxEnabled(id: string, enabled: boolean): void {
+  const db = getDb();
+  db.prepare('UPDATE chat_sessions SET sandbox_enabled = ?, sdk_session_id = ? WHERE id = ?')
+    .run(enabled ? 1 : 0, '', id);
 }
 
 // ==========================================

@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { deleteSession, getSession, updateSessionWorkingDirectory, updateSessionTitle, updateSessionMode, updateSessionModel, updateSessionProviderId, clearSessionMessages, updateSdkSessionId, updateSessionPermissionProfile, updateSessionEffort } from '@/lib/db';
+import { deleteSession, getSession, updateSessionWorkingDirectory, updateSessionTitle, updateSessionMode, updateSessionModel, updateSessionProviderId, clearSessionMessages, updateSdkSessionId, updateSessionPermissionProfile, updateSessionEffort, updateSessionSandboxEnabled } from '@/lib/db';
 import { autoApprovePendingForSession } from '@/lib/bridge/permission-broker';
 
 export async function GET(
@@ -89,6 +89,12 @@ export async function PATCH(
           console.warn('[session-api] Failed to auto-approve pending permissions:', err);
         }
       }
+    }
+    if (body.sandbox_enabled !== undefined) {
+      // Cowork POC toggle. updateSessionSandboxEnabled also clears
+      // sdk_session_id (execution target changed → resume across the VM
+      // boundary would fail).
+      updateSessionSandboxEnabled(id, !!body.sandbox_enabled);
     }
     if (body.clear_messages) {
       clearSessionMessages(id);
