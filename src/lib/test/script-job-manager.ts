@@ -131,7 +131,7 @@ function acquireLock(request: ScriptJobRequest): { close: () => void } {
       if (ownerDead || age > 30 * 60_000) fs.unlinkSync(file);
       fd = tryOpen();
     } catch {
-      throw new Error('script generation is already running');
+      throw new Error('脚本任务正在运行中，请稍候再试');
     }
   }
   fs.writeFileSync(fd, JSON.stringify({ pid: process.pid, jobKey: jobKey(request.projectPath, request.taskName, request.env, request.runHash), time: new Date().toISOString() }));
@@ -189,7 +189,7 @@ function currentInputs(request: ScriptJobRequest): {
 } {
   const p = artifactPaths(request.taskName, request.env);
   const runContent = fs.readFileSync(path.join(request.projectPath, p.runJson), 'utf-8');
-  if (sha1Hex(runContent) !== request.runHash) throw new Error('superseded by a newer execution');
+  if (sha1Hex(runContent) !== request.runHash) throw new Error('已被更新的一轮执行取代（superseded）');
   const run = JSON.parse(runContent) as RunJson;
   const casesRaw = parseCaseFile(path.join(request.projectPath, artifactPaths(request.taskName).cases));
   const trace = readTraceFile(request.projectPath, request.taskName, request.env);
@@ -258,7 +258,7 @@ async function validateAndPublish(params: {
       redactions,
     };
     const collected = await runGeneratedScript({ ...runnerBase, collectOnly: true, timeoutMs: 30_000 });
-    if (!collected.ok) return failed(`Playwright collection failed: ${collected.output.slice(-1000)}`, staticCheck.warnings);
+    if (!collected.ok) return failed(`Playwright 加载校验失败: ${collected.output.slice(-1000)}`, staticCheck.warnings);
 
     const safeReplay = isSafeForAutomaticReplay(candidate.testCase);
     let replayed = false;
@@ -266,7 +266,7 @@ async function validateAndPublish(params: {
     if (safeReplay) {
       const replay = await runGeneratedScript({ ...runnerBase, collectOnly: false, timeoutMs: 120_000 });
       replayed = replay.ok;
-      if (!replay.ok) replayError = `Playwright replay failed: ${replay.output.slice(-1000)}`;
+      if (!replay.ok) replayError = `Playwright 自动重放失败: ${replay.output.slice(-1000)}`;
     }
     if (safeReplay && !replayed) return failed(replayError, staticCheck.warnings);
 
@@ -288,9 +288,9 @@ async function validateAndPublish(params: {
         replayed,
         warnings: [
           ...staticCheck.warnings,
-          ...(candidate.usesMock ? ['execution used browser_route mock'] : []),
-          ...(!safeReplay ? ['automatic replay skipped because the case may mutate business data without cleanup'] : []),
-          ...(candidate.sourceMissing ? ['regression-library source mapping was missing; script kept under the synthetic task'] : []),
+          ...(candidate.usesMock ? ['执行时使用了接口模拟（browser_route mock），需人工确认真实环境可通过'] : []),
+          ...(!safeReplay ? ['已跳过自动重放：用例含写操作且未声明 cleanup 清理方式，请人工运行确认（或给用例补 cleanup 字段）'] : []),
+          ...(candidate.sourceMissing ? ['回归用例库来源映射缺失，脚本暂存于聚合任务目录'] : []),
         ],
       },
     };
@@ -308,7 +308,7 @@ async function generateMissing(
 ): Promise<Map<string, ScriptManifestCase>> {
   const result = new Map<string, ScriptManifestCase>();
   for (let i = 0; i < candidates.length; i += 5) {
-    if (abortSignal.aborted) throw new Error('script generation aborted');
+    if (abortSignal.aborted) throw new Error('脚本生成已中止（被更新的任务取代）');
     const batch = candidates.slice(i, i + 5);
     let generated = await generateScriptsBatch({
       candidates: batch,
@@ -319,7 +319,7 @@ async function generateMissing(
     });
     const generatedIds = new Set(generated.map((g) => g.caseId));
     for (const missing of batch.filter((candidate) => !generatedIds.has(candidate.id))) {
-      if (abortSignal.aborted) throw new Error('script generation aborted');
+      if (abortSignal.aborted) throw new Error('脚本生成已中止（被更新的任务取代）');
       const retry = await generateScriptsBatch({
         candidates: [missing],
         model: request.model,
@@ -341,8 +341,8 @@ async function generateMissing(
           status: previousById.has(candidate.id) && fs.existsSync(candidateFinalFile(request, candidate)) ? 'outdated' : 'failed',
           usesMock: candidate.usesMock,
           lastSeenRunHash: request.runHash,
-          error: 'generator omitted the eligible case after retry',
-          validation: { syntax: false, collected: false, replayed: false, warnings: [], error: 'generator omitted the eligible case after retry' },
+          error: 'AI 重试后仍未返回该用例的脚本',
+          validation: { syntax: false, collected: false, replayed: false, warnings: [], error: 'AI 重试后仍未返回该用例的脚本' },
         });
         continue;
       }
@@ -371,7 +371,7 @@ async function executeJob(entry: QueueEntry): Promise<void> {
     const inputs = currentInputs(request);
     const selection = selectEligibleCases(inputs.casesRaw, inputs.run, inputs.traceActions, manifest.runtimeVersion);
     if (selection.errors.length) throw new Error(selection.errors.join('; '));
-    if (selection.blockedReason === 'circuit_broken') throw new Error('execution circuit breaker is active; script generation skipped');
+    if (selection.blockedReason === 'circuit_broken') throw new Error('执行阶段熔断已触发，跳过脚本生成');
     const eligible = request.taskName === REGRESSION_LIBRARY_TASK
       ? retargetLibraryCandidates(
           selection.eligible,
@@ -559,7 +559,7 @@ export async function repairFailedScripts(request: RepairRequest): Promise<{
   manifest: ScriptManifest;
 }> {
   const manifest = readManifest(request.projectPath, request.taskName, request.env);
-  if (!manifest) throw new Error('script manifest not found');
+  if (!manifest) throw new Error('尚未生成脚本清单（manifest）');
   const jobRequest: ScriptJobRequest = {
     projectPath: request.projectPath,
     taskName: request.taskName,
@@ -572,7 +572,7 @@ export async function repairFailedScripts(request: RepairRequest): Promise<{
   const lock = acquireLock(jobRequest);
   try {
     const results = await repairScriptCases(jobRequest, manifest, request.caseIds);
-    if (!results.length) throw new Error('no failed script runs to repair');
+    if (!results.length) throw new Error('没有需要修复的运行失败脚本');
     manifest.counts = manifestCounts(manifest.cases, manifest.counts.eligible);
     manifest.jobStatus = manifest.counts.failed > 0 ? 'partial' : 'done';
     writeManifest(request.projectPath, request.taskName, request.env, manifest);
@@ -592,7 +592,7 @@ export async function runScripts(request: RepairRequest): Promise<{
   manifest: ScriptManifest;
 }> {
   const manifest = readManifest(request.projectPath, request.taskName, request.env);
-  if (!manifest) throw new Error('script manifest not found');
+  if (!manifest) throw new Error('尚未生成脚本清单（manifest）');
   const jobRequest: ScriptJobRequest = {
     projectPath: request.projectPath, taskName: request.taskName, env: request.env,
     runHash: manifest.latestRunHash, model: request.model, providerId: request.providerId,
@@ -600,7 +600,7 @@ export async function runScripts(request: RepairRequest): Promise<{
   const lock = acquireLock(jobRequest);
   try {
     const results = await runScriptCases(jobRequest, manifest, request.caseIds);
-    if (!results.length) throw new Error('no runnable scripts selected');
+    if (!results.length) throw new Error('没有可运行的脚本');
     manifest.counts = manifestCounts(manifest.cases, manifest.counts.eligible);
     manifest.jobStatus = manifest.counts.failed > 0 ? 'partial' : 'done';
     writeManifest(request.projectPath, request.taskName, request.env, manifest);
@@ -634,10 +634,10 @@ async function runScriptCases(
       results.push({ caseId: item.caseId, ok: false, output: reason, timedOut: false });
     };
     const ownerTask = item.sourceTask ?? jobRequest.taskName;
-    if (isUnsafeSegment(ownerTask)) { fail('script owner is invalid'); continue; }
+    if (isUnsafeSegment(ownerTask)) { fail('脚本归属任务名非法'); continue; }
     const root = scriptsDir(jobRequest.projectPath, ownerTask, jobRequest.env);
     const file = path.resolve(root, item.file);
-    if (!file.startsWith(path.resolve(root) + path.sep) || !fs.existsSync(file)) { fail('script file missing'); continue; }
+    if (!file.startsWith(path.resolve(root) + path.sep) || !fs.existsSync(file)) { fail('脚本文件不存在，请先重试生成'); continue; }
     const result = await runGeneratedScript({
       scriptFile: file,
       baseUrl: resolved.frontendBaseUrl,
@@ -864,7 +864,7 @@ export async function runPipelineForTask(request: {
   model?: string; providerId?: string; maxRepairRounds?: number;
 }): Promise<{ summary: PipelineSummary; manifest: ScriptManifest }> {
   const manifest = readManifest(request.projectPath, request.taskName, request.env);
-  if (!manifest) throw new Error('script manifest not found');
+  if (!manifest) throw new Error('尚未生成脚本清单（manifest）');
   const jobRequest: ScriptJobRequest = {
     projectPath: request.projectPath, taskName: request.taskName, env: request.env,
     runHash: manifest.latestRunHash, model: request.model, providerId: request.providerId,

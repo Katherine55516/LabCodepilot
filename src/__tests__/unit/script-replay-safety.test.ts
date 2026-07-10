@@ -85,7 +85,7 @@ describe('summarizeRunFailure', () => {
   });
 
   it('超时优先于输出内容', () => {
-    assert.equal(summarizeRunFailure('whatever\nError: boom', true), 'script run timed out');
+    assert.equal(summarizeRunFailure('whatever\nError: boom', true), '脚本运行超时');
   });
 
   it('无网络错误时取第一条 Error 行', () => {
@@ -98,7 +98,7 @@ describe('summarizeRunFailure', () => {
   });
 
   it('空输出不抛异常，给出兜底文案', () => {
-    assert.equal(summarizeRunFailure('', false), 'script run failed');
+    assert.equal(summarizeRunFailure('', false), '脚本运行失败');
   });
 
   it('截断到 300 字符，避免整段报告塞进卡片', () => {

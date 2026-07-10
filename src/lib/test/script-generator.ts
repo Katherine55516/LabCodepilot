@@ -170,7 +170,7 @@ function parseJsonResult(text: string): unknown {
   const start = trimmed.indexOf('{');
   const end = trimmed.lastIndexOf('}');
   if (start >= 0 && end > start) return JSON.parse(trimmed.slice(start, end + 1));
-  throw new Error('generator returned invalid JSON');
+  throw new Error('AI 返回的内容不是有效 JSON');
 }
 
 /**

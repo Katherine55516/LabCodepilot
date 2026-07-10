@@ -16,32 +16,32 @@ const ALLOWED_ENV = new Set(['BASE_URL', 'TEST_USERNAME', 'TEST_PASSWORD']);
 export function validateScriptSource(source: string, expectedCaseId: string): StaticScriptValidation {
   const warnings: string[] = [];
   const errors: string[] = [];
-  if (!source.trim()) errors.push('empty script');
-  if (Buffer.byteLength(source, 'utf-8') > 64 * 1024) errors.push('script exceeds 64KB');
-  if (!/from\s+["']playwright\/test["']/.test(source)) errors.push('script must import from playwright/test');
-  if (FORBIDDEN_IMPORT.test(source)) errors.push('forbidden Node.js module import');
+  if (!source.trim()) errors.push('脚本内容为空');
+  if (Buffer.byteLength(source, 'utf-8') > 64 * 1024) errors.push('脚本超过 64KB 大小上限');
+  if (!/from\s+["']playwright\/test["']/.test(source)) errors.push('脚本必须 import { test, expect } from "playwright/test"');
+  if (FORBIDDEN_IMPORT.test(source)) errors.push('禁止 import Node.js 系统模块（fs/child_process 等）');
   for (const match of source.matchAll(MODULE_REFERENCE)) {
-    if (match[1] !== 'playwright/test') errors.push(`module import is not allowed: ${match[1]}`);
+    if (match[1] !== 'playwright/test') errors.push(`不允许 import 该模块: ${match[1]}`);
   }
-  if (/\b(?:eval|Function|fetch)\s*\(/.test(source)) errors.push('dynamic code or direct network access is forbidden');
-  if (/(?:["'`])https?:\/\//i.test(source)) errors.push('absolute network URL is forbidden');
+  if (/\b(?:eval|Function|fetch)\s*\(/.test(source)) errors.push('禁止动态代码执行或直连网络（eval/Function/fetch）');
+  if (/(?:["'`])https?:\/\//i.test(source)) errors.push('禁止硬编码绝对网络地址，应使用相对 URL 或 BASE_URL');
   for (const match of source.matchAll(/\bprocess\.env\.([A-Za-z_][A-Za-z0-9_]*)/g)) {
-    if (!ALLOWED_ENV.has(match[1])) errors.push(`environment variable is not allowed: ${match[1]}`);
+    if (!ALLOWED_ENV.has(match[1])) errors.push(`不允许读取该环境变量: ${match[1]}`);
   }
-  if (SECRET_PATTERN.test(source)) errors.push('script appears to contain a secret');
-  if (ABSOLUTE_PATH.test(source)) errors.push('script contains an absolute user path');
-  if (/\btest\s*\.\s*(?:only|skip|fixme)\s*\(/.test(source)) errors.push('test.only/skip/fixme is forbidden');
-  if (!/\btest\s*\(/.test(source)) errors.push('script must contain one test()');
-  if ((source.match(/\btest\s*\(/g) ?? []).length !== 1) errors.push('script must contain exactly one test()');
-  if (!/\bexpect\s*\(/.test(source)) errors.push('script must contain at least one expect()');
+  if (SECRET_PATTERN.test(source)) errors.push('脚本疑似包含密钥/凭证，禁止写入真实秘密');
+  if (ABSOLUTE_PATH.test(source)) errors.push('脚本包含本机绝对路径');
+  if (/\btest\s*\.\s*(?:only|skip|fixme)\s*\(/.test(source)) errors.push('禁止使用 test.only/skip/fixme');
+  if (!/\btest\s*\(/.test(source)) errors.push('脚本必须包含 test()');
+  if ((source.match(/\btest\s*\(/g) ?? []).length !== 1) errors.push('每个脚本必须恰好一个 test()');
+  if (!/\bexpect\s*\(/.test(source)) errors.push('脚本至少要有一个 expect() 断言');
   const testTitle = /\btest\s*\(\s*(["'`])([^\r\n]*?)\1/.exec(source)?.[2] ?? '';
-  if (!testTitle.includes(expectedCaseId)) errors.push('script title must contain the case id');
-  if (/\bref\s*[:=]\s*["']e\d+/i.test(source)) errors.push('ephemeral MCP ref is forbidden');
+  if (!testTitle.includes(expectedCaseId)) errors.push('test 标题必须包含用例 ID');
+  if (/\bref\s*[:=]\s*["']e\d+/i.test(source)) errors.push('禁止使用临时 MCP ref 定位（e12 之类不可重放）');
 
-  if (/\.locator\(\s*["']\s*(?:\/\/|xpath=|\/html|html\s*>)/i.test(source)) warnings.push('xpath/absolute selector requires review');
-  if (/\.nth\s*\(/.test(source)) warnings.push('nth locator requires review');
-  if (/\.waitForTimeout\s*\(/.test(source)) warnings.push('fixed timeout requires review');
-  if (!/getBy(?:TestId|Role|Label|Text|Placeholder)\s*\(/.test(source)) warnings.push('no semantic locator found');
+  if (/\.locator\(\s*["']\s*(?:\/\/|xpath=|\/html|html\s*>)/i.test(source)) warnings.push('使用了 xpath/绝对选择器，需人工复核');
+  if (/\.nth\s*\(/.test(source)) warnings.push('使用了 nth 序号定位，需人工复核');
+  if (/\.waitForTimeout\s*\(/.test(source)) warnings.push('使用了固定等待 waitForTimeout，需人工复核');
+  if (!/getBy(?:TestId|Role|Label|Text|Placeholder)\s*\(/.test(source)) warnings.push('未使用语义化定位器（getByTestId/Role/Label 等）');
 
   const transpiled = ts.transpileModule(source, {
     compilerOptions: {

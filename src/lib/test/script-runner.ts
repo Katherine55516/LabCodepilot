@@ -49,7 +49,7 @@ export function resolveScriptPlaywrightRuntime(): RuntimeInfo {
       : []),
   ];
   const nested = candidates.find((candidate) => fs.existsSync(path.join(candidate, 'cli.js')));
-  if (!nested) throw new Error('Playwright runtime bundled with @playwright/mcp was not found');
+  if (!nested) throw new Error('未找到 @playwright/mcp 自带的 Playwright 运行时');
   let version = 'unknown';
   try { version = JSON.parse(fs.readFileSync(path.join(nested, 'package.json'), 'utf-8')).version || version; } catch { /* ignore */ }
   return { packageRoot: nested, cli: path.join(nested, 'cli.js'), version };
@@ -206,12 +206,12 @@ export async function runGeneratedScript(opts: ScriptRunnerOptions): Promise<Scr
  * `output` is already redacted by runGeneratedScript.
  */
 export function summarizeRunFailure(output: string, timedOut: boolean): string {
-  if (timedOut) return 'script run timed out';
+  if (timedOut) return '脚本运行超时';
   const lines = output.split('\n').map((line) => line.trim()).filter(Boolean);
   const picked =
     lines.find((line) => /net::ERR_[A-Z_]+/.test(line))
     ?? lines.find((line) => /^(?:\d+\)\s*)?(?:\w*Error):/.test(line))
     ?? lines.find((line) => /\bError:/.test(line))
     ?? lines[lines.length - 1];
-  return (picked ?? 'script run failed').slice(0, 300);
+  return (picked ?? '脚本运行失败').slice(0, 300);
 }
