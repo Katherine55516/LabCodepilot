@@ -145,13 +145,17 @@
 | POST `/api/test/suites/eval` | 构建器【未保存】套件实时命中预览(口径与发起执行完全一致)。 |
 | GET `/api/test/reports` | 扫描下钻轮次子目录(跳过 `.history`),条目透传 `roundId`。 |
 
-## UI(InlineTestingPanel,四个弹窗)
+## UI(InlineTestingPanel,批 H 页面化后)
 
-- **RegressionLibraryModal**(v1 升级):头部加「轮次历史」「回归套件」入口;「一键重跑」改开发起弹窗;检索工具条(搜索 ID/标题+来源任务/优先级过滤,纯前端,空组隐藏+命中计数);修复 `status-danger-*`→`status-error-*`(未定义 token,删除 hover 红色此前静默失效)。
-- **RegressionSuitesModal**:套件列表(内置全量🔒+类型 badge+实时命中+编辑/删除)+构建器(名称/类型 radio/查询条件 chips 四字段 300ms 防抖实时预览/静态分组勾选树组全选)+pinned 白名单查看与勾选树编辑。
-- **StartRegressionModal**:套件下拉(命中数)/环境下拉(env-config allowedEnvs)/被测地址展示(未配置警示)/预检卡(条数+任务数+近 3 个 done 轮均值时长估算,无历史显「暂无估算」)/红线说明/空套件禁用。确认→`runLibrary({suiteName, env})`。
-- **RegressionRoundsModal**:轮次表(时间/环境/套件/红线 badge/中断态/单轮删除)+行内展开详情(delta 三卡+任务分组红绿小计)。
+**信息架构(用户 2026-07-10 拍板)**:项目下两种**平级测试类型**——「功能测试」(现有任务四步流,交互不变)与「回归测试」(整页工作区)。项目头是分段式类型切换;「新建任务」仅功能测试显示;切换项目时类型/子页签重置。
+
+- **RegressionWorkspace**(回归测试整页):子页签 用例库/回归套件/轮次历史 + 右侧「发起回归」主按钮 + 运行状态行。三个区块由原 v2 弹窗内容页面化(卡片容器,无遮罩),数据链路不变:
+  - **RegressionLibrarySection**:摘要条(N 条·M 任务)+检索工具条(搜索 ID/标题+来源任务/优先级过滤,纯前端)+按任务分组列表与移除;
+  - **RegressionSuitesSection**:套件列表(内置全量🔒+类型 badge+实时命中+编辑/删除)+构建器(查询条件 chips 四字段 300ms 防抖实时预览/静态分组勾选树)+pinned 白名单;
+  - **RegressionRoundsSection**:轮次表(红线 badge/中断态/单轮删除)+行内展开详情(delta 三卡+任务分组红绿小计);reloadSignal 联动,跑完一轮自动刷新。
+- **StartRegressionModal**(唯一保留的对话框——一次性执行确认):套件下拉(命中数)/环境下拉(env-config allowedEnvs)/被测地址展示(未配置警示)/预检卡(条数+任务数+近 3 个 done 轮均值时长估算,无历史显「暂无估算」)/红线说明/空套件禁用。确认→`runLibrary({suiteName, env})`。
 - runLibrary(面板):发起带 suiteName/env→驱动 /api/test/run 带 roundId→完成 PATCH done/失败 PATCH aborted(读侧惰性兜底)。
+- 附带修复:`status-danger-*`→`status-error-*`(未定义 token,删除 hover 红色此前静默失效);next.config dev watch 忽略 `.playwright-mcp/`(见下方排障记,根治 CDP 验证时的重编译死循环)。
 
 ## i18n / 审计
 
@@ -169,4 +173,4 @@
 - 预检 **token 估算未做**(方案含此项):现状无按轮 token 数据源,一期仅时长估算;待 usage-stats 打通后补。
 - 复测轮(failed-only)/评审门禁/缺陷闭环/rev 版本号=二期;健康度/隔离区/stats=三期(quarantined 排除已前置兼容)。
 - 旧平铺重跑产物兼容显示、不折算轮次(设计默认 #3)。
-- dev 排障记:playwright MCP 往仓库根写 `.playwright-mcp/` 会触发 Tailwind/webpack 监听重编译死循环——验证时把该目录软链到仓库外。
+- dev 排障记:playwright MCP 往仓库根写 `.playwright-mcp/` 会触发 Tailwind/webpack 监听重编译死循环(表象:页面永远转圈、Fast Refresh 每 0.5s rebuilding、大 chunk 下载中被截断报 SyntaxError/ChunkLoadError)。已在 next.config.ts 的 dev webpack watchOptions.ignored 根治(注意:Next 默认 ignored 是 RegExp,不能把 RegExp 塞进 webpack 的字符串数组,按类型合并)。
