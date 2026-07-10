@@ -562,6 +562,11 @@ const zh: Record<TranslationKey, string> = {
   'test.scripts.loadFailed': '脚本读取失败',
   'test.scripts.output': '运行输出',
   'test.scripts.runFailed': '{n} 个脚本运行失败：{reason}',
+  'test.scripts.repair': 'AI 修复',
+  'test.scripts.repairResult': 'AI 修复：成功 {fixed}/{total}',
+  'test.scripts.pipeline': '自动跑通',
+  'test.scripts.pipelineHint': '自动运行全部脚本，失败则 AI 修复后重跑，直至全部可修复的通过',
+  'test.scripts.pipelineResult': '自动跑通：通过 {passed} · 需人工 {human} · 环境阻塞 {blocked} · 未修复 {failing}',
   'nav.imageStudio': '文生图',
 
   // ── 文生图（独立模块）──────────────────────────────────────

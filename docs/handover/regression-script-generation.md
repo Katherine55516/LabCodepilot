@@ -1,5 +1,7 @@
 # 成功回归用例自动沉淀 Playwright 脚本
 
+> 产品思考见 [docs/insights/regression-script-generation.md](../insights/regression-script-generation.md)
+
 ## 目标与边界
 
 现有测试流程仍只有 `requirement → cases → execution → report` 四个节点。报告流确认报告文件已成功写出后，后台为本轮同时满足以下条件的用例生成一个独立 TypeScript Playwright 脚本：
@@ -67,14 +69,27 @@ manifest job 状态：`queued/running/done/partial/error/stale`；单用例状�
 ## API 与 UI
 
 - `GET /api/test/scripts`：读 manifest；带 `caseId` 时返回经根目录校验后的脚本文本；同时恢复落盘的 queued/超时 running job。
-- `POST /api/test/scripts/retry`：按当前 run hash 重试全部缺口或指定 case ID。
-- `POST /api/test/scripts/run`：运行指定/全部 `verified|needs_review` 脚本，回写验证时间和审计。
+- `POST /api/test/scripts/retry`：按当前 run hash 重试全部缺口或指定 case ID。**盲目重新生成**——不读失败原因，旧脚本被丢弃。
+- `POST /api/test/scripts/run`：运行指定/全部 `verified|needs_review` 脚本。跑通→提升 `verified` 并清 `lastRunError`；失败→**不降级 status**（脚本可能没问题、只是被测应用没起），把 `summarizeRunFailure` 提炼的一行原因写入 `lastRunError/lastRunAt` 持久化。
+- `POST /api/test/scripts/repair`：**AI 修复**（手动单点）。把 `lastRunError` + 当前脚本 + 原用例喂回模型定向修（`repairScriptsBatch`），修复稿走生成同款校验/重放管线（`validateAndPublish`），全部通过才原子覆盖旧文件；未通过则旧脚本原样保留。与生成共用 `.generation.lock`。**红线**：prompt 要求只修技术缺陷（定位器/等待/前置），断言如实失败（页面行为 ≠ 用例预期）时必须 `fixed=false` 并给出测试人员能懂的解释——该解释持久化到 `repairNote`，防止"修复"掩盖真缺陷。生成期失败（无落盘脚本）不归 repair 管，走 retry。
+- `POST /api/test/scripts/pipeline`：**自动跑通流水线**（`runPipelineForTask`）。运行→失败自动修→再跑，直至全部可修复的脚本通过。入口先探测被测应用可达性（`isSutReachable` 打 `frontendBaseUrl`，4s 超时），不可达直接报错。**终止条件**（`runAndRepairLoop`，`DEFAULT_MAX_REPAIR_ROUNDS=3` 兜底）：① 没有可修复的失败了；② 轮次上限；③ 每条用例只给**一次**定向修复机会——一次带确切失败原因的修复仍跑不通就 park 为「需人工」，不管模型自评 fixed 与否（结构性重跑守红线，不信模型嘴上说的）。**分类**：环境问题（连接被拒，`isEnvironmentFailure`）→ 不喂 AI、归「环境阻塞」；如实失败/修不好 → 归「需人工」并覆盖乐观 repairNote 讲真话。**自动触发**：报告流 `enqueueScriptJob({runPipeline:true})`，生成后在 `executeJob` 内（持锁）接着跑；被测应用不可达则跳过运行、只停在生成态。best-effort：流水线抛错落终态、不抹掉已生成脚本、不卡 `running`。
 
-`ReportStepPanel` 的“产出资料”新增第四张“回归自动化脚本”卡，queued/running 每 2 秒轮询；可查看脚本和每条状态、重试缺口、运行单条或全部。它不是流程节点。
+`ReportStepPanel` 的“产出资料”新增第四张“回归自动化脚本”卡，queued/running 每 2 秒轮询；可查看脚本和每条状态、重试缺口、运行单条或全部。运行失败时卡片红字显示 `N 个脚本运行失败：<原因>` 并出现「AI 修复」按钮；脚本弹框内按条显示 `lastRunError`（红）与 `repairNote`（蓝），可单条修复。它不是流程节点。
+
+## 生成/校验的关键决策（按踩坑顺序）
+
+- `generateTextViaSdk` 超时参数化：批量 5 条完整 Playwright 文件 60s 必超时，按 `max(120s, n×60s)` 传入。
+- SDK result 判读（`interpretSdkResult`）：`outputFormat: json_schema` 的结果在 `structured_output` 而非 `result`；error subtype 无 `result` 字段；`success + is_error` 是错误包不是答案；CLI 退出码 0 可静默结束流→用 assistant 文本兜底并透传 stderr。
+- `normalizePlaywrightImport`：模型惯写 `@playwright/test`，但 runner 只 symlink 了 MCP 自带的 `playwright` 包（该包只依赖 playwright-core），`@playwright/test` 不可解析——校验前确定性重写为 `playwright/test`（语义等价，`playwright/test.js` 重导出同套 test/expect）。禁止反向放宽校验。
+- `isSafeForAutomaticReplay` 只扫 `steps[].content`（动作），不扫 expected/purpose——否则「+ 新建学科」这类按钮名会把只读用例误判成写操作、永久挡在自动验证外。无结构化 steps 时保守回退扫全文。
+- 生成 prompt 要求定位器唯一：`getByRole/getByText` 传字符串 name 必须 `{ exact: true }`（Playwright 默认子串匹配，列表卡片文案极易撞词造成 strict mode violation）；不许用 `.first()` 掩盖歧义。
+- `.generation.lock` 僵尸锁判定：除 30 分钟兜底外，额外检查锁记录的 `pid` 是否存活（`process.kill(pid,0)`）——桌面应用被强退/崩溃留下的锁，持有进程已死即立刻抢占，不必等 30 分钟堵死后续任务。
+- 运行/修复核心（`runScriptCases`/`repairScriptCases`）抽成 lock-free，手动路由（自持锁）与自动流水线（在 `executeJob` 锁内）共用同一份逻辑；`run`/`repair`/`pipeline` 三个手动路由各自 `acquireLock`，与后台生成互斥。
 
 ## 运维与验证
 
 - 开发态运行 UI 前若刚执行过 Electron 打包，先 `npm rebuild better-sqlite3` 恢复 Node ABI。
 - 打包流程的 `after-pack.js` 会再把 better-sqlite3 重编译为 Electron ABI。
-- 定向测试：`src/__tests__/unit/test-script-generation.test.ts`、`test-exec-stream.test.ts`。
+- 定向测试：`src/__tests__/unit/test-script-generation.test.ts`、`test-exec-stream.test.ts`、`sdk-result-interpret.test.ts`（SDK 四种 result 形态）、`script-import-normalize.test.ts`（import 归一化端到端契约）、`script-replay-safety.test.ts`（重放安全判定 + 失败摘要）、`script-repair.test.ts`（AI 修复载荷红线）、`script-pipeline-classify.test.ts`（环境失败分类器）。
+- 流水线端到端真机验证（打包版 + live SUT，两轮）：① R02 注入定位器歧义 → AI 自动诊断补 `exact:true` → 重跑通过（`verified`）；R03 断言如实失败（页面不禁用按钮） → 1 轮内判「需人工」、覆盖乐观 repairNote 讲真话、不 force-pass；终态 `partial` 不卡死。② 证实每条用例只 1 次修复机会、环境不可达跳过、孤儿锁按 pid 存活抢占。
 - 关键检查：同 run 重复报告不改 manifest；相同语义不改脚本 mtime；trace/脚本/输出无真实秘密和本机路径；Next dev 与 standalone 均能解析 MCP 配套 runtime/browser。

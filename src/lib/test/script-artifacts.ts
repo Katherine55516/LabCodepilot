@@ -40,6 +40,12 @@ export interface ScriptManifestCase {
    */
   lastRunError?: string;
   lastRunAt?: string;
+  /**
+   * Outcome of the last AI repair attempt, phrased for testers who don't code:
+   * what was fixed, or why the failure is NOT a script defect (e.g. the page's
+   * real behaviour contradicts the case's expected result) and needs a human.
+   */
+  repairNote?: string;
 }
 
 export interface ScriptManifest {

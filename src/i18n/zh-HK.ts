@@ -571,6 +571,11 @@ const zhHK: Record<TranslationKey, string> = {
   'test.scripts.loadFailed': '腳本讀取失敗',
   'test.scripts.output': '運行輸出',
   'test.scripts.runFailed': '{n} 個腳本運行失敗：{reason}',
+  'test.scripts.repair': 'AI 修復',
+  'test.scripts.repairResult': 'AI 修復：成功 {fixed}/{total}',
+  'test.scripts.pipeline': '自動跑通',
+  'test.scripts.pipelineHint': '自動運行全部腳本，失敗則 AI 修復後重跑，直至全部可修復的通過',
+  'test.scripts.pipelineResult': '自動跑通：通過 {passed} · 需人工 {human} · 環境阻塞 {blocked} · 未修復 {failing}',
   'nav.imageStudio': '文生圖',
 
   // ── 文生圖（獨立模塊）──────────────────────────────────────

@@ -564,6 +564,11 @@ const en = {
   'test.scripts.loadFailed': 'Failed to load script',
   'test.scripts.output': 'Run output',
   'test.scripts.runFailed': '{n} script(s) failed to run: {reason}',
+  'test.scripts.repair': 'AI fix',
+  'test.scripts.repairResult': 'AI fix: {fixed}/{total} repaired',
+  'test.scripts.pipeline': 'Auto-pass',
+  'test.scripts.pipelineHint': 'Run all scripts; on failure, AI repairs and re-runs until every fixable script passes',
+  'test.scripts.pipelineResult': 'Auto-pass: {passed} passed · {human} need human · {blocked} env-blocked · {failing} unfixed',
   'nav.imageStudio': 'Image',
 
   // ── Image Studio (standalone text-to-image) ─────────────────

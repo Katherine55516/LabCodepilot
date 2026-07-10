@@ -133,6 +133,8 @@ interface ScriptManifestCaseView {
   /** 最近一次手动运行的失败原因（运行失败不改 status，故卡片只能靠它显示"为什么没变绿"）。 */
   lastRunError?: string;
   lastRunAt?: string;
+  /** 最近一次 AI 修复的结论（修了什么 / 为什么不是脚本缺陷），写给不会写代码的测试人员。 */
+  repairNote?: string;
 }
 interface ScriptManifestView {
   latestRunHash: string;
@@ -3444,6 +3446,65 @@ function ReportStepPanel({
     }
   };
 
+  // AI 修复：把 lastRunError 喂回模型定向修脚本（测试人员不写代码，这是失败后唯一
+  // 不需要人手改 .spec.ts 的出路）。修复稿走生成同款校验/重放管线，失败不动旧文件。
+  const repairScripts = async (caseIds?: string[]) => {
+    setScriptBusy(true);
+    try {
+      const res = await fetch("/api/test/scripts/repair", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectPath, taskName, env, caseIds, model: model || undefined, providerId: providerId || undefined }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "repair failed");
+      if (data.manifest) setScriptManifest(data.manifest as ScriptManifestView);
+      const results = Array.isArray(data.results) ? data.results as Array<{ fixed?: boolean; reason?: string }> : [];
+      const fixed = results.filter((item) => item.fixed).length;
+      const firstUnfixed = results.find((item) => !item.fixed)?.reason;
+      showToast({
+        type: data.ok ? "success" : "warning",
+        message: `${t("test.scripts.repairResult", { fixed, total: results.length })}${firstUnfixed ? `：${firstUnfixed.slice(0, 120)}` : ""}`,
+      });
+    } catch (error) {
+      showToast({ type: "error", message: error instanceof Error ? error.message : t("test.scripts.error") });
+    } finally {
+      setScriptBusy(false);
+      setScriptReloadTick((n) => n + 1);
+    }
+  };
+
+  // 自动跑通：一键触发「运行→失败自动修→再跑」流水线，直至全部可修复脚本通过。
+  // 断言如实失败/环境阻塞的用例被诚实标出，不 force-pass。同步接口，分钟级返回。
+  const runPipeline = async () => {
+    setScriptBusy(true);
+    try {
+      const res = await fetch("/api/test/scripts/pipeline", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectPath, taskName, env, model: model || undefined, providerId: providerId || undefined }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "pipeline failed");
+      if (data.manifest) setScriptManifest(data.manifest as ScriptManifestView);
+      const s = data.summary as { passed?: string[]; needsHuman?: string[]; environmentBlocked?: string[]; stillFailing?: string[] } | undefined;
+      showToast({
+        type: data.ok ? "success" : "warning",
+        message: t("test.scripts.pipelineResult", {
+          passed: s?.passed?.length ?? 0,
+          human: s?.needsHuman?.length ?? 0,
+          blocked: s?.environmentBlocked?.length ?? 0,
+          failing: s?.stillFailing?.length ?? 0,
+        }),
+      });
+    } catch (error) {
+      showToast({ type: "error", message: error instanceof Error ? error.message : t("test.scripts.error") });
+    } finally {
+      setScriptBusy(false);
+      setScriptReloadTick((n) => n + 1);
+    }
+  };
+
   const metric = (label: string, value: string, danger?: boolean) => (
     <div className="rounded-lg bg-muted/40 p-2.5">
       <div className="text-[10px] text-muted-foreground">{label}</div>
@@ -3666,8 +3727,18 @@ function ReportStepPanel({
                 </button>
               )}
               {scriptRunnable.length > 0 && !scriptWorking && (
+                <button onClick={() => void runPipeline()} disabled={scriptBusy} className={btnPrimary} title={t("test.scripts.pipelineHint")}>
+                  {scriptBusy ? <SpinnerGap size={12} className="animate-spin" /> : <Wrench size={12} />} {t("test.scripts.pipeline")}
+                </button>
+              )}
+              {scriptRunnable.length > 0 && !scriptWorking && (
                 <button onClick={() => void runScripts(scriptRunnable.map((item) => item.caseId))} disabled={scriptBusy} className={btnGhost}>
                   <Play size={12} /> {t("test.scripts.runAll")}
+                </button>
+              )}
+              {scriptRunFailures.length > 0 && !scriptWorking && (
+                <button onClick={() => void repairScripts(scriptRunFailures.map((item) => item.caseId))} disabled={scriptBusy} className={btnGhost}>
+                  <Wrench size={12} /> {t("test.scripts.repair")}
                 </button>
               )}
             </>,
@@ -3809,7 +3880,7 @@ function ScriptPreview({ t, projectPath, taskName, env, initialManifest, onChang
   const [selectedId, setSelectedId] = useState(initialManifest.cases[0]?.caseId ?? "");
   const [content, setContent] = useState<string | null>(null);
   const [contentError, setContentError] = useState(false);
-  const [busy, setBusy] = useState<"retry" | "run" | null>(null);
+  const [busy, setBusy] = useState<"retry" | "run" | "repair" | null>(null);
   const [output, setOutput] = useState("");
   const selected = manifest.cases.find((item) => item.caseId === selectedId) ?? manifest.cases[0];
 
@@ -3912,6 +3983,33 @@ function ScriptPreview({ t, projectPath, taskName, env, initialManifest, onChang
     }
   };
 
+  // AI 修复：仅对「有失败记录」的脚本开放。同步接口（LLM+校验+重放），完成后 manifest 直达终态。
+  const repairSelected = async () => {
+    if (!selected) return;
+    setBusy("repair");
+    setOutput("");
+    try {
+      const res = await fetch("/api/test/scripts/repair", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectPath, taskName, env, caseIds: [selected.caseId] }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "repair failed");
+      if (data.manifest) {
+        const next = data.manifest as ScriptManifestView;
+        setManifest(next);
+        onChanged(next);
+      }
+      const result = Array.isArray(data.results) ? data.results[0] as { fixed?: boolean; reason?: string } | undefined : undefined;
+      setOutput(result ? `${result.fixed ? "✓" : "✗"} ${result.reason ?? ""}` : "");
+    } catch (error) {
+      setOutput(error instanceof Error ? error.message : t("test.scripts.error"));
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const runnable = selected?.status === "verified" || selected?.status === "needs_review";
   const working = manifest.jobStatus === "queued" || manifest.jobStatus === "running";
 
@@ -3958,11 +4056,22 @@ function ScriptPreview({ t, projectPath, taskName, env, initialManifest, onChang
                 {busy === "run" ? <SpinnerGap size={10} className="animate-spin" /> : <Play size={10} />} {t("test.scripts.runOne")}
               </button>
             )}
+            {selected?.lastRunError && (
+              <button onClick={repairSelected} disabled={busy !== null || working} className="inline-flex items-center gap-1 rounded border border-border px-2 py-0.5 text-[10px] text-foreground hover:bg-muted disabled:opacity-40">
+                {busy === "repair" ? <SpinnerGap size={10} className="animate-spin" /> : <Wrench size={10} />} {t("test.scripts.repair")}
+              </button>
+            )}
           </div>
           {/* 运行失败是持久化的（manifest.lastRunError），重开弹框仍可见；上方的 output 只是本次运行的瞬时输出。 */}
           {selected?.lastRunError && (
             <div className="border-b border-border bg-status-error-muted/40 px-3 py-1.5 text-[10px] text-status-error-foreground">
               {selected.lastRunError}
+            </div>
+          )}
+          {/* AI 修复结论：修了什么 / 为什么不是脚本缺陷（如页面行为与用例预期不符 → 需人工确认）。 */}
+          {selected?.repairNote && (
+            <div className="border-b border-border bg-status-info-muted/40 px-3 py-1.5 text-[10px] text-status-info-foreground">
+              🔧 {selected.repairNote}
             </div>
           )}
           {(Boolean(selected?.error) || (selected?.validation?.warnings?.length ?? 0) > 0) && (

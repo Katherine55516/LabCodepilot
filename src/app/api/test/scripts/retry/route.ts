@@ -29,6 +29,8 @@ export async function POST(req: Request): Promise<Response> {
       model: typeof body.model === 'string' ? body.model : undefined,
       providerId: typeof body.providerId === 'string' ? body.providerId : undefined,
       forceCaseIds,
+      // 可选：重新生成后接着自动跑通（与报告流的自动路径同一条链）。被测应用不可达时内部跳过运行。
+      runPipeline: body.runPipeline === true,
     });
     return Response.json({ ok: true, ...result });
   } catch (error) {
