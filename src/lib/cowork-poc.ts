@@ -16,9 +16,11 @@ import { getSetting } from './db';
 
 /** POC 转发器脚本路径(仓库内)。生产会内置为签名 helper。 */
 function forwarderPath(): string {
-  // 打包后 __dirname 在 .next/standalone 里,脚本不随包分发 —— POC 仅在 dev
-  // 环境从仓库根解析。用 cwd 兜底(dev server 从仓库根启动)。
+  // 脚本不随包分发。dev 环境从仓库根(cwd)解析;打包版的 next-server cwd 在
+  // standalone 目录,靠 cowork_forwarder_path 设置指到仓库脚本的绝对路径。
+  const fromSetting = (getSetting('cowork_forwarder_path') || '').trim();
   const candidates = [
+    ...(fromSetting ? [fromSetting] : []),
     path.join(process.cwd(), 'scripts/poc/cowork/forwarder-ssh.sh'),
     path.join(process.cwd(), '../../scripts/poc/cowork/forwarder-ssh.sh'),
   ];
