@@ -232,6 +232,41 @@ export function readRoundSnapshot(projectPath: string, roundId: string): RoundSn
 }
 
 /**
+ * 复测轮(failed-only)的基准轮:显式指定 → 按 roundId 取;缺省 → 最近一个**已收口的全量轮**
+ * (按 startedAt 倒序)。复测轮不能拿另一个复测轮当基准——否则「上轮失败集」会逐轮收缩,
+ * 最终把真正没修好的用例漏出回归范围。
+ */
+export function pickBaseRound(projectPath: string, parentRoundId?: string): RegressionRound | null {
+  const rounds = normalizeStaleRounds(readRounds(projectPath).rounds)
+    .sort((a, b) => (b.startedAt || '').localeCompare(a.startedAt || ''));
+  if (parentRoundId) return rounds.find((r) => r.roundId === parentRoundId) ?? null;
+  return rounds.find((r) => r.mode !== 'failed-only' && (r.status === 'done' || r.status === 'partial')) ?? null;
+}
+
+/**
+ * 某轮的失败集 → 条目身份数组。**非 pass 的任何终态都算失败**(fail / partial / blocked):
+ * 复测的目的是「把没过的重跑一遍」,partial 也没过。
+ * 快照或 run.json 缺损 → [](拿不到就不硬拼,调用方按空集处理)。
+ */
+export function failedKeysOfRound(projectPath: string, round: RegressionRound): SuiteKey[] {
+  try {
+    const snap = readRoundSnapshot(projectPath, round.roundId);
+    if (!snap?.idMap) return [];
+    const runAbs = path.join(projectPath, roundArtifactPaths(round.roundId, round.env).runJson);
+    const raw = JSON.parse(fs.readFileSync(runAbs, 'utf-8')) as { tests?: Array<{ id?: unknown; status?: unknown }> };
+    const out: SuiteKey[] = [];
+    for (const t of raw.tests ?? []) {
+      if (!t || typeof t.id !== 'string' || t.status === 'pass') continue;
+      const src = snap.idMap[t.id];
+      if (src) out.push({ task: src.task, originalId: src.originalId });
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+/**
  * 「上次结果」反查(套件 last 条件的数据源,批 A 的 evalSuite 以注入方式消费):
  * 取最近一个已收口轮(done/partial,按 startedAt 倒序),读其 run.json tests[] + 快照 idMap,
  * 把 runId 反解回 (task, originalId) → pass/fail;未出现的条目 → 'none'。

@@ -3,15 +3,14 @@ import path from 'path';
 import { artifactPaths } from '@/lib/test/prompts';
 import { appendAudit } from '@/lib/test/audit';
 import { readLibrary, buildRunnableCases, libraryRunMapFile, REGRESSION_LIBRARY_TASK } from '@/lib/test/library';
-import { readSuites, findSuite, evalSuite, REGRESSION_FULL_SUITE } from '@/lib/test/suites';
 import {
   readRounds,
   generateRoundId,
   appendRound,
   roundDirRel,
-  buildLastResultLookup,
   type RoundSnapshot,
 } from '@/lib/test/rounds';
+import { resolveRunScope, RunScopeError } from '@/lib/test/run-scope';
 import { isUnsafeSegment } from '@/lib/test/path-safety';
 
 export const runtime = 'nodejs';
@@ -31,8 +30,14 @@ export const runtime = 'nodejs';
  *   3. **当轮快照**:聚合结果(含 idMap)原样留存为 {roundId}/cases.snapshot.json——历史报告
  *      永远能回答「当时测的是什么」;idMap 随快照持久化,供报告分组/上次结果反查/复测。
  *
- * POST { projectPath, suiteName?, env? } → { ok, total, roundId? }。
- * total=0(库空/套件未命中)不建轮次;未知套件名 → 400。
+ * 二期增量:
+ *   4. **复测轮**(`mode='failed-only'`):基准轮的失败集(非 pass 的任何终态)合成一个静态套件,
+ *      再走同一条 evalSuite 通道——隔离排除 / pinned 必跑并入 / approvedOnly 三条口径自动与
+ *      全量轮一致,不另开一套过滤逻辑。轮次记 parentRoundId,红线按合并口径评估(见 rounds GET)。
+ *   5. **仅执行已确认用例**(`approvedOnly`):evalSuite 在 pinned 并入【之后】过滤,评审是硬闸门。
+ *
+ * POST { projectPath, suiteName?, env?, mode?, approvedOnly?, parentRoundId? } → { ok, total, roundId? }。
+ * total=0(库空/套件未命中/基准轮无失败)不建轮次;未知套件名或基准轮缺失 → 400。
  */
 export async function POST(req: Request): Promise<Response> {
   try {
@@ -41,12 +46,18 @@ export async function POST(req: Request): Promise<Response> {
     if (!projectPath || typeof projectPath !== 'string') {
       return Response.json({ ok: false, error: 'projectPath is required' }, { status: 400 });
     }
-    const suiteName: string =
-      typeof body.suiteName === 'string' && body.suiteName.trim() ? body.suiteName.trim() : REGRESSION_FULL_SUITE;
     const env: string = typeof body.env === 'string' && body.env.trim() ? body.env.trim() : 'local';
     // env 会进产物文件名({task}-{env}.run.json)、roundId 进产物目录 → 段安全校验。
     if (isUnsafeSegment(env)) {
       return Response.json({ ok: false, error: 'invalid env' }, { status: 400 });
+    }
+    const mode = body.mode === 'failed-only' ? 'failed-only' : 'full';
+    const approvedOnly = body.approvedOnly === true;
+    const parentRoundIdArg = typeof body.parentRoundId === 'string' && body.parentRoundId.trim()
+      ? body.parentRoundId.trim()
+      : undefined;
+    if (parentRoundIdArg && isUnsafeSegment(parentRoundIdArg)) {
+      return Response.json({ ok: false, error: 'invalid parentRoundId' }, { status: 400 });
     }
 
     const lib = readLibrary(projectPath);
@@ -54,15 +65,20 @@ export async function POST(req: Request): Promise<Response> {
       return Response.json({ ok: true, total: 0 });
     }
 
-    const suitesData = readSuites(projectPath);
-    const suite = findSuite(suitesData, suiteName); // 内置「全量」→ null;未知 → undefined
-    if (suite === undefined) {
-      return Response.json({ ok: false, error: `未知套件「${suiteName}」` }, { status: 400 });
+    // 范围解析下沉 lib(run-scope.ts):发起弹窗的预检卡走同一个函数,预览即所见即所跑。
+    let runScope;
+    try {
+      runScope = resolveRunScope(projectPath, {
+        suiteName: typeof body.suiteName === 'string' ? body.suiteName : undefined,
+        mode,
+        approvedOnly,
+        parentRoundId: parentRoundIdArg,
+      });
+    } catch (e) {
+      if (e instanceof RunScopeError) return Response.json({ ok: false, error: e.message }, { status: 400 });
+      throw e;
     }
-    const hits = evalSuite(lib, suite, {
-      pinned: suitesData.pinned,
-      lastResultOf: buildLastResultLookup(projectPath),
-    });
+    const { hits, suiteName, parentRoundId } = runScope;
     if (!hits.length) {
       return Response.json({ ok: true, total: 0 });
     }
@@ -96,7 +112,7 @@ export async function POST(req: Request): Promise<Response> {
         roundId,
         suiteName,
         env,
-        mode: 'full',
+        mode,
         generatedAt: startedAt,
         total: cases.length,
         idMap,
@@ -113,18 +129,20 @@ export async function POST(req: Request): Promise<Response> {
       startedAt,
       env,
       suiteName,
-      mode: 'full',
+      mode,
+      parentRoundId,
       status: 'running',
       total: cases.length,
     });
 
+    const scope = mode === 'failed-only' ? `复测轮(基准 ${parentRoundId})` : `套件「${suiteName}」`;
     void appendAudit(projectPath, REGRESSION_LIBRARY_TASK, {
       action: 'run-library',
       mode: 'manual',
       step: 'execution',
-      detail: `发起回归轮次 ${roundId}:套件「${suiteName}」命中 ${cases.length} 条(来源 ${new Set(hits.map((e) => e._source.task)).size} 个任务),环境 ${env}`,
+      detail: `发起回归轮次 ${roundId}:${scope}命中 ${cases.length} 条(来源 ${new Set(hits.map((e) => e._source.task)).size} 个任务),环境 ${env}${approvedOnly ? ',仅执行已确认用例' : ''}`,
     });
-    return Response.json({ ok: true, total: cases.length, roundId });
+    return Response.json({ ok: true, total: cases.length, roundId, mode, parentRoundId });
   } catch (e) {
     const message = e instanceof Error ? e.message : 'Internal server error';
     return Response.json({ ok: false, error: message }, { status: 500 });

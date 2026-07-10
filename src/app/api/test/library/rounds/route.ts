@@ -9,15 +9,19 @@ import {
   normalizeStaleRounds,
   roundDirRel,
   roundArtifactPaths,
+  type RegressionRound,
 } from '@/lib/test/rounds';
 import { isUnsafeSegment } from '@/lib/test/path-safety';
+import { buildCaseHistory, mergedStats } from '@/lib/test/case-history';
 
 export const runtime = 'nodejs';
 
 /**
  * 回归轮次 API(v2 批 B)。
  *
- * GET    ?projectPath           → { rounds }(惰性收口视图:超时 running → aborted;按发起时间倒序)
+ * GET    ?projectPath           → { rounds, quarantined }(惰性收口视图:超时 running → aborted;按发起时间倒序)
+ *          复测轮(failed-only)额外附 `mergedPassStr` = **合并口径**(每条用例截至该轮的最新
+ *          结果)。复测轮只跑上轮的失败集,自身的 2/2 通过【不等于】可发版——红线必须看合并态。
  * PATCH  { projectPath, roundId, outcome } → 收口轮次:
  *          outcome='done'    读该轮 run.json 摘录 counts/suitePassStr 落索引(缺 run.json → 按 aborted 收);
  *          outcome='aborted' 直接标中断(前端 catch/停止时调用)。
@@ -32,7 +36,25 @@ export async function GET(req: Request): Promise<Response> {
   }
   const rounds = normalizeStaleRounds(readRounds(projectPath).rounds)
     .sort((a, b) => (b.startedAt || '').localeCompare(a.startedAt || ''));
-  return Response.json({ rounds });
+
+  // 复测轮的合并口径:在跨轮矩阵里定位该轮的列下标,取每条用例截至此列的最新结果。
+  // 矩阵限流近 N 轮,更早的复测轮找不到列 → 不附 mergedPassStr(诚实降级,UI 不显示结论)。
+  let enriched: Array<RegressionRound & { mergedPassStr?: string }> = rounds;
+  let quarantined = 0;
+  try {
+    const hist = buildCaseHistory(projectPath);
+    quarantined = hist.cases.filter((c) => c.meta.quarantined).length;
+    const idxOf = new Map(hist.rounds.map((r, i) => [r.roundId, i]));
+    enriched = rounds.map((r) => {
+      if (r.mode !== 'failed-only') return r;
+      const i = idxOf.get(r.roundId);
+      if (i === undefined) return r;
+      const m = mergedStats(hist.cases, i);
+      return { ...r, mergedPassStr: `${m.pass}/${m.total}` };
+    });
+  } catch { /* 矩阵拼装失败不该拖垮轮次列表 */ }
+
+  return Response.json({ rounds: enriched, quarantined });
 }
 
 export async function PATCH(req: Request): Promise<Response> {

@@ -594,8 +594,9 @@ export function InlineTestingPanel() {
   // 现有 /api/test/run 依次跑 execution→report(taskName=保留名,带 roundId → 产物落
   // report/回归用例库/{roundId}/,同环境多轮互不覆盖);④收口轮次(PATCH rounds,done 时后端从
   // run.json 摘录口径,异常/中断按 aborted)。报告自动出现在【报告区】(reports 扫描含轮次子目录)。
-  // suiteName/env 由批 D 的发起弹窗传入;缺省 = 内置「全量」+ local(等价 v1 行为)。
-  const runLibrary = async (opts?: { suiteName?: string; env?: string }) => {
+  // suiteName/env/mode/approvedOnly 由发起弹窗传入;缺省 = 内置「全量」+ local + 全量模式
+  // (等价 v1 行为)。mode='failed-only' 时后端按基准轮的失败集圈选(见 lib/test/run-scope.ts)。
+  const runLibrary = async (opts?: { suiteName?: string; env?: string; mode?: "full" | "failed-only"; approvedOnly?: boolean; parentRoundId?: string }) => {
     const p = current?.path;
     if (!p || libraryRunning) return;
     const env = opts?.env || "local";
@@ -617,7 +618,14 @@ export function InlineTestingPanel() {
       const agg = await fetch("/api/test/library/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectPath: p, suiteName: opts?.suiteName, env }),
+        body: JSON.stringify({
+          projectPath: p,
+          suiteName: opts?.suiteName,
+          env,
+          mode: opts?.mode,
+          approvedOnly: opts?.approvedOnly,
+          parentRoundId: opts?.parentRoundId,
+        }),
       }).then((r) => r.json()).catch(() => null);
       if (!agg?.ok) { setLibraryRunStatus(agg?.error || t("test.library.runFailed")); return; }
       if (!agg.total) { setLibraryRunStatus(t("test.library.runEmpty")); return; }
@@ -1249,7 +1257,8 @@ export function InlineTestingPanel() {
   const [testType, setTestType] = useState<"func" | "regression">("func");
   const [regTab, setRegTab] = useState<"library" | "suites" | "rounds">("library");
   // 发起回归弹窗(v2 批 D):套件/环境/预检确认后才真正 runLibrary(保留为确认对话框)。
-  const [launchOpen, setLaunchOpen] = useState(false);
+  // 发起回归弹窗:null=关闭。带 preset 打开时(轮次历史的「复测 N 条」)预置复测模式与基准轮。
+  const [launchOpen, setLaunchOpen] = useState<null | { mode?: "failed-only"; parentRoundId?: string }>(null);
   // 跨任务一键重跑进行中(聚合→执行→报告)。禁用重复触发,按钮显示「重跑中…」。
   const [libraryRunning, setLibraryRunning] = useState(false);
   // 重跑状态提示(库不属于任何任务对话,故用独立状态在弹窗内展示,不走任务对话 push)。
@@ -2513,7 +2522,7 @@ export function InlineTestingPanel() {
                     setRegTab={setRegTab}
                     reloadSignal={libraryReload}
                     onChanged={() => setLibraryReload((n) => n + 1)}
-                    onLaunch={() => setLaunchOpen(true)}
+                    onLaunch={(preset) => setLaunchOpen(preset ?? {})}
                     running={libraryRunning}
                     runStatus={libraryRunStatus}
                   />
@@ -2680,8 +2689,10 @@ export function InlineTestingPanel() {
         <StartRegressionModal
           t={t}
           projectPath={current.path}
-          onClose={() => setLaunchOpen(false)}
-          onStart={(suiteName, env) => { setLaunchOpen(false); void runLibrary({ suiteName, env }); }}
+          initialMode={launchOpen.mode}
+          initialParentRoundId={launchOpen.parentRoundId}
+          onClose={() => setLaunchOpen(null)}
+          onStart={(opts) => { setLaunchOpen(null); void runLibrary(opts); }}
         />
       )}
       {recommendOpen && current?.path && activeTask && (
@@ -4127,7 +4138,7 @@ function RegressionWorkspace({ t, projectPath, regTab, setRegTab, reloadSignal, 
   setRegTab: (v: "library" | "suites" | "rounds") => void;
   reloadSignal: number;
   onChanged: () => void;
-  onLaunch: () => void;
+  onLaunch: (preset?: { mode?: "failed-only"; parentRoundId?: string }) => void;
   running: boolean;
   runStatus: string | null;
 }) {
@@ -4150,7 +4161,7 @@ function RegressionWorkspace({ t, projectPath, regTab, setRegTab, reloadSignal, 
         ))}
         <span className="flex-1" />
         <button
-          onClick={onLaunch}
+          onClick={() => onLaunch()}
           disabled={running}
           title={t("test.library.runHint")}
           className="mb-1 flex h-7 items-center gap-1 rounded-md bg-primary px-2.5 text-[11px] font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-40"
@@ -4166,7 +4177,14 @@ function RegressionWorkspace({ t, projectPath, regTab, setRegTab, reloadSignal, 
       )}
       {regTab === "library" && <RegressionLibrarySection t={t} projectPath={projectPath} reloadSignal={reloadSignal} onChanged={onChanged} />}
       {regTab === "suites" && <RegressionSuitesSection t={t} projectPath={projectPath} />}
-      {regTab === "rounds" && <RegressionRoundsSection t={t} projectPath={projectPath} reloadSignal={reloadSignal} />}
+      {regTab === "rounds" && (
+        <RegressionRoundsSection
+          t={t}
+          projectPath={projectPath}
+          reloadSignal={reloadSignal}
+          onRetest={(parentRoundId) => onLaunch({ mode: "failed-only", parentRoundId })}
+        />
+      )}
     </div>
   );
 }
@@ -4775,16 +4793,39 @@ function AddToSuiteModal({ t, projectPath, keys, onClose, onDone }: {
 interface RoundUI {
   roundId: string; startedAt?: string; env?: string; suiteName?: string; mode?: string;
   status?: string; total?: number; counts?: Record<string, number>; suitePassStr?: string;
+  /** 复测轮的合并口径(每条用例跨轮的最新结果);全量轮不返回。 */
+  mergedPassStr?: string;
+  parentRoundId?: string;
+}
+
+/** 迷你通过率趋势线(近 N 轮)。纯展示,无交互。 */
+function Sparkline({ values, width = 96, height = 22 }: { values: number[]; width?: number; height?: number }) {
+  if (values.length < 2) return null;
+  const min = Math.min(...values) - 3;
+  const max = Math.max(...values) + 3;
+  const span = max - min || 1;
+  const pts = values.map((v, i) => `${(i / (values.length - 1)) * (width - 6) + 3},${height - 3 - ((v - min) / span) * (height - 6)}`);
+  const [lx, ly] = pts[pts.length - 1].split(",");
+  return (
+    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} aria-hidden="true" className="inline-block align-middle">
+      <polyline points={pts.join(" ")} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" className="text-primary" />
+      <circle cx={lx} cy={ly} r="2.2" className="fill-primary" />
+    </svg>
+  );
 }
 interface RoundDetailUI {
   groups: Array<{ task: string; counts: Record<string, number>; tests: Array<{ task: string; originalId: string; purpose: string; status: string }> }>;
   delta: { baseRoundId: string; newFail: unknown[]; fixed: unknown[]; stillFail: unknown[] } | null;
 }
-function RegressionRoundsSection({ t, projectPath, reloadSignal }: { t: T; projectPath: string; reloadSignal: number }) {
+function RegressionRoundsSection({ t, projectPath, reloadSignal, onRetest }: {
+  t: T; projectPath: string; reloadSignal: number; onRetest: (parentRoundId: string) => void;
+}) {
   const [rounds, setRounds] = useState<RoundUI[] | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
   const [details, setDetails] = useState<Record<string, RoundDetailUI | null>>({});
   const [reload, setReload] = useState(0);
+  const [envFilter, setEnvFilter] = useState("");
+  const [passRates, setPassRates] = useState<number[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -4792,6 +4833,17 @@ function RegressionRoundsSection({ t, projectPath, reloadSignal }: { t: T; proje
       .then((r) => r.json())
       .then((d) => { if (!cancelled) setRounds(Array.isArray(d?.rounds) ? d.rounds : []); })
       .catch(() => { if (!cancelled) setRounds([]); });
+    // 通过率趋势(旧→新):与矩阵/健康度同源的 passRates,避免与轮次索引里的摘要口径打架。
+    fetch(`/api/test/library/history?projectPath=${encodeURIComponent(projectPath)}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (cancelled) return;
+        const pr = (Array.isArray(d?.passRates) ? d.passRates : [])
+          .filter((p: { total: number }) => p.total > 0)
+          .map((p: { pass: number; total: number }) => Math.round((p.pass / p.total) * 100));
+        setPassRates(pr);
+      })
+      .catch(() => { if (!cancelled) setPassRates([]); });
     return () => { cancelled = true; };
   }, [projectPath, reload, reloadSignal]);
 
@@ -4827,34 +4879,70 @@ function RegressionRoundsSection({ t, projectPath, reloadSignal }: { t: T; proje
     if (r.counts && typeof r.counts.total === "number") return `${r.counts.pass ?? 0}/${r.counts.total}`;
     return null;
   };
+  // 红线徽标。**复测轮必须看合并口径**:它只跑上轮的失败子集,自身 3/3 通过不代表可发版——
+  // 剩下那些没被重跑的用例,最新状态仍可能是失败(mergedPassStr 由 rounds API 算好)。
   const redline = (r: RoundUI) => {
     if (r.status === "running") return <span className="flex items-center gap-1 rounded bg-muted px-1.5 text-[9px] text-muted-foreground"><SpinnerGap size={9} className="animate-spin" /> {t("test.rounds.statusRunning")}</span>;
     if (r.status === "aborted") return <span className="rounded bg-muted px-1.5 text-[9px] text-muted-foreground">{t("test.rounds.statusAborted")}</span>;
-    const p = passOf(r);
+    const isRetest = r.mode === "failed-only";
+    const p = isRetest ? r.mergedPassStr : passOf(r);
     if (!p) return null;
     const [a, b] = p.split("/").map((x) => parseInt(x, 10));
     const ok = Number.isFinite(a) && Number.isFinite(b) && b > 0 && a === b;
-    return <span className={`rounded px-1.5 text-[9px] ${ok ? "bg-status-success-muted text-status-success-foreground" : "bg-status-error-muted text-status-error-foreground"}`}>{ok ? t("test.rounds.redlineOk") : t("test.rounds.redlineBlocked")}</span>;
+    const cls = ok ? "bg-status-success-muted text-status-success-foreground" : "bg-status-error-muted text-status-error-foreground";
+    const label = ok ? t("test.rounds.redlineOk") : t("test.rounds.redlineBlocked");
+    return (
+      <span className={`rounded px-1.5 text-[9px] ${cls}`} title={isRetest ? t("test.rounds.mergedHint") : undefined}>
+        {isRetest ? `${t("test.rounds.mergedRedline", { pass: p })} · ${label}` : label}
+      </span>
+    );
   };
+  const failCountOf = (r: RoundUI) => {
+    const p = passOf(r);
+    if (!p) return 0;
+    const [a, b] = p.split("/").map((x) => parseInt(x, 10));
+    return Number.isFinite(a) && Number.isFinite(b) ? Math.max(0, b - a) : 0;
+  };
+  const envOptions = [...new Set((rounds ?? []).map((r) => r.env).filter((e): e is string => !!e))];
+  const shown = (rounds ?? []).filter((r) => !envFilter || r.env === envFilter);
   const dot = (status: string) => (
     <span className={`inline-block h-1.5 w-1.5 flex-shrink-0 rounded-full ${status === "pass" ? "bg-status-success-foreground" : "bg-status-error-foreground"}`} />
   );
 
   return (
     <div className="flex flex-col overflow-hidden rounded-xl border border-border bg-card">
-        <div className="flex items-center gap-2 border-b border-border px-3 py-1.5">
+        <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-1.5">
           <Clock size={13} className="text-primary" />
           <span className="text-[11px] font-semibold text-foreground">{t("test.rounds.title")}</span>
           {rounds && rounds.length > 0 && <span className="text-[10px] text-muted-foreground">{rounds.length}</span>}
+          {passRates.length > 1 && (
+            <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
+              {t("test.rounds.passTrend", { n: passRates.length })}
+              <Sparkline values={passRates} />
+              <b className="font-mono text-foreground">{passRates[passRates.length - 1]}%</b>
+            </span>
+          )}
+          <span className="flex-1" />
+          {envOptions.length > 1 && (
+            <select
+              value={envFilter}
+              onChange={(e) => setEnvFilter(e.target.value)}
+              aria-label={t("test.rounds.filterEnv")}
+              className="h-6 rounded border border-border bg-background px-1 text-[10px] text-muted-foreground outline-none"
+            >
+              <option value="">{t("test.rounds.filterEnv")}</option>
+              {envOptions.map((e) => <option key={e} value={e}>{e}</option>)}
+            </select>
+          )}
         </div>
         <div className="min-h-0 flex-1 overflow-auto">
           {rounds === null ? (
             <div className="p-4 text-center text-[11px] text-muted-foreground"><SpinnerGap size={14} className="mx-auto animate-spin" /></div>
-          ) : rounds.length === 0 ? (
+          ) : shown.length === 0 ? (
             <div className="p-6 text-center text-[11px] leading-relaxed text-muted-foreground">{t("test.rounds.empty")}</div>
           ) : (
             <div className="divide-y divide-border">
-              {rounds.map((r) => {
+              {shown.map((r) => {
                 const detail = details[r.roundId];
                 const open = openId === r.roundId;
                 return (
@@ -4867,6 +4955,14 @@ function RegressionRoundsSection({ t, projectPath, reloadSignal }: { t: T; proje
                       {r.mode === "failed-only" && <span className="rounded bg-status-warning-muted px-1.5 text-[9px] text-status-warning-foreground">{t("test.rounds.modeRetest")}</span>}
                       {passOf(r) && <span className="font-mono text-[10px] text-foreground">{passOf(r)}</span>}
                       {redline(r)}
+                      {r.status === "done" && r.mode !== "failed-only" && failCountOf(r) > 0 && (
+                        <button
+                          onClick={() => onRetest(r.roundId)}
+                          className="flex items-center gap-0.5 rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground hover:text-foreground"
+                        >
+                          <ArrowsClockwise size={9} /> {t("test.rounds.retestFailed", { n: failCountOf(r) })}
+                        </button>
+                      )}
                       <button onClick={() => toggleDetail(r.roundId)} className="flex items-center gap-0.5 rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground hover:text-foreground">
                         {open ? <CaretUp size={9} /> : <CaretDown size={9} />} {open ? t("test.rounds.collapse") : t("test.rounds.detail")}
                       </button>
@@ -4882,6 +4978,14 @@ function RegressionRoundsSection({ t, projectPath, reloadSignal }: { t: T; proje
                           <div className="p-1 text-[10px] text-muted-foreground">{t("test.rounds.detailEmpty")}</div>
                         ) : (
                           <div className="space-y-2">
+                            <div className="text-[10px] text-muted-foreground">
+                              {t("test.rounds.snapshot", {
+                                n: r.total ?? 0,
+                                suite: r.suiteName || "—",
+                                mode: r.mode === "failed-only" ? t("test.rounds.modeRetest") : t("test.rounds.modeFull"),
+                              })}
+                              {r.parentRoundId && t("test.rounds.snapshotBase", { round: r.parentRoundId })}
+                            </div>
                             {detail.delta ? (
                               <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
                                 <span className="text-muted-foreground">{t("test.rounds.deltaBase", { round: detail.delta.baseRoundId })}</span>
@@ -4926,22 +5030,45 @@ function RegressionRoundsSection({ t, projectPath, reloadSignal }: { t: T; proje
   );
 }
 
-// 发起回归轮次弹窗(v2 批 D,替代 v1 直接一键全量):套件下拉(实时命中数)+ 环境下拉
-// (env-config allowedEnvs,显示所选环境被测地址)+ 预检(条数/来源任务数/近 3 轮均值时长
-// 估算,无历史诚实显示「暂无估算」)+ 红线口径说明。确认后调 runLibrary({suiteName, env}),
-// 进度仍在库弹窗状态行展示(轮次收口由 runLibrary 负责)。
-function StartRegressionModal({ t, projectPath, onClose, onStart }: {
+// 发起回归轮次弹窗(v2 批 D + 二期):套件下拉 + 环境下拉 + **模式**(全量 / 仅复测上轮失败)
+// + **仅执行已确认用例** + 预检卡(条数/来源任务数/隔离排除数/时长估算)+ 红线口径说明。
+//
+// 预检数字全部来自 POST /api/test/suites/eval 的 `scope` 形态——它与真正的发起接口共用
+// lib/test/run-scope.ts 的 resolveRunScope,所以「将执行 N 条」永远等于实跑条数。**不要**在
+// 这里用前端逻辑重算命中集,那正是预览与实跑漂移的经典来源。
+interface LaunchScopeDTO {
+  hits: number;
+  hitTasks: number;
+  quarantined: number;
+  pendingInScope: number;
+  suiteName?: string;
+  parentRoundId?: string;
+  /** 复测轮:基准轮失败条数(不含 pinned);hits 是含 pinned 的实跑总数,两者不可混用。 */
+  baseFailedCount?: number;
+  unavailable?: string;
+}
+function StartRegressionModal({ t, projectPath, initialMode, initialParentRoundId, onClose, onStart }: {
   t: T;
   projectPath: string;
+  /** 从轮次历史「复测 N 条」进入时预置(缺省=全量)。 */
+  initialMode?: "failed-only";
+  initialParentRoundId?: string;
   onClose: () => void;
-  onStart: (suiteName: string, env: string) => void;
+  onStart: (opts: { suiteName: string; env: string; mode: "full" | "failed-only"; approvedOnly: boolean; parentRoundId?: string }) => void;
 }) {
   const [suites, setSuites] = useState<Array<{ name: string; hits: number; hitTasks: number; builtin?: boolean }> | null>(null);
   const [envs, setEnvs] = useState<string[] | null>(null);
   const [envInfo, setEnvInfo] = useState<{ configured?: boolean; frontendBaseUrl?: string | null } | null>(null);
   const [suiteName, setSuiteName] = useState<string>("全量");
   const [env, setEnv] = useState<string>("local");
+  const [mode, setMode] = useState<"full" | "failed-only">(initialMode ?? "full");
+  const [approvedOnly, setApprovedOnly] = useState(false);
   const [estimate, setEstimate] = useState<{ minutes: number; rounds: number } | null | undefined>(undefined); // undefined=加载中
+  // 预检结果连同它对应的入参 key 一起存:key 不匹配即视为「加载中」,免得在 effect 体里同步
+  // setState(null) 触发级联渲染(react-hooks 规则)。
+  const [scopeState, setScopeState] = useState<{ key: string; data: LaunchScopeDTO } | null>(null);
+  // 复测模式是否可用(有无基准全量轮)——进弹窗时先探一次,不可用则禁用该 radio。
+  const [retest, setRetest] = useState<LaunchScopeDTO | null>(null);
 
   // 套件列表(内置全量置顶)+ 环境列表 + 时长估算(近 3 个 done 轮的 (finish-start)/total 均值)。
   useEffect(() => {
@@ -4964,6 +5091,14 @@ function StartRegressionModal({ t, projectPath, onClose, onStart }: {
         if (typeof d?.env === "string" && allowed.includes(d.env)) setEnv(d.env);
       })
       .catch(() => { if (!cancelled) setEnvs(["local"]); });
+    fetch("/api/test/suites/eval", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectPath, scope: { mode: "failed-only", parentRoundId: initialParentRoundId } }),
+    })
+      .then((r) => r.json())
+      .then((d) => { if (!cancelled) setRetest(d as LaunchScopeDTO); })
+      .catch(() => { if (!cancelled) setRetest({ hits: 0, hitTasks: 0, quarantined: 0, pendingInScope: 0, unavailable: "x" }); });
     fetch(`/api/test/library/rounds?projectPath=${encodeURIComponent(projectPath)}`)
       .then((r) => r.json())
       .then((d) => {
@@ -4979,7 +5114,7 @@ function StartRegressionModal({ t, projectPath, onClose, onStart }: {
       })
       .catch(() => { if (!cancelled) setEstimate(null); });
     return () => { cancelled = true; };
-  }, [projectPath]);
+  }, [projectPath, initialParentRoundId]);
 
   // 所选环境的被测地址展示(切换环境时刷新;仅展示用,执行时 run 路由自行解析)。
   useEffect(() => {
@@ -4991,12 +5126,29 @@ function StartRegressionModal({ t, projectPath, onClose, onStart }: {
     return () => { cancelled = true; };
   }, [projectPath, env]);
 
-  const sel = suites?.find((x) => x.name === suiteName) ?? suites?.[0];
-  const hits = sel?.hits ?? 0;
+  // 预检卡:套件/模式/仅已确认 任一变化 → 服务端重新求值(与实跑同源)。
+  const scopeKey = `${suiteName}\u0000${mode}\u0000${approvedOnly}\u0000${initialParentRoundId ?? ""}`;
+  useEffect(() => {
+    let cancelled = false;
+    const key = scopeKey;
+    fetch("/api/test/suites/eval", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectPath, scope: { suiteName, mode, approvedOnly, parentRoundId: initialParentRoundId } }),
+    })
+      .then((r) => r.json())
+      .then((d) => { if (!cancelled) setScopeState({ key, data: d as LaunchScopeDTO }); })
+      .catch(() => { if (!cancelled) setScopeState({ key, data: { hits: 0, hitTasks: 0, quarantined: 0, pendingInScope: 0 } }); });
+    return () => { cancelled = true; };
+  }, [projectPath, suiteName, mode, approvedOnly, initialParentRoundId, scopeKey]);
+  const scope = scopeState?.key === scopeKey ? scopeState.data : null;
+
+  const retestAvailable = !!retest && !retest.unavailable && retest.hits > 0;
+  const hits = scope?.hits ?? 0;
   const loading = suites === null || envs === null;
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
-      <div className="flex max-h-[84vh] w-full max-w-md flex-col overflow-hidden rounded-xl border border-border bg-background shadow-xl" onClick={(e) => e.stopPropagation()}>
+      <div className="flex max-h-[84vh] w-full max-w-md flex-col overflow-y-auto rounded-xl border border-border bg-background shadow-xl" onClick={(e) => e.stopPropagation()}>
         <div className="flex items-center gap-2 border-b border-border px-3 py-2">
           <Play size={13} className="text-primary" />
           <span className="text-xs font-semibold text-foreground">{t("test.launch.title")}</span>
@@ -5012,7 +5164,8 @@ function StartRegressionModal({ t, projectPath, onClose, onStart }: {
               <select
                 value={suiteName}
                 onChange={(e) => setSuiteName(e.target.value)}
-                className="h-7 flex-1 rounded border border-border bg-background px-1.5 text-[11px] outline-none focus:border-primary"
+                disabled={mode === "failed-only"}
+                className="h-7 flex-1 rounded border border-border bg-background px-1.5 text-[11px] outline-none focus:border-primary disabled:opacity-40"
               >
                 {(suites ?? []).map((x) => (
                   <option key={x.name} value={x.name}>{x.builtin ? `${x.name}（内置）` : x.name} — {t("test.suites.hits", { n: x.hits })}</option>
@@ -5029,6 +5182,39 @@ function StartRegressionModal({ t, projectPath, onClose, onStart }: {
                 {(envs ?? []).map((e2) => <option key={e2} value={e2}>{e2}</option>)}
               </select>
             </div>
+            <div className="flex items-start gap-2">
+              <span className="w-12 flex-shrink-0 pt-0.5 text-[10px] text-muted-foreground">{t("test.launch.mode")}</span>
+              <div className="flex flex-1 flex-col gap-1">
+                <label className="flex items-center gap-1.5 text-[11px] text-foreground">
+                  <input type="radio" name="regmode" checked={mode === "full"} onChange={() => setMode("full")} className="accent-primary" />
+                  {t("test.launch.modeFull")}
+                </label>
+                <label className={`flex items-center gap-1.5 text-[11px] ${retestAvailable ? "text-foreground" : "cursor-not-allowed text-muted-foreground"}`}>
+                  <input
+                    type="radio"
+                    name="regmode"
+                    checked={mode === "failed-only"}
+                    disabled={!retestAvailable}
+                    onChange={() => setMode("failed-only")}
+                    className="accent-primary"
+                  />
+                  {t("test.launch.modeRetest")}
+                  {retestAvailable
+                    ? <span className="text-muted-foreground">（{t("test.launch.modeRetestHint", { n: retest!.baseFailedCount ?? retest!.hits })}）</span>
+                    : <span className="text-muted-foreground">（{t("test.launch.modeRetestUnavailable")}）</span>}
+                </label>
+                {mode === "failed-only" && retest?.parentRoundId && (
+                  <span className="font-mono text-[10px] text-muted-foreground">{t("test.launch.basedOn", { round: retest.parentRoundId })}</span>
+                )}
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="w-12 flex-shrink-0" />
+              <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                <input type="checkbox" checked={approvedOnly} onChange={(e) => setApprovedOnly(e.target.checked)} className="accent-primary" />
+                {t("test.launch.approvedOnly")}
+              </label>
+            </div>
             <div className="flex items-start gap-2 text-[10px] text-muted-foreground">
               <span className="w-12 flex-shrink-0">{t("test.launch.baseUrl")}</span>
               {envInfo?.frontendBaseUrl ? (
@@ -5038,19 +5224,37 @@ function StartRegressionModal({ t, projectPath, onClose, onStart }: {
               )}
             </div>
             <div className="space-y-1 rounded border border-border bg-muted/30 px-2.5 py-2 text-[11px] text-foreground">
-              <div>{t("test.launch.precheck", { n: hits, m: sel?.hitTasks ?? 0 })}</div>
-              <div className="text-[10px] text-muted-foreground">
-                {estimate === undefined ? "…" : estimate === null
-                  ? t("test.launch.estimateNone")
-                  : t("test.launch.estimate", { min: Math.max(1, Math.round(estimate.minutes * hits)), rounds: estimate.rounds })}
-              </div>
+              {scope === null ? (
+                <div className="text-muted-foreground">…</div>
+              ) : (
+                <>
+                  <div>
+                    {t("test.launch.precheck", { n: scope.hits, m: scope.hitTasks })}
+                    {scope.quarantined > 0 && (
+                      <span className="ml-1 text-status-info-foreground">· {t("test.launch.quarantineExcluded", { n: scope.quarantined })}</span>
+                    )}
+                  </div>
+                  {approvedOnly
+                    ? null
+                    : scope.pendingInScope > 0 && (
+                      <div className="text-[10px] text-status-warning-foreground">{t("test.launch.pendingWarn", { n: scope.pendingInScope })}</div>
+                    )}
+                  <div className="text-[10px] text-muted-foreground">
+                    {estimate === undefined ? "…" : estimate === null
+                      ? t("test.launch.estimateNone")
+                      : t("test.launch.estimate", { min: Math.max(1, Math.round(estimate.minutes * scope.hits)), rounds: estimate.rounds })}
+                  </div>
+                </>
+              )}
             </div>
-            <div className="rounded bg-muted px-2.5 py-1.5 text-[10px] leading-relaxed text-muted-foreground">{t("test.launch.redline")}</div>
-            {hits === 0 && <div className="text-[11px] text-status-warning-foreground">{t("test.launch.emptySuite")}</div>}
+            <div className="rounded bg-muted px-2.5 py-1.5 text-[10px] leading-relaxed text-muted-foreground">
+              {mode === "failed-only" ? t("test.launch.retestRedline") : t("test.launch.redline")}
+            </div>
+            {scope !== null && hits === 0 && <div className="text-[11px] text-status-warning-foreground">{t("test.launch.emptySuite")}</div>}
             <div className="flex justify-end gap-2">
               <button onClick={onClose} className="flex h-6 items-center rounded border border-border px-2 text-[11px] text-muted-foreground hover:text-foreground">{t("test.launch.cancel")}</button>
               <button
-                onClick={() => onStart(suiteName, env)}
+                onClick={() => onStart({ suiteName, env, mode, approvedOnly, parentRoundId: mode === "failed-only" ? initialParentRoundId : undefined })}
                 disabled={hits === 0}
                 className="flex h-6 items-center gap-1 rounded bg-primary px-2.5 text-[11px] font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-40"
               >
