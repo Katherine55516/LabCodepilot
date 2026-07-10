@@ -670,6 +670,9 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
       // into the VM session workspace (host path → VM path map) and the end of
       // turn diffs the workspace to emit a vm_artifacts SSE event.
       let coworkActive = false;
+      // Set to the sessionId once the VM is marked active this turn, so the
+      // outer finally can release it (idle-reclaim gate) exactly once.
+      let coworkActiveSessionId: string | null = null;
       const coworkVmPathByHostPath = new Map<string, string>();
       const coworkTurnStartMs = Date.now();
 
@@ -776,12 +779,21 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
           const { getSession } = await import('./db');
           const { decideCowork } = await import('./cowork-poc');
           const sess = getSession(sessionId);
-          const decision = decideCowork(sess?.sandbox_enabled);
+          // decideCowork is async in P1-B: it lazily starts/rebuilds the VM
+          // via cowork-vm-manager and only resolves once the VM is ready (or
+          // decides to fall back to host). First sandbox message therefore
+          // blocks a few seconds on cold VM start — expected "open and it works".
+          const decision = await decideCowork(sess?.sandbox_enabled);
           if (decision.useSandbox && decision.executablePath) {
             queryOptions.pathToClaudeCodeExecutable = decision.executablePath;
             // Session-scoped VM workspace: the forwarder reads COWORK_SESSION_ID
             // and cd's to /home/agent/sessions/<id>/workspace before exec'ing claude.
             (queryOptions.env as Record<string, string>).COWORK_SESSION_ID = sessionId;
+            // Keep the VM alive while this turn runs (blocks idle reclaim);
+            // released in the outer finally.
+            const vmMgr = await import('./cowork-vm-manager');
+            vmMgr.markSessionActive(sessionId);
+            coworkActiveSessionId = sessionId;
             const transfer = await import('./cowork-transfer');
             await transfer.ensureSessionWorkspace(sessionId);
             // Push attachments (all types — the agent may process images with
@@ -2156,6 +2168,14 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
         if (shadowHome) {
           shadowHome.cleanup();
           shadowHome = null;
+        }
+        // Cowork: release the VM idle-reclaim gate for this session's turn.
+        if (coworkActiveSessionId) {
+          const releasingId = coworkActiveSessionId;
+          coworkActiveSessionId = null;
+          import('./cowork-vm-manager')
+            .then((m) => m.releaseSession(releasingId))
+            .catch(() => { /* manager not loaded — nothing to release */ });
         }
       }
     },

@@ -119,6 +119,17 @@ export async function DELETE(
       return Response.json({ error: 'Session not found' }, { status: 404 });
     }
 
+    // Cowork: best-effort clean the VM session directory before dropping the
+    // row. Only for sandbox sessions and never blocks/deny the delete.
+    if (session.sandbox_enabled) {
+      try {
+        const { removeSessionDir } = await import('@/lib/cowork-transfer');
+        await removeSessionDir(id);
+      } catch (err) {
+        console.warn('[session-api] cowork removeSessionDir failed (non-fatal):', err);
+      }
+    }
+
     deleteSession(id);
     return Response.json({ success: true });
   } catch (error) {

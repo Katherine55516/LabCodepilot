@@ -11,8 +11,8 @@
  */
 import fs from 'fs';
 import path from 'path';
-import os from 'os';
 import { getSetting } from './db';
+import { ensureRunning, isImageProvisioned } from './cowork-vm-manager';
 
 /** POC 转发器脚本路径(仓库内)。生产会内置为签名 helper。 */
 function forwarderPath(): string {
@@ -27,16 +27,6 @@ function forwarderPath(): string {
   return candidates.find((p) => fs.existsSync(p)) || candidates[0];
 }
 
-/** VM 是否就绪(vm-up.sh 写下的 IP 文件)。 */
-function vmReady(): boolean {
-  const ipFile = path.join(os.homedir(), '.codepilot/cowork-poc/vm-ip');
-  try {
-    return fs.statSync(ipFile).isFile() && fs.readFileSync(ipFile, 'utf8').trim().length > 0;
-  } catch {
-    return false;
-  }
-}
-
 export interface CoworkDecision {
   /** 是否走沙箱转发路径 */
   useSandbox: boolean;
@@ -47,20 +37,29 @@ export interface CoworkDecision {
 }
 
 /**
- * 判定某会话本回合是否应走沙箱。三重门:全局开关 + 会话开关 + VM 就绪。
- * 任一不满足都安全回退到宿主执行(useSandbox=false)。
+ * 判定某会话本回合是否应走沙箱,并在需要时懒启动/重建 VM。三重门:
+ * 全局开关 + 会话开关 + VM 管理器就绪(P1-B:自动 ensureRunning,不再只查
+ * vm-ip 文件)。任一不满足都安全回退到宿主执行(useSandbox=false)。
+ *
+ * async 因为 ensureRunning 可能要 spawn vfkit 并等 SSH 就绪(冷启动数秒);
+ * 首条沙箱消息因此会阻塞到 VM 起好,符合"点开就能用"的预期。
  */
-export function decideCowork(sandboxEnabled: boolean | number | undefined): CoworkDecision {
+export async function decideCowork(sandboxEnabled: boolean | number | undefined): Promise<CoworkDecision> {
   if (!sandboxEnabled) return { useSandbox: false };
   if (getSetting('cowork_enabled') !== 'true') {
     return { useSandbox: false, reason: 'cowork_disabled_globally' };
   }
-  if (!vmReady()) {
-    return { useSandbox: false, reason: 'vm_not_ready' };
+  if (!isImageProvisioned()) {
+    return { useSandbox: false, reason: 'image_not_provisioned' };
   }
   const fwd = forwarderPath();
   if (!fs.existsSync(fwd)) {
     return { useSandbox: false, reason: 'forwarder_missing' };
+  }
+  // 懒启动/重建 —— 崩溃态也会在这里被重新拉起。
+  const vm = await ensureRunning();
+  if (vm.phase !== 'running' || !vm.ip) {
+    return { useSandbox: false, reason: `vm_${vm.phase}${vm.reason ? ':' + vm.reason : ''}` };
   }
   return { useSandbox: true, executablePath: fwd };
 }

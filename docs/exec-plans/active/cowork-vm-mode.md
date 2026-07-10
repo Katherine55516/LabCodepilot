@@ -17,7 +17,7 @@
 | Phase | 内容 | 状态 | 备注 |
 |-------|------|------|------|
 | P1-A | **文件通道**:上传进 VM(会话隔离工作区 `/home/agent/sessions/<id>/workspace`)+ 回合产物 diff + 产物卡片下载(单文件/打包) | ✅ 已完成(2026-07-10) | E2E:CSV 附件→VM 内修改→vm_artifacts 事件→卡片下载,内容验证通过;逃逸请求 403/404 且错误脱敏(不泄漏 SSH 命令行);传输走 SSH,P1-C 平替 |
-| P1-B | **VM 生命周期管理器**(electron main):懒启动 / 空闲回收 / 健康检查 / 崩溃重建;去掉手动 vm-up.sh | 📋 待开始 | vfkit spawn + restful-uri;沙箱会话首条消息触发启动,UI「沙箱启动中」态 |
+| P1-B | **VM 生命周期管理器**(server 侧单例):懒启动 / 空闲回收 / 健康检查 / 崩溃重建 / 退出清理;去掉手动 vm-up.sh | ✅ 已完成(2026-07-10) | 落 server 侧(dev 无 main 进程,dev/打包共用);沙箱首条消息 ensureRunning 自动 spawn vfkit;E2E 验证冷启动自动起 VM、kill vfkit 后自愈重建、dev SIGTERM 连带关 VM 无孤儿;UI 状态态留 P1-D |
 | P1-C | **通道产品化**:guest-daemon(Go 静态二进制,vsock)替代 SSH;exec/writeFile/readFile/listFiles/health RPC | 📋 待开始 | vfkit vsock→unix socket;转发器改连 daemon;SSH 退役 |
 | P1-D | **就绪状态机 + 消息先行入队**:provisioning→vm_ready→ready→failed;未就绪时消息/附件入队,就绪自动发出 | 📋 待开始 | 设计见调研文档 §7.1;P1 范围内"下载镜像"仍为手动预置,状态机先覆盖 VM 启动窗口 |
 | P1-E | **入口正式化**:沙箱徽标/能力边界提示(外部 stdio MCP 屏蔽说明)、空态入口卡、真机零写入验收(fs 监控) | 📋 待开始 | POC 开关保留为会话内切换;i18n 三语 |
@@ -29,6 +29,9 @@
 - 2026-07-10: 会话工作区定为 `/home/agent/sessions/<sessionId>/workspace`(uploads 直接放 workspace 内,agent 视角一个目录,简化 prompt 引用;调研文档的 uploads/ 只读分离留给 P3 安全强化配合非特权用户做)
 - 2026-07-10: sessionId 经 `COWORK_SESSION_ID` env 传给转发器(SDK 的 argv 不可控,env 白名单是既有过河机制)
 - 2026-07-10: 产物 diff 用 `find -newermt @<turnStart>` + `stat`,排除本回合上传的原文件;下载 API 错误统一脱敏(SSH 命令行含 VM IP/密钥路径,绝不回显),仅 403/404/500 通用消息;路径校验用 VM 内 `realpath -e` + workspace 前缀判定(防 `../` 与符号链接逃逸,已 E2E 验证)
+- 2026-07-10: P1-B VM 管理器**放 server 侧单例**(globalThis park 抗 Next dev hot-reload),不放 electron main —— `npm run dev`(主要验证环境)根本没有 main 进程,且无 server→main 消息通道;dev 与打包版共用同一套逻辑,claude-client 直接调用。代价:VM 与 next-server 同生命周期(打包版 next-server 长驻,等价于随 app;dev 随 dev server)
+- 2026-07-10: `decideCowork` 改 async —— 首条沙箱消息阻塞到 VM 就绪(冷启动数秒),符合"点开就能用";崩溃态(health 双探失败 / vfkit exit)在下条消息的 ensureRunning 里自动重建;活跃会话用 markSessionActive/releaseSession 计数,归零后 15 分钟空闲回收
+- 2026-07-10: 排查"疑似双 VM"实为**测量假象** —— `ps|grep "[v]fkit"` 匹配到我自己命令行里的 "vfkit" 字面量;改用 `pgrep -f 'vfkit --cpus'` 精确计数,确认单例守卫(startingPromise + existingVfkitPid 复用)工作正常,全程只有一台 VM
 
 ## 详细设计
 
