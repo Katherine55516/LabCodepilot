@@ -1033,6 +1033,7 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
         startedAt={streamSnapshot?.startedAt}
         isAssistantProject={isAssistantProject}
         assistantName={assistantName}
+        sandboxEnabled={sandboxEnabled}
       />
       {/* End-of-turn terminal reason chip (only shown when stream is not active) */}
       {!isStreaming && (

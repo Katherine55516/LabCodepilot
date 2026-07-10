@@ -1626,6 +1626,7 @@ const zh: Record<TranslationKey, string> = {
   'sandbox.artifacts.downloadAll': '全部下载',
   'sandbox.artifacts.sleeping': '沙箱休眠中',
   'sandbox.artifacts.sleepingHint': '文件列表来自上次记录;点击下载会自动唤醒沙箱,首次稍慢几秒',
+  'sandbox.artifacts.starting': '正在唤醒沙箱,请稍候…',
 
   // ── Context Usage ─────────────────────────────────────────
   'context.usage': '上下文占用',

@@ -1628,6 +1628,7 @@ const en = {
   'sandbox.artifacts.downloadAll': 'Download all',
   'sandbox.artifacts.sleeping': 'Sandbox sleeping',
   'sandbox.artifacts.sleepingHint': 'List from last known state; downloading wakes the sandbox automatically (first download may take a few seconds)',
+  'sandbox.artifacts.starting': 'Waking the sandbox, please wait…',
 
   // ── Context Usage ─────────────────────────────────────────
   'context.usage': 'Context Usage',
