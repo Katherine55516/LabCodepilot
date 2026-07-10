@@ -2,7 +2,6 @@ import { spawn } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import { createRequire } from 'module';
 import { atomicWriteText, sha256Hex } from './script-artifacts';
 import { resolveBundledHeadlessShell, resolveSystemChrome } from './prompts';
 import type { TraceRedaction } from './script-trace';
@@ -34,21 +33,21 @@ interface RuntimeInfo {
 }
 
 export function resolveScriptPlaywrightRuntime(): RuntimeInfo {
-  const requireFromHere = createRequire(import.meta.url);
-  // Next dev/build rewrites import.meta.url to a server chunk, so resolving from
-  // this module can point at the chunk tree instead of the app's node_modules.
+  // Filesystem probing only. Do NOT reintroduce
+  // `createRequire(import.meta.url).resolve('@playwright/mcp')` as a fallback:
+  // webpack rewrites that literal specifier into a bundled module id (a number),
+  // so path.dirname() on it throws and the branch is dead in the build output —
+  // while the static specifier drags @playwright/mcp into the server bundle,
+  // whose nested playwright-core requires the uninstalled optional dependency
+  // `chromium-bidi` and fails `next build --webpack`.
   // process.cwd() is the repo root in dev and Resources/standalone in packaged
-  // Electron (main.ts starts server.js with cwd=standaloneDir).
+  // Electron (main.ts starts server.js with cwd=standaloneDir) — it covers both.
   const candidates = [
     path.join(process.cwd(), 'node_modules', '@playwright', 'mcp', 'node_modules', 'playwright'),
     ...(process.env.AILAB_RESOURCES_PATH
       ? [path.join(process.env.AILAB_RESOURCES_PATH, 'standalone', 'node_modules', '@playwright', 'mcp', 'node_modules', 'playwright')]
       : []),
   ];
-  try {
-    const mcpEntry = requireFromHere.resolve('@playwright/mcp');
-    candidates.push(path.join(path.dirname(mcpEntry), 'node_modules', 'playwright'));
-  } catch { /* explicit filesystem candidates still cover dev + packaged server */ }
   const nested = candidates.find((candidate) => fs.existsSync(path.join(candidate, 'cli.js')));
   if (!nested) throw new Error('Playwright runtime bundled with @playwright/mcp was not found');
   let version = 'unknown';
