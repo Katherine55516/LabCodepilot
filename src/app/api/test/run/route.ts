@@ -203,9 +203,33 @@ export async function POST(req: Request): Promise<Response> {
     // 不改变任何对客户端可见的行为；无 taskId 时保持原样直通。
     const finalStream =
       step === 'execution'
-        ? wrapExecutionStream(stream, { projectPath, taskName, env, runStartMs, leadingFrame, stats, roundId })
+        ? wrapExecutionStream(stream, {
+            projectPath,
+            taskName,
+            env,
+            runStartMs,
+            leadingFrame,
+            stats,
+            roundId,
+            traceRedactions: [
+              { value: projectPath, replacement: '${PROJECT_ROOT}' },
+              { value: baseUrl, replacement: '${BASE_URL}' },
+              { value: resolved.storageStatePath, replacement: '${STORAGE_STATE}' },
+              { value: resolved.loginAccount?.username, replacement: '${TEST_USERNAME}' },
+              { value: resolved.loginAccount?.password, replacement: '${TEST_PASSWORD}' },
+            ],
+          })
         : step === 'report'
-          ? wrapReportStream(stream, { projectPath, taskName, env, stats, roundId })
+          ? wrapReportStream(stream, {
+              projectPath,
+              taskName,
+              env,
+              model,
+              providerId,
+              aborted: () => abortController.signal.aborted,
+              stats,
+              roundId,
+            })
           : stats
             ? observeStream(
                 step === 'cases' ? wrapCasesStream(stream, { projectPath, taskName }) : stream,

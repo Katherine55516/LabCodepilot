@@ -9,6 +9,8 @@ import { buildStepCompleted, recordStatsEvents } from '@/lib/test/stats-recorder
 import { appendAudit } from '@/lib/test/audit';
 import { depositTask, readTaskCases, REGRESSION_LIBRARY_TASK } from '@/lib/test/library';
 import { readRoundSnapshot } from '@/lib/test/rounds';
+import { ScriptTraceCollector, writeTraceFile, type TraceRedaction } from '@/lib/test/script-trace';
+import { enqueueScriptJob } from '@/lib/test/script-job-manager';
 
 /**
  * 测试执行路由的 SSE 流包装器（从 src/app/api/test/run/route.ts 抽出）。
@@ -52,7 +54,16 @@ export function stepStatsFrame(step: TestStep, stats: StepStats): string {
  */
 export function wrapExecutionStream(
   src: ReadableStream<string>,
-  opts: { projectPath: string; taskName: string; env: string; runStartMs: number; leadingFrame?: string; stats?: StepStats; roundId?: string },
+  opts: {
+    projectPath: string;
+    taskName: string;
+    env: string;
+    runStartMs: number;
+    leadingFrame?: string;
+    stats?: StepStats;
+    roundId?: string;
+    traceRedactions?: TraceRedaction[];
+  },
 ): ReadableStream<string> {
   const reader = src.getReader();
   let frameBuf = '';
@@ -60,6 +71,7 @@ export function wrapExecutionStream(
   let sawError = false;
   // 逐用例计时：对 text 增量做行缓冲，▶ 行 → 下一条 @@RESULT 行的挂钟差（见 exec-timing.ts）
   const timer = createCaseTimer();
+  const traceCollector = new ScriptTraceCollector(opts.runStartMs, opts.traceRedactions ?? []);
   return new ReadableStream<string>({
     start(controller) {
       // 有头被自动回落无头时,先补发一条提示帧让用户在对话里看到「已改无头」(见 POST 内)。
@@ -146,6 +158,7 @@ export function wrapExecutionStream(
             if (typeof d === 'number' && d > 0) t.durationMs = d;
           }
           const runContent = JSON.stringify(reduced, null, 2);
+          const runHash = sha1Hex(runContent);
           try {
             const runAbs = path.join(opts.projectPath, paths.runJson);
             const reportTaskDir = path.dirname(runAbs);
@@ -165,6 +178,11 @@ export function wrapExecutionStream(
           } catch {
             // best-effort: still emit the reduced result even if the write fails
           }
+          try {
+            writeTraceFile(opts.projectPath, opts.taskName, opts.env, runHash, traceCollector.finish());
+          } catch {
+            // trace 是脚本生成增强产物；失败不得改变执行结果
+          }
           // 使用统计：执行轮干净收尾（无 error 帧、未中断）才记 execution_completed +
           // step_completed；runHash 与快照去重同源（sha1(runContent)，已含 durations）。
           const stats = opts.stats;
@@ -183,7 +201,7 @@ export function wrapExecutionStream(
                   funcCounts: reduced.funcCounts,
                   circuitBroken: reduced.circuitBroken,
                   durationMs: Date.now() - stats.stepStartMs,
-                  runHash: sha1Hex(runContent),
+                  runHash,
                   tests: reduced.tests.map((t) => ({ id: t.id, durationMs: t.durationMs ?? null })),
                 },
               },
@@ -219,6 +237,11 @@ export function wrapExecutionStream(
             if (evt?.type === 'text') {
               textAcc += evt.data || '';
               timer.feedText(evt.data || '', Date.now());
+              traceCollector.feedText(evt.data || '');
+            } else if (evt?.type === 'tool_use') {
+              try { traceCollector.feedToolUse(JSON.parse(evt.data || '{}')); } catch { /* ignore */ }
+            } else if (evt?.type === 'tool_result') {
+              try { traceCollector.feedToolResult(JSON.parse(evt.data || '{}')); } catch { /* ignore */ }
             } else if (evt?.type === 'error') {
               // SDK 报错路径先发 error 帧再发 done 帧——错误轮不得记成完成
               sawError = true;
@@ -251,7 +274,16 @@ export function wrapExecutionStream(
  */
 export function wrapReportStream(
   src: ReadableStream<string>,
-  opts: { projectPath: string; taskName: string; env: string; stats?: StepStats; roundId?: string },
+  opts: {
+    projectPath: string;
+    taskName: string;
+    env: string;
+    model?: string;
+    providerId?: string;
+    aborted?: () => boolean;
+    stats?: StepStats;
+    roundId?: string;
+  },
 ): ReadableStream<string> {
   const reader = src.getReader();
   let frameBuf = '';
@@ -266,18 +298,18 @@ export function wrapReportStream(
           if (!reportExists) {
             controller.enqueue(`data: ${JSON.stringify({ type: 'error', data: '测试报告文档未生成（AI 未写出 .md），请点「重跑」重试。' })}\n\n`);
           }
+          let reportRunHash: string | null = null;
+          try {
+            reportRunHash = sha1Hex(
+              fs.readFileSync(path.join(opts.projectPath, artifactPaths(opts.taskName, opts.env, opts.roundId).runJson), 'utf-8'),
+            );
+          } catch {
+            /* run.json 缺失 → runHash 缺省（统计聚合按时序回填兜底），也不排脚本后台任务 */
+          }
           // 使用统计：报告真的写出来了、且流干净收尾才记 report_generated + step_completed。
           // runHash 读 run.json 内容重算（与执行步 sha1(runContent) 同源同值）。
           const stats = opts.stats;
           if (stats && reportExists && !sawError && !stats.aborted()) {
-            let runHash: string | null = null;
-            try {
-              runHash = sha1Hex(
-                fs.readFileSync(path.join(opts.projectPath, artifactPaths(opts.taskName, opts.env, opts.roundId).runJson), 'utf-8'),
-              );
-            } catch {
-              /* run.json 缺失 → runHash 缺省，聚合按时序回填兜底 */
-            }
             recordStatsEvents([
               {
                 eventType: 'report_generated',
@@ -285,7 +317,7 @@ export function wrapReportStream(
                 taskId: stats.taskId,
                 taskName: opts.taskName,
                 env: opts.env,
-                payload: { env: opts.env, runHash, model: stats.model ?? null },
+                payload: { env: opts.env, runHash: reportRunHash, model: stats.model ?? null },
               },
               buildStepCompleted({
                 taskId: stats.taskId,
@@ -299,6 +331,21 @@ export function wrapReportStream(
               }),
             ]);
             controller.enqueue(stepStatsFrame('report', stats));
+          }
+          // 报告成功后只等待 queued manifest 落盘，不等待后台生成；软失败不改变报告 done。
+          if (reportExists && !sawError && !opts.aborted?.() && reportRunHash) {
+            try {
+              await enqueueScriptJob({
+                projectPath: opts.projectPath,
+                taskName: opts.taskName,
+                env: opts.env,
+                runHash: reportRunHash,
+                model: opts.model,
+                providerId: opts.providerId,
+              });
+            } catch {
+              // 后台增强产物失败不得拖垮报告主流程
+            }
           }
           controller.close();
           return;

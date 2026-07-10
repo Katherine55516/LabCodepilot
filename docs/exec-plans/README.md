@@ -44,6 +44,7 @@
 
 | 文件 | 主题 | 状态 |
 |------|------|------|
+| active/regression-script-generation.md | 测试报告完成后后台为本轮执行成功的「回归测试」标签用例生成、校验并运行独立 Playwright 脚本；四节点不变，支持幂等更新、重启恢复、失败项重试 | Phase 0 进行中 |
 | active/regression-library.md | 测试工作台:回归用例库(用例设计后自动沉淀「回归测试」标签用例 + 项目级库查看/管理 + 跨任务一键重跑) | 设计完成,待实现(批 A-E) |
 | active/regression-library-v2.md | 回归用例库 v2 一期：执行轮次实体（留痕/快照/中断态）+ 回归套件（静态+查询构建器+pinned）+ 发起弹窗重做（套件/env/预检估算）+ 报告按来源任务分组与 delta + 库检索；硬门槛=打包版执行可用(#13)；方案见 research/regression-library-v2-benchmark-proposal.md | 设计完成，待开工（批 A-G） |
 | active/test-regression-gate-audit.md | 测试工作台:回归集标签 + 用例门控 + 操作审计 | 开发完成(合并 PR #8),待打包验收 mac+Win |

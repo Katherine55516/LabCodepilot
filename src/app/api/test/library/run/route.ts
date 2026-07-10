@@ -2,7 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import { artifactPaths } from '@/lib/test/prompts';
 import { appendAudit } from '@/lib/test/audit';
-import { readLibrary, buildRunnableCases, REGRESSION_LIBRARY_TASK } from '@/lib/test/library';
+import { readLibrary, buildRunnableCases, libraryRunMapFile, REGRESSION_LIBRARY_TASK } from '@/lib/test/library';
 import { readSuites, findSuite, evalSuite, REGRESSION_FULL_SUITE } from '@/lib/test/suites';
 import {
   readRounds,
@@ -77,6 +77,12 @@ export async function POST(req: Request): Promise<Response> {
     const tmp = casesAbs + '.tmp';
     fs.writeFileSync(tmp, JSON.stringify({ cases }, null, 2), 'utf-8');
     fs.renameSync(tmp, casesAbs);
+    // Persist the same snapshot used to build cases. Script generation happens
+    // after the report and must not remap against a library that changed mid-run.
+    const mapAbs = libraryRunMapFile(projectPath);
+    const mapTmp = mapAbs + '.tmp';
+    fs.writeFileSync(mapTmp, JSON.stringify({ version: 1, createdAt: new Date().toISOString(), idMap }, null, 2), 'utf-8');
+    fs.renameSync(mapTmp, mapAbs);
 
     // 建轮次 + 当轮快照(快照写失败不阻塞发起——轮次照常,可信度降级但主流程可用)。
     const existing = new Set(readRounds(projectPath).rounds.map((r) => r.roundId));
