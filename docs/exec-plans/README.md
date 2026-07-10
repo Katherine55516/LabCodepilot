@@ -44,6 +44,7 @@
 
 | 文件 | 主题 | 状态 |
 |------|------|------|
+| active/cowork-vm-mode.md | Cowork 沙箱模式 P1 macOS MVP:文件通道(上传进 VM + 产物下载)→ VM 生命周期管理器 → guest-daemon/vsock → 就绪状态机 → 入口正式化;P0 POC 已通过(调研文档) | P1-A 进行中 |
 | active/regression-library.md | 测试工作台:回归用例库(用例设计后自动沉淀「回归测试」标签用例 + 项目级库查看/管理 + 跨任务一键重跑) | 设计完成,待实现(批 A-E) |
 | active/test-regression-gate-audit.md | 测试工作台:回归集标签 + 用例门控 + 操作审计 | 开发完成(合并 PR #8),待打包验收 mac+Win |
 | active/chat-latency-remediation.md | 聊天链路提速 + 模式入口收敛 + MCP 持久开关 | Phase 0 完成，Phase 1-4 待开始 |
