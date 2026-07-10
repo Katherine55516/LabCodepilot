@@ -9,8 +9,12 @@ import { getLocalDateString, localDayStartAsUTC } from './utils';
 import { inferProtocolFromLegacy } from './provider-catalog';
 import { seal, open, isSealed, getKey } from './crypto-seal';
 
-const dataDir = process.env.CLAUDE_GUI_DATA_DIR || path.join(os.homedir(), '.codepilot');
-const DB_PATH = path.join(dataDir, 'codepilot.db');
+function dataDir(): string {
+  return process.env.CLAUDE_GUI_DATA_DIR || path.join(os.homedir(), '.codepilot');
+}
+function DB_PATH(): string {
+  return path.join(dataDir(), 'codepilot.db');
+}
 
 // ── 凭证列加密（at-rest）────────────────────────────────────────────────────
 // 敏感列经 crypto-seal（safeStorage 主密钥 + AES-256-GCM）透明加解密：写时 seal、
@@ -65,7 +69,7 @@ let db: Database.Database | null = null;
 // File-based lock to prevent concurrent migration from multiple Next.js build workers.
 // Workers will retry for up to 10 seconds before giving up.
 function withMigrationLock(dbInstance: Database.Database, fn: (db: Database.Database) => void): void {
-  const lockPath = DB_PATH + '.migration-lock';
+  const lockPath = DB_PATH() + '.migration-lock';
   const maxWait = 10_000;
   const start = Date.now();
 
@@ -100,13 +104,13 @@ function withMigrationLock(dbInstance: Database.Database, fn: (db: Database.Data
 
 export function getDb(): Database.Database {
   if (!db) {
-    const dir = path.dirname(DB_PATH);
+    const dir = path.dirname(DB_PATH());
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
     }
 
     // Migrate from old locations if the new DB doesn't exist yet
-    if (!fs.existsSync(DB_PATH)) {
+    if (!fs.existsSync(DB_PATH())) {
       const home = os.homedir();
       const oldPaths = [
         // Old Electron userData paths (app.getPath('userData'))
@@ -122,10 +126,10 @@ export function getDb(): Database.Database {
       for (const oldPath of oldPaths) {
         if (fs.existsSync(oldPath)) {
           try {
-            fs.copyFileSync(oldPath, DB_PATH);
+            fs.copyFileSync(oldPath, DB_PATH());
             // Also copy WAL/SHM if they exist
-            if (fs.existsSync(oldPath + '-wal')) fs.copyFileSync(oldPath + '-wal', DB_PATH + '-wal');
-            if (fs.existsSync(oldPath + '-shm')) fs.copyFileSync(oldPath + '-shm', DB_PATH + '-shm');
+            if (fs.existsSync(oldPath + '-wal')) fs.copyFileSync(oldPath + '-wal', DB_PATH() + '-wal');
+            if (fs.existsSync(oldPath + '-shm')) fs.copyFileSync(oldPath + '-shm', DB_PATH() + '-shm');
             console.log(`[db] Migrated database from ${oldPath}`);
             break;
           } catch (err) {
@@ -135,7 +139,7 @@ export function getDb(): Database.Database {
       }
     }
 
-    db = new Database(DB_PATH);
+    db = new Database(DB_PATH());
     db.pragma('journal_mode = WAL');
     db.pragma('busy_timeout = 5000');
     db.pragma('foreign_keys = ON');
