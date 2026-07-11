@@ -184,6 +184,11 @@ interface ScriptManifestCaseView {
   usesMock: boolean;
   error?: string;
   validation?: { syntax: boolean; collected: boolean; replayed: boolean; warnings: string[]; error?: string };
+  /** 最近一次手动运行的失败原因（运行失败不改 status，故卡片只能靠它显示"为什么没变绿"）。 */
+  lastRunError?: string;
+  lastRunAt?: string;
+  /** 最近一次 AI 修复的结论（修了什么 / 为什么不是脚本缺陷），写给不会写代码的测试人员。 */
+  repairNote?: string;
 }
 interface ScriptManifestView {
   latestRunHash: string;
@@ -3603,13 +3608,15 @@ function ReportStepPanel({
     } catch { setHandoffBusy(false); }
   };
 
+  // 重试缺口 = 重新生成没有脚本/生成失败的用例。生成完接着自动跑通（runPipeline），
+  // 测试人员不必再点一次——单条精修（重试/运行/修复）在脚本弹框里。
   const retryScripts = async (caseIds?: string[]) => {
     setScriptBusy(true);
     try {
       const res = await fetch("/api/test/scripts/retry", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectPath, taskName, env, caseIds, model: model || undefined, providerId: providerId || undefined }),
+        body: JSON.stringify({ projectPath, taskName, env, caseIds, model: model || undefined, providerId: providerId || undefined, runPipeline: true }),
       });
       if (!res.ok) throw new Error("retry failed");
       setScriptReloadTick((n) => n + 1);
@@ -3620,21 +3627,28 @@ function ReportStepPanel({
     }
   };
 
-  const runScripts = async (caseIds?: string[]) => {
+  // 自动跑通：一键触发「运行→失败自动修→再跑」流水线，直至全部可修复脚本通过。
+  // 断言如实失败/环境阻塞的用例被诚实标出，不 force-pass。同步接口，分钟级返回。
+  const runPipeline = async () => {
     setScriptBusy(true);
     try {
-      const res = await fetch("/api/test/scripts/run", {
+      const res = await fetch("/api/test/scripts/pipeline", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectPath, taskName, env, caseIds }),
+        body: JSON.stringify({ projectPath, taskName, env, model: model || undefined, providerId: providerId || undefined }),
       });
       const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "run failed");
+      if (!res.ok) throw new Error(data.error || "pipeline failed");
       if (data.manifest) setScriptManifest(data.manifest as ScriptManifestView);
-      const results = Array.isArray(data.results) ? data.results as Array<{ ok?: boolean }> : [];
+      const s = data.summary as { passed?: string[]; needsHuman?: string[]; environmentBlocked?: string[]; stillFailing?: string[] } | undefined;
       showToast({
         type: data.ok ? "success" : "warning",
-        message: `${t("test.scripts.output")}：${results.filter((item) => item.ok).length}/${results.length}`,
+        message: t("test.scripts.pipelineResult", {
+          passed: s?.passed?.length ?? 0,
+          human: s?.needsHuman?.length ?? 0,
+          blocked: s?.environmentBlocked?.length ?? 0,
+          failing: s?.stillFailing?.length ?? 0,
+        }),
       });
     } catch (error) {
       showToast({ type: "error", message: error instanceof Error ? error.message : t("test.scripts.error") });
@@ -3724,18 +3738,36 @@ function ReportStepPanel({
     partial: "test.scripts.partial", error: "test.scripts.error", stale: "test.scripts.stale",
   };
   const scriptRunnable = scriptManifest?.cases.filter((item) => item.status === "verified" || item.status === "needs_review") ?? [];
-  const scriptHasGaps = !scriptManifest || scriptManifest.jobStatus === "partial" || scriptManifest.jobStatus === "error" || scriptManifest.jobStatus === "stale";
+  // 「重试缺口」只管【生成】缺口：没 manifest（旧报告）、整个 job 挂了/过期、或有用例
+  // 生成失败（failed/outdated）。刻意不含 jobStatus==='partial'——流水线后运行失败也会
+  // 置 partial，但那不是生成缺口，重试(重新生成)解决不了，会误导用户空点。
+  const scriptHasGaps = !scriptManifest
+    || scriptManifest.jobStatus === "error"
+    || scriptManifest.jobStatus === "stale"
+    || scriptManifest.cases.some((item) => item.status === "failed" || item.status === "outdated");
   const scriptWorking = scriptManifest?.jobStatus === "queued" || scriptManifest?.jobStatus === "running";
+  // 错误/进行中优先于空态：任务中途失败时 counts 仍是初始零值，
+  // 按 eligible===0 渲染会误报「本轮没有符合条件的用例」。
   const scriptInfo = !scriptManifest
     ? t("test.scripts.notGenerated")
-    : scriptManifest.counts.eligible === 0
-      ? t("test.scripts.empty")
-      : t("test.scripts.summary", {
-        generated: scriptManifest.counts.generated,
-        eligible: scriptManifest.counts.eligible,
-        verified: scriptManifest.counts.verified,
-        review: scriptManifest.counts.needsReview,
-      });
+    : scriptManifest.jobStatus === "error"
+      ? (scriptManifest.error?.slice(0, 200) || t("test.scripts.error"))
+      : scriptWorking && scriptManifest.counts.eligible === 0
+        ? t("test.scripts.busy")
+        : scriptManifest.counts.eligible === 0
+          ? t("test.scripts.empty")
+          : t("test.scripts.summary", {
+            generated: scriptManifest.counts.generated,
+            eligible: scriptManifest.counts.eligible,
+            verified: scriptManifest.counts.verified,
+            review: scriptManifest.counts.needsReview,
+          });
+  // 运行失败不改 case.status，counts 也不变 —— 不显式渲染出来，点「运行全部」后卡片
+  // 与点击前逐字节相同，用户只会看到一个转瞬即逝的 toast（"点了没反应"）。
+  const scriptRunFailures = scriptManifest?.cases.filter((item) => item.lastRunError) ?? [];
+  const scriptRunFailureText = scriptRunFailures.length > 0
+    ? t("test.scripts.runFailed", { n: scriptRunFailures.length, reason: scriptRunFailures[0].lastRunError!.slice(0, 160) })
+    : "";
 
   return (
     <div className="mt-2 space-y-3">
@@ -3830,9 +3862,17 @@ function ReportStepPanel({
               )}
             </>,
             `AI_LabTest/scripts/${taskName}/${env}/`,
-            <span className="inline-flex items-center gap-1.5">
-              {(scriptWorking || scriptBusy) && <SpinnerGap size={12} className="shrink-0 animate-spin" />}
-              {scriptInfo}
+            <span className="flex flex-col gap-1">
+              <span className="inline-flex items-center gap-1.5">
+                {(scriptWorking || scriptBusy) && <SpinnerGap size={12} className="shrink-0 animate-spin" />}
+                {scriptInfo}
+              </span>
+              {scriptRunFailureText && (
+                <span className="inline-flex items-start gap-1 text-status-error-foreground">
+                  <WarningCircle size={12} className="mt-0.5 shrink-0" />
+                  <span className="min-w-0 break-words">{scriptRunFailureText}</span>
+                </span>
+              )}
             </span>,
             <>
               {scriptManifest && scriptManifest.cases.length > 0 && (
@@ -3845,13 +3885,16 @@ function ReportStepPanel({
                   <ArrowUp size={12} /> {t("test.scripts.retry")}
                 </button>
               )}
+              {/* 卡片只留一个动作主线：自动跑通（运行→失败自动修→再跑）。原「运行全部」
+                  「AI 修复」是它的子集，收进弹框做单条精修，避免测试人员面对四个按钮犯选择困难。 */}
               {scriptRunnable.length > 0 && !scriptWorking && (
-                <button onClick={() => void runScripts(scriptRunnable.map((item) => item.caseId))} disabled={scriptBusy} className={btnGhost}>
-                  <Play size={12} /> {t("test.scripts.runAll")}
+                <button onClick={() => void runPipeline()} disabled={scriptBusy} className={btnPrimary} title={t("test.scripts.pipelineHint")}>
+                  {scriptBusy ? <SpinnerGap size={12} className="animate-spin" /> : <Wrench size={12} />} {t("test.scripts.pipeline")}
                 </button>
               )}
             </>,
-            !scriptManifest || scriptManifest.counts.eligible === 0 ? "dim" : undefined,
+            scriptManifest?.jobStatus === "error" ? "alert"
+              : !scriptManifest || scriptManifest.counts.eligible === 0 ? "dim" : undefined,
           )}
         </div>
       </div>
@@ -3988,7 +4031,7 @@ function ScriptPreview({ t, projectPath, taskName, env, initialManifest, onChang
   const [selectedId, setSelectedId] = useState(initialManifest.cases[0]?.caseId ?? "");
   const [content, setContent] = useState<string | null>(null);
   const [contentError, setContentError] = useState(false);
-  const [busy, setBusy] = useState<"retry" | "run" | null>(null);
+  const [busy, setBusy] = useState<"retry" | "run" | "repair" | null>(null);
   const [output, setOutput] = useState("");
   const selected = manifest.cases.find((item) => item.caseId === selectedId) ?? manifest.cases[0];
 
@@ -4091,6 +4134,33 @@ function ScriptPreview({ t, projectPath, taskName, env, initialManifest, onChang
     }
   };
 
+  // AI 修复：仅对「有失败记录」的脚本开放。同步接口（LLM+校验+重放），完成后 manifest 直达终态。
+  const repairSelected = async () => {
+    if (!selected) return;
+    setBusy("repair");
+    setOutput("");
+    try {
+      const res = await fetch("/api/test/scripts/repair", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectPath, taskName, env, caseIds: [selected.caseId] }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "repair failed");
+      if (data.manifest) {
+        const next = data.manifest as ScriptManifestView;
+        setManifest(next);
+        onChanged(next);
+      }
+      const result = Array.isArray(data.results) ? data.results[0] as { fixed?: boolean; reason?: string } | undefined : undefined;
+      setOutput(result ? `${result.fixed ? "✓" : "✗"} ${result.reason ?? ""}` : "");
+    } catch (error) {
+      setOutput(error instanceof Error ? error.message : t("test.scripts.error"));
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const runnable = selected?.status === "verified" || selected?.status === "needs_review";
   const working = manifest.jobStatus === "queued" || manifest.jobStatus === "running";
 
@@ -4137,7 +4207,24 @@ function ScriptPreview({ t, projectPath, taskName, env, initialManifest, onChang
                 {busy === "run" ? <SpinnerGap size={10} className="animate-spin" /> : <Play size={10} />} {t("test.scripts.runOne")}
               </button>
             )}
+            {selected?.lastRunError && (
+              <button onClick={repairSelected} disabled={busy !== null || working} className="inline-flex items-center gap-1 rounded border border-border px-2 py-0.5 text-[10px] text-foreground hover:bg-muted disabled:opacity-40">
+                {busy === "repair" ? <SpinnerGap size={10} className="animate-spin" /> : <Wrench size={10} />} {t("test.scripts.repair")}
+              </button>
+            )}
           </div>
+          {/* 运行失败是持久化的（manifest.lastRunError），重开弹框仍可见；上方的 output 只是本次运行的瞬时输出。 */}
+          {selected?.lastRunError && (
+            <div className="border-b border-border bg-status-error-muted/40 px-3 py-1.5 text-[10px] text-status-error-foreground">
+              {selected.lastRunError}
+            </div>
+          )}
+          {/* AI 修复结论：修了什么 / 为什么不是脚本缺陷（如页面行为与用例预期不符 → 需人工确认）。 */}
+          {selected?.repairNote && (
+            <div className="border-b border-border bg-status-info-muted/40 px-3 py-1.5 text-[10px] text-status-info-foreground">
+              🔧 {selected.repairNote}
+            </div>
+          )}
           {(Boolean(selected?.error) || (selected?.validation?.warnings?.length ?? 0) > 0) && (
             <div className="border-b border-border bg-status-warning-muted/40 px-3 py-1.5 text-[10px] text-status-warning-foreground">
               {selected.error || selected.validation?.warnings.join(" · ")}

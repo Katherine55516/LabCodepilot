@@ -1,6 +1,6 @@
 # 执行成功回归用例自动生成 Playwright 脚本
 
-> 状态：Phase 0 进行中 | 分支：V3.1.0_dev | 创建：2026-07-09
+> 状态：已完成 | 分支：V3.1.0_dev | 创建：2026-07-09 | 完成：2026-07-10
 >
 > 目标：保持现有「需求分析 → 用例设计 → 测试执行 → 测试报告」四节点不变；测试报告成功收口后，后台为本轮 `status=pass` 且 `tags` 含「回归测试」的每条用例生成、校验并可选回放一个独立 Playwright TypeScript 脚本。
 
@@ -158,9 +158,18 @@ interface ScriptManifest {
 
 | Phase | 状态 | 备注 |
 |---|---|---|
-| Phase 0 POC/契约 | 🔄 进行中 | 本轮 |
-| Phase 1 轨迹/筛选 | 📋 待开始 | |
-| Phase 2 后台/生成/幂等 | 📋 待开始 | |
-| Phase 3 运行器 | 📋 待开始 | |
-| Phase 4 API/UI | 📋 待开始 | |
-| Phase 5 收尾/验证 | 📋 待开始 | |
+| Phase 0 POC/契约 | ✅ 已完成 | MCP tool result 提取与配套 runtime POC 通过 |
+| Phase 1 轨迹/筛选 | ✅ 已完成 | trace 脱敏落盘；严格 cases/run join |
+| Phase 2 后台/生成/幂等 | ✅ 已完成 | manifest、singleflight、文件锁、最新 run 胜出、缺口重试 |
+| Phase 3 运行器 | ✅ 已完成 | 开发态与 packaged standalone 均真实拉起配套 headless shell |
+| Phase 4 API/UI | ✅ 已完成 | 报告区卡片、轮询、脚本预览、单条/全部运行、三语 i18n |
+| Phase 5 收尾/验证 | ✅ 已完成 | 回归库冻结来源映射；handover；全量 test/smoke/CDP/mac 打包通过 |
+
+## 7. 完成记录
+
+- `npm run test`：1952 passed / 1 skipped / 0 failed。
+- `npm run test:smoke`：6/6 passed。
+- CDP：桌面与 390×844 视口验证卡片/弹窗/脚本切换；console 0 error/warning；真实“运行所选”1 passed。
+- `npm run electron:pack`：macOS arm64 `.app` / DMG / ZIP 成功；codesign deep strict 与 `hdiutil verify` 通过。
+- 使用打包 `.app` 的 `ELECTRON_RUN_AS_NODE` + standalone MCP Playwright + Resources headless shell 实际启动浏览器，输出 `packaged-runner-ok`。
+- Windows 未在 macOS 上执行安装包实机回放；实现已覆盖 `.exe` 探测、junction runtime 链接和 standalone cwd，仍需 Windows 发布流水线终验。

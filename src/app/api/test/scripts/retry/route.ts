@@ -29,6 +29,12 @@ export async function POST(req: Request): Promise<Response> {
       model: typeof body.model === 'string' ? body.model : undefined,
       providerId: typeof body.providerId === 'string' ? body.providerId : undefined,
       forceCaseIds,
+      // 手动重试 = 明确的用户意图：跳过 done/partial 幂等去重、重新排任务（指纹没变的
+      // 用例在 executeJob 内仍复用、不烧模型）。没有这个标记，同 runHash 的重试会被
+      // 去重静默吞掉——用例改了（指纹变了）也不会重新生成，按钮等于空转。
+      forceRefresh: true,
+      // 可选：重新生成后接着自动跑通（与报告流的自动路径同一条链）。被测应用不可达时内部跳过运行。
+      runPipeline: body.runPipeline === true,
     });
     return Response.json({ ok: true, ...result });
   } catch (error) {

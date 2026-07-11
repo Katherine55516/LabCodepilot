@@ -756,7 +756,6 @@ const zh: Record<TranslationKey, string> = {
   'test.scripts.summary': '已生成 {generated}/{eligible} · 验证通过 {verified} · 待复核 {review}',
   'test.scripts.view': '查看脚本',
   'test.scripts.retry': '重试缺口',
-  'test.scripts.runAll': '运行全部',
   'test.scripts.runOne': '运行所选',
   'test.scripts.verified': '已验证',
   'test.scripts.needsReview': '待复核',
@@ -766,6 +765,11 @@ const zh: Record<TranslationKey, string> = {
   'test.scripts.busy': '处理中…',
   'test.scripts.loadFailed': '脚本读取失败',
   'test.scripts.output': '运行输出',
+  'test.scripts.runFailed': '{n} 个脚本运行失败：{reason}',
+  'test.scripts.repair': 'AI 修复',
+  'test.scripts.pipeline': '自动跑通',
+  'test.scripts.pipelineHint': '自动运行全部脚本，失败则 AI 修复后重跑，直至全部可修复的通过',
+  'test.scripts.pipelineResult': '自动跑通：通过 {passed} · 需人工 {human} · 环境阻塞 {blocked} · 未修复 {failing}',
   'nav.imageStudio': '文生图',
 
   // ── 文生图（独立模块）──────────────────────────────────────

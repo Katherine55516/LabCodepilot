@@ -44,7 +44,6 @@
 
 | 文件 | 主题 | 状态 |
 |------|------|------|
-| active/regression-script-generation.md | 测试报告完成后后台为本轮执行成功的「回归测试」标签用例生成、校验并运行独立 Playwright 脚本；四节点不变，支持幂等更新、重启恢复、失败项重试 | Phase 0 进行中 |
 | active/regression-library.md | 测试工作台:回归用例库(用例设计后自动沉淀「回归测试」标签用例 + 项目级库查看/管理 + 跨任务一键重跑) | 设计完成,待实现(批 A-E) |
 | active/regression-library-v2.md | 回归用例库 v2 一期：执行轮次实体（留痕/快照/中断态）+ 回归套件（静态+查询构建器+pinned）+ 发起弹窗重做（套件/env/预检估算）+ 报告按来源任务分组与 delta + 库检索；方案见 research/regression-library-v2-benchmark-proposal.md | 批 A-E/G/H 已完成；批 F（打包验收）待用户发起 |
 | active/regression-library-v2-phase23.md | 回归用例库 v2 二/三期（按交互原型 6 屏 1:1）：`_lib` 治理元数据（评审态/rev/隔离）+ 跨轮矩阵读侧现算 + 复测轮 failed-only 与合并口径红线 + 轮次报告独立页 + AI 失败归因 + 对比矩阵 + 健康度治理与隔离护栏 | 批 I-P 已完成；打包验收 + 真实 AI 归因质量待验 |
@@ -80,6 +79,7 @@
 
 | 文件 | 主题 | 完成日期 |
 |------|------|----------|
+| completed/regression-script-generation.md | 测试报告成功后后台为本轮 pass+「回归测试」标签用例生成独立 Playwright 脚本；四节点不变，具备脱敏轨迹、结构化生成、安全校验、指纹幂等、锁恢复、源任务回写、报告区查看/重试/运行，并通过开发态与 macOS 打包态真实回放 | 2026-07-10 |
 | completed/test-usage-stats.md | **测试模块使用统计**（P1）：test_stats_events 事件流水 + 纯函数聚合口径层（采纳率首轮基线 / 报告准确度+覆盖率 / 服务端逐用例计时 / 模型节点级归因 / 熔断排除 / 时间窗口计入门控）、10 类事件字典、四 scope API + 4 Sheet XLSX 导出、TestStatsView 看板（第 4 视图）+ 复核 UI + 节点用时/模型徽标。P2 匿名上报为独立后续里程碑 | 2026-07-09 |
 | completed/marketplace-skill-translate.md | 技能市场「AI 翻译简介」：详情页一键翻译 README 到应用语言（非英语才显示），managed 第一个模型 + generateTextViaSdk 单轮（别名坑规避）、11 条规则系统提示词（含提示注入防线）、译文/原文可回切 + 模块级缓存、30K 截断 | 2026-07-03 |
 | completed/document-preview.md | 应用内文档预览（PDF/DOCX/XLSX/PPTX）：复用 PreviewPanel 分发骨架 + serve 取 arrayBuffer + next/dynamic 懒加载四渲染器（react-pdf/SheetJS+DataTableViewer/docx-preview/aiden0z-pptx）、PDF 5 类离线资产管线（含 wasm+cmaps+iccs）、DOCX 三层强制 XSS vs PPTX 差异化安全、raw 路由中文名 RFC 5987 修复；老二进制 .doc/.ppt/.xls 不做 | 2026-06-30 |

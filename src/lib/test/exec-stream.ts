@@ -344,6 +344,9 @@ export function wrapReportStream(
                 runHash: reportRunHash,
                 model: opts.model,
                 providerId: opts.providerId,
+                // 报告触发的自动生成默认接入「运行→失败自动修→再跑」流水线；
+                // 被测应用不可达时 executeJob 内部会跳过运行、只停在生成态。
+                runPipeline: true,
               });
             } catch {
               // 后台增强产物失败不得拖垮报告主流程

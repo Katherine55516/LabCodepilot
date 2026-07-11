@@ -32,6 +32,20 @@ export interface ScriptManifestCase {
   lastSeenRunHash?: string;
   validation?: ScriptValidationSummary;
   error?: string;
+  /**
+   * Why the last manual run failed (redacted Playwright output tail), and when.
+   * A failed run does NOT demote `status`: the script may be sound and the app
+   * under test simply down. Persisting it here is what lets the report card show
+   * the reason instead of leaving the user with a card that never changes.
+   */
+  lastRunError?: string;
+  lastRunAt?: string;
+  /**
+   * Outcome of the last AI repair attempt, phrased for testers who don't code:
+   * what was fixed, or why the failure is NOT a script defect (e.g. the page's
+   * real behaviour contradicts the case's expected result) and needs a human.
+   */
+  repairNote?: string;
 }
 
 export interface ScriptManifest {
