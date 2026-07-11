@@ -86,11 +86,13 @@ manifest job 状态：`queued/running/done/partial/error/stale`；单用例状�
 - `.generation.lock` 僵尸锁判定：除 30 分钟兜底外，额外检查锁记录的 `pid` 是否存活（`process.kill(pid,0)`）——桌面应用被强退/崩溃留下的锁，持有进程已死即立刻抢占，不必等 30 分钟堵死后续任务。
 - `enqueueScriptJob` 幂等去重 vs 手动重试：done/partial + 同 runHash + 无 forceCaseIds 的入队会被去重短路（保证报告流重复触发幂等）。**手动「重试缺口」必须传 `forceRefresh:true`**（retry 路由已固定传）——否则用例改了（指纹变了）或上轮有 failed 用例时，重试被静默吞掉、按钮空转（真机踩坑：改完用例预期点重试无任何反应）。forceRefresh 只跳过去重，executeJob 内指纹复用仍生效，没变的用例不烧模型。
 - 运行/修复核心（`runScriptCases`/`repairScriptCases`）抽成 lock-free，手动路由（自持锁）与自动流水线（在 `executeJob` 锁内）共用同一份逻辑；`run`/`repair`/`pipeline` 三个手动路由各自 `acquireLock`，与后台生成互斥。
+- **静态校验失败的生成期自纠闭环（2026-07-11）**：此前只有【运行时】失败有 `repairScriptsBatch` 回灌闭环，【静态校验】失败（多个 `test()`、标题缺用例 ID、多余 import 等）一次不合规就 dead-end 成 `failed`、无任何自纠——「重试缺口」只是同一 prompt 再赌一次（真机踩坑：网关模型把一条用例拆成多个 `test()` → 「每个脚本必须恰好一个 test(); test 标题必须包含用例 ID」→ 永久 0/1）。修法镜像运行时闭环：`resolveStaticValidContent`（纯函数、注入 repair 便于单测）在静态失败时把**确切校验错误**喂回 `repairScriptsBatch` 一次并复校，改好才采纳、否则保留原始错误。生成 prompt 另加**具体结构骨架**（一个顶层 `test()`、标题以 `scriptCaseId` 开头、用 `await test.step(...)` 分步——`test.step(` 不被校验器的 `/\btest\s*\(/g` 计数）从源头降不合规率；repair prompt 同步这条。
+- **重放失败不再 dead-end（2026-07-11）**：`validateAndPublish` 里只读用例生成期【无条件真机重放】，此前重放失败 → `failed()`（**不带 `lastRunError`**）。而 `runScriptCases` 只跑 `verified|needs_review`、`repairScriptCases`/`runAndRepairLoop` 只碰带 `lastRunError` 的——`failed` 落在两个恢复通道之外成死态，被测应用没起时只读用例永久卡 0/1。改为：脚本既已过静态 + collect，就落盘、标 `needs_review` 并把 `replayError` 记进 `lastRunError`，交给既有闭环（运行→自动修 / `isEnvironmentFailure` 停靠 / 手动 AI 修复）在被测应用起来后收口。**collect 失败仍保留 `failed`**（连加载都过不了 = malformed，该重新生成）。恢复态契约抽成导出纯谓词 `isRunnableStatus`/`isFixableCase` 并单测，防后续新增恢复路径漏态。
 
 ## 运维与验证
 
 - 开发态运行 UI 前若刚执行过 Electron 打包，先 `npm rebuild better-sqlite3` 恢复 Node ABI。
 - 打包流程的 `after-pack.js` 会再把 better-sqlite3 重编译为 Electron ABI。
-- 定向测试：`src/__tests__/unit/test-script-generation.test.ts`、`test-exec-stream.test.ts`、`sdk-result-interpret.test.ts`（SDK 四种 result 形态）、`script-import-normalize.test.ts`（import 归一化端到端契约）、`script-replay-safety.test.ts`（重放安全判定 + 失败摘要）、`script-repair.test.ts`（AI 修复载荷红线）、`script-pipeline-classify.test.ts`（环境失败分类器）。
+- 定向测试：`src/__tests__/unit/test-script-generation.test.ts`、`test-exec-stream.test.ts`、`sdk-result-interpret.test.ts`（SDK 四种 result 形态）、`script-import-normalize.test.ts`（import 归一化端到端契约）、`script-replay-safety.test.ts`（重放安全判定 + 失败摘要）、`script-repair.test.ts`（AI 修复载荷红线）、`script-pipeline-classify.test.ts`（环境失败分类器）、`script-validator-structure.test.ts`（一个 test()/标题含 ID/test.step 不计数——复现并守 2026-07-11 真机失败）、`script-static-repair.test.ts`（静态修复决策 `resolveStaticValidContent` + 恢复态契约 `isRunnableStatus`/`isFixableCase`）。
 - 流水线端到端真机验证（打包版 + live SUT，两轮）：① R02 注入定位器歧义 → AI 自动诊断补 `exact:true` → 重跑通过（`verified`）；R03 断言如实失败（页面不禁用按钮） → 1 轮内判「需人工」、覆盖乐观 repairNote 讲真话、不 force-pass；终态 `partial` 不卡死。② 证实每条用例只 1 次修复机会、环境不可达跳过、孤儿锁按 pid 存活抢占。
 - 关键检查：同 run 重复报告不改 manifest；相同语义不改脚本 mtime；trace/脚本/输出无真实秘密和本机路径；Next dev 与 standalone 均能解析 MCP 配套 runtime/browser。

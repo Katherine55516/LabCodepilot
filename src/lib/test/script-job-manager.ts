@@ -19,7 +19,7 @@ import {
   type ScriptManifestCase,
 } from './script-artifacts';
 import { readTraceFile, redactTraceText, type TraceRedaction } from './script-trace';
-import { isSafeForAutomaticReplay, validateScriptSource } from './script-validator';
+import { isSafeForAutomaticReplay, validateScriptSource, type StaticScriptValidation } from './script-validator';
 import { resolveScriptPlaywrightRuntime, runGeneratedScript, summarizeRunFailure } from './script-runner';
 import { isUnsafeSegment } from './path-safety';
 import type { RunJson } from './reduce';
@@ -224,18 +224,113 @@ function candidateSource(candidate: EligibleScriptCase): Pick<ScriptManifestCase
     : {};
 }
 
+// ── Recovery state-machine contract ───────────────────────────────────────────
+// The generation pipeline has exactly two dead-end-free recovery channels, and a
+// case must land in a state one of them accepts or it is permanently stuck. These
+// predicates make that contract explicit and testable (a 2026-07-11 review found a
+// replay-failed read-only case was dead-ended as 'failed' — outside BOTH channels).
+
+/** Script is on disk and may be run / re-run against the SUT (运行 / pipeline). */
+export function isRunnableStatus(status: ScriptManifestCase['status']): boolean {
+  return status === 'verified' || status === 'needs_review';
+}
+
+/**
+ * The AI-repair loop may act on this case: it carries a recorded run failure.
+ * A 'failed' case (static/collect failure at generation — no lastRunError, no
+ * on-disk script) is deliberately NOT fixable; its only recovery is 「重试缺口」
+ * (re-generation). This is precisely why a loadable-but-replay-failed script must
+ * be published as needs_review WITH lastRunError (see validateAndPublish), never
+ * dead-ended as 'failed' — otherwise it is neither runnable nor fixable and stuck.
+ */
+export function isFixableCase(item: Pick<ScriptManifestCase, 'lastRunError'>): boolean {
+  return !!item.lastRunError;
+}
+
+/**
+ * Given freshly generated content and an injectable repair function, decide what
+ * to publish. When the content fails static validation we feed the *exact*
+ * validator errors back to the model once and re-validate — mirroring the
+ * runtime-repair closed loop, which the generation path previously lacked.
+ *
+ * Before this, a single non-conforming output (multiple `test()`, a title without
+ * the case ID, a stray import) dead-ended at `failed` with no recourse; the UI's
+ * 「重试缺口」 just re-rolled the same prompt/model and usually failed the same way
+ * (observed 2026-07-11: gateway model produced 2 `test()` blocks with step-titles
+ * → 「每个脚本必须恰好一个 test(); test 标题必须包含用例 ID」 → 0/1, permanently 存在缺口).
+ *
+ * The repair fn is INJECTED so this decision logic is unit-testable without the
+ * SDK. It resolves to the repaired source, or null when repair is impossible;
+ * it may REJECT (e.g. the job was superseded / aborted) — that propagates.
+ */
+export async function resolveStaticValidContent(params: {
+  content: string;
+  scriptCaseId: string;
+  repair: (errors: string[]) => Promise<string | null>;
+}): Promise<{ content: string; check: StaticScriptValidation; repaired: boolean }> {
+  const first = validateScriptSource(params.content, params.scriptCaseId);
+  if (first.ok) return { content: params.content, check: first, repaired: false };
+  const repaired = await params.repair(first.errors);
+  if (repaired && repaired.trim()) {
+    const recheck = validateScriptSource(repaired, params.scriptCaseId);
+    // Only accept the repair if it actually clears static validation; otherwise
+    // keep the original content so the manifest records the true first errors.
+    if (recheck.ok) return { content: repaired, check: recheck, repaired: true };
+  }
+  return { content: params.content, check: first, repaired: false };
+}
+
+/**
+ * Static-validation repair via the SDK — reuses the runtime-repair batch entry
+ * (its prompt already restates every generation constraint). The failure text is
+ * framed as a structural/写法 problem so the red-line ("页面行为≠预期时不得弱化断言")
+ * never misfires: a static failure is never a behavior mismatch.
+ */
+async function staticRepairViaSdk(params: {
+  request: ScriptJobRequest;
+  candidate: EligibleScriptCase;
+  content: string;
+  errors: string[];
+  redactions: TraceRedaction[];
+  abortSignal?: AbortSignal;
+}): Promise<string | null> {
+  const failure = `脚本未通过静态校验（尚未运行——属于结构/写法问题，不是页面实际行为与用例预期不符）。请逐条修正以下校验错误后重新输出完整脚本：\n- ${params.errors.join('\n- ')}`;
+  try {
+    const outcomes = await repairScriptsBatch({
+      inputs: [{ candidate: params.candidate, currentContent: params.content, failure }],
+      model: params.request.model,
+      providerId: params.request.providerId,
+      redactions: params.redactions,
+      abortSignal: params.abortSignal,
+    });
+    const fixed = outcomes.find((o) => o.caseId === params.candidate.id && o.fixed && o.content);
+    return fixed?.content ?? null;
+  } catch (err) {
+    // Job superseded / aborted → let it bubble so the outer loop stops cleanly.
+    if (params.abortSignal?.aborted) throw err;
+    // Repair call itself failed (timeout / gateway drop) → give up on repair for
+    // this case, fall back to the original static errors. Don't sink the batch.
+    return null;
+  }
+}
+
 async function validateAndPublish(params: {
   request: ScriptJobRequest;
   candidate: EligibleScriptCase;
   generated: GeneratedScript;
   previous?: ScriptManifestCase;
   redactions: TraceRedaction[];
+  abortSignal?: AbortSignal;
 }): Promise<ScriptManifestCase> {
-  const { request, candidate, generated, previous, redactions } = params;
+  const { request, candidate, generated, previous, redactions, abortSignal } = params;
   const now = new Date().toISOString();
   const finalFile = candidateFinalFile(request, candidate);
   const source = candidateSource(candidate);
-  const staticCheck = validateScriptSource(generated.content, candidate.scriptCaseId);
+  const { content, check: staticCheck } = await resolveStaticValidContent({
+    content: generated.content,
+    scriptCaseId: candidate.scriptCaseId,
+    repair: (errors) => staticRepairViaSdk({ request, candidate, content: generated.content, errors, redactions, abortSignal }),
+  });
   const failed = (error: string, warnings: string[] = []): ScriptManifestCase => ({
     caseId: candidate.id,
     file: candidate.fileName,
@@ -252,7 +347,7 @@ async function validateAndPublish(params: {
 
   fs.mkdirSync(path.dirname(finalFile), { recursive: true });
   const temp = candidateTempFile(finalFile);
-  fs.writeFileSync(temp, generated.content, 'utf-8');
+  fs.writeFileSync(temp, content, 'utf-8');
   try {
     const resolved = resolveProjectEnvWithDb(request.projectPath, request.env);
     const runnerBase = {
@@ -274,10 +369,18 @@ async function validateAndPublish(params: {
       replayed = replay.ok;
       if (!replay.ok) replayError = `Playwright 自动重放失败: ${replay.output.slice(-1000)}`;
     }
-    if (safeReplay && !replayed) return failed(replayError, staticCheck.warnings);
-
+    // 生成期自动重放失败【不再】dead-end 成 status:'failed'。'failed' 是死态：
+    // 它不带 lastRunError，而运行(runScriptCases 只跑 verified|needs_review)、AI 修复
+    // (repairScriptCases 跳过无 lastRunError 的)、自动流水线(fixable 要求 lastRunError)
+    // 全都不碰它，孤零零一个 failed 连流水线都不触发 —— 只读用例遇到被测应用没启动，
+    // 就永久卡 0/1 存在缺口，唯一出路是「重试缺口」重新生成、再撞同一堵墙。
+    // 脚本既已通过静态 + Playwright 加载(collect)校验，就落盘、标 needs_review 并把
+    // replayError 记进 lastRunError，交给既有闭环(运行→失败自动修 / isEnvironmentFailure
+    // 停靠 / 手动 AI 修复)在被测应用起来后收口。写操作用例本就跳过重放、同样 needs_review。
+    // 注意：collect 失败仍保留 failed —— 连加载都过不了的脚本是 malformed，该重新生成而非留存。
+    const replayFailed = safeReplay && !replayed;
     fs.renameSync(temp, finalFile);
-    const needsReview = staticCheck.needsReview || candidate.usesMock || !safeReplay || candidate.sourceMissing;
+    const needsReview = replayFailed || staticCheck.needsReview || candidate.usesMock || !safeReplay || candidate.sourceMissing;
     return {
       caseId: candidate.id,
       file: candidate.fileName,
@@ -287,6 +390,7 @@ async function validateAndPublish(params: {
       usesMock: candidate.usesMock,
       generatedAt: now,
       ...(replayed ? { lastVerifiedAt: now } : {}),
+      ...(replayFailed ? { lastRunError: replayError, lastRunAt: now } : {}),
       lastSeenRunHash: request.runHash,
       validation: {
         syntax: true,
@@ -296,6 +400,7 @@ async function validateAndPublish(params: {
           ...staticCheck.warnings,
           ...(candidate.usesMock ? ['执行时使用了接口模拟（browser_route mock），需人工确认真实环境可通过'] : []),
           ...(!safeReplay ? ['已跳过自动重放：用例含写操作且未声明 cleanup 清理方式，请人工运行确认（或给用例补 cleanup 字段）'] : []),
+          ...(replayFailed ? ['生成期自动重放未通过，脚本已保存待复核：可能被测应用未启动，或脚本需 AI 修复 —— 已进入运行/修复闭环，可点「运行」或「AI 修复」，或在被测应用启动后重跑'] : []),
           ...(candidate.sourceMissing ? ['回归用例库来源映射缺失，脚本暂存于聚合任务目录'] : []),
         ],
       },
@@ -358,6 +463,7 @@ async function generateMissing(
         generated: item,
         previous: previousById.get(candidate.id),
         redactions,
+        abortSignal,
       }));
     }
   }
@@ -435,7 +541,7 @@ async function executeJob(entry: QueueEntry): Promise<void> {
 
     // 自动流水线：生成后运行 + 失败自动修，直至全部（可修复的）通过。仅在被测应用可达时进行，
     // best-effort —— 流水线出问题不抹掉已生成的脚本，只把没跑成的留给用户手动触发。
-    if (request.runPipeline && manifest.cases.some((c) => c.status === 'verified' || c.status === 'needs_review')) {
+    if (request.runPipeline && manifest.cases.some((c) => isRunnableStatus(c.status))) {
       if (await isSutReachable(request)) {
         try {
           const summary = await runAndRepairLoop(request, manifest, request.maxRepairRounds ?? DEFAULT_MAX_REPAIR_ROUNDS);
@@ -630,7 +736,7 @@ async function runScriptCases(
 ): Promise<Array<{ caseId: string; ok: boolean; output: string; timedOut: boolean }>> {
   const requested = caseIds?.length ? new Set(caseIds) : null;
   const runnable = manifest.cases.filter((item) =>
-    (item.status === 'verified' || item.status === 'needs_review') && (!requested || requested.has(item.caseId)));
+    isRunnableStatus(item.status) && (!requested || requested.has(item.caseId)));
   const resolved = resolveProjectEnvWithDb(jobRequest.projectPath, jobRequest.env);
   const results: Array<{ caseId: string; ok: boolean; output: string; timedOut: boolean }> = [];
   for (const item of runnable) {
@@ -797,7 +903,7 @@ async function runAndRepairLoop(
   let rounds = 0;
   for (let round = 1; round <= maxRounds; round++) {
     parkEnv();  // 环境问题（被测应用没起）不喂给 AI。
-    const fixable = manifest.cases.filter((c) => c.lastRunError && !parked.has(c.caseId));
+    const fixable = manifest.cases.filter((c) => isFixableCase(c) && !parked.has(c.caseId));
     if (!fixable.length) break;
     rounds = round;
 

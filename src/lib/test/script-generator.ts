@@ -236,6 +236,18 @@ export async function generateScriptsBatch(params: {
 脚本必须 import { test, expect } from "playwright/test"（注意：不是 "@playwright/test"，运行环境里不存在该包），
 每文件恰好一个 test，标题包含 scriptCaseId，至少一个 expect。除此之外禁止任何 import/require。
 只能使用相对 URL 或 process.env.BASE_URL；账号密码只能引用 process.env.TEST_USERNAME/TEST_PASSWORD，禁止写真实秘密、storageState 路径和本机绝对路径。
+整份文件【只能有一个顶层 test(...)】，标题必须以 scriptCaseId 开头。多个步骤要写进【同一个】test 内，用 await test.step("步骤N：…", async () => { … }) 分段（test.step 不算额外的 test，且不要给它加标题外的 ID）。绝对不要把每个步骤拆成多个 test()，也不要用 test.describe 包多个 test —— 校验器会以「恰好一个 test()」直接判失败。结构必须严格如下（占位符换成真实内容）：
+import { test, expect } from "playwright/test";
+
+test("<scriptCaseId> <一句话用例目的>", async ({ page }) => {
+  await test.step("步骤1：…", async () => {
+    // 操作 + await expect(...) 断言
+  });
+  await test.step("步骤2：…", async () => {
+    // …
+  });
+});
+
 优先 getByTestId/getByRole/getByLabel，其次 getByText/getByPlaceholder；不得使用 MCP ref。
 定位器必须唯一：Playwright 的 name 选项默认按【子串】匹配，页面上的列表项/卡片常带 role="button" 且文案包含同样的字，
 一个宽泛的 name 会命中多个元素并以 strict mode violation 失败。因此 getByRole/getByText 传字符串 name 时必须写
@@ -353,7 +365,7 @@ export async function repairScriptsBatch(params: {
 只返回符合 JSON Schema 的对象，不输出 Markdown，不调用任何工具。每条输入恰好返回一项，caseId/fileName 原样返回。
 【只允许修技术缺陷】：定位器歧义或找不到元素（getByRole/getByText 传字符串 name 必须 { exact: true }；仍有歧义就用 getByTestId 或先用容器缩小范围，不要用 .first() 掩盖）、等待时机、前置条件/数据准备。
 【红线】：如果 failure 表明页面实际行为与用例 expected 不一致（断言如实失败），这不是脚本缺陷，禁止通过弱化、删除或反转断言让脚本通过 —— 返回 fixed=false，reason 用一句测试人员能懂的话说明「页面实际行为是 X，用例预期是 Y，需人工确认是产品缺陷还是用例预期有误」。
-fixed=true 时 content 为修复后的完整脚本，并保持生成约束：import { test, expect } from "playwright/test"（不是 "@playwright/test"）；每文件恰好一个 test，标题含 scriptCaseId，至少一个 expect；只用相对 URL 或 process.env.BASE_URL；账号密码只用 process.env.TEST_USERNAME/TEST_PASSWORD；除 playwright/test 外禁止任何 import/require。fixed=false 时 content 返回空字符串。
+fixed=true 时 content 为修复后的完整脚本，并保持生成约束：import { test, expect } from "playwright/test"（不是 "@playwright/test"）；【整份文件恰好一个顶层 test】，标题以 scriptCaseId 开头，多个步骤写进同一个 test 内并用 await test.step("步骤N：…", async () => {…}) 分段，绝不拆成多个 test 或用 test.describe 包多个；至少一个 expect；只用相对 URL 或 process.env.BASE_URL；账号密码只用 process.env.TEST_USERNAME/TEST_PASSWORD；除 playwright/test 外禁止任何 import/require。fixed=false 时 content 返回空字符串。
 reason 永远必填：修了什么、或为什么不能修，一句话，写给不会写代码的测试人员。`;
   const text = await generateTextViaSdk({
     providerId: params.providerId,
