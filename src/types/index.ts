@@ -785,6 +785,15 @@ export interface MCPServerConfig {
   headers?: Record<string, string>;
   /** Persistent enable/disable. undefined or true = enabled; false = disabled. */
   enabled?: boolean;
+  /**
+   * true = 该 server 的全部工具始终进入 turn-1 prompt，绝不被 tool search 延迟。
+   * Claude Code 2.1.203 起启用 tool search 时 MCP 工具默认延迟加载
+   * (defer_loading)，模型须先 ToolSearch 命中才能使用；对"必须立刻可用"的
+   * 工具集（如测试执行注入的 Playwright）延迟会导致模型反复 ToolSearch 空转。
+   * 映射为 SDK McpServerConfig.alwaysLoad（= API defer_loading:false）。
+   * 副作用：会话启动会阻塞等待该 server 连接（上限 5s）。
+   */
+  alwaysLoad?: boolean;
 }
 
 export interface MCPConfig {

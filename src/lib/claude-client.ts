@@ -116,6 +116,7 @@ function toSdkMcpConfig(
         if (config.headers && Object.keys(config.headers).length > 0) {
           sseConfig.headers = config.headers;
         }
+        if (config.alwaysLoad) sseConfig.alwaysLoad = true;
         result[name] = sseConfig;
         break;
       }
@@ -132,6 +133,7 @@ function toSdkMcpConfig(
         if (config.headers && Object.keys(config.headers).length > 0) {
           httpConfig.headers = config.headers;
         }
+        if (config.alwaysLoad) httpConfig.alwaysLoad = true;
         result[name] = httpConfig;
         break;
       }
@@ -147,6 +149,7 @@ function toSdkMcpConfig(
           args: config.args,
           env: config.env,
         };
+        if (config.alwaysLoad) stdioConfig.alwaysLoad = true;
         result[name] = stdioConfig;
         break;
       }

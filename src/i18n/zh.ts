@@ -2669,6 +2669,9 @@ const zh: Record<TranslationKey, string> = {
   'errors.NETWORK_UNREACHABLE.userMessage': '无法连接到 API 端点{baseUrl}。',
   'errors.NETWORK_UNREACHABLE.actionHint': '请检查网络连接，以及服务商设置中的 Base URL。',
 
+  'errors.STREAM_DISCONNECTED.userMessage': '模型响应中途连接被断开{provider}。',
+  'errors.STREAM_DISCONNECTED.actionHint': '通常是网关或服务商在长响应上超时断流（偶发，或该模型侧的问题）。请重试；若同一模型反复出现，请换用其他模型，或联系管理员检查网关的流式超时配置。',
+
   'errors.ENDPOINT_NOT_FOUND.userMessage': '找不到 API 端点{provider}。',
   'errors.ENDPOINT_NOT_FOUND.actionHint': 'Base URL 可能不正确。请检查服务商设置，确认 URL 含有正确的路径（如 /v1）。',
 

@@ -2676,6 +2676,9 @@ const en = {
   'errors.NETWORK_UNREACHABLE.userMessage': 'Cannot connect to API endpoint{baseUrl}.',
   'errors.NETWORK_UNREACHABLE.actionHint': 'Check your network connection and the Base URL in provider settings.',
 
+  'errors.STREAM_DISCONNECTED.userMessage': 'Connection dropped mid-response{provider}.',
+  'errors.STREAM_DISCONNECTED.actionHint': 'The provider or gateway closed the stream before the response finished — usually transient, or a gateway timeout on long responses. Retry; if it keeps happening with this model, switch models or have your admin check the gateway streaming timeout.',
+
   'errors.ENDPOINT_NOT_FOUND.userMessage': 'API endpoint not found{provider}.',
   'errors.ENDPOINT_NOT_FOUND.actionHint': 'The Base URL may be incorrect. Check your provider settings and ensure the URL includes the correct path (e.g. /v1).',
 

@@ -522,6 +522,11 @@ export function buildPlaywrightMcp(
   return {
     type: 'stdio',
     command: process.execPath,
+    // Claude Code 2.1.203 起启用 tool search 时 MCP 工具默认延迟加载，模型须先
+    // ToolSearch 命中才能用。执行步的浏览器工具是硬前置 —— 实测(2026-07-11,
+    // 3.2.1 打包版)网关模型在执行步反复 ToolSearch 空转、0/4 无进展,约 8 分钟后
+    // 被 SDK 停滞看门狗 abort。强制全量进 turn-1 prompt,绕开延迟加载。
+    alwaysLoad: true,
     args: [
       shim,
       '--browser', 'chromium',

@@ -57,6 +57,12 @@ found` 把整轮执行打崩。改为先用 `resolveSystemChrome()` 自己定位
 - `effectiveHeaded = headed && (!headlessShell || !!systemChrome)` → 打包态有头但没 Chrome ⇒ false（回落）
 - `executablePath = effectiveHeaded ? systemChrome : headlessShell`（dev 两态均为 null）
 - `--headless` 仅在 `!effectiveHeaded` 时加；`PLAYWRIGHT_BROWSERS_PATH` 仅「无头 + 用随包 shell」时注入
+- `alwaysLoad: true`（2026-07-11 修复）：Claude Code 2.1.203 起启用 tool search 时 MCP 工具
+  默认延迟加载（defer_loading），模型须先 ToolSearch 命中才能用。执行步的浏览器工具是硬前置——
+  实测网关模型在执行步反复 ToolSearch 空转、0/N 无进展，约 8 分钟后被 SDK 停滞看门狗 abort。
+  该字段经 `MCPServerConfig`（types）→ `toSdkMcpConfig`（claude-client）透传为 SDK
+  `McpStdioServerConfig.alwaysLoad`（= API `defer_loading:false`），强制工具进 turn-1 prompt。
+  副作用：会话启动阻塞等 server 连接（上限 5s）。单测：`test-playwright-mcp-alwaysload.test.ts`。
 
 ## API 合同
 
