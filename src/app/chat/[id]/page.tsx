@@ -28,7 +28,7 @@ export default function ChatSessionPage({ params }: ChatSessionPageProps) {
   const [sessionSandbox, setSessionSandbox] = useState(false);
   const [sessionMode, setSessionMode] = useState<'code' | 'plan'>('code');
   const [sessionHasSummary, setSessionHasSummary] = useState(false);
-  const { setWorkingDirectory, setSessionId, setSessionTitle: setPanelSessionTitle, setFileTreeOpen, setGitPanelOpen, setDashboardPanelOpen } = usePanel();
+  const { setWorkingDirectory, setSessionId, setSessionTitle: setPanelSessionTitle, setFileTreeOpen, setGitPanelOpen, setDashboardPanelOpen, setIsOfficeSession } = usePanel();
   const targetFilePath = searchParams.get('file') || undefined;
   const { t } = useTranslation();
   const defaultPanelAppliedRef = useRef(false);
@@ -69,6 +69,9 @@ export default function ChatSessionPage({ params }: ChatSessionPageProps) {
           setSessionEffort(data.session.effort || '');
           setSessionPermissionProfile(data.session.permission_profile || 'default');
           setSessionSandbox(!!data.session.sandbox_enabled);
+          // E4 (cowork): 通告 PanelContext —— AppShell/UnifiedTopBar 据此压制
+          // 研发特性面(PanelZone / 顶栏面板按钮 / 项目文件夹 chip)。
+          setIsOfficeSession(!!data.session.sandbox_enabled);
           setSessionMode((data.session.mode as 'code' | 'plan') || 'code');
           setSessionHasSummary(!!data.session.context_summary);
         }
@@ -132,6 +135,9 @@ export default function ChatSessionPage({ params }: ChatSessionPageProps) {
   // Uses sessionStorage to track which sessions have already been initialized,
   // so re-opening an untouched (zero-message) session won't override the layout.
   useEffect(() => {
+    // E4 (cowork): wait for session info — office (sandbox) sessions must NOT
+    // auto-open the file tree (dev panels are suppressed for them entirely).
+    if (!sessionInfoLoaded) return;
     if (defaultPanelAppliedRef.current) return;
     defaultPanelAppliedRef.current = true;
 
@@ -144,6 +150,11 @@ export default function ChatSessionPage({ params }: ChatSessionPageProps) {
 
     (async () => {
       try {
+        if (sessionSandbox) {
+          // Office session: no default dev panel. Existing panel state is left
+          // untouched — PanelZone is gated off while an office session is open.
+          return;
+        }
         if (targetFilePath) {
           // Preserve explicit deep-link intent from global search.
           setFileTreeOpen(true);
@@ -173,7 +184,7 @@ export default function ChatSessionPage({ params }: ChatSessionPageProps) {
         setFileTreeOpen(true);
       }
     })();
-  }, [id, targetFilePath, setFileTreeOpen, setGitPanelOpen, setDashboardPanelOpen]);
+  }, [id, targetFilePath, sessionInfoLoaded, sessionSandbox, setFileTreeOpen, setGitPanelOpen, setDashboardPanelOpen]);
 
   if (loading || !sessionInfoLoaded) {
     return (

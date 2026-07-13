@@ -311,7 +311,8 @@ export function MessageList({
           return (
             <div key={message.id} id={`msg-${message.id}`} className="group">
               <MessageItem message={message} sessionId={sessionId} isAssistantProject={isAssistantProject} assistantName={assistantName} sandboxEnabled={sandboxEnabled} />
-              {rewindSdkUuid && sessionId && !isStreaming && (
+              {/* E4 (cowork): 回滚是研发工作流(跨 VM 恢复语义未验证),办公隐藏 */}
+              {rewindSdkUuid && sessionId && !isStreaming && !sandboxEnabled && (
                 <RewindButton sessionId={sessionId} userMessageId={rewindSdkUuid} />
               )}
             </div>

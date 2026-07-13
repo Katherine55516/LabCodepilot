@@ -59,6 +59,13 @@ export interface PanelContextValue {
   setAssistantPanelOpen: (open: boolean) => void;
   isAssistantWorkspace: boolean;
   setIsAssistantWorkspace: (is: boolean) => void;
+  /**
+   * E4 (cowork): 当前打开的会话是否为办公(沙箱)会话。由 /chat/[id] 载入
+   * 会话时按 session.sandbox_enabled 设置。压制一切研发特性面:PanelZone
+   * 整体、顶栏 Git/文件树/任务/看板按钮与项目文件夹 chip 等。
+   */
+  isOfficeSession: boolean;
+  setIsOfficeSession: (is: boolean) => void;
   // Inline testing panel (对话内嵌测试) — opened from the sidebar "测试" entry,
   // closed via the panel's 收起. App-level so the sidebar can toggle it directly
   // (no transient event → no mount-timing race).

@@ -16,7 +16,6 @@ import { MessageInput } from './MessageInput';
 import { ChatComposerActionBar } from './ChatComposerActionBar';
 import { ModeIndicator } from './ModeIndicator';
 import { ChatPermissionSelector } from './ChatPermissionSelector';
-import { SandboxToggle } from './SandboxToggle';
 import { VmArtifactsCard } from './VmArtifactsCard';
 import { VmProvisioningBanner } from './VmProvisioningBanner';
 import { RunCockpit } from './RunCockpit';
@@ -1177,7 +1176,11 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
         onModelChange={setCurrentModel}
         providerId={currentProviderId}
         onProviderModelChange={handleProviderModelChange}
-        workingDirectory={workingDirectory}
+        // E4 (cowork): 办公会话把 workingDirectory 传空 —— @ 引用/目录摘要/
+        // 项目斜杠展开引用的是宿主路径,对 VM 内的 agent 无意义,空串走
+        // MessageInput 既有的优雅降级;officeMode 另隐藏斜杠/CLI 按钮。
+        workingDirectory={sandboxEnabled ? '' : workingDirectory}
+        officeMode={sandboxEnabled}
         onAssistantTrigger={checkAssistantTrigger}
         effort={selectedEffort}
         onEffortChange={handleEffortChange}
@@ -1186,21 +1189,25 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
         hasMessages={messages.length > 0}
       />
       <ChatComposerActionBar
-        left={<><ModeIndicator mode={mode} onModeChange={handleModeChange} disabled={isStreaming} />{/* ImageGenToggle hidden from UI — restore by uncommenting. Component + ImageGen logic kept intact. */}{/* <ImageGenToggle /> */}</>}
+        left={
+          // E4 (cowork): 办公会话隐藏 code/plan 切换 —— 计划模式是研发工作流。
+          sandboxEnabled
+            ? null
+            : <><ModeIndicator mode={mode} onModeChange={handleModeChange} disabled={isStreaming} />{/* ImageGenToggle hidden from UI — restore by uncommenting. Component + ImageGen logic kept intact. */}{/* <ImageGenToggle /> */}</>
+        }
         center={
-          <div className="flex items-center gap-1.5">
-            <ChatPermissionSelector
-              sessionId={sessionId}
-              permissionProfile={permissionProfile}
-              onPermissionChange={setPermissionProfile}
-            />
-            <SandboxToggle
-              sessionId={sessionId}
-              enabled={sandboxEnabled}
-              onChange={setSandboxEnabled}
-              disabled={isStreaming}
-            />
-          </div>
+          // E4 (cowork): 办公会话隐藏权限选择器 —— 创建期已定 full_access
+          // (VM 隔离即权限故事,D3),无需/不应回合内切换。原 SandboxToggle
+          // 已移除:模式由侧边栏「办公/研发」双栏在建会话时定死(E3)。
+          sandboxEnabled ? null : (
+            <div className="flex items-center gap-1.5">
+              <ChatPermissionSelector
+                sessionId={sessionId}
+                permissionProfile={permissionProfile}
+                onPermissionChange={setPermissionProfile}
+              />
+            </div>
+          )
         }
         right={
           <RunCockpit

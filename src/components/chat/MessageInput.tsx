@@ -106,6 +106,12 @@ interface MessageInputProps {
   providerId?: string;
   onProviderModelChange?: (providerId: string, model: string) => void;
   workingDirectory?: string;
+  /**
+   * E4 (cowork): 办公(沙箱)会话 —— 隐藏宿主侧研发入口(斜杠命令按钮、
+   * CLI 工具按钮)。@ 引用/项目斜杠展开由调用方传空 workingDirectory 走
+   * 既有优雅降级(它们引用的是宿主路径,对 VM 内的 agent 无意义)。
+   */
+  officeMode?: boolean;
   onAssistantTrigger?: () => void;
   /** Effort selection lifted to parent for inclusion in the stream chain */
   effort?: string;
@@ -166,6 +172,7 @@ export function MessageInput({
   providerId,
   onProviderModelChange,
   workingDirectory,
+  officeMode,
   onAssistantTrigger,
   effort: effortProp,
   onEffortChange,
@@ -980,20 +987,23 @@ export function MessageInput({
                   onUpdate={(full) => setInputValue(full)}
                 />
 
-                {/* Slash command button */}
-                <SlashCommandButton onInsertSlash={slashCommands.handleInsertSlash} />
+                {/* Slash command + CLI tools — 宿主侧研发入口,办公会话隐藏(E4) */}
+                {!officeMode && (
+                  <>
+                    <SlashCommandButton onInsertSlash={slashCommands.handleInsertSlash} />
 
-                {/* CLI tools button */}
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <PromptInputButton onClick={cliToolsFetch.handleOpenCliPopover}>
-                      <Terminal size={16} />
-                    </PromptInputButton>
-                  </TooltipTrigger>
-                  <TooltipContent>
-                    {t('cliTools.selectTool' as TranslationKey)}
-                  </TooltipContent>
-                </Tooltip>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <PromptInputButton onClick={cliToolsFetch.handleOpenCliPopover}>
+                          <Terminal size={16} />
+                        </PromptInputButton>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        {t('cliTools.selectTool' as TranslationKey)}
+                      </TooltipContent>
+                    </Tooltip>
+                  </>
+                )}
 
                 {/* Model selector */}
                 <ModelSelectorDropdown

@@ -136,6 +136,9 @@ export function ChatListPanel({ open, width, hasUpdate, readyToInstall }: ChatLi
   const handleTabChange = useCallback((tab: WorkspaceTab) => {
     setWorkspaceTab(tab);
     saveWorkspaceTab(tab);
+    // /chat 落地页据此实时切换 办公/研发 空态(E4);同 localStorage 值一起构成
+    // 「当前 tab」的唯一广播口。
+    window.dispatchEvent(new CustomEvent('workspace-tab-changed', { detail: tab }));
   }, []);
   const { workspacePath } = useAssistantWorkspace();
   const [assistantSummary, setAssistantSummary] = useState<{

@@ -1627,9 +1627,6 @@ const zhHK: Record<TranslationKey, string> = {
   'permission.sessionPermission': '對話權限',
 
   // ── Sandbox (Cowork POC) ──────────────────────────────────
-  'sandbox.on': '沙箱',
-  'sandbox.off': '沙箱',
-  'sandbox.tooltip': '沙箱模式：AI 在隔離虛擬機內處理檔案，唔會接觸真機檔案（實驗功能）',
   'sandbox.artifacts.title': '沙箱產物',
   'sandbox.artifacts.downloadAll': '全部下載',
   'sandbox.artifacts.sleeping': '沙箱休眠中',

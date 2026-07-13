@@ -239,6 +239,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [dashboardPanelOpen, setDashboardPanelOpen] = useState(false);
   const [assistantPanelOpen, setAssistantPanelOpen] = useState(false);
   const [isAssistantWorkspace, setIsAssistantWorkspace] = useState(false);
+  // E4 (cowork): 当前会话是否办公(沙箱)会话 — 压制 PanelZone 与顶栏研发按钮
+  const [isOfficeSession, setIsOfficeSession] = useState(false);
   const [testPanelOpen, setTestPanelOpenRaw] = useState(false);
   // 打开测试工作台时锚定「当前对话」。修复用户单栏「点报告过几秒自动跳回同一对话」：底下
   // /chat/[id] page 在 loading→加载完才【首次挂载】ChatView，其 setTestPanelOpen(false)
@@ -554,6 +556,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       setAssistantPanelOpen,
       isAssistantWorkspace,
       setIsAssistantWorkspace,
+      isOfficeSession,
+      setIsOfficeSession,
       testPanelOpen,
       setTestPanelOpen,
       testPanelBaseSession,
@@ -580,7 +584,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       previewViewMode,
       setPreviewViewMode,
     }),
-    [fileTreeOpen, taskListOpen, gitPanelOpen, previewOpen, terminalOpen, dashboardPanelOpen, assistantPanelOpen, isAssistantWorkspace, testPanelOpen, testPanelBaseSession, currentBranch, gitDirtyCount, currentWorktreeLabel, workingDirectory, sessionId, sessionTitle, streamingSessionId, pendingApprovalSessionId, activeStreamingSessions, pendingApprovalSessionIds, previewSource, setPreviewSource, previewFile, setPreviewFile, previewViewMode]
+    [fileTreeOpen, taskListOpen, gitPanelOpen, previewOpen, terminalOpen, dashboardPanelOpen, assistantPanelOpen, isAssistantWorkspace, isOfficeSession, testPanelOpen, testPanelBaseSession, currentBranch, gitDirtyCount, currentWorktreeLabel, workingDirectory, sessionId, sessionTitle, streamingSessionId, pendingApprovalSessionId, activeStreamingSessions, pendingApprovalSessionIds, previewSource, setPreviewSource, previewFile, setPreviewFile, previewViewMode]
   );
 
   const imageGenValue = useImageGenState();
@@ -634,7 +638,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                     panel would stay visible to the right of the overlay. Panel
                     open-state is preserved (only the render is gated), so closing
                     the workbench restores the previous layout. */}
-                {isChatDetailRoute && !testPanelOpen && <PanelZone />}
+                {/* E4 (cowork): 办公会话压制全部侧边研发面板(文件树/Git/任务/
+                    预览/看板/助理)— 面板状态保留,切回研发会话原样恢复 */}
+                {isChatDetailRoute && !testPanelOpen && !isOfficeSession && <PanelZone />}
               </div>
             </div>
           </div>

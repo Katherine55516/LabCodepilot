@@ -1620,10 +1620,9 @@ const en = {
   'permission.fullAccessWarning': 'Full Access mode will automatically approve all permission requests without confirmation. This includes file writes, shell commands, and network requests. Only enable this if you fully trust the current task.',
   'permission.sessionPermission': 'Chat Permission',
 
-  // ── Sandbox (Cowork POC) ──────────────────────────────────
-  'sandbox.on': 'Sandbox',
-  'sandbox.off': 'Sandbox',
-  'sandbox.tooltip': 'Sandbox mode: the AI works on files inside an isolated VM and never touches your real files (experimental)',
+  // ── Sandbox (Cowork) ──────────────────────────────────────
+  // sandbox.on/off/tooltip removed with SandboxToggle (E4) — the office/dev
+  // sidebar tabs (workspace.tab.*) are the entry now.
   'sandbox.artifacts.title': 'Sandbox files',
   'sandbox.artifacts.downloadAll': 'Download all',
   'sandbox.artifacts.sleeping': 'Sandbox sleeping',
