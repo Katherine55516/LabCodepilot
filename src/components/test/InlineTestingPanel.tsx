@@ -24,6 +24,7 @@ import { REGRESSION_LIBRARY_TASK, REGRESSION_FULL_SUITE as REGRESSION_FULL_SUITE
 import type { LoginStateInfo } from "@/lib/test/env-config";
 import type { RunHistoryEntry } from "@/lib/test/history";
 import { TestStatsView } from "@/components/test/TestStatsView";
+import { PromptDialog } from "@/components/ui/prompt-dialog";
 
 /**
  * Inline testing workbench (Phase 2 · 对话内嵌测试).
@@ -94,6 +95,8 @@ interface LiveCase {
 
 interface LibraryLive {
   step: TestStep;
+  /** 本轮 roundId(执行面板「查看轮次报告」下钻到这一轮用)。 */
+  roundId?: string;
   suiteName: string;
   env: string;
   /** 发起时确定的圈选条数(agg.total),进度分母。 */
@@ -659,6 +662,8 @@ export function InlineTestingPanel() {
     const p = current?.path;
     if (!p || libraryRunning) return;
     const env = opts?.env || "local";
+    // 执行状态面板只在「回归套件」tab 顶部显示 → 发起即切过去,避免在别的 tab 看不到运行动静。
+    setRegTab("suites");
     setLibraryRunning(true);
     setLibraryRunStatus(null);
     setLibraryLive(null);   // 上一轮的面板不留存
@@ -693,6 +698,7 @@ export function InlineTestingPanel() {
       setLibraryRunStatus(t("test.library.runStarted", { total: agg.total }));
       setLibraryLive({
         step: "execution",
+        roundId,
         suiteName: opts?.suiteName || REGRESSION_FULL_SUITE_NAME,
         env,
         total: agg.total,
@@ -4654,7 +4660,7 @@ function RegressionLivePanel({ t, live, running, runStatus, onOpenReport }: {
 }
 
 /** 回归测试整页工作区的子页签。 */
-type RegTab = "library" | "suites" | "rounds" | "report" | "matrix" | "health";
+type RegTab = "library" | "suites" | "rounds" | "matrix" | "health";
 
 // 回归测试整页工作区(批 H):子页签(用例库/回归套件/轮次历史/轮次报告)+「发起回归」+ 运行状态行。
 // 三个区块由原弹窗内容页面化而来,数据链路(reloadSignal/deposit/rounds API)不变。
@@ -4673,13 +4679,12 @@ function RegressionWorkspace({ t, projectPath, regTab, setRegTab, reloadSignal, 
   model: string;
   providerId: string;
 }) {
-  // 矩阵单元格点击 → 跳报告页并选中该轮。
-  const [jumpRound, setJumpRound] = useState<string | undefined>(undefined);
+  // 下钻查看某一轮的完整报告(null = 显示轮次列表)。矩阵单元格 / 执行面板「查看报告」也走这个态。
+  const [reportRoundId, setReportRoundId] = useState<string | null>(null);
   const TABS: Array<{ id: RegTab; label: string }> = [
     { id: "library", label: t("test.regression.tabLibrary") },
     { id: "suites", label: t("test.suites.open") },
     { id: "rounds", label: t("test.rounds.open") },
-    { id: "report", label: t("test.report.tab") },
     { id: "matrix", label: t("test.matrix.tab") },
     { id: "health", label: t("test.health.tab") },
   ];
@@ -4689,7 +4694,7 @@ function RegressionWorkspace({ t, projectPath, regTab, setRegTab, reloadSignal, 
         {TABS.map((tb) => (
           <button
             key={tb.id}
-            onClick={() => setRegTab(tb.id)}
+            onClick={() => { setRegTab(tb.id); setReportRoundId(null); }}
             className={`-mb-px border-b-2 px-3 py-1.5 text-[12px] transition-colors ${regTab === tb.id ? "border-primary font-semibold text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}
           >
             {tb.label}
@@ -4705,14 +4710,16 @@ function RegressionWorkspace({ t, projectPath, regTab, setRegTab, reloadSignal, 
           {running ? <SpinnerGap size={11} className="animate-spin" /> : <Play size={11} />} {running ? t("test.library.running") : t("test.launch.open")}
         </button>
       </div>
-      {live ? (
-        <RegressionLivePanel t={t} live={live} running={running} runStatus={runStatus} onOpenReport={() => setRegTab("report")} />
+      {/* 执行状态面板只在「回归套件」tab 顶部显示(运行中实时进度 + 完成后结果盘面);其余 tab 不显示,
+          避免完成后的盘面一直霸占所有 tab 顶部。全局「有轮次在跑」提示保留在顶部「运行中」按钮上。 */}
+      {regTab === "suites" && (live ? (
+        <RegressionLivePanel t={t} live={live} running={running} runStatus={runStatus} onOpenReport={() => { if (live.roundId) setReportRoundId(live.roundId); setRegTab("rounds"); }} />
       ) : runStatus ? (
         <div className="mb-3 flex items-center gap-1.5 rounded-md border border-border bg-muted/30 px-3 py-1.5 text-[11px] text-muted-foreground">
           {running && <SpinnerGap size={11} className="animate-spin" />}
           {runStatus}
         </div>
-      ) : null}
+      ) : null)}
       {regTab === "library" && <RegressionLibrarySection t={t} projectPath={projectPath} reloadSignal={reloadSignal} onChanged={onChanged} />}
       {regTab === "suites" && <RegressionSuitesSection t={t} projectPath={projectPath} />}
       {regTab === "rounds" && (
@@ -4720,18 +4727,20 @@ function RegressionWorkspace({ t, projectPath, regTab, setRegTab, reloadSignal, 
           t={t}
           projectPath={projectPath}
           reloadSignal={reloadSignal}
+          model={model}
+          providerId={providerId}
+          reportRoundId={reportRoundId}
+          onOpenReport={(rid) => setReportRoundId(rid)}
+          onBack={() => setReportRoundId(null)}
           onRetest={(parentRoundId) => onLaunch({ mode: "failed-only", parentRoundId })}
         />
-      )}
-      {regTab === "report" && (
-        <RegressionReportSection t={t} projectPath={projectPath} reloadSignal={reloadSignal} model={model} providerId={providerId} initialRoundId={jumpRound} />
       )}
       {regTab === "matrix" && (
         <RegressionMatrixSection
           t={t}
           projectPath={projectPath}
           reloadSignal={reloadSignal}
-          onOpenRound={(rid) => { setJumpRound(rid); setRegTab("report"); }}
+          onOpenRound={(rid) => { setReportRoundId(rid); setRegTab("rounds"); }}
         />
       )}
       {regTab === "health" && (
@@ -4768,6 +4777,9 @@ function RegressionLibrarySection({ t, projectPath, reloadSignal, onChanged }: {
   const [addToSuite, setAddToSuite] = useState(false);
   const [busy, setBusy] = useState(false);
   const [localReload, setLocalReload] = useState(0);
+  // 隔离理由弹窗的目标条目(null = 关闭)。批量隔离与抽屉「隔离」共用这一个受控弹窗——
+  // window.prompt 在 Electron 渲染进程会抛 TypeError,后续 fetch 根本不会执行(见 PromptDialog)。
+  const [quarantineKeys, setQuarantineKeys] = useState<Array<{ task: string; originalId: string }> | null>(null);
   // 按来源任务折叠用例列表（默认空 = 全部展开）。本版不持久化，与看板 collapsedCats 一致；
   // 筛选/检索活跃时忽略折叠、强制展开（见渲染处），避免命中项藏在折叠分组里。
   const [collapsedTasks, setCollapsedTasks] = useState<Set<string>>(new Set());
@@ -4824,15 +4836,14 @@ function RegressionLibrarySection({ t, projectPath, reloadSignal, onChanged }: {
     } catch { /* keep view */ } finally { setBusy(false); }
   };
 
-  const batchQuarantine = async () => {
-    const reason = window.prompt(t("test.library.quarantinePrompt", { n: sel.size }));
-    if (reason === null) return; // 取消
+  // 隔离写入(批量 / 单条共用)。理由由 PromptDialog 收集后传入,可为空(服务端兜底「手动隔离」)。
+  const doQuarantine = async (keys: Array<{ task: string; originalId: string }>, reason: string) => {
     setBusy(true);
     try {
       await fetch("/api/test/library/quarantine", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectPath, keys: selKeys(), quarantined: true, reason }),
+        body: JSON.stringify({ projectPath, keys, quarantined: true, reason }),
       });
       refresh();
     } catch { /* keep view */ } finally { setBusy(false); }
@@ -5049,7 +5060,7 @@ function RegressionLibrarySection({ t, projectPath, reloadSignal, onChanged }: {
           <button disabled={busy} onClick={() => setAddToSuite(true)} className="flex h-6 items-center gap-1 rounded border border-border px-2 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-40">
             <Plus size={10} /> {t("test.library.batchAddSuite")}
           </button>
-          <button disabled={busy} onClick={batchQuarantine} className="flex h-6 items-center gap-1 rounded border border-border px-2 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-40">
+          <button disabled={busy} onClick={() => setQuarantineKeys(selKeys())} className="flex h-6 items-center gap-1 rounded border border-border px-2 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-40">
             <Prohibit size={10} /> {t("test.library.batchQuarantine")}
           </button>
           <button disabled={busy} onClick={batchRemove} className="flex h-6 items-center gap-1 rounded border border-border px-2 text-[11px] text-muted-foreground hover:bg-status-error-muted hover:text-status-error-foreground disabled:opacity-40">
@@ -5071,8 +5082,18 @@ function RegressionLibrarySection({ t, projectPath, reloadSignal, onChanged }: {
           rounds={hist?.rounds ?? []}
           onClose={() => setDrawerKey(null)}
           onChanged={() => { setDrawerKey(null); refresh(); }}
+          onQuarantine={() => { setDrawerKey(null); setQuarantineKeys([{ task: drawerCase.task, originalId: drawerCase.originalId }]); }}
         />
       )}
+      <PromptDialog
+        open={quarantineKeys !== null}
+        onOpenChange={(o) => { if (!o) setQuarantineKeys(null); }}
+        title={t("test.library.quarantinePrompt", { n: quarantineKeys?.length ?? 0 })}
+        confirmLabel={t("common.confirm")}
+        cancelLabel={t("common.cancel")}
+        requireValue={false}
+        onConfirm={async (reason) => { if (quarantineKeys) await doQuarantine(quarantineKeys, reason); }}
+      />
       {addToSuite && (
         <AddToSuiteModal
           t={t}
@@ -5088,7 +5109,7 @@ function RegressionLibrarySection({ t, projectPath, reloadSignal, onChanged }: {
 
 // 用例详情抽屉(屏 1 行点击):步骤表、跨轮执行历史圆点(含翻转/连败)、rev 变更时间线、
 // 隔离说明与恢复、操作区。数据全部来自父级已取的两个 API,抽屉本身不再发请求(除写操作)。
-function CaseDrawer({ t, projectPath, task, originalId, entry, hist, rounds, onClose, onChanged }: {
+function CaseDrawer({ t, projectPath, task, originalId, entry, hist, rounds, onClose, onChanged, onQuarantine }: {
   t: T;
   projectPath: string;
   task: string;
@@ -5098,6 +5119,7 @@ function CaseDrawer({ t, projectPath, task, originalId, entry, hist, rounds, onC
   rounds: HistRound[];
   onClose: () => void;
   onChanged: () => void;
+  onQuarantine: () => void;
 }) {
   const [busy, setBusy] = useState(false);
   useEffect(() => {
@@ -5246,11 +5268,7 @@ function CaseDrawer({ t, projectPath, task, originalId, entry, hist, rounds, onC
           {!quarantined && (
             <button
               disabled={busy}
-              onClick={() => {
-                const reason = window.prompt(t("test.library.quarantinePrompt", { n: 1 }));
-                if (reason === null) return;
-                void post("/api/test/library/quarantine", { keys, quarantined: true, reason });
-              }}
+              onClick={onQuarantine}
               className="flex h-6 items-center gap-1 rounded border border-border px-2 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-40"
             >
               <Prohibit size={10} /> {t("test.case.quarantine")}
@@ -5387,8 +5405,14 @@ interface RoundDetailUI {
   groups: Array<{ task: string; counts: Record<string, number>; tests: Array<{ task: string; originalId: string; purpose: string; status: string }> }>;
   delta: { baseRoundId: string; newFail: unknown[]; fixed: unknown[]; stillFail: unknown[] } | null;
 }
-function RegressionRoundsSection({ t, projectPath, reloadSignal, onRetest }: {
-  t: T; projectPath: string; reloadSignal: number; onRetest: (parentRoundId: string) => void;
+function RegressionRoundsSection({ t, projectPath, reloadSignal, model, providerId, reportRoundId, onOpenReport, onBack, onRetest }: {
+  t: T; projectPath: string; reloadSignal: number;
+  model: string; providerId: string;
+  /** 非 null = 下钻查看该轮完整报告(渲染嵌入的 RegressionReportSection);null = 显示轮次列表。 */
+  reportRoundId: string | null;
+  onOpenReport: (roundId: string) => void;
+  onBack: () => void;
+  onRetest: (parentRoundId: string) => void;
 }) {
   const [rounds, setRounds] = useState<RoundUI[] | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
@@ -5479,6 +5503,22 @@ function RegressionRoundsSection({ t, projectPath, reloadSignal, onRetest }: {
     <span className={`inline-block h-1.5 w-1.5 flex-shrink-0 rounded-full ${status === "pass" ? "bg-status-success-foreground" : "bg-status-error-foreground"}`} />
   );
 
+  // 下钻态:渲染该轮的完整报告(嵌入模式,带「返回列表」+ 上一轮/下一轮切换)。所有 hooks 已在上方调用。
+  if (reportRoundId) {
+    return (
+      <RegressionReportSection
+        t={t}
+        projectPath={projectPath}
+        reloadSignal={reloadSignal}
+        model={model}
+        providerId={providerId}
+        controlledRoundId={reportRoundId}
+        onBack={onBack}
+        onSelectRound={onOpenReport}
+      />
+    );
+  }
+
   return (
     <div className="flex flex-col overflow-hidden rounded-xl border border-border bg-card">
         <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-1.5">
@@ -5535,6 +5575,9 @@ function RegressionRoundsSection({ t, projectPath, reloadSignal, onRetest }: {
                       )}
                       <button onClick={() => toggleDetail(r.roundId)} className="flex items-center gap-0.5 rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground hover:text-foreground">
                         {open ? <CaretUp size={9} /> : <CaretDown size={9} />} {open ? t("test.rounds.collapse") : t("test.rounds.detail")}
+                      </button>
+                      <button onClick={() => onOpenReport(r.roundId)} className="flex items-center gap-0.5 rounded border border-border px-1.5 py-0.5 text-[10px] text-primary hover:opacity-80">
+                        {t("test.rounds.viewReport")} <ArrowRight size={9} />
                       </button>
                       <button onClick={() => delRound(r.roundId)} className="text-muted-foreground hover:text-status-error-foreground" title={t("test.rounds.delete")} aria-label={t("test.rounds.delete")}>
                         <Trash size={11} />
@@ -5726,10 +5769,11 @@ function RegressionHealthSection({ t, projectPath, reloadSignal, onChanged }: {
   const hist = useCaseHistory(projectPath, reloadSignal, localReload);
   const [queue, setQueue] = useState<"flaky" | "streak" | "stale">("flaky");
   const [busy, setBusy] = useState(false);
+  const [quarantineTarget, setQuarantineTarget] = useState<HistCase | null>(null);
 
-  const setQuarantine = async (c: HistCase, quarantined: boolean) => {
-    const reason = quarantined ? window.prompt(t("test.library.quarantinePrompt", { n: 1 })) : "";
-    if (quarantined && reason === null) return;
+  // 隔离(reason 由 PromptDialog 收集,可空)/ 恢复(reason 传空)。window.prompt 在 Electron
+  // 渲染进程抛 TypeError,故隔离改走受控弹窗;恢复无需理由,直接调用。
+  const runQuarantine = async (c: HistCase, quarantined: boolean, reason: string) => {
     setBusy(true);
     try {
       await fetch("/api/test/library/quarantine", {
@@ -5829,7 +5873,7 @@ function RegressionHealthSection({ t, projectPath, reloadSignal, onChanged }: {
                     <button disabled title={t("test.case.recheckSoon")} className="flex h-6 cursor-not-allowed items-center gap-1 rounded border border-border px-1.5 text-[10px] text-muted-foreground opacity-50">
                       <ArrowsClockwise size={9} /> {t("test.health.recheck")}
                     </button>
-                    <button disabled={busy} onClick={() => setQuarantine(c, true)} className="flex h-6 items-center gap-1 rounded border border-border px-1.5 text-[10px] text-muted-foreground hover:text-foreground disabled:opacity-40">
+                    <button disabled={busy} onClick={() => setQuarantineTarget(c)} className="flex h-6 items-center gap-1 rounded border border-border px-1.5 text-[10px] text-muted-foreground hover:text-foreground disabled:opacity-40">
                       <Prohibit size={9} /> {t("test.case.quarantine")}
                     </button>
                   </>
@@ -5869,7 +5913,7 @@ function RegressionHealthSection({ t, projectPath, reloadSignal, onChanged }: {
                   {t("test.health.quarantineAt", { at: fmtDay(c.meta.quarantinedAt) })}
                 </span>
                 <span className="min-w-0 flex-1 truncate text-[10.5px] text-muted-foreground">{c.meta.quarantineReason}</span>
-                <button disabled={busy} onClick={() => setQuarantine(c, false)} className="flex h-6 items-center gap-1 rounded border border-border px-1.5 text-[10px] text-muted-foreground hover:text-foreground disabled:opacity-40">
+                <button disabled={busy} onClick={() => runQuarantine(c, false, "")} className="flex h-6 items-center gap-1 rounded border border-border px-1.5 text-[10px] text-muted-foreground hover:text-foreground disabled:opacity-40">
                   <ArrowClockwise size={9} /> {t("test.health.restore")}
                 </button>
               </div>
@@ -5881,6 +5925,15 @@ function RegressionHealthSection({ t, projectPath, reloadSignal, onChanged }: {
         <WarningCircle size={12} className="mt-0.5 flex-shrink-0" />
         <span>{t("test.health.guardrail")}</span>
       </div>
+      <PromptDialog
+        open={quarantineTarget !== null}
+        onOpenChange={(o) => { if (!o) setQuarantineTarget(null); }}
+        title={t("test.library.quarantinePrompt", { n: 1 })}
+        confirmLabel={t("common.confirm")}
+        cancelLabel={t("common.cancel")}
+        requireValue={false}
+        onConfirm={async (reason) => { if (quarantineTarget) await runQuarantine(quarantineTarget, true, reason); }}
+      />
     </div>
   );
 }
@@ -5906,10 +5959,14 @@ interface RoundReportUI {
 }
 type DeltaFilter = "" | "new" | "fixed" | "still";
 
-function RegressionReportSection({ t, projectPath, reloadSignal, model, providerId, initialRoundId }: {
+function RegressionReportSection({ t, projectPath, reloadSignal, model, providerId, initialRoundId, controlledRoundId, onBack, onSelectRound }: {
   t: T; projectPath: string; reloadSignal: number; model: string; providerId: string;
   /** 从对比矩阵单元格跳转过来时预选该轮。 */
   initialRoundId?: string;
+  /** 嵌入「轮次」tab 下钻详情时:受控选中轮 + 返回列表 + 切换上下轮。传了 onBack 即嵌入模式(隐藏下拉)。 */
+  controlledRoundId?: string;
+  onBack?: () => void;
+  onSelectRound?: (roundId: string) => void;
 }) {
   const [rounds, setRounds] = useState<RoundUI[] | null>(null);
   const [roundId, setRoundId] = useState<string>("");
@@ -5929,13 +5986,18 @@ function RegressionReportSection({ t, projectPath, reloadSignal, model, provider
         const list: RoundUI[] = (Array.isArray(d?.rounds) ? d.rounds : []).filter((r: RoundUI) => r.status !== "running");
         setRounds(list);
         setRoundId((cur) => {
-          const want = cur || initialRoundId;
+          const want = controlledRoundId || cur || initialRoundId;
           return want && list.some((r) => r.roundId === want) ? want : list[0]?.roundId ?? "";
         });
       })
       .catch(() => { if (!cancelled) setRounds([]); });
     return () => { cancelled = true; };
-  }, [projectPath, reloadSignal, initialRoundId]);
+  }, [projectPath, reloadSignal, initialRoundId, controlledRoundId]);
+
+  // 嵌入模式:受控轮次变化时同步内部选中,并清掉上一轮残留的过滤/缺陷提示。
+  useEffect(() => {
+    if (controlledRoundId) { setRoundId(controlledRoundId); setDeltaFilter(""); setDefectMsg(""); }
+  }, [controlledRoundId]);
 
   useEffect(() => {
     if (!roundId) return;
@@ -6026,22 +6088,46 @@ function RegressionReportSection({ t, projectPath, reloadSignal, model, provider
     </button>
   );
 
+  const rIdx = (rounds ?? []).findIndex((r) => r.roundId === roundId);
+  const newerId = rIdx > 0 ? rounds![rIdx - 1].roundId : undefined;
+  const olderId = rIdx >= 0 && rIdx < (rounds?.length ?? 0) - 1 ? rounds![rIdx + 1].roundId : undefined;
+
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="text-[10px] text-muted-foreground">{t("test.report.round")}</span>
-        <select
-          value={roundId}
-          onChange={(e) => { setRoundId(e.target.value); setDeltaFilter(""); setDefectMsg(""); }}
-          className="h-7 rounded border border-border bg-background px-1.5 text-[11px] outline-none focus:border-primary"
-        >
-          {(rounds ?? []).map((r) => (
-            <option key={r.roundId} value={r.roundId}>
-              {r.roundId} · {r.env}{r.mode === "failed-only" ? ` · ${t("test.rounds.modeRetest")}` : ""}
-            </option>
-          ))}
-        </select>
-        <span className="flex-1" />
+        {onBack ? (
+          <>
+            <button onClick={onBack} className="flex h-7 items-center gap-1 rounded border border-border px-2 text-[11px] text-muted-foreground hover:text-foreground">
+              <ArrowLeft size={11} /> {t("test.rounds.backToList")}
+            </button>
+            <span className="font-mono text-[11px] text-muted-foreground">{round?.roundId}</span>
+            {round?.env && <span className="rounded border border-border px-1 text-[9px] text-muted-foreground">{round.env}</span>}
+            {round?.suiteName && <span className="min-w-0 truncate text-[11px] text-foreground">{round.suiteName}</span>}
+            <span className="flex-1" />
+            <button onClick={() => newerId && onSelectRound?.(newerId)} disabled={!newerId} title={t("test.rounds.prevRound")} aria-label={t("test.rounds.prevRound")} className="flex h-7 items-center rounded border border-border px-1.5 text-muted-foreground hover:text-foreground disabled:opacity-30">
+              <CaretUp size={11} />
+            </button>
+            <button onClick={() => olderId && onSelectRound?.(olderId)} disabled={!olderId} title={t("test.rounds.nextRound")} aria-label={t("test.rounds.nextRound")} className="flex h-7 items-center rounded border border-border px-1.5 text-muted-foreground hover:text-foreground disabled:opacity-30">
+              <CaretDown size={11} />
+            </button>
+          </>
+        ) : (
+          <>
+            <span className="text-[10px] text-muted-foreground">{t("test.report.round")}</span>
+            <select
+              value={roundId}
+              onChange={(e) => { setRoundId(e.target.value); setDeltaFilter(""); setDefectMsg(""); }}
+              className="h-7 rounded border border-border bg-background px-1.5 text-[11px] outline-none focus:border-primary"
+            >
+              {(rounds ?? []).map((r) => (
+                <option key={r.roundId} value={r.roundId}>
+                  {r.roundId} · {r.env}{r.mode === "failed-only" ? ` · ${t("test.rounds.modeRetest")}` : ""}
+                </option>
+              ))}
+            </select>
+            <span className="flex-1" />
+          </>
+        )}
         {hasFailures && (
           <button
             onClick={analyse}
