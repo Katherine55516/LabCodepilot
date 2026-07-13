@@ -21,7 +21,7 @@
 | P1-B | **VM 生命周期管理器**(server 侧单例):懒启动 / 空闲回收 / 健康检查 / 崩溃重建 / 退出清理;去掉手动 vm-up.sh | ✅ 已完成(2026-07-10) | 落 server 侧(dev 无 main 进程,dev/打包共用);沙箱首条消息 ensureRunning 自动 spawn vfkit;E2E 验证冷启动自动起 VM、kill vfkit 后自愈重建、dev SIGTERM 连带关 VM 无孤儿;UI 状态态留 P1-D |
 | P1-C | **通道产品化**:guest-daemon(**Python3**,vsock)替代 SSH;exec/writeFile/readFile/listFiles/archive/removeSession/health RPC | ✅ 已完成(2026-07-13) | vfkit connect 模式 vsock→unix socket(无握手无魔数,已实测);运行时数据流全 vsock,SSH 仅剩一次性 provisioning(推 binary+daemon);E2E:冷机全链路(上传/流式 exec/产物 diff/下载)通过,daemon 崩溃自动 re-provision |
 | P1-D | **就绪状态机 + 消息先行入队**:VM 启动窗口(冷启动数秒~数十秒)期间 vm_status 事件贯通 → 前端"沙箱准备中"横幅,就绪自动进入正常流转 | ✅ 已完成(2026-07-13) | P1 镜像手动预置,状态机覆盖 VM 启动窗口(非下载窗口);服务端本已阻塞到就绪=隐式排队,补的是可见反馈;E2E:冷机发消息→starting/booting/provisioning/ready 事件流+横幅显示→ready 清除→正常回复,不再静默"生成中" |
-| P1-E | **入口正式化**:沙箱徽标/能力边界提示(外部 stdio MCP 屏蔽说明)、空态入口卡、真机零写入验收(fs 监控) | 📋 待开始 | POC 开关保留为会话内切换;i18n 三语 |
+| P1-E | **入口正式化** → **已重定义为「研发/办公」双栏切换** | 📋 由新计划承接 | 方案见 [cowork-office-mode.md](./cowork-office-mode.md)(E1-E5);原 P1-E 四项内容全部吸收进新计划,本行不再单独推进 |
 
 ## 决策日志
 
@@ -38,6 +38,7 @@
 - 2026-07-13: forwarder 从 bash(ssh)换 **bash 包装 + node .mjs**(vsock 客户端);pathToClaudeCodeExecutable 指向 .sh,claude-client 注入 `COWORK_NODE_BIN=process.execPath`+`ELECTRON_RUN_AS_NODE=1`,不依赖 PATH 里有 node(打包版 Electron 无独立 node)
 - 2026-07-13: **两个真 bug 在验证中抓出并修复**:① `vsockHealthy` 挂死 —— daemon 未监听时 vfkit accept 后立刻关连接,readJsonHeader 只处理 data/error 不处理 close → 永久挂起 ensureDaemon;修:close/end→reject + 读超时。② daemon `pump_out` 用 `proc.stdout.read(64K)` 阻塞攒满才吐 → stream-json 小块增量全缓冲、SDK 等不到 init 响应 claude 挂死;修:改 `os.read(fd)` 真流式。③ provision 命令 `pkill -f cowork-daemon.py` 自匹配(命令行含 python3 路径)→ 自杀;修:bracket trick `[c]owork-daemon.py` + 拆独立 ssh 调用
 - 2026-07-13: SSH 未 100% 退役 —— **运行时数据流(exec/文件/健康)全 vsock**,SSH 仅剩 VM-provision 一次性用途(推 claude binary + 推/启 daemon,与推 binary 同性质);生产形态把 daemon 烘进镜像 systemd 自启即彻底无 SSH(留待镜像流水线)
+- 2026-07-13: **P1-E 重定义为「研发/办公」双栏切换**(用户决策):对话列表上方两个 tab,现有一切=研发、cowork 沙箱=办公,办公会话不绑项目文件夹、建会话时定死模式(取代会话内 SandboxToggle)。新方案独立成文推进:[cowork-office-mode.md](./cowork-office-mode.md)
 
 ## 详细设计
 
