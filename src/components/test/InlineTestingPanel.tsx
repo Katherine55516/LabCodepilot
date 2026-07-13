@@ -4779,6 +4779,10 @@ function RegressionLibrarySection({ t, projectPath, reloadSignal, onChanged }: {
   const [addToSuite, setAddToSuite] = useState(false);
   const [busy, setBusy] = useState(false);
   const [localReload, setLocalReload] = useState(0);
+  // 按来源任务折叠用例列表（默认空 = 全部展开）。本版不持久化，与看板 collapsedCats 一致；
+  // 筛选/检索活跃时忽略折叠、强制展开（见渲染处），避免命中项藏在折叠分组里。
+  const [collapsedTasks, setCollapsedTasks] = useState<Set<string>>(new Set());
+  const toggleTask = (task: string) => setCollapsedTasks((s) => { const n = new Set(s); if (n.has(task)) n.delete(task); else n.add(task); return n; });
 
   useEffect(() => {
     let cancelled = false;
@@ -4969,19 +4973,31 @@ function RegressionLibrarySection({ t, projectPath, reloadSignal, onChanged }: {
           <div className="p-6 text-center text-[11px] leading-relaxed text-muted-foreground">{t("test.library.empty")}</div>
         ) : (
           <div className="divide-y divide-border">
-            {filteredTasks.map((g) => (
+            {filteredTasks.map((g) => {
+              // 筛选/检索活跃时强制展开，避免命中项藏在折叠分组里（看起来像"搜不到"）。
+              const collapsed = !filterActive && collapsedTasks.has(g.task);
+              return (
               <div key={g.task} className="px-3 py-2">
-                <div className="mb-1.5 flex items-center gap-2">
+                <div
+                  role="button"
+                  tabIndex={0}
+                  aria-expanded={!collapsed}
+                  onClick={() => toggleTask(g.task)}
+                  onKeyDown={(ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); toggleTask(g.task); } }}
+                  className="mb-1.5 flex cursor-pointer select-none items-center gap-2 rounded hover:bg-muted/40"
+                >
+                  <CaretDown size={12} className={`flex-shrink-0 text-muted-foreground transition-transform ${collapsed ? "-rotate-90" : ""}`} />
                   <span className="text-[11px] font-semibold text-foreground">{g.task}</span>
                   <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{g.count}</span>
                   <span className="flex-1" />
                   <button
-                    onClick={() => del(g.task, undefined, g.count)}
+                    onClick={(ev) => { ev.stopPropagation(); del(g.task, undefined, g.count); }}
                     className="flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-status-error-muted hover:text-status-error-foreground"
                   >
                     <Trash size={10} /> {t("test.library.removeTask")}
                   </button>
                 </div>
+                {!collapsed && (
                 <div className="space-y-1">
                   {g.entries.map((e, i) => {
                     const oid = e._source?.originalId || e.id || "";
@@ -5027,8 +5043,10 @@ function RegressionLibrarySection({ t, projectPath, reloadSignal, onChanged }: {
                     );
                   })}
                 </div>
+                )}
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
