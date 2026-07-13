@@ -120,6 +120,27 @@ describe('db: mergeVmArtifactLists (pure merge semantics)', () => {
   });
 });
 
+describe('cowork-transfer: assertPathInWorkspace (host-side early reject)', () => {
+  const SID = 'a1b2c3d4e5f6a7b8';
+  it('accepts a path inside the session workspace', async () => {
+    const { assertPathInWorkspace, sessionWorkspace } = await import(path.resolve(__dirname, '../../lib/cowork-transfer.ts'));
+    const ws = sessionWorkspace(SID);
+    assert.equal(assertPathInWorkspace(SID, `${ws}/out.csv`), `${ws}/out.csv`);
+    assert.equal(assertPathInWorkspace(SID, ws), ws);
+  });
+  it('rejects traversal and foreign prefixes', async () => {
+    const { assertPathInWorkspace, sessionWorkspace } = await import(path.resolve(__dirname, '../../lib/cowork-transfer.ts'));
+    const ws = sessionWorkspace(SID);
+    assert.throws(() => assertPathInWorkspace(SID, `${ws}/../../../../etc/passwd`), /invalid path/);
+    assert.throws(() => assertPathInWorkspace(SID, '/etc/hostname'), /escapes session workspace/);
+    assert.throws(() => assertPathInWorkspace(SID, `${ws}/a\0b`), /invalid path/);
+  });
+  it('rejects a non-hex sessionId', async () => {
+    const { sessionWorkspace } = await import(path.resolve(__dirname, '../../lib/cowork-transfer.ts'));
+    assert.throws(() => sessionWorkspace('../../etc'), /invalid cowork sessionId/);
+  });
+});
+
 describe('cowork-vm-manager: isImageProvisioned + getStatus surface', () => {
   it('exposes a stopped status before any start', async () => {
     const mod = await import(path.resolve(__dirname, '../../lib/cowork-vm-manager.ts'));

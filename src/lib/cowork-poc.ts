@@ -14,16 +14,21 @@ import path from 'path';
 import { getSetting } from './db';
 import { ensureRunning, isImageProvisioned } from './cowork-vm-manager';
 
-/** POC 转发器脚本路径(仓库内)。生产会内置为签名 helper。 */
+/**
+ * POC 转发器脚本路径(仓库内)。P1-C 起指向 vsock 版转发器
+ * (forwarder-vsock.mjs)。cowork_forwarder_path 设置若指向旧的
+ * forwarder-ssh.sh,同目录解析出 vsock 版。生产会内置为签名 helper。
+ */
 function forwarderPath(): string {
-  // 脚本不随包分发。dev 环境从仓库根(cwd)解析;打包版的 next-server cwd 在
-  // standalone 目录,靠 cowork_forwarder_path 设置指到仓库脚本的绝对路径。
   const fromSetting = (getSetting('cowork_forwarder_path') || '').trim();
-  const candidates = [
-    ...(fromSetting ? [fromSetting] : []),
-    path.join(process.cwd(), 'scripts/poc/cowork/forwarder-ssh.sh'),
-    path.join(process.cwd(), '../../scripts/poc/cowork/forwarder-ssh.sh'),
-  ];
+  const candidates: string[] = [];
+  if (fromSetting) {
+    // 设置可能仍指向旧 ssh 脚本;取同目录的 vsock 版 bash 包装
+    candidates.push(path.join(path.dirname(fromSetting), 'forwarder-vsock.sh'));
+    candidates.push(fromSetting);
+  }
+  candidates.push(path.join(process.cwd(), 'scripts/poc/cowork/forwarder-vsock.sh'));
+  candidates.push(path.join(process.cwd(), '../../scripts/poc/cowork/forwarder-vsock.sh'));
   return candidates.find((p) => fs.existsSync(p)) || candidates[0];
 }
 

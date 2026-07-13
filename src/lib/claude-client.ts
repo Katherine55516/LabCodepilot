@@ -786,9 +786,17 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
           const decision = await decideCowork(sess?.sandbox_enabled);
           if (decision.useSandbox && decision.executablePath) {
             queryOptions.pathToClaudeCodeExecutable = decision.executablePath;
+            const coworkEnv = queryOptions.env as Record<string, string>;
             // Session-scoped VM workspace: the forwarder reads COWORK_SESSION_ID
-            // and cd's to /home/agent/sessions/<id>/workspace before exec'ing claude.
-            (queryOptions.env as Record<string, string>).COWORK_SESSION_ID = sessionId;
+            // and the daemon cd's to /home/agent/sessions/<id>/workspace.
+            coworkEnv.COWORK_SESSION_ID = sessionId;
+            // P1-C: the forwarder connects to this vsock unix socket and runs
+            // under the app's own node (Electron with ELECTRON_RUN_AS_NODE=1 in
+            // the packaged app, plain node in dev) — no reliance on PATH having node.
+            const { VSOCK_SOCKET_PATH } = await import('./cowork-vsock');
+            coworkEnv.COWORK_VSOCK_PATH = VSOCK_SOCKET_PATH;
+            coworkEnv.COWORK_NODE_BIN = process.execPath;
+            coworkEnv.ELECTRON_RUN_AS_NODE = '1';
             // Keep the VM alive while this turn runs (blocks idle reclaim);
             // released in the outer finally.
             const vmMgr = await import('./cowork-vm-manager');

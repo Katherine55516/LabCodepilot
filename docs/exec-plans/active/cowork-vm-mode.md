@@ -19,7 +19,7 @@
 | P1-A | **文件通道**:上传进 VM(会话隔离工作区 `/home/agent/sessions/<id>/workspace`)+ 回合产物 diff + 产物卡片下载(单文件/打包) | ✅ 已完成(2026-07-10) | E2E:CSV 附件→VM 内修改→vm_artifacts 事件→卡片下载,内容验证通过;逃逸请求 403/404 且错误脱敏(不泄漏 SSH 命令行);传输走 SSH,P1-C 平替 |
 | P1-A+ | **产物持久化**:产物清单落库(`vm_artifacts_json`),历史会话 VM 休眠时仍显示卡片(列表读库不依赖 VM),下载时按需唤醒 VM + 休眠徽标 | ✅ 已完成(2026-07-10) | 修用户反馈"打开旧会话看不到产物";E2E:VM 停机→list 读库返回文件+vmOnline:false 不唤醒→下载自动 ensureRunning(6.5s)→内容正确;旧会话(落库前)VM 在线时懒迁移 |
 | P1-B | **VM 生命周期管理器**(server 侧单例):懒启动 / 空闲回收 / 健康检查 / 崩溃重建 / 退出清理;去掉手动 vm-up.sh | ✅ 已完成(2026-07-10) | 落 server 侧(dev 无 main 进程,dev/打包共用);沙箱首条消息 ensureRunning 自动 spawn vfkit;E2E 验证冷启动自动起 VM、kill vfkit 后自愈重建、dev SIGTERM 连带关 VM 无孤儿;UI 状态态留 P1-D |
-| P1-C | **通道产品化**:guest-daemon(Go 静态二进制,vsock)替代 SSH;exec/writeFile/readFile/listFiles/health RPC | 📋 待开始 | vfkit vsock→unix socket;转发器改连 daemon;SSH 退役 |
+| P1-C | **通道产品化**:guest-daemon(**Python3**,vsock)替代 SSH;exec/writeFile/readFile/listFiles/archive/removeSession/health RPC | ✅ 已完成(2026-07-13) | vfkit connect 模式 vsock→unix socket(无握手无魔数,已实测);运行时数据流全 vsock,SSH 仅剩一次性 provisioning(推 binary+daemon);E2E:冷机全链路(上传/流式 exec/产物 diff/下载)通过,daemon 崩溃自动 re-provision |
 | P1-D | **就绪状态机 + 消息先行入队**:provisioning→vm_ready→ready→failed;未就绪时消息/附件入队,就绪自动发出 | 📋 待开始 | 设计见调研文档 §7.1;P1 范围内"下载镜像"仍为手动预置,状态机先覆盖 VM 启动窗口 |
 | P1-E | **入口正式化**:沙箱徽标/能力边界提示(外部 stdio MCP 屏蔽说明)、空态入口卡、真机零写入验收(fs 监控) | 📋 待开始 | POC 开关保留为会话内切换;i18n 三语 |
 
@@ -33,6 +33,11 @@
 - 2026-07-10: P1-B VM 管理器**放 server 侧单例**(globalThis park 抗 Next dev hot-reload),不放 electron main —— `npm run dev`(主要验证环境)根本没有 main 进程,且无 server→main 消息通道;dev 与打包版共用同一套逻辑,claude-client 直接调用。代价:VM 与 next-server 同生命周期(打包版 next-server 长驻,等价于随 app;dev 随 dev server)
 - 2026-07-10: `decideCowork` 改 async —— 首条沙箱消息阻塞到 VM 就绪(冷启动数秒),符合"点开就能用";崩溃态(health 双探失败 / vfkit exit)在下条消息的 ensureRunning 里自动重建;活跃会话用 markSessionActive/releaseSession 计数,归零后 15 分钟空闲回收
 - 2026-07-10: 排查"疑似双 VM"实为**测量假象** —— `ps|grep "[v]fkit"` 匹配到我自己命令行里的 "vfkit" 字面量;改用 `pgrep -f 'vfkit --cpus'` 精确计数,确认单例守卫(startingPromise + existingVfkitPid 复用)工作正常,全程只有一台 VM
+- 2026-07-13: P1-C daemon 改用 **Python3**(guest 云镜像自带 + `socket.AF_VSOCK` 标准库)而非计划里的 Go —— 零工具链、零跨编译、零二进制推送,一个 .py scp 进去即可;POC 级 RPC broker 用 Python 完全够
+- 2026-07-13: vfkit vsock 用 **connect 模式**(guest daemon 当 server,宿主连 unix socket);调研+实测确认**无 Firecracker 式 `CONNECT` 握手、无魔数**,连上即裸字节流,应用层协议自定(首行 JSON header + body)
+- 2026-07-13: forwarder 从 bash(ssh)换 **bash 包装 + node .mjs**(vsock 客户端);pathToClaudeCodeExecutable 指向 .sh,claude-client 注入 `COWORK_NODE_BIN=process.execPath`+`ELECTRON_RUN_AS_NODE=1`,不依赖 PATH 里有 node(打包版 Electron 无独立 node)
+- 2026-07-13: **两个真 bug 在验证中抓出并修复**:① `vsockHealthy` 挂死 —— daemon 未监听时 vfkit accept 后立刻关连接,readJsonHeader 只处理 data/error 不处理 close → 永久挂起 ensureDaemon;修:close/end→reject + 读超时。② daemon `pump_out` 用 `proc.stdout.read(64K)` 阻塞攒满才吐 → stream-json 小块增量全缓冲、SDK 等不到 init 响应 claude 挂死;修:改 `os.read(fd)` 真流式。③ provision 命令 `pkill -f cowork-daemon.py` 自匹配(命令行含 python3 路径)→ 自杀;修:bracket trick `[c]owork-daemon.py` + 拆独立 ssh 调用
+- 2026-07-13: SSH 未 100% 退役 —— **运行时数据流(exec/文件/健康)全 vsock**,SSH 仅剩 VM-provision 一次性用途(推 claude binary + 推/启 daemon,与推 binary 同性质);生产形态把 daemon 烘进镜像 systemd 自启即彻底无 SSH(留待镜像流水线)
 
 ## 详细设计
 

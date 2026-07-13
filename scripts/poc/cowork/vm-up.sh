@@ -30,6 +30,7 @@ case "${1:-start}" in
     if [ -f "$PIDFILE" ] && kill -0 "$(cat "$PIDFILE")" 2>/dev/null; then
       echo "already running pid=$(cat "$PIDFILE")"; exit 0
     fi
+    rm -f "$POC/vsock-1024.sock"
     nohup vfkit \
       --cpus 2 --memory 2048 \
       --bootloader "efi,variable-store=$EFI_STORE,create" \
@@ -38,6 +39,7 @@ case "${1:-start}" in
       --device "virtio-net,nat,mac=$MAC" \
       --device "virtio-serial,logFilePath=$LOG" \
       --device virtio-rng \
+      --device "virtio-vsock,port=1024,socketURL=$POC/vsock-1024.sock,connect" \
       --restful-uri tcp://127.0.0.1:47899 \
       >"$POC/vfkit.out" 2>&1 &
     echo $! > "$PIDFILE"

@@ -1,34 +1,28 @@
 /**
  * cowork-transfer.ts — 宿主 ↔ 沙箱 VM 的文件/查询通道。
  *
- * P1-A 实现为 SSH(复用 POC 的密钥与 vm-ip 资产);P1-C 会替换为
- * guest-daemon 的 vsock RPC——调用方只依赖本模块导出的函数签名,
- * 传输机制平替时零改动。
+ * P1-C:传输从 SSH/scp 换成 guest-daemon 的 vsock RPC(见 cowork-vsock.ts +
+ * scripts/poc/cowork/cowork-daemon.py)。claude-client 侧的函数签名保持稳定
+ * (ensureSessionWorkspace/pushFileToVm/listNewFiles/removeSessionDir);流式
+ * 读取因 vsock connect 变 async,同步改 API 路由这一个调用方。
  *
- * 安全边界(本模块自防,API 层另有一道):
- * - sessionId 严格校验(hex),它会拼进远端 shell 命令与路径
- * - 远端命令统一经 shq() 单引号转义,防注入
- * - vmPath 读取前 realpath 校验必须落在该会话 workspace 内(防 ../ 与符号链接逃逸)
+ * 安全边界:sessionId 强制 hex 校验;下载路径的权威校验(realpath + workspace
+ * 前缀)在 daemon 侧完成(文件真身在那),本模块另做一道廉价的 `..` 早拒。
  */
-import { spawn, execFile } from 'child_process';
-import { promisify } from 'util';
-import fs from 'fs';
-import os from 'os';
 import path from 'path';
 import type { VmArtifactFile } from '@/types';
+import {
+  vsockHealthy,
+  rpcMkdirWorkspace,
+  rpcWriteFile,
+  rpcListFiles,
+  rpcReadFileStream,
+  rpcArchiveStream,
+  rpcRemoveSession,
+} from './cowork-vsock';
+import fs from 'fs';
 
-const execFileAsync = promisify(execFile);
-
-const POC_DIR = path.join(os.homedir(), '.codepilot', 'cowork-poc');
-const SSH_KEY = path.join(POC_DIR, 'ssh', 'id_ed25519');
-const VM_IP_FILE = path.join(POC_DIR, 'vm-ip');
-const GUEST_USER = 'agent';
 const SESSIONS_ROOT = '/home/agent/sessions';
-
-/** 单引号 shell 转义:'abc'"'"'def' 形式,适用于任意字节串。 */
-function shq(s: string): string {
-  return `'${s.replace(/'/g, `'"'"'`)}'`;
-}
 
 function assertSessionId(sessionId: string): void {
   if (!/^[a-f0-9]{8,64}$/i.test(sessionId)) {
@@ -41,61 +35,25 @@ export function sessionWorkspace(sessionId: string): string {
   return `${SESSIONS_ROOT}/${sessionId}/workspace`;
 }
 
-function vmIp(): string {
-  const ip = fs.readFileSync(VM_IP_FILE, 'utf8').trim();
-  if (!/^[0-9.]+$/.test(ip)) throw new Error('invalid vm-ip');
-  return ip;
-}
-
-function sshArgs(): string[] {
-  return [
-    '-i', SSH_KEY,
-    '-o', 'StrictHostKeyChecking=no',
-    '-o', 'UserKnownHostsFile=/dev/null',
-    '-o', 'LogLevel=ERROR',
-    '-o', 'ConnectTimeout=8',
-  ];
-}
-
-async function sshExec(remoteCmd: string, timeoutMs = 20000): Promise<string> {
-  const { stdout } = await execFileAsync(
-    'ssh', [...sshArgs(), `${GUEST_USER}@${vmIp()}`, remoteCmd],
-    { timeout: timeoutMs, maxBuffer: 8 * 1024 * 1024 },
-  );
-  return stdout;
-}
-
-/** VM 通道是否可用(vm-ip 存在且 SSH 应答)。轻量探活,3s 超时。 */
+/** VM 通道是否可用(vsock daemon 健康应答)。轻量探活。 */
 export async function vmChannelReady(): Promise<boolean> {
-  try {
-    if (!fs.existsSync(VM_IP_FILE)) return false;
-    await execFileAsync('ssh', [...sshArgs(), '-o', 'ConnectTimeout=3', `${GUEST_USER}@${vmIp()}`, 'true'], { timeout: 6000 });
-    return true;
-  } catch {
-    return false;
-  }
+  return vsockHealthy();
 }
 
 /** 确保会话 workspace 存在(幂等)。 */
 export async function ensureSessionWorkspace(sessionId: string): Promise<string> {
-  const ws = sessionWorkspace(sessionId);
-  await sshExec(`mkdir -p ${shq(ws)}`);
-  return ws;
+  assertSessionId(sessionId);
+  return rpcMkdirWorkspace(sessionId);
 }
 
 /**
  * 推送一个本地文件进会话 workspace,返回 VM 内绝对路径。
- * fileName 会被 basename + 白名单清洗(与上传链路的 safeName 规则一致)。
+ * fileName 的清洗与 daemon 侧一致(basename + 白名单)。
  */
 export async function pushFileToVm(sessionId: string, localPath: string, fileName: string): Promise<string> {
-  const ws = await ensureSessionWorkspace(sessionId);
-  const safeName = path.basename(fileName).replace(/[^a-zA-Z0-9._一-龥-]/g, '_');
-  const dest = `${ws}/${safeName}`;
-  await execFileAsync(
-    'scp', [...sshArgs(), localPath, `${GUEST_USER}@${vmIp()}:${dest}`],
-    { timeout: 120000 },
-  );
-  return dest;
+  assertSessionId(sessionId);
+  const data = await fs.promises.readFile(localPath);
+  return rpcWriteFile(sessionId, fileName, data);
 }
 
 /**
@@ -107,60 +65,44 @@ export async function listNewFiles(
   sinceEpochMs: number,
   excludePaths: string[] = [],
 ): Promise<VmArtifactFile[]> {
-  const ws = sessionWorkspace(sessionId);
-  const sinceSec = Math.floor(sinceEpochMs / 1000);
-  // stat -c '%s|%Y|%n':size|mtime|path,GNU coreutils(Debian guest)
-  const out = await sshExec(
-    `[ -d ${shq(ws)} ] && find ${shq(ws)} -type f -newermt @${sinceSec} -exec stat -c '%s|%Y|%n' {} + 2>/dev/null || true`,
-  );
+  assertSessionId(sessionId);
   const exclude = new Set(excludePaths);
-  const files: VmArtifactFile[] = [];
-  for (const line of out.split('\n')) {
-    const m = line.match(/^(\d+)\|(\d+)\|(.+)$/);
-    if (!m) continue;
-    const [, size, mtime, p] = m;
-    if (exclude.has(p)) continue;
-    files.push({ path: p, name: path.posix.basename(p), size: Number(size), mtime: Number(mtime) * 1000 });
-  }
-  return files.sort((a, b) => a.name.localeCompare(b.name));
+  const files = await rpcListFiles(sessionId, sinceEpochMs);
+  return files
+    .filter((f) => !exclude.has(f.path))
+    .map((f) => ({ path: f.path, name: f.name, size: f.size, mtime: f.mtime }))
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 /**
- * 校验 vmPath 确实位于该会话 workspace 内(realpath 解析符号链接后前缀判定)。
- * 通过则返回规范化路径,否则抛错。
+ * 廉价的 host 侧路径早拒(拒绝明显的 `..` 逃逸与非本会话前缀)。权威校验
+ * (realpath 解符号链接 + workspace 前缀)在 daemon 的 op_read_file 内完成。
  */
-export async function assertPathInWorkspace(sessionId: string, vmPath: string): Promise<string> {
+export function assertPathInWorkspace(sessionId: string, vmPath: string): string {
   const ws = sessionWorkspace(sessionId);
-  if (vmPath.includes('\0')) throw new Error('invalid path');
-  const real = (await sshExec(`realpath -e ${shq(vmPath)}`)).trim();
-  if (real !== ws && !real.startsWith(ws + '/')) {
+  if (vmPath.includes('\0') || vmPath.includes('..')) throw new Error('invalid path');
+  if (vmPath !== ws && !vmPath.startsWith(ws + '/')) {
     throw new Error(`path escapes session workspace: ${vmPath.slice(0, 80)}`);
   }
-  return real;
+  return vmPath;
 }
 
-/**
- * 流式读取 VM 内单个文件(调用方需先 assertPathInWorkspace)。
- * 返回 ssh 子进程的 stdout 可读流与进程句柄(供上层处理退出码)。
- */
-export function readFileStream(vmPath: string): { stream: NodeJS.ReadableStream; child: ReturnType<typeof spawn> } {
-  const child = spawn('ssh', [...sshArgs(), `${GUEST_USER}@${vmIp()}`, `cat ${shq(vmPath)}`], {
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  return { stream: child.stdout!, child };
+/** 流式读取 VM 内单个文件(daemon 侧做 realpath 权威校验)。 */
+export async function readFileStream(sessionId: string, vmPath: string): Promise<{ stream: NodeJS.ReadableStream; size: number }> {
+  assertPathInWorkspace(sessionId, vmPath);
+  return rpcReadFileStream(sessionId, vmPath);
 }
 
 /** 流式打包整个会话 workspace 为 tar.gz。 */
-export function archiveStream(sessionId: string): { stream: NodeJS.ReadableStream; child: ReturnType<typeof spawn> } {
-  const ws = sessionWorkspace(sessionId);
-  const child = spawn('ssh', [...sshArgs(), `${GUEST_USER}@${vmIp()}`, `cd ${shq(ws)} && tar czf - .`], {
-    stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  return { stream: child.stdout!, child };
+export async function archiveStream(sessionId: string): Promise<{ stream: NodeJS.ReadableStream; size: number }> {
+  assertSessionId(sessionId);
+  return rpcArchiveStream(sessionId);
 }
 
 /** 会话删除时清理 VM 内的会话目录。 */
 export async function removeSessionDir(sessionId: string): Promise<void> {
   assertSessionId(sessionId);
-  await sshExec(`rm -rf ${shq(`${SESSIONS_ROOT}/${sessionId}`)}`);
+  await rpcRemoveSession(sessionId);
 }
+
+export { SESSIONS_ROOT };

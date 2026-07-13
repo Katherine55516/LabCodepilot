@@ -36,6 +36,11 @@ const GUEST_HOSTNAME = 'cowork-poc';
 const GUEST_USER = 'agent';
 const VM_MAC = '72:20:43:d4:38:62';
 const RESTFUL_URI = 'tcp://127.0.0.1:47899';
+// P1-C: vsock 运行时通道。vfkit connect 模式 → guest daemon 当 server,
+// 宿主连这个 unix socket。port 与 daemon/客户端约定一致。
+const VSOCK_PORT = 1024;
+const VSOCK_SOCKET = path.join(POC_DIR, 'vsock-1024.sock');
+const GUEST_DAEMON_PATH = '/home/agent/cowork-daemon.py';
 
 const READY_TIMEOUT_MS = 120_000;
 const HEALTH_INTERVAL_MS = 20_000;
@@ -170,6 +175,53 @@ async function ensureGuestBinary(ip: string): Promise<void> {
   await execFileAsync('ssh', [...sshBaseArgs(), `${GUEST_USER}@${ip}`, 'chmod +x ~/bin/claude'], { timeout: 10000 });
 }
 
+/** 仓库内 daemon 脚本路径(dev 从 cwd 解析,打包版靠 cowork_forwarder_path 同目录)。 */
+function hostDaemonPath(): string | null {
+  const candidates: string[] = [];
+  try {
+    const { getSetting } = require('./db') as typeof import('./db');
+    const fwd = (getSetting('cowork_forwarder_path') || '').trim();
+    if (fwd) candidates.push(path.join(path.dirname(fwd), 'cowork-daemon.py'));
+  } catch { /* db not available */ }
+  candidates.push(path.join(process.cwd(), 'scripts/poc/cowork/cowork-daemon.py'));
+  return candidates.find((p) => fs.existsSync(p)) || null;
+}
+
+/**
+ * 确保 guest vsock daemon 在跑(P1-C 运行时通道)。先 vsock 健康探测;不健康则
+ * SSH 一次性推 daemon.py + nohup 启动,再探。SSH 仅用于 provisioning(与推
+ * claude binary 同性质);运行时数据流全走 vsock。生产形态会把 daemon 烘进镜像
+ * 用 systemd 开机自启,彻底无 SSH。
+ */
+async function ensureDaemon(ip: string): Promise<void> {
+  const { vsockHealthy } = await import('./cowork-vsock');
+  if (await vsockHealthy(3000)) return;
+  const daemonSrc = hostDaemonPath();
+  if (!daemonSrc) {
+    console.warn('[cowork-vm] daemon script not found on host — cannot provision vsock daemon');
+    return;
+  }
+  console.log('[cowork-vm] provisioning vsock daemon…');
+  await execFileAsync('scp', [...sshBaseArgs(), daemonSrc, `${GUEST_USER}@${ip}:${GUEST_DAEMON_PATH}`], { timeout: 30000 });
+  // 先杀旧实例(独立 ssh 调用 + bracket trick 防自杀:pkill 的模式串
+  // `[c]owork-daemon.py` 在本命令行里字面是 `[c]owork…`,正则却匹配 `cowork…`,
+  // 于是不会误杀这条 kill 命令自身。原先单命令里带 python3 路径 → 自匹配自杀,
+  // daemon 永远起不来)。
+  await execFileAsync('ssh', [...sshBaseArgs(), `${GUEST_USER}@${ip}`,
+    `pkill -f '[c]owork-daemon.py' 2>/dev/null; true`,
+  ], { timeout: 10000 }).catch(() => { /* 没有旧实例可杀 */ });
+  // 再起(独立 ssh:本命令行含脚本路径但无 pkill,不会被杀);setsid+nohup 脱离会话常驻
+  await execFileAsync('ssh', [...sshBaseArgs(), `${GUEST_USER}@${ip}`,
+    `setsid nohup python3 ${GUEST_DAEMON_PATH} >/tmp/cowork-daemon.log 2>&1 < /dev/null & sleep 0.5; echo started`,
+  ], { timeout: 15000 });
+  // 等 daemon 在 vsock 上就绪
+  for (let i = 0; i < 20; i++) {
+    if (await vsockHealthy(2000)) { console.log('[cowork-vm] vsock daemon ready'); return; }
+    await new Promise((r) => setTimeout(r, 500));
+  }
+  throw new Error('vsock daemon did not become healthy after provisioning');
+}
+
 function clearHealth(s: VmState): void {
   if (s.healthTimer) { clearInterval(s.healthTimer); s.healthTimer = null; }
 }
@@ -178,12 +230,14 @@ function startHealth(s: VmState): void {
   clearHealth(s);
   s.healthTimer = setInterval(async () => {
     if (s.phase !== 'running' || !s.ip) return;
-    const ok = await sshOk(s.ip, 6000);
+    // P1-C:健康探测走 vsock daemon(它挂了 = 通道断了,即使 VM 还活着也要重建)
+    const { vsockHealthy } = await import('./cowork-vsock');
+    const ok = await vsockHealthy(6000);
     if (!ok && s.phase === 'running') {
       // 二次确认,避免瞬时抖动误判
-      const retry = await sshOk(s.ip, 6000);
+      const retry = await vsockHealthy(6000);
       if (!retry && s.phase === 'running') {
-        console.warn('[cowork-vm] health check failed twice → marking crashed');
+        console.warn('[cowork-vm] vsock health check failed twice → marking crashed');
         s.phase = 'crashed';
         s.reason = 'health check failed';
         clearHealth(s);
@@ -244,6 +298,7 @@ export async function ensureRunning(): Promise<VmStatus> {
           s.ip = ip;
           fs.writeFileSync(VM_IP_FILE, ip);
           await ensureGuestBinary(ip).catch((e) => console.warn('[cowork-vm] ensureGuestBinary:', e?.message));
+          await ensureDaemon(ip).catch((e) => console.warn('[cowork-vm] ensureDaemon:', e?.message));
           s.phase = 'running';
           s.reason = undefined;
           startHealth(s);
@@ -263,6 +318,8 @@ export async function ensureRunning(): Promise<VmStatus> {
       s.ip = null;
       console.log('[cowork-vm] spawning vfkit…');
 
+      // 陈旧 vsock socket 文件会让 vfkit 的 ListenUnix bind 失败,先清
+      try { fs.rmSync(VSOCK_SOCKET, { force: true }); } catch { /* ignore */ }
       const proc = spawn('vfkit', [
         '--cpus', '2', '--memory', '2048',
         '--bootloader', `efi,variable-store=${EFI_STORE},create`,
@@ -271,6 +328,7 @@ export async function ensureRunning(): Promise<VmStatus> {
         '--device', `virtio-net,nat,mac=${VM_MAC}`,
         '--device', `virtio-serial,logFilePath=${CONSOLE_LOG}`,
         '--device', 'virtio-rng',
+        '--device', `virtio-vsock,port=${VSOCK_PORT},socketURL=${VSOCK_SOCKET},connect`,
         '--restful-uri', RESTFUL_URI,
       ], { stdio: 'ignore', detached: false });
 
@@ -295,6 +353,7 @@ export async function ensureRunning(): Promise<VmStatus> {
           s.ip = ip;
           fs.writeFileSync(VM_IP_FILE, ip);
           await ensureGuestBinary(ip);
+          await ensureDaemon(ip);
           s.phase = 'running';
           s.reason = undefined;
           startHealth(s);

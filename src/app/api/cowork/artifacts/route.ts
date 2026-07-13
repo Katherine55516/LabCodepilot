@@ -2,7 +2,6 @@ import { NextRequest } from 'next/server';
 import { Readable } from 'stream';
 import { getSession } from '@/lib/db';
 import {
-  assertPathInWorkspace,
   readFileStream,
   archiveStream,
   listNewFiles,
@@ -65,7 +64,7 @@ export async function GET(request: NextRequest) {
     }
 
     if (wantArchive) {
-      const { stream } = archiveStream(sessionId);
+      const { stream } = await archiveStream(sessionId);
       return new Response(Readable.toWeb(stream as Readable) as ReadableStream, {
         headers: {
           'Content-Type': 'application/gzip',
@@ -75,9 +74,8 @@ export async function GET(request: NextRequest) {
     }
 
     if (vmPath) {
-      const real = await assertPathInWorkspace(sessionId, vmPath);
-      const name = real.split('/').pop() || 'download';
-      const { stream } = readFileStream(real);
+      const name = vmPath.split('/').pop() || 'download';
+      const { stream } = await readFileStream(sessionId, vmPath);
       return new Response(Readable.toWeb(stream as Readable) as ReadableStream, {
         headers: {
           'Content-Type': 'application/octet-stream',
