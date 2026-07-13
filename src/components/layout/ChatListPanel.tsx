@@ -17,8 +17,11 @@ import {
   Gear,
   MagnifyingGlassCheck,
   Sparkle,
+  Briefcase,
+  Code,
   type Icon,
 } from "@/components/ui/icon";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -45,8 +48,13 @@ import {
   groupSessionsByProject,
   loadCollapsedProjects,
   saveCollapsedProjects,
+  loadWorkspaceTab,
+  saveWorkspaceTab,
+  splitSessionsByWorkspaceTab,
+  type WorkspaceTab,
   COLLAPSED_INITIALIZED_KEY,
 } from "./chat-list-utils";
+import { OfficeEmptyCard } from "./OfficeEmptyCard";
 import type { ChatSession } from "@/types";
 
 interface ChatListPanelProps {
@@ -103,6 +111,32 @@ export function ChatListPanel({ open, width, hasUpdate, readyToInstall }: ChatLi
   );
   const [hoveredFolder, setHoveredFolder] = useState<string | null>(null);
   const [creatingChat, setCreatingChat] = useState(false);
+
+  // E3 (cowork): 「办公 / 研发」双栏。办公 = 沙箱会话平铺(不按项目分组);
+  // 仅当全局 cowork_enabled 开启时分段控件才渲染 —— 关闭时回到现状外观,
+  // 遗留沙箱会话继续留在研发项目分组里。tab 选择记忆在 localStorage。
+  const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>(() => loadWorkspaceTab());
+  const [coworkAvailable, setCoworkAvailable] = useState(false);
+  const [coworkImageProvisioned, setCoworkImageProvisioned] = useState(true);
+
+  useEffect(() => {
+    // 只读探测(不触发 VM 启动);失败按不可用处理(fail-closed,tab 隐藏)。
+    fetch('/api/cowork/status')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!d) return;
+        setCoworkAvailable(!!d.enabled);
+        setCoworkImageProvisioned(!!d.imageProvisioned);
+      })
+      .catch(() => {});
+  }, []);
+
+  const activeTab: WorkspaceTab = coworkAvailable ? workspaceTab : 'dev';
+
+  const handleTabChange = useCallback((tab: WorkspaceTab) => {
+    setWorkspaceTab(tab);
+    saveWorkspaceTab(tab);
+  }, []);
   const { workspacePath } = useAssistantWorkspace();
   const [assistantSummary, setAssistantSummary] = useState<{
     name: string;
@@ -235,6 +269,29 @@ export function ChatListPanel({ open, width, hasUpdate, readyToInstall }: ChatLi
       setCreatingChat(false);
     }
   }, [router, workingDirectory, openFolderPicker, getCurrentModelAndProvider, t]);
+
+  // E3: 办公 tab 的「新对话」— 不选文件夹,POST sandbox_enabled:1;服务端
+  // 生成宿主暂存目录(E2)并默认 full_access。
+  const handleNewOfficeChat = useCallback(async () => {
+    setCreatingChat(true);
+    try {
+      const { model, provider_id } = getCurrentModelAndProvider();
+      const res = await fetch("/api/chat/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sandbox_enabled: 1, model, provider_id }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        window.dispatchEvent(new CustomEvent("session-created"));
+        router.push(`/chat/${data.session.id}`);
+      }
+    } catch {
+      // Silently fail (same convention as handleNewChat)
+    } finally {
+      setCreatingChat(false);
+    }
+  }, [router, getCurrentModelAndProvider]);
 
   const toggleProject = useCallback((wd: string) => {
     setCollapsedProjects((prev) => {
@@ -413,8 +470,18 @@ export function ChatListPanel({ open, width, hasUpdate, readyToInstall }: ChatLi
     return sessions;
   }, [sessions, isSplitActive, splitSessionIds]);
 
+  // E3: 双栏切分 —— office = 沙箱会话(updated_at 倒序平铺),dev = 其余。
+  // cowork 全局关闭时不切分(遗留沙箱会话留在研发分组,现状外观零变化)。
+  const { office: officeSessions, dev: devSessions } = useMemo(
+    () =>
+      coworkAvailable
+        ? splitSessionsByWorkspaceTab(filteredSessions)
+        : { office: [] as ChatSession[], dev: filteredSessions },
+    [filteredSessions, coworkAvailable]
+  );
+
   const projectGroups = useMemo(() => {
-    const groups = groupSessionsByProject(filteredSessions);
+    const groups = groupSessionsByProject(devSessions);
     // Pin assistant workspace project to top
     if (workspacePath) {
       const wsIdx = groups.findIndex(g => g.workingDirectory === workspacePath);
@@ -424,7 +491,7 @@ export function ChatListPanel({ open, width, hasUpdate, readyToInstall }: ChatLi
       }
     }
     return groups;
-  }, [filteredSessions, workspacePath]);
+  }, [devSessions, workspacePath]);
 
   // Auto-collapse: only expand the project with the most recent session activity.
   // Runs on first use AND whenever the project list changes (new projects added).
@@ -483,8 +550,8 @@ export function ChatListPanel({ open, width, hasUpdate, readyToInstall }: ChatLi
           variant="outline"
           size="sm"
           className="flex-1 justify-center gap-1.5 h-8 text-xs"
-          disabled={creatingChat}
-          onClick={handleNewChat}
+          disabled={creatingChat || (activeTab === 'office' && !coworkImageProvisioned)}
+          onClick={activeTab === 'office' ? handleNewOfficeChat : handleNewChat}
         >
           <Plus size={14} />
           {t('chatList.newConversation')}
@@ -504,6 +571,28 @@ export function ChatListPanel({ open, width, hasUpdate, readyToInstall }: ChatLi
           <TooltipContent side="bottom">{t('chatList.searchSessions')}</TooltipContent>
         </Tooltip>
       </div>
+
+      {/* E3 (cowork): 办公/研发 分段切换 — 仅 cowork_enabled 时渲染;办公=
+          沙箱会话平铺,研发=现有项目分组。切 tab 只换列表,不影响已打开会话。 */}
+      {coworkAvailable && (
+        <div className="px-3 pb-2">
+          {/* activationMode="manual":焦点掠过不切换(默认 automatic 下 Tab 键
+              路过/a11y 遍历 focus 到 trigger 就会切视图并写 localStorage,
+              CDP 验证时实测误触)。点击 / Enter / Space 才激活。 */}
+          <Tabs value={activeTab} onValueChange={(v) => handleTabChange(v as WorkspaceTab)} activationMode="manual">
+            <TabsList className="w-full !h-8 p-0.5 text-xs rounded-md">
+              <TabsTrigger value="office" className="flex-1 !h-6 rounded-sm px-1.5 py-0 text-xs gap-1.5">
+                <Briefcase size={13} />
+                {t('workspace.tab.office')}
+              </TabsTrigger>
+              <TabsTrigger value="dev" className="flex-1 !h-6 rounded-sm px-1.5 py-0 text-xs gap-1.5">
+                <Code size={13} />
+                {t('workspace.tab.dev')}
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
+        </div>
+      )}
 
       {/* Feature nav items — 测试 moved next to 文生图 above the account row (see bottom).
           navItems is empty today (entries live in Settings); render the block only when
@@ -542,23 +631,26 @@ export function ChatListPanel({ open, width, hasUpdate, readyToInstall }: ChatLi
         <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground/60">
           {t('chatList.threads')}
         </span>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-5 gap-1 px-1.5 text-[11px] text-muted-foreground/60 hover:text-foreground"
-          onClick={() => openFolderPicker()}
-        >
-          <FolderPlus size={12} />
-          {t('chatList.addProjectFolder')}
-        </Button>
+        {/* 「新建项目」是研发专属(办公不绑项目文件夹,E3) */}
+        {activeTab === 'dev' && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-5 gap-1 px-1.5 text-[11px] text-muted-foreground/60 hover:text-foreground"
+            onClick={() => openFolderPicker()}
+          >
+            <FolderPlus size={12} />
+            {t('chatList.addProjectFolder')}
+          </Button>
+        )}
       </div>
 
       {/* Session list grouped by project */}
       <ScrollArea className="flex-1 min-h-0 px-3 [&>[data-slot=scroll-area-viewport]>div]:!block">
         <div className="flex flex-col pb-3">
 
-          {/* Split group section */}
-          {isSplitActive && (
+          {/* Split group section — 分屏是研发工作流,办公 tab 不显示 */}
+          {activeTab === 'dev' && isSplitActive && (
             <SplitGroupSection
               splitSessions={splitSessions}
               activeColumnId={activeColumnId}
@@ -570,6 +662,50 @@ export function ChatListPanel({ open, width, hasUpdate, readyToInstall }: ChatLi
               setActiveColumn={setActiveColumn}
               removeFromSplit={removeFromSplit}
             />
+          )}
+
+          {/* E3: 办公 tab — 沙箱会话平铺(不分组);空态显示介绍卡 */}
+          {activeTab === 'office' && (
+            officeSessions.length === 0 ? (
+              <OfficeEmptyCard
+                imageProvisioned={coworkImageProvisioned}
+                creating={creatingChat}
+                onStart={handleNewOfficeChat}
+              />
+            ) : (
+              <div className="mt-0.5 flex flex-col gap-0.5">
+                {officeSessions.map((session) => {
+                  const isActive = !testPanelOpen && pathname === `/chat/${session.id}`;
+                  return (
+                    <SessionListItem
+                      key={session.id}
+                      session={session}
+                      isActive={isActive}
+                      isHovered={hoveredSession === session.id}
+                      isDeleting={deletingSession === session.id}
+                      isSessionStreaming={activeStreamingSessions.has(session.id) || streamingSessionId === session.id}
+                      needsApproval={pendingApprovalSessionIds.has(session.id) || pendingApprovalSessionId === session.id}
+                      canSplit={false}
+                      isWorkspace={false}
+                      formatRelativeTime={formatRelativeTime}
+                      t={t}
+                      onMouseEnter={() => setHoveredSession(session.id)}
+                      onMouseLeave={() => setHoveredSession(null)}
+                      onDelete={handleDeleteSession}
+                      onRename={handleRenameSession}
+                      onAddToSplit={(s) => addToSplit({
+                        sessionId: s.id,
+                        title: s.title,
+                        workingDirectory: s.working_directory || "",
+                        projectName: s.project_name || "",
+                        mode: s.mode,
+                      })}
+                      onNavigate={() => setTestPanelOpen(false)}
+                    />
+                  );
+                })}
+              </div>
+            )
           )}
 
           {/* Assistant promo card for unconfigured users — hidden per user
@@ -585,7 +721,7 @@ export function ChatListPanel({ open, width, hasUpdate, readyToInstall }: ChatLi
           )}
           */}
 
-          {filteredSessions.length === 0 && (!isSplitActive || splitSessions.length === 0) ? (
+          {activeTab === 'dev' && (devSessions.length === 0 && (!isSplitActive || splitSessions.length === 0) ? (
             <p className="px-2.5 py-3 text-[11px] text-muted-foreground/60">
               {t('chatList.noSessions')}
             </p>
@@ -712,7 +848,7 @@ export function ChatListPanel({ open, width, hasUpdate, readyToInstall }: ChatLi
                 </div>
               );
             })
-          )}
+          ))}
         </div>
       </ScrollArea>
 

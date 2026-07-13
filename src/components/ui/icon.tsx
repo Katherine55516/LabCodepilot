@@ -12,6 +12,7 @@ export {
   Bell,
   Book,
   Brain,
+  Briefcase,
   CaretDown,
   CaretUp,
   CaretRight,

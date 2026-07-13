@@ -1636,6 +1636,14 @@ const en = {
   'sandbox.provisioning.failedTitle': 'Sandbox failed to start',
   'sandbox.provisioning.failedHint': 'Please try again, or check the sandbox environment',
 
+  // ── Workspace tabs (Cowork office mode, E3) ───────────────
+  'workspace.tab.office': 'Work',
+  'workspace.tab.dev': 'Code',
+  'workspace.office.emptyTitle': 'Work sessions',
+  'workspace.office.emptyDesc': 'The AI works inside an isolated sandbox VM: send it files in chat to read and edit, download the results from the artifacts card — it never touches files on this machine.',
+  'workspace.office.start': 'Start a work session',
+  'workspace.office.imageMissing': 'The sandbox VM image is not provisioned on this machine yet, so work mode is unavailable (see scripts/poc/cowork/README.md).',
+
   // ── Context Usage ─────────────────────────────────────────
   'context.usage': 'Context Usage',
   'context.model': 'Model',

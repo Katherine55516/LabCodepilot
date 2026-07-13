@@ -1634,6 +1634,14 @@ const zh: Record<TranslationKey, string> = {
   'sandbox.provisioning.failedTitle': '沙箱启动失败',
   'sandbox.provisioning.failedHint': '请稍后重试,或检查沙箱环境',
 
+  // ── Workspace tabs (Cowork office mode, E3) ───────────────
+  'workspace.tab.office': '办公',
+  'workspace.tab.dev': '研发',
+  'workspace.office.emptyTitle': '办公对话',
+  'workspace.office.emptyDesc': 'AI 在隔离的沙箱虚拟机内工作:通过对话发文件给它读改,产出的文件在产物卡片中下载,全程不接触真机文件。',
+  'workspace.office.start': '开始办公对话',
+  'workspace.office.imageMissing': '本机尚未预置沙箱虚拟机镜像,暂无法使用办公模式(见 scripts/poc/cowork/README.md)。',
+
   // ── Context Usage ─────────────────────────────────────────
   'context.usage': '上下文占用',
   'context.model': '模型',
