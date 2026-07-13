@@ -313,15 +313,9 @@ const en = {
   'test.live.executing': 'Running',
   'test.live.durLive': 'Client-side wall clock (the authoritative value arrives at finalize)',
   'test.live.durFinal': 'Authoritative duration from run.json',
-
-  'test.live.filterAll': 'All',
-  'test.live.filterTool': 'Tool calls',
-  'test.live.filterAi': 'AI notes',
-  'test.live.filterKey': 'Cases & verdicts',
   'test.live.toolActivity': '{n} tool steps',
+  'test.live.execRecord': 'Execution record',
   'test.live.steps': '{n} steps',
-  'test.live.expandTools': 'Show {n} tool steps',
-  'test.live.collapseTools': 'Hide tool steps',
   'test.live.waiting': 'Waiting for execution to start…',
 
   'test.live.footOk': '✓ {pass}/{total} passed · shippable',

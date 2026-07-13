@@ -18,7 +18,7 @@ import { ModelSelectorDropdown } from "@/components/chat/ModelSelectorDropdown";
 import { useProviderModels } from "@/hooks/useProviderModels";
 import { diffRuns, funcPassRateStr } from "@/lib/test/compare";
 import { parseExecProgress } from "@/lib/test/exec-progress";
-import { createExecLineBuffer, type ExecLine, type LiveResult, type LiveStatus } from "@/lib/test/exec-live";
+import { createExecLineBuffer, shouldAdoptPlaceholder, type ExecLine, type LiveResult, type LiveStatus } from "@/lib/test/exec-live";
 import { withDownstreamReset, runStartOptions, taskCategory, occupiedSlots, TASK_CATEGORY_ORDER, type TaskCategory } from "@/lib/test/step-status";
 import { REGRESSION_LIBRARY_TASK, REGRESSION_FULL_SUITE as REGRESSION_FULL_SUITE_NAME } from "@/lib/test/library-constants";
 import type { LoginStateInfo } from "@/lib/test/env-config";
@@ -719,6 +719,12 @@ export function InlineTestingPanel() {
       const openCase = (id: string, index?: number) =>
         patchLive((s) => {
           const cases = s.cases.slice();
+          // 模型先发进度行再发 @@CASE_START 时,当前 `#N` 占位就是同一条用例 —— 就地认领
+          // (补真实 id,保留标题/事件),不另开幻影行(见 shouldAdoptPlaceholder 注释)。
+          if (s.curIdx >= 0 && shouldAdoptPlaceholder(cases[s.curIdx], index)) {
+            cases[s.curIdx] = { ...cases[s.curIdx], id };
+            return { ...s, cases };
+          }
           if (s.curIdx >= 0 && !cases[s.curIdx].result) cases[s.curIdx] = { ...cases[s.curIdx], lost: true };
           cases.push({ id, index: index ?? cases.length + 1, title: "", events: [], startedAt: Date.now() });
           return { ...s, cases, curIdx: cases.length - 1, started: s.started + 1 };
@@ -4419,7 +4425,6 @@ function LastResultDot({ t, res }: { t: T; res: CaseRes[] }) {
 // 对账条：正常时一行安静的 ✓；背离时展开三源读数。**锚点是 tool_use 计数**——@@CASE_START
 // 与 @@RESULT 都是模型自由文本，同一次 markdown 装饰会把两者一起污染、让背离被掩盖；
 // tool_use 是 SDK 结构化帧，与格式漂移无关（2026-07-10 事故的教训，见 lib/test/markers.ts）。
-type LiveFilter = "all" | "tool" | "ai" | "key";
 
 const LIVE_DOT: Record<LiveStatus, string> = {
   pass: "bg-status-success-foreground",
@@ -4442,9 +4447,6 @@ function RegressionLivePanel({ t, live, running, runStatus, onOpenReport }: {
   onOpenReport: () => void;
 }) {
   const [open, setOpen] = useState(true);
-  const [filter, setFilter] = useState<LiveFilter>("all");
-  const [expanded, setExpanded] = useState<Record<number, boolean>>({});
-  const [foldedTools, setFoldedTools] = useState<Record<string, boolean>>({});
   // 「收口中 / 疑似卡住」是【推断态】——服务端在做证据归集与归约时不发任何帧。用一个秒级
   // ticker 让面板能自己判断「多久没收到帧了」。
   const [now, setNow] = useState(() => Date.now());
@@ -4454,8 +4456,16 @@ function RegressionLivePanel({ t, live, running, runStatus, onOpenReport }: {
     return () => clearInterval(h);
   }, [running, live.finished]);
   const logRef = useRef<HTMLDivElement>(null);
+  // 智能吸底:仅当用户本就贴近底部时才自动跟随新帧。原来无条件 scrollTop=scrollHeight,
+  // 执行期间每来一帧都把滚动条拽回底部 —— 用户根本无法往上滚动阅读(实测反馈)。
+  const followRef = useRef(true);
+  const onLogScroll = () => {
+    const el = logRef.current;
+    if (el) followRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+  };
   useEffect(() => {
-    if (running && logRef.current) logRef.current.scrollTop = logRef.current.scrollHeight;
+    const el = logRef.current;
+    if (running && el && followRef.current) el.scrollTop = el.scrollHeight;
   }, [live.cases.length, live.tools, live.verdicts, running]);
 
   const fin = !!live.runJson || live.finished;
@@ -4491,35 +4501,17 @@ function RegressionLivePanel({ t, live, running, runStatus, onOpenReport }: {
   const chip = (label: string, n: number, cls: string) =>
     n > 0 ? <span key={label} className={`rounded-full px-1.5 text-[9.5px] tabular-nums ${cls}`}>{label} {n}</span> : null;
 
-  const keep = (e: LiveEvt) =>
-    filter === "all" || (filter === "tool" && e.k === "tool") || (filter === "ai" && e.k === "ai") || (filter === "key" && e.k !== "tool");
-
-  const renderEvents = (events: LiveEvt[], key: string) => {
-    const list = events.filter(keep);
-    if (!list.length) return null;
-    const tools = list.filter((e) => e.k === "tool");
-    const foldable = tools.length > 4 && filter !== "tool";
-    const showTools = !foldable || foldedTools[key] === false;
-    const shown = showTools ? list : list.filter((e) => e.k !== "tool");
+  // 完整记录:不再按类型过滤、不再折叠工具轨迹 —— 所有事件按时间顺序原样铺开
+  // (用户拍板:工具调用/AI 说明/用例与判定全部合入「全部」,不需要每用例收缩展开)。
+  const renderEvents = (events: LiveEvt[]) => {
+    if (!events.length) return null;
     const bubble = (e: LiveEvt, i: number) => {
       if (e.k === "tool") return <div key={i} className="truncate rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground" title={e.text}>{e.text}</div>;
       if (e.k === "err") return <div key={i} className="rounded bg-status-error-muted px-2 py-1 text-[10.5px] text-status-error-foreground">{e.text}</div>;
       if (e.k === "sys") return <div key={i} className={`font-mono text-[10.5px] font-semibold ${e.lost ? "font-sans font-medium text-status-error-foreground" : e.status ? LIVE_TEXT[e.status] : "text-muted-foreground"}`}>{e.text}</div>;
       return <div key={i} className="whitespace-pre-wrap rounded-md bg-muted px-2 py-1 text-[11px] text-foreground">{e.text}</div>;
     };
-    return (
-      <div className="flex flex-col gap-1 px-2.5 py-1.5">
-        {shown.map(bubble)}
-        {foldable && (
-          <button
-            onClick={(ev) => { ev.stopPropagation(); setFoldedTools((m) => ({ ...m, [key]: !(m[key] === false) })); }}
-            className="self-start rounded-full border border-dashed border-border px-2 text-[10px] text-muted-foreground hover:text-foreground"
-          >
-            {showTools ? t("test.live.collapseTools") : t("test.live.expandTools", { n: tools.length })}
-          </button>
-        )}
-      </div>
-    );
+    return <div className="flex flex-col gap-1 py-1.5">{events.map(bubble)}</div>;
   };
 
   return (
@@ -4582,12 +4574,12 @@ function RegressionLivePanel({ t, live, running, runStatus, onOpenReport }: {
                 {lostCases > 0 && t("test.live.caseLost", { n: lostCases })}
               </span>
             </div>
-            <div className="max-h-[320px] divide-y divide-border overflow-auto">
+            <div className="max-h-[420px] divide-y divide-border overflow-auto">
               {live.cases.length === 0 && <div className="p-4 text-center text-[11px] text-muted-foreground">{t("test.live.waiting")}</div>}
               {live.cases.map((c, i) => (
                 <button
                   key={`${c.id}-${i}`}
-                  onClick={() => { setExpanded((m) => ({ ...m, [i]: true })); document.getElementById(`live-seg-${i}`)?.scrollIntoView({ block: "center", behavior: "smooth" }); }}
+                  onClick={() => document.getElementById(`live-seg-${i}`)?.scrollIntoView({ block: "center", behavior: "smooth" })}
                   className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] hover:bg-muted ${c.lost ? "bg-status-error-muted" : live.curIdx === i ? "bg-primary/[0.07] shadow-[inset_2px_0_0_var(--primary)]" : ""}`}
                 >
                   {c.result ? <span className={`h-2 w-2 flex-shrink-0 rounded-full ${LIVE_DOT[c.result.status]}`} />
@@ -4610,35 +4602,32 @@ function RegressionLivePanel({ t, live, running, runStatus, onOpenReport }: {
             </div>
           </div>
 
-          {/* 右：按用例分段的执行流 */}
+          {/* 右：完整执行记录(单一时间线,用例边界只是分隔行,不可折叠) */}
           <div className="flex min-w-0 flex-col">
-            <div className="flex flex-wrap items-center gap-1 border-b border-border bg-muted px-2.5 py-1">
-              {([["all", t("test.live.filterAll")], ["tool", t("test.live.filterTool")], ["ai", t("test.live.filterAi")], ["key", t("test.live.filterKey")]] as const).map(([k, label]) => (
-                <button key={k} onClick={() => setFilter(k)} className={`rounded-full px-2 py-0.5 text-[10px] ${filter === k ? "border border-border bg-card font-semibold text-foreground" : "text-muted-foreground hover:text-foreground"}`}>{label}</button>
-              ))}
-              <span className="flex-1" />
+            <div className="flex items-center justify-between border-b border-border bg-muted px-2.5 py-1">
+              <span className="text-[9.5px] font-semibold uppercase tracking-wide text-muted-foreground">{t("test.live.execRecord")}</span>
               <span className="text-[10px] text-muted-foreground">{t("test.live.toolActivity", { n: live.tools })}</span>
             </div>
-            <div ref={logRef} className="flex h-[320px] flex-col gap-1.5 overflow-auto p-2">
-              {live.pre.length > 0 && <div className="overflow-hidden rounded-md border border-border">{renderEvents(live.pre, "pre")}</div>}
+            <div ref={logRef} onScroll={onLogScroll} className="flex h-[420px] flex-col overflow-auto p-2">
+              {renderEvents(live.pre)}
               {live.cases.map((c, i) => {
-                const isOpen = expanded[i] ?? (live.curIdx === i || !!c.lost || c.result?.status === "fail" || c.result?.status === "partial" || !c.result);
                 const toolCount = c.events.filter((e) => e.k === "tool").length;
-                const border = c.lost || c.result?.status === "fail" ? "border-status-error-foreground/45" : live.curIdx === i ? "border-primary/40" : "border-border";
+                const sepCls = c.lost || c.result?.status === "fail" ? "border-status-error-foreground/45" : live.curIdx === i ? "border-primary/40" : "border-border";
                 return (
-                  <div key={`${c.id}-${i}`} id={`live-seg-${i}`} className={`overflow-hidden rounded-md border ${border} ${c.lost ? "bg-status-error-muted/40" : ""}`}>
-                    <button onClick={() => setExpanded((m) => ({ ...m, [i]: !isOpen }))} className="flex w-full items-center gap-2 bg-muted px-2.5 py-1 text-left text-[11px] hover:brightness-[1.03]">
-                      {isOpen ? <CaretDown size={9} className="text-muted-foreground" /> : <CaretRight size={9} className="text-muted-foreground" />}
-                      <span className="font-mono text-[9.5px] text-muted-foreground">{c.index}/{live.total}</span>
-                      <span className="min-w-0 flex-1 truncate text-foreground" title={c.title}>{c.title || c.id}</span>
-                      <span className="text-[9.5px] tabular-nums text-muted-foreground">{t("test.live.steps", { n: toolCount })}</span>
-                      {c.result ? <span className={`font-mono text-[9.5px] font-bold ${LIVE_TEXT[c.result.status]}`}>{c.result.status}</span>
-                        : c.lost ? <span className="font-mono text-[9.5px] font-bold text-status-error-foreground">{t("test.live.noVerdict")}</span>
-                        : <SpinnerGap size={10} className="animate-spin text-primary" />}
-                    </button>
-                    {isOpen && renderEvents(c.events, String(i))}
-                    {c.result?.error && <div className="border-t border-status-error-foreground/20 bg-status-error-muted px-2.5 py-1 text-[10.5px] text-status-error-foreground">{c.result.error}</div>}
-                  </div>
+                  <Fragment key={`${c.id}-${i}`}>
+                    <div id={`live-seg-${i}`} className={`mt-2 flex items-center gap-2 border-t-2 px-0.5 pt-1.5 text-[11px] ${sepCls}`}>
+                      <span className="flex-shrink-0 font-mono text-[9.5px] text-muted-foreground">{c.index}/{live.total}</span>
+                      <span className="min-w-0 flex-1 truncate font-medium text-foreground" title={c.title}>{c.title || c.id}</span>
+                      <span className="flex-shrink-0 text-[9.5px] tabular-nums text-muted-foreground">
+                        {t("test.live.steps", { n: toolCount })}{c.ms ? ` · ${(c.ms / 1000).toFixed(1)}s` : ""}
+                      </span>
+                      {c.result ? <span className={`flex-shrink-0 font-mono text-[9.5px] font-bold ${LIVE_TEXT[c.result.status]}`}>{c.result.status}</span>
+                        : c.lost ? <span className="flex-shrink-0 font-mono text-[9.5px] font-bold text-status-error-foreground">{t("test.live.noVerdict")}</span>
+                        : <SpinnerGap size={10} className="flex-shrink-0 animate-spin text-primary" />}
+                    </div>
+                    {renderEvents(c.events)}
+                    {c.result?.error && <div className="rounded bg-status-error-muted px-2.5 py-1 text-[10.5px] text-status-error-foreground">{c.result.error}</div>}
+                  </Fragment>
                 );
               })}
               {live.cases.length === 0 && live.pre.length === 0 && <div className="py-8 text-center text-[11px] text-muted-foreground">{t("test.live.waiting")}</div>}

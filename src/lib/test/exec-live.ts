@@ -127,3 +127,25 @@ export function progressCounts(progress: string): { idx: number; total: number }
   const m = progress.match(/(\d+)\s*\/\s*(\d+)/);
   return m ? { idx: Number(m[1]), total: Number(m[2]) } : { idx: 0, total: 0 };
 }
+
+/**
+ * `@@CASE_START` 是否应【认领】当前用例(进度行开的占位),而不是另开一条。
+ *
+ * 模型的输出顺序不保证:可能先发 `▶ 用例 N/总数：标题` 再发 `@@CASE_START`。进度行的
+ * 兜底逻辑(为"模型漏发机器标记"设计)会先开一条 id 为 `#N` 的占位用例;若随后的
+ * `@@CASE_START` 无条件另开新条,同一条用例就变成两行 —— 占位那行永远等不到判定,被标
+ * 「无判定」,「已开始」计数虚高一倍,对账横幅(浏览器有活动却收不到判定)误响
+ * (2026-07-13 真机截图:3 条真用例配了 3 条幻影,面板全红,实际 3/3 全有判定)。
+ *
+ * 认领条件:占位尚无判定、id 仍是 `#N` 形态(从未被真实 id 认领过),且序号不冲突
+ * (@@CASE_START 未带 index、或占位未记 index、或两者相等)。认领 = 就地补上真实 id,
+ * 保留占位已归属的标题与事件。序号冲突时不认领 —— 那是真的两条用例,按旧行为另开。
+ */
+export function shouldAdoptPlaceholder(
+  cur: { id: string; index?: number; result?: unknown } | undefined,
+  incomingIndex?: number,
+): boolean {
+  if (!cur || cur.result) return false;
+  if (!/^#\d+$/.test(cur.id)) return false;
+  return incomingIndex === undefined || cur.index === undefined || cur.index === incomingIndex;
+}

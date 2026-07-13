@@ -311,15 +311,9 @@ const zh: Record<TranslationKey, string> = {
   'test.live.executing': '执行中',
   'test.live.durLive': '客户端墙钟近似（权威值收口后才有）',
   'test.live.durFinal': 'run.json 权威耗时',
-
-  'test.live.filterAll': '全部',
-  'test.live.filterTool': '工具调用',
-  'test.live.filterAi': 'AI 说明',
-  'test.live.filterKey': '用例与判定',
   'test.live.toolActivity': '工具活动 {n} 步',
+  'test.live.execRecord': '执行记录',
   'test.live.steps': '{n} 步',
-  'test.live.expandTools': '展开 {n} 步工具轨迹',
-  'test.live.collapseTools': '收起工具轨迹',
   'test.live.waiting': '等待执行开始…',
 
   'test.live.footOk': '✓ {pass}/{total} 全部通过 · 可发版',

@@ -320,15 +320,9 @@ const zhHK: Record<TranslationKey, string> = {
   'test.live.executing': '執行中',
   'test.live.durLive': '客户端牆鍾近似（權威值收口後才有）',
   'test.live.durFinal': 'run.json 權威耗時',
-
-  'test.live.filterAll': '全部',
-  'test.live.filterTool': '工具調用',
-  'test.live.filterAi': 'AI 説明',
-  'test.live.filterKey': '用例與判定',
   'test.live.toolActivity': '工具活動 {n} 步',
+  'test.live.execRecord': '執行記錄',
   'test.live.steps': '{n} 步',
-  'test.live.expandTools': '展開 {n} 步工具軌跡',
-  'test.live.collapseTools': '收起工具軌跡',
   'test.live.waiting': '等待執行開始…',
 
   'test.live.footOk': '✓ {pass}/{total} 全部通過 · 可發版',

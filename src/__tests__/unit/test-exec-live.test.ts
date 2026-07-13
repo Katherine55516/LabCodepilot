@@ -9,7 +9,7 @@
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { classifyExecLine, createExecLineBuffer, progressCounts, type ExecLine } from "../../lib/test/exec-live";
+import { classifyExecLine, createExecLineBuffer, progressCounts, shouldAdoptPlaceholder, type ExecLine } from "../../lib/test/exec-live";
 
 /** 2026-07-10 线上执行步的真实 assistant 文本(节选,原样保留加粗与诱饵行)。 */
 const REAL = [
@@ -154,4 +154,28 @@ describe("progressCounts", () => {
   it("取出第几条 / 共几条", () => assert.deepEqual(progressCounts("用例 2/3：标题"), { idx: 2, total: 3 }));
   it("全角冒号与空格容错", () => assert.deepEqual(progressCounts("用例 10 / 25 ：x"), { idx: 10, total: 25 }));
   it("取不到 → 0/0", () => assert.deepEqual(progressCounts("准备中"), { idx: 0, total: 0 }));
+});
+
+// 幻影配对回归守卫(2026-07-13 真机截图):模型先发「▶ 用例 N/总数」再发 @@CASE_START,
+// 进度行兜底先开了 `#N` 占位;@@CASE_START 此时必须【认领】占位而不是另开 —— 否则每条
+// 真用例配一条无判定幻影,「已开始」虚高一倍,对账横幅误响(实际全部有判定)。
+describe("shouldAdoptPlaceholder", () => {
+  it("进度行先行的 #N 占位(无判定,同序号)→ 认领", () => {
+    assert.equal(shouldAdoptPlaceholder({ id: "#1", index: 1 }, 1), true);
+  });
+  it("@@CASE_START 未带 index → 也认领(占位是 #N 即同一条)", () => {
+    assert.equal(shouldAdoptPlaceholder({ id: "#2", index: 2 }, undefined), true);
+  });
+  it("序号冲突(#1 占位遇到 index=2)→ 不认领,是真的下一条", () => {
+    assert.equal(shouldAdoptPlaceholder({ id: "#1", index: 1 }, 2), false);
+  });
+  it("占位已有判定 → 不认领(那条已完结)", () => {
+    assert.equal(shouldAdoptPlaceholder({ id: "#1", index: 1, result: { status: "pass" } }, 1), false);
+  });
+  it("当前用例已是真实 id(正常 @@CASE_START 先行的顺序)→ 不认领,照旧另开", () => {
+    assert.equal(shouldAdoptPlaceholder({ id: "TC-employee-001", index: 1 }, 2), false);
+  });
+  it("没有当前用例 → 不认领", () => {
+    assert.equal(shouldAdoptPlaceholder(undefined, 1), false);
+  });
 });
