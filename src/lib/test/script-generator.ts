@@ -259,12 +259,22 @@ locator("form")/locator("dialog") 等容器缩小范围，再在容器内定位�
   test("标题", async ({ request }) => { const res = await request.get("/api/xxx"); expect(res.status()).toBe(200); const body = await res.json(); ... })，
   URL 用相对路径（自动走 BASE_URL），断言 res.status()/res.ok() 与 await res.json() 的字段。
   【严禁】使用 fetch()/XMLHttpRequest/eval/Function/page.evaluate 里发网络请求，也不要 import 任何 http 库 —— 校验器会直接拒绝，只能用 request fixture。
+【断言必须基于执行轨迹这个事实来源，不要凭 expected 文案臆造】——这是脚本重放能通过的关键：
+1. 优先复用 executedPlaywrightCode 里【真实出现过并成功】的选择器、文本、正则。它们是"页面确实如此"的铁证；
+   用例 expected 只是预期描述，措辞常和真实 DOM 不一致。两者冲突时【以轨迹为准】。
+2. 轨迹里若用 page.evaluate 读 document.body.innerText 做子串/正则检查（说明"某文本出现在整页某处"），
+   生成脚本对应的断言【必须】用 await expect(page.locator("body")).toContainText("轨迹里检查的那个字符串或正则")，
+   【不要】用 page.getByText(/.../)。因为 getByText 匹配【单个元素】的文本，而"阶段"和数字"0"这类统计常在
+   不同 DOM 元素里（<span>阶段</span><span>0</span>），innerText 拼接后是"阶段 0"、但没有任何单元素文本等于
+   "阶段 0"，getByText 会匹配失败（真机踩坑）。整页文本判断只能用 locator("body").toContainText。
+3. 不要臆造比轨迹更强/更具体的断言：轨迹只验证了 /阶段\s*\d+/（存在阶段数），就别写 /阶段\s*0/（恰好 0）；
+   除非 expected 明确要求某具体值、且轨迹也确实验证过该值。断言宁可贴合轨迹已证事实，也不要更严导致重放失败。
 脚本必须建立自身前置条件，不依赖上一条用例状态，并按用例 cleanup 清理。`;
   const text = await generateTextViaSdk({
     providerId: params.providerId,
     model: params.model,
     system,
-    prompt: `为以下 ${candidates.length} 条用例生成脚本。执行轨迹是事实依据；用例 expected 用于生成断言。\n\n${cleanPayload}`,
+    prompt: `为以下 ${candidates.length} 条用例生成脚本。executedPlaywrightCode 执行轨迹是【事实来源】——断言优先基于它已验证过的选择器/文本/正则；用例 expected 只提供意图，与轨迹冲突时以轨迹为准。\n\n${cleanPayload}`,
     abortSignal: params.abortSignal,
     // 逐条生成（generateMissing 每次传 1 条），单条给 240s。真机实测：企业代理延迟忽高忽低，
     // 120s 下约 1/3 单条生成会顶破超时（且每轮超时的用例还不一样，纯环境抖动、非用例问题）。
