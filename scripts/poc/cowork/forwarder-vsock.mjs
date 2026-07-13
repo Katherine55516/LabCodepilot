@@ -34,12 +34,27 @@ const sock = net.createConnection({ path: sockPath });
 
 sock.on('connect', () => {
   sock.write(JSON.stringify({ op: 'exec', sessionId, argv, env: envOut }) + '\n');
-  // 裸双向管道
-  process.stdin.pipe(sock);
+  // stdin 方向做 [uint32 BE 长度][字节] 帧封装:vfkit 透明代理不可靠传播半关闭,
+  // 不能靠 sock.end() 让 guest 见 EOF。SDK 关我们的 stdin 时,发一个长度 0 帧
+  // 作为显式 EOF 标记,daemon 据此关 claude stdin → claude 退出 → 流正常终止。
+  process.stdin.on('data', (chunk) => {
+    const len = Buffer.allocUnsafe(4);
+    len.writeUInt32BE(chunk.length, 0);
+    sock.write(len);
+    sock.write(chunk);
+  });
+  process.stdin.on('end', () => {
+    const zero = Buffer.alloc(4); // 长度 0 = EOF 标记;不关 sock(还要收 stdout)
+    sock.write(zero);
+  });
+  // stdout 方向裸流
   sock.pipe(process.stdout);
 });
 
-// 连接结束 → CLI 进程结束,退出转发器
+// stdout 收完(daemon 在 claude 退出后 shutdown(SHUT_WR)→ 这里 'end')即可退出:
+// 该轮输出已全部转发给 SDK。不能只等 'close' —— daemon 半关闭时 host 只收 'end'
+// 不收 'close',会导致转发器残留。
+sock.on('end', () => process.exit(0));
 sock.on('close', () => process.exit(0));
 sock.on('error', (err) => {
   process.stderr.write(`[forwarder-vsock] ${err.message}\n`);

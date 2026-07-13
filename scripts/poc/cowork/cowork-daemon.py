@@ -163,7 +163,14 @@ def op_remove_session(conn, req, rest):
 
 
 def op_exec(conn, req, rest):
-    """spawn claude,裸双向管道:conn<->stdin/stdout。stderr 落 guest 日志(保 stream-json 纯净)。"""
+    """
+    spawn claude,双向管道。stdin 方向做 [uint32 BE 长度][字节] 帧封装 + 长度 0
+    的 EOF 标记 —— 因为 vfkit 透明代理不可靠地传播 TCP 半关闭(host `sock.end()`
+    的 FIN 到不了 guest),不能靠 recv 返回空来判定 stdin 结束。SDK 单轮结束时
+    关掉 forwarder stdin → forwarder 发长度 0 帧 → 这里关 claude stdin → claude
+    见 EOF 退出 → SDK 迭代器结束 → done。stdout 方向保持裸流(量大、要纯净)。
+    连接被非正常断开(abort:host 强杀 forwarder)→ 帧读到中途 EOF → 杀 claude。
+    """
     ws = workspace(req["sessionId"])
     os.makedirs(ws, exist_ok=True)
     argv = req.get("argv", [])
@@ -176,32 +183,45 @@ def op_exec(conn, req, rest):
     )
     err_log.close()
 
-    alive = {"v": True}
+    state = {"aborted": False, "graceful_eof": False}
+
+    def recv_into(buf, need):
+        """确保 buf 至少 need 字节,返回 True;连接断则 False。"""
+        while len(buf) < need:
+            d = conn.recv(65536)
+            if not d:
+                return False
+            buf.extend(d)
+        return True
 
     def pump_in():
-        # 首帧 header 之后可能已带少量 stdin 字节(rest),先灌进去
+        buf = bytearray(rest)  # header 之后已到达的字节 = 帧流起点
         try:
-            if rest:
-                proc.stdin.write(rest)
+            while True:
+                if not recv_into(buf, 4):
+                    state["aborted"] = True
+                    return
+                length = int.from_bytes(buf[:4], "big")
+                del buf[:4]
+                if length == 0:
+                    state["graceful_eof"] = True  # SDK 关了输入 → 优雅结束
+                    return
+                if not recv_into(buf, length):
+                    state["aborted"] = True
+                    return
+                proc.stdin.write(bytes(buf[:length]))
                 proc.stdin.flush()
-            while alive["v"]:
-                data = conn.recv(65536)
-                if not data:
-                    break
-                proc.stdin.write(data)
-                proc.stdin.flush()
+                del buf[:length]
         except (OSError, ValueError):
             pass
         finally:
             try:
-                proc.stdin.close()
+                proc.stdin.close()  # → claude 见 stdin EOF → 单轮结束后退出
             except OSError:
                 pass
 
     def pump_out():
-        # 关键:必须用 os.read(fd) 增量读 —— proc.stdout.read(N) 会阻塞到攒够 N
-        # 字节或进程退出,把 stream-json 的小块增量全缓冲住,SDK 等不到 init
-        # 响应 → claude 挂死。os.read 返回当前可用字节,真正流式转发。
+        # os.read 增量读,真正流式转发(proc.stdout.read(N) 会缓冲住小块增量)
         fd = proc.stdout.fileno()
         try:
             while True:
@@ -216,8 +236,27 @@ def op_exec(conn, req, rest):
     t_out = threading.Thread(target=pump_out, daemon=True)
     t_in.start()
     t_out.start()
+
+    # 若是 abort(连接断,非优雅 EOF),别干等 claude —— 直接杀
+    def watch_abort():
+        while proc.poll() is None:
+            if state["aborted"]:
+                try:
+                    proc.terminate()
+                except OSError:
+                    pass
+                try:
+                    proc.wait(timeout=3)
+                except subprocess.TimeoutExpired:
+                    try:
+                        proc.kill()
+                    except OSError:
+                        pass
+                return
+            time.sleep(0.2)
+
+    threading.Thread(target=watch_abort, daemon=True).start()
     proc.wait()
-    alive["v"] = False
     t_out.join(timeout=2)
     try:
         conn.shutdown(socket.SHUT_WR)
