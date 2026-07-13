@@ -1,5 +1,5 @@
 import { useRef, useCallback } from 'react';
-import type { SSEEvent, TokenUsage, PermissionRequestEvent, MediaBlock, VmArtifactFile } from '@/types';
+import type { SSEEvent, TokenUsage, PermissionRequestEvent, MediaBlock, VmArtifactFile, VmStatusEvent } from '@/types';
 import { saveCachedSdkInitMeta } from '@/lib/sdk-init-cache';
 
 interface ToolUseInfo {
@@ -39,6 +39,8 @@ export interface SSECallbacks {
   onContextUsage?: (snapshot: ContextUsageSnapshot) => void;
   /** Cowork sandbox: files the agent created/modified in the VM this turn. */
   onVmArtifacts?: (files: VmArtifactFile[]) => void;
+  /** Cowork sandbox: VM provisioning progress during the cold-start window. */
+  onVmStatus?: (status: VmStatusEvent) => void;
   onPermissionRequest: (data: PermissionRequestEvent) => void;
   onToolTimeout: (toolName: string, elapsedSeconds: number) => void;
   onModeChanged: (mode: string) => void;
@@ -307,6 +309,15 @@ function handleSSEEvent(
           callbacks.onVmArtifacts?.(payload.files);
         }
       } catch { /* skip malformed artifacts payload */ }
+      return accumulated;
+    }
+
+    case 'vm_status': {
+      // Cowork sandbox VM provisioning progress (P1-D readiness window).
+      try {
+        const status = JSON.parse(event.data) as VmStatusEvent;
+        if (status && typeof status.phase === 'string') callbacks.onVmStatus?.(status);
+      } catch { /* skip malformed vm_status payload */ }
       return accumulated;
     }
 

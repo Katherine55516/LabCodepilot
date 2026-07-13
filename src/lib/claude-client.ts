@@ -779,11 +779,28 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
           const { getSession } = await import('./db');
           const { decideCowork } = await import('./cowork-poc');
           const sess = getSession(sessionId);
+          // P1-D readiness window: while the VM cold-starts (spawn vfkit +
+          // provision daemon, ~5–30s), stream vm_status events so the frontend
+          // shows "沙箱准备中" progress instead of a bare "生成中" that reads as
+          // a hang. Subscribe before the blocking decideCowork; unsubscribe after.
+          let unsubVmProgress: (() => void) | null = null;
+          if (sess?.sandbox_enabled) {
+            const vmMgrEarly = await import('./cowork-vm-manager');
+            // If not already running, announce "starting" up front so the banner
+            // appears immediately (before the first progress transition).
+            if (vmMgrEarly.getStatus().phase !== 'running') {
+              controller.enqueue(formatSSE({ type: 'vm_status', data: JSON.stringify({ phase: 'starting' }) }));
+            }
+            unsubVmProgress = vmMgrEarly.onVmProgress((p) => {
+              controller.enqueue(formatSSE({ type: 'vm_status', data: JSON.stringify(p) }));
+            });
+          }
           // decideCowork is async in P1-B: it lazily starts/rebuilds the VM
           // via cowork-vm-manager and only resolves once the VM is ready (or
-          // decides to fall back to host). First sandbox message therefore
-          // blocks a few seconds on cold VM start — expected "open and it works".
-          const decision = await decideCowork(sess?.sandbox_enabled);
+          // decides to fall back to host).
+          const decision = await decideCowork(sess?.sandbox_enabled).finally(() => {
+            unsubVmProgress?.();
+          });
           if (decision.useSandbox && decision.executablePath) {
             queryOptions.pathToClaudeCodeExecutable = decision.executablePath;
             const coworkEnv = queryOptions.env as Record<string, string>;
@@ -823,6 +840,11 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
             console.log(`[claude-client] cowork sandbox ON for session ${sessionId} → forwarder ${decision.executablePath}, pushed ${coworkVmPathByHostPath.size} file(s)`);
           } else if (sess?.sandbox_enabled && decision.reason) {
             console.warn(`[claude-client] cowork sandbox requested but falling back to host: ${decision.reason}`);
+            // Sandbox was requested but the VM isn't usable this turn — tell the
+            // frontend so it can surface a failure instead of silently running
+            // on the host (which would violate the "files never touch the host"
+            // expectation the user set by enabling sandbox).
+            controller.enqueue(formatSSE({ type: 'vm_status', data: JSON.stringify({ phase: 'failed', detail: decision.reason }) }));
           }
         } catch (err) {
           console.warn('[claude-client] cowork decision failed, using host runtime:', err);

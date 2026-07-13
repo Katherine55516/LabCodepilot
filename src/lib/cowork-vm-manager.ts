@@ -54,6 +54,33 @@ export interface VmStatus {
   reason?: string;
 }
 
+/**
+ * P1-D 进度事件:VM 启动窗口(冷启动数秒~数十秒)期间对外广播阶段,供 claude-client
+ * 转成 vm_status SSE、前端显示"沙箱准备中"。用模块级监听器集合(挂 globalThis 抗
+ * hot-reload)而非回调参数,因为 ensureRunning 用共享 startingPromise,并发调用者
+ * 都该收到同一进度流。
+ */
+export type VmProgressPhase = 'starting' | 'booting' | 'provisioning' | 'ready' | 'failed';
+export interface VmProgress { phase: VmProgressPhase; detail?: string }
+type VmProgressListener = (p: VmProgress) => void;
+
+const PROGRESS_KEY = '__coworkVmProgress__';
+function progressListeners(): Set<VmProgressListener> {
+  const g = globalThis as Record<string, unknown>;
+  if (!g[PROGRESS_KEY]) g[PROGRESS_KEY] = new Set<VmProgressListener>();
+  return g[PROGRESS_KEY] as Set<VmProgressListener>;
+}
+function emitProgress(phase: VmProgressPhase, detail?: string): void {
+  for (const l of progressListeners()) {
+    try { l({ phase, detail }); } catch { /* listener error ignored */ }
+  }
+}
+/** 订阅 VM 启动进度,返回取消订阅函数。 */
+export function onVmProgress(cb: VmProgressListener): () => void {
+  progressListeners().add(cb);
+  return () => { progressListeners().delete(cb); };
+}
+
 interface VmState {
   phase: VmPhase;
   ip: string | null;
@@ -297,10 +324,12 @@ export async function ensureRunning(): Promise<VmStatus> {
         if (ip && (await sshOk(ip))) {
           s.ip = ip;
           fs.writeFileSync(VM_IP_FILE, ip);
+          emitProgress('provisioning', 'preparing sandbox');
           await ensureGuestBinary(ip).catch((e) => console.warn('[cowork-vm] ensureGuestBinary:', e?.message));
           await ensureDaemon(ip).catch((e) => console.warn('[cowork-vm] ensureDaemon:', e?.message));
           s.phase = 'running';
           s.reason = undefined;
+          emitProgress('ready');
           startHealth(s);
           resetIdleTimer(s);
           console.log(`[cowork-vm] reused existing vfkit pid=${alivePid} ip=${ip}`);
@@ -316,6 +345,7 @@ export async function ensureRunning(): Promise<VmStatus> {
       s.phase = 'starting';
       s.reason = undefined;
       s.ip = null;
+      emitProgress('starting', 'launching sandbox VM');
       console.log('[cowork-vm] spawning vfkit…');
 
       // 陈旧 vsock socket 文件会让 vfkit 的 ListenUnix bind 失败,先清
@@ -352,26 +382,31 @@ export async function ensureRunning(): Promise<VmStatus> {
         if (ip && (await sshOk(ip))) {
           s.ip = ip;
           fs.writeFileSync(VM_IP_FILE, ip);
+          emitProgress('provisioning', 'preparing sandbox');
           await ensureGuestBinary(ip);
           await ensureDaemon(ip);
           s.phase = 'running';
           s.reason = undefined;
+          emitProgress('ready');
           startHealth(s);
           resetIdleTimer(s);
           console.log(`[cowork-vm] ready ip=${ip} pid=${proc.pid}`);
           return getStatus();
         }
+        emitProgress('booting', 'waiting for sandbox to boot');
         await new Promise((r) => setTimeout(r, 2000));
       }
 
       // 超时:杀掉半死进程
       s.phase = 'crashed';
       s.reason = s.reason || 'vm did not become ready in time';
+      emitProgress('failed', s.reason);
       try { proc.kill('SIGKILL'); } catch { /* ignore */ }
       return getStatus();
     } catch (err) {
       s.phase = 'crashed';
       s.reason = err instanceof Error ? err.message : String(err);
+      emitProgress('failed', s.reason);
       return getStatus();
     } finally {
       s.startingPromise = null;

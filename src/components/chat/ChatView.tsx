@@ -18,6 +18,7 @@ import { ModeIndicator } from './ModeIndicator';
 import { ChatPermissionSelector } from './ChatPermissionSelector';
 import { SandboxToggle } from './SandboxToggle';
 import { VmArtifactsCard } from './VmArtifactsCard';
+import { VmProvisioningBanner } from './VmProvisioningBanner';
 import { RunCockpit } from './RunCockpit';
 import { RuntimeBadge } from './RuntimeBadge';
 import { ImageGenToggle } from './ImageGenToggle';
@@ -1154,6 +1155,10 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
           }}
           onDismiss={() => setRateLimitDismissed(true)}
         />
+      )}
+      {/* Cowork sandbox — VM provisioning progress during cold-start (P1-D) */}
+      {sandboxEnabled && (
+        <VmProvisioningBanner status={streamSnapshot?.vmStatus} />
       )}
       {/* Cowork sandbox — downloadable artifacts produced inside the VM */}
       {sandboxEnabled && vmArtifacts.length > 0 && (

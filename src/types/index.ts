@@ -720,11 +720,18 @@ export type SSEEventType =
   | 'rate_limit'         // SDK 0.2.111 subscription rate-limit telemetry
   | 'context_usage'      // SDK 0.2.111 post-turn context usage snapshot
   | 'vm_artifacts'       // cowork sandbox: files created/modified in the VM this turn
+  | 'vm_status'          // cowork sandbox: VM provisioning progress (P1-D readiness window)
   | 'done';              // stream complete
 
 export interface SSEEvent {
   type: SSEEventType;
   data: string;
+}
+
+/** Cowork sandbox: VM provisioning progress during the cold-start readiness window. */
+export interface VmStatusEvent {
+  phase: 'starting' | 'booting' | 'provisioning' | 'ready' | 'failed';
+  detail?: string;
 }
 
 /** Cowork sandbox: one file the agent created/modified inside the VM this turn. */
@@ -1280,6 +1287,12 @@ export interface SessionStreamSnapshot {
    * merges these into its session-level artifact list for download cards.
    */
   vmArtifacts?: VmArtifactFile[];
+  /**
+   * Cowork sandbox: latest VM provisioning status during the cold-start
+   * readiness window (P1-D). Drives the "沙箱准备中" banner; cleared to
+   * 'ready'/undefined once the VM is up and normal streaming begins.
+   */
+  vmStatus?: VmStatusEvent;
 }
 
 export interface StreamEvent {

@@ -20,7 +20,7 @@
 | P1-A+ | **产物持久化**:产物清单落库(`vm_artifacts_json`),历史会话 VM 休眠时仍显示卡片(列表读库不依赖 VM),下载时按需唤醒 VM + 休眠徽标 | ✅ 已完成(2026-07-10) | 修用户反馈"打开旧会话看不到产物";E2E:VM 停机→list 读库返回文件+vmOnline:false 不唤醒→下载自动 ensureRunning(6.5s)→内容正确;旧会话(落库前)VM 在线时懒迁移 |
 | P1-B | **VM 生命周期管理器**(server 侧单例):懒启动 / 空闲回收 / 健康检查 / 崩溃重建 / 退出清理;去掉手动 vm-up.sh | ✅ 已完成(2026-07-10) | 落 server 侧(dev 无 main 进程,dev/打包共用);沙箱首条消息 ensureRunning 自动 spawn vfkit;E2E 验证冷启动自动起 VM、kill vfkit 后自愈重建、dev SIGTERM 连带关 VM 无孤儿;UI 状态态留 P1-D |
 | P1-C | **通道产品化**:guest-daemon(**Python3**,vsock)替代 SSH;exec/writeFile/readFile/listFiles/archive/removeSession/health RPC | ✅ 已完成(2026-07-13) | vfkit connect 模式 vsock→unix socket(无握手无魔数,已实测);运行时数据流全 vsock,SSH 仅剩一次性 provisioning(推 binary+daemon);E2E:冷机全链路(上传/流式 exec/产物 diff/下载)通过,daemon 崩溃自动 re-provision |
-| P1-D | **就绪状态机 + 消息先行入队**:provisioning→vm_ready→ready→failed;未就绪时消息/附件入队,就绪自动发出 | 📋 待开始 | 设计见调研文档 §7.1;P1 范围内"下载镜像"仍为手动预置,状态机先覆盖 VM 启动窗口 |
+| P1-D | **就绪状态机 + 消息先行入队**:VM 启动窗口(冷启动数秒~数十秒)期间 vm_status 事件贯通 → 前端"沙箱准备中"横幅,就绪自动进入正常流转 | ✅ 已完成(2026-07-13) | P1 镜像手动预置,状态机覆盖 VM 启动窗口(非下载窗口);服务端本已阻塞到就绪=隐式排队,补的是可见反馈;E2E:冷机发消息→starting/booting/provisioning/ready 事件流+横幅显示→ready 清除→正常回复,不再静默"生成中" |
 | P1-E | **入口正式化**:沙箱徽标/能力边界提示(外部 stdio MCP 屏蔽说明)、空态入口卡、真机零写入验收(fs 监控) | 📋 待开始 | POC 开关保留为会话内切换;i18n 三语 |
 
 ## 决策日志

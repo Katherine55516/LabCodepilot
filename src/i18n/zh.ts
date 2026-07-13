@@ -1627,6 +1627,12 @@ const zh: Record<TranslationKey, string> = {
   'sandbox.artifacts.sleeping': '沙箱休眠中',
   'sandbox.artifacts.sleepingHint': '文件列表来自上次记录;点击下载会自动唤醒沙箱,首次稍慢几秒',
   'sandbox.artifacts.starting': '正在唤醒沙箱,请稍候…',
+  'sandbox.provisioning.starting': '沙箱启动中',
+  'sandbox.provisioning.booting': '沙箱启动中',
+  'sandbox.provisioning.preparing': '沙箱准备中',
+  'sandbox.provisioning.autostart': '· 就绪后将自动开始',
+  'sandbox.provisioning.failedTitle': '沙箱启动失败',
+  'sandbox.provisioning.failedHint': '请稍后重试,或检查沙箱环境',
 
   // ── Context Usage ─────────────────────────────────────────
   'context.usage': '上下文占用',
