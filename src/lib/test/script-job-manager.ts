@@ -410,6 +410,22 @@ async function validateAndPublish(params: {
   }
 }
 
+// 生成期【瞬时】错误：网络/鉴权抖动导致（企业代理超时、连接中途掐断、平台后台刷 token
+// 窗口内网关回绝那次调用的伪「未登录」、常见网络/网关码）——退避重发大概率自愈。
+// 刻意不含校验不过/断言不符/AI 未返回这类【确定性】失败——重试它们无意义、只是空耗。
+export function isTransientGenerationError(message: string): boolean {
+  return /(timed out|Connection closed|Not logged in|Please run \/login|ECONNRESET|ETIMEDOUT|EAI_AGAIN|socket hang up|fetch failed|network error|\b(?:429|500|502|503|504)\b)/i.test(message);
+}
+
+// 可被 abort 打断的等待：新任务取代时立即退出，不空等完退避。
+function abortableDelay(ms: number, abortSignal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (abortSignal.aborted) { reject(new Error('aborted')); return; }
+    const timer = setTimeout(resolve, ms);
+    abortSignal.addEventListener('abort', () => { clearTimeout(timer); reject(new Error('aborted')); }, { once: true });
+  });
+}
+
 async function generateMissing(
   request: ScriptJobRequest,
   candidates: EligibleScriptCase[],
@@ -418,54 +434,68 @@ async function generateMissing(
   abortSignal: AbortSignal,
 ): Promise<Map<string, ScriptManifestCase>> {
   const result = new Map<string, ScriptManifestCase>();
-  for (let i = 0; i < candidates.length; i += 5) {
+  const failedEntry = (candidate: EligibleScriptCase, error: string): ScriptManifestCase => ({
+    caseId: candidate.id,
+    file: candidate.fileName,
+    ...candidateSource(candidate),
+    fingerprint: candidate.fingerprint,
+    // 已有旧脚本 → outdated（保留旧版可用）；否则 failed。
+    status: previousById.has(candidate.id) && fs.existsSync(candidateFinalFile(request, candidate)) ? 'outdated' : 'failed',
+    usesMock: candidate.usesMock,
+    lastSeenRunHash: request.runHash,
+    error,
+    validation: { syntax: false, collected: false, replayed: false, warnings: [], error },
+  });
+
+  // 逐条生成：每条一次独立 SDK 调用、独立超时、独立失败。此前是【批量】(一次塞 5 条、
+  // 要求模型一口气输出全部脚本)——只要整批超过 180s 就全部丢失、整个任务 jobStatus:error，
+  // 哪怕其中几条单独生成毫无问题（用户实测：满批 3 条 180s 超时，3 条脚本连同任务一起挂）。
+  // 逐条后：一条超时/失败只记为该条 failed，其余照常生成落盘；单条 prompt 更小、返回更快、
+  // 超时概率更低。代价是 N 次子进程调用而非 ceil(N/5)，但脚本生成是后台任务，稳健优先。
+  // 单条遇瞬时错误时退避重发（首次 + 最多 2 次）：给企业代理/平台刷 token 缓过来的时间。
+  // 退避后再撞硬性/确定性错误则立即放弃，不空耗。
+  const RETRY_BACKOFFS_MS = [4_000, 10_000];
+  for (const candidate of candidates) {
     if (abortSignal.aborted) throw new Error('脚本生成已中止（被更新的任务取代）');
-    const batch = candidates.slice(i, i + 5);
-    let generated = await generateScriptsBatch({
-      candidates: batch,
-      model: request.model,
-      providerId: request.providerId,
+    let generated: GeneratedScript[] | null = null;
+    let lastError = '生成失败';
+    for (let attempt = 0; attempt <= RETRY_BACKOFFS_MS.length; attempt++) {
+      try {
+        generated = await generateScriptsBatch({
+          candidates: [candidate],
+          model: request.model,
+          providerId: request.providerId,
+          redactions,
+          abortSignal,
+        });
+        break;  // 成功（可能是空数组，交由下方 find 处理）
+      } catch (error) {
+        if (abortSignal.aborted) throw error;  // 被新任务取代 → 冒泡让 executeJob 走 stale 分支
+        lastError = redactTraceText(error instanceof Error ? error.message : String(error), redactions);
+        // 非瞬时错误、或已到重试上限 → 不再重试。
+        if (attempt >= RETRY_BACKOFFS_MS.length || !isTransientGenerationError(lastError)) break;
+        console.log(`[script-gen] ${candidate.scriptCaseId} 瞬时错误，${RETRY_BACKOFFS_MS[attempt] / 1000}s 后重试(${attempt + 1}/${RETRY_BACKOFFS_MS.length}): ${lastError.slice(0, 80)}`);
+        try { await abortableDelay(RETRY_BACKOFFS_MS[attempt], abortSignal); }
+        catch { throw new Error('脚本生成已中止（被更新的任务取代）'); }
+      }
+    }
+    if (!generated) {  // 三次都抛错（null 才是"从未成功"；空数组是"成功但 AI 没给脚本"）
+      result.set(candidate.id, failedEntry(candidate, lastError.slice(0, 300)));
+      continue;
+    }
+    const item = generated.find((g) => g.caseId === candidate.id);
+    if (!item) {
+      result.set(candidate.id, failedEntry(candidate, 'AI 未返回该用例的脚本'));
+      continue;
+    }
+    result.set(candidate.id, await validateAndPublish({
+      request,
+      candidate,
+      generated: item,
+      previous: previousById.get(candidate.id),
       redactions,
       abortSignal,
-    });
-    const generatedIds = new Set(generated.map((g) => g.caseId));
-    for (const missing of batch.filter((candidate) => !generatedIds.has(candidate.id))) {
-      if (abortSignal.aborted) throw new Error('脚本生成已中止（被更新的任务取代）');
-      const retry = await generateScriptsBatch({
-        candidates: [missing],
-        model: request.model,
-        providerId: request.providerId,
-        redactions,
-        abortSignal,
-      });
-      generated = [...generated, ...retry];
-    }
-    const byId = new Map(generated.map((item) => [item.caseId, item]));
-    for (const candidate of batch) {
-      const item = byId.get(candidate.id);
-      if (!item) {
-        result.set(candidate.id, {
-          caseId: candidate.id,
-          file: candidate.fileName,
-          ...candidateSource(candidate),
-          fingerprint: candidate.fingerprint,
-          status: previousById.has(candidate.id) && fs.existsSync(candidateFinalFile(request, candidate)) ? 'outdated' : 'failed',
-          usesMock: candidate.usesMock,
-          lastSeenRunHash: request.runHash,
-          error: 'AI 重试后仍未返回该用例的脚本',
-          validation: { syntax: false, collected: false, replayed: false, warnings: [], error: 'AI 重试后仍未返回该用例的脚本' },
-        });
-        continue;
-      }
-      result.set(candidate.id, await validateAndPublish({
-        request,
-        candidate,
-        generated: item,
-        previous: previousById.get(candidate.id),
-        redactions,
-        abortSignal,
-      }));
-    }
+    }));
   }
   return result;
 }

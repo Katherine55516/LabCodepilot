@@ -6929,11 +6929,16 @@ function RecommendReviewModal({ t, projectPath, taskName, cases, model, provider
 // xlsx 产物预览：调 /api/test/report-xlsx 解析为表格；证据单元格（.png/.webm 等）渲染成
 // 可点开的 chip → 截图灯箱 / 录像内联播放（经 /api/test/media，与 ReportView 同口径）。
 // 执行矩阵预览的列宽/换行规则（列头来自 report-xlsx 的 HEADER）。长文本列换行、短列紧凑。
-const XLSX_WRAP_COLS = new Set(["标题", "期望结果", "实际结果"]);
-const XLSX_COL_PCT: Record<string, string> = {
-  "序号": "4%", "用例ID": "6.5%", "标题": "13%",
-  "期望结果": "30.5%", "实际结果": "30.5%", "状态": "6.5%", "证据": "9%",
+const XLSX_WRAP_COLS = new Set(["标题", "用例标签", "期望结果", "实际结果"]);
+// 列宽按【权重】而非硬编码百分比：实际列宽 = 该列权重 / 当轮所有列权重之和。
+// 这样列集变化（不同分支给执行矩阵加过 用例标签 / 用时 两列）时总和永远归一到 100%、
+// 不再横向溢出；未知表头拿 DEFAULT 权重、有个合理宽度，而不是回退 auto 被挤成 0 宽、
+// 内容 nowrap 溢出叠到邻列（用户实测的「几列重合」根因）。
+const XLSX_COL_WEIGHT: Record<string, number> = {
+  "序号": 3.5, "用例ID": 6, "标题": 12, "用例标签": 6,
+  "期望结果": 27, "实际结果": 27, "状态": 5.5, "用时": 5, "证据": 8,
 };
+const XLSX_COL_WEIGHT_DEFAULT = 8;
 
 function XlsxPreview({ t, projectPath, taskName, env, onClose }: {
   t: T;
@@ -7013,11 +7018,15 @@ function XlsxPreview({ t, projectPath, taskName, env, onClose }: {
           <p className="text-[11px] text-muted-foreground">{t("test.report.xlsxEmpty")}</p>
         ) : (
           <table className="w-full table-fixed border-collapse text-[11px]">
-            {/* table-fixed + 百分比列宽（XLSX_COL_PCT，合计≈100%）：整表贴合弹窗宽度、不横向溢出。
-                长文本列（标题/期望结果/实际结果）whitespace-normal 换行、纵向堆叠；短列 nowrap 保持紧凑。
-                证据单元格内 cellNode 用 flex-wrap，多个截图/录像 chip 自动换行。列头未知时列宽回退 auto。 */}
+            {/* table-fixed + 归一化权重列宽（XLSX_COL_WEIGHT，总和恒为 100%）：整表贴合弹窗宽度、
+                不横向溢出。长文本列（标题/用例标签/期望结果/实际结果）whitespace-normal 换行、纵向堆叠；
+                短列 nowrap 保持紧凑。证据单元格内 cellNode 用 flex-wrap，多个截图/录像 chip 自动换行。 */}
             <colgroup>
-              {header.map((h, i) => <col key={i} style={XLSX_COL_PCT[h] ? { width: XLSX_COL_PCT[h] } : undefined} />)}
+              {(() => {
+                const weights = header.map((h) => XLSX_COL_WEIGHT[h] ?? XLSX_COL_WEIGHT_DEFAULT);
+                const total = weights.reduce((a, b) => a + b, 0) || 1;
+                return header.map((_, i) => <col key={i} style={{ width: `${(weights[i] / total) * 100}%` }} />);
+              })()}
             </colgroup>
             <thead>
               <tr className="bg-muted/50 text-left text-muted-foreground">

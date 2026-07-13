@@ -253,6 +253,12 @@ test("<scriptCaseId> <一句话用例目的>", async ({ page }) => {
 一个宽泛的 name 会命中多个元素并以 strict mode violation 失败。因此 getByRole/getByText 传字符串 name 时必须写
 { name: "…", exact: true }（传正则时不需要，正则本身已限定）。若同一名称仍可能重复，用 getByTestId 或先
 locator("form")/locator("dialog") 等容器缩小范围，再在容器内定位；不要用 .first() 掩盖歧义。
+按用例内容判断它是 UI 测试还是 API 接口测试：
+- UI 测试：用上面的定位器对页面做断言。
+- API 接口测试（用例在验证某个 HTTP 接口的状态码/响应体/字段，如「验证 GET /api/xxx 返回…」）：用 Playwright 的 request fixture ——
+  test("标题", async ({ request }) => { const res = await request.get("/api/xxx"); expect(res.status()).toBe(200); const body = await res.json(); ... })，
+  URL 用相对路径（自动走 BASE_URL），断言 res.status()/res.ok() 与 await res.json() 的字段。
+  【严禁】使用 fetch()/XMLHttpRequest/eval/Function/page.evaluate 里发网络请求，也不要 import 任何 http 库 —— 校验器会直接拒绝，只能用 request fixture。
 脚本必须建立自身前置条件，不依赖上一条用例状态，并按用例 cleanup 清理。`;
   const text = await generateTextViaSdk({
     providerId: params.providerId,
@@ -260,8 +266,10 @@ locator("form")/locator("dialog") 等容器缩小范围，再在容器内定位�
     system,
     prompt: `为以下 ${candidates.length} 条用例生成脚本。执行轨迹是事实依据；用例 expected 用于生成断言。\n\n${cleanPayload}`,
     abortSignal: params.abortSignal,
-    // 每条用例要产出一个完整 Playwright 文件，默认 60s 在满批（5 条）时必然超时。
-    timeoutMs: Math.max(120_000, candidates.length * 60_000),
+    // 逐条生成（generateMissing 每次传 1 条），单条给 240s。真机实测：企业代理延迟忽高忽低，
+    // 120s 下约 1/3 单条生成会顶破超时（且每轮超时的用例还不一样，纯环境抖动、非用例问题）。
+    // 逐条隔离后单条超时不再拖累别人，故放宽到 240s 给代理留足余量。formula 保留对多条的兼容。
+    timeoutMs: Math.max(240_000, candidates.length * 60_000),
     outputFormat: { type: 'json_schema', schema: OUTPUT_SCHEMA },
   });
   return validateGeneratedPayload(parseJsonResult(text), candidates);
