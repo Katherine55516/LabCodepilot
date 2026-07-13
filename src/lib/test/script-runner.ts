@@ -207,11 +207,22 @@ export async function runGeneratedScript(opts: ScriptRunnerOptions): Promise<Scr
  */
 export function summarizeRunFailure(output: string, timedOut: boolean): string {
   if (timedOut) return '脚本运行超时';
-  const lines = output.split('\n').map((line) => line.trim()).filter(Boolean);
-  const picked =
-    lines.find((line) => /net::ERR_[A-Z_]+/.test(line))
-    ?? lines.find((line) => /^(?:\d+\)\s*)?(?:\w*Error):/.test(line))
-    ?? lines.find((line) => /\bError:/.test(line))
-    ?? lines[lines.length - 1];
-  return (picked ?? '脚本运行失败').slice(0, 300);
+  const lines = output.split('\n').map((line) => line.trim());
+  // ① 环境类（连接被拒等）——一句话最有用，直接返回。
+  const envLine = lines.find((line) => /net::ERR_[A-Z_]+/.test(line));
+  if (envLine) return envLine.slice(0, 300);
+  // ② 失败锚点：Playwright 的 "Error: expect(...) failed" 或任意 "XxxError:"。
+  const anchor = lines.findIndex((line) => /^(?:\d+\)\s*)?\w*Error:\s/.test(line) || /\bError:\s/.test(line));
+  if (anchor < 0) return (lines.filter(Boolean).pop() ?? '脚本运行失败').slice(0, 300);
+  // 从锚点起收集【真正诊断】行（Error + Locator/Expected/Received/Timeout），到代码框、
+  // Call log、文件定位、trace 附件处止 —— 那些是噪音，且 slice(-1000) 恰好只截到它们（真机踩坑）。
+  const picked: string[] = [];
+  for (let i = anchor; i < lines.length && picked.length < 6; i++) {
+    const line = lines[i];
+    if (!line) continue;  // 诊断块（Error 与 Locator/Expected/Received）间常有空行，跳过而非停。
+    if (/^(?:Call log:|>|\d+\s*\||at\s|Error Context:|attachment|npx playwright|Usage:|─{3,})/.test(line)) break;
+    // Received 常是整页文本，单行截短，避免淹没。
+    picked.push(line.length > 200 ? `${line.slice(0, 200)}…` : line);
+  }
+  return picked.join(' ').slice(0, 500);
 }

@@ -101,8 +101,40 @@ describe('summarizeRunFailure', () => {
     assert.equal(summarizeRunFailure('', false), '脚本运行失败');
   });
 
-  it('截断到 300 字符，避免整段报告塞进卡片', () => {
+  it('有界输出：单行截到 200、整体截到 500，不把整段报告塞进卡片', () => {
     const long = 'Error: ' + 'x'.repeat(500);
-    assert.equal(summarizeRunFailure(long, false).length, 300);
+    const r = summarizeRunFailure(long, false);
+    assert.ok(r.length <= 500, `预期 ≤500，实际 ${r.length}`);
+    assert.match(r, /…$/);  // 超长单行被截并带省略号
+  });
+
+  it('抓真正的失败诊断（Error+Locator+Expected+Received），而不是末尾的代码框/trace 附件', () => {
+    // 真机 TC-034 形态：slice(-1000) 只会截到 test.step 声明 + trace 路径，看不到"为什么挂"。
+    const output = [
+      'Running 1 test using 1 worker',
+      '  1) TC-034 › 验证 Dashboard 学科卡片完整渲染',
+      '    Error: expect(locator).toContainText(expected) failed',
+      '',
+      "    Locator:  locator('body')",
+      '    Expected string: /踩坑\\s*\\d+/',
+      '    Received string: "我在学的 阶段 3 打卡 5 任务 2 ..."',
+      '    Timeout:  5000ms',
+      '',
+      '    Call log:',
+      '      - expect.toContainText with timeout 5000ms',
+      '      34 |',
+      '    > 35 |   await test.step("步骤4：检查卡片底部", async () => {',
+      '        at /Users/x/.codepilot/test-script-runs/abc/.TC-034.candidate.spec.ts:35:40',
+      '    Error Context: ../../../test-results/.TC-034-xxx/error-context.md',
+      '    attachment #2: trace (application/zip)',
+      '  1 failed',
+    ].join('\n');
+    const r = summarizeRunFailure(output, false);
+    // 抓到断言原因 + 期望/实际
+    assert.match(r, /toContainText/);
+    assert.match(r, /Expected string/);
+    assert.match(r, /踩坑/);
+    // 不含末尾噪音（旧 slice(-1000) 恰好只截到这些）
+    assert.doesNotMatch(r, /test\.step|trace|attachment|Error Context/);
   });
 });

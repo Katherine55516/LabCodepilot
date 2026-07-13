@@ -359,7 +359,9 @@ async function validateAndPublish(params: {
       redactions,
     };
     const collected = await runGeneratedScript({ ...runnerBase, collectOnly: true, timeoutMs: 30_000 });
-    if (!collected.ok) return failed(`Playwright 加载校验失败: ${collected.output.slice(-1000)}`, staticCheck.warnings);
+    // summarizeRunFailure 抓真正的失败诊断行（Error/Locator/Expected/Received），
+    // 不再 slice(-1000) 取输出末尾——那截到的是代码框/trace 附件路径，看不到"为什么挂"。
+    if (!collected.ok) return failed(`Playwright 加载校验失败: ${summarizeRunFailure(collected.output, collected.timedOut)}`, staticCheck.warnings);
 
     const safeReplay = isSafeForAutomaticReplay(candidate.testCase);
     let replayed = false;
@@ -367,7 +369,7 @@ async function validateAndPublish(params: {
     if (safeReplay) {
       const replay = await runGeneratedScript({ ...runnerBase, collectOnly: false, timeoutMs: 120_000 });
       replayed = replay.ok;
-      if (!replay.ok) replayError = `Playwright 自动重放失败: ${replay.output.slice(-1000)}`;
+      if (!replay.ok) replayError = `Playwright 自动重放失败: ${summarizeRunFailure(replay.output, replay.timedOut)}`;
     }
     // 生成期自动重放失败【不再】dead-end 成 status:'failed'。'failed' 是死态：
     // 它不带 lastRunError，而运行(runScriptCases 只跑 verified|needs_review)、AI 修复
