@@ -128,6 +128,17 @@ export async function DELETE(
       } catch (err) {
         console.warn('[session-api] cowork removeSessionDir failed (non-fatal):', err);
       }
+      // E2: also drop the host staging dir (~/.codepilot/cowork/<id>). The
+      // path is derived ONLY from the session id — never from
+      // working_directory — so legacy sandbox sessions bound to a real
+      // project folder are untouched (their staging path doesn't exist →
+      // rmSync force is a no-op).
+      try {
+        const { removeOfficeStagingDir } = await import('@/lib/cowork-staging');
+        removeOfficeStagingDir(id);
+      } catch (err) {
+        console.warn('[session-api] cowork removeOfficeStagingDir failed (non-fatal):', err);
+      }
     }
 
     deleteSession(id);

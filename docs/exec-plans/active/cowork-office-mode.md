@@ -30,7 +30,7 @@
 | Phase | 内容 | 状态 | 备注 |
 |-------|------|------|------|
 | E1 | **执行层守卫**(安全底座):沙箱硬失败不落宿主、native runtime 拒绝沙箱会话、外部 MCP 过滤 + 能力边界提示 | ✅ 已完成(2026-07-13) | 新增 cowork-guards.ts + 10 单测(1919 passed);dev+CDP 四场景全过:①cowork 关闭硬失败(错误+横幅+零文件+零进程+日志确认)②native 412 拒绝③正常办公回合(agent 报 VM workspace 路径=系统提示生效,产物卡片正常)④研发回归正常。剔除 MCP 的用户可见提示留 E4 UI 面做(本阶段 console.warn+系统提示已明示 agent) |
-| E2 | **数据与创建流**:创建期指定 sandbox_enabled、办公会话宿主暂存目录、删除连带清理 | 📋 待开始 | |
+| E2 | **数据与创建流**:创建期指定 sandbox_enabled、办公会话宿主暂存目录、删除连带清理 | ✅ 已完成(2026-07-13) | 新增 cowork-staging.ts;createSession+POST 支持创建期沙箱(办公分支默认 full_access,已在 UI 权限按钮验证);dev 六项验证:创建字段/暂存目录、附件落 `<staging>/.codepilot-uploads` 并推 VM、agent 读改产附件产物(内容含 E2-OK)、DELETE 级联删暂存目录、遗留会话(真实项目 wd)删除不误删项目目录;+5 单测(1924 passed) |
 | E3 | **侧边栏双 tab**:分段控件 + 按模式过滤 + 办公平铺列表 + 办公新建流 + 空态 | 📋 待开始 | |
 | E4 | **办公会话 UI 面**:隐藏全部研发特性、移除 SandboxToggle、保留纯对话+文件收发 | 📋 待开始 | |
 | E5 | **正式化收尾**:设置开关 + 状态 API + fs_usage 零写入验收 + 双文档 + 回归 | 📋 待开始 | |

@@ -421,6 +421,12 @@ export interface CreateSessionRequest {
   provider_id?: string;
   permission_profile?: string;
   effort?: string;
+  /**
+   * E2 (cowork): 创建期定死沙箱(办公)会话。为 truthy 且未给
+   * working_directory 时,服务端生成宿主暂存目录 ~/.codepilot/cowork/<id>
+   * 并默认 permission_profile='full_access'。见 cowork-office-mode.md D2/D3。
+   */
+  sandbox_enabled?: boolean | number;
 }
 
 export interface SendMessageRequest {

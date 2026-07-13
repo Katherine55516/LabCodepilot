@@ -1179,6 +1179,8 @@ export function createSession(
   providerId?: string,
   permissionProfile?: string,
   effort?: string,
+  // E2 (cowork): sandbox(办公)会话在创建期定死,不再依赖建后 PATCH。
+  sandboxEnabled?: boolean,
 ): ChatSession {
   const db = getDb();
   const id = crypto.randomBytes(16).toString('hex');
@@ -1187,8 +1189,8 @@ export function createSession(
   const projectName = path.basename(wd);
 
   db.prepare(
-    'INSERT INTO chat_sessions (id, title, created_at, updated_at, model, system_prompt, working_directory, sdk_session_id, project_name, status, mode, sdk_cwd, provider_id, permission_profile, effort) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-  ).run(id, title || 'New Chat', now, now, model || '', systemPrompt || '', wd, '', projectName, 'active', mode || 'code', wd, providerId || '', permissionProfile || 'default', effort || '');
+    'INSERT INTO chat_sessions (id, title, created_at, updated_at, model, system_prompt, working_directory, sdk_session_id, project_name, status, mode, sdk_cwd, provider_id, permission_profile, effort, sandbox_enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+  ).run(id, title || 'New Chat', now, now, model || '', systemPrompt || '', wd, '', projectName, 'active', mode || 'code', wd, providerId || '', permissionProfile || 'default', effort || '', sandboxEnabled ? 1 : 0);
 
   return getSession(id)!;
 }
