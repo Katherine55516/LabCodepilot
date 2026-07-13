@@ -254,6 +254,9 @@ const zhHK: Record<TranslationKey, string> = {
   'test.launch.modeRetestHint': '{n} 條失敗 + 📌 必跑',
   'test.launch.modeRetestUnavailable': '還沒有可作為基準的已收口全量輪。',
   'test.launch.approvedOnly': '僅執行已確認用例',
+  'test.launch.scriptFirst': '優先腳本重放',
+  'test.launch.scriptFirstHint': '有已驗證自動化腳本的用例由平台直接運行腳本（秒級、不消耗 AI），其餘用例仍由 AI 執行；關閉則全部由 AI 執行（排障 / 對照用）',
+  'test.launch.scriptableCount': '可腳本重放 {n} 條',
   'test.launch.pendingWarn': '當前圈選含待確認 {n} 條，建議先評審。',
   'test.launch.pendingExcluded': '已排除待確認 {n} 條。',
   'test.launch.quarantineExcluded': '隔離排除 {n} 條',
@@ -283,6 +286,8 @@ const zhHK: Record<TranslationKey, string> = {
 
   // ── 輪次報告獨立頁(屏 4) ──
   'test.report.tab': '輪次報告',
+  'test.report.viaScript': '腳本',
+  'test.report.viaScriptHint': '本條判定來自自動化腳本重放（非 AI 執行）',
 
   // ── 迴歸執行進展面板（就地下拉，不保留歷史） ──
   'test.live.prepare': '準備發起',

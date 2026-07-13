@@ -19,6 +19,7 @@ const input = (id: string): RepairScriptInput => ({
     fileName: `${id}.spec.ts`,
     fingerprint: 'fp',
     usesMock: false,
+    caseBodyHash: 'bodyhash',
   },
   currentContent: 'old script',
   failure: 'Error: strict mode violation',

@@ -247,6 +247,9 @@ const en = {
   'test.launch.modeRetestHint': '{n} failed + pinned must-run',
   'test.launch.modeRetestUnavailable': 'No completed full round to retest from yet.',
   'test.launch.approvedOnly': 'Approved cases only',
+  'test.launch.scriptFirst': 'Script replay first',
+  'test.launch.scriptFirstHint': 'Cases with a verified automation script are executed by replaying the script (seconds, no AI cost); the rest still run via AI. Turn off to run everything via AI (for debugging / comparison)',
+  'test.launch.scriptableCount': '{n} case(s) script-replayable',
   'test.launch.pendingWarn': '{n} pending case(s) in scope — consider reviewing first.',
   'test.launch.pendingExcluded': '{n} pending case(s) excluded.',
   'test.launch.quarantineExcluded': '{n} quarantined case(s) excluded',
@@ -276,6 +279,8 @@ const en = {
 
   // ── 轮次报告独立页(屏 4) ──
   'test.report.tab': 'Round report',
+  'test.report.viaScript': 'Script',
+  'test.report.viaScriptHint': 'This verdict came from automated script replay (not AI execution)',
 
   // ── 回归执行进展面板（就地下拉，不保留历史） ──
   'test.live.prepare': 'Preparing',

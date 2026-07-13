@@ -9,6 +9,7 @@ import {
 } from './script-artifacts';
 import { normalizedTraceHash, redactTraceText, type ScriptTraceAction, type TraceRedaction } from './script-trace';
 import { isUnsafeSegment } from './path-safety';
+import { caseFingerprint } from './library';
 
 export interface EligibleScriptCase {
   /** ID used by this execution run (unique even in the aggregate regression-library task). */
@@ -24,6 +25,8 @@ export interface EligibleScriptCase {
   fileName: string;
   fingerprint: string;
   usesMock: boolean;
+  /** 用例体语义指纹(caseFingerprint 口径)——落 manifest 供回归重放防错配。 */
+  caseBodyHash: string;
 }
 
 export interface EligibleSelection {
@@ -99,6 +102,8 @@ export function selectEligibleCases(
       fileName: scriptFileName(id),
       fingerprint,
       usesMock: caseActions.some((a) => a.usesMock),
+      // caseFingerprint 排除 id/tags —— retarget 改写 id 后依然同值,无需重算。
+      caseBodyHash: caseFingerprint(testCase as Parameters<typeof caseFingerprint>[0]),
     });
   }
   return { eligible, staleIds, errors };

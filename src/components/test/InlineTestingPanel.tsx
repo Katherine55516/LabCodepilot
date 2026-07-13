@@ -658,7 +658,7 @@ export function InlineTestingPanel() {
   // run.json 摘录口径,异常/中断按 aborted)。报告自动出现在【报告区】(reports 扫描含轮次子目录)。
   // suiteName/env/mode/approvedOnly 由发起弹窗传入;缺省 = 内置「全量」+ local + 全量模式
   // (等价 v1 行为)。mode='failed-only' 时后端按基准轮的失败集圈选(见 lib/test/run-scope.ts)。
-  const runLibrary = async (opts?: { suiteName?: string; env?: string; mode?: "full" | "failed-only"; approvedOnly?: boolean; parentRoundId?: string }) => {
+  const runLibrary = async (opts?: { suiteName?: string; env?: string; mode?: "full" | "failed-only"; approvedOnly?: boolean; scriptFirst?: boolean; parentRoundId?: string }) => {
     const p = current?.path;
     if (!p || libraryRunning) return;
     const env = opts?.env || "local";
@@ -791,7 +791,7 @@ export function InlineTestingPanel() {
         const res = await fetch("/api/test/run", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ projectPath: p, taskName: REGRESSION_LIBRARY_TASK, step, env, roundId, model: model || undefined, providerId: providerId || undefined }),
+          body: JSON.stringify({ projectPath: p, taskName: REGRESSION_LIBRARY_TASK, step, env, roundId, model: model || undefined, providerId: providerId || undefined, scriptFirst: opts?.scriptFirst !== false }),
         });
         if (!res.ok) {
           let msg = t("test.library.runFailed");
@@ -5949,6 +5949,8 @@ interface VerdictUI { cls: string; act: string; why: string }
 interface RoundTestUI {
   task: string; originalId: string; purpose: string; status: string;
   actual?: string; error?: string; evidence?: string[]; verdict?: VerdictUI;
+  /** 判定来源:'script' = 脚本重放(行内显示「脚本」徽标);缺省 = AI 执行。 */
+  via?: string;
 }
 interface RoundReportUI {
   round: RoundUI;
@@ -6212,6 +6214,11 @@ function RegressionReportSection({ t, projectPath, reloadSignal, model, provider
                           <span className={`inline-block h-2 w-2 flex-shrink-0 rounded-full ${c.status === "pass" ? "bg-status-success-foreground" : "bg-status-error-foreground"}`} />
                           <span className="font-mono text-[10px] text-muted-foreground">{c.originalId}</span>
                           <span className="min-w-0 flex-1 truncate text-[11px] text-foreground" title={c.purpose}>{c.purpose || "—"}</span>
+                          {c.via === "script" && (
+                            <span className="flex items-center gap-0.5 rounded bg-muted px-1 text-[9px] text-muted-foreground" title={t("test.report.viaScriptHint")}>
+                              <Lightning size={8} /> {t("test.report.viaScript")}
+                            </span>
+                          )}
                           <span className={`rounded px-1 text-[9px] ${c.status === "pass" ? "bg-status-success-muted text-status-success-foreground" : "bg-status-error-muted text-status-error-foreground"}`}>{c.status}</span>
                         </div>
                         {c.status !== "pass" && (
@@ -6278,6 +6285,8 @@ interface LaunchScopeDTO {
   hitTasks: number;
   quarantined: number;
   pendingInScope: number;
+  /** 圈选集内可脚本重放的条数(按当前环境的沉淀脚本资格判定)。 */
+  scriptable?: number;
   suiteName?: string;
   parentRoundId?: string;
   /** 复测轮:基准轮失败条数(不含 pinned);hits 是含 pinned 的实跑总数,两者不可混用。 */
@@ -6291,7 +6300,7 @@ function StartRegressionModal({ t, projectPath, initialMode, initialParentRoundI
   initialMode?: "failed-only";
   initialParentRoundId?: string;
   onClose: () => void;
-  onStart: (opts: { suiteName: string; env: string; mode: "full" | "failed-only"; approvedOnly: boolean; parentRoundId?: string }) => void;
+  onStart: (opts: { suiteName: string; env: string; mode: "full" | "failed-only"; approvedOnly: boolean; scriptFirst: boolean; parentRoundId?: string }) => void;
 }) {
   const [suites, setSuites] = useState<Array<{ name: string; hits: number; hitTasks: number; builtin?: boolean }> | null>(null);
   const [envs, setEnvs] = useState<string[] | null>(null);
@@ -6300,6 +6309,8 @@ function StartRegressionModal({ t, projectPath, initialMode, initialParentRoundI
   const [env, setEnv] = useState<string>("local");
   const [mode, setMode] = useState<"full" | "failed-only">(initialMode ?? "full");
   const [approvedOnly, setApprovedOnly] = useState(false);
+  // 优先脚本重放(默认开):有合格沉淀脚本的用例由平台直接跑脚本,其余走 AI;关闭 = 全 AI(排障/对照)。
+  const [scriptFirst, setScriptFirst] = useState(true);
   const [estimate, setEstimate] = useState<{ minutes: number; rounds: number } | null | undefined>(undefined); // undefined=加载中
   // 预检结果连同它对应的入参 key 一起存:key 不匹配即视为「加载中」,免得在 effect 体里同步
   // setState(null) 触发级联渲染(react-hooks 规则)。
@@ -6363,21 +6374,22 @@ function StartRegressionModal({ t, projectPath, initialMode, initialParentRoundI
     return () => { cancelled = true; };
   }, [projectPath, env]);
 
-  // 预检卡:套件/模式/仅已确认 任一变化 → 服务端重新求值(与实跑同源)。
-  const scopeKey = `${suiteName}\u0000${mode}\u0000${approvedOnly}\u0000${initialParentRoundId ?? ""}`;
+  // 预检卡:套件/模式/仅已确认/环境 任一变化 → 服务端重新求值(与实跑同源)。
+  // env 进 key 与请求:脚本按环境沉淀,「可脚本重放 N 条」随环境变化。
+  const scopeKey = `${suiteName}\u0000${mode}\u0000${approvedOnly}\u0000${env}\u0000${initialParentRoundId ?? ""}`;
   useEffect(() => {
     let cancelled = false;
     const key = scopeKey;
     fetch("/api/test/suites/eval", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ projectPath, scope: { suiteName, mode, approvedOnly, parentRoundId: initialParentRoundId } }),
+      body: JSON.stringify({ projectPath, scope: { suiteName, mode, approvedOnly, env, parentRoundId: initialParentRoundId } }),
     })
       .then((r) => r.json())
       .then((d) => { if (!cancelled) setScopeState({ key, data: d as LaunchScopeDTO }); })
       .catch(() => { if (!cancelled) setScopeState({ key, data: { hits: 0, hitTasks: 0, quarantined: 0, pendingInScope: 0 } }); });
     return () => { cancelled = true; };
-  }, [projectPath, suiteName, mode, approvedOnly, initialParentRoundId, scopeKey]);
+  }, [projectPath, suiteName, mode, approvedOnly, env, initialParentRoundId, scopeKey]);
   const scope = scopeState?.key === scopeKey ? scopeState.data : null;
 
   const retestAvailable = !!retest && !retest.unavailable && retest.hits > 0;
@@ -6452,6 +6464,14 @@ function StartRegressionModal({ t, projectPath, initialMode, initialParentRoundI
                 {t("test.launch.approvedOnly")}
               </label>
             </div>
+            <div className="flex items-center gap-2">
+              <span className="w-12 flex-shrink-0" />
+              <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground" title={t("test.launch.scriptFirstHint")}>
+                <input type="checkbox" checked={scriptFirst} onChange={(e) => setScriptFirst(e.target.checked)} className="accent-primary" />
+                {t("test.launch.scriptFirst")}
+                <Lightning size={10} className="text-primary" />
+              </label>
+            </div>
             <div className="flex items-start gap-2 text-[10px] text-muted-foreground">
               <span className="w-12 flex-shrink-0">{t("test.launch.baseUrl")}</span>
               {envInfo?.frontendBaseUrl ? (
@@ -6469,6 +6489,9 @@ function StartRegressionModal({ t, projectPath, initialMode, initialParentRoundI
                     {t("test.launch.precheck", { n: scope.hits, m: scope.hitTasks })}
                     {scope.quarantined > 0 && (
                       <span className="ml-1 text-status-info-foreground">· {t("test.launch.quarantineExcluded", { n: scope.quarantined })}</span>
+                    )}
+                    {scriptFirst && (scope.scriptable ?? 0) > 0 && (
+                      <span className="ml-1 text-primary">· {t("test.launch.scriptableCount", { n: scope.scriptable ?? 0 })}</span>
                     )}
                   </div>
                   {approvedOnly
@@ -6491,7 +6514,7 @@ function StartRegressionModal({ t, projectPath, initialMode, initialParentRoundI
             <div className="flex justify-end gap-2">
               <button onClick={onClose} className="flex h-6 items-center rounded border border-border px-2 text-[11px] text-muted-foreground hover:text-foreground">{t("test.launch.cancel")}</button>
               <button
-                onClick={() => onStart({ suiteName, env, mode, approvedOnly, parentRoundId: mode === "failed-only" ? initialParentRoundId : undefined })}
+                onClick={() => onStart({ suiteName, env, mode, approvedOnly, scriptFirst, parentRoundId: mode === "failed-only" ? initialParentRoundId : undefined })}
                 disabled={hits === 0}
                 className="flex h-6 items-center gap-1 rounded bg-primary px-2.5 text-[11px] font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-40"
               >

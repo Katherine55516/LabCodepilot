@@ -245,6 +245,9 @@ const zh: Record<TranslationKey, string> = {
   'test.launch.modeRetestHint': '{n} 条失败 + 📌 必跑',
   'test.launch.modeRetestUnavailable': '还没有可作为基准的已收口全量轮。',
   'test.launch.approvedOnly': '仅执行已确认用例',
+  'test.launch.scriptFirst': '优先脚本重放',
+  'test.launch.scriptFirstHint': '有已验证自动化脚本的用例由平台直接运行脚本（秒级、不消耗 AI），其余用例仍由 AI 执行；关闭则全部由 AI 执行（排障 / 对照用）',
+  'test.launch.scriptableCount': '可脚本重放 {n} 条',
   'test.launch.pendingWarn': '当前圈选含待确认 {n} 条，建议先评审。',
   'test.launch.pendingExcluded': '已排除待确认 {n} 条。',
   'test.launch.quarantineExcluded': '隔离排除 {n} 条',
@@ -274,6 +277,8 @@ const zh: Record<TranslationKey, string> = {
 
   // ── 轮次报告独立页(屏 4) ──
   'test.report.tab': '轮次报告',
+  'test.report.viaScript': '脚本',
+  'test.report.viaScriptHint': '本条判定来自自动化脚本重放（非 AI 执行）',
 
   // ── 回归执行进展面板（就地下拉，不保留历史） ──
   'test.live.prepare': '准备发起',

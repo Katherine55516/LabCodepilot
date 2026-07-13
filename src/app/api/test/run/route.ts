@@ -11,6 +11,17 @@ import { resolveProjectEnvWithDb } from '@/lib/test/env-resolve';
 import { isUnsafeSegment } from '@/lib/test/path-safety';
 import { buildStepCompleted, observeStream, recordCasesGenerated, recordStatsEvents } from '@/lib/test/stats-recorder';
 import { REGRESSION_LIBRARY_TASK } from '@/lib/test/library';
+import { readRoundSnapshot } from '@/lib/test/rounds';
+// 回归轮次 · 脚本重放优先(阶段 A):有合格沉淀脚本的用例由平台直接跑脚本产出判定,
+// AI(阶段 B)只执行剩余——全覆盖时完全跳过智能体。见 script-regression.ts 模块头。
+import {
+  candidatesFromSnapshot,
+  resolveReplayPlan,
+  acquireReplayLocks,
+  buildScriptPhaseStream,
+  concatSseStreams,
+  type ReplayPlanItem,
+} from '@/lib/test/script-regression';
 // SSE 流包装器（原先定义在本文件内）：Next.js 构建期路由类型校验只允许 route.ts 导出
 // HTTP method handler，helper 导出会使 `next build` 失败，故抽至 lib（见 exec-stream.ts 模块头）。
 import { wrapExecutionStream, wrapReportStream, wrapCasesStream, stepStatsFrame, type StepStats } from '@/lib/test/exec-stream';
@@ -75,6 +86,8 @@ export async function POST(req: Request): Promise<Response> {
     // 子目录,同环境多轮互不覆盖。普通任务禁止传(避免任意任务产物被改道)。
     const roundId: string | undefined =
       typeof body.roundId === 'string' && body.roundId.trim() ? body.roundId.trim() : undefined;
+    // 回归执行「优先脚本重放」开关(发起弹窗透传;缺省开)。false = 全部走 AI(排障/对照用)。
+    const scriptFirst: boolean = body.scriptFirst !== false;
 
     if (!projectPath || typeof projectPath !== 'string') {
       return new Response(JSON.stringify({ error: 'projectPath is required' }), {
@@ -151,7 +164,36 @@ export async function POST(req: Request): Promise<Response> {
       if (step === 'requirement' && requirementMode === 'generate-md') requirementSourcePath = origSource;
       else if (step === 'cases' && requirementMode === 'use-original') requirementSourcePath = origSource;
     }
-    const { systemPrompt, prompt, needsPlaywright } = buildStep(step, { taskName, env, baseUrl, extraInstruction, reuseImported, requirementMode, requirementSourcePath, hasLoginState, loginCredentials, roundId });
+    // ── 回归轮次 · 脚本重放优先(阶段 A)规划 ──────────────────────────────
+    // 仅 回归用例库+roundId+开关开 时生效:按当轮快照判定哪些用例有合格脚本(资格五道闸,
+    // 见 resolveReplayPlan),并按 manifest 归属拿 .generation.lock(锁忙 → 该组降级走 AI)。
+    // 锁的释放归 buildScriptPhaseStream 收尾(流关闭/取消/异常均触发,幂等)。
+    let replay: { items: ReplayPlanItem[]; release: () => void; totalCases: number } | null = null;
+    if (step === 'execution' && taskName === REGRESSION_LIBRARY_TASK && roundId && scriptFirst) {
+      try {
+        const snapshot = readRoundSnapshot(projectPath, roundId);
+        if (snapshot && Array.isArray(snapshot.cases) && snapshot.cases.length) {
+          const plan = resolveReplayPlan(projectPath, env, candidatesFromSnapshot(snapshot));
+          if (plan.eligible.length) {
+            const locks = acquireReplayLocks(projectPath, env, plan.eligible);
+            if (locks.locked.length) {
+              replay = { items: locks.locked, release: locks.release, totalCases: snapshot.cases.length };
+            } else {
+              locks.release();
+            }
+          }
+        }
+      } catch (e) {
+        // 规划失败不阻塞轮次:回退全 AI 执行(行为与关闭开关一致)。
+        console.warn('[script-replay] 重放规划失败,本轮全部走 AI:', e);
+        replay = null;
+      }
+    }
+
+    const { systemPrompt, prompt, needsPlaywright } = buildStep(step, {
+      taskName, env, baseUrl, extraInstruction, reuseImported, requirementMode, requirementSourcePath, hasLoginState, loginCredentials, roundId,
+      scriptDone: replay ? { ids: replay.items.map((i) => i.runId), total: replay.totalCases } : undefined,
+    });
 
     let mcpServers: Record<string, MCPServerConfig> | undefined;
     if (needsPlaywright) {
@@ -168,7 +210,9 @@ export async function POST(req: Request): Promise<Response> {
     req.signal.addEventListener('abort', () => abortController.abort());
 
     const runStartMs = Date.now();
-    const stream = streamClaude({
+    // AI 智能体流改为【惰性】工厂:脚本重放阶段存在时,等阶段 A 跑完才创建(避免脚本与
+    // AI 并发操作同一被测系统);全部用例被脚本覆盖时根本不创建(整轮零模型消耗)。
+    const makeAgentStream = () => streamClaude({
       prompt,
       // Synthetic id — used only as a label; streamClaudeSdk does not persist it.
       sessionId: `test-${step}-${taskName}`,
@@ -184,6 +228,24 @@ export async function POST(req: Request): Promise<Response> {
       bypassPermissions: true,
       autoTrigger: true,
     });
+    let stream: ReadableStream<string>;
+    if (replay && roundId) {
+      const remaining = replay.totalCases - replay.items.length;
+      const phaseStream = buildScriptPhaseStream({
+        projectPath,
+        env,
+        roundId,
+        items: replay.items,
+        totalCases: replay.totalCases,
+        abortSignal: abortController.signal,
+        closingNote: remaining <= 0 ? '✅ 本轮全部用例已由脚本重放完成，未启动 AI 执行。' : undefined,
+        release: replay.release,
+      });
+      // 剩余用例 >0 → 阶段 A 后惰性接 AI;=0 → 只有阶段 A(归约器在流末照常落 run.json)。
+      stream = remaining > 0 ? concatSseStreams(phaseStream, makeAgentStream) : phaseStream;
+    } else {
+      stream = makeAgentStream();
+    }
 
     // 有头请求但本机定位不到完整浏览器(打包态随包仅无头 shell + 没装 Chrome)→ buildPlaywrightMcp
     // 已自动回落无头;这里据同一判定补发一条提示帧,让用户知道本次未弹可见窗口、为什么。

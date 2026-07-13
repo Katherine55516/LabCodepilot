@@ -118,6 +118,18 @@ function readLockOwnerPid(file: string): number | null {
   } catch { return null; }
 }
 
+/**
+ * 非抛错版锁获取(回归轮次「脚本重放」用):锁被生成任务持有时返回 null,调用方把该任务的
+ * 用例整组降级走 AI 执行,不阻塞轮次。僵尸锁判定与 acquireLock 一致(内部同一实现)。
+ */
+export function tryAcquireScriptLock(projectPath: string, taskName: string, env: string): { close: () => void } | null {
+  try {
+    return acquireLock({ projectPath, taskName, env, runHash: 'regression-replay' });
+  } catch {
+    return null;
+  }
+}
+
 function acquireLock(request: ScriptJobRequest): { close: () => void } {
   const dir = scriptsDir(request.projectPath, request.taskName, request.env);
   fs.mkdirSync(dir, { recursive: true });
@@ -336,6 +348,7 @@ async function validateAndPublish(params: {
     file: candidate.fileName,
     ...source,
     fingerprint: candidate.fingerprint,
+    caseBodyHash: candidate.caseBodyHash,
     status: previous && fs.existsSync(finalFile) ? 'outdated' : 'failed',
     usesMock: candidate.usesMock,
     lastSeenRunHash: request.runHash,
@@ -388,6 +401,7 @@ async function validateAndPublish(params: {
       file: candidate.fileName,
       ...source,
       fingerprint: candidate.fingerprint,
+      caseBodyHash: candidate.caseBodyHash,
       status: needsReview ? 'needs_review' : 'verified',
       usesMock: candidate.usesMock,
       generatedAt: now,
@@ -441,6 +455,7 @@ async function generateMissing(
     file: candidate.fileName,
     ...candidateSource(candidate),
     fingerprint: candidate.fingerprint,
+    caseBodyHash: candidate.caseBodyHash,
     // 已有旧脚本 → outdated（保留旧版可用）；否则 failed。
     status: previousById.has(candidate.id) && fs.existsSync(candidateFinalFile(request, candidate)) ? 'outdated' : 'failed',
     usesMock: candidate.usesMock,
@@ -531,13 +546,22 @@ async function executeJob(entry: QueueEntry): Promise<void> {
     const pending: EligibleScriptCase[] = [];
     for (const candidate of eligible) {
       const previous = previousById.get(candidate.id);
+      // 回归轮次「脚本重放」判定的 pass(run.json via:'script'):判定本就来自已沉淀脚本,
+      // 本轮没有 MCP 工具轨迹(trace 为空 → 语义指纹必然漂移)。跳过重生成——否则每轮回归
+      // 都会拿空轨迹churn一遍脚本。有旧条目原样保留(回填 caseBodyHash);无旧条目(聚合
+      // manifest 首次见到该 runId)也不生成,脚本的权威元数据在来源任务 manifest 里。
+      if (candidate.result.via === 'script') {
+        if (previous) nextCases.push({ ...previous, caseBodyHash: candidate.caseBodyHash, lastSeenRunHash: request.runHash });
+        continue;
+      }
       const finalFile = candidateFinalFile(request, candidate);
       const reusable = !force?.has(candidate.id)
         && previous?.fingerprint === candidate.fingerprint
         && (previous.status === 'verified' || previous.status === 'needs_review')
         && fs.existsSync(finalFile);
       if (reusable) {
-        nextCases.push({ ...previous, lastSeenRunHash: request.runHash });
+        // 顺手补写 caseBodyHash:语义指纹相同 ⇒ 用例体相同,给存量条目回填、让回归重放的防错配尽快生效。
+        nextCases.push({ ...previous, caseBodyHash: candidate.caseBodyHash, lastSeenRunHash: request.runHash });
       } else if (!force || force.has(candidate.id)) {
         pending.push(candidate);
       } else if (previous) {

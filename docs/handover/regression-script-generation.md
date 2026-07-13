@@ -89,10 +89,39 @@ manifest job 状态：`queued/running/done/partial/error/stale`；单用例状�
 - **静态校验失败的生成期自纠闭环（2026-07-11）**：此前只有【运行时】失败有 `repairScriptsBatch` 回灌闭环，【静态校验】失败（多个 `test()`、标题缺用例 ID、多余 import 等）一次不合规就 dead-end 成 `failed`、无任何自纠——「重试缺口」只是同一 prompt 再赌一次（真机踩坑：网关模型把一条用例拆成多个 `test()` → 「每个脚本必须恰好一个 test(); test 标题必须包含用例 ID」→ 永久 0/1）。修法镜像运行时闭环：`resolveStaticValidContent`（纯函数、注入 repair 便于单测）在静态失败时把**确切校验错误**喂回 `repairScriptsBatch` 一次并复校，改好才采纳、否则保留原始错误。生成 prompt 另加**具体结构骨架**（一个顶层 `test()`、标题以 `scriptCaseId` 开头、用 `await test.step(...)` 分步——`test.step(` 不被校验器的 `/\btest\s*\(/g` 计数）从源头降不合规率；repair prompt 同步这条。
 - **重放失败不再 dead-end（2026-07-11）**：`validateAndPublish` 里只读用例生成期【无条件真机重放】，此前重放失败 → `failed()`（**不带 `lastRunError`**）。而 `runScriptCases` 只跑 `verified|needs_review`、`repairScriptCases`/`runAndRepairLoop` 只碰带 `lastRunError` 的——`failed` 落在两个恢复通道之外成死态，被测应用没起时只读用例永久卡 0/1。改为：脚本既已过静态 + collect，就落盘、标 `needs_review` 并把 `replayError` 记进 `lastRunError`，交给既有闭环（运行→自动修 / `isEnvironmentFailure` 停靠 / 手动 AI 修复）在被测应用起来后收口。**collect 失败仍保留 `failed`**（连加载都过不了 = malformed，该重新生成）。恢复态契约抽成导出纯谓词 `isRunnableStatus`/`isFixableCase` 并单测，防后续新增恢复路径漏态。
 
+## 回归执行 · 脚本重放优先(2026-07-13)
+
+回归轮次执行(`/api/test/run` step=execution,仅 `回归用例库`+roundId)在**同一条 SSE 流**内分两阶段:
+
+- **阶段 A 脚本重放**(`src/lib/test/script-regression.ts`):当轮快照 idMap 反解 `{来源任务, originalId}` →
+  双 manifest 查找(来源任务 manifest 与聚合 manifest 指向同一物理文件,按 `generatedAt/lastVerifiedAt/lastRunAt`
+  取**最新鲜**视图)→ 资格五道闸(非 mock → `verified`/干净 `needs_review` → `caseBodyHash` 与当前用例体
+  一致(存量缺失宽限)→ 文件存在 → `tryAcquireScriptLock` 拿到锁,锁忙整组降级走 AI)→ 逐条
+  `runGeneratedScript` 并发出与 AI 执行**同构**的合成帧(`@@CASE_START`/`▶ 进度行`/`@@RESULT` 带
+  `via:"script"`)。归约器/实时面板/计时零改动直接消费;`reduce.ts` 的 `via` 字段透传到 run.json 与
+  rounds/detail,报告行显示「脚本」徽标。
+- **阶段 B AI 执行**:惰性创建(`concatSseStreams` 第二条流工厂,阶段 A 跑完才起,避免与脚本并发操作
+  被测系统);prompt 注入 `scriptDone`(禁止执行已完成 id、只跑剩余、编号顺延)。**剩余为 0 时完全不
+  创建智能体**(整轮零模型消耗)。归约器「同 id 先到先得」保证脚本结果不被模型误跑覆盖。
+
+失败策略(用户拍板,策略 A):脚本失败 = 用例失败(error 为 Playwright 摘要),**不自动转 AI**;
+manifest 记 `consecutiveRunFailures`(pass 清零),连败 ≥2 时 error 附治理建议(脚本面板 AI 修复/重试,
+或关闭开关走 AI 对照)。环境类失败(`isEnvironmentFailure`)判 blocked、不计连败。
+
+配套联动:
+- **防 churn**:`executeJob` 对 run.json `via:'script'` 的 pass 用例跳过重生成(脚本重放无 MCP 轨迹,
+  语义指纹必然漂移;有旧条目原样保留并回填 `caseBodyHash`,无旧条目不生成——权威元数据在来源任务 manifest);
+- **防错配**:生成期在 manifest 记 `caseBodyHash`(library.caseFingerprint 口径,排除 id/tags/_source/_lib;
+  指纹复用路径顺带回填存量条目),重放前与快照用例体比对,库里改过的用例不拿旧脚本重放;
+- **入口**:发起弹窗「优先脚本重放」开关(默认开,`scriptFirst` 经 runLibrary → run 路由透传);预检卡
+  「可脚本重放 N 条」来自 suites/eval 的 `scriptable`(`countScriptableEntries`,弹窗把 env 一并传入);
+- **审计**:每轮 `script-replay` 记录「N 条:通过/失败/环境阻塞」(await 落定,不留竞态);
+- **v1 局限**:脚本重放无截图/录像证据(失败仅 error 摘要);时长估算未按脚本占比折算。
+
 ## 运维与验证
 
 - 开发态运行 UI 前若刚执行过 Electron 打包，先 `npm rebuild better-sqlite3` 恢复 Node ABI。
 - 打包流程的 `after-pack.js` 会再把 better-sqlite3 重编译为 Electron ABI。
-- 定向测试：`src/__tests__/unit/test-script-generation.test.ts`、`test-exec-stream.test.ts`、`sdk-result-interpret.test.ts`（SDK 四种 result 形态）、`script-import-normalize.test.ts`（import 归一化端到端契约）、`script-replay-safety.test.ts`（重放安全判定 + 失败摘要）、`script-repair.test.ts`（AI 修复载荷红线）、`script-pipeline-classify.test.ts`（环境失败分类器）、`script-validator-structure.test.ts`（一个 test()/标题含 ID/test.step 不计数——复现并守 2026-07-11 真机失败）、`script-static-repair.test.ts`（静态修复决策 `resolveStaticValidContent` + 恢复态契约 `isRunnableStatus`/`isFixableCase`）。
+- 定向测试：`src/__tests__/unit/test-script-generation.test.ts`、`test-exec-stream.test.ts`、`sdk-result-interpret.test.ts`（SDK 四种 result 形态）、`script-import-normalize.test.ts`（import 归一化端到端契约）、`script-replay-safety.test.ts`（重放安全判定 + 失败摘要）、`script-repair.test.ts`（AI 修复载荷红线）、`script-pipeline-classify.test.ts`（环境失败分类器）、`script-validator-structure.test.ts`（一个 test()/标题含 ID/test.step 不计数——复现并守 2026-07-11 真机失败）、`script-static-repair.test.ts`（静态修复决策 `resolveStaticValidContent` + 恢复态契约 `isRunnableStatus`/`isFixableCase`）、`script-regression.test.ts`（回归脚本重放:资格五道闸/合成帧×归约契约/先到先得/连败提示/环境失败分类/concat 惰性）。
 - 流水线端到端真机验证（打包版 + live SUT，两轮）：① R02 注入定位器歧义 → AI 自动诊断补 `exact:true` → 重跑通过（`verified`）；R03 断言如实失败（页面不禁用按钮） → 1 轮内判「需人工」、覆盖乐观 repairNote 讲真话、不 force-pass；终态 `partial` 不卡死。② 证实每条用例只 1 次修复机会、环境不可达跳过、孤儿锁按 pid 存活抢占。
 - 关键检查：同 run 重复报告不改 manifest；相同语义不改脚本 mtime；trace/脚本/输出无真实秘密和本机路径；Next dev 与 standalone 均能解析 MCP 配套 runtime/browser。

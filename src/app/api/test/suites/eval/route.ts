@@ -2,6 +2,7 @@ import { readLibrary } from '@/lib/test/library';
 import { readSuites, evalSuite, sanitizeSuite } from '@/lib/test/suites';
 import { buildLastResultLookup } from '@/lib/test/rounds';
 import { resolveRunScope, RunScopeError } from '@/lib/test/run-scope';
+import { countScriptableEntries } from '@/lib/test/script-regression';
 
 export const runtime = 'nodejs';
 
@@ -45,12 +46,15 @@ export async function POST(req: Request): Promise<Response> {
           approvedOnly: s.approvedOnly === true,
           parentRoundId: typeof s.parentRoundId === 'string' ? s.parentRoundId : undefined,
         });
+        // 脚本重放预检(脚本按环境沉淀 → 弹窗把 env 一并传入;缺省 local 与发起口径一致)。
+        const env = typeof s.env === 'string' && s.env.trim() ? s.env.trim() : 'local';
         return Response.json({
           hits: scope.hits.length,
           hitTasks: new Set(scope.hits.map((e) => e._source.task)).size,
           sample: sampleOf(scope.hits),
           quarantined: scope.quarantined,
           pendingInScope: scope.pendingInScope,
+          scriptable: countScriptableEntries(projectPath, env, scope.hits),
           suiteName: scope.suiteName,
           parentRoundId: scope.parentRoundId,
           baseFailedCount: scope.baseFailedCount,

@@ -38,6 +38,8 @@ export interface RawResult {
   error?: string;
   evidence?: string[];
   api?: ApiInfo;
+  /** 判定来源:'script' = 回归轮次脚本重放(平台合成帧);缺省 = AI 执行。 */
+  via?: string;
 }
 
 export interface ReducedTest {
@@ -49,6 +51,8 @@ export interface ReducedTest {
   api?: ApiInfo;
   /** 单用例执行耗时（服务端按进度行/@@RESULT 时间戳计，见 exec-timing.ts）；缺省=未测得 */
   durationMs?: number;
+  /** 判定来源:'script' = 脚本重放;缺省 = AI 执行。报告 UI 据此显示「脚本」徽标。 */
+  via?: string;
 }
 
 export interface RunCounts {
@@ -173,6 +177,7 @@ export function reduceResults(
       error,
       evidence: Array.isArray(r.evidence) ? r.evidence.map(String) : [],
       ...(api ? { api } : {}),
+      ...(typeof r.via === "string" && r.via ? { via: r.via } : {}),
     };
   });
 

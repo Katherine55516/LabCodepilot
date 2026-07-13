@@ -267,8 +267,15 @@ function executionPrompt(
   hasLoginState = false,
   loginCredentials?: { username: string; password: string },
   roundId?: string,
+  scriptDone?: { ids: string[]; total: number },
 ): string {
   const p = artifactPaths(taskName, env, roundId);
+  // 回归轮次·脚本重放优先:阶段 A 已由平台直接运行沉淀的 Playwright 脚本执行了部分用例并
+  // 产出判定(先进流,归约器同 id 先到先得,即使模型误跑也覆盖不掉)。这里显式声明排除,
+  // 让 AI 只执行剩余用例——省 token 也防重复写数据。
+  const scriptDoneBlock = scriptDone && scriptDone.ids.length
+    ? `\n⚠️ **本轮为脚本重放优先执行**：\`${p.cases}\` 共 ${scriptDone.total} 条用例，其中以下 ${scriptDone.ids.length} 条**已由平台的自动化脚本执行完毕并产出判定**——你【禁止执行它们、禁止输出它们的 @@CASE_START/@@RESULT】：\n${scriptDone.ids.map((id) => `  - ${id}`).join('\n')}\n你只执行**剩余 ${scriptDone.total - scriptDone.ids.length} 条**（cases.json 中除上述 id 外的全部用例）。覆盖自检（下方第 8 条）按剩余口径执行：你输出的 @@RESULT 行数必须等于 ${scriptDone.total - scriptDone.ids.length}；进度行「▶ 用例 N/总数」的总数仍写 ${scriptDone.total}，N 从 ${scriptDone.ids.length + 1} 开始顺延。\n`
+    : '';
   const rule = ruleBlock(
     '测试执行规范',
     loadRule('test-execution'),
@@ -279,7 +286,7 @@ function executionPrompt(
 环境：${env}
 ${baseUrl ? `被测地址：${baseUrl}（平台已在执行前完成可达性探测、确认可达才会进入本步——**无需再用 curl/请求工具反复探活**；若执行中途发现地址不可达，最多重试探活 3 次即停止并在结果中说明，**切勿无限重试**。）` : '（未配置被测地址：若无法确定目标系统地址或地址不可达，相应用例判 blocked 并在结果中说明，不要臆造结果。）'}
 输入产物（请先 Read）：测试用例 ${p.cases}
-
+${scriptDoneBlock}
 ⚠️ **本步为非交互自动化执行（交互端无人应答）**：**严禁使用 \`AskUserQuestion\`，也严禁以任何方式向用户提问 / 等待用户输入 / 暂停等待确认**——问了永远不会有人回答，会让执行永久卡死。目标环境已由平台指定为 \`${env}\`，直接使用，**不要再反问用户选环境**。
 
 ${loginHandlingBlock(hasLoginState, loginCredentials)}
@@ -367,6 +374,11 @@ export interface BuildStepOptions {
   loginCredentials?: { username: string; password: string };
   /** 回归轮次号（v2，仅回归用例库任务）：执行/报告产物落 report/{task}/{roundId}/ 子目录。 */
   roundId?: string;
+  /**
+   * 执行步·脚本重放优先(回归轮次):阶段 A 已由平台脚本执行完毕的用例 id 列表 + 本轮总数。
+   * 传入后执行 prompt 声明「禁止执行这些 id、只跑剩余、编号顺延」。缺省 = 全部由 AI 执行。
+   */
+  scriptDone?: { ids: string[]; total: number };
 }
 
 export interface BuiltStep {
@@ -394,7 +406,7 @@ export function buildStep(step: TestStep, opts: BuildStepOptions): BuiltStep {
     case 'cases':
       return withNote({ systemPrompt: SYS.cases, prompt: casesPrompt(taskName, { reuseImported: opts.reuseImported, requirementSourcePath: opts.requirementSourcePath }), needsPlaywright: false }, note);
     case 'execution':
-      return withNote({ systemPrompt: SYS.execution, prompt: executionPrompt(taskName, env, opts.baseUrl, opts.hasLoginState, opts.loginCredentials, opts.roundId), needsPlaywright: true }, note);
+      return withNote({ systemPrompt: SYS.execution, prompt: executionPrompt(taskName, env, opts.baseUrl, opts.hasLoginState, opts.loginCredentials, opts.roundId, opts.scriptDone), needsPlaywright: true }, note);
     case 'report':
       return withNote({ systemPrompt: SYS.report, prompt: reportPrompt(taskName, env, opts.roundId), needsPlaywright: false }, note);
   }

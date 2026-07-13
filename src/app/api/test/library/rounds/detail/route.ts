@@ -36,6 +36,8 @@ interface RunTest {
   error?: string;
   evidence?: string[];
   api?: Record<string, unknown>;
+  /** 判定来源:'script' = 脚本重放(报告行显示「脚本」徽标);缺省 = AI 执行。 */
+  via?: string;
 }
 
 function readRunTests(projectPath: string, round: RegressionRound): RunTest[] | null {
@@ -90,13 +92,13 @@ export async function GET(req: Request): Promise<Response> {
   const verdicts = readVerdicts(projectPath, roundId);
 
   // 按来源任务分组(保持快照内出现顺序)。失败用例带上实际结果/错误/证据/接口 + AI 归因。
-  type GroupTest = CaseRef & { status: string; actual?: string; error?: string; evidence?: string[]; api?: unknown; verdict?: CaseVerdict };
+  type GroupTest = CaseRef & { status: string; actual?: string; error?: string; evidence?: string[]; api?: unknown; verdict?: CaseVerdict; via?: string };
   const groups: Array<{ task: string; counts: Record<string, number>; tests: GroupTest[] }> = [];
   if (cur) {
     const byTask = new Map<string, GroupTest[]>();
     for (const { status, ref, test } of cur.values()) {
       if (!byTask.has(ref.task)) byTask.set(ref.task, []);
-      const row: GroupTest = { ...ref, status };
+      const row: GroupTest = { ...ref, status, ...(test.via === 'script' ? { via: 'script' } : {}) };
       if (status !== 'pass') {
         row.actual = test.actual;
         row.error = test.error;

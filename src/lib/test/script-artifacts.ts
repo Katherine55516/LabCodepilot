@@ -46,6 +46,17 @@ export interface ScriptManifestCase {
    * real behaviour contradicts the case's expected result) and needs a human.
    */
   repairNote?: string;
+  /**
+   * 用例体语义指纹(library.ts caseFingerprint 同口径:排除 id/tags/_source/_lib)。
+   * 回归轮次「脚本重放」用它防错配:库里被编辑过(rev 升)的用例不能拿旧脚本重放出
+   * 错误结论。存量条目缺失时宽限放行(下轮生成自然补齐)。
+   */
+  caseBodyHash?: string;
+  /**
+   * 回归轮次脚本重放的【连续】失败次数(pass 清零;环境类失败不计)。≥2 时错误信息
+   * 附带治理建议(去脚本面板 AI 修复/重试生成,或关闭「优先脚本重放」走 AI 对照)。
+   */
+  consecutiveRunFailures?: number;
 }
 
 export interface ScriptManifest {
