@@ -673,6 +673,10 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
       // Set to the sessionId once the VM is marked active this turn, so the
       // outer finally can release it (idle-reclaim gate) exactly once.
       let coworkActiveSessionId: string | null = null;
+      // True when the session row has sandbox_enabled. Drives the E1 hard-fail
+      // guard: a sandbox turn must NEVER silently fall back to host execution
+      // — that would break the isolation promise the session was created under.
+      let coworkSandboxRequested = false;
       const coworkVmPathByHostPath = new Map<string, string>();
       const coworkTurnStartMs = Date.now();
 
@@ -775,16 +779,33 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
         // that runs the linux claude binary INSIDE an isolated VM. The SDK is
         // unaware — it just spawns what it thinks is claude and talks stream-json
         // over the forwarded stdio. See src/lib/cowork-poc.ts.
+        //
+        // E1 hard-fail helper: emit a failed vm_status + structured error, then
+        // end the stream cleanly (done + close). Callers `return` right after.
+        // The outer finally still runs (shadow cleanup / unregister); any VM
+        // active-gate acquired earlier this turn is released there too.
+        const hardFailSandboxTurn = async (reason?: string) => {
+          const { buildSandboxUnavailableError } = await import('./cowork-guards');
+          const guardErr = buildSandboxUnavailableError(reason);
+          controller.enqueue(formatSSE({ type: 'vm_status', data: JSON.stringify({ phase: 'failed', detail: guardErr.rawMessage }) }));
+          controller.enqueue(formatSSE({
+            type: 'error',
+            data: JSON.stringify({ ...guardErr, _formattedMessage: guardErr.userMessage }),
+          }));
+          controller.enqueue(formatSSE({ type: 'done', data: '' }));
+          controller.close();
+        };
         try {
           const { getSession } = await import('./db');
           const { decideCowork } = await import('./cowork-poc');
           const sess = getSession(sessionId);
+          coworkSandboxRequested = !!sess?.sandbox_enabled;
           // P1-D readiness window: while the VM cold-starts (spawn vfkit +
           // provision daemon, ~5–30s), stream vm_status events so the frontend
           // shows "沙箱准备中" progress instead of a bare "生成中" that reads as
           // a hang. Subscribe before the blocking decideCowork; unsubscribe after.
           let unsubVmProgress: (() => void) | null = null;
-          if (sess?.sandbox_enabled) {
+          if (coworkSandboxRequested) {
             const vmMgrEarly = await import('./cowork-vm-manager');
             // If not already running, announce "starting" up front so the banner
             // appears immediately (before the first progress transition).
@@ -838,15 +859,22 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
             }
             coworkActive = true;
             console.log(`[claude-client] cowork sandbox ON for session ${sessionId} → forwarder ${decision.executablePath}, pushed ${coworkVmPathByHostPath.size} file(s)`);
-          } else if (sess?.sandbox_enabled && decision.reason) {
-            console.warn(`[claude-client] cowork sandbox requested but falling back to host: ${decision.reason}`);
-            // Sandbox was requested but the VM isn't usable this turn — tell the
-            // frontend so it can surface a failure instead of silently running
-            // on the host (which would violate the "files never touch the host"
-            // expectation the user set by enabling sandbox).
-            controller.enqueue(formatSSE({ type: 'vm_status', data: JSON.stringify({ phase: 'failed', detail: decision.reason }) }));
+          } else if (coworkSandboxRequested) {
+            // E1 hard-fail: sandbox was requested but the VM isn't usable this
+            // turn. Running on the host would silently violate the "files never
+            // touch the host" promise — end the turn instead (no host fallback).
+            console.warn(`[claude-client] cowork sandbox unavailable (${decision.reason}) — hard-failing turn, no host fallback`);
+            await hardFailSandboxTurn(decision.reason);
+            return;
           }
         } catch (err) {
+          if (coworkSandboxRequested) {
+            // Unexpected crash while deciding/preparing the sandbox — same
+            // hard-fail rule: a sandbox turn must never continue on the host.
+            console.error('[claude-client] cowork decision crashed for sandbox session — hard-failing turn:', err);
+            await hardFailSandboxTurn('decision_error');
+            return;
+          }
           console.warn('[claude-client] cowork decision failed, using host runtime:', err);
         }
 
@@ -864,6 +892,20 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
           };
         }
 
+        // E1 (cowork): capability-boundary note for sandbox turns — tells the
+        // agent it lives in an isolated VM, where its session workspace is, and
+        // that host paths / external MCP servers are unavailable. Placed before
+        // the built-in MCP blocks below so their prompt appends stack after it.
+        if (coworkActive) {
+          const { buildSandboxSystemNote } = await import('./cowork-guards');
+          const note = buildSandboxSystemNote(sessionId);
+          if (queryOptions.systemPrompt && typeof queryOptions.systemPrompt === 'object' && 'append' in queryOptions.systemPrompt) {
+            queryOptions.systemPrompt.append = (queryOptions.systemPrompt.append || '') + '\n\n' + note;
+          } else {
+            queryOptions.systemPrompt = { type: 'preset', preset: 'claude_code', append: note };
+          }
+        }
+
         // MCP servers: pass explicitly provided config (e.g. from AI Native Lab UI's
         // ${...}-resolved servers + in-process SDK MCPs like memory/widget/...).
         //
@@ -875,7 +917,19 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
         // Manager API enforces this by writing only to `.claude.json` and
         // migrating any legacy settings.json entries on read.
         if (mcpServers && Object.keys(mcpServers).length > 0) {
-          queryOptions.mcpServers = toSdkMcpConfig(mcpServers);
+          if (coworkActive) {
+            // E1 (cowork): sandbox turns load NO external MCP servers. stdio
+            // servers would be spawned INSIDE the VM (no npx/uvx there — they
+            // fail silently), and sse/http would connect from the VM with
+            // confusing semantics. Built-in in-process codepilot-* servers
+            // (registered below) run host-side over the SDK control channel and
+            // are unaffected. User-scope ~/.claude.json servers are naturally
+            // absent too: the CLI inside the VM reads the VM's own home, not
+            // the host's. See docs/exec-plans/active/cowork-office-mode.md (D4).
+            console.warn(`[claude-client] cowork: dropped external MCP servers for sandbox turn: ${Object.keys(mcpServers).join(', ')}`);
+          } else {
+            queryOptions.mcpServers = toSdkMcpConfig(mcpServers);
+          }
         }
 
         // For DB-provider requests, settingSources is ['user'] only (project
@@ -885,7 +939,9 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
         // `<cwd>/.mcp.json`, which is normally an auth-neutral file team
         // members commit to share project MCP servers. Re-inject it here so
         // those servers don't silently disappear for DB-provider users.
-        if (resolved.provider) {
+        // Skipped for sandbox turns (E1) — project .mcp.json servers are
+        // external MCPs and would fail/act confusingly inside the VM.
+        if (resolved.provider && !coworkActive) {
           const { loadProjectMcpServers } = await import('@/lib/mcp-loader');
           const projectMcps = loadProjectMcpServers(resolvedWorkingDirectory.path);
           if (projectMcps) {

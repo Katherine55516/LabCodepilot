@@ -65,6 +65,20 @@ export async function POST(request: NextRequest) {
       });
     }
 
+    // E1 (cowork): sandbox sessions must run via the SDK runtime — the native
+    // runtime executes tools on the HOST and is completely unaware of
+    // sandbox_enabled, so letting it through would silently run the turn on
+    // the real machine. Refuse up front (before the lock). Triggers:
+    // openai-oauth provider / cli_enabled=false / agent_runtime=native.
+    // See docs/exec-plans/active/cowork-office-mode.md (D5).
+    if (session.sandbox_enabled && predictNativeRuntime(provider_id || session.provider_id || '')) {
+      const { SANDBOX_NATIVE_RUNTIME_GUARD } = await import('@/lib/cowork-guards');
+      return new Response(JSON.stringify(SANDBOX_NATIVE_RUNTIME_GUARD), {
+        status: 412,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
     // Acquire exclusive lock for this session to prevent concurrent requests
     const lockId = crypto.randomBytes(8).toString('hex');
     const lockAcquired = acquireSessionLock(session_id, lockId, `chat-${process.pid}`, 600);

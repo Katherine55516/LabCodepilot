@@ -29,7 +29,7 @@
 
 | Phase | 内容 | 状态 | 备注 |
 |-------|------|------|------|
-| E1 | **执行层守卫**(安全底座):沙箱硬失败不落宿主、native runtime 拒绝沙箱会话、外部 MCP 过滤 + 能力边界提示 | 📋 待开始 | 两个调研新发现的安全缺口在此修(见 D5) |
+| E1 | **执行层守卫**(安全底座):沙箱硬失败不落宿主、native runtime 拒绝沙箱会话、外部 MCP 过滤 + 能力边界提示 | ✅ 已完成(2026-07-13) | 新增 cowork-guards.ts + 10 单测(1919 passed);dev+CDP 四场景全过:①cowork 关闭硬失败(错误+横幅+零文件+零进程+日志确认)②native 412 拒绝③正常办公回合(agent 报 VM workspace 路径=系统提示生效,产物卡片正常)④研发回归正常。剔除 MCP 的用户可见提示留 E4 UI 面做(本阶段 console.warn+系统提示已明示 agent) |
 | E2 | **数据与创建流**:创建期指定 sandbox_enabled、办公会话宿主暂存目录、删除连带清理 | 📋 待开始 | |
 | E3 | **侧边栏双 tab**:分段控件 + 按模式过滤 + 办公平铺列表 + 办公新建流 + 空态 | 📋 待开始 | |
 | E4 | **办公会话 UI 面**:隐藏全部研发特性、移除 SandboxToggle、保留纯对话+文件收发 | 📋 待开始 | |
@@ -143,6 +143,6 @@
 ## 风险与开放问题
 
 - **内置 in-process MCP(memory 等)在沙箱回合的可用性**:工具执行在宿主 SDK 进程、经 stream-json 控制通道过河,理论可用但未专项验证 —— E1 加一条验证项;memory 写宿主 assistant workspace 属产品特性(app 数据面),在 insights 文档中作为能力边界明示。
-- **en 文案**:办公=Work / Office / Home 待定(当前推荐 Work);zh 固定「办公/研发」。
+- ~~**en 文案**~~:已定(2026-07-13 用户确认):办公=**Work**,研发=**Code**;zh「办公/研发」,zh-HK「辦公/研發」。
 - **办公会话的 SDK cwd 传给 VM 内 claude**:与现状 POC 会话相同(宿主路径在 VM 内不存在,daemon 已 cd 到 workspace,P0-P1 E2E 均通过),无新增风险。
 - **PATCH sandbox_enabled 遗留 API**:UI 移除后成为 internal;若担心误用可在 E5 顺手加 guard(已建会话禁改),暂不强制。
