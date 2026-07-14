@@ -8,6 +8,7 @@
 
 | 文件 | 主题 |
 |------|------|
+| test-usage-upload.md | 测试用量上报（跨仓，含功能 P1 + 回归 P2）：本地 test_stats_events（事件表/机器级）+ 各项目 AI_LabTest 文件态（回归/单项目→枚举工作台项目清单凑机器级）→ 按北京日聚合 → 主进程 loopback 取数 + Bearer 上报 → codeagent-server `test_usage_daily` **GREATEST upsert**（幂等 + 抗客户端删除）→ 管理端「测试用量统计」。三处致命口径：**状态型事件(cases_approved/复核)必须 last-wins 不能求和**（真实数据里采纳率曾算成 294%）、**熔断轮只计 executions/rounds 不计用例级结果**（服务端只拿求和值、无法事后剔除；功能与回归两侧同构）、**回归按项目明细必须并进同一个 payload.projects[] 并用列名 reg_***（否则服务端下钻静默恒为 0）。4 类触发 + 水位回补；比率永不落库、SUM(分子)/SUM(分母) 现算 |
 | regression-stats.md | 回归测试使用统计：Stats 面板二级 toggle（功能/回归）、**文件态聚合不复用事件表**（单项目口径）、套件执行趋势/用例执行趋势/脚本重放 vs AI/套件明细、run.json 近 50 轮护栏、circuitBroken/running 排除口径、纯核 aggregateRegressionStats + fs wrapper、CDP mock 验证 |
 | test-usage-stats.md | 测试模块使用统计：test_stats_events 事件流水（追加式）+ 纯函数聚合口径层（采纳率首轮基线自动 diff / 报告准确度+复核覆盖率 / 服务端逐用例计时 / 模型节点级归因 / 熔断排除 / 时间窗口计入门控）、10 类事件字典、四 scope API + 4 Sheet XLSX 导出、TestStatsView 看板（第 4 视图）、fail-safe 埋点、electron-as-node 验证法 |
 | requirement-import-modes.md | 导入需求保留原文 + 需求分析节点二选一（生成 md / 直接用原文）：三文件模型（原始件 / docx 抽取文本 / AI 归一 md）、待选择闸门、批量停下等选、docx 必经抽取、需求来源路径穿透、向后兼容 |

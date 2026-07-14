@@ -246,8 +246,13 @@ export function aggregateRegressionStats(input: RegressionStatsInput): Regressio
 
 /* ============ fs wrapper ============ */
 
-/** 读某轮 run.json → 执行摘要（缺失/损坏/执行中未产出 → null）。 */
-function readRunSummary(projectPath: string, round: RegressionRound): RoundRunSummary | null {
+/**
+ * 读某轮 run.json → 执行摘要（缺失/损坏/执行中未产出 → null）。
+ *
+ * 导出供 regression-rollup.ts（每日上报聚合）复用 —— 脚本/AI 的判定口径（status==='pass'、
+ * via==='script'、circuitBroken）只此一处，绝不另写一遍，否则上报数与面板数会悄悄分叉。
+ */
+export function readRunSummary(projectPath: string, round: RegressionRound): RoundRunSummary | null {
   try {
     const abs = path.join(projectPath, roundArtifactPaths(round.roundId, round.env).runJson);
     const raw = JSON.parse(fs.readFileSync(abs, 'utf-8')) as { tests?: unknown; circuitBroken?: unknown };
