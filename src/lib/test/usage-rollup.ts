@@ -54,7 +54,12 @@ export interface DayUsageModelRow extends UsageCounts {
   model: string;
 }
 
-export interface DayUsageProjectRow extends UsageCounts {
+/**
+ * 按项目明细行。功能计数（11 项）恒有；回归字段（reg_*）在该项目当天有回归活动时才写入
+ * （由 regression-rollup.mergeRegressionIntoDays 合并进来）——功能与回归共用同一个 projects[]，
+ * 以项目全路径为键，服务端下钻时一次 unnest 即可同时拿到两侧。
+ */
+export interface DayUsageProjectRow extends UsageCounts, Partial<RegressionProjectFields> {
   project: string;
   name?: string;
 }
@@ -80,9 +85,24 @@ export interface RegressionCounts extends RegressionActivity {
   suites_count: number;
 }
 
-export interface DayUsageRegProjectRow extends RegressionActivity {
-  project: string;
-  name?: string;
+/**
+ * 项目行里的回归字段。
+ *
+ * 注意键名带 `reg_` 前缀，与日级 `regression` 块（不带前缀）不同 —— 这是被服务端的两套机制决定的：
+ * 日级走 Pydantic 的嵌套 `regression` 模型（字段无前缀，再映射到 reg_* 列）；
+ * 而按项目下钻是服务端直接对 `payload->projects` 里的 JSON **按列名**求和，
+ * 故这里必须直接用列名 `reg_*`，服务端才能自动汇总，无需为回归再加一套 SQL。
+ *
+ * 不含 reg_suites_count：套件数是状态、非活动量，按项目跨天求和无意义（日级已承载该快照）。
+ */
+export interface RegressionProjectFields {
+  reg_rounds_full: number;
+  reg_rounds_failed_only: number;
+  reg_case_executions: number;
+  reg_script_pass: number;
+  reg_script_fail: number;
+  reg_ai_pass: number;
+  reg_ai_fail: number;
 }
 
 export function newRegressionCounts(): RegressionCounts {
@@ -108,9 +128,8 @@ export interface DayUsagePayload {
   adoption: { kept: number; modified: number; added: number; removed: number };
   reviews_detail: { false_fail: number; missed_fail: number; severity_mismatch: number };
   models: DayUsageModelRow[];
+  /** 功能 + 回归共用（以项目全路径为键）；回归字段见 RegressionProjectFields。 */
   projects: DayUsageProjectRow[];
-  /** 回归的按项目明细（P2）。功能测试的 projects[] 不含回归字段，两者分开放，互不污染。 */
-  regression_projects?: DayUsageRegProjectRow[];
 }
 
 /** 单个北京自然日的使用量汇总（服务端上报契约，字段名冻结）。 */

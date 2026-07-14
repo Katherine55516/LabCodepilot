@@ -8,8 +8,9 @@ import { readRunSummary, type RoundRunSummary } from './regression-stats';
 import {
   newRegressionCounts,
   type DayUsage,
-  type DayUsageRegProjectRow,
+  type DayUsageProjectRow,
   type RegressionActivity,
+  type RegressionProjectFields,
 } from './usage-rollup';
 
 /**
@@ -86,9 +87,28 @@ export interface RegressionRollupProject {
   runSummaries: Record<string, RoundRunSummary>;
 }
 
+/** 聚合过程中的按项目回归行（合并进 DayUsage.payload.projects 时才改写成 reg_* 列名）。 */
+export interface RegressionProjectRow extends RegressionActivity {
+  project: string;
+  name: string;
+}
+
 export interface RegressionDailyResult {
   /** 北京日 → { 跨项目合计, 按项目明细 } */
-  byDay: Map<string, { totals: RegressionActivity; projects: DayUsageRegProjectRow[] }>;
+  byDay: Map<string, { totals: RegressionActivity; projects: RegressionProjectRow[] }>;
+}
+
+/** 活动量 → 服务端列名（reg_*）。projects[] 里必须用列名，服务端才能直接按列名求和。 */
+function toRegProjectFields(a: RegressionActivity): RegressionProjectFields {
+  return {
+    reg_rounds_full: a.rounds_full,
+    reg_rounds_failed_only: a.rounds_failed_only,
+    reg_case_executions: a.case_executions,
+    reg_script_pass: a.script_pass,
+    reg_script_fail: a.script_fail,
+    reg_ai_pass: a.ai_pass,
+    reg_ai_fail: a.ai_fail,
+  };
 }
 
 export interface AggregateRegressionDailyOptions {
@@ -104,7 +124,7 @@ export function aggregateRegressionDaily(
   opts: AggregateRegressionDailyOptions = {},
 ): RegressionDailyResult {
   const offsetMin = opts.tzOffsetMinutes ?? 480;
-  const byDay = new Map<string, { totals: RegressionActivity; projects: DayUsageRegProjectRow[] }>();
+  const byDay = new Map<string, { totals: RegressionActivity; projects: RegressionProjectRow[] }>();
 
   for (const proj of projects) {
     for (const r of proj.rounds) {
@@ -176,7 +196,18 @@ export function mergeRegressionIntoDays(
       byDate.set(date, day);
     }
     day.regression = { ...bucket.totals, suites_count: 0 };
-    day.payload.regression_projects = bucket.projects;
+
+    // 回归的按项目明细并进**同一个** projects[]（键=项目全路径）：该项目当天可能只有回归活动、
+    // 没有功能事件 → 补一个功能计数全 0 的行。服务端下钻时一次 unnest 即可同时拿到两侧。
+    for (const rp of bucket.projects) {
+      let row = day.payload.projects.find((p) => p.project === rp.project);
+      if (!row) {
+        row = { project: rp.project, name: rp.name, ...zeroCounts() };
+        day.payload.projects.push(row);
+      }
+      Object.assign(row, toRegProjectFields(rp));
+    }
+    day.payload.projects.sort((a, b) => (a.project < b.project ? -1 : a.project > b.project ? 1 : 0));
   }
 
   // suites_count 是当前快照 → 只打在最新一天（该天可能本来没有任何活动，也要建壳承载）
@@ -192,10 +223,9 @@ export function mergeRegressionIntoDays(
   return [...byDate.values()].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
 }
 
-/** 全 0 的一天（只有回归活动、或只承载 suites_count 快照时用）。 */
-function emptyDay(date: string): DayUsage {
+/** 功能计数全 0（该天/该项目只有回归活动时的占位）。 */
+function zeroCounts() {
   return {
-    date,
     tasks_created: 0,
     cases_generated: 0,
     cases_generated_first_round: 0,
@@ -207,6 +237,14 @@ function emptyDay(date: string): DayUsage {
     cases_failed: 0,
     reviews: 0,
     reviews_accurate: 0,
+  };
+}
+
+/** 全 0 的一天（只有回归活动、或只承载 suites_count 快照时用）。 */
+function emptyDay(date: string): DayUsage {
+  return {
+    date,
+    ...zeroCounts(),
     regression: newRegressionCounts(),
     payload: {
       exec: { partial: 0, blocked: 0, circuit_broken: 0, avg_case_duration_ms: 0 },

@@ -194,10 +194,15 @@ describe('mergeRegressionIntoDays', () => {
     assert.equal(d.regression.rounds_full, 1);
     assert.equal(d.regression.case_executions, 4);
     assert.equal(d.regression.script_pass, 4);
-    assert.deepEqual(
-      d.payload.regression_projects?.map((p) => [p.project, p.case_executions]),
-      [['/w/a', 4]],
-    );
+
+    // 回归明细并进同一个 projects[]，且用服务端列名 reg_*（服务端按列名 unnest 求和）
+    assert.equal(d.payload.projects.length, 1);
+    const p = d.payload.projects[0];
+    assert.equal(p.project, '/w/a');
+    assert.equal(p.reg_case_executions, 4);
+    assert.equal(p.reg_script_pass, 4);
+    assert.equal(p.reg_rounds_full, 1);
+    assert.equal(p.cases_generated, 0); // 该项目当天无功能事件 → 功能计数全 0
   });
 
   it('保留已有功能天，并把回归并进同一天', () => {
@@ -220,6 +225,12 @@ describe('mergeRegressionIntoDays', () => {
     assert.equal(merged.length, 1);
     assert.equal(merged[0].tasks_created, 1); // 功能侧保留
     assert.equal(merged[0].regression.rounds_full, 1); // 回归侧并入
+
+    // 同一项目 → 合并进**同一行**，不产生重复行
+    const rows = merged[0].payload.projects.filter((p) => p.project === '/w/a');
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].tasks_created, 1); // 功能计数
+    assert.equal(rows[0].reg_case_executions, 4); // 回归计数
   });
 
   it('suites_count 是当前快照 → 只打在最新一天', () => {
