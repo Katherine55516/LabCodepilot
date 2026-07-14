@@ -77,7 +77,49 @@
 **为什么必须在客户端排除**：服务端只拿到**求和后的计数**，无法再按轮次剔除。若把熔断轮折进
 `cases_executed`，管理端 `pass_rate = passed/executed` 就会与用户本地 Stats 面板对不上。
 
-### 2.2 上报链路（主进程）
+### 2.2 回归聚合层（P2）
+
+功能测试是「事件表 + 机器级」;回归是「**文件态 + 单项目**」——数据全在各项目 `AI_LabTest/` 下。
+上报要的是机器级口径,所以要先**枚举本机所有测试项目**,再逐项目读文件、按北京日折叠、跨项目求和。
+
+| 文件 | 职责 |
+|------|------|
+| `src/lib/test/regression-rollup.ts` | 纯核 `aggregateRegressionDaily` + fs wrapper `buildRegressionDailyRollup` + `mergeRegressionIntoDays` |
+| `listWorkbenchProjectPaths()` | 项目清单取自 `{dataDir}/test-workbench.json`（与测试面板同源,不另维护一份） |
+
+**文件位置**（由 `rounds.ts` / `suites.ts` 决定,勿硬编码）：
+- 轮次索引 `AI_LabTest/testCase/.data/回归轮次.json`
+- 每轮 run.json `AI_LabTest/report/回归用例库/{roundId}/回归用例库-{env}.run.json`
+- 套件 `AI_LabTest/testCase/回归套件.json`
+
+**口径（严格对齐面板 `regression-stats.ts`）**：
+- `running` 轮排除;按 `startedAt` 分桶（面板的周趋势亦按 startedAt）。
+  注意 `normalizeStaleRounds` 会把**超时未收口的 running 惰性归一为 aborted**,于是它会被计为一次
+  已执行轮——面板与上报都如此,保持一致。
+- **熔断轮**：计入 `rounds_full` / `rounds_failed_only`（活动量——用户确实发起了这一轮),
+  但**不**计入 `case_executions` 与脚本/AI（结果不可信）。与功能侧「熔断计 `executions`、
+  不计用例级结果」完全同构。
+- 无 `run.json`（老轮/未落盘）：执行量**退化**取轮次索引里的 `counts.total`,脚本/AI 记 0。
+- `run.json` 的解析（`status==='pass'` / `via==='script'` / `circuitBroken`）**直接复用
+  `regression-stats.ts` 导出的 `readRunSummary`**——只此一处,绝不另写一遍,否则上报数与面板数会悄悄分叉。
+- **`suites_count` 是「状态」不是活动量**：无法回溯「历史某天有几个套件」,故只打在滚动窗口的
+  **最新一天**,历史天为 0（服务端 GREATEST 会保留那天当初记下的值）。
+
+**性能**：只读窗口内的已执行轮（上报窗口通常 1~2 天),不必像面板那样读「近 50 轮」。
+
+**合并**：`mergeRegressionIntoDays` 把回归结果并进功能的 `days[]`,**按日期取并集**——
+只有回归活动、没有功能事件的那天也要出现（反之亦然）。
+
+**按项目明细必须并进同一个 `payload.projects[]`（键=项目全路径）,且直接用服务端列名 `reg_*`。**
+原因：服务端的按项目下钻是对 `payload->projects` 里的 JSON **按列名**求和
+（`proj_sum_cols` 走 `ALL_COUNT_FIELDS`）。若把回归明细单放一个 `regression_projects[]`,
+那几列会**静默恒为 0**——比没有这列更糟。并进同一数组后,服务端一次 unnest 就同时拿到两侧,
+**不必为回归再写一套 SQL**。
+> 于是出现一处刻意的命名不一致：日级 `regression` 块用**无前缀**字段（走 Pydantic 嵌套模型,
+> 再映射到 reg_* 列）,而项目行里用**带前缀**的 `reg_*`（服务端按列名求和）。两套机制决定的,
+> 已在 `RegressionProjectFields` 的类型注释里写明。
+
+### 2.3 上报链路（主进程）
 
 | 文件 | 职责 |
 |------|------|
@@ -116,7 +158,8 @@
 | `id` UUID PK / `user_id` UUID FK→users ON DELETE CASCADE | 归属用户 = `claims.sub` |
 | `device_id` varchar(128) / `device_name` / `app_version` / `tz` | 设备维度（复用登录体系的 device_id） |
 | `stat_date` date | **北京自然日**，客户端定桶 |
-| 11 个计数列 | `tasks_created, cases_generated, cases_generated_first_round, cases_adopted, cases_approved, executions, cases_executed, cases_passed, cases_failed, reviews, reviews_accurate` |
+| 11 个功能计数列 | `tasks_created, cases_generated, cases_generated_first_round, cases_adopted, cases_approved, executions, cases_executed, cases_passed, cases_failed, reviews, reviews_accurate` |
+| 8 个回归计数列（P2，迁移 `0018_test_usage_regression`） | `reg_rounds_full, reg_rounds_failed_only, reg_case_executions, reg_script_pass, reg_script_fail, reg_ai_pass, reg_ai_fail, reg_suites_count` |
 | `payload` JSONB | 明细：`exec`(partial/blocked/circuit_broken/avg_case_duration_ms)、`adoption`、`reviews_detail`、`models[]`、`projects[]` |
 | `first_reported_at` / `last_reported_at` | 审计 |
 | **UNIQUE** `(user_id, device_id, stat_date)` | upsert 冲突目标 |
@@ -155,8 +198,13 @@ ON CONFLICT (user_id, device_id, stat_date) DO UPDATE
 
 **比率永不落库**，一律 `SUM(分子)/SUM(分母)` 现算（分母 0 → `null`）：
 `adoption_rate = cases_adopted / cases_generated_first_round`、
-`pass_rate = cases_passed / cases_executed`、`review_accuracy = reviews_accurate / reviews`。
+`pass_rate = cases_passed / cases_executed`、`review_accuracy = reviews_accurate / reviews`、
+`reg_pass_rate = (reg_script_pass + reg_ai_pass) / 四项之和`、
+`reg_replay_ratio = (reg_script_pass + reg_script_fail) / 四项之和`（脚本重放 vs AI 执行）。
 > 绝不能对「每日比率」求平均 —— 那是加权错误。
+
+**向后兼容**：P1 客户端不发 `regression` → Pydantic 填全 0 → `GREATEST(已存值, 0)` 保留原值。
+老客户端永远不会把 P2 数据清零。
 
 `projects_count` 用**相关标量子查询**（`jsonb_array_elements(payload->'projects')` 去重计数），
 避免 lateral join 污染同一查询里其它列的 SUM。
@@ -196,4 +244,12 @@ antd v5，无新增图表依赖。
 3. **跨天重复批准**会在各自那天各计一次（见口径一）。
 4. 本地 dev 无登录体系 → 上报链路的**真实 POST** 只能在打包后登录态验证；dev 只能验到 loopback 聚合这一段。
 5. 未跑 live Postgres 迁移（本机无 DB），仅做了 alembic 离线 SQL 校验。
-6. 回归测试统计（文件态、单项目）**未纳入**，是二期。
+6. **回归（P2）的验证是「构造 fixture」而非「真实数据对账」**：开发机上没有任何项目跑过回归
+   （各项目均无 `回归轮次.json`）。故做法是造真实文件态 fixture，让「上报聚合」与
+   「面板聚合 `buildRegressionStats`」交叉验证 —— 两者在 rounds / case_executions /
+   script_pass / script_fail / ai_pass / ai_fail 六项上逐项一致。**功能测试那侧是有真实数据对过账的**
+   （并正因此抓出了采纳率 294% 的 bug），回归这侧缺这一层保险，上线后应尽早用真实数据复核一次。
+7. `reg_suites_count` 在**按项目下钻**里恒为 0（套件数是状态、按项目跨天求和无意义，
+   日级已承载该快照）。
+8. 回归的 last-wins 问题不存在（轮次是增量型事件，不会重复上报同一轮的状态）——
+   这与功能侧的 `cases_approved` 截然不同，别把两者的处置方式互相套用。
