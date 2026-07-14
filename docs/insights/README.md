@@ -8,6 +8,7 @@
 
 | 文档 | 对应交接文档 | 主题 |
 |------|------------|------|
+| [test-usage-upload.md](./test-usage-upload.md) | [handover/test-usage-upload.md](../handover/test-usage-upload.md) | 测试用量上报（一期本地统计的「二期全体用户视角」）：管理者看不见 AI 测试用得怎么样、值不值得投入；复用设备管理的形状而非新造轮子；上报按天计数而非原始事件（口径在客户端算好，服务端只 SUM，永远不会与用户面板不一致）；不脱敏是被明确选择的取舍。三个难决定：**盲覆盖会让删本地就丢服务端数据 → 全量重算 + GREATEST 取大**；**熔断轮：活动量算、质量信号不算**；**状态型事件求和导致采纳率 294% —— 单测全绿也没发现，是拿真实数据对账救回来的** |
 | [regression-stats.md](./regression-stats.md) | [handover/regression-stats.md](../handover/regression-stats.md) | 回归测试使用统计：把「套件新增/套件执行/用例执行」三种子升级为趋势与结构、文件态聚合不复用事件表的理由、二级切换而非合并大盘、诚实口径（熔断整轮排除/running 不出结论/flaky 只作候选）、用户主动收敛范围（放弃套件新增趋势）、对标 TestRail/Xray/Datadog 差异化落在脚本重放 vs AI、扩展位与已知局限 |
 | [test-usage-stats.md](./test-usage-stats.md) | [handover/test-usage-stats.md](../handover/test-usage-stats.md) | 测试使用统计：量 AI 用例质量/判断质量/效率的三把尺、采纳率以首轮为基线、准确度必配覆盖率的诚实原则、复核自动归类降认知负担、服务端计时不信 AI 自报、事件流水而非聚合表（口径可重算+二期上报铺路）、只给指标不列用例、对抗评审驱动质量、已知局限与二期全体用户视角 |
 | [requirement-import-modes.md](./requirement-import-modes.md) | [handover/requirement-import-modes.md](../handover/requirement-import-modes.md) | 导入需求保留原文 + 二选一：AI 归一覆盖原文的硬伤、选择放节点而非弹窗、原文不转 md、docx 必经抽取的诚实告知、无人值守停下等选、use-original 就地编 REQ-ID 取舍、已知局限 |
