@@ -21,12 +21,12 @@ describe('cowork-guards: buildSandboxUnavailableError', () => {
     assert.match(e.actionHint, /启用 Cowork 沙箱/);
   });
 
-  it('maps image_not_provisioned → non-retryable with provisioning hint', async () => {
+  it('maps image_not_provisioned → non-retryable with download guidance (M2)', async () => {
     const { buildSandboxUnavailableError } = await import(guardsPath);
     const e = buildSandboxUnavailableError('image_not_provisioned');
     assert.equal(e.retryable, false);
-    assert.match(e.userMessage, /镜像/);
-    assert.match(e.actionHint, /README/);
+    assert.match(e.userMessage, /尚未下载/);
+    assert.match(e.actionHint, /下载沙箱环境/);
   });
 
   it('maps forwarder_missing → non-retryable', async () => {

@@ -1,11 +1,12 @@
 'use client';
 
 import { useTranslation } from '@/hooks/useTranslation';
+import { useCoworkStatus, type CoworkAssetsStatus } from '@/hooks/useCoworkStatus';
 import { Button } from '@/components/ui/button';
-import { Plus, ShieldCheck } from '@/components/ui/icon';
+import { Plus, ShieldCheck, DownloadSimple } from '@/components/ui/icon';
 
 interface OfficeEmptyCardProps {
-  /** 本机 VM 镜像是否就绪(来自 /api/cowork/status);未就绪时不给新建按钮 */
+  /** 兼容字段:assets 信息缺席时(旧 payload)回退用。就绪判定以 assets.overall 为准。 */
   imageProvisioned: boolean;
   creating?: boolean;
   onStart: () => void;
@@ -17,11 +18,88 @@ interface OfficeEmptyCardProps {
 }
 
 /**
- * 「办公」模式空态卡(cowork-office-mode.md E3/E4)。
- * 说明沙箱语义 + 一键开始;镜像未预置时显示提示而非按钮(P1 镜像手动预置)。
+ * 沙箱资产动作区(镜像流水线 M2):就绪 → 开始按钮;缺失/失败 → 「下载沙箱
+ * 环境」按钮(+错误行);下载中 → 进度条。设置页复用(compact)。
+ * assets 未下发(旧 server)时回退 imageProvisioned 语义。
+ */
+export function CoworkAssetsAction({
+  assets,
+  fallbackProvisioned,
+  compact,
+  startLabel,
+  onStart,
+  starting,
+  onDownload,
+}: {
+  assets: CoworkAssetsStatus | undefined;
+  fallbackProvisioned: boolean;
+  compact?: boolean;
+  /** 就绪时的主按钮;不传则就绪时不渲染任何东西(设置页场景)。 */
+  startLabel?: string;
+  onStart?: () => void;
+  starting?: boolean;
+  onDownload: () => void;
+}) {
+  const { t } = useTranslation();
+  const btnSize = compact ? ('sm' as const) : ('default' as const);
+  const btnClass = compact ? 'h-7 gap-1 text-xs' : 'gap-1.5';
+  const textClass = compact ? 'text-[11px] leading-relaxed' : 'text-xs leading-relaxed';
+
+  const ready = assets ? assets.overall === 'ready' : fallbackProvisioned;
+  if (ready) {
+    if (!startLabel || !onStart) return null;
+    return (
+      <Button variant={compact ? 'outline' : 'default'} size={btnSize} className={btnClass} disabled={starting} onClick={onStart}>
+        <Plus size={compact ? 13 : 15} />
+        {startLabel}
+      </Button>
+    );
+  }
+
+  if (assets?.overall === 'downloading') {
+    const stateLine =
+      assets.image.state === 'verifying' || assets.claude.state === 'installing'
+        ? t('workspace.office.verifying')
+        : `${t('workspace.office.downloading')} ${assets.totalPct}%`;
+    return (
+      <div className="flex flex-col gap-1.5">
+        <div className={`${textClass} text-muted-foreground`}>{stateLine}</div>
+        <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+          <div
+            className="h-full rounded-full bg-primary transition-[width] duration-500"
+            style={{ width: `${Math.max(2, assets.totalPct)}%` }}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  // missing / failed → 下载(失败时同按钮即重试,.part 自动续传)
+  return (
+    <div className="flex flex-col gap-1.5">
+      {assets?.overall === 'failed' && (
+        <p className={`${textClass} text-status-error-foreground`}>
+          {t('workspace.office.downloadFailed')}
+          {assets.image.error || assets.claude.error ? `:${assets.image.error || assets.claude.error}` : ''}
+        </p>
+      )}
+      <Button variant="outline" size={btnSize} className={btnClass} onClick={onDownload}>
+        <DownloadSimple size={compact ? 13 : 15} />
+        {assets?.overall === 'failed' ? t('workspace.office.retryDownload') : t('workspace.office.download')}
+      </Button>
+    </div>
+  );
+}
+
+/**
+ * 「办公」模式空态卡(cowork-office-mode.md E3/E4;M2 加资产下载引导)。
+ * 说明沙箱语义 + 一键开始;资产未就绪时给「下载沙箱环境」按钮与进度(D3 显式
+ * 触发),就绪后变回开始按钮。
  */
 export function OfficeEmptyCard({ imageProvisioned, creating, onStart, variant = 'sidebar' }: OfficeEmptyCardProps) {
   const { t } = useTranslation();
+  const { data, startDownload } = useCoworkStatus();
+  const assets = data?.assets;
 
   if (variant === 'landing') {
     return (
@@ -34,16 +112,14 @@ export function OfficeEmptyCard({ imageProvisioned, creating, onStart, variant =
           <p className="text-sm leading-relaxed text-muted-foreground">
             {t('workspace.office.emptyDesc')}
           </p>
-          {imageProvisioned ? (
-            <Button className="gap-1.5" disabled={creating} onClick={onStart}>
-              <Plus size={15} />
-              {t('workspace.office.start')}
-            </Button>
-          ) : (
-            <p className="text-xs leading-relaxed text-status-warning-foreground">
-              {t('workspace.office.imageMissing')}
-            </p>
-          )}
+          <CoworkAssetsAction
+            assets={assets}
+            fallbackProvisioned={imageProvisioned}
+            startLabel={t('workspace.office.start')}
+            onStart={onStart}
+            starting={creating}
+            onDownload={startDownload}
+          />
         </div>
       </div>
     );
@@ -58,22 +134,15 @@ export function OfficeEmptyCard({ imageProvisioned, creating, onStart, variant =
       <p className="text-[11px] leading-relaxed text-muted-foreground">
         {t('workspace.office.emptyDesc')}
       </p>
-      {imageProvisioned ? (
-        <Button
-          variant="outline"
-          size="sm"
-          className="h-7 gap-1 text-xs"
-          disabled={creating}
-          onClick={onStart}
-        >
-          <Plus size={13} />
-          {t('workspace.office.start')}
-        </Button>
-      ) : (
-        <p className="text-[11px] leading-relaxed text-status-warning-foreground">
-          {t('workspace.office.imageMissing')}
-        </p>
-      )}
+      <CoworkAssetsAction
+        assets={assets}
+        fallbackProvisioned={imageProvisioned}
+        compact
+        startLabel={t('workspace.office.start')}
+        onStart={onStart}
+        starting={creating}
+        onDownload={startDownload}
+      />
     </div>
   );
 }

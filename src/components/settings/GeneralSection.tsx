@@ -23,6 +23,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { SettingsCard } from "@/components/patterns/SettingsCard";
 import { FieldRow } from "@/components/patterns/FieldRow";
 import { StatusBanner } from "@/components/patterns/StatusBanner";
+import { useCoworkStatus } from "@/hooks/useCoworkStatus";
+import { CoworkAssetsAction } from "@/components/layout/OfficeEmptyCard";
 import { AppearanceSection } from "./AppearanceSection";
 
 function UpdateCard() {
@@ -128,10 +130,12 @@ export function GeneralSection() {
   const [skipPermSaving, setSkipPermSaving] = useState(false);
   const [generativeUI, setGenerativeUI] = useState(true);
   const [generativeUISaving, setGenerativeUISaving] = useState(false);
-  // E5 (cowork): 办公模式(沙箱)全局开关 + 本机镜像预置状态(未预置时提示)
+  // E5 (cowork): 办公模式(沙箱)全局开关;M2: 资产状态走共享 hook(未就绪
+  // 时开关下方给「下载沙箱环境」按钮与进度,替代原"未预置"死提示)
   const [coworkEnabled, setCoworkEnabled] = useState(false);
   const [coworkSaving, setCoworkSaving] = useState(false);
-  const [coworkImageProvisioned, setCoworkImageProvisioned] = useState(true);
+  const { data: coworkStatusData, startDownload: startCoworkDownload } = useCoworkStatus();
+  const coworkAssets = coworkStatusData?.assets;
   const [defaultPanel, setDefaultPanel] = useState('file_tree');
   const { accountInfo } = useAccountInfo();
   const { t, locale, setLocale } = useTranslation();
@@ -156,16 +160,6 @@ export function GeneralSection() {
         setDefaultPanel(appSettings.default_panel || 'file_tree');
         // cowork_enabled 必须严格为 'true'(与后端 decideCowork 同口径)
         setCoworkEnabled(appSettings.cowork_enabled === "true");
-      }
-    } catch {
-      // ignore
-    }
-    // 镜像预置状态(只读探测,不触发 VM 启动)—— 未预置时开关旁给提示
-    try {
-      const res = await fetch("/api/cowork/status");
-      if (res.ok) {
-        const d = await res.json();
-        setCoworkImageProvisioned(!!d.imageProvisioned);
       }
     } catch {
       // ignore
@@ -310,11 +304,18 @@ export function GeneralSection() {
             disabled={coworkSaving}
           />
         </FieldRow>
-        {coworkEnabled && !coworkImageProvisioned && (
-          <StatusBanner variant="warning">
-            <span className="h-2 w-2 shrink-0 rounded-full bg-status-warning inline-block mr-1" />
-            {t('workspace.office.imageMissing')}
-          </StatusBanner>
+        {coworkEnabled && coworkAssets && coworkAssets.overall !== 'ready' && (
+          <div className="mt-2 flex flex-col gap-2 rounded-md border border-border/50 bg-muted/30 p-3">
+            <p className="text-xs leading-relaxed text-muted-foreground">
+              {t('workspace.office.imageMissing')}
+            </p>
+            <CoworkAssetsAction
+              assets={coworkAssets}
+              fallbackProvisioned={false}
+              compact
+              onDownload={startCoworkDownload}
+            />
+          </div>
         )}
 
         {/* Default panel — hidden. Hardcoded to 'file_tree' in

@@ -10,7 +10,7 @@
 >
 > **当前节点与下一步(接手先读这段)**:
 > 1. 用户正在验收 3.1.14(重点:E5 设置开关、E4.3 删除刷新);验收中的反馈按"复现→修→CDP 验证→commit→bump→打包"节奏处理。
-> 2. **镜像流水线已立项开工**(计划+决策日志:docs/exec-plans/active/cowork-image-pipeline.md)。M1(首启自注入+SSH 全退役)已完成并四项实测验收;**下一步 = M2**(宿主下载器:底镜走中科大+claude 平台子包走 npmmirror、断点续传+sha512、状态机+设置页/办公空态「下载」按钮+下载中禁发)→ M3(vfkit 内置+脚本随包+升级 GC)→ M4(裸机验收+双文档)。已定决策:不做 Intel x64;显式点击才下载;下载中禁发;daemon 升级=seed 模板版本 bump。
+> 2. **镜像流水线已立项开工**(计划+决策日志:docs/exec-plans/active/cowork-image-pipeline.md)。M1(首启自注入+SSH 全退役)与 M2(宿主下载器+UI 下载引导+下载中禁发)均已完成并全流程实测;**下一步 = M3**(vfkit 内置 app 包+entitlement 签名 POC、daemon/forwarder 脚本随包分发去仓库路径依赖、资产目录正式化+升级 GC)→ M4(裸机验收+双文档)。已定决策:不做 Intel x64;显式点击才下载;下载中禁发;daemon 升级=seed 模板版本 bump。**M2 后新机器只差 brew 装 vfkit 一项手动前置。**
 > 3. 其他待定:vm_cowork 合回 main(20+ commit,用户决定时机);用户手册(docs/user-manual/,用户自己在写)补办公模式章节(产品名用全称「AI Native Lab - 工作平台」);之后 P3 安全强化 → P2 Windows。
 > 4. 注意:`docs/user-manual/`、`image-config-server-verification.md`、`scripts/dev/docker-win-build.sh` 是用户自己的 untracked 文件,**commit 时绝不能用 `git add -A` 扫进去**(踩过一次,当场 amend 移出)。另:用户开发机上 `~/.codepilot/cowork-poc/images/*.raw.old-provisioned.bak` 与 `efi-variable-store.bak` 是 M1 验收时的老盘备份(3GB),确认稳定后可删。
 
@@ -62,6 +62,9 @@ Next server(宿主)                                     VM guest(Debian, aarch64
 | `src/lib/cowork-poc.ts` | `decideCowork(sandboxEnabled)`:三重门(全局 `cowork_enabled` 设置 + 会话 `sandbox_enabled` + `ensureRunning` 就绪)→ 返回是否走沙箱 + 转发器路径。**async**(会等 VM 就绪)。`forwarderPath()` 解析 forwarder-vsock.sh。 |
 | `src/lib/cowork-vm-manager.ts` | VM 生命周期**单例**(挂 globalThis 抗 hot-reload)。`ensureRunning()`(懒启动/复用/崩溃重建,幂等+并发安全 startingPromise)、`getStatus()`、`markSessionActive/releaseSession`(空闲回收计数)、`stop()`、`onVmProgress()`(P1-D 进度发射器)、`provisionGuest()`(M1:health 拿 version/claude,binary 缺则 vsock 推入)。**M1 起零 SSH**:就绪判定=轮询 vsock health,DHCP/`parseLeaseIp`/sshOk/scp 全删,`VmStatus` 不再有 ip 字段。 |
 | `src/lib/cowork-seed.ts` | **M1 新增:cloud-init seed 生成**。`SEED_TEMPLATE_VERSION`(决定 instance-id → 升级触发器)、`EXPECTED_DAEMON_VERSION`(跨层单测锁 daemon 版本)、`buildUserData`(daemon base64 内嵌 + systemd unit + mask ssh,纯函数)、`buildMetaData`、`ensureSeedIso()`(hdiutil makehybrid 造 cidata ISO,内容寻址缓存+旧版清理)、`resolveDaemonSource()`(原 hostDaemonPath 迁入)。 |
+| `src/lib/cowork-assets.ts` | **M2 新增:资产下载器**(server 侧单例)。manifest 常量:底镜锚定 dated build `20260712-2537`(**绝不锚 latest**,单测锁)双源 USTC+官方 + sha512;claude=`@anthropic-ai/claude-agent-sdk-linux-arm64` **与宿主 SDK 同版本**(`CLAUDE_SDK_VERSION` 单测锁 package.json)npmmirror+npmjs 双源,integrity 取 registry 元数据。引擎:Range 断点续传(.part+续传前重哈希前缀)、sha512 流式校验(失败删 .part 防死循环)、源不支持 Range→200 回退清零重下、`statfs` 磁盘预检、镜像落位后 `truncate` 稀疏扩容 8GiB(guest growpart 吃满)、claude tgz 系统 tar 解包。`getAssetsStatus()/assetsReady()/startAssetsDownload()(幂等)/cancelAssetsDownload()(保留 .part)`。**IMAGE_PATH/CLAUDE_BIN_PATH 是资产路径单一事实源**(vm-manager 从这里 import)。 |
+| `src/hooks/useCoworkStatus.ts` | **M2 新增:状态共享 hook**。拉 /api/cowork/status;`overall==='downloading'` 期间 2s 轮询;监听 `cowork-status-changed`/`cowork-assets-changed`;`startDownload/cancelDownload` 封装 + 广播。使用方:OfficeEmptyCard(内部自持)、GeneralSection、ChatView(D4 禁发)。 |
+| `src/app/api/cowork/assets/route.ts` | **M2 新增**:POST=开始下载(显式触发 D3,幂等)/DELETE=取消。进度经 status 轮询。 |
 | `src/lib/cowork-vsock.ts` | 宿主侧 vsock RPC 客户端。连 vfkit 的 unix socket,发 JSON header + body。导出 `vsockHealth`(M1 富探测 {ok,version,claude})/ `vsockHealthy` / `rpcInstallBinary`(M1:createReadStream 推流,253MB 级)/ `rpcMkdirWorkspace` / `rpcWriteFile` / `rpcListFiles` / `rpcRemoveSession` / `rpcReadFileStream` / `rpcArchiveStream`。`readJsonHeader` 处理 close/超时(见 §9 bug①)。 |
 | `src/lib/cowork-transfer.ts` | 文件通道**对外契约层**(claude-client / artifacts route 依赖这些签名):`sessionWorkspace` / `vmChannelReady` / `ensureSessionWorkspace` / `pushFileToVm` / `listNewFiles` / `assertPathInWorkspace`(host 侧廉价早拒)/ `readFileStream` / `archiveStream` / `removeSessionDir`。内部全部委托给 cowork-vsock。 |
 | `src/app/api/cowork/artifacts/route.ts` | 产物 API。`?list=1`(读库,VM 休眠也可用,懒迁移;**VM 在线时对账剔除已删文件并回写**,E4.2)、`?path=`(下载单文件,VM 离线时 ensureRunning 唤醒)、`?archive=1`(打包)。错误统一脱敏。 |
@@ -193,9 +196,12 @@ M1 后仍需手动预置的只剩**底镜 raw 与 claude binary**(M2 下载器�
 
 - **M1 首启自注入 + SSH 全退役**:cowork-seed.ts 生成 cloud-init seed(daemon base64 + systemd unit + mask ssh,instance-id=模板版本);daemon v2(health 带 version/claude + installBinary 流式落盘);vm-manager 删光 SSH/DHCP 链,就绪=轮询 vsock,binary 缺则 vsock 推入。四项实测:老盘 cloud-init 重跑升级、处女盘(中科大新下+sha512 核验)97s 首启全链路、二次启动 daemon ~5s、SSH 密钥挪走全程零影响;guest 内取证 sshd inactive+masked、daemon active+enabled、binary 时间戳=当次推入。
 
-### 未完成 —— 镜像流水线 M2-M4 + P2/P3
+### 已完成 —— 镜像流水线 M2(2026-07-14)
 
-- **M2 宿主下载器**(下一步):底镜中科大源(当期 bookworm latest sha512 `7caf037e…599ed0a` 实测可用)+ claude 走 npmmirror `@anthropic-ai/claude-agent-sdk-linux-arm64`(与宿主 SDK 同版本,0.3.203 实测 79MB tgz);断点续传+校验+磁盘预检+truncate 稀疏扩容;状态机+「下载」按钮+进度+下载中禁发(D3/D4)。
+- **M2 宿主下载器 + UI 下载引导**:cowork-assets.ts(manifest 锚定 dated build `20260712-2537` + sha512;claude 平台子包与宿主 SDK 同版本走 npmmirror)、/api/cowork/assets、useCoworkStatus hook、设置页/办公空态「下载沙箱环境(约 3.2 GB)」按钮+进度条、D4 下载中办公 composer 禁发+提示、E1 守卫文案演进为下载引导。实测:3GB 全程下载→校验→就绪翻回;取消/续传(前缀重哈希被最终校验硬证明);npmmirror 无 Range 的 200 回退真实触发;稀疏 8GiB+growpart 吃满(guest df 7.7G);新下载盘 41s 回合 E2E。**至此新机器只差 vfkit(brew)一项手动前置,M3 内置后归零。**
+
+### 未完成 —— 镜像流水线 M3-M4 + P2/P3
+
 - **M3 打包正式化**:vfkit 内置 app 包(entitlement 签名 POC)、daemon/forwarder 随包分发(去仓库绝对路径依赖 —— 现打包版只在有仓库的机器能跑 cowork)、资产目录迁移+升级/GC。
 - **M4 裸机验收 + 双文档**。
 - **P2 Windows**:WSL2 私有 distro(明确不走 Hyper-V HCS,官方 Cowork 的 Home 版惨案)+ 降级探测。vsock 在 WSL2 上的等价通道要重新调研。
@@ -275,6 +281,7 @@ npm run electron:build && node scripts/bundle-chromium.mjs && npx electron-build
 14. **裸 API 创建的会话没有凭证面**:UI 创建会自动带 localStorage 的 last-model/last-provider-id;curl 直接 POST 不带 → 会话落到默认模型且无 managed provider → VM 内 claude 秒退(init 成功但 result is_error、0 token、~15ms)。测试脚本创建会话务必带 model + provider_id。
 15. **别名模型(如 claude-opus-4-8[1m])在办公回合**:同上一条一起排查过 —— 模型面问题的表象都是"init 正常 + 秒退",先查会话的 model/provider_id 再怀疑通道。
 16. **三处版本必须同步 bump(M1 seed 注入纪律)**:改 `cowork-daemon.py` → 必 bump 它的 `DAEMON_VERSION` + `cowork-seed.ts` 的 `EXPECTED_DAEMON_VERSION`(跨层单测锁,忘了会挂测试)**和 `SEED_TEMPLATE_VERSION`**(这个单测锁不住:instance-id 不变则 cloud-init 不重跑,已有磁盘永远拿不到新 daemon,表象=健康探测 version 落后告警)。write_files/runcmd 是 per-instance 语义,这是升级机制的全部。
+17. **npmmirror 对 npm tarball 不支持 Range**(M2 实测):带 Range 头请求返回 200 全量 —— 下载器的"200 回退清零重下"路径不是防御性代码,是 npmmirror 的常态路径;改下载引擎别删这个分支。中科大 debian-cdimage 支持 Range(断点续传正常)。另:升级底镜 build 时同步改 `IMAGE_BUILD/IMAGE_SHA512/IMAGE_SIZE` 三常量(单测锁 URL 不含 latest);升级宿主 SDK 时 `CLAUDE_SDK_VERSION` 单测会挂,提醒同步。
 
 ---
 

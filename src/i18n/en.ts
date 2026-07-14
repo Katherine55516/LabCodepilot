@@ -1646,7 +1646,13 @@ const en = {
   'workspace.office.emptyTitle': 'Work sessions',
   'workspace.office.emptyDesc': 'The AI works inside an isolated sandbox VM: send it files in chat to read and edit, download the results from the artifacts card — it never touches files on this machine.',
   'workspace.office.start': 'Start a work session',
-  'workspace.office.imageMissing': 'The sandbox VM image is not provisioned on this machine yet, so work mode is unavailable (see scripts/poc/cowork/README.md).',
+  'workspace.office.imageMissing': 'The sandbox environment has not been downloaded on this machine yet. Work mode becomes available once the download completes.',
+  'workspace.office.download': 'Download sandbox environment (~3.2 GB)',
+  'workspace.office.retryDownload': 'Retry download',
+  'workspace.office.downloading': 'Downloading sandbox environment…',
+  'workspace.office.verifying': 'Verifying and installing…',
+  'workspace.office.downloadFailed': 'Download failed',
+  'workspace.office.sendBlocked': 'The sandbox environment is not ready yet — you can send once the download completes.',
 
   // ── Context Usage ─────────────────────────────────────────
   'context.usage': 'Context Usage',

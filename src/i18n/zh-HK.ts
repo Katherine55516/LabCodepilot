@@ -1650,7 +1650,13 @@ const zhHK: Record<TranslationKey, string> = {
   'workspace.office.emptyTitle': '辦公對話',
   'workspace.office.emptyDesc': 'AI 喺隔離嘅沙箱虛擬機內工作:透過對話發送檔案畀佢讀改,產出嘅檔案喺產物卡片度下載,全程唔會接觸真機檔案。',
   'workspace.office.start': '開始辦公對話',
-  'workspace.office.imageMissing': '本機尚未預置沙箱虛擬機鏡像,暫時無法使用辦公模式(見 scripts/poc/cowork/README.md)。',
+  'workspace.office.imageMissing': '本機尚未下載沙箱環境,下載完成後即可使用辦公模式。',
+  'workspace.office.download': '下載沙箱環境(約 3.2 GB)',
+  'workspace.office.retryDownload': '重試下載',
+  'workspace.office.downloading': '正在下載沙箱環境…',
+  'workspace.office.verifying': '正在校驗同安裝…',
+  'workspace.office.downloadFailed': '下載失敗',
+  'workspace.office.sendBlocked': '沙箱環境尚未就緒,下載完成後即可發送。',
 
   // ── Context Usage ─────────────────────────────────────────
   'context.usage': '上下文佔用',

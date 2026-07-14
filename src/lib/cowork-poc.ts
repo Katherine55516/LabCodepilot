@@ -12,7 +12,8 @@
 import fs from 'fs';
 import path from 'path';
 import { getSetting } from './db';
-import { ensureRunning, isImageProvisioned } from './cowork-vm-manager';
+import { ensureRunning } from './cowork-vm-manager';
+import { assetsReady } from './cowork-assets';
 
 /**
  * POC 转发器脚本路径(仓库内)。P1-C 起指向 vsock 版转发器
@@ -54,7 +55,8 @@ export async function decideCowork(sandboxEnabled: boolean | number | undefined)
   if (getSetting('cowork_enabled') !== 'true') {
     return { useSandbox: false, reason: 'cowork_disabled_globally' };
   }
-  if (!isImageProvisioned()) {
+  // M2:资产门 = 底镜 + claude binary 都在(缺任一走下载引导,reason 复用不变)
+  if (!assetsReady()) {
     return { useSandbox: false, reason: 'image_not_provisioned' };
   }
   const fwd = forwarderPath();

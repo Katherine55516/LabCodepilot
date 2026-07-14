@@ -23,6 +23,7 @@ import { RuntimeBadge } from './RuntimeBadge';
 import { ImageGenToggle } from './ImageGenToggle';
 import { Button } from '@/components/ui/button';
 import { usePanel } from '@/hooks/usePanel';
+import { useCoworkStatus } from '@/hooks/useCoworkStatus';
 import { useTranslation } from '@/hooks/useTranslation';
 import type { TranslationKey } from '@/i18n';
 import { PermissionPrompt } from './PermissionPrompt';
@@ -112,6 +113,12 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
   // per-turn vm_artifacts SSE merges. vmOnline drives the sleeping badge.
   const [vmArtifacts, setVmArtifacts] = useState<VmArtifactFile[]>([]);
   const [vmOnline, setVmOnline] = useState(true);
+  // M2 (镜像流水线): 办公会话的沙箱资产状态 —— 未就绪(下载中/缺失)时禁发
+  // 消息并给出进度提示(D4);仅办公会话激活探测。有数据且明确非 ready 才禁,
+  // 避免首个 fetch 返回前闪断。
+  const coworkStatus = useCoworkStatus(sandboxEnabled);
+  const coworkAssets = coworkStatus.data?.assets;
+  const officeAssetsBlocked = sandboxEnabled && !!coworkAssets && coworkAssets.overall !== 'ready';
 
   // Whether this session's working directory matches the configured assistant workspace
   const [isAssistantProject, setIsAssistantProject] = useState(false);
@@ -1182,13 +1189,22 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
       {sandboxEnabled && vmArtifacts.length > 0 && (
         <VmArtifactsCard sessionId={sessionId} files={vmArtifacts} vmOnline={vmOnline} />
       )}
+      {/* M2 (镜像流水线): 沙箱资产未就绪 —— 禁发 + 进度/引导提示(D4) */}
+      {officeAssetsBlocked && (
+        <div className="mx-3 mb-1.5 flex items-center gap-2 rounded-md border border-border/50 bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground">
+          <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-status-warning inline-block" />
+          {coworkAssets?.overall === 'downloading'
+            ? `${t('workspace.office.downloading')} ${coworkAssets.totalPct}%`
+            : t('workspace.office.sendBlocked')}
+        </div>
+      )}
       <MessageInput
         key={sessionId}
         onSend={sendMessage}
         onCommand={handleCommand}
         onBtw={btw.ask}
         onStop={stopStreaming}
-        disabled={false}
+        disabled={officeAssetsBlocked}
         isStreaming={isStreaming}
         sessionId={sessionId}
         modelName={currentModel}

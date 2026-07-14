@@ -44,8 +44,8 @@ export function buildSandboxUnavailableError(reason?: string): SandboxUnavailabl
     actionHint = '启用 Cowork 沙箱后重试,或新建普通(研发)会话继续。';
     retryable = false;
   } else if (raw === 'image_not_provisioned') {
-    userMessage = '沙箱虚拟机镜像尚未预置,无法启动隔离环境。';
-    actionHint = '完成 VM 镜像预置后重试(见 scripts/poc/cowork/README.md),或新建普通(研发)会话继续。';
+    userMessage = '沙箱环境尚未下载完成,无法启动隔离环境。';
+    actionHint = '到设置页或「办公」首页点击「下载沙箱环境」,完成后重试;或新建普通(研发)会话继续。';
     retryable = false;
   } else if (raw === 'forwarder_missing') {
     userMessage = '沙箱转发器脚本缺失,无法把执行转入虚拟机。';

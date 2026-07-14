@@ -23,13 +23,13 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { ensureSeedIso, EXPECTED_DAEMON_VERSION } from './cowork-seed';
+// M2:资产规范路径的单一事实源在 cowork-assets(下载器落位与此处消费同一路径)
+import { IMAGE_PATH as DISK, CLAUDE_BIN_PATH as HOST_CLAUDE_BIN } from './cowork-assets';
 
 const POC_DIR = path.join(os.homedir(), '.codepilot', 'cowork-poc');
-const DISK = path.join(POC_DIR, 'images', 'debian-12-genericcloud-arm64.raw');
 const EFI_STORE = path.join(POC_DIR, 'efi-variable-store');
 const VFKIT_PID_FILE = path.join(POC_DIR, 'vfkit.pid');
 const CONSOLE_LOG = path.join(POC_DIR, 'vm-console.log');
-const HOST_CLAUDE_BIN = path.join(POC_DIR, 'bin', 'package', 'claude');
 const VM_MAC = '72:20:43:d4:38:62';
 const RESTFUL_URI = 'tcp://127.0.0.1:47899';
 // P1-C: vsock 运行时通道。vfkit connect 模式 → guest daemon 当 server,
