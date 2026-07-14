@@ -301,11 +301,13 @@ function handleSSEEvent(
     }
 
     case 'vm_artifacts': {
-      // Cowork sandbox turn artifacts. Malformed payload → skip; the
-      // session-level artifact list refetch still covers recovery.
+      // Cowork sandbox — 回合末权威全量快照(E4.2)。空表必须放行:纯删除
+      // 回合(清单被删空)靠它清掉卡片 —— 曾有 length>0 守卫(增量语义残留)
+      // 吞掉空快照,导致「只删文件的回合卡片不刷新」(用户实测报告,E4.3)。
+      // Malformed payload → skip;回合完成的自动 refetch 兜底恢复。
       try {
         const payload = JSON.parse(event.data) as { files?: VmArtifactFile[] };
-        if (Array.isArray(payload.files) && payload.files.length > 0) {
+        if (Array.isArray(payload.files)) {
           callbacks.onVmArtifacts?.(payload.files);
         }
       } catch { /* skip malformed artifacts payload */ }

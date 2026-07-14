@@ -310,6 +310,18 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
     setVmArtifacts(snapshotVmArtifacts);
   }, [snapshotVmArtifacts]);
 
+  // E4.3(用户反馈)— 回合完成后无条件重拉产物清单兜底:SSE 快照可能因
+  // abort/超时/事件丢失而缺席,list 端点在 VM 在线时会对账剔除已删文件,
+  // 保证「对话完成 → 卡片即最新」不依赖任何用户后续操作。
+  const prevStreamingRef = useRef(isStreaming);
+  useEffect(() => {
+    const wasStreaming = prevStreamingRef.current;
+    prevStreamingRef.current = isStreaming;
+    if (wasStreaming && !isStreaming && sandboxEnabled) {
+      window.dispatchEvent(new CustomEvent('vm-artifacts-refresh'));
+    }
+  }, [isStreaming, sandboxEnabled]);
+
   // ── Skill nudge banner ──
   // Listens for 'skill-nudge' window events dispatched by stream-session-manager
   // when the agent loop completes a complex multi-step workflow.
