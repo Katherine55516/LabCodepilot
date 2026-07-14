@@ -178,6 +178,8 @@ Schema 定义在 `src/lib/db.ts`，主要表（完整清单以 db.ts 为准）�
 | 主进程文件日志（产品） | `docs/insights/file-logging.md` | 「崩了没日志」硬伤起因、汇聚主进程零侵入、同步写换崩溃安全、只脱密钥保路径取舍、对抗评审三个坑、源头脱敏未来方向 |
 | 测试模块使用统计 | `docs/handover/test-usage-stats.md` | 事件流水表 + 纯函数聚合口径层、10 类事件字典、四 scope API + 4 Sheet 导出、TestStatsView 看板、服务端逐用例计时、模型节点级归因、fail-safe 埋点、electron-as-node 验证法 |
 | 测试模块使用统计（产品） | `docs/insights/test-usage-stats.md` | 量 AI 用例/判断/效率三把尺、采纳率首轮基线、准确度必配覆盖率、事件流水而非聚合表（口径可重算+二期上报）、只给指标不列用例、对抗评审驱动质量、已知局限 |
+| 回归测试使用统计 | `docs/handover/regression-stats.md` | Stats 面板二级 toggle（功能/回归）、文件态聚合不复用事件表（单项目口径）、套件执行/用例执行/脚本重放 vs AI 三图 + 套件明细、纯核 aggregateRegressionStats + fs wrapper、run.json 近 50 轮护栏、circuitBroken/running 排除口径、CDP mock 验证 |
+| 回归测试使用统计（产品） | `docs/insights/regression-stats.md` | 三种子（套件新增/执行/用例执行）升级为趋势与结构、不复用事件表的理由、二级切换而非合并、诚实口径（熔断整轮排除/running 不出结论/flaky 只作候选）、用户主动收敛范围、对标 TestRail/Xray/Datadog 差异化落在脚本重放 vs AI |
 
 ## 技术栈
 

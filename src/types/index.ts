@@ -1834,3 +1834,66 @@ export interface TestStatsModelRow {
   /** 样本量小（执行轮 <3 或复核 <10），前端提示低置信度 */
   smallSample: boolean;
 }
+
+/* ============ 回归测试统计（文件态聚合层的 UI 输出契约） ============
+ * 功能测试统计走 test_stats_events 事件溯源、跨项目「本机」口径；回归统计走
+ * AI_LabTest/ 下的文件态（回归轮次.json + 每轮 run.json + 回归套件.json + 回归用例库.json），
+ * 单项目口径。两条管线互不污染。计算实现与单测在 src/lib/test/regression-stats.ts。 */
+
+/** 周趋势点（ISO 周一 UTC 分桶，与功能统计 stats.ts 同口径）。 */
+export interface RegressionWeeklyPoint {
+  /** 'YYYY-MM-DD'，该周周一（UTC）。 */
+  weekStart: string;
+  /** 当周 mode='full' 的已执行轮次数（含 done/partial/aborted，排除 running）。 */
+  roundsFull: number;
+  /** 当周 mode='failed-only' 的重跑轮次数。 */
+  roundsFailedOnly: number;
+  /** 当周用例执行条次之和（优先取每轮 run.json 记录数并排除 circuitBroken 轮，退化取 round.counts.total）。 */
+  caseExecutions: number;
+}
+
+/** 脚本重放 vs AI 执行点（每轮一条，仅取近 N 个已执行且非熔断轮）。 */
+export interface RegressionScriptPoint {
+  roundId: string;
+  /** 轴标签（`#序号`，序号为该轮在已执行轮中的升序位次）。 */
+  label: string;
+  scriptPass: number;
+  scriptFail: number;
+  aiPass: number;
+  aiFail: number;
+}
+
+/** 套件明细行。'builtin' = 内置「全量」；覆盖率 = caseCount/libraryTotal。 */
+export interface RegressionSuiteRow {
+  name: string;
+  type: 'builtin' | 'static' | 'query';
+  /** 该套件对当前库求值命中的用例数（内置「全量」= 库内非隔离条目数）。 */
+  caseCount: number;
+  /** 分母：库内非隔离条目总数。 */
+  libraryTotal: number;
+  /** 该套件被执行的轮次数（suiteName 匹配、排除 running）。 */
+  runCount: number;
+  /** 最近一轮（非熔断、done/partial）的通过率 0-1；无有效轮 → null。 */
+  latestPassRate: number | null;
+  /** 最近一轮通过串，如 "8/10"；无 → null。 */
+  latestPassStr: string | null;
+  /** 各已收口轮 finishedAt−startedAt 均值（ms）；无 → null。 */
+  avgDurationMs: number | null;
+  /** 各有 run.json 摘要且非熔断轮的 脚本占比（via='script'/total）均值 0-1；无 → null。 */
+  replayRatio: number | null;
+}
+
+/** 回归统计 · 聚合输出（GET /api/test/regression-stats 的 data）。 */
+export interface RegressionStats {
+  /** 当前项目目录名（面板标题曝光单项目口径用）。 */
+  projectName: string;
+  /** 窗口内已执行轮次总数（排除 running）。 */
+  totalRounds: number;
+  /** run.json 摘要读取的轮次上限（性能护栏，超出的更早轮不参与 run.json 相关口径）。 */
+  runReadLimit: number;
+  weekly: RegressionWeeklyPoint[];
+  scriptVsAi: RegressionScriptPoint[];
+  suites: RegressionSuiteRow[];
+  /** 是否有任何可展示数据（轮次/套件/库任一非空）。空态据此判定。 */
+  hasData: boolean;
+}

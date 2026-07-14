@@ -8,6 +8,7 @@
 
 | 文档 | 对应交接文档 | 主题 |
 |------|------------|------|
+| [regression-stats.md](./regression-stats.md) | [handover/regression-stats.md](../handover/regression-stats.md) | 回归测试使用统计：把「套件新增/套件执行/用例执行」三种子升级为趋势与结构、文件态聚合不复用事件表的理由、二级切换而非合并大盘、诚实口径（熔断整轮排除/running 不出结论/flaky 只作候选）、用户主动收敛范围（放弃套件新增趋势）、对标 TestRail/Xray/Datadog 差异化落在脚本重放 vs AI、扩展位与已知局限 |
 | [test-usage-stats.md](./test-usage-stats.md) | [handover/test-usage-stats.md](../handover/test-usage-stats.md) | 测试使用统计：量 AI 用例质量/判断质量/效率的三把尺、采纳率以首轮为基线、准确度必配覆盖率的诚实原则、复核自动归类降认知负担、服务端计时不信 AI 自报、事件流水而非聚合表（口径可重算+二期上报铺路）、只给指标不列用例、对抗评审驱动质量、已知局限与二期全体用户视角 |
 | [requirement-import-modes.md](./requirement-import-modes.md) | [handover/requirement-import-modes.md](../handover/requirement-import-modes.md) | 导入需求保留原文 + 二选一：AI 归一覆盖原文的硬伤、选择放节点而非弹窗、原文不转 md、docx 必经抽取的诚实告知、无人值守停下等选、use-original 就地编 REQ-ID 取舍、已知局限 |
 | [updates-v2.md](./updates-v2.md) | [handover/updates-v2.md](../handover/updates-v2.md) | 自动更新 V2：检查别人仓库+自动更新从未实现的双硬伤、为何不用 electron-updater/放主进程/复用登录、check-only 省流量取舍、借鉴姊妹项目避免重下与自动安装、对照 Trae 取舍、强制升级阻断、dev 验证边界 |

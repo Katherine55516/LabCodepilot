@@ -9,6 +9,7 @@ import type {
   TestStatsTaskDetail,
   TestStatsTaskRow,
   TestStatsCounts,
+  RegressionStats,
 } from "@/types";
 
 type T = (key: TranslationKey, params?: Record<string, string | number>) => string;
@@ -166,6 +167,31 @@ function HBars({ rows }: { rows: { label: string; ms: number }[] }) {
   );
 }
 
+/** 通用堆叠柱（任意分段）。回归视图的「套件执行趋势」（全量/仅失败）与「脚本 vs AI」共用。 */
+function StackBars({ rows, labels, height = 150, bwMax = 30 }: { rows: { v: number; color: string }[][]; labels: string[]; height?: number; bwMax?: number }) {
+  const W = 520, H = height, x0 = 34, x1 = 510, yTop = 16, yBase = H - 22;
+  const totals = rows.map((r) => r.reduce((a, s) => a + s.v, 0));
+  const maxV = Math.max(1, ...totals);
+  const slot = (x1 - x0) / Math.max(1, rows.length), bw = Math.min(bwMax, slot * 0.62);
+  const unit = (yBase - yTop) / maxV;
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full" role="img">
+      {[0, maxV / 2, maxV].map((tk, i) => {
+        const y = yBase - (tk / maxV) * (yBase - yTop);
+        return <g key={i}><line x1={x0} y1={y} x2={x1} y2={y} stroke="var(--border)" strokeWidth={1} /><text x={x0 - 5} y={y + 3} textAnchor="end" className={AX}>{Math.round(tk)}</text></g>;
+      })}
+      {rows.map((segs, i) => {
+        const x = x0 + slot * i + (slot - bw) / 2;
+        let y = yBase;
+        return <g key={i}>
+          {segs.map((seg, k) => { const h = seg.v * unit; y -= h; return h > 0 ? <rect key={k} x={x} y={y} width={bw} height={Math.max(0, h - 1)} rx={2} fill={seg.color} /> : null; })}
+          <text x={x + bw / 2} y={yBase + 14} textAnchor="middle" className={AX}>{labels[i]}</text>
+        </g>;
+      })}
+    </svg>
+  );
+}
+
 // ---------- 卡片外壳 ----------
 function Card({ title, sub, children }: { title: string; sub?: string; children: React.ReactNode }) {
   return (
@@ -186,7 +212,46 @@ function Legend({ items }: { items: { color: string; label: string }[] }) {
   );
 }
 
-export function TestStatsView({ t }: { t: T }) {
+/**
+ * 使用统计 · 外壳。工具条 + 「功能测试 / 回归测试」二级切换。功能测试走事件溯源、跨项目
+ * 「本机」口径；回归走文件态、单项目口径（当前项目名在标题曝光），两套指标各自渲染、不合并
+ * （分母语义不同，硬合并会误导；决策见 docs/handover/regression-stats.md）。
+ */
+export function TestStatsView({ t, projectPath }: { t: T; projectPath: string }) {
+  const [mode, setMode] = useState<"functional" | "regression">("functional");
+  const projectName = useMemo(() => {
+    if (!projectPath) return "";
+    const parts = projectPath.replace(/[\\/]+$/, "").split(/[\\/]/);
+    return parts[parts.length - 1] || projectPath;
+  }, [projectPath]);
+
+  const tabCls = (active: boolean) =>
+    `rounded-md px-3 py-1 text-[11px] font-medium ${active ? "bg-card font-semibold text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`;
+
+  return (
+    <div className="flex flex-col gap-3">
+      {/* 工具条：标题 + 范围 + 功能/回归切换 + 导出（功能态） */}
+      <div className="flex flex-wrap items-center gap-2">
+        <h3 className="text-sm font-semibold text-foreground">{t("test.stats.title")}</h3>
+        <span className="text-[11px] text-muted-foreground">
+          {mode === "functional" ? t("test.stats.rangeAll") : t("test.stats.reg.range", { project: projectName || "—" })}
+        </span>
+        <span className="flex-1" />
+        <div className="inline-flex gap-0.5 rounded-lg border border-border bg-muted p-0.5" role="tablist" aria-label={t("test.stats.title")}>
+          <button role="tab" aria-selected={mode === "functional"} onClick={() => setMode("functional")} className={tabCls(mode === "functional")}>{t("test.stats.reg.tabFunctional")}</button>
+          <button role="tab" aria-selected={mode === "regression"} onClick={() => setMode("regression")} className={tabCls(mode === "regression")}>{t("test.stats.reg.tabRegression")}</button>
+        </div>
+        {mode === "functional" && (
+          <a href="/api/test/stats/export?format=xlsx" className="rounded-md border border-border px-2.5 py-1 text-[11px] font-medium text-foreground hover:bg-muted">⬇ {t("test.stats.exportXlsx")}</a>
+        )}
+      </div>
+      {mode === "functional" ? <FunctionalStatsBody t={t} /> : <RegressionStatsView t={t} projectPath={projectPath} />}
+    </div>
+  );
+}
+
+/** 功能测试统计主体（原 TestStatsView 内容，去掉工具条——工具条已上提到外壳）。 */
+function FunctionalStatsBody({ t }: { t: T }) {
   const [global, setGlobal] = useState<TestStatsGlobal | null>(null);
   const [models, setModels] = useState<TestStatsModelRow[] | null>(null);
   const [loading, setLoading] = useState(true);
@@ -243,14 +308,6 @@ export function TestStatsView({ t }: { t: T }) {
 
   return (
     <div className="flex flex-col gap-3">
-      {/* 工具条 + 导出 */}
-      <div className="flex flex-wrap items-center gap-2">
-        <h3 className="text-sm font-semibold text-foreground">{t("test.stats.title")}</h3>
-        <span className="text-[11px] text-muted-foreground">{t("test.stats.rangeAll")}</span>
-        <span className="flex-1" />
-        <a href="/api/test/stats/export?format=xlsx" className="rounded-md border border-border px-2.5 py-1 text-[11px] font-medium text-foreground hover:bg-muted">⬇ {t("test.stats.exportXlsx")}</a>
-      </div>
-
       {/* KPI 四卡 */}
       <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
         <div className="rounded-xl border border-border bg-card p-3.5">
@@ -357,6 +414,108 @@ export function TestStatsView({ t }: { t: T }) {
             </tbody>
           </table>
         </div>
+      </Card>
+    </div>
+  );
+}
+
+// ---------- 回归测试统计主体（文件态、单项目口径）----------
+/**
+ * 回归视图 v1：套件执行趋势 + 用例执行趋势 + 脚本重放 vs AI + 套件明细。数据来自
+ * /api/test/regression-stats（读当前项目 AI_LabTest/ 文件态聚合）。KPI/通过率趋势/失败归因/
+ * 轮次明细等本期先不做，聚合层已算出相应口径的扩展位。
+ */
+function RegressionStatsView({ t, projectPath }: { t: T; projectPath: string }) {
+  const [data, setData] = useState<RegressionStats | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
+
+  useEffect(() => {
+    if (!projectPath) { setLoading(false); setError(true); return; }
+    let cancelled = false;
+    setLoading(true);
+    setError(false);
+    fetch(`/api/test/regression-stats?projectPath=${encodeURIComponent(projectPath)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (cancelled) return;
+        if (d?.data) setData(d.data as RegressionStats); else setError(true);
+        setLoading(false);
+      })
+      .catch(() => { if (!cancelled) { setError(true); setLoading(false); } });
+    return () => { cancelled = true; };
+  }, [projectPath]);
+
+  const weekLabels = useMemo(() => (data?.weekly ?? []).map((w) => fmtDate(w.weekStart)), [data]);
+
+  if (loading) return <div className="py-16 text-center text-sm text-muted-foreground">{t("test.stats.loading")}</div>;
+  if (error || !data) return <div className="py-16 text-center text-sm text-muted-foreground">{t("test.stats.loadError")}</div>;
+  if (!data.hasData) return <div className="py-16 text-center text-sm text-muted-foreground">{t("test.stats.reg.empty")}</div>;
+
+  const primary = "var(--primary)";
+  const primary45 = "color-mix(in oklab, var(--primary) 45%, transparent)";
+  const ok = "var(--status-success)";
+  const bad = "var(--status-error)";
+  const ok45 = "color-mix(in oklab, var(--status-success) 45%, transparent)";
+  const bad45 = "color-mix(in oklab, var(--status-error) 45%, transparent)";
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
+        <Card title={t("test.stats.reg.chartRuns")} sub={t("test.stats.perWeek")}>
+          <StackBars rows={data.weekly.map((w) => [{ v: w.roundsFull, color: primary }, { v: w.roundsFailedOnly, color: primary45 }])} labels={weekLabels} />
+          <Legend items={[{ color: primary, label: t("test.stats.reg.legendFull") }, { color: primary45, label: t("test.stats.reg.legendFailedOnly") }]} />
+        </Card>
+        <Card title={t("test.stats.reg.chartVolume")} sub={t("test.stats.perWeek")}>
+          <BarChart data={data.weekly.map((w) => w.caseExecutions)} labels={weekLabels} />
+        </Card>
+        <Card title={t("test.stats.reg.chartScript")} sub={t("test.stats.reg.chartScriptSub")}>
+          {data.scriptVsAi.length ? (
+            <>
+              <StackBars rows={data.scriptVsAi.map((p) => [{ v: p.scriptPass, color: ok }, { v: p.scriptFail, color: bad }, { v: p.aiPass, color: ok45 }, { v: p.aiFail, color: bad45 }])} labels={data.scriptVsAi.map((p) => p.label)} />
+              <Legend items={[
+                { color: ok, label: t("test.stats.reg.legendScriptPass") },
+                { color: bad, label: t("test.stats.reg.legendScriptFail") },
+                { color: ok45, label: t("test.stats.reg.legendAiPass") },
+                { color: bad45, label: t("test.stats.reg.legendAiFail") },
+              ]} />
+            </>
+          ) : <div className="py-6 text-center text-[11px] text-muted-foreground">—</div>}
+        </Card>
+      </div>
+
+      <Card title={t("test.stats.reg.suiteTitle")}>
+        <div className="overflow-x-auto">
+          <table className="w-full border-collapse text-[11px]">
+            <thead>
+              <tr className="text-left text-muted-foreground">
+                <th className="py-1.5 pr-3 font-medium">{t("test.stats.reg.colSuite")}</th>
+                <th className="px-2 py-1.5 font-medium">{t("test.stats.reg.colCoverage")}</th>
+                <th className="px-2 py-1.5 font-medium">{t("test.stats.reg.colRunCount")}</th>
+                <th className="px-2 py-1.5 font-medium">{t("test.stats.reg.colLatestPass")}</th>
+                <th className="px-2 py-1.5 font-medium">{t("test.stats.reg.colAvgDur")}</th>
+                <th className="px-2 py-1.5 font-medium">{t("test.stats.reg.colReplay")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.suites.map((s) => (
+                <tr key={s.name} className="border-t border-border">
+                  <td className="py-1.5 pr-3">
+                    <span className="font-medium text-foreground">{s.name}</span>
+                    <span className="ml-1 rounded bg-muted px-1 py-0.5 text-[9px] text-muted-foreground">{t(`test.stats.reg.type_${s.type}` as TranslationKey)}</span>
+                  </td>
+                  <td className="whitespace-nowrap px-2 py-1.5 tabular-nums">{s.caseCount}{s.libraryTotal > 0 && <span className="text-muted-foreground"> · {pct(s.caseCount / s.libraryTotal, 0)}</span>}</td>
+                  <td className="px-2 py-1.5 tabular-nums">{s.runCount}</td>
+                  <td className="whitespace-nowrap px-2 py-1.5 tabular-nums">{s.latestPassStr ? <>{s.latestPassStr}{s.latestPassRate != null && <span className="text-muted-foreground"> · {pct(s.latestPassRate, 0)}</span>}</> : "—"}</td>
+                  <td className="px-2 py-1.5 tabular-nums">{fmtDuration(s.avgDurationMs)}</td>
+                  <td className="px-2 py-1.5 tabular-nums">{s.replayRatio != null ? pct(s.replayRatio, 0) : "—"}</td>
+                </tr>
+              ))}
+              {data.suites.length === 0 && <tr><td colSpan={6} className="py-3 text-center text-muted-foreground">—</td></tr>}
+            </tbody>
+          </table>
+        </div>
+        <p className="mt-2 text-[10px] text-muted-foreground">{t("test.stats.reg.suiteNote")}</p>
       </Card>
     </div>
   );

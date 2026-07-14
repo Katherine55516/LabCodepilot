@@ -2884,7 +2884,7 @@ export function InlineTestingPanel() {
                 reloadSignal={reportsReload}
               />
             )}
-            {view === "stats" && <TestStatsView t={t} />}
+            {view === "stats" && <TestStatsView t={t} projectPath={current?.path ?? ""} />}
           </div>
         </div>
       )}

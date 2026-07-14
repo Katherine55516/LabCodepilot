@@ -8,6 +8,7 @@
 
 | 文件 | 主题 |
 |------|------|
+| regression-stats.md | 回归测试使用统计：Stats 面板二级 toggle（功能/回归）、**文件态聚合不复用事件表**（单项目口径）、套件执行趋势/用例执行趋势/脚本重放 vs AI/套件明细、run.json 近 50 轮护栏、circuitBroken/running 排除口径、纯核 aggregateRegressionStats + fs wrapper、CDP mock 验证 |
 | test-usage-stats.md | 测试模块使用统计：test_stats_events 事件流水（追加式）+ 纯函数聚合口径层（采纳率首轮基线自动 diff / 报告准确度+复核覆盖率 / 服务端逐用例计时 / 模型节点级归因 / 熔断排除 / 时间窗口计入门控）、10 类事件字典、四 scope API + 4 Sheet XLSX 导出、TestStatsView 看板（第 4 视图）、fail-safe 埋点、electron-as-node 验证法 |
 | requirement-import-modes.md | 导入需求保留原文 + 需求分析节点二选一（生成 md / 直接用原文）：三文件模型（原始件 / docx 抽取文本 / AI 归一 md）、待选择闸门、批量停下等选、docx 必经抽取、需求来源路径穿透、向后兼容 |
 | updates-v2.md | 自动更新（研发平台 V2）：主进程自定义更新器（检查/CDN 下载/sha256 校验/win+mac 安装）复用登录 getBackendBase+apiRequest+token、三层避免重下+pending、强制升级阻断、kill-switch 回滚、退役旧 GitHub 检查 |
