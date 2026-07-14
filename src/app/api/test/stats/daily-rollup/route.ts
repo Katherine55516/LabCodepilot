@@ -1,5 +1,10 @@
 import { queryTestStatsEvents } from '@/lib/db';
 import { buildDailyRollup } from '@/lib/test/usage-rollup';
+import {
+  buildRegressionDailyRollup,
+  listWorkbenchProjectPaths,
+  mergeRegressionIntoDays,
+} from '@/lib/test/regression-rollup';
 
 export const runtime = 'nodejs';
 
@@ -7,10 +12,15 @@ export const runtime = 'nodejs';
  * 测试模块使用统计 · 每日滚动汇总路由（供 Electron 主进程本地环回调用，无鉴权，与 /api/test/stats 一致）。
  *
  * GET ?from=YYYY-MM-DD&to=YYYY-MM-DD（均为北京日，必填）→ { days: DayUsage[] }
- *   北京 [from 00:00:00 .. to 23:59:59] 窗口换算为 UTC created_at 区间，查 test_stats_events，
- *   交给 buildDailyRollup 按北京自然日折叠，最后只保留 date 落在 [from, to] 内的天。
- *   缺参/格式非法 → 400；异常 → 500（fail-safe，采集/汇总不影响主流程）。
- *   口径与实现见 src/lib/test/usage-rollup.ts。
+ *
+ * 两路数据在此会合（来源与口径完全不同，故各自聚合后按日期并集合并）：
+ *   - 功能测试：SQLite test_stats_events（事件表、机器级）→ buildDailyRollup
+ *   - 回归测试：各项目 AI_LabTest/ 文件态（单项目）→ 先枚举工作台项目清单，再逐项目折叠
+ *     → buildRegressionDailyRollup → mergeRegressionIntoDays
+ * 只有回归活动、没有功能事件的那天也会出现（反之亦然）。
+ *
+ * 缺参/格式非法 → 400；异常 → 500（fail-safe，采集/汇总不影响主流程）。
+ * 口径与实现见 src/lib/test/usage-rollup.ts 与 src/lib/test/regression-rollup.ts。
  */
 
 const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
@@ -40,10 +50,23 @@ export async function GET(req: Request): Promise<Response> {
         { status: 400 },
       );
     }
+    // ① 功能测试（事件表，机器级）
     const fromUtc = beijingToUtc(`${from} 00:00:00`, TZ_OFFSET_MINUTES);
     const toUtc = beijingToUtc(`${to} 23:59:59`, TZ_OFFSET_MINUTES);
     const events = queryTestStatsEvents({ from: fromUtc, to: toUtc });
-    const days = buildDailyRollup(events, { tzOffsetMinutes: TZ_OFFSET_MINUTES }).filter(
+    const funcDays = buildDailyRollup(events, { tzOffsetMinutes: TZ_OFFSET_MINUTES });
+
+    // ② 回归（文件态，逐项目 → 机器级）。任一项目读失败都已在各 reader 内部容错为空，不影响功能侧。
+    const { reg, suitesCount } = buildRegressionDailyRollup(
+      listWorkbenchProjectPaths(),
+      from,
+      to,
+      Date.now(),
+      TZ_OFFSET_MINUTES,
+    );
+
+    // ③ 并集合并后再裁剪到窗口（suites_count 只打在最新一天 = to）
+    const days = mergeRegressionIntoDays(funcDays, reg, suitesCount, to).filter(
       (d) => d.date >= from && d.date <= to,
     );
     return Response.json({ days });

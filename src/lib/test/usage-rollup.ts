@@ -59,6 +59,45 @@ export interface DayUsageProjectRow extends UsageCounts {
   name?: string;
 }
 
+/** 回归的「活动量」字段（可按天/按项目累加）。 */
+export interface RegressionActivity {
+  rounds_full: number;
+  rounds_failed_only: number;
+  case_executions: number;
+  script_pass: number;
+  script_fail: number;
+  ai_pass: number;
+  ai_fail: number;
+}
+
+/**
+ * 每日回归计数（服务端契约，字段名冻结 → reg_* 列）。
+ *
+ * suites_count 是**当前快照**（套件数是状态、不是当天发生的活动量），无法回溯历史某天有几个套件，
+ * 故只打在滚动窗口的**最新一天**上，历史天为 0（服务端 GREATEST 会保留那天当初记下的值）。
+ */
+export interface RegressionCounts extends RegressionActivity {
+  suites_count: number;
+}
+
+export interface DayUsageRegProjectRow extends RegressionActivity {
+  project: string;
+  name?: string;
+}
+
+export function newRegressionCounts(): RegressionCounts {
+  return {
+    rounds_full: 0,
+    rounds_failed_only: 0,
+    case_executions: 0,
+    script_pass: 0,
+    script_fail: 0,
+    ai_pass: 0,
+    ai_fail: 0,
+    suites_count: 0,
+  };
+}
+
 export interface DayUsagePayload {
   exec: {
     partial: number;
@@ -70,12 +109,16 @@ export interface DayUsagePayload {
   reviews_detail: { false_fail: number; missed_fail: number; severity_mismatch: number };
   models: DayUsageModelRow[];
   projects: DayUsageProjectRow[];
+  /** 回归的按项目明细（P2）。功能测试的 projects[] 不含回归字段，两者分开放，互不污染。 */
+  regression_projects?: DayUsageRegProjectRow[];
 }
 
 /** 单个北京自然日的使用量汇总（服务端上报契约，字段名冻结）。 */
 export interface DayUsage extends UsageCounts {
   /** 'YYYY-MM-DD'（北京日） */
   date: string;
+  /** 回归计数（P2）。功能测试聚合器只产出全 0，由 regression-rollup 覆盖。 */
+  regression: RegressionCounts;
   payload: DayUsagePayload;
 }
 
@@ -306,6 +349,8 @@ function finalizeDay(day: DayAcc): DayUsage {
   return {
     date: day.date,
     ...day.scope.counts,
+    // 功能测试聚合器不产出回归数据 → 全 0 占位，由 regression-rollup.mergeRegressionIntoDays 覆盖。
+    regression: newRegressionCounts(),
     payload: {
       exec: {
         partial: day.exec.partial,
