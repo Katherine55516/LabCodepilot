@@ -5,44 +5,41 @@
  * 放 server 侧(而非 electron main)的原因:`npm run dev` 没有 main 进程,
  * dev 与打包版共用同一套逻辑,claude-client 直接调用,不依赖 IPC。
  *
+ * 镜像流水线 M1 起,宿主与 guest 的唯一通道是 vsock:
+ * - seed 由 cowork-seed.ts 生成(daemon/systemd 经 cloud-init 首启自注入),
+ *   SSH/scp provisioning 链整体退役,宿主不再需要知道 VM 的 IP
+ * - 就绪判定 = 轮询 vsock health(首启含 cloud-init 自注入 ~60-90s,二次
+ *   启动 systemd 拉 daemon ~15s)
+ * - claude binary 缺失时经 vsock installBinary 推入(health 一次探测拿全)
+ *
  * 职责:
- * - 懒启动:沙箱会话首条消息 → ensureRunning() → spawn vfkit + 等 SSH 就绪
+ * - 懒启动:沙箱会话首条消息 → ensureRunning() → spawn vfkit + 等 vsock 就绪
  * - 健康:定期探活,失联标记 crashed,下次 ensureRunning 自动重建
  * - 空闲回收:无活跃沙箱会话 N 分钟 → stop
  * - 进程纪律:pid 文件(孤儿回收,同 electron 主进程惯例)+ 退出清理
- * - binary 部署:VM 就绪后确保 ~/bin/claude 存在(缺则从宿主推入,复刻 Cowork installSdk)
- *
- * 传输/资产沿用 POC 目录 ~/.codepilot/cowork-poc(镜像/seed/SSH 密钥);
- * P1-C 换 vsock+daemon 时本模块的对外契约(ensureRunning/getStatus/stop)不变。
  */
-import { spawn, execFile, type ChildProcess } from 'child_process';
-import { promisify } from 'util';
+import { spawn, type ChildProcess } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-
-const execFileAsync = promisify(execFile);
+import { ensureSeedIso, EXPECTED_DAEMON_VERSION } from './cowork-seed';
 
 const POC_DIR = path.join(os.homedir(), '.codepilot', 'cowork-poc');
 const DISK = path.join(POC_DIR, 'images', 'debian-12-genericcloud-arm64.raw');
-const SEED = path.join(POC_DIR, 'images', 'seed.iso');
 const EFI_STORE = path.join(POC_DIR, 'efi-variable-store');
-const VM_IP_FILE = path.join(POC_DIR, 'vm-ip');
 const VFKIT_PID_FILE = path.join(POC_DIR, 'vfkit.pid');
 const CONSOLE_LOG = path.join(POC_DIR, 'vm-console.log');
-const SSH_KEY = path.join(POC_DIR, 'ssh', 'id_ed25519');
 const HOST_CLAUDE_BIN = path.join(POC_DIR, 'bin', 'package', 'claude');
-const GUEST_HOSTNAME = 'cowork-poc';
-const GUEST_USER = 'agent';
 const VM_MAC = '72:20:43:d4:38:62';
 const RESTFUL_URI = 'tcp://127.0.0.1:47899';
 // P1-C: vsock 运行时通道。vfkit connect 模式 → guest daemon 当 server,
 // 宿主连这个 unix socket。port 与 daemon/客户端约定一致。
 const VSOCK_PORT = 1024;
 const VSOCK_SOCKET = path.join(POC_DIR, 'vsock-1024.sock');
-const GUEST_DAEMON_PATH = '/home/agent/cowork-daemon.py';
 
-const READY_TIMEOUT_MS = 120_000;
+// 首启含 cloud-init 自注入(growpart + write_files + systemd enable,~60-90s),
+// 二次启动 daemon 由 systemd 秒级拉起 —— 超时按首启给足。
+const READY_TIMEOUT_MS = 240_000;
 const HEALTH_INTERVAL_MS = 20_000;
 const IDLE_SHUTDOWN_MS = 15 * 60_000;
 
@@ -50,7 +47,6 @@ export type VmPhase = 'stopped' | 'starting' | 'running' | 'crashed';
 
 export interface VmStatus {
   phase: VmPhase;
-  ip: string | null;
   reason?: string;
 }
 
@@ -83,7 +79,6 @@ export function onVmProgress(cb: VmProgressListener): () => void {
 
 interface VmState {
   phase: VmPhase;
-  ip: string | null;
   proc: ChildProcess | null;
   startingPromise: Promise<VmStatus> | null;
   healthTimer: NodeJS.Timeout | null;
@@ -99,55 +94,11 @@ function state(): VmState {
   const g = globalThis as Record<string, unknown>;
   if (!g[STATE_KEY]) {
     g[STATE_KEY] = {
-      phase: 'stopped', ip: null, proc: null, startingPromise: null,
+      phase: 'stopped', proc: null, startingPromise: null,
       healthTimer: null, idleTimer: null, activeSessions: new Set<string>(),
     } as VmState;
   }
   return g[STATE_KEY] as VmState;
-}
-
-function sshBaseArgs(connectTimeout = 8): string[] {
-  return [
-    '-i', SSH_KEY,
-    '-o', 'StrictHostKeyChecking=no',
-    '-o', 'UserKnownHostsFile=/dev/null',
-    '-o', 'LogLevel=ERROR',
-    '-o', `ConnectTimeout=${connectTimeout}`,
-  ];
-}
-
-/**
- * 从 macOS `/var/db/dhcpd_leases` 文本按 guest hostname 反查 IP。
- * 导出供单测:vmnet 的 hw_address 用 DHCP client-id 格式(与 --device mac= 不
- * 一致),所以必须按 hostname 匹配;同一 hostname 有多条历史租约时取最后一条
- * (最新)。纯函数,不碰文件系统。
- */
-export function parseLeaseIp(leasesText: string, hostname: string = GUEST_HOSTNAME): string | null {
-  let ip: string | null = null;
-  for (const block of leasesText.split('}')) {
-    if (!block.includes(`name=${hostname}`)) continue;
-    const m = block.match(/ip_address=([0-9.]+)/);
-    if (m) ip = m[1]; // 取最后一条匹配租约
-  }
-  return ip;
-}
-
-/** DHCP 租约表按 guest hostname 反查 IP(读文件 + parseLeaseIp)。 */
-function readLeaseIp(): string | null {
-  try {
-    return parseLeaseIp(fs.readFileSync('/var/db/dhcpd_leases', 'utf8'));
-  } catch {
-    return null;
-  }
-}
-
-async function sshOk(ip: string, timeoutMs = 6000): Promise<boolean> {
-  try {
-    await execFileAsync('ssh', [...sshBaseArgs(4), `${GUEST_USER}@${ip}`, 'true'], { timeout: timeoutMs });
-    return true;
-  } catch {
-    return false;
-  }
 }
 
 function isPidAlive(pid: number): boolean {
@@ -184,69 +135,42 @@ function registerExitCleanupOnce(): void {
   process.once('SIGINT', () => { killOwn(); process.exit(0); });
 }
 
+/**
+ * 镜像就绪判定:M1 起只看底镜 raw(seed 按需生成,SSH 密钥不再是前置)。
+ * M2 会演进为下载器的资产状态机。
+ */
 export function isImageProvisioned(): boolean {
-  return fs.existsSync(DISK) && fs.existsSync(SEED) && fs.existsSync(SSH_KEY);
-}
-
-/** VM 就绪后确保 ~/bin/claude 存在;缺则从宿主推入(复刻 Cowork installSdk 动态部署)。 */
-async function ensureGuestBinary(ip: string): Promise<void> {
-  const has = await execFileAsync('ssh', [...sshBaseArgs(), `${GUEST_USER}@${ip}`, 'test -x ~/bin/claude && echo yes || echo no'], { timeout: 10000 })
-    .then((r) => r.stdout.trim() === 'yes')
-    .catch(() => false);
-  if (has) return;
-  if (!fs.existsSync(HOST_CLAUDE_BIN)) {
-    throw new Error('guest claude binary missing and no host copy to push');
-  }
-  await execFileAsync('ssh', [...sshBaseArgs(), `${GUEST_USER}@${ip}`, 'mkdir -p ~/bin'], { timeout: 10000 });
-  await execFileAsync('scp', [...sshBaseArgs(), HOST_CLAUDE_BIN, `${GUEST_USER}@${ip}:~/bin/claude`], { timeout: 300_000 });
-  await execFileAsync('ssh', [...sshBaseArgs(), `${GUEST_USER}@${ip}`, 'chmod +x ~/bin/claude'], { timeout: 10000 });
-}
-
-/** 仓库内 daemon 脚本路径(dev 从 cwd 解析,打包版靠 cowork_forwarder_path 同目录)。 */
-function hostDaemonPath(): string | null {
-  const candidates: string[] = [];
-  try {
-    const { getSetting } = require('./db') as typeof import('./db');
-    const fwd = (getSetting('cowork_forwarder_path') || '').trim();
-    if (fwd) candidates.push(path.join(path.dirname(fwd), 'cowork-daemon.py'));
-  } catch { /* db not available */ }
-  candidates.push(path.join(process.cwd(), 'scripts/poc/cowork/cowork-daemon.py'));
-  return candidates.find((p) => fs.existsSync(p)) || null;
+  return fs.existsSync(DISK);
 }
 
 /**
- * 确保 guest vsock daemon 在跑(P1-C 运行时通道)。先 vsock 健康探测;不健康则
- * SSH 一次性推 daemon.py + nohup 启动,再探。SSH 仅用于 provisioning(与推
- * claude binary 同性质);运行时数据流全走 vsock。生产形态会把 daemon 烘进镜像
- * 用 systemd 开机自启,彻底无 SSH。
+ * VM 就绪后确保 guest 具备执行面(全 vsock,零 SSH):
+ * - daemon 版本哨兵:正常永远一致(改 daemon 必 bump SEED_TEMPLATE_VERSION →
+ *   instance-id 变化 → cloud-init 重跑);不一致只告警,下次重启自愈
+ * - v1 daemon(SSH 时代注入,health 无 version 字段)兼容:必然已被旧链路推过
+ *   binary,跳过检查,VM 重启后经新 seed 升级
+ * - claude binary 缺失 → installBinary 流式推入
  */
-async function ensureDaemon(ip: string): Promise<void> {
-  const { vsockHealthy } = await import('./cowork-vsock');
-  if (await vsockHealthy(3000)) return;
-  const daemonSrc = hostDaemonPath();
-  if (!daemonSrc) {
-    console.warn('[cowork-vm] daemon script not found on host — cannot provision vsock daemon');
+async function provisionGuest(): Promise<void> {
+  const { vsockHealth, rpcInstallBinary } = await import('./cowork-vsock');
+  const h = await vsockHealth(6000);
+  if (!h.ok) throw new Error('guest daemon not healthy after boot');
+  if (h.version === undefined) {
+    console.warn('[cowork-vm] guest daemon is v1 (pre-seed era) — skipping binary check until next VM restart');
     return;
   }
-  console.log('[cowork-vm] provisioning vsock daemon…');
-  await execFileAsync('scp', [...sshBaseArgs(), daemonSrc, `${GUEST_USER}@${ip}:${GUEST_DAEMON_PATH}`], { timeout: 30000 });
-  // 先杀旧实例(独立 ssh 调用 + bracket trick 防自杀:pkill 的模式串
-  // `[c]owork-daemon.py` 在本命令行里字面是 `[c]owork…`,正则却匹配 `cowork…`,
-  // 于是不会误杀这条 kill 命令自身。原先单命令里带 python3 路径 → 自匹配自杀,
-  // daemon 永远起不来)。
-  await execFileAsync('ssh', [...sshBaseArgs(), `${GUEST_USER}@${ip}`,
-    `pkill -f '[c]owork-daemon.py' 2>/dev/null; true`,
-  ], { timeout: 10000 }).catch(() => { /* 没有旧实例可杀 */ });
-  // 再起(独立 ssh:本命令行含脚本路径但无 pkill,不会被杀);setsid+nohup 脱离会话常驻
-  await execFileAsync('ssh', [...sshBaseArgs(), `${GUEST_USER}@${ip}`,
-    `setsid nohup python3 ${GUEST_DAEMON_PATH} >/tmp/cowork-daemon.log 2>&1 < /dev/null & sleep 0.5; echo started`,
-  ], { timeout: 15000 });
-  // 等 daemon 在 vsock 上就绪
-  for (let i = 0; i < 20; i++) {
-    if (await vsockHealthy(2000)) { console.log('[cowork-vm] vsock daemon ready'); return; }
-    await new Promise((r) => setTimeout(r, 500));
+  if (h.version !== EXPECTED_DAEMON_VERSION) {
+    console.warn(`[cowork-vm] guest daemon version=${h.version}, expected=${EXPECTED_DAEMON_VERSION} — will re-provision on next boot`);
   }
-  throw new Error('vsock daemon did not become healthy after provisioning');
+  if (!h.claude) {
+    if (!fs.existsSync(HOST_CLAUDE_BIN)) {
+      throw new Error('guest claude binary missing and no host copy to push');
+    }
+    emitProgress('provisioning', 'installing agent runtime');
+    console.log('[cowork-vm] pushing claude binary into guest via vsock…');
+    await rpcInstallBinary('claude', HOST_CLAUDE_BIN);
+    console.log('[cowork-vm] claude binary installed in guest');
+  }
 }
 
 function clearHealth(s: VmState): void {
@@ -256,7 +180,7 @@ function clearHealth(s: VmState): void {
 function startHealth(s: VmState): void {
   clearHealth(s);
   s.healthTimer = setInterval(async () => {
-    if (s.phase !== 'running' || !s.ip) return;
+    if (s.phase !== 'running') return;
     // P1-C:健康探测走 vsock daemon(它挂了 = 通道断了,即使 VM 还活着也要重建)
     const { vsockHealthy } = await import('./cowork-vsock');
     const ok = await vsockHealthy(6000);
@@ -289,19 +213,20 @@ function resetIdleTimer(s: VmState): void {
 
 export function getStatus(): VmStatus {
   const s = state();
-  return { phase: s.phase, ip: s.ip, reason: s.reason };
+  return { phase: s.phase, reason: s.reason };
 }
 
 /**
  * 确保 VM 就绪。幂等 + 并发安全(多个沙箱会话同一回合并发调用只启动一次)。
- * 成功返回 { phase:'running', ip }。失败返回 { phase:'crashed'/'stopped', reason }。
+ * 成功返回 { phase:'running' }。失败返回 { phase:'crashed'/'stopped', reason }。
  */
 export async function ensureRunning(): Promise<VmStatus> {
   const s = state();
 
-  if (s.phase === 'running' && s.ip) {
+  if (s.phase === 'running') {
     // 快速校验仍活着(pid 可能被外部杀掉)
-    if (existingVfkitPid() || (await sshOk(s.ip, 4000))) return getStatus();
+    const { vsockHealthy } = await import('./cowork-vsock');
+    if (existingVfkitPid() || (await vsockHealthy(4000))) return getStatus();
     s.phase = 'crashed';
     s.reason = 'vfkit process gone';
   }
@@ -316,24 +241,21 @@ export async function ensureRunning(): Promise<VmStatus> {
         s.reason = 'image_not_provisioned';
         return getStatus();
       }
+      const { vsockHealthy } = await import('./cowork-vsock');
 
-      // 复用外部已在跑的 vfkit(POC 手动启动的、或上次本进程启动的)
+      // 复用外部已在跑的 vfkit(vm-up.sh 手动启动的、或上次本进程启动的)
       const alivePid = existingVfkitPid();
       if (alivePid) {
-        const ip = readLeaseIp();
-        if (ip && (await sshOk(ip))) {
-          s.ip = ip;
-          fs.writeFileSync(VM_IP_FILE, ip);
+        if (await vsockHealthy(4000)) {
           emitProgress('provisioning', 'preparing sandbox');
-          await ensureGuestBinary(ip).catch((e) => console.warn('[cowork-vm] ensureGuestBinary:', e?.message));
-          await ensureDaemon(ip).catch((e) => console.warn('[cowork-vm] ensureDaemon:', e?.message));
+          await provisionGuest();
           s.phase = 'running';
           s.reason = undefined;
           emitProgress('ready');
           startHealth(s);
           resetIdleTimer(s);
           fireSessionReconcile();
-          console.log(`[cowork-vm] reused existing vfkit pid=${alivePid} ip=${ip}`);
+          console.log(`[cowork-vm] reused existing vfkit pid=${alivePid}`);
           return getStatus();
         }
         // Pidfile points to a live vfkit we can't reach (wedged VM, or an
@@ -345,17 +267,20 @@ export async function ensureRunning(): Promise<VmStatus> {
 
       s.phase = 'starting';
       s.reason = undefined;
-      s.ip = null;
       emitProgress('starting', 'launching sandbox VM');
-      console.log('[cowork-vm] spawning vfkit…');
 
+      // M1:seed 由代码生成(daemon/systemd 经 cloud-init 首启自注入)。
+      // 内容寻址 + 存在即复用,常态是零成本;daemon/模板变更时自动重造。
+      const seedIso = await ensureSeedIso();
+
+      console.log('[cowork-vm] spawning vfkit…');
       // 陈旧 vsock socket 文件会让 vfkit 的 ListenUnix bind 失败,先清
       try { fs.rmSync(VSOCK_SOCKET, { force: true }); } catch { /* ignore */ }
       const proc = spawn('vfkit', [
         '--cpus', '2', '--memory', '2048',
         '--bootloader', `efi,variable-store=${EFI_STORE},create`,
         '--device', `virtio-blk,path=${DISK}`,
-        '--device', `virtio-blk,path=${SEED}`,
+        '--device', `virtio-blk,path=${seedIso}`,
         '--device', `virtio-net,nat,mac=${VM_MAC}`,
         '--device', `virtio-serial,logFilePath=${CONSOLE_LOG}`,
         '--device', 'virtio-rng',
@@ -370,29 +295,23 @@ export async function ensureRunning(): Promise<VmStatus> {
         if (s.phase === 'running' || s.phase === 'starting') {
           s.phase = 'crashed';
           s.reason = `vfkit exited (${code})`;
-          s.ip = null;
           clearHealth(s);
         }
       });
 
-      // 轮询 DHCP 租约 + SSH 就绪
+      // 轮询 vsock 就绪(daemon 由 systemd 开机拉起;首启多一段 cloud-init 注入)
       const deadline = Date.now() + READY_TIMEOUT_MS;
       while (Date.now() < deadline) {
         if (s.phase !== 'starting') break; // exit 回调可能已改状态
-        const ip = readLeaseIp();
-        if (ip && (await sshOk(ip))) {
-          s.ip = ip;
-          fs.writeFileSync(VM_IP_FILE, ip);
-          emitProgress('provisioning', 'preparing sandbox');
-          await ensureGuestBinary(ip);
-          await ensureDaemon(ip);
+        if (await vsockHealthy(2500)) {
+          await provisionGuest();
           s.phase = 'running';
           s.reason = undefined;
           emitProgress('ready');
           startHealth(s);
           resetIdleTimer(s);
           fireSessionReconcile();
-          console.log(`[cowork-vm] ready ip=${ip} pid=${proc.pid}`);
+          console.log(`[cowork-vm] ready pid=${proc.pid}`);
           return getStatus();
         }
         emitProgress('booting', 'waiting for sandbox to boot');
@@ -464,7 +383,6 @@ export async function stop(): Promise<void> {
     setTimeout(() => { try { if (isPidAlive(pid)) process.kill(pid, 'SIGKILL'); } catch { /* ignore */ } }, 3000);
   }
   s.proc = null;
-  s.ip = null;
   s.phase = 'stopped';
   s.reason = undefined;
   try { fs.rmSync(VFKIT_PID_FILE, { force: true }); } catch { /* ignore */ }

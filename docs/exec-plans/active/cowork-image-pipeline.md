@@ -10,7 +10,7 @@
 
 | Phase | 内容 | 状态 | 备注 |
 |-------|------|------|------|
-| M1 | 首启自注入 + SSH 退役:seed 由代码生成(daemon/systemd 烘进 cloud-init),vm-manager 就绪链全 vsock,claude binary 经 vsock 推入 | 🔄 进行中 | |
+| M1 | 首启自注入 + SSH 退役:seed 由代码生成(daemon/systemd 烘进 cloud-init),vm-manager 就绪链全 vsock,claude binary 经 vsock 推入 | ✅ 已完成 | 2026-07-14 四项验收全过:①老盘升级(instance-id 变更触发 cloud-init 重跑,daemon v2 systemd active+enabled,回合 43s 产物内容正确)②处女盘首启(中科大新下 raw 校验 sha512 一致,首启自注入+253MB binary vsock 推入,97s 全链路,guest 实测 sshd inactive+masked/growpart 吃满)③二次启动 daemon ~5s 就绪④零 SSH(密钥目录挪走全程无影响);test 1930 绿 + smoke 6/6 |
 | M2 | 宿主下载器 + 就绪状态机 + UI 下载引导:底镜走中科大、claude 平台子包走 npmmirror,断点续传+校验+磁盘预检,设置页/办公空态出「下载」按钮+进度,下载中禁发 | 📋 待开始 | |
 | M3 | 打包正式化:vfkit 内置 app 包(签名/entitlement 验证)、daemon/forwarder 脚本随包分发(去仓库绝对路径依赖)、资产目录正式化 + 升级/GC | 📋 待开始 | |
 | M4 | 裸机验收 + 失败路径矩阵 + 双文档 | 📋 待开始 | CI 回归验证列为可选项 |

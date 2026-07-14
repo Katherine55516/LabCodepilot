@@ -6,13 +6,13 @@
 > POC 脚手架说明:[scripts/poc/cowork/README.md](../../scripts/poc/cowork/README.md)
 >
 > **本文件目标:让接手者读完即可完整理解 cowork 办公模式、并立刻接上未完成的工作,无遗漏。**
-> 最后更新:2026-07-14 · 分支 `vm_cowork`(HEAD `4a8e630`,**已推送**,工作区干净)· 版本 **3.1.14**(DMG 已交付用户验收中)· 状态:P0 + P1-A~D + 办公模式 E1-E5 **全部完成**。
+> 最后更新:2026-07-14 · 分支 `vm_cowork`(HEAD 以 git log 为准,均已推送至 origin)· 版本 **3.1.14**(DMG 已交付用户验收中)· 状态:P0 + P1-A~D + 办公模式 E1-E5 **全部完成**;**镜像流水线 M1 已完成**(用户已拍板 D1-D4)。
 >
 > **当前节点与下一步(接手先读这段)**:
 > 1. 用户正在验收 3.1.14(重点:E5 设置开关、E4.3 删除刷新);验收中的反馈按"复现→修→CDP 验证→commit→bump→打包"节奏处理。
-> 2. 已向用户建议的下一个大项:**镜像流水线**(内部试用→真实交付的关键路径:CI 出镜像、daemon 烘进镜像 systemd 自启→SSH 退役、应用内首次下载+后台预热、设置开关演进为下载引导;调研文档 §7.1 有下载窗口设计)。**用户尚未拍板**,开工前先写执行计划(exec-plans/active/)。
+> 2. **镜像流水线已立项开工**(计划+决策日志:docs/exec-plans/active/cowork-image-pipeline.md)。M1(首启自注入+SSH 全退役)已完成并四项实测验收;**下一步 = M2**(宿主下载器:底镜走中科大+claude 平台子包走 npmmirror、断点续传+sha512、状态机+设置页/办公空态「下载」按钮+下载中禁发)→ M3(vfkit 内置+脚本随包+升级 GC)→ M4(裸机验收+双文档)。已定决策:不做 Intel x64;显式点击才下载;下载中禁发;daemon 升级=seed 模板版本 bump。
 > 3. 其他待定:vm_cowork 合回 main(20+ commit,用户决定时机);用户手册(docs/user-manual/,用户自己在写)补办公模式章节(产品名用全称「AI Native Lab - 工作平台」);之后 P3 安全强化 → P2 Windows。
-> 4. 注意:`docs/user-manual/`、`image-config-server-verification.md`、`scripts/dev/docker-win-build.sh` 是用户自己的 untracked 文件,**commit 时绝不能用 `git add -A` 扫进去**(踩过一次,当场 amend 移出)。
+> 4. 注意:`docs/user-manual/`、`image-config-server-verification.md`、`scripts/dev/docker-win-build.sh` 是用户自己的 untracked 文件,**commit 时绝不能用 `git add -A` 扫进去**(踩过一次,当场 amend 移出)。另:用户开发机上 `~/.codepilot/cowork-poc/images/*.raw.old-provisioned.bak` 与 `efi-variable-store.bak` 是 M1 验收时的老盘备份(3GB),确认稳定后可删。
 
 ---
 
@@ -45,7 +45,7 @@ Next server(宿主)                                     VM guest(Debian, aarch64
 
 数据流(一次沙箱回合):
 1. `/api/chat` 收到消息,`claude-client.streamClaudeSdk` 进入 cowork 分支(`decideCowork`)。
-2. `decideCowork` → `ensureRunning()`:VM 没起就 spawn vfkit + provision daemon(阻塞到就绪,期间发 `vm_status` SSE)。
+2. `decideCowork` → `ensureRunning()`:VM 没起就生成 seed + spawn vfkit,轮询 vsock 到 daemon 就绪(daemon 由 cloud-init 首启注入、systemd 开机拉起;claude binary 缺则 vsock 推入。阻塞到就绪,期间发 `vm_status` SSE)。
 3. 附件经 vsock `writeFile` 推入 VM workspace;prompt 里的文件路径改写成 VM 内路径。
 4. SDK spawn `forwarder-vsock.sh`(它 exec `node forwarder-vsock.mjs`),转发器连 vsock,发 `exec` header,把 stdin/stdout 与 VM 内 claude 对接。
 5. claude 在 VM 内跑 stream-json,输出经 vsock→转发器→SDK。
@@ -60,8 +60,9 @@ Next server(宿主)                                     VM guest(Debian, aarch64
 | 文件 | 职责 |
 |---|---|
 | `src/lib/cowork-poc.ts` | `decideCowork(sandboxEnabled)`:三重门(全局 `cowork_enabled` 设置 + 会话 `sandbox_enabled` + `ensureRunning` 就绪)→ 返回是否走沙箱 + 转发器路径。**async**(会等 VM 就绪)。`forwarderPath()` 解析 forwarder-vsock.sh。 |
-| `src/lib/cowork-vm-manager.ts` | VM 生命周期**单例**(挂 globalThis 抗 hot-reload)。`ensureRunning()`(懒启动/复用/崩溃重建,幂等+并发安全 startingPromise)、`getStatus()`、`markSessionActive/releaseSession`(空闲回收计数)、`stop()`、`onVmProgress()`(P1-D 进度发射器)、`parseLeaseIp()`(纯函数,单测覆盖)。健康探测走 vsock。 |
-| `src/lib/cowork-vsock.ts` | 宿主侧 vsock RPC 客户端。连 vfkit 的 unix socket,发 JSON header + body。导出 `vsockHealthy` / `rpcMkdirWorkspace` / `rpcWriteFile` / `rpcListFiles` / `rpcRemoveSession` / `rpcReadFileStream` / `rpcArchiveStream`。`readJsonHeader` 处理 close/超时(见 §9 bug①)。 |
+| `src/lib/cowork-vm-manager.ts` | VM 生命周期**单例**(挂 globalThis 抗 hot-reload)。`ensureRunning()`(懒启动/复用/崩溃重建,幂等+并发安全 startingPromise)、`getStatus()`、`markSessionActive/releaseSession`(空闲回收计数)、`stop()`、`onVmProgress()`(P1-D 进度发射器)、`provisionGuest()`(M1:health 拿 version/claude,binary 缺则 vsock 推入)。**M1 起零 SSH**:就绪判定=轮询 vsock health,DHCP/`parseLeaseIp`/sshOk/scp 全删,`VmStatus` 不再有 ip 字段。 |
+| `src/lib/cowork-seed.ts` | **M1 新增:cloud-init seed 生成**。`SEED_TEMPLATE_VERSION`(决定 instance-id → 升级触发器)、`EXPECTED_DAEMON_VERSION`(跨层单测锁 daemon 版本)、`buildUserData`(daemon base64 内嵌 + systemd unit + mask ssh,纯函数)、`buildMetaData`、`ensureSeedIso()`(hdiutil makehybrid 造 cidata ISO,内容寻址缓存+旧版清理)、`resolveDaemonSource()`(原 hostDaemonPath 迁入)。 |
+| `src/lib/cowork-vsock.ts` | 宿主侧 vsock RPC 客户端。连 vfkit 的 unix socket,发 JSON header + body。导出 `vsockHealth`(M1 富探测 {ok,version,claude})/ `vsockHealthy` / `rpcInstallBinary`(M1:createReadStream 推流,253MB 级)/ `rpcMkdirWorkspace` / `rpcWriteFile` / `rpcListFiles` / `rpcRemoveSession` / `rpcReadFileStream` / `rpcArchiveStream`。`readJsonHeader` 处理 close/超时(见 §9 bug①)。 |
 | `src/lib/cowork-transfer.ts` | 文件通道**对外契约层**(claude-client / artifacts route 依赖这些签名):`sessionWorkspace` / `vmChannelReady` / `ensureSessionWorkspace` / `pushFileToVm` / `listNewFiles` / `assertPathInWorkspace`(host 侧廉价早拒)/ `readFileStream` / `archiveStream` / `removeSessionDir`。内部全部委托给 cowork-vsock。 |
 | `src/app/api/cowork/artifacts/route.ts` | 产物 API。`?list=1`(读库,VM 休眠也可用,懒迁移;**VM 在线时对账剔除已删文件并回写**,E4.2)、`?path=`(下载单文件,VM 离线时 ensureRunning 唤醒)、`?archive=1`(打包)。错误统一脱敏。 |
 | `src/app/api/cowork/status/route.ts` | 可用性状态(E3):`{enabled, imageProvisioned, vmPhase}`,只读探测绝不触发 VM 启动,fail-closed。供双栏可见性 gate、办公空态、设置页提示。 |
@@ -100,7 +101,7 @@ Next server(宿主)                                     VM guest(Debian, aarch64
 
 - **放 server 侧而非 electron main**:`npm run dev`(主要验证环境)没有 main 进程,也没有 server→main 消息通道;dev 与打包版共用同一套逻辑,claude-client 直接 import 调用。代价:VM 与 next-server 同生命周期。
 - **状态机**:`stopped → starting → running → crashed`。`ensureRunning()` 幂等 + 并发安全(共享 `startingPromise`)。
-- **启动**:沙箱首条消息触发 → spawn vfkit(带 vsock 设备)→ 轮询 DHCP 租约(`parseLeaseIp` 按 hostname `cowork-poc` 反查,**不能按 MAC**——vmnet 的 hw_address 是 client-id 格式)+ SSH 就绪 → provision(推 claude binary + 推/启 daemon)。
+- **启动(镜像流水线 M1 起全 vsock,零 SSH)**:沙箱首条消息触发 → `ensureSeedIso()`(cowork-seed.ts 生成 cloud-init seed,内容寻址缓存)→ spawn vfkit(挂底镜 + 生成的 seed + vsock 设备)→ **轮询 vsock health 即就绪**(daemon 由 cloud-init 首启注入的 systemd unit 开机拉起;老盘实测 ~5s,虚拟首启含 cloud-init 注入更久,READY_TIMEOUT 240s)→ `provisionGuest()`(health 一次拿全 version/claude:binary 缺 → vsock `installBinary` 流式推入)。宿主全程不需要知道 VM 的 IP(DHCP 租约反查/`parseLeaseIp`/sshOk/scp 已全部删除)。
 - **健康**:每 20s vsock health,双探失败 → crashed(下条消息 ensureRunning 自动重建)。
 - **空闲回收**:活跃会话计数(markSessionActive/releaseSession)归零 15 分钟 → stop。
 - **退出清理**:process exit/SIGTERM/SIGINT 关掉本进程起的 VM(不留孤儿);spawn 前 reap 无法连通的 pidfile 孤儿。
@@ -112,11 +113,12 @@ Next server(宿主)                                     VM guest(Debian, aarch64
 
 **vfkit 配置**:`--device virtio-vsock,port=1024,socketURL=<POC>/vsock-1024.sock,connect`。`connect` 模式 = guest daemon 当 server、宿主连 unix socket。**vfkit 是透明字节代理:无 Firecracker 式 `CONNECT` 握手、无魔数**,连上即裸流,应用层协议自定。(网上说的 "VFKT 魔数" 是 gvproxy 网络栈的东西,与 vsock 无关。)
 
-**daemon 协议**(每连接首行 JSON header `\n` 结尾):
+**daemon 协议**(每连接首行 JSON header `\n` 结尾;daemon v2 起 health 带版本与执行面状态):
 ```
-{"op":"health"}                                  -> {"ok":true}\n
+{"op":"health"}                                  -> {"ok":true,"version":N,"claude":bool}\n
 {"op":"mkdirWorkspace","sessionId"}              -> {"ok":true,"path"}\n
 {"op":"writeFile","sessionId","name","size":N}   -> 读 N 字节 -> {"ok":true,"path"}\n
+{"op":"installBinary","name","size":N}           -> 读 N 字节(流式直写 .part+原子替换)-> {"ok":true,"path"}\n
 {"op":"listFiles","sessionId","since":ms}        -> {"ok":true,"files":[{path,name,size,mtime}]}\n
 {"op":"readFile","sessionId","path"}             -> {"ok":true,"size":N}\n + N 字节
 {"op":"archive","sessionId"}                     -> {"ok":true,"size":N}\n + N 字节(tar.gz)
@@ -124,6 +126,11 @@ Next server(宿主)                                     VM guest(Debian, aarch64
 {"op":"exec","sessionId","argv":[],"env":{}}     -> 见下
 错误 -> {"ok":false,"error":"..."}\n
 ```
+installBinary 的 name 走 daemon 侧白名单(仅 `claude` → `~/bin/claude`),绝不接受路径;
+v1 daemon(SSH 时代)health 无 version 字段,宿主 provisionGuest 据此走兼容路径(跳过
+binary 检查,VM 重启后经新 seed 自动升 v2)。**版本纪律:改 cowork-daemon.py 必须同步
+bump DAEMON_VERSION + cowork-seed.ts 的 SEED_TEMPLATE_VERSION/EXPECTED_DAEMON_VERSION**
+(跨层单测锁定;instance-id 随模板版本变化,cloud-init 才会在已有磁盘上重跑注入)。
 
 **exec 通道(关键)**:spawn claude 后双向管道。**stdin 方向做 `[uint32 BE 长度][字节]` 帧封装 + 长度 0 的 EOF 标记;stdout 方向裸流。** 为什么:vfkit 不可靠传播 TCP 半关闭(host `sock.end()` 的 FIN 到不了 guest),不能靠 recv 返回空判定 stdin 结束。SDK 单轮结束关 forwarder stdin → forwarder 发长度 0 帧 → daemon 关 claude stdin → claude 退出 → SDK 迭代器结束 → `done`。连接被非正常断(abort)→ 帧读到中途 EOF → daemon 杀 claude。**这是修卡死 bug 的核心机制,改这块务必理解(§9 bug②③)。**
 
@@ -147,16 +154,16 @@ Next server(宿主)                                     VM guest(Debian, aarch64
 ## 6. POC 资产布局(`~/.codepilot/cowork-poc/`,不进 git,不随包)
 
 ```
-images/debian-12-genericcloud-arm64.raw   # Debian 云镜像(中科大源,3GB raw)
-images/seed.iso                            # cloud-init NoCloud seed(注入 agent 用户 + SSH 公钥)
-seed/                                      # seed 源文件
-ssh/id_ed25519{,.pub}                      # POC 专用 SSH 密钥(仅 provisioning 用)
-bin/package/claude                         # 官方 linux-arm64 claude binary(~250MB,provision 时 scp 进 VM)
+images/debian-12-genericcloud-arm64.raw   # Debian 底镜(中科大源,3GB raw;M2 起应用内下载)
+images/seed-codepilot-v1-<hash8>.iso       # M1:代码生成的 cloud-init seed(daemon+systemd 注入,内容寻址)
+images/seed.iso                            # 遗留:手工 seed(带 SSH 公钥),仅 vm-up.sh 手动调试用,应用不再读取
+seed/ + ssh/id_ed25519{,.pub}              # 遗留:seed 源文件与 SSH 密钥,应用不再依赖(M1 验收时挪走全程无影响)
+bin/package/claude                         # linux-arm64 claude binary(=SDK 平台子包解包,M1 经 vsock installBinary 推入;M2 起走 npmmirror 下载)
 efi-variable-store                         # vfkit EFI 变量
-vfkit.pid / vm-ip / vm-console.log         # 运行时状态
+vfkit.pid / vm-console.log                 # 运行时状态(vm-ip 已随 SSH 链退役)
 vsock-1024.sock                            # vfkit 暴露的 vsock unix socket(VM 跑时存在)
 ```
-镜像/binary 是**手动预置**的(P1 不做下载流水线)。新机器要跑得先复刻这个目录 —— 见 scripts/poc/cowork/README.md。
+M1 后仍需手动预置的只剩**底镜 raw 与 claude binary**(M2 下载器消灭)+ brew 装 vfkit(M3 内置)。新机器复刻见 scripts/poc/cowork/README.md;镜像流水线计划见 docs/exec-plans/active/cowork-image-pipeline.md。
 
 ---
 
@@ -182,11 +189,17 @@ vsock-1024.sock                            # vfkit 暴露的 vsock unix socket(V
 - **E4.3**(`ed6d4fe`):useSSEStream 空快照放行(纯删除回合清卡的根因)+ 回合完成自动重拉兜底。
 - **E5 正式化收尾**:设置页「办公模式(Cowork 沙箱)」开关(写 cowork_enabled、双栏即时显隐、镜像未预置警示);PATCH sandbox_enabled 锁定(400 SANDBOX_MODE_IMMUTABLE);真机零写入验收(见 §8.5)+ fs-audit.sh 强验收脚本;本双文档。
 
-### 未完成 —— P2/P3(P1 之后)
+### 已完成 —— 镜像流水线 M1(2026-07-14,计划见 exec-plans/active/cowork-image-pipeline.md)
 
+- **M1 首启自注入 + SSH 全退役**:cowork-seed.ts 生成 cloud-init seed(daemon base64 + systemd unit + mask ssh,instance-id=模板版本);daemon v2(health 带 version/claude + installBinary 流式落盘);vm-manager 删光 SSH/DHCP 链,就绪=轮询 vsock,binary 缺则 vsock 推入。四项实测:老盘 cloud-init 重跑升级、处女盘(中科大新下+sha512 核验)97s 首启全链路、二次启动 daemon ~5s、SSH 密钥挪走全程零影响;guest 内取证 sshd inactive+masked、daemon active+enabled、binary 时间戳=当次推入。
+
+### 未完成 —— 镜像流水线 M2-M4 + P2/P3
+
+- **M2 宿主下载器**(下一步):底镜中科大源(当期 bookworm latest sha512 `7caf037e…599ed0a` 实测可用)+ claude 走 npmmirror `@anthropic-ai/claude-agent-sdk-linux-arm64`(与宿主 SDK 同版本,0.3.203 实测 79MB tgz);断点续传+校验+磁盘预检+truncate 稀疏扩容;状态机+「下载」按钮+进度+下载中禁发(D3/D4)。
+- **M3 打包正式化**:vfkit 内置 app 包(entitlement 签名 POC)、daemon/forwarder 随包分发(去仓库绝对路径依赖 —— 现打包版只在有仓库的机器能跑 cowork)、资产目录迁移+升级/GC。
+- **M4 裸机验收 + 双文档**。
 - **P2 Windows**:WSL2 私有 distro(明确不走 Hyper-V HCS,官方 Cowork 的 Home 版惨案)+ 降级探测。vsock 在 WSL2 上的等价通道要重新调研。
-- **P3 安全强化**:宿主代理注入 token(永不进 VM)、出网白名单、每会话非特权用户/bwrap、下载凭证扫描。
-- **镜像流水线**:镜像 + daemon 烘进产物、CI 构建、首次下载 + 后台预热(调研文档 §7.1 的下载窗口 + 消息队列,P1 未做因镜像手动预置)。daemon 烘进镜像用 systemd 自启后,SSH 可彻底退役。
+- **P3 安全强化**:宿主代理注入 token(永不进 VM)、出网白名单、每会话非特权用户/bwrap、下载凭证扫描(sshd mask 已随 M1 提前落袋)。
 - **小项待办**:办公会话标题旁的模式徽标(可选)、办公列表长列表截断(现平铺不截断)、guest 磁盘用量可视化。
 
 ---
@@ -253,7 +266,7 @@ npm run electron:build && node scripts/bundle-chromium.mjs && npx electron-build
 5. **provision `pkill -f cowork-daemon.py` 自杀**:命令行含 python3 路径 → pkill 匹配到自己那条 launch 命令 → 自杀,daemon 起不来。修:bracket trick `[c]owork-daemon.py` + 拆独立 ssh 调用。
 6. **better-sqlite3 ABI**:打包 → Electron ABI;dev/test 需 `npm rebuild better-sqlite3` 回 node ABI。每次打包后都要 rebuild 才能继续 dev/test。
 7. **forwarder 需要 node 但打包版 Electron 无独立 node**:用 `COWORK_NODE_BIN=process.execPath` + `ELECTRON_RUN_AS_NODE=1`,forwarder.sh 用它跑 .mjs,不依赖 PATH。
-8. **SSH 未 100% 退役**:运行时数据流(exec/文件/健康)全 vsock;SSH 仅剩 VM-provision 一次性(推 binary + 推/启 daemon)。生产把 daemon 烘进镜像 systemd 自启后可彻底去 SSH。
+8. **SSH 已 100% 退役(镜像流水线 M1,2026-07-14)**:provisioning 改为 cloud-init seed 首启自注入(daemon+systemd),binary 走 vsock installBinary,新 seed 灌过的 guest 里 sshd 被 mask。**代价:guest 无 SSH 调试通道** —— 观测手段=沙箱会话里让 agent 跑命令带出结果(systemctl/ls/cat 均可),或 git revert 回老链路;vm-console.log 因 guest 内核未把 console 指到 virtio-serial 长期为空(P1 时代已如此),别指望它。
 9. **decideCowork 是 async**:会阻塞到 VM 就绪(冷启动数秒~数十秒)。沙箱首条消息因此慢是正常的,P1-D 横幅就是给这段做反馈。
 10. **vm_artifacts 空表不得吞(E4.3)**:事件语义是"回合末权威全量快照",空表 = 纯删除回合清卡的关键载荷。useSSEStream 曾残留 `length>0` 守卫吞空快照 →"只删文件的回合卡片不刷新"。改事件链任何一层都不要加长度守卫;ChatView 是整表替换不是合并。
 11. **Radix Tabs 默认 automatic 激活 = focus 即切换**:侧边栏双栏必须 `activationMode="manual"`,否则 Tab 键路过/a11y 遍历就切视图并写 localStorage(CDP 实测误触)。另:程序化 `.click()` 不触发 Radix 激活(挂在 mousedown),测试要派发完整鼠标事件序列。
@@ -261,6 +274,7 @@ npm run electron:build && node scripts/bundle-chromium.mjs && npx electron-build
 13. **unseal 脚本 vs 运行中的打包版 App**:两者同 app name(codepilot)→ 同 userData → Chromium ProcessSingleton 锁互斥,打包版开着时 unseal 无限排队(实测挂一小时)。unseal.js 必须 `app.setPath('userData', <独立临时目录>)`(keychain service 名只跟 app name 走,不受影响)。
 14. **裸 API 创建的会话没有凭证面**:UI 创建会自动带 localStorage 的 last-model/last-provider-id;curl 直接 POST 不带 → 会话落到默认模型且无 managed provider → VM 内 claude 秒退(init 成功但 result is_error、0 token、~15ms)。测试脚本创建会话务必带 model + provider_id。
 15. **别名模型(如 claude-opus-4-8[1m])在办公回合**:同上一条一起排查过 —— 模型面问题的表象都是"init 正常 + 秒退",先查会话的 model/provider_id 再怀疑通道。
+16. **三处版本必须同步 bump(M1 seed 注入纪律)**:改 `cowork-daemon.py` → 必 bump 它的 `DAEMON_VERSION` + `cowork-seed.ts` 的 `EXPECTED_DAEMON_VERSION`(跨层单测锁,忘了会挂测试)**和 `SEED_TEMPLATE_VERSION`**(这个单测锁不住:instance-id 不变则 cloud-init 不重跑,已有磁盘永远拿不到新 daemon,表象=健康探测 version 落后告警)。write_files/runcmd 是 per-instance 语义,这是升级机制的全部。
 
 ---
 

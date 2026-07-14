@@ -63,7 +63,7 @@ export async function decideCowork(sandboxEnabled: boolean | number | undefined)
   }
   // 懒启动/重建 —— 崩溃态也会在这里被重新拉起。
   const vm = await ensureRunning();
-  if (vm.phase !== 'running' || !vm.ip) {
+  if (vm.phase !== 'running') {
     return { useSandbox: false, reason: `vm_${vm.phase}${vm.reason ? ':' + vm.reason : ''}` };
   }
   return { useSandbox: true, executablePath: fwd };

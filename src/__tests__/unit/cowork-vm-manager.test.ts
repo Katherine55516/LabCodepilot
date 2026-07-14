@@ -2,62 +2,7 @@ import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'path';
 
-describe('cowork-vm-manager: parseLeaseIp', () => {
-  let parseLeaseIp: typeof import('../../lib/cowork-vm-manager').parseLeaseIp;
-
-  it('loads', async () => {
-    ({ parseLeaseIp } = await import(path.resolve(__dirname, '../../lib/cowork-vm-manager.ts')));
-    assert.equal(typeof parseLeaseIp, 'function');
-  });
-
-  it('extracts the IP for the matching hostname', async () => {
-    const leases = `{
-\tname=cowork-poc
-\tip_address=192.168.64.7
-\thw_address=ff,f1:f5:dd
-}`;
-    assert.equal(parseLeaseIp(leases, 'cowork-poc'), '192.168.64.7');
-  });
-
-  it('returns null when the hostname is absent', async () => {
-    const leases = `{
-\tname=some-other-vm
-\tip_address=192.168.64.3
-}`;
-    assert.equal(parseLeaseIp(leases, 'cowork-poc'), null);
-  });
-
-  it('takes the LAST lease when the hostname appears multiple times (stale + fresh)', async () => {
-    const leases = `{
-\tname=cowork-poc
-\tip_address=192.168.64.2
-}
-{
-\tname=unrelated
-\tip_address=192.168.64.5
-}
-{
-\tname=cowork-poc
-\tip_address=192.168.64.9
-}`;
-    assert.equal(parseLeaseIp(leases, 'cowork-poc'), '192.168.64.9');
-  });
-
-  it('does not confuse a different VM that shares an IP-like substring', async () => {
-    const leases = `{
-\tname=cowork-poc-other
-\tip_address=192.168.64.1
-}`;
-    // 'name=cowork-poc' IS a substring of 'name=cowork-poc-other', so the block
-    // matches; this documents the substring behavior. Callers use a fixed unique
-    // hostname so this is acceptable, but the test pins the actual semantics.
-    assert.equal(parseLeaseIp(leases, 'cowork-poc'), '192.168.64.1');
-  });
-
-  it('returns null on empty input', async () => {
-    assert.equal(parseLeaseIp('', 'cowork-poc'), null);
-  });
-});
+// parseLeaseIp 套件已随 M1 移除:SSH/DHCP 反查链整体退役,就绪判定全走 vsock。
 
 describe('cowork-poc: decideCowork gate (safe early-returns, no VM start)', () => {
   it('sandbox disabled → useSandbox:false, touches nothing', async () => {

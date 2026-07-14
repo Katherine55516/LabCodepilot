@@ -12,15 +12,21 @@ op,之后按 op 语义收发。vfkit 是透明字节代理(无握手、无魔数
 防逃逸;写入文件名 basename + 白名单清洗。
 
 协议(每连接首行 JSON header + 换行):
-  {"op":"health"}                                  -> {"ok":true}\n
+  {"op":"health"}                                  -> {"ok":true,"version":N,"claude":bool}\n
   {"op":"mkdirWorkspace","sessionId":"..."}        -> {"ok":true,"path":"..."}\n
   {"op":"writeFile","sessionId","name","size":N}   -> 读 N 字节 -> {"ok":true,"path":"..."}\n
+  {"op":"installBinary","name","size":N}           -> 读 N 字节 -> {"ok":true,"path":"..."}\n
   {"op":"listFiles","sessionId","since":ms}        -> {"ok":true,"files":[{path,name,size,mtime}]}\n
   {"op":"readFile","sessionId","path":"..."}       -> {"ok":true,"size":N}\n + N 字节
   {"op":"archive","sessionId"}                     -> {"ok":true,"size":N}\n + N 字节(tar.gz)
   {"op":"removeSession","sessionId"}               -> {"ok":true}\n
   {"op":"exec","sessionId","argv":[...],"env":{}}  -> 裸双向管道(stdin<->stdout),无 header 响应
   错误一律 -> {"ok":false,"error":"..."}\n
+
+版本纪律(镜像流水线 M1):本文件经 cloud-init seed 首启注入(write_files 是
+per-instance 语义)。**改本文件必须同步 bump DAEMON_VERSION,并 bump 宿主侧
+cowork-seed.ts 的 SEED_TEMPLATE_VERSION**(instance-id 变化才会让已有磁盘重跑
+cloud-init 拿到新版)。宿主 EXPECTED_DAEMON_VERSION 有跨层单测锁定。
 """
 import json
 import os
@@ -32,9 +38,13 @@ import sys
 import threading
 import time
 
+DAEMON_VERSION = 2
+
 PORT = int(os.environ.get("COWORK_VSOCK_PORT", "1024"))
 SESSIONS_ROOT = "/home/agent/sessions"
 CLAUDE_BIN = os.path.expanduser("~/bin/claude")
+# installBinary 的 name 白名单:只认逻辑名,绝不接受路径
+INSTALL_TARGETS = {"claude": CLAUDE_BIN}
 HEX_RE = re.compile(r"^[a-fA-F0-9]{8,64}$")
 SAFE_NAME_RE = re.compile(r"[^a-zA-Z0-9._一-鿿-]")
 
@@ -72,7 +82,10 @@ def recv_exact(conn, n, prefix=b""):
 
 
 def op_health(conn, req, rest):
-    send_json(conn, {"ok": True})
+    # version:宿主一致性哨兵;claude:执行面就绪(缺则宿主 installBinary 推入),
+    # 一次探测拿全就绪信息,省一轮 RPC。
+    claude_ready = os.path.isfile(CLAUDE_BIN) and os.access(CLAUDE_BIN, os.X_OK)
+    send_json(conn, {"ok": True, "version": DAEMON_VERSION, "claude": claude_ready})
 
 
 def op_mkdir(conn, req, rest):
@@ -91,6 +104,33 @@ def op_write_file(conn, req, rest):
     with open(dest, "wb") as f:
         f.write(data)
     send_json(conn, {"ok": True, "path": dest})
+
+
+def op_install_binary(conn, req, rest):
+    """宿主推可执行资产(M1:claude binary,~250MB)。与 op_write_file 的区别:
+    流式 recv 直写 .part 文件(大文件不进内存,VM 只有 2GB RAM),完成后
+    chmod + os.replace 原子替换 —— exec 并发读到半个 binary 的窗口不存在。"""
+    target = INSTALL_TARGETS.get(req.get("name") or "")
+    if not target:
+        raise ValueError("unknown binary name")
+    size = int(req["size"])
+    os.makedirs(os.path.dirname(target), exist_ok=True)
+    tmp = target + ".part"
+    remaining = size
+    head = bytes(rest[:size]) if rest else b""
+    with open(tmp, "wb") as f:
+        if head:
+            f.write(head)
+            remaining -= len(head)
+        while remaining > 0:
+            chunk = conn.recv(min(65536, remaining))
+            if not chunk:
+                raise EOFError("connection closed mid-body")
+            f.write(chunk)
+            remaining -= len(chunk)
+    os.chmod(tmp, 0o755)
+    os.replace(tmp, target)
+    send_json(conn, {"ok": True, "path": target})
 
 
 def op_list_files(conn, req, rest):
@@ -289,6 +329,7 @@ OPS = {
     "health": op_health,
     "mkdirWorkspace": op_mkdir,
     "writeFile": op_write_file,
+    "installBinary": op_install_binary,
     "listFiles": op_list_files,
     "readFile": op_read_file,
     "archive": op_archive,

@@ -97,18 +97,59 @@ async function rpcJson(op: string, extra: Record<string, unknown> = {}, body?: B
   }
 }
 
-/** 健康探活:连上并 health RPC 成功即就绪。daemon 未监听 → 连上即断 → false。 */
-export async function vsockHealthy(timeoutMs = 4000): Promise<boolean> {
+export interface VsockHealth {
+  ok: boolean;
+  /** daemon 版本(v1 时代的 daemon 不带此字段 → undefined,宿主据此走兼容路径)。 */
+  version?: number;
+  /** guest 内 ~/bin/claude 是否就绪(缺则宿主 installBinary 推入)。 */
+  claude?: boolean;
+}
+
+/** 富健康探测:一次 RPC 拿全就绪信息(daemon 版本 + claude binary 状态)。 */
+export async function vsockHealth(timeoutMs = 4000): Promise<VsockHealth> {
   let sock: net.Socket | null = null;
   try {
     sock = await connect(timeoutMs);
     sock.write(header('health'));
     const { obj } = await readJsonHeader(sock, timeoutMs);
-    return obj.ok === true;
+    return {
+      ok: obj.ok === true,
+      version: typeof obj.version === 'number' ? obj.version : undefined,
+      claude: obj.claude === true,
+    };
   } catch {
-    return false;
+    return { ok: false };
   } finally {
     try { sock?.destroy(); } catch { /* ignore */ }
+  }
+}
+
+/** 健康探活(布尔包装):连上并 health RPC 成功即就绪。daemon 未监听 → 连上即断 → false。 */
+export async function vsockHealthy(timeoutMs = 4000): Promise<boolean> {
+  return (await vsockHealth(timeoutMs)).ok;
+}
+
+/**
+ * M1:把宿主侧可执行资产流式推入 guest(installBinary op,name 走 daemon 侧
+ * 白名单,当前仅 'claude')。253MB 级文件走 createReadStream 管道(pipe 自带
+ * 背压),daemon 落盘 + 原子替换后才回响应;本地 vsock 实测秒级,超时给足。
+ */
+export async function rpcInstallBinary(name: string, filePath: string, timeoutMs = 180_000): Promise<void> {
+  const size = fs.statSync(filePath).size;
+  const sock = await connect();
+  try {
+    sock.write(header('installBinary', { name, size }));
+    await new Promise<void>((resolve, reject) => {
+      const rs = fs.createReadStream(filePath);
+      rs.once('error', reject);
+      rs.once('end', () => resolve());
+      sock.once('error', reject);
+      rs.pipe(sock, { end: false });
+    });
+    const { obj } = await readJsonHeader(sock, timeoutMs);
+    if (!obj.ok) throw new Error(String(obj.error || 'installBinary failed'));
+  } finally {
+    sock.end();
   }
 }
 

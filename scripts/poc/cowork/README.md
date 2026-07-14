@@ -1,11 +1,19 @@
 # Cowork 沙箱模式 POC
 
 > 方案调研见 [docs/research/cowork-local-vm-mode.md](../../../docs/research/cowork-local-vm-mode.md)
-> 首启窗口设计见同文档 §7.1
+> 首启窗口设计见同文档 §7.1;镜像流水线见 [docs/exec-plans/active/cowork-image-pipeline.md](../../../docs/exec-plans/active/cowork-image-pipeline.md)
 
 验证"把 Claude Agent SDK 的 CLI 进程放进本地隔离虚拟机、真机文件零接触"的转发桥拓扑。
-**这是开发者自测用的 POC 脚手架,不随应用分发。** 生产形态会把 SSH 换成 vsock + guest-daemon、
-把 vfkit 换成签名 helper、把手动脚本换成 electron-main 里的 VM 管理器。
+**这是开发者自测用的 POC 脚手架,不随应用分发**(cowork-daemon.py / forwarder-vsock.* 是
+运行时资产,镜像流水线 M3 会随包分发)。
+
+**镜像流水线 M1 起,应用运行时已零 SSH**:seed 由 `src/lib/cowork-seed.ts` 自动生成
+(daemon + systemd unit 经 cloud-init 首启注入,并 mask ssh),claude binary 经 vsock
+`installBinary` 推入。本目录的 `images/seed.iso`(手工 seed,带 SSH 公钥)与 `ssh/` 密钥
+**仅供 vm-up.sh 手动调试老镜像使用**,应用不再读取;新 seed 灌过的 VM 里 sshd 已被 mask,
+SSH 调试通道不复存在(观测走沙箱会话内让 agent 跑命令,或 git revert 回老链路)。
+**改 cowork-daemon.py 必须同步 bump 它的 DAEMON_VERSION + cowork-seed.ts 的
+SEED_TEMPLATE_VERSION 和 EXPECTED_DAEMON_VERSION**(跨层单测锁定,详见 cowork-seed.ts 头注)。
 
 ## 前置
 
