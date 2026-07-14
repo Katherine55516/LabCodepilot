@@ -39,16 +39,28 @@ export async function GET(request: NextRequest) {
     if (wantList) {
       // List reads from the DB first — always available, even while the VM is
       // asleep (the VM is only needed to download file contents). Sessions
-      // predating persistence (empty DB list) migrate lazily: if the VM is
-      // online, pull the live list once and persist it.
+      // predating persistence (empty DB list) migrate lazily; and when the VM
+      // IS online, reconcile deletions (E4.2): drop entries whose files no
+      // longer exist in the workspace (agent rm'd them mid-turn, or they were
+      // cleaned while the list was stale) and persist the pruned list.
       const { getSessionVmArtifacts, setSessionVmArtifacts } = await import('@/lib/db');
       let files = getSessionVmArtifacts(sessionId);
       const vmOnline = await vmChannelReady();
-      if (files.length === 0 && vmOnline) {
+      if (vmOnline) {
         try {
-          files = await listNewFiles(sessionId, 0);
-          if (files.length > 0) setSessionVmArtifacts(sessionId, files);
-        } catch { /* live migration is best-effort */ }
+          const live = await listNewFiles(sessionId, 0);
+          if (files.length === 0) {
+            files = live;
+            if (live.length > 0) setSessionVmArtifacts(sessionId, live);
+          } else {
+            const livePaths = new Set(live.map((f) => f.path));
+            const pruned = files.filter((f) => livePaths.has(f.path));
+            if (pruned.length !== files.length) {
+              setSessionVmArtifacts(sessionId, pruned);
+              files = pruned;
+            }
+          }
+        } catch { /* live reconcile is best-effort */ }
       }
       return Response.json({ files, vmOnline });
     }

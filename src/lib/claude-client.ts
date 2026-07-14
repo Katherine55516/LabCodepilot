@@ -1848,34 +1848,48 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
                 }
               }
 
-              // Cowork sandbox: diff the VM session workspace for files the agent
-              // created/modified this turn and surface them as downloadable
-              // artifacts. Bounded by a 8s race so a wedged VM can never stall
-              // stream close; uploads pushed at turn start are excluded.
+              // Cowork sandbox (E4.2): reconcile the artifact list against the
+              // VM workspace at end of turn. One full listing (since=0) gives
+              // both ① this turn's new/modified files (mtime >= turnStart,
+              // minus this turn's uploads) and ② the set of paths that still
+              // exist — files the agent DELETED mid-turn must drop off the
+              // card (user report: rm'd file lingered with a dead download
+              // button). Bounded by an 8s race so a wedged VM can never stall
+              // stream close; on timeout the stale list self-heals next turn
+              // or via the list endpoint's online reconcile.
               if (coworkActive && !resultMsg.is_error) {
                 try {
                   const { listNewFiles } = await import('./cowork-transfer');
-                  const artifacts = await Promise.race([
-                    listNewFiles(sessionId, coworkTurnStartMs, [...coworkVmPathByHostPath.values()]),
+                  const allFiles = await Promise.race([
+                    listNewFiles(sessionId, 0),
                     new Promise<never>((_, reject) => setTimeout(() => reject(new Error('vm diff timeout')), 8000)),
                   ]);
-                  if (artifacts.length > 0) {
-                    // Persist the merged artifact list so history sessions can
-                    // render the card while the VM is asleep (list from DB;
-                    // the VM is only needed at download time).
-                    try {
-                      const { mergeSessionVmArtifacts } = await import('./db');
-                      mergeSessionVmArtifacts(sessionId, artifacts);
-                    } catch (persistErr) {
-                      console.warn('[claude-client] cowork artifacts persist failed:', persistErr);
-                    }
-                    controller.enqueue(formatSSE({
-                      type: 'vm_artifacts',
-                      data: JSON.stringify({ sessionId, files: artifacts }),
-                    }));
+                  const uploadsThisTurn = new Set(coworkVmPathByHostPath.values());
+                  const livePaths = new Set(allFiles.map((f) => f.path));
+                  const newThisTurn = allFiles.filter(
+                    (f) => f.mtime >= coworkTurnStartMs && !uploadsThisTurn.has(f.path),
+                  );
+                  const { getSessionVmArtifacts, setSessionVmArtifacts, mergeVmArtifactLists } = await import('./db');
+                  // Drop DB entries whose files no longer exist, then merge in
+                  // this turn's output → authoritative snapshot, persisted so
+                  // history sessions render the card while the VM sleeps.
+                  const kept = getSessionVmArtifacts(sessionId).filter((f) => livePaths.has(f.path));
+                  const merged = mergeVmArtifactLists(kept, newThisTurn);
+                  try {
+                    setSessionVmArtifacts(sessionId, merged);
+                  } catch (persistErr) {
+                    console.warn('[claude-client] cowork artifacts persist failed:', persistErr);
                   }
+                  // vm_artifacts now carries the FULL end-of-turn snapshot and
+                  // is ALWAYS emitted (an empty list clears the card when the
+                  // agent deleted everything); the frontend replaces its state
+                  // instead of merging.
+                  controller.enqueue(formatSSE({
+                    type: 'vm_artifacts',
+                    data: JSON.stringify({ sessionId, files: merged, full: true }),
+                  }));
                 } catch (diffErr) {
-                  console.warn('[claude-client] cowork artifacts diff failed:', diffErr);
+                  console.warn('[claude-client] cowork artifacts reconcile failed:', diffErr);
                 }
               }
 

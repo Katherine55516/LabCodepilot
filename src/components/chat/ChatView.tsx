@@ -233,15 +233,24 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
   useEffect(() => {
     if (!sandboxEnabled) { setVmArtifacts([]); return; }
     let cancelled = false;
-    fetch(`/api/cowork/artifacts?sessionId=${encodeURIComponent(sessionId)}&list=1`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        if (cancelled || !data) return;
-        if (Array.isArray(data.files)) setVmArtifacts(data.files);
-        if (typeof data.vmOnline === 'boolean') setVmOnline(data.vmOnline);
-      })
-      .catch(() => {});
-    return () => { cancelled = true; };
+    const refetch = () => {
+      fetch(`/api/cowork/artifacts?sessionId=${encodeURIComponent(sessionId)}&list=1`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          if (cancelled || !data) return;
+          if (Array.isArray(data.files)) setVmArtifacts(data.files);
+          if (typeof data.vmOnline === 'boolean') setVmOnline(data.vmOnline);
+        })
+        .catch(() => {});
+    };
+    refetch();
+    // E4.2: 下载命中已删除文件时卡片发此事件 —— 重拉清单(list 端点在 VM
+    // 在线时会对账剔除已不存在的文件),把残留条目从卡片上清掉。
+    window.addEventListener('vm-artifacts-refresh', refetch);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('vm-artifacts-refresh', refetch);
+    };
   }, [sessionId, sandboxEnabled]);
 
 
@@ -291,16 +300,14 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
   const permissionResolved = streamSnapshot?.permissionResolved ?? null;
   const rewindPoints = getRewindPoints(sessionId);
 
-  // Cowork sandbox — merge per-turn artifacts from the stream snapshot
-  // (vm_artifacts SSE event) into the session-level list, deduped by path.
+  // Cowork sandbox (E4.2) — vm_artifacts 事件自此携带「回合末权威全量快照」:
+  // 整表替换而非合并。合并语义下 agent 删除的文件会永久残留在卡片上(用户
+  // 反馈:rm 掉的文件仍显示且下载无反应);空快照也必须应用(全删光时卡片
+  // 应消失)。undefined = 本会话尚无流事件,保持 list=1 拉到的初始值。
   const snapshotVmArtifacts = streamSnapshot?.vmArtifacts;
   useEffect(() => {
-    if (!snapshotVmArtifacts || snapshotVmArtifacts.length === 0) return;
-    setVmArtifacts((prev) => {
-      const byPath = new Map(prev.map((f) => [f.path, f]));
-      for (const f of snapshotVmArtifacts) byPath.set(f.path, f);
-      return [...byPath.values()];
-    });
+    if (!snapshotVmArtifacts) return;
+    setVmArtifacts(snapshotVmArtifacts);
   }, [snapshotVmArtifacts]);
 
   // ── Skill nudge banner ──

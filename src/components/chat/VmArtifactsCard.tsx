@@ -3,6 +3,7 @@
 import { useMemo, useState } from 'react';
 import type { VmArtifactFile } from '@/types';
 import { useTranslation } from '@/hooks/useTranslation';
+import { showToast } from '@/hooks/useToast';
 import { Button } from '@/components/ui/button';
 import { ShieldCheck, DownloadSimple, Package, SpinnerGap } from '@/components/ui/icon';
 
@@ -57,6 +58,10 @@ export function VmArtifactsCard({ sessionId, files, vmOnline = true }: VmArtifac
       const res = await fetch(url);
       if (!res.ok) {
         console.warn(`[VmArtifactsCard] download failed: ${res.status}`);
+        // E4.2: 大概率是文件已被 agent 删除(清单残留)。给出提示并触发
+        // 清单重拉 —— list 端点在 VM 在线时会对账剔除已不存在的文件。
+        showToast({ type: 'warning', message: t('sandbox.artifacts.downloadMissing') });
+        window.dispatchEvent(new CustomEvent('vm-artifacts-refresh'));
         return;
       }
       const blob = await res.blob();

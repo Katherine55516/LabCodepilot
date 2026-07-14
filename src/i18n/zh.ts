@@ -1624,6 +1624,7 @@ const zh: Record<TranslationKey, string> = {
   'sandbox.artifacts.sleeping': '沙箱休眠中',
   'sandbox.artifacts.sleepingHint': '文件列表来自上次记录;点击下载会自动唤醒沙箱,首次稍慢几秒',
   'sandbox.artifacts.starting': '正在唤醒沙箱,请稍候…',
+  'sandbox.artifacts.downloadMissing': '该文件在沙箱中已不存在(可能已被删除),列表已刷新。',
   'sandbox.provisioning.starting': '沙箱启动中',
   'sandbox.provisioning.booting': '沙箱启动中',
   'sandbox.provisioning.preparing': '沙箱准备中',
