@@ -370,6 +370,12 @@ export async function generateTextViaSdk(params: {
     settingSources: resolved.settingSources as Options['settingSources'],
     systemPrompt: params.system,
     maxTurns: 1,
+    // 走流式（与对话主路径一致）。非流式时把大 prompt 发出后连接【长时间静默】等整个响应，
+    // 复杂用例（如 Dashboard 渲染）模型生成久，这段静默里企业代理会把"死连接"掐断 → 响应回来
+    // 时鉴权上下文丢失 → 网关 401 → CLI 报 "Not logged in"（用户实测：对话流式 OK、生成非流式
+    // 却"未登录"，小用例生成快躲过、TC-034 生成久必中）。includePartialMessages 让 token 持续
+    // 回流、连接一直活跃，代理不再掐它。最终结果仍从 result 消息取，stream_event 增量被循环忽略。
+    includePartialMessages: true,
     // Text-only single-turn contract: strip ALL tools. With tools available,
     // a tool-eager model (e.g. qwen3.7-max asked to translate a long doc)
     // spends turn 1 on a tool call and maxTurns(1) kills the run with
