@@ -45,6 +45,8 @@
 - 2026-07-13: **D5 两个调研新发现的安全缺口必须先修(E1 先行)**:① 沙箱回合 decideCowork 失败后代码继续走宿主执行(claude-client.ts:841-848 只发 vm_status failed 未终止)——POC 的"安全回退"在产品语义下是隔离违约;改硬失败。② native runtime(openai-oauth / cli_enabled=false / agent_runtime=native)完全不感知 sandbox_enabled,办公会话会静默落真机;在 /api/chat 分发前加拒绝守卫。
 - 2026-07-13: **D6 tab 只过滤列表,不影响已打开的会话**。切 tab 不导航、不关当前会话;会话界面形态由会话自身的 sandbox_enabled 决定。办公 tab 仅在全局 `cowork_enabled==='true'` 时显示(内部试用门,经状态 API 下发)。
 - 2026-07-13: **D7 i18n 纪律**:en/zh/zh-HK 三份**全部手工添加**;不跑 `gen-zh-hk.mjs`(它会回退 ~40 个港式术语,历史教训)。文案:研发/研發/Code,办公/辦公/Work(en 可再议)。
+- 2026-07-13: **D6 修订(E4.1,用户实测反馈)**:tab 切换从「只换列表」改为「主区跟随」—— 当前打开的会话不属于目标模式时,自动切到目标模式的最近会话(无会话则回 /chat 落地页)。同批修复:办公输入 `/` 不再触发命令弹窗(源头 gate detectPopoverTrigger);带预填的 /chat 跳转(设置-CLI工具「添加工具」)强制切回研发 tab(预填=研发工作流,经 workspace-tab-changed 事件同步侧边栏)。已知边角:URL 直达(如全局搜索)可造成「tab 已是目标值+主区异模式会话」的不一致态,此时点同名 tab 无值变化不触发跟随 —— 留 E5/后续与跨 tab 高亮一起考虑。
+- 2026-07-13: **VM 存储对账(E4.1,用户提出存储管理担忧)**:removeSessionDir 在 VM 休眠时是 best-effort 失败 → 孤儿目录会累积占满 guest 磁盘。新增 daemon op `reconcileSessions {keep}`:VM 每次 ready 后宿主带全量现存会话 id(不只沙箱,防误删「曾开沙箱后关闭」会话的产物)fire-and-forget 对账,删除 DB 已不存在的 hex 目录;非 hex 形状路径一律不碰。E2E:人工孤儿 deadbeef* 冷启后被精确删除(keep=53, removed=1),53 个真会话目录零误伤。
 
 ## 详细设计
 

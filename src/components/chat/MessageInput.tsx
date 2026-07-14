@@ -309,6 +309,7 @@ export function MessageInput({
   const slashCommands = useSlashCommands({
     sessionId,
     workingDirectory,
+    officeMode,
     sdkInitMeta,
     textareaRef,
     inputValue,

@@ -162,6 +162,27 @@ def op_remove_session(conn, req, rest):
     send_json(conn, {"ok": True})
 
 
+def op_reconcile_sessions(conn, req, rest):
+    """删除 SESSIONS_ROOT 下不在 keep 名单里的孤儿会话目录(E4.1 存储对账)。
+
+    宿主删除会话时的 removeSession 是 best-effort:VM 休眠期间删除的会话
+    会留下孤儿目录,长期累积会占满 guest 磁盘。宿主在 VM 每次就绪后带全量
+    现存会话 id 调用本 op。只动名字匹配 HEX_RE 的目录 —— 非会话形状的路径
+    (调试残留等)一律不碰;keep 为空集合时同样照删(表示 DB 里已无会话)。
+    """
+    keep = set(req.get("keep") or [])
+    removed = []
+    if os.path.isdir(SESSIONS_ROOT):
+        for name in os.listdir(SESSIONS_ROOT):
+            if not HEX_RE.match(name):
+                continue
+            if name in keep:
+                continue
+            subprocess.run(["rm", "-rf", os.path.join(SESSIONS_ROOT, name)], check=False)
+            removed.append(name)
+    send_json(conn, {"ok": True, "removed": removed})
+
+
 def op_exec(conn, req, rest):
     """
     spawn claude,双向管道。stdin 方向做 [uint32 BE 长度][字节] 帧封装 + 长度 0
@@ -272,6 +293,7 @@ OPS = {
     "readFile": op_read_file,
     "archive": op_archive,
     "removeSession": op_remove_session,
+    "reconcileSessions": op_reconcile_sessions,
     "exec": op_exec,
 }
 

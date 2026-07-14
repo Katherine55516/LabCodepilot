@@ -19,6 +19,7 @@ import {
   rpcReadFileStream,
   rpcArchiveStream,
   rpcRemoveSession,
+  rpcReconcileSessions,
 } from './cowork-vsock';
 import fs from 'fs';
 
@@ -103,6 +104,16 @@ export async function archiveStream(sessionId: string): Promise<{ stream: NodeJS
 export async function removeSessionDir(sessionId: string): Promise<void> {
   assertSessionId(sessionId);
   await rpcRemoveSession(sessionId);
+}
+
+/**
+ * E4.1 存储对账:删除 VM 内不在 keep 名单里的孤儿会话目录。
+ * removeSessionDir 是 best-effort(VM 休眠时删除会话会留残留),
+ * VM 每次就绪后由 vm-manager 带全量现存会话 id 调用本函数兜底,
+ * 防止 guest 磁盘被已删除会话的遗留文件占满。
+ */
+export async function reconcileSessionDirs(keepSessionIds: string[]): Promise<string[]> {
+  return rpcReconcileSessions(keepSessionIds.filter((id) => /^[0-9a-f]{8,64}$/i.test(id)));
 }
 
 export { SESSIONS_ROOT };

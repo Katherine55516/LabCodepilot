@@ -332,6 +332,7 @@ export async function ensureRunning(): Promise<VmStatus> {
           emitProgress('ready');
           startHealth(s);
           resetIdleTimer(s);
+          fireSessionReconcile();
           console.log(`[cowork-vm] reused existing vfkit pid=${alivePid} ip=${ip}`);
           return getStatus();
         }
@@ -390,6 +391,7 @@ export async function ensureRunning(): Promise<VmStatus> {
           emitProgress('ready');
           startHealth(s);
           resetIdleTimer(s);
+          fireSessionReconcile();
           console.log(`[cowork-vm] ready ip=${ip} pid=${proc.pid}`);
           return getStatus();
         }
@@ -414,6 +416,28 @@ export async function ensureRunning(): Promise<VmStatus> {
   })();
 
   return s.startingPromise;
+}
+
+/**
+ * E4.1 存储对账(fire-and-forget,不阻塞就绪):VM 每次 ready 后,把
+ * guest 内 /home/agent/sessions 下「DB 里已不存在的会话」的孤儿目录删掉。
+ * removeSessionDir 在 VM 休眠时删除会话是 best-effort 失败的 —— 不对账
+ * 的话残留会累积占满 guest 磁盘。keep 名单取全量现存会话 id(不只沙箱:
+ * 历史上开过沙箱后来关掉的会话,其 VM 产物目录同样保留)。
+ */
+function fireSessionReconcile(): void {
+  (async () => {
+    try {
+      const { getAllSessions } = require('./db') as typeof import('./db');
+      const keep = getAllSessions().map((sess) => sess.id);
+      const { reconcileSessionDirs } = await import('./cowork-transfer');
+      const removed = await reconcileSessionDirs(keep);
+      console.log(`[cowork-vm] guest session reconcile: keep=${keep.length}, removed=${removed.length}${removed.length ? ` (${removed.join(', ')})` : ''}`);
+    } catch (err) {
+      // 对账失败不致命(下次 ready 再试);老 daemon 不认识该 op 时也走这里
+      console.warn('[cowork-vm] session reconcile failed (non-fatal):', err instanceof Error ? err.message : err);
+    }
+  })();
 }
 
 /** 标记一个沙箱会话为活跃(阻止空闲回收)。回合结束调 release。 */

@@ -132,6 +132,15 @@ export async function rpcRemoveSession(sessionId: string): Promise<void> {
 }
 
 /**
+ * E4.1 存储对账:删除 VM 内 /home/agent/sessions 下不在 keep 名单里的孤儿
+ * 会话目录(VM 休眠期间删除的会话残留)。返回被删除的目录名列表。
+ */
+export async function rpcReconcileSessions(keep: string[]): Promise<string[]> {
+  const r = await rpcJson('reconcileSessions', { keep });
+  return Array.isArray(r.removed) ? (r.removed as string[]) : [];
+}
+
+/**
  * 流式读取一个文件:先读 `{ok,size}` header,之后把 size 字节作为可读流吐出。
  * 返回一个 Readable(供 API 路由直接 pipe 到 HTTP 响应)。校验(realpath +
  * workspace 前缀)在 daemon 侧完成;失败会在 header 阶段抛错。

@@ -133,13 +133,36 @@ export function ChatListPanel({ open, width, hasUpdate, readyToInstall }: ChatLi
 
   const activeTab: WorkspaceTab = coworkAvailable ? workspaceTab : 'dev';
 
+  // E4.1: 也监听外部发出的 tab 切换(如 /chat 页在预填跳转时强制切研发),
+  // 保持侧边栏与主区一致。监听方只 setState 不再广播,不会成环。
+  useEffect(() => {
+    const onTab = (e: Event) => {
+      const tab = (e as CustomEvent).detail;
+      if (tab === 'office' || tab === 'dev') setWorkspaceTab(tab);
+    };
+    window.addEventListener('workspace-tab-changed', onTab);
+    return () => window.removeEventListener('workspace-tab-changed', onTab);
+  }, []);
+
   const handleTabChange = useCallback((tab: WorkspaceTab) => {
     setWorkspaceTab(tab);
     saveWorkspaceTab(tab);
     // /chat 落地页据此实时切换 办公/研发 空态(E4);同 localStorage 值一起构成
     // 「当前 tab」的唯一广播口。
     window.dispatchEvent(new CustomEvent('workspace-tab-changed', { detail: tab }));
-  }, []);
+    // E4.1 (用户反馈问题3): 主区跟随 —— 当前打开的会话不属于目标模式时,
+    // 切到目标模式的最近会话;目标模式没有会话则回 /chat(按 tab 显示对应空态)。
+    const m = pathname.match(/^\/chat\/([^/]+)$/);
+    if (!m) return;
+    const cur = sessions.find((s) => s.id === m[1]);
+    if (!cur) return;
+    const curIsOffice = !!cur.sandbox_enabled;
+    const targetIsOffice = tab === 'office';
+    if (curIsOffice === targetIsOffice) return;
+    // sessions 来自 getAllSessions(updated_at DESC),首个匹配即最近会话
+    const next = sessions.find((s) => (targetIsOffice ? !!s.sandbox_enabled : !s.sandbox_enabled));
+    router.push(next ? `/chat/${next.id}` : '/chat');
+  }, [pathname, sessions, router]);
   const { workspacePath } = useAssistantWorkspace();
   const [assistantSummary, setAssistantSummary] = useState<{
     name: string;

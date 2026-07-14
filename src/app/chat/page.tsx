@@ -12,7 +12,7 @@ import { ImageGenToggle } from '@/components/chat/ImageGenToggle';
 import { PermissionPrompt } from '@/components/chat/PermissionPrompt';
 import { ChatEmptyState } from '@/components/chat/ChatEmptyState';
 import { OfficeEmptyCard } from '@/components/layout/OfficeEmptyCard';
-import { loadWorkspaceTab, type WorkspaceTab } from '@/components/layout/chat-list-utils';
+import { loadWorkspaceTab, saveWorkspaceTab, type WorkspaceTab } from '@/components/layout/chat-list-utils';
 import { OnboardingWizard } from '@/components/assistant/OnboardingWizard';
 import { ErrorBanner } from '@/components/ui/error-banner';
 import { FolderPicker } from '@/components/chat/FolderPicker';
@@ -126,6 +126,18 @@ export default function NewChatPage() {
     window.addEventListener('workspace-tab-changed', onTabChange);
     return () => window.removeEventListener('workspace-tab-changed', onTabChange);
   }, []);
+
+  // E4.1 (用户反馈问题2): 带预填跳到 /chat(设置-CLI工具「添加工具」等)是
+  // 研发工作流 —— 强制切回研发 tab(连同侧边栏,经事件同步),否则办公
+  // landing 会替换掉预填输入界面。
+  useEffect(() => {
+    if (!prefillText) return;
+    if (loadWorkspaceTab() !== 'dev') {
+      saveWorkspaceTab('dev');
+      setWorkspaceTab('dev');
+      window.dispatchEvent(new CustomEvent('workspace-tab-changed', { detail: 'dev' }));
+    }
+  }, [prefillText]);
 
   const handleStartOfficeSession = useCallback(async () => {
     setCreatingOffice(true);

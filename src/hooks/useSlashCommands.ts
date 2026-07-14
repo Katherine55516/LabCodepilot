@@ -37,6 +37,12 @@ export function useSlashCommands(opts: {
   onMentionInserted?: (mention: { path: string; nodeType: 'file' | 'directory'; display: string }) => void;
   /** When true, block immediate commands and badge selection from popover */
   isStreaming?: boolean;
+  /**
+   * E4.1 (cowork): 办公(沙箱)会话 —— 输入 `/` 或 `@` 不触发任何补全弹窗。
+   * 斜杠命令/技能与 @ 文件引用都是宿主侧研发能力,对 VM 内的 agent 无意义
+   * (用户反馈:按钮隐藏后手输 `/` 仍弹窗)。
+   */
+  officeMode?: boolean;
 }): UseSlashCommandsReturn {
   const {
     sessionId,
@@ -58,6 +64,7 @@ export function useSlashCommands(opts: {
     addBadge,
     onMentionInserted,
     isStreaming,
+    officeMode,
   } = opts;
 
   // Enrich built-in commands with icons (presentation layer enrichment)
@@ -280,7 +287,8 @@ export function useSlashCommands(opts: {
     if (!textarea) return;
 
     const cursorPos = textarea.selectionStart;
-    const trigger = detectPopoverTrigger(val, cursorPos);
+    // E4.1: 办公会话不触发 `/`、`@` 补全弹窗(见 opts.officeMode 注释)
+    const trigger = officeMode ? null : detectPopoverTrigger(val, cursorPos);
 
     if (trigger) {
       setPopoverMode(trigger.mode!);
@@ -302,7 +310,7 @@ export function useSlashCommands(opts: {
     if (popoverMode && popoverMode !== 'cli') {
       closePopover();
     }
-  }, [fetchFiles, fetchSkills, popoverMode, closePopover, textareaRef, setInputValue, setPopoverMode, setPopoverFilter, setTriggerPos, setSelectedIndex, setPopoverItems]);
+  }, [fetchFiles, fetchSkills, popoverMode, closePopover, textareaRef, setInputValue, setPopoverMode, setPopoverFilter, setTriggerPos, setSelectedIndex, setPopoverItems, officeMode]);
 
   // Insert `/` into textarea to trigger slash command popover. When the
   // preceding char isn't whitespace, auto-prepend a space so the trigger regex
