@@ -6,7 +6,13 @@
 > POC 脚手架说明:[scripts/poc/cowork/README.md](../../scripts/poc/cowork/README.md)
 >
 > **本文件目标:让接手者读完即可完整理解 cowork 办公模式、并立刻接上未完成的工作,无遗漏。**
-> 最后更新:2026-07-14 · 分支 `vm_cowork` · 版本 3.1.13+ · 状态:P0 + P1-A~D + 办公模式 E1-E5 全部完成;待做 P2(Windows)/P3(安全强化)/镜像流水线。
+> 最后更新:2026-07-14 · 分支 `vm_cowork`(HEAD `4a8e630`,**已推送**,工作区干净)· 版本 **3.1.14**(DMG 已交付用户验收中)· 状态:P0 + P1-A~D + 办公模式 E1-E5 **全部完成**。
+>
+> **当前节点与下一步(接手先读这段)**:
+> 1. 用户正在验收 3.1.14(重点:E5 设置开关、E4.3 删除刷新);验收中的反馈按"复现→修→CDP 验证→commit→bump→打包"节奏处理。
+> 2. 已向用户建议的下一个大项:**镜像流水线**(内部试用→真实交付的关键路径:CI 出镜像、daemon 烘进镜像 systemd 自启→SSH 退役、应用内首次下载+后台预热、设置开关演进为下载引导;调研文档 §7.1 有下载窗口设计)。**用户尚未拍板**,开工前先写执行计划(exec-plans/active/)。
+> 3. 其他待定:vm_cowork 合回 main(20+ commit,用户决定时机);用户手册(docs/user-manual/,用户自己在写)补办公模式章节(产品名用全称「AI Native Lab - 工作平台」);之后 P3 安全强化 → P2 Windows。
+> 4. 注意:`docs/user-manual/`、`image-config-server-verification.md`、`scripts/dev/docker-win-build.sh` 是用户自己的 untracked 文件,**commit 时绝不能用 `git add -A` 扫进去**(踩过一次,当场 amend 移出)。
 
 ---
 
@@ -191,13 +197,28 @@ vsock-1024.sock                            # vfkit 暴露的 vsock unix socket(V
 
 **dev 起服务(需要解密密钥才能用 managed 凭证)**:
 ```bash
-# 1. 解封主密钥(打包版 keychain 里的 Safe Storage;脚本在旧 session scratchpad,可复制)
-#    unseal.js:app.whenReady 后 safeStorage.decryptString(~/.codepilot/secret.key.enc) 写 hex 到文件
+# 1. 解封主密钥(打包版 keychain 里的 Safe Storage;unseal.js 每次可按下方配方重建)
 npx electron <unseal.js 路径> /tmp/mk.tmp   # 输出 UNSEAL_OK
 # 2. 带密钥起 dev
 CLAUDE_GUI_SECRET_KEY=$(cat /tmp/mk.tmp) PORT=3000 npm run dev
 ```
-unseal.js 内容(若丢失可重建):`app.setName('codepilot')` → whenReady → 读 `~/.codepilot/secret.key.enc` → `safeStorage.decryptString` → 校验 64 hex → 写文件。
+unseal.js 完整配方(scratchpad 会被清,丢了照这个重建;**每一步都必要**):
+```js
+const { app, safeStorage } = require('electron');
+const fs = require('fs'); const os = require('os'); const path = require('path');
+app.setName('codepilot');   // keychain service 名跟 app name 走,必须是 codepilot
+// 关键(坑13):userData 挪独立临时目录 —— 打包版 App 开着时共用
+// ~/Library/Application Support/codepilot 会在 ProcessSingleton 锁上无限排队
+app.setPath('userData', path.join(os.tmpdir(), 'codepilot-unseal-' + process.pid));
+app.whenReady().then(() => {
+  const enc = fs.readFileSync(path.join(os.homedir(), '.codepilot', 'secret.key.enc'));
+  const hex = safeStorage.decryptString(enc).trim();
+  if (!/^[0-9a-f]{64}$/i.test(hex)) { console.error('UNSEAL_FAIL'); app.exit(2); return; }
+  fs.writeFileSync(process.argv[2], hex, { mode: 0o600 });
+  console.log('UNSEAL_OK'); app.exit(0);
+});
+```
+测试会话创建注意(坑14):脚本/curl 建会话**必须带 model + provider_id**(UI 会自动带 localStorage 的 last-model/last-provider-id,裸建的会话没有凭证面 → VM 内 claude 秒退:init 正常但 result is_error、0 token、~15ms)。可用值参考现存会话:`sqlite3 ~/.codepilot/codepilot.db "SELECT model,provider_id FROM chat_sessions WHERE provider_id!='' LIMIT 1"`。
 
 **手动起/停 VM(dev 调试)**:`bash scripts/poc/cowork/vm-up.sh start|stop`。但**正常路径是让应用自动起**(P1-B):dev 起好后,发沙箱消息即自动 spawn。
 
