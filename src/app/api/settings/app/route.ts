@@ -18,6 +18,9 @@ const ALLOWED_KEYS = [
   'default_panel',
   'agent_runtime',
   'cli_enabled',
+  // Cowork 办公模式(沙箱)全局开关(E5)。值必须是 'true' 才生效
+  // (cowork-poc.decideCowork 严格比较);空值 = 关闭。
+  'cowork_enabled',
   // Feature announcement dismiss flags (persist across Electron restarts)
   'codepilot:announcement:v0.48-agent-engine',
 ];

@@ -1,18 +1,18 @@
-# Cowork 沙箱模式(本地 VM 隔离 agent)— 技术交接文档
+# Cowork 办公模式(本地 VM 隔离 agent)— 技术交接文档
 
-> 产品思考见 [docs/insights/cowork-vm-mode.md](../insights/cowork-vm-mode.md)(P1-E 待补)
+> 产品思考见 [docs/insights/cowork-vm-mode.md](../insights/cowork-vm-mode.md)
 > 调研与 P0 结论:[docs/research/cowork-local-vm-mode.md](../research/cowork-local-vm-mode.md)
-> 执行计划(进度/决策日志):[docs/exec-plans/active/cowork-vm-mode.md](../exec-plans/active/cowork-vm-mode.md)
+> 执行计划(进度/决策日志,均已完成):[docs/exec-plans/completed/cowork-vm-mode.md](../exec-plans/completed/cowork-vm-mode.md)(P1 底层)+ [cowork-office-mode.md](../exec-plans/completed/cowork-office-mode.md)(办公模式 E1-E5)
 > POC 脚手架说明:[scripts/poc/cowork/README.md](../../scripts/poc/cowork/README.md)
 >
-> **本文件目标:让接手者读完即可完整理解 cowork 沙箱、并立刻接上未完成的工作,无遗漏。**
-> 最后更新:2026-07-13 · 分支 `vm_cowork` · 版本 3.1.9 · 状态:P0 + P1-A/A+/B/C/D 完成,P1-E 待做。
+> **本文件目标:让接手者读完即可完整理解 cowork 办公模式、并立刻接上未完成的工作,无遗漏。**
+> 最后更新:2026-07-14 · 分支 `vm_cowork` · 版本 3.1.13+ · 状态:P0 + P1-A~D + 办公模式 E1-E5 全部完成;待做 P2(Windows)/P3(安全强化)/镜像流水线。
 
 ---
 
 ## 0. 这是什么 / 为什么
 
-参考 Anthropic 官方 Claude Cowork,给本应用加一种**沙箱会话**:底层仍是 Claude Agent SDK,但 agent 的文件工具(Read/Write/Bash…)**只作用于一台本地 Linux 虚拟机内**,碰不到用户真机文件。用户通过对话框发文件 → 自动进 VM → agent 在 VM 内读改建 → 产物卡片下载回真机。全程真机零写入(除应用数据目录暂存 + 用户主动下载)。
+参考 Anthropic 官方 Claude Cowork,给本应用加**「办公」模式**:侧边栏对话列表上方有「办公 / 研发」双栏切换(参照 Claude 桌面版 Home/Code)——研发 = 原有的一切(项目分组、文件树/Git/任务面板、宿主执行);办公 = 沙箱会话,底层仍是 Claude Agent SDK,但 agent 的文件工具(Read/Write/Bash…)**只作用于一台本地 Linux 虚拟机内**,碰不到用户真机文件。办公会话不绑项目文件夹、列表平铺;用户通过对话发文件 → 自动进 VM 的会话专属工作区 → agent 读改建 → 产物卡片下载回真机;不同会话的产物按 sessionId 天然隔离。模式在**建会话时定死**(所在 tab 决定),会话内不可切换。全程真机零写入(除应用数据目录 + 用户主动下载,已系统性验收,见 §8.5)。
 
 **与官方 Cowork 的关键差异**:官方用 VirtioFS 双向挂载真机目录(agent 改动实时落回真机);我们用**拷贝语义**(上传/下载各拷一次,VM 与真机文件系统零共享面)——隔离更彻底,也更简单。
 
@@ -57,11 +57,20 @@ Next server(宿主)                                     VM guest(Debian, aarch64
 | `src/lib/cowork-vm-manager.ts` | VM 生命周期**单例**(挂 globalThis 抗 hot-reload)。`ensureRunning()`(懒启动/复用/崩溃重建,幂等+并发安全 startingPromise)、`getStatus()`、`markSessionActive/releaseSession`(空闲回收计数)、`stop()`、`onVmProgress()`(P1-D 进度发射器)、`parseLeaseIp()`(纯函数,单测覆盖)。健康探测走 vsock。 |
 | `src/lib/cowork-vsock.ts` | 宿主侧 vsock RPC 客户端。连 vfkit 的 unix socket,发 JSON header + body。导出 `vsockHealthy` / `rpcMkdirWorkspace` / `rpcWriteFile` / `rpcListFiles` / `rpcRemoveSession` / `rpcReadFileStream` / `rpcArchiveStream`。`readJsonHeader` 处理 close/超时(见 §9 bug①)。 |
 | `src/lib/cowork-transfer.ts` | 文件通道**对外契约层**(claude-client / artifacts route 依赖这些签名):`sessionWorkspace` / `vmChannelReady` / `ensureSessionWorkspace` / `pushFileToVm` / `listNewFiles` / `assertPathInWorkspace`(host 侧廉价早拒)/ `readFileStream` / `archiveStream` / `removeSessionDir`。内部全部委托给 cowork-vsock。 |
-| `src/app/api/cowork/artifacts/route.ts` | 产物 API。`?list=1`(读库,VM 休眠也可用,懒迁移)、`?path=`(下载单文件,VM 离线时 ensureRunning 唤醒)、`?archive=1`(打包)。错误统一脱敏(403/404/500,不回显内部路径)。 |
-| `src/components/chat/SandboxToggle.tsx` | 输入框「完全访问」右侧的沙箱开关。PATCH `sandbox_enabled`;切换连带清 `sdk_session_id`。 |
-| `src/components/chat/VmArtifactsCard.tsx` | 产物卡片(输入框上方)。文件列表 + 单文件/打包下载。下载走受控 fetch:VM 休眠时点下载显示 spinner(自动唤醒)。休眠时显示"沙箱休眠中"徽标。 |
+| `src/app/api/cowork/artifacts/route.ts` | 产物 API。`?list=1`(读库,VM 休眠也可用,懒迁移;**VM 在线时对账剔除已删文件并回写**,E4.2)、`?path=`(下载单文件,VM 离线时 ensureRunning 唤醒)、`?archive=1`(打包)。错误统一脱敏。 |
+| `src/app/api/cowork/status/route.ts` | 可用性状态(E3):`{enabled, imageProvisioned, vmPhase}`,只读探测绝不触发 VM 启动,fail-closed。供双栏可见性 gate、办公空态、设置页提示。 |
+| `src/lib/cowork-guards.ts` | **E1 执行层守卫纯逻辑**:`buildSandboxUnavailableError`(reason→结构化错误,含"没有在真机上执行任何操作"隔离尾注)、`SANDBOX_NATIVE_RUNTIME_GUARD`(412 响应体)、`buildSandboxSystemNote`(沙箱回合能力边界系统提示)。 |
+| `src/lib/cowork-staging.ts` | **E2 办公暂存目录**:`~/.codepilot/cowork/<sessionId>/` 的 path/ensure/remove(hex 校验;删除只按 sessionId 推导路径,绝不读 working_directory —— 防误删遗留 POC 会话绑的真实项目目录)。 |
+| `src/components/layout/ChatListPanel.tsx` | **双栏主战场(E3)**:「办公/研发」分段控件(`activationMode="manual"`,防 focus 误触)、按 `sandbox_enabled` 切分列表(办公平铺/研发分组互斥)、办公新建流(POST sandbox_enabled:1)、tab 记忆(localStorage `codepilot:workspace-tab`)、切 tab 主区跟随(E4.1)、监听 `cowork-status-changed` 即时显隐。 |
+| `src/components/layout/OfficeEmptyCard.tsx` | 办公空态卡:sidebar 变体(列表区)+ landing 变体(/chat 主区,E4)。镜像未预置时显示提示不给按钮。 |
+| `src/components/chat/VmArtifactsCard.tsx` | 产物卡片(输入框上方)。文件列表 + 单文件/打包下载;VM 休眠徽标 + 下载自动唤醒 spinner;**下载 404 → toast + 触发 `vm-artifacts-refresh` 重拉**(E4.2)。 |
 | `src/components/chat/VmProvisioningBanner.tsx` | P1-D 冷启动横幅。`vm_status` 的 starting/booting/provisioning 显示"沙箱准备中",ready 清除,failed 显示重试。 |
-| `src/hooks/useSSEStream.ts` | 加了 `onVmArtifacts` / `onVmStatus` 回调 + `vm_artifacts` / `vm_status` case。 |
+| `src/hooks/useSSEStream.ts` | 加了 `onVmArtifacts` / `onVmStatus` 回调 + `vm_artifacts` / `vm_status` case。**vm_artifacts 空表必须放行**(E4.3:快照语义,空表=清卡)。 |
+| `src/components/chat/ChatView.tsx` | 组装:产物卡/横幅挂载、`sandboxEnabled` 下发 MessageList/MessageInput、快照**整表替换**、回合完成自动重拉清单(E4.3)、办公隐藏 ModeIndicator/权限选择器。 |
+| `src/hooks/usePanel.ts` + `AppShell.tsx` + `UnifiedTopBar.tsx` | `isOfficeSession` 信号(E4):/chat/[id] 载入会话时设置;一处 gate 压制 PanelZone 全部侧板;顶栏四按钮+项目文件夹 chip 办公隐藏。 |
+| `src/hooks/useSlashCommands.ts` + `MessageInput.tsx` | `officeMode`(E4/E4.1):隐藏斜杠/CLI 按钮;输入 `/`、`@` 不触发补全弹窗(办公传空 workingDirectory 走既有优雅降级)。 |
+| `src/components/settings/GeneralSection.tsx` + `api/settings/app` | 设置页「办公模式(Cowork 沙箱)」开关(E5):写 `cowork_enabled`,广播 `cowork-status-changed` 双栏即时显隐;镜像未预置显示警示。 |
+| `scripts/poc/cowork/fs-audit.sh` | 真机零写入**强验收脚本**(E5):sudo fs_usage 包装,按进程树过滤写调用、剔除豁免面,violations 应为空。 |
 | `src/lib/stream-session-manager.ts` | snapshot 加 `vmArtifacts` / `vmStatus` 字段 + 回调。**注意 `buildSnapshot()` 是字段白名单**——加快照字段必须同步列进去(见 §9 bug④)。 |
 | `src/components/chat/ChatView.tsx` | 组装:沙箱开关状态、产物卡片、准备中横幅、消息内 DiffSummary 在沙箱下隐藏(传 `sandboxEnabled` 给 MessageList/MessageItem)。 |
 | `src/lib/claude-client.ts` | cowork 分支(约 775–847 行):`decideCowork` → 设 `pathToClaudeCodeExecutable` + 注入 env(`COWORK_SESSION_ID/VSOCK_PATH/NODE_BIN` + `ELECTRON_RUN_AS_NODE=1`)→ 推附件 → 回合末 diff 产物落库+发 SSE。订阅 `onVmProgress` 转 `vm_status`。 |
@@ -118,9 +127,12 @@ Next server(宿主)                                     VM guest(Debian, aarch64
 
 ## 5. 数据模型 / 接线点
 
-- **DB**(`chat_sessions`):`sandbox_enabled` INTEGER 0/1;`vm_artifacts_json` TEXT(JSON `VmArtifactFile[]`,回合末 merge 落库,历史会话 VM 休眠也能显示产物)。
-- **SSE 事件**:`vm_artifacts`(回合产物)、`vm_status`(冷启动进度:phase = starting/booting/provisioning/ready/failed)。
-- **设置键**:`cowork_enabled`(全局门,必须 `'true'` 才生效)、`cowork_forwarder_path`(转发器绝对路径;当前值仍指向旧 `forwarder-ssh.sh`,但 `forwarderPath()` 会从同目录解析出 `forwarder-vsock.sh`,所以无需改)。
+- **DB**(`chat_sessions`):`sandbox_enabled` INTEGER 0/1 —— **单一事实源**(D1):同时驱动列表归栏、UI 压制、执行判定;创建期经 `createSession(..., sandboxEnabled)` 落库,**建后不可改**(PATCH 返回 400 `SANDBOX_MODE_IMMUTABLE`,E5)。`vm_artifacts_json` TEXT(回合末**权威快照覆盖**落库,E4.2;不再只增 merge)。
+- **办公会话的宿主 cwd**:合成暂存目录 `~/.codepilot/cowork/<sessionId>/`(D2,POST 无 working_directory 且 sandbox_enabled 时服务端生成),附件沿既有链路落 `<暂存>/.codepilot-uploads/`;权限创建期定 `full_access`(D3)。删除会话三级级联:DB 行 + 宿主暂存目录 + VM 会话目录(后者 best-effort,兜底见 daemon 对账)。
+- **SSE 事件**:`vm_artifacts` —— **回合末权威全量快照**(E4.2/E4.3:总是发、含空表;前端整表替换,空表=清卡;useSSEStream 不得加长度守卫);`vm_status`(冷启动进度 + 硬失败 failed)。
+- **daemon 对账**(E4.1):op `reconcileSessions {keep}` —— VM 每次 ready 后宿主带全量现存会话 id fire-and-forget 调用,删除 guest 内 DB 已不存在的 hex 目录(堵"休眠期删除会话"的孤儿残留,防 guest 磁盘占满)。
+- **设置键**:`cowork_enabled`(全局门,必须 `'true'`;设置页开关 E5 起可视化,写入后广播 `cowork-status-changed`)、`cowork_forwarder_path`(仍指旧 ssh 路径,`forwarderPath()` 同目录解析 vsock 版,无需改)。
+- **前端状态**:localStorage `codepilot:workspace-tab`('dev'|'office');事件 `workspace-tab-changed`(tab 同步,双向)、`cowork-status-changed`(设置变更)、`vm-artifacts-refresh`(清单重拉)。
 - **env 过河**(claude-client 注入 queryOptions.env,forwarder 白名单透传):`COWORK_SESSION_ID`、`COWORK_VSOCK_PATH`、`COWORK_NODE_BIN`(= `process.execPath`)、`ELECTRON_RUN_AS_NODE=1`。
 - **凭证**:managed provider key 经 provider-resolver 注入 SDK env,不落 VM 磁盘(沿用现有"env 过河"纪律)。
 
@@ -154,21 +166,22 @@ vsock-1024.sock                            # vfkit 暴露的 vsock unix socket(V
 - **两个用户反馈修复**:消息内产物卡在沙箱下隐藏 + 下载唤醒转圈(`ce7408e`);产物卡片实时性(`e9c50ff`)。
 - **一个卡死 bug 修复**(`e0dfb51`):vsock exec 流 stdin EOF 语义(见 §9 bug②③)。
 
-### 未完成 —— P1-E(入口正式化),下一步就是它
-详见执行计划,四块:
-1. **能力边界透明化(必须,含真实缺口)**:沙箱会话里外部 stdio MCP 现在被原样传进 VM,但 VM 里没 npx/uvx → 静默失败。要**显式禁用 + 提示**(内置 codepilot-* MCP、SSE/HTTP MCP 不受影响)。加轻量能力说明。
-2. **入口正式化(部分可选)**:会话列表沙箱盾牌标识、空态"沙箱对话"入口卡、设置里的 `cowork_enabled` 正式开关(现在是手动写 DB)。**待拍板:入口模型 —— 会话内可切换开关 vs 新建时定死。**
-3. **真机零写入验收(必须)**:用 macOS `fs_usage`/文件监控在一次完整沙箱回合期间证明真机零写入(唯二例外:应用数据目录暂存、用户主动下载落点)。出记录。此前只用"find 搜不到产物"侧面验证,P1-E 要系统调用级正面钉死。
-4. **双文档**:本交接文档(已建)+ `docs/insights/cowork-vm-mode.md`(产品思考,待写),互链。
-
-**待拍板的产品决策(P1-E 开工前)**:
-- (a) 入口模型:会话内开关(现状)vs 新建时定死沙箱/非沙箱。
-- (b) 外部 stdio MCP:直接禁用+提示,还是往镜像装 npx/uvx 支持(后者成本大)。
+### 已完成 —— 办公模式 E1-E5(P1-E 重定义,方案见 cowork-office-mode.md)
+- **E1 执行层守卫**(`66e09ca`):沙箱回合 VM 不可用 → 硬失败终止,绝不落宿主(修 POC 的"安全回退"隔离违约);native runtime 分发前 412 拒绝;外部 MCP 全部剔除(仅留 in-process codepilot-*)+ 能力边界系统提示注入。
+- **E2 数据与创建流**(`bbdce87`):创建期指定 sandbox_enabled;办公暂存目录 `~/.codepilot/cowork/<id>/`;full_access 默认;删除级联清暂存目录。
+- **E3 侧边栏双栏**(`eebac7e`):「办公/研发」分段控件(manual 激活)、列表互斥切分、办公新建流、空态卡、tab 记忆、/api/cowork/status。
+- **E4 办公会话 UI 面**(`3e731d6`):isOfficeSession 信号;隐藏矩阵全压制(PanelZone/顶栏四按钮+文件夹 chip/首开文件树/ModeIndicator/权限选择器/斜杠 CLI 按钮/@ 引用/RewindButton);**SandboxToggle 退役删除**;/chat 落地页办公 landing。
+- **E4.1 实测反馈修复**(`b80fe7d`):办公输入 `/` 不弹窗;CLI 工具预填跳转强制切研发;切 tab 主区跟随;**daemon reconcileSessions 对账**(guest 孤儿目录清理,实测 keep=53 removed=1 零误伤)。
+- **E4.2 产物删除对账**(`fb9b288`):回合末权威快照替代只增合并;list 端点在线自愈;下载 404 toast+重拉。
+- **E4.3**(`ed6d4fe`):useSSEStream 空快照放行(纯删除回合清卡的根因)+ 回合完成自动重拉兜底。
+- **E5 正式化收尾**:设置页「办公模式(Cowork 沙箱)」开关(写 cowork_enabled、双栏即时显隐、镜像未预置警示);PATCH sandbox_enabled 锁定(400 SANDBOX_MODE_IMMUTABLE);真机零写入验收(见 §8.5)+ fs-audit.sh 强验收脚本;本双文档。
 
 ### 未完成 —— P2/P3(P1 之后)
+
 - **P2 Windows**:WSL2 私有 distro(明确不走 Hyper-V HCS,官方 Cowork 的 Home 版惨案)+ 降级探测。vsock 在 WSL2 上的等价通道要重新调研。
 - **P3 安全强化**:宿主代理注入 token(永不进 VM)、出网白名单、每会话非特权用户/bwrap、下载凭证扫描。
-- **镜像流水线**(P1 之后):镜像 + daemon 烘进产物、CI 构建、首次下载 + 后台预热(调研文档 §7.1 的下载窗口 + 消息队列,P1 未做因镜像手动预置)。daemon 烘进镜像用 systemd 自启后,SSH 可彻底退役。
+- **镜像流水线**:镜像 + daemon 烘进产物、CI 构建、首次下载 + 后台预热(调研文档 §7.1 的下载窗口 + 消息队列,P1 未做因镜像手动预置)。daemon 烘进镜像用 systemd 自启后,SSH 可彻底退役。
+- **小项待办**:办公会话标题旁的模式徽标(可选)、办公列表长列表截断(现平铺不截断)、guest 磁盘用量可视化。
 
 ---
 
@@ -200,7 +213,13 @@ npm run electron:build && node scripts/bundle-chromium.mjs && npx electron-build
 ```
 **打包后必做**:`npm rebuild better-sqlite3` —— 打包会把 better-sqlite3 编成 Electron ABI,dev/test 用 node ABI 会崩(见 §9)。
 
-**测试**:`npm run test`(typecheck + 单元,~5s)。当前 1909 passed。
+**测试**:`npm run test`(typecheck + 单元,~5s)。当前 1928 passed。
+
+### 8.5 真机零写入验收记录(E5,2026-07-14)
+
+- **弱验收(快照对比,已执行,通过)**:dev + 真实 managed 凭证,VM 冷启动,一轮完整办公回合 —— 上传 audit-input.csv → agent 在 VM 内读取、qty 翻倍、另存 doubled.csv → 产物接口下载并核验内容正确。`find $HOME -newer <T0>` 对比用户数据区(豁免面:`~/.codepilot` 应用数据、`~/Library` 系统/应用缓存、`~/Downloads` 下载落点、开发工具 dotfiles、本仓库),**违规 0 条**。同轮实测 daemon 对账 keep=55 removed=0。
+- **强验收(系统调用级,脚本就绪)**:`sudo bash scripts/poc/cowork/fs-audit.sh` —— fs_usage 全量写调用按本应用进程树过滤、剔除豁免面,violations.log 应为空。需 root,交由使用者在打包版上执行。
+- 局限:快照法无法按进程归因(违规为 0 时无归因需求);fs_usage 法可归因但需 sudo。
 
 ---
 
@@ -215,6 +234,12 @@ npm run electron:build && node scripts/bundle-chromium.mjs && npx electron-build
 7. **forwarder 需要 node 但打包版 Electron 无独立 node**:用 `COWORK_NODE_BIN=process.execPath` + `ELECTRON_RUN_AS_NODE=1`,forwarder.sh 用它跑 .mjs,不依赖 PATH。
 8. **SSH 未 100% 退役**:运行时数据流(exec/文件/健康)全 vsock;SSH 仅剩 VM-provision 一次性(推 binary + 推/启 daemon)。生产把 daemon 烘进镜像 systemd 自启后可彻底去 SSH。
 9. **decideCowork 是 async**:会阻塞到 VM 就绪(冷启动数秒~数十秒)。沙箱首条消息因此慢是正常的,P1-D 横幅就是给这段做反馈。
+10. **vm_artifacts 空表不得吞(E4.3)**:事件语义是"回合末权威全量快照",空表 = 纯删除回合清卡的关键载荷。useSSEStream 曾残留 `length>0` 守卫吞空快照 →"只删文件的回合卡片不刷新"。改事件链任何一层都不要加长度守卫;ChatView 是整表替换不是合并。
+11. **Radix Tabs 默认 automatic 激活 = focus 即切换**:侧边栏双栏必须 `activationMode="manual"`,否则 Tab 键路过/a11y 遍历就切视图并写 localStorage(CDP 实测误触)。另:程序化 `.click()` 不触发 Radix 激活(挂在 mousedown),测试要派发完整鼠标事件序列。
+12. **pkill 自匹配自杀**:`pkill -f xxx` 的模式若出现在当前 shell 命令行里会杀掉自己(daemon provision 与本地调试都踩过)。bracket trick(`[x]xx`)或拆独立调用。
+13. **unseal 脚本 vs 运行中的打包版 App**:两者同 app name(codepilot)→ 同 userData → Chromium ProcessSingleton 锁互斥,打包版开着时 unseal 无限排队(实测挂一小时)。unseal.js 必须 `app.setPath('userData', <独立临时目录>)`(keychain service 名只跟 app name 走,不受影响)。
+14. **裸 API 创建的会话没有凭证面**:UI 创建会自动带 localStorage 的 last-model/last-provider-id;curl 直接 POST 不带 → 会话落到默认模型且无 managed provider → VM 内 claude 秒退(init 成功但 result is_error、0 token、~15ms)。测试脚本创建会话务必带 model + provider_id。
+15. **别名模型(如 claude-opus-4-8[1m])在办公回合**:同上一条一起排查过 —— 模型面问题的表象都是"init 正常 + 秒退",先查会话的 model/provider_id 再怀疑通道。
 
 ---
 

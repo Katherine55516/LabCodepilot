@@ -128,6 +128,10 @@ export function GeneralSection() {
   const [skipPermSaving, setSkipPermSaving] = useState(false);
   const [generativeUI, setGenerativeUI] = useState(true);
   const [generativeUISaving, setGenerativeUISaving] = useState(false);
+  // E5 (cowork): 办公模式(沙箱)全局开关 + 本机镜像预置状态(未预置时提示)
+  const [coworkEnabled, setCoworkEnabled] = useState(false);
+  const [coworkSaving, setCoworkSaving] = useState(false);
+  const [coworkImageProvisioned, setCoworkImageProvisioned] = useState(true);
   const [defaultPanel, setDefaultPanel] = useState('file_tree');
   const { accountInfo } = useAccountInfo();
   const { t, locale, setLocale } = useTranslation();
@@ -150,6 +154,18 @@ export function GeneralSection() {
         setGenerativeUI(appSettings.generative_ui_enabled !== "false");
         // default_panel defaults to 'file_tree' when not set
         setDefaultPanel(appSettings.default_panel || 'file_tree');
+        // cowork_enabled 必须严格为 'true'(与后端 decideCowork 同口径)
+        setCoworkEnabled(appSettings.cowork_enabled === "true");
+      }
+    } catch {
+      // ignore
+    }
+    // 镜像预置状态(只读探测,不触发 VM 启动)—— 未预置时开关旁给提示
+    try {
+      const res = await fetch("/api/cowork/status");
+      if (res.ok) {
+        const d = await res.json();
+        setCoworkImageProvisioned(!!d.imageProvisioned);
       }
     } catch {
       // ignore
@@ -199,6 +215,29 @@ export function GeneralSection() {
       });
     } catch {
       // ignore
+    }
+  };
+
+  // E5 (cowork): 写 cowork_enabled 并广播 —— 侧边栏「办公/研发」双栏监听
+  // cowork-status-changed 即时显隐,无需重启。
+  const handleCoworkToggle = async (checked: boolean) => {
+    setCoworkSaving(true);
+    try {
+      const res = await fetch("/api/settings/app", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          settings: { cowork_enabled: checked ? "true" : "" },
+        }),
+      });
+      if (res.ok) {
+        setCoworkEnabled(checked);
+        window.dispatchEvent(new CustomEvent("cowork-status-changed"));
+      }
+    } catch {
+      // ignore
+    } finally {
+      setCoworkSaving(false);
     }
   };
 
@@ -258,6 +297,25 @@ export function GeneralSection() {
             disabled={generativeUISaving}
           />
         </FieldRow>
+
+        {/* Cowork 办公模式(沙箱)开关 — E5 */}
+        <FieldRow
+          label={t('settings.coworkTitle')}
+          description={t('settings.coworkDesc')}
+          separator
+        >
+          <Switch
+            checked={coworkEnabled}
+            onCheckedChange={handleCoworkToggle}
+            disabled={coworkSaving}
+          />
+        </FieldRow>
+        {coworkEnabled && !coworkImageProvisioned && (
+          <StatusBanner variant="warning">
+            <span className="h-2 w-2 shrink-0 rounded-full bg-status-warning inline-block mr-1" />
+            {t('workspace.office.imageMissing')}
+          </StatusBanner>
+        )}
 
         {/* Default panel — hidden. Hardcoded to 'file_tree' in
             src/app/chat/[id]/page.tsx so the choice is invisible AND

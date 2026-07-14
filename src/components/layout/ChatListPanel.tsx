@@ -121,14 +121,21 @@ export function ChatListPanel({ open, width, hasUpdate, readyToInstall }: ChatLi
 
   useEffect(() => {
     // 只读探测(不触发 VM 启动);失败按不可用处理(fail-closed,tab 隐藏)。
-    fetch('/api/cowork/status')
-      .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        if (!d) return;
-        setCoworkAvailable(!!d.enabled);
-        setCoworkImageProvisioned(!!d.imageProvisioned);
-      })
-      .catch(() => {});
+    // 设置页切换 cowork_enabled 后广播 cowork-status-changed(E5),这里重拉
+    // 让双栏即时显隐,无需重启。
+    const fetchCoworkStatus = () => {
+      fetch('/api/cowork/status')
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => {
+          if (!d) return;
+          setCoworkAvailable(!!d.enabled);
+          setCoworkImageProvisioned(!!d.imageProvisioned);
+        })
+        .catch(() => {});
+    };
+    fetchCoworkStatus();
+    window.addEventListener('cowork-status-changed', fetchCoworkStatus);
+    return () => window.removeEventListener('cowork-status-changed', fetchCoworkStatus);
   }, []);
 
   const activeTab: WorkspaceTab = coworkAvailable ? workspaceTab : 'dev';

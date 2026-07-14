@@ -1632,6 +1632,10 @@ const zh: Record<TranslationKey, string> = {
   'sandbox.provisioning.failedTitle': '沙箱启动失败',
   'sandbox.provisioning.failedHint': '请稍后重试,或检查沙箱环境',
 
+  // ── Cowork settings (E5) ──────────────────────────────────
+  'settings.coworkTitle': '办公模式(Cowork 沙箱)',
+  'settings.coworkDesc': '实验功能:开启后侧边栏出现「办公 / 研发」切换。办公对话在隔离虚拟机内处理文件,全程不接触真机文件。',
+
   // ── Workspace tabs (Cowork office mode, E3) ───────────────
   'workspace.tab.office': '办公',
   'workspace.tab.dev': '研发',

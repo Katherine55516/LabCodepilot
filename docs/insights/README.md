@@ -8,6 +8,7 @@
 
 | 文档 | 对应交接文档 | 主题 |
 |------|------------|------|
+| [cowork-vm-mode.md](./cowork-vm-mode.md) | [handover/cowork-vm-mode.md](../handover/cowork-vm-mode.md) | Cowork 办公模式:办公场景的信任门槛、双栏 vs 会话内开关(模式建时定死)、拷贝语义 vs 官方挂载、隔离承诺刚性(宁报错不降级)、能力做减法的逐项理由、产物卡片=取件口必须真实、启动时对账的存储自治、实测驱动六轮修复的共性教训、局限(镜像手动预置/网络未收口)与方向(镜像流水线/WSL2/办公工具链) |
 | [requirement-import-modes.md](./requirement-import-modes.md) | [handover/requirement-import-modes.md](../handover/requirement-import-modes.md) | 导入需求保留原文 + 二选一：AI 归一覆盖原文的硬伤、选择放节点而非弹窗、原文不转 md、docx 必经抽取的诚实告知、无人值守停下等选、use-original 就地编 REQ-ID 取舍、已知局限 |
 | [updates-v2.md](./updates-v2.md) | [handover/updates-v2.md](../handover/updates-v2.md) | 自动更新 V2：检查别人仓库+自动更新从未实现的双硬伤、为何不用 electron-updater/放主进程/复用登录、check-only 省流量取舍、借鉴姊妹项目避免重下与自动安装、对照 Trae 取舍、强制升级阻断、dev 验证边界 |
 | [cli-tools.md](./cli-tools.md) | [handover/cli-tools.md](../handover/cli-tools.md) | CLI 工具管理的 MCP 化、Agent-first CLI 趋势、凭证管理痛点 |

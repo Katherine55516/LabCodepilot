@@ -1640,6 +1640,10 @@ const zhHK: Record<TranslationKey, string> = {
   'sandbox.provisioning.failedTitle': '沙箱啟動失敗',
   'sandbox.provisioning.failedHint': '請稍後重試,或檢查沙箱環境',
 
+  // ── Cowork settings (E5) ──────────────────────────────────
+  'settings.coworkTitle': '辦公模式(Cowork 沙箱)',
+  'settings.coworkDesc': '實驗功能:開啟後側邊欄會出現「辦公 / 研發」切換。辦公對話喺隔離虛擬機內處理檔案,全程唔會接觸真機檔案。',
+
   // ── Workspace tabs (Cowork office mode, E3) ───────────────
   'workspace.tab.office': '辦公',
   'workspace.tab.dev': '研發',

@@ -33,7 +33,7 @@
 | E2 | **数据与创建流**:创建期指定 sandbox_enabled、办公会话宿主暂存目录、删除连带清理 | ✅ 已完成(2026-07-13) | 新增 cowork-staging.ts;createSession+POST 支持创建期沙箱(办公分支默认 full_access,已在 UI 权限按钮验证);dev 六项验证:创建字段/暂存目录、附件落 `<staging>/.codepilot-uploads` 并推 VM、agent 读改产附件产物(内容含 E2-OK)、DELETE 级联删暂存目录、遗留会话(真实项目 wd)删除不误删项目目录;+5 单测(1924 passed) |
 | E3 | **侧边栏双 tab**:分段控件 + 按模式过滤 + 办公平铺列表 + 办公新建流 + 空态 | ✅ 已完成(2026-07-13) | 分段控件(activationMode=**manual**,CDP 实测默认 automatic 下 focus 掠过即切换并写 localStorage,已修);/api/cowork/status 提前实现;CDP 验证:办公平铺 33 条/研发分组恢复且互斥、新建项目按钮跟随 tab、办公新对话直建暂存目录会话(full_access)、tab 记忆 reload 有效、cowork 关闭回现状外观(遗留沙箱会话回分组)、空态卡渲染正确、console 零错误;i18n 三语手加;+4 单测(1928 passed) |
 | E4 | **办公会话 UI 面**:隐藏全部研发特性、移除 SandboxToggle、保留纯对话+文件收发 | ✅ 已完成(2026-07-13) | isOfficeSession 入 PanelContext;隐藏矩阵 CDP 截图核对全过:顶栏四按钮+文件夹 chip、PanelZone 整体、首开文件树、ModeIndicator、权限选择器、斜杠/CLI 按钮、@ 引用(经空 wd 优雅降级)、RewindButton;SandboxToggle 组件删除+i18n 三键清理;/chat 落地页办公 landing 卡(OfficeEmptyCard variant=landing,tab 切换经 workspace-tab-changed 事件实时同步);研发会话零回归(树开关/权限/mode 实测正常);1928 passed,console 零错误 |
-| E5 | **正式化收尾**:设置开关 + 状态 API + fs_usage 零写入验收 + 双文档 + 回归 | 📋 待开始 | |
+| E5 | **正式化收尾**:设置开关 + 状态 API + fs_usage 零写入验收 + 双文档 + 回归 | ✅ 已完成(2026-07-14) | 设置页「办公模式(Cowork 沙箱)」开关(写 cowork_enabled + cowork-status-changed 广播双栏即时显隐 + 镜像未预置警示);PATCH sandbox_enabled 锁定(400 SANDBOX_MODE_IMMUTABLE);零写入验收通过(快照对比违规 0 条,fs-audit.sh 强验收脚本就绪,记录见 handover §8.5);双文档完成互链(handover 全面更新 + insights 新写);状态 API 已在 E3 提前交付 |
 
 ## 决策日志
 

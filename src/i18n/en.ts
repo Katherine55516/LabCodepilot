@@ -1636,6 +1636,10 @@ const en = {
   'sandbox.provisioning.failedTitle': 'Sandbox failed to start',
   'sandbox.provisioning.failedHint': 'Please try again, or check the sandbox environment',
 
+  // ── Cowork settings (E5) ──────────────────────────────────
+  'settings.coworkTitle': 'Work mode (Cowork sandbox)',
+  'settings.coworkDesc': 'Experimental: adds the Work / Code tabs to the sidebar. Work sessions run file operations inside an isolated VM and never touch files on this machine.',
+
   // ── Workspace tabs (Cowork office mode, E3) ───────────────
   'workspace.tab.office': 'Work',
   'workspace.tab.dev': 'Code',

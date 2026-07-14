@@ -44,8 +44,6 @@
 
 | 文件 | 主题 | 状态 |
 |------|------|------|
-| active/cowork-vm-mode.md | Cowork 沙箱模式 P1 macOS MVP:文件通道(上传进 VM + 产物下载)→ VM 生命周期管理器 → guest-daemon/vsock → 就绪状态机;P0 POC 已通过(调研文档) | P1-A~D 已完成;P1-E 重定义,由 cowork-office-mode.md 承接 |
-| active/cowork-office-mode.md | Cowork 办公模式:侧边栏「研发/办公」双栏切换(研发=现状零改动,办公=沙箱会话平铺不绑项目文件夹);执行层守卫(硬失败/native 拒绝/MCP 过滤)→ 数据与创建流 → 双 tab → 办公 UI 面 → 设置与 fs_usage 验收 | E1-E5 待开始 |
 | active/regression-library.md | 测试工作台:回归用例库(用例设计后自动沉淀「回归测试」标签用例 + 项目级库查看/管理 + 跨任务一键重跑) | 设计完成,待实现(批 A-E) |
 | active/test-regression-gate-audit.md | 测试工作台:回归集标签 + 用例门控 + 操作审计 | 开发完成(合并 PR #8),待打包验收 mac+Win |
 | active/chat-latency-remediation.md | 聊天链路提速 + 模式入口收敛 + MCP 持久开关 | Phase 0 完成，Phase 1-4 待开始 |
@@ -79,6 +77,8 @@
 
 | 文件 | 主题 | 完成日期 |
 |------|------|----------|
+| completed/cowork-office-mode.md | Cowork 办公模式:侧边栏「办公/研发」双栏切换(办公=沙箱会话平铺不绑项目文件夹);E1 执行层守卫(硬失败/native 拒绝/MCP 过滤)→ E2 创建期沙箱+暂存目录 → E3 双栏 → E4 办公 UI 面+实测反馈修复(E4.1-E4.3)→ E5 设置开关+零写入验收+双文档 | 2026-07-14 |
+| completed/cowork-vm-mode.md | Cowork 沙箱 P1 macOS MVP 底层:文件通道(上传进 VM + 产物下载/落库)→ VM 生命周期管理器(server 侧单例)→ guest-daemon/vsock 通道 → 就绪状态机;P1-E 由 cowork-office-mode.md 承接 | 2026-07-14 |
 | completed/marketplace-skill-translate.md | 技能市场「AI 翻译简介」：详情页一键翻译 README 到应用语言（非英语才显示），managed 第一个模型 + generateTextViaSdk 单轮（别名坑规避）、11 条规则系统提示词（含提示注入防线）、译文/原文可回切 + 模块级缓存、30K 截断 | 2026-07-03 |
 | completed/document-preview.md | 应用内文档预览（PDF/DOCX/XLSX/PPTX）：复用 PreviewPanel 分发骨架 + serve 取 arrayBuffer + next/dynamic 懒加载四渲染器（react-pdf/SheetJS+DataTableViewer/docx-preview/aiden0z-pptx）、PDF 5 类离线资产管线（含 wasm+cmaps+iccs）、DOCX 三层强制 XSS vs PPTX 差异化安全、raw 路由中文名 RFC 5987 修复；老二进制 .doc/.ppt/.xls 不做 | 2026-06-30 |
 | completed/credential-encryption.md | 凭证本地加密落盘：safeStorage 主密钥 + AES-256-GCM 列加密（双进程 env 过河）、anlcode 文件 + SQLite 敏感列 seal/hydrate、静默迁移 + fail-safe、image-generator 绕过修复 | 2026-06-03 |
