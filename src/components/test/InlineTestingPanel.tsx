@@ -546,6 +546,13 @@ export function InlineTestingPanel() {
     setEnv((prev) => (prev === next ? prev : next));
   }, [selected, projects]);
 
+  // 打开测试模块即触发一次后台用量上报。本组件在切到设置页等场景会卸载、切回重挂，
+  // 故挂载 effect ≈「每次点开测试模块」。fire-and-forget：仅 Electron 有 electronAPI
+  //（dev/web 为 no-op）；主进程去抖 + 未登录静默跳过，绝不阻塞 UI。
+  useEffect(() => {
+    void window.electronAPI?.auth?.uploadTestUsage?.();
+  }, []);
+
   // 执行方式(独立窗口可见 / 后台无头)。默认无头 —— 与原行为一致、更快。执行前确认弹窗
   // (ExecConfirmModal)记下用户选择并持久化;非弹窗触发(运行任务 / auto-chain 接力执行)
   // 复用上次选择。用 ref 让 runStep / auto-chain effect 读到最新值,避免闭包取到旧值。

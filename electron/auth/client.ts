@@ -285,7 +285,34 @@ export async function fetchAsrToken(): Promise<AsrTokenResp> {
   return r.json;
 }
 
-// ── 9. /api/v1/image/config（文生图凭证下发）─────────────────────────────────
+// ── 9. /api/v1/me/test-usage（测试用量上报）──────────────────────────────────
+
+/** 上报体：days 由主进程从 loopback 取得后原样透传，主进程不校验其内部结构。 */
+export interface TestUsageUploadPayload {
+  device_id: string;
+  device_name: string;
+  app_version: string;
+  /** 固定 'Asia/Shanghai'（北京 UTC+8）；stat_date 已在客户端按北京日分桶。 */
+  tz: string;
+  days: unknown[];
+}
+
+/**
+ * 上报按天聚合的测试用量。服务端按 (user_id, device_id, stat_date) 逐天 upsert，
+ * 计数列取 GREATEST（幂等，重复/回补/重试均安全）。token 由 apiRequest 注入，不出主进程。
+ * 错误（401/网络/HTTP）上抛，由调用方（uploader）归类并决定是否推进水位。
+ */
+export async function uploadTestUsage(
+  payload: TestUsageUploadPayload,
+): Promise<{ accepted_days: number }> {
+  const r = await apiRequest<{ accepted_days: number }>('/api/v1/me/test-usage', {
+    method: 'POST',
+    body: payload,
+  });
+  return r.json ?? { accepted_days: 0 };
+}
+
+// ── 10. /api/v1/image/config（文生图凭证下发）────────────────────────────────
 
 /** 服务端原始下发体：容忍 camelCase 与 snake_case 两种字段命名（managed API 惯用 snake_case）。 */
 interface RawImageConfig {

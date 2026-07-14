@@ -108,6 +108,8 @@ interface ElectronAuthAPI {
     | { ok: true; usage: UsageInfo }
     | { ok: false; status?: number; kind?: 'network'; error: string }
   >;
+  /** 打开测试模块时触发后台用量上报；fire-and-forget，主进程异步处理。 */
+  uploadTestUsage: () => Promise<{ ok: boolean }>;
   onChange: (callback: (state: AuthSnapshot) => void) => () => void;
 }
 
