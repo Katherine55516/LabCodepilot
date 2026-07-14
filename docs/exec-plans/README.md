@@ -44,6 +44,7 @@
 
 | 文件 | 主题 | 状态 |
 |------|------|------|
+| active/cowork-image-pipeline.md | **Cowork 镜像流水线**:沙箱环境零手动预置 — 上游底镜走中科大 + cloud-init seed 首启自注入(daemon/systemd 烘录,SSH 全退役)+ claude 平台子包走 npmmirror + vfkit 内置 app 包 + 应用内显式下载(断点续传/校验/进度) | M1 进行中,M2-M4 待开始 |
 | active/regression-library.md | 测试工作台:回归用例库(用例设计后自动沉淀「回归测试」标签用例 + 项目级库查看/管理 + 跨任务一键重跑) | 设计完成,待实现(批 A-E) |
 | active/test-regression-gate-audit.md | 测试工作台:回归集标签 + 用例门控 + 操作审计 | 开发完成(合并 PR #8),待打包验收 mac+Win |
 | active/chat-latency-remediation.md | 聊天链路提速 + 模式入口收敛 + MCP 持久开关 | Phase 0 完成，Phase 1-4 待开始 |
