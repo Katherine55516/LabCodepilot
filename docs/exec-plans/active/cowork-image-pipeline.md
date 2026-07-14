@@ -12,7 +12,7 @@
 |-------|------|------|------|
 | M1 | 首启自注入 + SSH 退役:seed 由代码生成(daemon/systemd 烘进 cloud-init),vm-manager 就绪链全 vsock,claude binary 经 vsock 推入 | ✅ 已完成 | 2026-07-14 四项验收全过:①老盘升级(instance-id 变更触发 cloud-init 重跑,daemon v2 systemd active+enabled,回合 43s 产物内容正确)②处女盘首启(中科大新下 raw 校验 sha512 一致,首启自注入+253MB binary vsock 推入,97s 全链路,guest 实测 sshd inactive+masked/growpart 吃满)③二次启动 daemon ~5s 就绪④零 SSH(密钥目录挪走全程无影响);test 1930 绿 + smoke 6/6 |
 | M2 | 宿主下载器 + 就绪状态机 + UI 下载引导:底镜走中科大、claude 平台子包走 npmmirror,断点续传+校验+磁盘预检,设置页/办公空态出「下载」按钮+进度,下载中禁发 | ✅ 已完成 | 2026-07-14 全流程实测:①挪走双资产→设置页/落地页下载按钮→3GB 全程下载(USTC ~2.5-5MB/s)→sha512 通过→就绪态翻回(CDP);②取消保留 .part(482MB)→续传从偏移继续→**最终校验通过=前缀重哈希正确性硬证明**;③npmmirror tarball 不支持 Range→200 回退清零重下路径真实触发,integrity 通过、二进制与原件逐位一致;④稀疏扩容 8GiB 落盘(实占 3.2GB),guest 首启 growpart 吃满 df 7.7G;⑤D4 下载中办公 composer disabled+提示行(CDP);⑥新下载盘 41s 办公回合 E2E;test 1936 绿+smoke 6/6 |
-| M3 | 打包正式化:vfkit 内置 app 包(签名/entitlement 验证)、daemon/forwarder 脚本随包分发(去仓库绝对路径依赖)、资产目录正式化 + 升级/GC | 📋 待开始 | |
+| M3 | 打包正式化:vfkit 内置 app 包(签名/entitlement 验证)、daemon/forwarder 脚本随包分发(去仓库绝对路径依赖)、资产目录正式化 + 升级/GC | ✅ 已完成 | 2026-07-14:①目录正式化 cowork-poc→cowork-assets(本机真实迁移,回合无感);②资源随包 Resources/cowork/(daemon+forwarder+vfkit),解析三级 bundled→设置→仓库;③**踩坑实证:electron-builder 签名会剥 vfkit 的 virtualization entitlement**(重签成 Electron 默认 allow-jit)→ mac.signIgnore 跳过 + after-sign 防回归校验/自愈,修后包内 vfkit 与 brew 原件逐位一致、entitlement 三键齐全可执行;④版本追踪:installed-*.json 懒栽种+needsUpgrade+设置页升级按钮+usable 语义(升级下载不禁办公);⑤daemon v3 claudeSize 偏斜自愈,老盘经 instance-id v2 重灌 v3(guest 取证);test 1940 绿+smoke 6/6。打包版 spawn bundled vfkit 的 E2E 留给 3.1.17 用户验收(解析逻辑单测覆盖,AILAB_RESOURCES_PATH 为既有成熟通道) |
 | M4 | 裸机验收 + 失败路径矩阵 + 双文档 | 📋 待开始 | CI 回归验证列为可选项 |
 
 ## 决策日志

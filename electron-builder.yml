@@ -180,6 +180,12 @@ mac:
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.inherit.plist
   notarize: false
+  # vfkit 必须跳过 electron-builder 的签名:它会用 Electron 默认 entitlements
+  # 重签(只剩 allow-jit),剥掉 Virtualization.framework 硬要求的
+  # com.apple.security.virtualization → 沙箱 VM 起不来(M3 实测踩坑)。
+  # 跳过后保留 brew 原签名与 entitlement;after-sign.js 有防回归校验。
+  signIgnore:
+    - "cowork/bin/vfkit$"
   # Only Apple Silicon — Intel Macs are no longer targeted (drops the need to
   # cross-install the darwin-x64 SDK platform subpackage in CI and halves the
   # release artifact size for macOS).

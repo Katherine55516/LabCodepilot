@@ -36,6 +36,49 @@ function codesign(targetPath) {
 }
 
 /**
+ * Cowork 沙箱的 bundled vfkit 必须带 com.apple.security.virtualization
+ * entitlement(Virtualization.framework 硬要求)。electron-builder 的签名会用
+ * Electron 默认 entitlements 重签并剥掉它(M3 实测)—— 正解是 mac.signIgnore
+ * 跳过;这里做防回归校验:发现被剥就用完整 entitlements 重签回来(需在主
+ * bundle 落 seal 之前调用,否则会破坏 resource seal)。
+ */
+function ensureVfkitEntitlements(appPath) {
+  const vfkit = path.join(appPath, 'Contents', 'Resources', 'cowork', 'bin', 'vfkit');
+  if (!fs.existsSync(vfkit)) return; // 未随包(异常构建),资源缺失由运行时回退 PATH
+  const read = () => {
+    try {
+      return execSync(`codesign -d --entitlements - "${vfkit}" 2>/dev/null`, {
+        encoding: 'utf-8', stdio: 'pipe', timeout: 15000,
+      });
+    } catch { return ''; }
+  };
+  if (read().includes('com.apple.security.virtualization')) {
+    console.log('[afterSign] bundled vfkit entitlements intact (virtualization OK)');
+    return;
+  }
+  console.warn('[afterSign] bundled vfkit LOST its virtualization entitlement — re-signing with correct entitlements');
+  const plist = path.join(require('os').tmpdir(), `vfkit-entitlements-${process.pid}.plist`);
+  fs.writeFileSync(plist, `<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>com.apple.security.virtualization</key><true/>
+  <key>com.apple.security.network.client</key><true/>
+  <key>com.apple.security.network.server</key><true/>
+</dict></plist>
+`);
+  try {
+    execSync(`codesign --force --sign - --entitlements "${plist}" "${vfkit}"`, { stdio: 'pipe', timeout: 30000 });
+    if (!read().includes('com.apple.security.virtualization')) {
+      console.error('[afterSign] ERROR: vfkit re-sign did not restore the virtualization entitlement — sandbox VM will NOT boot from this build');
+    } else {
+      console.log('[afterSign] vfkit re-signed with virtualization entitlement');
+    }
+  } finally {
+    try { fs.unlinkSync(plist); } catch { /* ignore */ }
+  }
+}
+
+/**
  * Recursively collect all files matching the given extensions.
  */
 function collectFiles(dir, extensions) {
@@ -115,6 +158,19 @@ module.exports = async function afterSign(context) {
     console.log('[afterSign] Real code signing certificate detected (CSC_LINK/CSC_NAME set or Developer ID signature found).');
     console.log('[afterSign] Skipping ad-hoc signing to preserve Developer ID signature.');
 
+    // 只查不改(改会破坏 Developer ID 的 resource seal):signIgnore 失效时响亮报错
+    try {
+      const vfkit = path.join(appPath, 'Contents', 'Resources', 'cowork', 'bin', 'vfkit');
+      if (fs.existsSync(vfkit)) {
+        const ent = execSync(`codesign -d --entitlements - "${vfkit}" 2>/dev/null`, { encoding: 'utf-8', stdio: 'pipe', timeout: 15000 });
+        if (!ent.includes('com.apple.security.virtualization')) {
+          console.error('[afterSign] ERROR: bundled vfkit lost its virtualization entitlement under real-cert signing — check mac.signIgnore; sandbox VM will NOT boot from this build');
+        } else {
+          console.log('[afterSign] bundled vfkit entitlements intact (virtualization OK)');
+        }
+      }
+    } catch { /* check is best-effort */ }
+
     try {
       execSync(`codesign --verify --deep --strict --verbose=4 "${appPath}"`, {
         stdio: 'pipe',
@@ -163,6 +219,10 @@ module.exports = async function afterSign(context) {
   if (helperApps.length > 0) {
     console.log(`[afterSign]   Signed ${helperApps.length} helper apps`);
   }
+
+  // Step 3.5: bundled vfkit 的 entitlement 防回归校验/自愈(必须在主 bundle
+  // 落 resource seal 之前 —— 之后再改 Resources 内容会破坏 seal)
+  ensureVfkitEntitlements(appPath);
 
   // Step 4: Sign the main app bundle
   codesign(appPath);
