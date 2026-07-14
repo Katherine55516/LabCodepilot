@@ -4091,11 +4091,16 @@ function ScriptPreview({ t, projectPath, taskName, env, initialManifest, onChang
           const next = data.manifest as ScriptManifestView;
           setManifest(next);
           onChanged(next);
+          // 后台重生成收尾（不再 queued/running）→ 清掉「重试」时设的「等待生成」占位。
+          // 否则脚本早已生成、状态徽章已更新，运行输出区却一直停在「等待生成」（用户实测）。
+          if (next.jobStatus !== "queued" && next.jobStatus !== "running") {
+            setOutput((prev) => (prev === t("test.scripts.queued") ? "" : prev));
+          }
         })
         .catch(() => undefined);
     }, 2_000);
     return () => { cancelled = true; clearInterval(timer); };
-  }, [manifest.jobStatus, projectPath, taskName, env, onChanged]);
+  }, [manifest.jobStatus, projectPath, taskName, env, onChanged, t]);
 
   const retrySelected = async () => {
     if (!selected) return;
