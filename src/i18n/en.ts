@@ -1653,6 +1653,8 @@ const en = {
   'workspace.office.verifying': 'Verifying and installing…',
   'workspace.office.downloadFailed': 'Download failed',
   'workspace.office.sendBlocked': 'The sandbox environment is not ready yet — you can send once the download completes.',
+  'workspace.office.upgrade': 'Download sandbox update',
+  'workspace.office.upgradeHint': 'A newer sandbox environment is available. The current one keeps working; upgrading rebuilds the sandbox VM.',
 
   // ── Context Usage ─────────────────────────────────────────
   'context.usage': 'Context Usage',

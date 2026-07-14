@@ -38,7 +38,7 @@ import sys
 import threading
 import time
 
-DAEMON_VERSION = 2
+DAEMON_VERSION = 3
 
 PORT = int(os.environ.get("COWORK_VSOCK_PORT", "1024"))
 SESSIONS_ROOT = "/home/agent/sessions"
@@ -82,10 +82,12 @@ def recv_exact(conn, n, prefix=b""):
 
 
 def op_health(conn, req, rest):
-    # version:宿主一致性哨兵;claude:执行面就绪(缺则宿主 installBinary 推入),
-    # 一次探测拿全就绪信息,省一轮 RPC。
+    # version:宿主一致性哨兵;claude:执行面就绪(缺则宿主 installBinary 推入);
+    # claudeSize(v3):宿主比对自家 binary 大小,不符则重推 —— app 升级 SDK 后
+    # guest 旧 binary 的版本偏斜自愈。一次探测拿全就绪信息,省一轮 RPC。
     claude_ready = os.path.isfile(CLAUDE_BIN) and os.access(CLAUDE_BIN, os.X_OK)
-    send_json(conn, {"ok": True, "version": DAEMON_VERSION, "claude": claude_ready})
+    claude_size = os.path.getsize(CLAUDE_BIN) if claude_ready else 0
+    send_json(conn, {"ok": True, "version": DAEMON_VERSION, "claude": claude_ready, "claudeSize": claude_size})
 
 
 def op_mkdir(conn, req, rest):

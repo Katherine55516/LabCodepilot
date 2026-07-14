@@ -304,15 +304,19 @@ export function GeneralSection() {
             disabled={coworkSaving}
           />
         </FieldRow>
-        {coworkEnabled && coworkAssets && coworkAssets.overall !== 'ready' && (
+        {coworkEnabled && coworkAssets
+          && (!coworkAssets.usable || coworkAssets.upgradeAvailable || coworkAssets.overall === 'downloading') && (
           <div className="mt-2 flex flex-col gap-2 rounded-md border border-border/50 bg-muted/30 p-3">
             <p className="text-xs leading-relaxed text-muted-foreground">
-              {t('workspace.office.imageMissing')}
+              {coworkAssets.usable
+                ? t('workspace.office.upgradeHint')
+                : t('workspace.office.imageMissing')}
             </p>
             <CoworkAssetsAction
               assets={coworkAssets}
               fallbackProvisioned={false}
               compact
+              showUpgrade
               onDownload={startCoworkDownload}
             />
           </div>

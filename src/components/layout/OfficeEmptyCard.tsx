@@ -30,23 +30,46 @@ export function CoworkAssetsAction({
   onStart,
   starting,
   onDownload,
+  showUpgrade,
 }: {
   assets: CoworkAssetsStatus | undefined;
   fallbackProvisioned: boolean;
   compact?: boolean;
-  /** 就绪时的主按钮;不传则就绪时不渲染任何东西(设置页场景)。 */
+  /** 可用时的主按钮;不传则可用时不渲染任何东西(设置页场景)。 */
   startLabel?: string;
   onStart?: () => void;
   starting?: boolean;
   onDownload: () => void;
+  /** M3:可用但有新版时显示"下载新版"按钮(仅设置页开启;办公卡不打扰)。 */
+  showUpgrade?: boolean;
 }) {
   const { t } = useTranslation();
   const btnSize = compact ? ('sm' as const) : ('default' as const);
   const btnClass = compact ? 'h-7 gap-1 text-xs' : 'gap-1.5';
   const textClass = compact ? 'text-[11px] leading-relaxed' : 'text-xs leading-relaxed';
 
-  const ready = assets ? assets.overall === 'ready' : fallbackProvisioned;
-  if (ready) {
+  // "能否开工"看 usable(升级下载期间仍可用);无 assets(旧 payload)回退兼容字段
+  const usable = assets ? assets.usable : fallbackProvisioned;
+  if (usable) {
+    // 可选升级面(仅设置页):下载中显示进度,有新版显示升级按钮
+    if (showUpgrade && assets?.overall === 'downloading') {
+      return (
+        <div className="flex flex-col gap-1.5">
+          <div className={`${textClass} text-muted-foreground`}>{`${t('workspace.office.downloading')} ${assets.totalPct}%`}</div>
+          <div className="h-1.5 w-full overflow-hidden rounded-full bg-muted">
+            <div className="h-full rounded-full bg-primary transition-[width] duration-500" style={{ width: `${Math.max(2, assets.totalPct)}%` }} />
+          </div>
+        </div>
+      );
+    }
+    if (showUpgrade && assets?.upgradeAvailable) {
+      return (
+        <Button variant="outline" size={btnSize} className={btnClass} onClick={onDownload}>
+          <DownloadSimple size={compact ? 13 : 15} />
+          {t('workspace.office.upgrade')}
+        </Button>
+      );
+    }
     if (!startLabel || !onStart) return null;
     return (
       <Button variant={compact ? 'outline' : 'default'} size={btnSize} className={btnClass} disabled={starting} onClick={onStart}>

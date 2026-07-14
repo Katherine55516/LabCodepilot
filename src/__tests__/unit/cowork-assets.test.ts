@@ -66,6 +66,22 @@ describe('cowork-assets: 状态面(no-throw,只读)', () => {
       assert.equal(s.totalPct, 100);
       assert.equal(s.image.state, 'ready');
       assert.equal(s.claude.state, 'ready');
+      assert.equal(s.usable, true);
     }
+  });
+
+  it('M3 版本戳:资产在位时懒栽种 installed-*.json,当前 manifest 下无升级信号', async () => {
+    const { assetsReady, imageNeedsUpgrade, claudeNeedsUpgrade, getAssetsStatus } = await assetsMod();
+    const paths = await import(path.resolve(__dirname, '../../lib/cowork-paths.ts'));
+    if (!assetsReady()) return; // 资产不在位的机器跳过
+    assert.equal(imageNeedsUpgrade(), false);
+    assert.equal(claudeNeedsUpgrade(), false);
+    // 懒栽种应已落盘,且 build/version 与 manifest 一致
+    const imgMarker = JSON.parse(fs.readFileSync(paths.IMAGE_MARKER_PATH, 'utf8'));
+    const claudeMarker = JSON.parse(fs.readFileSync(paths.CLAUDE_MARKER_PATH, 'utf8'));
+    const { IMAGE_BUILD, CLAUDE_SDK_VERSION } = await assetsMod();
+    assert.equal(imgMarker.build, IMAGE_BUILD);
+    assert.equal(claudeMarker.version, CLAUDE_SDK_VERSION);
+    assert.equal(getAssetsStatus().upgradeAvailable, false);
   });
 });

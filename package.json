@@ -36,7 +36,7 @@
     "vendor:ailab:verify": "node scripts/vendor-ailab-verify.js",
     "vendor:doc-assets": "node scripts/copy-doc-assets.js",
     "electron:dev": "npm run vendor:doc-assets && concurrently -k \"next dev\" \"wait-on http://localhost:3000 && electron .\"",
-    "electron:build": "npm run vendor:gsd && npm run vendor:gsd:verify && npm run vendor:ailab && npm run vendor:ailab:verify && npm run vendor:doc-assets && next build && node scripts/build-electron.mjs",
+    "electron:build": "npm run vendor:gsd && npm run vendor:gsd:verify && npm run vendor:ailab && npm run vendor:ailab:verify && npm run vendor:doc-assets && node scripts/bundle-vfkit.mjs && next build && node scripts/build-electron.mjs",
     "electron:pack": "npm run electron:build && node scripts/bundle-chromium.mjs && electron-builder --config electron-builder.yml",
     "electron:pack:mac": "npm run electron:build && node scripts/bundle-chromium.mjs && electron-builder --mac --config electron-builder.yml",
     "electron:pack:win": "npm run electron:build && node scripts/bundle-chromium.mjs && electron-builder --win --config electron-builder.yml",

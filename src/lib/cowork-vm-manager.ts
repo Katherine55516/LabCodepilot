@@ -20,22 +20,19 @@
  */
 import { spawn, type ChildProcess } from 'child_process';
 import fs from 'fs';
-import os from 'os';
-import path from 'path';
 import { ensureSeedIso, EXPECTED_DAEMON_VERSION } from './cowork-seed';
-// M2:资产规范路径的单一事实源在 cowork-assets(下载器落位与此处消费同一路径)
-import { IMAGE_PATH as DISK, CLAUDE_BIN_PATH as HOST_CLAUDE_BIN } from './cowork-assets';
+// M3:路径单一事实源在 cowork-paths(资产目录正式化 + 随包 vfkit 解析)
+import {
+  IMAGE_PATH as DISK, CLAUDE_BIN_PATH as HOST_CLAUDE_BIN,
+  EFI_STORE_PATH as EFI_STORE, VFKIT_PID_FILE, CONSOLE_LOG_PATH as CONSOLE_LOG,
+  VSOCK_SOCKET_PATH as VSOCK_SOCKET, vfkitBin,
+} from './cowork-paths';
 
-const POC_DIR = path.join(os.homedir(), '.codepilot', 'cowork-poc');
-const EFI_STORE = path.join(POC_DIR, 'efi-variable-store');
-const VFKIT_PID_FILE = path.join(POC_DIR, 'vfkit.pid');
-const CONSOLE_LOG = path.join(POC_DIR, 'vm-console.log');
 const VM_MAC = '72:20:43:d4:38:62';
 const RESTFUL_URI = 'tcp://127.0.0.1:47899';
 // P1-C: vsock 运行时通道。vfkit connect 模式 → guest daemon 当 server,
 // 宿主连这个 unix socket。port 与 daemon/客户端约定一致。
 const VSOCK_PORT = 1024;
-const VSOCK_SOCKET = path.join(POC_DIR, 'vsock-1024.sock');
 
 // 首启含 cloud-init 自注入(growpart + write_files + systemd enable,~60-90s),
 // 二次启动 daemon 由 systemd 秒级拉起 —— 超时按首启给足。
@@ -162,12 +159,16 @@ async function provisionGuest(): Promise<void> {
   if (h.version !== EXPECTED_DAEMON_VERSION) {
     console.warn(`[cowork-vm] guest daemon version=${h.version}, expected=${EXPECTED_DAEMON_VERSION} — will re-provision on next boot`);
   }
-  if (!h.claude) {
-    if (!fs.existsSync(HOST_CLAUDE_BIN)) {
+  // 缺失 → 推;或 daemon v3 上报的大小与宿主不符(app 升级 SDK 后 guest 旧
+  // binary 版本偏斜)→ 重推覆盖(installBinary 是 .part+原子替换,可安全覆盖)
+  const hostSize = fs.existsSync(HOST_CLAUDE_BIN) ? fs.statSync(HOST_CLAUDE_BIN).size : 0;
+  const sizeSkew = h.claude === true && typeof h.claudeSize === 'number' && hostSize > 0 && h.claudeSize !== hostSize;
+  if (!h.claude || sizeSkew) {
+    if (!hostSize) {
       throw new Error('guest claude binary missing and no host copy to push');
     }
     emitProgress('provisioning', 'installing agent runtime');
-    console.log('[cowork-vm] pushing claude binary into guest via vsock…');
+    console.log(`[cowork-vm] pushing claude binary into guest via vsock…${sizeSkew ? ' (version skew: guest size differs)' : ''}`);
     await rpcInstallBinary('claude', HOST_CLAUDE_BIN);
     console.log('[cowork-vm] claude binary installed in guest');
   }
@@ -273,10 +274,12 @@ export async function ensureRunning(): Promise<VmStatus> {
       // 内容寻址 + 存在即复用,常态是零成本;daemon/模板变更时自动重造。
       const seedIso = await ensureSeedIso();
 
-      console.log('[cowork-vm] spawning vfkit…');
+      // M3:随包 vfkit 优先(免 brew 前置),dev 回退 PATH
+      const vfkit = vfkitBin();
+      console.log(`[cowork-vm] spawning vfkit… (${vfkit})`);
       // 陈旧 vsock socket 文件会让 vfkit 的 ListenUnix bind 失败,先清
       try { fs.rmSync(VSOCK_SOCKET, { force: true }); } catch { /* ignore */ }
-      const proc = spawn('vfkit', [
+      const proc = spawn(vfkit, [
         '--cpus', '2', '--memory', '2048',
         '--bootloader', `efi,variable-store=${EFI_STORE},create`,
         '--device', `virtio-blk,path=${DISK}`,

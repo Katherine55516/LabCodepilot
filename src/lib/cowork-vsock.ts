@@ -8,11 +8,10 @@
  */
 import net from 'net';
 import fs from 'fs';
-import os from 'os';
-import path from 'path';
 
-const POC_DIR = path.join(os.homedir(), '.codepilot', 'cowork-poc');
-export const VSOCK_SOCKET_PATH = path.join(POC_DIR, 'vsock-1024.sock');
+// M3:路径单一事实源迁至 cowork-paths;保留 re-export 兼容 claude-client 的既有 import。
+export { VSOCK_SOCKET_PATH } from './cowork-paths';
+import { VSOCK_SOCKET_PATH } from './cowork-paths';
 
 export interface VmArtifact {
   path: string;
@@ -103,6 +102,8 @@ export interface VsockHealth {
   version?: number;
   /** guest 内 ~/bin/claude 是否就绪(缺则宿主 installBinary 推入)。 */
   claude?: boolean;
+  /** guest 内 claude binary 字节数(daemon v3;宿主比对不符则重推,版本偏斜自愈)。 */
+  claudeSize?: number;
 }
 
 /** 富健康探测:一次 RPC 拿全就绪信息(daemon 版本 + claude binary 状态)。 */
@@ -116,6 +117,7 @@ export async function vsockHealth(timeoutMs = 4000): Promise<VsockHealth> {
       ok: obj.ok === true,
       version: typeof obj.version === 'number' ? obj.version : undefined,
       claude: obj.claude === true,
+      claudeSize: typeof obj.claudeSize === 'number' ? obj.claudeSize : undefined,
     };
   } catch {
     return { ok: false };

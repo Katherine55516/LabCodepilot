@@ -1657,6 +1657,8 @@ const zhHK: Record<TranslationKey, string> = {
   'workspace.office.verifying': '正在校驗同安裝…',
   'workspace.office.downloadFailed': '下載失敗',
   'workspace.office.sendBlocked': '沙箱環境尚未就緒,下載完成後即可發送。',
+  'workspace.office.upgrade': '下載新版沙箱環境',
+  'workspace.office.upgradeHint': '沙箱環境有新版本可用;目前版本仍可正常使用,升級會重建沙箱虛擬機。',
 
   // ── Context Usage ─────────────────────────────────────────
   'context.usage': '上下文佔用',

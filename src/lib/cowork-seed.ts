@@ -19,19 +19,18 @@ import crypto from 'crypto';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { IMAGES_DIR, bundledCoworkResource } from './cowork-paths';
 
 const execFileAsync = promisify(execFile);
 
-const POC_DIR = path.join(os.homedir(), '.codepilot', 'cowork-poc');
-const IMAGES_DIR = path.join(POC_DIR, 'images');
-
-export const SEED_TEMPLATE_VERSION = 1;
+// v2(M3):daemon v3 —— health 增加 claudeSize(guest binary 版本偏斜自愈)
+export const SEED_TEMPLATE_VERSION = 2;
 
 /**
  * guest daemon 版本的宿主侧期望值,必须与 cowork-daemon.py 的 DAEMON_VERSION
  * 一致(单测跨层断言)。provisionGuest 用它做运行时一致性哨兵。
  */
-export const EXPECTED_DAEMON_VERSION = 2;
+export const EXPECTED_DAEMON_VERSION = 3;
 
 /** daemon 在 guest 内的落点(root 经 write_files 写入,agent 只读执行)。 */
 export const GUEST_DAEMON_TARGET = '/opt/codepilot/cowork-daemon.py';
@@ -97,12 +96,13 @@ runcmd:
 }
 
 /**
- * daemon 源码路径解析(双候选,原 vm-manager hostDaemonPath 迁入):
- * cowork_forwarder_path 同目录(打包版)→ 仓库路径(dev)。M3 会加 packaged
- * resources 候选,彻底去仓库绝对路径依赖。
+ * daemon 源码路径解析(M3 三级候选):随包 Resources/cowork/(打包版正道,
+ * 去仓库绝对路径依赖)→ cowork_forwarder_path 同目录(遗留设置)→ 仓库路径(dev)。
  */
 export function resolveDaemonSource(): string | null {
   const candidates: string[] = [];
+  const bundled = bundledCoworkResource('cowork-daemon.py');
+  if (bundled) candidates.push(bundled);
   try {
     const { getSetting } = require('./db') as typeof import('./db');
     const fwd = (getSetting('cowork_forwarder_path') || '').trim();

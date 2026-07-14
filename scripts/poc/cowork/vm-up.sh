@@ -4,7 +4,9 @@
 # 用法: vm-up.sh [start|stop|ip|ssh]
 set -euo pipefail
 
-POC="$HOME/.codepilot/cowork-poc"
+# M3 资产目录正式化:应用已把 cowork-poc 迁移为 cowork-assets;老目录兜底兼容
+POC="$HOME/.codepilot/cowork-assets"
+[ -d "$POC" ] || POC="$HOME/.codepilot/cowork-poc"
 DISK="$POC/images/debian-12-genericcloud-arm64.raw"
 SEED="$POC/images/seed.iso"
 EFI_STORE="$POC/efi-variable-store"

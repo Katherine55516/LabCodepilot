@@ -113,12 +113,12 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
   // per-turn vm_artifacts SSE merges. vmOnline drives the sleeping badge.
   const [vmArtifacts, setVmArtifacts] = useState<VmArtifactFile[]>([]);
   const [vmOnline, setVmOnline] = useState(true);
-  // M2 (镜像流水线): 办公会话的沙箱资产状态 —— 未就绪(下载中/缺失)时禁发
-  // 消息并给出进度提示(D4);仅办公会话激活探测。有数据且明确非 ready 才禁,
-  // 避免首个 fetch 返回前闪断。
+  // M2 (镜像流水线): 办公会话的沙箱资产状态 —— 不可用(缺失/下载中)时禁发
+  // 消息并给出进度提示(D4);仅办公会话激活探测。有数据且明确不可用才禁,
+  // 避免首个 fetch 返回前闪断;可选升级下载期间 usable 仍为 true 不误禁(M3)。
   const coworkStatus = useCoworkStatus(sandboxEnabled);
   const coworkAssets = coworkStatus.data?.assets;
-  const officeAssetsBlocked = sandboxEnabled && !!coworkAssets && coworkAssets.overall !== 'ready';
+  const officeAssetsBlocked = sandboxEnabled && !!coworkAssets && !coworkAssets.usable;
 
   // Whether this session's working directory matches the configured assistant workspace
   const [isAssistantProject, setIsAssistantProject] = useState(false);

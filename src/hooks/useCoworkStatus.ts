@@ -15,6 +15,10 @@ export interface CoworkAssetsStatus {
   claude: CoworkAssetProgress;
   overall: 'ready' | 'downloading' | 'missing' | 'failed';
   totalPct: number;
+  /** 当前落盘资产可用(升级下载期间仍 true)——"能否开工/发消息"看这个,别看 overall。 */
+  usable: boolean;
+  /** 有新版可下载(现有资产仍可用,升级可选)。 */
+  upgradeAvailable: boolean;
 }
 
 export interface CoworkStatusData {

@@ -27,14 +27,13 @@ import os from 'os';
 import path from 'path';
 import { Readable } from 'stream';
 import { pipeline } from 'stream/promises';
+import {
+  IMAGES_DIR, IMAGE_PATH, IMAGE_MARKER_PATH,
+  CLAUDE_BIN_PATH, CLAUDE_MARKER_PATH, EFI_STORE_PATH, COWORK_ROOT,
+} from './cowork-paths';
 
-const POC_DIR = path.join(os.homedir(), '.codepilot', 'cowork-poc');
-const IMAGES_DIR = path.join(POC_DIR, 'images');
-
-/** 底镜安装后的规范路径(vm-manager 的 DISK 即此;文件名不带 build 后缀,升级=原子替换)。 */
-export const IMAGE_PATH = path.join(IMAGES_DIR, 'debian-12-genericcloud-arm64.raw');
-/** claude binary 安装后的规范路径(vm-manager 的 HOST_CLAUDE_BIN 即此)。 */
-export const CLAUDE_BIN_PATH = path.join(POC_DIR, 'bin', 'package', 'claude');
+// M3 起路径单一事实源在 cowork-paths.ts;这里保留 re-export 兼容既有 import。
+export { IMAGE_PATH, CLAUDE_BIN_PATH } from './cowork-paths';
 
 // ── 底镜 manifest(dated build 锚定;2026-07-14 实测:此 build=当期 latest,
 //    sha512 与官方 SHA512SUMS 一致,USTC 全量下载+首启验证通过)──
@@ -82,6 +81,14 @@ export interface AssetsStatus {
   claude: AssetProgress;
   overall: 'ready' | 'downloading' | 'missing' | 'failed';
   totalPct: number;
+  /**
+   * M3:当前落盘资产是否可用(文件都在)。升级下载期间 overall='downloading'
+   * 但 usable 仍为 true —— UI 的"能不能开工/发消息"看这个,别看 overall
+   * (否则可选升级会误禁办公会话)。
+   */
+  usable: boolean;
+  /** M3:有新版可下载(app 更新携带了新 manifest,现有资产仍可用)。 */
+  upgradeAvailable: boolean;
 }
 
 interface AssetRuntime {
@@ -117,6 +124,47 @@ export function assetsReady(): boolean {
   return fs.existsSync(IMAGE_PATH) && fs.existsSync(CLAUDE_BIN_PATH);
 }
 
+// ── 版本戳(M3):installed-*.json 记录已装版本,与代码 manifest 常量比对得升级信号 ──
+
+function readJsonMarker(file: string): Record<string, unknown> | null {
+  try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; }
+}
+function writeJsonMarker(file: string, obj: Record<string, unknown>): void {
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify(obj, null, 2));
+  } catch (err) {
+    console.warn('[cowork-assets] marker write failed (non-fatal):', err instanceof Error ? err.message : err);
+  }
+}
+
+/**
+ * 懒栽种:资产在位但无版本戳(legacy 手动预置/M2 前下载)→ 按当前 manifest
+ * 补戳。对现存两台真机是事实正确的(盘与 binary 均为当前锚定版本)。
+ */
+function ensureMarkers(): void {
+  if (fs.existsSync(IMAGE_PATH) && !readJsonMarker(IMAGE_MARKER_PATH)) {
+    writeJsonMarker(IMAGE_MARKER_PATH, { build: IMAGE_BUILD, sha512: IMAGE_SHA512, stampedBy: 'lazy' });
+  }
+  if (fs.existsSync(CLAUDE_BIN_PATH) && !readJsonMarker(CLAUDE_MARKER_PATH)) {
+    writeJsonMarker(CLAUDE_MARKER_PATH, { version: CLAUDE_SDK_VERSION, stampedBy: 'lazy' });
+  }
+}
+
+/** 底镜有新版:文件在位但已装 build ≠ 代码锚定 build(app 更新携带新 manifest)。 */
+export function imageNeedsUpgrade(): boolean {
+  if (!fs.existsSync(IMAGE_PATH)) return false;
+  ensureMarkers();
+  return String(readJsonMarker(IMAGE_MARKER_PATH)?.build || '') !== IMAGE_BUILD;
+}
+
+/** claude binary 有新版:已装版本 ≠ 宿主 SDK 版本(app 升级 SDK 后触发)。 */
+export function claudeNeedsUpgrade(): boolean {
+  if (!fs.existsSync(CLAUDE_BIN_PATH)) return false;
+  ensureMarkers();
+  return String(readJsonMarker(CLAUDE_MARKER_PATH)?.version || '') !== CLAUDE_SDK_VERSION;
+}
+
 function probeIdle(r: AssetRuntime, file: string, total: number): AssetProgress {
   // 空闲态按文件系统真值报告(下载态按运行时进度报告)
   if (r.state === 'downloading' || r.state === 'verifying' || r.state === 'installing') {
@@ -137,8 +185,8 @@ export function getAssetsStatus(): AssetsStatus {
   const image = probeIdle(r.image, IMAGE_PATH, IMAGE_SIZE);
   const claude = probeIdle(r.claude, CLAUDE_BIN_PATH, r.claude.totalBytes || CLAUDE_TGZ_ESTIMATE);
   let overall: AssetsStatus['overall'];
-  if (image.state === 'ready' && claude.state === 'ready') overall = 'ready';
-  else if (r.active) overall = 'downloading';
+  if (r.active) overall = 'downloading';
+  else if (image.state === 'ready' && claude.state === 'ready') overall = 'ready';
   else if (image.state === 'failed' || claude.state === 'failed') overall = 'failed';
   else overall = 'missing';
   // 加权总进度:按字节权重(底镜占绝对大头)
@@ -147,7 +195,9 @@ export function getAssetsStatus(): AssetsStatus {
     (image.state === 'ready' ? image.totalBytes : image.receivedBytes) +
     (claude.state === 'ready' ? claude.totalBytes : claude.receivedBytes);
   const totalPct = overall === 'ready' ? 100 : totalBytes > 0 ? Math.min(99, Math.floor((gotBytes / totalBytes) * 100)) : 0;
-  return { image, claude, overall, totalPct };
+  const usable = assetsReady();
+  const upgradeAvailable = !r.active && (imageNeedsUpgrade() || claudeNeedsUpgrade());
+  return { image, claude, overall, totalPct, usable, upgradeAvailable };
 }
 
 /** 已有 .part 前缀重新灌进哈希(断点续传的校验连续性)。 */
@@ -287,12 +337,12 @@ export function preflightDiskSpace(): string | null {
     return null; // 探测不了就放行,下载写盘失败自会报错
   }
   let need = PREFLIGHT_MARGIN;
-  if (!fs.existsSync(IMAGE_PATH)) {
+  if (!fs.existsSync(IMAGE_PATH) || imageNeedsUpgrade()) {
     const partPath = path.join(IMAGES_DIR, IMAGE_FILENAME + '.part');
     const have = fs.existsSync(partPath) ? fs.statSync(partPath).size : 0;
     need += Math.max(0, IMAGE_SIZE - have);
   }
-  if (!fs.existsSync(CLAUDE_BIN_PATH)) need += CLAUDE_TGZ_ESTIMATE;
+  if (!fs.existsSync(CLAUDE_BIN_PATH) || claudeNeedsUpgrade()) need += CLAUDE_TGZ_ESTIMATE;
   if (free < need) {
     const needGiB = (need / 1024 ** 3).toFixed(1);
     const freeGiB = (free / 1024 ** 3).toFixed(1);
@@ -301,8 +351,8 @@ export function preflightDiskSpace(): string | null {
   return null;
 }
 
-async function downloadImage(r: AssetsRuntime, signal: AbortSignal): Promise<void> {
-  if (fs.existsSync(IMAGE_PATH)) { r.image.state = 'ready'; return; }
+async function downloadImage(r: AssetsRuntime, signal: AbortSignal, upgrade: boolean): Promise<void> {
+  if (fs.existsSync(IMAGE_PATH) && !upgrade) { r.image.state = 'ready'; return; }
   const partPath = path.join(IMAGES_DIR, IMAGE_FILENAME + '.part');
   r.image = { state: 'downloading', receivedBytes: 0, totalBytes: IMAGE_SIZE };
   await downloadToPart({
@@ -314,20 +364,30 @@ async function downloadImage(r: AssetsRuntime, signal: AbortSignal): Promise<voi
     onBytes: (received) => { r.image.receivedBytes = received; },
   });
   r.image.state = 'verifying'; // 哈希在流式中完成;此处只剩落位
+  if (upgrade) {
+    // 换盘窗口:停 VM(办公回合下条消息自动重建)+ 重置 EFI 变量(新盘新身份);
+    // 旧盘被 rename 原子覆盖即隐式 GC,guest 内旧会话目录随盘消失(产物列表
+    // 由既有的在线对账/回合末快照自愈)。
+    const { stop } = await import('./cowork-vm-manager');
+    await stop();
+    try { fs.rmSync(EFI_STORE_PATH, { force: true }); } catch { /* ignore */ }
+    console.log('[cowork-assets] image upgrade: VM stopped, EFI store reset');
+  }
   fs.renameSync(partPath, IMAGE_PATH);
   // 稀疏扩容:APFS 零成本,guest 首启 growpart 吃满(M2 起新下的盘 workspace 更大)
   try { fs.truncateSync(IMAGE_PATH, IMAGE_SPARSE_SIZE); } catch { /* 失败不致命,3GiB 也能用 */ }
+  writeJsonMarker(IMAGE_MARKER_PATH, { build: IMAGE_BUILD, sha512: IMAGE_SHA512, stampedBy: 'download' });
   r.image.state = 'ready';
   r.image.receivedBytes = IMAGE_SIZE;
   console.log('[cowork-assets] image installed:', IMAGE_PATH);
 }
 
-async function downloadClaude(r: AssetsRuntime, signal: AbortSignal): Promise<void> {
-  if (fs.existsSync(CLAUDE_BIN_PATH)) { r.claude.state = 'ready'; return; }
+async function downloadClaude(r: AssetsRuntime, signal: AbortSignal, upgrade: boolean): Promise<void> {
+  if (fs.existsSync(CLAUDE_BIN_PATH) && !upgrade) { r.claude.state = 'ready'; return; }
   r.claude = { state: 'downloading', receivedBytes: 0, totalBytes: 0 };
   const dist = await fetchClaudeDist(signal);
   r.claude.totalBytes = dist.size;
-  const tgzPath = path.join(POC_DIR, 'bin', `claude-${CLAUDE_SDK_VERSION}.tgz.part`);
+  const tgzPath = path.join(COWORK_ROOT, 'bin', `claude-${CLAUDE_SDK_VERSION}.tgz.part`);
   await downloadToPart({
     urls: CLAUDE_REGISTRIES.map(claudeTarballUrl),
     partPath: tgzPath,
@@ -340,7 +400,8 @@ async function downloadClaude(r: AssetsRuntime, signal: AbortSignal): Promise<vo
     },
   });
   r.claude.state = 'installing';
-  await extractClaude(tgzPath);
+  await extractClaude(tgzPath); // rename 原子覆盖旧 binary;guest 侧偏斜由 daemon v3 claudeSize 自愈
+  writeJsonMarker(CLAUDE_MARKER_PATH, { version: CLAUDE_SDK_VERSION, stampedBy: 'download' });
   r.claude.state = 'ready';
   console.log('[cowork-assets] claude binary installed:', CLAUDE_BIN_PATH);
 }
@@ -352,11 +413,13 @@ async function downloadClaude(r: AssetsRuntime, signal: AbortSignal): Promise<vo
 export function startAssetsDownload(): AssetsStatus {
   const r = runtime();
   if (r.active) return getAssetsStatus();
-  if (assetsReady()) return getAssetsStatus();
+  const upgradeImage = imageNeedsUpgrade();
+  const upgradeClaude = claudeNeedsUpgrade();
+  if (assetsReady() && !upgradeImage && !upgradeClaude) return getAssetsStatus();
   const spaceErr = preflightDiskSpace();
   if (spaceErr) {
-    if (!fs.existsSync(IMAGE_PATH)) r.image = { ...r.image, state: 'failed', error: spaceErr };
-    if (!fs.existsSync(CLAUDE_BIN_PATH)) r.claude = { ...r.claude, state: 'failed', error: spaceErr };
+    if (!fs.existsSync(IMAGE_PATH) || upgradeImage) r.image = { ...r.image, state: 'failed', error: spaceErr };
+    if (!fs.existsSync(CLAUDE_BIN_PATH) || upgradeClaude) r.claude = { ...r.claude, state: 'failed', error: spaceErr };
     return getAssetsStatus();
   }
   r.active = true;
@@ -365,13 +428,13 @@ export function startAssetsDownload(): AssetsStatus {
   void (async () => {
     const tasks: Array<Promise<void>> = [];
     tasks.push(
-      downloadImage(r, signal).catch((err) => {
+      downloadImage(r, signal, upgradeImage).catch((err) => {
         const msg = err instanceof Error ? err.message : String(err);
         r.image = { ...r.image, state: msg === 'cancelled' ? 'missing' : 'failed', error: msg === 'cancelled' ? undefined : msg };
       }),
     );
     tasks.push(
-      downloadClaude(r, signal).catch((err) => {
+      downloadClaude(r, signal, upgradeClaude).catch((err) => {
         const msg = err instanceof Error ? err.message : String(err);
         r.claude = { ...r.claude, state: msg === 'cancelled' ? 'missing' : 'failed', error: msg === 'cancelled' ? undefined : msg };
       }),

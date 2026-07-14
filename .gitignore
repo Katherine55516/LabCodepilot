@@ -56,6 +56,9 @@ next-env.d.ts
 # Playwright headless_shell —— 打包时由 scripts/bundle-chromium.mjs 生成、
 # electron-builder 复制进安装包的平台相关浏览器二进制(~192MB),绝不提交。
 /ms-playwright-bundle/
+# vfkit 虚拟机监视器 —— 打包时由 scripts/bundle-vfkit.mjs 从本机 brew 拷贝、
+# electron-builder 复制进 Resources/cowork/bin/ 的二进制,绝不提交。
+/vfkit-bundle/
 /release-win/
 
 # test artifacts

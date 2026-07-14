@@ -1649,6 +1649,8 @@ const zh: Record<TranslationKey, string> = {
   'workspace.office.verifying': '正在校验与安装…',
   'workspace.office.downloadFailed': '下载失败',
   'workspace.office.sendBlocked': '沙箱环境尚未就绪,下载完成后即可发送。',
+  'workspace.office.upgrade': '下载新版沙箱环境',
+  'workspace.office.upgradeHint': '沙箱环境有新版本可用;当前版本仍可正常使用,升级会重建沙箱虚拟机。',
 
   // ── Context Usage ─────────────────────────────────────────
   'context.usage': '上下文占用',

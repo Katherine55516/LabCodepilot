@@ -141,6 +141,22 @@ extraResources:
     filter:
       - "**/*"
       - "!transform-report.json"
+  # Cowork 沙箱运行时资源(镜像流水线 M3)—— guest daemon + vsock 转发器。
+  # 运行时由 src/lib/cowork-paths.ts bundledCoworkResource() 经
+  # AILAB_RESOURCES_PATH/cowork/ 定位(打包版脱离仓库绝对路径依赖的关键)。
+  - from: scripts/poc/cowork/
+    to: cowork/
+    filter:
+      - "cowork-daemon.py"
+      - "forwarder-vsock.sh"
+      - "forwarder-vsock.mjs"
+  # vfkit 虚拟机监视器(Apache-2.0,crc-org/vfkit)—— scripts/bundle-vfkit.mjs
+  # 在 electron:build 阶段从本机 brew 拷入 vfkit-bundle/(强校验
+  # com.apple.security.virtualization entitlement)。after-sign.js 的 adhoc 补签
+  # 按扩展名收集,不会碰这个无扩展名二进制,原签名与 entitlement 保留。
+  - from: vfkit-bundle/
+    to: cowork/bin/
+    filter: ["vfkit"]
 afterPack: scripts/after-pack.js
 afterSign: scripts/after-sign.js
 asarUnpack:

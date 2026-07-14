@@ -14,15 +14,18 @@ import path from 'path';
 import { getSetting } from './db';
 import { ensureRunning } from './cowork-vm-manager';
 import { assetsReady } from './cowork-assets';
+import { bundledCoworkResource } from './cowork-paths';
 
 /**
- * POC 转发器脚本路径(仓库内)。P1-C 起指向 vsock 版转发器
- * (forwarder-vsock.mjs)。cowork_forwarder_path 设置若指向旧的
- * forwarder-ssh.sh,同目录解析出 vsock 版。生产会内置为签名 helper。
+ * 转发器脚本路径(M3 起随包分发为正道):Resources/cowork/forwarder-vsock.sh
+ * (同目录带 .mjs,脚本按 dirname 自解析)→ cowork_forwarder_path 设置同目录
+ * (遗留)→ 仓库路径(dev)。
  */
 function forwarderPath(): string {
-  const fromSetting = (getSetting('cowork_forwarder_path') || '').trim();
   const candidates: string[] = [];
+  const bundled = bundledCoworkResource('forwarder-vsock.sh');
+  if (bundled) candidates.push(bundled);
+  const fromSetting = (getSetting('cowork_forwarder_path') || '').trim();
   if (fromSetting) {
     // 设置可能仍指向旧 ssh 脚本;取同目录的 vsock 版 bash 包装
     candidates.push(path.join(path.dirname(fromSetting), 'forwarder-vsock.sh'));
