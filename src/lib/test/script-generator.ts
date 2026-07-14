@@ -382,7 +382,8 @@ export async function repairScriptsBatch(params: {
   const system = `你是 Playwright 自动化脚本工程师。以下每条输入是一份【运行失败】的回归脚本：testCase 是用例（事实依据），currentScript 是当前脚本，failure 是本次运行的失败原因。请针对 failure 修复脚本。
 只返回符合 JSON Schema 的对象，不输出 Markdown，不调用任何工具。每条输入恰好返回一项，caseId/fileName 原样返回。
 【只允许修技术缺陷】：定位器歧义或找不到元素（getByRole/getByText 传字符串 name 必须 { exact: true }；仍有歧义就用 getByTestId 或先用容器缩小范围，不要用 .first() 掩盖）、等待时机、前置条件/数据准备。
-【红线】：如果 failure 表明页面实际行为与用例 expected 不一致（断言如实失败），这不是脚本缺陷，禁止通过弱化、删除或反转断言让脚本通过 —— 返回 fixed=false，reason 用一句测试人员能懂的话说明「页面实际行为是 X，用例预期是 Y，需人工确认是产品缺陷还是用例预期有误」。
+【断言写法与页面渲染不符，属技术缺陷、必须修正（不是弱化）】：仔细读 failure 里的 Received/实际文本——如果它【确实包含】expected 想验证的内容，只是格式/顺序/正则方向和断言写法对不上，就把断言改成匹配真实渲染。典型：页面渲染是「数字在前」如 "0踩坑"，而断言写成 /踩坑\s*\d+/（数字在后）永远匹配不上，应改成 /\d+\s*踩坑/；或 getByText 单元素匹配不到跨元素拼接的文本，应改用 expect(page.locator("body")).toContainText(...)。这类是把断言【对齐事实】，不是弱化，放心修。
+【红线】：只有当 Received 里【根本没有】expected 要验证的内容（页面实际行为与用例预期真不一致、断言如实失败）时，才禁止通过弱化/删除/反转断言让脚本通过 —— 返回 fixed=false，reason 用一句测试人员能懂的话说明「页面实际是 X、用例预期是 Y，需人工确认是产品缺陷还是用例预期有误」。
 fixed=true 时 content 为修复后的完整脚本，并保持生成约束：import { test, expect } from "playwright/test"（不是 "@playwright/test"）；【整份文件恰好一个顶层 test】，标题以 scriptCaseId 开头，多个步骤写进同一个 test 内并用 await test.step("步骤N：…", async () => {…}) 分段，绝不拆成多个 test 或用 test.describe 包多个；至少一个 expect；只用相对 URL 或 process.env.BASE_URL；账号密码只用 process.env.TEST_USERNAME/TEST_PASSWORD；除 playwright/test 外禁止任何 import/require。fixed=false 时 content 返回空字符串。
 reason 永远必填：修了什么、或为什么不能修，一句话，写给不会写代码的测试人员。`;
   const text = await generateTextViaSdk({
@@ -391,9 +392,9 @@ reason 永远必填：修了什么、或为什么不能修，一句话，写给�
     system,
     prompt: `修复以下 ${inputs.length} 条运行失败的脚本。\n\n${cleanPayload}`,
     abortSignal: params.abortSignal,
-    // 修复比生成更重：输入含完整旧脚本 + 失败原因，还要判断「该不该修」。单条 120s 实测
-    // 会超时（qwen3.7-max）；给足预算，避免超时抛错让流水线中断。
-    timeoutMs: Math.max(300_000, inputs.length * 120_000),
+    // 修复比生成更重：输入含完整旧脚本 + 失败原因，还要判断「该不该修」。真机实测复杂用例
+    // （TC-034 那种 Dashboard 渲染）单条 300s 仍会超时；配合流式连接不掉，放宽到 480s 给足预算。
+    timeoutMs: Math.max(480_000, inputs.length * 150_000),
     outputFormat: { type: 'json_schema', schema: REPAIR_SCHEMA },
   });
   return validateRepairPayload(parseJsonResult(text), inputs);
