@@ -11,7 +11,7 @@
 | Phase | 内容 | 状态 | 备注 |
 |-------|------|------|------|
 | P3-A | 每会话非特权用户:daemon 提权 + exec setuid 降权到会话专属用户 + workspace 700 | ✅ 已完成 | 2026-07-15 VM 实测:会话 B whoami=cw_<B>,cat/ls 会话 A 目录均 Permission denied,自己 workspace 读写正常,daemon(root)下载 A 产物正常,删会话 userdel;附带修竞态(见决策)+ seed instance-id 内容寻址 |
-| P3-B-0 | 宿主代理 POC:HTTP-over-vsock 流式转发 + claude http base_url + 一次性 token 三点验证 | 📋 待开始 | 架构有不确定性,POC 先行 |
+| P3-B-0 | 宿主代理 POC:claude http base_url + 一次性 token + HTTP/SSE 转发三点验证 | ✅ 已完成 | 2026-07-15 宿主本地层(scripts/poc/cowork/proxy-poc.ts)真凭证实测:三假设全 PASS,claude 回 BRIDGE_OK/result 无错。**理想架构可行,不走退路**。VM→host 通道选型待 P3-B 首步定(见决策) |
 | P3-B | 宿主代理产品化:真 key 只在宿主内存,VM 只拿一次性 token | 📋 待开始 | 依赖 P3-B-0 通过 |
 | P3-C | 审计日志 + 双文档 + 回归 + 打包 | 📋 待开始 | |
 
@@ -57,14 +57,15 @@ VM 内 claude ──http──▶ daemon(127.0.0.1 HTTP 代理) ──vsock 反�
 - **env 改造**:claude 的 `ANTHROPIC_BASE_URL=http://127.0.0.1:<port>`、`ANTHROPIC_AUTH_TOKEN=<一次性token>`;forwarder 白名单**剔除真凭证透传**(真 key 不再过河,只放行 COWORK_* + 一次性 token 的注入)。
 - **边界**:只引流 claude 的 API 调用(base_url 指向的域);agent 脚本的通用出网走 VM NAT 不经代理(决策 2)。
 
-**待 POC 验证的假设(P3-B-0,不通过则走退路)**:
-1. **claude 二进制接受 `http://` 本地明文 base_url**(Agent SDK CLI 是否强制 https?)——POC 首验。
-2. **HTTP/SSE 流式响应经 vsock 反向转发不破坏流**——模型响应是 SSE 长流,daemon 做 HTTP server + 逐字节经 vsock 转发,要保证不缓冲、不截断(P1-C 的 pump_out 经验可复用)。
-3. **一次性 token 机制**:宿主签发/校验/剥离/注入闭环,token 短期有效可废止。
+**POC 验证结论(P3-B-0,2026-07-15,scripts/poc/cowork/proxy-poc.ts)**:宿主本地层用真 managed 凭证实测,三假设**全 PASS**:
+1. ✅ **claude 接受 `http://` 本地明文 base_url**——darwin claude 正常打到 http 代理,不强制 https。
+2. ✅ **HTTP/SSE 流经代理完整转发**——claude 回 `BRIDGE_OK`,result 无错(此层是宿主本地 HTTP 转发;vsock 跳见下方通道选型)。
+3. ✅ **一次性 token 校验+剥离+注入真 key**——代理用 ONESHOT 换真 key 转发,真 key 只在宿主内存。
+- 发现:claude 会发个别**无 auth 的预检请求**,代理拒绝(401)后 claude 容错重试,对话仍成功 → 产品代理对无效 token 返回 401 是安全的(fail-secure)。
 
-**退路(POC 不通过)**:
-- 退路 A:**vfkit NAT 网关 IP**——宿主 proxy 监听 NAT 网关地址(VM 可达宿主),claude base_url 指网关 IP:port。缺点:明文 + 同网段暴露(当前单 VM 可接受);免掉 HTTP-over-vsock 的复杂度。
-- 退路 B:vsock 反向不可行但要加密 → 宿主 proxy 自签证书,VM 内信任。
+**VM→host 通道选型(P3-B 首步定,两选项均成熟,POC 已排除"claude 侧不可行")**:
+- 倾向 **NAT 网关**:宿主 proxy 监听 vfkit NAT 网关地址,claude base_url 指网关 IP:port。与"通用出网走 NAT"架构统一,免 HTTP-over-vsock 多路复用复杂度;明文 loopback 在单 VM 可接受。**P3-B 首步须验证 guest→host 网关可达性**(起 VM,guest curl 宿主监听端口);不通则转 vsock 反向。
+- 备选 **vsock 反向**:daemon 兼 HTTP 代理经宿主预建的 vsock 连接转发(vfkit connect 模式 guest 不能主动连宿主,需宿主保持长连接 + HTTP 多路复用)。更隔离但更复杂。
 
 **验收**:办公回合正常 + VM 内 `env | grep ANTHROPIC` **看不到真 key**(只有一次性 token + 本地 base_url);宿主 proxy 日志显示注入真 key 转发成功;速度/流式无退化。
 
