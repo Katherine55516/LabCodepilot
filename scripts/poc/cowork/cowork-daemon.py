@@ -33,12 +33,13 @@ import os
 import re
 import shlex
 import socket
+import pwd
 import subprocess
 import sys
 import threading
 import time
 
-DAEMON_VERSION = 3
+DAEMON_VERSION = 4
 
 PORT = int(os.environ.get("COWORK_VSOCK_PORT", "1024"))
 SESSIONS_ROOT = "/home/agent/sessions"
@@ -47,6 +48,54 @@ CLAUDE_BIN = os.path.expanduser("~/bin/claude")
 INSTALL_TARGETS = {"claude": CLAUDE_BIN}
 HEX_RE = re.compile(r"^[a-fA-F0-9]{8,64}$")
 SAFE_NAME_RE = re.compile(r"[^a-zA-Z0-9._一-鿿-]")
+
+
+# ── P3-A 每会话非特权用户 ─────────────────────────────────────────────
+# daemon 以 root 跑(seed v3 systemd User=root);exec claude 时降权到会话
+# 专属 Linux 用户 cw_<id[:12]>,workspace/home 目录 chown 给它 + chmod 700 —
+# 会话 B 的 claude 从文件系统权限层面就穿不过会话 A 的目录(<id> 700 属 A)。
+# 文件 op(mkdir/write/list/read/archive)仍由 daemon(root)执行,root 无视
+# 权限,上传下载/对账不受影响。daemon 非 root 时 Popen(user=) 会抛错 —— 这是
+# fail-secure:绝不静默降级到不隔离(daemon v4 只随 seed v3 root 出现)。
+
+def session_user(session_id):
+    if not HEX_RE.match(session_id or ""):
+        raise ValueError("invalid sessionId")
+    return "cw_" + session_id[:12]
+
+
+def ensure_session_user(session_id):
+    """幂等建会话专属系统账号(无家目录、nologin),返回用户名。"""
+    name = session_user(session_id)
+    try:
+        pwd.getpwnam(name)
+        return name
+    except KeyError:
+        pass
+    subprocess.run(["useradd", "-M", "-r", "-s", "/usr/sbin/nologin", name], check=False)
+    pwd.getpwnam(name)  # 确认建成;失败抛 KeyError → 上层回错误
+    return name
+
+
+def prepare_session_fs(session_id, name):
+    """建会话目录树(workspace + home),归会话用户,700 阻断兄弟会话穿越。"""
+    base = os.path.join(SESSIONS_ROOT, session_id)
+    ws = os.path.join(base, "workspace")
+    home = os.path.join(base, "home")
+    os.makedirs(ws, exist_ok=True)
+    os.makedirs(home, exist_ok=True)
+    subprocess.run(["chown", "-R", "%s:%s" % (name, name), base], check=False)
+    os.chmod(base, 0o700)   # <id> 700 → 兄弟会话用户无 x,穿不过
+    os.chmod(ws, 0o700)
+    os.chmod(home, 0o700)
+    return ws, home
+
+
+def delete_session_user(session_id):
+    try:
+        subprocess.run(["userdel", session_user(session_id)], check=False)
+    except ValueError:
+        pass
 
 
 def workspace(session_id):
@@ -87,7 +136,10 @@ def op_health(conn, req, rest):
     # guest 旧 binary 的版本偏斜自愈。一次探测拿全就绪信息,省一轮 RPC。
     claude_ready = os.path.isfile(CLAUDE_BIN) and os.access(CLAUDE_BIN, os.X_OK)
     claude_size = os.path.getsize(CLAUDE_BIN) if claude_ready else 0
-    send_json(conn, {"ok": True, "version": DAEMON_VERSION, "claude": claude_ready, "claudeSize": claude_size})
+    # uid(v4):宿主据此确认 daemon 已提权 root —— 升级重灌时 daemon 可能先以
+    # 旧 unit(User=agent)开机自启,cloud-init runcmd 的 restart 才提权到 root。
+    # 宿主必须等 uid==0 才开跑回合(否则 exec setuid 降权失败,claude 秒退)。
+    send_json(conn, {"ok": True, "version": DAEMON_VERSION, "claude": claude_ready, "claudeSize": claude_size, "uid": os.geteuid()})
 
 
 def op_mkdir(conn, req, rest):
@@ -201,6 +253,7 @@ def op_remove_session(conn, req, rest):
     if not HEX_RE.match(session_id or ""):
         raise ValueError("invalid sessionId")
     subprocess.run(["rm", "-rf", os.path.join(SESSIONS_ROOT, session_id)], check=False)
+    delete_session_user(session_id)  # P3-A:会话用户随会话删(best-effort)
     send_json(conn, {"ok": True})
 
 
@@ -221,6 +274,7 @@ def op_reconcile_sessions(conn, req, rest):
             if name in keep:
                 continue
             subprocess.run(["rm", "-rf", os.path.join(SESSIONS_ROOT, name)], check=False)
+            delete_session_user(name)  # P3-A:孤儿会话用户随目录清(防 uid 累积)
             removed.append(name)
     send_json(conn, {"ok": True, "removed": removed})
 
@@ -233,15 +287,20 @@ def op_exec(conn, req, rest):
     关掉 forwarder stdin → forwarder 发长度 0 帧 → 这里关 claude stdin → claude
     见 EOF 退出 → SDK 迭代器结束 → done。stdout 方向保持裸流(量大、要纯净)。
     连接被非正常断开(abort:host 强杀 forwarder)→ 帧读到中途 EOF → 杀 claude。
+
+    P3-A:claude 以会话专属用户降权跑(user=/group=,需 daemon 为 root)。
+    HOME 指向会话私有目录(claude 会往 ~ 写配置/会话状态,须可写且隔离)。
     """
-    ws = workspace(req["sessionId"])
-    os.makedirs(ws, exist_ok=True)
+    session_id = req["sessionId"]
+    name = ensure_session_user(session_id)
+    ws, home = prepare_session_fs(session_id, name)
     argv = req.get("argv", [])
     env = dict(os.environ)
     env.update(req.get("env", {}))
-    err_log = open("/tmp/cowork-exec-%s.err" % req["sessionId"], "ab")
+    env["HOME"] = home  # 每会话私有 HOME(claude 配置/状态随会话隔离)
+    err_log = open("/tmp/cowork-exec-%s.err" % session_id, "ab")
     proc = subprocess.Popen(
-        [CLAUDE_BIN] + argv, cwd=ws, env=env,
+        [CLAUDE_BIN] + argv, cwd=ws, env=env, user=name, group=name,
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=err_log,
     )
     err_log.close()

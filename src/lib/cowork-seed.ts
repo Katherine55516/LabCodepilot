@@ -24,32 +24,40 @@ import { IMAGES_DIR, bundledCoworkResource } from './cowork-paths';
 const execFileAsync = promisify(execFile);
 
 // v2(M3):daemon v3 —— health 增加 claudeSize(guest binary 版本偏斜自愈)
-export const SEED_TEMPLATE_VERSION = 2;
+// v3(P3-A):daemon v4 —— systemd User=root + exec setuid 降权到会话专属用户
+export const SEED_TEMPLATE_VERSION = 3;
 
 /**
  * guest daemon 版本的宿主侧期望值,必须与 cowork-daemon.py 的 DAEMON_VERSION
  * 一致(单测跨层断言)。provisionGuest 用它做运行时一致性哨兵。
  */
-export const EXPECTED_DAEMON_VERSION = 3;
+export const EXPECTED_DAEMON_VERSION = 4;
 
-/** daemon 在 guest 内的落点(root 经 write_files 写入,agent 只读执行)。 */
+/** daemon 在 guest 内的落点(root 经 write_files 写入)。 */
 export const GUEST_DAEMON_TARGET = '/opt/codepilot/cowork-daemon.py';
 
 /** hostname 保持 POC 时代的值:vm-up.sh 的 `ip` 子命令(dev 调试)按它反查租约。 */
 const GUEST_HOSTNAME = 'cowork-poc';
 
-export function buildMetaData(): string {
-  return `instance-id: codepilot-cowork-v${SEED_TEMPLATE_VERSION}\nlocal-hostname: ${GUEST_HOSTNAME}\n`;
+/**
+ * instance-id 决定 cloud-init 是否重跑 per-instance(write_files/runcmd)。
+ * 带 user-data 内容哈希 → **daemon 或模板任一改动即触发已有磁盘重灌**,
+ * 无需手动 bump SEED_TEMPLATE_VERSION(该常量仅标记模板结构版本 +
+ * EXPECTED_DAEMON_VERSION 单测锁仍在)。省掉 M1 坑16 的手动同步纪律。
+ */
+export function buildMetaData(contentHash?: string): string {
+  const id = `codepilot-cowork-v${SEED_TEMPLATE_VERSION}${contentHash ? `-${contentHash}` : ''}`;
+  return `instance-id: ${id}\nlocal-hostname: ${GUEST_HOSTNAME}\n`;
 }
 
 /**
  * 生成 user-data(#cloud-config)。要点:
  * - agent 用户**无 ssh_authorized_keys**、lock_passwd —— 唯一访问面是 vsock daemon
  * - daemon base64 内嵌 write_files → /opt/codepilot/cowork-daemon.py(0755)
- * - systemd unit:User=agent + 显式 HOME(systemd 不给 system service 设 HOME,
- *   claude 子进程需要)+ modprobe vsock 兜底 + Restart=always
- * - runcmd:enable --now daemon;disable+mask ssh(服务与 socket 激活双堵,
- *   P3 攻击面收缩提前落袋)
+ * - systemd unit:**User=root**(P3-A:daemon 需 root 来 useradd + exec setuid
+ *   降权到会话专属用户)+ 显式 HOME(daemon 自身;exec 时按会话覆盖)+
+ *   modprobe vsock 兜底 + Restart=always
+ * - runcmd:enable --now daemon;disable+mask ssh(服务与 socket 激活双堵)
  * - growpart 保留:M2 下载器把 raw 稀疏扩容后由它吃满
  */
 export function buildUserData(daemonSource: string): string {
@@ -75,7 +83,7 @@ write_files:
       After=local-fs.target
 
       [Service]
-      User=agent
+      User=root
       Environment=HOME=/home/agent
       ExecStartPre=-/sbin/modprobe vsock
       ExecStartPre=-/sbin/modprobe vmw_vsock_virtio_transport
@@ -89,7 +97,11 @@ runcmd:
   - mkdir -p /home/agent/workspace /home/agent/bin /home/agent/sessions
   - chown -R agent:agent /home/agent
   - systemctl daemon-reload
-  - systemctl enable --now codepilot-daemon.service
+  - systemctl enable codepilot-daemon.service
+  # restart(非 enable --now):升级重灌时,boot 期 systemd 可能已用旧 unit
+  # 启动了 daemon,--now 对已运行服务是 no-op → 新 unit(User=root)/新代码不
+  # 生效。restart 强制重启到新配置(P3-A 每会话隔离依赖 daemon 为 root)。
+  - systemctl restart codepilot-daemon.service
   - systemctl disable --now ssh.service ssh.socket 2>/dev/null || true
   - systemctl mask ssh.service ssh.socket 2>/dev/null || true
 `;
@@ -112,10 +124,14 @@ export function resolveDaemonSource(): string | null {
   return candidates.find((p) => fs.existsSync(p)) || null;
 }
 
+/** user-data 内容哈希前 8 位(seed 文件名 + instance-id 共用,内容寻址)。 */
+export function seedContentHash(userData: string): string {
+  return crypto.createHash('sha256').update(userData).digest('hex').slice(0, 8);
+}
+
 /** 内容寻址的 seed 文件名:模板版本 + user-data sha256 前 8 位。 */
 export function seedIsoPath(userData: string): string {
-  const hash = crypto.createHash('sha256').update(userData).digest('hex').slice(0, 8);
-  return path.join(IMAGES_DIR, `seed-codepilot-v${SEED_TEMPLATE_VERSION}-${hash}.iso`);
+  return path.join(IMAGES_DIR, `seed-codepilot-v${SEED_TEMPLATE_VERSION}-${seedContentHash(userData)}.iso`);
 }
 
 /**
@@ -133,7 +149,8 @@ export async function ensureSeedIso(): Promise<string> {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'codepilot-seed-'));
   try {
     fs.writeFileSync(path.join(tmp, 'user-data'), userData);
-    fs.writeFileSync(path.join(tmp, 'meta-data'), buildMetaData());
+    // instance-id 带 user-data 内容哈希 → daemon/模板一改即触发已有磁盘重灌
+    fs.writeFileSync(path.join(tmp, 'meta-data'), buildMetaData(seedContentHash(userData)));
     fs.mkdirSync(IMAGES_DIR, { recursive: true });
     // 先出到临时名再原子 rename(保持 .iso 后缀,hdiutil 对无后缀路径会自行追加)
     const tmpIso = iso.replace(/\.iso$/, '.tmp.iso');

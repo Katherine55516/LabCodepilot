@@ -104,6 +104,8 @@ export interface VsockHealth {
   claude?: boolean;
   /** guest 内 claude binary 字节数(daemon v3;宿主比对不符则重推,版本偏斜自愈)。 */
   claudeSize?: number;
+  /** daemon 进程 euid(daemon v4;宿主据此确认已提权 root 才开跑回合)。 */
+  uid?: number;
 }
 
 /** 富健康探测:一次 RPC 拿全就绪信息(daemon 版本 + claude binary 状态)。 */
@@ -118,6 +120,7 @@ export async function vsockHealth(timeoutMs = 4000): Promise<VsockHealth> {
       version: typeof obj.version === 'number' ? obj.version : undefined,
       claude: obj.claude === true,
       claudeSize: typeof obj.claudeSize === 'number' ? obj.claudeSize : undefined,
+      uid: typeof obj.uid === 'number' ? obj.uid : undefined,
     };
   } catch {
     return { ok: false };

@@ -102,6 +102,21 @@ function isPidAlive(pid: number): boolean {
   try { process.kill(pid, 0); return true; } catch { return false; }
 }
 
+/**
+ * VM 就绪判定(P3-A):不只是 daemon 应答,还要求 v4+ daemon 已提权到 root。
+ * 升级重灌时 daemon 可能先以旧 unit(User=agent)开机自启就 vsock 应答,而
+ * cloud-init runcmd 的 restart 才把它提权到 root —— 若此时开跑回合,exec 的
+ * setuid 降权(user=/group=)会失败、claude 秒退。故 fail-secure:daemon 非
+ * root 时不算就绪,继续等 cloud-init 完成(旧 daemon 无 uid 字段 → 不卡)。
+ */
+async function vsockRootReady(timeoutMs = 4000): Promise<boolean> {
+  const { vsockHealth } = await import('./cowork-vsock');
+  const h = await vsockHealth(timeoutMs);
+  if (!h.ok) return false;
+  if (h.version !== undefined && h.version >= 4 && h.uid !== 0) return false;
+  return true;
+}
+
 /** 是否已有一台我们的 vfkit 在跑(pid 文件存活),用于跨进程复用与孤儿判定。 */
 function existingVfkitPid(): number | null {
   try {
@@ -247,7 +262,7 @@ export async function ensureRunning(): Promise<VmStatus> {
       // 复用外部已在跑的 vfkit(vm-up.sh 手动启动的、或上次本进程启动的)
       const alivePid = existingVfkitPid();
       if (alivePid) {
-        if (await vsockHealthy(4000)) {
+        if (await vsockRootReady(4000)) {
           emitProgress('provisioning', 'preparing sandbox');
           await provisionGuest();
           s.phase = 'running';
@@ -306,7 +321,7 @@ export async function ensureRunning(): Promise<VmStatus> {
       const deadline = Date.now() + READY_TIMEOUT_MS;
       while (Date.now() < deadline) {
         if (s.phase !== 'starting') break; // exit 回调可能已改状态
-        if (await vsockHealthy(2500)) {
+        if (await vsockRootReady(2500)) {
           await provisionGuest();
           s.phase = 'running';
           s.reason = undefined;

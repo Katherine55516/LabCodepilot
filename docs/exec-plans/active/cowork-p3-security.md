@@ -10,7 +10,7 @@
 
 | Phase | 内容 | 状态 | 备注 |
 |-------|------|------|------|
-| P3-A | 每会话非特权用户:daemon 提权 + exec setuid 降权到会话专属用户 + workspace 700 | 📋 待开始 | 技术确定(标准 Linux),先做先落袋 |
+| P3-A | 每会话非特权用户:daemon 提权 + exec setuid 降权到会话专属用户 + workspace 700 | ✅ 已完成 | 2026-07-15 VM 实测:会话 B whoami=cw_<B>,cat/ls 会话 A 目录均 Permission denied,自己 workspace 读写正常,daemon(root)下载 A 产物正常,删会话 userdel;附带修竞态(见决策)+ seed instance-id 内容寻址 |
 | P3-B-0 | 宿主代理 POC:HTTP-over-vsock 流式转发 + claude http base_url + 一次性 token 三点验证 | 📋 待开始 | 架构有不确定性,POC 先行 |
 | P3-B | 宿主代理产品化:真 key 只在宿主内存,VM 只拿一次性 token | 📋 待开始 | 依赖 P3-B-0 通过 |
 | P3-C | 审计日志 + 双文档 + 回归 + 打包 | 📋 待开始 | |
@@ -20,7 +20,8 @@
 - 2026-07-15 **范围:只做两项 + 审计,不做出网白名单**(用户拍板)。①宿主代理注入 token(凭证永不进 VM)②每会话非特权用户(会话间不可越权互读)③配套审计日志。**明确不做出网白名单**:用户接受 agent 在沙箱内自由上网的风险(白名单会让"画图装包/查网页/下链接"失效,代价太大)。
 - 2026-07-15 **宿主代理只管 claude 的 API 凭证,不碰通用出网**(用户确认)。只把 claude 调模型 API 的流量引回宿主注入真 key;agent 跑脚本时的通用出网(pip/网页/下载)照旧走 VM 的 NAT 自由出去。与"保留自由上网"一致。**代价诚实记录**:被注入的 agent 理论上仍能把数据 POST 到任意外部地址——这是用户已接受的风险,P3 不封。
 - 2026-07-15 **每会话隔离用 Linux 用户 + setuid,而非 bwrap/namespace**。理由:Debian 云镜像自带 useradd/setuid(subprocess `user=` 参数,Python 3.11 支持),bwrap 要额外装进镜像;setuid 降权 + workspace chmod 700 从文件系统权限层面封死跨会话读,足够且标准。代价:daemon 须从 `User=agent` 提权到 root(才能 useradd + setuid 降权)——daemon 攻击面扩大,但其协议面小且固定(几个 op),是合理取舍。
-- 2026-07-15 **三处版本必须同步 bump**(沿用 M1 纪律):daemon `DAEMON_VERSION`=4、`cowork-seed.ts` 的 `SEED_TEMPLATE_VERSION`=3 + `EXPECTED_DAEMON_VERSION`=4。P3-A 改 daemon(root + setuid)与 seed(systemd User=root + 每会话用户初始化目录),必须让已有磁盘 cloud-init 重跑才生效。
+- 2026-07-15 **三处版本必须同步 bump**(沿用 M1 纪律):daemon `DAEMON_VERSION`=4、`cowork-seed.ts` 的 `SEED_TEMPLATE_VERSION`=3 + `EXPECTED_DAEMON_VERSION`=4。P3-A 改 daemon(root + setuid)与 seed(systemd User=root),必须让已有磁盘 cloud-init 重跑才生效。
+- 2026-07-15 **实测抓到两个升级健壮性 bug,一并修**(P3-A 副产物):①**seed instance-id 内容寻址**——原 instance-id 只跟 SEED_TEMPLATE_VERSION,daemon 改了不 bump 版本就不重灌(M1 坑16 的手动纪律);改为 `codepilot-cowork-v{N}-{userData内容hash}`,daemon/模板一改即触发重灌,消除手动 bump 负担(SEED_TEMPLATE_VERSION 仅留作结构版本 + EXPECTED_DAEMON_VERSION 单测锁)。②**runcmd 用 restart 而非 enable --now**——升级重灌时 daemon 可能已被 systemd 用旧 unit 开机自启,`enable --now` 对已运行服务 no-op → 新 unit(User=root)不生效;restart 强制加载。③**就绪判定加 root 门**(vsockRootReady)——竞态:daemon 首次 boot 就 vsock 应答(可能还是 agent),cloud-init restart 提权到 root 尚未完成;若此时开跑回合,exec setuid 失败、claude 秒退。修:health 上报 uid,v4+ daemon 必须 uid==0 才算就绪(fail-secure,绝不在 daemon 非 root 时开跑)。**这仨都是 P3-A 实测两次撞到 claude 秒退才挖出来的,非纸面能预见。**
 
 ## 详细设计
 
