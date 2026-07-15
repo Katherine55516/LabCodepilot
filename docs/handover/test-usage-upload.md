@@ -160,6 +160,7 @@
 | `stat_date` date | **北京自然日**，客户端定桶 |
 | 11 个功能计数列 | `tasks_created, cases_generated, cases_generated_first_round, cases_adopted, cases_approved, executions, cases_executed, cases_passed, cases_failed, reviews, reviews_accurate` |
 | 8 个回归计数列（P2，迁移 `0018_test_usage_regression`） | `reg_rounds_full, reg_rounds_failed_only, reg_case_executions, reg_script_pass, reg_script_fail, reg_ai_pass, reg_ai_fail, reg_suites_count` |
+| 3 个补充指标列（迁移 `0019_test_usage_metrics`） | `tasks_total`(快照·累计曾创建), `case_duration_ms_sum`(bigint), `case_duration_samples` |
 | `payload` JSONB | 明细：`exec`(partial/blocked/circuit_broken/avg_case_duration_ms)、`adoption`、`reviews_detail`、`models[]`、`projects[]` |
 | `first_reported_at` / `last_reported_at` | 审计 |
 | **UNIQUE** `(user_id, device_id, stat_date)` | upsert 冲突目标 |
@@ -204,7 +205,19 @@ ON CONFLICT (user_id, device_id, stat_date) DO UPDATE
 > 绝不能对「每日比率」求平均 —— 那是加权错误。
 
 **向后兼容**：P1 客户端不发 `regression` → Pydantic 填全 0 → `GREATEST(已存值, 0)` 保留原值。
-老客户端永远不会把 P2 数据清零。
+老客户端永远不会把 P2 数据清零。`GREATEST_FIELDS` 覆盖全部 22 个计数列（含 tasks_total + 时长两列），
+同理保证漏字段的老客户端不清零。
+
+**⚠️ 快照类字段（`tasks_total`、`reg_suites_count`）不能按区间 SUM**（迁移 0019 一并修正）。
+它们是「当前存量」快照，客户端只在窗口最新一天带真实值。管理端用 Postgres
+`DISTINCT ON (user_id, device_id) ORDER BY stat_date DESC` 取每台设备**区间内最新一天**的存量，
+再按用户/全局跨设备求和；`by_day` 取当天 `MAX`。绝不跨天 SUM（否则每天的快照会翻倍累加——
+这正是 0018 里 `reg_suites_count` 被当普通计数 SUM 的隐患，0019 修掉）。字段分组见
+`app/test_usage/schemas.py`：`SUM_FIELDS`（可求和，剔除两个快照）/ `SNAPSHOT_FIELDS` / `GREATEST_FIELDS`。
+
+**用例执行平均时间**：不落库均值，`avg_case_duration_ms = SUM(case_duration_ms_sum)/SUM(case_duration_samples)`
+按区间现算（与比率同原则，避免对每日均值再平均）。客户端 `tasks_total` = 全历史 `task_created` 事件计数
+（机器级，自统计事件上线起；含已删除）。
 
 `projects_count` 用**相关标量子查询**（`jsonb_array_elements(payload->'projects')` 去重计数），
 避免 lateral join 污染同一查询里其它列的 SUM。
