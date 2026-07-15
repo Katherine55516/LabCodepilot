@@ -44,6 +44,7 @@
 
 | 文件 | 主题 | 状态 |
 |------|------|------|
+| active/cowork-p3-security.md | **Cowork P3 安全强化**:凭证不进 VM(宿主代理注入 token,只管 API 凭证)+ 每会话非特权用户(setuid 降权,会话间不可越权互读)+ 审计日志;明确不做出网白名单(用户接受 agent 自由上网) | P3-A/B/C 待开始 |
 | active/regression-library.md | 测试工作台:回归用例库(用例设计后自动沉淀「回归测试」标签用例 + 项目级库查看/管理 + 跨任务一键重跑) | 设计完成,待实现(批 A-E) |
 | active/test-regression-gate-audit.md | 测试工作台:回归集标签 + 用例门控 + 操作审计 | 开发完成(合并 PR #8),待打包验收 mac+Win |
 | active/chat-latency-remediation.md | 聊天链路提速 + 模式入口收敛 + MCP 持久开关 | Phase 0 完成，Phase 1-4 待开始 |

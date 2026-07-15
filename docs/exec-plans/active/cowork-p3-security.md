@@ -1,0 +1,79 @@
+# Cowork P3 安全强化 — 凭证不进 VM + 会话间隔离
+
+> 创建时间:2026-07-15
+> 最后更新:2026-07-15
+> 上游:办公模式 E1-E5 + 镜像流水线 M1-M4 已交付(见 [docs/handover/cowork-vm-mode.md](../../handover/cowork-vm-mode.md));调研见 [docs/research/cowork-local-vm-mode.md](../../research/cowork-local-vm-mode.md)
+
+**威胁模型转变**:E1-E5 + 流水线保护的是"用户的真机"(agent 碰不到宿主文件)。P3 保护的是"用户的凭证与数据"——办公模式的核心用法是把**不可信文件**喂给 agent,一份被提示注入的文档可以指挥 agent 干它权限内的坏事。P3 堵两个当前敞开的口子。
+
+## 状态
+
+| Phase | 内容 | 状态 | 备注 |
+|-------|------|------|------|
+| P3-A | 每会话非特权用户:daemon 提权 + exec setuid 降权到会话专属用户 + workspace 700 | 📋 待开始 | 技术确定(标准 Linux),先做先落袋 |
+| P3-B-0 | 宿主代理 POC:HTTP-over-vsock 流式转发 + claude http base_url + 一次性 token 三点验证 | 📋 待开始 | 架构有不确定性,POC 先行 |
+| P3-B | 宿主代理产品化:真 key 只在宿主内存,VM 只拿一次性 token | 📋 待开始 | 依赖 P3-B-0 通过 |
+| P3-C | 审计日志 + 双文档 + 回归 + 打包 | 📋 待开始 | |
+
+## 决策日志
+
+- 2026-07-15 **范围:只做两项 + 审计,不做出网白名单**(用户拍板)。①宿主代理注入 token(凭证永不进 VM)②每会话非特权用户(会话间不可越权互读)③配套审计日志。**明确不做出网白名单**:用户接受 agent 在沙箱内自由上网的风险(白名单会让"画图装包/查网页/下链接"失效,代价太大)。
+- 2026-07-15 **宿主代理只管 claude 的 API 凭证,不碰通用出网**(用户确认)。只把 claude 调模型 API 的流量引回宿主注入真 key;agent 跑脚本时的通用出网(pip/网页/下载)照旧走 VM 的 NAT 自由出去。与"保留自由上网"一致。**代价诚实记录**:被注入的 agent 理论上仍能把数据 POST 到任意外部地址——这是用户已接受的风险,P3 不封。
+- 2026-07-15 **每会话隔离用 Linux 用户 + setuid,而非 bwrap/namespace**。理由:Debian 云镜像自带 useradd/setuid(subprocess `user=` 参数,Python 3.11 支持),bwrap 要额外装进镜像;setuid 降权 + workspace chmod 700 从文件系统权限层面封死跨会话读,足够且标准。代价:daemon 须从 `User=agent` 提权到 root(才能 useradd + setuid 降权)——daemon 攻击面扩大,但其协议面小且固定(几个 op),是合理取舍。
+- 2026-07-15 **三处版本必须同步 bump**(沿用 M1 纪律):daemon `DAEMON_VERSION`=4、`cowork-seed.ts` 的 `SEED_TEMPLATE_VERSION`=3 + `EXPECTED_DAEMON_VERSION`=4。P3-A 改 daemon(root + setuid)与 seed(systemd User=root + 每会话用户初始化目录),必须让已有磁盘 cloud-init 重跑才生效。
+
+## 详细设计
+
+### P3-A 每会话非特权用户(先做,技术确定)
+
+**现状**:seed 里 systemd unit `User=agent`,daemon 与它 exec 的 claude 都在 agent 下;所有会话共用 agent 用户,`/home/agent/sessions/<A>/workspace` 对会话 B 的 claude 可读(同属主)。
+
+**目标态**:
+1. **daemon 提权**:seed 的 systemd unit `User=agent` → `User=root`(daemon 需 useradd + setuid 降权)。daemon 自身的 HTTP 代理(P3-B)也在 root,但监听 127.0.0.1。
+2. **exec 降权**:`op_exec` spawn claude 前——
+   - 幂等建会话专属用户 `cw_<sessionId[:12]>`(`useradd -M -r` 无家目录系统账号;已存在跳过)
+   - workspace `chown -R <user>:<user>` + `chmod 700`
+   - `subprocess.Popen(..., user=<user>, group=<user>, cwd=workspace)` —— claude 以该用户身份跑
+3. **文件 op 不变**:writeFile/readFile/listFiles/archive/removeSession 由 daemon(root)执行,root 无视权限,上传下载照常;chown 后产物属会话用户,daemon 仍能读。
+4. **清理**:removeSession + reconcileSessions 顺带 `userdel cw_<...>`(best-effort)。
+
+**验收(VM 实测)**:建会话 A 建文件 → 会话 B 的 claude `cat /home/agent/sessions/<A>/workspace/*` 应 **permission denied**;会话 B 读写自己 workspace 正常;上传附件/下载产物/对账全部不受影响。
+
+**风险**:daemon root 化后若崩溃影响面更大(但有 systemd Restart=always);uid 耗尽(会话专属用户不回收会累积,靠 userdel + reconcile 兜底)。
+
+### P3-B 宿主代理注入 token(POC 先行,架构有不确定性)
+
+**现状(凭证暴露面)**:`provider-resolver.toClaudeCodeEnv` 注入 `ANTHROPIC_API_KEY`/`ANTHROPIC_AUTH_TOKEN`/`ANTHROPIC_BASE_URL`;forwarder 白名单 `/^(ANTHROPIC_|CLAUDE_|COWORK_)/` **把真凭证整个透传进 VM claude 的 env**。VM 被攻陷即泄 key。
+
+**目标架构**:
+```
+VM 内 claude ──http──▶ daemon(127.0.0.1 HTTP 代理) ──vsock 反向──▶ 宿主 cowork-proxy ──https──▶ 真 API
+  base_url=http://127.0.0.1:<port>          剥一次性token              校验+注入真key+真base_url
+  ANTHROPIC_AUTH_TOKEN=<一次性token>        经 vsock 转发             (真 key 只在宿主内存)
+```
+- **宿主 cowork-proxy**(next-server 侧,globalThis 单例同 vm-manager):持真实 `ANTHROPIC_*`(内存态,从 provider-resolver 拿),按会话签发一次性 token;收到 VM 转来的请求 → 校验一次性 token → 剥掉 → 插真 key + 真 base_url → 转发真 API → 流式回传。
+- **guest daemon 兼 HTTP 代理**:监听 `127.0.0.1:<port>`,收 claude 的 API 请求 → 经 vsock 反向通道转宿主 proxy → 流式回传。
+- **env 改造**:claude 的 `ANTHROPIC_BASE_URL=http://127.0.0.1:<port>`、`ANTHROPIC_AUTH_TOKEN=<一次性token>`;forwarder 白名单**剔除真凭证透传**(真 key 不再过河,只放行 COWORK_* + 一次性 token 的注入)。
+- **边界**:只引流 claude 的 API 调用(base_url 指向的域);agent 脚本的通用出网走 VM NAT 不经代理(决策 2)。
+
+**待 POC 验证的假设(P3-B-0,不通过则走退路)**:
+1. **claude 二进制接受 `http://` 本地明文 base_url**(Agent SDK CLI 是否强制 https?)——POC 首验。
+2. **HTTP/SSE 流式响应经 vsock 反向转发不破坏流**——模型响应是 SSE 长流,daemon 做 HTTP server + 逐字节经 vsock 转发,要保证不缓冲、不截断(P1-C 的 pump_out 经验可复用)。
+3. **一次性 token 机制**:宿主签发/校验/剥离/注入闭环,token 短期有效可废止。
+
+**退路(POC 不通过)**:
+- 退路 A:**vfkit NAT 网关 IP**——宿主 proxy 监听 NAT 网关地址(VM 可达宿主),claude base_url 指网关 IP:port。缺点:明文 + 同网段暴露(当前单 VM 可接受);免掉 HTTP-over-vsock 的复杂度。
+- 退路 B:vsock 反向不可行但要加密 → 宿主 proxy 自签证书,VM 内信任。
+
+**验收**:办公回合正常 + VM 内 `env | grep ANTHROPIC` **看不到真 key**(只有一次性 token + 本地 base_url);宿主 proxy 日志显示注入真 key 转发成功;速度/流式无退化。
+
+### P3-C 审计日志 + 配套
+
+- daemon 记 exec/文件 op 到宿主可读的审计日志(会话 id、时间、op、argv 摘要),经 vsock 拉取或落 guest 文件由宿主定期收。企业信任加分项,无用户可感面。
+- 双文档 + 回归 + 打包。
+
+## 明确不做(范围外)
+
+- **出网白名单**(决策 1 排除):agent 沙箱内自由上网,用户已接受数据外流风险。
+- 每会话独立网络命名空间 / 出口 IP:与自由上网决策冲突,不做。
+- P2 Windows/WSL2:独立立项。
