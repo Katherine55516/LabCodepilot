@@ -13,7 +13,7 @@
 | P3-A | 每会话非特权用户:daemon 提权 + exec setuid 降权到会话专属用户 + workspace 700 | ✅ 已完成 | 2026-07-15 VM 实测:会话 B whoami=cw_<B>,cat/ls 会话 A 目录均 Permission denied,自己 workspace 读写正常,daemon(root)下载 A 产物正常,删会话 userdel;附带修竞态(见决策)+ seed instance-id 内容寻址 |
 | P3-B-0 | 宿主代理 POC:claude http base_url + 一次性 token + HTTP/SSE 转发三点验证 | ✅ 已完成 | 2026-07-15 宿主本地层(scripts/poc/cowork/proxy-poc.ts)真凭证实测:三假设全 PASS,claude 回 BRIDGE_OK/result 无错。**理想架构可行,不走退路**。VM→host 通道选型待 P3-B 首步定(见决策) |
 | P3-B | 宿主代理产品化:真 key 只在宿主内存,VM 只拿一次性 token | ✅ 已完成 | 2026-07-15 NAT 网关方案 VM 实测:回合正常(81s,PROXY_TEST_OK),VM 内 `ANTHROPIC_API_KEY=cwk_…(len=52)` **是一次性 token 非真 key**、`ANTHROPIC_BASE_URL=http://192.168.64.1:8788`(代理);proxy 日志确认 real key withheld;删会话触发 revokeSession。guest→host 网关 192.168.64.1 实测可达 |
-| P3-C | 审计日志 + 双文档 + 回归 + 打包 | 📋 待开始 | |
+| P3-C | 审计日志 + 双文档 + 回归 + 打包 | ✅ 已完成 | 2026-07-15 cowork-audit.ts 宿主侧 append-only 审计(凭证签发/废止、文件进出、VM 生命周期);接入 cowork-proxy/transfer/vm-manager;落 audit.log(JSON Lines,8MB 软截断);双文档终稿;test 1948 绿。**P3 全部完成,计划归档** |
 
 ## 决策日志
 

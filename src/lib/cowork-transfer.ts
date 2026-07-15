@@ -54,7 +54,10 @@ export async function ensureSessionWorkspace(sessionId: string): Promise<string>
 export async function pushFileToVm(sessionId: string, localPath: string, fileName: string): Promise<string> {
   assertSessionId(sessionId);
   const data = await fs.promises.readFile(localPath);
-  return rpcWriteFile(sessionId, fileName, data);
+  const dest = await rpcWriteFile(sessionId, fileName, data);
+  const { audit } = await import('./cowork-audit');
+  audit('file_upload', { sessionId, detail: `${fileName} (${data.length}B)` }); // P3-C 安全审计:数据进 VM
+  return dest;
 }
 
 /**
@@ -91,13 +94,19 @@ export function assertPathInWorkspace(sessionId: string, vmPath: string): string
 /** 流式读取 VM 内单个文件(daemon 侧做 realpath 权威校验)。 */
 export async function readFileStream(sessionId: string, vmPath: string): Promise<{ stream: NodeJS.ReadableStream; size: number }> {
   assertPathInWorkspace(sessionId, vmPath);
-  return rpcReadFileStream(sessionId, vmPath);
+  const r = await rpcReadFileStream(sessionId, vmPath);
+  const { audit } = await import('./cowork-audit');
+  audit('file_download', { sessionId, detail: `${vmPath.split('/').pop()} (${r.size}B)` }); // P3-C:数据出 VM
+  return r;
 }
 
 /** 流式打包整个会话 workspace 为 tar.gz。 */
 export async function archiveStream(sessionId: string): Promise<{ stream: NodeJS.ReadableStream; size: number }> {
   assertSessionId(sessionId);
-  return rpcArchiveStream(sessionId);
+  const r = await rpcArchiveStream(sessionId);
+  const { audit } = await import('./cowork-audit');
+  audit('archive_download', { sessionId, detail: `workspace.tar.gz (${r.size}B)` }); // P3-C:数据出 VM
+  return r;
 }
 
 /** 会话删除时清理 VM 内的会话目录。 */

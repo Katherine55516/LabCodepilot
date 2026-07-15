@@ -66,6 +66,8 @@ Next server(宿主)                                     VM guest(Debian, aarch64
 | `src/lib/cowork-paths.ts` | **M3 新增:路径单一事实源**。资产目录正式化 `~/.codepilot/cowork-poc` → `cowork-assets`(模块加载时 renameSync 原子迁移,幂等;双存在用新告警,失败回退老);全部规范路径常量(IMAGE/CLAUDE/EFI/PID/CONSOLE/VSOCK/marker);`bundledCoworkResource()`(AILAB_RESOURCES_PATH/cowork 解析随包资源)、`vfkitBin()`(bundled 优先→PATH)。**server-only,勿被客户端组件引用**。 |
 | `scripts/bundle-vfkit.mjs` | **M3 新增**:构建期从 brew 拷 vfkit 进 vfkit-bundle/(挂 electron:build 链),强校验 virtualization entitlement,缺失即构建失败。 |
 | `src/lib/cowork-assets.ts` | **M2 新增:资产下载器**(server 侧单例)。manifest 常量:底镜锚定 dated build `20260712-2537`(**绝不锚 latest**,单测锁)双源 USTC+官方 + sha512;claude=`@anthropic-ai/claude-agent-sdk-linux-arm64` **与宿主 SDK 同版本**(`CLAUDE_SDK_VERSION` 单测锁 package.json)npmmirror+npmjs 双源,integrity 取 registry 元数据。引擎:Range 断点续传(.part+续传前重哈希前缀)、sha512 流式校验(失败删 .part 防死循环)、源不支持 Range→200 回退清零重下、`statfs` 磁盘预检、镜像落位后 `truncate` 稀疏扩容 8GiB(guest growpart 吃满)、claude tgz 系统 tar 解包。`getAssetsStatus()/assetsReady()/startAssetsDownload()(幂等)/cancelAssetsDownload()(保留 .part)`。**IMAGE_PATH/CLAUDE_BIN_PATH 是资产路径单一事实源**(vm-manager 从这里 import)。 |
+| `src/lib/cowork-proxy.ts` | **P3-B 新增:宿主凭证注入代理**(server 侧单例)。真 managed key 只在内存 Map;绑 vmnet 网关 `192.168.64.1:8788`;`registerSession`(签发 `cwk_` 一次性 token,幂等)/`revokeSession`/`ensureProxyRunning`/`discoverGatewayIp`。请求处理:校验来源 vmnet 网段+token→剥→注入真 key(authStyle)→https 转发真 base_url→SSE 流式回。**真 key 永不进 VM**。 |
+| `src/lib/cowork-audit.ts` | **P3-C 新增:宿主侧安全审计**。append-only `audit.log`(凭证签发/废止、文件进出、VM 生命周期);best-effort 永不抛;`readRecentAudit`。宿主是 VM 唯一出入口,日志 VM 攻陷改不了。 |
 | `src/hooks/useCoworkStatus.ts` | **M2 新增:状态共享 hook**。拉 /api/cowork/status;`overall==='downloading'` 期间 2s 轮询;监听 `cowork-status-changed`/`cowork-assets-changed`;`startDownload/cancelDownload` 封装 + 广播。使用方:OfficeEmptyCard(内部自持)、GeneralSection、ChatView(D4 禁发)。 |
 | `src/app/api/cowork/assets/route.ts` | **M2 新增**:POST=开始下载(显式触发 D3,幂等)/DELETE=取消。进度经 status 轮询。 |
 | `src/lib/cowork-vsock.ts` | 宿主侧 vsock RPC 客户端。连 vfkit 的 unix socket,发 JSON header + body。导出 `vsockHealth`(M1 富探测 {ok,version,claude})/ `vsockHealthy` / `rpcInstallBinary`(M1:createReadStream 推流,253MB 级)/ `rpcMkdirWorkspace` / `rpcWriteFile` / `rpcListFiles` / `rpcRemoveSession` / `rpcReadFileStream` / `rpcArchiveStream`。`readJsonHeader` 处理 close/超时(见 §9 bug①)。 |
@@ -207,12 +209,23 @@ vsock-1024.sock                            # vfkit 暴露的 vsock unix socket(V
 
 - **M3 打包正式化**:①资产目录 `cowork-poc`→`cowork-assets`(cowork-paths.ts 首触原子迁移,本机实测无感);②daemon/forwarder/vfkit 随包(Resources/cowork/,解析 bundled→设置→仓库三级)——**打包版脱离仓库绝对路径依赖 + 免 brew 前置**;③**大坑实证:electron-builder 签名剥 vfkit 的 virtualization entitlement** → `mac.signIgnore` 跳过 + after-sign.js 防回归校验/自愈(修后包内 vfkit 与 brew 原件逐位一致);④版本追踪 installed-*.json(懒栽种)+ 设置页「下载新版沙箱环境」+ `usable` 语义(升级下载不误禁办公);⑤daemon v3(health 带 claudeSize,宿主大小比对不符重推 —— SDK 升级后 guest binary 偏斜自愈),老盘经 instance-id v2 重灌取证 DAEMON_VERSION=3。
 
-### 未完成 —— 镜像流水线 M4 + P2/P3
+### 已完成 —— 镜像流水线 M4(2026-07-15)
 
-- **M4 裸机验收 + 双文档**:全新资产目录 + 3.1.17 打包版(bundled vfkit)走完 下载→首启→回合 全流程;失败路径复验;handover/insights 终稿。
+- **M4 裸机模拟验收**(见 §8.6):全新资产目录 + dev 以 3.1.17 包 Resources 为解析源 + 仓库运行时脚本全部藏起 → 回合成功唯一可能是包内资源;spawn 日志+ps 双证包内 vfkit 起 VM,包内 daemon 生成 seed,包内 forwarder 跑通;升级面 usable/upgradeAvailable CDP 验证。
+
+### 已完成 —— P3 安全强化 M1-C(2026-07-15,计划见 exec-plans/active/cowork-p3-security.md)
+
+> 威胁模型转变:E1-E5+流水线保护"真机";P3 保护"凭证与数据"——办公模式把不可信文件喂给 agent,提示注入可指挥它干权限内的坏事。**用户拍板范围:每会话隔离 + 凭证不进 VM + 审计;明确不做出网白名单(接受 agent 自由上网)。**
+
+- **P3-A 每会话非特权用户**(`f7d1cd6`):daemon 提权 root(seed User=root),exec claude 时降权到会话专属 Linux 用户 `cw_<id[:12]>`(幂等 useradd -M -r nologin),workspace/home chown 给它 + chmod 700,兄弟会话从文件系统权限层面穿不过(`<id>` 700)。文件 op 由 daemon(root)执行,上传下载不受影响;removeSession/reconcile 带 userdel。daemon v4/seed v3。VM 实测:会话 B cat/ls 会话 A 目录均 Permission denied,自己 workspace 正常。**副产物修三个升级健壮性 bug**(见 §9 坑20):seed instance-id 内容寻址、runcmd restart 替代 enable --now、就绪判定加 root 门(vsockRootReady)。
+- **P3-B 宿主代理注入 token**(`714840b`,POC `4377aed`):真 managed key 只留宿主 `cowork-proxy` 内存,VM 里的 claude 只拿按会话签发的一次性 token(`cwk_`+24 字节 hex)。**NAT 网关方案**(实测 guest→宿主网关 192.168.64.1 可达,免 HTTP-over-vsock 复杂度,daemon 不参与代理链故不改):proxy 绑 `192.168.64.1:8788`,claude base_url 指它;proxy 校验来源 vmnet 网段+token→剥→注入真 key(按 authStyle)→https 转发真 base_url→SSE 流式回。claude-client cowork 分支覆盖 env 为 token+代理地址(真 key 不过河);DELETE 会话 revokeSession。VM 实测:VM 内 `ANTHROPIC_API_KEY=cwk_…(len=52,token 非真 key)`、`BASE_URL=http://192.168.64.1:8788`,回合正常。**边界:只代理 claude API,通用出网走 NAT(自由上网)。**
+- **P3-C 安全审计 + 收尾**:cowork-audit.ts 宿主侧 append-only 审计(凭证签发/废止、文件进出 VM、VM 生命周期;宿主是 VM 唯一出入口,日志 VM 攻陷改不了,且不用改 daemon)。落 `~/.codepilot/cowork-assets/audit.log`(JSON Lines,8MB 软截断)。
+
+### 未完成 —— P2 + 明确不做 + 小项
+
+- **明确不做**:出网白名单(用户接受 agent 自由上网风险;白名单会让画图装包/查网页失效)。
 - **P2 Windows**:WSL2 私有 distro(明确不走 Hyper-V HCS,官方 Cowork 的 Home 版惨案)+ 降级探测。vsock 在 WSL2 上的等价通道要重新调研。
-- **P3 安全强化**:宿主代理注入 token(永不进 VM)、出网白名单、每会话非特权用户/bwrap、下载凭证扫描(sshd mask 已随 M1 提前落袋)。
-- **小项待办**:办公会话标题旁的模式徽标(可选)、办公列表长列表截断(现平铺不截断)、guest 磁盘用量可视化。
+- **小项待办**:审计日志 UI 查看面(现只落盘,readRecentAudit 已备)、办公会话标题旁的模式徽标(可选)、guest 磁盘用量可视化。
 
 ---
 
@@ -300,6 +313,8 @@ npm run electron:build && node scripts/bundle-chromium.mjs && npx electron-build
 17. **npmmirror 对 npm tarball 不支持 Range**(M2 实测):带 Range 头请求返回 200 全量 —— 下载器的"200 回退清零重下"路径不是防御性代码,是 npmmirror 的常态路径;改下载引擎别删这个分支。中科大 debian-cdimage 支持 Range(断点续传正常)。另:升级底镜 build 时同步改 `IMAGE_BUILD/IMAGE_SHA512/IMAGE_SIZE` 三常量(单测锁 URL 不含 latest);升级宿主 SDK 时 `CLAUDE_SDK_VERSION` 单测会挂,提醒同步。
 18. **electron-builder 签名会剥 bundled vfkit 的 entitlement(M3 实测)**:它用 Electron 默认 entitlements(只剩 allow-jit)重签 Resources 里的 Mach-O,`com.apple.security.virtualization` 被剥 → 沙箱 VM 起不来。修复:`mac.signIgnore: ["cowork/bin/vfkit$"]` 跳过(保留 brew 原签名,包内与原件逐位一致)+ after-sign.js `ensureVfkitEntitlements`(adhoc 路径在主 bundle 落 seal 前校验/自愈;真证书路径只查告警,改了会破坏 Developer ID resource seal)。**将来接真证书签名/公证时,vfkit 必须用同 Team ID 重签且带 virtualization entitlement**,到时再解决。
 19. **资产目录已正式化(M3)**:运行时目录是 `~/.codepilot/cowork-assets/`(cowork-paths.ts 首次加载把老的 cowork-poc 原子迁走)。文档/脚本里出现的 cowork-poc 是历史名;`npm run test` 也会触发迁移(import 即迁,幂等安全)。
+20. **daemon 提权/setuid 类改动的坑全在启动时序,dev 单测测不出,必须 kill VM 冷启动实测(P3-A 三坑)**:①**就绪判定竞态**——daemon 冷启动会先以旧配置(User=agent)被 systemd 拉起就 vsock 应答,cloud-init 的 `restart` 把它提权 root 尚未完成;此时开跑回合 exec setuid 失败、claude 秒退。修:health 上报 `uid`,`vsockRootReady` 要求 v4+ daemon `uid==0` 才算就绪(fail-secure,绝不在非 root 时执行回合)。②**runcmd 必须 `restart` 而非 `enable --now`**——后者对已运行 daemon 是 no-op,新 unit(User=root)/新代码不加载。③**instance-id 已改内容寻址**(`codepilot-cowork-v{N}-{userData hash}`)——daemon/模板一改 hash 变即触发已有磁盘重灌,**消除坑16 的手动 bump 纪律**(SEED_TEMPLATE_VERSION 仅留结构版本 + EXPECTED_DAEMON_VERSION 单测锁)。表象都是"claude 秒退 0 输出",先查 daemon uid 再怀疑别处。
+21. **P3-B 真 key 不进 VM 靠 claude-client 覆盖 env,不是改 forwarder**:cowork 分支把 coworkEnv 的真 `ANTHROPIC_API_KEY/BASE_URL` 覆盖成一次性 token + 代理地址,过河的就是假的;forwarder 白名单不用动(它透传的已是 token)。**改凭证注入链时别把这层覆盖弄丢**(丢了真 key 就回到过河)。验证法:办公回合里让 agent 跑 `case "$ANTHROPIC_API_KEY" in cwk_*) ...` 确认是 `cwk_` token 非真 key(零泄漏)。cowork-proxy 绑 vmnet 网关 IP,VM 必须已起(bridge100 存在)才绑得上 → ensureProxyRunning 在 decision.useSandbox(VM ready)后调。
 
 ---
 

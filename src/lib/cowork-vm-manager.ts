@@ -363,6 +363,8 @@ export async function ensureRunning(): Promise<VmStatus> {
  * 历史上开过沙箱后来关掉的会话,其 VM 产物目录同样保留)。
  */
 function fireSessionReconcile(): void {
+  // P3-C 安全审计:两个就绪点(reuse/fresh boot)都经此,一处记 vm_start。
+  void import('./cowork-audit').then((m) => m.audit('vm_start'));
   (async () => {
     try {
       const { getAllSessions } = require('./db') as typeof import('./db');
@@ -404,4 +406,5 @@ export async function stop(): Promise<void> {
   s.phase = 'stopped';
   s.reason = undefined;
   try { fs.rmSync(VFKIT_PID_FILE, { force: true }); } catch { /* ignore */ }
+  if (pid) void import('./cowork-audit').then((m) => m.audit('vm_stop')); // P3-C 审计
 }

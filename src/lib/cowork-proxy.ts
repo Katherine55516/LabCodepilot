@@ -116,6 +116,7 @@ export function registerSession(sessionId: string, cred: Omit<SessionCred, 'sess
     s.byToken.set(token, { sessionId, ...cred });
   }
   const host = s.boundHost && s.boundHost !== '0.0.0.0' ? s.boundHost : discoverGatewayIp();
+  void import('./cowork-audit').then((m) => m.audit('cred_issued', { sessionId })); // P3-C 安全审计
   return { token, baseUrl: `http://${host}:${PROXY_PORT}` };
 }
 
@@ -123,7 +124,11 @@ export function registerSession(sessionId: string, cred: Omit<SessionCred, 'sess
 export function revokeSession(sessionId: string): void {
   const s = state();
   const token = s.tokenBySession.get(sessionId);
-  if (token) { s.byToken.delete(token); s.tokenBySession.delete(sessionId); }
+  if (token) {
+    s.byToken.delete(token);
+    s.tokenBySession.delete(sessionId);
+    void import('./cowork-audit').then((m) => m.audit('cred_revoked', { sessionId }));
+  }
 }
 
 function handleRequest(req: http.IncomingMessage, res: http.ServerResponse): void {
