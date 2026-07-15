@@ -12,7 +12,7 @@
 |-------|------|------|------|
 | P3-A | 每会话非特权用户:daemon 提权 + exec setuid 降权到会话专属用户 + workspace 700 | ✅ 已完成 | 2026-07-15 VM 实测:会话 B whoami=cw_<B>,cat/ls 会话 A 目录均 Permission denied,自己 workspace 读写正常,daemon(root)下载 A 产物正常,删会话 userdel;附带修竞态(见决策)+ seed instance-id 内容寻址 |
 | P3-B-0 | 宿主代理 POC:claude http base_url + 一次性 token + HTTP/SSE 转发三点验证 | ✅ 已完成 | 2026-07-15 宿主本地层(scripts/poc/cowork/proxy-poc.ts)真凭证实测:三假设全 PASS,claude 回 BRIDGE_OK/result 无错。**理想架构可行,不走退路**。VM→host 通道选型待 P3-B 首步定(见决策) |
-| P3-B | 宿主代理产品化:真 key 只在宿主内存,VM 只拿一次性 token | 📋 待开始 | 依赖 P3-B-0 通过 |
+| P3-B | 宿主代理产品化:真 key 只在宿主内存,VM 只拿一次性 token | ✅ 已完成 | 2026-07-15 NAT 网关方案 VM 实测:回合正常(81s,PROXY_TEST_OK),VM 内 `ANTHROPIC_API_KEY=cwk_…(len=52)` **是一次性 token 非真 key**、`ANTHROPIC_BASE_URL=http://192.168.64.1:8788`(代理);proxy 日志确认 real key withheld;删会话触发 revokeSession。guest→host 网关 192.168.64.1 实测可达 |
 | P3-C | 审计日志 + 双文档 + 回归 + 打包 | 📋 待开始 | |
 
 ## 决策日志
@@ -63,9 +63,12 @@ VM 内 claude ──http──▶ daemon(127.0.0.1 HTTP 代理) ──vsock 反�
 3. ✅ **一次性 token 校验+剥离+注入真 key**——代理用 ONESHOT 换真 key 转发,真 key 只在宿主内存。
 - 发现:claude 会发个别**无 auth 的预检请求**,代理拒绝(401)后 claude 容错重试,对话仍成功 → 产品代理对无效 token 返回 401 是安全的(fail-secure)。
 
-**VM→host 通道选型(P3-B 首步定,两选项均成熟,POC 已排除"claude 侧不可行")**:
-- 倾向 **NAT 网关**:宿主 proxy 监听 vfkit NAT 网关地址,claude base_url 指网关 IP:port。与"通用出网走 NAT"架构统一,免 HTTP-over-vsock 多路复用复杂度;明文 loopback 在单 VM 可接受。**P3-B 首步须验证 guest→host 网关可达性**(起 VM,guest curl 宿主监听端口);不通则转 vsock 反向。
-- 备选 **vsock 反向**:daemon 兼 HTTP 代理经宿主预建的 vsock 连接转发(vfkit connect 模式 guest 不能主动连宿主,需宿主保持长连接 + HTTP 多路复用)。更隔离但更复杂。
+**VM→host 通道选型(P3-B 已定:NAT 网关)**:2026-07-15 实测 guest(192.168.64.4)curl 宿主网关 `192.168.64.1:8899` → REACHED,宿主 ping-server 收到请求。**采用 NAT 网关**:cowork-proxy 绑 vmnet 网关 IP `192.168.64.1:8788`(仅该接口可达),claude base_url 指它。daemon 完全不参与代理链(P3-B 不用改 daemon/seed)。备选 vsock 反向(更隔离更复杂)未采用。三重防护:绑网关 IP + 来源须 vmnet 网段 + 一次性 token。
+
+**P3-B 实现要点(已交付)**:
+- `src/lib/cowork-proxy.ts`(新,server 侧单例):`discoverGatewayIp`(os.networkInterfaces 找 192.168.64.x,回退 .1)、`ensureProxyRunning`(绑网关失败回退 0.0.0.0)、`registerSession`(签发 `cwk_`+24 字节 hex token,幂等,内存 Map 存真凭证)、`revokeSession`;请求处理校验来源 IP+token → 剥 token → 注入真 key(按 authStyle) → https 转发真 base_url → SSE 流式回传。
+- `claude-client.ts` cowork 分支:读 coworkEnv 的真 ANTHROPIC_*，注册进 proxy，覆盖为 token + 代理 base_url(真 key 不再进 queryOptions.env → 不过河);无真凭证(env 模式)保持原样。
+- `sessions/[id]` DELETE:revokeSession(会话删 → token 失效)。
 
 **验收**:办公回合正常 + VM 内 `env | grep ANTHROPIC` **看不到真 key**(只有一次性 token + 本地 base_url);宿主 proxy 日志显示注入真 key 转发成功;速度/流式无退化。
 

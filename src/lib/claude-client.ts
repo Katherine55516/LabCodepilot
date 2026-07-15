@@ -835,6 +835,22 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
             coworkEnv.COWORK_VSOCK_PATH = VSOCK_SOCKET_PATH;
             coworkEnv.COWORK_NODE_BIN = process.execPath;
             coworkEnv.ELECTRON_RUN_AS_NODE = '1';
+            // P3-B: 真凭证不进 VM —— 注册进宿主代理,把过河的 ANTHROPIC_* 换成
+            // 一次性 token + 代理 base_url。VM 内 claude 拿不到真 key(提示注入偷
+            // 不走、外发不掉真凭证);代理只管 API 调用,通用出网仍走 NAT。有真
+            // 凭证才走(env 模式用户自带 key、无 managed 凭证时保持原样)。
+            const realKey = coworkEnv.ANTHROPIC_AUTH_TOKEN || coworkEnv.ANTHROPIC_API_KEY;
+            const realBase = coworkEnv.ANTHROPIC_BASE_URL;
+            if (realKey && realBase) {
+              const proxy = await import('./cowork-proxy');
+              await proxy.ensureProxyRunning();
+              const authStyle = coworkEnv.ANTHROPIC_AUTH_TOKEN ? 'auth_token' : 'api_key';
+              const { token, baseUrl } = proxy.registerSession(sessionId, { realKey, realBase, authStyle });
+              coworkEnv.ANTHROPIC_BASE_URL = baseUrl;
+              if (authStyle === 'auth_token') coworkEnv.ANTHROPIC_AUTH_TOKEN = token;
+              else coworkEnv.ANTHROPIC_API_KEY = token;
+              console.log('[cowork] session credentials registered with host proxy — real key withheld from VM');
+            }
             // Keep the VM alive while this turn runs (blocks idle reclaim);
             // released in the outer finally.
             const vmMgr = await import('./cowork-vm-manager');

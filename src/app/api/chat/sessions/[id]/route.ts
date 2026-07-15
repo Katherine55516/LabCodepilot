@@ -142,6 +142,13 @@ export async function DELETE(
       } catch (err) {
         console.warn('[session-api] cowork removeOfficeStagingDir failed (non-fatal):', err);
       }
+      // P3-B: 废止会话的宿主代理一次性 token(VM 若曾被攻陷拿到 token,从此失效)。
+      try {
+        const { revokeSession } = await import('@/lib/cowork-proxy');
+        revokeSession(id);
+      } catch (err) {
+        console.warn('[session-api] cowork proxy revokeSession failed (non-fatal):', err);
+      }
     }
 
     deleteSession(id);
