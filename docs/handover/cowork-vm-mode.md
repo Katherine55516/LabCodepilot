@@ -6,14 +6,14 @@
 > POC 脚手架说明:[scripts/poc/cowork/README.md](../../scripts/poc/cowork/README.md)
 >
 > **本文件目标:让接手者读完即可完整理解 cowork 办公模式、并立刻接上未完成的工作,无遗漏。**
-> 最后更新:2026-07-14 · 分支 `vm_cowork`(HEAD 以 git log 为准)· 版本 **3.1.17** · 状态:P0 + P1-A~D + 办公模式 E1-E5 + **镜像流水线 M1-M4 全部完成**(零手动预置已达成并裸机模拟验收)。
+> 最后更新:2026-07-15 · 分支 `vm_cowork`(HEAD 以 git log 为准,**已全部推送 origin**)· 版本 **3.1.18** · 状态:**cowork 主线 macOS 侧全部交付**(P0 + P1 + 办公模式 E1-E5 + 镜像流水线 M1-M4 + P3 安全强化全完成)。**P2 Windows/WSL2 已立项待开工。**
 >
 > **当前节点与下一步(接手先读这段)**:
-> 1. 用户正在验收 3.1.14(重点:E5 设置开关、E4.3 删除刷新);验收中的反馈按"复现→修→CDP 验证→commit→bump→打包"节奏处理。
-> 2. **镜像流水线 M1-M4 全部完成并归档**(计划+决策日志+验收:docs/exec-plans/completed/cowork-image-pipeline.md):M1 首启自注入+SSH 全退役;M2 下载器+UI 引导;M3 资源随包+目录正式化+版本追踪+daemon v3;M4 裸机模拟验收(§8.6)。**零手动预置已达成**——3.1.17 起新机器装 DMG 即可用办公模式。已定决策:不做 Intel x64;显式点击才下载;下载中禁发;daemon 升级=seed 模板版本 bump。
-> 2.5 **cowork 主线到此收官**。后续大项(均待用户拍板):vm_cowork 合回 main(30+ commit)→ 用户手册补办公模式章节(产品名全称「AI Native Lab - 工作平台」)→ P3 安全强化(宿主代理 token/出网白名单/每会话非特权用户)→ P2 Windows/WSL2。
-> 3. 其他待定:vm_cowork 合回 main(20+ commit,用户决定时机);用户手册(docs/user-manual/,用户自己在写)补办公模式章节(产品名用全称「AI Native Lab - 工作平台」);之后 P3 安全强化 → P2 Windows。
-> 4. 注意:`docs/user-manual/`、`image-config-server-verification.md`、`scripts/dev/docker-win-build.sh` 是用户自己的 untracked 文件,**commit 时绝不能用 `git add -A` 扫进去**(踩过一次,当场 amend 移出)。另:用户开发机上 `~/.codepilot/cowork-poc/images/*.raw.old-provisioned.bak` 与 `efi-variable-store.bak` 是 M1 验收时的老盘备份(3GB),确认稳定后可删。
+> 1. **macOS 侧全交付,3.1.18 已打包已推送**。四个执行计划已归档到 completed/:办公模式(cowork-office-mode)、镜像流水线(cowork-image-pipeline)、P3 安全(cowork-p3-security)、P1 底层(cowork-vm-mode)。P3 成果:每会话非特权用户隔离(P3-A)+ 凭证不进 VM(P3-B 宿主代理注入一次性 token,NAT 网关)+ 宿主侧安全审计(P3-C);出网白名单明确不做(用户接受 agent 自由上网)。
+> 2. **下一步 = P2 Windows/WSL2,已立项**。**先读**:计划 [docs/exec-plans/active/cowork-p2-windows.md](../exec-plans/active/cowork-p2-windows.md) + 调研 [docs/research/cowork-p2-windows.md](../research/cowork-p2-windows.md)。核心决策:D1 接受"策略级强隔离+诚实文案"先交付(不等 WSLC GA,WSL2 隔离弱于 vfkit,#12443)、D2 全 Win10-11 不设门槛、D3 通道=`wsl.exe -e` stdio 模型(与现 exec 帧封装天然契合,免 admin)。
+> 3. **P2 开工卡点(关键)**:W0 通道 POC + W2-W7 实测**必须 Windows 机器**(开发机是 macOS)。**W1 平台后端抽象可在 macOS 做且零回归**(抽 guest-backend 接口 + daemon 加 --stdio 模式)。等用户给 Windows 环境:有 → W1(mac)并行 + W0(Win)验;没有 → 先做完 W1 抽象铺接缝,W0 起等环境。
+> 4. **其他待定(用户拍板)**:vm_cowork 合回 main(40+ commit,越拖冲突面越大,建议尽早)、用户手册(docs/user-manual/)补办公模式章节(产品名全称「AI Native Lab - 工作平台」、桥接只讲微信)。
+> 5. 注意:`docs/user-manual/`、`image-config-server-verification.md`、`scripts/dev/docker-win-build.sh` 是用户自己的 untracked 文件,**commit 时绝不能用 `git add -A` 扫进去**(踩过一次,当场 amend 移出)。开发机 `~/.codepilot/cowork-assets/images/*.bak` 老盘备份(3GB)确认稳定后可删。
 
 ---
 
@@ -224,7 +224,8 @@ vsock-1024.sock                            # vfkit 暴露的 vsock unix socket(V
 ### 未完成 —— P2 + 明确不做 + 小项
 
 - **明确不做**:出网白名单(用户接受 agent 自由上网风险;白名单会让画图装包/查网页失效)。
-- **P2 Windows**:WSL2 私有 distro(明确不走 Hyper-V HCS,官方 Cowork 的 Home 版惨案)+ 降级探测。vsock 在 WSL2 上的等价通道要重新调研。
+- **P2 Windows/WSL2(已立项待开工,2026-07-15)**:计划 [exec-plans/active/cowork-p2-windows.md](../exec-plans/active/cowork-p2-windows.md) + 调研 [research/cowork-p2-windows.md](../research/cowork-p2-windows.md)。**通道选型已定=`wsl.exe -e` stdio 模型**(不走 vsock —— WSL2 上裸 vsock 非免 admin;stdio 与当前架构天然契合:"一次连接=一个 op"→"一次 wsl.exe -e=一个 op",forwarder→spawn wsl.exe,daemon op 逻辑含 P3-A setuid 全复用,daemon 加 --stdio 入口)。**关键约束:W0 通道 POC + W2-W7 实测必须 Windows 机器**(开发机 macOS);W1 平台后端抽象(guest-backend 接口 + daemon --stdio)可在 macOS 做且零回归 —— 是不阻塞 Windows 环境的开工起点。**最大安全落差**:WSL2 隔离弱于 vfkit(#12443 automount 可被提权 PowerShell 绕过,官方 issue 仍 open),D1 已定接受"策略级隔离+诚实文案"先交付。POC 待攻破:exec 的 EOF 半关闭语义(WSL #4424)决定去/留帧封装。
+- **明确不做**:出网白名单(P3,用户接受 agent 自由上网);Hyper-V HCS(P2);mirrored networking 依赖(P2,砍 Win10 用户);WSLC GA 等待(P2,先交付)。
 - **小项待办**:审计日志 UI 查看面(现只落盘,readRecentAudit 已备)、办公会话标题旁的模式徽标(可选)、guest 磁盘用量可视化。
 
 ---
