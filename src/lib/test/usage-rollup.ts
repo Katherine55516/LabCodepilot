@@ -136,6 +136,19 @@ export interface DayUsagePayload {
 export interface DayUsage extends UsageCounts {
   /** 'YYYY-MM-DD'（北京日） */
   date: string;
+  /**
+   * 累计曾创建的任务数（历史 task_created 计数，自统计事件上线起；含已删除）。
+   * **快照**：只打在滚动窗口最新一天，其余天为 0；由 daily-rollup 路由计算并经
+   * mergeRegressionIntoDays 注入。服务端按「区间内最新一天」取值，不求和。
+   */
+  tasks_total: number;
+  /**
+   * 当日用例执行时长的**可求和**分子/分母（口径同 payload.exec.avg_case_duration_ms：
+   * 仅 durationMs>0 的用例、排除熔断轮）。服务端按区间 avg = SUM(sum)/SUM(samples)，
+   * 避免对每日均值再平均的加权错误。
+   */
+  case_duration_ms_sum: number;
+  case_duration_samples: number;
   /** 回归计数（P2）。功能测试聚合器只产出全 0，由 regression-rollup 覆盖。 */
   regression: RegressionCounts;
   payload: DayUsagePayload;
@@ -368,6 +381,11 @@ function finalizeDay(day: DayAcc): DayUsage {
   return {
     date: day.date,
     ...day.scope.counts,
+    // tasks_total 是快照，功能聚合器不产出（默认 0），由路由经 mergeRegressionIntoDays 打在最新一天。
+    tasks_total: 0,
+    // 用例执行时长的可求和分子/分母，供服务端 avg=SUM/SUM（与 payload 里的每日均值同源）。
+    case_duration_ms_sum: day.exec.durSum,
+    case_duration_samples: day.exec.durCount,
     // 功能测试聚合器不产出回归数据 → 全 0 占位，由 regression-rollup.mergeRegressionIntoDays 覆盖。
     regression: newRegressionCounts(),
     payload: {
