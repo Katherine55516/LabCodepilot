@@ -220,8 +220,12 @@ ON CONFLICT (user_id, device_id, stat_date) DO UPDATE
 ## 4. 管理端 Web（codeagent-server/web）
 
 照搬「设备管理」：`AppLayout.tsx` 菜单 +「测试用量统计」→ `App.tsx` 路由 `/test-usage`
-→ `pages/TestUsage.tsx`（RangePicker + KPI 卡 + 分页用户表 + 每日趋势表）+ `api/testUsage.ts`。
+→ `pages/TestUsage.tsx`（RangePicker + KPI 卡 + 分页用户表 + 全体每日趋势表）+ `api/testUsage.ts`。
 antd v5，无新增图表依赖。
+
+**单用户下钻**：主表是「按用户汇总」，全体每日趋势表是「所有用户按天」——都不是单个用户的每日。
+用户行尾「每日明细」按钮打开 Drawer，消费既有 `GET /admin/users/{id}/test-usage`，展示该用户的
+by_day（每日趋势）/ by_project / by_device 三张表。**后端零改动**，区间变化时抽屉同步刷新。
 
 ---
 
