@@ -6,11 +6,12 @@
 > POC 脚手架说明:[scripts/poc/cowork/README.md](../../scripts/poc/cowork/README.md)
 >
 > **本文件目标:让接手者读完即可完整理解 cowork 办公模式、并立刻接上未完成的工作,无遗漏。**
-> 最后更新:2026-07-14 · 分支 `vm_cowork`(HEAD 以 git log 为准,均已推送至 origin)· 版本 **3.1.14**(DMG 已交付用户验收中)· 状态:P0 + P1-A~D + 办公模式 E1-E5 **全部完成**;**镜像流水线 M1 已完成**(用户已拍板 D1-D4)。
+> 最后更新:2026-07-14 · 分支 `vm_cowork`(HEAD 以 git log 为准)· 版本 **3.1.17** · 状态:P0 + P1-A~D + 办公模式 E1-E5 + **镜像流水线 M1-M4 全部完成**(零手动预置已达成并裸机模拟验收)。
 >
 > **当前节点与下一步(接手先读这段)**:
 > 1. 用户正在验收 3.1.14(重点:E5 设置开关、E4.3 删除刷新);验收中的反馈按"复现→修→CDP 验证→commit→bump→打包"节奏处理。
-> 2. **镜像流水线 M1-M3 已完成**(计划+决策日志:docs/exec-plans/active/cowork-image-pipeline.md):M1 首启自注入+SSH 全退役;M2 下载器+UI 引导;M3 资源随包(vfkit/daemon/forwarder 进 Resources/cowork,signIgnore 保 entitlement)+ 目录正式化(cowork-assets)+ 版本追踪升级 + daemon v3 偏斜自愈。**零手动预置已达成**——3.1.17 起新机器装 DMG 即可用办公模式(应用内下载资产)。**下一步 = M4 裸机验收+双文档终稿**(打包版 bundled vfkit 的 E2E 与用户验收合并做)。已定决策:不做 Intel x64;显式点击才下载;下载中禁发;daemon 升级=seed 模板版本 bump。
+> 2. **镜像流水线 M1-M4 全部完成并归档**(计划+决策日志+验收:docs/exec-plans/completed/cowork-image-pipeline.md):M1 首启自注入+SSH 全退役;M2 下载器+UI 引导;M3 资源随包+目录正式化+版本追踪+daemon v3;M4 裸机模拟验收(§8.6)。**零手动预置已达成**——3.1.17 起新机器装 DMG 即可用办公模式。已定决策:不做 Intel x64;显式点击才下载;下载中禁发;daemon 升级=seed 模板版本 bump。
+> 2.5 **cowork 主线到此收官**。后续大项(均待用户拍板):vm_cowork 合回 main(30+ commit)→ 用户手册补办公模式章节(产品名全称「AI Native Lab - 工作平台」)→ P3 安全强化(宿主代理 token/出网白名单/每会话非特权用户)→ P2 Windows/WSL2。
 > 3. 其他待定:vm_cowork 合回 main(20+ commit,用户决定时机);用户手册(docs/user-manual/,用户自己在写)补办公模式章节(产品名用全称「AI Native Lab - 工作平台」);之后 P3 安全强化 → P2 Windows。
 > 4. 注意:`docs/user-manual/`、`image-config-server-verification.md`、`scripts/dev/docker-win-build.sh` 是用户自己的 untracked 文件,**commit 时绝不能用 `git add -A` 扫进去**(踩过一次,当场 amend 移出)。另:用户开发机上 `~/.codepilot/cowork-poc/images/*.raw.old-provisioned.bak` 与 `efi-variable-store.bak` 是 M1 验收时的老盘备份(3GB),确认稳定后可删。
 
@@ -156,19 +157,19 @@ bump DAEMON_VERSION + cowork-seed.ts 的 SEED_TEMPLATE_VERSION/EXPECTED_DAEMON_V
 
 ---
 
-## 6. POC 资产布局(`~/.codepilot/cowork-poc/`,不进 git,不随包)
+## 6. 资产布局(`~/.codepilot/cowork-assets/`,不进 git,不随包;M3 起全部应用自管)
 
 ```
-images/debian-12-genericcloud-arm64.raw   # Debian 底镜(中科大源,3GB raw;M2 起应用内下载)
-images/seed-codepilot-v1-<hash8>.iso       # M1:代码生成的 cloud-init seed(daemon+systemd 注入,内容寻址)
-images/seed.iso                            # 遗留:手工 seed(带 SSH 公钥),仅 vm-up.sh 手动调试用,应用不再读取
-seed/ + ssh/id_ed25519{,.pub}              # 遗留:seed 源文件与 SSH 密钥,应用不再依赖(M1 验收时挪走全程无影响)
-bin/package/claude                         # linux-arm64 claude binary(=SDK 平台子包解包,M1 经 vsock installBinary 推入;M2 起走 npmmirror 下载)
-efi-variable-store                         # vfkit EFI 变量
-vfkit.pid / vm-console.log                 # 运行时状态(vm-ip 已随 SSH 链退役)
+images/debian-12-genericcloud-arm64.raw    # Debian 底镜(应用内下载:中科大源,3GB;落位后稀疏扩到 8GiB)
+images/installed-image.json                # 已装底镜版本戳(build/sha512;legacy 懒栽种)
+images/seed-codepilot-v<N>-<hash8>.iso     # 代码生成的 cloud-init seed(daemon+systemd 注入,内容寻址,旧版自动清)
+bin/package/claude                         # linux-arm64 claude binary(应用内下载:npmmirror SDK 平台子包,经 vsock 推入 guest)
+bin/package/installed-claude.json          # 已装 binary 版本戳(=宿主 SDK 版本)
+efi-variable-store                         # vfkit EFI 变量(镜像升级换盘时重置)
+vfkit.pid / vm-console.log                 # 运行时状态
 vsock-1024.sock                            # vfkit 暴露的 vsock unix socket(VM 跑时存在)
 ```
-M1 后仍需手动预置的只剩**底镜 raw 与 claude binary**(M2 下载器消灭)+ brew 装 vfkit(M3 内置)。新机器复刻见 scripts/poc/cowork/README.md;镜像流水线计划见 docs/exec-plans/active/cowork-image-pipeline.md。
+**零手动预置(3.1.17)**:新机器装 DMG → 设置页/办公首页点「下载沙箱环境」即可,vfkit/daemon/forwarder 随包分发(Resources/cowork/)。老机器的 `cowork-poc` 目录由 cowork-paths.ts 首次触达自动迁移为 `cowork-assets`(内含遗留 seed.iso/ssh/ 已无用,可手动清)。流水线全貌见 docs/exec-plans/completed/cowork-image-pipeline.md。
 
 ---
 
@@ -255,16 +256,26 @@ rm -rf release/ .next/
 export ELECTRON_MIRROR="https://npmmirror.com/mirrors/electron/"
 npm run electron:build && node scripts/bundle-chromium.mjs && npx electron-builder --mac dmg --arm64 --config electron-builder.yml
 # 产物:release/AI Native Lab-3.1.x-arm64.dmg
+# electron:build 链自动执行 scripts/bundle-vfkit.mjs(本机需 brew 装 vfkit,
+# 缺失或 entitlement 不齐会构建失败);afterSign 日志应出现
+# "bundled vfkit entitlements intact (virtualization OK)"(坑18 防回归哨兵)
 ```
 **打包后必做**:`npm rebuild better-sqlite3` —— 打包会把 better-sqlite3 编成 Electron ABI,dev/test 用 node ABI 会崩(见 §9)。
 
-**测试**:`npm run test`(typecheck + 单元,~5s)。当前 1928 passed。
+**测试**:`npm run test`(typecheck + 单元,~5s)。当前 1940 passed。
 
 ### 8.5 真机零写入验收记录(E5,2026-07-14)
 
 - **弱验收(快照对比,已执行,通过)**:dev + 真实 managed 凭证,VM 冷启动,一轮完整办公回合 —— 上传 audit-input.csv → agent 在 VM 内读取、qty 翻倍、另存 doubled.csv → 产物接口下载并核验内容正确。`find $HOME -newer <T0>` 对比用户数据区(豁免面:`~/.codepilot` 应用数据、`~/Library` 系统/应用缓存、`~/Downloads` 下载落点、开发工具 dotfiles、本仓库),**违规 0 条**。同轮实测 daemon 对账 keep=55 removed=0。
 - **强验收(系统调用级,脚本就绪)**:`sudo bash scripts/poc/cowork/fs-audit.sh` —— fs_usage 全量写调用按本应用进程树过滤、剔除豁免面,violations.log 应为空。需 root,交由使用者在打包版上执行。
 - 局限:快照法无法按进程归因(违规为 0 时无归因需求);fs_usage 法可归因但需 sudo。
+
+### 8.6 镜像流水线裸机模拟验收记录(M4,2026-07-15)
+
+- **设置**:`cowork-assets` 整体挪空(全新目录)+ dev 以 3.1.17 包的 `Resources/` 为解析源(AILAB_RESOURCES_PATH)+ **仓库运行时脚本(daemon/forwarder×2)全部藏起** —— 回合成功的唯一可能是包内资源。
+- **通过项**:claude 二进制应用内真下载(npmmirror,含版本戳);办公回合 49s 零错误;**spawn 日志与 ps 双证 VM 由包内 vfkit 启动**;fresh 目录的 seed 由包内 daemon 生成;包内 forwarder 跑通 stream-json;guest 取证 instance-id v2 / DAEMON_VERSION=3 / daemon active / ssh masked / df 7.7G;产物下载逐字正确。升级面:伪造旧 build → `usable=true + upgradeAvailable=true`(办公不受扰)→ 设置页升级按钮+提示渲染(CDP)→ 恢复。
+- **如实注明**:底镜 3GB 下载环节引用 M2 全程实证(挪走双资产→下载→校验→首启→回合,含取消/续传与 Range 回退);本次跑到 75% 后按用户指示中止、从备份克隆,避免重复下载。升级换盘的执行段(停 VM+EFI 重置+原子 rename)为代码审阅级,组件(stop/rmSync/renameSync/truncate)均在其他路径单独实证。
+- 意外收获:验收窗口 `cowork_enabled` 被外部清空,E1 硬失败守卫真实触发(结构化错误+隔离尾注,零宿主执行)——守卫链拿到一次生产级实证。
 
 ---
 

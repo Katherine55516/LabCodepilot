@@ -44,7 +44,6 @@
 
 | 文件 | 主题 | 状态 |
 |------|------|------|
-| active/cowork-image-pipeline.md | **Cowork 镜像流水线**:沙箱环境零手动预置 — 上游底镜走中科大 + cloud-init seed 首启自注入(daemon/systemd 烘录,SSH 全退役)+ claude 平台子包走 npmmirror + vfkit 内置 app 包 + 应用内显式下载(断点续传/校验/进度) | M1 进行中,M2-M4 待开始 |
 | active/regression-library.md | 测试工作台:回归用例库(用例设计后自动沉淀「回归测试」标签用例 + 项目级库查看/管理 + 跨任务一键重跑) | 设计完成,待实现(批 A-E) |
 | active/test-regression-gate-audit.md | 测试工作台:回归集标签 + 用例门控 + 操作审计 | 开发完成(合并 PR #8),待打包验收 mac+Win |
 | active/chat-latency-remediation.md | 聊天链路提速 + 模式入口收敛 + MCP 持久开关 | Phase 0 完成，Phase 1-4 待开始 |
@@ -78,6 +77,7 @@
 
 | 文件 | 主题 | 完成日期 |
 |------|------|----------|
+| completed/cowork-image-pipeline.md | **Cowork 镜像流水线**:沙箱环境零手动预置(3.1.15→3.1.17)— M1 cloud-init seed 首启自注入+SSH 全退役 → M2 应用内下载(中科大底镜+npmmirror SDK 平台子包,断点续传/校验/8GiB 稀疏扩容)→ M3 资源随包(vfkit/daemon/forwarder,signIgnore 保 entitlement)+目录正式化+版本追踪+daemon v3 偏斜自愈 → M4 裸机模拟验收 | 2026-07-15 |
 | completed/cowork-office-mode.md | Cowork 办公模式:侧边栏「办公/研发」双栏切换(办公=沙箱会话平铺不绑项目文件夹);E1 执行层守卫(硬失败/native 拒绝/MCP 过滤)→ E2 创建期沙箱+暂存目录 → E3 双栏 → E4 办公 UI 面+实测反馈修复(E4.1-E4.3)→ E5 设置开关+零写入验收+双文档 | 2026-07-14 |
 | completed/cowork-vm-mode.md | Cowork 沙箱 P1 macOS MVP 底层:文件通道(上传进 VM + 产物下载/落库)→ VM 生命周期管理器(server 侧单例)→ guest-daemon/vsock 通道 → 就绪状态机;P1-E 由 cowork-office-mode.md 承接 | 2026-07-14 |
 | completed/marketplace-skill-translate.md | 技能市场「AI 翻译简介」：详情页一键翻译 README 到应用语言（非英语才显示），managed 第一个模型 + generateTextViaSdk 单轮（别名坑规避）、11 条规则系统提示词（含提示注入防线）、译文/原文可回切 + 模块级缓存、30K 截断 | 2026-07-03 |
