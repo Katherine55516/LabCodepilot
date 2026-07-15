@@ -185,7 +185,7 @@ describe('mergeRegressionIntoDays', () => {
   ]);
 
   it('只有回归活动、没有功能事件的那天也要出现（功能字段全 0）', () => {
-    const merged = mergeRegressionIntoDays([], reg, 0, '2026-07-15');
+    const merged = mergeRegressionIntoDays([], reg, 0, '2026-07-15', 0);
     assert.equal(merged.length, 1);
     const d = merged[0];
     assert.equal(d.date, '2026-07-15');
@@ -221,7 +221,7 @@ describe('mergeRegressionIntoDays', () => {
     ]);
     assert.deepEqual(funcDays.map((d) => d.date), ['2026-07-15']);
 
-    const merged = mergeRegressionIntoDays(funcDays, reg, 0, '2026-07-15');
+    const merged = mergeRegressionIntoDays(funcDays, reg, 0, '2026-07-15', 0);
     assert.equal(merged.length, 1);
     assert.equal(merged[0].tasks_created, 1); // 功能侧保留
     assert.equal(merged[0].regression.rounds_full, 1); // 回归侧并入
@@ -234,15 +234,22 @@ describe('mergeRegressionIntoDays', () => {
   });
 
   it('suites_count 是当前快照 → 只打在最新一天', () => {
-    const merged = mergeRegressionIntoDays([], reg, 7, '2026-07-16');
+    const merged = mergeRegressionIntoDays([], reg, 7, '2026-07-16', 0);
     const byDate = Object.fromEntries(merged.map((d) => [d.date, d]));
     assert.equal(byDate['2026-07-15'].regression.suites_count, 0); // 历史天不写
     assert.equal(byDate['2026-07-16'].regression.suites_count, 7); // 最新天承载快照
     assert.equal(byDate['2026-07-16'].regression.rounds_full, 0); // 该天无活动，仅承载快照
   });
 
-  it('无套件时不为最新一天凭空造壳', () => {
-    const merged = mergeRegressionIntoDays([], reg, 0, '2026-07-16');
+  it('tasks_total 快照只打在最新一天', () => {
+    const merged = mergeRegressionIntoDays([], reg, 0, '2026-07-16', 123);
+    const byDate = Object.fromEntries(merged.map((d) => [d.date, d]));
+    assert.equal(byDate['2026-07-15'].tasks_total, 0); // 历史天不写
+    assert.equal(byDate['2026-07-16'].tasks_total, 123); // 最新天承载快照（该天本无活动，为它建壳）
+  });
+
+  it('无套件且无 tasks_total 时不为最新一天凭空造壳', () => {
+    const merged = mergeRegressionIntoDays([], reg, 0, '2026-07-16', 0);
     assert.deepEqual(merged.map((d) => d.date), ['2026-07-15']);
   });
 });

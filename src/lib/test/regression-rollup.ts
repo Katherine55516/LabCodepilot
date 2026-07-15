@@ -178,13 +178,15 @@ export function aggregateRegressionDaily(
 /**
  * 把回归结果并进功能测试的 days[]（两侧日期取并集：只有回归活动、没有功能事件的那天也要出现）。
  *
- * @param latestDate 窗口最新一天（'YYYY-MM-DD'）；suites_count 只打在这一天。
+ * @param latestDate 窗口最新一天（'YYYY-MM-DD'）；快照（suites_count / tasks_total）只打在这一天。
+ * @param tasksTotal 累计曾创建的任务数（机器级全历史快照）；同 suites_count 只打最新一天。
  */
 export function mergeRegressionIntoDays(
   days: DayUsage[],
   reg: RegressionDailyResult,
   suitesCount: number,
   latestDate: string,
+  tasksTotal: number,
 ): DayUsage[] {
   const byDate = new Map<string, DayUsage>(days.map((d) => [d.date, d]));
 
@@ -210,14 +212,15 @@ export function mergeRegressionIntoDays(
     day.payload.projects.sort((a, b) => (a.project < b.project ? -1 : a.project > b.project ? 1 : 0));
   }
 
-  // suites_count 是当前快照 → 只打在最新一天（该天可能本来没有任何活动，也要建壳承载）
-  if (suitesCount > 0) {
+  // 快照类（套件总数 / 累计任务总数）都是当前值 → 只打在最新一天（该天可能本来没有任何活动，也要建壳承载）
+  if (suitesCount > 0 || tasksTotal > 0) {
     let day = byDate.get(latestDate);
     if (!day) {
       day = emptyDay(latestDate);
       byDate.set(latestDate, day);
     }
-    day.regression.suites_count = suitesCount;
+    if (suitesCount > 0) day.regression.suites_count = suitesCount;
+    if (tasksTotal > 0) day.tasks_total = tasksTotal;
   }
 
   return [...byDate.values()].sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
@@ -240,11 +243,14 @@ function zeroCounts() {
   };
 }
 
-/** 全 0 的一天（只有回归活动、或只承载 suites_count 快照时用）。 */
+/** 全 0 的一天（只有回归活动、或只承载 suites_count / tasks_total 快照时用）。 */
 function emptyDay(date: string): DayUsage {
   return {
     date,
     ...zeroCounts(),
+    tasks_total: 0,
+    case_duration_ms_sum: 0,
+    case_duration_samples: 0,
     regression: newRegressionCounts(),
     payload: {
       exec: { partial: 0, blocked: 0, circuit_broken: 0, avg_case_duration_ms: 0 },

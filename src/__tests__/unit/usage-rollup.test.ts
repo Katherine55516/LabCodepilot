@@ -148,6 +148,9 @@ describe('buildDailyRollup · 跨两日多事件聚合', () => {
     assert.equal(d.payload.exec.blocked, 0);
     assert.equal(d.payload.exec.circuit_broken, 0);
     assert.equal(d.payload.exec.avg_case_duration_ms, 15000); // (10000+20000)/2
+    // 可求和的时长分子/分母（供服务端 avg=SUM/SUM）
+    assert.equal(d.case_duration_ms_sum, 30000);
+    assert.equal(d.case_duration_samples, 2);
   });
 
   it('Day1: 复核 accurate 与 false_fail', () => {
@@ -174,6 +177,8 @@ describe('buildDailyRollup · 跨两日多事件聚合', () => {
     assert.equal(d.payload.exec.blocked, 0);
     assert.equal(d.payload.exec.partial, 0);
     assert.equal(d.payload.exec.avg_case_duration_ms, 0); // 当日唯一时长来自熔断轮 → 不纳入
+    assert.equal(d.case_duration_ms_sum, 0); // 熔断轮时长不计入分子
+    assert.equal(d.case_duration_samples, 0);
   });
 
   it('Day2: 一键全准批量复核', () => {

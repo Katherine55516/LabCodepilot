@@ -65,8 +65,12 @@ export async function GET(req: Request): Promise<Response> {
       TZ_OFFSET_MINUTES,
     );
 
-    // ③ 并集合并后再裁剪到窗口（suites_count 只打在最新一天 = to）
-    const days = mergeRegressionIntoDays(funcDays, reg, suitesCount, to).filter(
+    // ③ 累计曾创建的任务数（机器级全历史快照）：数所有 task_created 事件，与窗口无关。
+    //    事件数≈曾创建任务数（有限，几百级），count 即可。
+    const tasksTotal = queryTestStatsEvents({ eventTypes: ['task_created'] }).length;
+
+    // ④ 并集合并后再裁剪到窗口（快照 suites_count / tasks_total 只打在最新一天 = to）
+    const days = mergeRegressionIntoDays(funcDays, reg, suitesCount, to, tasksTotal).filter(
       (d) => d.date >= from && d.date <= to,
     );
     return Response.json({ days });
