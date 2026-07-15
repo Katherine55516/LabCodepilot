@@ -224,8 +224,12 @@ ON CONFLICT (user_id, device_id, stat_date) DO UPDATE
 antd v5，无新增图表依赖。
 
 **单用户下钻**：主表是「按用户汇总」，全体每日趋势表是「所有用户按天」——都不是单个用户的每日。
-用户行尾「每日明细」按钮打开 Drawer，消费既有 `GET /admin/users/{id}/test-usage`，展示该用户的
-by_day（每日趋势）/ by_project / by_device 三张表。**后端零改动**，区间变化时抽屉同步刷新。
+用户行尾「查看明细」按钮打开「详情」Drawer，消费既有 `GET /admin/users/{id}/test-usage`，
+展示该用户的 by_day / by_project / by_device。**后端零改动**。
+- **每日趋势用折线图**（`web/src/components/UsageTrendChart.tsx`，零依赖内联 SVG 泛型组件，
+  不引图表库，与客户端 Stats 面板同思路）+ 明细表并列；三条使用量序列：生成用例/执行用例/回归用例执行。
+- 抽屉**自带时间窗**（与主表统计区间独立）：默认近 7 天，Segmented 可切近 7/14/30 天，
+  每次打开回到 7 天，切换即重取。`fillDays` 把窗口内缺失的天补 0，图 x 轴连续、图表对齐。
 
 ---
 
