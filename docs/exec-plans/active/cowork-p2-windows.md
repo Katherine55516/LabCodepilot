@@ -16,9 +16,9 @@
 | W2 | WSL2 后端:vm-manager WSL2 版(wsl --import/启动/wsl --terminate,**绝不 wsl --shutdown**)+ stdio 通道实现 + Windows forwarder | **Windows** | 📋 待开始 | |
 | W3 | 分发:cowork-assets 加 WSL2 rootfs tarball 来源 + import + wsl-distribution.conf oobe 定制(daemon/systemd/agent 用户/mask unit) | **Windows** | 📋 待开始 | claude binary 复用 |
 | W4 | 网络+代理:cowork-proxy WSL2 网关发现(NAT 查 guest 默认路由拿宿主 IP;来源校验网段参数化) | **Windows** | 📋 待开始 | P3-B 移植 |
-| W5 | 降级探测+UI:探测 WSL/VMP/BIOS/GPO,任一不满足→隐藏办公 tab + 引导文案 | **Windows** | 📋 待开始 | 复用 cowork_status gate |
+| W5 | 降级探测+UI:四级就绪探测链(VMP→WSL本体→私有distro→`wsl -e`端到端,每级精确下一步)+ 未导入则应用自动 import;任一不满足→隐藏办公 tab + 引导;**绝不应用内 elevate**;不就绪出「给 IT 部署清单」 | **Windows** | 📋 待开始 | 复用 cowork_status gate;探测链/清单依据见调研 §8.6 |
 | W6 | 隔离硬化+诚实文案:wsl.conf 硬化组合 + #12443 残余风险产品文案 | **Windows** | 📋 待开始 | |
-| W7 | Windows NSIS 打包(CI windows-2022 经验)+ 全新 Win 机裸机验收 + 双文档 | **Windows** | 📋 待开始 | |
+| W7 | Windows NSIS 打包(`oneClick:true`+`perMachine:false` 免管理员 per-user 安装,CI windows-2022 经验)+ 全新 Win 机裸机验收(含企业镜像 AppLocker/WDAC/HNS 二级门排查)+ 双文档 + 给 IT 部署清单 | **Windows** | 📋 待开始 | 免管理员安装依据见调研 §8.6 |
 
 ## 决策日志
 
@@ -26,6 +26,8 @@
 - 2026-07-15 **D2 全 Win10/11,不设版本门槛**(用户拍板)。走 `wsl.exe -e` stdio 通道(全平台 work),**不依赖 mirrored networking**(那要 Win11 22H2+ 会砍用户)。
 - 2026-07-15 **D3 通道 = `wsl.exe -e` stdio 模型**(调研 §4)。裸 vsock 在 WSL2 非免 admin(要注册 HKLM GUID);stdio 模型免 admin、生产验证(wsl-vpnkit),且与当前架构天然契合:cowork-vsock 的"一次连接=一个 op"→"一次 wsl.exe -e=一个 op"同构,forwarder 的"spawn 进程做管道"→ spawn wsl.exe -e,daemon op 逻辑(含 P3-A setuid)全复用。
 - 2026-07-15 **D4 环境约束:W0 及 W2-W7 的实测必须 Windows 机器**(开发机是 macOS)。W1 抽象重构可在 macOS 做(且 macOS 零回归)。需用户提供 Windows 测试机 或 CI windows-2022 runner;W0 POC 尤其需要一台能装 WSL2 的 Win 机。
+- 2026-07-16 **D6(重大)本计划对公司部署场景失效,替代方案调研中**。用户办公电脑实机取证:BIOS 虚拟化禁用 + 无本地管理员 + **IT 明确不给开虚拟化** → 调研 §8 场景③实锤,WSL2 本地路线对用户公司死亡。用户提案服务端容器沙箱(远程服务器每会话分配容器),调研见 [research/cowork-remote-container.md](../../research/cowork-remote-container.md)。**本计划状态待用户拍板(建议:挂起不作废,W1 抽象两用保留;个人 Windows 用户场景未来可复活)。W0 wsl-probe.ps1 已写好(v2,scripts/poc/cowork/),暂停投递。**
+- 2026-07-16 **D5 企业无管理员权限已深度核实(调研 §8)**。核实:①装应用免管理员(NSIS `oneClick`+`perMachine:false`→`%LOCALAPPDATA%`)与②启用 VMP(需管理员一次,IT 侧,可 Intune/GPO 批量)**完全正交**;`wsl --import`/`wsl -e` 员工侧免管理员(微软工程师 issue #3817 背书,强推断);官方企业指南背书"自建 distro + wsl --import"路线。**免 VMP 又能可信隔离的方案不存在**(Windows Sandbox 同门且易失/WSL1 非边界/QEMU-TCG 太慢)→ IT 禁虚拟化则诚实停用办公、不做假隔离。**应用绝不自己 elevate 启 VMP**。净判定:P2 可行性 = "IT 肯不肯一次性开 VMP + 预置 WSL"这一个前提。**W0 环境提醒**:测通道只需"一台能起 WSL2 的 Win 机"(个人机即可),与"企业可用性"(W5,已调研清楚)是两个维度,别混。
 
 ## 详细设计
 
@@ -63,3 +65,5 @@ interface CoworkGuestBackend {
 - **不做 mirrored networking 依赖**(D2:会砍 Win10 + Win11 <22H2 用户)。
 - **不等 WSLC GA**(D1:2026 秋才 GA,先交付;架构可平滑迁移)。
 - **不做弱沙箱冒充**(BIOS 未开/GPO 禁 WSL → 降级探测 + 引导,不假装隔离)。
+- **不做假隔离**(D5:免 VMP 无可信隔离方案;IT 禁虚拟化则诚实停用办公,QEMU-TCG 太慢仅可选实验开关)。
+- **应用不自己 elevate**(D5:绝不在应用内尝试启用 VMP,必触发 UAC 且企业必失败)。

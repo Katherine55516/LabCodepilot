@@ -1,7 +1,7 @@
 # Cowork P2 — Windows/WSL2 移植调研
 
-> 创建时间:2026-07-15
-> 状态:**调研中**(移植面已盘定;WSL2 技术事实与通道选型待深度调研回填)
+> 创建时间:2026-07-15 · 最后更新:2026-07-16
+> 状态:**调研完成**(移植面 + WSL2 技术事实 + 通道选型 + **企业无管理员权限维度(§8)** 均已深度核实,权威源齐全)
 > 上游:cowork 主线已收官(P0 + P1-A~E + 办公模式 E1-E5 + 镜像流水线 M1-M4 + P3 安全强化 A/B/C);当前架构见 [docs/handover/cowork-vm-mode.md](../handover/cowork-vm-mode.md)
 > 关联:本文档取代 P1 时代 [cowork-local-vm-mode.md](./cowork-local-vm-mode.md) §5.2 的粗略 Windows 判断(那是基于 SSH 架构写的,已被 P1-C~P3 的 vsock+daemon+setuid+代理架构取代)
 
@@ -120,8 +120,67 @@ P1 时代 research §5.2 已给出 Windows 骨架(不走 Hyper-V HCS、`wsl --im
 4. `wsl --import` 在标准用户 + 平台已装的机器上免 UAC(坐实 per-user)。
 5. 宿主代理在 NAT 模式下网关可达性(WSL2→宿主 IP)。
 
-## 8. 需要你拍板的决策点
+## 8. 企业无管理员权限 —— 部署可行性深度核实(2026-07-16)
 
-1. **隔离落差怎么处理**(最重要):接受"策略级隔离 + 诚实文案"先交付,还是等 WSLC GA 的架构级隔离?
-2. **目标 Windows 版本**:全 Win10/11(NAT + stdio 模型,推荐)还是要求 Win11 22H2+(可用 mirrored localhost,但砍掉一批用户)?
-3. **优先级**:P2 现在做,还是先合流 main + 用户手册,P2 排后?(P2 是整个 cowork 里体量最大、且有隔离落差需权衡的一块)
+> 触发:用户指出"公司电脑不允许员工用管理员装应用"。这是 P2 可行性根基,专项核实(权威源见节末)。**一句话判定:P2 在企业管控电脑上可行,可行性等价于"IT 是否愿意一次性启用 VMP + 预置 WSL"这一个前提;应用安装本身免管理员、与之完全解耦。**
+
+### 8.1 "要不要管理员"拆成两件正交的事
+
+| | 需要管理员? | 谁做 / 何时 | 我们能否控制 |
+|---|---|---|---|
+| **① 装我们的应用** | ❌ 否 | 员工双击,装到 `%LOCALAPPDATA%` | ✅ NSIS `oneClick:true`+`perMachine:false` |
+| **② 启用 WSL 虚拟化平台(VMP)** | ✅ 一次 | IT 侧一次性(可 Intune/GPO 批量) | ❌ 系统级,员工侧绕不过 |
+| **③ 日常用(import distro/跑回合)** | ❌ 否 | 平台就绪后员工侧 | ✅ 应用自动 `wsl --import` |
+
+装应用与平台就绪**完全正交**:装得上 ≠ 办公模式可用。产品上必须解耦——平台没就绪时应用照装照跑,只是办公 tab 隐藏。
+
+### 8.2 三层权限事实(均有权威源)
+
+- **启用 VMP 绝对需要管理员,无非管理员路径。「确定」** 官方手动安装明文要求 "PowerShell **as Administrator**" 跑 DISM 启用 VMP + 重启;三条途径(DISM/Enable-WindowsOptionalFeature/控制面板)都是机器级变更要管理员。Win11 24H2 未放宽。唯一"非管理员"路径 = IT 以 SYSTEM 上下文下发(Intune/SCCM/镜像预置),本质仍是特权。
+- **Store 版 WSL 是现默认形态(build 19044+),但没消除 VMP 门槛。「确定」** `wsl --install` 默认装 Store MSIX;官方明文"VMP optional component will still be enabled"。管控企业常同时封 Store + 封非管理员 MSIX → **不能依赖员工自助装 WSL 本体,必须假设 IT 预置**。
+- **`wsl --import` + `wsl -d <d> -e` 在"平台已就绪 + 标准用户"下免管理员。「强推断,微软工程师背书」** 发行版注册落 `HKCU\...\Lxss`(标准用户可写);微软员工 @craigloewen-msft 在 issue #3817 明确"在**没有管理员权限**的账户上装了 WSL、没用 Store"。**从原 §3.3 的"待实测"升级为"强推断+背书"**。残留待实测:目标企业镜像的二级门(AppLocker/WDAC 封 wsl.exe、HNS 网络 ACL)——与"是否管理员"正交,但会让 import/run 失败。
+
+### 8.3 官方企业指南背书我们的路线(利好)
+
+learn.microsoft.com/windows/wsl/enterprise 明确支持 "Sharing an approved image internally using `wsl --import`/`wsl --export`" 与 "Creating your own WSL distro using the WSL-DistroLauncher repo" —— **正好是我们"自建 rootfs + wsl --import 私有 distro"模型,微软官方当企业标准做法背书**。且企业"目前不支持"精细限制"哪些 distro 可访问"和"用户 root 权限"→ 我们的私有 distro 不会被平台策略额外卡(中性偏好)。Intune 策略键:`AllowWSL`(禁=全禁)、`AllowInboxWSL`(禁=只允 Store 版)、`AllowWSL1`(禁=只 WSL2)等,官方 ADMX 齐全。
+
+### 8.4 免 VMP 降级隔离替代 —— 诚实结论:没有好方案
+
+| 方案 | 免 VMP | 免管理员 | 可信隔离? | 结论 |
+|---|:---:|:---:|---|---|
+| Windows Sandbox | ❌ | ❌ | 强但**易失**(关闭清空) | 同一道 VMP+admin 门,且不能持久 → 不适用 |
+| WSL1 | ✅ | ❌(仍需管理员启用组件) | **否**(共享内核翻译层,非边界) | 不是可信隔离,也没省管理员 → 不采用 |
+| 纯用户态(Cygwin/MSYS2) | ✅ | ✅ | **无** | 跑不了 Linux ELF + 零隔离 → 不采用 |
+| **QEMU-TCG 纯软件仿真** | ✅ | ✅ | 强(真 guest 边界) | **唯一"免 VMP 真边界"**,但慢 1-2 数量级 → 仅"实验性最后手段" |
+
+**净结论:没有"既免 VMP 又免管理员、还能可信隔离"的主流方案。IT 铁了心禁虚拟化 = 办公模式诚实停用,不做假隔离。** 唯一原理可行的 QEMU-TCG 太慢,只能当实验开关。
+
+### 8.5 企业无管理员可用性矩阵
+
+| 场景 | 办公模式 | 前置 | 谁做 |
+|---|---|---|---|
+| **① IT 已部署 WSL**(VMP 开+Store WSL 预置+未禁) | ✅ 全功能 | 应用免管理员装;首启自动 `wsl --import` 私有 distro | 员工:装即用。IT:一次性平台部署(已完成) |
+| **② IT 未部署可申请** | ⚠️ 应用可用,办公模式待 VMP | 应用照常装(正交);办公阻塞在 VMP 未就绪 | IT:按 §8.6 清单一次性开 VMP。我们:探测未就绪→出"给 IT 的说明" |
+| **③ IT 明令禁 WSL** | ❌ 办公停用,应用主体仍可用 | 无法满足隔离威胁模型 | 我们:诚实降级,不做假隔离(可选 QEMU-TCG 实验兜底) |
+
+### 8.6 分发/降级策略(P2 落地)+ 给 IT 的一页清单
+
+- **应用装**:NSIS `oneClick:true`+`perMachine:false`→`%LOCALAPPDATA%\Programs`,无 UAC(同 VS Code User Installer/Slack/Discord)。产品上把"装应用"与"办公可用"解耦。
+- **就绪探测链(W5,启动时逐级,每级给精确下一步)**:(a) VMP 是否启用(`wsl --status`/查功能/`HypervisorPresent`)→(b) WSL 本体在不在(`wsl --version`)→(c) 私有 distro 是否已导入(`wsl -l -v`)→ 未导入=应用**自动 import**(免管理员)→(d) `wsl -d <d> -e true` 端到端通不通 → 失败=排查 AppLocker/WDAC/HNS。
+- **绝不在应用内自己尝试启用 VMP**(必触发 UAC,企业必失败,坏体验)。不就绪→诚实降级 + 出"给 IT 清单"。
+- **给 IT 的一页清单**:① Win10/11 22H2+ 且 WSL 2.0.9+;② 启用 VirtualMachinePlatform(Intune/GPO/DISM,SYSTEM);③ 预置 Store WSL MSIX(或放开非管理员 MSIX/Store 安装);④ `AllowWSL=Enabled`、建议 `AllowInboxWSL=Disabled`;⑤ 私有 distro 由应用在用户态 import,IT 无需逐台操作;⑥ 可选 MDE for WSL 做审计。
+
+### 8.7 WSL Containers(wslc.exe)对此无改善
+
+2026 秋 GA 目标,但**构建在 WSL2 上**→ 继承 VMP+管理员门槛,同套 Intune/GPO 管控。它解决的是编排,不是绕过虚拟化。其 NuGet C/C++/C# API 值得长期跟踪(或可替代自建 wsl -e stdio 管道),但不纳入 P2 依赖。
+
+### 权威源
+install(要管理员)learn.microsoft.com/windows/wsl/install · 手动安装(VMP DISM)/install-manual · Store GA(VMP 仍启用/--no-distribution)devblogs commandline · 企业指南(import/export+自建 distro)/wsl/enterprise · Intune 策略 /wsl/intune + ADMX(github microsoft/WSL) · per-user 注册/非管理员工作流(issue #3817、#3974) · 标准用户 MSIX 策略(policy-csp-applicationmanagement) · Windows Sandbox(VMP+admin+易失) · WSL1 vs 2(compare-versions) · electron-builder NSIS per-user(electron.build/nsis + issue #4070) · WSL Containers 预览(devblogs)
+
+## 9. 需要你拍板的决策点
+
+> D1-D3 已在立项时拍板(见 exec-plans/active/cowork-p2-windows.md 决策日志):D1 接受策略级隔离先交付、D2 全 Win10/11、D3 通道 wsl.exe -e stdio。以下为 §8 企业维度核实后的新增/待定项:
+
+1. **【已由 §8 明确,待你确认】企业降级策略**:IT 禁虚拟化(场景③)时**诚实停用办公模式、不做假隔离**(QEMU-TCG 太慢仅作可选实验开关)。建议采纳"诚实降级"为默认,是否投入做 QEMU-TCG 实验兜底待定(倾向暂不做)。
+2. **【战略输入,影响 P2 定位/优先级】目标客户画像**:Windows 办公模式主要面向"个人/宽松环境"(装即用面大)还是"强管控企业"(受制于 IT 一次性开 VMP)?这决定 P2 值不值得现在做、以及"给 IT 清单"这条链要做多重。
+3. **【沿用】隔离落差 + WSLC**:接受策略级隔离先交付(D1 已定),WSLC GA(2026 秋)作为长期演进目标,不阻塞当前 P2。
