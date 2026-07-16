@@ -179,7 +179,7 @@
 
 | 阶段 | 内容 | 环境 |
 |---|---|---|
-| R0 通道 POC | 服务器上手工容器 + claude + **stdio shim(解帧)**;客户端 SDK→forwarder-remote→TCP→docker exec→shim→claude,stream-json 一轮跑通;EOF(零帧)/中断/并发两会话压测(gVisor 不试,已证实不稳→硬化 runc)。**POC 用裸 TCP 验协议(生产切 WS/TLS 是纯工程,只换连接层);代码 scripts/poc/cowork/remote/** | ✅ **协议层 + docker 实测均已过(2026-07-16,UTM arm64 / Ubuntu 26.04）**。本机 selftest-local 全 PASS;**真 docker exec 下 selftest-docker 全 PASS**:T1 字节穿透+优雅零帧 EOF、T2 并发两 exec 不串、**T3 中断实测 docker exec 正确传 stdin-EOF + shim 自保 + 零孤儿**(调研核心疑点消除);**claude 2.1.203 二进制在硬化 runc 容器(cap-drop ALL/no-new-privileges/mem+pids 限额）跑通**（证伪 gVisor 疑点 = runc 无碍）。仅剩「真 claude 经通道跑一轮 stream-json」待凭证 |
+| R0 通道 POC | 服务器上手工容器 + claude + **stdio shim(解帧)**;客户端 SDK→forwarder-remote→TCP→docker exec→shim→claude,stream-json 一轮跑通;EOF(零帧)/中断/并发两会话压测(gVisor 不试,已证实不稳→硬化 runc)。**POC 用裸 TCP 验协议(生产切 WS/TLS 是纯工程,只换连接层);代码 scripts/poc/cowork/remote/** | ✅ **协议层 + docker 实测均已过(2026-07-16,UTM arm64 / Ubuntu 26.04）**。本机 selftest-local 全 PASS;**真 docker exec 下 selftest-docker 全 PASS**:T1 字节穿透+优雅零帧 EOF、T2 并发两 exec 不串、**T3 中断实测 docker exec 正确传 stdin-EOF + shim 自保 + 零孤儿**(调研核心疑点消除);**claude 2.1.203 二进制在硬化 runc 容器(cap-drop ALL/no-new-privileges/mem+pids 限额）跑通**（证伪 gVisor 疑点 = runc 无碍）；**真 claude 经完整通道跑通一轮 stream-json**（claude-opus-4-8 读 stream-json → 回 `BRIDGE_OK` → result success、forwarder exit 0、server docker exec 干净收尾，连 newapi 中转出网正常）。**→ R0 全部完成 ✅** |
 | R1 W1 抽象 + 服务端控制面 MVP | guest-backend 接口(两用)+ cowork-server(分配/释放/exec 桥/labels 事实源) | mac + 服务器 |
 | R2 文件通道 + 产物 | 上传/diff/下载/archive 直读 volume;产物卡链路接通 | 同上 |
 | R3 凭证代理 + 审计 | P3-B 移植(方案 A/C)+ 双侧审计 | 同上 |
