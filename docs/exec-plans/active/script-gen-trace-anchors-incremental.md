@@ -33,8 +33,8 @@
 
 | Phase | 内容 | 状态 | 备注 |
 |-------|------|------|------|
-| Phase 1 | 快照元素清单富化（trace 记 observedElements → 生成 payload/prompt 消费） | 🔄 进行中 | 独立可交付，先行 |
-| Phase 2 | 逐条增量入队 + 触发点前移（执行收口兜底入队 + 未执行守卫） | 📋 待开始 | 依赖 Phase 1 的 trace 结构落定 |
+| Phase 1 | 快照元素清单富化（trace 记 observedElements → 生成 payload/prompt 消费） | ✅ 已完成 | commit 44fccc8；单测 15 条 + 真机快照解析验证 |
+| Phase 2 | 逐条增量入队 + 触发点前移（执行收口兜底入队 + 未执行守卫） | ✅ 开发完成 | 单测 14 条；**待打包真机验收**（断流轮已沉淀 / 健康轮等价 / 未执行不误标 stale） |
 
 ## 决策日志
 
@@ -64,6 +64,24 @@
 - 2026-07-16: **「未执行」守卫**：中断轮次的 run.json 会把没跑到的用例补成
   blocked+NOT_EXECUTED_MSG。收口 job 对这类用例**保留 manifest 旧条目原样**（不标 stale）——
   它们不是"失去资格"，只是这轮没轮到；否则一次断流会把几十条 verified 脚本打成 stale。
+  实现时确认这是一个**独立于 Phase 2 就已存在的真 bug**：今天那轮 11 条未执行 + 报告照跑，
+  就会把对应用例的 verified 脚本打成 stale（stale 非 isRunnableStatus → 掉出运行/修复/重放
+  全部通道）。判别靠 `ReducedTest.notExecuted` 机器标记，不靠中文文案字符串。
+- 2026-07-16: **增量任务不碰 latestRunHash / jobStatus，不进 abortByScope，锁被占即跳过**。
+  分别对应三个会咬人的坑：① 临时 hash 写进 latestRunHash 会让收口 job 的「newest run wins」
+  判定与报告触发的去重错乱；jobStatus 置 running 后，断流轮没有收口 job 来 settle，它会永远
+  卡 running（recoverScriptJob 30 分钟后还会拿旧 hash 重排、currentInputs 抛 superseded）；
+  ② executeJob 靠 abortByScope 实现「新任务取代旧任务」，增量任务彼此是不同用例、必须各自
+  跑完，注册进去会导致后一条把前一条掐死；③ 锁被后台生成/手动修复占用时不等不抢，该用例
+  交给收口 job 即可。
+- 2026-07-16: **增量走与整轮【同一个】selectEligibleCases 构造候选**（合成单条 cases/run 输入）。
+  指纹若不一致，收口 job 会把刚生成好的脚本判成漂移、重烧一遍模型 —— 这是整个 Phase 2 最
+  要命的契约，已单测锁定（result 内容不参与指纹，故合成 result 与 reduce 后的 result 无差）。
+- 2026-07-16: **`wrapExecutionStream` 增 `depositScripts` 开关（默认开，单测传 false）**。
+  实现中发现：执行流一律沉淀后，流包装器单测里带「回归测试」标签的 pass 用例会触发**真实
+  模型调用**，失败后 4s/10s 退避重试把全局单并发队列堵十几秒，别的用例的任务卡在 queued
+  （真实复现了一条 wrapReportStream 单测失败）。刻意不用「把测试用例的标签改掉」绕过 ——
+  那是给下一个人埋雷；沉淀本身另有专项单测（注入假队列）。
 
 ## 详细设计
 

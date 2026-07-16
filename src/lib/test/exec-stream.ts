@@ -10,7 +10,8 @@ import { appendAudit } from '@/lib/test/audit';
 import { depositTask, readTaskCases, REGRESSION_LIBRARY_TASK } from '@/lib/test/library';
 import { readRoundSnapshot } from '@/lib/test/rounds';
 import { ScriptTraceCollector, writeTraceFile, type TraceRedaction } from '@/lib/test/script-trace';
-import { enqueueScriptJob } from '@/lib/test/script-job-manager';
+import { enqueueIncrementalScriptCase, enqueueScriptJob, type IncrementalScriptCaseRequest } from '@/lib/test/script-job-manager';
+import { harvestMarkerObjects } from '@/lib/test/markers';
 
 /**
  * 测试执行路由的 SSE 流包装器（从 src/app/api/test/run/route.ts 抽出）。
@@ -44,6 +45,107 @@ export function stepStatsFrame(step: TestStep, stats: StepStats): string {
   })}\n\n`;
 }
 
+export interface IncrementalScriptFeeder {
+  /** 喂入一段 text 增量(行缓冲;@@RESULT 可能被 SSE 切分到多帧)。 */
+  feedText(chunk: string): void;
+  /** 流结束:冲刷可能没有换行结尾的尾行。 */
+  finish(): void;
+}
+
+/**
+ * 执行流里逐条捕获「pass 的回归用例」并入队生成脚本。
+ *
+ * 时序保证:@@RESULT 是该用例的最后一行输出,此时它的工具调用都已回执,`drainCase` 拿到的
+ * 就是完整轨迹。
+ *
+ * 刻意的过滤(每条都有由头):
+ *   - 只认 pass:失败/阻塞的用例不该沉淀成回归脚本(与 selectEligibleCases 同口径);
+ *   - 只认带「回归测试」标签的:同上;
+ *   - 跳过 `via === 'script'`:这条判定本就来自已沉淀脚本的重放,没有 MCP 轨迹(指纹必然
+ *     漂移),重生成 = 每轮 churn 一遍(executeJob 里已有同款短路);
+ *   - 同 id 只入队一次:模型违规重复输出 @@RESULT 时不重复烧模型。
+ *
+ * 全程 best-effort:cases.json 读不到/解析不了 → 整个特性静默关闭,绝不影响执行流。
+ */
+export function createIncrementalScriptFeeder(opts: {
+  projectPath: string;
+  taskName: string;
+  env: string;
+  roundId?: string;
+  model?: string;
+  providerId?: string;
+  runStartMs: number;
+  trace: ScriptTraceCollector;
+  /** 注入点(单测用):默认打到真实队列。 */
+  enqueue?: (request: IncrementalScriptCaseRequest) => void;
+}): IncrementalScriptFeeder {
+  const enqueue = opts.enqueue ?? enqueueIncrementalScriptCase;
+  const caseById = new Map<string, Record<string, unknown>>();
+  try {
+    // 执行【开始】就读:执行期间用例文件若被改动,以开跑时的版本为准(与本轮判定同源)。
+    const casesAbs = path.join(opts.projectPath, artifactPaths(opts.taskName).cases);
+    const parsed = JSON.parse(fs.readFileSync(casesAbs, 'utf-8')) as unknown;
+    const list = Array.isArray((parsed as { cases?: unknown })?.cases)
+      ? (parsed as { cases: Array<Record<string, unknown>> }).cases
+      : Array.isArray(parsed) ? (parsed as Array<Record<string, unknown>>) : [];
+    for (const c of list) {
+      if (!c || typeof c.id !== 'string') continue;
+      const tags = Array.isArray(c.tags) ? c.tags : [];
+      if (tags.some((t) => t === '回归测试')) caseById.set(c.id, c);
+    }
+  } catch {
+    // 没有用例文件(或坏 JSON)→ caseById 空 → 本特性自动静默,执行照常。
+  }
+
+  let lineBuf = '';
+  const seen = new Set<string>();
+  const onLine = (rawLine: string) => {
+    const line = rawLine.trim();
+    if (!line || !line.includes('@@RESULT')) return;
+    // 与 reduce.harvestResults / exec-timing 共用 markers.ts 的唯一解析器 —— 三处宽严必须
+    // 完全一致,否则带 markdown 装饰的行会一边采到、一边漏掉(见 markers.ts 模块头的事故)。
+    const [parsed] = harvestMarkerObjects<{ id?: unknown; status?: unknown; via?: unknown }>(line, 'RESULT');
+    if (!parsed || typeof parsed.id !== 'string') return;
+    const id = parsed.id.trim();
+    if (!id || seen.has(id)) return;
+    if (String(parsed.status ?? '').toLowerCase() !== 'pass') return;
+    if (parsed.via === 'script') return;
+    const caseBody = caseById.get(id);
+    if (!caseBody) return;
+    seen.add(id);
+    try {
+      enqueue({
+        projectPath: opts.projectPath,
+        taskName: opts.taskName,
+        env: opts.env,
+        roundId: opts.roundId,
+        model: opts.model,
+        providerId: opts.providerId,
+        runStartMs: opts.runStartMs,
+        caseBody,
+        result: { id, status: 'pass', actual: '', error: '', evidence: [] },
+        traceActions: opts.trace.drainCase(id),
+        observedElements: opts.trace.elementsForCase(id),
+      });
+    } catch {
+      // 入队失败不得拖累执行流
+    }
+  };
+
+  return {
+    feedText(chunk) {
+      lineBuf += chunk;
+      const lines = lineBuf.split('\n');
+      lineBuf = lines.pop() || '';
+      for (const l of lines) onLine(l);
+    },
+    finish() {
+      if (lineBuf) onLine(lineBuf);
+      lineBuf = '';
+    },
+  };
+}
+
 /**
  * Wrap the execution step's SSE stream: forward every frame to the client
  * unchanged AND accumulate the agent's `text` frames server-side. When the stream
@@ -60,9 +162,19 @@ export function wrapExecutionStream(
     env: string;
     runStartMs: number;
     leadingFrame?: string;
+    model?: string;
+    providerId?: string;
     stats?: StepStats;
     roundId?: string;
     traceRedactions?: TraceRedaction[];
+    /**
+     * 后台脚本沉淀(逐条增量生成 + 收口对账入队)。默认开启,生产路径不传。
+     *
+     * 单测必须传 false:带「回归测试」标签的 pass 用例会触发**真实模型调用**,让流包装器的
+     * 单测变成网络依赖,失败后还要走 4s/10s 退避重试、把全局单并发队列堵十几秒(其它用例
+     * 的任务因此卡在 queued)。沉淀本身另有专项单测(script-incremental.test.ts,注入假队列)。
+     */
+    depositScripts?: boolean;
   },
 ): ReadableStream<string> {
   const reader = src.getReader();
@@ -72,6 +184,20 @@ export function wrapExecutionStream(
   // 逐用例计时：对 text 增量做行缓冲，▶ 行 → 下一条 @@RESULT 行的挂钟差（见 exec-timing.ts）
   const timer = createCaseTimer();
   const traceCollector = new ScriptTraceCollector(opts.runStartMs, opts.traceRedactions ?? []);
+  const deposit = opts.depositScripts !== false;
+  // 逐条增量沉淀:一条回归用例 pass 就立刻生成它的脚本,不等报告。治「断流全丢」——生成原本
+  // 由报告成功门控,执行被网络掐断 → 报告不跑 → 已通过用例的脚本一条都不沉淀。
+  const incremental = createIncrementalScriptFeeder({
+    projectPath: opts.projectPath,
+    taskName: opts.taskName,
+    env: opts.env,
+    roundId: opts.roundId,
+    model: opts.model,
+    providerId: opts.providerId,
+    runStartMs: opts.runStartMs,
+    trace: traceCollector,
+    ...(deposit ? {} : { enqueue: () => {} }),
+  });
   return new ReadableStream<string>({
     start(controller) {
       // 有头被自动回落无头时,先补发一条提示帧让用户在对话里看到「已改无头」(见 POST 内)。
@@ -81,6 +207,8 @@ export function wrapExecutionStream(
       try {
         const { done, value } = await reader.read();
         if (done) {
+          // 冲刷尾行:最后一条 @@RESULT 可能没有换行结尾,不冲就永远漏掉最后一条用例。
+          incremental.finish();
           const paths = artifactPaths(opts.taskName, opts.env, opts.roundId);
           const evidenceAbs = path.join(opts.projectPath, paths.evidenceDir);
           // Evidence 收口: sweep stray screenshots/videos created this run into the
@@ -186,6 +314,29 @@ export function wrapExecutionStream(
           } catch {
             // trace 是脚本生成增强产物；失败不得改变执行结果
           }
+          // 执行收口即入队整轮生成任务(不再只由报告触发):run.json + trace 都已落盘,输入齐了。
+          // 作用是【对账】——增量已把 pass 用例生成完,这里走指纹复用(零模型消耗)补上
+          // stale 标记与 counts,并接自动跑通流水线统一补跑延后的重放。
+          // 报告流那次入队保持不变:同 runHash 会被 enqueueScriptJob 现有去重短路,健康轮次
+          // 行为等价;用户只跑执行不跑报告时,脚本也不再悬空。
+          // 用户主动中止的轮次不入队(半截产物不该触发后台生成);网络掐断(sawError)则【照常】
+          // 入队 —— 那正是本改动要救的场景,已 pass 的用例应当收口沉淀。
+          if (deposit && !opts.stats?.aborted?.()) {
+            try {
+              await enqueueScriptJob({
+                projectPath: opts.projectPath,
+                taskName: opts.taskName,
+                env: opts.env,
+                roundId: opts.roundId,
+                runHash,
+                model: opts.model,
+                providerId: opts.providerId,
+                runPipeline: true,
+              });
+            } catch {
+              // 后台增强产物失败不得拖垮执行主流程
+            }
+          }
           // 使用统计：执行轮干净收尾（无 error 帧、未中断）才记 execution_completed +
           // step_completed；runHash 与快照去重同源（sha1(runContent)，已含 durations）。
           const stats = opts.stats;
@@ -241,6 +392,8 @@ export function wrapExecutionStream(
               textAcc += evt.data || '';
               timer.feedText(evt.data || '', Date.now());
               traceCollector.feedText(evt.data || '');
+              // 顺序要紧:先喂 trace(把该用例的轨迹/元素收全),再让 feeder 取用。
+              incremental.feedText(evt.data || '');
             } else if (evt?.type === 'tool_use') {
               try { traceCollector.feedToolUse(JSON.parse(evt.data || '{}')); } catch { /* ignore */ }
             } else if (evt?.type === 'tool_result') {

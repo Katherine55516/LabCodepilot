@@ -271,6 +271,9 @@ export async function POST(req: Request): Promise<Response> {
             env,
             runStartMs,
             leadingFrame,
+            // 逐条增量生成 + 收口入队都要用它调模型(stats 只在带 taskId 时才有,不能依赖)。
+            model,
+            providerId,
             stats,
             roundId,
             traceRedactions: [
