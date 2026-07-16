@@ -31,7 +31,7 @@ import { classifyError, formatClassifiedError } from './error-classifier';
 import { resolveWorkingDirectory } from './working-directory';
 import { wrapController } from './safe-stream';
 import { type ShadowHome } from './claude-home-shadow';
-import { prepareSdkSubprocessEnv } from './sdk-subprocess-env';
+import { prepareSdkSubprocessEnv, createStderrCollector, type StderrCollector } from './sdk-subprocess-env';
 // Static imports for resolveRuntime/detectTransport — used to be lazy
 // `require('./runtime')` / `require('./provider-transport')`, but Turbopack's
 // CJS↔ESM interop returns `{ default: ... }` shape that broke destructuring
@@ -317,6 +317,20 @@ function buildFallbackContext(params: {
 }
 
 /**
+ * Attach buffered subprocess stderr to an Error about to be (re)thrown, so
+ * upstream error handling (classifyError reads `error.stderr`) can see the
+ * CLI's fatal startup diagnostics — the SDK itself never sets the property.
+ * No-op when the buffer is empty or the error already carries stderr.
+ */
+function attachCollectedStderr(err: unknown, collector: StderrCollector): void {
+  if (!(err instanceof Error)) return;
+  const target = err as { stderr?: string };
+  if (target.stderr) return;
+  const buffered = collector.snapshot();
+  if (buffered) target.stderr = buffered;
+}
+
+/**
  * Lightweight text generation via the Claude Code SDK subprocess.
  * Uses the same provider/env resolution as streamClaude but without sessions,
  * MCP, permissions, or conversation history. Suitable for simple tasks like
@@ -348,6 +362,10 @@ export async function generateTextViaSdk(params: {
   // Auto-timeout after 60s to prevent indefinite hangs
   const timeoutId = setTimeout(() => abortController.abort(), 60_000);
 
+  // Buffer subprocess stderr so a CLI crash surfaces its real cause (the SDK's
+  // thrown Error has no stderr property). Attached to errors below.
+  const stderrCollector = createStderrCollector();
+
   const queryOptions: Options = {
     cwd: os.homedir(),
     abortController,
@@ -357,6 +375,7 @@ export async function generateTextViaSdk(params: {
     settingSources: resolved.settingSources as Options['settingSources'],
     systemPrompt: params.system,
     maxTurns: 1,
+    stderr: (data: string) => stderrCollector.append(data),
   };
 
   if (params.model) {
@@ -384,8 +403,11 @@ export async function generateTextViaSdk(params: {
     clearTimeout(timeoutId);
     setup.shadow.cleanup();
     if (abortController.signal.aborted && !(params.abortSignal?.aborted)) {
-      throw new Error('SDK query timed out after 60s');
+      const timeoutErr = new Error('SDK query timed out after 60s');
+      attachCollectedStderr(timeoutErr, stderrCollector);
+      throw timeoutErr;
     }
+    attachCollectedStderr(err, stderrCollector);
     throw err;
   }
 
@@ -393,7 +415,9 @@ export async function generateTextViaSdk(params: {
   setup.shadow.cleanup();
 
   if (!resultText) {
-    throw new Error('SDK query returned no result');
+    const emptyErr = new Error('SDK query returned no result');
+    attachCollectedStderr(emptyErr, stderrCollector);
+    throw emptyErr;
   }
 
   return resultText;
@@ -430,6 +454,9 @@ export async function* streamTextViaSdk(params: {
   }
   const timeoutId = setTimeout(() => abortController.abort(), 60_000);
 
+  // Same stderr capture as generateTextViaSdk — see attachCollectedStderr.
+  const stderrCollector = createStderrCollector();
+
   const queryOptions: Options = {
     cwd: os.homedir(),
     abortController,
@@ -440,6 +467,7 @@ export async function* streamTextViaSdk(params: {
     systemPrompt: params.system,
     maxTurns: 1,
     includePartialMessages: true,
+    stderr: (data: string) => stderrCollector.append(data),
   };
   if (params.model) {
     queryOptions.model = params.model;
@@ -466,8 +494,11 @@ export async function* streamTextViaSdk(params: {
     }
   } catch (err) {
     if (abortController.signal.aborted && !(params.abortSignal?.aborted)) {
-      throw new Error('SDK query timed out after 60s');
+      const timeoutErr = new Error('SDK query timed out after 60s');
+      attachCollectedStderr(timeoutErr, stderrCollector);
+      throw timeoutErr;
     }
+    attachCollectedStderr(err, stderrCollector);
     throw err;
   } finally {
     clearTimeout(timeoutId);
@@ -598,6 +629,11 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
       });
       // Flag to prevent infinite PTL retry loops (at most one retry per request)
       let ptlRetryAttempted = false;
+      // Bounded stderr capture. Declared OUTSIDE the try block (like shadowHome)
+      // so the catch below can read it: the SDK's thrown Error carries no
+      // stderr property, and fatal CLI startup diagnostics (e.g. Windows
+      // "requires either Git for Windows …") exist only in this buffer.
+      const stderrCollector = createStderrCollector();
       // Per-request shadow ~/.claude/ for DB-provider isolation. Built lazily
       // below once we know whether we have an explicit DB provider; cleaned up
       // in the outer finally block. See src/lib/claude-home-shadow.ts.
@@ -1070,6 +1106,8 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
         queryOptions.stderr = (data: string) => {
           // Diagnostic: log raw stderr data length to server console
           console.log(`[stderr] received ${data.length} bytes, first 200 chars:`, data.slice(0, 200).replace(/[\x00-\x1F\x7F]/g, '?'));
+          // Buffer for error classification — see the catch block below.
+          stderrCollector.append(data);
           // Strip ANSI escape codes, OSC sequences, and control characters
           // but preserve tabs (\x09) and carriage returns (\x0D)
           const cleaned = data
@@ -1649,11 +1687,13 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
         const rawMessage = error instanceof Error ? error.message : 'Unknown error';
         // Log full error details for debugging (visible in terminal / dev tools)
         const stderrContent = error instanceof Error ? (error as { stderr?: string }).stderr : undefined;
+        const bufferedStderr = stderrCollector.snapshot();
         console.error('[claude-client] Stream error:', {
           message: rawMessage,
           stack: error instanceof Error ? error.stack : undefined,
           cause: error instanceof Error ? (error as { cause?: unknown }).cause : undefined,
           stderr: stderrContent,
+          bufferedStderr: bufferedStderr || undefined,
           code: error instanceof Error ? (error as NodeJS.ErrnoException).code : undefined,
         });
 
@@ -1663,9 +1703,8 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
           : undefined;
 
         // Classify the error using structured pattern matching
-        const classified = classifyError({
+        const classifyCtx = {
           error,
-          stderr: stderrContent,
           providerName: resolved.provider?.name,
           baseUrl: resolved.provider?.base_url,
           hasImages: files && files.some(f => isImageFile(f.type)),
@@ -1677,7 +1716,22 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
             docsUrl: presetForMeta.meta.docsUrl,
             pricingUrl: presetForMeta.meta.pricingUrl,
           } : undefined,
-        });
+        };
+        let classified = classifyError({ ...classifyCtx, stderr: stderrContent });
+
+        // stderr fallback pass: the SDK's Error has no stderr property, so a
+        // fatal CLI startup message (e.g. Windows "requires either Git for
+        // Windows …") never reaches the classifier and the result degrades to
+        // the generic PROCESS_CRASH "check your API key" copy — exactly the
+        // misdirection that once cost a user two weeks of API-key debugging.
+        // Re-classify with the buffered stderr, but ONLY when the first pass
+        // landed in a generic bucket: specific classifications (401, context
+        // too long, session errors …) must not be overridden by incidental
+        // stderr chatter matching loose patterns like 'not found'.
+        if (!stderrContent && bufferedStderr &&
+            (classified.category === 'PROCESS_CRASH' || classified.category === 'UNKNOWN')) {
+          classified = classifyError({ ...classifyCtx, stderr: bufferedStderr });
+        }
 
         // ── Reactive compact: auto-compress and retry on CONTEXT_TOO_LONG ──
         if (classified.category === 'CONTEXT_TOO_LONG' && !ptlRetryAttempted && conversationHistory && conversationHistory.length > 4) {
@@ -1751,6 +1805,7 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
               allowDangerouslySkipPermissions: true,
               env: { ...process.env as Record<string, string> },
               maxTurns: undefined,
+              stderr: (data: string) => stderrCollector.append(data),
             };
             if (model) retryOptions.model = model;
             if (systemPrompt) {

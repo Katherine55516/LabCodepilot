@@ -2149,8 +2149,8 @@ const zh: Record<TranslationKey, string> = {
   'errors.CLI_NOT_FOUND.userMessage': '未找到 Claude Code CLI。',
   'errors.CLI_NOT_FOUND.actionHint': '请先安装 Claude Code CLI 并确认它已加入 PATH，可执行：npm install -g @anthropic-ai/claude-code',
 
-  'errors.MISSING_GIT_BASH.userMessage': '在 Windows 上需要 Git Bash，但未找到。',
-  'errors.MISSING_GIT_BASH.actionHint': '请从 https://git-scm.com/downloads 安装 Git for Windows，并确保 bash.exe 已加入 PATH。',
+  'errors.MISSING_GIT_BASH.userMessage': 'Windows 上运行 Claude Code 需要安装 Git for Windows（或确保 PowerShell 可用），当前系统缺少可用的 shell 环境。这与 API Key、Base URL 或网络配置无关。',
+  'errors.MISSING_GIT_BASH.actionHint': '请从 https://git-scm.com/downloads/win 下载安装 Git for Windows（或确保 PowerShell 在系统 PATH 中）；也可以打开「设置 → Claude CLI」，安装向导会自动检测并引导安装 Git for Windows。安装完成后重新发送消息即可，若仍报此错误请重启应用。',
 
   'errors.NO_CREDENTIALS.userMessage': '未找到 API 凭据{provider}。',
   'errors.NO_CREDENTIALS.actionHint': '请到「设置 → 服务商」添加 API Key，或设置 ANTHROPIC_API_KEY 环境变量。',

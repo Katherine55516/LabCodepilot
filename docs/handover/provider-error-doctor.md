@@ -29,7 +29,7 @@ useSSEStream.ts / page.tsx 解析
 
 | 类别 | 触发模式 | 可重试 |
 |------|---------|--------|
-| CLI_NOT_FOUND | ENOENT, spawn | 否 |
+| CLI_NOT_FOUND | ENOENT, spawn, command not found | 否 |
 | NO_CREDENTIALS | missing api key | 否 |
 | AUTH_REJECTED | 401, invalid_api_key | 否 |
 | AUTH_FORBIDDEN | 403, Forbidden | 否 |
@@ -41,10 +41,12 @@ useSSEStream.ts / page.tsx 解析
 | CONTEXT_TOO_LONG | context_length | 否 |
 | UNSUPPORTED_FEATURE | unknown option | 否 |
 | CLI_VERSION_TOO_OLD | version, upgrade | 否 |
-| MISSING_GIT_BASH | git bash (Windows) | 否 |
+| MISSING_GIT_BASH | requires either Git for Windows / Git Bash was not found（CLI 致命启动文案，规则置顶） | 否 |
 | RESUME_FAILED | resume failed | 否 |
 | PROCESS_CRASH | exit code N | 否 |
 | UNKNOWN | 兜底 | 否 |
+
+**stderr 缓冲兜底 + Windows 缺 shell 直诊（2026-07）：** SDK 抛出的 Error **没有 `stderr` 属性**，而内嵌 CLI 的致命启动原因只打在 stderr 流上（典型：Windows 未装 Git for Windows 时 `Claude Code on Windows requires either Git for Windows (for bash) or PowerShell`，exit 1）——此前分类器只见 `exited with code 1`，落入 PROCESS_CRASH，弹窗指向 API Key，真实案例误导排查两周。修复分三层：① 所有 SDK spawn 点用 `createStderrCollector()`（`sdk-subprocess-env.ts`，8KB 上限、头尾各半 + 截断标记、剥 ANSI）缓冲 stderr——`streamClaudeSdk`（含 resume fallback / PTL retry）在 catch 里读取，`generateTextViaSdk` / `streamTextViaSdk` 把 snapshot 附着到上抛 Error 的 `stderr` 属性，provider-doctor 原有 500 字符缓冲不变；② claude-client catch 采用**两段式分类**：先按 error 自带信息分类，**仅当结果落在 PROCESS_CRASH/UNKNOWN 兜底桶且 error.stderr 为空**时才带缓冲 stderr 重分类——避免 8KB 杂音里的宽松子串（'not found' 等）劫持 401/PTL 等已明确的分类；③ MISSING_GIT_BASH 规则**移到列表最前**（`Git Bash was not found` 含 'not found'，否则被 CLI_NOT_FOUND 吞掉）且只匹配 CLI 的致命文案（勿匹配非致命警告 `Git Bash not found; BashTool will be unavailable`——无 Git 但 PowerShell 可用时正常会话也会打这条），文案直说与 API Key 无关并给出 git-scm.com 下载链接 + `/settings#cli` 安装向导入口；同时 CLI_NOT_FOUND 的裸 `'not found'` 收紧为 `'command not found'`。i18n `errors.MISSING_GIT_BASH.*` 三语已同步（目前为预留键，运行时文案来自 classifier）。测试见 `src/__tests__/unit/error-classifier-missing-git-bash.test.ts` 与 `sdk-subprocess-env.test.ts` 的 collector 用例。
 
 **上游 message 优先（2026-06）：** `classifyError` 是 `classifyErrorCore`（原分类逻辑）的包装——分类后用 `extractUpstreamMessage()` 从原始错误文本（rawMessage + stderr + cause）里提取上游网关返回的可读 `message`。**覆盖两种形态**：① JSON `{"error":{"message":"…"}}`；② SDK 已把 HTTP body 解析成的**纯文本** `API Error: <status> <可读文本>`（**实际线上就是这种**，如 `… API Error: 403 用户高阶模型额度不足, 剩余: ¥-0.024640 (request id: …)`，已不是 JSON）；纯 HTTP 状态短语（Forbidden/Unauthorized 等）信息量低则不覆盖、回退通用分类。提取到则覆盖 `userMessage` 为该 message（去掉尾部 request id），并清空 `actionHint`/`recoveryActions`，让聊天里只显示这一行人话；提取不到则保持上表分类不变。`category`/`rawMessage`/Sentry 上报均不受影响（完整原文含 request id 仍留在 `rawMessage` 供排查）。前端零改动：`userMessage` 直接展示、`actionHint===''` 时不渲染「What to do」。测试见 `src/__tests__/unit/error-classifier-upstream.test.ts`。
 

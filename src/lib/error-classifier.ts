@@ -105,23 +105,62 @@ interface ErrorPattern {
 const providerHint = (ctx: ErrorContext) =>
   ctx.providerName ? ` (Provider: ${ctx.providerName})` : '';
 
+// ── Windows missing-shell copy ──────────────────────────────────
+// Chinese-first: same rationale as IMAGES_NOT_SUPPORTED below — the product
+// targets zh-CN users, and this exact error once cost a user two weeks of
+// misdirected API-key debugging because the packaged app showed the generic
+// PROCESS_CRASH copy ("Invalid or missing API Key …") instead of the CLI's
+// real stderr message.
+const MISSING_GIT_BASH_USER_MESSAGE =
+  'Windows 上运行 Claude Code 需要安装 Git for Windows（或确保 PowerShell 可用），当前系统缺少可用的 shell 环境。' +
+  '这与 API Key、Base URL 或网络配置无关。';
+const MISSING_GIT_BASH_ACTION_HINT =
+  '请从 https://git-scm.com/downloads/win 下载安装 Git for Windows（或确保 PowerShell 在系统 PATH 中）；' +
+  '也可以打开「设置 → Claude CLI」，安装向导会自动检测并引导安装 Git for Windows。' +
+  '安装完成后重新发送消息即可，若仍报此错误请重启应用。';
+
 const ERROR_PATTERNS: ErrorPattern[] = [
-  // ── CLI not found ──
+  // ── Missing shell on Windows (fatal CLI startup, must be FIRST) ──
+  // Without Git for Windows / PowerShell the CLI exits with code 1 and
+  // prints its diagnosis only to stderr. The patterns below are the CLI's
+  // actual fatal phrasings (verified against the bundled binary):
+  //   "Claude Code on Windows requires either Git for Windows (for bash)
+  //    or PowerShell. Install one of: …"
+  //   "Claude Code on Windows requires a shell tool. Git Bash was not found
+  //    and the PowerShell tool is disabled (CLAUDE_CODE_USE_POWERSHELL_TOOL=0)."
+  //   "Git Bash was not found. Install Git for Windows (…), or …"
+  // This entry must precede CLI_NOT_FOUND: "Git Bash was not found" contains
+  // the substring 'not found', which CLI_NOT_FOUND would otherwise swallow.
+  // Deliberately NOT matched: the non-fatal warning "Git Bash not found;
+  // BashTool will be unavailable" (no 'was') — a session that degrades to
+  // PowerShell and later fails for another reason (e.g. 401) must still
+  // classify as the real error.
   {
-    category: 'CLI_NOT_FOUND',
-    patterns: ['ENOENT', 'spawn', 'not found', 'No such file'],
-    codes: ['ENOENT'],
-    userMessage: () => 'Claude Code CLI not found.',
-    actionHint: () => 'Please install Claude Code CLI and ensure it is available in your PATH. Run: npm install -g @anthropic-ai/claude-code',
+    category: 'MISSING_GIT_BASH',
+    patterns: [
+      'requires either git for windows',
+      'requires a shell tool',
+      'git bash was not found',
+      'bash.exe not found',
+    ],
+    userMessage: () => MISSING_GIT_BASH_USER_MESSAGE,
+    actionHint: () => MISSING_GIT_BASH_ACTION_HINT,
     retryable: false,
   },
 
-  // ── Missing Git Bash (Windows) ──
+  // ── CLI not found ──
+  // 'command not found' (shell wording), NOT the bare 'not found': now that
+  // spawn points feed buffered stderr into classification, a bare 'not found'
+  // would hijack unrelated errors on incidental stderr lines (e.g. the
+  // non-fatal "Git Bash not found; BashTool will be unavailable" warning, or
+  // "model … not found" upstream bodies). Real spawn failures are still fully
+  // covered by ENOENT (code + message), 'spawn', and 'No such file'.
   {
-    category: 'MISSING_GIT_BASH',
-    patterns: ['git bash', 'bash.exe not found', 'git for windows'],
-    userMessage: () => 'Git Bash is required on Windows but was not found.',
-    actionHint: () => 'Install Git for Windows from https://git-scm.com/downloads and ensure bash.exe is on PATH.',
+    category: 'CLI_NOT_FOUND',
+    patterns: ['ENOENT', 'spawn', 'command not found', 'No such file'],
+    codes: ['ENOENT'],
+    userMessage: () => 'Claude Code CLI not found.',
+    actionHint: () => 'Please install Claude Code CLI and ensure it is available in your PATH. Run: npm install -g @anthropic-ai/claude-code',
     retryable: false,
   },
 
@@ -521,6 +560,13 @@ function buildRecoveryActions(category: ClaudeErrorCategory, ctx: ErrorContext):
     case 'RESUME_FAILED':
     case 'SESSION_STATE_ERROR':
       actions.push({ label: 'New Conversation', action: 'new_conversation' });
+      break;
+    case 'MISSING_GIT_BASH':
+      // Chinese labels to match the category's Chinese-first copy above.
+      // Relative URL deep-links to the CLI settings section, where the
+      // InstallWizard's needs-git flow walks through installing Git.
+      actions.push({ label: '下载 Git for Windows', url: 'https://git-scm.com/downloads/win' });
+      actions.push({ label: '打开 CLI 设置（安装向导）', url: '/settings#cli' });
       break;
     case 'PROCESS_CRASH':
       if (meta?.apiKeyUrl) actions.push({ label: 'Check API Key', url: meta.apiKeyUrl });

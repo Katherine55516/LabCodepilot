@@ -140,3 +140,44 @@ describe('prepareSdkSubprocessEnv — uniform provider-group ownership', () => {
     setup.shadow.cleanup(); // second call must not throw
   });
 });
+
+describe('createStderrCollector — bounded stderr capture for spawn points', () => {
+  it('accumulates appended chunks and snapshots them', async () => {
+    const { createStderrCollector } = await import('../../lib/sdk-subprocess-env');
+    const c = createStderrCollector();
+    c.append('Claude Code on Windows requires either Git for Windows (for bash) or PowerShell. ');
+    c.append('Install one of:\n - Git for Windows: https://git-scm.com/downloads/win\n');
+    const snap = c.snapshot();
+    assert.ok(snap.includes('requires either Git for Windows'));
+    assert.ok(snap.includes('Install one of:'));
+  });
+
+  it('strips ANSI escape sequences and control chars, keeps \\t and \\n', async () => {
+    const { createStderrCollector } = await import('../../lib/sdk-subprocess-env');
+    const c = createStderrCollector();
+    c.append('\x1B[31mError:\x1B[0m Git Bash was not found.\x07\r\n\tdetail');
+    assert.equal(c.snapshot(), 'Error: Git Bash was not found.\n\tdetail');
+  });
+
+  it('truncates to head + tail with a marker when over the limit', async () => {
+    const { createStderrCollector } = await import('../../lib/sdk-subprocess-env');
+    const c = createStderrCollector(100); // half = 50
+    const head = 'H'.repeat(60);
+    const tail = 'T'.repeat(200);
+    c.append(head);
+    c.append(tail);
+    const snap = c.snapshot();
+    assert.ok(snap.includes('…[stderr truncated]…'), 'must mark truncation');
+    assert.ok(snap.startsWith('H'.repeat(50)), 'keeps the first half (startup banners)');
+    assert.ok(snap.endsWith('T'.repeat(50)), 'keeps the last half (pre-crash output)');
+    assert.ok(snap.length < 130, 'stays bounded');
+  });
+
+  it('empty / whitespace-only input snapshots to empty string', async () => {
+    const { createStderrCollector } = await import('../../lib/sdk-subprocess-env');
+    const c = createStderrCollector();
+    assert.equal(c.snapshot(), '');
+    c.append('   \n  ');
+    assert.equal(c.snapshot(), '');
+  });
+});
