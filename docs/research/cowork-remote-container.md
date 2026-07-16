@@ -179,7 +179,7 @@
 
 | 阶段 | 内容 | 环境 |
 |---|---|---|
-| R0 通道 POC | 服务器上手工容器 + claude + **stdio shim(解帧)**;客户端 SDK→forwarder-remote→TCP→docker exec→shim→claude,stream-json 一轮跑通;EOF(零帧)/中断/并发两会话压测(gVisor 不试,已证实不稳→硬化 runc)。**POC 用裸 TCP 验协议(生产切 WS/TLS 是纯工程,只换连接层);代码 scripts/poc/cowork/remote/** | **你的服务器 + 任一客户端**(mac 即可先验,不用等 Windows!)。**进展:本机协议自测已过(selftest-local.mjs:帧/零帧EOF/stdin-EOF abort自保/流式/并发全 PASS);docker exec 那一格待 UTM 补,验收点见 remote/README.md** |
+| R0 通道 POC | 服务器上手工容器 + claude + **stdio shim(解帧)**;客户端 SDK→forwarder-remote→TCP→docker exec→shim→claude,stream-json 一轮跑通;EOF(零帧)/中断/并发两会话压测(gVisor 不试,已证实不稳→硬化 runc)。**POC 用裸 TCP 验协议(生产切 WS/TLS 是纯工程,只换连接层);代码 scripts/poc/cowork/remote/** | ✅ **协议层 + docker 实测均已过(2026-07-16,UTM arm64 / Ubuntu 26.04）**。本机 selftest-local 全 PASS;**真 docker exec 下 selftest-docker 全 PASS**:T1 字节穿透+优雅零帧 EOF、T2 并发两 exec 不串、**T3 中断实测 docker exec 正确传 stdin-EOF + shim 自保 + 零孤儿**(调研核心疑点消除);**claude 2.1.203 二进制在硬化 runc 容器(cap-drop ALL/no-new-privileges/mem+pids 限额）跑通**（证伪 gVisor 疑点 = runc 无碍）。仅剩「真 claude 经通道跑一轮 stream-json」待凭证 |
 | R1 W1 抽象 + 服务端控制面 MVP | guest-backend 接口(两用)+ cowork-server(分配/释放/exec 桥/labels 事实源) | mac + 服务器 |
 | R2 文件通道 + 产物 | 上传/diff/下载/archive 直读 volume;产物卡链路接通 | 同上 |
 | R3 凭证代理 + 审计 | P3-B 移植(方案 A/C)+ 双侧审计 | 同上 |
@@ -192,8 +192,8 @@
 
 | 风险 | 等级 | 缓解 |
 |---|---|---|
-| docker exec EOF 半关闭不可靠 | **已消解(设计层)** | 调研证实不能赌传输层(moby 官方自认协议缺陷)→ 帧协议端到端 + 容器内 stdio shim 为正解(K8s v5 同构背书);R0 实测走通即可 |
-| claude(Bun)与 gVisor 不兼容 | **已证实(不再是风险,是事实)** | gVisor 下有活跃 bug 且随 claude 小版本回归(#27230/#35454)→ **默认硬化 runc**,gVisor 仅可选实验档(锁版本+升级回归) |
+| docker exec EOF 半关闭不可靠 | **已消解 + R0 实测通过** | 帧协议端到端 + 容器内 stdio shim 为正解(K8s v5 同构);**R0 UTM 实测 T3:docker exec 正确传 stdin-EOF、shim 自保、零孤儿**,加 server abort-grace 兜底 kill 双保险 |
+| claude(Bun)与 gVisor 不兼容 | **已证实 + runc 侧 R0 实测跑通** | gVisor 下有活跃 bug 随 claude 小版本回归(#27230/#35454)→ **默认硬化 runc**;**R0 实测 claude 2.1.203 在硬化 runc(cap-drop ALL/no-new-privileges/限额)正常启动**,runc 无碍;gVisor 仅可选实验档 |
 | 共享内核逃逸(runc) | 中(诚实标注) | 6.2 硬化基线全套;文案"防绝大多数提示注入类攻击,不防内核 0day";服务器有 KVM 则可评估 microVM 演进 |
 | 内网横移(提示注入扫内网) | **高(新增)** | 6.3 出网策略为 R4 硬门槛,不做不上多用户;**host network 禁用 + DNS 上游受控两个旁路显式封死** |
 | 多客户端版本 vs 单服务器 | 中 | 服务端按版本缓存 claude 二进制,按需下载 |
