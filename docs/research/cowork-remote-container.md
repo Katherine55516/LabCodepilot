@@ -179,7 +179,7 @@
 
 | 阶段 | 内容 | 环境 |
 |---|---|---|
-| R0 通道 POC | 服务器上手工容器 + claude + **stdio shim(解帧)**;客户端 SDK→forwarder-remote→WS→docker exec→shim→claude,stream-json 一轮跑通;EOF(零帧)/中断(WS 断杀进程)/并发两会话压测(gVisor 不试,已证实不稳→硬化 runc) | **你的服务器 + 任一客户端**(mac 即可先验,不用等 Windows!) |
+| R0 通道 POC | 服务器上手工容器 + claude + **stdio shim(解帧)**;客户端 SDK→forwarder-remote→TCP→docker exec→shim→claude,stream-json 一轮跑通;EOF(零帧)/中断/并发两会话压测(gVisor 不试,已证实不稳→硬化 runc)。**POC 用裸 TCP 验协议(生产切 WS/TLS 是纯工程,只换连接层);代码 scripts/poc/cowork/remote/** | **你的服务器 + 任一客户端**(mac 即可先验,不用等 Windows!)。**进展:本机协议自测已过(selftest-local.mjs:帧/零帧EOF/stdin-EOF abort自保/流式/并发全 PASS);docker exec 那一格待 UTM 补,验收点见 remote/README.md** |
 | R1 W1 抽象 + 服务端控制面 MVP | guest-backend 接口(两用)+ cowork-server(分配/释放/exec 桥/labels 事实源) | mac + 服务器 |
 | R2 文件通道 + 产物 | 上传/diff/下载/archive 直读 volume;产物卡链路接通 | 同上 |
 | R3 凭证代理 + 审计 | P3-B 移植(方案 A/C)+ 双侧审计 | 同上 |
