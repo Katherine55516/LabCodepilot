@@ -154,6 +154,9 @@ export function ChatListPanel({ open, width, hasUpdate, readyToInstall }: ChatLi
   const handleTabChange = useCallback((tab: WorkspaceTab) => {
     setWorkspaceTab(tab);
     saveWorkspaceTab(tab);
+    // 测试工作台是研发专属入口(2026-07 改版后办公 tab 不渲染测试按钮),切到办公时
+    // 顺手关闭,避免覆盖层留在 /chat 上却没有任何按钮能关它。
+    if (tab === 'office') setTestPanelOpen(false);
     // /chat 落地页据此实时切换 办公/研发 空态(E4);同 localStorage 值一起构成
     // 「当前 tab」的唯一广播口。
     window.dispatchEvent(new CustomEvent('workspace-tab-changed', { detail: tab }));
@@ -169,7 +172,7 @@ export function ChatListPanel({ open, width, hasUpdate, readyToInstall }: ChatLi
     // sessions 来自 getAllSessions(updated_at DESC),首个匹配即最近会话
     const next = sessions.find((s) => (targetIsOffice ? !!s.sandbox_enabled : !s.sandbox_enabled));
     router.push(next ? `/chat/${next.id}` : '/chat');
-  }, [pathname, sessions, router]);
+  }, [pathname, sessions, router, setTestPanelOpen]);
   const { workspacePath } = useAssistantWorkspace();
   const [assistantSummary, setAssistantSummary] = useState<{
     name: string;
@@ -577,27 +580,18 @@ export function ChatListPanel({ open, width, hasUpdate, readyToInstall }: ChatLi
       {/* macOS traffic lights spacing */}
       <div className="h-5 shrink-0 mt-3" />
 
-      {/* Top action bar: New Chat + Search */}
-      <div className="flex items-center gap-2 px-3 pb-2">
-        <Button
-          variant="outline"
-          size="sm"
-          className="flex-1 justify-center gap-1.5 h-8 text-xs"
-          disabled={creatingChat || (activeTab === 'office' && !coworkImageProvisioned)}
-          onClick={activeTab === 'office' ? handleNewOfficeChat : handleNewChat}
-        >
-          <Plus size={14} />
-          {t('chatList.newConversation')}
-        </Button>
+      {/* Top action bar: search only — 新对话 移到 办公/研发 切换栏下方
+          (2026-07 侧边栏改版,参考 Claude 桌面版的紧凑 "+ New" 行) */}
+      <div className="flex items-center justify-end px-3 pb-1">
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
-              variant="outline"
+              variant="ghost"
               size="icon-sm"
-              className="h-8 w-8 shrink-0"
+              className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground"
               onClick={() => window.dispatchEvent(new CustomEvent('open-global-search'))}
             >
-              <MagnifyingGlass size={14} />
+              <MagnifyingGlass size={15} />
               <span className="sr-only">{t('chatList.searchSessions')}</span>
             </Button>
           </TooltipTrigger>
@@ -627,9 +621,60 @@ export function ChatListPanel({ open, width, hasUpdate, readyToInstall }: ChatLi
         </div>
       )}
 
-      {/* Feature nav items — 测试 moved next to 文生图 above the account row (see bottom).
-          navItems is empty today (entries live in Settings); render the block only when
-          some are restored so it leaves no empty gap below the search bar. */}
+      {/* 新对话(弱化为 ghost 行 + 圈形加号,参考 Claude 桌面版)+ 按 tab 绑定的功能
+          入口:办公 → 文生图,研发 → 测试。cowork 关闭时没有 tab 概念,两个入口都
+          显示,保证文生图不从侧边栏消失。 */}
+      <div className="flex flex-col gap-0.5 px-3 pb-2">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="w-full justify-start gap-2 h-8 text-xs"
+          disabled={creatingChat || (activeTab === 'office' && !coworkImageProvisioned)}
+          onClick={activeTab === 'office' ? handleNewOfficeChat : handleNewChat}
+        >
+          <span className="flex size-[18px] shrink-0 items-center justify-center rounded-full border border-foreground/30">
+            <Plus size={11} className="size-[11px]" />
+          </span>
+          {t('chatList.newConversation')}
+        </Button>
+        {/* 测试 — 研发专属:toggle 内联测试工作台;办公 tab 不渲染(切办公时
+            handleTabChange 会顺手关闭工作台,避免覆盖层留在屏上无处可关)。 */}
+        {activeTab === 'dev' && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className={`w-full justify-start gap-2 h-8 text-xs ${
+              testPanelOpen && isChatRoute
+                ? "bg-accent text-accent-foreground font-medium"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+            onClick={handleOpenTesting}
+          >
+            <MagnifyingGlassCheck size={14} weight={testPanelOpen && isChatRoute ? "fill" : "regular"} />
+            {t('nav.test')}
+          </Button>
+        )}
+        {/* 文生图 — 办公专属(cowork 关闭时也显示,保证入口不丢) */}
+        {(activeTab === 'office' || !coworkAvailable) && (
+          <Link href="/image">
+            <Button
+              variant="ghost"
+              size="sm"
+              className={`w-full justify-start gap-2 h-8 text-xs ${
+                pathname.startsWith("/image")
+                  ? "bg-accent text-accent-foreground font-medium"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <Sparkle size={14} weight={pathname.startsWith("/image") ? "fill" : "regular"} />
+              {t('imageStudio.sidebarButton' as TranslationKey)}
+            </Button>
+          </Link>
+        )}
+      </div>
+
+      {/* Feature nav items — navItems is empty today (entries live in Settings);
+          render the block only when some are restored so it leaves no empty gap. */}
       {navItems.length > 0 && (
         <div className="px-3 pb-2">
           <div className="flex flex-col gap-0.5">
@@ -885,43 +930,8 @@ export function ChatListPanel({ open, width, hasUpdate, readyToInstall }: ChatLi
         </div>
       </ScrollArea>
 
-      {/* Feature entries — 测试 + 文生图 stacked above the account row. Both use the
-          neutral ghost style (transparent at rest, accent highlight when active) so they
-          match the rest of the sidebar nav; 测试 sits directly above 文生图. */}
-      <div className="shrink-0 px-3 pt-2 flex flex-col gap-0.5">
-        {/* 测试 — toggles the inline testing panel; active-highlighted while open
-            (the panel has no 收起 button — toggle here to exit). */}
-        <Button
-          variant="ghost"
-          size="sm"
-          className={`w-full justify-start gap-2 h-8 text-xs ${
-            testPanelOpen && isChatRoute
-              ? "bg-accent text-accent-foreground font-medium"
-              : "text-muted-foreground hover:text-foreground"
-          }`}
-          onClick={handleOpenTesting}
-        >
-          <MagnifyingGlassCheck size={14} weight={testPanelOpen && isChatRoute ? "fill" : "regular"} />
-          {t('nav.test')}
-        </Button>
-        {/* 文生图 — text-to-image entry */}
-        <Link href="/image">
-          <Button
-            variant="ghost"
-            size="sm"
-            className={`w-full justify-start gap-2 h-8 text-xs ${
-              pathname.startsWith("/image")
-                ? "bg-accent text-accent-foreground font-medium"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            <Sparkle size={14} weight={pathname.startsWith("/image") ? "fill" : "regular"} />
-            {t('imageStudio.sidebarButton' as TranslationKey)}
-          </Button>
-        </Link>
-      </div>
-
-      {/* Bottom: account chip + settings gear (horizontal row) */}
+      {/* Bottom: account chip + settings gear (horizontal row)
+          (测试/文生图 已上移到切换栏下方,按 tab 绑定 — 2026-07 侧边栏改版) */}
       <div className="shrink-0 px-3 py-2 flex items-center gap-1">
         <UserMenu />
         <Link href="/settings" className="shrink-0">
