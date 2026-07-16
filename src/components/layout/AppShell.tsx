@@ -84,6 +84,9 @@ function defaultViewMode(_filePath: string): PreviewViewMode {
 
 const LG_BREAKPOINT = 1024;
 
+// 侧边栏折叠偏好(手动点折叠按钮时写入;"1"=展开,"0"=收起)
+const CHATLIST_OPEN_KEY = "codepilot_chatlist_open";
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -194,10 +197,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     return () => window.removeEventListener('open-global-search', handler);
   }, []);
 
-  // Sync with viewport after hydration to avoid SSR mismatch
+  // Sync with viewport after hydration to avoid SSR mismatch.
+  // 用户通过侧边栏折叠按钮显式收起/展开过时(codepilot_chatlist_open),
+  // 优先恢复该偏好;否则按视口断点。
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
-    setChatListOpenRaw(window.matchMedia(`(min-width: ${LG_BREAKPOINT}px)`).matches);
+    const saved = localStorage.getItem(CHATLIST_OPEN_KEY);
+    setChatListOpenRaw(
+      saved !== null ? saved === "1" : window.matchMedia(`(min-width: ${LG_BREAKPOINT}px)`).matches
+    );
   }, []);
   /* eslint-enable react-hooks/set-state-in-effect */
 
@@ -228,6 +236,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   const setChatListOpen = useCallback((open: boolean) => {
     setChatListOpenRaw(open);
+  }, []);
+
+  // 侧边栏折叠按钮(ChatListPanel 顶行/折叠细栏)— 翻转并记住显式偏好
+  const toggleChatList = useCallback(() => {
+    setChatListOpenRaw((prev) => {
+      const next = !prev;
+      localStorage.setItem(CHATLIST_OPEN_KEY, next ? "1" : "0");
+      return next;
+    });
   }, []);
 
   // --- New independent panel states ---
@@ -499,10 +516,15 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }, [testPanelOpen]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
-  // Keep chat list state in sync when resizing across the breakpoint
+  // Keep chat list state in sync when resizing across the breakpoint.
+  // 缩窄一律收起(<lg 时 aside 本来就被 CSS hidden);放宽只在用户没有
+  // 显式折叠(偏好≠"0")时自动展开,不覆盖手动折叠的意图。
   useEffect(() => {
     const mql = window.matchMedia(`(min-width: ${LG_BREAKPOINT}px)`);
-    const handler = (e: MediaQueryListEvent) => setChatListOpenRaw(e.matches);
+    const handler = (e: MediaQueryListEvent) => {
+      if (!e.matches) setChatListOpenRaw(false);
+      else if (localStorage.getItem(CHATLIST_OPEN_KEY) !== "0") setChatListOpenRaw(true);
+    };
     mql.addEventListener("change", handler);
     return () => mql.removeEventListener("change", handler);
   }, []);
@@ -601,6 +623,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <ErrorBoundary>
               <ChatListPanel
                 open={chatListOpen}
+                onToggle={toggleChatList}
                 width={chatListWidth}
                 hasUpdate={updateContextValue.updateInfo?.updateAvailable ?? false}
                 readyToInstall={updateContextValue.updateInfo?.readyToInstall ?? false}

@@ -19,6 +19,7 @@ import {
   Sparkle,
   Briefcase,
   Code,
+  SidebarSimple,
   type Icon,
 } from "@/components/ui/icon";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
@@ -59,13 +60,15 @@ import type { ChatSession } from "@/types";
 
 interface ChatListPanelProps {
   open: boolean;
+  /** 折叠/展开侧边栏(顶行折叠按钮 + 折叠细栏的展开按钮共用) */
+  onToggle?: () => void;
   width?: number;
   hasUpdate?: boolean;
   readyToInstall?: boolean;
 }
 
 
-export function ChatListPanel({ open, width, hasUpdate, readyToInstall }: ChatListPanelProps) {
+export function ChatListPanel({ open, onToggle, width, hasUpdate, readyToInstall }: ChatListPanelProps) {
   const pathname = usePathname();
   const router = useRouter();
 
@@ -553,7 +556,46 @@ export function ChatListPanel({ open, width, hasUpdate, readyToInstall }: ChatLi
     }
   }, [projectGroups, collapsedProjects]);
 
-  if (!open) return null;
+  // 折叠态:整个面板收成一条细栏,只留 展开 + 搜索 两个图标(不用悬浮按钮,
+  // 避免与 macOS 红绿灯 / 各路由自己的顶部内容重叠)。
+  if (!open) {
+    return (
+      <aside className="hidden h-full w-[52px] shrink-0 flex-col items-center overflow-hidden bg-sidebar/80 backdrop-blur-xl lg:flex">
+        {/* macOS traffic lights spacing */}
+        <div className="h-5 shrink-0 mt-3" />
+        <div className="flex flex-col items-center gap-1 pt-2">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                onClick={onToggle}
+              >
+                <SidebarSimple size={15} />
+                <span className="sr-only">{t('chatList.expandSidebar')}</span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="right">{t('chatList.expandSidebar')}</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                onClick={() => window.dispatchEvent(new CustomEvent('open-global-search'))}
+              >
+                <MagnifyingGlass size={15} />
+                <span className="sr-only">{t('chatList.searchSessions')}</span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="right">{t('chatList.searchSessions')}</TooltipContent>
+          </Tooltip>
+        </div>
+      </aside>
+    );
+  }
 
   // Type annotation needed because the array is currently empty (every entry
   // commented out). When restoring any entry, drop the annotation if you like.
@@ -580,9 +622,23 @@ export function ChatListPanel({ open, width, hasUpdate, readyToInstall }: ChatLi
       {/* macOS traffic lights spacing */}
       <div className="h-5 shrink-0 mt-3" />
 
-      {/* Top action bar: search only — 新对话 移到 办公/研发 切换栏下方
-          (2026-07 侧边栏改版,参考 Claude 桌面版的紧凑 "+ New" 行) */}
-      <div className="flex items-center justify-end px-3 pb-1">
+      {/* Top action bar: 折叠 + 搜索(左对齐,参考 Claude 桌面版)— 新对话
+          移到 办公/研发 切换栏下方(2026-07 侧边栏改版) */}
+      <div className="flex items-center gap-1 px-3 pb-1">
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground"
+              onClick={onToggle}
+            >
+              <SidebarSimple size={15} />
+              <span className="sr-only">{t('chatList.collapseSidebar')}</span>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">{t('chatList.collapseSidebar')}</TooltipContent>
+        </Tooltip>
         <Tooltip>
           <TooltipTrigger asChild>
             <Button

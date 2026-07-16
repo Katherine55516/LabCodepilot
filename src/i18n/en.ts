@@ -412,6 +412,8 @@ const en = {
   'chatList.openFolder': 'Open Folder',
   'chatList.copyFolderPath': 'Copy Folder Path',
   'chatList.searchSessions': 'Search sessions...',
+  'chatList.collapseSidebar': 'Collapse sidebar',
+  'chatList.expandSidebar': 'Expand sidebar',
   'chatList.noSessions': 'No sessions yet',
   'chatList.importFromCli': 'Import from Claude Code',
   'chatList.addProjectFolder': 'New Project',

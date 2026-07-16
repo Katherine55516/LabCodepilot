@@ -410,6 +410,8 @@ const zh: Record<TranslationKey, string> = {
   'chatList.openFolder': '打开文件夹',
   'chatList.copyFolderPath': '复制文件夹路径',
   'chatList.searchSessions': '搜索会话...',
+  'chatList.collapseSidebar': '收起侧边栏',
+  'chatList.expandSidebar': '展开侧边栏',
   'chatList.noSessions': '暂无会话',
   'chatList.importFromCli': '从 Claude Code 导入',
   'chatList.addProjectFolder': '新建项目',

@@ -418,6 +418,8 @@ const zhHK: Record<TranslationKey, string> = {
   'chatList.openFolder': '打開文件夾',
   'chatList.copyFolderPath': '複製文件夾路徑',
   'chatList.searchSessions': '搜索會話...',
+  'chatList.collapseSidebar': '收起側邊欄',
+  'chatList.expandSidebar': '展開側邊欄',
   'chatList.noSessions': '暫無會話',
   'chatList.importFromCli': '從 Claude Code 導入',
   'chatList.addProjectFolder': '新建項目',
