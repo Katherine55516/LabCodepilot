@@ -44,7 +44,8 @@
 
 | 文件 | 主题 | 状态 |
 |------|------|------|
-| active/cowork-p2-windows.md | **Cowork P2 Windows/WSL2 移植**:补平台后端(约半数模块复用,四接缝=通道/生命周期/分发/网络)；通道走 `wsl.exe -e` stdio 模型(与现 exec 帧封装天然契合，免 admin)；决策 D1 接受策略级隔离先交付/D2 全 Win10-11 不设门槛/D3 stdio/D4 实测需 Win 机；W0 通道 POC 先行 → W1 抽象(macOS 可做) → W2-W7 | W0-W7 待开始 |
+| active/cowork-remote-container.md | **Cowork 远程容器沙箱(R 系列,取代本地 VM)**:全平台统一远程(RD1 弃本地活跃路径,代码保留复用)、单公司裸金属服务器账号下发(RD2/3,有 KVM 可升 microVM)、凭证先 A 预留 C(RD4)、单点诚实降级(RD5);CoworkBackend 接口 + cowork-server 控制面 + 帧协议端到端;R0 通道 POC 已实测全过(真 claude 一轮 BRIDGE_OK) | R0 ✅,R1-R5 待开工 |
+| active/cowork-p2-windows.md | **Cowork P2 Windows/WSL2 移植**:补平台后端(约半数模块复用,四接缝=通道/生命周期/分发/网络)；通道走 `wsl.exe -e` stdio 模型(与现 exec 帧封装天然契合，免 admin)；决策 D1 接受策略级隔离先交付/D2 全 Win10-11 不设门槛/D3 stdio/D4 实测需 Win 机；W0 通道 POC 先行 → W1 抽象(macOS 可做) → W2-W7 | ⏸ 挂起(企业禁虚拟化→远程容器方案取代;个人 Win 场景保留) |
 | active/regression-library.md | 测试工作台:回归用例库(用例设计后自动沉淀「回归测试」标签用例 + 项目级库查看/管理 + 跨任务一键重跑) | 设计完成,待实现(批 A-E) |
 | active/test-regression-gate-audit.md | 测试工作台:回归集标签 + 用例门控 + 操作审计 | 开发完成(合并 PR #8),待打包验收 mac+Win |
 | active/chat-latency-remediation.md | 聊天链路提速 + 模式入口收敛 + MCP 持久开关 | Phase 0 完成，Phase 1-4 待开始 |
