@@ -23,7 +23,7 @@
 | Phase | 内容 | 环境 | 状态 |
 |-------|------|------|------|
 | R0 | 通道 POC:forwarder→TCP→server→docker exec→shim→claude,帧/EOF/中断/并发 + claude×runc + 真 claude 一轮 | UTM+Mac | ✅ **完成**(2026-07-16,代码 scripts/poc/cowork/remote/) |
-| R1 | `CoworkBackend` 接口(远程唯一活跃,vfkit 包入保留)+ cowork-server 控制面 MVP(容器 per 会话编排 + exec WS 桥 + docker labels 事实源)+ claude-client 切远程 | Mac+VM | 📋 待开工 |
+| R1 | `CoworkBackend` 接口(远程唯一活跃,vfkit 包入保留)+ cowork-server 控制面 MVP(容器 per 会话编排 + exec WS 桥 + docker labels 事实源)+ claude-client 切远程 | Mac+VM | 🔄 **R1-1 ✅**(apps/cowork-server,VM 实测全 PASS:REST 编排/幂等/reconcile + WS exec 穿透/EOF/中断无孤儿)/ R1-2~4 待做 |
 | R2 | 文件通道:上传/diff/下载/archive **服务端直读会话 volume**(容器不用醒)+ 产物卡链路接通 + cowork-transfer 底层换远程 | Mac+VM | 📋 |
 | R3 | 凭证代理(方案 A:客户端 TLS 交 key→服务端内存→容器一次性 token→注入真 key→转发真 base_url;预留 C 的取凭证钩子)+ 双侧审计 | Mac+VM | 📋 |
 | R4 | 多用户 authz(userId+sessionId label scope)+ 配额(mem/cpu/pids/TTL 回收)+ **出网禁内网**(DOCKER-USER 四段 REJECT + 封 host-network/DNS 旁路)+ 隔离硬化文案 | VM | 📋 |
