@@ -677,20 +677,19 @@ export function ChatListPanel({ open, onToggle, width, hasUpdate, readyToInstall
         </div>
       )}
 
-      {/* 新对话(弱化为 ghost 行 + 圈形加号,参考 Claude 桌面版)+ 按 tab 绑定的功能
-          入口:办公 → 文生图,研发 → 测试。cowork 关闭时没有 tab 概念,两个入口都
-          显示,保证文生图不从侧边栏消失。 */}
+      {/* 新对话 + 按 tab 绑定的功能入口:办公 → 文生图,研发 → 测试。三行统一
+          同一种 ghost 行样式(裸图标 + muted 文字,hover/active 提亮),不再给
+          新对话单独加圈形加号。cowork 关闭时没有 tab 概念,两个入口都显示,
+          保证文生图不从侧边栏消失。 */}
       <div className="flex flex-col gap-0.5 px-3 pb-2">
         <Button
           variant="ghost"
           size="sm"
-          className="w-full justify-start gap-2 h-8 text-xs"
+          className="w-full justify-start gap-2 h-8 text-xs text-muted-foreground hover:text-foreground"
           disabled={creatingChat || (activeTab === 'office' && !coworkImageProvisioned)}
           onClick={activeTab === 'office' ? handleNewOfficeChat : handleNewChat}
         >
-          <span className="flex size-[18px] shrink-0 items-center justify-center rounded-full border border-foreground/30">
-            <Plus size={11} className="size-[11px]" />
-          </span>
+          <Plus size={14} />
           {t('chatList.newConversation')}
         </Button>
         {/* 测试 — 研发专属:toggle 内联测试工作台;办公 tab 不渲染(切办公时
