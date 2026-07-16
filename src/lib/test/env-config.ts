@@ -19,6 +19,21 @@ import { sanitizeAccountKey } from '@/lib/test-accounts-export';
 
 export type EnvConfigSource = 'file' | 'db' | 'none';
 
+/**
+ * The resolved default account's login shape + 密码 credentials, so the execution
+ * step can auto-login (fill username/password on the login page), not only replay a
+ * captured storageState. `null` when the env has no accounts. `username`/`password`
+ * are populated only for password-shape accounts (capture / token accounts → null).
+ * authType is inferred by shape, matching the AI_LabTest contract + toEnvironmentsJson:
+ *   authType==='capture' ? 'capture' : (token ? 'token' : 'password').
+ */
+export interface ResolvedLoginAccount {
+  key: string;
+  authType: 'password' | 'token' | 'capture';
+  username: string | null;
+  password: string | null;
+}
+
 export interface ResolvedTestEnv {
   /** A real frontendBaseUrl (not TBD) is available for the chosen env. */
   configured: boolean;
@@ -28,6 +43,8 @@ export interface ResolvedTestEnv {
   frontendBaseUrl: string | null;
   apiBaseUrl: string | null;
   defaultAccount: string | null;
+  /** The default account's login shape + credentials (for 密码 auto-login), or null. */
+  loginAccount: ResolvedLoginAccount | null;
   /** Absolute path to the captured Playwright storageState, if the file exists. */
   storageStatePath: string | null;
   allowedEnvs: string[];
@@ -42,9 +59,35 @@ function emptyResolved(env: string, source: EnvConfigSource): ResolvedTestEnv {
     frontendBaseUrl: null,
     apiBaseUrl: null,
     defaultAccount: null,
+    loginAccount: null,
     storageStatePath: null,
     allowedEnvs: ['local', 'sit'],
     source,
+  };
+}
+
+/**
+ * Pick the account object behind `defaultAccount` (fallback: first account) and
+ * resolve it into a ResolvedLoginAccount. `accountsRaw` is the env's raw accounts[]
+ * (exported-file shape: password → {key,role,username,password}). Returns null when
+ * there are no accounts. Only password-shape accounts carry username/password.
+ */
+function resolveLoginAccount(
+  accountsRaw: unknown,
+  defaultAccount: string | null,
+): ResolvedLoginAccount | null {
+  const list = Array.isArray(accountsRaw) ? (accountsRaw as Array<Record<string, unknown>>) : [];
+  const acct =
+    (defaultAccount ? list.find((a) => a && a.key === defaultAccount) : undefined) ?? list[0];
+  if (!acct || typeof acct.key !== 'string') return null;
+  // authType by shape — matches the AI_LabTest contract + toEnvironmentsJson output.
+  const authType: ResolvedLoginAccount['authType'] =
+    acct.authType === 'capture' ? 'capture' : acct.token ? 'token' : 'password';
+  return {
+    key: acct.key,
+    authType,
+    username: typeof acct.username === 'string' && acct.username ? acct.username : null,
+    password: typeof acct.password === 'string' && acct.password ? acct.password : null,
   };
 }
 
@@ -94,6 +137,7 @@ export function resolveFromRaw(
   const apiBaseUrl = cleanUrl(e.apiBaseUrl);
   const defaultAccount =
     typeof e.defaultAccount === 'string' && e.defaultAccount ? e.defaultAccount : null;
+  const loginAccount = resolveLoginAccount(e.accounts, defaultAccount);
 
   let storageStatePath: string | null = null;
   if (defaultAccount) {
@@ -116,6 +160,7 @@ export function resolveFromRaw(
     frontendBaseUrl,
     apiBaseUrl,
     defaultAccount,
+    loginAccount,
     storageStatePath,
     allowedEnvs,
     source,

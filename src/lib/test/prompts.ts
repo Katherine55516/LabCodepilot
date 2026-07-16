@@ -177,7 +177,7 @@ function casesPrompt(
   const rule = ruleBlock(
     '测试用例完整性规范',
     loadRule('test-case-completeness'),
-    '每个「需求×维度」生成用例，字段含 ID/优先级/用例类型/需求引用/标题/前置/步骤(操作↔预期1:1)/断言级别/清理；CRUD 用 serial；多角色用隔离会话比较'
+    '每个「需求×维度」生成用例，字段含 ID/优先级/用例类型/需求引用/标题/前置/步骤(操作↔预期1:1)/断言级别/标签(回归集)/清理；CRUD 用 serial；多角色用隔离会话比较'
   );
   // 新建任务时用户上传了用例（已转成 cases.json）→ 让本步复用它，绝不从零覆盖。
   const importedBlock = reuseImported
@@ -197,7 +197,7 @@ ${rule}
 执行：
 1. Read 需求来源 ${reqSource}；必要时从相关代码理解页面真实结构与行为。
 2. **先建「需求 × 适用维度」覆盖矩阵，再逐格生成**（让条数由需求决定、可复现、不漏需求）：对每条需求从八类维度（正向/异常/边界/状态转换/权限/业务规则/数据一致性/用户体验）判定哪些适用，每个适用格子恰好 1 条用例；**每条需求至少 1 条，一条都不能漏**。
-3. 每条用例必含字段：ID（TC-NNN）/ 优先级（P0-P3）/ 用例类型（八类之一）/ 需求引用（REQ-ID）/ 标题（purpose）/ 前置条件 / **测试步骤 steps（操作↔预期 1:1 的数组）** / 断言级别（L1可见/L2内容/L3状态/L4行为）/ **oracle 来源 + 验证性质（见第 4 步「oracle 双轴」铁律）** / 清理（如需要）。
+3. 每条用例必含字段：ID（TC-NNN）/ 优先级（P0-P3）/ 用例类型（八类之一）/ 需求引用（REQ-ID）/ 标题（purpose）/ 前置条件 / **测试步骤 steps（操作↔预期 1:1 的数组）** / 断言级别（L1可见/L2内容/L3状态/L4行为）/ **oracle 来源 + 验证性质（见第 4 步「oracle 双轴」铁律）** / **用例标签 tags（见第 5 步「回归集」铁律）** / 清理（如需要）。
    - steps:[{content,expected}]：每个操作配且仅配一条预期，每条 expected **以【检查点类别】开头**（仅用：【UI检查】【业务功能检查】【数据检查】【通知检查】【异常检查】【权限检查】）。
    - 预期要具体、可验证、有源码依据（真实文案/元素/路由/状态），拿不准标「待真机确认」。
 4. **oracle 双轴（功能验证 vs 回归基线 —— 决定报告通过率口径，必须标对，详见《测试用例完整性规范》§1.6）**：每条用例除「用例类型」(覆盖维度) 外，**必须**再标两个字段——
@@ -205,17 +205,59 @@ ${rule}
    - \`verification\`（验证性质，二选一）：功能验证 / 回归基线。
    - **映射铁律**（承接需求来源）：预期来自权威来源（需求标 USER / PROJECT_DOC）→ oracle 取 PRD/设计稿/API契约/产品确认之一 + \`verification:"功能验证"\`；预期来自代码反推或照抄当前 UI 现状（需求标 REVERSE_ENGINEERED 且未经产品确认）→ \`oracle:"现状锁定"\` + \`verification:"回归基线"\`。回归基线用例只锁现状、永远 pass，**禁止**当功能验证。
    - 状态迁移里「纯防御性」的非法迁移（重复操作、终态→任意操作）标 \`verification:"回归基线"\`（oracle = 现状锁定）。
-5. 对照规范核验：结构（含 oracle/验证性质是否齐全）/ 覆盖（八维度）/ 断言 / 隔离 / 顺序 / 数据 / 权限。
+5. **回归集标签（tags —— 标记「发版必跑」的阻塞级用例，详见《测试用例完整性规范》§1.7）**：逐条判定「该用例若不通过，是否阻塞系统运行」——失败意味着 登录/鉴权不可用、核心业务主链路中断、数据写入或一致性被破坏、应用崩溃/白屏 之一 → \`tags\` 含 \`"回归测试"\`；全不满足 → 不打（\`tags:[]\` 或省略）。
+   - **与第 4 步「验证性质」是两个正交维度，禁止互相推导**：回归集看「失败后果」，回归基线看「预期来源」。\`verification:"功能验证"\` 的登录主流程用例同时打 \`"回归测试"\` 是常态；\`verification:"回归基线"\` 也**不自动**属于回归集。
+   - P0 是天然候选但以失败后果为最终判据：**禁止** P0 无脑全打回归、**禁止**给纯文案/样式类用例打回归；回归集贵在小而准（经验值 ≤ 总数 30%）。
+6. 对照规范核验：结构（含 oracle/验证性质/tags 是否齐全）/ 覆盖（八维度）/ 断言 / 隔离 / 顺序 / 数据 / 权限 / 回归集标注是否克制且覆盖核心链路。
 
 ⚠️ 落点（必须遵守）：
 - 用 Write **只写这一个 JSON 数据文件**：\`${p.cases}\`（平台用可编辑页面渲染该 JSON）。不要生成 .xlsx / .md 或别的文件。
-- JSON 必须是严格合法的 UTF-8（可被 JSON.parse 解析）。结构：\`{"cases":[{"id","caseType","requirement","priority","purpose","precondition","steps":[{"content","expected"}],"assertion","oracle","verification","cleanup"}]}\`（\`oracle\`/\`verification\` 取值见第 4 步）。
+- JSON 必须是严格合法的 UTF-8（可被 JSON.parse 解析）。结构：\`{"cases":[{"id","caseType","requirement","priority","purpose","precondition","steps":[{"content","expected"}],"assertion","oracle","verification","cleanup","tags"}]}\`（\`oracle\`/\`verification\` 取值见第 4 步；\`tags\` 为字符串数组，回归集用例含 \`"回归测试"\`，见第 5 步）。
 - **内层引号铁律**：字符串值里引用按钮名/输入值/文案时，一律用中文全角引号「」或""，绝不用英文半角 \`"\`（半角内层引号会断开 JSON）。确需精确英文文案时用反斜杠转义（\\"Submit\\"）。
 
-完成后用一句话总结：生成了多少条用例、覆盖了多少需求维度、其中功能验证 / 回归基线各几条；**若全部为回归基线**，显式提示「本任务用例仅锁定现状、未验证正确性，建议补充权威需求来源（PRD / 产品确认）」。`;
+完成后用一句话总结：生成了多少条用例、覆盖了多少需求维度、其中功能验证 / 回归基线各几条、回归集（tags 含「回归测试」）几条；**若全部为回归基线**，显式提示「本任务用例仅锁定现状、未验证正确性，建议补充权威需求来源（PRD / 产品确认）」。`;
 }
 
-function executionPrompt(taskName: string, env: string, baseUrl?: string, hasLoginState = false): string {
+/**
+ * 登录处理指引（执行 prompt 的🔐块）。三态，优先级 storageState > 密码凭据 > 无：
+ *  1. hasLoginState：平台已注入 storageState（capture 抓过）→ 开跑即已登录。
+ *  2. loginCredentials：配了「密码」账号且无 storageState → 下发用户名/密码，指示 AI
+ *     在登录页自动填充并提交（替代旧的「遇登录墙一律 blocked」）。
+ *  3. 都没有：既无密码账号又无 storageState → 遇登录墙判 blocked 并引导去设置。
+ * 三个分支各自保留「严禁 AskUserQuestion 向用户索取凭证/输入」的非交互护栏。
+ */
+function loginHandlingBlock(
+  hasLoginState: boolean,
+  loginCredentials?: { username: string; password: string },
+): string {
+  if (hasLoginState) {
+    return `🔐 **登录态处理**：平台已为本项目注入登录态（storageState），正常情况下开跑即已登录。若仍被**登录页 / 企业 SSO / 401** 拦住、无法建立会话：把受影响用例判 \`blocked\`、\`error\` 写明「登录态失效 / 未生效」，并在收尾总结**明确提示用户**前往「**设置 · 测试账号**」重新获取登录态后重跑；**严禁**用 \`AskUserQuestion\` 向用户索取任何输入。`;
+  }
+  if (loginCredentials) {
+    // 凭据来自「设置·测试账号」平台下发，不是向用户索取 —— 明文进 prompt，与 DB /
+    // environments.json 的明文存储模型一致（见 docs/handover/test-account-settings.md）。
+    return `🔐 **登录处理（平台已下发登录账号，请自动登录）**：本项目已在「设置 · 测试账号」配置了「密码」登录账号，以下凭据由平台下发（**非**向用户索取，可直接使用）：
+- 用户名：\`${loginCredentials.username}\`
+- 密码：\`${loginCredentials.password}\`
+当访问被测系统被**登录页**拦住、需要登录时：先用 \`browser_snapshot\` 观察登录页结构，定位「账号 / 用户名 / 域账号」输入框与「密码」输入框（按可见文案 / placeholder / label 识别，中文系统常见 placeholder 如「请输入域账号」「请输入密码」），用 \`browser_fill_form\` 或 \`browser_type\` 把上面的用户名、密码填进对应输入框，再点击「登录」按钮提交；登录成功（跳出登录页、进入系统主界面）后再继续执行用例。
+- **登录只做一次**：会话建立后其余用例复用同一登录态，不要每条用例都重新登录。
+- 若遇**图形验证码 / 短信验证码 / 企业 SSO 二次跳转 / 2FA** 等用上述凭据无法自动完成的校验 → 该用例（及后续需登录用例）判 \`blocked\`，\`error\` 写明「需人工二次校验，密码自动登录无法完成」，并在收尾总结提示用户改用「**设置 · 测试账号 → 获取登录态**」抓取登录态后重跑；
+- **严禁**用 \`AskUserQuestion\` 向用户索取账号 / 密码 / 验证码或任何输入（下发的凭据已足够；缺失信息一律判 \`blocked\` 而非提问）。`;
+  }
+  return `🔐 **登录态处理（重要，替代"向用户要账号"）**：**本项目未配置登录态**（既未配置「密码」登录账号、也未捕获 storageState），若被测系统需要登录你将无法建立会话。若访问被测系统时被**登录页 / 企业 SSO / 401** 拦住、无法建立会话：
+- **不要**手动编造账号密码登录，**更不要**用 \`AskUserQuestion\` 向用户索取凭证；
+- 把受影响的用例判 \`blocked\`，\`error\` 写明「未检测到登录态，被登录页 / SSO 拦截」；
+- 若**整个被测系统都需要登录**（首个用例即被登录页挡住）→ **立即停止、不要逐条空跑**，其余用例一并判 \`blocked\`（原因同上，未输出的由平台补全为「未执行」）；
+- 在收尾总结里**明确提示用户**：请前往「**设置 · 测试账号**」为本项目配置登录账号（密码）或获取登录态（即项目的环境配置），配置好后再重跑本步。`;
+}
+
+function executionPrompt(
+  taskName: string,
+  env: string,
+  baseUrl?: string,
+  hasLoginState = false,
+  loginCredentials?: { username: string; password: string },
+): string {
   const p = artifactPaths(taskName, env);
   const rule = ruleBlock(
     '测试执行规范',
@@ -230,13 +272,7 @@ ${baseUrl ? `被测地址：${baseUrl}（平台已在执行前完成可达性探
 
 ⚠️ **本步为非交互自动化执行（交互端无人应答）**：**严禁使用 \`AskUserQuestion\`，也严禁以任何方式向用户提问 / 等待用户输入 / 暂停等待确认**——问了永远不会有人回答，会让执行永久卡死。目标环境已由平台指定为 \`${env}\`，直接使用，**不要再反问用户选环境**。
 
-🔐 **登录态处理（重要，替代"向用户要账号"）**：${hasLoginState
-  ? '平台已为本项目注入登录态（storageState），正常情况下开跑即已登录。'
-  : '**本项目未配置登录态**（未捕获 storageState），若被测系统需要登录你将无法建立会话。'}若访问被测系统时被**登录页 / 企业 SSO / 401** 拦住、无法建立会话：
-- **不要**手动输入账号密码登录，**更不要**用 \`AskUserQuestion\` 向用户索取凭证；
-- 把受影响的用例判 \`blocked\`，\`error\` 写明「未检测到登录态，被登录页 / SSO 拦截」；
-- 若**整个被测系统都需要登录**（首个用例即被登录页挡住）→ **立即停止、不要逐条空跑**，其余用例一并判 \`blocked\`（原因同上，未输出的由平台补全为「未执行」）；
-- 在收尾总结里**明确提示用户**：请前往「**设置 · 测试账号**」为本项目配置 / 重新捕获登录态（即项目的环境配置），配置好后再重跑本步。
+${loginHandlingBlock(hasLoginState, loginCredentials)}
 
 ${rule}
 
@@ -279,6 +315,7 @@ ${rule}
    - 「执行通过率（参考）」= 全部 pass ÷ 全部用例（含回归基线，**不代表功能正确**）。
    - 用例的 \`verification\`（功能验证 / 回归基线）来自 ${p.cases}；run.json 已按 cases 预聚合好功能验证四态，**优先直接采用** run.json 的 \`funcCounts\`（功能验证四态计数）与 \`funcPassStr\`（功能验证通过率字符串，全回归基线时为 \`N/A\`），无需自行重算。
    - 若全部用例均为回归基线，功能验证通过率记 \`N/A（仅锁现状）\`，**禁止**报「100% 通过」；需求覆盖矩阵中仅由回归基线覆盖的格子用 \`LOCK\` 符号（非 PASS）。
+   - **回归集红线（tags 口径，与上面回归基线正交，详见《测试报告规范》§2.1a）**：run.json 若含 \`suiteCounts\`/\`suitePassStr\`（回归集 = 用例 \`tags\` 含「回归测试」，失败即阻塞系统），报告**必须**含「回归集」小节列出其四态与通过率；回归集存在 fail/partial/blocked（含未执行）时，报告结论**必须**标「**阻塞——回归集未全过，不可发版**」，**禁止**在总体结论中表述为通过/可发布；回归集全过则结论标注「回归集全过（N/N）」。无 suiteCounts（用例未打回归标签）则跳过该小节。
 4. 失败分类必须明确（应用bug/测试bug/环境问题/路径不可建立/flaky），三段式给证据。报告时间用 run.json 的 time，不要用当前时间。
 5. 严守规范禁止事项：不写 bug 修复方案 / 改哪行代码 / 发布与否 / 优先级 / 指派；报告内不向用户提问、不留 TBD。
 
@@ -308,6 +345,11 @@ export interface BuildStepOptions {
   requirementSourcePath?: string;
   /** 执行步：本项目/该环境是否已捕获登录态(storageState)。false → 执行 prompt 提示 AI「未配置登录态，遇登录墙判 blocked 并引导去设置·测试账号」，且非交互运行严禁向用户提问。 */
   hasLoginState?: boolean;
+  /**
+   * 执行步：本项目/该环境配的「密码」登录账号（平台下发的用户名/密码），仅在无 storageState
+   * 时用于让执行智能体在登录页自动填充并提交登录。缺省 → 不注入凭据（走 hasLoginState 分支）。
+   */
+  loginCredentials?: { username: string; password: string };
 }
 
 export interface BuiltStep {
@@ -335,7 +377,7 @@ export function buildStep(step: TestStep, opts: BuildStepOptions): BuiltStep {
     case 'cases':
       return withNote({ systemPrompt: SYS.cases, prompt: casesPrompt(taskName, { reuseImported: opts.reuseImported, requirementSourcePath: opts.requirementSourcePath }), needsPlaywright: false }, note);
     case 'execution':
-      return withNote({ systemPrompt: SYS.execution, prompt: executionPrompt(taskName, env, opts.baseUrl, opts.hasLoginState), needsPlaywright: true }, note);
+      return withNote({ systemPrompt: SYS.execution, prompt: executionPrompt(taskName, env, opts.baseUrl, opts.hasLoginState, opts.loginCredentials), needsPlaywright: true }, note);
     case 'report':
       return withNote({ systemPrompt: SYS.report, prompt: reportPrompt(taskName, env), needsPlaywright: false }, note);
   }

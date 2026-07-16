@@ -64,6 +64,11 @@ const nextConfig: NextConfig = {
     // force-include 整包复制到 standalone/node_modules，由 import 路由的动态 import('xlsx')
     // 在运行时直接 require —— 避免 .xls 解析依赖被打包漏收。
     'xlsx',
+    // mammoth (docx→文本，导入需求用)：同 xlsx 的问题与修法——bundle 进 route chunk 后其
+    // 依赖链（jszip/@xmldom/lop 等 20+ 包）在 standalone（尤其 Windows）追踪不全，表现为
+    // 打包版「导入 docx 需求」失败而 dev 正常。标记 external + 下方 force-include 完整依赖
+    // 闭包，配合 import 路由的动态 import('mammoth') 在运行时直接 require。
+    'mammoth',
     '@anthropic-ai/claude-agent-sdk',
     '@anthropic-ai/claude-agent-sdk-darwin-arm64',
     '@anthropic-ai/claude-agent-sdk-darwin-x64',
@@ -116,6 +121,31 @@ const nextConfig: NextConfig = {
       // 必须显式把整包复制进 standalone/node_modules，否则导入 .xls 用例时 import 路由里的
       // 动态 import('xlsx') 在运行时找不到包而报错。
       'node_modules/xlsx/**/*',
+      // mammoth (docx→文本)：external 后同样必须显式复制。与 xlsx 不同，mammoth 有依赖链，
+      // 下面是**完整传递闭包**（脚本从 node_modules 实测枚举，22 包）——NFT 对 external 包
+      // 的依赖追踪在 Windows standalone 上翻过车（xlsx 前科），全部显式收录一劳永逸。
+      'node_modules/mammoth/**/*',
+      'node_modules/@xmldom/xmldom/**/*',
+      'node_modules/argparse/**/*',
+      'node_modules/base64-js/**/*',
+      'node_modules/bluebird/**/*',
+      'node_modules/dingbat-to-unicode/**/*',
+      'node_modules/duck/**/*',
+      'node_modules/immediate/**/*',
+      'node_modules/inherits/**/*',
+      'node_modules/jszip/**/*',
+      'node_modules/lie/**/*',
+      'node_modules/lop/**/*',
+      'node_modules/option/**/*',
+      'node_modules/pako/**/*',
+      'node_modules/path-is-absolute/**/*',
+      'node_modules/readable-stream/**/*',
+      'node_modules/safe-buffer/**/*',
+      'node_modules/setimmediate/**/*',
+      'node_modules/string_decoder/**/*',
+      'node_modules/underscore/**/*',
+      'node_modules/util-deprecate/**/*',
+      'node_modules/xmlbuilder/**/*',
     ],
   },
   // outputFileTracingExcludes: strip non-code dirs out of every route's NFT.

@@ -3,6 +3,7 @@ import type { PopoverItem, PopoverMode, SkillKind } from '@/types';
 import { detectPopoverTrigger, resolveItemSelection } from '@/lib/message-input-logic';
 import { BUILT_IN_COMMANDS, COMMAND_PROMPTS } from '@/lib/constants/commands';
 import { COMMAND_ICONS } from '@/lib/constants/command-icons';
+import { loadCachedSdkInitMeta } from '@/lib/sdk-init-cache';
 
 // Re-export for backward compatibility
 export { BUILT_IN_COMMANDS, COMMAND_PROMPTS };
@@ -125,21 +126,43 @@ export function useSlashCommands(opts: {
       // API not available - just use built-in commands
     }
 
-    // When SDK init metadata is available, use it as the truth source
-    if (sdkInitMeta) {
-      const rawCmds = sdkInitMeta.slash_commands;
-      const rawSkills = sdkInitMeta.skills;
+    // When SDK init metadata is available, use it as the truth source.
+    // Before the session's first message no live metadata exists, so fall
+    // back to the previous session's cached copy — CLI built-ins like
+    // /simplify live inside the claude binary and are invisible to the
+    // filesystem scan, so without the cache they'd be missing from a fresh
+    // conversation's popover until one message round-trips. Cached data may
+    // be stale, so it is ADDITIVE ONLY: it adds SDK-only commands but never
+    // filters/hides commands found on disk (see sdk-init-cache.ts).
+    const isLiveMeta = !!sdkInitMeta;
+    const effectiveMeta = sdkInitMeta ?? loadCachedSdkInitMeta();
+    if (effectiveMeta) {
+      const rawCmds = effectiveMeta.slash_commands;
+      const rawSkills = effectiveMeta.skills;
       const sdkCommandNames = new Set(
         Array.isArray(rawCmds) ? rawCmds.map(c => typeof c === 'string' ? c : (c as { name?: string })?.name).filter(Boolean) as string[] : []
       );
+      // Real descriptions when the entry is an object (/api/sdk-commands
+      // warmup shape); init messages carry bare names and get the generic
+      // "SDK command: /x" fallback below.
+      const sdkCommandDescriptions = new Map<string, string>();
+      if (Array.isArray(rawCmds)) {
+        for (const c of rawCmds) {
+          const entry = c as { name?: string; description?: string };
+          if (typeof c === 'object' && c && entry.name && entry.description) {
+            sdkCommandDescriptions.set(entry.name, entry.description);
+          }
+        }
+      }
       const sdkSkillNames = new Set(
         Array.isArray(rawSkills) ? rawSkills.map(s => typeof s === 'string' ? s : (s as { name?: string })?.name).filter(Boolean) as string[] : []
       );
 
-      // Only filter if SDK actually reported capabilities (non-empty arrays).
+      // Only filter if the LIVE SDK actually reported capabilities (non-empty
+      // arrays) — cached metadata never filters, only adds (see above).
       // AI Native Lab-bundled plugin commands (builtInPlugin:true) are exempted —
       // the SDK never registers them but they're guaranteed present on disk.
-      if (sdkCommandNames.size > 0 || sdkSkillNames.size > 0) {
+      if (isLiveMeta && (sdkCommandNames.size > 0 || sdkSkillNames.size > 0)) {
         apiSkills = apiSkills.filter(item => {
           if (item.builtInPlugin) return true;
           // Project-scoped skills/commands are dropped from the SDK's
@@ -161,7 +184,7 @@ export function useSlashCommands(opts: {
           apiSkills.push({
             label: cmdName,
             value: `/${cmdName}`,
-            description: `SDK command: /${cmdName}`,
+            description: sdkCommandDescriptions.get(cmdName) || `SDK command: /${cmdName}`,
             builtIn: false,
             source: 'sdk',
             kind: 'sdk_command',

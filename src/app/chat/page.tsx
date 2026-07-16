@@ -19,6 +19,7 @@ import { useTranslation } from '@/hooks/useTranslation';
 import { usePanel } from '@/hooks/usePanel';
 import { maybeShowStatusToast } from '@/hooks/useSSEStream';
 import { seedSnapshotPatch } from '@/lib/stream-session-manager';
+import { warmSdkCommandCache } from '@/lib/sdk-init-cache';
 import { NEW_CHAT_PREFILL_KEY } from '@/lib/constants/chat-prefill';
 import { buildFilesDisplayContent } from '@/lib/file-utils';
 import { parseMessageContent } from '@/types';
@@ -130,6 +131,12 @@ export default function NewChatPage() {
   // Provider options (thinking mode + 1M context)
   const [thinkingMode, setThinkingMode] = useState<string>('adaptive');
   const [context1m, setContext1m] = useState(false);
+
+  // Prewarm the slash popover's SDK-command cache (CLI built-ins like
+  // /simplify are invisible to the filesystem scan; the new-chat page is
+  // exactly where they'd otherwise be missing). Once per page load — the
+  // ChatView mount on /chat/[id] fires the same guarded call.
+  useEffect(() => { warmSdkCommandCache(); }, []);
 
   // Fetch provider-specific options (with abort to prevent stale responses on fast switch)
   useEffect(() => {

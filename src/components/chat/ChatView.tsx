@@ -36,6 +36,7 @@ import {
 } from '@/components/ui/alert-dialog';
 import { BatchExecutionDashboard, BatchContextSync } from './batch-image-gen';
 import { setLastGeneratedImages, loadLastGenerated } from '@/lib/image-ref-store';
+import { warmSdkCommandCache } from '@/lib/sdk-init-cache';
 import { useChatCommands } from '@/hooks/useChatCommands';
 import { useAssistantTrigger } from '@/hooks/useAssistantTrigger';
 import { useStreamSubscription } from '@/hooks/useStreamSubscription';
@@ -217,6 +218,11 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
 
   // Restore session-scoped last-generated images from sessionStorage
   useEffect(() => { loadLastGenerated(sessionId); }, [sessionId]);
+
+  // Prewarm the slash popover's SDK-command cache (CLI built-ins like
+  // /simplify are invisible to the filesystem scan; without this a fresh
+  // install shows them only after the first message). Once per page load.
+  useEffect(() => { warmSdkCommandCache(); }, []);
 
   // Dismiss the full-screen testing workbench when the user NAVIGATES to a
   // different chat (the panel has no in-panel 收起 button, so revealing a newly

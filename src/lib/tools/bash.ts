@@ -30,9 +30,16 @@ export function createBashTool(ctx: ToolContext) {
         let totalBytes = 0;
         let truncated = false;
 
+        // Strip NODE_ENV so the host runtime's value (in the packaged build the
+        // embedded Next server forces it to 'production') doesn't leak into the
+        // user's command — a leaked production NODE_ENV makes `npm install` skip
+        // devDependencies. See sdk-subprocess-env.ts for the full rationale.
+        const env: NodeJS.ProcessEnv = { ...process.env, TERM: 'dumb' };
+        delete (env as Record<string, string | undefined>).NODE_ENV;
+
         const proc = spawn('bash', ['-c', command], {
           cwd: ctx.workingDirectory,
-          env: { ...process.env, TERM: 'dumb' },
+          env,
           stdio: ['ignore', 'pipe', 'pipe'],
           timeout: timeoutMs,
         });

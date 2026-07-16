@@ -36,3 +36,6 @@
 | craft-agents-markdown-internals.md | Craft Agents 内部 Markdown 实现调研 — 渲染走 react-markdown + unified + Shiki LRU；Tiptap 仅用于编辑器；**代码块 language 拦截 = 10 个 MarkdownXxxBlock 轻量 Artifact**（Mermaid/Diff/JSON/Datatable/HTML/PDF/Image）；`id + children` 双键 memo 可修复 AI Native Lab 长文档重渲；修订了 Tiptap 评估与 AI Elements Artifact 路径 |
 | review-packet-opus-4-7-and-sdk-0-2-111.md | **Codex 审查包**：Opus 4.7 升级 + Agent SDK 0.2.111 采纳本轮迭代的范围、commit 分组、关键架构决策、已知 out-of-scope、测试状态、希望重点审的 7 个点 |
 | framework-flow-test-integration.md | ai-lab-test-framework 流程测试能力集成评估方案 — 认知校准（app 裁剪版才是参照系）+ 能力对照 + 分批集成设计（用例编辑器/报告查看器含录像/缺陷报告/对话修订 + 需求评审oracle双轴双口径 + 报告对比），含每项技术设计、工作量与分期 |
+| opencode-engine-migration-feasibility.md | 内嵌引擎 Claude Code → OpenCode 迁移调研 — 能力逐项对照（权限/MCP/skills/会话全对位）、四大硬风险（sdkProxyOnly 代理/效果回退/caching/Windows）、三方案对比（Native 提默认为廉价替代）、六阶段迁移方案含 no-go 检查点 |
+| context-usage-from-claude-code.md | 上下文占用直接取自 Claude Code 端调研（POC 已验证）— `getContextUsage()` 热调 6–10ms 推翻旧"死锁/太慢"结论、`modelUsage.contextWindow` 权威分母免费可取、headless `/context` 可用；前端 SSE 链路已预留只差后端点亮；推荐 P0/P1 落地顺序 |
+| agent-sdk-0-3-201-upgrade-research.md | 内置 Claude Code 2.1.141→2.1.20x 升级方案书 — 版本轨道修正（无 SDK 0.2.201，走 0.3.x 跨 minor）、类型面 diff 零移除、落点建议 0.3.203（2.1.201 处于 macOS 卡顿+context-usage CPU 回归区间）、风险登记册（TodoWrite 行为迁移 / .mcp.json 信任收紧 / ANTHROPIC_DEFAULT_* 校验）+ 分阶段实施与验证清单 |

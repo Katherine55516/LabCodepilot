@@ -28,6 +28,10 @@
 - 单个 `slash_command` badge 且 source ∈ {project, undefined} → `expandProjectSlashCommand` 取 `GET /api/skills/<name>?cwd=`，确认 `source==='project' && kind==='slash_command'` 后用纯函数 `expandSkillBody`（剥 frontmatter + 替换 `$ARGUMENTS`，无占位符则追加用户输入）得到 prompt；`displayLabel` 仍 `/名`（气泡显示 `/命令`，agent 收正文）。
 - 失败/非项目 → 回退 `dispatchBadge`（原样 `/命令`）。
 - [useSlashCommands.ts](../../src/hooks/useSlashCommands.ts)：SDK init 白名单过滤豁免 `source==='project'`，保证项目命令在托管下仍进 popover。
+- **init 元数据缓存回退 + 启动预热**（[sdk-init-cache.ts](../../src/lib/sdk-init-cache.ts)）：CLI 内置命令（如 `/simplify`）内嵌在 `claude` 二进制里、磁盘无文件，文件扫描发现不了；新会话首条消息发出前没有 init 消息，popover 会缺失这类命令。两层修复：
+  1. **启动预热**：`GET /api/sdk-commands`（[route.ts](../../src/app/api/sdk-commands/route.ts)）→ `enumerateSdkSlashCommands`（[claude-client.ts](../../src/lib/claude-client.ts)）用 streaming-input 模式起 SDK 子进程但不发消息，走控制通道 `supportedCommands()` 拿命令清单（**不调模型、零 token、约 500ms**，带真实描述），进程内缓存 10 分钟。客户端 `warmSdkCommandCache()` 在 chat 首页与 ChatView 挂载时各触发一次（module 级 once 守卫），写入 localStorage（`codepilot:sdk-init-meta:v1`）——**全新安装首次启动即可用**。
+  2. **live init 覆盖**：init 到达时（[useSSEStream.ts](../../src/hooks/useSSEStream.ts)）同样写缓存；save 做字段级合并（warmup 的带描述对象条目不被 init 的裸名字降级，commands-only 保存不清掉 skills）。
+  `fetchSkills` 无 live 元数据时回退读缓存。**缓存只做增量补充，不做白名单过滤**（可能过期，不得隐藏磁盘上确实存在的命令）；live 元数据仍是唯一过滤 truth source。
 
 发送语义对照（[ChatView.tsx](../../src/components/chat/ChatView.tsx) `sendMessage` 用 `displayOverride||content` 渲染气泡）：用户看 `/命令`，模型收展开正文。
 

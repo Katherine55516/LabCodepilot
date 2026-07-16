@@ -9,7 +9,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { SpinnerGap, CheckCircle, X } from "@/components/ui/icon";
+import { SpinnerGap, CheckCircle, X, Warning } from "@/components/ui/icon";
 import { useTranslation } from "@/hooks/useTranslation";
 import { stripAnsi } from "@/lib/strip-ansi";
 
@@ -158,6 +158,23 @@ export function InstallProgressDialog({
                 : t('skills.installFailed')}
           </DialogTitle>
         </DialogHeader>
+
+        {/* Node.js prerequisite hint — the marketplace installs skills via
+            `npx`, which fails outright when the machine has no Node runtime.
+            Shown ONLY on failure: surfacing "please install Node first" while
+            a normal install is still running (or after it succeeds) would just
+            confuse users whose environment is fine. */}
+        {action === "install" && phase === "error" && (
+          <div className="rounded-md border border-status-warning-muted bg-status-warning-muted/30 px-3 py-2">
+            <div className="flex items-start gap-2">
+              <Warning size={16} className="text-status-warning-foreground mt-0.5 flex-shrink-0" />
+              <div className="text-xs text-status-warning-foreground">
+                <p className="font-semibold">{t('skills.installNodeRequiredTitle')}</p>
+                <p className="mt-0.5 opacity-90">{t('skills.installNodeRequiredDesc')}</p>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="bg-muted/50 rounded-md p-3 max-h-64 overflow-y-auto font-mono text-xs leading-relaxed">
           {logs.length === 0 && phase === "running" && (

@@ -65,6 +65,19 @@ export function prepareSdkSubprocessEnv(resolved: ResolvedProvider): SdkSubproce
   // doesn't trip the SDK's "nested session" guard.
   delete sdkEnv.CLAUDECODE;
 
+  // Drop NODE_ENV so the host runtime's value never leaks into the SDK
+  // subprocess (the native `claude` cli and, transitively, its Bash/PowerShell
+  // tool). In the PACKAGED build these tools run as children of the embedded
+  // Next standalone server, whose `server.js` unconditionally sets
+  // process.env.NODE_ENV='production'. If that leaks through, `npm install`
+  // run by Claude's Bash tool in an unrelated user project silently skips
+  // devDependencies (production install), breaking builds — reported in the
+  // field (vite / vue-tsc / @types/* missing). We never set NODE_ENV ourselves;
+  // deleting it makes the subprocess behave like a shell opened from scratch
+  // (NODE_ENV undefined), which is exactly the unaffected baseline. A command
+  // that genuinely wants NODE_ENV can still set it inline (e.g. `NODE_ENV=x …`).
+  delete sdkEnv.NODE_ENV;
+
   // Windows-only: auto-detect Git Bash if not already configured.
   if (process.platform === 'win32' && !process.env.CLAUDE_CODE_GIT_BASH_PATH) {
     const gitBashPath = findGitBash();

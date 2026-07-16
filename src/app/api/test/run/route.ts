@@ -14,6 +14,8 @@ import { snapshotRunJson } from '@/lib/test/history';
 import { sweepStrayEvidence, normalizeEvidenceExt } from '@/lib/test/evidence';
 import { resolveProjectEnvWithDb } from '@/lib/test/env-resolve';
 import { isUnsafeSegment } from '@/lib/test/path-safety';
+import { appendAudit } from '@/lib/test/audit';
+import { depositTask, readTaskCases, REGRESSION_LIBRARY_TASK } from '@/lib/test/library';
 
 // Reference the import so it isn't tree-shaken away (keeps the registration side-effect).
 void predictNativeRuntime;
@@ -61,27 +63,32 @@ export function wrapExecutionStream(
           // unparseable cases → undefined map → reduce falls back to single-rate.
           let verificationById: Record<string, string> | undefined;
           let caseIds: string[] | undefined;
+          let suiteIds: string[] | undefined;
           try {
             const casesAbs = path.join(opts.projectPath, artifactPaths(opts.taskName).cases);
             const parsed = JSON.parse(await fs.promises.readFile(casesAbs, 'utf-8')) as unknown;
             // cases.json 可能是 { cases: [...] } 或顶层数组 [...]（与 report-xlsx 同口径兼容）。
             const list = Array.isArray((parsed as { cases?: unknown })?.cases)
-              ? (parsed as { cases: Array<{ id?: unknown; verification?: unknown }> }).cases
+              ? (parsed as { cases: Array<{ id?: unknown; verification?: unknown; tags?: unknown }> }).cases
               : Array.isArray(parsed)
-                ? (parsed as Array<{ id?: unknown; verification?: unknown }>)
+                ? (parsed as Array<{ id?: unknown; verification?: unknown; tags?: unknown }>)
                 : [];
             const map: Record<string, string> = {};
             const ids: string[] = [];
+            const suite: string[] = [];
             for (const c of list) {
               if (c && typeof c.id === 'string') {
                 ids.push(c.id);
                 if (typeof c.verification === 'string') map[c.id] = c.verification;
+                // 回归集 = tags 含「回归测试」（§1.7,与 verification 回归基线正交）。
+                if (Array.isArray(c.tags) && c.tags.some((tg) => tg === '回归测试')) suite.push(c.id);
               }
             }
             if (Object.keys(map).length) verificationById = map;
             // 用例全集 id（按 cases.json 顺序）→ 交给 reduce 兜底补全漏执行的用例（问题②修复：
             // 报告以用例全集为准，AI 漏跑的用例补成「未执行」blocked，而非静默丢失）。
             if (ids.length) caseIds = ids;
+            if (suite.length) suiteIds = suite;
           } catch {
             // no cases / parse fail → reduce falls back to single-rate + 不补全
           }
@@ -91,6 +98,7 @@ export function wrapExecutionStream(
             time: new Date().toISOString(),
             verificationById,
             caseIds,
+            suiteIds,
           });
           const runContent = JSON.stringify(reduced, null, 2);
           try {
@@ -98,6 +106,14 @@ export function wrapExecutionStream(
             const reportTaskDir = path.dirname(runAbs);
             await fs.promises.mkdir(reportTaskDir, { recursive: true });
             await fs.promises.writeFile(runAbs, runContent, 'utf-8');
+            // 缺陷报告是【上一次执行】的产物（仅在有 fail 时条件生成、非每次覆盖）。本次重新
+            // 执行已写新 run.json，旧缺陷报告随即作废：删掉它，否则会出现「本次全部通过/缺陷
+            // 已修，却仍显示上一次的缺陷报告」（用户反馈的 bug）。本次若仍有 fail，前端 ReportView
+            // 会按新 run.json 重新自动生成缺陷报告(见 autoDefectForTimeRef)。单文件删除、非批量，
+            // 不触发 EDR 反勒索。best-effort，无旧文件则忽略。
+            try {
+              await fs.promises.unlink(path.join(reportTaskDir, `${opts.taskName}-${opts.env}-缺陷报告.md`));
+            } catch { /* 无旧缺陷报告则忽略 */ }
             // 历史快照（报告多版本对比的数据基础）：除覆盖式 latest 外，再存一份带
             // 时间戳的副本到 .history/（SHA-1 去重，与上一份相同则跳过）。best-effort。
             snapshotRunJson({ reportTaskDir, taskName: opts.taskName, env: opts.env, content: runContent });
@@ -152,6 +168,57 @@ export function wrapReportStream(
           const reportAbs = path.join(opts.projectPath, artifactPaths(opts.taskName, opts.env).report);
           if (!fs.existsSync(reportAbs)) {
             controller.enqueue(`data: ${JSON.stringify({ type: 'error', data: '测试报告文档未生成（AI 未写出 .md），请点「重跑」重试。' })}\n\n`);
+          }
+          controller.close();
+          return;
+        }
+        controller.enqueue(value);
+      } catch (e) {
+        controller.error(e);
+      }
+    },
+    cancel(reason) {
+      reader.cancel(reason);
+    },
+  });
+}
+
+/**
+ * 用例设计步收口:透传全部帧;流结束时把该任务【打了「回归测试」标签的用例】自动 upsert 进
+ * 项目级回归用例库(需求:每个任务在「用例设计完成后」自动沉淀回归用例;详见
+ * docs/exec-plans/active/regression-library.md)。
+ *
+ * best-effort:入库失败一律静默,绝不阻塞用例设计步本身完成(库是增强特性)。upsert by 来源
+ * 任务(depositTask 内)保证重复跑/修订不产生重复。保留任务名 `回归用例库` 自身不入库(它是
+ * 重跑聚合的产物、不是真实测试任务),避免库自我递归。
+ */
+export function wrapCasesStream(
+  src: ReadableStream<string>,
+  opts: { projectPath: string; taskName: string },
+): ReadableStream<string> {
+  const reader = src.getReader();
+  return new ReadableStream<string>({
+    async pull(controller) {
+      try {
+        const { done, value } = await reader.read();
+        if (done) {
+          try {
+            if (opts.taskName !== REGRESSION_LIBRARY_TASK) {
+              const casesAbs = path.join(opts.projectPath, artifactPaths(opts.taskName).cases);
+              const cases = readTaskCases(casesAbs);
+              if (cases.length) {
+                const r = depositTask(opts.projectPath, opts.taskName, cases);
+                void appendAudit(opts.projectPath, opts.taskName, {
+                  action: 'deposit-library',
+                  mode: 'auto',
+                  step: 'cases',
+                  detail: `回归用例库自动入库:新增 ${r.added} 条、替换旧 ${r.removed} 条,库共 ${r.total} 条`,
+                });
+                controller.enqueue(`data: ${JSON.stringify({ type: 'library_updated', data: JSON.stringify(r) })}\n\n`);
+              }
+            }
+          } catch {
+            // 入库 best-effort:失败不影响用例设计步完成
           }
           controller.close();
           return;
@@ -265,6 +332,15 @@ export async function POST(req: Request): Promise<Response> {
     // 「遇登录墙判 blocked 并引导用户去设置·测试账号配置」，而非(非交互运行里)用 AskUserQuestion
     // 向用户要凭证——那会卡死(用户反馈的「询问弹不出来」缺陷)。
     const hasLoginState = !!resolved.storageStatePath;
+    // 密码方式自动登录（问题修复：配了「密码」账号却在被测登录页无法自动填充）：本项目该环境
+    // 配的是「密码」账号(有用户名+密码)、且没有已捕获的 storageState 时，把凭据下发给执行智能体，
+    // 让它在登录页 browser_fill_form/browser_type 填入并提交(替代旧的「遇登录墙一律 blocked」)。
+    // storageState 更稳、优先：capture 抓过就走登录态注入，不再重复自动登录(hasLoginState 分支)。
+    const cred = resolved.loginAccount;
+    const loginCredentials =
+      step === 'execution' && !hasLoginState && cred?.authType === 'password' && cred.username && cred.password
+        ? { username: cred.username, password: cred.password }
+        : undefined;
     // 需求来源文件（相对项目根）：requirement 步(生成 md)读保留原文/抽取文本、写 需求.md；
     // cases 步(直接用原文)直接读原文/抽取文本；其余(生成 md 的 cases / 旧任务无 ext)留空 → prompts 回退 需求.md。
     let requirementSourcePath: string | undefined;
@@ -275,7 +351,7 @@ export async function POST(req: Request): Promise<Response> {
       if (step === 'requirement' && requirementMode === 'generate-md') requirementSourcePath = origSource;
       else if (step === 'cases' && requirementMode === 'use-original') requirementSourcePath = origSource;
     }
-    const { systemPrompt, prompt, needsPlaywright } = buildStep(step, { taskName, env, baseUrl, extraInstruction, reuseImported, requirementMode, requirementSourcePath, hasLoginState });
+    const { systemPrompt, prompt, needsPlaywright } = buildStep(step, { taskName, env, baseUrl, extraInstruction, reuseImported, requirementMode, requirementSourcePath, hasLoginState, loginCredentials });
 
     let mcpServers: Record<string, MCPServerConfig> | undefined;
     if (needsPlaywright) {
@@ -323,7 +399,9 @@ export async function POST(req: Request): Promise<Response> {
         ? wrapExecutionStream(stream, { projectPath, taskName, env, runStartMs, leadingFrame })
         : step === 'report'
           ? wrapReportStream(stream, { projectPath, taskName, env })
-          : stream;
+          : step === 'cases'
+            ? wrapCasesStream(stream, { projectPath, taskName })
+            : stream;
 
     return new Response(finalStream, {
       headers: {

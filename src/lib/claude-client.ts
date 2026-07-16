@@ -21,6 +21,7 @@ import { captureCapabilities, isCacheFresh, setCachedPlugins } from './agent-sdk
 import { normalizeMessageContent, microCompactMessage } from './message-normalizer';
 import { roughTokenEstimate } from './context-estimator';
 import { getSetting, updateSdkSessionId, createPermissionRequest } from './db';
+import { fireContextUsageProbe } from './context-usage-probe';
 import { resolveForClaudeCode } from './provider-resolver';
 import { sanitizeClaudeModelOptions } from './claude-model-options';
 // platform.ts CLI binary lookup helpers were removed when AI Native Lab switched to
@@ -376,6 +377,14 @@ export async function generateTextViaSdk(params: {
     systemPrompt: params.system,
     maxTurns: 1,
     stderr: (data: string) => stderrCollector.append(data),
+    // Text-only single-turn contract: strip ALL tools. With tools available,
+    // a tool-eager model (e.g. qwen3.7-max asked to translate a long doc)
+    // spends turn 1 on a tool call and maxTurns(1) kills the run with
+    // "Reached maximum number of turns". tools:[] disables built-ins;
+    // strictMcpConfig keeps settings-file MCP servers (loaded via
+    // settingSources) out of the subprocess.
+    tools: [],
+    strictMcpConfig: true,
   };
 
   if (params.model) {
@@ -424,6 +433,57 @@ export async function generateTextViaSdk(params: {
 }
 
 /**
+ * Enumerate the CLI's supported slash commands WITHOUT running a turn.
+ *
+ * Streaming-input mode with a never-yielding iterable keeps the subprocess
+ * idle; supportedCommands() is a control-channel request the CLI answers
+ * locally — no model call, no tokens, no API key validation (~500ms cold).
+ *
+ * Why: CLI built-ins like /simplify are embedded in the claude binary and
+ * invisible to the /api/skills filesystem scan; without this, they're only
+ * knowable from a live session's init message (i.e. after the first message
+ * of a conversation). Used by /api/sdk-commands to prewarm the slash popover
+ * cache at app startup. Same provider/env isolation as generateTextViaSdk.
+ */
+export async function enumerateSdkSlashCommands(params?: {
+  providerId?: string;
+}): Promise<Array<{ name: string; description: string; argumentHint?: string }>> {
+  const resolved = resolveForClaudeCode(undefined, { providerId: params?.providerId });
+  const setup = prepareSdkSubprocessEnv(resolved);
+
+  const abortController = new AbortController();
+  const timeoutId = setTimeout(() => abortController.abort(), 15_000);
+
+  // Never yields: keeps stdin open until we abort after reading the list.
+  async function* noMessages(): AsyncGenerator<never> {
+    await new Promise<never>(() => {});
+  }
+
+  try {
+    const conversation = query({
+      prompt: noMessages() as AsyncIterable<SDKUserMessage>,
+      options: {
+        cwd: os.homedir(),
+        abortController,
+        env: sanitizeEnv(setup.env),
+        settingSources: resolved.settingSources as Options['settingSources'],
+        maxTurns: 1,
+      },
+    });
+    const commands = await conversation.supportedCommands();
+    return commands.map((c) => ({
+      name: c.name,
+      description: c.description,
+      argumentHint: c.argumentHint || undefined,
+    }));
+  } finally {
+    clearTimeout(timeoutId);
+    abortController.abort();
+    setup.shadow.cleanup();
+  }
+}
+
+/**
  * Streaming variant of generateTextViaSdk — yields assistant text deltas as they
  * arrive. Same single-turn / no-session / no-lock / SDK-subprocess path (so it
  * resolves CLI model aliases like `[1m]` identically to the main stream), but
@@ -468,6 +528,9 @@ export async function* streamTextViaSdk(params: {
     maxTurns: 1,
     includePartialMessages: true,
     stderr: (data: string) => stderrCollector.append(data),
+    // Same text-only contract as generateTextViaSdk — see comment there.
+    tools: [],
+    strictMcpConfig: true,
   };
   if (params.model) {
     queryOptions.model = params.model;
@@ -1239,13 +1302,6 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
           prompt: finalPrompt,
           options: queryOptions,
         });
-        // Keep a handle to the underlying Query instance for control-API
-        // calls (getContextUsage etc.). When we peek-and-rewrap below to
-        // detect resume failures, `conversation` becomes a plain async
-        // generator that loses the Query prototype's methods — we need
-        // this original reference to call .getContextUsage() at result
-        // time. Reassigned on resume-fallback to point at the fresh Query.
-        let controlQuery = conversation;
 
         // Wrap the iterator so we can detect resume failures on the first message
         if (shouldResume) {
@@ -1263,8 +1319,6 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
                 yield next.value;
               }
             })() as ReturnType<typeof query>;
-            // controlQuery still points at the original Query with
-            // getContextUsage() available.
           } catch (resumeError) {
             const errMsg = resumeError instanceof Error ? resumeError.message : String(resumeError);
             console.warn('[claude-client] Resume failed, retrying without resume:', errMsg);
@@ -1288,9 +1342,6 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
               prompt: buildFinalPrompt(true),
               options: queryOptions,
             });
-            // Fresh Query replaces the old handle — control-API calls
-            // now go through this one.
-            controlQuery = conversation;
           }
         }
 
@@ -1310,6 +1361,27 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
         let connectedModel: string | undefined = model || undefined;
         // Track pending TodoWrite tool_use_ids so we can sync after successful execution
         const pendingTodoWrites = new Map<string, Array<{ content: string; status: string; activeForm?: string }>>();
+        // Task* → 任务清单投影：内置 Claude Code 2.1.20x 起系统提示把任务管理导向
+        // TaskCreate/TaskUpdate（TodoWrite 类型仍在但模型不再调用）。把 Task* 的增量
+        // 变更投影成 todos 快照，复用 TodoWrite 的 task_update SSE 事件与前端组件。
+        // 注册表是流级状态：resume 后由前端从 DB 恢复历史面板，与 TodoWrite 行为一致。
+        const sdkTaskRegistry = new Map<string, { content: string; status: string; activeForm: string }>();
+        const pendingTaskCreates = new Map<string, { subject: string; activeForm?: string }>();
+        const pendingTaskUpdates = new Map<string, { taskId: string; subject?: string; status?: string; activeForm?: string }>();
+        const emitTaskSnapshot = () => {
+          controller.enqueue(formatSSE({
+            type: 'task_update',
+            data: JSON.stringify({
+              session_id: sessionId,
+              todos: [...sdkTaskRegistry.values()].map((t, i) => ({
+                id: String(i),
+                content: t.content,
+                status: t.status,
+                activeForm: t.activeForm,
+              })),
+            }),
+          }));
+        };
         for await (const message of conversation) {
           if (abortController?.signal.aborted) {
             break;
@@ -1354,6 +1426,17 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
                       }
                     } catch (e) {
                       console.warn('[claude-client] Failed to parse TodoWrite input:', e);
+                    }
+                  } else if (block.name === 'TaskCreate') {
+                    // Task* 同 TodoWrite：暂存，等 tool_result 确认成功再同步
+                    const taskInput = block.input as { subject?: string; activeForm?: string };
+                    if (taskInput?.subject) {
+                      pendingTaskCreates.set(block.id, { subject: taskInput.subject, activeForm: taskInput.activeForm });
+                    }
+                  } else if (block.name === 'TaskUpdate') {
+                    const taskInput = block.input as { taskId?: string; subject?: string; status?: string; activeForm?: string };
+                    if (taskInput?.taskId) {
+                      pendingTaskUpdates.set(block.id, taskInput as { taskId: string; subject?: string; status?: string; activeForm?: string });
                     }
                   }
                 }
@@ -1446,6 +1529,44 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
                           })),
                         }),
                       }));
+                    } else if (!block.is_error && pendingTaskCreates.has(block.tool_use_id)) {
+                      // Deferred TaskCreate sync → 注册并投影 todos 快照
+                      const taskInput = pendingTaskCreates.get(block.tool_use_id)!;
+                      pendingTaskCreates.delete(block.tool_use_id);
+                      // 2.1.203 实测 result 为纯文本 "Task #4 created successfully: <subject>"，
+                      // 其中编号即后续 TaskUpdate 引用的 taskId；JSON 解析留作兜底
+                      // （sdk-tools.d.ts 声明的 TaskCreateOutput 为 { task: { id } } 结构）。
+                      let taskId = '';
+                      const idMatch = /Task #(\S+) created/.exec(resultContent);
+                      if (idMatch) {
+                        taskId = idMatch[1];
+                      } else {
+                        try {
+                          taskId = (JSON.parse(resultContent) as { task?: { id?: string } })?.task?.id || '';
+                        } catch { /* 非 JSON → 落合成 id */ }
+                      }
+                      if (!taskId) taskId = `synthetic-${block.tool_use_id}`;
+                      sdkTaskRegistry.set(taskId, {
+                        content: taskInput.subject,
+                        status: 'pending',
+                        activeForm: taskInput.activeForm || '',
+                      });
+                      emitTaskSnapshot();
+                    } else if (!block.is_error && pendingTaskUpdates.has(block.tool_use_id)) {
+                      // Deferred TaskUpdate sync → 更新注册表并投影
+                      const taskInput = pendingTaskUpdates.get(block.tool_use_id)!;
+                      pendingTaskUpdates.delete(block.tool_use_id);
+                      const entry = sdkTaskRegistry.get(taskInput.taskId);
+                      if (entry) {
+                        if (taskInput.status === 'deleted') {
+                          sdkTaskRegistry.delete(taskInput.taskId);
+                        } else {
+                          if (taskInput.status) entry.status = taskInput.status;
+                          if (taskInput.subject) entry.content = taskInput.subject;
+                          if (taskInput.activeForm) entry.activeForm = taskInput.activeForm;
+                        }
+                        emitTaskSnapshot();
+                      }
                     }
                   }
                 }
@@ -1615,34 +1736,24 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
                 }
               }
 
-              // Phase 5 — context-usage snapshot via Query.getContextUsage()
-              // is intentionally NOT called here.
-              //
-              // getContextUsage() is a SDK control-API request that shares
-              // the same message channel as the for-await-of iterator we're
-              // inside. Awaiting it blocks the iterator from advancing,
-              // which prevents the control-response frame from arriving —
-              // the Query then closes on result and the call errors out
-              // with "Query closed before response received". There's no
-              // stable place outside the iteration loop where the Query
-              // is still alive.
-              //
-              // The chat-page indicator doesn't suffer from this: it
-              // already computes used-tokens from the SDKResultMessage's
-              // own `usage` field (input + cache_read + cache_creation),
-              // which is SDK-authoritative and carries <5% drift against
-              // what getContextUsage would report. The snapshot would
-              // only add category-level breakdown (system prompt / tools
-              // / user / memory) that the current UI doesn't surface.
-              //
-              // The SSE 'context_usage' event type and stream-session-
-              // manager snapshot field stay in place as extension points
-              // — a future Phase that needs category breakdown can fire
-              // them from a different point in the SDK lifecycle (e.g.
-              // from a background control-channel timer, or from a
-              // lifecycle hook the SDK may expose later).
-              // eslint-disable-next-line @typescript-eslint/no-unused-vars
-              const _unusedControlQuery = controlQuery;
+              // FIX(权威分子): 占用快照由无凭据探针进程后补(context-usage-probe.ts)。
+              // 不在本进程调 getContextUsage —— 有凭据时 CLI 会对上下文逐组件
+              // 发 ~82 个 count_tokens 非流式请求(网关请求风暴 + 几十秒延迟的
+              // 根因);探针无凭据走本地估算,totalTokens 实测与 API 计数逐位
+              // 一致。探针自带 1.5s 延迟,晚于 route 落库,match 防串扰。
+              if (sessionId) {
+                fireContextUsageProbe({
+                  appSessionId: sessionId,
+                  sdkSessionId: resultMsg.session_id,
+                  cwd: resolvedWorkingDirectory.path,
+                  match: tokenUsage
+                    ? {
+                        input_tokens: tokenUsage.input_tokens,
+                        output_tokens: tokenUsage.output_tokens,
+                      }
+                    : null,
+                });
+              }
               break;
             }
 
@@ -1798,12 +1909,18 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
 
             // Rebuild minimal query options from closure variables
             // (queryOptions is scoped to the try block and not accessible here)
+            // NOTE: this path bypasses prepareSdkSubprocessEnv(), so replicate
+            // its NODE_ENV strip here — otherwise the host Next-server
+            // production NODE_ENV leaks into the retry subprocess and its Bash
+            // tool (see sdk-subprocess-env.ts for the full rationale).
+            const retryEnv = { ...process.env as Record<string, string> };
+            delete retryEnv.NODE_ENV;
             const retryOptions: Options = {
               cwd: options.workingDirectory || os.homedir(),
               abortController,
               permissionMode: 'bypassPermissions' as Options['permissionMode'],
               allowDangerouslySkipPermissions: true,
-              env: { ...process.env as Record<string, string> },
+              env: retryEnv,
               maxTurns: undefined,
               stderr: (data: string) => stderrCollector.append(data),
             };
@@ -1952,6 +2069,20 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
                       tokensSaved: compResult.estimatedTokensSaved,
                     })),
                   }));
+                  // FIX(权威分子): 重试回合同样交给无凭据探针后补(同主路径)。
+                  if (sessionId) {
+                    fireContextUsageProbe({
+                      appSessionId: sessionId,
+                      sdkSessionId: rMsg.session_id,
+                      cwd: retryOptions.cwd as string,
+                      match: usage
+                        ? {
+                            input_tokens: usage.input_tokens,
+                            output_tokens: usage.output_tokens,
+                          }
+                        : null,
+                    });
+                  }
                   break;
                 }
               }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -10,8 +10,10 @@ import {
   ArrowSquareOut,
   Lightning,
   SpinnerGap,
+  Translate,
 } from "@/components/ui/icon";
 import { useTranslation } from "@/hooks/useTranslation";
+import { showToast } from "@/hooks/useToast";
 import { InstallProgressDialog } from "./InstallProgressDialog";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -22,15 +24,36 @@ interface MarketplaceSkillDetailProps {
   onInstallComplete: () => void;
 }
 
+// AI-translated READMEs, keyed by `${source}/${skillId}::${locale}`.
+// Module-level so revisiting a skill (or toggling 原文/译文) within the page
+// session never re-pays the model call.
+const translationCache = new Map<string, string>();
+
 export function MarketplaceSkillDetail({
   skill,
   onInstallComplete,
 }: MarketplaceSkillDetailProps) {
-  const { t } = useTranslation();
+  const { t, locale } = useTranslation();
   const [showProgress, setShowProgress] = useState(false);
   const [progressAction, setProgressAction] = useState<"install" | "uninstall">("install");
   const [readme, setReadme] = useState<string | null>(null);
   const [readmeLoading, setReadmeLoading] = useState(true);
+  const [translation, setTranslation] = useState<string | null>(null);
+  const [translating, setTranslating] = useState(false);
+  const [showTranslation, setShowTranslation] = useState(false);
+
+  const cacheKey = `${skill.source}/${skill.skillId}::${locale}`;
+  // Guards late translate responses after the user switched skill/locale:
+  // apply-to-state only when the response still belongs to the current view
+  // (the cache write itself is always safe — it's keyed by the request).
+  const cacheKeyRef = useRef(cacheKey);
+
+  useEffect(() => {
+    cacheKeyRef.current = cacheKey;
+    setTranslation(translationCache.get(cacheKey) ?? null);
+    setShowTranslation(false);
+    setTranslating(false);
+  }, [cacheKey]);
 
   useEffect(() => {
     let cancelled = false;
@@ -78,6 +101,51 @@ export function MarketplaceSkillDetail({
     ? readme.replace(/^---\r?\n[\s\S]*?\r?\n---\r?\n?/, "").trim()
     : null;
 
+  const handleTranslate = async () => {
+    if (translating) return;
+    // A translation already exists (state or just-restored cache) → pure toggle
+    if (translation) {
+      setShowTranslation((v) => !v);
+      return;
+    }
+    if (!displayContent) return;
+
+    const key = cacheKey;
+    setTranslating(true);
+    try {
+      const res = await fetch("/api/skills/marketplace/translate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: displayContent, targetLocale: locale }),
+      });
+      if (res.status === 409) {
+        showToast({ type: "error", message: t("skills.translateNoProvider") });
+        return;
+      }
+      const data = res.ok ? await res.json() : null;
+      const translated = typeof data?.translated === "string" ? data.translated.trim() : "";
+      if (!translated) {
+        showToast({ type: "error", message: t("skills.translateFailed") });
+        return;
+      }
+      translationCache.set(key, translated);
+      if (key === cacheKeyRef.current) {
+        setTranslation(translated);
+        setShowTranslation(true);
+      }
+    } catch {
+      showToast({ type: "error", message: t("skills.translateFailed") });
+    } finally {
+      if (key === cacheKeyRef.current) setTranslating(false);
+    }
+  };
+
+  const translateLabel = translating
+    ? t("skills.translating")
+    : translation
+      ? (showTranslation ? t("skills.showOriginal") : t("skills.showTranslation"))
+      : t("skills.aiTranslate");
+
   return (
     <div className="flex flex-col h-full">
       {/* Header */}
@@ -119,7 +187,23 @@ export function MarketplaceSkillDetail({
               )}
             </div>
           </div>
-          <div className="shrink-0">
+          <div className="flex items-center gap-2 shrink-0">
+            {locale !== 'en' && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="gap-1.5"
+                disabled={translating || readmeLoading || !displayContent}
+                onClick={handleTranslate}
+              >
+                {translating ? (
+                  <SpinnerGap size={14} className="animate-spin" />
+                ) : (
+                  <Translate size={14} />
+                )}
+                {translateLabel}
+              </Button>
+            )}
             {skill.isInstalled ? (
               <Button
                 variant="destructive"
@@ -149,7 +233,7 @@ export function MarketplaceSkillDetail({
         ) : displayContent ? (
           <div className="prose prose-sm dark:prose-invert max-w-none px-6 py-4">
             <ReactMarkdown remarkPlugins={[remarkGfm]}>
-              {displayContent}
+              {showTranslation && translation ? translation : displayContent}
             </ReactMarkdown>
           </div>
         ) : (

@@ -50,16 +50,19 @@ describe("GET /api/test/cases/export", () => {
     plantCases("订单", [
       {
         id: "TC-1", priority: "P0", purpose: "正常登录", oracle: "PRD", verification: "功能验证",
+        tags: ["冒烟测试", "回归测试"],
         steps: [{ content: "输入账号", expected: "显示" }, { content: "点登录", expected: "跳首页" }],
       },
     ]);
     const rows = await parseXlsx(await GET(new Request(url({ projectPath: proj, taskName: "订单" }))));
     assert.equal(rows[0][0], "ID"); // header row
+    assert.equal(rows[0][3], "用例标签"); // tags column (caseType 之后)
     assert.equal(rows[1][0], "TC-1");
     assert.equal(rows[1][1], "P0");
-    assert.match(rows[1][7], /1\. 输入账号/); // 测试操作 derived from steps[].content
-    assert.match(rows[1][8], /2\. 跳首页/); // 预期结果 derived from steps[].expected
-    assert.equal(rows[1][11], "功能验证"); // 验证性质 column
+    assert.equal(rows[1][3], "冒烟测试、回归测试"); // tags joined with 、
+    assert.match(rows[1][8], /1\. 输入账号/); // 测试操作 derived from steps[].content
+    assert.match(rows[1][9], /2\. 跳首页/); // 预期结果 derived from steps[].expected
+    assert.equal(rows[1][12], "功能验证"); // 验证性质 column
   });
   it("template=1 returns a blank template with an example row", async () => {
     const rows = await parseXlsx(await GET(new Request(url({ template: "1" }))));

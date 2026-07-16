@@ -95,6 +95,14 @@ jobs:
       - name: Build Electron app
         run: npm run electron:build
 
+      # 装【当前打包平台(win64)】的 chromium-headless-shell 到 ms-playwright-bundle/，供
+      # electron-builder.yml 的 extraResources 复制进 exe 的 resources/ms-playwright。缺这步
+      # → ms-playwright-bundle 不存在 → extraResources 静默跳过(glob 0 匹配) → exe 里没有
+      # 浏览器 → 测试执行的 Playwright MCP 起不来(用户「用不了 playwright」根因)。electron:pack:*
+      # script 里本有此步，但 CI 直接调 electron-builder 绕过了 script，故必须在此显式补上。
+      - name: Bundle Chromium headless shell
+        run: node scripts/bundle-chromium.mjs
+
       - name: Package for Windows (x64 only)
         run: npx electron-builder --win --x64 --config electron-builder.yml --publish never
 
@@ -136,6 +144,12 @@ jobs:
 
       - name: Build Electron app
         run: npm run electron:build
+
+      # 装 mac-arm64 的 chromium-headless-shell 到 ms-playwright-bundle/（同 Windows job 的
+      # 说明）——CI 直接调 electron-builder 绕过了 electron:pack:mac script，故显式补此步，
+      # 否则 dmg 缺浏览器、测试执行的 Playwright 起不来。
+      - name: Bundle Chromium headless shell
+        run: node scripts/bundle-chromium.mjs
 
       # The Claude Code native binary ships in the platform optional subpackage
       # @anthropic-ai/claude-agent-sdk-darwin-arm64 and must end up at
