@@ -2245,8 +2245,8 @@ const en = {
   'errors.CLI_NOT_FOUND.userMessage': 'Claude Code CLI not found.',
   'errors.CLI_NOT_FOUND.actionHint': 'Please install Claude Code CLI and ensure it is available in your PATH. Run: npm install -g @anthropic-ai/claude-code',
 
-  'errors.MISSING_GIT_BASH.userMessage': 'Git Bash is required on Windows but was not found.',
-  'errors.MISSING_GIT_BASH.actionHint': 'Install Git for Windows from https://git-scm.com/downloads and ensure bash.exe is on PATH.',
+  'errors.MISSING_GIT_BASH.userMessage': 'Running Claude Code on Windows requires Git for Windows (or an available PowerShell); no usable shell was found on this system. This is unrelated to your API Key, Base URL, or network settings.',
+  'errors.MISSING_GIT_BASH.actionHint': 'Download and install Git for Windows from https://git-scm.com/downloads/win (or make sure PowerShell is on the system PATH). You can also open Settings → Claude CLI, where the install wizard detects the missing Git and walks you through installing it. Then resend your message; restart the app if the error persists.',
 
   'errors.NO_CREDENTIALS.userMessage': 'No API credentials found{provider}.',
   'errors.NO_CREDENTIALS.actionHint': 'Go to Settings → Providers and add your API key, or set the ANTHROPIC_API_KEY environment variable.',
