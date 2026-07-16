@@ -179,7 +179,10 @@ export function wrapExecutionStream(
             // best-effort: still emit the reduced result even if the write fails
           }
           try {
-            writeTraceFile(opts.projectPath, opts.taskName, opts.env, runHash, traceCollector.finish());
+            writeTraceFile(
+              opts.projectPath, opts.taskName, opts.env, runHash,
+              traceCollector.finish(), traceCollector.finishElements(),
+            );
           } catch {
             // trace 是脚本生成增强产物；失败不得改变执行结果
           }

@@ -8,20 +8,22 @@
 
 真机使用暴露两类痛点（2026-07-16 用户反馈）：
 
-1. **定位器"盲翻译"误差**：生成模型看不到真实 DOM，只能从执行轨迹的代码片段和用例文字里
-   "猜"一个可重放定位器。被测前端缺少 testid/aria 锚点时，模型退化到组件库内部 class
-   （如 `.avatar-uploader`），重放时 `element(s) not found` —— 这是同类项目里脚本
-   首跑失败的最大来源。
+1. **断言目标定位器被臆造**：执行轨迹只记录**被操作过**的元素（MCP 的 `### Ran Playwright code`
+   已给出现成的 `getByRole('button', { name: '+ 新建学科' })` —— 对这些元素模型无需猜）。
+   但断言常打在**只在页面快照里观察过、从未被点击**的元素上（「验证头像上传框可见」），
+   这类元素在轨迹里没有任何代码，生成模型只能凭空捏造定位器 → 组件库内部 class
+   （如 `.avatar-uploader`）→ 重放 `element(s) not found`。这是脚本首跑失败的最大来源。
 2. **断流全丢**：脚本生成由【报告成功】门控。执行流被网络掐断（本环境跨境链路间歇丢包，
    已两次真机复现：82/93、29/93 处断流）→ 报告不跑 → 已通过用例的脚本一个都不沉淀，
    整轮 token 白烧。
 
 两个改进（曾评估"执行时让智能体顺手生成脚本"方案并否决，见决策日志）：
 
-- **Phase 1 轨迹锚点富化**：MCP 每次工具调用的 tool_use.input 携带 `ref` + `element` 描述，
-  tool_result 的 content 携带页面 aria 快照（`- button "新建学科" [ref=e12]`）。现在这两样
-  都被丢弃。把"ref 对应元素的真实语义属性（role/name/testid/文本）"记进轨迹 → 生成模型拿到
-  "这个元素真实长什么样"的铁证，多数场景可确定性地写出 `getByRole(..., { name, exact: true })`。
+- **Phase 1 快照元素清单富化**：MCP 的 tool_result 带 `### Snapshot` 节（aria 树 YAML，形如
+  `- button "+ 新建学科" [ref=e12]`），列出页面上**所有**可访问元素的 role/name —— 包括从未被
+  点击的断言目标。现在这一节被整个丢弃。改为按用例抽取去重的元素清单（`{role, name}[]`）记进
+  轨迹 → 生成模型写断言时有"页面真实存在哪些元素"的词汇表，可写出
+  `getByRole('button', { name: '上传头像', exact: true })` 而非臆造 CSS class。
 - **Phase 2 逐条增量入队**：执行流里每落一条 pass 的 `@@RESULT`（且用例带「回归测试」标签），
   平台侧立即为该用例入队生成任务（生成是纯文本 SDK 调用，不碰被测系统，与执行并行安全）；
   真机重放**延后**到执行结束（避免与执行智能体并发操作同一被测系统）。执行中途断流，
@@ -31,7 +33,7 @@
 
 | Phase | 内容 | 状态 | 备注 |
 |-------|------|------|------|
-| Phase 1 | 轨迹锚点富化（trace 记锚点 → 生成 payload/prompt 消费） | 📋 待开始 | 独立可交付，先行 |
+| Phase 1 | 快照元素清单富化（trace 记 observedElements → 生成 payload/prompt 消费） | 🔄 进行中 | 独立可交付，先行 |
 | Phase 2 | 逐条增量入队 + 触发点前移（执行收口兜底入队 + 未执行守卫） | 📋 待开始 | 依赖 Phase 1 的 trace 结构落定 |
 
 ## 决策日志
@@ -42,9 +44,16 @@
   Schema + tools:[] + 平台原子落盘"的控制面；④ 真机重放本就只能事后跑，可见报错不会减少；
   ⑤ 拿不到 manifest 指纹状态，每轮全量烧 token。平台侧"锚点富化 + 增量入队"以低风险
   拿到同样两个收益。
-- 2026-07-16: **锚点不进 `normalizedTraceHash`**。锚点是生成增强信息，不改变"执行了什么"
-  的语义。若计入 hash，升级当天所有存量脚本语义指纹漂移 → 全量重生成 churn。代价：存量
-  脚本不自动享受锚点质量提升，需用户对个别任务「重试缺口」（forceRefresh 已支持）。
+- 2026-07-16: **【设计修正】开工核查真实数据后推翻原 Phase 1 前提**。原以为"轨迹里是不可重放的
+  ref、模型只能猜定位器"。实测 @playwright/mcp 0.0.76 的 tool_result `### Ran Playwright code`
+  节**已经给出解析好的语义定位器**（真实轨迹：`await page.getByRole('button', { name: '+ 新建学科' }).click();`），
+  被操作过的元素根本无需富化。真正的缺口是**只在快照里出现、从未被操作的元素**（断言目标）
+  —— 轨迹对它们零记录，模型只能臆造（`.avatar-uploader` 即此类）。故 Phase 1 从"ref→锚点翻译"
+  改为"抽取 `### Snapshot` 节的元素清单作为断言词汇表"。附带纠正：MCP 入参字段名是 `target`
+  （可为 ref 或选择器）+ 可选 `element` 描述，并非原以为的 `ref`。
+- 2026-07-16: **observedElements 不进 `normalizedTraceHash`**。它是生成增强信息，不改变"执行了
+  什么"的语义。若计入 hash，升级当天所有存量脚本语义指纹漂移 → 全量重生成 churn。代价：存量
+  脚本不自动享受质量提升，需用户对个别任务「重试缺口」（forceRefresh 已支持）。
 - 2026-07-16: **增量任务跳过真机重放（deferReplay），统一由执行收口后的既有自动流水线补跑**。
   生成期重放会与执行智能体并发操作同一被测系统（数据互踩）。runAndRepairLoop 本就跑
   `verified|needs_review` 全集，延后重放零新增机制。
@@ -58,30 +67,40 @@
 
 ## 详细设计
 
-### Phase 1 轨迹锚点富化
+### Phase 1 快照元素清单富化
+
+**事实依据**（开工核查 @playwright/mcp 0.0.76 + 真实 trace，见决策日志）：MCP 的 tool_result
+是分节文本，`### Ran Playwright code`（```js 围栏）已给出**被操作元素**的语义定位器；
+`### Snapshot` 节（```yaml 围栏）是整页 aria 树，行形如 `- button "+ 新建学科" [ref=e12] [cursor=pointer]`，
+**涵盖所有可访问元素**（含从未被点击的断言目标）。`browser_click` 等 input 型工具也会
+`setIncludeSnapshot()`，故快照不止出现在 `browser_snapshot` 的响应里。
 
 **数据流**：`exec-stream` 已把 `tool_use`/`tool_result` 帧喂给 `ScriptTraceCollector`
-（exec-stream.ts:241-244），只是收集器丢弃了输入参数与快照。
+（exec-stream.ts:241-244），收集器目前只从 content 抽 `### Ran Playwright code`，丢弃 Snapshot 节。
 
 改动（全部在平台侧，不动执行 prompt）：
 
 | 文件 | 改动 |
 |------|------|
-| `src/lib/test/script-trace.ts` | ① `feedToolUse` 增读 `value.input`：提取 `ref`（string）与 `element`（人类描述），存进 PendingTool；② 维护「最近一次快照的 ref → 元素语义」映射：`feedToolResult` 的 content 里凡出现 aria 快照区段（行形如 `- role "name" [ref=eN]`，含 `[ref=` 即触发解析），整表替换（ref 按快照代际失效，不能跨快照累积）；③ action 落盘时若 pending 带 ref，从映射查出 `{ role, name, testid? }`，与 `element` 描述一起写进新字段 `anchor?: { ref: string; element?: string; role?: string; name?: string; testid?: string }`；④ 锚点文本过 `redactTraceText` 脱敏；⑤ `normalizedTraceHash` **保持现口径**（不含 anchor，见决策日志） |
-| `src/lib/test/script-generator.ts` | ① payload 的 `executedPlaywrightCode[]` 每项附 `anchor`（有则带）；② system prompt 增一段：`anchor 是执行当时该元素在页面可访问性树里的真实属性（role/name/testid），是定位器的第一事实来源：有 testid 用 getByTestId；否则用 getByRole(role, { name, exact: true })。禁止用 CSS class/结构选择器替代 anchor 已给出的语义定位。轨迹代码里的 aria-ref/eN 引用一律用 anchor 翻译，不得照抄`；③ repair prompt 同步该规则（修复输入的 testCase 旁附该用例轨迹锚点摘要） |
-| `src/lib/test/script-artifacts.ts` | `SCRIPT_TEMPLATE_VERSION` **不动**（锚点不改变模板语义）；trace 文件 version 仍为 1（新字段向后兼容，旧读者忽略） |
-| `src/__tests__/unit/script-trace-anchors.test.ts`（新） | 快照 ref 表解析（含中文 name/引号转义/多级缩进）；跨快照代际替换（旧 ref 不残留）；anchor 附着到对应 action；**anchor 不影响 normalizedTraceHash**（指纹稳定契约）；脱敏覆盖 anchor 字段 |
-| `src/__tests__/unit/test-script-generation.test.ts` | payload 含 anchor 的断言补充 |
+| `src/lib/test/script-trace.ts` | ① 新增 `extractAriaSnapshot(content)`：取 `### Snapshot` 后的 ```yaml 围栏内容（文件链接形态 `- [Snapshot](path)` → 返回空，不读盘）；② 新增 `parseSnapshotElements(yaml)`：逐行匹配 `- <role> "<name>" [ref=…]`，产出 `{role, name}`（name 走 YAML 转义还原：`\"`→`"`；role 取 `- ` 后首个 token；无 name 的行跳过——无名元素对断言无价值）；③ `feedToolResult` 对每个 result 解析快照并把元素并入 `elementsByCase[activeCaseId]`（Map<caseId, Map<role+name, {role,name}>> 去重，**按用例并集**而非按快照代际——它是"这条用例执行期间页面上存在过的元素"词汇表）；④ 上限：单用例 120 个、name 截断 100 字符（防大页面 aria 树撑爆 trace）；⑤ 元素文本过 `redactTraceText`；⑥ 新增 `finishElements(): Record<caseId, ObservedElement[]>`；⑦ `normalizedTraceHash` **保持现口径**（不含 observedElements，见决策日志） |
+| `src/lib/test/script-trace.ts`（落盘） | `writeTraceFile` 增参 `elementsByCase`，以新行类型 `{type:'elements', caseId, items:[{role,name}]}` 落 JSONL；`readTraceFile` 解析该类型进 `ScriptTraceFile.elementsByCase`（旧文件无此行 → 空 Map，向后兼容；`readTraceFile` 现有 `type==='action'` 过滤天然忽略未知行） |
+| `src/lib/test/script-generator.ts` | ① `EligibleScriptCase` 增 `observedElements: ObservedElement[]`；`selectEligibleCases` 增参 `elementsByCase` 并按 caseId 取（`retargetLibraryCandidates` 原样透传）；② payload 增 `observedElements`；③ system prompt 增段：`observedElements 是执行当时从页面可访问性树观察到的真实元素（role + name），是断言定位器的事实来源。断言只能用 executedPlaywrightCode 里出现过的定位器，或 observedElements 里的元素（写成 getByRole(role, { name, exact: true })）。【严禁】臆造 CSS class/结构选择器（如 .avatar-uploader）——清单里没有的元素不要断言它存在`；④ repair prompt 同步该规则并在 payload 附 observedElements |
+| `src/lib/test/script-job-manager.ts` | `currentInputs` 读 trace 时一并取 `elementsByCase` 并传入 `selectEligibleCases`；repair 路径构造候选时同样带上 |
+| `src/lib/test/script-artifacts.ts` | `SCRIPT_GENERATOR_VERSION`/`SCRIPT_TEMPLATE_VERSION` **均不动**（不改变模板语义，且不得触发存量指纹漂移）；trace 文件 version 仍为 1（新增行类型向后兼容） |
+| `src/__tests__/unit/script-trace-elements.test.ts`（新） | Snapshot 节抽取（```yaml 围栏 / 文件链接形态 / 无 Snapshot 节）；元素行解析（中文 name、转义引号、多级缩进、`[cursor=pointer]` 等尾随属性、无 name 行跳过、`- text:` 行跳过）；按用例并集去重与 120 条上限；脱敏；**observedElements 不影响 `normalizedTraceHash`**（指纹稳定契约）；JSONL 往返（write→read）与旧文件兼容 |
+| `src/__tests__/unit/test-script-generation.test.ts` | payload 含 observedElements 的断言补充 |
 
 **边界**：
-- 快照区段可能被 tool_result 截断/缺失 → 查不到 ref 就只落 `element` 描述，anchor 字段可部分缺省；
-- `browser_snapshot` 之外，导航/点击类 result 也可能带快照——统一按"content 含 `[ref=` 就解析"处理；
-- testid 提取依赖快照文本是否暴露（aria 树通常不含 testid）→ testid 为 best-effort，主力是 role+name。
+- Snapshot 节可能是文件链接形态（`_includeSnapshotFileName` 配置下）→ 不读盘、当作无快照（best-effort）；
+- 快照可能被 MCP 输出预算截断 → 解析到多少算多少；
+- 元素并集跨页面/状态（一条用例内导航多页）→ 清单是**词汇表提示**而非"断言时一定在场"，prompt 措辞需据实说明；
+- 无 name 的元素（`- generic [ref=e1]`）不入清单：对断言无价值且量大。
 
 **验收**：
 - `npm run test` 全过；
-- 真机一轮功能测试后抽查 trace.jsonl：ref 式操作的 action 带 anchor 且 role/name 与页面一致；
-- 用带 anchor 的轨迹重生成 1-2 条脚本，确认定位器采用 getByRole/getByTestId 且与 anchor 一致。
+- 真机一轮功能测试后抽查 trace.jsonl：`elements` 行存在，role/name 与页面真实元素一致，
+  且包含从未被点击的元素（断言目标）；
+- 用带 observedElements 的轨迹重生成 1-2 条脚本，确认断言定位器取自清单/轨迹而非臆造 class。
 
 ### Phase 2 逐条增量入队 + 触发点前移
 

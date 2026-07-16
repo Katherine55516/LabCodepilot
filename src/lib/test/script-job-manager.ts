@@ -203,6 +203,7 @@ function currentInputs(request: ScriptJobRequest): {
   run: RunJson;
   casesRaw: unknown;
   traceActions: NonNullable<ReturnType<typeof readTraceFile>>['actions'];
+  traceElements: NonNullable<ReturnType<typeof readTraceFile>>['elementsByCase'];
   runContent: string;
 } {
   const p = artifactPaths(request.taskName, request.env, request.roundId);
@@ -211,8 +212,11 @@ function currentInputs(request: ScriptJobRequest): {
   const run = JSON.parse(runContent) as RunJson;
   const casesRaw = parseCaseFile(path.join(request.projectPath, artifactPaths(request.taskName).cases));
   const trace = readTraceFile(request.projectPath, request.taskName, request.env);
-  const traceActions = trace?.runHash === request.runHash ? trace.actions : [];
-  return { run, casesRaw, traceActions, runContent };
+  const sameRun = trace?.runHash === request.runHash;
+  const traceActions = sameRun ? trace.actions : [];
+  // 存量 trace 无 elements 行 → 空表，候选的 observedElements 退化为 []（行为等同改动前）。
+  const traceElements = sameRun ? trace.elementsByCase : {};
+  return { run, casesRaw, traceActions, traceElements, runContent };
 }
 
 function candidateTempFile(finalFile: string): string {
@@ -528,7 +532,9 @@ async function executeJob(entry: QueueEntry): Promise<void> {
     abortByScope.set(scope, abortController);
     let manifest = markManifest(request, { jobStatus: 'running', error: undefined });
     const inputs = currentInputs(request);
-    const selection = selectEligibleCases(inputs.casesRaw, inputs.run, inputs.traceActions, manifest.runtimeVersion);
+    const selection = selectEligibleCases(
+      inputs.casesRaw, inputs.run, inputs.traceActions, manifest.runtimeVersion, inputs.traceElements,
+    );
     if (selection.errors.length) throw new Error(selection.errors.join('; '));
     if (selection.blockedReason === 'circuit_broken') throw new Error('执行阶段熔断已触发，跳过脚本生成');
     const eligible = request.taskName === REGRESSION_LIBRARY_TASK
@@ -841,7 +847,11 @@ async function repairScriptCases(
 ): Promise<RepairResultItem[]> {
   // currentInputs re-hashes run.json — repairs only ever apply to the latest run.
   const inputs = currentInputs(jobRequest);
-  const selection = selectEligibleCases(inputs.casesRaw, inputs.run, inputs.traceActions, manifest.runtimeVersion);
+  // 带上 observedElements：AI 修复「element(s) not found」时要靠它把臆造的 CSS class 换成
+  // 真实存在的 role/name（见 repairScriptsBatch 的 system prompt）。
+  const selection = selectEligibleCases(
+    inputs.casesRaw, inputs.run, inputs.traceActions, manifest.runtimeVersion, inputs.traceElements,
+  );
   const eligible = jobRequest.taskName === REGRESSION_LIBRARY_TASK
     ? retargetLibraryCandidates(selection.eligible, regressionLibraryIdMap(jobRequest.projectPath), manifest.runtimeVersion)
     : selection.eligible;
