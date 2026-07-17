@@ -33,15 +33,23 @@ command -v iptables>/dev/null || die "iptables 未安装(出网防火墙需要)"
 id "$COWORK_USER" >/dev/null 2>&1 || die "服务用户不存在:$COWORK_USER"
 id -nG "$COWORK_USER" | tr ' ' '\n' | grep -qx docker \
   || die "服务用户 $COWORK_USER 不在 docker 组(usermod -aG docker $COWORK_USER 后重登)"
-[ -d "$ASSETS_DIR" ] || die "assets 目录不存在:$ASSETS_DIR(放 claude 二进制 + cowork-shim.py)"
-[ -x "$ASSETS_DIR/claude" ] || die "缺 $ASSETS_DIR/claude(可执行 claude 二进制)"
-[ -f "$ASSETS_DIR/cowork-shim.py" ] || die "缺 $ASSETS_DIR/cowork-shim.py"
-info "  docker $(docker --version | awk '{print $3}' | tr -d ,) · node $(node -v) · 用户 $COWORK_USER(docker 组✓) · assets $ASSETS_DIR ✓"
+# 自建镜像模式(claude/shim 烘进镜像,见 image/build-image.sh):assets 非前置。
+# 判定:调用时环境变量,或已存在 .env 里的 COWORK_IMAGE_BUNDLED=1(升级场景)。
+BUNDLED="${COWORK_IMAGE_BUNDLED:-}"
+if [ -z "$BUNDLED" ] && [ -f "$DEST/.env" ] && grep -qE '^COWORK_IMAGE_BUNDLED=1' "$DEST/.env"; then BUNDLED=1; fi
+if [ "$BUNDLED" = "1" ]; then
+  info "  docker $(docker --version | awk '{print $3}' | tr -d ,) · node $(node -v) · 用户 $COWORK_USER(docker 组✓) · 自建镜像模式(跳过 assets 前置)"
+else
+  [ -d "$ASSETS_DIR" ] || die "assets 目录不存在:$ASSETS_DIR(放 claude 二进制 + cowork-shim.py;或用自建镜像:COWORK_IMAGE_BUNDLED=1)"
+  [ -x "$ASSETS_DIR/claude" ] || die "缺 $ASSETS_DIR/claude(可执行 claude 二进制)"
+  [ -f "$ASSETS_DIR/cowork-shim.py" ] || die "缺 $ASSETS_DIR/cowork-shim.py"
+  info "  docker $(docker --version | awk '{print $3}' | tr -d ,) · node $(node -v) · 用户 $COWORK_USER(docker 组✓) · assets $ASSETS_DIR ✓"
+fi
 
 # ── 拷代码 ──
 info "部署代码到 $DEST …"
 mkdir -p "$DEST"
-for item in index.mjs package.json lib container client setup-egress.sh sign-token.mjs deploy; do
+for item in index.mjs package.json lib container client image setup-egress.sh sign-token.mjs deploy; do
   [ -e "$SRC/$item" ] && cp -a "$SRC/$item" "$DEST/"
 done
 # selftest 也带上(运维自检用)

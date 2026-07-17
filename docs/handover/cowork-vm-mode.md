@@ -6,7 +6,7 @@
 > POC 脚手架说明:[scripts/poc/cowork/README.md](../../scripts/poc/cowork/README.md)
 >
 > **本文件目标:让接手者读完即可完整理解 cowork 办公模式、并立刻接上未完成的工作,无遗漏。**
-> 最后更新:2026-07-17 · 分支 `vm_cowork`(HEAD 以 git log 为准;R 系列已推送 origin 至 `c02f564` = R4+R5-1..4 全推齐;**R5-5/R5-6/R5-7 commit 未推送**)· 状态:**cowork 战略转向 —— 全平台统一「远程容器沙箱」(R 系列),取代本地 VM**。macOS 本地 vfkit(3.1.18 已交付)与 Windows WSL2(P2)都退为保留/挂起(代码不删,RD1)。**R 系列 R0-R5 代码侧全完成(exec-plan 已归档 completed/);剩余=等外部条件:R5-6 Windows 真机实测(等机器)、账号后端下发接口(契约见 exec-plan R5-5)、裸金属迁移三件套;后续候选=自建会话镜像/gVisor·Kata 评估 RD3/凭证方案 C。**
+> 最后更新:2026-07-17 · 分支 `vm_cowork`(HEAD 以 git log 为准;R 系列已推送 origin 至 `c02f564` = R4+R5-1..4 全推齐;**R5-5/R5-6/R5-7 commit 未推送**)· 状态:**cowork 战略转向 —— 全平台统一「远程容器沙箱」(R 系列),取代本地 VM**。macOS 本地 vfkit(3.1.18 已交付)与 Windows WSL2(P2)都退为保留/挂起(代码不删,RD1)。**R 系列 R0-R5 代码侧全完成(exec-plan 已归档 completed/);剩余=等外部条件:R5-6 Windows 真机实测(等机器)、账号后端下发接口(契约见 exec-plan R5-5)、裸金属迁移三件套;后续候选之一「自建会话镜像」已完成 ✅(2026-07-17):`apps/cowork-server/image/`(Dockerfile+build-image.sh)把 claude+shim+cred-proxy 烘进 `cowork-sandbox` 镜像(tag 自动取 claude 版本,实测 2.1.203/537MB),开关 `COWORK_IMAGE_BUNDLED=1` 跳过全部宿主 bind(默认关零破坏,容器内路径不变零协议改动);**VM 已切 bundled 为常态**,selftest r2/r3/r4 全 21 项 PASS+生产实例容器挂载只剩 volume;坑=切/升级镜像须先 `docker rm -f cowork-proxy` 再 restart(ensureProxy 见 running 即复用),存量会话容器 TTL/删除后才换新镜像;流程见 deploy/OPERATIONS.md §9。其余候选=gVisor·Kata 评估 RD3/凭证方案 C。**
 >
 > **当前节点与下一步(接手先读这段;远程容器是当前主线,本文档 §1-§9 的本地 vfkit 内容为"保留态背景",不是当前活跃路径)**:
 >

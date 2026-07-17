@@ -15,6 +15,9 @@ const execFileP = promisify(execFile);
 
 const IMAGE = process.env.COWORK_IMAGE || 'python:3-slim';
 const ASSETS_DIR = process.env.COWORK_ASSETS_DIR || '/opt/cowork-assets'; // 宿主放 claude + cowork-shim.py
+// 自建镜像模式(image/build-image.sh 产出的 cowork-sandbox):claude+shim 已烘进镜像
+// /opt/cowork,不再 bind 宿主 assets(cred-proxy.mjs 同开关跳过脚本挂载)。
+const BUNDLED = process.env.COWORK_IMAGE_BUNDLED === '1';
 const MEM = process.env.COWORK_MEM || '2g';
 const PIDS = process.env.COWORK_PIDS || '512';
 const CPUS = process.env.COWORK_CPUS || '2'; // R4 配额:每会话容器 CPU 上限
@@ -146,7 +149,7 @@ export async function ensureContainer(sid, uid = SINGLE_UID) {
     // volume,否则回合末产物 diff 会把它们当用户产物;容器存活期内跨回合仍持久。
     '-e', 'HOME=/home/agent',
     '--tmpfs', `/home/agent:uid=${AGENT_UID},gid=${AGENT_UID},mode=0700`,
-    '-v', `${ASSETS_DIR}:/opt/cowork:ro`,
+    ...(BUNDLED ? [] : ['-v', `${ASSETS_DIR}:/opt/cowork:ro`]),
     // R2:workspace 用会话专属 named volume(与容器生命周期解耦,文件 op 服务端直读)。
     '-v', `${volumeName(sid)}:/workspace`,
     IMAGE, 'sleep', 'infinity',

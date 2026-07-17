@@ -52,7 +52,8 @@ journalctl -u cowork-egress --no-pager           # 防火墙安装日志
 | `COWORK_IDLE_TTL_MS` | `1800000`(30min) | 空闲回收:仅 exec 续命;超时 `docker stop` 保留 volume,下次秒级复用 |
 | `COWORK_CPUS` / `MEM` / `PIDS` | `2` / `2g` / `512` | 每会话容器配额(改后只影响**新建**容器) |
 | `COWORK_AUDIT_FILE` | `<部署目录>/cowork-audit.log` | 审计文件路径 |
-| `COWORK_IMAGE` | `python:3-slim` | 会话容器基础镜像(**首次部署需能拉到或提前 `docker load`**) |
+| `COWORK_IMAGE` | `python:3-slim` | 会话容器镜像(**首次部署需能拉到或提前 `docker load`**;推荐切自建镜像,见 §9) |
+| `COWORK_IMAGE_BUNDLED` | 空(关) | `1` = 自建镜像模式:claude/shim/cred-proxy 已烘入镜像,不再 bind 宿主 assets/脚本 |
 
 ## 4. 密钥与 token 管理
 
@@ -113,7 +114,7 @@ tail -5 /opt/cowork-server/cowork-audit.log
 | egress 规则 0 条 | docker 未带 iptables 起(`iptables -L DOCKER-USER -n` 报错)→ 查 docker daemon 配置;或单元失败 → `journalctl -u cowork-egress` |
 | 删过 cowork-net 后内网没拦住 | 网桥名可能已不是 cowork0:`systemctl restart cowork-server`(重建网络+固定网桥)→ `systemctl restart cowork-egress`(重装规则) |
 | 真 API 在公司内网,回合全失败 | egress 默认拦私网四段。按 `setup-egress.sh` 尾注加一条对该地址的定向 RETURN(cred-proxy 是可信组件) |
-| 会话容器起不来 | assets 缺件(`claude` 可执行 + `cowork-shim.py`)或镜像拉不到(离线环境先 `docker load` `python:3-slim`) |
+| 会话容器起不来 | 通用镜像模式:assets 缺件(`claude` 可执行 + `cowork-shim.py`)或镜像拉不到(离线先 `docker load`);自建镜像模式:`docker images cowork-sandbox` 确认镜像在、`.env` 的 `COWORK_IMAGE` 拼写对 |
 | 回合全部连不上凭证代理 | `docker ps --filter name=cowork-proxy` 看是否被误删/退出 → `systemctl restart cowork-server` 重建(运行中不自动检测,见 §1) |
 | 容器"消失" | 大概率 TTL 空闲回收(审计有 `idle_reap`)。volume 还在,客户端下回合 ensure 自动 `docker start` 复用,**不是故障** |
 | 磁盘涨 | 会话 volume 是持久的(删除会话才清)。孤儿盘点:`docker volume ls --filter label=cowork.managed=1`,对不上客户端会话列表的可由客户端 reconcile 清,或确认后 `docker volume rm` |
@@ -123,7 +124,7 @@ tail -5 /opt/cowork-server/cowork-audit.log
 ## 8. 升级 / 迁移
 
 - **升级 server 代码**:新源码放服务器 → 重跑 `sudo ./deploy/install.sh`(幂等;拷代码+更新单元,**保留 `.env`**)→ 完。会话容器不受影响。
-- **升级 claude 二进制**:替换 `$COWORK_ASSETS_DIR/claude`(与客户端 SDK 版本对齐,架构别搞错 x64/arm64)。bind-mount 是 `:ro` 实时的,新回合即生效。
+- **升级 claude 二进制**:通用镜像模式下替换 `$COWORK_ASSETS_DIR/claude`(bind `:ro` 实时,新回合即生效);自建镜像模式下重建镜像(见 §9)。两种模式都要与客户端 SDK 版本对齐,架构别搞错 x64/arm64。
 - **迁移到真裸金属三件套**:① 换目标架构 claude 二进制;② 跑 selftest 自检(见下);③ 上 TLS(README「TLS」节)+ 真实域名下发。
 - **selftest 自检**(部署目录自带,验证 docker/容器链路完好;需 assets + egress 段需免密 sudo):
 
@@ -131,4 +132,23 @@ tail -5 /opt/cowork-server/cowork-audit.log
   cd /opt/cowork-server && COWORK_ASSETS_DIR=<assets目录> node selftest-r4.mjs   # 多用户/配额/TTL/出网
   ```
 
-  注意:selftest 用独立端口(8795)自起 server 实例,**会清场 cowork 容器/网络**,别在有活跃用户时跑;跑完 `systemctl restart cowork-server cowork-egress` 恢复生产网络与规则。
+  注意:selftest 用独立端口(8795)自起 server 实例,**会清场 cowork 容器/网络**,别在有活跃用户时跑;跑完 `systemctl restart cowork-server cowork-egress` 恢复生产网络与规则。自建镜像模式下跑 selftest 需带环境:`COWORK_IMAGE=cowork-sandbox:latest COWORK_IMAGE_BUNDLED=1 node selftest-r4.mjs`。
+
+## 9. 自建会话镜像(推荐的生产形态)
+
+把 claude 二进制 + cowork-shim.py + cred-proxy.py 烘进镜像,取代"python:3-slim + bind 宿主 assets"。收益:会话容器不依赖宿主 assets 目录(离线部署更净)、cred-proxy 不 bind 宿主脚本、镜像即版本单元。
+
+```bash
+# 构建(在 /opt/cowork-server 下;claude 从 assets 目录取,tag 自动取 claude 版本号)
+sh image/build-image.sh /opt/cowork-assets
+
+# 启用:.env 设两行 → 清 proxy → 重启
+#   COWORK_IMAGE=cowork-sandbox:latest
+#   COWORK_IMAGE_BUNDLED=1
+docker rm -f cowork-proxy && systemctl restart cowork-server
+```
+
+- **切换/升级后 proxy 必须手动清一次**:`ensureProxy` 见 proxy running 就复用,不会自动按新镜像重建。
+- **存量会话容器仍是旧镜像**:TTL 回收或会话删除后新建的才用新镜像;要全量立刻切,先让客户端 reconcile 或确认无活跃用户后 `docker rm -f $(docker ps -aq --filter label=cowork.managed=1)`(volume 保留,数据不丢)。
+- **升级 claude** = 换 assets 里的新二进制 → 重跑 `build-image.sh`(tag 自动取新版本)→ 清 proxy → 重启。
+- **回退** = `.env` 去掉 `COWORK_IMAGE_BUNDLED` 与 `COWORK_IMAGE`(回 bind 模式,assets 目录须在)→ 清 proxy → 重启。

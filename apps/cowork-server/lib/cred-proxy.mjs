@@ -33,9 +33,11 @@ const NET = process.env.COWORK_NET || 'cowork-net';
 const PROXY_NAME = process.env.COWORK_PROXY_NAME || 'cowork-proxy';
 const PROXY_PORT = parseInt(process.env.COWORK_PROXY_PORT || '8791', 10);
 const IMAGE = process.env.COWORK_IMAGE || 'python:3-slim';
-// 容器内 cred-proxy.py:bind-mount 宿主脚本(:ro)。dev/R3 最稳(docker cp 到 tmpfs
-// 会被遮盖,踩过);R5 烘进自建镜像后改镜像自带路径,去掉此 mount。
+// 容器内 cred-proxy.py:通用镜像 bind-mount 宿主脚本(:ro;docker cp 到 tmpfs 会被
+// 遮盖,踩过);自建镜像(COWORK_IMAGE_BUNDLED=1)自带 /opt/cred-proxy.py,不挂。
 const PROXY_PY_HOST = process.env.COWORK_CRED_PROXY_PATH || path.join(DIR, '..', 'container', 'cred-proxy.py');
+// 自建镜像模式:cred-proxy.py 已烘进镜像 /opt/cred-proxy.py,不再 bind 宿主脚本。
+const BUNDLED = process.env.COWORK_IMAGE_BUNDLED === '1';
 const LABEL_MANAGED = 'cowork.managed=1';
 const HEX = /^[a-f0-9]{1,64}$/i;
 
@@ -53,7 +55,7 @@ async function docker(args, opts) {
 export function ensureProxy(log = () => {}) {
   if (ready) return ready;
   ready = (async () => {
-    if (!fs.existsSync(PROXY_PY_HOST)) throw new Error(`cred-proxy.py not found: ${PROXY_PY_HOST}`);
+    if (!BUNDLED && !fs.existsSync(PROXY_PY_HOST)) throw new Error(`cred-proxy.py not found: ${PROXY_PY_HOST}`);
     // 网络(容器↔容器隔离域;固定网桥名供 setup-egress.sh 的 iptables 规则匹配)
     const nets = await docker(['network', 'ls', '--filter', `name=^${NET}$`, '--format', '{{.Name}}']);
     if (!nets.trim()) {
@@ -73,8 +75,8 @@ export function ensureProxy(log = () => {}) {
       '--memory', '256m', '--pids-limit', '128',
       // /creds 是 tmpfs:真 key 只落 proxy 容器内存态 tmpfs,永不落宿主盘。
       '--tmpfs', '/creds:mode=0700',
-      // cred-proxy.py bind-mount 只读(dev/R3;R5 烘进镜像后去掉)。
-      '-v', `${PROXY_PY_HOST}:/opt/cred-proxy.py:ro`,
+      // cred-proxy.py:自建镜像(BUNDLED)自带 /opt/cred-proxy.py;通用镜像 bind-mount 只读。
+      ...(BUNDLED ? [] : ['-v', `${PROXY_PY_HOST}:/opt/cred-proxy.py:ro`]),
       '-e', `COWORK_PROXY_PORT=${PROXY_PORT}`,
       IMAGE, 'python3', '/opt/cred-proxy.py',
     ]);
