@@ -83,10 +83,11 @@ describe('cowork-guards: buildSandboxSystemNote', () => {
     assert.ok(note.includes(sessionWorkspace(SID)));
   });
 
-  it('states the capability boundary: no host fs, no external MCP, artifacts auto-surfaced', async () => {
+  it('states the capability boundary: no host fs, no intranet, no external MCP, artifacts auto-surfaced', async () => {
     const { buildSandboxSystemNote } = await import(guardsPath);
     const note = buildSandboxSystemNote(SID);
     assert.match(note, /无法访问用户真机/);
+    assert.match(note, /内网|局域网/);
     assert.match(note, /外部 MCP/);
     assert.match(note, /codepilot-\*/);
     assert.match(note, /沙箱产物/);

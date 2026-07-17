@@ -84,16 +84,17 @@ export const SANDBOX_NATIVE_RUNTIME_GUARD = {
 
 /**
  * 沙箱回合注入的能力边界系统提示(coworkActive 时 append 到 systemPrompt)。
- * 告诉 agent:它在隔离 VM 内、工作目录在哪、宿主路径与外部 MCP 不可用、
+ * 告诉 agent:它在隔离沙箱内、工作目录在哪、宿主路径/公司内网/外部 MCP 不可用、
  * 产物会自动出现在下载卡片。
  */
 export function buildSandboxSystemNote(sessionId: string): string {
   const ws = sessionWorkspace(sessionId);
   return [
     '## 沙箱执行环境(Cowork)',
-    '本会话运行在一台隔离的 Linux 虚拟机内:',
+    '本会话运行在一个与用户真机隔离的 Linux 沙箱环境内:',
     `- 你的工作目录是本会话专属的 ${ws}/,用户通过对话发送的文件已放在这里。`,
     '- 你无法访问用户真机的文件系统。不要引用或臆测宿主路径(如 /Users/**);所有读写都在上述 workspace 内进行。',
+    '- 网络:可访问公网(安装依赖、调用外部 API 等);访问公司内网/局域网地址会被网络策略拒绝,不要尝试连接内网主机。',
     '- 外部 MCP 服务器在沙箱会话中不会加载;内置 codepilot-* 工具不受影响。',
     '- 你在 workspace 内新建或修改的文件,回合结束后会自动出现在用户界面的「沙箱产物」卡片中供下载,无需向用户解释如何取回文件。',
   ].join('\n');
