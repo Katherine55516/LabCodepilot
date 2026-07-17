@@ -5,23 +5,51 @@
  * 服务器。配置来源:R1 dev 走设置 `cowork_remote_url` / `cowork_remote_token`;R5 由账号
  * 登录下发(复刻 image-cred-account-delivery 范式)。
  *
- * R1 完成度:生命周期(ensureReady/getStatus/channelReady/remove/reconcile)+ exec 端点
- * 已实现;**文件 op 留 R2**(throw NOT_IMPL);**凭证 R1 直通真 key、R3 换服务端一次性 token**。
+ * R2 完成度:生命周期 + exec 端点 + **文件通道**(cowork-server 文件 REST,服务端 helper
+ * 容器直读会话 volume,会话容器不用醒);**凭证 R1 直通真 key、R3 换服务端一次性 token**。
  */
 import fs from 'fs';
 import path from 'path';
+import { Readable } from 'stream';
 import type { CoworkBackend, CoworkBackendStatus, CoworkExecEndpoint, CoworkCredential, CoworkProgress } from './cowork-backend';
 import type { VmArtifact } from './cowork-vsock';
 import { getSetting } from './db';
 import { bundledCoworkResource } from './cowork-paths';
 
 const WORKSPACE = '/workspace'; // 容器内会话 workspace(named volume 挂载点)
-const NOT_IMPL_R2 = 'cowork remote file op not implemented yet (R2)';
 
 function remoteConfig() {
   const url = (getSetting('cowork_remote_url') || '').trim().replace(/\/+$/, '');
   const token = (getSetting('cowork_remote_token') || '').trim();
   return { url, token };
+}
+
+function authHeaders(): Record<string, string> {
+  const { token } = remoteConfig();
+  return token ? { authorization: `Bearer ${token}` } : {};
+}
+
+function baseUrl(): string {
+  const { url } = remoteConfig();
+  if (!url) throw new Error('cowork_remote_url not configured');
+  return url;
+}
+
+/**
+ * 流式 GET(下载/打包)。错误信息保留服务端归类词("No such file"/"escapes"),
+ * artifacts route 据此映射 404/403。
+ */
+async function fetchStream(pathname: string): Promise<{ stream: NodeJS.ReadableStream; size: number }> {
+  const res = await fetch(baseUrl() + pathname, { headers: authHeaders() });
+  if (!res.ok || !res.body) {
+    let detail = '';
+    try { detail = String(((await res.json()) as { error?: string }).error || ''); } catch { /* 非 JSON 错误体 */ }
+    throw new Error(detail || `cowork-server GET ${pathname} → ${res.status}`);
+  }
+  return {
+    stream: Readable.fromWeb(res.body as import('stream/web').ReadableStream),
+    size: parseInt(res.headers.get('content-length') || '0', 10) || 0,
+  };
 }
 
 function wsEndpoint(url: string) {
@@ -93,10 +121,29 @@ export const remoteBackend: CoworkBackend = {
   sessionWorkspacePath(_sessionId: string) { return WORKSPACE; },
 
   async ensureWorkspace(sessionId: string): Promise<string> { await this.ensureReady(sessionId); return WORKSPACE; },
-  async writeFile(_sessionId: string, _name: string, _data: Buffer): Promise<string> { throw new Error(NOT_IMPL_R2); },
-  async listFiles(_sessionId: string, _sinceMs: number): Promise<VmArtifact[]> { return []; /* R1-3:先返回空产物(纯对话回合末 diff 不崩);R2 实现服务端 volume diff */ },
-  async readFileStream(_sessionId: string, _vmPath: string): Promise<{ stream: NodeJS.ReadableStream; size: number }> { throw new Error(NOT_IMPL_R2); },
-  async archiveStream(_sessionId: string): Promise<{ stream: NodeJS.ReadableStream; size: number }> { throw new Error(NOT_IMPL_R2); },
+  async writeFile(sessionId: string, name: string, data: Buffer): Promise<string> {
+    const res = await fetch(`${baseUrl()}/session/${sessionId}/file?name=${encodeURIComponent(name)}`, {
+      method: 'POST',
+      headers: { ...authHeaders(), 'content-type': 'application/octet-stream', 'content-length': String(data.length) },
+      body: new Uint8Array(data),
+    });
+    if (!res.ok) throw new Error(`cowork-server upload ${name} → ${res.status}`);
+    const r = (await res.json()) as { path?: string };
+    if (!r.path) throw new Error('cowork-server upload: no path in response');
+    return r.path;
+  },
+  async listFiles(sessionId: string, sinceMs: number): Promise<VmArtifact[]> {
+    const res = await fetch(`${baseUrl()}/session/${sessionId}/files?since=${Math.max(0, Math.trunc(sinceMs || 0))}`, { headers: authHeaders() });
+    if (!res.ok) throw new Error(`cowork-server list files → ${res.status}`);
+    const r = (await res.json()) as { files?: VmArtifact[] };
+    return Array.isArray(r.files) ? r.files : [];
+  },
+  async readFileStream(sessionId: string, vmPath: string): Promise<{ stream: NodeJS.ReadableStream; size: number }> {
+    return fetchStream(`/session/${sessionId}/file?path=${encodeURIComponent(vmPath)}`);
+  },
+  async archiveStream(sessionId: string): Promise<{ stream: NodeJS.ReadableStream; size: number }> {
+    return fetchStream(`/session/${sessionId}/archive`);
+  },
   async removeSession(sessionId: string): Promise<void> { try { await api('DELETE', `/session/${sessionId}`); } catch { /* best-effort */ } },
   async reconcile(keepSessionIds: string[]): Promise<string[]> {
     const r = await api('POST', '/reconcile', { keep: keepSessionIds });

@@ -65,13 +65,15 @@ export async function GET(request: NextRequest) {
       return Response.json({ files, vmOnline });
     }
 
-    // Download paths genuinely need the VM — wake it on demand (user explicitly
-    // asked for a file, so a few seconds of cold start is expected here).
+    // Download paths need the backend channel — wake it on demand (user
+    // explicitly asked for a file, so a few seconds of cold start is expected).
+    // vfkit: boots the VM; remote: the server reads the session volume directly
+    // (no container wake), so ready simply means the server is reachable.
     if (!(await vmChannelReady())) {
-      const { ensureRunning } = await import('@/lib/cowork-vm-manager');
-      const vm = await ensureRunning();
-      if (vm.phase !== 'running') {
-        return Response.json({ error: 'Sandbox VM is not available' }, { status: 503 });
+      const { getCoworkBackend } = await import('@/lib/cowork-backend');
+      const st = await (await getCoworkBackend()).ensureReady(sessionId);
+      if (!st.ready) {
+        return Response.json({ error: 'Sandbox backend is not available' }, { status: 503 });
       }
     }
 
