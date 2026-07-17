@@ -17,6 +17,7 @@
 - **RD3 裸金属有 KVM → 隔离可升级**(RD2 推论)。R1-R4 先用 R0 已验证的**硬化 runc**;裸金属就位后评估 gVisor(KVM 平台)/ Kata microVM(每会话轻量 VM,架构级隔离,不弱于原 vfkit)。
 - **RD4 凭证先 A 起步、预留切 C**(用户拍板)。A=客户端把真 key 经 TLS 交服务端内存代理;C=服务端直接向账号后端取凭证(客户端不碰 key,需后端加接口)。A/C 容器侧与注入侧代码相同,只差"真 key 怎么进服务端内存",切换成本低。B(反向隧道)不做。
 - **RD5 单点诚实降级**(RD2 推论)。服务器不可达 = 办公模式不可用,复用现有 `cowork_status` gate 隐藏 tab + 引导,不假装。
+- **RD6 凭证代理下沉为共享网络里的 sidecar 容器**(R3 实测倒逼,替代 P3-B 的"宿主/服务端进程代理")。docker 场景"容器→宿主网关"的可达性不可靠 —— 企业防火墙、k8s/kube-router 残留 iptables 都可能堵死(验证 VM 实测容器→宿主任何 IP 全超时,而容器↔容器恒通)。故 cred-proxy 改为一个可信 sidecar 容器 `cowork-proxy`,与会话容器同处专用网络 `cowork-net`,claude 经**容器名**访问(`ANTHROPIC_BASE_URL=http://cowork-proxy:8791`)。威胁模型与 P3-B 等价:真 key 只在 proxy 容器(可信,不跑 agent、不碰不可信文件)的 **tmpfs**;凭证经 `docker exec` stdin 注入(走 docker API,不走网络、不落宿主盘);会话容器只拿一次性 `cwk_` token。**这条路对生产也更 robust**(不依赖宿主网络拓扑/防火墙),且是 R4 出网管控、R5 docker-compose 部署的自然基座。
 
 ## 状态
 
@@ -25,7 +26,7 @@
 | R0 | 通道 POC:forwarder→TCP→server→docker exec→shim→claude,帧/EOF/中断/并发 + claude×runc + 真 claude 一轮 | UTM+Mac | ✅ **完成**(2026-07-16,代码 scripts/poc/cowork/remote/) |
 | R1 | `CoworkBackend` 接口(远程唯一活跃,vfkit 包入保留)+ cowork-server 控制面 MVP(容器 per 会话编排 + exec WS 桥 + docker labels 事实源)+ claude-client 切远程 | Mac+VM | ✅ **完成**(R1-1 控制面 / R1-2 接口+双实现 / R1-3 claude-client+契约层切 remote / R1-4 **dev 端到端真 claude BRIDGE_OK**;修容器非 root + shim os._exit) |
 | R2 | 文件通道:上传/diff/下载/archive **服务端直读会话 volume**(容器不用醒)+ 产物卡链路接通 + cowork-transfer 底层换远程 | Mac+VM | ✅ **完成**(R2-0 tmpfs→持久 named volume+uid 1000 chown / R2-1 文件 REST 四 op:helper 容器直读 volume / R2-2 remote backend 四文件 op / R2-3 artifacts route 去 vfkit 硬依赖 / R2-4 selftest 8 项全过 + dev 真 claude 上传→容器读改→产物卡→下载→archive→会话删除全链 CDP 验证。坑:chown init 容器须 `--cap-add CHOWN`;HOME 挪 tmpfs 防 claude 状态混进产物 diff;DELETE 清 volume 加短退避防在飞 helper 竞态) |
-| R3 | 凭证代理(方案 A:客户端 TLS 交 key→服务端内存→容器一次性 token→注入真 key→转发真 base_url;预留 C 的取凭证钩子)+ 双侧审计 | Mac+VM | 📋 |
+| R3 | 凭证代理(方案 A:客户端 TLS 交 key→服务端内存→容器一次性 token→注入真 key→转发真 base_url;预留 C 的取凭证钩子)+ 双侧审计 | Mac+VM | ✅ **完成**(**RD6:代理下沉为 sidecar 容器**,非宿主进程 —— 见决策日志)。R3-1 `container/cred-proxy.py`(python,tmpfs /creds,剥 token 注入真 key 转发,SSE chunked 流回)+ `lib/cred-proxy.mjs`(编排 cowork-net+proxy 容器,`docker exec` stdin 注入凭证不落宿主盘)+ `lib/audit.mjs`(服务端审计,与 app 侧事件对齐)+ 会话容器接 cowork-net。R3-3 `cowork-backend-remote.ts` registerCredentials→POST cred(真 key 不再进容器 env)、revoke→DELETE;会话删除走 backend.revokeCredentials。R3-2 **selftest-r3 7 项全过**(api_key/auth_token 双风格注入+host 重写+path 保留+SSE 流式+错/缺 token 401+revoke+会话删除联动+审计零 key/token 泄漏,全在 cowork-net 真容器间)。R3-4 dev 真 claude 回合 success(经 cred-proxy 转发)+ /creds 有会话 token 文件+会话容器无真 key+DELETE 联动清空;单测 1948 零回归。**坑**:docker cp 到 tmpfs 挂载点被遮盖→cred-proxy.py 改 bind-mount(R5 烘镜像);cap-drop ALL 剥 CHOWN(R2 已记)) |
 | R4 | 多用户 authz(userId+sessionId label scope)+ 配额(mem/cpu/pids/TTL 回收)+ **出网禁内网**(DOCKER-USER 四段 REJECT + 封 host-network/DNS 旁路)+ 隔离硬化文案 | VM | 📋 |
 | R5 | 客户端接入(账号下发 server 配置)+ Windows forwarder(.cmd 包装)+ NSIS 免管理员打包 + 单服务器 docker-compose 部署包 + 运维/IT 文档 + 双文档 | Win+VM | 📋 |
 
@@ -53,7 +54,7 @@ interface CoworkBackend {
 
 - **REST**(短 op,Bearer 鉴权 + per-user):`POST /session/:id/ensure`、`DELETE /session/:id`、`POST /session/:id/file`、`GET /session/:id/files?since=`、`GET /session/:id/file?path=`、`GET /session/:id/archive`、`POST /reconcile`
 - **WS**:`/session/:id/exec` —— 帧流桥到 `docker exec`(R0 已验;server 哑管道,容器内 shim 解帧)
-- **凭证代理**(R3,方案 A):`POST /session/:id/cred`(客户端 TLS 交真 key→内存 Map)→ 容器 claude 用一次性 `cwk_` token → 代理校验→注入真 key→转发真 base_url→SSE 回。预留 `credSource` 抽象(A=客户端交;C=后端取)。
+- **凭证代理**(R3 已完成,方案 A + **RD6 sidecar 容器**):`POST /session/:id/cred`(客户端 TLS 交真 key)→ cowork-server `docker exec` stdin 把凭证注入 **`cowork-proxy` sidecar 容器**的 tmpfs `/creds/<token>.json`(不走网络、不落宿主盘)→ 容器 claude 用一次性 `cwk_` token + `ANTHROPIC_BASE_URL=http://cowork-proxy:8791` → proxy 容器校验 token→注入真 key→转发真 base_url→SSE chunked 流回。会话容器与 proxy 容器同处 `cowork-net`(容器↔容器,绕开"容器→宿主"的环境依赖)。预留 `credSource` 抽象(A=客户端交;C=后端取,喂同一 registerCredentials 入口)。
 - **容器规格**(R0 已验硬化基线):`--cap-drop ALL --security-opt no-new-privileges --memory/--pids-limit`,claude+shim bind-mount `:ro`,workspace 用**会话专属 named volume**(与容器生命周期解耦:容器可回收,volume 留到会话删)。
 - **keepalive**:WS 双向 ping/pong 25s(防企业中间设备掐);断线=回合 abort(首版),"重连 re-attach 不杀回合"列演进。
 
