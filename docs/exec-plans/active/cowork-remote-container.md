@@ -24,7 +24,7 @@
 |-------|------|------|------|
 | R0 | 通道 POC:forwarder→TCP→server→docker exec→shim→claude,帧/EOF/中断/并发 + claude×runc + 真 claude 一轮 | UTM+Mac | ✅ **完成**(2026-07-16,代码 scripts/poc/cowork/remote/) |
 | R1 | `CoworkBackend` 接口(远程唯一活跃,vfkit 包入保留)+ cowork-server 控制面 MVP(容器 per 会话编排 + exec WS 桥 + docker labels 事实源)+ claude-client 切远程 | Mac+VM | ✅ **完成**(R1-1 控制面 / R1-2 接口+双实现 / R1-3 claude-client+契约层切 remote / R1-4 **dev 端到端真 claude BRIDGE_OK**;修容器非 root + shim os._exit) |
-| R2 | 文件通道:上传/diff/下载/archive **服务端直读会话 volume**(容器不用醒)+ 产物卡链路接通 + cowork-transfer 底层换远程 | Mac+VM | 📋 |
+| R2 | 文件通道:上传/diff/下载/archive **服务端直读会话 volume**(容器不用醒)+ 产物卡链路接通 + cowork-transfer 底层换远程 | Mac+VM | ✅ **完成**(R2-0 tmpfs→持久 named volume+uid 1000 chown / R2-1 文件 REST 四 op:helper 容器直读 volume / R2-2 remote backend 四文件 op / R2-3 artifacts route 去 vfkit 硬依赖 / R2-4 selftest 8 项全过 + dev 真 claude 上传→容器读改→产物卡→下载→archive→会话删除全链 CDP 验证。坑:chown init 容器须 `--cap-add CHOWN`;HOME 挪 tmpfs 防 claude 状态混进产物 diff;DELETE 清 volume 加短退避防在飞 helper 竞态) |
 | R3 | 凭证代理(方案 A:客户端 TLS 交 key→服务端内存→容器一次性 token→注入真 key→转发真 base_url;预留 C 的取凭证钩子)+ 双侧审计 | Mac+VM | 📋 |
 | R4 | 多用户 authz(userId+sessionId label scope)+ 配额(mem/cpu/pids/TTL 回收)+ **出网禁内网**(DOCKER-USER 四段 REJECT + 封 host-network/DNS 旁路)+ 隔离硬化文案 | VM | 📋 |
 | R5 | 客户端接入(账号下发 server 配置)+ Windows forwarder(.cmd 包装)+ NSIS 免管理员打包 + 单服务器 docker-compose 部署包 + 运维/IT 文档 + 双文档 | Win+VM | 📋 |
