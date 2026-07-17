@@ -54,9 +54,13 @@ export function ensureProxy(log = () => {}) {
   if (ready) return ready;
   ready = (async () => {
     if (!fs.existsSync(PROXY_PY_HOST)) throw new Error(`cred-proxy.py not found: ${PROXY_PY_HOST}`);
-    // 网络(容器↔容器隔离域)
+    // 网络(容器↔容器隔离域;固定网桥名供 setup-egress.sh 的 iptables 规则匹配)
     const nets = await docker(['network', 'ls', '--filter', `name=^${NET}$`, '--format', '{{.Name}}']);
-    if (!nets.trim()) await docker(['network', 'create', '--label', LABEL_MANAGED, NET]);
+    if (!nets.trim()) {
+      const bridge = process.env.COWORK_NET_BRIDGE || 'cowork0';
+      try { await docker(['network', 'create', '--label', LABEL_MANAGED, '--opt', `com.docker.network.bridge.name=${bridge}`, NET]); }
+      catch (e) { if (!/already exists/i.test(String(e?.message || ''))) throw e; }
+    }
 
     // proxy 容器
     const ps = (await docker(['ps', '-a', '--filter', `name=^${PROXY_NAME}$`, '--format', '{{.State}}'])).trim();

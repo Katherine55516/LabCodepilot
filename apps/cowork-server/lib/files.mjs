@@ -114,8 +114,10 @@ function runHelper(sid, script, scriptArgs, opts) {
  * Content-Length(-1=未知):helper 写 .part + 字节数校验 + 原子 rename —— 客户端中途
  * 断连(EOF 早到,字节数对不上)不会留下半截文件。返回沙箱内绝对路径。
  */
-export async function writeFile(sid, fileName, source, expectedSize = -1) {
-  await ensureVolume(sid);
+export async function writeFile(sid, fileName, source, expectedSize = -1, uid = undefined) {
+  // 传 uid:file 先于 exec 上传时(volume 尚不存在)按正确属主建 volume,
+  // 否则 authz 开启时同用户后续 exec 会归属不符。已存在的 volume ensureVolume 幂等跳过。
+  await ensureVolume(sid, uid);
   const safe = path.basename(fileName || 'file').replace(SAFE_NAME_RE, '_') || 'file';
   const { child, exit } = runHelper(sid, PY_WRITE, [`/ws/${safe}`, String(Math.trunc(expectedSize))], { ro: false, stdin: true });
   child.stdin.on('error', () => { /* EPIPE:helper 先退 */ });
