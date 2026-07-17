@@ -81,9 +81,10 @@ append-only JSONL,`COWORK_AUDIT_FILE` 指定路径;超 4MB 软截断保留后半
 | `exec_start` | 一次 agent 回合开始(uid) |
 | `file_upload` / `file_download` / `archive_download` | 文件上行/下行/打包下载(路径+字节数) |
 | `cred_issued` / `cred_revoked` | 凭证登记/废止(仅 sessionId) |
-| `cred_reject` | 坏 token 打到凭证接口(疑似探测,值得关注) |
 | `reconcile` | 客户端对账清孤儿(uid + 清了哪些 sid) |
 | `idle_reap` | TTL 空闲回收(容器停、volume 留) |
+
+**已知观测缺口**(tech-debt #15):坏 token 打到凭证代理的拒绝发生在 cowork-proxy **容器内**(只回 401,且故意不打日志防敏感头落盘),宿主侧**没有**对应审计事件 —— 当前无法从审计文件监控凭证探测行为。
 
 app 侧另有一半审计(`src/lib/cowork-audit.ts`,记在用户机),事件名对齐,可两侧对账。
 
@@ -99,8 +100,8 @@ docker ps -a --filter label=cowork.managed=1 --format '{{.Names}}\t{{.State}}'
 docker volume ls -q --filter label=cowork.managed=1 | wc -l
 # 出网防火墙(应为 5 条:1 内部 RETURN + 4 私网 REJECT)
 iptables -L DOCKER-USER -n | grep -c cowork-egress
-# 审计异常(cred_reject 多=有人拿错/伪造 token 探测)
-grep -c cred_reject /opt/cowork-server/cowork-audit.log
+# 最近审计事件抽查
+tail -5 /opt/cowork-server/cowork-audit.log
 ```
 
 ## 7. 故障排查

@@ -3,8 +3,10 @@
  *
  * append-only JSONL,best-effort 永不抛(审计失败不能影响业务链路)。事件名与
  * app 侧对齐(cred_issued/cred_revoked/file_upload/file_download/archive_download),
- * 服务端专属事件:cred_reject(坏 token 打代理)/ session_ensure / session_remove /
- * reconcile / exec_start。凭证类事件只记元数据,**绝不记 key/token 本体**。
+ * 服务端专属事件:session_ensure / session_remove / reconcile / exec_start / idle_reap。
+ * 凭证类事件只记元数据,**绝不记 key/token 本体**。
+ * 注意:没有 cred_reject 事件 —— 坏 token 的拒绝发生在 cred-proxy 容器内(只回 401,
+ * 故意不打日志防敏感头落盘),宿主侧无观测信号(tech-debt #15;勿把它写进运维文档)。
  */
 import fs from 'node:fs';
 import path from 'node:path';
