@@ -35,6 +35,9 @@ import { resolveUser, authzEnabled } from './lib/authz.mjs';
 import { handleExec } from './lib/exec-bridge.mjs';
 
 const PORT = parseInt(process.env.COWORK_SERVER_PORT || '8790', 10);
+// 监听地址:默认 0.0.0.0(客户端直连);上 TLS 反代时设 127.0.0.1,让 caddy/nginx
+// 独占对外、明文端口不暴露公网(见 deploy/docker-compose.tls.yml)。
+const HOST = process.env.COWORK_SERVER_HOST || '0.0.0.0';
 const TOKEN = process.env.COWORK_SERVER_TOKEN || '';
 const SHIM = process.env.COWORK_SHIM_PATH || '/opt/cowork/cowork-shim.py';
 const IDLE_TTL_MS = parseInt(process.env.COWORK_IDLE_TTL_MS || String(30 * 60 * 1000), 10);
@@ -244,7 +247,7 @@ const reaper = setInterval(async () => {
 }, 60000);
 reaper.unref?.();
 
-server.listen(PORT, () => log(`listening :${PORT} authz=${authzEnabled ? 'HMAC' : (TOKEN ? 'global-token' : 'OFF(dev)')} image=${orch._internals.IMAGE} assets=${orch._internals.ASSETS_DIR} idleTTL=${IDLE_TTL_MS}ms`));
+server.listen(PORT, HOST, () => log(`listening ${HOST}:${PORT} authz=${authzEnabled ? 'HMAC' : (TOKEN ? 'global-token' : 'OFF(dev)')} image=${orch._internals.IMAGE} assets=${orch._internals.ASSETS_DIR} idleTTL=${IDLE_TTL_MS}ms`));
 
 // cred-proxy sidecar 容器随服务启动(失败不阻塞主服务:首个 register 会懒重试)
 cred.ensureProxy(log).catch((e) => log('cred-proxy start deferred:', e.message));

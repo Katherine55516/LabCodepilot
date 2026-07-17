@@ -1,0 +1,27 @@
+# TLS 终结反代(生产可选,R5-3 预留)—— cowork-server 明文听 127.0.0.1:8790,
+# caddy 听 443 自动签 Let's Encrypt 证书并反代。客户端侧 COWORK_REMOTE_SCHEME=wss
+# 即走加密(forwarder 帧协议一字不改,ws→wss 只换承载)。
+#
+# 启用步骤:
+#   1) 编辑 /opt/cowork-server/.env:COWORK_SERVER_HOST=127.0.0.1 → systemctl restart cowork-server
+#      (让明文端口只在本机,不暴露公网)
+#   2) cp Caddyfile.example Caddyfile,把域名改成真实的
+#   3) docker compose -f docker-compose.tls.yml up -d
+#   4) 账号后端下发给客户端的 server 地址用 https/wss://<域名>(不带端口)
+#
+# network_mode: host —— caddy 直连宿主 127.0.0.1:8790,避开"容器→宿主网关"的不确定性
+# (RD6:某些环境该路径被防火墙/k8s 残留 iptables 堵死)。
+services:
+  caddy:
+    image: caddy:2
+    container_name: cowork-caddy
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:
