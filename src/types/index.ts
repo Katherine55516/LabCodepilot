@@ -1035,18 +1035,20 @@ export interface FileAttachment {
 }
 
 // Check if a MIME type is an image
-export function isImageFile(type: string): boolean {
-  return type.startsWith('image/');
+// type 可能缺失(历史消息/外部调用方构造的附件元数据没带 MIME)——缺失时按
+// 非媒体处理,绝不能让一条脏 attachment 白屏整个会话页或 500 掉发送链。
+export function isImageFile(type: string | undefined | null): boolean {
+  return !!type && type.startsWith('image/');
 }
 
 // Check if a MIME type is a video
-export function isVideoFile(type: string): boolean {
-  return type.startsWith('video/');
+export function isVideoFile(type: string | undefined | null): boolean {
+  return !!type && type.startsWith('video/');
 }
 
 // Check if a MIME type is any visual media (image or video)
-export function isMediaFile(type: string): boolean {
-  return type.startsWith('image/') || type.startsWith('video/') || type.startsWith('audio/');
+export function isMediaFile(type: string | undefined | null): boolean {
+  return !!type && (type.startsWith('image/') || type.startsWith('video/') || type.startsWith('audio/'));
 }
 
 // Format bytes into human-readable size
