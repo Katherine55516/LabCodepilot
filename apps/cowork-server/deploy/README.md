@@ -1,6 +1,6 @@
 # Cowork 控制面部署包(R5-3)
 
-> 完整运维文档见 [docs/handover/cowork-vm-mode.md](../../../docs/handover/cowork-vm-mode.md)(R5-4 补运维/IT 专章)。
+> 日常运维/IT 手册见 [OPERATIONS.md](./OPERATIONS.md)(服务管理/密钥轮换/审计/巡检/排障/升级迁移);架构与设计决策见 [docs/handover/cowork-vm-mode.md](../../../docs/handover/cowork-vm-mode.md)。
 > 本文件是部署操作向导,目标:把 `apps/cowork-server/` 部署成单公司裸金属服务器上开机自启的服务。
 
 ## 部署形态(RD8)
