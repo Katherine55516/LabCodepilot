@@ -1,6 +1,7 @@
 # Cowork 远程容器沙箱 — 执行计划(R 系列)
 
 > 创建:2026-07-16
+> **归档:2026-07-17 · R0-R5 代码侧全完成**。剩余打开项(等外部条件,不阻塞归档):R5-6 Windows 真机实测(等机器,清单见 R5 行)、账号后端下发接口(契约见 R5-5 行)、裸金属迁移三件套(x64 重跑 selftest / KVM 隔离评估 RD3 / TLS 真网联调)。**恢复上下文唯一入口 = [docs/handover/cowork-vm-mode.md](../../handover/cowork-vm-mode.md)**。
 > 调研(先读):[docs/research/cowork-remote-container.md](../../research/cowork-remote-container.md)(架构映射 + 外部硬事实 + R0 实测)
 > 上游:本地 VM(macOS vfkit)已全交付 + P3 安全强化;R0 通道 POC 已实测全过(见调研 §10)
 
