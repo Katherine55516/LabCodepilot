@@ -36,6 +36,7 @@ def main():
         stdout=subprocess.PIPE,
         stderr=sys.stderr,
         env=os.environ.copy(),
+        cwd=os.environ.get("COWORK_WORKSPACE", "/workspace"),  # agent 工作目录(可写 tmpfs/volume)
     )
 
     state = {"aborted": False, "graceful_eof": False}
@@ -116,7 +117,9 @@ def main():
     rc = proc.wait()
     t_out.join(timeout=2)
     sys.stdout.buffer.flush()
-    sys.exit(rc if rc is not None else 0)
+    # os._exit 而非 sys.exit:pump_in daemon 线程可能仍阻塞在 stdin.read,走 Python
+    # finalize 会 _enter_buffered_busy 触发 SIGABRT。stdout 已 flush,直接终止。
+    os._exit(rc if rc is not None else 0)
 
 
 if __name__ == "__main__":

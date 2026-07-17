@@ -18,6 +18,7 @@ const ASSETS_DIR = process.env.COWORK_ASSETS_DIR || '/opt/cowork-assets'; // 宿
 const MEM = process.env.COWORK_MEM || '2g';
 const PIDS = process.env.COWORK_PIDS || '512';
 const LABEL_MANAGED = 'cowork.managed=1';
+const AGENT_UID = process.env.COWORK_AGENT_UID || '1000'; // 容器内非 root 跑 claude(--dangerously-skip-permissions 禁 root)
 
 const HEX = /^[a-f0-9]{1,64}$/i;
 function name(sid) {
@@ -42,10 +43,14 @@ export async function ensureContainer(sid) {
   await docker([
     'run', '-d', '--name', cname,
     '--label', LABEL_MANAGED, '--label', `cowork.sid=${sid}`,
+    // 非 root 跑:claude 的 --dangerously-skip-permissions(办公 full_access)禁止 root。
+    '--user', `${AGENT_UID}:${AGENT_UID}`,
     '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges',
     '--memory', MEM, '--pids-limit', PIDS,
+    '-e', 'HOME=/workspace',
     '-v', `${ASSETS_DIR}:/opt/cowork:ro`,
-    '-v', `${volume(sid)}:/workspace`,
+    // R1:workspace 用 tmpfs(agent uid 可写);R2 换持久 named volume + uid 权限处理。
+    '--tmpfs', `/workspace:uid=${AGENT_UID},gid=${AGENT_UID},mode=0700`,
     IMAGE, 'sleep', 'infinity',
   ]);
   return { name: cname, reused: false };
