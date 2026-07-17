@@ -19,6 +19,9 @@ const MEM = process.env.COWORK_MEM || '2g';
 const PIDS = process.env.COWORK_PIDS || '512';
 const LABEL_MANAGED = 'cowork.managed=1';
 const AGENT_UID = process.env.COWORK_AGENT_UID || '1000'; // 容器内非 root 跑 claude(--dangerously-skip-permissions 禁 root)
+// 会话容器接入的专用网络:与 cred-proxy sidecar 同网,claude 经容器名访问代理(RD6)。
+// cred-proxy.mjs 负责建网 + 起 proxy;这里只把会话容器接进去。
+const NET = process.env.COWORK_NET || 'cowork-net';
 
 const HEX = /^[a-f0-9]{1,64}$/i;
 function name(sid) {
@@ -33,6 +36,15 @@ export function volumeName(sid) {
 async function docker(args) {
   const { stdout } = await execFileP('docker', args, { maxBuffer: 32 * 1024 * 1024 });
   return stdout;
+}
+
+/** 确保专用网络存在(幂等)。cred-proxy.mjs 也会建;两处都 ensure 防启动顺序耦合。 */
+async function ensureNetwork() {
+  const nets = await docker(['network', 'ls', '--filter', `name=^${NET}$`, '--format', '{{.Name}}']);
+  if (!nets.trim()) {
+    try { await docker(['network', 'create', '--label', LABEL_MANAGED, NET]); }
+    catch (e) { if (!/already exists/i.test(String(e?.message || ''))) throw e; }
+  }
 }
 
 export async function volumeExists(sid) {
@@ -75,9 +87,12 @@ export async function ensureContainer(sid) {
     return { name: cname, reused: true };
   }
   await ensureVolume(sid);
+  await ensureNetwork();
   await docker([
     'run', '-d', '--name', cname,
     '--label', LABEL_MANAGED, '--label', `cowork.sid=${sid}`,
+    // 专用网络:claude 经容器名访问 cred-proxy sidecar(RD6);R4 出网禁内网也针对本网络。
+    '--network', NET,
     // 非 root 跑:claude 的 --dangerously-skip-permissions(办公 full_access)禁止 root。
     '--user', `${AGENT_UID}:${AGENT_UID}`,
     '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges',

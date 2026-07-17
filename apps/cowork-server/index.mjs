@@ -13,11 +13,14 @@
  *     GET  /session/:id/files?since=   → 产物 diff → {files:[{path,name,size,mtime}]}
  *     GET  /session/:id/file?path=     → 下载单文件(流式,Content-Length)
  *     GET  /session/:id/archive        → 打包 workspace(tar.gz 流式,Content-Length)
+ *   凭证代理(R3,方案 A;真 key 只进内存,容器只见 cwk_ 一次性 token):
+ *     POST /session/:id/cred {realKey,realBase,authStyle} → {token,baseUrl}
+ *     DELETE /session/:id/cred         → 废止 token(会话删除/reconcile 自动联动)
  *   WS:
  *     /session/:id/exec                → 帧桥到 docker exec(升级前先 ensureContainer)
  *
  * R1 鉴权:COWORK_SERVER_TOKEN 为空则关闭(dev);R3/R5 强制。TLS 在 R5 由反代/证书接入
- * (ws→wss 只加 TLS 层,协议不变)。凭证代理在 R3 补。
+ * (ws→wss 只加 TLS 层,协议不变;cred POST 的传输加密同样由该层承担)。
  *
  * env:
  *   COWORK_SERVER_PORT(默认 8790)/ COWORK_SERVER_TOKEN(Bearer,空=dev 关闭)
@@ -28,6 +31,8 @@ import http from 'node:http';
 import { WebSocketServer } from 'ws';
 import * as orch from './lib/orchestrator.mjs';
 import * as files from './lib/files.mjs';
+import * as cred from './lib/cred-proxy.mjs';
+import { audit } from './lib/audit.mjs';
 import { handleExec } from './lib/exec-bridge.mjs';
 
 const PORT = parseInt(process.env.COWORK_SERVER_PORT || '8790', 10);
@@ -36,6 +41,7 @@ const SHIM = process.env.COWORK_SHIM_PATH || '/opt/cowork/cowork-shim.py';
 const SID_RE = /^\/session\/([a-f0-9]{1,64})$/i;
 const EXEC_RE = /^\/session\/([a-f0-9]{1,64})\/exec$/i;
 const FILE_RE = /^\/session\/([a-f0-9]{1,64})\/(file|files|archive)$/i;
+const CRED_RE = /^\/session\/([a-f0-9]{1,64})\/cred$/i;
 
 function log(...a) { process.stderr.write('[cowork-server] ' + a.join(' ') + '\n'); }
 function bearerOk(req) { return !TOKEN || req.headers.authorization === `Bearer ${TOKEN}`; }
@@ -51,7 +57,22 @@ const server = http.createServer(async (req, res) => {
 
     if (req.method === 'POST' && url.pathname === '/reconcile') {
       const keep = (JSON.parse((await readBody(req)) || '{}').keep) || [];
-      return send(200, { removed: await orch.reconcile(keep) });
+      const removed = await orch.reconcile(keep);
+      for (const sid of removed) await cred.revokeCredentials(sid); // 孤儿会话的 token 一并废止
+      if (removed.length) audit('reconcile', { detail: `removed ${removed.join(',')}` });
+      return send(200, { removed });
+    }
+
+    // 凭证登记/废止(R3 方案 A:客户端交 key;方案 C 时由服务端 credSource 喂同一入口)。
+    // 本路由绝不 log 请求体 —— 真 key 只进 cred-proxy 内存 Map。
+    const cm = url.pathname.match(CRED_RE);
+    if (cm) {
+      const sid = cm[1];
+      if (req.method === 'POST') {
+        const body = JSON.parse((await readBody(req)) || '{}');
+        return send(200, await cred.registerCredentials(sid, body, log));
+      }
+      if (req.method === 'DELETE') { await cred.revokeCredentials(sid); return send(200, { ok: true }); }
     }
 
     const fm = url.pathname.match(FILE_RE);
@@ -60,9 +81,18 @@ const server = http.createServer(async (req, res) => {
     const m = url.pathname.match(SID_RE);
     if (m) {
       const sid = m[1];
-      if (req.method === 'POST') return send(200, await orch.ensureContainer(sid));
-      // 会话删除:容器 + volume 一起清(volume 是会话数据的最后归宿,会话没了就该走)。
-      if (req.method === 'DELETE') { await orch.removeContainer(sid, { keepVolume: false }); return send(200, { ok: true }); }
+      if (req.method === 'POST') {
+        const r = await orch.ensureContainer(sid);
+        if (!r.reused) audit('session_ensure', { sessionId: sid });
+        return send(200, r);
+      }
+      // 会话删除:容器 + volume 一起清(volume 是会话数据的最后归宿),token 联动废止。
+      if (req.method === 'DELETE') {
+        await orch.removeContainer(sid, { keepVolume: false });
+        await cred.revokeCredentials(sid);
+        audit('session_remove', { sessionId: sid });
+        return send(200, { ok: true });
+      }
     }
     send(404, { error: 'not found' });
   } catch (e) { log('req error', e.message); send(500, { error: String(e.message || e) }); }
@@ -83,6 +113,7 @@ async function handleFileOp(req, res, url, sid, op, send) {
       const expected = req.headers['content-length'] ? parseInt(req.headers['content-length'], 10) : -1;
       const dest = await files.writeFile(sid, name, req, expected);
       log(`file upload session=${sid} ${dest} (${expected}B)`);
+      audit('file_upload', { sessionId: sid, detail: `${dest} (${expected}B)` });
       return send(200, { ok: true, path: dest });
     }
     if (op === 'files' && req.method === 'GET') {
@@ -93,6 +124,7 @@ async function handleFileOp(req, res, url, sid, op, send) {
       const vmPath = url.searchParams.get('path') || '';
       const { size, stream } = await files.readFile(sid, vmPath);
       log(`file download session=${sid} ${vmPath} (${size}B)`);
+      audit('file_download', { sessionId: sid, detail: `${vmPath} (${size}B)` });
       res.writeHead(200, { 'content-type': 'application/octet-stream', 'content-length': size });
       stream.on('error', () => { try { res.destroy(); } catch { /* ignore */ } });
       res.on('error', () => { /* 客户端断开 */ });
@@ -104,6 +136,7 @@ async function handleFileOp(req, res, url, sid, op, send) {
     if (op === 'archive' && req.method === 'GET') {
       const { size, stream, cleanup } = await files.archive(sid);
       log(`archive download session=${sid} (${size}B)`);
+      audit('archive_download', { sessionId: sid, detail: `${size}B` });
       res.writeHead(200, { 'content-type': 'application/gzip', 'content-length': size });
       stream.on('error', () => { try { res.destroy(); } catch { /* ignore */ } });
       res.on('error', () => { /* 客户端断开 */ });
@@ -130,6 +163,7 @@ server.on('upgrade', async (req, socket, head) => {
   try {
     const { name, reused } = await orch.ensureContainer(sid);
     log(`exec upgrade session=${sid} → ${name} (${reused ? 'reused' : 'new'})`);
+    audit('exec_start', { sessionId: sid });
     wss.handleUpgrade(req, socket, head, (ws) => {
       ws.isAlive = true;
       ws.on('pong', () => { ws.isAlive = true; });
@@ -149,5 +183,8 @@ const pinger = setInterval(() => {
 pinger.unref?.();
 
 server.listen(PORT, () => log(`listening :${PORT} token=${TOKEN ? 'required' : 'OFF(dev)'} image=${orch._internals.IMAGE} assets=${orch._internals.ASSETS_DIR}`));
+
+// cred-proxy sidecar 容器随服务启动(失败不阻塞主服务:首个 register 会懒重试)
+cred.ensureProxy(log).catch((e) => log('cred-proxy start deferred:', e.message));
 
 for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => { clearInterval(pinger); server.close(); process.exit(0); });
