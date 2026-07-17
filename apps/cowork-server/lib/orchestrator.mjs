@@ -25,11 +25,45 @@ function name(sid) {
   if (!HEX.test(sid)) throw new Error('invalid sessionId');
   return `cowork-${sid}`;
 }
-function volume(sid) { return `cowork-ws-${sid}`; }
+export function volumeName(sid) {
+  if (!HEX.test(sid)) throw new Error('invalid sessionId');
+  return `cowork-ws-${sid}`;
+}
 
 async function docker(args) {
   const { stdout } = await execFileP('docker', args, { maxBuffer: 32 * 1024 * 1024 });
   return stdout;
+}
+
+export async function volumeExists(sid) {
+  const out = await docker(['volume', 'ls', '-q', '--filter', `name=^${volumeName(sid)}$`]);
+  return out.trim().length > 0;
+}
+
+/**
+ * 确保会话 workspace volume 存在(幂等)。fresh named volume 属 root:root,而 claude 以
+ * 非 root(AGENT_UID)跑,故创建后用一次性 helper 容器 chown —— 只在首次创建时付这一次成本。
+ * volume 与容器同 label,是"会话存在"的另一半事实源(容器可回收,volume 留到会话删)。
+ */
+export async function ensureVolume(sid) {
+  const vol = volumeName(sid);
+  if (await volumeExists(sid)) return vol;
+  await docker(['volume', 'create', '--label', LABEL_MANAGED, '--label', `cowork.sid=${sid}`, vol]);
+  try {
+    await docker([
+      'run', '--rm', '--network', 'none',
+      // cap-drop ALL 会连 root 的 CAP_CHOWN 一起剥掉(自测踩过)—— 这个一次性
+      // init 容器只保留 CHOWN 这一个能力。
+      '--cap-drop', 'ALL', '--cap-add', 'CHOWN', '--security-opt', 'no-new-privileges',
+      '-v', `${vol}:/ws`, IMAGE, 'chown', `${AGENT_UID}:${AGENT_UID}`, '/ws',
+    ]);
+  } catch (e) {
+    // 半初始化(已创建未 chown)的 volume 会被 volumeExists 幂等跳过而永远不可写:
+    // 失败就地回收,让下次调用干净重试。
+    try { await docker(['volume', 'rm', vol]); } catch { /* ignore */ }
+    throw e;
+  }
+  return vol;
 }
 
 /** 确保会话容器存在且运行;不存在则起硬化容器。幂等。返回 { name, reused }。 */
@@ -40,6 +74,7 @@ export async function ensureContainer(sid) {
     if (ps !== 'running') await docker(['start', cname]);
     return { name: cname, reused: true };
   }
+  await ensureVolume(sid);
   await docker([
     'run', '-d', '--name', cname,
     '--label', LABEL_MANAGED, '--label', `cowork.sid=${sid}`,
@@ -47,10 +82,13 @@ export async function ensureContainer(sid) {
     '--user', `${AGENT_UID}:${AGENT_UID}`,
     '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges',
     '--memory', MEM, '--pids-limit', PIDS,
-    '-e', 'HOME=/workspace',
+    // HOME 放 tmpfs(不在 workspace 内):claude 的状态文件(~/.claude* 等)不落持久
+    // volume,否则回合末产物 diff 会把它们当用户产物;容器存活期内跨回合仍持久。
+    '-e', 'HOME=/home/agent',
+    '--tmpfs', `/home/agent:uid=${AGENT_UID},gid=${AGENT_UID},mode=0700`,
     '-v', `${ASSETS_DIR}:/opt/cowork:ro`,
-    // R1:workspace 用 tmpfs(agent uid 可写);R2 换持久 named volume + uid 权限处理。
-    '--tmpfs', `/workspace:uid=${AGENT_UID},gid=${AGENT_UID},mode=0700`,
+    // R2:workspace 用会话专属 named volume(与容器生命周期解耦,文件 op 服务端直读)。
+    '-v', `${volumeName(sid)}:/workspace`,
     IMAGE, 'sleep', 'infinity',
   ]);
   return { name: cname, reused: false };
@@ -60,13 +98,30 @@ export async function ensureContainer(sid) {
 export async function removeContainer(sid, { keepVolume = true } = {}) {
   const cname = name(sid);
   try { await docker(['rm', '-f', cname]); } catch { /* 不存在即已达成 */ }
-  if (!keepVolume) { try { await docker(['volume', 'rm', volume(sid)]); } catch { /* ignore */ } }
+  if (!keepVolume) {
+    // 在飞的文件 helper(--rm)可能瞬时还挂着 volume(下载刚结束/刚被取消)→
+    // "volume is in use":短退避重试;仍占用则静默留给 reconcile 兜底。
+    for (let i = 0; i < 4; i++) {
+      try { await docker(['volume', 'rm', volumeName(sid)]); return; }
+      catch (e) {
+        if (/no such volume/i.test(String(e?.message || ''))) return;
+        await new Promise((r) => setTimeout(r, 500));
+      }
+    }
+  }
 }
 
-/** 从 labels 列出所有受管会话 id(事实源)。 */
+/**
+ * 从 labels 列出所有受管会话 id(事实源)= 容器 ∪ volume。
+ * volume 也要扫:容器被回收(或从未起过,只推过文件)时 volume 仍代表会话存在,
+ * 否则 reconcile 永远看不到孤儿 volume。
+ */
 export async function listSessions() {
-  const out = await docker(['ps', '-a', '--filter', `label=${LABEL_MANAGED}`, '--format', '{{.Label "cowork.sid"}}']);
-  return out.split('\n').map((s) => s.trim()).filter(Boolean);
+  const [c, v] = await Promise.all([
+    docker(['ps', '-a', '--filter', `label=${LABEL_MANAGED}`, '--format', '{{.Label "cowork.sid"}}']),
+    docker(['volume', 'ls', '--filter', `label=${LABEL_MANAGED}`, '--format', '{{.Label "cowork.sid"}}']),
+  ]);
+  return [...new Set(`${c}\n${v}`.split('\n').map((s) => s.trim()).filter(Boolean))];
 }
 
 /** 对账:删除不在 keep 里的孤儿会话(容器 + volume)。对齐 daemon reconcileSessions 语义。 */
@@ -85,4 +140,5 @@ export async function health() {
   return { ok: true, dockerVersion: ver, sessions: (await listSessions()).length };
 }
 
-export const _internals = { name, volume, IMAGE, ASSETS_DIR };
+export { AGENT_UID, IMAGE };
+export const _internals = { name, volumeName, IMAGE, ASSETS_DIR };
