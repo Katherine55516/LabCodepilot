@@ -150,10 +150,22 @@ export const remoteBackend: CoworkBackend = {
     return (r.removed as string[]) || [];
   },
 
-  async registerCredentials(_sessionId: string, cred: CoworkCredential): Promise<{ token: string; baseUrl: string }> {
-    // R1:直通真 key(与 R0/R1-1 补验一致,先把链路跑通)。
-    // R3:换成 POST /session/:id/cred → 服务端内存代理签发一次性 token(真 key 不进容器)。
-    return { token: cred.realKey, baseUrl: cred.realBase };
+  async registerCredentials(sessionId: string, cred: CoworkCredential): Promise<{ token: string; baseUrl: string }> {
+    // R3(方案 A):真 key 经控制面交 cowork-server 内存 → 容器只拿一次性 cwk_ token +
+    // 服务端代理 baseUrl(代理校验 token→注入真 key→转发真 base_url)。真 key 永不进
+    // 容器 env。控制面的传输加密由 R5 的 TLS 反代层承担(RD4:A 起步、预留 C)。
+    const r = await api('POST', `/session/${sessionId}/cred`, {
+      realKey: cred.realKey,
+      realBase: cred.realBase,
+      authStyle: cred.authStyle,
+    });
+    if (!r.token || !r.baseUrl) throw new Error('cowork-server cred register: bad response');
+    void import('./cowork-audit').then((m) => m.audit('cred_issued', { sessionId, detail: 'remote proxy' }));
+    return { token: String(r.token), baseUrl: String(r.baseUrl) };
   },
-  revokeCredentials(_sessionId: string) { /* R3:通知服务端废止 token */ },
+  revokeCredentials(sessionId: string) {
+    // best-effort:服务端在 DELETE session / reconcile 时也会联动废止(兜底)。
+    void api('DELETE', `/session/${sessionId}/cred`).catch(() => { /* ignore */ });
+    void import('./cowork-audit').then((m) => m.audit('cred_revoked', { sessionId, detail: 'remote proxy' }));
+  },
 };
