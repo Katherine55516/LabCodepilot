@@ -1,26 +1,43 @@
 import { getSetting } from '@/lib/db';
-import { getStatus, isImageProvisioned } from '@/lib/cowork-vm-manager';
-import { getAssetsStatus } from '@/lib/cowork-assets';
+import { getCoworkBackend } from '@/lib/cowork-backend';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 /**
- * Cowork 沙箱可用性状态(E3;M2 扩资产状态)。只读探测,绝不触发 VM 启动
- * 或资产下载。
+ * Cowork 沙箱可用性状态(E3;M2 扩资产;R1-3 按后端分)。只读探测,绝不触发容器/VM
+ * 启动或本地资产下载。
  *
  * - enabled:全局开关 settings.cowork_enabled === 'true'
- * - imageProvisioned:底镜是否就绪(纯 fs 检查;兼容字段,UI 应改看 assets)
- * - vmPhase:VM 管理器当前相位(stopped/starting/running/crashed)
- * - assets:M2 资产状态机 {image,claude,overall,totalPct}(下载中含进度,
- *   前端据 overall==='downloading' 轮询)
+ * - backendKind:'remote'(单公司服务器,RD1 默认)| 'vfkit'(保留本地 VM)
+ * - remote:可用性 = cowork-server 可达(GET /health);无本地镜像/下载概念,
+ *   imageProvisioned/assets 为兼容字段,按 server 可达映射(前端 gate 直接放行)。
+ * - vfkit:保留 imageProvisioned(纯 fs)+ assets 状态机(本地下载进度)。
  */
 export async function GET() {
   try {
+    const enabled = getSetting('cowork_enabled') === 'true';
+    const backend = await getCoworkBackend();
+    const status = await backend.getStatus();
+
+    if (backend.kind === 'remote') {
+      return Response.json({
+        enabled,
+        backendKind: 'remote',
+        imageProvisioned: status.ready,
+        vmPhase: status.ready ? 'running' : 'stopped',
+        assets: { overall: status.ready ? 'ready' : 'unavailable', usable: status.ready },
+      });
+    }
+
+    // vfkit 保留:本地镜像/资产状态(M2 下载引导)
+    const { isImageProvisioned } = await import('@/lib/cowork-vm-manager');
+    const { getAssetsStatus } = await import('@/lib/cowork-assets');
     return Response.json({
-      enabled: getSetting('cowork_enabled') === 'true',
+      enabled,
+      backendKind: 'vfkit',
       imageProvisioned: isImageProvisioned(),
-      vmPhase: getStatus().phase,
+      vmPhase: status.phase,
       assets: getAssetsStatus(),
     });
   } catch (error) {

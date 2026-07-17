@@ -806,55 +806,46 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
           // a hang. Subscribe before the blocking decideCowork; unsubscribe after.
           let unsubVmProgress: (() => void) | null = null;
           if (coworkSandboxRequested) {
-            const vmMgrEarly = await import('./cowork-vm-manager');
-            // If not already running, announce "starting" up front so the banner
-            // appears immediately (before the first progress transition).
-            if (vmMgrEarly.getStatus().phase !== 'running') {
+            const { getCoworkBackend } = await import('./cowork-backend');
+            const backendEarly = await getCoworkBackend();
+            // 未就绪时先发 "starting",让"沙箱准备中"横幅即刻出现(remote 秒级就绪时一闪而过)。
+            const early = await backendEarly.getStatus();
+            if (!early.ready) {
               controller.enqueue(formatSSE({ type: 'vm_status', data: JSON.stringify({ phase: 'starting' }) }));
             }
-            unsubVmProgress = vmMgrEarly.onVmProgress((p) => {
+            unsubVmProgress = backendEarly.onProgress((p) => {
               controller.enqueue(formatSSE({ type: 'vm_status', data: JSON.stringify(p) }));
             });
           }
           // decideCowork is async in P1-B: it lazily starts/rebuilds the VM
           // via cowork-vm-manager and only resolves once the VM is ready (or
           // decides to fall back to host).
-          const decision = await decideCowork(sess?.sandbox_enabled).finally(() => {
+          const decision = await decideCowork(sessionId, sess?.sandbox_enabled).finally(() => {
             unsubVmProgress?.();
           });
           if (decision.useSandbox && decision.executablePath) {
             queryOptions.pathToClaudeCodeExecutable = decision.executablePath;
             const coworkEnv = queryOptions.env as Record<string, string>;
-            // Session-scoped VM workspace: the forwarder reads COWORK_SESSION_ID
-            // and the daemon cd's to /home/agent/sessions/<id>/workspace.
-            coworkEnv.COWORK_SESSION_ID = sessionId;
-            // P1-C: the forwarder connects to this vsock unix socket and runs
-            // under the app's own node (Electron with ELECTRON_RUN_AS_NODE=1 in
-            // the packaged app, plain node in dev) — no reliance on PATH having node.
-            const { VSOCK_SOCKET_PATH } = await import('./cowork-vsock');
-            coworkEnv.COWORK_VSOCK_PATH = VSOCK_SOCKET_PATH;
-            coworkEnv.COWORK_NODE_BIN = process.execPath;
-            coworkEnv.ELECTRON_RUN_AS_NODE = '1';
-            // P3-B: 真凭证不进 VM —— 注册进宿主代理,把过河的 ANTHROPIC_* 换成
-            // 一次性 token + 代理 base_url。VM 内 claude 拿不到真 key(提示注入偷
-            // 不走、外发不掉真凭证);代理只管 API 调用,通用出网仍走 NAT。有真
-            // 凭证才走(env 模式用户自带 key、无 managed 凭证时保持原样)。
+            // R1-3: 连接 env 由当前后端决定(COWORK_SESSION_ID + vsock 或 remote 端点 +
+            // COWORK_NODE_BIN/ELECTRON_RUN_AS_NODE),forwarder 据此连沙箱。
+            Object.assign(coworkEnv, decision.execEnv || {});
+            const { getCoworkBackend } = await import('./cowork-backend');
+            const backend = await getCoworkBackend();
+            // 凭证:真凭证不进沙箱 —— 注册进后端代理,把过河的 ANTHROPIC_* 换成 token +
+            // 代理 base_url(vfkit 走 P3-B 宿主代理;remote R1 直通真 key、R3 换服务端一次性
+            // token)。有真凭证才走(env 模式用户自带 key 时保持原样)。
             const realKey = coworkEnv.ANTHROPIC_AUTH_TOKEN || coworkEnv.ANTHROPIC_API_KEY;
             const realBase = coworkEnv.ANTHROPIC_BASE_URL;
             if (realKey && realBase) {
-              const proxy = await import('./cowork-proxy');
-              await proxy.ensureProxyRunning();
               const authStyle = coworkEnv.ANTHROPIC_AUTH_TOKEN ? 'auth_token' : 'api_key';
-              const { token, baseUrl } = proxy.registerSession(sessionId, { realKey, realBase, authStyle });
+              const { token, baseUrl } = await backend.registerCredentials(sessionId, { realKey, realBase, authStyle });
               coworkEnv.ANTHROPIC_BASE_URL = baseUrl;
               if (authStyle === 'auth_token') coworkEnv.ANTHROPIC_AUTH_TOKEN = token;
               else coworkEnv.ANTHROPIC_API_KEY = token;
-              console.log('[cowork] session credentials registered with host proxy — real key withheld from VM');
+              console.log('[cowork] session credentials registered with backend proxy');
             }
-            // Keep the VM alive while this turn runs (blocks idle reclaim);
-            // released in the outer finally.
-            const vmMgr = await import('./cowork-vm-manager');
-            vmMgr.markSessionActive(sessionId);
+            // 回合内保活(阻塞空闲回收);回合末 release 在外层 finally。
+            backend.markActive(sessionId);
             coworkActiveSessionId = sessionId;
             const transfer = await import('./cowork-transfer');
             await transfer.ensureSessionWorkspace(sessionId);
@@ -2298,9 +2289,10 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
         if (coworkActiveSessionId) {
           const releasingId = coworkActiveSessionId;
           coworkActiveSessionId = null;
-          import('./cowork-vm-manager')
-            .then((m) => m.releaseSession(releasingId))
-            .catch(() => { /* manager not loaded — nothing to release */ });
+          import('./cowork-backend')
+            .then((m) => m.getCoworkBackend())
+            .then((b) => b.release(releasingId))
+            .catch(() => { /* backend not loaded — nothing to release */ });
         }
       }
     },

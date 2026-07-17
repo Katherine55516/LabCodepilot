@@ -94,7 +94,7 @@ export const remoteBackend: CoworkBackend = {
 
   async ensureWorkspace(sessionId: string): Promise<string> { await this.ensureReady(sessionId); return WORKSPACE; },
   async writeFile(_sessionId: string, _name: string, _data: Buffer): Promise<string> { throw new Error(NOT_IMPL_R2); },
-  async listFiles(_sessionId: string, _sinceMs: number): Promise<VmArtifact[]> { throw new Error(NOT_IMPL_R2); },
+  async listFiles(_sessionId: string, _sinceMs: number): Promise<VmArtifact[]> { return []; /* R1-3:先返回空产物(纯对话回合末 diff 不崩);R2 实现服务端 volume diff */ },
   async readFileStream(_sessionId: string, _vmPath: string): Promise<{ stream: NodeJS.ReadableStream; size: number }> { throw new Error(NOT_IMPL_R2); },
   async archiveStream(_sessionId: string): Promise<{ stream: NodeJS.ReadableStream; size: number }> { throw new Error(NOT_IMPL_R2); },
   async removeSession(sessionId: string): Promise<void> { try { await api('DELETE', `/session/${sessionId}`); } catch { /* best-effort */ } },

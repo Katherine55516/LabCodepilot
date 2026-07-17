@@ -1,75 +1,55 @@
 /**
- * cowork-poc.ts — Cowork 沙箱模式(POC)的宿主侧接线。
+ * cowork-poc.ts — Cowork 沙箱模式的宿主侧接线判定。
  *
- * POC 阶段只做一件事:当会话开启 sandbox_enabled 且全局 cowork_enabled 打开时,
- * 返回一个转发器脚本路径,交给 SDK 的 `pathToClaudeCodeExecutable`。SDK 以为在
- * 跑本地 claude,实际由转发器经 SSH 把 stdin/stdout 接到 VM 内的 linux claude。
+ * 当会话开启 sandbox_enabled 且全局 cowork_enabled 打开时,经当前 CoworkBackend
+ * (RD1:remote 容器)确保沙箱就绪,返回转发器路径 + 连接 env 交给 SDK 的
+ * pathToClaudeCodeExecutable。SDK 以为在跑本地 claude,实际由转发器把 stdin/stdout
+ * 接到远程容器(或保留态的 vfkit VM)内的 linux claude。
  *
- * 生产形态会把这里换成正式的 VM 管理器(vfkit/WSL2 生命周期 + vsock + guest
- * daemon),并把执行目标建模成 session.execution_target。POC 先用最短路径验证
- * 转发桥拓扑是否成立。详见 docs/research/cowork-local-vm-mode.md。
+ * R1-3:从直连 vfkit(ensureRunning + forwarder-vsock)改为走 getCoworkBackend()。
+ * 资产门按后端分:vfkit 需本地镜像就绪;remote 无本地资产,就绪由 ensureReady 验(server 可达)。
  */
 import fs from 'fs';
-import path from 'path';
 import { getSetting } from './db';
-import { ensureRunning } from './cowork-vm-manager';
-import { assetsReady } from './cowork-assets';
-import { bundledCoworkResource } from './cowork-paths';
-
-/**
- * 转发器脚本路径(M3 起随包分发为正道):Resources/cowork/forwarder-vsock.sh
- * (同目录带 .mjs,脚本按 dirname 自解析)→ cowork_forwarder_path 设置同目录
- * (遗留)→ 仓库路径(dev)。
- */
-function forwarderPath(): string {
-  const candidates: string[] = [];
-  const bundled = bundledCoworkResource('forwarder-vsock.sh');
-  if (bundled) candidates.push(bundled);
-  const fromSetting = (getSetting('cowork_forwarder_path') || '').trim();
-  if (fromSetting) {
-    // 设置可能仍指向旧 ssh 脚本;取同目录的 vsock 版 bash 包装
-    candidates.push(path.join(path.dirname(fromSetting), 'forwarder-vsock.sh'));
-    candidates.push(fromSetting);
-  }
-  candidates.push(path.join(process.cwd(), 'scripts/poc/cowork/forwarder-vsock.sh'));
-  candidates.push(path.join(process.cwd(), '../../scripts/poc/cowork/forwarder-vsock.sh'));
-  return candidates.find((p) => fs.existsSync(p)) || candidates[0];
-}
+import { getCoworkBackend } from './cowork-backend';
 
 export interface CoworkDecision {
   /** 是否走沙箱转发路径 */
   useSandbox: boolean;
   /** 传给 SDK 的 pathToClaudeCodeExecutable(useSandbox 时才有) */
   executablePath?: string;
-  /** 不可用时的原因(用于日志/未来 UI 提示) */
+  /** 转发器连接所需 env(COWORK_SESSION_ID + vsock 或 remote 端点;由 backend.execEndpoint 提供) */
+  execEnv?: Record<string, string>;
+  /** 不可用时的原因(日志/UI 提示) */
   reason?: string;
 }
 
 /**
- * 判定某会话本回合是否应走沙箱,并在需要时懒启动/重建 VM。三重门:
- * 全局开关 + 会话开关 + VM 管理器就绪(P1-B:自动 ensureRunning,不再只查
- * vm-ip 文件)。任一不满足都安全回退到宿主执行(useSandbox=false)。
+ * 判定某会话本回合是否应走沙箱,并在需要时懒启动/重建沙箱。门:
+ * 全局开关 + 会话开关 + (vfkit 才校验)本地镜像就绪 + 转发器存在 + backend.ensureReady。
+ * 任一不满足都返回 useSandbox=false(claude-client 据此硬失败,绝不落宿主执行)。
  *
- * async 因为 ensureRunning 可能要 spawn vfkit 并等 SSH 就绪(冷启动数秒);
- * 首条沙箱消息因此会阻塞到 VM 起好,符合"点开就能用"的预期。
+ * async:backend.ensureReady 可能要起容器/VM 并等就绪(冷启动数秒),首条沙箱消息因此阻塞到就绪。
  */
-export async function decideCowork(sandboxEnabled: boolean | number | undefined): Promise<CoworkDecision> {
+export async function decideCowork(sessionId: string, sandboxEnabled: boolean | number | undefined): Promise<CoworkDecision> {
   if (!sandboxEnabled) return { useSandbox: false };
   if (getSetting('cowork_enabled') !== 'true') {
     return { useSandbox: false, reason: 'cowork_disabled_globally' };
   }
-  // M2:资产门 = 底镜 + claude binary 都在(缺任一走下载引导,reason 复用不变)
-  if (!assetsReady()) {
-    return { useSandbox: false, reason: 'image_not_provisioned' };
+  const backend = await getCoworkBackend();
+  // 资产门:vfkit 需本地底镜 + claude binary;remote 无本地资产(就绪由 ensureReady 验)。
+  if (backend.kind === 'vfkit') {
+    const { assetsReady } = await import('./cowork-assets');
+    if (!assetsReady()) return { useSandbox: false, reason: 'image_not_provisioned' };
   }
-  const fwd = forwarderPath();
-  if (!fs.existsSync(fwd)) {
+  const endpoint = backend.execEndpoint(sessionId);
+  if (!fs.existsSync(endpoint.forwarderPath)) {
     return { useSandbox: false, reason: 'forwarder_missing' };
   }
-  // 懒启动/重建 —— 崩溃态也会在这里被重新拉起。
-  const vm = await ensureRunning();
-  if (vm.phase !== 'running') {
-    return { useSandbox: false, reason: `vm_${vm.phase}${vm.reason ? ':' + vm.reason : ''}` };
+  // 懒启动/重建 —— 崩溃态/未就绪会在这里被拉起或判不可用。
+  const status = await backend.ensureReady(sessionId);
+  if (!status.ready) {
+    return { useSandbox: false, reason: `sandbox_${status.phase}${status.reason ? ':' + status.reason : ''}` };
   }
-  return { useSandbox: true, executablePath: fwd };
+  return { useSandbox: true, executablePath: endpoint.forwarderPath, execEnv: endpoint.env };
 }

@@ -5,11 +5,12 @@ import path from 'path';
 // parseLeaseIp 套件已随 M1 移除:SSH/DHCP 反查链整体退役,就绪判定全走 vsock。
 
 describe('cowork-poc: decideCowork gate (safe early-returns, no VM start)', () => {
+  const SID = 'a1b2c3d4e5f6a7b8';
   it('sandbox disabled → useSandbox:false, touches nothing', async () => {
     const { decideCowork } = await import(path.resolve(__dirname, '../../lib/cowork-poc.ts'));
-    assert.deepEqual(await decideCowork(0), { useSandbox: false });
-    assert.deepEqual(await decideCowork(undefined), { useSandbox: false });
-    assert.deepEqual(await decideCowork(false), { useSandbox: false });
+    assert.deepEqual(await decideCowork(SID, 0), { useSandbox: false });
+    assert.deepEqual(await decideCowork(SID, undefined), { useSandbox: false });
+    assert.deepEqual(await decideCowork(SID, false), { useSandbox: false });
   });
 
   it('sandbox on but global cowork_enabled off → falls back with reason, never starts VM', async () => {
@@ -18,7 +19,7 @@ describe('cowork-poc: decideCowork gate (safe early-returns, no VM start)', () =
     const saved = getSetting('cowork_enabled');
     try {
       setSetting('cowork_enabled', 'false');
-      const decision = await decideCowork(1);
+      const decision = await decideCowork(SID, 1);
       assert.equal(decision.useSandbox, false);
       assert.equal(decision.reason, 'cowork_disabled_globally');
     } finally {
