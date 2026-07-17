@@ -18,7 +18,7 @@
 import * as crypto from 'crypto';
 import * as fs from 'fs';
 import { anlcodePath, getAnlcodeDir } from './paths';
-import type { ImageProviderConfig, ModelConfig } from './types';
+import type { CoworkRemoteConfig, ImageProviderConfig, ModelConfig } from './types';
 import { logWarn } from './log';
 import { seal, open, isSealed, getKey } from './crypto-seal';
 
@@ -147,6 +147,34 @@ export function loadImageConfig(): ImageProviderConfig | null {
 
 export function clearImageConfig(): void {
   safeUnlink(anlcodePath('imageConfig'));
+}
+
+// ── Cowork config (办公沙箱配置下发离线缓存,R5-5) ───────────────────────────
+
+/** 缓存下发的 cowork 配置(token 已解密,整体 crypto-seal 加密落盘;断网降级用)。 */
+export function saveCoworkConfig(cfg: CoworkRemoteConfig): void {
+  fs.writeFileSync(anlcodePath('coworkConfig'), seal(JSON.stringify(cfg), getKey()), 'utf-8');
+}
+
+export function loadCoworkConfig(): CoworkRemoteConfig | null {
+  try {
+    const raw = fs.readFileSync(anlcodePath('coworkConfig'), 'utf-8').trim();
+    const key = getKey();
+    const json = open(raw, key);
+    if (!json) return null;
+    const parsed = JSON.parse(json) as CoworkRemoteConfig;
+    if (!parsed || typeof parsed !== 'object') return null;
+    if (key && !isSealed(raw)) {
+      try { saveCoworkConfig(parsed); } catch { /* best effort */ }
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+export function clearCoworkConfig(): void {
+  safeUnlink(anlcodePath('coworkConfig'));
 }
 
 // ── Selected Config ──────────────────────────────────────────────────────────

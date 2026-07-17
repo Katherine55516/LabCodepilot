@@ -16,7 +16,7 @@
 import * as http from 'http';
 import { logWarn } from './log';
 import type { ManagedProviderRow } from './managed-providers';
-import type { ImageProviderConfig } from './types';
+import type { CoworkRemoteConfig, ImageProviderConfig } from './types';
 
 let serverPort: number | null = null;
 
@@ -168,5 +168,32 @@ export async function purgeImageConfigOnServer(): Promise<void> {
   );
   if (!r.ok) {
     throw new Error(`image-config purge failed: status=${r.status} body=${JSON.stringify(r.body)}`);
+  }
+}
+
+/**
+ * Push the per-user cowork remote-sandbox config to the embedded server so it
+ * writes the cowork_remote_url / cowork_remote_token / cowork_backend settings
+ * (token is in SENSITIVE_SETTINGS → sealed at rest). Loopback-only, same trust
+ * model as /image-config/sync.
+ */
+export async function syncCoworkConfigToServer(config: CoworkRemoteConfig): Promise<void> {
+  const r = await postJson<{ ok: boolean; error?: string }>(
+    '/api/auth/cowork-config/sync',
+    { config },
+  );
+  if (!r.ok) {
+    throw new Error(`cowork-config sync failed: status=${r.status} body=${JSON.stringify(r.body)}`);
+  }
+}
+
+/** Clear the delivered cowork config (logout / 401) — office mode falls back to the local default. */
+export async function purgeCoworkConfigOnServer(): Promise<void> {
+  const r = await postJson<{ ok: boolean; error?: string }>(
+    '/api/auth/cowork-config/purge',
+    {},
+  );
+  if (!r.ok) {
+    throw new Error(`cowork-config purge failed: status=${r.status} body=${JSON.stringify(r.body)}`);
   }
 }

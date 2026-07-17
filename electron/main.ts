@@ -15,6 +15,7 @@ import {
   getConfigs,
   fetchUsage,
   fetchImageConfig,
+  fetchCoworkConfig,
   anlLogout,
 } from './auth/client';
 import {
@@ -35,6 +36,8 @@ import {
   purgeManagedProvidersOnServer,
   syncImageConfigToServer,
   purgeImageConfigOnServer,
+  syncCoworkConfigToServer,
+  purgeCoworkConfigOnServer,
 } from './auth/broker';
 import { clearAuthState } from './auth/storage';
 import { initMasterKey, getMasterKeyHex, logSafeStorageStatus } from './auth/secret-key';
@@ -1083,6 +1086,24 @@ async function refreshImageConfig(): Promise<void> {
 }
 
 /**
+ * Fetch the per-user cowork remote-sandbox config (server url + HMAC token,
+ * R5-5 账号下发) and push it to the embedded server (writes cowork_remote_url /
+ * cowork_remote_token(sealed)/ cowork_backend settings). Best-effort,同
+ * refreshImageConfig。404 = 未开通/后端未上线 → 跳过且**不清**既有配置(保
+ * dev 手写三键的联调后门;真正清空只发生在登出/401 的 purge)。
+ */
+async function refreshCoworkConfig(): Promise<void> {
+  try {
+    const cfg = await fetchCoworkConfig();
+    if (!cfg) return; // 404:未开通/未上线 — 不动现状
+    await syncCoworkConfigToServer(cfg);
+    logInfo('cowork config synced: url=', cfg.serverUrl, 'hasToken=', !!cfg.token);
+  } catch (err) {
+    logWarn('failed to refresh cowork config:', (err as Error).message);
+  }
+}
+
+/**
  * Initial boot pass — runs once after the embedded server is ready.
  *
  * Behaviour matrix (also documented in docs/exec-plans/active/login-system.md):
@@ -1153,14 +1174,16 @@ async function bootAccountState(): Promise<void> {
     } catch (e) {
       logWarn('getConfigs failed at boot:', (e as Error).message);
     }
-    // 文生图凭证下发：与 configs 并列，独立 try（失败不影响对话配置）。
+    // 文生图凭证/办公沙箱配置下发：与 configs 并列，独立 try（失败不影响对话配置）。
     await refreshImageConfig();
+    await refreshCoworkConfig();
 
     if (!isOfflineMode) {
       startBackgroundPolling({
         onConfigsChanged: (configs) => {
           void syncManagedFromConfigs(configs);
           void refreshImageConfig();
+          void refreshCoworkConfig();
           broadcastAuthChange();
         },
       });
@@ -1192,10 +1215,12 @@ async function postLoginSequence(): Promise<void> {
     logWarn('postLogin getConfigs failed:', (e as Error).message);
   }
   await refreshImageConfig();
+  await refreshCoworkConfig();
   startBackgroundPolling({
     onConfigsChanged: (configs) => {
       void syncManagedFromConfigs(configs);
       void refreshImageConfig();
+      void refreshCoworkConfig();
       broadcastAuthChange();
     },
   });
@@ -1214,6 +1239,11 @@ async function postLogoutSequence(): Promise<void> {
     await purgeImageConfigOnServer();
   } catch (e) {
     logWarn('postLogout image-config purge failed:', (e as Error).message);
+  }
+  try {
+    await purgeCoworkConfigOnServer();
+  } catch (e) {
+    logWarn('postLogout cowork-config purge failed:', (e as Error).message);
   }
   currentMe = null;
   isOfflineMode = false;
@@ -2463,8 +2493,9 @@ app.whenReady().then(async () => {
     try {
       const configs = await getConfigs({ force: true });
       await syncManagedFromConfigs(configs);
-      // 手动「刷新配置」按钮同时刷新文生图凭证；失败不阻断对话配置刷新结果。
+      // 手动「刷新配置」按钮同时刷新文生图凭证与办公沙箱配置；失败不阻断对话配置刷新结果。
       await refreshImageConfig();
+      await refreshCoworkConfig();
       broadcastAuthChange();
       return { ok: true as const, count: configs.length };
     } catch (e) {
@@ -2485,6 +2516,9 @@ app.whenReady().then(async () => {
       } catch { /* ignore */ }
       try {
         await purgeImageConfigOnServer();
+      } catch { /* ignore */ }
+      try {
+        await purgeCoworkConfigOnServer();
       } catch { /* ignore */ }
       managedConfigCount = 0;
       broadcastAuthChange();

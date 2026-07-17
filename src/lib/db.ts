@@ -37,6 +37,9 @@ const SENSITIVE_SETTINGS = new Set<string>([
   // Bailian (DashScope) text-to-image credentials blob — JSON { apiKey, workspaceId, model, region }.
   // Sealed at rest so the embedded api key isn't stored plaintext in the DB.
   'bailian_image_config',
+  // Cowork 远程沙箱的用户 HMAC token(R5-5 账号下发)。密封落盘;读侧 getSetting 透明
+  // 解密,存量明文值 open() 直通兼容(dev 后门手写的明文无需迁移)。
+  'cowork_remote_token',
 ]);
 
 // MCP 市场安装时收集的密钥（API key / token 等）以此为前缀写入，加密落盘——
