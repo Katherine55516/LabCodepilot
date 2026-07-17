@@ -183,7 +183,9 @@ export function wrapExecutionStream(
   let sawError = false;
   // 逐用例计时：对 text 增量做行缓冲，▶ 行 → 下一条 @@RESULT 行的挂钟差（见 exec-timing.ts）
   const timer = createCaseTimer();
-  const traceCollector = new ScriptTraceCollector(opts.runStartMs, opts.traceRedactions ?? []);
+  // projectPath 是必须的:真机里快照多以【项目相对路径的文件链接】形态出现(MCP 配了
+  // --output-dir),不给根就一个元素都收不到(2026-07-17 真机实测的初版失效原因)。
+  const traceCollector = new ScriptTraceCollector(opts.runStartMs, opts.traceRedactions ?? [], opts.projectPath);
   const deposit = opts.depositScripts !== false;
   // 逐条增量沉淀:一条回归用例 pass 就立刻生成它的脚本,不等报告。治「断流全丢」——生成原本
   // 由报告成功门控,执行被网络掐断 → 报告不跑 → 已通过用例的脚本一条都不沉淀。

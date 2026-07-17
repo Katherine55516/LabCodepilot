@@ -9,6 +9,14 @@
  *
  * fixture 严格照 @playwright/mcp 0.0.76 的真实响应格式（分节文本 + ```yaml 围栏 aria 树，
  * 行形如 `- button "+ 新建学科" [ref=e12] [cursor=pointer]`）。
+ *
+ * ⚠️ 2026-07-17 真机教训：初版【只认内联 ```yaml 形态】，本组用例也只覆盖内联，全绿；打包
+ * 真机跑下来 trace 里 elements 行为 0 —— 一个元素都没收到。原因是本 app 的 MCP 配了
+ * `--output-dir`（prompts.ts），真实响应根本不是内联：
+ *   - `browser_navigate` → `### Snapshot` 后跟【文件链接】`- [Snapshot](AI_LabTest/…/page-*.yml)`；
+ *   - `browser_snapshot` → 内联 YAML 有 352KB，被 SDK 截断成 `<persisted-output>` 包装 + 2KB 预览。
+ * 教训：解析器的 fixture 必须取自【真实链路的原文】，不能拿自己造的理想数据。下面
+ * REAL_* 两个常量就是从真机 SSE 流里原样抠出来的。
  */
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
@@ -24,6 +32,12 @@ import {
   writeTraceFile,
   type ScriptTraceAction,
 } from '@/lib/test/script-trace';
+
+/** 临时项目目录(文件链接形态需要真实的项目根)。 */
+const withTempProject = (fn: (dir: string) => void) => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'trace-elements-'));
+  try { fn(dir); } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+};
 
 /** 一条真实形态的 MCP tool_result：Ran Playwright code 节 + Snapshot 节。 */
 const mcpResult = (code: string, snapshotYaml: string) =>
@@ -57,9 +71,10 @@ describe('extractAriaSnapshot', () => {
     assert.equal(extractAriaSnapshot(content), undefined);
   });
 
-  it('快照被配置成文件链接形态时不读盘、当作无快照', () => {
-    // MCP 配了 snapshot 文件名时该节退化为 `- [Snapshot](page.yml)`（无 yaml 围栏）。
-    const content = ['### Snapshot', '- [Snapshot](/tmp/page-1.yml)'].join('\n');
+  it('文件链接形态在【没有 projectPath】时当作无快照', () => {
+    // 注意:这条曾经断言的是「文件链接一律不读盘」——那个设计判断被真机推翻(见文件头)。
+    // 现在的口径是:文件链接【要读】,但必须有项目根才能解析与做安全校验;没有根才降级。
+    const content = ['### Snapshot', '- [Snapshot](page-1.yml)'].join('\n');
     assert.equal(extractAriaSnapshot(content), undefined);
   });
 });
@@ -179,11 +194,6 @@ describe('observedElements 与语义指纹的隔离', () => {
 });
 
 describe('trace 文件往返', () => {
-  const withTempProject = (fn: (dir: string) => void) => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'trace-elements-'));
-    try { fn(dir); } finally { fs.rmSync(dir, { recursive: true, force: true }); }
-  };
-
   it('elements 行写入后能读回', () => {
     withTempProject((dir) => {
       const actions: ScriptTraceAction[] = [{
@@ -210,5 +220,136 @@ describe('trace 文件往返', () => {
       assert.equal(read?.actions.length, 1);
       assert.deepEqual(read?.elementsByCase, {});
     });
+  });
+});
+
+// ── 真机响应形态（2026-07-17 从打包版 SSE 流原样抠出）────────────────────────────
+// 初版对这两种形态一个都不认，真机 elements 行为 0。回归守护：它们才是主路径。
+
+/** browser_navigate 的真实返回：Snapshot 节退化成【项目相对路径】的文件链接。 */
+const REAL_NAVIGATE_RESULT = "### Ran Playwright code\n```js\nawait page.goto('http://localhost:5173');\n```\n### Page\n- Page URL: http://localhost:5173/\n- Page Title: Learning System\n- Console: 0 errors, 2 warnings\n### Snapshot\n- [Snapshot](AI_LabTest/report/_evidence/学科管理回归-local/page-2026-07-17T07-25-21-808Z.yml)\n### Events\n- New console entries: AI_LabTest/report/_evidence/学科管理回归-local/console-2026-07-17T07-25-21-630Z.log#L1-L3";
+
+/** 真实快照 .yml 的内容（MCP --output-dir 落盘的原样格式）。 */
+const REAL_SNAPSHOT_YML = [
+  '- generic [ref=e3]:',
+  '  - banner [ref=e4]:',
+  '    - generic [ref=e5]:',
+  '      - link "📚 Learning System" [ref=e6] [cursor=pointer]:',
+  '        - /url: /',
+  '      - navigation [ref=e7]:',
+  '        - link "总览" [ref=e8] [cursor=pointer]:',
+  '          - /url: /',
+  '        - link "学习日志" [ref=e9] [cursor=pointer]:',
+  '          - /url: /sessions',
+  '        - button "🔔" [ref=e14] [cursor=pointer]',
+  '  - main [ref=e15]:',
+  '    - heading "我在学的" [level=1] [ref=e21]',
+  '    - button "+ 新建学科" [ref=e22] [cursor=pointer]',
+].join('\n');
+
+/** browser_snapshot 的真实返回：内联 YAML 太大被 SDK 截断成 persisted 包装 + 2KB 预览。 */
+const realPersistedResult = (absPath: string) =>
+  `<persisted-output>\nOutput too large (352.1KB). Full output saved to: ${absPath}\n\nPreview (first 2KB):\n[\n  {\n    "type": "text",\n    "text": "### Page\\n- Page URL: http://localhost:5173/\\n### Snapshot\\n\`\`\`yaml\\n- generic [`;
+
+describe('真机响应形态 · 文件链接（browser_navigate 的主路径）', () => {
+  it('从 Snapshot 文件链接读出元素', () => {
+    withTempProject((dir) => {
+      const rel = 'AI_LabTest/report/_evidence/学科管理回归-local/page-2026-07-17T07-25-21-808Z.yml';
+      const abs = path.join(dir, rel);
+      fs.mkdirSync(path.dirname(abs), { recursive: true });
+      fs.writeFileSync(abs, REAL_SNAPSHOT_YML);
+
+      const yaml = extractAriaSnapshot(REAL_NAVIGATE_RESULT, dir);
+      assert.ok(yaml, '真机主路径:必须读得到快照文件');
+      const els = parseSnapshotElements(yaml);
+      assert.deepEqual(els, [
+        { role: 'link', name: '📚 Learning System' },
+        { role: 'link', name: '总览' },
+        { role: 'link', name: '学习日志' },
+        { role: 'button', name: '🔔' },
+        { role: 'heading', name: '我在学的' },
+        { role: 'button', name: '+ 新建学科' },
+      ]);
+    });
+  });
+
+  it('不给 projectPath 时不解析文件链接（无根则无从做安全校验）', () => {
+    assert.equal(extractAriaSnapshot(REAL_NAVIGATE_RESULT), undefined);
+  });
+
+  it('文件链接指向项目根之外 → 拒绝（路径来自 MCP 输出，按不可信处理）', () => {
+    withTempProject((dir) => {
+      const evil = '### Snapshot\n- [Snapshot](../../../../etc/passwd.yml)';
+      assert.equal(extractAriaSnapshot(evil, dir), undefined);
+    });
+  });
+
+  it('快照文件不存在 → 静默当作没有清单，不抛错', () => {
+    withTempProject((dir) => {
+      assert.equal(extractAriaSnapshot(REAL_NAVIGATE_RESULT, dir), undefined);
+    });
+  });
+});
+
+describe('真机响应形态 · persisted 截断（browser_snapshot 的主路径）', () => {
+  it('从 SDK tool-results 缓存 JSON 里读出元素', () => {
+    withTempProject((dir) => {
+      const cache = path.join(dir, 'cache.json');
+      fs.writeFileSync(cache, JSON.stringify([
+        { type: 'text', text: `### Page\n- Page URL: http://localhost:5173/\n### Snapshot\n\`\`\`yaml\n${REAL_SNAPSHOT_YML}\n\`\`\`` },
+      ]));
+      const yaml = extractAriaSnapshot(realPersistedResult(cache), dir);
+      assert.ok(yaml, 'persisted 形态必须能还原出内联快照');
+      assert.deepEqual(parseSnapshotElements(yaml).slice(0, 2), [
+        { role: 'link', name: '📚 Learning System' },
+        { role: 'link', name: '总览' },
+      ]);
+    });
+  });
+
+  it('缓存文件已被清理 → 静默降级，不抛错', () => {
+    withTempProject((dir) => {
+      assert.equal(extractAriaSnapshot(realPersistedResult(path.join(dir, 'gone.json')), dir), undefined);
+    });
+  });
+
+  it('persisted 输出里没有 Snapshot 节 → 不白读盘', () => {
+    withTempProject((dir) => {
+      const cache = path.join(dir, 'c.json');
+      fs.writeFileSync(cache, JSON.stringify([{ type: 'text', text: '一份很大的文件内容,与快照无关' }]));
+      const noSnap = `<persisted-output>\nOutput too large (99KB). Full output saved to: ${cache}\n\nPreview (first 2KB):\n[...]`;
+      assert.equal(extractAriaSnapshot(noSnap, dir), undefined);
+    });
+  });
+});
+
+describe('收集器端到端 · 真机文件链接形态', () => {
+  it('collector 拿到 projectPath 后，能从 navigate 的文件链接收集元素', () => {
+    withTempProject((dir) => {
+      const rel = 'AI_LabTest/report/_evidence/学科管理回归-local/page-x.yml';
+      const abs = path.join(dir, rel);
+      fs.mkdirSync(path.dirname(abs), { recursive: true });
+      fs.writeFileSync(abs, REAL_SNAPSHOT_YML);
+
+      const collector = new ScriptTraceCollector(0, [], dir);
+      collector.feedText('@@CASE_START {"id":"TC-001","index":1}\n');
+      collector.feedToolUse({ id: 't1', name: 'mcp__playwright__browser_navigate', input: { url: 'http://localhost:5173' } });
+      collector.feedToolResult({
+        tool_use_id: 't1',
+        content: `### Ran Playwright code\n\`\`\`js\nawait page.goto('x');\n\`\`\`\n### Snapshot\n- [Snapshot](${rel})`,
+      });
+
+      const els = collector.elementsForCase('TC-001');
+      assert.equal(els.length, 6, '真机主路径:收集器必须收到元素(初版这里是 0)');
+      assert.ok(els.some((e) => e.role === 'button' && e.name === '+ 新建学科'));
+    });
+  });
+
+  it('缺 projectPath 的 collector 不因文件链接崩溃（降级为空清单）', () => {
+    const collector = new ScriptTraceCollector(0, []);
+    collector.feedText('@@CASE_START {"id":"TC-001","index":1}\n');
+    collector.feedToolUse({ id: 't1', name: 'mcp__playwright__browser_navigate', input: {} });
+    collector.feedToolResult({ tool_use_id: 't1', content: REAL_NAVIGATE_RESULT });
+    assert.deepEqual(collector.elementsForCase('TC-001'), []);
   });
 });
