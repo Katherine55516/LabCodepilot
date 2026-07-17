@@ -18,11 +18,11 @@ import {
   type ScriptManifest,
   type ScriptManifestCase,
 } from './script-artifacts';
-import { readTraceFile, redactTraceText, type TraceRedaction } from './script-trace';
+import { readTraceFile, redactTraceText, type ObservedElement, type ScriptTraceAction, type TraceRedaction } from './script-trace';
 import { isSafeForAutomaticReplay, validateScriptSource, type StaticScriptValidation } from './script-validator';
 import { resolveScriptPlaywrightRuntime, runGeneratedScript, summarizeRunFailure } from './script-runner';
 import { isUnsafeSegment } from './path-safety';
-import type { RunJson } from './reduce';
+import type { ReducedTest, RunJson } from './reduce';
 import { buildRunnableCases, libraryRunMapFile, readLibrary, REGRESSION_LIBRARY_TASK } from './library';
 
 export interface ScriptJobRequest {
@@ -60,9 +60,42 @@ export interface EnqueueResult {
   jobKey: string;
 }
 
-interface QueueEntry extends ScriptJobRequest {
+/**
+ * 逐条增量生成请求(执行流中 @@RESULT pass 一落就发)。
+ *
+ * 与整轮任务(ScriptJobRequest)的根本差别:**此刻 run.json 还不存在**(它在执行收口才落盘),
+ * 所以输入靠内存直传,不读文件、不校 runHash。
+ */
+export interface IncrementalScriptCaseRequest {
+  projectPath: string;
+  taskName: string;
+  env: string;
+  roundId?: string;
+  model?: string;
+  providerId?: string;
+  /** 本轮执行起始挂钟:同一轮内稳定,仅用于日志/审计标识,不写进 manifest.latestRunHash。 */
+  runStartMs: number;
+  /** cases.json 里的用例体(执行开始时读入)。 */
+  caseBody: Record<string, unknown>;
+  /** 该用例的 @@RESULT 判定(仅 pass 才会走到这里)。 */
+  result: ReducedTest;
+  /** 该用例已收集的操作轨迹(collector.drainCase)。 */
+  traceActions: ScriptTraceAction[];
+  /** 该用例已观察到的元素清单(collector.elementsForCase)。 */
+  observedElements: ObservedElement[];
+}
+
+interface FullQueueEntry extends ScriptJobRequest {
+  kind: 'full';
   key: string;
 }
+
+interface IncrementalQueueEntry extends IncrementalScriptCaseRequest {
+  kind: 'incremental';
+  key: string;
+}
+
+type QueueEntry = FullQueueEntry | IncrementalQueueEntry;
 
 const queue: QueueEntry[] = [];
 const queuedKeys = new Set<string>();
@@ -203,6 +236,7 @@ function currentInputs(request: ScriptJobRequest): {
   run: RunJson;
   casesRaw: unknown;
   traceActions: NonNullable<ReturnType<typeof readTraceFile>>['actions'];
+  traceElements: NonNullable<ReturnType<typeof readTraceFile>>['elementsByCase'];
   runContent: string;
 } {
   const p = artifactPaths(request.taskName, request.env, request.roundId);
@@ -211,8 +245,11 @@ function currentInputs(request: ScriptJobRequest): {
   const run = JSON.parse(runContent) as RunJson;
   const casesRaw = parseCaseFile(path.join(request.projectPath, artifactPaths(request.taskName).cases));
   const trace = readTraceFile(request.projectPath, request.taskName, request.env);
-  const traceActions = trace?.runHash === request.runHash ? trace.actions : [];
-  return { run, casesRaw, traceActions, runContent };
+  const sameRun = trace?.runHash === request.runHash;
+  const traceActions = sameRun ? trace.actions : [];
+  // 存量 trace 无 elements 行 → 空表，候选的 observedElements 退化为 []（行为等同改动前）。
+  const traceElements = sameRun ? trace.elementsByCase : {};
+  return { run, casesRaw, traceActions, traceElements, runContent };
 }
 
 function candidateTempFile(finalFile: string): string {
@@ -333,8 +370,15 @@ async function validateAndPublish(params: {
   previous?: ScriptManifestCase;
   redactions: TraceRedaction[];
   abortSignal?: AbortSignal;
+  /**
+   * 跳过生成期真机重放(逐条增量生成用)。此时【执行智能体正在操作被测系统】,重放会和它
+   * 并发抢同一份数据/页面。脚本照常过静态 + Playwright 加载校验后落盘标 needs_review,
+   * 重放延后到执行收口后由既有自动流水线(runAndRepairLoop 本就跑 verified|needs_review
+   * 全集)统一补跑 —— 零新增机制。
+   */
+  deferReplay?: boolean;
 }): Promise<ScriptManifestCase> {
-  const { request, candidate, generated, previous, redactions, abortSignal } = params;
+  const { request, candidate, generated, previous, redactions, abortSignal, deferReplay } = params;
   const now = new Date().toISOString();
   const finalFile = candidateFinalFile(request, candidate);
   const source = candidateSource(candidate);
@@ -376,7 +420,7 @@ async function validateAndPublish(params: {
     // 不再 slice(-1000) 取输出末尾——那截到的是代码框/trace 附件路径，看不到"为什么挂"。
     if (!collected.ok) return failed(`Playwright 加载校验失败: ${summarizeRunFailure(collected.output, collected.timedOut)}`, staticCheck.warnings);
 
-    const safeReplay = isSafeForAutomaticReplay(candidate.testCase);
+    const safeReplay = !deferReplay && isSafeForAutomaticReplay(candidate.testCase);
     let replayed = false;
     let replayError = '';
     if (safeReplay) {
@@ -415,7 +459,8 @@ async function validateAndPublish(params: {
         warnings: [
           ...staticCheck.warnings,
           ...(candidate.usesMock ? ['执行时使用了接口模拟（browser_route mock），需人工确认真实环境可通过'] : []),
-          ...(!safeReplay ? ['已跳过自动重放：用例含写操作且未声明 cleanup 清理方式，请人工运行确认（或给用例补 cleanup 字段）'] : []),
+          ...(deferReplay ? ['执行过程中即时生成，重放延后至执行结束由「自动跑通」统一验证'] : []),
+          ...(!deferReplay && !safeReplay ? ['已跳过自动重放：用例含写操作且未声明 cleanup 清理方式，请人工运行确认（或给用例补 cleanup 字段）'] : []),
           ...(replayFailed ? ['生成期自动重放未通过，脚本已保存待复核：可能被测应用未启动，或脚本需 AI 修复 —— 已进入运行/修复闭环，可点「运行」或「AI 修复」，或在被测应用启动后重跑'] : []),
           ...(candidate.sourceMissing ? ['回归用例库来源映射缺失，脚本暂存于聚合任务目录'] : []),
         ],
@@ -448,6 +493,7 @@ async function generateMissing(
   previousById: Map<string, ScriptManifestCase>,
   redactions: TraceRedaction[],
   abortSignal: AbortSignal,
+  deferReplay = false,
 ): Promise<Map<string, ScriptManifestCase>> {
   const result = new Map<string, ScriptManifestCase>();
   const failedEntry = (candidate: EligibleScriptCase, error: string): ScriptManifestCase => ({
@@ -512,12 +558,13 @@ async function generateMissing(
       previous: previousById.get(candidate.id),
       redactions,
       abortSignal,
+      deferReplay,
     }));
   }
   return result;
 }
 
-async function executeJob(entry: QueueEntry): Promise<void> {
+async function executeJob(entry: FullQueueEntry): Promise<void> {
   const request: ScriptJobRequest = entry;
   const scope = scopeKey(request);
   const abortController = new AbortController();
@@ -528,7 +575,9 @@ async function executeJob(entry: QueueEntry): Promise<void> {
     abortByScope.set(scope, abortController);
     let manifest = markManifest(request, { jobStatus: 'running', error: undefined });
     const inputs = currentInputs(request);
-    const selection = selectEligibleCases(inputs.casesRaw, inputs.run, inputs.traceActions, manifest.runtimeVersion);
+    const selection = selectEligibleCases(
+      inputs.casesRaw, inputs.run, inputs.traceActions, manifest.runtimeVersion, inputs.traceElements,
+    );
     if (selection.errors.length) throw new Error(selection.errors.join('; '));
     if (selection.blockedReason === 'circuit_broken') throw new Error('执行阶段熔断已触发，跳过脚本生成');
     const eligible = request.taskName === REGRESSION_LIBRARY_TASK
@@ -568,8 +617,17 @@ async function executeJob(entry: QueueEntry): Promise<void> {
         nextCases.push(previous);
       }
     }
+    // 「本轮没轮到」≠「本轮失去资格」。执行中断/AI 漏跑的用例会被 reduce 按 cases 全集兜底
+    // 补成 blocked+notExecuted —— 它们没有失去回归资格,只是这轮没跑到。若一并标 stale,
+    // 一次断流轮就会把几十条 verified 脚本打出运行/修复/重放的全部通道(stale 不是
+    // isRunnableStatus)。故这类用例的旧条目原样保留,等下一轮完整执行再对账。
+    const notExecutedIds = new Set(
+      (inputs.run.tests ?? []).filter((t) => t.notExecuted).map((t) => t.id),
+    );
     for (const previous of manifest.cases) {
-      if (!eligibleIds.has(previous.caseId)) nextCases.push({ ...previous, status: 'stale', lastSeenRunHash: request.runHash });
+      if (eligibleIds.has(previous.caseId)) continue;
+      if (notExecutedIds.has(previous.caseId)) { nextCases.push(previous); continue; }
+      nextCases.push({ ...previous, status: 'stale', lastSeenRunHash: request.runHash });
     }
 
     const generated = await generateMissing(request, pending, previousById, safeRedactionsFor(request), abortController.signal);
@@ -647,6 +705,115 @@ async function executeJob(entry: QueueEntry): Promise<void> {
   }
 }
 
+/**
+ * 逐条增量生成(执行进行中,一条用例 pass 就生成它的脚本)。
+ *
+ * 为什么不复用 executeJob:后者以【整轮 run.json】为输入做资格 join、stale 对账、counts
+ * 重算,而此刻 run.json 还不存在。这里只做一件事:把这一条用例的脚本生成出来、upsert 进
+ * manifest.cases。
+ *
+ * 三条刻意的克制(每条都对应一个会咬人的坑):
+ *   1. **不碰 latestRunHash / jobStatus**:它们描述的是【整轮生成任务】的身份与终态,增量
+ *      不是那个任务。若把临时 hash 写进 latestRunHash,收口 job 的「newest run wins」判定
+ *      会误判、报告触发的去重也会错乱;若把 jobStatus 置 running,断流轮没有收口 job 来
+ *      settle,它会永远卡 running。
+ *   2. **不进 abortByScope**:executeJob 靠它「新任务取代旧任务」。增量任务彼此是不同用例、
+ *      必须各自跑完,注册进去会导致后一条把前一条掐死。
+ *   3. **锁被占就跳过**:不排队等、不阻塞执行流。这条用例交给收口 job 生成即可。
+ *
+ * 与整轮任务的指纹必须严格一致(否则收口 job 会把刚生成的脚本判成漂移、重新烧一遍模型):
+ * 故这里合成一份单条用例的 cases/run 输入,走【同一个】selectEligibleCases 构造候选。
+ */
+async function executeIncrementalJob(entry: IncrementalQueueEntry): Promise<void> {
+  const { projectPath, taskName, env, caseBody, result, traceActions, observedElements } = entry;
+  // 增量任务只做生成,不读 run.json —— 但 validateAndPublish / candidateFinalFile 等共用
+  // 逻辑要一个 ScriptJobRequest 形状。runHash 仅用于条目的 lastSeenRunHash 标记。
+  const request: ScriptJobRequest = {
+    projectPath, taskName, env,
+    runHash: `incr-${entry.runStartMs}`,
+    roundId: entry.roundId,
+    model: entry.model,
+    providerId: entry.providerId,
+  };
+  let lock: ReturnType<typeof acquireLock> | null = null;
+  try {
+    try {
+      lock = acquireLock(request);
+    } catch {
+      // 后台生成/手动运行/AI 修复正持锁 → 本条交给收口 job,不等不抢。
+      return;
+    }
+    const manifest = readManifest(projectPath, taskName, env);
+    const runtime = manifest?.runtimeVersion ?? runtimeVersion();
+
+    // 走与整轮任务【同一条】构造通道 → 语义指纹逐字一致 → 收口 job 能命中复用。
+    const selection = selectEligibleCases(
+      [caseBody],
+      { tests: [result] } as unknown as RunJson,
+      traceActions,
+      runtime,
+      { [result.id]: observedElements },
+    );
+    const eligible = taskName === REGRESSION_LIBRARY_TASK
+      ? retargetLibraryCandidates(selection.eligible, regressionLibraryIdMap(projectPath), runtime)
+      : selection.eligible;
+    const candidate = eligible[0];
+    if (!candidate) return;   // 没打回归标签 / 非 pass —— 上游已过滤,这里兜底
+
+    const previous = manifest?.cases.find((item) => item.caseId === candidate.id);
+    // 指纹未变且旧脚本还在 → 本轮无需重生成(与整轮任务的复用口径一致)。
+    if (previous?.fingerprint === candidate.fingerprint
+      && isRunnableStatus(previous.status)
+      && fs.existsSync(candidateFinalFile(request, candidate))) {
+      return;
+    }
+
+    const generated = await generateMissing(
+      request,
+      [candidate],
+      new Map(previous ? [[previous.caseId, previous]] : []),
+      safeRedactionsFor(request),
+      new AbortController().signal,
+      true,   // deferReplay:执行智能体正在操作被测系统,重放延后到收口后的自动跑通
+    );
+    const item = generated.get(candidate.id);
+    if (!item) return;
+
+    // 重读 manifest 再 upsert:生成期间(可能数分钟)别的写入者可能动过它。
+    const latest = readManifest(projectPath, taskName, env);
+    const cases = latest?.cases ? [...latest.cases] : [];
+    const at = cases.findIndex((c) => c.caseId === item.caseId);
+    if (at >= 0) cases[at] = item; else cases.push(item);
+    cases.sort((a, b) => a.caseId.localeCompare(b.caseId));
+    markManifest(request, {
+      cases,
+      // eligible 计数归收口 job 管(它才知道整轮有多少条合格);这里只让已生成的条目如实计数。
+      counts: manifestCounts(cases, Math.max(latest?.counts.eligible ?? 0, cases.length)),
+    });
+  } catch (error) {
+    // 增量生成是执行流的旁路增强:失败只留日志,绝不影响执行本身,也不改 manifest 终态。
+    console.warn(`[script-gen] 增量生成失败 ${entry.result.id}:`, error instanceof Error ? error.message : error);
+  } finally {
+    lock?.close();
+  }
+}
+
+/**
+ * 执行流中一条用例 pass 即入队生成它的脚本(不等报告)。
+ *
+ * 治的是「断流全丢」:生成原本由【报告成功】门控,执行被网络掐断(本环境跨境链路间歇丢包,
+ * 真机两次断在 82/93、29/93)→ 报告不跑 → 已通过用例的脚本一条都不沉淀,整轮 token 白烧。
+ *
+ * fire-and-forget:调用方不 await,失败只记日志。
+ */
+export function enqueueIncrementalScriptCase(request: IncrementalScriptCaseRequest): void {
+  const key = `incr\0${path.resolve(request.projectPath)}\0${request.taskName}\0${request.env}\0${request.result.id}\0${request.runStartMs}`;
+  if (queuedKeys.has(key) || activeKeys.has(key)) return;
+  queue.push({ ...request, kind: 'incremental', key });
+  queuedKeys.add(key);
+  drain();
+}
+
 function drain(): void {
   if (running) return;
   const entry = queue.shift();
@@ -654,7 +821,8 @@ function drain(): void {
   running = true;
   queuedKeys.delete(entry.key);
   activeKeys.add(entry.key);
-  void executeJob(entry).finally(() => {
+  const job = entry.kind === 'incremental' ? executeIncrementalJob(entry) : executeJob(entry);
+  void job.finally(() => {
     activeKeys.delete(entry.key);
     running = false;
     drain();
@@ -667,7 +835,7 @@ export async function enqueueScriptJob(request: ScriptJobRequest): Promise<Enque
   if (!request.forceCaseIds?.length && !request.forceRefresh && current?.latestRunHash === request.runHash
     && (current.jobStatus === 'queued' || current.jobStatus === 'running' || current.jobStatus === 'done' || current.jobStatus === 'partial')) {
     if ((current.jobStatus === 'queued' || current.jobStatus === 'running') && !queuedKeys.has(key) && !activeKeys.has(key)) {
-      queue.push({ ...request, key });
+      queue.push({ ...request, kind: 'full', key });
       queuedKeys.add(key);
       drain();
     }
@@ -679,7 +847,7 @@ export async function enqueueScriptJob(request: ScriptJobRequest): Promise<Enque
   const manifest = newManifest(request, key, current);
   writeManifest(request.projectPath, request.taskName, request.env, manifest);
   if (!queuedKeys.has(key)) {
-    queue.push({ ...request, key });
+    queue.push({ ...request, kind: 'full', key });
     queuedKeys.add(key);
     drain();
   }
@@ -841,7 +1009,11 @@ async function repairScriptCases(
 ): Promise<RepairResultItem[]> {
   // currentInputs re-hashes run.json — repairs only ever apply to the latest run.
   const inputs = currentInputs(jobRequest);
-  const selection = selectEligibleCases(inputs.casesRaw, inputs.run, inputs.traceActions, manifest.runtimeVersion);
+  // 带上 observedElements：AI 修复「element(s) not found」时要靠它把臆造的 CSS class 换成
+  // 真实存在的 role/name（见 repairScriptsBatch 的 system prompt）。
+  const selection = selectEligibleCases(
+    inputs.casesRaw, inputs.run, inputs.traceActions, manifest.runtimeVersion, inputs.traceElements,
+  );
   const eligible = jobRequest.taskName === REGRESSION_LIBRARY_TASK
     ? retargetLibraryCandidates(selection.eligible, regressionLibraryIdMap(jobRequest.projectPath), manifest.runtimeVersion)
     : selection.eligible;

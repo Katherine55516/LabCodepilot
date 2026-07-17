@@ -7,7 +7,14 @@ import {
   sha256Hex,
   stableStringify,
 } from './script-artifacts';
-import { normalizedTraceHash, redactTraceText, type ScriptTraceAction, type TraceRedaction } from './script-trace';
+import {
+  normalizedTraceHash,
+  redactTraceText,
+  type ObservedElement,
+  type ObservedElementsByCase,
+  type ScriptTraceAction,
+  type TraceRedaction,
+} from './script-trace';
 import { isUnsafeSegment } from './path-safety';
 import { caseFingerprint } from './library';
 
@@ -22,6 +29,11 @@ export interface EligibleScriptCase {
   testCase: Record<string, unknown>;
   result: ReducedTest;
   actions: ScriptTraceAction[];
+  /**
+   * 执行当时页面可访问性树里观察到的具名元素（含从未被点击的断言目标）。断言的定位器词汇表
+   * ——没有它，模型只能给「只看过没点过」的元素凭空捏 CSS class（见 script-trace.ts）。
+   */
+  observedElements: ObservedElement[];
   fileName: string;
   fingerprint: string;
   usesMock: boolean;
@@ -63,6 +75,7 @@ export function selectEligibleCases(
   run: RunJson,
   actions: ScriptTraceAction[],
   runtimeVersion: string,
+  elementsByCase: ObservedElementsByCase = {},
 ): EligibleSelection {
   const cases = readCases(casesRaw);
   const errors: string[] = [];
@@ -99,6 +112,7 @@ export function selectEligibleCases(
       testCase,
       result,
       actions: caseActions,
+      observedElements: elementsByCase[id] ?? [],
       fileName: scriptFileName(id),
       fingerprint,
       usesMock: caseActions.some((a) => a.usesMock),
@@ -233,6 +247,7 @@ export async function generateScriptsBatch(params: {
       tool: action.toolName,
       code: action.playwrightCode ?? '',
     })),
+    observedElements: candidate.observedElements,
   }));
   const cleanPayload = redactTraceText(JSON.stringify(payload, null, 2), params.redactions ?? []);
   const system = `你是 Playwright 自动化脚本工程师。把已经真实执行并通过的回归用例沉淀为可独立运行的 TypeScript 测试。
@@ -264,6 +279,18 @@ locator("form")/locator("dialog") 等容器缩小范围，再在容器内定位�
   test("标题", async ({ request }) => { const res = await request.get("/api/xxx"); expect(res.status()).toBe(200); const body = await res.json(); ... })，
   URL 用相对路径（自动走 BASE_URL），断言 res.status()/res.ok() 与 await res.json() 的字段。
   【严禁】使用 fetch()/XMLHttpRequest/eval/Function/page.evaluate 里发网络请求，也不要 import 任何 http 库 —— 校验器会直接拒绝，只能用 request fixture。
+【observedElements = 执行当时从页面可访问性树观察到的真实元素（role + name），是断言定位器的事实来源】：
+- executedPlaywrightCode 只覆盖【被操作过】的元素；断言常打在【只出现在页面、从未被点击】的元素上，
+  这类元素的唯一事实来源就是 observedElements。
+- 断言定位器只能来自两处：① executedPlaywrightCode 里真实出现过的定位器；② observedElements 里的元素
+  ——写成 getByRole("<role>", { name: "<name>", exact: true })，role/name 必须与清单里的条目【逐字一致】。
+- 【严禁】臆造 CSS class / 结构选择器（如 .avatar-uploader、.el-upload、div > span）——这类选择器是组件库
+  内部实现，页面上未必存在、版本一变就失效，重放会直接 element(s) not found（真机踩坑）。
+- observedElements 里【没有】的元素，不要断言它存在：清单是这条用例执行期间页面上出现过的元素并集，
+  找不到就说明轨迹没证据，改用轨迹已验证过的其它断言，不要硬编一个定位器。
+- 注意清单是【词汇表】不是【当前页面状态】：一条用例可能跨多个页面，清单是并集；元素是否在断言时可见，
+  以轨迹与用例语义为准。
+
 【断言必须基于执行轨迹这个事实来源，不要凭 expected 文案臆造】——这是脚本重放能通过的关键：
 1. 优先复用 executedPlaywrightCode 里【真实出现过并成功】的选择器、文本、正则。它们是"页面确实如此"的铁证；
    用例 expected 只是预期描述，措辞常和真实 DOM 不一致。两者冲突时【以轨迹为准】。
@@ -380,6 +407,7 @@ export async function repairScriptsBatch(params: {
     fileName: candidate.fileName,
     testCase: candidate.testCase,
     executionResult: candidate.result,
+    observedElements: candidate.observedElements,
     failure,
     currentScript: currentContent,
   }));
@@ -387,6 +415,11 @@ export async function repairScriptsBatch(params: {
   const system = `你是 Playwright 自动化脚本工程师。以下每条输入是一份【运行失败】的回归脚本：testCase 是用例（事实依据），currentScript 是当前脚本，failure 是本次运行的失败原因。请针对 failure 修复脚本。
 只返回符合 JSON Schema 的对象，不输出 Markdown，不调用任何工具。每条输入恰好返回一项，caseId/fileName 原样返回。
 【只允许修技术缺陷】：定位器歧义或找不到元素（getByRole/getByText 传字符串 name 必须 { exact: true }；仍有歧义就用 getByTestId 或先用容器缩小范围，不要用 .first() 掩盖）、等待时机、前置条件/数据准备。
+【observedElements = 执行当时页面可访问性树里的真实元素（role + name），修定位器时以它为准】：failure 若是
+element(s) not found / Locator 找不到，且当前脚本用的是 CSS class 或结构选择器（如 .avatar-uploader），
+几乎可以断定是【臆造的定位器】——去 observedElements 里找语义对应的元素，改写成
+getByRole("<role>", { name: "<name>", exact: true })（role/name 与清单逐字一致）。清单里确实没有对应元素时，
+说明该元素在执行期从未出现过，属于断言与事实不符 → 走下面的红线（fixed=false、讲清楚），不要再换一个猜的选择器。
 【断言写法与页面渲染不符，属技术缺陷、必须修正（不是弱化）】：仔细读 failure 里的 Received/实际文本——如果它【确实包含】expected 想验证的内容，只是格式/顺序/正则方向和断言写法对不上，就把断言改成匹配真实渲染。典型：页面渲染是「数字在前」如 "0踩坑"，而断言写成 /踩坑\s*\d+/（数字在后）永远匹配不上，应改成 /\d+\s*踩坑/；或 getByText 单元素匹配不到跨元素拼接的文本，应改用 expect(page.locator("body")).toContainText(...)。这类是把断言【对齐事实】，不是弱化，放心修。
 【红线】：只有当 Received 里【根本没有】expected 要验证的内容（页面实际行为与用例预期真不一致、断言如实失败）时，才禁止通过弱化/删除/反转断言让脚本通过 —— 返回 fixed=false，reason 用一句测试人员能懂的话说明「页面实际是 X、用例预期是 Y，需人工确认是产品缺陷还是用例预期有误」。
 fixed=true 时 content 为修复后的完整脚本，并保持生成约束：import { test, expect } from "playwright/test"（不是 "@playwright/test"）；【整份文件恰好一个顶层 test】，标题以 scriptCaseId 开头，多个步骤写进同一个 test 内并用 await test.step("步骤N：…", async () => {…}) 分段，绝不拆成多个 test 或用 test.describe 包多个；至少一个 expect；只用相对 URL 或 process.env.BASE_URL；账号密码只用 process.env.TEST_USERNAME/TEST_PASSWORD；除 playwright/test 外禁止任何 import/require。fixed=false 时 content 返回空字符串。

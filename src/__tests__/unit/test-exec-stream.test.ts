@@ -44,7 +44,7 @@ describe("wrapExecutionStream", () => {
       textFrame('▶ 用例 1/2\n@@RESULT {"id":"TC-1","status":"pass"}\n'),
       textFrame('@@RESULT {"id":"TC-2","status":"fail","error":"断言失败"}\n'),
     ]);
-    const out = await drain(wrapExecutionStream(src, { projectPath: proj, taskName: "订单", env: "local", runStartMs: Date.now() }));
+    const out = await drain(wrapExecutionStream(src, { projectPath: proj, taskName: "订单", env: "local", runStartMs: Date.now(), depositScripts: false }));
     assert.ok(out.some((c) => c.includes('"type":"text"')), "original text frames forwarded");
     assert.ok(out.some((c) => c.includes('"type":"run_json"')), "run_json frame appended at end");
     assert.ok(fs.existsSync(runJsonPath()), "run.json persisted");
@@ -63,7 +63,7 @@ describe("wrapExecutionStream", () => {
       { id: "TC-2", verification: "回归基线" },
     ] }));
     const src = mockStream([textFrame('@@RESULT {"id":"TC-1","status":"pass"}\n@@RESULT {"id":"TC-2","status":"pass"}\n')]);
-    await drain(wrapExecutionStream(src, { projectPath: proj, taskName: "订单", env: "local", runStartMs: Date.now() }));
+    await drain(wrapExecutionStream(src, { projectPath: proj, taskName: "订单", env: "local", runStartMs: Date.now(), depositScripts: false }));
     const run = readRun();
     assert.equal(run.passStr, "2/2"); // exec rate counts everything
     assert.deepEqual(run.funcCounts, { total: 1, pass: 1, fail: 0, partial: 0, blocked: 0 }); // 回归基线 excluded
@@ -75,7 +75,7 @@ describe("wrapExecutionStream", () => {
     const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
     fs.writeFileSync(path.join(proj, "TC-001.png"), PNG); // stray at project root
     const src = mockStream([textFrame('@@RESULT {"id":"TC-001","status":"pass","evidence":["TC-001.png"]}\n')]);
-    await drain(wrapExecutionStream(src, { projectPath: proj, taskName: "订单", env: "local", runStartMs: Date.now() - 1000 }));
+    await drain(wrapExecutionStream(src, { projectPath: proj, taskName: "订单", env: "local", runStartMs: Date.now() - 1000, depositScripts: false }));
     const evidenceDir = path.join(proj, "AI_LabTest", "report", "_evidence", "订单-local");
     assert.ok(fs.existsSync(path.join(evidenceDir, "TC-001.png")), "swept into evidence dir");
     assert.ok(!fs.existsSync(path.join(proj, "TC-001.png")), "removed from project root");
@@ -83,7 +83,7 @@ describe("wrapExecutionStream", () => {
 
   it("degrades to single-rate when no cases.json (funcCounts === counts)", async () => {
     const src = mockStream([textFrame('@@RESULT {"id":"TC-1","status":"pass"}\n')]);
-    await drain(wrapExecutionStream(src, { projectPath: proj, taskName: "订单", env: "local", runStartMs: Date.now() }));
+    await drain(wrapExecutionStream(src, { projectPath: proj, taskName: "订单", env: "local", runStartMs: Date.now(), depositScripts: false }));
     const run = readRun();
     assert.deepEqual(run.funcCounts, run.counts);
     assert.equal(run.regressionTotal, 0);
@@ -107,6 +107,9 @@ describe("wrapExecutionStream", () => {
       taskName: "订单",
       env: "local",
       runStartMs: Date.now(),
+      // 本组测的是流包装器本身;后台脚本沉淀会对 TC-REG(回归标签 + pass)发真实模型调用,
+      // 让单测依赖网络并堵塞全局队列。沉淀另有专项单测(script-incremental.test.ts)。
+      depositScripts: false,
       traceRedactions: [{ value: "hunter2", replacement: "${TEST_PASSWORD}" }],
     }));
     const trace = readTraceFile(proj, "订单", "local");

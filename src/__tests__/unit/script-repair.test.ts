@@ -16,6 +16,7 @@ const input = (id: string): RepairScriptInput => ({
     testCase: { id },
     result: { id, status: 'pass', actual: '', error: '', evidence: [] },
     actions: [],
+    observedElements: [],
     fileName: `${id}.spec.ts`,
     fingerprint: 'fp',
     usesMock: false,

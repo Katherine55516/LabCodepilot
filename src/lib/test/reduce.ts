@@ -53,6 +53,16 @@ export interface ReducedTest {
   durationMs?: number;
   /** 判定来源:'script' = 脚本重放;缺省 = AI 执行。报告 UI 据此显示「脚本」徽标。 */
   via?: string;
+  /**
+   * true = 本轮执行【没跑到】这条用例(执行中断/AI 漏跑),由 caseIds 全集兜底补出来的
+   * blocked 条目,不是"跑了但被阻塞"。
+   *
+   * 存在的理由:脚本生成的收口对账要区分「本轮失去资格」与「本轮没轮到」。前者该标 stale,
+   * 后者必须原样保留旧条目——否则一次断流轮就会把几十条 verified 脚本打成 stale、
+   * 掉出运行/修复/重放的全部通道(见 script-job-manager 的未执行守卫)。
+   * 靠中文文案字符串判别太脆,故给机器可读标记。
+   */
+  notExecuted?: boolean;
 }
 
 export interface RunCounts {
@@ -192,7 +202,7 @@ export function reduceResults(
     const byId = new Map<string, ReducedTest>();
     for (const t of tests) if (!byId.has(t.id)) byId.set(t.id, t);
     const aligned: ReducedTest[] = opts.caseIds.map(
-      (id) => byId.get(id) ?? { id, status: "blocked", actual: "", error: NOT_EXECUTED_MSG, evidence: [] },
+      (id) => byId.get(id) ?? { id, status: "blocked", actual: "", error: NOT_EXECUTED_MSG, evidence: [], notExecuted: true },
     );
     tests.splice(0, tests.length, ...aligned);
   }

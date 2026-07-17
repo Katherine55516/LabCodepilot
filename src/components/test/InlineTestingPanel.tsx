@@ -2379,7 +2379,7 @@ export function InlineTestingPanel() {
                       <span className="text-[11px] text-muted-foreground">{t("test.cases.total")} · {casesPreview.length}</span>
                       <span className="flex-1" />
                       {casesPreview.length > 0 && <button onClick={() => setCasesDraft(structuredClone(casesPreview))} className="rounded bg-primary px-2 py-0.5 text-[10px] font-medium text-primary-foreground hover:opacity-90">{t("test.cases.viewEdit")}</button>}
-                      {casesPreview.length > 0 && <button onClick={recommendSuite} disabled={busy} title={t("test.cases.recommendHint")} className="rounded border border-primary/40 px-1.5 py-0.5 text-[10px] text-primary hover:bg-primary/10 disabled:opacity-50">🎯 {t("test.cases.recommend")}</button>}
+                      {/* 「🎯 AI 推荐回归集」入口已按需下线（保留 recommendSuite / RecommendReviewModal / /api/test/cases/recommend[/apply] 代码，恢复时把此按钮加回即可）。 */}
                       {casesPreview.length > 0 && <button onClick={() => exportCases(false)} className="rounded border border-border px-1.5 py-0.5 text-[10px] text-foreground hover:bg-muted">{t("test.cases.export")}</button>}
                       <button onClick={() => exportCases(true)} className="rounded border border-border px-1.5 py-0.5 text-[10px] text-foreground hover:bg-muted">{t("test.cases.template")}</button>
                     </div>
@@ -4098,11 +4098,16 @@ function ScriptPreview({ t, projectPath, taskName, env, initialManifest, onChang
           const next = data.manifest as ScriptManifestView;
           setManifest(next);
           onChanged(next);
+          // 后台重生成收尾（不再 queued/running）→ 清掉「重试」时设的「等待生成」占位。
+          // 否则脚本早已生成、状态徽章已更新，运行输出区却一直停在「等待生成」（用户实测）。
+          if (next.jobStatus !== "queued" && next.jobStatus !== "running") {
+            setOutput((prev) => (prev === t("test.scripts.queued") ? "" : prev));
+          }
         })
         .catch(() => undefined);
     }, 2_000);
     return () => { cancelled = true; clearInterval(timer); };
-  }, [manifest.jobStatus, projectPath, taskName, env, onChanged]);
+  }, [manifest.jobStatus, projectPath, taskName, env, onChanged, t]);
 
   const retrySelected = async () => {
     if (!selected) return;
