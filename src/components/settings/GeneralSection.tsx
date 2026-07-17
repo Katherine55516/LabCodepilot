@@ -307,11 +307,14 @@ export function GeneralSection() {
         {coworkEnabled && coworkAssets
           && (!coworkAssets.usable || coworkAssets.upgradeAvailable || coworkAssets.overall === 'downloading') && (
           <div className="mt-2 flex flex-col gap-2 rounded-md border border-border/50 bg-muted/30 p-3">
-            <p className="text-xs leading-relaxed text-muted-foreground">
-              {coworkAssets.usable
-                ? t('workspace.office.upgradeHint')
-                : t('workspace.office.imageMissing')}
-            </p>
+            {/* unsupported(非 mac 且未下发 remote)由 CoworkAssetsAction 内部出唯一说明行,这里不重复 */}
+            {coworkAssets.overall !== 'unsupported' && (
+              <p className="text-xs leading-relaxed text-muted-foreground">
+                {coworkAssets.usable
+                  ? t('workspace.office.upgradeHint')
+                  : t('workspace.office.imageMissing')}
+              </p>
+            )}
             <CoworkAssetsAction
               assets={coworkAssets}
               fallbackProvisioned={false}

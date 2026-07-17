@@ -1649,6 +1649,7 @@ const en = {
   'workspace.office.emptyDesc': 'The AI works inside an isolated sandbox VM: send it files in chat to read and edit, download the results from the artifacts card — it never touches files on this machine.',
   'workspace.office.start': 'Start a work session',
   'workspace.office.imageMissing': 'The sandbox environment has not been downloaded on this machine yet. Work mode becomes available once the download completes.',
+  'workspace.office.remoteOnlyPlatform': "Office mode on this device is provided by your organization's remote sandbox and is enabled automatically after sign-in. Contact your administrator if it stays unavailable.",
   'workspace.office.download': 'Download sandbox environment (~3.2 GB)',
   'workspace.office.retryDownload': 'Retry download',
   'workspace.office.downloading': 'Downloading sandbox environment…',

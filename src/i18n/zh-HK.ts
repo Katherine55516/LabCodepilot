@@ -1653,6 +1653,7 @@ const zhHK: Record<TranslationKey, string> = {
   'workspace.office.emptyDesc': 'AI 喺隔離嘅沙箱虛擬機內工作:透過對話發送檔案畀佢讀改,產出嘅檔案喺產物卡片度下載,全程唔會接觸真機檔案。',
   'workspace.office.start': '開始辦公對話',
   'workspace.office.imageMissing': '本機尚未下載沙箱環境,下載完成後即可使用辦公模式。',
+  'workspace.office.remoteOnlyPlatform': '目前裝置的辦公模式由公司遠端沙箱提供,登入後自動開通;若持續無法使用請聯絡管理員。',
   'workspace.office.download': '下載沙箱環境(約 3.2 GB)',
   'workspace.office.retryDownload': '重試下載',
   'workspace.office.downloading': '正在下載沙箱環境…',

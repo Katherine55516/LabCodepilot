@@ -30,6 +30,20 @@ export async function GET() {
       });
     }
 
+    // R5-6:vfkit 是 macOS 专属(vfkit 二进制 + vsock)。非 darwin 且未下发 remote 时,
+    // 本地资产状态机是死路(下载的是 mac 资产)—— 返回 unsupported,前端只解释
+    // 「由公司远程沙箱提供、登录自动开通」(RD5 诚实降级),绝不引导下载。
+    if (process.platform !== 'darwin') {
+      const noAsset = { state: 'missing', receivedBytes: 0, totalBytes: 0, pct: 0 };
+      return Response.json({
+        enabled,
+        backendKind: 'vfkit',
+        imageProvisioned: false,
+        vmPhase: 'stopped',
+        assets: { image: noAsset, claude: noAsset, overall: 'unsupported', totalPct: 0, usable: false, upgradeAvailable: false },
+      });
+    }
+
     // vfkit 保留:本地镜像/资产状态(M2 下载引导)
     const { isImageProvisioned } = await import('@/lib/cowork-vm-manager');
     const { getAssetsStatus } = await import('@/lib/cowork-assets');

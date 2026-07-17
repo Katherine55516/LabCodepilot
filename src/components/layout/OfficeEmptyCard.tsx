@@ -79,6 +79,16 @@ export function CoworkAssetsAction({
     );
   }
 
+  // R5-6:非 macOS 平台没有 vfkit —— 办公由公司远程沙箱提供(登录后账号自动下发),
+  // 本地无可下载资产:只解释,不给下载按钮(RD5 诚实降级)。
+  if (assets?.overall === 'unsupported') {
+    return (
+      <p className={`${textClass} text-muted-foreground`}>
+        {t('workspace.office.remoteOnlyPlatform')}
+      </p>
+    );
+  }
+
   if (assets?.overall === 'downloading') {
     const stateLine =
       assets.image.state === 'verifying' || assets.claude.state === 'installing'
