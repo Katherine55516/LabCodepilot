@@ -49,7 +49,6 @@
 | active/regression-library-v2-phase23.md | 回归用例库 v2 二/三期（按交互原型 6 屏 1:1）：`_lib` 治理元数据（评审态/rev/隔离）+ 跨轮矩阵读侧现算 + 复测轮 failed-only 与合并口径红线 + 轮次报告独立页 + AI 失败归因 + 对比矩阵 + 健康度治理与隔离护栏 | 批 I-P 已完成；打包验收 + 真实 AI 归因质量待验 |
 | active/test-regression-gate-audit.md | 测试工作台:回归集标签 + 用例门控 + 操作审计 | 开发完成(合并 PR #8),待打包验收 mac+Win |
 | active/regression-script-replay.md | 回归执行·脚本重放优先:有合格沉淀脚本的用例直接跑脚本(阶段A),AI 只执行剩余(阶段B),全覆盖零模型消耗;失败策略A+连败提示 | 开发完成(单测 12 条全过),待打包验收 |
-| active/script-gen-trace-anchors-incremental.md | 回归脚本生成质量与韧性:轨迹锚点富化(ref→role/name/testid 铁证,治定位器盲翻译)+ 逐条增量入队(pass 即生成、重放延后,断流不再全丢)+ 触发点前移与未执行守卫 | Phase 1-2 待开始 |
 | active/chat-latency-remediation.md | 聊天链路提速 + 模式入口收敛 + MCP 持久开关 | Phase 0 完成，Phase 1-4 待开始 |
 | active/context-storage-migration.md | 上下文共享与存储迁移 | Phase 0 部分完成，Phase 1-3 待开始 |
 | active/site-and-docs.md | 官网 + 文档站（apps/site） | Phase 0-1 进行中 |
@@ -81,6 +80,7 @@
 
 | 文件 | 主题 | 完成日期 |
 |------|------|----------|
+| completed/script-gen-trace-anchors-incremental.md | 回归脚本生成质量与韧性:快照元素清单(治定位器臆造,具名元素臆造 class → 语义化 getByRole;边界:视觉结构类断言仍需被测端 data-testid)+ 逐条增量沉淀(执行流内 pass 即入队生成,断流不再全丢)+ 未执行守卫 + 打包产物完整性闸 | 2026-07-17 |
 | completed/regression-script-generation.md | 测试报告成功后后台为本轮 pass+「回归测试」标签用例生成独立 Playwright 脚本；四节点不变，具备脱敏轨迹、结构化生成、安全校验、指纹幂等、锁恢复、源任务回写、报告区查看/重试/运行，并通过开发态与 macOS 打包态真实回放 | 2026-07-10 |
 | completed/test-usage-stats.md | **测试模块使用统计**（P1）：test_stats_events 事件流水 + 纯函数聚合口径层（采纳率首轮基线 / 报告准确度+覆盖率 / 服务端逐用例计时 / 模型节点级归因 / 熔断排除 / 时间窗口计入门控）、10 类事件字典、四 scope API + 4 Sheet XLSX 导出、TestStatsView 看板（第 4 视图）+ 复核 UI + 节点用时/模型徽标。P2 匿名上报为独立后续里程碑 | 2026-07-09 |
 | completed/marketplace-skill-translate.md | 技能市场「AI 翻译简介」：详情页一键翻译 README 到应用语言（非英语才显示），managed 第一个模型 + generateTextViaSdk 单轮（别名坑规避）、11 条规则系统提示词（含提示注入防线）、译文/原文可回切 + 模块级缓存、30K 截断 | 2026-07-03 |

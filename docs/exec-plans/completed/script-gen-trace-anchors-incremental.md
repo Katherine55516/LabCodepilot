@@ -1,7 +1,8 @@
 # 回归脚本生成 · 轨迹锚点富化 + 逐条增量入队
 
 > 创建时间：2026-07-16
-> 最后更新：2026-07-16
+> 最后更新：2026-07-17
+> 状态：✅ 已完成（Phase 1+2 均已实现并打包真机验收；实现细节已并入 docs/handover/regression-script-generation.md「快照元素清单 + 逐条增量沉淀」节）
 > 关联：docs/handover/regression-script-generation.md（现状全貌）、docs/exec-plans/active/regression-script-replay.md（下游消费方）
 
 ## 背景与目标
@@ -33,8 +34,24 @@
 
 | Phase | 内容 | 状态 | 备注 |
 |-------|------|------|------|
-| Phase 1 | 快照元素清单富化（trace 记 observedElements → 生成 payload/prompt 消费） | ✅ 已完成 | commit 44fccc8；单测 15 条 + 真机快照解析验证 |
-| Phase 2 | 逐条增量入队 + 触发点前移（执行收口兜底入队 + 未执行守卫） | ✅ 开发完成 | 单测 14 条；**待打包真机验收**（断流轮已沉淀 / 健康轮等价 / 未执行不误标 stale） |
+| Phase 1 | 快照元素清单富化（trace 记 observedElements → 生成 payload/prompt 消费） | ✅ 已完成 | commit 44fccc8 + 修复 7b42dfb（三形态解析，初版真机零元素）；真机验证 UI 用例臆造 class → 语义化 getByRole |
+| Phase 2 | 逐条增量入队 + 触发点前移（执行收口兜底入队 + 未执行守卫） | ✅ 已完成 | commit c2cfcb1；真机验证：掐断连接后已 pass 用例脚本已沉淀（改动前必为零） |
+
+## 真机验收记录（2026-07-17，打包版 3.2.1 + live SUT）
+
+- **Phase 2 断流场景 PASS**：执行流跑到第 2 条回归用例 pass 后主动掐断连接 → TC-001/TC-006 的
+  manifest 条目被重新沉淀（generatedAt 前移、脚本 mtime 更新、带 deferReplay 的「重放延后」warning）。
+  改动前此处 manifest 纹丝不动（报告不跑）。
+- **Phase 1 初版真机零元素 → 已修**：trace 的 elements 行一度为 0。根因是初版只认内联 ```yaml，而本
+  app 的 MCP 配了 --output-dir，真实响应是【文件链接】与【persisted 截断】两种。修复后拿真机 SSE 原文
+  回放：navigate(file 形态) 抽 9 元素、snapshot(persisted 形态) 抽 80 元素。
+- **Phase 1 定位器质量 PASS（含边界）**：UI 用例 TC-058 臆造的 `span.w-3.h-3.rounded-full` →
+  `getByRole("heading", { name: "我在学的", exact: true })`（"我在学的"正是清单里的真实元素，模型
+  脚本里还自带注释「来自 observedElements」）。**边界**：清单只覆盖具名元素；TC-058 的「2 列网格」
+  这类纯视觉结构断言在 aria 树里是无名 generic，清单里没有，仍是 querySelector class —— 根治靠被测
+  前端加 data-testid（已记入 insights 与 tech-debt-tracker）。
+- **配套**：打包产物完整性闸（assertBuildArtifacts，commit f3cb8f9）—— 跨境链路把 next build 掐断、
+  退出码仍为 0 却没产出 standalone/ 的坏包被 fail-fast 拦下。
 
 ## 决策日志
 
