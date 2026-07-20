@@ -297,6 +297,19 @@ export function isFixableCase(item: Pick<ScriptManifestCase, 'lastRunError'>): b
 }
 
 /**
+ * 化石隔离：只有长在【当前合格集内（可运行状态）】条目上的 lastRunError 才代表
+ * 「本轮未跑通」。stale/outdated 条目的失败记录是历史事实（用例曾失败、随后被移出
+ * 回归集合或被新一轮取代），保留展示但不参与任务终态、修复循环与需人工计数 ——
+ * 否则一条被摘掉回归标签的旧失败会把任务永久钉在 partial：运行不碰 stale、修复把它
+ * 判「不在合格集内」跳过又 park 成需人工、重试缺口只重生成合格用例，三通道全清不掉
+ * （真机踩坑 2026-07-14：mealAllowance「功能测试-回归测试串联」TC-employee-001，
+ * 摘标签后 manifest 全绿仍每轮报「1 需人工」+「部分回归脚本自动跑通未成功」）。
+ */
+export function isActiveRunFailure(item: Pick<ScriptManifestCase, 'lastRunError' | 'status'>): boolean {
+  return !!item.lastRunError && isRunnableStatus(item.status);
+}
+
+/**
  * Given freshly generated content and an injectable repair function, decide what
  * to publish. When the content fails static validation we feed the *exact*
  * validator errors back to the model once and re-validate — mirroring the
@@ -660,8 +673,13 @@ async function executeJob(entry: FullQueueEntry): Promise<void> {
         try {
           const summary = await runAndRepairLoop(request, manifest, request.maxRepairRounds ?? DEFAULT_MAX_REPAIR_ROUNDS);
           const finalCounts = manifestCounts(manifest.cases, manifest.counts.eligible);
-          const unpassed = manifest.cases.some((c) => c.lastRunError);
+          const unpassed = manifest.cases.some(isActiveRunFailure);
+          // cases 必须随终态一起落盘：markManifest 从磁盘重读后仅覆盖 patch 字段，而
+          // runAndRepairLoop 在最后一次 persistRunning 之后还会改写 repairNote（「AI 修改后
+          // 仍未通过」的讲真话覆盖）——不带 cases 这次改写就被磁盘旧值静默吞掉（真机踩坑：
+          // manifest 里模型乐观的修复说明与 lastRunError 并存，测试人员看到「说修好了却报错」）。
           manifest = markManifest(request, {
+            cases: manifest.cases,
             counts: finalCounts,
             jobStatus: finalCounts.failed > 0 || unpassed ? 'partial' : 'done',
             error: unpassed ? '部分回归脚本自动跑通未成功（详见各用例）' : undefined,
@@ -673,8 +691,10 @@ async function executeJob(entry: FullQueueEntry): Promise<void> {
         } catch (pipelineError) {
           const clean = redactTraceText(pipelineError instanceof Error ? pipelineError.message : String(pipelineError), safeRedactionsFor(request));
           // 流水线中途失败不能把 manifest 卡在 persistRunning 写下的 'running'：落终态，保留已生成脚本。
-          const unpassed = manifest.cases.some((c) => c.lastRunError);
+          // cases 一并落盘，理由同上（中断前循环内存里的最后状态不能被磁盘旧值吞掉）。
+          const unpassed = manifest.cases.some(isActiveRunFailure);
           manifest = markManifest(request, {
+            cases: manifest.cases,
             counts: manifestCounts(manifest.cases, manifest.counts.eligible),
             jobStatus: (unpassed || manifest.counts.failed > 0) ? 'partial' : 'done',
             error: `自动跑通中断:${clean.slice(0, 300)}`,
@@ -1124,14 +1144,16 @@ async function runAndRepairLoop(
 
   const parkEnv = () => {
     for (const c of manifest.cases) {
-      if (c.lastRunError && isEnvironmentFailure(c.lastRunError)) { parked.add(c.caseId); environmentBlocked.add(c.caseId); }
+      if (isActiveRunFailure(c) && isEnvironmentFailure(c.lastRunError!)) { parked.add(c.caseId); environmentBlocked.add(c.caseId); }
     }
   };
 
   let rounds = 0;
   for (let round = 1; round <= maxRounds; round++) {
     parkEnv();  // 环境问题（被测应用没起）不喂给 AI。
-    const fixable = manifest.cases.filter((c) => isFixableCase(c) && !parked.has(c.caseId));
+    // isActiveRunFailure（而非裸 isFixableCase）：stale 化石进循环只会被修复通道
+    // 判「不在合格集内」跳过、再被 park 成需人工 —— 每轮空转一次并虚报审计计数。
+    const fixable = manifest.cases.filter((c) => isActiveRunFailure(c) && !parked.has(c.caseId));
     if (!fixable.length) break;
     rounds = round;
 
@@ -1171,7 +1193,7 @@ async function runAndRepairLoop(
   const passed = manifest.cases.filter((c) => c.status === 'verified' && !c.lastRunError).map((c) => c.caseId);
   // 循环结束仍带失败、又没归入环境/人工的（只会在 maxRounds 用尽且还有未处理项时出现）：统一算需人工。
   const stillFailing = manifest.cases
-    .filter((c) => c.lastRunError && !environmentBlocked.has(c.caseId) && !needsHuman.has(c.caseId))
+    .filter((c) => isActiveRunFailure(c) && !environmentBlocked.has(c.caseId) && !needsHuman.has(c.caseId))
     .map((c) => c.caseId);
   for (const id of stillFailing) needsHuman.add(id);
   return { rounds, passed, environmentBlocked: [...environmentBlocked], needsHuman: [...needsHuman], stillFailing };
@@ -1231,7 +1253,7 @@ export async function runPipelineForTask(request: {
       settle('partial', `自动跑通中断:${clean.slice(0, 300)}`);
       throw loopError;
     }
-    const unpassed = manifest.cases.some((c) => c.lastRunError);
+    const unpassed = manifest.cases.some(isActiveRunFailure);
     settle(unpassed ? 'partial' : 'done', unpassed ? '部分回归脚本自动跑通未成功（详见各用例）' : undefined);
     await appendAudit(request.projectPath, request.taskName, {
       action: 'run-repair-pipeline', mode: 'manual', step: 'report',

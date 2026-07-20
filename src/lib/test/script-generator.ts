@@ -273,6 +273,8 @@ test("<scriptCaseId> <一句话用例目的>", async ({ page }) => {
 一个宽泛的 name 会命中多个元素并以 strict mode violation 失败。因此 getByRole/getByText 传字符串 name 时必须写
 { name: "…", exact: true }（传正则时不需要，正则本身已限定）。若同一名称仍可能重复，用 getByTestId 或先
 locator("form")/locator("dialog") 等容器缩小范围，再在容器内定位；不要用 .first() 掩盖歧义。
+注意 exact 只防【子串误配】，防不了【精确重名】：查询表单的字段 label 与表格列头往往逐字相同（如「员工姓名」
+既是表单 label 又是列头），断言这类文本必须先用 locator("form") 等容器收窄，否则 strict mode violation（真机踩坑）。
 按用例内容判断它是 UI 测试还是 API 接口测试：
 - UI 测试：用上面的定位器对页面做断言。
 - API 接口测试（用例在验证某个 HTTP 接口的状态码/响应体/字段，如「验证 GET /api/xxx 返回…」）：用 Playwright 的 request fixture ——
@@ -415,6 +417,7 @@ export async function repairScriptsBatch(params: {
   const system = `你是 Playwright 自动化脚本工程师。以下每条输入是一份【运行失败】的回归脚本：testCase 是用例（事实依据），currentScript 是当前脚本，failure 是本次运行的失败原因。请针对 failure 修复脚本。
 只返回符合 JSON Schema 的对象，不输出 Markdown，不调用任何工具。每条输入恰好返回一项，caseId/fileName 原样返回。
 【只允许修技术缺陷】：定位器歧义或找不到元素（getByRole/getByText 传字符串 name 必须 { exact: true }；仍有歧义就用 getByTestId 或先用容器缩小范围，不要用 .first() 掩盖）、等待时机、前置条件/数据准备。
+【strict mode violation（定位器命中多个元素）的修法】：先读 failure 里列出的候选元素文本——若与断言文本【逐字相同】（如查询表单 label 与表格列头都叫「员工姓名」），加 { exact: true } 无效：exact 只防子串误配，防不了精确重名。必须用容器收窄——failure 里每个候选自带的 aka 提示就是现成答案（如 aka locator("form").getByText(...) → 直接照抄），或改用 getByTestId；不要用 .first() 掩盖（真机踩坑：修复只加了 exact，重跑仍以同样的 strict mode violation 失败）。
 【observedElements = 执行当时页面可访问性树里的真实元素（role + name），修定位器时以它为准】：failure 若是
 element(s) not found / Locator 找不到，且当前脚本用的是 CSS class 或结构选择器（如 .avatar-uploader），
 几乎可以断定是【臆造的定位器】——去 observedElements 里找语义对应的元素，改写成

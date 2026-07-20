@@ -3783,7 +3783,11 @@ function ReportStepPanel({
           });
   // 运行失败不改 case.status，counts 也不变 —— 不显式渲染出来，点「运行全部」后卡片
   // 与点击前逐字节相同，用户只会看到一个转瞬即逝的 toast（"点了没反应"）。
-  const scriptRunFailures = scriptManifest?.cases.filter((item) => item.lastRunError) ?? [];
+  // 化石隔离：stale/outdated 条目的 lastRunError 是历史（用例已移出回归集合/被新轮取代），
+  // 不算「当前失败」—— 否则合格集全绿仍挂红字（与 script-job-manager 的 isActiveRunFailure 同口径）。
+  const scriptRunFailures = scriptManifest?.cases.filter(
+    (item) => item.lastRunError && (item.status === "verified" || item.status === "needs_review"),
+  ) ?? [];
   const scriptRunFailureText = scriptRunFailures.length > 0
     ? t("test.scripts.runFailed", { n: scriptRunFailures.length, reason: scriptRunFailures[0].lastRunError!.slice(0, 160) })
     : "";

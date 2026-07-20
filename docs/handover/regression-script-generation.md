@@ -74,7 +74,7 @@ manifest job 状态：`queued/running/done/partial/error/stale`；单用例状�
 - `POST /api/test/scripts/repair`：**AI 修复**（手动单点）。把 `lastRunError` + 当前脚本 + 原用例喂回模型定向修（`repairScriptsBatch`），修复稿走生成同款校验/重放管线（`validateAndPublish`），全部通过才原子覆盖旧文件；未通过则旧脚本原样保留。与生成共用 `.generation.lock`。**红线**：prompt 要求只修技术缺陷（定位器/等待/前置），断言如实失败（页面行为 ≠ 用例预期）时必须 `fixed=false` 并给出测试人员能懂的解释——该解释持久化到 `repairNote`，防止"修复"掩盖真缺陷。生成期失败（无落盘脚本）不归 repair 管，走 retry。
 - `POST /api/test/scripts/pipeline`：**自动跑通流水线**（`runPipelineForTask`）。运行→失败自动修→再跑，直至全部可修复的脚本通过。入口先探测被测应用可达性（`isSutReachable` 打 `frontendBaseUrl`，4s 超时），不可达直接报错。**终止条件**（`runAndRepairLoop`，`DEFAULT_MAX_REPAIR_ROUNDS=3` 兜底）：① 没有可修复的失败了；② 轮次上限；③ 每条用例只给**一次**定向修复机会——一次带确切失败原因的修复仍跑不通就 park 为「需人工」，不管模型自评 fixed 与否（结构性重跑守红线，不信模型嘴上说的）。**分类**：环境问题（连接被拒，`isEnvironmentFailure`）→ 不喂 AI、归「环境阻塞」；如实失败/修不好 → 归「需人工」并覆盖乐观 repairNote 讲真话。**自动触发**：报告流 `enqueueScriptJob({runPipeline:true})`，生成后在 `executeJob` 内（持锁）接着跑；被测应用不可达则跳过运行、只停在生成态。best-effort：流水线抛错落终态、不抹掉已生成脚本、不卡 `running`。
 
-`ReportStepPanel` 的“产出资料”新增第四张“回归自动化脚本”卡，queued/running 每 2 秒轮询。**卡片只留一条动作主线**：查看脚本 + 「自动跑通」（流水线）+「重试缺口」（仅当存在【生成】缺口——无 manifest / job error/stale / 有用例 failed/outdated 时出现；刻意不含 partial，运行失败置 partial 但重新生成解决不了）。卡片重试完成后自动接流水线（retry 传 `runPipeline:true`）。原卡片级「运行全部」「AI 修复」已删——是流水线的子集，测试人员面对四个按钮会犯选择困难；单条精修（重试/运行所选/AI 修复）收在脚本弹框里。运行失败时卡片红字显示 `N 个脚本运行失败：<原因>`；弹框内按条显示 `lastRunError`（红）与 `repairNote`（蓝）。它不是流程节点。
+`ReportStepPanel` 的“产出资料”新增第四张“回归自动化脚本”卡，queued/running 每 2 秒轮询。**卡片只留一条动作主线**：查看脚本 + 「自动跑通」（流水线）+「重试缺口」（仅当存在【生成】缺口——无 manifest / job error/stale / 有用例 failed/outdated 时出现；刻意不含 partial，运行失败置 partial 但重新生成解决不了）。卡片重试完成后自动接流水线（retry 传 `runPipeline:true`）。原卡片级「运行全部」「AI 修复」已删——是流水线的子集，测试人员面对四个按钮会犯选择困难；单条精修（重试/运行所选/AI 修复）收在脚本弹框里。运行失败时卡片红字显示 `N 个脚本运行失败：<原因>`——只统计当前合格集（`verified|needs_review`）的失败，stale/outdated 化石不上榜（见 2026-07-20 化石隔离）；弹框内按条显示 `lastRunError`（红）与 `repairNote`（蓝）。它不是流程节点。
 
 ## 生成/校验的关键决策（按踩坑顺序）
 
@@ -169,11 +169,38 @@ manifest 记 `consecutiveRunFailures`(pass 清零),连败 ≥2 时 error 附治�
   `notExecuted` 的用例**保留 manifest 旧条目原样、不标 stale**——否则一次断流把几十条 verified 脚本
   打出运行/修复/重放全部通道(stale 非 `isRunnableStatus`)。
 
+## 化石隔离 + 收口落盘修复(2026-07-20)
+
+真机踩坑(mealAllowance「功能测试-回归测试串联」,2026-07-13/14):TC-employee-001 运行失败后被
+摘掉「回归测试」标签 → 收口对账标 `stale` 且**原样保留 `lastRunError`**(设计如此,历史要留)——但所有
+「当前失败」判定都是裸 `c.lastRunError`,不看 status:合格集 1/1 全绿仍每轮报「1 需人工」+ `partial` +
+「部分回归脚本自动跑通未成功」+ UI 红字。且三条恢复通道全清不掉:运行只跑 `verified|needs_review`、
+修复把它判「不在合格集内」跳过**又反手 park 成需人工**、重试缺口只重生成合格用例——`stale`+`lastRunError`
+是恢复态契约(见 2026-07-11 条)的又一处漏态,从「报告口径」侧漏而非通道侧。
+
+- **化石隔离**:新增导出纯谓词 `isActiveRunFailure = lastRunError && isRunnableStatus(status)`,
+  失败记录只有长在当前合格集内(可运行状态)的条目上才有投票权。落点:`executeJob` 流水线收口两处
+  `unpassed`、`runPipelineForTask` 的 `unpassed`、`runAndRepairLoop` 的 `parkEnv`/`fixable`/`stillFailing`、
+  UI `InlineTestingPanel` 红字过滤(客户端组件不能 import 服务端模块,谓词同口径内联)。
+  **不删数据**:stale/outdated 条目的 `lastRunError`/`repairNote` 原样保留,弹框单条详情仍可见;
+  `outdated` 不经 `unpassed` 也不会漏报——生成缺口由 `hasGap`(failed/outdated)独立驱动 `partial`。
+- **收口落盘修复**:`executeJob` 流水线收口用 `markManifest` 只 patch `{counts,jobStatus,error}`、
+  cases 从磁盘重读——而 `runAndRepairLoop` 在最后一次 `persistRunning` **之后**还会改写 repairNote
+  (「AI 修改后仍未通过」讲真话覆盖),这次改写被磁盘旧值静默吞掉(真机:manifest 里模型乐观的
+  repairNote 与 `lastRunError` 并存,「说修好了却报错」)。修法:两处收口 patch 都带上 `cases`
+  (锁内内存态权威;手动入口 `runPipelineForTask` 的 `settle` 本就整份写盘、无此问题)。
+- **strict mode violation 修法入 prompt**:真机 TC-employee-001 页面「员工姓名」同时是查询表单
+  label 和表格列头——**精确重名**,修复模型开的 `{ exact: true }` 无效(exact 只防子串误配),重跑同错。
+  修复 prompt 补:候选文本与断言文本逐字相同时必须容器收窄,**报错里每个候选自带的 aka 提示就是
+  现成答案**(直接照抄 `locator("form").getByText(...)`);生成 prompt 的定位器规则同步补一句预防。
+  当时另一重放大因素:旧构建 `summarizeRunFailure` 只存了首行「Error: expect...failed」,strict-mode
+  的候选清单根本没喂给修复模型(67a3f87 已修,现在完整诊断会进 `lastRunError`)。
+
 ## 运维与验证
 
 - 开发态运行 UI 前若刚执行过 Electron 打包，先 `npm rebuild better-sqlite3` 恢复 Node ABI。
 - 打包流程的 `after-pack.js` 会再把 better-sqlite3 重编译为 Electron ABI。
-- 定向测试：`src/__tests__/unit/test-script-generation.test.ts`、`test-exec-stream.test.ts`、`sdk-result-interpret.test.ts`（SDK 四种 result 形态）、`script-import-normalize.test.ts`（import 归一化端到端契约）、`script-replay-safety.test.ts`（重放安全判定 + 失败摘要）、`script-repair.test.ts`（AI 修复载荷红线）、`script-pipeline-classify.test.ts`（环境失败分类器）、`script-validator-structure.test.ts`（一个 test()/标题含 ID/test.step 不计数——复现并守 2026-07-11 真机失败）、`script-static-repair.test.ts`（静态修复决策 `resolveStaticValidContent` + 恢复态契约 `isRunnableStatus`/`isFixableCase`）、`script-regression.test.ts`（回归脚本重放:资格五道闸/合成帧×归约契约/先到先得/连败提示/环境失败分类/concat 惰性）、`script-trace-elements.test.ts`（快照三形态解析 inline/file/persisted + 路径逃逸拒绝 + 指纹隔离；**REAL_\* fixture 取自真机 SSE 原文**——初版拿自造数据全绿却真机零元素）、`script-incremental.test.ts`（增量入队闸门/流式健壮性/**增量与整轮指纹一致性**/depositScripts 开关/未执行守卫）。
+- 定向测试：`src/__tests__/unit/test-script-generation.test.ts`、`test-exec-stream.test.ts`、`sdk-result-interpret.test.ts`（SDK 四种 result 形态）、`script-import-normalize.test.ts`（import 归一化端到端契约）、`script-replay-safety.test.ts`（重放安全判定 + 失败摘要）、`script-repair.test.ts`（AI 修复载荷红线）、`script-pipeline-classify.test.ts`（环境失败分类器）、`script-validator-structure.test.ts`（一个 test()/标题含 ID/test.step 不计数——复现并守 2026-07-11 真机失败）、`script-static-repair.test.ts`（静态修复决策 `resolveStaticValidContent` + 恢复态契约 `isRunnableStatus`/`isFixableCase` + 化石隔离 `isActiveRunFailure`）、`script-regression.test.ts`（回归脚本重放:资格五道闸/合成帧×归约契约/先到先得/连败提示/环境失败分类/concat 惰性）、`script-trace-elements.test.ts`（快照三形态解析 inline/file/persisted + 路径逃逸拒绝 + 指纹隔离；**REAL_\* fixture 取自真机 SSE 原文**——初版拿自造数据全绿却真机零元素）、`script-incremental.test.ts`（增量入队闸门/流式健壮性/**增量与整轮指纹一致性**/depositScripts 开关/未执行守卫）。
 - 流水线端到端真机验证（打包版 + live SUT，两轮）：① R02 注入定位器歧义 → AI 自动诊断补 `exact:true` → 重跑通过（`verified`）；R03 断言如实失败（页面不禁用按钮） → 1 轮内判「需人工」、覆盖乐观 repairNote 讲真话、不 force-pass；终态 `partial` 不卡死。② 证实每条用例只 1 次修复机会、环境不可达跳过、孤儿锁按 pid 存活抢占。
 - 关键检查：同 run 重复报告不改 manifest；相同语义不改脚本 mtime；trace/脚本/输出无真实秘密和本机路径；Next dev 与 standalone 均能解析 MCP 配套 runtime/browser。
 - **打包产物完整性闸**（`scripts/build-electron.mjs` 的 `assertBuildArtifacts`）：`next build` 后断言

@@ -16,7 +16,7 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveStaticValidContent, isRunnableStatus, isFixableCase } from '../../lib/test/script-job-manager';
+import { resolveStaticValidContent, isRunnableStatus, isFixableCase, isActiveRunFailure } from '../../lib/test/script-job-manager';
 
 const ID = 'TC-employee-001';
 const conforming = (id: string) =>
@@ -111,5 +111,42 @@ describe('恢复态状态机契约（isRunnableStatus / isFixableCase）', () =>
     // 反例：旧行为 dead-end 成 failed（无 lastRunError）→ 两个通道都进不去
     const deadEnd = { status: 'failed' as const, lastRunError: undefined };
     assert.equal(isRunnableStatus(deadEnd.status) || isFixableCase(deadEnd), false, '旧 failed 死态两通道皆不可达');
+  });
+});
+
+// 化石隔离：lastRunError 只有长在【当前合格集内（可运行状态）】的条目上才算「本轮未跑通」。
+// 真机踩坑 2026-07-14（mealAllowance「功能测试-回归测试串联」）：TC-employee-001 运行失败后被
+// 摘掉回归标签 → stale 保留旧 lastRunError → unpassed/fixable/需人工计数照算它 →
+// 合格集 1/1 全绿仍每轮报「1 需人工」+ partial +「部分回归脚本自动跑通未成功」，
+// 且运行（stale 不可运行）/修复（判不在合格集内跳过）/重试缺口（只重生成合格用例）三通道全清不掉。
+describe('化石隔离（isActiveRunFailure）', () => {
+  it('可运行状态 + lastRunError → 是当前失败（verified 与 needs_review 都算）', () => {
+    assert.equal(isActiveRunFailure({ status: 'verified', lastRunError: 'Error: expect(locator).toBeVisible() failed' }), true);
+    assert.equal(isActiveRunFailure({ status: 'needs_review', lastRunError: 'Error: expect(locator).toBeVisible() failed' }), true);
+  });
+
+  it('stale/outdated/failed 条目的 lastRunError 是历史化石 → 不算当前失败', () => {
+    assert.equal(isActiveRunFailure({ status: 'stale', lastRunError: 'Error: expect(locator).toBeVisible() failed' }), false);
+    assert.equal(isActiveRunFailure({ status: 'outdated', lastRunError: 'Error: expect(locator).toBeVisible() failed' }), false);
+    assert.equal(isActiveRunFailure({ status: 'failed', lastRunError: 'Error: …' }), false);
+  });
+
+  it('无 lastRunError 无论什么状态都不是失败', () => {
+    assert.equal(isActiveRunFailure({ status: 'verified', lastRunError: undefined }), false);
+    assert.equal(isActiveRunFailure({ status: 'stale', lastRunError: undefined }), false);
+  });
+
+  it('真机场景回放：合格集全绿 + 一条 stale 化石 → 任务不算「未跑通」', () => {
+    const cases = [
+      { status: 'verified' as const, lastRunError: undefined },                                        // TC-employee-034，通过
+      { status: 'stale' as const, lastRunError: 'Error: expect(locator).toBeVisible() failed' },       // TC-employee-001，摘标签后的化石
+    ];
+    assert.equal(cases.some(isActiveRunFailure), false, '化石不得把任务钉在 partial');
+    // 对照：同样的失败长在合格集内（needs_review）→ 如实算未跑通
+    const active = [
+      { status: 'verified' as const, lastRunError: undefined },
+      { status: 'needs_review' as const, lastRunError: 'Error: expect(locator).toBeVisible() failed' },
+    ];
+    assert.equal(active.some(isActiveRunFailure), true, '合格集内的失败必须如实上报');
   });
 });
