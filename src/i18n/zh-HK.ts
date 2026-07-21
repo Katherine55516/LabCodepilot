@@ -474,7 +474,7 @@ const zhHK: Record<TranslationKey, string> = {
   'streaming.preparing': '組織回覆中...',
   'streaming.generating': '生成中',
   'streaming.noContentTimeout': '**錯誤：** {secs} 秒內未收到模型的任何實質回應，連線可能已卡住或中斷。',
-  'turnNotify.completedBody': 'Claude 正在等待你的輸入',
+  'turnNotify.completedBody': 'AI Native Lab 正在等待你的輸入',
   'turnNotify.errorBody': '回覆中斷出錯，點擊查看詳情',
   'streaming.allowForSession': '本次會話允許',
   'streaming.allowed': '已允許',
