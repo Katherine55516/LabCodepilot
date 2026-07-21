@@ -16,7 +16,7 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveStaticValidContent, isRunnableStatus, isFixableCase } from '../../lib/test/script-job-manager';
+import { resolveStaticValidContent, isRunnableStatus, isFixableCase, isCurrentRoundCase } from '../../lib/test/script-job-manager';
 
 const ID = 'TC-employee-001';
 const conforming = (id: string) =>
@@ -111,5 +111,31 @@ describe('恢复态状态机契约（isRunnableStatus / isFixableCase）', () =>
     // 反例：旧行为 dead-end 成 failed（无 lastRunError）→ 两个通道都进不去
     const deadEnd = { status: 'failed' as const, lastRunError: undefined };
     assert.equal(isRunnableStatus(deadEnd.status) || isFixableCase(deadEnd), false, '旧 failed 死态两通道皆不可达');
+  });
+});
+
+describe('本轮口径 isCurrentRoundCase（终态判定不被历史条目污染）', () => {
+  it('stale = 非本轮；其余状态都属于本轮', () => {
+    assert.equal(isCurrentRoundCase({ status: 'stale' }), false);
+    for (const st of ['verified', 'needs_review', 'failed', 'outdated'] as const) {
+      assert.equal(isCurrentRoundCase({ status: st }), true, `${st} 应属于本轮`);
+    }
+  });
+
+  it('回归：一条 stale 的陈年 lastRunError 不得把全通过的一轮判成未通过', () => {
+    // 2026-07-21 真机：本轮 6/6 全 verified，但 7-14 留下的 stale 条目 TC-005 带着
+    // ECONNREFUSED 的旧错误，`cases.some(c => c.lastRunError)` 全量扫描把 jobStatus
+    // 判成 partial → 卡片常驻「存在缺口」，而用户在列表里找不到任何失败项。
+    const cases = [
+      { caseId: 'TC-026', status: 'verified' as const },
+      { caseId: 'TC-051', status: 'verified' as const },
+      { caseId: 'TC-005', status: 'stale' as const, lastRunError: 'ECONNREFUSED ::1:5173' },
+    ];
+    assert.equal(cases.some((c) => 'lastRunError' in c && c.lastRunError), true, '前提：全量扫描确实会命中');
+    assert.equal(
+      cases.filter(isCurrentRoundCase).some((c) => 'lastRunError' in c && c.lastRunError),
+      false,
+      '本轮口径下必须没有未通过项',
+    );
   });
 });

@@ -285,6 +285,20 @@ export function isRunnableStatus(status: ScriptManifestCase['status']): boolean 
 }
 
 /**
+ * 属于【本轮】用例集的条目。`stale` = 本轮未测(历次用例集换代后留下的旧条目,脚本文件仍在
+ * 盘上但已不在当前回归范围内)。
+ *
+ * 存在的理由(真机踩坑 2026-07-21):`jobStatus` 的终态判定曾写成
+ * `manifest.cases.some(c => c.lastRunError)` —— 全量扫描。一条 7-14 留下的 stale 条目
+ * (TC-005,当时前端没起、报 ECONNREFUSED)让本轮 6/6 全部通过的任务被判成 `partial`,
+ * 卡片常驻红色「存在缺口」徽章,而用户在列表里找不到任何失败项。
+ * 凡是回答「本轮怎么样」的统计,都必须先过这道过滤。
+ */
+export function isCurrentRoundCase(item: Pick<ScriptManifestCase, 'status'>): boolean {
+  return item.status !== 'stale';
+}
+
+/**
  * The AI-repair loop may act on this case: it carries a recorded run failure.
  * A 'failed' case (static/collect failure at generation — no lastRunError, no
  * on-disk script) is deliberately NOT fixable; its only recovery is 「重试缺口」
@@ -660,7 +674,9 @@ async function executeJob(entry: FullQueueEntry): Promise<void> {
         try {
           const summary = await runAndRepairLoop(request, manifest, request.maxRepairRounds ?? DEFAULT_MAX_REPAIR_ROUNDS);
           const finalCounts = manifestCounts(manifest.cases, manifest.counts.eligible);
-          const unpassed = manifest.cases.some((c) => c.lastRunError);
+          // 只看【本轮】用例:stale 条目的陈年 lastRunError 会把 6/6 全通过的任务误判成 partial
+          // (卡片常驻「存在缺口」而列表里找不到失败项 —— 2026-07-21 真机复现)。
+          const unpassed = manifest.cases.filter(isCurrentRoundCase).some((c) => c.lastRunError);
           manifest = markManifest(request, {
             counts: finalCounts,
             jobStatus: finalCounts.failed > 0 || unpassed ? 'partial' : 'done',
@@ -673,7 +689,7 @@ async function executeJob(entry: FullQueueEntry): Promise<void> {
         } catch (pipelineError) {
           const clean = redactTraceText(pipelineError instanceof Error ? pipelineError.message : String(pipelineError), safeRedactionsFor(request));
           // 流水线中途失败不能把 manifest 卡在 persistRunning 写下的 'running'：落终态，保留已生成脚本。
-          const unpassed = manifest.cases.some((c) => c.lastRunError);
+          const unpassed = manifest.cases.filter(isCurrentRoundCase).some((c) => c.lastRunError);
           manifest = markManifest(request, {
             counts: manifestCounts(manifest.cases, manifest.counts.eligible),
             jobStatus: (unpassed || manifest.counts.failed > 0) ? 'partial' : 'done',
@@ -959,8 +975,12 @@ async function runScriptCases(
   caseIds?: string[] | null,
 ): Promise<Array<{ caseId: string; ok: boolean; output: string; timedOut: boolean }>> {
   const requested = caseIds?.length ? new Set(caseIds) : null;
+  // 未显式点名时只跑【本轮】用例 —— 否则「运行全部/自动跑通」会把已退役(stale)的历史脚本
+  // 也拉去跑,既慢又可能拿旧脚本的失败污染本轮终态。用户在弹框里显式点某条 stale 脚本时
+  // (requested 命中)仍然放行,那是明确的人为意图。
   const runnable = manifest.cases.filter((item) =>
-    isRunnableStatus(item.status) && (!requested || requested.has(item.caseId)));
+    isRunnableStatus(item.status)
+    && (requested ? requested.has(item.caseId) : isCurrentRoundCase(item)));
   const resolved = resolveProjectEnvWithDb(jobRequest.projectPath, jobRequest.env);
   const results: Array<{ caseId: string; ok: boolean; output: string; timedOut: boolean }> = [];
   for (const item of runnable) {
@@ -1131,7 +1151,8 @@ async function runAndRepairLoop(
   let rounds = 0;
   for (let round = 1; round <= maxRounds; round++) {
     parkEnv();  // 环境问题（被测应用没起）不喂给 AI。
-    const fixable = manifest.cases.filter((c) => isFixableCase(c) && !parked.has(c.caseId));
+    // 只修本轮用例:退役脚本的陈年失败不该消耗修复轮次与 token。
+    const fixable = manifest.cases.filter((c) => isCurrentRoundCase(c) && isFixableCase(c) && !parked.has(c.caseId));
     if (!fixable.length) break;
     rounds = round;
 
@@ -1168,9 +1189,11 @@ async function runAndRepairLoop(
   parkEnv();
 
   for (const id of environmentBlocked) needsHuman.delete(id);
-  const passed = manifest.cases.filter((c) => c.status === 'verified' && !c.lastRunError).map((c) => c.caseId);
+  // 汇总同样只统计本轮,避免退役条目混进「通过/未修复」的口径。
+  const currentCases = manifest.cases.filter(isCurrentRoundCase);
+  const passed = currentCases.filter((c) => c.status === 'verified' && !c.lastRunError).map((c) => c.caseId);
   // 循环结束仍带失败、又没归入环境/人工的（只会在 maxRounds 用尽且还有未处理项时出现）：统一算需人工。
-  const stillFailing = manifest.cases
+  const stillFailing = currentCases
     .filter((c) => c.lastRunError && !environmentBlocked.has(c.caseId) && !needsHuman.has(c.caseId))
     .map((c) => c.caseId);
   for (const id of stillFailing) needsHuman.add(id);
@@ -1231,7 +1254,8 @@ export async function runPipelineForTask(request: {
       settle('partial', `自动跑通中断:${clean.slice(0, 300)}`);
       throw loopError;
     }
-    const unpassed = manifest.cases.some((c) => c.lastRunError);
+    // 同上:只按本轮用例判终态,不被 stale 的历史失败记录拖住。
+    const unpassed = manifest.cases.filter(isCurrentRoundCase).some((c) => c.lastRunError);
     settle(unpassed ? 'partial' : 'done', unpassed ? '部分回归脚本自动跑通未成功（详见各用例）' : undefined);
     await appendAudit(request.projectPath, request.taskName, {
       action: 'run-repair-pipeline', mode: 'manual', step: 'report',
