@@ -92,6 +92,8 @@ export interface PanelContextValue {
   activeStreamingSessions: Set<string>;
   /** All sessions with pending permission approval */
   pendingApprovalSessionIds: Set<string>;
+  /** Sessions where AskUserQuestion is waiting for the user's answer (raised-hand icon) */
+  pendingQuestionSessionIds: Set<string>;
   /**
    * Primary preview source (new API). Use this for all new callers —
    * especially Phase 2 (Artifact .jsx/.tsx preview) and Phase 5.4

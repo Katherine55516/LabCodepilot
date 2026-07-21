@@ -61,7 +61,7 @@ export function ChatListPanel({ open, width, hasUpdate, readyToInstall }: ChatLi
   const pathname = usePathname();
   const router = useRouter();
 
-  const { streamingSessionId, pendingApprovalSessionId, activeStreamingSessions, pendingApprovalSessionIds, workingDirectory, testPanelOpen, setTestPanelOpen } = usePanel();
+  const { streamingSessionId, pendingApprovalSessionId, activeStreamingSessions, pendingApprovalSessionIds, pendingQuestionSessionIds, workingDirectory, testPanelOpen, setTestPanelOpen } = usePanel();
 
   // 工作台只在 chat 路由的覆盖层显示（见 AppShell：testPanelOpen && isChatRoute）。测试按钮的
   // active 高亮应与「工作台是否真的可见」一致——否则点文生图/设置导航到非 chat 路由后，工作台
@@ -566,6 +566,7 @@ export function ChatListPanel({ open, width, hasUpdate, readyToInstall }: ChatLi
               pendingApprovalSessionId={pendingApprovalSessionId}
               activeStreamingSessions={activeStreamingSessions}
               pendingApprovalSessionIds={pendingApprovalSessionIds}
+              pendingQuestionSessionIds={pendingQuestionSessionIds}
               t={t}
               setActiveColumn={setActiveColumn}
               removeFromSplit={removeFromSplit}
@@ -665,6 +666,7 @@ export function ChatListPanel({ open, width, hasUpdate, readyToInstall }: ChatLi
                                 isDeleting={deletingSession === session.id}
                                 isSessionStreaming={activeStreamingSessions.has(session.id) || streamingSessionId === session.id}
                                 needsApproval={pendingApprovalSessionIds.has(session.id) || pendingApprovalSessionId === session.id}
+                                awaitingQuestion={pendingQuestionSessionIds.has(session.id)}
                                 canSplit={canSplit}
                                 isWorkspace={groupIsWorkspace}
                                 formatRelativeTime={formatRelativeTime}

@@ -45,6 +45,7 @@ export {
   Funnel,
   GameController,
   Gear,
+  Hand,
   GitBranch,
   Globe,
   GlobeSimple,
