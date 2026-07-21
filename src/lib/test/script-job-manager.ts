@@ -941,6 +941,60 @@ export async function repairFailedScripts(request: RepairRequest): Promise<{
 }
 
 /** 手动「运行」入口（自持锁，与生成/修复互斥）。UI 的运行全部/运行所选走这里。 */
+/**
+ * 人工确认 mock 脚本通过 —— 「需人工确认」这句话的落点。
+ *
+ * 只对 `usesMock && needs_review` 的条目生效：非 mock 的待复核脚本各有其技术原因
+ * （重放失败、静态告警），有 运行/AI 修复 两条既有通道，不该被一键"确认"绕过。
+ *
+ * 刻意保留 `usesMock` 与那条 mock 警告：确认的是「我看过、认可它」，不是「它没用过 mock」。
+ * 回归重放的资格判定同样继续排除 mock 脚本，此处不放开自动重放。
+ */
+export async function confirmMockScripts(request: {
+  projectPath: string;
+  taskName: string;
+  env: string;
+  caseIds: string[];
+}): Promise<{ confirmed: string[]; skipped: Array<{ caseId: string; reason: string }>; manifest: ScriptManifest }> {
+  const manifest = readManifest(request.projectPath, request.taskName, request.env);
+  if (!manifest) throw new Error('尚未生成脚本清单（manifest）');
+  const wanted = new Set(request.caseIds);
+  const lock = acquireLock({
+    projectPath: request.projectPath, taskName: request.taskName, env: request.env,
+    runHash: manifest.latestRunHash,
+  });
+  try {
+    const now = new Date().toISOString();
+    const confirmed: string[] = [];
+    const skipped: Array<{ caseId: string; reason: string }> = [];
+    for (const item of manifest.cases) {
+      if (!wanted.has(item.caseId)) continue;
+      if (item.status !== 'needs_review') { skipped.push({ caseId: item.caseId, reason: `状态为 ${item.status}，无需确认` }); continue; }
+      if (!item.usesMock) { skipped.push({ caseId: item.caseId, reason: '非接口模拟脚本，请走「运行」或「AI 修复」' }); continue; }
+      if (item.lastRunError) { skipped.push({ caseId: item.caseId, reason: '存在运行失败记录，请先修复再确认' }); continue; }
+      item.status = 'verified';
+      item.manualVerifiedAt = now;
+      item.lastVerifiedAt = now;
+      confirmed.push(item.caseId);
+    }
+    if (!confirmed.length && skipped.length) throw new Error(skipped[0].reason);
+    if (!confirmed.length) throw new Error('没有可确认的脚本');
+    manifest.counts = manifestCounts(manifest.cases, manifest.counts.eligible);
+    // 终态按本轮口径重算（与 5b54341 的收口一致：退役条目的陈年失败不参与判定）。
+    const unpassed = manifest.cases.filter(isCurrentRoundCase).some((c) => c.lastRunError);
+    manifest.jobStatus = (manifest.counts.failed > 0 || unpassed) ? 'partial' : 'done';
+    if (manifest.jobStatus === 'done') manifest.error = undefined;
+    writeManifest(request.projectPath, request.taskName, request.env, manifest);
+    await appendAudit(request.projectPath, request.taskName, {
+      action: 'confirm-mock-scripts', mode: 'manual', step: 'report',
+      detail: `人工确认接口模拟脚本通过:${confirmed.join('、')}`,
+    });
+    return { confirmed, skipped, manifest };
+  } finally {
+    lock.close();
+  }
+}
+
 export async function runScripts(request: RepairRequest): Promise<{
   results: Array<{ caseId: string; ok: boolean; output: string; timedOut: boolean }>;
   manifest: ScriptManifest;

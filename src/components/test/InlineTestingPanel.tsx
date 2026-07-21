@@ -192,6 +192,8 @@ interface ScriptManifestCaseView {
   lastRunAt?: string;
   /** 最近一次 AI 修复的结论（修了什么 / 为什么不是脚本缺陷），写给不会写代码的测试人员。 */
   repairNote?: string;
+  /** 人工确认 mock 脚本通过的时刻（见 script-artifacts.ts 的字段注释）。 */
+  manualVerifiedAt?: string;
 }
 interface ScriptManifestView {
   latestRunHash: string;
@@ -4061,7 +4063,7 @@ function ScriptPreview({ t, projectPath, taskName, env, initialManifest, onChang
   const [selectedId, setSelectedId] = useState(initialManifest.cases.filter((c) => c.status !== "stale")[0]?.caseId ?? "");
   const [content, setContent] = useState<string | null>(null);
   const [contentError, setContentError] = useState(false);
-  const [busy, setBusy] = useState<"retry" | "run" | "repair" | null>(null);
+  const [busy, setBusy] = useState<"retry" | "run" | "repair" | "confirm" | null>(null);
   const [output, setOutput] = useState("");
   const selected = shownCases.find((item) => item.caseId === selectedId) ?? shownCases[0];
 
@@ -4196,7 +4198,36 @@ function ScriptPreview({ t, projectPath, taskName, env, initialManifest, onChang
     }
   };
 
+  // 人工确认 mock 脚本通过：「需人工确认真实环境可通过」这句警告此前没有落点，usesMock 的
+  // 脚本无论运行成功多少次都不会被提升（runScriptCases 刻意跳过它们），状态永久停在待复核。
+  const confirmSelected = async () => {
+    if (!selected) return;
+    setBusy("confirm");
+    setOutput("");
+    try {
+      const res = await fetch("/api/test/scripts/confirm-mock", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectPath, taskName, env, caseIds: [selected.caseId] }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "confirm failed");
+      if (data.manifest) {
+        const next = data.manifest as ScriptManifestView;
+        setManifest(next);
+        onChanged(next);
+      }
+      setOutput(`✓ ${t("test.scripts.confirmMockDone")}`);
+    } catch (error) {
+      setOutput(error instanceof Error ? error.message : t("test.scripts.error"));
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const runnable = selected?.status === "verified" || selected?.status === "needs_review";
+  // 只在「确实需要人工拍板」时给按钮：mock + 待复核 + 无失败记录（带失败记录该走运行/AI 修复）。
+  const confirmable = !!selected && selected.usesMock && selected.status === "needs_review" && !selected.lastRunError;
   const working = manifest.jobStatus === "queued" || manifest.jobStatus === "running";
 
   return (
@@ -4254,11 +4285,22 @@ function ScriptPreview({ t, projectPath, taskName, env, initialManifest, onChang
                 {busy === "repair" ? <SpinnerGap size={10} className="animate-spin" /> : <Wrench size={10} />} {t("test.scripts.repair")}
               </button>
             )}
+            {confirmable && (
+              <button onClick={confirmSelected} disabled={busy !== null || working} title={t("test.scripts.confirmMockHint")} className="inline-flex items-center gap-1 rounded border border-status-success-border bg-status-success-muted px-2 py-0.5 text-[10px] text-status-success-foreground hover:opacity-90 disabled:opacity-40">
+                {busy === "confirm" ? <SpinnerGap size={10} className="animate-spin" /> : <Check size={10} />} {t("test.scripts.confirmMock")}
+              </button>
+            )}
           </div>
           {/* 运行失败是持久化的（manifest.lastRunError），重开弹框仍可见；上方的 output 只是本次运行的瞬时输出。 */}
           {selected?.lastRunError && (
             <div className="border-b border-border bg-status-error-muted/40 px-3 py-1.5 text-[10px] text-status-error-foreground">
               {selected.lastRunError}
+            </div>
+          )}
+          {/* 人工确认留痕：它是被人放行的、不是自动验证通过的，这个区别必须可见。 */}
+          {selected?.manualVerifiedAt && (
+            <div className="border-b border-border bg-status-success-muted/40 px-3 py-1.5 text-[10px] text-status-success-foreground">
+              ✓ {t("test.scripts.confirmMockDone")} · {fmtCnDateTime(selected.manualVerifiedAt)}
             </div>
           )}
           {/* AI 修复结论：修了什么 / 为什么不是脚本缺陷（如页面行为与用例预期不符 → 需人工确认）。 */}
@@ -4316,6 +4358,7 @@ const AUDIT_ACTION_KEYS: Record<string, TranslationKey> = {
   "suite-save": "test.audit.action.suiteSave",
   "suite-delete": "test.audit.action.suiteDelete",
   "delete-round": "test.audit.action.deleteRound",
+  "confirm-mock-scripts": "test.audit.action.confirmMock",
 };
 const AUDIT_MODE_KEYS: Record<string, TranslationKey> = {
   manual: "test.audit.mode.manual",
