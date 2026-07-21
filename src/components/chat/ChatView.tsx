@@ -1234,7 +1234,13 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
           // E4 (cowork): 办公会话隐藏权限选择器 —— 创建期已定 full_access
           // (VM 隔离即权限故事,D3),无需/不应回合内切换。原 SandboxToggle
           // 已移除:模式由侧边栏「办公/研发」双栏在建会话时定死(E3)。
-          sandboxEnabled ? null : (
+          // 办公模式改为在输入框下方居中展示出品标识(企业法定名称,各
+          // 语言环境不翻译);absolute 相对整条 bar 居中 = 相对输入框居中。
+          sandboxEnabled ? (
+            <span className="pointer-events-none absolute inset-x-0 top-0.5 bottom-2.5 flex select-none items-center justify-center text-xs text-muted-foreground/40">
+              招商局金融科技有限公司出品
+            </span>
+          ) : (
             <div className="flex items-center gap-1.5">
               <ChatPermissionSelector
                 sessionId={sessionId}
