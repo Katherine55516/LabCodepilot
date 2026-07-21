@@ -3754,7 +3754,9 @@ function ReportStepPanel({
     : t("test.report.summaryFail", { func: funcRateStr, fail });
   const scriptJobLabel: Record<ScriptJobStatusView, TranslationKey> = {
     queued: "test.scripts.queued", running: "test.scripts.running", done: "test.scripts.done",
-    partial: "test.scripts.partial", error: "test.scripts.error", stale: "test.scripts.stale",
+    // job 级 stale = 该生成任务被更新的任务取代(superseded),与用例级 stale(本轮未测)
+    // 不同义 —— 两者曾复用同一文案 key,改名后会把「已被新任务取代」显示成「本轮未测」。
+    partial: "test.scripts.partial", error: "test.scripts.error", stale: "test.scripts.jobStale",
   };
   const scriptRunnable = scriptManifest?.cases.filter((item) => item.status === "verified" || item.status === "needs_review") ?? [];
   // 「重试缺口」只管【生成】缺口：没 manifest（旧报告）、整个 job 挂了/过期、或有用例

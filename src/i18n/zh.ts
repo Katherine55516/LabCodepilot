@@ -789,7 +789,9 @@ const zh: Record<TranslationKey, string> = {
   'test.scripts.verified': '已验证',
   'test.scripts.needsReview': '待复核',
   'test.scripts.failed': '失败',
-  'test.scripts.stale': '已过期',
+  'test.scripts.stale': '本轮未测',
+  // job 级：该生成任务被更新的任务取代（superseded），与用例级 stale(本轮未测) 不同义
+  'test.scripts.jobStale': '已被新任务取代',
   'test.scripts.outdated': '保留旧版',
   'test.scripts.busy': '处理中…',
   'test.scripts.loadFailed': '脚本读取失败',
