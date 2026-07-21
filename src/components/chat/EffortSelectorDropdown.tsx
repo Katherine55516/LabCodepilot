@@ -49,11 +49,14 @@ export function EffortSelectorDropdown({
   }, [effortMenuOpen]);
 
   return (
-    <div className="relative" ref={effortMenuRef}>
+    // min-w-0 + truncate: mirrors ModelSelectorDropdown so the trigger can
+    // shrink in narrow panes instead of overflowing the toolbar row.
+    <div className="relative min-w-0" ref={effortMenuRef}>
       <PromptInputButton
+        className="max-w-full"
         onClick={() => setEffortMenuOpen((prev) => !prev)}
       >
-        <span className="text-xs">{t(`messageInput.effort.${selectedEffort}` as TranslationKey)}</span>
+        <span className="text-xs truncate">{t(`messageInput.effort.${selectedEffort}` as TranslationKey)}</span>
         <CaretDown size={10} className={cn("transition-transform duration-200", effortMenuOpen && "rotate-180")} />
       </PromptInputButton>
 

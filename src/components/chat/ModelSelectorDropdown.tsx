@@ -165,15 +165,18 @@ export function ModelSelectorDropdown({
     .filter((item) => !mq || item.providerName.toLowerCase().includes(mq));
 
   return (
-    <div className="relative" ref={modelMenuRef}>
+    // min-w-0 + truncate: in narrow panes the model name ellipsizes instead of
+    // forcing the toolbar row wider than its container.
+    <div className="relative min-w-0" ref={modelMenuRef}>
       <PromptInputButton
+        className="max-w-full"
         onClick={() => setModelMenuOpen((prev) => !prev)}
       >
-        <span className="text-xs font-mono">
+        <span className="text-xs font-mono truncate">
           {selectedManaged?.name ?? localize(locale, '选择模型', 'Select model')}
         </span>
         {isCurrentDefault && (
-          <span className="text-[9px] px-1 py-0 rounded bg-primary/10 text-primary font-medium ml-0.5">
+          <span className="shrink-0 text-[9px] px-1 py-0 rounded bg-primary/10 text-primary font-medium ml-0.5">
             {localize(locale, '默认', 'Default')}
           </span>
         )}

@@ -59,7 +59,9 @@ export function FileAwareSubmitButton({
       status={canQueue ? 'ready' : status}
       onStop={canQueue ? undefined : onStop}
       disabled={!enabled}
-      className="rounded-full"
+      // self-end: when the tools row wraps to two lines in a narrow pane, keep
+      // the submit button pinned to the bottom-right instead of floating mid-height.
+      className="rounded-full self-end"
     >
       {canQueue ? (
         <ArrowUp size={16} />
