@@ -32,13 +32,13 @@
 | 23 | 回归执行无法中途停止：`runLibrary`(InlineTestingPanel.tsx) 的两处 fetch 没有 AbortController（功能测试的 `runStep` 有 `Promise.race` + signal）。执行进展面板只读进度、不能取消；长跑的大套件只能等它跑完 | 中 | 误发起的大套件无法叫停，浪费时间与 token | 2026-07-10 |
 | 24 | 执行进展面板的「收口中 / 疑似卡住」是**推断态**：最后一条 @@RESULT 到 run_json 之间服务端在做证据归集与归约，不发任何 SSE 帧。面板靠「多久没收到帧」推断，无心跳帧兜底。服务端若真卡死，面板只能靠 90s 超时提示，无法区分「归约慢」与「进程挂了」 | 低 | 收口阶段的可观测性依赖启发式 | 2026-07-10 |
 | 25 | 执行流事件在内存中无界增长：大回归套件（十几条用例 × 几百条工具调用）的 `libraryLive.cases[].events` 会持续膨胀。按用例分段 + 工具轨迹折叠缓解了渲染压力，但数组本身未封顶/虚拟化 | 低 | 超大套件长跑后滚动可能卡顿 | 2026-07-10 |
-| 26 | 静态校验器（`script-validator.ts`）对 **API 接口测试脚本**误报「未使用语义化定位器（getByTestId/Role/Label 等）」警告 → 压成 `needs_review`。API 测试走 `request` fixture、对 HTTP 状态码/响应体断言，本就没有也不该有 DOM 定位器（`getByRole` 之类）。该警告只对 UI 测试有意义。判据缺一个「脚本是否为 UI 测试」的前置（如检测 `{ page }` fixture / `page.` 调用），API 测试应跳过此警告。真机可见：TC-001/TC-006/TC-085 等 API 用例稳定挂 needs_review，掩盖了真正需要人工复核的信号 | 低 | API 测试脚本永远进不了 verified、needs_review 信号被稀释；不影响执行正确性 | 2026-07-17 |
 | 27 | 快照元素清单只覆盖**具名元素**（aria 树里有 role+name 的）。断言纯视觉结构的用例（卡片网格布局、颜色圆点、间距）——这些在 aria 树里是无名 `generic`，清单里没有，生成模型仍只能扒 CSS class（真机 TC-058 的「2 列响应式网格」断言仍是 `querySelector('.grid.gap-4...')`）。**根治不在测试平台，在被测前端加 `data-testid`**。平台侧可做的补强有限：或可对高频视觉断言词（网格/列表/卡片）在 prompt 里引导用更稳的结构断言，但收益不确定 | 低 | 视觉结构类 UI 断言的脚本仍脆、易随样式改动失效 | 2026-07-17 |
 
 ## 已解决
 
 | # | 描述 | 解决日期 | 解决方式 |
 |---|------|----------|----------|
+| 26 | 静态校验器对 **API 接口测试脚本**误报「未使用语义化定位器」→ 恒被压成 `needs_review`，稀释真正需要人工复核的信号（真机 8 条 API 用例常年待复核） | 2026-07-21 | 新增导出谓词 `touchesPage`（判据是**有没有实际 `page.` 调用**，而非 fixture 解构 —— `{ page, request }` 混合型含真实 UI 操作，必须照常检查），该警告仅对操作页面的脚本生效。另三条定位器警告（xpath/nth/waitForTimeout）是「用了不好的东西」才告警，API 脚本本就不会触发，无需改。单测 4 条覆盖纯 API/纯 UI/混合型/判据本身；真实脚本回放 15 条全部无假告警 |
 | 7 | `project-mcp-injection.test.ts` 的 "resolves ${...} env placeholders" 被 `process.env.CI ? it.skip : it` 跳过 | 2026-07-09 | 原条目归因（tsx 在 linux 与 macOS 上 module identity 去重不一致）不成立：`db.ts` 在 tsx 下本就会被 CJS 与 ESM 两套注册表各求值一次，与平台、与 `@/` 别名均无关。真正的根因是 `db.ts` 把 `dataDir` / `DB_PATH` 写成模块顶层 `const`，于是两个实例各自钉死一个 `CLAUDE_GUI_DATA_DIR` 快照，测试侧 `setSetting` 与 prod 侧 `getSetting` 落在不同的 SQLite 文件上。改为惰性函数求值后两个实例指向同一文件，守卫已移除，该用例在 `CI=true` 下正常执行 |
 | 13(旧,编号曾与上传条目重复) | 测试工作台「执行」步在打包版跑不起来（@playwright/mcp 不在 asarUnpack + Chromium 未随包） | 2026-07-09 确认 | `scripts/bundle-chromium.mjs`（electron:pack* 链内）用 @playwright/mcp 自带 revision 装 chromium-headless-shell → electron-builder extraResources 复制进包内 `resources/ms-playwright`，运行时经 `AILAB_RESOURCES_PATH` 定位 `--executable-path` 启动（见 electron-builder.yml:127-133、prompts.ts buildPlaywrightMcp）。回归用例库 v2 打包验收时一并复核真跑 |
 | 18(新增,与上表 18 不同类) | `GET /api/test/media` 与 `POST /api/test/defect` 不接受 `roundId` —— v2 一期把产物迁进 `report/{task}/{roundId}/`、证据迁进 `_evidence/{task}-{env}-{roundId}` 之后，轮次维度的证据**根本取不到**，缺陷单也会读错（平铺的）run.json | 2026-07-10 | 两处均补 `roundId` 参数 + `isUnsafeSegment` 段安全校验（穿越返回 400，已验证）；缺省行为不变，普通任务零影响 |

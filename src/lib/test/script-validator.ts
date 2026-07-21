@@ -13,6 +13,17 @@ const ABSOLUTE_PATH = /(?:["'`](?:\/[Uu]sers\/|\/[Hh]ome\/|[A-Za-z]:\\Users\\))/
 const MODULE_REFERENCE = /(?:\bfrom\s+|\bimport\s*\(\s*|\brequire\s*\(\s*)["']([^"']+)["']/g;
 const ALLOWED_ENV = new Set(['BASE_URL', 'TEST_USERNAME', 'TEST_PASSWORD']);
 
+/**
+ * 脚本是否真的操作了页面（决定要不要用 UI 维度的定位器规则去衡量它）。
+ *
+ * 判据刻意用「有没有 `page.` 调用」而不是「fixture 解构里有没有 page」：混合型脚本
+ * （`async ({ page, request })`，如先建数据再验页面渲染）含真实 UI 操作，必须照常检查；
+ * 而只解构不使用的情况不该被当成 UI 测试。
+ */
+export function touchesPage(source: string): boolean {
+  return /\bpage\s*\./.test(source);
+}
+
 export function validateScriptSource(source: string, expectedCaseId: string): StaticScriptValidation {
   const warnings: string[] = [];
   const errors: string[] = [];
@@ -41,7 +52,14 @@ export function validateScriptSource(source: string, expectedCaseId: string): St
   if (/\.locator\(\s*["']\s*(?:\/\/|xpath=|\/html|html\s*>)/i.test(source)) warnings.push('使用了 xpath/绝对选择器，需人工复核');
   if (/\.nth\s*\(/.test(source)) warnings.push('使用了 nth 序号定位，需人工复核');
   if (/\.waitForTimeout\s*\(/.test(source)) warnings.push('使用了固定等待 waitForTimeout，需人工复核');
-  if (!/getBy(?:TestId|Role|Label|Text|Placeholder)\s*\(/.test(source)) warnings.push('未使用语义化定位器（getByTestId/Role/Label 等）');
+  // 语义化定位器只对【操作页面】的脚本有意义。纯 API 接口测试走 request fixture、断言的是
+  // HTTP 状态码与响应体,压根没有也不该有 DOM 定位器 —— 无条件检查会让每条 API 脚本稳定挂
+  // 一条假警告并被压成 needs_review,把真正需要人工复核的信号淹掉(真机:7 条 API 用例常年
+  // 待复核)。判据用「是否实际操作页面」而非 fixture 解构:TC-051 那种 { page, request } 的
+  // 混合型有真实 UI 操作,仍须照常检查。
+  if (touchesPage(source) && !/getBy(?:TestId|Role|Label|Text|Placeholder)\s*\(/.test(source)) {
+    warnings.push('未使用语义化定位器（getByTestId/Role/Label 等）');
+  }
 
   const transpiled = ts.transpileModule(source, {
     compilerOptions: {
