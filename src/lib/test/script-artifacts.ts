@@ -47,6 +47,19 @@ export interface ScriptManifestCase {
    */
   repairNote?: string;
   /**
+   * 人工确认通过的时刻（仅 usesMock 脚本需要）。
+   *
+   * 存在的理由：执行时用了 `browser_route` 模拟接口的脚本，重放通过也不代表真实环境可通过，
+   * 故 `runScriptCases` 刻意不把它提升为 verified。但此前平台只留下一句「需人工确认真实
+   * 环境可通过」的警告、**却没有任何地方能记录确认结果** —— 状态被永久钉死在 needs_review，
+   * 和真正待修的脚本混在一起，反而稀释了「待复核」这个信号。此字段就是那个出口。
+   *
+   * 刻意保留 `usesMock: true` 与那条 mock 警告：确认的是「我看过、认可它」，不是「它没用过
+   * mock」，事实不该被抹掉。回归重放的资格判定同样继续排除 mock 脚本（见 script-regression
+   * 五道闸），人工确认解决的是状态卡死，不顺带放开自动重放。
+   */
+  manualVerifiedAt?: string;
+  /**
    * 用例体语义指纹(library.ts caseFingerprint 同口径:排除 id/tags/_source/_lib)。
    * 回归轮次「脚本重放」用它防错配:库里被编辑过(rev 升)的用例不能拿旧脚本重放出
    * 错误结论。存量条目缺失时宽限放行(下轮生成自然补齐)。

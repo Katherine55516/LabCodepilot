@@ -279,9 +279,35 @@ function candidateSource(candidate: EligibleScriptCase): Pick<ScriptManifestCase
 // predicates make that contract explicit and testable (a 2026-07-11 review found a
 // replay-failed read-only case was dead-ended as 'failed' — outside BOTH channels).
 
-/** Script is on disk and may be run / re-run against the SUT (运行 / pipeline). */
+/**
+ * Script is on disk and may be run / re-run against the SUT (运行 / pipeline).
+ *
+ * 含 `outdated`：该状态的定义就是「重新生成失败，但**盘上仍有一份可用的旧脚本**」——
+ * 两处产生点(generateMissing / validateAndPublish 的 failed 分支)都以
+ * `fs.existsSync(finalFile)` 为前提，没有旧文件的一律记 `failed`。
+ *
+ * 真机踩坑(2026-07-21)：TC-051 点「重试」重新生成时撞上跨境链路坏窗口（网关 401 被 SDK
+ * 原样报成 `Not logged in`），落 `outdated`。此后那份完好的旧脚本**掉出了所有恢复通道**
+ * —— 不能运行(此谓词曾排除它)、不能 AI 修复(无 lastRunError)、不能人工确认(非
+ * needs_review)，唯一出路是反复重试生成、反复赌网络。这与 2026-07-11 修掉的 `failed`
+ * 死态是同一类问题：**有可用脚本却无路可走**。
+ */
 export function isRunnableStatus(status: ScriptManifestCase['status']): boolean {
-  return status === 'verified' || status === 'needs_review';
+  return status === 'verified' || status === 'needs_review' || status === 'outdated';
+}
+
+/**
+ * 属于【本轮】用例集的条目。`stale` = 本轮未测(历次用例集换代后留下的旧条目,脚本文件仍在
+ * 盘上但已不在当前回归范围内)。
+ *
+ * 存在的理由(真机踩坑 2026-07-21):`jobStatus` 的终态判定曾写成
+ * `manifest.cases.some(c => c.lastRunError)` —— 全量扫描。一条 7-14 留下的 stale 条目
+ * (TC-005,当时前端没起、报 ECONNREFUSED)让本轮 6/6 全部通过的任务被判成 `partial`,
+ * 卡片常驻红色「存在缺口」徽章,而用户在列表里找不到任何失败项。
+ * 凡是回答「本轮怎么样」的统计,都必须先过这道过滤。
+ */
+export function isCurrentRoundCase(item: Pick<ScriptManifestCase, 'status'>): boolean {
+  return item.status !== 'stale';
 }
 
 /**
@@ -294,19 +320,6 @@ export function isRunnableStatus(status: ScriptManifestCase['status']): boolean 
  */
 export function isFixableCase(item: Pick<ScriptManifestCase, 'lastRunError'>): boolean {
   return !!item.lastRunError;
-}
-
-/**
- * 化石隔离：只有长在【当前合格集内（可运行状态）】条目上的 lastRunError 才代表
- * 「本轮未跑通」。stale/outdated 条目的失败记录是历史事实（用例曾失败、随后被移出
- * 回归集合或被新一轮取代），保留展示但不参与任务终态、修复循环与需人工计数 ——
- * 否则一条被摘掉回归标签的旧失败会把任务永久钉在 partial：运行不碰 stale、修复把它
- * 判「不在合格集内」跳过又 park 成需人工、重试缺口只重生成合格用例，三通道全清不掉
- * （真机踩坑 2026-07-14：mealAllowance「功能测试-回归测试串联」TC-employee-001，
- * 摘标签后 manifest 全绿仍每轮报「1 需人工」+「部分回归脚本自动跑通未成功」）。
- */
-export function isActiveRunFailure(item: Pick<ScriptManifestCase, 'lastRunError' | 'status'>): boolean {
-  return !!item.lastRunError && isRunnableStatus(item.status);
 }
 
 /**
@@ -668,12 +681,16 @@ async function executeJob(entry: FullQueueEntry): Promise<void> {
 
     // 自动流水线：生成后运行 + 失败自动修，直至全部（可修复的）通过。仅在被测应用可达时进行，
     // best-effort —— 流水线出问题不抹掉已生成的脚本，只把没跑成的留给用户手动触发。
-    if (request.runPipeline && manifest.cases.some((c) => isRunnableStatus(c.status))) {
+    // 「有没有可跑的」也按本轮口径:全是退役脚本时不该白启动一次流水线(它会去探测被测应用、
+    // 起 Playwright 运行器,最后无事可做)。
+    if (request.runPipeline && manifest.cases.some((c) => isCurrentRoundCase(c) && isRunnableStatus(c.status))) {
       if (await isSutReachable(request)) {
         try {
           const summary = await runAndRepairLoop(request, manifest, request.maxRepairRounds ?? DEFAULT_MAX_REPAIR_ROUNDS);
           const finalCounts = manifestCounts(manifest.cases, manifest.counts.eligible);
-          const unpassed = manifest.cases.some(isActiveRunFailure);
+          // 只看【本轮】用例:stale 条目的陈年 lastRunError 会把 6/6 全通过的任务误判成 partial
+          // (卡片常驻「存在缺口」而列表里找不到失败项 —— 2026-07-21 真机复现)。
+          const unpassed = manifest.cases.filter(isCurrentRoundCase).some((c) => c.lastRunError);
           // cases 必须随终态一起落盘：markManifest 从磁盘重读后仅覆盖 patch 字段，而
           // runAndRepairLoop 在最后一次 persistRunning 之后还会改写 repairNote（「AI 修改后
           // 仍未通过」的讲真话覆盖）——不带 cases 这次改写就被磁盘旧值静默吞掉（真机踩坑：
@@ -692,7 +709,7 @@ async function executeJob(entry: FullQueueEntry): Promise<void> {
           const clean = redactTraceText(pipelineError instanceof Error ? pipelineError.message : String(pipelineError), safeRedactionsFor(request));
           // 流水线中途失败不能把 manifest 卡在 persistRunning 写下的 'running'：落终态，保留已生成脚本。
           // cases 一并落盘，理由同上（中断前循环内存里的最后状态不能被磁盘旧值吞掉）。
-          const unpassed = manifest.cases.some(isActiveRunFailure);
+          const unpassed = manifest.cases.filter(isCurrentRoundCase).some((c) => c.lastRunError);
           manifest = markManifest(request, {
             cases: manifest.cases,
             counts: manifestCounts(manifest.cases, manifest.counts.eligible),
@@ -943,6 +960,60 @@ export async function repairFailedScripts(request: RepairRequest): Promise<{
 }
 
 /** 手动「运行」入口（自持锁，与生成/修复互斥）。UI 的运行全部/运行所选走这里。 */
+/**
+ * 人工确认 mock 脚本通过 —— 「需人工确认」这句话的落点。
+ *
+ * 只对 `usesMock && needs_review` 的条目生效：非 mock 的待复核脚本各有其技术原因
+ * （重放失败、静态告警），有 运行/AI 修复 两条既有通道，不该被一键"确认"绕过。
+ *
+ * 刻意保留 `usesMock` 与那条 mock 警告：确认的是「我看过、认可它」，不是「它没用过 mock」。
+ * 回归重放的资格判定同样继续排除 mock 脚本，此处不放开自动重放。
+ */
+export async function confirmMockScripts(request: {
+  projectPath: string;
+  taskName: string;
+  env: string;
+  caseIds: string[];
+}): Promise<{ confirmed: string[]; skipped: Array<{ caseId: string; reason: string }>; manifest: ScriptManifest }> {
+  const manifest = readManifest(request.projectPath, request.taskName, request.env);
+  if (!manifest) throw new Error('尚未生成脚本清单（manifest）');
+  const wanted = new Set(request.caseIds);
+  const lock = acquireLock({
+    projectPath: request.projectPath, taskName: request.taskName, env: request.env,
+    runHash: manifest.latestRunHash,
+  });
+  try {
+    const now = new Date().toISOString();
+    const confirmed: string[] = [];
+    const skipped: Array<{ caseId: string; reason: string }> = [];
+    for (const item of manifest.cases) {
+      if (!wanted.has(item.caseId)) continue;
+      if (item.status !== 'needs_review') { skipped.push({ caseId: item.caseId, reason: `状态为 ${item.status}，无需确认` }); continue; }
+      if (!item.usesMock) { skipped.push({ caseId: item.caseId, reason: '非接口模拟脚本，请走「运行」或「AI 修复」' }); continue; }
+      if (item.lastRunError) { skipped.push({ caseId: item.caseId, reason: '存在运行失败记录，请先修复再确认' }); continue; }
+      item.status = 'verified';
+      item.manualVerifiedAt = now;
+      item.lastVerifiedAt = now;
+      confirmed.push(item.caseId);
+    }
+    if (!confirmed.length && skipped.length) throw new Error(skipped[0].reason);
+    if (!confirmed.length) throw new Error('没有可确认的脚本');
+    manifest.counts = manifestCounts(manifest.cases, manifest.counts.eligible);
+    // 终态按本轮口径重算（与 5b54341 的收口一致：退役条目的陈年失败不参与判定）。
+    const unpassed = manifest.cases.filter(isCurrentRoundCase).some((c) => c.lastRunError);
+    manifest.jobStatus = (manifest.counts.failed > 0 || unpassed) ? 'partial' : 'done';
+    if (manifest.jobStatus === 'done') manifest.error = undefined;
+    writeManifest(request.projectPath, request.taskName, request.env, manifest);
+    await appendAudit(request.projectPath, request.taskName, {
+      action: 'confirm-mock-scripts', mode: 'manual', step: 'report',
+      detail: `人工确认接口模拟脚本通过:${confirmed.join('、')}`,
+    });
+    return { confirmed, skipped, manifest };
+  } finally {
+    lock.close();
+  }
+}
+
 export async function runScripts(request: RepairRequest): Promise<{
   results: Array<{ caseId: string; ok: boolean; output: string; timedOut: boolean }>;
   manifest: ScriptManifest;
@@ -979,8 +1050,12 @@ async function runScriptCases(
   caseIds?: string[] | null,
 ): Promise<Array<{ caseId: string; ok: boolean; output: string; timedOut: boolean }>> {
   const requested = caseIds?.length ? new Set(caseIds) : null;
+  // 未显式点名时只跑【本轮】用例 —— 否则「运行全部/自动跑通」会把已退役(stale)的历史脚本
+  // 也拉去跑,既慢又可能拿旧脚本的失败污染本轮终态。用户在弹框里显式点某条 stale 脚本时
+  // (requested 命中)仍然放行,那是明确的人为意图。
   const runnable = manifest.cases.filter((item) =>
-    isRunnableStatus(item.status) && (!requested || requested.has(item.caseId)));
+    isRunnableStatus(item.status)
+    && (requested ? requested.has(item.caseId) : isCurrentRoundCase(item)));
   const resolved = resolveProjectEnvWithDb(jobRequest.projectPath, jobRequest.env);
   const results: Array<{ caseId: string; ok: boolean; output: string; timedOut: boolean }> = [];
   for (const item of runnable) {
@@ -1011,7 +1086,12 @@ async function runScriptCases(
       continue;
     }
     item.lastRunError = undefined;
-    if (!item.usesMock) {
+    // `outdated` 跑通【不提升】为 verified:它的 manifest 记的是【新】指纹,盘上却是【旧】
+    // 脚本内容(重新生成失败所致)。若提升,下轮的复用判定会看到「指纹匹配 + 已验证」而直接
+    // 复用旧脚本,等于悄悄用过时脚本冒充当前用例的验证 —— 用例可能已经改过。
+    // 它跑通只说明「旧脚本目前还能跑」,是诊断与止血,不是「当前版本已验证」。诚实的出路
+    // 仍是把重新生成跑成功(卡片也据此继续显示存在缺口)。
+    if (!item.usesMock && item.status !== 'outdated') {
       item.status = 'verified';
       item.lastVerifiedAt = now;
       item.validation = { ...(item.validation ?? { syntax: true, collected: true, replayed: false, warnings: [] }), replayed: true, error: undefined };
@@ -1143,17 +1223,19 @@ async function runAndRepairLoop(
   persistRunning();
 
   const parkEnv = () => {
-    for (const c of manifest.cases) {
-      if (isActiveRunFailure(c) && isEnvironmentFailure(c.lastRunError!)) { parked.add(c.caseId); environmentBlocked.add(c.caseId); }
+    // 同样只看本轮:退役条目的陈年环境失败(如 TC-005 在 7-14 留下的 ECONNREFUSED)会被
+    // 计进 environmentBlocked,让「N 条环境阻塞」的汇总与审计常年多出一条不存在的问题。
+    for (const c of manifest.cases.filter(isCurrentRoundCase)) {
+      if (c.lastRunError && isEnvironmentFailure(c.lastRunError)) { parked.add(c.caseId); environmentBlocked.add(c.caseId); }
     }
   };
 
   let rounds = 0;
   for (let round = 1; round <= maxRounds; round++) {
     parkEnv();  // 环境问题（被测应用没起）不喂给 AI。
-    // isActiveRunFailure（而非裸 isFixableCase）：stale 化石进循环只会被修复通道
-    // 判「不在合格集内」跳过、再被 park 成需人工 —— 每轮空转一次并虚报审计计数。
-    const fixable = manifest.cases.filter((c) => isActiveRunFailure(c) && !parked.has(c.caseId));
+    // 只修本轮用例:退役脚本的陈年失败不该消耗修复轮次与 token(化石进循环只会被修复通道
+    // 判「不在合格集内」跳过、再被 park 成需人工 —— 每轮空转一次并虚报审计计数)。
+    const fixable = manifest.cases.filter((c) => isCurrentRoundCase(c) && isFixableCase(c) && !parked.has(c.caseId));
     if (!fixable.length) break;
     rounds = round;
 
@@ -1190,10 +1272,12 @@ async function runAndRepairLoop(
   parkEnv();
 
   for (const id of environmentBlocked) needsHuman.delete(id);
-  const passed = manifest.cases.filter((c) => c.status === 'verified' && !c.lastRunError).map((c) => c.caseId);
+  // 汇总同样只统计本轮,避免退役条目混进「通过/未修复」的口径。
+  const currentCases = manifest.cases.filter(isCurrentRoundCase);
+  const passed = currentCases.filter((c) => c.status === 'verified' && !c.lastRunError).map((c) => c.caseId);
   // 循环结束仍带失败、又没归入环境/人工的（只会在 maxRounds 用尽且还有未处理项时出现）：统一算需人工。
-  const stillFailing = manifest.cases
-    .filter((c) => isActiveRunFailure(c) && !environmentBlocked.has(c.caseId) && !needsHuman.has(c.caseId))
+  const stillFailing = currentCases
+    .filter((c) => c.lastRunError && !environmentBlocked.has(c.caseId) && !needsHuman.has(c.caseId))
     .map((c) => c.caseId);
   for (const id of stillFailing) needsHuman.add(id);
   return { rounds, passed, environmentBlocked: [...environmentBlocked], needsHuman: [...needsHuman], stillFailing };
@@ -1253,7 +1337,8 @@ export async function runPipelineForTask(request: {
       settle('partial', `自动跑通中断:${clean.slice(0, 300)}`);
       throw loopError;
     }
-    const unpassed = manifest.cases.some(isActiveRunFailure);
+    // 同上:只按本轮用例判终态,不被 stale 的历史失败记录拖住。
+    const unpassed = manifest.cases.filter(isCurrentRoundCase).some((c) => c.lastRunError);
     settle(unpassed ? 'partial' : 'done', unpassed ? '部分回归脚本自动跑通未成功（详见各用例）' : undefined);
     await appendAudit(request.projectPath, request.taskName, {
       action: 'run-repair-pipeline', mode: 'manual', step: 'report',

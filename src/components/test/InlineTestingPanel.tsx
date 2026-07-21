@@ -192,6 +192,8 @@ interface ScriptManifestCaseView {
   lastRunAt?: string;
   /** 最近一次 AI 修复的结论（修了什么 / 为什么不是脚本缺陷），写给不会写代码的测试人员。 */
   repairNote?: string;
+  /** 人工确认 mock 脚本通过的时刻（见 script-artifacts.ts 的字段注释）。 */
+  manualVerifiedAt?: string;
 }
 interface ScriptManifestView {
   latestRunHash: string;
@@ -3754,16 +3756,21 @@ function ReportStepPanel({
     : t("test.report.summaryFail", { func: funcRateStr, fail });
   const scriptJobLabel: Record<ScriptJobStatusView, TranslationKey> = {
     queued: "test.scripts.queued", running: "test.scripts.running", done: "test.scripts.done",
-    partial: "test.scripts.partial", error: "test.scripts.error", stale: "test.scripts.stale",
+    // job 级 stale = 该生成任务被更新的任务取代(superseded),与用例级 stale(本轮未测)
+    // 不同义 —— 两者曾复用同一文案 key,改名后会把「已被新任务取代」显示成「本轮未测」。
+    partial: "test.scripts.partial", error: "test.scripts.error", stale: "test.scripts.jobStale",
   };
-  const scriptRunnable = scriptManifest?.cases.filter((item) => item.status === "verified" || item.status === "needs_review") ?? [];
+  // 全卡片一律只看【本轮】用例(排除 status='stale' 的历史用例集残留):它们不在本轮范围内,
+  // 既不该被「自动跑通」拉去跑,其陈年 lastRunError 也不该在卡片上报红。
+  const scriptCurrentCases = scriptManifest?.cases.filter((item) => item.status !== "stale") ?? [];
+  const scriptRunnable = scriptCurrentCases.filter((item) => item.status === "verified" || item.status === "needs_review" || item.status === "outdated");
   // 「重试缺口」只管【生成】缺口：没 manifest（旧报告）、整个 job 挂了/过期、或有用例
   // 生成失败（failed/outdated）。刻意不含 jobStatus==='partial'——流水线后运行失败也会
   // 置 partial，但那不是生成缺口，重试(重新生成)解决不了，会误导用户空点。
   const scriptHasGaps = !scriptManifest
     || scriptManifest.jobStatus === "error"
     || scriptManifest.jobStatus === "stale"
-    || scriptManifest.cases.some((item) => item.status === "failed" || item.status === "outdated");
+    || scriptCurrentCases.some((item) => item.status === "failed" || item.status === "outdated");
   const scriptWorking = scriptManifest?.jobStatus === "queued" || scriptManifest?.jobStatus === "running";
   // 错误/进行中优先于空态：任务中途失败时 counts 仍是初始零值，
   // 按 eligible===0 渲染会误报「本轮没有符合条件的用例」。
@@ -3783,11 +3790,9 @@ function ReportStepPanel({
           });
   // 运行失败不改 case.status，counts 也不变 —— 不显式渲染出来，点「运行全部」后卡片
   // 与点击前逐字节相同，用户只会看到一个转瞬即逝的 toast（"点了没反应"）。
-  // 化石隔离：stale/outdated 条目的 lastRunError 是历史（用例已移出回归集合/被新轮取代），
-  // 不算「当前失败」—— 否则合格集全绿仍挂红字（与 script-job-manager 的 isActiveRunFailure 同口径）。
-  const scriptRunFailures = scriptManifest?.cases.filter(
-    (item) => item.lastRunError && (item.status === "verified" || item.status === "needs_review"),
-  ) ?? [];
+  // 化石隔离：stale 条目的 lastRunError 是历史（用例已移出本轮回归集合），不算「当前失败」
+  // —— 否则本轮全绿仍挂红字（与 script-job-manager 的 isCurrentRoundCase 同口径）。
+  const scriptRunFailures = scriptCurrentCases.filter((item) => item.lastRunError);
   const scriptRunFailureText = scriptRunFailures.length > 0
     ? t("test.scripts.runFailed", { n: scriptRunFailures.length, reason: scriptRunFailures[0].lastRunError!.slice(0, 160) })
     : "";
@@ -3898,7 +3903,8 @@ function ReportStepPanel({
               )}
             </span>,
             <>
-              {scriptManifest && scriptManifest.cases.length > 0 && (
+              {/* 按【本轮】脚本数判定:全是 stale(历史用例集残留)时弹框会是空列表,不给入口。 */}
+              {scriptCurrentCases.length > 0 && scriptManifest && (
                 <button onClick={() => setPreview({ kind: "scripts", manifest: scriptManifest })} className={btnPrimary}>
                   <Eye size={12} /> {t("test.scripts.view")}
                 </button>
@@ -4051,12 +4057,17 @@ function ScriptPreview({ t, projectPath, taskName, env, initialManifest, onChang
   onClose: () => void;
 }) {
   const [manifest, setManifest] = useState(initialManifest);
-  const [selectedId, setSelectedId] = useState(initialManifest.cases[0]?.caseId ?? "");
+  // 只列【本轮】的脚本:status='stale'(本轮未测)是历次用例集换代后留下的旧条目——脚本文件
+  // 仍在盘上、不删,但把它们混在列表里会让人以为本轮有一堆待处理的东西(真机上 15 条里 9 条
+  // 是历史残留)。counts 本就不计 stale,过滤后列表与顶部数字口径终于一致。
+  const shownCases = manifest.cases.filter((item) => item.status !== "stale");
+  const hiddenCount = manifest.cases.length - shownCases.length;
+  const [selectedId, setSelectedId] = useState(initialManifest.cases.filter((c) => c.status !== "stale")[0]?.caseId ?? "");
   const [content, setContent] = useState<string | null>(null);
   const [contentError, setContentError] = useState(false);
-  const [busy, setBusy] = useState<"retry" | "run" | "repair" | null>(null);
+  const [busy, setBusy] = useState<"retry" | "run" | "repair" | "confirm" | null>(null);
   const [output, setOutput] = useState("");
-  const selected = manifest.cases.find((item) => item.caseId === selectedId) ?? manifest.cases[0];
+  const selected = shownCases.find((item) => item.caseId === selectedId) ?? shownCases[0];
 
   const statusLabel: Record<ScriptCaseStatusView, TranslationKey> = {
     verified: "test.scripts.verified",
@@ -4189,7 +4200,38 @@ function ScriptPreview({ t, projectPath, taskName, env, initialManifest, onChang
     }
   };
 
-  const runnable = selected?.status === "verified" || selected?.status === "needs_review";
+  // 人工确认 mock 脚本通过：「需人工确认真实环境可通过」这句警告此前没有落点，usesMock 的
+  // 脚本无论运行成功多少次都不会被提升（runScriptCases 刻意跳过它们），状态永久停在待复核。
+  const confirmSelected = async () => {
+    if (!selected) return;
+    setBusy("confirm");
+    setOutput("");
+    try {
+      const res = await fetch("/api/test/scripts/confirm-mock", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectPath, taskName, env, caseIds: [selected.caseId] }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "confirm failed");
+      if (data.manifest) {
+        const next = data.manifest as ScriptManifestView;
+        setManifest(next);
+        onChanged(next);
+      }
+      setOutput(`✓ ${t("test.scripts.confirmMockDone")}`);
+    } catch (error) {
+      setOutput(error instanceof Error ? error.message : t("test.scripts.error"));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  // outdated 也可运行:它的定义是「重新生成失败但盘上仍有可用旧脚本」,排除它等于让好脚本
+  // 掉出全部恢复通道(与 isRunnableStatus 保持同一口径)。
+  const runnable = selected?.status === "verified" || selected?.status === "needs_review" || selected?.status === "outdated";
+  // 只在「确实需要人工拍板」时给按钮：mock + 待复核 + 无失败记录（带失败记录该走运行/AI 修复）。
+  const confirmable = !!selected && selected.usesMock && selected.status === "needs_review" && !selected.lastRunError;
   const working = manifest.jobStatus === "queued" || manifest.jobStatus === "running";
 
   return (
@@ -4205,7 +4247,7 @@ function ScriptPreview({ t, projectPath, taskName, env, initialManifest, onChang
       <div className="flex min-h-0 flex-1 flex-col md:flex-row">
         <aside className="max-h-44 shrink-0 overflow-auto border-b border-border bg-muted/20 p-2 md:max-h-none md:w-64 md:border-b-0 md:border-r">
           <div className="space-y-1">
-            {manifest.cases.map((item) => (
+            {shownCases.map((item) => (
               <button
                 key={item.caseId}
                 onClick={() => { setSelectedId(item.caseId); setOutput(""); }}
@@ -4221,6 +4263,13 @@ function ScriptPreview({ t, projectPath, taskName, env, initialManifest, onChang
               </button>
             ))}
           </div>
+          {/* 被过滤掉的历史脚本要留个交代:文件仍在盘上、下轮跑到该用例就自动回来,
+              静默消失会让人以为脚本被删了。 */}
+          {hiddenCount > 0 && (
+            <div className="mt-2 px-1 text-[9px] leading-relaxed text-muted-foreground">
+              {t("test.scripts.hiddenStale", { count: hiddenCount })}
+            </div>
+          )}
         </aside>
         <section className="flex min-h-[55vh] min-w-0 flex-1 flex-col">
           <div className="flex flex-wrap items-center gap-1.5 border-b border-border px-3 py-2">
@@ -4240,11 +4289,22 @@ function ScriptPreview({ t, projectPath, taskName, env, initialManifest, onChang
                 {busy === "repair" ? <SpinnerGap size={10} className="animate-spin" /> : <Wrench size={10} />} {t("test.scripts.repair")}
               </button>
             )}
+            {confirmable && (
+              <button onClick={confirmSelected} disabled={busy !== null || working} title={t("test.scripts.confirmMockHint")} className="inline-flex items-center gap-1 rounded border border-status-success-border bg-status-success-muted px-2 py-0.5 text-[10px] text-status-success-foreground hover:opacity-90 disabled:opacity-40">
+                {busy === "confirm" ? <SpinnerGap size={10} className="animate-spin" /> : <Check size={10} />} {t("test.scripts.confirmMock")}
+              </button>
+            )}
           </div>
           {/* 运行失败是持久化的（manifest.lastRunError），重开弹框仍可见；上方的 output 只是本次运行的瞬时输出。 */}
           {selected?.lastRunError && (
             <div className="border-b border-border bg-status-error-muted/40 px-3 py-1.5 text-[10px] text-status-error-foreground">
               {selected.lastRunError}
+            </div>
+          )}
+          {/* 人工确认留痕：它是被人放行的、不是自动验证通过的，这个区别必须可见。 */}
+          {selected?.manualVerifiedAt && (
+            <div className="border-b border-border bg-status-success-muted/40 px-3 py-1.5 text-[10px] text-status-success-foreground">
+              ✓ {t("test.scripts.confirmMockDone")} · {fmtCnDateTime(selected.manualVerifiedAt)}
             </div>
           )}
           {/* AI 修复结论：修了什么 / 为什么不是脚本缺陷（如页面行为与用例预期不符 → 需人工确认）。 */}
@@ -4302,6 +4362,7 @@ const AUDIT_ACTION_KEYS: Record<string, TranslationKey> = {
   "suite-save": "test.audit.action.suiteSave",
   "suite-delete": "test.audit.action.suiteDelete",
   "delete-round": "test.audit.action.deleteRound",
+  "confirm-mock-scripts": "test.audit.action.confirmMock",
 };
 const AUDIT_MODE_KEYS: Record<string, TranslationKey> = {
   manual: "test.audit.mode.manual",

@@ -16,7 +16,7 @@
 
 import { describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveStaticValidContent, isRunnableStatus, isFixableCase, isActiveRunFailure } from '../../lib/test/script-job-manager';
+import { resolveStaticValidContent, isRunnableStatus, isFixableCase, isCurrentRoundCase } from '../../lib/test/script-job-manager';
 
 const ID = 'TC-employee-001';
 const conforming = (id: string) =>
@@ -91,11 +91,14 @@ describe('resolveStaticValidContent', () => {
 // 2026-07-11 review 发现：只读用例生成期重放失败被 dead-end 成 'failed'（无 lastRunError），
 // 落在两个通道之外 → 卡 0/1。修复：可加载但重放失败的脚本落盘为 needs_review + lastRunError。
 describe('恢复态状态机契约（isRunnableStatus / isFixableCase）', () => {
-  it('verified / needs_review 可被运行；failed / outdated 不可运行', () => {
+  it('verified / needs_review / outdated 可被运行；failed 不可运行', () => {
     assert.equal(isRunnableStatus('verified'), true);
     assert.equal(isRunnableStatus('needs_review'), true);
+    // outdated 曾被断言为不可运行 —— 2026-07-21 真机推翻:该状态的定义就是「重新生成失败但
+    // 盘上仍有可用旧脚本」,把它排除等于让一份好脚本掉出全部恢复通道(详见下方 outdated 组)。
+    assert.equal(isRunnableStatus('outdated'), true);
+    // failed 无落盘脚本,仍只能重新生成。
     assert.equal(isRunnableStatus('failed'), false);
-    assert.equal(isRunnableStatus('outdated'), false);
   });
 
   it('带 lastRunError 才可被 AI 修复；无 lastRunError（如生成期 failed）不可修复', () => {
@@ -114,39 +117,55 @@ describe('恢复态状态机契约（isRunnableStatus / isFixableCase）', () =>
   });
 });
 
-// 化石隔离：lastRunError 只有长在【当前合格集内（可运行状态）】的条目上才算「本轮未跑通」。
-// 真机踩坑 2026-07-14（mealAllowance「功能测试-回归测试串联」）：TC-employee-001 运行失败后被
-// 摘掉回归标签 → stale 保留旧 lastRunError → unpassed/fixable/需人工计数照算它 →
-// 合格集 1/1 全绿仍每轮报「1 需人工」+ partial +「部分回归脚本自动跑通未成功」，
-// 且运行（stale 不可运行）/修复（判不在合格集内跳过）/重试缺口（只重生成合格用例）三通道全清不掉。
-describe('化石隔离（isActiveRunFailure）', () => {
-  it('可运行状态 + lastRunError → 是当前失败（verified 与 needs_review 都算）', () => {
-    assert.equal(isActiveRunFailure({ status: 'verified', lastRunError: 'Error: expect(locator).toBeVisible() failed' }), true);
-    assert.equal(isActiveRunFailure({ status: 'needs_review', lastRunError: 'Error: expect(locator).toBeVisible() failed' }), true);
+describe('本轮口径 isCurrentRoundCase（终态判定不被历史条目污染）', () => {
+  it('stale = 非本轮；其余状态都属于本轮', () => {
+    assert.equal(isCurrentRoundCase({ status: 'stale' }), false);
+    for (const st of ['verified', 'needs_review', 'failed', 'outdated'] as const) {
+      assert.equal(isCurrentRoundCase({ status: st }), true, `${st} 应属于本轮`);
+    }
   });
 
-  it('stale/outdated/failed 条目的 lastRunError 是历史化石 → 不算当前失败', () => {
-    assert.equal(isActiveRunFailure({ status: 'stale', lastRunError: 'Error: expect(locator).toBeVisible() failed' }), false);
-    assert.equal(isActiveRunFailure({ status: 'outdated', lastRunError: 'Error: expect(locator).toBeVisible() failed' }), false);
-    assert.equal(isActiveRunFailure({ status: 'failed', lastRunError: 'Error: …' }), false);
-  });
-
-  it('无 lastRunError 无论什么状态都不是失败', () => {
-    assert.equal(isActiveRunFailure({ status: 'verified', lastRunError: undefined }), false);
-    assert.equal(isActiveRunFailure({ status: 'stale', lastRunError: undefined }), false);
-  });
-
-  it('真机场景回放：合格集全绿 + 一条 stale 化石 → 任务不算「未跑通」', () => {
+  it('回归：一条 stale 的陈年 lastRunError 不得把全通过的一轮判成未通过', () => {
+    // 2026-07-21 真机：本轮 6/6 全 verified，但 7-14 留下的 stale 条目 TC-005 带着
+    // ECONNREFUSED 的旧错误，`cases.some(c => c.lastRunError)` 全量扫描把 jobStatus
+    // 判成 partial → 卡片常驻「存在缺口」，而用户在列表里找不到任何失败项。
     const cases = [
-      { status: 'verified' as const, lastRunError: undefined },                                        // TC-employee-034，通过
-      { status: 'stale' as const, lastRunError: 'Error: expect(locator).toBeVisible() failed' },       // TC-employee-001，摘标签后的化石
+      { caseId: 'TC-026', status: 'verified' as const },
+      { caseId: 'TC-051', status: 'verified' as const },
+      { caseId: 'TC-005', status: 'stale' as const, lastRunError: 'ECONNREFUSED ::1:5173' },
     ];
-    assert.equal(cases.some(isActiveRunFailure), false, '化石不得把任务钉在 partial');
-    // 对照：同样的失败长在合格集内（needs_review）→ 如实算未跑通
-    const active = [
-      { status: 'verified' as const, lastRunError: undefined },
-      { status: 'needs_review' as const, lastRunError: 'Error: expect(locator).toBeVisible() failed' },
-    ];
-    assert.equal(active.some(isActiveRunFailure), true, '合格集内的失败必须如实上报');
+    assert.equal(cases.some((c) => 'lastRunError' in c && c.lastRunError), true, '前提：全量扫描确实会命中');
+    assert.equal(
+      cases.filter(isCurrentRoundCase).some((c) => 'lastRunError' in c && c.lastRunError),
+      false,
+      '本轮口径下必须没有未通过项',
+    );
+  });
+});
+
+describe('outdated 不再是死态（有可用旧脚本就该有路可走）', () => {
+  it('outdated 属于可运行态', () => {
+    // 真机(2026-07-21):TC-051 点「重试」重新生成时撞上跨境坏窗口(网关 401 被 SDK 报成
+    // `Not logged in`),落 outdated。此后那份完好的旧脚本掉出全部恢复通道 —— 不能运行
+    // (此谓词曾排除它)、不能 AI 修复(无 lastRunError)、不能人工确认(非 needs_review),
+    // 唯一出路是反复重试生成、反复赌网络。与 2026-07-11 修掉的 failed 死态同类。
+    assert.equal(isRunnableStatus('outdated'), true);
+    assert.equal(isRunnableStatus('verified'), true);
+    assert.equal(isRunnableStatus('needs_review'), true);
+  });
+
+  it('failed 仍不可运行 —— 它没有落盘脚本,只能重新生成', () => {
+    // outdated 与 failed 的分水岭就是「盘上有没有可用旧脚本」(两处产生点都以
+    // fs.existsSync(finalFile) 为条件)。
+    assert.equal(isRunnableStatus('failed'), false);
+  });
+
+  it('stale 仍不可运行(本轮未测,不该被批量动作拉去跑)', () => {
+    assert.equal(isRunnableStatus('stale'), false);
+  });
+
+  it('恢复链:outdated 运行失败后落 lastRunError → AI 修复通道自然打开', () => {
+    assert.equal(isFixableCase({ lastRunError: undefined }), false, '刚落 outdated 时无失败信息,不该喂给 AI');
+    assert.equal(isFixableCase({ lastRunError: 'expect(locator).toBeVisible() failed' }), true, '跑失败后才可修');
   });
 });
