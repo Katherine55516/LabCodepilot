@@ -217,6 +217,8 @@ interface ElectronAPI {
   };
   shell: {
     openPath: (path: string) => Promise<string>;
+    /** Reveal + select a file/folder in Finder/Explorer (shell.showItemInFolder). */
+    showItemInFolder: (path: string) => Promise<void>;
   };
   fs: {
     /** Resolve a File's absolute filesystem path (via Electron webUtils). Empty string if unavailable. */

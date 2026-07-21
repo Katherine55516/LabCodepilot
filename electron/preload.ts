@@ -21,6 +21,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
   },
   shell: {
     openPath: (folderPath: string) => ipcRenderer.invoke('shell:open-path', folderPath),
+    showItemInFolder: (itemPath: string) => ipcRenderer.invoke('shell:show-item-in-folder', itemPath),
   },
   dialog: {
     openFolder: (options?: { defaultPath?: string; title?: string }) =>

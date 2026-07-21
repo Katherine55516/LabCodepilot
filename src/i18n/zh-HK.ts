@@ -703,6 +703,14 @@ const zhHK: Record<TranslationKey, string> = {
   'fileTree.newFileErrorNoWorkspace': '當前會話未選擇 workspace',
   'fileTree.newFileErrorGeneric': '創建失敗',
   'fileTree.addToChat': '添加到對話',
+  'fileTree.revealInFinder': '喺 Finder 中顯示',
+  'fileTree.revealInExplorer': '喺檔案總管中顯示',
+  'fileTree.revealFailed': '開啟失敗',
+  'fileTree.delete': '刪除',
+  'fileTree.deleteConfirmTitle': '確認刪除',
+  'fileTree.deleteConfirmDesc': '將 “{name}” 移到系統回收筒？可從回收筒還原。',
+  'fileTree.deleteSuccess': '已移到回收筒：{name}',
+  'fileTree.deleteFailed': '刪除失敗',
 
   // ── Doc preview ─────────────────────────────────────────────
   'docPreview.htmlPreview': 'HTML 預覽',

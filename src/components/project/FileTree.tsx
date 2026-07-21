@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
-import { ArrowsClockwise, MagnifyingGlass, FileCode, Code, File } from "@/components/ui/icon";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
+import { ArrowsClockwise, MagnifyingGlass, FileCode, Code, File, FolderOpen, Trash } from "@/components/ui/icon";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
@@ -11,8 +11,53 @@ import {
   FileTreeFolder,
   FileTreeFile,
 } from "@/components/ai-elements/file-tree";
+import {
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+} from "@/components/ui/context-menu";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { showToast } from "@/hooks/useToast";
 import { useTranslation } from "@/hooks/useTranslation";
 import type { ReactNode } from "react";
+
+/** Node identity passed to the context-menu actions. */
+interface MenuNode {
+  path: string;
+  name: string;
+  type: "file" | "directory";
+}
+
+/**
+ * Reveal a file/folder in the OS file manager (Finder / Explorer), selecting
+ * it in its parent folder. Prefers Electron's shell.showItemInFolder; falls
+ * back to the /api/files/reveal exec route in the browser/dev.
+ */
+async function revealInFileManager(path: string): Promise<void> {
+  const api = typeof window !== "undefined" ? window.electronAPI : undefined;
+  if (api?.shell?.showItemInFolder) {
+    await api.shell.showItemInFolder(path);
+    return;
+  }
+  const res = await fetch("/api/files/reveal", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ path }),
+  });
+  if (!res.ok) {
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error || `reveal failed (${res.status})`);
+  }
+}
 
 interface FileTreeProps {
   workingDirectory: string;
@@ -85,7 +130,18 @@ function filterTree(nodes: FileTreeNode[], query: string): FileTreeNode[] {
     }));
 }
 
-function RenderTreeNodes({ nodes, searchQuery, highlightPath }: { nodes: FileTreeNode[]; searchQuery: string; highlightPath?: string }) {
+function RenderTreeNodes({
+  nodes,
+  searchQuery,
+  highlightPath,
+  renderContextMenu,
+}: {
+  nodes: FileTreeNode[];
+  searchQuery: string;
+  highlightPath?: string;
+  /** Builds the right-click menu for a node (a <ContextMenuContent>). */
+  renderContextMenu?: (node: MenuNode) => ReactNode;
+}) {
   const filtered = searchQuery ? filterTree(nodes, searchQuery) : nodes;
 
   return (
@@ -100,9 +156,10 @@ function RenderTreeNodes({ nodes, searchQuery, highlightPath }: { nodes: FileTre
               name={node.name}
               className={cn(isHighlighted && "file-tree-flash")}
               id={isHighlighted ? `file-tree-highlight` : undefined}
+              contextMenuContent={renderContextMenu?.({ path: node.path, name: node.name, type: "directory" })}
             >
               {node.children && (
-                <RenderTreeNodes nodes={node.children} searchQuery={searchQuery} highlightPath={highlightPath} />
+                <RenderTreeNodes nodes={node.children} searchQuery={searchQuery} highlightPath={highlightPath} renderContextMenu={renderContextMenu} />
               )}
             </FileTreeFolder>
           );
@@ -116,6 +173,7 @@ function RenderTreeNodes({ nodes, searchQuery, highlightPath }: { nodes: FileTre
             icon={getFileIcon(node.extension)}
             className={cn(isHighlighted && "file-tree-flash")}
             id={isHighlighted ? `file-tree-highlight` : undefined}
+            contextMenuContent={renderContextMenu?.({ path: node.path, name: node.name, type: "file" })}
           />
         );
       })}
@@ -143,6 +201,22 @@ export function FileTree({ workingDirectory, onFileSelect, onFileAdd, selectedFo
   const abortRef = useRef<AbortController | null>(null);
   const { t } = useTranslation();
   const seekKeyRef = useRef<string | null>(null);
+
+  // Right-click menu: pending delete target drives the confirm dialog; null =
+  // dialog closed. `deleting` disables the confirm button while the request is
+  // in flight so a double-click can't fire two deletes.
+  const [pendingDelete, setPendingDelete] = useState<MenuNode | null>(null);
+  const [deleting, setDeleting] = useState(false);
+
+  // OS-appropriate "reveal" label — 访达 on macOS, 资源管理器 elsewhere. Uses
+  // the deprecated-but-universally-supported navigator.platform (Electron on
+  // mac reports "MacIntel"); userAgent is the fallback.
+  const isMac = useMemo(() => {
+    if (typeof navigator === "undefined") return false;
+    const p = navigator.platform || navigator.userAgent || "";
+    return /mac/i.test(p);
+  }, []);
+  const revealLabel = isMac ? t("fileTree.revealInFinder") : t("fileTree.revealInExplorer");
 
   // Clear stale tree data when switching projects to avoid cross-session seek races.
   useEffect(() => {
@@ -274,6 +348,63 @@ export function FileTree({ workingDirectory, onFileSelect, onFileAdd, selectedFo
     return () => clearInterval(interval);
   }, [workingDirectory, highlightPath, highlightSeek, tree]);
 
+  // --- Right-click menu actions ---
+  const handleReveal = useCallback(async (node: MenuNode) => {
+    try {
+      await revealInFileManager(node.path);
+    } catch {
+      showToast({ type: 'error', message: t('fileTree.revealFailed') });
+    }
+  }, [t]);
+
+  const handleConfirmDelete = useCallback(async () => {
+    if (!pendingDelete) return;
+    setDeleting(true);
+    try {
+      const res = await fetch('/api/files/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          path: pendingDelete.path,
+          baseDir: workingDirectory || undefined,
+          // Directories may be non-empty; the API requires explicit recursive
+          // acknowledgement (mirrors `rm -r`). The confirm dialog IS that ack.
+          recursive: pendingDelete.type === 'directory',
+        }),
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || `delete failed (${res.status})`);
+      }
+      showToast({ type: 'success', message: t('fileTree.deleteSuccess', { name: pendingDelete.name }) });
+      setPendingDelete(null);
+      fetchTree();
+    } catch {
+      showToast({ type: 'error', message: t('fileTree.deleteFailed') });
+    } finally {
+      setDeleting(false);
+    }
+  }, [pendingDelete, workingDirectory, t, fetchTree]);
+
+  // Builds the right-click menu for a single node. Passed down through
+  // RenderTreeNodes and attached to every file/folder row.
+  const renderContextMenu = useCallback((node: MenuNode): ReactNode => (
+    <ContextMenuContent>
+      <ContextMenuItem onSelect={() => void handleReveal(node)}>
+        <FolderOpen size={16} />
+        {revealLabel}
+      </ContextMenuItem>
+      <ContextMenuSeparator />
+      <ContextMenuItem
+        variant="destructive"
+        onSelect={() => setPendingDelete(node)}
+      >
+        <Trash size={16} />
+        {t('fileTree.delete')}
+      </ContextMenuItem>
+    </ContextMenuContent>
+  ), [handleReveal, revealLabel, t]);
+
   return (
     <div className="flex flex-col h-full min-h-0">
       {/* Search + Refresh */}
@@ -321,10 +452,33 @@ export function FileTree({ workingDirectory, onFileSelect, onFileAdd, selectedFo
             onSelectFolder={onSelectFolder}
             className="border-0 rounded-none"
           >
-            <RenderTreeNodes nodes={tree} searchQuery={searchQuery} highlightPath={highlightPath} />
+            <RenderTreeNodes nodes={tree} searchQuery={searchQuery} highlightPath={highlightPath} renderContextMenu={renderContextMenu} />
           </AIFileTree>
         )}
       </div>
+
+      {/* Delete confirmation — trashing (system recycle bin) is recoverable,
+          but a whole folder can go at once, so we make the user acknowledge. */}
+      <AlertDialog open={!!pendingDelete} onOpenChange={(open) => { if (!open && !deleting) setPendingDelete(null); }}>
+        <AlertDialogContent size="sm">
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('fileTree.deleteConfirmTitle')}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t('fileTree.deleteConfirmDesc', { name: pendingDelete?.name ?? '' })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleting}>{t('common.cancel')}</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              onClick={(e) => { e.preventDefault(); void handleConfirmDelete(); }}
+              disabled={deleting}
+            >
+              {deleting ? '…' : t('fileTree.delete')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

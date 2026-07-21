@@ -2009,6 +2009,14 @@ app.whenReady().then(async () => {
     return shell.openPath(folderPath);
   });
 
+  // Reveal a file/folder in the system file manager, selecting it inside its
+  // parent folder (Finder on macOS, Explorer on Windows). Cross-platform via
+  // Electron's shell.showItemInFolder — the renderer prefers this over the
+  // /api/files/reveal exec fallback when running inside the packaged app.
+  ipcMain.handle('shell:show-item-in-folder', async (_event: Electron.IpcMainInvokeEvent, itemPath: string) => {
+    shell.showItemInFolder(itemPath);
+  });
+
   // Open the application log directory (so users can find & share logs when
   // reporting a problem). Returns '' on success, else an error string.
   ipcMain.handle('logs:open-folder', async () => openLogsFolder());

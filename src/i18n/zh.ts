@@ -695,6 +695,14 @@ const zh: Record<TranslationKey, string> = {
   'fileTree.newFileErrorNoWorkspace': '当前会话未选择 workspace',
   'fileTree.newFileErrorGeneric': '创建失败',
   'fileTree.addToChat': '添加到对话',
+  'fileTree.revealInFinder': '在访达中查看',
+  'fileTree.revealInExplorer': '在资源管理器中查看',
+  'fileTree.revealFailed': '打开失败',
+  'fileTree.delete': '删除',
+  'fileTree.deleteConfirmTitle': '确认删除',
+  'fileTree.deleteConfirmDesc': '将 “{name}” 移到系统回收站？可从回收站中恢复。',
+  'fileTree.deleteSuccess': '已移到回收站：{name}',
+  'fileTree.deleteFailed': '删除失败',
 
   // ── Doc preview ─────────────────────────────────────────────
   'docPreview.htmlPreview': 'HTML 预览',

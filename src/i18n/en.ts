@@ -697,6 +697,14 @@ const en = {
   'fileTree.newFileErrorNoWorkspace': 'No workspace selected for this session',
   'fileTree.newFileErrorGeneric': 'Failed to create',
   'fileTree.addToChat': 'Add to chat',
+  'fileTree.revealInFinder': 'Reveal in Finder',
+  'fileTree.revealInExplorer': 'Show in Explorer',
+  'fileTree.revealFailed': 'Failed to open',
+  'fileTree.delete': 'Delete',
+  'fileTree.deleteConfirmTitle': 'Confirm delete',
+  'fileTree.deleteConfirmDesc': 'Move “{name}” to the system trash? You can restore it from there.',
+  'fileTree.deleteSuccess': 'Moved to trash: {name}',
+  'fileTree.deleteFailed': 'Delete failed',
 
   // ── Doc preview ─────────────────────────────────────────────
   'docPreview.htmlPreview': 'HTML Preview',
