@@ -669,7 +669,9 @@ async function executeJob(entry: FullQueueEntry): Promise<void> {
 
     // 自动流水线：生成后运行 + 失败自动修，直至全部（可修复的）通过。仅在被测应用可达时进行，
     // best-effort —— 流水线出问题不抹掉已生成的脚本，只把没跑成的留给用户手动触发。
-    if (request.runPipeline && manifest.cases.some((c) => isRunnableStatus(c.status))) {
+    // 「有没有可跑的」也按本轮口径:全是退役脚本时不该白启动一次流水线(它会去探测被测应用、
+    // 起 Playwright 运行器,最后无事可做)。
+    if (request.runPipeline && manifest.cases.some((c) => isCurrentRoundCase(c) && isRunnableStatus(c.status))) {
       if (await isSutReachable(request)) {
         try {
           const summary = await runAndRepairLoop(request, manifest, request.maxRepairRounds ?? DEFAULT_MAX_REPAIR_ROUNDS);
@@ -1143,7 +1145,9 @@ async function runAndRepairLoop(
   persistRunning();
 
   const parkEnv = () => {
-    for (const c of manifest.cases) {
+    // 同样只看本轮:退役条目的陈年环境失败(如 TC-005 在 7-14 留下的 ECONNREFUSED)会被
+    // 计进 environmentBlocked,让「N 条环境阻塞」的汇总与审计常年多出一条不存在的问题。
+    for (const c of manifest.cases.filter(isCurrentRoundCase)) {
       if (c.lastRunError && isEnvironmentFailure(c.lastRunError)) { parked.add(c.caseId); environmentBlocked.add(c.caseId); }
     }
   };
