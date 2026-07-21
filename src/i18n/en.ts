@@ -468,6 +468,8 @@ const en = {
   'streaming.preparing': 'Preparing response...',
   'streaming.generating': 'Generating',
   'streaming.noContentTimeout': '**Error:** No response for {secs}s — the model returned no content. The connection may have stalled or dropped.',
+  'turnNotify.completedBody': 'Claude is waiting for your input',
+  'turnNotify.errorBody': 'The response hit an error — click to view',
   'streaming.allowForSession': 'Allow for Session',
   'streaming.allowed': 'Allowed',
   'streaming.denied': 'Denied',

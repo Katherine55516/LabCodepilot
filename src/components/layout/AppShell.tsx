@@ -24,6 +24,7 @@ import { useGitStatus } from "@/hooks/useGitStatus";
 import { SetupCenter } from '@/components/setup/SetupCenter';
 import { Toaster } from '@/components/ui/toast';
 import { useNotificationPoll } from '@/hooks/useNotificationPoll';
+import { initTurnNotifications } from '@/lib/turn-notifications';
 import { useGlobalSearchShortcut } from '@/hooks/useGlobalSearchShortcut';
 import { GlobalSearchDialog } from './GlobalSearchDialog';
 import { InlineTestingPanel } from '@/components/test/InlineTestingPanel';
@@ -97,6 +98,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   // Poll server-side notification queue and display as toasts
   useNotificationPoll();
+
+  // Turn-completion system notifications (Claude-Desktop-style): when a turn
+  // finishes while the window is unfocused/minimized or the user is viewing a
+  // different conversation, show a native notification; clicking it focuses
+  // the app and navigates back to that session.
+  useEffect(() => {
+    initTurnNotifications((sessionId) => router.push(`/chat/${sessionId}`));
+  }, [router]);
 
   // Check if setup is needed — DISABLED.
   //

@@ -113,8 +113,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
     },
   },
   notification: {
-    show: (options: { title: string; body: string; onClick?: unknown }) =>
+    show: (options: { title: string; body: string; tag?: string; onClick?: unknown }) =>
       ipcRenderer.invoke('notification:show', options),
+    close: (tag: string) => ipcRenderer.invoke('notification:close', tag),
     onClick: (callback: (action: { type: string; payload: string }) => void) => {
       const listener = (_event: unknown, action: { type: string; payload: string }) => callback(action);
       ipcRenderer.on('notification:click', listener);

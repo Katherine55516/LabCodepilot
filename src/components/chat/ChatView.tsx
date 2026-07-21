@@ -47,6 +47,7 @@ import {
   getRewindPoints,
   respondToPermission,
 } from '@/lib/stream-session-manager';
+import { registerVisibleSession } from '@/lib/turn-notifications';
 
 interface QueuedMessage {
   content: string;
@@ -247,6 +248,13 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
   const [streamSnapshot, setStreamSnapshot] = useState<SessionStreamSnapshot | null>(
     () => getSnapshot(sessionId)
   );
+
+  // Turn-completion notifications: mark this session as "visible" while its
+  // ChatView is mounted (all split panes count). A turn that completes for a
+  // visible session in a focused window is NOT notified; registering also
+  // dismisses this session's stale notification when the user returns by
+  // themselves. See src/lib/turn-notifications.ts.
+  useEffect(() => registerVisibleSession(sessionId), [sessionId]);
 
   // Derive rendering state from snapshot
   const isStreaming = streamSnapshot?.phase === 'active';
