@@ -3758,14 +3758,17 @@ function ReportStepPanel({
     // 不同义 —— 两者曾复用同一文案 key,改名后会把「已被新任务取代」显示成「本轮未测」。
     partial: "test.scripts.partial", error: "test.scripts.error", stale: "test.scripts.jobStale",
   };
-  const scriptRunnable = scriptManifest?.cases.filter((item) => item.status === "verified" || item.status === "needs_review") ?? [];
+  // 全卡片一律只看【本轮】用例(排除 status='stale' 的历史用例集残留):它们不在本轮范围内,
+  // 既不该被「自动跑通」拉去跑,其陈年 lastRunError 也不该在卡片上报红。
+  const scriptCurrentCases = scriptManifest?.cases.filter((item) => item.status !== "stale") ?? [];
+  const scriptRunnable = scriptCurrentCases.filter((item) => item.status === "verified" || item.status === "needs_review");
   // 「重试缺口」只管【生成】缺口：没 manifest（旧报告）、整个 job 挂了/过期、或有用例
   // 生成失败（failed/outdated）。刻意不含 jobStatus==='partial'——流水线后运行失败也会
   // 置 partial，但那不是生成缺口，重试(重新生成)解决不了，会误导用户空点。
   const scriptHasGaps = !scriptManifest
     || scriptManifest.jobStatus === "error"
     || scriptManifest.jobStatus === "stale"
-    || scriptManifest.cases.some((item) => item.status === "failed" || item.status === "outdated");
+    || scriptCurrentCases.some((item) => item.status === "failed" || item.status === "outdated");
   const scriptWorking = scriptManifest?.jobStatus === "queued" || scriptManifest?.jobStatus === "running";
   // 错误/进行中优先于空态：任务中途失败时 counts 仍是初始零值，
   // 按 eligible===0 渲染会误报「本轮没有符合条件的用例」。
@@ -3785,7 +3788,7 @@ function ReportStepPanel({
           });
   // 运行失败不改 case.status，counts 也不变 —— 不显式渲染出来，点「运行全部」后卡片
   // 与点击前逐字节相同，用户只会看到一个转瞬即逝的 toast（"点了没反应"）。
-  const scriptRunFailures = scriptManifest?.cases.filter((item) => item.lastRunError) ?? [];
+  const scriptRunFailures = scriptCurrentCases.filter((item) => item.lastRunError);
   const scriptRunFailureText = scriptRunFailures.length > 0
     ? t("test.scripts.runFailed", { n: scriptRunFailures.length, reason: scriptRunFailures[0].lastRunError!.slice(0, 160) })
     : "";
@@ -3896,7 +3899,8 @@ function ReportStepPanel({
               )}
             </span>,
             <>
-              {scriptManifest && scriptManifest.cases.length > 0 && (
+              {/* 按【本轮】脚本数判定:全是 stale(历史用例集残留)时弹框会是空列表,不给入口。 */}
+              {scriptCurrentCases.length > 0 && scriptManifest && (
                 <button onClick={() => setPreview({ kind: "scripts", manifest: scriptManifest })} className={btnPrimary}>
                   <Eye size={12} /> {t("test.scripts.view")}
                 </button>
@@ -4049,12 +4053,17 @@ function ScriptPreview({ t, projectPath, taskName, env, initialManifest, onChang
   onClose: () => void;
 }) {
   const [manifest, setManifest] = useState(initialManifest);
-  const [selectedId, setSelectedId] = useState(initialManifest.cases[0]?.caseId ?? "");
+  // 只列【本轮】的脚本:status='stale'(本轮未测)是历次用例集换代后留下的旧条目——脚本文件
+  // 仍在盘上、不删,但把它们混在列表里会让人以为本轮有一堆待处理的东西(真机上 15 条里 9 条
+  // 是历史残留)。counts 本就不计 stale,过滤后列表与顶部数字口径终于一致。
+  const shownCases = manifest.cases.filter((item) => item.status !== "stale");
+  const hiddenCount = manifest.cases.length - shownCases.length;
+  const [selectedId, setSelectedId] = useState(initialManifest.cases.filter((c) => c.status !== "stale")[0]?.caseId ?? "");
   const [content, setContent] = useState<string | null>(null);
   const [contentError, setContentError] = useState(false);
   const [busy, setBusy] = useState<"retry" | "run" | "repair" | null>(null);
   const [output, setOutput] = useState("");
-  const selected = manifest.cases.find((item) => item.caseId === selectedId) ?? manifest.cases[0];
+  const selected = shownCases.find((item) => item.caseId === selectedId) ?? shownCases[0];
 
   const statusLabel: Record<ScriptCaseStatusView, TranslationKey> = {
     verified: "test.scripts.verified",
@@ -4203,7 +4212,7 @@ function ScriptPreview({ t, projectPath, taskName, env, initialManifest, onChang
       <div className="flex min-h-0 flex-1 flex-col md:flex-row">
         <aside className="max-h-44 shrink-0 overflow-auto border-b border-border bg-muted/20 p-2 md:max-h-none md:w-64 md:border-b-0 md:border-r">
           <div className="space-y-1">
-            {manifest.cases.map((item) => (
+            {shownCases.map((item) => (
               <button
                 key={item.caseId}
                 onClick={() => { setSelectedId(item.caseId); setOutput(""); }}
@@ -4219,6 +4228,13 @@ function ScriptPreview({ t, projectPath, taskName, env, initialManifest, onChang
               </button>
             ))}
           </div>
+          {/* 被过滤掉的历史脚本要留个交代:文件仍在盘上、下轮跑到该用例就自动回来,
+              静默消失会让人以为脚本被删了。 */}
+          {hiddenCount > 0 && (
+            <div className="mt-2 px-1 text-[9px] leading-relaxed text-muted-foreground">
+              {t("test.scripts.hiddenStale", { count: hiddenCount })}
+            </div>
+          )}
         </aside>
         <section className="flex min-h-[55vh] min-w-0 flex-1 flex-col">
           <div className="flex flex-wrap items-center gap-1.5 border-b border-border px-3 py-2">

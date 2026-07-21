@@ -793,6 +793,7 @@ const en = {
   'test.scripts.failed': 'Failed',
   'test.scripts.stale': 'Not in this run',
   'test.scripts.jobStale': 'Superseded',
+  'test.scripts.hiddenStale': '{count} older script(s) not in this run\'s case set (files kept; they return when the case runs again)',
   'test.scripts.outdated': 'Old version kept',
   'test.scripts.busy': 'Working…',
   'test.scripts.loadFailed': 'Failed to load script',

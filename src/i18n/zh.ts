@@ -792,6 +792,7 @@ const zh: Record<TranslationKey, string> = {
   'test.scripts.stale': '本轮未测',
   // job 级：该生成任务被更新的任务取代（superseded），与用例级 stale(本轮未测) 不同义
   'test.scripts.jobStale': '已被新任务取代',
+  'test.scripts.hiddenStale': '另有 {count} 条历史脚本未在本轮用例集中（文件仍保留，下轮跑到该用例会自动恢复）',
   'test.scripts.outdated': '保留旧版',
   'test.scripts.busy': '处理中…',
   'test.scripts.loadFailed': '脚本读取失败',

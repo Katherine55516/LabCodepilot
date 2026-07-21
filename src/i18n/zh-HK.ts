@@ -800,6 +800,7 @@ const zhHK: Record<TranslationKey, string> = {
   'test.scripts.failed': '失敗',
   'test.scripts.stale': '本輪未測',
   'test.scripts.jobStale': '已被新任務取代',
+  'test.scripts.hiddenStale': '另有 {count} 條歷史腳本未在本輪用例集中（檔案仍保留，下輪跑到該用例會自動恢復）',
   'test.scripts.outdated': '保留舊版',
   'test.scripts.busy': '處理中…',
   'test.scripts.loadFailed': '腳本讀取失敗',
