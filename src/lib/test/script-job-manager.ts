@@ -279,9 +279,21 @@ function candidateSource(candidate: EligibleScriptCase): Pick<ScriptManifestCase
 // predicates make that contract explicit and testable (a 2026-07-11 review found a
 // replay-failed read-only case was dead-ended as 'failed' — outside BOTH channels).
 
-/** Script is on disk and may be run / re-run against the SUT (运行 / pipeline). */
+/**
+ * Script is on disk and may be run / re-run against the SUT (运行 / pipeline).
+ *
+ * 含 `outdated`：该状态的定义就是「重新生成失败，但**盘上仍有一份可用的旧脚本**」——
+ * 两处产生点(generateMissing / validateAndPublish 的 failed 分支)都以
+ * `fs.existsSync(finalFile)` 为前提，没有旧文件的一律记 `failed`。
+ *
+ * 真机踩坑(2026-07-21)：TC-051 点「重试」重新生成时撞上跨境链路坏窗口（网关 401 被 SDK
+ * 原样报成 `Not logged in`），落 `outdated`。此后那份完好的旧脚本**掉出了所有恢复通道**
+ * —— 不能运行(此谓词曾排除它)、不能 AI 修复(无 lastRunError)、不能人工确认(非
+ * needs_review)，唯一出路是反复重试生成、反复赌网络。这与 2026-07-11 修掉的 `failed`
+ * 死态是同一类问题：**有可用脚本却无路可走**。
+ */
 export function isRunnableStatus(status: ScriptManifestCase['status']): boolean {
-  return status === 'verified' || status === 'needs_review';
+  return status === 'verified' || status === 'needs_review' || status === 'outdated';
 }
 
 /**
@@ -1067,7 +1079,12 @@ async function runScriptCases(
       continue;
     }
     item.lastRunError = undefined;
-    if (!item.usesMock) {
+    // `outdated` 跑通【不提升】为 verified:它的 manifest 记的是【新】指纹,盘上却是【旧】
+    // 脚本内容(重新生成失败所致)。若提升,下轮的复用判定会看到「指纹匹配 + 已验证」而直接
+    // 复用旧脚本,等于悄悄用过时脚本冒充当前用例的验证 —— 用例可能已经改过。
+    // 它跑通只说明「旧脚本目前还能跑」,是诊断与止血,不是「当前版本已验证」。诚实的出路
+    // 仍是把重新生成跑成功(卡片也据此继续显示存在缺口)。
+    if (!item.usesMock && item.status !== 'outdated') {
       item.status = 'verified';
       item.lastVerifiedAt = now;
       item.validation = { ...(item.validation ?? { syntax: true, collected: true, replayed: false, warnings: [] }), replayed: true, error: undefined };

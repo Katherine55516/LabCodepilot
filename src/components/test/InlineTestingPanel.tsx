@@ -3763,7 +3763,7 @@ function ReportStepPanel({
   // 全卡片一律只看【本轮】用例(排除 status='stale' 的历史用例集残留):它们不在本轮范围内,
   // 既不该被「自动跑通」拉去跑,其陈年 lastRunError 也不该在卡片上报红。
   const scriptCurrentCases = scriptManifest?.cases.filter((item) => item.status !== "stale") ?? [];
-  const scriptRunnable = scriptCurrentCases.filter((item) => item.status === "verified" || item.status === "needs_review");
+  const scriptRunnable = scriptCurrentCases.filter((item) => item.status === "verified" || item.status === "needs_review" || item.status === "outdated");
   // 「重试缺口」只管【生成】缺口：没 manifest（旧报告）、整个 job 挂了/过期、或有用例
   // 生成失败（failed/outdated）。刻意不含 jobStatus==='partial'——流水线后运行失败也会
   // 置 partial，但那不是生成缺口，重试(重新生成)解决不了，会误导用户空点。
@@ -4225,7 +4225,9 @@ function ScriptPreview({ t, projectPath, taskName, env, initialManifest, onChang
     }
   };
 
-  const runnable = selected?.status === "verified" || selected?.status === "needs_review";
+  // outdated 也可运行:它的定义是「重新生成失败但盘上仍有可用旧脚本」,排除它等于让好脚本
+  // 掉出全部恢复通道(与 isRunnableStatus 保持同一口径)。
+  const runnable = selected?.status === "verified" || selected?.status === "needs_review" || selected?.status === "outdated";
   // 只在「确实需要人工拍板」时给按钮：mock + 待复核 + 无失败记录（带失败记录该走运行/AI 修复）。
   const confirmable = !!selected && selected.usesMock && selected.status === "needs_review" && !selected.lastRunError;
   const working = manifest.jobStatus === "queued" || manifest.jobStatus === "running";

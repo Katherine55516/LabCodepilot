@@ -91,11 +91,14 @@ describe('resolveStaticValidContent', () => {
 // 2026-07-11 review 发现：只读用例生成期重放失败被 dead-end 成 'failed'（无 lastRunError），
 // 落在两个通道之外 → 卡 0/1。修复：可加载但重放失败的脚本落盘为 needs_review + lastRunError。
 describe('恢复态状态机契约（isRunnableStatus / isFixableCase）', () => {
-  it('verified / needs_review 可被运行；failed / outdated 不可运行', () => {
+  it('verified / needs_review / outdated 可被运行；failed 不可运行', () => {
     assert.equal(isRunnableStatus('verified'), true);
     assert.equal(isRunnableStatus('needs_review'), true);
+    // outdated 曾被断言为不可运行 —— 2026-07-21 真机推翻:该状态的定义就是「重新生成失败但
+    // 盘上仍有可用旧脚本」,把它排除等于让一份好脚本掉出全部恢复通道(详见下方 outdated 组)。
+    assert.equal(isRunnableStatus('outdated'), true);
+    // failed 无落盘脚本,仍只能重新生成。
     assert.equal(isRunnableStatus('failed'), false);
-    assert.equal(isRunnableStatus('outdated'), false);
   });
 
   it('带 lastRunError 才可被 AI 修复；无 lastRunError（如生成期 failed）不可修复', () => {
@@ -137,5 +140,32 @@ describe('本轮口径 isCurrentRoundCase（终态判定不被历史条目污染
       false,
       '本轮口径下必须没有未通过项',
     );
+  });
+});
+
+describe('outdated 不再是死态（有可用旧脚本就该有路可走）', () => {
+  it('outdated 属于可运行态', () => {
+    // 真机(2026-07-21):TC-051 点「重试」重新生成时撞上跨境坏窗口(网关 401 被 SDK 报成
+    // `Not logged in`),落 outdated。此后那份完好的旧脚本掉出全部恢复通道 —— 不能运行
+    // (此谓词曾排除它)、不能 AI 修复(无 lastRunError)、不能人工确认(非 needs_review),
+    // 唯一出路是反复重试生成、反复赌网络。与 2026-07-11 修掉的 failed 死态同类。
+    assert.equal(isRunnableStatus('outdated'), true);
+    assert.equal(isRunnableStatus('verified'), true);
+    assert.equal(isRunnableStatus('needs_review'), true);
+  });
+
+  it('failed 仍不可运行 —— 它没有落盘脚本,只能重新生成', () => {
+    // outdated 与 failed 的分水岭就是「盘上有没有可用旧脚本」(两处产生点都以
+    // fs.existsSync(finalFile) 为条件)。
+    assert.equal(isRunnableStatus('failed'), false);
+  });
+
+  it('stale 仍不可运行(本轮未测,不该被批量动作拉去跑)', () => {
+    assert.equal(isRunnableStatus('stale'), false);
+  });
+
+  it('恢复链:outdated 运行失败后落 lastRunError → AI 修复通道自然打开', () => {
+    assert.equal(isFixableCase({ lastRunError: undefined }), false, '刚落 outdated 时无失败信息,不该喂给 AI');
+    assert.equal(isFixableCase({ lastRunError: 'expect(locator).toBeVisible() failed' }), true, '跑失败后才可修');
   });
 });
