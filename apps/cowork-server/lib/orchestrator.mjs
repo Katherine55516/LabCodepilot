@@ -18,6 +18,10 @@ const ASSETS_DIR = process.env.COWORK_ASSETS_DIR || '/opt/cowork-assets'; // 宿
 // 自建镜像模式(image/build-image.sh 产出的 cowork-sandbox):claude+shim 已烘进镜像
 // /opt/cowork,不再 bind 宿主 assets(cred-proxy.mjs 同开关跳过脚本挂载)。
 const BUNDLED = process.env.COWORK_IMAGE_BUNDLED === '1';
+// 运行期 pip 源覆盖(可选):设了就注入 PIP_INDEX_URL(pip 的 env 优先级高于镜像内
+// /etc/pip.conf)。阿里云部署配内网源 mirrors.cloud.aliyuncs.com → agent 装长尾包
+// 走内网零公网带宽;不设 = 镜像默认(公网阿里镜像)。见 OPERATIONS.md §9。
+const PIP_INDEX_URL = (process.env.COWORK_PIP_INDEX_URL || '').trim();
 const MEM = process.env.COWORK_MEM || '2g';
 const PIDS = process.env.COWORK_PIDS || '512';
 const CPUS = process.env.COWORK_CPUS || '2'; // R4 配额:每会话容器 CPU 上限
@@ -148,6 +152,7 @@ export async function ensureContainer(sid, uid = SINGLE_UID) {
     // HOME 放 tmpfs(不在 workspace 内):claude 的状态文件(~/.claude* 等)不落持久
     // volume,否则回合末产物 diff 会把它们当用户产物;容器存活期内跨回合仍持久。
     '-e', 'HOME=/home/agent',
+    ...(PIP_INDEX_URL ? ['-e', `PIP_INDEX_URL=${PIP_INDEX_URL}`] : []),
     '--tmpfs', `/home/agent:uid=${AGENT_UID},gid=${AGENT_UID},mode=0700`,
     ...(BUNDLED ? [] : ['-v', `${ASSETS_DIR}:/opt/cowork:ro`]),
     // R2:workspace 用会话专属 named volume(与容器生命周期解耦,文件 op 服务端直读)。

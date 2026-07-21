@@ -38,7 +38,11 @@ cp "$SRV/container/cred-proxy.py" "$ctx/cred-proxy.py"
 cp "$DIR/Dockerfile" "$ctx/Dockerfile"
 
 info "docker build → cowork-sandbox:$TAG …"
-docker build -t "cowork-sandbox:$TAG" -t cowork-sandbox:latest "$ctx"
+# 构建期 pip 源:默认公网阿里镜像;阿里云服务器上可 COWORK_BUILD_PIP_INDEX 换内网源
+# (mirrors.cloud.aliyuncs.com/pypi/simple/)让预装依赖下载走内网零公网带宽。
+docker build \
+  --build-arg "PIP_INDEX=${COWORK_BUILD_PIP_INDEX:-https://mirrors.aliyun.com/pypi/simple/}" \
+  -t "cowork-sandbox:$TAG" -t cowork-sandbox:latest "$ctx"
 
 echo
 info "✅ 镜像就绪:"

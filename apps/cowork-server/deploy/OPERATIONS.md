@@ -152,3 +152,19 @@ docker rm -f cowork-proxy && systemctl restart cowork-server
 - **存量会话容器仍是旧镜像**:TTL 回收或会话删除后新建的才用新镜像;要全量立刻切,先让客户端 reconcile 或确认无活跃用户后 `docker rm -f $(docker ps -aq --filter label=cowork.managed=1)`(volume 保留,数据不丢)。
 - **升级 claude** = 换 assets 里的新二进制 → 重跑 `build-image.sh`(tag 自动取新版本)→ 清 proxy → 重启。
 - **回退** = `.env` 去掉 `COWORK_IMAGE_BUNDLED` 与 `COWORK_IMAGE`(回 bind 模式,assets 目录须在)→ 清 proxy → 重启。
+
+### 依赖预装与 pip 源(省带宽,10M 共享出口关键项)
+
+镜像已预装办公高频 Python 包(pandas/openpyxl/xlsxwriter/python-docx/python-pptx/
+pdfplumber/pypdf/matplotlib+中文字体/pillow/requests/tabulate)—— 日常任务 agent
+**零运行时 pip 下载**。长尾包 agent 仍会 `pip install --user`,pip 源三层:
+
+| 层 | 配置 | 何时用 |
+|---|---|---|
+| 运行期覆盖 | `.env` 的 `COWORK_PIP_INDEX_URL`(orchestrator 注入容器 env,优先级最高) | **阿里云部署必配内网源** `https://mirrors.cloud.aliyuncs.com/pypi/simple/` → 长尾包走内网零公网带宽 |
+| 镜像默认 | 镜像内 `/etc/pip.conf` = 公网阿里镜像 | 未配置覆盖时(非阿里云环境) |
+| 构建期 | `COWORK_BUILD_PIP_INDEX` 环境变量传给 `build-image.sh` | 阿里云上构建镜像时配内网源,预装下载也零公网带宽 |
+
+阿里云部署两条实测(部署当天做):① 宿主 `curl -sI https://mirrors.cloud.aliyuncs.com/pypi/simple/`
+确认内网源可达;② 沙箱容器内试 `pip download tabulate`——若内网源解析到 10/8 或 172.16/12
+被 egress 拦(阿里内网服务通常在 100.64/10 段不受拦),按 `setup-egress.sh` 尾注加定向放行。

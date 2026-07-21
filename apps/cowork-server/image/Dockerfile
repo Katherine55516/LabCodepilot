@@ -1,19 +1,47 @@
-# Cowork 自建会话镜像 —— 把 claude 二进制 + cowork-shim.py + cred-proxy.py 烘进镜像,
-# 取代"python:3-slim + 宿主 bind-mount"(R 系列遗留形态)。收益:会话容器不再依赖宿主
-# assets 目录(离线部署更净)、cred-proxy 不再 bind 宿主脚本、镜像即版本单元(升级=换镜像)。
+# Cowork 自建会话镜像 —— 把 claude 二进制 + cowork-shim.py + cred-proxy.py + 办公高频
+# Python 依赖烘进镜像,取代"python:3-slim + 宿主 bind-mount"(R 系列遗留形态)。
+# 收益:会话容器不依赖宿主 assets(离线部署净)、镜像即版本单元(升级=换镜像)、
+# **agent 处理办公文件零运行时 pip 下载**(10M 共享带宽下的最大流量点直接消失)。
 #
 # 路径与运行时协议完全对齐 bind 时代(零服务端协议改动):
 #   /opt/cowork/claude           — agent 二进制(shim 默认 CLAUDE_BIN)
 #   /opt/cowork/cowork-shim.py   — exec 桥容器侧(index.mjs 默认 COWORK_SHIM_PATH)
 #   /opt/cred-proxy.py           — 凭证代理(cred-proxy.mjs 启动命令同路径)
 #
-# 构建:用 build-image.sh(负责从 assets 目录/仓库组装 build context),不要直接 docker build。
-# base 保持 python:3-slim(debian/glibc,claude Bun 二进制已在其上验证过 R0-R5 全链;
-# helper/proxy 依赖 python3)。不预装办公工具链——agent 在容器内可自行 pip/apt(公网放行),
-# 需要预装时在下方追加 RUN apt-get 层(注意镜像体积与离线源)。
+# 构建:用 build-image.sh(负责组装 build context + 透传 PIP_INDEX),不要直接 docker build。
+# base 保持 python:3-slim(debian/glibc,claude Bun 二进制已在其上验证过 R0-R5 全链)。
 FROM python:3-slim
 
-# 会话容器以 --user 1000 运行(orchestrator 指定),文件属 root 只读即可(0755/0644)。
+# 构建期 pip 源(默认公网阿里镜像,全球可达;阿里云服务器上构建可 --build-arg 换内网源
+# mirrors.cloud.aliyuncs.com 走零公网带宽)。仅影响构建,运行期源见下方 /etc/pip.conf。
+ARG PIP_INDEX=https://mirrors.aliyun.com/pypi/simple/
+
+# 中文字体(matplotlib 画图中文标签必需,slim 基础镜像没有 —— 缺了全是方块)。
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends fonts-noto-cjk fontconfig \
+    && rm -rf /var/lib/apt/lists/*
+
+# 办公高频依赖预装(root 装进全局 site-packages,uid 1000 运行时可直接 import;
+# agent 运行时仍可 pip install --user 补长尾包,互不冲突)。清单克制:表格/文档/PDF/
+# 绘图/HTTP 五类刚需,增量约 0.5GB(服务器本地磁盘,不占带宽)。
+RUN pip install --no-cache-dir -i "$PIP_INDEX" \
+    pandas \
+    openpyxl \
+    xlsxwriter \
+    python-docx \
+    python-pptx \
+    pdfplumber \
+    pypdf \
+    matplotlib \
+    pillow \
+    requests \
+    tabulate
+
+# 运行期 pip 全局配置:默认公网阿里镜像(比 pypi.org 快且稳)。阿里云部署时由
+# orchestrator 注入 PIP_INDEX_URL 环境变量覆盖为内网源(env 优先级高于本文件),
+# 见 deploy/OPERATIONS.md §9 —— 镜像本身保持环境无关。
+RUN printf '[global]\nindex-url = https://mirrors.aliyun.com/pypi/simple/\ntimeout = 20\n' > /etc/pip.conf
+
 COPY --chmod=755 claude /opt/cowork/claude
 COPY --chmod=644 cowork-shim.py /opt/cowork/cowork-shim.py
 COPY --chmod=644 cred-proxy.py /opt/cred-proxy.py
