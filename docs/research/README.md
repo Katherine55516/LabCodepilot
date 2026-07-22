@@ -14,6 +14,7 @@
 | mobile-remote-control-overall-plan.md | 移动端远程控制整体方案（Host / Controller / Lease / 多设备控制） |
 | weixin-openclaw-plugin-review-2026-03-22.md | OpenClaw 微信插件拆包与 AI Native Lab 逆向集成可行性调研 |
 | chat-latency-remediation-review-2026-03-22.md | Chat Latency 修复 Code Review（effort 收敛、MCP 持久化开关、resume 首 token 优化） |
+| claude-desktop-title-generation.md | Claude 桌面版新对话自动生成标题的实现调研（逆向取证 + 本应用落地方案） |
 | mcp-tooling-agent-sdk-review-2026-03-10.md | MCP 工具 + Agent SDK 集成调研 |
 | skills-agent-sdk-review-2026-03-10.md | Skills + Agent SDK 集成调研 |
 | issue-analysis-2026-04-02.md | GitHub Issues #356-#417 分类分析：第三方 Provider CLI 崩溃、配置持久化丢失、Windows 兼容性 |
