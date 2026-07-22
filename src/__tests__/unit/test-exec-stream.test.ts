@@ -17,6 +17,7 @@ import { wrapExecutionStream, wrapReportStream } from "../../lib/test/exec-strea
 import { POST } from "../../app/api/test/run/route";
 import { readManifest } from "../../lib/test/script-artifacts";
 import { readTraceFile } from "../../lib/test/script-trace";
+import { appendRound, readRounds, roundAliveFile, type RegressionRound } from "../../lib/test/rounds";
 
 let proj: string;
 beforeEach(() => { proj = fs.mkdtempSync(path.join(os.tmpdir(), "exec-stream-")); });
@@ -119,6 +120,64 @@ describe("wrapExecutionStream", () => {
     assert.equal(trace.actions[0].playwrightCode?.includes("hunter2"), false);
     assert.equal(trace.actions[0].playwrightCode?.includes("${TEST_PASSWORD}"), true);
     assert.equal(trace.runHash.length, 40);
+  });
+});
+
+// 轮次收口所有权在服务端(层①,真机事故:执行中途页面刷新 → 前端 settle 永远不会到达 →
+// 轮次卡「执行中」)。done / cancel 两条路径都必须由流包装器自己收口,不押前端活到最后。
+describe("wrapExecutionStream — 轮次服务端收口(roundId)", () => {
+  const LIB = "回归用例库";
+  const round = (roundId: string): RegressionRound => ({
+    roundId, startedAt: new Date().toISOString(), env: "local",
+    suiteName: "全量", mode: "full", status: "running", total: 1,
+  });
+  const roundOpts = (roundId: string, extra: Record<string, unknown> = {}) => ({
+    projectPath: proj, taskName: LIB, env: "local", runStartMs: Date.now(),
+    depositScripts: false, roundId, ...extra,
+  });
+
+  it("流正常收口 → 轮次 done + counts/suitePassStr 摘要 + 心跳清理(不依赖前端 PATCH)", async () => {
+    appendRound(proj, round("RND-T1"));
+    const casesFile = path.join(proj, "AI_LabTest", "testCase", ".data", `${LIB}.cases.json`);
+    fs.mkdirSync(path.dirname(casesFile), { recursive: true });
+    fs.writeFileSync(casesFile, JSON.stringify({ cases: [{ id: "TC-1", tags: ["回归测试"] }] }));
+    const src = mockStream([textFrame('@@RESULT {"id":"TC-1","status":"pass"}\n')]);
+    await drain(wrapExecutionStream(src, roundOpts("RND-T1")));
+    const r = readRounds(proj).rounds.find((x) => x.roundId === "RND-T1")!;
+    assert.equal(r.status, "done");
+    assert.equal(r.suitePassStr, "1/1");
+    assert.deepEqual(r.counts, { total: 1, pass: 1, fail: 0, partial: 0, blocked: 0 });
+    assert.ok(r.finishedAt);
+    assert.ok(!fs.existsSync(roundAliveFile(proj, "RND-T1")), "收口后不残留心跳");
+  });
+
+  it("客户端断开(cancel)→ 轮次 aborted(事故路径:刷新页面后无人收口)", async () => {
+    appendRound(proj, round("RND-T2"));
+    // 永不结束的源流:模拟执行进行中
+    const src = new ReadableStream<string>({ start(c) { c.enqueue(textFrame("执行中…")); } });
+    const wrapped = wrapExecutionStream(src, roundOpts("RND-T2"));
+    const reader = wrapped.getReader();
+    await reader.read();                       // 消费一帧,确认流活着
+    assert.ok(fs.existsSync(roundAliveFile(proj, "RND-T2")), "执行期间有心跳");
+    await reader.cancel("client disconnected"); // Next 在客户端断开时调它
+    const r = readRounds(proj).rounds.find((x) => x.roundId === "RND-T2")!;
+    assert.equal(r.status, "aborted", "服务端在 cancel 路径收口,不再依赖前端");
+    assert.ok(!fs.existsSync(roundAliveFile(proj, "RND-T2")));
+  });
+
+  it("用户主动中止(stats.aborted)→ 即使流走到头也按 aborted 收", async () => {
+    appendRound(proj, round("RND-T3"));
+    const src = mockStream([textFrame('@@RESULT {"id":"TC-1","status":"pass"}\n')]);
+    await drain(wrapExecutionStream(src, roundOpts("RND-T3", {
+      stats: { taskId: "t", stepStartMs: Date.now(), aborted: () => true },
+    })));
+    assert.equal(readRounds(proj).rounds.find((x) => x.roundId === "RND-T3")!.status, "aborted");
+  });
+
+  it("无 roundId(普通任务)→ 不建轮次、不写心跳,零影响", async () => {
+    const src = mockStream([textFrame('@@RESULT {"id":"TC-1","status":"pass"}\n')]);
+    await drain(wrapExecutionStream(src, { projectPath: proj, taskName: "订单", env: "local", runStartMs: Date.now(), depositScripts: false }));
+    assert.equal(readRounds(proj).rounds.length, 0);
   });
 });
 

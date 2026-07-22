@@ -11,7 +11,7 @@ import { resolveProjectEnvWithDb } from '@/lib/test/env-resolve';
 import { isUnsafeSegment } from '@/lib/test/path-safety';
 import { buildStepCompleted, observeStream, recordCasesGenerated, recordStatsEvents } from '@/lib/test/stats-recorder';
 import { REGRESSION_LIBRARY_TASK } from '@/lib/test/library';
-import { readRoundSnapshot } from '@/lib/test/rounds';
+import { readRoundSnapshot, finishRound } from '@/lib/test/rounds';
 // 回归轮次 · 脚本重放优先(阶段 A):有合格沉淀脚本的用例由平台直接跑脚本产出判定,
 // AI(阶段 B)只执行剩余——全覆盖时完全跳过智能体。见 script-regression.ts 模块头。
 import {
@@ -55,6 +55,10 @@ void predictNativeRuntime;
  */
 
 export async function POST(req: Request): Promise<Response> {
+  // 层①补漏(见 rounds.ts 三层收口):执行步在建流【之前】早退失败(可达性闸门 503 /
+  // 兜底 500)时,轮次已被 library/run 建为 running、keeper 尚未创建——若押前端 settle,
+  // 客户端恰在此刻死亡就孤儿。在 try 内 roundId 就位后赋值,两处失败出口调用。
+  let settleRoundOnFailure: () => void = () => {};
   try {
     const body = await req.json().catch(() => ({}));
     const projectPath: string | undefined = body.projectPath;
@@ -111,6 +115,13 @@ export async function POST(req: Request): Promise<Response> {
         headers: { 'Content-Type': 'application/json' },
       });
     }
+    if (step === 'execution' && roundId && projectPath && typeof projectPath === 'string') {
+      const p = projectPath;
+      const rid = roundId;
+      settleRoundOnFailure = () => {
+        try { finishRound(p, rid, { status: 'aborted', ifRunning: true }); } catch { /* 读侧心跳兜底 */ }
+      };
+    }
 
     // Resolve the target env from the project's exported environments.json
     // (configured in 设置·测试账号). That file is the source of truth for the
@@ -132,6 +143,8 @@ export async function POST(req: Request): Promise<Response> {
     if (step === 'execution' && baseUrl && /^https?:\/\//i.test(baseUrl)) {
       const gate = await probeUrlWithRetry(baseUrl, { attempts: 3, timeoutMs: 5000, delayMs: 800, signal: req.signal });
       if (!gate.reachable) {
+        // 轮次执行被闸门拦下 = 本轮没跑起来,服务端直接按中断收口(不押前端 settle 到达)。
+        settleRoundOnFailure();
         const reason = gate.last.error ? `（${gate.last.error}）` : '';
         const msg = `被测系统无法访问：已连续尝试 ${gate.attempts} 次仍无法连接 ${baseUrl}${reason}。请检查被测系统是否已正常启动、被测链接是否正确，确认可访问后再点「重跑」重试。`;
         return new Response(JSON.stringify({ error: msg }), {
@@ -332,6 +345,8 @@ export async function POST(req: Request): Promise<Response> {
       },
     });
   } catch (error) {
+    // 建流之前抛错(建流之后 keeper 已接管;重复 settle 有 ifRunning 幂等保护,无害)。
+    settleRoundOnFailure();
     const message = error instanceof Error ? error.message : 'Internal server error';
     return new Response(JSON.stringify({ error: message }), {
       status: 500,

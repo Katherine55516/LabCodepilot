@@ -127,7 +127,7 @@
 
 ## 核心模块
 
-- **`src/lib/test/rounds.ts`**:轮次索引读写(宽松解析)、`generateRoundId`(RND-YYYYMMDD-HHmm+冲突后缀)、状态机 running→done/aborted/partial、`finishRound` 收口摘要、`normalizeStaleRounds` **惰性收口**(running 超 2h 视图归一 aborted,不回写)、`roundArtifactPaths`、`readRoundSnapshot`、`buildLastResultLookup`(最近已收口轮 run.json × 快照 idMap → 套件「上次结果」条件数据源)。
+- **`src/lib/test/rounds.ts`**:轮次索引读写(宽松解析)、`generateRoundId`(RND-YYYYMMDD-HHmm+冲突后缀)、状态机 running→done/aborted/partial、`finishRound` 收口摘要(`ifRunning` 终态保护 + 清 .alive)、**三层收口**(见下方事故):①`createRoundKeeper` 服务端收口守护(执行流 done/cancel/error 直接 finishRound + 30s 心跳)②`reapOrphanRounds` 读侧心跳判活(陈旧/缺失且过 120s 启动宽限 → 回写 aborted)③`normalizeStaleRounds` 惰性视图归一(running 超 2h,不回写,最后兜底)、`roundArtifactPaths`、`readRoundSnapshot`、`buildLastResultLookup`(最近已收口轮 run.json × 快照 idMap → 套件「上次结果」条件数据源)。
 - **`src/lib/test/suites.ts`**:套件读写、`sanitizeSuite`(文件/API 共用清洗)、`evalSuite`(query 四字段 AND/值 OR/空不限制;static keys;pinned 并入去重;`quarantined===true` 前置排除——三期字段兼容)、内置 `REGRESSION_FULL_SUITE='全量'` 不落盘不可改删。
 - **并发写保护(两文件同款)**:`seq` 写入序号 + mutate 在 rename 前重读比对,冲突在最新内容上重放一次——updatedAt 毫秒粒度同刻写入无法区分,故用 seq。
 - **`library.ts`**:`buildRunnableCases(lib, include?)` 加圈选集参数(套件求值/二期复测共用),缺省=v1 全库。
@@ -139,7 +139,7 @@
 |---|---|
 | POST `/api/test/library/run` | v2 重写:`{projectPath, suiteName?, env?}` → readSuites→evalSuite(pinned+lastResult)→buildRunnableCases(include)→写聚合 cases.json→**建轮次(running)+写快照**→返回 `{ok,total,roundId}`。未知套件 400;快照写失败不阻塞。 |
 | POST `/api/test/run` | 接受 `roundId`(段安全校验+仅保留任务名);穿透 buildStep/evidenceDir/两个 wrap→产物落 `report/回归用例库/{roundId}/`、证据 `_evidence/{task}-{env}-{roundId}`;执行归约注入快照 idMap 出 taskCounts;reportPrompt 注入「按来源任务分节」要求。 |
-| GET/PATCH/DELETE `/api/test/library/rounds` | 列轮次(惰性收口视图,倒序)/收口(done 从该轮 run.json 摘录 counts/suitePassStr,缺 run.json 按 aborted)/删单轮(索引+产物目录+该轮证据;审计 delete-round)。 |
+| GET/PATCH/DELETE `/api/test/library/rounds` | 列轮次(先 reapOrphanRounds 孤儿回写、再惰性视图兜底,倒序)/收口(前端兜底通道,权威收口在执行流:done 从该轮 run.json 摘录 counts/suitePassStr,缺 run.json 按 aborted;aborted 带 ifRunning 不降级终态)/删单轮(索引+产物目录+该轮证据;审计 delete-round)。 |
 | GET `/api/test/library/rounds/detail` | 单轮按来源任务分组 + 与上一全量轮 delta(新增失败/已修复/持续失败,**交集口径**,复测轮不作基准)。只读拼装。 |
 | GET/POST/DELETE `/api/test/suites` | 列套件(hits=执行范围口径:求值+pinned 并入+隔离排除,含 hitTasks/fullHits/fullTasks)/新建更新套件或覆盖 pinned(内置名 400;审计 suite-save)/删套件(内置 400;审计 suite-delete)。 |
 | POST `/api/test/suites/eval` | 构建器【未保存】套件实时命中预览(口径与发起执行完全一致)。 |
@@ -154,8 +154,40 @@
   - **RegressionSuitesSection**:套件列表(内置全量🔒+类型 badge+实时命中+编辑/删除)+构建器(查询条件 chips 四字段 300ms 防抖实时预览/静态分组勾选树)+pinned 白名单;
   - **RegressionRoundsSection**:轮次表(红线 badge/中断态/单轮删除)+行内展开详情(delta 三卡+任务分组红绿小计);reloadSignal 联动,跑完一轮自动刷新。
 - **StartRegressionModal**(唯一保留的对话框——一次性执行确认):套件下拉(命中数)/环境下拉(env-config allowedEnvs)/被测地址展示(未配置警示)/预检卡(条数+任务数+近 3 个 done 轮均值时长估算,无历史显「暂无估算」)/红线说明/空套件禁用。确认→`runLibrary({suiteName, env})`。
-- runLibrary(面板):发起带 suiteName/env→驱动 /api/test/run 带 roundId→完成 PATCH done/失败 PATCH aborted(读侧惰性兜底)。
+- runLibrary(面板):发起带 suiteName/env→驱动 /api/test/run 带 roundId→完成 PATCH done/失败 PATCH aborted。**前端 PATCH 只是兜底**——权威收口在服务端执行流(见下方「轮次卡执行中」事故),页面中途死亡不再孤儿化轮次。
 - 附带修复:`status-danger-*`→`status-error-*`(未定义 token,删除 hover 红色此前静默失效);next.config dev watch 忽略 `.playwright-mcp/`(见下方排障记,根治 CDP 验证时的重编译死循环)。
+
+## 事故:轮次卡「执行中」——收口所有权押在前端,页面一刷新轮次成孤儿
+
+真机 mealAllowance / RND-20260722-1450(14 条用例,14:50 发起):执行中途页面上下文死亡
+(刷新/切走/关窗任一),19 分钟后用户又正常跑完了另一轮,轮次页却仍显示旧轮「执行中」。
+磁盘物证:该轮产物目录只有 `cases.snapshot.json`,无 run.json、无报告、无证据——执行流从未
+走到收口。
+
+根因是**收口所有权错位**:轮次由服务端建(`appendRound(running)`),收口却只有前端
+`settle()` 在流消费完后 PATCH 这一条路。客户端断开 → `req.signal` abort 杀掉 SDK 流 →
+服务端流的 `cancel()` 只做 `reader.cancel()`,不写 run.json 不收口;前端的
+`settle('aborted')` 随页面一起死了。唯一兜底是读侧 2h 惰性视图归一——孤儿轮要顶着
+「执行中」挂近 2 小时。且「无法中途停止」(tech-debt #23)诱导用户用刷新当停止键,放大此缺陷。
+
+修复 = **三层收口**(rounds.ts 模块头有完整描述):
+
+| 层 | 机制 | 管什么 |
+|----|------|--------|
+| ① 服务端收口 | `createRoundKeeper`:wrapExecutionStream 的 done/cancel/error 三路径直接 `finishRound`;run 路由闸门 503/兜底 500 两处早退同样收口 | 流死、进程还活着(刷新/关窗/断网) |
+| ② 心跳判活 | keeper 每 30s touch `{roundDir}/.alive`;rounds GET 先 `reapOrphanRounds`:心跳陈旧(>90s)或缺失且过启动宽限(120s,发起与执行是两次请求之间无心跳)→ **回写** aborted | 进程本身被杀(dev server 重启/应用退出) |
+| ③ 惰性视图归一 | `normalizeStaleRounds`(running>2h,不回写) | 心跳文件写不进去等极端情况 |
+
+配套约束:`finishRound` 支持 `ifRunning`(aborted 类收口仅 running→aborted 生效,流末端
+竞态不得把服务端刚写的 done 降级);收口顺带清 .alive;done 收口摘要直接取归约内存值(counts/
+suitePassStr),不再回读 run.json。心跳必须**定时器驱动**而非随帧写——SDK 长工具调用会静默
+数分钟,随帧写会被误判死亡。存量孤儿轮(修复前留下的)在首次打开轮次页时自愈为「中断」。
+
+为什么「执行面板已完成、轮次页还在执行中」能并存:面板 `libraryLive` 是内存态(跑完定格,
+刷新即消失),轮次页读磁盘索引——一个数据源已死一个还活着,正是两套状态的裂缝暴露了孤儿轮。
+
+- 单测:`test-rounds.test.ts`(ifRunning 终态保护/keeper 幂等/reap 判活边界/存量自愈复刻/零写放大)、`test-exec-stream.test.ts`(done→轮次 done+摘要;**cancel→aborted**——摘掉 cancel 收口该用例即红;stats.aborted→aborted;无 roundId 零影响)。
+- 真机数据回放:mealAllowance `回归轮次.json` 副本过 `reapOrphanRounds`,RND-20260722-1450 running→aborted,其余 15 轮不动。
 
 ## i18n / 审计
 

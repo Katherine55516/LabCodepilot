@@ -8,7 +8,7 @@ import { createCaseTimer } from '@/lib/test/exec-timing';
 import { buildStepCompleted, recordStatsEvents } from '@/lib/test/stats-recorder';
 import { appendAudit } from '@/lib/test/audit';
 import { depositTask, readTaskCases, REGRESSION_LIBRARY_TASK } from '@/lib/test/library';
-import { readRoundSnapshot } from '@/lib/test/rounds';
+import { readRoundSnapshot, createRoundKeeper, type RoundKeeper } from '@/lib/test/rounds';
 import { ScriptTraceCollector, writeTraceFile, type TraceRedaction } from '@/lib/test/script-trace';
 import { enqueueIncrementalScriptCase, enqueueScriptJob, type IncrementalScriptCaseRequest } from '@/lib/test/script-job-manager';
 import { harvestMarkerObjects } from '@/lib/test/markers';
@@ -214,6 +214,13 @@ export function wrapExecutionStream(
     trace: traceCollector,
     ...(deposit ? {} : { enqueue: () => {} }),
   });
+  // 轮次守护(仅回归轮次有 roundId,普通任务零影响):收口所有权在服务端 + 心跳活性。
+  // 真机事故:轮次收口原本只由前端流消费完后 PATCH——执行中途页面刷新,settle 永远不会
+  // 到达,轮次卡「执行中」直到 2h 惰性兜底。现在流的 done/cancel/error 三条路径都由
+  // 服务端直接收口;进程本身被杀则由心跳陈旧让读侧判孤儿(见 rounds.ts 三层设计)。
+  const round: RoundKeeper | null = opts.roundId
+    ? createRoundKeeper(opts.projectPath, opts.roundId)
+    : null;
   return new ReadableStream<string>({
     start(controller) {
       // 有头被自动回落无头时,先补发一条提示帧让用户在对话里看到「已改无头」(见 POST 内)。
@@ -339,6 +346,14 @@ export function wrapExecutionStream(
           } catch {
             // trace 是脚本生成增强产物；失败不得改变执行结果
           }
+          // 轮次收口(层①):执行流走到头 = 轮次终态定了,服务端直接写,不等前端 PATCH。
+          // 语义与前端现状一致——settle('done') 本就只看执行流是否消费完(report 步返回值
+          // 被忽略),error 帧不改变收口事实(counts 里的 blocked/fail 才是结论)。用户主动
+          // 中止(stats.aborted)是唯一例外:半截轮按 aborted 收。
+          if (round) {
+            if (opts.stats?.aborted?.()) round.settleAborted();
+            else round.settleDone({ counts: { ...reduced.counts }, suitePassStr: reduced.suitePassStr });
+          }
           // 执行收口即入队整轮生成任务(不再只由报告触发):run.json + trace 都已落盘,输入齐了。
           // 作用是【对账】——增量已把 pass 用例生成完,这里走指纹复用(零模型消耗)补上
           // stale 标记与 counts,并接自动跑通流水线统一补跑延后的重放。
@@ -438,10 +453,15 @@ export function wrapExecutionStream(
           }
         }
       } catch (e) {
+        // 流内部报错(SDK 流 reject 等):run.json 没写成,轮次按中断收(层①的 error 路径)。
+        round?.settleAborted();
         controller.error(e);
       }
     },
     cancel(reason) {
+      // 客户端断开(刷新/关窗/停止):Next 调 cancel、pull 不再来,done 分支永远到不了。
+      // 这正是「轮次卡执行中」事故的路径——在这里由服务端收口(层①的 cancel 路径)。
+      round?.settleAborted();
       reader.cancel(reason);
     },
   });
