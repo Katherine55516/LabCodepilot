@@ -54,6 +54,18 @@ export interface ScriptJobRequest {
 
 const DEFAULT_MAX_REPAIR_ROUNDS = 3;
 
+/**
+ * 生成阶段（纯模型调用）的并发度。
+ *
+ * 定成 3 而不是更大：瓶颈是等模型返回，并发能线性摊薄墙上时钟；但网关有速率限制，且每条
+ * 并发都占一个 SDK 子进程（内存/句柄），过高反而触发限流与资源竞争。3 条足以把典型的
+ * 4-9 条批次压到 1/3 左右，是收益与风险的平衡点。
+ *
+ * 注意：只有【生成】并发。校验/重放仍严格串行 —— 它们要起 Playwright 真跑被测应用，
+ * 并发操作同一个 SUT 会互相踩数据（详见 generateMissing 的两阶段注释）。
+ */
+const GENERATION_CONCURRENCY = 3;
+
 export interface EnqueueResult {
   queued: boolean;
   reused: boolean;
@@ -544,20 +556,22 @@ async function generateMissing(
   // 单条遇瞬时错误时退避重发（首次 + 最多 2 次）：给企业代理/平台刷 token 缓过来的时间。
   // 退避后再撞硬性/确定性错误则立即放弃，不空耗。
   const RETRY_BACKOFFS_MS = [4_000, 10_000];
-  for (const candidate of candidates) {
-    if (abortSignal.aborted) throw new Error('脚本生成已中止（被更新的任务取代）');
-    let generated: GeneratedScript[] | null = null;
+
+  /** 单条的模型调用（含瞬时错误退避重发）。不碰被测系统，故可并发。 */
+  const generateOne = async (candidate: EligibleScriptCase): Promise<GeneratedScript | { error: string }> => {
     let lastError = '生成失败';
     for (let attempt = 0; attempt <= RETRY_BACKOFFS_MS.length; attempt++) {
+      if (abortSignal.aborted) throw new Error('脚本生成已中止（被更新的任务取代）');
       try {
-        generated = await generateScriptsBatch({
+        const generated = await generateScriptsBatch({
           candidates: [candidate],
           model: request.model,
           providerId: request.providerId,
           redactions,
           abortSignal,
         });
-        break;  // 成功（可能是空数组，交由下方 find 处理）
+        const item = generated.find((g) => g.caseId === candidate.id);
+        return item ?? { error: 'AI 未返回该用例的脚本' };
       } catch (error) {
         if (abortSignal.aborted) throw error;  // 被新任务取代 → 冒泡让 executeJob 走 stale 分支
         lastError = redactTraceText(error instanceof Error ? error.message : String(error), redactions);
@@ -568,19 +582,42 @@ async function generateMissing(
         catch { throw new Error('脚本生成已中止（被更新的任务取代）'); }
       }
     }
-    if (!generated) {  // 三次都抛错（null 才是"从未成功"；空数组是"成功但 AI 没给脚本"）
-      result.set(candidate.id, failedEntry(candidate, lastError.slice(0, 300)));
-      continue;
+    return { error: lastError.slice(0, 300) };
+  };
+
+  // ── 两阶段：模型调用【并发】，落盘校验【串行】────────────────────────────────
+  // 瓶颈是【等模型返回】(跨境链路 latency-bound，实测单条 ~120s 里大头在此)，这类等待型
+  // 工作只有并发能成倍改善：3 条并发等 70s ≈ 1 条等 70s。
+  //
+  // 但**校验/重放必须串行**：validateAndPublish 会起 Playwright 真跑被测应用，多个浏览器
+  // 并发操作同一个 SUT 会互相踩数据（真机已见测试库里堆出 5 条同名「前端开发」）。
+  // 故拆开：阶段 A 并发拿脚本文本(纯 API，不碰 SUT)，阶段 B 顺序校验落盘。
+  const inFlight = new Map<string, Promise<GeneratedScript | { error: string }>>();
+  let cursor = 0;
+  const pump = () => {
+    while (inFlight.size < GENERATION_CONCURRENCY && cursor < candidates.length) {
+      const candidate = candidates[cursor++];
+      inFlight.set(candidate.id, generateOne(candidate));
     }
-    const item = generated.find((g) => g.caseId === candidate.id);
-    if (!item) {
-      result.set(candidate.id, failedEntry(candidate, 'AI 未返回该用例的脚本'));
+  };
+  pump();
+
+  for (const candidate of candidates) {
+    if (abortSignal.aborted) throw new Error('脚本生成已中止（被更新的任务取代）');
+    const pending = inFlight.get(candidate.id);
+    // 阶段 A 的产物按候选顺序消费：先到的先算好放着，轮到谁就取谁，保持结果顺序确定。
+    const outcome = pending ? await pending : await generateOne(candidate);
+    inFlight.delete(candidate.id);
+    pump();   // 腾出一个槽位就补下一条，保持并发度
+
+    if ('error' in outcome) {
+      result.set(candidate.id, failedEntry(candidate, outcome.error));
       continue;
     }
     result.set(candidate.id, await validateAndPublish({
       request,
       candidate,
-      generated: item,
+      generated: outcome,
       previous: previousById.get(candidate.id),
       redactions,
       abortSignal,
