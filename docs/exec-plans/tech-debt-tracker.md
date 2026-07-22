@@ -29,7 +29,6 @@
 | 20 | 跨轮矩阵行身份 = `(来源任务, originalId)`。AI 重新生成用例改了 `id` → 该用例的跨轮历史断开、健康度重新计数，且**无任何提示**。需在重生成链路做身份继承或至少告警 | 中 | 历史断裂静默发生，flaky/连败判定被重置 | 2026-07-10 |
 | 21 | `npm run test:smoke` 在 worktree 内跑不了：playwright.config 的 webServer 用 `npm run dev`（Next 16 默认 Turbopack），而 worktree 的 `node_modules` 是指向主仓的符号链接，Turbopack 直接拒绝（"Symlink points out of the filesystem root"）。绕过办法是手动 `PORT=3000 next dev --webpack` 后复用（`reuseExistingServer`）。长期应让 webServer 命令可配置或改用 `--webpack` | 低 | worktree 内 UI 批次无法按纪律跑 smoke，需手工绕过 | 2026-07-10 |
 | 22 | 回归用例库批量移除走「逐条 DELETE」循环（`/api/test/library` 的 DELETE 是单条/单任务口径）。条数量级为个位数~百时可接受，选中上千条会产生同等数量的请求与落盘 | 低 | 大批量移除慢；每条都触发一次原子写 | 2026-07-10 |
-| 23 | 回归执行无法中途停止：`runLibrary`(InlineTestingPanel.tsx) 的两处 fetch 没有 AbortController（功能测试的 `runStep` 有 `Promise.race` + signal）。执行进展面板只读进度、不能取消；长跑的大套件只能等它跑完 | 中 | 误发起的大套件无法叫停，浪费时间与 token | 2026-07-10 |
 | 24 | 执行进展面板的「收口中 / 疑似卡住」是**推断态**：最后一条 @@RESULT 到 run_json 之间服务端在做证据归集与归约，不发任何 SSE 帧。面板靠「多久没收到帧」推断，无心跳帧兜底。服务端若真卡死，面板只能靠 90s 超时提示，无法区分「归约慢」与「进程挂了」 | 低 | 收口阶段的可观测性依赖启发式 | 2026-07-10 |
 | 25 | 执行流事件在内存中无界增长：大回归套件（十几条用例 × 几百条工具调用）的 `libraryLive.cases[].events` 会持续膨胀。按用例分段 + 工具轨迹折叠缓解了渲染压力，但数组本身未封顶/虚拟化 | 低 | 超大套件长跑后滚动可能卡顿 | 2026-07-10 |
 
@@ -37,6 +36,7 @@
 
 | # | 描述 | 解决日期 | 解决方式 |
 |---|------|----------|----------|
+| 23 | 回归执行无法中途停止：`runLibrary`(InlineTestingPanel.tsx) 的两处 fetch 没有 AbortController（功能测试的 `runStep` 有），执行进展面板只读进度、不能取消；长跑的大套件只能等它跑完 | 2026-07-22 | `runLibrary` 接入 AbortController + 执行面板头「停止」按钮（confirm 二次确认）。服务端零改动（`/api/test/run` 早已接 `req.signal`，与功能测试停止同机制）。收口语义：执行中途停止 → 轮次 aborted（与断网中断一致，判定不落盘）；报告步停止 → 轮次收 done（run.json 已落盘且权威，保留进复测基准/上次结果链路）。审计复用 `stop` 动作落 回归用例库.jsonl。CDP 三场景实测（执行停/报告停/取消确认继续跑）；文档见 handover/regression-library.md | 
 | 26 | 静态校验器对 **API 接口测试脚本**误报「未使用语义化定位器」→ 恒被压成 `needs_review`，稀释真正需要人工复核的信号（真机 8 条 API 用例常年待复核） | 2026-07-21 | 新增导出谓词 `touchesPage`（判据是**有没有实际 `page.` 调用**，而非 fixture 解构 —— `{ page, request }` 混合型含真实 UI 操作，必须照常检查），该警告仅对操作页面的脚本生效。另三条定位器警告（xpath/nth/waitForTimeout）是「用了不好的东西」才告警，API 脚本本就不会触发，无需改。单测 4 条覆盖纯 API/纯 UI/混合型/判据本身；真实脚本回放 15 条全部无假告警 |
 | 7 | `project-mcp-injection.test.ts` 的 "resolves ${...} env placeholders" 被 `process.env.CI ? it.skip : it` 跳过 | 2026-07-09 | 原条目归因（tsx 在 linux 与 macOS 上 module identity 去重不一致）不成立：`db.ts` 在 tsx 下本就会被 CJS 与 ESM 两套注册表各求值一次，与平台、与 `@/` 别名均无关。真正的根因是 `db.ts` 把 `dataDir` / `DB_PATH` 写成模块顶层 `const`，于是两个实例各自钉死一个 `CLAUDE_GUI_DATA_DIR` 快照，测试侧 `setSetting` 与 prod 侧 `getSetting` 落在不同的 SQLite 文件上。改为惰性函数求值后两个实例指向同一文件，守卫已移除，该用例在 `CI=true` 下正常执行 |
 | 13(旧,编号曾与上传条目重复) | 测试工作台「执行」步在打包版跑不起来（@playwright/mcp 不在 asarUnpack + Chromium 未随包） | 2026-07-09 确认 | `scripts/bundle-chromium.mjs`（electron:pack* 链内）用 @playwright/mcp 自带 revision 装 chromium-headless-shell → electron-builder extraResources 复制进包内 `resources/ms-playwright`，运行时经 `AILAB_RESOURCES_PATH` 定位 `--executable-path` 启动（见 electron-builder.yml:127-133、prompts.ts buildPlaywrightMcp）。回归用例库 v2 打包验收时一并复核真跑 |

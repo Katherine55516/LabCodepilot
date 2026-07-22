@@ -312,7 +312,8 @@
 - 「收口中」是推断态：最后一条判定到 `run_json` 之间服务端在做证据归集与归约、不发任何帧；超时转「疑似卡住」。
 - 报告步不流详情，执行步收口即冻结。
 
-**已知缺口**：`runLibrary` 没有 AbortController（功能测试有），因此面板只读进度、不能中途停止。
+~~**已知缺口**：`runLibrary` 没有 AbortController（功能测试有），因此面板只读进度、不能中途停止。~~
+**已补（2026-07-22，技术债 #23 关闭）**：`runLibrary` 接入 AbortController（`libraryAbortRef`），执行面板折叠头右侧新增「停止」按钮（`window.confirm` 二次确认）。服务端零改动——`/api/test/run` 早已接 `req.signal → abortController`（与功能测试 stopTask 同一机制），客户端 abort 即真正终止智能体/脚本重放（重放锁释放幂等）。收口语义：**执行中途停止 → 轮次 aborted**（run.json 不落盘，与断网/异常中断一致；已通过用例的增量脚本沉淀不受影响）；**报告步停止 → 轮次仍收 done**（run.json 已落盘且权威，标 aborted 会把完整一轮从复测基准/「上次结果」数据源里白白剔除；报告 md 缺失，收口 footer 以 `live.note` 说明）。面板以 `live.stopped` 区分「已手动停止」与真实失败的「执行中断」（headline/对账条/footer 三处文案独立）；审计复用 `stop` 动作落 `audit/回归用例库.jsonl`（detail 带轮次号，step 标记停止时所处步骤）。
 
 ## 顺带修复：回归轮次的脚本生成从来没成功过
 

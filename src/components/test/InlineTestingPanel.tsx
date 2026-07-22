@@ -113,6 +113,10 @@ interface LibraryLive {
   /** 执行步流末的权威归约(报告步那条必须忽略,否则会把盘面清零)。 */
   runJson: FourState | null;
   errored: boolean;
+  /** 用户点了「停止」——与 errored 的真实失败区分显示(已手动停止 vs 执行中断)。 */
+  stopped?: boolean;
+  /** 收口后的补充说明(如「报告步被停止,执行结果已保留」),渲染在收口 footer。 */
+  note?: string;
   errorText?: string;
   /** 最后一帧的时刻 —— 用于推断「收口中」(服务端做证据归集与归约时不发任何帧)。 */
   lastFrameAt: number;
@@ -676,6 +680,10 @@ export function InlineTestingPanel() {
     setLibraryRunning(true);
     setLibraryRunStatus(null);
     setLibraryLive(null);   // 上一轮的面板不留存
+    // 中断通道(技术债 #23):「停止」abort → 聚合/drive 的 fetch 全部拒绝、服务端 req.signal
+    // 联动终止智能体与脚本重放。settle 不挂 signal —— 停止之后还要靠它把轮次收口。
+    const ctrl = new AbortController();
+    libraryAbortRef.current = ctrl;
     let roundId: string | undefined;
     // 轮次收口(best-effort,fire-and-forget 语义但等待返回以便刷新列表)。
     const settle = async (outcome: "done" | "aborted") => {
@@ -692,6 +700,7 @@ export function InlineTestingPanel() {
       const agg = await fetch("/api/test/library/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
+        signal: ctrl.signal,
         body: JSON.stringify({
           projectPath: p,
           suiteName: opts?.suiteName,
@@ -701,7 +710,7 @@ export function InlineTestingPanel() {
           parentRoundId: opts?.parentRoundId,
         }),
       }).then((r) => r.json()).catch(() => null);
-      if (!agg?.ok) { setLibraryRunStatus(agg?.error || t("test.library.runFailed")); return; }
+      if (!agg?.ok) { setLibraryRunStatus(ctrl.signal.aborted ? t("test.library.runStopped") : (agg?.error || t("test.library.runFailed"))); return; }
       if (!agg.total) { setLibraryRunStatus(t("test.library.runEmpty")); return; }
       roundId = typeof agg.roundId === "string" ? agg.roundId : undefined;
       setLibraryRunStatus(t("test.library.runStarted", { total: agg.total }));
@@ -800,6 +809,7 @@ export function InlineTestingPanel() {
         const res = await fetch("/api/test/run", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
+          signal: ctrl.signal,
           body: JSON.stringify({ projectPath: p, taskName: REGRESSION_LIBRARY_TASK, step, env, roundId, model: model || undefined, providerId: providerId || undefined, scriptFirst: opts?.scriptFirst !== false }),
         });
         if (!res.ok) {
@@ -872,23 +882,54 @@ export function InlineTestingPanel() {
         return true;
       };
       if (await drive("execution")) {
-        await drive("report");
+        // 报告步期间点「停止」→ 只掐报告,轮次仍收 done:执行步已跑完、run.json 已落盘(权威口径),
+        // 标 aborted 会把完整的一轮从复测基准/「上次结果」数据源里白白剔除(2026-07-22 需求确认)。
+        let reportStopped = false;
+        try {
+          await drive("report");
+        } catch (e) {
+          if (!ctrl.signal.aborted) throw e;
+          reportStopped = true;
+        }
         await settle("done");
         setReportsReload((n) => n + 1);
         setLibraryReload((n) => n + 1);
-        setLibraryRunStatus(t("test.library.runDone"));
-        setLibraryLive((s) => (s ? { ...s, finished: true } : s));
+        setLibraryRunStatus(t(reportStopped ? "test.library.runStoppedReport" : "test.library.runDone"));
+        // 报告步被停止的说明进收口 footer(收口后 runStatus 行不再显示,note 是唯一可见落点)。
+        setLibraryLive((s) => (s ? { ...s, finished: true, ...(reportStopped ? { note: t("test.library.runStoppedReport") } : {}) } : s));
       } else {
         await settle("aborted");
         setLibraryLive((s) => (s ? { ...s, errored: true, finished: true } : s));
       }
     } catch {
-      setLibraryRunStatus(t("test.library.runFailed"));
-      setLibraryLive((s) => (s ? { ...s, errored: true, finished: true } : s));
+      // 执行中途 abort(用户停止)与真实失败分开表述;轮次一样标 aborted。
+      const stopped = ctrl.signal.aborted;
+      setLibraryRunStatus(t(stopped ? "test.library.runStopped" : "test.library.runFailed"));
+      setLibraryLive((s) => (s ? { ...s, ...(stopped ? { stopped: true } : { errored: true }), finished: true } : s));
       await settle("aborted");
     } finally {
+      if (libraryAbortRef.current === ctrl) libraryAbortRef.current = null;
       setLibraryRunning(false);
     }
+  };
+
+  // 停止当前回归轮次(技术债 #23):二次确认后 abort in-flight fetch → 服务端 req.signal 联动
+  // 终止智能体/脚本重放(与功能测试 stopTask 同一套服务端机制,重放锁释放幂等)。收口由
+  // runLibrary 负责:执行中途 → aborted;报告步 → done(执行结果已落盘)。审计落 回归用例库.jsonl。
+  const stopLibraryRun = () => {
+    const ctrl = libraryAbortRef.current;
+    if (!ctrl || ctrl.signal.aborted) return;
+    if (!window.confirm(t("test.library.stopConfirm"))) return;
+    // confirm 阻塞期间本轮可能已跑完(finally 已清 ref)→ 过期的停止意图直接丢弃。
+    if (libraryAbortRef.current !== ctrl || ctrl.signal.aborted) return;
+    logAudit("stop", {
+      taskId: "", // 轮次不属于任何功能测试任务,不能挂活动任务 id
+      projPath: current?.path,
+      taskName: REGRESSION_LIBRARY_TASK,
+      step: libraryLive?.step,
+      detail: libraryLive?.roundId ? `停止回归轮次 ${libraryLive.roundId}` : "停止回归轮次",
+    });
+    ctrl.abort();
   };
 
   // 排队调度: 槽位 = 并发数 − 占用数。占用 = 在跑(running) ∪ 已认领(autoRun) 的任务数 —— 用真实
@@ -1486,6 +1527,9 @@ export function InlineTestingPanel() {
   const [libraryRunStatus, setLibraryRunStatus] = useState<string | null>(null);
   // 回归执行的实时详情（内存态，不保留历史：切走/刷新即消失，收口后的事实见「轮次报告」页）。
   const [libraryLive, setLibraryLive] = useState<LibraryLive | null>(null);
+  // 回归轮次的中断通道(技术债 #23):abort → drive 的 fetch 拒绝 → runLibrary 按「用户停止」
+  // 收口(轮次标 aborted)。服务端 /api/test/run 已接 req.signal → 智能体/脚本重放真正终止。
+  const libraryAbortRef = useRef<AbortController | null>(null);
   // docx 原件预览弹窗(独立于 reqPreview 的文本弹窗):DocxViewer 按原版式渲染二进制原件。
   const [origDocPreview, setOrigDocPreview] = useState<{ abs: string; filename: string } | null>(null);
   useEffect(() => { setReqPreview(null); setOrigDocPreview(null); }, [aId]); // 切任务关掉残留的需求预览弹窗
@@ -2741,6 +2785,7 @@ export function InlineTestingPanel() {
                     reloadSignal={libraryReload}
                     onChanged={() => setLibraryReload((n) => n + 1)}
                     onLaunch={(preset) => setLaunchOpen(preset ?? {})}
+                    onStop={stopLibraryRun}
                     running={libraryRunning}
                     runStatus={libraryRunStatus}
                   />
@@ -4522,12 +4567,14 @@ const LIVE_TEXT: Record<LiveStatus, string> = {
   blocked: "text-muted-foreground",
 };
 
-function RegressionLivePanel({ t, live, running, runStatus, onOpenReport }: {
+function RegressionLivePanel({ t, live, running, runStatus, onOpenReport, onStop }: {
   t: T;
   live: LibraryLive;
   running: boolean;
   runStatus: string | null;
   onOpenReport: () => void;
+  /** 停止当前轮次(运行中显示按钮;确认与收口逻辑在上层 stopLibraryRun)。 */
+  onStop?: () => void;
 }) {
   const [open, setOpen] = useState(true);
   // 「收口中 / 疑似卡住」是【推断态】——服务端在做证据归集与归约时不发任何帧。用一个秒级
@@ -4555,7 +4602,9 @@ function RegressionLivePanel({ t, live, running, runStatus, onOpenReport }: {
   const counts = live.runJson ?? live.four;
   const lostCases = live.cases.filter((c) => c.lost).length;
   const lostAll = fin && live.verdicts === 0 && live.tools > 0 && !live.errored;
-  const aborting = live.errored;
+  // 用户停止与真实失败共用中断视觉(红),仅文案区分——中断的轮天然缺判定,不是判定丢失。
+  const stopped = !!live.stopped;
+  const aborting = live.errored || stopped;
   const idle = now - live.lastFrameAt;
   const settling = !fin && live.step === "execution" && live.started > 0 && idle > LIVE_SETTLE_MS;
   const stuck = settling && idle > LIVE_STUCK_MS;
@@ -4568,7 +4617,7 @@ function RegressionLivePanel({ t, live, running, runStatus, onOpenReport }: {
   let headline: string;
   let sub: string;
   if (fin) {
-    headline = aborting ? t("test.live.doneAborted") : lostAll ? t("test.live.doneLost")
+    headline = aborting ? t(stopped ? "test.live.doneStopped" : "test.live.doneAborted") : lostAll ? t("test.live.doneLost")
       : counts.fail || counts.blocked ? t("test.live.doneFail") : t("test.live.doneOk");
     sub = t("test.live.passOf", { pass: counts.pass, total: counts.total || live.total });
   } else if (live.step === "report") {
@@ -4599,34 +4648,45 @@ function RegressionLivePanel({ t, live, running, runStatus, onOpenReport }: {
 
   return (
     <div className={`mb-3 overflow-hidden rounded-lg border bg-card ${diverged || lostAll ? "border-status-error-foreground/50" : "border-border"}`}>
-      {/* 折叠头 */}
-      <button
-        onClick={() => setOpen((v) => !v)}
-        aria-expanded={open}
-        className="flex w-full items-center gap-2 px-3 py-1.5 text-left hover:bg-muted"
-      >
-        {open ? <CaretDown size={9} className="flex-shrink-0 text-muted-foreground" /> : <CaretRight size={9} className="flex-shrink-0 text-muted-foreground" />}
-        {fin ? <span className={`h-2 w-2 flex-shrink-0 rounded-full ${counts.fail || counts.blocked || aborting ? "bg-status-error-foreground" : "bg-status-success-foreground"}`} />
-             : <SpinnerGap size={11} className="flex-shrink-0 animate-spin text-primary" />}
-        <span className="whitespace-nowrap text-[11.5px] font-semibold text-foreground">{headline}</span>
-        <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">{sub}</span>
-        <span className="h-1 w-24 flex-shrink-0 overflow-hidden rounded-full bg-border">
-          <span className={`block h-full transition-all ${barCls}`} style={{ width: `${pct}%` }} />
-        </span>
-        <span className="flex flex-shrink-0 gap-1">
-          {chip(t("test.state.pass"), counts.pass, "bg-status-success-muted text-status-success-foreground")}
-          {chip(t("test.state.fail"), counts.fail, "bg-status-error-muted text-status-error-foreground")}
-          {chip(t("test.state.partial"), counts.partial, "bg-status-warning-muted text-status-warning-foreground")}
-          {chip(t("test.state.blocked"), counts.blocked, "bg-muted text-muted-foreground")}
-        </span>
-      </button>
+      {/* 折叠头(展开开关 + 运行中的「停止」并排 —— button 不能嵌套,停止不放开关内部) */}
+      <div className="flex w-full items-center">
+        <button
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          className="flex min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-left hover:bg-muted"
+        >
+          {open ? <CaretDown size={9} className="flex-shrink-0 text-muted-foreground" /> : <CaretRight size={9} className="flex-shrink-0 text-muted-foreground" />}
+          {fin ? <span className={`h-2 w-2 flex-shrink-0 rounded-full ${counts.fail || counts.blocked || aborting ? "bg-status-error-foreground" : "bg-status-success-foreground"}`} />
+               : <SpinnerGap size={11} className="flex-shrink-0 animate-spin text-primary" />}
+          <span className="whitespace-nowrap text-[11.5px] font-semibold text-foreground">{headline}</span>
+          <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">{sub}</span>
+          <span className="h-1 w-24 flex-shrink-0 overflow-hidden rounded-full bg-border">
+            <span className={`block h-full transition-all ${barCls}`} style={{ width: `${pct}%` }} />
+          </span>
+          <span className="flex flex-shrink-0 gap-1">
+            {chip(t("test.state.pass"), counts.pass, "bg-status-success-muted text-status-success-foreground")}
+            {chip(t("test.state.fail"), counts.fail, "bg-status-error-muted text-status-error-foreground")}
+            {chip(t("test.state.partial"), counts.partial, "bg-status-warning-muted text-status-warning-foreground")}
+            {chip(t("test.state.blocked"), counts.blocked, "bg-muted text-muted-foreground")}
+          </span>
+        </button>
+        {onStop && running && !live.finished && (
+          <button
+            onClick={onStop}
+            title={t("test.library.stopHint")}
+            className="mr-2 flex h-6 flex-shrink-0 items-center gap-1 rounded-md border border-status-error-foreground/40 px-2 text-[11px] font-medium text-status-error-foreground hover:bg-status-error-muted"
+          >
+            <Stop size={11} weight="fill" /> {t("test.library.stop")}
+          </button>
+        )}
+      </div>
 
       {/* 对账条：正常安静，背离/中断时响 */}
       {live.started > 0 && (
         aborting ? (
           <div className="flex flex-wrap items-center gap-1.5 border-t border-border bg-status-error-muted px-3 py-1.5 text-[11px] font-medium text-status-error-foreground">
-            <Warning size={11} /> <span>{t("test.live.reconAborted")}</span>
-            <span className="ml-auto font-normal">{live.errorText || t("test.live.reconAbortedWhy")}</span>
+            <Warning size={11} /> <span>{t(stopped ? "test.live.reconStopped" : "test.live.reconAborted")}</span>
+            <span className="ml-auto font-normal">{stopped ? t("test.live.reconStoppedWhy") : (live.errorText || t("test.live.reconAbortedWhy"))}</span>
           </div>
         ) : diverged ? (
           <div className="flex flex-wrap items-center gap-1.5 border-t border-border bg-status-error-muted px-3 py-1.5 text-[11px] font-medium text-status-error-foreground">
@@ -4722,10 +4782,11 @@ function RegressionLivePanel({ t, live, running, runStatus, onOpenReport }: {
       {/* 收口 */}
       {fin && (
         <div className="flex flex-wrap items-center gap-2 border-t border-border px-3 py-1.5 text-[11px] text-muted-foreground">
-          {aborting ? <span className="font-medium text-status-error-foreground">{t("test.live.footAborted")}</span>
+          {aborting ? <span className="font-medium text-status-error-foreground">{t(stopped ? "test.live.footStopped" : "test.live.footAborted")}</span>
             : lostAll ? <><span className="font-medium text-status-error-foreground">{t("test.live.footLost", { n: counts.blocked || live.total })}</span><span>{t("test.live.footLostWhy")}</span></>
             : counts.fail ? <span className="font-medium text-status-warning-foreground">{t("test.live.footFail", { n: counts.fail })}</span>
             : <span className="font-medium text-status-success-foreground">{t("test.live.footOk", { pass: counts.pass, total: counts.total })}</span>}
+          {live.note && <span>{live.note}</span>}
           <span className="flex-1" />
           <button onClick={onOpenReport} className="flex h-6 items-center rounded border border-border bg-primary px-2 text-[11px] font-medium text-primary-foreground">{t("test.live.viewReport")}</button>
           <span className="w-full text-[10px] leading-relaxed">{t("test.live.corrected")}</span>
@@ -4741,7 +4802,7 @@ type RegTab = "library" | "suites" | "rounds" | "matrix" | "health";
 
 // 回归测试整页工作区(批 H):子页签(用例库/回归套件/轮次历史/轮次报告)+「发起回归」+ 运行状态行。
 // 三个区块由原弹窗内容页面化而来,数据链路(reloadSignal/deposit/rounds API)不变。
-function RegressionWorkspace({ t, projectPath, regTab, setRegTab, reloadSignal, onChanged, onLaunch, running, runStatus, live, model, providerId }: {
+function RegressionWorkspace({ t, projectPath, regTab, setRegTab, reloadSignal, onChanged, onLaunch, onStop, running, runStatus, live, model, providerId }: {
   t: T;
   projectPath: string;
   regTab: RegTab;
@@ -4749,6 +4810,8 @@ function RegressionWorkspace({ t, projectPath, regTab, setRegTab, reloadSignal, 
   reloadSignal: number;
   onChanged: () => void;
   onLaunch: (preset?: { mode?: "failed-only"; parentRoundId?: string }) => void;
+  /** 停止当前轮次(执行面板头的「停止」按钮;确认与收口在上层 stopLibraryRun)。 */
+  onStop: () => void;
   running: boolean;
   runStatus: string | null;
   /** 执行中的实时详情；null = 没有正在跑的轮次（面板不显示）。 */
@@ -4790,7 +4853,7 @@ function RegressionWorkspace({ t, projectPath, regTab, setRegTab, reloadSignal, 
       {/* 执行状态面板只在「回归套件」tab 顶部显示(运行中实时进度 + 完成后结果盘面);其余 tab 不显示,
           避免完成后的盘面一直霸占所有 tab 顶部。全局「有轮次在跑」提示保留在顶部「运行中」按钮上。 */}
       {regTab === "suites" && (live ? (
-        <RegressionLivePanel t={t} live={live} running={running} runStatus={runStatus} onOpenReport={() => { if (live.roundId) setReportRoundId(live.roundId); setRegTab("rounds"); }} />
+        <RegressionLivePanel t={t} live={live} running={running} runStatus={runStatus} onStop={onStop} onOpenReport={() => { if (live.roundId) setReportRoundId(live.roundId); setRegTab("rounds"); }} />
       ) : runStatus ? (
         <div className="mb-3 flex items-center gap-1.5 rounded-md border border-border bg-muted/30 px-3 py-1.5 text-[11px] text-muted-foreground">
           {running && <SpinnerGap size={11} className="animate-spin" />}
