@@ -313,6 +313,57 @@ describe("reduceResults — caseIds 兜底补全（漏执行用例 → 报告以
   });
 });
 
+// 真机事故（forum-xc-sit / 20260722测试用例）：用例 id 带弯引号 ‘码’，模型判定 pass 且
+// @@RESULT 合规，只是把引号抄成了 ASCII '码' → 精确比对认不出 → pass 被丢弃、用例补成
+// blocked「未执行」→ 报告写「回归集未全过（0/1），存在阻塞级失败，不可发版」。
+describe("reduceResults — id 印刷体标点漂移仍认回用例（真机事故回归）", () => {
+  const ID = "1108941+菜单栏-更多-‘码’上合规的子标题更改";
+  const EMITTED = "1108941+菜单栏-更多-'码'上合规的子标题更改";
+
+  it("弯引号 id 收到直引号结果 ⇒ 记 pass，而不是 blocked「未执行」", () => {
+    const run = reduceResults(
+      [{ id: EMITTED, status: "pass", actual: "子标题已改为「以码为基，以规为界」" }],
+      { ...OPTS, caseIds: [ID], suiteIds: [ID] },
+    );
+    assert.equal(run.tests.length, 1);
+    assert.equal(run.tests[0].status, "pass");
+    assert.equal(run.tests[0].id, ID, "落盘 id 必须是 cases.json 的权威写法");
+    assert.ok(!run.tests[0].notExecuted);
+    assert.equal(run.tests[0].actual, "子标题已改为「以码为基，以规为界」");
+    assert.equal(run.status, "done");
+    assert.equal(run.passStr, "1/1");
+    assert.equal(run.suitePassStr, "1/1", "回归集应判全过（不再误报不可发版）");
+  });
+
+  it("双轴/回归集口径按权威 id 关联（回贴后的 id 要能被 verificationById 认到）", () => {
+    const run = reduceResults(
+      [{ id: EMITTED, status: "pass" }],
+      { ...OPTS, caseIds: [ID], verificationById: { [ID]: "回归基线" } },
+    );
+    assert.equal(run.regressionTotal, 1);
+    assert.equal(run.funcPassStr, "N/A");
+  });
+
+  it("歧义时不猜：两条用例规范化后撞键 ⇒ 仍按未执行兜底，不把结果记到任一条头上", () => {
+    const run = reduceResults(
+      [{ id: "TC’x‘", status: "pass" }],
+      { ...OPTS, caseIds: ["TC‘x’", "TC'x'"] },
+    );
+    assert.deepEqual(run.tests.map((t) => t.status), ["blocked", "blocked"]);
+    assert.ok(run.tests.every((t) => t.notExecuted));
+  });
+
+  it("编造的用例仍被丢弃（回贴不得成为塞进多余结果的后门）", () => {
+    const run = reduceResults(
+      [{ id: "完全不相干的用例", status: "pass" }],
+      { ...OPTS, caseIds: [ID] },
+    );
+    assert.equal(run.tests.length, 1);
+    assert.equal(run.tests[0].status, "blocked");
+    assert.ok(run.tests[0].notExecuted);
+  });
+});
+
 describe("reduceResults — 回归集口径（suiteIds = tags 含「回归测试」,发版红线）", () => {
   it("按 suiteIds 独立计数,与全量/功能验证口径并存", () => {
     const run = reduceResults(

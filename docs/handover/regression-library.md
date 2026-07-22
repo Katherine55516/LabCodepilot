@@ -278,6 +278,45 @@
 
 接入点：`reduce.ts`（本次事故）、`exec-timing.ts`（否则耗时错挂到兜底补全的条目上）、`recommend.ts`、`verdicts.ts`（原用 `^@@VERDICT` 锚定行首，一加粗归因全空）。`script-trace.ts` 保留其宽容正则。执行步与归因 prompt 加了「标记行必须裸写」的约束。
 
+## 事故：模型把 id 里的弯引号抄成直引号，pass 被报成 blocked
+
+同一个症状（模型判 pass、报告写 blocked），另一个根因。真机 `forum-xc-sit / 20260722测试用例`：
+
+- cases.json 里的 id 是 `1108941+菜单栏-更多-‘码’上合规的子标题更改`（弯引号 U+2018/U+2019）；
+- 模型执行完、判定 pass、`@@RESULT` 裸写合规、执行总结也写着 `pass=1`——**只是把弯引号敲成了 ASCII 直引号** `'码'`；
+- `reduce` 的 `caseIds` 对齐是精确字符串比对：认不出 → 真结果按「cases 之外的多余条目」丢弃 → 该用例兜底补成 `blocked` + `notExecuted`；
+- 报告最终写「⛔ 回归集未全过（0/1）—— 存在阻塞级失败，不可发版」。
+
+排查难点与上一起同源：**轨迹是全的**（`.trace.jsonl` 里 9 条动作、截图俱在），唯独判定成了「未执行」，看起来像执行阶段漏跑。
+
+不能靠 prompt 修：`prompts.ts` 第 8 条早就写了「id 必须与 cases.json 完全一致」。把印刷体标点规整成 ASCII 是 LLM 抄写文本的固有行为，不是提示词不够严。**判定的正确性不能押在模型的抄写保真度上。**
+
+### `src/lib/test/case-id.ts`：id 的「回贴」解析器
+
+`canonicalCaseKey` 建一条只用于匹配的规范键通道（NFKC → 印刷体引号/破折号归一 → 去不可见字符与空白 → 小写），`createCaseIdResolver` 据此把模型回写的 id 认回 cases.json 的权威写法。三条纪律：
+
+- **精确匹配永远优先**，回退只在精确失配时启用 → 本就抄对的 id 行为完全不变；
+- **歧义不猜**：cases.json 里两条 id 规范化后撞键，该键即作废、谁都不走回退——宁可退回「未执行」也不能把 A 的结果记到 B 头上（判定张冠李戴比漏判危险）；
+- **不做塞进多余结果的后门**：认不出的 id 原样返回，照旧被 `caseIds` 白名单过滤掉。
+
+刻意不归一 CJK 的 `「」『』《》`——它们在中文标题里是结构符号（执行 prompt 还让模型用 `「」` 做内层引号），归过去反而制造歧义。
+
+### 接入点（四处，都是同一个 join 的不同面）
+
+`reduce.ts` 对齐后把 `tests[].id` 改写成权威写法，下游 `suiteIds`/`verificationById`/`taskOf` 因此自动对上。另三处在 `exec-stream.ts`，若不一起改会静默半瘫：
+
+| 位置 | 不改的后果 |
+|------|-----------|
+| `reduce.ts` 的 `caseIds` 对齐 | 本次事故：pass 被丢、报成 blocked 不可发版 |
+| 耗时表 `durations` | 报告不显示该用例耗时 |
+| 落盘轨迹的 `caseId` | `selectEligibleCases` 按 `action.caseId === id` 过滤 → 0 条动作，脚本生成没有依据 |
+| 增量脚本喂料 `caseById` | 查不到 caseBody → 该用例静默不入队，回归脚本永远沉淀不下来 |
+
+轨迹侧仍按**模型写的** id 取（`@@CASE_START` 与 `@@RESULT` 出自同一次输出、漂移一致），只在带出去时挂权威 id。
+
+- 单测：`case-id.test.ts`（归一/歧义/不猜）、`test-reduce.test.ts`「id 印刷体标点漂移」组、`script-incremental.test.ts` 同名用例。把解析器改回纯精确比对，这几条会红。
+- 重放：用真机 cases.json + `.trace.jsonl` 里模型真实回写的 id 跑 `reduceFromText`，`{pass:0, blocked:1}` → `{pass:1, blocked:0}`，`suitePassStr` `0/1` → `1/1`。
+
 ## `src/lib/test/exec-live.ts`：客户端同口径
 
 前端原来也在 `InlineTestingPanel` 里就地用「indexOf + slice + JSON.parse」解析 `@@RESULT`——**功能测试的实时四态与用例列表同样会因加粗而全空**（只是当时那轮没加粗）。现在下沉为客户端安全模块，与服务端共用 `markers.ts`：
