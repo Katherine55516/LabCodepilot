@@ -92,6 +92,8 @@ export async function POST(req: Request): Promise<Response> {
       typeof body.roundId === 'string' && body.roundId.trim() ? body.roundId.trim() : undefined;
     // 回归执行「优先脚本重放」开关(发起弹窗透传;缺省开)。false = 全部走 AI(排障/对照用)。
     const scriptFirst: boolean = body.scriptFirst !== false;
+    // 任务级「沉淀回归脚本」开关。缺省 true —— 存量任务与旧客户端不传该字段,行为必须不变。
+    const depositScripts: boolean = body.depositScripts !== false;
 
     if (!projectPath || typeof projectPath !== 'string') {
       return new Response(JSON.stringify({ error: 'projectPath is required' }), {
@@ -287,6 +289,7 @@ export async function POST(req: Request): Promise<Response> {
             // 逐条增量生成 + 收口入队都要用它调模型(stats 只在带 taskId 时才有,不能依赖)。
             model,
             providerId,
+            depositScripts,
             stats,
             roundId,
             traceRedactions: [
@@ -307,6 +310,7 @@ export async function POST(req: Request): Promise<Response> {
               aborted: () => abortController.signal.aborted,
               stats,
               roundId,
+              depositScripts,
             })
           : stats
             ? observeStream(

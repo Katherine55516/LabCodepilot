@@ -182,11 +182,16 @@ export function wrapExecutionStream(
     roundId?: string;
     traceRedactions?: TraceRedaction[];
     /**
-     * 后台脚本沉淀(逐条增量生成 + 收口对账入队)。默认开启,生产路径不传。
+     * 后台脚本沉淀(逐条增量生成 + 收口对账入队)。默认开启。
      *
-     * 单测必须传 false:带「回归测试」标签的 pass 用例会触发**真实模型调用**,让流包装器的
-     * 单测变成网络依赖,失败后还要走 4s/10s 退避重试、把全局单并发队列堵十几秒(其它用例
-     * 的任务因此卡在 queued)。沉淀本身另有专项单测(script-incremental.test.ts,注入假队列)。
+     * 两个来源:
+     *  1. **任务级开关**(新建任务时选定、任务页可改)—— 不是所有任务都需要沉淀回归脚本,
+     *     关掉可省下每条用例约两分钟的生成与真机重放开销;
+     *  2. **单测**必须传 false:带「回归测试」标签的 pass 用例会触发真实模型调用,让流包装器
+     *     的单测变成网络依赖,失败后还要走退避重试、把全局单并发队列堵十几秒。沉淀本身另有
+     *     专项单测(script-incremental.test.ts,注入假队列)。
+     *
+     * 缺省 true:存量任务与旧客户端不传该字段,行为必须不变,故判定一律写 `!== false`。
      */
     depositScripts?: boolean;
   },
@@ -484,6 +489,11 @@ export function wrapReportStream(
     aborted?: () => boolean;
     stats?: StepStats;
     roundId?: string;
+    /**
+     * 任务级「沉淀回归脚本」开关(缺省开)。关闭时报告成功也不入队生成任务 ——
+     * 与 wrapExecutionStream 的同名参数一起构成该任务的完整关断。
+     */
+    depositScripts?: boolean;
   },
 ): ReadableStream<string> {
   const reader = src.getReader();
@@ -534,7 +544,7 @@ export function wrapReportStream(
             controller.enqueue(stepStatsFrame('report', stats));
           }
           // 报告成功后只等待 queued manifest 落盘，不等待后台生成；软失败不改变报告 done。
-          if (reportExists && !sawError && !opts.aborted?.() && reportRunHash) {
+          if (reportExists && !sawError && !opts.aborted?.() && reportRunHash && opts.depositScripts !== false) {
             try {
               await enqueueScriptJob({
                 projectPath: opts.projectPath,

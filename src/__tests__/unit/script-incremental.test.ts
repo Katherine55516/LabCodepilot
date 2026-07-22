@@ -297,3 +297,30 @@ describe('未执行守卫 · 状态语义', () => {
     assert.equal(isRunnableStatus('stale'), false);
   });
 });
+
+describe('任务级「沉淀回归脚本」开关的缺省语义', () => {
+  it('不传 depositScripts 时照常沉淀（存量任务/旧客户端行为不变）', async () => {
+    // 这条是开关的红线:TaskState 里没有该字段的老任务、以及不带该字段的旧客户端请求,
+    // 都必须继续沉淀。任何一处把判定写成 `=== true` 就会让它们静默停止生成。
+    await withProjectAsync([REGRESSION_CASE], async (dir) => {
+      const src = new ReadableStream<string>({
+        start(c) {
+          c.enqueue(`data: ${JSON.stringify({ type: 'text', data: '@@RESULT {"id":"TC-001","status":"pass"}\n' })}\n\n`);
+          c.close();
+        },
+      });
+      // 刻意不传 depositScripts —— 等价于旧客户端 / 存量任务。
+      const out = wrapExecutionStream(src, {
+        projectPath: dir, taskName: '任务', env: 'local', runStartMs: Date.now(),
+      });
+      const reader = out.getReader();
+      for (;;) { const { done } = await reader.read(); if (done) break; }
+      // 沉淀开启 → 走到入队路径 → manifest 被创建（内容如何取决于后台任务，此处只验「有没有触发」）。
+      assert.equal(
+        fs.existsSync(path.join(dir, 'AI_LabTest', 'scripts', '任务', 'local', 'manifest.json')),
+        true,
+        '缺省必须等于开启，否则存量任务会静默停止沉淀',
+      );
+    });
+  });
+});

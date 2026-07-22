@@ -242,6 +242,13 @@ interface TaskState {
   /** 使用统计：各节点最近一次运行的服务端权威用时（ms）+ 所用模型（step_stats 帧写入，随 workbench 持久化）。 */
   stepDurations?: Partial<Record<TestStep, number>>;
   stepModels?: Partial<Record<TestStep, string>>;
+  /**
+   * 是否为本任务沉淀回归脚本（新建任务时选定，任务页可随时改）。
+   *
+   * 缺省（undefined）= 开启 —— 存量任务与旧持久化数据没有这个字段，必须保持原有行为，
+   * 不能因为加了开关就让老任务静默停止沉淀。故所有判定一律写 `!== false`。
+   */
+  depositScripts?: boolean;
 }
 const DEFAULT_TASK_STATE: TaskState = {
   stepStatus: { requirement: "idle", cases: "idle", execution: "idle", report: "idle" },
@@ -1213,7 +1220,7 @@ export function InlineTestingPanel() {
   // BEFORE the task is created — a parse failure returns an error and creates nothing.
   // cases imported → 需求 + 用例 both skipped(done) → 直接进入「测试执行」(no 批准 gate,
   // execution unlocked, auto-chains like an approved 用例); only 需求 → 需求 待批准.
-  const addTask = async (name: string, files?: NewTaskFiles): Promise<{ ok: boolean; error?: string }> => {
+  const addTask = async (name: string, files?: NewTaskFiles, depositScripts?: boolean): Promise<{ ok: boolean; error?: string }> => {
     const proj = selected !== null ? projects[selected] : null;
     // 防重名：同一项目内任务名唯一（trim 后精确比较、区分大小写）。弹窗已实时校验+禁用创建，
     // 此处兜底防绕过；命中则不创建，返回错误供弹窗内联展示。
@@ -1249,6 +1256,9 @@ export function InlineTestingPanel() {
     }
     const id = makeTaskId();
     setProjects((ps) => ps.map((p, i) => (i === selected ? { ...p, tasks: [...p.tasks, { id, name }] } : p)));
+    // 沉淀回归脚本开关:独立于导入分支落盘 —— 下面的 patchTask 只在有导入时才走,
+    // 而开关任何情况都要记住(缺省 true 与既有行为一致,故只在明确关闭时写 false)。
+    if (depositScripts === false) patchTask(id, () => ({ depositScripts: false }));
     const hasReq = !!files?.requirement, hasCases = !!files?.cases;
     if (hasReq || hasCases) {
       patchTask(id, () => ({
@@ -1598,6 +1608,8 @@ export function InlineTestingPanel() {
       target?: { projPath: string; task: { id: string; name: string } };
       // 需求分析节点刚二选一时 taskStates 尚未落地(setState 异步) → 用这个即时值覆盖，避免读到旧 state。
       requirementModeOverride?: "generate-md" | "use-original";
+      // 同上:执行前确认弹窗刚改的「沉淀回归脚本」在本次运行就要生效,而 patchTask 是异步的。
+      depositScriptsOverride?: boolean;
     },
   ) => {
     // target 缺省 = 活动选择(原行为)；传入 = 跑指定后台任务(批量 / auto-chain 接力其它任务)。
@@ -1719,6 +1731,10 @@ export function InlineTestingPanel() {
           // 执行方式 + 被测链接覆盖(见上)。headed 仅执行步透传;baseUrl 缺省时后端回落 environments.json。
           headed: step === "execution" ? headed : undefined,
           baseUrl: baseUrlOverride,
+          // 是否为本任务沉淀回归脚本(任务级开关)。undefined=开启,故只在明确关闭时传 false ——
+          // 服务端同样按 `!== false` 判定,存量任务与旧客户端行为不变。
+          depositScripts:
+            (opts?.depositScriptsOverride ?? taskStates[id]?.depositScripts) === false ? false : undefined,
         }),
       });
       // 非 2xx(如 /api/test/run 抛错走 500 + JSON {error})：之前直接进流式解析，500 的
@@ -2065,11 +2081,14 @@ export function InlineTestingPanel() {
     runStepManual(focusStep);
   };
   // 弹窗「测试并执行」:记下执行方式(持久化),用确认后的地址 + 模式手动跑测试执行步。
-  const runExecutionConfirmed = (baseUrl: string, headed: boolean) => {
+  const runExecutionConfirmed = (baseUrl: string, headed: boolean, depositScripts: boolean) => {
     persistExecMode(headed ? "visible" : "headless");
+    // 弹窗里改的「沉淀回归脚本」写回任务状态 —— 它是任务级设置,不是一次性选项;
+    // 不写回的话下次打开弹窗又弹回旧值,用户会以为没生效。缺省 true,故只存 false。
+    if (aId) patchTask(aId, () => ({ depositScripts: depositScripts ? undefined : false }));
     setModal("none");
     if (aId) autoRunIdsRef.current.delete(aId);
-    runStep("execution", { headed, baseUrl });
+    runStep("execution", { headed, baseUrl, depositScriptsOverride: depositScripts });
   };
 
   // 运行任务: 从指定起点把整条流水线自动跑到报告(auto-approve 门控)。受全局并发约束 ——
@@ -3133,6 +3152,7 @@ export function InlineTestingPanel() {
           initialUrl={envCfg?.frontendBaseUrl || ""}
           unconfigured={!!envCfg && !envCfg.configured}
           initialMode={execMode}
+          initialDeposit={(activeTask && taskStates[activeTask.id]?.depositScripts) !== false}
           onRun={runExecutionConfirmed}
           onClose={() => setModal("none")}
         />
@@ -7716,6 +7736,7 @@ function ExecConfirmModal({
   initialUrl,
   unconfigured,
   initialMode,
+  initialDeposit,
   onRun,
   onClose,
 }: {
@@ -7724,11 +7745,15 @@ function ExecConfirmModal({
   /** R2：该项目未在 设置·测试账号 配置可用地址 → 顶部给软提示（运行不禁用，可临时填地址）。 */
   unconfigured?: boolean;
   initialMode: ExecMode;
-  onRun: (baseUrl: string, headed: boolean) => void;
+  /** 该任务当前的「沉淀回归脚本」设置(缺省 true)。 */
+  initialDeposit: boolean;
+  onRun: (baseUrl: string, headed: boolean, depositScripts: boolean) => void;
   onClose: () => void;
 }) {
   const [url, setUrl] = useState(initialUrl);
   const [headed, setHeaded] = useState(initialMode === "visible");
+  // 本次执行是否沉淀回归脚本。初值取任务设置,改动会随本次运行写回任务(见 runExecutionConfirmed)。
+  const [deposit, setDeposit] = useState(initialDeposit);
   const [probing, setProbing] = useState(false);
   // null = 未测;否则带可达性 + 状态码 / 错误。改地址即清空,避免显示过期结果。
   const [probe, setProbe] = useState<{ reachable: boolean; status?: number; latencyMs?: number; error?: string } | null>(null);
@@ -7777,7 +7802,7 @@ function ExecConfirmModal({
           <button onClick={onClose} className={CANCEL_BTN}>{t("test.cancel")}</button>
           <button
             disabled={!trimmed}
-            onClick={() => onRun(trimmed, headed)}
+            onClick={() => onRun(trimmed, headed, deposit)}
             className={PRIMARY_BTN}
           >
             {t("test.execConfirm.run")}
@@ -7808,6 +7833,18 @@ function ExecConfirmModal({
         <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">
           {headed ? t("test.execConfirm.hintVisible") : t("test.execConfirm.hintHeadless")}
         </p>
+      </Field>
+
+      <Field label={t("test.newTaskModal.depositScriptsLabel")}>
+        <label className="flex cursor-pointer items-start gap-2">
+          <input type="checkbox" checked={deposit} onChange={(e) => setDeposit(e.target.checked)} className="mt-0.5 accent-primary" />
+          <span className="min-w-0">
+            <span className="text-xs text-foreground">{t("test.newTaskModal.depositScripts")}</span>
+            <span className="mt-0.5 block text-[11px] leading-relaxed text-muted-foreground">
+              {t("test.execConfirm.depositHint")}
+            </span>
+          </span>
+        </label>
       </Field>
 
       <div className="flex items-center gap-2">
@@ -7877,8 +7914,11 @@ function EnvWarnModal({
   );
 }
 
-function NewTaskModal({ t, onClose, onAdd, existingNames }: { t: T; onClose: () => void; onAdd: (name: string, files?: NewTaskFiles) => Promise<{ ok: boolean; error?: string }>; existingNames: string[] }) {
+function NewTaskModal({ t, onClose, onAdd, existingNames }: { t: T; onClose: () => void; onAdd: (name: string, files?: NewTaskFiles, depositScripts?: boolean) => Promise<{ ok: boolean; error?: string }>; existingNames: string[] }) {
   const [name, setName] = useState("");
+  // 是否为该任务沉淀回归脚本。默认开(与既有行为一致);关掉可省下每条用例约两分钟的
+  // 生成与真机重放开销 —— 不是所有任务都需要沉淀脚本。
+  const [depositScripts, setDepositScripts] = useState(true);
   const [reqFile, setReqFile] = useState<{ name: string; data: string } | null>(null);
   const [casesFile, setCasesFile] = useState<{ name: string; data: string } | null>(null);
   const [err, setErr] = useState("");
@@ -7907,7 +7947,7 @@ function NewTaskModal({ t, onClose, onAdd, existingNames }: { t: T; onClose: () 
       const res = await onAdd(name.trim(), {
         requirement: reqFile ? { filename: reqFile.name, dataBase64: reqFile.data } : undefined,
         cases: casesFile ? { filename: casesFile.name, dataBase64: casesFile.data } : undefined,
-      });
+      }, depositScripts);
       if (res.ok) onClose();
       else setErr(res.error || t("test.newTaskModal.importFailed"));
     } catch (e) {
@@ -7977,6 +8017,22 @@ function NewTaskModal({ t, onClose, onAdd, existingNames }: { t: T; onClose: () 
         )}
         {err && <p className="mt-1 text-[11px] text-status-error-foreground">{err}</p>}
         <p className="mt-2 text-[11px] text-muted-foreground">{t("test.newTaskModal.importHint")}</p>
+      </Field>
+      <Field label={t("test.newTaskModal.depositScriptsLabel")}>
+        <label className="flex cursor-pointer items-start gap-2">
+          <input
+            type="checkbox"
+            checked={depositScripts}
+            onChange={(e) => setDepositScripts(e.target.checked)}
+            className="mt-0.5 accent-primary"
+          />
+          <span className="min-w-0">
+            <span className="text-xs text-foreground">{t("test.newTaskModal.depositScripts")}</span>
+            <span className="mt-0.5 block text-[11px] leading-relaxed text-muted-foreground">
+              {t("test.newTaskModal.depositScriptsHint")}
+            </span>
+          </span>
+        </label>
       </Field>
       {!ready && (
         <div className="rounded-md bg-status-warning-muted px-3 py-2 text-[11px] text-status-warning-foreground">
