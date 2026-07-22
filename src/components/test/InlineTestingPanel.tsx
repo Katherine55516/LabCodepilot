@@ -2126,9 +2126,9 @@ export function InlineTestingPanel() {
 
   // 运行任务 click: 全新任务(全 idle)直接从需求分析开跑；其余(部分完成 / 已完成)弹「选择起点」。
   const doRunTask = () => {
-    const ss = aState.stepStatus;
-    const allIdle = STEPS.every((s) => ss[s.step] === "idle");
-    if (allIdle) { startRunAllFrom("requirement"); return; }
+    // 一律走「运行任务」确认弹窗。此前全 idle 的新任务直接起跑、不弹窗 —— 于是新任务
+    // 恰恰没机会确认起点与「沉淀回归脚本」(用户反馈:点运行任务没得选)。弹窗对全 idle
+    // 任务只有一个可选起点(需求分析),多一次点击换来选项可见,值得。
     setModal("runStart");
   };
   const handleRunTask = () => {
@@ -3162,7 +3162,14 @@ export function InlineTestingPanel() {
         <RunStartModal
           t={t}
           stepStatus={aState.stepStatus}
-          onRun={(step) => { setModal("none"); startRunAllFrom(step); }}
+          initialDeposit={(activeTask && taskStates[activeTask.id]?.depositScripts) !== false}
+          onRun={(step, depositScripts) => {
+            setModal("none");
+            // 弹窗里改的开关写回任务状态(缺省 true → 开启存 undefined、关闭存 false),
+            // 与徽标/执行前弹窗同一份设置,不做一次性覆盖 —— 否则三处入口会互相打架。
+            if (aId) patchTask(aId, () => ({ depositScripts: depositScripts ? undefined : false }));
+            startRunAllFrom(step);
+          }}
           onClose={() => setModal("none")}
         />
       )}
@@ -7666,12 +7673,15 @@ const RUN_START_SUBKEY: Record<TestStep, TranslationKey> = {
 function RunStartModal({
   t,
   stepStatus,
+  initialDeposit,
   onRun,
   onClose,
 }: {
   t: T;
   stepStatus: Record<TestStep, StepStatus>;
-  onRun: (step: TestStep) => void;
+  /** 任务当前的「沉淀回归脚本」设置(缺省 true)。 */
+  initialDeposit: boolean;
+  onRun: (step: TestStep, depositScripts: boolean) => void;
   onClose: () => void;
 }) {
   const opts = runStartOptions(stepStatus, STEP_ORDER, RUN_START_STEPS);
@@ -7682,6 +7692,9 @@ function RunStartModal({
     [...opts].reverse().find((o) => o.unlocked)?.step ??
     "requirement";
   const [sel, setSel] = useState<TestStep>(defaultStep);
+  const [deposit, setDeposit] = useState(initialDeposit);
+  // 流水线含「测试执行」时才谈得上沉淀脚本 —— 从报告起跑不执行用例,给这个开关是噪音。
+  const willExecute = STEP_ORDER.indexOf(sel) <= STEP_ORDER.indexOf("execution");
   const selOpt = byStep[sel];
   const stepName = (s: TestStep) => t(STEPS.find((x) => x.step === s)!.name);
   const willOverwrite = !!selOpt?.willOverwrite;
@@ -7694,7 +7707,7 @@ function RunStartModal({
         <>
           <button onClick={onClose} className={CANCEL_BTN}>{t("test.cancel")}</button>
           <button
-            onClick={() => selOpt?.unlocked && onRun(sel)}
+            onClick={() => selOpt?.unlocked && onRun(sel, deposit)}
             disabled={!selOpt?.unlocked}
             className={PRIMARY_BTN}
           >
@@ -7743,6 +7756,18 @@ function RunStartModal({
             </button>
           );
         })}
+
+      {willExecute && (
+        <label className="mt-1 flex cursor-pointer items-start gap-2 rounded-md border border-border px-3 py-2.5">
+          <input type="checkbox" checked={deposit} onChange={(e) => setDeposit(e.target.checked)} className="mt-0.5 accent-primary" />
+          <span className="min-w-0">
+            <span className="text-xs font-medium text-foreground">{t("test.newTaskModal.depositScripts")}</span>
+            <span className="mt-0.5 block text-[10px] leading-relaxed text-muted-foreground">
+              {t("test.execConfirm.depositHint")}
+            </span>
+          </span>
+        </label>
+      )}
       </div>
     </ModalShell>
   );
