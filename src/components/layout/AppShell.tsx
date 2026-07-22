@@ -100,14 +100,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // Poll server-side notification queue and display as toasts
   useNotificationPoll();
 
-  // Turn-completion system notifications (Claude-Desktop-style): when a turn
-  // finishes while the window is unfocused/minimized or the user is viewing a
-  // different conversation, show a native notification; clicking it focuses
-  // the app and navigates back to that session.
-  useEffect(() => {
-    initTurnNotifications((sessionId) => router.push(`/chat/${sessionId}`));
-  }, [router]);
-
   // Check if setup is needed — DISABLED.
   //
   // Claude Code is now bundled into the installer (v0.55+) and API providers
@@ -440,6 +432,26 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       setActiveColumnIdRaw("");
     }
   }, [pathname, isSplitActive]);
+
+  // Turn-completion / ask-question system notifications (Claude-Desktop-style).
+  // Click-to-navigate must be SPLIT-AWARE: with split mode active, a plain
+  // router.push to a split-member session gets bounced back by the URL-sync
+  // corrective effect above (and the split container ignores the URL anyway),
+  // which read as "clicking the notification does nothing". So: member
+  // session → switch the active column (the split UX for "jump to it");
+  // non-member → exit split and navigate (the click is an explicit
+  // take-me-there intent). initTurnNotifications always adopts the latest
+  // callback, so stale closures over split state are not a concern.
+  useEffect(() => {
+    initTurnNotifications((sessionId) => {
+      if (splitSessions.some((s) => s.sessionId === sessionId)) {
+        setActiveColumn(sessionId);
+      } else {
+        if (isSplitActive) exitSplit();
+        router.push(`/chat/${sessionId}`);
+      }
+    });
+  }, [router, splitSessions, isSplitActive, setActiveColumn, exitSplit]);
 
   const splitContextValue = useMemo(
     () => ({

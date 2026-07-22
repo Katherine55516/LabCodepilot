@@ -2402,9 +2402,19 @@ app.whenReady().then(async () => {
       });
       if (options.onClick) {
         notification.on('click', () => {
-          mainWindow?.show();
-          mainWindow?.focus();
-          mainWindow?.webContents.send('notification:click', options.onClick);
+          // Diagnostic breadcrumb — persisted by the file logger so a broken
+          // click-to-navigate chain is attributable (main got the click? sent IPC?).
+          console.log('[notification] click received', { tag: options.tag ?? '', type: options.onClick?.type ?? '' });
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            // macOS: show()/focus() alone do NOT reliably deminiaturize a
+            // window minimized to the Dock — restore() first.
+            if (mainWindow.isMinimized()) mainWindow.restore();
+            mainWindow.show();
+            mainWindow.focus();
+            mainWindow.webContents.send('notification:click', options.onClick);
+          } else {
+            console.warn('[notification] click: mainWindow unavailable, cannot navigate');
+          }
         });
       }
       if (options.tag) {
