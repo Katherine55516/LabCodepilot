@@ -77,6 +77,8 @@ const en = {
   'test.newTaskModal.depositScripts': 'Generate Playwright scripts for passing regression cases',
   'test.newTaskModal.depositScriptsHint': 'When on, cases tagged 回归测试 that pass are turned into replayable scripts, so later regression runs can replay them without spending AI. Each case takes about two minutes to generate and verify; turn it off if you do not need it — you can change this anytime on the task page.',
   'test.execConfirm.depositHint': 'Turn off to skip regression-script generation for this run, saving roughly two minutes per case. The choice is remembered for later runs.',
+  'test.flow.depositScriptsOn': 'Deposit scripts',
+  'test.flow.depositScriptsOff': 'No scripts',
   'test.newTaskModal.importRequired': 'Import cases or requirements (at least one) to create a task',
   'test.newTaskModal.casesNeedJson': 'The cases file must be valid JSON (cases.json)',
   'test.newTaskModal.importing': 'Importing…',

@@ -74,6 +74,8 @@ const zh: Record<TranslationKey, string> = {
   'test.newTaskModal.depositScripts': '为通过的回归用例沉淀 Playwright 脚本',
   'test.newTaskModal.depositScriptsHint': '开启后，标了「回归测试」且执行通过的用例会自动生成可重放脚本，下次回归可直接跑脚本、不消耗 AI。每条用例约需两分钟生成与验证；不需要的话可关闭，任务页里随时能改。',
   'test.execConfirm.depositHint': '关闭后本次执行不生成回归脚本，可省下每条用例约两分钟的生成与验证；该设置会记住,下次执行沿用。',
+  'test.flow.depositScriptsOn': '沉淀回归脚本',
+  'test.flow.depositScriptsOff': '不沉淀脚本',
   'test.newTaskModal.importRequired': '请至少导入 用例 或 需求 才能创建任务',
   'test.newTaskModal.casesNeedJson': '用例文件需为合法 JSON（cases.json）',
   'test.newTaskModal.importing': '导入中…',

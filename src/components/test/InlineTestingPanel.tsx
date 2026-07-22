@@ -2383,6 +2383,26 @@ export function InlineTestingPanel() {
                       {execMode === "visible" ? t("test.execConfirm.modeVisible") : t("test.execConfirm.modeHeadless")}
                     </span>
                   )}
+                  {/* 回归脚本沉淀开关:常驻徽标,一眼见状态、一点即切。
+                      不能只放在执行前确认弹窗里 —— 「运行任务」的自动接力直接调 runStep、
+                      根本不弹那个弹窗,用户在流水线模式下既够不着也看不到当前设置。 */}
+                  {focusStep === "execution" && aId && (
+                    <button
+                      onClick={() => patchTask(aId, (s) => ({ depositScripts: s.depositScripts === false ? undefined : false }))}
+                      disabled={runningStep === "execution"}
+                      title={t("test.execConfirm.depositHint")}
+                      className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] transition disabled:opacity-40 ${
+                        taskStates[aId]?.depositScripts === false
+                          ? "bg-muted text-muted-foreground hover:text-foreground"
+                          : "bg-primary/10 text-primary hover:bg-primary/20"
+                      }`}
+                    >
+                      <Terminal size={10} />
+                      {taskStates[aId]?.depositScripts === false
+                        ? t("test.flow.depositScriptsOff")
+                        : t("test.flow.depositScriptsOn")}
+                    </button>
+                  )}
                   <span className="flex-1" />
                   {runningStep === focusStep ? (
                     // 运行中 → 停止 (问题②): aborts this step; it resets to idle so 运行 can re-run it.

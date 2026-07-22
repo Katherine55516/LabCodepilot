@@ -83,6 +83,8 @@ const zhHK: Record<TranslationKey, string> = {
   'test.newTaskModal.depositScripts': '為通過的回歸用例沉澱 Playwright 腳本',
   'test.newTaskModal.depositScriptsHint': '開啟後，標了「回歸測試」且執行通過的用例會自動生成可重放腳本，下次回歸可直接跑腳本、不消耗 AI。每條用例約需兩分鐘生成與驗證；不需要的話可關閉，任務頁裡隨時能改。',
   'test.execConfirm.depositHint': '關閉後本次執行不生成回歸腳本，可省下每條用例約兩分鐘的生成與驗證；該設定會記住,下次執行沿用。',
+  'test.flow.depositScriptsOn': '沉澱回歸腳本',
+  'test.flow.depositScriptsOff': '不沉澱腳本',
   'test.newTaskModal.importRequired': '請至少導入 用例 或 需求 才能創建任務',
   'test.newTaskModal.casesNeedJson': '用例文件需為合法 JSON（cases.json）',
   'test.newTaskModal.importing': '導入中…',
