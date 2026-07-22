@@ -28,3 +28,16 @@ export function shouldNotifyTurnCompletion(ctx: TurnNotificationContext): boolea
   if (ctx.phase !== 'completed' && ctx.phase !== 'error') return false;
   return !(ctx.windowFocused && ctx.sessionVisible);
 }
+
+/**
+ * AskUserQuestion waits use the same official suppression rule as turn
+ * completion: notify unless the window is focused AND the user is already
+ * viewing that session (mirrors Claude Desktop's ask_user_question
+ * notification with its "viewing_session" suppression).
+ */
+export function shouldNotifyPendingQuestion(ctx: {
+  windowFocused: boolean;
+  sessionVisible: boolean;
+}): boolean {
+  return !(ctx.windowFocused && ctx.sessionVisible);
+}

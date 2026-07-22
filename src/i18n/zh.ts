@@ -468,6 +468,7 @@ const zh: Record<TranslationKey, string> = {
   'streaming.noContentTimeout': '**错误：** {secs} 秒内未收到模型的任何实质响应，连接可能已卡住或中断。',
   'turnNotify.completedBody': 'AI Native Lab 正在等待你的输入',
   'turnNotify.errorBody': '回复中断出错，点击查看详情',
+  'turnNotify.questionBody': 'AI Native Lab 向你提出了一个问题',
   'streaming.allowForSession': '本次会话允许',
   'streaming.allowed': '已允许',
   'streaming.denied': '已拒绝',

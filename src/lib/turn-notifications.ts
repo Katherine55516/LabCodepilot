@@ -21,7 +21,8 @@
  * focus + navigate). Browser/dev fallback: HTML5 Notification API.
  */
 
-import { shouldNotifyTurnCompletion } from '@/lib/turn-notification-policy';
+import { shouldNotifyTurnCompletion, shouldNotifyPendingQuestion } from '@/lib/turn-notification-policy';
+import { isAskTool, parseAskQuestions } from '@/lib/tool-ask';
 import { translate, type Locale } from '@/i18n';
 import type { StreamEvent } from '@/types';
 
@@ -53,6 +54,10 @@ function notificationTag(sessionId: string): string {
   return `turn-${sessionId}`;
 }
 
+function askNotificationTag(sessionId: string): string {
+  return `ask-${sessionId}`;
+}
+
 /**
  * Mark a session as currently visible (a ChatView for it is mounted).
  * Returns an unregister cleanup. Registering also closes any stale
@@ -63,11 +68,11 @@ export function registerVisibleSession(sessionId: string): () => void {
   const visible = getVisibleSessions();
   visible.add(sessionId);
   closeTurnNotification(sessionId);
+  closeAskNotification(sessionId);
   return () => { visible.delete(sessionId); };
 }
 
-function closeTurnNotification(sessionId: string): void {
-  const tag = notificationTag(sessionId);
+function closeByTag(tag: string): void {
   if (typeof window !== 'undefined' && window.electronAPI?.notification?.close) {
     window.electronAPI.notification.close(tag).catch(() => {});
   }
@@ -76,6 +81,14 @@ function closeTurnNotification(sessionId: string): void {
     webNotif.close();
     getWebNotifications().delete(tag);
   }
+}
+
+function closeTurnNotification(sessionId: string): void {
+  closeByTag(notificationTag(sessionId));
+}
+
+function closeAskNotification(sessionId: string): void {
+  closeByTag(askNotificationTag(sessionId));
 }
 
 async function fetchSessionTitle(sessionId: string): Promise<string | null> {
@@ -90,6 +103,21 @@ async function fetchSessionTitle(sessionId: string): Promise<string | null> {
   }
 }
 
+/**
+ * AskUserQuestion wait — official parity: title = session title, body = the
+ * question text (truncated to 100 chars) or a localized fallback, one
+ * notification per session (tag), click focuses + navigates.
+ */
+async function showAskNotification(sessionId: string, questionText: string | null, navigate: (sessionId: string) => void): Promise<void> {
+  const locale = currentLocale();
+  const title = (await fetchSessionTitle(sessionId)) ?? 'AI Native Lab';
+  const trimmed = (questionText ?? '').trim();
+  const body = trimmed
+    ? (trimmed.length > 100 ? `${trimmed.slice(0, 100)}...` : trimmed)
+    : translate(locale, 'turnNotify.questionBody');
+  await deliverNotification(sessionId, askNotificationTag(sessionId), title, body, navigate);
+}
+
 async function showTurnNotification(sessionId: string, phase: string, navigate: (sessionId: string) => void): Promise<void> {
   const locale = currentLocale();
   const title = (await fetchSessionTitle(sessionId)) ?? 'AI Native Lab';
@@ -97,6 +125,10 @@ async function showTurnNotification(sessionId: string, phase: string, navigate: 
     ? translate(locale, 'turnNotify.errorBody')
     : translate(locale, 'turnNotify.completedBody');
   const tag = notificationTag(sessionId);
+  await deliverNotification(sessionId, tag, title, body, navigate);
+}
+
+async function deliverNotification(sessionId: string, tag: string, title: string, body: string, navigate: (sessionId: string) => void): Promise<void> {
 
   if (typeof window !== 'undefined' && window.electronAPI?.notification) {
     // Electron: native notification; click → main focuses window + renderer
@@ -146,12 +178,41 @@ export function initTurnNotifications(navigate: (sessionId: string) => void): vo
 
   window.addEventListener('stream-session-event', (e: Event) => {
     const event = (e as CustomEvent<StreamEvent>).detail;
-    if (!event || event.type !== 'completed') return;
+    if (!event) return;
+    const windowFocused = typeof document !== 'undefined' && document.hasFocus();
+    const sessionVisible = getVisibleSessions().has(event.sessionId);
+
+    // AskUserQuestion wait → raised-hand notification (official
+    // ask_user_question parity). Fires on the permission-request emit.
+    if (event.type === 'permission-request') {
+      const perm = event.snapshot?.pendingPermission;
+      if (perm && isAskTool(perm.toolName)) {
+        if (shouldNotifyPendingQuestion({ windowFocused, sessionVisible })) {
+          const questions = parseAskQuestions(perm.toolInput);
+          void showAskNotification(event.sessionId, questions?.[0]?.question ?? null, nav);
+        }
+      }
+      return;
+    }
+
+    // Question answered / cleared mid-stream → retract its stale notification
+    // (mirrors closeIdleNotificationForSession-on-answer in the official app).
+    if (event.type === 'snapshot-updated') {
+      const snap = event.snapshot;
+      if (snap && (!snap.pendingPermission || snap.permissionResolved)) {
+        closeAskNotification(event.sessionId);
+      }
+      return;
+    }
+
+    if (event.type !== 'completed') return;
+    // Turn ended — any unanswered-question banner is now stale too.
+    closeAskNotification(event.sessionId);
     const phase = event.snapshot?.phase ?? '';
     const decision = shouldNotifyTurnCompletion({
       phase,
-      windowFocused: typeof document !== 'undefined' && document.hasFocus(),
-      sessionVisible: getVisibleSessions().has(event.sessionId),
+      windowFocused,
+      sessionVisible,
     });
     if (decision) void showTurnNotification(event.sessionId, phase, nav);
   });
