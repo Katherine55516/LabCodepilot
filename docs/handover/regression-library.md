@@ -127,7 +127,7 @@
 
 ## 核心模块
 
-- **`src/lib/test/rounds.ts`**:轮次索引读写(宽松解析)、`generateRoundId`(RND-YYYYMMDD-HHmm+冲突后缀)、状态机 running→done/aborted/partial、`finishRound` 收口摘要、`normalizeStaleRounds` **惰性收口**(running 超 2h 视图归一 aborted,不回写)、`roundArtifactPaths`、`readRoundSnapshot`、`buildLastResultLookup`(最近已收口轮 run.json × 快照 idMap → 套件「上次结果」条件数据源)。
+- **`src/lib/test/rounds.ts`**:轮次索引读写(宽松解析)、`generateRoundId`(RND-YYYYMMDD-HHmm+冲突后缀)、状态机 running→done/aborted/partial、`finishRound` 收口摘要(`ifRunning` 终态保护 + 清 .alive)、**三层收口**(见下方事故):①`createRoundKeeper` 服务端收口守护(执行流 done/cancel/error 直接 finishRound + 30s 心跳)②`reapOrphanRounds` 读侧心跳判活(陈旧/缺失且过 120s 启动宽限 → 回写 aborted)③`normalizeStaleRounds` 惰性视图归一(running 超 2h,不回写,最后兜底)、`roundArtifactPaths`、`readRoundSnapshot`、`buildLastResultLookup`(最近已收口轮 run.json × 快照 idMap → 套件「上次结果」条件数据源)。
 - **`src/lib/test/suites.ts`**:套件读写、`sanitizeSuite`(文件/API 共用清洗)、`evalSuite`(query 四字段 AND/值 OR/空不限制;static keys;pinned 并入去重;`quarantined===true` 前置排除——三期字段兼容)、内置 `REGRESSION_FULL_SUITE='全量'` 不落盘不可改删。
 - **并发写保护(两文件同款)**:`seq` 写入序号 + mutate 在 rename 前重读比对,冲突在最新内容上重放一次——updatedAt 毫秒粒度同刻写入无法区分,故用 seq。
 - **`library.ts`**:`buildRunnableCases(lib, include?)` 加圈选集参数(套件求值/二期复测共用),缺省=v1 全库。
@@ -139,7 +139,7 @@
 |---|---|
 | POST `/api/test/library/run` | v2 重写:`{projectPath, suiteName?, env?}` → readSuites→evalSuite(pinned+lastResult)→buildRunnableCases(include)→写聚合 cases.json→**建轮次(running)+写快照**→返回 `{ok,total,roundId}`。未知套件 400;快照写失败不阻塞。 |
 | POST `/api/test/run` | 接受 `roundId`(段安全校验+仅保留任务名);穿透 buildStep/evidenceDir/两个 wrap→产物落 `report/回归用例库/{roundId}/`、证据 `_evidence/{task}-{env}-{roundId}`;执行归约注入快照 idMap 出 taskCounts;reportPrompt 注入「按来源任务分节」要求。 |
-| GET/PATCH/DELETE `/api/test/library/rounds` | 列轮次(惰性收口视图,倒序)/收口(done 从该轮 run.json 摘录 counts/suitePassStr,缺 run.json 按 aborted)/删单轮(索引+产物目录+该轮证据;审计 delete-round)。 |
+| GET/PATCH/DELETE `/api/test/library/rounds` | 列轮次(先 reapOrphanRounds 孤儿回写、再惰性视图兜底,倒序)/收口(前端兜底通道,权威收口在执行流:done 从该轮 run.json 摘录 counts/suitePassStr,缺 run.json 按 aborted;aborted 带 ifRunning 不降级终态)/删单轮(索引+产物目录+该轮证据;审计 delete-round)。 |
 | GET `/api/test/library/rounds/detail` | 单轮按来源任务分组 + 与上一全量轮 delta(新增失败/已修复/持续失败,**交集口径**,复测轮不作基准)。只读拼装。 |
 | GET/POST/DELETE `/api/test/suites` | 列套件(hits=执行范围口径:求值+pinned 并入+隔离排除,含 hitTasks/fullHits/fullTasks)/新建更新套件或覆盖 pinned(内置名 400;审计 suite-save)/删套件(内置 400;审计 suite-delete)。 |
 | POST `/api/test/suites/eval` | 构建器【未保存】套件实时命中预览(口径与发起执行完全一致)。 |
@@ -154,8 +154,40 @@
   - **RegressionSuitesSection**:套件列表(内置全量🔒+类型 badge+实时命中+编辑/删除)+构建器(查询条件 chips 四字段 300ms 防抖实时预览/静态分组勾选树)+pinned 白名单;
   - **RegressionRoundsSection**:轮次表(红线 badge/中断态/单轮删除)+行内展开详情(delta 三卡+任务分组红绿小计);reloadSignal 联动,跑完一轮自动刷新。
 - **StartRegressionModal**(唯一保留的对话框——一次性执行确认):套件下拉(命中数)/环境下拉(env-config allowedEnvs)/被测地址展示(未配置警示)/预检卡(条数+任务数+近 3 个 done 轮均值时长估算,无历史显「暂无估算」)/红线说明/空套件禁用。确认→`runLibrary({suiteName, env})`。
-- runLibrary(面板):发起带 suiteName/env→驱动 /api/test/run 带 roundId→完成 PATCH done/失败 PATCH aborted(读侧惰性兜底)。
+- runLibrary(面板):发起带 suiteName/env→驱动 /api/test/run 带 roundId→完成 PATCH done/失败 PATCH aborted。**前端 PATCH 只是兜底**——权威收口在服务端执行流(见下方「轮次卡执行中」事故),页面中途死亡不再孤儿化轮次。
 - 附带修复:`status-danger-*`→`status-error-*`(未定义 token,删除 hover 红色此前静默失效);next.config dev watch 忽略 `.playwright-mcp/`(见下方排障记,根治 CDP 验证时的重编译死循环)。
+
+## 事故:轮次卡「执行中」——收口所有权押在前端,页面一刷新轮次成孤儿
+
+真机 mealAllowance / RND-20260722-1450(14 条用例,14:50 发起):执行中途页面上下文死亡
+(刷新/切走/关窗任一),19 分钟后用户又正常跑完了另一轮,轮次页却仍显示旧轮「执行中」。
+磁盘物证:该轮产物目录只有 `cases.snapshot.json`,无 run.json、无报告、无证据——执行流从未
+走到收口。
+
+根因是**收口所有权错位**:轮次由服务端建(`appendRound(running)`),收口却只有前端
+`settle()` 在流消费完后 PATCH 这一条路。客户端断开 → `req.signal` abort 杀掉 SDK 流 →
+服务端流的 `cancel()` 只做 `reader.cancel()`,不写 run.json 不收口;前端的
+`settle('aborted')` 随页面一起死了。唯一兜底是读侧 2h 惰性视图归一——孤儿轮要顶着
+「执行中」挂近 2 小时。且「无法中途停止」(tech-debt #23)诱导用户用刷新当停止键,放大此缺陷。
+
+修复 = **三层收口**(rounds.ts 模块头有完整描述):
+
+| 层 | 机制 | 管什么 |
+|----|------|--------|
+| ① 服务端收口 | `createRoundKeeper`:wrapExecutionStream 的 done/cancel/error 三路径直接 `finishRound`;run 路由闸门 503/兜底 500 两处早退同样收口 | 流死、进程还活着(刷新/关窗/断网) |
+| ② 心跳判活 | keeper 每 30s touch `{roundDir}/.alive`;rounds GET 先 `reapOrphanRounds`:心跳陈旧(>90s)或缺失且过启动宽限(120s,发起与执行是两次请求之间无心跳)→ **回写** aborted | 进程本身被杀(dev server 重启/应用退出) |
+| ③ 惰性视图归一 | `normalizeStaleRounds`(running>2h,不回写) | 心跳文件写不进去等极端情况 |
+
+配套约束:`finishRound` 支持 `ifRunning`(aborted 类收口仅 running→aborted 生效,流末端
+竞态不得把服务端刚写的 done 降级);收口顺带清 .alive;done 收口摘要直接取归约内存值(counts/
+suitePassStr),不再回读 run.json。心跳必须**定时器驱动**而非随帧写——SDK 长工具调用会静默
+数分钟,随帧写会被误判死亡。存量孤儿轮(修复前留下的)在首次打开轮次页时自愈为「中断」。
+
+为什么「执行面板已完成、轮次页还在执行中」能并存:面板 `libraryLive` 是内存态(跑完定格,
+刷新即消失),轮次页读磁盘索引——一个数据源已死一个还活着,正是两套状态的裂缝暴露了孤儿轮。
+
+- 单测:`test-rounds.test.ts`(ifRunning 终态保护/keeper 幂等/reap 判活边界/存量自愈复刻/零写放大)、`test-exec-stream.test.ts`(done→轮次 done+摘要;**cancel→aborted**——摘掉 cancel 收口该用例即红;stats.aborted→aborted;无 roundId 零影响)。
+- 真机数据回放:mealAllowance `回归轮次.json` 副本过 `reapOrphanRounds`,RND-20260722-1450 running→aborted,其余 15 轮不动。
 
 ## i18n / 审计
 
@@ -278,6 +310,45 @@
 
 接入点：`reduce.ts`（本次事故）、`exec-timing.ts`（否则耗时错挂到兜底补全的条目上）、`recommend.ts`、`verdicts.ts`（原用 `^@@VERDICT` 锚定行首，一加粗归因全空）。`script-trace.ts` 保留其宽容正则。执行步与归因 prompt 加了「标记行必须裸写」的约束。
 
+## 事故：模型把 id 里的弯引号抄成直引号，pass 被报成 blocked
+
+同一个症状（模型判 pass、报告写 blocked），另一个根因。真机 `forum-xc-sit / 20260722测试用例`：
+
+- cases.json 里的 id 是 `1108941+菜单栏-更多-‘码’上合规的子标题更改`（弯引号 U+2018/U+2019）；
+- 模型执行完、判定 pass、`@@RESULT` 裸写合规、执行总结也写着 `pass=1`——**只是把弯引号敲成了 ASCII 直引号** `'码'`；
+- `reduce` 的 `caseIds` 对齐是精确字符串比对：认不出 → 真结果按「cases 之外的多余条目」丢弃 → 该用例兜底补成 `blocked` + `notExecuted`；
+- 报告最终写「⛔ 回归集未全过（0/1）—— 存在阻塞级失败，不可发版」。
+
+排查难点与上一起同源：**轨迹是全的**（`.trace.jsonl` 里 9 条动作、截图俱在），唯独判定成了「未执行」，看起来像执行阶段漏跑。
+
+不能靠 prompt 修：`prompts.ts` 第 8 条早就写了「id 必须与 cases.json 完全一致」。把印刷体标点规整成 ASCII 是 LLM 抄写文本的固有行为，不是提示词不够严。**判定的正确性不能押在模型的抄写保真度上。**
+
+### `src/lib/test/case-id.ts`：id 的「回贴」解析器
+
+`canonicalCaseKey` 建一条只用于匹配的规范键通道（NFKC → 印刷体引号/破折号归一 → 去不可见字符与空白 → 小写），`createCaseIdResolver` 据此把模型回写的 id 认回 cases.json 的权威写法。三条纪律：
+
+- **精确匹配永远优先**，回退只在精确失配时启用 → 本就抄对的 id 行为完全不变；
+- **歧义不猜**：cases.json 里两条 id 规范化后撞键，该键即作废、谁都不走回退——宁可退回「未执行」也不能把 A 的结果记到 B 头上（判定张冠李戴比漏判危险）；
+- **不做塞进多余结果的后门**：认不出的 id 原样返回，照旧被 `caseIds` 白名单过滤掉。
+
+刻意不归一 CJK 的 `「」『』《》`——它们在中文标题里是结构符号（执行 prompt 还让模型用 `「」` 做内层引号），归过去反而制造歧义。
+
+### 接入点（四处，都是同一个 join 的不同面）
+
+`reduce.ts` 对齐后把 `tests[].id` 改写成权威写法，下游 `suiteIds`/`verificationById`/`taskOf` 因此自动对上。另三处在 `exec-stream.ts`，若不一起改会静默半瘫：
+
+| 位置 | 不改的后果 |
+|------|-----------|
+| `reduce.ts` 的 `caseIds` 对齐 | 本次事故：pass 被丢、报成 blocked 不可发版 |
+| 耗时表 `durations` | 报告不显示该用例耗时 |
+| 落盘轨迹的 `caseId` | `selectEligibleCases` 按 `action.caseId === id` 过滤 → 0 条动作，脚本生成没有依据 |
+| 增量脚本喂料 `caseById` | 查不到 caseBody → 该用例静默不入队，回归脚本永远沉淀不下来 |
+
+轨迹侧仍按**模型写的** id 取（`@@CASE_START` 与 `@@RESULT` 出自同一次输出、漂移一致），只在带出去时挂权威 id。
+
+- 单测：`case-id.test.ts`（归一/歧义/不猜）、`test-reduce.test.ts`「id 印刷体标点漂移」组、`script-incremental.test.ts` 同名用例。把解析器改回纯精确比对，这几条会红。
+- 重放：用真机 cases.json + `.trace.jsonl` 里模型真实回写的 id 跑 `reduceFromText`，`{pass:0, blocked:1}` → `{pass:1, blocked:0}`，`suitePassStr` `0/1` → `1/1`。
+
 ## `src/lib/test/exec-live.ts`：客户端同口径
 
 前端原来也在 `InlineTestingPanel` 里就地用「indexOf + slice + JSON.parse」解析 `@@RESULT`——**功能测试的实时四态与用例列表同样会因加粗而全空**（只是当时那轮没加粗）。现在下沉为客户端安全模块，与服务端共用 `markers.ts`：
@@ -313,7 +384,7 @@
 - 报告步不流详情，执行步收口即冻结。
 
 ~~**已知缺口**：`runLibrary` 没有 AbortController（功能测试有），因此面板只读进度、不能中途停止。~~
-**已补（2026-07-22，技术债 #23 关闭）**：`runLibrary` 接入 AbortController（`libraryAbortRef`），执行面板折叠头右侧新增「停止」按钮（`window.confirm` 二次确认）。服务端零改动——`/api/test/run` 早已接 `req.signal → abortController`（与功能测试 stopTask 同一机制），客户端 abort 即真正终止智能体/脚本重放（重放锁释放幂等）。收口语义：**执行中途停止 → 轮次 aborted**（run.json 不落盘，与断网/异常中断一致；已通过用例的增量脚本沉淀不受影响）；**报告步停止 → 轮次仍收 done**（run.json 已落盘且权威，标 aborted 会把完整一轮从复测基准/「上次结果」数据源里白白剔除；报告 md 缺失，收口 footer 以 `live.note` 说明）。面板以 `live.stopped` 区分「已手动停止」与真实失败的「执行中断」（headline/对账条/footer 三处文案独立）；审计复用 `stop` 动作落 `audit/回归用例库.jsonl`（detail 带轮次号，step 标记停止时所处步骤）。
+**已补（2026-07-22，技术债 #23 关闭）**：`runLibrary` 接入 AbortController（`libraryAbortRef`），执行面板折叠头右侧新增「停止」按钮（`window.confirm` 二次确认）。服务端零改动——`/api/test/run` 早已接 `req.signal → abortController`（与功能测试 stopTask 同一机制），客户端 abort 即真正终止智能体/脚本重放（重放锁释放幂等）。收口语义：**执行中途停止 → 轮次 aborted**（run.json 不落盘，与断网/异常中断一致；已通过用例的增量脚本沉淀不受影响）；**报告步停止 → 轮次仍收 done**（run.json 已落盘且权威，标 aborted 会把完整一轮从复测基准/「上次结果」数据源里白白剔除；报告 md 缺失，收口 footer 以 `live.note` 说明）。面板以 `live.stopped` 区分「已手动停止」与真实失败的「执行中断」（headline/对账条/footer 三处文案独立）；审计复用 `stop` 动作落 `audit/回归用例库.jsonl`（detail 带轮次号，step 标记停止时所处步骤）。与「三层收口」（见下方事故节）同日落地、语义互补：停止触发的执行流 cancel 由 keeper 在**服务端**收 aborted，前端 settle PATCH 降级为幂等兜底（`ifRunning` 保证晚到的 aborted 不降级已收口的 done）——停止的收口不再依赖前端存活；报告步停止收 done 也与 keeper 一致（keeper 在执行流 done 时即已收口，报告步无 keeper、其中断不改写轮次终态）。
 
 ## 顺带修复：回归轮次的脚本生成从来没成功过
 

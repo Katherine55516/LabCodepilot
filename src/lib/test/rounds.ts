@@ -12,9 +12,17 @@ import type { SuiteKey, LastResult } from './suites';
  * `report/回归用例库/{roundId}/` 子目录,轮次索引落本文件维护的 `回归轮次.json`。
  *
  * 设计要点:
- *   - 状态机:running → done | aborted | partial。中断采用**惰性收口**(设计默认 #4):
- *     不依赖进程退出钩子,读侧发现 running 超过 STALE_RUNNING_MS 无收口 → 视图归一为
- *     aborted(normalizeStaleRounds,不回写,避免读放大)。
+ *   - 状态机:running → done | aborted | partial。收口有三层,按可信度递进(真机事故:
+ *     执行中途页面刷新 → 前端 settle 永远不会到达 → 轮次卡「执行中」近 2 小时):
+ *       ① **服务端收口**(根治,createRoundKeeper):执行流的事实所有者是服务端,
+ *          流收口/中断/报错时由 wrapExecutionStream 直接 finishRound,不押前端活到最后;
+ *       ② **心跳活性**(管进程死亡):执行期间守护定时器每 ROUND_HEARTBEAT_INTERVAL_MS
+ *          touch {roundDir}/.alive;读侧(rounds GET → reapOrphanRounds)对 running 轮
+ *          判活——心跳陈旧/缺失(且过了启动宽限)→ 孤儿,**回写** aborted(高置信度、
+ *          一次性、有界,与旧「只归一视图」不同);
+ *       ③ **惰性视图归一**(最后兜底,normalizeStaleRounds):running 超过
+ *          STALE_RUNNING_MS → 视图按 aborted 呈现(不回写)——覆盖心跳文件写不进去等
+ *          极端情况。
  *   - 并发写(设计默认 #7):.tmp+rename 只防半写不防丢更新(双窗口/主目录+worktree 双
  *     dev server 同项目)。mutateRounds 在 rename 前重读一次:文件 updatedAt 变了 →
  *     在新内容上重放变更(重试一次),仍冲突则以后写为准并告警。
@@ -57,8 +65,19 @@ export interface RoundsFile {
 
 const ROUNDS_VERSION = 1;
 
-/** running 轮超过该时长仍未收口 → 读侧视图归一为 aborted(惰性收口)。 */
+/** running 轮超过该时长仍未收口 → 读侧视图归一为 aborted(惰性收口,最后兜底)。 */
 export const STALE_RUNNING_MS = 2 * 60 * 60 * 1000;
+
+/** 心跳周期:执行流运行期间守护定时器 touch .alive 的间隔。 */
+export const ROUND_HEARTBEAT_INTERVAL_MS = 30_000;
+/** 心跳判活阈值:.alive mtime 距今超过该值 → 执行流已死(3 个心跳周期的容忍)。 */
+export const ROUND_HEARTBEAT_STALE_MS = 90_000;
+/**
+ * 启动宽限:发起(library/run 建轮次)与执行(test/run 起流、写第一拍心跳)是前端串联的
+ * **两次请求**,之间天然没有心跳。无心跳的 running 轮在此窗口内不判孤儿——否则发起后
+ * 立刻切到轮次页就会把刚建的轮次误杀。
+ */
+export const ROUND_START_GRACE_MS = 120_000;
 
 /** 轮次索引文件绝对路径。 */
 export function roundsFile(projectPath: string): string {
@@ -175,22 +194,104 @@ export function appendRound(projectPath: string, round: RegressionRound): Rounds
 
 /**
  * 收口轮次:置终态 + finishedAt + 结果摘要。轮次不存在 → no-op(库/索引可能被手动清理,
- * 收口是 best-effort,不抛不阻塞主流程)。
+ * 收口是 best-effort,不抛不阻塞主流程)。收口顺带清掉 .alive 心跳文件(终态轮不该再有
+ * 活性信号残留)。
+ *
+ * `ifRunning: true` = 仅 running → 终态的迁移才生效(aborted 类收口用):防止流末端竞态
+ * 把服务端刚写的 done 降级回 aborted(客户端 settle / cancel 回调 / 孤儿回收都可能晚到)。
  */
 export function finishRound(
   projectPath: string,
   roundId: string,
-  patch: { status: Exclude<RoundStatus, 'running'>; counts?: Record<string, number>; suitePassStr?: string; total?: number },
+  patch: { status: Exclude<RoundStatus, 'running'>; counts?: Record<string, number>; suitePassStr?: string; total?: number; ifRunning?: boolean },
 ): RoundsFile {
-  return mutateRounds(projectPath, (data) => {
+  const out = mutateRounds(projectPath, (data) => {
     const r = data.rounds.find((x) => x.roundId === roundId);
     if (!r) return;
+    if (patch.ifRunning && r.status !== 'running') return;
     r.status = patch.status;
     r.finishedAt = new Date().toISOString();
     if (patch.counts) r.counts = patch.counts;
     if (typeof patch.suitePassStr === 'string') r.suitePassStr = patch.suitePassStr;
     if (typeof patch.total === 'number') r.total = patch.total;
   });
+  try { fs.unlinkSync(roundAliveFile(projectPath, roundId)); } catch { /* 无心跳文件则忽略 */ }
+  return out;
+}
+
+/** 心跳文件路径:{roundDir}/.alive。mtime 即活性信号(内容只为人工排查存 ISO 时间)。 */
+export function roundAliveFile(projectPath: string, roundId: string): string {
+  return path.join(projectPath, roundDirRel(roundId), '.alive');
+}
+
+/** touch 心跳。失败静默——心跳写不进去时还有 startedAt 宽限与 2h 惰性兜底,不得影响执行流。 */
+export function touchRoundAlive(projectPath: string, roundId: string): void {
+  try {
+    const file = roundAliveFile(projectPath, roundId);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, new Date().toISOString());
+  } catch { /* best-effort */ }
+}
+
+export interface RoundKeeper {
+  /** 执行流正常收口:置 done + 结果摘要。 */
+  settleDone(patch: { counts?: Record<string, number>; suitePassStr?: string }): void;
+  /** 执行流中断/报错:置 aborted(仅当轮次仍 running,不降级已收口的终态)。 */
+  settleAborted(): void;
+}
+
+/**
+ * 执行流侧的轮次守护:发起心跳(层②)并把收口所有权收进服务端(层①)。
+ * settle* 幂等(先到先得);服务端进程被杀时谁都不会跑 → 读侧靠心跳陈旧判孤儿。
+ * 定时器 unref:不阻止进程退出,单测忘清也不挂住 runner。
+ */
+export function createRoundKeeper(projectPath: string, roundId: string): RoundKeeper {
+  touchRoundAlive(projectPath, roundId);
+  const timer = setInterval(() => touchRoundAlive(projectPath, roundId), ROUND_HEARTBEAT_INTERVAL_MS);
+  timer.unref?.();
+  let settled = false;
+  const once = (fn: () => void) => {
+    if (settled) return;
+    settled = true;
+    clearInterval(timer);
+    try { fn(); } catch { /* 收口失败 → 读侧心跳/惰性兜底,不得拖垮执行流 */ }
+  };
+  return {
+    settleDone(patch) {
+      once(() => finishRound(projectPath, roundId, { status: 'done', ...patch }));
+    },
+    settleAborted() {
+      once(() => finishRound(projectPath, roundId, { status: 'aborted', ifRunning: true }));
+    },
+  };
+}
+
+/**
+ * 孤儿轮判定 + 回写(层②读侧):对 running 轮以 .alive mtime 判活。
+ *   - 心跳新鲜(< ROUND_HEARTBEAT_STALE_MS)→ 真在跑,不动;
+ *   - 无心跳且轮次年龄 < ROUND_START_GRACE_MS → 启动窗口(发起与执行是两次请求),不动;
+ *   - 其余(心跳陈旧,或无心跳且过宽限)→ 孤儿,回写 aborted(ifRunning 保护,幂等)。
+ * 返回回写后的最新轮次列表。IO 失败退回原样——读侧不得因回写失败而崩。
+ */
+export function reapOrphanRounds(projectPath: string, now: Date = new Date()): RegressionRound[] {
+  const data = readRounds(projectPath);
+  const orphans: string[] = [];
+  for (const r of data.rounds) {
+    if (r.status !== 'running') continue;
+    let aliveAtMs = Number.NaN;
+    try { aliveAtMs = fs.statSync(roundAliveFile(projectPath, r.roundId)).mtimeMs; } catch { /* 无心跳文件 */ }
+    if (!Number.isNaN(aliveAtMs) && now.getTime() - aliveAtMs < ROUND_HEARTBEAT_STALE_MS) continue;
+    if (Number.isNaN(aliveAtMs)) {
+      const started = Date.parse(r.startedAt);
+      if (!Number.isNaN(started) && now.getTime() - started < ROUND_START_GRACE_MS) continue;
+    }
+    orphans.push(r.roundId);
+  }
+  if (!orphans.length) return data.rounds;
+  for (const roundId of orphans) {
+    try { finishRound(projectPath, roundId, { status: 'aborted', ifRunning: true }); } catch { /* 兜底:惰性视图归一 */ }
+  }
+  return readRounds(projectPath).rounds;
 }
 
 /**

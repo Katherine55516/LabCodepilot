@@ -107,6 +107,34 @@ describe('createIncrementalScriptFeeder · 入队闸门', () => {
     });
   });
 
+  // 与 reduce 同源的 bug（见 case-id.ts）：模型把 id 里的弯引号抄成 ASCII 直引号，
+  // caseById 查不到 → 该用例静默不入队，回归脚本永远沉淀不下来。
+  it('模型把 id 的印刷体标点抄成 ASCII → 仍认回用例并入队（轨迹挂权威 id）', () => {
+    const CURLY = { ...REGRESSION_CASE, id: "TC-‘码’-001" };
+    withProject([CURLY], (dir) => {
+      const sink: IncrementalScriptCaseRequest[] = [];
+      const trace = new ScriptTraceCollector(0);
+      // 轨迹按【模型写的】id 归集（@@CASE_START 与 @@RESULT 同源同漂移）
+      trace.feedText(`@@CASE_START {"id":"TC-'码'-001","index":1}\n`);
+      trace.feedToolUse({ id: 'tu-1', name: 'mcp__playwright__browser_click' });
+      trace.feedToolResult({
+        tool_use_id: 'tu-1',
+        content: '### Ran Playwright code\n```js\nawait page.click("#x");\n```',
+      });
+      const feeder = makeFeeder(dir, sink, trace);
+      feeder.feedText(`@@RESULT {"id":"TC-'码'-001","status":"pass"}\n`);
+
+      assert.equal(sink.length, 1, '认不回用例就一条都不入队');
+      assert.equal(sink[0].result.id, CURLY.id, '入队 id 必须是 cases.json 的权威写法');
+      assert.deepEqual(sink[0].caseBody, CURLY);
+      assert.ok(sink[0].traceActions.length > 0, '轨迹要跟着搬过来，否则生成模型没有动作可依据');
+      assert.ok(
+        sink[0].traceActions.every((a) => a.caseId === CURLY.id),
+        '动作的 caseId 要挂权威 id —— selectEligibleCases 按它过滤，不改就是 0 条动作',
+      );
+    });
+  });
+
   it('cases.json 缺失 → 静默关闭，不抛错、不入队', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'incr-nocases-'));
     try {

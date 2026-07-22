@@ -14,6 +14,7 @@
  * Pure functions — unit-tested in src/__tests__/unit/test-reduce.test.ts.
  */
 
+import { createCaseIdResolver } from "./case-id";
 import { harvestMarkers } from "./markers";
 
 export type FourStateStatus = "pass" | "fail" | "partial" | "blocked";
@@ -199,8 +200,18 @@ export function reduceResults(
   //    2 条——AI 编造 / 把一条拆成多条 / 写错 id 产生的额外条目，报告不应超出用户设计的用例集）。
   // 不传 caseIds 时行为不变（向后兼容旧调用与单测——不做任何对齐，tests 即 @@RESULT 原样）。
   if (opts.caseIds && opts.caseIds.length) {
+    // id 先过「回贴」解析器：模型常把 id 里的印刷体标点抄成 ASCII（弯引号 ‘’ → 直引号 '、
+    // 破折号 — → -、全角 → 半角），精确比对就此认不出，pass 的用例被丢弃、反被补成
+    // blocked「未执行」——报告里成了「回归集未全过、不可发版」。见 case-id.ts 模块头。
+    // 精确匹配优先、歧义不猜，所以对本就抄写正确的 id 行为完全不变。
+    const resolve = createCaseIdResolver(opts.caseIds);
     const byId = new Map<string, ReducedTest>();
-    for (const t of tests) if (!byId.has(t.id)) byId.set(t.id, t);
+    // 回贴后 id 换成 cases.json 的权威写法 —— 下游（suiteIds/verificationById/taskOf/
+    // 耗时表/轨迹）全部按权威 id 关联，不必各自再认一遍模型的变体。
+    for (const t of tests) {
+      const id = resolve(t.id);
+      if (!byId.has(id)) byId.set(id, { ...t, id });
+    }
     const aligned: ReducedTest[] = opts.caseIds.map(
       (id) => byId.get(id) ?? { id, status: "blocked", actual: "", error: NOT_EXECUTED_MSG, evidence: [], notExecuted: true },
     );

@@ -8,10 +8,11 @@ import { createCaseTimer } from '@/lib/test/exec-timing';
 import { buildStepCompleted, recordStatsEvents } from '@/lib/test/stats-recorder';
 import { appendAudit } from '@/lib/test/audit';
 import { depositTask, readTaskCases, REGRESSION_LIBRARY_TASK } from '@/lib/test/library';
-import { readRoundSnapshot } from '@/lib/test/rounds';
+import { readRoundSnapshot, createRoundKeeper, type RoundKeeper } from '@/lib/test/rounds';
 import { ScriptTraceCollector, writeTraceFile, type TraceRedaction } from '@/lib/test/script-trace';
 import { enqueueIncrementalScriptCase, enqueueScriptJob, type IncrementalScriptCaseRequest } from '@/lib/test/script-job-manager';
 import { harvestMarkerObjects } from '@/lib/test/markers';
+import { createCaseIdResolver, remapCaseKeys } from '@/lib/test/case-id';
 
 /**
  * 测试执行路由的 SSE 流包装器（从 src/app/api/test/run/route.ts 抽出）。
@@ -81,6 +82,7 @@ export function createIncrementalScriptFeeder(opts: {
 }): IncrementalScriptFeeder {
   const enqueue = opts.enqueue ?? enqueueIncrementalScriptCase;
   const caseById = new Map<string, Record<string, unknown>>();
+  let resolveCaseId: (id: string) => string = (id) => id;
   try {
     // 执行【开始】就读:执行期间用例文件若被改动,以开跑时的版本为准(与本轮判定同源)。
     const casesAbs = path.join(opts.projectPath, artifactPaths(opts.taskName).cases);
@@ -88,11 +90,16 @@ export function createIncrementalScriptFeeder(opts: {
     const list = Array.isArray((parsed as { cases?: unknown })?.cases)
       ? (parsed as { cases: Array<Record<string, unknown>> }).cases
       : Array.isArray(parsed) ? (parsed as Array<Record<string, unknown>>) : [];
+    const allIds: string[] = [];
     for (const c of list) {
       if (!c || typeof c.id !== 'string') continue;
+      allIds.push(c.id);
       const tags = Array.isArray(c.tags) ? c.tags : [];
       if (tags.some((t) => t === '回归测试')) caseById.set(c.id, c);
     }
+    // 解析器喂【全量】id 而非只喂回归子集:歧义保护要看得见所有用例,否则一条非回归用例的
+    // id 可能规范化后撞上某条回归用例、被误认成它。见 case-id.ts。
+    if (allIds.length) resolveCaseId = createCaseIdResolver(allIds);
   } catch {
     // 没有用例文件(或坏 JSON)→ caseById 空 → 本特性自动静默,执行照常。
   }
@@ -106,10 +113,15 @@ export function createIncrementalScriptFeeder(opts: {
     // 完全一致,否则带 markdown 装饰的行会一边采到、一边漏掉(见 markers.ts 模块头的事故)。
     const [parsed] = harvestMarkerObjects<{ id?: unknown; status?: unknown; via?: unknown }>(line, 'RESULT');
     if (!parsed || typeof parsed.id !== 'string') return;
-    const id = parsed.id.trim();
-    if (!id || seen.has(id)) return;
+    const emitted = parsed.id.trim();
+    if (!emitted) return;
     if (String(parsed.status ?? '').toLowerCase() !== 'pass') return;
     if (parsed.via === 'script') return;
+    // 回贴成 cases.json 的权威 id 再查:模型把弯引号抄成直引号就查不到 caseBody、整条用例
+    // 静默不入队(与 reduce 同一个 bug 的另一张脸)。轨迹侧仍按【模型写的】id 取——
+    // @@CASE_START 与 @@RESULT 出自同一次输出,漂移一致。
+    const id = resolveCaseId(emitted);
+    if (seen.has(id)) return;
     const caseBody = caseById.get(id);
     if (!caseBody) return;
     seen.add(id);
@@ -124,8 +136,10 @@ export function createIncrementalScriptFeeder(opts: {
         runStartMs: opts.runStartMs,
         caseBody,
         result: { id, status: 'pass', actual: '', error: '', evidence: [] },
-        traceActions: opts.trace.drainCase(id),
-        observedElements: opts.trace.elementsForCase(id),
+        // 取用【模型写的】id(轨迹收集器的键),但带出去的动作要挂权威 id ——
+        // 下游 selectEligibleCases 按 action.caseId === 用例 id 过滤,不改就是 0 条动作。
+        traceActions: opts.trace.drainCase(emitted).map((a) => ({ ...a, caseId: id })),
+        observedElements: opts.trace.elementsForCase(emitted),
       });
     } catch {
       // 入队失败不得拖累执行流
@@ -200,6 +214,13 @@ export function wrapExecutionStream(
     trace: traceCollector,
     ...(deposit ? {} : { enqueue: () => {} }),
   });
+  // 轮次守护(仅回归轮次有 roundId,普通任务零影响):收口所有权在服务端 + 心跳活性。
+  // 真机事故:轮次收口原本只由前端流消费完后 PATCH——执行中途页面刷新,settle 永远不会
+  // 到达,轮次卡「执行中」直到 2h 惰性兜底。现在流的 done/cancel/error 三条路径都由
+  // 服务端直接收口;进程本身被杀则由心跳陈旧让读侧判孤儿(见 rounds.ts 三层设计)。
+  const round: RoundKeeper | null = opts.roundId
+    ? createRoundKeeper(opts.projectPath, opts.roundId)
+    : null;
   return new ReadableStream<string>({
     start(controller) {
       // 有头被自动回落无头时,先补发一条提示帧让用户在对话里看到「已改无头」(见 POST 内)。
@@ -271,6 +292,8 @@ export function wrapExecutionStream(
               }
             } catch { /* best-effort */ }
           }
+          // caseIds 缺席（无 cases.json / 解析失败）时退化为恒等，行为与修复前一致。
+          const resolveCaseId = caseIds?.length ? createCaseIdResolver(caseIds) : (id: string) => id;
           const reduced = reduceFromText(textAcc, {
             module: opts.taskName,
             env: opts.env,
@@ -282,7 +305,10 @@ export function wrapExecutionStream(
           });
           // 逐用例耗时合入 tests[]（在 stringify 之前 → run.json 与 runHash 都覆盖 durations）。
           // 对齐补全的「未执行」条目天然测不到时长，保持缺省。
-          const durations = timer.finish(Date.now());
+          // 耗时表/轨迹的键都取自模型回写的 id，reduce 已把 tests[].id 回贴成 cases.json 的
+          // 权威写法（见 case-id.ts）——两侧得走同一把解析器，否则模型一拉直引号，时长与轨迹
+          // 就静默挂空：报告不显示耗时、脚本生成拿到 0 条动作。
+          const durations = remapCaseKeys(timer.finish(Date.now()), resolveCaseId);
           for (const t of reduced.tests) {
             const d = durations[t.id];
             if (typeof d === 'number' && d > 0) t.durationMs = d;
@@ -309,12 +335,24 @@ export function wrapExecutionStream(
             // best-effort: still emit the reduced result even if the write fails
           }
           try {
+            // 落盘前把轨迹的 caseId 也回贴到权威 id：轨迹是脚本生成的输入，
+            // selectEligibleCases 用 cases.json 的 id 去 filter(action.caseId === id)，
+            // 存模型的变体等于让每条用例都匹配到 0 条动作。
             writeTraceFile(
               opts.projectPath, opts.taskName, opts.env, runHash,
-              traceCollector.finish(), traceCollector.finishElements(),
+              traceCollector.finish().map((a) => ({ ...a, caseId: resolveCaseId(a.caseId) })),
+              remapCaseKeys(traceCollector.finishElements(), resolveCaseId),
             );
           } catch {
             // trace 是脚本生成增强产物；失败不得改变执行结果
+          }
+          // 轮次收口(层①):执行流走到头 = 轮次终态定了,服务端直接写,不等前端 PATCH。
+          // 语义与前端现状一致——settle('done') 本就只看执行流是否消费完(report 步返回值
+          // 被忽略),error 帧不改变收口事实(counts 里的 blocked/fail 才是结论)。用户主动
+          // 中止(stats.aborted)是唯一例外:半截轮按 aborted 收。
+          if (round) {
+            if (opts.stats?.aborted?.()) round.settleAborted();
+            else round.settleDone({ counts: { ...reduced.counts }, suitePassStr: reduced.suitePassStr });
           }
           // 执行收口即入队整轮生成任务(不再只由报告触发):run.json + trace 都已落盘,输入齐了。
           // 作用是【对账】——增量已把 pass 用例生成完,这里走指纹复用(零模型消耗)补上
@@ -415,10 +453,15 @@ export function wrapExecutionStream(
           }
         }
       } catch (e) {
+        // 流内部报错(SDK 流 reject 等):run.json 没写成,轮次按中断收(层①的 error 路径)。
+        round?.settleAborted();
         controller.error(e);
       }
     },
     cancel(reason) {
+      // 客户端断开(刷新/关窗/停止):Next 调 cancel、pull 不再来,done 分支永远到不了。
+      // 这正是「轮次卡执行中」事故的路径——在这里由服务端收口(层①的 cancel 路径)。
+      round?.settleAborted();
       reader.cancel(reason);
     },
   });

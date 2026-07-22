@@ -19,7 +19,13 @@ import {
   appendRound,
   finishRound,
   normalizeStaleRounds,
+  roundAliveFile,
+  touchRoundAlive,
+  createRoundKeeper,
+  reapOrphanRounds,
   STALE_RUNNING_MS,
+  ROUND_HEARTBEAT_STALE_MS,
+  ROUND_START_GRACE_MS,
   type RegressionRound,
 } from "../../lib/test/rounds";
 
@@ -126,6 +132,128 @@ describe("mutateRounds — 并发写丢更新保护", () => {
     );
     const ids = readRounds(proj).rounds.map((r) => r.roundId).sort();
     assert.deepEqual(ids, ["RND-A", "RND-B", "RND-base"]);
+  });
+});
+
+// 真机事故:执行中途页面刷新 → 前端 settle('aborted') 永远不会到达 → 轮次卡「执行中」
+// 近 2 小时(mealAllowance / RND-20260722-1450:目录里只有 cases.snapshot.json,无任何
+// 执行产物)。三层收口的新增两层在此锁定:①服务端 keeper ②心跳判活 + 孤儿回写。
+describe("finishRound — ifRunning 终态保护", () => {
+  it("ifRunning:running → aborted 生效;已 done 的轮不被晚到的 aborted 降级", () => {
+    appendRound(proj, R("RND-1"));
+    finishRound(proj, "RND-1", { status: "aborted", ifRunning: true });
+    assert.equal(readRounds(proj).rounds[0].status, "aborted");
+
+    appendRound(proj, R("RND-2"));
+    finishRound(proj, "RND-2", { status: "done", suitePassStr: "3/3" });
+    finishRound(proj, "RND-2", { status: "aborted", ifRunning: true }); // 流末端竞态的晚到 settle
+    const r2 = readRounds(proj).rounds.find((r) => r.roundId === "RND-2")!;
+    assert.equal(r2.status, "done", "终态不得被 ifRunning 的 aborted 降级");
+    assert.equal(r2.suitePassStr, "3/3");
+  });
+
+  it("不带 ifRunning 的收口保持旧语义(可覆盖终态,PATCH done 的回填路径依赖它)", () => {
+    appendRound(proj, R("RND-1"));
+    finishRound(proj, "RND-1", { status: "aborted" });
+    finishRound(proj, "RND-1", { status: "done", suitePassStr: "1/1" });
+    assert.equal(readRounds(proj).rounds[0].status, "done");
+  });
+
+  it("收口清掉 .alive 心跳文件", () => {
+    appendRound(proj, R("RND-1"));
+    touchRoundAlive(proj, "RND-1");
+    assert.ok(fs.existsSync(roundAliveFile(proj, "RND-1")));
+    finishRound(proj, "RND-1", { status: "done" });
+    assert.ok(!fs.existsSync(roundAliveFile(proj, "RND-1")), "终态轮不该残留活性信号");
+  });
+});
+
+describe("createRoundKeeper — 服务端收口守护(层①)", () => {
+  it("创建即写第一拍心跳;settleDone 落终态+摘要并清心跳", () => {
+    appendRound(proj, R("RND-1"));
+    const keeper = createRoundKeeper(proj, "RND-1");
+    assert.ok(fs.existsSync(roundAliveFile(proj, "RND-1")), "第一拍心跳在创建时同步写入");
+    keeper.settleDone({ counts: { total: 2, pass: 2, fail: 0, partial: 0, blocked: 0 }, suitePassStr: "2/2" });
+    const r = readRounds(proj).rounds[0];
+    assert.equal(r.status, "done");
+    assert.equal(r.suitePassStr, "2/2");
+    assert.ok(!fs.existsSync(roundAliveFile(proj, "RND-1")));
+  });
+
+  it("settle 幂等:先到先得,晚到的 settleAborted 不覆盖 settleDone", () => {
+    appendRound(proj, R("RND-1"));
+    const keeper = createRoundKeeper(proj, "RND-1");
+    keeper.settleDone({ suitePassStr: "1/1" });
+    keeper.settleAborted(); // cancel 回调可能在 done 之后仍被触发
+    assert.equal(readRounds(proj).rounds[0].status, "done");
+  });
+
+  it("settleAborted 只中断仍 running 的轮(带 ifRunning 语义)", () => {
+    appendRound(proj, R("RND-1"));
+    const keeper = createRoundKeeper(proj, "RND-1");
+    keeper.settleAborted();
+    assert.equal(readRounds(proj).rounds[0].status, "aborted");
+  });
+});
+
+describe("reapOrphanRounds — 心跳判活 + 孤儿回写(层②)", () => {
+  const past = (ms: number, now: Date) => new Date(now.getTime() - ms).toISOString();
+
+  it("心跳新鲜 → 真在跑,不动;心跳陈旧 → 回写 aborted", () => {
+    const now = new Date();
+    appendRound(proj, R("RND-alive", { startedAt: past(600_000, now) }));
+    appendRound(proj, R("RND-dead", { startedAt: past(600_000, now) }));
+    touchRoundAlive(proj, "RND-alive"); // mtime = 现在,新鲜
+    touchRoundAlive(proj, "RND-dead");
+    const staleAt = now.getTime() - ROUND_HEARTBEAT_STALE_MS - 1_000;
+    fs.utimesSync(roundAliveFile(proj, "RND-dead"), staleAt / 1000, staleAt / 1000);
+
+    reapOrphanRounds(proj, now);
+    const got = readRounds(proj).rounds;
+    assert.equal(got.find((r) => r.roundId === "RND-alive")!.status, "running");
+    const dead = got.find((r) => r.roundId === "RND-dead")!;
+    assert.equal(dead.status, "aborted", "心跳陈旧 = 执行流已死,回写落盘");
+    assert.ok(dead.finishedAt);
+  });
+
+  it("无心跳:启动宽限内不动(发起与执行是两次请求);过宽限 → 孤儿", () => {
+    const now = new Date();
+    appendRound(proj, R("RND-young", { startedAt: past(ROUND_START_GRACE_MS - 60_000, now) }));
+    appendRound(proj, R("RND-orphan", { startedAt: past(ROUND_START_GRACE_MS + 60_000, now) }));
+    reapOrphanRounds(proj, now);
+    const got = readRounds(proj).rounds;
+    assert.equal(got.find((r) => r.roundId === "RND-young")!.status, "running", "启动窗口不误杀");
+    assert.equal(got.find((r) => r.roundId === "RND-orphan")!.status, "aborted");
+  });
+
+  it("真机事故存量自愈:执行中途死亡留下的 running(只有快照、无心跳)→ 首次列表即中断", () => {
+    // 复刻 RND-20260722-1450 的磁盘形态:轮次 running、产物目录只有 cases.snapshot.json
+    const now = new Date();
+    appendRound(proj, R("RND-20260722-1450", { startedAt: past(20 * 60_000, now), total: 14 }));
+    const dir = path.join(proj, roundDirRel("RND-20260722-1450"));
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, "cases.snapshot.json"), "{}");
+    const view = reapOrphanRounds(proj, now);
+    assert.equal(view.find((r) => r.roundId === "RND-20260722-1450")!.status, "aborted");
+    assert.equal(readRounds(proj).rounds[0].status, "aborted", "回写落盘,不是只改视图");
+  });
+
+  it("终态轮与坏 startedAt 的 running:终态不动;坏时间戳无心跳 → 无法证明活着,回收", () => {
+    const now = new Date();
+    appendRound(proj, R("RND-done", { status: "done" }));
+    appendRound(proj, R("RND-bad", { startedAt: "不是时间" }));
+    reapOrphanRounds(proj, now);
+    const got = readRounds(proj).rounds;
+    assert.equal(got.find((r) => r.roundId === "RND-done")!.status, "done");
+    assert.equal(got.find((r) => r.roundId === "RND-bad")!.status, "aborted");
+  });
+
+  it("无孤儿时零写放大(seq 不变)", () => {
+    const now = new Date();
+    appendRound(proj, R("RND-1", { startedAt: now.toISOString() }));
+    const seqBefore = readRounds(proj).seq;
+    reapOrphanRounds(proj, now);
+    assert.equal(readRounds(proj).seq, seqBefore, "没有回写就不该动索引文件");
   });
 });
 
