@@ -5,6 +5,7 @@ import Link from "next/link";
 import {
   Trash,
   Bell,
+  Hand,
   Columns,
   X,
   DotsThree,
@@ -31,6 +32,8 @@ interface SessionListItemProps {
   isDeleting: boolean;
   isSessionStreaming: boolean;
   needsApproval: boolean;
+  /** AskUserQuestion is waiting for the user's answer — raised-hand icon takes priority over the streaming dot */
+  awaitingQuestion: boolean;
   canSplit: boolean;
   /** Whether this session belongs to the assistant workspace */
   isWorkspace?: boolean;
@@ -55,6 +58,7 @@ export function SessionListItem({
   isDeleting,
   isSessionStreaming,
   needsApproval,
+  awaitingQuestion,
   canSplit,
   isWorkspace,
   formatRelativeTime,
@@ -92,16 +96,27 @@ export function SessionListItem({
       >
         {/* Left icon area — streaming/approval indicators */}
         <span className="relative flex h-3.5 w-3.5 shrink-0 items-center justify-center">
-          {isSessionStreaming && (
-            <span className="relative flex h-2 w-2">
-              <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-status-success opacity-75" />
-              <span className="relative inline-flex h-2 w-2 rounded-full bg-status-success" />
-            </span>
-          )}
-          {needsApproval && !isSessionStreaming && (
+          {/* Raised hand (Claude-Desktop parity): AskUserQuestion is waiting
+              for the user's answer — takes priority over the streaming dot;
+              reverts to the dot once the answer is sent. */}
+          {awaitingQuestion ? (
             <span className="flex h-3.5 w-3.5 items-center justify-center rounded-full bg-status-warning-muted">
-              <Bell size={10} className="text-status-warning-foreground" />
+              <Hand size={10} weight="fill" className="text-status-warning-foreground" />
             </span>
+          ) : (
+            <>
+              {isSessionStreaming && (
+                <span className="relative flex h-2 w-2">
+                  <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-status-success opacity-75" />
+                  <span className="relative inline-flex h-2 w-2 rounded-full bg-status-success" />
+                </span>
+              )}
+              {needsApproval && !isSessionStreaming && (
+                <span className="flex h-3.5 w-3.5 items-center justify-center rounded-full bg-status-warning-muted">
+                  <Bell size={10} className="text-status-warning-foreground" />
+                </span>
+              )}
+            </>
           )}
         </span>
         {/* Title — flex-1 + truncate ensures it shrinks */}
@@ -203,6 +218,7 @@ interface SplitGroupSectionProps {
   pendingApprovalSessionId: string;
   activeStreamingSessions: Set<string>;
   pendingApprovalSessionIds: Set<string>;
+  pendingQuestionSessionIds: Set<string>;
   t: (key: TranslationKey, params?: Record<string, string | number>) => string;
   setActiveColumn: (sessionId: string) => void;
   removeFromSplit: (sessionId: string) => void;
@@ -215,6 +231,7 @@ export function SplitGroupSection({
   pendingApprovalSessionId,
   activeStreamingSessions,
   pendingApprovalSessionIds,
+  pendingQuestionSessionIds,
   t,
   setActiveColumn,
   removeFromSplit,
@@ -232,6 +249,7 @@ export function SplitGroupSection({
             activeStreamingSessions.has(session.sessionId) || streamingSessionId === session.sessionId;
           const needsApproval =
             pendingApprovalSessionIds.has(session.sessionId) || pendingApprovalSessionId === session.sessionId;
+          const awaitingQuestion = pendingQuestionSessionIds.has(session.sessionId);
 
           return (
             <div
@@ -247,13 +265,18 @@ export function SplitGroupSection({
                 setActiveColumn(session.sessionId);
               }}
             >
-              {isSessionStreaming && (
+              {awaitingQuestion && (
+                <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full bg-status-warning-muted">
+                  <Hand size={10} weight="fill" className="text-status-warning-foreground" />
+                </span>
+              )}
+              {isSessionStreaming && !awaitingQuestion && (
                 <span className="relative flex h-2 w-2 shrink-0">
                   <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-status-success opacity-75" />
                   <span className="relative inline-flex h-2 w-2 rounded-full bg-status-success" />
                 </span>
               )}
-              {needsApproval && (
+              {needsApproval && !awaitingQuestion && (
                 <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full bg-status-warning-muted">
                   <Bell size={10} className="text-status-warning-foreground" />
                 </span>

@@ -1059,8 +1059,10 @@ export const PromptInputTools = ({
   className,
   ...props
 }: PromptInputToolsProps) => (
+  // flex-wrap: in narrow panes (split mode / expanded side panels) tools flow
+  // to a second row instead of overflowing onto the submit button.
   <div
-    className={cn("flex min-w-0 items-center gap-1", className)}
+    className={cn("flex min-w-0 flex-wrap items-center gap-1", className)}
     {...props}
   />
 );

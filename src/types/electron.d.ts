@@ -217,6 +217,8 @@ interface ElectronAPI {
   };
   shell: {
     openPath: (path: string) => Promise<string>;
+    /** Reveal + select a file/folder in Finder/Explorer (shell.showItemInFolder). */
+    showItemInFolder: (path: string) => Promise<void>;
   };
   fs: {
     /** Resolve a File's absolute filesystem path (via Electron webUtils). Empty string if unavailable. */
@@ -249,8 +251,10 @@ interface ElectronAPI {
   };
   terminal?: ElectronTerminalAPI;
   notification?: {
-    show: (options: { title: string; body?: string; onClick?: string }) => Promise<void>;
-    onClick: (listener: (action: string) => void) => () => void;
+    show: (options: { title: string; body?: string; tag?: string; onClick?: { type: string; payload: string } }) => Promise<boolean>;
+    /** Close a tagged notification (see `tag` on show). */
+    close: (tag: string) => Promise<boolean>;
+    onClick: (listener: (action: { type: string; payload: string }) => void) => () => void;
   };
   /** Managed-account login. Isolated from any OpenAI OAuth flow. */
   auth?: ElectronAuthAPI;

@@ -50,6 +50,7 @@ import {
   getRewindPoints,
   respondToPermission,
 } from '@/lib/stream-session-manager';
+import { registerVisibleSession } from '@/lib/turn-notifications';
 
 interface QueuedMessage {
   content: string;
@@ -102,7 +103,7 @@ const MAX_MESSAGES_IN_MEMORY = 150;
 const MAX_CONTENT_BYTES_IN_MEMORY = 24 * 1024 * 1024; // ~24MB
 
 export function ChatView({ sessionId, initialMessages = [], initialHasMore = false, modelName, providerId, initialPermissionProfile, initialSandbox, initialMode, initialHasSummary, initialEffort, isSplitColumn = false }: ChatViewProps) {
-  const { setStreamingSessionId, workingDirectory, setPendingApprovalSessionId, setDashboardPanelOpen, setFileTreeOpen, setIsAssistantWorkspace, setTestPanelOpen, testPanelOpen, testPanelBaseSession } = usePanel();
+  const { setStreamingSessionId, workingDirectory, setPendingApprovalSessionId, setDashboardPanelOpen, setFileTreeOpen, setIsAssistantWorkspace, setTestPanelOpen, testPanelOpen, testPanelBaseSession, setSessionTitle } = usePanel();
   const { t } = useTranslation();
   const router = useRouter();
   const [messages, setMessages] = useState<Message[]>(initialMessages);
@@ -293,6 +294,13 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
     () => getSnapshot(sessionId)
   );
 
+  // Turn-completion notifications: mark this session as "visible" while its
+  // ChatView is mounted (all split panes count). A turn that completes for a
+  // visible session in a focused window is NOT notified; registering also
+  // dismisses this session's stale notification when the user returns by
+  // themselves. See src/lib/turn-notifications.ts.
+  useEffect(() => registerVisibleSession(sessionId), [sessionId]);
+
   // Derive rendering state from snapshot
   const isStreaming = streamSnapshot?.phase === 'active';
   const streamingContent = streamSnapshot?.streamingContent ?? '';
@@ -437,7 +445,22 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
         })
         .catch(() => {});
     }
-  }, [reconcileWithDb, sandboxEnabled, sessionId]);
+    // Async title generation (first turn) usually lands before the turn ends —
+    // refetch so the top bar shows the generated title and nudge the sidebar
+    // (its own poll would catch up anyway; this removes the visible lag).
+    if (phase === 'completed' && sessionId) {
+      fetch(`/api/chat/sessions/${sessionId}`)
+        .then((res) => (res.ok ? res.json() : null))
+        .then((data) => {
+          const title = data?.session?.title;
+          if (typeof title === 'string' && title) {
+            setSessionTitle(title);
+            window.dispatchEvent(new CustomEvent('session-updated'));
+          }
+        })
+        .catch(() => { /* silent — sidebar poll will catch up */ });
+    }
+  }, [reconcileWithDb, sandboxEnabled, sessionId, setSessionTitle]);
 
   useStreamSubscription({
     sessionId,

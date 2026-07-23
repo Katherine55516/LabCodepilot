@@ -92,3 +92,58 @@ export function prepareSdkSubprocessEnv(resolved: ResolvedProvider): SdkSubproce
 
   return { env: sdkEnv, shadow };
 }
+
+// ── Bounded stderr capture for SDK subprocess spawns ────────────────────────
+
+export interface StderrCollector {
+  /** Append raw stderr data (ANSI/control sequences are stripped). */
+  append: (data: string) => void;
+  /** Buffered stderr so far — head + tail with a marker when truncated. */
+  snapshot: () => string;
+}
+
+/**
+ * Bounded stderr accumulator for SDK spawn points. The Error the SDK throws
+ * on a subprocess crash carries no `stderr` property, so fatal CLI startup
+ * diagnostics (e.g. Windows "Claude Code on Windows requires either Git for
+ * Windows (for bash) or PowerShell") exist ONLY in the stderr stream — spawn
+ * points buffer it with this and hand the snapshot to classifyError as the
+ * fallback evidence.
+ *
+ * Keeps the first and last `limit/2` characters: startup banners print at the
+ * head, pre-crash output at the tail, and either can hold the relevant error.
+ */
+export function createStderrCollector(limit = 8192): StderrCollector {
+  const half = Math.floor(limit / 2);
+  let head = '';
+  let tail = '';
+  let truncated = false;
+
+  return {
+    append(data: string) {
+      // Strip ANSI CSI/OSC sequences and control chars (keep \t and \n) so
+      // pattern matching and log display don't trip over escape codes.
+      let text = data
+        .replace(/\x1B\[[0-9;]*[a-zA-Z]/g, '')
+        .replace(/\x1B\][^\x07\x1B]*(?:\x07|\x1B\\)/g, '')
+        .replace(/\r\n?/g, '\n')
+        .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
+      if (!text) return;
+      if (head.length < half) {
+        const room = half - head.length;
+        head += text.slice(0, room);
+        text = text.slice(room);
+        if (!text) return;
+      }
+      tail += text;
+      if (tail.length > half) {
+        tail = tail.slice(tail.length - half);
+        truncated = true;
+      }
+    },
+    snapshot() {
+      const joined = truncated ? `${head}\n…[stderr truncated]…\n${tail}` : head + tail;
+      return joined.trim();
+    },
+  };
+}

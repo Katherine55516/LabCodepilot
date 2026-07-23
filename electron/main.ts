@@ -1455,6 +1455,13 @@ app.whenReady().then(async () => {
   // and uncaught crashes are captured. Must run before the server fork.
   initFileLogger();
 
+  // Windows toast notifications require the AppUserModelID to match the
+  // shortcut's AUMID (electron-builder NSIS writes appId there). Without this
+  // call `new Notification()` silently shows nothing on packaged Windows.
+  if (process.platform === 'win32') {
+    app.setAppUserModelId('com.codepilot.app');
+  }
+
   // Load user's full shell environment (API keys, PATH, etc.)
   userShellEnv = loadUserShellEnv();
 
@@ -2039,6 +2046,14 @@ app.whenReady().then(async () => {
     return shell.openPath(folderPath);
   });
 
+  // Reveal a file/folder in the system file manager, selecting it inside its
+  // parent folder (Finder on macOS, Explorer on Windows). Cross-platform via
+  // Electron's shell.showItemInFolder — the renderer prefers this over the
+  // /api/files/reveal exec fallback when running inside the packaged app.
+  ipcMain.handle('shell:show-item-in-folder', async (_event: Electron.IpcMainInvokeEvent, itemPath: string) => {
+    shell.showItemInFolder(itemPath);
+  });
+
   // Open the application log directory (so users can find & share logs when
   // reporting a problem). Returns '' on success, else an error string.
   ipcMain.handle('logs:open-folder', async () => openLogsFolder());
@@ -2394,29 +2409,83 @@ app.whenReady().then(async () => {
   });
 
   // --- Notification IPC handler ---
+  // taggedNotifications: dedupe map for notifications that carry a `tag`
+  // (e.g. turn-completion `turn-<sessionId>`) — re-showing the same tag
+  // replaces the previous banner, and notification:close can dismiss it when
+  // the user returns to the session on their own. Mirrors Claude Desktop's
+  // official NotificationService tag behaviour.
+  const taggedNotifications = new Map<string, Electron.Notification>();
   ipcMain.handle('notification:show', async (_event, options: {
     title: string;
     body: string;
+    tag?: string;
     onClick?: { type: string; payload: string };
   }) => {
     try {
+      if (options.tag) {
+        taggedNotifications.get(options.tag)?.close();
+        taggedNotifications.delete(options.tag);
+      }
       const notification = new Notification({
         title: options.title,
         body: options.body || '',
       });
       if (options.onClick) {
         notification.on('click', () => {
-          mainWindow?.show();
-          mainWindow?.focus();
-          mainWindow?.webContents.send('notification:click', options.onClick);
+          // Diagnostic breadcrumb — persisted by the file logger so a broken
+          // click-to-navigate chain is attributable (main got the click? sent IPC?).
+          console.log('[notification] click received', { tag: options.tag ?? '', type: options.onClick?.type ?? '' });
+          if (mainWindow && !mainWindow.isDestroyed()) {
+            // macOS: show()/focus() alone do NOT reliably deminiaturize a
+            // window minimized to the Dock — restore() first.
+            if (mainWindow.isMinimized()) mainWindow.restore();
+            mainWindow.show();
+            mainWindow.focus();
+            mainWindow.webContents.send('notification:click', options.onClick);
+          } else {
+            console.warn('[notification] click: mainWindow unavailable, cannot navigate');
+          }
+        });
+      }
+      if (options.tag) {
+        const tag = options.tag;
+        taggedNotifications.set(tag, notification);
+        notification.on('close', () => {
+          if (taggedNotifications.get(tag) === notification) taggedNotifications.delete(tag);
+        });
+        notification.on('click', () => {
+          if (taggedNotifications.get(tag) === notification) taggedNotifications.delete(tag);
         });
       }
       notification.show();
+      // Ask for the user's attention while the window is in the background —
+      // official parity: macOS bounces the dock icon once, Windows/Linux
+      // flashes the taskbar entry until the window regains focus.
+      if (mainWindow && !mainWindow.isDestroyed() && !mainWindow.isFocused()) {
+        if (process.platform === 'darwin') {
+          app.dock?.bounce('informational');
+        } else {
+          mainWindow.flashFrame(true);
+          mainWindow.once('focus', () => {
+            if (mainWindow && !mainWindow.isDestroyed()) mainWindow.flashFrame(false);
+          });
+        }
+      }
       return true;
     } catch (err) {
       console.error('[notification] Failed to show:', err);
       return false;
     }
+  });
+
+  // Close a tagged notification (no-op for unknown tags).
+  ipcMain.handle('notification:close', async (_event, tag: string) => {
+    const existing = taggedNotifications.get(tag);
+    if (existing) {
+      existing.close();
+      taggedNotifications.delete(tag);
+    }
+    return true;
   });
 
   // Proxy resolution IPC — allows renderer/API routes to query system proxy

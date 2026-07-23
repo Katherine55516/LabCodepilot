@@ -20,10 +20,12 @@ import { SplitContext, type SplitSession } from "@/hooks/useSplit";
 import { SplitChatContainer } from "./SplitChatContainer";
 import { ErrorBoundary } from "./ErrorBoundary";
 import { getActiveSessionIds, getSnapshot } from "@/lib/stream-session-manager";
+import { isAskTool } from "@/lib/tool-ask";
 import { useGitStatus } from "@/hooks/useGitStatus";
 import { SetupCenter } from '@/components/setup/SetupCenter';
 import { Toaster } from '@/components/ui/toast';
 import { useNotificationPoll } from '@/hooks/useNotificationPoll';
+import { initTurnNotifications } from '@/lib/turn-notifications';
 import { useGlobalSearchShortcut } from '@/hooks/useGlobalSearchShortcut';
 import { GlobalSearchDialog } from './GlobalSearchDialog';
 import { InlineTestingPanel } from '@/components/test/InlineTestingPanel';
@@ -293,6 +295,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   // --- Multi-session stream tracking (driven by stream-session-manager) ---
   const [activeStreamingSessions, setActiveStreamingSessions] = useState<Set<string>>(EMPTY_SET);
   const [pendingApprovalSessionIds, setPendingApprovalSessionIds] = useState<Set<string>>(EMPTY_SET);
+  const [pendingQuestionSessionIds, setPendingQuestionSessionIds] = useState<Set<string>>(EMPTY_SET);
 
   // Listen for global stream events from stream-session-manager
   useEffect(() => {
@@ -301,13 +304,22 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       setActiveStreamingSessions(activeIds.length > 0 ? new Set(activeIds) : EMPTY_SET);
 
       const approvals = new Set<string>();
+      // AskUserQuestion waits split out from generic permission approvals —
+      // the sidebar shows a raised-hand icon for "Claude is asking you a
+      // question" (Claude-Desktop parity), distinct from the approval bell.
+      const questions = new Set<string>();
       for (const sid of activeIds) {
         const snap = getSnapshot(sid);
         if (snap?.pendingPermission && !snap.permissionResolved) {
-          approvals.add(sid);
+          if (isAskTool(snap.pendingPermission.toolName)) {
+            questions.add(sid);
+          } else {
+            approvals.add(sid);
+          }
         }
       }
       setPendingApprovalSessionIds(approvals.size > 0 ? approvals : EMPTY_SET);
+      setPendingQuestionSessionIds(questions.size > 0 ? questions : EMPTY_SET);
     };
     window.addEventListener('stream-session-event', handler);
     return () => window.removeEventListener('stream-session-event', handler);
@@ -439,6 +451,26 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       setActiveColumnIdRaw("");
     }
   }, [pathname, isSplitActive]);
+
+  // Turn-completion / ask-question system notifications (Claude-Desktop-style).
+  // Click-to-navigate must be SPLIT-AWARE: with split mode active, a plain
+  // router.push to a split-member session gets bounced back by the URL-sync
+  // corrective effect above (and the split container ignores the URL anyway),
+  // which read as "clicking the notification does nothing". So: member
+  // session → switch the active column (the split UX for "jump to it");
+  // non-member → exit split and navigate (the click is an explicit
+  // take-me-there intent). initTurnNotifications always adopts the latest
+  // callback, so stale closures over split state are not a concern.
+  useEffect(() => {
+    initTurnNotifications((sessionId) => {
+      if (splitSessions.some((s) => s.sessionId === sessionId)) {
+        setActiveColumn(sessionId);
+      } else {
+        if (isSplitActive) exitSplit();
+        router.push(`/chat/${sessionId}`);
+      }
+    });
+  }, [router, splitSessions, isSplitActive, setActiveColumn, exitSplit]);
 
   const splitContextValue = useMemo(
     () => ({
@@ -599,6 +631,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       setPendingApprovalSessionId,
       activeStreamingSessions,
       pendingApprovalSessionIds,
+      pendingQuestionSessionIds,
       previewSource,
       setPreviewSource,
       previewFile,
@@ -606,7 +639,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       previewViewMode,
       setPreviewViewMode,
     }),
-    [fileTreeOpen, taskListOpen, gitPanelOpen, previewOpen, terminalOpen, dashboardPanelOpen, assistantPanelOpen, isAssistantWorkspace, isOfficeSession, testPanelOpen, testPanelBaseSession, currentBranch, gitDirtyCount, currentWorktreeLabel, workingDirectory, sessionId, sessionTitle, streamingSessionId, pendingApprovalSessionId, activeStreamingSessions, pendingApprovalSessionIds, previewSource, setPreviewSource, previewFile, setPreviewFile, previewViewMode]
+    [fileTreeOpen, taskListOpen, gitPanelOpen, previewOpen, terminalOpen, dashboardPanelOpen, assistantPanelOpen, isAssistantWorkspace, isOfficeSession, testPanelOpen, testPanelBaseSession, currentBranch, gitDirtyCount, currentWorktreeLabel, workingDirectory, sessionId, sessionTitle, streamingSessionId, pendingApprovalSessionId, activeStreamingSessions, pendingApprovalSessionIds, pendingQuestionSessionIds, previewSource, setPreviewSource, previewFile, setPreviewFile, previewViewMode]
   );
 
   const imageGenValue = useImageGenState();

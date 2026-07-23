@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { streamClaude } from '@/lib/claude-client';
+import { generateSessionTitleInBackground } from '@/lib/title-generator';
 import { addMessage, getMessages, getSession, getSessionSummary, updateSessionTitle, updateSdkSessionId, updateSessionModel, updateSessionProvider, updateSessionProviderId, getSetting, acquireSessionLock, renewSessionLock, releaseSessionLock, setSessionRuntimeStatus, syncSdkTasks } from '@/lib/db';
 import { resolveProvider as resolveProviderUnified } from '@/lib/provider-resolver';
 import { notifySessionStart, notifySessionComplete, notifySessionError } from '@/lib/telegram-bot';
@@ -220,6 +221,9 @@ export async function POST(request: NextRequest) {
     // Skip saving for autoTrigger messages (invisible system triggers for assistant hooks)
     // Use displayOverride for DB storage if provided (e.g. /skillName instead of expanded prompt)
     let savedContent = displayOverride || content;
+    // Non-empty when THIS request set the first-message placeholder title —
+    // triggers async real-title generation after provider resolution.
+    let titlePlaceholder = '';
     let fileMeta: Array<{ id: string; name: string; type: string; size: number; filePath: string }> | undefined;
     if (!autoTrigger) {
       if (files && files.length > 0) {
@@ -239,10 +243,14 @@ export async function POST(request: NextRequest) {
       }
       addMessage(session_id, 'user', savedContent);
 
-      // Auto-generate title from first message if still default
+      // First message: set an instant truncation placeholder; the real title
+      // is generated asynchronously below (Claude-Desktop parity — see
+      // docs/research/claude-desktop-title-generation.md) and replaces the
+      // placeholder only if the user hasn't renamed the session meanwhile.
       if (session.title === 'New Chat') {
         const title = content.slice(0, 50) + (content.length > 50 ? '...' : '');
         updateSessionTitle(session_id, title);
+        titlePlaceholder = title;
       }
     }
 
@@ -285,6 +293,21 @@ export async function POST(request: NextRequest) {
     const persistProviderId = effectiveProviderId || provider_id || '';
     if (persistProviderId !== (session.provider_id || '')) {
       updateSessionProviderId(session_id, persistProviderId);
+    }
+
+    // Async real-title generation for the first message (fire-and-forget,
+    // concurrent with the main turn — the title depends only on the user's
+    // message, matching the official implementation). Failures keep the
+    // truncation placeholder; the sidebar picks the update up via its
+    // session poll / session-updated refresh.
+    if (titlePlaceholder) {
+      void generateSessionTitleInBackground({
+        sessionId: session_id,
+        firstMessage: content,
+        placeholderTitle: titlePlaceholder,
+        providerId: effectiveProviderId || undefined,
+        model: effectiveModel,
+      });
     }
 
     // Resolve permission mode from request body (sent by frontend on each message)

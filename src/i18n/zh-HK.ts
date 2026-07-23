@@ -476,6 +476,9 @@ const zhHK: Record<TranslationKey, string> = {
   'streaming.preparing': '組織回覆中...',
   'streaming.generating': '生成中',
   'streaming.noContentTimeout': '**錯誤：** {secs} 秒內未收到模型的任何實質回應，連線可能已卡住或中斷。',
+  'turnNotify.completedBody': 'AI Native Lab 正在等待你的輸入',
+  'turnNotify.errorBody': '回覆中斷出錯，點擊查看詳情',
+  'turnNotify.questionBody': 'AI Native Lab 向你提出了一個問題',
   'streaming.allowForSession': '本次會話允許',
   'streaming.allowed': '已允許',
   'streaming.denied': '已拒絕',
@@ -705,6 +708,14 @@ const zhHK: Record<TranslationKey, string> = {
   'fileTree.newFileErrorNoWorkspace': '當前會話未選擇 workspace',
   'fileTree.newFileErrorGeneric': '創建失敗',
   'fileTree.addToChat': '添加到對話',
+  'fileTree.revealInFinder': '喺 Finder 中顯示',
+  'fileTree.revealInExplorer': '喺檔案總管中顯示',
+  'fileTree.revealFailed': '開啟失敗',
+  'fileTree.delete': '刪除',
+  'fileTree.deleteConfirmTitle': '確認刪除',
+  'fileTree.deleteConfirmDesc': '將 “{name}” 移到系統回收筒？可從回收筒還原。',
+  'fileTree.deleteSuccess': '已移到回收筒：{name}',
+  'fileTree.deleteFailed': '刪除失敗',
 
   // ── Doc preview ─────────────────────────────────────────────
   'docPreview.htmlPreview': 'HTML 預覽',
@@ -2283,8 +2294,8 @@ const zhHK: Record<TranslationKey, string> = {
   'errors.CLI_NOT_FOUND.userMessage': '未找到 Claude Code CLI。',
   'errors.CLI_NOT_FOUND.actionHint': '請先安裝 Claude Code CLI 並確認它已加入 PATH，可執行：npm install -g @anthropic-ai/claude-code',
 
-  'errors.MISSING_GIT_BASH.userMessage': '在 Windows 上需要 Git Bash，但未找到。',
-  'errors.MISSING_GIT_BASH.actionHint': '請從 https://git-scm.com/downloads 安裝 Git for Windows，並確保 bash.exe 已加入 PATH。',
+  'errors.MISSING_GIT_BASH.userMessage': 'Windows 上運行 Claude Code 需要安裝 Git for Windows（或確保 PowerShell 可用），當前系統缺少可用的 shell 環境。這與 API Key、Base URL 或網絡配置無關。',
+  'errors.MISSING_GIT_BASH.actionHint': '請從 https://git-scm.com/downloads/win 下載安裝 Git for Windows（或確保 PowerShell 在系統 PATH 中）；也可以打開「設置 → Claude CLI」，安裝向導會自動檢測並引導安裝 Git for Windows。安裝完成後重新發送消息即可，若仍報此錯誤請重啟應用。',
 
   'errors.NO_CREDENTIALS.userMessage': '未找到 API 憑據{provider}。',
   'errors.NO_CREDENTIALS.actionHint': '請到「設置 → 服務商」添加 API Key，或設置 ANTHROPIC_API_KEY 環境變量。',

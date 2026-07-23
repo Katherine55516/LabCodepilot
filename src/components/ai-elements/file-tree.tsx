@@ -7,6 +7,10 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
+import {
+  ContextMenu,
+  ContextMenuTrigger,
+} from "@/components/ui/context-menu";
 import { cn } from "@/lib/utils";
 import { useTranslation } from "@/hooks/useTranslation";
 import {
@@ -136,6 +140,13 @@ const FileTreeFolderContext = createContext<FileTreeFolderContextType>({
 export type FileTreeFolderProps = HTMLAttributes<HTMLDivElement> & {
   path: string;
   name: string;
+  /**
+   * Optional right-click menu content (a <ContextMenuContent> element). When
+   * provided, the folder ROW becomes a context-menu trigger. Nested asChild
+   * (ContextMenuTrigger → CollapsibleTrigger → div) composes via Radix Slot so
+   * left-click still toggles expand while right-click opens the menu.
+   */
+  contextMenuContent?: ReactNode;
 };
 
 export const FileTreeFolder = ({
@@ -143,6 +154,7 @@ export const FileTreeFolder = ({
   name,
   className,
   children,
+  contextMenuContent,
   ...props
 }: FileTreeFolderProps) => {
   const { expandedPaths, togglePath, selectedFolderPath, onSelectFolder } =
@@ -164,6 +176,51 @@ export const FileTreeFolder = ({
     [isExpanded, name, path]
   );
 
+  const rowInner = (
+    <>
+      <span className="shrink-0 rounded p-0.5">
+        <CaretRight
+          size={16}
+          className={cn(
+            "text-muted-foreground transition-transform",
+            isExpanded && "rotate-90"
+          )}
+        />
+      </span>
+      <FileTreeIcon>
+        {isExpanded ? (
+          <FolderOpen size={16} className="text-muted-foreground" />
+        ) : (
+          <Folder size={16} className="text-muted-foreground" />
+        )}
+      </FileTreeIcon>
+      <FileTreeName>{name}</FileTreeName>
+    </>
+  );
+
+  const row = (
+    <div
+      className={cn(
+        "flex w-full cursor-pointer items-center gap-1 rounded px-2 py-1 text-left transition-colors hover:bg-muted/50",
+        isSelected && "bg-muted",
+      )}
+      role="button"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' || e.key === ' ') {
+          e.preventDefault();
+          handleToggle();
+        }
+      }}
+    >
+      {rowInner}
+    </div>
+  );
+
+  const trigger = (
+    <CollapsibleTrigger asChild>{row}</CollapsibleTrigger>
+  );
+
   return (
     <FileTreeFolderContext.Provider value={folderContextValue}>
       <Collapsible onOpenChange={handleToggle} open={isExpanded}>
@@ -172,40 +229,14 @@ export const FileTreeFolder = ({
           role="treeitem"
           {...props}
         >
-          <CollapsibleTrigger asChild>
-            <div
-              className={cn(
-                "flex w-full cursor-pointer items-center gap-1 rounded px-2 py-1 text-left transition-colors hover:bg-muted/50",
-                isSelected && "bg-muted",
-              )}
-              role="button"
-              tabIndex={0}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' || e.key === ' ') {
-                  e.preventDefault();
-                  handleToggle();
-                }
-              }}
-            >
-              <span className="shrink-0 rounded p-0.5">
-                <CaretRight
-                  size={16}
-                  className={cn(
-                    "text-muted-foreground transition-transform",
-                    isExpanded && "rotate-90"
-                  )}
-                />
-              </span>
-              <FileTreeIcon>
-                {isExpanded ? (
-                  <FolderOpen size={16} className="text-muted-foreground" />
-                ) : (
-                  <Folder size={16} className="text-muted-foreground" />
-                )}
-              </FileTreeIcon>
-              <FileTreeName>{name}</FileTreeName>
-            </div>
-          </CollapsibleTrigger>
+          {contextMenuContent ? (
+            <ContextMenu>
+              <ContextMenuTrigger asChild>{trigger}</ContextMenuTrigger>
+              {contextMenuContent}
+            </ContextMenu>
+          ) : (
+            trigger
+          )}
           <CollapsibleContent>
             <div className="ml-4 border-l pl-2">{children}</div>
           </CollapsibleContent>
@@ -229,6 +260,12 @@ export type FileTreeFileProps = HTMLAttributes<HTMLDivElement> & {
   path: string;
   name: string;
   icon?: ReactNode;
+  /**
+   * Optional right-click menu content (a <ContextMenuContent> element). When
+   * provided, the file row becomes a context-menu trigger; left-click still
+   * selects the file as before.
+   */
+  contextMenuContent?: ReactNode;
 };
 
 export const FileTreeFile = ({
@@ -237,6 +274,7 @@ export const FileTreeFile = ({
   icon,
   className,
   children,
+  contextMenuContent,
   ...props
 }: FileTreeFileProps) => {
   const { selectedPath, onSelect, onAdd } = useContext(FileTreeContext);
@@ -266,39 +304,50 @@ export const FileTreeFile = ({
 
   const fileContextValue = useMemo(() => ({ name, path }), [name, path]);
 
+  const row = (
+    <div
+      className={cn(
+        "group/file flex cursor-pointer items-center gap-1 rounded px-2 py-1 transition-colors hover:bg-muted/50",
+        isSelected && "bg-muted",
+        className
+      )}
+      onClick={handleClick}
+      onKeyDown={handleKeyDown}
+      role="treeitem"
+      tabIndex={0}
+      {...props}
+    >
+      {children ?? (
+        <>
+          <FileTreeIcon>
+            {icon ?? <File size={16} className="text-muted-foreground" />}
+          </FileTreeIcon>
+          <FileTreeName>{name}</FileTreeName>
+          {onAdd && (
+            <button
+              type="button"
+              className="ml-auto flex size-5 shrink-0 items-center justify-center rounded opacity-0 transition-opacity hover:bg-muted group-hover/file:opacity-100"
+              onClick={handleAdd}
+              title={t("fileTree.addToChat")}
+            >
+              <Plus size={12} className="text-muted-foreground" />
+            </button>
+          )}
+        </>
+      )}
+    </div>
+  );
+
   return (
     <FileTreeFileContext.Provider value={fileContextValue}>
-      <div
-        className={cn(
-          "group/file flex cursor-pointer items-center gap-1 rounded px-2 py-1 transition-colors hover:bg-muted/50",
-          isSelected && "bg-muted",
-          className
-        )}
-        onClick={handleClick}
-        onKeyDown={handleKeyDown}
-        role="treeitem"
-        tabIndex={0}
-        {...props}
-      >
-        {children ?? (
-          <>
-            <FileTreeIcon>
-              {icon ?? <File size={16} className="text-muted-foreground" />}
-            </FileTreeIcon>
-            <FileTreeName>{name}</FileTreeName>
-            {onAdd && (
-              <button
-                type="button"
-                className="ml-auto flex size-5 shrink-0 items-center justify-center rounded opacity-0 transition-opacity hover:bg-muted group-hover/file:opacity-100"
-                onClick={handleAdd}
-                title={t("fileTree.addToChat")}
-              >
-                <Plus size={12} className="text-muted-foreground" />
-              </button>
-            )}
-          </>
-        )}
-      </div>
+      {contextMenuContent ? (
+        <ContextMenu>
+          <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
+          {contextMenuContent}
+        </ContextMenu>
+      ) : (
+        row
+      )}
     </FileTreeFileContext.Provider>
   );
 };
