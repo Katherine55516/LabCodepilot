@@ -249,6 +249,14 @@ interface TaskState {
    * 不能因为加了开关就让老任务静默停止沉淀。故所有判定一律写 `!== false`。
    */
   depositScripts?: boolean;
+  /**
+   * 任务级被测入口地址（新建任务「目标」输入框；执行前确认弹窗改地址会按规则回写）。
+   *
+   * 执行步的地址优先级：弹窗显式确认 > 本字段 > 项目环境配置(environments.json)。
+   * 缺省（undefined）= 无任务级覆盖，跟随环境配置 —— 存量任务保持原行为。
+   * 回写规则见 runExecutionConfirmed：确认地址 ≠ 环境地址才记为覆盖；相同则清除覆盖。
+   */
+  targetUrl?: string;
 }
 const DEFAULT_TASK_STATE: TaskState = {
   stepStatus: { requirement: "idle", cases: "idle", execution: "idle", report: "idle" },
@@ -1220,7 +1228,7 @@ export function InlineTestingPanel() {
   // BEFORE the task is created — a parse failure returns an error and creates nothing.
   // cases imported → 需求 + 用例 both skipped(done) → 直接进入「测试执行」(no 批准 gate,
   // execution unlocked, auto-chains like an approved 用例); only 需求 → 需求 待批准.
-  const addTask = async (name: string, files?: NewTaskFiles, depositScripts?: boolean): Promise<{ ok: boolean; error?: string }> => {
+  const addTask = async (name: string, files?: NewTaskFiles, depositScripts?: boolean, targetUrl?: string): Promise<{ ok: boolean; error?: string }> => {
     const proj = selected !== null ? projects[selected] : null;
     // 防重名：同一项目内任务名唯一（trim 后精确比较、区分大小写）。弹窗已实时校验+禁用创建，
     // 此处兜底防绕过；命中则不创建，返回错误供弹窗内联展示。
@@ -1256,9 +1264,13 @@ export function InlineTestingPanel() {
     }
     const id = makeTaskId();
     setProjects((ps) => ps.map((p, i) => (i === selected ? { ...p, tasks: [...p.tasks, { id, name }] } : p)));
-    // 沉淀回归脚本开关:独立于导入分支落盘 —— 下面的 patchTask 只在有导入时才走,
-    // 而开关任何情况都要记住(缺省 true 与既有行为一致,故只在明确关闭时写 false)。
-    if (depositScripts === false) patchTask(id, () => ({ depositScripts: false }));
+    // 沉淀回归脚本开关 + 任务目标地址:独立于导入分支落盘 —— 下面的 patchTask 只在有导入时
+    // 才走,而这两项任何情况都要记住(开关缺省 true 与既有行为一致,故只在明确关闭时写 false;
+    // 地址 trim 非空才落,空串不产生任务级覆盖)。
+    const seed: Partial<TaskState> = {};
+    if (depositScripts === false) seed.depositScripts = false;
+    if (targetUrl?.trim()) seed.targetUrl = targetUrl.trim();
+    if (Object.keys(seed).length) patchTask(id, () => seed);
     const hasReq = !!files?.requirement, hasCases = !!files?.cases;
     if (hasReq || hasCases) {
       patchTask(id, () => ({
@@ -1624,8 +1636,13 @@ export function InlineTestingPanel() {
     // 执行方式仅对「测试执行」步有意义(只有它注入 Playwright)。弹窗触发带 opts.headed,
     // 非弹窗触发(运行任务 / auto-chain / 队列起跑)回落到上次选择(execModeRef)。
     const headed = step === "execution" ? (opts?.headed ?? execModeRef.current === "visible") : false;
-    // 被测链接覆盖:仅执行步、且弹窗显式给了地址时透传,让用户在弹窗里确认/改写的地址生效。
-    const baseUrlOverride = step === "execution" && opts?.baseUrl?.trim() ? opts.baseUrl.trim() : undefined;
+    // 被测链接覆盖(仅执行步):弹窗显式确认的地址 > 任务级 targetUrl(新建任务「目标」输入,
+    // 让「运行任务」/auto-chain/排队这些不经确认弹窗的路径也直测任务地址)> 不传(服务端回落
+    // 项目环境配置 environments.json)。
+    const baseUrlOverride =
+      step === "execution"
+        ? (opts?.baseUrl?.trim() || taskStates[id]?.targetUrl?.trim() || undefined)
+        : undefined;
     // 问题②·停止: a per-run AbortController. stopTask() aborts it → the fetch rejects
     // with AbortError, which the catch/finally below treat as a clean stop (not error).
     const ctrl = new AbortController();
@@ -2085,7 +2102,16 @@ export function InlineTestingPanel() {
     persistExecMode(headed ? "visible" : "headless");
     // 弹窗里改的「沉淀回归脚本」写回任务状态 —— 它是任务级设置,不是一次性选项;
     // 不写回的话下次打开弹窗又弹回旧值,用户会以为没生效。缺省 true,故只存 false。
-    if (aId) patchTask(aId, () => ({ depositScripts: depositScripts ? undefined : false }));
+    // 任务地址回写规则:确认地址与环境配置地址【不同】→ 记为任务级覆盖(下次运行任务/
+    // 流水线也用它);【相同】→ 清除覆盖、回归跟随环境 —— 若无条件回写,存量任务手动执行
+    // 一次就会把当时的环境地址钉死成任务地址,之后改环境配置该任务不再跟随(回归风险)。
+    if (aId) {
+      const envUrl = (envCfg?.frontendBaseUrl || "").trim();
+      patchTask(aId, () => ({
+        depositScripts: depositScripts ? undefined : false,
+        targetUrl: baseUrl && baseUrl !== envUrl ? baseUrl : undefined,
+      }));
+    }
     setModal("none");
     if (aId) autoRunIdsRef.current.delete(aId);
     runStep("execution", { headed, baseUrl, depositScriptsOverride: depositScripts });
@@ -2264,31 +2290,46 @@ export function InlineTestingPanel() {
                     <option key={x} value={x}>{x === "sit" ? "SIT" : x}</option>
                   ))}
                 </select>
-                {envCfg?.frontendBaseUrl ? (
-                  <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
-                    <span
-                      className="max-w-[180px] truncate font-mono"
-                      title={`${t("test.env.targetLabel")}: ${envCfg.frontendBaseUrl}`}
-                    >
-                      🎯 {envCfg.frontendBaseUrl}
-                    </span>
-                    {envCfg.source === "db" && (
-                      <span
-                        className="rounded bg-muted px-1 py-0.5 text-[10px]"
-                        title={t("test.env.fromSettingsTitle")}
+                {(() => {
+                  // 任务级目标地址优先展示(执行时它也确实优先生效);无任务地址回落环境地址。
+                  const taskUrl = (aId && taskStates[aId]?.targetUrl) || "";
+                  const shownUrl = taskUrl || envCfg?.frontendBaseUrl || "";
+                  if (!shownUrl) {
+                    return (
+                      <button
+                        onClick={() => router.push("/settings#test-accounts")}
+                        className="rounded bg-status-warning-muted px-1.5 py-0.5 text-[10px] font-medium text-status-warning-foreground hover:opacity-80"
                       >
-                        {t("test.env.fromSettings")}
+                        {t("test.env.unconfigured")}
+                      </button>
+                    );
+                  }
+                  return (
+                    <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                      <span
+                        className="max-w-[180px] truncate font-mono"
+                        title={`${t(taskUrl ? "test.env.taskTargetTitle" : "test.env.targetLabel")}: ${shownUrl}`}
+                      >
+                        🎯 {shownUrl}
                       </span>
-                    )}
-                  </span>
-                ) : (
-                  <button
-                    onClick={() => router.push("/settings#test-accounts")}
-                    className="rounded bg-status-warning-muted px-1.5 py-0.5 text-[10px] font-medium text-status-warning-foreground hover:opacity-80"
-                  >
-                    {t("test.env.unconfigured")}
-                  </button>
-                )}
+                      {taskUrl ? (
+                        <span
+                          className="rounded bg-muted px-1 py-0.5 text-[10px]"
+                          title={t("test.env.taskTargetTitle")}
+                        >
+                          {t("test.env.taskTargetBadge")}
+                        </span>
+                      ) : envCfg?.source === "db" ? (
+                        <span
+                          className="rounded bg-muted px-1 py-0.5 text-[10px]"
+                          title={t("test.env.fromSettingsTitle")}
+                        >
+                          {t("test.env.fromSettings")}
+                        </span>
+                      ) : null}
+                    </span>
+                  );
+                })()}
                 {/* 顶部「运行任务」按钮运行中不再变成停止 —— 停止只保留详情卡那一个,
                     避免两处停止入口造成混淆;运行中此按钮直接禁用。 */}
                 <button
@@ -3176,7 +3217,7 @@ export function InlineTestingPanel() {
       {modal === "execConfirm" && activeTask && (
         <ExecConfirmModal
           t={t}
-          initialUrl={envCfg?.frontendBaseUrl || ""}
+          initialUrl={taskStates[activeTask.id]?.targetUrl || envCfg?.frontendBaseUrl || ""}
           unconfigured={!!envCfg && !envCfg.configured}
           initialMode={execMode}
           initialDeposit={(activeTask && taskStates[activeTask.id]?.depositScripts) !== false}
@@ -7959,8 +8000,10 @@ function EnvWarnModal({
   );
 }
 
-function NewTaskModal({ t, onClose, onAdd, existingNames }: { t: T; onClose: () => void; onAdd: (name: string, files?: NewTaskFiles, depositScripts?: boolean) => Promise<{ ok: boolean; error?: string }>; existingNames: string[] }) {
+function NewTaskModal({ t, onClose, onAdd, existingNames }: { t: T; onClose: () => void; onAdd: (name: string, files?: NewTaskFiles, depositScripts?: boolean, targetUrl?: string) => Promise<{ ok: boolean; error?: string }>; existingNames: string[] }) {
   const [name, setName] = useState("");
+  // 任务目标地址(可选):填了则执行时直测该 URL(优先于项目环境配置);空 = 跟随环境配置。
+  const [targetUrl, setTargetUrl] = useState("");
   // 是否为该任务沉淀回归脚本。默认关(用户反馈:多数新任务并不需要沉淀脚本,而每条用例约两
   // 分钟的生成与真机重放开销不该默认承担);需要的用户在此勾选或到任务页随时开。
   // 语义:depositScripts=false → addTask 落 taskState.depositScripts=false;不勾选=false,
@@ -7994,7 +8037,7 @@ function NewTaskModal({ t, onClose, onAdd, existingNames }: { t: T; onClose: () 
       const res = await onAdd(name.trim(), {
         requirement: reqFile ? { filename: reqFile.name, dataBase64: reqFile.data } : undefined,
         cases: casesFile ? { filename: casesFile.name, dataBase64: casesFile.data } : undefined,
-      }, depositScripts);
+      }, depositScripts, targetUrl.trim() || undefined);
       if (res.ok) onClose();
       else setErr(res.error || t("test.newTaskModal.importFailed"));
     } catch (e) {
@@ -8037,7 +8080,15 @@ function NewTaskModal({ t, onClose, onAdd, existingNames }: { t: T; onClose: () 
         )}
       </Field>
       <Field label={t("test.newTaskModal.targetLabel")}>
-        <input className={INPUT} placeholder="http://localhost:3000/..." />
+        <input
+          className={INPUT}
+          value={targetUrl}
+          onChange={(e) => setTargetUrl(e.target.value)}
+          placeholder="http://localhost:3000/..."
+        />
+        {!!targetUrl.trim() && (
+          <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">{t("test.newTaskModal.targetHint")}</p>
+        )}
       </Field>
       <Field label={t("test.newTaskModal.importLabel")}>
         <div className="flex gap-2">
