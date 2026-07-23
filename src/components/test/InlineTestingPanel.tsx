@@ -7961,9 +7961,11 @@ function EnvWarnModal({
 
 function NewTaskModal({ t, onClose, onAdd, existingNames }: { t: T; onClose: () => void; onAdd: (name: string, files?: NewTaskFiles, depositScripts?: boolean) => Promise<{ ok: boolean; error?: string }>; existingNames: string[] }) {
   const [name, setName] = useState("");
-  // 是否为该任务沉淀回归脚本。默认开(与既有行为一致);关掉可省下每条用例约两分钟的
-  // 生成与真机重放开销 —— 不是所有任务都需要沉淀脚本。
-  const [depositScripts, setDepositScripts] = useState(true);
+  // 是否为该任务沉淀回归脚本。默认关(用户反馈:多数新任务并不需要沉淀脚本,而每条用例约两
+  // 分钟的生成与真机重放开销不该默认承担);需要的用户在此勾选或到任务页随时开。
+  // 语义:depositScripts=false → addTask 落 taskState.depositScripts=false;不勾选=false,
+  // 与「任务级缺省 undefined=开」正交——新建这一步的默认独立于既有任务的缺省语义。
+  const [depositScripts, setDepositScripts] = useState(false);
   const [reqFile, setReqFile] = useState<{ name: string; data: string } | null>(null);
   const [casesFile, setCasesFile] = useState<{ name: string; data: string } | null>(null);
   const [err, setErr] = useState("");
