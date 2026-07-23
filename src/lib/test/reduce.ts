@@ -14,6 +14,9 @@
  * Pure functions — unit-tested in src/__tests__/unit/test-reduce.test.ts.
  */
 
+import { createCaseIdResolver } from "./case-id";
+import { harvestMarkers } from "./markers";
+
 export type FourStateStatus = "pass" | "fail" | "partial" | "blocked";
 
 /**
@@ -36,6 +39,8 @@ export interface RawResult {
   error?: string;
   evidence?: string[];
   api?: ApiInfo;
+  /** 判定来源:'script' = 回归轮次脚本重放(平台合成帧);缺省 = AI 执行。 */
+  via?: string;
 }
 
 export interface ReducedTest {
@@ -45,6 +50,20 @@ export interface ReducedTest {
   error: string;
   evidence: string[];
   api?: ApiInfo;
+  /** 单用例执行耗时（服务端按进度行/@@RESULT 时间戳计，见 exec-timing.ts）；缺省=未测得 */
+  durationMs?: number;
+  /** 判定来源:'script' = 脚本重放;缺省 = AI 执行。报告 UI 据此显示「脚本」徽标。 */
+  via?: string;
+  /**
+   * true = 本轮执行【没跑到】这条用例(执行中断/AI 漏跑),由 caseIds 全集兜底补出来的
+   * blocked 条目,不是"跑了但被阻塞"。
+   *
+   * 存在的理由:脚本生成的收口对账要区分「本轮失去资格」与「本轮没轮到」。前者该标 stale,
+   * 后者必须原样保留旧条目——否则一次断流轮就会把几十条 verified 脚本打成 stale、
+   * 掉出运行/修复/重放的全部通道(见 script-job-manager 的未执行守卫)。
+   * 靠中文文案字符串判别太脆,故给机器可读标记。
+   */
+  notExecuted?: boolean;
 }
 
 export interface RunCounts {
@@ -77,6 +96,12 @@ export interface RunJson {
    */
   suiteCounts?: RunCounts;
   suitePassStr?: string; // 回归集 "pass/total"；pass < total 即回归集未全过（发版红线）
+  /**
+   * 按【来源任务】的四态小计（v2 回归轮次报告分组）：仅当调用方传入 taskOf(runId→来源
+   * 任务名,来自当轮快照 idMap)时输出——「哪个功能的回归挂了」一眼可见。普通任务执行
+   * 不传,字段缺省,旧 run.json 消费方不受影响。
+   */
+  taskCounts?: Record<string, RunCounts>;
   circuitBroken: boolean;
   tests: ReducedTest[];
 }
@@ -99,19 +124,13 @@ const NOT_EXECUTED_MSG = "用例未执行：执行阶段未产出该用例的结
 
 /** Extract every `@@RESULT {json}` object from streamed agent text. */
 export function harvestResults(text: string): RawResult[] {
-  const out: RawResult[] = [];
-  for (const line of text.split("\n")) {
-    const idx = line.indexOf("@@RESULT");
-    if (idx < 0) continue;
-    const jsonStr = line.slice(idx + "@@RESULT".length).trim();
-    try {
-      const obj = JSON.parse(jsonStr);
-      if (obj && typeof obj === "object") out.push(obj as RawResult);
-    } catch {
-      // ignore malformed result lines
-    }
+  const { items, malformed } = harvestMarkers<RawResult>(text, "RESULT");
+  if (malformed > 0) {
+    // 静默丢弃曾让「模型判 2 通过 1 失败」被报成「0/3 全阻塞」(见 markers.ts 模块头)。
+    // 解析器现在容忍 markdown 装饰;仍解析不了说明模型输出严重跑偏,必须留声。
+    console.warn(`[test-reduce] ${malformed} 行 @@RESULT 无法解析为 JSON,已丢弃`);
   }
-  return out;
+  return items;
 }
 
 /**
@@ -151,6 +170,8 @@ export function reduceResults(
     caseIds?: string[];
     /** 回归集用例 id（cases.json `tags` 含「回归测试」，由 run 路由收集传入）。 */
     suiteIds?: string[];
+    /** runId → 来源任务名（回归轮次:快照 idMap 反解;传入即输出 taskCounts 分组小计）。 */
+    taskOf?: Record<string, string>;
   },
 ): RunJson {
   const tests: ReducedTest[] = raw.map((r) => {
@@ -167,6 +188,7 @@ export function reduceResults(
       error,
       evidence: Array.isArray(r.evidence) ? r.evidence.map(String) : [],
       ...(api ? { api } : {}),
+      ...(typeof r.via === "string" && r.via ? { via: r.via } : {}),
     };
   });
 
@@ -178,10 +200,20 @@ export function reduceResults(
   //    2 条——AI 编造 / 把一条拆成多条 / 写错 id 产生的额外条目，报告不应超出用户设计的用例集）。
   // 不传 caseIds 时行为不变（向后兼容旧调用与单测——不做任何对齐，tests 即 @@RESULT 原样）。
   if (opts.caseIds && opts.caseIds.length) {
+    // id 先过「回贴」解析器：模型常把 id 里的印刷体标点抄成 ASCII（弯引号 ‘’ → 直引号 '、
+    // 破折号 — → -、全角 → 半角），精确比对就此认不出，pass 的用例被丢弃、反被补成
+    // blocked「未执行」——报告里成了「回归集未全过、不可发版」。见 case-id.ts 模块头。
+    // 精确匹配优先、歧义不猜，所以对本就抄写正确的 id 行为完全不变。
+    const resolve = createCaseIdResolver(opts.caseIds);
     const byId = new Map<string, ReducedTest>();
-    for (const t of tests) if (!byId.has(t.id)) byId.set(t.id, t);
+    // 回贴后 id 换成 cases.json 的权威写法 —— 下游（suiteIds/verificationById/taskOf/
+    // 耗时表/轨迹）全部按权威 id 关联，不必各自再认一遍模型的变体。
+    for (const t of tests) {
+      const id = resolve(t.id);
+      if (!byId.has(id)) byId.set(id, { ...t, id });
+    }
     const aligned: ReducedTest[] = opts.caseIds.map(
-      (id) => byId.get(id) ?? { id, status: "blocked", actual: "", error: NOT_EXECUTED_MSG, evidence: [] },
+      (id) => byId.get(id) ?? { id, status: "blocked", actual: "", error: NOT_EXECUTED_MSG, evidence: [], notExecuted: true },
     );
     tests.splice(0, tests.length, ...aligned);
   }
@@ -230,6 +262,19 @@ export function reduceResults(
     suitePassStr = `${suiteCounts.pass}/${suiteCounts.total}`;
   }
 
+  // 按来源任务的四态小计（v2 轮次报告分组）:taskOf 缺失的 runId 归入「未知来源」——
+  // 快照与执行集理论上一致,兜底桶只在快照缺损时出现,不静默丢数。
+  let taskCounts: Record<string, RunCounts> | undefined;
+  if (opts.taskOf) {
+    taskCounts = {};
+    for (const t of tests) {
+      const task = opts.taskOf[t.id] ?? "未知来源";
+      const c = (taskCounts[task] ??= { total: 0, pass: 0, fail: 0, partial: 0, blocked: 0 });
+      c.total++;
+      c[t.status]++;
+    }
+  }
+
   // Overall status: any real fail ⇒ failed; else all-blocked (nothing ran) ⇒ blocked; else done.
   const status: RunJson["status"] =
     counts.fail > 0
@@ -249,6 +294,7 @@ export function reduceResults(
     funcPassStr,
     regressionTotal,
     ...(suiteCounts ? { suiteCounts, suitePassStr } : {}),
+    ...(taskCounts ? { taskCounts } : {}),
     circuitBroken,
     tests,
   };
@@ -257,7 +303,7 @@ export function reduceResults(
 /** Convenience: harvest @@RESULT from raw stream text, then reduce. */
 export function reduceFromText(
   text: string,
-  opts: { module: string; env: string; time: string; verificationById?: Record<string, string>; caseIds?: string[]; suiteIds?: string[] },
+  opts: { module: string; env: string; time: string; verificationById?: Record<string, string>; caseIds?: string[]; suiteIds?: string[]; taskOf?: Record<string, string> },
 ): RunJson {
   return reduceResults(harvestResults(text), opts);
 }

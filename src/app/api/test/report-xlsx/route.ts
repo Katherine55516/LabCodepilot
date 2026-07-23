@@ -18,11 +18,21 @@ export const runtime = 'nodejs';
  * 标题、标签、期望结果来自 cases.json（按 id join）；实际结果/状态/证据来自 run.json。
  * 安全：taskName/env 经 isUnsafeSegment 校验（它们组成路径，不能穿越）。
  */
-const HEADER = ['序号', '用例ID', '标题', '用例标签', '期望结果', '实际结果', '状态', '证据'];
-// 下载 xlsx 的列宽（字符数，与 HEADER 对齐）：长文本列（期望结果/实际结果）加宽；标签列窄。
-const COL_WIDTHS = [6, 12, 26, 14, 48, 48, 10, 22];
+// 合并：V3.1.0_dev 的「用例标签」列 + 本功能的「用时」列，两列都保留。
+const HEADER = ['序号', '用例ID', '标题', '用例标签', '期望结果', '实际结果', '状态', '用时', '证据'];
+// 下载 xlsx 的列宽（字符数，与 HEADER 对齐）：长文本列（期望结果/实际结果）加宽；标签/用时列窄。
+const COL_WIDTHS = [6, 12, 26, 14, 48, 48, 10, 10, 22];
 
-type RunTest = { id?: string; status?: string; actual?: string; error?: string; evidence?: string[] };
+/** 毫秒 → 紧凑用时（与前端 fmtDuration 同口径）。 */
+function fmtDur(ms?: number): string {
+  if (typeof ms !== 'number' || !Number.isFinite(ms) || ms < 0) return '';
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  const s = Math.round(ms / 1000);
+  if (s < 60) return `${s}s`;
+  return `${Math.floor(s / 60)}m ${String(s % 60).padStart(2, '0')}s`;
+}
+
+type RunTest = { id?: string; status?: string; actual?: string; error?: string; evidence?: string[]; durationMs?: number };
 type CaseDef = { id?: string; purpose?: string; steps?: { expected?: string }[]; tags?: string[] };
 
 export async function GET(req: Request): Promise<Response> {
@@ -63,6 +73,7 @@ export async function GET(req: Request): Promise<Response> {
   tests.forEach((t, i) => {
     const c = t.id ? caseById.get(t.id) : undefined;
     const expected = c?.steps?.map((s) => s.expected).filter(Boolean).join('；') ?? '';
+    // 列序：序号 / 用例ID / 标题 / 用例标签 / 期望结果 / 实际结果 / 状态 / 用时 / 证据。
     rows.push([
       String(i + 1),
       String(t.id ?? ''),
@@ -71,6 +82,7 @@ export async function GET(req: Request): Promise<Response> {
       expected,
       t.actual ?? '',
       String(t.status ?? ''),
+      fmtDur(t.durationMs),
       Array.isArray(t.evidence) ? t.evidence.join(', ') : '',
     ]);
   });

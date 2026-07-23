@@ -1,5 +1,3 @@
-import fs from 'fs';
-import path from 'path';
 import { streamClaude } from '@/lib/claude-client';
 import type { MCPServerConfig } from '@/types';
 // Side-effect import: registers the agent runtimes (native + sdk) in the registry.
@@ -9,230 +7,27 @@ import type { MCPServerConfig } from '@/types';
 import { predictNativeRuntime } from '@/lib/runtime';
 import { buildStep, buildPlaywrightMcp, willRunHeaded, artifactPaths, requirementOriginalPath, requirementImportedTextPath, TEST_STEPS, type TestStep } from '@/lib/test/prompts';
 import { probeUrlWithRetry } from '@/lib/test/probe';
-import { reduceFromText } from '@/lib/test/reduce';
-import { snapshotRunJson } from '@/lib/test/history';
-import { sweepStrayEvidence, normalizeEvidenceExt } from '@/lib/test/evidence';
 import { resolveProjectEnvWithDb } from '@/lib/test/env-resolve';
 import { isUnsafeSegment } from '@/lib/test/path-safety';
-import { appendAudit } from '@/lib/test/audit';
-import { depositTask, readTaskCases, REGRESSION_LIBRARY_TASK } from '@/lib/test/library';
+import { buildStepCompleted, observeStream, recordCasesGenerated, recordStatsEvents } from '@/lib/test/stats-recorder';
+import { REGRESSION_LIBRARY_TASK } from '@/lib/test/library';
+import { readRoundSnapshot, finishRound } from '@/lib/test/rounds';
+// 回归轮次 · 脚本重放优先(阶段 A):有合格沉淀脚本的用例由平台直接跑脚本产出判定,
+// AI(阶段 B)只执行剩余——全覆盖时完全跳过智能体。见 script-regression.ts 模块头。
+import {
+  candidatesFromSnapshot,
+  resolveReplayPlan,
+  acquireReplayLocks,
+  buildScriptPhaseStream,
+  concatSseStreams,
+  type ReplayPlanItem,
+} from '@/lib/test/script-regression';
+// SSE 流包装器（原先定义在本文件内）：Next.js 构建期路由类型校验只允许 route.ts 导出
+// HTTP method handler，helper 导出会使 `next build` 失败，故抽至 lib（见 exec-stream.ts 模块头）。
+import { wrapExecutionStream, wrapReportStream, wrapCasesStream, stepStatsFrame, type StepStats } from '@/lib/test/exec-stream';
 
 // Reference the import so it isn't tree-shaken away (keeps the registration side-effect).
 void predictNativeRuntime;
-
-/**
- * Wrap the execution step's SSE stream: forward every frame to the client
- * unchanged AND accumulate the agent's `text` frames server-side. When the stream
- * ends, deterministically reduce the harvested `@@RESULT` lines into the canonical
- * run.json (code computes counts / env-reclass / 401 circuit-breaker — NOT the
- * LLM), write it to AI_LabTest/report/{task}/{task}-{env}.run.json, and emit a
- * final `{type:'run_json'}` frame so the panel shows the authoritative result.
- */
-export function wrapExecutionStream(
-  src: ReadableStream<string>,
-  opts: { projectPath: string; taskName: string; env: string; runStartMs: number; leadingFrame?: string },
-): ReadableStream<string> {
-  const reader = src.getReader();
-  let frameBuf = '';
-  let textAcc = '';
-  return new ReadableStream<string>({
-    start(controller) {
-      // 有头被自动回落无头时,先补发一条提示帧让用户在对话里看到「已改无头」(见 POST 内)。
-      if (opts.leadingFrame) controller.enqueue(opts.leadingFrame);
-    },
-    async pull(controller) {
-      try {
-        const { done, value } = await reader.read();
-        if (done) {
-          const paths = artifactPaths(opts.taskName, opts.env);
-          const evidenceAbs = path.join(opts.projectPath, paths.evidenceDir);
-          // Evidence 收口: sweep stray screenshots/videos created this run into the
-          // evidence dir, then give extension-less files a real ext (magic-number).
-          try {
-            sweepStrayEvidence({
-              dirs: [opts.projectPath, path.join(opts.projectPath, 'AI_LabTest', 'report')],
-              evidenceDir: evidenceAbs,
-              sinceMs: opts.runStartMs,
-            });
-            normalizeEvidenceExt(evidenceAbs);
-          } catch {
-            // best-effort cleanup
-          }
-          // Join cases.json's oracle 双轴 (verification field) so the reduction can
-          // compute the dual-rate pass (功能验证 vs 回归基线). best-effort: missing /
-          // unparseable cases → undefined map → reduce falls back to single-rate.
-          let verificationById: Record<string, string> | undefined;
-          let caseIds: string[] | undefined;
-          let suiteIds: string[] | undefined;
-          try {
-            const casesAbs = path.join(opts.projectPath, artifactPaths(opts.taskName).cases);
-            const parsed = JSON.parse(await fs.promises.readFile(casesAbs, 'utf-8')) as unknown;
-            // cases.json 可能是 { cases: [...] } 或顶层数组 [...]（与 report-xlsx 同口径兼容）。
-            const list = Array.isArray((parsed as { cases?: unknown })?.cases)
-              ? (parsed as { cases: Array<{ id?: unknown; verification?: unknown; tags?: unknown }> }).cases
-              : Array.isArray(parsed)
-                ? (parsed as Array<{ id?: unknown; verification?: unknown; tags?: unknown }>)
-                : [];
-            const map: Record<string, string> = {};
-            const ids: string[] = [];
-            const suite: string[] = [];
-            for (const c of list) {
-              if (c && typeof c.id === 'string') {
-                ids.push(c.id);
-                if (typeof c.verification === 'string') map[c.id] = c.verification;
-                // 回归集 = tags 含「回归测试」（§1.7,与 verification 回归基线正交）。
-                if (Array.isArray(c.tags) && c.tags.some((tg) => tg === '回归测试')) suite.push(c.id);
-              }
-            }
-            if (Object.keys(map).length) verificationById = map;
-            // 用例全集 id（按 cases.json 顺序）→ 交给 reduce 兜底补全漏执行的用例（问题②修复：
-            // 报告以用例全集为准，AI 漏跑的用例补成「未执行」blocked，而非静默丢失）。
-            if (ids.length) caseIds = ids;
-            if (suite.length) suiteIds = suite;
-          } catch {
-            // no cases / parse fail → reduce falls back to single-rate + 不补全
-          }
-          const reduced = reduceFromText(textAcc, {
-            module: opts.taskName,
-            env: opts.env,
-            time: new Date().toISOString(),
-            verificationById,
-            caseIds,
-            suiteIds,
-          });
-          const runContent = JSON.stringify(reduced, null, 2);
-          try {
-            const runAbs = path.join(opts.projectPath, paths.runJson);
-            const reportTaskDir = path.dirname(runAbs);
-            await fs.promises.mkdir(reportTaskDir, { recursive: true });
-            await fs.promises.writeFile(runAbs, runContent, 'utf-8');
-            // 缺陷报告是【上一次执行】的产物（仅在有 fail 时条件生成、非每次覆盖）。本次重新
-            // 执行已写新 run.json，旧缺陷报告随即作废：删掉它，否则会出现「本次全部通过/缺陷
-            // 已修，却仍显示上一次的缺陷报告」（用户反馈的 bug）。本次若仍有 fail，前端 ReportView
-            // 会按新 run.json 重新自动生成缺陷报告(见 autoDefectForTimeRef)。单文件删除、非批量，
-            // 不触发 EDR 反勒索。best-effort，无旧文件则忽略。
-            try {
-              await fs.promises.unlink(path.join(reportTaskDir, `${opts.taskName}-${opts.env}-缺陷报告.md`));
-            } catch { /* 无旧缺陷报告则忽略 */ }
-            // 历史快照（报告多版本对比的数据基础）：除覆盖式 latest 外，再存一份带
-            // 时间戳的副本到 .history/（SHA-1 去重，与上一份相同则跳过）。best-effort。
-            snapshotRunJson({ reportTaskDir, taskName: opts.taskName, env: opts.env, content: runContent });
-          } catch {
-            // best-effort: still emit the reduced result even if the write fails
-          }
-          controller.enqueue(`data: ${JSON.stringify({ type: 'run_json', data: JSON.stringify(reduced) })}\n\n`);
-          controller.close();
-          return;
-        }
-        controller.enqueue(value);
-        // Parse forwarded frames to accumulate agent text (source of @@RESULT lines).
-        frameBuf += value;
-        const frames = frameBuf.split('\n\n');
-        frameBuf = frames.pop() || '';
-        for (const f of frames) {
-          const line = f.replace(/^data:\s?/, '').trim();
-          if (!line) continue;
-          try {
-            const evt = JSON.parse(line);
-            if (evt?.type === 'text') textAcc += evt.data || '';
-          } catch {
-            // ignore non-JSON frames
-          }
-        }
-      } catch (e) {
-        controller.error(e);
-      }
-    },
-    cancel(reason) {
-      reader.cancel(reason);
-    },
-  });
-}
-
-/**
- * 报告步收口：报告 .md 全靠 report 步的 AI 用 Write 落盘（见 reportPrompt 落点）。AI 偶发
- * 只产摘要不调 Write → 步骤照样以「流结束无 error」标 done，结果「已完成」却无报告文档。
- * 这里在流结束时校验 `{task}-{env}.md` 是否真存在，缺失就补发一条 error 帧——前端据此把
- * 报告步标「失败」（而非误报已完成），面板转入失败态提示「重跑」，让用户能重试。
- */
-export function wrapReportStream(
-  src: ReadableStream<string>,
-  opts: { projectPath: string; taskName: string; env: string },
-): ReadableStream<string> {
-  const reader = src.getReader();
-  return new ReadableStream<string>({
-    async pull(controller) {
-      try {
-        const { done, value } = await reader.read();
-        if (done) {
-          const reportAbs = path.join(opts.projectPath, artifactPaths(opts.taskName, opts.env).report);
-          if (!fs.existsSync(reportAbs)) {
-            controller.enqueue(`data: ${JSON.stringify({ type: 'error', data: '测试报告文档未生成（AI 未写出 .md），请点「重跑」重试。' })}\n\n`);
-          }
-          controller.close();
-          return;
-        }
-        controller.enqueue(value);
-      } catch (e) {
-        controller.error(e);
-      }
-    },
-    cancel(reason) {
-      reader.cancel(reason);
-    },
-  });
-}
-
-/**
- * 用例设计步收口:透传全部帧;流结束时把该任务【打了「回归测试」标签的用例】自动 upsert 进
- * 项目级回归用例库(需求:每个任务在「用例设计完成后」自动沉淀回归用例;详见
- * docs/exec-plans/active/regression-library.md)。
- *
- * best-effort:入库失败一律静默,绝不阻塞用例设计步本身完成(库是增强特性)。upsert by 来源
- * 任务(depositTask 内)保证重复跑/修订不产生重复。保留任务名 `回归用例库` 自身不入库(它是
- * 重跑聚合的产物、不是真实测试任务),避免库自我递归。
- */
-export function wrapCasesStream(
-  src: ReadableStream<string>,
-  opts: { projectPath: string; taskName: string },
-): ReadableStream<string> {
-  const reader = src.getReader();
-  return new ReadableStream<string>({
-    async pull(controller) {
-      try {
-        const { done, value } = await reader.read();
-        if (done) {
-          try {
-            if (opts.taskName !== REGRESSION_LIBRARY_TASK) {
-              const casesAbs = path.join(opts.projectPath, artifactPaths(opts.taskName).cases);
-              const cases = readTaskCases(casesAbs);
-              if (cases.length) {
-                const r = depositTask(opts.projectPath, opts.taskName, cases);
-                void appendAudit(opts.projectPath, opts.taskName, {
-                  action: 'deposit-library',
-                  mode: 'auto',
-                  step: 'cases',
-                  detail: `回归用例库自动入库:新增 ${r.added} 条、替换旧 ${r.removed} 条,库共 ${r.total} 条`,
-                });
-                controller.enqueue(`data: ${JSON.stringify({ type: 'library_updated', data: JSON.stringify(r) })}\n\n`);
-              }
-            }
-          } catch {
-            // 入库 best-effort:失败不影响用例设计步完成
-          }
-          controller.close();
-          return;
-        }
-        controller.enqueue(value);
-      } catch (e) {
-        controller.error(e);
-      }
-    },
-    cancel(reason) {
-      reader.cancel(reason);
-    },
-  });
-}
 
 /**
  * AI 测试工作台 · 步骤执行路由（Phase 2 · 移植 ai-lab-test-framework 执行流程）。
@@ -260,6 +55,10 @@ export function wrapCasesStream(
  */
 
 export async function POST(req: Request): Promise<Response> {
+  // 层①补漏(见 rounds.ts 三层收口):执行步在建流【之前】早退失败(可达性闸门 503 /
+  // 兜底 500)时,轮次已被 library/run 建为 running、keeper 尚未创建——若押前端 settle,
+  // 客户端恰在此刻死亡就孤儿。在 try 内 roundId 就位后赋值,两处失败出口调用。
+  let settleRoundOnFailure: () => void = () => {};
   try {
     const body = await req.json().catch(() => ({}));
     const projectPath: string | undefined = body.projectPath;
@@ -269,6 +68,10 @@ export async function POST(req: Request): Promise<Response> {
     const envArg: string = body.env || 'local';
     const model: string | undefined = body.model;
     const providerId: string | undefined = body.providerId;
+    // 使用统计的任务身份（workbench 任务 UUID）。旧前端不带 → 跳过埋点（宁缺毋错，
+    // taskName 仅项目内唯一、不能冒充 id）。
+    const taskId: string | null =
+      typeof body.taskId === 'string' && body.taskId.trim() ? body.taskId.trim().slice(0, 128) : null;
     // Free-text 追加指令 from the 测试对话 composer (additive; only affects this run's prompt).
     const extraInstruction: string | undefined =
       typeof body.extraInstruction === 'string' && body.extraInstruction.trim() ? body.extraInstruction : undefined;
@@ -283,6 +86,14 @@ export async function POST(req: Request): Promise<Response> {
     // 执行方式(执行前确认弹窗):true=独立窗口可见运行(有头),false/缺省=后台无头运行。
     // 仅「测试执行」步注入 Playwright,故只对该步生效。
     const headed: boolean = body.headed === true;
+    // 回归轮次号(v2):仅回归用例库的轮次化执行传入——执行/报告产物落 report/{task}/{roundId}/
+    // 子目录,同环境多轮互不覆盖。普通任务禁止传(避免任意任务产物被改道)。
+    const roundId: string | undefined =
+      typeof body.roundId === 'string' && body.roundId.trim() ? body.roundId.trim() : undefined;
+    // 回归执行「优先脚本重放」开关(发起弹窗透传;缺省开)。false = 全部走 AI(排障/对照用)。
+    const scriptFirst: boolean = body.scriptFirst !== false;
+    // 任务级「沉淀回归脚本」开关。缺省 true —— 存量任务与旧客户端不传该字段,行为必须不变。
+    const depositScripts: boolean = body.depositScripts !== false;
 
     if (!projectPath || typeof projectPath !== 'string') {
       return new Response(JSON.stringify({ error: 'projectPath is required' }), {
@@ -297,6 +108,21 @@ export async function POST(req: Request): Promise<Response> {
         status: 400,
         headers: { 'Content-Type': 'application/json' },
       });
+    }
+    // roundId 同样进产物路径(report/{task}/{roundId}/) → 同 taskName 一样做段安全校验;
+    // 且只允许保留任务名使用(轮次是回归用例库的概念)。
+    if (roundId && (isUnsafeSegment(roundId) || taskName !== REGRESSION_LIBRARY_TASK)) {
+      return new Response(JSON.stringify({ error: 'invalid roundId' }), {
+        status: 400,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+    if (step === 'execution' && roundId && projectPath && typeof projectPath === 'string') {
+      const p = projectPath;
+      const rid = roundId;
+      settleRoundOnFailure = () => {
+        try { finishRound(p, rid, { status: 'aborted', ifRunning: true }); } catch { /* 读侧心跳兜底 */ }
+      };
     }
 
     // Resolve the target env from the project's exported environments.json
@@ -319,6 +145,8 @@ export async function POST(req: Request): Promise<Response> {
     if (step === 'execution' && baseUrl && /^https?:\/\//i.test(baseUrl)) {
       const gate = await probeUrlWithRetry(baseUrl, { attempts: 3, timeoutMs: 5000, delayMs: 800, signal: req.signal });
       if (!gate.reachable) {
+        // 轮次执行被闸门拦下 = 本轮没跑起来,服务端直接按中断收口(不押前端 settle 到达)。
+        settleRoundOnFailure();
         const reason = gate.last.error ? `（${gate.last.error}）` : '';
         const msg = `被测系统无法访问：已连续尝试 ${gate.attempts} 次仍无法连接 ${baseUrl}${reason}。请检查被测系统是否已正常启动、被测链接是否正确，确认可访问后再点「重跑」重试。`;
         return new Response(JSON.stringify({ error: msg }), {
@@ -351,11 +179,40 @@ export async function POST(req: Request): Promise<Response> {
       if (step === 'requirement' && requirementMode === 'generate-md') requirementSourcePath = origSource;
       else if (step === 'cases' && requirementMode === 'use-original') requirementSourcePath = origSource;
     }
-    const { systemPrompt, prompt, needsPlaywright } = buildStep(step, { taskName, env, baseUrl, extraInstruction, reuseImported, requirementMode, requirementSourcePath, hasLoginState, loginCredentials });
+    // ── 回归轮次 · 脚本重放优先(阶段 A)规划 ──────────────────────────────
+    // 仅 回归用例库+roundId+开关开 时生效:按当轮快照判定哪些用例有合格脚本(资格五道闸,
+    // 见 resolveReplayPlan),并按 manifest 归属拿 .generation.lock(锁忙 → 该组降级走 AI)。
+    // 锁的释放归 buildScriptPhaseStream 收尾(流关闭/取消/异常均触发,幂等)。
+    let replay: { items: ReplayPlanItem[]; release: () => void; totalCases: number } | null = null;
+    if (step === 'execution' && taskName === REGRESSION_LIBRARY_TASK && roundId && scriptFirst) {
+      try {
+        const snapshot = readRoundSnapshot(projectPath, roundId);
+        if (snapshot && Array.isArray(snapshot.cases) && snapshot.cases.length) {
+          const plan = resolveReplayPlan(projectPath, env, candidatesFromSnapshot(snapshot));
+          if (plan.eligible.length) {
+            const locks = acquireReplayLocks(projectPath, env, plan.eligible);
+            if (locks.locked.length) {
+              replay = { items: locks.locked, release: locks.release, totalCases: snapshot.cases.length };
+            } else {
+              locks.release();
+            }
+          }
+        }
+      } catch (e) {
+        // 规划失败不阻塞轮次:回退全 AI 执行(行为与关闭开关一致)。
+        console.warn('[script-replay] 重放规划失败,本轮全部走 AI:', e);
+        replay = null;
+      }
+    }
+
+    const { systemPrompt, prompt, needsPlaywright } = buildStep(step, {
+      taskName, env, baseUrl, extraInstruction, reuseImported, requirementMode, requirementSourcePath, hasLoginState, loginCredentials, roundId,
+      scriptDone: replay ? { ids: replay.items.map((i) => i.runId), total: replay.totalCases } : undefined,
+    });
 
     let mcpServers: Record<string, MCPServerConfig> | undefined;
     if (needsPlaywright) {
-      const evidenceDir = artifactPaths(taskName, env).evidenceDir;
+      const evidenceDir = artifactPaths(taskName, env, roundId).evidenceDir;
       // Pass the captured storageState so the AI starts logged in (set up in 设置·测试账号).
       // headed: 用户在执行前确认弹窗选了「独立窗口可见运行」→ 弹出可见浏览器窗口(打包态走系统 Chrome)。
       mcpServers = { playwright: buildPlaywrightMcp(projectPath, evidenceDir, resolved.storageStatePath, { headed }) };
@@ -368,7 +225,9 @@ export async function POST(req: Request): Promise<Response> {
     req.signal.addEventListener('abort', () => abortController.abort());
 
     const runStartMs = Date.now();
-    const stream = streamClaude({
+    // AI 智能体流改为【惰性】工厂:脚本重放阶段存在时,等阶段 A 跑完才创建(避免脚本与
+    // AI 并发操作同一被测系统);全部用例被脚本覆盖时根本不创建(整轮零模型消耗)。
+    const makeAgentStream = () => streamClaude({
       prompt,
       // Synthetic id — used only as a label; streamClaudeSdk does not persist it.
       sessionId: `test-${step}-${taskName}`,
@@ -384,6 +243,24 @@ export async function POST(req: Request): Promise<Response> {
       bypassPermissions: true,
       autoTrigger: true,
     });
+    let stream: ReadableStream<string>;
+    if (replay && roundId) {
+      const remaining = replay.totalCases - replay.items.length;
+      const phaseStream = buildScriptPhaseStream({
+        projectPath,
+        env,
+        roundId,
+        items: replay.items,
+        totalCases: replay.totalCases,
+        abortSignal: abortController.signal,
+        closingNote: remaining <= 0 ? '✅ 本轮全部用例已由脚本重放完成，未启动 AI 执行。' : undefined,
+        release: replay.release,
+      });
+      // 剩余用例 >0 → 阶段 A 后惰性接 AI;=0 → 只有阶段 A(归约器在流末照常落 run.json)。
+      stream = remaining > 0 ? concatSseStreams(phaseStream, makeAgentStream) : phaseStream;
+    } else {
+      stream = makeAgentStream();
+    }
 
     // 有头请求但本机定位不到完整浏览器(打包态随包仅无头 shell + 没装 Chrome)→ buildPlaywrightMcp
     // 已自动回落无头;这里据同一判定补发一条提示帧,让用户知道本次未弹可见窗口、为什么。
@@ -392,15 +269,76 @@ export async function POST(req: Request): Promise<Response> {
       ? `data: ${JSON.stringify({ type: 'exec_notice', data: 'headed_downgraded_no_chrome' })}\n\n`
       : undefined;
 
+    // 使用统计上下文（缺 taskId 则为 undefined → 所有埋点跳过）
+    const stats: StepStats | undefined = taskId
+      ? { taskId, model, providerId, stepStartMs: runStartMs, aborted: () => abortController.signal.aborted }
+      : undefined;
+
     // Execution step: wrap to sweep evidence + reduce/persist run.json + emit run_json.
     // Report step: wrap to verify the .md was actually written (else emit error → 失败).
+    // Requirement/cases steps: 仅观测包装（step_completed / cases_generated 埋点），
+    // 不改变任何对客户端可见的行为；无 taskId 时保持原样直通。
     const finalStream =
       step === 'execution'
-        ? wrapExecutionStream(stream, { projectPath, taskName, env, runStartMs, leadingFrame })
+        ? wrapExecutionStream(stream, {
+            projectPath,
+            taskName,
+            env,
+            runStartMs,
+            leadingFrame,
+            // 逐条增量生成 + 收口入队都要用它调模型(stats 只在带 taskId 时才有,不能依赖)。
+            model,
+            providerId,
+            depositScripts,
+            stats,
+            roundId,
+            traceRedactions: [
+              { value: projectPath, replacement: '${PROJECT_ROOT}' },
+              { value: baseUrl, replacement: '${BASE_URL}' },
+              { value: resolved.storageStatePath, replacement: '${STORAGE_STATE}' },
+              { value: resolved.loginAccount?.username, replacement: '${TEST_USERNAME}' },
+              { value: resolved.loginAccount?.password, replacement: '${TEST_PASSWORD}' },
+            ],
+          })
         : step === 'report'
-          ? wrapReportStream(stream, { projectPath, taskName, env })
-          : step === 'cases'
-            ? wrapCasesStream(stream, { projectPath, taskName })
+          ? wrapReportStream(stream, {
+              projectPath,
+              taskName,
+              env,
+              model,
+              providerId,
+              aborted: () => abortController.signal.aborted,
+              stats,
+              roundId,
+              depositScripts,
+            })
+          : stats
+            ? observeStream(
+                step === 'cases' ? wrapCasesStream(stream, { projectPath, taskName }) : stream,
+                {
+                  aborted: stats.aborted,
+                  cleanDoneFrame: () => stepStatsFrame(step, stats),
+                  onCleanDone: () => {
+                    recordStatsEvents([
+                      buildStepCompleted({
+                        taskId: stats.taskId,
+                        projectPath,
+                        taskName,
+                        env,
+                        step,
+                        stepStartMs: stats.stepStartMs,
+                        model,
+                        providerId,
+                      }),
+                    ]);
+                    if (step === 'cases') {
+                      recordCasesGenerated({ taskId: stats.taskId, projectPath, taskName, sinceMs: stats.stepStartMs, model });
+                    }
+                  },
+                }
+              )
+            : step === 'cases'
+              ? wrapCasesStream(stream, { projectPath, taskName })
             : stream;
 
     return new Response(finalStream, {
@@ -411,6 +349,8 @@ export async function POST(req: Request): Promise<Response> {
       },
     });
   } catch (error) {
+    // 建流之前抛错(建流之后 keeper 已接管;重复 settle 有 ifRunning 幂等保护,无害)。
+    settleRoundOnFailure();
     const message = error instanceof Error ? error.message : 'Internal server error';
     return new Response(JSON.stringify({ error: message }), {
       status: 500,

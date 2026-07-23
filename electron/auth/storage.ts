@@ -168,6 +168,25 @@ export function clearSelectedConfigId(): void {
   safeUnlink(anlcodePath('selectedConfigId'));
 }
 
+// ── Test-usage upload watermark ───────────────────────────────────────────────
+
+/**
+ * 测试用量上报的水位：已成功上报到的北京自然日（'YYYY-MM-DD'）。无敏感，明文。
+ * 读不到 → null（首次上报，回退到近 N 天）。离线期间不推进，下次在线自动回补。
+ */
+export function loadTestUsageWatermark(): string | null {
+  try {
+    const raw = fs.readFileSync(anlcodePath('testUsageWatermark'), 'utf-8').trim();
+    return raw || null;
+  } catch {
+    return null;
+  }
+}
+
+export function saveTestUsageWatermark(date: string): void {
+  fs.writeFileSync(anlcodePath('testUsageWatermark'), date, 'utf-8');
+}
+
 // ── Cleanup paths ────────────────────────────────────────────────────────────
 
 /**

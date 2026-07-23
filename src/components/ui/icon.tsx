@@ -11,6 +11,7 @@ export {
   At,
   Bell,
   Book,
+  Bug,
   Brain,
   CaretDown,
   CaretUp,
@@ -82,6 +83,7 @@ export {
   Stop,
   Storefront,
   Sun,
+  Table,
   TelegramLogo,
   Terminal,
   Translate,
@@ -98,6 +100,8 @@ export {
   GitCommit,
   CloudArrowUp,
   ArrowsInLineVertical,
+  Prohibit,
+  Pulse,
   PushPin,
 } from "@phosphor-icons/react";
 

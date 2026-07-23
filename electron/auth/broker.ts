@@ -107,6 +107,24 @@ function getJson<T>(path: string): Promise<BrokerResponse<T>> {
   });
 }
 
+/**
+ * 从嵌入式 Next 服务读取「按天脱敏聚合」的测试用量（loopback GET）。
+ * 主进程读不了 SQLite（better-sqlite3 ABI 绑定在 Next 服务），故经 127.0.0.1
+ * 让 Next 侧用现有聚合器把 test_stats_events 按北京自然日重算后返回。
+ * 返回的 days[] 即上报体的 days 字段，主进程原样转发（只补 device_id/app_version/tz）。
+ */
+export async function fetchDailyRollupFromServer(
+  from: string,
+  to: string,
+): Promise<{ days: unknown[] }> {
+  const q = `from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`;
+  const r = await getJson<{ days?: unknown[] }>(`/api/test/stats/daily-rollup?${q}`);
+  if (!r.ok) {
+    throw new Error(`daily-rollup fetch failed: status=${r.status}`);
+  }
+  return { days: r.body?.days ?? [] };
+}
+
 /** Push the full ManagedProviderRow list. Returns {upserted, pruned}. */
 export async function syncManagedProvidersToServer(
   rows: ManagedProviderRow[],

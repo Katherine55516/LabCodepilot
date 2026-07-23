@@ -27,6 +27,11 @@ import {
 } from './auth/login-window';
 import { startBackgroundPolling, stopBackgroundPolling } from './auth/poller';
 import {
+  startTestUsageScheduler,
+  stopTestUsageScheduler,
+  scheduleTestUsageUpload,
+} from './auth/test-usage-uploader';
+import {
   modelConfigToManagedProviderRow,
 } from './auth/managed-providers';
 import {
@@ -1164,6 +1169,9 @@ async function bootAccountState(): Promise<void> {
           broadcastAuthChange();
         },
       });
+      // 测试用量：启动每日 10/16/20 定时上报 + 启动即触发一次（仅登录态生效）。
+      startTestUsageScheduler();
+      scheduleTestUsageUpload('boot');
     }
   } catch (e) {
     logError('bootAccountState fatal error:', (e as Error).message);
@@ -1199,12 +1207,16 @@ async function postLoginSequence(): Promise<void> {
       broadcastAuthChange();
     },
   });
+  // 测试用量：登录后启动定时器 + 触发一次上报。
+  startTestUsageScheduler();
+  scheduleTestUsageUpload('login');
   broadcastAuthChange();
 }
 
 /** Full post-logout pass — invoked after the user explicitly logs out. */
 async function postLogoutSequence(): Promise<void> {
   stopBackgroundPolling();
+  stopTestUsageScheduler();
   try {
     await purgeManagedProvidersOnServer();
   } catch (e) {
@@ -2577,6 +2589,13 @@ app.whenReady().then(async () => {
       if (e instanceof NetworkError) return { ok: false as const, kind: 'network' as const, error: e.message };
       return { ok: false as const, error: e instanceof Error ? e.message : String(e) };
     }
+  });
+
+  // 打开测试模块触发的后台用量上报：fire-and-forget，绝不阻塞 renderer。
+  // 实际上报在主进程去抖后异步进行（未登录/离线静默跳过）。
+  ipcMain.handle('auth:upload-test-usage', () => {
+    scheduleTestUsageUpload('panel-open');
+    return { ok: true as const };
   });
 
   // Native auto-updater (research-platform V2): register renderer IPC and wire

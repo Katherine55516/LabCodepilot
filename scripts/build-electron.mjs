@@ -53,6 +53,25 @@ function obfuscateFile(file) {
   console.log(`Obfuscated ${file} (${(after / 1024).toFixed(0)} KB)`);
 }
 
+/**
+ * 产物完整性闸：`next build` 必须产出 standalone/server.js（Electron 主进程靠它拉起内嵌
+ * 服务器）。缺它就是坏包 —— app 一启动即 `ERR_MODULE_NOT_FOUND: standalone/server.js`。
+ *
+ * 为什么退出码不够：真机踩坑（2026-07-17）—— 跨境链路把 `next build` 的某步 TLS 连接反复
+ * 掐断，构建仍以退出码 0 收场，却没产出 standalone/，`&&` 链照常往下打包，最终产出一个
+ * 能装、一启动就崩的 DMG。CI 和同事本地都可能中招，故在此显式断言、缺失即 fail-fast。
+ */
+function assertBuildArtifacts() {
+  const serverJs = '.next/standalone/server.js';
+  if (!fs.existsSync(serverJs)) {
+    console.error(`\n✗ 构建产物不完整：缺少 ${serverJs}`);
+    console.error('  next build 可能未真正成功（本环境常见：跨境链路把构建期请求掐断，');
+    console.error('  但退出码仍为 0）。请清理后重试：rm -rf .next release && npm run electron:pack:mac');
+    process.exit(1);
+  }
+  console.log(`✓ 构建产物校验通过：${serverJs}`);
+}
+
 // Replace symlinks in standalone with real copies so electron-builder can package them
 function resolveStandaloneSymlinks() {
   const standaloneModules = '.next/standalone/.next/node_modules';
@@ -125,6 +144,9 @@ async function buildElectron() {
   } else {
     console.log('Obfuscation skipped (DISABLE_OBFUSCATION=1)');
   }
+
+  // 产物完整性闸：standalone/server.js 缺失即坏包，fail-fast 别让它进 electron-builder。
+  assertBuildArtifacts();
 
   // Fix standalone symlinks after next build
   resolveStandaloneSymlinks();

@@ -313,6 +313,57 @@ describe("reduceResults — caseIds 兜底补全（漏执行用例 → 报告以
   });
 });
 
+// 真机事故（forum-xc-sit / 20260722测试用例）：用例 id 带弯引号 ‘码’，模型判定 pass 且
+// @@RESULT 合规，只是把引号抄成了 ASCII '码' → 精确比对认不出 → pass 被丢弃、用例补成
+// blocked「未执行」→ 报告写「回归集未全过（0/1），存在阻塞级失败，不可发版」。
+describe("reduceResults — id 印刷体标点漂移仍认回用例（真机事故回归）", () => {
+  const ID = "1108941+菜单栏-更多-‘码’上合规的子标题更改";
+  const EMITTED = "1108941+菜单栏-更多-'码'上合规的子标题更改";
+
+  it("弯引号 id 收到直引号结果 ⇒ 记 pass，而不是 blocked「未执行」", () => {
+    const run = reduceResults(
+      [{ id: EMITTED, status: "pass", actual: "子标题已改为「以码为基，以规为界」" }],
+      { ...OPTS, caseIds: [ID], suiteIds: [ID] },
+    );
+    assert.equal(run.tests.length, 1);
+    assert.equal(run.tests[0].status, "pass");
+    assert.equal(run.tests[0].id, ID, "落盘 id 必须是 cases.json 的权威写法");
+    assert.ok(!run.tests[0].notExecuted);
+    assert.equal(run.tests[0].actual, "子标题已改为「以码为基，以规为界」");
+    assert.equal(run.status, "done");
+    assert.equal(run.passStr, "1/1");
+    assert.equal(run.suitePassStr, "1/1", "回归集应判全过（不再误报不可发版）");
+  });
+
+  it("双轴/回归集口径按权威 id 关联（回贴后的 id 要能被 verificationById 认到）", () => {
+    const run = reduceResults(
+      [{ id: EMITTED, status: "pass" }],
+      { ...OPTS, caseIds: [ID], verificationById: { [ID]: "回归基线" } },
+    );
+    assert.equal(run.regressionTotal, 1);
+    assert.equal(run.funcPassStr, "N/A");
+  });
+
+  it("歧义时不猜：两条用例规范化后撞键 ⇒ 仍按未执行兜底，不把结果记到任一条头上", () => {
+    const run = reduceResults(
+      [{ id: "TC’x‘", status: "pass" }],
+      { ...OPTS, caseIds: ["TC‘x’", "TC'x'"] },
+    );
+    assert.deepEqual(run.tests.map((t) => t.status), ["blocked", "blocked"]);
+    assert.ok(run.tests.every((t) => t.notExecuted));
+  });
+
+  it("编造的用例仍被丢弃（回贴不得成为塞进多余结果的后门）", () => {
+    const run = reduceResults(
+      [{ id: "完全不相干的用例", status: "pass" }],
+      { ...OPTS, caseIds: [ID] },
+    );
+    assert.equal(run.tests.length, 1);
+    assert.equal(run.tests[0].status, "blocked");
+    assert.ok(run.tests[0].notExecuted);
+  });
+});
+
 describe("reduceResults — 回归集口径（suiteIds = tags 含「回归测试」,发版红线）", () => {
   it("按 suiteIds 独立计数,与全量/功能验证口径并存", () => {
     const run = reduceResults(
@@ -356,5 +407,36 @@ describe("reduceResults — 回归集口径（suiteIds = tags 含「回归测试
     assert.equal(run.suiteCounts, undefined);
     assert.equal(run.suitePassStr, undefined);
     assert.ok(!JSON.stringify(run).includes("suiteCounts"));
+  });
+});
+
+describe("reduceResults — taskCounts 按来源任务小计（v2 回归轮次分组）", () => {
+  it("传 taskOf → 按任务分组四态;缺映射的 runId 归「未知来源」;不传 → 字段缺省", () => {
+    const raw = [
+      { id: "TC-001", status: "pass" },
+      { id: "设备预约::TC-001", status: "fail" },
+      { id: "TC-002", status: "pass" },
+      { id: "野生ID", status: "pass" },
+    ];
+    const withTask = reduceResults(raw, {
+      module: "回归用例库", env: "local", time: "t",
+      taskOf: { "TC-001": "登录鉴权", "设备预约::TC-001": "设备预约", "TC-002": "设备预约" },
+    });
+    assert.ok(withTask.taskCounts);
+    assert.deepEqual(withTask.taskCounts!["登录鉴权"], { total: 1, pass: 1, fail: 0, partial: 0, blocked: 0 });
+    assert.deepEqual(withTask.taskCounts!["设备预约"], { total: 2, pass: 1, fail: 1, partial: 0, blocked: 0 });
+    assert.deepEqual(withTask.taskCounts!["未知来源"], { total: 1, pass: 1, fail: 0, partial: 0, blocked: 0 });
+    // 不传 taskOf → 无 taskCounts(普通任务/旧消费方零影响)
+    const without = reduceResults(raw, { module: "m", env: "local", time: "t" });
+    assert.equal(without.taskCounts, undefined);
+  });
+
+  it("caseIds 对齐补全的「未执行」blocked 同样计入所属任务小计", () => {
+    const out = reduceResults([{ id: "TC-001", status: "pass" }], {
+      module: "回归用例库", env: "local", time: "t",
+      caseIds: ["TC-001", "TC-002"],
+      taskOf: { "TC-001": "登录鉴权", "TC-002": "登录鉴权" },
+    });
+    assert.deepEqual(out.taskCounts!["登录鉴权"], { total: 2, pass: 1, fail: 0, partial: 0, blocked: 1 });
   });
 });

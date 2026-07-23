@@ -42,6 +42,26 @@ const nextConfig: NextConfig = {
   // click handlers. See the warning printed at dev startup:
   //   "Blocked cross-origin request to Next.js dev resource /_next/webpack-hmr from 127.0.0.1"
   allowedDevOrigins: ['127.0.0.1', 'localhost'],
+  // dev 专用:把 playwright MCP 的输出目录从 webpack 文件监听里排除。CDP/playwright 验证
+  // 时 MCP 会把快照 yml / console log / 截图持续写进仓库根的 `.playwright-mcp/`,Tailwind v4
+  // content 扫描 + webpack watch 将其视为源码变化 → 重编译 → 页面 HMR/RSC 刷新 → 又产生
+  // console 日志写入 → **自激重编译死循环**(表象:页面永远转圈、[Fast Refresh] rebuilding
+  // 每 0.5s 刷屏、大 chunk 下载途中被重编译截断报 SyntaxError/ChunkLoadError)。
+  // 注意合并姿势:Next 默认 ignored 是**RegExp**,而 webpack schema 的数组形式只接受字符串
+  // ——不能把 RegExp 塞进数组(会 ValidationError 起不来),按既有类型分别合并。
+  webpack: (config, { dev }) => {
+    if (dev) {
+      const extra = /[\\/]\.playwright-mcp[\\/]/;
+      const prev = config.watchOptions?.ignored;
+      const ignored =
+        prev instanceof RegExp ? new RegExp(`${prev.source}|${extra.source}`)
+        : Array.isArray(prev) ? [...prev, '**/.playwright-mcp/**']
+        : typeof prev === 'string' ? [prev, '**/.playwright-mcp/**']
+        : extra;
+      config.watchOptions = { ...config.watchOptions, ignored };
+    }
+    return config;
+  },
   // serverExternalPackages: keep these in node_modules at runtime instead of bundling.
   // - better-sqlite3 / zlib-sync: native modules, can't be bundled
   // - discord.js / @discordjs/ws: dynamic require chain
@@ -69,6 +89,14 @@ const nextConfig: NextConfig = {
     // 打包版「导入 docx 需求」失败而 dev 正常。标记 external + 下方 force-include 完整依赖
     // 闭包，配合 import 路由的动态 import('mammoth') 在运行时直接 require。
     'mammoth',
+    // @playwright/mcp：script-runner.ts 里 `createRequire(...).resolve('@playwright/mcp')`
+    // 只为拿到包所在目录（再拼 node_modules/playwright/cli.js 去 spawn），从不真正加载它。
+    // 但 webpack 把 createRequire 的 .resolve() 当静态依赖跟了进去，一路解析到嵌套的
+    // playwright-core/lib/coreBundle.js，那里 require 的 'chromium-bidi/lib/cjs/...' 只在
+    // playwright 自己 bundle 后才存在 → `next build --webpack` 报 Module not found 而失败。
+    // dev 用 Turbopack 不做这层解析，所以只在打包时炸。标记 external 让 webpack 不进包，
+    // 运行时按真实 node_modules 解析；整包已由下方 outputFileTracingIncludes 复制进 standalone。
+    '@playwright/mcp',
     '@anthropic-ai/claude-agent-sdk',
     '@anthropic-ai/claude-agent-sdk-darwin-arm64',
     '@anthropic-ai/claude-agent-sdk-darwin-x64',

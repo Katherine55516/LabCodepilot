@@ -28,6 +28,24 @@
 **非弹窗触发**（顶部「运行任务」全流水线、cases→execution 的 auto-chain 接力）**不弹窗**，
 复用上次选择（`execModeRef`，默认 headless），不打断流水线、零回归。
 
+## 任务级目标地址（2026-07-23 追加）
+
+新建任务弹窗的「目标（入口 URL / 鉴权）」输入框接线为 **任务级 `TaskState.targetUrl`**
+（此前是无状态摆设）。执行步地址优先级变为三层：
+
+```
+弹窗显式确认(opts.baseUrl) > 任务 targetUrl > 不传(服务端回落 environments.json)
+```
+
+- 收口在 `runStep`：非弹窗路径（运行任务/auto-chain/排队）此前从不带 baseUrl，现在任务有
+  targetUrl 时自动带上 —— 任务填了地址即「直测该 URL」。
+- ExecConfirmModal 预填改为 `targetUrl || envCfg.frontendBaseUrl`；**回写规则**（runExecutionConfirmed）：
+  确认地址 ≠ 环境地址 → 记为任务覆盖；相同 → 清除覆盖（回归跟随环境）。无条件回写会让存量
+  任务手动执行一次就把当时的环境地址钉死成任务地址，之后改环境配置不再跟随（回归风险）。
+- 流程 header 的 🎯 优先显示任务地址并挂「任务」badge（i18n `test.env.taskTarget*`）。
+- 边界：登录态(storageState/密码)仍按项目环境解析注入，任务 URL 只覆盖地址；未配置环境的
+  envWarn 拦截保留（用户拍板），弹窗里「仍要运行」可继续；回归轮次不涉及（走发起弹窗的环境选择）。
+
 ## 关键设计：有头模式的浏览器二进制矩阵
 
 `--browser` **始终 `chromium`**；差异只在 `--executable-path` 指谁 + 是否 `--headless`：
@@ -57,6 +75,12 @@ found` 把整轮执行打崩。改为先用 `resolveSystemChrome()` 自己定位
 - `effectiveHeaded = headed && (!headlessShell || !!systemChrome)` → 打包态有头但没 Chrome ⇒ false（回落）
 - `executablePath = effectiveHeaded ? systemChrome : headlessShell`（dev 两态均为 null）
 - `--headless` 仅在 `!effectiveHeaded` 时加；`PLAYWRIGHT_BROWSERS_PATH` 仅「无头 + 用随包 shell」时注入
+- `alwaysLoad: true`（2026-07-11 修复）：Claude Code 2.1.203 起启用 tool search 时 MCP 工具
+  默认延迟加载（defer_loading），模型须先 ToolSearch 命中才能用。执行步的浏览器工具是硬前置——
+  实测网关模型在执行步反复 ToolSearch 空转、0/N 无进展，约 8 分钟后被 SDK 停滞看门狗 abort。
+  该字段经 `MCPServerConfig`（types）→ `toSdkMcpConfig`（claude-client）透传为 SDK
+  `McpStdioServerConfig.alwaysLoad`（= API `defer_loading:false`），强制工具进 turn-1 prompt。
+  副作用：会话启动阻塞等 server 连接（上限 5s）。单测：`test-playwright-mcp-alwaysload.test.ts`。
 
 ## API 合同
 
@@ -64,7 +88,8 @@ found` 把整轮执行打崩。改为先用 `resolveSystemChrome()` 自己定位
 - `headed?: boolean` — `true`=有头。**仅「测试执行」步生效**（只有它注入 Playwright），其它步忽略。
 - `baseUrl?: string` — 用户在弹窗确认/改写的被测链接。**显式给出时对本次运行最高优先级**
   （`overrideUrl || resolved.frontendBaseUrl`）。缺省回落 `environments.json` 解析值，
-  其它步不传 → 行为不变。
+  其它步不传 → 行为不变。前端在 runStep 收口时会把任务级 `targetUrl` 作为缺省填入本字段
+  （见上方「任务级目标地址」），服务端合同不变。
 
 ### `POST /api/test/probe`（新增路由）
 被测链接探活，服务端发起（避开浏览器端跨源限制）。探活本体在 `@/lib/test/probe`（`probeUrl`）。

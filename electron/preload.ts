@@ -160,6 +160,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
     refreshConfigs: () => ipcRenderer.invoke('auth:refresh-configs'),
     probe: () => ipcRenderer.invoke('auth:probe'),
     getUsage: () => ipcRenderer.invoke('auth:get-usage'),
+    // 打开测试模块时触发后台用量上报（fire-and-forget，主进程去抖后异步执行）。
+    uploadTestUsage: () => ipcRenderer.invoke('auth:upload-test-usage'),
     onChange: (callback: (state: unknown) => void) => {
       const listener = (_event: unknown, state: unknown) => callback(state);
       ipcRenderer.on('auth:changed', listener);

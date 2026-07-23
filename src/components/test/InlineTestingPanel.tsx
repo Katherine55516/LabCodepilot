@@ -1,13 +1,13 @@
 "use client";
 
-import { useState, useRef, useEffect, useMemo, type ReactNode } from "react";
+import { useState, useRef, useEffect, useMemo, Fragment, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { useRouter, usePathname } from "next/navigation";
 import dynamic from "next/dynamic";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { useTranslation } from "@/hooks/useTranslation";
-import { ListChecks, ChartBar, Gear, ArrowLeft, ArrowRight, FolderPlus, FolderOpen, Play, Stop, ArrowUp, SpinnerGap, Sparkle, Terminal, WarningCircle, Wrench, Trash, Desktop, Lightning, Plug, CheckCircle, File as FileIcon, FileArrowDown, NotePencil, DownloadSimple, Eye, X, CaretDown, CaretUp, Check, type Icon } from "@/components/ui/icon";
+import { ListChecks, ChartBar, Gear, ArrowLeft, ArrowRight, FolderPlus, FolderOpen, Play, Stop, ArrowUp, SpinnerGap, Sparkle, Terminal, WarningCircle, Wrench, Trash, Desktop, Lightning, Plug, CheckCircle, File as FileIcon, FileArrowDown, NotePencil, DownloadSimple, Eye, X, CaretDown, CaretUp, Check, Lock, PencilSimple, Plus, PushPin, Clock, MagnifyingGlass, Prohibit, ArrowClockwise, ArrowsClockwise, Bug, Warning, CaretRight, type Icon } from "@/components/ui/icon";
 import { MarkdownEditor } from "@/components/editor/MarkdownEditor.lazy";
 import type { TranslationKey } from "@/i18n";
 import { useNativeFolderPicker } from "@/hooks/useNativeFolderPicker";
@@ -18,10 +18,13 @@ import { ModelSelectorDropdown } from "@/components/chat/ModelSelectorDropdown";
 import { useProviderModels } from "@/hooks/useProviderModels";
 import { diffRuns, funcPassRateStr } from "@/lib/test/compare";
 import { parseExecProgress } from "@/lib/test/exec-progress";
+import { createExecLineBuffer, shouldAdoptPlaceholder, type ExecLine, type LiveResult, type LiveStatus } from "@/lib/test/exec-live";
 import { withDownstreamReset, runStartOptions, taskCategory, occupiedSlots, TASK_CATEGORY_ORDER, type TaskCategory } from "@/lib/test/step-status";
-import { REGRESSION_LIBRARY_TASK } from "@/lib/test/library-constants";
+import { REGRESSION_LIBRARY_TASK, REGRESSION_FULL_SUITE as REGRESSION_FULL_SUITE_NAME } from "@/lib/test/library-constants";
 import type { LoginStateInfo } from "@/lib/test/env-config";
 import type { RunHistoryEntry } from "@/lib/test/history";
+import { TestStatsView } from "@/components/test/TestStatsView";
+import { PromptDialog } from "@/components/ui/prompt-dialog";
 
 /**
  * Inline testing workbench (Phase 2 · 对话内嵌测试).
@@ -38,7 +41,7 @@ import type { RunHistoryEntry } from "@/lib/test/history";
  * Projects/tasks live in local component state (real input, not persisted yet).
  */
 
-type View = "dash" | "flow" | "report";
+type View = "dash" | "flow" | "report" | "stats";
 type ModalKind = "none" | "newTask" | "runStart" | "execConfirm" | "envWarn";
 // 执行方式:visible=独立窗口可见运行(有头),headless=后台无头运行(默认,更快)。
 type ExecMode = "headless" | "visible";
@@ -66,7 +69,66 @@ interface FourState { total: number; pass: number; fail: number; partial: number
 // 失败/部分通过用例的关键请求接口信息（执行阶段采集，进缺陷报告；镜像 reduce.ts ApiInfo）。
 interface ApiInfo { method?: string; url?: string; status?: number | string; requestBody?: string; responseBody?: string }
 // One executed case parsed from an execution @@RESULT frame (drives 报告 table).
-interface CaseResult { id: string; status: string; actual?: string; error?: string; evidence?: string[]; api?: ApiInfo }
+interface CaseResult { id: string; status: string; actual?: string; error?: string; evidence?: string[]; api?: ApiInfo; durationMs?: number }
+// ── 回归执行进展面板的实时状态(v2 二/三期后续) ────────────────────────────────
+// 数据全部来自执行步的 SSE 帧;**只活在内存**,切走/刷新即消失(用户明确要求不保留历史)。
+// 收口后的事实去「轮次报告」页看。
+//
+// ⚠ 对账锚点是 `tools`(tool_use 帧计数),不是 @@CASE_START/@@RESULT 的计数。后两者都是模型
+// 自由文本,同一次 markdown 装饰会把它们一起污染、让「背离」被掩盖;tool_use 是 SDK 结构化帧,
+// 与模型的格式漂移无关。这是 2026-07-10 事故留下的教训(见 lib/test/markers.ts)。
+type LiveEvtKind = "tool" | "ai" | "err" | "sys";
+interface LiveEvt { k: LiveEvtKind; text: string; status?: LiveStatus; lost?: boolean }
+
+interface LiveCase {
+  /** 执行结果里的 id(= @@CASE_START / @@RESULT 的 id)。缺 @@CASE_START 时按进度行序号兜底。 */
+  id: string;
+  index: number;
+  title: string;
+  events: LiveEvt[];
+  result?: LiveResult;
+  /** 跑完了却没收到可解析的判定 —— 不是「待执行」,这个区分正是事故难查的关键。 */
+  lost?: boolean;
+  startedAt: number;
+  ms?: number;
+}
+
+interface LibraryLive {
+  step: TestStep;
+  /** 本轮 roundId(执行面板「查看轮次报告」下钻到这一轮用)。 */
+  roundId?: string;
+  suiteName: string;
+  env: string;
+  /** 发起时确定的圈选条数(agg.total),进度分母。 */
+  total: number;
+  pre: LiveEvt[];
+  cases: LiveCase[];
+  curIdx: number;
+  /** tool_use 帧计数 —— 对账锚点。 */
+  tools: number;
+  started: number;
+  verdicts: number;
+  malformed: number;
+  four: FourState;
+  /** 执行步流末的权威归约(报告步那条必须忽略,否则会把盘面清零)。 */
+  runJson: FourState | null;
+  errored: boolean;
+  /** 用户点了「停止」——与 errored 的真实失败区分显示(已手动停止 vs 执行中断)。 */
+  stopped?: boolean;
+  /** 收口后的补充说明(如「报告步被停止,执行结果已保留」),渲染在收口 footer。 */
+  note?: string;
+  errorText?: string;
+  /** 最后一帧的时刻 —— 用于推断「收口中」(服务端做证据归集与归约时不发任何帧)。 */
+  lastFrameAt: number;
+  finished: boolean;
+}
+
+const EMPTY_FOUR: FourState = { total: 0, pass: 0, fail: 0, partial: 0, blocked: 0 };
+/** 最后一帧起超过这个时长仍无 run_json → 判定为「收口中」(服务端在归约,无帧)。 */
+const LIVE_SETTLE_MS = 1500;
+/** 收口态持续超过这个时长 → 提示「疑似卡住」。 */
+const LIVE_STUCK_MS = 90_000;
+
 // 用例设计阶段生成的一条测试用例(读 cases.json,镜像 ai-lab-test-framework)。在用例
 // 阶段详情卡展示。字段全可选 —— AI 产出可能有出入,渲染时按需兜底。
 interface GeneratedCase {
@@ -110,10 +172,40 @@ interface ReportEntry {
   /** 回归集 "pass/total"；pass < total 即未全过（发版红线）。 */
   suitePassStr?: string;
   tests: CaseResult[];
+  /** run.json 全文 SHA-1（与执行埋点同源）：把人工复核关联到确切执行轮。 */
+  runHash?: string;
   /** The full markdown report doc ({task}-{env}.md), if the report step wrote one. */
   markdown: string;
   /** The defect report ({task}-{env}-缺陷报告.md), if generated (第三交付物). */
   defectMarkdown: string;
+}
+
+type ScriptJobStatusView = "queued" | "running" | "done" | "partial" | "error" | "stale";
+type ScriptCaseStatusView = "verified" | "needs_review" | "failed" | "stale" | "outdated";
+interface ScriptManifestCaseView {
+  caseId: string;
+  file: string;
+  sourceTask?: string;
+  sourceCaseId?: string;
+  status: ScriptCaseStatusView;
+  usesMock: boolean;
+  error?: string;
+  validation?: { syntax: boolean; collected: boolean; replayed: boolean; warnings: string[]; error?: string };
+  /** 最近一次手动运行的失败原因（运行失败不改 status，故卡片只能靠它显示"为什么没变绿"）。 */
+  lastRunError?: string;
+  lastRunAt?: string;
+  /** 最近一次 AI 修复的结论（修了什么 / 为什么不是脚本缺陷），写给不会写代码的测试人员。 */
+  repairNote?: string;
+  /** 人工确认 mock 脚本通过的时刻（见 script-artifacts.ts 的字段注释）。 */
+  manualVerifiedAt?: string;
+}
+interface ScriptManifestView {
+  latestRunHash: string;
+  updatedAt?: string;
+  jobStatus: ScriptJobStatusView;
+  counts: { eligible: number; generated: number; verified: number; needsReview: number; failed: number };
+  cases: ScriptManifestCaseView[];
+  error?: string;
 }
 
 interface Project {
@@ -147,6 +239,24 @@ interface TaskState {
   requirementMode?: "generate-md" | "use-original";
   /** 保留的原始需求文档信息（导入需求时写入）：原文件名 + 扩展名，用于预览与定位需求来源文件。 */
   requirementOriginal?: { filename: string; ext: string };
+  /** 使用统计：各节点最近一次运行的服务端权威用时（ms）+ 所用模型（step_stats 帧写入，随 workbench 持久化）。 */
+  stepDurations?: Partial<Record<TestStep, number>>;
+  stepModels?: Partial<Record<TestStep, string>>;
+  /**
+   * 是否为本任务沉淀回归脚本（新建任务时选定，任务页可随时改）。
+   *
+   * 缺省（undefined）= 开启 —— 存量任务与旧持久化数据没有这个字段，必须保持原有行为，
+   * 不能因为加了开关就让老任务静默停止沉淀。故所有判定一律写 `!== false`。
+   */
+  depositScripts?: boolean;
+  /**
+   * 任务级被测入口地址（新建任务「目标」输入框；执行前确认弹窗改地址会按规则回写）。
+   *
+   * 执行步的地址优先级：弹窗显式确认 > 本字段 > 项目环境配置(environments.json)。
+   * 缺省（undefined）= 无任务级覆盖，跟随环境配置 —— 存量任务保持原行为。
+   * 回写规则见 runExecutionConfirmed：确认地址 ≠ 环境地址才记为覆盖；相同则清除覆盖。
+   */
+  targetUrl?: string;
 }
 const DEFAULT_TASK_STATE: TaskState = {
   stepStatus: { requirement: "idle", cases: "idle", execution: "idle", report: "idle" },
@@ -165,8 +275,48 @@ function makeTaskId(): string {
   }
 }
 
+/**
+ * 使用统计 · 前端埋点上报（fire-and-forget）。任何失败只吞掉，绝不影响测试主流程 /
+ * 用户操作。服务端 sanitize 会丢弃不合法条目（见 /api/test/stats POST）。
+ */
+function recordTestStat(events: Array<{
+  eventType: string;
+  projectPath: string;
+  taskId: string;
+  taskName?: string;
+  env?: string;
+  payload?: Record<string, unknown>;
+}>): void {
+  if (!events.length) return;
+  try {
+    // 服务端单请求上限 200（见 /api/test/stats POST）——删除大项目可能一次几十上百条
+    // task_deleted，分批发避免整批 400 全丢。
+    for (let i = 0; i < events.length; i += 200) {
+      void fetch("/api/test/stats", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ events: events.slice(i, i + 200) }),
+        keepalive: true, // 允许在页面卸载/导航时仍把事件发出去
+      }).catch(() => {});
+    }
+  } catch {
+    /* 上报失败静默 */
+  }
+}
+
 const INPUT =
   "w-full h-9 rounded-md border border-border bg-background px-2.5 text-xs text-foreground outline-none focus:border-primary";
+
+/** 毫秒 → 紧凑用时（1m 05s / 47s / 320ms）。使用统计的用时徽标 / 报告矩阵共用。 */
+function fmtDuration(ms: number): string {
+  if (!Number.isFinite(ms) || ms < 0) return "—";
+  if (ms < 1000) return `${Math.round(ms)}ms`;
+  const s = Math.round(ms / 1000);
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  const rem = s % 60;
+  return `${m}m ${String(rem).padStart(2, "0")}s`;
+}
 
 // Per-task workflow (no code analysis), ported from ai-lab-test-framework V0.3:
 // 需求分析 → 用例设计 → 测试执行 → 测试报告. Steps run in order; each reads the
@@ -348,6 +498,10 @@ export function InlineTestingPanel() {
   // Simulated progress % for non-execution running steps (no granular progress) — see effect below.
   const [simPct, setSimPct] = useState(0);
   const threadRef = useRef<HTMLDivElement>(null);
+  // 使用统计 · 流程节点运行中用时实时累计：记录每个 (taskId:step) 的起跑时刻 + 1s ticker
+  // 驱动重渲染。完成后展示服务端权威用时（stepDurations），运行中展示这里的本地累计。
+  const stepStartRef = useRef<Record<string, number>>({});
+  const [nowTick, setNowTick] = useState(0);
   // Tasks in "run all" mode (运行任务/批量): gated steps auto-approve + the chain runs
   // through to 报告 without waiting for 批准. Was a single id; now a set for parallel tasks.
   const autoRunIdsRef = useRef<Set<string>>(new Set());
@@ -412,6 +566,13 @@ export function InlineTestingPanel() {
     const next = remembered ?? legacy;
     setEnv((prev) => (prev === next ? prev : next));
   }, [selected, projects]);
+
+  // 打开测试模块即触发一次后台用量上报。本组件在切到设置页等场景会卸载、切回重挂，
+  // 故挂载 effect ≈「每次点开测试模块」。fire-and-forget：仅 Electron 有 electronAPI
+  //（dev/web 为 no-op）；主进程去抖 + 未登录静默跳过，绝不阻塞 UI。
+  useEffect(() => {
+    void window.electronAPI?.auth?.uploadTestUsage?.();
+  }, []);
 
   // 执行方式(独立窗口可见 / 后台无头)。默认无头 —— 与原行为一致、更快。执行前确认弹窗
   // (ExecConfirmModal)记下用户选择并持久化;非弹窗触发(运行任务 / auto-chain 接力执行)
@@ -519,57 +680,271 @@ export function InlineTestingPanel() {
       .catch(() => {});
   };
 
-  // 跨任务一键重跑:①聚合库→写 `回归用例库.cases.json`(POST /api/test/library/run);②③复用现有
-  // /api/test/run 依次跑 execution→report(taskName=保留名),env 走项目 environments.json。产物落
-  // report/回归用例库/,自动出现在【报告区】(reports 列举扫全 report/ 目录),故这里跑完只需 bump
-  // reportsReload。执行/报告的详细进度不在弹窗内逐行渲染(MVP);弹窗按钮显示「重跑中…」。
-  const runLibrary = async () => {
+  // 发起回归轮次(v2):①圈选聚合→建轮次+快照(POST /api/test/library/run,返回 roundId);②③复用
+  // 现有 /api/test/run 依次跑 execution→report(taskName=保留名,带 roundId → 产物落
+  // report/回归用例库/{roundId}/,同环境多轮互不覆盖);④收口轮次(PATCH rounds,done 时后端从
+  // run.json 摘录口径,异常/中断按 aborted)。报告自动出现在【报告区】(reports 扫描含轮次子目录)。
+  // suiteName/env/mode/approvedOnly 由发起弹窗传入;缺省 = 内置「全量」+ local + 全量模式
+  // (等价 v1 行为)。mode='failed-only' 时后端按基准轮的失败集圈选(见 lib/test/run-scope.ts)。
+  const runLibrary = async (opts?: { suiteName?: string; env?: string; mode?: "full" | "failed-only"; approvedOnly?: boolean; scriptFirst?: boolean; parentRoundId?: string }) => {
     const p = current?.path;
     if (!p || libraryRunning) return;
+    const env = opts?.env || "local";
+    // 执行状态面板只在「回归套件」tab 顶部显示 → 发起即切过去,避免在别的 tab 看不到运行动静。
+    setRegTab("suites");
     setLibraryRunning(true);
     setLibraryRunStatus(null);
+    setLibraryLive(null);   // 上一轮的面板不留存
+    // 中断通道(技术债 #23):「停止」abort → 聚合/drive 的 fetch 全部拒绝、服务端 req.signal
+    // 联动终止智能体与脚本重放。settle 不挂 signal —— 停止之后还要靠它把轮次收口。
+    const ctrl = new AbortController();
+    libraryAbortRef.current = ctrl;
+    let roundId: string | undefined;
+    // 轮次收口(best-effort,fire-and-forget 语义但等待返回以便刷新列表)。
+    const settle = async (outcome: "done" | "aborted") => {
+      if (!roundId) return;
+      try {
+        await fetch("/api/test/library/rounds", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ projectPath: p, roundId, outcome }),
+        });
+      } catch { /* 收口失败 → 读侧惰性 aborted 兜底 */ }
+    };
     try {
       const agg = await fetch("/api/test/library/run", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectPath: p }),
+        signal: ctrl.signal,
+        body: JSON.stringify({
+          projectPath: p,
+          suiteName: opts?.suiteName,
+          env,
+          mode: opts?.mode,
+          approvedOnly: opts?.approvedOnly,
+          parentRoundId: opts?.parentRoundId,
+        }),
       }).then((r) => r.json()).catch(() => null);
-      if (!agg?.ok) { setLibraryRunStatus(t("test.library.runFailed")); return; }
+      if (!agg?.ok) { setLibraryRunStatus(ctrl.signal.aborted ? t("test.library.runStopped") : (agg?.error || t("test.library.runFailed"))); return; }
       if (!agg.total) { setLibraryRunStatus(t("test.library.runEmpty")); return; }
+      roundId = typeof agg.roundId === "string" ? agg.roundId : undefined;
       setLibraryRunStatus(t("test.library.runStarted", { total: agg.total }));
-      // 依次驱动 execution → report,消费 SSE 到 done(不逐行渲染)。任一步 !res.ok(如 503
-      // 被测地址不可达 / NO_CREDENTIALS)则中止并把后端 error 展示在弹窗状态行。
+      setLibraryLive({
+        step: "execution",
+        roundId,
+        suiteName: opts?.suiteName || REGRESSION_FULL_SUITE_NAME,
+        env,
+        total: agg.total,
+        pre: [], cases: [], curIdx: -1,
+        tools: 0, started: 0, verdicts: 0, malformed: 0,
+        four: { ...EMPTY_FOUR },
+        runJson: null, errored: false, lastFrameAt: Date.now(), finished: false,
+      });
+
+      /** live 状态的唯一写入口。所有分支都走它,便于一处维护「最后一帧时刻」。 */
+      const patchLive = (fn: (s: LibraryLive) => LibraryLive) =>
+        setLibraryLive((s) => (s ? { ...fn(s), lastFrameAt: Date.now() } : s));
+
+      /** 事件落到当前用例;还没有用例时落 pre(读用例文件、建证据目录那几步)。 */
+      const pushEvt = (evt: LiveEvt) =>
+        patchLive((s) => {
+          if (s.curIdx < 0) return { ...s, pre: [...s.pre, evt] };
+          const cases = s.cases.slice();
+          cases[s.curIdx] = { ...cases[s.curIdx], events: [...cases[s.curIdx].events, evt] };
+          return { ...s, cases };
+        });
+
+      /** 一条用例开始。上一条若还没收到判定 → 标记「无判定」(它跑完了,不是没跑)。 */
+      const openCase = (id: string, index?: number) =>
+        patchLive((s) => {
+          const cases = s.cases.slice();
+          // 模型先发进度行再发 @@CASE_START 时,当前 `#N` 占位就是同一条用例 —— 就地认领
+          // (补真实 id,保留标题/事件),不另开幻影行(见 shouldAdoptPlaceholder 注释)。
+          if (s.curIdx >= 0 && shouldAdoptPlaceholder(cases[s.curIdx], index)) {
+            cases[s.curIdx] = { ...cases[s.curIdx], id };
+            return { ...s, cases };
+          }
+          if (s.curIdx >= 0 && !cases[s.curIdx].result) cases[s.curIdx] = { ...cases[s.curIdx], lost: true };
+          cases.push({ id, index: index ?? cases.length + 1, title: "", events: [], startedAt: Date.now() });
+          return { ...s, cases, curIdx: cases.length - 1, started: s.started + 1 };
+        });
+
+      const applyLine = (e: ExecLine) => {
+        if (e.kind === "caseStart") { openCase(e.id, e.index); return; }
+        if (e.kind === "progress") {
+          // 进度行既给标题(已剥掉「用例 N/总数：」前缀)，也在缺 @@CASE_START 时兜底切段
+          // ——模型可能漏输出机器标记，此时序号变化就是新用例的唯一信号。
+          patchLive((s) => {
+            const cases = s.cases.slice();
+            if (s.curIdx < 0 || (e.idx > 0 && cases[s.curIdx]?.index !== e.idx)) {
+              if (s.curIdx >= 0 && !cases[s.curIdx].result) cases[s.curIdx] = { ...cases[s.curIdx], lost: true };
+              cases.push({ id: `#${e.idx || cases.length + 1}`, index: e.idx || cases.length + 1, title: e.title, events: [], startedAt: Date.now() });
+              return { ...s, cases, curIdx: cases.length - 1, started: s.started + 1 };
+            }
+            cases[s.curIdx] = { ...cases[s.curIdx], title: e.title };
+            return { ...s, cases };
+          });
+          return;
+        }
+        if (e.kind === "result") {
+          const r = e.result;
+          patchLive((s) => {
+            const cases = s.cases.slice();
+            let i = cases.findIndex((c) => c.id === r.id);
+            if (i < 0) i = s.curIdx;                       // id 对不上 → 挂当前用例
+            if (i < 0) return s;
+            cases[i] = { ...cases[i], result: r, lost: false, ms: Date.now() - cases[i].startedAt, title: cases[i].title || r.id };
+            return {
+              ...s, cases, verdicts: s.verdicts + 1,
+              four: {
+                total: s.four.total + 1,
+                pass: s.four.pass + (r.status === "pass" ? 1 : 0),
+                fail: s.four.fail + (r.status === "fail" ? 1 : 0),
+                partial: s.four.partial + (r.status === "partial" ? 1 : 0),
+                blocked: s.four.blocked + (r.status === "blocked" ? 1 : 0),
+              },
+            };
+          });
+          pushEvt({ k: "sys", text: `■ ${r.id} → ${r.status}`, status: r.status });
+          return;
+        }
+        if (e.kind === "resultMalformed") {
+          patchLive((s) => ({ ...s, malformed: s.malformed + 1 }));
+          pushEvt({ k: "sys", text: e.raw, lost: true });
+          return;
+        }
+        pushEvt({ k: "ai", text: e.text });
+      };
+
+      // 依次驱动 execution → report。执行步逐帧解析并画进面板;报告步**不流详情**(用户拍板:
+      // 执行步收口即冻结),只把面板头切成「生成报告中」。任一步 !res.ok(如 503 被测地址不可达 /
+      // NO_CREDENTIALS)则中止并把后端 error 展示在面板与状态行。
       const drive = async (step: TestStep): Promise<boolean> => {
+        if (step !== "execution") patchLive((s) => ({ ...s, step }));
         const res = await fetch("/api/test/run", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ projectPath: p, taskName: REGRESSION_LIBRARY_TASK, step, env: "local", model: model || undefined, providerId: providerId || undefined }),
+          signal: ctrl.signal,
+          body: JSON.stringify({ projectPath: p, taskName: REGRESSION_LIBRARY_TASK, step, env, roundId, model: model || undefined, providerId: providerId || undefined, scriptFirst: opts?.scriptFirst !== false }),
         });
         if (!res.ok) {
           let msg = t("test.library.runFailed");
           try { const d = await res.json(); if (d?.error) msg = d.error; } catch {}
           setLibraryRunStatus(msg);
+          patchLive((s) => ({ ...s, errored: true, errorText: msg, finished: true }));
           return false;
         }
         const reader = res.body?.getReader();
         if (!reader) return true;
-        for (;;) {
-          const { done } = await reader.read();
-          if (done) break;
+        // 报告步不解析详情,只排空(冻结执行步的快照)。
+        if (step !== "execution") {
+          for (;;) { const { done } = await reader.read(); if (done) break; }
+          return true;
         }
+        const dec = new TextDecoder();
+        const lineBuf = createExecLineBuffer();
+        let frameBuf = "";
+        for (;;) {
+          const { done, value } = await reader.read();
+          if (done) break;
+          frameBuf += dec.decode(value, { stream: true });
+          const frames = frameBuf.split("\n\n");
+          frameBuf = frames.pop() || "";
+          for (const f of frames) {
+            const line = f.replace(/^data:\s?/, "").trim();
+            if (!line) continue;
+            let evt: { type?: string; data?: string } | null = null;
+            try { evt = JSON.parse(line); } catch { continue; }
+            if (!evt) continue;
+            if (evt.type === "text") {
+              for (const e of lineBuf.feed(evt.data || "")) applyLine(e);
+            } else if (evt.type === "tool_use") {
+              // tool_use 是【结构化】帧 —— 对账锚点,不受模型 markdown 装饰影响。
+              patchLive((s) => ({ ...s, tools: s.tools + 1 }));
+              try {
+                const tu = JSON.parse(evt.data || "{}");
+                const label = toolUseLabel(tu.name || "", tu.input);
+                if (label) pushEvt({ k: "tool", text: `→ ${label}` });
+              } catch { /* 坏帧忽略 */ }
+            } else if (evt.type === "run_json") {
+              // 只认【执行步】这条。报告步流末也发一条 run_json,套用它会把盘面清零。
+              try {
+                const rj = JSON.parse(evt.data || "{}") as { counts?: FourState };
+                if (rj.counts) patchLive((s) => ({ ...s, runJson: rj.counts! }));
+              } catch { /* 坏帧忽略 */ }
+            } else if (evt.type === "error") {
+              let msg = "";
+              try { const d = JSON.parse(evt.data || "{}"); msg = d.userMessage || d.rawMessage || ""; } catch { msg = evt.data || ""; }
+              patchLive((s) => ({ ...s, errored: true, errorText: msg || s.errorText }));
+              pushEvt({ k: "err", text: msg || t("test.library.runFailed") });
+            } else if (evt.type === "result") {
+              // 会话级失败(限流/鉴权)只发 result{is_error:true}、没有 error 帧 —— 不解析它
+              // 面板会一路假绿到收口。
+              try {
+                const r = JSON.parse(evt.data || "{}") as { is_error?: unknown };
+                if (r?.is_error === true) patchLive((s) => ({ ...s, errored: true }));
+              } catch { /* native result 帧无 is_error → 非错误 */ }
+            }
+          }
+        }
+        for (const e of lineBuf.flush()) applyLine(e);
+        // 流末:最后一条用例若始终没有判定,标记「无判定」而不是留在「执行中」。
+        patchLive((s) => {
+          const cases = s.cases.slice();
+          if (s.curIdx >= 0 && !cases[s.curIdx].result) cases[s.curIdx] = { ...cases[s.curIdx], lost: true };
+          return { ...s, cases, curIdx: -1 };
+        });
         return true;
       };
       if (await drive("execution")) {
-        await drive("report");
+        // 报告步期间点「停止」→ 只掐报告,轮次仍收 done:执行步已跑完、run.json 已落盘(权威口径),
+        // 标 aborted 会把完整的一轮从复测基准/「上次结果」数据源里白白剔除(2026-07-22 需求确认)。
+        let reportStopped = false;
+        try {
+          await drive("report");
+        } catch (e) {
+          if (!ctrl.signal.aborted) throw e;
+          reportStopped = true;
+        }
+        await settle("done");
         setReportsReload((n) => n + 1);
         setLibraryReload((n) => n + 1);
-        setLibraryRunStatus(t("test.library.runDone"));
+        setLibraryRunStatus(t(reportStopped ? "test.library.runStoppedReport" : "test.library.runDone"));
+        // 报告步被停止的说明进收口 footer(收口后 runStatus 行不再显示,note 是唯一可见落点)。
+        setLibraryLive((s) => (s ? { ...s, finished: true, ...(reportStopped ? { note: t("test.library.runStoppedReport") } : {}) } : s));
+      } else {
+        await settle("aborted");
+        setLibraryLive((s) => (s ? { ...s, errored: true, finished: true } : s));
       }
     } catch {
-      setLibraryRunStatus(t("test.library.runFailed"));
+      // 执行中途 abort(用户停止)与真实失败分开表述;轮次一样标 aborted。
+      const stopped = ctrl.signal.aborted;
+      setLibraryRunStatus(t(stopped ? "test.library.runStopped" : "test.library.runFailed"));
+      setLibraryLive((s) => (s ? { ...s, ...(stopped ? { stopped: true } : { errored: true }), finished: true } : s));
+      await settle("aborted");
     } finally {
+      if (libraryAbortRef.current === ctrl) libraryAbortRef.current = null;
       setLibraryRunning(false);
     }
+  };
+
+  // 停止当前回归轮次(技术债 #23):二次确认后 abort in-flight fetch → 服务端 req.signal 联动
+  // 终止智能体/脚本重放(与功能测试 stopTask 同一套服务端机制,重放锁释放幂等)。收口由
+  // runLibrary 负责:执行中途 → aborted;报告步 → done(执行结果已落盘)。审计落 回归用例库.jsonl。
+  const stopLibraryRun = () => {
+    const ctrl = libraryAbortRef.current;
+    if (!ctrl || ctrl.signal.aborted) return;
+    if (!window.confirm(t("test.library.stopConfirm"))) return;
+    // confirm 阻塞期间本轮可能已跑完(finally 已清 ref)→ 过期的停止意图直接丢弃。
+    if (libraryAbortRef.current !== ctrl || ctrl.signal.aborted) return;
+    logAudit("stop", {
+      taskId: "", // 轮次不属于任何功能测试任务,不能挂活动任务 id
+      projPath: current?.path,
+      taskName: REGRESSION_LIBRARY_TASK,
+      step: libraryLive?.step,
+      detail: libraryLive?.roundId ? `停止回归轮次 ${libraryLive.roundId}` : "停止回归轮次",
+    });
+    ctrl.abort();
   };
 
   // 排队调度: 槽位 = 并发数 − 占用数。占用 = 在跑(running) ∪ 已认领(autoRun) 的任务数 —— 用真实
@@ -668,7 +1043,7 @@ export function InlineTestingPanel() {
         method: "POST",
         signal: ctrl.signal,
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ projectPath: proj.path, taskName: task.name, step, instruction: text, model: model || undefined, providerId: providerId || undefined }),
+        body: JSON.stringify({ projectPath: proj.path, taskName: task.name, taskId: task.id, step, instruction: text, model: model || undefined, providerId: providerId || undefined }),
       });
       if (!res.ok || !res.body) {
         const j = await res.json().catch(() => ({}));
@@ -853,7 +1228,7 @@ export function InlineTestingPanel() {
   // BEFORE the task is created — a parse failure returns an error and creates nothing.
   // cases imported → 需求 + 用例 both skipped(done) → 直接进入「测试执行」(no 批准 gate,
   // execution unlocked, auto-chains like an approved 用例); only 需求 → 需求 待批准.
-  const addTask = async (name: string, files?: NewTaskFiles): Promise<{ ok: boolean; error?: string }> => {
+  const addTask = async (name: string, files?: NewTaskFiles, depositScripts?: boolean, targetUrl?: string): Promise<{ ok: boolean; error?: string }> => {
     const proj = selected !== null ? projects[selected] : null;
     // 防重名：同一项目内任务名唯一（trim 后精确比较、区分大小写）。弹窗已实时校验+禁用创建，
     // 此处兜底防绕过；命中则不创建，返回错误供弹窗内联展示。
@@ -889,6 +1264,13 @@ export function InlineTestingPanel() {
     }
     const id = makeTaskId();
     setProjects((ps) => ps.map((p, i) => (i === selected ? { ...p, tasks: [...p.tasks, { id, name }] } : p)));
+    // 沉淀回归脚本开关 + 任务目标地址:独立于导入分支落盘 —— 下面的 patchTask 只在有导入时
+    // 才走,而这两项任何情况都要记住(开关缺省 true 与既有行为一致,故只在明确关闭时写 false;
+    // 地址 trim 非空才落,空串不产生任务级覆盖)。
+    const seed: Partial<TaskState> = {};
+    if (depositScripts === false) seed.depositScripts = false;
+    if (targetUrl?.trim()) seed.targetUrl = targetUrl.trim();
+    if (Object.keys(seed).length) patchTask(id, () => seed);
     const hasReq = !!files?.requirement, hasCases = !!files?.cases;
     if (hasReq || hasCases) {
       patchTask(id, () => ({
@@ -906,6 +1288,13 @@ export function InlineTestingPanel() {
         // 保留的原始需求文档信息（仅导入需求时）。requirementMode 故意留空 → 触发「待选择」。
         requirementOriginal: hasReq ? reqOriginal : undefined,
       }));
+    }
+    // 使用统计：新建任务。source 标注导入来源（采纳率只统计 imported_requirement 的 AI 生成流）。
+    if (proj?.path) {
+      const source = hasReq && hasCases ? "both" : hasCases ? "imported_cases" : "imported_requirement";
+      recordTestStat([
+        { eventType: "task_created", projectPath: proj.path, taskId: id, taskName: name, payload: { source } },
+      ]);
     }
     return { ok: true };
   };
@@ -1020,6 +1409,13 @@ export function InlineTestingPanel() {
     return () => clearInterval(id);
   }, [runningStep]);
 
+  // 运行中节点用时的 1s ticker（仅当前活动任务有步在跑时才计）。
+  useEffect(() => {
+    if (!runningStep) return;
+    const id = setInterval(() => setNowTick((n) => n + 1), 1000);
+    return () => clearInterval(id);
+  }, [runningStep]);
+
   // Resolve the active project's env config (target baseUrl) for display in the flow
   // view. Refetches when entering a flow / switching env / 路由切回工作台(pathname)，并在
   // 窗口重新聚焦 / 页面重新可见时也重拉 —— 这样在「设置·测试账号」改完配置(或重新导出
@@ -1119,7 +1515,7 @@ export function InlineTestingPanel() {
       const r = await fetch("/api/test/cases", {
         method: "PUT",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ projectPath: current.path, taskName: activeTask.name, cases: casesDraft }),
+        body: JSON.stringify({ projectPath: current.path, taskName: activeTask.name, taskId: activeTask.id, cases: casesDraft }),
       }).then((res) => res.json());
       if (r?.ok) {
         setCasesPreview(casesDraft);
@@ -1140,11 +1536,22 @@ export function InlineTestingPanel() {
   // AI 推荐回归集 · 可视化审阅弹窗(用例设计阶段;取代旧的对话框流式推荐)。
   const [recommendOpen, setRecommendOpen] = useState(false);
   // 回归用例库弹窗(项目级):查看/管理沉淀的回归用例 + 跨任务一键重跑。
-  const [libraryOpen, setLibraryOpen] = useState(false);
+  // 测试类型(批 H,用户确认的信息架构):项目下两种平级测试类型——功能测试(现有任务流)/
+  // 回归测试(整页工作区:用例库/回归套件/轮次历史 页内子页签,不再用弹窗)。切换项目时重置。
+  const [testType, setTestType] = useState<"func" | "regression">("func");
+  const [regTab, setRegTab] = useState<RegTab>("library");
+  // 发起回归弹窗(v2 批 D):套件/环境/预检确认后才真正 runLibrary(保留为确认对话框)。
+  // 发起回归弹窗:null=关闭。带 preset 打开时(轮次历史的「复测 N 条」)预置复测模式与基准轮。
+  const [launchOpen, setLaunchOpen] = useState<null | { mode?: "failed-only"; parentRoundId?: string }>(null);
   // 跨任务一键重跑进行中(聚合→执行→报告)。禁用重复触发,按钮显示「重跑中…」。
   const [libraryRunning, setLibraryRunning] = useState(false);
   // 重跑状态提示(库不属于任何任务对话,故用独立状态在弹窗内展示,不走任务对话 push)。
   const [libraryRunStatus, setLibraryRunStatus] = useState<string | null>(null);
+  // 回归执行的实时详情（内存态，不保留历史：切走/刷新即消失，收口后的事实见「轮次报告」页）。
+  const [libraryLive, setLibraryLive] = useState<LibraryLive | null>(null);
+  // 回归轮次的中断通道(技术债 #23):abort → drive 的 fetch 拒绝 → runLibrary 按「用户停止」
+  // 收口(轮次标 aborted)。服务端 /api/test/run 已接 req.signal → 智能体/脚本重放真正终止。
+  const libraryAbortRef = useRef<AbortController | null>(null);
   // docx 原件预览弹窗(独立于 reqPreview 的文本弹窗):DocxViewer 按原版式渲染二进制原件。
   const [origDocPreview, setOrigDocPreview] = useState<{ abs: string; filename: string } | null>(null);
   useEffect(() => { setReqPreview(null); setOrigDocPreview(null); }, [aId]); // 切任务关掉残留的需求预览弹窗
@@ -1213,6 +1620,8 @@ export function InlineTestingPanel() {
       target?: { projPath: string; task: { id: string; name: string } };
       // 需求分析节点刚二选一时 taskStates 尚未落地(setState 异步) → 用这个即时值覆盖，避免读到旧 state。
       requirementModeOverride?: "generate-md" | "use-original";
+      // 同上:执行前确认弹窗刚改的「沉淀回归脚本」在本次运行就要生效,而 patchTask 是异步的。
+      depositScriptsOverride?: boolean;
     },
   ) => {
     // target 缺省 = 活动选择(原行为)；传入 = 跑指定后台任务(批量 / auto-chain 接力其它任务)。
@@ -1227,8 +1636,13 @@ export function InlineTestingPanel() {
     // 执行方式仅对「测试执行」步有意义(只有它注入 Playwright)。弹窗触发带 opts.headed,
     // 非弹窗触发(运行任务 / auto-chain / 队列起跑)回落到上次选择(execModeRef)。
     const headed = step === "execution" ? (opts?.headed ?? execModeRef.current === "visible") : false;
-    // 被测链接覆盖:仅执行步、且弹窗显式给了地址时透传,让用户在弹窗里确认/改写的地址生效。
-    const baseUrlOverride = step === "execution" && opts?.baseUrl?.trim() ? opts.baseUrl.trim() : undefined;
+    // 被测链接覆盖(仅执行步):弹窗显式确认的地址 > 任务级 targetUrl(新建任务「目标」输入,
+    // 让「运行任务」/auto-chain/排队这些不经确认弹窗的路径也直测任务地址)> 不传(服务端回落
+    // 项目环境配置 environments.json)。
+    const baseUrlOverride =
+      step === "execution"
+        ? (opts?.baseUrl?.trim() || taskStates[id]?.targetUrl?.trim() || undefined)
+        : undefined;
     // 问题②·停止: a per-run AbortController. stopTask() aborts it → the fetch rejects
     // with AbortError, which the catch/finally below treat as a clean stop (not error).
     const ctrl = new AbortController();
@@ -1240,6 +1654,14 @@ export function InlineTestingPanel() {
       for (let i = sidx; i < STEP_ORDER.length; i++) stoppedStepRef.current.delete(`${id}:${STEP_ORDER[i]}`);
     }
     markRunning(id);
+    stepStartRef.current[`${id}:${step}`] = Date.now(); // 使用统计：运行中用时累计起点
+    // 清掉该步上一次的用时/模型徽标：运行中显示实时累计，若本轮失败/中断（无 step_stats
+    // 补发）则徽标为空而非残留旧值（评审 L6）；成功时 step_stats 会重新写入。
+    patchTask(id, (s) => {
+      const d = { ...(s.stepDurations ?? {}) }; delete d[step];
+      const m = { ...(s.stepModels ?? {}) }; delete m[step];
+      return { stepDurations: d, stepModels: m };
+    });
     // 重跑某步 → 其下游各步产物失效：当前步置 running，其后所有步骤复位 idle(未开始)，
     // 避免重跑时下游残留上次的「已完成」(如重跑「测试执行」后「测试报告」仍显示已完成)。
     // 规则收敛在 withDownstreamReset；所有重跑入口都经此处，四节点统一生效。
@@ -1252,6 +1674,9 @@ export function InlineTestingPanel() {
         caseResults: [],
         circuitBroken: false,
       }));
+      // 使用统计：进入执行 = 用例已被批准（手动门控 / 运行任务 / 批量三条路径的汇聚点）。
+      // 服务端据此读 cases.json 拍终态快照、对首轮基线做 diff 算采纳率（last-wins，重跑重新快照无害）。
+      recordTestStat([{ eventType: "cases_approved", projectPath: projPath, taskId: id, taskName: task.name, env }]);
     }
     const stepName = t(STEPS.find((s) => s.step === step)!.name);
     const push = (msg: ConvoMsg) => patchTask(id, (s) => ({ convo: [...s.convo, msg] }));
@@ -1264,47 +1689,38 @@ export function InlineTestingPanel() {
     push({ role: "user", text: `▶ ${t("test.flow.run")}「${stepName}」` });
     let sawError = false;
     let stopped = false; // set when the run is aborted via stopStep (停止)
-    let lineBuf = "";
-    const processText = (chunk: string) => {
-      lineBuf += chunk;
-      const lines = lineBuf.split("\n");
-      lineBuf = lines.pop() || "";
-      for (const raw of lines) {
-        const line = raw.trimEnd();
-        const rIdx = line.indexOf("@@RESULT");
-        if (rIdx >= 0) {
-          try {
-            const r = JSON.parse(line.slice(rIdx + 8).trim());
-            const st = String(r.status || "").toLowerCase();
-            patchTask(id, (s) => ({
-              fourState: {
-                total: s.fourState.total + 1,
-                pass: s.fourState.pass + (st === "pass" ? 1 : 0),
-                fail: s.fourState.fail + (st === "fail" ? 1 : 0),
-                partial: s.fourState.partial + (st === "partial" ? 1 : 0),
-                blocked: s.fourState.blocked + (st === "blocked" ? 1 : 0),
-              },
-              caseResults: [
-                ...s.caseResults,
-                {
-                  id: String(r.id || "用例"),
-                  status: st,
-                  actual: typeof r.actual === "string" ? r.actual : undefined,
-                  error: typeof r.error === "string" ? r.error : undefined,
-                  evidence: Array.isArray(r.evidence) ? r.evidence.map(String) : undefined,
-                },
-              ],
-            }));
-            push({ role: "tool", text: `■ ${r.id || "用例"} → ${st}` });
-          } catch {
-            appendAi(line + "\n");
-          }
-          continue;
-        }
-        if (line.startsWith("▶")) patchTask(id, () => ({ currentCase: line.replace(/^▶\s*/, "") }));
-        if (line) appendAi(line + "\n");
+    // 逐行解析执行步的 AI 文本(@@RESULT / @@CASE_START / ▶ 进度行)。
+    // 解析下沉到 lib/test/exec-live.ts,与服务端归约共用 markers.ts —— 原来这里用
+    // 「indexOf + slice 到行尾 + JSON.parse」,模型一旦把判定行包成 `**@@RESULT {…}**`
+    // 就整条解析失败、实时四态与用例列表全空(与 2026-07-10 服务端那次事故同源)。
+    const lineBuf = createExecLineBuffer();
+    const applyLine = (e: ExecLine) => {
+      if (e.kind === "result") {
+        const r = e.result;
+        patchTask(id, (s) => ({
+          fourState: {
+            total: s.fourState.total + 1,
+            pass: s.fourState.pass + (r.status === "pass" ? 1 : 0),
+            fail: s.fourState.fail + (r.status === "fail" ? 1 : 0),
+            partial: s.fourState.partial + (r.status === "partial" ? 1 : 0),
+            blocked: s.fourState.blocked + (r.status === "blocked" ? 1 : 0),
+          },
+          caseResults: [...s.caseResults, { id: r.id, status: r.status, actual: r.actual, error: r.error, evidence: r.evidence }],
+        }));
+        push({ role: "tool", text: `■ ${r.id} → ${r.status}` });
+      } else if (e.kind === "resultMalformed") {
+        // 含判定标记却解不出 —— 不静默吞掉,原样放进对话流让用户看得见。
+        appendAi(e.raw + "\n");
+      } else if (e.kind === "progress") {
+        // currentCase 保留原始文本（parseExecProgress 会再解一次，向后兼容既有渲染）。
+        patchTask(id, () => ({ currentCase: e.text }));
+        appendAi(`▶ ${e.text}\n`);
+      } else if (e.kind === "text") {
+        appendAi(e.text + "\n");
       }
+      // caseStart 是纯机器标记,不进对话流(服务端用它给工具轨迹归属用例)。
     };
+    const processText = (chunk: string) => { for (const e of lineBuf.feed(chunk)) applyLine(e); };
     try {
       const res = await fetch("/api/test/run", {
         method: "POST",
@@ -1313,6 +1729,8 @@ export function InlineTestingPanel() {
         body: JSON.stringify({
           projectPath: projPath,
           taskName: task.name,
+          // 使用统计的任务身份（workbench 任务 UUID）；服务端埋点按它归档事件
+          taskId: task.id,
           step,
           env,
           // 追加指令: user-typed notes for this task, appended to the step prompt server-side.
@@ -1330,6 +1748,10 @@ export function InlineTestingPanel() {
           // 执行方式 + 被测链接覆盖(见上)。headed 仅执行步透传;baseUrl 缺省时后端回落 environments.json。
           headed: step === "execution" ? headed : undefined,
           baseUrl: baseUrlOverride,
+          // 是否为本任务沉淀回归脚本(任务级开关)。undefined=开启,故只在明确关闭时传 false ——
+          // 服务端同样按 `!== false` 判定,存量任务与旧客户端行为不变。
+          depositScripts:
+            (opts?.depositScriptsOverride ?? taskStates[id]?.depositScripts) === false ? false : undefined,
         }),
       });
       // 非 2xx(如 /api/test/run 抛错走 500 + JSON {error})：之前直接进流式解析，500 的
@@ -1420,10 +1842,24 @@ export function InlineTestingPanel() {
                     actual: typeof tt.actual === "string" ? tt.actual : undefined,
                     error: typeof tt.error === "string" ? tt.error : undefined,
                     evidence: Array.isArray(tt.evidence) ? tt.evidence.map(String) : undefined,
+                    durationMs: typeof tt.durationMs === "number" ? tt.durationMs : undefined,
                   }));
                 }
                 return patch;
               });
+            } catch {}
+          } else if (evt.type === "step_stats") {
+            // 使用统计：服务端在步骤干净收尾时补发的节点用时/模型（权威值），写进 TaskState
+            // 供流程节点徽标展示 + 随 workbench 持久化。未知帧旧前端静默忽略、零影响。
+            try {
+              const ss = JSON.parse(evt.data || "{}") as { step?: string; durationMs?: number; model?: string | null };
+              const stStep = ss.step as TestStep | undefined;
+              if (stStep && STEP_ORDER.includes(stStep)) {
+                patchTask(id, (s) => ({
+                  stepDurations: { ...(s.stepDurations ?? {}), ...(typeof ss.durationMs === "number" ? { [stStep]: ss.durationMs } : {}) },
+                  stepModels: { ...(s.stepModels ?? {}), ...(ss.model ? { [stStep]: ss.model } : {}) },
+                }));
+              }
             } catch {}
           } else if (evt.type === "exec_notice") {
             // 后端系统提示(非 AI 输出 / 非错误):目前仅「有头自动回落无头」。映射成本地化系统气泡。
@@ -1449,7 +1885,8 @@ export function InlineTestingPanel() {
           }
         }
       }
-      if (lineBuf.trim()) appendAi(lineBuf);
+      // 流末冲刷:最后一行可能没有换行符,漏了它会丢掉一条判定或总结。
+      for (const e of lineBuf.flush()) applyLine(e);
     } catch (e) {
       // 停止 (AbortError) is a user action, not a failure — handle it cleanly below.
       if (ctrl.signal.aborted || (e instanceof DOMException && e.name === "AbortError")) {
@@ -1560,6 +1997,10 @@ export function InlineTestingPanel() {
     if (kind === "project") {
       const proj = projects[pIdx];
       if (proj?.path) for (const tk of proj.tasks) toDelete.push({ path: proj.path, name: tk.name });
+      // 使用统计：删除项目 → 逐任务记 task_deleted
+      if (proj?.path) {
+        recordTestStat(proj.tasks.map((tk) => ({ eventType: "task_deleted", projectPath: proj.path, taskId: tk.id, taskName: tk.name })));
+      }
       const ids = new Set((proj?.tasks ?? []).map((tk) => tk.id));
       nextTaskStates = (() => { const n = { ...taskStates }; ids.forEach((id) => delete n[id]); return n; })();
       nextProjects = projects.filter((_, i) => i !== pIdx);
@@ -1571,6 +2012,10 @@ export function InlineTestingPanel() {
       const proj = projects[pIdx];
       const tk = proj?.tasks[tIdx!];
       if (proj?.path && tk) toDelete.push({ path: proj.path, name: tk.name });
+      // 使用统计：删除单个任务
+      if (proj?.path && tk) {
+        recordTestStat([{ eventType: "task_deleted", projectPath: proj.path, taskId: tk.id, taskName: tk.name }]);
+      }
       if (tk) {
         nextTaskStates = (() => { const n = { ...taskStates }; delete n[tk.id]; return n; })();
         setTaskStates((m) => { const n = { ...m }; delete n[tk.id]; return n; });
@@ -1653,11 +2098,23 @@ export function InlineTestingPanel() {
     runStepManual(focusStep);
   };
   // 弹窗「测试并执行」:记下执行方式(持久化),用确认后的地址 + 模式手动跑测试执行步。
-  const runExecutionConfirmed = (baseUrl: string, headed: boolean) => {
+  const runExecutionConfirmed = (baseUrl: string, headed: boolean, depositScripts: boolean) => {
     persistExecMode(headed ? "visible" : "headless");
+    // 弹窗里改的「沉淀回归脚本」写回任务状态 —— 它是任务级设置,不是一次性选项;
+    // 不写回的话下次打开弹窗又弹回旧值,用户会以为没生效。缺省 true,故只存 false。
+    // 任务地址回写规则:确认地址与环境配置地址【不同】→ 记为任务级覆盖(下次运行任务/
+    // 流水线也用它);【相同】→ 清除覆盖、回归跟随环境 —— 若无条件回写,存量任务手动执行
+    // 一次就会把当时的环境地址钉死成任务地址,之后改环境配置该任务不再跟随(回归风险)。
+    if (aId) {
+      const envUrl = (envCfg?.frontendBaseUrl || "").trim();
+      patchTask(aId, () => ({
+        depositScripts: depositScripts ? undefined : false,
+        targetUrl: baseUrl && baseUrl !== envUrl ? baseUrl : undefined,
+      }));
+    }
     setModal("none");
     if (aId) autoRunIdsRef.current.delete(aId);
-    runStep("execution", { headed, baseUrl });
+    runStep("execution", { headed, baseUrl, depositScriptsOverride: depositScripts });
   };
 
   // 运行任务: 从指定起点把整条流水线自动跑到报告(auto-approve 门控)。受全局并发约束 ——
@@ -1695,9 +2152,9 @@ export function InlineTestingPanel() {
 
   // 运行任务 click: 全新任务(全 idle)直接从需求分析开跑；其余(部分完成 / 已完成)弹「选择起点」。
   const doRunTask = () => {
-    const ss = aState.stepStatus;
-    const allIdle = STEPS.every((s) => ss[s.step] === "idle");
-    if (allIdle) { startRunAllFrom("requirement"); return; }
+    // 一律走「运行任务」确认弹窗。此前全 idle 的新任务直接起跑、不弹窗 —— 于是新任务
+    // 恰恰没机会确认起点与「沉淀回归脚本」(用户反馈:点运行任务没得选)。弹窗对全 idle
+    // 任务只有一个可选起点(需求分析),多一次点击换来选项可见,值得。
     setModal("runStart");
   };
   const handleRunTask = () => {
@@ -1792,6 +2249,7 @@ export function InlineTestingPanel() {
         <div className="flex overflow-hidden rounded-md border border-border">
           {segBtn("dash", t("test.projects"))}
           {segBtn("report", t("test.view.report"))}
+          {segBtn("stats", t("test.stats.tab"))}
         </div>
         <ModelSelectorDropdown
           currentModelValue={model || globalDefaultModel || ""}
@@ -1832,31 +2290,46 @@ export function InlineTestingPanel() {
                     <option key={x} value={x}>{x === "sit" ? "SIT" : x}</option>
                   ))}
                 </select>
-                {envCfg?.frontendBaseUrl ? (
-                  <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
-                    <span
-                      className="max-w-[180px] truncate font-mono"
-                      title={`${t("test.env.targetLabel")}: ${envCfg.frontendBaseUrl}`}
-                    >
-                      🎯 {envCfg.frontendBaseUrl}
-                    </span>
-                    {envCfg.source === "db" && (
-                      <span
-                        className="rounded bg-muted px-1 py-0.5 text-[10px]"
-                        title={t("test.env.fromSettingsTitle")}
+                {(() => {
+                  // 任务级目标地址优先展示(执行时它也确实优先生效);无任务地址回落环境地址。
+                  const taskUrl = (aId && taskStates[aId]?.targetUrl) || "";
+                  const shownUrl = taskUrl || envCfg?.frontendBaseUrl || "";
+                  if (!shownUrl) {
+                    return (
+                      <button
+                        onClick={() => router.push("/settings#test-accounts")}
+                        className="rounded bg-status-warning-muted px-1.5 py-0.5 text-[10px] font-medium text-status-warning-foreground hover:opacity-80"
                       >
-                        {t("test.env.fromSettings")}
+                        {t("test.env.unconfigured")}
+                      </button>
+                    );
+                  }
+                  return (
+                    <span className="flex items-center gap-1 text-[11px] text-muted-foreground">
+                      <span
+                        className="max-w-[180px] truncate font-mono"
+                        title={`${t(taskUrl ? "test.env.taskTargetTitle" : "test.env.targetLabel")}: ${shownUrl}`}
+                      >
+                        🎯 {shownUrl}
                       </span>
-                    )}
-                  </span>
-                ) : (
-                  <button
-                    onClick={() => router.push("/settings#test-accounts")}
-                    className="rounded bg-status-warning-muted px-1.5 py-0.5 text-[10px] font-medium text-status-warning-foreground hover:opacity-80"
-                  >
-                    {t("test.env.unconfigured")}
-                  </button>
-                )}
+                      {taskUrl ? (
+                        <span
+                          className="rounded bg-muted px-1 py-0.5 text-[10px]"
+                          title={t("test.env.taskTargetTitle")}
+                        >
+                          {t("test.env.taskTargetBadge")}
+                        </span>
+                      ) : envCfg?.source === "db" ? (
+                        <span
+                          className="rounded bg-muted px-1 py-0.5 text-[10px]"
+                          title={t("test.env.fromSettingsTitle")}
+                        >
+                          {t("test.env.fromSettings")}
+                        </span>
+                      ) : null}
+                    </span>
+                  );
+                })()}
                 {/* 顶部「运行任务」按钮运行中不再变成停止 —— 停止只保留详情卡那一个,
                     避免两处停止入口造成混淆;运行中此按钮直接禁用。 */}
                 <button
@@ -1912,6 +2385,24 @@ export function InlineTestingPanel() {
                       <div className={`mt-1 text-[11px] ${isRunning ? "text-primary" : "text-muted-foreground"}`}>
                         {stepStatusText(status, t)}
                       </div>
+                      {/* 使用统计：用时徽标（运行中本地实时累计 / 完成后服务端权威值）+ 所用模型 */}
+                      {(() => {
+                        void nowTick; // 依赖 1s ticker 触发运行中用时的重渲染
+                        const started = aId ? stepStartRef.current[`${aId}:${s.step}`] : undefined;
+                        const liveMs = isRunning && started ? Date.now() - started : null;
+                        const doneMs = aState.stepDurations?.[s.step];
+                        const durText = liveMs !== null ? `${fmtDuration(liveMs)}…` : typeof doneMs === "number" ? fmtDuration(doneMs) : null;
+                        const model = aState.stepModels?.[s.step];
+                        if (!durText && !model) return null;
+                        return (
+                          <div className="mt-1 flex flex-col gap-0.5">
+                            {durText && (
+                              <span className={`font-mono text-[10px] ${isRunning ? "text-primary" : "text-muted-foreground"}`}>⏱ {durText}</span>
+                            )}
+                            {model && <span className="truncate font-mono text-[9px] text-muted-foreground" title={model}>{model}</span>}
+                          </div>
+                        );
+                      })()}
                     </button>
                   );
                 })}
@@ -1932,6 +2423,26 @@ export function InlineTestingPanel() {
                       {execMode === "visible" ? <Desktop size={10} /> : <Lightning size={10} />}
                       {execMode === "visible" ? t("test.execConfirm.modeVisible") : t("test.execConfirm.modeHeadless")}
                     </span>
+                  )}
+                  {/* 回归脚本沉淀开关:常驻徽标,一眼见状态、一点即切。
+                      不能只放在执行前确认弹窗里 —— 「运行任务」的自动接力直接调 runStep、
+                      根本不弹那个弹窗,用户在流水线模式下既够不着也看不到当前设置。 */}
+                  {focusStep === "execution" && aId && (
+                    <button
+                      onClick={() => patchTask(aId, (s) => ({ depositScripts: s.depositScripts === false ? undefined : false }))}
+                      disabled={runningStep === "execution"}
+                      title={t("test.execConfirm.depositHint")}
+                      className={`flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] transition disabled:opacity-40 ${
+                        taskStates[aId]?.depositScripts === false
+                          ? "bg-muted text-muted-foreground hover:text-foreground"
+                          : "bg-primary/10 text-primary hover:bg-primary/20"
+                      }`}
+                    >
+                      <Terminal size={10} />
+                      {taskStates[aId]?.depositScripts === false
+                        ? t("test.flow.depositScriptsOff")
+                        : t("test.flow.depositScriptsOn")}
+                    </button>
                   )}
                   <span className="flex-1" />
                   {runningStep === focusStep ? (
@@ -1994,7 +2505,7 @@ export function InlineTestingPanel() {
                       <span className="text-[11px] text-muted-foreground">{t("test.cases.total")} · {casesPreview.length}</span>
                       <span className="flex-1" />
                       {casesPreview.length > 0 && <button onClick={() => setCasesDraft(structuredClone(casesPreview))} className="rounded bg-primary px-2 py-0.5 text-[10px] font-medium text-primary-foreground hover:opacity-90">{t("test.cases.viewEdit")}</button>}
-                      {casesPreview.length > 0 && <button onClick={recommendSuite} disabled={busy} title={t("test.cases.recommendHint")} className="rounded border border-primary/40 px-1.5 py-0.5 text-[10px] text-primary hover:bg-primary/10 disabled:opacity-50">🎯 {t("test.cases.recommend")}</button>}
+                      {/* 「🎯 AI 推荐回归集」入口已按需下线（保留 recommendSuite / RecommendReviewModal / /api/test/cases/recommend[/apply] 代码，恢复时把此按钮加回即可）。 */}
                       {casesPreview.length > 0 && <button onClick={() => exportCases(false)} className="rounded border border-border px-1.5 py-0.5 text-[10px] text-foreground hover:bg-muted">{t("test.cases.export")}</button>}
                       <button onClick={() => exportCases(true)} className="rounded border border-border px-1.5 py-0.5 text-[10px] text-foreground hover:bg-muted">{t("test.cases.template")}</button>
                     </div>
@@ -2266,6 +2777,8 @@ export function InlineTestingPanel() {
                         <button
                           onClick={() => {
                             setSelected(i);
+                            setTestType("func");
+                            setRegTab("library");
                             setSelectedTask(null);
                           }}
                           className="flex w-full flex-col gap-2.5 rounded-xl border border-border bg-card p-3.5 text-left transition-colors hover:border-primary/50 hover:bg-muted/40"
@@ -2310,14 +2823,19 @@ export function InlineTestingPanel() {
                     <ArrowLeft size={12} /> {t("test.projects")}
                   </button>
                   <h3 className="text-sm font-semibold text-foreground">{current.name}</h3>
+                  {/* 测试类型切换(批 H):功能测试=现有任务流;回归测试=整页工作区(库/套件/轮次) */}
+                  <div className="ml-1 flex items-center gap-0.5 rounded-lg border border-border bg-muted p-0.5">
+                    {([["func", t("test.type.func")], ["regression", t("test.type.regression")]] as const).map(([k, label]) => (
+                      <button
+                        key={k}
+                        onClick={() => setTestType(k)}
+                        className={`rounded-md px-3 py-1 text-[11px] transition-colors ${testType === k ? "bg-background font-semibold text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
                   <span className="flex-1" />
-                  <button
-                    onClick={() => setLibraryOpen(true)}
-                    title={t("test.library.runHint")}
-                    className="flex h-7 items-center gap-1 rounded-md border border-border px-2 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground"
-                  >
-                    <FolderOpen size={12} /> {t("test.library.open")}
-                  </button>
                   <button
                     onClick={() => router.push("/settings#test-accounts")}
                     title={current?.path ? `${t("test.envModal.title")}（设置·测试账号；project_root = ${current.path}）` : undefined}
@@ -2325,14 +2843,34 @@ export function InlineTestingPanel() {
                   >
                     <Gear size={12} /> {t("test.envModal.title")}
                   </button>
-                  <button
-                    onClick={() => setModal("newTask")}
-                    className="flex h-7 items-center gap-1 rounded-md bg-primary px-2.5 text-[11px] font-medium text-primary-foreground"
-                  >
-                    ＋ {t("test.newTask")}
-                  </button>
+                  {testType === "func" && (
+                    <button
+                      onClick={() => setModal("newTask")}
+                      className="flex h-7 items-center gap-1 rounded-md bg-primary px-2.5 text-[11px] font-medium text-primary-foreground"
+                    >
+                      ＋ {t("test.newTask")}
+                    </button>
+                  )}
                 </div>
-                {current.tasks.length > 0 && (
+                {/* 回归测试整页工作区(批 H):子页签 + 发起回归 + 状态行 + 页内区块 */}
+                {testType === "regression" && current?.path && (
+                  <RegressionWorkspace
+                    t={t}
+                    projectPath={current.path}
+                    regTab={regTab}
+                    live={libraryLive}
+                    model={model}
+                    providerId={providerId}
+                    setRegTab={setRegTab}
+                    reloadSignal={libraryReload}
+                    onChanged={() => setLibraryReload((n) => n + 1)}
+                    onLaunch={(preset) => setLaunchOpen(preset ?? {})}
+                    onStop={stopLibraryRun}
+                    running={libraryRunning}
+                    runStatus={libraryRunStatus}
+                  />
+                )}
+                {testType === "func" && current.tasks.length > 0 && (
                   <div className="mb-3 flex items-center gap-2">
                     <span className="flex-1" />
                     <label className="flex items-center gap-1 text-[11px] text-muted-foreground" title={t("test.batch.concurrencyHint")}>
@@ -2349,7 +2887,7 @@ export function InlineTestingPanel() {
                     </label>
                   </div>
                 )}
-                {current.tasks.length === 0 ? (
+                {testType !== "func" ? null : current.tasks.length === 0 ? (
                   <EmptyState icon={ListChecks} text={t("test.tasksEmpty")} />
                 ) : (() => {
                   // 单张任务卡（抽出闭包以便各分组复用）。i = 任务原始下标（点开进详情 / 删除按 index 操作）。
@@ -2480,6 +3018,7 @@ export function InlineTestingPanel() {
                 reloadSignal={reportsReload}
               />
             )}
+            {view === "stats" && <TestStatsView t={t} projectPath={current?.path ?? ""} />}
           </div>
         </div>
       )}
@@ -2489,16 +3028,14 @@ export function InlineTestingPanel() {
       {auditOpen && current?.path && activeTask && (
         <AuditModal t={t} projectPath={current.path} taskName={activeTask.name} onClose={() => setAuditOpen(false)} />
       )}
-      {libraryOpen && current?.path && (
-        <RegressionLibraryModal
+      {launchOpen && current?.path && (
+        <StartRegressionModal
           t={t}
           projectPath={current.path}
-          reloadSignal={libraryReload}
-          onChanged={() => setLibraryReload((n) => n + 1)}
-          onClose={() => setLibraryOpen(false)}
-          onRun={runLibrary}
-          running={libraryRunning}
-          runStatus={libraryRunStatus}
+          initialMode={launchOpen.mode}
+          initialParentRoundId={launchOpen.parentRoundId}
+          onClose={() => setLaunchOpen(null)}
+          onStart={(opts) => { setLaunchOpen(null); void runLibrary(opts); }}
         />
       )}
       {recommendOpen && current?.path && activeTask && (
@@ -2666,16 +3203,24 @@ export function InlineTestingPanel() {
         <RunStartModal
           t={t}
           stepStatus={aState.stepStatus}
-          onRun={(step) => { setModal("none"); startRunAllFrom(step); }}
+          initialDeposit={(activeTask && taskStates[activeTask.id]?.depositScripts) !== false}
+          onRun={(step, depositScripts) => {
+            setModal("none");
+            // 弹窗里改的开关写回任务状态(缺省 true → 开启存 undefined、关闭存 false),
+            // 与徽标/执行前弹窗同一份设置,不做一次性覆盖 —— 否则三处入口会互相打架。
+            if (aId) patchTask(aId, () => ({ depositScripts: depositScripts ? undefined : false }));
+            startRunAllFrom(step);
+          }}
           onClose={() => setModal("none")}
         />
       )}
       {modal === "execConfirm" && activeTask && (
         <ExecConfirmModal
           t={t}
-          initialUrl={envCfg?.frontendBaseUrl || ""}
+          initialUrl={taskStates[activeTask.id]?.targetUrl || envCfg?.frontendBaseUrl || ""}
           unconfigured={!!envCfg && !envCfg.configured}
           initialMode={execMode}
+          initialDeposit={(activeTask && taskStates[activeTask.id]?.depositScripts) !== false}
           onRun={runExecutionConfirmed}
           onClose={() => setModal("none")}
         />
@@ -2749,7 +3294,10 @@ function SuiteBanner({ t, suiteCounts, suitePassStr }: { t: T; suiteCounts?: Fou
   );
 }
 
-function ReportView({ t, results, four, funcCounts, funcPassStr, suiteCounts, suitePassStr, circuitBroken, taskName, projectPath, env }: { t: T; results: CaseResult[]; four: FourState; funcCounts?: FourState; funcPassStr?: string; suiteCounts?: FourState; suitePassStr?: string; circuitBroken?: boolean; taskName: string; projectPath?: string; env?: string }) {
+// 使用统计（Phase 3）：taskId + runHash 就位时，执行矩阵每行加人工复核（✓准确/✗有误→选
+// 实际结果，误报/漏报/程度不符由服务端归类）+ 用时列 + 一键全准；打开时回显已复核状态。
+// 合并 V3.1.0_dev：保留回归集 SuiteBanner 的 suiteCounts/suitePassStr 属性。
+function ReportView({ t, results, four, funcCounts, funcPassStr, suiteCounts, suitePassStr, circuitBroken, taskName, projectPath, env, taskId, runHash }: { t: T; results: CaseResult[]; four: FourState; funcCounts?: FourState; funcPassStr?: string; suiteCounts?: FourState; suitePassStr?: string; circuitBroken?: boolean; taskName: string; projectPath?: string; env?: string; taskId?: string; runHash?: string }) {
   // 证据媒体（图片灯箱 + 录像内联回放）：经 /api/test/media 白名单流式取证据；
   // lightbox=当前放大查看的文件名。无 projectPath（如流程内调用）时退化为文件名文本。
   const [lightbox, setLightbox] = useState<string | null>(null);
@@ -2760,6 +3308,54 @@ function ReportView({ t, results, four, funcCounts, funcPassStr, suiteCounts, su
   // 功能验证通过率（oracle 双轴，排除回归基线）：用后端权威 funcCounts/funcPassStr，
   // 缺失（legacy 报告）回退「扣除 blocked」执行口径；全回归基线 → "N/A"，不报「100%」。
   const funcRateStr = funcPassRateStr({ total, pass: four.pass, blocked: four.blocked }, funcCounts, funcPassStr);
+
+  // 人工复核：caseId → verdict（accurate/false_fail/missed_fail/severity_mismatch）。
+  // 仅当 taskId + runHash 就位（报告浏览器场景）才开放复核；流程内联预览无这两者时只读。
+  const canReview = !!taskId && !!runHash;
+  const [reviews, setReviews] = useState<Record<string, string>>({});
+  const [badFor, setBadFor] = useState<string | null>(null); // 正在选「实际结果」的 caseId
+  useEffect(() => {
+    if (!canReview) return;
+    let cancelled = false;
+    fetch(`/api/test/stats?scope=reviews&taskId=${encodeURIComponent(taskId!)}&runHash=${encodeURIComponent(runHash!)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => { if (!cancelled && d?.data?.byCaseId) setReviews(d.data.byCaseId as Record<string, string>); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [canReview, taskId, runHash]);
+
+  const postReview = (events: Array<Record<string, unknown>>) => {
+    if (!taskId || !projectPath) return;
+    recordTestStat(events.map((p) => ({ eventType: p.eventType as string, projectPath, taskId, taskName, env, payload: p.payload as Record<string, unknown> })));
+  };
+  const markAccurate = (caseId: string) => {
+    setReviews((m) => ({ ...m, [caseId]: "accurate" }));
+    postReview([{ eventType: "report_reviewed", payload: { caseId, verdict: "accurate", runHash } }]);
+  };
+  const markBad = (caseId: string, aiStatus: string, actual: "ok" | "broken" | "severity") => {
+    // verdict 由服务端按 aiStatus + actual 归类（enrichReviewed）；本地先乐观按同规则显示。
+    const verdict = actual === "severity" ? "severity_mismatch" : actual === "ok" ? (aiStatus === "pass" ? "accurate" : "false_fail") : (aiStatus === "fail" || aiStatus === "blocked" ? "accurate" : "missed_fail");
+    setReviews((m) => ({ ...m, [caseId]: verdict }));
+    setBadFor(null);
+    postReview([{ eventType: "report_reviewed", payload: { caseId, aiStatus, actual, runHash } }]);
+  };
+  const undoReview = (caseId: string) => {
+    setReviews((m) => { const n = { ...m }; delete n[caseId]; return n; });
+    // 撤销必须落库（否则重开报告会从 DB 回显、且仍计入准确度分母 —— 评审 M2）。
+    // 用 verdict:'cleared' 哨兵，聚合层与回显按 last-wins 移除该条。
+    postReview([{ eventType: "report_reviewed", payload: { caseId, verdict: "cleared", runHash } }]);
+  };
+  const bulkAccurate = () => {
+    const rest = results.map((r) => r.id).filter((id) => !reviews[id]);
+    if (!rest.length) return;
+    setReviews((m) => { const n = { ...m }; rest.forEach((id) => { n[id] = "accurate"; }); return n; });
+    postReview([{ eventType: "report_review_bulk", payload: { caseIds: rest, count: rest.length, runHash } }]);
+  };
+  const reviewedCount = results.filter((r) => reviews[r.id]).length;
+  const verdictLabel: Record<string, TranslationKey> = {
+    accurate: "test.review.accurate", false_fail: "test.review.falseFail", missed_fail: "test.review.missedFail", severity_mismatch: "test.review.severityMismatch",
+  };
+
   const metric = (label: string, value: string, danger?: boolean) => (
     <div className="rounded-lg bg-muted/40 p-3">
       <div className="text-[11px] text-muted-foreground">{label}</div>
@@ -2796,6 +3392,21 @@ function ReportView({ t, results, four, funcCounts, funcPassStr, suiteCounts, su
         {metric(t("test.report.execRate"), `${execRate}%`)}
         {metric(t("test.report.defects"), String(four.fail), four.fail > 0)}
       </div>
+      {/* 使用统计：人工复核工具条（仅报告浏览器场景，taskId+runHash 就位）。circuitBroken
+          轮结果不可信，复核无意义 → 不开放。 */}
+      {canReview && !circuitBroken && (
+        <div className="mb-2 flex flex-wrap items-center gap-2 text-[11px] text-muted-foreground">
+          <span>{t("test.review.progress")}：<b className="text-foreground">{reviewedCount}</b>/{results.length}</span>
+          <span className="flex-1" />
+          <button
+            onClick={bulkAccurate}
+            disabled={reviewedCount >= results.length}
+            className="rounded-md border border-border px-2 py-1 text-[11px] text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            {t("test.review.bulkAccurate")}
+          </button>
+        </div>
+      )}
       <div className="overflow-hidden rounded-xl border border-border">
         <table className="w-full border-collapse text-[11px]">
           <thead>
@@ -2803,8 +3414,10 @@ function ReportView({ t, results, four, funcCounts, funcPassStr, suiteCounts, su
               <th className="px-2 py-1.5 font-medium">{t("test.report.colId")}</th>
               <th className="px-2 py-1.5 font-medium">{t("test.report.colActual")}</th>
               <th className="px-2 py-1.5 font-medium">{t("test.report.colStatus")}</th>
+              <th className="whitespace-nowrap px-2 py-1.5 font-medium">{t("test.report.colDuration")}</th>
               <th className="px-2 py-1.5 font-medium">{t("test.report.colEvidence")}</th>
               <th className="px-2 py-1.5 font-medium">{t("test.report.colReason")}</th>
+              {canReview && !circuitBroken && <th className="whitespace-nowrap px-2 py-1.5 font-medium">{t("test.report.colReview")}</th>}
             </tr>
           </thead>
           <tbody>
@@ -2817,6 +3430,7 @@ function ReportView({ t, results, four, funcCounts, funcPassStr, suiteCounts, su
                     {chipLabel[r.status] ? t(chipLabel[r.status]) : r.status}
                   </span>
                 </td>
+                <td className="whitespace-nowrap px-2 py-1.5 font-mono text-muted-foreground">{typeof r.durationMs === "number" ? fmtDuration(r.durationMs) : "—"}</td>
                 <td className="px-2 py-1.5">
                   {r.evidence?.length && projectPath ? (
                     <div className="flex flex-wrap gap-1">
@@ -2832,6 +3446,33 @@ function ReportView({ t, results, four, funcCounts, funcPassStr, suiteCounts, su
                   )}
                 </td>
                 <td className="px-2 py-1.5 text-muted-foreground">{r.error || "—"}</td>
+                {canReview && !circuitBroken && (
+                  <td className="whitespace-nowrap px-2 py-1.5">
+                    {reviews[r.id] ? (
+                      <span className="flex items-center gap-1.5">
+                        <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${reviews[r.id] === "accurate" ? "bg-status-success-muted text-status-success-foreground" : "bg-status-error-muted text-status-error-foreground"}`}>
+                          {reviews[r.id] === "accurate" ? "✓ " : "✗ "}{verdictLabel[reviews[r.id]] ? t(verdictLabel[reviews[r.id]]) : reviews[r.id]}
+                        </span>
+                        <button onClick={() => undoReview(r.id)} className="text-[10px] text-muted-foreground underline hover:text-foreground">{t("test.review.undo")}</button>
+                      </span>
+                    ) : badFor === r.id ? (
+                      <span className="flex flex-col gap-1">
+                        <span className="text-[10px] text-muted-foreground">{t("test.review.actualPrompt")}</span>
+                        <span className="flex flex-wrap gap-1">
+                          <button onClick={() => markBad(r.id, r.status, "ok")} className="rounded border border-border px-1.5 py-0.5 text-[10px] hover:bg-muted">{t("test.review.actualOk")}</button>
+                          <button onClick={() => markBad(r.id, r.status, "broken")} className="rounded border border-border px-1.5 py-0.5 text-[10px] hover:bg-muted">{t("test.review.actualBroken")}</button>
+                          <button onClick={() => markBad(r.id, r.status, "severity")} className="rounded border border-border px-1.5 py-0.5 text-[10px] hover:bg-muted">{t("test.review.actualSeverity")}</button>
+                          <button onClick={() => setBadFor(null)} className="px-1 text-[10px] text-muted-foreground hover:text-foreground">{t("common.cancel")}</button>
+                        </span>
+                      </span>
+                    ) : (
+                      <span className="flex gap-1">
+                        <button onClick={() => markAccurate(r.id)} title={t("test.review.accurate")} className="rounded border border-border px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground hover:border-status-success-border hover:text-status-success-foreground">✓ {t("test.review.ok")}</button>
+                        <button onClick={() => setBadFor(r.id)} title={t("test.review.markBad")} className="rounded border border-border px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground hover:border-status-error-border hover:text-status-error-foreground">✗ {t("test.review.bad")}</button>
+                      </span>
+                    )}
+                  </td>
+                )}
               </tr>
             ))}
           </tbody>
@@ -2966,7 +3607,8 @@ function CompareView({ t, projectPath, taskName, env }: { t: T; projectPath: str
 // 产物预览的目标：md（测试报告/缺陷报告，预览/编辑切换）或 xlsx（执行矩阵只读表格）。
 type PreviewState =
   | { kind: "md"; titleKey: TranslationKey; rel: string; content: string; editable: boolean }
-  | { kind: "xlsx" };
+  | { kind: "xlsx" }
+  | { kind: "scripts"; manifest: ScriptManifestView };
 
 // 报告步「就地展示」面板（替换报告节点的占位符）。报告步 done 时拉 GET /api/test/reports
 // 取当前 task+env 的 ReportEntry，展示：概览条（复用 funcPassRateStr 口径）+ 产出资料列表
@@ -2989,6 +3631,9 @@ function ReportStepPanel({
   const [reloadTick, setReloadTick] = useState(0);
   const [defectBusy, setDefectBusy] = useState(false);
   const [handoffBusy, setHandoffBusy] = useState(false);
+  const [scriptBusy, setScriptBusy] = useState(false);
+  const [scriptManifest, setScriptManifest] = useState<ScriptManifestView | null>(null);
+  const [scriptReloadTick, setScriptReloadTick] = useState(0);
   const [preview, setPreview] = useState<PreviewState | null>(null);
   // 缺陷报告随执行更新：自动缺陷生成守卫按【本次执行时间】记忆——同一份 run 只自动生成一次
   // (防 effect 重复触发)，但【重新执行任务 = 新 run.json(新 time)】时允许再生成一次。配合
@@ -3018,6 +3663,31 @@ function ReportStepPanel({
     // defectGen 闭包仅用 props/setter、稳定；有意不入 deps 以免重建 effect。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [reportStatus, projectPath, taskName, env, reloadTick]);
+
+  // 脚本生成是报告成功后的后台任务，不占用流程节点。manifest 为持久化真相；queued/running
+  // 时短轮询，终态后停止。旧报告没有 manifest 时显示“尚未生成”，允许用户手动补触发。
+  useEffect(() => {
+    if (reportStatus !== "done" || !projectPath) { setScriptManifest(null); return; }
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const load = async () => {
+      try {
+        const query = new URLSearchParams({ projectPath, taskName, env });
+        const res = await fetch(`/api/test/scripts?${query.toString()}`);
+        const data = res.ok ? await res.json() : { manifest: null };
+        if (cancelled) return;
+        const manifest = (data.manifest ?? null) as ScriptManifestView | null;
+        setScriptManifest(manifest);
+        if (manifest && (manifest.jobStatus === "queued" || manifest.jobStatus === "running")) {
+          timer = setTimeout(load, 2_000);
+        }
+      } catch {
+        if (!cancelled) setScriptManifest(null);
+      }
+    };
+    void load();
+    return () => { cancelled = true; if (timer) clearTimeout(timer); };
+  }, [reportStatus, projectPath, taskName, env, scriptReloadTick]);
 
   // 失败态：报告步执行失败 → 提示重跑，不渲染空报告。
   if (reportStatus === "error") {
@@ -3092,6 +3762,56 @@ function ReportStepPanel({
     } catch { setHandoffBusy(false); }
   };
 
+  // 重试缺口 = 重新生成没有脚本/生成失败的用例。生成完接着自动跑通（runPipeline），
+  // 测试人员不必再点一次——单条精修（重试/运行/修复）在脚本弹框里。
+  const retryScripts = async (caseIds?: string[]) => {
+    setScriptBusy(true);
+    try {
+      const res = await fetch("/api/test/scripts/retry", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectPath, taskName, env, caseIds, model: model || undefined, providerId: providerId || undefined, runPipeline: true }),
+      });
+      if (!res.ok) throw new Error("retry failed");
+      setScriptReloadTick((n) => n + 1);
+    } catch {
+      showToast({ type: "error", message: t("test.scripts.error") });
+    } finally {
+      setScriptBusy(false);
+    }
+  };
+
+  // 自动跑通：一键触发「运行→失败自动修→再跑」流水线，直至全部可修复脚本通过。
+  // 断言如实失败/环境阻塞的用例被诚实标出，不 force-pass。同步接口，分钟级返回。
+  const runPipeline = async () => {
+    setScriptBusy(true);
+    try {
+      const res = await fetch("/api/test/scripts/pipeline", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectPath, taskName, env, model: model || undefined, providerId: providerId || undefined }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "pipeline failed");
+      if (data.manifest) setScriptManifest(data.manifest as ScriptManifestView);
+      const s = data.summary as { passed?: string[]; needsHuman?: string[]; environmentBlocked?: string[]; stillFailing?: string[] } | undefined;
+      showToast({
+        type: data.ok ? "success" : "warning",
+        message: t("test.scripts.pipelineResult", {
+          passed: s?.passed?.length ?? 0,
+          human: s?.needsHuman?.length ?? 0,
+          blocked: s?.environmentBlocked?.length ?? 0,
+          failing: s?.stillFailing?.length ?? 0,
+        }),
+      });
+    } catch (error) {
+      showToast({ type: "error", message: error instanceof Error ? error.message : t("test.scripts.error") });
+    } finally {
+      setScriptBusy(false);
+      setScriptReloadTick((n) => n + 1);
+    }
+  };
+
   const metric = (label: string, value: string, danger?: boolean) => (
     <div className="rounded-lg bg-muted/40 p-2.5">
       <div className="text-[10px] text-muted-foreground">{label}</div>
@@ -3099,7 +3819,7 @@ function ReportStepPanel({
     </div>
   );
 
-  // 产出资料卡片（方案 B v3：三卡等大）——主/次按钮样式常量。
+  // 产出资料卡片（报告、矩阵、缺陷、回归脚本）——主/次按钮样式常量。
   const btnPrimary = "inline-flex items-center gap-1 rounded-md bg-primary px-2.5 py-1 text-[11px] font-medium text-primary-foreground hover:bg-primary/90 disabled:opacity-50";
   const btnGhost = "inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-[11px] text-foreground hover:bg-muted disabled:opacity-50";
 
@@ -3141,6 +3861,7 @@ function ReportStepPanel({
   const tileDoc = <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary"><FileIcon size={18} /></span>;
   const tileXls = <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-status-success-muted text-status-success"><FileArrowDown size={18} /></span>;
   const tileBug = (dim?: boolean) => <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${dim ? "bg-muted text-muted-foreground" : "bg-status-error-muted text-status-error"}`}><WarningCircle size={18} /></span>;
+  const tileScript = <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-status-info-muted text-status-info-foreground"><Terminal size={18} /></span>;
 
   // 缺陷卡「导出」：md 已在内存（entry.defectMarkdown），客户端直接下载 .md 原文件。
   const downloadMd = (filename: string, content: string) => {
@@ -3166,6 +3887,48 @@ function ReportStepPanel({
   const summaryText = passed
     ? t("test.report.summaryPass", { func: funcRateStr, exec: execRate })
     : t("test.report.summaryFail", { func: funcRateStr, fail });
+  const scriptJobLabel: Record<ScriptJobStatusView, TranslationKey> = {
+    queued: "test.scripts.queued", running: "test.scripts.running", done: "test.scripts.done",
+    // job 级 stale = 该生成任务被更新的任务取代(superseded),与用例级 stale(本轮未测)
+    // 不同义 —— 两者曾复用同一文案 key,改名后会把「已被新任务取代」显示成「本轮未测」。
+    partial: "test.scripts.partial", error: "test.scripts.error", stale: "test.scripts.jobStale",
+  };
+  // 全卡片一律只看【本轮】用例(排除 status='stale' 的历史用例集残留):它们不在本轮范围内,
+  // 既不该被「自动跑通」拉去跑,其陈年 lastRunError 也不该在卡片上报红。
+  const scriptCurrentCases = scriptManifest?.cases.filter((item) => item.status !== "stale") ?? [];
+  const scriptRunnable = scriptCurrentCases.filter((item) => item.status === "verified" || item.status === "needs_review" || item.status === "outdated");
+  // 「重试缺口」只管【生成】缺口：没 manifest（旧报告）、整个 job 挂了/过期、或有用例
+  // 生成失败（failed/outdated）。刻意不含 jobStatus==='partial'——流水线后运行失败也会
+  // 置 partial，但那不是生成缺口，重试(重新生成)解决不了，会误导用户空点。
+  const scriptHasGaps = !scriptManifest
+    || scriptManifest.jobStatus === "error"
+    || scriptManifest.jobStatus === "stale"
+    || scriptCurrentCases.some((item) => item.status === "failed" || item.status === "outdated");
+  const scriptWorking = scriptManifest?.jobStatus === "queued" || scriptManifest?.jobStatus === "running";
+  // 错误/进行中优先于空态：任务中途失败时 counts 仍是初始零值，
+  // 按 eligible===0 渲染会误报「本轮没有符合条件的用例」。
+  const scriptInfo = !scriptManifest
+    ? t("test.scripts.notGenerated")
+    : scriptManifest.jobStatus === "error"
+      ? (scriptManifest.error?.slice(0, 200) || t("test.scripts.error"))
+      : scriptWorking && scriptManifest.counts.eligible === 0
+        ? t("test.scripts.busy")
+        : scriptManifest.counts.eligible === 0
+          ? t("test.scripts.empty")
+          : t("test.scripts.summary", {
+            generated: scriptManifest.counts.generated,
+            eligible: scriptManifest.counts.eligible,
+            verified: scriptManifest.counts.verified,
+            review: scriptManifest.counts.needsReview,
+          });
+  // 运行失败不改 case.status，counts 也不变 —— 不显式渲染出来，点「运行全部」后卡片
+  // 与点击前逐字节相同，用户只会看到一个转瞬即逝的 toast（"点了没反应"）。
+  // 化石隔离：stale 条目的 lastRunError 是历史（用例已移出本轮回归集合），不算「当前失败」
+  // —— 否则本轮全绿仍挂红字（与 script-job-manager 的 isCurrentRoundCase 同口径）。
+  const scriptRunFailures = scriptCurrentCases.filter((item) => item.lastRunError);
+  const scriptRunFailureText = scriptRunFailures.length > 0
+    ? t("test.scripts.runFailed", { n: scriptRunFailures.length, reason: scriptRunFailures[0].lastRunError!.slice(0, 160) })
+    : "";
 
   return (
     <div className="mt-2 space-y-3">
@@ -3195,14 +3958,14 @@ function ReportStepPanel({
         )}
       </div>
 
-      {/* 产出资料：三张等大卡片（方案 B v3：结论摘要 + 蓝底预览 + 缺陷卡三按钮） */}
+      {/* 产出资料：报告完成后展示四类产物；脚本是后台副产物，不进入流程节点。 */}
       <div>
         <div className="mb-1.5 flex items-center gap-1.5">
           <FolderPlus size={13} className="text-muted-foreground" />
           <span className="text-[11px] font-medium text-foreground">{t("test.report.deliverables")}</span>
           <span className="text-[10px] text-muted-foreground">{t("test.report.deliverablesHint")}</span>
         </div>
-        <div className="grid grid-cols-3 gap-3">
+        <div className="grid grid-cols-1 gap-3 md:grid-cols-2 2xl:grid-cols-4">
           {/* 卡1：测试结果总览（报告 md）——预览 / 编辑 */}
           {deliverableCard(
             tileDoc,
@@ -3249,6 +4012,52 @@ function ReportStepPanel({
             null,
             "dim",
           )}
+          {/* 卡4：成功回归用例的 Playwright 脚本——后台生成、指纹复用、失败项可重试。 */}
+          {deliverableCard(
+            tileScript,
+            <>
+              {t("test.scripts.title")}
+              {scriptManifest && chip(
+                t(scriptJobLabel[scriptManifest.jobStatus]),
+                scriptManifest.jobStatus === "done" ? "ok" : scriptManifest.jobStatus === "error" || scriptManifest.jobStatus === "partial" ? "err" : "mut",
+              )}
+            </>,
+            `AI_LabTest/scripts/${taskName}/${env}/`,
+            <span className="flex flex-col gap-1">
+              <span className="inline-flex items-center gap-1.5">
+                {(scriptWorking || scriptBusy) && <SpinnerGap size={12} className="shrink-0 animate-spin" />}
+                {scriptInfo}
+              </span>
+              {scriptRunFailureText && (
+                <span className="inline-flex items-start gap-1 text-status-error-foreground">
+                  <WarningCircle size={12} className="mt-0.5 shrink-0" />
+                  <span className="min-w-0 break-words">{scriptRunFailureText}</span>
+                </span>
+              )}
+            </span>,
+            <>
+              {/* 按【本轮】脚本数判定:全是 stale(历史用例集残留)时弹框会是空列表,不给入口。 */}
+              {scriptCurrentCases.length > 0 && scriptManifest && (
+                <button onClick={() => setPreview({ kind: "scripts", manifest: scriptManifest })} className={btnPrimary}>
+                  <Eye size={12} /> {t("test.scripts.view")}
+                </button>
+              )}
+              {scriptHasGaps && !scriptWorking && (
+                <button onClick={() => void retryScripts()} disabled={scriptBusy} className={btnGhost}>
+                  <ArrowUp size={12} /> {t("test.scripts.retry")}
+                </button>
+              )}
+              {/* 卡片只留一个动作主线：自动跑通（运行→失败自动修→再跑）。原「运行全部」
+                  「AI 修复」是它的子集，收进弹框做单条精修，避免测试人员面对四个按钮犯选择困难。 */}
+              {scriptRunnable.length > 0 && !scriptWorking && (
+                <button onClick={() => void runPipeline()} disabled={scriptBusy} className={btnPrimary} title={t("test.scripts.pipelineHint")}>
+                  {scriptBusy ? <SpinnerGap size={12} className="animate-spin" /> : <Wrench size={12} />} {t("test.scripts.pipeline")}
+                </button>
+              )}
+            </>,
+            scriptManifest?.jobStatus === "error" ? "alert"
+              : !scriptManifest || scriptManifest.counts.eligible === 0 ? "dim" : undefined,
+          )}
         </div>
       </div>
 
@@ -3261,6 +4070,7 @@ function ReportStepPanel({
           env={env}
           onClose={() => setPreview(null)}
           onSaved={() => { setPreview(null); setReloadTick((n) => n + 1); }}
+          onScriptsChanged={(manifest) => { setScriptManifest(manifest); setScriptReloadTick((n) => n + 1); }}
           setEditable={(editable) => setPreview((p) => (p && p.kind === "md" ? { ...p, editable } : p))}
         />
       )}
@@ -3270,7 +4080,7 @@ function ReportStepPanel({
 
 // 产物预览弹窗壳（复刻用例编辑器的 fixed inset-0 模态）：md 走 MdPreview（渲染/编辑），
 // xlsx 走 XlsxPreview（只读表格 + 证据截图灯箱/录像内联）。
-function PreviewModal({ t, preview, projectPath, taskName, env, onClose, onSaved, setEditable }: {
+function PreviewModal({ t, preview, projectPath, taskName, env, onClose, onSaved, onScriptsChanged, setEditable }: {
   t: T;
   preview: PreviewState;
   projectPath: string;
@@ -3278,15 +4088,26 @@ function PreviewModal({ t, preview, projectPath, taskName, env, onClose, onSaved
   env: string;
   onClose: () => void;
   onSaved: () => void;
+  onScriptsChanged?: (manifest: ScriptManifestView) => void;
   setEditable: (editable: boolean) => void;
 }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
-      <div className={`flex max-h-[85vh] w-full flex-col overflow-hidden rounded-xl border border-border bg-card ${preview.kind === "xlsx" ? "max-w-[1040px]" : "max-w-3xl"}`} onClick={(e) => e.stopPropagation()}>
+      <div className={`flex max-h-[85vh] w-full flex-col overflow-hidden rounded-xl border border-border bg-card ${preview.kind === "md" ? "max-w-3xl" : "max-w-[1040px]"}`} onClick={(e) => e.stopPropagation()}>
         {preview.kind === "md" ? (
           <MdPreview t={t} preview={preview} projectPath={projectPath} onClose={onClose} onSaved={onSaved} setEditable={setEditable} />
-        ) : (
+        ) : preview.kind === "xlsx" ? (
           <XlsxPreview t={t} projectPath={projectPath} taskName={taskName} env={env} onClose={onClose} />
+        ) : (
+          <ScriptPreview
+            t={t}
+            projectPath={projectPath}
+            taskName={taskName}
+            env={env}
+            initialManifest={preview.manifest}
+            onChanged={onScriptsChanged ?? (() => undefined)}
+            onClose={onClose}
+          />
         )}
       </div>
     </div>
@@ -3357,6 +4178,300 @@ function MdPreview({ t, preview, projectPath, onClose, onSaved, setEditable }: {
   );
 }
 
+// 回归脚本预览：manifest 左侧列出每条成功回归用例及验证状态，右侧只读展示脚本；
+// 可对失败/旧版本单独重试，也可在隔离的 Playwright runner 中手动运行当前脚本。
+function ScriptPreview({ t, projectPath, taskName, env, initialManifest, onChanged, onClose }: {
+  t: T;
+  projectPath: string;
+  taskName: string;
+  env: string;
+  initialManifest: ScriptManifestView;
+  onChanged: (manifest: ScriptManifestView) => void;
+  onClose: () => void;
+}) {
+  const [manifest, setManifest] = useState(initialManifest);
+  // 只列【本轮】的脚本:status='stale'(本轮未测)是历次用例集换代后留下的旧条目——脚本文件
+  // 仍在盘上、不删,但把它们混在列表里会让人以为本轮有一堆待处理的东西(真机上 15 条里 9 条
+  // 是历史残留)。counts 本就不计 stale,过滤后列表与顶部数字口径终于一致。
+  const shownCases = manifest.cases.filter((item) => item.status !== "stale");
+  const hiddenCount = manifest.cases.length - shownCases.length;
+  const [selectedId, setSelectedId] = useState(initialManifest.cases.filter((c) => c.status !== "stale")[0]?.caseId ?? "");
+  const [content, setContent] = useState<string | null>(null);
+  const [contentError, setContentError] = useState(false);
+  const [busy, setBusy] = useState<"retry" | "run" | "repair" | "confirm" | null>(null);
+  const [output, setOutput] = useState("");
+  const selected = shownCases.find((item) => item.caseId === selectedId) ?? shownCases[0];
+
+  const statusLabel: Record<ScriptCaseStatusView, TranslationKey> = {
+    verified: "test.scripts.verified",
+    needs_review: "test.scripts.needsReview",
+    failed: "test.scripts.failed",
+    stale: "test.scripts.stale",
+    outdated: "test.scripts.outdated",
+  };
+  const statusClass: Record<ScriptCaseStatusView, string> = {
+    verified: "border-status-success-border bg-status-success-muted text-status-success-foreground",
+    needs_review: "border-status-warning-border bg-status-warning-muted text-status-warning-foreground",
+    failed: "border-status-error-border bg-status-error-muted text-status-error-foreground",
+    stale: "border-border bg-muted text-muted-foreground",
+    outdated: "border-status-warning-border bg-status-warning-muted text-status-warning-foreground",
+  };
+
+  useEffect(() => {
+    if (!selected?.caseId) { setContent(null); return; }
+    let cancelled = false;
+    setContent(null);
+    setContentError(false);
+    const query = new URLSearchParams({ projectPath, taskName, env, caseId: selected.caseId });
+    fetch(`/api/test/scripts?${query.toString()}`)
+      .then(async (res) => {
+        if (!res.ok) throw new Error("load failed");
+        return res.json();
+      })
+      .then((data) => { if (!cancelled) setContent(typeof data.content === "string" ? data.content : ""); })
+      .catch(() => { if (!cancelled) setContentError(true); });
+    return () => { cancelled = true; };
+  }, [projectPath, taskName, env, selected?.caseId, manifest.updatedAt]);
+
+  // 在弹窗内也跟随后台任务；这样单项重试后不必关闭弹窗等待产物卡刷新。
+  useEffect(() => {
+    if (manifest.jobStatus !== "queued" && manifest.jobStatus !== "running") return;
+    let cancelled = false;
+    const timer = setInterval(() => {
+      const query = new URLSearchParams({ projectPath, taskName, env });
+      void fetch(`/api/test/scripts?${query.toString()}`)
+        .then((res) => res.json())
+        .then((data) => {
+          if (cancelled || !data.manifest) return;
+          const next = data.manifest as ScriptManifestView;
+          setManifest(next);
+          onChanged(next);
+          // 后台重生成收尾（不再 queued/running）→ 清掉「重试」时设的「等待生成」占位。
+          // 否则脚本早已生成、状态徽章已更新，运行输出区却一直停在「等待生成」（用户实测）。
+          if (next.jobStatus !== "queued" && next.jobStatus !== "running") {
+            setOutput((prev) => (prev === t("test.scripts.queued") ? "" : prev));
+          }
+        })
+        .catch(() => undefined);
+    }, 2_000);
+    return () => { cancelled = true; clearInterval(timer); };
+  }, [manifest.jobStatus, projectPath, taskName, env, onChanged, t]);
+
+  const retrySelected = async () => {
+    if (!selected) return;
+    setBusy("retry");
+    setOutput("");
+    try {
+      const res = await fetch("/api/test/scripts/retry", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectPath, taskName, env, caseIds: [selected.caseId] }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "retry failed");
+      const queued: ScriptManifestView = { ...manifest, jobStatus: "queued" };
+      setManifest(queued);
+      onChanged(queued);
+      setOutput(t("test.scripts.queued"));
+    } catch (error) {
+      setOutput(error instanceof Error ? error.message : t("test.scripts.error"));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const runSelected = async () => {
+    if (!selected) return;
+    setBusy("run");
+    setOutput("");
+    try {
+      const res = await fetch("/api/test/scripts/run", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectPath, taskName, env, caseIds: [selected.caseId] }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "run failed");
+      if (data.manifest) {
+        const next = data.manifest as ScriptManifestView;
+        setManifest(next);
+        onChanged(next);
+      }
+      const result = Array.isArray(data.results) ? data.results[0] as { output?: string } | undefined : undefined;
+      setOutput(result?.output || "");
+    } catch (error) {
+      setOutput(error instanceof Error ? error.message : t("test.scripts.error"));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  // AI 修复：仅对「有失败记录」的脚本开放。同步接口（LLM+校验+重放），完成后 manifest 直达终态。
+  const repairSelected = async () => {
+    if (!selected) return;
+    setBusy("repair");
+    setOutput("");
+    try {
+      const res = await fetch("/api/test/scripts/repair", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectPath, taskName, env, caseIds: [selected.caseId] }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "repair failed");
+      if (data.manifest) {
+        const next = data.manifest as ScriptManifestView;
+        setManifest(next);
+        onChanged(next);
+      }
+      const result = Array.isArray(data.results) ? data.results[0] as { fixed?: boolean; reason?: string } | undefined : undefined;
+      setOutput(result ? `${result.fixed ? "✓" : "✗"} ${result.reason ?? ""}` : "");
+    } catch (error) {
+      setOutput(error instanceof Error ? error.message : t("test.scripts.error"));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  // 人工确认 mock 脚本通过：「需人工确认真实环境可通过」这句警告此前没有落点，usesMock 的
+  // 脚本无论运行成功多少次都不会被提升（runScriptCases 刻意跳过它们），状态永久停在待复核。
+  const confirmSelected = async () => {
+    if (!selected) return;
+    setBusy("confirm");
+    setOutput("");
+    try {
+      const res = await fetch("/api/test/scripts/confirm-mock", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectPath, taskName, env, caseIds: [selected.caseId] }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data.error || "confirm failed");
+      if (data.manifest) {
+        const next = data.manifest as ScriptManifestView;
+        setManifest(next);
+        onChanged(next);
+      }
+      setOutput(`✓ ${t("test.scripts.confirmMockDone")}`);
+    } catch (error) {
+      setOutput(error instanceof Error ? error.message : t("test.scripts.error"));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  // outdated 也可运行:它的定义是「重新生成失败但盘上仍有可用旧脚本」,排除它等于让好脚本
+  // 掉出全部恢复通道(与 isRunnableStatus 保持同一口径)。
+  const runnable = selected?.status === "verified" || selected?.status === "needs_review" || selected?.status === "outdated";
+  // 只在「确实需要人工拍板」时给按钮：mock + 待复核 + 无失败记录（带失败记录该走运行/AI 修复）。
+  const confirmable = !!selected && selected.usesMock && selected.status === "needs_review" && !selected.lastRunError;
+  const working = manifest.jobStatus === "queued" || manifest.jobStatus === "running";
+
+  return (
+    <>
+      <div className="flex items-center gap-2 border-b border-border px-3 py-2">
+        <Terminal size={14} className="shrink-0 text-primary" />
+        <span className="text-[11px] font-medium text-foreground">{t("test.scripts.title")}</span>
+        <span className="font-mono text-[10px] text-muted-foreground">{taskName}/{env}</span>
+        {working && <SpinnerGap size={12} className="animate-spin text-muted-foreground" />}
+        <span className="flex-1" />
+        <button onClick={onClose} className="text-muted-foreground hover:text-foreground" aria-label={t("test.report.close")}><X size={14} /></button>
+      </div>
+      <div className="flex min-h-0 flex-1 flex-col md:flex-row">
+        <aside className="max-h-44 shrink-0 overflow-auto border-b border-border bg-muted/20 p-2 md:max-h-none md:w-64 md:border-b-0 md:border-r">
+          <div className="space-y-1">
+            {shownCases.map((item) => (
+              <button
+                key={item.caseId}
+                onClick={() => { setSelectedId(item.caseId); setOutput(""); }}
+                className={`w-full rounded-md border px-2 py-1.5 text-left transition ${selected?.caseId === item.caseId ? "border-primary/50 bg-primary/5" : "border-transparent hover:bg-muted"}`}
+              >
+                <div className="flex min-w-0 items-center gap-1.5">
+                  <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-foreground">
+                    {item.sourceTask ? `${item.sourceTask} · ${item.sourceCaseId || item.caseId}` : item.caseId}
+                  </span>
+                  <span className={`shrink-0 rounded-full border px-1.5 py-0.5 text-[9px] ${statusClass[item.status]}`}>{t(statusLabel[item.status])}</span>
+                </div>
+                <div className="mt-0.5 truncate font-mono text-[9px] text-muted-foreground">{item.file}</div>
+              </button>
+            ))}
+          </div>
+          {/* 被过滤掉的历史脚本要留个交代:文件仍在盘上、下轮跑到该用例就自动回来,
+              静默消失会让人以为脚本被删了。 */}
+          {hiddenCount > 0 && (
+            <div className="mt-2 px-1 text-[9px] leading-relaxed text-muted-foreground">
+              {t("test.scripts.hiddenStale", { count: hiddenCount })}
+            </div>
+          )}
+        </aside>
+        <section className="flex min-h-[55vh] min-w-0 flex-1 flex-col">
+          <div className="flex flex-wrap items-center gap-1.5 border-b border-border px-3 py-2">
+            <span className="min-w-0 flex-1 truncate font-mono text-[10px] text-muted-foreground">{selected?.file ?? "—"}</span>
+            {selected && (
+              <button onClick={retrySelected} disabled={busy !== null || working} className="inline-flex items-center gap-1 rounded border border-border px-2 py-0.5 text-[10px] text-foreground hover:bg-muted disabled:opacity-40">
+                {busy === "retry" ? <SpinnerGap size={10} className="animate-spin" /> : <ArrowUp size={10} />} {t("test.scripts.retry")}
+              </button>
+            )}
+            {runnable && (
+              <button onClick={runSelected} disabled={busy !== null || working} className="inline-flex items-center gap-1 rounded bg-primary px-2 py-0.5 text-[10px] text-primary-foreground disabled:opacity-40">
+                {busy === "run" ? <SpinnerGap size={10} className="animate-spin" /> : <Play size={10} />} {t("test.scripts.runOne")}
+              </button>
+            )}
+            {selected?.lastRunError && (
+              <button onClick={repairSelected} disabled={busy !== null || working} className="inline-flex items-center gap-1 rounded border border-border px-2 py-0.5 text-[10px] text-foreground hover:bg-muted disabled:opacity-40">
+                {busy === "repair" ? <SpinnerGap size={10} className="animate-spin" /> : <Wrench size={10} />} {t("test.scripts.repair")}
+              </button>
+            )}
+            {confirmable && (
+              <button onClick={confirmSelected} disabled={busy !== null || working} title={t("test.scripts.confirmMockHint")} className="inline-flex items-center gap-1 rounded border border-status-success-border bg-status-success-muted px-2 py-0.5 text-[10px] text-status-success-foreground hover:opacity-90 disabled:opacity-40">
+                {busy === "confirm" ? <SpinnerGap size={10} className="animate-spin" /> : <Check size={10} />} {t("test.scripts.confirmMock")}
+              </button>
+            )}
+          </div>
+          {/* 运行失败是持久化的（manifest.lastRunError），重开弹框仍可见；上方的 output 只是本次运行的瞬时输出。 */}
+          {selected?.lastRunError && (
+            <div className="border-b border-border bg-status-error-muted/40 px-3 py-1.5 text-[10px] text-status-error-foreground">
+              {selected.lastRunError}
+            </div>
+          )}
+          {/* 人工确认留痕：它是被人放行的、不是自动验证通过的，这个区别必须可见。 */}
+          {selected?.manualVerifiedAt && (
+            <div className="border-b border-border bg-status-success-muted/40 px-3 py-1.5 text-[10px] text-status-success-foreground">
+              ✓ {t("test.scripts.confirmMockDone")} · {fmtCnDateTime(selected.manualVerifiedAt)}
+            </div>
+          )}
+          {/* AI 修复结论：修了什么 / 为什么不是脚本缺陷（如页面行为与用例预期不符 → 需人工确认）。 */}
+          {selected?.repairNote && (
+            <div className="border-b border-border bg-status-info-muted/40 px-3 py-1.5 text-[10px] text-status-info-foreground">
+              🔧 {selected.repairNote}
+            </div>
+          )}
+          {(Boolean(selected?.error) || (selected?.validation?.warnings?.length ?? 0) > 0) && (
+            <div className="border-b border-border bg-status-warning-muted/40 px-3 py-1.5 text-[10px] text-status-warning-foreground">
+              {selected.error || selected.validation?.warnings.join(" · ")}
+            </div>
+          )}
+          <div className="min-h-0 flex-1 overflow-auto bg-muted/15">
+            {contentError ? (
+              <div className="p-6 text-center text-[11px] text-status-error-foreground">{t("test.scripts.loadFailed")}</div>
+            ) : content === null ? (
+              <div className="p-6 text-center"><SpinnerGap size={14} className="mx-auto animate-spin text-muted-foreground" /></div>
+            ) : (
+              <pre className="min-w-max p-3 font-mono text-[11px] leading-relaxed text-foreground"><code>{content}</code></pre>
+            )}
+          </div>
+          {output && (
+            <div className="max-h-36 overflow-auto border-t border-border bg-background px-3 py-2">
+              <div className="mb-1 text-[10px] font-medium text-muted-foreground">{t("test.scripts.output")}</div>
+              <pre className="whitespace-pre-wrap break-all font-mono text-[10px] leading-relaxed text-foreground">{output}</pre>
+            </div>
+          )}
+        </section>
+      </div>
+    </>
+  );
+}
+
 // 操作记录弹窗（需求②审计的查看端）：GET /api/test/audit 拉当前任务事件（最新在前，服务端
 // 已倒序），展示 时间(fmtCnDateTime 本地化)/步骤/动作/方式/详情。动作与方式经 i18n 映射；
 // 未知动作原样显示（审计文件是数据，向前兼容新动作）。审计文件删任务留痕，故已删任务的
@@ -3377,6 +4492,10 @@ const AUDIT_ACTION_KEYS: Record<string, TranslationKey> = {
   "deposit-library": "test.audit.action.depositLibrary",
   "run-library": "test.audit.action.runLibrary",
   "library-remove": "test.audit.action.libraryRemove",
+  "suite-save": "test.audit.action.suiteSave",
+  "suite-delete": "test.audit.action.suiteDelete",
+  "delete-round": "test.audit.action.deleteRound",
+  "confirm-mock-scripts": "test.audit.action.confirmMock",
 };
 const AUDIT_MODE_KEYS: Record<string, TranslationKey> = {
   manual: "test.audit.mode.manual",
@@ -3445,31 +4564,476 @@ function AuditModal({ t, projectPath, taskName, onClose }: { t: T; projectPath: 
   );
 }
 
-// 回归用例库弹窗(项目级):按来源任务分组展示沉淀的回归用例;支持移除单条 / 移除某任务全部。
-// 「一键重跑」按钮 + 报告查看在批 D 接线(onRun 由父组件在批 D 传入)。
-interface LibEntry { id?: string; purpose?: string; priority?: string; caseType?: string; tags?: string[]; _source?: { task?: string; originalId?: string; depositedAt?: string } }
+// 回归用例库区块(批 H 页面化,项目级):按来源任务分组展示沉淀的回归用例;检索/过滤;
+// 支持移除单条 / 移除某任务全部。发起回归与运行状态行在 RegressionWorkspace 层。
+interface LibMetaUI {
+  reviewState: "approved" | "pending";
+  rev: number;
+  history: Array<{ rev: number; at: string; note: string }>;
+  quarantined: boolean;
+  quarantinedAt?: string;
+  quarantineReason?: string;
+}
+interface LibEntry {
+  id?: string; purpose?: string; priority?: string; caseType?: string; module?: string;
+  requirement?: string; tags?: string[];
+  steps?: Array<{ content?: string; expected?: string }>;
+  _source?: { task?: string; originalId?: string; depositedAt?: string };
+  _lib?: LibMetaUI;
+}
 interface LibGroup { task: string; count: number; entries: LibEntry[] }
-function RegressionLibraryModal({ t, projectPath, reloadSignal, onChanged, onClose, onRun, running, runStatus }: {
+
+// 跨轮历史(GET /api/test/library/history):矩阵 + 健康度派生。库总览徽标、详情抽屉的执行
+// 历史圆点、对比矩阵、健康度页共用同一份数据。
+type CaseRes = "p" | "f" | "-";
+type HealthKind = "quar" | "streak" | "flaky" | "never" | "stale" | "ok";
+interface HistRound { roundId: string; startedAt: string; env: string; suiteName: string; mode: string; status: string }
+interface HistCase {
+  task: string; originalId: string; purpose: string; priority: string; module: string;
+  meta: LibMetaUI; res: CaseRes[]; pinned: boolean; flips: number; tailFails: number; health: HealthKind;
+}
+interface HistSummary {
+  total: number; flaky: number; streak: number; stale: number; never: number;
+  quarantined: number; pending: number; quarantineRatio: number; quarantineAlert: boolean;
+}
+interface HistoryDTO {
+  rounds: HistRound[]; cases: HistCase[];
+  passRates: Array<{ roundId: string; pass: number; fail: number; total: number }>;
+  summary: HistSummary;
+}
+
+/** 条目身份键(任务名可含空格,用 JSON 数组做无歧义键)。 */
+const caseKey = (task: string, originalId: string) => JSON.stringify([task, originalId]);
+const caseKeyDec = (s: string): { task: string; originalId: string } => {
+  const [task, originalId] = JSON.parse(s) as [string, string];
+  return { task, originalId };
+};
+
+/** 健康度徽标文案与配色(与 case-history.ts 的 health() 一一对应)。 */
+function healthBadge(t: T, c: Pick<HistCase, "health" | "tailFails">): { label: string; cls: string } | null {
+  switch (c.health) {
+    case "quar": return { label: t("test.health.quarantined"), cls: "bg-status-info-muted text-status-info-foreground" };
+    case "streak": return { label: t("test.health.streak", { n: c.tailFails }), cls: "bg-status-error-muted text-status-error-foreground" };
+    case "flaky": return { label: t("test.health.flaky"), cls: "bg-status-warning-muted text-status-warning-foreground" };
+    case "never": return { label: t("test.health.never"), cls: "border border-border text-muted-foreground" };
+    case "stale": return { label: t("test.health.stale"), cls: "border border-border text-muted-foreground" };
+    default: return null;
+  }
+}
+
+/** 上次执行结果圆点(p/f/未跑)。 */
+function LastResultDot({ t, res }: { t: T; res: CaseRes[] }) {
+  let last: CaseRes = "-";
+  for (let i = res.length - 1; i >= 0; i--) if (res[i] !== "-") { last = res[i]; break; }
+  const cls = last === "p" ? "bg-status-success-foreground" : last === "f" ? "bg-status-error-foreground" : "bg-border";
+  const title = last === "p" ? t("test.library.lastResultPass") : last === "f" ? t("test.library.lastResultFail") : t("test.library.lastResultNone");
+  return <span className={`inline-block h-2 w-2 flex-shrink-0 rounded-full ${cls}`} title={title} />;
+}
+
+// 回归执行进展面板：就地下拉的执行详情（替换原来只有一句话的运行状态行）。
+//
+// 折叠 = 一行摘要（跑到哪、有没有挂）。展开 = 左侧用例进度 + 右侧按用例分段的执行流：
+// 通过的用例自动收起，失败/无判定的保持展开并挂红边，工具轨迹折叠成「N 步」。
+//
+// **不保留历史**：状态活在内存，跑完定格为本次快照，切走/刷新即消失（用户拍板）。
+// 收口后的事实在「轮次报告」页。
+//
+// 对账条：正常时一行安静的 ✓；背离时展开三源读数。**锚点是 tool_use 计数**——@@CASE_START
+// 与 @@RESULT 都是模型自由文本，同一次 markdown 装饰会把两者一起污染、让背离被掩盖；
+// tool_use 是 SDK 结构化帧，与格式漂移无关（2026-07-10 事故的教训，见 lib/test/markers.ts）。
+
+const LIVE_DOT: Record<LiveStatus, string> = {
+  pass: "bg-status-success-foreground",
+  fail: "bg-status-error-foreground",
+  partial: "bg-status-warning-foreground",
+  blocked: "bg-muted-foreground",
+};
+const LIVE_TEXT: Record<LiveStatus, string> = {
+  pass: "text-status-success-foreground",
+  fail: "text-status-error-foreground",
+  partial: "text-status-warning-foreground",
+  blocked: "text-muted-foreground",
+};
+
+function RegressionLivePanel({ t, live, running, runStatus, onOpenReport, onStop }: {
+  t: T;
+  live: LibraryLive;
+  running: boolean;
+  runStatus: string | null;
+  onOpenReport: () => void;
+  /** 停止当前轮次(运行中显示按钮;确认与收口逻辑在上层 stopLibraryRun)。 */
+  onStop?: () => void;
+}) {
+  const [open, setOpen] = useState(true);
+  // 「收口中 / 疑似卡住」是【推断态】——服务端在做证据归集与归约时不发任何帧。用一个秒级
+  // ticker 让面板能自己判断「多久没收到帧了」。
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!running || live.finished) return;
+    const h = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(h);
+  }, [running, live.finished]);
+  const logRef = useRef<HTMLDivElement>(null);
+  // 智能吸底:仅当用户本就贴近底部时才自动跟随新帧。原来无条件 scrollTop=scrollHeight,
+  // 执行期间每来一帧都把滚动条拽回底部 —— 用户根本无法往上滚动阅读(实测反馈)。
+  const followRef = useRef(true);
+  const onLogScroll = () => {
+    const el = logRef.current;
+    if (el) followRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 48;
+  };
+  useEffect(() => {
+    const el = logRef.current;
+    if (running && el && followRef.current) el.scrollTop = el.scrollHeight;
+  }, [live.cases.length, live.tools, live.verdicts, running]);
+
+  const fin = !!live.runJson || live.finished;
+  const counts = live.runJson ?? live.four;
+  const lostCases = live.cases.filter((c) => c.lost).length;
+  const lostAll = fin && live.verdicts === 0 && live.tools > 0 && !live.errored;
+  // 用户停止与真实失败共用中断视觉(红),仅文案区分——中断的轮天然缺判定,不是判定丢失。
+  const stopped = !!live.stopped;
+  const aborting = live.errored || stopped;
+  const idle = now - live.lastFrameAt;
+  const settling = !fin && live.step === "execution" && live.started > 0 && idle > LIVE_SETTLE_MS;
+  const stuck = settling && idle > LIVE_STUCK_MS;
+  // 背离 = 「浏览器确有活动，却收不到判定」。中断的轮天然缺判定，那是【中断】不是【判定丢失】——
+  // 混为一谈会让真事故淹没在噪音里。
+  const inflight = live.curIdx >= 0 ? 1 : 0;
+  const diverged = !aborting && (live.malformed > 0 || (live.tools > 0 && live.started - inflight > live.verdicts));
+
+  const cur = live.curIdx >= 0 ? live.cases[live.curIdx] : undefined;
+  let headline: string;
+  let sub: string;
+  if (fin) {
+    headline = aborting ? t(stopped ? "test.live.doneStopped" : "test.live.doneAborted") : lostAll ? t("test.live.doneLost")
+      : counts.fail || counts.blocked ? t("test.live.doneFail") : t("test.live.doneOk");
+    sub = t("test.live.passOf", { pass: counts.pass, total: counts.total || live.total });
+  } else if (live.step === "report") {
+    headline = t("test.live.report"); sub = t("test.live.reportSub");
+  } else if (stuck) { headline = t("test.live.settling"); sub = t("test.live.stuck"); }
+  else if (settling) { headline = t("test.live.settling"); sub = t("test.live.settlingSub"); }
+  else if (cur) { headline = t("test.live.running", { idx: cur.index, total: live.total }); sub = cur.title || cur.id; }
+  else { headline = t("test.live.startingUp"); sub = t("test.live.startingUpSub"); }
+
+  const pct = fin ? 100 : live.total ? Math.round((live.verdicts / live.total) * 100) : 0;
+  const barCls = fin ? (counts.fail || counts.blocked ? "bg-status-error-foreground" : "bg-status-success-foreground") : "bg-primary";
+
+  const chip = (label: string, n: number, cls: string) =>
+    n > 0 ? <span key={label} className={`rounded-full px-1.5 text-[9.5px] tabular-nums ${cls}`}>{label} {n}</span> : null;
+
+  // 完整记录:不再按类型过滤、不再折叠工具轨迹 —— 所有事件按时间顺序原样铺开
+  // (用户拍板:工具调用/AI 说明/用例与判定全部合入「全部」,不需要每用例收缩展开)。
+  const renderEvents = (events: LiveEvt[]) => {
+    if (!events.length) return null;
+    const bubble = (e: LiveEvt, i: number) => {
+      if (e.k === "tool") return <div key={i} className="truncate rounded bg-muted px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground" title={e.text}>{e.text}</div>;
+      if (e.k === "err") return <div key={i} className="rounded bg-status-error-muted px-2 py-1 text-[10.5px] text-status-error-foreground">{e.text}</div>;
+      if (e.k === "sys") return <div key={i} className={`font-mono text-[10.5px] font-semibold ${e.lost ? "font-sans font-medium text-status-error-foreground" : e.status ? LIVE_TEXT[e.status] : "text-muted-foreground"}`}>{e.text}</div>;
+      return <div key={i} className="whitespace-pre-wrap rounded-md bg-muted px-2 py-1 text-[11px] text-foreground">{e.text}</div>;
+    };
+    return <div className="flex flex-col gap-1 py-1.5">{events.map(bubble)}</div>;
+  };
+
+  return (
+    <div className={`mb-3 overflow-hidden rounded-lg border bg-card ${diverged || lostAll ? "border-status-error-foreground/50" : "border-border"}`}>
+      {/* 折叠头(展开开关 + 运行中的「停止」并排 —— button 不能嵌套,停止不放开关内部) */}
+      <div className="flex w-full items-center">
+        <button
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+          className="flex min-w-0 flex-1 items-center gap-2 px-3 py-1.5 text-left hover:bg-muted"
+        >
+          {open ? <CaretDown size={9} className="flex-shrink-0 text-muted-foreground" /> : <CaretRight size={9} className="flex-shrink-0 text-muted-foreground" />}
+          {fin ? <span className={`h-2 w-2 flex-shrink-0 rounded-full ${counts.fail || counts.blocked || aborting ? "bg-status-error-foreground" : "bg-status-success-foreground"}`} />
+               : <SpinnerGap size={11} className="flex-shrink-0 animate-spin text-primary" />}
+          <span className="whitespace-nowrap text-[11.5px] font-semibold text-foreground">{headline}</span>
+          <span className="min-w-0 flex-1 truncate text-[11px] text-muted-foreground">{sub}</span>
+          <span className="h-1 w-24 flex-shrink-0 overflow-hidden rounded-full bg-border">
+            <span className={`block h-full transition-all ${barCls}`} style={{ width: `${pct}%` }} />
+          </span>
+          <span className="flex flex-shrink-0 gap-1">
+            {chip(t("test.state.pass"), counts.pass, "bg-status-success-muted text-status-success-foreground")}
+            {chip(t("test.state.fail"), counts.fail, "bg-status-error-muted text-status-error-foreground")}
+            {chip(t("test.state.partial"), counts.partial, "bg-status-warning-muted text-status-warning-foreground")}
+            {chip(t("test.state.blocked"), counts.blocked, "bg-muted text-muted-foreground")}
+          </span>
+        </button>
+        {onStop && running && !live.finished && (
+          <button
+            onClick={onStop}
+            title={t("test.library.stopHint")}
+            className="mr-2 flex h-6 flex-shrink-0 items-center gap-1 rounded-md border border-status-error-foreground/40 px-2 text-[11px] font-medium text-status-error-foreground hover:bg-status-error-muted"
+          >
+            <Stop size={11} weight="fill" /> {t("test.library.stop")}
+          </button>
+        )}
+      </div>
+
+      {/* 对账条：正常安静，背离/中断时响 */}
+      {live.started > 0 && (
+        aborting ? (
+          <div className="flex flex-wrap items-center gap-1.5 border-t border-border bg-status-error-muted px-3 py-1.5 text-[11px] font-medium text-status-error-foreground">
+            <Warning size={11} /> <span>{t(stopped ? "test.live.reconStopped" : "test.live.reconAborted")}</span>
+            <span className="ml-auto font-normal">{stopped ? t("test.live.reconStoppedWhy") : (live.errorText || t("test.live.reconAbortedWhy"))}</span>
+          </div>
+        ) : diverged ? (
+          <div className="flex flex-wrap items-center gap-1.5 border-t border-border bg-status-error-muted px-3 py-1.5 text-[11px] font-medium text-status-error-foreground">
+            <Warning size={11} />
+            <span>{t("test.live.reconToolActivity", { n: live.tools })}</span>·
+            <span>{t("test.live.reconStarted", { n: live.started })}</span>·
+            <span>{t("test.live.reconVerdicts", { n: live.verdicts })}</span>
+            {live.malformed > 0 && <>·<span>{t("test.live.reconMalformed", { n: live.malformed })}</span></>}
+            <span className="ml-auto font-normal">{t("test.live.reconBad")}</span>
+          </div>
+        ) : (
+          <div className="flex flex-wrap items-center gap-1.5 border-t border-border bg-muted px-3 py-1 text-[10.5px] text-muted-foreground">
+            <Check size={10} /> <span>{t("test.live.reconOk", { verdicts: live.verdicts, started: live.started })}</span>
+            <span className="ml-auto">{t("test.live.reconAnchor")}</span>
+          </div>
+        )
+      )}
+
+      {open && (
+        <div className="grid grid-cols-1 border-t border-border md:grid-cols-[280px_1fr]">
+          {/* 左：用例进度 */}
+          <div className="min-w-0 border-b border-border md:border-b-0 md:border-r">
+            <div className="flex items-center gap-1.5 bg-muted px-3 py-1 text-[9.5px] font-semibold uppercase tracking-wide text-muted-foreground">
+              {t("test.live.caseSect")}
+              <span className="flex-1" />
+              <span className={`text-[10px] font-normal normal-case tracking-normal ${lostCases ? "text-status-error-foreground" : ""}`}>
+                {t("test.live.caseDone", { done: live.verdicts, total: live.total })}
+                {lostCases > 0 && t("test.live.caseLost", { n: lostCases })}
+              </span>
+            </div>
+            <div className="max-h-[420px] divide-y divide-border overflow-auto">
+              {live.cases.length === 0 && <div className="p-4 text-center text-[11px] text-muted-foreground">{t("test.live.waiting")}</div>}
+              {live.cases.map((c, i) => (
+                <button
+                  key={`${c.id}-${i}`}
+                  onClick={() => document.getElementById(`live-seg-${i}`)?.scrollIntoView({ block: "center", behavior: "smooth" })}
+                  className={`flex w-full items-center gap-2 px-3 py-1.5 text-left text-[11px] hover:bg-muted ${c.lost ? "bg-status-error-muted" : live.curIdx === i ? "bg-primary/[0.07] shadow-[inset_2px_0_0_var(--primary)]" : ""}`}
+                >
+                  {c.result ? <span className={`h-2 w-2 flex-shrink-0 rounded-full ${LIVE_DOT[c.result.status]}`} />
+                    : c.lost ? <span className="h-2 w-2 flex-shrink-0 rounded-full bg-status-error-foreground" />
+                    : live.curIdx === i ? <SpinnerGap size={9} className="flex-shrink-0 animate-spin text-primary" />
+                    : <span className="h-2 w-2 flex-shrink-0 rounded-full bg-border" />}
+                  <span className="flex-shrink-0 font-mono text-[10px] text-muted-foreground">{c.id}</span>
+                  <span className="min-w-0 flex-1 truncate text-foreground" title={c.title}>{c.title || "—"}</span>
+                  {c.result ? (
+                    <span className="font-mono text-[9.5px] tabular-nums text-muted-foreground" title={live.runJson ? t("test.live.durFinal") : t("test.live.durLive")}>
+                      {live.runJson ? "" : "~"}{((c.ms ?? 0) / 1000).toFixed(1)}s
+                    </span>
+                  ) : c.lost ? (
+                    <span className="text-[9.5px] font-semibold text-status-error-foreground" title={t("test.live.noVerdictHint")}>⚠ {t("test.live.noVerdict")}</span>
+                  ) : (
+                    <span className="text-[9.5px] text-muted-foreground">{live.curIdx === i ? t("test.live.executing") : t("test.live.pending")}</span>
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* 右：完整执行记录(单一时间线,用例边界只是分隔行,不可折叠) */}
+          <div className="flex min-w-0 flex-col">
+            <div className="flex items-center justify-between border-b border-border bg-muted px-2.5 py-1">
+              <span className="text-[9.5px] font-semibold uppercase tracking-wide text-muted-foreground">{t("test.live.execRecord")}</span>
+              <span className="text-[10px] text-muted-foreground">{t("test.live.toolActivity", { n: live.tools })}</span>
+            </div>
+            <div ref={logRef} onScroll={onLogScroll} className="flex h-[420px] flex-col overflow-auto p-2">
+              {renderEvents(live.pre)}
+              {live.cases.map((c, i) => {
+                const toolCount = c.events.filter((e) => e.k === "tool").length;
+                const sepCls = c.lost || c.result?.status === "fail" ? "border-status-error-foreground/45" : live.curIdx === i ? "border-primary/40" : "border-border";
+                return (
+                  <Fragment key={`${c.id}-${i}`}>
+                    <div id={`live-seg-${i}`} className={`mt-2 flex items-center gap-2 border-t-2 px-0.5 pt-1.5 text-[11px] ${sepCls}`}>
+                      <span className="flex-shrink-0 font-mono text-[9.5px] text-muted-foreground">{c.index}/{live.total}</span>
+                      <span className="min-w-0 flex-1 truncate font-medium text-foreground" title={c.title}>{c.title || c.id}</span>
+                      <span className="flex-shrink-0 text-[9.5px] tabular-nums text-muted-foreground">
+                        {t("test.live.steps", { n: toolCount })}{c.ms ? ` · ${(c.ms / 1000).toFixed(1)}s` : ""}
+                      </span>
+                      {c.result ? <span className={`flex-shrink-0 font-mono text-[9.5px] font-bold ${LIVE_TEXT[c.result.status]}`}>{c.result.status}</span>
+                        : c.lost ? <span className="flex-shrink-0 font-mono text-[9.5px] font-bold text-status-error-foreground">{t("test.live.noVerdict")}</span>
+                        : <SpinnerGap size={10} className="flex-shrink-0 animate-spin text-primary" />}
+                    </div>
+                    {renderEvents(c.events)}
+                    {c.result?.error && <div className="rounded bg-status-error-muted px-2.5 py-1 text-[10.5px] text-status-error-foreground">{c.result.error}</div>}
+                  </Fragment>
+                );
+              })}
+              {live.cases.length === 0 && live.pre.length === 0 && <div className="py-8 text-center text-[11px] text-muted-foreground">{t("test.live.waiting")}</div>}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 收口 */}
+      {fin && (
+        <div className="flex flex-wrap items-center gap-2 border-t border-border px-3 py-1.5 text-[11px] text-muted-foreground">
+          {aborting ? <span className="font-medium text-status-error-foreground">{t(stopped ? "test.live.footStopped" : "test.live.footAborted")}</span>
+            : lostAll ? <><span className="font-medium text-status-error-foreground">{t("test.live.footLost", { n: counts.blocked || live.total })}</span><span>{t("test.live.footLostWhy")}</span></>
+            : counts.fail ? <span className="font-medium text-status-warning-foreground">{t("test.live.footFail", { n: counts.fail })}</span>
+            : <span className="font-medium text-status-success-foreground">{t("test.live.footOk", { pass: counts.pass, total: counts.total })}</span>}
+          {live.note && <span>{live.note}</span>}
+          <span className="flex-1" />
+          <button onClick={onOpenReport} className="flex h-6 items-center rounded border border-border bg-primary px-2 text-[11px] font-medium text-primary-foreground">{t("test.live.viewReport")}</button>
+          <span className="w-full text-[10px] leading-relaxed">{t("test.live.corrected")}</span>
+        </div>
+      )}
+      {!fin && runStatus && <div className="border-t border-border px-3 py-1 text-[10px] text-muted-foreground">{runStatus}</div>}
+    </div>
+  );
+}
+
+/** 回归测试整页工作区的子页签。 */
+type RegTab = "library" | "suites" | "rounds" | "matrix" | "health";
+
+// 回归测试整页工作区(批 H):子页签(用例库/回归套件/轮次历史/轮次报告)+「发起回归」+ 运行状态行。
+// 三个区块由原弹窗内容页面化而来,数据链路(reloadSignal/deposit/rounds API)不变。
+function RegressionWorkspace({ t, projectPath, regTab, setRegTab, reloadSignal, onChanged, onLaunch, onStop, running, runStatus, live, model, providerId }: {
+  t: T;
+  projectPath: string;
+  regTab: RegTab;
+  setRegTab: (v: RegTab) => void;
+  reloadSignal: number;
+  onChanged: () => void;
+  onLaunch: (preset?: { mode?: "failed-only"; parentRoundId?: string }) => void;
+  /** 停止当前轮次(执行面板头的「停止」按钮;确认与收口在上层 stopLibraryRun)。 */
+  onStop: () => void;
+  running: boolean;
+  runStatus: string | null;
+  /** 执行中的实时详情；null = 没有正在跑的轮次（面板不显示）。 */
+  live: LibraryLive | null;
+  model: string;
+  providerId: string;
+}) {
+  // 下钻查看某一轮的完整报告(null = 显示轮次列表)。矩阵单元格 / 执行面板「查看报告」也走这个态。
+  const [reportRoundId, setReportRoundId] = useState<string | null>(null);
+  const TABS: Array<{ id: RegTab; label: string }> = [
+    { id: "library", label: t("test.regression.tabLibrary") },
+    { id: "suites", label: t("test.suites.open") },
+    { id: "rounds", label: t("test.rounds.open") },
+    { id: "matrix", label: t("test.matrix.tab") },
+    { id: "health", label: t("test.health.tab") },
+  ];
+  return (
+    <div>
+      <div className="mb-3 flex items-center gap-1 border-b border-border">
+        {TABS.map((tb) => (
+          <button
+            key={tb.id}
+            onClick={() => { setRegTab(tb.id); setReportRoundId(null); }}
+            className={`-mb-px border-b-2 px-3 py-1.5 text-[12px] transition-colors ${regTab === tb.id ? "border-primary font-semibold text-foreground" : "border-transparent text-muted-foreground hover:text-foreground"}`}
+          >
+            {tb.label}
+          </button>
+        ))}
+        <span className="flex-1" />
+        <button
+          onClick={() => onLaunch()}
+          disabled={running}
+          title={t("test.library.runHint")}
+          className="mb-1 flex h-7 items-center gap-1 rounded-md bg-primary px-2.5 text-[11px] font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-40"
+        >
+          {running ? <SpinnerGap size={11} className="animate-spin" /> : <Play size={11} />} {running ? t("test.library.running") : t("test.launch.open")}
+        </button>
+      </div>
+      {/* 执行状态面板只在「回归套件」tab 顶部显示(运行中实时进度 + 完成后结果盘面);其余 tab 不显示,
+          避免完成后的盘面一直霸占所有 tab 顶部。全局「有轮次在跑」提示保留在顶部「运行中」按钮上。 */}
+      {regTab === "suites" && (live ? (
+        <RegressionLivePanel t={t} live={live} running={running} runStatus={runStatus} onStop={onStop} onOpenReport={() => { if (live.roundId) setReportRoundId(live.roundId); setRegTab("rounds"); }} />
+      ) : runStatus ? (
+        <div className="mb-3 flex items-center gap-1.5 rounded-md border border-border bg-muted/30 px-3 py-1.5 text-[11px] text-muted-foreground">
+          {running && <SpinnerGap size={11} className="animate-spin" />}
+          {runStatus}
+        </div>
+      ) : null)}
+      {regTab === "library" && <RegressionLibrarySection t={t} projectPath={projectPath} reloadSignal={reloadSignal} onChanged={onChanged} />}
+      {regTab === "suites" && <RegressionSuitesSection t={t} projectPath={projectPath} />}
+      {regTab === "rounds" && (
+        <RegressionRoundsSection
+          t={t}
+          projectPath={projectPath}
+          reloadSignal={reloadSignal}
+          model={model}
+          providerId={providerId}
+          reportRoundId={reportRoundId}
+          onOpenReport={(rid) => setReportRoundId(rid)}
+          onBack={() => setReportRoundId(null)}
+          onRetest={(parentRoundId) => onLaunch({ mode: "failed-only", parentRoundId })}
+        />
+      )}
+      {regTab === "matrix" && (
+        <RegressionMatrixSection
+          t={t}
+          projectPath={projectPath}
+          reloadSignal={reloadSignal}
+          onOpenRound={(rid) => { setReportRoundId(rid); setRegTab("rounds"); }}
+        />
+      )}
+      {regTab === "health" && (
+        <RegressionHealthSection t={t} projectPath={projectPath} reloadSignal={reloadSignal} onChanged={onChanged} />
+      )}
+    </div>
+  );
+}
+
+// 库总览(屏 1,v2 二/三期):在 v1 的「按来源任务分组 + 检索」之上，叠加治理视图——
+// 评审态 / 健康度徽标 / 上次结果 / rev / 📌必跑，多选批量条(确认·加入套件·隔离·移除)，
+// 以及行点击打开的详情抽屉。数据来自两个只读 API 的合并:
+//   /api/test/library         → 用例全字段(步骤、需求、_lib 治理元数据)
+//   /api/test/library/history → 跨轮结果矩阵 + 健康度派生 + pinned
+function RegressionLibrarySection({ t, projectPath, reloadSignal, onChanged }: {
   t: T;
   projectPath: string;
   reloadSignal: number;
   onChanged: () => void;
-  onClose: () => void;
-  onRun?: () => void;
-  running?: boolean;
-  runStatus?: string | null;
 }) {
   // null = 加载中(初次挂载即 null → 显示 spinner;reloadSignal 变化时保留旧数据直到新数据到达,
   // 不在 effect 体里同步 setData(null)——避免 react-hooks/set-state-in-effect 级联渲染告警)。
   const [data, setData] = useState<{ total: number; updatedAt: string; tasks: LibGroup[] } | null>(null);
+  const [hist, setHist] = useState<HistoryDTO | null>(null);
+  // 库检索:搜索(ID/标题)+ 来源任务/模块/优先级/评审态/健康度 过滤,纯前端内存过滤。
+  const [libQ, setLibQ] = useState("");
+  const [libTask, setLibTask] = useState("");
+  const [libModule, setLibModule] = useState("");
+  const [libPri, setLibPri] = useState("");
+  const [libReview, setLibReview] = useState("");
+  const [libHealth, setLibHealth] = useState("");
+  const [sel, setSel] = useState<Set<string>>(new Set());
+  const [drawerKey, setDrawerKey] = useState<string | null>(null);
+  const [addToSuite, setAddToSuite] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [localReload, setLocalReload] = useState(0);
+  // 隔离理由弹窗的目标条目(null = 关闭)。批量隔离与抽屉「隔离」共用这一个受控弹窗——
+  // window.prompt 在 Electron 渲染进程会抛 TypeError,后续 fetch 根本不会执行(见 PromptDialog)。
+  const [quarantineKeys, setQuarantineKeys] = useState<Array<{ task: string; originalId: string }> | null>(null);
+  // 按来源任务折叠用例列表（默认空 = 全部展开）。本版不持久化，与看板 collapsedCats 一致；
+  // 筛选/检索活跃时忽略折叠、强制展开（见渲染处），避免命中项藏在折叠分组里。
+  const [collapsedTasks, setCollapsedTasks] = useState<Set<string>>(new Set());
+  const toggleTask = (task: string) => setCollapsedTasks((s) => { const n = new Set(s); if (n.has(task)) n.delete(task); else n.add(task); return n; });
+
   useEffect(() => {
     let cancelled = false;
     fetch(`/api/test/library?projectPath=${encodeURIComponent(projectPath)}`)
       .then((r) => r.json())
       .then((d) => { if (!cancelled) setData({ total: d?.total ?? 0, updatedAt: d?.updatedAt ?? "", tasks: Array.isArray(d?.tasks) ? d.tasks : [] }); })
       .catch(() => { if (!cancelled) setData({ total: 0, updatedAt: "", tasks: [] }); });
+    fetch(`/api/test/library/history?projectPath=${encodeURIComponent(projectPath)}`)
+      .then((r) => r.json())
+      .then((d) => { if (!cancelled) setHist(d?.cases ? (d as HistoryDTO) : null); })
+      .catch(() => { if (!cancelled) setHist(null); });
     return () => { cancelled = true; };
-  }, [projectPath, reloadSignal]);
+  }, [projectPath, reloadSignal, localReload]);
+
+  const refresh = () => { setSel(new Set()); setLocalReload((n) => n + 1); onChanged(); };
+
+  // 历史侧按身份索引;库侧条目 join 上去。history 未就绪时以安全默认渲染(不闪徽标)。
+  const histByKey = useMemo(() => {
+    const m = new Map<string, HistCase>();
+    for (const c of hist?.cases ?? []) m.set(caseKey(c.task, c.originalId), c);
+    return m;
+  }, [hist]);
 
   const del = async (task: string, originalId?: string, count?: number) => {
     const ok = originalId
@@ -3482,82 +5046,2039 @@ function RegressionLibraryModal({ t, projectPath, reloadSignal, onChanged, onClo
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ projectPath, task, originalId }),
       });
-      onChanged();
+      refresh();
     } catch { /* keep current view; user can retry */ }
   };
 
+  const selKeys = () => [...sel].map(caseKeyDec);
+
+  const batchReview = async () => {
+    setBusy(true);
+    try {
+      await fetch("/api/test/library/review", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectPath, keys: selKeys(), reviewState: "approved" }),
+      });
+      refresh();
+    } catch { /* keep view */ } finally { setBusy(false); }
+  };
+
+  // 隔离写入(批量 / 单条共用)。理由由 PromptDialog 收集后传入,可为空(服务端兜底「手动隔离」)。
+  const doQuarantine = async (keys: Array<{ task: string; originalId: string }>, reason: string) => {
+    setBusy(true);
+    try {
+      await fetch("/api/test/library/quarantine", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectPath, keys, quarantined: true, reason }),
+      });
+      refresh();
+    } catch { /* keep view */ } finally { setBusy(false); }
+  };
+
+  const batchRemove = async () => {
+    if (!window.confirm(t("test.library.confirmBatchRemove", { n: sel.size }))) return;
+    setBusy(true);
+    try {
+      // 库 DELETE 是单条/单任务口径,批量按条目逐个删(条数量级为个位数~百,可接受)。
+      for (const k of selKeys()) {
+        await fetch("/api/test/library", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ projectPath, task: k.task, originalId: k.originalId }),
+        });
+      }
+      refresh();
+    } catch { /* keep view */ } finally { setBusy(false); }
+  };
+
   const taskCount = data?.tasks.length ?? 0;
+  // 过滤下拉的候选值(来自库现存条目)。
+  const { priOptions, moduleOptions } = useMemo(() => {
+    const pri = new Set<string>();
+    const mod = new Set<string>();
+    for (const g of data?.tasks ?? []) for (const e of g.entries) {
+      if (e.priority) pri.add(e.priority);
+      if (e.module) mod.add(e.module);
+    }
+    return { priOptions: [...pri].sort(), moduleOptions: [...mod].sort() };
+  }, [data]);
+
+  // 过滤视图:组内条目过滤,空组隐藏;命中数用于工具条反馈。
+  const filteredTasks = useMemo(() => {
+    if (!data) return [];
+    const q = libQ.trim().toLowerCase();
+    return data.tasks
+      .filter((g) => !libTask || g.task === libTask)
+      .map((g) => ({
+        ...g,
+        entries: g.entries.filter((e) => {
+          const oid = e._source?.originalId || e.id || "";
+          const h = histByKey.get(caseKey(g.task, oid));
+          if (libPri && e.priority !== libPri) return false;
+          if (libModule && e.module !== libModule) return false;
+          if (libReview && (e._lib?.reviewState ?? "approved") !== libReview) return false;
+          if (libHealth && (h?.health ?? "ok") !== libHealth) return false;
+          if (!q) return true;
+          return oid.toLowerCase().includes(q) || (e.purpose ?? "").toLowerCase().includes(q);
+        }),
+      }))
+      .filter((g) => g.entries.length > 0);
+  }, [data, histByKey, libQ, libTask, libModule, libPri, libReview, libHealth]);
+  const filteredCount = filteredTasks.reduce((n, g) => n + g.entries.length, 0);
+  const filterActive = !!(libQ.trim() || libTask || libModule || libPri || libReview || libHealth);
+
+  const summary = hist?.summary;
+  const drawerCase = useMemo(() => {
+    if (!drawerKey) return null;
+    const { task, originalId } = caseKeyDec(drawerKey);
+    const g = data?.tasks.find((x) => x.task === task);
+    const entry = g?.entries.find((e) => (e._source?.originalId || e.id) === originalId);
+    return entry ? { task, originalId, entry, hist: histByKey.get(drawerKey) ?? null } : null;
+  }, [drawerKey, data, histByKey]);
+
+  const selectClass = "h-6 rounded border border-border bg-background px-1 text-[10px] text-muted-foreground outline-none";
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
-      <div className="flex max-h-[82vh] w-full max-w-2xl flex-col overflow-hidden rounded-xl border border-border bg-background shadow-xl" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center gap-2 border-b border-border px-3 py-2">
-          <FolderOpen size={14} className="text-primary" />
-          <span className="text-xs font-semibold text-foreground">{t("test.library.title")}</span>
-          {data && data.total > 0 && (
-            <span className="text-[10px] text-muted-foreground">{t("test.library.summary", { total: data.total, tasks: taskCount })}</span>
+    <div className="flex flex-col overflow-hidden rounded-xl border border-border bg-card">
+      {data && data.total > 0 && (
+        <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-1.5 text-[11px] text-muted-foreground">
+          <FolderOpen size={13} className="text-primary" />
+          <span>{t("test.library.summary", { total: data.total, tasks: taskCount })}</span>
+          {summary && (
+            <>
+              {summary.flaky > 0 && <span className="text-status-warning-foreground">flaky {summary.flaky}</span>}
+              {summary.streak > 0 && <span className="text-status-error-foreground">{t("test.health.streak", { n: summary.streak })}</span>}
+              {summary.quarantined > 0 && <span className="text-status-info-foreground">{t("test.health.quarantined")} {summary.quarantined}</span>}
+              {summary.pending > 0 && <span>{t("test.library.reviewPending")} {summary.pending}</span>}
+            </>
           )}
-          <span className="flex-1" />
-          {onRun && (
-            <button
-              onClick={onRun}
-              disabled={running || !data || data.total === 0}
-              title={t("test.library.runHint")}
-              className="flex h-6 items-center gap-1 rounded bg-primary px-2 text-[11px] font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              {running ? <SpinnerGap size={11} className="animate-spin" /> : <Play size={11} />} {running ? t("test.library.running") : t("test.library.run")}
-            </button>
-          )}
-          <button onClick={onClose} className="text-muted-foreground hover:text-foreground" aria-label={t("test.library.close")}><X size={14} /></button>
         </div>
-        {runStatus && (
-          <div className="flex items-center gap-1.5 border-b border-border bg-muted/30 px-3 py-1.5 text-[11px] text-muted-foreground">
-            {running && <SpinnerGap size={11} className="animate-spin" />}
-            {runStatus}
+      )}
+      {data && data.total > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5 border-b border-border px-3 py-1.5">
+          <div className="flex h-6 min-w-[150px] flex-1 items-center gap-1 rounded border border-border bg-background px-1.5">
+            <MagnifyingGlass size={11} className="flex-shrink-0 text-muted-foreground" />
+            <input
+              value={libQ}
+              onChange={(e) => setLibQ(e.target.value)}
+              placeholder={t("test.library.searchPh")}
+              className="w-full bg-transparent text-[11px] outline-none placeholder:text-muted-foreground"
+            />
           </div>
-        )}
-        <div className="min-h-0 flex-1 overflow-auto">
-          {data === null ? (
-            <div className="p-4 text-center text-[11px] text-muted-foreground"><SpinnerGap size={14} className="mx-auto animate-spin" /></div>
-          ) : data.total === 0 ? (
-            <div className="p-6 text-center text-[11px] leading-relaxed text-muted-foreground">{t("test.library.empty")}</div>
-          ) : (
-            <div className="divide-y divide-border">
-              {data.tasks.map((g) => (
-                <div key={g.task} className="px-3 py-2">
-                  <div className="mb-1.5 flex items-center gap-2">
-                    <span className="text-[11px] font-semibold text-foreground">{g.task}</span>
-                    <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{g.count}</span>
-                    <span className="flex-1" />
-                    <button
-                      onClick={() => del(g.task, undefined, g.count)}
-                      className="flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-status-danger-muted hover:text-status-danger-foreground"
-                    >
-                      <Trash size={10} /> {t("test.library.removeTask")}
-                    </button>
-                  </div>
-                  <div className="space-y-1">
-                    {g.entries.map((e, i) => (
-                      <div key={i} className="flex items-center gap-2 rounded border border-border/60 bg-muted/20 px-2 py-1">
-                        <span className="font-mono text-[10px] text-muted-foreground">{e._source?.originalId || e.id}</span>
+          <select value={libTask} onChange={(e) => setLibTask(e.target.value)} className={selectClass} aria-label={t("test.library.filterTask")}>
+            <option value="">{t("test.library.filterTask")}：{t("test.library.filterAll")}</option>
+            {(data?.tasks ?? []).map((g) => <option key={g.task} value={g.task}>{g.task}</option>)}
+          </select>
+          <select value={libModule} onChange={(e) => setLibModule(e.target.value)} className={selectClass} aria-label={t("test.library.filterModule")}>
+            <option value="">{t("test.library.filterModule")}：{t("test.library.filterAll")}</option>
+            {moduleOptions.map((v) => <option key={v} value={v}>{v}</option>)}
+          </select>
+          <select value={libPri} onChange={(e) => setLibPri(e.target.value)} className={selectClass} aria-label={t("test.library.filterPri")}>
+            <option value="">{t("test.library.filterPri")}：{t("test.library.filterAll")}</option>
+            {priOptions.map((v) => <option key={v} value={v}>{v}</option>)}
+          </select>
+          <select value={libReview} onChange={(e) => setLibReview(e.target.value)} className={selectClass} aria-label={t("test.library.filterReview")}>
+            <option value="">{t("test.library.filterReview")}：{t("test.library.filterAll")}</option>
+            <option value="approved">{t("test.library.reviewApproved")}</option>
+            <option value="pending">{t("test.library.reviewPending")}</option>
+          </select>
+          <select value={libHealth} onChange={(e) => setLibHealth(e.target.value)} className={selectClass} aria-label={t("test.library.filterHealth")}>
+            <option value="">{t("test.library.filterHealth")}：{t("test.library.filterAll")}</option>
+            <option value="flaky">{t("test.health.flaky")}</option>
+            <option value="streak">{t("test.health.streakFilter")}</option>
+            <option value="stale">{t("test.health.stale")}</option>
+            <option value="never">{t("test.health.never")}</option>
+            <option value="quar">{t("test.health.quarantined")}</option>
+          </select>
+          {filterActive && <span className="text-[10px] text-primary">{t("test.library.filterHit", { n: filteredCount })}</span>}
+        </div>
+      )}
+      <div className="min-h-0 flex-1 overflow-auto">
+        {data === null ? (
+          <div className="p-4 text-center text-[11px] text-muted-foreground"><SpinnerGap size={14} className="mx-auto animate-spin" /></div>
+        ) : data.total === 0 ? (
+          <div className="p-6 text-center text-[11px] leading-relaxed text-muted-foreground">{t("test.library.empty")}</div>
+        ) : (
+          <div className="divide-y divide-border">
+            {filteredTasks.map((g) => {
+              // 筛选/检索活跃时强制展开，避免命中项藏在折叠分组里（看起来像"搜不到"）。
+              const collapsed = !filterActive && collapsedTasks.has(g.task);
+              return (
+              <div key={g.task} className="px-3 py-2">
+                <div
+                  role="button"
+                  tabIndex={0}
+                  aria-expanded={!collapsed}
+                  onClick={() => toggleTask(g.task)}
+                  onKeyDown={(ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); toggleTask(g.task); } }}
+                  className="mb-1.5 flex cursor-pointer select-none items-center gap-2 rounded hover:bg-muted/40"
+                >
+                  <CaretDown size={12} className={`flex-shrink-0 text-muted-foreground transition-transform ${collapsed ? "-rotate-90" : ""}`} />
+                  <span className="text-[11px] font-semibold text-foreground">{g.task}</span>
+                  <span className="rounded bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">{g.count}</span>
+                  <span className="flex-1" />
+                  <button
+                    onClick={(ev) => { ev.stopPropagation(); del(g.task, undefined, g.count); }}
+                    className="flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground hover:bg-status-error-muted hover:text-status-error-foreground"
+                  >
+                    <Trash size={10} /> {t("test.library.removeTask")}
+                  </button>
+                </div>
+                {!collapsed && (
+                <div className="space-y-1">
+                  {g.entries.map((e, i) => {
+                    const oid = e._source?.originalId || e.id || "";
+                    const k = caseKey(g.task, oid);
+                    const h = histByKey.get(k);
+                    const badge = h ? healthBadge(t, h) : null;
+                    const review = e._lib?.reviewState ?? "approved";
+                    const rev = e._lib?.rev ?? 1;
+                    return (
+                      <div
+                        key={i}
+                        onClick={() => setDrawerKey(k)}
+                        className="flex cursor-pointer items-center gap-2 rounded border border-border/60 bg-muted/20 px-2 py-1 hover:bg-muted/50"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={sel.has(k)}
+                          onClick={(ev) => ev.stopPropagation()}
+                          onChange={() => setSel((s) => { const n = new Set(s); if (n.has(k)) n.delete(k); else n.add(k); return n; })}
+                          className="accent-primary"
+                          aria-label={oid}
+                        />
+                        {h?.pinned && <PushPin size={10} weight="fill" className="flex-shrink-0 text-primary" aria-label={t("test.library.pinned")} />}
+                        <span className="font-mono text-[10px] text-muted-foreground">{oid}</span>
                         {e.priority && <span className="rounded bg-muted px-1 text-[9px] text-muted-foreground">{e.priority}</span>}
                         <span className="min-w-0 flex-1 truncate text-[11px] text-foreground" title={e.purpose}>{e.purpose || "—"}</span>
+                        {e.module && <span className="hidden rounded bg-muted px-1 text-[9px] text-muted-foreground sm:inline">{e.module}</span>}
+                        <span className={`rounded px-1 text-[9px] ${review === "approved" ? "bg-status-success-muted text-status-success-foreground" : "bg-status-warning-muted text-status-warning-foreground"}`}>
+                          {review === "approved" ? t("test.library.reviewApproved") : t("test.library.reviewPending")}
+                        </span>
+                        {badge && <span className={`rounded px-1 text-[9px] ${badge.cls}`}>{badge.label}</span>}
+                        {h && <LastResultDot t={t} res={h.res} />}
+                        <span className="font-mono text-[9px] text-muted-foreground" title={t("test.library.rev", { n: rev })}>r{rev}</span>
                         <button
-                          onClick={() => del(g.task, e._source?.originalId || e.id)}
-                          className="text-muted-foreground hover:text-status-danger-foreground"
+                          onClick={(ev) => { ev.stopPropagation(); del(g.task, oid); }}
+                          className="text-muted-foreground hover:text-status-error-foreground"
                           title={t("test.library.remove")}
                           aria-label={t("test.library.remove")}
                         >
                           <Trash size={11} />
                         </button>
                       </div>
-                    ))}
-                  </div>
+                    );
+                  })}
                 </div>
+                )}
+              </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+      {sel.size > 0 && (
+        <div className="sticky bottom-0 flex flex-wrap items-center gap-2 border-t border-border bg-card px-3 py-2 shadow-lg">
+          <span className="text-[11px] text-foreground">{t("test.library.selected", { n: sel.size })}</span>
+          <span className="flex-1" />
+          <button disabled={busy} onClick={batchReview} className="flex h-6 items-center gap-1 rounded border border-border px-2 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-40">
+            <Check size={10} /> {t("test.library.batchApprove")}
+          </button>
+          <button disabled={busy} onClick={() => setAddToSuite(true)} className="flex h-6 items-center gap-1 rounded border border-border px-2 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-40">
+            <Plus size={10} /> {t("test.library.batchAddSuite")}
+          </button>
+          <button disabled={busy} onClick={() => setQuarantineKeys(selKeys())} className="flex h-6 items-center gap-1 rounded border border-border px-2 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-40">
+            <Prohibit size={10} /> {t("test.library.batchQuarantine")}
+          </button>
+          <button disabled={busy} onClick={batchRemove} className="flex h-6 items-center gap-1 rounded border border-border px-2 text-[11px] text-muted-foreground hover:bg-status-error-muted hover:text-status-error-foreground disabled:opacity-40">
+            <Trash size={10} /> {t("test.library.batchRemove")}
+          </button>
+          <button onClick={() => setSel(new Set())} className="text-muted-foreground hover:text-foreground" title={t("test.library.clearSelection")} aria-label={t("test.library.clearSelection")}>
+            <X size={12} />
+          </button>
+        </div>
+      )}
+      {drawerCase && (
+        <CaseDrawer
+          t={t}
+          projectPath={projectPath}
+          task={drawerCase.task}
+          originalId={drawerCase.originalId}
+          entry={drawerCase.entry}
+          hist={drawerCase.hist}
+          rounds={hist?.rounds ?? []}
+          onClose={() => setDrawerKey(null)}
+          onChanged={() => { setDrawerKey(null); refresh(); }}
+          onQuarantine={() => { setDrawerKey(null); setQuarantineKeys([{ task: drawerCase.task, originalId: drawerCase.originalId }]); }}
+        />
+      )}
+      <PromptDialog
+        open={quarantineKeys !== null}
+        onOpenChange={(o) => { if (!o) setQuarantineKeys(null); }}
+        title={t("test.library.quarantinePrompt", { n: quarantineKeys?.length ?? 0 })}
+        confirmLabel={t("common.confirm")}
+        cancelLabel={t("common.cancel")}
+        requireValue={false}
+        onConfirm={async (reason) => { if (quarantineKeys) await doQuarantine(quarantineKeys, reason); }}
+      />
+      {addToSuite && (
+        <AddToSuiteModal
+          t={t}
+          projectPath={projectPath}
+          keys={selKeys()}
+          onClose={() => setAddToSuite(false)}
+          onDone={() => { setAddToSuite(false); refresh(); }}
+        />
+      )}
+    </div>
+  );
+}
+
+// 用例详情抽屉(屏 1 行点击):步骤表、跨轮执行历史圆点(含翻转/连败)、rev 变更时间线、
+// 隔离说明与恢复、操作区。数据全部来自父级已取的两个 API,抽屉本身不再发请求(除写操作)。
+function CaseDrawer({ t, projectPath, task, originalId, entry, hist, rounds, onClose, onChanged, onQuarantine }: {
+  t: T;
+  projectPath: string;
+  task: string;
+  originalId: string;
+  entry: LibEntry;
+  hist: HistCase | null;
+  rounds: HistRound[];
+  onClose: () => void;
+  onChanged: () => void;
+  onQuarantine: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") onClose(); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  const meta = entry._lib;
+  const review = meta?.reviewState ?? "approved";
+  const rev = meta?.rev ?? 1;
+  const quarantined = meta?.quarantined ?? false;
+  const steps = entry.steps ?? [];
+  // 存量条目没有 rev 时间线 → 用入库时间兜一条「首次入库」，与原型一致。
+  const history = meta?.history?.length
+    ? meta.history
+    : [{ rev, at: entry._source?.depositedAt ?? "", note: t("test.library.fromTask") + "：" + task }];
+  const badge = hist ? healthBadge(t, hist) : null;
+
+  const post = async (url: string, body: Record<string, unknown>) => {
+    setBusy(true);
+    try {
+      await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ projectPath, ...body }) });
+      onChanged();
+    } catch { setBusy(false); }
+  };
+  const keys = [{ task, originalId }];
+  const fmtAt = (iso: string) => (iso ? iso.slice(0, 10) : "—");
+
+  return (
+    <div className="fixed inset-0 z-[60] flex justify-end bg-black/50" onClick={onClose}>
+      <div
+        role="dialog"
+        aria-label={t("test.case.title")}
+        className="flex h-full w-full max-w-md flex-col overflow-y-auto border-l border-border bg-background p-4 shadow-xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-center gap-2">
+          <span className="font-mono text-[11px] text-muted-foreground">{originalId}</span>
+          {entry.priority && <span className="rounded bg-muted px-1 text-[9px] text-muted-foreground">{entry.priority}</span>}
+          {badge && <span className={`rounded px-1 text-[9px] ${badge.cls}`}>{badge.label}</span>}
+          <span className="flex-1" />
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground" aria-label={t("test.case.close")}><X size={14} /></button>
+        </div>
+        <h3 className="mt-1 flex items-start gap-1.5 text-[13px] font-semibold text-foreground">
+          {hist?.pinned && <PushPin size={12} weight="fill" className="mt-0.5 flex-shrink-0 text-primary" />}
+          {entry.purpose || originalId}
+        </h3>
+        <div className="mt-1 text-[10px] text-muted-foreground">
+          {t("test.case.source", { task, id: originalId, at: fmtAt(entry._source?.depositedAt ?? "") })}
+          {" · r"}{rev}
+          {" · "}{review === "approved" ? t("test.library.reviewApproved") : t("test.library.reviewPending")}
+        </div>
+
+        <dl className="mt-3 grid grid-cols-[80px_1fr] gap-x-2 gap-y-1 text-[11px]">
+          {entry.module && (<><dt className="text-muted-foreground">{t("test.case.module")}</dt><dd className="text-foreground">{entry.module}</dd></>)}
+          {entry.caseType && (<><dt className="text-muted-foreground">{t("test.case.caseType")}</dt><dd className="text-foreground">{entry.caseType}</dd></>)}
+          {entry.requirement && (<><dt className="text-muted-foreground">{t("test.case.requirement")}</dt><dd className="font-mono text-foreground">{entry.requirement}</dd></>)}
+          {entry.tags?.length ? (<><dt className="text-muted-foreground">{t("test.case.tags")}</dt><dd className="flex flex-wrap gap-1">{entry.tags.map((tg) => <span key={tg} className="rounded bg-status-info-muted px-1 text-[9px] text-status-info-foreground">{tg}</span>)}</dd></>) : null}
+        </dl>
+
+        <div className="mt-4 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{t("test.case.steps")}</div>
+        {steps.length === 0 ? (
+          <div className="mt-1 text-[11px] text-muted-foreground">{t("test.case.noSteps")}</div>
+        ) : (
+          <div className="mt-1 overflow-hidden rounded border border-border text-[11px]">
+            <div className="grid grid-cols-[24px_1fr_1fr] bg-muted text-[9px] font-semibold text-muted-foreground">
+              <div className="px-2 py-1">{t("test.case.stepNo")}</div>
+              <div className="border-l border-border px-2 py-1">{t("test.case.stepAction")}</div>
+              <div className="border-l border-border px-2 py-1">{t("test.case.stepExpected")}</div>
+            </div>
+            {steps.map((s, i) => (
+              <div key={i} className="grid grid-cols-[24px_1fr_1fr] border-t border-border">
+                <div className="px-2 py-1 font-mono text-muted-foreground">{i + 1}</div>
+                <div className="border-l border-border px-2 py-1 text-foreground">{s.content || "—"}</div>
+                <div className="border-l border-border px-2 py-1 text-foreground">{s.expected || "—"}</div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        <div className="mt-4 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+          {t("test.case.execHistory", { n: rounds.length })}
+        </div>
+        {!hist || rounds.length === 0 ? (
+          <div className="mt-1 text-[11px] text-muted-foreground">{t("test.case.execHistoryEmpty")}</div>
+        ) : (
+          <div className="mt-1 flex flex-wrap items-center gap-1">
+            {hist.res.map((r, i) => (
+              <span
+                key={rounds[i]?.roundId ?? i}
+                title={`${rounds[i]?.roundId ?? ""} · ${r === "p" ? t("test.library.lastResultPass") : r === "f" ? t("test.library.lastResultFail") : t("test.library.lastResultNone")}`}
+                className={`inline-block h-2 w-2 rounded-full ${r === "p" ? "bg-status-success-foreground" : r === "f" ? "bg-status-error-foreground" : "bg-border"}`}
+              />
+            ))}
+            <span className="ml-1 text-[10px] text-muted-foreground">
+              {t("test.case.flips", { n: hist.flips })} · {t("test.case.tailFails", { n: hist.tailFails })}
+            </span>
+          </div>
+        )}
+
+        {quarantined && (
+          <div className="mt-3 rounded border border-border bg-muted/40 px-2.5 py-2 text-[11px]">
+            <div className="font-medium text-status-info-foreground">{t("test.case.quarantinedAt", { at: fmtAt(meta?.quarantinedAt ?? "") })}</div>
+            {meta?.quarantineReason && <div className="mt-0.5 text-muted-foreground">{meta.quarantineReason}</div>}
+            <div className="mt-1 text-[10px] leading-relaxed text-muted-foreground">{t("test.case.quarantineNote")}</div>
+            <button
+              disabled={busy}
+              onClick={() => post("/api/test/library/quarantine", { keys, quarantined: false })}
+              className="mt-1.5 flex h-6 items-center gap-1 rounded border border-border px-2 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-40"
+            >
+              <ArrowClockwise size={10} /> {t("test.case.unquarantine")}
+            </button>
+          </div>
+        )}
+
+        <div className="mt-4 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{t("test.case.revTimeline")}</div>
+        <div className="mt-1 flex flex-col gap-1.5 border-l-2 border-border pl-3 text-[11px]">
+          {history.map((h, i) => (
+            <div key={i} className="relative">
+              <span className={`absolute -left-[17px] top-1.5 h-1.5 w-1.5 rounded-full ${i === 0 ? "bg-primary" : "bg-border"}`} />
+              <span className="font-mono font-semibold text-foreground">r{h.rev}</span>
+              <span className="text-muted-foreground"> · {fmtAt(h.at)} — {h.note}</span>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-4 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{t("test.case.actions")}</div>
+        <div className="mt-1.5 flex flex-wrap gap-2">
+          {review === "pending" && (
+            <button
+              disabled={busy}
+              onClick={() => post("/api/test/library/review", { keys, reviewState: "approved" })}
+              className="flex h-6 items-center gap-1 rounded bg-primary px-2 text-[11px] font-medium text-primary-foreground disabled:opacity-40"
+            >
+              <Check size={10} /> {t("test.case.approve")}
+            </button>
+          )}
+          <button
+            disabled
+            title={t("test.case.recheckSoon")}
+            className="flex h-6 cursor-not-allowed items-center gap-1 rounded border border-border px-2 text-[11px] text-muted-foreground opacity-50"
+          >
+            <ArrowsClockwise size={10} /> {t("test.case.recheck")}
+          </button>
+          {!quarantined && (
+            <button
+              disabled={busy}
+              onClick={onQuarantine}
+              className="flex h-6 items-center gap-1 rounded border border-border px-2 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-40"
+            >
+              <Prohibit size={10} /> {t("test.case.quarantine")}
+            </button>
+          )}
+          <button
+            disabled={busy}
+            onClick={async () => {
+              if (!window.confirm(t("test.library.confirmRemove"))) return;
+              setBusy(true);
+              try {
+                await fetch("/api/test/library", {
+                  method: "DELETE",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ projectPath, task, originalId }),
+                });
+                onChanged();
+              } catch { setBusy(false); }
+            }}
+            className="flex h-6 items-center gap-1 rounded border border-border px-2 text-[11px] text-muted-foreground hover:bg-status-error-muted hover:text-status-error-foreground disabled:opacity-40"
+          >
+            <Trash size={10} /> {t("test.case.remove")}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// 「加入套件」弹窗(库总览批量条):只列静态套件——查询套件保存的是【条件】,由条件自动圈选,
+// 手工塞入会让「条件即真相」的语义失效(与原型 openAddToSuite 一致)。
+function AddToSuiteModal({ t, projectPath, keys, onClose, onDone }: {
+  t: T;
+  projectPath: string;
+  keys: Array<{ task: string; originalId: string }>;
+  onClose: () => void;
+  onDone: () => void;
+}) {
+  const [suites, setSuites] = useState<SuiteDTO[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/test/suites?projectPath=${encodeURIComponent(projectPath)}`)
+      .then((r) => r.json())
+      .then((d) => { if (!cancelled) setSuites((Array.isArray(d?.suites) ? d.suites : []).filter((s: SuiteDTO) => s.type === "static")); })
+      .catch(() => { if (!cancelled) setSuites([]); });
+    return () => { cancelled = true; };
+  }, [projectPath]);
+
+  const add = async (s: SuiteDTO) => {
+    setBusy(true);
+    setMsg("");
+    // 静态套件是固定清单:并集去重后整体覆盖保存(套件 POST 是 upsert by name)。
+    const have = new Set((s.keys ?? []).map((k) => caseKey(k.task, k.originalId)));
+    const merged = [...(s.keys ?? [])];
+    let added = 0;
+    for (const k of keys) if (!have.has(caseKey(k.task, k.originalId))) { merged.push(k); added++; }
+    try {
+      const r = await fetch("/api/test/suites", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectPath, suite: { name: s.name, type: "static", keys: merged } }),
+      }).then((x) => x.json());
+      if (r?.ok) { setMsg(t("test.library.addToSuiteDone", { suite: s.name, n: added })); setTimeout(onDone, 900); }
+      else { setMsg(r?.error || "failed"); setBusy(false); }
+    } catch { setMsg("failed"); setBusy(false); }
+  };
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+      <div className="flex max-h-[80vh] w-full max-w-sm flex-col overflow-hidden rounded-xl border border-border bg-background shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center gap-2 border-b border-border px-3 py-2">
+          <Plus size={13} className="text-primary" />
+          <span className="text-xs font-semibold text-foreground">{t("test.library.addToSuiteTitle")}</span>
+          <span className="flex-1" />
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground" aria-label={t("test.case.close")}><X size={14} /></button>
+        </div>
+        <div className="space-y-2 p-3">
+          <div className="text-[10px] leading-relaxed text-muted-foreground">{t("test.library.addToSuiteHint", { n: keys.length })}</div>
+          {suites === null ? (
+            <div className="p-3 text-center"><SpinnerGap size={14} className="mx-auto animate-spin text-muted-foreground" /></div>
+          ) : suites.length === 0 ? (
+            <div className="p-3 text-center text-[11px] text-muted-foreground">{t("test.library.addToSuiteNone")}</div>
+          ) : (
+            <div className="divide-y divide-border overflow-hidden rounded border border-border">
+              {suites.map((s) => (
+                <button
+                  key={s.name}
+                  disabled={busy}
+                  onClick={() => add(s)}
+                  className="flex w-full items-center gap-2 px-2.5 py-2 text-left text-[11px] hover:bg-muted disabled:opacity-40"
+                >
+                  <span className="flex-1 truncate text-foreground">{s.name}</span>
+                  <span className="rounded border border-border px-1 text-[9px] text-muted-foreground">{s.keys?.length ?? 0}</span>
+                </button>
               ))}
             </div>
           )}
+          {msg && <div className="text-[10px] text-primary">{msg}</div>}
         </div>
       </div>
+    </div>
+  );
+}
+// 轮次历史区块(批 H 页面化,原弹窗):轮次 = 一次回归执行实例(TestRail Run 语义)。列表(时间/环境/
+// 套件/模式/状态/通过/红线)+ 行内展开详情(按来源任务分组结果 + 与上一全量轮的 delta 三类,
+// 交集口径)+ 删单轮(报告/快照/证据一并删)。数据全部来自 rounds / rounds/detail 只读 API。
+interface RoundUI {
+  roundId: string; startedAt?: string; env?: string; suiteName?: string; mode?: string;
+  status?: string; total?: number; counts?: Record<string, number>; suitePassStr?: string;
+  /** 复测轮的合并口径(每条用例跨轮的最新结果);全量轮不返回。 */
+  mergedPassStr?: string;
+  parentRoundId?: string;
+}
+
+/** 迷你通过率趋势线(近 N 轮)。纯展示,无交互。 */
+function Sparkline({ values, width = 96, height = 22 }: { values: number[]; width?: number; height?: number }) {
+  if (values.length < 2) return null;
+  const min = Math.min(...values) - 3;
+  const max = Math.max(...values) + 3;
+  const span = max - min || 1;
+  const pts = values.map((v, i) => `${(i / (values.length - 1)) * (width - 6) + 3},${height - 3 - ((v - min) / span) * (height - 6)}`);
+  const [lx, ly] = pts[pts.length - 1].split(",");
+  return (
+    <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} aria-hidden="true" className="inline-block align-middle">
+      <polyline points={pts.join(" ")} fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" className="text-primary" />
+      <circle cx={lx} cy={ly} r="2.2" className="fill-primary" />
+    </svg>
+  );
+}
+interface RoundDetailUI {
+  groups: Array<{ task: string; counts: Record<string, number>; tests: Array<{ task: string; originalId: string; purpose: string; status: string }> }>;
+  delta: { baseRoundId: string; newFail: unknown[]; fixed: unknown[]; stillFail: unknown[] } | null;
+}
+function RegressionRoundsSection({ t, projectPath, reloadSignal, model, providerId, reportRoundId, onOpenReport, onBack, onRetest }: {
+  t: T; projectPath: string; reloadSignal: number;
+  model: string; providerId: string;
+  /** 非 null = 下钻查看该轮完整报告(渲染嵌入的 RegressionReportSection);null = 显示轮次列表。 */
+  reportRoundId: string | null;
+  onOpenReport: (roundId: string) => void;
+  onBack: () => void;
+  onRetest: (parentRoundId: string) => void;
+}) {
+  const [rounds, setRounds] = useState<RoundUI[] | null>(null);
+  const [openId, setOpenId] = useState<string | null>(null);
+  const [details, setDetails] = useState<Record<string, RoundDetailUI | null>>({});
+  const [reload, setReload] = useState(0);
+  const [envFilter, setEnvFilter] = useState("");
+  const [passRates, setPassRates] = useState<number[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/test/library/rounds?projectPath=${encodeURIComponent(projectPath)}`)
+      .then((r) => r.json())
+      .then((d) => { if (!cancelled) setRounds(Array.isArray(d?.rounds) ? d.rounds : []); })
+      .catch(() => { if (!cancelled) setRounds([]); });
+    // 通过率趋势(旧→新):与矩阵/健康度同源的 passRates,避免与轮次索引里的摘要口径打架。
+    fetch(`/api/test/library/history?projectPath=${encodeURIComponent(projectPath)}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (cancelled) return;
+        const pr = (Array.isArray(d?.passRates) ? d.passRates : [])
+          .filter((p: { total: number }) => p.total > 0)
+          .map((p: { pass: number; total: number }) => Math.round((p.pass / p.total) * 100));
+        setPassRates(pr);
+      })
+      .catch(() => { if (!cancelled) setPassRates([]); });
+    return () => { cancelled = true; };
+  }, [projectPath, reload, reloadSignal]);
+
+  const toggleDetail = (roundId: string) => {
+    if (openId === roundId) { setOpenId(null); return; }
+    setOpenId(roundId);
+    if (details[roundId] !== undefined) return;
+    fetch(`/api/test/library/rounds/detail?projectPath=${encodeURIComponent(projectPath)}&roundId=${encodeURIComponent(roundId)}`)
+      .then((r) => r.json())
+      .then((d) => setDetails((m) => ({ ...m, [roundId]: d?.groups ? { groups: d.groups, delta: d.delta ?? null } : null })))
+      .catch(() => setDetails((m) => ({ ...m, [roundId]: null })));
+  };
+
+  const delRound = async (roundId: string) => {
+    if (!window.confirm(t("test.rounds.confirmDelete", { round: roundId }))) return;
+    try {
+      await fetch("/api/test/library/rounds", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectPath, roundId }),
+      });
+      setReload((n) => n + 1);
+    } catch { /* keep view */ }
+  };
+
+  const fmtTime = (iso?: string) => {
+    if (!iso) return "—";
+    const d = new Date(iso);
+    return Number.isNaN(d.getTime()) ? iso : `${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")} ${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+  };
+  const passOf = (r: RoundUI) => {
+    if (r.suitePassStr) return r.suitePassStr;
+    if (r.counts && typeof r.counts.total === "number") return `${r.counts.pass ?? 0}/${r.counts.total}`;
+    return null;
+  };
+  // 红线徽标。**复测轮必须看合并口径**:它只跑上轮的失败子集,自身 3/3 通过不代表可发版——
+  // 剩下那些没被重跑的用例,最新状态仍可能是失败(mergedPassStr 由 rounds API 算好)。
+  const redline = (r: RoundUI) => {
+    if (r.status === "running") return <span className="flex items-center gap-1 rounded bg-muted px-1.5 text-[9px] text-muted-foreground"><SpinnerGap size={9} className="animate-spin" /> {t("test.rounds.statusRunning")}</span>;
+    if (r.status === "aborted") return <span className="rounded bg-muted px-1.5 text-[9px] text-muted-foreground">{t("test.rounds.statusAborted")}</span>;
+    const isRetest = r.mode === "failed-only";
+    const p = isRetest ? r.mergedPassStr : passOf(r);
+    if (!p) return null;
+    const [a, b] = p.split("/").map((x) => parseInt(x, 10));
+    const ok = Number.isFinite(a) && Number.isFinite(b) && b > 0 && a === b;
+    const cls = ok ? "bg-status-success-muted text-status-success-foreground" : "bg-status-error-muted text-status-error-foreground";
+    const label = ok ? t("test.rounds.redlineOk") : t("test.rounds.redlineBlocked");
+    return (
+      <span className={`rounded px-1.5 text-[9px] ${cls}`} title={isRetest ? t("test.rounds.mergedHint") : undefined}>
+        {isRetest ? `${t("test.rounds.mergedRedline", { pass: p })} · ${label}` : label}
+      </span>
+    );
+  };
+  const failCountOf = (r: RoundUI) => {
+    const p = passOf(r);
+    if (!p) return 0;
+    const [a, b] = p.split("/").map((x) => parseInt(x, 10));
+    return Number.isFinite(a) && Number.isFinite(b) ? Math.max(0, b - a) : 0;
+  };
+  const envOptions = [...new Set((rounds ?? []).map((r) => r.env).filter((e): e is string => !!e))];
+  const shown = (rounds ?? []).filter((r) => !envFilter || r.env === envFilter);
+  const dot = (status: string) => (
+    <span className={`inline-block h-1.5 w-1.5 flex-shrink-0 rounded-full ${status === "pass" ? "bg-status-success-foreground" : "bg-status-error-foreground"}`} />
+  );
+
+  // 下钻态:渲染该轮的完整报告(嵌入模式,带「返回列表」+ 上一轮/下一轮切换)。所有 hooks 已在上方调用。
+  if (reportRoundId) {
+    return (
+      <RegressionReportSection
+        t={t}
+        projectPath={projectPath}
+        reloadSignal={reloadSignal}
+        model={model}
+        providerId={providerId}
+        controlledRoundId={reportRoundId}
+        onBack={onBack}
+        onSelectRound={onOpenReport}
+      />
+    );
+  }
+
+  return (
+    <div className="flex flex-col overflow-hidden rounded-xl border border-border bg-card">
+        <div className="flex flex-wrap items-center gap-2 border-b border-border px-3 py-1.5">
+          <Clock size={13} className="text-primary" />
+          <span className="text-[11px] font-semibold text-foreground">{t("test.rounds.title")}</span>
+          {rounds && rounds.length > 0 && <span className="text-[10px] text-muted-foreground">{rounds.length}</span>}
+          {passRates.length > 1 && (
+            <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
+              {t("test.rounds.passTrend", { n: passRates.length })}
+              <Sparkline values={passRates} />
+              <b className="font-mono text-foreground">{passRates[passRates.length - 1]}%</b>
+            </span>
+          )}
+          <span className="flex-1" />
+          {envOptions.length > 1 && (
+            <select
+              value={envFilter}
+              onChange={(e) => setEnvFilter(e.target.value)}
+              aria-label={t("test.rounds.filterEnv")}
+              className="h-6 rounded border border-border bg-background px-1 text-[10px] text-muted-foreground outline-none"
+            >
+              <option value="">{t("test.rounds.filterEnv")}</option>
+              {envOptions.map((e) => <option key={e} value={e}>{e}</option>)}
+            </select>
+          )}
+        </div>
+        <div className="min-h-0 flex-1 overflow-auto">
+          {rounds === null ? (
+            <div className="p-4 text-center text-[11px] text-muted-foreground"><SpinnerGap size={14} className="mx-auto animate-spin" /></div>
+          ) : shown.length === 0 ? (
+            <div className="p-6 text-center text-[11px] leading-relaxed text-muted-foreground">{t("test.rounds.empty")}</div>
+          ) : (
+            <div className="divide-y divide-border">
+              {shown.map((r) => {
+                const detail = details[r.roundId];
+                const open = openId === r.roundId;
+                return (
+                  <div key={r.roundId} className="px-3 py-1.5">
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-[10px] text-muted-foreground">{r.roundId}</span>
+                      <span className="text-[10px] text-muted-foreground">{fmtTime(r.startedAt)}</span>
+                      <span className="rounded border border-border px-1 text-[9px] text-muted-foreground">{r.env || "—"}</span>
+                      <span className="min-w-0 flex-1 truncate text-[11px] text-foreground">{r.suiteName || "—"}</span>
+                      {r.mode === "failed-only" && <span className="rounded bg-status-warning-muted px-1.5 text-[9px] text-status-warning-foreground">{t("test.rounds.modeRetest")}</span>}
+                      {passOf(r) && <span className="font-mono text-[10px] text-foreground">{passOf(r)}</span>}
+                      {redline(r)}
+                      {r.status === "done" && r.mode !== "failed-only" && failCountOf(r) > 0 && (
+                        <button
+                          onClick={() => onRetest(r.roundId)}
+                          className="flex items-center gap-0.5 rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground hover:text-foreground"
+                        >
+                          <ArrowsClockwise size={9} /> {t("test.rounds.retestFailed", { n: failCountOf(r) })}
+                        </button>
+                      )}
+                      <button onClick={() => toggleDetail(r.roundId)} className="flex items-center gap-0.5 rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground hover:text-foreground">
+                        {open ? <CaretUp size={9} /> : <CaretDown size={9} />} {open ? t("test.rounds.collapse") : t("test.rounds.detail")}
+                      </button>
+                      <button onClick={() => onOpenReport(r.roundId)} className="flex items-center gap-0.5 rounded border border-border px-1.5 py-0.5 text-[10px] text-primary hover:opacity-80">
+                        {t("test.rounds.viewReport")} <ArrowRight size={9} />
+                      </button>
+                      <button onClick={() => delRound(r.roundId)} className="text-muted-foreground hover:text-status-error-foreground" title={t("test.rounds.delete")} aria-label={t("test.rounds.delete")}>
+                        <Trash size={11} />
+                      </button>
+                    </div>
+                    {open && (
+                      <div className="mt-1.5 rounded border border-border/60 bg-muted/20 p-2">
+                        {detail === undefined ? (
+                          <div className="p-2 text-center"><SpinnerGap size={12} className="mx-auto animate-spin text-muted-foreground" /></div>
+                        ) : detail === null || detail.groups.length === 0 ? (
+                          <div className="p-1 text-[10px] text-muted-foreground">{t("test.rounds.detailEmpty")}</div>
+                        ) : (
+                          <div className="space-y-2">
+                            <div className="text-[10px] text-muted-foreground">
+                              {t("test.rounds.snapshot", {
+                                n: r.total ?? 0,
+                                suite: r.suiteName || "—",
+                                mode: r.mode === "failed-only" ? t("test.rounds.modeRetest") : t("test.rounds.modeFull"),
+                              })}
+                              {r.parentRoundId && t("test.rounds.snapshotBase", { round: r.parentRoundId })}
+                            </div>
+                            {detail.delta ? (
+                              <div className="flex flex-wrap items-center gap-1.5 text-[10px]">
+                                <span className="text-muted-foreground">{t("test.rounds.deltaBase", { round: detail.delta.baseRoundId })}</span>
+                                <span className="rounded bg-status-error-muted px-1.5 py-0.5 text-status-error-foreground">{t("test.rounds.deltaNewFail")} {detail.delta.newFail.length}</span>
+                                <span className="rounded bg-status-success-muted px-1.5 py-0.5 text-status-success-foreground">{t("test.rounds.deltaFixed")} {detail.delta.fixed.length}</span>
+                                <span className="rounded bg-status-warning-muted px-1.5 py-0.5 text-status-warning-foreground">{t("test.rounds.deltaStillFail")} {detail.delta.stillFail.length}</span>
+                              </div>
+                            ) : (
+                              <div className="text-[10px] text-muted-foreground">{t("test.rounds.deltaNone")}</div>
+                            )}
+                            {detail.groups.map((g) => (
+                              <div key={g.task}>
+                                <div className="mb-0.5 flex items-center gap-1.5">
+                                  <span className="text-[10px] font-semibold text-foreground">{g.task}</span>
+                                  <span className={`rounded px-1 text-[9px] ${g.counts.pass === g.counts.total ? "bg-status-success-muted text-status-success-foreground" : "bg-status-error-muted text-status-error-foreground"}`}>
+                                    {g.counts.pass ?? 0}/{g.counts.total ?? 0}
+                                  </span>
+                                </div>
+                                <div className="space-y-0.5">
+                                  {g.tests.map((c) => (
+                                    <div key={`${g.task}-${c.originalId}`} className="flex items-center gap-1.5 pl-1">
+                                      {dot(c.status)}
+                                      <span className="font-mono text-[9px] text-muted-foreground">{c.originalId}</span>
+                                      <span className="min-w-0 flex-1 truncate text-[10px] text-foreground" title={c.purpose}>{c.purpose || "—"}</span>
+                                      <span className="text-[9px] text-muted-foreground">{c.status}</span>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+    </div>
+  );
+}
+
+// 屏 5「对比矩阵」+ 屏 6「健康度」共用的数据钩子:一次 GET /api/test/library/history 拿全。
+// 矩阵与健康度是同一份跨轮矩阵的两种读法——徽标、翻转/连败、队列分类必须来自同一处派生,
+// 否则「库总览说 flaky、健康度说健康」这类不一致迟早出现。
+function useCaseHistory(projectPath: string, reloadSignal: number, localReload: number) {
+  const [data, setData] = useState<HistoryDTO | null | undefined>(undefined); // undefined=加载中
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/test/library/history?projectPath=${encodeURIComponent(projectPath)}`)
+      .then((r) => r.json())
+      .then((d) => { if (!cancelled) setData(d?.cases ? (d as HistoryDTO) : null); })
+      .catch(() => { if (!cancelled) setData(null); });
+    return () => { cancelled = true; };
+  }, [projectPath, reloadSignal, localReload]);
+  return data;
+}
+
+/** 按来源任务分组(保持库序)。 */
+function groupByTask<X extends { task: string }>(list: X[]): Array<[string, X[]]> {
+  const m = new Map<string, X[]>();
+  for (const c of list) { if (!m.has(c.task)) m.set(c.task, []); m.get(c.task)!.push(c); }
+  return [...m.entries()];
+}
+
+const fmtDay = (iso?: string) => (iso ? iso.slice(5, 10) : "—");
+
+// 对比矩阵(屏 5,二期):行 = 用例(按来源任务分组,首列 sticky) × 列 = 轮次。
+// 对标 TestRail「Comparison for Cases」。全部由本地轮次索引 + 各轮 run.json 只读拼装。
+function RegressionMatrixSection({ t, projectPath, reloadSignal, onOpenRound }: {
+  t: T; projectPath: string; reloadSignal: number; onOpenRound: (roundId: string) => void;
+}) {
+  const hist = useCaseHistory(projectPath, reloadSignal, 0);
+  const [failOnly, setFailOnly] = useState(false);
+
+  if (hist === undefined) return <div className="p-4 text-center"><SpinnerGap size={14} className="mx-auto animate-spin text-muted-foreground" /></div>;
+  if (!hist || hist.rounds.length === 0) {
+    return <div className="rounded-xl border border-border bg-card p-6 text-center text-[11px] leading-relaxed text-muted-foreground">{t("test.matrix.empty")}</div>;
+  }
+
+  const rows = failOnly ? hist.cases.filter((c) => c.res.some((r) => r === "f")) : hist.cases;
+  const cell = (r: CaseRes) =>
+    r === "p" ? "bg-status-success-foreground/75" : r === "f" ? "bg-status-error-foreground/80" : "border border-border bg-muted";
+  const resText = (r: CaseRes) => (r === "p" ? t("test.matrix.pass") : r === "f" ? t("test.matrix.fail") : t("test.matrix.none"));
+
+  return (
+    <div className="space-y-2">
+      <div className="flex flex-wrap items-center gap-3">
+        <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+          <input type="checkbox" checked={failOnly} onChange={(e) => setFailOnly(e.target.checked)} className="accent-primary" />
+          {t("test.matrix.failOnly")}
+        </label>
+        <span className="flex-1" />
+        <span className="flex items-center gap-1.5 text-[10px] text-muted-foreground">
+          {t("test.matrix.legend")}
+          <span className={`inline-block h-3 w-5 rounded ${cell("p")}`} /> {t("test.matrix.pass")}
+          <span className={`inline-block h-3 w-5 rounded ${cell("f")}`} /> {t("test.matrix.fail")}
+          <span className={`inline-block h-3 w-5 rounded ${cell("-")}`} /> {t("test.matrix.none")}
+        </span>
+      </div>
+      <div className="overflow-x-auto rounded-xl border border-border bg-card">
+        <table className="min-w-full border-collapse text-[11px]">
+          <thead>
+            <tr>
+              <th className="sticky left-0 z-10 max-w-[280px] border-b border-border bg-card px-2 py-1.5 text-left text-[9.5px] font-semibold text-muted-foreground">
+                {t("test.matrix.case")}
+              </th>
+              {hist.rounds.map((r) => (
+                <th key={r.roundId} title={`${r.roundId} · ${r.env}`} className="whitespace-nowrap border-b border-border px-2 py-1.5 text-center text-[9.5px] font-semibold text-muted-foreground">
+                  {fmtDay(r.startedAt)}<br />
+                  <span className="font-normal">{r.env}</span>
+                  {r.mode === "failed-only" && <><br /><span className="font-normal">{t("test.rounds.modeRetest")}</span></>}
+                </th>
+              ))}
+              <th className="border-b border-border px-2 py-1.5 text-center text-[9.5px] font-semibold text-muted-foreground">{t("test.matrix.flips")}</th>
+              <th className="border-b border-border px-2 py-1.5 text-center text-[9.5px] font-semibold text-muted-foreground">{t("test.matrix.streak")}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {groupByTask(rows).map(([task, cs]) => (
+              <Fragment key={task}>
+                <tr>
+                  <td colSpan={hist.rounds.length + 3} className="sticky left-0 border-b border-border bg-muted px-2 py-1 text-[10.5px] font-semibold text-foreground">
+                    {task}
+                  </td>
+                </tr>
+                {cs.map((c) => (
+                  <tr key={`${c.task}-${c.originalId}`} className="hover:bg-muted/50">
+                    <td className="sticky left-0 z-10 max-w-[280px] truncate border-b border-border bg-card px-2 py-1" title={c.purpose}>
+                      <span className="font-mono text-[10px] text-muted-foreground">{c.originalId}</span>{" "}
+                      <span className="text-foreground">{c.purpose || "—"}</span>
+                    </td>
+                    {c.res.map((r, i) => (
+                      <td key={hist.rounds[i].roundId} className="border-b border-border px-2 py-1 text-center">
+                        <button
+                          onClick={() => onOpenRound(hist.rounds[i].roundId)}
+                          title={t("test.matrix.cellTitle", { round: hist.rounds[i].roundId, result: resText(r) })}
+                          aria-label={t("test.matrix.cellTitle", { round: hist.rounds[i].roundId, result: resText(r) })}
+                          className={`inline-block h-3.5 w-5 rounded ${cell(r)}`}
+                        />
+                      </td>
+                    ))}
+                    <td className="border-b border-border px-2 py-1 text-center tabular-nums text-muted-foreground">{c.flips || ""}</td>
+                    <td className={`border-b border-border px-2 py-1 text-center tabular-nums ${c.tailFails >= 3 ? "font-bold text-status-error-foreground" : "text-muted-foreground"}`}>
+                      {c.tailFails || ""}
+                    </td>
+                  </tr>
+                ))}
+              </Fragment>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// 健康度(屏 6,三期):统计卡 + 三条治理队列(flaky / 连败 / 久未跑)+ 隔离区 + 护栏。
+//
+// ⚠️ 跨轮翻转 ≠ 真 flaky(版本一直在变)。这些队列只是**候选**,最终判定依赖「AI 就地复核:
+// 同版本连跑 3 次」——尚未实现,入口置灰。判定阈值集中在 lib/test/case-history.ts。
+function RegressionHealthSection({ t, projectPath, reloadSignal, onChanged }: {
+  t: T; projectPath: string; reloadSignal: number; onChanged: () => void;
+}) {
+  const [localReload, setLocalReload] = useState(0);
+  const hist = useCaseHistory(projectPath, reloadSignal, localReload);
+  const [queue, setQueue] = useState<"flaky" | "streak" | "stale">("flaky");
+  const [busy, setBusy] = useState(false);
+  const [quarantineTarget, setQuarantineTarget] = useState<HistCase | null>(null);
+
+  // 隔离(reason 由 PromptDialog 收集,可空)/ 恢复(reason 传空)。window.prompt 在 Electron
+  // 渲染进程抛 TypeError,故隔离改走受控弹窗;恢复无需理由,直接调用。
+  const runQuarantine = async (c: HistCase, quarantined: boolean, reason: string) => {
+    setBusy(true);
+    try {
+      await fetch("/api/test/library/quarantine", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectPath, keys: [{ task: c.task, originalId: c.originalId }], quarantined, reason }),
+      });
+      setLocalReload((n) => n + 1);
+      onChanged();
+    } catch { /* keep view */ } finally { setBusy(false); }
+  };
+
+  if (hist === undefined) return <div className="p-4 text-center"><SpinnerGap size={14} className="mx-auto animate-spin text-muted-foreground" /></div>;
+  if (!hist || hist.summary.total === 0) {
+    return <div className="rounded-xl border border-border bg-card p-6 text-center text-[11px] leading-relaxed text-muted-foreground">{t("test.health.empty")}</div>;
+  }
+
+  const s = hist.summary;
+  const rates = hist.passRates.filter((p) => p.total > 0).map((p) => Math.round((p.pass / p.total) * 100));
+  const byHealth = (k: HealthKind) => hist.cases.filter((c) => c.health === k);
+  const queues = { flaky: byHealth("flaky"), streak: byHealth("streak"), stale: [...byHealth("stale"), ...byHealth("never")] };
+  const quarantined = byHealth("quar");
+  const rows = queues[queue];
+
+  const card = (label: string, value: ReactNode, hint?: ReactNode, color = "text-foreground") => (
+    <div className="rounded-xl border border-border bg-card px-3.5 py-3">
+      <div className="text-[10.5px] tracking-wide text-muted-foreground">{label}</div>
+      <div className={`mt-0.5 flex items-baseline gap-1.5 text-xl font-semibold tabular-nums ${color}`}>
+        {value}
+        {hint && <small className="text-[10.5px] font-normal text-muted-foreground">{hint}</small>}
+      </div>
+    </div>
+  );
+
+  const dots = (c: HistCase) => (
+    <span className="flex flex-wrap items-center gap-0.5">
+      {c.res.map((r, i) => (
+        <span
+          key={hist.rounds[i]?.roundId ?? i}
+          title={hist.rounds[i]?.roundId}
+          className={`inline-block h-2 w-2 rounded-full ${r === "p" ? "bg-status-success-foreground" : r === "f" ? "bg-status-error-foreground" : "bg-border"}`}
+        />
+      ))}
+    </span>
+  );
+
+  return (
+    <div className="space-y-3">
+      {s.quarantineAlert && (
+        <div className="flex items-start gap-2 rounded-lg border border-status-warning-foreground/40 bg-status-warning-muted/40 px-3 py-2 text-[11px] text-status-warning-foreground">
+          <Warning size={13} className="mt-0.5 flex-shrink-0" />
+          <span>{t("test.health.guardrailAlert", { pct: Math.round(s.quarantineRatio * 100) })}</span>
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
+        {card(t("test.health.cardTotal"), s.total)}
+        {card(
+          t("test.health.cardPassRate", { n: rates.length }),
+          rates.length ? `${rates[rates.length - 1]}%` : "—",
+          rates.length > 1 ? <Sparkline values={rates} width={64} height={18} /> : undefined,
+        )}
+        {card(t("test.health.cardFlaky"), s.flaky, t("test.health.cardFlakyHint"), "text-status-warning-foreground")}
+        {card(t("test.health.cardStreak"), s.streak, t("test.health.cardStreakHint"), "text-status-error-foreground")}
+        {card(t("test.health.cardQuarantine"), s.quarantined, t("test.health.cardQuarantineHint"), "text-status-info-foreground")}
+      </div>
+
+      <div className="flex flex-wrap gap-1.5">
+        {([
+          ["flaky", t("test.health.queueFlaky", { n: queues.flaky.length })],
+          ["streak", t("test.health.queueStreak", { n: queues.streak.length })],
+          ["stale", t("test.health.queueStale", { n: queues.stale.length })],
+        ] as const).map(([k, label]) => (
+          <button
+            key={k}
+            onClick={() => setQueue(k)}
+            className={`rounded-full border px-2.5 py-1 text-[11px] transition-colors ${queue === k ? "border-foreground bg-foreground font-semibold text-background" : "border-border text-muted-foreground hover:text-foreground"}`}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+
+      <div className="overflow-hidden rounded-xl border border-border bg-card">
+        {rows.length === 0 ? (
+          <div className="p-6 text-center text-[11px] text-muted-foreground">{t("test.health.queueEmpty")}</div>
+        ) : (
+          <div className="divide-y divide-border">
+            {rows.map((c) => (
+              <div key={`${c.task}-${c.originalId}`} className="flex flex-wrap items-center gap-2 px-3 py-2">
+                <span className="font-mono text-[10px] text-muted-foreground">{c.originalId}</span>
+                <span className="min-w-0 flex-1 truncate text-[11px] text-foreground" title={c.purpose}>{c.purpose || "—"}</span>
+                <span className="rounded bg-muted px-1 text-[9px] text-muted-foreground">{c.task}</span>
+                {dots(c)}
+                {queue === "flaky" && (
+                  <>
+                    <button disabled title={t("test.case.recheckSoon")} className="flex h-6 cursor-not-allowed items-center gap-1 rounded border border-border px-1.5 text-[10px] text-muted-foreground opacity-50">
+                      <ArrowsClockwise size={9} /> {t("test.health.recheck")}
+                    </button>
+                    <button disabled={busy} onClick={() => setQuarantineTarget(c)} className="flex h-6 items-center gap-1 rounded border border-border px-1.5 text-[10px] text-muted-foreground hover:text-foreground disabled:opacity-40">
+                      <Prohibit size={9} /> {t("test.case.quarantine")}
+                    </button>
+                  </>
+                )}
+                {queue === "streak" && (
+                  <>
+                    <span className="rounded bg-status-error-muted px-1.5 text-[9px] text-status-error-foreground">{t("test.health.streak", { n: c.tailFails })}</span>
+                    {/* 连败的正解是转缺陷跟踪,不是隔离——隔离会把真实回归藏起来。 */}
+                    <span className="text-[9.5px] text-muted-foreground">→ {t("test.health.toDefect")}</span>
+                  </>
+                )}
+                {queue === "stale" && (
+                  <span className="rounded border border-border px-1.5 text-[9px] text-muted-foreground">
+                    {c.health === "never"
+                      ? t("test.health.neverRun")
+                      : t("test.health.lastRun", { at: fmtDay(hist.rounds[c.res.reduce((last, r, i) => (r !== "-" ? i : last), -1)]?.startedAt) })}
+                  </span>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
+      <div className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{t("test.health.quarantineSection")}</div>
+      <div className="overflow-hidden rounded-xl border border-border bg-card">
+        {quarantined.length === 0 ? (
+          <div className="p-6 text-center text-[11px] text-muted-foreground">{t("test.health.quarantineEmpty")}</div>
+        ) : (
+          <div className="divide-y divide-border">
+            {quarantined.map((c) => (
+              <div key={`${c.task}-${c.originalId}`} className="flex flex-wrap items-center gap-2 px-3 py-2">
+                <span className="font-mono text-[10px] text-muted-foreground">{c.originalId}</span>
+                <span className="min-w-0 truncate text-[11px] text-foreground" title={c.purpose}>{c.purpose || "—"}</span>
+                <span className="rounded bg-muted px-1 text-[9px] text-muted-foreground">{c.task}</span>
+                <span className="rounded bg-status-info-muted px-1.5 text-[9px] text-status-info-foreground">
+                  {t("test.health.quarantineAt", { at: fmtDay(c.meta.quarantinedAt) })}
+                </span>
+                <span className="min-w-0 flex-1 truncate text-[10.5px] text-muted-foreground">{c.meta.quarantineReason}</span>
+                <button disabled={busy} onClick={() => runQuarantine(c, false, "")} className="flex h-6 items-center gap-1 rounded border border-border px-1.5 text-[10px] text-muted-foreground hover:text-foreground disabled:opacity-40">
+                  <ArrowClockwise size={9} /> {t("test.health.restore")}
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+      <div className="flex items-start gap-1.5 text-[10px] leading-relaxed text-muted-foreground">
+        <WarningCircle size={12} className="mt-0.5 flex-shrink-0" />
+        <span>{t("test.health.guardrail")}</span>
+      </div>
+      <PromptDialog
+        open={quarantineTarget !== null}
+        onOpenChange={(o) => { if (!o) setQuarantineTarget(null); }}
+        title={t("test.library.quarantinePrompt", { n: 1 })}
+        confirmLabel={t("common.confirm")}
+        cancelLabel={t("common.cancel")}
+        requireValue={false}
+        onConfirm={async (reason) => { if (quarantineTarget) await runQuarantine(quarantineTarget, true, reason); }}
+      />
+    </div>
+  );
+}
+
+// 轮次报告(屏 4,二期):红/绿横幅 + delta 三卡(点击过滤)+ 按来源任务分组 + 失败行展开
+// (AI 归因 / 证据缩略图 / 转缺陷)。
+//
+// 两条不可动摇的口径:
+//   1. **复测轮看合并口径**——它只跑上轮失败子集,自身全过不代表可发版(mergedPassStr)。
+//   2. **隔离条数强制曝光**——隔离不计红线,但横幅必须写「隔离中 N 条未计入」,否则隔离就成了
+//      发版前把挂掉的用例扫到地毯下的工具。
+interface VerdictUI { cls: string; act: string; why: string }
+interface RoundTestUI {
+  task: string; originalId: string; purpose: string; status: string;
+  actual?: string; error?: string; evidence?: string[]; verdict?: VerdictUI;
+  /** 判定来源:'script' = 脚本重放(行内显示「脚本」徽标);缺省 = AI 执行。 */
+  via?: string;
+}
+interface RoundReportUI {
+  round: RoundUI;
+  groups: Array<{ task: string; counts: Record<string, number>; tests: RoundTestUI[] }>;
+  delta: { baseRoundId: string; newFail: Array<{ task: string; originalId: string }>; fixed: Array<{ task: string; originalId: string }>; stillFail: Array<{ task: string; originalId: string }> } | null;
+  quarantined: number;
+  hasVerdicts: boolean;
+}
+type DeltaFilter = "" | "new" | "fixed" | "still";
+
+function RegressionReportSection({ t, projectPath, reloadSignal, model, providerId, initialRoundId, controlledRoundId, onBack, onSelectRound }: {
+  t: T; projectPath: string; reloadSignal: number; model: string; providerId: string;
+  /** 从对比矩阵单元格跳转过来时预选该轮。 */
+  initialRoundId?: string;
+  /** 嵌入「轮次」tab 下钻详情时:受控选中轮 + 返回列表 + 切换上下轮。传了 onBack 即嵌入模式(隐藏下拉)。 */
+  controlledRoundId?: string;
+  onBack?: () => void;
+  onSelectRound?: (roundId: string) => void;
+}) {
+  const [rounds, setRounds] = useState<RoundUI[] | null>(null);
+  const [roundId, setRoundId] = useState<string>("");
+  const [data, setData] = useState<RoundReportUI | null | undefined>(undefined); // undefined=加载中
+  const [deltaFilter, setDeltaFilter] = useState<DeltaFilter>("");
+  const [analysing, setAnalysing] = useState(false);
+  const [defectMsg, setDefectMsg] = useState("");
+  const [lightbox, setLightbox] = useState<string | null>(null);
+  const [reload, setReload] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/test/library/rounds?projectPath=${encodeURIComponent(projectPath)}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (cancelled) return;
+        const list: RoundUI[] = (Array.isArray(d?.rounds) ? d.rounds : []).filter((r: RoundUI) => r.status !== "running");
+        setRounds(list);
+        setRoundId((cur) => {
+          const want = controlledRoundId || cur || initialRoundId;
+          return want && list.some((r) => r.roundId === want) ? want : list[0]?.roundId ?? "";
+        });
+      })
+      .catch(() => { if (!cancelled) setRounds([]); });
+    return () => { cancelled = true; };
+  }, [projectPath, reloadSignal, initialRoundId, controlledRoundId]);
+
+  // 嵌入模式:受控轮次变化时同步内部选中,并清掉上一轮残留的过滤/缺陷提示。
+  useEffect(() => {
+    if (controlledRoundId) { setRoundId(controlledRoundId); setDeltaFilter(""); setDefectMsg(""); }
+  }, [controlledRoundId]);
+
+  useEffect(() => {
+    if (!roundId) return;
+    let cancelled = false;
+    fetch(`/api/test/library/rounds/detail?projectPath=${encodeURIComponent(projectPath)}&roundId=${encodeURIComponent(roundId)}`)
+      .then((r) => r.json())
+      .then((d) => { if (!cancelled) setData(d?.groups ? (d as RoundReportUI) : null); })
+      .catch(() => { if (!cancelled) setData(null); });
+    return () => { cancelled = true; };
+  }, [projectPath, roundId, reload]);
+
+  const round = rounds?.find((r) => r.roundId === roundId);
+  const counts = useMemo(() => {
+    let pass = 0, total = 0;
+    for (const g of data?.groups ?? []) for (const c of g.tests) { total++; if (c.status === "pass") pass++; }
+    return { pass, total };
+  }, [data]);
+  const isRetest = round?.mode === "failed-only";
+  // 红线:复测轮看合并口径,全量轮看本轮口径。
+  const verdictOk = isRetest
+    ? (() => { const m = round?.mergedPassStr?.split("/").map(Number); return !!m && m.length === 2 && m[0] === m[1]; })()
+    : counts.total > 0 && counts.pass === counts.total;
+
+  const analyse = async () => {
+    setAnalysing(true);
+    try {
+      const res = await fetch("/api/test/library/verdict", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectPath, roundId, model: model || undefined, providerId: providerId || undefined }),
+      });
+      if (res.body) { const rd = res.body.getReader(); for (;;) { const { done } = await rd.read(); if (done) break; } }
+      setReload((n) => n + 1);
+    } catch { /* 归因失败不影响报告主体 */ } finally { setAnalysing(false); }
+  };
+
+  const toDefect = async () => {
+    setDefectMsg(t("test.report.defectRunning"));
+    try {
+      const res = await fetch("/api/test/defect", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectPath, taskName: REGRESSION_LIBRARY_TASK, env: round?.env || "local", roundId, model: model || undefined, providerId: providerId || undefined }),
+      });
+      if (!res.ok) {
+        let msg = String(res.status);
+        try { const d = await res.json(); if (d?.error) msg = d.error; } catch {}
+        setDefectMsg(t("test.report.defectFailed", { msg }));
+        return;
+      }
+      if (res.body) { const rd = res.body.getReader(); for (;;) { const { done } = await rd.read(); if (done) break; } }
+      setDefectMsg(t("test.report.defectDone"));
+    } catch (e) {
+      setDefectMsg(t("test.report.defectFailed", { msg: e instanceof Error ? e.message : "error" }));
+    }
+  };
+
+  // delta 过滤:三卡各自的 key 集合;点击同一张卡取消过滤。
+  const deltaKeys = useMemo(() => {
+    const mk = (arr?: Array<{ task: string; originalId: string }>) => new Set((arr ?? []).map((x) => caseKey(x.task, x.originalId)));
+    return { new: mk(data?.delta?.newFail), fixed: mk(data?.delta?.fixed), still: mk(data?.delta?.stillFail) };
+  }, [data]);
+  const shownGroups = useMemo(() => {
+    if (!data) return [];
+    if (!deltaFilter) return data.groups;
+    const want = deltaKeys[deltaFilter];
+    return data.groups
+      .map((g) => ({ ...g, tests: g.tests.filter((c) => want.has(caseKey(c.task, c.originalId))) }))
+      .filter((g) => g.tests.length > 0);
+  }, [data, deltaFilter, deltaKeys]);
+
+  const mediaUrl = (file: string) =>
+    `/api/test/media?projectPath=${encodeURIComponent(projectPath)}&taskName=${encodeURIComponent(REGRESSION_LIBRARY_TASK)}&env=${encodeURIComponent(round?.env || "local")}&roundId=${encodeURIComponent(roundId)}&file=${encodeURIComponent(file)}`;
+  const isVid = (f: string) => /\.(webm|mp4|mov)$/i.test(f);
+  const hasFailures = (data?.groups ?? []).some((g) => g.tests.some((c) => c.status !== "pass"));
+
+  if (rounds !== null && rounds.length === 0) {
+    return <div className="rounded-xl border border-border bg-card p-6 text-center text-[11px] leading-relaxed text-muted-foreground">{t("test.report.noRounds")}</div>;
+  }
+
+  const deltaCard = (k: Exclude<DeltaFilter, "">, label: string, n: number, color: string) => (
+    <button
+      onClick={() => setDeltaFilter((cur) => (cur === k ? "" : k))}
+      className={`rounded-lg border bg-card px-3 py-2 text-left transition-colors ${deltaFilter === k ? "border-primary ring-1 ring-primary" : "border-border hover:border-primary"}`}
+    >
+      <div className="text-[10px] text-muted-foreground">{label}</div>
+      <div className={`text-lg font-semibold tabular-nums ${color}`}>{n}<span className="ml-1 text-[10px] font-normal text-muted-foreground">条</span></div>
+    </button>
+  );
+
+  const rIdx = (rounds ?? []).findIndex((r) => r.roundId === roundId);
+  const newerId = rIdx > 0 ? rounds![rIdx - 1].roundId : undefined;
+  const olderId = rIdx >= 0 && rIdx < (rounds?.length ?? 0) - 1 ? rounds![rIdx + 1].roundId : undefined;
+
+  return (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2">
+        {onBack ? (
+          <>
+            <button onClick={onBack} className="flex h-7 items-center gap-1 rounded border border-border px-2 text-[11px] text-muted-foreground hover:text-foreground">
+              <ArrowLeft size={11} /> {t("test.rounds.backToList")}
+            </button>
+            <span className="font-mono text-[11px] text-muted-foreground">{round?.roundId}</span>
+            {round?.env && <span className="rounded border border-border px-1 text-[9px] text-muted-foreground">{round.env}</span>}
+            {round?.suiteName && <span className="min-w-0 truncate text-[11px] text-foreground">{round.suiteName}</span>}
+            <span className="flex-1" />
+            <button onClick={() => newerId && onSelectRound?.(newerId)} disabled={!newerId} title={t("test.rounds.prevRound")} aria-label={t("test.rounds.prevRound")} className="flex h-7 items-center rounded border border-border px-1.5 text-muted-foreground hover:text-foreground disabled:opacity-30">
+              <CaretUp size={11} />
+            </button>
+            <button onClick={() => olderId && onSelectRound?.(olderId)} disabled={!olderId} title={t("test.rounds.nextRound")} aria-label={t("test.rounds.nextRound")} className="flex h-7 items-center rounded border border-border px-1.5 text-muted-foreground hover:text-foreground disabled:opacity-30">
+              <CaretDown size={11} />
+            </button>
+          </>
+        ) : (
+          <>
+            <span className="text-[10px] text-muted-foreground">{t("test.report.round")}</span>
+            <select
+              value={roundId}
+              onChange={(e) => { setRoundId(e.target.value); setDeltaFilter(""); setDefectMsg(""); }}
+              className="h-7 rounded border border-border bg-background px-1.5 text-[11px] outline-none focus:border-primary"
+            >
+              {(rounds ?? []).map((r) => (
+                <option key={r.roundId} value={r.roundId}>
+                  {r.roundId} · {r.env}{r.mode === "failed-only" ? ` · ${t("test.rounds.modeRetest")}` : ""}
+                </option>
+              ))}
+            </select>
+            <span className="flex-1" />
+          </>
+        )}
+        {hasFailures && (
+          <button
+            onClick={analyse}
+            disabled={analysing}
+            className="flex h-7 items-center gap-1 rounded border border-border px-2 text-[11px] text-muted-foreground hover:text-foreground disabled:opacity-40"
+          >
+            {analysing ? <SpinnerGap size={11} className="animate-spin" /> : <Sparkle size={11} />}
+            {analysing ? t("test.report.analysing") : data?.hasVerdicts ? t("test.report.reanalyse") : t("test.report.analyse")}
+          </button>
+        )}
+      </div>
+
+      {data === undefined ? (
+        <div className="p-4 text-center"><SpinnerGap size={14} className="mx-auto animate-spin text-muted-foreground" /></div>
+      ) : data === null ? (
+        <div className="rounded-xl border border-border bg-card p-6 text-center text-[11px] text-muted-foreground">{t("test.rounds.detailEmpty")}</div>
+      ) : (
+        <>
+          {counts.total === 0 ? (
+            // 中断/无产物的轮**不给发版结论**:0/0 既不是「可发版」也不是「不可发版」,
+            // 而是「这轮没跑出结果」。把它渲染成红色红线徽标会误导发版决策。
+            <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-muted/40 px-4 py-3 text-[11px] text-muted-foreground">
+              <WarningCircle size={14} />
+              <span>{t("test.report.noResults", { status: round?.status === "running" ? t("test.rounds.statusRunning") : t("test.rounds.statusAborted") })}</span>
+              <span className="flex-1" />
+              <span className="text-[10px]">{round?.roundId} · {round?.env} · {round?.suiteName || "—"}</span>
+            </div>
+          ) : (
+            <div className={`flex flex-wrap items-center gap-3 rounded-xl border px-4 py-3 ${verdictOk ? "border-status-success-foreground/30 bg-status-success-muted/40" : "border-status-error-foreground/30 bg-status-error-muted/40"}`}>
+              <span className="font-mono text-xl font-bold tabular-nums text-foreground">{counts.pass}/{counts.total}</span>
+              <span className={`text-sm font-bold ${verdictOk ? "text-status-success-foreground" : "text-status-error-foreground"}`}>
+                {verdictOk ? t("test.report.shippable") : t("test.report.blocked")}
+              </span>
+              <span className="text-[10px] text-muted-foreground">
+                {t("test.report.redlineNote")}
+                {isRetest && round?.mergedPassStr && ` ${t("test.report.mergedNote", { pass: round.mergedPassStr })}`}
+              </span>
+              <span className="flex-1" />
+              <span className="text-[10px] text-muted-foreground">
+                {round?.roundId} · {round?.env} · {round?.suiteName || "—"}
+                {data.quarantined > 0 && (
+                  <span className="ml-1.5 text-status-info-foreground">⛔ {t("test.report.quarantineNote", { n: data.quarantined })}</span>
+                )}
+              </span>
+            </div>
+          )}
+
+          {data.delta && (
+            <>
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                {deltaCard("new", t("test.report.deltaNewFail"), data.delta.newFail.length, "text-status-error-foreground")}
+                {deltaCard("fixed", t("test.report.deltaFixed"), data.delta.fixed.length, "text-status-success-foreground")}
+                {deltaCard("still", t("test.report.deltaStillFail"), data.delta.stillFail.length, "text-status-warning-foreground")}
+              </div>
+              <div className="text-[10px] text-muted-foreground">
+                {t("test.report.deltaBase", { round: data.delta.baseRoundId })}
+                {deltaFilter && (
+                  <button onClick={() => setDeltaFilter("")} className="ml-2 text-primary hover:underline">{t("test.report.filterCleared")}</button>
+                )}
+              </div>
+            </>
+          )}
+
+          {shownGroups.length === 0 ? (
+            <div className="rounded-xl border border-border bg-card p-6 text-center text-[11px] text-muted-foreground">{t("test.report.empty")}</div>
+          ) : (
+            shownGroups.map((g) => {
+              const pass = g.tests.filter((c) => c.status === "pass").length;
+              const allPass = pass === g.tests.length;
+              return (
+                <div key={g.task} className="overflow-hidden rounded-xl border border-border bg-card">
+                  <div className="flex items-center gap-2 border-b border-border bg-muted/40 px-3 py-1.5">
+                    <span className="text-[11px] font-semibold text-foreground">{g.task}</span>
+                    <span className={`rounded px-1.5 text-[9px] ${allPass ? "bg-status-success-muted text-status-success-foreground" : "bg-status-error-muted text-status-error-foreground"}`}>
+                      {t("test.report.groupPass", { pass, total: g.tests.length })}
+                    </span>
+                  </div>
+                  <div className="divide-y divide-border">
+                    {g.tests.map((c) => (
+                      <div key={`${c.task}-${c.originalId}`} className="px-3 py-1.5">
+                        <div className="flex items-center gap-2">
+                          <span className={`inline-block h-2 w-2 flex-shrink-0 rounded-full ${c.status === "pass" ? "bg-status-success-foreground" : "bg-status-error-foreground"}`} />
+                          <span className="font-mono text-[10px] text-muted-foreground">{c.originalId}</span>
+                          <span className="min-w-0 flex-1 truncate text-[11px] text-foreground" title={c.purpose}>{c.purpose || "—"}</span>
+                          {c.via === "script" && (
+                            <span className="flex items-center gap-0.5 rounded bg-muted px-1 text-[9px] text-muted-foreground" title={t("test.report.viaScriptHint")}>
+                              <Lightning size={8} /> {t("test.report.viaScript")}
+                            </span>
+                          )}
+                          <span className={`rounded px-1 text-[9px] ${c.status === "pass" ? "bg-status-success-muted text-status-success-foreground" : "bg-status-error-muted text-status-error-foreground"}`}>{c.status}</span>
+                        </div>
+                        {c.status !== "pass" && (
+                          <div className="mt-1 flex flex-col gap-1.5 rounded bg-muted/50 px-2.5 py-2 text-[10px]">
+                            <div className="flex flex-wrap items-center gap-1.5">
+                              <span className={`rounded px-1.5 py-0.5 ${c.verdict ? "bg-status-error-muted text-status-error-foreground" : "border border-border text-muted-foreground"}`}>
+                                {c.verdict ? t("test.report.verdict", { cls: c.verdict.cls }) : t("test.report.verdictNone")}
+                              </span>
+                              {c.verdict && <span className="rounded border border-border px-1.5 py-0.5 text-muted-foreground">{t("test.report.suggest", { act: c.verdict.act })}</span>}
+                              <span className="flex-1" />
+                              <button onClick={toDefect} className="flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-muted-foreground hover:text-foreground">
+                                <Bug size={10} /> {t("test.report.toDefect")}
+                              </button>
+                            </div>
+                            {c.verdict?.why && <div className="leading-relaxed text-muted-foreground">{c.verdict.why}</div>}
+                            {c.actual && <div className="text-muted-foreground"><b className="text-foreground">{t("test.report.actual")}：</b>{c.actual}</div>}
+                            {c.error && <div className="text-status-error-foreground">{t("test.report.error")}：{c.error}</div>}
+                            {!!c.evidence?.length && (
+                              <div className="flex flex-wrap items-center gap-2">
+                                {c.evidence.map((f) => (
+                                  <button key={f} onClick={() => setLightbox(f)} className="overflow-hidden rounded border border-border" title={f}>
+                                    {isVid(f)
+                                      ? <span className="flex h-[46px] w-[76px] items-center justify-center bg-muted text-[9px] text-muted-foreground">🎬</span>
+                                      // eslint-disable-next-line @next/next/no-img-element
+                                      : <img src={mediaUrl(f)} alt={f} className="h-[46px] w-[76px] object-cover" />}
+                                  </button>
+                                ))}
+                                <span className="text-[9px] text-muted-foreground">{t("test.report.evidence")}</span>
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })
+          )}
+          {defectMsg && <div className="text-[10px] text-primary">{defectMsg}</div>}
+        </>
+      )}
+
+      {lightbox && (
+        <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/80 p-6" onClick={() => setLightbox(null)}>
+          {isVid(lightbox)
+            ? <video src={mediaUrl(lightbox)} controls autoPlay className="max-h-full max-w-full" onClick={(e) => e.stopPropagation()} />
+            // eslint-disable-next-line @next/next/no-img-element
+            : <img src={mediaUrl(lightbox)} alt={lightbox} className="max-h-full max-w-full object-contain" onClick={(e) => e.stopPropagation()} />}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// 发起回归轮次弹窗(v2 批 D + 二期):套件下拉 + 环境下拉 + **模式**(全量 / 仅复测上轮失败)
+// + **仅执行已确认用例** + 预检卡(条数/来源任务数/隔离排除数/时长估算)+ 红线口径说明。
+//
+// 预检数字全部来自 POST /api/test/suites/eval 的 `scope` 形态——它与真正的发起接口共用
+// lib/test/run-scope.ts 的 resolveRunScope,所以「将执行 N 条」永远等于实跑条数。**不要**在
+// 这里用前端逻辑重算命中集,那正是预览与实跑漂移的经典来源。
+interface LaunchScopeDTO {
+  hits: number;
+  hitTasks: number;
+  quarantined: number;
+  pendingInScope: number;
+  /** 圈选集内可脚本重放的条数(按当前环境的沉淀脚本资格判定)。 */
+  scriptable?: number;
+  suiteName?: string;
+  parentRoundId?: string;
+  /** 复测轮:基准轮失败条数(不含 pinned);hits 是含 pinned 的实跑总数,两者不可混用。 */
+  baseFailedCount?: number;
+  unavailable?: string;
+}
+function StartRegressionModal({ t, projectPath, initialMode, initialParentRoundId, onClose, onStart }: {
+  t: T;
+  projectPath: string;
+  /** 从轮次历史「复测 N 条」进入时预置(缺省=全量)。 */
+  initialMode?: "failed-only";
+  initialParentRoundId?: string;
+  onClose: () => void;
+  onStart: (opts: { suiteName: string; env: string; mode: "full" | "failed-only"; approvedOnly: boolean; scriptFirst: boolean; parentRoundId?: string }) => void;
+}) {
+  const [suites, setSuites] = useState<Array<{ name: string; hits: number; hitTasks: number; builtin?: boolean }> | null>(null);
+  const [envs, setEnvs] = useState<string[] | null>(null);
+  const [envInfo, setEnvInfo] = useState<{ configured?: boolean; frontendBaseUrl?: string | null } | null>(null);
+  const [suiteName, setSuiteName] = useState<string>("全量");
+  const [env, setEnv] = useState<string>("local");
+  const [mode, setMode] = useState<"full" | "failed-only">(initialMode ?? "full");
+  const [approvedOnly, setApprovedOnly] = useState(false);
+  // 优先脚本重放(默认开):有合格沉淀脚本的用例由平台直接跑脚本,其余走 AI;关闭 = 全 AI(排障/对照)。
+  const [scriptFirst, setScriptFirst] = useState(true);
+  const [estimate, setEstimate] = useState<{ minutes: number; rounds: number } | null | undefined>(undefined); // undefined=加载中
+  // 预检结果连同它对应的入参 key 一起存:key 不匹配即视为「加载中」,免得在 effect 体里同步
+  // setState(null) 触发级联渲染(react-hooks 规则)。
+  const [scopeState, setScopeState] = useState<{ key: string; data: LaunchScopeDTO } | null>(null);
+  // 复测模式是否可用(有无基准全量轮)——进弹窗时先探一次,不可用则禁用该 radio。
+  const [retest, setRetest] = useState<LaunchScopeDTO | null>(null);
+
+  // 套件列表(内置全量置顶)+ 环境列表 + 时长估算(近 3 个 done 轮的 (finish-start)/total 均值)。
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/test/suites?projectPath=${encodeURIComponent(projectPath)}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (cancelled) return;
+        const list = [{ name: "全量", hits: d?.fullHits ?? 0, hitTasks: d?.fullTasks ?? 0, builtin: true },
+          ...(Array.isArray(d?.suites) ? d.suites.map((x: { name: string; hits: number; hitTasks?: number }) => ({ name: x.name, hits: x.hits ?? 0, hitTasks: x.hitTasks ?? 0 })) : [])];
+        setSuites(list);
+      })
+      .catch(() => { if (!cancelled) setSuites([]); });
+    fetch(`/api/test/env-config?projectPath=${encodeURIComponent(projectPath)}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (cancelled) return;
+        const allowed: string[] = Array.isArray(d?.allowedEnvs) && d.allowedEnvs.length ? d.allowedEnvs.map(String) : ["local"];
+        setEnvs(allowed);
+        if (typeof d?.env === "string" && allowed.includes(d.env)) setEnv(d.env);
+      })
+      .catch(() => { if (!cancelled) setEnvs(["local"]); });
+    fetch("/api/test/suites/eval", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectPath, scope: { mode: "failed-only", parentRoundId: initialParentRoundId } }),
+    })
+      .then((r) => r.json())
+      .then((d) => { if (!cancelled) setRetest(d as LaunchScopeDTO); })
+      .catch(() => { if (!cancelled) setRetest({ hits: 0, hitTasks: 0, quarantined: 0, pendingInScope: 0, unavailable: "x" }); });
+    fetch(`/api/test/library/rounds?projectPath=${encodeURIComponent(projectPath)}`)
+      .then((r) => r.json())
+      .then((d) => {
+        if (cancelled) return;
+        const done = (Array.isArray(d?.rounds) ? d.rounds : []).filter(
+          (r: { status?: string; startedAt?: string; finishedAt?: string; total?: number }) =>
+            r.status === "done" && r.startedAt && r.finishedAt && typeof r.total === "number" && r.total > 0,
+        ).slice(0, 3);
+        if (!done.length) { setEstimate(null); return; }
+        const perCaseMs = done.reduce((acc: number, r: { startedAt: string; finishedAt: string; total: number }) =>
+          acc + (Date.parse(r.finishedAt) - Date.parse(r.startedAt)) / r.total, 0) / done.length;
+        setEstimate(perCaseMs > 0 ? { minutes: perCaseMs / 60000, rounds: done.length } : null);
+      })
+      .catch(() => { if (!cancelled) setEstimate(null); });
+    return () => { cancelled = true; };
+  }, [projectPath, initialParentRoundId]);
+
+  // 所选环境的被测地址展示(切换环境时刷新;仅展示用,执行时 run 路由自行解析)。
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/test/env-config?projectPath=${encodeURIComponent(projectPath)}&env=${encodeURIComponent(env)}`)
+      .then((r) => r.json())
+      .then((d) => { if (!cancelled) setEnvInfo({ configured: d?.configured, frontendBaseUrl: d?.frontendBaseUrl ?? null }); })
+      .catch(() => { if (!cancelled) setEnvInfo(null); });
+    return () => { cancelled = true; };
+  }, [projectPath, env]);
+
+  // 预检卡:套件/模式/仅已确认/环境 任一变化 → 服务端重新求值(与实跑同源)。
+  // env 进 key 与请求:脚本按环境沉淀,「可脚本重放 N 条」随环境变化。
+  const scopeKey = `${suiteName}\u0000${mode}\u0000${approvedOnly}\u0000${env}\u0000${initialParentRoundId ?? ""}`;
+  useEffect(() => {
+    let cancelled = false;
+    const key = scopeKey;
+    fetch("/api/test/suites/eval", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectPath, scope: { suiteName, mode, approvedOnly, env, parentRoundId: initialParentRoundId } }),
+    })
+      .then((r) => r.json())
+      .then((d) => { if (!cancelled) setScopeState({ key, data: d as LaunchScopeDTO }); })
+      .catch(() => { if (!cancelled) setScopeState({ key, data: { hits: 0, hitTasks: 0, quarantined: 0, pendingInScope: 0 } }); });
+    return () => { cancelled = true; };
+  }, [projectPath, suiteName, mode, approvedOnly, env, initialParentRoundId, scopeKey]);
+  const scope = scopeState?.key === scopeKey ? scopeState.data : null;
+
+  const retestAvailable = !!retest && !retest.unavailable && retest.hits > 0;
+  const hits = scope?.hits ?? 0;
+  const loading = suites === null || envs === null;
+  return (
+    <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
+      <div className="flex max-h-[84vh] w-full max-w-md flex-col overflow-y-auto rounded-xl border border-border bg-background shadow-xl" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center gap-2 border-b border-border px-3 py-2">
+          <Play size={13} className="text-primary" />
+          <span className="text-xs font-semibold text-foreground">{t("test.launch.title")}</span>
+          <span className="flex-1" />
+          <button onClick={onClose} className="text-muted-foreground hover:text-foreground" aria-label={t("test.launch.cancel")}><X size={14} /></button>
+        </div>
+        {loading ? (
+          <div className="p-4 text-center text-[11px] text-muted-foreground"><SpinnerGap size={14} className="mx-auto animate-spin" /></div>
+        ) : (
+          <div className="space-y-3 p-3">
+            <div className="flex items-center gap-2">
+              <span className="w-12 flex-shrink-0 text-[10px] text-muted-foreground">{t("test.launch.suite")}</span>
+              <select
+                value={suiteName}
+                onChange={(e) => setSuiteName(e.target.value)}
+                disabled={mode === "failed-only"}
+                className="h-7 flex-1 rounded border border-border bg-background px-1.5 text-[11px] outline-none focus:border-primary disabled:opacity-40"
+              >
+                {(suites ?? []).map((x) => (
+                  <option key={x.name} value={x.name}>{x.builtin ? `${x.name}（内置）` : x.name} — {t("test.suites.hits", { n: x.hits })}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="w-12 flex-shrink-0 text-[10px] text-muted-foreground">{t("test.launch.env")}</span>
+              <select
+                value={env}
+                onChange={(e) => setEnv(e.target.value)}
+                className="h-7 flex-1 rounded border border-border bg-background px-1.5 text-[11px] outline-none focus:border-primary"
+              >
+                {(envs ?? []).map((e2) => <option key={e2} value={e2}>{e2}</option>)}
+              </select>
+            </div>
+            <div className="flex items-start gap-2">
+              <span className="w-12 flex-shrink-0 pt-0.5 text-[10px] text-muted-foreground">{t("test.launch.mode")}</span>
+              <div className="flex flex-1 flex-col gap-1">
+                <label className="flex items-center gap-1.5 text-[11px] text-foreground">
+                  <input type="radio" name="regmode" checked={mode === "full"} onChange={() => setMode("full")} className="accent-primary" />
+                  {t("test.launch.modeFull")}
+                </label>
+                <label className={`flex items-center gap-1.5 text-[11px] ${retestAvailable ? "text-foreground" : "cursor-not-allowed text-muted-foreground"}`}>
+                  <input
+                    type="radio"
+                    name="regmode"
+                    checked={mode === "failed-only"}
+                    disabled={!retestAvailable}
+                    onChange={() => setMode("failed-only")}
+                    className="accent-primary"
+                  />
+                  {t("test.launch.modeRetest")}
+                  {retestAvailable
+                    ? <span className="text-muted-foreground">（{t("test.launch.modeRetestHint", { n: retest!.baseFailedCount ?? retest!.hits })}）</span>
+                    : <span className="text-muted-foreground">（{t("test.launch.modeRetestUnavailable")}）</span>}
+                </label>
+                {mode === "failed-only" && retest?.parentRoundId && (
+                  <span className="font-mono text-[10px] text-muted-foreground">{t("test.launch.basedOn", { round: retest.parentRoundId })}</span>
+                )}
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="w-12 flex-shrink-0" />
+              <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                <input type="checkbox" checked={approvedOnly} onChange={(e) => setApprovedOnly(e.target.checked)} className="accent-primary" />
+                {t("test.launch.approvedOnly")}
+              </label>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="w-12 flex-shrink-0" />
+              <label className="flex items-center gap-1.5 text-[11px] text-muted-foreground" title={t("test.launch.scriptFirstHint")}>
+                <input type="checkbox" checked={scriptFirst} onChange={(e) => setScriptFirst(e.target.checked)} className="accent-primary" />
+                {t("test.launch.scriptFirst")}
+                <Lightning size={10} className="text-primary" />
+              </label>
+            </div>
+            <div className="flex items-start gap-2 text-[10px] text-muted-foreground">
+              <span className="w-12 flex-shrink-0">{t("test.launch.baseUrl")}</span>
+              {envInfo?.frontendBaseUrl ? (
+                <span className="min-w-0 flex-1 truncate font-mono" title={envInfo.frontendBaseUrl}>{envInfo.frontendBaseUrl}</span>
+              ) : (
+                <span className="flex-1 text-status-warning-foreground">{t("test.launch.envUnconfigured")}</span>
+              )}
+            </div>
+            <div className="space-y-1 rounded border border-border bg-muted/30 px-2.5 py-2 text-[11px] text-foreground">
+              {scope === null ? (
+                <div className="text-muted-foreground">…</div>
+              ) : (
+                <>
+                  <div>
+                    {t("test.launch.precheck", { n: scope.hits, m: scope.hitTasks })}
+                    {scope.quarantined > 0 && (
+                      <span className="ml-1 text-status-info-foreground">· {t("test.launch.quarantineExcluded", { n: scope.quarantined })}</span>
+                    )}
+                    {scriptFirst && (scope.scriptable ?? 0) > 0 && (
+                      <span className="ml-1 text-primary">· {t("test.launch.scriptableCount", { n: scope.scriptable ?? 0 })}</span>
+                    )}
+                  </div>
+                  {approvedOnly
+                    ? null
+                    : scope.pendingInScope > 0 && (
+                      <div className="text-[10px] text-status-warning-foreground">{t("test.launch.pendingWarn", { n: scope.pendingInScope })}</div>
+                    )}
+                  <div className="text-[10px] text-muted-foreground">
+                    {estimate === undefined ? "…" : estimate === null
+                      ? t("test.launch.estimateNone")
+                      : t("test.launch.estimate", { min: Math.max(1, Math.round(estimate.minutes * scope.hits)), rounds: estimate.rounds })}
+                  </div>
+                </>
+              )}
+            </div>
+            <div className="rounded bg-muted px-2.5 py-1.5 text-[10px] leading-relaxed text-muted-foreground">
+              {mode === "failed-only" ? t("test.launch.retestRedline") : t("test.launch.redline")}
+            </div>
+            {scope !== null && hits === 0 && <div className="text-[11px] text-status-warning-foreground">{t("test.launch.emptySuite")}</div>}
+            <div className="flex justify-end gap-2">
+              <button onClick={onClose} className="flex h-6 items-center rounded border border-border px-2 text-[11px] text-muted-foreground hover:text-foreground">{t("test.launch.cancel")}</button>
+              <button
+                onClick={() => onStart({ suiteName, env, mode, approvedOnly, scriptFirst, parentRoundId: mode === "failed-only" ? initialParentRoundId : undefined })}
+                disabled={hits === 0}
+                className="flex h-6 items-center gap-1 rounded bg-primary px-2.5 text-[11px] font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <Play size={11} /> {t("test.launch.start", { n: hits })}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// 回归套件区块(批 H 页面化,原 v2 批 C 弹窗):套件 = 「本轮跑什么」的圈选器。列表(内置全量 + 用户套件,
+// 实时命中数)+ 构建器(查询条件 chips / 静态勾选树,eval API 实时预览,口径与发起执行一致)
+// + 核心必跑白名单(pinned,任何套件执行始终并入)。套件是引用不是复制——落 回归套件.json。
+interface SuiteKeyUI { task: string; originalId: string }
+interface SuiteDTO {
+  name: string; type: "static" | "query"; hits: number;
+  keys?: SuiteKeyUI[];
+  filter?: { pri?: string[]; module?: string[]; task?: string[]; last?: ("pass" | "fail" | "none")[] };
+}
+interface SuiteEditState {
+  orig?: string; // 编辑既有套件时的原名(重命名 = 存新删旧)
+  name: string;
+  type: "static" | "query";
+  pri: string[]; module: string[]; task: string[]; last: string[];
+  keys: Set<string>; // JSON.stringify([task, originalId])
+}
+const suiteKeyEnc = (k: SuiteKeyUI) => JSON.stringify([k.task, k.originalId]);
+const suiteKeyDec = (s: string): SuiteKeyUI => { const [task, originalId] = JSON.parse(s) as [string, string]; return { task, originalId }; };
+function RegressionSuitesSection({ t, projectPath }: { t: T; projectPath: string }) {
+  const [data, setData] = useState<{ pinned: SuiteKeyUI[]; fullHits: number; suites: SuiteDTO[] } | null>(null);
+  const [lib, setLib] = useState<LibGroup[] | null>(null);
+  const [editing, setEditing] = useState<SuiteEditState | null>(null);
+  const [pinnedEdit, setPinnedEdit] = useState<Set<string> | null>(null);
+  const [preview, setPreview] = useState<{ hits: number } | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [errMsg, setErrMsg] = useState("");
+  const [reload, setReload] = useState(0);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/test/suites?projectPath=${encodeURIComponent(projectPath)}`)
+      .then((r) => r.json())
+      .then((d) => { if (!cancelled) setData({ pinned: Array.isArray(d?.pinned) ? d.pinned : [], fullHits: d?.fullHits ?? 0, suites: Array.isArray(d?.suites) ? d.suites : [] }); })
+      .catch(() => { if (!cancelled) setData({ pinned: [], fullHits: 0, suites: [] }); });
+    fetch(`/api/test/library?projectPath=${encodeURIComponent(projectPath)}`)
+      .then((r) => r.json())
+      .then((d) => { if (!cancelled) setLib(Array.isArray(d?.tasks) ? d.tasks : []); })
+      .catch(() => { if (!cancelled) setLib([]); });
+    return () => { cancelled = true; };
+  }, [projectPath, reload]);
+
+  // 字段候选值(来自库现存条目;确保已选值即使库里已不存在也仍可见可取消)。
+  const fieldValues = useMemo(() => {
+    const pri = new Set<string>(); const mod = new Set<string>(); const task = new Set<string>();
+    for (const g of lib ?? []) { task.add(g.task); for (const e of g.entries) { if (e.priority) pri.add(e.priority); const m = (e as { module?: unknown }).module; if (typeof m === "string" && m) mod.add(m); } }
+    for (const v of editing?.pri ?? []) pri.add(v);
+    for (const v of editing?.module ?? []) mod.add(v);
+    for (const v of editing?.task ?? []) task.add(v);
+    return { pri: [...pri].sort(), module: [...mod].sort(), task: [...task] };
+  }, [lib, editing]);
+
+  const editingSuitePayload = (e: SuiteEditState) =>
+    e.type === "query"
+      ? { name: e.name.trim(), type: "query", filter: { pri: e.pri, module: e.module, task: e.task, last: e.last } }
+      : { name: e.name.trim(), type: "static", keys: [...e.keys].map(suiteKeyDec) };
+
+  // 构建器实时命中预览(300ms 防抖;名称不参与求值,用占位名避免空名 400)。
+  useEffect(() => {
+    if (!editing) { setPreview(null); return; }
+    const payload = { ...editingSuitePayload(editing), name: editing.name.trim() || "预览" };
+    const timer = setTimeout(() => {
+      fetch("/api/test/suites/eval", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectPath, suite: payload }),
+      })
+        .then((r) => r.json())
+        .then((d) => setPreview({ hits: typeof d?.hits === "number" ? d.hits : 0 }))
+        .catch(() => setPreview(null));
+    }, 300);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectPath, editing]);
+
+  const startNew = () => { setErrMsg(""); setEditing({ name: "", type: "query", pri: [], module: [], task: [], last: [], keys: new Set() }); };
+  const startEdit = (s: SuiteDTO) => {
+    setErrMsg("");
+    setEditing({
+      orig: s.name, name: s.name, type: s.type,
+      pri: s.filter?.pri ?? [], module: s.filter?.module ?? [], task: s.filter?.task ?? [], last: s.filter?.last ?? [],
+      keys: new Set((s.keys ?? []).map(suiteKeyEnc)),
+    });
+  };
+  const toggleArr = (arr: string[], v: string) => (arr.includes(v) ? arr.filter((x) => x !== v) : [...arr, v]);
+
+  const saveSuite = async () => {
+    if (!editing) return;
+    if (!editing.name.trim()) { setErrMsg(t("test.suites.nameRequired")); return; }
+    if (editing.type === "static" && editing.keys.size === 0) { setErrMsg(t("test.suites.emptyStatic")); return; }
+    setSaving(true); setErrMsg("");
+    try {
+      const res = await fetch("/api/test/suites", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectPath, suite: editingSuitePayload(editing) }),
+      });
+      const d = await res.json().catch(() => ({}));
+      if (!res.ok) { setErrMsg((d?.error as string) || t("test.suites.saveFailed")); return; }
+      // 重命名 = 存新删旧(name 是主键)。
+      if (editing.orig && editing.orig !== editing.name.trim()) {
+        await fetch("/api/test/suites", {
+          method: "DELETE",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ projectPath, name: editing.orig }),
+        }).catch(() => {});
+      }
+      setEditing(null); setReload((n) => n + 1);
+    } catch { setErrMsg(t("test.suites.saveFailed")); } finally { setSaving(false); }
+  };
+
+  const delSuite = async (name: string) => {
+    if (!window.confirm(t("test.suites.confirmDelete", { name }))) return;
+    try {
+      await fetch("/api/test/suites", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectPath, name }),
+      });
+      setReload((n) => n + 1);
+    } catch { /* keep view */ }
+  };
+
+  const savePinned = async () => {
+    if (!pinnedEdit) return;
+    setSaving(true);
+    try {
+      await fetch("/api/test/suites", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectPath, pinned: [...pinnedEdit].map(suiteKeyDec) }),
+      });
+      setPinnedEdit(null); setReload((n) => n + 1);
+    } catch { /* keep editing state so user can retry */ } finally { setSaving(false); }
+  };
+
+  // 静态勾选树(按来源任务分组;pinned 编辑复用同一渲染)。
+  const renderTree = (checked: Set<string>, toggle: (k: string) => void, toggleGroup: (ks: string[]) => void) => (
+    <div className="space-y-2">
+      {(lib ?? []).map((g) => {
+        const ks = g.entries.map((e) => suiteKeyEnc({ task: g.task, originalId: e._source?.originalId || e.id || "" }));
+        const allOn = ks.length > 0 && ks.every((k) => checked.has(k));
+        return (
+          <div key={g.task} className="rounded border border-border/60">
+            <label className="flex cursor-pointer items-center gap-2 border-b border-border/60 bg-muted/40 px-2 py-1">
+              <input type="checkbox" checked={allOn} onChange={() => toggleGroup(ks)} className="accent-primary" />
+              <span className="text-[11px] font-semibold text-foreground">{g.task}</span>
+              <span className="rounded bg-muted px-1.5 text-[9px] text-muted-foreground">{ks.filter((k) => checked.has(k)).length}/{ks.length}</span>
+            </label>
+            <div className="space-y-0.5 p-1">
+              {g.entries.map((e, i) => {
+                const k = ks[i];
+                return (
+                  <label key={k} className="flex cursor-pointer items-center gap-2 rounded px-1.5 py-0.5 hover:bg-muted/40">
+                    <input type="checkbox" checked={checked.has(k)} onChange={() => toggle(k)} className="accent-primary" />
+                    <span className="font-mono text-[10px] text-muted-foreground">{e._source?.originalId || e.id}</span>
+                    <span className="min-w-0 flex-1 truncate text-[11px] text-foreground" title={e.purpose}>{e.purpose || "—"}</span>
+                    {e.priority && <span className="rounded bg-muted px-1 text-[9px] text-muted-foreground">{e.priority}</span>}
+                  </label>
+                );
+              })}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+
+  // 查询条件行:字段标签 + 值 chips(选中高亮;不选 = 不限制)。
+  const condRow = (label: string, values: string[], selected: string[], onToggle: (v: string) => void, renderVal?: (v: string) => string) => (
+    <div className="flex items-start gap-2">
+      <span className="w-14 flex-shrink-0 pt-0.5 text-[10px] text-muted-foreground">{label}</span>
+      <div className="flex flex-1 flex-wrap gap-1">
+        {values.map((v) => (
+          <button
+            key={v}
+            onClick={() => onToggle(v)}
+            className={`rounded-full border px-2 py-0.5 text-[10px] ${selected.includes(v) ? "border-primary bg-primary/10 font-semibold text-primary" : "border-border text-muted-foreground hover:text-foreground"}`}
+          >
+            {renderVal ? renderVal(v) : v}
+          </button>
+        ))}
+        {values.length === 0 && <span className="pt-0.5 text-[10px] text-muted-foreground">—</span>}
+      </div>
+    </div>
+  );
+
+  const lastLabel = (v: string) => (v === "pass" ? t("test.suites.lastPass") : v === "fail" ? t("test.suites.lastFail") : t("test.suites.lastNone"));
+  const body = () => {
+    if (data === null || lib === null) {
+      return <div className="p-4 text-center text-[11px] text-muted-foreground"><SpinnerGap size={14} className="mx-auto animate-spin" /></div>;
+    }
+    if (pinnedEdit) {
+      return (
+        <div className="space-y-2 p-3">
+          <div className="text-[11px] text-muted-foreground">{t("test.suites.pinnedHint")}</div>
+          {lib.length === 0 ? <div className="p-4 text-center text-[11px] text-muted-foreground">{t("test.suites.libEmpty")}</div> :
+            renderTree(pinnedEdit, (k) => setPinnedEdit((s) => { const n = new Set(s); if (n.has(k)) n.delete(k); else n.add(k); return n; }),
+              (ks) => setPinnedEdit((s) => { const n = new Set(s); const all = ks.every((k) => n.has(k)); ks.forEach((k) => (all ? n.delete(k) : n.add(k))); return n; }))}
+          <div className="flex justify-end gap-2 pt-1">
+            <button onClick={() => setPinnedEdit(null)} className="flex h-6 items-center rounded border border-border px-2 text-[11px] text-muted-foreground hover:text-foreground">{t("test.suites.cancel")}</button>
+            <button onClick={savePinned} disabled={saving} className="flex h-6 items-center gap-1 rounded bg-primary px-2.5 text-[11px] font-medium text-primary-foreground disabled:opacity-40">
+              {saving && <SpinnerGap size={11} className="animate-spin" />} {t("test.suites.save")}
+            </button>
+          </div>
+        </div>
+      );
+    }
+    if (editing) {
+      return (
+        <div className="space-y-3 p-3">
+          <div className="flex items-center gap-2">
+            <span className="w-14 flex-shrink-0 text-[10px] text-muted-foreground">{t("test.suites.name")}</span>
+            <input
+              value={editing.name}
+              onChange={(e) => setEditing({ ...editing, name: e.target.value })}
+              placeholder={t("test.suites.namePh")}
+              className="h-7 flex-1 rounded border border-border bg-background px-2 text-[11px] outline-none focus:border-primary"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="w-14 flex-shrink-0 text-[10px] text-muted-foreground">{t("test.suites.type")}</span>
+            <label className="flex cursor-pointer items-center gap-1 text-[11px]">
+              <input type="radio" checked={editing.type === "query"} onChange={() => setEditing({ ...editing, type: "query" })} className="accent-primary" />
+              {t("test.suites.queryType")}
+            </label>
+            <label className="flex cursor-pointer items-center gap-1 text-[11px]">
+              <input type="radio" checked={editing.type === "static"} onChange={() => setEditing({ ...editing, type: "static" })} className="accent-primary" />
+              {t("test.suites.staticType")}
+            </label>
+          </div>
+          {editing.type === "query" ? (
+            <div className="space-y-2 rounded border border-border/60 bg-muted/20 p-2">
+              {condRow(t("test.suites.condPri"), fieldValues.pri, editing.pri, (v) => setEditing({ ...editing, pri: toggleArr(editing.pri, v) }))}
+              {condRow(t("test.suites.condModule"), fieldValues.module, editing.module, (v) => setEditing({ ...editing, module: toggleArr(editing.module, v) }))}
+              {condRow(t("test.suites.condTask"), fieldValues.task, editing.task, (v) => setEditing({ ...editing, task: toggleArr(editing.task, v) }))}
+              {condRow(t("test.suites.condLast"), ["pass", "fail", "none"], editing.last, (v) => setEditing({ ...editing, last: toggleArr(editing.last, v) }), lastLabel)}
+              <div className="text-[10px] leading-relaxed text-muted-foreground">{t("test.suites.queryHint")}</div>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <div className="text-[10px] text-muted-foreground">{t("test.suites.staticHint")}</div>
+              {lib.length === 0 ? <div className="p-4 text-center text-[11px] text-muted-foreground">{t("test.suites.libEmpty")}</div> :
+                renderTree(editing.keys, (k) => setEditing((s) => { if (!s) return s; const n = new Set(s.keys); if (n.has(k)) n.delete(k); else n.add(k); return { ...s, keys: n }; }),
+                  (ks) => setEditing((s) => { if (!s) return s; const n = new Set(s.keys); const all = ks.every((k) => n.has(k)); ks.forEach((k) => (all ? n.delete(k) : n.add(k))); return { ...s, keys: n }; }))}
+            </div>
+          )}
+          <div className="flex items-center gap-2 rounded border border-border bg-muted/30 px-2 py-1.5 text-[11px] text-muted-foreground">
+            {preview === null ? <SpinnerGap size={11} className="animate-spin" /> : preview.hits > 0 ? t("test.suites.preview", { n: preview.hits }) : t("test.suites.previewEmpty")}
+          </div>
+          {errMsg && <div className="text-[11px] text-status-error-foreground">{errMsg}</div>}
+          <div className="flex justify-end gap-2">
+            <button onClick={() => setEditing(null)} className="flex h-6 items-center rounded border border-border px-2 text-[11px] text-muted-foreground hover:text-foreground">{t("test.suites.cancel")}</button>
+            <button onClick={saveSuite} disabled={saving} className="flex h-6 items-center gap-1 rounded bg-primary px-2.5 text-[11px] font-medium text-primary-foreground disabled:opacity-40">
+              {saving && <SpinnerGap size={11} className="animate-spin" />} {saving ? t("test.suites.saving") : t("test.suites.save")}
+            </button>
+          </div>
+        </div>
+      );
+    }
+    return (
+      <div className="space-y-3 p-3">
+        <div className="overflow-hidden rounded border border-border/60">
+          <div className="flex items-center gap-2 border-b border-border/60 bg-muted/20 px-2 py-1.5">
+            <Lock size={11} className="text-muted-foreground" />
+            <span className="text-[11px] font-semibold text-foreground">{t("test.suites.builtinFull")}</span>
+            <span className="rounded bg-muted px-1.5 text-[9px] text-muted-foreground">{t("test.suites.hits", { n: data.fullHits })}</span>
+            <span className="min-w-0 flex-1 truncate text-[10px] text-muted-foreground" title={t("test.suites.builtinHint")}>{t("test.suites.builtinHint")}</span>
+          </div>
+          {data.suites.map((s) => (
+            <div key={s.name} className="flex items-center gap-2 border-b border-border/60 px-2 py-1.5 last:border-b-0">
+              <span className="min-w-0 flex-1 truncate text-[11px] text-foreground">{s.name}</span>
+              <span className={`rounded px-1.5 text-[9px] ${s.type === "query" ? "bg-primary/10 text-primary" : "bg-muted text-muted-foreground"}`}>
+                {s.type === "query" ? t("test.suites.typeQuery") : t("test.suites.typeStatic")}
+              </span>
+              <span className="rounded bg-muted px-1.5 text-[9px] text-muted-foreground">{t("test.suites.hits", { n: s.hits })}</span>
+              <button onClick={() => startEdit(s)} className="flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground hover:text-foreground">
+                <PencilSimple size={10} /> {t("test.suites.edit")}
+              </button>
+              <button onClick={() => delSuite(s.name)} className="text-muted-foreground hover:text-status-error-foreground" title={t("test.suites.delete")} aria-label={t("test.suites.delete")}>
+                <Trash size={11} />
+              </button>
+            </div>
+          ))}
+          <button onClick={startNew} className="flex w-full items-center gap-1.5 px-2 py-1.5 text-[11px] text-muted-foreground hover:bg-muted/40 hover:text-foreground">
+            <Plus size={11} /> {t("test.suites.new")}
+          </button>
+        </div>
+        <div className="rounded border border-border/60 p-2">
+          <div className="mb-1 flex items-center gap-2">
+            <PushPin size={11} className="text-muted-foreground" />
+            <span className="text-[11px] font-semibold text-foreground">{t("test.suites.pinned")}</span>
+            <span className="flex-1" />
+            <button onClick={() => setPinnedEdit(new Set(data.pinned.map(suiteKeyEnc)))} className="flex items-center gap-1 rounded border border-border px-1.5 py-0.5 text-[10px] text-muted-foreground hover:text-foreground">
+              <PencilSimple size={10} /> {t("test.suites.pinnedEdit")}
+            </button>
+          </div>
+          <div className="text-[10px] text-muted-foreground">{t("test.suites.pinnedHint")}</div>
+          <div className="mt-1.5 flex flex-wrap gap-1">
+            {data.pinned.length === 0 ? (
+              <span className="text-[10px] text-muted-foreground">{t("test.suites.pinnedEmpty")}</span>
+            ) : (
+              data.pinned.map((k) => (
+                <span key={suiteKeyEnc(k)} className="rounded border border-border bg-muted/30 px-1.5 py-0.5 font-mono text-[10px] text-muted-foreground">
+                  📌 {k.task} · {k.originalId}
+                </span>
+              ))
+            )}
+          </div>
+        </div>
+      </div>
+    );
+  };
+
+  return (
+    <div className="flex flex-col overflow-hidden rounded-xl border border-border bg-card">
+        <div className="flex items-center gap-2 border-b border-border px-3 py-1.5">
+          <ListChecks size={13} className="text-primary" />
+          <span className="text-[11px] font-semibold text-foreground">{t("test.suites.title")}</span>
+          {data && (
+            <span className="text-[10px] text-muted-foreground">{t("test.suites.summary", { count: data.suites.length, full: data.fullHits })}</span>
+          )}
+        </div>
+        <div className="min-h-0 flex-1 overflow-auto">{body()}</div>
     </div>
   );
 }
@@ -3745,11 +7266,16 @@ function RecommendReviewModal({ t, projectPath, taskName, cases, model, provider
 // xlsx 产物预览：调 /api/test/report-xlsx 解析为表格；证据单元格（.png/.webm 等）渲染成
 // 可点开的 chip → 截图灯箱 / 录像内联播放（经 /api/test/media，与 ReportView 同口径）。
 // 执行矩阵预览的列宽/换行规则（列头来自 report-xlsx 的 HEADER）。长文本列换行、短列紧凑。
-const XLSX_WRAP_COLS = new Set(["标题", "期望结果", "实际结果"]);
-const XLSX_COL_PCT: Record<string, string> = {
-  "序号": "4%", "用例ID": "6.5%", "标题": "13%",
-  "期望结果": "30.5%", "实际结果": "30.5%", "状态": "6.5%", "证据": "9%",
+const XLSX_WRAP_COLS = new Set(["标题", "用例标签", "期望结果", "实际结果"]);
+// 列宽按【权重】而非硬编码百分比：实际列宽 = 该列权重 / 当轮所有列权重之和。
+// 这样列集变化（不同分支给执行矩阵加过 用例标签 / 用时 两列）时总和永远归一到 100%、
+// 不再横向溢出；未知表头拿 DEFAULT 权重、有个合理宽度，而不是回退 auto 被挤成 0 宽、
+// 内容 nowrap 溢出叠到邻列（用户实测的「几列重合」根因）。
+const XLSX_COL_WEIGHT: Record<string, number> = {
+  "序号": 3.5, "用例ID": 6, "标题": 12, "用例标签": 6,
+  "期望结果": 27, "实际结果": 27, "状态": 5.5, "用时": 5, "证据": 8,
 };
+const XLSX_COL_WEIGHT_DEFAULT = 8;
 
 function XlsxPreview({ t, projectPath, taskName, env, onClose }: {
   t: T;
@@ -3829,11 +7355,15 @@ function XlsxPreview({ t, projectPath, taskName, env, onClose }: {
           <p className="text-[11px] text-muted-foreground">{t("test.report.xlsxEmpty")}</p>
         ) : (
           <table className="w-full table-fixed border-collapse text-[11px]">
-            {/* table-fixed + 百分比列宽（XLSX_COL_PCT，合计≈100%）：整表贴合弹窗宽度、不横向溢出。
-                长文本列（标题/期望结果/实际结果）whitespace-normal 换行、纵向堆叠；短列 nowrap 保持紧凑。
-                证据单元格内 cellNode 用 flex-wrap，多个截图/录像 chip 自动换行。列头未知时列宽回退 auto。 */}
+            {/* table-fixed + 归一化权重列宽（XLSX_COL_WEIGHT，总和恒为 100%）：整表贴合弹窗宽度、
+                不横向溢出。长文本列（标题/用例标签/期望结果/实际结果）whitespace-normal 换行、纵向堆叠；
+                短列 nowrap 保持紧凑。证据单元格内 cellNode 用 flex-wrap，多个截图/录像 chip 自动换行。 */}
             <colgroup>
-              {header.map((h, i) => <col key={i} style={XLSX_COL_PCT[h] ? { width: XLSX_COL_PCT[h] } : undefined} />)}
+              {(() => {
+                const weights = header.map((h) => XLSX_COL_WEIGHT[h] ?? XLSX_COL_WEIGHT_DEFAULT);
+                const total = weights.reduce((a, b) => a + b, 0) || 1;
+                return header.map((_, i) => <col key={i} style={{ width: `${(weights[i] / total) * 100}%` }} />);
+              })()}
             </colgroup>
             <thead>
               <tr className="bg-muted/50 text-left text-muted-foreground">
@@ -4090,7 +7620,7 @@ function ReportBrowser({ projects, t, model, providerId, onOpenTask, reloadSigna
                                 </div>
                               ) : (
                                 <>
-                                  <ReportView t={t} results={r.tests} four={r.counts} funcCounts={r.funcCounts} funcPassStr={r.funcPassStr} suiteCounts={r.suiteCounts} suitePassStr={r.suitePassStr} circuitBroken={r.circuitBroken} taskName={task} projectPath={project.path} env={r.env} />
+                                  <ReportView t={t} results={r.tests} four={r.counts} funcCounts={r.funcCounts} funcPassStr={r.funcPassStr} suiteCounts={r.suiteCounts} suitePassStr={r.suitePassStr} circuitBroken={r.circuitBroken} taskName={task} projectPath={project.path} env={r.env} taskId={project.tasks.find((tk) => tk.name === task)?.id} runHash={r.runHash} />
                                   {r.markdown && (
                                     <div className="mt-3 border-t border-border pt-3">
                                       <div className="mb-2 text-[11px] font-medium text-muted-foreground">{t("test.report.docTitle")}</div>
@@ -4184,12 +7714,15 @@ const RUN_START_SUBKEY: Record<TestStep, TranslationKey> = {
 function RunStartModal({
   t,
   stepStatus,
+  initialDeposit,
   onRun,
   onClose,
 }: {
   t: T;
   stepStatus: Record<TestStep, StepStatus>;
-  onRun: (step: TestStep) => void;
+  /** 任务当前的「沉淀回归脚本」设置(缺省 true)。 */
+  initialDeposit: boolean;
+  onRun: (step: TestStep, depositScripts: boolean) => void;
   onClose: () => void;
 }) {
   const opts = runStartOptions(stepStatus, STEP_ORDER, RUN_START_STEPS);
@@ -4200,6 +7733,9 @@ function RunStartModal({
     [...opts].reverse().find((o) => o.unlocked)?.step ??
     "requirement";
   const [sel, setSel] = useState<TestStep>(defaultStep);
+  const [deposit, setDeposit] = useState(initialDeposit);
+  // 流水线含「测试执行」时才谈得上沉淀脚本 —— 从报告起跑不执行用例,给这个开关是噪音。
+  const willExecute = STEP_ORDER.indexOf(sel) <= STEP_ORDER.indexOf("execution");
   const selOpt = byStep[sel];
   const stepName = (s: TestStep) => t(STEPS.find((x) => x.step === s)!.name);
   const willOverwrite = !!selOpt?.willOverwrite;
@@ -4212,7 +7748,7 @@ function RunStartModal({
         <>
           <button onClick={onClose} className={CANCEL_BTN}>{t("test.cancel")}</button>
           <button
-            onClick={() => selOpt?.unlocked && onRun(sel)}
+            onClick={() => selOpt?.unlocked && onRun(sel, deposit)}
             disabled={!selOpt?.unlocked}
             className={PRIMARY_BTN}
           >
@@ -4261,6 +7797,18 @@ function RunStartModal({
             </button>
           );
         })}
+
+      {willExecute && (
+        <label className="mt-1 flex cursor-pointer items-start gap-2 rounded-md border border-border px-3 py-2.5">
+          <input type="checkbox" checked={deposit} onChange={(e) => setDeposit(e.target.checked)} className="mt-0.5 accent-primary" />
+          <span className="min-w-0">
+            <span className="text-xs font-medium text-foreground">{t("test.newTaskModal.depositScripts")}</span>
+            <span className="mt-0.5 block text-[10px] leading-relaxed text-muted-foreground">
+              {t("test.execConfirm.depositHint")}
+            </span>
+          </span>
+        </label>
+      )}
       </div>
     </ModalShell>
   );
@@ -4274,6 +7822,7 @@ function ExecConfirmModal({
   initialUrl,
   unconfigured,
   initialMode,
+  initialDeposit,
   onRun,
   onClose,
 }: {
@@ -4282,11 +7831,15 @@ function ExecConfirmModal({
   /** R2：该项目未在 设置·测试账号 配置可用地址 → 顶部给软提示（运行不禁用，可临时填地址）。 */
   unconfigured?: boolean;
   initialMode: ExecMode;
-  onRun: (baseUrl: string, headed: boolean) => void;
+  /** 该任务当前的「沉淀回归脚本」设置(缺省 true)。 */
+  initialDeposit: boolean;
+  onRun: (baseUrl: string, headed: boolean, depositScripts: boolean) => void;
   onClose: () => void;
 }) {
   const [url, setUrl] = useState(initialUrl);
   const [headed, setHeaded] = useState(initialMode === "visible");
+  // 本次执行是否沉淀回归脚本。初值取任务设置,改动会随本次运行写回任务(见 runExecutionConfirmed)。
+  const [deposit, setDeposit] = useState(initialDeposit);
   const [probing, setProbing] = useState(false);
   // null = 未测;否则带可达性 + 状态码 / 错误。改地址即清空,避免显示过期结果。
   const [probe, setProbe] = useState<{ reachable: boolean; status?: number; latencyMs?: number; error?: string } | null>(null);
@@ -4335,7 +7888,7 @@ function ExecConfirmModal({
           <button onClick={onClose} className={CANCEL_BTN}>{t("test.cancel")}</button>
           <button
             disabled={!trimmed}
-            onClick={() => onRun(trimmed, headed)}
+            onClick={() => onRun(trimmed, headed, deposit)}
             className={PRIMARY_BTN}
           >
             {t("test.execConfirm.run")}
@@ -4366,6 +7919,18 @@ function ExecConfirmModal({
         <p className="mt-1.5 text-[11px] leading-relaxed text-muted-foreground">
           {headed ? t("test.execConfirm.hintVisible") : t("test.execConfirm.hintHeadless")}
         </p>
+      </Field>
+
+      <Field label={t("test.newTaskModal.depositScriptsLabel")}>
+        <label className="flex cursor-pointer items-start gap-2">
+          <input type="checkbox" checked={deposit} onChange={(e) => setDeposit(e.target.checked)} className="mt-0.5 accent-primary" />
+          <span className="min-w-0">
+            <span className="text-xs text-foreground">{t("test.newTaskModal.depositScripts")}</span>
+            <span className="mt-0.5 block text-[11px] leading-relaxed text-muted-foreground">
+              {t("test.execConfirm.depositHint")}
+            </span>
+          </span>
+        </label>
       </Field>
 
       <div className="flex items-center gap-2">
@@ -4435,8 +8000,15 @@ function EnvWarnModal({
   );
 }
 
-function NewTaskModal({ t, onClose, onAdd, existingNames }: { t: T; onClose: () => void; onAdd: (name: string, files?: NewTaskFiles) => Promise<{ ok: boolean; error?: string }>; existingNames: string[] }) {
+function NewTaskModal({ t, onClose, onAdd, existingNames }: { t: T; onClose: () => void; onAdd: (name: string, files?: NewTaskFiles, depositScripts?: boolean, targetUrl?: string) => Promise<{ ok: boolean; error?: string }>; existingNames: string[] }) {
   const [name, setName] = useState("");
+  // 任务目标地址(可选):填了则执行时直测该 URL(优先于项目环境配置);空 = 跟随环境配置。
+  const [targetUrl, setTargetUrl] = useState("");
+  // 是否为该任务沉淀回归脚本。默认关(用户反馈:多数新任务并不需要沉淀脚本,而每条用例约两
+  // 分钟的生成与真机重放开销不该默认承担);需要的用户在此勾选或到任务页随时开。
+  // 语义:depositScripts=false → addTask 落 taskState.depositScripts=false;不勾选=false,
+  // 与「任务级缺省 undefined=开」正交——新建这一步的默认独立于既有任务的缺省语义。
+  const [depositScripts, setDepositScripts] = useState(false);
   const [reqFile, setReqFile] = useState<{ name: string; data: string } | null>(null);
   const [casesFile, setCasesFile] = useState<{ name: string; data: string } | null>(null);
   const [err, setErr] = useState("");
@@ -4465,7 +8037,7 @@ function NewTaskModal({ t, onClose, onAdd, existingNames }: { t: T; onClose: () 
       const res = await onAdd(name.trim(), {
         requirement: reqFile ? { filename: reqFile.name, dataBase64: reqFile.data } : undefined,
         cases: casesFile ? { filename: casesFile.name, dataBase64: casesFile.data } : undefined,
-      });
+      }, depositScripts, targetUrl.trim() || undefined);
       if (res.ok) onClose();
       else setErr(res.error || t("test.newTaskModal.importFailed"));
     } catch (e) {
@@ -4508,7 +8080,15 @@ function NewTaskModal({ t, onClose, onAdd, existingNames }: { t: T; onClose: () 
         )}
       </Field>
       <Field label={t("test.newTaskModal.targetLabel")}>
-        <input className={INPUT} placeholder="http://localhost:3000/..." />
+        <input
+          className={INPUT}
+          value={targetUrl}
+          onChange={(e) => setTargetUrl(e.target.value)}
+          placeholder="http://localhost:3000/..."
+        />
+        {!!targetUrl.trim() && (
+          <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">{t("test.newTaskModal.targetHint")}</p>
+        )}
       </Field>
       <Field label={t("test.newTaskModal.importLabel")}>
         <div className="flex gap-2">
@@ -4536,6 +8116,22 @@ function NewTaskModal({ t, onClose, onAdd, existingNames }: { t: T; onClose: () 
         {err && <p className="mt-1 text-[11px] text-status-error-foreground">{err}</p>}
         <p className="mt-2 text-[11px] text-muted-foreground">{t("test.newTaskModal.importHint")}</p>
       </Field>
+      <Field label={t("test.newTaskModal.depositScriptsLabel")}>
+        <label className="flex cursor-pointer items-start gap-2">
+          <input
+            type="checkbox"
+            checked={depositScripts}
+            onChange={(e) => setDepositScripts(e.target.checked)}
+            className="mt-0.5 accent-primary"
+          />
+          <span className="min-w-0">
+            <span className="text-xs text-foreground">{t("test.newTaskModal.depositScripts")}</span>
+            <span className="mt-0.5 block text-[11px] leading-relaxed text-muted-foreground">
+              {t("test.newTaskModal.depositScriptsHint")}
+            </span>
+          </span>
+        </label>
+      </Field>
       {!ready && (
         <div className="rounded-md bg-status-warning-muted px-3 py-2 text-[11px] text-status-warning-foreground">
           ⚠ {t("test.newTaskModal.importRequired")}
@@ -4544,4 +8140,3 @@ function NewTaskModal({ t, onClose, onAdd, existingNames }: { t: T; onClose: () 
     </ModalShell>
   );
 }
-
