@@ -2313,6 +2313,24 @@ const en = {
   'errors.UNKNOWN.userMessage': 'An unexpected error occurred{provider}.',
   'errors.UNKNOWN.actionHint': 'Check the error details below. If the problem persists, run Provider Doctor in Settings.',
 
+  // ── Feedback (问题反馈) ──
+  'settings.feedback': 'Feedback',
+  'feedback.title': 'Feedback',
+  'feedback.description': 'Ran into a problem or have a suggestion? Send it to us here and we will follow up.',
+  'feedback.placeholder': 'Describe the problem: steps to reproduce, expected result, actual result…',
+  'feedback.includeLog': 'Attach application log',
+  'feedback.includeLogHint': 'Scrubbed on write (no API keys/tokens), contains app runtime records only, and greatly speeds up diagnosis.',
+  'feedback.submit': 'Submit feedback',
+  'feedback.submitting': 'Submitting…',
+  'feedback.success': 'Feedback submitted — thank you!',
+  'feedback.loginRequired': 'Sign in to submit feedback.',
+  'feedback.desktopOnly': 'Feedback is only available in the desktop app.',
+  'feedback.errorNotLoggedIn': 'Session expired — please sign in again.',
+  'feedback.errorRateLimited': 'Too many submissions — please try again later.',
+  'feedback.errorTooLarge': 'Attachment too large — retry without the log.',
+  'feedback.errorNetwork': 'Network error — check your connection and retry.',
+  'feedback.errorGeneric': 'Submission failed — please try again later.',
+
   // ── Test Accounts (测试账号) ──
   'settings.testAccounts': 'Test Accounts',
   'testAccounts.title': 'Test Accounts',

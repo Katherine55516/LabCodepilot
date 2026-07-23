@@ -2306,6 +2306,24 @@ const zh: Record<TranslationKey, string> = {
   'errors.UNKNOWN.userMessage': '发生未知错误{provider}。',
   'errors.UNKNOWN.actionHint': '请查看下方错误详情。如问题持续，可在「设置」运行 Provider Doctor。',
 
+  // ── 问题反馈 ──
+  'settings.feedback': '问题反馈',
+  'feedback.title': '问题反馈',
+  'feedback.description': '遇到问题或有建议？在这里直接反馈给我们，我们会尽快跟进。',
+  'feedback.placeholder': '请描述遇到的问题：操作步骤、预期结果、实际结果……',
+  'feedback.includeLog': '附带应用日志',
+  'feedback.includeLogHint': '写入时已自动脱敏（API Key/Token 等不会出现），仅含应用运行记录，能显著加快问题定位。',
+  'feedback.submit': '提交反馈',
+  'feedback.submitting': '提交中…',
+  'feedback.success': '反馈已提交，感谢你的帮助！',
+  'feedback.loginRequired': '登录后可上报问题反馈。',
+  'feedback.desktopOnly': '问题反馈仅在桌面版可用。',
+  'feedback.errorNotLoggedIn': '登录已过期，请重新登录后再试。',
+  'feedback.errorRateLimited': '提交太频繁了，请稍后再试。',
+  'feedback.errorTooLarge': '附带内容过大，请去掉日志后重试。',
+  'feedback.errorNetwork': '网络异常，请检查网络后重试。',
+  'feedback.errorGeneric': '提交失败，请稍后再试。',
+
   // ── 测试账号 ──
   'settings.testAccounts': '测试账号',
   'testAccounts.title': '测试账号',
