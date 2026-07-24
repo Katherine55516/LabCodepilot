@@ -2118,6 +2118,8 @@ const zhHK: Record<TranslationKey, string> = {
   'workspace.office.start': '開始辦公對話',
   'workspace.office.imageMissing': '本機尚未下載沙箱環境,下載完成後即可使用辦公模式。',
   'workspace.office.remoteOnlyPlatform': '目前裝置的辦公模式由公司遠端沙箱提供,登入後自動開通;若持續無法使用請聯絡管理員。',
+  'workspace.office.sandboxDisabled': '辦公沙箱目前已在設定中關閉,開啟後即可在隔離環境中開始辦公對話。',
+  'workspace.office.enableInSettings': '前往設定開啟',
   'workspace.office.download': '下載沙箱環境(約 3.2 GB)',
   'workspace.office.retryDownload': '重試下載',
   'workspace.office.downloading': '正在下載沙箱環境…',

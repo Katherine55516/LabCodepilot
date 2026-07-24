@@ -2112,6 +2112,8 @@ const en = {
   'workspace.office.start': 'Start a work session',
   'workspace.office.imageMissing': 'The sandbox environment has not been downloaded on this machine yet. Work mode becomes available once the download completes.',
   'workspace.office.remoteOnlyPlatform': "Office mode on this device is provided by your organization's remote sandbox and is enabled automatically after sign-in. Contact your administrator if it stays unavailable.",
+  'workspace.office.sandboxDisabled': 'The office sandbox is currently turned off in Settings. Enable it to start office conversations in an isolated environment.',
+  'workspace.office.enableInSettings': 'Enable in Settings',
   'workspace.office.download': 'Download sandbox environment (~3.2 GB)',
   'workspace.office.retryDownload': 'Retry download',
   'workspace.office.downloading': 'Downloading sandbox environment…',

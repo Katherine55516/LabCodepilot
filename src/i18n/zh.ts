@@ -2109,6 +2109,8 @@ const zh: Record<TranslationKey, string> = {
   'workspace.office.start': '开始办公对话',
   'workspace.office.imageMissing': '本机尚未下载沙箱环境,下载完成后即可使用办公模式。',
   'workspace.office.remoteOnlyPlatform': '当前设备的办公模式由公司远程沙箱提供,登录后自动开通;若持续不可用请联系管理员。',
+  'workspace.office.sandboxDisabled': '办公沙箱当前已在设置中关闭,开启后即可在隔离环境中开始办公对话。',
+  'workspace.office.enableInSettings': '前往设置开启',
   'workspace.office.download': '下载沙箱环境(约 3.2 GB)',
   'workspace.office.retryDownload': '重试下载',
   'workspace.office.downloading': '正在下载沙箱环境…',

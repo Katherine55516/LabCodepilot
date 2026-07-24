@@ -115,23 +115,30 @@ export function ChatListPanel({ open, onToggle, width, hasUpdate, readyToInstall
   const [hoveredFolder, setHoveredFolder] = useState<string | null>(null);
   const [creatingChat, setCreatingChat] = useState(false);
 
-  // E3 (cowork): 「办公 / 研发」双栏。办公 = 沙箱会话平铺(不按项目分组);
-  // 仅当全局 cowork_enabled 开启时分段控件才渲染 —— 关闭时回到现状外观,
-  // 遗留沙箱会话继续留在研发项目分组里。tab 选择记忆在 localStorage。
+  // E3 (cowork): 「办公 / 研发」双栏。办公 = 沙箱会话平铺(不按项目分组)。
+  //
+  // 双栏是**固定信息架构,恒常渲染** —— 不再由 cowork_enabled 或状态探测决定
+  // 显隐。历史上它挂在 `/api/cowork/status` 的一次性 fetch 上:该请求静默
+  // catch、失败不重试,首帧探测失败(打包版启动时内嵌服务未就绪等)双栏就永久
+  // 消失,只能靠去设置页切开关或重启碰运气,表现为「功能莫名不见了」。
+  // 现在探测结果只用于**办公 tab 内部的诚实降级**(见 OfficeEmptyCard),
+  // 不再左右 tab 本身。tab 选择记忆在 localStorage(默认 dev,存量观感不变)。
   const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>(() => loadWorkspaceTab());
-  const [coworkAvailable, setCoworkAvailable] = useState(false);
+  // 执行门状态(settings.cowork_enabled)。仅用于办公空态卡的提示分支:关闭时
+  // 明说「已在设置中关闭」并给开启入口,而不是让用户建一个发消息才硬失败的会话。
+  const [coworkEnabled, setCoworkEnabled] = useState(true);
   const [coworkImageProvisioned, setCoworkImageProvisioned] = useState(true);
 
   useEffect(() => {
-    // 只读探测(不触发 VM 启动);失败按不可用处理(fail-closed,tab 隐藏)。
-    // 设置页切换 cowork_enabled 后广播 cowork-status-changed(E5),这里重拉
-    // 让双栏即时显隐,无需重启。
+    // 只读探测(不触发 VM 启动)。失败保持乐观默认 —— 双栏已不依赖它,且
+    // 真正的护栏在服务端 decideCowork(不满足一律硬失败,绝不落宿主执行),
+    // 这里猜错顶多让空态卡少一句提示,不会造成越权执行。
     const fetchCoworkStatus = () => {
       fetch('/api/cowork/status')
         .then((r) => (r.ok ? r.json() : null))
         .then((d) => {
           if (!d) return;
-          setCoworkAvailable(!!d.enabled);
+          setCoworkEnabled(!!d.enabled);
           setCoworkImageProvisioned(!!d.imageProvisioned);
         })
         .catch(() => {});
@@ -141,7 +148,7 @@ export function ChatListPanel({ open, onToggle, width, hasUpdate, readyToInstall
     return () => window.removeEventListener('cowork-status-changed', fetchCoworkStatus);
   }, []);
 
-  const activeTab: WorkspaceTab = coworkAvailable ? workspaceTab : 'dev';
+  const activeTab: WorkspaceTab = workspaceTab;
 
   // E4.1: 也监听外部发出的 tab 切换(如 /chat 页在预填跳转时强制切研发),
   // 保持侧边栏与主区一致。监听方只 setState 不再广播,不会成环。
@@ -510,13 +517,11 @@ export function ChatListPanel({ open, onToggle, width, hasUpdate, readyToInstall
   }, [sessions, isSplitActive, splitSessionIds]);
 
   // E3: 双栏切分 —— office = 沙箱会话(updated_at 倒序平铺),dev = 其余。
-  // cowork 全局关闭时不切分(遗留沙箱会话留在研发分组,现状外观零变化)。
+  // 恒常切分:双栏常驻后不再有「不切分」形态。否则沙箱会话会随开关在
+  // 研发项目分组与办公栏之间来回跳,列表位置飘忽。
   const { office: officeSessions, dev: devSessions } = useMemo(
-    () =>
-      coworkAvailable
-        ? splitSessionsByWorkspaceTab(filteredSessions)
-        : { office: [] as ChatSession[], dev: filteredSessions },
-    [filteredSessions, coworkAvailable]
+    () => splitSessionsByWorkspaceTab(filteredSessions),
+    [filteredSessions]
   );
 
   const projectGroups = useMemo(() => {
@@ -655,32 +660,33 @@ export function ChatListPanel({ open, onToggle, width, hasUpdate, readyToInstall
         </Tooltip>
       </div>
 
-      {/* E3 (cowork): 办公/研发 分段切换 — 仅 cowork_enabled 时渲染;办公=
-          沙箱会话平铺,研发=现有项目分组。切 tab 只换列表,不影响已打开会话。 */}
-      {coworkAvailable && (
-        <div className="px-3 pb-2">
-          {/* activationMode="manual":焦点掠过不切换(默认 automatic 下 Tab 键
-              路过/a11y 遍历 focus 到 trigger 就会切视图并写 localStorage,
-              CDP 验证时实测误触)。点击 / Enter / Space 才激活。 */}
-          <Tabs value={activeTab} onValueChange={(v) => handleTabChange(v as WorkspaceTab)} activationMode="manual">
-            <TabsList className="w-full !h-8 p-0.5 text-xs rounded-md">
-              <TabsTrigger value="office" className="flex-1 !h-6 rounded-sm px-1.5 py-0 text-xs gap-1.5">
-                <Briefcase size={13} />
-                {t('workspace.tab.office')}
-              </TabsTrigger>
-              <TabsTrigger value="dev" className="flex-1 !h-6 rounded-sm px-1.5 py-0 text-xs gap-1.5">
-                <Code size={13} />
-                {t('workspace.tab.dev')}
-              </TabsTrigger>
-            </TabsList>
-          </Tabs>
-        </div>
-      )}
+      {/* E3 (cowork): 办公/研发 分段切换 —— **恒常渲染**,不受 cowork_enabled
+          与状态探测影响(见上方 workspaceTab 处的说明:曾因一次性 fetch 静默
+          失败导致双栏永久消失)。办公=沙箱会话平铺,研发=现有项目分组。
+          切 tab 只换列表,不影响已打开会话。沙箱能否真的执行由服务端
+          decideCowork 把关,办公栏内部诚实呈现(OfficeEmptyCard)。 */}
+      <div className="px-3 pb-2">
+        {/* activationMode="manual":焦点掠过不切换(默认 automatic 下 Tab 键
+            路过/a11y 遍历 focus 到 trigger 就会切视图并写 localStorage,
+            CDP 验证时实测误触)。点击 / Enter / Space 才激活。 */}
+        <Tabs value={activeTab} onValueChange={(v) => handleTabChange(v as WorkspaceTab)} activationMode="manual">
+          <TabsList className="w-full !h-8 p-0.5 text-xs rounded-md">
+            <TabsTrigger value="office" className="flex-1 !h-6 rounded-sm px-1.5 py-0 text-xs gap-1.5">
+              <Briefcase size={13} />
+              {t('workspace.tab.office')}
+            </TabsTrigger>
+            <TabsTrigger value="dev" className="flex-1 !h-6 rounded-sm px-1.5 py-0 text-xs gap-1.5">
+              <Code size={13} />
+              {t('workspace.tab.dev')}
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
+      </div>
 
       {/* 新对话 + 按 tab 绑定的功能入口:办公 → 文生图,研发 → 测试。三行统一
           同一种 ghost 行样式(裸图标 + muted 文字,hover/active 提亮),不再给
-          新对话单独加圈形加号。cowork 关闭时没有 tab 概念,两个入口都显示,
-          保证文生图不从侧边栏消失。 */}
+          新对话单独加圈形加号。双栏恒常存在后每个入口只归属一个 tab,不再有
+          「无 tab 概念时都显示」的兜底形态。 */}
       <div className="flex flex-col gap-0.5 px-3 pb-2">
         <Button
           variant="ghost"
@@ -709,8 +715,8 @@ export function ChatListPanel({ open, onToggle, width, hasUpdate, readyToInstall
             {t('nav.test')}
           </Button>
         )}
-        {/* 文生图 — 办公专属(cowork 关闭时也显示,保证入口不丢) */}
-        {(activeTab === 'office' || !coworkAvailable) && (
+        {/* 文生图 — 办公专属 */}
+        {activeTab === 'office' && (
           <Link href="/image">
             <Button
               variant="ghost"
@@ -803,6 +809,7 @@ export function ChatListPanel({ open, onToggle, width, hasUpdate, readyToInstall
             officeSessions.length === 0 ? (
               <OfficeEmptyCard
                 imageProvisioned={coworkImageProvisioned}
+                sandboxDisabled={!coworkEnabled}
                 creating={creatingChat}
                 onStart={handleNewOfficeChat}
               />
