@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useSyncExternalStore } from "react";
-import { type Icon, Gear, Code, UserCircle, Plug, ChartBar, Lightning, Terminal, Sparkle, WifiHigh, ListChecks } from "@/components/ui/icon";
+import { type Icon, Gear, Code, UserCircle, Plug, ChartBar, Lightning, Terminal, Sparkle, WifiHigh, ListChecks, ChatCircleText } from "@/components/ui/icon";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { GeneralSection } from "./GeneralSection";
@@ -10,6 +10,7 @@ import { CliSettingsSection } from "./CliSettingsSection";
 import { UsageStatsSection } from "./UsageStatsSection";
 import { AssistantWorkspaceSection } from "./AssistantWorkspaceSection";
 import { TestAccountsSection } from "./TestAccountsSection";
+import { FeedbackSection } from "./FeedbackSection";
 import { AccountSection } from "@/components/account/AccountSection";
 // Skills / MCP / CLI Tools managers — embedded as settings sub-sections so
 // users have a single panel for everything customizable. The /skills, /mcp,
@@ -26,7 +27,7 @@ import { BridgeLayout } from "@/components/bridge/BridgeLayout";
 import { useTranslation } from "@/hooks/useTranslation";
 import type { TranslationKey } from "@/i18n";
 
-type Section = "general" | "account" | "providers" | "cli" | "usage" | "assistant" | "skills" | "mcp" | "cli-tools" | "bridge" | "plugins" | "test-accounts";
+type Section = "general" | "account" | "providers" | "cli" | "usage" | "assistant" | "skills" | "mcp" | "cli-tools" | "bridge" | "plugins" | "test-accounts" | "feedback";
 
 interface SidebarItem {
   id: Section;
@@ -66,6 +67,9 @@ const sidebarItems: SidebarItem[] = [
   // Test Accounts — multi-system test credentials, exported to AI_LabTest
   // environments.json. See docs/handover/test-account-settings.md.
   { id: "test-accounts", label: "Test Accounts", icon: ListChecks },
+  // 问题反馈 — 登录态一键上报到账号后端（admin 管理页可见）。
+  // See docs/exec-plans/active/bug-report-feedback.md.
+  { id: "feedback", label: "Feedback", icon: ChatCircleText },
 ];
 
 function getSectionFromHash(): Section {
@@ -110,6 +114,7 @@ export function SettingsLayout() {
     'Bridge': 'settings.bridge',
     'Plugins': 'settings.plugins.title',
     'Test Accounts': 'settings.testAccounts',
+    'Feedback': 'settings.feedback',
   };
 
   const handleSectionChange = useCallback((section: Section) => {
@@ -164,6 +169,7 @@ export function SettingsLayout() {
           {activeSection === "bridge" && <BridgeLayout embedded />}
           {activeSection === "plugins" && <PluginsManager />}
           {activeSection === "test-accounts" && <TestAccountsSection />}
+          {activeSection === "feedback" && <FeedbackSection />}
         </div>
       </div>
     </div>
