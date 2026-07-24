@@ -49,7 +49,7 @@ export async function POST(request: NextRequest) {
     if (!hasCodePilotProvider()) {
       return new Response(
         JSON.stringify({
-          error: 'No provider configured in AI Native Lab.',
+          error: 'No provider configured in CMWork.',
           code: 'NEEDS_PROVIDER_SETUP',
           actionHint: 'open_setup_center',
           initialCard: 'provider',

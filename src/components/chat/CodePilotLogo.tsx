@@ -17,7 +17,7 @@ export function CodePilotLogo({ className }: CodePilotLogoProps) {
   return (
     <img
       src="/brand/anl-logo.png"
-      alt="AI Native Lab"
+      alt="CMWork"
       className={cn('object-contain', className)}
     />
   );
