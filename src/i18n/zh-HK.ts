@@ -2836,6 +2836,14 @@ const zhHK: Record<TranslationKey, string> = {
   'feedback.errorNetwork': '網絡異常，請檢查網絡後重試。',
   'feedback.errorGeneric': '提交失敗，請稍後再試。',
 
+  // ── Help (帮助) ──
+  'settings.help': '幫助',
+  'help.title': '幫助',
+  'help.description': '產品使用文件與操作指引。',
+  'help.manual': '用戶手冊',
+  'help.manualHint': '在系統預設瀏覽器中開啟線上手冊。',
+  'help.openManual': '開啟手冊',
+
   // ── 測試帳號 ──
   'settings.testAccounts': '測試帳號',
   'testAccounts.title': '測試帳號',

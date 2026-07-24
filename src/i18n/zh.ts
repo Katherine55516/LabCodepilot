@@ -2827,6 +2827,14 @@ const zh: Record<TranslationKey, string> = {
   'feedback.errorNetwork': '网络异常，请检查网络后重试。',
   'feedback.errorGeneric': '提交失败，请稍后再试。',
 
+  // ── Help (帮助) ──
+  'settings.help': '帮助',
+  'help.title': '帮助',
+  'help.description': '产品使用文档与操作指引。',
+  'help.manual': '用户手册',
+  'help.manualHint': '在系统默认浏览器中打开在线手册。',
+  'help.openManual': '打开手册',
+
   // ── 测试账号 ──
   'settings.testAccounts': '测试账号',
   'testAccounts.title': '测试账号',

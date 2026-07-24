@@ -2835,6 +2835,14 @@ const en = {
   'feedback.errorNetwork': 'Network error — check your connection and retry.',
   'feedback.errorGeneric': 'Submission failed — please try again later.',
 
+  // ── Help (帮助) ──
+  'settings.help': 'Help',
+  'help.title': 'Help',
+  'help.description': 'Documentation and guides for using the app.',
+  'help.manual': 'User Manual',
+  'help.manualHint': 'Opens the online manual in your default browser.',
+  'help.openManual': 'Open Manual',
+
   // ── Test Accounts (测试账号) ──
   'settings.testAccounts': 'Test Accounts',
   'testAccounts.title': 'Test Accounts',
