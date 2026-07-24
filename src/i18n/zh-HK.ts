@@ -2770,24 +2770,6 @@ const zhHK: Record<TranslationKey, string> = {
   'errors.UNKNOWN.userMessage': '發生未知錯誤{provider}。',
   'errors.UNKNOWN.actionHint': '請查看下方錯誤詳情。如問題持續，可在「設置」運行 Provider Doctor。',
 
-  // ── 問題反饋 ──
-  'settings.feedback': '問題反饋',
-  'feedback.title': '問題反饋',
-  'feedback.description': '遇到問題或有建議？在這裏直接反饋給我們，我們會盡快跟進。',
-  'feedback.placeholder': '請描述遇到的問題：操作步驟、預期結果、實際結果……',
-  'feedback.includeLog': '附帶應用日誌',
-  'feedback.includeLogHint': '寫入時已自動脫敏（API Key/Token 等不會出現），僅含應用運行記錄，能顯著加快問題定位。',
-  'feedback.submit': '提交反饋',
-  'feedback.submitting': '提交中…',
-  'feedback.success': '反饋已提交，多謝你的幫助！',
-  'feedback.loginRequired': '登入後可上報問題反饋。',
-  'feedback.desktopOnly': '問題反饋僅在桌面版可用。',
-  'feedback.errorNotLoggedIn': '登入已過期，請重新登入後再試。',
-  'feedback.errorRateLimited': '提交太頻繁了，請稍後再試。',
-  'feedback.errorTooLarge': '附帶內容過大，請去掉日誌後重試。',
-  'feedback.errorNetwork': '網絡異常，請檢查網絡後重試。',
-  'feedback.errorGeneric': '提交失敗，請稍後再試。',
-
   // ── 測試帳號 ──
   'settings.testAccounts': '測試帳號',
   'testAccounts.title': '測試帳號',
