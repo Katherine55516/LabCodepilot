@@ -32,8 +32,11 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getPath: () => ipcRenderer.invoke('logs:get-path'),
   },
   feedback: {
-    submit: (payload: { message: string; includeLog: boolean }) =>
-      ipcRenderer.invoke('feedback:submit', payload),
+    submit: (payload: {
+      message: string;
+      includeLog: boolean;
+      images?: { name: string; type: string; data: ArrayBuffer }[];
+    }) => ipcRenderer.invoke('feedback:submit', payload),
   },
   install: {
     checkPrerequisites: () => ipcRenderer.invoke('install:check-prerequisites'),

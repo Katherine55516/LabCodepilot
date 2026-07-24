@@ -18,6 +18,7 @@ import {
   normalizeFeedbackMessage,
   buildFeedbackForm,
   postFeedback,
+  isAllowedFeedbackImage,
 } from '../../../electron/feedback-core';
 
 const ENV = { appVersion: '1.9.0', platform: 'darwin', osVersion: '15.5' };
@@ -78,6 +79,58 @@ describe('buildFeedbackForm', () => {
   });
 });
 
+describe('feedback images', () => {
+  it('allows only the four supported raster types', () => {
+    for (const ok of ['image/png', 'image/jpeg', 'image/gif', 'image/webp']) {
+      assert.equal(isAllowedFeedbackImage(ok), true);
+    }
+    // SVG 是可执行 XML —— 管理端展示会成为 XSS 面，刻意不支持
+    assert.equal(isAllowedFeedbackImage('image/svg+xml'), false);
+    assert.equal(isAllowedFeedbackImage('text/html'), false);
+    assert.equal(isAllowedFeedbackImage(''), false);
+  });
+
+  it('appends every image under the same field name, in order', async () => {
+    const form = buildFeedbackForm({
+      message: 'm',
+      env: ENV,
+      images: [
+        { name: 'a.png', type: 'image/png', data: new Uint8Array([1, 2, 3]) },
+        { name: 'b.jpg', type: 'image/jpeg', data: new Uint8Array([4, 5]) },
+      ],
+    });
+    const all = form.getAll('images');
+    assert.equal(all.length, 2);
+    assert.equal((all[0] as File).name, 'a.png');
+    assert.equal((all[1] as File).name, 'b.jpg');
+    assert.equal((all[0] as Blob).type, 'image/png');
+    assert.equal((await (all[0] as Blob).arrayBuffer()).byteLength, 3);
+    assert.equal((await (all[1] as Blob).arrayBuffer()).byteLength, 2);
+  });
+
+  it('accepts ArrayBuffer payloads (the IPC wire form)', async () => {
+    const buf = new Uint8Array([9, 9]).buffer;
+    const form = buildFeedbackForm({
+      message: 'm',
+      env: ENV,
+      images: [{ name: 's.png', type: 'image/png', data: buf }],
+    });
+    assert.equal((await (form.get('images') as Blob).arrayBuffer()).byteLength, 2);
+  });
+
+  it('skips empty payloads and omits the field when there are no images', () => {
+    assert.equal(buildFeedbackForm({ message: 'm', env: ENV }).get('images'), null);
+    assert.equal(
+      buildFeedbackForm({
+        message: 'm',
+        env: ENV,
+        images: [{ name: 'x.png', type: 'image/png', data: new Uint8Array(0) }],
+      }).get('images'),
+      null,
+    );
+  });
+});
+
 describe('postFeedback', () => {
   const captured: { url?: string; init?: RequestInit } = {};
 
@@ -113,6 +166,20 @@ describe('postFeedback', () => {
       const r = await postFeedback({ baseUrl: 'http://b', token: 't', form, fetchImpl: fakeFetch(status) });
       assert.deepEqual(r, { ok: false, error, status });
     }
+  });
+
+  it('maps 422 to invalid-image, but keeps message errors distinct', async () => {
+    const imgErr = await postFeedback({
+      baseUrl: 'http://b', token: 't', form,
+      fetchImpl: fakeFetch(422, { detail: 'unsupported image format (png/jpeg/gif/webp only)' }),
+    });
+    assert.deepEqual(imgErr, { ok: false, error: 'invalid-image', status: 422 });
+
+    const msgErr = await postFeedback({
+      baseUrl: 'http://b', token: 't', form,
+      fetchImpl: fakeFetch(422, { detail: 'message must be 1-5000 characters' }),
+    });
+    assert.deepEqual(msgErr, { ok: false, error: 'invalid-message', status: 422 });
   });
 
   it('maps thrown fetch errors to network', async () => {

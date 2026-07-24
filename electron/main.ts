@@ -46,7 +46,15 @@ import {
 } from './auth/broker';
 import { clearAuthState, loadToken } from './auth/storage';
 import { getBackendBase } from './auth/config';
-import { normalizeFeedbackMessage, buildFeedbackForm, postFeedback } from './feedback-core';
+import {
+  normalizeFeedbackMessage,
+  buildFeedbackForm,
+  postFeedback,
+  isAllowedFeedbackImage,
+  FEEDBACK_MAX_IMAGES,
+  FEEDBACK_IMAGE_MAX_BYTES,
+  type FeedbackImageInput,
+} from './feedback-core';
 import { initMasterKey, getMasterKeyHex, logSafeStorageStatus } from './auth/secret-key';
 import { logInfo, logWarn, logError } from './auth/log';
 import { HttpError, AuthExpiredError, NetworkError, type MeInfo, type ModelConfig } from './auth/types';
@@ -2632,7 +2640,10 @@ app.whenReady().then(async () => {
   // main.log（写入时已经过 scrubSecrets 脱敏，≤5MB），不含轮转旧档。
   // 身份不上送 — 服务端以 JWT claims 为准。契约见
   // docs/exec-plans/active/bug-report-feedback.md。
-  ipcMain.handle('feedback:submit', async (_event, payload: { message?: unknown; includeLog?: unknown }) => {
+  ipcMain.handle('feedback:submit', async (
+    _event,
+    payload: { message?: unknown; includeLog?: unknown; images?: unknown },
+  ) => {
     const message = normalizeFeedbackMessage(payload?.message);
     if (!message) return { ok: false as const, error: 'invalid-message' as const };
     const token = loadToken();
@@ -2647,6 +2658,21 @@ app.whenReady().then(async () => {
       }
     }
 
+    // 截图：renderer 已按张数/大小/类型筛过一遍，这里再收一次口 —— IPC 是
+    // 可被绕过的边界，主进程不能把 renderer 的入参当已验证数据。真正的终审
+    // 仍在服务端（魔术字节嗅探），这里只是不把明显不合规的东西发出去。
+    const rawImages = Array.isArray(payload?.images) ? payload.images : [];
+    const images: FeedbackImageInput[] = [];
+    for (const raw of rawImages.slice(0, FEEDBACK_MAX_IMAGES)) {
+      const item = raw as Partial<FeedbackImageInput> | null;
+      if (!item || typeof item.type !== 'string' || !isAllowedFeedbackImage(item.type)) continue;
+      const buf = item.data;
+      const bytes =
+        buf instanceof Uint8Array ? buf : buf instanceof ArrayBuffer ? new Uint8Array(buf) : null;
+      if (!bytes || bytes.byteLength === 0 || bytes.byteLength > FEEDBACK_IMAGE_MAX_BYTES) continue;
+      images.push({ name: typeof item.name === 'string' ? item.name : 'screenshot', type: item.type, data: bytes });
+    }
+
     const form = buildFeedbackForm({
       message,
       env: {
@@ -2655,10 +2681,15 @@ app.whenReady().then(async () => {
         osVersion: process.getSystemVersion(),
       },
       logBytes,
+      images,
     });
     const result = await postFeedback({ baseUrl: getBackendBase(), token, form });
     if (result.ok) {
-      logInfo('[feedback] submitted', result.id ?? '', logBytes ? `log=${logBytes.byteLength}B` : 'no-log');
+      logInfo(
+        '[feedback] submitted', result.id ?? '',
+        logBytes ? `log=${logBytes.byteLength}B` : 'no-log',
+        `images=${images.length}`,
+      );
     } else {
       logWarn('[feedback] submit failed:', result.error, result.status ?? '');
     }

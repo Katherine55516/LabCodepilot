@@ -250,7 +250,12 @@ interface ElectronAPI {
    * multipart 上报账号后端；身份以服务端 JWT claims 为准，客户端不上送。
    */
   feedback?: {
-    submit: (payload: { message: string; includeLog: boolean }) => Promise<
+    submit: (payload: {
+      message: string;
+      includeLog: boolean;
+      /** 截图（最多 5 张、单张 ≤1MB）；data 为 ArrayBuffer 以便结构化克隆过 IPC。 */
+      images?: { name: string; type: string; data: ArrayBuffer }[];
+    }) => Promise<
       | { ok: true; id?: string }
       | {
           ok: false;
@@ -258,8 +263,10 @@ interface ElectronAPI {
             | 'invalid-message'
             | 'not-logged-in'
             | 'network'
+            /** 服务端 429：已达每日反馈次数上限 */
             | 'rate-limited'
             | 'too-large'
+            | 'invalid-image'
             | 'server';
           status?: number;
         }
