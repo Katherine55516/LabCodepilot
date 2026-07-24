@@ -1,0 +1,210 @@
+# 成功回归用例自动沉淀 Playwright 脚本
+
+> 产品思考见 [docs/insights/regression-script-generation.md](../insights/regression-script-generation.md)
+
+## 目标与边界
+
+现有测试流程仍只有 `requirement → cases → execution → report` 四个节点。报告流确认报告文件已成功写出后，后台为本轮同时满足以下条件的用例生成一个独立 TypeScript Playwright 脚本：
+
+- `cases.json.tags` 精确包含 `回归测试`；
+- 权威 `run.json.tests[].status === "pass"`；
+- 整轮没有触发 `circuitBroken`。
+
+脚本生成是报告的软失败副产物，不改变报告 `done`、任务完成态或发版红线口径。
+
+## 数据流
+
+1. `executionPrompt` 要求每条用例在第一个浏览器动作前输出 `@@CASE_START {id,index}`。
+2. `wrapExecutionStream` 旁路观察 SSE 的 `text/tool_use/tool_result`，用 tool use ID 配对结果，从 MCP 的 `### Ran Playwright code` 区段提取可重放代码。
+3. 执行收口继续使用原有确定性 reducer 写 `run.json`，并以同一 run hash 写 `report/<task>/.data/<task>-<env>.trace.jsonl`。轨迹写入前替换项目路径、base URL、storage state、账号密码和常见 token 形态。
+4. `wrapReportStream` 只有在报告文件存在、流无错误且未中断时调用 `enqueueScriptJob`。这里只等待 queued manifest 原子落盘，不等待模型生成或回放。
+5. 单进程队列全局并发为 1；同任务环境另有 O_EXCL `.generation.lock`。后台完成结构化生成、静态检查、Playwright `--list`，安全可重放时再真实跑一次，最后原子替换正式脚本。
+
+核心实现：
+
+- `src/lib/test/script-trace.ts`：轨迹状态机、脱敏、JSONL；
+- `src/lib/test/script-generator.ts`：资格 join、语义指纹、JSON Schema 生成；
+- `src/lib/test/script-validator.ts`：代码大小、导入 allowlist、秘密/绝对路径/外网 URL/危险 API、test/expect、locator 质量；
+- `src/lib/test/script-job-manager.ts`：队列、锁、恢复、幂等、旧版本保留；
+- `src/lib/test/script-runner.ts`：隔离目录与 MCP 配套 Playwright/runtime/browser；
+- `src/lib/test/script-artifacts.ts`：路径、manifest、原子写。
+
+## 产物与幂等
+
+普通任务产物：
+
+```text
+AI_LabTest/scripts/<task>/<env>/
+  manifest.json
+  <case-id>.spec.ts
+```
+
+manifest job 状态：`queued/running/done/partial/error/stale`；单用例状态：`verified/needs_review/failed/stale/outdated`。
+
+`runHash` 只去重同一报告触发。是否重写单脚本由以下语义指纹决定：用例内容、去掉时间偏移后的成功轨迹、generator/template/runtime 版本。语义未变时复用正式文件，不改变 mtime；新版本生成或校验失败时保留旧文件并标 `outdated`；本轮失去资格的记录标 `stale`，不自动删除。
+
+## 运行器与安全
+
+模型只进行单轮 JSON Schema 文本生成，`tools: []` 且 `strictMcpConfig: true`，没有 Write/Bash/MCP 权限。平台决定文件路径并在候选临时文件通过所有门槛后 rename。
+
+运行器不依赖被测项目安装 Playwright。它解析 `@playwright/mcp` 内嵌的 Playwright CLI，将该 runtime symlink 到 `~/.codepilot/test-script-runs/<id>` 的隔离目录。浏览器选择顺序：
+
+1. 打包态 `AILAB_RESOURCES_PATH/ms-playwright`；
+2. 开发态 `ms-playwright-bundle`；
+3. 与内嵌 runtime revision 精确匹配的 Playwright cache。
+
+有头运行仅在能定位系统 Chrome 时启用，否则回落配套 headless shell。输出最多保留末尾 20KB，并再次脱敏；运行目录在结束、超时或 spawn 错误后删除。
+
+自动真实回放采用保守策略：用例疑似写业务数据且没有 cleanup 时只做 `--list` 并标 `needs_review`；使用 browser route mock、弱 locator 或来源缺失也进入待复核。
+
+## 回归用例库
+
+`回归用例库` 是合成执行任务，不拥有重复脚本。聚合前 `/api/test/library/run` 同时写：
+
+- `.data/回归用例库.cases.json`；
+- `.data/回归用例库.id-map.json`（本轮 run ID 到 `_source.task/originalId` 的冻结快照）。
+
+报告后的脚本任务用冻结映射把文件写到真实源任务目录；aggregate manifest 保留 `sourceTask/sourceCaseId` 供查看、运行和重试。映射缺失或不安全时才保留在合成任务目录并标 `needs_review`。
+
+## API 与 UI
+
+- `GET /api/test/scripts`：读 manifest；带 `caseId` 时返回经根目录校验后的脚本文本；同时恢复落盘的 queued/超时 running job。
+- `POST /api/test/scripts/retry`：按当前 run hash 重试全部缺口或指定 case ID。**盲目重新生成**——不读失败原因，旧脚本被丢弃。
+- `POST /api/test/scripts/run`：运行指定/全部 `verified|needs_review` 脚本。跑通→提升 `verified` 并清 `lastRunError`；失败→**不降级 status**（脚本可能没问题、只是被测应用没起），把 `summarizeRunFailure` 提炼的一行原因写入 `lastRunError/lastRunAt` 持久化。
+- `POST /api/test/scripts/repair`：**AI 修复**（手动单点）。把 `lastRunError` + 当前脚本 + 原用例喂回模型定向修（`repairScriptsBatch`），修复稿走生成同款校验/重放管线（`validateAndPublish`），全部通过才原子覆盖旧文件；未通过则旧脚本原样保留。与生成共用 `.generation.lock`。**红线**：prompt 要求只修技术缺陷（定位器/等待/前置），断言如实失败（页面行为 ≠ 用例预期）时必须 `fixed=false` 并给出测试人员能懂的解释——该解释持久化到 `repairNote`，防止"修复"掩盖真缺陷。生成期失败（无落盘脚本）不归 repair 管，走 retry。
+- `POST /api/test/scripts/pipeline`：**自动跑通流水线**（`runPipelineForTask`）。运行→失败自动修→再跑，直至全部可修复的脚本通过。入口先探测被测应用可达性（`isSutReachable` 打 `frontendBaseUrl`，4s 超时），不可达直接报错。**终止条件**（`runAndRepairLoop`，`DEFAULT_MAX_REPAIR_ROUNDS=3` 兜底）：① 没有可修复的失败了；② 轮次上限；③ 每条用例只给**一次**定向修复机会——一次带确切失败原因的修复仍跑不通就 park 为「需人工」，不管模型自评 fixed 与否（结构性重跑守红线，不信模型嘴上说的）。**分类**：环境问题（连接被拒，`isEnvironmentFailure`）→ 不喂 AI、归「环境阻塞」；如实失败/修不好 → 归「需人工」并覆盖乐观 repairNote 讲真话。**自动触发**：报告流 `enqueueScriptJob({runPipeline:true})`，生成后在 `executeJob` 内（持锁）接着跑；被测应用不可达则跳过运行、只停在生成态。best-effort：流水线抛错落终态、不抹掉已生成脚本、不卡 `running`。
+
+`ReportStepPanel` 的“产出资料”新增第四张“回归自动化脚本”卡，queued/running 每 2 秒轮询。**卡片只留一条动作主线**：查看脚本 + 「自动跑通」（流水线）+「重试缺口」（仅当存在【生成】缺口——无 manifest / job error/stale / 有用例 failed/outdated 时出现；刻意不含 partial，运行失败置 partial 但重新生成解决不了）。卡片重试完成后自动接流水线（retry 传 `runPipeline:true`）。原卡片级「运行全部」「AI 修复」已删——是流水线的子集，测试人员面对四个按钮会犯选择困难；单条精修（重试/运行所选/AI 修复）收在脚本弹框里。运行失败时卡片红字显示 `N 个脚本运行失败：<原因>`——只统计当前合格集（`verified|needs_review`）的失败，stale/outdated 化石不上榜（见 2026-07-20 化石隔离）；弹框内按条显示 `lastRunError`（红）与 `repairNote`（蓝）。它不是流程节点。
+
+## 生成/校验的关键决策（按踩坑顺序）
+
+- `generateTextViaSdk` 超时参数化：批量 5 条完整 Playwright 文件 60s 必超时，按 `max(120s, n×60s)` 传入。
+- SDK result 判读（`interpretSdkResult`）：`outputFormat: json_schema` 的结果在 `structured_output` 而非 `result`；error subtype 无 `result` 字段；`success + is_error` 是错误包不是答案；CLI 退出码 0 可静默结束流→用 assistant 文本兜底并透传 stderr。
+- `normalizePlaywrightImport`：模型惯写 `@playwright/test`，但 runner 只 symlink 了 MCP 自带的 `playwright` 包（该包只依赖 playwright-core），`@playwright/test` 不可解析——校验前确定性重写为 `playwright/test`（语义等价，`playwright/test.js` 重导出同套 test/expect）。禁止反向放宽校验。
+- `isSafeForAutomaticReplay` 只扫 `steps[].content`（动作），不扫 expected/purpose——否则「+ 新建学科」这类按钮名会把只读用例误判成写操作、永久挡在自动验证外。无结构化 steps 时保守回退扫全文。
+- 生成 prompt 要求定位器唯一：`getByRole/getByText` 传字符串 name 必须 `{ exact: true }`（Playwright 默认子串匹配，列表卡片文案极易撞词造成 strict mode violation）；不许用 `.first()` 掩盖歧义。
+- `.generation.lock` 僵尸锁判定：除 30 分钟兜底外，额外检查锁记录的 `pid` 是否存活（`process.kill(pid,0)`）——桌面应用被强退/崩溃留下的锁，持有进程已死即立刻抢占，不必等 30 分钟堵死后续任务。
+- `enqueueScriptJob` 幂等去重 vs 手动重试：done/partial + 同 runHash + 无 forceCaseIds 的入队会被去重短路（保证报告流重复触发幂等）。**手动「重试缺口」必须传 `forceRefresh:true`**（retry 路由已固定传）——否则用例改了（指纹变了）或上轮有 failed 用例时，重试被静默吞掉、按钮空转（真机踩坑：改完用例预期点重试无任何反应）。forceRefresh 只跳过去重，executeJob 内指纹复用仍生效，没变的用例不烧模型。
+- 运行/修复核心（`runScriptCases`/`repairScriptCases`）抽成 lock-free，手动路由（自持锁）与自动流水线（在 `executeJob` 锁内）共用同一份逻辑；`run`/`repair`/`pipeline` 三个手动路由各自 `acquireLock`，与后台生成互斥。
+- **静态校验失败的生成期自纠闭环（2026-07-11）**：此前只有【运行时】失败有 `repairScriptsBatch` 回灌闭环，【静态校验】失败（多个 `test()`、标题缺用例 ID、多余 import 等）一次不合规就 dead-end 成 `failed`、无任何自纠——「重试缺口」只是同一 prompt 再赌一次（真机踩坑：网关模型把一条用例拆成多个 `test()` → 「每个脚本必须恰好一个 test(); test 标题必须包含用例 ID」→ 永久 0/1）。修法镜像运行时闭环：`resolveStaticValidContent`（纯函数、注入 repair 便于单测）在静态失败时把**确切校验错误**喂回 `repairScriptsBatch` 一次并复校，改好才采纳、否则保留原始错误。生成 prompt 另加**具体结构骨架**（一个顶层 `test()`、标题以 `scriptCaseId` 开头、用 `await test.step(...)` 分步——`test.step(` 不被校验器的 `/\btest\s*\(/g` 计数）从源头降不合规率；repair prompt 同步这条。
+- **重放失败不再 dead-end（2026-07-11）**：`validateAndPublish` 里只读用例生成期【无条件真机重放】，此前重放失败 → `failed()`（**不带 `lastRunError`**）。而 `runScriptCases` 只跑 `verified|needs_review`、`repairScriptCases`/`runAndRepairLoop` 只碰带 `lastRunError` 的——`failed` 落在两个恢复通道之外成死态，被测应用没起时只读用例永久卡 0/1。改为：脚本既已过静态 + collect，就落盘、标 `needs_review` 并把 `replayError` 记进 `lastRunError`，交给既有闭环（运行→自动修 / `isEnvironmentFailure` 停靠 / 手动 AI 修复）在被测应用起来后收口。**collect 失败仍保留 `failed`**（连加载都过不了 = malformed，该重新生成）。恢复态契约抽成导出纯谓词 `isRunnableStatus`/`isFixableCase` 并单测，防后续新增恢复路径漏态。
+
+## 回归执行 · 脚本重放优先(2026-07-13)
+
+回归轮次执行(`/api/test/run` step=execution,仅 `回归用例库`+roundId)在**同一条 SSE 流**内分两阶段:
+
+- **阶段 A 脚本重放**(`src/lib/test/script-regression.ts`):当轮快照 idMap 反解 `{来源任务, originalId}` →
+  双 manifest 查找(来源任务 manifest 与聚合 manifest 指向同一物理文件,按 `generatedAt/lastVerifiedAt/lastRunAt`
+  取**最新鲜**视图)→ 资格五道闸(非 mock → `verified`/干净 `needs_review` → `caseBodyHash` 与当前用例体
+  一致(存量缺失宽限)→ 文件存在 → `tryAcquireScriptLock` 拿到锁,锁忙整组降级走 AI)→ 逐条
+  `runGeneratedScript` 并发出与 AI 执行**同构**的合成帧(`@@CASE_START`/`▶ 进度行`/`@@RESULT` 带
+  `via:"script"`)。归约器/实时面板/计时零改动直接消费;`reduce.ts` 的 `via` 字段透传到 run.json 与
+  rounds/detail,报告行显示「脚本」徽标。
+- **阶段 B AI 执行**:惰性创建(`concatSseStreams` 第二条流工厂,阶段 A 跑完才起,避免与脚本并发操作
+  被测系统);prompt 注入 `scriptDone`(禁止执行已完成 id、只跑剩余、编号顺延)。**剩余为 0 时完全不
+  创建智能体**(整轮零模型消耗)。归约器「同 id 先到先得」保证脚本结果不被模型误跑覆盖。
+
+失败策略(用户拍板,策略 A):脚本失败 = 用例失败(error 为 Playwright 摘要),**不自动转 AI**;
+manifest 记 `consecutiveRunFailures`(pass 清零),连败 ≥2 时 error 附治理建议(脚本面板 AI 修复/重试,
+或关闭开关走 AI 对照)。环境类失败(`isEnvironmentFailure`)判 blocked、不计连败。
+
+配套联动:
+- **防 churn**:`executeJob` 对 run.json `via:'script'` 的 pass 用例跳过重生成(脚本重放无 MCP 轨迹,
+  语义指纹必然漂移;有旧条目原样保留并回填 `caseBodyHash`,无旧条目不生成——权威元数据在来源任务 manifest);
+- **防错配**:生成期在 manifest 记 `caseBodyHash`(library.caseFingerprint 口径,排除 id/tags/_source/_lib;
+  指纹复用路径顺带回填存量条目),重放前与快照用例体比对,库里改过的用例不拿旧脚本重放;
+- **入口**:发起弹窗「优先脚本重放」开关(默认开,`scriptFirst` 经 runLibrary → run 路由透传);预检卡
+  「可脚本重放 N 条」来自 suites/eval 的 `scriptable`(`countScriptableEntries`,弹窗把 env 一并传入);
+- **审计**:每轮 `script-replay` 记录「N 条:通过/失败/环境阻塞」(await 落定,不留竞态);
+- **v1 局限**:脚本重放无截图/录像证据(失败仅 error 摘要);时长估算未按脚本占比折算。
+
+## 快照元素清单 + 逐条增量沉淀(2026-07-16/17)
+
+> 产品思考见 [docs/insights/regression-script-generation.md](../insights/regression-script-generation.md) 的「定位器盲翻译与断流全丢」节。
+
+### 快照元素清单(治定位器臆造)
+
+生成模型看不到 DOM,只能从轨迹片段"猜"定位器,缺 testid 时退化到臆造 CSS class。补齐办法:把 MCP
+响应里 `### Snapshot` 节的整页 aria 树(所有具名元素的 role/name,**含从未被点过的断言目标**)抽成
+词汇表喂给生成/修复模型。
+
+- `src/lib/test/script-trace.ts`:
+  - `locateAriaSnapshot(content)` 纯解析,区分快照的三种真机形态——**`inline`**(内联 ```yaml)、
+    **`file`**(MCP 配了 `--output-dir` 时退化成 `- [Snapshot](AI_LabTest/…/page-*.yml)` 文件链接)、
+    **`persisted`**(内联 YAML 过大被 SDK 截断成 `<persisted-output>` 包装 + 缓存 JSON 路径)。
+    **真机主路径是后两种,不是 inline**——初版只认 inline,打包真机 elements 行为 0(见关键决策)。
+  - `extractAriaSnapshot(content, projectPath?)` 按形态读盘:file 相对项目根解析 + 根目录逃逸校验
+    + 2MB 上限;persisted 从缓存 JSON 还原全文再抽内联。任一步失败静默降级为"无清单"。
+  - `ScriptTraceCollector` 增 `projectPath` 构造参数(file 形态必需);按用例取元素**并集**(ref 会随
+    快照代际失效,只存 role/name 作词汇表);单用例封顶 120、name 截 100 字符;元素文本单独脱敏。
+  - 解析走**未脱敏原文**(脱敏会改写路径令文件链接失效),元素文本在 `collectElements` 内单独脱敏。
+  - `elementsByCase` 落 trace 的 `{"type":"elements"}` 行;**不进 `normalizedTraceHash`**(否则升级
+    当天存量脚本全量 churn)。旧读者按 `type==='action'` 过滤天然忽略,无需 version bump。
+- `src/lib/test/script-generator.ts`:payload 的 `executedPlaywrightCode` 附 `observedElements`;
+  生成/修复 prompt 增"断言定位器优先取自清单,写 `getByRole(role,{name,exact:true})`,清单里没有的
+  元素不臆造 class、走既有 `fixed=false` 红线"。
+- **边界**:清单只收具名元素;断言纯视觉结构(网格/圆点)的用例其元素在 aria 树里是无名 `generic`,
+  清单帮不上,根治靠被测前端加 `data-testid`(真机 TC-058 的网格断言仍是 querySelector class)。
+
+### 逐条增量沉淀(治断流全丢)
+
+生成原本由报告成功门控,执行被网络掐断→报告不跑→已通过用例脚本全丢。改为执行流内一条回归用例
+`@@RESULT pass` 即入队生成。
+
+- `src/lib/test/exec-stream.ts`:`createIncrementalScriptFeeder` 行缓冲捕获 `@@RESULT`,只认
+  pass + 带「回归测试」标签 + 非 `via:'script'`(脚本重放无轨迹、重生成即 churn),同 id 只入队一次;
+  复用 `markers.ts` 唯一解析器(三处宽严必须一致)。执行收口(run.json + trace 落盘后)入队整轮任务
+  对账并接自动跑通;报告那次入队保留为幂等兜底(同 runHash 被现有去重短路)。用户主动中止不入队,
+  网络掐断照常入队(正是要救的场景)。`depositScripts` 开关默认开、单测传 false(否则回归标签的 pass
+  用例会在单测里发真实模型调用、退避重试堵死全局单并发队列)。
+- `src/lib/test/script-job-manager.ts`:`enqueueIncrementalScriptCase`/`executeIncrementalJob` 与整轮
+  任务共用单并发队列和锁。三条克制:**不碰 `latestRunHash`/`jobStatus`**(临时 hash 污染会让收口
+  「newest run wins」与去重错乱;running 态无收口 job settle 会永卡)、**不进 `abortByScope`**(增量
+  彼此不同用例、注册进去会互相掐死)、**锁被占即跳过**(交给收口 job)。走**同一个** `selectEligibleCases`
+  构造候选,保证语义指纹与整轮逐字一致——否则收口 job 判漂移、把刚生成的脚本重烧一遍。
+  `validateAndPublish` 增 `deferReplay`:增量生成期执行智能体正操作被测系统,重放会并发抢数据,
+  故跳过、落 needs_review,延后由 `runAndRepairLoop` 统一补跑。
+- **未执行守卫**(独立于本功能就已存在的真 bug):中断轮 run.json 把没跑到的用例兜底补成 blocked。
+  `reduce.ts` 给这类条目打 `notExecuted: true`(机器标记,不靠中文文案);`executeJob` 收口对账对
+  `notExecuted` 的用例**保留 manifest 旧条目原样、不标 stale**——否则一次断流把几十条 verified 脚本
+  打出运行/修复/重放全部通道(stale 非 `isRunnableStatus`)。
+
+## 化石隔离 + 收口落盘修复(2026-07-20)
+
+真机踩坑(mealAllowance「功能测试-回归测试串联」,2026-07-13/14):TC-employee-001 运行失败后被
+摘掉「回归测试」标签 → 收口对账标 `stale` 且**原样保留 `lastRunError`**(设计如此,历史要留)——但所有
+「当前失败」判定都是裸 `c.lastRunError`,不看 status:合格集 1/1 全绿仍每轮报「1 需人工」+ `partial` +
+「部分回归脚本自动跑通未成功」+ UI 红字。且三条恢复通道全清不掉:运行只跑 `verified|needs_review`、
+修复把它判「不在合格集内」跳过**又反手 park 成需人工**、重试缺口只重生成合格用例——`stale`+`lastRunError`
+是恢复态契约(见 2026-07-11 条)的又一处漏态,从「报告口径」侧漏而非通道侧。
+
+- **化石隔离**:新增导出纯谓词 `isActiveRunFailure = lastRunError && isRunnableStatus(status)`,
+  失败记录只有长在当前合格集内(可运行状态)的条目上才有投票权。落点:`executeJob` 流水线收口两处
+  `unpassed`、`runPipelineForTask` 的 `unpassed`、`runAndRepairLoop` 的 `parkEnv`/`fixable`/`stillFailing`、
+  UI `InlineTestingPanel` 红字过滤(客户端组件不能 import 服务端模块,谓词同口径内联)。
+  **不删数据**:stale/outdated 条目的 `lastRunError`/`repairNote` 原样保留,弹框单条详情仍可见;
+  `outdated` 不经 `unpassed` 也不会漏报——生成缺口由 `hasGap`(failed/outdated)独立驱动 `partial`。
+- **收口落盘修复**:`executeJob` 流水线收口用 `markManifest` 只 patch `{counts,jobStatus,error}`、
+  cases 从磁盘重读——而 `runAndRepairLoop` 在最后一次 `persistRunning` **之后**还会改写 repairNote
+  (「AI 修改后仍未通过」讲真话覆盖),这次改写被磁盘旧值静默吞掉(真机:manifest 里模型乐观的
+  repairNote 与 `lastRunError` 并存,「说修好了却报错」)。修法:两处收口 patch 都带上 `cases`
+  (锁内内存态权威;手动入口 `runPipelineForTask` 的 `settle` 本就整份写盘、无此问题)。
+- **strict mode violation 修法入 prompt**:真机 TC-employee-001 页面「员工姓名」同时是查询表单
+  label 和表格列头——**精确重名**,修复模型开的 `{ exact: true }` 无效(exact 只防子串误配),重跑同错。
+  修复 prompt 补:候选文本与断言文本逐字相同时必须容器收窄,**报错里每个候选自带的 aka 提示就是
+  现成答案**(直接照抄 `locator("form").getByText(...)`);生成 prompt 的定位器规则同步补一句预防。
+  当时另一重放大因素:旧构建 `summarizeRunFailure` 只存了首行「Error: expect...failed」,strict-mode
+  的候选清单根本没喂给修复模型(67a3f87 已修,现在完整诊断会进 `lastRunError`)。
+
+## 运维与验证
+
+- 开发态运行 UI 前若刚执行过 Electron 打包，先 `npm rebuild better-sqlite3` 恢复 Node ABI。
+- 打包流程的 `after-pack.js` 会再把 better-sqlite3 重编译为 Electron ABI。
+- 定向测试：`src/__tests__/unit/test-script-generation.test.ts`、`test-exec-stream.test.ts`、`sdk-result-interpret.test.ts`（SDK 四种 result 形态）、`script-import-normalize.test.ts`（import 归一化端到端契约）、`script-replay-safety.test.ts`（重放安全判定 + 失败摘要）、`script-repair.test.ts`（AI 修复载荷红线）、`script-pipeline-classify.test.ts`（环境失败分类器）、`script-validator-structure.test.ts`（一个 test()/标题含 ID/test.step 不计数——复现并守 2026-07-11 真机失败）、`script-static-repair.test.ts`（静态修复决策 `resolveStaticValidContent` + 恢复态契约 `isRunnableStatus`/`isFixableCase` + 化石隔离 `isActiveRunFailure`）、`script-regression.test.ts`（回归脚本重放:资格五道闸/合成帧×归约契约/先到先得/连败提示/环境失败分类/concat 惰性）、`script-trace-elements.test.ts`（快照三形态解析 inline/file/persisted + 路径逃逸拒绝 + 指纹隔离；**REAL_\* fixture 取自真机 SSE 原文**——初版拿自造数据全绿却真机零元素）、`script-incremental.test.ts`（增量入队闸门/流式健壮性/**增量与整轮指纹一致性**/depositScripts 开关/未执行守卫）。
+- 流水线端到端真机验证（打包版 + live SUT，两轮）：① R02 注入定位器歧义 → AI 自动诊断补 `exact:true` → 重跑通过（`verified`）；R03 断言如实失败（页面不禁用按钮） → 1 轮内判「需人工」、覆盖乐观 repairNote 讲真话、不 force-pass；终态 `partial` 不卡死。② 证实每条用例只 1 次修复机会、环境不可达跳过、孤儿锁按 pid 存活抢占。
+- 关键检查：同 run 重复报告不改 manifest；相同语义不改脚本 mtime；trace/脚本/输出无真实秘密和本机路径；Next dev 与 standalone 均能解析 MCP 配套 runtime/browser。
+- **打包产物完整性闸**（`scripts/build-electron.mjs` 的 `assertBuildArtifacts`）：`next build` 后断言
+  `.next/standalone/server.js` 存在，缺失即 `process.exit(1)`。踩坑（2026-07-17）：跨境链路把
+  `next build` 的构建期请求反复掐断，构建仍以退出码 0 收场却没产出 standalone/，`&&` 链照常打包，
+  产出一个能装、一启动即 `ERR_MODULE_NOT_FOUND: standalone/server.js` 的坏包。退出码不可信，
+  必须显式校验产物。**真机验收结论优先于"单测全绿"**——快照元素清单初版单测全绿但真机零元素。

@@ -23,7 +23,7 @@ LabCodepilot 之前已导入 `test-case-completeness.md` / `test-report.md` 规�
 | `src/lib/test/prompts.ts` · `casesPrompt` | 字段清单 + JSON schema 加 `oracle` / `verification`；新增「oracle 双轴」执行点（映射铁律：USER/PROJECT_DOC→功能验证；REVERSE_ENGINEERED→回归基线）；总结要求报功能验证/回归基线计数 + 全回归基线提示 |
 | `src/lib/test/prompts.ts` · `reportPrompt` | 概要改「双口径通过率」；新增执行点：功能验证通过率（回归基线不计入）vs 执行通过率（参考），优先采用 run.json 预聚合的 `funcCounts`/`funcPassStr`，全回归基线记 N/A |
 | `src/lib/test/reduce.ts` | `RunJson` 加 `funcCounts`/`funcPassStr`/`regressionTotal`；`reduceResults`/`reduceFromText` 加可选参 `verificationById`，按 id join 验证性质，回归基线排除出功能验证四态 |
-| `src/app/api/test/run/route.ts` · `wrapExecutionStream` | 归约前读 cases.json 提取 `id→verification` 映射传入 reduce（best-effort，缺失则退化单口径） |
+| `src/lib/test/exec-stream.ts` · `wrapExecutionStream`（由 `api/test/run/route.ts` 调用）| 归约前读 cases.json 提取 `id→verification` 映射传入 reduce（best-effort，缺失则退化单口径） |
 | `src/components/test/InlineTestingPanel.tsx` | `GeneratedCase` 加 `oracle`/`verification`；只读用例卡加验证性质标签（功能验证=绿 status-success / 回归基线=灰 muted，附 oracle 来源）；编辑器加两个 `<select>`（验证性质 2 项 / oracle 5 项） |
 | `src/app/api/test/cases/export/route.ts` | COLUMNS + caseRow + EXAMPLE 加「oracle来源」「验证性质」两列 |
 | `src/i18n/{zh,en,zh-HK}.ts` | 加 `test.cases.verification` / `test.cases.oracle`（标签；option 值是与 prompt 一致的中文数据值，不翻译） |

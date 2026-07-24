@@ -15,7 +15,7 @@ void predictNativeRuntime;
  * 报告阶段产「测试报告 + run.json」；本路由按需追加一份给开发的**缺陷单**：只挑
  * status=fail 且确属应用 bug 的用例，产出可定位的缺陷报告（只写期望行为 + 验收标准，
  * 守 QA 铁律——禁修复方案/优先级/指派）。读 run.json + cases.json，AI 自行筛选。
- * 写入 AI_LabTest/report/{task}/{task}-{env}-缺陷报告.md。
+ * 写入 AI_LabTest/report/{task}[/{roundId}]/{task}-{env}-缺陷报告.md。
  */
 const SYSTEM_PROMPT = `你是 QA 自动化测试平台的「缺陷报告员」。
 任务：从一次测试执行结果里挑出真实应用缺陷，按缺陷单模板整合成给开发平台用的 Markdown 缺陷报告。
@@ -32,18 +32,21 @@ export async function POST(req: Request): Promise<Response> {
     const envArg: string = body.env || 'local';
     const model: string | undefined = body.model;
     const providerId: string | undefined = body.providerId;
+    // 回归轮次的产物落 report/回归用例库/{roundId}/,缺陷单需读该轮的 run.json 与证据。
+    // 缺省 = 旧的平铺路径,普通任务零影响。
+    const roundId: string | undefined = typeof body.roundId === 'string' && body.roundId.trim() ? body.roundId.trim() : undefined;
 
     if (!projectPath) {
       return new Response(JSON.stringify({ error: 'projectPath is required' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
     }
-    if (isUnsafeSegment(taskName) || isUnsafeSegment(envArg)) {
-      return new Response(JSON.stringify({ error: 'invalid taskName or env' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
+    if (isUnsafeSegment(taskName) || isUnsafeSegment(envArg) || (roundId && isUnsafeSegment(roundId))) {
+      return new Response(JSON.stringify({ error: 'invalid taskName, env or roundId' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
     }
 
     const resolved = resolveProjectEnvWithDb(projectPath, envArg);
     const env = resolved.env;
     const baseUrl = resolved.frontendBaseUrl || (typeof body.baseUrl === 'string' ? body.baseUrl : undefined);
-    const p = artifactPaths(taskName, env);
+    const p = artifactPaths(taskName, env, roundId);
 
     // run.json 必须存在（缺陷报告消费它）。
     let runRaw = '';
@@ -52,7 +55,9 @@ export async function POST(req: Request): Promise<Response> {
       return new Response(JSON.stringify({ error: `执行结果缺失（${p.runJson}），请先执行测试再出缺陷报告` }), { status: 400, headers: { 'Content-Type': 'application/json' } });
     }
 
-    const defectRel = `AI_LabTest/report/${taskName}/${taskName}-${env}-缺陷报告.md`;
+    const defectRel = roundId
+      ? `AI_LabTest/report/${taskName}/${roundId}/${taskName}-${env}-缺陷报告.md`
+      : `AI_LabTest/report/${taskName}/${taskName}-${env}-缺陷报告.md`;
     const prompt = `请为测试任务「${taskName}」（环境 ${env}）生成**缺陷报告**（Markdown，给开发平台作修复依据）。
 
 输入产物（请先 Read）：

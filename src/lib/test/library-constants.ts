@@ -10,3 +10,9 @@ export const REGRESSION_TAG = '回归测试';
 
 /** 跨任务重跑使用的保留任务名(聚合库写入 `<name>.cases.json`,复用执行+报告机器)。 */
 export const REGRESSION_LIBRARY_TASK = '回归用例库';
+
+/**
+ * 内置「全量」套件名(v2)。不落盘、不可编辑/删除,语义 = 库内全部用例(隔离除外),
+ * 等价 v1 一键重跑的圈选范围,保证向后兼容。用户自建套件禁止占用此名。
+ */
+export const REGRESSION_FULL_SUITE = '全量';

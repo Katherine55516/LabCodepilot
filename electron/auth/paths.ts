@@ -33,6 +33,9 @@ export const ANLCODE_FILES = {
   configsHash: 'configs.hash',
   selectedConfigId: 'selected_config_id',
   imageConfig: 'image_config.json',
+  // 测试用量上报的断点续传水位：已成功上报到的北京自然日（YYYY-MM-DD）。
+  // 无敏感，保持明文。跨登出保留（按机器记录上报进度，非用户维度）。
+  testUsageWatermark: 'test_usage_watermark',
 } as const;
 
 export function anlcodePath(file: keyof typeof ANLCODE_FILES): string {

@@ -3,7 +3,7 @@ import fs from 'fs';
 import { artifactPaths } from '@/lib/test/prompts';
 import { isUnsafeSegment } from '@/lib/test/path-safety';
 import { appendAudit } from '@/lib/test/audit';
-import { applyRecommend } from '../route';
+import { applyRecommend } from '@/lib/test/recommend';
 import { depositTask, readTaskCases, REGRESSION_LIBRARY_TASK } from '@/lib/test/library';
 
 export const runtime = 'nodejs';

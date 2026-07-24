@@ -1,0 +1,173 @@
+# 测试工作台：回归用例库 v2 二期 + 三期（按交互原型 1:1 对齐）
+
+> 创建时间：2026-07-10 | 最后更新：2026-07-10
+> 状态：**批 I–P 已完成**（六屏全部落地）；打包验收 + 真实 AI 归因质量待用户发起 | 目标分支：worktree `silly-franklin-fd6043`（基于 V3.1.0_dev）
+> 交互原型：Artifact `6b854a65-79f4-40bc-89ca-769a29c16680`「回归用例库 v2 · 交互原型」（6 屏，自带一/二/三期标注）
+> 依赖：[regression-library.md](./regression-library.md)（v1 批 A-E ✅）、[regression-library-v2.md](./regression-library-v2.md)（一期批 A-H ✅）
+> 一句话：把原型里**一期未落的增强 + 二期（对比矩阵/评审门禁/隔离/复测轮/失败归因）+ 三期（健康度治理）**全部落地，让回归用例库从「能跑」变成「能治理」。
+
+## 0. 决策日志
+
+- 2026-07-10（用户拍板）：**范围 = 原型全部 6 屏**，分批交付，每批独立 commit，可随时叫停。
+- 2026-07-10（用户拍板）：**逐用例跨轮结果读侧现算**——遍历近 N 轮 `run.json` + `cases.snapshot.json` 的 `idMap` 反解拼装，**不物化** `回归用例库.stats.json`。理由：run.json 是唯一真相源，物化会引入漂移与存量回填；限流近 20 轮 + 进程内缓存（按轮次索引 `seq` 失效）足以覆盖成本。
+- 2026-07-10（用户拍板）：**AI 能力本轮只做「失败归因」**。「AI 就地复核（同版本连跑 3 次判 flaky）」与「自然语言转套件条件」保留入口但置灰标注「即将推出」；「转缺陷」复用现有 `/api/test/defect`。
+- 2026-07-10（本文决策）：库治理元数据落 **`_lib` 命名空间**（与 `_source` 并列），不污染用例业务字段。`suites.isQuarantined` 兼容旧顶层 `quarantined`。`buildRunnableCases` 同时剥离 `_source` 与 `_lib`（AI 执行 prompt 不该看到治理字段）。
+- 2026-07-10（本文决策）：**发起弹窗的预检卡与发起接口共用 `lib/test/run-scope.ts` 的 `resolveRunScope`**——预检数字与真正圈选的用例集永远同源。前端重算命中集是预览/实跑漂移的经典来源，明令禁止。
+- 2026-07-10（本文决策）：`reviewState` 存量回填 `approved`（v2 计划 §9 既有建议），**新入库默认 `pending`**（与原型一致：新沉淀的用例显示「待确认」）。发版红线口径**不变**（仍是回归集未全过=不可发版），评审态只影响「仅执行已确认用例」开关与库内曝光，不改红线。
+
+## 1. 设计默认（未单独问，可推翻）
+
+| # | 点 | 默认 | 理由 |
+|---|----|------|------|
+| 1 | `depositTask` 重新 upsert 时的治理元数据 | **按 `originalId` 继承**（reviewState/quarantine/rev/history 不被覆写） | upsert 语义是「刷新用例体」，治理状态是人工资产，不能被一次重新入库抹掉 |
+| 2 | `rev` 递增判据 | 用例体**语义指纹**（purpose+steps+assertion+oracle+verification）变化才 +1，并追加一条 history | 纯格式化/字段顺序变动不该产生版本噪音 |
+| 3 | 健康度阈值 | flaky=执行序列翻转 ≥2；连败=尾部连续失败 ≥3；久未执行=距最新轮 ≥3 轮未跑 | 与原型 `health()` 完全一致，避免实现与原型漂移 |
+| 4 | 跨轮矩阵行身份 | `(来源任务, originalId)`，与 `_source` 对齐 | 沿用 v2 一期口径；AI 重生成改 id 造成的行漂移仍不解决（v2 §7 已记） |
+| 5 | 复测轮（failed-only）基准轮 | 缺省取**最近一个已收口的全量轮**；其 fail/partial 集 + pinned 并入 | 原型「复测上轮失败」语义；partial 视为未通过 |
+| 6 | 复测轮红线 | 按**合并口径**（每用例截至该轮的最新状态）评估，不单独给「可发版」结论 | 防「2/2 通过=可发版」误判（v2 §0 已定，本批实现） |
+| 7 | 失败归因产物 | 落 `report/回归用例库/{roundId}/verdicts.json`，与 run.json 同目录、随轮删除 | 归因是该轮的解读，不是库的属性 |
+| 8 | 隔离护栏 | 报告横幅**强制显示**「隔离中 N 条未计入」；隔离占比 >10% 时健康度页顶部告警 | 防止用隔离掩盖真实回归（原型明确要求） |
+
+## 2. 数据模型增量
+
+### 2.1 库条目治理元数据（`回归用例库.json` 的 `entries[]`）
+```jsonc
+{
+  "id": "TC-004", "purpose": "...", "steps": [...],      // 用例业务字段(原样)
+  "_source": { "task": "登录鉴权", "originalId": "TC-004", "depositedAt": "ISO" },
+  "_lib": {                                               // 新增:库治理元数据
+    "reviewState": "approved",                            // approved | pending
+    "rev": 3,
+    "fingerprint": "sha1:...",                            // 语义指纹,rev 递增判据
+    "history": [ { "rev": 3, "at": "ISO", "note": "AI 重生成:步骤 2 预期变更" } ],
+    "quarantined": false,
+    "quarantinedAt": "ISO?", "quarantineReason": "string?"
+  }
+}
+```
+- 读侧宽松：缺 `_lib` → 视为 `{ reviewState:'approved', rev:1, quarantined:false }`（存量零迁移，回填在首次写入时惰性发生）。
+
+### 2.2 逐用例跨轮历史（读侧现算，无新文件）
+`src/lib/test/case-history.ts`：
+```ts
+buildCaseHistory(projectPath, { limit = 20 }): {
+  rounds: Array<{ roundId; startedAt; env; suiteName; mode; status }>,   // 旧→新
+  cases: Array<{ task; originalId; purpose; res: Array<'p'|'f'|'-'> }>,  // res 与 rounds 同下标
+}
+```
+- 数据源：每轮 `cases.snapshot.json.idMap` + `{roundId}-{env}.run.json.tests[]`；缺失/损坏的轮 → 该列全 `'-'`。
+- 派生（纯函数，与原型同名同义）：`flips` / `tailFails` / `lastRunIdx` / `health` / `mergedStats`。
+- 缓存：进程内 Map，key = `projectPath + roundsSeq + limit`；轮次索引 `seq` 变化即失效。
+
+### 2.3 失败归因 `report/回归用例库/{roundId}/verdicts.json`
+```jsonc
+{ "version": 1, "generatedAt": "ISO",
+  "verdicts": { "登录鉴权\u0000TC-004": { "cls": "产品缺陷", "act": "建议转缺陷跟踪", "why": "连续 4 轮失败:..." } } }
+```
+
+## 3. 分批实现
+
+### 批 I — 数据层：`_lib` 治理元数据 + 跨轮历史现算
+- **改** `library.ts`：`LibMeta` 类型 + `readLibMeta`（宽松默认）；`depositTask` 按 `originalId` **继承** `_lib`，语义指纹变化 → `rev+1` + 追加 history；`buildRunnableCases` 剥离 `_lib`；新增 `setReviewState` / `setQuarantine`（批量，按 SuiteKey）。
+- **改** `suites.ts`：`isQuarantined` 读 `_lib.quarantined ?? quarantined`；`SuiteFilter` 加 `review?: ('approved'|'pending')[]`（原型第五类条件字段）；`evalSuite` 支持 `approvedOnly`。
+- **新增** `case-history.ts`：`buildCaseHistory` + `flips`/`tailFails`/`lastRunIdx`/`health`/`mergedStats` + 缓存。
+- 单测：`test-library-meta.test.ts`（继承/指纹/rev/history/批量写）、`test-case-history.test.ts`（矩阵拼装/缺轮容错/派生函数/缓存失效）。
+
+**验收**：`npm run test` 绿；新增单测 ≥20 条。
+
+### 批 J — API：评审 / 隔离 / 跨轮历史
+- **新增** `POST /api/test/library/review` `{projectPath, keys[], reviewState}` → 审计 `library-review`。
+- **新增** `POST /api/test/library/quarantine` `{projectPath, keys[], quarantined, reason?}` → 审计 `library-quarantine`。
+- **新增** `GET /api/test/library/history?projectPath&limit` → 矩阵 + 健康度数据（rounds/cases/res + 派生 flips/tailFails/health）。
+- **改** `GET /api/test/suites`：`hits` 计数排除隔离（已有）+ 返回 `quarantinedCount`。
+
+**验收**：curl——批量评审/隔离写盘正确且幂等；隔离条目从 `evalSuite` 命中消失；history 返回矩阵与 run.json 一致。
+
+### 批 K — 屏 1：库总览增强 + 详情抽屉
+- 行内：`📌 pinned` / 评审态 badge / 健康度徽标（flaky·连败 N 轮·久未执行·隔离中）/ 上次结果圆点 / `rN`。
+- 工具条补齐：模块 / 评审态 / 健康度 三个过滤器 + 导出 xlsx（复用 report-xlsx 通路）。
+- 多选 checkbox + 底部 sticky 批量条：批量确认 / ＋加入套件 / 批量隔离 / 移除。
+- **详情抽屉**：步骤表（content/expected）、执行历史圆点行（含翻转/连败）、rev 变更时间线、隔离说明与恢复、操作区（确认入池 / AI 就地复核【置灰·即将推出】/ 隔离 / 移除）。
+
+**验收**：CDP mock——徽标与原型 `health()` 判定一致；批量操作后库刷新；抽屉 Esc 关闭；0 console error。
+
+### 批 L — 发起回归：复测轮 + 仅已确认 + 隔离计数
+- **改** `POST /api/test/library/run`：入参 `mode: 'full'|'failed-only'`、`approvedOnly?`、`parentRoundId?`；failed-only 取基准轮 fail/partial 集 + pinned；轮次与快照落 `mode`/`parentRoundId`。
+- **改** `GET /api/test/library/rounds`：复测轮附 `mergedPassStr`（合并口径）。
+- **前端** `StartRegressionModal`：模式 radio（全量 / 仅复测上轮失败 N 条 + 📌必跑）+「仅执行已确认用例」toggle + 待确认条数提示 + 预检卡隔离排除计数 + 复测轮红线说明行。
+- **前端** 轮次历史：失败轮直接「复测 N 条」入口；通过率迷你趋势线；环境过滤；快照查看。
+
+**验收**：curl——failed-only 轮圈选 = 基准轮失败集 ∪ pinned；合并口径数字正确。CDP——模式切换条数联动。
+
+### 批 M — 屏 4：轮次报告独立页
+- 新子页签 `report`；轮次下拉切换。
+- 红/绿横幅（`pass/total` + 可发版结论 + 隔离 N 条未计入 + 复测轮合并口径附注）。
+- delta 三卡（较上轮新增失败 / 已修复 / 持续失败），点击即过滤下方列表。
+- 按来源任务分组 + 组头红绿小计；失败行展开：AI 归因 badge、证据缩略图（截图/录像，落 `report/_evidence/`）、「🐞 转缺陷」按钮（调 `/api/test/defect`）。
+- **改** `rounds/detail` API：每条 test 透传 `error/actual/evidence/api`；读取同目录 `verdicts.json` 一并返回。
+
+**验收**：CDP mock——delta 卡数字与 curl 一致；点击卡片过滤正确；证据缩略图可打开。
+
+### 批 N — AI 失败归因
+- **新增** `src/lib/test/rules/regression-verdict.md`（归因 prompt 规则：分类 = 产品缺陷 / 测试用例问题 / 环境问题 / 疑似 flaky）。
+- **新增** `POST /api/test/library/verdict` `{projectPath, roundId}`：读该轮 run.json 的 fail/partial 用例 + 快照 + 近 N 轮该用例历史 → `streamClaude` 透传 SSE，流尾 harvest `@@VERDICT {"id","cls","act","why"}` → 写 `verdicts.json`（AI 只读不写，沿用 recommend 路由的「代码落盘」范式）。
+- 报告页「AI 归因」按钮触发；已有 verdicts 直接展示，可重新归因。
+
+**验收**：dev 无凭证 → 按钮返回 NO_CREDENTIALS 且 UI 明示（如实标注）；harvest 单测覆盖 `@@VERDICT` 解析容错。
+
+### 批 O — 屏 5 对比矩阵 + 屏 6 健康度
+- **矩阵**：行=用例（sticky 首列，按来源任务分组）× 列=轮次；单元格 通过/失败/未执行；行尾「翻转 / 连败」列；「只看有失败的行」开关；单元格点击跳该轮报告。
+- **健康度**：5 张统计卡（库总用例 / 近 N 轮通过率+趋势 / 疑似 flaky / 连续失败 / 隔离区）+ 三队列 tab（flaky / 连败 / 久未跑）+ 隔离区列表（恢复）+ 护栏提示条（隔离占比 >10% 告警）。
+- AI 就地复核 / AI 生成套件条件 → 置灰 + 「即将推出」tooltip。
+
+**验收**：CDP mock——矩阵列数=轮次数、翻转/连败与派生函数一致；队列分类与徽标一致；隔离恢复后重新计入。
+
+### 批 P — 收尾
+- i18n 三文件（`zh.ts` / `en.ts` / `zh-HK.ts`）`test.library.*` / `test.rounds.*` / `test.health.*` / `test.matrix.*` 强类型齐。
+- `npm run test` 全绿 + `npm run test:smoke`；CDP mock 六屏全链路 0 console error。
+- 双文档：`docs/handover/regression-library.md` 增补二/三期章节；`docs/insights/regression-library.md` 增补治理设计理由；三个 README 索引同步。
+- `tech-debt-tracker.md`：AI 就地复核、自然语言转条件、轮次磁盘保留策略、行身份漂移。
+
+## 4. 验证与交付纪律
+1. 每批 `npm run test` → CDP mock 验证；UI 批次加 `npm run test:smoke`。
+2. Worktree 纪律：改动只在 worktree 内；dev server 用 `PORT=3001`；提交前关闭 dev server、清理 untracked 残留；**禁止 push**（用户发起）。
+3. **本地无用户登录体系** → managed 数据为空、AI 执行步必 blocked。所有 AI 相关结论以 mock 验证为准，如实标注；真实链路留打包验收。
+4. Playwright MCP 会往仓库根写 `.playwright-mcp/` 触发 dev 重编译死循环 → CDP 前软链到仓库外，提交前移除。
+5. 批间独立 commit（conventional commits）。
+
+## 5. 风险与回滚
+
+| 风险 | 缓解 |
+|------|------|
+| `depositTask` 继承逻辑写错 → 治理状态被抹 | 批 I 单测优先覆盖「重新入库后 reviewState/quarantine 保留」；`_lib` 缺失=安全默认 |
+| `_lib` 泄漏进 AI 执行 prompt | `buildRunnableCases` 剥离 + 单测断言输出无 `_lib`/`_source` |
+| 跨轮矩阵读 IO 放大（轮次多） | 限流近 20 轮 + 进程内缓存（seq 失效）；单测覆盖缓存命中 |
+| 评审门禁改变既有红线口径 | 明确：`reviewState` **不参与**红线；仅影响「仅执行已确认」开关 |
+| 隔离被滥用掩盖回归 | 横幅强制曝光 + >10% 告警（设计默认 #8） |
+| AI 归因幻觉 | 归因是**建议**不是结论，UI 明示「AI 归因」来源；转缺陷仍走人工确认 |
+| 回滚 | `_lib` 为增量字段（缺失即默认）；新路由/新页签删除即回退二期前行为 |
+
+## 6. 进度跟踪
+
+| 批 | 内容 | 状态 | commit |
+|----|------|------|--------|
+| 计划文档 | 本文 + README 索引 | ✅ 完成 | |
+| 批 I | 数据层：`_lib` 元数据 + 跨轮历史现算 + 单测 | ✅ 完成（+49 单测，0 新失败；顺带修 `writeLibrary` 缺 `seq` 导致同毫秒写入无法区分） | |
+| 批 J | API：评审 / 隔离 / 跨轮历史 | ✅ 完成（curl 对账原型 mock 数据集：健康度六类分类逐条一致；隔离占比护栏实测触发） | |
+| 批 K | 屏 1：库总览增强 + 详情抽屉 | ✅ 完成（CDP：徽标/优先级/pinned/上次结果与原型一致；抽屉 Esc 关闭；批量确认端到端写盘+审计） | |
+| 批 L | 发起回归：复测轮 + 仅已确认 + 隔离计数 | ✅ 完成（范围解析下沉 run-scope.ts，预检 hits ≡ 实跑 total；复测轮合并口径 curl+CDP 双验） | |
+| 批 M | 屏 4：轮次报告独立页 | ✅ 完成（顺带修 media/defect 路由取不到轮次维度产物；中断轮不再伪造发版结论） | |
+| 批 N | AI 失败归因 | ✅ 完成（+19 单测覆盖 @@VERDICT harvest 容错；规则内联避开打包态读不到 .md） | |
+| 批 O | 屏 5 对比矩阵 + 屏 6 健康度 | ✅ 完成（CDP：矩阵 7 列/16 行、翻转连败与派生一致、单元格跳报告；健康度护栏双向可逆） | |
+| 批 P | 收尾：i18n / 单测 / CDP / 双文档 / tracker | ✅ 完成 | |
+
+**二/三期整体状态**：批 I–P 代码全部完成并逐批提交。`npm run test` 1903/2044，**114 条失败与开工前 baseline 完全一致**（better-sqlite3 在 node 下的 ABI 不匹配，非本期引入）；新增单测 71 条。
+
+**待用户发起的验收**：
+1. **打包验收**（mac arm64 + Windows）：登录后跑通一轮真实回归，复核 roundId 产物路径与轮次维度证据。
+2. **真实 AI 失败归因质量**：dev 无登录体系（`NO_CREDENTIALS`），本期以 mock `verdicts.json` 验证读侧与渲染，归因质量未经真实模型检验。
+
+**已知偏差**（如实记录）：
+- `npm run test:smoke` 在本 worktree 跑不了——Next 16 Turbopack 拒绝符号链接的 `node_modules`。改用 `--webpack` 临时起 3000 验证：6 条失败，**回退到开工前提交后失败完全相同**（根因同为 better-sqlite3 ABI）。已记 tech-debt #21。
+- 预检 token 估算仍缺按轮数据源（一期遗留）。
+- 「AI 就地复核」「自然语言转套件条件」按用户决策置灰占位，已记 tech-debt #18/#19。
