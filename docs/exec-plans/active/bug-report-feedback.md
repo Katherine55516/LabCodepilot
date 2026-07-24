@@ -1,7 +1,7 @@
 # 问题反馈(Bug 上报)— 客户端反馈入口 + 服务端管理页
 
 > 创建时间:2026-07-20
-> 最后更新:2026-07-23 · 状态:**S/W/C 已完成,待 E(打包版端到端联调)**
+> 最后更新:2026-07-23 · 状态:**S/W/C 已完成,E 联调进行中(首轮暴露并修复线上 500,待重新部署收尾)**
 > 跨仓库:客户端 = LabCodepilot,服务端 = codeagent-server(服务端章节批准后可拆副本至该仓库 docs/)
 
 ## 目标与范围
@@ -102,7 +102,35 @@ admin web「用户反馈」页(AdminClaims)── 列表/详情/日志下载
 | S(服务端 API) | migration + 模块 + 测试 | pytest 全绿;curl multipart 手测 201 + 文件落盘 | ✅ 2026-07-23(codeagent-server feat/user-feedback 547612d;82 passed;本地 PG+假 JWKS 真服务 curl 六项全过:401/201+UUID 落盘/403/列表/下载字节一致/删除联动) |
 | W(admin web) | Feedback 页 + 菜单 | 本地起 web,列表/下载/删除可用 | ✅ 2026-07-23(4258b70;tsc+vite build 过;浏览器实测列表/抽屉/下载 200/删除 204/过滤) |
 | C(客户端) | Section UI + IPC + 主进程上传 + i18n | 单测全绿;CDP mock 三态;`npm run test` 零回归 | ✅ 2026-07-23(LabCodepilot para;feedback-core 9 单测;全量 1929 pass;浏览器 mock 三态 + 提交 payload/清空验证,console 零报错) |
-| E(联调) | 打包版真实上报一条(dev 无登录体系,真实链路须打包版)→ admin 页看到并下载日志比对字节 | 端到端闭环 | 📋 待做 |
+| E(联调) | 真实客户端上报 → admin 页看到并下载日志比对字节 | 端到端闭环 | 🔄 进行中(2026-07-23 首轮暴露线上 500,已修并在真实镜像上验证;待生产重新部署后收尾) |
+
+### E 首轮结果(2026-07-23)
+
+**跑法**(比"必须打包版"更轻,且覆盖同样的真实链路):隔离数据目录
+(`CLAUDE_GUI_DATA_DIR` 指向 DB 快照 + token 副本,避免污染日常环境)+
+`BACKEND_BASE=https://code-agent.ai-native-lab.com` 启动 electron,
+`--remote-debugging-port` 挂 CDP 直接调 `window.electronAPI.feedback.submit`。
+与打包版的差异仅剩 `app.isPackaged` 分支与版本号。
+
+结果:
+- ✅ 不带日志 → 201(`bbd75a7b-…`,生产库有记录)
+- ❌ 带日志 → **500**。二分定位:未鉴权 3MB 请求体能穿过反代返回 401 →
+  排除反代限制,问题在应用层。
+- **根因**:镜像 `COPY --from=builder /app /app` 产物属 root,容器以非 root 的
+  `app` 用户运行,而 `APP_FEEDBACK_STORAGE_DIR` 默认相对路径落在 `/app` 下 →
+  `mkdir` PermissionError → 未捕获 → 裸 500。已用同构容器复现
+  (`uid=999`,`/app` 属 root → `PermissionError: 'data'`)。
+- **修复**(codeagent-server `d554918`):镜像预建 `/data/feedback-logs` 并
+  chown;compose 显式配 `APP_FEEDBACK_STORAGE_DIR=/data/feedback-logs` + 挂
+  named volume(继承镜像属主,免宿主机 chown);落盘失败改抛
+  `FeedbackStorageError` → 503 + 带 `storage_dir` 的错误日志。
+- **修复验证**(在**真实生产镜像**上,非宿主机 uvicorn):3MB 带日志上报 201 →
+  卷内文件属 `app:app`/3145728 字节 → admin 下载 200 且**字节完全一致** →
+  删除 204 且文件联动清除;另起一个故意不配变量的实例,确认降级为 503 +
+  日志含 `Permission denied: 'data'`,且不带日志的上报仍 201。
+
+**待收尾**:生产 `docker compose up -d --build backend` 后,重跑一次带日志上报,
+并在 admin「用户反馈」页确认记录 + 下载日志。
 
 ## 四、已定决策(用户拍板,2026-07-20)
 
@@ -111,5 +139,13 @@ admin web「用户反馈」页(AdminClaims)── 列表/详情/日志下载
 3. **只传当前 main.log** —— 不做「含旧日志档 main.1-4.log」选项。更早的问题若已轮转出 main.log 则本期取不到,遇到再评估,不预留 UI。
 
 ## 决策日志
+
+- 2026-07-23(E 联调):落盘目录的**部署契约**补齐 —— 需要写盘的数据一律放
+  `/data`(镜像内 chown 给运行用户),不放 `COPY` 进来的只读 `/app`;compose 用
+  named volume 而非 bind mount,理由是前者创建时继承镜像内属主,不需要在宿主机
+  上按容器 uid 手工 chown(代价:`docker compose down -v` 会清空,运维流程需避开
+  `-v`)。同时确立一条口径:**部署配置问题不许表现为裸 500** —— 落盘失败一律
+  转成 503 + 带 `storage_dir` 的结构化错误日志,否则线上只能看到没有上下文的
+  500,定位成本极高。
 
 - 2026-07-20:方案成文并经用户拍板三项(见上「已定决策」)。架构决策:上报者身份以服务端 JWT claims 为准(客户端不传身份)/ 日志走 Electron 主进程读取并 multipart 上传(token 与文件都只在主进程)/ 日志文件服务端落盘不入 DB / 存储文件名用服务端 UUID(防路径注入)。
