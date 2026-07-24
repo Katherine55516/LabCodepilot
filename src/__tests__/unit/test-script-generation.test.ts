@@ -9,6 +9,7 @@ import { ScriptTraceCollector, extractPlaywrightCode, redactTraceText } from '..
 import { artifactPaths } from '../../lib/test/prompts';
 import { validateScriptSource } from '../../lib/test/script-validator';
 import { resolveScriptPlaywrightRuntime, runGeneratedScript } from '../../lib/test/script-runner';
+import { safeRmRecursive } from '../../lib/claude-home-shadow';
 import type { RunJson } from '../../lib/test/reduce';
 
 function run(tests: RunJson['tests'], circuitBroken = false): RunJson {
@@ -195,5 +196,57 @@ describe('回归轮次的脚本生成:run.json 路径必须带 roundId', () => {
 
   it('普通任务不传 roundId,路径与 v1 完全相同', () => {
     assert.equal(artifactPaths('员工信息', 'local').runJson, 'AI_LabTest/report/员工信息/员工信息-local.run.json');
+  });
+});
+
+/**
+ * 回归:Windows 上「运行所选 / 运行全部 / 回归脚本自动跑通」曾把安装包内的 Playwright
+ * 运行时删掉 —— runGeneratedScript 在临时目录建 node_modules/playwright 指向【包内】真实
+ * 的 @playwright/mcp/node_modules/playwright(Windows 用 junction)，跑完 fs.rmSync(dir,
+ * {recursive:true}) 清理时，Node 的递归删除在 Windows 上会穿过 junction 删掉目标里的真实
+ * 文件。表现:首次运行即自毁，之后永远报「未找到 @playwright/mcp 自带的 Playwright 运行时」;
+ * 删到一半被占用中止则残留成 cli.js 还在、lib/ 已空，报「缺失 './lib/program' 模块」。
+ * macOS 用 'dir' symlink 只删链接本身，故完全不受影响 —— 单测也复现不出平台差异，
+ * 因此这里用源码守卫锁住实现方式。
+ */
+describe('script-runner 清理不得穿透链接（Windows junction 数据丢失回归）', () => {
+  it('source guard: 清理必须走 safeRmRecursive，不得 fs.rmSync(dir, {recursive:true})', () => {
+    const src = fs.readFileSync(path.join(process.cwd(), 'src/lib/test/script-runner.ts'), 'utf-8');
+    // 只扫真实代码行 —— 注释里正写着「绝不能用 fs.rmSync(dir, {recursive:true})」，
+    // 连注释一起扫会把这句说明当成违规命中（本测试第一版就栽在这里）。
+    const code = src
+      .split('\n')
+      .filter((line) => !line.trim().startsWith('//') && !line.trim().startsWith('*') && !line.trim().startsWith('/*'))
+      .join('\n');
+    assert.ok(!/fs\.rmSync\(\s*dir\s*,\s*\{[^}]*recursive:\s*true/.test(code),
+      'script-runner 不得对 runner 目录用 fs.rmSync(recursive) —— 在 Windows 上会穿过 junction 删掉安装包内的 playwright 运行时');
+    assert.match(code, /safeRmRecursive\(dir\)/,
+      '清理必须使用 safeRmRecursive()，它 lstat 每个节点、只摘链接不递归进目标');
+  });
+
+  it('safeRmRecursive 摘掉链接但保留目标内容（cli.js + lib/ 完好）', () => {
+    const base = fs.mkdtempSync(path.join(os.tmpdir(), 'runner-cleanup-'));
+    try {
+      // 模拟安装包内的真实 playwright 包
+      const pkg = path.join(base, 'packaged-playwright');
+      fs.mkdirSync(path.join(pkg, 'lib'), { recursive: true });
+      fs.writeFileSync(path.join(pkg, 'cli.js'), "require('./lib/program')");
+      fs.writeFileSync(path.join(pkg, 'lib', 'program.js'), 'module.exports={}');
+
+      // 模拟 runner 临时目录:node_modules/playwright 链接到包内运行时
+      const runner = path.join(base, 'runner');
+      fs.mkdirSync(path.join(runner, 'node_modules'), { recursive: true });
+      fs.symlinkSync(pkg, path.join(runner, 'node_modules', 'playwright'),
+        process.platform === 'win32' ? 'junction' : 'dir');
+      fs.writeFileSync(path.join(runner, 'spec.js'), 'test');
+
+      safeRmRecursive(runner);
+
+      assert.ok(!fs.existsSync(runner), '临时目录必须被清理');
+      assert.ok(fs.existsSync(path.join(pkg, 'cli.js')), '链接目标的 cli.js 必须存活');
+      assert.ok(fs.existsSync(path.join(pkg, 'lib', 'program.js')), "链接目标的 lib/program.js 必须存活（否则报「缺失 './lib/program'」）");
+    } finally {
+      fs.rmSync(base, { recursive: true, force: true });
+    }
   });
 });

@@ -2,6 +2,7 @@ import { spawn } from 'child_process';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
+import { safeRmRecursive } from '../claude-home-shadow';
 import { atomicWriteText, sha256Hex } from './script-artifacts';
 import { resolveBundledHeadlessShell, resolveSystemChrome } from './prompts';
 import type { TraceRedaction } from './script-trace';
@@ -82,20 +83,22 @@ function symlinkRuntime(dir: string, runtime: RuntimeInfo): void {
   }
 }
 
-// 清理临时运行目录。⚠️ 必须先摘掉 node_modules/playwright 这个链接，再删目录树。
+// 清理临时运行目录。⚠️ 绝不能用 fs.rmSync(dir, { recursive: true })。
 //
 // 为什么:symlinkRuntime() 在 Windows 上建的是 junction，指向【安装包内】真实的
-// @playwright/mcp/node_modules/playwright。Node 的 fs.rmSync(recursive) 在 Windows 上
-// 会【穿过 junction 递归删除目标目录里的真实文件】，而 POSIX 的 'dir' symlink 只删链接
-// 本身 —— 所以 macOS 一直正常，Windows 上每跑一次「回归脚本自动跑通」，就把安装包里的
-// playwright 运行时清空一次:首次运行即自毁，之后永远报「未找到 @playwright/mcp 自带的
-// Playwright 运行时」，手动补文件也只能撑到下一次运行。
+// @playwright/mcp/node_modules/playwright。Node 的递归删除在 Windows 上会【穿过 junction
+// 删掉目标目录里的真实文件】，而 POSIX 的 'dir' symlink 只删链接本身 —— 所以 macOS 一直
+// 正常，Windows 上「运行所选 / 运行全部 / 回归脚本自动跑通」(都经 runGeneratedScript)
+// 每跑一次就把安装包里的 playwright 运行时删一次:首次运行即自毁，之后永远报「未找到
+// @playwright/mcp 自带的 Playwright 运行时」;若删到一半被占用中止，则残留成 cli.js 还在
+// 但 lib/ 已空，报「缺失 './lib/program' 模块」。
 //
-// fs.rmSync 对 junction 本身用 unlink 语义（只摘链接、不动目标），故先单独摘再删父目录。
+// 复用 claude-home-shadow.ts 的 safeRmRecursive:仓库此前在 shadow HOME 清理上踩过同一个
+// 坑(注释里的 "shadow-cleanup data-loss bug")，它 lstat 每个节点、只摘链接不递归进目标，
+// 且 detachLink 处理了「Windows junction 上 unlinkSync 会失败、需回退 rmdirSync」这一细节
+// —— 自己手写 rmSync(link, {recursive:false}) 在 junction 上会抛错，进而退化回原 bug。
 function cleanupRunnerDir(dir: string): void {
-  try { fs.rmSync(path.join(dir, 'node_modules', 'playwright'), { recursive: false, force: true }); }
-  catch { /* 链接不存在或已摘除 */ }
-  try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
+  try { safeRmRecursive(dir); } catch { /* best effort */ }
 }
 
 function findHeadlessShell(root: string): string | null {
