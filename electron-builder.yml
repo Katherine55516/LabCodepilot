@@ -91,6 +91,48 @@ extraResources:
   # electron-builder 26.8.1 此时进程退出码仍是 0,极具欺骗性,务必以"是否真生成
   # dmg"为准,不要只看退出码。(白名单时代第一条不复制 .next/node_modules,单独条目
   # 才是必需的;切黑名单后它变成有害重复,故删除。)
+  #
+  # @playwright/mcp 整包(含嵌套 node_modules/playwright + playwright-core)从源
+  # node_modules 再显式复制一份,不依赖 Next.js NFT。
+  #
+  # 为什么必需:next.config.ts 的 outputFileTracingIncludes 里虽有
+  # 'node_modules/@playwright/mcp/**/*',但这条 glob 只在 macOS 构建里把嵌套的
+  # node_modules/playwright(54 个文件,含 cli.js)带进了 standalone;Windows 产物里
+  # 该嵌套目录缺失,导致 src/lib/test/script-runner.ts 的
+  # resolveScriptPlaywrightRuntime() 两个候选路径全部落空 → 抛「未找到 @playwright/mcp
+  # 自带的 Playwright 运行时」,「回归脚本生成后自动跑通」在 Windows 上必失败,而
+  # macOS 一切正常 —— 极易漏测。注意那两个候选在打包态实际指向同一处
+  # (AILAB_RESOURCES_PATH=process.resourcesPath,且 server.js 以
+  # cwd=<resources>/standalone 启动),没有任何容错余地,缺文件即直接报错。
+  #
+  # 依赖本身跨平台一致(package-lock.json 锁定嵌套条目,optional:false / os:any /
+  # cpu:any),所以问题只出在打包复制阶段;从源复制可绕开 NFT 的跨平台 glob 差异。
+  # 与上面 .next/standalone/node_modules/ 那条目标路径重叠属同内容覆盖:该包内无
+  # symlink(不同于 @anthropic-ai/claude-agent-sdk),不会触发上文警告的 EEXIST。
+  # ⚠️ 必须分两条:electron-builder 的 filter "**/*" 不会递归进 node_modules 子目录
+  # (与本文件 files: 段 "!node_modules" 的特殊语义一致)。只写下面第一条时,实测仅
+  # 补进了 @playwright/mcp/README.md 这个顶层文件,嵌套的 node_modules/playwright
+  # 一个文件都没复制 —— 而那恰恰是 Windows 缺、且 script-runner 唯一要找的东西。
+  # 故第二条显式指向嵌套 node_modules(其下子目录名为 playwright/playwright-core,
+  # 不再命中 node_modules 排除规则)。
+  # 自检指标:包内 .../@playwright/mcp/node_modules/playwright 应有 62 个文件
+  # (只靠 NFT 时是 54),且 cli.js 必须存在。
+  - from: node_modules/@playwright/mcp/
+    to: standalone/node_modules/@playwright/mcp/
+    filter: ["**/*"]
+  # ⚠️ 必须排除 .bin:node_modules/.bin/playwright 是指向 ../playwright/cli.js 的
+  # symlink,上面 .next/standalone/node_modules/ 那条已经创建过一次,这里再复制会报
+  # "EEXIST: file already exists, symlink ..." → failedTask=build、dmg 不生成,而
+  # electron-builder 26.8.1 退出码仍是 0(同本文件上方警告,务必以是否真生成 dmg 为准)。
+  # 排除它是安全的:script-runner.ts 用的是 <nested>/cli.js 的绝对路径 spawn,
+  # 从不经过 .bin;且 .bin 本身仍由 standalone 那条带进包。
+  # 注意 find -type f 统计不到 symlink,只看文件数会漏掉这个坑。
+  - from: node_modules/@playwright/mcp/node_modules/
+    to: standalone/node_modules/@playwright/mcp/node_modules/
+    filter:
+      - "**/*"
+      - "!.bin"
+      - "!.bin/**/*"
   - from: .next/standalone/.next/
     to: standalone/.next/
     filter: ["**/*"]

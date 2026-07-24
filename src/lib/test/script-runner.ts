@@ -49,7 +49,20 @@ export function resolveScriptPlaywrightRuntime(): RuntimeInfo {
       : []),
   ];
   const nested = candidates.find((candidate) => fs.existsSync(path.join(candidate, 'cli.js')));
-  if (!nested) throw new Error('未找到 @playwright/mcp 自带的 Playwright 运行时');
+  if (!nested) {
+    // 打包态这两个候选其实指向同一处(AILAB_RESOURCES_PATH=process.resourcesPath,且
+    // server.js 以 cwd=<resources>/standalone 启动),缺文件就直接报错、无容错。原先只抛
+    // 一句话,Windows 上「回归脚本自动跑通」报错时完全看不出是整包没进包还是只丢了嵌套
+    // node_modules,故把探测路径连同父目录实际内容一并带出。
+    const probed = candidates.map((candidate) => {
+      const parent = path.dirname(candidate);
+      let listing: string;
+      try { listing = fs.existsSync(parent) ? (fs.readdirSync(parent).join(', ') || '(空目录)') : '(不存在)'; }
+      catch { listing = '(读取失败)'; }
+      return `  ${path.join(candidate, 'cli.js')}\n    └ ${parent} → ${listing}`;
+    }).join('\n');
+    throw new Error(`未找到 @playwright/mcp 自带的 Playwright 运行时。已探测以下路径:\n${probed}`);
+  }
   let version = 'unknown';
   try { version = JSON.parse(fs.readFileSync(path.join(nested, 'package.json'), 'utf-8')).version || version; } catch { /* ignore */ }
   return { packageRoot: nested, cli: path.join(nested, 'cli.js'), version };
