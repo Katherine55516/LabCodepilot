@@ -237,6 +237,65 @@ module.exports = async function afterPack(context) {
   }
   console.log(`[afterPack] Claude Code SDK binary check passed (${sdkBinariesFound} copies verified)`);
 
+  // ── @playwright/mcp 兜底复制 ────────────────────────────────────────────
+  // 直接往【已打好的产物目录】写,绕开 electron-builder 的 extraResources filter。
+  //
+  // 为什么必须在这里做:src/lib/test/script-runner.ts 的
+  // resolveScriptPlaywrightRuntime() 要 <resources>/standalone/node_modules/
+  // @playwright/mcp/node_modules/playwright/cli.js,缺了就抛「未找到 @playwright/mcp
+  // 自带的 Playwright 运行时」,「回归脚本自动跑通」直接失败。这个文件走过两层 glob,
+  // 每层都在 Windows 上漏掉它、而 macOS 正常:
+  //   1. Next.js NFT 的 outputFileTracingIncludes —— 已由 bundle-chromium.mjs 的
+  //      syncMcpPackage() 在 .next/standalone 里补齐(实测 Windows 日志确认 cli.js 在);
+  //   2. electron-builder 的 extraResources filter —— 补齐后的 standalone 复制进包时
+  //      又丢了(用户实测:.next/standalone 有 cli.js,win-unpacked 里没有,那层只剩
+  //      .bin/playwright/playwright-core 三个目录)。electron-builder 的 "**/*" 不递归
+  //      进 node_modules 子目录,专门加的嵌套条目在 macOS 生效、Windows 不生效。
+  // 故第三道防线放在 afterPack:此时产物目录已定型,用 fs.cpSync 直接写,不经过任何
+  // filter/glob,跨平台行为一致。
+  //
+  // 跳过 .bin:其中的 playwright 在 POSIX 上是指向 ../playwright/cli.js 的 symlink,
+  // 已由前面的复制带进包;重复创建会报 EEXIST。
+  const mcpSrc = path.join(__dirname, '..', 'node_modules', '@playwright', 'mcp');
+  if (!fs.existsSync(mcpSrc)) {
+    const msg = `[afterPack] FATAL: 源 @playwright/mcp 不存在: ${mcpSrc}(请先 npm ci)`;
+    console.error(msg);
+    throw new Error(msg);
+  }
+
+  let mcpSynced = 0;
+  for (const root of resourceRoots) {
+    const dest = path.join(root, 'standalone', 'node_modules', '@playwright', 'mcp');
+    if (!fs.existsSync(path.join(root, 'standalone'))) continue;
+    fs.cpSync(mcpSrc, dest, {
+      recursive: true,
+      force: true,
+      dereference: false,
+      filter: (from) => !path.relative(mcpSrc, from).split(path.sep).includes('.bin'),
+    });
+    // 自检:cli.js 是 script-runner 唯一要找的文件。此处是打包链路最后一道关口,
+    // 缺了就等于本次打包产出一个「装上去才发现回归脚本跑不通」的坏包,故 fail loud。
+    const cliJs = path.join(dest, 'node_modules', 'playwright', 'cli.js');
+    if (!fs.existsSync(cliJs)) {
+      const nested = path.join(dest, 'node_modules');
+      const msg =
+        `[afterPack] FATAL: 复制后仍缺 ${cliJs}\n` +
+        `  该层实际内容: ${fs.existsSync(nested) ? fs.readdirSync(nested).join(', ') : '(目录不存在)'}`;
+      console.error(msg);
+      throw new Error(msg);
+    }
+    console.log(`[afterPack] @playwright/mcp 已就位: ${dest}(cli.js 已确认)`);
+    mcpSynced++;
+  }
+
+  if (mcpSynced === 0) {
+    const msg =
+      `[afterPack] FATAL: 未找到任何 standalone 目录,@playwright/mcp 没能进包。\n` +
+      `  已查 resources 根: ${resourceRoots.join(', ')}`;
+    console.error(msg);
+    throw new Error(msg);
+  }
+
   // Note: Ad-hoc code signing moved to scripts/after-sign.js (afterSign hook).
   // afterSign runs after electron-builder's own signing step (which is a no-op
   // with CSC_IDENTITY_AUTO_DISCOVERY=false), ensuring the signature is the last
