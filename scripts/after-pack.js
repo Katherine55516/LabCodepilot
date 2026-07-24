@@ -63,72 +63,97 @@ module.exports = async function afterPack(context) {
   const projectDir = process.cwd();
   console.log('[afterPack] Rebuilding better-sqlite3 for Electron ABI...');
 
-  try {
-    // Use @electron/rebuild via npx (it's a dependency of electron-builder)
-    const rebuildCmd = `npx electron-rebuild -f -o better-sqlite3 -v ${electronVersion} -a ${archName}`;
-    console.log(`[afterPack] Running: ${rebuildCmd}`);
-    execSync(rebuildCmd, {
-      cwd: projectDir,
-      stdio: 'inherit',
-      timeout: 120000,
-    });
-    console.log('[afterPack] Rebuild completed successfully');
-  } catch (err) {
-    console.error('[afterPack] Failed to rebuild better-sqlite3:', err.message);
-    // Try alternative: use @electron/rebuild programmatically
-    try {
-      const { rebuild } = require('@electron/rebuild');
-      await rebuild({
-        buildPath: projectDir,
-        electronVersion: electronVersion,
-        arch: archName,
-        onlyModules: ['better-sqlite3'],
-        force: true,
-      });
-      console.log('[afterPack] Rebuild via @electron/rebuild API succeeded');
-    } catch (err2) {
-      console.error('[afterPack] @electron/rebuild API also failed:', err2.message);
-      throw new Error('Cannot rebuild better-sqlite3 for Electron ABI');
-    }
-  }
-
-  // Step 2: Verify the rebuilt .node file
   const rebuiltSource = path.join(
     projectDir, 'node_modules', 'better-sqlite3', 'build', 'Release', 'better_sqlite3.node'
   );
+  // electron-rebuild compiles in-place under the project's own node_modules.
+  // The resulting binary carries the Electron ABI, which plain Node (dev server,
+  // `tsx --test`) cannot dlopen — so `npm run dev` and `npm run test` would break
+  // for the rest of the developer's session unless we put the Node-ABI build back.
+  // Stash it here and restore in the `finally` below, once it has been copied
+  // into the packaged resources.
+  const nodeAbiBackup = rebuiltSource + '.node-abi-backup';
 
-  if (!fs.existsSync(rebuiltSource)) {
-    throw new Error(`[afterPack] Rebuilt better_sqlite3.node not found at ${rebuiltSource}`);
+  // A leftover backup means a previous run was killed between rebuild and
+  // restore, so the current binary is the Electron one — restore before stashing
+  // again, otherwise we would snapshot the polluted state as the "original".
+  if (fs.existsSync(nodeAbiBackup)) {
+    console.log('[afterPack] Found stale Node-ABI backup from an interrupted run; restoring it first');
+    fs.copyFileSync(nodeAbiBackup, rebuiltSource);
+  } else if (fs.existsSync(rebuiltSource)) {
+    fs.copyFileSync(rebuiltSource, nodeAbiBackup);
   }
 
-  const sourceStats = fs.statSync(rebuiltSource);
-  console.log(`[afterPack] Rebuilt .node file: ${rebuiltSource} (${sourceStats.size} bytes, mtime: ${sourceStats.mtime.toISOString()})`);
-
-  // Step 3: Find and replace all better_sqlite3.node in standalone resources.
-  // Built from the dynamically-resolved resourceRoots above.
+  // Built from the dynamically-resolved resourceRoots above. Declared out here
+  // because the diagnostic branch after the try/finally reports on them too.
   const searchRoots = resourceRoots.map(r => path.join(r, 'standalone'));
-
   let replaced = 0;
 
-  function walkAndReplace(dir) {
-    if (!fs.existsSync(dir)) return;
-    const entries = fs.readdirSync(dir, { withFileTypes: true });
-    for (const entry of entries) {
-      const fullPath = path.join(dir, entry.name);
-      if (entry.isDirectory()) {
-        walkAndReplace(fullPath);
-      } else if (entry.name === 'better_sqlite3.node') {
-        const beforeSize = fs.statSync(fullPath).size;
-        fs.copyFileSync(rebuiltSource, fullPath);
-        const afterSize = fs.statSync(fullPath).size;
-        console.log(`[afterPack] Replaced ${fullPath} (${beforeSize} -> ${afterSize} bytes)`);
-        replaced++;
+  try {
+    try {
+      // Use @electron/rebuild via npx (it's a dependency of electron-builder)
+      const rebuildCmd = `npx electron-rebuild -f -o better-sqlite3 -v ${electronVersion} -a ${archName}`;
+      console.log(`[afterPack] Running: ${rebuildCmd}`);
+      execSync(rebuildCmd, {
+        cwd: projectDir,
+        stdio: 'inherit',
+        timeout: 120000,
+      });
+      console.log('[afterPack] Rebuild completed successfully');
+    } catch (err) {
+      console.error('[afterPack] Failed to rebuild better-sqlite3:', err.message);
+      // Try alternative: use @electron/rebuild programmatically
+      try {
+        const { rebuild } = require('@electron/rebuild');
+        await rebuild({
+          buildPath: projectDir,
+          electronVersion: electronVersion,
+          arch: archName,
+          onlyModules: ['better-sqlite3'],
+          force: true,
+        });
+        console.log('[afterPack] Rebuild via @electron/rebuild API succeeded');
+      } catch (err2) {
+        console.error('[afterPack] @electron/rebuild API also failed:', err2.message);
+        throw new Error('Cannot rebuild better-sqlite3 for Electron ABI');
       }
     }
-  }
 
-  for (const root of searchRoots) {
-    walkAndReplace(root);
+    // Step 2: Verify the rebuilt .node file
+    if (!fs.existsSync(rebuiltSource)) {
+      throw new Error(`[afterPack] Rebuilt better_sqlite3.node not found at ${rebuiltSource}`);
+    }
+
+    const sourceStats = fs.statSync(rebuiltSource);
+    console.log(`[afterPack] Rebuilt .node file: ${rebuiltSource} (${sourceStats.size} bytes, mtime: ${sourceStats.mtime.toISOString()})`);
+
+    // Step 3: Find and replace all better_sqlite3.node in standalone resources.
+    function walkAndReplace(dir) {
+      if (!fs.existsSync(dir)) return;
+      const entries = fs.readdirSync(dir, { withFileTypes: true });
+      for (const entry of entries) {
+        const fullPath = path.join(dir, entry.name);
+        if (entry.isDirectory()) {
+          walkAndReplace(fullPath);
+        } else if (entry.name === 'better_sqlite3.node') {
+          const beforeSize = fs.statSync(fullPath).size;
+          fs.copyFileSync(rebuiltSource, fullPath);
+          const afterSize = fs.statSync(fullPath).size;
+          console.log(`[afterPack] Replaced ${fullPath} (${beforeSize} -> ${afterSize} bytes)`);
+          replaced++;
+        }
+      }
+    }
+
+    for (const root of searchRoots) {
+      walkAndReplace(root);
+    }
+  } finally {
+    if (fs.existsSync(nodeAbiBackup)) {
+      fs.copyFileSync(nodeAbiBackup, rebuiltSource);
+      fs.unlinkSync(nodeAbiBackup);
+      console.log('[afterPack] Restored the Node-ABI better_sqlite3.node in node_modules');
+    }
   }
 
   if (replaced > 0) {

@@ -116,6 +116,7 @@ function toSdkMcpConfig(
         if (config.headers && Object.keys(config.headers).length > 0) {
           sseConfig.headers = config.headers;
         }
+        if (config.alwaysLoad) sseConfig.alwaysLoad = true;
         result[name] = sseConfig;
         break;
       }
@@ -132,6 +133,7 @@ function toSdkMcpConfig(
         if (config.headers && Object.keys(config.headers).length > 0) {
           httpConfig.headers = config.headers;
         }
+        if (config.alwaysLoad) httpConfig.alwaysLoad = true;
         result[name] = httpConfig;
         break;
       }
@@ -147,6 +149,7 @@ function toSdkMcpConfig(
           args: config.args,
           env: config.env,
         };
+        if (config.alwaysLoad) stdioConfig.alwaysLoad = true;
         result[name] = stdioConfig;
         break;
       }
@@ -343,6 +346,9 @@ export async function generateTextViaSdk(params: {
   system: string;
   prompt: string;
   abortSignal?: AbortSignal;
+  /** Auto-abort deadline; defaults to 60s. Long-form generations (multi-file scripts) need more. */
+  timeoutMs?: number;
+  outputFormat?: { type: 'json_schema'; schema: Record<string, unknown> };
 }): Promise<string> {
   const resolved = resolveForClaudeCode(undefined, {
     providerId: params.providerId,
@@ -360,11 +366,13 @@ export async function generateTextViaSdk(params: {
     params.abortSignal.addEventListener('abort', () => abortController.abort());
   }
 
-  // Auto-timeout after 60s to prevent indefinite hangs
-  const timeoutId = setTimeout(() => abortController.abort(), 60_000);
+  // Auto-timeout to prevent indefinite hangs
+  const timeoutMs = params.timeoutMs ?? 60_000;
+  const timeoutId = setTimeout(() => abortController.abort(), timeoutMs);
 
   // Buffer subprocess stderr so a CLI crash surfaces its real cause (the SDK's
-  // thrown Error has no stderr property). Attached to errors below.
+  // thrown Error has no stderr property). Attached to errors below, and its
+  // tail feeds interpretSdkResult's no-result diagnostics.
   const stderrCollector = createStderrCollector();
 
   const queryOptions: Options = {
@@ -376,7 +384,12 @@ export async function generateTextViaSdk(params: {
     settingSources: resolved.settingSources as Options['settingSources'],
     systemPrompt: params.system,
     maxTurns: 1,
-    stderr: (data: string) => stderrCollector.append(data),
+    // 走流式（与对话主路径一致）。非流式时把大 prompt 发出后连接【长时间静默】等整个响应，
+    // 复杂用例（如 Dashboard 渲染）模型生成久，这段静默里企业代理会把"死连接"掐断 → 响应回来
+    // 时鉴权上下文丢失 → 网关 401 → CLI 报 "Not logged in"（用户实测：对话流式 OK、生成非流式
+    // 却"未登录"，小用例生成快躲过、TC-034 生成久必中）。includePartialMessages 让 token 持续
+    // 回流、连接一直活跃，代理不再掐它。最终结果仍从 result 消息取，stream_event 增量被循环忽略。
+    includePartialMessages: true,
     // Text-only single-turn contract: strip ALL tools. With tools available,
     // a tool-eager model (e.g. qwen3.7-max asked to translate a long doc)
     // spends turn 1 on a tool call and maxTurns(1) kills the run with
@@ -385,34 +398,52 @@ export async function generateTextViaSdk(params: {
     // settingSources) out of the subprocess.
     tools: [],
     strictMcpConfig: true,
+    stderr: (data: string) => stderrCollector.append(data),
   };
 
   if (params.model) {
     queryOptions.model = params.model;
+  }
+  if (params.outputFormat) {
+    queryOptions.outputFormat = params.outputFormat;
   }
 
   // pathToClaudeCodeExecutable is intentionally not set — the SDK auto-discovers
   // the native binary from the bundled platform subpackage
   // (@anthropic-ai/claude-agent-sdk-<platform>-<arch>).
 
-  let resultText = '';
+  let resultMessage: SDKResultMessage | null = null;
+  const assistantChunks: string[] = [];
+  const seenTypes = new Set<string>();
   try {
     const conversation = query({
       prompt: params.prompt,
       options: queryOptions,
     });
 
-    // Iterate through all messages; the last one with type 'result' has the answer
+    // Keep the whole result message rather than just its `result` field, and
+    // keep the assistant text as a fallback: the CLI can exit 0 without ever
+    // emitting a result message (see interpretSdkResult).
     for await (const msg of conversation) {
-      if (msg.type === 'result' && 'result' in msg) {
-        resultText = (msg as SDKResultSuccess).result || '';
+      seenTypes.add(msg.type);
+      if (msg.type === 'result') {
+        resultMessage = msg as SDKResultMessage;
+      } else if (msg.type === 'assistant') {
+        const content = (msg as { message?: { content?: unknown } }).message?.content;
+        if (Array.isArray(content)) {
+          for (const block of content) {
+            if (block && typeof block === 'object' && (block as { type?: string }).type === 'text') {
+              assistantChunks.push(String((block as { text?: string }).text ?? ''));
+            }
+          }
+        }
       }
     }
   } catch (err) {
     clearTimeout(timeoutId);
     setup.shadow.cleanup();
     if (abortController.signal.aborted && !(params.abortSignal?.aborted)) {
-      const timeoutErr = new Error('SDK query timed out after 60s');
+      const timeoutErr = new Error(`SDK query timed out after ${Math.round(timeoutMs / 1000)}s`);
       attachCollectedStderr(timeoutErr, stderrCollector);
       throw timeoutErr;
     }
@@ -423,13 +454,82 @@ export async function generateTextViaSdk(params: {
   clearTimeout(timeoutId);
   setup.shadow.cleanup();
 
-  if (!resultText) {
-    const emptyErr = new Error('SDK query returned no result');
-    attachCollectedStderr(emptyErr, stderrCollector);
-    throw emptyErr;
+  try {
+    return interpretSdkResult(resultMessage, !!params.outputFormat, {
+      assistantText: assistantChunks.join(''),
+      seenTypes: [...seenTypes],
+      stderrTail: stderrCollector.snapshot().slice(-1000),
+    });
+  } catch (err) {
+    // classifyError reads `error.stderr` for CLI startup diagnostics (e.g.
+    // Windows missing Git shell) — keep the property on interpret failures too.
+    attachCollectedStderr(err, stderrCollector);
+    throw err;
   }
+}
 
-  return resultText;
+/** What the stream yielded besides the terminal result message. */
+export interface SdkStreamTrace {
+  /** Concatenated text blocks of every assistant message, in order. */
+  assistantText: string;
+  /** Distinct `msg.type` values seen, for diagnostics when nothing usable arrived. */
+  seenTypes: string[];
+  /** Tail of the CLI subprocess's stderr — where it explains why it bailed. */
+  stderrTail: string;
+}
+
+/**
+ * Turn what the SDK stream produced into the text `generateTextViaSdk` promises,
+ * or throw an error that names the real reason.
+ *
+ * Exported for unit tests. Three traps live here, each hit in production:
+ *  1. `outputFormat: json_schema` answers arrive in `structured_output`, not `result`.
+ *  2. The `error_*` subtypes carry no `result` at all — the reason is in `errors`.
+ *  3. The CLI can exit 0 having emitted NO result message (the SDK's
+ *     getProcessExitError returns undefined for code 0, so nothing is thrown and
+ *     the stream just ends). Observed when the CLI fails to parse the model's
+ *     text against --json-schema. The assistant text is still usable, so prefer
+ *     it over failing; callers parse loose JSON out of it.
+ */
+export function interpretSdkResult(
+  resultMessage: SDKResultMessage | null,
+  hasOutputFormat: boolean,
+  trace: SdkStreamTrace = { assistantText: '', seenTypes: [], stderrTail: '' },
+): string {
+  if (!resultMessage) {
+    if (trace.assistantText.trim()) return trace.assistantText;
+    const seen = trace.seenTypes.length ? trace.seenTypes.join(', ') : 'none';
+    const stderr = trace.stderrTail.trim();
+    throw new Error(
+      `SDK query ended without a result message (messages seen: ${seen})`
+      + (stderr ? `; CLI stderr: ${stderr}` : ''),
+    );
+  }
+  // error_max_turns / error_during_execution / error_max_budget_usd /
+  // error_max_structured_output_retries — these carry no `result`; the reason
+  // lives in `errors`.
+  if (resultMessage.subtype !== 'success') {
+    const detail = resultMessage.errors?.join('; ');
+    throw new Error(`SDK query failed (${resultMessage.subtype})${detail ? `: ${detail}` : ''}`);
+  }
+  const success = resultMessage as SDKResultSuccess;
+  // With outputFormat: json_schema the validated object lands in
+  // structured_output and `result` may be empty. Re-serialize it so callers
+  // keep the "returns text" contract.
+  if (hasOutputFormat && success.structured_output != null) {
+    return JSON.stringify(success.structured_output);
+  }
+  // A `success` subtype can still be an error envelope: the CLI reports e.g.
+  // "Not logged in · Please run /login" as `result` with is_error set. Without
+  // this, that sentence is handed back as if the model had written it.
+  if (success.is_error) {
+    throw new Error(`SDK query failed: ${success.result || 'unknown error'}`);
+  }
+  if (success.result) return success.result;
+  // Schema requested, structured output missing, `result` empty — the raw
+  // assistant text is the last place the answer can be.
+  if (trace.assistantText.trim()) return trace.assistantText;
+  throw new Error('SDK query returned no result');
 }
 
 /**

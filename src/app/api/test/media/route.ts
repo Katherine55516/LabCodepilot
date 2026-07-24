@@ -8,7 +8,7 @@ export const runtime = 'nodejs';
 /**
  * 测试证据媒体服务（报告查看器的证据图片灯箱 + 录像内联回放）。
  *
- * GET ?projectPath&taskName&env&file=TC-001.png → 流式返回该证据文件。
+ * GET ?projectPath&taskName&env&file=TC-001.png[&roundId=RND-…] → 流式返回该证据文件。
  * 移植 ai-lab-test-framework 的 `ailab-media://` 协议思路，Next 改用 API route：
  *  - **严格白名单**到项目的 `AI_LabTest/report/_evidence/{task}-{env}/`，只取 basename
  *    平铺查找，杜绝 `../` 路径穿越。
@@ -31,18 +31,21 @@ export async function GET(req: Request): Promise<Response> {
   const taskName = url.searchParams.get('taskName');
   const env = url.searchParams.get('env') || 'local';
   const file = url.searchParams.get('file');
+  // 回归轮次的证据落 _evidence/{task}-{env}-{roundId}/（v2 起产物按轮隔离）。缺省 = 旧的
+  // 平铺目录，普通任务与 v1 产物零影响。
+  const roundId = url.searchParams.get('roundId') || undefined;
   if (!projectPath || !taskName || !file) {
     return new Response('projectPath, taskName, file are required', { status: 400 });
   }
-  // taskName / env are NOT basename-stripped like `file` — they flow straight into
-  // the evidence root, so a traversal value (../) would let the root escape the
+  // taskName / env / roundId are NOT basename-stripped like `file` — they flow straight
+  // into the evidence root, so a traversal value (../) would let the root escape the
   // project. Reject non-segment values up front.
-  if (isUnsafeSegment(taskName) || isUnsafeSegment(env)) {
-    return new Response('invalid taskName or env', { status: 400 });
+  if (isUnsafeSegment(taskName) || isUnsafeSegment(env) || (roundId && isUnsafeSegment(roundId))) {
+    return new Response('invalid taskName, env or roundId', { status: 400 });
   }
 
   // 白名单根 = 项目的证据目录；只取 basename（证据在该目录平铺），杜绝路径穿越。
-  const evidenceRoot = path.resolve(projectPath, artifactPaths(taskName, env).evidenceDir);
+  const evidenceRoot = path.resolve(projectPath, artifactPaths(taskName, env, roundId).evidenceDir);
   const target = path.join(evidenceRoot, path.basename(file));
   if (target !== evidenceRoot && !target.startsWith(evidenceRoot + path.sep)) {
     return new Response('forbidden', { status: 403 });

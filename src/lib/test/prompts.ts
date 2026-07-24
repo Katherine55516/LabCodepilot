@@ -35,15 +35,24 @@ function loadRule(name: string): string | null {
   }
 }
 
-/** 产物路径约定（镜像框架；相对项目根）。 */
-export function artifactPaths(taskName: string, env: string = 'local') {
+/**
+ * 产物路径约定（镜像框架；相对项目根）。
+ *
+ * `roundId`（v2 回归轮次）：仅回归用例库的轮次化执行传入——执行/报告产物改落
+ * `report/{taskName}/{roundId}/` 子目录、证据落 `_evidence/{taskName}-{env}-{roundId}`，
+ * 同环境多轮互不覆盖（与 rounds.ts roundArtifactPaths 口径一致）。普通任务不传，
+ * 路径与 v1 完全相同。requirement/cases 与轮次无关（聚合输入共享最新一份）。
+ */
+export function artifactPaths(taskName: string, env: string = 'local', roundId?: string) {
   const base = 'AI_LabTest';
+  const reportDir = roundId ? `${base}/report/${taskName}/${roundId}` : `${base}/report/${taskName}`;
+  const evidenceSeg = roundId ? `${taskName}-${env}-${roundId}` : `${taskName}-${env}`;
   return {
     requirement: `${base}/requirements/${taskName}-需求.md`,
     cases: `${base}/testCase/.data/${taskName}.cases.json`,
-    runJson: `${base}/report/${taskName}/${taskName}-${env}.run.json`,
-    report: `${base}/report/${taskName}/${taskName}-${env}.md`,
-    evidenceDir: `${base}/report/_evidence/${taskName}-${env}`,
+    runJson: `${reportDir}/${taskName}-${env}.run.json`,
+    report: `${reportDir}/${taskName}-${env}.md`,
+    evidenceDir: `${base}/report/_evidence/${evidenceSeg}`,
   };
 }
 
@@ -257,8 +266,16 @@ function executionPrompt(
   baseUrl?: string,
   hasLoginState = false,
   loginCredentials?: { username: string; password: string },
+  roundId?: string,
+  scriptDone?: { ids: string[]; total: number },
 ): string {
-  const p = artifactPaths(taskName, env);
+  const p = artifactPaths(taskName, env, roundId);
+  // 回归轮次·脚本重放优先:阶段 A 已由平台直接运行沉淀的 Playwright 脚本执行了部分用例并
+  // 产出判定(先进流,归约器同 id 先到先得,即使模型误跑也覆盖不掉)。这里显式声明排除,
+  // 让 AI 只执行剩余用例——省 token 也防重复写数据。
+  const scriptDoneBlock = scriptDone && scriptDone.ids.length
+    ? `\n⚠️ **本轮为脚本重放优先执行**：\`${p.cases}\` 共 ${scriptDone.total} 条用例，其中以下 ${scriptDone.ids.length} 条**已由平台的自动化脚本执行完毕并产出判定**——你【禁止执行它们、禁止输出它们的 @@CASE_START/@@RESULT】：\n${scriptDone.ids.map((id) => `  - ${id}`).join('\n')}\n你只执行**剩余 ${scriptDone.total - scriptDone.ids.length} 条**（cases.json 中除上述 id 外的全部用例）。覆盖自检（下方第 8 条）按剩余口径执行：你输出的 @@RESULT 行数必须等于 ${scriptDone.total - scriptDone.ids.length}；进度行「▶ 用例 N/总数」的总数仍写 ${scriptDone.total}，N 从 ${scriptDone.ids.length + 1} 开始顺延。\n`
+    : '';
   const rule = ruleBlock(
     '测试执行规范',
     loadRule('test-execution'),
@@ -269,7 +286,7 @@ function executionPrompt(
 环境：${env}
 ${baseUrl ? `被测地址：${baseUrl}（平台已在执行前完成可达性探测、确认可达才会进入本步——**无需再用 curl/请求工具反复探活**；若执行中途发现地址不可达，最多重试探活 3 次即停止并在结果中说明，**切勿无限重试**。）` : '（未配置被测地址：若无法确定目标系统地址或地址不可达，相应用例判 blocked 并在结果中说明，不要臆造结果。）'}
 输入产物（请先 Read）：测试用例 ${p.cases}
-
+${scriptDoneBlock}
 ⚠️ **本步为非交互自动化执行（交互端无人应答）**：**严禁使用 \`AskUserQuestion\`，也严禁以任何方式向用户提问 / 等待用户输入 / 暂停等待确认**——问了永远不会有人回答，会让执行永久卡死。目标环境已由平台指定为 \`${env}\`，直接使用，**不要再反问用户选环境**。
 
 ${loginHandlingBlock(hasLoginState, loginCredentials)}
@@ -280,7 +297,7 @@ ${rule}
 1. Read ${p.cases}，逐条用例：用浏览器工具（browser_navigate / browser_click / browser_type / browser_fill_form / browser_snapshot / browser_wait_for / browser_take_screenshot）满足前置条件（如登录）→ 执行测试操作 → 对照用例「预期结果」判定四态。前置若卡在**非被测的第三方依赖**（三方 OAuth 回调 / 验证码 / 外部 SDK / 无关外部 API），可用 \`browser_route\` 受控桩绕过（见《测试执行规范》§1.1：先真实后桩、被测接口绝不桩、桩须在 actual 留痕、用完 browser_unroute 清理）。
 2. **录像（每条用例一段）**：每条用例开始操作前调 \`browser_start_video({filename:"{用例ID}.webm"})\` 开录，用例结束（判完四态、补完证据后）调 \`browser_stop_video\` 停录。**pass 用例：录像不写进 evidence**（平台会清理未被引用的录像）；**fail / partial 用例：把 \`{用例ID}.webm\` 写进该用例 evidence**。录像与截图都落 \`${p.evidenceDir}\`。
 3. **失败用例采集接口信息**：对 fail / partial 用例，先用 \`browser_network_requests\` 列出本页请求、定位与失败现象相关的关键请求，再用 \`browser_network_request\` 取其完整 方法 / URL / 状态码 / 请求体 / 响应体；请求体、响应体过长时各自截断到约 ≤4000 字符。pass / blocked 用例无需采集。
-4. **每条用例先打印进度** \`▶ 用例 N/总数：{标题}\`；结束**输出单行 JSON**：\`@@RESULT {"id":"...","status":"pass|fail|partial|blocked","actual":"观察现象","evidence":["TC-xxx.png","TC-xxx.webm"],"error":"失败/阻塞原因，pass留空","api":{"method":"POST","url":"/api/...","status":200,"requestBody":"...","responseBody":"..."}}\`（单行、严格 JSON、内层引号用「」或转义）。\`api\` **仅 fail / partial 且定位到关键请求时给出**，pass 省略该字段；\`evidence\` 含截图与（fail/partial 时）录像文件名。
+4. **每条用例在任何浏览器工具调用之前**先输出两行：机器标记 \`@@CASE_START {"id":"TC-xxx","index":N}\`（单行严格 JSON，id 必须与 cases.json 完全一致）以及可读进度 \`▶ 用例 N/总数：{标题}\`。结束**输出单行 JSON**：\`@@RESULT {"id":"...","status":"pass|fail|partial|blocked","actual":"观察现象","evidence":["TC-xxx.png","TC-xxx.webm"],"error":"失败/阻塞原因，pass留空","api":{"method":"POST","url":"/api/...","status":200,"requestBody":"...","responseBody":"..."}}\`（单行、严格 JSON、内层引号用「」或转义）。\`api\` **仅 fail / partial 且定位到关键请求时给出**，pass 省略该字段；\`evidence\` 含截图与（fail/partial 时）录像文件名。\`@@CASE_START\` 只用于平台把本条真实 Playwright 工具轨迹归属到对应用例，不得省略、不得在工具调用后补写。⚠️ **两个标记行都必须裸写**：以 \`@@\` 开头、整行只有标记与 JSON，**不得加粗（\`**\`）、不得套反引号或代码块、不得在 JSON 后补任何文字**——平台按行解析，包裹会让该行判定丢失。
 5. **四态**：pass=预期完全出现；fail=预期明确未出现且可复现（疑似应用缺陷，保留事实不放水）；partial=部分满足；blocked=前置/路径/登录态/地址不可达（**不是应用 bug**）。判 blocked 前：若挡路的是**非被测前置依赖**，先按 §1.1 受控桩重试；仅当**被测接口/地址/账号本身**无法建立才判 blocked。桩过的用例 \`actual\` 须注明「已桩 mock <依赖>」，被桩部分不计入验证。
 6. 绝不修改业务源码与配置，只在被测系统页面内操作；截图与录像存到 \`${p.evidenceDir}\`。
 7. **不要自己写汇总文件**：每条用例的 \`@@RESULT\` 行就是唯一事实来源，平台会据此**确定性归约**出 \`${p.runJson}\`（计数 / 四态 / 环境错误重分类 / 401 熔断由平台代码计算，不由你汇总）。你只需保证**每条用例都输出一行规范的 @@RESULT**。
@@ -289,8 +306,13 @@ ${rule}
 完成后用一句话总结：用例总数 N、已输出 @@RESULT 行数、以及四态计数（pass/fail/partial/blocked）；若行数 < N 必须显式说明哪些用例未覆盖。`;
 }
 
-function reportPrompt(taskName: string, env: string): string {
-  const p = artifactPaths(taskName, env);
+function reportPrompt(taskName: string, env: string, roundId?: string): string {
+  const p = artifactPaths(taskName, env, roundId);
+  // 回归轮次报告(v2):run.json 带 taskCounts(按来源任务小计,快照 idMap 反解)。报告主体
+  // 必须按来源任务分节,让「哪个功能的回归挂了」一眼可见,替代 runId 平铺。
+  const roundBlock = roundId
+    ? `\n⚠️ **本报告为回归轮次报告（轮次 ${roundId}）**：run.json 含 \`taskCounts\`（按来源任务的四态小计）。报告主体的「模块结果」与「失败明细」**必须按【来源任务】分节**（每节标题 = 来源任务名 + 该任务 x/y 通过小计，直接采用 taskCounts 数据），不要按用例 id 平铺；概要须列出各来源任务的通过小计一览。\n`
+    : '';
   const rule = ruleBlock(
     '测试报告规范',
     loadRule('test-report'),
@@ -302,7 +324,7 @@ function reportPrompt(taskName: string, env: string): string {
 输入产物（请先 Read）：
 - 执行结果（权威事实，四态计数/逐条状态以此为准，不要自行改数）：${p.runJson}
 - 测试用例（含 TC↔REQ 引用、断言级别）：${p.cases}
-
+${roundBlock}
 ⚠️ 本步**不读需求文档**：需求覆盖矩阵只依据**测试用例中的 REQ 引用**，不要去找/读需求文档，也不要臆造未在用例中出现的需求。
 
 ${rule}
@@ -350,6 +372,13 @@ export interface BuildStepOptions {
    * 时用于让执行智能体在登录页自动填充并提交登录。缺省 → 不注入凭据（走 hasLoginState 分支）。
    */
   loginCredentials?: { username: string; password: string };
+  /** 回归轮次号（v2，仅回归用例库任务）：执行/报告产物落 report/{task}/{roundId}/ 子目录。 */
+  roundId?: string;
+  /**
+   * 执行步·脚本重放优先(回归轮次):阶段 A 已由平台脚本执行完毕的用例 id 列表 + 本轮总数。
+   * 传入后执行 prompt 声明「禁止执行这些 id、只跑剩余、编号顺延」。缺省 = 全部由 AI 执行。
+   */
+  scriptDone?: { ids: string[]; total: number };
 }
 
 export interface BuiltStep {
@@ -377,9 +406,9 @@ export function buildStep(step: TestStep, opts: BuildStepOptions): BuiltStep {
     case 'cases':
       return withNote({ systemPrompt: SYS.cases, prompt: casesPrompt(taskName, { reuseImported: opts.reuseImported, requirementSourcePath: opts.requirementSourcePath }), needsPlaywright: false }, note);
     case 'execution':
-      return withNote({ systemPrompt: SYS.execution, prompt: executionPrompt(taskName, env, opts.baseUrl, opts.hasLoginState, opts.loginCredentials), needsPlaywright: true }, note);
+      return withNote({ systemPrompt: SYS.execution, prompt: executionPrompt(taskName, env, opts.baseUrl, opts.hasLoginState, opts.loginCredentials, opts.roundId, opts.scriptDone), needsPlaywright: true }, note);
     case 'report':
-      return withNote({ systemPrompt: SYS.report, prompt: reportPrompt(taskName, env), needsPlaywright: false }, note);
+      return withNote({ systemPrompt: SYS.report, prompt: reportPrompt(taskName, env, opts.roundId), needsPlaywright: false }, note);
   }
 }
 
@@ -398,7 +427,7 @@ export function buildStep(step: TestStep, opts: BuildStepOptions): BuiltStep {
  * 动态扫描(不写死 revision,升级 playwright 后仍生效):
  *   <resources>/ms-playwright/chromium_headless_shell-<rev>/chrome-headless-shell-<plat>/chrome-headless-shell[.exe]
  */
-function resolveBundledHeadlessShell(): string | null {
+export function resolveBundledHeadlessShell(): string | null {
   const resourcesPath = process.env.AILAB_RESOURCES_PATH;
   if (!resourcesPath) return null;
   const browsersDir = path.join(resourcesPath, 'ms-playwright');
@@ -505,6 +534,11 @@ export function buildPlaywrightMcp(
   return {
     type: 'stdio',
     command: process.execPath,
+    // Claude Code 2.1.203 起启用 tool search 时 MCP 工具默认延迟加载，模型须先
+    // ToolSearch 命中才能用。执行步的浏览器工具是硬前置 —— 实测(2026-07-11,
+    // 3.2.1 打包版)网关模型在执行步反复 ToolSearch 空转、0/4 无进展,约 8 分钟后
+    // 被 SDK 停滞看门狗 abort。强制全量进 turn-1 prompt,绕开延迟加载。
+    alwaysLoad: true,
     args: [
       shim,
       '--browser', 'chromium',

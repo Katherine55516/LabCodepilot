@@ -50,6 +50,13 @@ extraResources:
       # 误判塞进 standalone 的构建产物。漏了它会把整个 Windows 包(~700MB,含 .exe
       # + portable.zip)塞进 macOS DMG,体积暴涨 3 倍多;CI 跨平台构建同样受影响。
       - "!release-win"
+      # !ms-playwright-bundle —— scripts/bundle-chromium.mjs 装在仓库根的 chromium
+      # headless shell(~196MB),被 NFT 误判扫进 standalone。它已由下方专门的
+      # `from: ms-playwright-bundle/ to: ms-playwright/` 条目复制到 resources/ms-playwright,
+      # 打包态经 AILAB_RESOURCES_PATH 定位(electron/main.ts 无条件注入该 env),
+      # 故 standalone 下这份是纯重复。script-runner.ts 里 process.cwd()/ms-playwright-bundle
+      # 那条 fallback 只在 dev 态(cwd=仓库根)生效,打包态先被 resolveBundledHeadlessShell 命中。
+      - "!ms-playwright-bundle"
       - "!src"
       - "!electron"
       - "!apps"

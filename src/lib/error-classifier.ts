@@ -15,6 +15,7 @@ export type ClaudeErrorCategory =
   | 'AUTH_STYLE_MISMATCH'
   | 'RATE_LIMITED'
   | 'NETWORK_UNREACHABLE'
+  | 'STREAM_DISCONNECTED'
   | 'ENDPOINT_NOT_FOUND'
   | 'MODEL_NOT_AVAILABLE'
   | 'CONTEXT_TOO_LONG'
@@ -254,6 +255,25 @@ const ERROR_PATTERNS: ErrorPattern[] = [
     userMessage: () => 'Your Claude Code CLI version is too old.',
     actionHint: () => 'Update to the latest version: npm update -g @anthropic-ai/claude-code',
     retryable: false,
+  },
+
+  // ── Stream disconnected mid-response ──
+  // Claude Code CLI surfaces upstream/gateway stream drops as
+  // "API Error: Connection closed mid-response. The response above may be
+  // incomplete." — observed systematically with managed-gateway models
+  // (e.g. Qwen3.7-Plus) on long test-execution streams. Without this
+  // pattern it fell through to UNKNOWN ("An unexpected error occurred").
+  // 中文文案:与 IMAGES_NOT_SUPPORTED 快速通道同理,新增分支默认中文
+  // (产品面向 zh-CN 用户;测试面板直接显示 userMessage 原文)。
+  {
+    category: 'STREAM_DISCONNECTED',
+    // 三个变体均来自 CLI 2.1.203 二进制原文(strings 实证):
+    // "Connection closed mid-response" / "connection closed mid-call" /
+    // "connection dropped mid-request"。
+    patterns: ['closed mid-response', 'closed mid-call', 'dropped mid-request'],
+    userMessage: (ctx) => `模型响应中途连接被断开${ctx.providerName ? `（${ctx.providerName}）` : ''}。`,
+    actionHint: () => '通常是网关或服务商在长响应上超时断流（偶发，或该模型侧的问题）。请重试；若同一模型反复出现，请换用其他模型，或联系管理员检查网关的流式超时配置。',
+    retryable: true,
   },
 
   // ── Network unreachable ──
@@ -550,6 +570,9 @@ function buildRecoveryActions(category: ClaudeErrorCategory, ctx: ErrorContext):
     case 'RATE_LIMITED':
       actions.push({ label: 'Retry', action: 'retry' });
       if (meta?.pricingUrl) actions.push({ label: 'Upgrade Plan', url: meta.pricingUrl });
+      break;
+    case 'STREAM_DISCONNECTED':
+      actions.push({ label: 'Retry', action: 'retry' });
       break;
     case 'MODEL_NOT_AVAILABLE':
     case 'ENDPOINT_NOT_FOUND':

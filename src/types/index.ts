@@ -811,6 +811,15 @@ export interface MCPServerConfig {
   headers?: Record<string, string>;
   /** Persistent enable/disable. undefined or true = enabled; false = disabled. */
   enabled?: boolean;
+  /**
+   * true = 该 server 的全部工具始终进入 turn-1 prompt，绝不被 tool search 延迟。
+   * Claude Code 2.1.203 起启用 tool search 时 MCP 工具默认延迟加载
+   * (defer_loading)，模型须先 ToolSearch 命中才能使用；对"必须立刻可用"的
+   * 工具集（如测试执行注入的 Playwright）延迟会导致模型反复 ToolSearch 空转。
+   * 映射为 SDK McpServerConfig.alwaysLoad（= API defer_loading:false）。
+   * 副作用：会话启动会阻塞等待该 server 连接（上限 5s）。
+   */
+  alwaysLoad?: boolean;
 }
 
 export interface MCPConfig {
@@ -1652,4 +1661,279 @@ export interface UpdateTestAccountSystemRequest {
   project_root?: string;
   environments?: TestSystemEnvironments;
   sort_order?: number;
+}
+
+// ==========================================
+// Test Usage Stats (测试模块使用统计)
+// ==========================================
+// 测试工作台使用统计：追加式事件流水（DB 表 test_stats_events）+ 聚合响应契约。
+// 口径要点：采纳率以首轮 AI 生成为基线；准确度只算人工已复核条次并同示复核覆盖率；
+// 401 熔断（circuitBroken）轮次整轮排除；展示层只给指标、不列具体用例
+// （底层事件仍按用例粒度 id+hash 记录，是自动 diff 与误判归类的基础）。
+// 事件字典 / 冻结口径 / 分期见 docs/exec-plans/active/test-usage-stats.md。
+
+export type TestStatsEventType =
+  | 'task_created'        // 新建任务（前端）
+  | 'task_deleted'        // 删除任务（前端）
+  | 'step_completed'      // 四步任一步 SSE 正常收尾（服务端）
+  | 'cases_generated'     // cases 步 / revise 写出 cases.json（服务端，含 id+hash 快照）
+  | 'cases_edited'        // 用例手动编辑保存（服务端）
+  | 'cases_approved'      // 用户批准用例；diff 由服务端对首轮快照计算（前端触发）
+  | 'execution_completed' // 执行步收尾、run.json 落盘（服务端）
+  | 'report_generated'    // 报告步收尾（服务端）
+  | 'report_reviewed'     // 人工复核单条结论（前端）
+  | 'report_review_bulk'; // 一键全部标记准确（前端）
+
+/** 与 lib/test/prompts.ts 的 TestStep 对齐；独立定义避免 types → lib 反向依赖。 */
+export type TestStatsStep = 'requirement' | 'cases' | 'execution' | 'report';
+
+/** 复核结论：准确 / 误报（AI 判失败实际正常）/ 漏报（AI 判通过实际有问题）/ 程度不符。 */
+export type TestReviewVerdict = 'accurate' | 'false_fail' | 'missed_fail' | 'severity_mismatch';
+
+/** 用例身份快照：id + 内容 hash（不存用例内容本身）。 */
+export interface TestStatsCaseKey {
+  id: string;
+  hash: string;
+}
+
+/** POST /api/test/stats 单条事件输入；payload 为开放 JSON，字段随 event_type 而异。 */
+export interface TestStatsEventInput {
+  eventType: TestStatsEventType;
+  projectPath: string;
+  taskId: string;
+  taskName?: string;
+  env?: string;
+  payload?: Record<string, unknown>;
+}
+
+/** DB 行视图：test_stats_events（payload 已解析；createdAt 为 UTC 'YYYY-MM-DD HH:MM:SS'）。 */
+export interface TestStatsEvent {
+  id: string;
+  eventType: TestStatsEventType;
+  projectPath: string;
+  taskId: string;
+  taskName: string;
+  env: string | null;
+  payload: Record<string, unknown>;
+  schemaVersion: number;
+  createdAt: string;
+}
+
+/** 四态计数（与 lib/test/reduce.ts 的 RunCounts 对齐，独立定义避免反向依赖）。 */
+export interface TestStatsCounts {
+  total: number;
+  pass: number;
+  fail: number;
+  partial: number;
+  blocked: number;
+}
+
+/** 用例采纳汇总。比率为 0-1 小数；分母为 0 时为 null。 */
+export interface TestStatsAdoption {
+  /** 计入分母的任务数：AI 生成流（source=imported_requirement）且已批准 */
+  eligibleTasks: number;
+  /** 首轮 AI 生成用例数合计（采纳基线） */
+  generated: number;
+  kept: number;
+  modified: number;
+  removed: number;
+  userAdded: number;
+  /** (kept+modified)/generated */
+  adoptionRate: number | null;
+  keptRate: number | null;
+  /** 返工轮数合计（每任务 cases 生成轮数 - 1，聚合所有 AI 生成流任务） */
+  reworkRounds: number;
+}
+
+/** 报告复核汇总。totalResults 为可复核条次（排除熔断轮）。 */
+export interface TestStatsReview {
+  totalResults: number;
+  reviewed: number;
+  coverage: number | null;
+  accurate: number;
+  falseFail: number;
+  missedFail: number;
+  severityMismatch: number;
+  accuracy: number | null;
+}
+
+export interface TestStatsExecution {
+  /** 执行轮次总数（含熔断轮） */
+  runs: number;
+  /** 四态合计（排除熔断轮） */
+  results: TestStatsCounts;
+  passRate: number | null;
+  avgCaseDurationMs: number | null;
+  /** 单用例时长分布（固定桶：<15s / 15–30s / 30–60s / 1–2m / >2m） */
+  durationBuckets: { label: string; count: number }[];
+  /** 各步骤平均用时（step_completed.durationMs 均值） */
+  stepAvgDurationsMs: Partial<Record<TestStatsStep, number>>;
+}
+
+export interface TestStatsWeeklyPoint {
+  /** 周一（UTC）YYYY-MM-DD */
+  weekStart: string;
+  tasksCreated: number;
+  casesKept: number;
+  casesModified: number;
+  casesRemoved: number;
+  reviewAccuracy: number | null;
+}
+
+export interface TestStatsTaskRow {
+  taskId: string;
+  taskName: string;
+  projectPath: string;
+  createdAt: string | null;
+  /** imported_requirement / imported_cases / both；无 task_created 事件时为 null */
+  source: string | null;
+  /** 是否计入采纳率（AI 生成流） */
+  adoptionEligible: boolean;
+  generated: number | null;
+  adopted: number | null;
+  modified: number | null;
+  removed: number | null;
+  executionRuns: number;
+  latestResults: TestStatsCounts | null;
+  latestCircuitBroken: boolean;
+  latestDurationMs: number | null;
+  reviewed: number;
+  reviewTotal: number;
+  accuracy: number | null;
+  deleted: boolean;
+}
+
+export interface TestStatsGlobal {
+  range: { from: string | null; to: string | null };
+  tasks: { total: number; aiFlow: number; importedCases: number; deleted: number };
+  adoption: TestStatsAdoption;
+  execution: TestStatsExecution;
+  review: TestStatsReview;
+  weekly: TestStatsWeeklyPoint[];
+  taskRows: TestStatsTaskRow[];
+}
+
+/** 任务详情 · 节点轮次（指标做行、轮次做列的数据源；只含指标不含具体用例）。 */
+export interface TestStatsNodeRound {
+  step: TestStatsStep;
+  round: number;
+  at: string | null;
+  env: string | null;
+  model: string | null;
+  providerId: string | null;
+  durationMs: number | null;
+  status: string | null;
+  /** cases 轮：本轮生成用例数 */
+  caseCount: number | null;
+  /** cases 轮：本轮生成集 vs 最终批准集的 diff（无批准快照时为 null） */
+  adoption: { rate: number | null; kept: number; modified: number; removed: number; added: number } | null;
+  /** execution 轮 */
+  results: TestStatsCounts | null;
+  passRate: number | null;
+  circuitBroken: boolean;
+  runHash: string | null;
+  /** report 轮：按 runHash 关联的复核进度 */
+  reviewed: number | null;
+  accuracy: number | null;
+}
+
+export interface TestStatsTaskDetail {
+  taskId: string;
+  taskName: string;
+  projectPath: string;
+  createdAt: string | null;
+  source: string | null;
+  rounds: TestStatsNodeRound[];
+  adoption: {
+    generated: number;
+    kept: number;
+    modified: number;
+    removed: number;
+    userAdded: number;
+    adoptionRate: number | null;
+    reworkRounds: number;
+  } | null;
+  review: TestStatsReview;
+}
+
+/** 模型使用与效果行。归因：采纳率→首轮用例设计模型；准确度/通过率/时长→执行模型。 */
+export interface TestStatsModelRow {
+  model: string;
+  tasks: number;
+  executionRuns: number;
+  adoptionGenerated: number;
+  adoptionKeptModified: number;
+  adoptionRate: number | null;
+  results: TestStatsCounts;
+  passRate: number | null;
+  reviewed: number;
+  accurate: number;
+  accuracy: number | null;
+  coverage: number | null;
+  avgCaseDurationMs: number | null;
+  /** 样本量小（执行轮 <3 或复核 <10），前端提示低置信度 */
+  smallSample: boolean;
+}
+
+/* ============ 回归测试统计（文件态聚合层的 UI 输出契约） ============
+ * 功能测试统计走 test_stats_events 事件溯源、跨项目「本机」口径；回归统计走
+ * AI_LabTest/ 下的文件态（回归轮次.json + 每轮 run.json + 回归套件.json + 回归用例库.json），
+ * 单项目口径。两条管线互不污染。计算实现与单测在 src/lib/test/regression-stats.ts。 */
+
+/** 周趋势点（ISO 周一 UTC 分桶，与功能统计 stats.ts 同口径）。 */
+export interface RegressionWeeklyPoint {
+  /** 'YYYY-MM-DD'，该周周一（UTC）。 */
+  weekStart: string;
+  /** 当周 mode='full' 的已执行轮次数（含 done/partial/aborted，排除 running）。 */
+  roundsFull: number;
+  /** 当周 mode='failed-only' 的重跑轮次数。 */
+  roundsFailedOnly: number;
+  /** 当周用例执行条次之和（优先取每轮 run.json 记录数并排除 circuitBroken 轮，退化取 round.counts.total）。 */
+  caseExecutions: number;
+}
+
+/** 脚本重放 vs AI 执行点（每轮一条，仅取近 N 个已执行且非熔断轮）。 */
+export interface RegressionScriptPoint {
+  roundId: string;
+  /** 轴标签（`#序号`，序号为该轮在已执行轮中的升序位次）。 */
+  label: string;
+  scriptPass: number;
+  scriptFail: number;
+  aiPass: number;
+  aiFail: number;
+}
+
+/** 套件明细行。'builtin' = 内置「全量」；覆盖率 = caseCount/libraryTotal。 */
+export interface RegressionSuiteRow {
+  name: string;
+  type: 'builtin' | 'static' | 'query';
+  /** 该套件对当前库求值命中的用例数（内置「全量」= 库内非隔离条目数）。 */
+  caseCount: number;
+  /** 分母：库内非隔离条目总数。 */
+  libraryTotal: number;
+  /** 该套件被执行的轮次数（suiteName 匹配、排除 running）。 */
+  runCount: number;
+  /** 最近一轮（非熔断、done/partial）的通过率 0-1；无有效轮 → null。 */
+  latestPassRate: number | null;
+  /** 最近一轮通过串，如 "8/10"；无 → null。 */
+  latestPassStr: string | null;
+  /** 各已收口轮 finishedAt−startedAt 均值（ms）；无 → null。 */
+  avgDurationMs: number | null;
+  /** 各有 run.json 摘要且非熔断轮的 脚本占比（via='script'/total）均值 0-1；无 → null。 */
+  replayRatio: number | null;
+}
+
+/** 回归统计 · 聚合输出（GET /api/test/regression-stats 的 data）。 */
+export interface RegressionStats {
+  /** 当前项目目录名（面板标题曝光单项目口径用）。 */
+  projectName: string;
+  /** 窗口内已执行轮次总数（排除 running）。 */
+  totalRounds: number;
+  /** run.json 摘要读取的轮次上限（性能护栏，超出的更早轮不参与 run.json 相关口径）。 */
+  runReadLimit: number;
+  weekly: RegressionWeeklyPoint[];
+  scriptVsAi: RegressionScriptPoint[];
+  suites: RegressionSuiteRow[];
+  /** 是否有任何可展示数据（轮次/套件/库任一非空）。空态据此判定。 */
+  hasData: boolean;
 }

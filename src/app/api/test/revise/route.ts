@@ -4,6 +4,7 @@ import { streamClaude } from '@/lib/claude-client';
 import { predictNativeRuntime } from '@/lib/runtime';
 import { artifactPaths } from '@/lib/test/prompts';
 import { isUnsafeSegment } from '@/lib/test/path-safety';
+import { observeStream, recordCasesGenerated } from '@/lib/test/stats-recorder';
 
 // Side-effect import registers the agent runtimes (see run/route.ts for why).
 void predictNativeRuntime;
@@ -39,6 +40,9 @@ export async function POST(req: Request): Promise<Response> {
     const instruction: string = typeof body.instruction === 'string' ? body.instruction.trim() : '';
     const model: string | undefined = body.model;
     const providerId: string | undefined = body.providerId;
+    // 使用统计的任务身份；旧前端不带 → 跳过埋点（见 stats-recorder 纪律注释）
+    const taskId: string | null =
+      typeof body.taskId === 'string' && body.taskId.trim() ? body.taskId.trim().slice(0, 128) : null;
 
     if (!projectPath || !instruction) {
       return new Response(JSON.stringify({ error: 'projectPath and instruction are required' }), { status: 400, headers: { 'Content-Type': 'application/json' } });
@@ -75,6 +79,7 @@ ${jsonNote}
 
     const abortController = new AbortController();
     req.signal.addEventListener('abort', () => abortController.abort());
+    const reviseStartMs = Date.now();
     const stream = streamClaude({
       prompt,
       sessionId: `test-revise-${step}-${taskName}`,
@@ -85,7 +90,17 @@ ${jsonNote}
       bypassPermissions: true,
       autoTrigger: true,
     });
-    return new Response(stream, {
+    // 使用统计：用例修订轮 = 一次新的 cases_generated（round 自增），干净收尾才记；
+    // 修订不算整步重跑，刻意不记 step_completed（口径见执行计划决策日志）。
+    // 需求修订不进统计。无 taskId 时保持原样直通。
+    const finalStream =
+      taskId && step === 'cases'
+        ? observeStream(stream, {
+            aborted: () => req.signal.aborted,
+            onCleanDone: () => recordCasesGenerated({ taskId, projectPath, taskName, sinceMs: reviseStartMs, model }),
+          })
+        : stream;
+    return new Response(finalStream, {
       headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' },
     });
   } catch (error) {

@@ -108,6 +108,8 @@ interface ElectronAuthAPI {
     | { ok: true; usage: UsageInfo }
     | { ok: false; status?: number; kind?: 'network'; error: string }
   >;
+  /** 打开测试模块时触发后台用量上报；fire-and-forget，主进程异步处理。 */
+  uploadTestUsage: () => Promise<{ ok: boolean }>;
   onChange: (callback: (state: AuthSnapshot) => void) => () => void;
 }
 
@@ -242,6 +244,26 @@ interface ElectronAPI {
     openFolder: () => Promise<string>;
     /** Absolute path of the log directory. */
     getPath: () => Promise<string>;
+  };
+  /**
+   * 问题反馈上报（设置页「问题反馈」）。主进程读 main.log + 登录 token 组
+   * multipart 上报账号后端；身份以服务端 JWT claims 为准，客户端不上送。
+   */
+  feedback?: {
+    submit: (payload: { message: string; includeLog: boolean }) => Promise<
+      | { ok: true; id?: string }
+      | {
+          ok: false;
+          error:
+            | 'invalid-message'
+            | 'not-logged-in'
+            | 'network'
+            | 'rate-limited'
+            | 'too-large'
+            | 'server';
+          status?: number;
+        }
+    >;
   };
   bridge?: {
     isActive: () => Promise<boolean>;

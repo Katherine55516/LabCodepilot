@@ -9,7 +9,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { harvestRecommend, harvestRecommendDetailed, applyRecommend } from "../../app/api/test/cases/recommend/route";
+import { harvestRecommend, harvestRecommendDetailed, applyRecommend } from "../../lib/test/recommend";
 
 let dir: string;
 beforeEach(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), "recommend-")); });
