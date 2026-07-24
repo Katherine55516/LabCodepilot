@@ -82,6 +82,22 @@ function symlinkRuntime(dir: string, runtime: RuntimeInfo): void {
   }
 }
 
+// 清理临时运行目录。⚠️ 必须先摘掉 node_modules/playwright 这个链接，再删目录树。
+//
+// 为什么:symlinkRuntime() 在 Windows 上建的是 junction，指向【安装包内】真实的
+// @playwright/mcp/node_modules/playwright。Node 的 fs.rmSync(recursive) 在 Windows 上
+// 会【穿过 junction 递归删除目标目录里的真实文件】，而 POSIX 的 'dir' symlink 只删链接
+// 本身 —— 所以 macOS 一直正常，Windows 上每跑一次「回归脚本自动跑通」，就把安装包里的
+// playwright 运行时清空一次:首次运行即自毁，之后永远报「未找到 @playwright/mcp 自带的
+// Playwright 运行时」，手动补文件也只能撑到下一次运行。
+//
+// fs.rmSync 对 junction 本身用 unlink 语义（只摘链接、不动目标），故先单独摘再删父目录。
+function cleanupRunnerDir(dir: string): void {
+  try { fs.rmSync(path.join(dir, 'node_modules', 'playwright'), { recursive: false, force: true }); }
+  catch { /* 链接不存在或已摘除 */ }
+  try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* best effort */ }
+}
+
 function findHeadlessShell(root: string): string | null {
   if (!root || !fs.existsSync(root)) return null;
   const executable = process.platform === 'win32' ? 'chrome-headless-shell.exe' : 'chrome-headless-shell';
@@ -199,13 +215,13 @@ export async function runGeneratedScript(opts: ScriptRunnerOptions): Promise<Scr
     }, timeoutMs);
     child.on('error', (error) => {
       clearTimeout(timer);
-      try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
+      cleanupRunnerDir(dir);
       resolve({ ok: false, exitCode: null, output: redactTraceText(`${output}\n${error.message}`, redactions), timedOut });
     });
     child.on('close', (code) => {
       clearTimeout(timer);
       const clean = redactTraceText(output, redactions);
-      try { fs.rmSync(dir, { recursive: true, force: true }); } catch { /* ignore */ }
+      cleanupRunnerDir(dir);
       resolve({ ok: code === 0 && !timedOut, exitCode: code, output: clean, timedOut });
     });
   });
