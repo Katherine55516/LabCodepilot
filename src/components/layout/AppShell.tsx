@@ -29,6 +29,8 @@ import { initTurnNotifications } from '@/lib/turn-notifications';
 import { useGlobalSearchShortcut } from '@/hooks/useGlobalSearchShortcut';
 import { GlobalSearchDialog } from './GlobalSearchDialog';
 import { InlineTestingPanel } from '@/components/test/InlineTestingPanel';
+import { SettingsDialog } from '@/components/settings/SettingsDialog';
+import { LAST_NON_SETTINGS_PATH_KEY } from '@/lib/settings-route';
 
 const SPLIT_SESSIONS_KEY = "codepilot:split-sessions";
 const SPLIT_ACTIVE_COLUMN_KEY = "codepilot:split-active-column";
@@ -122,6 +124,16 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   //     })
   //     .catch(() => {});
   // }, []);
+
+  // 记录用户当前待着的页面,供 /settings 兼容层关掉后跳回(见 lib/settings-route.ts)。
+  useEffect(() => {
+    if (!pathname || pathname.startsWith('/settings')) return;
+    try {
+      sessionStorage.setItem(LAST_NON_SETTINGS_PATH_KEY, pathname + window.location.search);
+    } catch {
+      // sessionStorage 不可用 —— 兼容层会回落到 /chat
+    }
+  }, [pathname]);
 
   // Listen for open-setup-center events
   useEffect(() => {
@@ -704,6 +716,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           <FeatureAnnouncementDialog />
           <Toaster />
           <GlobalSearchDialog open={searchOpen} onOpenChange={setSearchOpen} />
+          {/* 设置弹窗 —— 全局唯一,由 'open-settings' 事件唤起(侧栏齿轮 / 各处深链) */}
+          <SettingsDialog />
           {setupOpen && (
             <SetupCenter
               onClose={() => setSetupOpen(false)}

@@ -44,6 +44,7 @@ import { FolderPicker } from "@/components/chat/FolderPicker";
 import { useAssistantWorkspace } from "@/hooks/useAssistantWorkspace";
 import { AssistantPromoCard } from "@/components/chat/ChatEmptyState";
 import { UserMenu } from "@/components/account/UserMenu";
+import { openSettings } from "@/components/settings/SettingsDialog";
 import {
   formatRelativeTime,
   groupSessionsByProject,
@@ -1000,28 +1001,24 @@ export function ChatListPanel({ open, onToggle, width, hasUpdate, readyToInstall
           (测试/文生图 已上移到切换栏下方,按 tab 绑定 — 2026-07 侧边栏改版) */}
       <div className="shrink-0 px-3 py-2 flex items-center gap-1">
         <UserMenu />
-        <Link href="/settings" className="shrink-0">
-          <Button
-            variant="ghost"
-            size="icon"
-            className={`relative h-9 w-9 ${
-              pathname.startsWith("/settings")
-                ? "bg-accent text-accent-foreground"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-            title={t('nav.settings' as TranslationKey)}
-            aria-label={t('nav.settings' as TranslationKey)}
-          >
-            <Gear size={16} weight={pathname.startsWith("/settings") ? "fill" : "regular"} />
-            {(hasUpdate || readyToInstall) && (
-              <span
-                className={`absolute top-1.5 right-1.5 h-2 w-2 rounded-full ${
-                  readyToInstall ? "bg-primary" : "bg-primary animate-pulse"
-                }`}
-              />
-            )}
-          </Button>
-        </Link>
+        {/* 设置是弹窗不是路由 —— 直接开弹窗,不动底层路由(用户停在当前会话上) */}
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => openSettings()}
+          className="relative h-9 w-9 shrink-0 text-muted-foreground hover:text-foreground"
+          title={t('nav.settings' as TranslationKey)}
+          aria-label={t('nav.settings' as TranslationKey)}
+        >
+          <Gear size={16} />
+          {(hasUpdate || readyToInstall) && (
+            <span
+              className={`absolute top-1.5 right-1.5 h-2 w-2 rounded-full ${
+                readyToInstall ? "bg-primary" : "bg-primary animate-pulse"
+              }`}
+            />
+          )}
+        </Button>
       </div>
 
       {/* Folder Picker Dialog */}
