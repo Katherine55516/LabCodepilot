@@ -38,6 +38,15 @@ contextBridge.exposeInMainWorld('electronAPI', {
       images?: { name: string; type: string; data: ArrayBuffer }[];
     }) => ipcRenderer.invoke('feedback:submit', payload),
   },
+  // 技能市场（内部）— codeagent-server Skills 商店。token 在主进程,这里只透传参数。
+  // Phase 0: probe/list/detail;install/update/uninstall 随 Phase 2 加入。
+  skillsStore: {
+    probe: () => ipcRenderer.invoke('skills-store:probe'),
+    list: (params?: { keyword?: string; page?: number; pageSize?: number }) =>
+      ipcRenderer.invoke('skills-store:list', params),
+    detail: (skillId: string, opts?: { withContent?: boolean }) =>
+      ipcRenderer.invoke('skills-store:detail', skillId, opts),
+  },
   install: {
     checkPrerequisites: () => ipcRenderer.invoke('install:check-prerequisites'),
     start: () => ipcRenderer.invoke('install:start'),

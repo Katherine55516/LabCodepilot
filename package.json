@@ -120,6 +120,7 @@
     "uuid": "^13.0.0",
     "ws": "^8.19.0",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
+    "yauzl": "^3.4.0",
     "zod": "^4.3.6"
   },
   "optionalDependencies": {
@@ -139,6 +140,7 @@
     "@types/react-syntax-highlighter": "^15.5.13",
     "@types/uuid": "^10.0.0",
     "@types/ws": "^8.18.1",
+    "@types/yauzl": "^3.4.0",
     "concurrently": "^9.2.1",
     "electron": "^40.2.1",
     "electron-builder": "^26.8.1",

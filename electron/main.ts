@@ -82,6 +82,9 @@ import {
   registerGsdIpc,
 } from './gsd-installer';
 
+// 技能市场（内部）— codeagent-server Skills 商店 BFF 的主进程代理。
+import { registerSkillsStoreIpc } from './skills-store';
+
 // Vendor-bundled AI_LabTest plugin — synced to ~/.claude/plugins/external_plugins/
 // on first launch (default disabled) and version drift. See electron/ailab-installer.ts.
 import {
@@ -1524,6 +1527,11 @@ app.whenReady().then(async () => {
     const iconPath = getIconPath();
     app.dock.setIcon(nativeImage.createFromPath(iconPath));
   }
+
+  // --- 技能市场（内部）：codeagent-server Skills 商店 BFF 的主进程代理 ---
+  // 登录 token 只在主进程,renderer 经 IPC 拿结构化结果。
+  // 方案见 docs/exec-plans/active/skills-store-internal.md。
+  registerSkillsStoreIpc(ipcMain);
 
   // --- Vendor-bundled GSD: sync (fire-and-forget, never blocks startup) ---
   registerGsdIpc(ipcMain);
