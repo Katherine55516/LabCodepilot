@@ -125,7 +125,10 @@ export function GalleryDetail({
           {t('gallery.imageDetail' as TranslationKey)}
         </DialogTitle>
 
-        <div className="flex flex-row h-full">
+        {/* min-h-0 是关键:DialogContent 是 grid,grid item 默认 min-height:auto,
+            提示词一长右侧栏就把这一行撑出对话框,下载/删除被顶到屏幕外(右侧栏自己的
+            overflow-y-auto 因此从来没机会生效)。夹住高度后滚动条才会按需出现。 */}
+        <div className="flex flex-row h-full min-h-0 overflow-hidden">
           {/* Left: Media preview */}
           <div className="relative w-[70%] shrink-0 bg-black">
             <div className="absolute inset-0 flex items-center justify-center">
@@ -175,7 +178,7 @@ export function GalleryDetail({
           </div>
 
           {/* Right: Info panel */}
-          <div className="flex-1 min-w-0 border-l border-border/50 overflow-y-auto p-6 space-y-5">
+          <div className="flex-1 min-w-0 min-h-0 border-l border-border/50 overflow-y-auto p-6 space-y-5">
             {/* Favorite button */}
             <Button
               variant="ghost"
