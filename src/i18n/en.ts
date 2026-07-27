@@ -869,6 +869,7 @@ const en = {
   'chatList.importFromCli': 'Import from Claude Code',
   'chatList.addProjectFolder': 'New Project',
   'chatList.threads': 'Threads',
+  'chatList.projects': 'Projects',
   'chatList.showMore': 'Show {count} more',
   'chatList.showLess': 'Show less',
 

@@ -768,7 +768,8 @@ export function ChatListPanel({ open, onToggle, width, hasUpdate, readyToInstall
       {/* Section title + add folder button (fixed, not scrolling) */}
       <div className="flex items-center justify-between px-5 pt-2 pb-1.5 shrink-0">
         <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground/60">
-          {t('chatList.threads')}
+          {/* 研发按项目组织会话,标题叫「项目列表」;办公不绑项目文件夹,仍是「对话列表」 */}
+          {activeTab === 'dev' ? t('chatList.projects') : t('chatList.threads')}
         </span>
         {/* 「新建项目」是研发专属(办公不绑项目文件夹,E3) */}
         {activeTab === 'dev' && (

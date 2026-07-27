@@ -868,6 +868,7 @@ const zh: Record<TranslationKey, string> = {
   'chatList.importFromCli': '从 Claude Code 导入',
   'chatList.addProjectFolder': '新建项目',
   'chatList.threads': '对话列表',
+  'chatList.projects': '项目列表',
   'chatList.showMore': '展开更多（{count} 条）',
   'chatList.showLess': '收起',
 

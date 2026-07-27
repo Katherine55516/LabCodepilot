@@ -877,6 +877,7 @@ const zhHK: Record<TranslationKey, string> = {
   'chatList.importFromCli': '從 Claude Code 導入',
   'chatList.addProjectFolder': '新建項目',
   'chatList.threads': '對話列表',
+  'chatList.projects': '項目列表',
   'chatList.showMore': '展開更多（{count} 條）',
   'chatList.showLess': '收起',
 
