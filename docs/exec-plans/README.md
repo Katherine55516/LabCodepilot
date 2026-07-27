@@ -77,6 +77,7 @@
 | active/btw-side-question.md | `/btw` 会话内临时问答浮层（对标 Claude Code CLI /btw）：无状态端点 native generateText（无工具/不取锁/不落库）+ 前端 `/btw <arg>` 解析 + BtwDialog 浮层 + 前端内存上下文快照（含 in-flight），主对话流式期间不打断 | Phase 0 完成，Phase 1-6 待开始 |
 | active/image-model-managed-delivery-client.md | **文生图模型账号下发（客户端层）**：去编译期 key 注入，改登录后服务端下发百炼凭证+模型列表；以 `settings.bailian_image_config` 落地（不进 api_providers，结构上隔离对话下拉框），复刻 ASR 下发范式 + broker 写入嵌入式 Next | Phase 0-6 待开始 |
 | active/image-model-managed-delivery-server.md | **文生图模型账号下发（服务端层）**：新增 `GET /api/v1/image/config(/encrypted/hash)`，apiKey 复用 configs 的 AES-256-GCM 加密口令；图片配置独立于 configs 列表避免泄漏进对话下拉框 | S1-S5 待开始 |
+| active/skills-store-internal.md | **技能市场（内部）**：Skills 页第三 tab 接 codeagent-server Skills 商店 BFF（acb6240）；主进程 IPC 持 token（不走 Next route）、zip 下载解压安装到 `~/.claude/skills/` + 自建台账 `.internal-store.json`、contentHash/ETag 更新检查、错误码分支 UI | 方案完成，Phase 0-4 待开始 |
 ### Completed
 
 | 文件 | 主题 | 完成日期 |
