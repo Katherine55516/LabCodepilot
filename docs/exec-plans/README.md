@@ -49,6 +49,7 @@
 | active/regression-library-v2-phase23.md | 回归用例库 v2 二/三期（按交互原型 6 屏 1:1）：`_lib` 治理元数据（评审态/rev/隔离）+ 跨轮矩阵读侧现算 + 复测轮 failed-only 与合并口径红线 + 轮次报告独立页 + AI 失败归因 + 对比矩阵 + 健康度治理与隔离护栏 | 批 I-P 已完成；打包验收 + 真实 AI 归因质量待验 |
 | active/test-regression-gate-audit.md | 测试工作台:回归集标签 + 用例门控 + 操作审计 | 开发完成(合并 PR #8),待打包验收 mac+Win |
 | active/regression-script-replay.md | 回归执行·脚本重放优先:有合格沉淀脚本的用例直接跑脚本(阶段A),AI 只执行剩余(阶段B),全覆盖零模型消耗;失败策略A+连败提示 | 开发完成(单测 12 条全过),待打包验收 |
+| active/regression-assertion-evidence.md | 回归脚本·执行期断言取证（方案 A′）：执行智能体输出 `@@EVIDENCE` 结构化判定依据落进轨迹，作为生成期断言定位器的第一事实来源。**Phase 0 真机取样已推翻根因假设**（臆造率仅 4.7%、83% 断言不涉及 DOM；`structural` 断言实为用例 expected 写死 Tailwind 类的传导），Phase 1-5 暂缓，改投用例设计侧治理；取样见 research/regression-assertion-evidence-sampling.md | Phase 0 完成（结论：暂缓），Phase 1-5 ⏸ 待重启信号 |
 | active/chat-latency-remediation.md | 聊天链路提速 + 模式入口收敛 + MCP 持久开关 | Phase 0 完成，Phase 1-4 待开始 |
 | active/context-storage-migration.md | 上下文共享与存储迁移 | Phase 0 部分完成，Phase 1-3 待开始 |
 | active/site-and-docs.md | 官网 + 文档站（apps/site） | Phase 0-1 进行中 |

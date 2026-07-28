@@ -61,7 +61,7 @@ export async function POST(req: Request): Promise<Response> {
     }
 
     const jsonNote = target.json
-      ? `\n⚠️ 本产物是 JSON 数据文件（平台用可编辑页面渲染）：修改后必须仍是**严格合法的 UTF-8 JSON**（可被 JSON.parse 解析，无注释/无尾逗号），字段结构保持不变。结构：\`${CASES_SCHEMA}\`。内层引号一律用中文全角「」或""，绝不用英文半角 \`"\`（会断开 JSON）。`
+      ? `\n⚠️ 本产物是 JSON 数据文件（平台用可编辑页面渲染）：修改后必须仍是**严格合法的 UTF-8 JSON**（可被 JSON.parse 解析，无注释/无尾逗号），字段结构保持不变。结构：\`${CASES_SCHEMA}\`。内层引号一律用中文全角「」或""，绝不用英文半角 \`"\`（会断开 JSON）。\n⚠️ **预期结果（\`expected\`）只写用户看得见的事实，禁写实现细节**：不得出现 CSS 类名（\`rounded-full\`、\`md:grid-cols-2\`）、DOM 标签（\`<button>\`）、结构选择器（\`.grid > div\`）、组件库内部 class；用户要求「写详细点」时，细化的是**用户可观察的现象**（文案、数量、位置、状态），不是实现方式。唯一例外是被测系统已提供的 \`data-testid\`。理由：预期写死实现类会让下游沉淀的回归脚本被迫用结构选择器，样式一改就假失败。`
       : '';
     const prompt = `你正在修订「${taskName}」的 **${target.label}** 产物。
 
