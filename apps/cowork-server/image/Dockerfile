@@ -24,7 +24,16 @@ RUN apt-get update \
 # 办公高频依赖预装(root 装进全局 site-packages,uid 1000 运行时可直接 import;
 # agent 运行时仍可 pip install --user 补长尾包,互不冲突)。清单克制:表格/文档/PDF/
 # 绘图/HTTP 五类刚需,增量约 0.5GB(服务器本地磁盘,不占带宽)。
-RUN pip install --no-cache-dir -i "$PIP_INDEX" \
+# ⚠️ http 索引必须配 --trusted-host,否则 pip 直接拒绝("not a trusted or secure host")。
+# 阿里云**内网**源只能走 http —— 其 https 证书签给 mirrors-ssl.aliyuncs.com / mirrors.aliyun.com,
+# 用 mirrors.cloud.aliyuncs.com 访问会 hostname mismatch(2026-07-28 生产实测)。
+# 只在 http 时放宽:https 索引照常验证证书,不降级。
+RUN set -eu; \
+    EXTRA=""; \
+    case "$PIP_INDEX" in \
+      http://*) EXTRA="--trusted-host $(printf '%s' "$PIP_INDEX" | sed -E 's#^http://([^/:]+).*#\1#')" ;; \
+    esac; \
+    pip install --no-cache-dir -i "$PIP_INDEX" $EXTRA \
     pandas \
     openpyxl \
     xlsxwriter \

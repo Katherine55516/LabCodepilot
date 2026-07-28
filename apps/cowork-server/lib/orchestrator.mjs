@@ -22,6 +22,15 @@ const BUNDLED = process.env.COWORK_IMAGE_BUNDLED === '1';
 // /etc/pip.conf)。阿里云部署配内网源 mirrors.cloud.aliyuncs.com → agent 装长尾包
 // 走内网零公网带宽;不设 = 镜像默认(公网阿里镜像)。见 OPERATIONS.md §9。
 const PIP_INDEX_URL = (process.env.COWORK_PIP_INDEX_URL || '').trim();
+// ⚠️ http 索引 pip 会直接拒绝("not a trusted or secure host"),必须同时给
+// PIP_TRUSTED_HOST。阿里云内网源**只能走 http**:它的 https 证书签给
+// mirrors-ssl.aliyuncs.com / mirrors.aliyun.com,用 mirrors.cloud.aliyuncs.com
+// 访问必然 hostname mismatch(2026-07-28 生产实测,构建期与运行期同病)。
+// 只对 http 放宽,https 索引照常验证证书。
+const PIP_TRUSTED_HOST = (() => {
+  if (!PIP_INDEX_URL.startsWith('http://')) return '';
+  try { return new URL(PIP_INDEX_URL).hostname; } catch { return ''; }
+})();
 const MEM = process.env.COWORK_MEM || '2g';
 const PIDS = process.env.COWORK_PIDS || '512';
 const CPUS = process.env.COWORK_CPUS || '2'; // R4 配额:每会话容器 CPU 上限
@@ -153,6 +162,7 @@ export async function ensureContainer(sid, uid = SINGLE_UID) {
     // volume,否则回合末产物 diff 会把它们当用户产物;容器存活期内跨回合仍持久。
     '-e', 'HOME=/home/agent',
     ...(PIP_INDEX_URL ? ['-e', `PIP_INDEX_URL=${PIP_INDEX_URL}`] : []),
+    ...(PIP_TRUSTED_HOST ? ['-e', `PIP_TRUSTED_HOST=${PIP_TRUSTED_HOST}`] : []),
     '--tmpfs', `/home/agent:uid=${AGENT_UID},gid=${AGENT_UID},mode=0700`,
     ...(BUNDLED ? [] : ['-v', `${ASSETS_DIR}:/opt/cowork:ro`]),
     // R2:workspace 用会话专属 named volume(与容器生命周期解耦,文件 op 服务端直读)。
