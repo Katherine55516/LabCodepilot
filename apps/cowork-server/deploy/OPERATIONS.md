@@ -129,10 +129,22 @@ tail -5 /opt/cowork-server/cowork-audit.log
 - **selftest 自检**(部署目录自带,验证 docker/容器链路完好;需 assets + egress 段需免密 sudo):
 
   ```bash
-  cd /opt/cowork-server && COWORK_ASSETS_DIR=<assets目录> node selftest-r4.mjs   # 多用户/配额/TTL/出网
+  cd /opt/cowork-server
+  set -a; . ./.env; set +a
+  export COWORK_SERVER_HOST=127.0.0.1        # selftest 自起实例连 127.0.0.1,必须覆盖 .env 的内网 IP
+  unset COWORK_AUTH_SECRET COWORK_SERVER_TOKEN  # r1-r3 不发 Authorization;r4 自带 r4-test-secret
+  node selftest-r1.mjs && node selftest-r2.mjs && node selftest-r3.mjs && node selftest-r4.mjs
   ```
 
-  注意:selftest 用独立端口(8795)自起 server 实例,**会清场 cowork 容器/网络**,别在有活跃用户时跑;跑完 `systemctl restart cowork-server cowork-egress` 恢复生产网络与规则。自建镜像模式下跑 selftest 需带环境:`COWORK_IMAGE=cowork-sandbox:latest COWORK_IMAGE_BUNDLED=1 node selftest-r4.mjs`。
+  **三个必踩的坑(2026-07-28 生产实测)**:
+  1. **不 unset `COWORK_AUTH_SECRET` 则 r1-r3 全 FAIL** —— 它们不带 Authorization 头,authz 开着时一律 401,现象是所有断言返回 `undefined`(不是明显的 401 报错,极易误判成功能坏了)。r4 自带密钥专测鉴权,同样要清掉外部密钥免得干扰。
+  2. **不覆盖 `COWORK_SERVER_HOST` 则连不上** —— 生产 .env 绑内网 IP,而 selftest 的 BASE 写死 127.0.0.1。
+  3. ⚠️ **r4 跑完会把 DOCKER-USER 规则清空**(它要对比"装 egress 前后"),生产机上等于**出网防护短暂失效**。跑完**必须** `systemctl restart cowork-egress` 并复验:
+     ```bash
+     iptables -S DOCKER-USER | grep -c cowork-egress   # 应为 5
+     ```
+
+  另:selftest 自起独立端口实例,**会清场 cowork 容器/网络**,别在有活跃用户时跑;跑完 `systemctl restart cowork-server cowork-egress` 恢复生产网络与规则。自建镜像模式下 `.env` 里已有 `COWORK_IMAGE`/`COWORK_IMAGE_BUNDLED`,source 后自动带上。
 
 ## 9. 自建会话镜像(推荐的生产形态)
 
