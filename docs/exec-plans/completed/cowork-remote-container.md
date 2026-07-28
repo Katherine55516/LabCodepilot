@@ -15,7 +15,14 @@
 
 - **RD1 全平台统一远程,弃本地活跃路径**(用户拍板)。不再做平台分派(mac vfkit / win wsl / 远程),`CoworkBackend` 只有一个活跃实现 = 远程容器;vfkit 实现包进接口保留但不激活。
 - **RD2 单一公司服务器,不开放个人自配**(用户拍板)。server 地址 + 接入凭证纯账号登录下发(复刻 [image-cred-account-delivery] 范式);不做设置页手填 server。后续用户提供一台**裸金属服务器**(有 KVM)专跑沙箱。
-- **RD3 裸金属有 KVM → 隔离可升级**(RD2 推论)。R1-R4 先用 R0 已验证的**硬化 runc**;裸金属就位后评估 gVisor(KVM 平台)/ Kata microVM(每会话轻量 VM,架构级隔离,不弱于原 vfkit)。
+- ~~**RD3 裸金属有 KVM → 隔离可升级**(RD2 推论)。R1-R4 先用 R0 已验证的**硬化 runc**;裸金属就位后评估 gVisor(KVM 平台)/ Kata microVM(每会话轻量 VM,架构级隔离,不弱于原 vfkit)。~~
+  **RD3 修正(2026-07-28,服务器到位后实测推翻前提)**:实际采购的是**阿里云 ECS 普通实例**(47.243.237.188,Alibaba Cloud Linux 4 / x86_64 / 32C·60Gi),**不是裸金属,也未开嵌套虚拟化** —— 实测 `/dev/kvm` 不存在、`/proc/cpuinfo` 无 `vmx|svm`、`virt-what` 报 `alibaba_cloud`+`kvm`(说明这台机器自身就是 KVM guest)。结论:
+  - **Kata microVM 出局**(强依赖 `/dev/kvm`),**gVisor KVM 平台出局**;
+  - **gVisor systrap 平台仍可选**(纯用户态 + seccomp SIGSYS 陷入,不需 KVM),代价是 syscall 密集型负载变慢 —— 办公 agent 恰是文件 IO/进程创建密集型,上之前必须实测;
+  - **主线不受影响**:`apps/cowork-server/` 全量 grep `kvm|gvisor|runsc|kata|--runtime` **零命中**,R0-R5 从头到尾建立在硬化 runc 上,与 KVM 无关。RD3 原本就把 microVM 定为"评估项"而非前置(见「明确不做」),故不需要任何架构调整;
+  - 补偿加固走 **RD9(userns-remap)**,不换运行时;
+  - 若将来威胁模型升级需要架构级隔离 = **换实例规格**(阿里云支持嵌套虚拟化的规格族 / 裸金属 `ecs.ebm*`),届时代码侧仅需给 orchestrator 加 `--runtime` 参数。这是采购问题,不是技术问题。
+- **RD9 无 KVM 场景的补偿加固 = docker `userns-remap`**(用户拍板,2026-07-28)。RD3 修正后 runc 成为长期方案,其固有弱点是**共享宿主内核**;在不换运行时的前提下,性价比最高的一招是用户命名空间重映射:容器内 root 映射到宿主非特权 uid,显著抬高逃逸利用链的门槛,**零代码改动、零性能损耗**。生产实测(2026-07-28):`/etc/docker/daemon.json` 配 `"userns-remap":"default"` + `"data-root":"/data/docker"`,docker 自建 `dockremap` 用户、`subuid=100000:65536`,容器内 uid 0 → 宿主 uid 100000(`uid_map: 0 100000 65536`)。**兼容性已逐项实测**:①chown init 容器(`--cap-drop ALL --cap-add CHOWN` chown 1000:1000)成功;②会话容器 `--user 1000` 写 volume 成功;③宿主侧文件属主 = 101000(基址+1000),符合预期。orchestrator 无需改动。**必须在装 docker 时就开** —— 事后再开要迁移已有镜像/volume(data-root 会变成 `<root>/<uid>.<gid>` 子目录)。
 - **RD4 凭证先 A 起步、预留切 C**(用户拍板)。A=客户端把真 key 经 TLS 交服务端内存代理;C=服务端直接向账号后端取凭证(客户端不碰 key,需后端加接口)。A/C 容器侧与注入侧代码相同,只差"真 key 怎么进服务端内存",切换成本低。B(反向隧道)不做。
 - **RD5 单点诚实降级**(RD2 推论)。服务器不可达 = 办公模式不可用,复用现有 `cowork_status` gate 隐藏 tab + 引导,不假装。
 - **RD6 凭证代理下沉为共享网络里的 sidecar 容器**(R3 实测倒逼,替代 P3-B 的"宿主/服务端进程代理")。docker 场景"容器→宿主网关"的可达性不可靠 —— 企业防火墙、k8s/kube-router 残留 iptables 都可能堵死(验证 VM 实测容器→宿主任何 IP 全超时,而容器↔容器恒通)。故 cred-proxy 改为一个可信 sidecar 容器 `cowork-proxy`,与会话容器同处专用网络 `cowork-net`,claude 经**容器名**访问(`ANTHROPIC_BASE_URL=http://cowork-proxy:8791`)。威胁模型与 P3-B 等价:真 key 只在 proxy 容器(可信,不跑 agent、不碰不可信文件)的 **tmpfs**;凭证经 `docker exec` stdin 注入(走 docker API,不走网络、不落宿主盘);会话容器只拿一次性 `cwk_` token。**这条路对生产也更 robust**(不依赖宿主网络拓扑/防火墙),且是 R4 出网管控、R5 docker-compose 部署的自然基座。
@@ -81,7 +88,7 @@ interface CoworkBackend {
 - 不做个人自配远程服务器(RD2)。
 - 不做凭证方案 B 反向隧道(RD4)。
 - 不做假隔离:服务器/虚拟化不可用 = 诚实降级(RD5)。
-- microVM(gVisor/Kata)不在 R1-R4 强做,裸金属就位后评估(RD3)。
+- microVM(gVisor/Kata)不在 R1-R4 强做,裸金属就位后评估(RD3)。**2026-07-28 更新**:服务器实为无嵌套虚拟化的阿里云 ECS,Kata 与 gVisor-KVM 已彻底出局;长期方案 = 硬化 runc + userns-remap(RD3 修正 / RD9),gVisor systrap 留作未来可选项。
 
 ## 验收标准(每阶段)
 
