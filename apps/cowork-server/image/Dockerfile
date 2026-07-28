@@ -51,9 +51,13 @@ RUN set -eu; \
 # 见 deploy/OPERATIONS.md §9 —— 镜像本身保持环境无关。
 RUN printf '[global]\nindex-url = https://mirrors.aliyun.com/pypi/simple/\ntimeout = 20\n' > /etc/pip.conf
 
-COPY --chmod=755 claude /opt/cowork/claude
-COPY --chmod=644 cowork-shim.py /opt/cowork/cowork-shim.py
-COPY --chmod=644 cred-proxy.py /opt/cred-proxy.py
+# 刻意不用 COPY --chmod=:它**要求 BuildKit**,而不少发行版自带的 docker(如
+# Alibaba Cloud Linux 4 的 docker 24)默认仍是 legacy builder 且仓库里没有 buildx
+# 插件 —— 用了会直接构建失败(2026-07-28 生产实测)。改为由 build-image.sh 在组装
+# 上下文时显式 chmod,两种 builder 都保留源文件权限,镜像因此可在任何 docker 上构建。
+COPY claude /opt/cowork/claude
+COPY cowork-shim.py /opt/cowork/cowork-shim.py
+COPY cred-proxy.py /opt/cred-proxy.py
 
 # 无 ENTRYPOINT/CMD:会话容器由 orchestrator 以 `sleep infinity` 起,proxy 以
 # `python3 /opt/cred-proxy.py` 起,helper 以 python one-liner 起 —— 全部显式传参。

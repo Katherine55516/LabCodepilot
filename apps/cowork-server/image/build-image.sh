@@ -36,6 +36,10 @@ cp "$ASSETS_DIR/claude" "$ctx/claude"
 cp "$SRV/container/cowork-shim.py" "$ctx/cowork-shim.py"
 cp "$SRV/container/cred-proxy.py" "$ctx/cred-proxy.py"
 cp "$DIR/Dockerfile" "$ctx/Dockerfile"
+# 权限在这里定死(Dockerfile 不用 COPY --chmod —— 那需要 BuildKit,legacy builder
+# 会直接失败,见 Dockerfile 注释)。两种 builder 都保留源文件权限,故等效。
+chmod 755 "$ctx/claude"
+chmod 644 "$ctx/cowork-shim.py" "$ctx/cred-proxy.py"
 
 info "docker build → cowork-sandbox:$TAG …"
 # 构建期 pip 源:默认公网阿里镜像;阿里云服务器上可 COWORK_BUILD_PIP_INDEX 换内网源
