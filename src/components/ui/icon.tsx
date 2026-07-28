@@ -106,6 +106,7 @@ export {
   Prohibit,
   Pulse,
   PushPin,
+  ArrowCircleUp,
 } from "@phosphor-icons/react";
 
 import type { IconProps } from "@phosphor-icons/react";

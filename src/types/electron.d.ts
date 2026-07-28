@@ -339,6 +339,15 @@ interface ElectronAPI {
     detail: (skillId: string, opts?: { withContent?: boolean }) => Promise<
       { ok: true; skill: InternalStoreSkill } | SkillsStoreFailureEnvelope
     >;
+    // ── 以下 Phase 2 接入（可选：preload 尚未暴露时 UI 按钮禁用）──
+    install?: (skillId: string) => Promise<
+      { ok: true; dirName: string } | SkillsStoreFailureEnvelope
+    >;
+    /** 304（内容未变）→ updated:false，仅刷新台账。 */
+    update?: (skillId: string) => Promise<
+      { ok: true; updated: boolean } | SkillsStoreFailureEnvelope
+    >;
+    uninstall?: (skillId: string) => Promise<{ ok: true } | SkillsStoreFailureEnvelope>;
   };
   bridge?: {
     isActive: () => Promise<boolean>;

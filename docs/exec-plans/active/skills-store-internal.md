@@ -1,7 +1,7 @@
 # 技能市场（内部）— 客户端接入 codeagent-server Skills 商店
 
 > 创建时间：2026-07-27
-> 最后更新：2026-07-27（Phase 0 完成）
+> 最后更新：2026-07-28（Phase 0-1 完成）
 >
 > 服务端契约：codeagent-server `docs/skills-store-api.md`（commit `acb6240`，已合入 main）。
 > 服务端为 Lab AI Hub 的 BFF 纯代理，本方案只覆盖客户端层。
@@ -11,7 +11,7 @@
 | Phase | 内容 | 状态 | 备注 |
 |-------|------|------|------|
 | Phase 0 | 调研 + 主进程骨架：zip 解压库选型 POC、HubSkillsClient（list/detail/download 透传 + 错误码映射）、IPC + preload + 类型声明 | ✅ 已完成 | 选型定稿 **yauzl@3.4.0**（MIT，唯一依赖 pend）：POC 实测其默认（decodeStrings）即拒绝 `../`/绝对路径条目，中文文件名正确解码，symlink 经 externalFileAttributes 高 16 位识别拒绝；extract-zip 落选（会创建 symlink 条目且无大小/条目数上限口子）。core 26 条单测全过 |
-| Phase 1 | UI：Skills 页第三个 tab「技能市场（内部）」+ 列表/搜索/分页 + 详情页 | 📋 待开始 | |
+| Phase 1 | UI：Skills 页第三个 tab「技能市场（内部）」+ 列表/搜索/分页 + 详情页 | ✅ 已完成 | CDP mock 全链路验证（三 tab/徽章/详情/搜索/分页 20→40→45/错误与登录门禁/重试恢复/无 electronAPI 隐藏 tab）；修一处窄弹窗标题被徽章按钮挤没的布局 bug（header flex-wrap）；动作按钮 Phase 2 前禁用；en 外部市场文案对齐为 Marketplace (External) | 
 | Phase 2 | 安装链路：install / uninstall / update（zip 下载解压 + 台账 + zip-slip 防护 + skill 缓存失效） | 📋 待开始 | |
 | Phase 3 | 状态联动：isInstalled 合并、可更新徽章、DEPRECATED 处理、台账自愈、与「我的技能」互通 | 📋 待开始 | |
 | Phase 4 | i18n（en/zh/zh-HK 手工）+ 单测 + 真实链路验证 + CDP UI 验证 + 交接/产品两份文档 | 📋 待开始 | |

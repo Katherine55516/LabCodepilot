@@ -10,6 +10,7 @@ import { SkillListItem } from "./SkillListItem";
 import { SkillEditor } from "./SkillEditor";
 import { CreateSkillDialog } from "./CreateSkillDialog";
 import { MarketplaceBrowser } from "./MarketplaceBrowser";
+import { InternalStoreBrowser } from "./internal/InternalStoreBrowser";
 import { useTranslation } from "@/hooks/useTranslation";
 import type { TranslationKey } from "@/i18n";
 import { cn } from "@/lib/utils";
@@ -17,7 +18,14 @@ import { groupSessionsByProject } from "@/components/layout/chat-list-utils";
 import type { ChatSession } from "@/types";
 import type { SkillItem } from "./SkillListItem";
 
-type ViewTab = "local" | "marketplace";
+type ViewTab = "local" | "marketplace" | "internal";
+
+/**
+ * 内部市场 tab 可见性的会话级缓存（方案 D5）：SKILLS_NOT_CONFIGURED（服务端
+ * 未启用）在应用生命周期内不会变 → 缓存 hidden 避免每次进设置都探测;
+ * 探测失败(网络/未登录)不缓存 — tab 显示,具体状态由 Browser 内部呈现。
+ */
+let internalProbeCache: boolean | null = null;
 
 /** A project the user can scope skills to — derived from conversation groups. */
 export interface SkillProject {
@@ -48,6 +56,41 @@ export function SkillsManager() {
   const [search, setSearch] = useState("");
   const [showCreate, setShowCreate] = useState(false);
   const [viewTab, setViewTab] = useState<ViewTab>("local");
+  // 内部市场 tab:纯浏览器(无 electronAPI)不渲染;probe 拿到「未启用」也不渲染。
+  const [internalVisible, setInternalVisible] = useState<boolean>(internalProbeCache ?? false);
+
+  useEffect(() => {
+    const api = typeof window !== "undefined" ? window.electronAPI?.skillsStore : undefined;
+    if (!api) return; // 纯浏览器 dev:保持隐藏
+    if (internalProbeCache !== null) {
+      setInternalVisible(internalProbeCache);
+      return;
+    }
+    let cancelled = false;
+    api.probe().then((r) => {
+      if (cancelled) return;
+      if (r.ok) {
+        internalProbeCache = true;
+        setInternalVisible(true);
+      } else if (r.error === "SKILLS_NOT_CONFIGURED") {
+        internalProbeCache = false;
+        setInternalVisible(false);
+      } else {
+        // 未登录/网络异常:显示 tab,登录态与错误由 Browser 内部处理;不缓存
+        setInternalVisible(true);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  /** 登录后首次列表才探到「未启用」→ 隐藏 tab 并回落本地列表。 */
+  const handleInternalUnavailable = useCallback(() => {
+    internalProbeCache = false;
+    setInternalVisible(false);
+    setViewTab("local");
+  }, []);
 
   const fetchSkills = useCallback(async () => {
     try {
@@ -260,11 +303,31 @@ export function SkillsManager() {
           >
             {t('skills.marketplace')}
           </Button>
+          {internalVisible && (
+            <Button
+              variant="ghost"
+              size="sm"
+              className={cn(
+                "px-3 py-1 text-xs font-medium rounded h-auto",
+                viewTab === "internal"
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground"
+              )}
+              onClick={() => setViewTab("internal")}
+            >
+              {t('skills.internalMarketplace')}
+            </Button>
+          )}
         </div>
       </div>
 
       {/* Main content */}
-      {viewTab === "marketplace" ? (
+      {viewTab === "internal" && internalVisible ? (
+        <InternalStoreBrowser
+          onInstalled={fetchSkills}
+          onUnavailable={handleInternalUnavailable}
+        />
+      ) : viewTab === "marketplace" ? (
         <MarketplaceBrowser onInstalled={fetchSkills} />
       ) : (
       <div className="flex flex-1 min-h-0">
