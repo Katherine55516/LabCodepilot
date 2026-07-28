@@ -68,6 +68,7 @@
 | active/stream-idle-timeout-rework.md | 对话流空闲超时改造：从「距上次任何事件」改为「距上次实质内容」计时，根治慢首包 provider 误杀（B-019），保留真卡死兜底 | Phase 0/1/4 已完成（c7888dc/e9ddbc2），Phase 2-3 可选暂缓 |
 | active/test-framework-integration.md | 测试框架集成（对话内嵌测试）：把 ai-lab-test-framework 做成第三种对话模式（代码/计划/测试），上半结构化面板(看板/流程/报告)+下半对话流；锁定作用域/模式/视图模型，替换 Phase-1 的 /test 独立路由 | Phase 0 进行中，Phase 1-8 待开始 |
 | active/test-account-settings.md | 测试账号设置：设置内新增多系统测试账号面板（系统下拉 + local/SIT 标签 + 密码/token/获取登录态），导出到 AI_LabTest `environments.json` + `.auth/` storageState，Electron BrowserWindow 抓取登录态 | Phase 0 完成，Phase 1-6 待开始 |
+| active/test-env-inline-config.md | 测试工作台·就地环境配置（test-account-settings 消费侧延伸）：项目=系统按归一化路径自动绑定、右侧抽屉复用共享 `TestSystemEditor` 就地编辑写同一库、消灭 3 处跳设置页往返；保留设置页双入口 | 阶段 1 完成（dev 态验证 55/55 单测 + CDP），打包态实测待验；阶段 2（环境胶囊+登录态可视）/3 待立项 |
 | active/test-report-display-and-evidence.md | 测试报告就地展示 + 产物预览 + 缺陷结构化 + 执行端接口/录像采集：报告节点完成后工作台流程页展示「概览+产物列表+内嵌全文」，md 渲染/编辑、xlsx 表格、证据截图+录像（每用例一段、留 fail/partial）、缺陷报告结构化模板、`@@RESULT` 加 `api` 字段穿透 run.json | Phase 0-6 代码完成（typecheck/单测 + CDP mock 验证通过），录像/接口真跑 POC 待验证 |
 | active/test-multitask-parallel-execution.md | 测试工作台多任务并行执行：看板多选 + 批量执行（强制无头）+ 并发数 1–5（本机设置）+ 客户端排队（running/waiting 槽位调度）+ 执行前登录态预检（storageState 存在性/过期）；编排去单例化（busyTaskId/abortRef/autoRunRef → 按任务集合） | Phase 0 完成，Phase 1-5 进行中 |
 | active/uploads-storage-relocation.md | 上传附件（截图/@文件）存储从用户工作目录迁到统一缓存 `~/.codepilot/` + 存储治理（会话级联清理 + 容量/TTL）+ `/api/uploads` 锚定根校验 + 存量迁移；连带 `.codepilot-images` 同迁 | Phase 0 完成，Phase 1-6 待开始 |

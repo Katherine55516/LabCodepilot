@@ -127,16 +127,19 @@
 | `electron/auth/client.ts` | `uploadTestUsage(payload)` → `apiRequest('/api/v1/me/test-usage', POST)`（Bearer 自动注入） |
 | `electron/auth/broker.ts` | `fetchDailyRollupFromServer(from,to)` → loopback GET 内嵌 Next |
 | `electron/auth/storage.ts` / `paths.ts` | `test_usage_watermark`（明文，**跨登出保留** —— 按机器记录上报进度，非用户维度） |
-| `electron/main.ts` | boot/postLogin 启定时器 + 触发一次；登出停；`auth:upload-test-usage` IPC |
+| `electron/main.ts` | boot/postLogin 启定时器 + 触发一次；登出停；`ipcMain.handle('auth:upload-test-usage')` → `scheduleTestUsageUpload('panel-open')` |
 | `electron/preload.ts` / `src/types/electron.d.ts` | `electronAPI.auth.uploadTestUsage()` |
-| `src/components/test/InlineTestingPanel.tsx` | 挂载 effect 触发（切走卸载、切回重挂 → 等价「每次点开测试模块」） |
+| `src/components/test/InlineTestingPanel.tsx` | `visible` 属性（AppShell 传 `testPanelOpen && isChatRoute`）；effect 依赖 `[visible,view,selected]`，在「可见 && 项目列表页(`view==="dash" && selected===null`)」时触发。面板保活(常挂载)，故不用 mount-only。 |
+| `src/components/layout/AppShell.tsx` | `<InlineTestingPanel visible={testPanelOpen && isChatRoute} />` |
 
-**4 类触发**（全部汇入 `scheduleTestUsageUpload(reason)`）：
-1. 登录成功 / App 启动
-2. 每日 **10:00 / 16:00 / 20:00**（北京时间；中国无 DST，固定 +8 计算下一次触发）
-3. 打开测试模块（renderer → IPC，只发信号、不带数据）
+**触发源**（全部汇入 `scheduleTestUsageUpload(reason)`）：
+1. 登录成功 / App 启动（`boot` / `login`）
+2. 每日 **10:00–20:00 每个整点**（北京时间，11 个点；中国无 DST 固定 +8；`DAILY_HOURS` 数组）
+3. **打开测试模块看到项目列表页**（`panel-open`；renderer → IPC，只发信号、不带数据）
 
-**去抖**：60s 内多次触发合并为一次；距上次成功不足 5min 则跳过（GREATEST 让漏掉也无害）。
+> ⚠️ 历史坑（2026-07-28 修）：第 3 源曾**断链** —— preload 有 `invoke('auth:upload-test-usage')`、renderer 也调了，但 `electron/main.ts` **从未注册对应 `ipcMain.handle`**，invoke 无 handler 直接 reject、被 `void` 吞掉 → 打开测试模块实际不上报。现已补 handler 接通，并把 renderer 触发从「mount-only」（保活面板只首挂一次）改为「可见 && 项目列表页」以匹配「每次点开看列表页」。
+
+**去抖**：60s 内多次触发合并为一次；距上次成功不足 5min 则跳过（GREATEST 让漏掉也无害）。整点彼此相隔 60min 不受 5min 间隔影响；仅当面板触发恰在整点前 <5min 才会让该整点被跳过（数据刚传过，跳过无害）。
 
 **天数区间**：`from = min(watermark, 昨天)`，`to = 今天`，回补上限 90 天。
 - 「至少回补到昨天」是为了补齐上一日 20:00 之后的活动（否则次日再传时那段永远丢）。

@@ -656,7 +656,9 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                         让 children 正常显示；切回 chat 再显示，执行进度不丢。 */}
                     {testEverOpened && (
                       <div className={testPanelOpen && isChatRoute ? "contents" : "hidden"}>
-                        <InlineTestingPanel />
+                        {/* visible 传入：面板保活(常挂载)，用它区分「真正可见」以驱动
+                            打开测试模块看列表页时的用量上报触发（见 InlineTestingPanel）。 */}
+                        <InlineTestingPanel visible={testPanelOpen && isChatRoute} />
                       </div>
                     )}
                   </main>

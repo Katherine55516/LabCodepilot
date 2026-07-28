@@ -1,10 +1,10 @@
 /**
  * 测试用量上报编排（全部在主进程）。
  *
- * 触发源（4 类，均汇入去抖入口 scheduleTestUsageUpload）：
- *   1. 登录成功 / App 启动        —— main 的 bootAccountState / postLoginSequence
- *   2. 每日 10:00 / 16:00 / 20:00 —— 本模块的定时器（北京时间）
- *   3. 打开测试模块              —— renderer → IPC 'auth:upload-test-usage'
+ * 触发源（均汇入去抖入口 scheduleTestUsageUpload）：
+ *   1. 登录成功 / App 启动           —— main 的 bootAccountState / postLoginSequence
+ *   2. 每日 10:00–20:00 每个整点     —— 本模块的定时器（北京时间，11 个点）
+ *   3. 打开测试模块看到项目列表页    —— renderer → IPC 'auth:upload-test-usage'（main 转调本模块）
  *
  * 一次上报：判定登录 → 选天数区间 [min(watermark, 昨天) .. 今天] → loopback 让
  * 内嵌 Next 按北京自然日重算 → 附 device_id/app_version/tz 后 POST →
@@ -26,7 +26,10 @@ import { logInfo, logWarn } from './log';
 const TZ = 'Asia/Shanghai';
 const TZ_OFFSET_MIN = 480; // 北京 UTC+8
 
-const DAILY_HOURS = [10, 16, 20]; // 北京时间的定时上报点
+// 北京时间的定时上报点：10:00–20:00 每个整点（含首尾，共 11 个）。
+// msUntilNextDaily 支持任意小时列表，故扩点只改此数组即可。整点彼此相隔 60min，
+// 远大于 MIN_INTERVAL_MS(5min)，故整点之间不会互相被最小间隔跳过。
+const DAILY_HOURS = [10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20];
 
 const DEBOUNCE_MS = 60_000; // 60s 内多次触发合并为一次
 const MIN_INTERVAL_MS = 5 * 60_000; // 两次成功上报间的最小间隔（省流量；GREATEST 让漏掉也无害）
@@ -141,7 +144,7 @@ function scheduleNextDaily(): void {
 export function startTestUsageScheduler(): void {
   if (dailyTimers.length > 0) return;
   scheduleNextDaily();
-  logInfo('test-usage daily scheduler started (10/16/20 Asia/Shanghai)');
+  logInfo('test-usage daily scheduler started (hourly 10:00-20:00 Asia/Shanghai)');
 }
 
 /** 停止定时器（登出时调用）。 */

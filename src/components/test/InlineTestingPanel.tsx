@@ -24,6 +24,7 @@ import { REGRESSION_LIBRARY_TASK, REGRESSION_FULL_SUITE as REGRESSION_FULL_SUITE
 import type { LoginStateInfo } from "@/lib/test/env-config";
 import type { RunHistoryEntry } from "@/lib/test/history";
 import { TestStatsView } from "@/components/test/TestStatsView";
+import { TestEnvDrawer } from "@/components/test/TestEnvDrawer";
 import { PromptDialog } from "@/components/ui/prompt-dialog";
 
 /**
@@ -250,13 +251,15 @@ interface TaskState {
    */
   depositScripts?: boolean;
   /**
-   * 任务级被测入口地址（新建任务「目标」输入框；执行前确认弹窗改地址会按规则回写）。
+   * 任务级被测入口地址，**按环境（local/sit）隔离**（新建任务「目标」输入框；执行前确认弹窗改地址会按规则回写）。
    *
-   * 执行步的地址优先级：弹窗显式确认 > 本字段 > 项目环境配置(environments.json)。
-   * 缺省（undefined）= 无任务级覆盖，跟随环境配置 —— 存量任务保持原行为。
-   * 回写规则见 runExecutionConfirmed：确认地址 ≠ 环境地址才记为覆盖；相同则清除覆盖。
+   * 执行步的地址优先级：弹窗显式确认 > 本字段[当前 env] > 项目环境配置(environments.json)。
+   * 某 env 无键（或整体 undefined）= 该 env 无任务级覆盖，跟随环境配置。
+   * 按 env 隔离的原因：一个任务在 SIT 侧钉的深链，不应在切到 local 时冒充 local 的地址显示/执行
+   * （否则「选 local 实际跑 SIT」）。回写规则见 runExecutionConfirmed。
+   * 迁移：旧的单一 `targetUrl` 在加载时归位到该任务所属项目的当前 `selectedEnv`（见加载 effect）。
    */
-  targetUrl?: string;
+  targetUrlByEnv?: Record<string, string>;
 }
 const DEFAULT_TASK_STATE: TaskState = {
   stepStatus: { requirement: "idle", cases: "idle", execution: "idle", report: "idle" },
@@ -450,11 +453,10 @@ async function deleteTaskReports(projectPath: string, taskName: string): Promise
   }).catch(() => {});
 }
 
-export function InlineTestingPanel() {
+export function InlineTestingPanel({ visible = true }: { visible?: boolean } = {}) {
   const { t } = useTranslation();
-  const router = useRouter();
-  // 路由路径：从「设置·测试账号」改完配置切回工作台(/chat)时，pathname 变化 → 触发 env-config
-  // 重拉(见下方 effect)，避免面板常驻不刷新、仍显示旧的访问地址。
+  // 环境配置改为就地抽屉（阶段 1）后，本组件不再用 router 跳转设置页；useRouter 仍由下方
+  // 子组件（打开对话）使用。pathname 仍用于「切回工作台重拉 env-config」。
   const pathname = usePathname();
   const [view, setView] = useState<View>("dash");
   const [modal, setModal] = useState<ModalKind>("none");
@@ -547,6 +549,11 @@ export function InlineTestingPanel() {
     try { return localStorage.getItem("codepilot:test-env") || "local"; } catch { return "local"; }
   });
   const [envCfg, setEnvCfg] = useState<{ configured: boolean; env: string; frontendBaseUrl: string | null; allowedEnvs: string[]; source?: string; loginState?: LoginStateInfo } | null>(null);
+  // 就地环境配置抽屉（阶段 1）：取代原「跳转到 设置·测试账号」整页往返。三处入口
+  // （项目页「环境配置」按钮 / 流程头未配置 chip / EnvWarnModal「去配置」）改为开抽屉；
+  // 保存后 bump envCfgReload → 下方 env-config effect 重拉，🎯 访问地址即时刷新。
+  const [envDrawerOpen, setEnvDrawerOpen] = useState(false);
+  const [envCfgReload, setEnvCfgReload] = useState(0);
   // Change env + persist to the ACTIVE project entry（不再写全局 localStorage）。allowedEnvs
   // 越界回落也走这里，于是回落值也会落到该项目，下次切回稳定。
   const handleEnvChange = (next: string) => {
@@ -567,12 +574,17 @@ export function InlineTestingPanel() {
     setEnv((prev) => (prev === next ? prev : next));
   }, [selected, projects]);
 
-  // 打开测试模块即触发一次后台用量上报。本组件在切到设置页等场景会卸载、切回重挂，
-  // 故挂载 effect ≈「每次点开测试模块」。fire-and-forget：仅 Electron 有 electronAPI
-  //（dev/web 为 no-op）；主进程去抖 + 未登录静默跳过，绝不阻塞 UI。
+  // 用量上报触发：打开测试模块看到「项目列表页」时触发一次。面板是保活的（常挂载、
+  // 靠 CSS 显隐，见 AppShell），故用 visible 属性判「真正可见」——只挂载一次的 effect
+  // 满足不了「每次点开」。条件 = 可见 && 在项目列表页（view==="dash" && 无选中项目）。
+  // 首次打开、保活后重新点开停在列表、从项目返回列表 都会触发（依赖变化各触发一次）。
+  // fire-and-forget：仅 Electron 有 electronAPI（dev/web 为 no-op）；主进程 60s 去抖 +
+  // 距上次成功 5min 最小间隔 + 未登录静默跳过，故频繁进出列表也不会重复上传、绝不阻塞。
   useEffect(() => {
-    void window.electronAPI?.auth?.uploadTestUsage?.();
-  }, []);
+    if (visible && view === "dash" && selected === null) {
+      void window.electronAPI?.auth?.uploadTestUsage?.();
+    }
+  }, [visible, view, selected]);
 
   // 执行方式(独立窗口可见 / 后台无头)。默认无头 —— 与原行为一致、更快。执行前确认弹窗
   // (ExecConfirmModal)记下用户选择并持久化;非弹窗触发(运行任务 / auto-chain 接力执行)
@@ -1269,7 +1281,8 @@ export function InlineTestingPanel() {
     // 地址 trim 非空才落,空串不产生任务级覆盖)。
     const seed: Partial<TaskState> = {};
     if (depositScripts === false) seed.depositScripts = false;
-    if (targetUrl?.trim()) seed.targetUrl = targetUrl.trim();
+    // 新建任务的「目标」地址按 env 隔离：归到新任务所属项目的当前 env（默认 local）。
+    if (targetUrl?.trim()) seed.targetUrlByEnv = { [proj?.selectedEnv || env || "local"]: targetUrl.trim() };
     if (Object.keys(seed).length) patchTask(id, () => seed);
     const hasReq = !!files?.requirement, hasCases = !!files?.cases;
     if (hasReq || hasCases) {
@@ -1333,7 +1346,13 @@ export function InlineTestingPanel() {
         // 被中断的瞬时态 → 恢复成 "error"（中断未完成），避免任务永远卡在「运行中」、且因无
         // AbortController 而停不掉（实际早已无进展）。用 error 而非 idle 是为了**不触发 auto-chain
         // effect 自动重跑**（它只跑 idle 步）——重启后应由用户主动点「运行」重跑，不擅自执行。
-        for (const st of Object.values(nextStates)) {
+        // 旧 targetUrl(单一) → targetUrlByEnv(按 env) 迁移：需知道每个任务所属项目的当前 env。
+        const taskEnvMap = new Map<string, string>();
+        for (const p of nextProjects) {
+          const penv = typeof p.selectedEnv === "string" && p.selectedEnv ? p.selectedEnv : "local";
+          for (const tk of p.tasks ?? []) taskEnvMap.set(tk.id, penv);
+        }
+        for (const [tid, st] of Object.entries(nextStates)) {
           const ss = st?.stepStatus;
           if (ss) for (const k of Object.keys(ss) as Array<keyof typeof ss>) if (ss[k] === "running") ss[k] = "error";
           // 向后兼容：旧「导入需求」任务把内容直接写进了 需求.md（无 requirementOriginal、无 requirementMode）。
@@ -1341,6 +1360,12 @@ export function InlineTestingPanel() {
           if (st?.imported?.requirement && !st.requirementMode && !st.requirementOriginal) {
             st.requirementMode = "use-original";
           }
+          // 旧单一 targetUrl → 按 env 隔离：归位到该任务项目的当前 env（未知项目回落 local）。
+          const legacy = (st as unknown as { targetUrl?: unknown }).targetUrl;
+          if (typeof legacy === "string" && legacy.trim() && !st.targetUrlByEnv) {
+            st.targetUrlByEnv = { [taskEnvMap.get(tid) || "local"]: legacy.trim() };
+          }
+          if (st && "targetUrl" in st) delete (st as { targetUrl?: unknown }).targetUrl;
         }
         // 历史遗留去重：早期无防重逻辑可能产生同路径的重复项目（如两个 mealAllowance）→
         // 按路径合并，保留任务最多的那张卡片。去重结果会被下方持久化 effect 写回文件，一次性清理现状。
@@ -1453,8 +1478,9 @@ export function InlineTestingPanel() {
     };
     // handleEnvChange is stable enough (only writes localStorage); excluded to avoid re-fetch loops.
     // pathname 入依赖：从 /settings 改完配置切回 /chat 时 pathname 变 → 重拉最新访问地址。
+    // envCfgReload 入依赖：就地抽屉保存并同步后 bump，触发重拉刷新访问地址（阶段 1）。
 
-  }, [view, current?.path, env, pathname]);
+  }, [view, current?.path, env, pathname, envCfgReload]);
 
   // 解锁判定可传显式 stepStatus(后台任务用)；stepUnlocked 是活动任务的便捷包装。
   const stepUnlockedFor = (ss: Record<TestStep, StepStatus>, step: TestStep): boolean => {
@@ -1636,12 +1662,14 @@ export function InlineTestingPanel() {
     // 执行方式仅对「测试执行」步有意义(只有它注入 Playwright)。弹窗触发带 opts.headed,
     // 非弹窗触发(运行任务 / auto-chain / 队列起跑)回落到上次选择(execModeRef)。
     const headed = step === "execution" ? (opts?.headed ?? execModeRef.current === "visible") : false;
-    // 被测链接覆盖(仅执行步):弹窗显式确认的地址 > 任务级 targetUrl(新建任务「目标」输入,
-    // 让「运行任务」/auto-chain/排队这些不经确认弹窗的路径也直测任务地址)> 不传(服务端回落
-    // 项目环境配置 environments.json)。
+    // 被测链接覆盖(仅执行步):弹窗显式确认的地址 > 任务级覆盖[该任务项目的当前 env](新建任务
+    // 「目标」输入 / 执行前确认回写,让「运行任务」/auto-chain/排队这些不经确认弹窗的路径也直测)
+    // > 不传(服务端回落项目环境配置 environments.json)。按 env 取，避免用错环境的覆盖跑测。
+    const taskEnv =
+      projects.find((p) => normalizeProjectPath(p.path) === normalizeProjectPath(projPath))?.selectedEnv || "local";
     const baseUrlOverride =
       step === "execution"
-        ? (opts?.baseUrl?.trim() || taskStates[id]?.targetUrl?.trim() || undefined)
+        ? (opts?.baseUrl?.trim() || taskStates[id]?.targetUrlByEnv?.[taskEnv]?.trim() || undefined)
         : undefined;
     // 问题②·停止: a per-run AbortController. stopTask() aborts it → the fetch rejects
     // with AbortError, which the catch/finally below treat as a clean stop (not error).
@@ -2102,15 +2130,21 @@ export function InlineTestingPanel() {
     persistExecMode(headed ? "visible" : "headless");
     // 弹窗里改的「沉淀回归脚本」写回任务状态 —— 它是任务级设置,不是一次性选项;
     // 不写回的话下次打开弹窗又弹回旧值,用户会以为没生效。缺省 true,故只存 false。
-    // 任务地址回写规则:确认地址与环境配置地址【不同】→ 记为任务级覆盖(下次运行任务/
-    // 流水线也用它);【相同】→ 清除覆盖、回归跟随环境 —— 若无条件回写,存量任务手动执行
-    // 一次就会把当时的环境地址钉死成任务地址,之后改环境配置该任务不再跟随(回归风险)。
+    // 任务地址回写规则(按当前 env 隔离):确认地址与【当前 env】环境配置地址【不同】→ 记为该 env 的
+    // 任务级覆盖;【相同】→ 清除该 env 覆盖、回归跟随环境。其它 env 的覆盖保持不动 —— 一个任务在 SIT
+    // 钉的深链不受 local 执行影响,反之亦然。若无条件回写,存量任务手动执行一次就会把当时的环境地址
+    // 钉死成覆盖,之后改环境配置该任务不再跟随(回归风险)。
     if (aId) {
       const envUrl = (envCfg?.frontendBaseUrl || "").trim();
-      patchTask(aId, () => ({
-        depositScripts: depositScripts ? undefined : false,
-        targetUrl: baseUrl && baseUrl !== envUrl ? baseUrl : undefined,
-      }));
+      patchTask(aId, (s) => {
+        const next = { ...(s.targetUrlByEnv ?? {}) };
+        if (baseUrl && baseUrl !== envUrl) next[env] = baseUrl;
+        else delete next[env];
+        return {
+          depositScripts: depositScripts ? undefined : false,
+          targetUrlByEnv: Object.keys(next).length ? next : undefined,
+        };
+      });
     }
     setModal("none");
     if (aId) autoRunIdsRef.current.delete(aId);
@@ -2291,13 +2325,14 @@ export function InlineTestingPanel() {
                   ))}
                 </select>
                 {(() => {
-                  // 任务级目标地址优先展示(执行时它也确实优先生效);无任务地址回落环境地址。
-                  const taskUrl = (aId && taskStates[aId]?.targetUrl) || "";
+                  // 任务级目标地址(按当前 env)优先展示(执行时它也确实优先生效);该 env 无覆盖则回落
+                  // 环境地址 —— 于是切到未配置的 env(如 local)时不再冒充显示别的 env 的覆盖地址。
+                  const taskUrl = (aId && taskStates[aId]?.targetUrlByEnv?.[env]) || "";
                   const shownUrl = taskUrl || envCfg?.frontendBaseUrl || "";
                   if (!shownUrl) {
                     return (
                       <button
-                        onClick={() => router.push("/settings#test-accounts")}
+                        onClick={() => setEnvDrawerOpen(true)}
                         className="rounded bg-status-warning-muted px-1.5 py-0.5 text-[10px] font-medium text-status-warning-foreground hover:opacity-80"
                       >
                         {t("test.env.unconfigured")}
@@ -2837,8 +2872,8 @@ export function InlineTestingPanel() {
                   </div>
                   <span className="flex-1" />
                   <button
-                    onClick={() => router.push("/settings#test-accounts")}
-                    title={current?.path ? `${t("test.envModal.title")}（设置·测试账号；project_root = ${current.path}）` : undefined}
+                    onClick={() => setEnvDrawerOpen(true)}
+                    title={current?.path ? `${t("test.envModal.title")}（就地配置；project_root = ${current.path}）` : undefined}
                     className="flex h-7 items-center gap-1 rounded-md border border-border px-2 text-[11px] text-muted-foreground hover:text-foreground"
                   >
                     <Gear size={12} /> {t("test.envModal.title")}
@@ -3217,7 +3252,7 @@ export function InlineTestingPanel() {
       {modal === "execConfirm" && activeTask && (
         <ExecConfirmModal
           t={t}
-          initialUrl={taskStates[activeTask.id]?.targetUrl || envCfg?.frontendBaseUrl || ""}
+          initialUrl={taskStates[activeTask.id]?.targetUrlByEnv?.[env] || envCfg?.frontendBaseUrl || ""}
           unconfigured={!!envCfg && !envCfg.configured}
           initialMode={execMode}
           initialDeposit={(activeTask && taskStates[activeTask.id]?.depositScripts) !== false}
@@ -3230,7 +3265,7 @@ export function InlineTestingPanel() {
           t={t}
           source={envCfg?.source}
           env={env}
-          onGoConfigure={() => { setModal("none"); router.push("/settings#test-accounts"); }}
+          onGoConfigure={() => { setModal("none"); setEnvDrawerOpen(true); }}
           onRunAnyway={() => { setModal("none"); doRunTask(); }}
           onClose={() => setModal("none")}
         />
@@ -3243,6 +3278,15 @@ export function InlineTestingPanel() {
           addProjectFromPath(p);
         }}
       />
+      {/* 就地环境配置抽屉（阶段 1）：绑定当前项目文件夹，保存并同步后重拉 env-config。 */}
+      {current?.path && (
+        <TestEnvDrawer
+          projectPath={current.path}
+          open={envDrawerOpen}
+          onOpenChange={setEnvDrawerOpen}
+          onSaved={() => setEnvCfgReload((n) => n + 1)}
+        />
+      )}
     </div>
   );
 }

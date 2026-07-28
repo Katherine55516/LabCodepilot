@@ -2591,6 +2591,14 @@ app.whenReady().then(async () => {
     }
   });
 
+  // 测试用量上报 · renderer 触发源（打开测试模块看到项目列表页时）。仅转调去抖入口 ——
+  // 未登录 / 去抖 60s / 距上次成功 5min 的门都在 scheduleTestUsageUpload→runUpload 内，
+  // 这里不做判断、也绝不阻塞。fire-and-forget：renderer 侧 void 调用，忽略返回。
+  ipcMain.handle('auth:upload-test-usage', () => {
+    scheduleTestUsageUpload('panel-open');
+    return { ok: true as const };
+  });
+
   // Native auto-updater (research-platform V2): register renderer IPC and wire
   // to the main window. The first check is renderer-triggered (useUpdateChecker
   // on mount, so the onStatus listener is registered before any result is
