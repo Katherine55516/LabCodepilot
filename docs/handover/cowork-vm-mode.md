@@ -1,11 +1,221 @@
 # Cowork 办公模式(本地 VM 隔离 agent)— 技术交接文档
 
+---
+
+# 📍 §A 当前状态速览(2026-07-29 · 接手先读本节,读完即可继续干活)
+
+> **本节自足**:只读这一节就能知道系统现在长什么样、还剩什么、怎么继续。
+> 下面 §0-§9 是历史全貌(本地 vfkit 时代的背景),**不是当前活跃路径**,按需再查。
+
+## A.1 一句话现状
+
+**生产环境已全部就绪并端到端验证通过,只差「在 admin 页点几下开通」这最后一步。**
+沙箱服务器(香港阿里云 x64)已部署、域名与 TLS 已通、四套 selftest 在 x64+userns 上全过;
+账号后端的下发接口与 admin 可视化配置页也已做完并推送。用户侧目前仍是「未开通」状态。
+
+## A.2 生产环境实况(2026-07-29 实测核准)
+
+**沙箱服务器**(RD2 的「单一公司服务器」):
+
+| 项 | 值 |
+|---|---|
+| SSH | `ssh cowork-prod`(别名已配)= `root@47.243.237.188:40022`,专用密钥 `~/.ssh/cowork_prod` |
+| 密码 | 在 `/Users/yuanqi/project/server.txt`(纯密码 18 字符,**只用于一次性装公钥,之后全程密钥认证**;要用请 `sshpass`/`expect` 从文件读,勿打印) |
+| OS | Alibaba Cloud Linux 4.0.4(OpenAnolis)· **dnf 系,非 apt** |
+| 架构/规格 | **x86_64** · 32 核 Xeon · 60Gi 内存 · **无 swap** |
+| 磁盘 | 系统盘 `vda` 40G;数据盘 `vdb` 1TB → ext4 挂 `/data`(已写 fstab,UUID `0405f6a2-…`),现 915M 用 / 973G 余 |
+| 虚拟化 | **无 KVM**(普通 ECS,未开嵌套虚拟化)—— 见 RD3 修正 |
+| docker | 24.0.9(阿里云内网源)· containerd 1.7.29 · runc 1.2.8 · **legacy builder,无 buildx** |
+| docker 配置 | `/etc/docker/daemon.json`:`data-root=/data/docker`、**`userns-remap=default`**、日志 50m×3 |
+| userns 实况 | `dockremap` uid 994,`subuid=100000:65536`,容器内 uid 0 → 宿主 uid 100000 |
+| node / git | v22.23.0 / 2.47.3(均内网源) |
+| 服务用户 | `cowork`(uid 993,在 docker 组)—— **非 root**,故绑不了 <1024 端口 |
+| 镜像 | `cowork-sandbox:2.1.203` + `:latest`,**786MB**(x64 本机构建) |
+| claude | `/opt/cowork-assets/claude` = **2.1.203 · ELF x86-64** |
+| 网络 | `cowork-net` 网段 **172.19.0.0/16**,网桥名 `cowork0`;宿主 eth0 `172.24.185.132/20`(不冲突) |
+
+**systemd 两单元**:`cowork-server` + `cowork-egress`,均 `active` + `enabled`(开机自启);
+监听 `172.24.185.132:8790`;`DOCKER-USER` 5 条 egress 规则在位。
+
+**`/opt/cowork-server/.env` 生效值**:
+```
+COWORK_AUTH_SECRET=036a47e034ec5e118bbc07df60e22a9ee465c090ea8410d8639d9af82d3b84e0
+COWORK_ASSETS_DIR=/opt/cowork-assets
+COWORK_SERVER_PORT=8790
+COWORK_SERVER_HOST=172.24.185.132     # ← 绑内网 IP;**绝不能设 127.0.0.1**(NPM 在另一台机器)
+COWORK_IDLE_TTL_MS=1800000
+COWORK_CPUS=2 / COWORK_MEM=2g / COWORK_PIDS=512
+COWORK_AUDIT_FILE=/opt/cowork-server/cowork-audit.log
+COWORK_IMAGE=cowork-sandbox:latest
+COWORK_IMAGE_BUNDLED=1
+COWORK_PIP_INDEX_URL=http://mirrors.cloud.aliyuncs.com/pypi/simple/   # ← 必须 http,见 A.5①
+```
+
+## A.3 网络拓扑(与原设计不同,务必先看)
+
+两台 ECS **共用同一个公网 IP**,另一台跑 Nginx Proxy Manager(NPM)做反代:
+
+```
+客户端 → https://cowork-server.ai-native-lab.com   (公网,Let's Encrypt *.ai-native-lab.com,有效至 2026-09-13)
+       → NPM(另一台 ECS,内网 172.24.185.130)
+       → 本机 172.24.185.132:8790                  (cowork-server)
+```
+
+- **SSH 的 40022 也是经 NAT/转发到本机 22**,故 `ss -tlnp` 看到的是 `:22`。
+- **NPM 的 Forward Port 已由用户改为 8790**(原先填 80,但服务以非 root 跑绑不了特权端口)。
+- 实测(带真 token,经公网域名):REST `GET /health` → `200 {"ok":true,...}`;
+  WS `/session/:id/exec` 升级 → **`101 Switching Protocols`**(NPM 的 Websockets Support 已开)。
+  无 token 时 WS 返回 **502** 属正常(服务端直接断连,nginx 视为上游关闭),不是代理故障。
+- X-Forwarded-For 正常透传;`client_max_body_size` ≥10MB(声明 10MB 未被立即 413)。
+- **R5-3 预留的 Caddy TLS 反代作废**(`docker-compose.tls.yml`/`Caddyfile.example`)—— NPM 已承担 TLS。
+- 参考数据:从开发者当前网络上传实测仅 **66KB/s**(10MB 传 120s 未完)。这是开发者侧链路,
+  不代表办公网;上线后值得在办公网实测一次「对话里发大附件」的体感。
+
+## A.4 本轮新增/修正的决策
+
+- **RD3 已修正**(见 exec-plan):服务器实为**无嵌套虚拟化的普通 ECS**,`/dev/kvm` 不存在、
+  cpuinfo 无 `vmx|svm`、`virt-what` 报自身即 KVM guest → **Kata microVM 与 gVisor-KVM 平台彻底出局**;
+  gVisor **systrap** 平台(不需 KVM)仍可选但**未采用**(办公 agent 是文件 IO/进程创建密集型,
+  正是 gVisor 的损耗区,上之前必须实测)。**主线不受影响**:`apps/cowork-server/` 全量 grep
+  `kvm|gvisor|runsc|kata|--runtime` **零命中**,R0-R5 本就建立在硬化 runc 上,RD3 原文也把
+  microVM 定为「评估项」而非前置。若将来要架构级隔离 = **换实例规格**(支持嵌套虚拟化的规格族
+  或裸金属 `ecs.ebm*`),代码侧只需给 orchestrator 加 `--runtime`。
+- **RD9(新增)**:无 KVM 场景的补偿加固 = **docker `userns-remap`**。零代码改动、零性能损耗,
+  容器内 root 映射到宿主非特权 uid。**兼容性已逐项实测**:chown init 容器(`--cap-drop ALL
+  --cap-add CHOWN`)成功、会话容器 `--user 1000` 写 volume 成功、宿主侧文件属主 = 101000。
+  orchestrator **无需改动**。⚠️ **必须在装 docker 时就开** —— 事后再开要迁移已有镜像/volume
+  (data-root 会变成 `<root>/<uid>.<gid>` 子目录)。
+
+## A.5 本轮修掉的 4 个真 bug(都是 Mac 开发期被掩盖的环境差异)
+
+**① 阿里云内网 pip 源配置从来没被真正验证过**(`53fbe68`)
+`mirrors.cloud.aliyuncs.com` 的 https 证书签给 `mirrors-ssl.aliyuncs.com`/`mirrors.aliyun.com`
+→ **hostname mismatch,内网源只能走 http**;而 pip 对 http 索引强制要求 `--trusted-host`,
+构建期与运行期**都缺**。修三处:Dockerfile 按 scheme 自动推导 `--trusted-host`(**只在 http 时
+放宽**,https 照常验证)、`orchestrator.mjs` 注入 `PIP_INDEX_URL` 时同步注入 `PIP_TRUSTED_HOST`、
+`.env.example` 改正并补验证命令。根因是原文档只要求「curl 验可达性」—— **curl 通不代表 pip 能用**。
+实测:`http://mirrors.cloud.aliyuncs.com/pypi/simple/pandas/` → 200/0.5s;解析 `100.100.2.148`
+(100.64/10 段,**不在 egress 拦截的私网四段内**,故容器内走内网源零公网带宽成立)。
+
+**② 镜像构建依赖 BuildKit,而多数服务器没有**(`277f15a`)
+`COPY --chmod=` 要求 BuildKit,Anolis 自带 docker 24 默认 legacy builder 且内网源无 buildx 插件
+→ 构建直接失败。Mac 的 Docker Desktop 默认开 BuildKit,所以一直没暴露。改为 Dockerfile 去掉
+`--chmod`、由 `build-image.sh` 组装上下文时显式 `chmod`(claude 755 / 两个 py 644),两种 builder
+都保留源文件权限,镜像因此可在**任何** docker 上构建。
+
+**③ 生产机上跑 selftest-r4 会清空出网防护**(`cc68b6d`,已写进 OPERATIONS)
+r4 要对比「装 egress 前后」,跑完 `DOCKER-USER` 只剩默认 `RETURN`。本次实测中招并已恢复。
+
+**④ 账号后端 compose 完全没透传 `APP_COWORK_*`**(codeagent-server `4c6ee22`)
+运维即使按 `.env.production.example` 写进 `.env` 也进不了容器,下发接口对所有人 404 ——
+R5-5 交付时「接口做了、部署面没接上」。同 commit 还修了两处:示例值 `wss://` 是错的
+(客户端 REST 走 `fetch(url+path)` 不支持 wss;WS 由 `https:` 推导,填 wss 反而降级成明文 ws),
+以及补记灰度组对桌面端不可用(见 A.6)。
+
+## A.6 ⚠️ 五条必须记住的坑(踩过,再踩一次就是浪费时间)
+
+1. **`APP_COWORK_ALLOWED_GROUPS` 对桌面客户端 = 总开关,必须留空。**
+   桌面端走 opaque session token,`claims.groups` **恒为 `[]`**(`app/auth/security.py` 显式置空),
+   而灰度判定是 `isdisjoint(claims.groups)` —— 该项非空则恒真 → **每个桌面用户都被判「组不匹配」→ 全员 404**。
+   它只对 admin web 的 JWT 路径有意义。
+2. **cowork-server 以非 root 跑,绑不了 80。** 走 NPM 转 8790(已如此);若非要 80,需给
+   systemd 单元加 `AmbientCapabilities=CAP_NET_BIND_SERVICE`。
+3. **换镜像必须先 `docker rm -f cowork-proxy` 再 restart** —— `ensureProxy` 见 running 即复用,
+   否则 proxy 还挂在旧镜像上(本次实测中招:install.sh 首启时 .env 还没配 `COWORK_IMAGE`)。
+4. **跑 selftest 前必须 `unset COWORK_AUTH_SECRET`**,否则 r1-r3 全 FAIL 且断言返回 `undefined`
+   (不是明显的 401,极易误判成功能坏了 —— 本次就误判了一轮);同时要 `export COWORK_SERVER_HOST=127.0.0.1`
+   覆盖 .env 的内网 IP。r4 自带 `r4-test-secret` 专测鉴权。完整命令见 `deploy/OPERATIONS.md`。
+5. **REST 路径是 `POST /session/:id`,不是 `/session/:id/ensure`** —— 后者是设计文档里的简写,
+   实现以 `index.mjs` 的 `SID_RE` 为准(`/^\/session\/([a-f0-9]{1,64})$/i`)。
+
+## A.7 账号后端侧(codeagent-server)—— 已全部完成并推送 main
+
+`origin/main` 最新三条(**均已推送**):
+
+| commit | 内容 |
+|---|---|
+| `aa263ae` | fix:「测试连接」改为测**表单里的待存值**而非库里已保存的(用户实测踩到:填完没保存就点测试→报"未配置") |
+| `eeb1f31` | feat: **admin「办公沙箱」可视化配置页**(此前 cowork 是唯一没有管理页的模块) |
+| `4c6ee22` | fix: compose 补 `APP_COWORK_*` 透传 + 修正示例 URL + 灰度说明 |
+
+**配置页能力**(`/cowork` 路由,侧栏「办公沙箱」):开关 / 服务器地址 / 签发密钥(加密入库、
+只显示掩码)/ **测试连接** / 清空回落 env。三项均 **DB 优先、env 兜底**,改完**即时生效无需重启**;
+每项旁有来源标记(`本页配置` / `环境变量兜底`)。
+「测试连接」用当前表单值签 token 真打沙箱 `/health`,**区分三种失败**:连不上 / 可达但密钥不被
+认可(401)/ 非预期状态码 —— 密钥不一致是最难查的故障(用户侧只有 401 且不提示原因)。
+
+对应服务端:`app/admin/cowork.py`(GET/PUT/POST probe/DELETE)+ `app/cowork/service.py` 新增
+`cowork_enabled` 键(DB 三态,未设回落 `APP_COWORK_ENABLED`)+ `resolve_enabled/server_url/auth_secret`。
+测试:`tests/cowork/` 共 **32 passed**;全仓 122 passed。
+
+## A.8 ✅ 已完成的验证(不必重做)
+
+- **四套 selftest 在 x64 + userns-remap 上全过,共 25 项**(r1 编排/WS exec 4 · r2 文件通道 8 ·
+  r3 凭证代理 7 · r4 authz/配额/出网 6)—— 这是「裸金属迁移三件套」的第一件。
+- **真实会话全链**:`POST /session/<hex>` 起容器(uid 1000 / NanoCpus 2e9 / Mem 2g)→
+  **容器内 `pip install humanize` 走内网源真装上并可 import** → 出网策略实证(内网 10 段与
+  NPM 所在 172 段均被拒、公网放行)→ `DELETE` 三方归零。
+- **镜像内容**:claude 2.1.203 可执行、权限 755/644/644、办公依赖全部可 import(pandas 3.0.5)、
+  中文字体 4 个、以 uid 1000 非 root 可跑。
+- **账号后端**:本地起真后端 + 真 admin web,保存生产配置后用户侧 `/api/v1/cowork/config`
+  **立刻从 404 变 200**(无需重启);页面「测试连接」真打香港沙箱返回 ok;故意填错密钥/错地址/
+  wss:// 三种情况均给出准确诊断。
+
+## A.9 🔜 还剩什么(按优先级)
+
+**① 最后一步:用户在 admin 页开通(需用户操作,已多次告知)**
+```bash
+# 服务器上
+git pull && docker compose up -d --build backend     # --build 必须(含前端页面)
+```
+然后 admin →「办公沙箱」→ 填地址 `https://cowork-server.ai-native-lab.com`(不带端口/尾斜杠)
++ 密钥 `036a47e034ec5e118bbc07df60e22a9ee465c090ea8410d8639d9af82d3b84e0` → 先「测试连接」看绿色
+→ 「保存」→ 打开「开通状态」。**`APP_COWORK_ALLOWED_GROUPS` 不要设**。
+验证:客户端日志由 `cowork config not provisioned for this account (404) — skipping`
+变为 `cowork config synced: url=... hasToken=true`(登录时或每 10 分钟轮询)。
+
+**② LabCodepilot 有 4 个 commit 未推送**(分支 `vm_cowork`):
+`1ffb773`(RD3/RD9)、`53fbe68`(pip)、`277f15a`(BuildKit)、`cc68b6d`(OPERATIONS)。
+**push 需用户明确指示。**
+
+**③ R5-6 Windows 真机实测**(等机器)。代码侧全完成:NSIS 免管理员(`perMachine:false` +
+`packElevateHelper:false`)、非 darwin 平台诚实降级 gate、forwarder+ws 会进 win 包。
+真机清单:装测零 UAC / forwarder `ELECTRON_RUN_AS_NODE` spawn .mjs / 完整办公回合。
+
+**④ 裸金属迁移三件套 —— 实际已消解 2/3**:x64 重跑 selftest ✅ 已完成;KVM 隔离评估 → RD3 已否决;
+TLS 真网联调 → NPM 已承担并实测。**故此项基本可关闭。**
+
+**⑤ 长尾**:`vm_cowork` 合回 main(用户拍板);技术债 #30(cred-proxy 拒绝无观测信号);
+审计日志 UI 查看面;办公会话标题旁模式徽标;guest 磁盘用量可视化。
+
+## A.10 运维速查
+
+```bash
+ssh cowork-prod                                   # 上机
+systemctl status cowork-server cowork-egress      # 服务
+journalctl -u cowork-server -f                    # 日志
+docker ps --filter label=cowork.managed=1         # 受管容器(cowork-proxy + 会话容器)
+iptables -S DOCKER-USER | grep -c cowork-egress   # 出网规则,应为 5
+# 手工签 token(联调用;生产由账号后端签)
+sudo -u cowork sh -c 'set -a; . /opt/cowork-server/.env; node /opt/cowork-server/sign-token.mjs <uid>'
+# 升级镜像后
+docker rm -f cowork-proxy && systemctl restart cowork-server
+```
+运维/IT 手册全文:`apps/cowork-server/deploy/OPERATIONS.md`(含 10 类审计事件、排障表、
+密钥轮换 = 全量 token 失效、selftest 三坑)。
+
+---
+
 > 产品思考见 [docs/insights/cowork-vm-mode.md](../insights/cowork-vm-mode.md)
 > 调研与 P0 结论:[docs/research/cowork-local-vm-mode.md](../research/cowork-local-vm-mode.md)
 > 执行计划(进度/决策日志,均已完成):[docs/exec-plans/completed/cowork-vm-mode.md](../exec-plans/completed/cowork-vm-mode.md)(P1 底层)+ [cowork-office-mode.md](../exec-plans/completed/cowork-office-mode.md)(办公模式 E1-E5)+ [cowork-remote-container.md](../exec-plans/completed/cowork-remote-container.md)(R 系列远程容器,RD1-RD8)
 > POC 脚手架说明:[scripts/poc/cowork/README.md](../../scripts/poc/cowork/README.md)
 >
 > **本文件目标:让接手者读完即可完整理解 cowork 办公模式、并立刻接上未完成的工作,无遗漏。**
+> ⚠️ **以下 §0-§9 为历史全貌,部分结论已被 §A 取代**(最显著的三处:①「账号后端下发接口待做」——
+> 实际早已完成**并已上线**,且 admin 可视化配置页也已做完;②「裸金属/KVM」——实际服务器无 KVM,
+> 见 RD3 修正;③「等外部条件」清单已大幅收窄。**以 §A 为准。**)
+>
 > 最后更新:2026-07-17 · 分支 `vm_cowork`(HEAD 以 git log 为准;R 系列已推送 origin 至 `c02f564` = R4+R5-1..4 全推齐;**R5-5/R5-6/R5-7 commit 未推送**)· 状态:**cowork 战略转向 —— 全平台统一「远程容器沙箱」(R 系列),取代本地 VM**。macOS 本地 vfkit(3.1.18 已交付)与 Windows WSL2(P2)都退为保留/挂起(代码不删,RD1)。**R 系列 R0-R5 代码侧全完成(exec-plan 已归档 completed/);剩余=等外部条件:R5-6 Windows 真机实测(等机器)、账号后端下发接口(契约见 exec-plan R5-5)、裸金属迁移三件套;后续候选之一「自建会话镜像」已完成 ✅(2026-07-17):`apps/cowork-server/image/`(Dockerfile+build-image.sh)把 claude+shim+cred-proxy 烘进 `cowork-sandbox` 镜像(tag 自动取 claude 版本,实测 2.1.203/537MB),开关 `COWORK_IMAGE_BUNDLED=1` 跳过全部宿主 bind(默认关零破坏,容器内路径不变零协议改动);**VM 已切 bundled 为常态**,selftest r2/r3/r4 全 21 项 PASS+生产实例容器挂载只剩 volume;**镜像已含办公依赖预装(2026-07-20,10M 共享带宽省流关键)**:pandas/openpyxl/xlsxwriter/python-docx/python-pptx/pdfplumber/pypdf/matplotlib+Noto CJK/pillow/requests/tabulate(537MB→1.16GB,日常任务零运行时 pip 下载)+ pip 三层源(运行期 COWORK_PIP_INDEX_URL 注入容器 env——阿里云配内网源零公网带宽 > 镜像 /etc/pip.conf 公网阿里源 > 构建期 COWORK_BUILD_PIP_INDEX),流程与部署日实测清单见 OPERATIONS §9;坑=切/升级镜像须先 `docker rm -f cowork-proxy` 再 restart(ensureProxy 见 running 即复用),存量会话容器 TTL/删除后才换新镜像;流程见 deploy/OPERATIONS.md §9。其余候选=gVisor·Kata 评估 RD3/凭证方案 C。**
 >
 > **当前节点与下一步(接手先读这段;远程容器是当前主线,本文档 §1-§9 的本地 vfkit 内容为"保留态背景",不是当前活跃路径)**:
