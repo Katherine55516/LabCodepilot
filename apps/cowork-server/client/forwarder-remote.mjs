@@ -23,9 +23,16 @@ const port = parseInt(process.env.COWORK_REMOTE_PORT || '8790', 10);
 const sid = process.env.COWORK_SESSION_ID || '';
 const token = process.env.COWORK_REMOTE_TOKEN || '';
 
+// HTTP_PROXY/HTTPS_PROXY/NO_PROXY **故意不过河**(生产实测踩过):宿主的代理地址
+// 几乎总是 127.0.0.1:xxxx —— 系统代理、Clash/Surge 之类本地代理软件,而 main.ts
+// 还会主动探测 macOS 系统代理并注入这两个变量。送进远程容器后 127.0.0.1 指向容器
+// 自身,claude 把每个 API 请求都发给一个不存在的端口 → 出向零字节、卡两分多钟后
+// exit 1,客户端表现为"模型没有任何反应"。沙箱有自己的出网路径(cred-proxy +
+// 公网直连),与客户端宿主的网络环境无关;沙箱侧若需代理应在服务器端配置。
+// 同理适用于本地 VM(vfkit):VM 内的 127.0.0.1 也不是宿主。
 const envOut = {};
 for (const [k, v] of Object.entries(process.env)) {
-  if (/^(ANTHROPIC_|CLAUDE_|COWORK_)/.test(k) || ['API_TIMEOUT_MS', 'HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY'].includes(k)) {
+  if (/^(ANTHROPIC_|CLAUDE_|COWORK_)/.test(k) || k === 'API_TIMEOUT_MS') {
     if (typeof v === 'string') envOut[k] = v;
   }
 }

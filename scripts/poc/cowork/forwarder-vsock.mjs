@@ -21,10 +21,14 @@ if (!sockPath || !fs.existsSync(sockPath)) {
   process.exit(127);
 }
 
-// 白名单 env 过河(不透传宿主 HOME/PATH 等)
+// 白名单 env 过河(不透传宿主 HOME/PATH 等)。
+// HTTP_PROXY/HTTPS_PROXY/NO_PROXY 故意不过河:宿主代理地址几乎总是 127.0.0.1:xxxx
+// (main.ts 还会主动探测 macOS 系统代理并注入),而 VM 内的 127.0.0.1 是 VM 自己,
+// claude 会把 API 请求发给不存在的端口并卡死。见 forwarder-remote.mjs 同处注释
+// (远程沙箱上已生产实测:出向零字节 + 两分钟后 exit 1)。
 const envOut = {};
 for (const [k, v] of Object.entries(process.env)) {
-  if (/^(ANTHROPIC_|CLAUDE_|COWORK_)/.test(k) || ['API_TIMEOUT_MS', 'HTTP_PROXY', 'HTTPS_PROXY', 'NO_PROXY'].includes(k)) {
+  if (/^(ANTHROPIC_|CLAUDE_|COWORK_)/.test(k) || k === 'API_TIMEOUT_MS') {
     if (typeof v === 'string') envOut[k] = v;
   }
 }
