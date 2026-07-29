@@ -1,11 +1,13 @@
 import { NextRequest } from 'next/server';
 import fs from 'fs/promises';
-import { getAllSessions, createSession, getSession, updateSessionWorkingDirectory } from '@/lib/db';
+import { getVisibleSessions, createSession, getSession, updateSessionWorkingDirectory } from '@/lib/db';
 import type { CreateSessionRequest, SessionsResponse, SessionResponse } from '@/types';
 
 export async function GET() {
   try {
-    const sessions = getAllSessions();
+    // 账号隔离:办公会话只返回属于当前登录账号的(研发会话不受影响)。
+    // 用 getVisibleSessions 而非 getAllSessions —— 后者保留给导入去重等内部逻辑。
+    const sessions = getVisibleSessions();
     const response: SessionsResponse = { sessions };
     return Response.json(response);
   } catch (error) {

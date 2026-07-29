@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { addMessage, updateMessageContent, updateMessageBySessionAndHint, getSession } from '@/lib/db';
+import { addMessage, updateMessageContent, updateMessageBySessionAndHint, getSession, isSessionVisibleToCurrentUser } from '@/lib/db';
 
 export const runtime = 'nodejs';
 
@@ -26,7 +26,8 @@ export async function POST(request: NextRequest) {
     }
 
     const session = getSession(session_id);
-    if (!session) {
+    // 账号隔离:这是写入口 —— 不拦的话别的账号能往他人办公会话里追加消息
+    if (!isSessionVisibleToCurrentUser(session)) {
       return NextResponse.json({ error: 'Session not found' }, { status: 404 });
     }
 

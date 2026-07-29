@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import { Readable } from 'stream';
-import { getSession } from '@/lib/db';
+import { getSession, isSessionVisibleToCurrentUser } from '@/lib/db';
 import {
   readFileStream,
   archiveStream,
@@ -28,7 +28,10 @@ export async function GET(request: NextRequest) {
   const wantArchive = request.nextUrl.searchParams.get('archive') === '1';
 
   const session = getSession(sessionId);
-  if (!session) {
+  // 账号隔离:产物清单(list)读的是本地 vm_artifacts_json 缓存,**不经过 cowork-server**,
+  // 所以服务端那道 uid 校验在这条路径上兜不住 —— 必须在这里拦,否则换账号后能列出
+  // 上一个账号办公会话的产物文件名。
+  if (!isSessionVisibleToCurrentUser(session)) {
     return Response.json({ error: 'Session not found' }, { status: 404 });
   }
   if (!session.sandbox_enabled) {

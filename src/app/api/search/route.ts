@@ -1,6 +1,6 @@
 import { NextRequest } from 'next/server';
 import path from 'path';
-import { getAllSessions, searchMessages } from '@/lib/db';
+import { getVisibleSessions, searchMessages } from '@/lib/db';
 import { scanDirectory } from '@/lib/files';
 import type { ChatSession, FileTreeNode } from '@/types';
 
@@ -123,7 +123,9 @@ export async function GET(request: NextRequest) {
       return Response.json({ sessions: [], messages: [], files: [] });
     }
 
-    const allSessions = getAllSessions();
+    // 账号隔离:搜索结果(会话名 / 消息正文 / 工作区文件)都必须限定在当前账号
+    // 可见的会话内。searchMessages 自身已在 SQL 层做同样过滤。
+    const allSessions = getVisibleSessions();
     const result: SearchResponse = { sessions: [], messages: [], files: [] };
 
     if (scope === 'all' || scope === 'sessions') {

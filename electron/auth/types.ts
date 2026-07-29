@@ -104,6 +104,12 @@ export interface CoworkRemoteConfig {
 // ── /api/v1/me response ────────────────────────────────────────────────────
 
 export interface MeInfo {
+  /**
+   * 账号 UUID。服务端 `upsert_from_claims` 用 `UUID(claims.sub)` 建档,所以它**就是**
+   * 签发 cowork HMAC token 时用的那个 uid —— 客户端拿它做办公会话归属,与沙箱侧
+   * 容器/卷的 `cowork.uid` label 天然对齐。
+   */
+  id?: string;
   username: string;
   display_name: string;
   email?: string;

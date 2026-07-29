@@ -43,6 +43,7 @@ import {
   purgeImageConfigOnServer,
   syncCoworkConfigToServer,
   purgeCoworkConfigOnServer,
+  syncCurrentUserToServer,
 } from './auth/broker';
 import { clearAuthState, loadToken } from './auth/storage';
 import { getBackendBase } from './auth/config';
@@ -1192,6 +1193,9 @@ async function bootAccountState(): Promise<void> {
     } catch (e) {
       logWarn('getConfigs failed at boot:', (e as Error).message);
     }
+    // 办公会话账号隔离的事实源：必须先于 refreshCoworkConfig 推下去，否则本次启动
+    // 期间新建的办公会话会带着空归属落库（空归属按存量处理 = 对所有账号隐藏）。
+    await syncCurrentUserToServer(String(currentMe?.id || ''));
     // 文生图凭证/办公沙箱配置下发：与 configs 并列，独立 try（失败不影响对话配置）。
     await refreshImageConfig();
     await refreshCoworkConfig();
@@ -1235,6 +1239,8 @@ async function postLoginSequence(): Promise<void> {
   } catch (e) {
     logWarn('postLogin getConfigs failed:', (e as Error).message);
   }
+  // 先于 cowork 配置：新账号登录后建的办公会话必须立刻带上正确归属（见 bootAccountState）
+  await syncCurrentUserToServer(String(currentMe?.id || ''));
   await refreshImageConfig();
   await refreshCoworkConfig();
   startBackgroundPolling({
@@ -1270,6 +1276,9 @@ async function postLogoutSequence(): Promise<void> {
   } catch (e) {
     logWarn('postLogout cowork-config purge failed:', (e as Error).message);
   }
+  // 清空归属标记：登出后办公会话对任何人都不可见,防止下一个登录的账号读到上一个
+  // 账号的办公对话(研发会话不受影响 —— 它绑定本地项目,不属于账号体系)。
+  await syncCurrentUserToServer('');
   currentMe = null;
   isOfflineMode = false;
   managedConfigCount = 0;
@@ -2619,6 +2628,8 @@ app.whenReady().then(async () => {
       try {
         await purgeCoworkConfigOnServer();
       } catch { /* ignore */ }
+      // token 失效等同登出:清归属,办公会话立即不可见(见 postLogoutSequence)
+      await syncCurrentUserToServer('');
       managedConfigCount = 0;
       broadcastAuthChange();
     } else {

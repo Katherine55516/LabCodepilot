@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { deleteSession, getSession, updateSessionWorkingDirectory, updateSessionTitle, updateSessionMode, updateSessionModel, updateSessionProviderId, clearSessionMessages, updateSdkSessionId, updateSessionPermissionProfile, updateSessionEffort } from '@/lib/db';
+import { deleteSession, getSession, isSessionVisibleToCurrentUser, updateSessionWorkingDirectory, updateSessionTitle, updateSessionMode, updateSessionModel, updateSessionProviderId, clearSessionMessages, updateSdkSessionId, updateSessionPermissionProfile, updateSessionEffort } from '@/lib/db';
 import { autoApprovePendingForSession } from '@/lib/bridge/permission-broker';
 
 export async function GET(
@@ -9,7 +9,9 @@ export async function GET(
   try {
     const { id } = await params;
     const session = getSession(id);
-    if (!session) {
+    // 账号隔离:别人的办公会话一律按"不存在"处理(而非 403),与 cowork-server
+    // 跨 uid 访问返回 404 的防枚举语义保持一致 —— 知道 id 也问不出这个会话存在。
+    if (!isSessionVisibleToCurrentUser(session)) {
       return Response.json({ error: 'Session not found' }, { status: 404 });
     }
     return Response.json({ session });
@@ -26,7 +28,9 @@ export async function PATCH(
   try {
     const { id } = await params;
     const session = getSession(id);
-    if (!session) {
+    // 账号隔离:别人的办公会话一律按"不存在"处理(而非 403),与 cowork-server
+    // 跨 uid 访问返回 404 的防枚举语义保持一致 —— 知道 id 也问不出这个会话存在。
+    if (!isSessionVisibleToCurrentUser(session)) {
       return Response.json({ error: 'Session not found' }, { status: 404 });
     }
 
@@ -118,7 +122,9 @@ export async function DELETE(
   try {
     const { id } = await params;
     const session = getSession(id);
-    if (!session) {
+    // 账号隔离:别人的办公会话一律按"不存在"处理(而非 403),与 cowork-server
+    // 跨 uid 访问返回 404 的防枚举语义保持一致 —— 知道 id 也问不出这个会话存在。
+    if (!isSessionVisibleToCurrentUser(session)) {
       return Response.json({ error: 'Session not found' }, { status: 404 });
     }
 

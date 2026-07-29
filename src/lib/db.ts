@@ -469,6 +469,15 @@ function migrateDb(db: Database.Database): void {
   if (!colNames.includes('vm_artifacts_json')) {
     safeAddColumn(db, "ALTER TABLE chat_sessions ADD COLUMN vm_artifacts_json TEXT NOT NULL DEFAULT ''");
   }
+  // 办公会话的归属账号(账号后端的用户 UUID)。同一台机器换账号登录时,办公会话
+  // 必须跟着账号走 —— 否则 B 登录后能读到 A 的全部办公对话,而对应的沙箱容器
+  // 又按 uid 隔离(cowork-server assertOwner → OWNER_MISMATCH → 404),B 拿到的是
+  // 一个"能看历史但用不了"的坏会话。
+  // 研发会话**不**参与账号隔离:它绑定的是本地项目目录,不属于账号体系(产品决策)。
+  // 空字符串 = 归属未知(本列上线前的存量),按用户决策一律隐藏,见 isVisibleSql()。
+  if (!colNames.includes('owner_uid')) {
+    safeAddColumn(db, "ALTER TABLE chat_sessions ADD COLUMN owner_uid TEXT NOT NULL DEFAULT ''");
+  }
   if (!colNames.includes('context_summary')) {
     safeAddColumn(db, "ALTER TABLE chat_sessions ADD COLUMN context_summary TEXT NOT NULL DEFAULT ''");
   }
@@ -1139,6 +1148,50 @@ export function getAllSessions(): ChatSession[] {
 }
 
 /**
+ * 当前登录账号的 uid。主进程登录成功后经 `/api/auth/current-user/sync` 推入,
+ * 登出/401 purge 时清空 —— 所以未登录时恒为 ''。
+ */
+export function getCurrentUserUid(): string {
+  return getSetting('current_user_uid') || '';
+}
+
+/**
+ * 会话可见性(账号隔离)WHERE 片段 —— 绑定一个参数:当前 uid。
+ *
+ * - **研发会话(sandbox_enabled=0)全部可见**:它绑定的是本地项目目录而非账号体系,
+ *   换账号不该让本地项目的历史消失(产品决策)。
+ * - **办公会话仅归属本账号可见**:办公会话与远程沙箱容器/卷一一对应,而沙箱侧本就
+ *   按 uid 隔离(cowork-server assertOwner)。客户端不隔离的话,换账号后能读到前一个
+ *   账号的全部办公对话,且点进去必然 404 —— 既泄漏又是坏会话。
+ * - `owner_uid != ''` 一箭双雕:既隐藏归属未知的存量会话(用户决策:一律隐藏),
+ *   又保证**未登录时 uid='' 不会把存量全部漏出**(否则 ''=''  恒真)。
+ */
+const SESSION_VISIBLE_WHERE = "(sandbox_enabled = 0 OR (owner_uid != '' AND owner_uid = ?))";
+
+/** 会话列表/搜索用:只返回当前账号可见的会话。内部去重/导入仍用 getAllSessions。 */
+export function getVisibleSessions(): ChatSession[] {
+  const db = getDb();
+  return db
+    .prepare(`SELECT * FROM chat_sessions WHERE ${SESSION_VISIBLE_WHERE} ORDER BY updated_at DESC`)
+    .all(getCurrentUserUid()) as ChatSession[];
+}
+
+/**
+ * 单会话可见性守卫。按 id 直接访问的入口(详情/消息/改标题/删除)必须用它,
+ * 否则知道 id 就能绕过列表过滤读到别人的办公会话。
+ */
+export function isSessionVisibleToCurrentUser<
+  T extends Pick<ChatSession, 'sandbox_enabled' | 'owner_uid'>,
+>(session: T | undefined | null): session is T {
+  // 类型谓词而非 boolean:调用点普遍是 `getSession(id)` 的结果(可能 undefined),
+  // 让它同时承担"存在性检查",省去每处再写一次 null 判断。
+  if (!session) return false;
+  if (!session.sandbox_enabled) return true; // 研发会话不参与账号隔离
+  const uid = getCurrentUserUid();
+  return !!uid && session.owner_uid === uid;
+}
+
+/**
  * Get sessions that are currently running or waiting for permission.
  */
 export function getActiveSessions(): ChatSession[] {
@@ -1214,9 +1267,14 @@ export function createSession(
   const wd = workingDirectory || '';
   const projectName = path.basename(wd);
 
+  // 办公会话在创建期定死归属账号(与 sandbox_enabled 同一时刻),此后不再变更 ——
+  // 换账号登录时它就跟着原账号走,不会出现在新账号的列表里。研发会话留空:
+  // 它绑定本地项目目录,不参与账号隔离。
+  const ownerUid = sandboxEnabled ? getCurrentUserUid() : '';
+
   db.prepare(
-    'INSERT INTO chat_sessions (id, title, created_at, updated_at, model, system_prompt, working_directory, sdk_session_id, project_name, status, mode, sdk_cwd, provider_id, permission_profile, effort, sandbox_enabled) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-  ).run(id, title || 'New Chat', now, now, model || '', systemPrompt || '', wd, '', projectName, 'active', mode || 'code', wd, providerId || '', permissionProfile || 'default', effort || '', sandboxEnabled ? 1 : 0);
+    'INSERT INTO chat_sessions (id, title, created_at, updated_at, model, system_prompt, working_directory, sdk_session_id, project_name, status, mode, sdk_cwd, provider_id, permission_profile, effort, sandbox_enabled, owner_uid) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+  ).run(id, title || 'New Chat', now, now, model || '', systemPrompt || '', wd, '', projectName, 'active', mode || 'code', wd, providerId || '', permissionProfile || 'default', effort || '', sandboxEnabled ? 1 : 0, ownerUid);
 
   return getSession(id)!;
 }
@@ -1322,8 +1380,10 @@ export function updateSessionPermissionProfile(id: string, profile: string): voi
 // is preserved via the existing conversationHistory replay path.
 export function updateSessionSandboxEnabled(id: string, enabled: boolean): void {
   const db = getDb();
-  db.prepare('UPDATE chat_sessions SET sandbox_enabled = ?, sdk_session_id = ? WHERE id = ?')
-    .run(enabled ? 1 : 0, '', id);
+  // 归属必须与 sandbox_enabled 同步翻转:切成办公却留空 owner_uid 会让这个会话
+  // 对**所有**账号隐藏(空归属按存量处理);切回研发则清空,回到"不参与账号隔离"。
+  db.prepare('UPDATE chat_sessions SET sandbox_enabled = ?, sdk_session_id = ?, owner_uid = ? WHERE id = ?')
+    .run(enabled ? 1 : 0, '', enabled ? getCurrentUserUid() : '', id);
 }
 
 /** Cowork: shape persisted in chat_sessions.vm_artifacts_json (VmArtifactFile). */
@@ -1600,8 +1660,13 @@ export function searchMessages(
     FROM messages m
     LEFT JOIN chat_sessions s ON s.id = m.session_id
     WHERE m.content LIKE ? ESCAPE '\\'${ackFilter}
+      AND (s.sandbox_enabled = 0 OR s.sandbox_enabled IS NULL OR (s.owner_uid != '' AND s.owner_uid = ?))
   `;
-  const params: unknown[] = [pattern];
+  // 账号隔离必须下沉到 SQL:搜索直接命中消息正文,是泄漏面最大的入口之一。
+  // 语义同 SESSION_VISIBLE_WHERE(此处列带 s. 前缀);LEFT JOIN 下 s 可能为 NULL
+  // (会话已删的孤儿消息),显式放行以免连带改变既有搜索行为。
+  // 在 SQL 层过滤而非取回后再筛 —— 否则 LIMIT 先截断,过滤完可能所剩无几。
+  const params: unknown[] = [pattern, getCurrentUserUid()];
 
   if (options.sessionId) {
     sql += ' AND m.session_id = ?';

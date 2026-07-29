@@ -24,6 +24,11 @@ export interface ChatSession {
   permission_profile?: 'default' | 'full_access';
   /** Cowork POC: 1 = SDK CLI runs inside an isolated VM, 0 = host runtime. */
   sandbox_enabled?: number;
+  /**
+   * 办公会话的归属账号(账号后端用户 UUID)。'' = 归属未知(存量),按可见性规则隐藏。
+   * 研发会话恒为 ''(它绑定本地项目目录,不参与账号隔离)。见 db.ts isSessionVisibleToCurrentUser。
+   */
+  owner_uid?: string;
   /** Per-session reasoning effort (e.g. 'low'|'medium'|'high'|'max'); ''/undefined = no explicit effort */
   effort?: string;
   context_summary?: string;

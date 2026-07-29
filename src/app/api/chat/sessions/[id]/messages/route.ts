@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { getMessages, getSession } from '@/lib/db';
+import { getMessages, getSession, isSessionVisibleToCurrentUser } from '@/lib/db';
 import type { MessagesResponse } from '@/types';
 
 /** Strip base64 `data` fields from <!--files:...--> HTML comments in message content */
@@ -25,7 +25,8 @@ export async function GET(
   try {
     const { id } = await params;
     const session = getSession(id);
-    if (!session) {
+    // 账号隔离:消息是泄漏面最大的入口(对话正文全在这儿),必须与列表同一把锁。
+    if (!isSessionVisibleToCurrentUser(session)) {
       return Response.json({ error: 'Session not found' }, { status: 404 });
     }
 

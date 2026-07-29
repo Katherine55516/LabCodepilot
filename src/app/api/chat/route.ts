@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import { streamClaude } from '@/lib/claude-client';
 import { generateSessionTitleInBackground } from '@/lib/title-generator';
-import { addMessage, getMessages, getSession, getSessionSummary, updateSessionTitle, updateSdkSessionId, updateSessionModel, updateSessionProvider, updateSessionProviderId, getSetting, acquireSessionLock, renewSessionLock, releaseSessionLock, setSessionRuntimeStatus, syncSdkTasks } from '@/lib/db';
+import { addMessage, getMessages, getSession, isSessionVisibleToCurrentUser, getSessionSummary, updateSessionTitle, updateSdkSessionId, updateSessionModel, updateSessionProvider, updateSessionProviderId, getSetting, acquireSessionLock, renewSessionLock, releaseSessionLock, setSessionRuntimeStatus, syncSdkTasks } from '@/lib/db';
 import { resolveProvider as resolveProviderUnified } from '@/lib/provider-resolver';
 import { notifySessionStart, notifySessionComplete, notifySessionError } from '@/lib/telegram-bot';
 import { extractCompletion } from '@/lib/onboarding-completion';
@@ -59,7 +59,10 @@ export async function POST(request: NextRequest) {
     }
 
     const session = getSession(session_id);
-    if (!session) {
+    // 账号隔离(发消息主入口):不拦的话,换账号后仍能往上一个账号的办公会话里发消息 ——
+    // 消息会落进别人的会话,而沙箱侧 assertOwner 又必然 404,是最糟的组合。
+    // 入口拦一次即可,下面流内部的 getSession 都在这道门之后。
+    if (!isSessionVisibleToCurrentUser(session)) {
       return new Response(JSON.stringify({ error: 'Session not found' }), {
         status: 404,
         headers: { 'Content-Type': 'application/json' },

@@ -215,3 +215,23 @@ export async function purgeCoworkConfigOnServer(): Promise<void> {
     throw new Error(`cowork-config purge failed: status=${r.status} body=${JSON.stringify(r.body)}`);
   }
 }
+
+/**
+ * 把当前登录账号的 uid 推给嵌入式服务(办公会话账号隔离的事实源)。
+ *
+ * 传空串 = 清除(登出 / 401)。**故意不抛异常**:隔离标记同步失败不该阻断登录流程,
+ * 失败的后果是"办公会话看不见"(fail-closed,偏安全一侧),而不是泄漏。
+ */
+export async function syncCurrentUserToServer(uid: string): Promise<void> {
+  try {
+    const r = await postJson<{ ok: boolean; error?: string }>(
+      '/api/auth/current-user/sync',
+      { uid },
+    );
+    if (!r.ok) {
+      logWarn(`current-user sync failed: status=${r.status} body=${JSON.stringify(r.body)}`);
+    }
+  } catch (e) {
+    logWarn('current-user sync failed:', (e as Error).message);
+  }
+}
