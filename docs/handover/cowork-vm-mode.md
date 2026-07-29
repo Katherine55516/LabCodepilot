@@ -9,9 +9,11 @@
 
 ## A.1 一句话现状
 
-**生产环境已全部就绪并端到端验证通过,只差「在 admin 页点几下开通」这最后一步。**
+**已开通,并完成真实用户端到端验收 —— 远程沙箱正式可用。**
 沙箱服务器(香港阿里云 x64)已部署、域名与 TLS 已通、四套 selftest 在 x64+userns 上全过;
-账号后端的下发接口与 admin 可视化配置页也已做完并推送。用户侧目前仍是「未开通」状态。
+账号后端下发接口与 admin 可视化配置页已上线。2026-07-29 在 admin 页开通后,
+**两个真实账号**都跑通了完整链路(配置下发 → 起容器 → 凭证代理 → WS exec → 文件通道上下行),
+过程中发现并修掉一个只在特定机器上复现的真 bug(A.5 ⑤,代理变量过河)。剩余工作见 A.9。
 
 ## A.2 生产环境实况(2026-07-29 实测核准)
 
@@ -39,7 +41,7 @@
 
 **`/opt/cowork-server/.env` 生效值**:
 ```
-COWORK_AUTH_SECRET=036a47e034ec5e118bbc07df60e22a9ee465c090ea8410d8639d9af82d3b84e0
+COWORK_AUTH_SECRET=<64 位 hex —— 故意不写进本文档,见服务器 /opt/cowork-server/.env>
 COWORK_ASSETS_DIR=/opt/cowork-assets
 COWORK_SERVER_PORT=8790
 COWORK_SERVER_HOST=172.24.185.132     # ← 绑内网 IP;**绝不能设 127.0.0.1**(NPM 在另一台机器)
@@ -68,8 +70,15 @@ COWORK_PIP_INDEX_URL=http://mirrors.cloud.aliyuncs.com/pypi/simple/   # ← 必�
   无 token 时 WS 返回 **502** 属正常(服务端直接断连,nginx 视为上游关闭),不是代理故障。
 - X-Forwarded-For 正常透传;`client_max_body_size` ≥10MB(声明 10MB 未被立即 413)。
 - **R5-3 预留的 Caddy TLS 反代作废**(`docker-compose.tls.yml`/`Caddyfile.example`)—— NPM 已承担 TLS。
-- 参考数据:从开发者当前网络上传实测仅 **66KB/s**(10MB 传 120s 未完)。这是开发者侧链路,
-  不代表办公网;上线后值得在办公网实测一次「对话里发大附件」的体感。
+- ⚠️ **曾记录「从开发者网络上传仅 66KB/s」—— 那个数字是被本地代理软件污染的,不是链路真实水平。**
+  2026-07-29 定位清楚:开发机跑着 fake-ip + TUN 模式的代理(域名解析到 `198.18.x.x` 这类
+  RFC 2544 保留段),流量绕经代理节点再回香港。实测对照:
+  服务端本地处理 `0.0001s` · NPM→沙箱内网 `0.0002s` · 内网 TLS 握手 `0.033s` ·
+  **服务器侧走公网+TLS `~0.10s`(这才是真实基线)** · 而开发机 TLS 握手 **1.5~3.0s**。
+  判据:开发机 ping 该 IP 物理 RTT 95ms,但 curl 的 TCP 握手只要 **0.6ms** —— 比物理延迟
+  快 150 倍,说明连接根本没出本机,连的是本地代理进程。
+  **做容量/体感判断时不要采信 66KB/s**;要测真实水平,先在代理规则里把
+  `ai-native-lab.com` 设为 DIRECT(判据:TCP 时间从 0.6ms 变成 ~95ms 才算真直连)。
 
 ## A.4 本轮新增/修正的决策
 
@@ -86,7 +95,7 @@ COWORK_PIP_INDEX_URL=http://mirrors.cloud.aliyuncs.com/pypi/simple/   # ← 必�
   orchestrator **无需改动**。⚠️ **必须在装 docker 时就开** —— 事后再开要迁移已有镜像/volume
   (data-root 会变成 `<root>/<uid>.<gid>` 子目录)。
 
-## A.5 本轮修掉的 4 个真 bug(都是 Mac 开发期被掩盖的环境差异)
+## A.5 修掉的 5 个真 bug(都是"开发者自己那台机器恰好没事"型)
 
 **① 阿里云内网 pip 源配置从来没被真正验证过**(`53fbe68`)
 `mirrors.cloud.aliyuncs.com` 的 https 证书签给 `mirrors-ssl.aliyuncs.com`/`mirrors.aliyun.com`
@@ -112,7 +121,22 @@ R5-5 交付时「接口做了、部署面没接上」。同 commit 还修了两�
 (客户端 REST 走 `fetch(url+path)` 不支持 wss;WS 由 `https:` 推导,填 wss 反而降级成明文 ws),
 以及补记灰度组对桌面端不可用(见 A.6)。
 
-## A.6 ⚠️ 五条必须记住的坑(踩过,再踩一次就是浪费时间)
+**⑤ 宿主代理变量过河进沙箱,导致别人的账号办公模式完全无响应**(`7ba9420`,2026-07-29 生产实测)
+`electron/main.ts:641-668` 会**主动探测 macOS 系统代理并注入 `HTTP_PROXY`/`HTTPS_PROXY`**
+(对本机跑 claude 是必要的),而两个 forwarder 的 env 白名单原样把它们送进沙箱。宿主代理
+地址几乎总是 `127.0.0.1:xxxx`,进容器后 `127.0.0.1` 指向**容器自身**,claude 把每个 API
+请求发往一个不存在的端口 → **出向零字节、卡 2 分 23 秒后 `exit 1`**,用户侧只看到"模型
+没有任何反应",且**服务端 stderr 一片空白**(claude 没来得及报错)。
+**为什么开发者自己测不出**:TUN 模式的代理软件不设系统代理(`scutil --proxy` 全 0),
+探测不到就不注入;只有**系统代理模式**的机器才中招 —— 典型的"我这好好的"型 bug。
+修复 = 白名单移除 `HTTP_PROXY`/`HTTPS_PROXY`/`NO_PROXY`,改动两处(两处都打进安装包):
+`apps/cowork-server/client/forwarder-remote.mjs`(远程,生产路径)与
+`scripts/poc/cowork/forwarder-vsock.mjs`(本地 VM —— VM 内的 `127.0.0.1` 同样不是宿主)。
+**没有动 main.ts 的注入逻辑**(本机确实需要走代理),只是不让它跨过沙箱边界。
+定位手法值得复用:`exec spawn env=21` 比正常的 `19` 多两个 + 容器 `NET=1.01kB/0B`
++ cred-proxy 流量零增长 —— 三个数字就锁定了"请求从未离开容器"。
+
+## A.6 ⚠️ 六条必须记住的坑(踩过,再踩一次就是浪费时间)
 
 1. **`APP_COWORK_ALLOWED_GROUPS` 对桌面客户端 = 总开关,必须留空。**
    桌面端走 opaque session token,`claims.groups` **恒为 `[]`**(`app/auth/security.py` 显式置空),
@@ -127,6 +151,13 @@ R5-5 交付时「接口做了、部署面没接上」。同 commit 还修了两�
    覆盖 .env 的内网 IP。r4 自带 `r4-test-secret` 专测鉴权。完整命令见 `deploy/OPERATIONS.md`。
 5. **REST 路径是 `POST /session/:id`,不是 `/session/:id/ensure`** —— 后者是设计文档里的简写,
    实现以 `index.mjs` 的 `SID_RE` 为准(`/^\/session\/([a-f0-9]{1,64})$/i`)。
+6. **报「模型没反应」时的排障顺序**(别一上来怀疑鉴权/下发)。先看审计日志有没有该 uid 的
+   `session_ensure`:**有 = 沙箱侧全通,问题在容器内**(下发、HMAC、网络都可以排除)。
+   然后 `journalctl -u cowork-server` 找 `exec exit code=`:`code=0` 是正常回合,
+   **`code=1` + 容器 `NET` 出向为 0 = 请求从未离开容器**,首先怀疑 env 污染(见 A.5 ⑤)。
+   注意两点:**`exec exit` 只进 journal 不进审计日志**(只看审计会误判成"卡住没退出");
+   claude 的 stderr 是 `inherit` 直通 journal,但**它可能什么都不输出** —— stderr 空
+   不代表没出错。对比 `exec spawn env=N` 的 N 值是快速判据(正常 19)。
 
 ## A.7 账号后端侧(codeagent-server)—— 已全部完成并推送 main
 
@@ -160,23 +191,37 @@ R5-5 交付时「接口做了、部署面没接上」。同 commit 还修了两�
 - **账号后端**:本地起真后端 + 真 admin web,保存生产配置后用户侧 `/api/v1/cowork/config`
   **立刻从 404 变 200**(无需重启);页面「测试连接」真打香港沙箱返回 ok;故意填错密钥/错地址/
   wss:// 三种情况均给出准确诊断。
+- **🎯 生产端到端验收(2026-07-29,真实账号 + 打包客户端)** —— 四条通道全通:
+  ①下发:客户端日志 `cowork config synced: url=https://cowork-server.ai-native-lab.com hasToken=true`,
+  DB 落 `cowork_backend=remote` + 215 字符密文 token;
+  ②鉴权:`/api/cowork/status` 用**真实下发 token** 打沙箱 `/health` → `usable:true`
+  (**这一步才证明 admin 页填的密钥与沙箱 `.env` 逐字符一致**,密钥错的唯一表现是全员 401 且不提示原因);
+  ③执行:`session_ensure → cred_issued(+0.5s) → exec_start(+3.5s) → exec exit code=0`,
+  第二轮 `(reused)` 复用容器;④文件通道:`file_download /workspace/1.md (294B)`。
+  **交叉验证**(排除"其实跑在本地"):客户端显示的 `Python 3.14.6` 与 `294 B` 同沙箱内实物逐字节吻合,
+  宿主卷属主 `101000`(userns 生效),容器 `User=1000:1000 / CapDrop=[ALL] / no-new-privileges`。
+  **UUID 格式 uid 已实测**:此前测试用的都是 `alice` 这类短串,而账号后端签发的是用户 UUID(含连字符);
+  `UID_RE = /^[a-zA-Z0-9._:-]{1,128}$/` 兼容,容器与卷 label 原样保留、清理归零。
+  **多用户已验证**:两个不同 UUID 的账号各自起容器互不干扰(开通是全局的,不按账号发)。
 
 ## A.9 🔜 还剩什么(按优先级)
 
-**① 最后一步:用户在 admin 页开通(需用户操作,已多次告知)**
+**① ~~在 admin 页开通~~ ✅ 已于 2026-07-29 完成**(验收结果见 A.8)。
+配置方法留档,**换密钥/换地址/重建环境时照此操作**:
 ```bash
-# 服务器上
+# 服务器上(账号后端 codeagent-server)
 git pull && docker compose up -d --build backend     # --build 必须(含前端页面)
 ```
-然后 admin →「办公沙箱」→ 填地址 `https://cowork-server.ai-native-lab.com`(不带端口/尾斜杠)
-+ 密钥 `036a47e034ec5e118bbc07df60e22a9ee465c090ea8410d8639d9af82d3b84e0` → 先「测试连接」看绿色
-→ 「保存」→ 打开「开通状态」。**`APP_COWORK_ALLOWED_GROUPS` 不要设**。
-验证:客户端日志由 `cowork config not provisioned for this account (404) — skipping`
+admin →「办公沙箱」→ 地址填 `https://cowork-server.ai-native-lab.com`(不带端口/尾斜杠、
+**不要填 `wss://`**)+ 密钥(取自沙箱服务器 `/opt/cowork-server/.env` 的 `COWORK_AUTH_SECRET`)
+→ **先点「测试连接」看绿色再保存**(密钥错会让全员 401 且不提示原因)→ 打开「开通状态」。
+**`APP_COWORK_ALLOWED_GROUPS` 必须留空**(原因见 A.6 ①)。开通是**全局**的,不按账号逐个发。
+生效判据:客户端日志由 `cowork config not provisioned for this account (404) — skipping`
 变为 `cowork config synced: url=... hasToken=true`(登录时或每 10 分钟轮询)。
 
-**② LabCodepilot 有 4 个 commit 未推送**(分支 `vm_cowork`):
-`1ffb773`(RD3/RD9)、`53fbe68`(pip)、`277f15a`(BuildKit)、`cc68b6d`(OPERATIONS)。
-**push 需用户明确指示。**
+**② LabCodepilot `vm_cowork` 有若干 commit 未推送**(**别照抄数字,以 `git log origin/vm_cowork..HEAD` 为准**
+—— 本文档此前写死"4 个"已被证伪:实际还压着**技能市场 Phase 0/1、image-studio 修复**等
+与 cowork 无关的更早工作,推分支会把它们一并推上去,推之前先看清楚)。**push 需用户明确指示。**
 
 **③ R5-6 Windows 真机实测**(等机器)。代码侧全完成:NSIS 免管理员(`perMachine:false` +
 `packElevateHelper:false`)、非 darwin 平台诚实降级 gate、forwarder+ws 会进 win 包。
