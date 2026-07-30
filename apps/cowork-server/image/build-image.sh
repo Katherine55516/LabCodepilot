@@ -39,6 +39,9 @@ cp "$SRV/container/cred-proxy.py" "$ctx/cred-proxy.py"
 cp "$DIR/Dockerfile" "$ctx/Dockerfile"
 # 预制 skills(纯 Markdown,无可执行脚本 —— 见 skills/README.md 的选型与 license 说明)
 cp -R "$DIR/skills" "$ctx/skills"
+# 从 macOS 同步过来时,tar/cp 会把扩展属性写成 AppleDouble 伴生文件(._xxx),
+# 连 .DS_Store 一起清掉 —— 否则它们会原样进镜像(2026-07-30 实测中招)。
+find "$ctx/skills" \( -name '._*' -o -name '.DS_Store' \) -delete
 # 权限在这里定死(Dockerfile 不用 COPY --chmod —— 那需要 BuildKit,legacy builder
 # 会直接失败,见 Dockerfile 注释)。两种 builder 都保留源文件权限,故等效。
 chmod 755 "$ctx/claude"
