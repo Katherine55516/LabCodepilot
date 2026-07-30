@@ -1647,6 +1647,51 @@ export type TestStatsEventType =
 /** 与 lib/test/prompts.ts 的 TestStep 对齐；独立定义避免 types → lib 反向依赖。 */
 export type TestStatsStep = 'requirement' | 'cases' | 'execution' | 'report';
 
+/**
+ * 测试任务形态。缺省（字段不存在）= `'functional'` —— 存量任务与旧持久化数据没有这个
+ * 字段，必须保持原有行为，故所有判定一律写 `=== 'smoke'` 而非 `!== 'functional'`。
+ *
+ * ⚠️ 「回归测试」不在此枚举里：回归不是任务形态，而是项目级的库/套件/轮次结构
+ * （见 lib/test/library.ts），不占用 tasks[] 维度。
+ */
+export type TestTaskType = 'functional' | 'smoke';
+
+/**
+ * 冒烟报告的一条 Bug（结构化列表，供人工复核）。
+ *
+ * 落盘在 `AI_LabTest/report/{任务}/{任务}-{env}.bugs.json`，**不进 run.json** ——
+ * run.json 是确定性归约产物（四态由代码算、不由人改），人工可写的严重级别 / 备注若混进去
+ * 会污染"执行事实"这一层语义。
+ */
+export interface SmokeBug {
+  /** Bug 编号（`BUG-01`，报告内稳定引用）。 */
+  id: string;
+  /** 关联的失败场景 id（`SM-003`）——复核动作即以此为 caseId 复用 report_reviewed 事件。 */
+  sceneId: string;
+  title: string;
+  /** 严重级别：致命 / 严重 / 一般 / 建议（AI 初判，可人工调整）。 */
+  severity: string;
+  /** 实际现象 vs 预期（报告正文用）。 */
+  actual?: string;
+  expected?: string;
+  /** 关键接口信息（失败用例采集，见 reduce.ts ApiInfo）。 */
+  api?: { method?: string; url?: string; status?: number | string; requestBody?: string; responseBody?: string };
+  /** 证据文件名（截图 / 录像）。 */
+  evidence?: string[];
+  /** 人工改过严重级别时记录原值，保留 AI 原判供追溯（双记录口径）。 */
+  severityOverriddenFrom?: string;
+  /** 复核备注（人工填写）。 */
+  note?: string;
+}
+
+/** `{任务}-{env}.bugs.json` 文件结构。 */
+export interface SmokeBugsFile {
+  version: number;
+  /** 绑定的执行轮次 hash（run.json 的 sha1）——换轮即换文件，防止复核态错挂到新一轮。 */
+  runHash: string;
+  bugs: SmokeBug[];
+}
+
 /** 复核结论：准确 / 误报（AI 判失败实际正常）/ 漏报（AI 判通过实际有问题）/ 程度不符。 */
 export type TestReviewVerdict = 'accurate' | 'false_fail' | 'missed_fail' | 'severity_mismatch';
 

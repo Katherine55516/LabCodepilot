@@ -21,6 +21,7 @@ import { parseExecProgress } from "@/lib/test/exec-progress";
 import { createExecLineBuffer, shouldAdoptPlaceholder, type ExecLine, type LiveResult, type LiveStatus } from "@/lib/test/exec-live";
 import { withDownstreamReset, runStartOptions, taskCategory, occupiedSlots, TASK_CATEGORY_ORDER, type TaskCategory } from "@/lib/test/step-status";
 import { REGRESSION_LIBRARY_TASK, REGRESSION_FULL_SUITE as REGRESSION_FULL_SUITE_NAME } from "@/lib/test/library-constants";
+import type { TestTaskType } from "@/types";
 import type { LoginStateInfo } from "@/lib/test/env-config";
 import type { RunHistoryEntry } from "@/lib/test/history";
 import { TestStatsView } from "@/components/test/TestStatsView";
@@ -212,7 +213,12 @@ interface ScriptManifestView {
 interface Project {
   name: string;
   path: string;
-  tasks: { id: string; name: string }[];
+  /**
+   * 任务清单。`type` 缺省 = 功能测试（存量任务无此字段，判定一律写 `=== "smoke"`）；
+   * 任务形态在新建时定死、不可后改（形态决定流水线节点与 prompt，中途切换会让已产出的
+   * 产物与新形态对不上）。
+   */
+  tasks: { id: string; name: string; type?: TestTaskType }[];
   /** R1：该项目记住的测试环境(local/SIT)，随项目切换各自恢复；缺省→迁移旧的全局值。 */
   selectedEnv?: string;
 }
@@ -260,6 +266,13 @@ interface TaskState {
    * 迁移：旧的单一 `targetUrl` 在加载时归位到该任务所属项目的当前 `selectedEnv`（见加载 effect）。
    */
   targetUrlByEnv?: Record<string, string>;
+  /**
+   * 冒烟任务：目标模块入口（「如何进入该模块」，如「左侧导航『评估管理』→『评估机构』列表页」）。
+   *
+   * 承接原冒烟提示词的 `<如何进入该模块>` 占位符 —— 冒烟场景只写"验证什么"不写点击步骤，
+   * 执行智能体需要一句话知道从哪儿进模块，否则要在整站里瞎找。仅冒烟任务写入。
+   */
+  moduleEntry?: string;
 }
 const DEFAULT_TASK_STATE: TaskState = {
   stepStatus: { requirement: "idle", cases: "idle", execution: "idle", report: "idle" },

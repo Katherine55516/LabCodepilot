@@ -104,6 +104,24 @@ export interface RunJson {
   taskCounts?: Record<string, RunCounts>;
   circuitBroken: boolean;
   tests: ReducedTest[];
+  /**
+   * 冒烟测试 · 体验观察（`@@OBSERVATION` 标记归约而来）：执行中顺带记录的**非功能**问题
+   * （响应慢 / 提示不清 / 按钮无反馈 / 状态不同步），供冒烟报告的「奇怪交互 / 体验问题」
+   * 章节。承接原冒烟提示词该章节的要求。
+   *
+   * 与四态判定【正交】：观察不影响 pass/fail、不计入任何通过率、不产生 Bug —— 它是
+   * "顺手记下的体验瑕疵"，不是缺陷判定。功能/回归任务的执行 prompt 不输出该标记，
+   * 故字段缺省，旧 run.json 与既有消费方完全不受影响。
+   */
+  observations?: RunObservation[];
+}
+
+/** 一条体验观察（冒烟执行中 `@@OBSERVATION` 输出）。 */
+export interface RunObservation {
+  /** 观察到的现象（面向用户的描述）。 */
+  text: string;
+  /** 关联场景 id（如 `SM-004`）；观察发生在场景之外时缺省。 */
+  scene?: string;
 }
 
 // Status aliases → the canonical four states.
@@ -131,6 +149,35 @@ export function harvestResults(text: string): RawResult[] {
     console.warn(`[test-reduce] ${malformed} 行 @@RESULT 无法解析为 JSON,已丢弃`);
   }
   return items;
+}
+
+/** 单条观察文本上限（防健谈模型把 run.json 撑爆；与 sanitizeApi 同款防御姿态）。 */
+const OBSERVATION_TEXT_MAX = 500;
+/** 单轮观察条数上限。超出即截断——体验观察是附带产物，不值得让 run.json 无限膨胀。 */
+const OBSERVATION_MAX = 50;
+
+/**
+ * 收割冒烟执行流里的 `@@OBSERVATION {json}`（体验观察，见 prompts.ts 冒烟执行 prompt）。
+ *
+ * 与 @@RESULT 的处置差异：**解析失败不告警**。观察是"顺手记下的瑕疵"，丢一条不影响任何
+ * 判定与计数；而 @@RESULT 丢一条会让用例状态错乱，必须留声（见 harvestResults）。
+ * 功能/回归任务的 prompt 不产出该标记 → 返回空数组，调用方据此省略字段。
+ */
+export function harvestObservations(text: string): RunObservation[] {
+  const { items } = harvestMarkers<{ text?: unknown; scene?: unknown }>(text, "OBSERVATION");
+  const out: RunObservation[] = [];
+  for (const raw of items) {
+    if (!raw || typeof raw !== "object") continue;
+    const t = typeof raw.text === "string" ? raw.text.trim() : "";
+    if (!t) continue; // 无文本的观察没有信息量，丢弃
+    const scene = typeof raw.scene === "string" && raw.scene.trim() ? raw.scene.trim() : undefined;
+    out.push({
+      text: t.length > OBSERVATION_TEXT_MAX ? t.slice(0, OBSERVATION_TEXT_MAX) + "…" : t,
+      ...(scene ? { scene } : {}),
+    });
+    if (out.length >= OBSERVATION_MAX) break;
+  }
+  return out;
 }
 
 /**
@@ -172,6 +219,11 @@ export function reduceResults(
     suiteIds?: string[];
     /** runId → 来源任务名（回归轮次:快照 idMap 反解;传入即输出 taskCounts 分组小计）。 */
     taskOf?: Record<string, string>;
+    /**
+     * 冒烟：体验观察（`@@OBSERVATION` 收割结果，见 harvestObservations）。非空才写进
+     * run.json；功能/回归任务不传 → 字段缺省，旧消费方零感知。
+     */
+    observations?: RunObservation[];
   },
 ): RunJson {
   const tests: ReducedTest[] = raw.map((r) => {
@@ -297,13 +349,19 @@ export function reduceResults(
     ...(taskCounts ? { taskCounts } : {}),
     circuitBroken,
     tests,
+    ...(opts.observations?.length ? { observations: opts.observations } : {}),
   };
 }
 
-/** Convenience: harvest @@RESULT from raw stream text, then reduce. */
+/**
+ * Convenience: harvest @@RESULT from raw stream text, then reduce.
+ *
+ * 同时收割 `@@OBSERVATION`（冒烟体验观察）——功能/回归的执行流里不会出现该标记，收割结果
+ * 为空数组、字段自然缺省，故无需调用方按任务形态分流。
+ */
 export function reduceFromText(
   text: string,
   opts: { module: string; env: string; time: string; verificationById?: Record<string, string>; caseIds?: string[]; suiteIds?: string[]; taskOf?: Record<string, string> },
 ): RunJson {
-  return reduceResults(harvestResults(text), opts);
+  return reduceResults(harvestResults(text), { ...opts, observations: harvestObservations(text) });
 }
