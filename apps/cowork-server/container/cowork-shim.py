@@ -21,6 +21,44 @@ import subprocess
 import threading
 
 CLAUDE_BIN = os.environ.get("COWORK_CLAUDE_BIN", "/opt/cowork/claude")
+# 镜像内预制的 Agent Skills(只读)。刻意不在 /opt/cowork 下 —— 非 bundled 模式
+# orchestrator 会把宿主 assets 挂到 /opt/cowork:ro 并遮蔽其内容,见 image/Dockerfile。
+SKILLS_SRC = os.environ.get("COWORK_SKILLS_DIR", "/opt/cowork-skills")
+
+
+def link_preinstalled_skills():
+    """把镜像内预制的 skill 软链进 ~/.claude/skills/,让 claude 能发现它们。
+
+    为什么每次启动都要做:HOME(/home/agent)是 orchestrator 挂的 **tmpfs**,容器每次
+    创建都是空的,所以不可能在镜像里把文件写死到 ~/.claude/skills。
+
+    为什么逐个软链、而不是把整个 skills 目录软链过去:claude 扫描 skills 目录用的是
+    readdir —— 目录内的**条目**是软链能被正常列出;而把 skills 本身做成软链则依赖
+    实现是否 follow,不可靠。逐个链也让用户/后续流程仍可往同一目录放自己的 skill。
+
+    软链而非复制:tmpfs 占的是内存,且软链指向镜像只读层,agent 改不动预制内容。
+
+    失败只告警不抛:skill 是增强项,不能因为它挂掉整个回合。
+    """
+    try:
+        if not os.path.isdir(SKILLS_SRC):
+            return
+        dest = os.path.join(os.environ.get("HOME", "/home/agent"), ".claude", "skills")
+        os.makedirs(dest, exist_ok=True)
+        linked = 0
+        for name in sorted(os.listdir(SKILLS_SRC)):
+            src = os.path.join(SKILLS_SRC, name)
+            if not os.path.isdir(src):
+                continue  # 跳过 LICENSE 等非 skill 文件
+            link = os.path.join(dest, name)
+            if os.path.lexists(link):
+                continue  # 已存在(同容器内多回合)—— 不覆盖用户可能自建的同名 skill
+            os.symlink(src, link)
+            linked += 1
+        if linked:
+            print(f"[cowork-shim] 预制 skill 已挂载: {linked} 个 → {dest}", file=sys.stderr)
+    except OSError as e:
+        print(f"[cowork-shim] 预制 skill 挂载失败(不影响本回合): {e}", file=sys.stderr)
 
 
 def main():
@@ -29,6 +67,8 @@ def main():
         argv = sys.argv[sys.argv.index("--") + 1:]
     else:
         argv = sys.argv[1:]
+
+    link_preinstalled_skills()  # 必须在起 claude 之前:它启动时就会扫 skills 目录
 
     proc = subprocess.Popen(
         [CLAUDE_BIN] + argv,

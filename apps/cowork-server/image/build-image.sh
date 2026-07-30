@@ -21,6 +21,7 @@ command -v docker >/dev/null || die "docker 未安装"
 [ -x "$ASSETS_DIR/claude" ] || die "缺 $ASSETS_DIR/claude(可执行 claude 二进制);用法: $0 <assets目录>"
 [ -f "$SRV/container/cowork-shim.py" ] || die "缺 $SRV/container/cowork-shim.py(在部署目录/仓库下跑本脚本)"
 [ -f "$SRV/container/cred-proxy.py" ] || die "缺 $SRV/container/cred-proxy.py"
+[ -d "$DIR/skills" ] || die "缺 $DIR/skills(预制 skill 目录)"
 
 # tag:优先 claude --version(同架构宿主可直接执行;失败回退日期)
 TAG="${COWORK_IMAGE_TAG:-}"
@@ -36,10 +37,15 @@ cp "$ASSETS_DIR/claude" "$ctx/claude"
 cp "$SRV/container/cowork-shim.py" "$ctx/cowork-shim.py"
 cp "$SRV/container/cred-proxy.py" "$ctx/cred-proxy.py"
 cp "$DIR/Dockerfile" "$ctx/Dockerfile"
+# 预制 skills(纯 Markdown,无可执行脚本 —— 见 skills/README.md 的选型与 license 说明)
+cp -R "$DIR/skills" "$ctx/skills"
 # 权限在这里定死(Dockerfile 不用 COPY --chmod —— 那需要 BuildKit,legacy builder
 # 会直接失败,见 Dockerfile 注释)。两种 builder 都保留源文件权限,故等效。
 chmod 755 "$ctx/claude"
 chmod 644 "$ctx/cowork-shim.py" "$ctx/cred-proxy.py"
+find "$ctx/skills" -type d -exec chmod 755 {} +
+find "$ctx/skills" -type f -exec chmod 644 {} +
+info "预制 skills:$(find "$DIR/skills" -name SKILL.md | wc -l | tr -d ' ') 个"
 
 info "docker build → cowork-sandbox:$TAG …"
 # 构建期 pip 源:默认公网阿里镜像;阿里云服务器上可 COWORK_BUILD_PIP_INDEX 换内网源
