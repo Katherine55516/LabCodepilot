@@ -20,16 +20,18 @@ import type { IpcMain } from 'electron';
 import { getBackendBase } from './auth/config';
 import { loadToken } from './auth/storage';
 import { logInfo, logWarn } from './auth/log';
-import { extractZip, replaceDirAtomic } from './skills-store-fs';
 import {
-  LEDGER_BASENAME,
+  extractZip,
+  replaceDirAtomic,
+  skillsRootDir,
+  loadLedgerHealed,
+  saveLedger,
+} from './skills-store-fs';
+import {
   MAX_ZIP_BYTES,
   findSkillContentRoot,
   resolveDirName,
   parseHubFailure,
-  parseLedger,
-  serializeLedger,
-  healLedger,
   mergeInstallState,
   type Ledger,
   type SkillsStoreFailure,
@@ -42,48 +44,15 @@ export const DOWNLOAD_TIMEOUT_MS = 65_000;
 
 const NETWORK_FAILURE: SkillsStoreFailure = { ok: false, error: 'network' };
 
-// ── 台账（fs 侧；纯逻辑在 core）──────────────────────────────────────────────
-
-export function skillsRootDir(): string {
-  return path.join(os.homedir(), '.claude', 'skills');
-}
-
-function ledgerPath(): string {
-  return path.join(skillsRootDir(), LEDGER_BASENAME);
-}
-
-function hasSkillDir(dirName: string): boolean {
-  return fs.existsSync(path.join(skillsRootDir(), dirName, 'SKILL.md'));
-}
+// ── 台账（fs 层在 skills-store-fs.ts,此处只补日志）──────────────────────────
 
 /** 读台账并就地自愈（目录被「我的技能」侧删除后清掉死条目，见方案 §7）。 */
-export function loadLedger(): Ledger {
-  let raw: string | null = null;
-  try {
-    raw = fs.readFileSync(ledgerPath(), 'utf-8');
-  } catch {
-    raw = null;
-  }
-  const parsed = parseLedger(raw);
-  const { ledger, removed } = healLedger(parsed, hasSkillDir);
+function loadLedger(): Ledger {
+  const { ledger, removed } = loadLedgerHealed();
   if (removed.length > 0) {
     logInfo('[skills-store] ledger self-heal, removed stale entries:', removed.join(','));
-    try {
-      saveLedger(ledger);
-    } catch {
-      // 写失败不阻断读路径 — 下次再愈
-    }
   }
   return ledger;
-}
-
-export function saveLedger(ledger: Ledger): void {
-  const dir = skillsRootDir();
-  fs.mkdirSync(dir, { recursive: true });
-  // 临时文件 + rename，避免半写台账
-  const tmp = path.join(dir, `${LEDGER_BASENAME}.tmp`);
-  fs.writeFileSync(tmp, serializeLedger(ledger), 'utf-8');
-  fs.renameSync(tmp, ledgerPath());
 }
 
 // ── Hub 请求 ─────────────────────────────────────────────────────────────────

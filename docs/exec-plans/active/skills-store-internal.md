@@ -1,7 +1,7 @@
 # 技能市场（内部）— 客户端接入 codeagent-server Skills 商店
 
 > 创建时间：2026-07-27
-> 最后更新：2026-07-28（Phase 0-2 完成）
+> 最后更新：2026-07-28（Phase 0-3 完成）
 >
 > 服务端契约：codeagent-server `docs/skills-store-api.md`（commit `acb6240`，已合入 main）。
 > 服务端为 Lab AI Hub 的 BFF 纯代理，本方案只覆盖客户端层。
@@ -13,7 +13,7 @@
 | Phase 0 | 调研 + 主进程骨架：zip 解压库选型 POC、HubSkillsClient（list/detail/download 透传 + 错误码映射）、IPC + preload + 类型声明 | ✅ 已完成 | 选型定稿 **yauzl@3.4.0**（MIT，唯一依赖 pend）：POC 实测其默认（decodeStrings）即拒绝 `../`/绝对路径条目，中文文件名正确解码，symlink 经 externalFileAttributes 高 16 位识别拒绝；extract-zip 落选（会创建 symlink 条目且无大小/条目数上限口子）。core 26 条单测全过 |
 | Phase 1 | UI：Skills 页第三个 tab「技能市场（内部）」+ 列表/搜索/分页 + 详情页 | ✅ 已完成 | CDP mock 全链路验证（三 tab/徽章/详情/搜索/分页 20→40→45/错误与登录门禁/重试恢复/无 electronAPI 隐藏 tab）；修一处窄弹窗标题被徽章按钮挤没的布局 bug（header flex-wrap）；动作按钮 Phase 2 前禁用；en 外部市场文案对齐为 Marketplace (External) | 
 | Phase 2 | 安装链路：install / uninstall / update（zip 下载解压 + 台账 + zip-slip 防护 + skill 缓存失效） | ✅ 已完成 | 解压/落位层拆为独立 `skills-store-fs.ts`（不依赖 electron）→ 单测用手工 zip 字节流驱动真实 yauzl 循环（slip/symlink/中文名/原子替换 7 条）；变更操作 promise 链串行化防台账并发丢写；新增 `POST /api/skills/refresh` 失效 Next 侧发现缓存；CDP 验证装/卸/更全链路 + 修一处详情页安装状态取组件 state 不随 prop 更新的 bug | 
-| Phase 3 | 状态联动：isInstalled 合并、可更新徽章、DEPRECATED 处理、台账自愈、与「我的技能」互通 | 📋 待开始 | |
+| Phase 3 | 状态联动：isInstalled 合并、可更新徽章、DEPRECATED 处理、台账自愈、与「我的技能」互通 | ✅ 已完成 | 大头已在 Phase 0-2 顺手落地；本阶段:修「我的技能」DELETE 对 installed 技能只删 SKILL.md 的既有 bug（孤儿残留+永久占 slug,外部市场同受益,整目录删除+根围栏）；台账 fs 层迁至 skills-store-fs（CODEPILOT_SKILLS_ROOT_OVERRIDE 注入口）+4 条集成测试（round-trip/自愈持久化/legacy 单文件删/损坏容错）；核查结论:「我的技能」按 frontmatter name 匹配,与内部 dirName 无错位风险 | 
 | Phase 4 | i18n（en/zh/zh-HK 手工）+ 单测 + 真实链路验证 + CDP UI 验证 + 交接/产品两份文档 | 📋 待开始 | |
 
 ## 决策日志

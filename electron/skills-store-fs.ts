@@ -5,15 +5,72 @@
  */
 
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import yauzl from 'yauzl';
 
 import {
+  LEDGER_BASENAME,
   MAX_ZIP_ENTRIES,
   MAX_UNCOMPRESSED_BYTES,
   isSymlinkEntry,
   entryPathIsContained,
+  parseLedger,
+  serializeLedger,
+  healLedger,
+  type Ledger,
 } from './skills-store-core';
+
+// ── 安装台账（fs 侧;纯逻辑在 core）──────────────────────────────────────────
+
+/**
+ * 安装根。CODEPILOT_SKILLS_ROOT_OVERRIDE 是单测注入口(真实主目录不可作
+ * 测试靶场),生产不设。
+ */
+export function skillsRootDir(): string {
+  const override = process.env.CODEPILOT_SKILLS_ROOT_OVERRIDE?.trim();
+  return override || path.join(os.homedir(), '.claude', 'skills');
+}
+
+function ledgerPath(): string {
+  return path.join(skillsRootDir(), LEDGER_BASENAME);
+}
+
+function hasSkillDir(dirName: string): boolean {
+  return fs.existsSync(path.join(skillsRootDir(), dirName, 'SKILL.md'));
+}
+
+/**
+ * 读台账并就地自愈:目录(或其 SKILL.md)已不存在的条目移除并回写 —
+ * 用户从「我的技能」删除只动目录不动台账,靠这里兜底避免幽灵「已安装」。
+ * removed 交调用方记日志(本层不依赖 electron 日志设施)。
+ */
+export function loadLedgerHealed(): { ledger: Ledger; removed: string[] } {
+  let raw: string | null = null;
+  try {
+    raw = fs.readFileSync(ledgerPath(), 'utf-8');
+  } catch {
+    raw = null;
+  }
+  const { ledger, removed } = healLedger(parseLedger(raw), hasSkillDir);
+  if (removed.length > 0) {
+    try {
+      saveLedger(ledger);
+    } catch {
+      // 写失败不阻断读路径 — 下次再愈
+    }
+  }
+  return { ledger, removed };
+}
+
+export function saveLedger(ledger: Ledger): void {
+  const dir = skillsRootDir();
+  fs.mkdirSync(dir, { recursive: true });
+  // 临时文件 + rename,避免半写台账
+  const tmp = path.join(dir, `${LEDGER_BASENAME}.tmp`);
+  fs.writeFileSync(tmp, serializeLedger(ledger), 'utf-8');
+  fs.renameSync(tmp, ledgerPath());
+}
 
 /**
  * yauzl 解压循环 + 守卫（方案 §8 安全清单）。守卫三重:yauzl 自带文件名校验

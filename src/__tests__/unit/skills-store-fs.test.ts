@@ -17,7 +17,14 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
-import { extractZip, replaceDirAtomic } from '../../../electron/skills-store-fs';
+import {
+  extractZip,
+  replaceDirAtomic,
+  skillsRootDir,
+  loadLedgerHealed,
+  saveLedger,
+} from '../../../electron/skills-store-fs';
+import { LEDGER_BASENAME, LEDGER_VERSION, type Ledger } from '../../../electron/skills-store-core';
 
 // ── 手工 zip 构造器（stored,无压缩）──────────────────────────────────────────
 
@@ -201,5 +208,90 @@ describe('replaceDirAtomic', () => {
     // 无备份目录残留
     const siblings = fs.readdirSync(path.dirname(dest));
     assert.equal(siblings.some((n) => n.startsWith(path.basename(dest) + '.bak-')), false);
+  });
+});
+
+// ── 台账 fs 层(CODEPILOT_SKILLS_ROOT_OVERRIDE 注入临时安装根)──────────────────
+
+describe('ledger fs (loadLedgerHealed / saveLedger)', () => {
+  function withRoot<T>(fn: (root: string) => T): T {
+    const root = path.join(workRoot, `skills-root-${seq++}`);
+    fs.mkdirSync(root, { recursive: true });
+    process.env.CODEPILOT_SKILLS_ROOT_OVERRIDE = root;
+    try {
+      return fn(root);
+    } finally {
+      delete process.env.CODEPILOT_SKILLS_ROOT_OVERRIDE;
+    }
+  }
+
+  function entry(dirName: string) {
+    return {
+      slug: dirName,
+      dirName,
+      displayName: dirName,
+      contentHash: 'h1',
+      etag: '"h1"',
+      downloadVersion: 1,
+      installedAt: '2026-07-28T00:00:00Z',
+    };
+  }
+
+  function installDir(root: string, dirName: string): void {
+    fs.mkdirSync(path.join(root, dirName), { recursive: true });
+    fs.writeFileSync(path.join(root, dirName, 'SKILL.md'), '---\nname: x\n---\n');
+  }
+
+  it('honors the root override and round-trips via real files (no .tmp residue)', () => {
+    withRoot((root) => {
+      assert.equal(skillsRootDir(), root);
+      installDir(root, 'pdf-toolkit');
+      const src: Ledger = { version: LEDGER_VERSION, skills: { ck1: entry('pdf-toolkit') } };
+      saveLedger(src);
+      assert.equal(fs.existsSync(path.join(root, LEDGER_BASENAME)), true);
+      assert.equal(fs.existsSync(path.join(root, `${LEDGER_BASENAME}.tmp`)), false);
+      const { ledger, removed } = loadLedgerHealed();
+      assert.deepEqual(removed, []);
+      assert.deepEqual(ledger, src);
+    });
+  });
+
+  it('self-heals after「我的技能」-style deletion and persists the healed ledger', () => {
+    withRoot((root) => {
+      installDir(root, 'alive');
+      installDir(root, 'doomed');
+      saveLedger({ version: LEDGER_VERSION, skills: { ckA: entry('alive'), ckB: entry('doomed') } });
+
+      // 模拟「我的技能」删除:整目录移除(修复后的 DELETE 语义)
+      fs.rmSync(path.join(root, 'doomed'), { recursive: true, force: true });
+
+      const first = loadLedgerHealed();
+      assert.deepEqual(first.removed, ['ckB']);
+      assert.deepEqual(Object.keys(first.ledger.skills), ['ckA']);
+      // 自愈结果已回写磁盘:重读不再出现死条目
+      const second = loadLedgerHealed();
+      assert.deepEqual(second.removed, []);
+      assert.deepEqual(Object.keys(second.ledger.skills), ['ckA']);
+    });
+  });
+
+  it('treats a dir whose SKILL.md is gone as dead (legacy file-only deletion)', () => {
+    withRoot((root) => {
+      installDir(root, 'husk');
+      saveLedger({ version: LEDGER_VERSION, skills: { ckH: entry('husk') } });
+      fs.unlinkSync(path.join(root, 'husk', 'SKILL.md')); // 旧 DELETE 语义只删文件
+      const { ledger, removed } = loadLedgerHealed();
+      assert.deepEqual(removed, ['ckH']);
+      assert.deepEqual(ledger.skills, {});
+    });
+  });
+
+  it('survives a corrupt ledger file on disk', () => {
+    withRoot((root) => {
+      fs.writeFileSync(path.join(root, LEDGER_BASENAME), '{not json');
+      const { ledger, removed } = loadLedgerHealed();
+      assert.deepEqual(removed, []);
+      assert.deepEqual(ledger, { version: LEDGER_VERSION, skills: {} });
+    });
   });
 });

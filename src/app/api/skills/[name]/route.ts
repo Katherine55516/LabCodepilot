@@ -400,6 +400,19 @@ export async function DELETE(
       return NextResponse.json({ error: "Skill not found" }, { status: 404 });
     }
 
+    if (found.source === "installed") {
+      // 已安装技能以「目录」为单位:只删 SKILL.md 会留下 scripts/ 等孤儿残留,
+      // 且残留目录永久占住目录名(内部市场重装被迫用 id 后缀目录)。
+      // 目录围栏:仅当技能目录直接位于两个安装根之一时才整目录删除。
+      const skillDir = path.dirname(found.filePath);
+      const parent = path.resolve(path.dirname(skillDir));
+      const roots = [getInstalledSkillsDir(), getClaudeSkillsDir()].map((d) => path.resolve(d));
+      if (roots.includes(parent)) {
+        fs.rmSync(skillDir, { recursive: true, force: true });
+        return NextResponse.json({ success: true });
+      }
+    }
+
     fs.unlinkSync(found.filePath);
     return NextResponse.json({ success: true });
   } catch (error) {
