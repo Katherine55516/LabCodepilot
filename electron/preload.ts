@@ -31,6 +31,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     openFolder: () => ipcRenderer.invoke('logs:open-folder'),
     getPath: () => ipcRenderer.invoke('logs:get-path'),
   },
+  feedback: {
+    submit: (payload: { message: string; includeLog: boolean }) =>
+      ipcRenderer.invoke('feedback:submit', payload),
+  },
   install: {
     checkPrerequisites: () => ipcRenderer.invoke('install:check-prerequisites'),
     start: () => ipcRenderer.invoke('install:start'),

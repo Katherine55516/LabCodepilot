@@ -41,7 +41,9 @@ import {
   syncImageConfigToServer,
   purgeImageConfigOnServer,
 } from './auth/broker';
-import { clearAuthState } from './auth/storage';
+import { clearAuthState, loadToken } from './auth/storage';
+import { getBackendBase } from './auth/config';
+import { normalizeFeedbackMessage, buildFeedbackForm, postFeedback } from './feedback-core';
 import { initMasterKey, getMasterKeyHex, logSafeStorageStatus } from './auth/secret-key';
 import { logInfo, logWarn, logError } from './auth/log';
 import { HttpError, AuthExpiredError, NetworkError, type MeInfo, type ModelConfig } from './auth/types';
@@ -2589,6 +2591,51 @@ app.whenReady().then(async () => {
       if (e instanceof NetworkError) return { ok: false as const, kind: 'network' as const, error: e.message };
       return { ok: false as const, error: e instanceof Error ? e.message : String(e) };
     }
+  });
+
+  // 问题反馈：设置页「问题反馈」上报。走主进程的原因 — 登录 token 与
+  // main.log 都只在主进程（token 绝不下发 renderer）。日志只取当前
+  // main.log（写入时已经过 scrubSecrets 脱敏，≤5MB），不含轮转旧档。
+  // 身份不上送 — 服务端以 JWT claims 为准。契约见
+  // docs/exec-plans/active/bug-report-feedback.md。
+  ipcMain.handle('feedback:submit', async (_event, payload: { message?: unknown; includeLog?: unknown }) => {
+    const message = normalizeFeedbackMessage(payload?.message);
+    if (!message) return { ok: false as const, error: 'invalid-message' as const };
+    const token = loadToken();
+    if (!token) return { ok: false as const, error: 'not-logged-in' as const };
+
+    let logBytes: Uint8Array | null = null;
+    if (payload?.includeLog === true) {
+      try {
+        logBytes = fs.readFileSync(path.join(getLogDir(), 'main.log'));
+      } catch {
+        logBytes = null; // 日志缺失不阻断上报，仅不附带
+      }
+    }
+
+    const form = buildFeedbackForm({
+      message,
+      env: {
+        appVersion: app.getVersion(),
+        platform: process.platform,
+        osVersion: process.getSystemVersion(),
+      },
+      logBytes,
+    });
+    const result = await postFeedback({ baseUrl: getBackendBase(), token, form });
+    if (result.ok) {
+      logInfo('[feedback] submitted', result.id ?? '', logBytes ? `log=${logBytes.byteLength}B` : 'no-log');
+    } else {
+      logWarn('[feedback] submit failed:', result.error, result.status ?? '');
+    }
+    return result;
+  });
+
+  // 打开测试模块触发的后台用量上报：fire-and-forget，绝不阻塞 renderer。
+  // 实际上报在主进程去抖后异步进行（未登录/离线静默跳过）。
+  ipcMain.handle('auth:upload-test-usage', () => {
+    scheduleTestUsageUpload('panel-open');
+    return { ok: true as const };
   });
 
   // Native auto-updater (research-platform V2): register renderer IPC and wire
