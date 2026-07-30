@@ -14,6 +14,7 @@ import { useNativeFolderPicker } from "@/hooks/useNativeFolderPicker";
 import { FolderPicker } from "@/components/chat/FolderPicker";
 import { showToast } from "@/hooks/useToast";
 import { normalizeProjectPath, dedupeProjectsByPath } from "@/lib/projectDedupe";
+import { buildProjectSystemNameMap, getProjectSystemName } from "@/lib/test-project-display-name";
 import { ModelSelectorDropdown } from "@/components/chat/ModelSelectorDropdown";
 import { useProviderModels } from "@/hooks/useProviderModels";
 import { diffRuns, funcPassRateStr } from "@/lib/test/compare";
@@ -21,7 +22,7 @@ import { parseExecProgress } from "@/lib/test/exec-progress";
 import { createExecLineBuffer, shouldAdoptPlaceholder, type ExecLine, type LiveResult, type LiveStatus } from "@/lib/test/exec-live";
 import { withDownstreamReset, runStartOptions, taskCategory, occupiedSlots, TASK_CATEGORY_ORDER, type TaskCategory } from "@/lib/test/step-status";
 import { REGRESSION_LIBRARY_TASK, REGRESSION_FULL_SUITE as REGRESSION_FULL_SUITE_NAME } from "@/lib/test/library-constants";
-import type { TestTaskType, SmokeBug } from "@/types";
+import type { TestTaskType, SmokeBug, TestAccountProjectSummary } from "@/types";
 import { scenarioTextToCases, casesToScenarios, scenariosToText, smokeDataPrefix } from "@/lib/test/smoke-scenarios";
 import { smokeVerdict, SMOKE_SEVERITIES } from "@/lib/test/smoke-bugs";
 import type { LoginStateInfo } from "@/lib/test/env-config";
@@ -495,6 +496,9 @@ export function InlineTestingPanel({ visible = true }: { visible?: boolean } = {
   // 由下方 mount-time effect 异步从文件加载（含老用户 localStorage 一次性迁移）；loaded
   // 守卫确保加载完成前不会用空初值 PUT 覆盖文件里的真实数据。
   const [projects, setProjects] = useState<Project[]>([]);
+  // 项目卡片展示名来自环境配置系统摘要；仅存脱敏的 id/name/project_root，
+  // 不把账号、密码、Token 或完整 environments 加载进工作台。
+  const [projectSystemSummaries, setProjectSystemSummaries] = useState<TestAccountProjectSummary[]>([]);
   const [selected, setSelected] = useState<number | null>(null);
   const [selectedTask, setSelectedTask] = useState<number | null>(null);
   // 看板按状态分组后，被用户手动折叠的分组（默认空 = 全部展开，含已完成）。本版不持久化。
@@ -584,6 +588,26 @@ export function InlineTestingPanel({ visible = true }: { visible?: boolean } = {
   // 保存后 bump envCfgReload → 下方 env-config effect 重拉，🎯 访问地址即时刷新。
   const [envDrawerOpen, setEnvDrawerOpen] = useState(false);
   const [envCfgReload, setEnvCfgReload] = useState(0);
+  // 测试面板可见时拉取一次脱敏摘要；从设置页返回（visible/pathname 变化）或抽屉保存
+  // （envCfgReload）后重拉，使系统改名无需写入 workbench 即可即时反映。
+  useEffect(() => {
+    if (!visible) return;
+    let cancelled = false;
+    fetch("/api/test-accounts/project-summaries", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : { systems: [] }))
+      .then((data: { systems?: TestAccountProjectSummary[] }) => {
+        if (!cancelled) setProjectSystemSummaries(Array.isArray(data.systems) ? data.systems : []);
+      })
+      .catch(() => {
+        // 展示增强失败不能阻塞项目列表；清空摘要后统一以文件夹名回退。
+        if (!cancelled) setProjectSystemSummaries([]);
+      });
+    return () => { cancelled = true; };
+  }, [visible, pathname, envCfgReload]);
+  const projectSystemNamesByPath = useMemo(
+    () => buildProjectSystemNameMap(projectSystemSummaries),
+    [projectSystemSummaries],
+  );
   // Change env + persist to the ACTIVE project entry（不再写全局 localStorage）。allowedEnvs
   // 越界回落也走这里，于是回落值也会落到该项目，下次切回稳定。
   const handleEnvChange = (next: string) => {
@@ -647,6 +671,8 @@ export function InlineTestingPanel({ visible = true }: { visible?: boolean } = {
   };
 
   const current = selected !== null ? projects[selected] ?? null : null;
+  const currentSystemName = current ? getProjectSystemName(projectSystemNamesByPath, current.path) : null;
+  const currentDisplayName = currentSystemName || current?.name || "";
   const activeTask = current && selectedTask !== null ? current.tasks[selectedTask] ?? null : null;
   /** 活动任务是否为冒烟形态（流程视图按此裁剪节点、换标签、走冒烟 prompt）。 */
   const isSmokeTask = activeTask?.type === "smoke";
@@ -2119,7 +2145,12 @@ export function InlineTestingPanel({ visible = true }: { visible?: boolean } = {
   const requestDeleteProject = (pIdx: number) => {
     const p = projects[pIdx];
     if (!p) return;
-    setDeleteTarget({ kind: "project", pIdx, name: p.name, running: p.tasks.some((tk) => runningTaskIds.has(tk.id)) });
+    setDeleteTarget({
+      kind: "project",
+      pIdx,
+      name: getProjectSystemName(projectSystemNamesByPath, p.path) || p.name,
+      running: p.tasks.some((tk) => runningTaskIds.has(tk.id)),
+    });
   };
   const requestDeleteTask = (tIdx: number) => {
     if (selected === null) return;
@@ -2453,7 +2484,16 @@ export function InlineTestingPanel({ visible = true }: { visible?: boolean } = {
                   <ArrowLeft size={12} /> {t("test.projects")}
                 </button>
                 <h3 className="text-sm font-semibold text-foreground">{activeTask.name}</h3>
-                {current && <span className="font-mono text-[11px] text-muted-foreground">{current.name}</span>}
+                {current && (
+                  <span className="max-w-[180px] truncate text-[11px] text-muted-foreground" title={current.path}>
+                    {currentDisplayName}
+                  </span>
+                )}
+                {currentSystemName && current && (
+                  <span className="max-w-[140px] truncate font-mono text-[10px] text-muted-foreground/70" title={current.path}>
+                    {current.name}
+                  </span>
+                )}
                 <span className="flex-1" />
                 {/* env (local/SIT) + resolved target from 设置·测试账号 → environments.json */}
                 <select
@@ -2951,39 +2991,66 @@ export function InlineTestingPanel({ visible = true }: { visible?: boolean } = {
                   <EmptyState icon={FolderPlus} text={t("test.projectsEmpty")} />
                 ) : (
                   <div className="grid grid-cols-2 gap-2 lg:grid-cols-3">
-                    {projects.map((p, i) => (
-                      <div key={i} className="group relative">
-                        <button
-                          onClick={() => {
-                            setSelected(i);
-                            setTestType("func");
-                            setRegTab("library");
-                            setSelectedTask(null);
-                          }}
-                          className="flex w-full flex-col gap-2.5 rounded-xl border border-border bg-card p-3.5 text-left transition-colors hover:border-primary/50 hover:bg-muted/40"
-                        >
-                          <div className="flex items-center gap-2.5">
-                            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                              <FolderPlus size={17} />
-                            </span>
-                            <div className="min-w-0 flex-1">
-                              <div className="truncate text-sm font-medium text-foreground">{p.name}</div>
-                              {p.path && <div className="truncate font-mono text-[10px] text-muted-foreground">{p.path}</div>}
+                    {projects.map((p, i) => {
+                      const systemName = getProjectSystemName(projectSystemNamesByPath, p.path);
+                      const displayName = systemName || p.name;
+                      return (
+                        <div key={p.path || i} className="group relative">
+                          <button
+                            onClick={() => {
+                              setSelected(i);
+                              setTestType("func");
+                              setRegTab("library");
+                              setSelectedTask(null);
+                            }}
+                            className="flex h-full w-full flex-col gap-2.5 rounded-xl border border-border bg-card p-3.5 text-left transition-colors hover:border-primary/50 hover:bg-muted/40"
+                            data-testid="test-project-card"
+                            data-project-path={p.path}
+                            data-system-name={systemName ?? ""}
+                          >
+                            <div className="flex min-w-0 items-start gap-2.5">
+                              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                                <FolderPlus size={17} />
+                              </span>
+                              <div className="min-w-0 flex-1">
+                                <div
+                                  className="truncate text-sm font-medium text-foreground"
+                                  title={displayName}
+                                  data-testid="test-project-display-name"
+                                >
+                                  {displayName}
+                                </div>
+                                <div
+                                  className="mt-0.5 flex min-w-0 items-center gap-1 text-[10px] text-muted-foreground"
+                                  title={systemName ? p.name : t("test.project.systemNameMissing")}
+                                  data-testid="test-project-folder-name"
+                                >
+                                  {systemName ? <FolderOpen size={10} className="shrink-0" /> : <Gear size={10} className="shrink-0" />}
+                                  <span className="truncate">
+                                    {systemName ? p.name : t("test.project.systemNameMissing")}
+                                  </span>
+                                </div>
+                                {p.path && (
+                                  <div className="mt-0.5 truncate font-mono text-[10px] text-muted-foreground" title={p.path}>
+                                    {p.path}
+                                  </div>
+                                )}
+                              </div>
                             </div>
-                          </div>
-                          <div className="flex items-center gap-1.5 border-t border-border/60 pt-2 text-[11px] text-muted-foreground">
-                            <ListChecks size={12} /> {p.tasks.length} {t("test.tasks")}
-                          </div>
-                        </button>
-                        <button
-                          onClick={(e) => { e.stopPropagation(); requestDeleteProject(i); }}
-                          title={t("test.del.delete")}
-                          className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-status-error-muted hover:text-status-error group-hover:opacity-100"
-                        >
-                          <Trash size={13} />
-                        </button>
-                      </div>
-                    ))}
+                            <div className="flex items-center gap-1.5 border-t border-border/60 pt-2 text-[11px] text-muted-foreground">
+                              <ListChecks size={12} /> {p.tasks.length} {t("test.tasks")}
+                            </div>
+                          </button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); requestDeleteProject(i); }}
+                            title={t("test.del.delete")}
+                            className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-status-error-muted hover:text-status-error group-hover:opacity-100"
+                          >
+                            <Trash size={13} />
+                          </button>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -3001,7 +3068,14 @@ export function InlineTestingPanel({ visible = true }: { visible?: boolean } = {
                   >
                     <ArrowLeft size={12} /> {t("test.projects")}
                   </button>
-                  <h3 className="text-sm font-semibold text-foreground">{current.name}</h3>
+                  <h3 className="max-w-[240px] truncate text-sm font-semibold text-foreground" title={currentDisplayName}>
+                    {currentDisplayName}
+                  </h3>
+                  {currentSystemName && (
+                    <span className="max-w-[180px] truncate font-mono text-[10px] text-muted-foreground" title={current.path}>
+                      {current.name}
+                    </span>
+                  )}
                   {/* 测试形态切换:功能=现有任务流;回归=整页工作区(库/套件/轮次);冒烟=轻场景任务流 */}
                   <div className="ml-1 flex items-center gap-0.5 rounded-lg border border-border bg-muted p-0.5">
                     {([["func", t("test.type.func")], ["regression", t("test.type.regression")], ["smoke", t("test.type.smoke")]] as const).map(([k, label]) => (
@@ -3220,6 +3294,7 @@ export function InlineTestingPanel({ visible = true }: { visible?: boolean } = {
             {view === "report" && (
               <ReportBrowser
                 projects={projects}
+                projectSystemNamesByPath={projectSystemNamesByPath}
                 t={t}
                 model={model}
                 providerId={providerId}
@@ -3615,7 +3690,7 @@ function ReportView({ t, results, four, funcCounts, funcPassStr, suiteCounts, su
       })
       .catch(() => {});
   };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+
   useEffect(reloadBugs, [isSmoke, projectPath, taskName, env, runHash]);
   /** 覆盖层写入（严重级别/备注）；409（执行已重跑）→ 重拉刷新，不静默吞。 */
   const putBug = (patch: { sceneId: string; severity?: string; note?: string; severityOverriddenFrom?: string }) => {
@@ -7272,7 +7347,7 @@ function RegressionSuitesSection({ t, projectPath }: { t: T; projectPath: string
         .catch(() => setPreview(null));
     }, 300);
     return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+
   }, [projectPath, editing]);
 
   const startNew = () => { setErrMsg(""); setEditing({ name: "", type: "query", pri: [], module: [], task: [], last: [], keys: new Set() }); };
@@ -7850,7 +7925,23 @@ function XlsxPreview({ t, projectPath, taskName, env, onClose }: {
 // 报告 view: browse persisted reports by 项目 → 任务 → 环境. A task can have multiple
 // reports (one per env); each row expands to the full ReportView. Reads from disk via
 // GET /api/test/reports (per project).
-function ReportBrowser({ projects, t, model, providerId, onOpenTask, reloadSignal }: { projects: Project[]; t: T; model: string; providerId: string; onOpenTask: (projectIndex: number, taskIndex: number) => void; reloadSignal: number }) {
+function ReportBrowser({
+  projects,
+  projectSystemNamesByPath,
+  t,
+  model,
+  providerId,
+  onOpenTask,
+  reloadSignal,
+}: {
+  projects: Project[];
+  projectSystemNamesByPath: ReadonlyMap<string, string>;
+  t: T;
+  model: string;
+  providerId: string;
+  onOpenTask: (projectIndex: number, taskIndex: number) => void;
+  reloadSignal: number;
+}) {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [groups, setGroups] = useState<{ project: Project; reports: ReportEntry[] }[]>([]);
@@ -7970,11 +8061,17 @@ function ReportBrowser({ projects, t, model, providerId, onOpenTask, reloadSigna
       {groups.map(({ project, reports }) => {
         const tasks = new Map<string, ReportEntry[]>();
         for (const r of reports) { const a = tasks.get(r.task) ?? []; a.push(r); tasks.set(r.task, a); }
+        const systemName = getProjectSystemName(projectSystemNamesByPath, project.path);
         return (
           <div key={project.path}>
             <div className="mb-2 flex items-center gap-2">
               <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/10 text-primary"><FolderPlus size={14} /></span>
-              <h3 className="text-sm font-semibold text-foreground">{project.name}</h3>
+              <h3 className="text-sm font-semibold text-foreground">{systemName || project.name}</h3>
+              {systemName && (
+                <span className="max-w-[180px] truncate font-mono text-[10px] text-muted-foreground" title={project.path}>
+                  {project.name}
+                </span>
+              )}
               <span className="text-[11px] text-muted-foreground">{reports.length} {t("test.report.reportsSuffix")}</span>
             </div>
             <div className="flex flex-col gap-3">

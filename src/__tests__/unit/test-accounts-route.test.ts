@@ -21,6 +21,7 @@ let idR: typeof import("../../app/api/test-accounts/[id]/route");
 let exportR: typeof import("../../app/api/test-accounts/[id]/export/route");
 let envCfg: typeof import("../../app/api/test/env-config/route");
 let resolveR: typeof import("../../app/api/test-accounts/resolve/route");
+let projectSummariesR: typeof import("../../app/api/test-accounts/project-summaries/route");
 let dbMod: typeof import("../../lib/db");
 
 before(async () => {
@@ -32,6 +33,7 @@ before(async () => {
   exportR = await import("../../app/api/test-accounts/[id]/export/route");
   envCfg = await import("../../app/api/test/env-config/route");
   resolveR = await import("../../app/api/test-accounts/resolve/route");
+  projectSummariesR = await import("../../app/api/test-accounts/project-summaries/route");
   dbMod = await import("../../lib/db");
 });
 beforeEach(() => { dbMod.getDb().exec("DELETE FROM test_account_systems"); });
@@ -142,5 +144,37 @@ describe("resolve（工作台就地配置：项目路径 → 系统）", () => {
     await createSys({ name: "未绑定系统" }); // no project_root
     const r = await resolveOf("/Users/dev/whatever");
     assert.equal(r.system, null);
+  });
+});
+
+describe("project summaries（工作台系统名称脱敏摘要）", () => {
+  it("只返回已绑定系统的 id/name/project_root，不泄露环境配置或凭据", async () => {
+    const bound = await createSys({
+      name: "论坛管理系统",
+      project_root: "/Users/dev/forum-xc-sit",
+      environments: envOf({
+        frontendBaseUrl: "https://secret.example.test",
+        accounts: [{
+          key: "admin",
+          role: "admin",
+          authMethod: "password",
+          username: "private-user",
+          password: "private-password",
+        }],
+      }),
+    });
+    await createSys({ name: "未绑定系统" });
+
+    const res = await projectSummariesR.GET();
+    assert.equal(res.status, 200);
+    const body = await res.json() as { systems: Record<string, unknown>[] };
+    assert.equal(body.systems.length, 1);
+    assert.deepEqual(body.systems[0], {
+      id: bound.id,
+      name: "论坛管理系统",
+      project_root: "/Users/dev/forum-xc-sit",
+    });
+    assert.equal(JSON.stringify(body).includes("private-password"), false);
+    assert.equal("environments" in body.systems[0], false);
   });
 });

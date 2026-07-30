@@ -83,6 +83,7 @@
 
 | 文件 | 主题 | 完成日期 |
 |------|------|----------|
+| completed/test-project-system-display-name.md | 测试工作台项目展示名称：环境配置系统名优先，保留文件夹名与路径；脱敏摘要接口 + 路径归一化 + 空名称回退 + 三语与 UI 验证，不改变项目持久化身份 | 2026-07-30 |
 | completed/script-gen-trace-anchors-incremental.md | 回归脚本生成质量与韧性:快照元素清单(治定位器臆造,具名元素臆造 class → 语义化 getByRole;边界:视觉结构类断言仍需被测端 data-testid)+ 逐条增量沉淀(执行流内 pass 即入队生成,断流不再全丢)+ 未执行守卫 + 打包产物完整性闸 | 2026-07-17 |
 | completed/regression-script-generation.md | 测试报告成功后后台为本轮 pass+「回归测试」标签用例生成独立 Playwright 脚本；四节点不变，具备脱敏轨迹、结构化生成、安全校验、指纹幂等、锁恢复、源任务回写、报告区查看/重试/运行，并通过开发态与 macOS 打包态真实回放 | 2026-07-10 |
 | completed/test-usage-stats.md | **测试模块使用统计**（P1）：test_stats_events 事件流水 + 纯函数聚合口径层（采纳率首轮基线 / 报告准确度+覆盖率 / 服务端逐用例计时 / 模型节点级归因 / 熔断排除 / 时间窗口计入门控）、10 类事件字典、四 scope API + 4 Sheet XLSX 导出、TestStatsView 看板（第 4 视图）+ 复核 UI + 节点用时/模型徽标。P2 匿名上报为独立后续里程碑 | 2026-07-09 |

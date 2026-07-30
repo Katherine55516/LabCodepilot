@@ -1610,6 +1610,13 @@ export interface TestAccountSystemView {
   updated_at: string;
 }
 
+/** 测试工作台项目列表使用的脱敏系统摘要；不包含环境配置或登录凭据。 */
+export interface TestAccountProjectSummary {
+  id: string;
+  name: string;
+  project_root: string;
+}
+
 export interface CreateTestAccountSystemRequest {
   name: string;
   project_root?: string;

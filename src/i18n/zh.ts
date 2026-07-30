@@ -53,6 +53,7 @@ const zh: Record<TranslationKey, string> = {
   'test.projects': '项目',
   'test.addProject': '添加项目',
   'test.projectsEmpty': '还没有项目 —— 添加一个开始。',
+  'test.project.systemNameMissing': '未配置系统名称',
   'test.duplicateProject': '该项目已添加，请勿重复添加。',
   'test.addProjectModal.title': '添加项目',
   'test.addProjectModal.nameLabel': '项目名称',
