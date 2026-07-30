@@ -67,7 +67,10 @@ async function hubGet(
   pathname: string,
   opts?: { timeoutMs?: number; headers?: Record<string, string> },
 ): Promise<{ ok: true; res: Response } | SkillsStoreFailure> {
-  const token = loadToken();
+  // CODEPILOT_SKILLS_TOKEN_OVERRIDE:真实链路集成测试的注入口(配合 BACKEND_BASE
+  // 指本地 codeagent-server + 假 JWKS 签发的 JWT),生产不设;不提权 — 与用户
+  // 自改 BACKEND_BASE 同级,只影响本机自己的进程。
+  const token = process.env.CODEPILOT_SKILLS_TOKEN_OVERRIDE?.trim() || loadToken();
   if (!token) return { ok: false, error: 'not-logged-in' };
 
   const controller = new AbortController();

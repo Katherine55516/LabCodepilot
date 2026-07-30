@@ -77,11 +77,12 @@
 | active/btw-side-question.md | `/btw` 会话内临时问答浮层（对标 Claude Code CLI /btw）：无状态端点 native generateText（无工具/不取锁/不落库）+ 前端 `/btw <arg>` 解析 + BtwDialog 浮层 + 前端内存上下文快照（含 in-flight），主对话流式期间不打断 | Phase 0 完成，Phase 1-6 待开始 |
 | active/image-model-managed-delivery-client.md | **文生图模型账号下发（客户端层）**：去编译期 key 注入，改登录后服务端下发百炼凭证+模型列表；以 `settings.bailian_image_config` 落地（不进 api_providers，结构上隔离对话下拉框），复刻 ASR 下发范式 + broker 写入嵌入式 Next | Phase 0-6 待开始 |
 | active/image-model-managed-delivery-server.md | **文生图模型账号下发（服务端层）**：新增 `GET /api/v1/image/config(/encrypted/hash)`，apiKey 复用 configs 的 AES-256-GCM 加密口令；图片配置独立于 configs 列表避免泄漏进对话下拉框 | S1-S5 待开始 |
-| active/skills-store-internal.md | **技能市场（内部）**：Skills 页第三 tab 接 codeagent-server Skills 商店 BFF（acb6240）；主进程 IPC 持 token（不走 Next route）、zip 下载解压安装到 `~/.claude/skills/` + 自建台账 `.internal-store.json`、contentHash/ETag 更新检查、错误码分支 UI | 方案完成，Phase 0-4 待开始 |
+
 ### Completed
 
 | 文件 | 主题 | 完成日期 |
 |------|------|----------|
+| completed/skills-store-internal.md | **技能市场（内部）**：Skills 页第三 tab 接 codeagent-server Skills 商店 BFF（acb6240）；主进程 IPC 持 token、yauzl 安装事务（zip 三重守卫/原子落位/台账自愈/串行化）、错误码分支 UI、「我的技能」互通（顺修 installed 删除残留 bug）；假 JWKS+假 Hub 真实链路 26 断言全过 | 2026-07-28 |
 | completed/cowork-remote-container.md | **Cowork 远程容器沙箱(R 系列,取代本地 VM)**:RD1-RD8 八决策(全平台统一远程/单公司服务器账号下发/凭证代理 sidecar/无状态 HMAC+禁内网放公网/粒度=归属隔离容器仍 per 会话);R0 POC→R1 控制面+CoworkBackend→R2 文件通道(helper 直读持久 volume)→R3 凭证代理(真 key 不进 agent 容器)→R4 多用户 authz/配额 TTL/出网禁内网→R5 打包版实测+部署包(install.sh+systemd 双单元+TLS 预留)+运维手册+账号下发客户端全链+Windows 平台 gate。剩:Win 真机实测/账号后端接口/裸金属迁移三件套(见文档头) | 2026-07-17 |
 | completed/cowork-p3-security.md | **Cowork P3 安全强化**:凭证不进 VM(宿主代理注入一次性 token,NAT 网关方案)+ 每会话非特权用户(setuid 降权,会话间不可越权互读)+ 宿主侧安全审计;明确不做出网白名单(用户接受 agent 自由上网) | 2026-07-15 |
 | completed/cowork-image-pipeline.md | **Cowork 镜像流水线**:沙箱环境零手动预置(3.1.15→3.1.17)— M1 cloud-init seed 首启自注入+SSH 全退役 → M2 应用内下载(中科大底镜+npmmirror SDK 平台子包,断点续传/校验/8GiB 稀疏扩容)→ M3 资源随包(vfkit/daemon/forwarder,signIgnore 保 entitlement)+目录正式化+版本追踪+daemon v3 偏斜自愈 → M4 裸机模拟验收 | 2026-07-15 |
