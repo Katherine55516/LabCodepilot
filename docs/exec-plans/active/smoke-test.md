@@ -21,7 +21,7 @@
 | Phase 5 | 冒烟报告：结论横幅 + **Bug 可复核列表** + 体验问题 | ✅ 已完成 | 新增 `smoke-bugs.ts`（25 单测）+ `/api/test/bugs`；复核复用 report_reviewed；CDP 全交互验证 |
 | Phase 6 | i18n 三语言 + 埋点口径 | ✅ 已完成 | `test.smoke.*` ×3；冒烟不发 cases_approved（采纳率口径隔离）；task_created 带 taskType |
 | Phase 7 | 验证：单测 + dev CDP | ✅ dev 侧完成 | 2439 单测 0 fail；API curl 合同（GET/PUT/409/400）+ CDP 报告全交互；**打包态实测待用户发起** |
-| Phase 8 | 文档：handover + insights 互链 + ARCHITECTURE 索引 | 📋 待开始 | CLAUDE.md 强制两份 |
+| Phase 8 | 文档：handover + insights 互链 + ARCHITECTURE 索引 | ✅ 已完成 | 两份互链文档 + 三处索引（handover/insights README、ARCHITECTURE） |
 
 ## 决策日志
 

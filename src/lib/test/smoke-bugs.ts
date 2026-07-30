@@ -19,7 +19,6 @@
  */
 
 import type { SmokeBug, SmokeBugsFile } from '@/types';
-import type { RunJson } from './reduce';
 
 export const SMOKE_BUGS_VERSION = 1;
 /** 严重级别枚举（与原冒烟提示词一致：致命/严重/一般/建议）。 */
@@ -74,12 +73,25 @@ export function parseMdBugInfo(md: string): Record<string, MdBugInfo> {
 }
 
 /**
+ * Bug 派生只读取的最小场景形状（结构宽于 reduce 的 ReducedTest —— 字段全可选，
+ * run.json 来自磁盘、可能被手工编辑过，防御式读取不预设字段齐全）。
+ */
+export interface BugSourceTest {
+  id: string;
+  status: string;
+  actual?: string;
+  error?: string;
+  api?: SmokeBug['api'];
+  evidence?: string[];
+}
+
+/**
  * 从 run.json 派生 Bug 清单（fail 场景 1:1），叠加报告 md 的 AI 初判。
  *
  * `goalOf`：sceneId → 验证目标（cases.json 的 purpose），标题兜底用；缺失不影响派生。
  */
 export function deriveBugs(
-  run: Pick<RunJson, 'tests'>,
+  run: { tests?: BugSourceTest[] | null },
   mdInfo: Record<string, MdBugInfo>,
   goalOf: Record<string, string> = {},
 ): SmokeBug[] {
