@@ -94,6 +94,14 @@ export async function POST(req: Request): Promise<Response> {
     const scriptFirst: boolean = body.scriptFirst !== false;
     // 任务级「沉淀回归脚本」开关。缺省 true —— 存量任务与旧客户端不传该字段,行为必须不变。
     const depositScripts: boolean = body.depositScripts !== false;
+    // 冒烟测试(第三形态):形态 + 模块入口 + 数据前缀。只认字面量 'smoke',其余一律按功能
+    // 测试处理 —— 存量任务/旧客户端不传该字段,行为必须逐字不变。
+    const taskType: 'smoke' | undefined = body.taskType === 'smoke' ? 'smoke' : undefined;
+    const moduleEntry: string | undefined =
+      typeof body.moduleEntry === 'string' && body.moduleEntry.trim() ? body.moduleEntry.trim().slice(0, 500) : undefined;
+    // 前缀由前端按本地日期下发(跨零点执行时报告与实际造的数据才对得上);缺省由 prompts 兜底。
+    const dataPrefix: string | undefined =
+      typeof body.dataPrefix === 'string' && body.dataPrefix.trim() ? body.dataPrefix.trim().slice(0, 64) : undefined;
 
     if (!projectPath || typeof projectPath !== 'string') {
       return new Response(JSON.stringify({ error: 'projectPath is required' }), {
@@ -208,6 +216,7 @@ export async function POST(req: Request): Promise<Response> {
     const { systemPrompt, prompt, needsPlaywright } = buildStep(step, {
       taskName, env, baseUrl, extraInstruction, reuseImported, requirementMode, requirementSourcePath, hasLoginState, loginCredentials, roundId,
       scriptDone: replay ? { ids: replay.items.map((i) => i.runId), total: replay.totalCases } : undefined,
+      taskType, moduleEntry, dataPrefix,
     });
 
     let mcpServers: Record<string, MCPServerConfig> | undefined;

@@ -22,6 +22,7 @@ import { createExecLineBuffer, shouldAdoptPlaceholder, type ExecLine, type LiveR
 import { withDownstreamReset, runStartOptions, taskCategory, occupiedSlots, TASK_CATEGORY_ORDER, type TaskCategory } from "@/lib/test/step-status";
 import { REGRESSION_LIBRARY_TASK, REGRESSION_FULL_SUITE as REGRESSION_FULL_SUITE_NAME } from "@/lib/test/library-constants";
 import type { TestTaskType } from "@/types";
+import { scenarioTextToCases, casesToScenarios, scenariosToText, smokeDataPrefix } from "@/lib/test/smoke-scenarios";
 import type { LoginStateInfo } from "@/lib/test/env-config";
 import type { RunHistoryEntry } from "@/lib/test/history";
 import { TestStatsView } from "@/components/test/TestStatsView";
@@ -44,7 +45,7 @@ import { PromptDialog } from "@/components/ui/prompt-dialog";
  */
 
 type View = "dash" | "flow" | "report" | "stats";
-type ModalKind = "none" | "newTask" | "runStart" | "execConfirm" | "envWarn";
+type ModalKind = "none" | "newTask" | "newSmokeTask" | "runStart" | "execConfirm" | "envWarn";
 // 执行方式:visible=独立窗口可见运行(有头),headless=后台无头运行(默认,更快)。
 type ExecMode = "headless" | "visible";
 type T = (key: TranslationKey, params?: Record<string, string | number>) => string;
@@ -346,6 +347,19 @@ const STEPS: { step: TestStep; name: TranslationKey; desc: TranslationKey }[] = 
 // 步骤顺序（传给 withDownstreamReset 等纯函数，避免它们 import 服务端的 prompts.ts）。
 const STEP_ORDER: TestStep[] = STEPS.map((s) => s.step);
 
+/**
+ * 节点名：冒烟任务复用同样的 step 键（cases/execution/report），但措辞不同 ——
+ * 「用例设计」在冒烟里是「测试场景」，「测试报告」是「冒烟报告」。
+ * 只换标签不换键：底层流程机器（状态机/排队/auto-chain/埋点）完全不用知道形态差异。
+ */
+function stepLabel(step: TestStep, isSmoke: boolean, t: T): string {
+  if (isSmoke) {
+    if (step === "cases") return t("test.smoke.step.scenarios");
+    if (step === "report") return t("test.smoke.step.report");
+  }
+  return t(STEPS.find((s) => s.step === step)!.name);
+}
+
 // Gating model (ai-lab-test-framework / prototype): 需求分析 + 用例设计 are
 // human-gated — they run, then wait for the user to 批准 the output before the
 // next step unlocks. 测试执行 + 测试报告 are an auto-chain (run automatically once
@@ -631,6 +645,8 @@ export function InlineTestingPanel({ visible = true }: { visible?: boolean } = {
 
   const current = selected !== null ? projects[selected] ?? null : null;
   const activeTask = current && selectedTask !== null ? current.tasks[selectedTask] ?? null : null;
+  /** 活动任务是否为冒烟形态（流程视图按此裁剪节点、换标签、走冒烟 prompt）。 */
+  const isSmokeTask = activeTask?.type === "smoke";
 
   // Active task's state, derived from the per-task map (render reads these names).
   const aId = activeTask?.id ?? "";
@@ -1325,6 +1341,72 @@ export function InlineTestingPanel({ visible = true }: { visible?: boolean } = {
     return { ok: true };
   };
 
+  /**
+   * 新建**冒烟任务**（第三形态）。与 addTask 的三点差异：
+   *  1. 场景由前端解析后直接 PUT 进 cases.json —— 冒烟不跑"用例设计"，场景就是产物；
+   *  2. stepStatus 预置 requirement/cases 为 done（冒烟无需求节点、场景已就绪）→
+   *     **无门控**，创建后由调用方直接发起执行；
+   *  3. 任务带 `type:'smoke'` + `moduleEntry`，供 runStep 分流 prompt。
+   */
+  const addSmokeTask = async (
+    name: string,
+    moduleEntry: string,
+    scenarioText: string,
+    targetUrl?: string,
+  ): Promise<{ ok: boolean; error?: string; taskId?: string }> => {
+    const proj = selected !== null ? projects[selected] : null;
+    const trimmedName = name.trim();
+    if (!proj?.path) return { ok: false, error: t("test.smoke.noProject") };
+    if (proj.tasks.some((tk) => tk.name.trim() === trimmedName)) {
+      return { ok: false, error: t("test.newTaskModal.duplicateName") };
+    }
+    const cases = scenarioTextToCases(scenarioText);
+    if (!cases.length) return { ok: false, error: t("test.smoke.noScenarios") };
+    // 场景落盘：复用既有用例写盘路由（原子写 + 路径校验），冒烟不另起一套存储。
+    const id = makeTaskId();
+    try {
+      const res = await fetch("/api/test/cases", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectPath: proj.path, taskName: trimmedName, taskId: id, cases }),
+      });
+      if (!res.ok) {
+        const j = (await res.json().catch(() => ({}))) as { error?: string };
+        return { ok: false, error: j.error || t("test.smoke.saveFailed") };
+      }
+    } catch {
+      return { ok: false, error: t("test.smoke.saveFailed") };
+    }
+    setProjects((ps) =>
+      ps.map((p, i) => (i === selected ? { ...p, tasks: [...p.tasks, { id, name: trimmedName, type: "smoke" as const }] } : p)),
+    );
+    patchTask(id, () => ({
+      // 冒烟无需求节点；场景已落盘 → 两步直接 done，execution 解锁（无门控）。
+      stepStatus: { requirement: "done", cases: "done", execution: "idle", report: "idle" },
+      moduleEntry: moduleEntry.trim() || undefined,
+      convo: [
+        {
+          role: "ai" as const,
+          text: `💨 已创建冒烟任务「${trimmedName}」，共 ${cases.length} 个测试场景。数据前缀 \`${smokeDataPrefix()}\`，即将开始执行。`,
+        },
+      ],
+      ...(targetUrl?.trim() ? { targetUrlByEnv: { [proj.selectedEnv || env || "local"]: targetUrl.trim() } } : {}),
+    }));
+    logAudit("create-task", { projPath: proj.path, taskName: trimmedName, detail: `smoke:${cases.length}场景` });
+    // 使用统计：taskType 让服务端聚合把冒烟排除出「AI 生成流」采纳率分母（手动录入的场景
+    // 不是 AI 生成的用例，计进去会稀释采纳率）。
+    recordTestStat([
+      {
+        eventType: "task_created",
+        projectPath: proj.path,
+        taskId: id,
+        taskName: trimmedName,
+        payload: { source: "smoke_manual", taskType: "smoke", scenarios: cases.length },
+      },
+    ]);
+    return { ok: true, taskId: id };
+  };
+
   // Mount 时从主进程文件异步加载 projects/taskStates（GET /api/test/workbench）。
   // 老用户迁移：文件为空壳（projects 空 + taskStates 无键）时，回退读旧的 localStorage
   // 两个 key —— 有就用它们完成一次性迁移（下方写 effect 会把它们 PUT 回文件）。
@@ -1577,7 +1659,21 @@ export function InlineTestingPanel({ visible = true }: { visible?: boolean } = {
   // 回归用例库弹窗(项目级):查看/管理沉淀的回归用例 + 跨任务一键重跑。
   // 测试类型(批 H,用户确认的信息架构):项目下两种平级测试类型——功能测试(现有任务流)/
   // 回归测试(整页工作区:用例库/回归套件/轮次历史 页内子页签,不再用弹窗)。切换项目时重置。
-  const [testType, setTestType] = useState<"func" | "regression">("func");
+  // 三种测试形态（页签）：功能=任务流；回归=项目级库/套件/轮次工作区；冒烟=轻场景任务流。
+  const [testType, setTestType] = useState<"func" | "regression" | "smoke">("func");
+  /**
+   * 当前页签该显示的任务（按形态过滤），**保留原始下标** —— setSelectedTask /
+   * requestDeleteTask 都按 `tasks[]` 的原始下标操作，用过滤后的下标会指向另一个任务。
+   * type 缺省视为功能任务（存量任务无该字段，天然归功能页签）。
+   */
+  const visibleTasks = useMemo(() => {
+    const wantSmoke = testType === "smoke";
+    return (current?.tasks ?? [])
+      .map((tk, i) => ({ tk, i }))
+      .filter(({ tk }) => (tk.type === "smoke") === wantSmoke);
+  }, [current?.tasks, testType]);
+  /** 冒烟「创建即执行」的待发起任务 id（见下方 effect：等选中态落定后自动起跑）。 */
+  const [pendingSmokeRun, setPendingSmokeRun] = useState<string | null>(null);
   const [regTab, setRegTab] = useState<RegTab>("library");
   // 发起回归弹窗(v2 批 D):套件/环境/预检确认后才真正 runLibrary(保留为确认对话框)。
   // 发起回归弹窗:null=关闭。带 preset 打开时(轮次历史的「复测 N 条」)预置复测模式与基准轮。
@@ -1656,7 +1752,7 @@ export function InlineTestingPanel({ visible = true }: { visible?: boolean } = {
     opts?: {
       headed?: boolean;
       baseUrl?: string;
-      target?: { projPath: string; task: { id: string; name: string } };
+      target?: { projPath: string; task: { id: string; name: string; type?: TestTaskType } };
       // 需求分析节点刚二选一时 taskStates 尚未落地(setState 异步) → 用这个即时值覆盖，避免读到旧 state。
       requirementModeOverride?: "generate-md" | "use-original";
       // 同上:执行前确认弹窗刚改的「沉淀回归脚本」在本次运行就要生效,而 patchTask 是异步的。
@@ -1793,6 +1889,12 @@ export function InlineTestingPanel({ visible = true }: { visible?: boolean } = {
           // 服务端同样按 `!== false` 判定,存量任务与旧客户端行为不变。
           depositScripts:
             (opts?.depositScriptsOverride ?? taskStates[id]?.depositScripts) === false ? false : undefined,
+          // 冒烟任务（第三形态）：形态 + 模块入口 + 数据前缀 → 服务端 buildStep 分流到冒烟
+          // prompt 变体。前缀在**前端**按本地日期生成并下发，而不是让服务端各步各算一次 ——
+          // 否则跨零点执行时报告里的前缀会与执行时实际造的数据对不上。
+          taskType: task.type === "smoke" ? ("smoke" as const) : undefined,
+          moduleEntry: task.type === "smoke" ? taskStates[id]?.moduleEntry || undefined : undefined,
+          dataPrefix: task.type === "smoke" ? smokeDataPrefix() : undefined,
         }),
       });
       // 非 2xx(如 /api/test/run 抛错走 500 + JSON {error})：之前直接进流式解析，500 的
@@ -2197,6 +2299,25 @@ export function InlineTestingPanel({ visible = true }: { visible?: boolean } = {
     setWaitingTaskIds(new Set(waitingQueueRef.current));
   };
 
+  /**
+   * 冒烟「创建即执行」（无门控）：新建弹窗创建成功后记下 taskId，等 setProjects /
+   * setSelectedTask 的状态落定、activeTask 指向这个新任务时，自动从「测试执行」起跑
+   * （execution → report 由既有 auto-chain 接力）。
+   *
+   * 为什么要过一道 effect 而不是创建后直接调 startRunAllFrom：后者读的是 `activeTask`
+   * 闭包值，在同一轮渲染里还是旧任务（或 null），会对着错误的任务发起执行。
+   */
+  useEffect(() => {
+    if (!pendingSmokeRun) return;
+    if (activeTask?.id !== pendingSmokeRun) return; // 等选中态切到新任务
+    if (busy || !current?.path) return;
+    setPendingSmokeRun(null);
+    startRunAllFrom("execution");
+    // startRunAllFrom / activeTask 每轮渲染重建，全列进依赖会让 effect 反复触发；
+    // 这里的触发条件已由 pendingSmokeRun + activeTask.id 唯一确定。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingSmokeRun, activeTask?.id, busy, current?.path]);
+
   // 运行任务 click: 全新任务(全 idle)直接从需求分析开跑；其余(部分完成 / 已完成)弹「选择起点」。
   const doRunTask = () => {
     // 一律走「运行任务」确认弹窗。此前全 idle 的新任务直接起跑、不弹窗 —— 于是新任务
@@ -2403,9 +2524,11 @@ export function InlineTestingPanel({ visible = true }: { visible?: boolean } = {
               )}
 
               {/* pipeline strip (horizontal): 需求 → 用例 → 执行 → 报告。
-                  问题1：导入用例的任务跳过需求分析，隐藏需求节点。 */}
+                  问题1：导入用例的任务跳过需求分析，隐藏需求节点。
+                  冒烟任务同样隐藏需求节点（三节点：测试场景 → 执行 → 冒烟报告），
+                  且「用例设计」节点改标为「测试场景」（见 stepLabel）。 */}
               <div className="mb-3 flex flex-wrap gap-2">
-                {STEPS.filter((s) => !(aState.imported?.cases && s.step === "requirement")).map((s, i) => {
+                {STEPS.filter((s) => !((aState.imported?.cases || isSmokeTask) && s.step === "requirement")).map((s, i) => {
                   const status = stepStatus[s.step];
                   const isFocus = s.step === focusStep;
                   const isRunning = status === "running";
@@ -2416,7 +2539,7 @@ export function InlineTestingPanel({ visible = true }: { visible?: boolean } = {
                       onClick={() => setViewStep(s.step)}
                       // 执行中锁定:不能点其他节点(连查看切换也禁用),避免切走详情卡 + 误以为能运行别的节点。
                       disabled={!current?.path || busy}
-                      title={t(s.name)}
+                      title={stepLabel(s.step, isSmokeTask, t)}
                       className={`min-w-[120px] flex-1 rounded-lg border p-2.5 text-left transition-colors disabled:cursor-not-allowed ${stepPillClass(status)} ${
                         isFocus ? "ring-1 ring-muted-foreground/40" : ""
                       } ${current?.path && !busy ? "hover:border-muted-foreground/40" : ""}`}
@@ -2426,8 +2549,9 @@ export function InlineTestingPanel({ visible = true }: { visible?: boolean } = {
                           ? <SpinnerGap size={13} className="animate-spin text-primary" />
                           : <span className={`h-2 w-2 rounded-full ${stepDotClass(status)}`} />}
                         <span className={`text-xs font-medium ${isRunning ? "text-primary" : "text-foreground"}`}>
-                          {i + 1}. {t(s.name)}
-                          {HUMAN_GATED.includes(s.step) && <span title={t("test.gate.auto")}> ✋</span>}
+                          {i + 1}. {stepLabel(s.step, isSmokeTask, t)}
+                          {/* 冒烟无门控（创建即自动跑到报告）→ 不显示门控手势图标 */}
+                          {!isSmokeTask && HUMAN_GATED.includes(s.step) && <span title={t("test.gate.auto")}> ✋</span>}
                         </span>
                       </div>
                       <div className={`mt-1 text-[11px] ${isRunning ? "text-primary" : "text-muted-foreground"}`}>
@@ -2871,9 +2995,9 @@ export function InlineTestingPanel({ visible = true }: { visible?: boolean } = {
                     <ArrowLeft size={12} /> {t("test.projects")}
                   </button>
                   <h3 className="text-sm font-semibold text-foreground">{current.name}</h3>
-                  {/* 测试类型切换(批 H):功能测试=现有任务流;回归测试=整页工作区(库/套件/轮次) */}
+                  {/* 测试形态切换:功能=现有任务流;回归=整页工作区(库/套件/轮次);冒烟=轻场景任务流 */}
                   <div className="ml-1 flex items-center gap-0.5 rounded-lg border border-border bg-muted p-0.5">
-                    {([["func", t("test.type.func")], ["regression", t("test.type.regression")]] as const).map(([k, label]) => (
+                    {([["func", t("test.type.func")], ["regression", t("test.type.regression")], ["smoke", t("test.type.smoke")]] as const).map(([k, label]) => (
                       <button
                         key={k}
                         onClick={() => setTestType(k)}
@@ -2899,7 +3023,33 @@ export function InlineTestingPanel({ visible = true }: { visible?: boolean } = {
                       ＋ {t("test.newTask")}
                     </button>
                   )}
+                  {testType === "smoke" && (
+                    <button
+                      onClick={() => setModal("newSmokeTask")}
+                      className="flex h-7 items-center gap-1 rounded-md bg-primary px-2.5 text-[11px] font-medium text-primary-foreground"
+                    >
+                      ＋ {t("test.smoke.newTask")}
+                    </button>
+                  )}
                 </div>
+                {/* 冒烟页签：沿用环境配置的只读信息条 —— 冒烟不建第二套环境体系，
+                    系统地址/登录态都来自「环境配置」抽屉（TestEnvDrawer），这里只做展示与提醒。 */}
+                {testType === "smoke" && (
+                  <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-dashed border-border bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground">
+                    <span>{t("test.smoke.envReuse")}</span>
+                    <span>
+                      {t("test.smoke.envName")} <span className="font-medium text-foreground">{env}</span>
+                    </span>
+                    {envCfg?.frontendBaseUrl && <span className="font-mono text-[10px]">{envCfg.frontendBaseUrl}</span>}
+                    <span>
+                      {t("test.smoke.loginState")}{" "}
+                      <span className={envCfg?.loginState?.hasState ? "font-medium text-status-success-foreground" : "text-muted-foreground"}>
+                        {envCfg?.loginState?.hasState ? t("test.smoke.loginCaptured") : t("test.smoke.loginNone")}
+                      </span>
+                    </span>
+                    <span className="ml-auto">{t("test.smoke.envHint")}</span>
+                  </div>
+                )}
                 {/* 回归测试整页工作区(批 H):子页签 + 发起回归 + 状态行 + 页内区块 */}
                 {testType === "regression" && current?.path && (
                   <RegressionWorkspace
@@ -2918,7 +3068,7 @@ export function InlineTestingPanel({ visible = true }: { visible?: boolean } = {
                     runStatus={libraryRunStatus}
                   />
                 )}
-                {testType === "func" && current.tasks.length > 0 && (
+                {testType === "func" && visibleTasks.length > 0 && (
                   <div className="mb-3 flex items-center gap-2">
                     <span className="flex-1" />
                     <label className="flex items-center gap-1 text-[11px] text-muted-foreground" title={t("test.batch.concurrencyHint")}>
@@ -2935,11 +3085,11 @@ export function InlineTestingPanel({ visible = true }: { visible?: boolean } = {
                     </label>
                   </div>
                 )}
-                {testType !== "func" ? null : current.tasks.length === 0 ? (
-                  <EmptyState icon={ListChecks} text={t("test.tasksEmpty")} />
+                {testType === "regression" ? null : visibleTasks.length === 0 ? (
+                  <EmptyState icon={ListChecks} text={t(testType === "smoke" ? "test.smoke.tasksEmpty" : "test.tasksEmpty")} />
                 ) : (() => {
                   // 单张任务卡（抽出闭包以便各分组复用）。i = 任务原始下标（点开进详情 / 删除按 index 操作）。
-                  const renderTaskCard = (tk: { id: string; name: string }, i: number) => {
+                  const renderTaskCard = (tk: { id: string; name: string; type?: TestTaskType }, i: number) => {
                     const st = taskStates[tk.id] ?? DEFAULT_TASK_STATE;
                     const chip = taskChip(st, t);
                     const inWait = waitingTaskIds.has(tk.id);
@@ -2960,6 +3110,7 @@ export function InlineTestingPanel({ visible = true }: { visible?: boolean } = {
                             {/* 标签放标题行（taskName 旁），不占右列额外一行 —— 导入用例卡片才显示，避免撑高同行卡片 */}
                             <div className="flex min-w-0 items-center gap-1.5 pt-0.5">
                               <span className="truncate text-sm font-medium text-foreground">{tk.name}</span>
+                              {tk.type === "smoke" && <span className="shrink-0 rounded-full bg-status-warning-muted px-1.5 py-0.5 text-[9px] font-medium text-status-warning-foreground">{t("test.type.smoke")}</span>}
                               {st.imported?.cases && <span className="shrink-0 rounded-full bg-primary/15 px-1.5 py-0.5 text-[9px] font-medium text-primary">{t("test.task.importedTag")}</span>}
                             </div>
                             <div className="flex shrink-0 flex-col items-end gap-0.5">
@@ -2968,7 +3119,7 @@ export function InlineTestingPanel({ visible = true }: { visible?: boolean } = {
                             </div>
                           </div>
                           <div className="flex items-start">
-                            {STEPS.filter((s) => !(st.imported?.cases && s.step === "requirement")).map((s, idx, arr) => (
+                            {STEPS.filter((s) => !((st.imported?.cases || tk.type === "smoke") && s.step === "requirement")).map((s, idx, arr) => (
                               <div key={s.step} className="flex flex-1 flex-col items-center">
                                 {/* dot with connector lines on both sides (ends are hidden) */}
                                 <div className="flex w-full items-center">
@@ -2992,13 +3143,16 @@ export function InlineTestingPanel({ visible = true }: { visible?: boolean } = {
                     );
                   };
                   // 每个任务落入唯一分类（运行中 > 排队中 > 已完成 > 待处理），保留原始下标。
-                  const groups: Record<TaskCategory, { tk: { id: string; name: string }; i: number }[]> =
+                  // ⚠️ 分组的是 visibleTasks（当前页签的形态）而非 current.tasks，但 `i` 必须是
+                  // **原始下标** —— setSelectedTask / requestDeleteTask 都按原始下标操作 tasks[]，
+                  // 用过滤后的下标会打开/删掉另一个任务。
+                  const groups: Record<TaskCategory, { tk: { id: string; name: string; type?: TestTaskType }; i: number }[]> =
                     { running: [], queued: [], pending: [], done: [] };
-                  current.tasks.forEach((tk, i) => {
+                  for (const { tk, i } of visibleTasks) {
                     const st = taskStates[tk.id] ?? DEFAULT_TASK_STATE;
                     const c = taskCategory(st.stepStatus, STEP_ORDER, runningTaskIds.has(tk.id), waitingTaskIds.has(tk.id));
                     groups[c].push({ tk, i });
-                  });
+                  }
                   // 排队中按队列序号升序；其余保持任务原序（状态变化时不跳动）。
                   groups.queued.sort((a, b) => waitingQueueRef.current.indexOf(a.tk.id) - waitingQueueRef.current.indexOf(b.tk.id));
                   const CAT_META: Record<TaskCategory, { dot: string; text: string; label: TranslationKey }> = {
@@ -3245,6 +3399,30 @@ export function InlineTestingPanel({ visible = true }: { visible?: boolean } = {
           onClose={() => setModal("none")}
           onAdd={addTask}
           existingNames={(selected !== null ? projects[selected]?.tasks : undefined)?.map((tk) => tk.name) ?? []}
+        />
+      )}
+      {modal === "newSmokeTask" && (
+        <NewSmokeTaskModal
+          t={t}
+          env={env}
+          envCfg={envCfg}
+          dataPrefix={smokeDataPrefix()}
+          existingNames={(selected !== null ? projects[selected]?.tasks : undefined)?.map((tk) => tk.name) ?? []}
+          onClose={() => setModal("none")}
+          onCreate={async (moduleName, moduleEntry, scenarioText, targetUrl) => {
+            const taskName = `${moduleName.trim()}-冒烟`;
+            const r = await addSmokeTask(taskName, moduleEntry, scenarioText, targetUrl);
+            if (!r.ok || !r.taskId) return r;
+            setModal("none");
+            // 无门控：创建即打开流程视图并直接发起执行（execution → report 由既有
+            // auto-chain 接力）。定位新任务的下标用「创建后的长度 - 1」——setProjects
+            // 是异步的，此刻 current.tasks 还是旧值，不能用 findIndex。
+            const idx = (current?.tasks.length ?? 0);
+            setSelectedTask(idx);
+            setView("flow");
+            setPendingSmokeRun(r.taskId);
+            return { ok: true };
+          }}
         />
       )}
       {modal === "runStart" && activeTask && (
@@ -8053,6 +8231,169 @@ function EnvWarnModal({
         <WarningCircle size={14} className="mt-0.5 shrink-0" />
         <span>{body}</span>
       </div>
+    </ModalShell>
+  );
+}
+
+/**
+ * 新建**冒烟任务**弹窗（第三形态）。
+ *
+ * 与 NewTaskModal 的核心差异是**必填只剩 3 项**：模块名称 / 模块入口 / 测试场景。
+ * 环境信息（系统地址、登录态）一律沿用项目的环境配置，这里只读展示 —— 冒烟不建
+ * 第二套环境体系（原冒烟提示词里要手填的 <系统名称>/<URL>/cookie 都由此消化）。
+ * 角色、全局规则、报告结构三段固定内容已内嵌进平台 prompt，弹窗底部只做只读告知。
+ */
+function NewSmokeTaskModal({
+  t, env, envCfg, dataPrefix, existingNames, onClose, onCreate,
+}: {
+  t: T;
+  env: string;
+  envCfg: { configured: boolean; env: string; frontendBaseUrl: string | null; allowedEnvs: string[]; source?: string; loginState?: LoginStateInfo } | null;
+  dataPrefix: string;
+  existingNames: string[];
+  onCreate: (moduleName: string, moduleEntry: string, scenarioText: string, targetUrl?: string) => Promise<{ ok: boolean; error?: string }>;
+  onClose: () => void;
+}) {
+  const [moduleName, setModuleName] = useState("");
+  const [moduleEntry, setModuleEntry] = useState("");
+  const [scenarioText, setScenarioText] = useState("");
+  const [targetUrl, setTargetUrl] = useState("");
+  const [showAdv, setShowAdv] = useState(false);
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  // 任务名由模块名派生（与报告标题、产物目录同名），重名实时校验同 NewTaskModal 口径。
+  const taskName = moduleName.trim() ? `${moduleName.trim()}-冒烟` : "";
+  const isDuplicateName = !!taskName && existingNames.some((n) => n.trim() === taskName);
+  // 实时解析预览：让用户在创建前就看到"平台把我这几行读成了几个场景"，
+  // 而不是创建后才在场景表里发现分隔符没写对。
+  const parsed = useMemo(() => scenarioTextToCases(scenarioText), [scenarioText]);
+  const missingExpected = parsed.filter((c) => c.steps[0].expected.includes("该操作可正常完成")).length;
+  const ready = !!taskName && !isDuplicateName && !!moduleEntry.trim() && parsed.length > 0;
+
+  const create = async () => {
+    if (!ready || busy) return;
+    setBusy(true);
+    setErr("");
+    try {
+      const res = await onCreate(moduleName, moduleEntry, scenarioText, targetUrl.trim() || undefined);
+      if (!res.ok) setErr(res.error || t("test.smoke.createFailed"));
+      // 成功时由 onCreate 内部关闭弹窗并发起执行（无门控）。
+    } catch (e) {
+      // 与 NewTaskModal 同款兜底：任一 await 抛错都必须落到 finally，否则按钮永久卡「创建中」。
+      setErr(e instanceof Error ? e.message : t("test.smoke.createFailed"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <ModalShell
+      title={t("test.smoke.newTaskTitle")}
+      subtitle={t("test.smoke.newTaskSubtitle")}
+      onClose={onClose}
+      footer={
+        <>
+          <span className="mr-auto text-[11px] text-muted-foreground">{t("test.smoke.autoRunHint")}</span>
+          <button onClick={onClose} className={CANCEL_BTN}>{t("test.cancel")}</button>
+          <button disabled={!ready || busy} onClick={create} className={PRIMARY_BTN}>
+            {busy ? t("test.smoke.creating") : t("test.smoke.createAndRun")}
+          </button>
+        </>
+      }
+    >
+      {/* 测试环境：只读沿用项目环境配置 */}
+      <Field label={t("test.smoke.envLabel")}>
+        <div className="flex flex-col gap-1.5 rounded-md border border-border bg-muted/30 px-3 py-2 text-[11px]">
+          <div className="flex items-center gap-2">
+            <span className="w-16 shrink-0 text-muted-foreground">{t("test.smoke.envName")}</span>
+            <span className="font-medium text-foreground">{env}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="w-16 shrink-0 text-muted-foreground">{t("test.smoke.sysUrl")}</span>
+            <span className="truncate font-mono text-[10px] text-foreground">
+              {envCfg?.frontendBaseUrl || t("test.smoke.envUnset")}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="w-16 shrink-0 text-muted-foreground">{t("test.smoke.loginState")}</span>
+            <span className={envCfg?.loginState?.hasState ? "font-medium text-status-success-foreground" : "text-muted-foreground"}>
+              {envCfg?.loginState?.hasState ? t("test.smoke.loginCaptured") : t("test.smoke.loginNone")}
+            </span>
+          </div>
+          <button
+            onClick={() => setShowAdv((v) => !v)}
+            className="mt-0.5 w-fit text-left text-[11px] text-primary hover:underline"
+          >
+            {showAdv ? "▾" : "▸"} {t("test.smoke.overrideUrl")}
+          </button>
+          {showAdv && (
+            <>
+              <input
+                className={INPUT}
+                value={targetUrl}
+                onChange={(e) => setTargetUrl(e.target.value)}
+                placeholder={t("test.smoke.overrideUrlPlaceholder")}
+              />
+              <p className="text-[10px] leading-relaxed text-muted-foreground">{t("test.smoke.overrideUrlHint")}</p>
+            </>
+          )}
+        </div>
+      </Field>
+
+      <Field label={t("test.smoke.moduleNameLabel")}>
+        <input
+          className={isDuplicateName ? INPUT.replace("border-border", "border-status-error-border") : INPUT}
+          value={moduleName}
+          onChange={(e) => setModuleName(e.target.value)}
+          placeholder={t("test.smoke.moduleNamePlaceholder")}
+        />
+        {isDuplicateName ? (
+          <p className="mt-1 text-[11px] text-status-error-foreground">⚠ {t("test.newTaskModal.duplicateName")}</p>
+        ) : taskName ? (
+          <p className="mt-1 text-[11px] text-muted-foreground">{t("test.smoke.taskNamePreview", { name: taskName })}</p>
+        ) : null}
+      </Field>
+
+      <Field label={t("test.smoke.moduleEntryLabel")}>
+        <input
+          className={INPUT}
+          value={moduleEntry}
+          onChange={(e) => setModuleEntry(e.target.value)}
+          placeholder={t("test.smoke.moduleEntryPlaceholder")}
+        />
+      </Field>
+
+      <Field label={t("test.smoke.scenariosLabel")}>
+        <textarea
+          className="h-40 w-full resize-y rounded-md border border-border bg-background px-2.5 py-2 font-mono text-[11px] leading-relaxed text-foreground outline-none focus:border-primary"
+          value={scenarioText}
+          onChange={(e) => setScenarioText(e.target.value)}
+          placeholder={t("test.smoke.scenariosPlaceholder")}
+        />
+        <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">{t("test.smoke.scenariosHint")}</p>
+        {parsed.length > 0 && (
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            {t("test.smoke.parsedCount", { n: parsed.length })}
+            {missingExpected > 0 && (
+              <span className="ml-1 text-status-warning-foreground">{t("test.smoke.missingExpected", { n: missingExpected })}</span>
+            )}
+          </p>
+        )}
+      </Field>
+
+      {/* 平台自动提供的部分：让用户知道原提示词里那几段"没丢，只是被平台接管了" */}
+      <div className="rounded-md border border-border bg-muted/40 px-3 py-2">
+        <div className="mb-1.5 text-[11px] font-medium text-foreground">🔒 {t("test.smoke.builtinTitle")}</div>
+        <ul className="flex list-inside list-disc flex-col gap-1 text-[10.5px] leading-relaxed text-muted-foreground">
+          <li>{t("test.smoke.builtinRole")}</li>
+          <li>{t("test.smoke.builtinRules")}</li>
+          <li>{t("test.smoke.builtinReport")}</li>
+          <li>{t("test.smoke.builtinPrefix", { prefix: dataPrefix })}</li>
+        </ul>
+      </div>
+
+      {err && <p className="text-[11px] text-status-error-foreground">⚠ {err}</p>}
     </ModalShell>
   );
 }
