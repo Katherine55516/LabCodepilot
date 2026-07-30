@@ -47,4 +47,34 @@ describe("GET /api/test/env-config", () => {
     assert.equal(r.env, "sit");
     assert.equal(r.frontendBaseUrl, "http://b");
   });
+  it("returns the requested SIT URL and its captured default-account login state together", async () => {
+    writeEnv({
+      default: "local",
+      allowedEnvs: ["local", "sit"],
+      environments: {
+        local: { frontendBaseUrl: "http://localhost:3000" },
+        sit: {
+          frontendBaseUrl: "https://fhrms-di1.sit.cmft.com/index",
+          defaultAccount: "role1",
+        },
+      },
+    });
+    const authDir = path.join(proj, "AI_LabTest", ".auth");
+    fs.mkdirSync(authDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(authDir, "sit.role1.storageState.json"),
+      JSON.stringify({
+        cookies: [{ name: "session", value: "redacted", expires: -1 }],
+        origins: [],
+      }),
+    );
+
+    const r = await (await get({ projectPath: proj, env: "sit" })).json();
+    assert.equal(r.env, "sit");
+    assert.equal(r.frontendBaseUrl, "https://fhrms-di1.sit.cmft.com/index");
+    assert.equal(r.loginState.account, "role1");
+    assert.equal(r.loginState.hasState, true);
+    assert.equal(r.loginState.expired, false);
+    assert.equal(typeof r.loginState.capturedAtMs, "number");
+  });
 });

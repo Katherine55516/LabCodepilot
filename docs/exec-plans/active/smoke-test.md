@@ -22,6 +22,7 @@
 | Phase 6 | i18n 三语言 + 埋点口径 | ✅ 已完成 | `test.smoke.*` ×3；冒烟不发 cases_approved（采纳率口径隔离）；task_created 带 taskType |
 | Phase 7 | 验证：单测 + dev CDP | ✅ dev 侧完成 | 2439 单测 0 fail；API curl 合同（GET/PUT/409/400）+ CDP 报告全交互；**打包态实测待用户发起** |
 | Phase 8 | 文档：handover + insights 互链 + ARCHITECTURE 索引 | ✅ 已完成 | 两份互链文档 + 三处索引（handover/insights README、ARCHITECTURE） |
+| Phase 9 | 冒烟看板环境摘要修复 | ✅ 已完成 | 修复 dash 视图未请求 env-config；按项目路径+环境隔离响应，加载态不误报；2446 单测 0 fail（1 skip）+ 9/9 smoke E2E + dev 截图/console 0 error |
 
 ## 决策日志
 
@@ -38,6 +39,7 @@
 - 2026-07-30：**插件侧 `ai-lab-test:smoke` 本期不做**。平台先行验证形态，P2 再改上游 ai-lab-test-agent 仓库并走 vendor 流水线。
 - 2026-07-30（Phase 1 实施中发现）：**既有 `CASE_TAGS` 里已有一个「冒烟测试」标签**（`InlineTestingPanel.tsx` 的用例编辑器多选标签、导入路由也认），但它**只是功能用例上的人工标注，无任何程序消费**（对比「回归测试」标签驱动 `depositTask` 入库 + reduce 的 `suiteCounts` 红线）。处置：① P1 冒烟场景 `tags` 恒空，与该标签零交互，无功能冲突；② 该标签是 P2「从功能任务提炼冒烟场景」最自然的数据源（用户打了标签 = 已经标出了主流程用例），P2 实现时直接消费它；③ 概念上二者需在文档里说清——**标签 = 功能用例上的标注，形态 = 任务类型**，避免用户困惑"打了冒烟标签的用例为什么不出现在冒烟页签"。已在 `smoke-scenarios.ts` 顶部注释与单测里锁死。
 - 2026-07-30（Phase 1 实施中修正）：任务级地址字段实际是 **`targetUrlByEnv?: Record<string, string>`（按 env 隔离）**，非方案里写的单一 `targetUrl`（那是已迁移的旧字段）。冒烟的地址覆盖直接复用该结构，Phase 4 写表单时按当前 `selectedEnv` 存取。
+- 2026-07-30（Phase 9 缺陷修复）：**冒烟项目看板与新建弹窗必须和 flow 共用 `/api/test/env-config`，并将响应绑定到 `normalize(projectPath) + env` scope**。根因是 Phase 4 新增了 dash 消费者，却沿用了旧 effect 的 `view === "flow"` 加载门槛，导致配置与登录态真实存在时仍把 `null` 渲染成“未配置/未捕获”。不在弹窗内另建请求，也不改服务端 resolver；scope key 同时防止切项目/环境时旧 URL 与登录态串台，首次加载明确显示 loading。
 
 ## 详细设计
 

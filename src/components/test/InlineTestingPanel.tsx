@@ -51,6 +51,15 @@ type ModalKind = "none" | "newTask" | "newSmokeTask" | "runStart" | "execConfirm
 // 执行方式:visible=独立窗口可见运行(有头),headless=后台无头运行(默认,更快)。
 type ExecMode = "headless" | "visible";
 type T = (key: TranslationKey, params?: Record<string, string | number>) => string;
+type EnvConfigDTO = {
+  configured: boolean;
+  env: string;
+  frontendBaseUrl: string | null;
+  allowedEnvs: string[];
+  source?: string;
+  loginState?: LoginStateInfo;
+};
+type ScopedEnvConfig = { key: string; data: EnvConfigDTO | null };
 // Backend test-step keys (match /api/test/run + src/lib/test/prompts.ts).
 // docx 原文档预览：复用文件树预览体系的 DocxViewer（docx-preview + DOMPurify + sandbox
 // iframe 三层 XSS 防护，见 src/components/editor/DocxViewer.tsx）。懒加载——只有真正点开
@@ -582,7 +591,7 @@ export function InlineTestingPanel({ visible = true }: { visible?: boolean } = {
   const [env, setEnv] = useState(() => {
     try { return localStorage.getItem("codepilot:test-env") || "local"; } catch { return "local"; }
   });
-  const [envCfg, setEnvCfg] = useState<{ configured: boolean; env: string; frontendBaseUrl: string | null; allowedEnvs: string[]; source?: string; loginState?: LoginStateInfo } | null>(null);
+  const [envCfgState, setEnvCfgState] = useState<ScopedEnvConfig | null>(null);
   // 就地环境配置抽屉（阶段 1）：取代原「跳转到 设置·测试账号」整页往返。三处入口
   // （项目页「环境配置」按钮 / 流程头未配置 chip / EnvWarnModal「去配置」）改为开抽屉；
   // 保存后 bump envCfgReload → 下方 env-config effect 重拉，🎯 访问地址即时刷新。
@@ -671,6 +680,16 @@ export function InlineTestingPanel({ visible = true }: { visible?: boolean } = {
   };
 
   const current = selected !== null ? projects[selected] ?? null : null;
+  // 环境配置必须与「项目路径 + 环境」绑定。切项目或 local/SIT 时，React 会先 render 再跑
+  // effect；若只保留一个裸 envCfg，这一帧会把上个项目/环境的地址和登录态串到新项目。
+  const envCfgKey = current?.path ? `${normalizeProjectPath(current.path)}\u0000${env}` : "";
+  const envCfg = envCfgState?.key === envCfgKey ? envCfgState.data : null;
+  const envCfgLoading = Boolean(
+    visible
+      && current?.path
+      && (view === "dash" || view === "flow")
+      && envCfgState?.key !== envCfgKey,
+  );
   const currentSystemName = current ? getProjectSystemName(projectSystemNamesByPath, current.path) : null;
   const currentDisplayName = currentSystemName || current?.name || "";
   const activeTask = current && selectedTask !== null ? current.tasks[selectedTask] ?? null : null;
@@ -1565,21 +1584,32 @@ export function InlineTestingPanel({ visible = true }: { visible?: boolean } = {
     return () => clearInterval(id);
   }, [runningStep]);
 
-  // Resolve the active project's env config (target baseUrl) for display in the flow
-  // view. Refetches when entering a flow / switching env / 路由切回工作台(pathname)，并在
+  // Resolve the active project's env config (target baseUrl + login state) for the
+  // project dashboard and flow view. Refetches when selecting a project / switching
+  // env / 路由切回工作台(pathname)，并在
   // 窗口重新聚焦 / 页面重新可见时也重拉 —— 这样在「设置·测试账号」改完配置(或重新导出
   // environments.json)切回工作台时，访问地址会自动刷新，不再显示缓存的旧地址。
   useEffect(() => {
-    if (view !== "flow" || !current?.path) { setEnvCfg(null); return; }
+    if (!visible || (view !== "dash" && view !== "flow") || !current?.path) return;
     const projectPath = current.path;
+    const key = envCfgKey;
     let cancelled = false;
+    let loadSeq = 0;
+    const settleFailure = (seq: number) => {
+      if (cancelled || seq !== loadSeq) return;
+      // 首次请求失败时结束 loading；同一 scope 已有成功值时保留旧值，避免一次临时
+      // 网络错误把可用配置降级成「未配置」。
+      setEnvCfgState((prev) => (prev?.key === key ? prev : { key, data: null }));
+    };
     const load = () => {
+      const seq = ++loadSeq;
       // no-store：重拉时必须拿最新值（否则浏览器可能回放缓存的旧地址，自动刷新就失效了）。
       fetch(`/api/test/env-config?projectPath=${encodeURIComponent(projectPath)}&env=${encodeURIComponent(env)}`, { cache: "no-store" })
         .then((r) => (r.ok ? r.json() : null))
         .then((d) => {
-          if (cancelled || !d || d.error) return;
-          setEnvCfg(d);
+          if (cancelled || seq !== loadSeq) return;
+          if (!d || d.error) { settleFailure(seq); return; }
+          setEnvCfgState({ key, data: d as EnvConfigDTO });
           // The persisted env may be illegal for this project (allowedEnvs comes from
           // the project's environments.json, resolved here async) — fall back to a
           // valid value so the <select> isn't stuck on an out-of-range option.
@@ -1588,7 +1618,7 @@ export function InlineTestingPanel({ visible = true }: { visible?: boolean } = {
             handleEnvChange(allowed.includes("local") ? "local" : allowed[0]);
           }
         })
-        .catch(() => {});
+        .catch(() => settleFailure(seq));
     };
     load();
     // 自动重拉：窗口重新聚焦 / 标签页重新可见时（覆盖外部切走再回来、改完配置切回等场景）。
@@ -1604,7 +1634,7 @@ export function InlineTestingPanel({ visible = true }: { visible?: boolean } = {
     // pathname 入依赖：从 /settings 改完配置切回 /chat 时 pathname 变 → 重拉最新访问地址。
     // envCfgReload 入依赖：就地抽屉保存并同步后 bump，触发重拉刷新访问地址（阶段 1）。
 
-  }, [view, current?.path, env, pathname, envCfgReload]);
+  }, [visible, view, current?.path, env, envCfgKey, pathname, envCfgReload]);
 
   // 解锁判定可传显式 stepStatus(后台任务用)；stepUnlocked 是活动任务的便捷包装。
   const stepUnlockedFor = (ss: Record<TestStep, StepStatus>, step: TestStep): boolean => {
@@ -2510,6 +2540,13 @@ export function InlineTestingPanel({ visible = true }: { visible?: boolean } = {
                   // 环境地址 —— 于是切到未配置的 env(如 local)时不再冒充显示别的 env 的覆盖地址。
                   const taskUrl = (aId && taskStates[aId]?.targetUrlByEnv?.[env]) || "";
                   const shownUrl = taskUrl || envCfg?.frontendBaseUrl || "";
+                  if (!taskUrl && envCfgLoading) {
+                    return (
+                      <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                        <SpinnerGap size={11} className="animate-spin" /> {t("common.loading")}
+                      </span>
+                    );
+                  }
                   if (!shownUrl) {
                     return (
                       <button
@@ -3116,16 +3153,29 @@ export function InlineTestingPanel({ visible = true }: { visible?: boolean } = {
                 {/* 冒烟页签：沿用环境配置的只读信息条 —— 冒烟不建第二套环境体系，
                     系统地址/登录态都来自「环境配置」抽屉（TestEnvDrawer），这里只做展示与提醒。 */}
                 {testType === "smoke" && (
-                  <div className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-dashed border-border bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground">
+                  <div
+                    className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-dashed border-border bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground"
+                    data-testid="test-smoke-env-summary"
+                  >
                     <span>{t("test.smoke.envReuse")}</span>
                     <span>
                       {t("test.smoke.envName")} <span className="font-medium text-foreground">{env}</span>
                     </span>
-                    {envCfg?.frontendBaseUrl && <span className="font-mono text-[10px]">{envCfg.frontendBaseUrl}</span>}
+                    {envCfgLoading ? (
+                      <span className="flex items-center gap-1 text-[10px]">
+                        <SpinnerGap size={11} className="animate-spin" /> {t("common.loading")}
+                      </span>
+                    ) : envCfg?.frontendBaseUrl ? (
+                      <span className="font-mono text-[10px]">{envCfg.frontendBaseUrl}</span>
+                    ) : null}
                     <span>
                       {t("test.smoke.loginState")}{" "}
-                      <span className={envCfg?.loginState?.hasState ? "font-medium text-status-success-foreground" : "text-muted-foreground"}>
-                        {envCfg?.loginState?.hasState ? t("test.smoke.loginCaptured") : t("test.smoke.loginNone")}
+                      <span className={envCfg?.loginState?.hasState && !envCfgLoading ? "font-medium text-status-success-foreground" : "text-muted-foreground"}>
+                        {envCfgLoading
+                          ? t("common.loading")
+                          : envCfg?.loginState?.hasState
+                            ? t("test.smoke.loginCaptured")
+                            : t("test.smoke.loginNone")}
                       </span>
                     </span>
                     <span className="ml-auto">{t("test.smoke.envHint")}</span>
@@ -3488,6 +3538,7 @@ export function InlineTestingPanel({ visible = true }: { visible?: boolean } = {
           t={t}
           env={env}
           envCfg={envCfg}
+          envCfgLoading={envCfgLoading}
           dataPrefix={smokeDataPrefix()}
           existingNames={(selected !== null ? projects[selected]?.tasks : undefined)?.map((tk) => tk.name) ?? []}
           onClose={() => setModal("none")}
@@ -8551,11 +8602,12 @@ function EnvWarnModal({
  * 角色、全局规则、报告结构三段固定内容已内嵌进平台 prompt，弹窗底部只做只读告知。
  */
 function NewSmokeTaskModal({
-  t, env, envCfg, dataPrefix, existingNames, onClose, onCreate,
+  t, env, envCfg, envCfgLoading, dataPrefix, existingNames, onClose, onCreate,
 }: {
   t: T;
   env: string;
-  envCfg: { configured: boolean; env: string; frontendBaseUrl: string | null; allowedEnvs: string[]; source?: string; loginState?: LoginStateInfo } | null;
+  envCfg: EnvConfigDTO | null;
+  envCfgLoading: boolean;
   dataPrefix: string;
   existingNames: string[];
   onCreate: (moduleName: string, moduleEntry: string, scenarioText: string, targetUrl?: string) => Promise<{ ok: boolean; error?: string }>;
@@ -8611,7 +8663,10 @@ function NewSmokeTaskModal({
     >
       {/* 测试环境：只读沿用项目环境配置 */}
       <Field label={t("test.smoke.envLabel")}>
-        <div className="flex flex-col gap-1.5 rounded-md border border-border bg-muted/30 px-3 py-2 text-[11px]">
+        <div
+          className="flex flex-col gap-1.5 rounded-md border border-border bg-muted/30 px-3 py-2 text-[11px]"
+          data-testid="test-smoke-env-modal"
+        >
           <div className="flex items-center gap-2">
             <span className="w-16 shrink-0 text-muted-foreground">{t("test.smoke.envName")}</span>
             <span className="font-medium text-foreground">{env}</span>
@@ -8619,13 +8674,17 @@ function NewSmokeTaskModal({
           <div className="flex items-center gap-2">
             <span className="w-16 shrink-0 text-muted-foreground">{t("test.smoke.sysUrl")}</span>
             <span className="truncate font-mono text-[10px] text-foreground">
-              {envCfg?.frontendBaseUrl || t("test.smoke.envUnset")}
+              {envCfgLoading ? t("common.loading") : envCfg?.frontendBaseUrl || t("test.smoke.envUnset")}
             </span>
           </div>
           <div className="flex items-center gap-2">
             <span className="w-16 shrink-0 text-muted-foreground">{t("test.smoke.loginState")}</span>
-            <span className={envCfg?.loginState?.hasState ? "font-medium text-status-success-foreground" : "text-muted-foreground"}>
-              {envCfg?.loginState?.hasState ? t("test.smoke.loginCaptured") : t("test.smoke.loginNone")}
+            <span className={envCfg?.loginState?.hasState && !envCfgLoading ? "font-medium text-status-success-foreground" : "text-muted-foreground"}>
+              {envCfgLoading
+                ? t("common.loading")
+                : envCfg?.loginState?.hasState
+                  ? t("test.smoke.loginCaptured")
+                  : t("test.smoke.loginNone")}
             </span>
           </div>
           <button
