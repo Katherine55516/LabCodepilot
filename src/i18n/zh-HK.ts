@@ -2122,6 +2122,8 @@ const zhHK: Record<TranslationKey, string> = {
   'sandbox.artifacts.downloadMissing': '該檔案喺沙箱入面已經唔存在(可能已被刪除),列表已刷新。',
   'sandbox.artifacts.collapse': '收起產物面板',
   'sandbox.artifacts.expand': '展開沙箱產物',
+  'sandbox.skills.title': '使用的技能',
+  'sandbox.skills.times': '調用 {count} 次',
   'sandbox.provisioning.starting': '沙箱啟動中',
   'sandbox.provisioning.booting': '沙箱啟動中',
   'sandbox.provisioning.preparing': '沙箱準備中',

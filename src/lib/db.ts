@@ -8,6 +8,7 @@ import type { ChannelType, ChannelBinding } from './bridge/types';
 import { getLocalDateString, localDayStartAsUTC } from './utils';
 import { inferProtocolFromLegacy } from './provider-catalog';
 import { seal, open, isSealed, getKey } from './crypto-seal';
+import { parseSkillUsesJson, mergeSkillUses, type SessionSkillUse } from './skill-use';
 
 function dataDir(): string {
   return process.env.CLAUDE_GUI_DATA_DIR || path.join(os.homedir(), '.codepilot');
@@ -477,6 +478,13 @@ function migrateDb(db: Database.Database): void {
   // 空字符串 = 归属未知(本列上线前的存量),按用户决策一律隐藏,见 isVisibleSql()。
   if (!colNames.includes('owner_uid')) {
     safeAddColumn(db, "ALTER TABLE chat_sessions ADD COLUMN owner_uid TEXT NOT NULL DEFAULT ''");
+  }
+  // 沙箱会话累计调用过的 skill(JSON SessionSkillUse[],见 src/lib/skill-use.ts)。
+  // 与 vm_artifacts_json 同构:回合末在 chat route 落 assistant 消息处提取合并,
+  // 历史会话打开时浮窗才能显示完整清单 —— 消息是分页加载的(首屏 50 条),
+  // 纯靠客户端解析已加载消息会漏掉更早回合里的调用。
+  if (!colNames.includes('skills_used_json')) {
+    safeAddColumn(db, "ALTER TABLE chat_sessions ADD COLUMN skills_used_json TEXT NOT NULL DEFAULT ''");
   }
   if (!colNames.includes('context_summary')) {
     safeAddColumn(db, "ALTER TABLE chat_sessions ADD COLUMN context_summary TEXT NOT NULL DEFAULT ''");
@@ -1442,6 +1450,27 @@ export function setSessionVmArtifacts(id: string, files: SessionVmArtifact[]): v
   const db = getDb();
   db.prepare('UPDATE chat_sessions SET vm_artifacts_json = ? WHERE id = ?')
     .run(JSON.stringify(files), id);
+}
+
+/** Cowork: 会话累计调用过的 skill(浮窗「使用的技能」小节数据源)。 */
+export function getSessionSkillsUsed(id: string): SessionSkillUse[] {
+  const db = getDb();
+  const row = db.prepare('SELECT skills_used_json FROM chat_sessions WHERE id = ?').get(id) as
+    | { skills_used_json?: string }
+    | undefined;
+  return parseSkillUsesJson(row?.skills_used_json);
+}
+
+/**
+ * Cowork: 回合末把本回合的 Skill 调用合并进会话累计(按 tool_use id 去重 ——
+ * 错误兜底路径与正常路径共享同一 contentBlocks,重复调用本函数是安全的)。
+ */
+export function mergeSessionSkillsUsed(id: string, uses: SessionSkillUse[]): void {
+  if (!uses.length) return;
+  const db = getDb();
+  const merged = mergeSkillUses(getSessionSkillsUsed(id), uses);
+  db.prepare('UPDATE chat_sessions SET skills_used_json = ? WHERE id = ?')
+    .run(JSON.stringify(merged), id);
 }
 
 // ==========================================

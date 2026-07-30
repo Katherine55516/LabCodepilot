@@ -29,6 +29,8 @@ export interface ChatSession {
    * 研发会话恒为 ''(它绑定本地项目目录,不参与账号隔离)。见 db.ts isSessionVisibleToCurrentUser。
    */
   owner_uid?: string;
+  /** 沙箱会话累计调用过的 skill(JSON SessionSkillUse[],见 src/lib/skill-use.ts)。 */
+  skills_used_json?: string;
   /** Per-session reasoning effort (e.g. 'low'|'medium'|'high'|'max'); ''/undefined = no explicit effort */
   effort?: string;
   context_summary?: string;

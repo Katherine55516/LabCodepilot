@@ -912,6 +912,20 @@ async function collectStreamResponse(
       }
     }
   } finally {
+    // ── Cowork:累计本回合调用过的 skill(浮窗「使用的技能」小节)──
+    // 放 finally = 单一钩子覆盖正常与错误兜底两条 assistant 落库路径(它们共享
+    // contentBlocks);merge 按 tool_use id 去重,幂等。best-effort,绝不影响回合。
+    try {
+      const s = getSession(sessionId);
+      if (s?.sandbox_enabled) {
+        const { extractSkillUses } = await import('@/lib/skill-use');
+        const uses = extractSkillUses(contentBlocks, Date.now());
+        if (uses.length) {
+          const { mergeSessionSkillsUsed } = await import('@/lib/db');
+          mergeSessionSkillsUsed(sessionId, uses);
+        }
+      }
+    } catch { /* skill 记录失败不影响回合 */ }
     // ── Server-side completion detection (reliable path) ──
     // After persisting the assistant message, check for onboarding/checkin
     // fences and process them directly on the server. This ensures completion

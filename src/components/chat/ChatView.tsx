@@ -17,6 +17,7 @@ import { ChatComposerActionBar } from './ChatComposerActionBar';
 import { ModeIndicator } from './ModeIndicator';
 import { ChatPermissionSelector } from './ChatPermissionSelector';
 import { VmArtifactsCard } from './VmArtifactsCard';
+import { extractSkillUses, mergeSkillUses, groupSkillUses, parseSkillUsesJson, type SessionSkillUse } from '@/lib/skill-use';
 import { VmProvisioningBanner } from './VmProvisioningBanner';
 import { RunCockpit } from './RunCockpit';
 import { RuntimeBadge } from './RuntimeBadge';
@@ -262,6 +263,30 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
   }, [sessionId, sandboxEnabled]);
 
 
+  // Cowork — 「使用的技能」持久化来源(chat_sessions.skills_used_json,回合末服务端
+  // 合并写入)。挂载时拉一次,回合结束借用 vm-artifacts-refresh 事件同时机重拉
+  // (E4.3 已保证回合完成必发该事件)。消息是分页加载的,不能只靠客户端解析。
+  const [persistedSkillUses, setPersistedSkillUses] = useState<SessionSkillUse[]>([]);
+  useEffect(() => {
+    if (!sandboxEnabled) { setPersistedSkillUses([]); return; }
+    let cancelled = false;
+    const refetch = () => {
+      fetch(`/api/chat/sessions/${sessionId}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          if (cancelled || !data?.session) return;
+          setPersistedSkillUses(parseSkillUsesJson(data.session.skills_used_json));
+        })
+        .catch(() => {});
+    };
+    refetch();
+    window.addEventListener('vm-artifacts-refresh', refetch);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('vm-artifacts-refresh', refetch);
+    };
+  }, [sessionId, sandboxEnabled]);
+
   // Restore session-scoped last-generated images from sessionStorage
   useEffect(() => { loadLastGenerated(sessionId); }, [sessionId]);
 
@@ -336,6 +361,20 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
       window.dispatchEvent(new CustomEvent('vm-artifacts-refresh'));
     }
   }, [isStreaming, sandboxEnabled]);
+
+  // 「使用的技能」三源合并(按 tool_use id 去重,顺序 = 持久化 → 历史解析 → 实时):
+  //   ① 持久化(完整,但只有本列上线后的回合);② 已加载历史消息解析(存量老会话
+  //   兜底,受分页局限);③ 流式实时(技能被调用的瞬间浮窗即更新)。
+  const skillsUsed = useMemo(() => {
+    if (!sandboxEnabled) return [];
+    const fromMessages: SessionSkillUse[] = [];
+    for (const m of messages) {
+      if (m.role !== 'assistant' || !m.content.startsWith('[')) continue;
+      try { fromMessages.push(...extractSkillUses(JSON.parse(m.content))); } catch { /* 非结构化消息 */ }
+    }
+    const live = extractSkillUses(toolUses);
+    return groupSkillUses(mergeSkillUses(persistedSkillUses, fromMessages, live));
+  }, [sandboxEnabled, messages, toolUses, persistedSkillUses]);
 
   // ── Skill nudge banner ──
   // Listens for 'skill-nudge' window events dispatched by stream-session-manager
@@ -1208,9 +1247,10 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
       {sandboxEnabled && (
         <VmProvisioningBanner status={streamSnapshot?.vmStatus} />
       )}
-      {/* Cowork sandbox — downloadable artifacts produced inside the VM */}
-      {sandboxEnabled && vmArtifacts.length > 0 && (
-        <VmArtifactsCard sessionId={sessionId} files={vmArtifacts} vmOnline={vmOnline} />
+      {/* Cowork sandbox — downloadable artifacts + skills used inside the VM.
+          skills 非空也要渲染:对话开头 agent 先读规范、尚无产物时,浮窗即出现 */}
+      {sandboxEnabled && (vmArtifacts.length > 0 || skillsUsed.length > 0) && (
+        <VmArtifactsCard sessionId={sessionId} files={vmArtifacts} vmOnline={vmOnline} skillsUsed={skillsUsed} />
       )}
       {/* M2 (镜像流水线): 沙箱资产未就绪 —— 禁发 + 进度/引导提示(D4) */}
       {officeAssetsBlocked && (

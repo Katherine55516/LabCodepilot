@@ -5,13 +5,15 @@ import type { VmArtifactFile } from '@/types';
 import { useTranslation } from '@/hooks/useTranslation';
 import { showToast } from '@/hooks/useToast';
 import { Button } from '@/components/ui/button';
-import { ShieldCheck, DownloadSimple, Package, SpinnerGap, SidebarSimple } from '@/components/ui/icon';
+import { ShieldCheck, DownloadSimple, Package, SpinnerGap, SidebarSimple, Sparkle } from '@/components/ui/icon';
 
 interface VmArtifactsCardProps {
   sessionId: string;
   files: VmArtifactFile[];
   /** VM 在线状态:false 时显示"沙箱休眠"徽标(列表来自持久化,下载会自动唤醒 VM)。 */
   vmOnline?: boolean;
+  /** 本会话调用过的 skill(已按名聚合计数,来源见 ChatView 三源合并)。 */
+  skillsUsed?: Array<{ skill: string; count: number }>;
 }
 
 /** 折叠偏好跨会话记住(全局,不分会话 —— 这是用户的界面习惯,不是会话状态)。 */
@@ -34,7 +36,7 @@ function formatSize(bytes: number): string {
  * 下载走受控 fetch(不用裸 <a download>):VM 休眠时下载接口会先唤醒 VM
  * (数秒冷启动),期间给对应条目转圈动画,避免"点了没反应像卡死"的困惑。
  */
-export function VmArtifactsCard({ sessionId, files, vmOnline = true }: VmArtifactsCardProps) {
+export function VmArtifactsCard({ sessionId, files, vmOnline = true, skillsUsed = [] }: VmArtifactsCardProps) {
   const { t } = useTranslation();
   // 正在下载的 key 集合('__all__' 表示整包下载)。
   const [busy, setBusy] = useState<Set<string>>(new Set());
@@ -49,7 +51,7 @@ export function VmArtifactsCard({ sessionId, files, vmOnline = true }: VmArtifac
     [files],
   );
 
-  if (sorted.length === 0) return null;
+  if (sorted.length === 0 && skillsUsed.length === 0) return null;
 
   const toggleCollapsed = () => {
     setCollapsed((prev) => {
@@ -104,7 +106,8 @@ export function VmArtifactsCard({ sessionId, files, vmOnline = true }: VmArtifac
     `/api/cowork/artifacts?sessionId=${encodeURIComponent(sessionId)}&path=${encodeURIComponent(p)}`;
   const archiveUrl = `/api/cowork/artifacts?sessionId=${encodeURIComponent(sessionId)}&archive=1`;
 
-  // 折叠态:只剩一个角落小按钮(徽标示数),点击展开。
+  // 折叠态:只剩一个角落小按钮,点击展开。计数只显示**文件数**(用户决策;
+  // 技能数展开可见),仅有技能、尚无产物时不显示数字。
   if (collapsed) {
     return (
       <button
@@ -116,7 +119,7 @@ export function VmArtifactsCard({ sessionId, files, vmOnline = true }: VmArtifac
         aria-expanded={false}
       >
         <ShieldCheck size={14} className="text-status-success-foreground" />
-        <span className="font-medium">{sorted.length}</span>
+        {sorted.length > 0 && <span className="font-medium">{sorted.length}</span>}
         <SidebarSimple size={14} className="text-muted-foreground" />
       </button>
     );
@@ -128,7 +131,9 @@ export function VmArtifactsCard({ sessionId, files, vmOnline = true }: VmArtifac
       <div className="flex items-center gap-1.5 border-b border-border/50 px-3 py-2 text-xs font-medium">
         <ShieldCheck size={14} className="shrink-0 text-status-success-foreground" />
         <span className="truncate">{t('sandbox.artifacts.title')}</span>
-        <span className="shrink-0 font-normal text-muted-foreground">· {sorted.length}</span>
+        {sorted.length > 0 && (
+          <span className="shrink-0 font-normal text-muted-foreground">· {sorted.length}</span>
+        )}
         {!vmOnline && (
           <span
             className="ml-0.5 shrink-0 rounded-full border border-border/60 bg-background px-1.5 py-0.5 text-[10px] font-normal text-muted-foreground"
@@ -163,27 +168,53 @@ export function VmArtifactsCard({ sessionId, files, vmOnline = true }: VmArtifac
           <SidebarSimple size={14} />
         </Button>
       </div>
-      {/* 列表:一行一个文件;产物多时在面板内滚动,不再撑满屏幕 */}
-      <div className="max-h-[45vh] overflow-y-auto p-1.5">
-        {sorted.map((f) => {
-          const isBusy = busy.has(f.path);
-          return (
-            <button
-              key={f.path}
-              type="button"
-              disabled={isBusy}
-              onClick={() => download(fileUrl(f.path), f.path, f.name)}
-              className="group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors hover:bg-muted/60 disabled:opacity-70"
-              title={isBusy ? t('sandbox.artifacts.starting') : `${f.path} · ${formatSize(f.size)}`}
-            >
-              <span className="min-w-0 flex-1 truncate">{f.name}</span>
-              <span className="shrink-0 text-[11px] text-muted-foreground">{formatSize(f.size)}</span>
-              {isBusy
-                ? <SpinnerGap size={13} className="shrink-0 animate-spin text-status-success-foreground" />
-                : <DownloadSimple size={13} className="shrink-0 text-muted-foreground group-hover:text-foreground" />}
-            </button>
-          );
-        })}
+      {/* 文件与技能共用同一滚动区:产物多时在面板内滚动,不再撑满屏幕 */}
+      <div className="max-h-[45vh] overflow-y-auto">
+        {sorted.length > 0 && (
+          <div className="p-1.5">
+            {sorted.map((f) => {
+              const isBusy = busy.has(f.path);
+              return (
+                <button
+                  key={f.path}
+                  type="button"
+                  disabled={isBusy}
+                  onClick={() => download(fileUrl(f.path), f.path, f.name)}
+                  className="group flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs transition-colors hover:bg-muted/60 disabled:opacity-70"
+                  title={isBusy ? t('sandbox.artifacts.starting') : `${f.path} · ${formatSize(f.size)}`}
+                >
+                  <span className="min-w-0 flex-1 truncate">{f.name}</span>
+                  <span className="shrink-0 text-[11px] text-muted-foreground">{formatSize(f.size)}</span>
+                  {isBusy
+                    ? <SpinnerGap size={13} className="shrink-0 animate-spin text-status-success-foreground" />
+                    : <DownloadSimple size={13} className="shrink-0 text-muted-foreground group-hover:text-foreground" />}
+                </button>
+              );
+            })}
+          </div>
+        )}
+        {/* 使用的技能:agent 本会话调用过的 skill(×N = 累计调用次数) */}
+        {skillsUsed.length > 0 && (
+          <div className={sorted.length > 0 ? 'border-t border-border/50 px-3 py-2' : 'px-3 py-2'}>
+            <div className="mb-1.5 flex items-center gap-1.5 text-[11px] font-medium text-muted-foreground">
+              <Sparkle size={12} className="shrink-0" />
+              <span>{t('sandbox.skills.title')}</span>
+              <span className="font-normal">· {skillsUsed.length}</span>
+            </div>
+            <div className="flex flex-wrap gap-1">
+              {skillsUsed.map(({ skill, count }) => (
+                <span
+                  key={skill}
+                  className="inline-flex max-w-full items-center gap-1 rounded-md border border-border/60 bg-muted/40 px-1.5 py-0.5 text-[11px]"
+                  title={t('sandbox.skills.times', { count: String(count) })}
+                >
+                  <span className="truncate">{skill}</span>
+                  {count > 1 && <span className="shrink-0 text-muted-foreground">×{count}</span>}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
       {busy.size > 0 && !vmOnline && (
         <div className="flex items-center gap-1.5 border-t border-border/50 px-3 py-1.5 text-[11px] text-muted-foreground">

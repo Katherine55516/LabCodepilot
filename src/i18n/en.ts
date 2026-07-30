@@ -2116,6 +2116,8 @@ const en = {
   'sandbox.artifacts.downloadMissing': 'This file no longer exists in the sandbox (it may have been deleted) — the list has been refreshed.',
   'sandbox.artifacts.collapse': 'Collapse files panel',
   'sandbox.artifacts.expand': 'Show sandbox files',
+  'sandbox.skills.title': 'Skills used',
+  'sandbox.skills.times': 'Invoked {count} time(s)',
   'sandbox.provisioning.starting': 'Starting sandbox',
   'sandbox.provisioning.booting': 'Starting sandbox',
   'sandbox.provisioning.preparing': 'Preparing sandbox',

@@ -2113,6 +2113,8 @@ const zh: Record<TranslationKey, string> = {
   'sandbox.artifacts.downloadMissing': '该文件在沙箱中已不存在(可能已被删除),列表已刷新。',
   'sandbox.artifacts.collapse': '收起产物面板',
   'sandbox.artifacts.expand': '展开沙箱产物',
+  'sandbox.skills.title': '使用的技能',
+  'sandbox.skills.times': '调用 {count} 次',
   'sandbox.provisioning.starting': '沙箱启动中',
   'sandbox.provisioning.booting': '沙箱启动中',
   'sandbox.provisioning.preparing': '沙箱准备中',
