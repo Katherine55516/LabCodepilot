@@ -11,6 +11,8 @@ import { ChatPermissionSelector } from '@/components/chat/ChatPermissionSelector
 import { ImageGenToggle } from '@/components/chat/ImageGenToggle';
 import { PermissionPrompt } from '@/components/chat/PermissionPrompt';
 import { ChatEmptyState } from '@/components/chat/ChatEmptyState';
+import { OfficeEmptyCard } from '@/components/layout/OfficeEmptyCard';
+import { loadWorkspaceTab, saveWorkspaceTab, type WorkspaceTab } from '@/components/layout/chat-list-utils';
 import { OnboardingWizard } from '@/components/assistant/OnboardingWizard';
 import { ErrorBanner } from '@/components/ui/error-banner';
 import { FolderPicker } from '@/components/chat/FolderPicker';
@@ -99,6 +101,66 @@ export default function NewChatPage() {
   const [assistantConfigured, setAssistantConfigured] = useState(false);
   const [assistantWorkspacePath, setAssistantWorkspacePath] = useState('');
   const [mode, setMode] = useState('code');
+
+  // E4 (cowork): 办公 tab 下的落地页变体 —— 显示「开始办公对话」引导卡,
+  // 替代研发的「项目对话/选择文件夹」。tab 初值读 localStorage,侧边栏切换
+  // 经 'workspace-tab-changed' 事件实时同步;cowork 可用性走状态 API(fail-closed)。
+  const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>(() => loadWorkspaceTab());
+  const [coworkAvailable, setCoworkAvailable] = useState(false);
+  const [coworkImageProvisioned, setCoworkImageProvisioned] = useState(true);
+  const [creatingOffice, setCreatingOffice] = useState(false);
+
+  useEffect(() => {
+    fetch('/api/cowork/status')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!d) return;
+        setCoworkAvailable(!!d.enabled);
+        setCoworkImageProvisioned(!!d.imageProvisioned);
+      })
+      .catch(() => {});
+    const onTabChange = (e: Event) => {
+      const tab = (e as CustomEvent).detail;
+      if (tab === 'office' || tab === 'dev') setWorkspaceTab(tab);
+    };
+    window.addEventListener('workspace-tab-changed', onTabChange);
+    return () => window.removeEventListener('workspace-tab-changed', onTabChange);
+  }, []);
+
+  // E4.1 (用户反馈问题2): 带预填跳到 /chat(设置-CLI工具「添加工具」等)是
+  // 研发工作流 —— 强制切回研发 tab(连同侧边栏,经事件同步),否则办公
+  // landing 会替换掉预填输入界面。
+  useEffect(() => {
+    if (!prefillText) return;
+    if (loadWorkspaceTab() !== 'dev') {
+      saveWorkspaceTab('dev');
+      setWorkspaceTab('dev');
+      window.dispatchEvent(new CustomEvent('workspace-tab-changed', { detail: 'dev' }));
+    }
+  }, [prefillText]);
+
+  const handleStartOfficeSession = useCallback(async () => {
+    setCreatingOffice(true);
+    try {
+      const model = localStorage.getItem('codepilot:last-model') || '';
+      const provider_id = localStorage.getItem('codepilot:last-provider-id') || '';
+      const res = await fetch('/api/chat/sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sandbox_enabled: 1, model, provider_id }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        window.dispatchEvent(new CustomEvent('session-created'));
+        router.push(`/chat/${data.session.id}`);
+      }
+    } catch {
+      // Silently fail (same convention as openFolderAsNewSession)
+    } finally {
+      setCreatingOffice(false);
+    }
+  }, [router]);
+
   // Model/provider start empty — populated by the async global-default fetch.
   // This prevents the race where a user sends before the fetch completes and
   // gets the stale localStorage model instead of the configured default.
@@ -933,6 +995,22 @@ export default function NewChatPage() {
         sendFirstMessage(command);
     }
   }, [sendFirstMessage]);
+
+  // E4 (cowork): 办公 tab 下的落地页只给「开始办公对话」引导 —— 不渲染研发
+  // 的选文件夹空态与 composer(此页的首条消息流程按研发语义校验 workingDir,
+  // 办公会话必须先建会话再进入 /chat/[id] 输入)。
+  if (coworkAvailable && workspaceTab === 'office' && messages.length === 0 && !isStreaming) {
+    return (
+      <div className="relative flex h-full min-h-0 flex-col">
+        <OfficeEmptyCard
+          variant="landing"
+          imageProvisioned={coworkImageProvisioned}
+          creating={creatingOffice}
+          onStart={handleStartOfficeSession}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="relative flex h-full min-h-0 flex-col">

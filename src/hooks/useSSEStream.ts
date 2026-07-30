@@ -1,5 +1,5 @@
 import { useRef, useCallback } from 'react';
-import type { SSEEvent, TokenUsage, PermissionRequestEvent, MediaBlock } from '@/types';
+import type { SSEEvent, TokenUsage, PermissionRequestEvent, MediaBlock, VmArtifactFile, VmStatusEvent } from '@/types';
 import { saveCachedSdkInitMeta } from '@/lib/sdk-init-cache';
 
 interface ToolUseInfo {
@@ -37,6 +37,10 @@ export interface SSECallbacks {
    *  page's indicator to replace char:token estimation for ~60s after
    *  capture. */
   onContextUsage?: (snapshot: ContextUsageSnapshot) => void;
+  /** Cowork sandbox: files the agent created/modified in the VM this turn. */
+  onVmArtifacts?: (files: VmArtifactFile[]) => void;
+  /** Cowork sandbox: VM provisioning progress during the cold-start window. */
+  onVmStatus?: (status: VmStatusEvent) => void;
   onPermissionRequest: (data: PermissionRequestEvent) => void;
   onToolTimeout: (toolName: string, elapsedSeconds: number) => void;
   onModeChanged: (mode: string) => void;
@@ -293,6 +297,29 @@ function handleSSEEvent(
         const snap = JSON.parse(event.data) as ContextUsageSnapshot;
         callbacks.onContextUsage?.(snap);
       } catch { /* estimator still applies */ }
+      return accumulated;
+    }
+
+    case 'vm_artifacts': {
+      // Cowork sandbox — 回合末权威全量快照(E4.2)。空表必须放行:纯删除
+      // 回合(清单被删空)靠它清掉卡片 —— 曾有 length>0 守卫(增量语义残留)
+      // 吞掉空快照,导致「只删文件的回合卡片不刷新」(用户实测报告,E4.3)。
+      // Malformed payload → skip;回合完成的自动 refetch 兜底恢复。
+      try {
+        const payload = JSON.parse(event.data) as { files?: VmArtifactFile[] };
+        if (Array.isArray(payload.files)) {
+          callbacks.onVmArtifacts?.(payload.files);
+        }
+      } catch { /* skip malformed artifacts payload */ }
+      return accumulated;
+    }
+
+    case 'vm_status': {
+      // Cowork sandbox VM provisioning progress (P1-D readiness window).
+      try {
+        const status = JSON.parse(event.data) as VmStatusEvent;
+        if (status && typeof status.phase === 'string') callbacks.onVmStatus?.(status);
+      } catch { /* skip malformed vm_status payload */ }
       return accumulated;
     }
 

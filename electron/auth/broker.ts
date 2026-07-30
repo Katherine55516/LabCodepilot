@@ -16,7 +16,7 @@
 import * as http from 'http';
 import { logWarn } from './log';
 import type { ManagedProviderRow } from './managed-providers';
-import type { ImageProviderConfig } from './types';
+import type { CoworkRemoteConfig, ImageProviderConfig } from './types';
 
 let serverPort: number | null = null;
 
@@ -186,5 +186,52 @@ export async function purgeImageConfigOnServer(): Promise<void> {
   );
   if (!r.ok) {
     throw new Error(`image-config purge failed: status=${r.status} body=${JSON.stringify(r.body)}`);
+  }
+}
+
+/**
+ * Push the per-user cowork remote-sandbox config to the embedded server so it
+ * writes the cowork_remote_url / cowork_remote_token / cowork_backend settings
+ * (token is in SENSITIVE_SETTINGS → sealed at rest). Loopback-only, same trust
+ * model as /image-config/sync.
+ */
+export async function syncCoworkConfigToServer(config: CoworkRemoteConfig): Promise<void> {
+  const r = await postJson<{ ok: boolean; error?: string }>(
+    '/api/auth/cowork-config/sync',
+    { config },
+  );
+  if (!r.ok) {
+    throw new Error(`cowork-config sync failed: status=${r.status} body=${JSON.stringify(r.body)}`);
+  }
+}
+
+/** Clear the delivered cowork config (logout / 401) — office mode falls back to the local default. */
+export async function purgeCoworkConfigOnServer(): Promise<void> {
+  const r = await postJson<{ ok: boolean; error?: string }>(
+    '/api/auth/cowork-config/purge',
+    {},
+  );
+  if (!r.ok) {
+    throw new Error(`cowork-config purge failed: status=${r.status} body=${JSON.stringify(r.body)}`);
+  }
+}
+
+/**
+ * 把当前登录账号的 uid 推给嵌入式服务(办公会话账号隔离的事实源)。
+ *
+ * 传空串 = 清除(登出 / 401)。**故意不抛异常**:隔离标记同步失败不该阻断登录流程,
+ * 失败的后果是"办公会话看不见"(fail-closed,偏安全一侧),而不是泄漏。
+ */
+export async function syncCurrentUserToServer(uid: string): Promise<void> {
+  try {
+    const r = await postJson<{ ok: boolean; error?: string }>(
+      '/api/auth/current-user/sync',
+      { uid },
+    );
+    if (!r.ok) {
+      logWarn(`current-user sync failed: status=${r.status} body=${JSON.stringify(r.body)}`);
+    }
+  } catch (e) {
+    logWarn('current-user sync failed:', (e as Error).message);
   }
 }

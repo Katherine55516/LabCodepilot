@@ -44,6 +44,7 @@
 
 | 文件 | 主题 | 状态 |
 |------|------|------|
+| active/cowork-p2-windows.md | **Cowork P2 Windows/WSL2 移植**:补平台后端(约半数模块复用,四接缝=通道/生命周期/分发/网络)；通道走 `wsl.exe -e` stdio 模型(与现 exec 帧封装天然契合，免 admin)；决策 D1 接受策略级隔离先交付/D2 全 Win10-11 不设门槛/D3 stdio/D4 实测需 Win 机；W0 通道 POC 先行 → W1 抽象(macOS 可做) → W2-W7 | ⏸ 挂起(企业禁虚拟化→远程容器方案取代;个人 Win 场景保留) |
 | active/regression-library.md | 测试工作台:回归用例库(用例设计后自动沉淀「回归测试」标签用例 + 项目级库查看/管理 + 跨任务一键重跑) | 设计完成,待实现(批 A-E) |
 | active/regression-library-v2.md | 回归用例库 v2 一期：执行轮次实体（留痕/快照/中断态）+ 回归套件（静态+查询构建器+pinned）+ 发起弹窗重做（套件/env/预检估算）+ 报告按来源任务分组与 delta + 库检索；方案见 research/regression-library-v2-benchmark-proposal.md | 批 A-E/G/H 已完成；批 F（打包验收）待用户发起 |
 | active/regression-library-v2-phase23.md | 回归用例库 v2 二/三期（按交互原型 6 屏 1:1）：`_lib` 治理元数据（评审态/rev/隔离）+ 跨轮矩阵读侧现算 + 复测轮 failed-only 与合并口径红线 + 轮次报告独立页 + AI 失败归因 + 对比矩阵 + 健康度治理与隔离护栏 | 批 I-P 已完成；打包验收 + 真实 AI 归因质量待验 |
@@ -76,10 +77,17 @@
 | active/btw-side-question.md | `/btw` 会话内临时问答浮层（对标 Claude Code CLI /btw）：无状态端点 native generateText（无工具/不取锁/不落库）+ 前端 `/btw <arg>` 解析 + BtwDialog 浮层 + 前端内存上下文快照（含 in-flight），主对话流式期间不打断 | Phase 0 完成，Phase 1-6 待开始 |
 | active/image-model-managed-delivery-client.md | **文生图模型账号下发（客户端层）**：去编译期 key 注入，改登录后服务端下发百炼凭证+模型列表；以 `settings.bailian_image_config` 落地（不进 api_providers，结构上隔离对话下拉框），复刻 ASR 下发范式 + broker 写入嵌入式 Next | Phase 0-6 待开始 |
 | active/image-model-managed-delivery-server.md | **文生图模型账号下发（服务端层）**：新增 `GET /api/v1/image/config(/encrypted/hash)`，apiKey 复用 configs 的 AES-256-GCM 加密口令；图片配置独立于 configs 列表避免泄漏进对话下拉框 | S1-S5 待开始 |
+
 ### Completed
 
 | 文件 | 主题 | 完成日期 |
 |------|------|----------|
+| completed/skills-store-internal.md | **技能市场（内部）**：Skills 页第三 tab 接 codeagent-server Skills 商店 BFF（acb6240）；主进程 IPC 持 token、yauzl 安装事务（zip 三重守卫/原子落位/台账自愈/串行化）、错误码分支 UI、「我的技能」互通（顺修 installed 删除残留 bug）；假 JWKS+假 Hub 真实链路 26 断言全过 | 2026-07-28 |
+| completed/cowork-remote-container.md | **Cowork 远程容器沙箱(R 系列,取代本地 VM)**:RD1-RD8 八决策(全平台统一远程/单公司服务器账号下发/凭证代理 sidecar/无状态 HMAC+禁内网放公网/粒度=归属隔离容器仍 per 会话);R0 POC→R1 控制面+CoworkBackend→R2 文件通道(helper 直读持久 volume)→R3 凭证代理(真 key 不进 agent 容器)→R4 多用户 authz/配额 TTL/出网禁内网→R5 打包版实测+部署包(install.sh+systemd 双单元+TLS 预留)+运维手册+账号下发客户端全链+Windows 平台 gate。剩:Win 真机实测/账号后端接口/裸金属迁移三件套(见文档头) | 2026-07-17 |
+| completed/cowork-p3-security.md | **Cowork P3 安全强化**:凭证不进 VM(宿主代理注入一次性 token,NAT 网关方案)+ 每会话非特权用户(setuid 降权,会话间不可越权互读)+ 宿主侧安全审计;明确不做出网白名单(用户接受 agent 自由上网) | 2026-07-15 |
+| completed/cowork-image-pipeline.md | **Cowork 镜像流水线**:沙箱环境零手动预置(3.1.15→3.1.17)— M1 cloud-init seed 首启自注入+SSH 全退役 → M2 应用内下载(中科大底镜+npmmirror SDK 平台子包,断点续传/校验/8GiB 稀疏扩容)→ M3 资源随包(vfkit/daemon/forwarder,signIgnore 保 entitlement)+目录正式化+版本追踪+daemon v3 偏斜自愈 → M4 裸机模拟验收 | 2026-07-15 |
+| completed/cowork-office-mode.md | Cowork 办公模式:侧边栏「办公/研发」双栏切换(办公=沙箱会话平铺不绑项目文件夹);E1 执行层守卫(硬失败/native 拒绝/MCP 过滤)→ E2 创建期沙箱+暂存目录 → E3 双栏 → E4 办公 UI 面+实测反馈修复(E4.1-E4.3)→ E5 设置开关+零写入验收+双文档 | 2026-07-14 |
+| completed/cowork-vm-mode.md | Cowork 沙箱 P1 macOS MVP 底层:文件通道(上传进 VM + 产物下载/落库)→ VM 生命周期管理器(server 侧单例)→ guest-daemon/vsock 通道 → 就绪状态机;P1-E 由 cowork-office-mode.md 承接 | 2026-07-14 |
 | completed/script-gen-trace-anchors-incremental.md | 回归脚本生成质量与韧性:快照元素清单(治定位器臆造,具名元素臆造 class → 语义化 getByRole;边界:视觉结构类断言仍需被测端 data-testid)+ 逐条增量沉淀(执行流内 pass 即入队生成,断流不再全丢)+ 未执行守卫 + 打包产物完整性闸 | 2026-07-17 |
 | completed/regression-script-generation.md | 测试报告成功后后台为本轮 pass+「回归测试」标签用例生成独立 Playwright 脚本；四节点不变，具备脱敏轨迹、结构化生成、安全校验、指纹幂等、锁恢复、源任务回写、报告区查看/重试/运行，并通过开发态与 macOS 打包态真实回放 | 2026-07-10 |
 | completed/test-usage-stats.md | **测试模块使用统计**（P1）：test_stats_events 事件流水 + 纯函数聚合口径层（采纳率首轮基线 / 报告准确度+覆盖率 / 服务端逐用例计时 / 模型节点级归因 / 熔断排除 / 时间窗口计入门控）、10 类事件字典、四 scope API + 4 Sheet XLSX 导出、TestStatsView 看板（第 4 视图）+ 复核 UI + 节点用时/模型徽标。P2 匿名上报为独立后续里程碑 | 2026-07-09 |

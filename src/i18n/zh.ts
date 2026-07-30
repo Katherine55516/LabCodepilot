@@ -862,10 +862,13 @@ const zh: Record<TranslationKey, string> = {
   'chatList.openFolder': '打开文件夹',
   'chatList.copyFolderPath': '复制文件夹路径',
   'chatList.searchSessions': '搜索会话...',
+  'chatList.collapseSidebar': '收起侧边栏',
+  'chatList.expandSidebar': '展开侧边栏',
   'chatList.noSessions': '暂无会话',
   'chatList.importFromCli': '从 Claude Code 导入',
   'chatList.addProjectFolder': '新建项目',
   'chatList.threads': '对话列表',
+  'chatList.projects': '项目列表',
   'chatList.showMore': '展开更多（{count} 条）',
   'chatList.showLess': '收起',
 
@@ -883,7 +886,7 @@ const zh: Record<TranslationKey, string> = {
   'globalSearch.toolLabel': '工具',
 
   // ── Message list ────────────────────────────────────────────
-  'messageList.claudeChat': 'AI Native Lab',
+  'messageList.claudeChat': 'CMWork',
   'messageList.emptyDescription': '',
   'messageList.loadEarlier': '加载更早的消息',
   'messageList.loading': '加载中...',
@@ -918,9 +921,9 @@ const zh: Record<TranslationKey, string> = {
   'streaming.preparing': '组织回复中...',
   'streaming.generating': '生成中',
   'streaming.noContentTimeout': '**错误：** {secs} 秒内未收到模型的任何实质响应，连接可能已卡住或中断。',
-  'turnNotify.completedBody': 'AI Native Lab 正在等待你的输入',
+  'turnNotify.completedBody': 'CMWork 正在等待你的输入',
   'turnNotify.errorBody': '回复中断出错，点击查看详情',
-  'turnNotify.questionBody': 'AI Native Lab 向你提出了一个问题',
+  'turnNotify.questionBody': 'CMWork 向你提出了一个问题',
   'streaming.allowForSession': '本次会话允许',
   'streaming.allowed': '已允许',
   'streaming.denied': '已拒绝',
@@ -939,11 +942,11 @@ const zh: Record<TranslationKey, string> = {
 
   // ── Settings: General ───────────────────────────────────────
   'settings.title': '设置',
-  'settings.description': '管理 AI Native Lab - 工作平台 和 Claude Code 设置',
+  'settings.description': '管理 CMWork 和 Claude Code 设置',
   'settings.general': '通用',
   'settings.providers': '服务商',
   'settings.claudeCli': 'Agent',
-  'settings.codepilot': 'AI Native Lab - 工作平台',
+  'settings.codepilot': 'CMWork',
   'settings.version': '版本 {version}',
   'settings.checkForUpdates': '检查更新',
   'settings.checking': '检查中...',
@@ -1027,7 +1030,7 @@ const zh: Record<TranslationKey, string> = {
   'cli.enableClaude': '启用 Claude Code',
   'cli.enableClaudeDesc': '关闭时使用原生 AI SDK 作为后端，开启后使用 Claude Code 作为后端。',
   'cli.agentRuntime': 'Agent 运行时',
-  'cli.agentRuntimeDesc': '选择 AI Native Lab - 工作平台 执行 Agent 任务的方式',
+  'cli.agentRuntimeDesc': '选择 CMWork 执行 Agent 任务的方式',
   'cli.runtimeNative': '原生 Runtime (AI SDK)',
   'cli.runtimeSdk': 'Claude Code SDK',
   'cli.cliStatus': '状态',
@@ -1225,6 +1228,26 @@ const zh: Record<TranslationKey, string> = {
   'skills.showTranslation': '显示译文',
   'skills.translateFailed': '翻译失败，请重试',
   'skills.translateNoProvider': '未获取到账号下发的模型，请先登录后重试',
+  // 技能市场（内部）— codeagent-server Skills 商店
+  'skills.internalMarketplace': '技能市场（内部）',
+  'skills.internalSearch': '搜索内部技能...',
+  'skills.internalError': '加载内部技能市场失败',
+  'skills.internalUnavailable': '内部技能市场暂时不可用，请稍后重试',
+  'skills.internalHint': '浏览内部技能市场',
+  'skills.internalHintDesc': '搜索并安装组织内发布的技能',
+  'skills.internalLoginRequired': '登录后可浏览内部技能市场',
+  'skills.internalLoginAction': '立即登录',
+  'skills.internalNotActive': '账号未激活或已被禁用，请联系管理员',
+  'skills.internalRetry': '重试',
+  'skills.internalDeprecated': '已下架',
+  'skills.internalOwn': '我的',
+  'skills.internalUpdatable': '可更新',
+  'skills.internalUpdate': '更新',
+  'skills.internalRateLimited': '操作过于频繁，{seconds} 秒后再试',
+  'skills.internalFileManifest': '文件清单',
+  'skills.internalInlinePreview': '内容预览',
+  'skills.internalUpToDate': '已是最新版本',
+  'skills.internalInvalidPackage': '技能包不合法（缺少 SKILL.md）',
 
   // ── MCP ─────────────────────────────────────────────────────
   'mcp.addServer': '添加服务器',
@@ -1351,7 +1374,7 @@ const zh: Record<TranslationKey, string> = {
   'connection.missingGitDesc': 'Claude Code 需要 Git for Windows 才能正常运行。缺少 Git 会导致所有命令以 exit code 1 失败。',
   'connection.installGit': '一键安装 Git',
   'connection.gitInstalling': '安装中...',
-  'connection.gitInstallSuccess': 'Git 安装成功！请重启 AI Native Lab - 工作平台。',
+  'connection.gitInstallSuccess': 'Git 安装成功！请重启 CMWork。',
   'connection.gitInstallFailed': '自动安装失败，请手动下载安装。',
   'connection.downloadGit': '手动下载',
   'connection.recheck': '重新检测',
@@ -1362,7 +1385,7 @@ const zh: Record<TranslationKey, string> = {
   'connection.versionCompare': 'v{current} → v{latest}',
   'connection.upgradeButton': '升级 CLI',
   'connection.upgrading': '升级中...',
-  'connection.upgradeSuccess': '升级成功！请重启 AI Native Lab - 工作平台 以应用更新。',
+  'connection.upgradeSuccess': '升级成功！请重启 CMWork 以应用更新。',
   'connection.upgradeFailed': '升级失败，请手动执行：',
   'connection.checkUpgrade': '检查更新',
   'connection.manualUpdateHint': '当前安装渠道不会自动更新，点击下方按钮检查并安装新版本。',
@@ -1458,10 +1481,10 @@ const zh: Record<TranslationKey, string> = {
   'update.downloading': '下载中',
   'update.restartToUpdate': '重启以更新',
   'update.restartNow': '立即重启',
-  'update.readyToInstall': 'AI Native Lab - 工作平台 v{version} 已就绪 — 重启以完成更新',
+  'update.readyToInstall': 'CMWork v{version} 已就绪 — 重启以完成更新',
   'update.installUpdate': '下载并安装',
   'update.later': '稍后',
-  'update.rosettaWarning': 'AI Native Lab - 工作平台 当前正通过 Rosetta 在这台 Apple Silicon Mac 上运行。安装 arm64 版本可获得更好的响应速度。',
+  'update.rosettaWarning': 'CMWork 当前正通过 Rosetta 在这台 Apple Silicon Mac 上运行。安装 arm64 版本可获得更好的响应速度。',
   'update.recommendedAsset': '推荐下载：{asset}',
   'update.getRecommendedBuild': '下载推荐版本',
   'update.quitApp': '退出应用',
@@ -1647,7 +1670,7 @@ const zh: Record<TranslationKey, string> = {
 
   // ── Feishu (Bridge) ──────────────────────────────────────
   'feishu.quickCreate': '快速开始',
-  'feishu.quickCreateDesc': '自动创建飞书机器人并绑定到 AI Native Lab - 工作平台，无需手动配置权限和事件',
+  'feishu.quickCreateDesc': '自动创建飞书机器人并绑定到 CMWork，无需手动配置权限和事件',
   'feishu.quickCreateBtn': '创建并绑定飞书应用',
   'feishu.waitingAuth': '浏览器已打开，请在飞书页面中确认创建...',
   'feishu.createSuccess': '绑定成功：{botName}',
@@ -2081,6 +2104,47 @@ const zh: Record<TranslationKey, string> = {
   'permission.fullAccessWarning': '完全访问模式将自动批准此对话的所有权限请求，包括文件写入、命令执行等潜在危险操作。确定要开启吗？',
   'permission.sessionPermission': '对话权限',
 
+  // ── Sandbox (Cowork POC) ──────────────────────────────────
+  'sandbox.artifacts.title': '沙箱产物',
+  'sandbox.artifacts.downloadAll': '全部下载',
+  'sandbox.artifacts.sleeping': '沙箱休眠中',
+  'sandbox.artifacts.sleepingHint': '文件列表来自上次记录;点击下载会自动唤醒沙箱,首次稍慢几秒',
+  'sandbox.artifacts.starting': '正在唤醒沙箱,请稍候…',
+  'sandbox.artifacts.downloadMissing': '该文件在沙箱中已不存在(可能已被删除),列表已刷新。',
+  'sandbox.artifacts.collapse': '收起产物面板',
+  'sandbox.artifacts.expand': '展开沙箱产物',
+  'sandbox.skills.title': '使用的技能',
+  'sandbox.skills.times': '调用 {count} 次',
+  'sandbox.provisioning.starting': '沙箱启动中',
+  'sandbox.provisioning.booting': '沙箱启动中',
+  'sandbox.provisioning.preparing': '沙箱准备中',
+  'sandbox.provisioning.autostart': '· 就绪后将自动开始',
+  'sandbox.provisioning.failedTitle': '沙箱启动失败',
+  'sandbox.provisioning.failedHint': '请稍后重试,或检查沙箱环境',
+
+  // ── Cowork settings (E5) ──────────────────────────────────
+  'settings.coworkTitle': '办公模式(Cowork 沙箱)',
+  'settings.coworkDesc': '实验功能:开启后侧边栏出现「办公 / 研发」切换。办公对话在隔离虚拟机内处理文件,全程不接触真机文件。',
+
+  // ── Workspace tabs (Cowork office mode, E3) ───────────────
+  'workspace.tab.office': '办公',
+  'workspace.tab.dev': '研发',
+  'workspace.office.emptyTitle': '办公对话',
+  'workspace.office.emptyDesc': 'AI 在隔离的沙箱虚拟机内工作:通过对话发文件给它读改,产出的文件在产物卡片中下载,全程不接触真机文件。',
+  'workspace.office.start': '开始办公对话',
+  'workspace.office.imageMissing': '本机尚未下载沙箱环境,下载完成后即可使用办公模式。',
+  'workspace.office.remoteOnlyPlatform': '当前设备的办公模式由公司远程沙箱提供,登录后自动开通;若持续不可用请联系管理员。',
+  'workspace.office.sandboxDisabled': '办公沙箱当前已在设置中关闭,开启后即可在隔离环境中开始办公对话。',
+  'workspace.office.enableInSettings': '前往设置开启',
+  'workspace.office.download': '下载沙箱环境(约 3.2 GB)',
+  'workspace.office.retryDownload': '重试下载',
+  'workspace.office.downloading': '正在下载沙箱环境…',
+  'workspace.office.verifying': '正在校验与安装…',
+  'workspace.office.downloadFailed': '下载失败',
+  'workspace.office.sendBlocked': '沙箱环境尚未就绪,下载完成后即可发送。',
+  'workspace.office.upgrade': '下载新版沙箱环境',
+  'workspace.office.upgradeHint': '沙箱环境有新版本可用;当前版本仍可正常使用,升级会重建沙箱虚拟机。',
+
   // ── Context Usage ─────────────────────────────────────────
   'context.usage': '上下文占用',
   'context.model': '模型',
@@ -2236,7 +2300,7 @@ const zh: Record<TranslationKey, string> = {
   'mcp.enable': '启用',
   'mcp.enabled': '已启用',
   'mcp.disabled': '已禁用',
-  'mcp.managerDesc': '开关控制 AI Native Lab - 工作平台 注入的 MCP 服务。',
+  'mcp.managerDesc': '开关控制 CMWork 注入的 MCP 服务。',
 
   // ── SDK Capabilities: Thinking ────────────────────────────
   'settings.thinkingMode': '思考模式',
@@ -2278,7 +2342,7 @@ const zh: Record<TranslationKey, string> = {
   'cliTools.path': '路径',
   'cliTools.brewNotInstalled': '未检测到 Homebrew',
   'cliTools.brewInstallGuide': '大部分推荐工具依赖 Homebrew 安装，请先在终端中运行以下命令安装：',
-  'cliTools.viewDocs': '查看 AI Native Lab - 工作平台 官方文档',
+  'cliTools.viewDocs': '查看 CMWork 官方文档',
   'cliTools.searchPlaceholder': '搜索 CLI 工具...',
   'cliTools.noToolsDetected': '还没有检测到已安装的 CLI 工具',
   'cliTools.goInstall': '去安装 CLI 工具',
@@ -2421,7 +2485,7 @@ const zh: Record<TranslationKey, string> = {
   'terminal.exited': '进程已退出',
 
   // ── Setup Center ──────────────────────────────────────────────
-  'setup.title': '欢迎使用 AI Native Lab - 工作平台',
+  'setup.title': '欢迎使用 CMWork',
   'setup.subtitle': '配置 Agent 引擎、服务商和工作目录。',
   'setup.skipAndEnter': '跳过并进入',
   'setup.progress': '{completed}/3 已完成',
@@ -2431,12 +2495,12 @@ const zh: Record<TranslationKey, string> = {
 
   // Setup: Welcome card
   'setup.welcome.title': '欢迎',
-  'setup.welcome.description': 'AI Native Lab - 工作平台 是多模型 AI Agent 桌面客户端。连接任意 AI 服务商，通过 MCP 和 Skills 扩展能力，让你的助理学会你的工作方式。',
+  'setup.welcome.description': 'CMWork 是多模型 AI Agent 桌面客户端。连接任意 AI 服务商，通过 MCP 和 Skills 扩展能力，让你的助理学会你的工作方式。',
 
   // Setup: Claude Code card
   'setup.claude.title': 'Claude Code',
   'setup.claude.description': 'Claude Code 已随应用一同分发，无需单独安装。',
-  'setup.claude.bundled': '已内置于 AI Native Lab - 工作平台',
+  'setup.claude.bundled': '已内置于 CMWork',
   'setup.claude.detected': '已检测到 Claude Code',
   'setup.claude.notFound': '未找到 Claude Code',
   'setup.claude.conflict': '检测到多个安装版本，可能导致版本冲突',
@@ -2453,7 +2517,7 @@ const zh: Record<TranslationKey, string> = {
 
   // Setup: Provider card
   'setup.provider.title': 'API 服务商',
-  'setup.provider.description': '配置 AI Native Lab - 工作平台 连接 AI 模型的方式。',
+  'setup.provider.description': '配置 CMWork 连接 AI 模型的方式。',
   'setup.provider.envDetected': '检测到环境变量 — 使用 Claude Code 环境变量作为服务商。',
   'setup.provider.useEnv': '使用 Claude Code 环境',
   'setup.provider.noProvider': '未配置服务商。选择一个预设开始。',
@@ -2607,7 +2671,7 @@ const zh: Record<TranslationKey, string> = {
   'auth.noManagedConfigs': '暂无托管配置',
   'auth.managedTag': '账号托管',
   'auth.managedReadOnly': '由账号下发，不可在此编辑',
-  'auth.accountCardTitle': '登录 AI Native Lab - 工作平台 账号',
+  'auth.accountCardTitle': '登录 CMWork 账号',
   'auth.accountCardSubtitle': '登录后直接获得已配置好的模型 Provider，无需自行填写 API Key',
   'auth.accountCardPlan': '套餐：{plan}',
   'auth.email': '邮箱',
@@ -2624,7 +2688,7 @@ const zh: Record<TranslationKey, string> = {
 
   // ─── 内置插件面板（GSD） ───
   'settings.plugins.title': '插件',
-  'settings.plugins.subtitle': 'AI Native Lab - 工作平台 内置的插件，可在此启用/禁用、重新同步或卸载。',
+  'settings.plugins.subtitle': 'CMWork 内置的插件，可在此启用/禁用、重新同步或卸载。',
   'settings.plugins.electronOnly': '此面板需要在 Electron 桌面端运行。',
 
   'settings.gsd.description': 'GSD（Get-Shit-Done）是 TÂCHES 出品的元提示词系统，提供 /gsd-* 斜杠命令和 33 个专用子 agent。基于 gsd-build/get-shit-done 内置打包（MIT 协议）。',
@@ -2775,9 +2839,26 @@ const zh: Record<TranslationKey, string> = {
   'feedback.desktopOnly': '问题反馈仅在桌面版可用。',
   'feedback.errorNotLoggedIn': '登录已过期，请重新登录后再试。',
   'feedback.errorRateLimited': '提交太频繁了，请稍后再试。',
+  'feedback.errorDailyLimit': '今日反馈次数已达上限，请明天再试。',
+  'feedback.errorInvalidImage': '截图格式不支持或数量超限，请检查后重试。',
+  'feedback.images': '截图',
+  'feedback.imagesHint': '可粘贴（Ctrl/⌘+V）或点加号添加，最多 {max} 张、单张不超过 {size}',
+  'feedback.imageAdd': '添加截图',
+  'feedback.imageRemove': '移除这张截图',
+  'feedback.imageBadType': '只能添加图片（PNG / JPEG / GIF / WebP）。',
+  'feedback.imageTooLarge': '单张图片不能超过 1MB，过大的已跳过。',
+  'feedback.imageTooMany': '最多添加 {max} 张截图，超出的已跳过。',
   'feedback.errorTooLarge': '附带内容过大，请去掉日志后重试。',
   'feedback.errorNetwork': '网络异常，请检查网络后重试。',
   'feedback.errorGeneric': '提交失败，请稍后再试。',
+
+  // ── Help (帮助) ──
+  'settings.help': '帮助',
+  'help.title': '帮助',
+  'help.description': '产品使用文档与操作指引。',
+  'help.manual': '用户手册',
+  'help.manualHint': '在系统默认浏览器中打开在线手册。',
+  'help.openManual': '打开手册',
 
   // ── 测试账号 ──
   'settings.testAccounts': '测试账号',

@@ -2,7 +2,7 @@
 
 import { useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
-import type { Message, MessagesResponse, FileAttachment, SessionStreamSnapshot, MentionRef } from '@/types';
+import type { Message, MessagesResponse, FileAttachment, SessionStreamSnapshot, MentionRef, VmArtifactFile } from '@/types';
 import { parseMessageContent } from '@/types';
 import { BtwPanel } from './BtwPanel';
 import { useBtw } from '@/hooks/useBtw';
@@ -16,11 +16,15 @@ import { MessageInput } from './MessageInput';
 import { ChatComposerActionBar } from './ChatComposerActionBar';
 import { ModeIndicator } from './ModeIndicator';
 import { ChatPermissionSelector } from './ChatPermissionSelector';
+import { VmArtifactsCard } from './VmArtifactsCard';
+import { extractSkillUses, mergeSkillUses, groupSkillUses, parseSkillUsesJson, type SessionSkillUse } from '@/lib/skill-use';
+import { VmProvisioningBanner } from './VmProvisioningBanner';
 import { RunCockpit } from './RunCockpit';
 import { RuntimeBadge } from './RuntimeBadge';
 import { ImageGenToggle } from './ImageGenToggle';
 import { Button } from '@/components/ui/button';
 import { usePanel } from '@/hooks/usePanel';
+import { useCoworkStatus } from '@/hooks/useCoworkStatus';
 import { useTranslation } from '@/hooks/useTranslation';
 import type { TranslationKey } from '@/i18n';
 import { PermissionPrompt } from './PermissionPrompt';
@@ -64,6 +68,8 @@ interface ChatViewProps {
   modelName?: string;
   providerId?: string;
   initialPermissionProfile?: 'default' | 'full_access';
+  /** Cowork POC: whether this session runs the agent inside an isolated VM. */
+  initialSandbox?: boolean;
   initialMode?: 'code' | 'plan';
   initialHasSummary?: boolean;
   /** Per-session reasoning effort restored from the DB ('' = no explicit effort). */
@@ -97,12 +103,24 @@ const MAX_MESSAGES_IN_MEMORY = 150;
  */
 const MAX_CONTENT_BYTES_IN_MEMORY = 24 * 1024 * 1024; // ~24MB
 
-export function ChatView({ sessionId, initialMessages = [], initialHasMore = false, modelName, providerId, initialPermissionProfile, initialMode, initialHasSummary, initialEffort, isSplitColumn = false }: ChatViewProps) {
+export function ChatView({ sessionId, initialMessages = [], initialHasMore = false, modelName, providerId, initialPermissionProfile, initialSandbox, initialMode, initialHasSummary, initialEffort, isSplitColumn = false }: ChatViewProps) {
   const { setStreamingSessionId, workingDirectory, setPendingApprovalSessionId, setDashboardPanelOpen, setFileTreeOpen, setIsAssistantWorkspace, setTestPanelOpen, testPanelOpen, testPanelBaseSession, setSessionTitle } = usePanel();
   const { t } = useTranslation();
   const router = useRouter();
   const [messages, setMessages] = useState<Message[]>(initialMessages);
   const [permissionProfile, setPermissionProfile] = useState<'default' | 'full_access'>(initialPermissionProfile || 'default');
+  const [sandboxEnabled, setSandboxEnabled] = useState(!!initialSandbox);
+  // Cowork sandbox: session-level artifact list (files in the VM workspace).
+  // Sources: mount-time restore fetch (DB-backed, works while VM sleeps) +
+  // per-turn vm_artifacts SSE merges. vmOnline drives the sleeping badge.
+  const [vmArtifacts, setVmArtifacts] = useState<VmArtifactFile[]>([]);
+  const [vmOnline, setVmOnline] = useState(true);
+  // M2 (镜像流水线): 办公会话的沙箱资产状态 —— 不可用(缺失/下载中)时禁发
+  // 消息并给出进度提示(D4);仅办公会话激活探测。有数据且明确不可用才禁,
+  // 避免首个 fetch 返回前闪断;可选升级下载期间 usable 仍为 true 不误禁(M3)。
+  const coworkStatus = useCoworkStatus(sandboxEnabled);
+  const coworkAssets = coworkStatus.data?.assets;
+  const officeAssetsBlocked = sandboxEnabled && !!coworkAssets && !coworkAssets.usable;
 
   // Whether this session's working directory matches the configured assistant workspace
   const [isAssistantProject, setIsAssistantProject] = useState(false);
@@ -216,6 +234,58 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
     return () => controller.abort();
   }, [currentProviderId, currentModel]);
   useEffect(() => { if (initialPermissionProfile) setPermissionProfile(initialPermissionProfile); }, [initialPermissionProfile]);
+  useEffect(() => { setSandboxEnabled(!!initialSandbox); }, [initialSandbox]);
+
+  // Cowork sandbox — restore the artifact list on mount/toggle (covers page
+  // reload where per-turn SSE events are gone). The list endpoint is DB-backed
+  // so it works even while the VM is asleep; vmOnline drives the sleeping badge.
+  useEffect(() => {
+    if (!sandboxEnabled) { setVmArtifacts([]); return; }
+    let cancelled = false;
+    const refetch = () => {
+      fetch(`/api/cowork/artifacts?sessionId=${encodeURIComponent(sessionId)}&list=1`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          if (cancelled || !data) return;
+          if (Array.isArray(data.files)) setVmArtifacts(data.files);
+          if (typeof data.vmOnline === 'boolean') setVmOnline(data.vmOnline);
+        })
+        .catch(() => {});
+    };
+    refetch();
+    // E4.2: 下载命中已删除文件时卡片发此事件 —— 重拉清单(list 端点在 VM
+    // 在线时会对账剔除已不存在的文件),把残留条目从卡片上清掉。
+    window.addEventListener('vm-artifacts-refresh', refetch);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('vm-artifacts-refresh', refetch);
+    };
+  }, [sessionId, sandboxEnabled]);
+
+
+  // Cowork — 「使用的技能」持久化来源(chat_sessions.skills_used_json,回合末服务端
+  // 合并写入)。挂载时拉一次,回合结束借用 vm-artifacts-refresh 事件同时机重拉
+  // (E4.3 已保证回合完成必发该事件)。消息是分页加载的,不能只靠客户端解析。
+  const [persistedSkillUses, setPersistedSkillUses] = useState<SessionSkillUse[]>([]);
+  useEffect(() => {
+    if (!sandboxEnabled) { setPersistedSkillUses([]); return; }
+    let cancelled = false;
+    const refetch = () => {
+      fetch(`/api/chat/sessions/${sessionId}`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          if (cancelled || !data?.session) return;
+          setPersistedSkillUses(parseSkillUsesJson(data.session.skills_used_json));
+        })
+        .catch(() => {});
+    };
+    refetch();
+    window.addEventListener('vm-artifacts-refresh', refetch);
+    return () => {
+      cancelled = true;
+      window.removeEventListener('vm-artifacts-refresh', refetch);
+    };
+  }, [sessionId, sandboxEnabled]);
 
   // Restore session-scoped last-generated images from sessionStorage
   useEffect(() => { loadLastGenerated(sessionId); }, [sessionId]);
@@ -269,6 +339,42 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
   const pendingPermission = streamSnapshot?.pendingPermission ?? null;
   const permissionResolved = streamSnapshot?.permissionResolved ?? null;
   const rewindPoints = getRewindPoints(sessionId);
+
+  // Cowork sandbox (E4.2) — vm_artifacts 事件自此携带「回合末权威全量快照」:
+  // 整表替换而非合并。合并语义下 agent 删除的文件会永久残留在卡片上(用户
+  // 反馈:rm 掉的文件仍显示且下载无反应);空快照也必须应用(全删光时卡片
+  // 应消失)。undefined = 本会话尚无流事件,保持 list=1 拉到的初始值。
+  const snapshotVmArtifacts = streamSnapshot?.vmArtifacts;
+  useEffect(() => {
+    if (!snapshotVmArtifacts) return;
+    setVmArtifacts(snapshotVmArtifacts);
+  }, [snapshotVmArtifacts]);
+
+  // E4.3(用户反馈)— 回合完成后无条件重拉产物清单兜底:SSE 快照可能因
+  // abort/超时/事件丢失而缺席,list 端点在 VM 在线时会对账剔除已删文件,
+  // 保证「对话完成 → 卡片即最新」不依赖任何用户后续操作。
+  const prevStreamingRef = useRef(isStreaming);
+  useEffect(() => {
+    const wasStreaming = prevStreamingRef.current;
+    prevStreamingRef.current = isStreaming;
+    if (wasStreaming && !isStreaming && sandboxEnabled) {
+      window.dispatchEvent(new CustomEvent('vm-artifacts-refresh'));
+    }
+  }, [isStreaming, sandboxEnabled]);
+
+  // 「使用的技能」三源合并(按 tool_use id 去重,顺序 = 持久化 → 历史解析 → 实时):
+  //   ① 持久化(完整,但只有本列上线后的回合);② 已加载历史消息解析(存量老会话
+  //   兜底,受分页局限);③ 流式实时(技能被调用的瞬间浮窗即更新)。
+  const skillsUsed = useMemo(() => {
+    if (!sandboxEnabled) return [];
+    const fromMessages: SessionSkillUse[] = [];
+    for (const m of messages) {
+      if (m.role !== 'assistant' || !m.content.startsWith('[')) continue;
+      try { fromMessages.push(...extractSkillUses(JSON.parse(m.content))); } catch { /* 非结构化消息 */ }
+    }
+    const live = extractSkillUses(toolUses);
+    return groupSkillUses(mergeSkillUses(persistedSkillUses, fromMessages, live));
+  }, [sandboxEnabled, messages, toolUses, persistedSkillUses]);
 
   // ── Skill nudge banner ──
   // Listens for 'skill-nudge' window events dispatched by stream-session-manager
@@ -364,6 +470,20 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
       tailTrimmedRef.current = false;
       reconcileWithDb();
     }
+    // Cowork sandbox — refetch the artifact list at end of turn. Belt-and-
+    // braces for the realtime vm_artifacts SSE path: completion clears the
+    // manager snapshot, and event batching around done/completed has already
+    // eaten the realtime update once. The list endpoint is authoritative.
+    if (sandboxEnabled) {
+      fetch(`/api/cowork/artifacts?sessionId=${encodeURIComponent(sessionId)}&list=1`)
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          if (!data) return;
+          if (Array.isArray(data.files) && data.files.length > 0) setVmArtifacts(data.files);
+          if (typeof data.vmOnline === 'boolean') setVmOnline(data.vmOnline);
+        })
+        .catch(() => {});
+    }
     // Async title generation (first turn) usually lands before the turn ends —
     // refetch so the top bar shows the generated title and nudge the sidebar
     // (its own poll would catch up anyway; this removes the visible lag).
@@ -379,7 +499,7 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
         })
         .catch(() => { /* silent — sidebar poll will catch up */ });
     }
-  }, [reconcileWithDb, sessionId, setSessionTitle]);
+  }, [reconcileWithDb, sandboxEnabled, sessionId, setSessionTitle]);
 
   useStreamSubscription({
     sessionId,
@@ -1001,6 +1121,7 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
         startedAt={streamSnapshot?.startedAt}
         isAssistantProject={isAssistantProject}
         assistantName={assistantName}
+        sandboxEnabled={sandboxEnabled}
       />
       {/* End-of-turn terminal reason chip (only shown when stream is not active) */}
       {!isStreaming && (
@@ -1122,20 +1243,42 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
           onDismiss={() => setRateLimitDismissed(true)}
         />
       )}
+      {/* Cowork sandbox — VM provisioning progress during cold-start (P1-D) */}
+      {sandboxEnabled && (
+        <VmProvisioningBanner status={streamSnapshot?.vmStatus} />
+      )}
+      {/* Cowork sandbox — downloadable artifacts + skills used inside the VM.
+          skills 非空也要渲染:对话开头 agent 先读规范、尚无产物时,浮窗即出现 */}
+      {sandboxEnabled && (vmArtifacts.length > 0 || skillsUsed.length > 0) && (
+        <VmArtifactsCard sessionId={sessionId} files={vmArtifacts} vmOnline={vmOnline} skillsUsed={skillsUsed} />
+      )}
+      {/* M2 (镜像流水线): 沙箱资产未就绪 —— 禁发 + 进度/引导提示(D4) */}
+      {officeAssetsBlocked && (
+        <div className="mx-3 mb-1.5 flex items-center gap-2 rounded-md border border-border/50 bg-muted/40 px-3 py-1.5 text-xs text-muted-foreground">
+          <span className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-status-warning inline-block" />
+          {coworkAssets?.overall === 'downloading'
+            ? `${t('workspace.office.downloading')} ${coworkAssets.totalPct}%`
+            : t('workspace.office.sendBlocked')}
+        </div>
+      )}
       <MessageInput
         key={sessionId}
         onSend={sendMessage}
         onCommand={handleCommand}
         onBtw={btw.ask}
         onStop={stopStreaming}
-        disabled={false}
+        disabled={officeAssetsBlocked}
         isStreaming={isStreaming}
         sessionId={sessionId}
         modelName={currentModel}
         onModelChange={setCurrentModel}
         providerId={currentProviderId}
         onProviderModelChange={handleProviderModelChange}
-        workingDirectory={workingDirectory}
+        // E4 (cowork): 办公会话把 workingDirectory 传空 —— @ 引用/目录摘要/
+        // 项目斜杠展开引用的是宿主路径,对 VM 内的 agent 无意义,空串走
+        // MessageInput 既有的优雅降级;officeMode 另隐藏斜杠/CLI 按钮。
+        workingDirectory={sandboxEnabled ? '' : workingDirectory}
+        officeMode={sandboxEnabled}
         onAssistantTrigger={checkAssistantTrigger}
         effort={selectedEffort}
         onEffortChange={handleEffortChange}
@@ -1144,13 +1287,31 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
         hasMessages={messages.length > 0}
       />
       <ChatComposerActionBar
-        left={<><ModeIndicator mode={mode} onModeChange={handleModeChange} disabled={isStreaming} />{/* ImageGenToggle hidden from UI — restore by uncommenting. Component + ImageGen logic kept intact. */}{/* <ImageGenToggle /> */}</>}
+        left={
+          // E4 (cowork): 办公会话隐藏 code/plan 切换 —— 计划模式是研发工作流。
+          sandboxEnabled
+            ? null
+            : <><ModeIndicator mode={mode} onModeChange={handleModeChange} disabled={isStreaming} />{/* ImageGenToggle hidden from UI — restore by uncommenting. Component + ImageGen logic kept intact. */}{/* <ImageGenToggle /> */}</>
+        }
         center={
-          <ChatPermissionSelector
-            sessionId={sessionId}
-            permissionProfile={permissionProfile}
-            onPermissionChange={setPermissionProfile}
-          />
+          // E4 (cowork): 办公会话隐藏权限选择器 —— 创建期已定 full_access
+          // (VM 隔离即权限故事,D3),无需/不应回合内切换。原 SandboxToggle
+          // 已移除:模式由侧边栏「办公/研发」双栏在建会话时定死(E3)。
+          // 办公模式改为在输入框下方居中展示出品标识(企业法定名称,各
+          // 语言环境不翻译);absolute 相对整条 bar 居中 = 相对输入框居中。
+          sandboxEnabled ? (
+            <span className="pointer-events-none absolute inset-x-0 top-0.5 bottom-2.5 flex select-none items-center justify-center text-xs text-muted-foreground/40">
+              招商局金融科技有限公司出品
+            </span>
+          ) : (
+            <div className="flex items-center gap-1.5">
+              <ChatPermissionSelector
+                sessionId={sessionId}
+                permissionProfile={permissionProfile}
+                onPermissionChange={setPermissionProfile}
+              />
+            </div>
+          )
         }
         right={
           <RunCockpit

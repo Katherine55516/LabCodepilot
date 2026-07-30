@@ -802,6 +802,20 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
       // in the outer finally block. See src/lib/claude-home-shadow.ts.
       let shadowHome: ShadowHome | null = null;
 
+      // Cowork sandbox state for this turn. When active, attachments are pushed
+      // into the VM session workspace (host path → VM path map) and the end of
+      // turn diffs the workspace to emit a vm_artifacts SSE event.
+      let coworkActive = false;
+      // Set to the sessionId once the VM is marked active this turn, so the
+      // outer finally can release it (idle-reclaim gate) exactly once.
+      let coworkActiveSessionId: string | null = null;
+      // True when the session row has sandbox_enabled. Drives the E1 hard-fail
+      // guard: a sandbox turn must NEVER silently fall back to host execution
+      // — that would break the isolation promise the session was created under.
+      let coworkSandboxRequested = false;
+      const coworkVmPathByHostPath = new Map<string, string>();
+      const coworkTurnStartMs = Date.now();
+
       // Resolve provider via the unified resolver. The caller may pass an explicit
       // provider (from resolveProvider().provider), or undefined when 'env' mode is
       // intended. We do NOT fall back to getActiveProvider() here — that's handled
@@ -890,11 +904,122 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
           queryOptions.allowDangerouslySkipPermissions = true;
         }
 
-        // pathToClaudeCodeExecutable is intentionally not set — the SDK
-        // auto-discovers the native binary from the bundled platform subpackage
+        // pathToClaudeCodeExecutable is normally NOT set — the SDK auto-discovers
+        // the native binary from the bundled platform subpackage
         // (@anthropic-ai/claude-agent-sdk-<platform>-<arch>). This is the same
         // claude.exe / claude binary that the official native installer ships,
         // but distributed via npm so it's bundled at install/build time.
+        //
+        // Cowork POC: when the session has sandbox enabled (and the global
+        // cowork_enabled gate is on + VM is ready), point the SDK at a forwarder
+        // that runs the linux claude binary INSIDE an isolated VM. The SDK is
+        // unaware — it just spawns what it thinks is claude and talks stream-json
+        // over the forwarded stdio. See src/lib/cowork-poc.ts.
+        //
+        // E1 hard-fail helper: emit a failed vm_status + structured error, then
+        // end the stream cleanly (done + close). Callers `return` right after.
+        // The outer finally still runs (shadow cleanup / unregister); any VM
+        // active-gate acquired earlier this turn is released there too.
+        const hardFailSandboxTurn = async (reason?: string) => {
+          const { buildSandboxUnavailableError } = await import('./cowork-guards');
+          const guardErr = buildSandboxUnavailableError(reason);
+          controller.enqueue(formatSSE({ type: 'vm_status', data: JSON.stringify({ phase: 'failed', detail: guardErr.rawMessage }) }));
+          controller.enqueue(formatSSE({
+            type: 'error',
+            data: JSON.stringify({ ...guardErr, _formattedMessage: guardErr.userMessage }),
+          }));
+          controller.enqueue(formatSSE({ type: 'done', data: '' }));
+          controller.close();
+        };
+        try {
+          const { getSession } = await import('./db');
+          const { decideCowork } = await import('./cowork-poc');
+          const sess = getSession(sessionId);
+          coworkSandboxRequested = !!sess?.sandbox_enabled;
+          // P1-D readiness window: while the VM cold-starts (spawn vfkit +
+          // provision daemon, ~5–30s), stream vm_status events so the frontend
+          // shows "沙箱准备中" progress instead of a bare "生成中" that reads as
+          // a hang. Subscribe before the blocking decideCowork; unsubscribe after.
+          let unsubVmProgress: (() => void) | null = null;
+          if (coworkSandboxRequested) {
+            const { getCoworkBackend } = await import('./cowork-backend');
+            const backendEarly = await getCoworkBackend();
+            // 未就绪时先发 "starting",让"沙箱准备中"横幅即刻出现(remote 秒级就绪时一闪而过)。
+            const early = await backendEarly.getStatus();
+            if (!early.ready) {
+              controller.enqueue(formatSSE({ type: 'vm_status', data: JSON.stringify({ phase: 'starting' }) }));
+            }
+            unsubVmProgress = backendEarly.onProgress((p) => {
+              controller.enqueue(formatSSE({ type: 'vm_status', data: JSON.stringify(p) }));
+            });
+          }
+          // decideCowork is async in P1-B: it lazily starts/rebuilds the VM
+          // via cowork-vm-manager and only resolves once the VM is ready (or
+          // decides to fall back to host).
+          const decision = await decideCowork(sessionId, sess?.sandbox_enabled).finally(() => {
+            unsubVmProgress?.();
+          });
+          if (decision.useSandbox && decision.executablePath) {
+            queryOptions.pathToClaudeCodeExecutable = decision.executablePath;
+            const coworkEnv = queryOptions.env as Record<string, string>;
+            // R1-3: 连接 env 由当前后端决定(COWORK_SESSION_ID + vsock 或 remote 端点 +
+            // COWORK_NODE_BIN/ELECTRON_RUN_AS_NODE),forwarder 据此连沙箱。
+            Object.assign(coworkEnv, decision.execEnv || {});
+            const { getCoworkBackend } = await import('./cowork-backend');
+            const backend = await getCoworkBackend();
+            // 凭证:真凭证不进沙箱 —— 注册进后端代理,把过河的 ANTHROPIC_* 换成 token +
+            // 代理 base_url(vfkit 走 P3-B 宿主代理;remote R1 直通真 key、R3 换服务端一次性
+            // token)。有真凭证才走(env 模式用户自带 key 时保持原样)。
+            const realKey = coworkEnv.ANTHROPIC_AUTH_TOKEN || coworkEnv.ANTHROPIC_API_KEY;
+            const realBase = coworkEnv.ANTHROPIC_BASE_URL;
+            if (realKey && realBase) {
+              const authStyle = coworkEnv.ANTHROPIC_AUTH_TOKEN ? 'auth_token' : 'api_key';
+              const { token, baseUrl } = await backend.registerCredentials(sessionId, { realKey, realBase, authStyle });
+              coworkEnv.ANTHROPIC_BASE_URL = baseUrl;
+              if (authStyle === 'auth_token') coworkEnv.ANTHROPIC_AUTH_TOKEN = token;
+              else coworkEnv.ANTHROPIC_API_KEY = token;
+              console.log('[cowork] session credentials registered with backend proxy');
+            }
+            // 回合内保活(阻塞空闲回收);回合末 release 在外层 finally。
+            backend.markActive(sessionId);
+            coworkActiveSessionId = sessionId;
+            const transfer = await import('./cowork-transfer');
+            await transfer.ensureSessionWorkspace(sessionId);
+            // Push attachments (all types — the agent may process images with
+            // scripts too) into the VM workspace; prompt references are rewritten
+            // to VM paths in buildFinalPrompt via coworkVmPathByHostPath.
+            if (files && files.length > 0) {
+              const hostPaths = getUploadedFilePaths(files, resolvedWorkingDirectory.path);
+              for (let i = 0; i < hostPaths.length; i++) {
+                try {
+                  const vmPath = await transfer.pushFileToVm(sessionId, hostPaths[i], files[i].name);
+                  coworkVmPathByHostPath.set(hostPaths[i], vmPath);
+                } catch (pushErr) {
+                  // Keep the host path reference; the agent will report the miss.
+                  console.warn(`[claude-client] cowork: failed to push ${files[i].name} into VM:`, pushErr);
+                }
+              }
+            }
+            coworkActive = true;
+            console.log(`[claude-client] cowork sandbox ON for session ${sessionId} → forwarder ${decision.executablePath}, pushed ${coworkVmPathByHostPath.size} file(s)`);
+          } else if (coworkSandboxRequested) {
+            // E1 hard-fail: sandbox was requested but the VM isn't usable this
+            // turn. Running on the host would silently violate the "files never
+            // touch the host" promise — end the turn instead (no host fallback).
+            console.warn(`[claude-client] cowork sandbox unavailable (${decision.reason}) — hard-failing turn, no host fallback`);
+            await hardFailSandboxTurn(decision.reason);
+            return;
+          }
+        } catch (err) {
+          if (coworkSandboxRequested) {
+            // Unexpected crash while deciding/preparing the sandbox — same
+            // hard-fail rule: a sandbox turn must never continue on the host.
+            console.error('[claude-client] cowork decision crashed for sandbox session — hard-failing turn:', err);
+            await hardFailSandboxTurn('decision_error');
+            return;
+          }
+          console.warn('[claude-client] cowork decision failed, using host runtime:', err);
+        }
 
         if (model) {
           queryOptions.model = model;
@@ -910,6 +1035,20 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
           };
         }
 
+        // E1 (cowork): capability-boundary note for sandbox turns — tells the
+        // agent it lives in an isolated VM, where its session workspace is, and
+        // that host paths / external MCP servers are unavailable. Placed before
+        // the built-in MCP blocks below so their prompt appends stack after it.
+        if (coworkActive) {
+          const { buildSandboxSystemNote } = await import('./cowork-guards');
+          const note = buildSandboxSystemNote(sessionId);
+          if (queryOptions.systemPrompt && typeof queryOptions.systemPrompt === 'object' && 'append' in queryOptions.systemPrompt) {
+            queryOptions.systemPrompt.append = (queryOptions.systemPrompt.append || '') + '\n\n' + note;
+          } else {
+            queryOptions.systemPrompt = { type: 'preset', preset: 'claude_code', append: note };
+          }
+        }
+
         // MCP servers: pass explicitly provided config (e.g. from AI Native Lab UI's
         // ${...}-resolved servers + in-process SDK MCPs like memory/widget/...).
         //
@@ -921,7 +1060,19 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
         // Manager API enforces this by writing only to `.claude.json` and
         // migrating any legacy settings.json entries on read.
         if (mcpServers && Object.keys(mcpServers).length > 0) {
-          queryOptions.mcpServers = toSdkMcpConfig(mcpServers);
+          if (coworkActive) {
+            // E1 (cowork): sandbox turns load NO external MCP servers. stdio
+            // servers would be spawned INSIDE the VM (no npx/uvx there — they
+            // fail silently), and sse/http would connect from the VM with
+            // confusing semantics. Built-in in-process codepilot-* servers
+            // (registered below) run host-side over the SDK control channel and
+            // are unaffected. User-scope ~/.claude.json servers are naturally
+            // absent too: the CLI inside the VM reads the VM's own home, not
+            // the host's. See docs/exec-plans/active/cowork-office-mode.md (D4).
+            console.warn(`[claude-client] cowork: dropped external MCP servers for sandbox turn: ${Object.keys(mcpServers).join(', ')}`);
+          } else {
+            queryOptions.mcpServers = toSdkMcpConfig(mcpServers);
+          }
         }
 
         // For DB-provider requests, settingSources is ['user'] only (project
@@ -931,7 +1082,9 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
         // `<cwd>/.mcp.json`, which is normally an auth-neutral file team
         // members commit to share project MCP servers. Re-inject it here so
         // those servers don't silently disappear for DB-provider users.
-        if (resolved.provider) {
+        // Skipped for sandbox turns (E1) — project .mcp.json servers are
+        // external MCPs and would fail/act confusingly inside the VM.
+        if (resolved.provider && !coworkActive) {
           const { loadProjectMcpServers } = await import('@/lib/mcp-loader');
           const projectMcps = loadProjectMcpServers(resolvedWorkingDirectory.path);
           if (projectMcps) {
@@ -1313,7 +1466,10 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
           if (nonImageFiles.length > 0) {
             const workDir = resolvedWorkingDirectory.path;
             const savedPaths = getUploadedFilePaths(nonImageFiles, workDir);
-            const fileReferences = savedPaths
+            // Cowork sandbox: attachments were pushed into the VM workspace —
+            // reference the in-VM path so the CLI (running inside the VM) can Read it.
+            const refPaths = savedPaths.map((p) => coworkVmPathByHostPath.get(p) || p);
+            const fileReferences = refPaths
               .map((p, i) => `[User attached file: ${p} (${nonImageFiles[i].name})]`)
               .join('\n');
             textPrompt = `${fileReferences}\n\nPlease read the attached file(s) above using your Read tool, then respond to the user's message:\n\n${basePrompt}`;
@@ -1337,7 +1493,8 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
               ? textPrompt
               : (() => {
                   const workDir = resolvedWorkingDirectory.path;
-                  const imagePaths = getUploadedFilePaths(limitedImages, workDir);
+                  const imagePaths = getUploadedFilePaths(limitedImages, workDir)
+                    .map((p) => coworkVmPathByHostPath.get(p) || p);
                   const imageReferences = imagePaths
                     .map((p, i) => `[User attached image: ${p} (${limitedImages[i].name})]`)
                     .join('\n');
@@ -1836,6 +1993,51 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
                 }
               }
 
+              // Cowork sandbox (E4.2): reconcile the artifact list against the
+              // VM workspace at end of turn. One full listing (since=0) gives
+              // both ① this turn's new/modified files (mtime >= turnStart,
+              // minus this turn's uploads) and ② the set of paths that still
+              // exist — files the agent DELETED mid-turn must drop off the
+              // card (user report: rm'd file lingered with a dead download
+              // button). Bounded by an 8s race so a wedged VM can never stall
+              // stream close; on timeout the stale list self-heals next turn
+              // or via the list endpoint's online reconcile.
+              if (coworkActive && !resultMsg.is_error) {
+                try {
+                  const { listNewFiles } = await import('./cowork-transfer');
+                  const allFiles = await Promise.race([
+                    listNewFiles(sessionId, 0),
+                    new Promise<never>((_, reject) => setTimeout(() => reject(new Error('vm diff timeout')), 8000)),
+                  ]);
+                  const uploadsThisTurn = new Set(coworkVmPathByHostPath.values());
+                  const livePaths = new Set(allFiles.map((f) => f.path));
+                  const newThisTurn = allFiles.filter(
+                    (f) => f.mtime >= coworkTurnStartMs && !uploadsThisTurn.has(f.path),
+                  );
+                  const { getSessionVmArtifacts, setSessionVmArtifacts, mergeVmArtifactLists } = await import('./db');
+                  // Drop DB entries whose files no longer exist, then merge in
+                  // this turn's output → authoritative snapshot, persisted so
+                  // history sessions render the card while the VM sleeps.
+                  const kept = getSessionVmArtifacts(sessionId).filter((f) => livePaths.has(f.path));
+                  const merged = mergeVmArtifactLists(kept, newThisTurn);
+                  try {
+                    setSessionVmArtifacts(sessionId, merged);
+                  } catch (persistErr) {
+                    console.warn('[claude-client] cowork artifacts persist failed:', persistErr);
+                  }
+                  // vm_artifacts now carries the FULL end-of-turn snapshot and
+                  // is ALWAYS emitted (an empty list clears the card when the
+                  // agent deleted everything); the frontend replaces its state
+                  // instead of merging.
+                  controller.enqueue(formatSSE({
+                    type: 'vm_artifacts',
+                    data: JSON.stringify({ sessionId, files: merged, full: true }),
+                  }));
+                } catch (diffErr) {
+                  console.warn('[claude-client] cowork artifacts reconcile failed:', diffErr);
+                }
+              }
+
               // FIX(权威分子): 占用快照由无凭据探针进程后补(context-usage-probe.ts)。
               // 不在本进程调 getContextUsage —— 有凭据时 CLI 会对上下文逐组件
               // 发 ~82 个 count_tokens 非流式请求(网关请求风暴 + 几十秒延迟的
@@ -2237,6 +2439,15 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
         if (shadowHome) {
           shadowHome.cleanup();
           shadowHome = null;
+        }
+        // Cowork: release the VM idle-reclaim gate for this session's turn.
+        if (coworkActiveSessionId) {
+          const releasingId = coworkActiveSessionId;
+          coworkActiveSessionId = null;
+          import('./cowork-backend')
+            .then((m) => m.getCoworkBackend())
+            .then((b) => b.release(releasingId))
+            .catch(() => { /* backend not loaded — nothing to release */ });
         }
       }
     },

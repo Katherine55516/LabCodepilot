@@ -1,0 +1,32 @@
+[Unit]
+# Cowork 远程容器沙箱控制面 —— 宿主 node 进程,编排会话容器 + cred-proxy sidecar。
+# 部署形态 RD8/R5-3:控制面本身就是宿主 docker 的客户端(spawn docker run/exec,
+# bind-mount 宿主 assets 目录进会话容器),故以宿主 systemd 进程跑,不进容器 —— 零
+# docker.sock 挂载弱化、bind-mount 路径天然宿主视角。占位符由 install.sh 渲染。
+Description=Cowork remote container sandbox control plane
+Documentation=file:///opt/cowork-server/deploy/README.md
+After=docker.service network-online.target
+Requires=docker.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=__COWORK_USER__
+WorkingDirectory=__DEST__
+EnvironmentFile=__DEST__/.env
+ExecStart=/usr/bin/env node __DEST__/index.mjs
+Restart=on-failure
+RestartSec=3
+# 优雅停:index.mjs 收 SIGTERM 关 http/ws;会话容器由 named volume 解耦不受影响。
+KillSignal=SIGTERM
+TimeoutStopSec=15
+# 轻度硬化(不能加 NoNewPrivileges/ProtectSystem=strict —— 会挡 docker.sock 客户端调用)。
+ProtectHome=false
+PrivateTmp=true
+# journald 收日志:journalctl -u cowork-server -f
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=cowork-server
+
+[Install]
+WantedBy=multi-user.target

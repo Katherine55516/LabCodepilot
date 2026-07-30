@@ -331,6 +331,12 @@ interface MessageItemProps {
   isAssistantProject?: boolean;
   /** Assistant name for avatar */
   assistantName?: string;
+  /**
+   * Cowork sandbox session. When true, the per-message DiffSummary card is
+   * suppressed — the file lives in the VM (its host path would be misleading)
+   * and the session-level artifacts card already lists downloadable outputs.
+   */
+  sandboxEnabled?: boolean;
 }
 
 interface ToolBlock {
@@ -574,7 +580,7 @@ function TokenUsageDisplay({ usage }: { usage: TokenUsage }) {
 
 const COLLAPSE_HEIGHT = 300;
 
-export const MessageItem = memo(function MessageItem({ message, sessionId, isAssistantProject, assistantName }: MessageItemProps) {
+export const MessageItem = memo(function MessageItem({ message, sessionId, isAssistantProject, assistantName, sandboxEnabled }: MessageItemProps) {
   const isUser = message.role === 'user';
 
   // Collapse/expand state for long user messages (hooks must be called unconditionally)
@@ -761,6 +767,10 @@ export const MessageItem = memo(function MessageItem({ message, sessionId, isAss
           })
           .filter(f => f.path);
         if (modifiedFiles.length === 0) return null;
+        // Cowork sandbox: suppress the per-message diff card. The file path is a
+        // VM path (host-side preview/export can't reach it), and the session's
+        // artifacts card already lists downloadable outputs for the turn.
+        if (sandboxEnabled) return null;
         // Deduplicate by path. When the same file appears multiple times (e.g.
         // created then edited in one turn), the last tool wins — callers see
         // "Modified" rather than "Created" which matches the file's final

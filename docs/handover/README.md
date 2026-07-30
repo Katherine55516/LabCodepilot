@@ -8,6 +8,7 @@
 
 | 文件 | 主题 |
 |------|------|
+| skills-store-internal.md | 技能市场（内部）：Skills 设置页第三 tab 接 codeagent-server BFF（Hub 纯代理）；主进程 IPC 持 token（不走 Next route）、zip 安装事务（yauzl 三重守卫/原子落位/串行化）、台账 `.internal-store.json`（etag 原文/自愈）、目录名 slug 优先撞名加 id 后缀、错误码→UI 映射、`/api/skills/refresh` 缓存失效、假 JWKS+假 Hub 真实链路验证法（26 断言）与两个 `CODEPILOT_*_OVERRIDE` 测试注入口 |
 | test-usage-upload.md | 测试用量上报（跨仓，含功能 P1 + 回归 P2）：本地 test_stats_events（事件表/机器级）+ 各项目 AI_LabTest 文件态（回归/单项目→枚举工作台项目清单凑机器级）→ 按北京日聚合 → 主进程 loopback 取数 + Bearer 上报 → codeagent-server `test_usage_daily` **GREATEST upsert**（幂等 + 抗客户端删除）→ 管理端「测试用量统计」。三处致命口径：**状态型事件(cases_approved/复核)必须 last-wins 不能求和**（真实数据里采纳率曾算成 294%）、**熔断轮只计 executions/rounds 不计用例级结果**（服务端只拿求和值、无法事后剔除；功能与回归两侧同构）、**回归按项目明细必须并进同一个 payload.projects[] 并用列名 reg_***（否则服务端下钻静默恒为 0）。4 类触发 + 水位回补；比率永不落库、SUM(分子)/SUM(分母) 现算 |
 | regression-stats.md | 回归测试使用统计：Stats 面板二级 toggle（功能/回归）、**文件态聚合不复用事件表**（单项目口径）、套件执行趋势/用例执行趋势/脚本重放 vs AI/套件明细、run.json 近 50 轮护栏、circuitBroken/running 排除口径、纯核 aggregateRegressionStats + fs wrapper、CDP mock 验证 |
 | test-usage-stats.md | 测试模块使用统计：test_stats_events 事件流水（追加式）+ 纯函数聚合口径层（采纳率首轮基线自动 diff / 报告准确度+复核覆盖率 / 服务端逐用例计时 / 模型节点级归因 / 熔断排除 / 时间窗口计入门控）、10 类事件字典、四 scope API + 4 Sheet XLSX 导出、TestStatsView 看板（第 4 视图）、fail-safe 埋点、electron-as-node 验证法 |
@@ -65,3 +66,4 @@
 | skills-discovery.md | 技能创建与发现（应用内创建 + 手动拖入）：两套运行时 × settingSources 约束、列表 PROJECT 分区 + 项目徽章、Option C 项目斜杠命令客户端展开（expandSkillBody + displayLabel 保 `/命令`）、codepilot-skill in-process MCP 文件系统直扫绕开 settingSources、磁盘格式识别矩阵、零开销注册、非原生执行语义局限 |
 | document-preview.md | 应用内文档预览（PDF/DOCX/XLSX/PPTX）：复用 PreviewPanel 分发骨架 + serve 取 arrayBuffer + next/dynamic 懒加载四渲染器、isDocumentPreview 短路跳过文本通道、PDF 5 类离线资产管线（copy-doc-assets.js + public 绝对路径 + 四入口幂等挂载）、DOCX 三层强制 XSS 防护 vs PPTX 结构化渲染差异化安全、raw 路由中文名 RFC 5987 修复、@napi-rs/canvas+echarts chunk 待巡检、缺 e2e 用 CDP |
 | skill-translate.md | 技能市场「AI 翻译简介」：README 一键翻译到应用语言（`locale!=='en'` 才显示），managed 第一行 + role default 模型经 generateTextViaSdk 单轮调用（CLI 别名坑规避）、11 条规则系统提示词（完整性/结构保留/不译清单/提示注入防线）、译文⇄原文切换 + 模块级缓存 + cacheKeyRef 竞态守卫、30K 截断、409/502 分支与验证前提 |
+| cowork-vm-mode.md | **Cowork 办公模式(本地 VM 隔离 agent)完整交接** — 「办公/研发」双栏形态、转发桥架构(宿主 SDK 不动、CLI 进 VM)、文件地图、vsock daemon 协议(exec stdin 帧封装/EOF + reconcileSessions 对账)、VM 生命周期(server 侧单例/懒启动/自愈/回收)、创建期沙箱+暂存目录+三级删除级联、E1 三守卫(硬失败/native 拒绝/MCP 过滤)、产物权威快照语义、DB/SSE/设置接线、已完成(P0+P1-A~D+办公 E1-E5)与未完成(P2/P3/镜像流水线)、15 个踩坑、零写入验收记录、运行验证打包命令。上下文压缩后接手 cowork 读这份 |

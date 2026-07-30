@@ -1,0 +1,5 @@
+# cp 成 Caddyfile,把域名改成真实的。caddy 自动申请/续期 Let's Encrypt 证书。
+# 前置:该域名 A 记录指向本服务器,443/80 对公网放行。
+cowork.example.com {
+	reverse_proxy 127.0.0.1:8790
+}

@@ -36,7 +36,7 @@
     "vendor:ailab:verify": "node scripts/vendor-ailab-verify.js",
     "vendor:doc-assets": "node scripts/copy-doc-assets.js",
     "electron:dev": "npm run vendor:doc-assets && concurrently -k \"next dev\" \"wait-on http://localhost:3000 && electron .\"",
-    "electron:build": "npm run vendor:gsd && npm run vendor:gsd:verify && npm run vendor:ailab && npm run vendor:ailab:verify && npm run vendor:doc-assets && next build --webpack && node scripts/build-electron.mjs",
+    "electron:build": "npm run vendor:gsd && npm run vendor:gsd:verify && npm run vendor:ailab && npm run vendor:ailab:verify && npm run vendor:doc-assets && node scripts/bundle-vfkit.mjs && next build --webpack && node scripts/build-electron.mjs",
     "electron:pack": "npm run electron:build && node scripts/bundle-chromium.mjs && electron-builder --config electron-builder.yml",
     "electron:pack:mac": "npm run electron:build && node scripts/bundle-chromium.mjs && electron-builder --mac --config electron-builder.yml",
     "electron:pack:win": "npm run electron:build && node scripts/bundle-chromium.mjs && electron-builder --win --config electron-builder.yml",
@@ -120,6 +120,7 @@
     "uuid": "^13.0.0",
     "ws": "^8.19.0",
     "xlsx": "https://cdn.sheetjs.com/xlsx-0.20.3/xlsx-0.20.3.tgz",
+    "yauzl": "^3.4.0",
     "zod": "^4.3.6"
   },
   "optionalDependencies": {
@@ -139,6 +140,7 @@
     "@types/react-syntax-highlighter": "^15.5.13",
     "@types/uuid": "^10.0.0",
     "@types/ws": "^8.18.1",
+    "@types/yauzl": "^3.4.0",
     "concurrently": "^9.2.1",
     "electron": "^40.2.1",
     "electron-builder": "^26.8.1",

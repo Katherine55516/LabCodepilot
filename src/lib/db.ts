@@ -8,6 +8,7 @@ import type { ChannelType, ChannelBinding } from './bridge/types';
 import { getLocalDateString, localDayStartAsUTC } from './utils';
 import { inferProtocolFromLegacy } from './provider-catalog';
 import { seal, open, isSealed, getKey } from './crypto-seal';
+import { parseSkillUsesJson, mergeSkillUses, type SessionSkillUse } from './skill-use';
 
 function dataDir(): string {
   return process.env.CLAUDE_GUI_DATA_DIR || path.join(os.homedir(), '.codepilot');
@@ -41,6 +42,9 @@ const SENSITIVE_SETTINGS = new Set<string>([
   // Bailian (DashScope) text-to-image credentials blob — JSON { apiKey, workspaceId, model, region }.
   // Sealed at rest so the embedded api key isn't stored plaintext in the DB.
   'bailian_image_config',
+  // Cowork 远程沙箱的用户 HMAC token(R5-5 账号下发)。密封落盘;读侧 getSetting 透明
+  // 解密,存量明文值 open() 直通兼容(dev 后门手写的明文无需迁移)。
+  'cowork_remote_token',
 ]);
 
 // MCP 市场安装时收集的密钥（API key / token 等）以此为前缀写入，加密落盘——
@@ -453,6 +457,34 @@ function migrateDb(db: Database.Database): void {
   }
   if (!colNames.includes('permission_profile')) {
     safeAddColumn(db, "ALTER TABLE chat_sessions ADD COLUMN permission_profile TEXT NOT NULL DEFAULT 'default'");
+  }
+  // Cowork POC: when 1, the SDK CLI runs inside an isolated VM (see
+  // scripts/poc/cowork). Gated behind the cowork_enabled setting; default 0
+  // keeps every existing session on the host runtime.
+  if (!colNames.includes('sandbox_enabled')) {
+    safeAddColumn(db, "ALTER TABLE chat_sessions ADD COLUMN sandbox_enabled INTEGER NOT NULL DEFAULT 0");
+  }
+  // Cowork: last-known artifact list (JSON VmArtifactFile[]) for the session's
+  // VM workspace. Persisted at end of turn so history sessions can render the
+  // artifacts card while the VM is asleep — the VM is only needed to download.
+  if (!colNames.includes('vm_artifacts_json')) {
+    safeAddColumn(db, "ALTER TABLE chat_sessions ADD COLUMN vm_artifacts_json TEXT NOT NULL DEFAULT ''");
+  }
+  // 办公会话的归属账号(账号后端的用户 UUID)。同一台机器换账号登录时,办公会话
+  // 必须跟着账号走 —— 否则 B 登录后能读到 A 的全部办公对话,而对应的沙箱容器
+  // 又按 uid 隔离(cowork-server assertOwner → OWNER_MISMATCH → 404),B 拿到的是
+  // 一个"能看历史但用不了"的坏会话。
+  // 研发会话**不**参与账号隔离:它绑定的是本地项目目录,不属于账号体系(产品决策)。
+  // 空字符串 = 归属未知(本列上线前的存量),按用户决策一律隐藏,见 isVisibleSql()。
+  if (!colNames.includes('owner_uid')) {
+    safeAddColumn(db, "ALTER TABLE chat_sessions ADD COLUMN owner_uid TEXT NOT NULL DEFAULT ''");
+  }
+  // 沙箱会话累计调用过的 skill(JSON SessionSkillUse[],见 src/lib/skill-use.ts)。
+  // 与 vm_artifacts_json 同构:回合末在 chat route 落 assistant 消息处提取合并,
+  // 历史会话打开时浮窗才能显示完整清单 —— 消息是分页加载的(首屏 50 条),
+  // 纯靠客户端解析已加载消息会漏掉更早回合里的调用。
+  if (!colNames.includes('skills_used_json')) {
+    safeAddColumn(db, "ALTER TABLE chat_sessions ADD COLUMN skills_used_json TEXT NOT NULL DEFAULT ''");
   }
   if (!colNames.includes('context_summary')) {
     safeAddColumn(db, "ALTER TABLE chat_sessions ADD COLUMN context_summary TEXT NOT NULL DEFAULT ''");
@@ -1124,6 +1156,50 @@ export function getAllSessions(): ChatSession[] {
 }
 
 /**
+ * 当前登录账号的 uid。主进程登录成功后经 `/api/auth/current-user/sync` 推入,
+ * 登出/401 purge 时清空 —— 所以未登录时恒为 ''。
+ */
+export function getCurrentUserUid(): string {
+  return getSetting('current_user_uid') || '';
+}
+
+/**
+ * 会话可见性(账号隔离)WHERE 片段 —— 绑定一个参数:当前 uid。
+ *
+ * - **研发会话(sandbox_enabled=0)全部可见**:它绑定的是本地项目目录而非账号体系,
+ *   换账号不该让本地项目的历史消失(产品决策)。
+ * - **办公会话仅归属本账号可见**:办公会话与远程沙箱容器/卷一一对应,而沙箱侧本就
+ *   按 uid 隔离(cowork-server assertOwner)。客户端不隔离的话,换账号后能读到前一个
+ *   账号的全部办公对话,且点进去必然 404 —— 既泄漏又是坏会话。
+ * - `owner_uid != ''` 一箭双雕:既隐藏归属未知的存量会话(用户决策:一律隐藏),
+ *   又保证**未登录时 uid='' 不会把存量全部漏出**(否则 ''=''  恒真)。
+ */
+const SESSION_VISIBLE_WHERE = "(sandbox_enabled = 0 OR (owner_uid != '' AND owner_uid = ?))";
+
+/** 会话列表/搜索用:只返回当前账号可见的会话。内部去重/导入仍用 getAllSessions。 */
+export function getVisibleSessions(): ChatSession[] {
+  const db = getDb();
+  return db
+    .prepare(`SELECT * FROM chat_sessions WHERE ${SESSION_VISIBLE_WHERE} ORDER BY updated_at DESC`)
+    .all(getCurrentUserUid()) as ChatSession[];
+}
+
+/**
+ * 单会话可见性守卫。按 id 直接访问的入口(详情/消息/改标题/删除)必须用它,
+ * 否则知道 id 就能绕过列表过滤读到别人的办公会话。
+ */
+export function isSessionVisibleToCurrentUser<
+  T extends Pick<ChatSession, 'sandbox_enabled' | 'owner_uid'>,
+>(session: T | undefined | null): session is T {
+  // 类型谓词而非 boolean:调用点普遍是 `getSession(id)` 的结果(可能 undefined),
+  // 让它同时承担"存在性检查",省去每处再写一次 null 判断。
+  if (!session) return false;
+  if (!session.sandbox_enabled) return true; // 研发会话不参与账号隔离
+  const uid = getCurrentUserUid();
+  return !!uid && session.owner_uid === uid;
+}
+
+/**
  * Get sessions that are currently running or waiting for permission.
  */
 export function getActiveSessions(): ChatSession[] {
@@ -1190,6 +1266,8 @@ export function createSession(
   providerId?: string,
   permissionProfile?: string,
   effort?: string,
+  // E2 (cowork): sandbox(办公)会话在创建期定死,不再依赖建后 PATCH。
+  sandboxEnabled?: boolean,
 ): ChatSession {
   const db = getDb();
   const id = crypto.randomBytes(16).toString('hex');
@@ -1197,9 +1275,14 @@ export function createSession(
   const wd = workingDirectory || '';
   const projectName = path.basename(wd);
 
+  // 办公会话在创建期定死归属账号(与 sandbox_enabled 同一时刻),此后不再变更 ——
+  // 换账号登录时它就跟着原账号走,不会出现在新账号的列表里。研发会话留空:
+  // 它绑定本地项目目录,不参与账号隔离。
+  const ownerUid = sandboxEnabled ? getCurrentUserUid() : '';
+
   db.prepare(
-    'INSERT INTO chat_sessions (id, title, created_at, updated_at, model, system_prompt, working_directory, sdk_session_id, project_name, status, mode, sdk_cwd, provider_id, permission_profile, effort) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-  ).run(id, title || 'New Chat', now, now, model || '', systemPrompt || '', wd, '', projectName, 'active', mode || 'code', wd, providerId || '', permissionProfile || 'default', effort || '');
+    'INSERT INTO chat_sessions (id, title, created_at, updated_at, model, system_prompt, working_directory, sdk_session_id, project_name, status, mode, sdk_cwd, provider_id, permission_profile, effort, sandbox_enabled, owner_uid) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
+  ).run(id, title || 'New Chat', now, now, model || '', systemPrompt || '', wd, '', projectName, 'active', mode || 'code', wd, providerId || '', permissionProfile || 'default', effort || '', sandboxEnabled ? 1 : 0, ownerUid);
 
   return getSession(id)!;
 }
@@ -1296,6 +1379,98 @@ export function updateSessionEffort(id: string, effort: string): void {
 export function updateSessionPermissionProfile(id: string, profile: string): void {
   const db = getDb();
   db.prepare('UPDATE chat_sessions SET permission_profile = ? WHERE id = ?').run(profile, id);
+}
+
+// Cowork POC: flip the sandbox execution target. Toggling MUST clear
+// sdk_session_id — the SDK session file lives on whichever machine last ran
+// the CLI (host vs VM), so a resume across the boundary would fail. Clearing
+// forces the next message to start a fresh SDK session; conversation context
+// is preserved via the existing conversationHistory replay path.
+export function updateSessionSandboxEnabled(id: string, enabled: boolean): void {
+  const db = getDb();
+  // 归属必须与 sandbox_enabled 同步翻转:切成办公却留空 owner_uid 会让这个会话
+  // 对**所有**账号隐藏(空归属按存量处理);切回研发则清空,回到"不参与账号隔离"。
+  db.prepare('UPDATE chat_sessions SET sandbox_enabled = ?, sdk_session_id = ?, owner_uid = ? WHERE id = ?')
+    .run(enabled ? 1 : 0, '', enabled ? getCurrentUserUid() : '', id);
+}
+
+/** Cowork: shape persisted in chat_sessions.vm_artifacts_json (VmArtifactFile). */
+export interface SessionVmArtifact {
+  path: string;
+  name: string;
+  size: number;
+  mtime: number;
+}
+
+export function getSessionVmArtifacts(id: string): SessionVmArtifact[] {
+  const db = getDb();
+  const row = db.prepare('SELECT vm_artifacts_json FROM chat_sessions WHERE id = ?').get(id) as
+    | { vm_artifacts_json?: string }
+    | undefined;
+  if (!row?.vm_artifacts_json) return [];
+  try {
+    const parsed = JSON.parse(row.vm_artifacts_json);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Cowork: merge this turn's artifact diff into the session's persisted list.
+ * Dedupe by path, newer mtime wins. Exported pure helper + DB writer so the
+ * merge semantics are unit-testable without a database.
+ */
+export function mergeVmArtifactLists(
+  existing: SessionVmArtifact[],
+  incoming: SessionVmArtifact[],
+): SessionVmArtifact[] {
+  const byPath = new Map<string, SessionVmArtifact>();
+  for (const f of existing) {
+    if (f && typeof f.path === 'string') byPath.set(f.path, f);
+  }
+  for (const f of incoming) {
+    if (!f || typeof f.path !== 'string') continue;
+    const prev = byPath.get(f.path);
+    if (!prev || (f.mtime ?? 0) >= (prev.mtime ?? 0)) byPath.set(f.path, f);
+  }
+  return [...byPath.values()].sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export function mergeSessionVmArtifacts(id: string, incoming: SessionVmArtifact[]): SessionVmArtifact[] {
+  const db = getDb();
+  const merged = mergeVmArtifactLists(getSessionVmArtifacts(id), incoming);
+  db.prepare('UPDATE chat_sessions SET vm_artifacts_json = ? WHERE id = ?')
+    .run(JSON.stringify(merged), id);
+  return merged;
+}
+
+/** Cowork: overwrite the persisted artifact list (used by the live-list migration path). */
+export function setSessionVmArtifacts(id: string, files: SessionVmArtifact[]): void {
+  const db = getDb();
+  db.prepare('UPDATE chat_sessions SET vm_artifacts_json = ? WHERE id = ?')
+    .run(JSON.stringify(files), id);
+}
+
+/** Cowork: 会话累计调用过的 skill(浮窗「使用的技能」小节数据源)。 */
+export function getSessionSkillsUsed(id: string): SessionSkillUse[] {
+  const db = getDb();
+  const row = db.prepare('SELECT skills_used_json FROM chat_sessions WHERE id = ?').get(id) as
+    | { skills_used_json?: string }
+    | undefined;
+  return parseSkillUsesJson(row?.skills_used_json);
+}
+
+/**
+ * Cowork: 回合末把本回合的 Skill 调用合并进会话累计(按 tool_use id 去重 ——
+ * 错误兜底路径与正常路径共享同一 contentBlocks,重复调用本函数是安全的)。
+ */
+export function mergeSessionSkillsUsed(id: string, uses: SessionSkillUse[]): void {
+  if (!uses.length) return;
+  const db = getDb();
+  const merged = mergeSkillUses(getSessionSkillsUsed(id), uses);
+  db.prepare('UPDATE chat_sessions SET skills_used_json = ? WHERE id = ?')
+    .run(JSON.stringify(merged), id);
 }
 
 // ==========================================
@@ -1514,8 +1689,13 @@ export function searchMessages(
     FROM messages m
     LEFT JOIN chat_sessions s ON s.id = m.session_id
     WHERE m.content LIKE ? ESCAPE '\\'${ackFilter}
+      AND (s.sandbox_enabled = 0 OR s.sandbox_enabled IS NULL OR (s.owner_uid != '' AND s.owner_uid = ?))
   `;
-  const params: unknown[] = [pattern];
+  // 账号隔离必须下沉到 SQL:搜索直接命中消息正文,是泄漏面最大的入口之一。
+  // 语义同 SESSION_VISIBLE_WHERE(此处列带 s. 前缀);LEFT JOIN 下 s 可能为 NULL
+  // (会话已删的孤儿消息),显式放行以免连带改变既有搜索行为。
+  // 在 SQL 层过滤而非取回后再筛 —— 否则 LIMIT 先截断,过滤完可能所剩无几。
+  const params: unknown[] = [pattern, getCurrentUserUid()];
 
   if (options.sessionId) {
     sql += ' AND m.session_id = ?';

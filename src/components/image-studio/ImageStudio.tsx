@@ -9,6 +9,8 @@ import {
   Image as ImageIcon,
   Warning,
   X,
+  Copy,
+  Check,
 } from "@/components/ui/icon";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -23,7 +25,7 @@ import {
 import { useTranslation } from "@/hooks/useTranslation";
 import { useAccount } from "@/hooks/useAccount";
 import { showToast } from "@/hooks/useToast";
-import { cn } from "@/lib/utils";
+import { cn, parseDBDate } from "@/lib/utils";
 
 const ASPECT_RATIOS = ["1:1", "16:9", "9:16", "4:3", "3:4"] as const;
 const COUNTS = [1, 2, 3, 4] as const;
@@ -49,6 +51,8 @@ interface StudioMessage {
   status: "loading" | "done" | "error";
   images: GeneratedImage[];
   error?: string;
+  /** 生成时间。历史条目取 gallery 的 created_at(UTC),新生成的取本地当前时间。 */
+  createdAt: Date;
 }
 
 interface GalleryHistoryItem {
@@ -61,6 +65,16 @@ interface GalleryHistoryItem {
 
 function imageUrl(localPath: string): string {
   return `/api/media/serve?path=${encodeURIComponent(localPath)}`;
+}
+
+/** 生成时间显示格式:年-月-日 时:分:秒(本地时区,补零)。 */
+function formatTimestamp(date: Date): string {
+  if (Number.isNaN(date.getTime())) return "";
+  const p = (n: number) => String(n).padStart(2, "0");
+  return (
+    `${date.getFullYear()}-${p(date.getMonth() + 1)}-${p(date.getDate())} ` +
+    `${p(date.getHours())}:${p(date.getMinutes())}:${p(date.getSeconds())}`
+  );
 }
 
 let msgSeq = 0;
@@ -83,8 +97,12 @@ export function ImageStudio() {
   const [loading, setLoading] = useState(false);
   const [messages, setMessages] = useState<StudioMessage[]>([]);
   const [lightbox, setLightbox] = useState<string | null>(null);
+  // 刚复制过的那条,用于把按钮图标短暂切成对勾
+  const [copiedId, setCopiedId] = useState<string | null>(null);
 
-  const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  // 是否应保持贴底。用户手动向上滚动后置 false,再滚回底部恢复 true。
+  const stickToBottom = useRef(true);
 
   // 账号下发的图片模型列表 + 是否已配置可用凭证。登录态变化后重新拉取（登录后即生效）。
   useEffect(() => {
@@ -133,7 +151,14 @@ export function ImageStudio() {
           const key = `${it.created_at}__${it.prompt}`;
           let g = groups.get(key);
           if (!g) {
-            g = { id: it.id, prompt: it.prompt, count: 0, status: "done", images: [] };
+            g = {
+              id: it.id,
+              prompt: it.prompt,
+              count: 0,
+              status: "done",
+              images: [],
+              createdAt: parseDBDate(it.created_at),
+            };
             groups.set(key, g);
           }
           g.images.push(...it.images);
@@ -149,10 +174,32 @@ export function ImageStudio() {
     };
   }, []);
 
-  // Auto-scroll to newest turn.
+  // 保持贴底。
+  //
+  // 以前是 messages 变化时 `bottomRef.scrollIntoView({behavior:'smooth'})`,
+  // 但历史里的图片是异步加载的:平滑滚动动画结束时图片还没解码,容器高度随后
+  // 又被撑高几千像素,结果进模块看到的是列表中间而不是最新一条。
+  // 改成用 ResizeObserver 盯住内容高度,只要处于贴底状态就把 scrollTop 顶到底,
+  // 图片一张张加载完也会跟着校正到位。
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    const el = scrollRef.current;
+    if (!el) return;
+    const pin = () => {
+      if (stickToBottom.current) el.scrollTop = el.scrollHeight;
+    };
+    pin();
+    const ro = new ResizeObserver(pin);
+    // 观察内容包裹层:它的高度随图片加载增长,容器自身高度是不变的
+    if (el.firstElementChild) ro.observe(el.firstElementChild);
+    return () => ro.disconnect();
   }, [messages]);
+
+  // 用户手动上滚就停止贴底,滚回底部(容差 24px)恢复。
+  const handleScroll = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 24;
+  }, []);
 
   // Esc closes the lightbox.
   useEffect(() => {
@@ -175,7 +222,10 @@ export function ImageStudio() {
       return;
     }
     const id = nextId();
-    setMessages((prev) => [...prev, { id, prompt: p, count, status: "loading", images: [] }]);
+    setMessages((prev) => [
+      ...prev,
+      { id, prompt: p, count, status: "loading", images: [], createdAt: new Date() },
+    ]);
     setPrompt("");
     setLoading(true);
     try {
@@ -195,7 +245,16 @@ export function ImageStudio() {
       }
       setMessages((prev) =>
         prev.map((m) =>
-          m.id === id ? { ...m, status: "done", images: Array.isArray(data.images) ? data.images : [] } : m,
+          m.id === id
+            ? {
+                ...m,
+                status: "done",
+                images: Array.isArray(data.images) ? data.images : [],
+                // 落库时间取的是生成完成时刻,这里跟着刷新,免得刷新页面后
+                // 从 gallery 读回来的时间与刚才显示的对不上。
+                createdAt: new Date(),
+              }
+            : m,
         ),
       );
     } catch (err) {
@@ -206,6 +265,28 @@ export function ImageStudio() {
       setLoading(false);
     }
   }, [prompt, model, aspectRatio, count, configured, t]);
+
+  const handleCopyPrompt = useCallback(
+    async (id: string, text: string) => {
+      try {
+        await navigator.clipboard.writeText(text);
+      } catch {
+        // 剪贴板 API 不可用(无安全上下文等)时退回到 execCommand
+        const ta = document.createElement("textarea");
+        ta.value = text;
+        ta.style.position = "fixed";
+        ta.style.opacity = "0";
+        document.body.appendChild(ta);
+        ta.select();
+        document.execCommand("copy");
+        document.body.removeChild(ta);
+      }
+      setCopiedId(id);
+      showToast({ type: "success", message: t("common.copied") });
+      window.setTimeout(() => setCopiedId((cur) => (cur === id ? null : cur)), 1500);
+    },
+    [t],
+  );
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
@@ -238,7 +319,7 @@ export function ImageStudio() {
       </div>
 
       {/* Conversation flow (scrollable) */}
-      <div className="flex-1 min-h-0 overflow-y-auto">
+      <div ref={scrollRef} onScroll={handleScroll} className="flex-1 min-h-0 overflow-y-auto">
         <div className="mx-auto flex w-full max-w-3xl flex-col gap-6 px-6 py-6">
           {isEmpty ? (
             <div className="flex flex-col items-center justify-center gap-3 py-24 text-center">
@@ -250,10 +331,22 @@ export function ImageStudio() {
             </div>
           ) : (
             messages.map((m) => (
-              <div key={m.id} className="flex flex-col gap-3">
-                {/* User prompt — right bubble */}
-                <div className="flex justify-end">
-                  <div className="max-w-[78%] whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-sm text-primary-foreground">
+              <div key={m.id} className="group/turn flex flex-col gap-3">
+                {/* User prompt — right bubble。
+                    select-text + cursor-text 显式放开拖选(容器链上任何一层将来加了
+                    select-none 都不会再波及这里);旁边常备一个复制按钮,不依赖拖选。 */}
+                <div className="flex items-end justify-end gap-1.5">
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    onClick={() => handleCopyPrompt(m.id, m.prompt)}
+                    title={t("common.copy")}
+                    aria-label={t("common.copy")}
+                    className="h-7 w-7 shrink-0 text-muted-foreground opacity-0 transition-opacity hover:text-foreground group-hover/turn:opacity-100 focus-visible:opacity-100"
+                  >
+                    {copiedId === m.id ? <Check size={14} /> : <Copy size={14} />}
+                  </Button>
+                  <div className="max-w-[78%] cursor-text select-text whitespace-pre-wrap break-words rounded-2xl rounded-br-md bg-primary px-4 py-2.5 text-sm text-primary-foreground">
                     {m.prompt}
                   </div>
                 </div>
@@ -285,23 +378,29 @@ export function ImageStudio() {
                     )}
 
                     {m.status === "done" && (
-                      <div className={cn("grid gap-2", m.images.length > 1 ? "max-w-xl grid-cols-2" : "max-w-md grid-cols-1")}>
-                        {m.images.map((img, i) => (
-                          <button
-                            key={img.localPath}
-                            type="button"
-                            onClick={() => setLightbox(imageUrl(img.localPath))}
-                            className="group relative cursor-zoom-in overflow-hidden rounded-xl border border-border/50 bg-muted/40"
-                          >
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img
-                              src={imageUrl(img.localPath)}
-                              alt={`${m.prompt} ${i + 1}`}
-                              loading="lazy"
-                              className="max-h-[440px] w-full object-contain transition-transform duration-200 group-hover:scale-[1.01]"
-                            />
-                          </button>
-                        ))}
+                      <div className={cn(m.images.length > 1 ? "max-w-xl" : "max-w-md")}>
+                        <div className={cn("grid gap-2", m.images.length > 1 ? "grid-cols-2" : "grid-cols-1")}>
+                          {m.images.map((img, i) => (
+                            <button
+                              key={img.localPath}
+                              type="button"
+                              onClick={() => setLightbox(imageUrl(img.localPath))}
+                              className="group relative cursor-zoom-in overflow-hidden rounded-xl border border-border/50 bg-muted/40"
+                            >
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img
+                                src={imageUrl(img.localPath)}
+                                alt={`${m.prompt} ${i + 1}`}
+                                loading="lazy"
+                                className="max-h-[440px] w-full object-contain transition-transform duration-200 group-hover:scale-[1.01]"
+                              />
+                            </button>
+                          ))}
+                        </div>
+                        {/* 生成时间 */}
+                        <div className="mt-1.5 select-text text-[11px] tabular-nums text-muted-foreground/70">
+                          {formatTimestamp(m.createdAt)}
+                        </div>
                       </div>
                     )}
                   </div>
@@ -309,7 +408,6 @@ export function ImageStudio() {
               </div>
             ))
           )}
-          <div ref={bottomRef} />
         </div>
       </div>
 

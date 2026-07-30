@@ -22,6 +22,15 @@ export interface ChatSession {
   runtime_updated_at: string;
   runtime_error: string;
   permission_profile?: 'default' | 'full_access';
+  /** Cowork POC: 1 = SDK CLI runs inside an isolated VM, 0 = host runtime. */
+  sandbox_enabled?: number;
+  /**
+   * 办公会话的归属账号(账号后端用户 UUID)。'' = 归属未知(存量),按可见性规则隐藏。
+   * 研发会话恒为 ''(它绑定本地项目目录,不参与账号隔离)。见 db.ts isSessionVisibleToCurrentUser。
+   */
+  owner_uid?: string;
+  /** 沙箱会话累计调用过的 skill(JSON SessionSkillUse[],见 src/lib/skill-use.ts)。 */
+  skills_used_json?: string;
   /** Per-session reasoning effort (e.g. 'low'|'medium'|'high'|'max'); ''/undefined = no explicit effort */
   effort?: string;
   context_summary?: string;
@@ -419,6 +428,12 @@ export interface CreateSessionRequest {
   provider_id?: string;
   permission_profile?: string;
   effort?: string;
+  /**
+   * E2 (cowork): 创建期定死沙箱(办公)会话。为 truthy 且未给
+   * working_directory 时,服务端生成宿主暂存目录 ~/.codepilot/cowork/<id>
+   * 并默认 permission_profile='full_access'。见 cowork-office-mode.md D2/D3。
+   */
+  sandbox_enabled?: boolean | number;
 }
 
 export interface SendMessageRequest {
@@ -717,11 +732,29 @@ export type SSEEventType =
   | 'rewind_point'       // SDK user message with rewind checkpoint
   | 'rate_limit'         // SDK 0.2.111 subscription rate-limit telemetry
   | 'context_usage'      // SDK 0.2.111 post-turn context usage snapshot
+  | 'vm_artifacts'       // cowork sandbox: files created/modified in the VM this turn
+  | 'vm_status'          // cowork sandbox: VM provisioning progress (P1-D readiness window)
   | 'done';              // stream complete
 
 export interface SSEEvent {
   type: SSEEventType;
   data: string;
+}
+
+/** Cowork sandbox: VM provisioning progress during the cold-start readiness window. */
+export interface VmStatusEvent {
+  phase: 'starting' | 'booting' | 'provisioning' | 'ready' | 'failed';
+  detail?: string;
+}
+
+/** Cowork sandbox: one file the agent created/modified inside the VM this turn. */
+export interface VmArtifactFile {
+  /** Absolute path inside the VM (under the session workspace). */
+  path: string;
+  name: string;
+  size: number;
+  /** Epoch millis of last modification (VM clock). */
+  mtime: number;
 }
 
 // ==========================================
@@ -1018,18 +1051,20 @@ export interface FileAttachment {
 }
 
 // Check if a MIME type is an image
-export function isImageFile(type: string): boolean {
-  return type.startsWith('image/');
+// type 可能缺失(历史消息/外部调用方构造的附件元数据没带 MIME)——缺失时按
+// 非媒体处理,绝不能让一条脏 attachment 白屏整个会话页或 500 掉发送链。
+export function isImageFile(type: string | undefined | null): boolean {
+  return !!type && type.startsWith('image/');
 }
 
 // Check if a MIME type is a video
-export function isVideoFile(type: string): boolean {
-  return type.startsWith('video/');
+export function isVideoFile(type: string | undefined | null): boolean {
+  return !!type && type.startsWith('video/');
 }
 
 // Check if a MIME type is any visual media (image or video)
-export function isMediaFile(type: string): boolean {
-  return type.startsWith('image/') || type.startsWith('video/') || type.startsWith('audio/');
+export function isMediaFile(type: string | undefined | null): boolean {
+  return !!type && (type.startsWith('image/') || type.startsWith('video/') || type.startsWith('audio/'));
 }
 
 // Format bytes into human-readable size
@@ -1270,6 +1305,18 @@ export interface SessionStreamSnapshot {
     /** Epoch ms at which the snapshot was taken */
     capturedAt: number;
   };
+  /**
+   * Cowork sandbox: files the agent created/modified inside the VM this
+   * turn (emitted after result via the vm_artifacts SSE event). ChatView
+   * merges these into its session-level artifact list for download cards.
+   */
+  vmArtifacts?: VmArtifactFile[];
+  /**
+   * Cowork sandbox: latest VM provisioning status during the cold-start
+   * readiness window (P1-D). Drives the "沙箱准备中" banner; cleared to
+   * 'ready'/undefined once the VM is up and normal streaming begins.
+   */
+  vmStatus?: VmStatusEvent;
 }
 
 export interface StreamEvent {

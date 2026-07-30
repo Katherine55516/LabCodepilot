@@ -190,6 +190,36 @@ extraResources:
     filter:
       - "**/*"
       - "!transform-report.json"
+  # Cowork 沙箱运行时资源(镜像流水线 M3)—— guest daemon + vsock 转发器。
+  # 运行时由 src/lib/cowork-paths.ts bundledCoworkResource() 经
+  # AILAB_RESOURCES_PATH/cowork/ 定位(打包版脱离仓库绝对路径依赖的关键)。
+  - from: scripts/poc/cowork/
+    to: cowork/
+    filter:
+      - "cowork-daemon.py"
+      - "forwarder-vsock.sh"
+      - "forwarder-vsock.mjs"
+  # R5-1:远程容器沙箱 WS 转发器(cowork-backend-remote.ts remoteForwarderPath 的
+  # 打包版第一候选;SDK 对 .mjs 走 JS 运行时 spawn + ELECTRON_RUN_AS_NODE)。
+  - from: apps/cowork-server/client/
+    to: cowork/
+    filter:
+      - "forwarder-remote.mjs"
+  # forwarder 唯一依赖 ws(零运行时依赖,MIT,~192K)整包拷成 cowork/node_modules/ws,
+  # ESM 从脚本所在目录向上解析即命中。不能换 Node 内置 WebSocket:握手需自定义
+  # authorization Bearer 头,内置(undici)实现不支持。bufferutil/utf-8-validate 为
+  # 可选原生加速,ws 内部 try/catch 缺省走纯 JS,不拷。
+  - from: node_modules/ws/
+    to: cowork/node_modules/ws/
+    filter:
+      - "**/*"
+  # vfkit 虚拟机监视器(Apache-2.0,crc-org/vfkit)—— scripts/bundle-vfkit.mjs
+  # 在 electron:build 阶段从本机 brew 拷入 vfkit-bundle/(强校验
+  # com.apple.security.virtualization entitlement)。after-sign.js 的 adhoc 补签
+  # 按扩展名收集,不会碰这个无扩展名二进制,原签名与 entitlement 保留。
+  - from: vfkit-bundle/
+    to: cowork/bin/
+    filter: ["vfkit"]
 afterPack: scripts/after-pack.js
 afterSign: scripts/after-sign.js
 asarUnpack:
@@ -213,6 +243,12 @@ mac:
   entitlements: build/entitlements.mac.plist
   entitlementsInherit: build/entitlements.mac.inherit.plist
   notarize: false
+  # vfkit 必须跳过 electron-builder 的签名:它会用 Electron 默认 entitlements
+  # 重签(只剩 allow-jit),剥掉 Virtualization.framework 硬要求的
+  # com.apple.security.virtualization → 沙箱 VM 起不来(M3 实测踩坑)。
+  # 跳过后保留 brew 原签名与 entitlement;after-sign.js 有防回归校验。
+  signIgnore:
+    - "cowork/bin/vfkit$"
   # Only Apple Silicon — Intel Macs are no longer targeted (drops the need to
   # cross-install the darwin-x64 SDK platform subpackage in CI and halves the
   # release artifact size for macOS).

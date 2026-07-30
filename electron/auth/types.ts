@@ -89,9 +89,27 @@ export interface ImageProviderConfig {
   models: ImageModelOption[];
 }
 
+/**
+ * Cowork 远程沙箱配置(R5-5 账号下发)—— server 地址 + 当前用户的 HMAC token。
+ * `/encrypted` 变体里 token 为密文(同 configs 的 auth_token),客户端解密后使用。
+ * token 经 broker 推嵌入式 Next 服务密封落库(SENSITIVE settings),不以明文下行 renderer。
+ */
+export interface CoworkRemoteConfig {
+  /** cowork-server 地址,如 https://cowork.example.com(https 时 forwarder 自动走 wss) */
+  serverUrl: string;
+  /** 当前用户的 HMAC 签名 token(账号后端用与 cowork-server 相同的 COWORK_AUTH_SECRET 签发) */
+  token: string;
+}
+
 // ── /api/v1/me response ────────────────────────────────────────────────────
 
 export interface MeInfo {
+  /**
+   * 账号 UUID。服务端 `upsert_from_claims` 用 `UUID(claims.sub)` 建档,所以它**就是**
+   * 签发 cowork HMAC token 时用的那个 uid —— 客户端拿它做办公会话归属,与沙箱侧
+   * 容器/卷的 `cowork.uid` label 天然对齐。
+   */
+  id?: string;
   username: string;
   display_name: string;
   email?: string;

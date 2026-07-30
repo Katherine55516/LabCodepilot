@@ -41,6 +41,7 @@ export function UnifiedTopBar() {
     assistantPanelOpen,
     setAssistantPanelOpen,
     isAssistantWorkspace,
+    isOfficeSession,
     currentBranch,
     gitDirtyCount,
   } = usePanel();
@@ -180,11 +181,13 @@ export function UnifiedTopBar() {
             )
           )}
 
-          {isChatRoute && projectName && sessionTitle && (
+          {/* E4 (cowork): 办公会话隐藏项目文件夹 chip —— 它会显示宿主暂存
+              目录名(=会话 id),对用户是噪音;办公不绑项目文件夹。 */}
+          {isChatRoute && projectName && sessionTitle && !isOfficeSession && (
             <span className="text-xs text-muted-foreground/60 shrink-0">/</span>
           )}
 
-          {isChatRoute && projectName && (
+          {isChatRoute && projectName && !isOfficeSession && (
             <Tooltip>
               <TooltipTrigger asChild>
                 <Button
@@ -223,7 +226,9 @@ export function UnifiedTopBar() {
           className="flex items-center gap-1"
           style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
         >
-          {isChatRoute && (
+          {/* E4 (cowork): 办公会话隐藏全部研发面板按钮(Git/文件树/任务/看板)
+              —— 面板本体已由 AppShell 的 PanelZone gate 压制,按钮同步消失。 */}
+          {isChatRoute && !isOfficeSession && (
             <>
               <Tooltip>
                 <TooltipTrigger asChild>

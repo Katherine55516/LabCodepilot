@@ -1,0 +1,17 @@
+{
+  "name": "cowork-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Cowork 远程容器沙箱服务端控制面(容器 per 会话编排 + exec WS 桥 + 凭证代理)。单公司裸金属服务器部署。",
+  "bin": {
+    "cowork-server": "index.mjs"
+  },
+  "scripts": {
+    "start": "node index.mjs",
+    "selftest": "node selftest-r1.mjs"
+  },
+  "dependencies": {
+    "ws": "^8.19.0"
+  }
+}

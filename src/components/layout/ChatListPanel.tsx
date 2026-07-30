@@ -17,8 +17,12 @@ import {
   Gear,
   MagnifyingGlassCheck,
   Sparkle,
+  Briefcase,
+  Code,
+  SidebarSimple,
   type Icon,
 } from "@/components/ui/icon";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -40,24 +44,32 @@ import { FolderPicker } from "@/components/chat/FolderPicker";
 import { useAssistantWorkspace } from "@/hooks/useAssistantWorkspace";
 import { AssistantPromoCard } from "@/components/chat/ChatEmptyState";
 import { UserMenu } from "@/components/account/UserMenu";
+import { openSettings } from "@/components/settings/SettingsDialog";
 import {
   formatRelativeTime,
   groupSessionsByProject,
   loadCollapsedProjects,
   saveCollapsedProjects,
+  loadWorkspaceTab,
+  saveWorkspaceTab,
+  splitSessionsByWorkspaceTab,
+  type WorkspaceTab,
   COLLAPSED_INITIALIZED_KEY,
 } from "./chat-list-utils";
+import { OfficeEmptyCard } from "./OfficeEmptyCard";
 import type { ChatSession } from "@/types";
 
 interface ChatListPanelProps {
   open: boolean;
+  /** 折叠/展开侧边栏(顶行折叠按钮 + 折叠细栏的展开按钮共用) */
+  onToggle?: () => void;
   width?: number;
   hasUpdate?: boolean;
   readyToInstall?: boolean;
 }
 
 
-export function ChatListPanel({ open, width, hasUpdate, readyToInstall }: ChatListPanelProps) {
+export function ChatListPanel({ open, onToggle, width, hasUpdate, readyToInstall }: ChatListPanelProps) {
   const pathname = usePathname();
   const router = useRouter();
 
@@ -103,6 +115,75 @@ export function ChatListPanel({ open, width, hasUpdate, readyToInstall }: ChatLi
   );
   const [hoveredFolder, setHoveredFolder] = useState<string | null>(null);
   const [creatingChat, setCreatingChat] = useState(false);
+
+  // E3 (cowork): 「办公 / 研发」双栏。办公 = 沙箱会话平铺(不按项目分组)。
+  //
+  // 双栏是**固定信息架构,恒常渲染** —— 不再由 cowork_enabled 或状态探测决定
+  // 显隐。历史上它挂在 `/api/cowork/status` 的一次性 fetch 上:该请求静默
+  // catch、失败不重试,首帧探测失败(打包版启动时内嵌服务未就绪等)双栏就永久
+  // 消失,只能靠去设置页切开关或重启碰运气,表现为「功能莫名不见了」。
+  // 现在探测结果只用于**办公 tab 内部的诚实降级**(见 OfficeEmptyCard),
+  // 不再左右 tab 本身。tab 选择记忆在 localStorage(默认 dev,存量观感不变)。
+  const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>(() => loadWorkspaceTab());
+  // 执行门状态(settings.cowork_enabled)。仅用于办公空态卡的提示分支:关闭时
+  // 明说「已在设置中关闭」并给开启入口,而不是让用户建一个发消息才硬失败的会话。
+  const [coworkEnabled, setCoworkEnabled] = useState(true);
+  const [coworkImageProvisioned, setCoworkImageProvisioned] = useState(true);
+
+  useEffect(() => {
+    // 只读探测(不触发 VM 启动)。失败保持乐观默认 —— 双栏已不依赖它,且
+    // 真正的护栏在服务端 decideCowork(不满足一律硬失败,绝不落宿主执行),
+    // 这里猜错顶多让空态卡少一句提示,不会造成越权执行。
+    const fetchCoworkStatus = () => {
+      fetch('/api/cowork/status')
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => {
+          if (!d) return;
+          setCoworkEnabled(!!d.enabled);
+          setCoworkImageProvisioned(!!d.imageProvisioned);
+        })
+        .catch(() => {});
+    };
+    fetchCoworkStatus();
+    window.addEventListener('cowork-status-changed', fetchCoworkStatus);
+    return () => window.removeEventListener('cowork-status-changed', fetchCoworkStatus);
+  }, []);
+
+  const activeTab: WorkspaceTab = workspaceTab;
+
+  // E4.1: 也监听外部发出的 tab 切换(如 /chat 页在预填跳转时强制切研发),
+  // 保持侧边栏与主区一致。监听方只 setState 不再广播,不会成环。
+  useEffect(() => {
+    const onTab = (e: Event) => {
+      const tab = (e as CustomEvent).detail;
+      if (tab === 'office' || tab === 'dev') setWorkspaceTab(tab);
+    };
+    window.addEventListener('workspace-tab-changed', onTab);
+    return () => window.removeEventListener('workspace-tab-changed', onTab);
+  }, []);
+
+  const handleTabChange = useCallback((tab: WorkspaceTab) => {
+    setWorkspaceTab(tab);
+    saveWorkspaceTab(tab);
+    // 测试工作台是研发专属入口(2026-07 改版后办公 tab 不渲染测试按钮),切到办公时
+    // 顺手关闭,避免覆盖层留在 /chat 上却没有任何按钮能关它。
+    if (tab === 'office') setTestPanelOpen(false);
+    // /chat 落地页据此实时切换 办公/研发 空态(E4);同 localStorage 值一起构成
+    // 「当前 tab」的唯一广播口。
+    window.dispatchEvent(new CustomEvent('workspace-tab-changed', { detail: tab }));
+    // E4.1 (用户反馈问题3): 主区跟随 —— 当前打开的会话不属于目标模式时,
+    // 切到目标模式的最近会话;目标模式没有会话则回 /chat(按 tab 显示对应空态)。
+    const m = pathname.match(/^\/chat\/([^/]+)$/);
+    if (!m) return;
+    const cur = sessions.find((s) => s.id === m[1]);
+    if (!cur) return;
+    const curIsOffice = !!cur.sandbox_enabled;
+    const targetIsOffice = tab === 'office';
+    if (curIsOffice === targetIsOffice) return;
+    // sessions 来自 getAllSessions(updated_at DESC),首个匹配即最近会话
+    const next = sessions.find((s) => (targetIsOffice ? !!s.sandbox_enabled : !s.sandbox_enabled));
+    router.push(next ? `/chat/${next.id}` : '/chat');
+  }, [pathname, sessions, router, setTestPanelOpen]);
   const { workspacePath } = useAssistantWorkspace();
   const [assistantSummary, setAssistantSummary] = useState<{
     name: string;
@@ -235,6 +316,29 @@ export function ChatListPanel({ open, width, hasUpdate, readyToInstall }: ChatLi
       setCreatingChat(false);
     }
   }, [router, workingDirectory, openFolderPicker, getCurrentModelAndProvider, t]);
+
+  // E3: 办公 tab 的「新对话」— 不选文件夹,POST sandbox_enabled:1;服务端
+  // 生成宿主暂存目录(E2)并默认 full_access。
+  const handleNewOfficeChat = useCallback(async () => {
+    setCreatingChat(true);
+    try {
+      const { model, provider_id } = getCurrentModelAndProvider();
+      const res = await fetch("/api/chat/sessions", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ sandbox_enabled: 1, model, provider_id }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        window.dispatchEvent(new CustomEvent("session-created"));
+        router.push(`/chat/${data.session.id}`);
+      }
+    } catch {
+      // Silently fail (same convention as handleNewChat)
+    } finally {
+      setCreatingChat(false);
+    }
+  }, [router, getCurrentModelAndProvider]);
 
   const toggleProject = useCallback((wd: string) => {
     setCollapsedProjects((prev) => {
@@ -413,8 +517,16 @@ export function ChatListPanel({ open, width, hasUpdate, readyToInstall }: ChatLi
     return sessions;
   }, [sessions, isSplitActive, splitSessionIds]);
 
+  // E3: 双栏切分 —— office = 沙箱会话(updated_at 倒序平铺),dev = 其余。
+  // 恒常切分:双栏常驻后不再有「不切分」形态。否则沙箱会话会随开关在
+  // 研发项目分组与办公栏之间来回跳,列表位置飘忽。
+  const { office: officeSessions, dev: devSessions } = useMemo(
+    () => splitSessionsByWorkspaceTab(filteredSessions),
+    [filteredSessions]
+  );
+
   const projectGroups = useMemo(() => {
-    const groups = groupSessionsByProject(filteredSessions);
+    const groups = groupSessionsByProject(devSessions);
     // Pin assistant workspace project to top
     if (workspacePath) {
       const wsIdx = groups.findIndex(g => g.workingDirectory === workspacePath);
@@ -424,7 +536,7 @@ export function ChatListPanel({ open, width, hasUpdate, readyToInstall }: ChatLi
       }
     }
     return groups;
-  }, [filteredSessions, workspacePath]);
+  }, [devSessions, workspacePath]);
 
   // Auto-collapse: only expand the project with the most recent session activity.
   // Runs on first use AND whenever the project list changes (new projects added).
@@ -450,7 +562,46 @@ export function ChatListPanel({ open, width, hasUpdate, readyToInstall }: ChatLi
     }
   }, [projectGroups, collapsedProjects]);
 
-  if (!open) return null;
+  // 折叠态:整个面板收成一条细栏,只留 展开 + 搜索 两个图标(不用悬浮按钮,
+  // 避免与 macOS 红绿灯 / 各路由自己的顶部内容重叠)。
+  if (!open) {
+    return (
+      <aside className="hidden h-full w-[52px] shrink-0 flex-col items-center overflow-hidden bg-sidebar/80 backdrop-blur-xl lg:flex">
+        {/* macOS traffic lights spacing */}
+        <div className="h-5 shrink-0 mt-3" />
+        <div className="flex flex-col items-center gap-1 pt-2">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                onClick={onToggle}
+              >
+                <SidebarSimple size={15} />
+                <span className="sr-only">{t('chatList.expandSidebar')}</span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="right">{t('chatList.expandSidebar')}</TooltipContent>
+          </Tooltip>
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon-sm"
+                className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                onClick={() => window.dispatchEvent(new CustomEvent('open-global-search'))}
+              >
+                <MagnifyingGlass size={15} />
+                <span className="sr-only">{t('chatList.searchSessions')}</span>
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="right">{t('chatList.searchSessions')}</TooltipContent>
+          </Tooltip>
+        </div>
+      </aside>
+    );
+  }
 
   // Type annotation needed because the array is currently empty (every entry
   // commented out). When restoring any entry, drop the annotation if you like.
@@ -477,27 +628,32 @@ export function ChatListPanel({ open, width, hasUpdate, readyToInstall }: ChatLi
       {/* macOS traffic lights spacing */}
       <div className="h-5 shrink-0 mt-3" />
 
-      {/* Top action bar: New Chat + Search */}
-      <div className="flex items-center gap-2 px-3 pb-2">
-        <Button
-          variant="outline"
-          size="sm"
-          className="flex-1 justify-center gap-1.5 h-8 text-xs"
-          disabled={creatingChat}
-          onClick={handleNewChat}
-        >
-          <Plus size={14} />
-          {t('chatList.newConversation')}
-        </Button>
+      {/* Top action bar: 折叠 + 搜索(左对齐,参考 Claude 桌面版)— 新对话
+          移到 办公/研发 切换栏下方(2026-07 侧边栏改版) */}
+      <div className="flex items-center gap-1 px-3 pb-1">
         <Tooltip>
           <TooltipTrigger asChild>
             <Button
-              variant="outline"
+              variant="ghost"
               size="icon-sm"
-              className="h-8 w-8 shrink-0"
+              className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground"
+              onClick={onToggle}
+            >
+              <SidebarSimple size={15} />
+              <span className="sr-only">{t('chatList.collapseSidebar')}</span>
+            </Button>
+          </TooltipTrigger>
+          <TooltipContent side="bottom">{t('chatList.collapseSidebar')}</TooltipContent>
+        </Tooltip>
+        <Tooltip>
+          <TooltipTrigger asChild>
+            <Button
+              variant="ghost"
+              size="icon-sm"
+              className="h-7 w-7 shrink-0 text-muted-foreground hover:text-foreground"
               onClick={() => window.dispatchEvent(new CustomEvent('open-global-search'))}
             >
-              <MagnifyingGlass size={14} />
+              <MagnifyingGlass size={15} />
               <span className="sr-only">{t('chatList.searchSessions')}</span>
             </Button>
           </TooltipTrigger>
@@ -505,9 +661,82 @@ export function ChatListPanel({ open, width, hasUpdate, readyToInstall }: ChatLi
         </Tooltip>
       </div>
 
-      {/* Feature nav items — 测试 moved next to 文生图 above the account row (see bottom).
-          navItems is empty today (entries live in Settings); render the block only when
-          some are restored so it leaves no empty gap below the search bar. */}
+      {/* E3 (cowork): 办公/研发 分段切换 —— **恒常渲染**,不受 cowork_enabled
+          与状态探测影响(见上方 workspaceTab 处的说明:曾因一次性 fetch 静默
+          失败导致双栏永久消失)。办公=沙箱会话平铺,研发=现有项目分组。
+          切 tab 只换列表,不影响已打开会话。沙箱能否真的执行由服务端
+          decideCowork 把关,办公栏内部诚实呈现(OfficeEmptyCard)。 */}
+      <div className="px-3 pb-2">
+        {/* activationMode="manual":焦点掠过不切换(默认 automatic 下 Tab 键
+            路过/a11y 遍历 focus 到 trigger 就会切视图并写 localStorage,
+            CDP 验证时实测误触)。点击 / Enter / Space 才激活。 */}
+        <Tabs value={activeTab} onValueChange={(v) => handleTabChange(v as WorkspaceTab)} activationMode="manual">
+          <TabsList className="w-full !h-8 p-0.5 text-xs rounded-md">
+            <TabsTrigger value="office" className="flex-1 !h-6 rounded-sm px-1.5 py-0 text-xs gap-1.5">
+              <Briefcase size={13} />
+              {t('workspace.tab.office')}
+            </TabsTrigger>
+            <TabsTrigger value="dev" className="flex-1 !h-6 rounded-sm px-1.5 py-0 text-xs gap-1.5">
+              <Code size={13} />
+              {t('workspace.tab.dev')}
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
+      </div>
+
+      {/* 新对话 + 按 tab 绑定的功能入口:办公 → 文生图,研发 → 测试。三行统一
+          同一种 ghost 行样式(裸图标 + muted 文字,hover/active 提亮),不再给
+          新对话单独加圈形加号。双栏恒常存在后每个入口只归属一个 tab,不再有
+          「无 tab 概念时都显示」的兜底形态。 */}
+      <div className="flex flex-col gap-0.5 px-3 pb-2">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="w-full justify-start gap-2 h-8 text-xs text-muted-foreground hover:text-foreground"
+          disabled={creatingChat || (activeTab === 'office' && !coworkImageProvisioned)}
+          onClick={activeTab === 'office' ? handleNewOfficeChat : handleNewChat}
+        >
+          <Plus size={14} />
+          {t('chatList.newConversation')}
+        </Button>
+        {/* 测试 — 研发专属:toggle 内联测试工作台;办公 tab 不渲染(切办公时
+            handleTabChange 会顺手关闭工作台,避免覆盖层留在屏上无处可关)。 */}
+        {activeTab === 'dev' && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className={`w-full justify-start gap-2 h-8 text-xs ${
+              testPanelOpen && isChatRoute
+                ? "bg-accent text-accent-foreground font-medium"
+                : "text-muted-foreground hover:text-foreground"
+            }`}
+            onClick={handleOpenTesting}
+          >
+            <MagnifyingGlassCheck size={14} weight={testPanelOpen && isChatRoute ? "fill" : "regular"} />
+            {t('nav.test')}
+          </Button>
+        )}
+        {/* 文生图 — 办公专属 */}
+        {activeTab === 'office' && (
+          <Link href="/image">
+            <Button
+              variant="ghost"
+              size="sm"
+              className={`w-full justify-start gap-2 h-8 text-xs ${
+                pathname.startsWith("/image")
+                  ? "bg-accent text-accent-foreground font-medium"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <Sparkle size={14} weight={pathname.startsWith("/image") ? "fill" : "regular"} />
+              {t('imageStudio.sidebarButton' as TranslationKey)}
+            </Button>
+          </Link>
+        )}
+      </div>
+
+      {/* Feature nav items — navItems is empty today (entries live in Settings);
+          render the block only when some are restored so it leaves no empty gap. */}
       {navItems.length > 0 && (
         <div className="px-3 pb-2">
           <div className="flex flex-col gap-0.5">
@@ -540,25 +769,29 @@ export function ChatListPanel({ open, width, hasUpdate, readyToInstall }: ChatLi
       {/* Section title + add folder button (fixed, not scrolling) */}
       <div className="flex items-center justify-between px-5 pt-2 pb-1.5 shrink-0">
         <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground/60">
-          {t('chatList.threads')}
+          {/* 研发按项目组织会话,标题叫「项目列表」;办公不绑项目文件夹,仍是「对话列表」 */}
+          {activeTab === 'dev' ? t('chatList.projects') : t('chatList.threads')}
         </span>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-5 gap-1 px-1.5 text-[11px] text-muted-foreground/60 hover:text-foreground"
-          onClick={() => openFolderPicker()}
-        >
-          <FolderPlus size={12} />
-          {t('chatList.addProjectFolder')}
-        </Button>
+        {/* 「新建项目」是研发专属(办公不绑项目文件夹,E3) */}
+        {activeTab === 'dev' && (
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-5 gap-1 px-1.5 text-[11px] text-muted-foreground/60 hover:text-foreground"
+            onClick={() => openFolderPicker()}
+          >
+            <FolderPlus size={12} />
+            {t('chatList.addProjectFolder')}
+          </Button>
+        )}
       </div>
 
       {/* Session list grouped by project */}
       <ScrollArea className="flex-1 min-h-0 px-3 [&>[data-slot=scroll-area-viewport]>div]:!block">
         <div className="flex flex-col pb-3">
 
-          {/* Split group section */}
-          {isSplitActive && (
+          {/* Split group section — 分屏是研发工作流,办公 tab 不显示 */}
+          {activeTab === 'dev' && isSplitActive && (
             <SplitGroupSection
               splitSessions={splitSessions}
               activeColumnId={activeColumnId}
@@ -571,6 +804,52 @@ export function ChatListPanel({ open, width, hasUpdate, readyToInstall }: ChatLi
               setActiveColumn={setActiveColumn}
               removeFromSplit={removeFromSplit}
             />
+          )}
+
+          {/* E3: 办公 tab — 沙箱会话平铺(不分组);空态显示介绍卡 */}
+          {activeTab === 'office' && (
+            officeSessions.length === 0 ? (
+              <OfficeEmptyCard
+                imageProvisioned={coworkImageProvisioned}
+                sandboxDisabled={!coworkEnabled}
+                creating={creatingChat}
+                onStart={handleNewOfficeChat}
+              />
+            ) : (
+              <div className="mt-0.5 flex flex-col gap-0.5">
+                {officeSessions.map((session) => {
+                  const isActive = !testPanelOpen && pathname === `/chat/${session.id}`;
+                  return (
+                    <SessionListItem
+                      key={session.id}
+                      session={session}
+                      isActive={isActive}
+                      isHovered={hoveredSession === session.id}
+                      isDeleting={deletingSession === session.id}
+                      isSessionStreaming={activeStreamingSessions.has(session.id) || streamingSessionId === session.id}
+                      needsApproval={pendingApprovalSessionIds.has(session.id) || pendingApprovalSessionId === session.id}
+                      awaitingQuestion={pendingQuestionSessionIds.has(session.id)}
+                      canSplit={false}
+                      isWorkspace={false}
+                      formatRelativeTime={formatRelativeTime}
+                      t={t}
+                      onMouseEnter={() => setHoveredSession(session.id)}
+                      onMouseLeave={() => setHoveredSession(null)}
+                      onDelete={handleDeleteSession}
+                      onRename={handleRenameSession}
+                      onAddToSplit={(s) => addToSplit({
+                        sessionId: s.id,
+                        title: s.title,
+                        workingDirectory: s.working_directory || "",
+                        projectName: s.project_name || "",
+                        mode: s.mode,
+                      })}
+                      onNavigate={() => setTestPanelOpen(false)}
+                    />
+                  );
+                })}
+              </div>
+            )
           )}
 
           {/* Assistant promo card for unconfigured users — hidden per user
@@ -586,7 +865,7 @@ export function ChatListPanel({ open, width, hasUpdate, readyToInstall }: ChatLi
           )}
           */}
 
-          {filteredSessions.length === 0 && (!isSplitActive || splitSessions.length === 0) ? (
+          {activeTab === 'dev' && (devSessions.length === 0 && (!isSplitActive || splitSessions.length === 0) ? (
             <p className="px-2.5 py-3 text-[11px] text-muted-foreground/60">
               {t('chatList.noSessions')}
             </p>
@@ -714,71 +993,32 @@ export function ChatListPanel({ open, width, hasUpdate, readyToInstall }: ChatLi
                 </div>
               );
             })
-          )}
+          ))}
         </div>
       </ScrollArea>
 
-      {/* Feature entries — 测试 + 文生图 stacked above the account row. Both use the
-          neutral ghost style (transparent at rest, accent highlight when active) so they
-          match the rest of the sidebar nav; 测试 sits directly above 文生图. */}
-      <div className="shrink-0 px-3 pt-2 flex flex-col gap-0.5">
-        {/* 测试 — toggles the inline testing panel; active-highlighted while open
-            (the panel has no 收起 button — toggle here to exit). */}
-        <Button
-          variant="ghost"
-          size="sm"
-          className={`w-full justify-start gap-2 h-8 text-xs ${
-            testPanelOpen && isChatRoute
-              ? "bg-accent text-accent-foreground font-medium"
-              : "text-muted-foreground hover:text-foreground"
-          }`}
-          onClick={handleOpenTesting}
-        >
-          <MagnifyingGlassCheck size={14} weight={testPanelOpen && isChatRoute ? "fill" : "regular"} />
-          {t('nav.test')}
-        </Button>
-        {/* 文生图 — text-to-image entry */}
-        <Link href="/image">
-          <Button
-            variant="ghost"
-            size="sm"
-            className={`w-full justify-start gap-2 h-8 text-xs ${
-              pathname.startsWith("/image")
-                ? "bg-accent text-accent-foreground font-medium"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-          >
-            <Sparkle size={14} weight={pathname.startsWith("/image") ? "fill" : "regular"} />
-            {t('imageStudio.sidebarButton' as TranslationKey)}
-          </Button>
-        </Link>
-      </div>
-
-      {/* Bottom: account chip + settings gear (horizontal row) */}
+      {/* Bottom: account chip + settings gear (horizontal row)
+          (测试/文生图 已上移到切换栏下方,按 tab 绑定 — 2026-07 侧边栏改版) */}
       <div className="shrink-0 px-3 py-2 flex items-center gap-1">
         <UserMenu />
-        <Link href="/settings" className="shrink-0">
-          <Button
-            variant="ghost"
-            size="icon"
-            className={`relative h-9 w-9 ${
-              pathname.startsWith("/settings")
-                ? "bg-accent text-accent-foreground"
-                : "text-muted-foreground hover:text-foreground"
-            }`}
-            title={t('nav.settings' as TranslationKey)}
-            aria-label={t('nav.settings' as TranslationKey)}
-          >
-            <Gear size={16} weight={pathname.startsWith("/settings") ? "fill" : "regular"} />
-            {(hasUpdate || readyToInstall) && (
-              <span
-                className={`absolute top-1.5 right-1.5 h-2 w-2 rounded-full ${
-                  readyToInstall ? "bg-primary" : "bg-primary animate-pulse"
-                }`}
-              />
-            )}
-          </Button>
-        </Link>
+        {/* 设置是弹窗不是路由 —— 直接开弹窗,不动底层路由(用户停在当前会话上) */}
+        <Button
+          variant="ghost"
+          size="icon"
+          onClick={() => openSettings()}
+          className="relative h-9 w-9 shrink-0 text-muted-foreground hover:text-foreground"
+          title={t('nav.settings' as TranslationKey)}
+          aria-label={t('nav.settings' as TranslationKey)}
+        >
+          <Gear size={16} />
+          {(hasUpdate || readyToInstall) && (
+            <span
+              className={`absolute top-1.5 right-1.5 h-2 w-2 rounded-full ${
+                readyToInstall ? "bg-primary" : "bg-primary animate-pulse"
+              }`}
+            />
+          )}
+        </Button>
       </div>
 
       {/* Folder Picker Dialog */}

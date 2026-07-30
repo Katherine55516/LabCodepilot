@@ -156,6 +156,13 @@ function buildSnapshot(stream: ActiveStream): SessionStreamSnapshot {
     terminalReason: stream.snapshot.terminalReason,
     rateLimitInfo: stream.snapshot.rateLimitInfo,
     contextUsageSnapshot: stream.snapshot.contextUsageSnapshot,
+    // buildSnapshot is a field WHITELIST — every emit() rebuilds the snapshot
+    // from scratch, so any field patched onto stream.snapshot by a callback
+    // MUST be re-listed here or it is silently dropped before broadcast.
+    // (vmArtifacts was missing at first: the realtime artifacts card never
+    // showed until a remount refetched the list.)
+    vmArtifacts: stream.snapshot.vmArtifacts,
+    vmStatus: stream.snapshot.vmStatus,
   };
 }
 
@@ -594,6 +601,16 @@ async function runStream(stream: ActiveStream, params: StartStreamParams): Promi
       onContextUsage: (snap) => {
         markActive();
         stream.snapshot = { ...stream.snapshot, contextUsageSnapshot: snap };
+        emit(stream, 'snapshot-updated');
+      },
+      onVmArtifacts: (files) => {
+        markActive();
+        stream.snapshot = { ...stream.snapshot, vmArtifacts: files };
+        emit(stream, 'snapshot-updated');
+      },
+      onVmStatus: (status) => {
+        markActive();
+        stream.snapshot = { ...stream.snapshot, vmStatus: status };
         emit(stream, 'snapshot-updated');
       },
       onPermissionRequest: (permData) => {

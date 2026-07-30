@@ -32,8 +32,22 @@ contextBridge.exposeInMainWorld('electronAPI', {
     getPath: () => ipcRenderer.invoke('logs:get-path'),
   },
   feedback: {
-    submit: (payload: { message: string; includeLog: boolean }) =>
-      ipcRenderer.invoke('feedback:submit', payload),
+    submit: (payload: {
+      message: string;
+      includeLog: boolean;
+      images?: { name: string; type: string; data: ArrayBuffer }[];
+    }) => ipcRenderer.invoke('feedback:submit', payload),
+  },
+  // 技能市场（内部）— codeagent-server Skills 商店。token 在主进程,这里只透传参数。
+  skillsStore: {
+    probe: () => ipcRenderer.invoke('skills-store:probe'),
+    list: (params?: { keyword?: string; page?: number; pageSize?: number }) =>
+      ipcRenderer.invoke('skills-store:list', params),
+    detail: (skillId: string, opts?: { withContent?: boolean }) =>
+      ipcRenderer.invoke('skills-store:detail', skillId, opts),
+    install: (skillId: string) => ipcRenderer.invoke('skills-store:install', skillId),
+    update: (skillId: string) => ipcRenderer.invoke('skills-store:update', skillId),
+    uninstall: (skillId: string) => ipcRenderer.invoke('skills-store:uninstall', skillId),
   },
   install: {
     checkPrerequisites: () => ipcRenderer.invoke('install:check-prerequisites'),

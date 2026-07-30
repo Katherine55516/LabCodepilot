@@ -863,10 +863,13 @@ const en = {
   'chatList.openFolder': 'Open Folder',
   'chatList.copyFolderPath': 'Copy Folder Path',
   'chatList.searchSessions': 'Search sessions...',
+  'chatList.collapseSidebar': 'Collapse sidebar',
+  'chatList.expandSidebar': 'Expand sidebar',
   'chatList.noSessions': 'No sessions yet',
   'chatList.importFromCli': 'Import from Claude Code',
   'chatList.addProjectFolder': 'New Project',
   'chatList.threads': 'Threads',
+  'chatList.projects': 'Projects',
   'chatList.showMore': 'Show {count} more',
   'chatList.showLess': 'Show less',
 
@@ -884,7 +887,7 @@ const en = {
   'globalSearch.toolLabel': 'Tool',
 
   // ── Message list ────────────────────────────────────────────
-  'messageList.claudeChat': 'AI Native Lab',
+  'messageList.claudeChat': 'CMWork',
   'messageList.emptyDescription': '',
   'messageList.loadEarlier': 'Load earlier messages',
   'messageList.loading': 'Loading...',
@@ -919,9 +922,9 @@ const en = {
   'streaming.preparing': 'Preparing response...',
   'streaming.generating': 'Generating',
   'streaming.noContentTimeout': '**Error:** No response for {secs}s — the model returned no content. The connection may have stalled or dropped.',
-  'turnNotify.completedBody': 'AI Native Lab is waiting for your input',
+  'turnNotify.completedBody': 'CMWork is waiting for your input',
   'turnNotify.errorBody': 'The response hit an error — click to view',
-  'turnNotify.questionBody': 'AI Native Lab is asking you a question',
+  'turnNotify.questionBody': 'CMWork is asking you a question',
   'streaming.allowForSession': 'Allow for Session',
   'streaming.allowed': 'Allowed',
   'streaming.denied': 'Denied',
@@ -940,11 +943,11 @@ const en = {
 
   // ── Settings: General ───────────────────────────────────────
   'settings.title': 'Settings',
-  'settings.description': 'Manage AI Native Lab - 工作平台 and Claude Code settings',
+  'settings.description': 'Manage CMWork and Claude Code settings',
   'settings.general': 'General',
   'settings.providers': 'Providers',
   'settings.claudeCli': 'Agent',
-  'settings.codepilot': 'AI Native Lab - 工作平台',
+  'settings.codepilot': 'CMWork',
   'settings.version': 'Version {version}',
   'settings.checkForUpdates': 'Check for Updates',
   'settings.checking': 'Checking...',
@@ -1028,7 +1031,7 @@ const en = {
   'cli.enableClaude': 'Enable Claude Code',
   'cli.enableClaudeDesc': 'OFF: Native AI SDK as backend. ON: Claude Code as backend.',
   'cli.agentRuntime': 'Agent Runtime',
-  'cli.agentRuntimeDesc': 'Choose how AI Native Lab - 工作平台 executes agent tasks',
+  'cli.agentRuntimeDesc': 'Choose how CMWork executes agent tasks',
   'cli.runtimeNative': 'Native Runtime (AI SDK)',
   'cli.runtimeSdk': 'Claude Code SDK',
   'cli.cliStatus': 'Status',
@@ -1202,7 +1205,7 @@ const en = {
   'skills.placeholder': 'Write your skill prompt in Markdown...',
   'skills.description': 'Manage reusable prompt patterns and automation skills',
   'skills.mySkills': 'My Skills',
-  'skills.marketplace': 'Marketplace',
+  'skills.marketplace': 'Marketplace (External)',
   'skills.marketplaceSearch': 'Search Skills.sh...',
   'skills.install': 'Install',
   'skills.installed': 'Installed',
@@ -1226,6 +1229,26 @@ const en = {
   'skills.showTranslation': 'Show translation',
   'skills.translateFailed': 'Translation failed, please retry',
   'skills.translateNoProvider': 'No account-delivered model available, please sign in first',
+  // 技能市场（内部）— codeagent-server Skills 商店
+  'skills.internalMarketplace': 'Marketplace (Internal)',
+  'skills.internalSearch': 'Search internal skills...',
+  'skills.internalError': 'Failed to load the internal marketplace',
+  'skills.internalUnavailable': 'The internal marketplace is temporarily unavailable, please retry later',
+  'skills.internalHint': 'Browse the Internal Marketplace',
+  'skills.internalHintDesc': 'Search and install skills published within your organization',
+  'skills.internalLoginRequired': 'Sign in to browse the internal marketplace',
+  'skills.internalLoginAction': 'Sign in',
+  'skills.internalNotActive': 'Your account is inactive or disabled. Please contact an administrator.',
+  'skills.internalRetry': 'Retry',
+  'skills.internalDeprecated': 'Delisted',
+  'skills.internalOwn': 'Mine',
+  'skills.internalUpdatable': 'Update available',
+  'skills.internalUpdate': 'Update',
+  'skills.internalRateLimited': 'Too many requests, retry in {seconds}s',
+  'skills.internalFileManifest': 'Files',
+  'skills.internalInlinePreview': 'Content preview',
+  'skills.internalUpToDate': 'Already up to date',
+  'skills.internalInvalidPackage': 'Invalid skill package (missing SKILL.md)',
 
   // ── MCP ─────────────────────────────────────────────────────
   'mcp.addServer': 'Add Server',
@@ -1352,7 +1375,7 @@ const en = {
   'connection.missingGitDesc': 'Claude Code requires Git for Windows to run properly. Without it, all commands will fail with exit code 1.',
   'connection.installGit': 'Install Git',
   'connection.gitInstalling': 'Installing...',
-  'connection.gitInstallSuccess': 'Git installed successfully! Please restart AI Native Lab - 工作平台.',
+  'connection.gitInstallSuccess': 'Git installed successfully! Please restart CMWork.',
   'connection.gitInstallFailed': 'Auto-install failed. Please download and install manually.',
   'connection.downloadGit': 'Download',
   'connection.recheck': 'Recheck',
@@ -1363,7 +1386,7 @@ const en = {
   'connection.versionCompare': 'v{current} → v{latest}',
   'connection.upgradeButton': 'Upgrade CLI',
   'connection.upgrading': 'Upgrading...',
-  'connection.upgradeSuccess': 'Upgrade successful! Please restart AI Native Lab - 工作平台 to apply the update.',
+  'connection.upgradeSuccess': 'Upgrade successful! Please restart CMWork to apply the update.',
   'connection.upgradeFailed': 'Upgrade failed. Please try manually:',
   'connection.checkUpgrade': 'Check for Updates',
   'connection.manualUpdateHint': 'This install channel does not auto-update. Run the upgrade to check for new versions.',
@@ -1459,15 +1482,15 @@ const en = {
   'update.downloading': 'Downloading',
   'update.restartToUpdate': 'Restart to Update',
   'update.restartNow': 'Restart Now',
-  'update.readyToInstall': 'AI Native Lab - 工作平台 v{version} is ready — restart to update',
+  'update.readyToInstall': 'CMWork v{version} is ready — restart to update',
   'update.installUpdate': 'Download & Install',
   'update.later': 'Later',
-  'update.rosettaWarning': 'AI Native Lab - 工作平台 is running through Rosetta on this Apple Silicon Mac. Install the arm64 build for better responsiveness.',
+  'update.rosettaWarning': 'CMWork is running through Rosetta on this Apple Silicon Mac. Install the arm64 build for better responsiveness.',
   'update.recommendedAsset': 'Recommended download: {asset}',
   'update.getRecommendedBuild': 'Get Recommended Build',
   'update.quitApp': 'Quit App',
   'update.upgradeNow': 'Update Now',
-  'update.mustUpgradeHint': 'This is a required update. Please update to continue using AI Native Lab.',
+  'update.mustUpgradeHint': 'This is a required update. Please update to continue using CMWork.',
 
   // ── Image Generation ──────────────────────────────────────
   'imageGen.toggle': 'Image Generation',
@@ -1648,7 +1671,7 @@ const en = {
 
   // ── Feishu (Bridge) ──────────────────────────────────────
   'feishu.quickCreate': 'Quick Start',
-  'feishu.quickCreateDesc': 'Auto-create a Feishu bot and bind it to AI Native Lab - 工作平台 — no manual permission or event setup needed',
+  'feishu.quickCreateDesc': 'Auto-create a Feishu bot and bind it to CMWork — no manual permission or event setup needed',
   'feishu.quickCreateBtn': 'Create & Bind Feishu App',
   'feishu.waitingAuth': 'Browser opened — please confirm creation in Feishu...',
   'feishu.createSuccess': 'Bound successfully: {botName}',
@@ -2082,6 +2105,49 @@ const en = {
   'permission.fullAccessWarning': 'Full Access mode will automatically approve all permission requests without confirmation. This includes file writes, shell commands, and network requests. Only enable this if you fully trust the current task.',
   'permission.sessionPermission': 'Chat Permission',
 
+  // ── Sandbox (Cowork) ──────────────────────────────────────
+  // sandbox.on/off/tooltip removed with SandboxToggle (E4) — the office/dev
+  // sidebar tabs (workspace.tab.*) are the entry now.
+  'sandbox.artifacts.title': 'Sandbox files',
+  'sandbox.artifacts.downloadAll': 'Download all',
+  'sandbox.artifacts.sleeping': 'Sandbox sleeping',
+  'sandbox.artifacts.sleepingHint': 'List from last known state; downloading wakes the sandbox automatically (first download may take a few seconds)',
+  'sandbox.artifacts.starting': 'Waking the sandbox, please wait…',
+  'sandbox.artifacts.downloadMissing': 'This file no longer exists in the sandbox (it may have been deleted) — the list has been refreshed.',
+  'sandbox.artifacts.collapse': 'Collapse files panel',
+  'sandbox.artifacts.expand': 'Show sandbox files',
+  'sandbox.skills.title': 'Skills used',
+  'sandbox.skills.times': 'Invoked {count} time(s)',
+  'sandbox.provisioning.starting': 'Starting sandbox',
+  'sandbox.provisioning.booting': 'Starting sandbox',
+  'sandbox.provisioning.preparing': 'Preparing sandbox',
+  'sandbox.provisioning.autostart': '· will start automatically when ready',
+  'sandbox.provisioning.failedTitle': 'Sandbox failed to start',
+  'sandbox.provisioning.failedHint': 'Please try again, or check the sandbox environment',
+
+  // ── Cowork settings (E5) ──────────────────────────────────
+  'settings.coworkTitle': 'Work mode (Cowork sandbox)',
+  'settings.coworkDesc': 'Experimental: adds the Work / Code tabs to the sidebar. Work sessions run file operations inside an isolated VM and never touch files on this machine.',
+
+  // ── Workspace tabs (Cowork office mode, E3) ───────────────
+  'workspace.tab.office': 'Work',
+  'workspace.tab.dev': 'Code',
+  'workspace.office.emptyTitle': 'Work sessions',
+  'workspace.office.emptyDesc': 'The AI works inside an isolated sandbox VM: send it files in chat to read and edit, download the results from the artifacts card — it never touches files on this machine.',
+  'workspace.office.start': 'Start a work session',
+  'workspace.office.imageMissing': 'The sandbox environment has not been downloaded on this machine yet. Work mode becomes available once the download completes.',
+  'workspace.office.remoteOnlyPlatform': "Office mode on this device is provided by your organization's remote sandbox and is enabled automatically after sign-in. Contact your administrator if it stays unavailable.",
+  'workspace.office.sandboxDisabled': 'The office sandbox is currently turned off in Settings. Enable it to start office conversations in an isolated environment.',
+  'workspace.office.enableInSettings': 'Enable in Settings',
+  'workspace.office.download': 'Download sandbox environment (~3.2 GB)',
+  'workspace.office.retryDownload': 'Retry download',
+  'workspace.office.downloading': 'Downloading sandbox environment…',
+  'workspace.office.verifying': 'Verifying and installing…',
+  'workspace.office.downloadFailed': 'Download failed',
+  'workspace.office.sendBlocked': 'The sandbox environment is not ready yet — you can send once the download completes.',
+  'workspace.office.upgrade': 'Download sandbox update',
+  'workspace.office.upgradeHint': 'A newer sandbox environment is available. The current one keeps working; upgrading rebuilds the sandbox VM.',
+
   // ── Context Usage ─────────────────────────────────────────
   'context.usage': 'Context Usage',
   'context.model': 'Model',
@@ -2237,7 +2303,7 @@ const en = {
   'mcp.enable': 'Enable',
   'mcp.enabled': 'Enabled',
   'mcp.disabled': 'Disabled',
-  'mcp.managerDesc': 'Toggle controls AI Native Lab - 工作平台 MCP injection.',
+  'mcp.managerDesc': 'Toggle controls CMWork MCP injection.',
 
   // ── SDK Capabilities: Thinking ────────────────────────────
   'settings.thinkingMode': 'Thinking Mode',
@@ -2279,7 +2345,7 @@ const en = {
   'cliTools.path': 'Path',
   'cliTools.brewNotInstalled': 'Homebrew not detected',
   'cliTools.brewInstallGuide': 'Most recommended tools require Homebrew. Run this command in your terminal to install it:',
-  'cliTools.viewDocs': 'View AI Native Lab - 工作平台 documentation',
+  'cliTools.viewDocs': 'View CMWork documentation',
   'cliTools.searchPlaceholder': 'Search CLI tools...',
   'cliTools.noToolsDetected': 'No installed CLI tools detected',
   'cliTools.goInstall': 'Go install CLI tools',
@@ -2422,7 +2488,7 @@ const en = {
   'terminal.exited': 'Process exited',
 
   // ── Setup Center ──────────────────────────────────────────────
-  'setup.title': 'Welcome to AI Native Lab - 工作平台',
+  'setup.title': 'Welcome to CMWork',
   'setup.subtitle': 'Configure your Agent engine, providers, and workspace.',
   'setup.skipAndEnter': 'Skip and Enter',
   'setup.progress': '{completed}/3 completed',
@@ -2432,12 +2498,12 @@ const en = {
 
   // Setup: Welcome card
   'setup.welcome.title': 'Welcome',
-  'setup.welcome.description': 'AI Native Lab - 工作平台 is a multi-model AI agent desktop client. Connect any AI provider, extend with MCP & skills, and let your assistant learn your workflow.',
+  'setup.welcome.description': 'CMWork is a multi-model AI agent desktop client. Connect any AI provider, extend with MCP & skills, and let your assistant learn your workflow.',
 
   // Setup: Claude Code card
   'setup.claude.title': 'Claude Code',
   'setup.claude.description': 'Claude Code is bundled with the application. No separate installation needed.',
-  'setup.claude.bundled': 'Bundled with AI Native Lab - 工作平台',
+  'setup.claude.bundled': 'Bundled with CMWork',
   'setup.claude.detected': 'Claude Code detected',
   'setup.claude.notFound': 'Claude Code not found',
   'setup.claude.conflict': 'Multiple installations detected — this may cause version conflicts',
@@ -2454,7 +2520,7 @@ const en = {
 
   // Setup: Provider card
   'setup.provider.title': 'API Provider',
-  'setup.provider.description': 'Configure how AI Native Lab - 工作平台 connects to AI models.',
+  'setup.provider.description': 'Configure how CMWork connects to AI models.',
   'setup.provider.envDetected': 'Environment variables detected — use Claude Code env as your provider.',
   'setup.provider.useEnv': 'Use Claude Code Env',
   'setup.provider.noProvider': 'No provider configured. Select a preset to get started.',
@@ -2609,7 +2675,7 @@ const en = {
   'auth.noManagedConfigs': 'No managed configurations',
   'auth.managedTag': 'Managed',
   'auth.managedReadOnly': 'Pushed by your account; not editable here',
-  'auth.accountCardTitle': 'Sign in to AI Native Lab - 工作平台 account',
+  'auth.accountCardTitle': 'Sign in to CMWork account',
   'auth.accountCardSubtitle': 'Get pre-configured model providers without entering API keys',
   'auth.accountCardPlan': 'Plan: {plan}',
   'auth.email': 'Email',
@@ -2626,7 +2692,7 @@ const en = {
 
   // ─── Built-in plugins panel (GSD) ───
   'settings.plugins.title': 'Plugins',
-  'settings.plugins.subtitle': 'Built-in plugins shipped with AI Native Lab - 工作平台. Toggle, re-sync, or uninstall here.',
+  'settings.plugins.subtitle': 'Built-in plugins shipped with CMWork. Toggle, re-sync, or uninstall here.',
   'settings.plugins.electronOnly': 'This panel requires the Electron desktop app.',
 
   'settings.gsd.description': 'Get-Shit-Done meta-prompting system by TÂCHES — adds /gsd-* slash commands and 33 specialized subagents. Vendored from gsd-build/get-shit-done (MIT).',
@@ -2781,9 +2847,26 @@ const en = {
   'feedback.desktopOnly': 'Feedback is only available in the desktop app.',
   'feedback.errorNotLoggedIn': 'Session expired — please sign in again.',
   'feedback.errorRateLimited': 'Too many submissions — please try again later.',
+  'feedback.errorDailyLimit': "You've reached today's feedback limit. Please try again tomorrow.",
+  'feedback.errorInvalidImage': 'Unsupported screenshot format or too many images — please check and retry.',
+  'feedback.images': 'Screenshots',
+  'feedback.imagesHint': 'Paste (Ctrl/⌘+V) or click + to add — up to {max}, {size} each',
+  'feedback.imageAdd': 'Add screenshot',
+  'feedback.imageRemove': 'Remove this screenshot',
+  'feedback.imageBadType': 'Images only (PNG / JPEG / GIF / WebP).',
+  'feedback.imageTooLarge': 'Each image must be under 1MB — oversized ones were skipped.',
+  'feedback.imageTooMany': 'Up to {max} screenshots — the extras were skipped.',
   'feedback.errorTooLarge': 'Attachment too large — retry without the log.',
   'feedback.errorNetwork': 'Network error — check your connection and retry.',
   'feedback.errorGeneric': 'Submission failed — please try again later.',
+
+  // ── Help (帮助) ──
+  'settings.help': 'Help',
+  'help.title': 'Help',
+  'help.description': 'Documentation and guides for using the app.',
+  'help.manual': 'User Manual',
+  'help.manualHint': 'Opens the online manual in your default browser.',
+  'help.openManual': 'Open Manual',
 
   // ── Test Accounts (测试账号) ──
   'settings.testAccounts': 'Test Accounts',

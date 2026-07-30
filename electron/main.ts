@@ -15,6 +15,7 @@ import {
   getConfigs,
   fetchUsage,
   fetchImageConfig,
+  fetchCoworkConfig,
   anlLogout,
 } from './auth/client';
 import {
@@ -40,10 +41,21 @@ import {
   purgeManagedProvidersOnServer,
   syncImageConfigToServer,
   purgeImageConfigOnServer,
+  syncCoworkConfigToServer,
+  purgeCoworkConfigOnServer,
+  syncCurrentUserToServer,
 } from './auth/broker';
 import { clearAuthState, loadToken } from './auth/storage';
 import { getBackendBase } from './auth/config';
-import { normalizeFeedbackMessage, buildFeedbackForm, postFeedback } from './feedback-core';
+import {
+  normalizeFeedbackMessage,
+  buildFeedbackForm,
+  postFeedback,
+  isAllowedFeedbackImage,
+  FEEDBACK_MAX_IMAGES,
+  FEEDBACK_IMAGE_MAX_BYTES,
+  type FeedbackImageInput,
+} from './feedback-core';
 import { initMasterKey, getMasterKeyHex, logSafeStorageStatus } from './auth/secret-key';
 import { logInfo, logWarn, logError } from './auth/log';
 import { HttpError, AuthExpiredError, NetworkError, type MeInfo, type ModelConfig } from './auth/types';
@@ -70,6 +82,9 @@ import {
   install as installGsdBundle,
   registerGsdIpc,
 } from './gsd-installer';
+
+// 技能市场（内部）— codeagent-server Skills 商店 BFF 的主进程代理。
+import { registerSkillsStoreIpc } from './skills-store';
 
 // Vendor-bundled AI_LabTest plugin — synced to ~/.claude/plugins/external_plugins/
 // on first launch (default disabled) and version drift. See electron/ailab-installer.ts.
@@ -408,11 +423,11 @@ function createTray(): void {
   const iconPath = getIconPath();
   const trayIcon = nativeImage.createFromPath(iconPath).resize({ width: 16, height: 16 });
   tray = new Tray(trayIcon);
-  tray.setToolTip('AI Native Lab - 工作平台 — Bridge Active');
+  tray.setToolTip('CMWork — Bridge Active');
 
   const contextMenu = Menu.buildFromTemplate([
     {
-      label: 'Open AI Native Lab - 工作平台',
+      label: 'Open CMWork',
       click: () => {
         if (BrowserWindow.getAllWindows().length === 0) {
           createWindow(`http://127.0.0.1:${serverPort || 3000}`);
@@ -572,7 +587,7 @@ function checkNativeModuleABI(): void {
     if (msg.includes('NODE_MODULE_VERSION')) {
       console.error(`[ABI check] ABI mismatch detected: ${msg}`);
       dialog.showErrorBox(
-        'AI Native Lab - 工作平台 - Native Module ABI Mismatch',
+        'CMWork - Native Module ABI Mismatch',
         `The bundled better-sqlite3 native module was compiled for a different Node.js version.\n\n` +
         `${msg}\n\n` +
         `This usually means the build process did not correctly recompile native modules for Electron.\n` +
@@ -1090,6 +1105,24 @@ async function refreshImageConfig(): Promise<void> {
 }
 
 /**
+ * Fetch the per-user cowork remote-sandbox config (server url + HMAC token,
+ * R5-5 账号下发) and push it to the embedded server (writes cowork_remote_url /
+ * cowork_remote_token(sealed)/ cowork_backend settings). Best-effort,同
+ * refreshImageConfig。404 = 未开通/后端未上线 → 跳过且**不清**既有配置(保
+ * dev 手写三键的联调后门;真正清空只发生在登出/401 的 purge)。
+ */
+async function refreshCoworkConfig(): Promise<void> {
+  try {
+    const cfg = await fetchCoworkConfig();
+    if (!cfg) return; // 404:未开通/未上线 — 不动现状
+    await syncCoworkConfigToServer(cfg);
+    logInfo('cowork config synced: url=', cfg.serverUrl, 'hasToken=', !!cfg.token);
+  } catch (err) {
+    logWarn('failed to refresh cowork config:', (err as Error).message);
+  }
+}
+
+/**
  * Initial boot pass — runs once after the embedded server is ready.
  *
  * Behaviour matrix (also documented in docs/exec-plans/active/login-system.md):
@@ -1160,14 +1193,19 @@ async function bootAccountState(): Promise<void> {
     } catch (e) {
       logWarn('getConfigs failed at boot:', (e as Error).message);
     }
-    // 文生图凭证下发：与 configs 并列，独立 try（失败不影响对话配置）。
+    // 办公会话账号隔离的事实源：必须先于 refreshCoworkConfig 推下去，否则本次启动
+    // 期间新建的办公会话会带着空归属落库（空归属按存量处理 = 对所有账号隐藏）。
+    await syncCurrentUserToServer(String(currentMe?.id || ''));
+    // 文生图凭证/办公沙箱配置下发：与 configs 并列，独立 try（失败不影响对话配置）。
     await refreshImageConfig();
+    await refreshCoworkConfig();
 
     if (!isOfflineMode) {
       startBackgroundPolling({
         onConfigsChanged: (configs) => {
           void syncManagedFromConfigs(configs);
           void refreshImageConfig();
+          void refreshCoworkConfig();
           broadcastAuthChange();
         },
       });
@@ -1201,11 +1239,15 @@ async function postLoginSequence(): Promise<void> {
   } catch (e) {
     logWarn('postLogin getConfigs failed:', (e as Error).message);
   }
+  // 先于 cowork 配置：新账号登录后建的办公会话必须立刻带上正确归属（见 bootAccountState）
+  await syncCurrentUserToServer(String(currentMe?.id || ''));
   await refreshImageConfig();
+  await refreshCoworkConfig();
   startBackgroundPolling({
     onConfigsChanged: (configs) => {
       void syncManagedFromConfigs(configs);
       void refreshImageConfig();
+      void refreshCoworkConfig();
       broadcastAuthChange();
     },
   });
@@ -1229,6 +1271,14 @@ async function postLogoutSequence(): Promise<void> {
   } catch (e) {
     logWarn('postLogout image-config purge failed:', (e as Error).message);
   }
+  try {
+    await purgeCoworkConfigOnServer();
+  } catch (e) {
+    logWarn('postLogout cowork-config purge failed:', (e as Error).message);
+  }
+  // 清空归属标记：登出后办公会话对任何人都不可见,防止下一个登录的账号读到上一个
+  // 账号的办公对话(研发会话不受影响 —— 它绑定本地项目,不属于账号体系)。
+  await syncCurrentUserToServer('');
   currentMe = null;
   isOfflineMode = false;
   managedConfigCount = 0;
@@ -1312,7 +1362,7 @@ const LOADING_HTML = `data:text/html;charset=utf-8,${encodeURIComponent(`<!DOCTY
 <body>
 <div class="container">
   <div class="spinner"></div>
-  <p>Starting AI Native Lab - 工作平台...</p>
+  <p>Starting CMWork...</p>
 </div>
 </body>
 </html>`)}`;
@@ -1486,6 +1536,11 @@ app.whenReady().then(async () => {
     const iconPath = getIconPath();
     app.dock.setIcon(nativeImage.createFromPath(iconPath));
   }
+
+  // --- 技能市场（内部）：codeagent-server Skills 商店 BFF 的主进程代理 ---
+  // 登录 token 只在主进程,renderer 经 IPC 拿结构化结果。
+  // 方案见 docs/exec-plans/active/skills-store-internal.md。
+  registerSkillsStoreIpc(ipcMain);
 
   // --- Vendor-bundled GSD: sync (fire-and-forget, never blocks startup) ---
   registerGsdIpc(ipcMain);
@@ -2546,8 +2601,9 @@ app.whenReady().then(async () => {
     try {
       const configs = await getConfigs({ force: true });
       await syncManagedFromConfigs(configs);
-      // 手动「刷新配置」按钮同时刷新文生图凭证；失败不阻断对话配置刷新结果。
+      // 手动「刷新配置」按钮同时刷新文生图凭证与办公沙箱配置；失败不阻断对话配置刷新结果。
       await refreshImageConfig();
+      await refreshCoworkConfig();
       broadcastAuthChange();
       return { ok: true as const, count: configs.length };
     } catch (e) {
@@ -2569,6 +2625,11 @@ app.whenReady().then(async () => {
       try {
         await purgeImageConfigOnServer();
       } catch { /* ignore */ }
+      try {
+        await purgeCoworkConfigOnServer();
+      } catch { /* ignore */ }
+      // token 失效等同登出:清归属,办公会话立即不可见(见 postLogoutSequence)
+      await syncCurrentUserToServer('');
       managedConfigCount = 0;
       broadcastAuthChange();
     } else {
@@ -2598,7 +2659,10 @@ app.whenReady().then(async () => {
   // main.log（写入时已经过 scrubSecrets 脱敏，≤5MB），不含轮转旧档。
   // 身份不上送 — 服务端以 JWT claims 为准。契约见
   // docs/exec-plans/active/bug-report-feedback.md。
-  ipcMain.handle('feedback:submit', async (_event, payload: { message?: unknown; includeLog?: unknown }) => {
+  ipcMain.handle('feedback:submit', async (
+    _event,
+    payload: { message?: unknown; includeLog?: unknown; images?: unknown },
+  ) => {
     const message = normalizeFeedbackMessage(payload?.message);
     if (!message) return { ok: false as const, error: 'invalid-message' as const };
     const token = loadToken();
@@ -2613,6 +2677,21 @@ app.whenReady().then(async () => {
       }
     }
 
+    // 截图：renderer 已按张数/大小/类型筛过一遍，这里再收一次口 —— IPC 是
+    // 可被绕过的边界，主进程不能把 renderer 的入参当已验证数据。真正的终审
+    // 仍在服务端（魔术字节嗅探），这里只是不把明显不合规的东西发出去。
+    const rawImages = Array.isArray(payload?.images) ? payload.images : [];
+    const images: FeedbackImageInput[] = [];
+    for (const raw of rawImages.slice(0, FEEDBACK_MAX_IMAGES)) {
+      const item = raw as Partial<FeedbackImageInput> | null;
+      if (!item || typeof item.type !== 'string' || !isAllowedFeedbackImage(item.type)) continue;
+      const buf = item.data;
+      const bytes =
+        buf instanceof Uint8Array ? buf : buf instanceof ArrayBuffer ? new Uint8Array(buf) : null;
+      if (!bytes || bytes.byteLength === 0 || bytes.byteLength > FEEDBACK_IMAGE_MAX_BYTES) continue;
+      images.push({ name: typeof item.name === 'string' ? item.name : 'screenshot', type: item.type, data: bytes });
+    }
+
     const form = buildFeedbackForm({
       message,
       env: {
@@ -2621,10 +2700,15 @@ app.whenReady().then(async () => {
         osVersion: process.getSystemVersion(),
       },
       logBytes,
+      images,
     });
     const result = await postFeedback({ baseUrl: getBackendBase(), token, form });
     if (result.ok) {
-      logInfo('[feedback] submitted', result.id ?? '', logBytes ? `log=${logBytes.byteLength}B` : 'no-log');
+      logInfo(
+        '[feedback] submitted', result.id ?? '',
+        logBytes ? `log=${logBytes.byteLength}B` : 'no-log',
+        `images=${images.length}`,
+      );
     } else {
       logWarn('[feedback] submit failed:', result.error, result.status ?? '');
     }
@@ -2724,7 +2808,7 @@ app.whenReady().then(async () => {
   } catch (err) {
     console.error('Failed to start:', err);
     dialog.showErrorBox(
-      'AI Native Lab - 工作平台 - Failed to Start',
+      'CMWork - Failed to Start',
       `The internal server could not start.\n\n${err instanceof Error ? err.message : String(err)}\n\nPlease try restarting the application.`
     );
     app.quit();

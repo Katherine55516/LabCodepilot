@@ -19,6 +19,6 @@ export async function POST() {
     deprecated: true,
     message:
       'Claude Code is now bundled inside the application. To get a newer ' +
-      'version, update AI Native Lab itself via the in-app updater.',
+      'version, update CMWork itself via the in-app updater.',
   });
 }

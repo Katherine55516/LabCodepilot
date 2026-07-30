@@ -1,5 +1,5 @@
 import { NextRequest } from 'next/server';
-import { deleteSession, getSession, updateSessionWorkingDirectory, updateSessionTitle, updateSessionMode, updateSessionModel, updateSessionProviderId, clearSessionMessages, updateSdkSessionId, updateSessionPermissionProfile, updateSessionEffort } from '@/lib/db';
+import { deleteSession, getSession, isSessionVisibleToCurrentUser, updateSessionWorkingDirectory, updateSessionTitle, updateSessionMode, updateSessionModel, updateSessionProviderId, clearSessionMessages, updateSdkSessionId, updateSessionPermissionProfile, updateSessionEffort } from '@/lib/db';
 import { autoApprovePendingForSession } from '@/lib/bridge/permission-broker';
 
 export async function GET(
@@ -9,7 +9,9 @@ export async function GET(
   try {
     const { id } = await params;
     const session = getSession(id);
-    if (!session) {
+    // 账号隔离:别人的办公会话一律按"不存在"处理(而非 403),与 cowork-server
+    // 跨 uid 访问返回 404 的防枚举语义保持一致 —— 知道 id 也问不出这个会话存在。
+    if (!isSessionVisibleToCurrentUser(session)) {
       return Response.json({ error: 'Session not found' }, { status: 404 });
     }
     return Response.json({ session });
@@ -26,7 +28,9 @@ export async function PATCH(
   try {
     const { id } = await params;
     const session = getSession(id);
-    if (!session) {
+    // 账号隔离:别人的办公会话一律按"不存在"处理(而非 403),与 cowork-server
+    // 跨 uid 访问返回 404 的防枚举语义保持一致 —— 知道 id 也问不出这个会话存在。
+    if (!isSessionVisibleToCurrentUser(session)) {
       return Response.json({ error: 'Session not found' }, { status: 404 });
     }
 
@@ -90,6 +94,15 @@ export async function PATCH(
         }
       }
     }
+    if (body.sandbox_enabled !== undefined) {
+      // E5 (cowork): 模式在创建期定死 —— 侧边栏「办公/研发」双栏是唯一入口,
+      // 旧 SandboxToggle 已移除。已建会话翻转 sandbox_enabled 会造成列表归类、
+      // 宿主暂存目录与 VM 工作区三方错位,一律拒绝。
+      return Response.json(
+        { error: 'sandbox_enabled is immutable after creation — set it when creating the session', code: 'SANDBOX_MODE_IMMUTABLE' },
+        { status: 400 },
+      );
+    }
     if (body.clear_messages) {
       clearSessionMessages(id);
     }
@@ -109,8 +122,41 @@ export async function DELETE(
   try {
     const { id } = await params;
     const session = getSession(id);
-    if (!session) {
+    // 账号隔离:别人的办公会话一律按"不存在"处理(而非 403),与 cowork-server
+    // 跨 uid 访问返回 404 的防枚举语义保持一致 —— 知道 id 也问不出这个会话存在。
+    if (!isSessionVisibleToCurrentUser(session)) {
       return Response.json({ error: 'Session not found' }, { status: 404 });
+    }
+
+    // Cowork: best-effort clean the VM session directory before dropping the
+    // row. Only for sandbox sessions and never blocks/deny the delete.
+    if (session.sandbox_enabled) {
+      try {
+        const { removeSessionDir } = await import('@/lib/cowork-transfer');
+        await removeSessionDir(id);
+      } catch (err) {
+        console.warn('[session-api] cowork removeSessionDir failed (non-fatal):', err);
+      }
+      // E2: also drop the host staging dir (~/.codepilot/cowork/<id>). The
+      // path is derived ONLY from the session id — never from
+      // working_directory — so legacy sandbox sessions bound to a real
+      // project folder are untouched (their staging path doesn't exist →
+      // rmSync force is a no-op).
+      try {
+        const { removeOfficeStagingDir } = await import('@/lib/cowork-staging');
+        removeOfficeStagingDir(id);
+      } catch (err) {
+        console.warn('[session-api] cowork removeOfficeStagingDir failed (non-fatal):', err);
+      }
+      // P3-B/R3: 废止会话的一次性凭证 token(沙箱若曾被攻陷拿到 token,从此失效)。
+      // 走当前 backend:vfkit=宿主代理 revokeSession;remote=通知 cowork-server 废止
+      // (服务端在 DELETE session 时也会联动废止,这里是显式双保险)。
+      try {
+        const { getCoworkBackend } = await import('@/lib/cowork-backend');
+        (await getCoworkBackend()).revokeCredentials(id);
+      } catch (err) {
+        console.warn('[session-api] cowork revokeCredentials failed (non-fatal):', err);
+      }
     }
 
     deleteSession(id);

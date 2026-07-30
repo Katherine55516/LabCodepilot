@@ -10,7 +10,7 @@ src/
 │   ├── api/        #   52 个 REST 端点（chat, media, files, plugins, settings …）
 │   ├── chat/       #   聊天页（主界面）
 │   ├── plugins/    #   插件 / MCP 管理
-│   ├── settings/   #   应用设置
+│   ├── settings/   #   /settings 兼容层（设置本体是全局弹窗 SettingsDialog，见下）
 │   ├── bridge/     #   IM Bridge 设置
 │   ├── gallery/    #   图片画廊
 │   └── …
@@ -20,7 +20,8 @@ src/
 │   ├── ai-elements/#   AI 响应渲染 (artifact, reasoning, tool, task …)
 │   ├── layout/     #   布局 (AppShell, Header, NavRail, ChatListPanel …)
 │   ├── plugins/    #   插件管理 UI
-│   ├── settings/   #   设置面板
+│   ├── settings/   #   设置面板（SettingsDialog = 挂在 AppShell 的全局弹窗，
+│   │               #   由 'open-settings' 事件唤起；/settings 路由只做深链转发）
 │   ├── bridge/     #   Bridge 设置 UI
 │   ├── skills/     #   技能市场
 │   ├── project/    #   项目文件树

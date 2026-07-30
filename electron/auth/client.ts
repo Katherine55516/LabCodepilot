@@ -25,12 +25,15 @@ import {
   loadSelectedConfigId,
   saveImageConfig,
   loadImageConfig,
+  saveCoworkConfig,
+  loadCoworkConfig,
 } from './storage';
 import {
   AuthExpiredError,
   HttpError,
   NetworkError,
   type AuthProbeResult,
+  type CoworkRemoteConfig,
   type ImageProviderConfig,
   type MeInfo,
   type ModelConfig,
@@ -98,7 +101,7 @@ export async function fetchMe(): Promise<MeInfo> {
 export async function registerDevice(): Promise<void> {
   const payload = {
     device_id: getOrCreateDeviceId(),
-    device_name: `${os.hostname()} (AI Native Lab - 工作平台)`,
+    device_name: `${os.hostname()} (CMWork)`,
     os: process.platform,
     os_version: os.release(),
     app_version: app.getVersion(),
@@ -388,6 +391,72 @@ export async function fetchImageConfig(): Promise<ImageProviderConfig> {
       const cached = loadImageConfig();
       if (cached) {
         logWarn('image config fetch failed (network) — falling back to local cache');
+        return cached;
+      }
+    }
+    throw e;
+  }
+}
+
+// ── 10. /api/v1/cowork/config(办公沙箱配置下发,R5-5)──────────────────────────
+
+/** 服务端原始下发体:容忍 camelCase 与 snake_case 两种字段命名。 */
+interface RawCoworkConfig {
+  serverUrl?: string; server_url?: string;
+  token?: string;
+}
+
+/** 归一化 cowork 配置:encrypted 变体解密 token,失败 fail-safe 置空。 */
+function normalizeCoworkConfig(raw: RawCoworkConfig, encrypted: boolean): CoworkRemoteConfig {
+  let token = raw.token || '';
+  if (encrypted && token) {
+    try {
+      token = decryptAuthToken(token);
+    } catch (e) {
+      logWarn('[cowork config] decrypt token failed — treating as none:', (e as Error).message);
+      token = '';
+    }
+  }
+  return { serverUrl: raw.serverUrl || raw.server_url || '', token };
+}
+
+/**
+ * 拉取当前用户的 cowork 远程沙箱配置(server 地址 + per-user HMAC token,账号后端用
+ * 与 cowork-server 相同的 COWORK_AUTH_SECRET 按 uid 签发)。镜像 fetchImageConfig:
+ *   - 优先 `/api/v1/cowork/config/encrypted`(token 为密文);503/404 回退明文端点;
+ *   - 成功 → 加密缓存落盘;网络失败 → 降级用缓存;
+ *   - **明文端点也 404 = 该账号未开通/后端未上线 → 返回 null**,调用方跳过且
+ *     不得清既有配置(保 dev 手写三键的联调后门不被登录轮询打扰)。
+ * token 仅主进程解出,经 broker 推嵌入式服务密封落库,不以明文下行 renderer。
+ */
+export async function fetchCoworkConfig(): Promise<CoworkRemoteConfig | null> {
+  try {
+    let r: ApiResponse<RawCoworkConfig>;
+    let encrypted = true;
+    try {
+      r = await apiRequest<RawCoworkConfig>('/api/v1/cowork/config/encrypted');
+    } catch (e) {
+      if (e instanceof HttpError && (e.status === 503 || e.status === 404)) {
+        encrypted = false;
+        r = await apiRequest<RawCoworkConfig>('/api/v1/cowork/config');
+      } else {
+        throw e;
+      }
+    }
+    if (!r.json) throw new Error('/api/v1/cowork/config returned empty body');
+    const cfg = normalizeCoworkConfig(r.json, encrypted);
+    saveCoworkConfig(cfg);
+    logInfo('cowork config fetched & cached: url=', cfg.serverUrl, 'hasToken=', !!cfg.token);
+    return cfg;
+  } catch (e) {
+    if (e instanceof HttpError && e.status === 404) {
+      logInfo('cowork config not provisioned for this account (404) — skipping');
+      return null;
+    }
+    if (e instanceof NetworkError) {
+      const cached = loadCoworkConfig();
+      if (cached) {
+        logWarn('cowork config fetch failed (network) — falling back to local cache');
         return cached;
       }
     }

@@ -95,7 +95,7 @@ async function runUpload(reason: string): Promise<void> {
     if (days.length > 0) {
       await uploadTestUsage({
         device_id: getOrCreateDeviceId(),
-        device_name: `${os.hostname()} (AI Native Lab - 工作平台)`,
+        device_name: `${os.hostname()} (CMWork)`,
         app_version: app.getVersion(),
         tz: TZ,
         days,

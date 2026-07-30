@@ -179,6 +179,8 @@ interface MessageListProps {
   isAssistantProject?: boolean;
   /** Assistant name for avatar display */
   assistantName?: string;
+  /** Cowork sandbox session — suppresses per-message DiffSummary cards. */
+  sandboxEnabled?: boolean;
 }
 
 export function MessageList({
@@ -200,6 +202,7 @@ export function MessageList({
   startedAt,
   isAssistantProject,
   assistantName,
+  sandboxEnabled,
 }: MessageListProps) {
   const { t } = useTranslation();
   // Scroll anchor: preserve position when older messages are prepended
@@ -307,8 +310,9 @@ export function MessageList({
 
           return (
             <div key={message.id} id={`msg-${message.id}`} className="group">
-              <MessageItem message={message} sessionId={sessionId} isAssistantProject={isAssistantProject} assistantName={assistantName} />
-              {rewindSdkUuid && sessionId && !isStreaming && (
+              <MessageItem message={message} sessionId={sessionId} isAssistantProject={isAssistantProject} assistantName={assistantName} sandboxEnabled={sandboxEnabled} />
+              {/* E4 (cowork): 回滚是研发工作流(跨 VM 恢复语义未验证),办公隐藏 */}
+              {rewindSdkUuid && sessionId && !isStreaming && !sandboxEnabled && (
                 <RewindButton sessionId={sessionId} userMessageId={rewindSdkUuid} />
               )}
             </div>

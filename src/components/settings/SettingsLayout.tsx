@@ -1,7 +1,6 @@
 "use client";
 
-import { useState, useCallback, useSyncExternalStore } from "react";
-import { type Icon, Gear, Code, UserCircle, Plug, ChartBar, Lightning, Terminal, Sparkle, WifiHigh, ListChecks, ChatCircleText } from "@/components/ui/icon";
+import { type Icon, Gear, Code, UserCircle, Plug, ChartBar, Lightning, Terminal, Sparkle, WifiHigh, ListChecks, ChatCircleText, Question } from "@/components/ui/icon";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { GeneralSection } from "./GeneralSection";
@@ -11,6 +10,7 @@ import { UsageStatsSection } from "./UsageStatsSection";
 import { AssistantWorkspaceSection } from "./AssistantWorkspaceSection";
 import { TestAccountsSection } from "./TestAccountsSection";
 import { FeedbackSection } from "./FeedbackSection";
+import { HelpSection } from "./HelpSection";
 import { AccountSection } from "@/components/account/AccountSection";
 // Skills / MCP / CLI Tools managers — embedded as settings sub-sections so
 // users have a single panel for everything customizable. The /skills, /mcp,
@@ -27,7 +27,7 @@ import { BridgeLayout } from "@/components/bridge/BridgeLayout";
 import { useTranslation } from "@/hooks/useTranslation";
 import type { TranslationKey } from "@/i18n";
 
-type Section = "general" | "account" | "providers" | "cli" | "usage" | "assistant" | "skills" | "mcp" | "cli-tools" | "bridge" | "plugins" | "test-accounts" | "feedback";
+export type Section = "general" | "account" | "providers" | "cli" | "usage" | "assistant" | "skills" | "mcp" | "cli-tools" | "bridge" | "plugins" | "test-accounts" | "feedback" | "help";
 
 interface SidebarItem {
   id: Section;
@@ -70,31 +70,37 @@ const sidebarItems: SidebarItem[] = [
   // 问题反馈 — 登录态一键上报到账号后端（admin 管理页可见）。
   // See docs/exec-plans/active/bug-report-feedback.md.
   { id: "feedback", label: "Feedback", icon: ChatCircleText },
+  // 帮助 — 在线用户手册入口，点击后由系统默认浏览器打开。放在最后一项。
+  { id: "help", label: "Help", icon: Question },
 ];
 
-function getSectionFromHash(): Section {
-  if (typeof window === "undefined") return "general";
-  const hash = window.location.hash.replace("#", "");
-  if (sidebarItems.some((item) => item.id === hash)) {
-    return hash as Section;
-  }
-  return "general";
+/** 把任意字符串归一成合法 Section —— 非法值一律回落 general。深链的 hash
+ *  可能指向已隐藏的 tab(providers / usage / assistant),这些 Section 分支仍在
+ *  渲染,所以此处按全集校验而非 sidebarItems。 */
+const ALL_SECTIONS: Section[] = [
+  "general", "account", "providers", "cli", "usage", "assistant", "skills",
+  "mcp", "cli-tools", "bridge", "plugins", "test-accounts", "feedback", "help",
+];
+
+export function normalizeSection(raw: string | null | undefined): Section {
+  return ALL_SECTIONS.includes(raw as Section) ? (raw as Section) : "general";
 }
 
-function subscribeToHash(callback: () => void) {
-  window.addEventListener("hashchange", callback);
-  return () => window.removeEventListener("hashchange", callback);
+export interface SettingsLayoutProps {
+  /**
+   * 当前分类 —— 受控,由 SettingsDialog 持有。
+   *
+   * 以前这里自己读写 URL hash(`/settings#cli`),因为设置是一整页。现在设置是浮在
+   * 应用之上的弹窗,底层路由必须保持不动:否则点一下侧栏分类就会把地址栏改成
+   * /settings,顶掉用户正待着的会话。
+   */
+  section: Section;
+  onSectionChange: (section: Section) => void;
+  /** 顶部标题栏。弹窗需要它是 DialogTitle 才满足 Radix 的 a11y 要求,故由外部传入。 */
+  titleSlot?: React.ReactNode;
 }
 
-export function SettingsLayout() {
-  // useSyncExternalStore subscribes to hash changes without triggering
-  // the react-hooks/set-state-in-effect lint rule.
-  const hashSection = useSyncExternalStore(subscribeToHash, getSectionFromHash, () => "general" as Section);
-
-  // Local state allows immediate UI update on click before the hash updates.
-  const [overrideSection, setOverrideSection] = useState<Section | null>(null);
-  const activeSection = overrideSection ?? hashSection;
-
+export function SettingsLayout({ section: activeSection, onSectionChange, titleSlot }: SettingsLayoutProps) {
   const { t } = useTranslation();
 
   const settingsLabelKeys: Record<string, TranslationKey> = {
@@ -115,35 +121,25 @@ export function SettingsLayout() {
     'Plugins': 'settings.plugins.title',
     'Test Accounts': 'settings.testAccounts',
     'Feedback': 'settings.feedback',
+    'Help': 'settings.help',
   };
 
-  const handleSectionChange = useCallback((section: Section) => {
-    setOverrideSection(section);
-    window.history.replaceState(null, "", `/settings#${section}`);
-    // Clear override so subsequent hash changes take effect
-    queueMicrotask(() => setOverrideSection(null));
-  }, []);
-
   return (
-    <div className="flex h-full flex-col">
-      <div className="border-b border-border/50 px-6 pt-4 pb-4">
-        <h1 className="text-xl font-semibold">{t('settings.title')}</h1>
-        {/* Subtitle hidden — restore by uncommenting below */}
-        {/* <p className="text-sm text-muted-foreground">
-          {t('settings.description')}
-        </p> */}
-      </div>
+    <div className="flex h-full min-h-0 flex-col">
+      {titleSlot}
 
-      <div className="flex min-h-0 flex-1">
-        {/* Sidebar */}
-        <nav className="flex w-52 shrink-0 flex-col gap-1 border-r border-border/50 p-3">
+      {/* 窄屏(<sm)分类改为顶部横向条 —— 208px 的竖侧栏在手机宽度下会把内容区
+          压到只剩百来像素,文字被逼成竖排。宽屏维持左右分栏。 */}
+      <div className="flex min-h-0 flex-1 flex-col sm:flex-row">
+        {/* Sidebar —— 分类多于弹窗高度时侧栏自己滚动,不把整个弹窗撑高 */}
+        <nav className="flex shrink-0 gap-1 overflow-x-auto border-b border-border/50 p-2 sm:w-52 sm:flex-col sm:overflow-x-visible sm:overflow-y-auto sm:border-r sm:border-b-0 sm:p-3">
           {sidebarItems.map((item) => (
             <Button
               key={item.id}
               variant="ghost"
-              onClick={() => handleSectionChange(item.id)}
+              onClick={() => onSectionChange(item.id)}
               className={cn(
-                "justify-start gap-3 px-3 py-2 text-sm font-medium text-left w-full",
+                "shrink-0 justify-start gap-3 px-3 py-2 text-sm font-medium text-left sm:w-full",
                 activeSection === item.id
                   ? "bg-accent text-accent-foreground"
                   : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
@@ -155,8 +151,9 @@ export function SettingsLayout() {
           ))}
         </nav>
 
-        {/* Content */}
-        <div className="flex-1 overflow-auto p-6">
+        {/* Content —— key 让切换分类时滚动位置回到顶部(否则从长页面切到短页面
+            会停在中间);min-w-0 防止宽内容(表格/代码块)把弹窗撑破。 */}
+        <div key={activeSection} className="min-w-0 flex-1 overflow-auto p-6">
           {activeSection === "general" && <GeneralSection />}
           {activeSection === "account" && <AccountSection />}
           {activeSection === "providers" && <ProviderManager />}
@@ -170,6 +167,7 @@ export function SettingsLayout() {
           {activeSection === "plugins" && <PluginsManager />}
           {activeSection === "test-accounts" && <TestAccountsSection />}
           {activeSection === "feedback" && <FeedbackSection />}
+          {activeSection === "help" && <HelpSection />}
         </div>
       </div>
     </div>

@@ -13,6 +13,7 @@ export {
   Book,
   Bug,
   Brain,
+  Briefcase,
   CaretDown,
   CaretUp,
   CaretRight,
@@ -66,6 +67,7 @@ export {
   Minus,
   Moon,
   NotePencil,
+  Package,
   PaintBrush,
   PencilLine,
   PencilSimple,
@@ -78,6 +80,7 @@ export {
   SortDescending,
   Sparkle,
   SpinnerGap,
+  ShieldCheck,
   Star,
   Stethoscope,
   Stop,
@@ -103,6 +106,7 @@ export {
   Prohibit,
   Pulse,
   PushPin,
+  ArrowCircleUp,
 } from "@phosphor-icons/react";
 
 import type { IconProps } from "@phosphor-icons/react";

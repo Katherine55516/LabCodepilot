@@ -9,6 +9,57 @@ interface ClaudeInstallDetection {
   type: 'native' | 'homebrew' | 'npm' | 'bun' | 'unknown';
 }
 
+// ── 技能市场（内部）────────────────────────────────────────────────────────────
+
+/** IPC 统一失败信封（electron/skills-store-core.ts 的 SkillsStoreFailure 镜像）。 */
+export interface SkillsStoreFailureEnvelope {
+  ok: false;
+  /** 'not-logged-in' | 'network' | Hub 稳定错误码（未知码原样透传，走通用分支）。 */
+  error: string;
+  status?: number;
+  /** RATE_LIMITED 时的退避秒数。 */
+  retryAfter?: number;
+  message?: string;
+}
+
+/**
+ * Hub 技能条目 + 主进程合并的安装状态。服务端契约承诺可能新增字段 —
+ * 只声明客户端用到的，未知字段经索引签名透传，勿建全量模型。
+ */
+export interface InternalStoreSkill {
+  id: string;
+  slug: string;
+  displayName: string;
+  description?: string;
+  /** LISTED = 上架；DEPRECATED = 已下架（本地保留、停止更新）。 */
+  state?: string;
+  /** SANDBOX | INLINE — 安装统一走 download，INLINE 详情另有 inlineContent 预览。 */
+  deliveryMode?: string;
+  isOwn?: boolean;
+  contentHash?: string;
+  downloadVersion?: number;
+  updatedAt?: string;
+  /** 详情页字段（列表不含） */
+  guide?: string;
+  authorNote?: string;
+  fileManifest?: unknown;
+  dependencies?: unknown;
+  inlineContent?: string;
+  // 主进程合并的安装状态（台账比对，见 electron/skills-store-core.ts mergeInstallState）
+  isInstalled: boolean;
+  hasUpdate: boolean;
+  installedAt?: string;
+  [key: string]: unknown;
+}
+
+export interface InternalStorePagination {
+  total?: number;
+  page?: number;
+  pageSize?: number;
+  totalPages?: number;
+  [key: string]: unknown;
+}
+
 interface ElectronInstallAPI {
   checkPrerequisites: () => Promise<{
     hasClaude: boolean;
@@ -250,7 +301,12 @@ interface ElectronAPI {
    * multipart 上报账号后端；身份以服务端 JWT claims 为准，客户端不上送。
    */
   feedback?: {
-    submit: (payload: { message: string; includeLog: boolean }) => Promise<
+    submit: (payload: {
+      message: string;
+      includeLog: boolean;
+      /** 截图（最多 5 张、单张 ≤1MB）；data 为 ArrayBuffer 以便结构化克隆过 IPC。 */
+      images?: { name: string; type: string; data: ArrayBuffer }[];
+    }) => Promise<
       | { ok: true; id?: string }
       | {
           ok: false;
@@ -258,12 +314,40 @@ interface ElectronAPI {
             | 'invalid-message'
             | 'not-logged-in'
             | 'network'
+            /** 服务端 429：已达每日反馈次数上限 */
             | 'rate-limited'
             | 'too-large'
+            | 'invalid-image'
             | 'server';
           status?: number;
         }
     >;
+  };
+  /**
+   * 技能市场（内部）— codeagent-server Skills 商店（主进程持登录 token 代理）。
+   * 失败信封：error 为 'not-logged-in' | 'network' | Hub 稳定错误码
+   * （SKILLS_NOT_CONFIGURED/HUB_UNAVAILABLE/RATE_LIMITED/…），分支只认 code。
+   * Phase 0 仅 probe/list/detail；install/update/uninstall 随 Phase 2 加入。
+   */
+  skillsStore?: {
+    /** Skills 页 mount 时探测：SKILLS_NOT_CONFIGURED → 隐藏 tab；not-logged-in → 登录空态。 */
+    probe: () => Promise<{ ok: true } | SkillsStoreFailureEnvelope>;
+    list: (params?: { keyword?: string; page?: number; pageSize?: number }) => Promise<
+      | { ok: true; items: InternalStoreSkill[]; pagination: InternalStorePagination }
+      | SkillsStoreFailureEnvelope
+    >;
+    detail: (skillId: string, opts?: { withContent?: boolean }) => Promise<
+      { ok: true; skill: InternalStoreSkill } | SkillsStoreFailureEnvelope
+    >;
+    // ── 安装事务（Phase 2 已接入;保持可选供 UI feature-detect 旧 preload）──
+    install?: (skillId: string) => Promise<
+      { ok: true; dirName: string } | SkillsStoreFailureEnvelope
+    >;
+    /** 304（内容未变）→ updated:false，仅刷新台账。 */
+    update?: (skillId: string) => Promise<
+      { ok: true; updated: boolean } | SkillsStoreFailureEnvelope
+    >;
+    uninstall?: (skillId: string) => Promise<{ ok: true } | SkillsStoreFailureEnvelope>;
   };
   bridge?: {
     isActive: () => Promise<boolean>;

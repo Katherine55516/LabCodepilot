@@ -8,6 +8,8 @@
 
 | 文档 | 对应交接文档 | 主题 |
 |------|------------|------|
+| [skills-store-internal.md](./skills-store-internal.md) | [handover/skills-store-internal.md](../handover/skills-store-internal.md) | 技能市场（内部）：组织内技能分发的空白（外部市场解决不了内部资产）、客户端只做浏览+安装不落权限数据、走主进程而非复用外部链路（token 边界）、目录名可读性赢唯一性建议（slug 优先）、「不变不传」与下架温和度、未启用即不存在、与「我的技能」一份事实互通；局限（无灰度审批/无批量更新/更新靠打开列表）与方向 |
+| [cowork-vm-mode.md](./cowork-vm-mode.md) | [handover/cowork-vm-mode.md](../handover/cowork-vm-mode.md) | Cowork 办公模式:办公场景的信任门槛、双栏 vs 会话内开关(模式建时定死)、拷贝语义 vs 官方挂载、隔离承诺刚性(宁报错不降级)、能力做减法的逐项理由、产物卡片=取件口必须真实、启动时对账的存储自治、实测驱动六轮修复的共性教训、局限(镜像手动预置/网络未收口)与方向(镜像流水线/WSL2/办公工具链) |
 | [test-usage-upload.md](./test-usage-upload.md) | [handover/test-usage-upload.md](../handover/test-usage-upload.md) | 测试用量上报（一期本地统计的「二期全体用户视角」）：管理者看不见 AI 测试用得怎么样、值不值得投入；复用设备管理的形状而非新造轮子；上报按天计数而非原始事件（口径在客户端算好，服务端只 SUM，永远不会与用户面板不一致）；不脱敏是被明确选择的取舍。四个难决定：**盲覆盖会让删本地就丢服务端数据 → 全量重算 + GREATEST 取大**；**熔断轮：活动量算、质量信号不算**（功能/回归两侧同构，同一条原则）；**状态型事件求和导致采纳率 294% —— 单测全绿也没发现，是拿真实数据对账救回来的**；**一个静默的 0 比一个缺失的列更危险**（回归按项目明细放错数组会让管理员误判"没人用回归"）。P2 回归：脚本重放占比是回归资产成熟度最直接的尺；诚实交代回归缺真实数据对账、比功能侧少一层保险 |
 | [regression-stats.md](./regression-stats.md) | [handover/regression-stats.md](../handover/regression-stats.md) | 回归测试使用统计：把「套件新增/套件执行/用例执行」三种子升级为趋势与结构、文件态聚合不复用事件表的理由、二级切换而非合并大盘、诚实口径（熔断整轮排除/running 不出结论/flaky 只作候选）、用户主动收敛范围（放弃套件新增趋势）、对标 TestRail/Xray/Datadog 差异化落在脚本重放 vs AI、扩展位与已知局限 |
 | [test-usage-stats.md](./test-usage-stats.md) | [handover/test-usage-stats.md](../handover/test-usage-stats.md) | 测试使用统计：量 AI 用例质量/判断质量/效率的三把尺、采纳率以首轮为基线、准确度必配覆盖率的诚实原则、复核自动归类降认知负担、服务端计时不信 AI 自报、事件流水而非聚合表（口径可重算+二期上报铺路）、只给指标不列用例、对抗评审驱动质量、已知局限与二期全体用户视角 |

@@ -5,6 +5,52 @@ import type { TranslationKey } from "@/i18n";
 const COLLAPSED_PROJECTS_KEY = "codepilot:collapsed-projects";
 export const COLLAPSED_INITIALIZED_KEY = "codepilot:collapsed-initialized";
 
+// ── E3 (cowork):「办公 / 研发」双栏 ────────────────────────────────
+// 办公 = 沙箱会话(sandbox_enabled,单一事实源,见 cowork-office-mode.md D1),
+// 平铺不按项目分组;研发 = 其余,走既有 groupSessionsByProject。
+
+export type WorkspaceTab = "dev" | "office";
+
+const WORKSPACE_TAB_KEY = "codepilot:workspace-tab";
+
+export function loadWorkspaceTab(): WorkspaceTab {
+  if (typeof window === "undefined") return "dev";
+  try {
+    const raw = localStorage.getItem(WORKSPACE_TAB_KEY);
+    if (raw === "office" || raw === "dev") return raw;
+  } catch {
+    // ignore
+  }
+  return "dev";
+}
+
+export function saveWorkspaceTab(tab: WorkspaceTab) {
+  try {
+    localStorage.setItem(WORKSPACE_TAB_KEY, tab);
+  } catch {
+    // ignore
+  }
+}
+
+/**
+ * 按双栏语义切分会话:office = sandbox_enabled(按 updated_at 倒序平铺),
+ * dev = 其余(顺序保持,调用方再做项目分组)。纯函数,单测覆盖。
+ */
+export function splitSessionsByWorkspaceTab(sessions: ChatSession[]): {
+  office: ChatSession[];
+  dev: ChatSession[];
+} {
+  const office: ChatSession[] = [];
+  const dev: ChatSession[] = [];
+  for (const s of sessions) {
+    (s.sandbox_enabled ? office : dev).push(s);
+  }
+  office.sort(
+    (a, b) => parseDBDate(b.updated_at).getTime() - parseDBDate(a.updated_at).getTime()
+  );
+  return { office, dev };
+}
+
 export function loadCollapsedProjects(): Set<string> {
   if (typeof window === 'undefined') return new Set();
   try {

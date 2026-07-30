@@ -1,7 +1,7 @@
 import { NextRequest } from 'next/server';
 import { streamClaude } from '@/lib/claude-client';
 import { generateSessionTitleInBackground } from '@/lib/title-generator';
-import { addMessage, getMessages, getSession, getSessionSummary, updateSessionTitle, updateSdkSessionId, updateSessionModel, updateSessionProvider, updateSessionProviderId, getSetting, acquireSessionLock, renewSessionLock, releaseSessionLock, setSessionRuntimeStatus, syncSdkTasks } from '@/lib/db';
+import { addMessage, getMessages, getSession, isSessionVisibleToCurrentUser, getSessionSummary, updateSessionTitle, updateSdkSessionId, updateSessionModel, updateSessionProvider, updateSessionProviderId, getSetting, acquireSessionLock, renewSessionLock, releaseSessionLock, setSessionRuntimeStatus, syncSdkTasks } from '@/lib/db';
 import { resolveProvider as resolveProviderUnified } from '@/lib/provider-resolver';
 import { notifySessionStart, notifySessionComplete, notifySessionError } from '@/lib/telegram-bot';
 import { extractCompletion } from '@/lib/onboarding-completion';
@@ -49,7 +49,7 @@ export async function POST(request: NextRequest) {
     if (!hasCodePilotProvider()) {
       return new Response(
         JSON.stringify({
-          error: 'No provider configured in AI Native Lab.',
+          error: 'No provider configured in CMWork.',
           code: 'NEEDS_PROVIDER_SETUP',
           actionHint: 'open_setup_center',
           initialCard: 'provider',
@@ -59,9 +59,26 @@ export async function POST(request: NextRequest) {
     }
 
     const session = getSession(session_id);
-    if (!session) {
+    // 账号隔离(发消息主入口):不拦的话,换账号后仍能往上一个账号的办公会话里发消息 ——
+    // 消息会落进别人的会话,而沙箱侧 assertOwner 又必然 404,是最糟的组合。
+    // 入口拦一次即可,下面流内部的 getSession 都在这道门之后。
+    if (!isSessionVisibleToCurrentUser(session)) {
       return new Response(JSON.stringify({ error: 'Session not found' }), {
         status: 404,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    // E1 (cowork): sandbox sessions must run via the SDK runtime — the native
+    // runtime executes tools on the HOST and is completely unaware of
+    // sandbox_enabled, so letting it through would silently run the turn on
+    // the real machine. Refuse up front (before the lock). Triggers:
+    // openai-oauth provider / cli_enabled=false / agent_runtime=native.
+    // See docs/exec-plans/active/cowork-office-mode.md (D5).
+    if (session.sandbox_enabled && predictNativeRuntime(provider_id || session.provider_id || '')) {
+      const { SANDBOX_NATIVE_RUNTIME_GUARD } = await import('@/lib/cowork-guards');
+      return new Response(JSON.stringify(SANDBOX_NATIVE_RUNTIME_GUARD), {
+        status: 412,
         headers: { 'Content-Type': 'application/json' },
       });
     }
@@ -895,6 +912,20 @@ async function collectStreamResponse(
       }
     }
   } finally {
+    // ── Cowork:累计本回合调用过的 skill(浮窗「使用的技能」小节)──
+    // 放 finally = 单一钩子覆盖正常与错误兜底两条 assistant 落库路径(它们共享
+    // contentBlocks);merge 按 tool_use id 去重,幂等。best-effort,绝不影响回合。
+    try {
+      const s = getSession(sessionId);
+      if (s?.sandbox_enabled) {
+        const { extractSkillUses } = await import('@/lib/skill-use');
+        const uses = extractSkillUses(contentBlocks, Date.now());
+        if (uses.length) {
+          const { mergeSessionSkillsUsed } = await import('@/lib/db');
+          mergeSessionSkillsUsed(sessionId, uses);
+        }
+      }
+    } catch { /* skill 记录失败不影响回合 */ }
     // ── Server-side completion detection (reliable path) ──
     // After persisting the assistant message, check for onboarding/checkin
     // fences and process them directly on the server. This ensures completion
