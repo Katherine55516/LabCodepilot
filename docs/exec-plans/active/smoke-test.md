@@ -18,9 +18,9 @@
 | Phase 2 | Prompt 层：冒烟角色 system + 3 变体 + `rules/smoke-test.md` + fallback | ✅ 已完成 | `SMOKE_SYS` + 3 prompt + 规则文件；30 单测（含打包态 fallback + 功能测试零回归） |
 | Phase 3 | 执行归约：`@@OBSERVATION` harvest → `run.json.observations[]` | ✅ 已完成 | 仅改 reduce.ts；exec-stream **零改动**（唯一归约点走 reduceFromText）；14 单测 |
 | Phase 4 | UI 主链：第三段页签 + 环境沿用条 + 新建表单 + 无门控 auto-chain | ✅ 已完成 | CDP 端到端验证通过（隔离数据目录）；i18n ×3；场景表编辑并入 Phase 5 |
-| Phase 5 | 冒烟报告：结论横幅 + 场景结果表 + **Bug 可复核列表** + 体验问题 | 📋 待开始 | 复核复用 `report_reviewed`；新增 `/api/test/bugs` |
-| Phase 6 | i18n 三语言 + 埋点 taskType + 采纳率口径排除 | 📋 待开始 | en 为类型源 |
-| Phase 7 | 验证：单测 + dev CDP + 打包态实测 | 📋 待开始 | 登录态链路需打包登录 |
+| Phase 5 | 冒烟报告：结论横幅 + **Bug 可复核列表** + 体验问题 | ✅ 已完成 | 新增 `smoke-bugs.ts`（25 单测）+ `/api/test/bugs`；复核复用 report_reviewed；CDP 全交互验证 |
+| Phase 6 | i18n 三语言 + 埋点口径 | ✅ 已完成 | `test.smoke.*` ×3；冒烟不发 cases_approved（采纳率口径隔离）；task_created 带 taskType |
+| Phase 7 | 验证：单测 + dev CDP | ✅ dev 侧完成 | 2439 单测 0 fail；API curl 合同（GET/PUT/409/400）+ CDP 报告全交互；**打包态实测待用户发起** |
 | Phase 8 | 文档：handover + insights 互链 + ARCHITECTURE 索引 | 📋 待开始 | CLAUDE.md 强制两份 |
 
 ## 决策日志

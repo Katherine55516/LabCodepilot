@@ -21,8 +21,9 @@ import { parseExecProgress } from "@/lib/test/exec-progress";
 import { createExecLineBuffer, shouldAdoptPlaceholder, type ExecLine, type LiveResult, type LiveStatus } from "@/lib/test/exec-live";
 import { withDownstreamReset, runStartOptions, taskCategory, occupiedSlots, TASK_CATEGORY_ORDER, type TaskCategory } from "@/lib/test/step-status";
 import { REGRESSION_LIBRARY_TASK, REGRESSION_FULL_SUITE as REGRESSION_FULL_SUITE_NAME } from "@/lib/test/library-constants";
-import type { TestTaskType } from "@/types";
+import type { TestTaskType, SmokeBug } from "@/types";
 import { scenarioTextToCases, casesToScenarios, scenariosToText, smokeDataPrefix } from "@/lib/test/smoke-scenarios";
+import { smokeVerdict, SMOKE_SEVERITIES } from "@/lib/test/smoke-bugs";
 import type { LoginStateInfo } from "@/lib/test/env-config";
 import type { RunHistoryEntry } from "@/lib/test/history";
 import { TestStatsView } from "@/components/test/TestStatsView";
@@ -175,6 +176,8 @@ interface ReportEntry {
   /** 回归集 "pass/total"；pass < total 即未全过（发版红线）。 */
   suitePassStr?: string;
   tests: CaseResult[];
+  /** 冒烟：体验观察（run.json.observations 透传）；功能/回归报告缺省。 */
+  observations?: { text: string; scene?: string }[];
   /** run.json 全文 SHA-1（与执行埋点同源）：把人工复核关联到确切执行轮。 */
   runHash?: string;
   /** The full markdown report doc ({task}-{env}.md), if the report step wrote one. */
@@ -1813,7 +1816,11 @@ export function InlineTestingPanel({ visible = true }: { visible?: boolean } = {
       }));
       // 使用统计：进入执行 = 用例已被批准（手动门控 / 运行任务 / 批量三条路径的汇聚点）。
       // 服务端据此读 cases.json 拍终态快照、对首轮基线做 diff 算采纳率（last-wins，重跑重新快照无害）。
-      recordTestStat([{ eventType: "cases_approved", projectPath: projPath, taskId: id, taskName: task.name, env }]);
+      // ⚠️ 冒烟任务不发：场景是用户手写直落盘，从未有过「AI 生成 → 批准」环节 ——
+      // 发了会让采纳率口径混入非 AI 生成流（快照 diff 无首轮基线可对，语义不成立）。
+      if (task.type !== "smoke") {
+        recordTestStat([{ eventType: "cases_approved", projectPath: projPath, taskId: id, taskName: task.name, env }]);
+      }
     }
     const stepName = t(STEPS.find((s) => s.step === step)!.name);
     const push = (msg: ConvoMsg) => patchTask(id, (s) => ({ convo: [...s.convo, msg] }));
@@ -3532,7 +3539,8 @@ function SuiteBanner({ t, suiteCounts, suitePassStr }: { t: T; suiteCounts?: Fou
 // 使用统计（Phase 3）：taskId + runHash 就位时，执行矩阵每行加人工复核（✓准确/✗有误→选
 // 实际结果，误报/漏报/程度不符由服务端归类）+ 用时列 + 一键全准；打开时回显已复核状态。
 // 合并 V3.1.0_dev：保留回归集 SuiteBanner 的 suiteCounts/suitePassStr 属性。
-function ReportView({ t, results, four, funcCounts, funcPassStr, suiteCounts, suitePassStr, circuitBroken, taskName, projectPath, env, taskId, runHash }: { t: T; results: CaseResult[]; four: FourState; funcCounts?: FourState; funcPassStr?: string; suiteCounts?: FourState; suitePassStr?: string; circuitBroken?: boolean; taskName: string; projectPath?: string; env?: string; taskId?: string; runHash?: string }) {
+function ReportView({ t, results, four, funcCounts, funcPassStr, suiteCounts, suitePassStr, circuitBroken, taskName, projectPath, env, taskId, runHash, taskType, observations }: { t: T; results: CaseResult[]; four: FourState; funcCounts?: FourState; funcPassStr?: string; suiteCounts?: FourState; suitePassStr?: string; circuitBroken?: boolean; taskName: string; projectPath?: string; env?: string; taskId?: string; runHash?: string; taskType?: TestTaskType; observations?: { text: string; scene?: string }[] }) {
+  const isSmoke = taskType === "smoke";
   // 证据媒体（图片灯箱 + 录像内联回放）：经 /api/test/media 白名单流式取证据；
   // lightbox=当前放大查看的文件名。无 projectPath（如流程内调用）时退化为文件名文本。
   const [lightbox, setLightbox] = useState<string | null>(null);
@@ -3591,6 +3599,60 @@ function ReportView({ t, results, four, funcCounts, funcPassStr, suiteCounts, su
     accurate: "test.review.accurate", false_fail: "test.review.falseFail", missed_fail: "test.review.missedFail", severity_mismatch: "test.review.severityMismatch",
   };
 
+  // ── 冒烟：Bug 可复核列表（事实层现场派生 + 覆盖层 bugs.json，见 /api/test/bugs）──
+  const [bugs, setBugs] = useState<SmokeBug[]>([]);
+  const [bugsHash, setBugsHash] = useState<string | null>(null);
+  const [noteDraft, setNoteDraft] = useState<Record<string, string>>({});
+  const reloadBugs = () => {
+    if (!isSmoke || !projectPath) return;
+    fetch(`/api/test/bugs?projectPath=${encodeURIComponent(projectPath)}&taskName=${encodeURIComponent(taskName)}&env=${encodeURIComponent(env || "local")}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!d?.ok) return;
+        setBugs(Array.isArray(d.bugs) ? d.bugs : []);
+        setBugsHash(typeof d.runHash === "string" ? d.runHash : null);
+        setNoteDraft(Object.fromEntries(((d.bugs as SmokeBug[]) ?? []).map((b) => [b.sceneId, b.note ?? ""])));
+      })
+      .catch(() => {});
+  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(reloadBugs, [isSmoke, projectPath, taskName, env, runHash]);
+  /** 覆盖层写入（严重级别/备注）；409（执行已重跑）→ 重拉刷新，不静默吞。 */
+  const putBug = (patch: { sceneId: string; severity?: string; note?: string; severityOverriddenFrom?: string }) => {
+    if (!projectPath) return;
+    fetch("/api/test/bugs", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectPath, taskName, env: env || "local", runHash: bugsHash, patch }),
+    })
+      .then(async (r) => {
+        if (r.status === 409) { reloadBugs(); return null; }
+        return r.ok ? r.json() : null;
+      })
+      .then((d) => { if (d?.ok && Array.isArray(d.bugs)) setBugs(d.bugs); })
+      .catch(() => {});
+  };
+  const changeSeverity = (b: SmokeBug, severity: string) => {
+    if (severity === b.severity) return;
+    setBugs((list) => list.map((x) => (x.sceneId === b.sceneId ? { ...x, severity, severityOverriddenFrom: x.severityOverriddenFrom ?? x.severity } : x)));
+    putBug({ sceneId: b.sceneId, severity, severityOverriddenFrom: b.severityOverriddenFrom ?? b.severity });
+  };
+  const saveNote = (b: SmokeBug) => {
+    const note = (noteDraft[b.sceneId] ?? "").trim();
+    if (note === (b.note ?? "")) return;
+    putBug({ sceneId: b.sceneId, note });
+  };
+  /** 冒烟批量：把所有未复核的 Bug（fail 场景）一键确认为缺陷（accurate）。 */
+  const bulkConfirmBugs = () => {
+    const rest = bugs.map((b) => b.sceneId).filter((id) => !reviews[id]);
+    if (!rest.length) return;
+    setReviews((m) => { const n = { ...m }; rest.forEach((id) => { n[id] = "accurate"; }); return n; });
+    postReview([{ eventType: "report_review_bulk", payload: { caseIds: rest, count: rest.length, runHash } }]);
+  };
+  // 冒烟结论（双记录：AI 原判保留在场景表/报告 md，复核态只影响横幅表述）。
+  const failSceneIds = results.filter((r) => r.status === "fail").map((r) => r.id);
+  const sv = smokeVerdict({ total: four.total || results.length, pass: four.pass, fail: four.fail, blocked: four.blocked }, failSceneIds, reviews);
+
   const metric = (label: string, value: string, danger?: boolean) => (
     <div className="rounded-lg bg-muted/40 p-3">
       <div className="text-[11px] text-muted-foreground">{label}</div>
@@ -3616,6 +3678,26 @@ function ReportView({ t, results, four, funcCounts, funcPassStr, suiteCounts, su
       {circuitBroken && (
         <div className="mb-3 rounded-md border border-status-error-border bg-status-error-muted px-3 py-2 text-[11px] text-status-error-foreground">
           ⚠ {t("test.report.circuitBroken")}
+        </div>
+      )}
+      {/* 冒烟结论横幅（口径见 smoke-bugs.ts smokeVerdict）。双记录：复核把全部 fail 判为
+          误报时横幅转「通过·经人工复核」，但场景表 / 报告 md 里的 AI 原判保持原样可追溯。 */}
+      {isSmoke && !circuitBroken && sv.verdict !== "empty" && (
+        <div
+          className={`mb-3 rounded-md border px-3 py-2 text-[11px] ${
+            sv.verdict === "failed"
+              ? "border-status-error-border bg-status-error-muted text-status-error-foreground"
+              : sv.verdict === "incomplete"
+                ? "border-status-warning-border bg-status-warning-muted text-status-warning-foreground"
+                : "border-status-success-border bg-status-success-muted text-status-success-foreground"
+          }`}
+        >
+          <span className="font-medium">
+            {sv.verdict === "passed" && <>✓ {t("test.smoke.verdict.passed")}</>}
+            {sv.verdict === "passed-after-review" && <>✓ {t("test.smoke.verdict.passedAfterReview", { n: sv.clearedFails })}</>}
+            {sv.verdict === "failed" && <>🚫 {t("test.smoke.verdict.failed", { n: four.fail })}</>}
+            {sv.verdict === "incomplete" && <>⏸ {t("test.smoke.verdict.incomplete", { n: four.blocked })}</>}
+          </span>
         </div>
       )}
       <div className="mb-3 empty:hidden">
@@ -3714,6 +3796,134 @@ function ReportView({ t, results, four, funcCounts, funcPassStr, suiteCounts, su
         </table>
       </div>
       <p className="mt-2 text-[11px] text-muted-foreground">ℹ️ {t("test.report.factsNote")}</p>
+
+      {/* ── 冒烟 · Bug 清单（结构化列表 + 人工复核）─────────────────────────────
+          事实字段派生自 run.json（fail 场景 1:1）+ 报告 md 的 AI 初判；人工只写
+          严重级别/备注（bugs.json 覆盖层）。复核动作复用上表同一套 report_reviewed
+          事件（sceneId = caseId），故上表复核过的 fail 行这里同步显示，反之亦然。 */}
+      {isSmoke && !circuitBroken && bugs.length > 0 && (
+        <div className="mt-4">
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            <Bug size={14} className="text-status-error-foreground" />
+            <h4 className="text-xs font-semibold text-foreground">{t("test.smoke.bugs.title")}</h4>
+            <span className="text-[11px] text-muted-foreground">
+              {t("test.smoke.bugs.progress", { reviewed: bugs.filter((b) => reviews[b.sceneId]).length, total: bugs.length })}
+            </span>
+            <span className="flex-1" />
+            {canReview && (
+              <button
+                onClick={bulkConfirmBugs}
+                disabled={bugs.every((b) => reviews[b.sceneId])}
+                className="rounded-md border border-border px-2 py-1 text-[11px] text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {t("test.smoke.bugs.bulkConfirm")}
+              </button>
+            )}
+          </div>
+          <div className="overflow-x-auto rounded-xl border border-border">
+            <table className="w-full border-collapse text-[11px]">
+              <thead>
+                <tr className="bg-muted/50 text-left text-muted-foreground">
+                  <th className="whitespace-nowrap px-2 py-1.5 font-medium">{t("test.smoke.bugs.colId")}</th>
+                  <th className="px-2 py-1.5 font-medium">{t("test.smoke.bugs.colTitle")}</th>
+                  <th className="whitespace-nowrap px-2 py-1.5 font-medium">{t("test.smoke.bugs.colSeverity")}</th>
+                  <th className="whitespace-nowrap px-2 py-1.5 font-medium">{t("test.smoke.bugs.colScene")}</th>
+                  {canReview && <th className="whitespace-nowrap px-2 py-1.5 font-medium">{t("test.smoke.bugs.colReview")}</th>}
+                  <th className="px-2 py-1.5 font-medium">{t("test.smoke.bugs.colNote")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {bugs.map((b) => (
+                  <tr key={b.sceneId} className="border-t border-border align-top">
+                    <td className="whitespace-nowrap px-2 py-1.5 font-mono text-foreground">{b.id}</td>
+                    <td className="px-2 py-1.5">
+                      <div className="text-foreground">{b.title}</div>
+                      {(b.actual || b.expected) && (
+                        <div className="mt-0.5 text-[10px] leading-relaxed text-muted-foreground">
+                          {b.expected && <>{t("test.smoke.bugs.expected")}：{b.expected}　</>}
+                          {b.actual && <>{t("test.smoke.bugs.actual")}：{b.actual}</>}
+                        </div>
+                      )}
+                      {b.api?.url && (
+                        <div className="mt-0.5 font-mono text-[10px] text-muted-foreground">
+                          {b.api.method || "GET"} {b.api.url} {b.api.status != null ? `(${b.api.status})` : ""}
+                        </div>
+                      )}
+                    </td>
+                    <td className="whitespace-nowrap px-2 py-1.5">
+                      <select
+                        value={b.severity}
+                        disabled={!projectPath}
+                        onChange={(e) => changeSeverity(b, e.target.value)}
+                        className="h-6 rounded-md border border-border bg-background px-1 text-[10px] text-foreground outline-none focus:border-primary"
+                      >
+                        {SMOKE_SEVERITIES.map((s) => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                      {b.severityOverriddenFrom && (
+                        <div className="mt-0.5 text-[9px] text-muted-foreground" title={t("test.smoke.bugs.aiOriginal")}>
+                          AI: {b.severityOverriddenFrom}
+                        </div>
+                      )}
+                    </td>
+                    <td className="whitespace-nowrap px-2 py-1.5 font-mono text-muted-foreground">{b.sceneId}</td>
+                    {canReview && (
+                      <td className="whitespace-nowrap px-2 py-1.5">
+                        {reviews[b.sceneId] ? (
+                          <span className="flex items-center gap-1.5">
+                            <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${reviews[b.sceneId] === "accurate" ? "bg-status-success-muted text-status-success-foreground" : "bg-status-error-muted text-status-error-foreground"}`}>
+                              {reviews[b.sceneId] === "accurate" ? `✓ ${t("test.smoke.bugs.confirmed")}` : reviews[b.sceneId] === "false_fail" ? `✗ ${t("test.review.falseFail")}` : `✗ ${t("test.review.severityMismatch")}`}
+                            </span>
+                            <button onClick={() => undoReview(b.sceneId)} className="text-[10px] text-muted-foreground underline hover:text-foreground">{t("test.review.undo")}</button>
+                          </span>
+                        ) : (
+                          <span className="flex flex-wrap gap-1">
+                            <button onClick={() => markAccurate(b.sceneId)} className="rounded border border-border px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground hover:border-status-error-border hover:text-status-error-foreground">🐛 {t("test.smoke.bugs.confirm")}</button>
+                            <button onClick={() => markBad(b.sceneId, "fail", "ok")} className="rounded border border-border px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground hover:border-status-success-border hover:text-status-success-foreground">{t("test.smoke.bugs.falseAlarm")}</button>
+                            <button onClick={() => markBad(b.sceneId, "fail", "severity")} className="rounded border border-border px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground hover:bg-muted">{t("test.review.actualSeverity")}</button>
+                          </span>
+                        )}
+                      </td>
+                    )}
+                    <td className="px-2 py-1.5">
+                      <input
+                        value={noteDraft[b.sceneId] ?? ""}
+                        disabled={!projectPath}
+                        onChange={(e) => setNoteDraft((m) => ({ ...m, [b.sceneId]: e.target.value }))}
+                        onBlur={() => saveNote(b)}
+                        placeholder={t("test.smoke.bugs.notePlaceholder")}
+                        className="h-6 w-full min-w-[120px] rounded-md border border-border bg-background px-1.5 text-[10px] text-foreground outline-none focus:border-primary"
+                      />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-1.5 text-[10px] text-muted-foreground">ℹ️ {t("test.smoke.bugs.note")}</p>
+        </div>
+      )}
+      {isSmoke && !circuitBroken && bugs.length === 0 && four.fail === 0 && (four.total || results.length) > 0 && (
+        <p className="mt-3 text-[11px] text-status-success-foreground">✓ {t("test.smoke.bugs.none")}</p>
+      )}
+
+      {/* ── 冒烟 · 奇怪交互 / 体验问题（@@OBSERVATION 归约，非缺陷、不计入通过率）── */}
+      {isSmoke && !!observations?.length && (
+        <div className="mt-4">
+          <div className="mb-2 flex items-center gap-2">
+            <Warning size={14} className="text-status-warning-foreground" />
+            <h4 className="text-xs font-semibold text-foreground">{t("test.smoke.obs.title")}</h4>
+            <span className="text-[11px] text-muted-foreground">{t("test.smoke.obs.hint")}</span>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            {observations.map((o, i) => (
+              <div key={i} className="rounded-md border border-border border-l-2 border-l-status-warning bg-muted/30 px-2.5 py-1.5 text-[11px]">
+                <span className="text-foreground">{o.text}</span>
+                {o.scene && <span className="ml-1.5 font-mono text-[10px] text-muted-foreground">{o.scene}</span>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       {/* lightbox 用 Portal 渲染到 body —— 这个 ReportView 挂在「报告」顶部 tab 的报告行
           手风琴展开区里，其祖先是 overflow-hidden rounded-lg（accordion 行容器）；<video>
           嵌套在 overflow-hidden + 圆角祖先内会硬件合成黑屏（录像已加载、控件/时长都在，
@@ -7855,7 +8065,7 @@ function ReportBrowser({ projects, t, model, providerId, onOpenTask, reloadSigna
                                 </div>
                               ) : (
                                 <>
-                                  <ReportView t={t} results={r.tests} four={r.counts} funcCounts={r.funcCounts} funcPassStr={r.funcPassStr} suiteCounts={r.suiteCounts} suitePassStr={r.suitePassStr} circuitBroken={r.circuitBroken} taskName={task} projectPath={project.path} env={r.env} taskId={project.tasks.find((tk) => tk.name === task)?.id} runHash={r.runHash} />
+                                  <ReportView t={t} results={r.tests} four={r.counts} funcCounts={r.funcCounts} funcPassStr={r.funcPassStr} suiteCounts={r.suiteCounts} suitePassStr={r.suitePassStr} circuitBroken={r.circuitBroken} taskName={task} projectPath={project.path} env={r.env} taskId={project.tasks.find((tk) => tk.name === task)?.id} runHash={r.runHash} taskType={project.tasks.find((tk) => tk.name === task)?.type} observations={r.observations} />
                                   {r.markdown && (
                                     <div className="mt-3 border-t border-border pt-3">
                                       <div className="mb-2 text-[11px] font-medium text-muted-foreground">{t("test.report.docTitle")}</div>
