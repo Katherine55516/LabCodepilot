@@ -1246,6 +1246,8 @@ const zh: Record<TranslationKey, string> = {
   'skills.internalRateLimited': '操作过于频繁，{seconds} 秒后再试',
   'skills.internalFileManifest': '文件清单',
   'skills.internalInlinePreview': '内容预览',
+  'skills.internalUpToDate': '已是最新版本',
+  'skills.internalInvalidPackage': '技能包不合法（缺少 SKILL.md）',
 
   // ── MCP ─────────────────────────────────────────────────────
   'mcp.addServer': '添加服务器',

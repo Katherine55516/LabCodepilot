@@ -20,9 +20,12 @@ import type { IpcMain } from 'electron';
 import { getBackendBase } from './auth/config';
 import { loadToken } from './auth/storage';
 import { logInfo, logWarn } from './auth/log';
+import { extractZip, replaceDirAtomic } from './skills-store-fs';
 import {
   LEDGER_BASENAME,
   MAX_ZIP_BYTES,
+  findSkillContentRoot,
+  resolveDirName,
   parseHubFailure,
   parseLedger,
   serializeLedger,
@@ -268,7 +271,199 @@ export async function downloadSkillZip(
   };
 }
 
+// ── 安装事务（Phase 2）──────────────────────────────────────────────────────
+
+/** 安装类失败的客户端自有码（非 Hub 码）：包不合法 / 落位冲突 / 解压失败。 */
+const INVALID_PACKAGE: SkillsStoreFailure = {
+  ok: false,
+  error: 'INVALID_PACKAGE',
+  message: 'skill package is missing SKILL.md',
+};
+
+interface DeployMeta {
+  skillId: string;
+  slug: string;
+  displayName: string;
+  contentHash: string;
+  downloadVersion: number;
+  etag: string;
+}
+
+/** 已下载 zip → 解压校验 → 落位 → 写台账。install 与 update(200 分支)共用。 */
+async function deployZip(
+  zipPath: string,
+  meta: DeployMeta,
+): Promise<{ ok: true; dirName: string } | SkillsStoreFailure> {
+  const extractDir = fs.mkdtempSync(path.join(os.tmpdir(), 'anl-skill-extract-'));
+  try {
+    try {
+      await extractZip(zipPath, extractDir);
+    } catch (e) {
+      logWarn('[skills-store] extract failed:', (e as Error).message);
+      return { ok: false, error: 'INVALID_PACKAGE', message: (e as Error).message };
+    }
+
+    // 内容根:SKILL.md 在 zip 根,或唯一外壳目录内(契约未约定,两种都接)
+    const listing = fs.readdirSync(extractDir, { withFileTypes: true });
+    const root = findSkillContentRoot({
+      files: listing.filter((e) => e.isFile()).map((e) => e.name),
+      dirs: listing.filter((e) => e.isDirectory()).map((e) => e.name),
+      hasSkillMdInDir: (dir) => fs.existsSync(path.join(extractDir, dir, 'SKILL.md')),
+    });
+    if (!root) return INVALID_PACKAGE;
+    const contentDir = root === '.' ? extractDir : path.join(extractDir, root);
+
+    const ledger = loadLedger();
+    const rootDir = skillsRootDir();
+    fs.mkdirSync(rootDir, { recursive: true });
+    const taken = new Set(
+      fs
+        .readdirSync(rootDir, { withFileTypes: true })
+        .filter((e) => e.isDirectory())
+        .map((e) => e.name),
+    );
+    const dirName = resolveDirName(meta.slug, meta.skillId, ledger, taken);
+    if (!dirName) {
+      return { ok: false, error: 'DIR_CONFLICT', message: `dir name exhausted for ${meta.slug}` };
+    }
+
+    replaceDirAtomic(contentDir, path.join(rootDir, dirName));
+
+    ledger.skills[meta.skillId] = {
+      slug: meta.slug,
+      dirName,
+      displayName: meta.displayName,
+      contentHash: meta.contentHash,
+      etag: meta.etag,
+      downloadVersion: meta.downloadVersion,
+      installedAt: new Date().toISOString(),
+    };
+    saveLedger(ledger);
+    return { ok: true, dirName };
+  } finally {
+    fs.rmSync(extractDir, { recursive: true, force: true });
+  }
+}
+
+/** 详情 → 元数据快照（下载响应本身没有名称/版本,与服务端审计同款预取姿势）。 */
+function metaFromDetail(skillId: string, skill: Record<string, unknown>, etag: string): DeployMeta {
+  const slug = typeof skill.slug === 'string' && skill.slug ? skill.slug : skillId;
+  return {
+    skillId,
+    slug,
+    displayName:
+      typeof skill.displayName === 'string' && skill.displayName ? skill.displayName : slug,
+    contentHash: typeof skill.contentHash === 'string' ? skill.contentHash : '',
+    downloadVersion: typeof skill.downloadVersion === 'number' ? skill.downloadVersion : 0,
+    etag,
+  };
+}
+
+export async function installSkill(
+  skillId: string,
+): Promise<{ ok: true; dirName: string } | SkillsStoreFailure> {
+  const d = await getSkillDetail(skillId);
+  if (!d.ok) return d;
+
+  const dl = await downloadSkillZip(skillId);
+  if (!dl.ok) return dl;
+  if (dl.outcome.notModified || !dl.outcome.filePath) {
+    // 未带 If-None-Match,304 不应出现 — 防御性兜底
+    return { ok: false, error: 'HUB_UNAVAILABLE', message: 'unexpected 304 on install' };
+  }
+  try {
+    const r = await deployZip(
+      dl.outcome.filePath,
+      metaFromDetail(skillId, d.skill, dl.outcome.etag ?? ''),
+    );
+    if (r.ok) {
+      logInfo('[skills-store] installed', skillId, '→', r.dirName, `${dl.outcome.bytes ?? 0}B`);
+    } else {
+      logWarn('[skills-store] install failed:', skillId, r.error, r.message ?? '');
+    }
+    return r;
+  } finally {
+    fs.rmSync(dl.outcome.filePath, { force: true });
+  }
+}
+
+export async function updateSkill(
+  skillId: string,
+): Promise<{ ok: true; updated: boolean } | SkillsStoreFailure> {
+  const ledger = loadLedger();
+  const entry = ledger.skills[skillId];
+  if (!entry) {
+    // 台账无此项(如「我的技能」侧删过) → 视作全新安装
+    const r = await installSkill(skillId);
+    return r.ok ? { ok: true, updated: true } : r;
+  }
+
+  const d = await getSkillDetail(skillId);
+  if (!d.ok) return d;
+  const hubHash = typeof d.skill.contentHash === 'string' ? d.skill.contentHash : '';
+  if (hubHash && entry.contentHash && hubHash === entry.contentHash) {
+    return { ok: true, updated: false };
+  }
+
+  const dl = await downloadSkillZip(skillId, { ifNoneMatch: entry.etag || undefined });
+  if (!dl.ok) return dl;
+
+  if (dl.outcome.notModified) {
+    // ETag 权威说内容没变 — 只把台账对齐 Hub 元数据(「不变不传」)
+    entry.contentHash = hubHash || entry.contentHash;
+    entry.downloadVersion =
+      typeof d.skill.downloadVersion === 'number' ? d.skill.downloadVersion : entry.downloadVersion;
+    saveLedger(ledger);
+    logInfo('[skills-store] update 304 (not modified):', skillId);
+    return { ok: true, updated: false };
+  }
+  if (!dl.outcome.filePath) return { ok: false, error: 'HUB_UNAVAILABLE', message: 'empty download' };
+
+  try {
+    const r = await deployZip(
+      dl.outcome.filePath,
+      metaFromDetail(skillId, d.skill, dl.outcome.etag ?? ''),
+    );
+    if (r.ok) {
+      logInfo('[skills-store] updated', skillId, '→', r.dirName);
+      return { ok: true, updated: true };
+    }
+    logWarn('[skills-store] update failed:', skillId, r.error, r.message ?? '');
+    return r;
+  } finally {
+    fs.rmSync(dl.outcome.filePath, { force: true });
+  }
+}
+
+export function uninstallSkill(skillId: string): { ok: true } | SkillsStoreFailure {
+  const ledger = loadLedger();
+  const entry = ledger.skills[skillId];
+  if (entry) {
+    const root = path.resolve(skillsRootDir());
+    const dir = path.resolve(root, entry.dirName);
+    // 目录围栏:台账被手改的极端情形下也绝不删到 skills 根之外
+    if (dir.startsWith(root + path.sep) && fs.existsSync(dir)) {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+    delete ledger.skills[skillId];
+    saveLedger(ledger);
+    logInfo('[skills-store] uninstalled', skillId, entry.dirName);
+  }
+  return { ok: true };
+}
+
 // ── IPC 注册 ─────────────────────────────────────────────────────────────────
+
+/**
+ * 变更类操作串行化:台账是读-改-写文件,并发安装/卸载会互相丢写。
+ * 简单 promise 链即可(操作秒级,无需真队列)。
+ */
+let mutationChain: Promise<unknown> = Promise.resolve();
+function serialized<T>(fn: () => Promise<T> | T): Promise<T> {
+  const next = mutationChain.then(fn, fn);
+  mutationChain = next.catch(() => undefined);
+  return next;
+}
 
 /**
  * probe：renderer 在 Skills 页 mount 时调一次决定 tab 可见性（方案 D5）。
@@ -298,5 +493,22 @@ export function registerSkillsStoreIpc(ipcMain: IpcMain): void {
     }
     const o = (opts ?? {}) as Record<string, unknown>;
     return getSkillDetail(skillId, { withContent: o.withContent === true });
+  });
+
+  const badId: SkillsStoreFailure = { ok: false, error: 'VALIDATION_FAILED' };
+
+  ipcMain.handle('skills-store:install', (_event, skillId: unknown) => {
+    if (typeof skillId !== 'string' || !skillId) return badId;
+    return serialized(() => installSkill(skillId));
+  });
+
+  ipcMain.handle('skills-store:update', (_event, skillId: unknown) => {
+    if (typeof skillId !== 'string' || !skillId) return badId;
+    return serialized(() => updateSkill(skillId));
+  });
+
+  ipcMain.handle('skills-store:uninstall', (_event, skillId: unknown) => {
+    if (typeof skillId !== 'string' || !skillId) return badId;
+    return serialized(() => uninstallSkill(skillId));
   });
 }

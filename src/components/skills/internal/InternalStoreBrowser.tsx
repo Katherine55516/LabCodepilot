@@ -130,6 +130,8 @@ export function InternalStoreBrowser({ onInstalled, onUnavailable }: InternalSto
   }, [search, doSearch]);
 
   const handleChanged = useCallback(() => {
+    // Next 侧技能发现缓存失效(主进程写盘 Next 不感知;失败无害,fire-and-forget)
+    fetch("/api/skills/refresh", { method: "POST" }).catch(() => {});
     // 重拉当前深度,保留滚动位置;再通知上层刷新「我的技能」
     doSearch(search, pageRef.current);
     onInstalled();

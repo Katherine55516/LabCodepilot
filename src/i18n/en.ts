@@ -1247,6 +1247,8 @@ const en = {
   'skills.internalRateLimited': 'Too many requests, retry in {seconds}s',
   'skills.internalFileManifest': 'Files',
   'skills.internalInlinePreview': 'Content preview',
+  'skills.internalUpToDate': 'Already up to date',
+  'skills.internalInvalidPackage': 'Invalid skill package (missing SKILL.md)',
 
   // ── MCP ─────────────────────────────────────────────────────
   'mcp.addServer': 'Add Server',

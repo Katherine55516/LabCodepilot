@@ -1255,6 +1255,8 @@ const zhHK: Record<TranslationKey, string> = {
   'skills.internalRateLimited': '操作過於頻繁，{seconds} 秒後再試',
   'skills.internalFileManifest': '檔案清單',
   'skills.internalInlinePreview': '內容預覽',
+  'skills.internalUpToDate': '已是最新版本',
+  'skills.internalInvalidPackage': '技能包不合法（缺少 SKILL.md）',
 
   // ── MCP ─────────────────────────────────────────────────────
   'mcp.addServer': '添加服務器',

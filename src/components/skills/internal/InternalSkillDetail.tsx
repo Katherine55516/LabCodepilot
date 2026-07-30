@@ -85,6 +85,9 @@ export function InternalSkillDetail({ skill, onChanged }: InternalSkillDetailPro
       case "not-logged-in":
         showToast({ type: "error", message: t("skills.internalLoginRequired") });
         return;
+      case "INVALID_PACKAGE":
+        showToast({ type: "error", message: t("skills.internalInvalidPackage") });
+        return;
       default:
         showToast({ type: "error", message: t("skills.internalUnavailable") });
     }
@@ -94,11 +97,21 @@ export function InternalSkillDetail({ skill, onChanged }: InternalSkillDetailPro
     if (!api || busy) return;
     const fn =
       action === "install" ? api.install : action === "update" ? api.update : api.uninstall;
-    if (!fn) return; // Phase 2 之前按钮已禁用,这里只是类型收窄
+    if (!fn) return; // preload 未暴露(旧版)时按钮已禁用,这里只是类型收窄
     setBusy(action);
     try {
       const r = await fn(skill.id);
       if (r.ok) {
+        if (action === "install") {
+          showToast({ type: "success", message: t("skills.installSuccess") });
+        } else if (action === "update") {
+          // 304/内容未变 → 提示已是最新(台账已对齐,列表刷新后徽章消失)
+          const updated = (r as { updated?: boolean }).updated !== false;
+          showToast({
+            type: "success",
+            message: t(updated ? "skills.installSuccess" : "skills.internalUpToDate"),
+          });
+        }
         onChanged();
       } else {
         toastFailure(r);
@@ -108,9 +121,12 @@ export function InternalSkillDetail({ skill, onChanged }: InternalSkillDetailPro
     }
   };
 
-  const installed = detail.isInstalled;
-  const deprecated = detail.state === "DEPRECATED";
-  const actionsReady = !!api?.install; // Phase 2 接入前禁用动作按钮
+  // 安装状态以 prop 为准:安装/卸载后上层重拉列表并同步 selected(同 id 新对象),
+  // 组件内 detail state 只在 mount 初始化,拿它判断会停在操作前的旧状态。
+  const installed = skill.isInstalled;
+  const hasUpdate = skill.hasUpdate;
+  const deprecated = (detail.state ?? skill.state) === "DEPRECATED";
+  const actionsReady = !!api?.install; // preload 未暴露(旧版)时禁用动作按钮
 
   // guide 优先;INLINE 型的 inlineContent 作为补充预览段
   const guide = typeof detail.guide === "string" ? detail.guide.trim() : "";
@@ -140,7 +156,7 @@ export function InternalSkillDetail({ skill, onChanged }: InternalSkillDetailPro
                   {t("skills.installed")}
                 </Badge>
               )}
-              {installed && detail.hasUpdate && (
+              {installed && hasUpdate && (
                 <Badge
                   variant="outline"
                   className="text-[10px] px-1.5 py-0 border-status-warning-border text-status-warning-foreground shrink-0"
@@ -171,7 +187,7 @@ export function InternalSkillDetail({ skill, onChanged }: InternalSkillDetailPro
           <div className="flex items-center gap-2 shrink-0">
             {installed ? (
               <>
-                {detail.hasUpdate && (
+                {hasUpdate && (
                   <Button
                     size="sm"
                     className="gap-1.5"
