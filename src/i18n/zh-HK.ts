@@ -2118,6 +2118,8 @@ const zhHK: Record<TranslationKey, string> = {
   'sandbox.artifacts.sleepingHint': '檔案列表來自上次記錄;點擊下載會自動喚醒沙箱,首次會慢幾秒',
   'sandbox.artifacts.starting': '正在喚醒沙箱,請稍候…',
   'sandbox.artifacts.downloadMissing': '該檔案喺沙箱入面已經唔存在(可能已被刪除),列表已刷新。',
+  'sandbox.artifacts.collapse': '收起產物面板',
+  'sandbox.artifacts.expand': '展開沙箱產物',
   'sandbox.provisioning.starting': '沙箱啟動中',
   'sandbox.provisioning.booting': '沙箱啟動中',
   'sandbox.provisioning.preparing': '沙箱準備中',

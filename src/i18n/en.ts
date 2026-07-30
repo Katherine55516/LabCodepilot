@@ -2112,6 +2112,8 @@ const en = {
   'sandbox.artifacts.sleepingHint': 'List from last known state; downloading wakes the sandbox automatically (first download may take a few seconds)',
   'sandbox.artifacts.starting': 'Waking the sandbox, please wait…',
   'sandbox.artifacts.downloadMissing': 'This file no longer exists in the sandbox (it may have been deleted) — the list has been refreshed.',
+  'sandbox.artifacts.collapse': 'Collapse files panel',
+  'sandbox.artifacts.expand': 'Show sandbox files',
   'sandbox.provisioning.starting': 'Starting sandbox',
   'sandbox.provisioning.booting': 'Starting sandbox',
   'sandbox.provisioning.preparing': 'Preparing sandbox',
