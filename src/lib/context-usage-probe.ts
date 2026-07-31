@@ -31,6 +31,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { userHome } from './user-home';
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { patchLatestAssistantTokenUsage } from './db';
 
@@ -97,7 +98,8 @@ export function fireContextUsageProbe(args: ContextUsageProbeArgs): void {
 async function runProbe(args: ContextUsageProbeArgs): Promise<void> {
   const slug = transcriptSlug(args.cwd);
   const realTranscript = path.join(
-    os.homedir(), '.claude', 'projects', slug, `${args.sdkSessionId}.jsonl`,
+    // userHome() 而非 os.homedir():防 NFT 把变量段通配成 ~/.claude/projects 子树 glob,见 user-home.ts
+    userHome(), '.claude', 'projects', slug, `${args.sdkSessionId}.jsonl`,
   );
   if (!fs.existsSync(realTranscript)) return; // slug 猜错/尚未落盘 → 放弃
 

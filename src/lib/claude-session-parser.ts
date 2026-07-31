@@ -15,6 +15,7 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { userHome, winAppData } from './user-home';
 import type { MessageContentBlock } from '@/types';
 
 // ==========================================
@@ -162,17 +163,19 @@ export interface ClaudeProjectsRoot {
 function getBsAppShadowHome(): string | null {
   const productName = 'claude-bs-agent';
 
+  // 各分支取根一律走 user-home.ts 的屏障函数:NFT 会求值 APPDATA/homedir 并把
+  // productName 变量段通配成整个 Roaming/主目录的 glob(Windows CI EPERM 根因之一)。
   if (process.platform === 'win32') {
-    const appData = process.env.APPDATA;
+    const appData = winAppData();
     if (!appData) return null;
     return path.join(appData, productName, 'claude-home');
   }
 
   if (process.platform === 'darwin') {
-    return path.join(os.homedir(), 'Library', 'Application Support', productName, 'claude-home');
+    return path.join(userHome(), 'Library', 'Application Support', productName, 'claude-home');
   }
 
-  const xdgConfig = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
+  const xdgConfig = process.env.XDG_CONFIG_HOME || path.join(userHome(), '.config');
   return path.join(xdgConfig, productName, 'claude-home');
 }
 

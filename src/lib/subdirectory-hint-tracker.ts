@@ -29,6 +29,7 @@
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
+import { userHome } from './user-home';
 
 /** Filenames to look for in discovered subdirectories, in priority order. */
 const HINT_FILENAMES = [
@@ -147,7 +148,8 @@ export class SubdirectoryHintTracker {
       // Expand leading ~ to home directory.
       let p = rawPath;
       if (p.startsWith('~')) {
-        p = path.join(os.homedir(), p.slice(1));
+        // userHome() 而非 os.homedir():同表达式内「已知前缀+变量」会被 NFT 通配成全盘 glob,见 user-home.ts
+        p = path.join(userHome(), p.slice(1));
       }
 
       // Resolve relative paths against the working directory.

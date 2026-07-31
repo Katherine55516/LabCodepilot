@@ -26,6 +26,7 @@
  */
 
 import path from 'path';
+import { envHome } from './user-home';
 
 /**
  * Tools that must NEVER run in parallel because they require user
@@ -177,7 +178,8 @@ export function extractScopePath(
   // Expand leading ~ to the user's home directory.
   let expanded = rawPath;
   if (expanded.startsWith('~')) {
-    const home = process.env.HOME || process.env.USERPROFILE || '';
+    // envHome() 而非直接读 env:NFT 会求值 HOME/USERPROFILE 并把变量段通配成全盘 glob,见 user-home.ts
+    const home = envHome();
     if (home) {
       expanded = path.join(home, expanded.slice(1));
     }

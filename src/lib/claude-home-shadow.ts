@@ -70,6 +70,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { userHome } from './user-home';
 
 /** Auth-related keys that DB-provider mode strips from settings.env. */
 const AUTH_KEYS_TO_STRIP = new Set([
@@ -100,7 +101,10 @@ export interface ShadowHome {
   cleanup(): void;
 }
 
-const REAL_HOME = (): string => os.homedir();
+// userHome 屏障而非内联箭头函数:平凡的 `() => os.homedir()` 会被 terser 内联回
+// os.homedir(),mirrorPersistDirs 里 join(realHome, rel循环变量) 就会被 NFT 通配成
+// `<home>/**/*` 全盘 glob(Windows CI EPERM 的最大来源,×6),见 user-home.ts。
+const REAL_HOME = userHome;
 const isWindows = process.platform === 'win32';
 
 /**
