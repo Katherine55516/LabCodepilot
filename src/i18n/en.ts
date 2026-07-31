@@ -288,6 +288,7 @@ const en = {
   'test.smoke.createAndRun': 'Create and run',
   'test.smoke.creating': 'Creating…',
   'test.smoke.createFailed': 'Could not create the smoke test',
+  'test.smoke.authInvalidStopped': 'Smoke test stopped: the login state is no longer valid. The remaining scenarios were not run and no smoke report was generated. Capture the login state again in Environment config, then rerun.',
   'test.smoke.noProject': 'Select a project first',
   'test.smoke.noScenarios': 'Add at least one scenario',
   'test.smoke.saveFailed': 'Could not save the scenarios',

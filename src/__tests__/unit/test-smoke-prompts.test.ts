@@ -124,6 +124,32 @@ describe("smoke execution prompt · 口径铁律", () => {
     assert.ok(withCreds.prompt.includes("p@ss"));
   });
 
+  it("三种登录配置都带同一硬停止协议；信号后禁止场景结果、总结与报告", () => {
+    const variants = [
+      buildStep("execution", { ...SMOKE, dataPrefix: PREFIX }),
+      buildStep("execution", { ...SMOKE, dataPrefix: PREFIX, hasLoginState: true }),
+      buildStep("execution", {
+        ...SMOKE,
+        dataPrefix: PREFIX,
+        loginCredentials: { username: "qa", password: "p@ss" },
+      }),
+    ];
+    for (const variant of variants) {
+      assert.ok(variant.prompt.includes('@@AUTH_INVALID {"reason":"login_state_invalid"}'));
+      assert.ok(variant.prompt.includes("停止一切浏览器工具调用与文字输出"));
+      assert.ok(variant.prompt.includes("不要输出任何 `@@RESULT`"));
+      assert.ok(variant.prompt.includes("跳过冒烟报告"));
+      assert.ok(variant.prompt.includes("个别页面权限不足"));
+    }
+    const functional = buildStep("execution", { taskName: "功能任务", hasLoginState: true });
+    assert.equal(functional.prompt.includes("@@AUTH_INVALID"), false, "功能测试保持原协议，不受冒烟硬停止影响");
+  });
+
+  it("覆盖自检明确把登录失效作为机器终止例外，不再要求剩余场景逐条 blocked", () => {
+    assert.ok(b.prompt.includes("当前与剩余场景均不再输出 `@@RESULT`"));
+    assert.ok(b.prompt.includes("若已输出 `@@AUTH_INVALID`，禁止执行本段总结"));
+  });
+
   it("不设置 baseUrl 时给出「不要臆造结果」的兜底口径", () => {
     const noUrl = buildStep("execution", { ...SMOKE, dataPrefix: PREFIX });
     assert.ok(noUrl.prompt.includes("不要臆造结果"));

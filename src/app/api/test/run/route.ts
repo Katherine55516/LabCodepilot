@@ -301,6 +301,10 @@ export async function POST(req: Request): Promise<Response> {
             depositScripts,
             stats,
             roundId,
+            // 冒烟任务发现整站登录态失效时走 @@AUTH_INVALID 硬停止：服务端直接终止
+            // agent 流，不归约 run.json，前端据结构化事件把执行置失败并跳过冒烟报告。
+            stopOnAuthInvalid: taskType === 'smoke',
+            abortAgent: () => abortController.abort(),
             traceRedactions: [
               { value: projectPath, replacement: '${PROJECT_ROOT}' },
               { value: baseUrl, replacement: '${BASE_URL}' },

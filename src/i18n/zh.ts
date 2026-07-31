@@ -286,6 +286,7 @@ const zh: Record<TranslationKey, string> = {
   'test.smoke.createAndRun': '创建并开始执行',
   'test.smoke.creating': '创建中…',
   'test.smoke.createFailed': '创建冒烟任务失败',
+  'test.smoke.authInvalidStopped': '冒烟测试已停止：登录态已失效。剩余场景未继续执行，本次不会生成冒烟报告。请在「环境配置」中重新获取登录态后再重跑。',
   'test.smoke.noProject': '请先选择一个项目',
   'test.smoke.noScenarios': '请至少填写一个测试场景',
   'test.smoke.saveFailed': '保存测试场景失败',

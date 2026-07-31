@@ -19,7 +19,14 @@ import { ModelSelectorDropdown } from "@/components/chat/ModelSelectorDropdown";
 import { useProviderModels } from "@/hooks/useProviderModels";
 import { diffRuns, funcPassRateStr } from "@/lib/test/compare";
 import { parseExecProgress } from "@/lib/test/exec-progress";
-import { createExecLineBuffer, shouldAdoptPlaceholder, type ExecLine, type LiveResult, type LiveStatus } from "@/lib/test/exec-live";
+import {
+  createExecLineBuffer,
+  isAuthInvalidBlockedRun,
+  shouldAdoptPlaceholder,
+  type ExecLine,
+  type LiveResult,
+  type LiveStatus,
+} from "@/lib/test/exec-live";
 import { withDownstreamReset, runStartOptions, taskCategory, occupiedSlots, TASK_CATEGORY_ORDER, type TaskCategory } from "@/lib/test/step-status";
 import { REGRESSION_LIBRARY_TASK, REGRESSION_FULL_SUITE as REGRESSION_FULL_SUITE_NAME } from "@/lib/test/library-constants";
 import type { TestTaskType, SmokeBug, TestAccountProjectSummary } from "@/types";
@@ -902,6 +909,8 @@ export function InlineTestingPanel({ visible = true }: { visible?: boolean } = {
           pushEvt({ k: "sys", text: e.raw, lost: true });
           return;
         }
+        // @@AUTH_INVALID 仅由冒烟 prompt 产出；回归轮次不消费该控制信号。
+        if (e.kind === "authInvalid") return;
         pushEvt({ k: "ai", text: e.text });
       };
 
@@ -1889,6 +1898,14 @@ export function InlineTestingPanel({ visible = true }: { visible?: boolean } = {
     push({ role: "user", text: `▶ ${t("test.flow.run")}「${stepName}」` });
     let sawError = false;
     let stopped = false; // set when the run is aborted via stopStep (停止)
+    let authInvalidStopped = false;
+    const stopForAuthInvalid = () => {
+      // 机器信号只属于冒烟 execution；功能/回归任务即使正文意外出现同名标记也不改变流程。
+      if (task.type !== "smoke" || step !== "execution" || authInvalidStopped) return;
+      authInvalidStopped = true;
+      sawError = true;
+      push({ role: "error", text: t("test.smoke.authInvalidStopped") });
+    };
     // 逐行解析执行步的 AI 文本(@@RESULT / @@CASE_START / ▶ 进度行)。
     // 解析下沉到 lib/test/exec-live.ts,与服务端归约共用 markers.ts —— 原来这里用
     // 「indexOf + slice 到行尾 + JSON.parse」,模型一旦把判定行包成 `**@@RESULT {…}**`
@@ -1911,6 +1928,9 @@ export function InlineTestingPanel({ visible = true }: { visible?: boolean } = {
       } else if (e.kind === "resultMalformed") {
         // 含判定标记却解不出 —— 不静默吞掉,原样放进对话流让用户看得见。
         appendAi(e.raw + "\n");
+      } else if (e.kind === "authInvalid") {
+        // 机器控制行本身不展示；统一用本地化平台文案告知用户，且不信任模型自由文本。
+        stopForAuthInvalid();
       } else if (e.kind === "progress") {
         // currentCase 保留原始文本（parseExecProgress 会再解一次，向后兼容既有渲染）。
         patchTask(id, () => ({ currentCase: e.text }));
@@ -1920,7 +1940,13 @@ export function InlineTestingPanel({ visible = true }: { visible?: boolean } = {
       }
       // caseStart 是纯机器标记,不进对话流(服务端用它给工具轨迹归属用例)。
     };
-    const processText = (chunk: string) => { for (const e of lineBuf.feed(chunk)) applyLine(e); };
+    const processText = (chunk: string) => {
+      for (const e of lineBuf.feed(chunk)) {
+        applyLine(e);
+        // 模型可能在同一 text 帧的硬停止标记后继续吐下一场景；标记之后的内容一律丢弃。
+        if (authInvalidStopped) break;
+      }
+    };
     try {
       const res = await fetch("/api/test/run", {
         method: "POST",
@@ -2053,7 +2079,13 @@ export function InlineTestingPanel({ visible = true }: { visible?: boolean } = {
                 }
                 return patch;
               });
+              // 防御性兜底：旧模型未发机器标记，但权威结果已明确“全 blocked + 登录失效”
+              // 时，仍把本轮冒烟收口为失败，绝不自动接力生成一份无意义报告。
+              if (task.type === "smoke" && isAuthInvalidBlockedRun(rj)) stopForAuthInvalid();
             } catch {}
+          } else if (evt.type === "auth_invalid") {
+            // 服务端识别 @@AUTH_INVALID 后已终止真实 agent 流；这里只负责状态与用户提示。
+            stopForAuthInvalid();
           } else if (evt.type === "step_stats") {
             // 使用统计：服务端在步骤干净收尾时补发的节点用时/模型（权威值），写进 TaskState
             // 供流程节点徽标展示 + 随 workbench 持久化。未知帧旧前端静默忽略、零影响。
@@ -2089,10 +2121,21 @@ export function InlineTestingPanel({ visible = true }: { visible?: boolean } = {
             push({ role: "error", text: msg });
             sawError = true;
           }
+          // 同一次网络读取可能已经带回多帧。结构化 auth_invalid 或 text 内机器标记一旦
+          // 命中，当前批次后面的帧也属于“停止之后”，不能等到整个 frames 循环跑完才取消。
+          if (authInvalidStopped) break;
+        }
+        if (authInvalidStopped) {
+          // 不再消费标记之后的任何“毒丸”帧；服务端也已 abort agent。读侧取消用
+          // fire-and-forget，避免浏览器实现里的 cancel 清理拖住 finally 的终态收口。
+          void reader.cancel().catch(() => {});
+          break;
         }
       }
       // 流末冲刷:最后一行可能没有换行符,漏了它会丢掉一条判定或总结。
-      for (const e of lineBuf.flush()) applyLine(e);
+      if (!authInvalidStopped) {
+        for (const e of lineBuf.flush()) applyLine(e);
+      }
     } catch (e) {
       // 停止 (AbortError) is a user action, not a failure — handle it cleanly below.
       if (ctrl.signal.aborted || (e instanceof DOMException && e.name === "AbortError")) {
@@ -2113,7 +2156,7 @@ export function InlineTestingPanel({ visible = true }: { visible?: boolean } = {
       // (pumpQueue)不受影响——那是「入队前已存在的产物」的隐含确认,本门控只拦本次新生成的用例。
       const gateCases = step === "cases" && autoAll && !stopped && !sawError;
       const finalStatus: StepStatus =
-        stopped ? "idle" : sawError ? "error" : gateCases || (HUMAN_GATED.includes(step) && !autoAll) ? "review" : "done";
+        authInvalidStopped ? "error" : stopped ? "idle" : sawError ? "error" : gateCases || (HUMAN_GATED.includes(step) && !autoAll) ? "review" : "done";
       patchTask(id, (s) => ({ stepStatus: { ...s.stepStatus, [step]: finalStatus } }));
       if (stopped) {
         // 停止 = 在此节点停住，不再向下游接力。标记该步【及其下游】为已停止，auto-chain 便不会
@@ -2621,6 +2664,7 @@ export function InlineTestingPanel({ visible = true }: { visible?: boolean } = {
                     <button
                       key={s.step}
                       onClick={() => setViewStep(s.step)}
+                      data-testid={`test-step-${s.step}`}
                       // 执行中锁定:不能点其他节点(连查看切换也禁用),避免切走详情卡 + 误以为能运行别的节点。
                       disabled={!current?.path || busy}
                       title={stepLabel(s.step, isSmokeTask, t)}
@@ -3637,7 +3681,7 @@ function ConvoBubble({ msg }: { msg: ConvoMsg }) {
       <div className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${cfg.avatar}`}>
         <Cmp size={13} />
       </div>
-      <div className={`${bubble} rounded-tl-sm ${cfg.body}`}>{msg.text}</div>
+      <div data-testid={msg.role === "error" ? "test-convo-error" : undefined} className={`${bubble} rounded-tl-sm ${cfg.body}`}>{msg.text}</div>
     </div>
   );
 }

@@ -1,7 +1,7 @@
 # 冒烟测试（测试工作台第三形态）
 
 > 创建时间：2026-07-30
-> 最后更新：2026-07-30
+> 最后更新：2026-07-31
 > 方案与原型见 [docs/research/smoke-test-feature-proposal.md](../../research/smoke-test-feature-proposal.md) + `docs/research/prototypes/smoke-test-prototype.html`
 > 参照特性：[test-exec-mode.md](../../handover/test-exec-mode.md)（执行机器）、[regression-library.md](../../handover/regression-library.md)（第二形态如何加入）、[test-viewer-defect-revise.md](../../handover/test-viewer-defect-revise.md)（缺陷报告链路）、[test-usage-stats.md](../../handover/test-usage-stats.md)（复核事件与准确度 KPI）
 
@@ -15,7 +15,7 @@
 |-------|------|------|------|
 | Phase 0 | 方案 + 原型 + 决策收敛（8 项全锁） | ✅ 已完成 | 提案 + 原型 v2.1，用户两轮反馈已吸收 |
 | Phase 1 | 数据与类型层：任务 `type`/`moduleEntry`、场景解析、`observations`/`bugs.json` 类型 | ✅ 已完成 | 新增 `lib/test/smoke-scenarios.ts`（24 单测全过）+ 类型 4 处；typecheck 0 |
-| Phase 2 | Prompt 层：冒烟角色 system + 3 变体 + `rules/smoke-test.md` + fallback | ✅ 已完成 | `SMOKE_SYS` + 3 prompt + 规则文件；30 单测（含打包态 fallback + 功能测试零回归） |
+| Phase 2 | Prompt 层：冒烟角色 system + 3 变体 + `rules/smoke-test.md` + fallback | ✅ 已完成 | `SMOKE_SYS` + 3 prompt + 规则文件；32 单测（含打包态 fallback + 功能测试零回归） |
 | Phase 3 | 执行归约：`@@OBSERVATION` harvest → `run.json.observations[]` | ✅ 已完成 | 仅改 reduce.ts；exec-stream **零改动**（唯一归约点走 reduceFromText）；14 单测 |
 | Phase 4 | UI 主链：第三段页签 + 环境沿用条 + 新建表单 + 无门控 auto-chain | ✅ 已完成 | CDP 端到端验证通过（隔离数据目录）；i18n ×3；场景表编辑并入 Phase 5 |
 | Phase 5 | 冒烟报告：结论横幅 + **Bug 可复核列表** + 体验问题 | ✅ 已完成 | 新增 `smoke-bugs.ts`（25 单测）+ `/api/test/bugs`；复核复用 report_reviewed；CDP 全交互验证 |
@@ -23,6 +23,7 @@
 | Phase 7 | 验证：单测 + dev CDP | ✅ dev 侧完成 | 2439 单测 0 fail；API curl 合同（GET/PUT/409/400）+ CDP 报告全交互；**打包态实测待用户发起** |
 | Phase 8 | 文档：handover + insights 互链 + ARCHITECTURE 索引 | ✅ 已完成 | 两份互链文档 + 三处索引（handover/insights README、ARCHITECTURE） |
 | Phase 9 | 冒烟看板环境摘要修复 | ✅ 已完成 | 修复 dash 视图未请求 env-config；按项目路径+环境隔离响应，加载态不误报；2446 单测 0 fail（1 skip）+ 9/9 smoke E2E + dev 截图/console 0 error |
+| Phase 10 | 登录态整体失效机器早停 | ✅ 已完成 | `@@AUTH_INVALID` → 服务端终止 agent → 前端执行置失败并跳过报告；2454 单测 0 fail（1 skip）+ 14/14 smoke E2E + dev CDP/trace 截图、console 0 error |
 
 ## 决策日志
 
@@ -40,6 +41,7 @@
 - 2026-07-30（Phase 1 实施中发现）：**既有 `CASE_TAGS` 里已有一个「冒烟测试」标签**（`InlineTestingPanel.tsx` 的用例编辑器多选标签、导入路由也认），但它**只是功能用例上的人工标注，无任何程序消费**（对比「回归测试」标签驱动 `depositTask` 入库 + reduce 的 `suiteCounts` 红线）。处置：① P1 冒烟场景 `tags` 恒空，与该标签零交互，无功能冲突；② 该标签是 P2「从功能任务提炼冒烟场景」最自然的数据源（用户打了标签 = 已经标出了主流程用例），P2 实现时直接消费它；③ 概念上二者需在文档里说清——**标签 = 功能用例上的标注，形态 = 任务类型**，避免用户困惑"打了冒烟标签的用例为什么不出现在冒烟页签"。已在 `smoke-scenarios.ts` 顶部注释与单测里锁死。
 - 2026-07-30（Phase 1 实施中修正）：任务级地址字段实际是 **`targetUrlByEnv?: Record<string, string>`（按 env 隔离）**，非方案里写的单一 `targetUrl`（那是已迁移的旧字段）。冒烟的地址覆盖直接复用该结构，Phase 4 写表单时按当前 `selectedEnv` 存取。
 - 2026-07-30（Phase 9 缺陷修复）：**冒烟项目看板与新建弹窗必须和 flow 共用 `/api/test/env-config`，并将响应绑定到 `normalize(projectPath) + env` scope**。根因是 Phase 4 新增了 dash 消费者，却沿用了旧 effect 的 `view === "flow"` 加载门槛，导致配置与登录态真实存在时仍把 `null` 渲染成“未配置/未捕获”。不在弹窗内另建请求，也不改服务端 resolver；scope key 同时防止切项目/环境时旧 URL 与登录态串台，首次加载明确显示 loading。
+- 2026-07-30（Phase 10 缺陷修复）：**登录态整体失效必须是平台机器终态，不能只靠 AI 自然语言“自觉停止”**。历史修复只改提示词，流正常 EOF 后前端仍把 execution 标 `done`，auto-chain 随即生成无意义报告。新增冒烟专用裸标记 `@@AUTH_INVALID {"reason":"login_state_invalid"}`：服务端识别后立即 abort agent、取消上游且不归约本轮 run.json；前端以 `error` 收口、显示三语平台提示并保持 report `idle`。为兼容未遵守新标记的旧模型，只有在权威结果满足“全部 blocked + 至少一条明确登录失效证据”时才做报告阻断兜底；个别页面权限或单接口 401 不触发机器早停。
 
 ## 详细设计
 
@@ -114,6 +116,7 @@
 6. `npm run test` 通过（typecheck + 单测），新增单测覆盖：场景解析（各分隔符/空行/缺预期）、scenariosToCases 结构、smoke prompt 变体断言（含 fallback 生效）、`@@OBSERVATION` 归约与旧 run.json 兼容。
 7. dev 态 CDP 验证：三段页签切换、新建表单两态、场景表编辑、Bug 复核列表交互（severity 改、三种复核、批量、进度）、控制台无报错；登录态相关走 mock（dev 无登录体系）。
 8. 打包态实测：真实项目跑一轮冒烟（含登录态注入 + 真 AI 执行 + 报告 + 复核落盘）。
+9. 登录态整体失效：AI 发出 `@@AUTH_INVALID` 后服务端取消后续源读取、不落本轮 run.json，UI 同时丢弃同批次已到达的后续场景；执行节点收口为失败、报告保持未开始、对话明确提示重新获取登录态；自动接力对 `/api/test/run` 的请求序列只有 `execution`，正常冒烟仍为 `execution → report`。
 
 ### 风险与已知边界
 

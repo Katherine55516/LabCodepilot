@@ -18,6 +18,8 @@ import { POST } from "../../app/api/test/run/route";
 import { readManifest } from "../../lib/test/script-artifacts";
 import { readTraceFile } from "../../lib/test/script-trace";
 import { appendRound, readRounds, roundAliveFile, type RegressionRound } from "../../lib/test/rounds";
+import { getRuntime, registerRuntime } from "../../lib/runtime/registry";
+import type { AgentRuntime } from "../../lib/runtime/types";
 
 let proj: string;
 beforeEach(() => { proj = fs.mkdtempSync(path.join(os.tmpdir(), "exec-stream-")); });
@@ -54,6 +56,51 @@ describe("wrapExecutionStream", () => {
     assert.equal(run.status, "failed");
     const histDir = path.join(proj, "AI_LabTest", "report", "订单", ".history");
     assert.equal(fs.readdirSync(histDir).filter((f) => f.endsWith(".run.json")).length, 1, "one history snapshot");
+  });
+
+  it("冒烟 @@AUTH_INVALID 跨帧到达 → 取消上游、发结构化终止事件且不产 run.json", async () => {
+    let sourceCancelled = false;
+    let agentAborted = false;
+    const src = new ReadableStream<string>({
+      start(controller) {
+        controller.enqueue(textFrame("@@AUTH_INVA"));
+        controller.enqueue(textFrame('LID {"reason":"login_state_invalid"}\n'));
+        controller.enqueue(textFrame("▶ 场景 2/7：毒丸——不得继续处理\n"));
+        // 故意不 close：没有平台硬停止时 drain 会永久挂起。
+      },
+      cancel() { sourceCancelled = true; },
+    });
+    const out = await drain(wrapExecutionStream(src, {
+      projectPath: proj,
+      taskName: "订单",
+      env: "local",
+      runStartMs: Date.now(),
+      depositScripts: false,
+      stopOnAuthInvalid: true,
+      abortAgent: () => { agentAborted = true; },
+    }));
+    const joined = out.join("");
+    assert.equal(agentAborted, true, "必须终止真实 agent run");
+    assert.equal(sourceCancelled, true, "必须取消上游流，不能继续跑后续场景");
+    assert.ok(joined.includes('"type":"auth_invalid"'), "前端收到结构化登录失效事件");
+    assert.equal(joined.includes("毒丸"), false, "标记后的后续场景不得再转发");
+    assert.equal(joined.includes('"type":"run_json"'), false, "早停轮不归约 run.json");
+    assert.equal(fs.existsSync(runJsonPath()), false, "早停轮不落本轮 run.json");
+  });
+
+  it("功能执行未开启硬停止时，同名文本不改变正常归约", async () => {
+    const src = mockStream([
+      textFrame('@@AUTH_INVALID {"reason":"login_state_invalid"}\n@@RESULT {"id":"TC-1","status":"pass"}\n'),
+    ]);
+    const out = await drain(wrapExecutionStream(src, {
+      projectPath: proj,
+      taskName: "订单",
+      env: "local",
+      runStartMs: Date.now(),
+      depositScripts: false,
+    }));
+    assert.ok(out.some((chunk) => chunk.includes('"type":"run_json"')));
+    assert.equal(readRun().counts.pass, 1);
   });
 
   it("joins cases.json verification → funcCounts excludes 回归基线 (oracle 双轴)", async () => {
@@ -238,5 +285,81 @@ describe("POST /api/test/run — guards", () => {
   it("rejects a traversal taskName before reaching the agent (H2)", async () => {
     const res = await POST(new Request("http://x/api/test/run", { method: "POST", body: JSON.stringify({ projectPath: proj, taskName: "../../evil", step: "requirement" }) }));
     assert.equal(res.status, 400);
+  });
+});
+
+describe("POST /api/test/run — 冒烟登录失效接线", () => {
+  it("仅 taskType=smoke 开启硬停止，并把 agent 的 AbortController 一并中止", async () => {
+    const originalNative = getRuntime("native");
+    assert.ok(originalNative, "route side-effect 应已注册 native runtime");
+    let agentAborted = false;
+    let sourceCancelled = false;
+    let streamCall = 0;
+    const fakeNative: AgentRuntime = {
+      id: "native",
+      displayName: "test native",
+      description: "route contract test",
+      isAvailable: () => true,
+      interrupt: () => {},
+      dispose: () => {},
+      stream(options) {
+        streamCall += 1;
+        options.abortController?.signal.addEventListener("abort", () => { agentAborted = true; });
+        if (streamCall === 1) {
+          return new ReadableStream<string>({
+            start(controller) {
+              controller.enqueue(textFrame('@@AUTH_INVALID {"reason":"login_state_invalid"}\n'));
+              controller.enqueue(textFrame("▶ 场景 2/2：服务端不得继续转发\n"));
+              // 故意不 close：只有 route 正确打开 stopOnAuthInvalid 才能收口。
+            },
+            cancel() { sourceCancelled = true; },
+          });
+        }
+        return mockStream([
+          textFrame('@@AUTH_INVALID {"reason":"login_state_invalid"}\n@@RESULT {"id":"TC-1","status":"pass"}\n'),
+        ]);
+      },
+    };
+    registerRuntime(fakeNative);
+    try {
+      const smoke = await POST(new Request("http://x/api/test/run", {
+        method: "POST",
+        body: JSON.stringify({
+          projectPath: proj,
+          taskName: "订单",
+          step: "execution",
+          env: "local",
+          taskType: "smoke",
+          providerId: "openai-oauth",
+          depositScripts: false,
+        }),
+      }));
+      assert.equal(smoke.status, 200);
+      assert.ok(smoke.body);
+      const smokeBody = (await drain(smoke.body as unknown as ReadableStream<string>)).join("");
+      assert.match(smokeBody, /"type":"auth_invalid"/);
+      assert.doesNotMatch(smokeBody, /服务端不得继续转发/);
+      assert.equal(agentAborted, true, "route 必须把硬停止传回真实 agent AbortController");
+      assert.equal(sourceCancelled, true, "route 必须取消 agent 源流");
+
+      const functional = await POST(new Request("http://x/api/test/run", {
+        method: "POST",
+        body: JSON.stringify({
+          projectPath: proj,
+          taskName: "订单",
+          step: "execution",
+          env: "local",
+          providerId: "openai-oauth",
+          depositScripts: false,
+        }),
+      }));
+      assert.equal(functional.status, 200);
+      assert.ok(functional.body);
+      const functionalBody = (await drain(functional.body as unknown as ReadableStream<string>)).join("");
+      assert.doesNotMatch(functionalBody, /"type":"auth_invalid"/);
+      assert.match(functionalBody, /"type":"run_json"/);
+    } finally {
+      registerRuntime(originalNative);
+    }
   });
 });

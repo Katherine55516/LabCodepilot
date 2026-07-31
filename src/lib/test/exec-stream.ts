@@ -11,7 +11,7 @@ import { depositTask, readTaskCases, REGRESSION_LIBRARY_TASK } from '@/lib/test/
 import { readRoundSnapshot, createRoundKeeper, type RoundKeeper } from '@/lib/test/rounds';
 import { ScriptTraceCollector, writeTraceFile, type TraceRedaction } from '@/lib/test/script-trace';
 import { enqueueIncrementalScriptCase, enqueueScriptJob, type IncrementalScriptCaseRequest } from '@/lib/test/script-job-manager';
-import { harvestMarkerObjects } from '@/lib/test/markers';
+import { findAuthInvalidSignal, harvestMarkerObjects } from '@/lib/test/markers';
 import { createCaseIdResolver, remapCaseKeys } from '@/lib/test/case-id';
 
 /**
@@ -181,6 +181,13 @@ export function wrapExecutionStream(
     stats?: StepStats;
     roundId?: string;
     traceRedactions?: TraceRedaction[];
+    /**
+     * 冒烟专用登录失效硬停止：AI 输出 @@AUTH_INVALID 后立刻掐断上游智能体，
+     * 不做 run.json 归约，也不给前端留下“正常完成→自动接力报告”的机会。
+     */
+    stopOnAuthInvalid?: boolean;
+    /** 终止真实 agent run（仅与 stopOnAuthInvalid 一起由 run 路由传入）。 */
+    abortAgent?: () => void;
     /**
      * 后台脚本沉淀(逐条增量生成 + 收口对账入队)。默认开启。
      *
@@ -428,6 +435,7 @@ export function wrapExecutionStream(
         frameBuf += value;
         const frames = frameBuf.split('\n\n');
         frameBuf = frames.pop() || '';
+        let authInvalid = false;
         for (const f of frames) {
           const line = f.replace(/^data:\s?/, '').trim();
           if (!line) continue;
@@ -439,6 +447,9 @@ export function wrapExecutionStream(
               traceCollector.feedText(evt.data || '');
               // 顺序要紧:先喂 trace(把该用例的轨迹/元素收全),再让 feeder 取用。
               incremental.feedText(evt.data || '');
+              // 控制标记可能被 SDK 拆在多个 text 帧里，所以对累计文本查找完整行。只在冒烟
+              // 路由显式开启时生效；功能/回归执行即使正文提到该词也不会被平台终止。
+              if (opts.stopOnAuthInvalid && findAuthInvalidSignal(textAcc)) authInvalid = true;
             } else if (evt?.type === 'tool_use') {
               try { traceCollector.feedToolUse(JSON.parse(evt.data || '{}')); } catch { /* ignore */ }
             } else if (evt?.type === 'tool_result') {
@@ -456,6 +467,17 @@ export function wrapExecutionStream(
           } catch {
             // ignore non-JSON frames
           }
+        }
+        if (authInvalid) {
+          // 先把包含标记的原始 text 帧转给前端（exec-live 会隐藏机器行），再发结构化终止
+          // 事件。随后同时 abort agent + cancel reader，保证不会继续跑下一场景；刻意跳过
+          // done 分支的 run.json/统计/脚本沉淀，报告因执行未完成而不应生成。
+          try { opts.abortAgent?.(); } catch { /* best-effort */ }
+          void reader.cancel('smoke auth invalid').catch(() => {});
+          round?.settleAborted();
+          controller.enqueue(`data: ${JSON.stringify({ type: 'auth_invalid', data: 'login_state_invalid' })}\n\n`);
+          controller.close();
+          return;
         }
       } catch (e) {
         // 流内部报错(SDK 流 reject 等):run.json 没写成,轮次按中断收(层①的 error 路径)。

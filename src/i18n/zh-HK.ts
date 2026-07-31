@@ -295,6 +295,7 @@ const zhHK: Record<TranslationKey, string> = {
   'test.smoke.createAndRun': '建立並開始執行',
   'test.smoke.creating': '建立中…',
   'test.smoke.createFailed': '建立冒煙任務失敗',
+  'test.smoke.authInvalidStopped': '冒煙測試已停止：登入狀態已失效。剩餘場景不會繼續執行，本次不會產生冒煙報告。請在「環境設定」中重新擷取登入狀態後再重跑。',
   'test.smoke.noProject': '請先選擇一個專案',
   'test.smoke.noScenarios': '請至少填寫一個測試場景',
   'test.smoke.saveFailed': '儲存測試場景失敗',

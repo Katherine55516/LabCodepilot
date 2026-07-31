@@ -1,4 +1,10 @@
-import { harvestMarkers, isProgressLine, stripLineDecoration, PROGRESS_PREFIX } from './markers';
+import {
+  harvestMarkers,
+  isProgressLine,
+  parseAuthInvalidSignal,
+  stripLineDecoration,
+  PROGRESS_PREFIX,
+} from './markers';
 
 /**
  * 测试工作台 · 执行步 SSE 文本流的**实时**逐行解析(客户端安全:纯字符串,无 Node 依赖)。
@@ -44,6 +50,8 @@ export type ExecLine =
   | { kind: 'result'; result: LiveResult }
   /** 含 `@@RESULT` 与 `{`,但 JSON 解不出 —— 模型输出严重跑偏,必须可观测,不能静默吞掉。 */
   | { kind: 'resultMalformed'; raw: string }
+  /** 冒烟专用：整站登录态失效，平台应立即终止执行并跳过报告。机器行本身不进对话。 */
+  | { kind: 'authInvalid'; reason?: string }
   | { kind: 'caseStart'; id: string; index?: number }
   /**
    * 进度行。`text` 已剥掉 `▶ ` 前缀与 markdown 装饰;`title` 进一步剥掉「用例 N/总数：」,
@@ -70,6 +78,10 @@ function toResult(o: Record<string, unknown>): LiveResult | null {
  * 解析口径与服务端 `harvestResults` 完全一致(同一个 markers.ts)。
  */
 export function classifyExecLine(line: string): ExecLine {
+  if (line.includes('@@AUTH_INVALID')) {
+    const signal = parseAuthInvalidSignal(line);
+    if (signal) return { kind: 'authInvalid', ...signal };
+  }
   if (line.includes('@@RESULT')) {
     const { items, malformed } = harvestMarkers<Record<string, unknown>>(line, 'RESULT');
     const r = items.length ? toResult(items[0]) : null;
@@ -93,6 +105,32 @@ export function classifyExecLine(line: string): ExecLine {
   // 注意在【剥装饰之前】判断:stripLineDecoration 会把 `-` 当列表符剥掉,`---` 会变成空串。
   if (/^\s*([-*_])\1{2,}\s*$/.test(line)) return { kind: 'text', text: '' };
   return { kind: 'text', text: line };
+}
+
+/**
+ * 兼容兜底：旧模型未遵守 @@AUTH_INVALID 协议、但最终 run.json 已明确显示整轮都被
+ * 登录墙挡住时，同样阻止冒烟报告接力。它只能在流结束时生效（不如机器信号即时），但可
+ * 保证“登录失效轮不产报告”。要求【全部 blocked + 至少一条明确登录失效证据】，避免把
+ * 普通场景权限不足、路径失败误判为整站登录失效。
+ */
+export function isAuthInvalidBlockedRun(run: unknown): boolean {
+  if (!run || typeof run !== 'object') return false;
+  const tests = (run as { tests?: unknown }).tests;
+  if (!Array.isArray(tests) || tests.length === 0) return false;
+  const rows = tests.filter((row): row is Record<string, unknown> => !!row && typeof row === 'object');
+  if (rows.length !== tests.length || !rows.every((row) => String(row.status ?? '').toLowerCase() === 'blocked')) {
+    return false;
+  }
+  const evidence = rows
+    .map((row) => `${typeof row.error === 'string' ? row.error : ''} ${typeof row.actual === 'string' ? row.actual : ''}`)
+    .join('\n');
+  const explicitStateInvalid =
+    /(?:登录态|会话|认证状态).{0,16}(?:失效|过期|未生效|未检测到|未捕获|缺失)|\b(?:login\s+state|auth(?:entication)?\s+state|session)\b.{0,24}(?:expired|invalid|missing|not\s+found|not\s+captured|failed)/i;
+  const globalLoginWall =
+    /(?:整站|整个系统|被测系统|所有页面|全部页面).{0,32}(?:(?:均|都|全部)?(?:被)?(?:重定向|跳转|返回).{0,16}(?:登录页|企业\s*SSO|单点登录|登录墙)|(?:登录页|企业\s*SSO|单点登录|登录墙).{0,16}(?:拦截|挡住|要求重新登录))|(?:登录页|企业\s*SSO|单点登录|登录墙).{0,24}(?:拦截|挡住|无法进入|无法访问|进不去|要求重新登录).{0,32}(?:整站|整个系统|被测系统|所有页面|全部页面)|(?:whole\s+site|entire\s+system|tested\s+system|all\s+pages|every\s+page).{0,40}(?:(?:redirect(?:ed)?|sent)\s+to.{0,16}(?:login|sso)|(?:login\s+page|sso|login\s+wall).{0,16}(?:block|requires?\s+(?:a\s+)?login))|(?:login\s+page|sso|login\s+wall).{0,24}(?:block|cannot|can't|unable).{0,32}(?:whole\s+site|entire\s+system|tested\s+system|all\s+pages|every\s+page)/i;
+  const global401 =
+    /(?:(?:整站|整个系统|全局|所有请求|全部请求|每个请求|whole\s+site|entire\s+system|global|all\s+requests|every\s+request).{0,40}\b401\b|\b401\b.{0,40}(?:整站|整个系统|全局|所有请求|全部请求|每个请求|whole\s+site|entire\s+system|global|all\s+requests|every\s+request))/i;
+  return explicitStateInvalid.test(evidence) || globalLoginWall.test(evidence) || global401.test(evidence);
 }
 
 export interface ExecLineBuffer {

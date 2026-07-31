@@ -9,7 +9,14 @@
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { classifyExecLine, createExecLineBuffer, progressCounts, shouldAdoptPlaceholder, type ExecLine } from "../../lib/test/exec-live";
+import {
+  classifyExecLine,
+  createExecLineBuffer,
+  isAuthInvalidBlockedRun,
+  progressCounts,
+  shouldAdoptPlaceholder,
+  type ExecLine,
+} from "../../lib/test/exec-live";
 
 /** 2026-07-10 线上执行步的真实 assistant 文本(节选,原样保留加粗与诱饵行)。 */
 const REAL = [
@@ -147,6 +154,97 @@ describe("createExecLineBuffer — SSE 把一行切成多帧", () => {
     const out = [...b.feed(REAL.join("\n") + "\n"), ...b.flush()];
     const c = out.reduce<Record<string, number>>((m, e) => ((m[e.kind] = (m[e.kind] ?? 0) + 1), m), {});
     assert.deepEqual(c, { caseStart: 2, progress: 2, result: 2, text: 2 });
+  });
+});
+
+describe("@@AUTH_INVALID — 冒烟登录失效硬停止", () => {
+  it("裸标记与 markdown 装饰都解析为控制信号，普通正文提及不误停", () => {
+    for (const line of [
+      '@@AUTH_INVALID {"reason":"login_state_invalid"}',
+      '**@@AUTH_INVALID {"reason":"login_state_invalid"}**',
+      '`@@AUTH_INVALID {"reason":"login_state_invalid"}`',
+    ]) {
+      const event = classifyExecLine(line);
+      assert.equal(event.kind, "authInvalid", line);
+      if (event.kind === "authInvalid") assert.equal(event.reason, "login_state_invalid");
+    }
+    assert.equal(
+      classifyExecLine('若登录失效应输出 @@AUTH_INVALID {"reason":"login_state_invalid"}').kind,
+      "text",
+      "正文里的协议示例不得终止真实执行",
+    );
+    assert.equal(classifyExecLine("@@AUTH_INVALID {reason: nope}").kind, "text");
+  });
+
+  it("标记被 SSE 切成多段时，只有完整行到达后才触发", () => {
+    const buffer = createExecLineBuffer();
+    assert.deepEqual(kinds(buffer.feed('@@AUTH_INVA')), []);
+    assert.deepEqual(kinds(buffer.feed('LID {"reason":"login_')), []);
+    assert.deepEqual(kinds(buffer.feed('state_invalid"}\n')), ["authInvalid"]);
+  });
+
+  it("全 blocked 且有明确登录失效证据才命中兼容兜底", () => {
+    assert.equal(isAuthInvalidBlockedRun({
+      tests: [
+        { id: "SM-001", status: "blocked", error: "页面重定向至登录页，登录态已失效" },
+        { id: "SM-002", status: "blocked", error: "用例未执行" },
+      ],
+    }), true);
+    assert.equal(isAuthInvalidBlockedRun({
+      tests: [
+        { id: "SM-001", status: "blocked", error: "模块入口不存在" },
+        { id: "SM-002", status: "blocked", error: "依赖场景未通过" },
+      ],
+    }), false);
+    assert.equal(isAuthInvalidBlockedRun({
+      tests: [
+        { id: "SM-001", status: "blocked", error: "单个报表接口返回 401 Unauthorized" },
+        { id: "SM-002", status: "blocked", error: "依赖场景未通过" },
+      ],
+    }), false, "单接口 401 不能冒充整站登录失效");
+    assert.equal(isAuthInvalidBlockedRun({
+      tests: [
+        { id: "SM-001", status: "blocked", error: "当前账号无该页面权限" },
+        { id: "SM-002", status: "blocked", error: "依赖场景未通过" },
+      ],
+    }), false, "个别页面权限不足不能冒充整站登录失效");
+    assert.equal(isAuthInvalidBlockedRun({
+      tests: [
+        { id: "SM-001", status: "blocked", error: "登录页验证码未显示" },
+        { id: "SM-002", status: "blocked", error: "依赖场景未通过" },
+      ],
+    }), false, "被测模块自身是登录页时，页面缺陷不能冒充会话失效");
+    assert.equal(isAuthInvalidBlockedRun({
+      tests: [
+        { id: "SM-001", status: "blocked", error: "企业 SSO 页面提交按钮不可用" },
+        { id: "SM-002", status: "blocked", error: "依赖场景未通过" },
+      ],
+    }), false, "裸 SSO 页面问题不能冒充整站登录失效");
+    for (const error of [
+      "企业 SSO 跳转正常，风险模块入口不存在",
+      "退出登录后未跳转到登录页",
+      "单个认证接口返回 401 Unauthorized，其他页面可访问",
+      "单个登录接口偶发返回 401，其他请求正常",
+    ]) {
+      assert.equal(isAuthInvalidBlockedRun({
+        tests: [
+          { id: "SM-001", status: "blocked", error },
+          { id: "SM-002", status: "blocked", error: "依赖场景未通过" },
+        ],
+      }), false, `正常/否定语义或单接口 401 不得触发：${error}`);
+    }
+    assert.equal(isAuthInvalidBlockedRun({
+      tests: [
+        { id: "SM-001", status: "blocked", error: "整个系统所有请求均返回 401，认证状态已失效" },
+        { id: "SM-002", status: "blocked", error: "用例未执行" },
+      ],
+    }), true, "带整站认证语义的 401 才可命中兜底");
+    assert.equal(isAuthInvalidBlockedRun({
+      tests: [
+        { id: "SM-001", status: "blocked", error: "登录态已失效" },
+        { id: "SM-002", status: "pass" },
+      ],
+    }), false, "不是整轮 blocked 时不得误判成整站登录失效");
   });
 });
 
