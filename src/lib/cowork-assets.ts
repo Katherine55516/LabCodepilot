@@ -230,7 +230,7 @@ async function downloadToPart(opts: {
   for (const url of urls) {
     try {
       const hash = crypto.createHash('sha512');
-      let offset = await hashExisting(partPath, hash);
+      const offset = await hashExisting(partPath, hash);
       const headers: Record<string, string> = {};
       if (offset > 0) headers.Range = `bytes=${offset}-`;
       const res = await fetch(url, { headers, signal });

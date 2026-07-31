@@ -108,7 +108,6 @@ export function sanitizeInput(
   if (!text) return { text: '', truncated: false };
 
   // Strip control characters except \n (0x0A) and \t (0x09)
-  // eslint-disable-next-line no-control-regex
   let sanitized = text.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, '');
 
   const truncated = sanitized.length > maxLength;

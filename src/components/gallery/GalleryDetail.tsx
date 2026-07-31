@@ -134,7 +134,6 @@ export function GalleryDetail({
             <div className="absolute inset-0 flex items-center justify-center">
               {currentImage && (
                 isVideo ? (
-                  // eslint-disable-next-line jsx-a11y/media-has-caption
                   <video
                     src={imageUrl(currentImage)}
                     controls

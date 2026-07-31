@@ -8,6 +8,7 @@
  */
 import net from 'net';
 import fs from 'fs';
+import { PassThrough } from 'stream';
 
 // M3:路径单一事实源迁至 cowork-paths;保留 re-export 兼容 claude-client 的既有 import。
 export { VSOCK_SOCKET_PATH } from './cowork-paths';
@@ -218,7 +219,6 @@ async function streamOp(op: string, extra: Record<string, unknown>): Promise<{ s
   const size = Number(obj.size || 0);
   // 用 PassThrough 精确投递 size 字节:先灌 header 之后的 rest,再转发后续 data,
   // 满 size 即结束(daemon 发完 body 会关连接,这里以字节数为准更稳)。
-  const { PassThrough } = require('stream') as typeof import('stream');
   const out = new PassThrough();
   let sent = 0;
   const push = (buf: Buffer) => {

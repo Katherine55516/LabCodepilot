@@ -75,7 +75,6 @@ export function McpInstallDialog({
   const needsAck = trust?.friction === "extra-confirm";
 
   // Reset when (re)opened
-  /* eslint-disable react-hooks/set-state-in-effect -- intentional reset on open */
   useEffect(() => {
     if (open) {
       setPhase("form");

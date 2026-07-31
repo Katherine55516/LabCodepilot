@@ -63,7 +63,6 @@ export function GalleryGrid({ items, onSelect }: GalleryGridProps) {
             <div className="relative bg-muted/30">
               {url ? (
                 isVideo ? (
-                  // eslint-disable-next-line jsx-a11y/media-has-caption
                   <video
                     src={url}
                     muted

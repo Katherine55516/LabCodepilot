@@ -367,7 +367,7 @@ function fireSessionReconcile(): void {
   void import('./cowork-audit').then((m) => m.audit('vm_start'));
   (async () => {
     try {
-      const { getAllSessions } = require('./db') as typeof import('./db');
+      const { getAllSessions } = await import('./db');
       const keep = getAllSessions().map((sess) => sess.id);
       const { reconcileSessionDirs } = await import('./cowork-transfer');
       const removed = await reconcileSessionDirs(keep);

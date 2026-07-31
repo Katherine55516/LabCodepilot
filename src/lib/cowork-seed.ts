@@ -116,6 +116,7 @@ export function resolveDaemonSource(): string | null {
   const bundled = bundledCoworkResource('cowork-daemon.py');
   if (bundled) candidates.push(bundled);
   try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports -- 同步函数内惰性加载,db 不可加载时由 catch 降级;import() 会把本函数变异步
     const { getSetting } = require('./db') as typeof import('./db');
     const fwd = (getSetting('cowork_forwarder_path') || '').trim();
     if (fwd) candidates.push(path.join(path.dirname(fwd), 'cowork-daemon.py'));

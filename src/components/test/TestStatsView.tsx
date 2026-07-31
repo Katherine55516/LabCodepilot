@@ -426,25 +426,24 @@ function FunctionalStatsBody({ t }: { t: T }) {
  * 轮次明细等本期先不做，聚合层已算出相应口径的扩展位。
  */
 function RegressionStatsView({ t, projectPath }: { t: T; projectPath: string }) {
-  const [data, setData] = useState<RegressionStats | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
+  // 结果自带来源 path,loading/error 由「结果是否匹配当前 path」派生 —— effect 内不做
+  // 同步 setState(react-hooks/set-state-in-effect),路径切换的当次渲染即回到加载态。
+  const [result, setResult] = useState<{ path: string; data: RegressionStats | null } | null>(null);
 
   useEffect(() => {
-    if (!projectPath) { setLoading(false); setError(true); return; }
+    if (!projectPath) return;
     let cancelled = false;
-    setLoading(true);
-    setError(false);
     fetch(`/api/test/regression-stats?projectPath=${encodeURIComponent(projectPath)}`)
       .then((r) => (r.ok ? r.json() : null))
-      .then((d) => {
-        if (cancelled) return;
-        if (d?.data) setData(d.data as RegressionStats); else setError(true);
-        setLoading(false);
-      })
-      .catch(() => { if (!cancelled) { setError(true); setLoading(false); } });
+      .then((d) => { if (!cancelled) setResult({ path: projectPath, data: (d?.data as RegressionStats | undefined) ?? null }); })
+      .catch(() => { if (!cancelled) setResult({ path: projectPath, data: null }); });
     return () => { cancelled = true; };
   }, [projectPath]);
+
+  const current = result?.path === projectPath ? result : null;
+  const loading = !!projectPath && !current;
+  const data = current?.data ?? null;
+  const error = !projectPath || (!!current && !current.data);
 
   const weekLabels = useMemo(() => (data?.weekly ?? []).map((w) => fmtDate(w.weekStart)), [data]);
 

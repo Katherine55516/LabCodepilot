@@ -6827,7 +6827,6 @@ function RegressionSuitesSection({ t, projectPath }: { t: T; projectPath: string
         .catch(() => setPreview(null));
     }, 300);
     return () => clearTimeout(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectPath, editing]);
 
   const startNew = () => { setErrMsg(""); setEditing({ name: "", type: "query", pri: [], module: [], task: [], last: [], keys: new Set() }); };

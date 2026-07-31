@@ -59,6 +59,7 @@ export function useCoworkStatus(active: boolean = true) {
 
   useEffect(() => {
     if (!active) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- refresh 为 async,setData 在 await 之后的异步回调里,并非同步 setState(规则误报)
     refresh();
     window.addEventListener('cowork-status-changed', refresh);
     window.addEventListener('cowork-assets-changed', refresh);
