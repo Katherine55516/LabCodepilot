@@ -245,6 +245,36 @@ describe("wrapReportStream — 报告 .md 落盘校验", () => {
     assert.ok(out.includes('"type":"error"')); // 末尾补了 error
     assert.ok(out.includes("未生成"));
   });
+  it("冒烟报告收口会把旧版 Bug 列表规范化为固定 8 列表格，功能报告不改写", async () => {
+    const taskDir = path.dirname(reportMd());
+    fs.mkdirSync(taskDir, { recursive: true });
+    const legacy = "# 冒烟报告\n\n## 三、Bug 清单\n\n- BUG-01：保存失败\n\n## 五、整体结论\n\n未通过。\n";
+    fs.writeFileSync(reportMd(), legacy, "utf-8");
+    fs.writeFileSync(runJsonPath(), JSON.stringify({
+      counts: { total: 1, pass: 0, fail: 1, partial: 0, blocked: 0 },
+      tests: [{ id: "SM-001", status: "fail", error: "保存失败", api: { method: "POST", url: "/api/order", status: 500 } }],
+    }), "utf-8");
+
+    await drain(wrapReportStream(mockStream([textFrame("完成")]), {
+      projectPath: proj,
+      taskName: "订单",
+      env: "local",
+      taskType: "smoke",
+      depositScripts: false,
+    }));
+    const normalized = fs.readFileSync(reportMd(), "utf-8");
+    assert.match(normalized, /\| 编号 \| 标题 \| 严重级别 \| 关联场景 \| 实际 \| 预期 \| 接口 \| 证据 \|/);
+    assert.match(normalized, /\| BUG-01 \| 保存失败 \| 严重 \| SM-001 \|/);
+
+    fs.writeFileSync(reportMd(), legacy, "utf-8");
+    await drain(wrapReportStream(mockStream([textFrame("功能报告完成")]), {
+      projectPath: proj,
+      taskName: "订单",
+      env: "local",
+      depositScripts: false,
+    }));
+    assert.equal(fs.readFileSync(reportMd(), "utf-8"), legacy, "功能测试报告 Markdown 必须保持原样");
+  });
   it("报告成功 + run.json 存在 → 排队脚本任务；同一 run 重复报告不重复生成", async () => {
     const taskDir = path.dirname(reportMd());
     fs.mkdirSync(taskDir, { recursive: true });
@@ -358,6 +388,60 @@ describe("POST /api/test/run — 冒烟登录失效接线", () => {
       const functionalBody = (await drain(functional.body as unknown as ReadableStream<string>)).join("");
       assert.doesNotMatch(functionalBody, /"type":"auth_invalid"/);
       assert.match(functionalBody, /"type":"run_json"/);
+    } finally {
+      registerRuntime(originalNative);
+    }
+  });
+});
+
+describe("POST /api/test/run — 冒烟回归脚本硬关断", () => {
+  it("旧客户端显式传 depositScripts:true 时，execution/report 均不创建 manifest", async () => {
+    const originalNative = getRuntime("native");
+    assert.ok(originalNative);
+    const casesFile = path.join(proj, "AI_LabTest", "testCase", ".data", "订单.cases.json");
+    fs.mkdirSync(path.dirname(casesFile), { recursive: true });
+    fs.writeFileSync(casesFile, JSON.stringify({
+      cases: [{ id: "SM-001", purpose: "下单", tags: ["回归测试"] }],
+    }), "utf-8");
+    let streamCall = 0;
+    const fakeNative: AgentRuntime = {
+      id: "native",
+      displayName: "test native",
+      description: "smoke deposit guard",
+      isAvailable: () => true,
+      interrupt: () => {},
+      dispose: () => {},
+      stream() {
+        streamCall += 1;
+        if (streamCall === 2) {
+          const report = path.join(proj, "AI_LabTest", "report", "订单", "订单-local.md");
+          fs.mkdirSync(path.dirname(report), { recursive: true });
+          fs.writeFileSync(report, "# 冒烟报告\n\n## 三、Bug 清单\n\n无。\n", "utf-8");
+          return mockStream([textFrame("报告完成")]);
+        }
+        return mockStream([textFrame('@@RESULT {"id":"SM-001","status":"pass","actual":"下单成功"}\n')]);
+      },
+    };
+    registerRuntime(fakeNative);
+    try {
+      for (const step of ["execution", "report"] as const) {
+        const res = await POST(new Request("http://x/api/test/run", {
+          method: "POST",
+          body: JSON.stringify({
+            projectPath: proj,
+            taskName: "订单",
+            step,
+            env: "local",
+            taskType: "smoke",
+            providerId: "openai-oauth",
+            depositScripts: true,
+          }),
+        }));
+        assert.equal(res.status, 200);
+        assert.ok(res.body);
+        await drain(res.body as unknown as ReadableStream<string>);
+        assert.equal(readManifest(proj, "订单", "local"), null, `${step} 不得创建回归脚本 manifest`);
+      }
     } finally {
       registerRuntime(originalNative);
     }

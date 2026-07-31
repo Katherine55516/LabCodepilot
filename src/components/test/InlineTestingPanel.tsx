@@ -31,7 +31,7 @@ import { withDownstreamReset, runStartOptions, taskCategory, occupiedSlots, TASK
 import { REGRESSION_LIBRARY_TASK, REGRESSION_FULL_SUITE as REGRESSION_FULL_SUITE_NAME } from "@/lib/test/library-constants";
 import type { TestTaskType, SmokeBug, TestAccountProjectSummary } from "@/types";
 import { scenarioTextToCases, casesToScenarios, scenariosToText, smokeDataPrefix } from "@/lib/test/smoke-scenarios";
-import { smokeVerdict, SMOKE_SEVERITIES } from "@/lib/test/smoke-bugs";
+import { ensureSmokeReportBugTable, smokeReportStatus, smokeVerdict, SMOKE_SEVERITIES } from "@/lib/test/smoke-bugs";
 import type { LoginStateInfo } from "@/lib/test/env-config";
 import type { RunHistoryEntry } from "@/lib/test/history";
 import { TestStatsView } from "@/components/test/TestStatsView";
@@ -1440,6 +1440,9 @@ export function InlineTestingPanel({ visible = true }: { visible?: boolean } = {
     patchTask(id, () => ({
       // 冒烟无需求节点；场景已落盘 → 两步直接 done，execution 解锁（无门控）。
       stepStatus: { requirement: "done", cases: "done", execution: "idle", report: "idle" },
+      // 冒烟只产出一份报告，不生成回归脚本。显式落 false 让自动接力和所有手工入口
+      // 都读取到同一任务级真相；服务端还会按 taskType 再做硬兜底。
+      depositScripts: false,
       moduleEntry: moduleEntry.trim() || undefined,
       convo: [
         {
@@ -1976,8 +1979,9 @@ export function InlineTestingPanel({ visible = true }: { visible?: boolean } = {
           baseUrl: baseUrlOverride,
           // 是否为本任务沉淀回归脚本(任务级开关)。undefined=开启,故只在明确关闭时传 false ——
           // 服务端同样按 `!== false` 判定,存量任务与旧客户端行为不变。
-          depositScripts:
-            (opts?.depositScriptsOverride ?? taskStates[id]?.depositScripts) === false ? false : undefined,
+          depositScripts: task.type === "smoke"
+            ? false
+            : (opts?.depositScriptsOverride ?? taskStates[id]?.depositScripts) === false ? false : undefined,
           // 冒烟任务（第三形态）：形态 + 模块入口 + 数据前缀 → 服务端 buildStep 分流到冒烟
           // prompt 变体。前缀在**前端**按本地日期生成并下发，而不是让服务端各步各算一次 ——
           // 否则跨零点执行时报告里的前缀会与执行时实际造的数据对不上。
@@ -2354,6 +2358,7 @@ export function InlineTestingPanel({ visible = true }: { visible?: boolean } = {
   // 弹窗「测试并执行」:记下执行方式(持久化),用确认后的地址 + 模式手动跑测试执行步。
   const runExecutionConfirmed = (baseUrl: string, headed: boolean, depositScripts: boolean) => {
     persistExecMode(headed ? "visible" : "headless");
+    const effectiveDepositScripts = activeTask?.type === "smoke" ? false : depositScripts;
     // 弹窗里改的「沉淀回归脚本」写回任务状态 —— 它是任务级设置,不是一次性选项;
     // 不写回的话下次打开弹窗又弹回旧值,用户会以为没生效。缺省 true,故只存 false。
     // 任务地址回写规则(按当前 env 隔离):确认地址与【当前 env】环境配置地址【不同】→ 记为该 env 的
@@ -2367,14 +2372,14 @@ export function InlineTestingPanel({ visible = true }: { visible?: boolean } = {
         if (baseUrl && baseUrl !== envUrl) next[env] = baseUrl;
         else delete next[env];
         return {
-          depositScripts: depositScripts ? undefined : false,
+          depositScripts: effectiveDepositScripts ? undefined : false,
           targetUrlByEnv: Object.keys(next).length ? next : undefined,
         };
       });
     }
     setModal("none");
     if (aId) autoRunIdsRef.current.delete(aId);
-    runStep("execution", { headed, baseUrl, depositScriptsOverride: depositScripts });
+    runStep("execution", { headed, baseUrl, depositScriptsOverride: effectiveDepositScripts });
   };
 
   // 运行任务: 从指定起点把整条流水线自动跑到报告(auto-approve 门控)。受全局并发约束 ——
@@ -2711,7 +2716,11 @@ export function InlineTestingPanel({ visible = true }: { visible?: boolean } = {
               {/* current-step detail card */}
               <div className="rounded-xl border border-border bg-card p-3">
                 <div className="mb-2 flex items-center gap-2">
-                  <h4 className="text-xs font-semibold text-foreground">{focusStep === "report" ? t("test.report.overviewTitle") : t(STEPS.find((s) => s.step === focusStep)!.name)}</h4>
+                  <h4 className="text-xs font-semibold text-foreground">
+                    {focusStep === "report"
+                      ? t(isSmokeTask ? "test.smoke.step.report" : "test.report.overviewTitle")
+                      : t(STEPS.find((s) => s.step === focusStep)!.name)}
+                  </h4>
                   {focusStep === "execution" && (
                     <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">{t("test.flow.aiDriven")}</span>
                   )}
@@ -2727,7 +2736,7 @@ export function InlineTestingPanel({ visible = true }: { visible?: boolean } = {
                   {/* 回归脚本沉淀开关:常驻徽标,一眼见状态、一点即切。
                       不能只放在执行前确认弹窗里 —— 「运行任务」的自动接力直接调 runStep、
                       根本不弹那个弹窗,用户在流水线模式下既够不着也看不到当前设置。 */}
-                  {focusStep === "execution" && aId && (
+                  {focusStep === "execution" && aId && !isSmokeTask && (
                     <button
                       onClick={() => patchTask(aId, (s) => ({ depositScripts: s.depositScripts === false ? undefined : false }))}
                       disabled={runningStep === "execution"}
@@ -2822,6 +2831,7 @@ export function InlineTestingPanel({ visible = true }: { visible?: boolean } = {
                     t={t}
                     projectPath={current?.path ?? ""}
                     taskName={activeTask?.name ?? ""}
+                    taskType={activeTask?.type}
                     env={env}
                     reportStatus={stepStatus.report}
                     live={{ caseResults, fourState, circuitBroken }}
@@ -3606,12 +3616,15 @@ export function InlineTestingPanel({ visible = true }: { visible?: boolean } = {
         <RunStartModal
           t={t}
           stepStatus={aState.stepStatus}
-          initialDeposit={(activeTask && taskStates[activeTask.id]?.depositScripts) !== false}
+          initialDeposit={activeTask.type === "smoke" ? false : taskStates[activeTask.id]?.depositScripts !== false}
+          allowDepositScripts={activeTask.type !== "smoke"}
+          smokeOnly={activeTask.type === "smoke"}
           onRun={(step, depositScripts) => {
             setModal("none");
+            const effectiveDepositScripts = activeTask.type === "smoke" ? false : depositScripts;
             // 弹窗里改的开关写回任务状态(缺省 true → 开启存 undefined、关闭存 false),
             // 与徽标/执行前弹窗同一份设置,不做一次性覆盖 —— 否则三处入口会互相打架。
-            if (aId) patchTask(aId, () => ({ depositScripts: depositScripts ? undefined : false }));
+            if (aId) patchTask(aId, () => ({ depositScripts: effectiveDepositScripts ? undefined : false }));
             startRunAllFrom(step);
           }}
           onClose={() => setModal("none")}
@@ -3623,7 +3636,8 @@ export function InlineTestingPanel({ visible = true }: { visible?: boolean } = {
           initialUrl={taskStates[activeTask.id]?.targetUrlByEnv?.[env] || envCfg?.frontendBaseUrl || ""}
           unconfigured={!!envCfg && !envCfg.configured}
           initialMode={execMode}
-          initialDeposit={(activeTask && taskStates[activeTask.id]?.depositScripts) !== false}
+          initialDeposit={activeTask.type === "smoke" ? false : taskStates[activeTask.id]?.depositScripts !== false}
+          allowDepositScripts={activeTask.type !== "smoke"}
           onRun={runExecutionConfirmed}
           onClose={() => setModal("none")}
         />
@@ -4221,7 +4235,7 @@ function CompareView({ t, projectPath, taskName, env }: { t: T; projectPath: str
 
 // 产物预览的目标：md（测试报告/缺陷报告，预览/编辑切换）或 xlsx（执行矩阵只读表格）。
 type PreviewState =
-  | { kind: "md"; titleKey: TranslationKey; rel: string; content: string; editable: boolean }
+  | { kind: "md"; titleKey: TranslationKey; rel: string; content: string; editable: boolean; wide?: boolean }
   | { kind: "xlsx" }
   | { kind: "scripts"; manifest: ScriptManifestView };
 
@@ -4230,17 +4244,19 @@ type PreviewState =
 // （测试报告.md / Excel / 缺陷报告.md，可「点开修改」或预览）+ 内嵌报告全文（ReactMarkdown）。
 // 失败态给提示、不渲染空报告。指标在 entry 到达前回退实时执行 tally，避免空白。
 function ReportStepPanel({
-  t, projectPath, taskName, env, reportStatus, live, model, providerId,
+  t, projectPath, taskName, taskType, env, reportStatus, live, model, providerId,
 }: {
   t: T;
   projectPath: string;
   taskName: string;
+  taskType?: TestTaskType;
   env: string;
   reportStatus: StepStatus;
   live: { caseResults: CaseResult[]; fourState: FourState; circuitBroken: boolean };
   model: string;
   providerId: string;
 }) {
+  const isSmoke = taskType === "smoke";
   const router = useRouter();
   const [entry, setEntry] = useState<ReportEntry | null>(null);
   const [reloadTick, setReloadTick] = useState(0);
@@ -4268,7 +4284,7 @@ function ReportStepPanel({
         const e = list.find((x) => x.task === taskName && x.env === env) ?? null;
         setEntry(e);
         // 问题4：执行有缺陷(fail>0)且尚未生成缺陷报告 → 自动生成一次（用户无需手点）。
-        if (e && (e.counts?.fail ?? 0) > 0 && !e.defectMarkdown && autoDefectForTimeRef.current !== e.time) {
+        if (!isSmoke && e && (e.counts?.fail ?? 0) > 0 && !e.defectMarkdown && autoDefectForTimeRef.current !== e.time) {
           autoDefectForTimeRef.current = e.time;
           void defectGen();
         }
@@ -4277,11 +4293,12 @@ function ReportStepPanel({
     return () => { cancelled = true; };
     // defectGen 闭包仅用 props/setter、稳定；有意不入 deps 以免重建 effect。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reportStatus, projectPath, taskName, env, reloadTick]);
+  }, [reportStatus, projectPath, taskName, env, reloadTick, isSmoke]);
 
   // 脚本生成是报告成功后的后台任务，不占用流程节点。manifest 为持久化真相；queued/running
   // 时短轮询，终态后停止。旧报告没有 manifest 时显示“尚未生成”，允许用户手动补触发。
   useEffect(() => {
+    if (isSmoke) { setScriptManifest(null); return; }
     if (reportStatus !== "done" || !projectPath) { setScriptManifest(null); return; }
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -4302,7 +4319,7 @@ function ReportStepPanel({
     };
     void load();
     return () => { cancelled = true; if (timer) clearTimeout(timer); };
-  }, [reportStatus, projectPath, taskName, env, scriptReloadTick]);
+  }, [reportStatus, projectPath, taskName, env, scriptReloadTick, isSmoke]);
 
   // 失败态：报告步执行失败 → 提示重跑，不渲染空报告。
   if (reportStatus === "error") {
@@ -4327,6 +4344,10 @@ function ReportStepPanel({
   // 产物相对路径（与 reports/route.ts、artifactPaths 命名一致）。
   const reportMdRel = `AI_LabTest/report/${taskName}/${taskName}-${env}.md`;
   const defectMdRel = `AI_LabTest/report/${taskName}/${taskName}-${env}-缺陷报告.md`;
+  // 服务端会在新冒烟报告收口时规范化；这里再处理一次，保证历史逐字段报告在查看、编辑、
+  // 导出时也统一呈现为固定 8 列 Bug 表格，而不是只对新报告生效。
+  const smokeReportMarkdown =
+    isSmoke && entry?.markdown ? ensureSmokeReportBugTable(entry.markdown, entry.tests) : entry?.markdown ?? "";
 
   // 生成缺陷报告（第三交付物）：调 /api/test/defect 跑完后 reload 拿到新写的 defectMarkdown。
   const defectGen = async () => {
@@ -4452,7 +4473,7 @@ function ReportStepPanel({
     tile: ReactNode, name: ReactNode, file: string, info: ReactNode, actions: ReactNode,
     variant?: "dim" | "alert",
   ) => (
-    <div className={`flex min-w-0 flex-col gap-2 rounded-lg border p-3 transition ${
+    <div data-testid="test-report-deliverable" className={`flex min-w-0 flex-col gap-2 rounded-lg border p-3 transition ${
       variant === "alert" ? "border-status-error-border bg-status-error-muted/40"
         : variant === "dim" ? "border-border bg-muted/30"
         : "border-border bg-background hover:border-primary/40"
@@ -4544,6 +4565,97 @@ function ReportStepPanel({
   const scriptRunFailureText = scriptRunFailures.length > 0
     ? t("test.scripts.runFailed", { n: scriptRunFailures.length, reason: scriptRunFailures[0].lastRunError!.slice(0, 160) })
     : "";
+
+  // 冒烟报告是独立、精简的交付形态：流程页只保留一张报告卡，完整内容统一在大弹窗
+  // 中查看。历史 Excel / 缺陷报告 / 回归脚本即使仍在磁盘，也不会在这里暴露入口。
+  if (isSmoke) {
+    const smokeBugCount = fail;
+    const smokeStatus = smokeReportStatus(counts);
+    const smokeStatusLabel: Record<typeof smokeStatus, TranslationKey> = {
+      passed: "test.smoke.report.statusPassed",
+      failed: "test.smoke.report.statusFailed",
+      incomplete: "test.smoke.report.statusIncomplete",
+      partial: "test.smoke.report.statusPartial",
+    };
+    const fallbackConclusion =
+      smokeStatus === "failed"
+        ? t("test.smoke.report.summaryFailed")
+        : smokeStatus === "incomplete"
+          ? t("test.smoke.report.summaryIncomplete")
+          : smokeStatus === "partial"
+            ? t("test.smoke.report.summaryPartial")
+            : t("test.smoke.report.summaryPassed");
+    // 总览只给状态级结论，避免 AI 的完整结论把场景通过/失败/阻塞数量重新带回精简卡；
+    // 具体原因和数量留在“查看报告”的完整 Markdown 内。
+    const conclusion = fallbackConclusion;
+    const reportName = `${taskName}-${env}.md`;
+
+    return (
+      <div className="mt-2 space-y-3">
+        {entry?.circuitBroken && (
+          <div className="rounded-md border border-status-error-border bg-status-error-muted px-2.5 py-1.5 text-[11px] text-status-error-foreground">
+            ⚠ {t("test.report.circuitBroken")}
+          </div>
+        )}
+        <div
+          data-testid="smoke-report-card"
+          className={`flex min-w-0 flex-col gap-3 rounded-xl border p-4 ${
+            smokeStatus === "failed" ? "border-status-error-border bg-status-error-muted/20" : "border-border bg-background"
+          }`}
+        >
+          <div className="flex min-w-0 items-center gap-3">
+            {tileDoc}
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-1.5 text-[13px] font-semibold text-foreground">
+                {t("test.smoke.step.report")}
+                {chip(t(smokeStatusLabel[smokeStatus]), smokeStatus === "passed" ? "ok" : smokeStatus === "failed" ? "err" : "mut")}
+                <span data-testid="smoke-report-bug-count">{chip(t("test.smoke.report.bugCount", { n: smokeBugCount }), smokeBugCount > 0 ? "err" : "mut")}</span>
+              </div>
+              <div className="truncate font-mono text-[10px] text-muted-foreground">{reportName}</div>
+            </div>
+          </div>
+          <div className="rounded-lg border border-muted bg-muted/40 px-3 py-2">
+            <div className="mb-1 text-[10px] font-medium text-muted-foreground">{t("test.smoke.report.overallConclusion")}</div>
+            <p className="text-[11px] leading-relaxed text-foreground/80">
+              {smokeReportMarkdown ? conclusion : t("test.report.docEmpty")}
+            </p>
+          </div>
+          {smokeReportMarkdown && (
+            <div className="flex flex-wrap gap-1.5">
+              <button
+                data-testid="smoke-report-view"
+                onClick={() => setPreview({ kind: "md", titleKey: "test.smoke.step.report", rel: reportMdRel, content: smokeReportMarkdown, editable: false, wide: true })}
+                className={btnPrimary}
+              >
+                <Eye size={12} /> {t("test.smoke.report.view")}
+              </button>
+              <button
+                onClick={() => setPreview({ kind: "md", titleKey: "test.smoke.step.report", rel: reportMdRel, content: smokeReportMarkdown, editable: true, wide: true })}
+                className={btnGhost}
+              >
+                <NotePencil size={12} /> {t("test.report.tabEdit")}
+              </button>
+              <button onClick={() => downloadMd(reportName, smokeReportMarkdown)} className={btnGhost}>
+                <DownloadSimple size={12} /> {t("test.report.exportFile")}
+              </button>
+            </div>
+          )}
+        </div>
+        {preview && (
+          <PreviewModal
+            t={t}
+            preview={preview}
+            projectPath={projectPath}
+            taskName={taskName}
+            env={env}
+            onClose={() => setPreview(null)}
+            onSaved={() => { setPreview(null); setReloadTick((n) => n + 1); }}
+            setEditable={(editable) => setPreview((p) => (p && p.kind === "md" ? { ...p, editable } : p))}
+          />
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="mt-2 space-y-3">
@@ -4708,7 +4820,14 @@ function PreviewModal({ t, preview, projectPath, taskName, env, onClose, onSaved
 }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
-      <div className={`flex max-h-[85vh] w-full flex-col overflow-hidden rounded-xl border border-border bg-card ${preview.kind === "md" ? "max-w-3xl" : "max-w-[1040px]"}`} onClick={(e) => e.stopPropagation()}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        className={`flex max-h-[85vh] w-full flex-col overflow-hidden rounded-xl border border-border bg-card ${
+          preview.kind === "md" && !preview.wide ? "max-w-3xl" : "max-w-[1040px]"
+        }`}
+        onClick={(e) => e.stopPropagation()}
+      >
         {preview.kind === "md" ? (
           <MdPreview t={t} preview={preview} projectPath={projectPath} onClose={onClose} onSaved={onSaved} setEditable={setEditable} />
         ) : preview.kind === "xlsx" ? (
@@ -4742,6 +4861,7 @@ function MdPreview({ t, preview, projectPath, onClose, onSaved, setEditable }: {
   const [draft, setDraft] = useState(preview.content);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState(false);
+  const isSmokeReport = preview.titleKey === "test.smoke.step.report";
   useEffect(() => { setDraft(preview.content); }, [preview.rel, preview.content]);
 
   const save = async () => {
@@ -4784,8 +4904,14 @@ function MdPreview({ t, preview, projectPath, onClose, onSaved, setEditable }: {
         {preview.editable ? (
           <div className="h-[60vh]"><MarkdownEditor value={draft} onChange={setDraft} onSave={save} /></div>
         ) : (
-          <div className="prose prose-sm dark:prose-invert max-w-none p-4">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{draft}</ReactMarkdown>
+          <div className={`prose prose-sm dark:prose-invert max-w-none p-4 ${
+            isSmokeReport
+              ? "[&_table]:my-3 [&_table]:w-full [&_table]:border-collapse [&_table]:text-[11px] [&_th]:whitespace-nowrap [&_th]:border [&_th]:border-border [&_th]:bg-muted/70 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_td]:border [&_td]:border-border [&_td]:px-3 [&_td]:py-2 [&_td]:align-top"
+              : ""
+          }`}>
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+              {isSmokeReport ? draft.replace(/<br\s*\/?>/gi, " / ") : draft}
+            </ReactMarkdown>
           </div>
         )}
       </div>
@@ -8045,6 +8171,24 @@ function ReportBrowser({
   const [defectBusy, setDefectBusy] = useState<string | null>(null);
   const [reloadTick, setReloadTick] = useState(0);
   const [handoffKey, setHandoffKey] = useState<string | null>(null);
+  const [smokePreview, setSmokePreview] = useState<{
+    projectPath: string;
+    taskName: string;
+    env: string;
+    preview: Extract<PreviewState, { kind: "md" }>;
+  } | null>(null);
+
+  const downloadReportMd = (filename: string, content: string) => {
+    const blob = new Blob([content], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
 
   // 交给研发修复: hand a failing report to the 研发平台 (coding chat). Creates a
   // project-scoped session, seeds the bug report as a composer DRAFT (MessageInput
@@ -8179,7 +8323,12 @@ function ReportBrowser({
                       <span className="flex-none rounded-full border border-border px-1.5 py-px text-[10px] text-muted-foreground">{t("test.report.taskTag")}</span>
                       {(() => {
                         const latest = rs.reduce((a, b) => ((Date.parse(b.time) || 0) > (Date.parse(a.time) || 0) ? b : a), rs[0]);
-                        const latestBad = !!latest && (latest.circuitBroken || latest.counts.fail > 0);
+                        const latestIsSmoke = project.tasks.find((tk) => tk.name === task)?.type === "smoke";
+                        const latestBad = !!latest && (
+                          latest.circuitBroken
+                          || latest.counts.fail > 0
+                          || (latestIsSmoke && smokeReportStatus(latest.counts) !== "passed")
+                        );
                         return (
                           <span className={`flex-none rounded px-1.5 py-px text-[10px] ${latestBad ? "bg-status-error-muted text-status-error-foreground" : "bg-status-success-muted text-status-success-foreground"}`}>
                             {t(latestBad ? "test.report.latestFail" : "test.report.latestPass")}
@@ -8203,7 +8352,20 @@ function ReportBrowser({
                     {rs.map((r) => {
                       const key = `${project.path}|${task}|${r.env}`;
                       const isOpen = open === key;
-                      const bad = r.circuitBroken || r.counts.fail > 0;
+                      const taskRecord = project.tasks.find((tk) => tk.name === task);
+                      const isSmoke = taskRecord?.type === "smoke";
+                      const smokeStatus = smokeReportStatus(r.counts);
+                      const bad = r.circuitBroken || r.counts.fail > 0 || (isSmoke && smokeStatus !== "passed");
+                      const smokeMarkdown = isSmoke ? ensureSmokeReportBugTable(r.markdown, r.tests) : r.markdown;
+                      const smokeConclusion =
+                        smokeStatus === "failed"
+                          ? t("test.smoke.report.summaryFailed")
+                          : smokeStatus === "incomplete"
+                            ? t("test.smoke.report.summaryIncomplete")
+                            : smokeStatus === "partial"
+                              ? t("test.smoke.report.summaryPartial")
+                              : t("test.smoke.report.summaryPassed");
+                      const smokeReportRel = `AI_LabTest/report/${task}/${task}-${r.env}.md`;
                       return (
                         <div key={key} className="overflow-hidden rounded-lg border border-border">
                           <button
@@ -8212,59 +8374,167 @@ function ReportBrowser({
                           >
                             <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${bad ? "bg-status-error" : "bg-status-success"}`} />
                             <span className="rounded-full bg-background px-2 py-0.5 text-[10px] font-medium text-foreground">{r.env || "—"}</span>
-                            <span className="text-[11px] text-muted-foreground">
-                              {t("test.state.pass")} {r.passStr || `${r.counts.pass}/${r.counts.total}`}
-                              {r.counts.fail > 0 ? ` · ${t("test.state.fail")} ${r.counts.fail}` : ""}
-                              {r.counts.blocked > 0 ? ` · ${t("test.state.blocked")} ${r.counts.blocked}` : ""}
-                            </span>
+                            {isSmoke ? (
+                              <>
+                                <span className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${
+                                  smokeStatus === "passed"
+                                    ? "border-status-success-border bg-status-success-muted text-status-success-foreground"
+                                    : smokeStatus === "failed"
+                                      ? "border-status-error-border bg-status-error-muted text-status-error-foreground"
+                                      : "border-border bg-muted text-muted-foreground"
+                                }`}>
+                                  {smokeStatus === "passed"
+                                    ? t("test.smoke.report.statusPassed")
+                                    : smokeStatus === "failed"
+                                      ? t("test.smoke.report.statusFailed")
+                                      : smokeStatus === "incomplete"
+                                        ? t("test.smoke.report.statusIncomplete")
+                                        : t("test.smoke.report.statusPartial")}
+                                </span>
+                                <span className="text-[11px] text-muted-foreground">{t("test.smoke.report.bugCount", { n: r.counts.fail })}</span>
+                              </>
+                            ) : (
+                              <span className="text-[11px] text-muted-foreground">
+                                {t("test.state.pass")} {r.passStr || `${r.counts.pass}/${r.counts.total}`}
+                                {r.counts.fail > 0 ? ` · ${t("test.state.fail")} ${r.counts.fail}` : ""}
+                                {r.counts.blocked > 0 ? ` · ${t("test.state.blocked")} ${r.counts.blocked}` : ""}
+                              </span>
+                            )}
                             <span className="flex-1" />
                             {r.time && <span className="text-[10px] text-muted-foreground">{fmtCnDateTime(r.time)}</span>}
                             <span className="w-3 text-center text-[10px] text-muted-foreground">{isOpen ? "▲" : "▼"}</span>
                           </button>
                           {isOpen && (
                             <div className="border-t border-border p-3">
-                              <div className="mb-3 flex items-center gap-1.5">
-                                {(["result", "compare", "defect"] as const).map((tab) => {
-                                  const cur = rowTab[key] || "result";
-                                  const label = tab === "result" ? t("test.compare.tabResult") : tab === "compare" ? t("test.compare.tabCompare") : t("test.defect.tab");
-                                  return (
-                                    <button key={tab} onClick={() => { setRowTab((m) => ({ ...m, [key]: tab })); if (tab === "defect" && r.counts.fail > 0 && !r.defectMarkdown && defectBusy !== key) void defectGen(project, r); }} className={`rounded px-2 py-0.5 text-[11px] ${cur === tab ? "bg-primary text-primary-foreground" : "border border-border text-foreground hover:bg-muted"}`}>{label}</button>
-                                  );
-                                })}
-                                <span className="flex-1" />
-                                {(rowTab[key] || "result") === "result" && r.counts.fail > 0 && (
-                                  <button
-                                    onClick={() => handoff(project, r)}
-                                    disabled={handoffKey === key}
-                                    className="flex h-7 items-center gap-1 rounded-md bg-primary px-2.5 text-[11px] font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
-                                  >
-                                    <Wrench size={12} /> {t("test.report.handoff")}（{r.counts.fail}）
-                                  </button>
-                                )}
-                              </div>
-                              {(rowTab[key] || "result") === "compare" ? (
-                                <CompareView t={t} projectPath={project.path} taskName={task} env={r.env} />
-                              ) : (rowTab[key] || "result") === "defect" ? (
-                                <div>
-                                  {/* 问题4：缺陷报告自动生成（切到本 tab 时若有缺陷且未生成则触发），不再手动按钮。 */}
-                                  {r.defectMarkdown ? (
-                                    <div className="prose prose-sm dark:prose-invert max-w-none rounded-lg border border-border bg-card p-3">
-                                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{r.defectMarkdown}</ReactMarkdown>
+                              {isSmoke ? (
+                                <div
+                                  data-testid="smoke-report-card"
+                                  className={`rounded-xl border p-4 ${
+                                    smokeStatus === "failed" ? "border-status-error-border bg-status-error-muted/20" : "border-border bg-background"
+                                  }`}
+                                >
+                                  <div className="flex min-w-0 items-center gap-3">
+                                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                                      <FileIcon size={18} />
+                                    </span>
+                                    <div className="min-w-0 flex-1">
+                                      <div className="flex flex-wrap items-center gap-1.5 text-[12.5px] font-semibold text-foreground">
+                                        {t("test.smoke.step.report")}
+                                        <span className={`rounded-full border px-2 py-0.5 text-[10px] ${
+                                          smokeStatus === "passed"
+                                            ? "border-status-success-border bg-status-success-muted text-status-success-foreground"
+                                            : smokeStatus === "failed"
+                                              ? "border-status-error-border bg-status-error-muted text-status-error-foreground"
+                                              : "border-border bg-muted text-muted-foreground"
+                                        }`}>
+                                          {smokeStatus === "passed"
+                                            ? t("test.smoke.report.statusPassed")
+                                            : smokeStatus === "failed"
+                                              ? t("test.smoke.report.statusFailed")
+                                              : smokeStatus === "incomplete"
+                                                ? t("test.smoke.report.statusIncomplete")
+                                                : t("test.smoke.report.statusPartial")}
+                                        </span>
+                                        <span
+                                          data-testid="smoke-report-bug-count"
+                                          className={`rounded-full border px-2 py-0.5 text-[10px] ${
+                                            r.counts.fail > 0
+                                              ? "border-status-error-border bg-status-error-muted text-status-error-foreground"
+                                              : "border-border bg-muted text-muted-foreground"
+                                          }`}
+                                        >
+                                          {t("test.smoke.report.bugCount", { n: r.counts.fail })}
+                                        </span>
+                                      </div>
+                                      <div className="truncate font-mono text-[10px] text-muted-foreground">{task}-{r.env}.md</div>
                                     </div>
-                                  ) : (
-                                    <p className="flex items-center gap-1 text-[11px] text-muted-foreground">{defectBusy === key ? <><SpinnerGap size={12} className="animate-spin" /> {t("test.defect.generating")}</> : t("test.defect.empty")}</p>
+                                  </div>
+                                  <div className="mt-3 rounded-lg border border-muted bg-muted/40 px-3 py-2">
+                                    <div className="mb-1 text-[10px] font-medium text-muted-foreground">{t("test.smoke.report.overallConclusion")}</div>
+                                    <p className="text-[11px] leading-relaxed text-foreground/80">
+                                      {smokeMarkdown ? smokeConclusion : t("test.report.docEmpty")}
+                                    </p>
+                                  </div>
+                                  {smokeMarkdown && (
+                                    <div className="mt-3 flex flex-wrap gap-1.5">
+                                      <button
+                                        data-testid="smoke-report-view"
+                                        onClick={() => setSmokePreview({
+                                          projectPath: project.path,
+                                          taskName: task,
+                                          env: r.env,
+                                          preview: { kind: "md", titleKey: "test.smoke.step.report", rel: smokeReportRel, content: smokeMarkdown, editable: false, wide: true },
+                                        })}
+                                        className="inline-flex items-center gap-1 rounded-md bg-primary px-2.5 py-1 text-[11px] font-medium text-primary-foreground hover:bg-primary/90"
+                                      >
+                                        <Eye size={12} /> {t("test.smoke.report.view")}
+                                      </button>
+                                      <button
+                                        onClick={() => setSmokePreview({
+                                          projectPath: project.path,
+                                          taskName: task,
+                                          env: r.env,
+                                          preview: { kind: "md", titleKey: "test.smoke.step.report", rel: smokeReportRel, content: smokeMarkdown, editable: true, wide: true },
+                                        })}
+                                        className="inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-[11px] text-foreground hover:bg-muted"
+                                      >
+                                        <NotePencil size={12} /> {t("test.report.tabEdit")}
+                                      </button>
+                                      <button
+                                        onClick={() => downloadReportMd(`${task}-${r.env}.md`, smokeMarkdown)}
+                                        className="inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-[11px] text-foreground hover:bg-muted"
+                                      >
+                                        <DownloadSimple size={12} /> {t("test.report.exportFile")}
+                                      </button>
+                                    </div>
                                   )}
                                 </div>
                               ) : (
                                 <>
-                                  <ReportView t={t} results={r.tests} four={r.counts} funcCounts={r.funcCounts} funcPassStr={r.funcPassStr} suiteCounts={r.suiteCounts} suitePassStr={r.suitePassStr} circuitBroken={r.circuitBroken} taskName={task} projectPath={project.path} env={r.env} taskId={project.tasks.find((tk) => tk.name === task)?.id} runHash={r.runHash} taskType={project.tasks.find((tk) => tk.name === task)?.type} observations={r.observations} />
-                                  {r.markdown && (
-                                    <div className="mt-3 border-t border-border pt-3">
-                                      <div className="mb-2 text-[11px] font-medium text-muted-foreground">{t("test.report.docTitle")}</div>
-                                      <div className="prose prose-sm dark:prose-invert max-w-none">
-                                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{r.markdown}</ReactMarkdown>
-                                      </div>
+                                  <div className="mb-3 flex items-center gap-1.5">
+                                    {(["result", "compare", "defect"] as const).map((tab) => {
+                                      const cur = rowTab[key] || "result";
+                                      const label = tab === "result" ? t("test.compare.tabResult") : tab === "compare" ? t("test.compare.tabCompare") : t("test.defect.tab");
+                                      return (
+                                        <button key={tab} onClick={() => { setRowTab((m) => ({ ...m, [key]: tab })); if (tab === "defect" && r.counts.fail > 0 && !r.defectMarkdown && defectBusy !== key) void defectGen(project, r); }} className={`rounded px-2 py-0.5 text-[11px] ${cur === tab ? "bg-primary text-primary-foreground" : "border border-border text-foreground hover:bg-muted"}`}>{label}</button>
+                                      );
+                                    })}
+                                    <span className="flex-1" />
+                                    {(rowTab[key] || "result") === "result" && r.counts.fail > 0 && (
+                                      <button
+                                        onClick={() => handoff(project, r)}
+                                        disabled={handoffKey === key}
+                                        className="flex h-7 items-center gap-1 rounded-md bg-primary px-2.5 text-[11px] font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                                      >
+                                        <Wrench size={12} /> {t("test.report.handoff")}（{r.counts.fail}）
+                                      </button>
+                                    )}
+                                  </div>
+                                  {(rowTab[key] || "result") === "compare" ? (
+                                    <CompareView t={t} projectPath={project.path} taskName={task} env={r.env} />
+                                  ) : (rowTab[key] || "result") === "defect" ? (
+                                    <div>
+                                      {/* 问题4：缺陷报告自动生成（切到本 tab 时若有缺陷且未生成则触发），不再手动按钮。 */}
+                                      {r.defectMarkdown ? (
+                                        <div className="prose prose-sm dark:prose-invert max-w-none rounded-lg border border-border bg-card p-3">
+                                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{r.defectMarkdown}</ReactMarkdown>
+                                        </div>
+                                      ) : (
+                                        <p className="flex items-center gap-1 text-[11px] text-muted-foreground">{defectBusy === key ? <><SpinnerGap size={12} className="animate-spin" /> {t("test.defect.generating")}</> : t("test.defect.empty")}</p>
+                                      )}
                                     </div>
+                                  ) : (
+                                    <>
+                                      <ReportView t={t} results={r.tests} four={r.counts} funcCounts={r.funcCounts} funcPassStr={r.funcPassStr} suiteCounts={r.suiteCounts} suitePassStr={r.suitePassStr} circuitBroken={r.circuitBroken} taskName={task} projectPath={project.path} env={r.env} taskId={taskRecord?.id} runHash={r.runHash} taskType={taskRecord?.type} observations={r.observations} />
+                                      {r.markdown && (
+                                        <div className="mt-3 border-t border-border pt-3">
+                                          <div className="mb-2 text-[11px] font-medium text-muted-foreground">{t("test.report.docTitle")}</div>
+                                          <div className="prose prose-sm dark:prose-invert max-w-none">
+                                            <ReactMarkdown remarkPlugins={[remarkGfm]}>{r.markdown}</ReactMarkdown>
+                                          </div>
+                                        </div>
+                                      )}
+                                    </>
                                   )}
                                 </>
                               )}
@@ -8280,6 +8550,20 @@ function ReportBrowser({
           </div>
         );
       })}
+      {smokePreview && (
+        <PreviewModal
+          t={t}
+          preview={smokePreview.preview}
+          projectPath={smokePreview.projectPath}
+          taskName={smokePreview.taskName}
+          env={smokePreview.env}
+          onClose={() => setSmokePreview(null)}
+          onSaved={() => { setSmokePreview(null); setReloadTick((n) => n + 1); }}
+          setEditable={(editable) => setSmokePreview((current) => (
+            current ? { ...current, preview: { ...current.preview, editable } } : current
+          ))}
+        />
+      )}
     </div>
   );
 }
@@ -8352,6 +8636,8 @@ function RunStartModal({
   t,
   stepStatus,
   initialDeposit,
+  allowDepositScripts,
+  smokeOnly,
   onRun,
   onClose,
 }: {
@@ -8359,10 +8645,14 @@ function RunStartModal({
   stepStatus: Record<TestStep, StepStatus>;
   /** 任务当前的「沉淀回归脚本」设置(缺省 true)。 */
   initialDeposit: boolean;
+  /** 冒烟测试没有回归脚本产物，隐藏开关并强制回调 false。 */
+  allowDepositScripts: boolean;
+  /** 冒烟没有需求/用例生成节点，运行任务只允许从测试执行起跑。 */
+  smokeOnly?: boolean;
   onRun: (step: TestStep, depositScripts: boolean) => void;
   onClose: () => void;
 }) {
-  const opts = runStartOptions(stepStatus, STEP_ORDER, RUN_START_STEPS);
+  const opts = runStartOptions(stepStatus, STEP_ORDER, smokeOnly ? ["execution"] : RUN_START_STEPS);
   const byStep = Object.fromEntries(opts.map((o) => [o.step, o])) as Record<TestStep, (typeof opts)[number]>;
   // 默认：下一个待办且可选 → 否则最后一个可选(已完成任务→测试执行) → 兜底需求。
   const defaultStep =
@@ -8385,7 +8675,7 @@ function RunStartModal({
         <>
           <button onClick={onClose} className={CANCEL_BTN}>{t("test.cancel")}</button>
           <button
-            onClick={() => selOpt?.unlocked && onRun(sel, deposit)}
+            onClick={() => selOpt?.unlocked && onRun(sel, allowDepositScripts ? deposit : false)}
             disabled={!selOpt?.unlocked}
             className={PRIMARY_BTN}
           >
@@ -8435,7 +8725,7 @@ function RunStartModal({
           );
         })}
 
-      {willExecute && (
+      {willExecute && allowDepositScripts && (
         <label className="mt-1 flex cursor-pointer items-start gap-2 rounded-md border border-border px-3 py-2.5">
           <input type="checkbox" checked={deposit} onChange={(e) => setDeposit(e.target.checked)} className="mt-0.5 accent-primary" />
           <span className="min-w-0">
@@ -8460,6 +8750,7 @@ function ExecConfirmModal({
   unconfigured,
   initialMode,
   initialDeposit,
+  allowDepositScripts,
   onRun,
   onClose,
 }: {
@@ -8470,6 +8761,8 @@ function ExecConfirmModal({
   initialMode: ExecMode;
   /** 该任务当前的「沉淀回归脚本」设置(缺省 true)。 */
   initialDeposit: boolean;
+  /** 冒烟测试没有回归脚本产物，隐藏开关并强制回调 false。 */
+  allowDepositScripts: boolean;
   onRun: (baseUrl: string, headed: boolean, depositScripts: boolean) => void;
   onClose: () => void;
 }) {
@@ -8525,7 +8818,7 @@ function ExecConfirmModal({
           <button onClick={onClose} className={CANCEL_BTN}>{t("test.cancel")}</button>
           <button
             disabled={!trimmed}
-            onClick={() => onRun(trimmed, headed, deposit)}
+            onClick={() => onRun(trimmed, headed, allowDepositScripts ? deposit : false)}
             className={PRIMARY_BTN}
           >
             {t("test.execConfirm.run")}
@@ -8558,17 +8851,19 @@ function ExecConfirmModal({
         </p>
       </Field>
 
-      <Field label={t("test.newTaskModal.depositScriptsLabel")}>
-        <label className="flex cursor-pointer items-start gap-2">
-          <input type="checkbox" checked={deposit} onChange={(e) => setDeposit(e.target.checked)} className="mt-0.5 accent-primary" />
-          <span className="min-w-0">
-            <span className="text-xs text-foreground">{t("test.newTaskModal.depositScripts")}</span>
-            <span className="mt-0.5 block text-[11px] leading-relaxed text-muted-foreground">
-              {t("test.execConfirm.depositHint")}
+      {allowDepositScripts && (
+        <Field label={t("test.newTaskModal.depositScriptsLabel")}>
+          <label className="flex cursor-pointer items-start gap-2">
+            <input type="checkbox" checked={deposit} onChange={(e) => setDeposit(e.target.checked)} className="mt-0.5 accent-primary" />
+            <span className="min-w-0">
+              <span className="text-xs text-foreground">{t("test.newTaskModal.depositScripts")}</span>
+              <span className="mt-0.5 block text-[11px] leading-relaxed text-muted-foreground">
+                {t("test.execConfirm.depositHint")}
+              </span>
             </span>
-          </span>
-        </label>
-      </Field>
+          </label>
+        </Field>
+      )}
 
       <div className="flex items-center gap-2">
         <button

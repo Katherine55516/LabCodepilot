@@ -8,7 +8,7 @@
 
 ## 一句话
 
-把用户手工投喂的「冒烟测试提示词」产品化为测试工作台**第三段页签**：手动录入测试场景（验证目标 + 预期结果，不含操作步骤）→ **无门控**创建即自动执行 → 冒烟报告（结论横幅 + Bug 可复核列表 + 体验问题）。环境沿用现有配置，执行/归约/报告机器全量复用。
+把用户手工投喂的「冒烟测试提示词」产品化为测试工作台**第三段页签**：手动录入测试场景（验证目标 + 预期结果，不含操作步骤）→ **无门控**创建即自动执行 → 单一「冒烟测试报告」。环境沿用现有配置，执行/归约/报告机器复用，但冒烟不生成 Excel、独立缺陷报告或回归脚本。
 
 ## ⚠️ 读代码前必知（四条口径铁律）
 
@@ -32,8 +32,10 @@
   → 执行（自主探索 + @@RESULT 四态 + @@OBSERVATION 体验观察）
     ↘ 若整站登录态失效：@@AUTH_INVALID → 服务端硬停止 → UI 提示用户，跳过报告
   → wrapExecutionStream → reduceFromText（观察自动归约进 run.json.observations[]）
-  → 报告步（五节固定结构 + 结构化 Bug 字段）→ report/{任务}/{任务}-{env}.md
-  → 报告区 ReportView（taskType='smoke'）：结论横幅 + Bug 复核列表 + 体验问题
+  → 报告步（五节固定结构 + 8 列 Bug 表格）→ report/{任务}/{任务}-{env}.md
+  → wrapReportStream 按 run.json 校验/规范化 Bug 表格
+  → 流程页/报告页：单张报告卡（状态 + Bug 数 + 整体结论）
+  → 查看报告：PreviewModal 大弹窗展示完整 Markdown 五节
 ```
 
 ## Prompt 层（`src/lib/test/prompts.ts`）
@@ -41,7 +43,7 @@
 - `SMOKE_SYS`：三步各自的冒烟角色 system prompt（场景整理员/冒烟执行/冒烟报告员）。
 - `smokeScenariosPrompt`（cases 步，实际上无门控流程下**通常不跑**——场景由前端直落盘；保留它是为了「AI 重新归整」类操作与 revise 场景）：只审不改写、禁臆造/增删、保护 tags/verification。
 - `smokeExecutionPrompt`：自主探索式（场景无预设步骤，先 snapshot 再操作）、数据前缀铁律 `冒烟测试_{YYYYMMDD}_`（前端下发防跨零点）、写操作只针对自建数据（需要"任选一条"必须先自建）、失败不中断（依赖场景判 blocked）、`@@OBSERVATION` 体验观察（与四态正交）；保留既有全部契约（@@CASE_START/@@RESULT 裸写、登录态三分支、非交互护栏、覆盖自检、探活声明）。登录态三分支在冒烟模式下共用 `@@AUTH_INVALID` 硬停止协议，明确区分整站会话失效与个别权限/单接口 401。
-- `smokeReportPrompt`：五节固定（环境/场景结果表/Bug 清单/体验问题/整体结论）；Bug 按**固定字段**输出（编号/标题/严重级别/关联场景/实际/预期/接口/证据）供服务端解析；结论口径 = 主流程通不通 + 能否进入下一阶段；**不出**需求覆盖矩阵/双口径/回归红线。
+- `smokeReportPrompt`：五节固定（环境/场景结果表/Bug 清单/体验问题/整体结论）；Bug 按固定 8 列 GFM 表格输出（编号/标题/严重级别/关联场景/实际/预期/接口/证据），fail 场景 1:1；结论口径补齐 fail/blocked/partial/pass；**不出**需求覆盖矩阵/双口径/回归红线。
 - `rules/smoke-test.md` + 每个变体的 `ruleBlock` fallback：打包 standalone 剥 .md，**fallback 必须一次写足**（单测 chdir 模拟打包态验证）。
 
 ## 登录态整体失效硬停止（Phase 10）
@@ -55,7 +57,18 @@
 3. `wrapExecutionStream`：仅 `taskType==='smoke'` 开启识别；标记可跨 text 帧，识别后 abort 真实 agent、cancel 上游、发 `auth_invalid` 结构帧并关闭，不走 EOF 的 run.json/统计/脚本沉淀。
 4. `InlineTestingPanel.runStep`：收到机器行或结构帧后只显示本地化平台提示，execution=`error`、report=`idle`、释放 autoRun。兼容旧模型的兜底仅认“权威 tests 全 blocked + 至少一条明确登录失效证据”；其它 blocked 仍照常生成报告。
 
+## 单一报告交付（Phase 11）
+
+- **用户可见产物只有一份**：流程页和报告页都只显示「冒烟测试报告」卡片；卡片只含报告状态、Bug 数量和不带场景计数的整体结论。环境/时间、场景结果、体验观察只在完整报告弹窗中展示。
+- **完整报告仍保留五节**：点击「查看报告」复用 `PreviewModal` 居中大弹窗，渲染完整 Markdown；Bug 清单固定为 8 列表格。`ensureSmokeReportBugTable` 在服务端收口时规范化新报告，UI 打开/编辑/导出时再兜底历史逐字段报告，因此不是只靠模型遵从提示词。
+- **不生成或展示副产物**：冒烟隐藏执行矩阵 Excel、独立缺陷报告、回归脚本、对比/缺陷页签和「交给研发修复」。旧文件只隐藏，不删除。
+- **脚本前后端双保险**：新任务显式存 `depositScripts:false`，所有冒烟运行入口隐藏开关并传 false；`resolveDepositScripts` 在 `/api/test/run` 以 `taskType==='smoke'` 强制 false，覆盖 execution/report 两条包装链，即使旧客户端传 true 也不能绕过。
+- **功能测试保持原样**：缺省 task type 仍走四张产物卡、自动缺陷报告、脚本轮询/重试、报告对比与研发交接。
+
 ## Bug 复核（Phase 5 核心）
+
+> Phase 11 后这套复核数据/API 仍保留兼容性，但不再作为冒烟报告的用户可见入口；完整报告
+> 以只读/编辑 Markdown 表格呈现。以下内容记录 Phase 5 的底层结构，避免历史数据失读。
 
 ### 三层数据模型（`src/lib/test/smoke-bugs.ts` 纯函数 + `/api/test/bugs` 薄壳）
 
@@ -80,8 +93,8 @@ Bug 行的三个动作直接复用 ReportView 的 `markAccurate`/`markBad`/`undo
 
 ## 关键文件
 
-**新增**：`src/lib/test/smoke-scenarios.ts`（场景解析/互转/前缀，纯函数）、`src/lib/test/smoke-bugs.ts`（Bug 派生/md 解析/覆盖合并/结论，纯函数）、`src/app/api/test/bugs/route.ts`、`src/lib/test/rules/smoke-test.md`、单测 ×4（scenarios 24 / prompts 32 / observations 14 / bugs 25）。
-**改动**：`prompts.ts`（SMOKE_SYS + 3 变体 + BuildStepOptions.taskType/moduleEntry/dataPrefix + buildStep 分流 + 登录失效控制协议）、`markers.ts` / `exec-live.ts` / `exec-stream.ts`（`@@AUTH_INVALID` 解析、服务端硬停止、旧模型兜底）、`reduce.ts`（harvestObservations + RunJson.observations）、`run/route.ts`（三字段透传 + 冒烟硬停止开关）、`reports/route.ts`（observations 透传）、`InlineTestingPanel.tsx`（三段页签/visibleTasks 过滤保原始下标/NewSmokeTaskModal/addSmokeTask/pendingSmokeRun effect/stepLabel/ReportView 冒烟扩展/cases_approved 冒烟不发/登录失效终态）、`types/index.ts`（TestTaskType/SmokeBug/SmokeBugsFile）、i18n ×3（`test.smoke.*`）。
+**新增**：`src/lib/test/smoke-scenarios.ts`（场景解析/互转/前缀，纯函数）、`src/lib/test/smoke-bugs.ts`（Bug 派生/md 解析/表格规范化/状态归约/覆盖合并）、`src/lib/test/run-options.ts`（脚本开关服务端归一化）、`src/app/api/test/bugs/route.ts`、`src/lib/test/rules/smoke-test.md`。
+**改动**：`prompts.ts`（SMOKE_SYS + 3 变体 + 固定 Bug 表格/四态结论）、`markers.ts` / `exec-live.ts` / `exec-stream.ts`（登录失效硬停止 + 冒烟报告表格收口）、`reduce.ts`（observations）、`run/route.ts`（冒烟硬停止 + 脚本硬关断）、`InlineTestingPanel.tsx`（第三形态主链 + 单报告卡/弹窗 + 功能分支隔离）、`types/index.ts`、i18n ×3。
 
 ## 埋点口径
 
@@ -96,11 +109,12 @@ Bug 行的三个动作直接复用 ReportView 的 `markAccurate`/`markBad`/`undo
 - API curl 合同：GET 派生+初判+覆盖合并、PUT 200/409/400、bugs.json 原子落盘。⚠️ curl 直打需 URL 编码中文（Node 拒绝原始字节请求行）；前端 encodeURIComponent 不受影响。
 - CDP 端到端（隔离 `CLAUDE_GUI_DATA_DIR` + 临时项目，未碰真实 workbench）：三段页签、新建弹窗实时解析（4 种分隔符 + 缺预期计数）、创建即执行、三节点流水线、报告全交互（横幅三态翻转/severity 覆盖落盘/备注持久化/复核事件 DB 回显/体验问题渲染）、console 零代码报错。
 - Phase 10：`npm run test` 共 2454 条（2453 pass / 0 fail / 1 skip）；`PORT=3001 npm run test:smoke` 14/14。专项 E2E 覆盖结构事件、文本标记、旧模型 run.json 兜底、单接口 401 负例与正常 auto-chain；Playwright trace 截图确认 execution 失败、report 未开始、三语平台提示可见，应用内浏览器 console 0 error。
+- Phase 11：定向单元/路由测试 89/89；`npm run test` 共 2469 条（2468 pass / 0 fail / 1 skip）；`PORT=3001 npm run test:smoke` 17/17。覆盖流程页与报告页单卡、历史列表确定性转 8 列表格、无缺陷/脚本副作用、无研发交接，以及功能测试四产物对照；弹窗截图与 console 0 error 已验证。
 - **未验证（需打包+登录）**：真实 AI 执行的自主探索质量、@@OBSERVATION 遵从性、打包态 fallback 规则实跑效果。
 
 ## 已知边界
 
 - 冒烟场景质量取决于用户录入（验证目标写太粗会让自主探索发散）；表单提示语 + 解析预览是软约束。
-- Bug↔场景 1:1：报告 AI 对同一场景产多条 Bug 时先到先得（`parseMdBugInfo`），复核退化为对该场景的单一判定。
-- 流程内联报告（flow 视图）不含 Bug 复核（与既有「复核仅报告区」口径一致，canReview 需 taskId+runHash）。
+- Bug↔场景 1:1：服务端表格规范化以 run.json 的 fail 场景为权威，多余/缺失行会按 1:1 重建；历史 AI 标题/严重级别能解析则保留，否则回退事实与默认「严重」。
+- Phase 5 的 Bug 复核 API/旁路文件保留兼容，但 Phase 11 的冒烟 UI 不再展示复核控件。
 - 任务形态创建后不可改（形态决定流水线与 prompt，中途切换产物对不上）。

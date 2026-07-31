@@ -44,7 +44,7 @@
 
 | 文件 | 主题 | 状态 |
 |------|------|------|
-| active/smoke-test.md | **冒烟测试（测试工作台第三形态）**：第三段页签 + 手动录入测试场景（验证目标+预期结果）+ 无门控三节点流水线；环境沿用现有配置、提示词三段固定内容内嵌为 skill/prompt；冒烟报告 Bug 可复核列表（复用 report_reviewed 与准确度 KPI）+ @@OBSERVATION 体验观察 | Phase 1-10 dev 侧全部完成（含整站登录态失效机器早停、UI/路由回归与 CDP 截图）；打包态实测待用户发起 |
+| active/smoke-test.md | **冒烟测试（测试工作台第三形态）**：第三段页签 + 手动录入测试场景（验证目标+预期结果）+ 无门控三节点流水线；环境沿用现有配置、提示词三段固定内容内嵌为 skill/prompt；Phase 11 收敛为单份完整冒烟报告（Bug 表格），停止 Excel/独立缺陷/回归脚本 | Phase 1-11 已完成；打包态实测待用户发起 |
 | active/regression-library.md | 测试工作台:回归用例库(用例设计后自动沉淀「回归测试」标签用例 + 项目级库查看/管理 + 跨任务一键重跑) | 设计完成,待实现(批 A-E) |
 | active/regression-library-v2.md | 回归用例库 v2 一期：执行轮次实体（留痕/快照/中断态）+ 回归套件（静态+查询构建器+pinned）+ 发起弹窗重做（套件/env/预检估算）+ 报告按来源任务分组与 delta + 库检索；方案见 research/regression-library-v2-benchmark-proposal.md | 批 A-E/G/H 已完成；批 F（打包验收）待用户发起 |
 | active/regression-library-v2-phase23.md | 回归用例库 v2 二/三期（按交互原型 6 屏 1:1）：`_lib` 治理元数据（评审态/rev/隔离）+ 跨轮矩阵读侧现算 + 复测轮 failed-only 与合并口径红线 + 轮次报告独立页 + AI 失败归因 + 对比矩阵 + 健康度治理与隔离护栏 | 批 I-P 已完成；打包验收 + 真实 AI 归因质量待验 |

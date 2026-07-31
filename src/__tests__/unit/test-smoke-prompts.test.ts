@@ -18,6 +18,8 @@ import { buildStep } from "../../lib/test/prompts";
 
 const SMOKE = { taskName: "评估机构-冒烟", taskType: "smoke" as const, env: "sit" };
 const PREFIX = "冒烟测试_20260730_";
+const SMOKE_BUG_TABLE_HEADER = "| 编号 | 标题 | 严重级别 | 关联场景 | 实际 | 预期 | 接口 | 证据 |";
+const SMOKE_BUG_TABLE_SEPARATOR = "| --- | --- | --- | --- | --- | --- | --- | --- |";
 
 describe("buildStep · smoke 分流", () => {
   it("cases 步走「场景整理」而非用例设计", () => {
@@ -52,6 +54,8 @@ describe("buildStep · smoke 分流", () => {
       const report = buildStep("report", opts);
       assert.ok(report.systemPrompt.includes("测试报告员"));
       assert.equal(report.systemPrompt.includes("冒烟"), false);
+      assert.equal(report.prompt.includes(SMOKE_BUG_TABLE_HEADER), false, "功能报告不得混入冒烟 Bug 表格合同");
+      assert.equal(report.prompt.includes("每个 `fail` 场景恰好一行"), false, "功能报告不得混入冒烟 fail 1:1 纪律");
     }
   });
 
@@ -182,12 +186,29 @@ describe("smoke report prompt · 结论口径", () => {
     assert.ok(b.prompt.includes("判「未完成」"));
   });
 
-  it("Bug 清单结构化字段齐全（供 UI 解析成可复核列表）", () => {
-    for (const f of ["编号", "标题", "严重级别", "关联场景", "实际", "预期", "接口", "证据"]) {
-      assert.ok(b.prompt.includes(`**${f}**`), `Bug 清单缺字段：${f}`);
-    }
+  it("仅有 partial 时必须判部分通过，不能与全 pass 混为通过", () => {
+    assert.ok(b.prompt.includes("无 fail/blocked 但存在 partial"));
+    assert.ok(b.prompt.includes("判「部分通过」"));
+    assert.ok(b.prompt.includes("只有全部 pass 才判「通过」"));
+  });
+
+  it("Bug 清单固定为字段齐全、顺序稳定的 GFM 表格（供 UI 解析）", () => {
+    assert.ok(b.prompt.includes(SMOKE_BUG_TABLE_HEADER), "缺少固定 GFM 表头或字段顺序发生漂移");
+    assert.ok(b.prompt.includes(SMOKE_BUG_TABLE_SEPARATOR), "缺少 GFM 表头分隔行");
+    assert.equal(b.prompt.includes("- **编号**："), false, "不得继续要求易漂移的逐字段列表格式");
     assert.ok(b.prompt.includes("致命 / 严重 / 一般 / 建议"));
-    assert.ok(b.prompt.includes("仅 `fail` 状态的场景产出 Bug"));
+  });
+
+  it("Bug 表格严格保持 fail 1:1，blocked / partial 不入表", () => {
+    const plain = b.prompt.replace(/\*\*/g, "");
+    assert.ok(plain.includes("每个 `fail` 场景恰好一行"));
+    assert.match(plain, /blocked\s*\/\s*partial[^。\n]*(?:不进|不得进入)(?:本节|表格)/);
+  });
+
+  it("Bug 表格单元格遵守单行、换行与竖线转义纪律", () => {
+    assert.match(b.prompt, /每个单元格[^。\n]*(?:同一物理行|单行)/);
+    assert.match(b.prompt, /(?:同一格有多项|多个值)[^。\n]*`<br>`[^。\n]*分隔/);
+    assert.match(b.prompt, /正文中的[^。\n]*`\|`[^。\n]*(?:写成|转义为)[^。\n]*`\\\|`/);
   });
 
   it("不出需求覆盖矩阵 / 双口径通过率 / 回归红线", () => {

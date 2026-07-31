@@ -7,7 +7,7 @@
 
 ## 一句话
 
-把用户手工投喂的「冒烟测试提示词」产品化为测试工作台**第三段页签**：手动录入测试场景（验证目标 + 预期结果）→ 无门控自动执行 → 冒烟报告（Bug 可复核列表）。环境沿用现有配置，执行/报告机器全量复用。
+把用户手工投喂的「冒烟测试提示词」产品化为测试工作台**第三段页签**：手动录入测试场景（验证目标 + 预期结果）→ 无门控自动执行 → 单一完整冒烟报告（Bug 表格）。环境沿用现有配置，执行/报告机器复用，但不生成 Excel、独立缺陷报告或回归脚本。
 
 ## 状态
 
@@ -24,6 +24,7 @@
 | Phase 8 | 文档：handover + insights 互链 + ARCHITECTURE 索引 | ✅ 已完成 | 两份互链文档 + 三处索引（handover/insights README、ARCHITECTURE） |
 | Phase 9 | 冒烟看板环境摘要修复 | ✅ 已完成 | 修复 dash 视图未请求 env-config；按项目路径+环境隔离响应，加载态不误报；2446 单测 0 fail（1 skip）+ 9/9 smoke E2E + dev 截图/console 0 error |
 | Phase 10 | 登录态整体失效机器早停 | ✅ 已完成 | `@@AUTH_INVALID` → 服务端终止 agent → 前端执行置失败并跳过报告；2454 单测 0 fail（1 skip）+ 14/14 smoke E2E + dev CDP/trace 截图、console 0 error |
+| Phase 11 | 冒烟报告单产物收敛 | ✅ 已完成 | 单报告卡 + 完整报告弹窗 + 确定性 8 列 Bug 表格；停止 Excel/独立缺陷/回归脚本/研发交接；2469 tests（2468 pass / 1 skip）+ 17/17 smoke E2E |
 
 ## 决策日志
 
@@ -42,6 +43,7 @@
 - 2026-07-30（Phase 1 实施中修正）：任务级地址字段实际是 **`targetUrlByEnv?: Record<string, string>`（按 env 隔离）**，非方案里写的单一 `targetUrl`（那是已迁移的旧字段）。冒烟的地址覆盖直接复用该结构，Phase 4 写表单时按当前 `selectedEnv` 存取。
 - 2026-07-30（Phase 9 缺陷修复）：**冒烟项目看板与新建弹窗必须和 flow 共用 `/api/test/env-config`，并将响应绑定到 `normalize(projectPath) + env` scope**。根因是 Phase 4 新增了 dash 消费者，却沿用了旧 effect 的 `view === "flow"` 加载门槛，导致配置与登录态真实存在时仍把 `null` 渲染成“未配置/未捕获”。不在弹窗内另建请求，也不改服务端 resolver；scope key 同时防止切项目/环境时旧 URL 与登录态串台，首次加载明确显示 loading。
 - 2026-07-30（Phase 10 缺陷修复）：**登录态整体失效必须是平台机器终态，不能只靠 AI 自然语言“自觉停止”**。历史修复只改提示词，流正常 EOF 后前端仍把 execution 标 `done`，auto-chain 随即生成无意义报告。新增冒烟专用裸标记 `@@AUTH_INVALID {"reason":"login_state_invalid"}`：服务端识别后立即 abort agent、取消上游且不归约本轮 run.json；前端以 `error` 收口、显示三语平台提示并保持 report `idle`。为兼容未遵守新标记的旧模型，只有在权威结果满足“全部 blocked + 至少一条明确登录失效证据”时才做报告阻断兜底；个别页面权限或单接口 401 不触发机器早停。
+- 2026-07-31（Phase 11 用户确认）：**冒烟报告与功能测试报告彻底分流，但不新增持久化结构**。冒烟总览只显示单张「冒烟测试报告」卡、结论、状态与 Bug 数量；不显示场景总数/通过/失败/阻塞，也不显示章节摘要。点击「查看报告」沿用现有大尺寸弹窗打开完整 Markdown 报告（环境与时间、场景结果、Bug 清单、体验观察、整体结论），其中 Bug 清单强制为表格。冒烟不生成或展示 Excel、独立缺陷报告、回归脚本，也不提供「交给研发修复」；功能测试继续走原四产物和脚本逻辑。
 
 ## 详细设计
 
@@ -98,6 +100,14 @@
 **Phase 8 · 文档**
 16. `docs/handover/smoke-test.md` + `docs/insights/smoke-test.md`（互链）；ARCHITECTURE.md 文档索引补两行；本计划移入 `completed/`。
 
+**Phase 11 · 冒烟报告单产物收敛**
+17. `InlineTestingPanel.tsx`：向 `ReportStepPanel` 透传任务类型；冒烟走单报告卡分支，移除总览统计、Excel/缺陷/脚本卡与研发交付；预览继续复用 `PreviewModal` 打开完整 Markdown。
+18. 冒烟执行入口隐藏全部「沉淀回归脚本」开关，创建时显式写入 `depositScripts:false`；脚本轮询、重试与清单请求仅功能测试启用。
+19. `POST /api/test/run`：服务端以 `taskType==='smoke'` 强制关闭 `depositScripts`，同时覆盖 execution/report 两条包装链，防止旧任务或旧客户端绕过。
+20. `smokeReportPrompt`：保留完整五段报告，强制 Bug 清单输出 GFM Markdown 表格；功能测试 prompt 不变。
+21. `ReportBrowser`：冒烟不展示/触发独立缺陷报告与研发交付，结果只保留同一份冒烟报告；功能测试的结果/对比/缺陷页签保持原样。
+22. 同步简中、英文、繁中；补接口参数矩阵、prompt 合同和 UI E2E 对照回归。
+
 ### 依赖项
 
 - 无新增三方依赖。
@@ -110,13 +120,19 @@
 2. 新建表单必填仅 3 项；环境信息只读且与「环境配置」抽屉一致；地址覆盖可选生效。
 3. 创建后无需任何确认即自动跑到报告；中途可停止；场景可改可重跑（下游状态正确重置）。
 4. 执行 prompt 含数据前缀铁律、自主探索、失败不中断、`@@OBSERVATION`；产物落 cases.json / run.json / 报告 md，路径与功能测试同构。
-5. 报告含五段；Bug 为列表；severity 可改并持久化；复核动作写出 `report_reviewed` 事件且 Stats 准确度 KPI 计入；复核为误报后结论横幅更新且保留 AI 原判。
+5. 报告含五段；Bug 清单为固定 8 列 GFM 表格。流程页与报告页只展示一张冒烟报告卡（状态 + Bug 数 + 整体结论），点击后以大弹窗查看完整报告；不出现 Excel、独立缺陷报告、回归脚本、对比/缺陷页签或研发交接。功能测试四产物与既有动作保持原样。
 
 **质量闸**
 6. `npm run test` 通过（typecheck + 单测），新增单测覆盖：场景解析（各分隔符/空行/缺预期）、scenariosToCases 结构、smoke prompt 变体断言（含 fallback 生效）、`@@OBSERVATION` 归约与旧 run.json 兼容。
 7. dev 态 CDP 验证：三段页签切换、新建表单两态、场景表编辑、Bug 复核列表交互（severity 改、三种复核、批量、进度）、控制台无报错；登录态相关走 mock（dev 无登录体系）。
 8. 打包态实测：真实项目跑一轮冒烟（含登录态注入 + 真 AI 执行 + 报告 + 复核落盘）。
 9. 登录态整体失效：AI 发出 `@@AUTH_INVALID` 后服务端取消后续源读取、不落本轮 run.json，UI 同时丢弃同批次已到达的后续场景；执行节点收口为失败、报告保持未开始、对话明确提示重新获取登录态；自动接力对 `/api/test/run` 的请求序列只有 `execution`，正常冒烟仍为 `execution → report`。
+
+**Phase 11 验证记录（2026-07-31）**
+
+- `npm run test`：2469 tests，2468 pass / 0 fail / 1 skip。
+- `PORT=3001 npm run test:smoke`：17/17 pass；覆盖流程页与报告页的单报告卡、完整报告弹窗、历史列表转固定 8 列 Bug 表格、无缺陷/脚本副作用、无研发交接，以及功能测试四产物对照。
+- 专项弹窗截图完成视觉核对，浏览器 console 0 error。
 
 ### 风险与已知边界
 
@@ -125,3 +141,4 @@
 - **dev 无登录体系**：登录态链路本地只能 mock 验证，真验证需打包登录（CLAUDE.md 既有纪律）。
 - **打包态规则文件剥离**：`smoke-test.md` 同受 `outputFileTracingExcludes` 影响，fallback 精简规则必须一次写足。
 - **复核语义边界**：Bug ↔ 场景 1:1 成立于「每个 fail 场景生成一条 Bug」；若报告步为同一场景产出多条 Bug，复核会退化为对该场景的单一判定。Phase 5 需在报告 prompt 里约束 1 场景 ≤ 1 Bug，或在复核 UI 上按场景聚合（实现时确认）。
+- **Phase 11 格式兜底**：提示词本身不能保证模型格式遵从，因此 `ensureSmokeReportBugTable` 会以 run.json 的 fail 场景为权威，在服务端收口及 UI 打开历史报告时确定性规范化；已经符合 8 列合同且与 fail 1:1 的报告保持原文。

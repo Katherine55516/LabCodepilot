@@ -16,6 +16,9 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   parseMdBugInfo,
+  extractSmokeConclusion,
+  ensureSmokeReportBugTable,
+  smokeReportStatus,
   deriveBugs,
   mergeBugOverrides,
   upsertBugOverride,
@@ -33,7 +36,26 @@ const RUN = {
   ],
 };
 
-const MD = `# 冒烟测试报告
+const GFM_MD = `# 冒烟测试报告
+
+## 三、Bug 清单
+
+| 编号 | 标题 | 严重级别 | 关联场景 | 实际 | 预期 | 接口 | 证据 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| BUG-01 | 机构名称查询无结果 | 致命 | \`SM-002\` | 返回空列表 | 应命中机构 | GET /api/orgs?name=x (200) | SM-002.png |
+| BUG-02 | 修改保存不生效 | 一般 | \`SM-004\` | 保存后详情未更新 | 详情同步更新 | — | SM-004.png |
+
+## 四、奇怪交互 / 体验问题
+严重级别：这行在章节外，不该被解析
+
+## 五、整体结论
+冒烟未通过：风险查询主流程存在断点，暂不具备进一步测试条件。
+
+## 附录
+这里不属于整体结论。
+`;
+
+const LEGACY_MD = `# 冒烟测试报告
 
 ## 三、Bug 清单
 
@@ -53,34 +75,109 @@ const MD = `# 冒烟测试报告
 `;
 
 describe("parseMdBugInfo", () => {
-  it("按 标题→严重级别→关联场景 的顺序捞出每条 Bug 的 AI 初判", () => {
-    const info = parseMdBugInfo(MD);
+  it("从固定 GFM 表格按列名解析标题、严重级别与关联场景", () => {
+    const info = parseMdBugInfo(GFM_MD);
+    assert.deepEqual(info["SM-002"], { title: "机构名称查询无结果", severity: "致命" });
+    assert.deepEqual(info["SM-004"], { title: "修改保存不生效", severity: "一般" });
+  });
+
+  it("兼容历史逐字段列表格式", () => {
+    const info = parseMdBugInfo(LEGACY_MD);
     assert.deepEqual(info["SM-002"], { title: "机构名称查询无结果", severity: "致命" });
     assert.deepEqual(info["SM-004"], { title: "修改保存不生效", severity: "一般" });
   });
 
   it("只扫「Bug 清单」章节，章节外的字样不污染", () => {
-    const info = parseMdBugInfo(MD);
+    const info = parseMdBugInfo(GFM_MD);
     assert.equal(Object.keys(info).length, 2);
   });
 
-  it("同一场景出现多条 Bug 时先到先得（1:1 前提）", () => {
-    const md = "## Bug 清单\n- **严重级别**：致命\n- **关联场景**：SM-002\n- **严重级别**：建议\n- **关联场景**：SM-002\n";
-    assert.equal(parseMdBugInfo(md)["SM-002"].severity, "致命");
+  it("GFM 表格中同一场景出现多行时先到先得（1:1 前提）", () => {
+    const md = `## Bug 清单
+| 编号 | 标题 | 严重级别 | 关联场景 | 实际 | 预期 | 接口 | 证据 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| BUG-01 | 首条 | 致命 | SM-002 | A | B | — | — |
+| BUG-02 | 重复条目 | 建议 | SM-002 | C | D | — | — |
+`;
+    assert.deepEqual(parseMdBugInfo(md)["SM-002"], { title: "首条", severity: "致命" });
   });
 
   it("空 / 无章节 / 格式漂移 → 空映射，不抛", () => {
     assert.deepEqual(parseMdBugInfo(""), {});
     assert.doesNotThrow(() => parseMdBugInfo("随便什么文本"));
     // 非法严重级别值不采纳
-    const md = "## Bug 清单\n- **严重级别**：超级严重\n- **关联场景**：SM-001\n";
-    assert.equal(parseMdBugInfo(md)["SM-001"].severity, undefined);
+    const md = `## Bug 清单
+| 编号 | 标题 | 严重级别 | 关联场景 | 实际 | 预期 | 接口 | 证据 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| BUG-01 | 格式漂移 | 超级严重 | SM-001 | A | B | — | — |
+`;
+    assert.deepEqual(parseMdBugInfo(md)["SM-001"], { title: "格式漂移", severity: undefined });
+  });
+});
+
+describe("extractSmokeConclusion", () => {
+  it("只提取「整体结论」章节，并在下一个标题前停止", () => {
+    assert.equal(
+      extractSmokeConclusion(GFM_MD),
+      "冒烟未通过：风险查询主流程存在断点，暂不具备进一步测试条件。",
+    );
+  });
+
+  it("报告为空、缺少结论章节或章节为空时返回 null，不从其它章节猜结论", () => {
+    assert.equal(extractSmokeConclusion(""), null);
+    assert.equal(extractSmokeConclusion("## 场景结果表\n主流程未通过"), null);
+    assert.equal(extractSmokeConclusion("## 五、整体结论\n\n## 附录\n其它内容"), null);
+  });
+});
+
+describe("ensureSmokeReportBugTable", () => {
+  it("旧版逐字段 Bug 清单会被确定性转换成固定 8 列 GFM 表格", () => {
+    const normalized = ensureSmokeReportBugTable(LEGACY_MD, RUN.tests);
+    assert.match(normalized, /\| 编号 \| 标题 \| 严重级别 \| 关联场景 \| 实际 \| 预期 \| 接口 \| 证据 \|/);
+    assert.match(normalized, /\| BUG-01 \| 机构名称查询无结果 \| 致命 \| SM-002 \|/);
+    assert.match(normalized, /\| BUG-02 \| 修改保存不生效 \| 一般 \| SM-004 \|/);
+    assert.equal((normalized.match(/\| BUG-/g) ?? []).length, 2);
+    assert.doesNotMatch(normalized, /-\s*\*\*编号\*\*/);
+  });
+
+  it("已符合合同且覆盖全部 fail 场景的表格保持原文不变", () => {
+    assert.equal(ensureSmokeReportBugTable(GFM_MD, RUN.tests), GFM_MD);
+  });
+
+  it("缺少 Bug 章节时会在整体结论前补表；无 fail 时保留空表行", () => {
+    const md = "# 冒烟测试报告\n\n## 五、整体结论\n\n通过。\n";
+    const normalized = ensureSmokeReportBugTable(md, [{ id: "SM-001", status: "pass" }]);
+    assert.ok(normalized.indexOf("## 三、Bug 清单") < normalized.indexOf("## 五、整体结论"));
+    assert.match(normalized, /\| — \| 本轮冒烟未发现缺陷 \| — \| — \| — \| — \| — \| — \|/);
+  });
+
+  it("单元格中的换行和竖线会被转义，不破坏表格结构", () => {
+    const md = "# 报告\n\n## 三、Bug 清单\n\n- **标题**：保存异常\n- **严重级别**：严重\n- **关联场景**：SM-001\n";
+    const normalized = ensureSmokeReportBugTable(md, [{
+      id: "SM-001",
+      status: "fail",
+      actual: "第一行\n包含 A|B",
+      api: { method: "POST", url: "/api/a|b", status: 500 },
+      evidence: ["a.png", "b.png"],
+    }]);
+    assert.match(normalized, /第一行<br>包含 A\\\|B/);
+    assert.match(normalized, /POST \/api\/a\\\|b \(500\)/);
+  });
+});
+
+describe("smokeReportStatus", () => {
+  it("按 fail → blocked/empty → partial → pass 的固定优先级归约", () => {
+    assert.equal(smokeReportStatus({ total: 4, fail: 1, blocked: 1, partial: 1 }), "failed");
+    assert.equal(smokeReportStatus({ total: 4, fail: 0, blocked: 1, partial: 1 }), "incomplete");
+    assert.equal(smokeReportStatus({ total: 4, fail: 0, blocked: 0, partial: 1 }), "partial");
+    assert.equal(smokeReportStatus({ total: 4, fail: 0, blocked: 0, partial: 0 }), "passed");
+    assert.equal(smokeReportStatus({ total: 0, fail: 0, blocked: 0, partial: 0 }), "incomplete");
   });
 });
 
 describe("deriveBugs · fail 1:1 派生", () => {
   const goals = { "SM-002": "条件查询", "SM-004": "修改机构信息" };
-  const bugs = deriveBugs(RUN, parseMdBugInfo(MD), goals);
+  const bugs = deriveBugs(RUN, parseMdBugInfo(GFM_MD), goals);
 
   it("只有 fail 场景产 Bug（pass/blocked 不产）", () => {
     assert.equal(bugs.length, 2);

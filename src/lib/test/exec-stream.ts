@@ -13,6 +13,7 @@ import { ScriptTraceCollector, writeTraceFile, type TraceRedaction } from '@/lib
 import { enqueueIncrementalScriptCase, enqueueScriptJob, type IncrementalScriptCaseRequest } from '@/lib/test/script-job-manager';
 import { findAuthInvalidSignal, harvestMarkerObjects } from '@/lib/test/markers';
 import { createCaseIdResolver, remapCaseKeys } from '@/lib/test/case-id';
+import { ensureSmokeReportBugTable, type BugSourceTest } from '@/lib/test/smoke-bugs';
 
 /**
  * 测试执行路由的 SSE 流包装器（从 src/app/api/test/run/route.ts 抽出）。
@@ -511,6 +512,8 @@ export function wrapReportStream(
     aborted?: () => boolean;
     stats?: StepStats;
     roundId?: string;
+    /** 冒烟报告收口时确定性校验 Bug 表格；缺省保持功能测试原样。 */
+    taskType?: 'smoke';
     /**
      * 任务级「沉淀回归脚本」开关(缺省开)。关闭时报告成功也不入队生成任务 ——
      * 与 wrapExecutionStream 的同名参数一起构成该任务的完整关断。
@@ -532,12 +535,28 @@ export function wrapReportStream(
             controller.enqueue(`data: ${JSON.stringify({ type: 'error', data: '测试报告文档未生成（AI 未写出 .md），请点「重跑」重试。' })}\n\n`);
           }
           let reportRunHash: string | null = null;
+          let reportRunContent: string | null = null;
           try {
-            reportRunHash = sha1Hex(
-              fs.readFileSync(path.join(opts.projectPath, artifactPaths(opts.taskName, opts.env, opts.roundId).runJson), 'utf-8'),
+            reportRunContent = fs.readFileSync(
+              path.join(opts.projectPath, artifactPaths(opts.taskName, opts.env, opts.roundId).runJson),
+              'utf-8',
             );
+            reportRunHash = sha1Hex(reportRunContent);
           } catch {
             /* run.json 缺失 → runHash 缺省（统计聚合按时序回填兜底），也不排脚本后台任务 */
+          }
+          // Prompt 约束不是确定性保证：模型偶尔仍沿用旧版逐字段列表。冒烟报告在服务端
+          // 收口时以 run.json 的 fail 场景为事实源校验/补齐固定 8 列 GFM 表格；功能测试
+          // 不进入此分支，报告 Markdown 字节保持原样。
+          if (reportExists && reportRunContent && opts.taskType === 'smoke') {
+            try {
+              const run = JSON.parse(reportRunContent) as { tests?: BugSourceTest[] };
+              const current = fs.readFileSync(reportAbs, 'utf-8');
+              const normalized = ensureSmokeReportBugTable(current, run.tests);
+              if (normalized !== current) fs.writeFileSync(reportAbs, normalized, 'utf-8');
+            } catch {
+              // 格式兜底失败不改变报告主流程终态；UI 打开历史/异常报告时还会再校验一次。
+            }
           }
           // 使用统计：报告真的写出来了、且流干净收尾才记 report_generated + step_completed。
           // runHash 读 run.json 内容重算（与执行步 sha1(runContent) 同源同值）。
