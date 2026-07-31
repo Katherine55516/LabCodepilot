@@ -39,6 +39,12 @@ extraResources:
     filter:
       - "**/*"
       - "!node_modules"
+      # !.next —— 关键:下方另有专门条目 `.next/standalone/.next/ → standalone/.next/`
+      # 复制这棵子树。若本条目也命中 .next(glob dot 语义),同一批源文件会被两个
+      # 条目并发写到同一批目标路径,Windows 上 copyfile 撞句柄即 EBUSY —— 9 轮
+      # CI 失败的被锁文件 100% 落在 standalone\.next\server\ 下,即此故障。
+      # 显式排除让专门条目独占该子树;若本条目本就不含 dot 目录则此行为无害空操作。
+      - "!.next"
       # !**/*.nft.json —— NFT 构建期文件追踪清单,仅供组装 standalone 用,运行时
       # 无任何代码读取(src/electron/scripts 全仓零引用)。CI Windows 打包时
       # electron-builder 高并发复制三次 EBUSY 全部锁死在这类文件上(Defender
@@ -140,7 +146,11 @@ extraResources:
       - "!.bin/**/*"
   - from: .next/standalone/.next/
     to: standalone/.next/
-    filter: ["**/*"]
+    # 本条目现在独占 standalone/.next 子树(第一条已 !.next 防双写 EBUSY);
+    # nft.json 排除同步到这里 —— 运行时零引用,减包体(原先只排在第一条,漏了本条)。
+    filter:
+      - "**/*"
+      - "!**/*.nft.json"
   - from: .next/static/
     to: standalone/.next/static/
     filter: ["**/*"]
