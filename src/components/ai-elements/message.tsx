@@ -31,6 +31,7 @@ import {
 } from "react";
 import { Streamdown } from "streamdown";
 import { linkSafetyConfig } from "./link-safety";
+import { useDeidRestore } from "@/lib/deid-restore";
 
 export type MessageProps = HTMLAttributes<HTMLDivElement> & {
   from: UIMessage["role"];
@@ -333,17 +334,26 @@ const _codePlugin = createSharedCodePlugin();
 const streamdownPlugins = { cjk, code: _codePlugin, math, mermaid };
 
 export const MessageResponse = memo(
-  ({ className, ...props }: MessageResponseProps) => (
-    <Streamdown
-      className={cn(
-        "size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
-        className
-      )}
-      plugins={streamdownPlugins}
-      linkSafety={linkSafetyConfig}
-      {...props}
-    />
-  ),
+  ({ className, children, ...props }: MessageResponseProps) => {
+    // 脱敏网关(D5):deid 会话在渲染前把占位符还原为原文。context 默认 null
+    // = 非 deid 会话恒等直通;context 变更绕过下方 memo,mapping 更新即时生效。
+    const deidRestore = useDeidRestore();
+    const restored =
+      deidRestore && typeof children === "string" ? deidRestore(children) : children;
+    return (
+      <Streamdown
+        className={cn(
+          "size-full [&>*:first-child]:mt-0 [&>*:last-child]:mb-0",
+          className
+        )}
+        plugins={streamdownPlugins}
+        linkSafety={linkSafetyConfig}
+        {...props}
+      >
+        {restored}
+      </Streamdown>
+    );
+  },
   (prevProps, nextProps) => prevProps.children === nextProps.children
 );
 
