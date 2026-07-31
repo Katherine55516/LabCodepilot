@@ -3,6 +3,12 @@ import { goToChat } from '../helpers';
 
 const projectPath = '/Users/dev/projects/report-deliverables';
 const env = 'sit';
+const evidenceImage = `<svg xmlns="http://www.w3.org/2000/svg" width="640" height="360" viewBox="0 0 640 360">
+  <rect width="640" height="360" fill="#eff6ff"/>
+  <rect x="32" y="32" width="576" height="296" rx="16" fill="#ffffff" stroke="#2563eb" stroke-width="4"/>
+  <text x="320" y="164" text-anchor="middle" font-family="sans-serif" font-size="36" fill="#111827">SM-001</text>
+  <text x="320" y="214" text-anchor="middle" font-family="sans-serif" font-size="24" fill="#2563eb">冒烟测试截图证据</text>
+</svg>`;
 
 const smokeTask = {
   id: 'smoke-report-task',
@@ -21,14 +27,14 @@ const smokeResults = [
     status: 'pass',
     actual: '风险列表正常展示',
     error: '',
-    evidence: [],
+    evidence: ['SM-001.png'],
   },
   {
     id: 'SM-002',
     status: 'fail',
     actual: '保存时接口返回 500',
     error: '新增风险失败',
-    evidence: [],
+    evidence: ['SM-002.png'],
   },
 ];
 const functionalResults = smokeResults.map((result, index) => ({
@@ -46,10 +52,12 @@ const smokeMarkdown = `# 风险模块冒烟测试报告
 
 ## 二、场景结果表
 
-| 场景 | 结论 |
-| --- | --- |
-| SM-001 | 通过 |
-| SM-002 | 失败 |
+| 场景 | 验证目标 | 预期 | 实际 | 结论 | 截图 |
+| --- | --- | --- | --- | --- | --- |
+| SM-001 | 查看风险列表 | 列表正常展示 | 风险列表正常展示 | 通过 | SM-001.png |
+| SM-002 | 新增风险 | 新增成功 | 保存时接口返回 500 | 失败 | SM-002.png |
+
+说明：如需人工补图，文件名格式示例 manual.png（这不是证据）。
 
 ## 三、Bug 清单
 
@@ -111,6 +119,7 @@ async function mockCompletedReport(page: Page, variant: ReportVariant) {
   const task = variant === 'smoke' ? smokeTask : functionalTask;
   let defectPosts = 0;
   let scriptGets = 0;
+  const mediaRequests: Record<string, string>[] = [];
 
   await page.route('**/api/test/workbench', async (route) => {
     if (route.request().method() === 'PUT') {
@@ -197,6 +206,15 @@ async function mockCompletedReport(page: Page, variant: ReportVariant) {
       body: `data: ${JSON.stringify({ type: 'text', data: '缺陷报告已生成。' })}\n\n`,
     });
   });
+  await page.route('**/api/test/media?**', (route) => {
+    const url = new URL(route.request().url());
+    mediaRequests.push(Object.fromEntries(url.searchParams.entries()));
+    return route.fulfill({
+      status: 200,
+      contentType: 'image/svg+xml',
+      body: evidenceImage,
+    });
+  });
   for (const pattern of ['**/api/test/audit**', '**/api/test/stats**']) {
     await page.route(pattern, (route) => route.fulfill({
       status: 200,
@@ -208,6 +226,7 @@ async function mockCompletedReport(page: Page, variant: ReportVariant) {
   return {
     defectPosts: () => defectPosts,
     scriptGets: () => scriptGets,
+    mediaRequests: () => mediaRequests,
   };
 }
 
@@ -252,6 +271,28 @@ test.describe('Smoke report deliverables', () => {
     await expect(dialog).toBeVisible();
     await expect(dialog.getByRole('heading', { name: '风险模块冒烟测试报告' })).toBeVisible();
     await expect(dialog.getByText('完整报告末尾校验标记：SMOKE_REPORT_END')).toBeVisible();
+    const sceneTable = dialog.getByRole('heading', { name: '二、场景结果表' }).locator('xpath=following::table[1]');
+    const screenshotButton = sceneTable.getByRole('button', { name: /SM-001\.png/ });
+    await expect(screenshotButton).toBeVisible();
+    await expect(dialog.getByRole('button', { name: /manual\.png/ })).toHaveCount(0);
+    const reportUrl = page.url();
+    await screenshotButton.click();
+    const lightbox = page.getByTestId('smoke-report-media-lightbox');
+    await expect(lightbox).toBeVisible();
+    await expect(lightbox.getByRole('img', { name: 'SM-001.png' })).toBeVisible();
+    expect(page.url()).toBe(reportUrl);
+    expect(calls.mediaRequests()).toContainEqual({
+      projectPath,
+      taskName: smokeTask.name,
+      env,
+      file: 'SM-001.png',
+    });
+    await testInfo.attach('smoke-report-evidence-lightbox', {
+      body: await page.screenshot(),
+      contentType: 'image/png',
+    });
+    await lightbox.getByRole('button').click();
+    await expect(lightbox).toHaveCount(0);
     const bugHeading = dialog.getByRole('heading', { name: '三、Bug 清单' });
     const bugTable = bugHeading.locator('xpath=following::table[1]');
     for (const header of ['编号', '标题', '严重级别', '关联场景', '实际', '预期', '接口', '证据']) {

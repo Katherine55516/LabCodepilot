@@ -4829,7 +4829,16 @@ function PreviewModal({ t, preview, projectPath, taskName, env, onClose, onSaved
         onClick={(e) => e.stopPropagation()}
       >
         {preview.kind === "md" ? (
-          <MdPreview t={t} preview={preview} projectPath={projectPath} onClose={onClose} onSaved={onSaved} setEditable={setEditable} />
+          <MdPreview
+            t={t}
+            preview={preview}
+            projectPath={projectPath}
+            taskName={taskName}
+            env={env}
+            onClose={onClose}
+            onSaved={onSaved}
+            setEditable={setEditable}
+          />
         ) : preview.kind === "xlsx" ? (
           <XlsxPreview t={t} projectPath={projectPath} taskName={taskName} env={env} onClose={onClose} />
         ) : (
@@ -4848,12 +4857,37 @@ function PreviewModal({ t, preview, projectPath, taskName, env, onClose, onSaved
   );
 }
 
+const MARKDOWN_REPORT_MEDIA_RE = /^[^/\\:?#]+?\.(png|jpe?g|webp|gif|webm|mp4|mov)$/i;
+
+/**
+ * 冒烟报告的「截图」列按 prompt 合同只写证据文件名，不是 Markdown 链接。
+ * 仅当整个单元格由安全 basename 媒体名组成时才转为按钮；路径、URL、查询串及普通正文
+ * 保持文本，避免把不可信报告内容变成任意资源入口。多个证据允许逗号、顿号或 " / " 分隔。
+ */
+function markdownReportMediaFiles(children: ReactNode): string[] {
+  const text = typeof children === "string"
+    ? children
+    : Array.isArray(children) && children.every((child) => typeof child === "string" || typeof child === "number")
+      ? children.join("")
+      : "";
+  if (!text.trim()) return [];
+  const parts = text
+    .split(/(?:,\s*|，|、|\s+\/\s+)/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  return parts.length > 0 && parts.every((part) => MARKDOWN_REPORT_MEDIA_RE.test(part))
+    ? [...new Set(parts)]
+    : [];
+}
+
 // md 产物预览：默认 ReactMarkdown 渲染；切「编辑」用 CodeMirror MarkdownEditor，⌘S / 保存
 // 按钮经 POST /api/files/write 写回（overwrite）。draft 本地态，预览模式也渲染 draft 以反映改动。
-function MdPreview({ t, preview, projectPath, onClose, onSaved, setEditable }: {
+function MdPreview({ t, preview, projectPath, taskName, env, onClose, onSaved, setEditable }: {
   t: T;
   preview: Extract<PreviewState, { kind: "md" }>;
   projectPath: string;
+  taskName: string;
+  env: string;
   onClose: () => void;
   onSaved: () => void;
   setEditable: (editable: boolean) => void;
@@ -4861,7 +4895,10 @@ function MdPreview({ t, preview, projectPath, onClose, onSaved, setEditable }: {
   const [draft, setDraft] = useState(preview.content);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState(false);
+  const [lightbox, setLightbox] = useState<string | null>(null);
   const isSmokeReport = preview.titleKey === "test.smoke.step.report";
+  const mediaUrl = (file: string) => `/api/test/media?projectPath=${encodeURIComponent(projectPath)}&taskName=${encodeURIComponent(taskName)}&env=${encodeURIComponent(env || "local")}&file=${encodeURIComponent(file)}`;
+  const isVideo = (file: string) => /\.(webm|mp4|mov)$/i.test(file);
   useEffect(() => { setDraft(preview.content); }, [preview.rel, preview.content]);
 
   const save = async () => {
@@ -4909,12 +4946,68 @@ function MdPreview({ t, preview, projectPath, onClose, onSaved, setEditable }: {
               ? "[&_table]:my-3 [&_table]:w-full [&_table]:border-collapse [&_table]:text-[11px] [&_th]:whitespace-nowrap [&_th]:border [&_th]:border-border [&_th]:bg-muted/70 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_td]:border [&_td]:border-border [&_td]:px-3 [&_td]:py-2 [&_td]:align-top"
               : ""
           }`}>
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              components={isSmokeReport ? {
+                td: ({ node, children, ...props }) => {
+                  void node;
+                  const files = markdownReportMediaFiles(children);
+                  return (
+                    <td {...props}>
+                      {files.length > 0 ? (
+                        <span className="flex flex-wrap items-center gap-1">
+                          {files.map((file) => (
+                            <button
+                              key={file}
+                              type="button"
+                              data-testid="smoke-report-media-link"
+                              aria-label={`${isVideo(file) ? t("test.media.video") : t("test.media.image")}：${file}`}
+                              title={file}
+                              onClick={() => setLightbox(file)}
+                              className="inline-flex items-center gap-1 rounded border border-border px-1.5 py-0.5 font-mono text-[10px] text-primary no-underline hover:bg-muted"
+                            >
+                              <span aria-hidden="true">{isVideo(file) ? "🎬" : "🖼"}</span>
+                              {file}
+                            </button>
+                          ))}
+                        </span>
+                      ) : children}
+                    </td>
+                  );
+                },
+              } : undefined}
+            >
               {isSmokeReport ? draft.replace(/<br\s*\/?>/gi, " / ") : draft}
             </ReactMarkdown>
           </div>
         )}
       </div>
+      {lightbox && createPortal(
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={lightbox}
+          data-testid="smoke-report-media-lightbox"
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-6"
+          onClick={() => setLightbox(null)}
+        >
+          <button
+            type="button"
+            onClick={() => setLightbox(null)}
+            className="absolute right-5 top-5 rounded-full bg-black/60 p-2 text-white hover:bg-black/80"
+            aria-label={t("test.report.close")}
+          >
+            <X size={18} />
+          </button>
+          {isVideo(lightbox) ? (
+            <video src={mediaUrl(lightbox)} controls autoPlay muted playsInline preload="metadata" className="max-h-full max-w-full" onClick={(event) => event.stopPropagation()} />
+          ) : (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={mediaUrl(lightbox)} alt={lightbox} className="max-h-full max-w-full object-contain" onClick={(event) => event.stopPropagation()} />
+          )}
+        </div>,
+        document.body,
+      )}
     </>
   );
 }
