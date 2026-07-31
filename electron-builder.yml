@@ -39,6 +39,11 @@ extraResources:
     filter:
       - "**/*"
       - "!node_modules"
+      # !**/*.nft.json —— NFT 构建期文件追踪清单,仅供组装 standalone 用,运行时
+      # 无任何代码读取(src/electron/scripts 全仓零引用)。CI Windows 打包时
+      # electron-builder 高并发复制三次 EBUSY 全部锁死在这类文件上(Defender
+      # 排除后依旧),整体排除既绕开文件锁竞态又减小包体。
+      - "!**/*.nft.json"
       # !dist-electron —— 去掉 NFT 误判塞进 standalone 的主进程产物重复拷贝。
       # 主进程真正运行的 main.js 在 app.asar 内(preload 走 __dirname/preload.js),
       # standalone 下这份 dist-electron/{main,preload}.js 是死代码 + 明文泄漏面。
@@ -259,6 +264,14 @@ mac:
       arch: [arm64]
 win:
   icon: build/icon.ico
+  # CI 无证书,electron-builder 默认仍对产物内每个 exe 逐个调 signtool(含
+  # ms-playwright bundle 的 PrintDeps/ffmpeg/headless-shell),且与 extraResources
+  # 大树复制并发 —— Windows runner 四连 EBUSY copyfile 竞态实测(每次锁不同文件,
+  # Defender 排除/文件类排除均无效)。no-op 钩子移除全部 signtool 活动消除并发窗口。
+  # 注意:electron-builder 26.x 起自定义签名钩子在 signtoolOptions.sign(旧顶层
+  # win.sign 已从 schema 移除,写错会 Invalid configuration object 直接失败)。
+  signtoolOptions:
+    sign: scripts/noop-sign.cjs
   # Only x64 — arm64 is no longer targeted (most Windows users are x64; drops
   # the need to cross-install win32-arm64 SDK platform subpackage in CI).
   target:
