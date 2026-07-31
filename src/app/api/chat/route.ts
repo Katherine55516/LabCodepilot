@@ -1,7 +1,9 @@
 import { NextRequest } from 'next/server';
 import { streamClaude } from '@/lib/claude-client';
 import { generateSessionTitleInBackground } from '@/lib/title-generator';
-import { addMessage, getMessages, getSession, isSessionVisibleToCurrentUser, getSessionSummary, updateSessionTitle, updateSdkSessionId, updateSessionModel, updateSessionProvider, updateSessionProviderId, getSetting, acquireSessionLock, renewSessionLock, releaseSessionLock, setSessionRuntimeStatus, syncSdkTasks } from '@/lib/db';
+import { addMessage, getMessages, getSession, getSessionDeidState, isSessionVisibleToCurrentUser, getSessionSummary, updateSessionTitle, updateSdkSessionId, updateSessionModel, updateSessionProvider, updateSessionProviderId, getSetting, acquireSessionLock, renewSessionLock, releaseSessionLock, setSessionRuntimeStatus, syncSdkTasks } from '@/lib/db';
+import { remaskText } from '@/lib/deid-utils';
+import { getRecommendedSystemPrompt } from '@/lib/deid-client';
 import { resolveProvider as resolveProviderUnified } from '@/lib/provider-resolver';
 import { notifySessionStart, notifySessionComplete, notifySessionError } from '@/lib/telegram-bot';
 import { extractCompletion } from '@/lib/onboarding-completion';
@@ -383,16 +385,41 @@ export async function POST(request: NextRequest) {
       _rowid: m._rowid,
     }));
 
+    // ── 脱敏网关(deid-gateway,决策 D2/D3)──────────────────────────
+    // deid 会话的 DB user 消息存的是原文(displayOverride 展示语义),本回合
+    // prompt(content)已在发送前由预览确认产出脱敏文;但 SDK resume 失效或
+    // 上下文压缩时,历史/摘要会从 DB 回灌给外部模型 —— 这里统一反向重脱敏
+    // (原文→占位符,长词优先)。assistant 消息本就存占位符,重放替换幂等。
+    // 用户在预览中「取消脱敏」的实体会被过度替换(安全方向误差,已知边界)。
+    const deidActive = !!(session.sandbox_enabled && session.deid_enabled);
+    if (deidActive) {
+      const deidMapping = getSessionDeidState(session_id).mapping;
+      if (Object.keys(deidMapping).length > 0) {
+        for (const m of historyMsgs) m.content = remaskText(m.content, deidMapping);
+        if (sessionSummaryData.summary) {
+          sessionSummaryData.summary = remaskText(sessionSummaryData.summary, deidMapping);
+        }
+      }
+    }
+
     // Detect actual image agent mode by checking for the specific design agent prompt,
     // not just any systemPromptAppend (which could come from CLI badges or skills).
     const isImageAgentMode = !!systemPromptAppend && systemPromptAppend.includes('image-gen-request');
+
+    // 脱敏网关(决策 D9):deid 会话给外部模型追加占位符使用规则
+    // (/v1/meta 内存缓存 10min,不可达时用兜底副本,getRecommendedSystemPrompt 永不 throw)
+    let effectiveSystemPromptAppend = systemPromptAppend;
+    if (deidActive) {
+      const deidPrompt = await getRecommendedSystemPrompt();
+      effectiveSystemPromptAppend = [systemPromptAppend, deidPrompt].filter(Boolean).join('\n\n');
+    }
 
     // Unified context assembly — extracts workspace, CLI tools, widget prompt
     const assembled = await assembleContext({
       session,
       entryPoint: 'desktop',
       userPrompt: content,
-      systemPromptAppend,
+      systemPromptAppend: effectiveSystemPromptAppend,
       conversationHistory: historyMsgs,
       imageAgentMode: isImageAgentMode,
       autoTrigger: !!autoTrigger,

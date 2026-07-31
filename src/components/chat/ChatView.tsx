@@ -52,6 +52,10 @@ import {
   respondToPermission,
 } from '@/lib/stream-session-manager';
 import { registerVisibleSession } from '@/lib/turn-notifications';
+import { useDeidGate } from '@/hooks/useDeidGate';
+import { DeidPreviewDialog } from './DeidPreviewDialog';
+import { DeidRestoreContext } from '@/lib/deid-restore';
+import { containsPlaceholder, restoreText } from '@/lib/deid-utils';
 
 interface QueuedMessage {
   content: string;
@@ -121,6 +125,84 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
   const coworkStatus = useCoworkStatus(sandboxEnabled);
   const coworkAssets = coworkStatus.data?.assets;
   const officeAssetsBlocked = sandboxEnabled && !!coworkAssets && !coworkAssets.usable;
+
+  // ── 脱敏网关(deid-gateway)————————————————————————————————
+  // 开关(会话级持久)+ 渲染层还原字典(mapping)。还原只看 mapping 是否
+  // 非空,与开关当前状态无关:关掉开关后,历史里已存在的占位符仍需还原。
+  const [deidEnabled, setDeidEnabled] = useState(false);
+  const [deidMapping, setDeidMapping] = useState<Record<string, string>>({});
+  const deidGate = useDeidGate({
+    sessionId,
+    active: sandboxEnabled && deidEnabled,
+    onMappingUpdate: setDeidMapping,
+  });
+  const deidSetDenyValues = deidGate.setDenyValues;
+
+  // 载入会话脱敏状态(开关 + mapping + denyValues)
+  useEffect(() => {
+    if (!sandboxEnabled) return;
+    let cancelled = false;
+    fetch(`/api/deid/state?session_id=${encodeURIComponent(sessionId)}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (cancelled || !d) return;
+        setDeidEnabled(!!d.enabled);
+        setDeidMapping(d.mapping || {});
+        deidSetDenyValues(d.denyValues || []);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [sessionId, sandboxEnabled, deidSetDenyValues]);
+
+  // 开关翻转(乐观更新,失败回滚)
+  const handleDeidToggle = useCallback(() => {
+    const next = !deidEnabled;
+    setDeidEnabled(next);
+    fetch('/api/deid/state', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: sessionId, enabled: next }),
+    })
+      .then((r) => { if (!r.ok) setDeidEnabled(!next); })
+      .catch(() => setDeidEnabled(!next));
+  }, [deidEnabled, sessionId]);
+
+  // 渲染层还原函数(D5):mapping 非空才提供;context 变更绕过 MessageResponse 的 memo
+  const deidRestoreFn = useMemo(() => {
+    if (!sandboxEnabled || Object.keys(deidMapping).length === 0) return null;
+    return (text: string) => restoreText(text, deidMapping);
+  }, [sandboxEnabled, deidMapping]);
+
+  // unknownPlaceholders 检测(契约 §6/§13):回合完成后把 assistant 文本交给
+  // /v1/reidentify,模型自造/改写的占位符无法还原 → toast 告警。fire-and-forget,
+  // 每条消息只查一次(ChatView 按 sessionId key 重挂,ref 天然按会话隔离)。
+  const deidCheckedRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (!sandboxEnabled || Object.keys(deidMapping).length === 0) return;
+    const last = messages[messages.length - 1];
+    if (!last || last.role !== 'assistant' || deidCheckedRef.current.has(last.id)) return;
+    deidCheckedRef.current.add(last.id);
+    const text = parseMessageContent(last.content)
+      .filter((b): b is Extract<ReturnType<typeof parseMessageContent>[number], { type: 'text' }> => b.type === 'text')
+      .map((b) => b.text)
+      .join('\n');
+    if (!text || !containsPlaceholder(text)) return;
+    fetch('/api/deid/reidentify', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ session_id: sessionId, text }),
+    })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { unknownPlaceholders?: string[] } | null) => {
+        const unknown = d?.unknownPlaceholders || [];
+        if (unknown.length > 0) {
+          import('@/hooks/useToast').then(({ showToast }) => {
+            showToast({ type: 'warning', message: `${t('deid.unknownPlaceholders')} ${unknown.join(' ')}` });
+          });
+        }
+      })
+      .catch(() => {});
+  }, [messages, sandboxEnabled, deidMapping, sessionId, t]);
 
   // Whether this session's working directory matches the configured assistant workspace
   const [isAssistantProject, setIsAssistantProject] = useState(false);
@@ -1087,6 +1169,8 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
   }, [sessionId]);
 
   return (
+    // 脱敏网关(D5):mapping 非空时,MessageResponse 渲染前做占位符→原文还原
+    <DeidRestoreContext.Provider value={deidRestoreFn}>
     <div className="relative flex h-full min-h-0 flex-col">
       {/* Workspace mismatch banner */}
       {workspaceMismatchPath && (
@@ -1279,6 +1363,9 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
         // MessageInput 既有的优雅降级;officeMode 另隐藏斜杠/CLI 按钮。
         workingDirectory={sandboxEnabled ? '' : workingDirectory}
         officeMode={sandboxEnabled}
+        deidEnabled={deidEnabled}
+        onDeidToggle={sandboxEnabled ? handleDeidToggle : undefined}
+        deidGate={sandboxEnabled ? deidGate.gate : undefined}
         onAssistantTrigger={checkAssistantTrigger}
         effort={selectedEffort}
         onEffortChange={handleEffortChange}
@@ -1338,6 +1425,9 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
           onClose={() => btw.setOpen(false)}
         />
       )}
+      {/* 脱敏预览确认弹窗(deid-gateway,仅办公会话且开关开启时会被打开) */}
+      {sandboxEnabled && <DeidPreviewDialog {...deidGate.dialog} />}
     </div>
+    </DeidRestoreContext.Provider>
   );
 }

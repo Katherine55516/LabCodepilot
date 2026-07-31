@@ -9,6 +9,7 @@ import { getLocalDateString, localDayStartAsUTC } from './utils';
 import { inferProtocolFromLegacy } from './provider-catalog';
 import { seal, open, isSealed, getKey } from './crypto-seal';
 import { parseSkillUsesJson, mergeSkillUses, type SessionSkillUse } from './skill-use';
+import { parseDeidStateJson } from './deid-utils';
 
 function dataDir(): string {
   return process.env.CLAUDE_GUI_DATA_DIR || path.join(os.homedir(), '.codepilot');
@@ -485,6 +486,17 @@ function migrateDb(db: Database.Database): void {
   // 纯靠客户端解析已加载消息会漏掉更早回合里的调用。
   if (!colNames.includes('skills_used_json')) {
     safeAddColumn(db, "ALTER TABLE chat_sessions ADD COLUMN skills_used_json TEXT NOT NULL DEFAULT ''");
+  }
+  // 脱敏网关(deid-gateway):办公会话的脱敏开关(默认关,用户在输入区自行开关)。
+  // 仅 sandbox_enabled=1 的会话有意义;研发会话恒 0 且不渲染入口。
+  if (!colNames.includes('deid_enabled')) {
+    safeAddColumn(db, "ALTER TABLE chat_sessions ADD COLUMN deid_enabled INTEGER NOT NULL DEFAULT 0");
+  }
+  // 脱敏会话状态(JSON {mapping, denyValues},见 src/types/deid.ts)。含明文 PII,
+  // 敏感级别等同 messages.content(同库同暴露面);deid-service 无状态,本列是
+  // 占位符字典跨轮复用的唯一持久层。会话删除随行删除。
+  if (!colNames.includes('deid_state_json')) {
+    safeAddColumn(db, "ALTER TABLE chat_sessions ADD COLUMN deid_state_json TEXT NOT NULL DEFAULT ''");
   }
   if (!colNames.includes('context_summary')) {
     safeAddColumn(db, "ALTER TABLE chat_sessions ADD COLUMN context_summary TEXT NOT NULL DEFAULT ''");
@@ -1471,6 +1483,39 @@ export function mergeSessionSkillsUsed(id: string, uses: SessionSkillUse[]): voi
   const merged = mergeSkillUses(getSessionSkillsUsed(id), uses);
   db.prepare('UPDATE chat_sessions SET skills_used_json = ? WHERE id = ?')
     .run(JSON.stringify(merged), id);
+}
+
+// ==========================================
+// 脱敏网关(deid-gateway)会话状态
+// ==========================================
+
+/** 脱敏开关(仅办公会话调用方有意义) */
+export function updateSessionDeidEnabled(id: string, enabled: boolean): void {
+  const db = getDb();
+  db.prepare('UPDATE chat_sessions SET deid_enabled = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?')
+    .run(enabled ? 1 : 0, id);
+}
+
+/** 会话脱敏状态(mapping + denyValues);'' / 脏数据 → 空状态 */
+export function getSessionDeidState(id: string): { mapping: Record<string, string>; denyValues: Array<{ text: string; entity_type?: string }> } {
+  const db = getDb();
+  const row = db.prepare('SELECT deid_state_json FROM chat_sessions WHERE id = ?').get(id) as
+    | { deid_state_json?: string }
+    | undefined;
+  return parseDeidStateJson(row?.deid_state_json);
+}
+
+/**
+ * 原子覆盖会话脱敏状态(契约 §2:每次脱敏成功后用响应中的新 mapping 整体替换)。
+ * 串行性由调用侧保证(预览弹窗一次一条 + inFlight 守卫)。
+ */
+export function setSessionDeidState(
+  id: string,
+  state: { mapping: Record<string, string>; denyValues: Array<{ text: string; entity_type?: string }> },
+): void {
+  const db = getDb();
+  db.prepare('UPDATE chat_sessions SET deid_state_json = ? WHERE id = ?')
+    .run(JSON.stringify(state), id);
 }
 
 // ==========================================

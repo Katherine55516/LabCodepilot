@@ -31,6 +31,10 @@ export interface ChatSession {
   owner_uid?: string;
   /** 沙箱会话累计调用过的 skill(JSON SessionSkillUse[],见 src/lib/skill-use.ts)。 */
   skills_used_json?: string;
+  /** 脱敏网关:1 = 本办公会话开启发送前脱敏(研发会话恒 0)。 */
+  deid_enabled?: number;
+  /** 脱敏网关:会话级 {mapping, denyValues}(JSON,见 src/types/deid.ts)。 */
+  deid_state_json?: string;
   /** Per-session reasoning effort (e.g. 'low'|'medium'|'high'|'max'); ''/undefined = no explicit effort */
   effort?: string;
   context_summary?: string;

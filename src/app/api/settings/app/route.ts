@@ -23,6 +23,10 @@ const ALLOWED_KEYS = [
   'cowork_enabled',
   // Feature announcement dismiss flags (persist across Electron restarts)
   'codepilot:announcement:v0.48-agent-engine',
+  // 脱敏网关(deid-gateway):服务地址/调用密钥覆盖(无设置 UI,运维/调试用;
+  // 优先级 env > setting > 内置默认,见 src/lib/deid-client.ts)
+  'deid_api_url',
+  'deid_api_key',
 ];
 
 export async function GET() {

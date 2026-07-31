@@ -20,6 +20,8 @@ import { ModelSelectorDropdown } from './ModelSelectorDropdown';
 import { EffortSelectorDropdown } from './EffortSelectorDropdown';
 import { FileAwareSubmitButton, AttachFileButton, FileTreeAttachmentBridge, FileAttachmentsCapsules, CliBadge, ComposerBadgeRow } from './MessageInputParts';
 import { VoiceInputButton } from './VoiceInputButton';
+import { DeidToggle } from './DeidToggle';
+import type { DeidGateResult } from '@/hooks/useDeidGate';
 import {
   Tooltip,
   TooltipContent,
@@ -112,6 +114,14 @@ interface MessageInputProps {
    * 既有优雅降级(它们引用的是宿主路径,对 VM 内的 agent 无意义)。
    */
   officeMode?: boolean;
+  /** 脱敏网关(deid-gateway):开关态 + 翻转回调(仅办公会话渲染开关) */
+  deidEnabled?: boolean;
+  onDeidToggle?: () => void;
+  /**
+   * 脱敏发送门:onSend 之前 await,返回 ok:false 表示用户取消或服务失败
+   * (fail-closed)—— 不发送、不清输入。ok:true 时 outbound 为确认后的外发文本。
+   */
+  deidGate?: (text: string, hasFiles: boolean) => Promise<DeidGateResult>;
   onAssistantTrigger?: () => void;
   /** Effort selection lifted to parent for inclusion in the stream chain */
   effort?: string;
@@ -173,6 +183,9 @@ export function MessageInput({
   onProviderModelChange,
   workingDirectory,
   officeMode,
+  deidEnabled,
+  onDeidToggle,
+  deidGate,
   onAssistantTrigger,
   effort: effortProp,
   onEffortChange,
@@ -507,7 +520,8 @@ export function MessageInput({
     // If Image Agent toggle is on and no badge, send via normal LLM with systemPromptAppend.
     // PENDING_KEY is a global singleton — queuing would misattach refs, so block entirely
     // during streaming rather than letting it fall through to the plain queue path.
-    if (imageGen.state.enabled && badges.length === 0) {
+    // 办公会话不进图像 Agent 路径(入口本就隐藏,防全局态残留绕过脱敏门)。
+    if (!officeMode && imageGen.state.enabled && badges.length === 0) {
       if (isStreaming) return; // silently block — can't safely queue image-agent prompts
       const uploadedFiles = await convertFiles();
       const mentionPayload = await resolveMentionPayload();
@@ -576,7 +590,14 @@ export function MessageInput({
         mentionSections.push(`[Mention Limits]\n${mentionPayload.limitNotes.map((x) => `- ${x}`).join('\n')}`);
       }
       const mentionAppend = mentionSections.length > 0 ? `\n\n${mentionSections.join('\n\n')}` : '';
-      const finalPrompt = `${prompt}${mentionAppend}`.trim();
+      let finalPrompt = `${prompt}${mentionAppend}`.trim();
+      // 脱敏发送门(deid-gateway):badge 展开后的完整 prompt 同样过预览门。
+      // 取消/失败 → 不发送,badge 与输入框原样保留(fail-closed)。
+      if (officeMode && deidGate && finalPrompt) {
+        const gated = await deidGate(finalPrompt, files.length > 0);
+        if (!gated.ok) return;
+        finalPrompt = gated.outbound;
+      }
       clearBadgesWithOrder();
       setInputValue('');
       onSend(
@@ -634,20 +655,35 @@ export function MessageInput({
       }
     }
 
+    // 脱敏发送门(deid-gateway):办公会话开关开启时,发送前经服务识别 +
+    // 预览确认;确认后的外发文本替换 content,原文走 displayOverride(用户
+    // 气泡/DB 显示原文,模型只见占位符)。取消/失败 → 不发送、不清输入
+    // (fail-closed,契约 §11)。
+    let outboundContent = finalContent;
+    let deidDisplayOverride: string | undefined;
+    if (officeMode && deidGate && finalContent) {
+      const gated = await deidGate(finalContent, hasFiles);
+      if (!gated.ok) return;
+      if (gated.outbound !== finalContent) {
+        outboundContent = gated.outbound;
+        deidDisplayOverride = content;
+      }
+    }
+
     // If CLI badge is active, inject systemPromptAppend to guide model
     const cliAppend = buildCliAppend(cliBadge);
     if (cliBadge) setCliBadge(null);
 
-    const displayOverride = mentionPayload.mentions.length > 0 ? content : undefined;
+    const displayOverride = deidDisplayOverride ?? (mentionPayload.mentions.length > 0 ? content : undefined);
     onSend(
-      finalContent || 'Please review the attached file(s).',
+      outboundContent || 'Please review the attached file(s).',
       hasFiles ? files : undefined,
       cliAppend,
       displayOverride,
       mentionPayload.mentions.length > 0 ? mentionPayload.mentions : undefined,
     );
     setInputValue('');
-  }, [inputValue, mentionNodeTypes, onSend, onCommand, onBtw, disabled, isStreaming, popover, badges, cliBadge, imageGen, addBadgeWithOrder, clearBadgesWithOrder, setCliBadge, setInputValue, fetchDirectorySummary, fetchMentionFileAttachment, workingDirectory]);
+  }, [inputValue, mentionNodeTypes, onSend, onCommand, onBtw, disabled, isStreaming, popover, badges, cliBadge, imageGen, addBadgeWithOrder, clearBadgesWithOrder, setCliBadge, setInputValue, fetchDirectorySummary, fetchMentionFileAttachment, workingDirectory, officeMode, deidGate]);
 
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -1025,6 +1061,11 @@ export function MessageInput({
                     onEffortChange={setSelectedEffort}
                     supportedEffortLevels={currentModelMeta?.supportedEffortLevels}
                   />
+                )}
+
+                {/* 脱敏网关开关 — 仅办公(沙箱)会话(deid-gateway) */}
+                {officeMode && onDeidToggle && (
+                  <DeidToggle enabled={!!deidEnabled} onToggle={onDeidToggle} disabled={disabled} />
                 )}
 
               </PromptInputTools>

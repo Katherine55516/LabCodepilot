@@ -64,6 +64,7 @@
 | active/agent-sdk-0-2-141-upgrade.md | SDK 0.2.141 升级 + 内置 Claude Code：从 0.2.111 升到 0.2.141（含 Claude Code 2.1.141）；切换到 SDK 新架构的平台子包，把 Claude Code 原生二进制内置到安装包；删除本地 CLI 探测；保留 Native runtime 应急 fallback | Phase 0-9 已完成，Phase 10 进行中，Phase 11 待开始 |
 | active/login-system.md | 登录账号体系（managed-account login）：浏览器 OAuth + 服务端下发 ModelConfig + 与 BYOK 并存 + 与 OpenAI OAuth 完全隔离 | Phase 1-5 待开始 |
 | active/updates-v2-migration.md | 自动更新迁移到研发平台 V2 API：主进程自定义更新器（检查/CDN 下载/sha256 校验/安装）复用登录 `getBackendBase`+`apiRequest`+token，退役 GitHub op7418 旧检查 | Phase 0 待审核 |
+| active/deid-gateway.md | **办公模式脱敏网关(deid-service)对接** — 输入区脱敏开关(会话级持久/默认关/仅办公)+ 发送前预览逐项确认 + 客户端按 normalizedText 偏移重建外发文本 + 渲染层占位符还原 + unknownPlaceholders 告警;决策 D1-D10(展示原文/外发脱敏复用 displayOverride、历史回灌重脱敏、fail-closed、mapping 会话级原子覆盖) | P1 已完成(单测 16 + 真实链路 13 项),P2 图片脱敏待做 |
 | active/v0.48-post-release-issues.md | v0.48.0/0.48.1 发版后问题追查（已归档至 issue-tracker.md，保留原始记录） | 已归档 |
 | active/security-audit-remediation.md | 安全审计修复方案：2 处无鉴权 RCE（Shell 注入）→ API 边界鉴权（middleware）→ 文件接口作用域 → Bridge 访问控制/凭证加密 → Electron CSP/sandbox → 依赖升级，共 7 Phase | Phase 1-7 待开始 |
 | active/stream-idle-timeout-rework.md | 对话流空闲超时改造：从「距上次任何事件」改为「距上次实质内容」计时，根治慢首包 provider 误杀（B-019），保留真卡死兜底 | Phase 0/1/4 已完成（c7888dc/e9ddbc2），Phase 2-3 可选暂缓 |
