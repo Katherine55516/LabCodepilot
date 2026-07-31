@@ -13,9 +13,9 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { SpinnerGap, Warning } from '@/components/ui/icon';
 import { useTranslation } from '@/hooks/useTranslation';
-import { buildPreviewSegments } from '@/lib/deid-utils';
+import { buildPreviewSegments, unlocatedEntities } from '@/lib/deid-utils';
 import type { DeidPreviewDialogState } from '@/hooks/useDeidGate';
-import type { DeidEntity } from '@/types/deid';
+import type { DeidEntity, DeidImagePreview } from '@/types/deid';
 import { cn } from '@/lib/utils';
 
 /**
@@ -91,8 +91,116 @@ function AddEntityRow({
   );
 }
 
+/**
+ * 单张图片的原图/打码图左右对比 + 区域实体表(交互文档 §7.2)。
+ * 取消某实体 → 上层从**原图** canvas 重绘该区域(不在打码图上擦除)。
+ */
+function ImagePreviewCard({
+  image,
+  excludedImages,
+  loading,
+  onToggleImageEntity,
+}: {
+  image: DeidImagePreview;
+  excludedImages: Set<string>;
+  loading: boolean;
+  onToggleImageEntity: (imageIndex: number, entityId: number) => void;
+}) {
+  const { t } = useTranslation();
+  const boxed = image.entities.filter((e) => e.action === 'anonymized' && !!e.box);
+  const unlocated = unlocatedEntities(image.entities);
+
+  return (
+    <div className="rounded-md border border-border/60 p-2">
+      <div className="mb-1.5 flex items-center gap-2 text-xs text-muted-foreground">
+        <span className="min-w-0 flex-1 truncate" title={image.name}>{image.name}</span>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2">
+        <figure className="min-w-0">
+          <figcaption className="mb-1 text-[11px] text-muted-foreground">{t('deid.imageOriginal')}</figcaption>
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={`data:${image.mimeType};base64,${image.originalBase64}`}
+            alt={t('deid.imageOriginal')}
+            className="w-full rounded border border-border/40 bg-muted/20 object-contain"
+          />
+        </figure>
+        <figure className="min-w-0">
+          <figcaption className="mb-1 text-[11px] font-medium text-blue-700 dark:text-blue-300">
+            {t('deid.imageRedacted')}
+          </figcaption>
+          {image.redactedBase64 ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={`data:image/png;base64,${image.redactedBase64}`}
+              alt={t('deid.imageRedacted')}
+              className="w-full rounded border border-blue-500/40 bg-muted/20 object-contain"
+            />
+          ) : (
+            <div className="flex h-full min-h-16 items-center justify-center rounded border border-destructive/40 bg-destructive/10 px-2 py-3 text-[11px] text-destructive">
+              {t('deid.imageRedrawFailed')}
+            </div>
+          )}
+        </figure>
+      </div>
+
+      {/* 定位失败的实体 —— 这些在图上**没有被遮盖**,必须显式告知 */}
+      {unlocated.length > 0 && (
+        <div className="mt-2 flex items-start gap-2 rounded-md border border-status-warning/40 bg-status-warning/10 px-2 py-1.5 text-[11px]">
+          <Warning size={13} className="mt-0.5 shrink-0 text-status-warning" />
+          <span>
+            {t('deid.imageUnlocated')}
+            {unlocated.map((e) => (
+              <span key={e.id} className="ml-1 font-mono">{e.original}</span>
+            ))}
+          </span>
+        </div>
+      )}
+
+      {boxed.length > 0 ? (
+        <div className="mt-2 divide-y divide-border/40 rounded border border-border/50">
+          {boxed.map((e) => {
+            const checked = !excludedImages.has(`${image.index}:${e.id}`);
+            return (
+              <label
+                key={e.id}
+                className="flex cursor-pointer items-center gap-2 px-2 py-1 text-[11px] hover:bg-muted/40"
+                title={`${e.layer || ''}${e.recognizer ? ` · ${e.recognizer}` : ''}${typeof e.score === 'number' ? ` · ${e.score.toFixed(2)}` : ''}`}
+              >
+                {/* eslint-disable-next-line no-restricted-syntax */}
+                <input
+                  type="checkbox"
+                  className="accent-primary"
+                  checked={checked}
+                  disabled={loading}
+                  onChange={() => onToggleImageEntity(image.index, e.id)}
+                />
+                <span className="w-24 shrink-0 truncate font-mono text-muted-foreground">{e.entity_type}</span>
+                <span className="min-w-0 flex-1 truncate" title={e.original}>{e.original}</span>
+                <span className="shrink-0 font-mono text-blue-700 dark:text-blue-300">{e.placeholder || '—'}</span>
+                <span className={cn('w-14 shrink-0 text-right', checked ? 'text-muted-foreground' : 'text-amber-700 dark:text-amber-300')}>
+                  {checked ? t('deid.actionAnonymized') : t('deid.actionKeptByUser')}
+                </span>
+              </label>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="mt-2 rounded bg-muted/40 px-2 py-1.5 text-[11px] text-muted-foreground">
+          {t('deid.imageNoRegions')}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function DeidPreviewDialog(props: DeidPreviewDialogState) {
-  const { open, loading, errorStatus, data, hasFiles, excluded, onToggleEntity, onAddEntity, onConfirm, onCancel } = props;
+  const {
+    open, loading, errorStatus, data, hasNonImageFiles, images, hasImageFailure,
+    imageMode, onImageModeChange, excluded, excludedImages,
+    onToggleEntity, onToggleImageEntity, onAddEntity, onConfirm, onCancel,
+  } = props;
   const { t } = useTranslation();
 
   const segments = useMemo(
@@ -100,8 +208,11 @@ export function DeidPreviewDialog(props: DeidPreviewDialogState) {
     [data, excluded],
   );
 
-  const anonymizedCount = data?.entities?.filter((e) => e.action === 'anonymized').length ?? 0;
-  const keptCount = excluded.size;
+  // 计数含图片:确认按钮文案要反馈**整条消息**的风险(交互文档 §5.2)
+  const anonymizedCount =
+    (data?.entities?.filter((e) => e.action === 'anonymized').length ?? 0) +
+    images.reduce((n, img) => n + img.entities.filter((e) => e.action === 'anonymized' && !!e.box).length, 0);
+  const keptCount = excluded.size + excludedImages.size;
   const normalizationEdits = (data?.normalization?.edits || []).filter((e) => e.accepted !== false);
 
   const errorMessage =
@@ -130,7 +241,8 @@ export function DeidPreviewDialog(props: DeidPreviewDialogState) {
 
   return (
     <Dialog open={open} onOpenChange={(o) => { if (!o) onCancel(); }}>
-      <DialogContent className="sm:max-w-xl">
+      {/* 带图片时放宽到 3xl —— 左右对比需要横向空间 */}
+      <DialogContent className={cn('max-h-[85vh] overflow-y-auto', images.length > 0 ? 'sm:max-w-3xl' : 'sm:max-w-xl')}>
         <DialogHeader>
           <DialogTitle>{t('deid.dialogTitle')}</DialogTitle>
           <DialogDescription>{t('deid.dialogSubtitle')}</DialogDescription>
@@ -144,15 +256,15 @@ export function DeidPreviewDialog(props: DeidPreviewDialogState) {
           </div>
         )}
 
-        {/* 初次识别中 */}
-        {loading && !data && !errorMessage && (
+        {/* 初次识别中(图片管道实测 6~10s/张,这里必须能看到进度) */}
+        {loading && !data && images.length === 0 && !errorMessage && (
           <div className="flex items-center gap-2 py-6 justify-center text-sm text-muted-foreground">
             <SpinnerGap size={18} className="animate-spin" />
             {t('deid.processing')}
           </div>
         )}
 
-        {data && !errorMessage && (
+        {(data || images.length > 0) && !errorMessage && (
           <div className="space-y-3 text-sm">
             {/* 重跑中的轻量提示 */}
             {loading && (
@@ -163,7 +275,7 @@ export function DeidPreviewDialog(props: DeidPreviewDialogState) {
             )}
 
             {/* LLM 层降级(契约 §11:保留规则/NER 结果,允许继续) */}
-            {data.llmError && (
+            {(data?.llmError || images.some((img) => img.llmError)) && (
               <div className="flex items-start gap-2 rounded-md border border-status-warning/40 bg-status-warning/10 px-3 py-2 text-xs">
                 <Warning size={14} className="mt-0.5 shrink-0 text-status-warning" />
                 <span>{t('deid.degraded')}</span>
@@ -182,15 +294,17 @@ export function DeidPreviewDialog(props: DeidPreviewDialogState) {
               </div>
             )}
 
-            {/* 附件不参与脱敏提示(D6) */}
-            {hasFiles && (
+            {/* 非图片附件不参与脱敏(文本管道处理不了任意二进制) */}
+            {hasNonImageFiles && (
               <div className="flex items-start gap-2 rounded-md border border-status-warning/40 bg-status-warning/10 px-3 py-2 text-xs">
                 <Warning size={14} className="mt-0.5 shrink-0 text-status-warning" />
                 <span>{t('deid.filesNotice')}</span>
               </div>
             )}
 
-            {/* 最终外发内容预览(与 buildOutbound 同源) */}
+            {/* 最终外发内容预览(与 buildOutbound 同源;纯图片消息无此段) */}
+            {data && (
+            <>
             <div>
               <div className="mb-1 text-xs font-medium text-muted-foreground">{t('deid.previewLabel')}</div>
               <div className="max-h-40 overflow-y-auto whitespace-pre-wrap break-words rounded-md border border-border/60 bg-muted/30 px-3 py-2 leading-relaxed">
@@ -262,6 +376,46 @@ export function DeidPreviewDialog(props: DeidPreviewDialogState) {
                 {t('deid.noEntities')}
               </div>
             )}
+            </>
+            )}
+
+            {/* 图片脱敏:原图/打码图对比 + 区域实体表(交互文档 §7) */}
+            {images.length > 0 && (
+              <div>
+                <div className="mb-1 flex items-center justify-between gap-2">
+                  <span className="text-xs font-medium text-muted-foreground">
+                    {t('deid.imagesLabel', { n: images.length })}
+                  </span>
+                  {/* 遮罩模式:placeholder 便于视觉模型理解语义,fill 更彻底 */}
+                  <div className="flex items-center gap-1">
+                    {(['placeholder', 'fill'] as const).map((m) => (
+                      <Button
+                        key={m}
+                        type="button"
+                        variant={imageMode === m ? 'secondary' : 'ghost'}
+                        size="sm"
+                        className="h-6 px-2 text-[11px]"
+                        disabled={loading}
+                        onClick={() => onImageModeChange(m)}
+                      >
+                        {t(m === 'placeholder' ? 'deid.imageModePlaceholder' : 'deid.imageModeFill')}
+                      </Button>
+                    ))}
+                  </div>
+                </div>
+                <div className="space-y-2">
+                  {images.map((img) => (
+                    <ImagePreviewCard
+                      key={img.index}
+                      image={img}
+                      excludedImages={excludedImages}
+                      loading={loading}
+                      onToggleImageEntity={onToggleImageEntity}
+                    />
+                  ))}
+                </div>
+              </div>
+            )}
 
             {/* 新增脱敏实体(漏检修正,写入 denyValues 跨轮生效) */}
             <AddEntityRow loading={loading} onAdd={onAddEntity} />
@@ -273,7 +427,13 @@ export function DeidPreviewDialog(props: DeidPreviewDialogState) {
             {t('deid.cancel')}
           </Button>
           {!errorMessage && (
-            <Button type="button" onClick={onConfirm} disabled={loading || !data}>
+            <Button
+              type="button"
+              onClick={onConfirm}
+              // hasImageFailure:拿不到打码产物就不给发 —— 回落发原图是
+              // 最严重的失败模式(fail-closed,契约 §11)
+              disabled={loading || hasImageFailure || (!data && images.length === 0)}
+            >
               {keptCount > 0
                 ? t('deid.confirmWithKept', { n: keptCount })
                 : anonymizedCount === 0

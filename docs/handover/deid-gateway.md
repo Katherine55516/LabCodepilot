@@ -115,10 +115,35 @@ ALTER TABLE chat_sessions ADD COLUMN deid_state_json TEXT NOT NULL DEFAULT '';
 **串行。** 契约要求同会话请求串行(并发会产生占位符编号冲突)。预览弹窗天然一次
 一条,`useDeidGate` 另有 `pendingRef` 守卫拒绝并发 gate。
 
+### 6.1 图片管道(契约 §7/§8)
+
+`useDeidGate.runDeid` 一轮内**先文本、再逐张图片,严格串行 await**。每步各自调服务端,
+服务端每次重读会话字典,所以后一步天然拿到前一步落库的新 mapping —— 正文里的手机号
+与图片里的同一号码因此复用同一个 `<PHONE_NUMBER_1>`(已实测)。并发跑会撞编号。
+
+**外发图由客户端 canvas 从原图重绘**(`src/lib/deid-image.ts`),不用服务端返回的
+`redactedImageBase64`。原因:服务端那张是"全打码"版本,用户取消某区域后它不会变,
+直接外发会让预览与实际发送不一致。重绘铁律是**每次都从原图重画保留区域**,绝不在
+已打码的图上"擦除"遮罩(契约 §7.2 末句)。取消勾选、切换 placeholder/fill 模式都
+只是改变绘制列表。
+
+**fail-closed 无回落**:canvas 与服务端图都拿不到时,确认按钮禁用 + `onConfirm` 二次
+拦截,**绝不回落发原图**。这里回落等于把未脱敏内容外发,比不发严重得多。
+
+**excluded 命名空间**:文本与每张图片的实体 id 各自从 0 开始,图片取消集合用复合 key
+`${imageIndex}:${entityId}`(`imageExcludeKey` / `imageExcludedIds`),否则多图会串台。
+
+**纯图片消息同样过门**。早期版本门禁条件写成 `finalContent` 非空,导致只发图片时
+静默绕过整个脱敏流程 —— 这是用户实测抓到的真 bug,现条件为 `finalContent || hasFiles`。
+
 ## 7. 已知边界(本期不做)
 
-- **附件/图片不脱敏**。文本管道处理不了二进制;图片管道(`/v1/deidentify/image`
-  + canvas 重绘)是 P2。预览弹窗在带附件时显示黄色提示。
+- **非图片附件不脱敏**(docx/xlsx/pdf 等)。文本管道处理不了任意二进制,弹窗黄条如实提示。
+  图片已在 §6.1 覆盖。
+- **图片中定位失败的实体不会被打码**。服务端可能返回 `action:"unlocated"` +
+  `placeholder:null`(LLM 报出实体但 OCR 定位不到,实测「姓名:张伟」这类紧贴标签的
+  版式会命中),该区域**原样外发**。弹窗按图列黄条警示,但这是服务端识别能力边界。
+- **图片手工框选补充未做**(契约 §7.3):用户只能取消已识别区域,不能自己框一块打码。
 - **非 composer 路径不过门**:桥接(微信)消息、`/btw` 侧问、autoTrigger 心跳。
   桥接消息进 deid 办公会话会绕过脱敏 —— 若要覆盖,门必须下沉到 `/api/chat` 服务端
   (但那样就没有"用户逐项确认"这一步了,是产品取舍不是技术障碍)。
@@ -152,6 +177,27 @@ ALTER TABLE chat_sessions ADD COLUMN deid_state_json TEXT NOT NULL DEFAULT '';
 | 13 | fail-closed:地址指向不可达端口 → 502,弹窗提示「内容尚未发送」,消息列表零新增、输入框内容保留 | ✅ |
 
 console 全程无 error/warn。测试会话与临时 setting 已清理。
+
+### 8.1 图片管道验证(2026-07-31 补做,dev + 真实 deid 服务)
+
+单测 23 条(含图片 7 条:`visibleBoxes` / `unlocatedEntities` / excluded 命名空间);
+全量 `npm run test` 2495 pass / 0 fail(此时基线已切 vm_cowork,`claude-home-shadow`
+全绿 —— 那 15 条失败是 `debug-win-build` 分支的 Windows 构建改动带来的,与本功能无关)。
+
+| # | 断言 | 结果 |
+|---|---|---|
+| 1 | 服务端 `/api/deid/image` 真实打通,mapping 落库 | ✅ |
+| 2 | **跨模态复用**:文本先得 `<PHONE_NUMBER_1>`,同会话图片里同一号码复用该占位符 | ✅ |
+| 3 | 编号连续:传入 `<PHONE_NUMBER_3>` 后新号顺延 `<PHONE_NUMBER_4>` | ✅ |
+| 4 | **纯图片无文字**消息现在会拦下并弹预览(此前静默外发,真 bug) | ✅ |
+| 5 | 弹窗左右对比渲染 + 4 实体表 | ✅ |
+| 6 | 取消某项 → 图片重绘,按钮变「确认发送(1 项保留原文)」 | ✅ |
+| 7 | placeholder ↔ fill 模式切换即时重绘 | ✅ |
+| 8 | 外发附件为 `*-redacted.png`,非原图 | ✅ |
+| 9 | **像素级验证**:外发图与原图逐像素 diff,仅姓名/手机/邮箱三行被改,被取消的身份证行**零差异** | ✅ |
+
+第 9 项是这轮的关键证据 —— 文件名和实体表都可能骗人,只有像素 diff 能同时证明
+"该遮的遮了"和"取消的确实是从原图重绘、不是把灰块擦掉"。
 
 ## 9. 排障
 

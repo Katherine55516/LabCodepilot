@@ -10,9 +10,13 @@ import {
   buildOutbound,
   buildPreviewSegments,
   containsPlaceholder,
+  imageExcludeKey,
+  imageExcludedIds,
   parseDeidStateJson,
   remaskText,
   restoreText,
+  unlocatedEntities,
+  visibleBoxes,
 } from '../../lib/deid-utils';
 import type { DeidEntity } from '../../types/deid';
 
@@ -145,5 +149,68 @@ describe('parseDeidStateJson', () => {
       assert.deepEqual(st.mapping, {});
       assert.deepEqual(st.denyValues, []);
     }
+  });
+});
+
+// ── 图片管道(契约 §7.2 客户端重绘)──
+// 取自真实服务响应(2026-07-31,760×300 员工信息卡):手机/邮箱/身份证有 box,
+// 「张伟」被 LLM 报出但 OCR 定位失败 → unlocated + placeholder:null。
+const imgEntities: DeidEntity[] = [
+  { id: 0, entity_type: 'PHONE_NUMBER', original: '13800138000', placeholder: '<PHONE_NUMBER_1>', action: 'anonymized', box: { left: 91, top: 129, width: 174, height: 26 } },
+  { id: 1, entity_type: 'EMAIL_ADDRESS', original: 'zhangwei@example.com', placeholder: '<EMAIL_1>', action: 'anonymized', box: { left: 83, top: 176, width: 353, height: 34 } },
+  { id: 2, entity_type: 'CN_ID_CARD', original: '110101199003074512', placeholder: '<CN_ID_CARD_1>', action: 'anonymized', box: { left: 131, top: 229, width: 258, height: 26 } },
+  { id: 3, entity_type: 'PERSON', original: '张伟', placeholder: null, action: 'unlocated' },
+];
+
+describe('visibleBoxes (image redraw list)', () => {
+  it('keeps only anonymized entities that carry a usable box', () => {
+    const boxes = visibleBoxes(imgEntities, new Set());
+    assert.equal(boxes.length, 3);
+    assert.deepEqual(boxes.map((e) => e.id), [0, 1, 2]);
+  });
+
+  it('excludes user-cancelled regions — that area stays as the original image', () => {
+    const boxes = visibleBoxes(imgEntities, new Set([1]));
+    assert.deepEqual(boxes.map((e) => e.id), [0, 2]);
+  });
+
+  it('drops zero-area boxes (would paint nothing but could confuse the count)', () => {
+    const degenerate: DeidEntity[] = [
+      { id: 9, entity_type: 'X', original: 'x', placeholder: '<X_1>', action: 'anonymized', box: { left: 1, top: 1, width: 0, height: 10 } },
+    ];
+    assert.equal(visibleBoxes(degenerate, new Set()).length, 0);
+  });
+});
+
+describe('unlocatedEntities (must be surfaced — NOT masked in the image)', () => {
+  it('reports LLM-detected but unlocatable entities', () => {
+    const un = unlocatedEntities(imgEntities);
+    assert.deepEqual(un.map((e) => e.original), ['张伟']);
+  });
+
+  it('also catches anonymized entities that somehow lack a box', () => {
+    const weird: DeidEntity[] = [
+      { id: 0, entity_type: 'PERSON', original: '李四', placeholder: '<PERSON_2>', action: 'anonymized' },
+    ];
+    assert.equal(unlocatedEntities(weird).length, 1);
+  });
+});
+
+describe('image exclude keys (namespacing across text + multiple images)', () => {
+  it('round-trips per-image ids without cross-image collisions', () => {
+    const keys = new Set([
+      imageExcludeKey(0, 1),
+      imageExcludeKey(0, 2),
+      imageExcludeKey(3, 1), // same entity id, different image
+    ]);
+    assert.deepEqual([...imageExcludedIds(keys, 0)].sort(), [1, 2]);
+    assert.deepEqual([...imageExcludedIds(keys, 3)], [1]);
+    assert.deepEqual([...imageExcludedIds(keys, 7)], []);
+  });
+
+  it('is not confused by an index that prefixes another (1 vs 10)', () => {
+    const keys = new Set([imageExcludeKey(10, 5)]);
+    assert.deepEqual([...imageExcludedIds(keys, 1)], []);
+    assert.deepEqual([...imageExcludedIds(keys, 10)], [5]);
   });
 });

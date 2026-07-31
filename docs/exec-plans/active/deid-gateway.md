@@ -13,7 +13,7 @@
 | P1-b | 服务端:deid-client + /api/deid/* 三路由 + chat route(系统提示词追加 + 历史重脱敏) | ✅ 已完成 | |
 | P1-c | 渲染端:开关 + 预览确认弹窗 + 发送门 + 渲染层还原 + unknownPlaceholders 告警 + i18n | ✅ 已完成 | |
 | P1-d | 验证:npm run test + CDP 真实链路验证(真 deid 服务)| ✅ 已完成 | 13 项断言全过,console 干净 |
-| P2 | 图片脱敏(/v1/deidentify/image + canvas 重绘)| 📋 待开始 | 本期不做,见边界 |
+| P2 | 图片脱敏(/v1/deidentify/image + canvas 重绘)| ✅ 已完成 | CDP 像素级验证:外发图仅 3 行被改,取消项逐字节保留原文 |
 
 ## 决策日志
 
@@ -22,7 +22,11 @@
 - 2026-07-31 D3: **历史回灌重脱敏(服务端)**。`/api/chat` 的 conversationHistory 从 DB 读的是原文(D2 的代价),SDK resume 失效/上下文压缩时会回灌给模型 → 在 route.ts 构建 historyMsgs 处,对 deid 会话用 mapping 做 反向替换(原文→占位符,长词优先)。用户在预览中"取消脱敏"的实体会被过度替换(安全方向的误差),接受。
 - 2026-07-31 D4: **mapping/denyValues 存会话级 `deid_state_json`,由服务端在 /api/deid/text 成功后原子覆盖**(契约 §2/§9)。串行由预览弹窗 UI(一次一条)+ inFlight 守卫保证。会话删除随行删除;不复用跨会话。
 - 2026-07-31 D5: **还原走渲染层单点**:`MessageResponse`(所有 markdown 文本的唯一渲染出口)内用 context 做占位符→原文替换;DB assistant 消息存服务端原样(含占位符)。回合完成后调 `/v1/reidentify` 仅用于 unknownPlaceholders 检测(toast 告警),不用于展示替换。thinking/tool 块保持原样 = 交互文档"模型原始返回"详情语义。
-- 2026-07-31 D6: **附件不脱敏**(文本管道无法处理任意二进制;图片管道 P2)。预览弹窗在带附件时显示黄色提示。
+- 2026-07-31 D6: ~~附件不脱敏(图片管道 P2)~~ → **已推翻并补做(同日)**。原决策把用户给的 openapi 中 `/v1/deidentify/image` 整条管道排除在外,是不该做的范围收窄;且实现上留了个更糟的洞:门禁条件为 `finalContent` 非空,**纯图片消息直接静默绕过整个脱敏流程**。现:图片走 `/api/deid/image`,纯图片消息同样过门。**非图片附件**(docx/xlsx 等二进制)仍不脱敏,弹窗黄条如实提示。
+- 2026-07-31 D11: **外发图 = 客户端 canvas 从原图重绘,不用服务端 redactedImageBase64**(契约 §7.2)。服务端那张是「全打码」版本,用户在预览里取消某区域后它不会变 —— 直接外发会导致预览与实际发送不一致。canvas 每次都从原图重画保留区域,绝不在打码图上"擦除"。
+- 2026-07-31 D12: **图片 fail-closed 无回落**:canvas 与服务端图都拿不到时,确认按钮禁用 + onConfirm 二次拦截,**绝不回落发原图**(回落等于把未脱敏内容外发,比不发严重得多)。
+- 2026-07-31 D13: **excluded 加命名空间**:文本与每张图片的实体 id 各自从 0 开始,图片取消集合改用复合 key `${imageIndex}:${entityId}`,否则多图/图文混合时取消会串台(单测覆盖 1 vs 10 的前缀撞车)。
+- 2026-07-31 D14: **`unlocated` 实体必须显式警示**。实测服务端会返回 `action:"unlocated"` + `placeholder:null`(LLM 报出人名但 OCR 定位失败),这类实体**在图上不会被打码**。弹窗按图单独列黄条,不能让用户以为"出了打码图 = 全部安全"。
 - 2026-07-31 D7: **API key 服务端持有**:`DEID_API_URL`/`DEID_API_KEY` env > settings(`deid_api_url`/`deid_api_key`,进 ALLOWED_KEYS,无 UI)> 默认(`https://deid-api.ai-native-lab.com` / `cmwork-desktop`)。deid-service 密钥仅作调用方归因(任意非空即可),不属于高敏凭证,不进 SENSITIVE_SETTINGS。
 - 2026-07-31 D8: **fail-closed**:脱敏接口失败(网络/401/502)→ 不发送、保留输入、提示"脱敏服务暂不可用,内容尚未发送";`llmError` 降级 → 黄条提示但允许继续(契约 §11)。
 - 2026-07-31 D9: **recommendedSystemPrompt 服务端追加**:chat route 检测 deid 会话后,从 `/v1/meta`(内存缓存 10min)取推荐提示词拼进 systemPromptAppend;meta 不可达时用硬编码兜底副本(实测抓取的全文)。
@@ -65,7 +69,9 @@ MessageInput.handleSubmit(办公 && 开关开 && 文本非空)
 
 ### 边界(本期不做,已知限制)
 
-- 图片/附件内容不脱敏(P2:/v1/deidentify/image 与文本共用 mapping)
+- **非图片附件**(docx/xlsx/pdf 等)内容不脱敏 —— 文本管道处理不了任意二进制,弹窗黄条如实提示
+- **图片里定位失败的实体不会被打码**(服务端 `unlocated`):实测「姓名:张伟」这类版式下 OCR 可能定位不到人名,该区域原样外发。UI 已按图警示,但这是服务端识别能力边界,客户端无法补救
+- 图片手工框选补充(契约 §7.3)未做:用户只能取消已识别区域,不能在原图上自己框一块打码
 - NDJSON `?stream=1` 阶段进度不做,弹窗内 spinner 代替
 - 桥接(微信)/ `/btw` 侧问 / autoTrigger 心跳不经过预览门(非 composer 路径);桥接消息进 deid 办公会话会绕过脱敏 —— 已在交接文档记录
 - 会话标题占位符:deid 会话首条消息的即时标题取自脱敏文(占位符可见),异步真标题生成同样只见脱敏文(隐私正确,观感其次)

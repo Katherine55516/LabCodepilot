@@ -103,6 +103,46 @@ export function restoreText(text: string, mapping: Record<string, string>): stri
   return replaceAllLiteral(text, pairs);
 }
 
+/**
+ * 图片:筛出仍需打码的区域(契约 §7.2 第 2 步)。
+ * 条件 = 已脱敏 + 有 box + 未被用户取消。`unlocated`(LLM 报出但 OCR 定位
+ * 失败,box 缺失)天然被排除 —— 这类实体在图上**不会被遮盖**,UI 必须
+ * 如实告知,不能让用户以为出了打码图就等于全部安全。
+ */
+export function visibleBoxes(entities: DeidEntity[], excluded: Set<number>): DeidEntity[] {
+  return entities.filter(
+    (e) =>
+      e.action === 'anonymized' &&
+      !!e.box &&
+      e.box.width > 0 &&
+      e.box.height > 0 &&
+      !excluded.has(e.id),
+  );
+}
+
+/** 图片:LLM 报出但无法定位的实体(不会被打码,需在 UI 上单独警示) */
+export function unlocatedEntities(entities: DeidEntity[]): DeidEntity[] {
+  return entities.filter((e) => e.action === 'unlocated' || (e.action === 'anonymized' && !e.box));
+}
+
+/** excluded 复合 key:文本与多张图片的实体 id 各自从 0 开始,必须加命名空间防撞 */
+export function imageExcludeKey(imageIndex: number, entityId: number): string {
+  return `${imageIndex}:${entityId}`;
+}
+
+/** 从复合 key 集合中取出某张图片的 excluded id 集合 */
+export function imageExcludedIds(excludedKeys: Set<string>, imageIndex: number): Set<number> {
+  const out = new Set<number>();
+  const prefix = `${imageIndex}:`;
+  for (const key of excludedKeys) {
+    if (key.startsWith(prefix)) {
+      const id = Number(key.slice(prefix.length));
+      if (Number.isInteger(id)) out.add(id);
+    }
+  }
+  return out;
+}
+
 /** 文本中是否存在占位符形状的记号(<TYPE_n>,契约 /v1/meta placeholder.regex) */
 export function containsPlaceholder(text: string): boolean {
   return /<[A-Z0-9_]+_\d+>/.test(text);

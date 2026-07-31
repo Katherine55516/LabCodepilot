@@ -121,7 +121,7 @@ interface MessageInputProps {
    * 脱敏发送门:onSend 之前 await,返回 ok:false 表示用户取消或服务失败
    * (fail-closed)—— 不发送、不清输入。ok:true 时 outbound 为确认后的外发文本。
    */
-  deidGate?: (text: string, hasFiles: boolean) => Promise<DeidGateResult>;
+  deidGate?: (text: string, files?: FileAttachment[]) => Promise<DeidGateResult>;
   onAssistantTrigger?: () => void;
   /** Effort selection lifted to parent for inclusion in the stream chain */
   effort?: string;
@@ -591,18 +591,20 @@ export function MessageInput({
       }
       const mentionAppend = mentionSections.length > 0 ? `\n\n${mentionSections.join('\n\n')}` : '';
       let finalPrompt = `${prompt}${mentionAppend}`.trim();
+      let badgeFiles = files;
       // 脱敏发送门(deid-gateway):badge 展开后的完整 prompt 同样过预览门。
       // 取消/失败 → 不发送,badge 与输入框原样保留(fail-closed)。
-      if (officeMode && deidGate && finalPrompt) {
-        const gated = await deidGate(finalPrompt, files.length > 0);
+      if (officeMode && deidGate && (finalPrompt || files.length > 0)) {
+        const gated = await deidGate(finalPrompt, files);
         if (!gated.ok) return;
         finalPrompt = gated.outbound;
+        if (gated.files) badgeFiles = gated.files;
       }
       clearBadgesWithOrder();
       setInputValue('');
       onSend(
         finalPrompt,
-        files.length > 0 ? files : undefined,
+        badgeFiles.length > 0 ? badgeFiles : undefined,
         undefined,
         displayLabel,
         mentionPayload.mentions.length > 0 ? mentionPayload.mentions : undefined,
@@ -659,15 +661,19 @@ export function MessageInput({
     // 预览确认;确认后的外发文本替换 content,原文走 displayOverride(用户
     // 气泡/DB 显示原文,模型只见占位符)。取消/失败 → 不发送、不清输入
     // (fail-closed,契约 §11)。
+    // 图片同样经门(契约 §7):**纯图片无文字**时也必须过 —— 早期版本这里
+    // 要求 finalContent 非空,导致只发图片时静默绕过整个脱敏流程。
     let outboundContent = finalContent;
+    let outboundFiles = files;
     let deidDisplayOverride: string | undefined;
-    if (officeMode && deidGate && finalContent) {
-      const gated = await deidGate(finalContent, hasFiles);
+    if (officeMode && deidGate && (finalContent || hasFiles)) {
+      const gated = await deidGate(finalContent, files);
       if (!gated.ok) return;
       if (gated.outbound !== finalContent) {
         outboundContent = gated.outbound;
         deidDisplayOverride = content;
       }
+      if (gated.files) outboundFiles = gated.files;
     }
 
     // If CLI badge is active, inject systemPromptAppend to guide model
@@ -677,7 +683,7 @@ export function MessageInput({
     const displayOverride = deidDisplayOverride ?? (mentionPayload.mentions.length > 0 ? content : undefined);
     onSend(
       outboundContent || 'Please review the attached file(s).',
-      hasFiles ? files : undefined,
+      outboundFiles.length > 0 ? outboundFiles : undefined,
       cliAppend,
       displayOverride,
       mentionPayload.mentions.length > 0 ? mentionPayload.mentions : undefined,

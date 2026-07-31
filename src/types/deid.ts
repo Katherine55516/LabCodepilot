@@ -26,6 +26,18 @@ export interface DeidEntity {
   layer?: 'deny_list' | 'regex' | 'builtin' | 'ner' | 'llm' | string;
   recognizer?: string;
   /**
+   * 打码区域(图片管道,含安全边距)。文本管道恒无此字段;图片管道中
+   * `unlocated` 的实体也没有 —— 那类实体**不会被打码**,见 unlocatedEntities。
+   */
+  box?: {
+    left: number;
+    top: number;
+    width: number;
+    height: number;
+  };
+  /** VLM 将 n 个 OCR 碎片合并为本实体(图片管道) */
+  merged?: number;
+  /**
    * anonymized=已替换占位符;kept=策略保留;allowlisted=白名单放行;
    * unlocated=LLM 报出但定位失败(如实上报,未处理)。只有 anonymized 允许用户取消。
    */
@@ -60,6 +72,32 @@ export interface DeidTextResponse {
   timings?: Record<string, number>;
   /** LLM 层故障时出现(已 fail-open 降级,规则/NER 结果仍可用) */
   llmError?: string;
+}
+
+/** POST /v1/deidentify/image 响应 */
+export interface DeidImageResponse {
+  level?: string;
+  mode?: 'placeholder' | 'fill' | string;
+  /** 服务端渲染的打码图(仅作参照;外发图由客户端 canvas 从原图重绘) */
+  redactedImageBase64?: string;
+  entities: DeidEntity[];
+  mapping: Record<string, string>;
+  timings?: Record<string, number>;
+  llmError?: string;
+}
+
+/** 一张待确认图片的完整预览状态(gate 内部 + 弹窗共用) */
+export interface DeidImagePreview {
+  /** 在 files 数组中的下标 —— excluded 复合 key 的命名空间 */
+  index: number;
+  name: string;
+  /** 原图 base64(裸,不含 data: 前缀);canvas 每次都从它重绘 */
+  originalBase64: string;
+  mimeType: string;
+  entities: DeidEntity[];
+  llmError?: string;
+  /** 客户端 canvas 重绘产物(裸 base64,image/png);= 真正外发的图 */
+  redactedBase64: string;
 }
 
 /** POST /v1/reidentify 响应 */

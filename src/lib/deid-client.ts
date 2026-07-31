@@ -9,11 +9,14 @@
  */
 
 import { getSetting } from '@/lib/db';
-import type { DeidDenyValue, DeidReidentifyResponse, DeidTextResponse } from '@/types/deid';
+import type { DeidDenyValue, DeidImageResponse, DeidReidentifyResponse, DeidTextResponse } from '@/types/deid';
 
 const DEFAULT_BASE_URL = 'https://deid-api.ai-native-lab.com';
 const DEFAULT_API_KEY = 'cmwork-desktop';
 const TEXT_TIMEOUT_MS = 30_000; // LLM 层实测 ~0.7s,长文本留余量
+// 图片管道 = OCR + 视觉 + 渲染,实测 760×300 小图首次 9.5s / 复用 6.1s;
+// 大图与冷启动留足余量,超时按 502 归一(fail-closed,不外发原图)。
+const IMAGE_TIMEOUT_MS = 120_000;
 const REID_TIMEOUT_MS = 15_000;
 const META_TIMEOUT_MS = 8_000;
 const META_CACHE_TTL_MS = 10 * 60 * 1000;
@@ -88,6 +91,30 @@ export function deidentifyText(
     '/v1/deidentify/text',
     { method: 'POST', body: JSON.stringify({ text, mapping, denyValues, level: 'high', language: 'zh' }) },
     TEXT_TIMEOUT_MS,
+  );
+}
+
+/**
+ * POST /v1/deidentify/image — 图片脱敏(OCR + 识别 + 打码渲染)。
+ * 与文本共用同一本 mapping(契约 §8:跨模态复用占位符,已实测邮箱复用
+ * <EMAIL_1>、新手机号顺延 <PHONE_NUMBER_4>)。
+ *
+ * 走 JSON(imageBase64)而非 multipart:服务端已持有裸 base64
+ * (FileAttachment.data),免去构造 FormData 与二次编解码。
+ *
+ * ⚠️ 返回的 redactedImageBase64 仅作服务端渲染参照;真正外发的图由客户端
+ * 从原图 canvas 重绘(契约 §7.2),否则用户取消某区域后无法还原该区域。
+ */
+export function deidentifyImage(
+  imageBase64: string,
+  mapping: Record<string, string>,
+  denyValues: DeidDenyValue[],
+  mode: 'placeholder' | 'fill',
+): Promise<DeidImageResponse> {
+  return deidFetch<DeidImageResponse>(
+    '/v1/deidentify/image',
+    { method: 'POST', body: JSON.stringify({ imageBase64, mapping, denyValues, mode }) },
+    IMAGE_TIMEOUT_MS,
   );
 }
 
