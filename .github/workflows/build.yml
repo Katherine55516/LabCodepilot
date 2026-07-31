@@ -127,15 +127,22 @@ jobs:
       - name: Bundle Chromium headless shell
         run: node scripts/bundle-chromium.mjs
 
-      # 重试兜底:EBUSY 类文件锁竞态即使经 no-op 签名消除主因,仍防御性重试
+      # 重试兜底:EBUSY 类文件锁竞态即使经 no-op 签名消除主因,仍防御性重试。
+      # 每次重试前必须清空 release/ 并稍候:失败尝试可能残留子进程握着输出目录
+      # 句柄,原地重跑会 16 秒内秒死(4.0.0 首打时三连 EBUSY 实测,后两次即此故障)。
       - name: Package for Windows (x64 only)
         shell: pwsh
         run: |
           $ok = $false
           foreach ($i in 1..3) {
+            if ($i -gt 1) {
+              Write-Host "清理上一轮残留输出后重试..."
+              Remove-Item -Recurse -Force release -ErrorAction SilentlyContinue
+              Start-Sleep -Seconds 15
+            }
             npx electron-builder --win --x64 --config electron-builder.yml --publish never
             if ($LASTEXITCODE -eq 0) { $ok = $true; break }
-            Write-Host "electron-builder 第 $i 次失败(exit $LASTEXITCODE),重试..."
+            Write-Host "electron-builder 第 $i 次失败(exit $LASTEXITCODE)"
           }
           if (-not $ok) { exit 1 }
 

@@ -271,7 +271,7 @@ win:
   # 注意:electron-builder 26.x 起自定义签名钩子在 signtoolOptions.sign(旧顶层
   # win.sign 已从 schema 移除,写错会 Invalid configuration object 直接失败)。
   signtoolOptions:
-    sign: scripts/noop-sign.cjs
+    sign: ./scripts/noop-sign.cjs
   # Only x64 — arm64 is no longer targeted (most Windows users are x64; drops
   # the need to cross-install win32-arm64 SDK platform subpackage in CI).
   target:
