@@ -2715,8 +2715,9 @@ app.whenReady().then(async () => {
     return result;
   });
 
-  // 打开测试模块触发的后台用量上报：fire-and-forget，绝不阻塞 renderer。
-  // 实际上报在主进程去抖后异步进行（未登录/离线静默跳过）。
+  // 测试用量上报 · renderer 触发源（打开测试模块看到项目列表页时）。仅转调去抖入口 ——
+  // 未登录 / 去抖 60s / 距上次成功 5min 的门都在 scheduleTestUsageUpload→runUpload 内，
+  // 这里不做判断、也绝不阻塞。fire-and-forget：renderer 侧 void 调用，忽略返回。
   ipcMain.handle('auth:upload-test-usage', () => {
     scheduleTestUsageUpload('panel-open');
     return { ok: true as const };

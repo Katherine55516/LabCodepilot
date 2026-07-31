@@ -81,6 +81,11 @@ export async function GET(req: Request): Promise<Response> {
               ? { suiteCounts: raw.suiteCounts, suitePassStr: typeof raw.suitePassStr === 'string' ? raw.suitePassStr : '' }
               : {}),
             tests: Array.isArray(raw.tests) ? raw.tests : [],
+            // 冒烟：体验观察（@@OBSERVATION 归约产物）。功能/回归 run.json 无此字段 →
+            // 不透传，前端不渲染体验问题区块。
+            ...(Array.isArray(raw.observations) && raw.observations.length
+              ? { observations: raw.observations }
+              : {}),
             runHash,
             markdown,
             defectMarkdown,

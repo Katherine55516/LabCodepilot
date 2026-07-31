@@ -9,6 +9,7 @@ import { buildStep, buildPlaywrightMcp, willRunHeaded, artifactPaths, requiremen
 import { probeUrlWithRetry } from '@/lib/test/probe';
 import { resolveProjectEnvWithDb } from '@/lib/test/env-resolve';
 import { isUnsafeSegment } from '@/lib/test/path-safety';
+import { resolveDepositScripts } from '@/lib/test/run-options';
 import { buildStepCompleted, observeStream, recordCasesGenerated, recordStatsEvents } from '@/lib/test/stats-recorder';
 import { REGRESSION_LIBRARY_TASK } from '@/lib/test/library';
 import { readRoundSnapshot, finishRound } from '@/lib/test/rounds';
@@ -92,8 +93,17 @@ export async function POST(req: Request): Promise<Response> {
       typeof body.roundId === 'string' && body.roundId.trim() ? body.roundId.trim() : undefined;
     // 回归执行「优先脚本重放」开关(发起弹窗透传;缺省开)。false = 全部走 AI(排障/对照用)。
     const scriptFirst: boolean = body.scriptFirst !== false;
-    // 任务级「沉淀回归脚本」开关。缺省 true —— 存量任务与旧客户端不传该字段,行为必须不变。
-    const depositScripts: boolean = body.depositScripts !== false;
+    // 冒烟测试(第三形态):形态 + 模块入口 + 数据前缀。只认字面量 'smoke',其余一律按功能
+    // 测试处理 —— 存量任务/旧客户端不传该字段,行为必须逐字不变。
+    const taskType: 'smoke' | undefined = body.taskType === 'smoke' ? 'smoke' : undefined;
+    // 功能测试沿用「缺省 true」；冒烟没有回归脚本产物，服务端强制 false，防止旧任务状态
+    // 或旧客户端显式传 true 绕过前端。这个单点同时覆盖 execution/report 两个入队入口。
+    const depositScripts = resolveDepositScripts(taskType, body.depositScripts);
+    const moduleEntry: string | undefined =
+      typeof body.moduleEntry === 'string' && body.moduleEntry.trim() ? body.moduleEntry.trim().slice(0, 500) : undefined;
+    // 前缀由前端按本地日期下发(跨零点执行时报告与实际造的数据才对得上);缺省由 prompts 兜底。
+    const dataPrefix: string | undefined =
+      typeof body.dataPrefix === 'string' && body.dataPrefix.trim() ? body.dataPrefix.trim().slice(0, 64) : undefined;
 
     if (!projectPath || typeof projectPath !== 'string') {
       return new Response(JSON.stringify({ error: 'projectPath is required' }), {
@@ -208,6 +218,7 @@ export async function POST(req: Request): Promise<Response> {
     const { systemPrompt, prompt, needsPlaywright } = buildStep(step, {
       taskName, env, baseUrl, extraInstruction, reuseImported, requirementMode, requirementSourcePath, hasLoginState, loginCredentials, roundId,
       scriptDone: replay ? { ids: replay.items.map((i) => i.runId), total: replay.totalCases } : undefined,
+      taskType, moduleEntry, dataPrefix,
     });
 
     let mcpServers: Record<string, MCPServerConfig> | undefined;
@@ -292,6 +303,10 @@ export async function POST(req: Request): Promise<Response> {
             depositScripts,
             stats,
             roundId,
+            // 冒烟任务发现整站登录态失效时走 @@AUTH_INVALID 硬停止：服务端直接终止
+            // agent 流，不归约 run.json，前端据结构化事件把执行置失败并跳过冒烟报告。
+            stopOnAuthInvalid: taskType === 'smoke',
+            abortAgent: () => abortController.abort(),
             traceRedactions: [
               { value: projectPath, replacement: '${PROJECT_ROOT}' },
               { value: baseUrl, replacement: '${BASE_URL}' },
@@ -311,6 +326,7 @@ export async function POST(req: Request): Promise<Response> {
               stats,
               roundId,
               depositScripts,
+              taskType,
             })
           : stats
             ? observeStream(

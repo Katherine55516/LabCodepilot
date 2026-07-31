@@ -45,11 +45,13 @@
 | 文件 | 主题 | 状态 |
 |------|------|------|
 | active/cowork-p2-windows.md | **Cowork P2 Windows/WSL2 移植**:补平台后端(约半数模块复用,四接缝=通道/生命周期/分发/网络)；通道走 `wsl.exe -e` stdio 模型(与现 exec 帧封装天然契合，免 admin)；决策 D1 接受策略级隔离先交付/D2 全 Win10-11 不设门槛/D3 stdio/D4 实测需 Win 机；W0 通道 POC 先行 → W1 抽象(macOS 可做) → W2-W7 | ⏸ 挂起(企业禁虚拟化→远程容器方案取代;个人 Win 场景保留) |
+| active/smoke-test.md | **冒烟测试（测试工作台第三形态）**：第三段页签 + 手动录入测试场景（验证目标+预期结果）+ 无门控三节点流水线；环境沿用现有配置、提示词三段固定内容内嵌为 skill/prompt；Phase 11 收敛为单份完整冒烟报告（Bug 表格），停止 Excel/独立缺陷/回归脚本 | Phase 1-11 已完成；打包态实测待用户发起 |
 | active/regression-library.md | 测试工作台:回归用例库(用例设计后自动沉淀「回归测试」标签用例 + 项目级库查看/管理 + 跨任务一键重跑) | 设计完成,待实现(批 A-E) |
 | active/regression-library-v2.md | 回归用例库 v2 一期：执行轮次实体（留痕/快照/中断态）+ 回归套件（静态+查询构建器+pinned）+ 发起弹窗重做（套件/env/预检估算）+ 报告按来源任务分组与 delta + 库检索；方案见 research/regression-library-v2-benchmark-proposal.md | 批 A-E/G/H 已完成；批 F（打包验收）待用户发起 |
 | active/regression-library-v2-phase23.md | 回归用例库 v2 二/三期（按交互原型 6 屏 1:1）：`_lib` 治理元数据（评审态/rev/隔离）+ 跨轮矩阵读侧现算 + 复测轮 failed-only 与合并口径红线 + 轮次报告独立页 + AI 失败归因 + 对比矩阵 + 健康度治理与隔离护栏 | 批 I-P 已完成；打包验收 + 真实 AI 归因质量待验 |
 | active/test-regression-gate-audit.md | 测试工作台:回归集标签 + 用例门控 + 操作审计 | 开发完成(合并 PR #8),待打包验收 mac+Win |
 | active/regression-script-replay.md | 回归执行·脚本重放优先:有合格沉淀脚本的用例直接跑脚本(阶段A),AI 只执行剩余(阶段B),全覆盖零模型消耗;失败策略A+连败提示 | 开发完成(单测 12 条全过),待打包验收 |
+| active/regression-assertion-evidence.md | 回归脚本·执行期断言取证（方案 A′）：执行智能体输出 `@@EVIDENCE` 结构化判定依据落进轨迹，作为生成期断言定位器的第一事实来源。**Phase 0 真机取样已推翻根因假设**（臆造率仅 4.7%、83% 断言不涉及 DOM；`structural` 断言实为用例 expected 写死 Tailwind 类的传导），Phase 1-5 暂缓，改投用例设计侧治理；取样见 research/regression-assertion-evidence-sampling.md | Phase 0 完成（结论：暂缓），Phase 1-5 ⏸ 待重启信号 |
 | active/chat-latency-remediation.md | 聊天链路提速 + 模式入口收敛 + MCP 持久开关 | Phase 0 完成，Phase 1-4 待开始 |
 | active/context-storage-migration.md | 上下文共享与存储迁移 | Phase 0 部分完成，Phase 1-3 待开始 |
 | active/site-and-docs.md | 官网 + 文档站（apps/site） | Phase 0-1 进行中 |
@@ -69,6 +71,7 @@
 | active/stream-idle-timeout-rework.md | 对话流空闲超时改造：从「距上次任何事件」改为「距上次实质内容」计时，根治慢首包 provider 误杀（B-019），保留真卡死兜底 | Phase 0/1/4 已完成（c7888dc/e9ddbc2），Phase 2-3 可选暂缓 |
 | active/test-framework-integration.md | 测试框架集成（对话内嵌测试）：把 ai-lab-test-framework 做成第三种对话模式（代码/计划/测试），上半结构化面板(看板/流程/报告)+下半对话流；锁定作用域/模式/视图模型，替换 Phase-1 的 /test 独立路由 | Phase 0 进行中，Phase 1-8 待开始 |
 | active/test-account-settings.md | 测试账号设置：设置内新增多系统测试账号面板（系统下拉 + local/SIT 标签 + 密码/token/获取登录态），导出到 AI_LabTest `environments.json` + `.auth/` storageState，Electron BrowserWindow 抓取登录态 | Phase 0 完成，Phase 1-6 待开始 |
+| active/test-env-inline-config.md | 测试工作台·就地环境配置（test-account-settings 消费侧延伸）：项目=系统按归一化路径自动绑定、右侧抽屉复用共享 `TestSystemEditor` 就地编辑写同一库、消灭 3 处跳设置页往返；保留设置页双入口 | 阶段 1 完成（dev 态验证 55/55 单测 + CDP），打包态实测待验；阶段 2（环境胶囊+登录态可视）/3 待立项 |
 | active/test-report-display-and-evidence.md | 测试报告就地展示 + 产物预览 + 缺陷结构化 + 执行端接口/录像采集：报告节点完成后工作台流程页展示「概览+产物列表+内嵌全文」，md 渲染/编辑、xlsx 表格、证据截图+录像（每用例一段、留 fail/partial）、缺陷报告结构化模板、`@@RESULT` 加 `api` 字段穿透 run.json | Phase 0-6 代码完成（typecheck/单测 + CDP mock 验证通过），录像/接口真跑 POC 待验证 |
 | active/test-multitask-parallel-execution.md | 测试工作台多任务并行执行：看板多选 + 批量执行（强制无头）+ 并发数 1–5（本机设置）+ 客户端排队（running/waiting 槽位调度）+ 执行前登录态预检（storageState 存在性/过期）；编排去单例化（busyTaskId/abortRef/autoRunRef → 按任务集合） | Phase 0 完成，Phase 1-5 进行中 |
 | active/uploads-storage-relocation.md | 上传附件（截图/@文件）存储从用户工作目录迁到统一缓存 `~/.codepilot/` + 存储治理（会话级联清理 + 容量/TTL）+ `/api/uploads` 锚定根校验 + 存量迁移；连带 `.codepilot-images` 同迁 | Phase 0 完成，Phase 1-6 待开始 |
@@ -88,6 +91,7 @@
 | completed/cowork-image-pipeline.md | **Cowork 镜像流水线**:沙箱环境零手动预置(3.1.15→3.1.17)— M1 cloud-init seed 首启自注入+SSH 全退役 → M2 应用内下载(中科大底镜+npmmirror SDK 平台子包,断点续传/校验/8GiB 稀疏扩容)→ M3 资源随包(vfkit/daemon/forwarder,signIgnore 保 entitlement)+目录正式化+版本追踪+daemon v3 偏斜自愈 → M4 裸机模拟验收 | 2026-07-15 |
 | completed/cowork-office-mode.md | Cowork 办公模式:侧边栏「办公/研发」双栏切换(办公=沙箱会话平铺不绑项目文件夹);E1 执行层守卫(硬失败/native 拒绝/MCP 过滤)→ E2 创建期沙箱+暂存目录 → E3 双栏 → E4 办公 UI 面+实测反馈修复(E4.1-E4.3)→ E5 设置开关+零写入验收+双文档 | 2026-07-14 |
 | completed/cowork-vm-mode.md | Cowork 沙箱 P1 macOS MVP 底层:文件通道(上传进 VM + 产物下载/落库)→ VM 生命周期管理器(server 侧单例)→ guest-daemon/vsock 通道 → 就绪状态机;P1-E 由 cowork-office-mode.md 承接 | 2026-07-14 |
+| completed/test-project-system-display-name.md | 测试工作台项目展示名称：环境配置系统名优先，保留文件夹名与路径；脱敏摘要接口 + 路径归一化 + 空名称回退 + 三语与 UI 验证，不改变项目持久化身份 | 2026-07-30 |
 | completed/script-gen-trace-anchors-incremental.md | 回归脚本生成质量与韧性:快照元素清单(治定位器臆造,具名元素臆造 class → 语义化 getByRole;边界:视觉结构类断言仍需被测端 data-testid)+ 逐条增量沉淀(执行流内 pass 即入队生成,断流不再全丢)+ 未执行守卫 + 打包产物完整性闸 | 2026-07-17 |
 | completed/regression-script-generation.md | 测试报告成功后后台为本轮 pass+「回归测试」标签用例生成独立 Playwright 脚本；四节点不变，具备脱敏轨迹、结构化生成、安全校验、指纹幂等、锁恢复、源任务回写、报告区查看/重试/运行，并通过开发态与 macOS 打包态真实回放 | 2026-07-10 |
 | completed/test-usage-stats.md | **测试模块使用统计**（P1）：test_stats_events 事件流水 + 纯函数聚合口径层（采纳率首轮基线 / 报告准确度+覆盖率 / 服务端逐用例计时 / 模型节点级归因 / 熔断排除 / 时间窗口计入门控）、10 类事件字典、四 scope API + 4 Sheet XLSX 导出、TestStatsView 看板（第 4 视图）+ 复核 UI + 节点用时/模型徽标。P2 匿名上报为独立后续里程碑 | 2026-07-09 |

@@ -2,6 +2,7 @@ import fs from 'fs';
 import path from 'path';
 import type { MCPServerConfig } from '@/types';
 import { writeMcpLauncherShim } from './evidence';
+import { smokeDataPrefix } from './smoke-scenarios';
 
 /**
  * AI 测试工作台 · 步骤 prompts（移植自 ai-lab-test-framework V0.3 的执行流程）。
@@ -95,6 +96,25 @@ const SYS: Record<TestStep, string> = {
 ② 失败必须给出分类(应用bug/测试bug/环境问题/路径不可建立/flaky)与三段式备注(做了什么/看到了什么/为什么足以关闭为该状态)；
 ③ 报告只属测试范畴：可列 bug 事实与"待开发处理"，但禁止写 bug 修复方案/改哪行代码/发布与否/优先级/指派责任人；
 ④ 禁止在报告中向用户提问或留 TBD/待确认占位；⑤ 只读输入与业务源码，只写 AI_LabTest/ 目录。`,
+};
+
+/**
+ * 冒烟测试的角色 system prompts（第三形态；承接原冒烟提示词的【角色与目标】段）。
+ *
+ * 为什么另起一套而不复用 SYS：冒烟与功能测试在**同样的 step 键**上做的是不同的事——
+ * cases 步不设计用例而是归整用户录入的场景、execution 步不按步骤走而是自主探索、report
+ * 步的结论口径是"主流程通不通"而非双口径通过率。角色定位不同，system prompt 必须分开。
+ */
+const SMOKE_SYS: Partial<Record<TestStep, string>> = {
+  cases: `你是 QA 自动化测试平台的「冒烟测试场景整理员」。
+任务：把用户录入的冒烟测试场景（「验证目标 + 预期结果」，不含操作步骤）归整为平台可执行的结构化数据。
+铁律：① **以用户录入为准**——只做格式归整与明显笔误修正，绝不改写用户的验证目标与预期结果、绝不臆造预期、绝不新增用户没写的场景；② 冒烟只覆盖主流程，**不要**补边界/异常/权限用例；③ 只写入 AI_LabTest/ 目录，绝不修改业务源码。`,
+  execution: `你是 <系统> 的测试工程师，用 Playwright MCP 对指定模块执行**冒烟测试**。
+目标：仅验证主流程是否走得通；边界值、异常输入、权限等非主流程场景本次不覆盖。
+铁律：① 自行探索页面完成每个场景（场景只给"验证什么"，不给"怎么点"），操作前先 browser_snapshot 定位元素；② 所有写操作只针对本次自己新建的数据（用平台下发的前缀），**严禁操作任何存量/他人数据**；③ 每个场景对照「预期结果」判定四态，判定依据必须能在页面上被观察到；④ 某场景失败不中断，跳过其依赖场景、继续其余场景；⑤ 绝不修改业务源码与配置，只写 AI_LabTest/ 目录。`,
+  report: `你是 QA 自动化测试平台的「冒烟测试报告员」。
+任务：把一次冒烟执行的结果整合成结构化 Markdown 报告，回答两件事——**主流程是否走得通、是否具备进一步测试的条件**。
+铁律：① 只陈述事实并引用真实证据（执行结果/截图路径），不臆造；② 结论口径只属冒烟：不出需求覆盖矩阵、不出双口径通过率、不出回归集红线；③ 报告只属测试范畴：可列 bug 事实，但禁止写修复方案/改哪行代码/发布与否/优先级/指派责任人；④ 不向用户提问、不留 TBD 占位；⑤ 只读输入，只写 AI_LabTest/ 目录。`,
 };
 
 // ── user prompt 构造（按框架 buildPrompt 改写，适配「任务」维度）──────────────
@@ -208,7 +228,8 @@ ${rule}
 2. **先建「需求 × 适用维度」覆盖矩阵，再逐格生成**（让条数由需求决定、可复现、不漏需求）：对每条需求从八类维度（正向/异常/边界/状态转换/权限/业务规则/数据一致性/用户体验）判定哪些适用，每个适用格子恰好 1 条用例；**每条需求至少 1 条，一条都不能漏**。
 3. 每条用例必含字段：ID（TC-NNN）/ 优先级（P0-P3）/ 用例类型（八类之一）/ 需求引用（REQ-ID）/ 标题（purpose）/ 前置条件 / **测试步骤 steps（操作↔预期 1:1 的数组）** / 断言级别（L1可见/L2内容/L3状态/L4行为）/ **oracle 来源 + 验证性质（见第 4 步「oracle 双轴」铁律）** / **用例标签 tags（见第 5 步「回归集」铁律）** / 清理（如需要）。
    - steps:[{content,expected}]：每个操作配且仅配一条预期，每条 expected **以【检查点类别】开头**（仅用：【UI检查】【业务功能检查】【数据检查】【通知检查】【异常检查】【权限检查】）。
-   - 预期要具体、可验证、有源码依据（真实文案/元素/路由/状态），拿不准标「待真机确认」。
+   - 预期要具体、可验证（真实文案/元素/路由/状态），拿不准标「待真机确认」。
+   - **预期只写用户看得见的事实，禁写实现细节（铁律，见规范 §1.5）**：\`expected\` 里**禁止出现** CSS 类名（\`w-3 h-3 rounded-full\`、\`md:grid-cols-2\`、\`text-lg font-semibold\`）、DOM 标签（\`<button>\` 元素）、结构选择器（\`.grid > div\`、\`[class*="..."]\`）、组件库内部 class。即便你读了源码看到这些类名，也要把它翻译回用户视角再写——「颜色标识圆点（w-3 h-3 rounded-full）」应写成「每张卡片左侧显示一个圆形颜色标识」，「卡片以 2 列网格排列（md:grid-cols-2）」应写成「桌面宽度下卡片每行显示 2 张」。**唯一例外**是被测系统已提供的 \`data-testid\`（那是给测试用的契约，可以引用）。理由：预期写死实现类会让下游沉淀的回归脚本被迫用结构选择器，样式一改就假失败，而且断言的根本不是用户关心的事实（真机踩坑）。
 4. **oracle 双轴（功能验证 vs 回归基线 —— 决定报告通过率口径，必须标对，详见《测试用例完整性规范》§1.6）**：每条用例除「用例类型」(覆盖维度) 外，**必须**再标两个字段——
    - \`oracle\`（预期结果来源，五选一）：PRD / 设计稿 / API契约 / 产品确认 / 现状锁定。
    - \`verification\`（验证性质，二选一）：功能验证 / 回归基线。
@@ -238,20 +259,41 @@ ${rule}
 function loginHandlingBlock(
   hasLoginState: boolean,
   loginCredentials?: { username: string; password: string },
+  stopOnAuthInvalid = false,
 ): string {
+  const hardStop = `🚨 **冒烟登录态整体失效硬停止协议（最高优先级）**：只有在确认**整个被测系统都进不去**（登录页 / 企业 SSO 重定向 / 401 持续拦截、会话无法建立），而不是个别页面权限不足或单个接口偶发 401 时，立即裸写且只写一行：
+\`@@AUTH_INVALID {"reason":"login_state_invalid"}\`
+该行发出后平台会立刻终止本次执行并跳过冒烟报告。**从这一行起停止一切浏览器工具调用与文字输出**：不要再执行当前或剩余场景，不要输出任何 \`@@RESULT\` / \`@@OBSERVATION\`，不要把剩余场景逐条判 blocked，不要写收尾总结，更不要生成报告。用户提示由平台统一给出。`;
   if (hasLoginState) {
-    return `🔐 **登录态处理**：平台已为本项目注入登录态（storageState），正常情况下开跑即已登录。若仍被**登录页 / 企业 SSO / 401** 拦住、无法建立会话：把受影响用例判 \`blocked\`、\`error\` 写明「登录态失效 / 未生效」，并在收尾总结**明确提示用户**前往「**设置 · 测试账号**」重新获取登录态后重跑；**严禁**用 \`AskUserQuestion\` 向用户索取任何输入。`;
+    if (stopOnAuthInvalid) {
+      return `🔐 **登录态处理**：平台已为本项目注入登录态（storageState），正常情况下开跑即已登录。若仍被**登录页 / 企业 SSO / 401** 拦住，先确认是整站会话失效而非个别页面权限问题；**严禁**用 \`AskUserQuestion\` 向用户索取任何输入。
+${hardStop}`;
+    }
+    return `🔐 **登录态处理**：平台已为本项目注入登录态（storageState），正常情况下开跑即已登录。若仍被**登录页 / 企业 SSO / 401** 拦住、无法建立会话：把受影响用例判 \`blocked\`、\`error\` 写明「登录态失效 / 未生效」，并在收尾总结**明确提示用户**前往「**设置 · 测试账号**」重新获取登录态后重跑；**严禁**用 \`AskUserQuestion\` 向用户索取任何输入。
+- **登录态整体失效即刻停跑（不要逐条空跑）**：若**首个用例（或最初 1–2 条）就被登录页 / SSO / 401 挡住**、确认是**登录态整体失效**（整个被测系统都进不去、不是个别用例的权限问题）→ **立即停止，不要再把剩余用例逐条全跑一遍**（跑了也都是同一堵墙 → 一片 blocked，白耗时间）；把剩余用例一并判 \`blocked\`（\`error\` 同「登录态失效 / 未生效」，未输出的由平台补全为「未执行」），直接进入收尾总结、明确提示用户去「**设置 · 测试账号**」重新获取登录态后重跑。这是规则 #8「不得中途停」的**明确例外**。`;
   }
   if (loginCredentials) {
     // 凭据来自「设置·测试账号」平台下发，不是向用户索取 —— 明文进 prompt，与 DB /
     // environments.json 的明文存储模型一致（见 docs/handover/test-account-settings.md）。
-    return `🔐 **登录处理（平台已下发登录账号，请自动登录）**：本项目已在「设置 · 测试账号」配置了「密码」登录账号，以下凭据由平台下发（**非**向用户索取，可直接使用）：
+    const credentialsBlock = `🔐 **登录处理（平台已下发登录账号，请自动登录）**：本项目已在「设置 · 测试账号」配置了「密码」登录账号，以下凭据由平台下发（**非**向用户索取，可直接使用）：
 - 用户名：\`${loginCredentials.username}\`
 - 密码：\`${loginCredentials.password}\`
 当访问被测系统被**登录页**拦住、需要登录时：先用 \`browser_snapshot\` 观察登录页结构，定位「账号 / 用户名 / 域账号」输入框与「密码」输入框（按可见文案 / placeholder / label 识别，中文系统常见 placeholder 如「请输入域账号」「请输入密码」），用 \`browser_fill_form\` 或 \`browser_type\` 把上面的用户名、密码填进对应输入框，再点击「登录」按钮提交；登录成功（跳出登录页、进入系统主界面）后再继续执行用例。
-- **登录只做一次**：会话建立后其余用例复用同一登录态，不要每条用例都重新登录。
-- 若遇**图形验证码 / 短信验证码 / 企业 SSO 二次跳转 / 2FA** 等用上述凭据无法自动完成的校验 → 该用例（及后续需登录用例）判 \`blocked\`，\`error\` 写明「需人工二次校验，密码自动登录无法完成」，并在收尾总结提示用户改用「**设置 · 测试账号 → 获取登录态**」抓取登录态后重跑；
+- **登录只做一次**：会话建立后其余用例复用同一登录态，不要每条用例都重新登录。`;
+    if (stopOnAuthInvalid) {
+      return `${credentialsBlock}
+- 若遇**图形验证码 / 短信验证码 / 企业 SSO 二次跳转 / 2FA** 等无法用上述凭据完成的校验，且因此整站会话无法建立，按下方硬停止协议处理；个别页面权限不足不触发整站早停。
+- **严禁**用 \`AskUserQuestion\` 向用户索取账号 / 密码 / 验证码或任何输入。
+${hardStop}`;
+    }
+    return `${credentialsBlock}
+- 若遇**图形验证码 / 短信验证码 / 企业 SSO 二次跳转 / 2FA** 等用上述凭据无法自动完成的校验 → 该用例（及后续需登录用例）判 \`blocked\`，\`error\` 写明「需人工二次校验，密码自动登录无法完成」，并在收尾总结提示用户改用「**设置 · 测试账号 → 获取登录态**」抓取登录态后重跑；**若首个用例即因此无法建立会话（整站都要登录、登不进去）→ 立即停止、不要逐条空跑，其余用例一并判 \`blocked\`（规则 #8 的明确例外）**；
 - **严禁**用 \`AskUserQuestion\` 向用户索取账号 / 密码 / 验证码或任何输入（下发的凭据已足够；缺失信息一律判 \`blocked\` 而非提问）。`;
+  }
+  if (stopOnAuthInvalid) {
+    return `🔐 **登录态处理（重要，替代"向用户要账号"）**：本项目未配置可用登录态。若被测系统无需登录则正常执行；若访问后被**登录页 / 企业 SSO / 401** 拦住且确认整站会话无法建立：
+- **不要**手动编造账号密码登录，**更不要**用 \`AskUserQuestion\` 向用户索取凭证；
+${hardStop}`;
   }
   return `🔐 **登录态处理（重要，替代"向用户要账号"）**：**本项目未配置登录态**（既未配置「密码」登录账号、也未捕获 storageState），若被测系统需要登录你将无法建立会话。若访问被测系统时被**登录页 / 企业 SSO / 401** 拦住、无法建立会话：
 - **不要**手动编造账号密码登录，**更不要**用 \`AskUserQuestion\` 向用户索取凭证；
@@ -301,7 +343,7 @@ ${rule}
 5. **四态**：pass=预期完全出现；fail=预期明确未出现且可复现（疑似应用缺陷，保留事实不放水）；partial=部分满足；blocked=前置/路径/登录态/地址不可达（**不是应用 bug**）。判 blocked 前：若挡路的是**非被测前置依赖**，先按 §1.1 受控桩重试；仅当**被测接口/地址/账号本身**无法建立才判 blocked。桩过的用例 \`actual\` 须注明「已桩 mock <依赖>」，被桩部分不计入验证。
 6. 绝不修改业务源码与配置，只在被测系统页面内操作；截图与录像存到 \`${p.evidenceDir}\`。
 7. **不要自己写汇总文件**：每条用例的 \`@@RESULT\` 行就是唯一事实来源，平台会据此**确定性归约**出 \`${p.runJson}\`（计数 / 四态 / 环境错误重分类 / 401 熔断由平台代码计算，不由你汇总）。你只需保证**每条用例都输出一行规范的 @@RESULT**。
-8. **覆盖自检（防漏跑，最重要）**：开跑前先数出 \`${p.cases}\` 的用例总数 N，以「全部执行完 N 条」为目标，**逐条执行、不得中途停**。每条用例无论 pass/fail/partial/blocked **都必须输出恰好一行 @@RESULT**；确实无法执行的也要输出 \`status:"blocked"\` 并在 error 说明，**不得跳过或省略任何一条**。全部结束后核对：已输出的 @@RESULT 行数必须等于 N；**若少于 N，必须回到缺失的用例补执行并补输出 @@RESULT**，严禁因用例多、耗时长而提前收尾、抽样或只跑前几条。**每条 @@RESULT 的 \`id\` 必须与 \`${p.cases}\` 中该用例的 id 完全一致；一条用例只输出一行 @@RESULT，不得为同一用例产出多行、也不得编造或拆分出 cases 之外的用例（否则报告会多出用户没设计的用例）。**
+8. **覆盖自检（防漏跑，最重要）**：开跑前先数出 \`${p.cases}\` 的用例总数 N，以「全部执行完 N 条」为目标，**逐条执行、不得中途停**。**唯一例外——登录态整体失效**：整个被测系统被登录墙（登录页 / 企业 SSO / 401）挡住、会话根本建不起来（见上方🔐登录态处理）时，允许在确认后**立即停止**、把剩余用例一并判 \`blocked\`，**无需跑满 N**（未输出的由平台补全为「未执行」的 blocked）——这不算违反本条。除此一种情形外，每条用例无论 pass/fail/partial/blocked **都必须输出恰好一行 @@RESULT**；确实无法执行的也要输出 \`status:"blocked"\` 并在 error 说明，**不得跳过或省略任何一条**。全部结束后核对：已输出的 @@RESULT 行数必须等于 N（**登录态整体失效早停除外**）；**若少于 N 且非登录态早停，必须回到缺失的用例补执行并补输出 @@RESULT**，严禁因用例多、耗时长而提前收尾、抽样或只跑前几条。**每条 @@RESULT 的 \`id\` 必须与 \`${p.cases}\` 中该用例的 id 完全一致；一条用例只输出一行 @@RESULT，不得为同一用例产出多行、也不得编造或拆分出 cases 之外的用例（否则报告会多出用户没设计的用例）。**
 
 完成后用一句话总结：用例总数 N、已输出 @@RESULT 行数、以及四态计数（pass/fail/partial/blocked）；若行数 < N 必须显式说明哪些用例未覆盖。`;
 }
@@ -346,6 +388,177 @@ ${rule}
 完成后用一句话总结：结论(通过/未通过/阻塞)、通过率、失败数、主要风险点（仅事实）。`;
 }
 
+// ── 冒烟测试 · 三个 prompt 变体（第三形态）────────────────────────────────────
+
+/**
+ * 冒烟全局规则块。规则文件 `rules/smoke-test.md` 在 dev 下可读；打包 standalone 下
+ * `outputFileTracingExcludes` 会剥掉 `**​/*.md` → loadRule 返回 null，此时回退到这里的
+ * 内置精简版。**fallback 必须一次写足**（打包态用户拿到的就是它），不能只写个提要。
+ */
+function smokeRuleBlock(dataPrefix: string): string {
+  return ruleBlock(
+    '冒烟测试规范',
+    loadRule('smoke-test'),
+    `【范围】仅验证主流程是否走得通，边界值/异常输入/权限等非主流程场景本次不覆盖，也不要自行补充这类场景。
+【数据可识别】凡需新建的数据统一用前缀「${dataPrefix}」（如「${dataPrefix}机构A」），便于回查与清理。
+【数据安全·最高优先级】所有写操作（新建/修改/状态变更/删除）只针对本次自己新建的带前缀数据；严禁操作任何存量或他人数据；需要「任选一条」做修改/删除时必须先自己新建一条再操作；拿不准是不是自己造的就不碰；宁可判 blocked 也不动存量数据。
+【自主执行】场景只给「验证什么」不给「怎么点」，自行探索页面完成；操作前先 browser_snapshot 观察真实结构再定位，不要凭猜测点击。
+【判定原则】对照「预期结果」判定，而非点完就算成功；判定依据必须是页面上可观察到的事实（提示文案/列表增减/详情字段/状态标识/URL 变化）。
+【失败不中断】某场景失败→如实记录并跳过依赖它的后续场景（判 blocked 注明依赖未通过）→继续其余可独立进行的场景→最后统一汇报。唯一例外是登录态整体失效（整站进不去）：裸写 \`@@AUTH_INVALID {"reason":"login_state_invalid"}\` 后立即停止全部工具与输出，当前/剩余场景不再产出 @@RESULT，由平台跳过冒烟报告并通知用户。
+【截图】每个场景关键状态截图留证，失败场景补现场截图；截图用 fullPage:false、禁用动画、设置 timeout，挂起则重置连接重试一次，仍失败就跳过截图继续判定（不要因截图失败中断场景）。
+【体验观察】顺带记录非功能问题（响应慢/提示不清/按钮无反馈/状态不同步），与四态判定正交——不影响 pass/fail、不产生 Bug，不要因体验问题把功能正常的场景判 fail。`,
+  );
+}
+
+/**
+ * 冒烟 · 场景整理（cases 步）。
+ *
+ * 与功能测试 casesPrompt 的根本差异：**不设计用例**。用户录入的场景已由平台前端解析并
+ * 落盘为极简 cases.json（见 lib/test/smoke-scenarios.ts），本步只做"归整 + 审核提醒"，
+ * 沿用「用户上传用例以上传为准、AI 只审不改」的既有纪律（rules/test-workflow.md V0.10）。
+ */
+function smokeScenariosPrompt(taskName: string, moduleEntry?: string): string {
+  const p = artifactPaths(taskName);
+  return `请整理测试任务「${taskName}」的**冒烟测试场景**。
+
+平台已把用户录入的场景写入 \`${p.cases}\`（每条 = 一个「验证目标 + 预期结果」的轻场景，**不含操作步骤**，这是冒烟的正常形态）。${moduleEntry ? `\n目标模块入口：${moduleEntry}` : ''}
+
+## 你要做什么
+
+1. **先 Read \`${p.cases}\`**，通读全部场景。
+2. 只做**格式归整**：明显笔误、多余空白、表述不完整到无法执行的地方。
+3. 通读后如发现问题（场景之间重复、验证目标过于笼统无法判定、预期结果缺失或与目标不匹配、场景顺序导致依赖倒置），**在总结里列成「审核提醒」交用户裁定**。
+4. 用 Write 把归整后的结果写回 **同一个文件** \`${p.cases}\`（结构保持不变）。
+
+## 铁律（必须遵守）
+
+- ⚠️ **以用户录入为准**：绝不改写用户的验证目标与预期结果的**含义**，绝不臆造用户没写的预期，绝不新增用户没写的场景，绝不删除用户写了的场景。发现问题只提醒、不擅自改。
+- ⚠️ **不要补充边界 / 异常 / 权限 / 并发场景**——冒烟只覆盖主流程，这是刻意的范围裁剪，不是遗漏。
+- ⚠️ 保持每条场景的 \`id\`（\`SM-NNN\`）、\`tags\`（**必须保持空数组**）、\`verification\`（**必须保持「功能验证」**）原样不动：\`tags\` 一旦带上「回归测试」会被误收进回归用例库并触发发版红线；\`verification\` 改成「回归基线」会让报告通过率变成 N/A。
+- ⚠️ JSON 必须严格合法（可被 JSON.parse 解析）。字符串值里引用按钮名/文案时用中文全角引号「」或""，**绝不用英文半角 \`"\`**（会断开 JSON）。
+- ⚠️ 只写 \`${p.cases}\` 这一个文件，不要生成 .md / .xlsx 或其它文件，绝不修改业务源码。
+
+完成后用一句话总结：共几条场景、归整了哪些格式问题、有哪些「审核提醒」（无则明说"无"）。`;
+}
+
+/**
+ * 冒烟 · 执行（execution 步）。
+ *
+ * 骨架与功能测试 executionPrompt 一致（@@CASE_START/@@RESULT 契约、登录态三分支、非交互
+ * 护栏、覆盖自检、证据落盘），差异集中在三处：① 自主探索式执行（场景无预设步骤）；
+ * ② 数据前缀 + 数据安全铁律；③ @@OBSERVATION 体验观察通道。
+ */
+function smokeExecutionPrompt(
+  taskName: string,
+  env: string,
+  dataPrefix: string,
+  baseUrl?: string,
+  moduleEntry?: string,
+  hasLoginState = false,
+  loginCredentials?: { username: string; password: string },
+): string {
+  const p = artifactPaths(taskName, env);
+  return `请对测试任务「${taskName}」执行**冒烟测试**（通过 Playwright MCP 浏览器工具实时驱动浏览器，逐个场景验证主流程）。
+
+环境：${env}
+${baseUrl ? `被测地址：${baseUrl}（平台已在执行前完成可达性探测、确认可达才会进入本步——**无需再用 curl/请求工具反复探活**；若执行中途发现地址不可达，最多重试探活 3 次即停止并说明，**切勿无限重试**。）` : '（未配置被测地址：若无法确定目标系统地址或地址不可达，相应场景判 blocked 并在结果中说明，不要臆造结果。）'}
+${moduleEntry ? `目标模块入口：${moduleEntry}\n` : ''}测试数据前缀：\`${dataPrefix}\`
+输入产物（请先 Read）：冒烟场景 ${p.cases}
+
+⚠️ **本步为非交互自动化执行（交互端无人应答）**：**严禁使用 \`AskUserQuestion\`，也严禁以任何方式向用户提问 / 等待用户输入 / 暂停等待确认**——问了永远不会有人回答，会让执行永久卡死。目标环境已由平台指定为 \`${env}\`，直接使用，**不要再反问用户选环境**。
+
+${loginHandlingBlock(hasLoginState, loginCredentials, true)}
+
+${smokeRuleBlock(dataPrefix)}
+
+## 执行
+
+1. Read \`${p.cases}\`，逐个场景执行。**每个场景的 \`purpose\` 是"验证目标"、\`steps[0].expected\` 是"预期结果"，没有预设操作步骤——由你自主探索页面完成该验证目标**（先 \`browser_navigate\` 打开被测地址${moduleEntry ? `，按上面的「目标模块入口」进入模块` : ''}，用 \`browser_snapshot\` 观察真实结构后再 \`browser_click\`/\`browser_type\`/\`browser_fill_form\`/\`browser_select_option\`/\`browser_wait_for\` 操作）。
+2. **新建数据一律带前缀 \`${dataPrefix}\`**（如机构名写「${dataPrefix}机构A」）。**写操作只针对本次自己新建的数据**——需要"任选一条记录"做修改/删除/状态切换的场景，**必须先自己新建一条再对它操作**，绝不动列表里已有的存量数据。
+3. 每个场景**在任何浏览器工具调用之前**先输出两行：机器标记 \`@@CASE_START {"id":"SM-xxx","index":N}\`（单行严格 JSON，id 必须与 ${p.cases} 完全一致）以及可读进度 \`▶ 场景 N/总数：{验证目标}\`。
+4. 场景结束**输出单行 JSON**：\`@@RESULT {"id":"...","status":"pass|fail|partial|blocked","actual":"观察到的现象","evidence":["SM-xxx.png"],"error":"失败/阻塞原因，pass 留空","api":{"method":"POST","url":"/api/...","status":200,"requestBody":"...","responseBody":"..."}}\`。\`api\` **仅 fail / partial 且定位到关键请求时给出**（先用 \`browser_network_requests\` 列请求、再用 \`browser_network_request\` 取详情，请求体/响应体各截断到约 ≤4000 字符），pass 省略该字段。
+5. **四态**：pass=预期完全出现（有可观察证据）；fail=预期明确未出现且可复现（疑似应用缺陷，保留事实不放水）；partial=部分满足；blocked=前置/路径/登录态无法建立、**依赖的前序场景已失败**、或为守数据安全而放弃操作（**不是应用 bug**）。
+6. **体验观察（冒烟特有）**：过程中发现的**非功能**问题，随时输出单行 \`@@OBSERVATION {"text":"现象描述","scene":"SM-xxx"}\`（\`scene\` 为当前场景 id，可省略）。例：\`@@OBSERVATION {"text":"状态切换点击后约 4s 才更新，期间无 loading 提示","scene":"SM-004"}\`。**与四态判定正交**——观察不影响 pass/fail、不产生 Bug，**不要因为发现体验问题就把功能正常的场景判 fail**。无观察则不输出。
+7. 每个场景关键状态截图留证（落 \`${p.evidenceDir}\`），失败场景补现场截图。截图挂起就重置连接重试一次，仍失败则跳过截图继续判定。
+8. **不要自己写汇总文件**：每个场景的 \`@@RESULT\` 行就是唯一事实来源，平台会据此**确定性归约**出 \`${p.runJson}\`（计数/四态/环境错误重分类由平台代码计算，不由你汇总）。
+9. **覆盖自检**：开跑前数出 \`${p.cases}\` 的场景总数 N，逐个执行、**每个场景无论 pass/fail/partial/blocked 都必须输出恰好一行 \`@@RESULT\`**。失败场景**不中断**——跳过依赖它的场景（判 blocked 注明"依赖场景 X 未通过"），继续其余可独立进行的场景。**唯一例外**是登录态整体失效：严格按上方硬停止协议输出一行 \`@@AUTH_INVALID\` 后立即结束，当前与剩余场景均不再输出 \`@@RESULT\`，平台直接跳过报告。除此之外结束时已输出的 @@RESULT 行数必须等于 N，**少于 N 必须回去补执行**。
+
+⚠️ **机器标记行必须裸写**：\`@@CASE_START\` / \`@@RESULT\` / \`@@OBSERVATION\` / \`@@AUTH_INVALID\` 都以 \`@@\` 开头、整行只有标记与 JSON，**不得加粗（\`**\`）、不得套反引号或代码块、不得在 JSON 后补任何文字**。
+
+⚠️ **绝不修改业务源码与配置**，只在被测系统页面内操作。
+
+正常完成后用一句话总结：场景总数 N、已输出 @@RESULT 行数、四态计数（pass/fail/partial/blocked）、体验观察条数；若行数 < N 必须显式说明哪些场景未覆盖及原因。**若已输出 \`@@AUTH_INVALID\`，禁止执行本段总结。**`;
+}
+
+/**
+ * 冒烟 · 报告（report 步）。
+ *
+ * 与功能测试 reportPrompt 的根本差异：结论口径是"主流程通不通 + 能不能进入下一阶段"，
+ * **不出**需求覆盖矩阵 / 双口径通过率 / 回归集红线（冒烟没有这些口径）。另外多两块：
+ * Bug 清单要求**结构化**（供 UI 渲染可复核列表 + 落 bugs.json），体验问题独立成节。
+ */
+function smokeReportPrompt(taskName: string, env: string, dataPrefix: string, baseUrl?: string): string {
+  const p = artifactPaths(taskName, env);
+  return `请为测试任务「${taskName}」生成**冒烟测试报告**。
+
+环境：${env}${baseUrl ? `\n被测地址：${baseUrl}` : ''}
+测试数据前缀：\`${dataPrefix}\`
+输入产物（请先 Read）：
+- 执行结果（权威事实，四态计数/逐条状态以此为准，**不要自行改数**）：${p.runJson}
+- 冒烟场景（验证目标 + 预期结果）：${p.cases}
+
+⚠️ 本步**不读需求文档**（冒烟没有需求产物），也**不要**去找或臆造需求。
+
+${ruleBlock(
+    '冒烟测试规范',
+    loadRule('smoke-test'),
+    '报告五节固定：测试环境与执行时间 / 场景结果表 / Bug 清单（固定 GFM 表格）/ 奇怪交互与体验问题 / 整体结论（主流程是否通过冒烟、是否具备进一步测试条件）。只陈述事实，禁止写修复方案、发布决策、优先级、指派。',
+  )}
+
+## 报告结构（五节，顺序固定，全部必出）
+
+### 一、测试环境与执行时间
+系统环境、被测地址、执行时间（用 run.json 的 \`time\`，**不要用当前时间**）、场景总数与四态计数、测试数据前缀。
+
+### 二、场景结果表
+表头固定：\`| 场景 | 验证目标 | 预期 | 实际 | 结论 | 截图 |\`。与 \`${p.cases}\` 的场景**一一对应，不多不少**；「结论」列写 通过/失败/部分/阻塞；「截图」列写证据文件名。
+
+### 三、Bug 清单
+**仅 \`fail\` 状态的场景产出 Bug**（blocked/partial 不是应用缺陷，不进本节）。必须使用下面的 **GFM Markdown 表格**，表头与列顺序固定、不得改名：
+
+| 编号 | 标题 | 严重级别 | 关联场景 | 实际 | 预期 | 接口 | 证据 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| BUG-01 | 一句话说清缺陷现象 | 严重 | SM-003 | 观察到的现象 | 本应出现的结果 | POST /api/example (500) | SM-003.png |
+
+- 每个 \`fail\` 场景**恰好一行**，编号从 \`BUG-01\` 起顺序递增；同一场景不得拆成多行。
+- 严重级别只允许：致命 / 严重 / 一般 / 建议（四选一）。
+- 「接口」采用 run.json 该场景的 \`api\` 字段（方法 / URL / 状态码；无则写"—"）。
+- 每个单元格必须保持在同一物理行；同一格有多项时用 \`<br>\` 分隔，正文中的 \`|\` 必须写成 \`\\|\`，避免破坏表格。
+
+严重级别判定参考：主流程完全中断/数据被破坏 → 致命；主流程某环节不可用、无替代路径 → 严重；主流程可走通但有明显功能偏差 → 一般；不影响使用的小问题 → 建议。
+
+若无 fail 场景，仍保留表头，并写一行：\`| — | 本轮冒烟未发现缺陷 | — | — | — | — | — | — |\`。
+
+### 四、奇怪交互 / 体验问题
+逐条列出 run.json 的 \`observations\`（执行中记录的非功能观察：响应慢、提示不清、按钮无反馈、状态不同步等）。**这些不是缺陷**，不计入 Bug 清单、不影响结论判定。无则写"无"。
+
+### 五、整体结论
+明确回答两件事：
+1. **主流程是否通过冒烟** —— 存在任何 \`fail\` 场景即判「**未通过**」，并说明卡在哪个主流程环节；有 blocked 但无 fail 时说明被阻塞的环节与原因（判「未完成」，不要报"通过"）；无 fail/blocked 但存在 partial 时判「部分通过」，说明主流程尚未完整满足预期、暂不具备进一步测试条件；只有全部 pass 才判「通过」。
+2. **是否具备进一步测试（功能测试 / 回归测试）的条件** —— 未通过冒烟即"暂不具备"，建议修复后重跑冒烟。
+
+另附一句测试数据处置说明（本轮用前缀 \`${dataPrefix}\` 创建的数据是否已清理）。
+
+## 铁律
+
+- ⚠️ **不出**需求覆盖矩阵、**不出**双口径通过率（功能验证/执行通过率）、**不出**回归集红线——冒烟没有这些口径，硬套会误导。
+- ⚠️ 四态计数与逐条状态**必须**采用 ${p.runJson} 的数据，不得自行重算或修饰。
+- ⚠️ 只陈述事实：可列 bug 事实与"待开发处理"，但**禁止**写 bug 修复方案 / 改哪行代码 / 发布与否 / 优先级 / 指派责任人；不向用户提问、不留 TBD 占位。
+- ⚠️ 报告**只能用 Write 写入** \`${p.report}\`。
+
+完成后用一句话总结：结论（通过/未通过/未完成）、Bug 数与最高严重级别。`;
+}
+
 export interface BuildStepOptions {
   taskName: string;
   env?: string;
@@ -379,6 +592,19 @@ export interface BuildStepOptions {
    * 传入后执行 prompt 声明「禁止执行这些 id、只跑剩余、编号顺延」。缺省 = 全部由 AI 执行。
    */
   scriptDone?: { ids: string[]; total: number };
+  /**
+   * 任务形态。`'smoke'` → 三个步骤走冒烟 prompt 变体（场景整理 / 自主探索执行 / 冒烟报告）；
+   * 缺省或 `'functional'` → 现有功能测试 prompt，**行为完全不变**（存量任务不带该字段）。
+   */
+  taskType?: 'functional' | 'smoke';
+  /** 冒烟：目标模块入口（「如何进入该模块」），进 cases/execution prompt 指路。 */
+  moduleEntry?: string;
+  /**
+   * 冒烟：测试数据前缀（`冒烟测试_YYYYMMDD_`，由前端按本地日期生成并随请求下发）。
+   * 缺省时执行/报告 prompt 用 `smokeDataPrefix()` 的服务端当日值兜底——但**应当由前端下发**，
+   * 否则跨零点执行会出现"报告里的前缀与实际造的数据对不上"。
+   */
+  dataPrefix?: string;
 }
 
 export interface BuiltStep {
@@ -400,6 +626,32 @@ export function buildStep(step: TestStep, opts: BuildStepOptions): BuiltStep {
   const taskName = opts.taskName;
   const env = opts.env || 'local';
   const note = opts.extraInstruction;
+  // 冒烟任务分流：只有 cases / execution / report 三步（requirement 步对冒烟任务在前端
+  // 就被裁掉，理论上不会走到；真走到了也回落功能测试 prompt，不做特殊处理）。
+  if (opts.taskType === 'smoke' && step !== 'requirement') {
+    const prefix = opts.dataPrefix || smokeDataPrefix();
+    switch (step) {
+      case 'cases':
+        return withNote(
+          { systemPrompt: SMOKE_SYS.cases!, prompt: smokeScenariosPrompt(taskName, opts.moduleEntry), needsPlaywright: false },
+          note,
+        );
+      case 'execution':
+        return withNote(
+          {
+            systemPrompt: SMOKE_SYS.execution!,
+            prompt: smokeExecutionPrompt(taskName, env, prefix, opts.baseUrl, opts.moduleEntry, opts.hasLoginState, opts.loginCredentials),
+            needsPlaywright: true,
+          },
+          note,
+        );
+      case 'report':
+        return withNote(
+          { systemPrompt: SMOKE_SYS.report!, prompt: smokeReportPrompt(taskName, env, prefix, opts.baseUrl), needsPlaywright: false },
+          note,
+        );
+    }
+  }
   switch (step) {
     case 'requirement':
       return withNote({ systemPrompt: SYS.requirement, prompt: requirementPrompt(taskName, { reuseImported: opts.reuseImported, sourcePath: opts.requirementSourcePath }), needsPlaywright: false }, note);

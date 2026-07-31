@@ -14,16 +14,28 @@ import { useNativeFolderPicker } from "@/hooks/useNativeFolderPicker";
 import { FolderPicker } from "@/components/chat/FolderPicker";
 import { showToast } from "@/hooks/useToast";
 import { normalizeProjectPath, dedupeProjectsByPath } from "@/lib/projectDedupe";
+import { buildProjectSystemNameMap, getProjectSystemName } from "@/lib/test-project-display-name";
 import { ModelSelectorDropdown } from "@/components/chat/ModelSelectorDropdown";
 import { useProviderModels } from "@/hooks/useProviderModels";
 import { diffRuns, funcPassRateStr } from "@/lib/test/compare";
 import { parseExecProgress } from "@/lib/test/exec-progress";
-import { createExecLineBuffer, shouldAdoptPlaceholder, type ExecLine, type LiveResult, type LiveStatus } from "@/lib/test/exec-live";
+import {
+  createExecLineBuffer,
+  isAuthInvalidBlockedRun,
+  shouldAdoptPlaceholder,
+  type ExecLine,
+  type LiveResult,
+  type LiveStatus,
+} from "@/lib/test/exec-live";
 import { withDownstreamReset, runStartOptions, taskCategory, occupiedSlots, TASK_CATEGORY_ORDER, type TaskCategory } from "@/lib/test/step-status";
 import { REGRESSION_LIBRARY_TASK, REGRESSION_FULL_SUITE as REGRESSION_FULL_SUITE_NAME } from "@/lib/test/library-constants";
+import type { TestTaskType, SmokeBug, TestAccountProjectSummary } from "@/types";
+import { scenarioTextToCases, casesToScenarios, scenariosToText, smokeDataPrefix } from "@/lib/test/smoke-scenarios";
+import { ensureSmokeReportBugTable, smokeReportStatus, smokeVerdict, SMOKE_SEVERITIES } from "@/lib/test/smoke-bugs";
 import type { LoginStateInfo } from "@/lib/test/env-config";
 import type { RunHistoryEntry } from "@/lib/test/history";
 import { TestStatsView } from "@/components/test/TestStatsView";
+import { TestEnvDrawer } from "@/components/test/TestEnvDrawer";
 import { PromptDialog } from "@/components/ui/prompt-dialog";
 
 /**
@@ -42,10 +54,19 @@ import { PromptDialog } from "@/components/ui/prompt-dialog";
  */
 
 type View = "dash" | "flow" | "report" | "stats";
-type ModalKind = "none" | "newTask" | "runStart" | "execConfirm" | "envWarn";
+type ModalKind = "none" | "newTask" | "newSmokeTask" | "runStart" | "execConfirm" | "envWarn";
 // 执行方式:visible=独立窗口可见运行(有头),headless=后台无头运行(默认,更快)。
 type ExecMode = "headless" | "visible";
 type T = (key: TranslationKey, params?: Record<string, string | number>) => string;
+type EnvConfigDTO = {
+  configured: boolean;
+  env: string;
+  frontendBaseUrl: string | null;
+  allowedEnvs: string[];
+  source?: string;
+  loginState?: LoginStateInfo;
+};
+type ScopedEnvConfig = { key: string; data: EnvConfigDTO | null };
 // Backend test-step keys (match /api/test/run + src/lib/test/prompts.ts).
 // docx 原文档预览：复用文件树预览体系的 DocxViewer（docx-preview + DOMPurify + sandbox
 // iframe 三层 XSS 防护，见 src/components/editor/DocxViewer.tsx）。懒加载——只有真正点开
@@ -172,6 +193,8 @@ interface ReportEntry {
   /** 回归集 "pass/total"；pass < total 即未全过（发版红线）。 */
   suitePassStr?: string;
   tests: CaseResult[];
+  /** 冒烟：体验观察（run.json.observations 透传）；功能/回归报告缺省。 */
+  observations?: { text: string; scene?: string }[];
   /** run.json 全文 SHA-1（与执行埋点同源）：把人工复核关联到确切执行轮。 */
   runHash?: string;
   /** The full markdown report doc ({task}-{env}.md), if the report step wrote one. */
@@ -211,7 +234,12 @@ interface ScriptManifestView {
 interface Project {
   name: string;
   path: string;
-  tasks: { id: string; name: string }[];
+  /**
+   * 任务清单。`type` 缺省 = 功能测试（存量任务无此字段，判定一律写 `=== "smoke"`）；
+   * 任务形态在新建时定死、不可后改（形态决定流水线节点与 prompt，中途切换会让已产出的
+   * 产物与新形态对不上）。
+   */
+  tasks: { id: string; name: string; type?: TestTaskType }[];
   /** R1：该项目记住的测试环境(local/SIT)，随项目切换各自恢复；缺省→迁移旧的全局值。 */
   selectedEnv?: string;
 }
@@ -250,13 +278,22 @@ interface TaskState {
    */
   depositScripts?: boolean;
   /**
-   * 任务级被测入口地址（新建任务「目标」输入框；执行前确认弹窗改地址会按规则回写）。
+   * 任务级被测入口地址，**按环境（local/sit）隔离**（新建任务「目标」输入框；执行前确认弹窗改地址会按规则回写）。
    *
-   * 执行步的地址优先级：弹窗显式确认 > 本字段 > 项目环境配置(environments.json)。
-   * 缺省（undefined）= 无任务级覆盖，跟随环境配置 —— 存量任务保持原行为。
-   * 回写规则见 runExecutionConfirmed：确认地址 ≠ 环境地址才记为覆盖；相同则清除覆盖。
+   * 执行步的地址优先级：弹窗显式确认 > 本字段[当前 env] > 项目环境配置(environments.json)。
+   * 某 env 无键（或整体 undefined）= 该 env 无任务级覆盖，跟随环境配置。
+   * 按 env 隔离的原因：一个任务在 SIT 侧钉的深链，不应在切到 local 时冒充 local 的地址显示/执行
+   * （否则「选 local 实际跑 SIT」）。回写规则见 runExecutionConfirmed。
+   * 迁移：旧的单一 `targetUrl` 在加载时归位到该任务所属项目的当前 `selectedEnv`（见加载 effect）。
    */
-  targetUrl?: string;
+  targetUrlByEnv?: Record<string, string>;
+  /**
+   * 冒烟任务：目标模块入口（「如何进入该模块」，如「左侧导航『评估管理』→『评估机构』列表页」）。
+   *
+   * 承接原冒烟提示词的 `<如何进入该模块>` 占位符 —— 冒烟场景只写"验证什么"不写点击步骤，
+   * 执行智能体需要一句话知道从哪儿进模块，否则要在整站里瞎找。仅冒烟任务写入。
+   */
+  moduleEntry?: string;
 }
 const DEFAULT_TASK_STATE: TaskState = {
   stepStatus: { requirement: "idle", cases: "idle", execution: "idle", report: "idle" },
@@ -329,6 +366,19 @@ const STEPS: { step: TestStep; name: TranslationKey; desc: TranslationKey }[] = 
 ];
 // 步骤顺序（传给 withDownstreamReset 等纯函数，避免它们 import 服务端的 prompts.ts）。
 const STEP_ORDER: TestStep[] = STEPS.map((s) => s.step);
+
+/**
+ * 节点名：冒烟任务复用同样的 step 键（cases/execution/report），但措辞不同 ——
+ * 「用例设计」在冒烟里是「测试场景」，「测试报告」是「冒烟报告」。
+ * 只换标签不换键：底层流程机器（状态机/排队/auto-chain/埋点）完全不用知道形态差异。
+ */
+function stepLabel(step: TestStep, isSmoke: boolean, t: T): string {
+  if (isSmoke) {
+    if (step === "cases") return t("test.smoke.step.scenarios");
+    if (step === "report") return t("test.smoke.step.report");
+  }
+  return t(STEPS.find((s) => s.step === step)!.name);
+}
 
 // Gating model (ai-lab-test-framework / prototype): 需求分析 + 用例设计 are
 // human-gated — they run, then wait for the user to 批准 the output before the
@@ -450,11 +500,10 @@ async function deleteTaskReports(projectPath: string, taskName: string): Promise
   }).catch(() => {});
 }
 
-export function InlineTestingPanel() {
+export function InlineTestingPanel({ visible = true }: { visible?: boolean } = {}) {
   const { t } = useTranslation();
-  const router = useRouter();
-  // 路由路径：从「设置·测试账号」改完配置切回工作台(/chat)时，pathname 变化 → 触发 env-config
-  // 重拉(见下方 effect)，避免面板常驻不刷新、仍显示旧的访问地址。
+  // 环境配置改为就地抽屉（阶段 1）后，本组件不再用 router 跳转设置页；useRouter 仍由下方
+  // 子组件（打开对话）使用。pathname 仍用于「切回工作台重拉 env-config」。
   const pathname = usePathname();
   const [view, setView] = useState<View>("dash");
   const [modal, setModal] = useState<ModalKind>("none");
@@ -463,6 +512,9 @@ export function InlineTestingPanel() {
   // 由下方 mount-time effect 异步从文件加载（含老用户 localStorage 一次性迁移）；loaded
   // 守卫确保加载完成前不会用空初值 PUT 覆盖文件里的真实数据。
   const [projects, setProjects] = useState<Project[]>([]);
+  // 项目卡片展示名来自环境配置系统摘要；仅存脱敏的 id/name/project_root，
+  // 不把账号、密码、Token 或完整 environments 加载进工作台。
+  const [projectSystemSummaries, setProjectSystemSummaries] = useState<TestAccountProjectSummary[]>([]);
   const [selected, setSelected] = useState<number | null>(null);
   const [selectedTask, setSelectedTask] = useState<number | null>(null);
   // 看板按状态分组后，被用户手动折叠的分组（默认空 = 全部展开，含已完成）。本版不持久化。
@@ -546,7 +598,32 @@ export function InlineTestingPanel() {
   const [env, setEnv] = useState(() => {
     try { return localStorage.getItem("codepilot:test-env") || "local"; } catch { return "local"; }
   });
-  const [envCfg, setEnvCfg] = useState<{ configured: boolean; env: string; frontendBaseUrl: string | null; allowedEnvs: string[]; source?: string; loginState?: LoginStateInfo } | null>(null);
+  const [envCfgState, setEnvCfgState] = useState<ScopedEnvConfig | null>(null);
+  // 就地环境配置抽屉（阶段 1）：取代原「跳转到 设置·测试账号」整页往返。三处入口
+  // （项目页「环境配置」按钮 / 流程头未配置 chip / EnvWarnModal「去配置」）改为开抽屉；
+  // 保存后 bump envCfgReload → 下方 env-config effect 重拉，🎯 访问地址即时刷新。
+  const [envDrawerOpen, setEnvDrawerOpen] = useState(false);
+  const [envCfgReload, setEnvCfgReload] = useState(0);
+  // 测试面板可见时拉取一次脱敏摘要；从设置页返回（visible/pathname 变化）或抽屉保存
+  // （envCfgReload）后重拉，使系统改名无需写入 workbench 即可即时反映。
+  useEffect(() => {
+    if (!visible) return;
+    let cancelled = false;
+    fetch("/api/test-accounts/project-summaries", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : { systems: [] }))
+      .then((data: { systems?: TestAccountProjectSummary[] }) => {
+        if (!cancelled) setProjectSystemSummaries(Array.isArray(data.systems) ? data.systems : []);
+      })
+      .catch(() => {
+        // 展示增强失败不能阻塞项目列表；清空摘要后统一以文件夹名回退。
+        if (!cancelled) setProjectSystemSummaries([]);
+      });
+    return () => { cancelled = true; };
+  }, [visible, pathname, envCfgReload]);
+  const projectSystemNamesByPath = useMemo(
+    () => buildProjectSystemNameMap(projectSystemSummaries),
+    [projectSystemSummaries],
+  );
   // Change env + persist to the ACTIVE project entry（不再写全局 localStorage）。allowedEnvs
   // 越界回落也走这里，于是回落值也会落到该项目，下次切回稳定。
   const handleEnvChange = (next: string) => {
@@ -567,12 +644,17 @@ export function InlineTestingPanel() {
     setEnv((prev) => (prev === next ? prev : next));
   }, [selected, projects]);
 
-  // 打开测试模块即触发一次后台用量上报。本组件在切到设置页等场景会卸载、切回重挂，
-  // 故挂载 effect ≈「每次点开测试模块」。fire-and-forget：仅 Electron 有 electronAPI
-  //（dev/web 为 no-op）；主进程去抖 + 未登录静默跳过，绝不阻塞 UI。
+  // 用量上报触发：打开测试模块看到「项目列表页」时触发一次。面板是保活的（常挂载、
+  // 靠 CSS 显隐，见 AppShell），故用 visible 属性判「真正可见」——只挂载一次的 effect
+  // 满足不了「每次点开」。条件 = 可见 && 在项目列表页（view==="dash" && 无选中项目）。
+  // 首次打开、保活后重新点开停在列表、从项目返回列表 都会触发（依赖变化各触发一次）。
+  // fire-and-forget：仅 Electron 有 electronAPI（dev/web 为 no-op）；主进程 60s 去抖 +
+  // 距上次成功 5min 最小间隔 + 未登录静默跳过，故频繁进出列表也不会重复上传、绝不阻塞。
   useEffect(() => {
-    void window.electronAPI?.auth?.uploadTestUsage?.();
-  }, []);
+    if (visible && view === "dash" && selected === null) {
+      void window.electronAPI?.auth?.uploadTestUsage?.();
+    }
+  }, [visible, view, selected]);
 
   // 执行方式(独立窗口可见 / 后台无头)。默认无头 —— 与原行为一致、更快。执行前确认弹窗
   // (ExecConfirmModal)记下用户选择并持久化;非弹窗触发(运行任务 / auto-chain 接力执行)
@@ -605,7 +687,21 @@ export function InlineTestingPanel() {
   };
 
   const current = selected !== null ? projects[selected] ?? null : null;
+  // 环境配置必须与「项目路径 + 环境」绑定。切项目或 local/SIT 时，React 会先 render 再跑
+  // effect；若只保留一个裸 envCfg，这一帧会把上个项目/环境的地址和登录态串到新项目。
+  const envCfgKey = current?.path ? `${normalizeProjectPath(current.path)}\u0000${env}` : "";
+  const envCfg = envCfgState?.key === envCfgKey ? envCfgState.data : null;
+  const envCfgLoading = Boolean(
+    visible
+      && current?.path
+      && (view === "dash" || view === "flow")
+      && envCfgState?.key !== envCfgKey,
+  );
+  const currentSystemName = current ? getProjectSystemName(projectSystemNamesByPath, current.path) : null;
+  const currentDisplayName = currentSystemName || current?.name || "";
   const activeTask = current && selectedTask !== null ? current.tasks[selectedTask] ?? null : null;
+  /** 活动任务是否为冒烟形态（流程视图按此裁剪节点、换标签、走冒烟 prompt）。 */
+  const isSmokeTask = activeTask?.type === "smoke";
 
   // Active task's state, derived from the per-task map (render reads these names).
   const aId = activeTask?.id ?? "";
@@ -813,6 +909,8 @@ export function InlineTestingPanel() {
           pushEvt({ k: "sys", text: e.raw, lost: true });
           return;
         }
+        // @@AUTH_INVALID 仅由冒烟 prompt 产出；回归轮次不消费该控制信号。
+        if (e.kind === "authInvalid") return;
         pushEvt({ k: "ai", text: e.text });
       };
 
@@ -1269,7 +1367,8 @@ export function InlineTestingPanel() {
     // 地址 trim 非空才落,空串不产生任务级覆盖)。
     const seed: Partial<TaskState> = {};
     if (depositScripts === false) seed.depositScripts = false;
-    if (targetUrl?.trim()) seed.targetUrl = targetUrl.trim();
+    // 新建任务的「目标」地址按 env 隔离：归到新任务所属项目的当前 env（默认 local）。
+    if (targetUrl?.trim()) seed.targetUrlByEnv = { [proj?.selectedEnv || env || "local"]: targetUrl.trim() };
     if (Object.keys(seed).length) patchTask(id, () => seed);
     const hasReq = !!files?.requirement, hasCases = !!files?.cases;
     if (hasReq || hasCases) {
@@ -1297,6 +1396,75 @@ export function InlineTestingPanel() {
       ]);
     }
     return { ok: true };
+  };
+
+  /**
+   * 新建**冒烟任务**（第三形态）。与 addTask 的三点差异：
+   *  1. 场景由前端解析后直接 PUT 进 cases.json —— 冒烟不跑"用例设计"，场景就是产物；
+   *  2. stepStatus 预置 requirement/cases 为 done（冒烟无需求节点、场景已就绪）→
+   *     **无门控**，创建后由调用方直接发起执行；
+   *  3. 任务带 `type:'smoke'` + `moduleEntry`，供 runStep 分流 prompt。
+   */
+  const addSmokeTask = async (
+    name: string,
+    moduleEntry: string,
+    scenarioText: string,
+    targetUrl?: string,
+  ): Promise<{ ok: boolean; error?: string; taskId?: string }> => {
+    const proj = selected !== null ? projects[selected] : null;
+    const trimmedName = name.trim();
+    if (!proj?.path) return { ok: false, error: t("test.smoke.noProject") };
+    if (proj.tasks.some((tk) => tk.name.trim() === trimmedName)) {
+      return { ok: false, error: t("test.newTaskModal.duplicateName") };
+    }
+    const cases = scenarioTextToCases(scenarioText);
+    if (!cases.length) return { ok: false, error: t("test.smoke.noScenarios") };
+    // 场景落盘：复用既有用例写盘路由（原子写 + 路径校验），冒烟不另起一套存储。
+    const id = makeTaskId();
+    try {
+      const res = await fetch("/api/test/cases", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ projectPath: proj.path, taskName: trimmedName, taskId: id, cases }),
+      });
+      if (!res.ok) {
+        const j = (await res.json().catch(() => ({}))) as { error?: string };
+        return { ok: false, error: j.error || t("test.smoke.saveFailed") };
+      }
+    } catch {
+      return { ok: false, error: t("test.smoke.saveFailed") };
+    }
+    setProjects((ps) =>
+      ps.map((p, i) => (i === selected ? { ...p, tasks: [...p.tasks, { id, name: trimmedName, type: "smoke" as const }] } : p)),
+    );
+    patchTask(id, () => ({
+      // 冒烟无需求节点；场景已落盘 → 两步直接 done，execution 解锁（无门控）。
+      stepStatus: { requirement: "done", cases: "done", execution: "idle", report: "idle" },
+      // 冒烟只产出一份报告，不生成回归脚本。显式落 false 让自动接力和所有手工入口
+      // 都读取到同一任务级真相；服务端还会按 taskType 再做硬兜底。
+      depositScripts: false,
+      moduleEntry: moduleEntry.trim() || undefined,
+      convo: [
+        {
+          role: "ai" as const,
+          text: `💨 已创建冒烟任务「${trimmedName}」，共 ${cases.length} 个测试场景。数据前缀 \`${smokeDataPrefix()}\`，即将开始执行。`,
+        },
+      ],
+      ...(targetUrl?.trim() ? { targetUrlByEnv: { [proj.selectedEnv || env || "local"]: targetUrl.trim() } } : {}),
+    }));
+    logAudit("create-task", { projPath: proj.path, taskName: trimmedName, detail: `smoke:${cases.length}场景` });
+    // 使用统计：taskType 让服务端聚合把冒烟排除出「AI 生成流」采纳率分母（手动录入的场景
+    // 不是 AI 生成的用例，计进去会稀释采纳率）。
+    recordTestStat([
+      {
+        eventType: "task_created",
+        projectPath: proj.path,
+        taskId: id,
+        taskName: trimmedName,
+        payload: { source: "smoke_manual", taskType: "smoke", scenarios: cases.length },
+      },
+    ]);
+    return { ok: true, taskId: id };
   };
 
   // Mount 时从主进程文件异步加载 projects/taskStates（GET /api/test/workbench）。
@@ -1333,7 +1501,13 @@ export function InlineTestingPanel() {
         // 被中断的瞬时态 → 恢复成 "error"（中断未完成），避免任务永远卡在「运行中」、且因无
         // AbortController 而停不掉（实际早已无进展）。用 error 而非 idle 是为了**不触发 auto-chain
         // effect 自动重跑**（它只跑 idle 步）——重启后应由用户主动点「运行」重跑，不擅自执行。
-        for (const st of Object.values(nextStates)) {
+        // 旧 targetUrl(单一) → targetUrlByEnv(按 env) 迁移：需知道每个任务所属项目的当前 env。
+        const taskEnvMap = new Map<string, string>();
+        for (const p of nextProjects) {
+          const penv = typeof p.selectedEnv === "string" && p.selectedEnv ? p.selectedEnv : "local";
+          for (const tk of p.tasks ?? []) taskEnvMap.set(tk.id, penv);
+        }
+        for (const [tid, st] of Object.entries(nextStates)) {
           const ss = st?.stepStatus;
           if (ss) for (const k of Object.keys(ss) as Array<keyof typeof ss>) if (ss[k] === "running") ss[k] = "error";
           // 向后兼容：旧「导入需求」任务把内容直接写进了 需求.md（无 requirementOriginal、无 requirementMode）。
@@ -1341,6 +1515,12 @@ export function InlineTestingPanel() {
           if (st?.imported?.requirement && !st.requirementMode && !st.requirementOriginal) {
             st.requirementMode = "use-original";
           }
+          // 旧单一 targetUrl → 按 env 隔离：归位到该任务项目的当前 env（未知项目回落 local）。
+          const legacy = (st as unknown as { targetUrl?: unknown }).targetUrl;
+          if (typeof legacy === "string" && legacy.trim() && !st.targetUrlByEnv) {
+            st.targetUrlByEnv = { [taskEnvMap.get(tid) || "local"]: legacy.trim() };
+          }
+          if (st && "targetUrl" in st) delete (st as { targetUrl?: unknown }).targetUrl;
         }
         // 历史遗留去重：早期无防重逻辑可能产生同路径的重复项目（如两个 mealAllowance）→
         // 按路径合并，保留任务最多的那张卡片。去重结果会被下方持久化 effect 写回文件，一次性清理现状。
@@ -1416,21 +1596,32 @@ export function InlineTestingPanel() {
     return () => clearInterval(id);
   }, [runningStep]);
 
-  // Resolve the active project's env config (target baseUrl) for display in the flow
-  // view. Refetches when entering a flow / switching env / 路由切回工作台(pathname)，并在
+  // Resolve the active project's env config (target baseUrl + login state) for the
+  // project dashboard and flow view. Refetches when selecting a project / switching
+  // env / 路由切回工作台(pathname)，并在
   // 窗口重新聚焦 / 页面重新可见时也重拉 —— 这样在「设置·测试账号」改完配置(或重新导出
   // environments.json)切回工作台时，访问地址会自动刷新，不再显示缓存的旧地址。
   useEffect(() => {
-    if (view !== "flow" || !current?.path) { setEnvCfg(null); return; }
+    if (!visible || (view !== "dash" && view !== "flow") || !current?.path) return;
     const projectPath = current.path;
+    const key = envCfgKey;
     let cancelled = false;
+    let loadSeq = 0;
+    const settleFailure = (seq: number) => {
+      if (cancelled || seq !== loadSeq) return;
+      // 首次请求失败时结束 loading；同一 scope 已有成功值时保留旧值，避免一次临时
+      // 网络错误把可用配置降级成「未配置」。
+      setEnvCfgState((prev) => (prev?.key === key ? prev : { key, data: null }));
+    };
     const load = () => {
+      const seq = ++loadSeq;
       // no-store：重拉时必须拿最新值（否则浏览器可能回放缓存的旧地址，自动刷新就失效了）。
       fetch(`/api/test/env-config?projectPath=${encodeURIComponent(projectPath)}&env=${encodeURIComponent(env)}`, { cache: "no-store" })
         .then((r) => (r.ok ? r.json() : null))
         .then((d) => {
-          if (cancelled || !d || d.error) return;
-          setEnvCfg(d);
+          if (cancelled || seq !== loadSeq) return;
+          if (!d || d.error) { settleFailure(seq); return; }
+          setEnvCfgState({ key, data: d as EnvConfigDTO });
           // The persisted env may be illegal for this project (allowedEnvs comes from
           // the project's environments.json, resolved here async) — fall back to a
           // valid value so the <select> isn't stuck on an out-of-range option.
@@ -1439,7 +1630,7 @@ export function InlineTestingPanel() {
             handleEnvChange(allowed.includes("local") ? "local" : allowed[0]);
           }
         })
-        .catch(() => {});
+        .catch(() => settleFailure(seq));
     };
     load();
     // 自动重拉：窗口重新聚焦 / 标签页重新可见时（覆盖外部切走再回来、改完配置切回等场景）。
@@ -1453,8 +1644,9 @@ export function InlineTestingPanel() {
     };
     // handleEnvChange is stable enough (only writes localStorage); excluded to avoid re-fetch loops.
     // pathname 入依赖：从 /settings 改完配置切回 /chat 时 pathname 变 → 重拉最新访问地址。
+    // envCfgReload 入依赖：就地抽屉保存并同步后 bump，触发重拉刷新访问地址（阶段 1）。
 
-  }, [view, current?.path, env, pathname]);
+  }, [visible, view, current?.path, env, envCfgKey, pathname, envCfgReload]);
 
   // 解锁判定可传显式 stepStatus(后台任务用)；stepUnlocked 是活动任务的便捷包装。
   const stepUnlockedFor = (ss: Record<TestStep, StepStatus>, step: TestStep): boolean => {
@@ -1538,7 +1730,21 @@ export function InlineTestingPanel() {
   // 回归用例库弹窗(项目级):查看/管理沉淀的回归用例 + 跨任务一键重跑。
   // 测试类型(批 H,用户确认的信息架构):项目下两种平级测试类型——功能测试(现有任务流)/
   // 回归测试(整页工作区:用例库/回归套件/轮次历史 页内子页签,不再用弹窗)。切换项目时重置。
-  const [testType, setTestType] = useState<"func" | "regression">("func");
+  // 三种测试形态（页签）：功能=任务流；回归=项目级库/套件/轮次工作区；冒烟=轻场景任务流。
+  const [testType, setTestType] = useState<"func" | "regression" | "smoke">("func");
+  /**
+   * 当前页签该显示的任务（按形态过滤），**保留原始下标** —— setSelectedTask /
+   * requestDeleteTask 都按 `tasks[]` 的原始下标操作，用过滤后的下标会指向另一个任务。
+   * type 缺省视为功能任务（存量任务无该字段，天然归功能页签）。
+   */
+  const visibleTasks = useMemo(() => {
+    const wantSmoke = testType === "smoke";
+    return (current?.tasks ?? [])
+      .map((tk, i) => ({ tk, i }))
+      .filter(({ tk }) => (tk.type === "smoke") === wantSmoke);
+  }, [current?.tasks, testType]);
+  /** 冒烟「创建即执行」的待发起任务 id（见下方 effect：等选中态落定后自动起跑）。 */
+  const [pendingSmokeRun, setPendingSmokeRun] = useState<string | null>(null);
   const [regTab, setRegTab] = useState<RegTab>("library");
   // 发起回归弹窗(v2 批 D):套件/环境/预检确认后才真正 runLibrary(保留为确认对话框)。
   // 发起回归弹窗:null=关闭。带 preset 打开时(轮次历史的「复测 N 条」)预置复测模式与基准轮。
@@ -1617,7 +1823,7 @@ export function InlineTestingPanel() {
     opts?: {
       headed?: boolean;
       baseUrl?: string;
-      target?: { projPath: string; task: { id: string; name: string } };
+      target?: { projPath: string; task: { id: string; name: string; type?: TestTaskType } };
       // 需求分析节点刚二选一时 taskStates 尚未落地(setState 异步) → 用这个即时值覆盖，避免读到旧 state。
       requirementModeOverride?: "generate-md" | "use-original";
       // 同上:执行前确认弹窗刚改的「沉淀回归脚本」在本次运行就要生效,而 patchTask 是异步的。
@@ -1636,12 +1842,14 @@ export function InlineTestingPanel() {
     // 执行方式仅对「测试执行」步有意义(只有它注入 Playwright)。弹窗触发带 opts.headed,
     // 非弹窗触发(运行任务 / auto-chain / 队列起跑)回落到上次选择(execModeRef)。
     const headed = step === "execution" ? (opts?.headed ?? execModeRef.current === "visible") : false;
-    // 被测链接覆盖(仅执行步):弹窗显式确认的地址 > 任务级 targetUrl(新建任务「目标」输入,
-    // 让「运行任务」/auto-chain/排队这些不经确认弹窗的路径也直测任务地址)> 不传(服务端回落
-    // 项目环境配置 environments.json)。
+    // 被测链接覆盖(仅执行步):弹窗显式确认的地址 > 任务级覆盖[该任务项目的当前 env](新建任务
+    // 「目标」输入 / 执行前确认回写,让「运行任务」/auto-chain/排队这些不经确认弹窗的路径也直测)
+    // > 不传(服务端回落项目环境配置 environments.json)。按 env 取，避免用错环境的覆盖跑测。
+    const taskEnv =
+      projects.find((p) => normalizeProjectPath(p.path) === normalizeProjectPath(projPath))?.selectedEnv || "local";
     const baseUrlOverride =
       step === "execution"
-        ? (opts?.baseUrl?.trim() || taskStates[id]?.targetUrl?.trim() || undefined)
+        ? (opts?.baseUrl?.trim() || taskStates[id]?.targetUrlByEnv?.[taskEnv]?.trim() || undefined)
         : undefined;
     // 问题②·停止: a per-run AbortController. stopTask() aborts it → the fetch rejects
     // with AbortError, which the catch/finally below treat as a clean stop (not error).
@@ -1676,7 +1884,11 @@ export function InlineTestingPanel() {
       }));
       // 使用统计：进入执行 = 用例已被批准（手动门控 / 运行任务 / 批量三条路径的汇聚点）。
       // 服务端据此读 cases.json 拍终态快照、对首轮基线做 diff 算采纳率（last-wins，重跑重新快照无害）。
-      recordTestStat([{ eventType: "cases_approved", projectPath: projPath, taskId: id, taskName: task.name, env }]);
+      // ⚠️ 冒烟任务不发：场景是用户手写直落盘，从未有过「AI 生成 → 批准」环节 ——
+      // 发了会让采纳率口径混入非 AI 生成流（快照 diff 无首轮基线可对，语义不成立）。
+      if (task.type !== "smoke") {
+        recordTestStat([{ eventType: "cases_approved", projectPath: projPath, taskId: id, taskName: task.name, env }]);
+      }
     }
     const stepName = t(STEPS.find((s) => s.step === step)!.name);
     const push = (msg: ConvoMsg) => patchTask(id, (s) => ({ convo: [...s.convo, msg] }));
@@ -1689,6 +1901,14 @@ export function InlineTestingPanel() {
     push({ role: "user", text: `▶ ${t("test.flow.run")}「${stepName}」` });
     let sawError = false;
     let stopped = false; // set when the run is aborted via stopStep (停止)
+    let authInvalidStopped = false;
+    const stopForAuthInvalid = () => {
+      // 机器信号只属于冒烟 execution；功能/回归任务即使正文意外出现同名标记也不改变流程。
+      if (task.type !== "smoke" || step !== "execution" || authInvalidStopped) return;
+      authInvalidStopped = true;
+      sawError = true;
+      push({ role: "error", text: t("test.smoke.authInvalidStopped") });
+    };
     // 逐行解析执行步的 AI 文本(@@RESULT / @@CASE_START / ▶ 进度行)。
     // 解析下沉到 lib/test/exec-live.ts,与服务端归约共用 markers.ts —— 原来这里用
     // 「indexOf + slice 到行尾 + JSON.parse」,模型一旦把判定行包成 `**@@RESULT {…}**`
@@ -1711,6 +1931,9 @@ export function InlineTestingPanel() {
       } else if (e.kind === "resultMalformed") {
         // 含判定标记却解不出 —— 不静默吞掉,原样放进对话流让用户看得见。
         appendAi(e.raw + "\n");
+      } else if (e.kind === "authInvalid") {
+        // 机器控制行本身不展示；统一用本地化平台文案告知用户，且不信任模型自由文本。
+        stopForAuthInvalid();
       } else if (e.kind === "progress") {
         // currentCase 保留原始文本（parseExecProgress 会再解一次，向后兼容既有渲染）。
         patchTask(id, () => ({ currentCase: e.text }));
@@ -1720,7 +1943,13 @@ export function InlineTestingPanel() {
       }
       // caseStart 是纯机器标记,不进对话流(服务端用它给工具轨迹归属用例)。
     };
-    const processText = (chunk: string) => { for (const e of lineBuf.feed(chunk)) applyLine(e); };
+    const processText = (chunk: string) => {
+      for (const e of lineBuf.feed(chunk)) {
+        applyLine(e);
+        // 模型可能在同一 text 帧的硬停止标记后继续吐下一场景；标记之后的内容一律丢弃。
+        if (authInvalidStopped) break;
+      }
+    };
     try {
       const res = await fetch("/api/test/run", {
         method: "POST",
@@ -1750,8 +1979,15 @@ export function InlineTestingPanel() {
           baseUrl: baseUrlOverride,
           // 是否为本任务沉淀回归脚本(任务级开关)。undefined=开启,故只在明确关闭时传 false ——
           // 服务端同样按 `!== false` 判定,存量任务与旧客户端行为不变。
-          depositScripts:
-            (opts?.depositScriptsOverride ?? taskStates[id]?.depositScripts) === false ? false : undefined,
+          depositScripts: task.type === "smoke"
+            ? false
+            : (opts?.depositScriptsOverride ?? taskStates[id]?.depositScripts) === false ? false : undefined,
+          // 冒烟任务（第三形态）：形态 + 模块入口 + 数据前缀 → 服务端 buildStep 分流到冒烟
+          // prompt 变体。前缀在**前端**按本地日期生成并下发，而不是让服务端各步各算一次 ——
+          // 否则跨零点执行时报告里的前缀会与执行时实际造的数据对不上。
+          taskType: task.type === "smoke" ? ("smoke" as const) : undefined,
+          moduleEntry: task.type === "smoke" ? taskStates[id]?.moduleEntry || undefined : undefined,
+          dataPrefix: task.type === "smoke" ? smokeDataPrefix() : undefined,
         }),
       });
       // 非 2xx(如 /api/test/run 抛错走 500 + JSON {error})：之前直接进流式解析，500 的
@@ -1847,7 +2083,13 @@ export function InlineTestingPanel() {
                 }
                 return patch;
               });
+              // 防御性兜底：旧模型未发机器标记，但权威结果已明确“全 blocked + 登录失效”
+              // 时，仍把本轮冒烟收口为失败，绝不自动接力生成一份无意义报告。
+              if (task.type === "smoke" && isAuthInvalidBlockedRun(rj)) stopForAuthInvalid();
             } catch {}
+          } else if (evt.type === "auth_invalid") {
+            // 服务端识别 @@AUTH_INVALID 后已终止真实 agent 流；这里只负责状态与用户提示。
+            stopForAuthInvalid();
           } else if (evt.type === "step_stats") {
             // 使用统计：服务端在步骤干净收尾时补发的节点用时/模型（权威值），写进 TaskState
             // 供流程节点徽标展示 + 随 workbench 持久化。未知帧旧前端静默忽略、零影响。
@@ -1883,10 +2125,21 @@ export function InlineTestingPanel() {
             push({ role: "error", text: msg });
             sawError = true;
           }
+          // 同一次网络读取可能已经带回多帧。结构化 auth_invalid 或 text 内机器标记一旦
+          // 命中，当前批次后面的帧也属于“停止之后”，不能等到整个 frames 循环跑完才取消。
+          if (authInvalidStopped) break;
+        }
+        if (authInvalidStopped) {
+          // 不再消费标记之后的任何“毒丸”帧；服务端也已 abort agent。读侧取消用
+          // fire-and-forget，避免浏览器实现里的 cancel 清理拖住 finally 的终态收口。
+          void reader.cancel().catch(() => {});
+          break;
         }
       }
       // 流末冲刷:最后一行可能没有换行符,漏了它会丢掉一条判定或总结。
-      for (const e of lineBuf.flush()) applyLine(e);
+      if (!authInvalidStopped) {
+        for (const e of lineBuf.flush()) applyLine(e);
+      }
     } catch (e) {
       // 停止 (AbortError) is a user action, not a failure — handle it cleanly below.
       if (ctrl.signal.aborted || (e instanceof DOMException && e.name === "AbortError")) {
@@ -1907,7 +2160,7 @@ export function InlineTestingPanel() {
       // (pumpQueue)不受影响——那是「入队前已存在的产物」的隐含确认,本门控只拦本次新生成的用例。
       const gateCases = step === "cases" && autoAll && !stopped && !sawError;
       const finalStatus: StepStatus =
-        stopped ? "idle" : sawError ? "error" : gateCases || (HUMAN_GATED.includes(step) && !autoAll) ? "review" : "done";
+        authInvalidStopped ? "error" : stopped ? "idle" : sawError ? "error" : gateCases || (HUMAN_GATED.includes(step) && !autoAll) ? "review" : "done";
       patchTask(id, (s) => ({ stepStatus: { ...s.stepStatus, [step]: finalStatus } }));
       if (stopped) {
         // 停止 = 在此节点停住，不再向下游接力。标记该步【及其下游】为已停止，auto-chain 便不会
@@ -1969,7 +2222,12 @@ export function InlineTestingPanel() {
   const requestDeleteProject = (pIdx: number) => {
     const p = projects[pIdx];
     if (!p) return;
-    setDeleteTarget({ kind: "project", pIdx, name: p.name, running: p.tasks.some((tk) => runningTaskIds.has(tk.id)) });
+    setDeleteTarget({
+      kind: "project",
+      pIdx,
+      name: getProjectSystemName(projectSystemNamesByPath, p.path) || p.name,
+      running: p.tasks.some((tk) => runningTaskIds.has(tk.id)),
+    });
   };
   const requestDeleteTask = (tIdx: number) => {
     if (selected === null) return;
@@ -2100,21 +2358,28 @@ export function InlineTestingPanel() {
   // 弹窗「测试并执行」:记下执行方式(持久化),用确认后的地址 + 模式手动跑测试执行步。
   const runExecutionConfirmed = (baseUrl: string, headed: boolean, depositScripts: boolean) => {
     persistExecMode(headed ? "visible" : "headless");
+    const effectiveDepositScripts = activeTask?.type === "smoke" ? false : depositScripts;
     // 弹窗里改的「沉淀回归脚本」写回任务状态 —— 它是任务级设置,不是一次性选项;
     // 不写回的话下次打开弹窗又弹回旧值,用户会以为没生效。缺省 true,故只存 false。
-    // 任务地址回写规则:确认地址与环境配置地址【不同】→ 记为任务级覆盖(下次运行任务/
-    // 流水线也用它);【相同】→ 清除覆盖、回归跟随环境 —— 若无条件回写,存量任务手动执行
-    // 一次就会把当时的环境地址钉死成任务地址,之后改环境配置该任务不再跟随(回归风险)。
+    // 任务地址回写规则(按当前 env 隔离):确认地址与【当前 env】环境配置地址【不同】→ 记为该 env 的
+    // 任务级覆盖;【相同】→ 清除该 env 覆盖、回归跟随环境。其它 env 的覆盖保持不动 —— 一个任务在 SIT
+    // 钉的深链不受 local 执行影响,反之亦然。若无条件回写,存量任务手动执行一次就会把当时的环境地址
+    // 钉死成覆盖,之后改环境配置该任务不再跟随(回归风险)。
     if (aId) {
       const envUrl = (envCfg?.frontendBaseUrl || "").trim();
-      patchTask(aId, () => ({
-        depositScripts: depositScripts ? undefined : false,
-        targetUrl: baseUrl && baseUrl !== envUrl ? baseUrl : undefined,
-      }));
+      patchTask(aId, (s) => {
+        const next = { ...(s.targetUrlByEnv ?? {}) };
+        if (baseUrl && baseUrl !== envUrl) next[env] = baseUrl;
+        else delete next[env];
+        return {
+          depositScripts: effectiveDepositScripts ? undefined : false,
+          targetUrlByEnv: Object.keys(next).length ? next : undefined,
+        };
+      });
     }
     setModal("none");
     if (aId) autoRunIdsRef.current.delete(aId);
-    runStep("execution", { headed, baseUrl, depositScriptsOverride: depositScripts });
+    runStep("execution", { headed, baseUrl, depositScriptsOverride: effectiveDepositScripts });
   };
 
   // 运行任务: 从指定起点把整条流水线自动跑到报告(auto-approve 门控)。受全局并发约束 ——
@@ -2149,6 +2414,25 @@ export function InlineTestingPanel() {
     waitingQueueRef.current = [...waitingQueueRef.current, id];
     setWaitingTaskIds(new Set(waitingQueueRef.current));
   };
+
+  /**
+   * 冒烟「创建即执行」（无门控）：新建弹窗创建成功后记下 taskId，等 setProjects /
+   * setSelectedTask 的状态落定、activeTask 指向这个新任务时，自动从「测试执行」起跑
+   * （execution → report 由既有 auto-chain 接力）。
+   *
+   * 为什么要过一道 effect 而不是创建后直接调 startRunAllFrom：后者读的是 `activeTask`
+   * 闭包值，在同一轮渲染里还是旧任务（或 null），会对着错误的任务发起执行。
+   */
+  useEffect(() => {
+    if (!pendingSmokeRun) return;
+    if (activeTask?.id !== pendingSmokeRun) return; // 等选中态切到新任务
+    if (busy || !current?.path) return;
+    setPendingSmokeRun(null);
+    startRunAllFrom("execution");
+    // startRunAllFrom / activeTask 每轮渲染重建，全列进依赖会让 effect 反复触发；
+    // 这里的触发条件已由 pendingSmokeRun + activeTask.id 唯一确定。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingSmokeRun, activeTask?.id, busy, current?.path]);
 
   // 运行任务 click: 全新任务(全 idle)直接从需求分析开跑；其余(部分完成 / 已完成)弹「选择起点」。
   const doRunTask = () => {
@@ -2278,7 +2562,16 @@ export function InlineTestingPanel() {
                   <ArrowLeft size={12} /> {t("test.projects")}
                 </button>
                 <h3 className="text-sm font-semibold text-foreground">{activeTask.name}</h3>
-                {current && <span className="font-mono text-[11px] text-muted-foreground">{current.name}</span>}
+                {current && (
+                  <span className="max-w-[180px] truncate text-[11px] text-muted-foreground" title={current.path}>
+                    {currentDisplayName}
+                  </span>
+                )}
+                {currentSystemName && current && (
+                  <span className="max-w-[140px] truncate font-mono text-[10px] text-muted-foreground/70" title={current.path}>
+                    {current.name}
+                  </span>
+                )}
                 <span className="flex-1" />
                 {/* env (local/SIT) + resolved target from 设置·测试账号 → environments.json */}
                 <select
@@ -2291,13 +2584,21 @@ export function InlineTestingPanel() {
                   ))}
                 </select>
                 {(() => {
-                  // 任务级目标地址优先展示(执行时它也确实优先生效);无任务地址回落环境地址。
-                  const taskUrl = (aId && taskStates[aId]?.targetUrl) || "";
+                  // 任务级目标地址(按当前 env)优先展示(执行时它也确实优先生效);该 env 无覆盖则回落
+                  // 环境地址 —— 于是切到未配置的 env(如 local)时不再冒充显示别的 env 的覆盖地址。
+                  const taskUrl = (aId && taskStates[aId]?.targetUrlByEnv?.[env]) || "";
                   const shownUrl = taskUrl || envCfg?.frontendBaseUrl || "";
+                  if (!taskUrl && envCfgLoading) {
+                    return (
+                      <span className="flex items-center gap-1 text-[10px] text-muted-foreground">
+                        <SpinnerGap size={11} className="animate-spin" /> {t("common.loading")}
+                      </span>
+                    );
+                  }
                   if (!shownUrl) {
                     return (
                       <button
-                        onClick={() => router.push("/settings#test-accounts")}
+                        onClick={() => setEnvDrawerOpen(true)}
                         className="rounded bg-status-warning-muted px-1.5 py-0.5 text-[10px] font-medium text-status-warning-foreground hover:opacity-80"
                       >
                         {t("test.env.unconfigured")}
@@ -2355,9 +2656,11 @@ export function InlineTestingPanel() {
               )}
 
               {/* pipeline strip (horizontal): 需求 → 用例 → 执行 → 报告。
-                  问题1：导入用例的任务跳过需求分析，隐藏需求节点。 */}
+                  问题1：导入用例的任务跳过需求分析，隐藏需求节点。
+                  冒烟任务同样隐藏需求节点（三节点：测试场景 → 执行 → 冒烟报告），
+                  且「用例设计」节点改标为「测试场景」（见 stepLabel）。 */}
               <div className="mb-3 flex flex-wrap gap-2">
-                {STEPS.filter((s) => !(aState.imported?.cases && s.step === "requirement")).map((s, i) => {
+                {STEPS.filter((s) => !((aState.imported?.cases || isSmokeTask) && s.step === "requirement")).map((s, i) => {
                   const status = stepStatus[s.step];
                   const isFocus = s.step === focusStep;
                   const isRunning = status === "running";
@@ -2366,9 +2669,10 @@ export function InlineTestingPanel() {
                     <button
                       key={s.step}
                       onClick={() => setViewStep(s.step)}
+                      data-testid={`test-step-${s.step}`}
                       // 执行中锁定:不能点其他节点(连查看切换也禁用),避免切走详情卡 + 误以为能运行别的节点。
                       disabled={!current?.path || busy}
-                      title={t(s.name)}
+                      title={stepLabel(s.step, isSmokeTask, t)}
                       className={`min-w-[120px] flex-1 rounded-lg border p-2.5 text-left transition-colors disabled:cursor-not-allowed ${stepPillClass(status)} ${
                         isFocus ? "ring-1 ring-muted-foreground/40" : ""
                       } ${current?.path && !busy ? "hover:border-muted-foreground/40" : ""}`}
@@ -2378,8 +2682,9 @@ export function InlineTestingPanel() {
                           ? <SpinnerGap size={13} className="animate-spin text-primary" />
                           : <span className={`h-2 w-2 rounded-full ${stepDotClass(status)}`} />}
                         <span className={`text-xs font-medium ${isRunning ? "text-primary" : "text-foreground"}`}>
-                          {i + 1}. {t(s.name)}
-                          {HUMAN_GATED.includes(s.step) && <span title={t("test.gate.auto")}> ✋</span>}
+                          {i + 1}. {stepLabel(s.step, isSmokeTask, t)}
+                          {/* 冒烟无门控（创建即自动跑到报告）→ 不显示门控手势图标 */}
+                          {!isSmokeTask && HUMAN_GATED.includes(s.step) && <span title={t("test.gate.auto")}> ✋</span>}
                         </span>
                       </div>
                       <div className={`mt-1 text-[11px] ${isRunning ? "text-primary" : "text-muted-foreground"}`}>
@@ -2411,7 +2716,11 @@ export function InlineTestingPanel() {
               {/* current-step detail card */}
               <div className="rounded-xl border border-border bg-card p-3">
                 <div className="mb-2 flex items-center gap-2">
-                  <h4 className="text-xs font-semibold text-foreground">{focusStep === "report" ? t("test.report.overviewTitle") : t(STEPS.find((s) => s.step === focusStep)!.name)}</h4>
+                  <h4 className="text-xs font-semibold text-foreground">
+                    {focusStep === "report"
+                      ? t(isSmokeTask ? "test.smoke.step.report" : "test.report.overviewTitle")
+                      : t(STEPS.find((s) => s.step === focusStep)!.name)}
+                  </h4>
                   {focusStep === "execution" && (
                     <span className="rounded bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary">{t("test.flow.aiDriven")}</span>
                   )}
@@ -2427,7 +2736,7 @@ export function InlineTestingPanel() {
                   {/* 回归脚本沉淀开关:常驻徽标,一眼见状态、一点即切。
                       不能只放在执行前确认弹窗里 —— 「运行任务」的自动接力直接调 runStep、
                       根本不弹那个弹窗,用户在流水线模式下既够不着也看不到当前设置。 */}
-                  {focusStep === "execution" && aId && (
+                  {focusStep === "execution" && aId && !isSmokeTask && (
                     <button
                       onClick={() => patchTask(aId, (s) => ({ depositScripts: s.depositScripts === false ? undefined : false }))}
                       disabled={runningStep === "execution"}
@@ -2522,6 +2831,7 @@ export function InlineTestingPanel() {
                     t={t}
                     projectPath={current?.path ?? ""}
                     taskName={activeTask?.name ?? ""}
+                    taskType={activeTask?.type}
                     env={env}
                     reportStatus={stepStatus.report}
                     live={{ caseResults, fourState, circuitBroken }}
@@ -2772,39 +3082,66 @@ export function InlineTestingPanel() {
                   <EmptyState icon={FolderPlus} text={t("test.projectsEmpty")} />
                 ) : (
                   <div className="grid grid-cols-2 gap-2 lg:grid-cols-3">
-                    {projects.map((p, i) => (
-                      <div key={i} className="group relative">
-                        <button
-                          onClick={() => {
-                            setSelected(i);
-                            setTestType("func");
-                            setRegTab("library");
-                            setSelectedTask(null);
-                          }}
-                          className="flex w-full flex-col gap-2.5 rounded-xl border border-border bg-card p-3.5 text-left transition-colors hover:border-primary/50 hover:bg-muted/40"
-                        >
-                          <div className="flex items-center gap-2.5">
-                            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                              <FolderPlus size={17} />
-                            </span>
-                            <div className="min-w-0 flex-1">
-                              <div className="truncate text-sm font-medium text-foreground">{p.name}</div>
-                              {p.path && <div className="truncate font-mono text-[10px] text-muted-foreground">{p.path}</div>}
+                    {projects.map((p, i) => {
+                      const systemName = getProjectSystemName(projectSystemNamesByPath, p.path);
+                      const displayName = systemName || p.name;
+                      return (
+                        <div key={p.path || i} className="group relative">
+                          <button
+                            onClick={() => {
+                              setSelected(i);
+                              setTestType("func");
+                              setRegTab("library");
+                              setSelectedTask(null);
+                            }}
+                            className="flex h-full w-full flex-col gap-2.5 rounded-xl border border-border bg-card p-3.5 text-left transition-colors hover:border-primary/50 hover:bg-muted/40"
+                            data-testid="test-project-card"
+                            data-project-path={p.path}
+                            data-system-name={systemName ?? ""}
+                          >
+                            <div className="flex min-w-0 items-start gap-2.5">
+                              <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                                <FolderPlus size={17} />
+                              </span>
+                              <div className="min-w-0 flex-1">
+                                <div
+                                  className="truncate text-sm font-medium text-foreground"
+                                  title={displayName}
+                                  data-testid="test-project-display-name"
+                                >
+                                  {displayName}
+                                </div>
+                                <div
+                                  className="mt-0.5 flex min-w-0 items-center gap-1 text-[10px] text-muted-foreground"
+                                  title={systemName ? p.name : t("test.project.systemNameMissing")}
+                                  data-testid="test-project-folder-name"
+                                >
+                                  {systemName ? <FolderOpen size={10} className="shrink-0" /> : <Gear size={10} className="shrink-0" />}
+                                  <span className="truncate">
+                                    {systemName ? p.name : t("test.project.systemNameMissing")}
+                                  </span>
+                                </div>
+                                {p.path && (
+                                  <div className="mt-0.5 truncate font-mono text-[10px] text-muted-foreground" title={p.path}>
+                                    {p.path}
+                                  </div>
+                                )}
+                              </div>
                             </div>
-                          </div>
-                          <div className="flex items-center gap-1.5 border-t border-border/60 pt-2 text-[11px] text-muted-foreground">
-                            <ListChecks size={12} /> {p.tasks.length} {t("test.tasks")}
-                          </div>
-                        </button>
-                        <button
-                          onClick={(e) => { e.stopPropagation(); requestDeleteProject(i); }}
-                          title={t("test.del.delete")}
-                          className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-status-error-muted hover:text-status-error group-hover:opacity-100"
-                        >
-                          <Trash size={13} />
-                        </button>
-                      </div>
-                    ))}
+                            <div className="flex items-center gap-1.5 border-t border-border/60 pt-2 text-[11px] text-muted-foreground">
+                              <ListChecks size={12} /> {p.tasks.length} {t("test.tasks")}
+                            </div>
+                          </button>
+                          <button
+                            onClick={(e) => { e.stopPropagation(); requestDeleteProject(i); }}
+                            title={t("test.del.delete")}
+                            className="absolute right-2 top-2 flex h-6 w-6 items-center justify-center rounded-md text-muted-foreground opacity-0 transition-opacity hover:bg-status-error-muted hover:text-status-error group-hover:opacity-100"
+                          >
+                            <Trash size={13} />
+                          </button>
+                        </div>
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -2822,10 +3159,17 @@ export function InlineTestingPanel() {
                   >
                     <ArrowLeft size={12} /> {t("test.projects")}
                   </button>
-                  <h3 className="text-sm font-semibold text-foreground">{current.name}</h3>
-                  {/* 测试类型切换(批 H):功能测试=现有任务流;回归测试=整页工作区(库/套件/轮次) */}
+                  <h3 className="max-w-[240px] truncate text-sm font-semibold text-foreground" title={currentDisplayName}>
+                    {currentDisplayName}
+                  </h3>
+                  {currentSystemName && (
+                    <span className="max-w-[180px] truncate font-mono text-[10px] text-muted-foreground" title={current.path}>
+                      {current.name}
+                    </span>
+                  )}
+                  {/* 测试形态切换:功能=现有任务流;回归=整页工作区(库/套件/轮次);冒烟=轻场景任务流 */}
                   <div className="ml-1 flex items-center gap-0.5 rounded-lg border border-border bg-muted p-0.5">
-                    {([["func", t("test.type.func")], ["regression", t("test.type.regression")]] as const).map(([k, label]) => (
+                    {([["func", t("test.type.func")], ["regression", t("test.type.regression")], ["smoke", t("test.type.smoke")]] as const).map(([k, label]) => (
                       <button
                         key={k}
                         onClick={() => setTestType(k)}
@@ -2837,8 +3181,8 @@ export function InlineTestingPanel() {
                   </div>
                   <span className="flex-1" />
                   <button
-                    onClick={() => router.push("/settings#test-accounts")}
-                    title={current?.path ? `${t("test.envModal.title")}（设置·测试账号；project_root = ${current.path}）` : undefined}
+                    onClick={() => setEnvDrawerOpen(true)}
+                    title={current?.path ? `${t("test.envModal.title")}（就地配置；project_root = ${current.path}）` : undefined}
                     className="flex h-7 items-center gap-1 rounded-md border border-border px-2 text-[11px] text-muted-foreground hover:text-foreground"
                   >
                     <Gear size={12} /> {t("test.envModal.title")}
@@ -2851,7 +3195,46 @@ export function InlineTestingPanel() {
                       ＋ {t("test.newTask")}
                     </button>
                   )}
+                  {testType === "smoke" && (
+                    <button
+                      onClick={() => setModal("newSmokeTask")}
+                      className="flex h-7 items-center gap-1 rounded-md bg-primary px-2.5 text-[11px] font-medium text-primary-foreground"
+                    >
+                      ＋ {t("test.smoke.newTask")}
+                    </button>
+                  )}
                 </div>
+                {/* 冒烟页签：沿用环境配置的只读信息条 —— 冒烟不建第二套环境体系，
+                    系统地址/登录态都来自「环境配置」抽屉（TestEnvDrawer），这里只做展示与提醒。 */}
+                {testType === "smoke" && (
+                  <div
+                    className="mb-3 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-dashed border-border bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground"
+                    data-testid="test-smoke-env-summary"
+                  >
+                    <span>{t("test.smoke.envReuse")}</span>
+                    <span>
+                      {t("test.smoke.envName")} <span className="font-medium text-foreground">{env}</span>
+                    </span>
+                    {envCfgLoading ? (
+                      <span className="flex items-center gap-1 text-[10px]">
+                        <SpinnerGap size={11} className="animate-spin" /> {t("common.loading")}
+                      </span>
+                    ) : envCfg?.frontendBaseUrl ? (
+                      <span className="font-mono text-[10px]">{envCfg.frontendBaseUrl}</span>
+                    ) : null}
+                    <span>
+                      {t("test.smoke.loginState")}{" "}
+                      <span className={envCfg?.loginState?.hasState && !envCfgLoading ? "font-medium text-status-success-foreground" : "text-muted-foreground"}>
+                        {envCfgLoading
+                          ? t("common.loading")
+                          : envCfg?.loginState?.hasState
+                            ? t("test.smoke.loginCaptured")
+                            : t("test.smoke.loginNone")}
+                      </span>
+                    </span>
+                    <span className="ml-auto">{t("test.smoke.envHint")}</span>
+                  </div>
+                )}
                 {/* 回归测试整页工作区(批 H):子页签 + 发起回归 + 状态行 + 页内区块 */}
                 {testType === "regression" && current?.path && (
                   <RegressionWorkspace
@@ -2870,7 +3253,7 @@ export function InlineTestingPanel() {
                     runStatus={libraryRunStatus}
                   />
                 )}
-                {testType === "func" && current.tasks.length > 0 && (
+                {testType === "func" && visibleTasks.length > 0 && (
                   <div className="mb-3 flex items-center gap-2">
                     <span className="flex-1" />
                     <label className="flex items-center gap-1 text-[11px] text-muted-foreground" title={t("test.batch.concurrencyHint")}>
@@ -2887,11 +3270,11 @@ export function InlineTestingPanel() {
                     </label>
                   </div>
                 )}
-                {testType !== "func" ? null : current.tasks.length === 0 ? (
-                  <EmptyState icon={ListChecks} text={t("test.tasksEmpty")} />
+                {testType === "regression" ? null : visibleTasks.length === 0 ? (
+                  <EmptyState icon={ListChecks} text={t(testType === "smoke" ? "test.smoke.tasksEmpty" : "test.tasksEmpty")} />
                 ) : (() => {
                   // 单张任务卡（抽出闭包以便各分组复用）。i = 任务原始下标（点开进详情 / 删除按 index 操作）。
-                  const renderTaskCard = (tk: { id: string; name: string }, i: number) => {
+                  const renderTaskCard = (tk: { id: string; name: string; type?: TestTaskType }, i: number) => {
                     const st = taskStates[tk.id] ?? DEFAULT_TASK_STATE;
                     const chip = taskChip(st, t);
                     const inWait = waitingTaskIds.has(tk.id);
@@ -2912,6 +3295,7 @@ export function InlineTestingPanel() {
                             {/* 标签放标题行（taskName 旁），不占右列额外一行 —— 导入用例卡片才显示，避免撑高同行卡片 */}
                             <div className="flex min-w-0 items-center gap-1.5 pt-0.5">
                               <span className="truncate text-sm font-medium text-foreground">{tk.name}</span>
+                              {tk.type === "smoke" && <span className="shrink-0 rounded-full bg-status-warning-muted px-1.5 py-0.5 text-[9px] font-medium text-status-warning-foreground">{t("test.type.smoke")}</span>}
                               {st.imported?.cases && <span className="shrink-0 rounded-full bg-primary/15 px-1.5 py-0.5 text-[9px] font-medium text-primary">{t("test.task.importedTag")}</span>}
                             </div>
                             <div className="flex shrink-0 flex-col items-end gap-0.5">
@@ -2920,7 +3304,7 @@ export function InlineTestingPanel() {
                             </div>
                           </div>
                           <div className="flex items-start">
-                            {STEPS.filter((s) => !(st.imported?.cases && s.step === "requirement")).map((s, idx, arr) => (
+                            {STEPS.filter((s) => !((st.imported?.cases || tk.type === "smoke") && s.step === "requirement")).map((s, idx, arr) => (
                               <div key={s.step} className="flex flex-1 flex-col items-center">
                                 {/* dot with connector lines on both sides (ends are hidden) */}
                                 <div className="flex w-full items-center">
@@ -2944,13 +3328,16 @@ export function InlineTestingPanel() {
                     );
                   };
                   // 每个任务落入唯一分类（运行中 > 排队中 > 已完成 > 待处理），保留原始下标。
-                  const groups: Record<TaskCategory, { tk: { id: string; name: string }; i: number }[]> =
+                  // ⚠️ 分组的是 visibleTasks（当前页签的形态）而非 current.tasks，但 `i` 必须是
+                  // **原始下标** —— setSelectedTask / requestDeleteTask 都按原始下标操作 tasks[]，
+                  // 用过滤后的下标会打开/删掉另一个任务。
+                  const groups: Record<TaskCategory, { tk: { id: string; name: string; type?: TestTaskType }; i: number }[]> =
                     { running: [], queued: [], pending: [], done: [] };
-                  current.tasks.forEach((tk, i) => {
+                  for (const { tk, i } of visibleTasks) {
                     const st = taskStates[tk.id] ?? DEFAULT_TASK_STATE;
                     const c = taskCategory(st.stepStatus, STEP_ORDER, runningTaskIds.has(tk.id), waitingTaskIds.has(tk.id));
                     groups[c].push({ tk, i });
-                  });
+                  }
                   // 排队中按队列序号升序；其余保持任务原序（状态变化时不跳动）。
                   groups.queued.sort((a, b) => waitingQueueRef.current.indexOf(a.tk.id) - waitingQueueRef.current.indexOf(b.tk.id));
                   const CAT_META: Record<TaskCategory, { dot: string; text: string; label: TranslationKey }> = {
@@ -3011,6 +3398,7 @@ export function InlineTestingPanel() {
             {view === "report" && (
               <ReportBrowser
                 projects={projects}
+                projectSystemNamesByPath={projectSystemNamesByPath}
                 t={t}
                 model={model}
                 providerId={providerId}
@@ -3199,16 +3587,44 @@ export function InlineTestingPanel() {
           existingNames={(selected !== null ? projects[selected]?.tasks : undefined)?.map((tk) => tk.name) ?? []}
         />
       )}
+      {modal === "newSmokeTask" && (
+        <NewSmokeTaskModal
+          t={t}
+          env={env}
+          envCfg={envCfg}
+          envCfgLoading={envCfgLoading}
+          dataPrefix={smokeDataPrefix()}
+          existingNames={(selected !== null ? projects[selected]?.tasks : undefined)?.map((tk) => tk.name) ?? []}
+          onClose={() => setModal("none")}
+          onCreate={async (moduleName, moduleEntry, scenarioText, targetUrl) => {
+            const taskName = `${moduleName.trim()}-冒烟`;
+            const r = await addSmokeTask(taskName, moduleEntry, scenarioText, targetUrl);
+            if (!r.ok || !r.taskId) return r;
+            setModal("none");
+            // 无门控：创建即打开流程视图并直接发起执行（execution → report 由既有
+            // auto-chain 接力）。定位新任务的下标用「创建后的长度 - 1」——setProjects
+            // 是异步的，此刻 current.tasks 还是旧值，不能用 findIndex。
+            const idx = (current?.tasks.length ?? 0);
+            setSelectedTask(idx);
+            setView("flow");
+            setPendingSmokeRun(r.taskId);
+            return { ok: true };
+          }}
+        />
+      )}
       {modal === "runStart" && activeTask && (
         <RunStartModal
           t={t}
           stepStatus={aState.stepStatus}
-          initialDeposit={(activeTask && taskStates[activeTask.id]?.depositScripts) !== false}
+          initialDeposit={activeTask.type === "smoke" ? false : taskStates[activeTask.id]?.depositScripts !== false}
+          allowDepositScripts={activeTask.type !== "smoke"}
+          smokeOnly={activeTask.type === "smoke"}
           onRun={(step, depositScripts) => {
             setModal("none");
+            const effectiveDepositScripts = activeTask.type === "smoke" ? false : depositScripts;
             // 弹窗里改的开关写回任务状态(缺省 true → 开启存 undefined、关闭存 false),
             // 与徽标/执行前弹窗同一份设置,不做一次性覆盖 —— 否则三处入口会互相打架。
-            if (aId) patchTask(aId, () => ({ depositScripts: depositScripts ? undefined : false }));
+            if (aId) patchTask(aId, () => ({ depositScripts: effectiveDepositScripts ? undefined : false }));
             startRunAllFrom(step);
           }}
           onClose={() => setModal("none")}
@@ -3217,10 +3633,11 @@ export function InlineTestingPanel() {
       {modal === "execConfirm" && activeTask && (
         <ExecConfirmModal
           t={t}
-          initialUrl={taskStates[activeTask.id]?.targetUrl || envCfg?.frontendBaseUrl || ""}
+          initialUrl={taskStates[activeTask.id]?.targetUrlByEnv?.[env] || envCfg?.frontendBaseUrl || ""}
           unconfigured={!!envCfg && !envCfg.configured}
           initialMode={execMode}
-          initialDeposit={(activeTask && taskStates[activeTask.id]?.depositScripts) !== false}
+          initialDeposit={activeTask.type === "smoke" ? false : taskStates[activeTask.id]?.depositScripts !== false}
+          allowDepositScripts={activeTask.type !== "smoke"}
           onRun={runExecutionConfirmed}
           onClose={() => setModal("none")}
         />
@@ -3230,7 +3647,7 @@ export function InlineTestingPanel() {
           t={t}
           source={envCfg?.source}
           env={env}
-          onGoConfigure={() => { setModal("none"); router.push("/settings#test-accounts"); }}
+          onGoConfigure={() => { setModal("none"); setEnvDrawerOpen(true); }}
           onRunAnyway={() => { setModal("none"); doRunTask(); }}
           onClose={() => setModal("none")}
         />
@@ -3243,6 +3660,15 @@ export function InlineTestingPanel() {
           addProjectFromPath(p);
         }}
       />
+      {/* 就地环境配置抽屉（阶段 1）：绑定当前项目文件夹，保存并同步后重拉 env-config。 */}
+      {current?.path && (
+        <TestEnvDrawer
+          projectPath={current.path}
+          open={envDrawerOpen}
+          onOpenChange={setEnvDrawerOpen}
+          onSaved={() => setEnvCfgReload((n) => n + 1)}
+        />
+      )}
     </div>
   );
 }
@@ -3269,7 +3695,7 @@ function ConvoBubble({ msg }: { msg: ConvoMsg }) {
       <div className={`mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${cfg.avatar}`}>
         <Cmp size={13} />
       </div>
-      <div className={`${bubble} rounded-tl-sm ${cfg.body}`}>{msg.text}</div>
+      <div data-testid={msg.role === "error" ? "test-convo-error" : undefined} className={`${bubble} rounded-tl-sm ${cfg.body}`}>{msg.text}</div>
     </div>
   );
 }
@@ -3297,7 +3723,8 @@ function SuiteBanner({ t, suiteCounts, suitePassStr }: { t: T; suiteCounts?: Fou
 // 使用统计（Phase 3）：taskId + runHash 就位时，执行矩阵每行加人工复核（✓准确/✗有误→选
 // 实际结果，误报/漏报/程度不符由服务端归类）+ 用时列 + 一键全准；打开时回显已复核状态。
 // 合并 V3.1.0_dev：保留回归集 SuiteBanner 的 suiteCounts/suitePassStr 属性。
-function ReportView({ t, results, four, funcCounts, funcPassStr, suiteCounts, suitePassStr, circuitBroken, taskName, projectPath, env, taskId, runHash }: { t: T; results: CaseResult[]; four: FourState; funcCounts?: FourState; funcPassStr?: string; suiteCounts?: FourState; suitePassStr?: string; circuitBroken?: boolean; taskName: string; projectPath?: string; env?: string; taskId?: string; runHash?: string }) {
+function ReportView({ t, results, four, funcCounts, funcPassStr, suiteCounts, suitePassStr, circuitBroken, taskName, projectPath, env, taskId, runHash, taskType, observations }: { t: T; results: CaseResult[]; four: FourState; funcCounts?: FourState; funcPassStr?: string; suiteCounts?: FourState; suitePassStr?: string; circuitBroken?: boolean; taskName: string; projectPath?: string; env?: string; taskId?: string; runHash?: string; taskType?: TestTaskType; observations?: { text: string; scene?: string }[] }) {
+  const isSmoke = taskType === "smoke";
   // 证据媒体（图片灯箱 + 录像内联回放）：经 /api/test/media 白名单流式取证据；
   // lightbox=当前放大查看的文件名。无 projectPath（如流程内调用）时退化为文件名文本。
   const [lightbox, setLightbox] = useState<string | null>(null);
@@ -3356,6 +3783,60 @@ function ReportView({ t, results, four, funcCounts, funcPassStr, suiteCounts, su
     accurate: "test.review.accurate", false_fail: "test.review.falseFail", missed_fail: "test.review.missedFail", severity_mismatch: "test.review.severityMismatch",
   };
 
+  // ── 冒烟：Bug 可复核列表（事实层现场派生 + 覆盖层 bugs.json，见 /api/test/bugs）──
+  const [bugs, setBugs] = useState<SmokeBug[]>([]);
+  const [bugsHash, setBugsHash] = useState<string | null>(null);
+  const [noteDraft, setNoteDraft] = useState<Record<string, string>>({});
+  const reloadBugs = () => {
+    if (!isSmoke || !projectPath) return;
+    fetch(`/api/test/bugs?projectPath=${encodeURIComponent(projectPath)}&taskName=${encodeURIComponent(taskName)}&env=${encodeURIComponent(env || "local")}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d) => {
+        if (!d?.ok) return;
+        setBugs(Array.isArray(d.bugs) ? d.bugs : []);
+        setBugsHash(typeof d.runHash === "string" ? d.runHash : null);
+        setNoteDraft(Object.fromEntries(((d.bugs as SmokeBug[]) ?? []).map((b) => [b.sceneId, b.note ?? ""])));
+      })
+      .catch(() => {});
+  };
+
+  useEffect(reloadBugs, [isSmoke, projectPath, taskName, env, runHash]);
+  /** 覆盖层写入（严重级别/备注）；409（执行已重跑）→ 重拉刷新，不静默吞。 */
+  const putBug = (patch: { sceneId: string; severity?: string; note?: string; severityOverriddenFrom?: string }) => {
+    if (!projectPath) return;
+    fetch("/api/test/bugs", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectPath, taskName, env: env || "local", runHash: bugsHash, patch }),
+    })
+      .then(async (r) => {
+        if (r.status === 409) { reloadBugs(); return null; }
+        return r.ok ? r.json() : null;
+      })
+      .then((d) => { if (d?.ok && Array.isArray(d.bugs)) setBugs(d.bugs); })
+      .catch(() => {});
+  };
+  const changeSeverity = (b: SmokeBug, severity: string) => {
+    if (severity === b.severity) return;
+    setBugs((list) => list.map((x) => (x.sceneId === b.sceneId ? { ...x, severity, severityOverriddenFrom: x.severityOverriddenFrom ?? x.severity } : x)));
+    putBug({ sceneId: b.sceneId, severity, severityOverriddenFrom: b.severityOverriddenFrom ?? b.severity });
+  };
+  const saveNote = (b: SmokeBug) => {
+    const note = (noteDraft[b.sceneId] ?? "").trim();
+    if (note === (b.note ?? "")) return;
+    putBug({ sceneId: b.sceneId, note });
+  };
+  /** 冒烟批量：把所有未复核的 Bug（fail 场景）一键确认为缺陷（accurate）。 */
+  const bulkConfirmBugs = () => {
+    const rest = bugs.map((b) => b.sceneId).filter((id) => !reviews[id]);
+    if (!rest.length) return;
+    setReviews((m) => { const n = { ...m }; rest.forEach((id) => { n[id] = "accurate"; }); return n; });
+    postReview([{ eventType: "report_review_bulk", payload: { caseIds: rest, count: rest.length, runHash } }]);
+  };
+  // 冒烟结论（双记录：AI 原判保留在场景表/报告 md，复核态只影响横幅表述）。
+  const failSceneIds = results.filter((r) => r.status === "fail").map((r) => r.id);
+  const sv = smokeVerdict({ total: four.total || results.length, pass: four.pass, fail: four.fail, blocked: four.blocked }, failSceneIds, reviews);
+
   const metric = (label: string, value: string, danger?: boolean) => (
     <div className="rounded-lg bg-muted/40 p-3">
       <div className="text-[11px] text-muted-foreground">{label}</div>
@@ -3381,6 +3862,26 @@ function ReportView({ t, results, four, funcCounts, funcPassStr, suiteCounts, su
       {circuitBroken && (
         <div className="mb-3 rounded-md border border-status-error-border bg-status-error-muted px-3 py-2 text-[11px] text-status-error-foreground">
           ⚠ {t("test.report.circuitBroken")}
+        </div>
+      )}
+      {/* 冒烟结论横幅（口径见 smoke-bugs.ts smokeVerdict）。双记录：复核把全部 fail 判为
+          误报时横幅转「通过·经人工复核」，但场景表 / 报告 md 里的 AI 原判保持原样可追溯。 */}
+      {isSmoke && !circuitBroken && sv.verdict !== "empty" && (
+        <div
+          className={`mb-3 rounded-md border px-3 py-2 text-[11px] ${
+            sv.verdict === "failed"
+              ? "border-status-error-border bg-status-error-muted text-status-error-foreground"
+              : sv.verdict === "incomplete"
+                ? "border-status-warning-border bg-status-warning-muted text-status-warning-foreground"
+                : "border-status-success-border bg-status-success-muted text-status-success-foreground"
+          }`}
+        >
+          <span className="font-medium">
+            {sv.verdict === "passed" && <>✓ {t("test.smoke.verdict.passed")}</>}
+            {sv.verdict === "passed-after-review" && <>✓ {t("test.smoke.verdict.passedAfterReview", { n: sv.clearedFails })}</>}
+            {sv.verdict === "failed" && <>🚫 {t("test.smoke.verdict.failed", { n: four.fail })}</>}
+            {sv.verdict === "incomplete" && <>⏸ {t("test.smoke.verdict.incomplete", { n: four.blocked })}</>}
+          </span>
         </div>
       )}
       <div className="mb-3 empty:hidden">
@@ -3479,6 +3980,134 @@ function ReportView({ t, results, four, funcCounts, funcPassStr, suiteCounts, su
         </table>
       </div>
       <p className="mt-2 text-[11px] text-muted-foreground">ℹ️ {t("test.report.factsNote")}</p>
+
+      {/* ── 冒烟 · Bug 清单（结构化列表 + 人工复核）─────────────────────────────
+          事实字段派生自 run.json（fail 场景 1:1）+ 报告 md 的 AI 初判；人工只写
+          严重级别/备注（bugs.json 覆盖层）。复核动作复用上表同一套 report_reviewed
+          事件（sceneId = caseId），故上表复核过的 fail 行这里同步显示，反之亦然。 */}
+      {isSmoke && !circuitBroken && bugs.length > 0 && (
+        <div className="mt-4">
+          <div className="mb-2 flex flex-wrap items-center gap-2">
+            <Bug size={14} className="text-status-error-foreground" />
+            <h4 className="text-xs font-semibold text-foreground">{t("test.smoke.bugs.title")}</h4>
+            <span className="text-[11px] text-muted-foreground">
+              {t("test.smoke.bugs.progress", { reviewed: bugs.filter((b) => reviews[b.sceneId]).length, total: bugs.length })}
+            </span>
+            <span className="flex-1" />
+            {canReview && (
+              <button
+                onClick={bulkConfirmBugs}
+                disabled={bugs.every((b) => reviews[b.sceneId])}
+                className="rounded-md border border-border px-2 py-1 text-[11px] text-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                {t("test.smoke.bugs.bulkConfirm")}
+              </button>
+            )}
+          </div>
+          <div className="overflow-x-auto rounded-xl border border-border">
+            <table className="w-full border-collapse text-[11px]">
+              <thead>
+                <tr className="bg-muted/50 text-left text-muted-foreground">
+                  <th className="whitespace-nowrap px-2 py-1.5 font-medium">{t("test.smoke.bugs.colId")}</th>
+                  <th className="px-2 py-1.5 font-medium">{t("test.smoke.bugs.colTitle")}</th>
+                  <th className="whitespace-nowrap px-2 py-1.5 font-medium">{t("test.smoke.bugs.colSeverity")}</th>
+                  <th className="whitespace-nowrap px-2 py-1.5 font-medium">{t("test.smoke.bugs.colScene")}</th>
+                  {canReview && <th className="whitespace-nowrap px-2 py-1.5 font-medium">{t("test.smoke.bugs.colReview")}</th>}
+                  <th className="px-2 py-1.5 font-medium">{t("test.smoke.bugs.colNote")}</th>
+                </tr>
+              </thead>
+              <tbody>
+                {bugs.map((b) => (
+                  <tr key={b.sceneId} className="border-t border-border align-top">
+                    <td className="whitespace-nowrap px-2 py-1.5 font-mono text-foreground">{b.id}</td>
+                    <td className="px-2 py-1.5">
+                      <div className="text-foreground">{b.title}</div>
+                      {(b.actual || b.expected) && (
+                        <div className="mt-0.5 text-[10px] leading-relaxed text-muted-foreground">
+                          {b.expected && <>{t("test.smoke.bugs.expected")}：{b.expected}　</>}
+                          {b.actual && <>{t("test.smoke.bugs.actual")}：{b.actual}</>}
+                        </div>
+                      )}
+                      {b.api?.url && (
+                        <div className="mt-0.5 font-mono text-[10px] text-muted-foreground">
+                          {b.api.method || "GET"} {b.api.url} {b.api.status != null ? `(${b.api.status})` : ""}
+                        </div>
+                      )}
+                    </td>
+                    <td className="whitespace-nowrap px-2 py-1.5">
+                      <select
+                        value={b.severity}
+                        disabled={!projectPath}
+                        onChange={(e) => changeSeverity(b, e.target.value)}
+                        className="h-6 rounded-md border border-border bg-background px-1 text-[10px] text-foreground outline-none focus:border-primary"
+                      >
+                        {SMOKE_SEVERITIES.map((s) => <option key={s} value={s}>{s}</option>)}
+                      </select>
+                      {b.severityOverriddenFrom && (
+                        <div className="mt-0.5 text-[9px] text-muted-foreground" title={t("test.smoke.bugs.aiOriginal")}>
+                          AI: {b.severityOverriddenFrom}
+                        </div>
+                      )}
+                    </td>
+                    <td className="whitespace-nowrap px-2 py-1.5 font-mono text-muted-foreground">{b.sceneId}</td>
+                    {canReview && (
+                      <td className="whitespace-nowrap px-2 py-1.5">
+                        {reviews[b.sceneId] ? (
+                          <span className="flex items-center gap-1.5">
+                            <span className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${reviews[b.sceneId] === "accurate" ? "bg-status-success-muted text-status-success-foreground" : "bg-status-error-muted text-status-error-foreground"}`}>
+                              {reviews[b.sceneId] === "accurate" ? `✓ ${t("test.smoke.bugs.confirmed")}` : reviews[b.sceneId] === "false_fail" ? `✗ ${t("test.review.falseFail")}` : `✗ ${t("test.review.severityMismatch")}`}
+                            </span>
+                            <button onClick={() => undoReview(b.sceneId)} className="text-[10px] text-muted-foreground underline hover:text-foreground">{t("test.review.undo")}</button>
+                          </span>
+                        ) : (
+                          <span className="flex flex-wrap gap-1">
+                            <button onClick={() => markAccurate(b.sceneId)} className="rounded border border-border px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground hover:border-status-error-border hover:text-status-error-foreground">🐛 {t("test.smoke.bugs.confirm")}</button>
+                            <button onClick={() => markBad(b.sceneId, "fail", "ok")} className="rounded border border-border px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground hover:border-status-success-border hover:text-status-success-foreground">{t("test.smoke.bugs.falseAlarm")}</button>
+                            <button onClick={() => markBad(b.sceneId, "fail", "severity")} className="rounded border border-border px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground hover:bg-muted">{t("test.review.actualSeverity")}</button>
+                          </span>
+                        )}
+                      </td>
+                    )}
+                    <td className="px-2 py-1.5">
+                      <input
+                        value={noteDraft[b.sceneId] ?? ""}
+                        disabled={!projectPath}
+                        onChange={(e) => setNoteDraft((m) => ({ ...m, [b.sceneId]: e.target.value }))}
+                        onBlur={() => saveNote(b)}
+                        placeholder={t("test.smoke.bugs.notePlaceholder")}
+                        className="h-6 w-full min-w-[120px] rounded-md border border-border bg-background px-1.5 text-[10px] text-foreground outline-none focus:border-primary"
+                      />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <p className="mt-1.5 text-[10px] text-muted-foreground">ℹ️ {t("test.smoke.bugs.note")}</p>
+        </div>
+      )}
+      {isSmoke && !circuitBroken && bugs.length === 0 && four.fail === 0 && (four.total || results.length) > 0 && (
+        <p className="mt-3 text-[11px] text-status-success-foreground">✓ {t("test.smoke.bugs.none")}</p>
+      )}
+
+      {/* ── 冒烟 · 奇怪交互 / 体验问题（@@OBSERVATION 归约，非缺陷、不计入通过率）── */}
+      {isSmoke && !!observations?.length && (
+        <div className="mt-4">
+          <div className="mb-2 flex items-center gap-2">
+            <Warning size={14} className="text-status-warning-foreground" />
+            <h4 className="text-xs font-semibold text-foreground">{t("test.smoke.obs.title")}</h4>
+            <span className="text-[11px] text-muted-foreground">{t("test.smoke.obs.hint")}</span>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            {observations.map((o, i) => (
+              <div key={i} className="rounded-md border border-border border-l-2 border-l-status-warning bg-muted/30 px-2.5 py-1.5 text-[11px]">
+                <span className="text-foreground">{o.text}</span>
+                {o.scene && <span className="ml-1.5 font-mono text-[10px] text-muted-foreground">{o.scene}</span>}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       {/* lightbox 用 Portal 渲染到 body —— 这个 ReportView 挂在「报告」顶部 tab 的报告行
           手风琴展开区里，其祖先是 overflow-hidden rounded-lg（accordion 行容器）；<video>
           嵌套在 overflow-hidden + 圆角祖先内会硬件合成黑屏（录像已加载、控件/时长都在，
@@ -3606,7 +4235,7 @@ function CompareView({ t, projectPath, taskName, env }: { t: T; projectPath: str
 
 // 产物预览的目标：md（测试报告/缺陷报告，预览/编辑切换）或 xlsx（执行矩阵只读表格）。
 type PreviewState =
-  | { kind: "md"; titleKey: TranslationKey; rel: string; content: string; editable: boolean }
+  | { kind: "md"; titleKey: TranslationKey; rel: string; content: string; editable: boolean; wide?: boolean }
   | { kind: "xlsx" }
   | { kind: "scripts"; manifest: ScriptManifestView };
 
@@ -3615,17 +4244,19 @@ type PreviewState =
 // （测试报告.md / Excel / 缺陷报告.md，可「点开修改」或预览）+ 内嵌报告全文（ReactMarkdown）。
 // 失败态给提示、不渲染空报告。指标在 entry 到达前回退实时执行 tally，避免空白。
 function ReportStepPanel({
-  t, projectPath, taskName, env, reportStatus, live, model, providerId,
+  t, projectPath, taskName, taskType, env, reportStatus, live, model, providerId,
 }: {
   t: T;
   projectPath: string;
   taskName: string;
+  taskType?: TestTaskType;
   env: string;
   reportStatus: StepStatus;
   live: { caseResults: CaseResult[]; fourState: FourState; circuitBroken: boolean };
   model: string;
   providerId: string;
 }) {
+  const isSmoke = taskType === "smoke";
   const router = useRouter();
   const [entry, setEntry] = useState<ReportEntry | null>(null);
   const [reloadTick, setReloadTick] = useState(0);
@@ -3653,7 +4284,7 @@ function ReportStepPanel({
         const e = list.find((x) => x.task === taskName && x.env === env) ?? null;
         setEntry(e);
         // 问题4：执行有缺陷(fail>0)且尚未生成缺陷报告 → 自动生成一次（用户无需手点）。
-        if (e && (e.counts?.fail ?? 0) > 0 && !e.defectMarkdown && autoDefectForTimeRef.current !== e.time) {
+        if (!isSmoke && e && (e.counts?.fail ?? 0) > 0 && !e.defectMarkdown && autoDefectForTimeRef.current !== e.time) {
           autoDefectForTimeRef.current = e.time;
           void defectGen();
         }
@@ -3662,11 +4293,12 @@ function ReportStepPanel({
     return () => { cancelled = true; };
     // defectGen 闭包仅用 props/setter、稳定；有意不入 deps 以免重建 effect。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reportStatus, projectPath, taskName, env, reloadTick]);
+  }, [reportStatus, projectPath, taskName, env, reloadTick, isSmoke]);
 
   // 脚本生成是报告成功后的后台任务，不占用流程节点。manifest 为持久化真相；queued/running
   // 时短轮询，终态后停止。旧报告没有 manifest 时显示“尚未生成”，允许用户手动补触发。
   useEffect(() => {
+    if (isSmoke) { setScriptManifest(null); return; }
     if (reportStatus !== "done" || !projectPath) { setScriptManifest(null); return; }
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
@@ -3687,7 +4319,7 @@ function ReportStepPanel({
     };
     void load();
     return () => { cancelled = true; if (timer) clearTimeout(timer); };
-  }, [reportStatus, projectPath, taskName, env, scriptReloadTick]);
+  }, [reportStatus, projectPath, taskName, env, scriptReloadTick, isSmoke]);
 
   // 失败态：报告步执行失败 → 提示重跑，不渲染空报告。
   if (reportStatus === "error") {
@@ -3712,6 +4344,10 @@ function ReportStepPanel({
   // 产物相对路径（与 reports/route.ts、artifactPaths 命名一致）。
   const reportMdRel = `AI_LabTest/report/${taskName}/${taskName}-${env}.md`;
   const defectMdRel = `AI_LabTest/report/${taskName}/${taskName}-${env}-缺陷报告.md`;
+  // 服务端会在新冒烟报告收口时规范化；这里再处理一次，保证历史逐字段报告在查看、编辑、
+  // 导出时也统一呈现为固定 8 列 Bug 表格，而不是只对新报告生效。
+  const smokeReportMarkdown =
+    isSmoke && entry?.markdown ? ensureSmokeReportBugTable(entry.markdown, entry.tests) : entry?.markdown ?? "";
 
   // 生成缺陷报告（第三交付物）：调 /api/test/defect 跑完后 reload 拿到新写的 defectMarkdown。
   const defectGen = async () => {
@@ -3837,7 +4473,7 @@ function ReportStepPanel({
     tile: ReactNode, name: ReactNode, file: string, info: ReactNode, actions: ReactNode,
     variant?: "dim" | "alert",
   ) => (
-    <div className={`flex min-w-0 flex-col gap-2 rounded-lg border p-3 transition ${
+    <div data-testid="test-report-deliverable" className={`flex min-w-0 flex-col gap-2 rounded-lg border p-3 transition ${
       variant === "alert" ? "border-status-error-border bg-status-error-muted/40"
         : variant === "dim" ? "border-border bg-muted/30"
         : "border-border bg-background hover:border-primary/40"
@@ -3929,6 +4565,97 @@ function ReportStepPanel({
   const scriptRunFailureText = scriptRunFailures.length > 0
     ? t("test.scripts.runFailed", { n: scriptRunFailures.length, reason: scriptRunFailures[0].lastRunError!.slice(0, 160) })
     : "";
+
+  // 冒烟报告是独立、精简的交付形态：流程页只保留一张报告卡，完整内容统一在大弹窗
+  // 中查看。历史 Excel / 缺陷报告 / 回归脚本即使仍在磁盘，也不会在这里暴露入口。
+  if (isSmoke) {
+    const smokeBugCount = fail;
+    const smokeStatus = smokeReportStatus(counts);
+    const smokeStatusLabel: Record<typeof smokeStatus, TranslationKey> = {
+      passed: "test.smoke.report.statusPassed",
+      failed: "test.smoke.report.statusFailed",
+      incomplete: "test.smoke.report.statusIncomplete",
+      partial: "test.smoke.report.statusPartial",
+    };
+    const fallbackConclusion =
+      smokeStatus === "failed"
+        ? t("test.smoke.report.summaryFailed")
+        : smokeStatus === "incomplete"
+          ? t("test.smoke.report.summaryIncomplete")
+          : smokeStatus === "partial"
+            ? t("test.smoke.report.summaryPartial")
+            : t("test.smoke.report.summaryPassed");
+    // 总览只给状态级结论，避免 AI 的完整结论把场景通过/失败/阻塞数量重新带回精简卡；
+    // 具体原因和数量留在“查看报告”的完整 Markdown 内。
+    const conclusion = fallbackConclusion;
+    const reportName = `${taskName}-${env}.md`;
+
+    return (
+      <div className="mt-2 space-y-3">
+        {entry?.circuitBroken && (
+          <div className="rounded-md border border-status-error-border bg-status-error-muted px-2.5 py-1.5 text-[11px] text-status-error-foreground">
+            ⚠ {t("test.report.circuitBroken")}
+          </div>
+        )}
+        <div
+          data-testid="smoke-report-card"
+          className={`flex min-w-0 flex-col gap-3 rounded-xl border p-4 ${
+            smokeStatus === "failed" ? "border-status-error-border bg-status-error-muted/20" : "border-border bg-background"
+          }`}
+        >
+          <div className="flex min-w-0 items-center gap-3">
+            {tileDoc}
+            <div className="min-w-0 flex-1">
+              <div className="flex flex-wrap items-center gap-1.5 text-[13px] font-semibold text-foreground">
+                {t("test.smoke.step.report")}
+                {chip(t(smokeStatusLabel[smokeStatus]), smokeStatus === "passed" ? "ok" : smokeStatus === "failed" ? "err" : "mut")}
+                <span data-testid="smoke-report-bug-count">{chip(t("test.smoke.report.bugCount", { n: smokeBugCount }), smokeBugCount > 0 ? "err" : "mut")}</span>
+              </div>
+              <div className="truncate font-mono text-[10px] text-muted-foreground">{reportName}</div>
+            </div>
+          </div>
+          <div className="rounded-lg border border-muted bg-muted/40 px-3 py-2">
+            <div className="mb-1 text-[10px] font-medium text-muted-foreground">{t("test.smoke.report.overallConclusion")}</div>
+            <p className="text-[11px] leading-relaxed text-foreground/80">
+              {smokeReportMarkdown ? conclusion : t("test.report.docEmpty")}
+            </p>
+          </div>
+          {smokeReportMarkdown && (
+            <div className="flex flex-wrap gap-1.5">
+              <button
+                data-testid="smoke-report-view"
+                onClick={() => setPreview({ kind: "md", titleKey: "test.smoke.step.report", rel: reportMdRel, content: smokeReportMarkdown, editable: false, wide: true })}
+                className={btnPrimary}
+              >
+                <Eye size={12} /> {t("test.smoke.report.view")}
+              </button>
+              <button
+                onClick={() => setPreview({ kind: "md", titleKey: "test.smoke.step.report", rel: reportMdRel, content: smokeReportMarkdown, editable: true, wide: true })}
+                className={btnGhost}
+              >
+                <NotePencil size={12} /> {t("test.report.tabEdit")}
+              </button>
+              <button onClick={() => downloadMd(reportName, smokeReportMarkdown)} className={btnGhost}>
+                <DownloadSimple size={12} /> {t("test.report.exportFile")}
+              </button>
+            </div>
+          )}
+        </div>
+        {preview && (
+          <PreviewModal
+            t={t}
+            preview={preview}
+            projectPath={projectPath}
+            taskName={taskName}
+            env={env}
+            onClose={() => setPreview(null)}
+            onSaved={() => { setPreview(null); setReloadTick((n) => n + 1); }}
+            setEditable={(editable) => setPreview((p) => (p && p.kind === "md" ? { ...p, editable } : p))}
+          />
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="mt-2 space-y-3">
@@ -4093,9 +4820,25 @@ function PreviewModal({ t, preview, projectPath, taskName, env, onClose, onSaved
 }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4" onClick={onClose}>
-      <div className={`flex max-h-[85vh] w-full flex-col overflow-hidden rounded-xl border border-border bg-card ${preview.kind === "md" ? "max-w-3xl" : "max-w-[1040px]"}`} onClick={(e) => e.stopPropagation()}>
+      <div
+        role="dialog"
+        aria-modal="true"
+        className={`flex max-h-[85vh] w-full flex-col overflow-hidden rounded-xl border border-border bg-card ${
+          preview.kind === "md" && !preview.wide ? "max-w-3xl" : "max-w-[1040px]"
+        }`}
+        onClick={(e) => e.stopPropagation()}
+      >
         {preview.kind === "md" ? (
-          <MdPreview t={t} preview={preview} projectPath={projectPath} onClose={onClose} onSaved={onSaved} setEditable={setEditable} />
+          <MdPreview
+            t={t}
+            preview={preview}
+            projectPath={projectPath}
+            taskName={taskName}
+            env={env}
+            onClose={onClose}
+            onSaved={onSaved}
+            setEditable={setEditable}
+          />
         ) : preview.kind === "xlsx" ? (
           <XlsxPreview t={t} projectPath={projectPath} taskName={taskName} env={env} onClose={onClose} />
         ) : (
@@ -4114,12 +4857,37 @@ function PreviewModal({ t, preview, projectPath, taskName, env, onClose, onSaved
   );
 }
 
+const MARKDOWN_REPORT_MEDIA_RE = /^[^/\\:?#]+?\.(png|jpe?g|webp|gif|webm|mp4|mov)$/i;
+
+/**
+ * 冒烟报告的「截图」列按 prompt 合同只写证据文件名，不是 Markdown 链接。
+ * 仅当整个单元格由安全 basename 媒体名组成时才转为按钮；路径、URL、查询串及普通正文
+ * 保持文本，避免把不可信报告内容变成任意资源入口。多个证据允许逗号、顿号或 " / " 分隔。
+ */
+function markdownReportMediaFiles(children: ReactNode): string[] {
+  const text = typeof children === "string"
+    ? children
+    : Array.isArray(children) && children.every((child) => typeof child === "string" || typeof child === "number")
+      ? children.join("")
+      : "";
+  if (!text.trim()) return [];
+  const parts = text
+    .split(/(?:,\s*|，|、|\s+\/\s+)/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  return parts.length > 0 && parts.every((part) => MARKDOWN_REPORT_MEDIA_RE.test(part))
+    ? [...new Set(parts)]
+    : [];
+}
+
 // md 产物预览：默认 ReactMarkdown 渲染；切「编辑」用 CodeMirror MarkdownEditor，⌘S / 保存
 // 按钮经 POST /api/files/write 写回（overwrite）。draft 本地态，预览模式也渲染 draft 以反映改动。
-function MdPreview({ t, preview, projectPath, onClose, onSaved, setEditable }: {
+function MdPreview({ t, preview, projectPath, taskName, env, onClose, onSaved, setEditable }: {
   t: T;
   preview: Extract<PreviewState, { kind: "md" }>;
   projectPath: string;
+  taskName: string;
+  env: string;
   onClose: () => void;
   onSaved: () => void;
   setEditable: (editable: boolean) => void;
@@ -4127,6 +4895,10 @@ function MdPreview({ t, preview, projectPath, onClose, onSaved, setEditable }: {
   const [draft, setDraft] = useState(preview.content);
   const [saving, setSaving] = useState(false);
   const [err, setErr] = useState(false);
+  const [lightbox, setLightbox] = useState<string | null>(null);
+  const isSmokeReport = preview.titleKey === "test.smoke.step.report";
+  const mediaUrl = (file: string) => `/api/test/media?projectPath=${encodeURIComponent(projectPath)}&taskName=${encodeURIComponent(taskName)}&env=${encodeURIComponent(env || "local")}&file=${encodeURIComponent(file)}`;
+  const isVideo = (file: string) => /\.(webm|mp4|mov)$/i.test(file);
   useEffect(() => { setDraft(preview.content); }, [preview.rel, preview.content]);
 
   const save = async () => {
@@ -4169,11 +4941,73 @@ function MdPreview({ t, preview, projectPath, onClose, onSaved, setEditable }: {
         {preview.editable ? (
           <div className="h-[60vh]"><MarkdownEditor value={draft} onChange={setDraft} onSave={save} /></div>
         ) : (
-          <div className="prose prose-sm dark:prose-invert max-w-none p-4">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{draft}</ReactMarkdown>
+          <div className={`prose prose-sm dark:prose-invert max-w-none p-4 ${
+            isSmokeReport
+              ? "[&_table]:my-3 [&_table]:w-full [&_table]:border-collapse [&_table]:text-[11px] [&_th]:whitespace-nowrap [&_th]:border [&_th]:border-border [&_th]:bg-muted/70 [&_th]:px-3 [&_th]:py-2 [&_th]:text-left [&_td]:border [&_td]:border-border [&_td]:px-3 [&_td]:py-2 [&_td]:align-top"
+              : ""
+          }`}>
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              components={isSmokeReport ? {
+                td: ({ node, children, ...props }) => {
+                  void node;
+                  const files = markdownReportMediaFiles(children);
+                  return (
+                    <td {...props}>
+                      {files.length > 0 ? (
+                        <span className="flex flex-wrap items-center gap-1">
+                          {files.map((file) => (
+                            <button
+                              key={file}
+                              type="button"
+                              data-testid="smoke-report-media-link"
+                              aria-label={`${isVideo(file) ? t("test.media.video") : t("test.media.image")}：${file}`}
+                              title={file}
+                              onClick={() => setLightbox(file)}
+                              className="inline-flex items-center gap-1 rounded border border-border px-1.5 py-0.5 font-mono text-[10px] text-primary no-underline hover:bg-muted"
+                            >
+                              <span aria-hidden="true">{isVideo(file) ? "🎬" : "🖼"}</span>
+                              {file}
+                            </button>
+                          ))}
+                        </span>
+                      ) : children}
+                    </td>
+                  );
+                },
+              } : undefined}
+            >
+              {isSmokeReport ? draft.replace(/<br\s*\/?>/gi, " / ") : draft}
+            </ReactMarkdown>
           </div>
         )}
       </div>
+      {lightbox && createPortal(
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={lightbox}
+          data-testid="smoke-report-media-lightbox"
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 p-6"
+          onClick={() => setLightbox(null)}
+        >
+          <button
+            type="button"
+            onClick={() => setLightbox(null)}
+            className="absolute right-5 top-5 rounded-full bg-black/60 p-2 text-white hover:bg-black/80"
+            aria-label={t("test.report.close")}
+          >
+            <X size={18} />
+          </button>
+          {isVideo(lightbox) ? (
+            <video src={mediaUrl(lightbox)} controls autoPlay muted playsInline preload="metadata" className="max-h-full max-w-full" onClick={(event) => event.stopPropagation()} />
+          ) : (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img src={mediaUrl(lightbox)} alt={lightbox} className="max-h-full max-w-full object-contain" onClick={(event) => event.stopPropagation()} />
+          )}
+        </div>,
+        document.body,
+      )}
     </>
   );
 }
@@ -7404,7 +8238,23 @@ function XlsxPreview({ t, projectPath, taskName, env, onClose }: {
 // 报告 view: browse persisted reports by 项目 → 任务 → 环境. A task can have multiple
 // reports (one per env); each row expands to the full ReportView. Reads from disk via
 // GET /api/test/reports (per project).
-function ReportBrowser({ projects, t, model, providerId, onOpenTask, reloadSignal }: { projects: Project[]; t: T; model: string; providerId: string; onOpenTask: (projectIndex: number, taskIndex: number) => void; reloadSignal: number }) {
+function ReportBrowser({
+  projects,
+  projectSystemNamesByPath,
+  t,
+  model,
+  providerId,
+  onOpenTask,
+  reloadSignal,
+}: {
+  projects: Project[];
+  projectSystemNamesByPath: ReadonlyMap<string, string>;
+  t: T;
+  model: string;
+  providerId: string;
+  onOpenTask: (projectIndex: number, taskIndex: number) => void;
+  reloadSignal: number;
+}) {
   const router = useRouter();
   const [loading, setLoading] = useState(true);
   const [groups, setGroups] = useState<{ project: Project; reports: ReportEntry[] }[]>([]);
@@ -7413,6 +8263,24 @@ function ReportBrowser({ projects, t, model, providerId, onOpenTask, reloadSigna
   const [defectBusy, setDefectBusy] = useState<string | null>(null);
   const [reloadTick, setReloadTick] = useState(0);
   const [handoffKey, setHandoffKey] = useState<string | null>(null);
+  const [smokePreview, setSmokePreview] = useState<{
+    projectPath: string;
+    taskName: string;
+    env: string;
+    preview: Extract<PreviewState, { kind: "md" }>;
+  } | null>(null);
+
+  const downloadReportMd = (filename: string, content: string) => {
+    const blob = new Blob([content], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  };
 
   // 交给研发修复: hand a failing report to the 研发平台 (coding chat). Creates a
   // project-scoped session, seeds the bug report as a composer DRAFT (MessageInput
@@ -7524,11 +8392,17 @@ function ReportBrowser({ projects, t, model, providerId, onOpenTask, reloadSigna
       {groups.map(({ project, reports }) => {
         const tasks = new Map<string, ReportEntry[]>();
         for (const r of reports) { const a = tasks.get(r.task) ?? []; a.push(r); tasks.set(r.task, a); }
+        const systemName = getProjectSystemName(projectSystemNamesByPath, project.path);
         return (
           <div key={project.path}>
             <div className="mb-2 flex items-center gap-2">
               <span className="flex h-7 w-7 items-center justify-center rounded-lg bg-primary/10 text-primary"><FolderPlus size={14} /></span>
-              <h3 className="text-sm font-semibold text-foreground">{project.name}</h3>
+              <h3 className="text-sm font-semibold text-foreground">{systemName || project.name}</h3>
+              {systemName && (
+                <span className="max-w-[180px] truncate font-mono text-[10px] text-muted-foreground" title={project.path}>
+                  {project.name}
+                </span>
+              )}
               <span className="text-[11px] text-muted-foreground">{reports.length} {t("test.report.reportsSuffix")}</span>
             </div>
             <div className="flex flex-col gap-3">
@@ -7541,7 +8415,12 @@ function ReportBrowser({ projects, t, model, providerId, onOpenTask, reloadSigna
                       <span className="flex-none rounded-full border border-border px-1.5 py-px text-[10px] text-muted-foreground">{t("test.report.taskTag")}</span>
                       {(() => {
                         const latest = rs.reduce((a, b) => ((Date.parse(b.time) || 0) > (Date.parse(a.time) || 0) ? b : a), rs[0]);
-                        const latestBad = !!latest && (latest.circuitBroken || latest.counts.fail > 0);
+                        const latestIsSmoke = project.tasks.find((tk) => tk.name === task)?.type === "smoke";
+                        const latestBad = !!latest && (
+                          latest.circuitBroken
+                          || latest.counts.fail > 0
+                          || (latestIsSmoke && smokeReportStatus(latest.counts) !== "passed")
+                        );
                         return (
                           <span className={`flex-none rounded px-1.5 py-px text-[10px] ${latestBad ? "bg-status-error-muted text-status-error-foreground" : "bg-status-success-muted text-status-success-foreground"}`}>
                             {t(latestBad ? "test.report.latestFail" : "test.report.latestPass")}
@@ -7565,7 +8444,20 @@ function ReportBrowser({ projects, t, model, providerId, onOpenTask, reloadSigna
                     {rs.map((r) => {
                       const key = `${project.path}|${task}|${r.env}`;
                       const isOpen = open === key;
-                      const bad = r.circuitBroken || r.counts.fail > 0;
+                      const taskRecord = project.tasks.find((tk) => tk.name === task);
+                      const isSmoke = taskRecord?.type === "smoke";
+                      const smokeStatus = smokeReportStatus(r.counts);
+                      const bad = r.circuitBroken || r.counts.fail > 0 || (isSmoke && smokeStatus !== "passed");
+                      const smokeMarkdown = isSmoke ? ensureSmokeReportBugTable(r.markdown, r.tests) : r.markdown;
+                      const smokeConclusion =
+                        smokeStatus === "failed"
+                          ? t("test.smoke.report.summaryFailed")
+                          : smokeStatus === "incomplete"
+                            ? t("test.smoke.report.summaryIncomplete")
+                            : smokeStatus === "partial"
+                              ? t("test.smoke.report.summaryPartial")
+                              : t("test.smoke.report.summaryPassed");
+                      const smokeReportRel = `AI_LabTest/report/${task}/${task}-${r.env}.md`;
                       return (
                         <div key={key} className="overflow-hidden rounded-lg border border-border">
                           <button
@@ -7574,59 +8466,167 @@ function ReportBrowser({ projects, t, model, providerId, onOpenTask, reloadSigna
                           >
                             <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${bad ? "bg-status-error" : "bg-status-success"}`} />
                             <span className="rounded-full bg-background px-2 py-0.5 text-[10px] font-medium text-foreground">{r.env || "—"}</span>
-                            <span className="text-[11px] text-muted-foreground">
-                              {t("test.state.pass")} {r.passStr || `${r.counts.pass}/${r.counts.total}`}
-                              {r.counts.fail > 0 ? ` · ${t("test.state.fail")} ${r.counts.fail}` : ""}
-                              {r.counts.blocked > 0 ? ` · ${t("test.state.blocked")} ${r.counts.blocked}` : ""}
-                            </span>
+                            {isSmoke ? (
+                              <>
+                                <span className={`rounded-full border px-2 py-0.5 text-[10px] font-medium ${
+                                  smokeStatus === "passed"
+                                    ? "border-status-success-border bg-status-success-muted text-status-success-foreground"
+                                    : smokeStatus === "failed"
+                                      ? "border-status-error-border bg-status-error-muted text-status-error-foreground"
+                                      : "border-border bg-muted text-muted-foreground"
+                                }`}>
+                                  {smokeStatus === "passed"
+                                    ? t("test.smoke.report.statusPassed")
+                                    : smokeStatus === "failed"
+                                      ? t("test.smoke.report.statusFailed")
+                                      : smokeStatus === "incomplete"
+                                        ? t("test.smoke.report.statusIncomplete")
+                                        : t("test.smoke.report.statusPartial")}
+                                </span>
+                                <span className="text-[11px] text-muted-foreground">{t("test.smoke.report.bugCount", { n: r.counts.fail })}</span>
+                              </>
+                            ) : (
+                              <span className="text-[11px] text-muted-foreground">
+                                {t("test.state.pass")} {r.passStr || `${r.counts.pass}/${r.counts.total}`}
+                                {r.counts.fail > 0 ? ` · ${t("test.state.fail")} ${r.counts.fail}` : ""}
+                                {r.counts.blocked > 0 ? ` · ${t("test.state.blocked")} ${r.counts.blocked}` : ""}
+                              </span>
+                            )}
                             <span className="flex-1" />
                             {r.time && <span className="text-[10px] text-muted-foreground">{fmtCnDateTime(r.time)}</span>}
                             <span className="w-3 text-center text-[10px] text-muted-foreground">{isOpen ? "▲" : "▼"}</span>
                           </button>
                           {isOpen && (
                             <div className="border-t border-border p-3">
-                              <div className="mb-3 flex items-center gap-1.5">
-                                {(["result", "compare", "defect"] as const).map((tab) => {
-                                  const cur = rowTab[key] || "result";
-                                  const label = tab === "result" ? t("test.compare.tabResult") : tab === "compare" ? t("test.compare.tabCompare") : t("test.defect.tab");
-                                  return (
-                                    <button key={tab} onClick={() => { setRowTab((m) => ({ ...m, [key]: tab })); if (tab === "defect" && r.counts.fail > 0 && !r.defectMarkdown && defectBusy !== key) void defectGen(project, r); }} className={`rounded px-2 py-0.5 text-[11px] ${cur === tab ? "bg-primary text-primary-foreground" : "border border-border text-foreground hover:bg-muted"}`}>{label}</button>
-                                  );
-                                })}
-                                <span className="flex-1" />
-                                {(rowTab[key] || "result") === "result" && r.counts.fail > 0 && (
-                                  <button
-                                    onClick={() => handoff(project, r)}
-                                    disabled={handoffKey === key}
-                                    className="flex h-7 items-center gap-1 rounded-md bg-primary px-2.5 text-[11px] font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
-                                  >
-                                    <Wrench size={12} /> {t("test.report.handoff")}（{r.counts.fail}）
-                                  </button>
-                                )}
-                              </div>
-                              {(rowTab[key] || "result") === "compare" ? (
-                                <CompareView t={t} projectPath={project.path} taskName={task} env={r.env} />
-                              ) : (rowTab[key] || "result") === "defect" ? (
-                                <div>
-                                  {/* 问题4：缺陷报告自动生成（切到本 tab 时若有缺陷且未生成则触发），不再手动按钮。 */}
-                                  {r.defectMarkdown ? (
-                                    <div className="prose prose-sm dark:prose-invert max-w-none rounded-lg border border-border bg-card p-3">
-                                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{r.defectMarkdown}</ReactMarkdown>
+                              {isSmoke ? (
+                                <div
+                                  data-testid="smoke-report-card"
+                                  className={`rounded-xl border p-4 ${
+                                    smokeStatus === "failed" ? "border-status-error-border bg-status-error-muted/20" : "border-border bg-background"
+                                  }`}
+                                >
+                                  <div className="flex min-w-0 items-center gap-3">
+                                    <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                                      <FileIcon size={18} />
+                                    </span>
+                                    <div className="min-w-0 flex-1">
+                                      <div className="flex flex-wrap items-center gap-1.5 text-[12.5px] font-semibold text-foreground">
+                                        {t("test.smoke.step.report")}
+                                        <span className={`rounded-full border px-2 py-0.5 text-[10px] ${
+                                          smokeStatus === "passed"
+                                            ? "border-status-success-border bg-status-success-muted text-status-success-foreground"
+                                            : smokeStatus === "failed"
+                                              ? "border-status-error-border bg-status-error-muted text-status-error-foreground"
+                                              : "border-border bg-muted text-muted-foreground"
+                                        }`}>
+                                          {smokeStatus === "passed"
+                                            ? t("test.smoke.report.statusPassed")
+                                            : smokeStatus === "failed"
+                                              ? t("test.smoke.report.statusFailed")
+                                              : smokeStatus === "incomplete"
+                                                ? t("test.smoke.report.statusIncomplete")
+                                                : t("test.smoke.report.statusPartial")}
+                                        </span>
+                                        <span
+                                          data-testid="smoke-report-bug-count"
+                                          className={`rounded-full border px-2 py-0.5 text-[10px] ${
+                                            r.counts.fail > 0
+                                              ? "border-status-error-border bg-status-error-muted text-status-error-foreground"
+                                              : "border-border bg-muted text-muted-foreground"
+                                          }`}
+                                        >
+                                          {t("test.smoke.report.bugCount", { n: r.counts.fail })}
+                                        </span>
+                                      </div>
+                                      <div className="truncate font-mono text-[10px] text-muted-foreground">{task}-{r.env}.md</div>
                                     </div>
-                                  ) : (
-                                    <p className="flex items-center gap-1 text-[11px] text-muted-foreground">{defectBusy === key ? <><SpinnerGap size={12} className="animate-spin" /> {t("test.defect.generating")}</> : t("test.defect.empty")}</p>
+                                  </div>
+                                  <div className="mt-3 rounded-lg border border-muted bg-muted/40 px-3 py-2">
+                                    <div className="mb-1 text-[10px] font-medium text-muted-foreground">{t("test.smoke.report.overallConclusion")}</div>
+                                    <p className="text-[11px] leading-relaxed text-foreground/80">
+                                      {smokeMarkdown ? smokeConclusion : t("test.report.docEmpty")}
+                                    </p>
+                                  </div>
+                                  {smokeMarkdown && (
+                                    <div className="mt-3 flex flex-wrap gap-1.5">
+                                      <button
+                                        data-testid="smoke-report-view"
+                                        onClick={() => setSmokePreview({
+                                          projectPath: project.path,
+                                          taskName: task,
+                                          env: r.env,
+                                          preview: { kind: "md", titleKey: "test.smoke.step.report", rel: smokeReportRel, content: smokeMarkdown, editable: false, wide: true },
+                                        })}
+                                        className="inline-flex items-center gap-1 rounded-md bg-primary px-2.5 py-1 text-[11px] font-medium text-primary-foreground hover:bg-primary/90"
+                                      >
+                                        <Eye size={12} /> {t("test.smoke.report.view")}
+                                      </button>
+                                      <button
+                                        onClick={() => setSmokePreview({
+                                          projectPath: project.path,
+                                          taskName: task,
+                                          env: r.env,
+                                          preview: { kind: "md", titleKey: "test.smoke.step.report", rel: smokeReportRel, content: smokeMarkdown, editable: true, wide: true },
+                                        })}
+                                        className="inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-[11px] text-foreground hover:bg-muted"
+                                      >
+                                        <NotePencil size={12} /> {t("test.report.tabEdit")}
+                                      </button>
+                                      <button
+                                        onClick={() => downloadReportMd(`${task}-${r.env}.md`, smokeMarkdown)}
+                                        className="inline-flex items-center gap-1 rounded-md border border-border px-2.5 py-1 text-[11px] text-foreground hover:bg-muted"
+                                      >
+                                        <DownloadSimple size={12} /> {t("test.report.exportFile")}
+                                      </button>
+                                    </div>
                                   )}
                                 </div>
                               ) : (
                                 <>
-                                  <ReportView t={t} results={r.tests} four={r.counts} funcCounts={r.funcCounts} funcPassStr={r.funcPassStr} suiteCounts={r.suiteCounts} suitePassStr={r.suitePassStr} circuitBroken={r.circuitBroken} taskName={task} projectPath={project.path} env={r.env} taskId={project.tasks.find((tk) => tk.name === task)?.id} runHash={r.runHash} />
-                                  {r.markdown && (
-                                    <div className="mt-3 border-t border-border pt-3">
-                                      <div className="mb-2 text-[11px] font-medium text-muted-foreground">{t("test.report.docTitle")}</div>
-                                      <div className="prose prose-sm dark:prose-invert max-w-none">
-                                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{r.markdown}</ReactMarkdown>
-                                      </div>
+                                  <div className="mb-3 flex items-center gap-1.5">
+                                    {(["result", "compare", "defect"] as const).map((tab) => {
+                                      const cur = rowTab[key] || "result";
+                                      const label = tab === "result" ? t("test.compare.tabResult") : tab === "compare" ? t("test.compare.tabCompare") : t("test.defect.tab");
+                                      return (
+                                        <button key={tab} onClick={() => { setRowTab((m) => ({ ...m, [key]: tab })); if (tab === "defect" && r.counts.fail > 0 && !r.defectMarkdown && defectBusy !== key) void defectGen(project, r); }} className={`rounded px-2 py-0.5 text-[11px] ${cur === tab ? "bg-primary text-primary-foreground" : "border border-border text-foreground hover:bg-muted"}`}>{label}</button>
+                                      );
+                                    })}
+                                    <span className="flex-1" />
+                                    {(rowTab[key] || "result") === "result" && r.counts.fail > 0 && (
+                                      <button
+                                        onClick={() => handoff(project, r)}
+                                        disabled={handoffKey === key}
+                                        className="flex h-7 items-center gap-1 rounded-md bg-primary px-2.5 text-[11px] font-medium text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50"
+                                      >
+                                        <Wrench size={12} /> {t("test.report.handoff")}（{r.counts.fail}）
+                                      </button>
+                                    )}
+                                  </div>
+                                  {(rowTab[key] || "result") === "compare" ? (
+                                    <CompareView t={t} projectPath={project.path} taskName={task} env={r.env} />
+                                  ) : (rowTab[key] || "result") === "defect" ? (
+                                    <div>
+                                      {/* 问题4：缺陷报告自动生成（切到本 tab 时若有缺陷且未生成则触发），不再手动按钮。 */}
+                                      {r.defectMarkdown ? (
+                                        <div className="prose prose-sm dark:prose-invert max-w-none rounded-lg border border-border bg-card p-3">
+                                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{r.defectMarkdown}</ReactMarkdown>
+                                        </div>
+                                      ) : (
+                                        <p className="flex items-center gap-1 text-[11px] text-muted-foreground">{defectBusy === key ? <><SpinnerGap size={12} className="animate-spin" /> {t("test.defect.generating")}</> : t("test.defect.empty")}</p>
+                                      )}
                                     </div>
+                                  ) : (
+                                    <>
+                                      <ReportView t={t} results={r.tests} four={r.counts} funcCounts={r.funcCounts} funcPassStr={r.funcPassStr} suiteCounts={r.suiteCounts} suitePassStr={r.suitePassStr} circuitBroken={r.circuitBroken} taskName={task} projectPath={project.path} env={r.env} taskId={taskRecord?.id} runHash={r.runHash} taskType={taskRecord?.type} observations={r.observations} />
+                                      {r.markdown && (
+                                        <div className="mt-3 border-t border-border pt-3">
+                                          <div className="mb-2 text-[11px] font-medium text-muted-foreground">{t("test.report.docTitle")}</div>
+                                          <div className="prose prose-sm dark:prose-invert max-w-none">
+                                            <ReactMarkdown remarkPlugins={[remarkGfm]}>{r.markdown}</ReactMarkdown>
+                                          </div>
+                                        </div>
+                                      )}
+                                    </>
                                   )}
                                 </>
                               )}
@@ -7642,6 +8642,20 @@ function ReportBrowser({ projects, t, model, providerId, onOpenTask, reloadSigna
           </div>
         );
       })}
+      {smokePreview && (
+        <PreviewModal
+          t={t}
+          preview={smokePreview.preview}
+          projectPath={smokePreview.projectPath}
+          taskName={smokePreview.taskName}
+          env={smokePreview.env}
+          onClose={() => setSmokePreview(null)}
+          onSaved={() => { setSmokePreview(null); setReloadTick((n) => n + 1); }}
+          setEditable={(editable) => setSmokePreview((current) => (
+            current ? { ...current, preview: { ...current.preview, editable } } : current
+          ))}
+        />
+      )}
     </div>
   );
 }
@@ -7714,6 +8728,8 @@ function RunStartModal({
   t,
   stepStatus,
   initialDeposit,
+  allowDepositScripts,
+  smokeOnly,
   onRun,
   onClose,
 }: {
@@ -7721,10 +8737,14 @@ function RunStartModal({
   stepStatus: Record<TestStep, StepStatus>;
   /** 任务当前的「沉淀回归脚本」设置(缺省 true)。 */
   initialDeposit: boolean;
+  /** 冒烟测试没有回归脚本产物，隐藏开关并强制回调 false。 */
+  allowDepositScripts: boolean;
+  /** 冒烟没有需求/用例生成节点，运行任务只允许从测试执行起跑。 */
+  smokeOnly?: boolean;
   onRun: (step: TestStep, depositScripts: boolean) => void;
   onClose: () => void;
 }) {
-  const opts = runStartOptions(stepStatus, STEP_ORDER, RUN_START_STEPS);
+  const opts = runStartOptions(stepStatus, STEP_ORDER, smokeOnly ? ["execution"] : RUN_START_STEPS);
   const byStep = Object.fromEntries(opts.map((o) => [o.step, o])) as Record<TestStep, (typeof opts)[number]>;
   // 默认：下一个待办且可选 → 否则最后一个可选(已完成任务→测试执行) → 兜底需求。
   const defaultStep =
@@ -7747,7 +8767,7 @@ function RunStartModal({
         <>
           <button onClick={onClose} className={CANCEL_BTN}>{t("test.cancel")}</button>
           <button
-            onClick={() => selOpt?.unlocked && onRun(sel, deposit)}
+            onClick={() => selOpt?.unlocked && onRun(sel, allowDepositScripts ? deposit : false)}
             disabled={!selOpt?.unlocked}
             className={PRIMARY_BTN}
           >
@@ -7797,7 +8817,7 @@ function RunStartModal({
           );
         })}
 
-      {willExecute && (
+      {willExecute && allowDepositScripts && (
         <label className="mt-1 flex cursor-pointer items-start gap-2 rounded-md border border-border px-3 py-2.5">
           <input type="checkbox" checked={deposit} onChange={(e) => setDeposit(e.target.checked)} className="mt-0.5 accent-primary" />
           <span className="min-w-0">
@@ -7822,6 +8842,7 @@ function ExecConfirmModal({
   unconfigured,
   initialMode,
   initialDeposit,
+  allowDepositScripts,
   onRun,
   onClose,
 }: {
@@ -7832,6 +8853,8 @@ function ExecConfirmModal({
   initialMode: ExecMode;
   /** 该任务当前的「沉淀回归脚本」设置(缺省 true)。 */
   initialDeposit: boolean;
+  /** 冒烟测试没有回归脚本产物，隐藏开关并强制回调 false。 */
+  allowDepositScripts: boolean;
   onRun: (baseUrl: string, headed: boolean, depositScripts: boolean) => void;
   onClose: () => void;
 }) {
@@ -7887,7 +8910,7 @@ function ExecConfirmModal({
           <button onClick={onClose} className={CANCEL_BTN}>{t("test.cancel")}</button>
           <button
             disabled={!trimmed}
-            onClick={() => onRun(trimmed, headed, deposit)}
+            onClick={() => onRun(trimmed, headed, allowDepositScripts ? deposit : false)}
             className={PRIMARY_BTN}
           >
             {t("test.execConfirm.run")}
@@ -7920,17 +8943,19 @@ function ExecConfirmModal({
         </p>
       </Field>
 
-      <Field label={t("test.newTaskModal.depositScriptsLabel")}>
-        <label className="flex cursor-pointer items-start gap-2">
-          <input type="checkbox" checked={deposit} onChange={(e) => setDeposit(e.target.checked)} className="mt-0.5 accent-primary" />
-          <span className="min-w-0">
-            <span className="text-xs text-foreground">{t("test.newTaskModal.depositScripts")}</span>
-            <span className="mt-0.5 block text-[11px] leading-relaxed text-muted-foreground">
-              {t("test.execConfirm.depositHint")}
+      {allowDepositScripts && (
+        <Field label={t("test.newTaskModal.depositScriptsLabel")}>
+          <label className="flex cursor-pointer items-start gap-2">
+            <input type="checkbox" checked={deposit} onChange={(e) => setDeposit(e.target.checked)} className="mt-0.5 accent-primary" />
+            <span className="min-w-0">
+              <span className="text-xs text-foreground">{t("test.newTaskModal.depositScripts")}</span>
+              <span className="mt-0.5 block text-[11px] leading-relaxed text-muted-foreground">
+                {t("test.execConfirm.depositHint")}
+              </span>
             </span>
-          </span>
-        </label>
-      </Field>
+          </label>
+        </Field>
+      )}
 
       <div className="flex items-center gap-2">
         <button
@@ -7995,6 +9020,177 @@ function EnvWarnModal({
         <WarningCircle size={14} className="mt-0.5 shrink-0" />
         <span>{body}</span>
       </div>
+    </ModalShell>
+  );
+}
+
+/**
+ * 新建**冒烟任务**弹窗（第三形态）。
+ *
+ * 与 NewTaskModal 的核心差异是**必填只剩 3 项**：模块名称 / 模块入口 / 测试场景。
+ * 环境信息（系统地址、登录态）一律沿用项目的环境配置，这里只读展示 —— 冒烟不建
+ * 第二套环境体系（原冒烟提示词里要手填的 <系统名称>/<URL>/cookie 都由此消化）。
+ * 角色、全局规则、报告结构三段固定内容已内嵌进平台 prompt，弹窗底部只做只读告知。
+ */
+function NewSmokeTaskModal({
+  t, env, envCfg, envCfgLoading, dataPrefix, existingNames, onClose, onCreate,
+}: {
+  t: T;
+  env: string;
+  envCfg: EnvConfigDTO | null;
+  envCfgLoading: boolean;
+  dataPrefix: string;
+  existingNames: string[];
+  onCreate: (moduleName: string, moduleEntry: string, scenarioText: string, targetUrl?: string) => Promise<{ ok: boolean; error?: string }>;
+  onClose: () => void;
+}) {
+  const [moduleName, setModuleName] = useState("");
+  const [moduleEntry, setModuleEntry] = useState("");
+  const [scenarioText, setScenarioText] = useState("");
+  const [targetUrl, setTargetUrl] = useState("");
+  const [showAdv, setShowAdv] = useState(false);
+  const [err, setErr] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  // 任务名由模块名派生（与报告标题、产物目录同名），重名实时校验同 NewTaskModal 口径。
+  const taskName = moduleName.trim() ? `${moduleName.trim()}-冒烟` : "";
+  const isDuplicateName = !!taskName && existingNames.some((n) => n.trim() === taskName);
+  // 实时解析预览：让用户在创建前就看到"平台把我这几行读成了几个场景"，
+  // 而不是创建后才在场景表里发现分隔符没写对。
+  const parsed = useMemo(() => scenarioTextToCases(scenarioText), [scenarioText]);
+  const missingExpected = parsed.filter((c) => c.steps[0].expected.includes("该操作可正常完成")).length;
+  const ready = !!taskName && !isDuplicateName && !!moduleEntry.trim() && parsed.length > 0;
+
+  const create = async () => {
+    if (!ready || busy) return;
+    setBusy(true);
+    setErr("");
+    try {
+      const res = await onCreate(moduleName, moduleEntry, scenarioText, targetUrl.trim() || undefined);
+      if (!res.ok) setErr(res.error || t("test.smoke.createFailed"));
+      // 成功时由 onCreate 内部关闭弹窗并发起执行（无门控）。
+    } catch (e) {
+      // 与 NewTaskModal 同款兜底：任一 await 抛错都必须落到 finally，否则按钮永久卡「创建中」。
+      setErr(e instanceof Error ? e.message : t("test.smoke.createFailed"));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <ModalShell
+      title={t("test.smoke.newTaskTitle")}
+      subtitle={t("test.smoke.newTaskSubtitle")}
+      onClose={onClose}
+      footer={
+        <>
+          <span className="mr-auto text-[11px] text-muted-foreground">{t("test.smoke.autoRunHint")}</span>
+          <button onClick={onClose} className={CANCEL_BTN}>{t("test.cancel")}</button>
+          <button disabled={!ready || busy} onClick={create} className={PRIMARY_BTN}>
+            {busy ? t("test.smoke.creating") : t("test.smoke.createAndRun")}
+          </button>
+        </>
+      }
+    >
+      {/* 测试环境：只读沿用项目环境配置 */}
+      <Field label={t("test.smoke.envLabel")}>
+        <div
+          className="flex flex-col gap-1.5 rounded-md border border-border bg-muted/30 px-3 py-2 text-[11px]"
+          data-testid="test-smoke-env-modal"
+        >
+          <div className="flex items-center gap-2">
+            <span className="w-16 shrink-0 text-muted-foreground">{t("test.smoke.envName")}</span>
+            <span className="font-medium text-foreground">{env}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="w-16 shrink-0 text-muted-foreground">{t("test.smoke.sysUrl")}</span>
+            <span className="truncate font-mono text-[10px] text-foreground">
+              {envCfgLoading ? t("common.loading") : envCfg?.frontendBaseUrl || t("test.smoke.envUnset")}
+            </span>
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="w-16 shrink-0 text-muted-foreground">{t("test.smoke.loginState")}</span>
+            <span className={envCfg?.loginState?.hasState && !envCfgLoading ? "font-medium text-status-success-foreground" : "text-muted-foreground"}>
+              {envCfgLoading
+                ? t("common.loading")
+                : envCfg?.loginState?.hasState
+                  ? t("test.smoke.loginCaptured")
+                  : t("test.smoke.loginNone")}
+            </span>
+          </div>
+          <button
+            onClick={() => setShowAdv((v) => !v)}
+            className="mt-0.5 w-fit text-left text-[11px] text-primary hover:underline"
+          >
+            {showAdv ? "▾" : "▸"} {t("test.smoke.overrideUrl")}
+          </button>
+          {showAdv && (
+            <>
+              <input
+                className={INPUT}
+                value={targetUrl}
+                onChange={(e) => setTargetUrl(e.target.value)}
+                placeholder={t("test.smoke.overrideUrlPlaceholder")}
+              />
+              <p className="text-[10px] leading-relaxed text-muted-foreground">{t("test.smoke.overrideUrlHint")}</p>
+            </>
+          )}
+        </div>
+      </Field>
+
+      <Field label={t("test.smoke.moduleNameLabel")}>
+        <input
+          className={isDuplicateName ? INPUT.replace("border-border", "border-status-error-border") : INPUT}
+          value={moduleName}
+          onChange={(e) => setModuleName(e.target.value)}
+          placeholder={t("test.smoke.moduleNamePlaceholder")}
+        />
+        {isDuplicateName ? (
+          <p className="mt-1 text-[11px] text-status-error-foreground">⚠ {t("test.newTaskModal.duplicateName")}</p>
+        ) : taskName ? (
+          <p className="mt-1 text-[11px] text-muted-foreground">{t("test.smoke.taskNamePreview", { name: taskName })}</p>
+        ) : null}
+      </Field>
+
+      <Field label={t("test.smoke.moduleEntryLabel")}>
+        <input
+          className={INPUT}
+          value={moduleEntry}
+          onChange={(e) => setModuleEntry(e.target.value)}
+          placeholder={t("test.smoke.moduleEntryPlaceholder")}
+        />
+      </Field>
+
+      <Field label={t("test.smoke.scenariosLabel")}>
+        <textarea
+          className="h-40 w-full resize-y rounded-md border border-border bg-background px-2.5 py-2 font-mono text-[11px] leading-relaxed text-foreground outline-none focus:border-primary"
+          value={scenarioText}
+          onChange={(e) => setScenarioText(e.target.value)}
+          placeholder={t("test.smoke.scenariosPlaceholder")}
+        />
+        <p className="mt-1 text-[11px] leading-relaxed text-muted-foreground">{t("test.smoke.scenariosHint")}</p>
+        {parsed.length > 0 && (
+          <p className="mt-1 text-[11px] text-muted-foreground">
+            {t("test.smoke.parsedCount", { n: parsed.length })}
+            {missingExpected > 0 && (
+              <span className="ml-1 text-status-warning-foreground">{t("test.smoke.missingExpected", { n: missingExpected })}</span>
+            )}
+          </p>
+        )}
+      </Field>
+
+      {/* 平台自动提供的部分：让用户知道原提示词里那几段"没丢，只是被平台接管了" */}
+      <div className="rounded-md border border-border bg-muted/40 px-3 py-2">
+        <div className="mb-1.5 text-[11px] font-medium text-foreground">🔒 {t("test.smoke.builtinTitle")}</div>
+        <ul className="flex list-inside list-disc flex-col gap-1 text-[10.5px] leading-relaxed text-muted-foreground">
+          <li>{t("test.smoke.builtinRole")}</li>
+          <li>{t("test.smoke.builtinRules")}</li>
+          <li>{t("test.smoke.builtinReport")}</li>
+          <li>{t("test.smoke.builtinPrefix", { prefix: dataPrefix })}</li>
+        </ul>
+      </div>
+
+      {err && <p className="text-[11px] text-status-error-foreground">⚠ {err}</p>}
     </ModalShell>
   );
 }

@@ -166,7 +166,16 @@ sanitize(key) = key.replace(/[^A-Za-z0-9_-]/g, '_')   // 必须与 runner 完全
 
 **展示用** `GET /api/test/env-config?projectPath=&env=` → 同一 `resolveProjectEnvWithDb` 结果**去掉明文 `loginAccount`**（改只回传非敏感的 `loginAuthType`），供前端 flow 头部显示目标 + 来源。
 
-**前端**（`InlineTestingPanel.tsx` flow 视图头部）：env 选择器(local/SIT，来自 `allowedEnvs`) + 目标 chip `🎯 {frontendBaseUrl}`（`source==='db'` 时附「来自设置」小标，提示是直接读库未导出）；未配置 → `未配置目标 · 去设置·测试账号` 按钮。切 env 触发重新拉取。任务页「环境配置」按钮 → `router.push('/settings#test-accounts')`（配置入口已收口到设置，工作台只读消费，原内嵌 EnvModal 已删）。
+**前端**（`InlineTestingPanel.tsx` flow 视图头部）：env 选择器(local/SIT，来自 `allowedEnvs`) + 目标 chip `🎯 {frontendBaseUrl}`（`source==='db'` 时附「来自设置」小标，提示是直接读库未导出）；未配置 → `未配置目标 · 点击配置` 按钮。切 env 触发重新拉取。流程头未配置 chip、项目页「环境配置」按钮和执行前环境警告都打开同一份 `TestEnvDrawer`，抽屉按项目路径绑定系统并复用设置页 `TestSystemEditor`；保存后重拉环境配置。
+
+**项目名称展示（2026-07-30）**：工作台项目的稳定身份仍是 `project.path`，持久化的
+`project.name` 仍为文件夹名；界面通过脱敏接口
+`GET /api/test-accounts/project-summaries` 只读取 `{id,name,project_root}`，按
+`normalizeProjectPath(project_root) == normalizeProjectPath(project.path)` 建立映射。命中且
+系统名非空时，项目卡片/详情标题/流程头/报告分组以系统名为主标题，同时保留文件夹名和路径；
+未命中、空名或接口失败时回退文件夹名。系统名不写入 `test-workbench.json`，环境配置改名后
+由工作台重新拉取摘要即时生效；摘要接口不返回 environments、账号、密码、Token 或登录态。
+同一路径重复绑定沿用现有排序后首条 `find()` 语义，本次不增加数据库唯一约束。
 
 ## 安全模型
 

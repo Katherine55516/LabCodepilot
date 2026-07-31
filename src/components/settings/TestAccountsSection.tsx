@@ -2,18 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "@/hooks/useTranslation";
-import type {
-  TestAccountSystemView,
-  TestEnvironment,
-  TestLoginAccount,
-  TestEnvKey,
-  TestAuthMethod,
-  TestTokenStorage,
-} from "@/types";
+import type { TestAccountSystemView, TestEnvKey } from "@/types";
 import { toEnvironmentsJson, sanitizeAccountKey } from "@/lib/test-accounts-export";
+import { TestSystemEditor } from "./TestSystemEditor";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -21,7 +13,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -33,27 +24,16 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import {
-  Plus,
-  Trash,
-  X,
-  FloppyDisk,
-  DownloadSimple,
-  Lock,
-  Folder,
-  CheckCircle,
-  Warning,
-  CaretDown,
-} from "@/components/ui/icon";
+import { Plus, Trash, FloppyDisk, DownloadSimple, CaretDown } from "@/components/ui/icon";
 import { cn } from "@/lib/utils";
 
-// 测试账号设置面板。系统下拉 + local/SIT 环境标签 + 三种登录方式（密码/token/获取登录态）。
+// 测试账号设置面板。系统下拉 + 多系统总览 + 增删系统 + 保存/导出/导出预览。
+// 单系统的可编辑主体（元信息/env 标签/地址/账号/三种登录方式）由共享组件
+// TestSystemEditor 渲染 —— 与测试工作台就地配置抽屉（TestEnvDrawer）同一份，零漂移。
 // 导出到 AI_LabTest/environments.json（复用 toEnvironmentsJson，预览与导出同源）。
-// 设计/契约见 docs/exec-plans/active/test-account-settings.md。
+// 设计/契约见 docs/exec-plans/active/test-account-settings.md、test-env-inline-config.md。
 
 const ENV_KEYS: TestEnvKey[] = ["local", "sit"];
-const STORAGE_TYPES: TestTokenStorage[] = ["header", "localStorage", "sessionStorage", "cookie"];
-const AUTH_METHODS: TestAuthMethod[] = ["password", "token", "capture"];
 
 type Feedback = { kind: "ok" | "err" | "info"; text: string } | null;
 
@@ -124,28 +104,13 @@ export function TestAccountsSection() {
   const dirty = activeSystem ? snapshot(activeSystem) !== savedSnapshots[activeSystem.id] : false;
 
   // ── 不可变更新辅助 ───────────────────────────────────────────────
+  // 系统级 setter（传给 TestSystemEditor 作 onSystemChange，也供 chooseFolder 写 project_root）。
+  // env/account 级的不可变更新已下沉到 TestSystemEditor 内部（从此 setter 派生）。
   const mutateSystem = useCallback(
     (updater: (s: TestAccountSystemView) => TestAccountSystemView) => {
       setSystems((prev) => prev.map((s) => (s.id === activeId ? updater(s) : s)));
     },
     [activeId],
-  );
-
-  const mutateEnv = useCallback(
-    (updater: (e: TestEnvironment) => TestEnvironment) => {
-      mutateSystem((s) => ({
-        ...s,
-        environments: { ...s.environments, [activeEnv]: updater(s.environments[activeEnv]) },
-      }));
-    },
-    [mutateSystem, activeEnv],
-  );
-
-  const mutateAccount = useCallback(
-    (idx: number, updater: (a: TestLoginAccount) => TestLoginAccount) => {
-      mutateEnv((e) => ({ ...e, accounts: e.accounts.map((a, i) => (i === idx ? updater(a) : a)) }));
-    },
-    [mutateEnv],
   );
 
   // ── 系统级操作 ───────────────────────────────────────────────────
@@ -333,38 +298,21 @@ export function TestAccountsSection() {
     await window.electronAPI?.testAuthCapture
       ?.clear({ projectRoot: activeSystem.project_root, env: activeEnv, accountKey: acct.key })
       .catch(() => {});
-    mutateAccount(idx, (a) => ({ ...a, captured: false, capturedAt: "" }));
-  }, [activeSystem, env, activeEnv, mutateAccount]);
+    mutateSystem((s) => ({
+      ...s,
+      environments: {
+        ...s.environments,
+        [activeEnv]: {
+          ...s.environments[activeEnv],
+          accounts: s.environments[activeEnv].accounts.map((a, i) =>
+            i === idx ? { ...a, captured: false, capturedAt: "" } : a,
+          ),
+        },
+      },
+    }));
+  }, [activeSystem, env, activeEnv, mutateSystem]);
 
-  // ── 账号增删 / 默认 ──────────────────────────────────────────────
-  const addAccount = useCallback(() => {
-    mutateEnv((e) => {
-      const nextKey = `role${e.accounts.length + 1}`;
-      return { ...e, accounts: [...e.accounts, { key: nextKey, role: "", authMethod: "password" }] };
-    });
-  }, [mutateEnv]);
-
-  const deleteAccount = useCallback((idx: number) => {
-    mutateEnv((e) => {
-      const removed = e.accounts[idx];
-      const accounts = e.accounts.filter((_, i) => i !== idx);
-      const defaultAccountKey = e.defaultAccountKey === removed?.key ? "" : e.defaultAccountKey;
-      return { ...e, accounts, defaultAccountKey };
-    });
-  }, [mutateEnv]);
-
-  const setAccountKey = useCallback((idx: number, value: string) => {
-    mutateEnv((e) => {
-      const old = e.accounts[idx]?.key;
-      const accounts = e.accounts.map((a, i) => (i === idx ? { ...a, key: value } : a));
-      // key 改名时同步默认账号引用，避免悬挂。
-      const defaultAccountKey = e.defaultAccountKey === old ? value : e.defaultAccountKey;
-      return { ...e, accounts, defaultAccountKey };
-    });
-  }, [mutateEnv]);
-
-  const authLabel = (m: TestAuthMethod): string =>
-    m === "password" ? t("testAccounts.authPassword") : m === "token" ? t("testAccounts.authToken") : t("testAccounts.authCapture");
+  // 账号增删 / 默认 / 三种登录方式字段编辑均下沉到 TestSystemEditor（见 onSystemChange）。
 
   // ── 渲染 ─────────────────────────────────────────────────────────
   if (loading) {
@@ -438,242 +386,29 @@ export function TestAccountsSection() {
 
       {activeSystem && env && (
         <>
-          {/* System meta */}
-          <div className="rounded-lg border border-border/50 p-4 space-y-3">
-            <div className="grid grid-cols-2 gap-3">
-              <label className="space-y-1 block">
-                <span className="text-xs text-muted-foreground">{t("testAccounts.systemName")}</span>
-                <Input
-                  value={activeSystem.name}
-                  placeholder={t("testAccounts.systemNamePlaceholder")}
-                  onChange={(e) => mutateSystem((s) => ({ ...s, name: e.target.value }))}
-                />
-              </label>
-              <label className="space-y-1 block">
-                <span className="text-xs text-muted-foreground">{t("testAccounts.projectRoot")}</span>
-                <div className="flex gap-1.5">
-                  <Input value={activeSystem.project_root} readOnly placeholder={t("testAccounts.notSelected")} className="bg-muted/40" />
-                  <Button variant="outline" size="sm" onClick={chooseFolder} className="gap-1.5 shrink-0">
-                    <Folder size={14} /> {t("testAccounts.chooseFolder")}
-                  </Button>
-                </div>
-              </label>
-            </div>
-            <div className="flex items-center gap-3 pt-1">
-              <Button onClick={doExport} disabled={exporting} className="gap-1.5">
-                <DownloadSimple size={15} /> {exporting ? t("testAccounts.exporting") : t("testAccounts.export")}
-              </Button>
-              <span className="text-[11px] text-muted-foreground font-mono truncate">
-                → {(activeSystem.project_root || "〈" + t("testAccounts.notSelected") + "〉") + "/AI_LabTest/environments.json"}
-              </span>
-            </div>
-          </div>
-
-          {/* Env tabs */}
-          <Tabs value={activeEnv} onValueChange={(v) => setActiveEnv(v as TestEnvKey)}>
-            <TabsList>
-              <TabsTrigger value="local">{t("testAccounts.tabLocal")}</TabsTrigger>
-              <TabsTrigger value="sit">{t("testAccounts.tabSit")}</TabsTrigger>
-            </TabsList>
-          </Tabs>
-
-          {/* Env panel */}
-          <div className="rounded-lg border border-border/50 p-4 space-y-4">
-            {/* Access URLs */}
-            <div className="space-y-3">
-              <h3 className="text-sm font-medium">{t("testAccounts.accessSection")}</h3>
-              <label className="space-y-1 block">
-                <span className="text-xs text-muted-foreground">{t("testAccounts.frontendUrl")}</span>
-                <Input
-                  value={env.frontendBaseUrl}
-                  placeholder={t("testAccounts.frontendUrlPlaceholder")}
-                  onChange={(e) => mutateEnv((en) => ({ ...en, frontendBaseUrl: e.target.value }))}
-                />
-              </label>
-              <div className="grid grid-cols-2 gap-3">
-                <label className="space-y-1 block">
-                  <span className="text-xs text-muted-foreground">{t("testAccounts.apiUrl")}</span>
-                  <Input
-                    value={env.apiBaseUrl}
-                    placeholder={t("testAccounts.apiUrlPlaceholder")}
-                    onChange={(e) => mutateEnv((en) => ({ ...en, apiBaseUrl: e.target.value }))}
-                  />
-                </label>
-                <label className="space-y-1 block">
-                  <span className="text-xs text-muted-foreground">{t("testAccounts.healthEndpoint")}</span>
-                  <Input
-                    value={env.healthEndpoint}
-                    placeholder={t("testAccounts.healthEndpointPlaceholder")}
-                    onChange={(e) => mutateEnv((en) => ({ ...en, healthEndpoint: e.target.value }))}
-                  />
-                </label>
-              </div>
-            </div>
-
-            {/* Accounts */}
-            <div className="border-t border-border/30 pt-4 space-y-3">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-medium">{t("testAccounts.accountsSection")}</h3>
-                <Button variant="outline" size="sm" onClick={addAccount} className="gap-1.5">
-                  <Plus size={14} /> {t("testAccounts.addAccount")}
+          {/* 单系统可编辑主体 —— 与工作台就地配置抽屉共享同一组件（零漂移）。
+              导出按钮 + environments.json 路径提示放进 metaFooter，保持原布局位置。 */}
+          <TestSystemEditor
+            system={activeSystem}
+            activeEnv={activeEnv}
+            onActiveEnvChange={setActiveEnv}
+            onSystemChange={mutateSystem}
+            captureAvailable={captureAvailable}
+            capturing={capturing && capturing.systemId === activeSystem.id ? { env: capturing.env, key: capturing.key } : null}
+            onStartCapture={startCapture}
+            onClearCapture={clearCapture}
+            onChooseFolder={chooseFolder}
+            metaFooter={
+              <div className="flex items-center gap-3 pt-1">
+                <Button onClick={doExport} disabled={exporting} className="gap-1.5">
+                  <DownloadSimple size={15} /> {exporting ? t("testAccounts.exporting") : t("testAccounts.export")}
                 </Button>
+                <span className="text-[11px] text-muted-foreground font-mono truncate">
+                  → {(activeSystem.project_root || "〈" + t("testAccounts.notSelected") + "〉") + "/AI_LabTest/environments.json"}
+                </span>
               </div>
-
-              {env.accounts.length === 0 && (
-                <p className="text-xs text-muted-foreground">{t("testAccounts.noAccounts")}</p>
-              )}
-
-              {env.accounts.map((acct, idx) => {
-                const isCapturing = capturing?.systemId === activeSystem?.id && capturing?.env === activeEnv && capturing?.key === acct.key;
-                const isDefault = env.defaultAccountKey === acct.key && acct.key !== "";
-                return (
-                  <div key={idx} className="rounded-md border border-border/50 bg-muted/30 p-3 space-y-3">
-                    {/* head */}
-                    <div className="flex items-center gap-2 flex-wrap">
-                      <label className="flex items-center gap-1 text-xs text-muted-foreground whitespace-nowrap cursor-pointer">
-                        <input
-                          type="radio"
-                          name={`default-${activeEnv}`}
-                          checked={isDefault}
-                          onChange={() => mutateEnv((en) => ({ ...en, defaultAccountKey: acct.key }))}
-                          className="accent-primary"
-                        />
-                        {t("testAccounts.default")}
-                      </label>
-                      <Input
-                        value={acct.key}
-                        placeholder={t("testAccounts.accountKey")}
-                        onChange={(e) => setAccountKey(idx, e.target.value)}
-                        className="h-8 w-[130px]"
-                      />
-                      <Input
-                        value={acct.role}
-                        placeholder={t("testAccounts.role")}
-                        onChange={(e) => mutateAccount(idx, (a) => ({ ...a, role: e.target.value }))}
-                        className="h-8 w-[130px]"
-                      />
-                      {/* auth method pills */}
-                      <div className="flex items-center rounded-md border border-border/50 overflow-hidden" role="radiogroup">
-                        {AUTH_METHODS.map((m) => {
-                          const selected = acct.authMethod === m;
-                          return (
-                            <button
-                              key={m}
-                              type="button"
-                              role="radio"
-                              aria-checked={selected}
-                              onClick={() => mutateAccount(idx, (a) => ({ ...a, authMethod: m }))}
-                              className={cn(
-                                "px-2.5 py-1 text-xs transition-colors border-r border-border/50 last:border-r-0",
-                                selected
-                                  ? "bg-emerald-600 text-white font-medium"
-                                  : "text-muted-foreground hover:bg-accent",
-                              )}
-                            >
-                              {authLabel(m)}
-                            </button>
-                          );
-                        })}
-                      </div>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        aria-label={t("testAccounts.deleteAccount")}
-                        onClick={() => deleteAccount(idx)}
-                        className="ml-auto h-7 w-7 text-destructive hover:text-destructive"
-                      >
-                        <X size={14} />
-                      </Button>
-                    </div>
-
-                    {/* method fields */}
-                    {acct.authMethod === "password" && (
-                      <div className="grid grid-cols-2 gap-2">
-                        <label className="space-y-1 block">
-                          <span className="text-xs text-muted-foreground">{t("testAccounts.username")}</span>
-                          <Input value={acct.username ?? ""} className="h-8" onChange={(e) => mutateAccount(idx, (a) => ({ ...a, username: e.target.value }))} />
-                        </label>
-                        <label className="space-y-1 block">
-                          <span className="text-xs text-muted-foreground">{t("testAccounts.password")}</span>
-                          <Input value={acct.password ?? ""} className="h-8" onChange={(e) => mutateAccount(idx, (a) => ({ ...a, password: e.target.value }))} />
-                        </label>
-                      </div>
-                    )}
-
-                    {acct.authMethod === "token" && (
-                      <div className="space-y-2">
-                        <label className="space-y-1 block">
-                          <span className="text-xs text-muted-foreground">{t("testAccounts.token")}</span>
-                          <Textarea
-                            value={acct.token ?? ""}
-                            rows={2}
-                            placeholder={t("testAccounts.tokenPlaceholder")}
-                            onChange={(e) => mutateAccount(idx, (a) => ({ ...a, token: e.target.value }))}
-                          />
-                        </label>
-                        <div className="grid grid-cols-2 gap-2">
-                          <label className="space-y-1 block">
-                            <span className="text-xs text-muted-foreground">{t("testAccounts.storageType")}</span>
-                            <Select
-                              value={acct.storageType ?? "header"}
-                              onValueChange={(v) => mutateAccount(idx, (a) => ({ ...a, storageType: v as TestTokenStorage }))}
-                            >
-                              <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
-                              <SelectContent>
-                                {STORAGE_TYPES.map((s) => <SelectItem key={s} value={s}>{s}</SelectItem>)}
-                              </SelectContent>
-                            </Select>
-                          </label>
-                          <label className="space-y-1 block">
-                            <span className="text-xs text-muted-foreground">{t("testAccounts.storageKey")}</span>
-                            <Input value={acct.storageKey ?? ""} className="h-8" placeholder="Authorization" onChange={(e) => mutateAccount(idx, (a) => ({ ...a, storageKey: e.target.value }))} />
-                          </label>
-                        </div>
-                      </div>
-                    )}
-
-                    {acct.authMethod === "capture" && (
-                      <div className="space-y-1.5">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          {acct.captured ? (
-                            <span className="inline-flex items-center gap-1 text-xs text-emerald-600 dark:text-emerald-400">
-                              <CheckCircle size={14} /> {t("testAccounts.captured", { time: acct.capturedAt ?? "" })}
-                            </span>
-                          ) : (
-                            <span className="inline-flex items-center gap-1 text-xs text-amber-600 dark:text-amber-400">
-                              <Warning size={14} /> {t("testAccounts.capturePending")}
-                            </span>
-                          )}
-                          {isCapturing ? (
-                            <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-                              <Lock size={14} /> {t("testAccounts.captureInWindow")}
-                            </span>
-                          ) : (
-                            <>
-                              <Button
-                                size="sm"
-                                onClick={() => startCapture(idx)}
-                                disabled={!captureAvailable}
-                                className="gap-1.5"
-                              >
-                                <Lock size={14} /> {acct.captured ? t("testAccounts.recapture") : t("testAccounts.captureBtn")}
-                              </Button>
-                              {acct.captured && (
-                                <Button size="sm" variant="outline" onClick={() => clearCapture(idx)}>{t("testAccounts.clearCapture")}</Button>
-                              )}
-                            </>
-                          )}
-                        </div>
-                        <p className="text-[11px] text-muted-foreground">
-                          {captureAvailable ? t("testAccounts.captureHint") : t("testAccounts.captureElectronOnly")}
-                        </p>
-                      </div>
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-          </div>
+            }
+          />
 
           {/* Save bar */}
           <div className="flex items-center gap-3">

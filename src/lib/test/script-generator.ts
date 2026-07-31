@@ -269,6 +269,22 @@ test("<scriptCaseId> <一句话用例目的>", async ({ page }) => {
 });
 
 优先 getByTestId/getByRole/getByLabel，其次 getByText/getByPlaceholder；不得使用 MCP ref。
+【用例 expected 里若写了 CSS 类名 / DOM 标签，那是用例写法的历史遗留，不是断言目标】：要断言的是它描述的【用户可见事实】，用语义定位器表达，不要照抄成结构选择器。
+  - 「颜色标识圆点（w-3 h-3 rounded-full）」→ 断言那个圆点对应的语义元素可见，而不是 querySelector(".w-3.h-3")；
+  - 「卡片以 2 列网格排列（md:grid-cols-2）」→ 断言卡片数量/可见性，不要去查 .grid.gap-4.md\\:grid-cols-2（Tailwind 冒号还要转义，极脆）；
+  - 用例说某元素是「button」时【不要】写 locator("div > button")：真机上卡片常是 div[role="button"]，结构选择器命中 0 个（真机踩坑：TC-058 两个任务各挂一次，根因都是这个）。
+【叶子控件 vs 容器型元素，定位写法不同 —— 别把 { exact: true } 套到卡片上】：
+  - **叶子控件**（真 <button>、链接、输入框，可访问名 = 一个短标签如「打开」「保存」）：按上面的规则写
+    getByRole("button", { name: "保存", exact: true })。
+  - **容器型元素**（卡片、列表项、行——常见形态是 div[role="button"] 包着标题/描述/统计数字）：它的可访问名是
+    【整个子树文本的拼接】，不是标题本身。此时 getByRole("button", { name: "学科名", exact: true }) 必然
+    【0 命中】——exact 要求逐字等于那一长串（真机实测：卡片可访问名是「一致性测试名原始描述⬇️0阶段0打卡0任务0踩坑目标 10 小时/周 · 从 2026/7/22 起」）。
+    正确写法是 getByRole("button").filter({ hasText: "学科名" })，或先定位内部唯一文本再用 locator("..") 上溯容器。
+  - **候选仍不唯一时不要硬凑**：过滤后仍命中多个（被测端缺 data-testid，或测试数据里存在同名记录——真机实测
+    「前端开发」有 7 条），说明【页面没有提供可唯一定位该元素的契约】。不要用 .first()/.nth() 或退回结构选择器
+    凑一个能跑的断言（那等于把断言弱化成恒真）。改断言到用例真正关心且唯一的事实上；确实无解就走既有红线，
+    在 reason 里说明「被测端缺少可定位的稳定标识（建议加 data-testid）」。
+  只有当断言目标在 aria 树里确实无名（纯视觉的网格/圆点/色块，observedElements 里找不到任何对应项）时，才允许退回结构选择器，并优先用属性选择器而非 Tailwind 类。
 定位器必须唯一：Playwright 的 name 选项默认按【子串】匹配，页面上的列表项/卡片常带 role="button" 且文案包含同样的字，
 一个宽泛的 name 会命中多个元素并以 strict mode violation 失败。因此 getByRole/getByText 传字符串 name 时必须写
 { name: "…", exact: true }（传正则时不需要，正则本身已限定）。若同一名称仍可能重复，用 getByTestId 或先
@@ -423,6 +439,18 @@ element(s) not found / Locator 找不到，且当前脚本用的是 CSS class �
 几乎可以断定是【臆造的定位器】——去 observedElements 里找语义对应的元素，改写成
 getByRole("<role>", { name: "<name>", exact: true })（role/name 与清单逐字一致）。清单里确实没有对应元素时，
 说明该元素在执行期从未出现过，属于断言与事实不符 → 走下面的红线（fixed=false、讲清楚），不要再换一个猜的选择器。
+【结构选择器命中 0 个时，先换语义定位器，不要换另一个结构选择器】：failure 显示 CSS/结构选择器匹配到 0 个元素时，
+最常见的根因是对 DOM 标签的假设错了——真机上卡片、菜单项常是 div[role="button"] 而非 <button>，所以
+locator(".grid > button") 命中 0 个。**把 "> button" 改成 "> div" 这类同层替换是治标**：它换个页面结构就再挂，
+而且往往从「命中 0 个」变成「命中全部」（真机实测：".grid.gap-4 > div" 命中 346 个卡片，断言退化成恒真），
+等于亲手把用例废掉。用例 expected 里写的 CSS 类名 / DOM 标签是用例写法的历史遗留，不是断言目标，不要照抄进定位器
+（真机踩坑：TC-058 在两个任务里各挂一次，两次修复都只做了同层替换）。
+  正确修法按元素形态分两种：**叶子控件**（真 <button>/链接，可访问名是短标签）→ getByRole("button", { name: "保存", exact: true })；
+  **容器型元素**（卡片/列表项，div[role="button"] 包着标题+描述+统计数字）→ 它的可访问名是【整个子树文本拼接】，
+  加 { exact: true } 必然 0 命中，要用 getByRole("button").filter({ hasText: "标题" }) 或先定位内部唯一文本再 locator("..") 上溯。
+  **过滤后仍命中多个就不要硬凑**（被测端缺 data-testid，或数据里有同名记录——真机实测「前端开发」有 7 条）：
+  禁止用 .first()/.nth() 或退回结构选择器让它「能跑」，那是把断言弱化成恒真。改断言到唯一且用例真正关心的事实上；
+  确实无解就返回 fixed=false，reason 说明「被测端缺少可唯一定位该元素的标识（建议加 data-testid）」。
 【断言写法与页面渲染不符，属技术缺陷、必须修正（不是弱化）】：仔细读 failure 里的 Received/实际文本——如果它【确实包含】expected 想验证的内容，只是格式/顺序/正则方向和断言写法对不上，就把断言改成匹配真实渲染。典型：页面渲染是「数字在前」如 "0踩坑"，而断言写成 /踩坑\s*\d+/（数字在后）永远匹配不上，应改成 /\d+\s*踩坑/；或 getByText 单元素匹配不到跨元素拼接的文本，应改用 expect(page.locator("body")).toContainText(...)。这类是把断言【对齐事实】，不是弱化，放心修。
 【红线】：只有当 Received 里【根本没有】expected 要验证的内容（页面实际行为与用例预期真不一致、断言如实失败）时，才禁止通过弱化/删除/反转断言让脚本通过 —— 返回 fixed=false，reason 用一句测试人员能懂的话说明「页面实际是 X、用例预期是 Y，需人工确认是产品缺陷还是用例预期有误」。
 fixed=true 时 content 为修复后的完整脚本，并保持生成约束：import { test, expect } from "playwright/test"（不是 "@playwright/test"）；【整份文件恰好一个顶层 test】，标题以 scriptCaseId 开头，多个步骤写进同一个 test 内并用 await test.step("步骤N：…", async () => {…}) 分段，绝不拆成多个 test 或用 test.describe 包多个；至少一个 expect；只用相对 URL 或 process.env.BASE_URL；账号密码只用 process.env.TEST_USERNAME/TEST_PASSWORD；除 playwright/test 外禁止任何 import/require。fixed=false 时 content 返回空字符串。

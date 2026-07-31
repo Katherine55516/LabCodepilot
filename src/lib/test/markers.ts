@@ -116,6 +116,35 @@ export function stripLineDecoration(line: string): string {
     .trim();
 }
 
+/**
+ * 冒烟执行的「登录态整体失效」硬停止信号。
+ *
+ * 这是控制信号，不沿用 @@RESULT 那种“行内任意位置都可采”的宽松口径：正文里讲解
+ * `@@AUTH_INVALID` 不能误停一次真实执行。只接受标记位于剥除 markdown 装饰后的行首，
+ * JSON 可容忍模型偶发的加粗/反引号包装；`reason` 仅作诊断，不参与 UI 文案。
+ */
+export interface AuthInvalidSignal {
+  reason?: string;
+}
+
+export function parseAuthInvalidSignal(line: string): AuthInvalidSignal | null {
+  const normalized = stripLineDecoration(line);
+  if (!/^@@AUTH_INVALID(?:\s|\{)/.test(normalized)) return null;
+  const [raw] = harvestMarkers<{ reason?: unknown }>(normalized, 'AUTH_INVALID').items;
+  if (!raw) return null;
+  const reason = typeof raw.reason === 'string' ? raw.reason.trim().slice(0, 200) : '';
+  return reason ? { reason } : {};
+}
+
+/** 从一段可能跨 SSE 帧累计的 AI 文本里找第一条完整的登录失效硬停止信号。 */
+export function findAuthInvalidSignal(text: string): AuthInvalidSignal | null {
+  for (const line of text.split('\n')) {
+    const signal = parseAuthInvalidSignal(line);
+    if (signal) return signal;
+  }
+  return null;
+}
+
 /** 进度行前缀(执行步 prompt 约定)。 */
 export const PROGRESS_PREFIX = '▶';
 

@@ -11,8 +11,9 @@ import { depositTask, readTaskCases, REGRESSION_LIBRARY_TASK } from '@/lib/test/
 import { readRoundSnapshot, createRoundKeeper, type RoundKeeper } from '@/lib/test/rounds';
 import { ScriptTraceCollector, writeTraceFile, type TraceRedaction } from '@/lib/test/script-trace';
 import { enqueueIncrementalScriptCase, enqueueScriptJob, type IncrementalScriptCaseRequest } from '@/lib/test/script-job-manager';
-import { harvestMarkerObjects } from '@/lib/test/markers';
+import { findAuthInvalidSignal, harvestMarkerObjects } from '@/lib/test/markers';
 import { createCaseIdResolver, remapCaseKeys } from '@/lib/test/case-id';
+import { ensureSmokeReportBugTable, type BugSourceTest } from '@/lib/test/smoke-bugs';
 
 /**
  * 测试执行路由的 SSE 流包装器（从 src/app/api/test/run/route.ts 抽出）。
@@ -181,6 +182,13 @@ export function wrapExecutionStream(
     stats?: StepStats;
     roundId?: string;
     traceRedactions?: TraceRedaction[];
+    /**
+     * 冒烟专用登录失效硬停止：AI 输出 @@AUTH_INVALID 后立刻掐断上游智能体，
+     * 不做 run.json 归约，也不给前端留下“正常完成→自动接力报告”的机会。
+     */
+    stopOnAuthInvalid?: boolean;
+    /** 终止真实 agent run（仅与 stopOnAuthInvalid 一起由 run 路由传入）。 */
+    abortAgent?: () => void;
     /**
      * 后台脚本沉淀(逐条增量生成 + 收口对账入队)。默认开启。
      *
@@ -428,6 +436,7 @@ export function wrapExecutionStream(
         frameBuf += value;
         const frames = frameBuf.split('\n\n');
         frameBuf = frames.pop() || '';
+        let authInvalid = false;
         for (const f of frames) {
           const line = f.replace(/^data:\s?/, '').trim();
           if (!line) continue;
@@ -439,6 +448,9 @@ export function wrapExecutionStream(
               traceCollector.feedText(evt.data || '');
               // 顺序要紧:先喂 trace(把该用例的轨迹/元素收全),再让 feeder 取用。
               incremental.feedText(evt.data || '');
+              // 控制标记可能被 SDK 拆在多个 text 帧里，所以对累计文本查找完整行。只在冒烟
+              // 路由显式开启时生效；功能/回归执行即使正文提到该词也不会被平台终止。
+              if (opts.stopOnAuthInvalid && findAuthInvalidSignal(textAcc)) authInvalid = true;
             } else if (evt?.type === 'tool_use') {
               try { traceCollector.feedToolUse(JSON.parse(evt.data || '{}')); } catch { /* ignore */ }
             } else if (evt?.type === 'tool_result') {
@@ -456,6 +468,17 @@ export function wrapExecutionStream(
           } catch {
             // ignore non-JSON frames
           }
+        }
+        if (authInvalid) {
+          // 先把包含标记的原始 text 帧转给前端（exec-live 会隐藏机器行），再发结构化终止
+          // 事件。随后同时 abort agent + cancel reader，保证不会继续跑下一场景；刻意跳过
+          // done 分支的 run.json/统计/脚本沉淀，报告因执行未完成而不应生成。
+          try { opts.abortAgent?.(); } catch { /* best-effort */ }
+          void reader.cancel('smoke auth invalid').catch(() => {});
+          round?.settleAborted();
+          controller.enqueue(`data: ${JSON.stringify({ type: 'auth_invalid', data: 'login_state_invalid' })}\n\n`);
+          controller.close();
+          return;
         }
       } catch (e) {
         // 流内部报错(SDK 流 reject 等):run.json 没写成,轮次按中断收(层①的 error 路径)。
@@ -489,6 +512,8 @@ export function wrapReportStream(
     aborted?: () => boolean;
     stats?: StepStats;
     roundId?: string;
+    /** 冒烟报告收口时确定性校验 Bug 表格；缺省保持功能测试原样。 */
+    taskType?: 'smoke';
     /**
      * 任务级「沉淀回归脚本」开关(缺省开)。关闭时报告成功也不入队生成任务 ——
      * 与 wrapExecutionStream 的同名参数一起构成该任务的完整关断。
@@ -510,12 +535,28 @@ export function wrapReportStream(
             controller.enqueue(`data: ${JSON.stringify({ type: 'error', data: '测试报告文档未生成（AI 未写出 .md），请点「重跑」重试。' })}\n\n`);
           }
           let reportRunHash: string | null = null;
+          let reportRunContent: string | null = null;
           try {
-            reportRunHash = sha1Hex(
-              fs.readFileSync(path.join(opts.projectPath, artifactPaths(opts.taskName, opts.env, opts.roundId).runJson), 'utf-8'),
+            reportRunContent = fs.readFileSync(
+              path.join(opts.projectPath, artifactPaths(opts.taskName, opts.env, opts.roundId).runJson),
+              'utf-8',
             );
+            reportRunHash = sha1Hex(reportRunContent);
           } catch {
             /* run.json 缺失 → runHash 缺省（统计聚合按时序回填兜底），也不排脚本后台任务 */
+          }
+          // Prompt 约束不是确定性保证：模型偶尔仍沿用旧版逐字段列表。冒烟报告在服务端
+          // 收口时以 run.json 的 fail 场景为事实源校验/补齐固定 8 列 GFM 表格；功能测试
+          // 不进入此分支，报告 Markdown 字节保持原样。
+          if (reportExists && reportRunContent && opts.taskType === 'smoke') {
+            try {
+              const run = JSON.parse(reportRunContent) as { tests?: BugSourceTest[] };
+              const current = fs.readFileSync(reportAbs, 'utf-8');
+              const normalized = ensureSmokeReportBugTable(current, run.tests);
+              if (normalized !== current) fs.writeFileSync(reportAbs, normalized, 'utf-8');
+            } catch {
+              // 格式兜底失败不改变报告主流程终态；UI 打开历史/异常报告时还会再校验一次。
+            }
           }
           // 使用统计：报告真的写出来了、且流干净收尾才记 report_generated + step_completed。
           // runHash 读 run.json 内容重算（与执行步 sha1(runContent) 同源同值）。
