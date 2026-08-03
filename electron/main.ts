@@ -128,12 +128,27 @@ let serverExitCode: number | null = null;
 let userShellEnv: Record<string, string> = {};
 let resolvedProxyEnv: Record<string, string> = {};
 let isQuitting = false;
+// 「这次 server 退出是我们主动杀的」标记 —— killServer() 与端口重试路径置位。
+//
+// 为什么 isQuitting 不够用:Windows 关窗走 window-all-closed → killServer() →
+// `taskkill /T /F` ⇒ 子进程退出码 1,而 isQuitting 要等 before-quit 才置位(且
+// 那时 serverProcess 已被置 null、分支根本进不去)。结果每一次正常关窗都被 exit
+// 回调误判成「异常退出 code=1」并排队一次「1500ms 后自动重启」——实测用户日志里
+// 20 次"崩溃"全部是关窗,且进程随即退出、那条重启从未真正执行过(50 次启动 / 52 次
+// spawn 全部来自启动流程,0 次来自重启路径)。假崩溃会把真崩溃淹掉,故单独标记。
+let serverKillIntentional = false;
 // server 崩溃自动重启:崩溃后 respawn,限次避免确定性崩溃导致的无限重启烧 CPU。
 let serverRestartCount = 0;
 let serverStartedAt = 0;
 const MAX_SERVER_RESTARTS = 3;
 const SERVER_RESTART_DELAY_MS = 1500;
 const SERVER_STABLE_MS = 90_000; // server 稳定运行超过此时长 → 视为已恢复,重置重启计数
+// 渲染进程崩溃自愈:窗口崩了就重新加载。同样限次 —— "一加载就崩"时无限重载只会
+// 刷屏,不如停下把 reason 留在日志里。见 createWindow 的 'render-process-gone'。
+const MAX_RENDERER_RELOADS = 3;
+const RENDERER_RELOAD_WINDOW_MS = 60_000;
+const RENDERER_RELOAD_DELAY_MS = 500; // 等崩溃的 renderer 彻底回收再重载
+let rendererReloadTimes: number[] = [];
 let tray: Tray | null = null;
 let bgNotifyTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -315,6 +330,10 @@ function killServer(): Promise<void> {
       resolve();
       return;
     }
+
+    // 主动终结 —— 下面的 taskkill/SIGKILL 会让子进程以非 0 码退出,提前打标
+    // 避免 handleExit 把它当成崩溃(见 serverKillIntentional 注释)。
+    serverKillIntentional = true;
 
     const pid = serverProcess.pid;
 
@@ -822,7 +841,8 @@ async function startServerOnStablePort(): Promise<number> {
         (isPortConflict ? ' — trying next stable port' : ''),
       );
       // Make sure the failed subprocess is dead before trying again — otherwise
-      // we'd leak processes on each retry.
+      // we'd leak processes on each retry. 同样是主动杀,打标避免误报成崩溃。
+      serverKillIntentional = true;
       try { serverProcess?.kill(); } catch { /* already gone */ }
       serverProcess = null;
 
@@ -898,6 +918,7 @@ function startServer(port: number): Electron.UtilityProcess | ChildProcess {
   serverErrors = [];
   serverExited = false;
   serverExitCode = null;
+  serverKillIntentional = false;
   serverStartedAt = Date.now();
 
   const home = os.homedir();
@@ -959,14 +980,15 @@ function startServer(port: number): Electron.UtilityProcess | ChildProcess {
   };
   // 服务退出处理 —— 两种宿主进程(见下方分支)共用。child_process 语义下被信号杀时 code 为 null。
   const handleExit = (code: number | null) => {
-    console.log(`Server process exited with code ${code}`);
+    const intentional = serverKillIntentional;
+    console.log(`Server process exited with code ${code}${intentional ? ' (主动终结:关窗/退出/端口重试)' : ''}`);
     serverExited = true;
     serverExitCode = code;
     serverProcess = null;
     // 内嵌 server 异常退出(崩溃)且 app 没在主动退出 → 诊断 + 限次自动重启。
     // 背景:实测 server ready 后约 12s 会异常退出(code≠0),之前无重启 → 之后所有请求
     // (导入/页面/RSC)全 Failed to fetch。这里兜底恢复 + dump 崩溃前输出帮定位根因。
-    if (code !== 0 && code !== null && !isQuitting) {
+    if (code !== 0 && code !== null && !isQuitting && !intentional) {
       const ranMs = serverStartedAt ? Date.now() - serverStartedAt : 0;
       console.error(`[server] 异常退出 code=${code},本次运行约 ${Math.round(ranMs / 1000)}s。崩溃前最后输出:`);
       for (const line of serverErrors.slice(-30)) console.error(`[server:crash-tail] ${line}`);
@@ -1452,8 +1474,64 @@ function createWindow(url?: string) {
   // them on every such transition so they don't accumulate. (Window-close is
   // handled in the 'closed' handler below; on macOS that path matters most
   // because closing the window does not quit the app.)
-  mainWindow.webContents.on('render-process-gone', () => {
+  //
+  // 同时:渲染进程消失 = 用户看到的「整个白屏、点什么都没反应、只能退出重开」。
+  // 之前这里既不记日志也不恢复,主进程还活着照常轮询,于是日志上完全无痕 —— 排查
+  // 线上白屏时唯一能确认的就是"什么都没记下来"。现在把 reason/exitCode 落盘
+  // (crashed / oom / launch-failed / integrity-failure 直接指认根因),并自动重载窗口。
+  mainWindow.webContents.on('render-process-gone', (_event, details) => {
     terminalManager.killAll();
+
+    const { reason, exitCode } = details;
+    console.error(`[renderer] 渲染进程消失 reason=${reason} exitCode=${exitCode}`);
+
+    // clean-exit 是主动销毁(关窗/换页)的正常路径,退出中或窗口已销毁同理 → 不自愈。
+    if (reason === 'clean-exit' || isQuitting) return;
+    if (!mainWindow || mainWindow.isDestroyed()) return;
+
+    const now = Date.now();
+    rendererReloadTimes = rendererReloadTimes.filter((t) => now - t < RENDERER_RELOAD_WINDOW_MS);
+    if (rendererReloadTimes.length >= MAX_RENDERER_RELOADS) {
+      console.error(
+        `[renderer] ${RENDERER_RELOAD_WINDOW_MS / 1000}s 内已自动恢复 ${rendererReloadTimes.length} 次,` +
+        `停止重载(确定性崩溃 —— 按上面的 reason 与 [metrics] 内存日志定位)`,
+      );
+      return;
+    }
+    rendererReloadTimes.push(now);
+    console.error(`[renderer] 自动重新加载窗口 (${rendererReloadTimes.length}/${MAX_RENDERER_RELOADS})…`);
+    setTimeout(() => {
+      if (isQuitting || !mainWindow || mainWindow.isDestroyed()) return;
+      try {
+        mainWindow.webContents.reload();
+      } catch (err) {
+        console.error(`[renderer] 重新加载失败: ${err instanceof Error ? err.message : String(err)}`);
+      }
+    }, RENDERER_RELOAD_DELAY_MS);
+  });
+
+  // 主线程被长任务/死循环阻塞 —— 窗口停止重绘,用户看到的同样是"卡死/白屏",但
+  // 进程还活着,与上面的崩溃是两回事。只记录不干预:Electron 常能自行恢复,强行
+  // reload 会丢掉用户正在输入的内容。阻塞时长决定它是不是白屏的元凶。
+  let unresponsiveSince = 0;
+  mainWindow.on('unresponsive', () => {
+    unresponsiveSince = Date.now();
+    console.error('[renderer] 窗口无响应(主线程阻塞中)');
+  });
+  mainWindow.on('responsive', () => {
+    const blockedMs = unresponsiveSince ? Date.now() - unresponsiveSince : 0;
+    unresponsiveSince = 0;
+    console.warn(`[renderer] 窗口恢复响应(阻塞约 ${Math.round(blockedMs / 1000)}s)`);
+  });
+
+  // 页面加载失败 —— server 没起来/被杀/端口漂移时窗口会停在空白页。
+  // ERR_ABORTED(-3) 是导航被打断的正常情况(SPA 路由、连续 loadURL),不算故障。
+  mainWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription, validatedURL, isMainFrame) => {
+    if (errorCode === -3) return;
+    console.error(
+      `[renderer] 页面加载失败 code=${errorCode} ${errorDescription} ` +
+      `mainFrame=${isMainFrame} url=${validatedURL}`,
+    );
   });
   mainWindow.webContents.on('did-start-navigation', (details) => {
     // Only a real document swap in the main frame orphans the terminals;
@@ -1482,6 +1560,22 @@ function createWindow(url?: string) {
 // native 崩溃(code -36616)。显式禁用崩溃上报，切断这条崩溃链，作为 platform.ts 去 shell:true
 // 之外的防御纵深。
 app.commandLine.appendSwitch('disable-crash-reporter');
+
+// GPU / utility 等非渲染子进程退出 —— 企业 Windows 上显卡驱动导致 GPU 进程反复
+// 崩溃是"窗口整片白"的另一条常见路径,而主进程对此毫无察觉。这里只记录不干预:
+// Chromium 自己会拉起新的 GPU 进程,连续失败后自动降级到软件渲染。日志里若出现
+// 连串 type=GPU,就该考虑 app.disableHardwareAcceleration() 兜底。
+// (crash-reporter 已禁用 ⇒ 没有 crashpad dump,这条日志是唯一的痕迹。)
+app.on('child-process-gone', (_event, details) => {
+  // GPU 进程的 serviceName 与 type 同为 'GPU',拼起来是冗余的 "GPU/GPU"。
+  const who = details.serviceName && details.serviceName !== details.type
+    ? `${details.type}/${details.serviceName}`
+    : details.type;
+  console.error(
+    `[child-process] ${who} 退出 reason=${details.reason} exitCode=${details.exitCode}` +
+    `${details.name ? ` name=${details.name}` : ''}`,
+  );
+});
 
 app.whenReady().then(async () => {
   // Initialise file logging FIRST so every subsequent console.* in main — and
