@@ -7,7 +7,7 @@
  *   截断/清空/轮转后首行必变 → 拉取端(账号后端)检测到 fileId 变化即归零重拉,
  *   PG 侧 UNIQUE 约束兜底去重(见 exec-plan cowork-usage-admin D6)。
  * - collectStats():docker 现查现返(活跃容器资源 + 全部会话卷 + 大小)。
- *   卷大小 du 现算,60s 缓存 —— 现在 19 个卷毫秒级,几百个卷时也只有首查慢。
+ *   卷大小走 docker system df(daemon 算,60s 缓存)—— 见 volumeSizes 注释。
  */
 import fs from 'node:fs';
 import crypto from 'node:crypto';
@@ -65,22 +65,30 @@ export function readAuditSince(offset = 0) {
   }
 }
 
-// —— 卷大小缓存(60s):du 是唯一相对贵的操作 ——
+// —— 卷大小缓存(60s):docker system df 是唯一相对贵的操作 ——
+// 不用 du:服务进程跑在非 root 的 cowork 用户下,穿越不了 root 属主的 docker
+// data-root(userns-remap 子目录),du 恒失败(生产实测 sizeBytes 全 null)。
+// docker daemon 自己算则只需 docker 组权限,一次调用拿全部卷。
 let volSizeCache = { at: 0, sizes: new Map() };
 
-async function volumeSizes(volNames) {
+/** docker 的人类可读大小("7.368kB"/"1.2MB"/"0B",10 进制)→ 字节。 */
+function parseDockerSize(s) {
+  const m = /^([\d.]+)\s*([kMGT]?)B$/i.exec(String(s || '').trim());
+  if (!m) return null;
+  const mult = { '': 1, k: 1e3, m: 1e6, g: 1e9, t: 1e12 }[m[2].toLowerCase()] ?? 1;
+  return Math.round(parseFloat(m[1]) * mult);
+}
+
+async function volumeSizes() {
   const now = Date.now();
   if (now - volSizeCache.at < 60_000) return volSizeCache.sizes;
   const sizes = new Map();
-  for (const vol of volNames) {
-    try {
-      const mp = (await docker(['volume', 'inspect', vol, '--format', '{{.Mountpoint}}'])).trim();
-      const { stdout } = await execFileP('du', ['-sk', mp]);
-      sizes.set(vol, parseInt(stdout.split('\t')[0], 10) * 1024);
-    } catch {
-      sizes.set(vol, null); // 拿不到就 null,不让单卷失败拖垮整个 stats
+  try {
+    const out = await docker(['system', 'df', '-v', '--format', 'json']);
+    for (const v of JSON.parse(out).Volumes || []) {
+      if (v?.Name) sizes.set(v.Name, parseDockerSize(v.Size));
     }
-  }
+  } catch { /* 拿不到就空 map,volumes 全 null,不拖垮 stats */ }
   volSizeCache = { at: now, sizes };
   return sizes;
 }
@@ -96,7 +104,7 @@ export async function collectStats() {
     const [name, sid, uid] = l.split('\t');
     return { name, sid: sid || '', uid: uid || '' };
   }) : [];
-  const sizes = await volumeSizes(volumes.map((v) => v.name));
+  const sizes = await volumeSizes();
 
   // 活跃会话容器(排除 cowork-proxy:它没有 cowork.sid label)
   const psLines = (await docker([

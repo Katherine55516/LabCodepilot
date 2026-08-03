@@ -8,12 +8,12 @@
 
 | Phase | 内容 | 状态 | 备注 |
 |-------|------|------|------|
-| P0-a | cowork-server 审计补全(exec_end + 字段扩展 + MAX_BYTES env) | 🔄 进行中 | |
-| P0-b | cowork-server admin 面(`__admin__` 鉴权 + audit/stats/运维端点)+ selftest | 📋 待开始 | |
-| P0-c | codeagent-server 迁移 + 惰性拉取器 + 聚合服务 | 📋 待开始 | |
-| P1 | admin usage API + pytest + admin web「沙箱用量」页 | 📋 待开始 | |
-| P2 | 运维动作(删会话 / 产物查看下载)+ 管理操作审计 | 📋 待开始 | 与 P1 同批交付 |
-| 部署 | 沙箱侧同步重启 + selftest;账号后端由用户 pull+build | 📋 待开始 | |
+| P0-a | cowork-server 审计补全(exec_end + 字段扩展 + MAX_BYTES env) | ✅ 已完成 | eed2b10 |
+| P0-b | cowork-server admin 面(`__admin__` 鉴权 + audit/stats/运维端点)+ selftest | ✅ 已完成 | 本机+生产 selftest 各 17/17;卷大小改走 docker system df(cowork 用户穿越不了 root data-root,du 恒 null) |
+| P0-c | codeagent-server 迁移 + 惰性拉取器 + 聚合服务 | ✅ 已完成 | codeagent-server 3be252a;pytest 134 passed |
+| P1 | admin usage API + pytest + admin web「沙箱用量」页 | ✅ 已完成 | 同 3be252a;web tsc+build 过 |
+| P2 | 运维动作(删会话 / 产物查看下载)+ 管理操作审计 | ✅ 已完成 | 同批交付;admin_remove/admin_download 生产验证落审计 |
+| 部署 | 沙箱侧同步重启 + selftest;账号后端由用户 pull+build | 🔄 沙箱侧已上线 | 沙箱侧 2026-08-03 已重启并真 secret 验证(20 卷/audit 210 行);**账号后端待用户 pull + migrate + build** |
 
 ## 决策日志
 
