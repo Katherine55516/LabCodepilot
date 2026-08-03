@@ -785,7 +785,17 @@ export default function NewChatPage() {
                       // (this page) and the ongoing session flow
                       // (useSSEStream via stream-session-manager).
                       maybeShowStatusToast(statusData);
-                      setStatusText(statusData.message || statusData.title || undefined);
+                      // 与 stream-session-manager 的 onStatus 对称：一次性通知
+                      // 自到期，不常驻状态行（长文案的视觉问题另由 status-line
+                      // 的单行截断兜底）。
+                      const notifyText = statusData.message || statusData.title || undefined;
+                      setStatusText(notifyText);
+                      if (notifyText) {
+                        setTimeout(
+                          () => setStatusText((cur) => (cur === notifyText ? undefined : cur)),
+                          8000,
+                        );
+                      }
                     } else if (typeof statusData === 'string') {
                       // 仅纯字符串状态文案才显示；结构化对象（含未知 subtype）忽略，
                       // 避免原始 JSON 泄漏到执行状态行。

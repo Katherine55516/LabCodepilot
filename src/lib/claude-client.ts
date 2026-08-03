@@ -29,6 +29,7 @@ import { sanitizeClaudeModelOptions } from './claude-model-options';
 // (cli.js no longer needs to be resolved against the user's local install).
 import { notifyPermissionRequest, notifyGeneric } from './telegram-bot';
 import { classifyError, formatClassifiedError } from './error-classifier';
+import { toStatusLine } from './status-line';
 import { resolveWorkingDirectory } from './working-directory';
 import { wrapController } from './safe-stream';
 import { type ShadowHome } from './claude-home-shadow';
@@ -1380,11 +1381,14 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
             console.warn('[claude-client] Failed to persist permission request to DB:', e);
           }
 
-          // Send permission_request SSE event to the client
+          // Send permission_request SSE event to the client.
+          // 记下投递那一刻通道是否还开着 —— 关着就说明前端根本收不到这条提示,
+          // 后面那 5 分钟的等待纯属白等,超时日志里要能一眼看出来。
           controller.enqueue(formatSSE({
             type: 'permission_request',
             data: JSON.stringify(permEvent),
           }));
+          const deliveredToClient = !controller.closed;
 
           // Notify via Telegram (fire-and-forget) — skip for auto-trigger turns
           if (!autoTrigger) {
@@ -1396,7 +1400,11 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
 
           // Wait for user response (resolved by POST /api/chat/permission)
           // Store original input so registry can inject updatedInput on allow
-          const result = await registerPendingPermission(permissionRequestId, input, opts.signal);
+          const result = await registerPendingPermission(permissionRequestId, input, opts.signal, {
+            sessionId,
+            toolName,
+            deliveredToClient,
+          });
 
           // Restore runtime status after permission resolved
           onRuntimeStatusChange?.('running');
@@ -1908,12 +1916,16 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
                     status: string; summary: string; task_id: string;
                   };
                   const title = taskMsg.status === 'completed' ? 'Task completed' : `Task ${taskMsg.status}`;
+                  // 子代理的 summary 是一份完整报告(可达数千字)。它经 SSE →
+                  // onStatus → snapshot.statusText 最终落到执行状态行，那里只有
+                  // 一行的位置——原样透传会把整篇报告铺满聊天区，挤掉所有输出
+                  // (用户实拍回归)。状态行取单行摘要，Telegram 通知仍发全文。
                   controller.enqueue(formatSSE({
                     type: 'status',
                     data: JSON.stringify({
                       notification: true,
                       title,
-                      message: taskMsg.summary || '',
+                      message: toStatusLine(taskMsg.summary),
                     }),
                   }));
                   if (!autoTrigger) {
