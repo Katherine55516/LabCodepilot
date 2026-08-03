@@ -16,6 +16,7 @@ import { BatchPlanInlinePreview } from './batch-image-gen/BatchPlanInlinePreview
 import { WidgetRenderer } from './WidgetRenderer';
 import { parseAllShowWidgets, computePartialWidgetKey, segmentsFromBlocks } from './MessageItem';
 import { PENDING_KEY, buildReferenceImages } from '@/lib/image-ref-store';
+import { toStatusLine } from '@/lib/status-line';
 import type { PlannerOutput, MediaBlock, MessageContentBlock, RenderSegment } from '@/types';
 
 interface ImageGenRequest {
@@ -235,7 +236,12 @@ function ElapsedTimer({ startedAt }: { startedAt: number }) {
 }
 
 function StreamingStatusBar({ statusText, onForceStop, startedAt }: { statusText?: string; onForceStop?: () => void; startedAt: number }) {
-  const displayText = statusText || 'Thinking';
+  // 最后一道防线：状态行只有一行位置，但上游有多条通道能塞进不受控的长文本
+  // （子代理 summary、SSE 兜底的原始载荷、无截断的 file_path…）。这里无条件
+  // 压成单行短文案——CSS 的 overflow 挡得住溢出，却挡不住 Shimmer 按字符数算
+  // 的高光宽度（几千字 → 几千 px spread → 整段文字被背景色填满近乎隐形），
+  // 所以字符串层面的截断不可省。详见 lib/status-line.ts。
+  const displayText = toStatusLine(statusText) || 'Thinking';
 
   // Parse elapsed seconds from statusText like "Running bash... (45s)"
   const elapsedMatch = statusText?.match(/\((\d+)s\)/);
@@ -244,26 +250,33 @@ function StreamingStatusBar({ statusText, onForceStop, startedAt }: { statusText
   const isCritical = toolElapsed >= 90;
 
   return (
-    <div className="flex items-center gap-3 py-2 px-1 text-xs text-muted-foreground">
-      <div className="flex items-center gap-2">
-        <span className={isCritical ? 'text-status-error-foreground' : isWarning ? 'text-status-warning-foreground' : undefined}>
+    <div className="flex min-w-0 items-center gap-3 py-2 px-1 text-xs text-muted-foreground">
+      <div className="flex min-w-0 items-center gap-2">
+        {/* block + overflow-hidden + nowrap：Shimmer 渲染的 <p> 再长也只能被
+            裁掉，绝不换行铺开把聊天区顶出视口。 */}
+        <span
+          title={statusText}
+          className={`block min-w-0 overflow-hidden whitespace-nowrap ${
+            isCritical ? 'text-status-error-foreground' : isWarning ? 'text-status-warning-foreground' : ''
+          }`}
+        >
           <Shimmer duration={1.5}>{displayText}</Shimmer>
         </span>
         {isWarning && !isCritical && (
-          <span className="text-status-warning-foreground text-[10px]">Running longer than usual</span>
+          <span className="shrink-0 text-status-warning-foreground text-[10px]">Running longer than usual</span>
         )}
         {isCritical && (
-          <span className="text-status-error-foreground text-[10px]">Tool may be stuck</span>
+          <span className="shrink-0 text-status-error-foreground text-[10px]">Tool may be stuck</span>
         )}
       </div>
-      <span className="text-muted-foreground/50">|</span>
-      <ElapsedTimer startedAt={startedAt} />
+      <span className="shrink-0 text-muted-foreground/50">|</span>
+      <span className="shrink-0"><ElapsedTimer startedAt={startedAt} /></span>
       {isCritical && onForceStop && (
         <Button
           variant="outline"
           size="xs"
           onClick={onForceStop}
-          className="ml-auto border-status-error-border bg-status-error-muted text-[10px] font-medium text-status-error-foreground hover:bg-status-error-muted"
+          className="ml-auto shrink-0 border-status-error-border bg-status-error-muted text-[10px] font-medium text-status-error-foreground hover:bg-status-error-muted"
         >
           Force stop
         </Button>

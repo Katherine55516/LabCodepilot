@@ -136,6 +136,7 @@ const SERVER_RESTART_DELAY_MS = 1500;
 const SERVER_STABLE_MS = 90_000; // server 稳定运行超过此时长 → 视为已恢复,重置重启计数
 let tray: Tray | null = null;
 let bgNotifyTimer: ReturnType<typeof setInterval> | null = null;
+let metricsTimer: ReturnType<typeof setInterval> | null = null;
 
 // ── Managed-account auth state (held in-memory; tokens stay on disk) ──
 let currentMe: MeInfo | null = null;
@@ -542,6 +543,60 @@ function stopBgNotifyPoll(): void {
   if (bgNotifyTimer) {
     clearInterval(bgNotifyTimer);
     bgNotifyTimer = null;
+  }
+}
+
+/**
+ * 进程内存采样 —— 白屏排查的第二只眼。
+ *
+ * 渲染进程被 OOM 干掉时,render-process-gone 只给得出 reason=oom/crashed,回答不了
+ * 「涨到多少、涨了多久、是哪个进程」。每 5 分钟记一行各进程 working set,崩溃前的
+ * 增长曲线就留在日志里,事后一眼能分辨「渲染进程内存爬到天花板」和「驱动/EDR 把
+ * 进程干掉」这两类根因 —— 后者内存曲线是平的。
+ *
+ * 刻意做成单行:日志按大小轮转(见 logger.ts),多行采样会把有用的上下文挤出去。
+ */
+const METRICS_SAMPLE_INTERVAL_MS = 5 * 60_000;
+// Chromium 渲染进程通常在 2~4GB 附近被 OOM 终结。过线就升级成 WARN,
+// 让「崩之前其实已经报过警」这件事在日志里可检索。
+const RENDERER_WARN_MB = 1500;
+
+function sampleProcessMetrics(): void {
+  try {
+    const metrics = app.getAppMetrics();
+    let totalMb = 0;
+    let maxRendererMb = 0;
+    const parts: string[] = [];
+    for (const m of metrics) {
+      // ProcessMetric.memory.workingSetSize 单位是 KB。
+      const sizeMb = Math.round((m.memory?.workingSetSize ?? 0) / 1024);
+      totalMb += sizeMb;
+      // 渲染进程在 Electron 的口径里是 'Tab'。
+      if (m.type === 'Tab') maxRendererMb = Math.max(maxRendererMb, sizeMb);
+      const label = m.name ? `${m.type}(${m.name})` : m.type;
+      parts.push(`${label}#${m.pid}=${sizeMb}MB`);
+    }
+    const line = `[metrics] total=${totalMb}MB ${parts.join(' ')}`;
+    if (maxRendererMb >= RENDERER_WARN_MB) {
+      console.warn(`${line} —— 渲染进程已达 ${maxRendererMb}MB,接近 OOM 风险区`);
+    } else {
+      console.log(line);
+    }
+  } catch (err) {
+    console.warn(`[metrics] 采样失败: ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+function startMetricsSampling(): void {
+  if (metricsTimer) return;
+  sampleProcessMetrics(); // 先落一条基线,否则最早的数据点要等 5 分钟
+  metricsTimer = setInterval(sampleProcessMetrics, METRICS_SAMPLE_INTERVAL_MS);
+}
+
+function stopMetricsSampling(): void {
+  if (metricsTimer) {
+    clearInterval(metricsTimer);
+    metricsTimer = null;
   }
 }
 
@@ -1488,6 +1543,9 @@ app.whenReady().then(async () => {
   // the forked server's piped output we re-log below — is persisted to disk,
   // and uncaught crashes are captured. Must run before the server fork.
   initFileLogger();
+
+  // 内存采样紧跟日志之后开:从冷启动就开始记基线,白屏发生时才有完整的增长曲线可比。
+  startMetricsSampling();
 
   // Windows toast notifications require the AppUserModelID to match the
   // shortcut's AUMID (electron-builder NSIS writes appId there). Without this
@@ -2864,6 +2922,8 @@ app.on('before-quit', async (e) => {
   stopBackgroundPolling();
   // Stop the auto-updater periodic check timer (also unref'd, belt-and-braces).
   stopUpdater();
+  // 同理停掉内存采样定时器。
+  stopMetricsSampling();
   if (isLoginWindowOpen()) cancelLoginWindow('before-quit');
 
   // Kill all terminal processes

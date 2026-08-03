@@ -570,19 +570,23 @@ async function runStream(stream: ActiveStream, params: StartStreamParams): Promi
           emit(stream, 'snapshot-updated');
           return;
         }
-        if (text?.startsWith('Connected (')) {
-          stream.snapshot = { ...stream.snapshot, statusText: text };
-          emit(stream, 'snapshot-updated');
+        // 所有经 onStatus 到达的文案都是一次性提示（连接完成、子代理任务结束、
+        // 会话恢复回退…），没有一条需要常驻。此前只有 'Connected (' 会自到期，
+        // 其余走 else 永久占用状态行，直到下一条 status 或本回合结束——一条长
+        // 通知能就此霸占状态行整个回合。统一改为设置即挂到期定时器，只是连接
+        // 提示更短（2s），其余留足阅读时间（8s）。到期后状态行回落到工具进度/
+        // Thinking，是合理降级。
+        stream.snapshot = { ...stream.snapshot, statusText: text };
+        emit(stream, 'snapshot-updated');
+        if (text) {
+          const ttl = text.startsWith('Connected (') ? 2000 : 8000;
           streamTimeout(stream, () => {
             // Only clear if still the same status
             if (stream.snapshot.statusText === text) {
               stream.snapshot = { ...stream.snapshot, statusText: undefined };
               emit(stream, 'snapshot-updated');
             }
-          }, 2000);
-        } else {
-          stream.snapshot = { ...stream.snapshot, statusText: text };
-          emit(stream, 'snapshot-updated');
+          }, ttl);
         }
       },
       onResult: (usage, meta) => {
