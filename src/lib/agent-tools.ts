@@ -164,6 +164,7 @@ function wrapWithPermissions(
             permId,
             (input || {}) as Record<string, unknown>,
             ctx.abortSignal,
+            { sessionId: ctx.sessionId, toolName: name },
           );
 
           emitEvent('permission:resolved', { sessionId: ctx.sessionId, toolName: name, behavior: permResult.behavior });
