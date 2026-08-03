@@ -12,17 +12,26 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const AUDIT_FILE = process.env.COWORK_AUDIT_FILE || path.join(process.cwd(), 'cowork-audit.log');
-const MAX_BYTES = 4 * 1024 * 1024;
+// 用量后台上线后审计日志是唯一史料的"缓冲区"(增量拉进账号后端 PG),截断上限
+// 从 4MB 调大到 64MB —— 拉取周期内(分钟级)绝不可能写满,截断丢数据的窗口
+// 实际消失;env 可覆盖(=0 表示不截断,联调用)。
+const MAX_BYTES = (() => {
+  const v = parseInt(process.env.COWORK_AUDIT_MAX_BYTES || '', 10);
+  return Number.isFinite(v) && v >= 0 ? v : 64 * 1024 * 1024;
+})();
 
-export function audit(event, { sessionId, detail } = {}) {
+export function audit(event, { sessionId, detail, code, durationMs } = {}) {
   try {
     const rec = { ts: new Date().toISOString(), event };
     if (sessionId) rec.sessionId = sessionId;
     if (detail) rec.detail = detail;
+    // exec_end 专用(回合成败与时长的唯一结构化来源):code 允许 0,不能用 truthy 判
+    if (code !== undefined && code !== null) rec.code = code;
+    if (durationMs !== undefined && durationMs !== null) rec.durationMs = durationMs;
     fs.appendFileSync(AUDIT_FILE, JSON.stringify(rec) + '\n');
     // 软截断:超上限保留后半(粗粒度,对齐 app 侧 cowork-audit 语义)
     const { size } = fs.statSync(AUDIT_FILE);
-    if (size > MAX_BYTES) {
+    if (MAX_BYTES > 0 && size > MAX_BYTES) {
       const tail = fs.readFileSync(AUDIT_FILE).subarray(Math.floor(size / 2));
       const nl = tail.indexOf(0x0a);
       fs.writeFileSync(AUDIT_FILE, nl === -1 ? tail : tail.subarray(nl + 1));

@@ -33,6 +33,7 @@ import * as cred from './lib/cred-proxy.mjs';
 import { audit } from './lib/audit.mjs';
 import { resolveUser, authzEnabled } from './lib/authz.mjs';
 import { handleExec } from './lib/exec-bridge.mjs';
+import { ADMIN_UID, readAuditSince, collectStats } from './lib/admin.mjs';
 
 const PORT = parseInt(process.env.COWORK_SERVER_PORT || '8790', 10);
 // 监听地址:默认 0.0.0.0(客户端直连);上 TLS 反代时设 127.0.0.1,让 caddy/nginx
@@ -79,6 +80,66 @@ const server = http.createServer(async (req, res) => {
     const { uid } = auth;
 
     if (req.method === 'GET' && url.pathname === '/health') return send(200, await orch.health());
+
+    // —— 管理面(用量后台):只认 __admin__ token(账号后端服务端自签,普通用户
+    // token 恒为真实 UUID 不可能碰撞;authz 关闭 = dev 单用户,放行便于联调)。
+    // 语义与用户面刻意分离:admin 端点绕过 ownerReject(跨 uid 是它存在的意义),
+    // 且删除/下载写 admin_* 审计留痕 —— 经拉取器进后台事件流,对全体 admin 可见。
+    if (url.pathname.startsWith('/admin/')) {
+      if (authzEnabled && uid !== ADMIN_UID) return send(404, { error: 'not found' }); // 防枚举:不承认 /admin 存在
+
+      if (req.method === 'GET' && url.pathname === '/admin/audit') {
+        const offset = parseInt(url.searchParams.get('offset') || '0', 10) || 0;
+        return send(200, readAuditSince(offset));
+      }
+      if (req.method === 'GET' && url.pathname === '/admin/stats') {
+        return send(200, await collectStats());
+      }
+      const am = url.pathname.match(/^\/admin\/session\/([a-f0-9]{1,64})(?:\/(files|file|archive))?$/i);
+      if (am) {
+        const sid = am[1];
+        const op = (am[2] || '').toLowerCase();
+        if (req.method === 'GET' && op === 'files') {
+          return send(200, { ok: true, files: await files.listFiles(sid, 0) });
+        }
+        if (req.method === 'GET' && op === 'file') {
+          const vmPath = url.searchParams.get('path') || '';
+          try {
+            const { size, stream } = await files.readFile(sid, vmPath);
+            audit('admin_download', { sessionId: sid, detail: `${vmPath} (${size}B)` });
+            res.writeHead(200, { 'content-type': 'application/octet-stream', 'content-length': size });
+            stream.on('error', () => { try { res.destroy(); } catch { /* ignore */ } });
+            res.on('error', () => { /* 客户端断开 */ });
+            stream.pipe(res);
+            res.on('close', () => { try { stream.destroy(); } catch { /* ignore */ } });
+            return;
+          } catch (e) {
+            const msg = String(e?.message || e);
+            if (/escapes|invalid path/.test(msg)) return send(403, { error: msg.slice(0, 200) });
+            if (/No such file/.test(msg)) return send(404, { error: msg.slice(0, 200) });
+            throw e;
+          }
+        }
+        if (req.method === 'GET' && op === 'archive') {
+          const { size, stream, cleanup } = await files.archive(sid);
+          audit('admin_download', { sessionId: sid, detail: `archive (${size}B)` });
+          res.writeHead(200, { 'content-type': 'application/gzip', 'content-length': size });
+          stream.on('error', () => { try { res.destroy(); } catch { /* ignore */ } });
+          res.on('error', () => { /* 客户端断开 */ });
+          stream.pipe(res);
+          res.on('close', cleanup);
+          return;
+        }
+        if (req.method === 'DELETE' && !op) {
+          await orch.removeContainer(sid, { keepVolume: false });
+          await cred.revokeCredentials(sid);
+          lastActive.delete(sid); activeExec.delete(sid);
+          audit('admin_remove', { sessionId: sid, detail: ADMIN_UID });
+          return send(200, { ok: true });
+        }
+      }
+      return send(404, { error: 'not found' });
+    }
 
     if (req.method === 'POST' && url.pathname === '/reconcile') {
       const keep = (JSON.parse((await readBody(req)) || '{}').keep) || [];
@@ -216,7 +277,7 @@ server.on('upgrade', async (req, socket, head) => {
       ws.on('pong', () => { ws.isAlive = true; });
       execOpened(sid);
       ws.on('close', () => execClosed(sid));
-      handleExec(ws, sid, name, { shimPath: SHIM, log });
+      handleExec(ws, sid, name, { shimPath: SHIM, log, uid: auth.uid });
     });
   } catch (e) { log('upgrade error', e.message); try { socket.destroy(); } catch { /* ignore */ } }
 });
