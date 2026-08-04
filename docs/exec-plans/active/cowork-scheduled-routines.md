@@ -19,7 +19,7 @@
 | P0 | 技术验证：生产真机验 `claude -p` | — | ✅ 已完成 | 五条结论改变了实现，见「决策日志 2026-08-04 ②」 |
 | P1 | 账号后端内部凭证接口 | codeagent-server | ✅ **代码完成**（`99c044d`，未推送） | 21 单测 / 全仓 155 passed；**待部署 + 与 P2 联调** |
 | P2 | 沙箱执行器 `routine-runner` | cowork-server | ✅ **已完成并生产实测** | 成功/401/超时/溢出/并发闸全验；**顺带补完 P0 的成功路径** |
-| P3 | 沙箱调度 + 存储 + REST | cowork-server | 📋 待开始 | 依赖 P2 |
+| P3 | 沙箱调度 + 存储 + REST | cowork-server | ✅ **代码完成**（selftest-r5 37/37） | 已部署生产但**服务未重启**（会断在线用户 WS），等择时 |
 | P4 | 客户端数据层 + 代理路由 | LabCodepilot | 📋 待开始 | **契约冻结后即可并行** |
 | P5 | 客户端同步与物化 | LabCodepilot | 📋 待开始 | 依赖 P3 + P4 |
 | P6 | 客户端 UI 三层 | LabCodepilot | 📋 待开始 | 依赖 P4 |
@@ -232,7 +232,25 @@ const ok = exitCode === 0 && result?.is_error !== true && result?.api_error_stat
 
 ---
 
-## P3 · 沙箱调度 + 存储 + REST
+## P3 · 沙箱调度 + 存储 + REST ✅ 代码完成
+
+> 2026-08-04 交付（`b24db74`）。`selftest-r5.mjs` **37 项全过**（生产上跑的）。
+>
+> **交付**：`routine-store`（文件型存储）· `routine-cron`（**时区感知**求值，实测 0-3ms）·
+> `routine-scheduler`（60s tick + 补跑 + 配额 + 自动停用）· `routine-api`（REST 八端点）·
+> `orchestrator` 加 `cowork.kind` · `index.mjs` 接线 · `install.sh` 建 state 目录。
+>
+> **两条红色项已落地并被自检锁住**：reconcile 排除 `kind=routine`；`ROUTINE_ACTIVITY`
+> 把 `execOpened/execClosed` 接进 runner 与调度器（自检直接正则断言接线在位）。
+>
+> **自检抓到三个真问题**（全已修）：① `readBody` 返回原始字符串不是 JSON，当成对象用
+> 导致所有创建报「name is required」；② `getRoutine` 的校验在 try 内，路径穿越守卫不可观测；
+> ③ **自检把 2 行 `routine_end` 写进了生产审计日志**（audit.mjs 在模块加载时读
+> `COWORK_AUDIT_FILE`，我在 import 之后才设）——已修并复验行数不变，已发生的 2 行留档不改。
+>
+> ⚠️ **剩余**：生产服务**尚未重启**，仍跑旧代码。重启会断开在线用户的 WS
+> （检查时有 3 个会话容器在跑、6 分钟前还有真实用户的 exec）。需择低峰时段执行：
+> `systemctl restart cowork-server`，之后确认日志有 `routine scheduler started`。
 
 **目标**：客户端全程关闭，routine 也能按时自动跑完。
 
