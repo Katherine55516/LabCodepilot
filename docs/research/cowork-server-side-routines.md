@@ -27,20 +27,78 @@
 
 ---
 
+## 0.5 S0 实测结果（2026-08-04，生产服务器真机）
+
+在生产上建了一个 uid=`s0-probe` 的探针会话跑完全部验证，**结束后已清理，零残留**（真实用户的 8 个容器 / 27 个卷、5 条 egress 规则均未受影响）。
+
+### ✅ 证实的
+
+| # | 结论 | 证据 |
+|---|---|---|
+| 1 | `-p --output-format stream-json --verbose --dangerously-skip-permissions` **全部被接受**，首条即 `{"type":"system","subtype":"init",...}`（含 cwd / session_id / tools / model / permissionMode） | 直接跑通 |
+| 2 | **不需要给 shim 加 `--oneshot`** —— 往 stdin 写 4 字节零长帧（`printf '\0\0\0\0'`）就是现有协议的优雅 EOF，shim **零改动**即可跑 one-shot | `docker exec -i … cowork-shim.py -- -p "hi" … < 零长帧` 直接出 init 消息 |
+| 3 | **绕开 shim 会丢掉全部 5 个办公 skill** —— 直连 claude 只有 14 个内置 skill；经 shim 是 19 个，多出 `docx-manipulation` / `xlsx-manipulation` / `pptx-manipulation` / `pdf-extraction` / `office-cn`，且 `cwd=/workspace` 正确 | 两次 init 消息的 `skills` 数组对比 |
+| 4 | **退出码经 shim 正确传播** | `--version` → 0；`--no-such-flag` → 1 |
+| 5 | result 消息自带 `duration_ms` / `total_cost_usd` / `usage`（4 类 token）/ `num_turns` / `modelUsage` —— **配额与用量统计免费拿到** | 见下方 result 样本 |
+| 6 | 容器内默认模型 `claude-opus-4-8[1m]`，`permissionMode` 已是 `bypassPermissions` | init 消息 |
+
+### 🔴 两个会直接导致 bug 的发现
+
+**① `subtype: "success"` 是陷阱 —— 判成败绝不能看它。**
+
+一个 401 全程失败的回合，最后一条是：
+```json
+{"type":"result","subtype":"success","is_error":true,"api_error_status":401,
+ "duration_ms":180784,"num_turns":1,"result":"Failed to authenticate. API Error: 401 …",
+ "total_cost_usd":0,"terminal_reason":"completed"}
+```
+**`subtype` 字面就是 `"success"`，而 `is_error: true`。** 这比 Claude 官方文档警告的"绿色状态不代表任务成功"更险——字段名本身就在误导。
+
+> **runner 判定口径（写死）**：`ok = (exitCode === 0) && (result.is_error !== true) && (result.api_error_status == null)`。**任何情况下不读 `subtype`。**
+
+**② 坏凭证不会快速失败，而是烧 181 秒。**
+
+401 触发 `max_retries: 10` 的指数退避（0.5s → 1s → 2.2s → 4.4s → 8.3s → 16.6s → 38.5s → 38.3s …），实测**总耗时 181 秒**才 exit 1。这正是交接文档 A.5⑤ 记的"卡 2 分 23 秒"同一现象。
+
+对定时任务的影响比交互回合严重得多：没人盯着，一个凭证配错的 routine 每次触发白占一个容器 3 分钟，N 个 routine × 每天 M 次会持续挤占并发额度。
+
+> **runner 必须做的**：流式解析 stdout，**看到第一条 `{"type":"system","subtype":"api_retry","error_status":401}` 就主动 abort**（kill + 标记 `credential_error`），不等它退避完。非 401 的 retry（429/5xx）可以让它退避。
+
+### ⚠️ 勘误：先前读的是旧分支
+
+本文 §1 最初基于 `para` 分支的 `apps/cowork-server/`（255 行 index.mjs）。**生产实际跑的是 `vm_cowork` 分支**（316 行 + `lib/admin.mjs`，已核实 `/opt/cowork-server/lib/admin.mjs` 存在）。差异 342 行，且**其中两项直接改善了本方案**：
+
+**(a) 服务间通道已经存在。** `lib/admin.mjs` + `index.mjs` 的 `/admin/*` 分支：账号后端用共享密钥自签 uid=`__admin__` 的 token（`app/cowork/usage_service.py:sign_admin_token`，TTL 300s），沙箱侧只认这个 uid，其余一律 404 防枚举。已有端点：`GET /admin/audit?offset=` / `GET /admin/stats` / `GET /admin/session/:id/{files,file,archive}` / `DELETE /admin/session/:id`。
+
+→ **凭证接口不需要新的密钥体系**，只需把同一套 HMAC 反向用一次（见 §9）。
+
+**(b) `exec_end` 审计事件已经有了。** `exec-bridge.mjs` 在 exec 退出时写 `audit('exec_end', {sessionId, detail: uid, code, durationMs})`，注释写明这是"回合成败/时长的唯一结构化来源"。而账号后端的 `usage_service.py` 已经在**惰性增量拉取** `/admin/audit` 落 PG（`CoworkAuditEvent`）供 admin 用量后台。
+
+→ **routine 的用量统计几乎免费**：runner 只要照写 `routine_fire` / `routine_end` 事件，就自动流进已有管线。审计截断上限也已从 4MB 调到 64MB 正是为此。
+
+### ❓ 尚未验证的一项
+
+**成功路径没跑**——需要一个真实可用的模型凭证。机制面（argv、输出格式、退出码、skill、cwd、frame EOF）全部已证，剩下的只是"有 key 时能不能正常出 assistant 消息并写文件到 /workspace"，而这条路径交互回合每天都在跑（交接文档 A.8 有 `file_download /workspace/1.md (294B)` 的实证）。**风险低但不为零，建议拿到凭证后补跑一次**（见文末待办）。
+
+---
+
 ## 1. cowork-server 实现读解
+
+> ⚠️ 下文行号基于 **`vm_cowork` 分支**（= 生产部署版）。`para` 分支的版本较旧，缺 `lib/admin.mjs`。
 
 ### 1.1 全貌
 
 ```
-apps/cowork-server/                     1874 行，运行时依赖只有 ws 一个
-├── index.mjs              255   HTTP + WS 单入口，路由/鉴权/空闲回收
+apps/cowork-server/           (vm_cowork = 生产版)  运行时依赖只有 ws 一个
+├── index.mjs              316   HTTP + WS 单入口，路由/鉴权/空闲回收/管理面
 ├── lib/
 │   ├── orchestrator.mjs   240   容器 per 会话编排（docker labels 作事实源）
 │   ├── files.mjs          201   文件通道四 op（短命 helper 容器直读 volume）
+│   ├── admin.mjs          139   管理面数据源：审计增量读 + docker 现查统计
 │   ├── cred-proxy.mjs     127   凭证代理编排 + 经 stdin 注入
 │   ├── authz.mjs           69   HMAC token 验签取 uid，无状态
-│   ├── exec-bridge.mjs     53   WS ↔ docker exec 帧桥
-│   └── audit.mjs           33   append-only JSONL 审计
+│   ├── exec-bridge.mjs     65   WS ↔ docker exec 帧桥 + exec_end 审计
+│   └── audit.mjs           42   append-only JSONL 审计（64MB 软截断）
 ├── container/
 │   ├── cowork-shim.py     166   容器内解帧器 + 预制 skill 软链
 │   └── cred-proxy.py      154   sidecar：校验 cwk_ token → 注入真 key → 转发
@@ -142,14 +200,14 @@ SDK query()
 
 **两条路：**
 
-**(a) RD4 方案 C —— 服务端向账号后端直取（推荐）**
+**(a) RD4 方案 C —— 服务端向账号后端直取（推荐，详细设计见 §9）**
 ```
-cowork-server ──service secret──> codeagent-server
-  GET /api/v1/internal/cowork/model-credentials?uid=<uid>
+cowork-server ──HMAC token(uid=__sandbox__)──> codeagent-server
+  GET /api/v1/internal/cowork/model-credentials?uid=<用户 UUID>
   → { realKey, realBase, authStyle }
      └ 喂进现有的 cred.registerCredentials(routineSid, {...})   ← 零改动
 ```
-账号后端**本来就持有**这些 managed 凭证（它就是下发方），这是反向复用同一套体系。契约可以照抄已有的 `docs/cowork-config-api.md`（R5-5 交付的那份）的形状。
+账号后端**本来就持有**这些 managed 凭证（它就是下发方）。而且 —— **服务间信道已经存在**：账号后端现在就在用共享密钥自签 uid=`__admin__` 的 token 调沙箱 `/admin/audit` 拉用量（§0.5 勘误 (a)）。本接口只是把同一套 HMAC **反向用一次**，不引入新密钥体系。
 
 **(b) 客户端预存 —— 更便宜但有致命缺陷**
 客户端创建 routine 时把凭证存到服务端，之后一直用。
@@ -166,43 +224,38 @@ cowork-server ──service secret──> codeagent-server
 
 现有 `exec-bridge.mjs` 是为"给 SDK 当管道"设计的：等 WS header、解帧、双向泵。定时任务不需要交互，只需要**跑完一轮、拿到结果**。
 
-**做法**：给 shim 加一个 one-shot 模式，服务端直接 spawn，不经 WS。
-
-```python
-# container/cowork-shim.py —— 新增分支
-# 用法: python3 cowork-shim.py --oneshot -- <claude argv...>
-# 与帧模式的唯一区别:不解帧、stdin 直接关闭(prompt 在 argv 里),
-# stdout 原样透传。link_preinstalled_skills() 照常执行 —— 这是必须走 shim 的原因。
-```
+**做法（S0 实测后简化）**：~~给 shim 加 one-shot 模式~~ —— **shim 零改动**。往 stdin 写一个 4 字节零长帧就是现有协议的优雅 EOF，claude 在 `-p` 模式下 prompt 来自 argv、本就不需要 stdin。
 
 ```js
 // lib/routine-runner.mjs（新建）
 const args = [
-  'exec', '-i',
+  'exec', '-i', '-u', '1000', '-w', '/workspace',
   '-e', `ANTHROPIC_BASE_URL=${baseUrl}`,           // cred-proxy
   '-e', `ANTHROPIC_AUTH_TOKEN=${cwkToken}`,        // 一次性 token
-  containerName, 'python3', SHIM, '--oneshot', '--',
+  containerName, 'python3', SHIM, '--',            // ← 必须走 shim,否则丢 5 个办公 skill
   '-p', prompt,
   '--output-format', 'stream-json', '--verbose',
   '--dangerously-skip-permissions',                // 办公模式本来就是这个模式
   ...(model ? ['--model', model] : []),
 ];
+const child = spawn('docker', args, { stdio: ['pipe', 'pipe', 'pipe'] });
+child.stdin.end(Buffer.alloc(4));                  // ← 零长帧 = 优雅 EOF,就这一行
 ```
 
 **为什么 `--dangerously-skip-permissions` 是对的**：办公模式的交互回合本来就走 `bypassPermissions`（`claude-client.ts:382`），容器内已经强制非 root（`orchestrator.mjs:158`，正是因为 claude 禁止 root + 该参数）。这同时天然满足了 Claude Routines 的"全自主、无审批"语义。
 
-**必须配套的三个护栏**（交互回合有人盯着，定时任务没有）：
+**必须配套的四个护栏**（交互回合有人盯着，定时任务没有）：
 | 护栏 | 值 | 理由 |
 |---|---|---|
+| **401 立即中止** | 见到首条 `api_retry` 且 `error_status:401` 即 kill | **S0 实测：不做就白烧 181 秒**（§0.5 ②） |
 | 硬超时 | `COWORK_ROUTINE_TIMEOUT_MS`，默认 15min | claude 可能卡住；超时 SIGTERM → 3s 后 SIGKILL |
 | 输出上限 | transcript 单次 ≤ 8MB | 防日志盘打爆 |
-| 并发上限 | `COWORK_ROUTINE_CONCURRENCY`，默认 4 | 32 核 / 每容器 2 核，见 R6 |
+| 并发上限 | `COWORK_ROUTINE_CONCURRENCY`，默认 4 | 32 核 / 每容器 2 核，见 R4 |
 
-**⚠️ 待 POC 验证**：容器内 claude 2.1.203 的 `-p --output-format stream-json` 具体行为（退出码语义、结果消息形状、是否需要 `--verbose`）**没有实测过**，这是本方案的第一个 POC 项，应在动工前用一条 SSH 命令验掉：
-```bash
-docker exec -i -u 1000 -e ANTHROPIC_BASE_URL=... -e ANTHROPIC_AUTH_TOKEN=... \
-  cowork-<sid> /opt/cowork/claude -p "列出 /workspace 下的文件" \
-  --output-format stream-json --verbose --dangerously-skip-permissions
+**成败判定（S0 实测后写死，见 §0.5 ①）**：
+```js
+const ok = exitCode === 0 && result?.is_error !== true && result?.api_error_status == null;
+// 绝不读 result.subtype —— 它在 401 全失败时仍然是 "success"
 ```
 
 ### 3.3 断点③：状态持久化 —— 文件型 store，不引依赖
@@ -323,16 +376,17 @@ tick.unref?.();
 
 ## 5. 分期
 
-| 期 | 内容 | 阻塞依赖 | 验收 |
-|---|---|---|---|
-| **S0** | POC：SSH 到生产，手工 `docker exec` 跑一次 `claude -p --output-format stream-json`，确认输出形状与退出码 | 无 | 拿到一份真实 transcript 样本 |
-| **S1** | 账号后端加内部凭证接口（RD4-C）+ service secret | **关键路径，最先启动** | cowork-server 能用 uid 换到可用凭证 |
-| **S2** | shim `--oneshot` + `routine-runner.mjs` + 三护栏（超时/输出上限/并发） | S0 | 手工触发一条 routine 跑完，transcript 落盘 |
-| **S3** | store + 调度循环 + REST 七个端点 + `cowork.kind=routine` label + reconcile 排除 + `execOpened` 续命 | S2 | 建一条 cron routine，客户端全程关闭，到点自动跑完 |
-| **S4** | 客户端：`/api/routines/*` 代理 + 拉取物化 + 办公 tab 定时入口 + 列表/表单/详情/历史 UI | S3 | 打开 app 看到离线期间的运行记录，可点开看全过程 |
-| **S5** | 配额（per-uid 日上限）、审计事件、`OPERATIONS.md` 补章、selftest-r5 | S3 | selftest 覆盖：调度触发/超时/并发上限/跨用户 404/凭证用后即废 |
+| 期 | 内容 | 阻塞依赖 | 验收 | 状态 |
+|---|---|---|---|---|
+| **S0** | 生产真机验 `claude -p stream-json`：argv / 输出形状 / 退出码 / shim 差异 / EOF 方式 | 无 | 拿到真实样本 | ✅ **完成**（§0.5）。剩成功路径待补一次 |
+| **S1** | 账号后端内部凭证接口（RD4-C，§9）+ 沙箱侧取数客户端 | **关键路径** | cowork-server 能用 uid 换到可用凭证 | 📋 |
+| **S2** | `routine-runner.mjs` + 四护栏（401 立即中止 / 超时 / 输出上限 / 并发）+ 成败判定口径 | S0 ✅ | 手工触发一条 routine 跑完，transcript 落盘 | 📋 （**shim 零改动**） |
+| **S3** | store + 调度循环 + REST 七个端点 + `cowork.kind=routine` label + reconcile 排除 + `execOpened` 续命 | S2 | 建一条 cron routine，客户端全程关闭，到点自动跑完 | 📋 |
+| **S4** | 客户端全套（§10）：代理路由 + 拉取物化 + UI + MCP 工具 | S3 | 打开 app 看到离线期间的运行记录，可点开看全过程 | 📋 |
+| **S5** | 配额（per-uid 日上限）、`routine_*` 审计事件、`OPERATIONS.md` 补章、selftest-r5 | S3 | selftest 覆盖：调度触发/401 快失败/超时/并发上限/跨用户 404/凭证用后即废 | 📋 |
 
 **S1 是关键路径**，建议立刻确认账号后端的接口排期，其余各期可并行准备。
+S0 已把 S2 的不确定性基本清空（唯一剩项是成功路径，风险低）。
 
 ---
 
@@ -389,3 +443,216 @@ tick.unref?.();
            → 办公列表「定时」分组出现「每日销售日报」，点开看全过程
            → 产物卡片走已有文件通道下载 xlsx
 ```
+
+---
+
+## 9. 账号后端内部凭证接口（S1）
+
+代码位置：`/Users/yuanqi/project/codeagent-server/`。已读 `app/cowork/{router,service,usage_service}.py`、`app/config_set/service.py`、`app/api_key/service.py`。
+
+### 9.1 凭证在账号后端的真实来源
+
+读代码确认的链路（不是推测）：
+
+```
+uid（= Claims.sub = 用户 UUID）
+ └ ConfigService.list_for_client(user_id, username)      app/config_set/service.py:43
+    ├ repo.get_user_plan_id(user_id)                     ← 套餐门控，拿不到套餐返回空集
+    ├ repo.list_visible(only_enabled=True, plan_id)      ← 该套餐可见的 managed 配置
+    └ ApiKeyService.ensure_active(user_id, username)     app/api_key/service.py:53
+       └ ActiveKey.plaintext                             ← 懒创建：没有就去 new-api 建一个
+ → ConfigItem { base_url, auth_token, model, default_opus_model, … }
+```
+
+**关键认知**：`base_url` 属于配置行，`auth_token` 属于「用户 × new-api」，两者在 `list_for_client` 里被拼到一起。所以内部接口**不需要新的取数逻辑，直接复用 `ConfigService`**。
+
+### 9.2 接口契约
+
+```
+GET /api/v1/internal/cowork/model-credentials?uid=<用户 UUID>&config_id=<可选>
+Authorization: Bearer <HMAC token, uid=__sandbox__, 必带 exp>
+
+200 → { "base_url": "...", "auth_token": "...", "auth_style": "auth_token",
+        "config_id": "...", "config_name": "...",
+        "default_models": { "opus": "...", "sonnet": "...", "haiku": "..." } }
+404 → 该 uid 无套餐 / 无可见配置 / cowork 未开通   （同一响应，不区分原因，防探测）
+409 → 用户在 new-api 不存在（沿用 /configs 的既有语义）
+```
+
+`config_id` 省略时取 `sort_order` 最小的 enabled 配置。routine 记录里存 `config_id`，保证「建 routine 时选的哪套模型，将来就一直用哪套」，不会因为管理员调 `sort_order` 而漂移。
+
+`default_models` 一并返回，让沙箱侧能把 routine 存的 `"opus"` 这类逻辑名解析成真实模型 id —— 复用 managed 的模型别名体系（memory 记过：managed 模型 id 可能是 `claude-opus-4-7[1m]` 这类 CLI 别名，而这里**恰好就是在跑 CLI**，别名天然可解析，比走 `@ai-sdk` 直连更稳）。
+
+### 9.3 鉴权：为什么建议**另起一个密钥**
+
+现成的路子是复用 `COWORK_AUTH_SECRET`（账号后端已经用它自签 `__admin__` 调沙箱）。技术上可行，但**这里必须停一下**：
+
+| | 现在 | 加了本接口之后 |
+|---|---|---|
+| 拿到 `COWORK_AUTH_SECRET` 能干什么 | 冒充任意用户访问**沙箱**（会话、文件） | 再加一条：**批量导出全体用户的模型 API key** |
+
+密钥存在沙箱服务器的 `/opt/cowork-server/.env`。沙箱是**跑不可信 agent 代码**的机器 —— 它被攻破的概率本来就高于账号后端，而这个改动会让"攻破沙箱"直接升级成"拖走所有人的模型凭证"。**这是一次质变，不是量变。**
+
+**建议**：
+- 单独的 `APP_COWORK_INTERNAL_SECRET`（沙箱侧 `COWORK_INTERNAL_SECRET`），与 `COWORK_AUTH_SECRET` 分开轮换
+- token **必须带 `exp`**，TTL ≤ 60s（`sign_cowork_token` 已支持 `ttl_sec`，直接可用）
+- 保留 uid `__sandbox__`（用户 uid 恒为 UUID，不可能碰撞 —— 与 `__admin__` 同一论证）
+- 落审计：记 `requested_uid` + 调用方 IP + 时间，**绝不记 key 本体**
+- 频控：同一 uid 每分钟 ≤ N 次（正常情况一个 routine 触发只取一次）
+- 网络层：接口只挂在内部路由前缀，配合反代限制来源 IP
+
+如果嫌两套密钥麻烦，退一步的最小要求是：**至少把 `exp` 和审计做上**，并且明确接受"沙箱失陷 = 凭证全泄"这个风险。这个取舍需要你拍板。
+
+### 9.4 落地文件清单（codeagent-server）
+
+| 文件 | 改动 |
+|---|---|
+| `app/cowork/internal.py` | **新建**：路由 + `__sandbox__` token 校验依赖 |
+| `app/cowork/service.py` | 加 `verify_sandbox_token(token) -> bool`（与 `sign_cowork_token` 对称的验签）+ `resolve_internal_secret()` |
+| `app/cowork/schemas.py` | `ModelCredentialsResponse` |
+| `app/deps.py` | 依赖注入 `SandboxAuthDep` |
+| `app/config.py` | `APP_COWORK_INTERNAL_SECRET` |
+| `app/main.py`（或 router 汇总处） | 挂 `/api/v1/internal` 前缀 |
+| `docs/cowork-internal-credentials-api.md` | **新建**：契约 + golden 向量（照抄 `cowork-config-api.md` 的写法，那份已被沙箱侧验签实证过） |
+| `tests/cowork/test_internal_credentials.py` | 验签通过/失败/过期、uid 不存在 404、无套餐 404、new-api 缺号 409 |
+| `.env.production.example` + `docker-compose.yml` | **透传新变量** —— ⚠️ 交接文档 A.5④ 记过：compose 漏透传 `APP_COWORK_*` 导致接口对所有人 404，别再踩 |
+
+---
+
+## 10. 客户端设计（S4）
+
+### 10.1 角色转变：客户端不再参与执行
+
+这是和现有办公模式**最根本的差别**，先说清楚：
+
+| | 现有办公会话 | 定时任务 |
+|---|---|---|
+| agent loop 在哪 | **客户端** Next server（SDK query） | **服务端**（`claude -p`） |
+| 客户端角色 | 驱动者，关掉就断 | **纯管理与展示前端**，关掉不影响 |
+| 消息从哪来 | 本地 SDK 实时流 | 服务端 transcript **重放** |
+
+所以客户端要做的三件事只是：**管理（CRUD）、拉取（同步）、展示（物化成会话）**。
+
+### 10.2 核心设计决策：一次运行就物化成一个办公会话
+
+不新建"运行记录"的展示体系，而是把每次 run **重放成现有的 `chat_sessions` + `messages`**。
+
+这样一来，整个聊天 UI、产物卡片、Markdown 渲染、代码高亮、导出、搜索**全部零成本复用**，而且天然满足"点开看 Claude 到底干了什么"这条体验要求（U6）。
+
+代价是要写一个 transcript → messages 的转换器。但服务端存的是 claude CLI 的 stream-json，与 SDK 消息**是同一套 message 形状**（`type: system/assistant/user/result`），S0 的样本已经证实，转换器不复杂。
+
+### 10.3 数据模型
+
+**本地是缓存，服务端是权威。** 冲突一律以服务端为准（拉取即覆盖），不做本地编辑合并。
+
+```sql
+-- 新表：routine 定义的本地镜像
+CREATE TABLE cowork_routines (
+  id TEXT PRIMARY KEY,              -- 服务端 routine id（同时也是它的 sid）
+  owner_uid TEXT NOT NULL,          -- 账号隔离，与 chat_sessions 同一机制
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  prompt TEXT NOT NULL,
+  model TEXT,
+  config_id TEXT,                   -- §9.2：锁定 managed 配置，防漂移
+  schedule_kind TEXT NOT NULL,      -- cron | once | manual
+  schedule_expr TEXT NOT NULL DEFAULT '',
+  schedule_tz TEXT NOT NULL DEFAULT '',
+  enabled INTEGER NOT NULL DEFAULT 1,
+  next_run_at TEXT, last_run_at TEXT, last_status TEXT,
+  synced_at TEXT NOT NULL,          -- 最后一次与服务端对齐的时间
+  created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+);
+
+-- chat_sessions 加两列：标记「这个会话是某次定时运行物化来的」
+ALTER TABLE chat_sessions ADD COLUMN routine_id TEXT;
+ALTER TABLE chat_sessions ADD COLUMN routine_run_id TEXT;
+CREATE INDEX idx_sessions_routine ON chat_sessions(routine_id);
+```
+
+**运行记录不单独建表** —— run 就是一个 session，`routine_run_id` 做幂等键（重复拉取不重复物化）。
+
+### 10.4 同步与物化
+
+```
+routine-sync.ts
+ ├ 触发时机：app 启动 / 打开定时面板 / 每 10 分钟（对齐现有 cowork config 同步节奏）
+ ├ 1. GET /routines                    → upsert cowork_routines（按 owner_uid）
+ ├ 2. GET /routines/:id/runs?since=<本地最新 run 的时间戳>
+ ├ 3. 对每条新 run：
+ │     ├ GET /runs/:runId/transcript   → stream-json
+ │     ├ replayTranscript() → Message[]
+ │     ├ createSession({ sandbox_enabled:1, owner_uid, routine_id, routine_run_id,
+ │     │                 title: `${routine.name} · ${本地时间}` })
+ │     └ 批量 addMessage()
+ └ 4. 有新 run → notification-manager 发通知
+       离线期间多条 → 合并成一条汇总（"你不在时跑了 3 次，2 成功 1 失败"）
+```
+
+**幂等**：物化前先查 `routine_run_id` 是否已存在，存在则跳过。断网/中途失败重试安全。
+
+**失败的 run 也要物化**，把 `is_error` + 错误文本渲染成一条醒目的消息 —— 定时任务最需要被看见的恰恰是失败。
+
+### 10.5 UI
+
+形态照 Claude 桌面版的 Routines 页，**但入口放在办公 tab 内**（不是设置页 —— 它是工作对象，不是配置项）。
+
+**入口**：`ChatListPanel.tsx` 办公 tab 的功能行现在是 `activeTab === 'office' && <文生图>`（`:719`），在同位置并列加一个「定时」按钮。
+
+**三个界面**：
+| 界面 | 内容 |
+|---|---|
+| 列表 | 名称 / 描述 / 人类可读调度（"每个工作日 09:00"，由 `schedule_kind+expr+tz` 渲染，不给用户看裸 cron）/ 下次运行 / 状态徽标（运行中·已暂停·已完成·连续失败） |
+| 新建・编辑 | 名称 + 描述 + 指令（复用 `MessageInput` 的编辑体验）+ 模型选择器（复用现有 managed 下拉）+ 调度选择器（预设 每小时/每天/工作日/每周/仅手动 + 一次性时间 + 高级 cron）|
+| 详情 | 立即运行（可带一次性文本）/ 暂停恢复 / 编辑 / 删除 + **运行历史表**（时间·耗时·状态·成本），点任一行跳到物化的会话 |
+
+**会话列表分组**：办公 tab 的会话列表里，`routine_id` 非空的归入「定时」分组（对齐 Claude Desktop 的 Scheduled 分组），与手动会话分开。
+
+**调度选择器不暴露裸 cron 作为主路径** —— 预设覆盖 90% 场景，cron 藏在「高级」里。这是 Claude 两个产品面（Web 预设 + CLI cron）的一致做法。
+
+### 10.6 三条创建入口
+
+1. **UI 表单**（主）
+2. **对话里自然语言** —— `src/lib/routines-mcp.ts` 注册 `codepilot_routine_{create,list,update,delete,run}`，复刻现有 `notification-mcp` 的注册范式。用户说「每个工作日早上把昨天的数据整理成表发我」直接建出来。**只在办公会话注册**（研发会话没有沙箱，建了也跑不了）
+3. **从现有办公会话「存为定时任务」** —— 把当前会话的最后一条 user prompt 预填进新建表单。这是最自然的发现路径：用户手动干了一次，觉得每天都要干，顺手固化
+
+### 10.7 门控与降级
+
+- **可用性 = 办公模式可用性**：复用 `/api/cowork/status` 的 `assets.overall`。未开通/非支持平台 → 「定时」按钮**不渲染**（不是置灰 —— 对齐 R5-6 已定的"绝不给不可用的下载按钮"原则）
+- **服务端不可达**：列表用本地缓存渲染 + 顶部一条「离线，显示的是上次同步的数据」提示条。**不允许本地新建**（会和服务端状态分叉）
+- **换账号**：清空 `cowork_routines` 重拉；物化的 session 靠 `owner_uid` 天然隔离
+
+### 10.8 落地文件清单（LabCodepilot）
+
+**新建**
+| 文件 | 职责 |
+|---|---|
+| `src/lib/routines-client.ts` | 沙箱 REST 客户端（复用 `cowork-backend-remote.ts` 的 `remoteConfig`/`authHeaders` 模式） |
+| `src/lib/routine-transcript.ts` | stream-json → `Message[]`（纯函数，好单测） |
+| `src/lib/routine-sync.ts` | 拉取 + 幂等物化 + 通知 |
+| `src/lib/routines-mcp.ts` | 五个 MCP 工具 |
+| `src/app/api/routines/route.ts`<br>`src/app/api/routines/[id]/route.ts`<br>`src/app/api/routines/[id]/run/route.ts`<br>`src/app/api/routines/[id]/runs/route.ts` | 代理层 —— **token 留在 Next server，绝不进 renderer**（沿用现有 cowork 路由的做法） |
+| `src/components/routines/{RoutinePanel,RoutineForm,RoutineDetail,RoutineRunHistory,Schedulepicker}.tsx` | UI |
+
+**改**
+| 文件 | 改动 |
+|---|---|
+| `src/lib/db.ts` | `cowork_routines` 表 + `chat_sessions` 两列 + 迁移（`safeAddColumn`） |
+| `src/types/index.ts` | `CoworkRoutine` / `RoutineRun` / `RoutineSchedule` |
+| `src/components/layout/ChatListPanel.tsx` | 办公 tab 加「定时」入口 + 会话列表「定时」分组 |
+| `src/lib/claude-client.ts` | 办公会话注册 routines MCP |
+| `src/i18n/{en,zh,zh-HK}.ts` | 三语键。⚠️ **zh-HK 手工加，别跑 `gen-zh-hk.mjs`**（会回退约 40 个已校对的港式术语） |
+
+### 10.9 ⚠️ 必须先处理：和现有 `task-scheduler.ts` 的关系
+
+本仓库**已经有一套定时任务**（`src/lib/task-scheduler.ts` + `scheduled_tasks` 表 + `/api/tasks/*`，客户端调度、纯文本执行、无 UI，详见 [cowork-scheduled-routines.md §2](cowork-scheduled-routines.md)）。
+
+两套并存会让用户看到两个"定时任务"，且语义完全不同（一个跑在本机只会生成文字、一个跑在沙箱是完整 agent）。**必须选一个：**
+
+| 选项 | 说明 |
+|---|---|
+| **A. 下线旧的**（倾向） | 它没有 UI、执行能力残废、还有 owner_uid 跨账号缺陷。删代码 + 保留表做数据迁移窗口 |
+| B. 划清边界 | 旧的降级为"助理提醒"，只在助理 workspace 内部用，不在办公 tab 露面，改名避免混淆 |
+| C. 合并 | 旧表迁进新体系。**不推荐** —— 数据模型和执行语义都对不上，迁移成本大于重建 |
+
+这条需要你拍板，且应该在 S4 动工**之前**定，否则 UI 文案和入口位置都没法定。
