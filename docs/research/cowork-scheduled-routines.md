@@ -2,6 +2,11 @@
 
 > 调研时间：2026-08-04
 > 触发：希望在办公模式下做定时任务，体验对齐 Claude 云端 Routines
+>
+> ⚠️ **本文 §4 的决策 D1 已由用户拍板：走方案 B（服务端调度），定时任务跑在沙箱服务器上，不在用户电脑上跑。**
+> 服务端实现读解与落地设计见 **[cowork-server-side-routines.md](cowork-server-side-routines.md)**。
+> 本文保留作为**能力对标基线**（§1 的 Claude 三套调度辨析与 U1-U15 验收清单仍然有效），
+> 但 §3/§5 的分期建议（先客户端）已被推翻，不要按它施工。
 > 相关：[cowork-remote-container.md](cowork-remote-container.md)（办公模式底座）· [handover/cowork-vm-mode.md](../handover/cowork-vm-mode.md)（当前状态）· [exec-plans/active/scheduled-tasks-notifications.md](../exec-plans/active/scheduled-tasks-notifications.md)（**状态表已过期，见 §2**）
 
 ---
@@ -226,7 +231,10 @@ A 先落地并把数据模型按 B 的形状设计（routine 是一等实体、r
 | 凭证 | 复用现状 | **需 RD4-C（未做）** |
 | 容量风险 | 无（单机单用户） | 需队列/配额 |
 
-**建议**：先 A，把 B 当 P3。理由：办公场景的定时任务多是"每天上班前把昨天数据整理好"——用户第二天开机就要看到结果，**开机补跑最近一次**在体感上和真云端差别不大；而 B 的凭证前置牵动账号后端，不该阻塞整个功能上线。
+~~**建议**：先 A，把 B 当 P3。~~
+✅ **已拍板：走 B（服务端调度）。** 用户明确要求跑在沙箱服务器上、不占用户电脑。
+后续读 [cowork-server-side-routines.md](cowork-server-side-routines.md) —— 那份基于对 `apps/cowork-server/` 全量代码的实读，
+结论是适配度远高于本文估计（九项基础设施现成、三项要做），B 的成本被本文高估了。
 
 ### D2：每次运行 = 新会话新容器，还是同一工作区新对话？
 
