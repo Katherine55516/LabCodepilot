@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>沙箱定时任务 · 交互原型</title>
+<title>沙箱定时任务 · 交互原型 v2</title>
 </head>
 <body>
 <style>
@@ -15,7 +15,6 @@
     --muted-fg: oklch(0.553 0.013 58.071);
     --border: oklch(0.923 0.003 48.717);
     --primary: oklch(0.546 0.245 262.881);
-    --primary-fg: oklch(0.985 0.001 106.423);
     --ok: oklch(0.577 0.17 149);
     --warn: oklch(0.65 0.19 47.6);
     --err: oklch(0.577 0.215 27.3);
@@ -56,7 +55,7 @@
 
   header.top { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
   h1 { font-size: 22px; letter-spacing: -0.01em; }
-  .subtitle { color: var(--muted-fg); margin-top: 8px; max-width: 80ch; }
+  .subtitle { color: var(--muted-fg); margin-top: 8px; max-width: 82ch; }
   .chip { display: inline-flex; align-items: center; gap: 5px; font-size: 11px; padding: 2px 8px;
           border-radius: 999px; border: 1px solid var(--border); background: var(--muted); color: var(--muted-fg); white-space: nowrap; }
   .chip.rt { background: var(--rt-bg); color: var(--rt); border-color: transparent; font-weight: 600; }
@@ -70,7 +69,7 @@
 
   nav.steps { display: flex; flex-wrap: wrap; gap: 6px; margin: 20px 0 18px; padding-bottom: 14px; border-bottom: 1px solid var(--border); }
   nav.steps button { display: inline-flex; align-items: center; gap: 7px; font-size: 12.5px; padding: 7px 12px;
-    border-radius: 8px; border: 1px solid var(--border); background: var(--card); color: var(--muted-fg); transition: .12s; }
+    border-radius: 8px; border: 1px solid var(--border); background: var(--card); color: var(--muted-fg); transition: .12s; cursor: pointer; font-family: inherit; }
   nav.steps button:hover { color: var(--fg); border-color: var(--rt); }
   nav.steps button.active { background: var(--rt); border-color: var(--rt); color: #fff; }
   nav.steps .n { display: grid; place-items: center; width: 17px; height: 17px; border-radius: 999px;
@@ -89,18 +88,17 @@
   .stage + .stage { margin-top: 18px; }
 
   /* —— app 外壳 —— */
-  .app { display: grid; grid-template-columns: 236px 1fr; min-height: 460px; }
+  .app { display: grid; grid-template-columns: 236px 1fr; min-height: 480px; }
   .side { border-right: 1px solid var(--border); background: var(--muted); padding: 10px; display: flex; flex-direction: column; gap: 9px; }
   .seg { display: flex; gap: 3px; background: var(--card); border: 1px solid var(--border); border-radius: 8px; padding: 3px; }
-  .seg button { flex: 1; font-size: 12px; padding: 4px 0; border: 0; border-radius: 5px; background: transparent; color: var(--muted-fg); }
+  .seg button { flex: 1; font-size: 12px; padding: 4px 0; border: 0; border-radius: 5px; background: transparent; color: var(--muted-fg); font-family: inherit; cursor: pointer; }
   .seg button.on { background: var(--rt); color: #fff; font-weight: 600; }
   .sidebtns { display: flex; flex-direction: column; gap: 5px; }
   .sb { display: flex; align-items: center; gap: 7px; font-size: 12.5px; padding: 6px 9px; border-radius: 7px;
-        border: 1px solid var(--border); background: var(--card); color: var(--fg); text-align: left; }
-  .sb.primary { background: var(--rt); border-color: var(--rt); color: #fff; font-weight: 600; }
+        border: 1px solid var(--border); background: var(--card); color: var(--fg); text-align: left; font-family: inherit; cursor: pointer; }
+  .sb.primary { background: var(--rt); border-color: var(--rt); color: #fff; font-weight: 600; justify-content: center; }
   .sb.hl { border-color: var(--rt); color: var(--rt); font-weight: 600; box-shadow: 0 0 0 3px var(--rt-bg); }
-  .sbrow { display: grid; grid-template-columns: 1fr 1fr; gap: 5px; }
-  .grp { font-size: 10.5px; color: var(--muted-fg); text-transform: none; padding: 6px 6px 3px; display: flex; justify-content: space-between; align-items: center; }
+  .grp { font-size: 10.5px; color: var(--muted-fg); padding: 6px 6px 3px; }
   .conv { display: flex; align-items: center; gap: 6px; font-size: 12px; padding: 5px 8px; border-radius: 6px; color: var(--fg); }
   .conv:hover { background: var(--card); }
   .conv.on { background: var(--card); box-shadow: inset 0 0 0 1px var(--border); }
@@ -112,15 +110,20 @@
   .mhead { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
   .mhead h3 { font-size: 15px; display: flex; align-items: center; gap: 8px; }
 
-  .btn { font-size: 12.5px; padding: 6px 12px; border-radius: 7px; border: 1px solid var(--border); background: var(--card); color: var(--fg); }
+  /* —— 面包屑（页内三层导航）—— */
+  .crumb { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--muted-fg); margin-bottom: 12px; flex-wrap: wrap; }
+  .crumb a { color: var(--rt); cursor: pointer; font-weight: 600; }
+  .crumb .cur { color: var(--fg); font-weight: 650; }
+  .crumb .sepr { opacity: .5; }
+
+  .btn { font-size: 12.5px; padding: 6px 12px; border-radius: 7px; border: 1px solid var(--border); background: var(--card); color: var(--fg); font-family: inherit; cursor: pointer; }
   .btn.p { background: var(--rt); border-color: var(--rt); color: #fff; font-weight: 600; }
   .btn.sm { font-size: 11.5px; padding: 4px 9px; }
   .btn.ghost { background: transparent; }
   .btn.danger { color: var(--err); border-color: oklch(from var(--err) l c h / .4); }
-  .btn:disabled { opacity: .45; cursor: not-allowed; }
 
   /* —— routine 卡 —— */
-  .rcard { border: 1px solid var(--border); border-radius: 11px; padding: 12px 14px; background: var(--card); display: grid; gap: 7px; }
+  .rcard { border: 1px solid var(--border); border-radius: 11px; padding: 12px 14px; background: var(--card); display: grid; gap: 7px; cursor: pointer; }
   .rcard + .rcard { margin-top: 9px; }
   .rcard:hover { border-color: var(--rt); }
   .rtop { display: flex; align-items: center; gap: 8px; }
@@ -145,7 +148,7 @@
     border: 1px solid var(--border); background: var(--bg); color: var(--fg); }
   .ta { min-height: 92px; resize: vertical; line-height: 1.65; }
   .presets { display: flex; flex-wrap: wrap; gap: 6px; }
-  .presets button { font-size: 12px; padding: 5px 11px; border-radius: 7px; border: 1px solid var(--border); background: var(--card); color: var(--muted-fg); }
+  .presets button { font-size: 12px; padding: 5px 11px; border-radius: 7px; border: 1px solid var(--border); background: var(--card); color: var(--muted-fg); font-family: inherit; cursor: pointer; }
   .presets button.on { background: var(--rt); border-color: var(--rt); color: #fff; font-weight: 600; }
   .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 
@@ -166,7 +169,7 @@
   .artifact .sz { font-size: 11px; color: var(--muted-fg); }
 
   .toast { display: flex; align-items: flex-start; gap: 10px; border: 1px solid var(--border); border-radius: 11px;
-           padding: 11px 14px; background: var(--card); box-shadow: var(--shadow); max-width: 400px; }
+           padding: 11px 14px; background: var(--card); box-shadow: var(--shadow); max-width: 420px; }
   .toast .ic { font-size: 17px; }
   .toast .tt { font-weight: 650; font-size: 13px; }
   .toast .tb { font-size: 12px; color: var(--muted-fg); }
@@ -175,23 +178,28 @@
   .cap b { color: var(--fg); }
   h4.sec { font-size: 13px; margin: 20px 0 8px; display: flex; align-items: center; gap: 7px; }
   h4.sec::before { content: ''; width: 3px; height: 13px; background: var(--rt); border-radius: 2px; }
-  ul.tight { margin: 6px 0 0 18px; font-size: 13px; }
-  ul.tight li { margin-bottom: 4px; }
-  .themebtn { margin-left: auto; font-size: 11.5px; padding: 4px 10px; border-radius: 7px; border: 1px solid var(--border); background: var(--card); color: var(--muted-fg); }
+  .themebtn { margin-left: auto; font-size: 11.5px; padding: 4px 10px; border-radius: 7px; border: 1px solid var(--border); background: var(--card); color: var(--muted-fg); font-family: inherit; cursor: pointer; }
+  .badge-new { font-size: 10px; background: var(--rt); color: #fff; border-radius: 999px; padding: 0 6px; font-weight: 700; }
+  .xcut { text-decoration: line-through; opacity: .55; }
 </style>
 
 <div class="wrap">
   <header class="top">
-    <h1>沙箱定时任务 · 交互原型</h1>
+    <h1>沙箱定时任务 · 交互原型 <span class="mono" style="color:var(--muted-fg);font-size:15px">v2</span></h1>
     <span class="chip rt">⏰ 办公模式</span>
     <span class="chip">跑在沙箱服务器</span>
     <button class="themebtn" id="theme">🌓 切换主题</button>
   </header>
   <p class="subtitle">
-    定时任务在<b>公司沙箱服务器</b>上执行，关掉客户端、关掉电脑都照常运行。
-    客户端不参与执行，只负责<b>管理、拉取、展示</b>——所以本原型全部是「管理与查看」的界面。
-    每次运行会物化成一个<b>可点开的办公会话</b>，复用现有聊天界面与产物卡片。
+    定时任务在<b>公司沙箱服务器</b>上执行，关掉客户端、关掉电脑都照常运行。客户端不参与执行，只负责<b>管理、拉取、展示</b>。
   </p>
+
+  <div class="note" style="margin-top:14px">
+    <b>v2 相对 v1 的两处修改：</b>
+    ① 侧边栏按钮文案改为「<b>定时任务</b>」，位置移到「文生图」<b>下方</b>（竖排，不再并排）。
+    ② <b>定时任务产生的会话不再混进办公对话列表</b> —— 全部收进「定时任务」页内，靠<b>三层面包屑导航</b>浏览
+    （任务列表 → 任务详情 → 某次运行）。普通办公对话里<b>仍然可以创建</b>定时任务，只是结果不会跑到对话列表里打扰用户。
+  </div>
 
   <div class="decisions">
     <span>✅ 执行位置：<b>沙箱服务器</b></span>
@@ -207,19 +215,19 @@
 
   <nav class="steps" aria-label="原型步骤">
     <button class="active" data-s="s1"><span class="n">1</span>入口：办公 tab</button>
-    <button data-s="s2"><span class="n">2</span>定时任务列表</button>
+    <button data-s="s2"><span class="n">2</span>① 任务列表</button>
     <button data-s="s3"><span class="n">3</span>新建任务</button>
-    <button data-s="s4"><span class="n">4</span>详情 + 运行历史</button>
-    <button data-s="s5"><span class="n">5</span>点开一次运行</button>
-    <button data-s="s6"><span class="n">6</span>对话里直接创建</button>
+    <button data-s="s4"><span class="n">4</span>② 任务详情</button>
+    <button data-s="s5"><span class="n">5</span>③ 某次运行</button>
+    <button data-s="s6"><span class="n">6</span>在办公对话里创建</button>
     <button data-s="s7"><span class="n">7</span>离线归来 + 异常态</button>
   </nav>
 
   <!-- ═══ 1 · 入口 ═══ -->
   <section class="screen active" id="s1">
     <div class="note">
-      入口放在<b>办公 tab 内</b>，与「文生图」并列——它是<b>工作对象</b>，不是配置项，所以不进设置页。
-      会话列表里新增一个「⏰ 定时」分组，把定时任务产生的会话与手动会话分开。
+      三个入口按钮<b>竖排</b>：新对话 / 文生图 / 定时任务。
+      <b>对话列表里干干净净，只有用户自己的对话</b> —— 定时任务产生的会话一条都不出现在这里。
     </div>
     <div class="stage">
       <div class="app">
@@ -230,42 +238,36 @@
           </div>
           <div class="sidebtns">
             <button class="sb primary">＋ 新对话</button>
-            <div class="sbrow">
-              <button class="sb">🖼 文生图</button>
-              <button class="sb hl">⏰ 定时</button>
-            </div>
+            <button class="sb">🖼 文生图</button>
+            <button class="sb hl">⏰ 定时任务 <span class="sp" style="flex:1"></span><span class="chip" style="font-size:10px">4</span></button>
           </div>
           <div class="sep"></div>
-          <div class="grp"><span>⏰ 定时（3）</span><span>▾</span></div>
-          <div class="conv"><span class="t">每日销售日报</span><span class="w">09:03</span></div>
-          <div class="conv"><span class="t">周报汇总</span><span class="w">周一</span></div>
-          <div class="conv"><span class="t">发票归档</span><span class="w">昨天</span></div>
-          <div class="sep"></div>
-          <div class="grp"><span>对话列表</span></div>
+          <div class="grp">对话列表</div>
           <div class="conv on"><span class="t">帮我整理这批合同</span><span class="w">刚刚</span></div>
           <div class="conv"><span class="t">Q2 数据透视</span><span class="w">2 天前</span></div>
+          <div class="conv"><span class="t">发票核对</span><span class="w">3 天前</span></div>
           <div class="conv"><span class="t">未命名对话</span><span class="w">上周</span></div>
         </div>
         <div class="main" style="display:grid;place-items:center;text-align:center;color:var(--muted-fg)">
           <div>
             <div style="font-size:34px">⏰</div>
-            <div style="margin-top:8px;font-size:13px">点击左侧「定时」进入定时任务管理</div>
+            <div style="margin-top:8px;font-size:13px">点击左侧「定时任务」进入管理页</div>
           </div>
         </div>
       </div>
       <div class="cap">
-        <b>为什么「定时」按钮和「文生图」并排：</b>现有代码里这一行就是办公 tab 专属的功能入口区
-        （<span class="mono">ChatListPanel.tsx</span> 的 <span class="mono">activeTab === 'office'</span> 分支），新增一个按钮不改结构。
-        <b>未开通沙箱的账号：该按钮不渲染</b>（不是置灰）——沿用「绝不给不可用的入口」的既有原则。
+        <b>为什么定时任务的会话要单独收起来：</b>它们是机器自动产生的，每天都在增加。
+        混进对话列表会把用户自己的对话越推越远，而且「我没建过这个对话」本身就令人困惑。
+        <span class="xcut">v1 曾设计成对话列表里加一个「⏰ 定时」分组</span> —— 已废弃。
       </div>
     </div>
   </section>
 
-  <!-- ═══ 2 · 列表 ═══ -->
+  <!-- ═══ 2 · 任务列表（第一层）═══ -->
   <section class="screen" id="s2">
     <div class="note">
-      列表是这个功能的主界面。每张卡回答三个问题：<b>它是干什么的</b>、<b>什么时候跑</b>、<b>上次跑得怎么样</b>。
-      右上角常驻今日配额——用户随时知道还剩多少次。
+      <b>第一层：任务列表。</b>每张卡回答三个问题：干什么的、什么时候跑、上次跑得怎么样。
+      右上角常驻今日配额。点任意一张卡进入第二层。
     </div>
     <div class="stage">
       <div class="app">
@@ -273,17 +275,19 @@
           <div class="seg"><button class="on">🏢 办公</button><button>💻 研发</button></div>
           <div class="sidebtns">
             <button class="sb primary">＋ 新对话</button>
-            <div class="sbrow"><button class="sb">🖼 文生图</button><button class="sb hl">⏰ 定时</button></div>
+            <button class="sb">🖼 文生图</button>
+            <button class="sb hl">⏰ 定时任务 <span style="flex:1"></span><span class="chip" style="font-size:10px">4</span></button>
           </div>
           <div class="sep"></div>
-          <div class="grp"><span>⏰ 定时（3）</span><span>▾</span></div>
-          <div class="conv"><span class="t">每日销售日报</span><span class="w">09:03</span></div>
-          <div class="conv"><span class="t">周报汇总</span><span class="w">周一</span></div>
-          <div class="conv"><span class="t">发票归档</span><span class="w">昨天</span></div>
+          <div class="grp">对话列表</div>
+          <div class="conv"><span class="t">帮我整理这批合同</span><span class="w">刚刚</span></div>
+          <div class="conv"><span class="t">Q2 数据透视</span><span class="w">2 天前</span></div>
+          <div class="conv"><span class="t">发票核对</span><span class="w">3 天前</span></div>
         </div>
         <div class="main">
-          <div class="mhead">
-            <h3>⏰ 定时任务 <span class="chip">4 / 50</span></h3>
+          <div class="crumb"><span class="cur">⏰ 定时任务</span></div>
+          <div class="mhead" style="margin-top:-4px">
+            <h3><span class="chip">4 / 50</span></h3>
             <div style="display:flex;gap:7px;align-items:center">
               <span class="chip">今日已用 <b style="color:var(--fg)">3</b> / 20</span>
               <button class="btn p">＋ 新建定时任务</button>
@@ -303,7 +307,7 @@
               <span>🗓 <b>每个工作日 09:00</b></span>
               <span>⏭ 下次 <b>明天 09:03</b></span>
               <span>✅ 上次 <b>今天 09:03</b> · 1 分 34 秒</span>
-              <span>🤖 deepseek-v4-flash</span>
+              <span>📁 <b>18</b> 次运行</span>
             </div>
           </div>
 
@@ -320,7 +324,7 @@
               <span>🗓 <b>每周一 08:30</b></span>
               <span>⏭ 下次 <b>8 月 10 日 08:33</b></span>
               <span>✅ 上次 <b>8 月 3 日</b> · 2 分 08 秒</span>
-              <span>🤖 deepseek-v4-flash</span>
+              <span>📁 <b>5</b> 次运行</span>
             </div>
           </div>
 
@@ -353,9 +357,8 @@
         </div>
       </div>
       <div class="cap">
-        <b>状态徽标只有四种：</b>运行中 / 已启用 / 已暂停 / 连续失败 N 次。
-        <b>连续失败 10 次会自动停用</b>并在卡片上明说原因——定时任务最需要被看见的恰恰是失败，
-        所以失败信息直接摊在列表上，不藏进详情页。
+        <b>状态徽标只有四种：</b>运行中 / 已启用 / 已暂停 / 连续失败 N 次。连续失败 10 次自动停用。
+        失败原因直接摊在卡片上，不藏进详情页 —— 定时任务最需要被看见的恰恰是失败。
       </div>
     </div>
   </section>
@@ -363,12 +366,15 @@
   <!-- ═══ 3 · 新建 ═══ -->
   <section class="screen" id="s3">
     <div class="note">
-      表单最重要的一栏是<b>指令</b>。因为每次运行都是全新对话、无人值守、没有追问的机会，
-      所以输入框下方常驻一句提醒：<b>指令要能独立看懂</b>。这是 Claude Routines 踩出来的经验。
+      最重要的一栏是<b>指令</b>。每次运行都是全新对话、无人值守、没有追问的机会，
+      所以输入框下方常驻提醒：<b>指令要能独立看懂</b>。
     </div>
     <div class="stage">
       <div class="main" style="max-width:none">
-        <div class="mhead">
+        <div class="crumb">
+          <a>⏰ 定时任务</a><span class="sepr">/</span><span class="cur">新建</span>
+        </div>
+        <div class="mhead" style="margin-top:-4px">
           <h3>＋ 新建定时任务</h3>
           <div style="display:flex;gap:7px"><button class="btn ghost">取消</button><button class="btn p">创建</button></div>
         </div>
@@ -420,9 +426,7 @@
             <input class="inp" style="width:110px" value="09:00">
             <span class="hint">时区 <b>Asia/Shanghai</b>（跟随本机）</span>
           </div>
-          <div style="margin-top:9px">
-            <span class="hint">▸ 高级：直接写 cron 表达式</span>
-          </div>
+          <div style="margin-top:9px"><span class="hint">▸ 高级：直接写 cron 表达式</span></div>
           <span class="hint" style="margin-top:6px">最小间隔 <b>15 分钟</b>；实际触发会有几分钟固定偏移，用于错开服务器负载。</span>
         </div>
 
@@ -433,66 +437,17 @@
       </div>
       <div class="cap">
         <b>调度预设刻意不把 cron 放主路径：</b>六个预设覆盖绝大多数场景，cron 收进「高级」。
-        这与 Claude 的做法一致（Web 给预设、CLI 给 cron）。「指定时间跑一次」的任务<b>触发后自动停用</b>并标记「已运行」。
+        「指定时间跑一次」的任务<b>触发后自动停用</b>并标记「已运行」。
       </div>
     </div>
   </section>
 
-  <!-- ═══ 4 · 详情 ═══ -->
+  <!-- ═══ 4 · 任务详情（第二层）═══ -->
   <section class="screen" id="s4">
     <div class="note">
-      详情页 = <b>配置 + 运行历史</b>。历史里每一行都能点开成一个完整会话（见下一屏），
-      这是"我怎么知道它到底干了什么"的答案。
-    </div>
-    <div class="stage">
-      <div class="main" style="max-width:none">
-        <div class="mhead">
-          <h3>⏰ 每日销售日报 <span class="chip ok">已启用</span></h3>
-          <div style="display:flex;gap:7px">
-            <button class="btn p">▶ 立即运行</button>
-            <button class="btn">⏸ 暂停</button>
-            <button class="btn">✎ 编辑</button>
-            <button class="btn danger">删除</button>
-          </div>
-        </div>
-
-        <div class="rcard" style="margin-bottom:16px">
-          <div class="rmeta" style="gap:22px">
-            <span>🗓 调度 <b>每个工作日 09:00</b>（Asia/Shanghai）</span>
-            <span>⏭ 下次 <b>明天 09:03</b></span>
-            <span>🤖 <b>deepseek-v4-flash</b></span>
-            <span>📁 工作区 <b>已累积 12 个文件</b> · 4.2 MB</span>
-          </div>
-          <div class="rdesc" style="margin-top:2px">汇总昨天的销售数据，生成 xlsx 并写一段要点摘要</div>
-        </div>
-
-        <h4 class="sec">运行历史</h4>
-        <table>
-          <thead><tr><th>时间</th><th>状态</th><th style="text-align:right">耗时</th><th style="text-align:right">成本</th><th>结果</th></tr></thead>
-          <tbody>
-            <tr><td class="mono">08-04 09:03</td><td><span class="chip ok">成功</span></td><td class="num">1m34s</td><td class="num">$0.13</td><td>生成 销售日报_08-03.xlsx，华东环比 -23%</td></tr>
-            <tr><td class="mono">08-01 09:03</td><td><span class="chip ok">成功</span></td><td class="num">1m12s</td><td class="num">$0.11</td><td>生成 销售日报_07-31.xlsx</td></tr>
-            <tr><td class="mono">07-31 09:03</td><td><span class="chip err">失败</span></td><td class="num">18s</td><td class="num">$0.01</td><td style="color:var(--err)">sales_raw.csv 为空，按指令跳过</td></tr>
-            <tr><td class="mono">07-31 02:11</td><td><span class="chip warn">跳过</span></td><td class="num">—</td><td class="num">—</td><td>上一次运行尚未结束</td></tr>
-            <tr><td class="mono">07-30 09:03</td><td><span class="chip ok">成功</span></td><td class="num">2m02s</td><td class="num">$0.15</td><td>生成 销售日报_07-29.xlsx</td></tr>
-          </tbody>
-        </table>
-        <p class="hint" style="margin-top:8px">运行记录永久保留。点任意一行进入该次运行的完整会话。</p>
-      </div>
-      <div class="cap">
-        <b>「跳过」也要记录并给原因</b>（上次还没跑完 / 达到并发上限 / 超出日配额）——
-        没有这一行，用户只会看到"今天怎么没跑"，无从判断。
-        <b>成本列</b>直接来自沙箱回传的 <span class="mono">total_cost_usd</span>，不用另算。
-      </div>
-    </div>
-  </section>
-
-  <!-- ═══ 5 · 一次运行 ═══ -->
-  <section class="screen" id="s5">
-    <div class="note">
-      <b>这是整个设计里最省事、也最关键的一步：</b>一次运行直接物化成一个<b>办公会话</b>。
-      于是聊天界面、工具调用折叠、产物卡片、下载、导出、搜索——全部零成本复用，
-      不需要为"运行详情"另做一套查看器。
+      <b>第二层：任务详情 = 配置 + 运行历史。</b>
+      历史里每一行都能点开成完整会话（第三层）—— 这就是「我怎么知道它到底干了什么」的答案，
+      而且<b>整个过程都在这个页面里完成</b>，不会跳到对话列表去。
     </div>
     <div class="stage">
       <div class="app">
@@ -500,18 +455,92 @@
           <div class="seg"><button class="on">🏢 办公</button><button>💻 研发</button></div>
           <div class="sidebtns">
             <button class="sb primary">＋ 新对话</button>
-            <div class="sbrow"><button class="sb">🖼 文生图</button><button class="sb">⏰ 定时</button></div>
+            <button class="sb">🖼 文生图</button>
+            <button class="sb hl">⏰ 定时任务 <span style="flex:1"></span><span class="chip" style="font-size:10px">4</span></button>
           </div>
           <div class="sep"></div>
-          <div class="grp"><span>⏰ 定时（3）</span><span>▾</span></div>
-          <div class="conv on"><span class="t">每日销售日报</span><span class="w">09:03</span></div>
-          <div class="conv"><span class="t">周报汇总</span><span class="w">周一</span></div>
-          <div class="conv"><span class="t">发票归档</span><span class="w">昨天</span></div>
+          <div class="grp">对话列表</div>
+          <div class="conv"><span class="t">帮我整理这批合同</span><span class="w">刚刚</span></div>
+          <div class="conv"><span class="t">Q2 数据透视</span><span class="w">2 天前</span></div>
         </div>
         <div class="main">
+          <div class="crumb">
+            <a>⏰ 定时任务</a><span class="sepr">/</span><span class="cur">每日销售日报</span>
+          </div>
+          <div class="mhead" style="margin-top:-4px">
+            <h3>每日销售日报 <span class="chip ok">已启用</span></h3>
+            <div style="display:flex;gap:6px">
+              <button class="btn p sm">▶ 立即运行</button>
+              <button class="btn sm">⏸ 暂停</button>
+              <button class="btn sm">✎ 编辑</button>
+              <button class="btn sm danger">删除</button>
+            </div>
+          </div>
+
+          <div class="rcard" style="margin-bottom:14px;cursor:default">
+            <div class="rmeta" style="gap:20px">
+              <span>🗓 <b>每个工作日 09:00</b>（Asia/Shanghai）</span>
+              <span>⏭ 下次 <b>明天 09:03</b></span>
+              <span>🤖 <b>deepseek-v4-flash</b></span>
+              <span>📁 工作区 <b>12 个文件</b> · 4.2 MB</span>
+            </div>
+            <div class="rdesc" style="margin-top:2px">汇总昨天的销售数据，生成 xlsx 并写一段要点摘要</div>
+          </div>
+
+          <h4 class="sec" style="margin-top:6px">运行历史</h4>
+          <table>
+            <thead><tr><th>时间</th><th>状态</th><th style="text-align:right">耗时</th><th style="text-align:right">成本</th><th>结果</th></tr></thead>
+            <tbody>
+              <tr><td class="mono">08-04 09:03</td><td><span class="chip ok">成功</span></td><td class="num">1m34s</td><td class="num">$0.13</td><td>生成 销售日报_08-03.xlsx，华东环比 −23%</td></tr>
+              <tr><td class="mono">08-01 09:03</td><td><span class="chip ok">成功</span></td><td class="num">1m12s</td><td class="num">$0.11</td><td>生成 销售日报_07-31.xlsx</td></tr>
+              <tr><td class="mono">07-31 09:03</td><td><span class="chip err">失败</span></td><td class="num">18s</td><td class="num">$0.01</td><td style="color:var(--err)">sales_raw.csv 为空，按指令跳过</td></tr>
+              <tr><td class="mono">07-31 02:11</td><td><span class="chip warn">跳过</span></td><td class="num">—</td><td class="num">—</td><td>上一次运行尚未结束</td></tr>
+              <tr><td class="mono">07-30 09:03</td><td><span class="chip ok">成功</span></td><td class="num">2m02s</td><td class="num">$0.15</td><td>生成 销售日报_07-29.xlsx</td></tr>
+            </tbody>
+          </table>
+          <p class="hint" style="margin-top:8px;font-size:11.5px;color:var(--muted-fg)">运行记录永久保留 · 点任意一行查看该次运行的完整过程</p>
+        </div>
+      </div>
+      <div class="cap">
+        <b>「跳过」也要记录并给原因</b>（上次还没跑完 / 达到并发上限 / 超出日配额）——
+        没有这一行，用户只会看到"今天怎么没跑"，无从判断。<b>成本列</b>直接来自沙箱回传的
+        <span class="mono">total_cost_usd</span>，不用另算。
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══ 5 · 某次运行（第三层）═══ -->
+  <section class="screen" id="s5">
+    <div class="note">
+      <b>第三层：某次运行的完整过程。</b>还是在同一个页面区域里，靠面包屑回上一层。
+      渲染复用现有聊天组件（工具调用折叠、Markdown、产物卡片、下载），但<b>这个会话不在对话列表里</b>。
+    </div>
+    <div class="stage">
+      <div class="app">
+        <div class="side">
+          <div class="seg"><button class="on">🏢 办公</button><button>💻 研发</button></div>
+          <div class="sidebtns">
+            <button class="sb primary">＋ 新对话</button>
+            <button class="sb">🖼 文生图</button>
+            <button class="sb hl">⏰ 定时任务 <span style="flex:1"></span><span class="chip" style="font-size:10px">4</span></button>
+          </div>
+          <div class="sep"></div>
+          <div class="grp">对话列表</div>
+          <div class="conv"><span class="t">帮我整理这批合同</span><span class="w">刚刚</span></div>
+          <div class="conv"><span class="t">Q2 数据透视</span><span class="w">2 天前</span></div>
+        </div>
+        <div class="main">
+          <div class="crumb">
+            <a>⏰ 定时任务</a><span class="sepr">/</span><a>每日销售日报</a><span class="sepr">/</span>
+            <span class="cur">08-04 09:03 的运行</span>
+            <span style="flex:1"></span>
+            <button class="btn sm ghost">← 上一次</button>
+            <button class="btn sm ghost">下一次 →</button>
+          </div>
+
           <div class="chat">
             <div class="banner">
-              ⏰ 本次对话由定时任务 <b>每日销售日报</b> 于 08-04 09:03 自动触发 · <a>查看任务</a> · <a>查看全部运行</a>
+              ✅ 成功 · 耗时 1 分 34 秒 · 成本 $0.13 · 模型 deepseek-v4-flash
             </div>
 
             <div class="msg">
@@ -528,7 +557,7 @@
                 已完成 8 月 3 日销售日报，两个 sheet 分别是大区维度和产品线维度。<br><br>
                 关键变化：<br>
                 · 总额 ¥1,284,300，环比 +4.2%<br>
-                · <b>华东大区环比 -23%</b>，主要是 A 产品线单量腰斩<br>
+                · <b>华东大区环比 −23%</b>，主要是 A 产品线单量腰斩<br>
                 · 华南连续第 3 天正增长
               </div>
             </div>
@@ -546,20 +575,21 @@
         </div>
       </div>
       <div class="cap">
-        顶部那条<b>来源横幅</b>是这个会话与普通会话唯一的视觉差异，同时提供回到任务的两个入口。
-        会话本身是<b>只读回放</b>（内容来自沙箱回传的执行记录），但产物下载走的是现成的文件通道，与手动会话完全一致。
+        <b>只读回放</b>（内容来自沙箱回传的执行记录，不能在这里接着对话）；
+        面包屑右侧的<b>「上一次 / 下一次」</b>让用户能横向比对连续几天的结果，这是定时任务特有的浏览需求。
+        产物下载走的是现成的文件通道，与手动会话完全一致。
       </div>
     </div>
   </section>
 
-  <!-- ═══ 6 · 对话里创建 ═══ -->
+  <!-- ═══ 6 · 在办公对话里创建 ═══ -->
   <section class="screen" id="s6">
     <div class="note">
-      三条创建路径：<b>表单</b>（主）、<b>对话里说一句</b>、<b>从现有会话存为定时任务</b>。
-      第三条是最自然的发现路径——手动干了一次，觉得每天都要干，顺手固化。
+      普通办公对话里<b>照样能建定时任务</b> —— 这是最自然的发现路径。
+      关键是助手要<b>明确告诉用户结果去哪里</b>，避免"建完了怎么没动静"的困惑。
     </div>
 
-    <h4 class="sec">路径二：在办公对话里直接说</h4>
+    <h4 class="sec">路径二：在办公对话里说一句</h4>
     <div class="stage">
       <div class="main">
         <div class="chat">
@@ -575,14 +605,16 @@
               🗓 每个工作日 09:00（Asia/Shanghai）<br>
               🤖 deepseek-v4-flash<br>
               📁 独立工作区，文件跨次累积<br><br>
-              明天 09:03 第一次运行。要现在先跑一次看看效果吗？
+              明天 09:03 第一次运行。<b>运行结果会出现在左侧「⏰ 定时任务」里，不会打扰这个对话。</b><br><br>
+              要现在先跑一次看看效果吗？
             </div>
           </div>
         </div>
       </div>
       <div class="cap">
-        由 MCP 工具实现，<b>只在办公会话注册</b>——研发会话没有沙箱，建了也跑不了。
-        助手会把口语转成完整指令并<b>复述确认</b>，不静默创建。
+        由 MCP 工具实现，<b>只在办公会话注册</b>（研发会话没有沙箱，建了也跑不了）。
+        助手把口语转成完整指令并<b>复述确认</b>，不静默创建；<b>并明说结果去哪</b> —— 这一句是本次改版新增的，
+        没有它用户会一直在这个对话里等结果。
       </div>
     </div>
 
@@ -593,7 +625,10 @@
           <h3 style="font-size:13.5px">💬 帮我整理这批合同</h3>
           <button class="btn sm">⏰ 存为定时任务</button>
         </div>
-        <p class="hint">点击后打开新建表单，<b>指令栏已用本次会话的最后一条指令预填</b>，改改就能存。</p>
+        <p style="font-size:12px;color:var(--muted-fg)">
+          点击后打开新建表单，<b style="color:var(--fg)">指令栏已用本次会话的最后一条指令预填</b>，改改就能存。
+          原会话保持不变，仍留在对话列表里。
+        </p>
       </div>
       <div class="cap">
         这条路径的价值在于<b>时机</b>：用户刚看到满意的结果，正是"以后每天都这样"的念头最强的时刻。
@@ -604,8 +639,8 @@
   <!-- ═══ 7 · 离线 + 异常 ═══ -->
   <section class="screen" id="s7">
     <div class="note">
-      定时任务在服务器上跑，用户不在的时候照样出结果。所以<b>「回来时怎么被告知」</b>是这个功能体验的关键一环。
-      已定：<b>离线期间不推送</b>，打开 app 时<b>合并成一条汇总</b>——不逐条弹，避免开机被通知淹没。
+      任务在服务器上跑，用户不在时照样出结果。已定：<b>离线期间不推送</b>，
+      打开 app 时<b>合并成一条汇总</b>——不逐条弹，避免开机被通知淹没。
     </div>
 
     <h4 class="sec">打开 app：一条汇总通知</h4>
@@ -622,7 +657,8 @@
         </div>
       </div>
       <div class="cap" style="margin:14px -18px -18px">
-        点「查看」进定时任务列表；新产生的会话已经躺在侧边栏「⏰ 定时」分组里，标题带日期，随时可点开。
+        点「查看」进定时任务列表。侧边栏「定时任务」按钮上的计数徽标也会变化，
+        <b>但对话列表始终不受影响</b> —— 用户自己的对话不会被挤走。
       </div>
     </div>
 
@@ -632,16 +668,16 @@
         <div class="banner" style="background:oklch(from var(--warn) l c h / .12);color:var(--warn);margin-bottom:12px">
           ⚠️ 连不上沙箱服务器，下面显示的是上次同步的数据（08-04 09:12）· <a>重试</a>
         </div>
-        <p class="hint" style="margin-bottom:16px">
-          <b>离线降级：</b>列表用本地缓存渲染，<b>但禁止新建和编辑</b>——本地改了会和服务端分叉，
-          与其事后合并冲突，不如当场说清楚"现在改不了"。
+        <p style="font-size:12px;color:var(--muted-fg);margin-bottom:16px">
+          <b style="color:var(--fg)">离线降级：</b>列表用本地缓存渲染，<b style="color:var(--fg)">但禁止新建和编辑</b>——
+          本地改了会和服务端分叉，与其事后合并冲突，不如当场说清楚现在改不了。
         </p>
 
         <div class="banner" style="background:oklch(from var(--err) l c h / .12);color:var(--err);margin-bottom:12px">
           🚫 今日配额已用完（20 / 20），后续任务将跳过并记录，明天 0 点重置
         </div>
-        <p class="hint" style="margin-bottom:16px">
-          <b>配额用尽：</b>不是静默失败——被跳过的运行会进历史并注明原因，用户查得到。
+        <p style="font-size:12px;color:var(--muted-fg);margin-bottom:16px">
+          <b style="color:var(--fg)">配额用尽：</b>不是静默失败——被跳过的运行会进历史并注明原因，用户查得到。
         </p>
 
         <div class="banner" style="background:oklch(from var(--err) l c h / .12);color:var(--err)">
