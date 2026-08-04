@@ -107,7 +107,9 @@ export async function runRoutine({
     c.realKey = '';  // 主动清引用,别让它出现在任何后续结构里
 
     // ── 3. 确保容器就绪(TTL 回收过的会 docker start 复用)──────────
-    const { name, reused } = await orch.ensureContainer(sid, uid);
+    // kind='routine':让容器与卷带上 cowork.kind 标签,reconcile 才会放过它们。
+    // 漏了这个参数 = 用户下次打开 app 时定时任务的累积工作区被当孤儿删光。
+    const { name, reused } = await orch.ensureContainer(sid, uid, orch.KIND_ROUTINE);
     audit('routine_fire', { sessionId: sid, detail: `${uid} ${reused ? 'reused' : 'new'}` });
 
     // ── 4. 跑 ────────────────────────────────────────────────

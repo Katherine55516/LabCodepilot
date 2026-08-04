@@ -42,6 +42,21 @@ const NET = process.env.COWORK_NET || 'cowork-net';
 // authz 关闭时的占位 owner(与 authz.mjs singleUid 一致):session 不做跨用户 scope。
 const SINGLE_UID = '__single__';
 
+// —— cowork.kind:区分「用户的办公会话」与「定时任务的常驻工作区」——
+//
+// ⚠️ 这个 label 存在的唯一理由:**reconcile 不能删定时任务的工作区**。
+// reconcile 收的是客户端传来的 keep 列表(客户端本地有哪些会话),而客户端**根本
+// 不知道 routine 的 sid** —— 定时任务是服务端实体。不打这个标、不在 listSessions
+// 里排掉的话,用户每打开一次 app 就会把自己所有定时任务的累积文件清空一次。
+// 加它的成本是一行 label,不加的代价是数据丢失且用户无从察觉。
+const KIND_SESSION = 'session';
+const KIND_ROUTINE = 'routine';
+const KIND_RE = /^[a-z]{1,16}$/;
+function assertKind(kind) {
+  if (!KIND_RE.test(kind)) throw new Error('invalid kind');
+  return kind;
+}
+
 const HEX = /^[a-f0-9]{1,64}$/i;
 // uid 与 authz.signToken 的 uid 字符集一致(label 值安全:无空格/引号)。
 const UID_RE = /^[a-zA-Z0-9._:-]{1,128}$/;
@@ -85,11 +100,11 @@ export async function volumeExists(sid) {
  * 非 root(AGENT_UID)跑,故创建后用一次性 helper 容器 chown —— 只在首次创建时付这一次成本。
  * volume 与容器同 label,是"会话存在"的另一半事实源(容器可回收,volume 留到会话删)。
  */
-export async function ensureVolume(sid, uid = SINGLE_UID) {
+export async function ensureVolume(sid, uid = SINGLE_UID, kind = KIND_SESSION) {
   assertUid(uid);
   const vol = volumeName(sid);
   if (await volumeExists(sid)) return vol;
-  await docker(['volume', 'create', '--label', LABEL_MANAGED, '--label', `cowork.sid=${sid}`, '--label', `cowork.uid=${uid}`, vol]);
+  await docker(['volume', 'create', '--label', LABEL_MANAGED, '--label', `cowork.sid=${sid}`, '--label', `cowork.uid=${uid}`, '--label', `cowork.kind=${assertKind(kind)}`, vol]);
   try {
     await docker([
       'run', '--rm', '--network', 'none',
@@ -135,8 +150,9 @@ export async function assertOwner(sid, uid) {
 }
 
 /** 确保会话容器存在且运行;不存在则起硬化容器。幂等。返回 { name, reused }。 */
-export async function ensureContainer(sid, uid = SINGLE_UID) {
+export async function ensureContainer(sid, uid = SINGLE_UID, kind = KIND_SESSION) {
   assertUid(uid);
+  assertKind(kind);
   const cname = name(sid);
   // 复用/重建前先校验归属:借他人 sid 的请求在这里被挡(容器已回收只剩 volume 也算数)。
   const guard = await assertOwner(sid, uid);
@@ -147,11 +163,12 @@ export async function ensureContainer(sid, uid = SINGLE_UID) {
   }
   // guard 为 'absent'(全新)或 'ok'(volume 属本人、容器被 TTL 回收待重建)
   void guard;
-  await ensureVolume(sid, uid);
+  await ensureVolume(sid, uid, kind);
   await ensureNetwork();
   await docker([
     'run', '-d', '--name', cname,
     '--label', LABEL_MANAGED, '--label', `cowork.sid=${sid}`, '--label', `cowork.uid=${uid}`,
+    '--label', `cowork.kind=${kind}`,
     // 专用网络:claude 经容器名访问 cred-proxy sidecar(RD6);R4 出网禁内网也针对本网络。
     '--network', NET,
     // 非 root 跑:claude 的 --dangerously-skip-permissions(办公 full_access)禁止 root。
@@ -200,10 +217,27 @@ export async function removeContainer(sid, { keepVolume = true } = {}) {
  * volume 也要扫:容器被回收(或从未起过,只推过文件)时 volume 仍代表会话存在,
  * 否则 reconcile 永远看不到孤儿 volume。
  */
-export async function listSessions(uid) {
+export async function listSessions(uid, { excludeKind } = {}) {
   const filters = uid !== undefined
     ? ['--filter', `label=cowork.uid=${assertUid(uid)}`]
     : ['--filter', `label=${LABEL_MANAGED}`];
+  const [c, v] = await Promise.all([
+    docker(['ps', '-a', ...filters, '--format', '{{.Label "cowork.sid"}}']),
+    docker(['volume', 'ls', ...filters, '--format', '{{.Label "cowork.sid"}}']),
+  ]);
+  const all = new Set(`${c}\n${v}`.split('\n').map((s) => s.trim()).filter(Boolean));
+  if (!excludeKind) return [...all];
+  // docker 没有「label 不等于」过滤器,只能正查一次要排除的那类再做差集。
+  // R1-R3 时代建的资源没有 cowork.kind 标签 —— 它们不会出现在这个正查结果里,
+  // 于是天然被当成 session 参与 reconcile,与改动前行为一致(不误伤、不误留)。
+  const ex = new Set(await listSessionsOfKind(excludeKind, uid));
+  return [...all].filter((s) => !ex.has(s));
+}
+
+/** 列出指定 kind 的 sid(容器 ∪ volume)。uid 省略 = 全部用户。 */
+export async function listSessionsOfKind(kind, uid) {
+  const filters = ['--filter', `label=cowork.kind=${assertKind(kind)}`];
+  if (uid !== undefined) filters.push('--filter', `label=cowork.uid=${assertUid(uid)}`);
   const [c, v] = await Promise.all([
     docker(['ps', '-a', ...filters, '--format', '{{.Label "cowork.sid"}}']),
     docker(['volume', 'ls', ...filters, '--format', '{{.Label "cowork.sid"}}']),
@@ -218,7 +252,10 @@ export async function listSessions(uid) {
 export async function reconcile(keepSids, uid) {
   const keep = new Set(keepSids);
   const removed = [];
-  for (const sid of await listSessions(uid)) {
+  // ⚠️ excludeKind:'routine' 是本函数最重要的一个参数。keep 列表来自客户端,而客户端
+  // 不知道 routine 的 sid(那是服务端实体)—— 不排掉的话每次 reconcile 都会把用户
+  // 所有定时任务的累积工作区当孤儿删光。
+  for (const sid of await listSessions(uid, { excludeKind: KIND_ROUTINE })) {
     if (!keep.has(sid)) { await removeContainer(sid, { keepVolume: false }); removed.push(sid); }
   }
   return removed;
@@ -236,5 +273,5 @@ export async function health() {
   return { ok: true, dockerVersion: ver, sessions: (await listSessions()).length };
 }
 
-export { AGENT_UID, IMAGE, SINGLE_UID };
+export { AGENT_UID, IMAGE, SINGLE_UID, KIND_SESSION, KIND_ROUTINE };
 export const _internals = { name, volumeName, IMAGE, ASSETS_DIR };

@@ -87,6 +87,17 @@ fi
 # ── 属主(含 audit log 可写)──
 chown -R "$COWORK_USER":"$COWORK_USER" "$DEST"
 
+# ── 定时任务的状态目录 ──
+# 放数据盘(routine 定义 + 运行历史 + transcript 永久保留)。
+# ⚠️ 必须由本脚本以 root 建好并 chown —— 服务以非 root 跑,而 /data 通常是 root:root,
+# 服务自己 mkdir 会 EACCES。失败的表现极不直观:服务一切正常,但定时任务永远不触发。
+STATE_DIR="$(grep -E '^COWORK_STATE_DIR=' "$DEST/.env" 2>/dev/null | cut -d= -f2- | tr -d '"' || true)"
+STATE_DIR="${STATE_DIR:-/data/cowork-state}"
+info "定时任务状态目录:$STATE_DIR"
+mkdir -p "$STATE_DIR/routines" "$STATE_DIR/runs"
+chown -R "$COWORK_USER":"$COWORK_USER" "$STATE_DIR"
+chmod 700 "$STATE_DIR"
+
 # ── systemd units(渲染占位符)──
 info "安装 systemd 单元…"
 sed -e "s#__DEST__#$DEST#g" -e "s#__COWORK_USER__#$COWORK_USER#g" \

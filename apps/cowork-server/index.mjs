@@ -34,6 +34,8 @@ import { audit } from './lib/audit.mjs';
 import { resolveUser, authzEnabled } from './lib/authz.mjs';
 import { handleExec } from './lib/exec-bridge.mjs';
 import { ADMIN_UID, readAuditSince, collectStats } from './lib/admin.mjs';
+import * as routineApi from './lib/routine-api.mjs';
+import * as routineSched from './lib/routine-scheduler.mjs';
 
 const PORT = parseInt(process.env.COWORK_SERVER_PORT || '8790', 10);
 // 监听地址:默认 0.0.0.0(客户端直连);上 TLS 反代时设 127.0.0.1,让 caddy/nginx
@@ -71,9 +73,19 @@ function execClosed(sid) {
   markActive(sid);
 }
 
+/**
+ * 🔴 定时任务的保活钩子 —— 把 runner 接进现有的空闲回收机制。
+ *
+ * reaper 只认 WS 连接(execOpened/execClosed),而定时任务是服务端自己 docker exec 发起的,
+ * 根本不经过 WS。不接这两个钩子的话:一次跑超过 IDLE_TTL(默认 30 分钟)的定时任务,
+ * 会在跑到一半时被 reaper `docker stop` 掉 —— 机制本来就是对的,纯粹是「要记得调」。
+ */
+const ROUTINE_ACTIVITY = { start: execOpened, end: execClosed };
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, 'http://localhost');
-  const send = (code, obj) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(obj)); };
+  // 返回 true 是给 routine-api 的 handler 用的「已处理」信号;既有调用处不读返回值。
+  const send = (code, obj) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(obj)); return true; };
   try {
     const auth = authOf(req);
     if (!auth) return send(401, { error: 'unauthorized' });
@@ -191,6 +203,11 @@ const server = http.createServer(async (req, res) => {
         return send(200, { ok: true });
       }
     }
+    // 定时任务(P3)。鉴权已在上面完成,这里只按 uid scope;跨用户一律 404(防枚举)。
+    const rctx = { uid, send, readBody, log, activity: ROUTINE_ACTIVITY, res };
+    if (await routineApi.handleRoutines(req, url, rctx)) return;
+    if (await routineApi.handleTranscript(req, url, rctx)) return;
+
     send(404, { error: 'not found' });
   } catch (e) { log('req error', e.message); send(500, { error: String(e.message || e) }); }
 });
@@ -313,4 +330,14 @@ server.listen(PORT, HOST, () => log(`listening ${HOST}:${PORT} authz=${authzEnab
 // cred-proxy sidecar 容器随服务启动(失败不阻塞主服务:首个 register 会懒重试)
 cred.ensureProxy(log).catch((e) => log('cred-proxy start deferred:', e.message));
 
-for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => { clearInterval(pinger); clearInterval(reaper); server.close(); process.exit(0); });
+// 定时任务调度器(P3)。start() 内部会 ensureStateDir;首个 tick 承载「补跑最近一次」判定。
+try { routineSched.start({ log, activity: ROUTINE_ACTIVITY }); }
+catch (e) {
+  // 必须吵:静默失败的表现是「服务一切正常,但定时任务永远不触发」,
+  // 而用户只会看到「我建的任务没跑」,运维完全无从下手。最常见的原因是
+  // COWORK_STATE_DIR 的父目录不允许服务用户写(见 deploy/install.sh)。
+  log('!!! routine scheduler FAILED TO START — 定时任务不会触发:', e.message);
+  log('!!! 检查 COWORK_STATE_DIR 是否存在且属于服务用户 (默认 /data/cowork-state)');
+}
+
+for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => { clearInterval(pinger); clearInterval(reaper); routineSched.stop(); server.close(); process.exit(0); });
