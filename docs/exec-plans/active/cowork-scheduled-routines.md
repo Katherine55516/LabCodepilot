@@ -18,7 +18,7 @@
 |-------|------|------|------|------|
 | P0 | 技术验证：生产真机验 `claude -p` | — | ✅ 已完成 | 五条结论改变了实现，见「决策日志 2026-08-04 ②」 |
 | P1 | 账号后端内部凭证接口 | codeagent-server | ✅ **代码完成**（`99c044d`，未推送） | 21 单测 / 全仓 155 passed；**待部署 + 与 P2 联调** |
-| P2 | 沙箱执行器 `routine-runner` | cowork-server | 📋 待开始 | 只依赖 P0，可立即开工 |
+| P2 | 沙箱执行器 `routine-runner` | cowork-server | ✅ **已完成并生产实测** | 成功/401/超时/溢出/并发闸全验；**顺带补完 P0 的成功路径** |
 | P3 | 沙箱调度 + 存储 + REST | cowork-server | 📋 待开始 | 依赖 P2 |
 | P4 | 客户端数据层 + 代理路由 | LabCodepilot | 📋 待开始 | **契约冻结后即可并行** |
 | P5 | 客户端同步与物化 | LabCodepilot | 📋 待开始 | 依赖 P3 + P4 |
@@ -198,10 +198,37 @@ const ok = exitCode === 0 && result?.is_error !== true && result?.api_error_stat
 
 非 401 的 retry（429 / 5xx）**让它退避**，不要一见 retry 就杀。
 
-### 验收
-- 手工触发一条 routine 跑完，transcript 落盘、成败判定正确
-- 故意用坏 token → **≤5 秒**中止并标 `credential_error`（而非 181 秒）
-- 故意让任务卡住 → 15 分钟被超时 kill 且记录原因
+### 验收 ✅（2026-08-04 生产真机，探针 uid=`p2probe`，跑完已清理零残留）
+
+| 项 | 结果 |
+|---|---|
+| 手工触发跑完 | ✅ `success` / exit 0 / 6.8s / $0.153 / 3 turns |
+| transcript 落盘 | ✅ 7 行 5826 B |
+| **产物真在卷里** | ✅ 经文件通道读出 `/workspace/hello.txt` (5B) = `"P2 OK"`，会话容器未唤醒 |
+| cwd / 模型 / skill | ✅ `/workspace`、`deepseek-v4-flash[1m]`（CLI 别名可解析）、**19 个 skill 含全部 5 个办公 skill** |
+| 401 立即中止 | ✅ **3 秒**（P0 基线 181 秒，60×） |
+| 硬超时 | ✅ 阈值调 4s 实测 `timeout`，走的是与 401 相同的 kill 路径 |
+| 输出上限 | ✅ 阈值调 2KB 实测 `output_overflow` |
+| 并发闸 | ✅ `CONCURRENCY=0` → `skipped`/`concurrency_limit`，零容器 |
+| 未配后端 | ✅ `credential_error: not_configured`，归类清晰 |
+
+**🐛 实测抓到一个真 bug（已修，注释留档）**：`--` 之后**不能再写 claude 二进制路径** ——
+`cowork-shim.py` 自己会 `Popen([CLAUDE_BIN] + argv)`。多写一次会让它变成 claude 的
+**第一个位置参数**，而 `-p/--print` 是布尔开关、prompt 走位置参数 → `/opt/cowork/claude`
+成了真正的 prompt，用户写的指令被丢掉。而回合照样 **exit=0 / status=success / 花掉 $0.39**，
+模型一本正经地介绍「/opt/cowork/claude 是什么」。**只有读输出才发现** ——
+这是「绿色不等于任务达成」最好的活标本，也是 P0 结论 ③ 的现场复现。
+
+**未验**：无。四个护栏 + 成功路径 + 产物取回全部实测过。
+
+### 交付
+| 文件 | 说明 |
+|---|---|
+| `lib/backend-credentials.mjs` | 向账号后端取凭证（P1 对端）+ `CredentialError` 归类（not_configured / backend_unreachable / not_provisioned / newapi_user_missing / rate_limited / backend_error） |
+| `lib/routine-runner.mjs` | 执行器本体 + 四护栏 + 成败判定 + 用后即废凭证 |
+| `routine-once.mjs` | 手工触发 CLI（验收工具 + 日后排障入口），支持 `COWORK_TEST_REAL_*` 绕开账号后端联调 |
+
+三个文件已部署生产，但 **`index.mjs` 尚未引用它们** —— 对现网服务零影响，等 P3 接线。
 
 ---
 
