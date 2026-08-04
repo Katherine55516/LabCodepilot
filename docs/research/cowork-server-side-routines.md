@@ -76,9 +76,37 @@
 
 → **routine 的用量统计几乎免费**：runner 只要照写 `routine_fire` / `routine_end` 事件，就自动流进已有管线。审计截断上限也已从 4MB 调到 64MB 正是为此。
 
-### ❓ 尚未验证的一项
+### ✅ 成功路径（用真实凭证补跑，全链路通过）
 
-**成功路径没跑**——需要一个真实可用的模型凭证。机制面（argv、输出格式、退出码、skill、cwd、frame EOF）全部已证，剩下的只是"有 key 时能不能正常出 assistant 消息并写文件到 /workspace"，而这条路径交互回合每天都在跑（交接文档 A.8 有 `file_download /workspace/1.md (294B)` 的实证）。**风险低但不为零，建议拿到凭证后补跑一次**（见文末待办）。
+走的是**完整的生产路径**，不是简化版：`POST /session/:id` 起容器 → `POST /session/:id/cred` 经 cred-proxy 登记真凭证拿 `cwk_` 一次性 token → `docker exec` 经 shim + 零长帧 EOF 跑 `claude -p` → 文件通道取回产物。
+
+```
+exit=0   耗时 94s   17 行 stream-json
+消息分布: system/init ×1 · system/api_retry ×12 · assistant ×2 · user ×1 · result/success ×1
+[cowork-shim] 预制 skill 已挂载: 5 个 → /home/agent/.claude/skills     ← stderr 实证
+[工具调用] Write
+[文本] 已在当前目录创建 s0-report.md，内容写为一行 "S0 verified"。
+
+result: subtype=success  is_error=False  api_error_status=None  terminal_reason=completed
+        duration_ms=93618  num_turns=2  total_cost_usd=0.1302
+        usage: in=22415 out=90 cache_read=22016
+        modelUsage=['deepseek-v4-flash[1m]']
+
+文件通道验证: GET /session/:id/files → /workspace/s0-report.md (11B)
+              GET /session/:id/file  → "S0 verified"  ← 内容逐字节正确
+```
+
+**三个额外收获：**
+
+**① CLI 别名模型原样可用。** 传的是 `--model "deepseek-v4-flash[1m]"`，`modelUsage` 的键就是它本身。memory 里记过的坑「managed 模型 id 可能是 CLI 别名，只有 SDK 子进程能解析，走 `@ai-sdk` 直连会 503」**在这条路径上不存在** —— 因为跑的就是 CLI。这反而比客户端的辅助 AI 路径更稳。
+
+**② 实测撞上 12 次 `429 rate_limit`，claude 自行退避后成功。** 这从正面印证了护栏设计的分寸：**401 立即中止、429/5xx 让它退避**。如果一刀切"见 retry 就 kill"，这次本该成功的运行会被误杀。
+
+**③ 正常运行也可能到 90s+。** 94 秒里绝大部分是等 429 退避。所以**超时不能设短**，15 分钟是合理的；同时也说明并发上限要按"每个 routine 可能占容器好几分钟"来估，不能按理想耗时算。
+
+**结论：S0 全部完成，S2 的技术不确定性已清零。**
+
+> ⚠️ 本次用的测试 key 属一次性用途，**请在 newapi 后台轮换**。服务端侧已 `DELETE /cred` 废止 + `shred` 擦除临时文件 + 删会话（容器/卷归零），真实用户的 8 容器 / 27 卷 / 5 条 egress 规则未受影响。
 
 ---
 
@@ -378,7 +406,7 @@ tick.unref?.();
 
 | 期 | 内容 | 阻塞依赖 | 验收 | 状态 |
 |---|---|---|---|---|
-| **S0** | 生产真机验 `claude -p stream-json`：argv / 输出形状 / 退出码 / shim 差异 / EOF 方式 | 无 | 拿到真实样本 | ✅ **完成**（§0.5）。剩成功路径待补一次 |
+| **S0** | 生产真机验 `claude -p stream-json`：argv / 输出形状 / 退出码 / shim 差异 / EOF 方式 / **成功路径全链路** | 无 | 拿到真实样本 | ✅ **全部完成**（§0.5），技术不确定性清零 |
 | **S1** | 账号后端内部凭证接口（RD4-C，§9）+ 沙箱侧取数客户端 | **关键路径** | cowork-server 能用 uid 换到可用凭证 | 📋 |
 | **S2** | `routine-runner.mjs` + 四护栏（401 立即中止 / 超时 / 输出上限 / 并发）+ 成败判定口径 | S0 ✅ | 手工触发一条 routine 跑完，transcript 落盘 | 📋 （**shim 零改动**） |
 | **S3** | store + 调度循环 + REST 七个端点 + `cowork.kind=routine` label + reconcile 排除 + `execOpened` 续命 | S2 | 建一条 cron routine，客户端全程关闭，到点自动跑完 | 📋 |
@@ -406,6 +434,9 @@ S0 已把 S2 的不确定性基本清空（唯一剩项是成功路径，风险�
 ---
 
 ## 7. 待拍板
+
+> ✅ **已定**：走服务端调度（D1）· 旧客户端定时任务界面已隐藏、无冲突（§10.9）· S0 全部验完。
+> 🔴 **新增待定**：§9.3 —— 内部凭证接口是否单独用一个密钥。这条影响安全边界，优先级最高。
 
 1. **凭证走 RD4-C（服务端向账号后端直取）** —— 确认后需要立刻和账号后端对接口。是否现在启动？
 2. **routine 独占一个持久 volume**（每次运行共享同一 workspace，有状态累积）—— 确认？还是每次运行要全新环境？
@@ -643,16 +674,15 @@ routine-sync.ts
 | `src/lib/claude-client.ts` | 办公会话注册 routines MCP |
 | `src/i18n/{en,zh,zh-HK}.ts` | 三语键。⚠️ **zh-HK 手工加，别跑 `gen-zh-hk.mjs`**（会回退约 40 个已校对的港式术语） |
 
-### 10.9 ⚠️ 必须先处理：和现有 `task-scheduler.ts` 的关系
+### 10.9 和现有 `task-scheduler.ts` 的关系 —— ✅ 已澄清，无冲突
 
-本仓库**已经有一套定时任务**（`src/lib/task-scheduler.ts` + `scheduled_tasks` 表 + `/api/tasks/*`，客户端调度、纯文本执行、无 UI，详见 [cowork-scheduled-routines.md §2](cowork-scheduled-routines.md)）。
+本仓库有一套旧的定时任务（`src/lib/task-scheduler.ts` + `scheduled_tasks` 表 + `/api/tasks/*`，客户端调度、纯文本执行）。
 
-两套并存会让用户看到两个"定时任务"，且语义完全不同（一个跑在本机只会生成文字、一个跑在沙箱是完整 agent）。**必须选一个：**
+**用户已确认：它在界面上早就隐藏了，用户看不到。** 所以**不存在"两个定时任务"的命名与入口冲突**，新功能可以直接占用「定时任务」这个名字和办公 tab 的入口位置，不需要先做下线。
 
-| 选项 | 说明 |
-|---|---|
-| **A. 下线旧的**（倾向） | 它没有 UI、执行能力残废、还有 owner_uid 跨账号缺陷。删代码 + 保留表做数据迁移窗口 |
-| B. 划清边界 | 旧的降级为"助理提醒"，只在助理 workspace 内部用，不在办公 tab 露面，改名避免混淆 |
-| C. 合并 | 旧表迁进新体系。**不推荐** —— 数据模型和执行语义都对不上，迁移成本大于重建 |
+但有两点仍要注意（不阻塞 S4，作为技术债登记）：
 
-这条需要你拍板，且应该在 S4 动工**之前**定，否则 UI 文案和入口位置都没法定。
+1. **它还在跑。** `src/instrumentation.ts:25` 每次 server 启动都会 `ensureSchedulerRunning()`，10s 轮询照常。UI 隐藏 ≠ 代码停止。虽然表里没数据就没有实际动作，但空转的轮询和它的 `owner_uid` 缺陷都还在。
+2. **命名空间要分开。** 新体系用 `cowork_routines` 表 + `/api/routines/*` 路由，与旧的 `scheduled_tasks` + `/api/tasks/*` **完全不重叠**（本文 §10.3/§10.8 已按此设计），两者可以静默共存不打架。
+
+**建议**：S4 完成、新功能稳定后，再单独起一个小 PR 清理旧代码（删 `task-scheduler.ts` + `/api/tasks/*` + 表）。现在不动它，避免给主线增加无关风险。
