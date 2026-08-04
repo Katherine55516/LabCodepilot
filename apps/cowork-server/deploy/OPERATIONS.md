@@ -105,6 +105,26 @@ iptables -L DOCKER-USER -n | grep -c cowork-egress
 tail -5 /opt/cowork-server/cowork-audit.log
 ```
 
+### 部署漂移检测(在**开发机**上跑,不是服务器)
+
+服务端是 scp/install.sh 推上来的,没有任何机制会告诉你「生产上跑的」和「仓库里的」
+分叉了。2026-08-04 手工比对发现生产落后仓库 3 个文件,其中就包括本文件自己 ——
+少了下面 §7 的「selftest 三个必踩的坑」,而那正是出事时要照着做的那段。
+
+```bash
+# 在 LabCodepilot 仓库里跑;只读,不写远端、不重启服务
+apps/cowork-server/deploy/verify-deployment.sh              # 默认比 cowork-prod
+apps/cowork-server/deploy/verify-deployment.sh cowork-vm    # 换目标
+```
+
+输出分三类,**处理方式完全不同**:
+- `⚠️ 内容不一致` — 先判方向。仓库领先 = 等下次部署;生产领先 = 有人手工改过服务器,
+  必须回填进 git,否则那份改动只活在一台机器上。
+- `⬜ 仅仓库有` — 新文件还没部署,正常。
+- `🔺 仅生产有` — **最危险**:只存在于这台机器的代码,机器没了就没了,立刻回填 git。
+
+退出码 0 = 一致、1 = 有漂移,可直接挂进巡检脚本。
+
 ## 7. 故障排查
 
 | 症状 | 排查/处置 |
