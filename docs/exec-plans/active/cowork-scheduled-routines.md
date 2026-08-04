@@ -17,7 +17,7 @@
 | Phase | 内容 | 仓库 | 状态 | 备注 |
 |-------|------|------|------|------|
 | P0 | 技术验证：生产真机验 `claude -p` | — | ✅ 已完成 | 五条结论改变了实现，见「决策日志 2026-08-04 ②」 |
-| P1 | 账号后端内部凭证接口 | codeagent-server | ⏸ **等用户指示启动**（D5） | **关键路径**，排期最长 |
+| P1 | 账号后端内部凭证接口 | codeagent-server | ✅ **代码完成**（`99c044d`，未推送） | 21 单测 / 全仓 155 passed；**待部署 + 与 P2 联调** |
 | P2 | 沙箱执行器 `routine-runner` | cowork-server | 📋 待开始 | 只依赖 P0，可立即开工 |
 | P3 | 沙箱调度 + 存储 + REST | cowork-server | 📋 待开始 | 依赖 P2 |
 | P4 | 客户端数据层 + 代理路由 | LabCodepilot | 📋 待开始 | **契约冻结后即可并行** |
@@ -108,7 +108,22 @@ P4/P6 立刻可以对着契约并行开发，不必等服务端跑通。这能�
 
 ---
 
-## P1 · 账号后端内部凭证接口 ⏸
+## P1 · 账号后端内部凭证接口 ✅ 代码完成
+
+> 2026-08-04 交付于 codeagent-server `main` 分支 commit `99c044d`（**本地,未推送**）。
+> 开发文档：`codeagent-server/docs/cowork-internal-credentials-api.md`（含 golden 向量与部署自检）。
+>
+> **交付内容**：`app/cowork/internal.py` 路由 + `verify_sandbox_token()` + `ModelCredentialsResponse`
+> + `APP_COWORK_INTERNAL_SECRET` 配置 + 21 条单测 + 三处 env 透传 + 开发文档。
+> 全仓 155 passed；ruff/mypy 回到改动前基线（63/57，新增文件零告警）。
+>
+> **实现中确认的一件事（会影响 P2）**：`auth_style` 默认是 **`api_key` 而不是 `auth_token`**。
+> 核实自客户端真实推断链路 —— managed 配置映射成 `provider_type='anthropic'` 且 extra_env 不含
+> `ANTHROPIC_AUTH_TOKEN`，经 `inferAuthStyleFromLegacy` 落 `api_key` 分支（注入 `x-api-key`）。
+> P2 的 runner 据此设 `ANTHROPIC_API_KEY`；本文早前草案里写的 `auth_token` 是错的。
+>
+> **剩余**：部署到生产（`docker compose up -d --build backend` + 配 `APP_COWORK_INTERNAL_SECRET`）、
+> 与 P2 真实联调。
 
 **目标**：让沙箱在没有客户端在场时，凭 uid 换到该用户的模型凭证。
 
