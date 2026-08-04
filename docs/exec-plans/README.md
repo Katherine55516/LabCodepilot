@@ -44,6 +44,7 @@
 
 | 文件 | 主题 | 状态 |
 |------|------|------|
+| active/cowork-usage-admin.md | **沙箱使用情况管理后台**:审计入库(exec_end 补全 + 惰性增量拉取 + fileId 截断容错)→ PG 统计(用户/会话/成功率,JOIN users 换人名)→ admin web「沙箱用量」页;admin 可删会话/看下载产物(UD2/UD3),动作写 admin_* 审计回流留痕;`__admin__` HMAC 鉴权零新密钥 | P0-P2 完成;沙箱侧已上线;账号后端待用户部署(pull+migrate+build) |
 | active/cowork-p2-windows.md | **Cowork P2 Windows/WSL2 移植**:补平台后端(约半数模块复用,四接缝=通道/生命周期/分发/网络)；通道走 `wsl.exe -e` stdio 模型(与现 exec 帧封装天然契合，免 admin)；决策 D1 接受策略级隔离先交付/D2 全 Win10-11 不设门槛/D3 stdio/D4 实测需 Win 机；W0 通道 POC 先行 → W1 抽象(macOS 可做) → W2-W7 | ⏸ 挂起(企业禁虚拟化→远程容器方案取代;个人 Win 场景保留) |
 | active/smoke-test.md | **冒烟测试（测试工作台第三形态）**：第三段页签 + 手动录入测试场景（验证目标+预期结果）+ 无门控三节点流水线；环境沿用现有配置、提示词三段固定内容内嵌为 skill/prompt；Phase 11 收敛为单份完整冒烟报告（Bug 表格），停止 Excel/独立缺陷/回归脚本 | Phase 1-11 已完成；打包态实测待用户发起 |
 | active/regression-library.md | 测试工作台:回归用例库(用例设计后自动沉淀「回归测试」标签用例 + 项目级库查看/管理 + 跨任务一键重跑) | 设计完成,待实现(批 A-E) |
