@@ -4,8 +4,9 @@
  *
  * 每个办公会话一个硬化容器 cowork-<sid>:
  *   --cap-drop ALL --security-opt no-new-privileges --memory/--pids-limit
- *   claude + shim 从宿主 bind-mount(:ro);workspace 用会话专属 named volume
- *   (与容器生命周期解耦:容器可回收,volume 留到会话删)。
+ *   claude + shim 从宿主 bind-mount(:ro);会话专属 named volume 两个 —— workspace
+ *   (/workspace,用户产物)与 state(/home/agent,claude 自己的状态)。都与容器生命周期
+ *   解耦:容器可回收,volume 留到会话删。
  * R1 用现成 python:3-slim + bind claude/shim;R5 换烘进二进制的自建镜像。
  */
 import { execFile } from 'node:child_process';
@@ -72,6 +73,21 @@ export function volumeName(sid) {
   if (!HEX.test(sid)) throw new Error('invalid sessionId');
   return `cowork-ws-${sid}`;
 }
+/**
+ * 会话状态卷(挂成容器内 HOME=/home/agent)。
+ *
+ * 为什么不能是 tmpfs(原实现):tmpfs 在**每次 docker start 时都是空的**,而 R4 的空闲
+ * 回收会 stop 容器。于是"离开半小时再回来接着聊"必然丢掉 claude 写在 ~/.claude/projects
+ * 的会话记录,客户端仍按本地 DB 的 sdk_session_id 发 --resume → claude 打
+ * "No conversation found" 并 exit 1 → 退出码被 forwarder 抹平 → 用户侧"发出去没反应"。
+ *
+ * 为什么不并进 workspace 卷:回合末产物 diff 只扫 /workspace,状态文件混进去会被当成
+ * 用户产物显示在「沙箱产物」卡片里 —— 单独一个卷同时满足"持久"与"不进产物"。
+ */
+export function stateVolumeName(sid) {
+  if (!HEX.test(sid)) throw new Error('invalid sessionId');
+  return `cowork-st-${sid}`;
+}
 
 async function docker(args) {
   const { stdout } = await execFileP('docker', args, { maxBuffer: 32 * 1024 * 1024 });
@@ -91,19 +107,36 @@ async function ensureNetwork() {
 }
 
 export async function volumeExists(sid) {
-  const out = await docker(['volume', 'ls', '-q', '--filter', `name=^${volumeName(sid)}$`]);
+  return volumeExistsByName(volumeName(sid));
+}
+
+async function volumeExistsByName(vol) {
+  const out = await docker(['volume', 'ls', '-q', '--filter', `name=^${vol}$`]);
   return out.trim().length > 0;
 }
 
-/**
- * 确保会话 workspace volume 存在(幂等)。fresh named volume 属 root:root,而 claude 以
- * 非 root(AGENT_UID)跑,故创建后用一次性 helper 容器 chown —— 只在首次创建时付这一次成本。
- * volume 与容器同 label,是"会话存在"的另一半事实源(容器可回收,volume 留到会话删)。
- */
+/** 确保会话 workspace volume 存在(幂等)。挂成容器内 /workspace,产物 diff 只扫它。 */
 export async function ensureVolume(sid, uid = SINGLE_UID, kind = KIND_SESSION) {
+  return ensureManagedVolume(volumeName(sid), sid, uid, kind);
+}
+
+/**
+ * 确保会话状态卷存在(幂等)。语义同 ensureVolume,只是多 chmod 0700 —— 原 tmpfs 就是
+ * mode=0700,HOME 里放的是 claude 的会话记录与配置,权限不该比原来松。
+ */
+export async function ensureStateVolume(sid, uid = SINGLE_UID, kind = KIND_SESSION) {
+  return ensureManagedVolume(stateVolumeName(sid), sid, uid, kind, '0700');
+}
+
+/**
+ * 建一个受管 named volume 并交给 AGENT_UID(幂等)。fresh named volume 属 root:root,
+ * 而 claude 以非 root(AGENT_UID)跑,故创建后用一次性 helper 容器 chown —— 只在首次
+ * 创建时付这一次成本。volume 与容器同 label,是"会话存在"的另一半事实源(容器可回收,
+ * volume 留到会话删)。
+ */
+async function ensureManagedVolume(vol, sid, uid, kind, mode) {
   assertUid(uid);
-  const vol = volumeName(sid);
-  if (await volumeExists(sid)) return vol;
+  if (await volumeExistsByName(vol)) return vol;
   await docker(['volume', 'create', '--label', LABEL_MANAGED, '--label', `cowork.sid=${sid}`, '--label', `cowork.uid=${uid}`, '--label', `cowork.kind=${assertKind(kind)}`, vol]);
   try {
     await docker([
@@ -111,10 +144,15 @@ export async function ensureVolume(sid, uid = SINGLE_UID, kind = KIND_SESSION) {
       // cap-drop ALL 会连 root 的 CAP_CHOWN 一起剥掉(自测踩过)—— 这个一次性
       // init 容器只保留 CHOWN 这一个能力。
       '--cap-drop', 'ALL', '--cap-add', 'CHOWN', '--security-opt', 'no-new-privileges',
-      '-v', `${vol}:/ws`, IMAGE, 'chown', `${AGENT_UID}:${AGENT_UID}`, '/ws',
+      '-v', `${vol}:/ws`, IMAGE,
+      // ⚠️ 必须 chmod 在前:chown 之后 root 不再是属主,而 CAP_FOWNER 已被 cap-drop ALL
+      // 剥掉 → 那时再 chmod 必然 EPERM。
+      ...(mode
+        ? ['sh', '-c', `chmod ${mode} /ws && chown ${AGENT_UID}:${AGENT_UID} /ws`]
+        : ['chown', `${AGENT_UID}:${AGENT_UID}`, '/ws']),
     ]);
   } catch (e) {
-    // 半初始化(已创建未 chown)的 volume 会被 volumeExists 幂等跳过而永远不可写:
+    // 半初始化(已创建未 chown)的 volume 会被存在性检查幂等跳过而永远不可写:
     // 失败就地回收,让下次调用干净重试。
     try { await docker(['volume', 'rm', vol]); } catch { /* ignore */ }
     throw e;
@@ -164,6 +202,7 @@ export async function ensureContainer(sid, uid = SINGLE_UID, kind = KIND_SESSION
   // guard 为 'absent'(全新)或 'ok'(volume 属本人、容器被 TTL 回收待重建)
   void guard;
   await ensureVolume(sid, uid, kind);
+  await ensureStateVolume(sid, uid, kind);
   await ensureNetwork();
   await docker([
     'run', '-d', '--name', cname,
@@ -175,12 +214,13 @@ export async function ensureContainer(sid, uid = SINGLE_UID, kind = KIND_SESSION
     '--user', `${AGENT_UID}:${AGENT_UID}`,
     '--cap-drop', 'ALL', '--security-opt', 'no-new-privileges',
     '--memory', MEM, '--pids-limit', PIDS, '--cpus', CPUS,
-    // HOME 放 tmpfs(不在 workspace 内):claude 的状态文件(~/.claude* 等)不落持久
-    // volume,否则回合末产物 diff 会把它们当用户产物;容器存活期内跨回合仍持久。
+    // HOME 用会话专属状态卷(不在 workspace 内):claude 的状态文件(~/.claude* 等)
+    // 不落进产物目录,同时**跨容器 stop/start 存活** —— 原来是 tmpfs,TTL 一回收就清空,
+    // 客户端的 --resume 必然落空(见 stateVolumeName 注释)。
     '-e', 'HOME=/home/agent',
     ...(PIP_INDEX_URL ? ['-e', `PIP_INDEX_URL=${PIP_INDEX_URL}`] : []),
     ...(PIP_TRUSTED_HOST ? ['-e', `PIP_TRUSTED_HOST=${PIP_TRUSTED_HOST}`] : []),
-    '--tmpfs', `/home/agent:uid=${AGENT_UID},gid=${AGENT_UID},mode=0700`,
+    '-v', `${stateVolumeName(sid)}:/home/agent`,
     ...(BUNDLED ? [] : ['-v', `${ASSETS_DIR}:/opt/cowork:ro`]),
     // R2:workspace 用会话专属 named volume(与容器生命周期解耦,文件 op 服务端直读)。
     '-v', `${volumeName(sid)}:/workspace`,
@@ -199,14 +239,22 @@ export async function removeContainer(sid, { keepVolume = true } = {}) {
   const cname = name(sid);
   try { await docker(['rm', '-f', cname]); } catch { /* 不存在即已达成 */ }
   if (!keepVolume) {
-    // 在飞的文件 helper(--rm)可能瞬时还挂着 volume(下载刚结束/刚被取消)→
-    // "volume is in use":短退避重试;仍占用则静默留给 reconcile 兜底。
-    for (let i = 0; i < 4; i++) {
-      try { await docker(['volume', 'rm', volumeName(sid)]); return; }
-      catch (e) {
-        if (/no such volume/i.test(String(e?.message || ''))) return;
-        await new Promise((r) => setTimeout(r, 500));
-      }
+    // 两个卷都要清:workspace(用户产物)+ state(claude 的 HOME)。
+    await rmVolume(volumeName(sid));
+    await rmVolume(stateVolumeName(sid));
+  }
+}
+
+/**
+ * 删卷。在飞的文件 helper(--rm)可能瞬时还挂着 volume(下载刚结束/刚被取消)→
+ * "volume is in use":短退避重试;仍占用则静默留给 reconcile 兜底。
+ */
+async function rmVolume(vol) {
+  for (let i = 0; i < 4; i++) {
+    try { await docker(['volume', 'rm', vol]); return; }
+    catch (e) {
+      if (/no such volume/i.test(String(e?.message || ''))) return;
+      await new Promise((r) => setTimeout(r, 500));
     }
   }
 }
@@ -274,4 +322,4 @@ export async function health() {
 }
 
 export { AGENT_UID, IMAGE, SINGLE_UID, KIND_SESSION, KIND_ROUTINE };
-export const _internals = { name, volumeName, IMAGE, ASSETS_DIR };
+export const _internals = { name, volumeName, stateVolumeName, IMAGE, ASSETS_DIR };

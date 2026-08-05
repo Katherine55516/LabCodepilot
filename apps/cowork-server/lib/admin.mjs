@@ -134,6 +134,14 @@ export async function collectStats() {
         cpu: s?.CPUPerc ?? null, mem: s?.MemUsage ?? null, net: s?.NetIO ?? null, pids: s?.PIDs ?? null,
       };
     }),
-    volumes: volumes.map((v) => ({ sid: v.sid, uid: v.uid, sizeBytes: sizes.get(v.name) ?? null })),
+    // 一个会话现在有两个卷(workspace 产物 + state=claude 的 HOME),按 sid 合并成一行、
+    // 大小求和 —— 否则同一个会话会在面板里出现两条。全 null(拿不到 df)才报 null。
+    volumes: [...volumes.reduce((acc, v) => {
+      const row = acc.get(v.sid) || { sid: v.sid, uid: v.uid, sizeBytes: null };
+      const size = sizes.get(v.name);
+      if (size != null) row.sizeBytes = (row.sizeBytes ?? 0) + size;
+      acc.set(v.sid, row);
+      return acc;
+    }, new Map()).values()],
   };
 }

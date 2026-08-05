@@ -60,7 +60,7 @@ COPY cowork-shim.py /opt/cowork/cowork-shim.py
 COPY cred-proxy.py /opt/cred-proxy.py
 
 # 预制 Agent Skills(办公高频)。三个位置都不能用,所以落在 /opt/cowork-skills:
-#   - `~/.claude/skills`:HOME 是 tmpfs(orchestrator 显式挂),容器每次创建都为空,
+#   - `~/.claude/skills`:HOME 是 orchestrator 挂的会话状态卷,新建会话时为空,
 #     写进镜像无效 —— 必须由 shim 在启动时软链进去;
 #   - `/workspace`:持久卷,但**会被回合末产物 diff 扫描**,skill 文件会被当成用户
 #     产物显示在「沙箱产物」卡片里,污染界面;

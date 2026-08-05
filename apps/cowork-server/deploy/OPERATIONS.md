@@ -13,7 +13,9 @@ cowork-server(宿主 node 进程,systemd 管理)── 控制面,自身无特权
    │  docker CLI(服务用户在 docker 组)
    ▼
 docker ─┬─ cowork-<sid>    会话容器(每会话一个;非 root uid 1000、cap-drop ALL、
-        │                  cpu/mem/pids 配额;workspace = named volume cowork-ws-<sid>)
+        │                  cpu/mem/pids 配额;两个 named volume:
+        │                  cowork-ws-<sid> → /workspace(用户产物,只有它进产物 diff)
+        │                  cowork-st-<sid> → /home/agent(claude 的会话记录/配置)
         ├─ cowork-proxy    凭证代理 sidecar(常驻;真 key 只在它的 tmpfs /creds)
         └─ cowork-net      专用网络(固定网桥 cowork0,egress 防火墙按此名匹配)
 ```
@@ -137,13 +139,15 @@ apps/cowork-server/deploy/verify-deployment.sh cowork-vm    # 换目标
 | 会话容器起不来 | 通用镜像模式:assets 缺件(`claude` 可执行 + `cowork-shim.py`)或镜像拉不到(离线先 `docker load`);自建镜像模式:`docker images cowork-sandbox` 确认镜像在、`.env` 的 `COWORK_IMAGE` 拼写对 |
 | 回合全部连不上凭证代理 | `docker ps --filter name=cowork-proxy` 看是否被误删/退出 → `systemctl restart cowork-server` 重建(运行中不自动检测,见 §1) |
 | 容器"消失" | 大概率 TTL 空闲回收(审计有 `idle_reap`)。volume 还在,客户端下回合 ensure 自动 `docker start` 复用,**不是故障** |
-| 磁盘涨 | 会话 volume 是持久的(删除会话才清)。孤儿盘点:`docker volume ls --filter label=cowork.managed=1`,对不上客户端会话列表的可由客户端 reconcile 清,或确认后 `docker volume rm` |
+| 磁盘涨 | 会话 volume 是持久的(删除会话才清),且**每会话两个**(`cowork-ws-*` 产物 + `cowork-st-*` claude 状态)。孤儿盘点:`docker volume ls --filter label=cowork.managed=1`,对不上客户端会话列表的可由客户端 reconcile 清,或确认后 `docker volume rm` |
+| 接着聊上一轮却"没反应" | 容器里没有该会话的 transcript,claude 打 `No conversation found with session ID` 并 exit 1(`journalctl -u cowork-server | grep "No conversation"`)。shim 会自动降级成"以同 id 新建会话"(日志 `[cowork-shim] 会话 … 已不在容器内`),用户只失忆一轮。**仍频繁出现** = 该会话容器还是老的 tmpfs HOME,按 §8 重建一次 |
 | install.sh 报 npm 相关错 | sudo 的 secure_path 常不认 npm 的 .js symlink —— 把 `node_modules/ws` 随部署源一并拷来(install.sh 优先直拷,根本不需要 npm) |
 | 远程脚本操作结果错乱 | SSH ControlMaster 连接复用叠加会话状态导致跨调用副作用错乱(踩过:文件"传完即失踪")。部署类操作用**单次原子 ssh**(tar-pipe + 执行放同一 shell) |
 
 ## 8. 升级 / 迁移
 
 - **升级 server 代码**:新源码放服务器 → 重跑 `sudo ./deploy/install.sh`(幂等;拷代码+更新单元,**保留 `.env`**)→ 完。会话容器不受影响。
+- **⚠️ 升级到「HOME 用状态卷」这一版**:`docker run` 的挂载参数在建容器时就固化了,**存量容器仍是 tmpfs HOME**,不重建就享受不到。升级步骤:装新代码 + 重建镜像(§9,shim 有改动)→ `systemctl restart cowork-server` → 确认无活跃回合后 `docker rm -f $(docker ps -aq --filter label=cowork.managed=1)`(**产物卷保留,用户文件不丢**;proxy 会随下次 restart 重建)。存量会话记着的 sdk_session_id 在新卷里同样不存在,首个回合由 shim 降级成"以同 id 新建",之后恢复正常。
 - **升级 claude 二进制**:通用镜像模式下替换 `$COWORK_ASSETS_DIR/claude`(bind `:ro` 实时,新回合即生效);自建镜像模式下重建镜像(见 §9)。两种模式都要与客户端 SDK 版本对齐,架构别搞错 x64/arm64。
 - **迁移到真裸金属三件套**:① 换目标架构 claude 二进制;② 跑 selftest 自检(见下);③ 上 TLS(README「TLS」节)+ 真实域名下发。
 - **selftest 自检**(部署目录自带,验证 docker/容器链路完好;需 assets + egress 段需免密 sudo):

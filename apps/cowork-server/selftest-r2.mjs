@@ -62,7 +62,7 @@ function truncatedUpload(sid) {
   const truncLeak = afterTrunc.files.some((f) => f.name.startsWith('trunc'));
   check('R2 上传:Content-Length 不符(断连)不留半截文件', !truncLeak, JSON.stringify(afterTrunc.files.map((f) => f.name)));
 
-  // 3. 容器内 agent 写文件(非 root uid 对 volume 可写;HOME 在 tmpfs 不进 workspace)
+  // 3. 容器内 agent 写文件(非 root uid 对 volume 可写;HOME 在独立状态卷不进 workspace)
   await jget(`/session/${A}`, { method: 'POST' });
   const t1 = Date.now();
   await sleep(1100); // mtime 粒度余量
@@ -72,7 +72,7 @@ function truncatedUpload(sid) {
   const names = sinceDiff.files.map((f) => f.name).sort();
   const gen = sinceDiff.files.find((f) => f.name === 'gen.txt');
   // 期望恰好 [gen.txt, n.txt]:旧文件(in.txt)被 since 滤掉、目录本身不列、
-  // HOME(tmpfs)里的 .claude-state 不混入 workspace diff。
+  // HOME(独立状态卷)里的 .claude-state 不混入 workspace diff。
   check('R2 diff:since 过滤 + 子目录递归 + HOME 状态不混入',
     JSON.stringify(names) === JSON.stringify(['gen.txt', 'n.txt'])
     && gen.path === '/workspace/gen.txt' && gen.size === 10 && gen.mtime >= t1,

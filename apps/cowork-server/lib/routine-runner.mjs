@@ -13,7 +13,7 @@
  *
  * ① **必须走 shim,不能直连 claude。** shim 的 link_preinstalled_skills() 负责把镜像里
  *    5 个办公 skill(docx/xlsx/pptx/pdf/office-cn)软链进 ~/.claude/skills —— HOME 是
- *    tmpfs,每次建容器都是空的,镜像里写死没用。实测:直连 14 个 skill,经 shim 19 个。
+ *    会话状态卷,新建时是空的,镜像里写死没用。实测:直连 14 个 skill,经 shim 19 个。
  *    绕开 shim = 静默丢掉全部办公能力,而定时任务恰恰最需要它们。
  *
  * ② **stdin 写 4 字节零长帧就是优雅 EOF,shim 零改动。** `-p` 模式 prompt 在 argv 里,

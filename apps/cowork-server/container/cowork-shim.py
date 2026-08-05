@@ -15,6 +15,7 @@ stdin EOF 只能靠"关连接写侧"表达,moby 维护者自认该协议 fundame
 即其容器版最小子集(去掉 vsock 监听与 setuid:容器边界已做隔离,claude 直接跑)。
 """
 import os
+import re
 import sys
 import time
 import subprocess
@@ -29,14 +30,16 @@ SKILLS_SRC = os.environ.get("COWORK_SKILLS_DIR", "/opt/cowork-skills")
 def link_preinstalled_skills():
     """把镜像内预制的 skill 软链进 ~/.claude/skills/,让 claude 能发现它们。
 
-    为什么每次启动都要做:HOME(/home/agent)是 orchestrator 挂的 **tmpfs**,容器每次
-    创建都是空的,所以不可能在镜像里把文件写死到 ~/.claude/skills。
+    为什么每次启动都要做:HOME(/home/agent)是 orchestrator 挂的**会话状态卷**,
+    首次创建时是空的,所以不可能在镜像里把文件写死到 ~/.claude/skills。已存在的链
+    直接跳过(见下),所以卷持久化之后重复调用也不做无用功;代价是镜像里删掉某个
+    skill 后,老会话的卷里会留一个悬空软链 —— claude 扫到读不出内容,自然忽略。
 
     为什么逐个软链、而不是把整个 skills 目录软链过去:claude 扫描 skills 目录用的是
     readdir —— 目录内的**条目**是软链能被正常列出;而把 skills 本身做成软链则依赖
     实现是否 follow,不可靠。逐个链也让用户/后续流程仍可往同一目录放自己的 skill。
 
-    软链而非复制:tmpfs 占的是内存,且软链指向镜像只读层,agent 改不动预制内容。
+    软链而非复制:省卷空间,且软链指向镜像只读层,agent 改不动预制内容。
 
     失败只告警不抛:skill 是增强项,不能因为它挂掉整个回合。
     """
@@ -61,6 +64,66 @@ def link_preinstalled_skills():
         print(f"[cowork-shim] 预制 skill 挂载失败(不影响本回合): {e}", file=sys.stderr)
 
 
+UUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+
+
+def resume_target_exists(session_id):
+    """容器内是否还留着这个会话的 transcript。
+
+    claude 把会话写在 $HOME/.claude/projects/<cwd-slug>/<session-id>.jsonl。这里不按
+    slug 拼路径、而是把整棵 .claude 走一遍:slug 由 cwd 推导、跨版本可能变,而这棵树
+    很小(skills 是软链,os.walk 默认不跟进),多走几个目录的成本可以忽略。
+    """
+    root = os.path.join(os.environ.get("HOME", "/home/agent"), ".claude")
+    target = session_id + ".jsonl"
+    for _dirpath, _dirnames, filenames in os.walk(root):
+        if target in filenames:
+            return True
+    return False
+
+
+def rewrite_stale_resume(argv):
+    """--resume <id> 指向容器里已不存在的会话 → 换成 --session-id <id>(或直接去掉)。
+
+    为什么需要:HOME 卷是会话级的,而容器被 TTL 空闲回收(docker stop)再拉起、或会话
+    容器被重建时,卷可能还没有(或曾经是 tmpfs、每次 start 都清空)这个 transcript,
+    客户端却仍按本地 DB 记着的 sdk_session_id 发 --resume。claude 会打
+    "No conversation found with session ID: <id>" 并 exit 1 —— 而 forwarder 把退出码
+    抹平成 0(ws close → process.exit(0)),SDK 因此既收不到消息也收不到错误,用户侧
+    表现为"消息发出去毫无反应",服务端日志之外无痕(2026-08-05 线上取证:两天内 20 次,
+    占同期失败回合的七成;失败回合本身约占全部回合的两成)。
+
+    换成 --session-id(而不是直接删掉 --resume)的好处:本回合以**同一个 id** 新建会话,
+    客户端记着的 id 与容器内的对上,下一回合的 --resume 就能命中,只失忆这一轮。
+    id 不是合法 UUID 时 --session-id 会被 claude 拒绝,那就退化成直接去掉 --resume。
+
+    只认长选项:唯一的调用方是 Agent SDK,它固定 push("--resume", id) 两个元素;
+    --resume= 等价写法一并兼容。--fork-session 依赖 --resume,改写时一起摘掉。
+    """
+    for i, arg in enumerate(argv):
+        if arg == "--resume" and i + 1 < len(argv):
+            sid, tail_from = argv[i + 1], i + 2
+        elif arg.startswith("--resume="):
+            sid, tail_from = arg.split("=", 1)[1], i + 1
+        else:
+            continue
+        # --resume 的值是可选的(claude 允许裸 --resume 进交互选择器):取到的若是
+        # 下一个选项或空,说明本来就没带 id,交给 claude 自己处理。
+        if not sid or sid.startswith("-"):
+            return argv
+        if resume_target_exists(sid):
+            return argv
+        head = argv[:i]
+        tail = [a for a in argv[tail_from:] if a != "--fork-session"]
+        head = [a for a in head if a != "--fork-session"]
+        if UUID_RE.match(sid):
+            print(f"[cowork-shim] 会话 {sid} 的记录已不在容器内 → 以同 id 新建", file=sys.stderr)
+            return head + ["--session-id", sid] + tail
+        print(f"[cowork-shim] 会话 {sid} 的记录已不在容器内且非 UUID → 去掉 --resume", file=sys.stderr)
+        return head + tail
+    return argv
+
+
 def main():
     # argv:'--' 之后的一切透传给 claude(与 forwarder process.argv.slice(2) 对齐)
     if "--" in sys.argv:
@@ -69,6 +132,7 @@ def main():
         argv = sys.argv[1:]
 
     link_preinstalled_skills()  # 必须在起 claude 之前:它启动时就会扫 skills 目录
+    argv = rewrite_stale_resume(argv)
 
     proc = subprocess.Popen(
         [CLAUDE_BIN] + argv,
