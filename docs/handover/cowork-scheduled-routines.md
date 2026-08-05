@@ -30,8 +30,8 @@
 | P3 | 沙箱调度 + 存储 + REST | ✅ **已上线生产** |
 | P4 | 客户端数据层 + 代理路由 | ✅ 完成（无 UI） |
 | P5 | 客户端同步与物化 | ✅ 完成（无 UI） |
-| **P6** | **客户端 UI 三层** | 📋 **下一步，见 §I** |
-| P7 | 创建入口（MCP / 存为定时）+ 通知 + i18n | 📋 依赖 P6 |
+| P6 | 客户端 UI 三层 | ✅ 完成（含三语 i18n） |
+| **P7** | **创建入口（MCP / 存为定时）** | 📋 **下一步，见 §I** |
 | P8 | 加固与运维（配额/审计/手册） | 📋 |
 | P9 | 端到端 + 双文档 + 打包验收 | 📋 |
 
@@ -43,11 +43,15 @@ agent 回合、产出文件、记录历史 —— 全程不需要任何客户端
 **客户端的数据链路也通了**：P4 铺好数据层与 `/api/routines/*` 代理，P5 做完拉取与物化 ——
 `POST /api/routines/sync` 一调，服务端的运行就变成本地会话（幂等、失败也物化、不进办公列表）。
 
-**但还看不到任何界面**（P6 才做）。现在只能用 curl 打 `/api/routines/sync` 验证。
+**界面也做完了**：侧边栏「文生图」下方的「定时任务」入口 → 三层导航（列表 / 详情+运行历史 / 某次运行的
+只读回放）。第三层直接复用现有聊天渲染，工具调用折叠、Markdown、产物下载全都现成。
+
+**还缺的是「怎么创建得更顺手」**：目前只能在定时任务页点「新建」。P7 补 MCP 工具（在办公对话里
+说一句就建）和「存为定时任务」（从现有会话固化）。
 
 ## A.4 下一步
 
-**P6：客户端 UI 三层。** 具体怎么做见 §I，那一节是自足的施工说明。
+**P7：创建入口（MCP 工具 + 存为定时任务）。** 具体怎么做见 §I，那一节是自足的施工说明。
 
 ---
 
@@ -248,6 +252,8 @@ reaper 只认 WS 连接（`execOpened`/`execClosed`），而定时任务是服�
 | G8 | **`readBody` 返回原始字符串不是 JSON** | `index.mjs` 的既有调用方都自己 parse。当对象用会让所有字段读成 undefined，表现是创建全报「name is required」 |
 | G9 | **selftest-r1..r4 会清场** | 它们 reconcile 掉全部受管容器与网络，**有活跃用户时绝不能跑**。`selftest-r5` 刻意不清场，可在生产跑 |
 | G10 | **远端命令里的 glob 会被远端 shell 展开** | `verify-deployment.sh` 拼 ssh 命令时必须 `printf '%q '` 转义模式，用 `%s` 会让 `.env*` / `*.log` 提前展开、find 静默失效 |
+| G11 | **`{0 && <X/>}` 会把 `0` 渲染出来** | `enabled` 是 SQLite 的 1/0 不是布尔。P6 的暂停卡片上因此多出两个孤零零的「0」，肉眼看才发现。写 `!!r.enabled &&` |
+| G12 | **中文文案要用全角标点** | app 既有 271 条中文文案用「，：（）」，新写的用了半角，混在一起很扎眼。写完扫一遍 |
 
 ---
 
@@ -300,7 +306,7 @@ $COWORK_STATE_DIR (默认 /data/cowork-state)
 | `tests/cowork/test_internal_credentials.py` | **21 项**，重心在「什么情况下必须闭嘴」 |
 | `docs/cowork-internal-credentials-api.md` | 契约 + 安全论证 + golden 向量 + 部署自检 |
 
-## H.3 客户端 `LabCodepilot/src/`（P4 + P5 已交付）
+## H.3 客户端 `LabCodepilot/src/`（P4 + P5 + P6 已交付）
 
 | 文件 | 职责 |
 |---|---|
@@ -316,6 +322,13 @@ $COWORK_STATE_DIR (默认 /data/cowork-state)
 | `__tests__/unit/routine-session-isolation.test.ts` | 10 项，锁 F3 |
 | `__tests__/unit/routine-transcript.test.ts` | **P5**：16 项，重放形状 + G1 陷阱 + 失败必须被看见 |
 | `__tests__/unit/routine-sync.test.ts` | **P5**：15 项，幂等 / 排序 / 降级 / 失败兜底 |
+| `lib/routine-ui.ts` | **P6 新建**：预设↔cron 互转、状态色调、格式化。纯逻辑，23 单测 |
+| `components/routines/` | **P6 新建**：七个组件（Panel/List/Form/SchedulePicker/Detail/RunView/StatusChip） |
+| `app/routines/page.tsx` | **P6 新建**：路由 |
+| `app/api/routines/{count,[id]/sessions}` | **P6 新建**：两个**纯本地**读取口，不打沙箱 |
+| `components/layout/ChatListPanel.tsx` | **P6 改**：办公 tab 加「定时任务」入口（文生图下方竖排 + 任务数徽标） |
+| `i18n/{en,zh,zh-HK}.ts` | **P6 改**：100 个 `routines.*` key ×3 语 |
+| `__tests__/unit/routine-ui.test.ts` | **P6**：23 项，重点锁预设↔cron 往返 |
 
 ### P5 的四条口径（改同步逻辑前先读）
 
@@ -327,6 +340,16 @@ $COWORK_STATE_DIR (默认 /data/cowork-state)
    运行历史里，那才是它该待的地方。给它建空会话只会在列表里堆没内容的条目。
 4. **从旧到新物化**。`getSessionsByRoutine` 按 `created_at DESC` 排，而 created_at 是物化
    时刻；服务端返回的是新→旧，照单全收会让本地顺序跟真实运行顺序反过来。
+
+### P6 的两条口径
+
+5. **第三层直接复用 `MessageList`**，不另写渲染器。P5 物化出的消息与实时回合同形状，
+   所以工具调用折叠、Markdown、产物下载全都现成。另写一个等于重新实现一遍还会慢慢走样。
+   定时会话按 id 取消息是**允许的** —— `isSessionVisibleToCurrentUser` 只看 `owner_uid`，
+   不看 `routine_id`（F3 的排除只针对列表，不针对访问）。
+6. **模型下拉只列 managed 模型，绝不兜底成 sonnet/opus**。留空 = 跟随账号配置的第一个（D9，
+   服务端本来就这么兜底）。列一堆本账号未必有的模型，选了就是必然失败，而失败要等到下次触发
+   才看得见。
 
 ### 关键 DB 契约
 ```sql
@@ -351,73 +374,55 @@ listCoworkRoutines() / getCoworkRoutine(id) / replaceCoworkRoutines(rows) / purg
 
 ---
 
-# §I 下一步：P6 客户端 UI 三层（施工说明）
+# §I 下一步：P7 创建入口（施工说明）
 
-**目标**：把七屏原型落地。数据链路已经全通（P4 管理 + P5 物化），P6 只做「看得见」这一层。
+**目标**：让用户**不必先想到「去定时任务页」**也能建定时任务。这是发现路径的问题，不是功能缺口 ——
+现在的能力已经完整，只是入口只有一个。
 
-> 原型是唯一的形态依据：[research/prototypes/scheduled-routines-prototype.html](../research/prototypes/scheduled-routines-prototype.html)（v2，七屏，明暗都有）。
-> 开工前**在浏览器里打开看一遍**，比读任何描述都快。
-
-## I.1 数据都已经备好了，别重造
-
-| 要什么 | 用什么 | 备注 |
-|---|---|---|
-| routine 列表 | `GET /api/routines` | 已带 `offline` 标记与本地缓存兜底 |
-| 建 / 改 / 删 / 立即跑 | `POST /api/routines`、`PATCH·DELETE /api/routines/:id`、`POST /api/routines/:id/run` | 400/429 的中文消息**原样透传**，直接显示 |
-| 运行历史（第二层的表） | `GET /api/routines/:id/runs` | 服务端权威，含 `skipped` 及原因 |
-| 某次运行的对话（第三层） | `getSessionsByRoutine(routineId)` → `getSessionByRoutineRun(runId)` → 现有会话渲染组件 | **不要另写渲染器**，物化出来的形状与实时回合一致 |
-| 拉新运行 | `POST /api/routines/sync` | 恒 200，成败看 body。返回 `summary` 就是那条汇总文案 |
-
-**同步触发点要在 P6 接上**（P5 只提供了能力）：app 启动、打开定时任务页、每 10 分钟
-（对齐现有 cowork config 的同步节奏）。`summary` 非 null 时才提示，且**只提示一条**（D14）。
-
-## I.2 要建的文件
+## I.1 要建的东西
 
 | 文件 | 内容 |
 |---|---|
-| `components/routines/RoutinePanel.tsx` | 三层容器 + 面包屑（① 列表 →② 详情+运行历史 →③ 某次运行） |
-| `components/routines/RoutineList.tsx` | 卡片列表 + 顶部配额与 `n/50` |
-| `components/routines/RoutineForm.tsx` | 新建/编辑：名称・描述・指令・模型・调度 |
-| `components/routines/SchedulePicker.tsx` | 六个预设 + 高级 cron |
-| `components/routines/RoutineDetail.tsx` | 配置摘要 + 运行历史表 |
-| `components/routines/RoutineRunView.tsx` | 只读回放 + 产物卡片 + 「← 上一次 / 下一次 →」 |
-| `components/layout/ChatListPanel.tsx` | **改**：办公 tab 加入口按钮 |
+| `src/lib/routines-mcp.ts` | **新建**：五个 MCP 工具（列表 / 创建 / 改 / 删 / 立即跑），**只在办公会话注册** |
+| `src/components/chat/*` | 会话标题栏加「⏰ 存为定时任务」按钮，跳新建表单并预填指令 |
 
-## I.3 四条不能走样的（都是用户明确定过的）
+`RoutineForm` 已经预留了 `presetPrompt` 参数，第二条只差把入口和跳转接上。
 
-1. **入口位置与文案**：侧边栏在「文生图」**下方竖排**，文字就是「定时任务」四个字 ——
-   不并排、不简写。（用户看原型 v1 后当场提的两点修改之一）
-2. **办公对话列表不加任何「定时」分组**。定时任务的会话只能从这个页面经三层进入。
-   用户否掉混排的原话是「很乱很疑惑」，加个分组等于把否掉的东西换个样子放回去。
-3. **调度预设只给六个**：仅手动 / 每小时 / 每天 / 工作日 / 每周 / 指定时间跑一次。
-   cron 收进「高级」。**预设里不提供 <15 分钟的选项**（D6：给了用户选、服务端再报错，
-   是自己制造挫败）。
-4. **未开通 → 整个入口不渲染**，不是置灰（沿用 R5-6 已定原则）。判定看
-   `/api/routines/sync` 或列表接口返回的 `notProvisioned`。
+## I.2 🔴 MCP 创建成功的回复必须明说结果去哪
 
-## I.4 离线降级
+改版把定时任务的会话从办公对话列表里摘了出去，于是引入一个**新的失败模式**：用户在对话里说
+「以后每天九点给我做日报」，助手答「已创建」，然后用户就在这个对话里**一直等**——
+结果永远不会出现在这里。
 
-列表用本地缓存渲染 + 顶部横幅，**禁止新建和编辑**（本地改了会与服务端分叉；与其事后合并
-冲突不如当场说清楚）。已物化的历史会话照常能看 —— 那是本地数据，不受沙箱可达性影响。
+所以工具的成功返回里必须有这么一句（原型第 6 屏的原话）：
 
-## I.5 验收
+> 运行结果会出现在左侧「定时任务」里，不会打扰这个对话。
 
-- CDP 逐屏验证四个界面 + 三层面包屑跳转，console 无报错
-- 明暗主题各验一遍；`npm run lint:colors` 通过（禁止裸色值）
+没有这一句，这个功能对第一次用的人就是坏的。
+
+## I.3 其它约束
+
+- **只在办公会话注册**：研发会话没有沙箱，建了也跑不了。
+- 助手要把口语转成完整指令并**复述确认**，不静默创建 —— 指令写得对不对是这个功能成败的关键，
+  而用户说的「每天给我做个日报」离一条能独立跑的指令还差很远。
+- i18n **已在 P6 做完**（100 个 key ×3 语），新增文案照 `routines.*` 命名往下加即可。
+  ⚠️ zh-HK **手工加**，别跑 `gen-zh-hk.mjs`（它会把约 40 个已校对的港式词汇revert 回去）。
+
+## I.4 验收
+
+- 在办公会话里用自然语言创建成功，且回复里包含「结果会出现在左侧『定时任务』里」
+- 研发会话里**没有**这些工具
+- 「存为定时任务」跳转后指令栏已预填，原会话不受影响
 - `npm run test` + `npm run test:smoke` 全绿
-- ⚠️ 本地 dev **没有登录体系**，`cowork_remote_url/token` 为空 → 接口会走
-  `notProvisioned` 分支。验渲染与过滤逻辑要用 mock（CDP 注入 `fetch` 拦截
-  `/api/routines/*` 返回模拟数据），结论要按「验的是逻辑不是真实数据」表述。
 
 ---
 
-# §J P7–P9 概要
+# §J P8–P9 概要
 
-（P6 是下一步，施工说明在 §I。）
+（P7 是下一步，施工说明在 §I。）
 
 | 阶段 | 要点 |
 |---|---|
-| **P7** 创建入口 | `routines-mcp.ts` 五工具（**只在办公会话注册**）+「存为定时任务」+ 三语 i18n（⚠️ zh-HK 手工加，别跑 `gen-zh-hk.mjs`）。🔴 **MCP 创建成功的回复必须明说「结果会出现在左侧『定时任务』里，不会打扰这个对话」** —— 结果不再落进当前对话是改版引入的新失败模式 |
 | **P8** 加固 | per-uid 日配额已在 store 备好（`countRunsSince`，刻意排除 skipped 防自锁死）；补 `routine_*` 审计进用量管线、`OPERATIONS.md` 章节 |
 | **P9** 收尾 | 端到端 + **双文档**（本文件补完 + `docs/insights/cowork-scheduled-routines.md` 并互相反链）+ **打包态验收**（本地 dev 无登录体系、managed 数据为空，凭证链路必须打包后登录才完整） |
 
@@ -453,10 +458,13 @@ curl -s -X DELETE -H "Authorization: Bearer $T" "http://$H/routines/$RID"     # 
 
 ## K.4 客户端
 ```bash
-npm run test                                          # 期望 2677 passed, 0 failed, 1 skipped
+npm run test                                          # 期望 2700 passed, 0 failed, 1 skipped
+npm run test:smoke                                    # 期望 17/17（需 dev server；刚改过代码要先预热路由，
+                                                      #   Turbopack 正在编译时 waitForPageReady 会超时误报）
 npx tsx --test src/__tests__/unit/routine-session-isolation.test.ts   # 10 项，锁 F3
 npx tsx --test src/__tests__/unit/routine-transcript.test.ts          # 16 项，重放形状 + G1
 npx tsx --test src/__tests__/unit/routine-sync.test.ts                # 15 项，幂等 + 降级
+npx tsx --test src/__tests__/unit/routine-ui.test.ts                  # 23 项，预设↔cron 往返
 apps/cowork-server/deploy/verify-deployment.sh        # 期望 43/43，仅 2 个已知漂移
 ```
 

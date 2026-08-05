@@ -84,9 +84,21 @@ async function api<T>(method: string, path: string, body?: unknown): Promise<T> 
   return (await res.json()) as T;
 }
 
+/** 列表接口的完整响应。配额两项是**可选**的 —— 老版本沙箱不回,界面就不显示那块。 */
+export interface RoutineListEnvelope {
+  routines: RemoteRoutine[];
+  max: number;
+  dailyCap?: number;
+  usedToday?: number;
+}
+
+export async function listRoutinesEnvelope(): Promise<RoutineListEnvelope> {
+  const r = await api<RoutineListEnvelope>('GET', '/routines');
+  return { ...r, routines: r.routines || [] };
+}
+
 export async function listRoutines(): Promise<RemoteRoutine[]> {
-  const r = await api<{ routines: RemoteRoutine[]; max: number }>('GET', '/routines');
-  return r.routines || [];
+  return (await listRoutinesEnvelope()).routines;
 }
 
 export async function getRoutine(id: string): Promise<RemoteRoutine> {

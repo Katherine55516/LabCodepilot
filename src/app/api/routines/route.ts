@@ -1,4 +1,4 @@
-import { listRoutines, createRoutine, toCacheRow } from '@/lib/routines-client';
+import { listRoutinesEnvelope, createRoutine, toCacheRow } from '@/lib/routines-client';
 import { replaceCoworkRoutines, upsertCoworkRoutine, listCoworkRoutines } from '@/lib/db';
 import { routineError } from '@/lib/routines-route-helpers';
 
@@ -11,10 +11,16 @@ import { routineError } from '@/lib/routines-route-helpers';
  */
 export async function GET() {
   try {
-    const remote = await listRoutines();
-    const rows = remote.map(toCacheRow);
+    const env = await listRoutinesEnvelope();
+    const rows = env.routines.map(toCacheRow);
     replaceCoworkRoutines(rows);
-    return Response.json({ routines: rows, offline: false });
+    return Response.json({
+      routines: rows,
+      offline: false,
+      max: env.max,
+      dailyCap: env.dailyCap,
+      usedToday: env.usedToday,
+    });
   } catch (e) {
     const cached = listCoworkRoutines();
     if (cached.length > 0) {

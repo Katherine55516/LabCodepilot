@@ -17,6 +17,7 @@ import {
   Gear,
   MagnifyingGlassCheck,
   Sparkle,
+  Clock,
   Briefcase,
   Code,
   SidebarSimple,
@@ -147,6 +148,21 @@ export function ChatListPanel({ open, onToggle, width, hasUpdate, readyToInstall
     fetchCoworkStatus();
     window.addEventListener('cowork-status-changed', fetchCoworkStatus);
     return () => window.removeEventListener('cowork-status-changed', fetchCoworkStatus);
+  }, []);
+
+  // 定时任务入口的徽标数。纯本地读缓存(/api/routines/count 不打沙箱),所以可以
+  // 放心在每次挂载时拉;定时任务页改动后会广播 'routines-changed' 让它跟上。
+  const [routineCount, setRoutineCount] = useState(0);
+  useEffect(() => {
+    const fetchCount = () => {
+      fetch('/api/routines/count')
+        .then((r) => (r.ok ? r.json() : null))
+        .then((d) => { if (d) setRoutineCount(d.count || 0); })
+        .catch(() => {});
+    };
+    fetchCount();
+    window.addEventListener('routines-changed', fetchCount);
+    return () => window.removeEventListener('routines-changed', fetchCount);
   }, []);
 
   const activeTab: WorkspaceTab = workspaceTab;
@@ -730,6 +746,30 @@ export function ChatListPanel({ open, onToggle, width, hasUpdate, readyToInstall
             >
               <Sparkle size={14} weight={pathname.startsWith("/image") ? "fill" : "regular"} />
               {t('imageStudio.sidebarButton' as TranslationKey)}
+            </Button>
+          </Link>
+        )}
+        {/* 定时任务 — 办公专属,**竖排在文生图下方**(不与它并排、文案不简写)。
+            定时任务产生的会话刻意不进下面的对话列表,只能从这里进 —— 所以这个入口是
+            那些会话唯一的门,徽标上的数字是任务数(不是未读数)。 */}
+        {activeTab === 'office' && coworkImageProvisioned && (
+          <Link href="/routines">
+            <Button
+              variant="ghost"
+              size="sm"
+              className={`w-full justify-start gap-2 h-8 text-xs ${
+                pathname.startsWith("/routines")
+                  ? "bg-accent text-accent-foreground font-medium"
+                  : "text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              <Clock size={14} weight={pathname.startsWith("/routines") ? "fill" : "regular"} />
+              {t('routines.sidebarButton' as TranslationKey)}
+              {routineCount > 0 && (
+                <span className="ml-auto rounded bg-muted px-1.5 py-0.5 text-[10px] leading-none text-muted-foreground">
+                  {routineCount}
+                </span>
+              )}
             </Button>
           </Link>
         )}

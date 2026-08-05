@@ -22,8 +22,8 @@
 | P3 | 沙箱调度 + 存储 + REST | cowork-server | ✅ **已上线并端到端验证** | selftest-r5 37/37；生产上调度器自主触发跑通全链 |
 | P4 | 客户端数据层 + 代理路由 | LabCodepilot | ✅ **完成**（10 单测 / 全量 2646 passed） | 代理层已对**生产沙箱**实测通全部端点 |
 | P5 | 客户端同步与物化 | LabCodepilot | ✅ 完成 | 端到端留 P9 打包态验 |
-| P6 | 客户端 UI 三层 | LabCodepilot | 📋 待开始 | 依赖 P4 |
-| P7 | 创建入口（MCP / 存为定时）+ 通知 + i18n | LabCodepilot | 📋 待开始 | 依赖 P6 |
+| P6 | 客户端 UI 三层 | LabCodepilot | ✅ 完成 | 含三语 i18n（原属 P7）|
+| P7 | 创建入口（MCP / 存为定时）| LabCodepilot | 📋 待开始 | i18n 已在 P6 做掉 |
 | P8 | 加固与运维（配额 / 审计 / selftest / 手册） | cowork-server | 📋 待开始 | 依赖 P3 |
 | P9 | 端到端联调 + 双文档 + 打包验收 | 全部 | 📋 待开始 | 依赖全部 + P1 |
 
@@ -383,29 +383,45 @@ GET        /runs/:runId/transcript
 
 ---
 
-## P6 · 客户端 UI 三层
+## P6 · 客户端 UI 三层 — ✅ 已完成（2026-08-05）
 
 **目标**：把原型 v2 落地。
 
 | 文件 | 内容 |
 |---|---|
-| `src/components/routines/RoutinePanel.tsx` | 三层容器 + 面包屑路由（① 列表 → ② 详情 → ③ 某次运行） |
-| `src/components/routines/RoutineList.tsx` | 卡片列表 + 顶部配额与 `n/50` |
+| `src/lib/routine-ui.ts` | **新建**：预设↔cron 互转、状态色调、格式化。纯逻辑抽出来是为了能单测——这层错了界面不报错，只静默显示错的调度 |
+| `src/components/routines/RoutinePanel.tsx` | 三层容器 + 面包屑（① 列表 → ② 详情 → ③ 某次运行）+ 进页面同步 |
+| `src/components/routines/RoutineList.tsx` | 卡片列表 + 顶部配额与 `n/50` + 上限/配额横幅 |
 | `src/components/routines/RoutineForm.tsx` | 新建/编辑：名称・描述・指令・模型・调度 |
 | `src/components/routines/SchedulePicker.tsx` | 六个预设 + 时间/星期 + 高级 cron。**预设里不提供 <15 分钟的选项**（D6） |
 | `src/components/routines/RoutineDetail.tsx` | 配置摘要 + 运行历史表（含 `skipped` 及原因） |
-| `src/components/routines/RoutineRunView.tsx` | 只读回放 + 产物卡片 + 「← 上一次 / 下一次 →」 |
+| `src/components/routines/RoutineRunView.tsx` | 只读回放（**直接复用 `MessageList`**）+ 「← 上一次 / 下一次 →」 |
+| `src/components/routines/StatusChip.tsx` | 共用状态徽标，四种 tone 映到 `status-*` 语义 token |
+| `src/app/routines/page.tsx` | 路由 |
+| `src/app/api/routines/{count,[id]/sessions}/route.ts` | **新建**：两个**纯本地**读取口，不打沙箱 |
 | `src/components/layout/ChatListPanel.tsx` | 办公 tab 在「文生图」**下方竖排**加「定时任务」按钮（带任务数徽标）。**不加会话分组** |
+| `src/i18n/{en,zh,zh-HK}.ts` | **100 个 key ×3 语**（原计划在 P7，提前做掉——`TranslationKey` 由 en 推导且三本字典都是 `Record<TranslationKey,string>`，少一个就编不过，所以是全有或全无；边写边加比事后 retrofit 六个组件省得多） |
+| `apps/cowork-server/lib/routine-{api,store,scheduler}.mjs` | 列表接口回 `dailyCap`/`usedToday`；`todayStartIso` 挪进 store 供两边共用（界面显示的和实际拦的必须同一个「今天」）|
 
-**门控**：可用性 = 办公模式可用性，复用 `/api/cowork/status` 的 `assets.overall`；
-未开通 → 按钮**不渲染**（不是置灰，沿用 R5-6 已定原则）。
+**门控**：可用性 = 办公模式可用性（`/api/cowork/status` 的 `imageProvisioned`）；
+未开通 → 按钮**不渲染**（不是置灰）。CDP 实测确认。
 
 **离线降级**：列表用本地缓存渲染 + 顶部横幅；**禁止新建和编辑**（本地改了会与服务端分叉）。
 
-### 验收
-- CDP 逐屏验证四个界面 + 三层面包屑跳转，console 无报错
-- 明暗主题各验一遍；`npm run lint:colors` 通过（禁止裸色值）
-- `npm run test` + `npm run test:smoke` 全绿
+### 验收 ✅
+- ✅ CDP 逐屏验证：入口 → 列表 → 详情 → 某次运行 → 新建表单，三层面包屑跳转正常
+- ✅ 明暗主题各验一遍；`npm run lint:colors` 通过（本次改动零裸色值）
+- ✅ 干净加载 console **零报错零警告**
+- ✅ `npm run test` 2700 passed / 0 failed（新增 23 项 routine-ui）+ `npm run test:smoke` 17/17
+- ✅ CDP 抓到并修掉三个真 bug（见下）
+
+### CDP 抓到的三个 bug（都是肉眼看才发现的）
+1. **暂停的卡片上多出两个孤零零的「0」**——`r.enabled` 是 SQLite 的 1/0，`{0 && <X/>}` 在 JSX 里会把 `0` 渲染成文本。四处 `!!` 修掉。
+2. **高级 cron 显示陈旧值**——选「每周·周四」时框里仍是 `0 9 * * *`，用户没法判断哪个算数。改成显示当前预设**真正会生成的**表达式。
+3. **中文标点半角**——新文案用了 `,` `:` `(`，而 app 既有 271 条中文文案用全角。全部转正。
+
+### 未做（留 P7）
+「存为定时任务」入口、MCP 五工具。`RoutineForm` 已预留 `presetPrompt` 参数。
 
 ---
 

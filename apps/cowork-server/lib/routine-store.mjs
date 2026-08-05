@@ -169,4 +169,17 @@ export function countRunsSince(uid, sinceIso) {
   return n;
 }
 
+/**
+ * 配额「今天」的起点 —— 北京日(与 feedback 模块的日配额口径一致)。
+ *
+ * 放在 store 而不是调度器里:调度器用它**拦截**,REST 用它**显示剩余额度**。
+ * 两处各写一份的话,界面显示「还剩 5 次」而实际已经被拦,用户会觉得是 bug ——
+ * 而这种不一致只在跨日边界附近出现,极难复现。
+ */
+export function todayStartIso() {
+  const now = new Date();
+  const bj = new Date(now.getTime() + 8 * 3600_000);
+  return new Date(Date.UTC(bj.getUTCFullYear(), bj.getUTCMonth(), bj.getUTCDate()) - 8 * 3600_000).toISOString();
+}
+
 export const _internals = { STATE_DIR, ROUTINES_DIR, RUNS_DIR, safeUid, safeId, writeAtomic };

@@ -106,7 +106,14 @@ export async function handleRoutines(req, url, ctx) {
     // —— 集合 ——
     if (!id) {
       if (req.method === 'GET') {
-        return send(200, { routines: store.listRoutines(uid).map(view), max: store.MAX_ROUTINES_PER_UID });
+        // 配额一并回:界面右上角要常驻「今日已用 n / 20」。客户端把这两个字段当**可选**处理,
+        // 所以服务端没升级时界面只是不显示这块,不会坏。
+        return send(200, {
+          routines: store.listRoutines(uid).map(view),
+          max: store.MAX_ROUTINES_PER_UID,
+          dailyCap: store.DAILY_RUN_CAP,
+          usedToday: store.countRunsSince(uid, store.todayStartIso()),
+        });
       }
       if (req.method === 'POST') return send(201, await create(uid, await jsonBody(req, ctx.readBody)));
       return send(404, { error: 'not found' });

@@ -30,12 +30,9 @@ const MAX_CONSECUTIVE_ERRORS = parseInt(process.env.COWORK_ROUTINE_MAX_ERRORS ||
 const inFlight = new Set();
 let timer = null;
 
-/** 北京日的起点(与 feedback 模块的日配额口径一致)。 */
-function todayStartIso() {
-  const now = new Date();
-  const bj = new Date(now.getTime() + 8 * 3600_000);
-  return new Date(Date.UTC(bj.getUTCFullYear(), bj.getUTCMonth(), bj.getUTCDate()) - 8 * 3600_000).toISOString();
-}
+// 配额「今天」的定义已挪进 store(REST 显示剩余额度也要用同一个)——
+// 两处各写一份会让界面说的和实际拦的对不上,且只在跨日边界露馅。
+const todayStartIso = store.todayStartIso;
 
 /**
  * 算下一次触发时刻(含抖动)。返回 ISO 串或 null(= 不再触发)。

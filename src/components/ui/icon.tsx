@@ -72,6 +72,7 @@ export {
   PencilLine,
   PencilSimple,
   Play,
+  Pause,
   Plug,
   Plus,
   Question,
@@ -107,6 +108,8 @@ export {
   Pulse,
   PushPin,
   ArrowCircleUp,
+  CalendarBlank,
+  Robot,
 } from "@phosphor-icons/react";
 
 import type { IconProps } from "@phosphor-icons/react";
