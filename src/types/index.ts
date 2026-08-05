@@ -39,6 +39,14 @@ export interface ChatSession {
   effort?: string;
   context_summary?: string;
   context_summary_updated_at?: string;
+  /**
+   * 定时任务:非空 = 本会话由服务端某次定时运行物化而来。
+   * **非空的会话不出现在办公对话列表里**(db.ts SESSION_VISIBLE_WHERE),
+   * 只能从「定时任务」页经三层导航进入 —— 渲染/产物/下载仍复用现有整套。
+   */
+  routine_id?: string;
+  /** 该次运行的 runId,物化时的幂等键(重复拉取不重复建会话)。 */
+  routine_run_id?: string;
 }
 
 // ==========================================
@@ -1999,4 +2007,76 @@ export interface RegressionStats {
   suites: RegressionSuiteRow[];
   /** 是否有任何可展示数据（轮次/套件/库任一非空）。空态据此判定。 */
   hasData: boolean;
+}
+
+// ==========================================
+// Cowork Routines(沙箱定时任务)
+// ==========================================
+//
+// 定时任务跑在**沙箱服务器**上,客户端只做管理/拉取/展示。下面这些类型是
+// 服务端 REST 的镜像(apps/cowork-server/lib/routine-api.mjs 的 view()),
+// 字段命名在客户端侧转成 snake_case 与本仓库 DB 行保持一致。
+
+export type RoutineScheduleKind = 'cron' | 'once' | 'manual';
+
+/** 服务端返回的 schedule 结构(camelCase,原样来自 REST)。 */
+export interface RoutineSchedule {
+  kind: RoutineScheduleKind;
+  /** kind='cron' 时的 5 字段表达式 */
+  expr?: string;
+  /** kind='cron' 时的 IANA 时区,如 Asia/Shanghai。服务端按它求值,不是服务器本地时区 */
+  tz?: string;
+  /** kind='once' 时的 ISO 触发时刻 */
+  fireAt?: string;
+}
+
+/** 本地缓存行(snake_case,与 cowork_routines 表一一对应)。 */
+export interface CoworkRoutine {
+  id: string;
+  owner_uid: string;
+  name: string;
+  description: string;
+  prompt: string;
+  model: string;
+  config_id: string;
+  schedule_kind: RoutineScheduleKind;
+  schedule_expr: string;
+  schedule_tz: string;
+  schedule_fire_at: string;
+  /** SQLite 无布尔:1/0 */
+  enabled: number;
+  next_run_at: string;
+  last_run_at: string;
+  last_status: string;
+  /** kind='once' 触发后落位,对应 UI 上的「已运行」 */
+  ran_at: string;
+  consecutive_errors: number;
+  /** 自动停用的原因(连续失败 10 次等),空 = 不是被自动停的 */
+  disabled_reason: string;
+  created_at: string;
+  updated_at: string;
+  /** 最后一次与服务端对齐的时间;离线时用来提示「显示的是上次同步的数据」 */
+  synced_at: string;
+}
+
+/** 一次运行的记录(服务端 runs.jsonl 的一行,camelCase 原样透出)。 */
+export interface RoutineRun {
+  runId: string;
+  startedAt: string;
+  finishedAt?: string;
+  /** success | error | credential_error | timeout | output_overflow | skipped */
+  status: string;
+  ok?: boolean;
+  /** status='skipped' 时的原因:concurrency_limit / daily_quota_exceeded /
+   *  previous_run_in_progress / missed_too_long */
+  skipReason?: string;
+  durationMs?: number;
+  costUsd?: number | null;
+  numTurns?: number | null;
+  exitCode?: number | null;
+  apiErrorStatus?: number | null;
+  resultText?: string;
+  error?: string;
+  model?: string;
+  configId?: string;
 }

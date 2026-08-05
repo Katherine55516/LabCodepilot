@@ -20,7 +20,7 @@
 | P1 | 账号后端内部凭证接口 | codeagent-server | ✅ **已上线并联调通过** | 21 单测；生产实测密钥配对成功、取回真实凭证 |
 | P2 | 沙箱执行器 `routine-runner` | cowork-server | ✅ **已完成并生产实测** | 成功/401/超时/溢出/并发闸全验；**顺带补完 P0 的成功路径** |
 | P3 | 沙箱调度 + 存储 + REST | cowork-server | ✅ **已上线并端到端验证** | selftest-r5 37/37；生产上调度器自主触发跑通全链 |
-| P4 | 客户端数据层 + 代理路由 | LabCodepilot | 📋 待开始 | **契约冻结后即可并行** |
+| P4 | 客户端数据层 + 代理路由 | LabCodepilot | ✅ **完成**（10 单测 / 全量 2646 passed） | 代理层已对**生产沙箱**实测通全部端点 |
 | P5 | 客户端同步与物化 | LabCodepilot | 📋 待开始 | 依赖 P3 + P4 |
 | P6 | 客户端 UI 三层 | LabCodepilot | 📋 待开始 | 依赖 P4 |
 | P7 | 创建入口（MCP / 存为定时）+ 通知 + i18n | LabCodepilot | 📋 待开始 | 依赖 P6 |
@@ -336,10 +336,20 @@ GET        /runs/:runId/transcript
 | `src/lib/routines-client.ts` | **新建**：沙箱 REST 客户端（复用 `cowork-backend-remote.ts` 的 `remoteConfig` / `authHeaders` 模式） |
 | `src/app/api/routines/{route,[id]/route,[id]/run/route,[id]/runs/route}.ts` | **新建**：代理层，token 留 Next server |
 
-### 验收
-- 单测：造一条 `routine_id` 非空的会话，断言**不出现在办公列表**、但能按 `routine_id` 查到
-- 单测：换账号后 `cowork_routines` 按 `owner_uid` 隔离
-- `npm run test` 全绿
+### 验收 ✅
+- 新增 `routine-session-isolation.test.ts` **10 项**：routine 会话不进办公列表 / 普通会话不受影响 /
+  按 routineId 与 runId 可查 / **搜索也排除** / routine 缓存按 uid 隔离 / 覆盖式同步删远端已无的且不误删他人
+- `npm run test`：**2646 passed, 0 failed**（`SESSION_VISIBLE_WHERE` 被改动，既有账号隔离测试仍全绿）
+- **代理层对生产沙箱实测**（独立 `CLAUDE_GUI_DATA_DIR`，未碰打包版共用库；uid=`p4probe`，跑完清零）：
+  列表 / 创建 / PATCH 停用 / runs / 立即运行 / 删除联动全通；
+  服务端 400 中文校验消息**原样透传**（「触发间隔 5 分钟,低于最小间隔 15 分钟」）；
+  离线 → 回落缓存且 `offline:true`；未开通 → **503 + `not_provisioned`**（不是 404，UI 要据此隐藏整个入口）
+
+### 实现上的两处取舍
+- **`routine_id` 用 `''` 而非 `NULL` 作缺省**：与 `owner_uid` 等既有列一致，SQL 里少一类三值逻辑漏判；
+  搜索那处走 LEFT JOIN，额外容忍 `IS NULL`（会话已删的孤儿消息）
+- **共享逻辑放 `routines-route-helpers.ts`**：Next 的 route.ts 只允许导出 handler
+  （CLAUDE.md 记过：导出别的值会让 webpack 构建期路由校验报错）
 
 ---
 

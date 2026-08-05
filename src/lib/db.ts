@@ -3,7 +3,7 @@ import path from 'path';
 import crypto from 'crypto';
 import fs from 'fs';
 import os from 'os';
-import type { ChatSession, Message, SettingsMap, TaskItem, TaskStatus, ApiProvider, CreateProviderRequest, UpdateProviderRequest, MediaJob, MediaJobStatus, MediaJobItem, MediaJobItemStatus, MediaContextEvent, BatchConfig, CustomCliTool, ScheduledTask, TestAccountSystem, TestAccountSystemView, TestSystemEnvironments, TestEnvironment, CreateTestAccountSystemRequest, UpdateTestAccountSystemRequest, TestStatsEvent, TestStatsEventInput, TestStatsEventType } from '@/types';
+import type { ChatSession, Message, SettingsMap, TaskItem, TaskStatus, ApiProvider, CreateProviderRequest, UpdateProviderRequest, MediaJob, MediaJobStatus, MediaJobItem, MediaJobItemStatus, MediaContextEvent, BatchConfig, CustomCliTool, ScheduledTask, TestAccountSystem, TestAccountSystemView, TestSystemEnvironments, TestEnvironment, CreateTestAccountSystemRequest, UpdateTestAccountSystemRequest, TestStatsEvent, TestStatsEventInput, TestStatsEventType, CoworkRoutine } from '@/types';
 import type { ChannelType, ChannelBinding } from './bridge/types';
 import { getLocalDateString, localDayStartAsUTC } from './utils';
 import { inferProtocolFromLegacy } from './provider-catalog';
@@ -487,6 +487,18 @@ function migrateDb(db: Database.Database): void {
   if (!colNames.includes('skills_used_json')) {
     safeAddColumn(db, "ALTER TABLE chat_sessions ADD COLUMN skills_used_json TEXT NOT NULL DEFAULT ''");
   }
+  // 定时任务(P4):标记「这个会话是某次定时运行物化来的」。
+  // routine_id 非空 = 由服务端定时任务产生,**不出现在办公对话列表里**(见 SESSION_VISIBLE_WHERE)。
+  // 用 '' 而不是 NULL 作缺省:与 owner_uid 等既有列一致,且省掉 SQL 里的三值逻辑
+  // (`= ''` 比 `IS NULL` 少一类漏判;搜索那处走 LEFT JOIN 仍要额外容忍 NULL)。
+  if (!colNames.includes('routine_id')) {
+    safeAddColumn(db, "ALTER TABLE chat_sessions ADD COLUMN routine_id TEXT NOT NULL DEFAULT ''");
+  }
+  // 该次运行的 runId —— 物化时的幂等键:重复拉取同一条 run 不会重复建会话。
+  if (!colNames.includes('routine_run_id')) {
+    safeAddColumn(db, "ALTER TABLE chat_sessions ADD COLUMN routine_run_id TEXT NOT NULL DEFAULT ''");
+  }
+
   // 脱敏网关(deid-gateway):办公会话的脱敏开关(默认关,用户在输入区自行开关)。
   // 仅 sandbox_enabled=1 的会话有意义;研发会话恒 0 且不渲染入口。
   if (!colNames.includes('deid_enabled')) {
@@ -1086,6 +1098,42 @@ function migrateDb(db: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_task_run_logs_task_id ON task_run_logs(task_id);
   `);
 
+  // ── 定时任务(沙箱侧 routine 的本地缓存镜像,P4)──
+  // **服务端才是权威**:这张表只是缓存,拉取即覆盖,不做本地编辑合并。
+  // 存在的理由是离线可看 + 列表秒开;真要改 routine 一律走 REST 打沙箱。
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS cowork_routines (
+      id TEXT PRIMARY KEY,
+      owner_uid TEXT NOT NULL,
+      name TEXT NOT NULL,
+      description TEXT NOT NULL DEFAULT '',
+      prompt TEXT NOT NULL DEFAULT '',
+      model TEXT NOT NULL DEFAULT '',
+      config_id TEXT NOT NULL DEFAULT '',
+      schedule_kind TEXT NOT NULL DEFAULT 'manual',
+      schedule_expr TEXT NOT NULL DEFAULT '',
+      schedule_tz TEXT NOT NULL DEFAULT '',
+      schedule_fire_at TEXT NOT NULL DEFAULT '',
+      enabled INTEGER NOT NULL DEFAULT 1,
+      next_run_at TEXT NOT NULL DEFAULT '',
+      last_run_at TEXT NOT NULL DEFAULT '',
+      last_status TEXT NOT NULL DEFAULT '',
+      ran_at TEXT NOT NULL DEFAULT '',
+      consecutive_errors INTEGER NOT NULL DEFAULT 0,
+      disabled_reason TEXT NOT NULL DEFAULT '',
+      created_at TEXT NOT NULL DEFAULT '',
+      updated_at TEXT NOT NULL DEFAULT '',
+      synced_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_cowork_routines_owner ON cowork_routines(owner_uid);
+  `);
+
+  // 定时任务物化会话的两个索引:按 routine 查历史、按 runId 做幂等。
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_sessions_routine ON chat_sessions(routine_id);
+    CREATE INDEX IF NOT EXISTS idx_sessions_routine_run ON chat_sessions(routine_run_id);
+  `);
+
   // Test Usage Stats: 测试模块使用统计事件流水（追加式）。payload 为开放 JSON，
   // 字段随 event_type 而异；聚合口径可对历史事件随时重算。事件字典 / 冻结口径见
   // docs/exec-plans/active/test-usage-stats.md。
@@ -1159,6 +1207,111 @@ function reSealSensitiveColumns(db: Database.Database): void {
 }
 
 // ==========================================
+// Cowork Routines(定时任务本地缓存)
+// ==========================================
+//
+// 服务端权威、客户端缓存。所有写入都来自「拉取服务端后覆盖」,不接受本地凭空创建 ——
+// 本地建了服务端也不知道,到点不会跑,只会制造一个永远不触发的幽灵任务。
+
+/** 覆盖式写入一条 routine 缓存(来自服务端拉取)。 */
+export function upsertCoworkRoutine(r: CoworkRoutine): void {
+  const db = getDb();
+  db.prepare(`
+    INSERT INTO cowork_routines (
+      id, owner_uid, name, description, prompt, model, config_id,
+      schedule_kind, schedule_expr, schedule_tz, schedule_fire_at,
+      enabled, next_run_at, last_run_at, last_status, ran_at,
+      consecutive_errors, disabled_reason, created_at, updated_at, synced_at
+    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
+    ON CONFLICT(id) DO UPDATE SET
+      owner_uid=excluded.owner_uid, name=excluded.name, description=excluded.description,
+      prompt=excluded.prompt, model=excluded.model, config_id=excluded.config_id,
+      schedule_kind=excluded.schedule_kind, schedule_expr=excluded.schedule_expr,
+      schedule_tz=excluded.schedule_tz, schedule_fire_at=excluded.schedule_fire_at,
+      enabled=excluded.enabled, next_run_at=excluded.next_run_at,
+      last_run_at=excluded.last_run_at, last_status=excluded.last_status, ran_at=excluded.ran_at,
+      consecutive_errors=excluded.consecutive_errors, disabled_reason=excluded.disabled_reason,
+      created_at=excluded.created_at, updated_at=excluded.updated_at,
+      synced_at=datetime('now')
+  `).run(
+    r.id, r.owner_uid, r.name, r.description, r.prompt, r.model, r.config_id,
+    r.schedule_kind, r.schedule_expr, r.schedule_tz, r.schedule_fire_at,
+    r.enabled, r.next_run_at, r.last_run_at, r.last_status, r.ran_at,
+    r.consecutive_errors, r.disabled_reason, r.created_at, r.updated_at,
+  );
+}
+
+/** 当前账号的 routine 缓存。未登录(uid='')恒返回空 —— 与办公会话同一姿态。 */
+export function listCoworkRoutines(): CoworkRoutine[] {
+  const uid = getCurrentUserUid();
+  if (!uid) return [];
+  return getDb()
+    .prepare('SELECT * FROM cowork_routines WHERE owner_uid = ? ORDER BY created_at ASC')
+    .all(uid) as CoworkRoutine[];
+}
+
+export function getCoworkRoutine(id: string): CoworkRoutine | undefined {
+  const uid = getCurrentUserUid();
+  if (!uid) return undefined;
+  return getDb()
+    .prepare('SELECT * FROM cowork_routines WHERE id = ? AND owner_uid = ?')
+    .get(id, uid) as CoworkRoutine | undefined;
+}
+
+export function deleteCoworkRoutine(id: string): void {
+  getDb().prepare('DELETE FROM cowork_routines WHERE id = ?').run(id);
+}
+
+/**
+ * 用服务端返回的全量列表覆盖本账号的缓存 —— 服务端没有的就地删掉。
+ * 不这么做的话,别处(网页/另一台机器)删掉的 routine 会永远留在本地列表里。
+ */
+export function replaceCoworkRoutines(routines: CoworkRoutine[]): void {
+  const uid = getCurrentUserUid();
+  if (!uid) return;
+  const db = getDb();
+  const keep = new Set(routines.map((r) => r.id));
+  db.transaction(() => {
+    for (const r of routines) upsertCoworkRoutine(r);
+    const existing = db.prepare('SELECT id FROM cowork_routines WHERE owner_uid = ?').all(uid) as { id: string }[];
+    for (const row of existing) if (!keep.has(row.id)) deleteCoworkRoutine(row.id);
+  })();
+}
+
+/** 换账号/登出时清空缓存(与 owner_uid 隔离互为兜底)。 */
+export function purgeCoworkRoutines(): void {
+  getDb().prepare('DELETE FROM cowork_routines').run();
+}
+
+/**
+ * 把一个已建的会话标记为「某次定时运行的物化结果」(P5 物化时用)。
+ *
+ * 刻意做成建完再标而不是 createSession 加参数:createSession 的签名已经有 9 个位置参数,
+ * 再塞两个只会让调用处更难读,而这两列只有定时任务这一条路径会写。
+ */
+export function markSessionAsRoutineRun(sessionId: string, routineId: string, runId: string): void {
+  getDb()
+    .prepare('UPDATE chat_sessions SET routine_id = ?, routine_run_id = ? WHERE id = ?')
+    .run(routineId, runId, sessionId);
+}
+
+/** 某 routine 的历史运行会话(倒序)。这是「定时任务」页第二层的取数口。 */
+export function getSessionsByRoutine(routineId: string): ChatSession[] {
+  if (!routineId) return [];
+  return getDb()
+    .prepare('SELECT * FROM chat_sessions WHERE routine_id = ? ORDER BY created_at DESC')
+    .all(routineId) as ChatSession[];
+}
+
+/** 幂等键:该次运行是否已经物化过。物化前必查,否则重复拉取会造出重复会话。 */
+export function getSessionByRoutineRun(runId: string): ChatSession | undefined {
+  if (!runId) return undefined;
+  return getDb()
+    .prepare('SELECT * FROM chat_sessions WHERE routine_run_id = ?')
+    .get(runId) as ChatSession | undefined;
+}
+
+// ==========================================
 // Session Operations
 // ==========================================
 
@@ -1185,8 +1338,14 @@ export function getCurrentUserUid(): string {
  *   账号的全部办公对话,且点进去必然 404 —— 既泄漏又是坏会话。
  * - `owner_uid != ''` 一箭双雕:既隐藏归属未知的存量会话(用户决策:一律隐藏),
  *   又保证**未登录时 uid='' 不会把存量全部漏出**(否则 ''=''  恒真)。
+ * - 🔴 **`routine_id = ''` 排除定时任务产生的会话**:它们是服务端每天自动产出的,
+ *   混进对话列表会把用户自己的对话越推越远,而且「我没建过这个对话」本身就令人困惑
+ *   (用户原话:很乱很疑惑)。它们仍然是完整的 chat_sessions 行 —— 渲染、产物卡片、
+ *   下载全部复用现有那套,只是**只能从「定时任务」页经三层导航进入**(getSessionsByRoutine)。
+ *   ⚠️ 凡是给办公对话列表取数的地方都必须带上这一条,漏一处就前功尽弃。
  */
-const SESSION_VISIBLE_WHERE = "(sandbox_enabled = 0 OR (owner_uid != '' AND owner_uid = ?))";
+const SESSION_VISIBLE_WHERE =
+  "routine_id = '' AND (sandbox_enabled = 0 OR (owner_uid != '' AND owner_uid = ?))";
 
 /** 会话列表/搜索用:只返回当前账号可见的会话。内部去重/导入仍用 getAllSessions。 */
 export function getVisibleSessions(): ChatSession[] {
@@ -1734,10 +1893,13 @@ export function searchMessages(
     FROM messages m
     LEFT JOIN chat_sessions s ON s.id = m.session_id
     WHERE m.content LIKE ? ESCAPE '\\'${ackFilter}
+      AND (s.routine_id = '' OR s.routine_id IS NULL)
       AND (s.sandbox_enabled = 0 OR s.sandbox_enabled IS NULL OR (s.owner_uid != '' AND s.owner_uid = ?))
   `;
   // 账号隔离必须下沉到 SQL:搜索直接命中消息正文,是泄漏面最大的入口之一。
-  // 语义同 SESSION_VISIBLE_WHERE(此处列带 s. 前缀);LEFT JOIN 下 s 可能为 NULL
+  // 语义同 SESSION_VISIBLE_WHERE(此处列带 s. 前缀);LEFT JOIN 下 s 可能为 NULL。
+  // routine_id 一并排除:搜索命中一条「列表里根本看不到的会话」会把人导向死路,
+  // 而定时任务的历史在它自己的页面里有专门的浏览路径。
   // (会话已删的孤儿消息),显式放行以免连带改变既有搜索行为。
   // 在 SQL 层过滤而非取回后再筛 —— 否则 LIMIT 先截断,过滤完可能所剩无几。
   const params: unknown[] = [pattern, getCurrentUserUid()];
