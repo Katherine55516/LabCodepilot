@@ -29,7 +29,10 @@ LOCAL_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 readonly EXCLUDES=(
   -not -path "*/node_modules/*"
   -not -name "._*"
-  -not -name ".env"
+  # .env 及其一切备份变体(.env.bak-*)。只排 ".env" 的话,改配置时留的备份会被报成
+  # 「🔺 仅生产有」—— 那是最吓人的一类提示,而它们其实是含密钥的备份、本就不该进 git。
+  # 误报会训练人无视这个脚本,而检测工具最怕的就是被无视。
+  -not -name ".env*"
   -not -name "*.log"
   -not -path "*/.bak-*"
   -not -name "package-lock.json"
@@ -76,8 +79,13 @@ if [ ! -s "$tmp/repo.md5" ]; then
   exit 2
 fi
 
+# ⚠️ 远端命令是拼成字符串再交给 ssh 的,所以模式必须**逐个 shell 转义**(%q)——
+# 用 %s 的话 `.env*` / `*.log` 这类会先被远端 shell 按它当时的工作目录展开,
+# find 拿到的就不是模式而是一串文件名(或匹配不到时的残缺参数),整条命令静默失效。
+# 这是原本就埋着的坑:早先的模式恰好在远端家目录匹配不到东西,所以一直没暴露,
+# 直到加了 `.env*` 才踩响。
 if ! ssh -o BatchMode=yes -o ConnectTimeout=15 "$HOST" \
-  "cd '$REMOTE_DIR' 2>/dev/null && find . -type f $(printf '%s ' "${EXCLUDES[@]}") -print0 \
+  "cd '$REMOTE_DIR' 2>/dev/null && find . -type f $(printf '%q ' "${EXCLUDES[@]}") -print0 \
      | xargs -0 md5sum 2>/dev/null | sed 's| \./| |' | awk '{print \$2\" \"\$1}' | sort" \
   > "$tmp/prod.md5" 2>"$tmp/ssh.err"; then
   echo "❌ 连不上 $HOST 或读不到 $REMOTE_DIR:"
