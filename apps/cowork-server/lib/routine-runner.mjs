@@ -114,7 +114,10 @@ export async function runRoutine({
 
     // ── 4. 跑 ────────────────────────────────────────────────
     activity?.start?.(sid);
-    const r = await execOnce({ sid, container: name, prompt, model, token, baseUrl, authStyle: c.authStyle, log });
+    const r = await execOnce({
+      sid, container: name, prompt, model, token, baseUrl, authStyle: c.authStyle, log,
+      defaultModels: c.defaultModels, effortLevel: c.effortLevel,
+    });
     activity?.end?.(sid);
 
     // ── 5. transcript 落盘 ───────────────────────────────────
@@ -145,15 +148,33 @@ export async function runRoutine({
 }
 
 /** 真正 spawn 的那一段。返回 { status, exitCode, result, resultText, transcript, ... }。 */
-function execOnce({ sid, container, prompt, model, token, baseUrl, authStyle, log }) {
+function execOnce({ sid, container, prompt, model, token, baseUrl, authStyle, log, defaultModels = {}, effortLevel = '' }) {
   return new Promise((resolve) => {
     // 容器侧拿的是一次性 cwk_ token。cred-proxy 两种头都认(x-api-key 优先、
     // 回退 Authorization: Bearer),这里跟随 authStyle 保持与客户端同构。
     const keyVar = authStyle === 'auth_token' ? 'ANTHROPIC_AUTH_TOKEN' : 'ANTHROPIC_API_KEY';
+
+    // 账号配置里的角色模型必须过河 —— 否则 claude 用的是**容器内置默认**,而不是该账号
+    // 实际开通的模型。首次端到端实测踩过:账号配的是 qwen3.7-max[1m],回合却跑在
+    // claude-opus-4-8[1m] 上 —— 网关恰好放行了,所以既没报错也没人发现,只有去读
+    // transcript 的 init 消息才看得出来。与客户端 managed-providers.ts 的映射保持一致。
+    const roleEnv = [];
+    const pushEnv = (k, v) => { if (v) roleEnv.push('-e', `${k}=${v}`); };
+    pushEnv('ANTHROPIC_DEFAULT_OPUS_MODEL', defaultModels.opus);
+    pushEnv('ANTHROPIC_DEFAULT_SONNET_MODEL', defaultModels.sonnet);
+    pushEnv('ANTHROPIC_DEFAULT_HAIKU_MODEL', defaultModels.haiku);
+    pushEnv('CLAUDE_CODE_SUBAGENT_MODEL', defaultModels.subagent);
+    pushEnv('CLAUDE_CODE_EFFORT_LEVEL', effortLevel);
+
+    // routine 没显式选模型时,退到账号配置的 opus 角色(与客户端「默认取配置第一条」同义);
+    // 都没有才交给容器内置默认。
+    const effectiveModel = model || defaultModels.opus || defaultModels.sonnet || '';
+
     const args = [
       'exec', '-i', '-u', '1000',
       '-e', `ANTHROPIC_BASE_URL=${baseUrl}`,
       '-e', `${keyVar}=${token}`,
+      ...roleEnv,
       container, 'python3', SHIM, '--',
       // ⚠️ **不要在这里再写一次 claude 二进制路径。** shim 自己会 prepend
       // (cowork-shim.py: `Popen([CLAUDE_BIN] + argv)`,路径取自 COWORK_CLAUDE_BIN)。
@@ -165,9 +186,9 @@ function execOnce({ sid, container, prompt, model, token, baseUrl, authStyle, lo
       '-p', prompt,
       '--output-format', 'stream-json', '--verbose',
       '--dangerously-skip-permissions',
-      ...(model ? ['--model', model] : []),
+      ...(effectiveModel ? ['--model', effectiveModel] : []),
     ];
-    log(`routine ${sid} spawn model=${model || 'default'} authStyle=${authStyle}`);
+    log(`routine ${sid} spawn model=${effectiveModel || '容器默认'}${model ? '(显式)' : '(账号配置)'} authStyle=${authStyle}`);
 
     const child = spawn('docker', args, { stdio: ['pipe', 'pipe', 'pipe'] });
     const transcript = [];

@@ -17,9 +17,9 @@
 | Phase | 内容 | 仓库 | 状态 | 备注 |
 |-------|------|------|------|------|
 | P0 | 技术验证：生产真机验 `claude -p` | — | ✅ 已完成 | 五条结论改变了实现，见「决策日志 2026-08-04 ②」 |
-| P1 | 账号后端内部凭证接口 | codeagent-server | ✅ **代码完成**（`99c044d`，未推送） | 21 单测 / 全仓 155 passed；**待部署 + 与 P2 联调** |
+| P1 | 账号后端内部凭证接口 | codeagent-server | ✅ **已上线并联调通过** | 21 单测；生产实测密钥配对成功、取回真实凭证 |
 | P2 | 沙箱执行器 `routine-runner` | cowork-server | ✅ **已完成并生产实测** | 成功/401/超时/溢出/并发闸全验；**顺带补完 P0 的成功路径** |
-| P3 | 沙箱调度 + 存储 + REST | cowork-server | ✅ **代码完成**（selftest-r5 37/37） | 已部署生产但**服务未重启**（会断在线用户 WS），等择时 |
+| P3 | 沙箱调度 + 存储 + REST | cowork-server | ✅ **已上线并端到端验证** | selftest-r5 37/37；生产上调度器自主触发跑通全链 |
 | P4 | 客户端数据层 + 代理路由 | LabCodepilot | 📋 待开始 | **契约冻结后即可并行** |
 | P5 | 客户端同步与物化 | LabCodepilot | 📋 待开始 | 依赖 P3 + P4 |
 | P6 | 客户端 UI 三层 | LabCodepilot | 📋 待开始 | 依赖 P4 |
@@ -248,9 +248,31 @@ const ok = exitCode === 0 && result?.is_error !== true && result?.api_error_stat
 > ③ **自检把 2 行 `routine_end` 写进了生产审计日志**（audit.mjs 在模块加载时读
 > `COWORK_AUDIT_FILE`，我在 import 之后才设）——已修并复验行数不变，已发生的 2 行留档不改。
 >
-> ⚠️ **剩余**：生产服务**尚未重启**，仍跑旧代码。重启会断开在线用户的 WS
-> （检查时有 3 个会话容器在跑、6 分钟前还有真实用户的 exec）。需择低峰时段执行：
-> `systemctl restart cowork-server`，之后确认日志有 `routine scheduler started`。
+> ### ✅ 生产端到端验收（2026-08-05）
+>
+> 已重启并配齐 `COWORK_BACKEND_URL` / `COWORK_INTERNAL_SECRET`（后者与 `COWORK_AUTH_SECRET`
+> 实测不同值，D4 成立）。用真实账号跑通全链：
+>
+> | 项 | 结果 |
+> |---|---|
+> | 密钥配对 | ✅ 取回真实凭证（配置 `Qwen3.7-Max`，`authStyle: api_key` —— 与 P1 从客户端推断链路得出的结论一致） |
+> | **调度器自主触发** | ✅ `fireAt 01:33:55` → `ranAt 01:34:27`（一个 tick 内），全程无人工干预 |
+> | 一次性自动停用（D10） | ✅ 跑完 `enabled=false` + `ranAt` 落位 |
+> | 运行历史 | ✅ `success` / 16.4s / $0.104 / 3 turns / exit 0 |
+> | transcript | ✅ 落盘 7690 B，REST 可取，`cwd=/workspace`、**19 个 skill** |
+> | 产物 | ✅ 经文件通道读出 `/workspace/e2e.txt` = `"P3 E2E OK\n"` |
+> | `cowork.kind=routine` 标签 | ✅ 容器与卷都带上了（reconcile 靠它保命） |
+> | 审计链 | ✅ `routine_create → cred_issued → routine_fire → routine_end(code=0) → cred_revoked` |
+> | `POST /routines/:id/run` | ✅ `{"started":true}`，15 秒内 success |
+>
+> **🐛 端到端抓到一个真 bug（已修）**：账号配置的角色模型没过河 —— 首次运行的
+> `init.model` 是容器内置默认 `claude-opus-4-8[1m]`，而该账号配的是 `qwen3.7-max[1m]`。
+> 网关恰好放行，所以**既没报错也没人发现**，只有去读 transcript 的 init 消息才看得出来。
+> 修法：把 `ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU}_MODEL` / `CLAUDE_CODE_SUBAGENT_MODEL` /
+> `CLAUDE_CODE_EFFORT_LEVEL` 按客户端 `managed-providers.ts` 的映射注入容器，
+> 且 routine 未显式选模型时退到账号配置的 opus 角色。复验 `model: qwen3.7-max[1m]` ✅。
+>
+> 探针资源已全部清理（0 个 routine 残留、无 `kind=routine` 的容器/卷）。
 
 **目标**：客户端全程关闭，routine 也能按时自动跑完。
 
