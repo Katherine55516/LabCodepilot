@@ -1280,7 +1280,31 @@ export function replaceCoworkRoutines(routines: CoworkRoutine[]): void {
 
 /** 换账号/登出时清空缓存(与 owner_uid 隔离互为兜底)。 */
 export function purgeCoworkRoutines(): void {
-  getDb().prepare('DELETE FROM cowork_routines').run();
+  const db = getDb();
+  db.transaction(() => {
+    db.prepare('DELETE FROM cowork_routines').run();
+    // 水位线一并清掉:留着的话,新账号万一撞上同一个 routineId 会以为那些运行已对过账,
+    // 于是永远不物化 —— 表现是「定时任务跑了但客户端什么都没有」,极难排查。
+    db.prepare(`DELETE FROM settings WHERE key LIKE '${ROUTINE_WATERMARK_PREFIX}%'`).run();
+  })();
+}
+
+/**
+ * 定时任务对账水位线:该 routine 已经拉到哪个 `startedAt` 了。
+ *
+ * 放 settings 而不是 cowork_routines 的列:它是**客户端本地的同步进度**,与服务端下发的
+ * routine 定义不是一回事 —— 混在一起会让「用服务端结果覆盖缓存」把进度一起冲掉。
+ */
+const ROUTINE_WATERMARK_PREFIX = 'routine_wm_';
+
+export function getRoutineWatermark(routineId: string): string {
+  if (!routineId) return '';
+  return getSetting(ROUTINE_WATERMARK_PREFIX + routineId) || '';
+}
+
+export function setRoutineWatermark(routineId: string, startedAt: string): void {
+  if (!routineId) return;
+  setSetting(ROUTINE_WATERMARK_PREFIX + routineId, startedAt);
 }
 
 /**
@@ -1295,11 +1319,17 @@ export function markSessionAsRoutineRun(sessionId: string, routineId: string, ru
     .run(routineId, runId, sessionId);
 }
 
-/** 某 routine 的历史运行会话(倒序)。这是「定时任务」页第二层的取数口。 */
+/**
+ * 某 routine 的历史运行会话(倒序)。这是「定时任务」页第二层的取数口。
+ *
+ * `created_at` 只精确到秒,而一次同步会把攒下的多次运行**在同一秒里**全部物化 ——
+ * 只按它排的话并列行的顺序是不确定的,列表会时不时自己换个序。rowid 兜底把顺序钉死:
+ * 物化是从旧到新做的(见 routine-sync.ts),所以 rowid 大 = 运行时间晚。
+ */
 export function getSessionsByRoutine(routineId: string): ChatSession[] {
   if (!routineId) return [];
   return getDb()
-    .prepare('SELECT * FROM chat_sessions WHERE routine_id = ? ORDER BY created_at DESC')
+    .prepare('SELECT * FROM chat_sessions WHERE routine_id = ? ORDER BY created_at DESC, rowid DESC')
     .all(routineId) as ChatSession[];
 }
 

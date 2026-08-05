@@ -17,6 +17,11 @@ import path from 'path';
 import os from 'os';
 import { userHome, winAppData } from './user-home';
 import type { MessageContentBlock } from '@/types';
+import {
+  type ContentBlock,
+  parseAssistantContent,
+  analyzeUserContent,
+} from './claude-content-blocks';
 
 // ==========================================
 // Constants
@@ -118,17 +123,9 @@ interface AssistantEntry extends JournalEntry {
   timestamp: string;
 }
 
-interface ContentBlock {
-  type: string;
-  text?: string;
-  thinking?: string;
-  id?: string;
-  name?: string;
-  input?: unknown;
-  tool_use_id?: string;
-  content?: string | ContentBlock[];
-  is_error?: boolean;
-}
+// ContentBlock 与块级归一化(thinking/text/tool_use/tool_result)已抽到
+// `claude-content-blocks.ts` —— 沙箱定时任务的 stream-json 原文用的是同一套块结构,
+// 两边共用一份,免得在一处修了块解析的 bug 另一处静默留着。
 
 // ==========================================
 // Session Discovery
@@ -492,7 +489,7 @@ export function parseClaudeSession(sessionId: string): ParsedSession | null {
         if (!gitBranch && userEntry.gitBranch) gitBranch = userEntry.gitBranch;
         if (!version && userEntry.version) version = userEntry.version;
 
-        const { prompt, toolResults } = analyzeUserEntry(userEntry);
+        const { prompt, toolResults } = analyzeUserContent(userEntry.message?.content);
 
         // tool_result lines belong to the in-flight assistant turn.
         if (toolResults.length > 0 && pendingBlocks) {
@@ -515,7 +512,7 @@ export function parseClaudeSession(sessionId: string): ParsedSession | null {
       } else if (entry.type === 'assistant') {
         assistantMessageCount++;
         const assistantEntry = entry as AssistantEntry;
-        const blocks = parseAssistantBlocks(assistantEntry);
+        const blocks = parseAssistantContent(assistantEntry.message?.content);
         if (blocks.length > 0) {
           if (!pendingBlocks) {
             pendingBlocks = [];
@@ -555,78 +552,4 @@ export function parseClaudeSession(sessionId: string): ParsedSession | null {
   };
 
   return { info, messages };
-}
-
-/** Normalize a tool_result block's content (string or text-block array) to string. */
-function toolResultContentToString(content: string | ContentBlock[] | undefined): string {
-  if (typeof content === 'string') return content;
-  if (Array.isArray(content)) {
-    return content.filter(c => c.type === 'text').map(c => c.text || '').join('\n');
-  }
-  return '';
-}
-
-/**
- * Extract ordered content blocks from an assistant JSONL entry. Preserves the
- * block array order (= chronological order) and includes thinking blocks.
- * Returns [] for entries with no renderable blocks.
- */
-function parseAssistantBlocks(entry: AssistantEntry): MessageContentBlock[] {
-  const msgContent = entry.message?.content;
-  if (!msgContent || !Array.isArray(msgContent)) return [];
-
-  const blocks: MessageContentBlock[] = [];
-  for (const block of msgContent) {
-    switch (block.type) {
-      case 'thinking': {
-        if (block.thinking) blocks.push({ type: 'thinking', thinking: block.thinking });
-        break;
-      }
-      case 'text': {
-        if (block.text) blocks.push({ type: 'text', text: block.text });
-        break;
-      }
-      case 'tool_use': {
-        blocks.push({ type: 'tool_use', id: block.id || '', name: block.name || '', input: block.input });
-        break;
-      }
-      case 'tool_result': {
-        blocks.push({
-          type: 'tool_result',
-          tool_use_id: block.tool_use_id || '',
-          content: toolResultContentToString(block.content),
-          is_error: block.is_error || false,
-        });
-        break;
-      }
-    }
-  }
-  return blocks;
-}
-
-/**
- * Analyze a user JSONL entry. In Claude Code's transcript, a "user" line is
- * EITHER a real user prompt (string / text content) OR the tool_result(s) fed
- * back to the model after a tool_use (array of tool_result blocks). We split
- * these so the importer can group tool_results into the assistant turn and
- * only treat real prompts as turn boundaries.
- */
-function analyzeUserEntry(entry: UserEntry): { prompt: string | null; toolResults: MessageContentBlock[] } {
-  const content = entry.message?.content;
-  if (typeof content === 'string') {
-    return { prompt: content.trim() ? content : null, toolResults: [] };
-  }
-  if (Array.isArray(content)) {
-    const text = content.filter(b => b.type === 'text').map(b => b.text || '').join('\n');
-    const toolResults: MessageContentBlock[] = content
-      .filter(b => b.type === 'tool_result')
-      .map(b => ({
-        type: 'tool_result' as const,
-        tool_use_id: b.tool_use_id || '',
-        content: toolResultContentToString(b.content),
-        is_error: b.is_error || false,
-      }));
-    return { prompt: text.trim() ? text : null, toolResults };
-  }
-  return { prompt: null, toolResults: [] };
 }

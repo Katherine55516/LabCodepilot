@@ -21,7 +21,7 @@
 | P2 | 沙箱执行器 `routine-runner` | cowork-server | ✅ **已完成并生产实测** | 成功/401/超时/溢出/并发闸全验；**顺带补完 P0 的成功路径** |
 | P3 | 沙箱调度 + 存储 + REST | cowork-server | ✅ **已上线并端到端验证** | selftest-r5 37/37；生产上调度器自主触发跑通全链 |
 | P4 | 客户端数据层 + 代理路由 | LabCodepilot | ✅ **完成**（10 单测 / 全量 2646 passed） | 代理层已对**生产沙箱**实测通全部端点 |
-| P5 | 客户端同步与物化 | LabCodepilot | 📋 待开始 | 依赖 P3 + P4 |
+| P5 | 客户端同步与物化 | LabCodepilot | ✅ 完成 | 端到端留 P9 打包态验 |
 | P6 | 客户端 UI 三层 | LabCodepilot | 📋 待开始 | 依赖 P4 |
 | P7 | 创建入口（MCP / 存为定时）+ 通知 + i18n | LabCodepilot | 📋 待开始 | 依赖 P6 |
 | P8 | 加固与运维（配额 / 审计 / selftest / 手册） | cowork-server | 📋 待开始 | 依赖 P3 |
@@ -353,23 +353,33 @@ GET        /runs/:runId/transcript
 
 ---
 
-## P5 · 客户端同步与物化
+## P5 · 客户端同步与物化 — ✅ 已完成（2026-08-05）
 
 **目标**：把服务端的运行记录变成本地可看的会话。
 
 | 文件 | 职责 |
 |---|---|
-| `src/lib/routine-transcript.ts` | **新建**：stream-json → `Message[]`（纯函数，好单测。P0 已证实与 SDK 消息同形状） |
-| `src/lib/routine-sync.ts` | **新建**：拉取 + **幂等**物化 + 通知 |
+| `src/lib/claude-content-blocks.ts` | **新建**：内容块归一化，与 `claude-session-parser.ts` 共用（两处读的是不同文件格式，但块结构同源） |
+| `src/lib/routine-transcript.ts` | **新建**：stream-json → 消息（纯函数）。与实时回合同形状，渲染层零改动复用 |
+| `src/lib/routine-sync.ts` | **新建**：拉取 + **幂等**物化 + 汇总。网络层走依赖注入，单测能驱动整条链路 |
+| `src/app/api/routines/sync/route.ts` | **新建**：`POST`，恒返回 200，成败放 body（同步失败不该让页面加载报错） |
+| `src/lib/db.ts` | **改**：水位线读写 + `purgeCoworkRoutines` 连带清 + `getSessionsByRoutine` 加 rowid 兜底排序 |
 
-**同步时机**：app 启动 / 打开定时任务页 / 每 10 分钟（对齐现有 cowork config 同步节奏）。
-**幂等**：物化前查 `routine_run_id` 是否已存在，存在则跳过 —— 断网重试安全。
-**失败的 run 也要物化**，把 `is_error` + 错误文本渲染成醒目消息。
+**同步时机**：app 启动 / 打开定时任务页 / 每 10 分钟 —— 触发接线属 P6（UI）。
+**幂等**：物化前查 `getSessionByRoutineRun(runId)`。水位线丢失导致服务端全量返回时，这道闸是最后防线。
+**失败照样物化**：`credential_error` 在容器起来之前就失败了，服务端没写 transcript，拉取必然 404 —— 这是正常输入而不是异常。`skipped` 不物化（无产出，只在服务端运行历史里出现）。
 
-### 验收
-- 用 P0 抓到的真实 transcript 样本做单测，断言消息条数与关键字段
-- 重复调用 sync 不产生重复会话
-- 服务端跑 3 次 → 客户端拉取后本地出现 3 个会话，且**都不在办公对话列表里**
+**三个只有实读才知道的形状事实**（详见 `src/__tests__/fixtures/routine-transcripts/README.md`）：
+原文里**没有用户指令那一条**（要从 routine 定义补）；同一条 assistant 在流式下**拆成多行**；
+中间混着 `system/thinking_tokens` 进度噪声。
+
+### 验收 ✅
+- ✅ 黄金样本用**生产上取回的真实原文**（两份，未改一字节），断言块序列、配对、元信息
+- ✅ 重复 sync 不产生重复会话；水位线倒退也不重复
+- ✅ 物化出的会话不在办公对话列表里；顺序与真实运行顺序一致
+- ✅ `npm run test` 2677 passed / 0 failed（新增 31 项：transcript 16 + sync 15）
+- ⏸ **服务端真跑 3 次的端到端**留到 P9 打包态验收 —— 本地 dev 无登录体系，
+  `cowork_remote_url/token` 为空，拉不到真实数据（CLAUDE.md 已载明此限制）
 
 ---
 
