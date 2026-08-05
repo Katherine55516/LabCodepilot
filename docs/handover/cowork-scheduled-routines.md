@@ -1,7 +1,7 @@
 # 沙箱定时任务（服务端调度 · 对标 Claude Routines）— 技术交接文档
 
 > **本文件的目标：读完这一份就能完整恢复上下文并无缝接上后续开发，不必回看会话记录。**
-> 最后更新：2026-08-05 · 分支 `scheduler` @ `4ca3f31`（P5 完成，**未推送**）
+> 最后更新：2026-08-05 · 分支 `scheduler` @ `aa94c2f`（P6 完成，**未推送**）
 > 执行计划（进度/决策/验收）：[docs/exec-plans/active/cowork-scheduled-routines.md](../exec-plans/active/cowork-scheduled-routines.md)
 > 调研与设计：[research/cowork-server-side-routines.md](../research/cowork-server-side-routines.md)（服务端实读 + 客户端设计）·
 > [research/cowork-scheduled-routines.md](../research/cowork-scheduled-routines.md)（Claude 三套调度辨析 + U1-U15 验收清单）
@@ -59,13 +59,15 @@ agent 回合、产出文件、记录历史 —— 全程不需要任何客户端
 
 | 仓库 | 分支 | HEAD | 与 GitHub |
 |---|---|---|---|
-| `LabCodepilot` | **`scheduler`**（本功能全部工作在这） | `4ca3f31` | ⬆️ 领先远端（P5 未推送） |
+| `LabCodepilot` | **`scheduler`**（本功能全部工作在这） | `aa94c2f` | ⬆️ 领先远端（P6 未推送） |
 | `LabCodepilot` | `para`（scheduler 的父分支） | `537173f` | 已同步 |
 | `codeagent-server` | `main` | `99c044d` | 已同步 |
 
 `scheduler` 从 `para` 拉出，本功能的 commit（新→旧）：
 
 ```
+aa94c2f feat(client): P6 定时任务界面 —— 侧边栏入口 + 三层导航
+0f79815 docs(handover): 更正 P5 的 commit 引用
 4ca3f31 feat(client): P5 定时任务同步与物化 —— 服务端运行变成本地会话
 24bc996 docs(handover): 沙箱定时任务交接文档
 21dc1fe feat(client): P4 定时任务数据层 + 代理路由
