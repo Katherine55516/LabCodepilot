@@ -29,6 +29,12 @@ export interface CoworkBackendStatus {
 export interface CoworkExecEndpoint {
   forwarderPath: string;
   env: Record<string, string>;
+  /**
+   * 跑 forwarder 用的 JS 运行时(传给 SDK 的 `executable`)。
+   * forwarderPath 是 .mjs 时**必须给** —— 见 cowork-backend-remote.ts 的注释。
+   * .sh 包装(vfkit)不需要:SDK 会直接 spawn 脚本本身。
+   */
+  runtimeExecutable?: string;
 }
 
 export interface CoworkCredential {

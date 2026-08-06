@@ -40,7 +40,13 @@ export function handleExec(ws, sid, containerName, { shimPath, log, uid }) {
         // 回合成败/时长的唯一结构化来源(此前只进 journal,统计后台无从取数)。
         // code=null(被信号杀)记 -1,与正常退出码区分。
         audit('exec_end', { sessionId: sid, detail: uid, code: code === null ? -1 : code, durationMs: Date.now() - startedAt });
-        try { ws.close(1000, 'exec exit'); } catch { /* ignore */ }
+        // 用 close code 把容器内 claude 的退出码带回客户端:1000=正常;4000+N=退出码 N
+        // (4000-4999 是 WS 规范留给应用层的区间)。转发器据此以同样的码退出,SDK 才能
+        // 把"claude 报错退出"识别成失败 —— 否则一律 exit(0),错误被静默吞掉(见
+        // client/forwarder-remote.mjs 的注释)。被信号杀(null)属正常中断,按 1000。
+        // 老转发器忽略 close code 照样 exit(0),行为与改造前一致,可以混着跑。
+        const wsCode = !code ? 1000 : 4000 + Math.min(code, 255);
+        try { ws.close(wsCode, 'exec exit'); } catch { /* ignore */ }
       });
       child.on('error', (e) => { log?.(`exec error session=${sid} ${e.message}`); try { ws.close(1011, 'exec error'); } catch { /* ignore */ } });
       return;

@@ -20,6 +20,8 @@ export interface CoworkDecision {
   executablePath?: string;
   /** 转发器连接所需 env(COWORK_SESSION_ID + vsock 或 remote 端点;由 backend.execEndpoint 提供) */
   execEnv?: Record<string, string>;
+  /** 跑转发器的 JS 运行时(传给 SDK 的 executable);转发器是 .mjs 时必须给,见 CoworkExecEndpoint */
+  runtimeExecutable?: string;
   /** 不可用时的原因(日志/UI 提示) */
   reason?: string;
 }
@@ -51,5 +53,10 @@ export async function decideCowork(sessionId: string, sandboxEnabled: boolean | 
   if (!status.ready) {
     return { useSandbox: false, reason: `sandbox_${status.phase}${status.reason ? ':' + status.reason : ''}` };
   }
-  return { useSandbox: true, executablePath: endpoint.forwarderPath, execEnv: endpoint.env };
+  return {
+    useSandbox: true,
+    executablePath: endpoint.forwarderPath,
+    execEnv: endpoint.env,
+    runtimeExecutable: endpoint.runtimeExecutable,
+  };
 }

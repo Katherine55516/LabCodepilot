@@ -67,6 +67,34 @@ function sanitizeEnvValue(value: string): string {
 }
 
 /**
+ * resume 首消息的等待上限。超了就按 resume 失败处理(清 sdk_session_id + 不带 resume
+ * 重跑),而不是无限期地悬在 await 上 —— 那会让前端一直停在"生成中",用户只能自己放弃。
+ *
+ * 取 60s 而不是更短:沙箱回合首消息前要等容器冷启动(ensure/`docker start` + claude
+ * 自身启动),线上实测正常在数秒内,60s 留足余量,避免把慢启动误判成失败白跑一轮。
+ */
+const RESUME_FIRST_MESSAGE_TIMEOUT_MS = 60_000;
+
+/**
+ * Promise 超时护栏:超时 reject,并清掉定时器(unref 防它拖住事件循环)。
+ * 导出仅为单测(见 cowork-resume-guard.test.ts),生产只在本文件内用。
+ */
+export async function withTimeout<T>(promise: Promise<T>, ms: number, label: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(`${label} timed out after ${ms}ms`)), ms);
+        timer.unref?.();
+      }),
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/**
  * Sanitize all values in an env record so child_process.spawn won't
  * throw EINVAL due to invalid characters or non-string values.
  * On Windows, spawn is strict: every env value MUST be a string.
@@ -962,6 +990,13 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
           });
           if (decision.useSandbox && decision.executablePath) {
             queryOptions.pathToClaudeCodeExecutable = decision.executablePath;
+            if (decision.runtimeExecutable) {
+              // SDK 的类型把 executable 标成 'bun'|'deno'|'node'(它当运行时**名字**用),
+              // 但运行时它就是 spawn 的命令字符串,绝对路径同样有效(已实测)。转发器是
+              // .mjs 时不给这个,SDK 会去 spawn PATH 里的字面量 "node" —— 打包版没有独立
+              // node,用户没装 Node.js 就整条办公模式不可用。见 cowork-backend-remote.ts。
+              queryOptions.executable = decision.runtimeExecutable as NonNullable<Options['executable']>;
+            }
             const coworkEnv = queryOptions.env as Record<string, string>;
             // R1-3: 连接 env 由当前后端决定(COWORK_SESSION_ID + vsock 或 remote 端点 +
             // COWORK_NODE_BIN/ELECTRON_RUN_AS_NODE),forwarder 据此连沙箱。
@@ -1568,25 +1603,43 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
           options: queryOptions,
         });
 
-        // Wrap the iterator so we can detect resume failures on the first message
+        // Wrap the iterator so we can detect resume failures on the first message.
+        //
+        // 三种失败都要接住(前两种是 2026-08 线上事故补的):
+        //   ① 抛错     —— 原有分支,resume 的会话文件损坏/CLI 版本不匹配等;
+        //   ② 零消息   —— 迭代器直接 done。**远程沙箱下曾必现**:容器里没有该会话的
+        //      记录,claude 打 "No conversation found with session ID" 后 exit 1,而
+        //      转发器把退出码抹平成 0(ws close → exit(0)),SDK 于是既不抛错也不产出,
+        //      回合静默收场。用户侧就是"消息发出去毫无反应",客户端日志一片干净;
+        //   ③ 挂住     —— 首消息永远不来。原来这里是裸 await,一挂就是永远。
+        // 三种都归到同一条兜底:清 sdk_session_id + 不带 resume 重跑(prompt 带上历史)。
         if (shouldResume) {
+          const iter = conversation[Symbol.asyncIterator]();
+          let first: Awaited<ReturnType<typeof iter.next>> | undefined;
+          let resumeFailure = '';
           try {
-            // Peek at the first message to verify resume works
-            const iter = conversation[Symbol.asyncIterator]();
-            const first = await iter.next();
+            first = await withTimeout(iter.next(), RESUME_FIRST_MESSAGE_TIMEOUT_MS, 'resume first message');
+            if (first.done) resumeFailure = 'stream ended with no message (resume produced no output)';
+          } catch (resumeError) {
+            resumeFailure = resumeError instanceof Error ? resumeError.message : String(resumeError);
+          }
 
+          if (!resumeFailure && first) {
             // Re-wrap into an async iterable that yields the first message then the rest
+            const peeked = first;
             conversation = (async function* () {
-              if (!first.done) yield first.value;
+              if (!peeked.done) yield peeked.value;
               while (true) {
                 const next = await iter.next();
                 if (next.done) break;
                 yield next.value;
               }
             })() as ReturnType<typeof query>;
-          } catch (resumeError) {
-            const errMsg = resumeError instanceof Error ? resumeError.message : String(resumeError);
-            console.warn('[claude-client] Resume failed, retrying without resume:', errMsg);
+          } else {
+            console.warn('[claude-client] Resume failed, retrying without resume:', resumeFailure);
+            // 主动收掉这次 query:超时分支里子进程(以及沙箱容器内的 exec)可能还活着,
+            // 不 return 就成孤儿,还会跟重跑的那次抢同一个会话。best-effort,不等它。
+            try { void iter.return?.(); } catch { /* 已经结束了就无所谓 */ }
             // Clear stale sdk_session_id so future messages don't retry this broken resume
             if (sessionId) {
               try { updateSdkSessionId(sessionId, ''); } catch { /* best effort */ }

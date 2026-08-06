@@ -53,7 +53,17 @@ ws.on('open', () => {
   process.stdin.on('end', () => { ws.send(Buffer.alloc(4)); }); // 长度 0 = EOF 标记
 });
 ws.on('message', (data) => { process.stdout.write(data); }); // claude stdout 裸流
-ws.on('close', () => process.exit(0));
+// 退出码必须还原成容器内 claude 的,不能一律 0 ——
+// 原来这里无条件 process.exit(0),于是 claude 在容器里 exit 1(如 "No conversation
+// found with session ID" )也被抹平成"正常结束"。SDK 见子进程 code 0 且 stdout 零字节,
+// 既不生成 exitError 也不产出消息,回合静默收场:用户"发出去没反应",客户端日志无痕,
+// 错误只留在服务端 journal 里(2026-08 线上事故,排查成本极高)。
+// 约定(server 侧 exec-bridge.mjs 对应):1000=claude 正常退出;4000+N=claude 退出码 N;
+// 其余(1006 断线、1011 服务端错等)一律按失败。老服务端只会发 1000/1011,行为不变。
+ws.on('close', (code) => {
+  if (code >= 4000 && code <= 4255) process.exit(code - 4000);
+  process.exit(code === 1000 || code === 1005 ? 0 : 1);
+});
 ws.on('error', (err) => { process.stderr.write(`[forwarder-remote] ${err.message}\n`); process.exit(1); });
 
 for (const s of ['SIGTERM', 'SIGINT', 'SIGHUP']) {

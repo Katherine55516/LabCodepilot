@@ -158,6 +158,24 @@ R5-5 交付时「接口做了、部署面没接上」。同 commit 还修了两�
    注意两点:**`exec exit` 只进 journal 不进审计日志**(只看审计会误判成"卡住没退出");
    claude 的 stderr 是 `inherit` 直通 journal,但**它可能什么都不输出** —— stderr 空
    不代表没出错。对比 `exec spawn env=N` 的 N 值是快速判据(正常 19)。
+   **`code=1` 且只跑了几百毫秒**,先 grep `No conversation found` —— 见下面第 7 条。
+7. **`--resume` 与退出码:2026-08-05 的静默事故,两条协议级结论。**
+   ① **容器内 claude 的会话记录必须持久**。原来 `HOME=/home/agent` 是 tmpfs,而 TTL 空闲
+   回收会 `docker stop`,tmpfs 每次 `docker start` 都是空的 → 客户端按本地 DB 的
+   `sdk_session_id` 发 `--resume` → claude 打 `No conversation found with session ID` 并
+   **~650ms 内 exit 1**。线上两天 20 次,占失败回合七成、全部回合两成。已改为独立状态卷
+   `cowork-st-<sid>`(与 workspace 卷分开,"状态不进产物"由分卷保证而非 tmpfs),
+   并在 `cowork-shim.py` 加兜底:transcript 不在就把 `--resume <id>` 改写成
+   `--session-id <id>`,以同一个 id 新建 → 只失忆一轮,下一回合的 resume 就能命中。
+   ② **退出码必须端到端还原,否则失败会变成"静默成功"**。转发器原来无条件
+   `process.exit(0)`,把容器里的 exit 1 抹平;SDK 见 code 0 + stdout 零字节,既不生成
+   exitError 也不产出消息 → 客户端 `for await` 一次都不进,回合无声结束,**日志一片干净**,
+   全部证据只在服务端 journal 里。现在约定:**close code 1000=正常,4000+N=claude 退出码 N**
+   (`exec-bridge.mjs` 发、`forwarder-remote.mjs` 还原;老转发器忽略未知 code 仍 exit(0),
+   可混跑)。客户端另加两条护栏:resume 首消息**零消息即判失败**、**60s 超时**,都走既有的
+   "清 sdk_session_id + 不带 resume 重跑"兜底。回归用例:
+   `apps/cowork-server/selftest-forwarder-exit.mjs`(退出码映射,免 docker)、
+   `container/selftest-shim-resume.py`(改写分支)、`src/__tests__/unit/cowork-resume-guard.test.ts`。
 
 ## A.7 账号后端侧(codeagent-server)—— 已全部完成并推送 main
 

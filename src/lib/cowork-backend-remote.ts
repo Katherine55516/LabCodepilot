@@ -107,6 +107,16 @@ export const remoteBackend: CoworkBackend = {
     const { scheme, host, port } = wsEndpoint(url || 'http://127.0.0.1:8790');
     return {
       forwarderPath: remoteForwarderPath(),
+      // ⚠️ 必须显式给运行时。SDK 对 `.js/.mjs/.ts/...` 结尾的
+      // pathToClaudeCodeExecutable 不会直接 spawn 脚本,而是 spawn `executable`
+      // (默认字面量 "node")并把脚本当第一个参数 —— 打包版 Electron 里没有独立的
+      // node 可执行文件,用户机器上没装 Node.js 就直接
+      // "Claude Code executable at …forwarder-remote.mjs exists but failed to launch"
+      // (2026-08-04 线上实测,同事机器无 node,办公模式 6 次回合全挂;错误信息还指着
+      // .mjs 的路径,极具误导性)。这里指向 Electron 自身,配合下面的
+      // ELECTRON_RUN_AS_NODE=1 让它以纯 Node 运行时跑 forwarder,彻底不依赖 PATH。
+      // 与 vfkit 的做法同源:那边是 .sh 包装里 exec "$COWORK_NODE_BIN"。
+      runtimeExecutable: process.execPath,
       env: {
         COWORK_SESSION_ID: sessionId,
         COWORK_REMOTE_SCHEME: scheme,
