@@ -23,6 +23,9 @@ docker ─┬─ cowork-<sid>    会话容器(每会话一个;非 root uid 1000�
 - 三类东西**开机自启**:docker(发行版自带)、`cowork-server.service`、`cowork-egress.service`。
 - 会话容器/cowork-proxy/cowork-net 都由控制面**运行时动态编排**,不在 systemd 里声明;server 重启不影响已跑的会话容器。cowork-proxy 在 server **启动时**确保存在(有 memoize,运行中被误删不会自动检测)—— 误删后 `systemctl restart cowork-server` 即重建。
 - 凭证:客户端每回合重新注册,server 重启后**自动自愈**,无需运维干预。
+- **两条执行路径,别混**:交互回合的 agent loop 跑在**客户端**(server 只是转发器的哑管道);
+  定时任务的 agent loop 跑在**服务端**(`routine-runner.mjs` 自己 `docker exec`)。所以
+  「客户端全关着但容器在跑」是定时任务的正常现象,不是泄漏。详见 §10。
 
 ## 2. 服务管理
 
@@ -56,6 +59,14 @@ journalctl -u cowork-egress --no-pager           # 防火墙安装日志
 | `COWORK_AUDIT_FILE` | `<部署目录>/cowork-audit.log` | 审计文件路径 |
 | `COWORK_IMAGE` | `python:3-slim` | 会话容器镜像(**首次部署需能拉到或提前 `docker load`**;推荐切自建镜像,见 §9) |
 | `COWORK_IMAGE_BUNDLED` | 空(关) | `1` = 自建镜像模式:claude/shim/cred-proxy 已烘入镜像,不再 bind 宿主 assets/脚本 |
+| `COWORK_STATE_DIR` | `/data/cowork-state` | **定时任务**的定义与运行历史(见 §10)。install.sh 会建好并 chown —— 服务非 root 跑,漏了会 EACCES 而**表现是任务永远不触发** |
+| `COWORK_BACKEND_URL` | 空 | 账号后端地址。定时任务靠它取模型凭证;**没配 = 所有定时运行都 credential_error** |
+| `COWORK_INTERNAL_SECRET` | 空 | 取凭证用的独立密钥,与账号后端 `APP_COWORK_INTERNAL_SECRET` 同值。**必须与 `COWORK_AUTH_SECRET` 不同**(理由见 §10.5) |
+| `COWORK_ROUTINE_CONCURRENCY` | `4` | 同时最多跑几个定时任务 |
+| `COWORK_ROUTINE_DAILY_CAP` | `20` | 每用户每天最多跑几次 |
+| `COWORK_ROUTINE_MAX_PER_UID` | `50` | 每用户最多建几个定时任务 |
+| `COWORK_ROUTINE_TIMEOUT_MS` | `900000`(15min) | 单次运行硬超时,超时 SIGTERM → SIGKILL |
+| `COWORK_ROUTINE_MAX_ERRORS` | `10` | 连续失败几次后自动停用该任务 |
 
 ## 4. 密钥与 token 管理
 
@@ -72,7 +83,7 @@ journalctl -u cowork-egress --no-pager           # 防火墙安装日志
 
 ## 5. 审计
 
-append-only JSONL,`COWORK_AUDIT_FILE` 指定路径;超 4MB 软截断保留后半。**绝不记录 key/token 本体**。真实样例:
+append-only JSONL,`COWORK_AUDIT_FILE` 指定路径;超 64MB(`COWORK_AUDIT_MAX_BYTES`,`0`=不截断)软截断保留后半。**绝不记录 key/token 本体**。真实样例:
 
 ```json
 {"ts":"2026-07-17T08:57:54.185Z","event":"session_ensure","sessionId":"e2e5b3d4c1a09f7e","detail":"alice"}
@@ -86,6 +97,14 @@ append-only JSONL,`COWORK_AUDIT_FILE` 指定路径;超 4MB 软截断保留后半
 | `cred_issued` / `cred_revoked` | 凭证登记/废止(仅 sessionId) |
 | `reconcile` | 客户端对账清孤儿(uid + 清了哪些 sid) |
 | `idle_reap` | TTL 空闲回收(容器停、volume 留) |
+| `routine_create` / `routine_delete` | 定时任务建/删(uid) |
+| `routine_fire` | 一次定时运行开始(uid + 容器是新建还是复用) |
+| `routine_end` | 一次定时运行结束(uid + 终态;`code` 是退出码,`durationMs` 是耗时) |
+| `cred_fetched` | 为定时运行取到模型凭证(uid + 配置名,**无 key**) |
+
+🔴 **带归属的事件,`detail` 必须以 uid 开头**(后面可以跟补充信息)。账号后端的用量归属
+就按这条规则解析;写成 `"success <uid>"` 之类照样入库、也不报错,但 uid 落成 NULL ——
+归不到人头、在用户维度聚合里整个消失。`selftest-r5.mjs` 第 5 组按源码锁住了这条。
 
 **已知观测缺口**(tech-debt #15):坏 token 打到凭证代理的拒绝发生在 cowork-proxy **容器内**(只回 401,且故意不打日志防敏感头落盘),宿主侧**没有**对应审计事件 —— 当前无法从审计文件监控凭证探测行为。
 
@@ -204,3 +223,101 @@ pdfplumber/pypdf/matplotlib+中文字体/pillow/requests/tabulate)—— 日常�
 阿里云部署两条实测(部署当天做):① 宿主 `curl -sI https://mirrors.cloud.aliyuncs.com/pypi/simple/`
 确认内网源可达;② 沙箱容器内试 `pip download tabulate`——若内网源解析到 10/8 或 172.16/12
 被 egress 拦(阿里内网服务通常在 100.64/10 段不受拦),按 `setup-egress.sh` 尾注加定向放行。
+
+---
+
+## 10. 定时任务(服务端调度)
+
+用户在客户端建的定时任务**跑在这台服务器上**,到点由本机调度器自己发起完整的 agent 回合。
+**客户端关着、用户电脑关机都照跑** —— 所以「没人在线但容器在转」是正常的。
+
+### 10.1 它在哪、长什么样
+
+```
+$COWORK_STATE_DIR(默认 /data/cowork-state,权限 700,属服务用户)
+├── routines/<uid>/<routineId>.json         任务定义 + 调度状态(原子写)
+├── routines/<uid>/<routineId>.runs.jsonl   运行历史(append-only,**永久保留**)
+└── runs/<runId>.jsonl                      每次运行的完整 stream-json 原文
+```
+
+**routineId 就是 sid**,所以每个任务天然拥有自己的容器 `cowork-<id>` 和工作区卷
+`cowork-ws-<id>`,与普通会话同一套编排。区别只在容器/卷带 `cowork.kind=routine` 标签。
+
+### 10.2 巡检
+
+```bash
+# 调度器起来了没(启动时打一行,没有这行 = 调度根本没跑)
+journalctl -u cowork-server --no-pager -o cat | grep 'routine scheduler started' | tail -1
+#   期望:routine scheduler started (tick=60000ms concurrency=4 dailyCap=20)
+
+# 现存任务数(按用户分目录)
+find "$COWORK_STATE_DIR/routines" -name '*.json' | wc -l
+
+# 只看定时任务的容器(普通会话不带这个标签)
+docker ps -a --filter label=cowork.kind=routine
+
+# 最近的运行结果
+grep -h routine_end /opt/cowork-server/cowork-audit.log | tail -20
+
+# 状态目录属主(必须是服务用户,不是 root)
+ls -ld "$COWORK_STATE_DIR"
+```
+
+### 10.3 排障:任务到点不跑
+
+**按这个顺序查,前三条覆盖绝大多数情况:**
+
+1. **状态目录权限**。`ls -ld $COWORK_STATE_DIR` 属主不是服务用户 → 服务读写不了,
+   而它的表现极不直观:**服务一切正常、health 也正常,只是任务永远不触发**。
+   修:`chown -R <服务用户>:<服务用户> $COWORK_STATE_DIR`,重启服务。
+2. **`COWORK_BACKEND_URL` / `COWORK_INTERNAL_SECRET` 没配或不匹配**。表现是每次运行都
+   `credential_error`。验(不打印 key;⚠️ 必须用一个**确定能正常用办公模式**的 uid,
+   否则 404 有歧义 —— 「密钥不对」和「这人没有可用配置」返回同一个 404):
+
+   ```bash
+   cd /opt/cowork-server; set -a; . ./.env; set +a
+   node -e "import('./lib/backend-credentials.mjs').then(async m=>{try{const c=await m.fetchModelCredentials(process.argv[1]);console.log('✅',c.configName,c.realBase);}catch(e){console.log('❌',e.reason,e.message);}})" <用户UUID>
+   ```
+3. **任务被自动停用**。连续失败 `COWORK_ROUTINE_MAX_ERRORS`(默认 10)次后自动停,
+   `disabledReason` 里写了原因。看 `routines/<uid>/<id>.json` 的 `enabled` 与 `disabledReason`。
+4. **配额或并发把它挡了**。这类**不会静默丢**,一定会在 `.runs.jsonl` 里留一条
+   `status:"skipped"` 并注明 `skipReason`(`daily_quota_exceeded` / `concurrency_limit` /
+   `previous_run_in_progress` / `missed_too_long`)。查不到 skipped 记录就说明不是这个原因。
+5. **cron 时区**。任务按它自己的 `schedule.tz`(IANA,如 `Asia/Shanghai`)求值,
+   **不是服务器本地时区**。别拿 `date` 的输出去对。
+
+**手工触发一次**(排障主入口,绕开调度器):
+
+```bash
+cd /opt/cowork-server; set -a; . ./.env; set +a
+node routine-once.mjs --uid <用户UUID> --prompt "在当前目录建 ok.txt 写 OK" --transcript /tmp/x.jsonl
+```
+
+### 10.4 调配额
+
+改 `.env` 里 §3 那几个 `COWORK_ROUTINE_*`,`systemctl restart cowork-server`。
+
+- **日配额只数真正跑掉的**:`skipped` 不计入。否则配额一旦打满就再也降不下来
+  (满额 → 后续全 skipped → skipped 又计入 → 永远满额,自锁死)。
+- **配额的「今天」是北京日**(00:00 UTC+8 重置),与账号后端的口径同源。
+- 并发调大前先看内存:每个容器默认 2 CPU / 2G,`COWORK_ROUTINE_CONCURRENCY=4` 时
+  定时任务峰值可占 8 核 8G,与交互会话**共享**同一台机器的资源。
+
+### 10.5 两把密钥不能混用
+
+| 密钥 | 作用 |
+|---|---|
+| `COWORK_AUTH_SECRET` | 签发**用户** token(客户端访问本服务) |
+| `COWORK_INTERNAL_SECRET` | 本服务**反向**去账号后端取模型凭证 |
+
+**必须是两个不同的值。** 沙箱是跑不可信 agent 代码的机器,被攻破概率天然高于账号后端。
+复用同一把会让「攻破沙箱」从「冒充用户访问沙箱」升级为「批量导出全体用户的模型 API key」——
+这是质变,不是量变。
+
+### 10.6 两条别踩的线
+
+- **`selftest-r1..r4` 会清场**(reconcile 掉全部受管容器与网络),有活跃用户时绝不能跑。
+  `selftest-r5.mjs` 刻意不清场,可以在生产跑(仍建议低峰)。
+- **客户端的 `/reconcile` 不会碰定时任务的工作区** —— 靠 `cowork.kind=routine` 标签排除。
+  改 orchestrator 的过滤逻辑时务必先跑 `selftest-r5.mjs` 第 3 组:漏了这条,
+  **用户每打开一次 app 就清空一次自己所有定时任务的累积文件**。

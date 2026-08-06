@@ -223,10 +223,49 @@ async function testRest() {
   ok('删除后查不到', (await api('GET', `/routines/${created.id}`)).status === 404);
 }
 
+// ── 5. 审计契约(P8)────────────────────────────────────────────
+/**
+ * 🔴 每个带归属的审计事件,detail 必须**以 uid 开头**。
+ *
+ * 账号后端的用量归属就靠这条规则解析(usage_service.parse_audit_line)。写成
+ * "success <uid>" 之类的话,事件照样入库、也不报错,但 uid 落成 NULL ——
+ * 归不到人头、JOIN 不到用户名、在用户维度聚合里整个消失。踩过一次:routine_* 的
+ * 四个事件里有三个是这样,直到查用量后台才发现数据默默不全。
+ */
+async function testAuditContract() {
+  console.log('\n[5] 审计契约(归属靠 detail 以 uid 开头)');
+  const src = fs.readFileSync(new URL('./lib/routine-runner.mjs', import.meta.url), 'utf8')
+    + fs.readFileSync(new URL('./lib/routine-api.mjs', import.meta.url), 'utf8');
+
+  // 抓出所有 routine_* / cred_fetched 的 detail 写法
+  const calls = [...src.matchAll(/audit\('((?:routine_|cred_fetched)[a-z_]*)',\s*\{[^}]*?detail:\s*([^,}]+)/g)];
+  ok('至少抓到 5 个带归属的审计调用', calls.length >= 5, `实际 ${calls.length}`);
+
+  for (const [, event, detailExpr] of calls) {
+    const d = detailExpr.trim();
+    // 合法两种:裸 uid,或模板串且 uid 在最前
+    const bare = d === 'uid';
+    // 捕获组遇到 `}` 就停,所以模板串抓到的是 "`${uid" 而不是完整表达式
+    const prefixed = /^`\$\{uid\b/.test(d);
+    ok(`${event} 的 detail 以 uid 开头`, bare || prefixed, d.slice(0, 40));
+  }
+
+  // 计划里点名要有的三个事件,别漏
+  for (const ev of ['routine_fire', 'routine_end', 'cred_fetched']) {
+    ok(`发出 ${ev} 事件`, src.includes(`audit('${ev}'`));
+  }
+
+  // 凭证类事件绝不能带 key 本体
+  const credLine = calls.find(([, e]) => e === 'cred_fetched');
+  ok('cred_fetched 不含 key 字段', !!credLine && !/realKey|apiKey|token/i.test(credLine[2]),
+      credLine ? credLine[2].slice(0, 40) : '未找到');
+}
+
 // ── main ────────────────────────────────────────────────────────
 console.log(`P3 自检 — state=${STATE_DIR} port=${PORT}`);
 await testPureLayers();
 await testActivityHook();
+await testAuditContract();
 
 let child = null;
 try {

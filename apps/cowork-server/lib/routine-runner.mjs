@@ -99,6 +99,12 @@ export async function runRoutine({
       return { ok: false, status: 'credential_error', error: `${reason}: ${e.message}`, durationMs: Date.now() - startedAt };
     }
 
+    // 取凭证成功也要留痕:排障时「这次运行到底有没有拿到凭证、拿的是哪套配置」
+    // 是第一个要问的问题。账号后端那边虽然也记了,但两边日志对不到一条时间线上,
+    // 而这条能和同一 sessionId 的 routine_fire / routine_end 直接串起来。
+    // ⚠️ 只记 uid 与配置名,**绝不记 key 本体**(与 cred_issued/cred_revoked 同规矩)。
+    audit('cred_fetched', { sessionId: sid, detail: `${uid} ${c.configName || 'default'}` });
+
     // ── 2. 登记进 cred-proxy(真 key 到此为止,不再往下走)──────────
     const { token, baseUrl } = await cred.registerCredentials(
       sid, { realKey: c.realKey, realBase: c.realBase, authStyle: c.authStyle }, log,
