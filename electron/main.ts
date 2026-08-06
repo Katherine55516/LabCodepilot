@@ -1837,6 +1837,11 @@ app.whenReady().then(async () => {
       for (const line of whichResult.trim().split(/\r?\n/)) {
         const candidate = line.trim();
         if (!candidate) continue;
+        // where 会把同目录下无扩展名的 claude 一并列出 —— 那是安装器留给 Git Bash 的
+        // POSIX sh 脚本，不是 PE。下面 execFileSync 对它走 shell:false 直接 CreateProcessW，
+        // Windows 会弹出无法捕获的系统模态框「此应用无法在你的电脑上运行」。
+        // 与 platform.ts:isSpawnableBinary() 同一道闸(此处为向导页触发点)。
+        if (isWinPlatform && !/\.(exe|cmd|bat|com)$/i.test(candidate)) continue;
         try {
           let realPath: string;
           try { realPath = fs.realpathSync(candidate); } catch { realPath = candidate; }

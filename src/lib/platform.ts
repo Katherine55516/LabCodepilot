@@ -34,6 +34,22 @@ function needsShell(binPath: string): boolean {
   return isWindows && /\.(cmd|bat)$/i.test(binPath);
 }
 
+/**
+ * Windows 上该路径能否交给 execFileSync 直接拉起。
+ *
+ * 只有 .exe / .cmd / .bat 可以。**无扩展名的 `claude` 绝不可以** —— 那是安装器留给
+ * Git Bash 的 POSIX sh 脚本(npm 全局装会同时生成 claude.cmd + claude;在 Git Bash 里
+ * 跑官方 install.sh 则只装出无扩展名的那一个)，不是 PE 镜像。把它丢给 CreateProcessW
+ * 时 Windows 会弹出系统级模态框「此应用无法在你的电脑上运行」——由系统抛出，应用无法
+ * 捕获或抑制。用户线上实测:启动进主界面即弹(chat 页 → /api/setup → findClaudeBinary)，
+ * 关掉后功能正常(探测异常被 catch，最终用随包自带的 claude.exe)，但体验上是硬伤。
+ *
+ * 故所有会走到 execFileSync 的候选都必须先过这道闸。非 Windows 无扩展名即常态，放行。
+ */
+function isSpawnableBinary(p: string): boolean {
+  return !isWindows || /\.(exe|cmd|bat|com)$/i.test(p);
+}
+
 function readSysctlValue(name: string): string | null {
   try {
     return execFileSync('/usr/sbin/sysctl', ['-in', name], {
@@ -145,7 +161,9 @@ export function getClaudeCandidatePaths(): string[] {
   if (isWindows) {
     const appData = process.env.APPDATA || path.join(home, 'AppData', 'Roaming');
     const localAppData = process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local');
-    const exts = ['.cmd', '.exe', '.bat', ''];
+    // 不含无扩展名的 '' —— 见 isSpawnableBinary()。候选最终都会被 execFileSync
+    // 执行，无扩展名的 claude 是 sh 脚本，spawn 它必弹 Windows 系统错误框。
+    const exts = ['.cmd', '.exe', '.bat'];
     // Native first, then bun, then npm paths
     const baseDirs = [
       path.join(home, '.local', 'bin'),
@@ -235,9 +253,11 @@ export function findAllClaudeBinaries(): ClaudeInstallInfo[] {
       shell: false,
       encoding: 'utf-8',
     });
+    // where.exe 会把同目录下无扩展名的 claude(sh 脚本)一并列出，必须滤掉 ——
+    // tryAdd 会 execFileSync 它，spawn 非 PE 文件会弹 Windows 系统错误框。
     for (const line of result.trim().split(/\r?\n/)) {
       const candidate = line.trim();
-      if (candidate) tryAdd(candidate);
+      if (candidate && isSpawnableBinary(candidate)) tryAdd(candidate);
     }
   } catch {
     // which/where failed
@@ -353,11 +373,12 @@ function _findClaudeBinaryUncached(): string | undefined {
       env: { ...process.env, PATH: getExpandedPath() },
       shell: false,
     });
-    // where.exe may return multiple lines; try each with --version validation
+    // where.exe may return multiple lines; try each with --version validation.
+    // 无扩展名的候选先滤掉(见 isSpawnableBinary)，否则 spawn sh 脚本会弹系统错误框。
     const lines = result.toString().trim().split(/\r?\n/);
     for (const line of lines) {
       const candidate = line.trim();
-      if (!candidate) continue;
+      if (!candidate || !isSpawnableBinary(candidate)) continue;
       try {
         execFileSync(candidate, ['--version'], {
           timeout: TIMEOUT_MS,
