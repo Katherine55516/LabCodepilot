@@ -1,7 +1,7 @@
 # 沙箱定时任务（服务端调度 · 对标 Claude Routines）— 技术交接文档
 
 > **本文件的目标：读完这一份就能完整恢复上下文并无缝接上后续开发，不必回看会话记录。**
-> 最后更新：2026-08-05 · 分支 `scheduler` @ `aa94c2f`（P6 完成，**未推送**）
+> 最后更新：2026-08-05 · 分支 `scheduler` @ `6e5bbee`（P7 完成，**未推送**）
 > 执行计划（进度/决策/验收）：[docs/exec-plans/active/cowork-scheduled-routines.md](../exec-plans/active/cowork-scheduled-routines.md)
 > 调研与设计：[research/cowork-server-side-routines.md](../research/cowork-server-side-routines.md)（服务端实读 + 客户端设计）·
 > [research/cowork-scheduled-routines.md](../research/cowork-scheduled-routines.md)（Claude 三套调度辨析 + U1-U15 验收清单）
@@ -31,8 +31,8 @@
 | P4 | 客户端数据层 + 代理路由 | ✅ 完成（无 UI） |
 | P5 | 客户端同步与物化 | ✅ 完成（无 UI） |
 | P6 | 客户端 UI 三层 | ✅ 完成（含三语 i18n） |
-| **P7** | **创建入口（MCP / 存为定时）** | 📋 **下一步，见 §I** |
-| P8 | 加固与运维（配额/审计/手册） | 📋 |
+| P7 | 创建入口（MCP / 存为定时） | ✅ 完成 |
+| **P8** | **加固与运维（配额/审计/手册）** | 📋 **下一步** |
 | P9 | 端到端 + 双文档 + 打包验收 | 📋 |
 
 ## A.3 现在这个功能已经能干什么
@@ -46,12 +46,18 @@ agent 回合、产出文件、记录历史 —— 全程不需要任何客户端
 **界面也做完了**：侧边栏「文生图」下方的「定时任务」入口 → 三层导航（列表 / 详情+运行历史 / 某次运行的
 只读回放）。第三层直接复用现有聊天渲染，工具调用折叠、Markdown、产物下载全都现成。
 
-**还缺的是「怎么创建得更顺手」**：目前只能在定时任务页点「新建」。P7 补 MCP 工具（在办公对话里
-说一句就建）和「存为定时任务」（从现有会话固化）。
+**三条创建路径都通了**：定时任务页点「新建」/ 办公对话里说一句（`codepilot-routines` 五工具，
+只在办公会话注册）/ 办公会话顶栏「存为定时任务」（用最后一条指令预填）。
+
+⚠️ **本机定时任务工具已按用户决定下线**（`codepilot_schedule_task` 等三个）。它们建的任务跑在
+用户电脑上、关机就不跑，而那套界面早已隐藏 —— 与沙箱定时任务并存时模型会挑错，且挑错的表现是
+「已创建」而非报错。**两条通往模型的路径都删干净了**（MCP 与 native runtime 的 AI SDK 各一份），
+`routines-mcp.test.ts` 按路径列举锁住。引擎 `task-scheduler.ts` 与 `/api/tasks/*` 暂留（见 §L.2）。
 
 ## A.4 下一步
 
-**P7：创建入口（MCP 工具 + 存为定时任务）。** 具体怎么做见 §I，那一节是自足的施工说明。
+**P8：加固与运维**（per-uid 日配额落地、`routine_*` 审计进用量管线、OPERATIONS.md 章节），
+然后 P9 收尾。见 §J。
 
 ---
 
@@ -59,13 +65,16 @@ agent 回合、产出文件、记录历史 —— 全程不需要任何客户端
 
 | 仓库 | 分支 | HEAD | 与 GitHub |
 |---|---|---|---|
-| `LabCodepilot` | **`scheduler`**（本功能全部工作在这） | `aa94c2f` | ⬆️ 领先远端（P6 未推送） |
+| `LabCodepilot` | **`scheduler`**（本功能全部工作在这） | `6e5bbee` | ⬆️ 领先远端（P7 未推送） |
 | `LabCodepilot` | `para`（scheduler 的父分支） | `537173f` | 已同步 |
 | `codeagent-server` | `main` | `99c044d` | 已同步 |
 
 `scheduler` 从 `para` 拉出，本功能的 commit（新→旧）：
 
 ```
+6e5bbee feat(client): P7 定时任务创建入口 + 下线本机定时任务工具
+f4b9b65 / 1f77aff / 400cfac   （沙箱护栏,非本功能）
+f1fa1d7 docs(handover): 记录 P6 的 commit 引用
 aa94c2f feat(client): P6 定时任务界面 —— 侧边栏入口 + 三层导航
 0f79815 docs(handover): 更正 P5 的 commit 引用
 4ca3f31 feat(client): P5 定时任务同步与物化 —— 服务端运行变成本地会话
@@ -256,6 +265,8 @@ reaper 只认 WS 连接（`execOpened`/`execClosed`），而定时任务是服�
 | G10 | **远端命令里的 glob 会被远端 shell 展开** | `verify-deployment.sh` 拼 ssh 命令时必须 `printf '%q '` 转义模式，用 `%s` 会让 `.env*` / `*.log` 提前展开、find 静默失效 |
 | G11 | **`{0 && <X/>}` 会把 `0` 渲染出来** | `enabled` 是 SQLite 的 1/0 不是布尔。P6 的暂停卡片上因此多出两个孤零零的「0」，肉眼看才发现。写 `!!r.enabled &&` |
 | G12 | **中文文案要用全角标点** | app 既有 271 条中文文案用「，：（）」，新写的用了半角，混在一起很扎眼。写完扫一遍 |
+| G13 | **同一套工具可能有两份实现** | 下线本机定时任务时只删了 MCP 那份，以为干净了 —— native runtime 走的是 AI SDK 的 `tool()`，`builtin-tools/notification.ts` 里有**第二份**，模型在那条路径上照样能调。删工具/加工具都要按「通往模型的路径」而不是按文件核一遍 |
+| G14 | **读完即焚的数据要等确认用得上再读** | 「存为定时任务」的预填挂在 sessionStorage，早期在挂载时就取 —— 碰上未开通/离线（渲染的是空态、没有表单）草稿被静默吃掉，用户退回去也找不回来 |
 
 ---
 
@@ -491,6 +502,11 @@ curl -X POST http://localhost:3000/api/routines/sync   # 看 materialized / summ
 - 生产审计日志有 2 行 `r5probe` 的自检事件（G7），append-only 不修改，uid 一眼可辨
 - 生产 `/opt/cowork-server/` 下有两个 `.env.bak-*`（改配置时的备份，含密钥，已从漂移检测排除）
 - `docs/insights/cowork-scheduled-routines.md` 未写（P9 交付项，CLAUDE.md 强制要求与本文互链）
+- **本机定时任务的引擎与界面暂留**：模型已完全够不着（两条路径的工具都删了），但
+  `src/lib/task-scheduler.ts`、`/api/tasks/*` 七个路由、设置页 `AssistantWorkspaceSection`
+  与项目页 `TaskList` 仍在。`instrumentation.ts` 启动时仍 `ensureSchedulerRunning()`，
+  所以**存量任务仍会照常触发**。清这一层要动 UI，且 `useNotificationPoll` 轮询的
+  `/api/tasks/notify` 同时也是普通通知的送达路径（不只服务定时任务），不能一刀切 —— 单独做
 
 ## L.3 工作方式的一条约定（用户提出）
 改源码**默认用编辑工具**而不是 python/sed 脚本 —— 后者会绕过文件状态跟踪、可能静默失败
