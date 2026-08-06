@@ -1,7 +1,7 @@
 # 沙箱定时任务（服务端调度 · 对标 Claude Routines）— 技术交接文档
 
 > **本文件的目标：读完这一份就能完整恢复上下文并无缝接上后续开发，不必回看会话记录。**
-> 最后更新：2026-08-05 · 分支 `scheduler` @ `6e5bbee`（P7 完成，**未推送**）
+> 最后更新：2026-08-05 · 分支 `scheduler` @ `f43d264`（P8 完成，**未推送**）
 > 执行计划（进度/决策/验收）：[docs/exec-plans/active/cowork-scheduled-routines.md](../exec-plans/active/cowork-scheduled-routines.md)
 > 调研与设计：[research/cowork-server-side-routines.md](../research/cowork-server-side-routines.md)（服务端实读 + 客户端设计）·
 > [research/cowork-scheduled-routines.md](../research/cowork-scheduled-routines.md)（Claude 三套调度辨析 + U1-U15 验收清单）
@@ -32,8 +32,8 @@
 | P5 | 客户端同步与物化 | ✅ 完成（无 UI） |
 | P6 | 客户端 UI 三层 | ✅ 完成（含三语 i18n） |
 | P7 | 创建入口（MCP / 存为定时） | ✅ 完成 |
-| **P8** | **加固与运维（配额/审计/手册）** | 📋 **下一步** |
-| P9 | 端到端 + 双文档 + 打包验收 | 📋 |
+| P8 | 加固与运维（配额/审计/手册） | ✅ 完成 |
+| **P9** | **端到端 + 双文档 + 打包验收** | 📋 **下一步** |
 
 ## A.3 现在这个功能已经能干什么
 
@@ -56,8 +56,14 @@ agent 回合、产出文件、记录历史 —— 全程不需要任何客户端
 
 ## A.4 下一步
 
-**P8：加固与运维**（per-uid 日配额落地、`routine_*` 审计进用量管线、OPERATIONS.md 章节），
-然后 P9 收尾。见 §J。
+**P9：收尾。** 三件事：
+
+1. **端到端 + 打包态验收** —— 本地 dev 无登录体系、managed 数据为空，凭证链路必须**打包后登录**才完整
+2. **双文档**（CLAUDE.md 强制）：本文补完 + 写 `docs/insights/cowork-scheduled-routines.md` 并互相反链
+3. 决定 §L.1 里那几项未决
+
+⚠️ **服务端有未部署的改动**：P8 的 `cred_fetched` 审计与 P6 的配额字段（`dailyCap`/`usedToday`）
+都还没上生产。客户端对配额字段按可选处理，所以不部署也不会坏，只是界面不显示那块。
 
 ---
 
@@ -65,13 +71,15 @@ agent 回合、产出文件、记录历史 —— 全程不需要任何客户端
 
 | 仓库 | 分支 | HEAD | 与 GitHub |
 |---|---|---|---|
-| `LabCodepilot` | **`scheduler`**（本功能全部工作在这） | `6e5bbee` | ⬆️ 领先远端（P7 未推送） |
+| `LabCodepilot` | **`scheduler`**（本功能全部工作在这） | `f43d264` | ⬆️ 领先远端（P8 未推送） |
 | `LabCodepilot` | `para`（scheduler 的父分支） | `537173f` | 已同步 |
-| `codeagent-server` | `main` | `99c044d` | 已同步 |
+| `codeagent-server` | `main` | `51d5141` | ⬆️ 领先远端（P8 的归属修复未推送） |
 
 `scheduler` 从 `para` 拉出，本功能的 commit（新→旧）：
 
 ```
+f43d264 feat(cowork-server): P8 加固 —— cred_fetched + 归属契约 + 运维手册
+abf2478 docs: P7 完成收口
 6e5bbee feat(client): P7 定时任务创建入口 + 下线本机定时任务工具
 f4b9b65 / 1f77aff / 400cfac   （沙箱护栏,非本功能）
 f1fa1d7 docs(handover): 记录 P6 的 commit 引用
@@ -267,6 +275,7 @@ reaper 只认 WS 连接（`execOpened`/`execClosed`），而定时任务是服�
 | G12 | **中文文案要用全角标点** | app 既有 271 条中文文案用「，：（）」，新写的用了半角，混在一起很扎眼。写完扫一遍 |
 | G13 | **同一套工具可能有两份实现** | 下线本机定时任务时只删了 MCP 那份，以为干净了 —— native runtime 走的是 AI SDK 的 `tool()`，`builtin-tools/notification.ts` 里有**第二份**，模型在那条路径上照样能调。删工具/加工具都要按「通往模型的路径」而不是按文件核一遍 |
 | G14 | **读完即焚的数据要等确认用得上再读** | 「存为定时任务」的预填挂在 sessionStorage，早期在挂载时就取 —— 碰上未开通/离线（渲染的是空态、没有表单）草稿被静默吃掉，用户退回去也找不回来 |
+| G15 | 🔴 **审计 `detail` 必须以 uid 开头** | 账号后端按这条解析用量归属（`usage_service.parse_audit_line`）。routine_* 写成 `"<uid> success"` 而原规则要求**整串**是 uid，于是四个事件里三个落成 `uid=NULL` —— **不报错**，只是用量后台里定时任务那部分永远是空的。已在解析侧放宽 + `selftest-r5` 第 5 组按源码锁死 |
 
 ---
 
@@ -288,6 +297,8 @@ reaper 只认 WS 连接（`execOpened`/`execClosed`），而定时任务是服�
 | `selftest-r5.mjs` | **37 项**，不清场，可在生产跑 |
 | `deploy/install.sh` | **改**：建 state 目录并 chown（G6） |
 | `deploy/verify-deployment.sh` | 部署漂移检测（开发机跑） |
+| `deploy/OPERATIONS.md` | **P8 改**：新增第 10 章「定时任务」+ 补 §1/§3/§5。运维在服务器上直接读的 runbook |
+| `selftest-r5.mjs` | **P8 改**：加第 5 组「审计归属契约」12 项 |
 
 ### 服务端 REST（uid 从 HMAC token 取，跨用户一律 404）
 ```
@@ -436,7 +447,7 @@ listCoworkRoutines() / getCoworkRoutine(id) / replaceCoworkRoutines(rows) / purg
 
 | 阶段 | 要点 |
 |---|---|
-| **P8** 加固 | per-uid 日配额已在 store 备好（`countRunsSince`，刻意排除 skipped 防自锁死）；补 `routine_*` 审计进用量管线、`OPERATIONS.md` 章节 |
+| ~~**P8** 加固~~ | ✅ 已完成。配额与自动停用 P3 就做了；本阶段真活是**审计归属 bug**（见 §G15）+ `cred_fetched` + OPERATIONS.md 第 10 章 |
 | **P9** 收尾 | 端到端 + **双文档**（本文件补完 + `docs/insights/cowork-scheduled-routines.md` 并互相反链）+ **打包态验收**（本地 dev 无登录体系、managed 数据为空，凭证链路必须打包后登录才完整） |
 
 ---

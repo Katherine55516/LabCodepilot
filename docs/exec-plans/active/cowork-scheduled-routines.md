@@ -24,7 +24,7 @@
 | P5 | 客户端同步与物化 | LabCodepilot | ✅ 完成 | 端到端留 P9 打包态验 |
 | P6 | 客户端 UI 三层 | LabCodepilot | ✅ 完成 | 含三语 i18n（原属 P7）|
 | P7 | 创建入口（MCP / 存为定时）| LabCodepilot | ✅ 完成 | 顺带下线本机定时任务工具（用户决定）|
-| P8 | 加固与运维（配额 / 审计 / selftest / 手册） | cowork-server | 📋 待开始 | 依赖 P3 |
+| P8 | 加固与运维（配额 / 审计 / selftest / 手册） | cowork-server | ✅ 完成 | 配额与自动停用 P3 已做；本阶段真活是**审计归属 bug** + 手册 |
 | P9 | 端到端联调 + 双文档 + 打包验收 | 全部 | 📋 待开始 | 依赖全部 + P1 |
 
 ### 依赖与并行
@@ -446,15 +446,46 @@ GET        /runs/:runId/transcript
 
 ---
 
-## P8 · 加固与运维
+## P8 · 加固与运维 — ✅ 已完成（2026-08-05）
 
-| 内容 | 说明 |
+| 内容 | 结果 |
 |---|---|
-| per-uid 日配额 | 20 次/天（D8）；超出的运行记 `skipped` 并注明原因，**不静默丢** |
-| 连续失败自动停用 | 10 次（D11） |
-| `routine_*` 审计事件 | `routine_fire` / `routine_end` / `cred_fetched`（只记 uid，绝不记 key）→ 自动流进账号后端已有的用量拉取管线 |
-| `selftest-r5.mjs` | 调度触发 / 401 快失败 / 超时 kill / 并发上限 / 跨用户 404 / 凭证用后即废 / reconcile 不误删 routine |
-| `deploy/OPERATIONS.md` | 补「定时任务」章：配置项、排障、配额调整、状态目录位置 |
+| per-uid 日配额 | ✅ **P3 就做了**（`countRunsSince` 刻意排除 skipped 防自锁死）；本阶段只是核实 |
+| 连续失败自动停用 | ✅ **P3 就做了**（10 次，`disabledReason` 落位） |
+| `routine_*` 审计事件 | ⚠️ **发现真 bug 并修复**，见下 |
+| `cred_fetched` | ✅ 补上（计划里点名要有，此前一直没实现） |
+| `selftest-r5.mjs` | ✅ 加第 5 组「审计归属契约」12 项 |
+| `deploy/OPERATIONS.md` | ✅ 新增第 10 章 + 补 §1/§3/§5 |
+
+### 🔴 本阶段发现的真问题：定时任务的审计事件归不到人头
+
+沙箱的审计事件靠 `detail` 归属到用户，而账号后端的解析规则要求 **`detail` 整串就是 uid**
+（`_UUID_RE` 全串锚定）。定时任务的事件把状态附在后面写成 `"<uid> success"`，于是
+`routine_fire` / `routine_end` / `routine_create` 三个事件**全部落成 `uid=NULL`** ——
+归不到人头、JOIN 不到用户名、在用户维度聚合里整个消失。
+
+**它不报错**，只是数据默默不全：用量后台看起来正常，只是定时任务那部分永远是空的。
+
+修法是**在解析侧放宽**成「`detail` 以 uid 开头即归属」，而不是让沙箱端砍掉状态字段 ——
+状态（`success` / `credential_error:xxx` / `timeout`）是排障时最有用的信息。对既有的裸 uid
+事件完全向后兼容。（`codeagent-server` @ `51d5141`）
+
+顺带给聚合加了 routine 口径（`overview.today_routine_runs`、`per_user.routine_runs_*`、
+`per_session.routine_runs`），**刻意不并进 `turns`**：那个口径一直是「用户手动发起的交互
+回合」，混进无人值守的自动运行会让「今天用得多不多」失真。`per_session` 尤其需要——routine
+只发 `routine_fire` 不发 `exec_start`，不单独计的话时间轴里会出现一批 `turns=0` 的行。
+
+### 验收
+- 账号后端 157 passed（新增 2 项解析测试）；ruff 回到改动前基线
+- `selftest-r5.mjs` 可跑部分 29 passed（较改动前净增 12）。⚠️ REST/reconcile 两组需要
+  Docker daemon，开发机没起时跑不了——**已 stash 比对确认改动前后同样跑不了**，不是回归
+- OPERATIONS.md 里写的 9 个环境变量名与默认值、skipReason 取值、启动日志格式、
+  `routine-once.mjs` 参数，逐个核过源码
+
+### 未做（留 P9 或单独）
+- 用量后台**前端**还没展示新增的 routine 字段（响应是裸 dict，加字段向后兼容，UI 更新前只是不显示）
+- 本机旧定时任务的引擎与界面（`task-scheduler.ts` / `/api/tasks/*` / 两处 UI）仍在，
+  模型已够不着（P7 删了工具），清理单独做
 
 ---
 
