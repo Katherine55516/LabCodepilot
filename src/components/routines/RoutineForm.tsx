@@ -45,6 +45,7 @@ export function RoutineForm({
   onSubmit,
   onCancel,
   presetPrompt,
+  presetName,
 }: {
   /** 给了就是编辑,不给就是新建 */
   routine?: CoworkRoutine;
@@ -53,11 +54,13 @@ export function RoutineForm({
   submitting?: boolean;
   onSubmit: (p: RoutinePayload) => void;
   onCancel: () => void;
-  /** 「存为定时任务」带过来的预填指令(P7 用) */
+  /** 「存为定时任务」带过来的预填指令(P7) */
   presetPrompt?: string;
+  /** 同上,预填任务名(取自原会话标题) */
+  presetName?: string;
 }) {
   const { t } = useTranslation();
-  const [name, setName] = useState(routine?.name || "");
+  const [name, setName] = useState(routine?.name || presetName || "");
   const [description, setDescription] = useState(routine?.description || "");
   const [prompt, setPrompt] = useState(routine?.prompt || presetPrompt || "");
   // '' = 跟随账号配置的第一个(D9)。服务端本来就这么兜底,所以这里留空是**正确的默认**,

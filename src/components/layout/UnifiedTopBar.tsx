@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useCallback, useEffect, useRef } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   GitBranch,
   TreeStructure,
@@ -10,6 +10,7 @@ import {
   DotOutline,
   ChartBar,
   Brain,
+  Clock,
 } from "@/components/ui/icon";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -23,6 +24,8 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { useClientPlatform } from '@/hooks/useClientPlatform';
 import { showToast } from '@/hooks/useToast';
 import { SPECIES_IMAGE_URL, EGG_IMAGE_URL, type Species } from '@/lib/buddy';
+import { stashRoutineDraft, stripFileMeta } from '@/lib/routine-draft';
+import type { TranslationKey } from '@/i18n';
 
 export function UnifiedTopBar() {
   const {
@@ -46,7 +49,28 @@ export function UnifiedTopBar() {
     gitDirtyCount,
   } = usePanel();
   const { t } = useTranslation();
+  const router = useRouter();
   const { isWindows } = useClientPlatform();
+
+  /**
+   * 「存为定时任务」:取本次会话的**最后一条用户指令**作为预填,跳到新建表单。
+   *
+   * 预填走 sessionStorage 而不是 URL 参数 —— 指令动辄几百字,塞进 URL 既难看又可能超长;
+   * 而且它只是「这一次跳转」的临时数据,不该留在地址栏里被复制传播。
+   */
+  const saveSessionAsRoutine = useCallback(async (sid: string, title: string) => {
+    try {
+      const res = await fetch(`/api/chat/sessions/${sid}/messages?limit=200`);
+      const data = res.ok ? await res.json() : { messages: [] };
+      const lastUser = [...(data.messages || [])].reverse()
+        .find((m: { role: string; content: string }) => m.role === 'user');
+      // 取不到就跳空表单 —— 比拦下来报错好:用户本来就可以自己写
+      stashRoutineDraft({ prompt: stripFileMeta(lastUser?.content || ''), name: title || '' });
+    } catch {
+      stashRoutineDraft({ prompt: '', name: title || '' });
+    }
+    router.push('/routines?new=1');
+  }, [router]);
   const [assistantName, setAssistantName] = useState('');
   const [buddyEmoji, setBuddyEmoji] = useState('');
   const [buddySpecies, setBuddySpecies] = useState('');
@@ -226,6 +250,29 @@ export function UnifiedTopBar() {
           className="flex items-center gap-1"
           style={{ WebkitAppRegion: 'no-drag' } as React.CSSProperties}
         >
+          {/* P7:办公会话的「存为定时任务」——从现有对话固化。
+              这条路径的价值在于**时机**:用户刚看到满意的结果,正是「以后每天都这样」
+              的念头最强的时刻,而这时让他去侧边栏另起一个新建表单、把指令重打一遍,
+              念头就凉了。点它带着本次会话的最后一条指令跳到新建表单,原会话不受影响。 */}
+          {isChatRoute && isOfficeSession && sessionId && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 gap-1 px-1.5 text-muted-foreground hover:text-foreground"
+                  onClick={() => saveSessionAsRoutine(sessionId, sessionTitle)}
+                >
+                  <Clock size={16} />
+                  <span className="text-xs">{t('routines.saveAsRoutine' as TranslationKey)}</span>
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>
+                <p className="text-xs">{t('routines.saveAsRoutineHint' as TranslationKey)}</p>
+              </TooltipContent>
+            </Tooltip>
+          )}
+
           {/* E4 (cowork): 办公会话隐藏全部研发面板按钮(Git/文件树/任务/看板)
               —— 面板本体已由 AppShell 的 PanelZone gate 压制,按钮同步消失。 */}
           {isChatRoute && !isOfficeSession && (

@@ -3069,6 +3069,8 @@ const en = {
 
   // ── Scheduled routines (server-side, runs in the sandbox) ──
   'routines.sidebarButton': 'Scheduled Tasks',
+  'routines.saveAsRoutine': 'Save as scheduled task',
+  'routines.saveAsRoutineHint': "Create a scheduled task from this conversation's last instruction — this conversation is unchanged",
   'routines.title': 'Scheduled Tasks',
   'routines.edit': 'Edit',
   'routines.refresh': 'Refresh',

@@ -1151,7 +1151,7 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
           }
         }
 
-        // Notification + Schedule MCP: globally available in all contexts
+        // Notification MCP: globally available in all contexts
         {
           const { createNotificationMcpServer, NOTIFICATION_MCP_SYSTEM_PROMPT } =
             await import('@/lib/notification-mcp');
@@ -1161,6 +1161,22 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
           };
           if (queryOptions.systemPrompt && typeof queryOptions.systemPrompt === 'object' && 'append' in queryOptions.systemPrompt) {
             queryOptions.systemPrompt.append = (queryOptions.systemPrompt.append || '') + '\n\n' + NOTIFICATION_MCP_SYSTEM_PROMPT;
+          }
+        }
+
+        // Routines MCP (P7): 沙箱定时任务的管理工具,**只在办公会话注册**。
+        // 研发会话没有沙箱,建了也跑不了 —— 与其让模型建一个必然失败的任务,不如它压根看不见。
+        //
+        // 内置的 codepilot-* in-process 服务器跑在**宿主侧**的 SDK 控制通道上,所以沙箱回合
+        // 照样可用(与上面被丢弃的外部 stdio MCP 不同,见 E1 那段注释)。
+        if (coworkActive) {
+          const { createRoutinesMcpServer, ROUTINES_MCP_SYSTEM_PROMPT } = await import('@/lib/routines-mcp');
+          queryOptions.mcpServers = {
+            ...(queryOptions.mcpServers || {}),
+            'codepilot-routines': createRoutinesMcpServer(),
+          };
+          if (queryOptions.systemPrompt && typeof queryOptions.systemPrompt === 'object' && 'append' in queryOptions.systemPrompt) {
+            queryOptions.systemPrompt.append = (queryOptions.systemPrompt.append || '') + '\n\n' + ROUTINES_MCP_SYSTEM_PROMPT;
           }
         }
 

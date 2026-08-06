@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowClockwise, CaretRight, Clock, WarningCircle } from "@/components/ui/icon";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
@@ -9,6 +9,7 @@ import { showToast } from "@/hooks/useToast";
 import type { CoworkRoutine, RoutineRun } from "@/types";
 import { cn } from "@/lib/utils";
 import { formatDateTime } from "@/lib/routine-ui";
+import { takeRoutineDraft, type RoutineDraft } from "@/lib/routine-draft";
 import { RoutineList } from "./RoutineList";
 import { RoutineDetail } from "./RoutineDetail";
 import { RoutineRunView } from "./RoutineRunView";
@@ -56,6 +57,8 @@ export function RoutinePanel() {
   const [loadingRuns, setLoadingRuns] = useState(false);
   const [sessionByRun, setSessionByRun] = useState<Record<string, string>>({});
   const [models, setModels] = useState<ModelOption[]>([]);
+  // 从办公对话「存为定时任务」跳过来时的预填(P7)。读完即焚,见 routine-draft.ts。
+  const [draft, setDraft] = useState<RoutineDraft | null>(null);
 
   const current = useMemo(
     () => routines.find((r) => "id" in view && r.id === (view as { id: string }).id),
@@ -87,6 +90,22 @@ export function RoutinePanel() {
   }, []);
 
   useEffect(() => { void loadList(); }, [loadList]);
+
+  // 「存为定时任务」跳转:带着草稿直接落到新建表单,用户不必再点一次「新建」。
+  //
+  // ⚠️ 必须**等列表加载完、且确实能用**再取 —— `takeRoutineDraft` 是读完即焚的。
+  // 挂载时就取的话,碰上未开通/离线(此时渲染的是空态,根本没有表单)草稿就被静默吃掉了,
+  // 用户退回去再点也找不回来,只能重打一遍指令。
+  const draftTaken = useRef(false);
+  useEffect(() => {
+    if (draftTaken.current || loading || notProvisioned) return;
+    draftTaken.current = true;
+    const d = takeRoutineDraft();
+    if (d) {
+      setDraft(d);
+      setView({ kind: "create" });
+    }
+  }, [loading, notProvisioned]);
 
   // 进页面就拉一次服务端的新运行并物化(D14:不推送,回来汇总)。
   // 失败静默:同步是后台动作,连不上沙箱时列表还有本地缓存可看。
@@ -304,6 +323,8 @@ export function RoutinePanel() {
             routine={view.kind === "edit" ? current : undefined}
             models={models}
             submitting={submitting}
+            presetPrompt={view.kind === "create" ? draft?.prompt : undefined}
+            presetName={view.kind === "create" ? draft?.name : undefined}
             onSubmit={submit}
             onCancel={() =>
               setView(view.kind === "edit" ? { kind: "detail", id: view.id } : { kind: "list" })

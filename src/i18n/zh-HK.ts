@@ -3070,6 +3070,8 @@ const zhHK: Record<TranslationKey, string> = {
 
   // ── 定時任務(沙箱伺服器端排程)──
   'routines.sidebarButton': '定時任務',
+  'routines.saveAsRoutine': '存為定時任務',
+  'routines.saveAsRoutineHint': '用這次對話的最後一條指令新增一個定時任務，原對話不受影響',
   'routines.title': '定時任務',
   'routines.edit': '編輯',
   'routines.refresh': '重新整理',

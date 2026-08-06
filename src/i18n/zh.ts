@@ -3061,6 +3061,8 @@ const zh: Record<TranslationKey, string> = {
 
   // ── 定时任务(沙箱服务端调度)──
   'routines.sidebarButton': '定时任务',
+  'routines.saveAsRoutine': '存为定时任务',
+  'routines.saveAsRoutineHint': '用这次对话的最后一条指令新建一个定时任务，原对话不受影响',
   'routines.title': '定时任务',
   'routines.edit': '编辑',
   'routines.refresh': '刷新',

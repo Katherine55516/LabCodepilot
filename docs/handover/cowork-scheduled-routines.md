@@ -247,7 +247,7 @@ reaper 只认 WS 连接（`execOpened`/`execClosed`），而定时任务是服�
 | G1 | **`result.subtype` 是陷阱** | 401 全程失败的回合，最后一条仍是 `subtype:"success"`。判定必须用 `exitCode===0 && !is_error && api_error_status==null`，**绝不读 subtype** |
 | G2 | **坏凭证不快速失败** | 401 触发 10 次指数退避，实测烧 **181 秒**。runner 见首条 `api_retry(401)` 立即 kill（实测降到 3 秒）。非 401 的 retry（429/5xx）**放行** |
 | G3 | **`--` 之后不能再写 claude 二进制路径** | `cowork-shim.py` 自己会 `Popen([CLAUDE_BIN] + argv)`。多写一次会让它变成第一个位置参数，而 `-p` 是布尔开关、prompt 走位置参数 → 路径成了 prompt，用户指令被丢掉。**回合照样 exit=0 / success / 花掉 $0.39**，只有读输出才发现 |
-| G4 | **必须走 shim** | 绕开直连 claude 会丢掉全部 5 个办公 skill（实测 14 vs 19）。HOME 是 tmpfs，skill 靠 shim 每次启动软链 |
+| G4 | **必须走 shim** | 绕开直连 claude 会丢掉全部 5 个办公 skill（实测 14 vs 19），skill 靠 shim 每次启动软链。⚠️ 2026-08-05 `400cfac` 后 HOME **已从 tmpfs 换成持久状态卷**（TTL 回收会清空 tmpfs，导致 `--resume` 必挂）——本条早前写的「HOME 是 tmpfs」已作废，但「必须走 shim」不变 |
 | G5 | **账号的角色模型不会自动过河** | 首次端到端跑在容器内置默认模型上（账号配的是 `qwen3.7-max[1m]`，实际跑 `claude-opus-4-8[1m]`），网关恰好放行所以没报错。已注入 `ANTHROPIC_DEFAULT_{OPUS,SONNET,HAIKU}_MODEL` 等 |
 | G6 | **`/data` 是 root:root，服务非 root 跑** | `ensureStateDir()` EACCES → 服务一切正常但**定时任务永远不触发**。`install.sh` 已建目录并 chown；`index.mjs` 该失败改为显式吼两行 |
 | G7 | **自检会污染生产审计日志** | `audit.mjs` 在**模块加载时**读 `COWORK_AUDIT_FILE`，必须在任何 import 之前设。曾写进去 2 行 `r5probe` 事件（已留档不改，append-only） |
