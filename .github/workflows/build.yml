@@ -182,6 +182,16 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # electron:build 链里的 scripts/bundle-vfkit.mjs 需要本机有带
+      # com.apple.security.virtualization entitlement 的 vfkit(Cowork 沙箱靠它起
+      # Virtualization.framework),缺了直接 exit 1 —— 该脚本刻意 fail-hard,因为
+      # 没有 entitlement 的包沙箱起不来,宁可构建失败也不静默出坏包。runner 不预装
+      # vfkit,故显式安装;homebrew-core 有 bottle(31.9MB),自带该 entitlement。
+      # 注:此步缺失导致 build-macos 自 24a849f(2026-07-14)起从未成功跑通,
+      # 期间所有 dispatch 都只选了 windows/skip 掉 macOS,故一直未暴露。
+      - name: Install vfkit (required by bundle-vfkit.mjs)
+        run: brew install vfkit
+
       - name: Build Electron app
         run: npm run electron:build
 
