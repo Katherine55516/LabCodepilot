@@ -218,7 +218,8 @@ async function materializeRun(
 function buildSummary(r: RoutineSyncResult): string | null {
   if (r.materialized === 0) return null;
 
-  const parts = [`定时任务:你不在时跑了 ${r.materialized} 次`];
+  // 全角标点:这句是直接弹给用户看的(app 内中文文案统一全角,P6 校过一轮,这里当时漏了)
+  const parts = [`定时任务：你不在时跑了 ${r.materialized} 次`];
   const tally: string[] = [];
   if (r.succeeded) tally.push(`${r.succeeded} 成功`);
   if (r.failed) tally.push(`${r.failed} 失败`);
@@ -228,7 +229,7 @@ function buildSummary(r: RoutineSyncResult): string | null {
   const first = r.failures[0];
   if (first) {
     const reason = first.reason.length > 40 ? first.reason.slice(0, 40) + '…' : first.reason;
-    parts.push(`${first.routineName}:${reason}`);
+    parts.push(`${first.routineName}：${reason}`);
   }
 
   return parts.join(' · ');
