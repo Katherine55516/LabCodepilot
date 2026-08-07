@@ -49,7 +49,7 @@ export const IMAGE_SIZE = 3221225472;
 export const IMAGE_SPARSE_SIZE = 8 * 1024 ** 3;
 
 // ── claude binary manifest(与宿主 SDK 同版本;单测锁 package.json)──
-export const CLAUDE_SDK_VERSION = '0.3.203';
+export const CLAUDE_SDK_VERSION = '0.3.221';
 export const CLAUDE_PLATFORM_PKG = '@anthropic-ai/claude-agent-sdk-linux-arm64';
 export const CLAUDE_REGISTRIES = ['https://registry.npmmirror.com', 'https://registry.npmjs.org'];
 

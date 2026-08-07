@@ -1540,6 +1540,9 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
             }
             contentBlocks.push({ type: 'text', text: textWithImageRefs });
 
+            // SDK 0.3.221 起 origin 缺省不再视为人类输入,而是"未归因"并在
+            // isHuman() 信任门控处 fail-closed。纯文本 prompt 由 CLI 自己包装,
+            // 只有这条手工构造的消息需要显式打标。
             const userMessage: SDKUserMessage = {
               type: 'user',
               message: {
@@ -1548,6 +1551,7 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
               },
               parent_tool_use_id: null,
               session_id: sdkSessionId || '',
+              origin: { kind: 'human' },
             };
 
             return (async function* () {
