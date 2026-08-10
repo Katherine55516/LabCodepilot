@@ -9,7 +9,7 @@ import { VmArtifactsCard } from "@/components/chat/VmArtifactsCard";
 import { useTranslation } from "@/hooks/useTranslation";
 import type { Message, MessagesResponse, RoutineRun, VmArtifactFile } from "@/types";
 import { cn } from "@/lib/utils";
-import { formatCost, formatDateTime, formatDuration, runStatusText, runTone } from "@/lib/routine-ui";
+import { formatDateTime, formatDuration, runStatusText, runTone } from "@/lib/routine-ui";
 
 const BANNER_TONE = {
   ok: "border-status-success-border bg-status-success-muted text-status-success-foreground",
@@ -109,7 +109,7 @@ export function RoutineRunView({
           runStatusText(run, tt),
           formatDateTime(run.startedAt),
           run.durationMs != null ? formatDuration(run.durationMs) : "",
-          run.costUsd != null ? formatCost(run.costUsd) : "",
+          // 成本对用户不展示(产品决策):后端仍记 costUsd,只是不出现在界面上。
           run.model || "",
         ].filter(Boolean).join(" · ")}
         {run.status !== "success" && run.error && (

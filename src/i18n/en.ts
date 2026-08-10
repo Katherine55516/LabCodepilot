@@ -3154,7 +3154,6 @@ const en = {
   'routines.detail.colTime': 'Time',
   'routines.detail.colStatus': 'Status',
   'routines.detail.colDuration': 'Duration',
-  'routines.detail.colCost': 'Cost',
   'routines.detail.colResult': 'Result',
 
   'routines.run.success': 'Success',

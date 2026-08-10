@@ -3155,7 +3155,6 @@ const zhHK: Record<TranslationKey, string> = {
   'routines.detail.colTime': '時間',
   'routines.detail.colStatus': '狀態',
   'routines.detail.colDuration': '耗時',
-  'routines.detail.colCost': '成本',
   'routines.detail.colResult': '結果',
 
   'routines.run.success': '成功',

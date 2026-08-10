@@ -8,7 +8,7 @@ import type { TranslationKey } from "@/i18n";
 import type { CoworkRoutine, RoutineRun } from "@/types";
 import { cn } from "@/lib/utils";
 import {
-  describeSchedule, formatCost, formatDateTime, formatDuration,
+  describeSchedule, formatDateTime, formatDuration,
   routineBadge, runResultText, runStatusText, runTone,
 } from "@/lib/routine-ui";
 import { StatusChip } from "./StatusChip";
@@ -139,7 +139,7 @@ export function RoutineDetail({
                   <th className="px-3 py-2 text-left font-medium">{t("routines.detail.colTime")}</th>
                   <th className="px-3 py-2 text-left font-medium">{t("routines.detail.colStatus")}</th>
                   <th className="px-3 py-2 text-right font-medium">{t("routines.detail.colDuration")}</th>
-                  <th className="px-3 py-2 text-right font-medium">{t("routines.detail.colCost")}</th>
+                  {/* 成本列已按产品决策移除:后端仍记 costUsd,只是不给用户看。 */}
                   <th className="px-3 py-2 text-left font-medium">{t("routines.detail.colResult")}</th>
                 </tr>
               </thead>
@@ -164,9 +164,6 @@ export function RoutineDetail({
                       </td>
                       <td className="whitespace-nowrap px-3 py-2 text-right font-mono text-muted-foreground">
                         {formatDuration(run.durationMs)}
-                      </td>
-                      <td className="whitespace-nowrap px-3 py-2 text-right font-mono text-muted-foreground">
-                        {formatCost(run.costUsd)}
                       </td>
                       <td className={cn("px-3 py-2", tone === "err" && "text-status-error-foreground")}>
                         <span className="line-clamp-1">{runResultText(run, tt)}</span>
