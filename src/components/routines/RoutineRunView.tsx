@@ -5,8 +5,9 @@ import { ArrowLeft, ArrowRight } from "@/components/ui/icon";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
 import { MessageList } from "@/components/chat/MessageList";
+import { VmArtifactsCard } from "@/components/chat/VmArtifactsCard";
 import { useTranslation } from "@/hooks/useTranslation";
-import type { Message, MessagesResponse, RoutineRun } from "@/types";
+import type { Message, MessagesResponse, RoutineRun, VmArtifactFile } from "@/types";
 import { cn } from "@/lib/utils";
 import { formatCost, formatDateTime, formatDuration, runStatusText, runTone } from "@/lib/routine-ui";
 
@@ -27,6 +28,7 @@ const BANNER_TONE = {
  */
 export function RoutineRunView({
   run,
+  routineId,
   sessionId,
   hasPrev,
   hasNext,
@@ -34,6 +36,8 @@ export function RoutineRunView({
   onNext,
 }: {
   run: RoutineRun;
+  /** 任务 id —— 同时也是沙箱侧的 sid,产物按它取(工作区归任务所有,不归某一次运行)。 */
+  routineId: string;
   /** 本地物化会话 id。没有就说明还没同步下来 */
   sessionId: string;
   hasPrev: boolean;
@@ -46,8 +50,21 @@ export function RoutineRunView({
   // 这样 effect 里不需要同步 setState(会引发级联渲染,eslint 也拦),而且切换
   // 上一次/下一次时不会出现"新运行的界面上短暂显示上一次的消息"。
   const [result, setResult] = useState<{ sessionId: string; messages: Message[]; error: string } | null>(null);
+  // 产物按**任务**取而不是按某次运行:工作区是任务独占且跨运行累积的(D2),
+  // 昨天生成的文件今天还在。所以切换「上一次/下一次」时这一份不需要重拉。
+  const [artifacts, setArtifacts] = useState<VmArtifactFile[]>([]);
   const tone = runTone(run.status);
   const tt = t as (k: string, p?: Record<string, string | number>) => string;
+
+  useEffect(() => {
+    if (!routineId) return;
+    let cancelled = false;
+    fetch(`/api/routines/${routineId}/artifacts?list=1`)
+      .then((r) => (r.ok ? r.json() : { files: [] }))
+      .then((d: { files?: VmArtifactFile[] }) => { if (!cancelled) setArtifacts(d.files || []); })
+      .catch(() => { /* 拿不到产物不该影响回放本身 */ });
+    return () => { cancelled = true; };
+  }, [routineId]);
 
   const settled = result?.sessionId === sessionId ? result : null;
   const loading = !!sessionId && !settled;
@@ -100,7 +117,20 @@ export function RoutineRunView({
         )}
       </div>
 
-      <div className="min-h-0 flex-1 overflow-hidden">
+      {/* 🔴 必须是 flex 容器:`MessageList` 内部的 `<Conversation>` 是 `flex-1`,
+          放进非 flex 的父级里 `flex-1` 不生效 → 高度塌陷 → 整个回放滚不动
+          (内容超出一屏就再也看不到后半截)。
+          `relative` 给产物浮窗(absolute right-3 top-3)当定位父级。 */}
+      <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+        {/* 产物浮窗:定时任务跑出来的文件在这里下载。工作区归**任务**所有,
+            所以即使这一次运行没产出文件,之前累积的也列得出来。 */}
+        {artifacts.length > 0 && (
+          <VmArtifactsCard
+            sessionId={routineId}
+            files={artifacts}
+            endpointBase={`/api/routines/${encodeURIComponent(routineId)}/artifacts`}
+          />
+        )}
         {/* 「还没同步」要判在 loading 前面:没有本地会话时上面的 effect 直接返回,
             loading 会停在上一次的值,判在后面就可能一直转圈。 */}
         {!sessionId ? (

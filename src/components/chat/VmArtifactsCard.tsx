@@ -14,6 +14,12 @@ interface VmArtifactsCardProps {
   vmOnline?: boolean;
   /** 本会话调用过的 skill(已按名聚合计数,来源见 ChatView 三源合并)。 */
   skillsUsed?: Array<{ skill: string; count: number }>;
+  /**
+   * 产物接口的 base。定时任务的工作区挂在 routineId 名下、不在 chat_sessions 里,
+   * 走的是另一条按 `cowork_routines.owner_uid` 校验的路由,故此处可覆盖。
+   * 带不带 query 都行 —— 连接符由下面按有无 `?` 自动选。
+   */
+  endpointBase?: string;
 }
 
 /** 折叠偏好跨会话记住(全局,不分会话 —— 这是用户的界面习惯,不是会话状态)。 */
@@ -36,7 +42,7 @@ function formatSize(bytes: number): string {
  * 下载走受控 fetch(不用裸 <a download>):VM 休眠时下载接口会先唤醒 VM
  * (数秒冷启动),期间给对应条目转圈动画,避免"点了没反应像卡死"的困惑。
  */
-export function VmArtifactsCard({ sessionId, files, vmOnline = true, skillsUsed = [] }: VmArtifactsCardProps) {
+export function VmArtifactsCard({ sessionId, files, vmOnline = true, skillsUsed = [], endpointBase }: VmArtifactsCardProps) {
   const { t } = useTranslation();
   // 正在下载的 key 集合('__all__' 表示整包下载)。
   const [busy, setBusy] = useState<Set<string>>(new Set());
@@ -102,9 +108,10 @@ export function VmArtifactsCard({ sessionId, files, vmOnline = true, skillsUsed 
     }
   };
 
-  const fileUrl = (p: string) =>
-    `/api/cowork/artifacts?sessionId=${encodeURIComponent(sessionId)}&path=${encodeURIComponent(p)}`;
-  const archiveUrl = `/api/cowork/artifacts?sessionId=${encodeURIComponent(sessionId)}&archive=1`;
+  const base = endpointBase ?? `/api/cowork/artifacts?sessionId=${encodeURIComponent(sessionId)}`;
+  const sep = base.includes('?') ? '&' : '?';
+  const fileUrl = (p: string) => `${base}${sep}path=${encodeURIComponent(p)}`;
+  const archiveUrl = `${base}${sep}archive=1`;
 
   // 折叠态:只剩一个角落小按钮,点击展开。计数只显示**文件数**(用户决策;
   // 技能数展开可见),仅有技能、尚无产物时不显示数字。

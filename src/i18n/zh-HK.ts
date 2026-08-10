@@ -3104,6 +3104,7 @@ const zhHK: Record<TranslationKey, string> = {
   'routines.form.namePlaceholder': '例如：每日銷售日報',
   'routines.form.model': '模型',
   'routines.form.modelDefault': '預設（跟隨帳號設定）',
+  'routines.form.multimodal': '（多模態）',
   'routines.form.description': '描述',
   'routines.form.descriptionHint': '（選填，顯示在列表裡）',
   'routines.form.prompt': '指令',

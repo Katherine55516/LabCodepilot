@@ -23,13 +23,28 @@ export interface RoutinePayload {
   description: string;
   prompt: string;
   model: string;
+  configId: string;
   schedule: ReturnType<typeof draftToSchedule>;
 }
 
+/**
+ * 可选的账号配置(= managed provider)。
+ *
+ * **粒度必须与聊天页的模型下拉一致** —— 那里列的是「账号配置」(Qwen3.8-Max、
+ * 高阶模型-G55…),一个配置一项。早前这里列的是配置**内部**的 model 标识
+ * (`qwen3.8-max[1m]`/`Sonnet 4.6`…),同一个东西两个地方两种叫法,用户没法对应。
+ */
 export interface ModelOption {
-  value: string;
+  /** managed 配置 id(= provider id 去掉 `managed-` 前缀,也是服务端的 configId) */
+  configId: string;
   label: string;
+  multimodal: boolean;
 }
+
+/** 「默认(跟随账号配置)」的哨兵值 —— Radix Select 不接受空字符串作 value。 */
+const DEFAULT_VALUE = "__default__";
+/** 存量任务只存了 model 没存 configId 时,给它保留一项,避免编辑一次就把原值冲掉。 */
+const LEGACY_PREFIX = "legacy:";
 
 /**
  * 新建 / 编辑定时任务(P6)。
@@ -63,9 +78,14 @@ export function RoutineForm({
   const [name, setName] = useState(routine?.name || presetName || "");
   const [description, setDescription] = useState(routine?.description || "");
   const [prompt, setPrompt] = useState(routine?.prompt || presetPrompt || "");
-  // '' = 跟随账号配置的第一个(D9)。服务端本来就这么兜底,所以这里留空是**正确的默认**,
-  // 而不是"没选"——列一堆本账号未必有的模型才是错的。
-  const [model, setModel] = useState(routine?.model || "");
+  // 选中项统一编码成一个字符串:哨兵 / 配置 id / `legacy:<model>`。
+  // '' = 跟随账号配置的第一个(D9)。服务端本来就这么兜底,所以留空是**正确的默认**,
+  // 而不是"没选"。
+  const [choice, setChoice] = useState(() => {
+    if (routine?.config_id) return routine.config_id;
+    if (routine?.model) return LEGACY_PREFIX + routine.model;  // 存量:只有 model
+    return DEFAULT_VALUE;
+  });
   const [draft, setDraft] = useState<ScheduleDraft>(
     routine ? routineToDraft(routine) : emptyScheduleDraft(),
   );
@@ -90,17 +110,27 @@ export function RoutineForm({
         </div>
         <div className="space-y-1.5">
           <Label className="text-xs">{t("routines.form.model")}</Label>
-          <Select value={model || "__default__"} onValueChange={(v) => setModel(v === "__default__" ? "" : v)} disabled={submitting}>
+          <Select value={choice} onValueChange={setChoice} disabled={submitting}>
             <SelectTrigger className="h-8 text-xs">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="__default__" className="text-xs">
+              <SelectItem value={DEFAULT_VALUE} className="text-xs">
                 {t("routines.form.modelDefault")}
               </SelectItem>
+              {/* 存量任务的原值:它不在账号配置列表里,不补这一项的话打开编辑就被
+                  静默改成「默认」,用户按下保存才发现模型换了。 */}
+              {choice.startsWith(LEGACY_PREFIX) && (
+                <SelectItem value={choice} className="text-xs">
+                  {choice.slice(LEGACY_PREFIX.length)}
+                </SelectItem>
+              )}
               {models.map((m) => (
-                <SelectItem key={m.value} value={m.value} className="text-xs">
+                <SelectItem key={m.configId} value={m.configId} className="text-xs">
                   {m.label}
+                  {m.multimodal && (
+                    <span className="ml-1 text-muted-foreground">{t("routines.form.multimodal")}</span>
+                  )}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -161,7 +191,11 @@ export function RoutineForm({
               name: name.trim(),
               description: description.trim(),
               prompt: prompt.trim(),
-              model,
+              // 选了配置就只传 configId,model 留空让服务端按该配置的 opus 角色兜底
+              // (D9)—— 与聊天页「选配置、模型跟着配置走」同义。只有存量的 legacy
+              // 值才继续走 model。
+              model: choice.startsWith(LEGACY_PREFIX) ? choice.slice(LEGACY_PREFIX.length) : "",
+              configId: choice === DEFAULT_VALUE || choice.startsWith(LEGACY_PREFIX) ? "" : choice,
               schedule: draftToSchedule(draft),
             })
           }

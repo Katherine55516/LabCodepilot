@@ -3103,6 +3103,7 @@ const en = {
   'routines.form.namePlaceholder': 'e.g. Daily sales report',
   'routines.form.model': 'Model',
   'routines.form.modelDefault': 'Default (follow account config)',
+  'routines.form.multimodal': '(multimodal)',
   'routines.form.description': 'Description',
   'routines.form.descriptionHint': '(optional, shown in the list)',
   'routines.form.prompt': 'Instructions',

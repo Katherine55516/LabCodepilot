@@ -25,6 +25,7 @@ export function RoutineDetail({
   runs,
   loadingRuns,
   sessionByRun,
+  configName,
   offline,
   busy,
   onOpenRun,
@@ -36,6 +37,8 @@ export function RoutineDetail({
   routine: CoworkRoutine;
   runs: RoutineRun[];
   loadingRuns: boolean;
+  /** 该任务绑定的账号配置显示名。空 = 跟随账号配置 / 配置已下架 */
+  configName: string;
   /** runId → 本地会话 id。没有的行不可点(还没同步到本地) */
   sessionByRun: Record<string, string>;
   offline: boolean;
@@ -98,7 +101,10 @@ export function RoutineDetail({
           )}
           <span className="flex items-center gap-1">
             <Robot size={11} />
-            {routine.model || t("routines.form.modelDefault")}
+            {/* 显示**账号配置名**(与聊天页、表单下拉同一套叫法)。configName 由列表
+                接口按 config_id 投影而来;拿不到时才退回裸 model(存量任务只存了
+                model 没存 config_id)。 */}
+            {configName || routine.model || t("routines.form.modelDefault")}
           </span>
         </div>
         {routine.description && (

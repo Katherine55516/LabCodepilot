@@ -8,6 +8,7 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { showToast } from "@/hooks/useToast";
 import type { CoworkRoutine, RoutineRun } from "@/types";
 import { cn } from "@/lib/utils";
+import { isMultimodalDescription } from "@/lib/model-multimodal";
 import { formatDateTime } from "@/lib/routine-ui";
 import { takeRoutineDraft, type RoutineDraft } from "@/lib/routine-draft";
 import { RoutineList } from "./RoutineList";
@@ -21,6 +22,15 @@ type View =
   | { kind: "edit"; id: string }
   | { kind: "detail"; id: string }
   | { kind: "run"; id: string; runId: string };
+
+/** `/api/providers` 行里本组件读到的字段。 */
+interface ProviderRow {
+  id: string;
+  name: string;
+  source?: string;
+  sort_order?: number;
+  notes?: string;
+}
 
 interface ListResponse {
   routines: CoworkRoutine[];
@@ -120,7 +130,7 @@ export function RoutinePanel() {
     return () => { cancelled = true; };
   }, []);
 
-  // 模型下拉:只列账号下发的 managed 模型。**绝不兜底成 sonnet/opus** ——
+  // 模型下拉:只列账号下发的 managed 配置。**绝不兜底成 sonnet/opus** ——
   // 本账号未必有,选了就是必然失败,而失败要等到下次触发才看得见。
   useEffect(() => {
     let cancelled = false;
@@ -129,49 +139,80 @@ export function RoutinePanel() {
       fetch("/api/providers/models").then((r) => (r.ok ? r.json() : { groups: [] })).catch(() => ({ groups: [] })),
     ]).then(([p, m]) => {
       if (cancelled) return;
-      const managedIds = new Set(
-        (p?.providers ?? [])
-          .filter((x: { source?: string }) => x.source === "managed")
-          .map((x: { id: string }) => x.id),
+      // 🔴 粒度 = **账号配置**,与聊天页的模型下拉严格一致(那里列的也是 managed
+      // provider,一个配置一项)。早前这里拍平成配置内部的 model 标识,于是同一个
+      // 东西在两个界面有两种叫法(聊天页「Qwen3.8-Max(多模态)」vs 这里
+      // 「qwen3.8-max[1m]」),用户没法把它们对应起来;而且十几个配置各带
+      // opus/sonnet/haiku 别名,拍平后同名项重复十几次、根本选不动。
+      //
+      // 只留有模型可用的配置:列一个空配置,选了必然失败,而失败要等到下次触发才看得见。
+      const withModels = new Set(
+        (m?.groups ?? []).filter((g: { models?: unknown[] }) => (g.models?.length ?? 0) > 0)
+          .map((g: { provider_id: string }) => g.provider_id),
       );
-      // 跨 provider 按 value 去重:`prependRoleModels` 只在单个 provider 内部去重,
-      // 而这里把所有 managed 配置的模型拍平成一个列表 —— 账号下发十几个配置时,
-      // `sonnet`/`opus`/`haiku` 这类角色别名会重复十几次(聊天页按 provider 分组渲染
-      // 所以不撞,只有拍平才暴露)。重复的后果不止 React key 告警:Select 按 value 匹配,
-      // 同 value 的多项用户根本选不动。保留第一个 —— 与 D9「默认取账号配置的第一个」同义。
-      const opts: ModelOption[] = [];
-      const seen = new Set<string>();
-      for (const g of m?.groups ?? []) {
-        if (!managedIds.has(g.provider_id)) continue;
-        for (const model of g.models ?? []) {
-          if (seen.has(model.value)) continue;
-          seen.add(model.value);
-          opts.push({ value: model.value, label: model.label || model.value });
-        }
-      }
+      const opts: ModelOption[] = (p?.providers ?? [])
+        .filter((x: ProviderRow) => x.source === "managed" && withModels.has(x.id))
+        .sort((a: ProviderRow, b: ProviderRow) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+        .map((x: ProviderRow) => ({
+          // 服务端的 configId 就是 provider id 去掉 `managed-` 前缀
+          // (DB: managed-<uuid> ↔ run 记录里的 configId=<uuid>)。
+          configId: x.id.startsWith("managed-") ? x.id.slice("managed-".length) : x.id,
+          label: x.name,
+          multimodal: isMultimodalDescription(x.notes || ""),
+        }));
       setModels(opts);
     });
     return () => { cancelled = true; };
   }, []);
 
   // ── 运行历史 + 本地物化会话 ──
+  /** runId → 本地会话 id。`/sessions` 是纯本地读,只看得见**已物化**的运行。 */
+  const fetchSessionMap = useCallback(async (id: string) => {
+    const res = await fetch(`/api/routines/${id}/sessions`).then((r) => (r.ok ? r.json() : { sessions: [] }));
+    const map: Record<string, string> = {};
+    for (const s of res.sessions || []) if (s.runId) map[s.runId] = s.sessionId;
+    return map;
+  }, []);
+
+  /**
+   * 最后一次 `loadRuns` 的目标任务。sync 要跑好几秒,期间用户可能已经退回列表、
+   * 点进另一个任务 —— 晚到的响应必须自己认出「我已经不是当前这一个了」再闭嘴,
+   * 否则会把 A 的运行历史盖到 B 的界面上。
+   */
+  const runsOwnerRef = useRef("");
+
   const loadRuns = useCallback(async (id: string) => {
+    runsOwnerRef.current = id;
     setLoadingRuns(true);
     try {
-      const [runsRes, sessRes] = await Promise.all([
+      const [runsRes, map] = await Promise.all([
         fetch(`/api/routines/${id}/runs`).then((r) => (r.ok ? r.json() : { runs: [] })),
-        fetch(`/api/routines/${id}/sessions`).then((r) => (r.ok ? r.json() : { sessions: [] })),
+        fetchSessionMap(id),
       ]);
-      setRuns(runsRes.runs || []);
-      const map: Record<string, string> = {};
-      for (const s of sessRes.sessions || []) if (s.runId) map[s.runId] = s.sessionId;
+      if (runsOwnerRef.current !== id) return;
+      const list: RoutineRun[] = runsRes.runs || [];
+      setRuns(list);
       setSessionByRun(map);
+
+      // 刚跑完的运行在服务端已有记录,但本地还没物化 —— 那一行会因为查不到会话而
+      // **点不动**,且用户完全看不出为什么。页面级 sync 只在进页面时跑一次,所以
+      // 「跑完就在详情页等着」这条最自然的路径恰恰是补不到的那条(实测:要切走再
+      // 切回来、反复几次才点得开)。这里补一次定向 sync 把它接上。
+      // `skipped` 按设计不物化(无产出),不能算缺失,否则每次都会白跑一趟 sync。
+      const missing = list.some((r) => r.status !== "skipped" && !map[r.runId]);
+      if (!missing) return;
+      const synced = await fetch("/api/routines/sync", { method: "POST" })
+        .then((r) => (r.ok ? r.json() : null))
+        .catch(() => null);
+      if (!synced?.materialized || runsOwnerRef.current !== id) return;
+      const fresh = await fetchSessionMap(id);
+      if (runsOwnerRef.current === id) setSessionByRun(fresh);
     } catch {
-      setRuns([]);
+      if (runsOwnerRef.current === id) setRuns([]);
     } finally {
-      setLoadingRuns(false);
+      if (runsOwnerRef.current === id) setLoadingRuns(false);
     }
-  }, []);
+  }, [fetchSessionMap]);
 
   const openDetail = useCallback((r: CoworkRoutine) => {
     setView({ kind: "detail", id: r.id });
@@ -346,6 +387,7 @@ export function RoutinePanel() {
             runs={runs}
             loadingRuns={loadingRuns}
             sessionByRun={sessionByRun}
+            configName={models.find((m) => m.configId === current.config_id)?.label || ""}
             offline={offline}
             busy={busyId === current.id}
             onOpenRun={(run) => setView({ kind: "run", id: current.id, runId: run.runId })}
@@ -361,6 +403,7 @@ export function RoutinePanel() {
             return (
               <RoutineRunView
                 run={run}
+                routineId={current.id}
                 sessionId={sessionByRun[run.runId] || ""}
                 hasPrev={runIndex >= 0 && runIndex + 1 < runs.length}
                 hasNext={runIndex > 0}

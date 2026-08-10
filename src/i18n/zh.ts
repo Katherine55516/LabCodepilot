@@ -3095,6 +3095,7 @@ const zh: Record<TranslationKey, string> = {
   'routines.form.namePlaceholder': '例如：每日销售日报',
   'routines.form.model': '模型',
   'routines.form.modelDefault': '默认（跟随账号配置）',
+  'routines.form.multimodal': '（多模态）',
   'routines.form.description': '描述',
   'routines.form.descriptionHint': '（选填，显示在列表里）',
   'routines.form.prompt': '指令',
