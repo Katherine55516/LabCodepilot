@@ -1,8 +1,12 @@
 # 沙箱定时任务（服务端调度 · 对标 Claude Routines）
 
+> ✅ **已完成（2026-08-10）** —— P0-P9 全部交付，生产可用。
+> 技术交接见 [docs/handover/cowork-scheduled-routines.md](../../handover/cowork-scheduled-routines.md)（含 P9 验收记录 §K.5）·
+> 产品思考见 [docs/insights/cowork-scheduled-routines.md](../../insights/cowork-scheduled-routines.md)
+>
 > 创建时间：2026-08-04
-> 最后更新：2026-08-04
-> 分支：`scheduler`
+> 最后更新：2026-08-10
+> 分支：`scheduler` @ `3d461cc`（未推送）
 > 调研与设计：[docs/research/cowork-server-side-routines.md](../../research/cowork-server-side-routines.md)（服务端实读 + 五个断点 + 客户端设计）
 > 能力对标基线：[docs/research/cowork-scheduled-routines.md](../../research/cowork-scheduled-routines.md)（Claude 三套调度辨析 + U1-U15 验收清单）
 > 交互原型：[docs/research/prototypes/scheduled-routines-prototype.html](../../research/prototypes/scheduled-routines-prototype.html)（七屏 v2）
@@ -25,7 +29,7 @@
 | P6 | 客户端 UI 三层 | LabCodepilot | ✅ 完成 | 含三语 i18n（原属 P7）|
 | P7 | 创建入口（MCP / 存为定时）| LabCodepilot | ✅ 完成 | 顺带下线本机定时任务工具（用户决定）|
 | P8 | 加固与运维（配额 / 审计 / selftest / 手册） | cowork-server | ✅ 完成 | 配额与自动停用 P3 已做；本阶段真活是**审计归属 bug** + 手册 |
-| P9 | 端到端联调 + 双文档 + 打包验收 | 全部 | 📋 待开始 | 依赖全部 + P1 |
+| P9 | 端到端联调 + 双文档 + 验收 | 全部 | ✅ **完成** | 生产端到端全绿（handover §K.5）；顺带抓修 2 个真 bug |
 
 ### 依赖与并行
 
@@ -489,16 +493,32 @@ GET        /runs/:runId/transcript
 
 ---
 
-## P9 · 联调 + 文档 + 打包验收
+## P9 · 联调 + 文档 + 验收 — ✅ 已完成（2026-08-10）
 
-1. **端到端**：客户端建任务 → 关掉客户端 → 服务端按时跑 → 重开客户端 → 汇总通知 → 三层导航看到完整过程 → 下载产物
-2. **部署漂移检测**：`apps/cowork-server/deploy/verify-deployment.sh` 返回 0
-3. **双文档**（CLAUDE.md 强制）：
-   - `docs/handover/cowork-scheduled-routines.md` — 架构、数据流、REST 契约、DB schema、坑
-   - `docs/insights/cowork-scheduled-routines.md` — 为什么服务端调度、为什么会话要分离、与 Claude Routines 的异同
-   - 两份互相反向链接
-4. **打包验收**：macOS DMG 真机跑一遍（本地 dev 无登录体系，managed 数据为空，**必须打包态验**）
-5. 本执行计划移入 `completed/`；research 文档标注「已实现」
+**完整验收记录见交接文档 [§K.5](../../handover/cowork-scheduled-routines.md)**，此处只记结论与两处与原计划的偏差。
+
+| 项 | 结果 |
+|---|---|
+| 端到端（建任务 → 服务端自主跑 → 同步 → 汇总通知 → 三层导航 → 产物） | ✅ 全绿，调度器 09:00 自主触发无人工干预 |
+| 部署漂移检测 | ✅ **45/45 源码完全一致**（P8 改动已上生产，原以为未部署） |
+| 生产自检 `selftest-r5` | ✅ 49 passed / 0 failed |
+| 双文档 + 互相反链 | ✅ handover 补完 + insights 新写 |
+| 客户端测试 | ✅ `npm run test` 2723 / `npm run test:smoke` 17/17 |
+
+**抓到并修掉 2 个真 bug**：汇总通知半角标点（`b039b4e`）、模型下拉跨 provider 重复（`3d461cc`）。
+两个都只有**真跑一遍**才看得见 —— 前者不走 i18n 字典所以扫文案时漏了，后者要账号真下发十几个
+managed 配置才撞得出来。
+
+### 与原计划的两处偏差（都是刻意的）
+
+1. **没走「打包 DMG 再验」**，改为**借打包版主密钥起 dev** 跑真实凭证链路
+   （`CLAUDE_GUI_SECRET_KEY=<hex> npm run dev`，配方见 `cowork-vm-mode.md §8`）。
+   原计划写「必须打包态验」的理由是「本地 dev 无登录体系、managed 数据为空」——
+   而借密钥的 dev **拿到的就是同一份真实 managed 凭证**（实测跑通真实模型、真实扣费），
+   这个理由不再成立。省掉一次十几分钟的打包，验证强度不变。
+2. **没主动触发 reconcile 验 F1**。生产上当时有**用户自己建的 routine**，
+   而 F1 一旦失效就是清空用户工作区。selftest-r5 第 3 组已真建卷、真跑 reconcile 锁住这条且
+   49 项全过 —— 用自检的证据替代在用户数据上冒险，是更好的交换。
 
 ---
 
@@ -517,8 +537,10 @@ GET        /runs/:runId/transcript
 
 ---
 
-## 未决（不阻塞开工）
+## 未决（功能已交付，这些不阻塞使用）
 
 - 建 routine 时若指令含内网地址，是**创建前拦截**还是**只提示**？
 - 运行历史永久保留（D12），到什么量级需要重新评估策略？
 - 旧 `task-scheduler.ts` 的清理 PR 何时发（D16 已定「新功能稳定后」，具体时机待定）
+- 内部凭证接口没有 admin 配置页 / 其 404 有歧义（详见 handover §L.1）
+- 用量后台**前端**未展示 P8 新增的 routine 统计字段（后端已回，向后兼容）

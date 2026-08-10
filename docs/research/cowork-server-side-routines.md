@@ -1,5 +1,10 @@
 # 定时任务跑在沙箱服务器上 —— cowork-server 实现读解与方案设计
 
+> ✅ **已实现并上线（2026-08-10）**。本文的设计已全部落地，实现以
+> **[handover/cowork-scheduled-routines.md](../handover/cowork-scheduled-routines.md) 为准**
+> （本文是设计期快照，细节与最终实现可能有出入）；产品思考见
+> [insights/cowork-scheduled-routines.md](../insights/cowork-scheduled-routines.md)。
+>
 > 调研时间：2026-08-04
 > 前置：[cowork-scheduled-routines.md](cowork-scheduled-routines.md)（对标 Claude Routines 的能力清单与三方案对比）
 > **决策已定**：走该文 §3 的**方案 B（服务端调度）** —— 定时任务在沙箱服务器上跑，不依赖用户电脑

@@ -1,13 +1,13 @@
 # 沙箱定时任务（服务端调度 · 对标 Claude Routines）— 技术交接文档
 
 > **本文件的目标：读完这一份就能完整恢复上下文并无缝接上后续开发，不必回看会话记录。**
-> 最后更新：2026-08-05 · 分支 `scheduler` @ `f43d264`（P8 完成，**未推送**）
-> 执行计划（进度/决策/验收）：[docs/exec-plans/active/cowork-scheduled-routines.md](../exec-plans/active/cowork-scheduled-routines.md)
+> 产品思考见 [docs/insights/cowork-scheduled-routines.md](../insights/cowork-scheduled-routines.md)
+> 最后更新：2026-08-10 · 分支 `scheduler` @ `3d461cc`（**P9 完成，功能全部交付**，未推送）
+> 执行计划（进度/决策/验收）：[docs/exec-plans/completed/cowork-scheduled-routines.md](../exec-plans/completed/cowork-scheduled-routines.md)
 > 调研与设计：[research/cowork-server-side-routines.md](../research/cowork-server-side-routines.md)（服务端实读 + 客户端设计）·
 > [research/cowork-scheduled-routines.md](../research/cowork-scheduled-routines.md)（Claude 三套调度辨析 + U1-U15 验收清单）
 > 交互原型（七屏 v2）：[research/prototypes/scheduled-routines-prototype.html](../research/prototypes/scheduled-routines-prototype.html)
 > 底座：[handover/cowork-vm-mode.md](cowork-vm-mode.md)（办公模式远程容器沙箱）
-> ⚠️ 产品思考文档（`docs/insights/cowork-scheduled-routines.md`）**尚未写**，属 P9 的交付项。
 
 ---
 
@@ -33,7 +33,9 @@
 | P6 | 客户端 UI 三层 | ✅ 完成（含三语 i18n） |
 | P7 | 创建入口（MCP / 存为定时） | ✅ 完成 |
 | P8 | 加固与运维（配额/审计/手册） | ✅ 完成 |
-| **P9** | **端到端 + 双文档 + 打包验收** | 📋 **下一步** |
+| P9 | 端到端 + 双文档 + 验收 | ✅ **完成**（2026-08-10，见 §K.5） |
+
+**功能已全部交付。** 后续工作只剩 §L 的未决项与清理，没有未完成的施工。
 
 ## A.3 现在这个功能已经能干什么
 
@@ -56,14 +58,14 @@ agent 回合、产出文件、记录历史 —— 全程不需要任何客户端
 
 ## A.4 下一步
 
-**P9：收尾。** 三件事：
+**施工已结束**，剩下的都不是这个功能的欠账：
 
-1. **端到端 + 打包态验收** —— 本地 dev 无登录体系、managed 数据为空，凭证链路必须**打包后登录**才完整
-2. **双文档**（CLAUDE.md 强制）：本文补完 + 写 `docs/insights/cowork-scheduled-routines.md` 并互相反链
-3. 决定 §L.1 里那几项未决
+1. §L.1 的四项未决（内部凭证接口的 admin 页 / 404 歧义 / 旧调度器清理时机 / 内网地址拦截策略）
+2. 用量后台**前端**还没展示 P8 加的 routine 字段（后端已回，加字段向后兼容）
+3. 分支未推送（`scheduler` 与 codeagent-server 的 `main` 都领先远端，等用户指示）
 
-⚠️ **服务端有未部署的改动**：P8 的 `cred_fetched` 审计与 P6 的配额字段（`dailyCap`/`usedToday`）
-都还没上生产。客户端对配额字段按可选处理，所以不部署也不会坏，只是界面不显示那块。
+✅ **服务端改动已全部上生产**（2026-08-10 核准）：`verify-deployment.sh` 报 45/45 源码完全一致，
+`selftest-r5` 在生产上 **49 passed / 0 failed**（P8 加了第 5 组后从 37 增至 49）。
 
 ---
 
@@ -71,13 +73,17 @@ agent 回合、产出文件、记录历史 —— 全程不需要任何客户端
 
 | 仓库 | 分支 | HEAD | 与 GitHub |
 |---|---|---|---|
-| `LabCodepilot` | **`scheduler`**（本功能全部工作在这） | `f43d264` | ⬆️ 领先远端（P8 未推送） |
+| `LabCodepilot` | **`scheduler`**（本功能全部工作在这） | `3d461cc` | ⬆️ 领先远端（P8/P9 未推送） |
 | `LabCodepilot` | `para`（scheduler 的父分支） | `537173f` | 已同步 |
 | `codeagent-server` | `main` | `51d5141` | ⬆️ 领先远端（P8 的归属修复未推送） |
 
 `scheduler` 从 `para` 拉出，本功能的 commit（新→旧）：
 
 ```
+（P9）
+3d461cc fix(client): 定时任务模型下拉跨 provider 重复
+b039b4e fix(client): 定时任务汇总通知的标点改全角
+526d92b docs: P8 完成 —— 交接文档与执行计划收口
 f43d264 feat(cowork-server): P8 加固 —— cred_fetched + 归属契约 + 运维手册
 abf2478 docs: P7 完成收口
 6e5bbee feat(client): P7 定时任务创建入口 + 下线本机定时任务工具
@@ -276,6 +282,8 @@ reaper 只认 WS 连接（`execOpened`/`execClosed`），而定时任务是服�
 | G13 | **同一套工具可能有两份实现** | 下线本机定时任务时只删了 MCP 那份，以为干净了 —— native runtime 走的是 AI SDK 的 `tool()`，`builtin-tools/notification.ts` 里有**第二份**，模型在那条路径上照样能调。删工具/加工具都要按「通往模型的路径」而不是按文件核一遍 |
 | G14 | **读完即焚的数据要等确认用得上再读** | 「存为定时任务」的预填挂在 sessionStorage，早期在挂载时就取 —— 碰上未开通/离线（渲染的是空态、没有表单）草稿被静默吃掉，用户退回去也找不回来 |
 | G15 | 🔴 **审计 `detail` 必须以 uid 开头** | 账号后端按这条解析用量归属（`usage_service.parse_audit_line`）。routine_* 写成 `"<uid> success"` 而原规则要求**整串**是 uid，于是四个事件里三个落成 `uid=NULL` —— **不报错**，只是用量后台里定时任务那部分永远是空的。已在解析侧放宽 + `selftest-r5` 第 5 组按源码锁死 |
+| G16 | **去重层级要跟渲染形态走** | `prependRoleModels` 只在单个 provider 内按 id 去重，聊天页按 provider 分组渲染所以够用；而 `RoutinePanel` 把所有 managed 配置**拍平**成一个列表 —— 本账号 14 个配置各带 opus/sonnet/haiku 别名，同 value 出现 14 次。后果不止 React key 告警：Radix Select 按 value 匹配，同 value 的多项**用户根本选不动**。拍平时按 value 去重、保留第一个（与 D9 同义）。教训：复用一个「已经去过重」的列表前，先确认它的去重范围和你的渲染范围是不是同一个 |
+| G17 | **半角标点会从 i18n 之外的地方漏进来** | P6 把界面文案统一成全角后，`routine-sync.ts` 里**写死**的汇总通知仍是半角 —— 它不走 i18n 字典，当时的排查只扫了 i18n 文件。扫标点时要按「用户能看到的字符串」而不是「i18n 文件」来找（`b039b4e`） |
 
 ---
 
@@ -398,57 +406,41 @@ listCoworkRoutines() / getCoworkRoutine(id) / replaceCoworkRoutines(rows) / purg
 
 ---
 
-# §I 下一步：P7 创建入口（施工说明）
+# §I P7 创建入口（已交付，`6e5bbee`）
 
-**目标**：让用户**不必先想到「去定时任务页」**也能建定时任务。这是发现路径的问题，不是功能缺口 ——
-现在的能力已经完整，只是入口只有一个。
-
-## I.1 要建的东西
+**解决的问题**：让用户**不必先想到「去定时任务页」**也能建定时任务 —— 发现路径问题，不是功能缺口。
 
 | 文件 | 内容 |
 |---|---|
-| `src/lib/routines-mcp.ts` | **新建**：五个 MCP 工具（列表 / 创建 / 改 / 删 / 立即跑），**只在办公会话注册** |
-| `src/components/chat/*` | 会话标题栏加「⏰ 存为定时任务」按钮，跳新建表单并预填指令 |
+| `src/lib/routines-mcp.ts` | 五个 MCP 工具（列表 / 创建 / 改 / 删 / 立即跑），**只在办公会话注册** |
+| `src/components/chat/*` | 会话标题栏「⏰ 存为定时任务」，用最后一条指令预填 `RoutineForm` 的 `presetPrompt` |
 
-`RoutineForm` 已经预留了 `presetPrompt` 参数，第二条只差把入口和跳转接上。
-
-## I.2 🔴 MCP 创建成功的回复必须明说结果去哪
+## I.1 🔴 MCP 创建成功的回复必须明说结果去哪（写死在工具 prompt 里）
 
 改版把定时任务的会话从办公对话列表里摘了出去，于是引入一个**新的失败模式**：用户在对话里说
 「以后每天九点给我做日报」，助手答「已创建」，然后用户就在这个对话里**一直等**——
-结果永远不会出现在这里。
-
-所以工具的成功返回里必须有这么一句（原型第 6 屏的原话）：
+结果永远不会出现在这里。所以工具的成功返回里必须有这么一句（原型第 6 屏原话）：
 
 > 运行结果会出现在左侧「定时任务」里，不会打扰这个对话。
 
-没有这一句，这个功能对第一次用的人就是坏的。
+没有这一句，这个功能对第一次用的人就是坏的。**不能指望模型自己想到**，写进工具的 system prompt。
 
-## I.3 其它约束
+## I.2 其它已落地的约束
 
 - **只在办公会话注册**：研发会话没有沙箱，建了也跑不了。
-- 助手要把口语转成完整指令并**复述确认**，不静默创建 —— 指令写得对不对是这个功能成败的关键，
-  而用户说的「每天给我做个日报」离一条能独立跑的指令还差很远。
-- i18n **已在 P6 做完**（100 个 key ×3 语），新增文案照 `routines.*` 命名往下加即可。
-  ⚠️ zh-HK **手工加**，别跑 `gen-zh-hk.mjs`（它会把约 40 个已校对的港式词汇revert 回去）。
-
-## I.4 验收
-
-- 在办公会话里用自然语言创建成功，且回复里包含「结果会出现在左侧『定时任务』里」
-- 研发会话里**没有**这些工具
-- 「存为定时任务」跳转后指令栏已预填，原会话不受影响
-- `npm run test` + `npm run test:smoke` 全绿
+- 助手把口语转成完整指令并**复述确认**，不静默创建 —— 用户说的「每天给我做个日报」
+  离一条能独立跑的指令还差很远，而指令写得对不对是这个功能成败的关键。
+- i18n 在 P6 一次做完（100 个 key ×3 语）。⚠️ zh-HK **手工加**，别跑 `gen-zh-hk.mjs`
+  （它会把约 40 个已校对的港式词汇 revert 回去）。
 
 ---
 
-# §J P8–P9 概要
-
-（P7 是下一步，施工说明在 §I。）
+# §J P8–P9 摘要
 
 | 阶段 | 要点 |
 |---|---|
-| ~~**P8** 加固~~ | ✅ 已完成。配额与自动停用 P3 就做了；本阶段真活是**审计归属 bug**（见 §G15）+ `cred_fetched` + OPERATIONS.md 第 10 章 |
-| **P9** 收尾 | 端到端 + **双文档**（本文件补完 + `docs/insights/cowork-scheduled-routines.md` 并互相反链）+ **打包态验收**（本地 dev 无登录体系、managed 数据为空，凭证链路必须打包后登录才完整） |
+| **P8** 加固 | ✅ 配额与自动停用 P3 就做了；本阶段真活是**审计归属 bug**（见 §G15）+ `cred_fetched` + OPERATIONS.md 第 10 章 |
+| **P9** 收尾 | ✅ 生产端到端（§K.5）+ 双文档互链 + 部署核准（45/45、selftest 49 项）。抓到并修掉 2 个真 bug：汇总通知半角标点（`b039b4e`）、模型下拉跨 provider 重复（`3d461cc`，见 §G16） |
 
 ---
 
@@ -482,20 +474,50 @@ curl -s -X DELETE -H "Authorization: Bearer $T" "http://$H/routines/$RID"     # 
 
 ## K.4 客户端
 ```bash
-npm run test                                          # 期望 2700 passed, 0 failed, 1 skipped
+npm run test                                          # 期望 2723 passed, 0 failed, 1 skipped
 npm run test:smoke                                    # 期望 17/17（需 dev server；刚改过代码要先预热路由，
                                                       #   Turbopack 正在编译时 waitForPageReady 会超时误报）
 npx tsx --test src/__tests__/unit/routine-session-isolation.test.ts   # 10 项，锁 F3
 npx tsx --test src/__tests__/unit/routine-transcript.test.ts          # 16 项，重放形状 + G1
 npx tsx --test src/__tests__/unit/routine-sync.test.ts                # 15 项，幂等 + 降级
 npx tsx --test src/__tests__/unit/routine-ui.test.ts                  # 23 项，预设↔cron 往返
-apps/cowork-server/deploy/verify-deployment.sh        # 期望 43/43，仅 2 个已知漂移
+apps/cowork-server/deploy/verify-deployment.sh        # 期望 45/45 源码完全一致
 ```
 
-**物化链路的手工验证**（需要打包版并已登录 —— 本地 dev 没有登录体系，token 为空）：
+**物化链路的手工验证**：
 ```bash
 curl -X POST http://localhost:3000/api/routines/sync   # 看 materialized / summary
 ```
+
+## K.5 P9 生产端到端验收记录（2026-08-10）
+
+**关键前提**：本地 dev 无登录体系，managed 凭证是密文 —— 必须**借打包版的主密钥**起 dev 才能跑通
+（配方见 [cowork-vm-mode.md §8](cowork-vm-mode.md)：`npx electron unseal.js /tmp/mk.tmp` →
+`CLAUDE_GUI_SECRET_KEY=$(cat /tmp/mk.tmp) PORT=3000 npm run dev`）。不带密钥起的 dev
+拿不到凭证，整条链路验不了。
+
+| 验收项 | 结果 |
+|---|---|
+| 部署漂移 | ✅ **45/45 源码完全一致**（P8 改动已全部上生产） |
+| 生产自检 | ✅ `selftest-r5` **49 passed / 0 failed** |
+| 客户端建任务 | ✅ 三层导航 → 新建表单 → 一次性任务，写入生产 |
+| **调度器自主触发** | ✅ 定 09:00，实际 `startedAt 07:00:13Z`（= 本地 09:00），**全程无人工干预** |
+| 运行结果 | ✅ `success` / 9.7s / $0.163 / 2 turns / exit 0 |
+| 模型过河（G5 回归位） | ✅ 日志 `spawn model=qwen3.8-max[1m](账号配置) authStyle=api_key` |
+| 一次性自动停用（D10） | ✅ 跑完 `enabled=false` + `ranAt` 落位，卡片显示「已运行」 |
+| 审计链完整 | ✅ `routine_create → cred_fetched → cred_issued → routine_fire → routine_end(code=0) → cred_revoked`，**六个事件 detail 全部以 uid 开头**（G15 修复生效） |
+| 产物真在卷里 | ✅ 直读 `cowork-ws-<id>` 卷：`/workspace/p9-e2e.txt` = `P9 E2E OK`（10B，属主 1000） |
+| 同步与物化 | ✅ `POST /api/routines/sync` → `materialized:1 / succeeded:1`，汇总「定时任务：你不在时跑了 1 次 · 1 成功」 |
+| 幂等 | ✅ 抹掉水位线重跑 sync，不产生第二条会话 |
+| 会话隔离（F3） | ✅ 物化会话不在办公对话列表里，只能从定时任务页进 |
+| 三层回放 | ✅ 第三层复用 `MessageList`：用户指令 → Thought → `Edit p9-e2e.txt` → Thought → 结果文本 |
+| 删除联动 | ✅ 删任务后定义文件、`cowork-ws-*`、`cowork-st-*` 卷**全部连带清除** |
+| 测试 | ✅ `npm run test` 2723 passed / `npm run test:smoke` 17/17 |
+
+**过程中抓到并修掉 2 个真 bug**：汇总通知半角标点（`b039b4e`）、模型下拉跨 provider 重复（`3d461cc`，§G16）。
+
+⚠️ **验收残留已清零**：测试 routine 已删（服务端定义+卷、本地会话+消息+水位线+缓存表）。
+生产上现存的另一个 routine（`e2fdf534`「测试」）是**用户自建的，不要动**。
 
 ---
 
@@ -512,7 +534,9 @@ curl -X POST http://localhost:3000/api/routines/sync   # 看 materialized / summ
 ## L.2 已知遗留
 - 生产审计日志有 2 行 `r5probe` 的自检事件（G7），append-only 不修改，uid 一眼可辨
 - 生产 `/opt/cowork-server/` 下有两个 `.env.bak-*`（改配置时的备份，含密钥，已从漂移检测排除）
-- `docs/insights/cowork-scheduled-routines.md` 未写（P9 交付项，CLAUDE.md 强制要求与本文互链）
+- **用量后台前端**还没展示 P8 加的 routine 字段（`overview.today_routine_runs`、
+  `per_user.routine_runs_*`、`per_session.routine_runs`）—— 响应是裸 dict，加字段向后兼容，
+  UI 更新前只是不显示
 - **本机定时任务的引擎与界面暂留**：模型已完全够不着（两条路径的工具都删了），但
   `src/lib/task-scheduler.ts`、`/api/tasks/*` 七个路由、设置页 `AssistantWorkspaceSection`
   与项目页 `TaskList` 仍在。`instrumentation.ts` 启动时仍 `ensureSchedulerRunning()`，

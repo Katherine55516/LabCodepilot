@@ -1,5 +1,10 @@
 # 办公模式定时任务（对标 Claude Routines）实现调研
 
+> ✅ **功能已实现并上线（2026-08-10）** —— 走的是 §3 方案 B（服务端调度）。
+> 实现以 **[handover/cowork-scheduled-routines.md](../handover/cowork-scheduled-routines.md) 为准**；
+> 产品思考见 [insights/cowork-scheduled-routines.md](../insights/cowork-scheduled-routines.md)。
+> 本文保留价值在 **§1 的 Claude 三套调度辨析与 U1-U15 验收清单**（仍然有效）。
+>
 > 调研时间：2026-08-04
 > 触发：希望在办公模式下做定时任务，体验对齐 Claude 云端 Routines
 >
