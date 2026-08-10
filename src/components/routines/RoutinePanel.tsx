@@ -134,10 +134,18 @@ export function RoutinePanel() {
           .filter((x: { source?: string }) => x.source === "managed")
           .map((x: { id: string }) => x.id),
       );
+      // 跨 provider 按 value 去重:`prependRoleModels` 只在单个 provider 内部去重,
+      // 而这里把所有 managed 配置的模型拍平成一个列表 —— 账号下发十几个配置时,
+      // `sonnet`/`opus`/`haiku` 这类角色别名会重复十几次(聊天页按 provider 分组渲染
+      // 所以不撞,只有拍平才暴露)。重复的后果不止 React key 告警:Select 按 value 匹配,
+      // 同 value 的多项用户根本选不动。保留第一个 —— 与 D9「默认取账号配置的第一个」同义。
       const opts: ModelOption[] = [];
+      const seen = new Set<string>();
       for (const g of m?.groups ?? []) {
         if (!managedIds.has(g.provider_id)) continue;
         for (const model of g.models ?? []) {
+          if (seen.has(model.value)) continue;
+          seen.add(model.value);
           opts.push({ value: model.value, label: model.label || model.value });
         }
       }
