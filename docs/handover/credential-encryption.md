@@ -82,6 +82,8 @@ Next.js server   crypto-seal.getKey() = hex→Buffer(process.env.CLAUDE_GUI_SECR
 
 **关键正确性约束**：`api_providers` 的 api_key 任何读取都必须经上述 hydrate 出口。已修复唯一绕过点 `image-generator.ts:pickImageProvider`（原裸 `SELECT ... api_key ... FROM api_providers`，列加密后会拿到密文 → 图片生成崩）。其余 `FROM api_providers` 裸 SQL 仅存在于 db.ts 内部迁移代码。
 
+**列加密不等于对外安全**：hydrate 出口是解密的，所以凡把 provider 行往外发的地方都要各自脱敏。`GET /api/providers` 曾只对 `api_key` 打掩码，却把同样解密后的 `managed_extra_json` 原样返回 —— 而它内含的 raw ModelConfig 带着该模型完整的明文 `auth_token`，等于在打了掩码的字段旁边把同一把钥匙发了出去。现该字段已不再下发（`stripManagedExtra`，见 `src/app/api/providers/route.ts`）；其唯一读取需求（模型倍率）改由该路由提到顶层 `model_multiplier`。新增对外出口时照此自查：**at-rest 加密只挡落盘，挡不住响应体**。
+
 列加密天然覆盖 WAL（`codepilot.db-wal`）——写进 WAL 的就是密文，无需对 DB 文件整体加密（也避免引入 SQLCipher 原生模块）。
 
 ## 7. 迁移（幂等重封，`migrateDb` 末尾 `reSealSensitiveColumns`）

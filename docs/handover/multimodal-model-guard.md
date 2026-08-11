@@ -18,12 +18,31 @@
    │  electron/auth/managed-providers.ts:69  notes: cfg.description ?? ''
    ▼
 api_providers.notes（managed 行）
-   │  /api/providers GET 返回完整 ApiProvider（仅 api_key 脱敏）
+   │  /api/providers GET 返回 ApiProvider（api_key 脱敏、managed_extra_json 不下发）
    ▼
 useManagedMultimodal()  ← 过滤 source==='managed'，notes 含「多模态」⇒ isMultimodal
    ├─► ModelSelectorDropdown：列表项渲染「（多模态）」后缀
    └─► MessageInput：构造 validateFile，喂给 PromptInput 拦截媒体上传
 ```
+
+## 后续：这个 hook 现在也带模型倍率
+
+`useManagedMultimodal` 已从"多模态判定"扩成 managed 模型**展示元数据**的统一来源，
+条目上多一个 `multiplier: number | null`，供三处模型下拉在模型名后展示倍率
+（如「Qwen3.8-Max 1.4x（多模态）」）。倍率排在「（多模态）」之前。
+
+- 取值链路与 notes 不同：倍率来自服务端 `ModelConfig.model_multiplier`，落在
+  `managed_extra_json.raw` 里，由 `/api/providers` GET 提到顶层 `model_multiplier`
+  再交给本 hook。**渲染层不解析 `managed_extra_json`** —— 那份 JSON 里带着明文
+  `auth_token`，为一个数字把密钥扩散到 UI 组件不划算；同理该字段现已不再下发。
+- 缺失即不渲染，**不兜底 1.0x**：账号没下发倍率时兜一个默认值，等于替后端编一个
+  用户会据此花钱的成本数字。判定与格式化收在 `src/lib/model-multiplier.ts`。
+- 覆盖面比多模态多一处：办公与研发共用同一个 composer（本 hook 即可覆盖），
+  定时任务是 `RoutinePanel`/`RoutineForm` 独立一套，单独接同一份 lib。
+
+> 注：多模态判定至今仍是 `notes` 文本匹配。服务端后来已下发结构化的
+> `is_multimodal`（同在 `managed_extra_json.raw`，与倍率同源），若要改判定口径，
+> 照倍率这条路提到顶层即可，无需改 DB 或 electron 映射。
 
 ## 关键文件 / 改动点
 
