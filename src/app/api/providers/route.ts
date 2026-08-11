@@ -28,6 +28,23 @@ function withMultiplier(provider: ApiProvider): ApiProvider {
   return multiplier === null ? provider : { ...provider, model_multiplier: multiplier };
 }
 
+/**
+ * Drop `managed_extra_json` from the response.
+ *
+ * getAllProviders() decrypts it (it is a sealed column), and the raw
+ * ModelConfig it holds includes the model's plaintext `auth_token` — so
+ * shipping it here handed out a full API key next to an `api_key` field we
+ * deliberately mask. Nothing consumes the blob over HTTP: the multiplier, its
+ * only reader, is lifted to a top-level field by withMultiplier() just above,
+ * and the sync path writes this column through the DB layer, never through
+ * this route. Must run after withMultiplier(), which reads it.
+ */
+function stripManagedExtra(provider: ApiProvider): ApiProvider {
+  if (provider.managed_extra_json === undefined) return provider;
+  const { managed_extra_json: _sealed, ...rest } = provider;
+  return rest;
+}
+
 /** Check which ANTHROPIC_* env vars are set in the server process environment */
 function detectEnvVars(): Record<string, string> {
   const detected: Record<string, string> = {};
@@ -54,7 +71,7 @@ function detectEnvVars(): Record<string, string> {
 
 export async function GET() {
   try {
-    const providers = getAllProviders().map(maskApiKey).map(withMultiplier);
+    const providers = getAllProviders().map(maskApiKey).map(withMultiplier).map(stripManagedExtra);
     const envDetected = detectEnvVars();
     return NextResponse.json({
       providers,
