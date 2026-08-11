@@ -18,6 +18,7 @@ import {
   CommandListGroup,
   CommandListFooter,
   CommandListFooterAction,
+  MultiplierBadge,
 } from '@/components/patterns';
 
 interface ModelOption {
@@ -162,9 +163,9 @@ export function ModelSelectorDropdown({
         modelValue: firstModel?.value ?? currentModelValue,
         isMultimodal: mp.isMultimodal,
         // null when the account backend hasn't pushed a multiplier for this
-        // model — the row then renders no badge at all rather than a made-up
-        // 1.0x (see src/lib/model-multiplier.ts).
-        multiplierLabel: formatMultiplier(mp.multiplier),
+        // model — MultiplierBadge then renders nothing at all rather than a
+        // made-up 1.0x (see src/lib/model-multiplier.ts).
+        multiplier: mp.multiplier,
       };
     })
     .filter((item) => !mq || item.providerName.toLowerCase().includes(mq));
@@ -224,13 +225,9 @@ export function ModelSelectorDropdown({
                       <span className="truncate">{item.providerName}</span>
                       {/* Cost multiplier — kept right after the name (and
                           ahead of the「多模态」suffix) because it is what the
-                          user weighs when picking a model. shrink-0 so it
-                          survives when a long name ellipsizes. */}
-                      {item.multiplierLabel && (
-                        <span className="shrink-0 text-muted-foreground tabular-nums">
-                          {item.multiplierLabel}
-                        </span>
-                      )}
+                          user weighs when picking a model. The badge is
+                          shrink-0, so a long name ellipsizes before it does. */}
+                      <MultiplierBadge label={formatMultiplier(item.multiplier)} />
                       {item.isMultimodal && (
                         <span className="shrink-0 text-muted-foreground/60">
                           {t('composer.multimodalSuffix' as TranslationKey)}

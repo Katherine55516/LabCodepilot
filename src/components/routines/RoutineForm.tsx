@@ -11,6 +11,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { useTranslation } from "@/hooks/useTranslation";
+import { MultiplierBadge } from "@/components/patterns";
 import { formatMultiplier } from "@/lib/model-multiplier";
 import type { CoworkRoutine } from "@/types";
 import {
@@ -131,12 +132,9 @@ export function RoutineForm({
               {models.map((m) => (
                 <SelectItem key={m.configId} value={m.configId} className="text-xs">
                   {m.label}
-                  {/* 倍率紧跟模型名、排在(多模态)之前 —— 与聊天页下拉同一顺序。 */}
-                  {formatMultiplier(m.multiplier) && (
-                    <span className="ml-1 text-muted-foreground tabular-nums">
-                      {formatMultiplier(m.multiplier)}
-                    </span>
-                  )}
+                  {/* 倍率紧跟模型名、排在(多模态)之前 —— 与聊天页下拉同一顺序;
+                      徽标本身也复用同一个组件,样式不会两处走偏。 */}
+                  <MultiplierBadge label={formatMultiplier(m.multiplier)} className="ml-1" />
                   {m.multimodal && (
                     <span className="ml-1 text-muted-foreground">{t("routines.form.multimodal")}</span>
                   )}

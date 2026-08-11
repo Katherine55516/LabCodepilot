@@ -4,6 +4,7 @@ export { SectionPage } from "./SectionPage";
 export { StatusBanner } from "./StatusBanner";
 export { EmptyState } from "./EmptyState";
 export { IconAction } from "./IconAction";
+export { MultiplierBadge } from "./MultiplierBadge";
 export {
   CommandList,
   CommandListSearch,
