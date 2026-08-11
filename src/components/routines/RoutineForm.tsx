@@ -11,6 +11,7 @@ import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
 import { useTranslation } from "@/hooks/useTranslation";
+import { formatMultiplier } from "@/lib/model-multiplier";
 import type { CoworkRoutine } from "@/types";
 import {
   draftToSchedule, emptyScheduleDraft, routineToDraft, type ScheduleDraft,
@@ -39,6 +40,8 @@ export interface ModelOption {
   configId: string;
   label: string;
   multimodal: boolean;
+  /** 相对基准模型的成本倍率;账号未下发时为 null,不渲染。 */
+  multiplier: number | null;
 }
 
 /** 「默认(跟随账号配置)」的哨兵值 —— Radix Select 不接受空字符串作 value。 */
@@ -128,6 +131,12 @@ export function RoutineForm({
               {models.map((m) => (
                 <SelectItem key={m.configId} value={m.configId} className="text-xs">
                   {m.label}
+                  {/* 倍率紧跟模型名、排在(多模态)之前 —— 与聊天页下拉同一顺序。 */}
+                  {formatMultiplier(m.multiplier) && (
+                    <span className="ml-1 text-muted-foreground tabular-nums">
+                      {formatMultiplier(m.multiplier)}
+                    </span>
+                  )}
                   {m.multimodal && (
                     <span className="ml-1 text-muted-foreground">{t("routines.form.multimodal")}</span>
                   )}

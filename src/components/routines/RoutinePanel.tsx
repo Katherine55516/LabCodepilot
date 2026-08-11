@@ -9,6 +9,7 @@ import { showToast } from "@/hooks/useToast";
 import type { CoworkRoutine, RoutineRun } from "@/types";
 import { cn } from "@/lib/utils";
 import { isMultimodalDescription } from "@/lib/model-multimodal";
+import { normalizeMultiplier } from "@/lib/model-multiplier";
 import { formatDateTime } from "@/lib/routine-ui";
 import { takeRoutineDraft, type RoutineDraft } from "@/lib/routine-draft";
 import { RoutineList } from "./RoutineList";
@@ -30,6 +31,7 @@ interface ProviderRow {
   source?: string;
   sort_order?: number;
   notes?: string;
+  model_multiplier?: number;
 }
 
 interface ListResponse {
@@ -159,6 +161,9 @@ export function RoutinePanel() {
           configId: x.id.startsWith("managed-") ? x.id.slice("managed-".length) : x.id,
           label: x.name,
           multimodal: isMultimodalDescription(x.notes || ""),
+          // 与聊天页同源:都取 /api/providers 提到顶层的 model_multiplier。
+          // 账号没下发就是 null —— 不显示,别兜底成 1.0x 编一个成本出来。
+          multiplier: normalizeMultiplier(x.model_multiplier),
         }));
       setModels(opts);
     });

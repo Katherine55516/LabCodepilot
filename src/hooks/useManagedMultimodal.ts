@@ -1,16 +1,20 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
 import { isMultimodalDescription } from '@/lib/model-multimodal';
+import { normalizeMultiplier } from '@/lib/model-multiplier';
 
 /**
- * useManagedMultimodal — single source of truth for "which managed models are
- * multimodal".
+ * useManagedMultimodal — single source of truth for the managed model display
+ * metadata the pickers need: whether a model is multimodal, and its cost
+ * multiplier.
  *
  * The managed-account backend pushes a `description` per model, persisted in
  * the provider row's `notes` column. A model is multimodal when that text
- * contains「多模态」(see src/lib/model-multimodal.ts). This hook fetches the
- * managed providers once, exposes the enriched list (for the model picker
- * label) plus a guard helper (for the composer upload block), and refreshes on
- * the `provider-changed` event like the other provider consumers.
+ * contains「多模态」(see src/lib/model-multimodal.ts). It also pushes a
+ * `model_multiplier`, which GET /api/providers lifts to a top-level field
+ * (see src/lib/model-multiplier.ts). This hook fetches the managed providers
+ * once, exposes the enriched list (for the model picker label) plus a guard
+ * helper (for the composer upload block), and refreshes on the
+ * `provider-changed` event like the other provider consumers.
  *
  * Only `source==='managed'` rows are considered — local / BYOK providers have
  * no guaranteed description, so they are intentionally absent from the map and
@@ -23,6 +27,8 @@ export interface ManagedMultimodalEntry {
   sort_order: number;
   notes: string;
   isMultimodal: boolean;
+  /** Cost multiplier relative to the baseline model; null when not pushed. */
+  multiplier: number | null;
 }
 
 // Subset of /api/providers rows we read here.
@@ -32,6 +38,7 @@ interface ProviderRow {
   source?: string;
   sort_order?: number;
   notes?: string;
+  model_multiplier?: number;
 }
 
 export interface UseManagedMultimodalReturn {
@@ -67,6 +74,7 @@ export function useManagedMultimodal(): UseManagedMultimodalReturn {
             sort_order: p.sort_order ?? 0,
             notes: p.notes ?? '',
             isMultimodal: isMultimodalDescription(p.notes),
+            multiplier: normalizeMultiplier(p.model_multiplier),
           }));
         setManaged(rows);
       })

@@ -304,6 +304,17 @@ export interface ApiProvider {
   managed_config_id?: string;
   /** When source='managed', JSON dump of fields not mapped into typed columns */
   managed_extra_json?: string;
+  /**
+   * Model cost multiplier relative to the baseline model (1.0x), as computed
+   * by the account backend. NOT a DB column — GET /api/providers lifts it out
+   * of `managed_extra_json` so the model pickers get a typed number without
+   * parsing that blob (see src/lib/model-multiplier.ts).
+   *
+   * Undefined for local/BYOK rows and for managed rows synced before the
+   * server shipped the field. Render nothing when absent — never default to
+   * 1.0, which would state a cost the backend never sent.
+   */
+  model_multiplier?: number;
   created_at: string;
   updated_at: string;
 }

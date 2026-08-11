@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getAllProviders, createProvider, getSetting } from '@/lib/db';
 import { getEffectiveProviderProtocol, isValidProtocol } from '@/lib/provider-catalog';
+import { parseManagedMultiplier } from '@/lib/model-multiplier';
 import type { ProviderResponse, ErrorResponse, CreateProviderRequest, ApiProvider } from '@/types';
 
 function maskApiKey(provider: ApiProvider): ApiProvider {
@@ -9,6 +10,22 @@ function maskApiKey(provider: ApiProvider): ApiProvider {
     maskedKey = '***' + maskedKey.slice(-8);
   }
   return { ...provider, api_key: maskedKey };
+}
+
+/**
+ * Lift the managed model's cost multiplier out of `managed_extra_json` into a
+ * typed top-level field.
+ *
+ * The multiplier only exists inside the raw ModelConfig dump (the account
+ * backend added `model_multiplier` after the client's typed columns were
+ * settled). Extracting it here keeps the model pickers off that JSON blob
+ * entirely — it also carries the provider's plaintext auth_token, so parsing
+ * it in the renderer would spread a secret across UI components for the sake
+ * of one number. Local / BYOK rows have no multiplier and stay undefined.
+ */
+function withMultiplier(provider: ApiProvider): ApiProvider {
+  const multiplier = parseManagedMultiplier(provider.managed_extra_json);
+  return multiplier === null ? provider : { ...provider, model_multiplier: multiplier };
 }
 
 /** Check which ANTHROPIC_* env vars are set in the server process environment */
@@ -37,7 +54,7 @@ function detectEnvVars(): Record<string, string> {
 
 export async function GET() {
   try {
-    const providers = getAllProviders().map(maskApiKey);
+    const providers = getAllProviders().map(maskApiKey).map(withMultiplier);
     const envDetected = detectEnvVars();
     return NextResponse.json({
       providers,

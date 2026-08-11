@@ -9,6 +9,7 @@ import { localize } from '@/i18n/zh-hk-runtime';
 import { PromptInputButton } from '@/components/ai-elements/prompt-input';
 import type { ProviderModelGroup } from '@/types';
 import { useManagedMultimodal } from '@/hooks/useManagedMultimodal';
+import { formatMultiplier } from '@/lib/model-multiplier';
 import {
   CommandList,
   CommandListSearch,
@@ -160,6 +161,10 @@ export function ModelSelectorDropdown({
         providerName: mp.name,
         modelValue: firstModel?.value ?? currentModelValue,
         isMultimodal: mp.isMultimodal,
+        // null when the account backend hasn't pushed a multiplier for this
+        // model — the row then renders no badge at all rather than a made-up
+        // 1.0x (see src/lib/model-multiplier.ts).
+        multiplierLabel: formatMultiplier(mp.multiplier),
       };
     })
     .filter((item) => !mq || item.providerName.toLowerCase().includes(mq));
@@ -215,15 +220,24 @@ export function ModelSelectorDropdown({
                     onClick={() => handleModelSelect(item.providerId, item.modelValue)}
                     className="justify-between"
                   >
-                    <span className="font-mono text-xs flex items-center gap-1.5">
-                      {item.providerName}
+                    <span className="font-mono text-xs flex items-center gap-1.5 min-w-0">
+                      <span className="truncate">{item.providerName}</span>
+                      {/* Cost multiplier — kept right after the name (and
+                          ahead of the「多模态」suffix) because it is what the
+                          user weighs when picking a model. shrink-0 so it
+                          survives when a long name ellipsizes. */}
+                      {item.multiplierLabel && (
+                        <span className="shrink-0 text-muted-foreground tabular-nums">
+                          {item.multiplierLabel}
+                        </span>
+                      )}
                       {item.isMultimodal && (
-                        <span className="text-muted-foreground/60">
+                        <span className="shrink-0 text-muted-foreground/60">
                           {t('composer.multimodalSuffix' as TranslationKey)}
                         </span>
                       )}
                       {isDefault && (
-                        <span className="text-[9px] px-1 py-0 rounded bg-primary/10 text-primary font-medium">
+                        <span className="shrink-0 text-[9px] px-1 py-0 rounded bg-primary/10 text-primary font-medium">
                           {localize(locale, '默认', 'Default')}
                         </span>
                       )}
