@@ -975,7 +975,7 @@ const zhHK: Record<TranslationKey, string> = {
   'globalSearch.toolLabel': '工具',
 
   // ── Message list ────────────────────────────────────────────
-  'messageList.claudeChat': 'CMWork',
+  'messageList.claudeChat': 'AIMate',
   'messageList.emptyDescription': '',
   'messageList.loadEarlier': '加載更早的消息',
   'messageList.loading': '加載中...',
@@ -1010,9 +1010,9 @@ const zhHK: Record<TranslationKey, string> = {
   'streaming.preparing': '組織回覆中...',
   'streaming.generating': '生成中',
   'streaming.noContentTimeout': '**錯誤：** {secs} 秒內未收到模型的任何實質回應，連線可能已卡住或中斷。',
-  'turnNotify.completedBody': 'CMWork 正在等待你的輸入',
+  'turnNotify.completedBody': 'AIMate 正在等待你的輸入',
   'turnNotify.errorBody': '回覆中斷出錯，點擊查看詳情',
-  'turnNotify.questionBody': 'CMWork 向你提出了一個問題',
+  'turnNotify.questionBody': 'AIMate 向你提出了一個問題',
   'streaming.allowForSession': '本次會話允許',
   'streaming.allowed': '已允許',
   'streaming.denied': '已拒絕',
@@ -1031,11 +1031,11 @@ const zhHK: Record<TranslationKey, string> = {
 
   // ── Settings: General ───────────────────────────────────────
   'settings.title': '設置',
-  'settings.description': '管理 CMWork 和 Claude Code 設置',
+  'settings.description': '管理 AIMate 和 Claude Code 設置',
   'settings.general': '通用',
   'settings.providers': '服務商',
   'settings.claudeCli': 'Agent',
-  'settings.codepilot': 'CMWork',
+  'settings.codepilot': 'AIMate',
   'settings.version': '版本 {version}',
   'settings.checkForUpdates': '檢查更新',
   'settings.checking': '檢查中...',
@@ -1119,7 +1119,7 @@ const zhHK: Record<TranslationKey, string> = {
   'cli.enableClaude': '啓用 Claude Code',
   'cli.enableClaudeDesc': '關閉時使用原生 AI SDK 作為後端，開啓後使用 Claude Code 作為後端。',
   'cli.agentRuntime': 'Agent 運行時',
-  'cli.agentRuntimeDesc': '選擇 CMWork 執行 Agent 任務的方式',
+  'cli.agentRuntimeDesc': '選擇 AIMate 執行 Agent 任務的方式',
   'cli.runtimeNative': '原生 Runtime (AI SDK)',
   'cli.runtimeSdk': 'Claude Code SDK',
   'cli.cliStatus': '狀態',
@@ -1463,7 +1463,7 @@ const zhHK: Record<TranslationKey, string> = {
   'connection.missingGitDesc': 'Claude Code 需要 Git for Windows 才能正常運行。缺少 Git 會導致所有命令以 exit code 1 失敗。',
   'connection.installGit': '一鍵安裝 Git',
   'connection.gitInstalling': '安裝中...',
-  'connection.gitInstallSuccess': 'Git 安裝成功！請重啓 CMWork。',
+  'connection.gitInstallSuccess': 'Git 安裝成功！請重啓 AIMate。',
   'connection.gitInstallFailed': '自動安裝失敗，請手動下載安裝。',
   'connection.downloadGit': '手動下載',
   'connection.recheck': '重新檢測',
@@ -1474,7 +1474,7 @@ const zhHK: Record<TranslationKey, string> = {
   'connection.versionCompare': 'v{current} → v{latest}',
   'connection.upgradeButton': '升級 CLI',
   'connection.upgrading': '升級中...',
-  'connection.upgradeSuccess': '升級成功！請重啓 CMWork 以應用更新。',
+  'connection.upgradeSuccess': '升級成功！請重啓 AIMate 以應用更新。',
   'connection.upgradeFailed': '升級失敗，請手動執行：',
   'connection.checkUpgrade': '檢查更新',
   'connection.manualUpdateHint': '當前安裝渠道不會自動更新，點擊下方按鈕檢查並安裝新版本。',
@@ -1570,10 +1570,10 @@ const zhHK: Record<TranslationKey, string> = {
   'update.downloading': '下載中',
   'update.restartToUpdate': '重啓以更新',
   'update.restartNow': '立即重啓',
-  'update.readyToInstall': 'CMWork v{version} 已就緒 — 重啓以完成更新',
+  'update.readyToInstall': 'AIMate v{version} 已就緒 — 重啓以完成更新',
   'update.installUpdate': '下載並安裝',
   'update.later': '稍後',
-  'update.rosettaWarning': 'CMWork 當前正通過 Rosetta 在這台 Apple Silicon Mac 上運行。安裝 arm64 版本可獲得更好的響應速度。',
+  'update.rosettaWarning': 'AIMate 當前正通過 Rosetta 在這台 Apple Silicon Mac 上運行。安裝 arm64 版本可獲得更好的響應速度。',
   'update.recommendedAsset': '推薦下載：{asset}',
   'update.getRecommendedBuild': '下載推薦版本',
   'update.quitApp': '退出應用',
@@ -1759,7 +1759,7 @@ const zhHK: Record<TranslationKey, string> = {
 
   // ── Feishu (Bridge) ──────────────────────────────────────
   'feishu.quickCreate': '快速開始',
-  'feishu.quickCreateDesc': '自動創建飛書機器人並綁定到 CMWork，無需手動配置權限和事件',
+  'feishu.quickCreateDesc': '自動創建飛書機器人並綁定到 AIMate，無需手動配置權限和事件',
   'feishu.quickCreateBtn': '創建並綁定飛書應用',
   'feishu.waitingAuth': '瀏覽器已打開，請在飛書頁面中確認創建...',
   'feishu.createSuccess': '綁定成功：{botName}',
@@ -2429,7 +2429,7 @@ const zhHK: Record<TranslationKey, string> = {
   'mcp.enable': '啓用',
   'mcp.enabled': '已啓用',
   'mcp.disabled': '已禁用',
-  'mcp.managerDesc': '開關控制 CMWork 注入的 MCP 服務。',
+  'mcp.managerDesc': '開關控制 AIMate 注入的 MCP 服務。',
 
   // ── SDK Capabilities: Thinking ────────────────────────────
   'settings.thinkingMode': '思考模式',
@@ -2471,7 +2471,7 @@ const zhHK: Record<TranslationKey, string> = {
   'cliTools.path': '路徑',
   'cliTools.brewNotInstalled': '未檢測到 Homebrew',
   'cliTools.brewInstallGuide': '大部分推薦工具依賴 Homebrew 安裝，請先在終端中運行以下命令安裝：',
-  'cliTools.viewDocs': '查看 CMWork 官方文檔',
+  'cliTools.viewDocs': '查看 AIMate 官方文檔',
   'cliTools.searchPlaceholder': '搜索 CLI 工具...',
   'cliTools.noToolsDetected': '還沒有檢測到已安裝的 CLI 工具',
   'cliTools.goInstall': '去安裝 CLI 工具',
@@ -2614,7 +2614,7 @@ const zhHK: Record<TranslationKey, string> = {
   'terminal.exited': '進程已退出',
 
   // ── Setup Center ──────────────────────────────────────────────
-  'setup.title': '歡迎使用 CMWork',
+  'setup.title': '歡迎使用 AIMate',
   'setup.subtitle': '配置 Agent 引擎、服務商和工作目錄。',
   'setup.skipAndEnter': '跳過並進入',
   'setup.progress': '{completed}/3 已完成',
@@ -2624,12 +2624,12 @@ const zhHK: Record<TranslationKey, string> = {
 
   // Setup: Welcome card
   'setup.welcome.title': '歡迎',
-  'setup.welcome.description': 'CMWork 是多模型 AI Agent 桌面客户端。連接任意 AI 服務商，通過 MCP 和 Skills 擴展能力，讓你的助理學會你的工作方式。',
+  'setup.welcome.description': 'AIMate 是多模型 AI Agent 桌面客户端。連接任意 AI 服務商，通過 MCP 和 Skills 擴展能力，讓你的助理學會你的工作方式。',
 
   // Setup: Claude Code card
   'setup.claude.title': 'Claude Code',
   'setup.claude.description': 'Claude Code 已隨應用一同分發，無需單獨安裝。',
-  'setup.claude.bundled': '已內置於 CMWork',
+  'setup.claude.bundled': '已內置於 AIMate',
   'setup.claude.detected': '已檢測到 Claude Code',
   'setup.claude.notFound': '未找到 Claude Code',
   'setup.claude.conflict': '檢測到多個安裝版本，可能導致版本衝突',
@@ -2646,7 +2646,7 @@ const zhHK: Record<TranslationKey, string> = {
 
   // Setup: Provider card
   'setup.provider.title': 'API 服務商',
-  'setup.provider.description': '配置 CMWork 連接 AI 模型的方式。',
+  'setup.provider.description': '配置 AIMate 連接 AI 模型的方式。',
   'setup.provider.envDetected': '檢測到環境變量 — 使用 Claude Code 環境變量作為服務商。',
   'setup.provider.useEnv': '使用 Claude Code 環境',
   'setup.provider.noProvider': '未配置服務商。選擇一個預設開始。',
@@ -2800,7 +2800,7 @@ const zhHK: Record<TranslationKey, string> = {
   'auth.noManagedConfigs': '暫無託管配置',
   'auth.managedTag': '帳號託管',
   'auth.managedReadOnly': '由帳號下發，不可在此編輯',
-  'auth.accountCardTitle': '登入 CMWork 帳號',
+  'auth.accountCardTitle': '登入 AIMate 帳號',
   'auth.accountCardSubtitle': '登入後直接獲得已配置好的模型 Provider，無需自行填寫 API Key',
   'auth.accountCardPlan': '套餐：{plan}',
   'auth.email': '郵箱',
@@ -2817,7 +2817,7 @@ const zhHK: Record<TranslationKey, string> = {
 
   // ─── 內置插件面板（GSD） ───
   'settings.plugins.title': '插件',
-  'settings.plugins.subtitle': 'CMWork 內置的插件，可在此啓用/禁用、重新同步或卸載。',
+  'settings.plugins.subtitle': 'AIMate 內置的插件，可在此啓用/禁用、重新同步或卸載。',
   'settings.plugins.electronOnly': '此面板需要在 Electron 桌面端運行。',
 
   'settings.gsd.description': 'GSD（Get-Shit-Done）是 TÂCHES 出品的元提示詞系統，提供 /gsd-* 斜槓命令和 33 個專用子 agent。基於 gsd-build/get-shit-done 內置打包（MIT 協議）。',

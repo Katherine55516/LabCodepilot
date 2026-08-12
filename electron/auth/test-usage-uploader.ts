@@ -98,7 +98,7 @@ async function runUpload(reason: string): Promise<void> {
     if (days.length > 0) {
       await uploadTestUsage({
         device_id: getOrCreateDeviceId(),
-        device_name: `${os.hostname()} (CMWork)`,
+        device_name: `${os.hostname()} (AIMate)`,
         app_version: app.getVersion(),
         tz: TZ,
         days,

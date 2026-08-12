@@ -29,7 +29,7 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "CMWork",
+  title: "AIMate",
   description: "A multi-model AI agent desktop client",
 };
 

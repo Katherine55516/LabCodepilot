@@ -82,8 +82,8 @@ export function FeatureAnnouncementDialog() {
 
           <>
             <p>{localize(locale,
-              'CMWork 现在可以脱离 Claude Code CLI 独立运行了。',
-              'CMWork can now run independently without the Claude Code CLI.'
+              'AIMate 现在可以脱离 Claude Code CLI 独立运行了。',
+              'AIMate can now run independently without the Claude Code CLI.'
             )}</p>
             <div className="space-y-2 text-muted-foreground">
               <p>

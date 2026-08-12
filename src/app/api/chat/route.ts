@@ -51,7 +51,7 @@ export async function POST(request: NextRequest) {
     if (!hasCodePilotProvider()) {
       return new Response(
         JSON.stringify({
-          error: 'No provider configured in CMWork.',
+          error: 'No provider configured in AIMate.',
           code: 'NEEDS_PROVIDER_SETUP',
           actionHint: 'open_setup_center',
           initialCard: 'provider',

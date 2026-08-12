@@ -30,7 +30,7 @@ const WINDOW_OPTIONS = {
   minimizable: true,
   maximizable: false,
   fullscreenable: false,
-  title: 'CMWork — 登录账号',
+  title: 'AIMate — 登录账号',
   backgroundColor: '#0a0a0a',
 } as const;
 

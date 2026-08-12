@@ -17,7 +17,7 @@ export function CodePilotLogo({ className }: CodePilotLogoProps) {
   return (
     <img
       src="/brand/anl-logo.png"
-      alt="CMWork"
+      alt="AIMate"
       className={cn('object-contain', className)}
     />
   );

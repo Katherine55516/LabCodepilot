@@ -101,7 +101,7 @@ export async function fetchMe(): Promise<MeInfo> {
 export async function registerDevice(): Promise<void> {
   const payload = {
     device_id: getOrCreateDeviceId(),
-    device_name: `${os.hostname()} (CMWork)`,
+    device_name: `${os.hostname()} (AIMate)`,
     os: process.platform,
     os_version: os.release(),
     app_version: app.getVersion(),

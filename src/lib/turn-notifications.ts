@@ -110,7 +110,7 @@ async function fetchSessionTitle(sessionId: string): Promise<string | null> {
  */
 async function showAskNotification(sessionId: string, questionText: string | null, navigate: (sessionId: string) => void): Promise<void> {
   const locale = currentLocale();
-  const title = (await fetchSessionTitle(sessionId)) ?? 'CMWork';
+  const title = (await fetchSessionTitle(sessionId)) ?? 'AIMate';
   const trimmed = (questionText ?? '').trim();
   const body = trimmed
     ? (trimmed.length > 100 ? `${trimmed.slice(0, 100)}...` : trimmed)
@@ -120,7 +120,7 @@ async function showAskNotification(sessionId: string, questionText: string | nul
 
 async function showTurnNotification(sessionId: string, phase: string, navigate: (sessionId: string) => void): Promise<void> {
   const locale = currentLocale();
-  const title = (await fetchSessionTitle(sessionId)) ?? 'CMWork';
+  const title = (await fetchSessionTitle(sessionId)) ?? 'AIMate';
   const body = phase === 'error'
     ? translate(locale, 'turnNotify.errorBody')
     : translate(locale, 'turnNotify.completedBody');

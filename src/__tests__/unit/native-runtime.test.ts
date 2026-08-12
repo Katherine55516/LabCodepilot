@@ -231,7 +231,7 @@ describe('System prompt builder', () => {
   it('includes base prompt', async () => {
     const { buildSystemPrompt } = await import('@/lib/agent-system-prompt');
     const prompt = buildSystemPrompt();
-    assert.ok(prompt.includes('CMWork'));
+    assert.ok(prompt.includes('AIMate'));
   });
 
   it('includes working directory', async () => {
