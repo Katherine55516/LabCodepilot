@@ -227,8 +227,16 @@ function extractTokenUsage(msg: SDKResultMessage): TokenUsage | null {
  * input + cache_read + cache_creation 不含跨内部请求累加，适合作为当前上下文占用。
  * 探针实测：整轮 result.usage.cacheR 会随回合内 N 次工具调用累加（一次回合 17 次请求
  * → cacheR 虚高 6.5×），而单条 assistant 请求的值是平的、等于真实驻留量。
+ *
+ * 仅主链消息参与占用口径：子代理(sidechain)的 assistant 消息带
+ * parent_tool_use_id，其 usage 是子代理自己那条独立小上下文的，不是主链
+ * 驻留量——回合以 Task/子代理请求收尾时若不过滤，占用数会从主链的上百 K
+ * 骤降到子代理的几 K。这里直接返回 null，让主链最后一次请求的值留任。
+ *
+ * 导出仅为单测（assistant-usage-sidechain.test.ts），生产只在本文件内用。
  */
-function extractAssistantTurnUsage(msg: SDKAssistantMessage): TokenUsage | null {
+export function extractAssistantTurnUsage(msg: SDKAssistantMessage): TokenUsage | null {
+  if (msg.parent_tool_use_id != null) return null; // sidechain → 不参与
   const u = msg.message?.usage as {
     input_tokens?: number;
     output_tokens?: number;
@@ -1735,7 +1743,8 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
                 });
               }
               const assistantMsg = message as SDKAssistantMessage;
-              // FIX(占用口径): 记录最新一条 assistant 请求的单次 usage，回合结束用它覆盖累计值。
+              // FIX(占用口径): 记录最新一条主链 assistant 请求的单次 usage，回合结束用它
+              // 覆盖累计值。sidechain 过滤在 extractAssistantTurnUsage 内部。
               const turnUsage = extractAssistantTurnUsage(assistantMsg);
               if (turnUsage) lastAssistantUsage = turnUsage;
               // Text deltas are handled by stream_event for real-time streaming.

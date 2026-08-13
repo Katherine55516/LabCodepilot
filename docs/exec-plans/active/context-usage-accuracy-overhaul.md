@@ -12,7 +12,7 @@
 
 | Phase | 内容 | 状态 | 备注 |
 |-------|------|------|------|
-| Phase 1 | 分子正确性 + 权威值交付链（sidechain 过滤、探针结果实时到达 UI） | 📋 待开始 | 对"不准"体感贡献最大 |
+| Phase 1 | 分子正确性 + 权威值交付链（sidechain 过滤、探针结果实时到达 UI） | 🔄 进行中 | 1A sidechain 过滤已完成（含单测 4 条）；1B/1C 待做 |
 | Phase 2 | 分母统一 resolver（UI 与服务端压缩同源） | 📋 待开始 | 修 managed 1M 模型压缩误触发 |
 | Phase 3 | 压缩权威二选一 + 预算边界修正 | 📋 待开始 | 修"估算的不是实际发送的上下文" |
 | Phase 4 | 明细分类真实化 + 覆盖盲区补齐 + UI 诚实化 | 📋 待开始 | |
@@ -21,9 +21,11 @@
 ## 决策日志
 
 - 2026-08-13: 立项。审计报告的结论逐条对照当前源码复核，全部成立；另发现两个报告未覆盖的问题（D0 背景）。
-- 待拍板 D1（分母来源）：是否让 live `modelUsage[model].contextWindow` 优先于静态表（推翻 2026-06 的"分母始终静态表"决策）。**推荐：live 优先、静态表兜底**——6 月逐模型实测两者已一致（9 模型全对齐，Kimi 修正后），live 值可自动跟随后端窗口调整（Qwen 曾 200K→1M），维护成本归零；静态表保留为无 live 值时的回退，不删除。
-- 待拍板 D2（压缩权威）：resume 主路径是否停用应用侧 pre-compression、交给 CLI auto-compact。**推荐：停用**（详见 Phase 3 理由）。
-- 待拍板 D3（cowork 沙箱探针）：容器会话 transcript 在远端 volume，本地探针必然失败。**推荐：先接受 fallback + "近似"徽标（零成本），把"helper 从 volume 拉 transcript 本地跑探针"另行立项**，不阻塞主线。
+- 2026-08-13: **D1-D3 全部按推荐拍板**（用户确认）：D1 = live `modelUsage.contextWindow` 优先、静态表兜底；D2 = resume 路径停用应用侧 pre-compression，交 CLI auto-compact；D3 = cowork 本期只做"近似"徽标，volume 拉 transcript 另行立项。
+- 2026-08-13: Phase 1A 实现细节：sidechain 过滤下沉到 `extractAssistantTurnUsage` 内部（`parent_tool_use_id != null` → 返回 null），而非调用点判断——函数语义即"提取可代表主链驻留上下文的单次 usage"，且导出后可直接单测（assistant-usage-sidechain.test.ts）。`parent_tool_use_id: string | null` 为 SDK 一等类型字段（sdk.d.ts:2879），子代理消息必带，已核实无需运行时探字段。
+- 已拍板 D1（分母来源）：是否让 live `modelUsage[model].contextWindow` 优先于静态表（推翻 2026-06 的"分母始终静态表"决策）。**推荐：live 优先、静态表兜底**——6 月逐模型实测两者已一致（9 模型全对齐，Kimi 修正后），live 值可自动跟随后端窗口调整（Qwen 曾 200K→1M），维护成本归零；静态表保留为无 live 值时的回退，不删除。
+- 已拍板 D2（压缩权威）：resume 主路径是否停用应用侧 pre-compression、交给 CLI auto-compact。**推荐：停用**（详见 Phase 3 理由）。
+- 已拍板 D3（cowork 沙箱探针）：容器会话 transcript 在远端 volume，本地探针必然失败。**推荐：先接受 fallback + "近似"徽标（零成本），把"helper 从 volume 拉 transcript 本地跑探针"另行立项**，不阻塞主线。
 
 ## 一、问题定位（已逐条对照当前源码确认）
 
