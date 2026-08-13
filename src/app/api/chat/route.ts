@@ -506,7 +506,27 @@ export async function POST(request: NextRequest) {
         contextWindow * 0.7 - estimate.breakdown.system - estimate.breakdown.summary - estimate.breakdown.userMessage
       );
 
-      if (needsCompression(estimate.total, contextWindow, session_id)) {
+      // FIX(压缩权威二选一 3A): resume 路径不做应用侧预压缩。
+      //
+      // resume 时真实上下文是 CLI 自己的 transcript,而这里的 estimate 估的是
+      // 「DB 归一化历史 + 4B/token」—— 不含 CLI preset system prompt、内置工具
+      // schemas、MCP schemas、skills、memory,也不知道 CLI 是否已 auto-compact。
+      // 两个方向都会错:工具/MCP 重时严重偏低(压缩过晚);CLI 已 compact 而 DB
+      // 历史很长时偏高,于是用一份内容完全不同的粗估,去清掉 sdk_session_id、
+      // 抛弃真实 transcript。压缩权威二选一:resume 路径交给 CLI 的
+      // auto-compact(它按真实 totalTokens 触发)。
+      //
+      // 兜底仍在:CONTEXT_TOO_LONG 的 reactive 重试链(claude-client PTL retry)
+      // 不受影响 —— 那条链由**真实**的 prompt-too-long 信号触发,不是估算。
+      // 预压缩只保留给 fresh/fallback 路径(无 sdk_session_id):那里 DB 历史
+      // 就是真正要发送的内容,estimator 的输入集合成立。
+      // fallbackTokenBudget 仍照常计算:resume 失败会回落到 buildFinalPrompt(true)。
+      const preCompressionApplies = !streamSdkSessionId;
+      if (!preCompressionApplies) {
+        const pct = ((estimate.total / contextWindow) * 100).toFixed(1);
+        console.log(`[chat API] resume path — pre-compression skipped (CLI auto-compact owns it); DB-history estimate ${pct}% is advisory only`);
+      }
+      if (preCompressionApplies && needsCompression(estimate.total, contextWindow, session_id)) {
         console.log(`[chat API] Context at ${((estimate.total / contextWindow) * 100).toFixed(1)}% — triggering compression`);
 
         // Slice keep/compress on the raw DB rows (with _rowid) FIRST, then

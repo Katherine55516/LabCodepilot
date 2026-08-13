@@ -344,10 +344,15 @@ function buildFallbackContext(params: {
   }));
 
   // Select messages within token budget (walk backward from newest).
-  // Floor at 10K tokens so even extreme sessions keep some recent context.
-  const effectiveBudget = tokenBudget != null ? Math.max(tokenBudget, 10000) : undefined;
+  // FIX(预算边界 3B): 预算不足时下限是 0，不是 10K。旧代码把任何预算强抬到
+  // 10K —— 当 system prompt + summary + 当前用户消息已经吃满窗口(预算算出来
+  // 是负数)时，仍硬塞 10K 历史，叠加未计入的 CLI/tool/MCP overhead 直接把
+  // 回合推进 prompt-too-long。预算耗尽时正确行为是只发 summary + prompt。
+  // 注意 0 是合法预算：必须用 !== undefined 判断，写成 if (effectiveBudget)
+  // 会让 0 落进 else 分支、反而发送**全部**历史。
+  const effectiveBudget = tokenBudget != null ? Math.max(tokenBudget, 0) : undefined;
   let selected: typeof normalized;
-  if (effectiveBudget) {
+  if (effectiveBudget !== undefined) {
     selected = [];
     let accumulated = 0;
     for (let i = normalized.length - 1; i >= 0; i--) {
@@ -368,6 +373,13 @@ function buildFallbackContext(params: {
     lines.push(sessionSummary);
     lines.push('</session-summary>');
     lines.push('');
+  }
+
+  // 预算 0 / 一条都塞不下 → 不发空的 conversation_history 块（那段前导说明
+  // 本身也要几十 token，且空块会让模型以为"历史是空的"）。
+  if (selected.length === 0) {
+    lines.push(prompt);
+    return lines.join('\n');
   }
 
   lines.push('<conversation_history>');
@@ -2313,10 +2325,20 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
             const newSummaryTokens = roughTokenEstimate(compResult.summary);
             const promptTokens = roughTokenEstimate(prompt);
             const systemTokens = roughTokenEstimate(systemPrompt || '');
-            // Use a conservative 50% of actual context window for retry
-            const { getContextWindow } = await import('./model-context');
-            const ctxWindow = getContextWindow(model || 'sonnet', { context1m: !!context1m }) || 200000;
-            const retryBudget = Math.max(10000, Math.floor(ctxWindow * 0.5 - systemTokens - newSummaryTokens - promptTokens));
+            // Use a conservative 50% of actual context window for retry.
+            // FIX(分母统一 2B): 走同一个 resolver —— connectedModel 带 [1m]
+            // 时旧的 getContextWindow(model) 解析不出 1M。
+            // FIX(预算边界 3B): 下限 0 而非 10K。这条路径是**刚刚**因
+            // prompt-too-long 失败的重试,再硬塞 10K 历史等于原地复发。
+            const { resolveContextWindow } = await import('./context-window-resolver');
+            const ctxWindow = resolveContextWindow({
+              // 此处在流闭包外，拿不到 SDK init 回填的 connectedModel；
+              // options.model 即请求模型名，[1m] 别名同样带在它上面。
+              runtimeModelName: model,
+              model: model || 'sonnet',
+              context1m: !!context1m,
+            }) || 200000;
+            const retryBudget = Math.max(0, Math.floor(ctxWindow * 0.5 - systemTokens - newSummaryTokens - promptTokens));
             console.log(`[claude-client] Compressed ${compResult.messagesCompressed} messages for PTL retry, budget=${retryBudget}`);
 
             // Clear stale session so retry starts fresh

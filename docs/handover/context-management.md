@@ -11,7 +11,7 @@
 
 核心能力：
 - **上下文预估** — 发送前估算 token 用量，决定是否触发压缩
-- **自动压缩** — 超过 80% 窗口时用 LLM 生成对话摘要
+- **自动压缩** — 超过 80% 窗口时用 LLM 生成对话摘要（**仅 fresh/fallback 路径**，见下）
 - **消息归一化** — 剥离元数据、摘要化工具调用、按年龄截断
 - **PTL 被动压缩** — API 返回 prompt_too_long 时自动压缩重试
 - **前端可视化** — 双指标（实际用量 + 下一轮预估）+ 压缩状态
@@ -57,7 +57,9 @@ src/lib/
 
 LLM 压缩引擎。
 
-- `needsCompression(tokens, window, sessionId)` — 阈值 80% + 熔断器检查
+- `needsCompression(tokens, window, sessionId)` — 阈值 80% + 熔断器检查。
+  **调用方必须先判 `!streamSdkSessionId`**（route.ts 的 `preCompressionApplies`）：
+  resume 路径不走这条判断，见「压缩权威二选一」
 - `compressConversation(params)` — 主压缩函数：
   1. 通过 `resolveProvider({ useCase: 'small' })` 解析压缩用模型
   2. 用 `normalizeMessageContent` 清理消息后截断到 800 字符
@@ -96,7 +98,9 @@ LLM 压缩引擎。
 ├── 3. 计算 fallback token 预算
 │   budget = window * 0.7 - system - summary - userMessage
 │
-├── 4. needsCompression(estimate.total, window, sessionId)?
+├── 4. preCompressionApplies（= 无 sdk_session_id）&& needsCompression(...)?
+│   │   ⚠️ resume 路径（有 sdk_session_id）直接跳过 —— 压缩权威归 CLI
+│   │      auto-compact，详见下方「压缩权威二选一」
 │   │
 │   ├── YES → 确定 keep/compress 分界线（保留最近 50% 窗口）
 │   │   ├── compressConversation(older messages)
@@ -143,7 +147,8 @@ SDK 返回 CONTEXT_TOO_LONG 错误
 │
 ├── normalize + microCompact 每条消息（年龄分级）
 │
-├── token 预算截断（从最新往回累加，budget 下限 10K）
+├── token 预算截断（从最新往回累加，budget 下限 **0**；预算耗尽 → 只发
+│   summary + prompt，不发空的 conversation_history 块）
 │
 ├── 组装输出：
 │   ├── <conversation_summary> (如有 summary)
@@ -242,6 +247,34 @@ PTL（Prompt Too Long）是 API 层面的硬限制。处理策略：
 
 相关 commit: `03d8f00`, `3f90039`
 
+### 6.5 压缩权威二选一（2026-08-13，Phase 3A）
+
+**一个会话只能有一个压缩权威。** resume 路径下，模型实际看到的上下文是
+Claude Code 自己的 transcript；而 `estimateContextTokens` 估的是「DB 归一化
+历史 + 4B/token」——不含 CLI preset system prompt、内置工具 schemas、MCP
+schemas、skills、memory，也不知道 CLI 是否已经 auto-compact 过。两个方向都
+会错：
+
+- 工具 / MCP 很重时估算严重偏低 → 压缩触发过晚；
+- CLI 已 auto-compact 而 DB 历史仍很长 → 估算偏高，提前触发。
+
+而预压缩成功的副作用是 `updateSdkSessionId(session_id, '')`：用一份内容完全
+不同的粗估，去清掉并抛弃真实 transcript，换成应用自己的 summary。卡片、模型
+实际上下文、DB 状态三者从此脱节，且静默发生。
+
+**现行规则（route.ts `preCompressionApplies`）：**
+
+| 路径 | 压缩权威 | 说明 |
+|---|---|---|
+| resume（有 `sdk_session_id`） | **CLI auto-compact** | 应用侧预压缩跳过；CLI 按真实 totalTokens 触发 |
+| fresh / fallback（无 `sdk_session_id`） | 应用侧预压缩 | DB 历史就是真正要发送的内容，estimator 输入集合成立 |
+| 任意路径遇 prompt_too_long | PTL reactive compact | 由**真实**错误信号触发，不是估算；不受此门影响 |
+
+resume 路径仍照常计算 `fallbackTokenBudget`：resume 失败会回落到
+`buildFinalPrompt(true)`，那时需要预算。
+
+约束由 `src/__tests__/unit/context-budget-and-gating.test.ts` 源码扫描锁住。
+
 ### 7. 媒体项数量限制
 
 API 硬限制 100 个媒体项。实现策略：
@@ -288,6 +321,9 @@ PTL reactive compact 期间，`stream-session-manager` 收到 `context_compressi
 4. **Compact 后无上下文恢复** — Claude Code 在 compact 后会恢复最近读取的文件、活跃的 plan 等。AI Native Lab 只有 summary + 最近消息
 5. **单模型压缩** — 压缩和主对话用同一个 provider 通道，如果 provider 限流可能影响压缩质量
 6. **无 blocking 阈值** — 没有阻止用户继续发送的硬限制，极端情况下可能连续触发 PTL
+7. **resume 路径的窗口预警只是提示** — 应用侧不再在 resume 路径主动压缩（见 6.5），
+   CLI auto-compact 的触发点与卡片显示的百分比不完全同步（CLI 的 effective window
+   还含 autocompact buffer）
 
 ## 关键文件索引
 
