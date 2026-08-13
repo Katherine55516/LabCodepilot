@@ -143,3 +143,31 @@ CLI 2.1.201 实测可用，无需登录态、无 API 调用，输出 markdown �
 **最终形态（方案 A，"临时 HOME 无凭据探针"）**：回合门整体拆除（恢复 string prompt），聊天进程内不再调 getContextUsage；result 时 fire `context-usage-probe.ts`：延迟 1.5s → mkdtemp 假 HOME → 按 cwd slug 拷贝 transcript 副本 → 剥离全部凭据 resume → 本地估算 getContextUsage（~200ms）→ patchLatestAssistantTokenUsage 后补 → 整个临时 HOME 删除。收益：网关 82 请求/回合 → 0；后补命中率从约一半（60s 超时+串轮）升到接近全部；真实 ~/.claude 零写入（直连 resume 实测会 +266B 追加、forkSession 会留副本且挂起输入模式下 init 不进 iterator 拿不到 forked id——两条路都被临时 HOME 形态绕开）。
 
 **升级回归项（SDK/CLI 升级时必跑）**：① 无凭据探针对任意历史会话的 totalTokens 是否仍与带凭据一致（5 分钟：`ANTHROPIC_BASE_URL` 指向记录 stub 对照）；② transcript slug 规则（`'-' + cwd.replace(/\//g,'-')`，仅 POSIX 实测；Windows 未验证故探针在 win32 禁用）；③ 挂起输入模式下 getContextUsage 控制通道仍可用。
+
+### 第三次复核（2026-08-13，上下文用量计算正确性改造 Phase 4/5）
+
+改造背景与全景见执行计划 [context-usage-accuracy-overhaul.md](../exec-plans/active/context-usage-accuracy-overhaul.md)。本次对探针本身的两点复核：
+
+**① 分类明细不可用（新结论，n=2 实测）。** 上文「待真实环境复核：快照 categories 是否含 System prompt / System tools 行」现在有答案了，而且是否定的：探针的临时 HOME 里没有 `~/.claude.json` 等配置，所以
+
+- `categories` 恒为 `{Skills, Messages, Free space}`——**`Free space` 是补满 maxTokens 的余量项**（实测 categoriesSum 恰好 = maxTokens），任何"分类求和得占用"的写法都会翻倍；
+- `mcpTools` / `memoryFiles` 恒 0，`systemTools` / `systemPromptSections` 字段**根本不存在**；
+- `model` / `maxTokens` / `autoCompactThreshold` 属于 **CLI 默认模型**，与会话模型无关（两次样本分别是 `claude-fable-5` 与 `claude-opus-5`，彼此都不同）——这印证了当初"刻意不用其 maxTokens 做分母"的判断。
+
+因此探针只有 `totalTokens` 可用（它锚定 transcript 真实 usage，与凭据无关，见上一节）。想要忠实的分类明细，必须是带真实配置/凭据的快照——那条路要么回到 count_tokens 风暴，要么等 SessionActor 形态下能复用活 Query 的场景再评估。卡片因此不展示假分类，改为标注数据来源（精确值 / 近似值）。
+
+**② 对照工具已入库。** 上文提到的"脚本未入库（临时验证件）"已修正：
+
+```bash
+node scripts/dev/context-usage-probe-dump.mjs <cwd> <sdkSessionId>
+```
+
+与生产探针同构（临时 HOME + transcript 副本 + 剥凭据），但把整份响应摊开打印。SDK/CLI 升级回归时先跑它：**若 elapsedMs 从百毫秒级突然变成几十秒，说明 CLI 又开始打 count_tokens 了——那是网关请求风暴的信号，必须停下来查**，不要直接放行升级。
+
+**升级回归项（在上一节三条基础上补充）：**
+
+④ `elapsedMs` 仍为百毫秒级（count_tokens 风暴回归的哨兵）；
+⑤ `totalTokens` 字段仍存在且 > 0（字段改名会让卡片静默退回近似口径——现在这种退化在 UI 上可见了，卡片会显示"近似值"）；
+⑥ 分类结论是否仍成立（若上游改成即使无配置也报完整分类，可重新评估明细展示）。
+
+**运行期观测（Phase 5 新增，仅本地 console，不外发）：** 探针每次执行打一条 `[ctx-probe] <outcome>` —— `patched` / `stale-match` / `empty-snapshot` / `failed` / `skipped`（含原因：`win32-slug-unverified`、`inflight`、`transcript-missing`）。`patched` 行同时记录 `exact`、`fallback`（= input+cacheR+cacheC）与两者偏差百分比和耗时，用于积累"近似口径到底有多不准"的分布——盲区场景（win32 / 办公沙箱 / native）永远只有近似值，判断其可信度只能靠这批数据。

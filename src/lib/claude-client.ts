@@ -2189,6 +2189,12 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
                         output_tokens: tokenUsage.output_tokens,
                       }
                     : null,
+                  // 观测用(Phase 5):卡片回退口径,用于记录与权威值的偏差。
+                  fallbackUsed: tokenUsage
+                    ? tokenUsage.input_tokens +
+                      (tokenUsage.cache_read_input_tokens ?? 0) +
+                      (tokenUsage.cache_creation_input_tokens ?? 0)
+                    : undefined,
                 });
               }
               break;
@@ -2533,6 +2539,11 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
                             output_tokens: usage.output_tokens,
                           }
                         : null,
+                      fallbackUsed: usage
+                        ? usage.input_tokens +
+                          (usage.cache_read_input_tokens ?? 0) +
+                          (usage.cache_creation_input_tokens ?? 0)
+                        : undefined,
                     });
                   }
                   break;

@@ -16,7 +16,7 @@
 | Phase 2 | 分母统一 resolver（UI 与服务端压缩同源） | ✅ 已完成 | 2A live 窗口落库 + 2B resolveContextWindow 两侧共用；CDP 复验行为一致 |
 | Phase 3 | 压缩权威二选一 + 预算边界修正 | ✅ 已完成 | 3A resume 跳过预压缩 + 3B 预算下限 0（含 PTL 重试）+ 3C 文档；dev 实测两条分支 |
 | Phase 4 | 明细分类真实化 + 覆盖盲区补齐 + UI 诚实化 | ✅ 已完成（4A 经实测**改为不做**） | 4B 来源徽标 + 4C 盲区归档 + 4D i18n；4A 被真实数据推翻，理由见决策日志 |
-| Phase 5 | 回归测试 + 观测埋点 | 📋 待开始 | |
+| Phase 5 | 回归测试 + 观测埋点 | ✅ 已完成 | 单测五组齐；探针观测日志（含偏差）实测；对照工具入库 |
 
 ## 决策日志
 
@@ -28,6 +28,7 @@
 - 2026-08-13: Phase 3 完成。实现要点与计划外的发现：① 3A 门 = `preCompressionApplies = !streamSdkSessionId`，`fallbackTokenBudget` 仍在门外无条件计算（resume 失败会回落 `buildFinalPrompt(true)`，那时需要预算）。② **3B 的隐藏陷阱**：把 floor 改成 0 后，原来的 `if (effectiveBudget)` 会让预算 0 落进 else 分支、反而发送**全部**历史 —— 必须同时改成 `!== undefined`；另补一条：选中为空时不再输出空的 `<conversation_history>` 块（那段前导说明本身也要几十 token）。③ **计划外**：PTL 重试路径（claude-client.ts）有第二处同样的 10K floor，且窗口仍走 `getContextWindow(model)` 未过 resolver —— 那条路径正是刚因 prompt-too-long 失败的重试，硬塞 10K 等于原地复发，一并修掉。④ dev 实测两条分支：resume 会话打出 skip 日志、fresh 会话不打，且估算块无异常（`getLatestAssistantContextUsage` 在 route 中工作正常）；验证用的临时 provider/会话/消息已删除，DB 计数回到改动前（14 providers / 0 active）。
 - 2026-08-13: **Phase 4A（明细分类真实化）实测后决定不做** —— 计划的前提被真实数据推翻。用与探针同构的脚本对两个真实 transcript（LabCodepilot 612K / CoReader 227K）跑 `getContextUsage()`，结果一致：① `categories` 恒为 `{Skills, Messages, Free space}`，`mcpTools`/`memoryFiles` 恒 0，`systemTools`/`systemPromptSections` 字段**根本不存在** —— 因为探针的临时 HOME 里没有 `~/.claude.json` 等配置，这不是会话的真实构成；把它接进卡片的 compiler 会渲染出「MCP 0 / Memory 0 / 系统提示 0」，正是审计 §4.6 点名要避免的「让用户误以为这些分类已被精确测量」。② `maxTokens`/`autoCompactThreshold` 属于**CLI 默认模型**（两次样本分别是 claude-fable-5 与 claude-opus-5，彼此都不同，更与会话模型无关），同样不可用 —— 印证了探针里既有的那条注释。③ `Free space` 是分类之一（categories 求和 = maxTokens），任何"求和得占用"的写法都会翻倍。结论：忠实分类需要带真实配置/凭据的快照（SessionActor 路径），本期改为**不做假精度**，用 4B 的来源标注如实告知。发现已写进 `context-usage-probe.ts` 头注释。
 - 2026-08-13: Phase 4 交付 4B/4C/4D：popover 增来源标注（exact「精确值 · 截至上一回合结束」/ approx「近似值 · 按最近一次请求用量估算」，三语；无数据仍渲染 `—` 不渲染 0%）；覆盖盲区（win32 slug 未实测、**办公沙箱 CLI 在远程容器内跑本机无 transcript**、native runtime）全部归档进探针头注释，由徽标兜底告知。CDP 实测两条分支：有权威值会话显示「精确值」，办公沙箱会话（正是盲区场景）显示「近似值」。win32 slug 实测需 Windows 真机，留待 Phase 5 之外的平台验收。
+- 2026-08-13: Phase 5 完成。① 单测五组齐（sidechain / resolver+opus-4-8 回归 / 压缩 gating / 预算下限 / 端点 match 防串扰），另补 `getLatestAssistantContextUsage` 的 db 层单测（白名单、脏数据丢弃、JSON 损坏 → null）；总计 2767 pass。② 探针观测日志落地（仅本地 console，不外发）：`patched` / `stale-match` / `empty-snapshot` / `failed` / `skipped(win32-slug-unverified|inflight|transcript-missing)`，`patched` 行带 exact/fallback/偏差%/耗时——实测 `patched exact=612500 fallback=550000 deviation=10.2% ms=346`，DB 回填同步验证；跳过路径也逐条实测。③ 对照工具入库 `scripts/dev/context-usage-probe-dump.mjs`，并把 elapsedMs 定为 count_tokens 风暴回归哨兵写进 research 文档的升级回归清单。④ **带凭据的 n≥5 对照未做**：那正是 82 次 count_tokens/次的网关风暴路径，不应为了验证而对公司网关发起；改为把可复跑的工具与判据固化，留给有安全环境时执行。
 - 已拍板 D1（分母来源）：是否让 live `modelUsage[model].contextWindow` 优先于静态表（推翻 2026-06 的"分母始终静态表"决策）。**推荐：live 优先、静态表兜底**——6 月逐模型实测两者已一致（9 模型全对齐，Kimi 修正后），live 值可自动跟随后端窗口调整（Qwen 曾 200K→1M），维护成本归零；静态表保留为无 live 值时的回退，不删除。
 - 已拍板 D2（压缩权威）：resume 主路径是否停用应用侧 pre-compression、交给 CLI auto-compact。**推荐：停用**（详见 Phase 3 理由）。
 - 已拍板 D3（cowork 沙箱探针）：容器会话 transcript 在远端 volume，本地探针必然失败。**推荐：先接受 fallback + "近似"徽标（零成本），把"helper 从 volume 拉 transcript 本地跑探针"另行立项**，不阻塞主线。

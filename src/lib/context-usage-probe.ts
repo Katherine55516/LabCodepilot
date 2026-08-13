@@ -94,21 +94,50 @@ export interface ContextUsageProbeArgs {
   cwd: string;
   /** 防串扰匹配:本回合落库 usage 的 input/output。 */
   match: { input_tokens?: number; output_tokens?: number } | null;
+  /**
+   * 仅用于观测:卡片的回退口径值(input + cacheRead + cacheCreation)。
+   * 与权威 totalTokens 对比出偏差分布 —— 盲区场景(win32/办公沙箱/native)
+   * 永远只有回退值,靠这里积累的数据判断它到底有多不准。不参与任何计算。
+   */
+  fallbackUsed?: number;
 }
 
 /**
  * Fire-and-forget:任何失败都静默(卡片回退旧口径)。绝不 throw。
  */
+/**
+ * 观测(Phase 5):只打本地 console,绝不外发遥测(no-data-to-US 纪律)。
+ * 记录放弃原因与时延,是为了让「卡片为什么还是近似值」可诊断 —— 此前所有
+ * 失败路径都是纯静默的,线上只能靠猜。
+ */
+function logProbe(outcome: string, detail?: Record<string, unknown>): void {
+  const parts = detail
+    ? Object.entries(detail).map(([k, v]) => `${k}=${v}`).join(' ')
+    : '';
+  console.log(`[ctx-probe] ${outcome}${parts ? ' ' + parts : ''}`);
+}
+
 export function fireContextUsageProbe(args: ContextUsageProbeArgs): void {
   const { appSessionId, sdkSessionId, cwd } = args;
   if (!appSessionId || !sdkSessionId || !cwd) return;
-  if (process.platform === 'win32') return; // slug 规则未实测,暂不启用
-  if (inflight.has(appSessionId)) return;
+  if (process.platform === 'win32') {
+    logProbe('skipped', { reason: 'win32-slug-unverified' });
+    return;
+  }
+  if (inflight.has(appSessionId)) {
+    // 上一发还没结束(大会话本地估算慢)。宁缺毋滥:本轮放弃,下回合自然再补。
+    logProbe('skipped', { reason: 'inflight', session: appSessionId.slice(0, 8) });
+    return;
+  }
   inflight.add(appSessionId);
 
   setTimeout(() => {
     runProbe(args)
-      .catch(() => { /* 静默 */ })
+      .catch((err) => {
+        logProbe('failed', {
+          reason: err instanceof Error ? err.message.slice(0, 120) : 'unknown',
+        });
+      })
       .finally(() => inflight.delete(appSessionId));
   }, PROBE_START_DELAY_MS);
 }
@@ -119,8 +148,13 @@ async function runProbe(args: ContextUsageProbeArgs): Promise<void> {
     // userHome() 而非 os.homedir():防 NFT 把变量段通配成 ~/.claude/projects 子树 glob,见 user-home.ts
     userHome(), '.claude', 'projects', slug, `${args.sdkSessionId}.jsonl`,
   );
-  if (!fs.existsSync(realTranscript)) return; // slug 猜错/尚未落盘 → 放弃
+  if (!fs.existsSync(realTranscript)) {
+    // slug 猜错 / 尚未落盘 / **办公沙箱(transcript 在远程容器卷里)** → 放弃。
+    logProbe('skipped', { reason: 'transcript-missing', slug });
+    return;
+  }
 
+  const startedAt = Date.now();
   const probeHome = fs.mkdtempSync(path.join(os.tmpdir(), 'ctx-probe-'));
   const ac = new AbortController();
   const timeout = setTimeout(() => ac.abort(), PROBE_TIMEOUT_MS);
@@ -159,9 +193,23 @@ async function runProbe(args: ContextUsageProbeArgs): Promise<void> {
     if (cu && typeof cu.totalTokens === 'number' && cu.totalTokens > 0) {
       // cli_context_window 刻意不写:探针跑在 CLI 默认模型下,其 maxTokens
       // 不代表会话真实模型的窗口。分母走应用侧解析(用户决策)。
-      patchLatestAssistantTokenUsage(args.appSessionId, args.match, {
+      const patched = patchLatestAssistantTokenUsage(args.appSessionId, args.match, {
         context_used_tokens: cu.totalTokens,
       });
+      // 权威值 vs 卡片回退口径(input+cacheR+cacheC)的偏差。
+      const fallback = args.fallbackUsed;
+      logProbe(patched ? 'patched' : 'stale-match', {
+        exact: cu.totalTokens,
+        ...(fallback && fallback > 0
+          ? {
+              fallback,
+              deviation: `${(((cu.totalTokens - fallback) / cu.totalTokens) * 100).toFixed(1)}%`,
+            }
+          : {}),
+        ms: Date.now() - startedAt,
+      });
+    } else {
+      logProbe('empty-snapshot', { ms: Date.now() - startedAt });
     }
 
     ac.abort();
