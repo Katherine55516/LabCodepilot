@@ -261,3 +261,26 @@ resolveContextWindow(输入: {
 | 5 | ~1 天 | 贯穿各 Phase |
 
 建议提交粒度：1A 单独一个 commit（独立可验证的止血修复）→ 1B+1C → 2 → 3 → 4 → 5，每步 `npm run test` + 冒烟。
+
+## 十、交付结果与剩余事项（2026-08-13）
+
+**已交付（5 个 commit，全部 dev 态验证通过）：**
+
+| Commit | 内容 |
+|---|---|
+| `c8d1109` | 1A sidechain 过滤 |
+| `1f6d3f3` | 1B 权威值回合末拉取闭环 + 1C freshness 语义 + 死通道移除 |
+| `29567da` | 2A live 窗口落库 + 2B 分母统一 resolver |
+| `f662d8d` | 3A 压缩权威二选一 + 3B 预算下限归零（含 PTL 重试）+ 3C 文档 |
+| `c35d083` | 4B 来源徽标 + 4C 盲区归档 + 4D i18n（4A 实测后不做） |
+| `560c7bf` | 5 观测日志 + 对照工具入库 + db 层单测 |
+
+累计：`npm run test` 2767 pass / 0 fail，`npm run test:smoke` 17/17，CDP 验证卡片两种来源分支，dev 实测压缩门两条分支。
+
+**剩余事项（均为环境受限，非代码欠账）：**
+
+1. **打包态验收** —— 本轮全部改动只在 dev 态验证。打包版需复核：探针在打包环境的时延与成功率（观测日志现在能直接读）、卡片来源徽标显示、managed 会话的 live 窗口是否成功落库（dev 无登录体系拿不到 managed 数据）。
+2. **Windows 平台** —— 探针仍禁用（slug 规则未实测），卡片在 win32 恒为"近似值"。放开需要 Windows 真机验证 `~/.claude/projects` 的盘符/反斜杠 slug 规则。
+3. **办公沙箱覆盖** —— 已确认为结构性盲区（CLI 在远程容器，transcript 在容器持久卷）。按 D3 另行立项：helper 从卷里读出 transcript 再在本地跑探针（R 系列文件通道已具备直读能力）。
+4. **带凭据的 n≥5 探针对照** —— 工具与判据已固化（`scripts/dev/context-usage-probe-dump.mjs` + research 文档回归清单），但执行需要一个不会把 82 次 count_tokens 打到公司网关的环境。
+5. **分类明细真实化** —— 需要带真实配置的快照，绑定 SessionActor（审计 P0-B）方向，本计划范围外。
