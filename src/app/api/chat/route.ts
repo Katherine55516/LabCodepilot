@@ -457,18 +457,31 @@ export async function POST(request: NextRequest) {
 
     try {
       const { estimateContextTokens } = await import('@/lib/context-estimator');
-      const { getContextWindow } = await import('@/lib/model-context');
+      const { resolveContextWindow } = await import('@/lib/context-window-resolver');
+      const { getManagedContextWindowByName } = await import('@/lib/model-context');
       const { needsCompression, compressConversation } = await import('@/lib/context-compressor');
-      const { updateSessionSummary } = await import('@/lib/db');
+      const { updateSessionSummary, getLatestAssistantContextUsage } = await import('@/lib/db');
 
       const modelForWindow = resolved.upstreamModel || resolved.model || effectiveModel || 'sonnet';
-      // Pass upstream explicitly so alias lookups (e.g. 'opus') resolve to
-      // the correct per-provider window — first-party opus → 4.7 (1M) vs
-      // Bedrock/Vertex opus → 4.6 (200K).
-      const contextWindow = getContextWindow(modelForWindow, {
+      // FIX(分母统一 2B): 与 UI 卡片共用同一 resolver。此前这里只走静态
+      // catalog 的 substring 匹配 —— managed 模型 id(如 claude-opus-4-8)
+      // 命中子串 'opus' → 200K,而 UI 按展示名表显示 1M:压缩在 ~160K
+      // (80%×200K)误触发并清 sdk_session_id,静默抛弃 CLI transcript。
+      // live 窗口/运行时 [1m] 标记取自该会话最新一条 assistant 的
+      // token_usage(2A 落库);账号侧窗口走 managed 展示名表。
+      const lastTurnCtx = getLatestAssistantContextUsage(session_id);
+      const resolvedWindow = resolveContextWindow({
+        runtimeModelName: lastTurnCtx?.model,
+        liveWindow: lastTurnCtx?.context_window,
+        accountWindow: getManagedContextWindowByName(session.provider_name || undefined),
+        model: modelForWindow,
+        upstreamModel: resolved.upstreamModel,
         context1m: context_1m,
-        upstream: resolved.upstreamModel,
-      }) || 200000;
+      });
+      if (resolvedWindow === null) {
+        console.warn(`[chat API] Context window unresolved for model=${modelForWindow}; falling back to 200K for compression check`);
+      }
+      const contextWindow = resolvedWindow || 200000;
 
       // Estimate using normalized content (matches what buildFallbackContext actually sends).
       // Raw transcript overestimates tool-heavy conversations because normalize + microcompact

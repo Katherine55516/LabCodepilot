@@ -1817,6 +1817,8 @@ export function getLatestAssistantContextUsage(sessionId: string): {
   context_used_tokens?: number;
   context_window?: number;
   context_accounting?: unknown;
+  /** 运行时实际请求的模型名（可能带 [1m]）—— resolver 的最高优先级输入。 */
+  model?: string;
 } | null {
   const db = getDb();
   const row = db.prepare(
@@ -1841,6 +1843,7 @@ export function getLatestAssistantContextUsage(sessionId: string): {
       usage.context_accounting && typeof usage.context_accounting === 'object'
         ? usage.context_accounting
         : undefined,
+    model: typeof usage.model === 'string' && usage.model ? usage.model : undefined,
   };
 }
 

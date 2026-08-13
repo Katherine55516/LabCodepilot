@@ -13,7 +13,7 @@
 | Phase | 内容 | 状态 | 备注 |
 |-------|------|------|------|
 | Phase 1 | 分子正确性 + 权威值交付链（sidechain 过滤、探针结果实时到达 UI） | ✅ 已完成 | 1A/1B/1C 全部完成；CDP 端到端验证 merge 链路（2.6%→3.1% 活更新） |
-| Phase 2 | 分母统一 resolver（UI 与服务端压缩同源） | 📋 待开始 | 修 managed 1M 模型压缩误触发 |
+| Phase 2 | 分母统一 resolver（UI 与服务端压缩同源） | ✅ 已完成 | 2A live 窗口落库 + 2B resolveContextWindow 两侧共用；CDP 复验行为一致 |
 | Phase 3 | 压缩权威二选一 + 预算边界修正 | 📋 待开始 | 修"估算的不是实际发送的上下文" |
 | Phase 4 | 明细分类真实化 + 覆盖盲区补齐 + UI 诚实化 | 📋 待开始 | |
 | Phase 5 | 回归测试 + 观测埋点 | 📋 待开始 | |
@@ -24,6 +24,7 @@
 - 2026-08-13: **D1-D3 全部按推荐拍板**（用户确认）：D1 = live `modelUsage.contextWindow` 优先、静态表兜底；D2 = resume 路径停用应用侧 pre-compression，交 CLI auto-compact；D3 = cowork 本期只做"近似"徽标，volume 拉 transcript 另行立项。
 - 2026-08-13: Phase 1A 实现细节：sidechain 过滤下沉到 `extractAssistantTurnUsage` 内部（`parent_tool_use_id != null` → 返回 null），而非调用点判断——函数语义即"提取可代表主链驻留上下文的单次 usage"，且导出后可直接单测（assistant-usage-sidechain.test.ts）。`parent_tool_use_id: string | null` 为 SDK 一等类型字段（sdk.d.ts:2879），子代理消息必带，已核实无需运行时探字段。
 - 2026-08-13: Phase 1B/1C 完成。实现要点与计划的差异：① 前端轮询退避为挂载补拉 [0s,4s] / 回合完成 [2s,6s,12s] 两组；② **StrictMode 双跑陷阱（CDP 实测踩到）**：ChatView 侧 once-ref 会在 mount→cleanup→mount 中第一遍消费掉、定时器被 cleanup 清掉、第二遍跳过 → 轮询整体失效。修法 = 每会话一次的去重下沉到 hook 内部并在 cleanup 里重置（调用方可无脑重调）。③ merge 端到端 CDP 验证：加载时值缺失 → 轮询发出 → 延迟注入 DB 模拟探针晚到 → 卡片活着 2.6%→3.1%；已有值的会话零补拉请求。④ 死通道四处（useSSEStream/stream-session-manager/page.tsx/StreamSnapshot 类型+RunCockpit prop 链）已全部移除；source 语义改 exact/approx/none，60s freshness 魔数删除。
+- 2026-08-13: Phase 2 完成。实现要点：① `extractLiveContextWindow` 从 result.modelUsage 提主模型窗口——connectedModel 精确命中，否则仅单条目才取（子代理混用模型时宁缺毋滥）；主路径与 PTL 重试路径都落库。② `resolveContextWindow` 优先级 = [1m] 标记 → live 窗口 → 账号侧（managed 展示名表 ?? provider-models）→ 静态 catalog → null；UI 与 route.ts 压缩共用。③ 服务端压缩的 live/[1m] 输入取自 `getLatestAssistantContextUsage`（复用 1B 的 db helper，扩展返回 model）；无法解析时兜 200K 并打 warn 日志（不再静默）。
 - 已拍板 D1（分母来源）：是否让 live `modelUsage[model].contextWindow` 优先于静态表（推翻 2026-06 的"分母始终静态表"决策）。**推荐：live 优先、静态表兜底**——6 月逐模型实测两者已一致（9 模型全对齐，Kimi 修正后），live 值可自动跟随后端窗口调整（Qwen 曾 200K→1M），维护成本归零；静态表保留为无 live 值时的回退，不删除。
 - 已拍板 D2（压缩权威）：resume 主路径是否停用应用侧 pre-compression、交给 CLI auto-compact。**推荐：停用**（详见 Phase 3 理由）。
 - 已拍板 D3（cowork 沙箱探针）：容器会话 transcript 在远端 volume，本地探针必然失败。**推荐：先接受 fallback + "近似"徽标（零成本），把"helper 从 volume 拉 transcript 本地跑探针"另行立项**，不阻塞主线。

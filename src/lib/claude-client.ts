@@ -222,6 +222,30 @@ function extractTokenUsage(msg: SDKResultMessage): TokenUsage | null {
 }
 
 /**
+ * FIX(分母统一 2A): 从 result.modelUsage 提取本回合主模型的 contextWindow，
+ * 随 token_usage.context_window 落库 —— 这是运行时免费拿到的权威分母
+ * （context-usage-walk 已支持读取；resolveContextWindow 把它排在 [1m] 标记
+ * 之后、managed 展示名表之前）。键 = 运行时模型名（connectedModel）；无精确
+ * 命中时仅当只有一个条目才取——子代理混用多模型时宁缺毋滥，回退应用侧解析链。
+ * 导出仅为单测（context-window-live.test.ts），生产只在本文件内用。
+ */
+export function extractLiveContextWindow(
+  msg: SDKResultMessage,
+  connectedModel: string | undefined,
+): number | undefined {
+  const mu = (msg as unknown as {
+    modelUsage?: Record<string, { contextWindow?: number }>;
+  }).modelUsage;
+  if (!mu) return undefined;
+  const entries = Object.values(mu);
+  const pick =
+    (connectedModel ? mu[connectedModel] : undefined) ??
+    (entries.length === 1 ? entries[0] : undefined);
+  const w = pick?.contextWindow;
+  return typeof w === 'number' && w > 0 ? w : undefined;
+}
+
+/**
  * FIX(占用口径): 从单条 assistant 消息（= 一次模型请求）提取其单次 usage。
  * 与整轮累计的 result.usage 不同，这是「该次请求的真实 prompt 大小」——
  * input + cache_read + cache_creation 不含跨内部请求累加，适合作为当前上下文占用。
@@ -2057,6 +2081,11 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
               if (tokenUsage && connectedModel) {
                 tokenUsage = { ...tokenUsage, model: connectedModel };
               }
+              // FIX(分母统一 2A): live 窗口一并落库(modelUsage[主模型].contextWindow)。
+              if (tokenUsage) {
+                const liveWindow = extractLiveContextWindow(resultMsg, connectedModel);
+                if (liveWindow) tokenUsage = { ...tokenUsage, context_window: liveWindow };
+              }
               // terminal_reason is an optional field added in SDK 0.2.111.
               // When present, it enriches the end-of-turn UI chip (Phase 1 of
               // agent-sdk-0-2-111-adoption) without replacing error-classifier.
@@ -2440,6 +2469,11 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
                   let usage = 'result' in rMsg ? extractTokenUsage(rMsg as SDKResultSuccess) : undefined;
                   if (usage && retryConnectedModel) {
                     usage = { ...usage, model: retryConnectedModel };
+                  }
+                  // FIX(分母统一 2A): 重试回合同样落库 live 窗口(同主路径)。
+                  if (usage) {
+                    const liveWindow = extractLiveContextWindow(rMsg, retryConnectedModel);
+                    if (liveWindow) usage = { ...usage, context_window: liveWindow };
                   }
                   // Match main-path result shape so the chat route can persist
                   // the new sdk_session_id (route reads result.session_id as a

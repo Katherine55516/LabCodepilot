@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import type { Message } from '@/types';
-import { getContextWindow, is1mContextModelName } from '@/lib/model-context';
+import { resolveContextWindow } from '@/lib/context-window-resolver';
 import { walkContextUsage } from '@/lib/context-usage-walk';
 import {
   buildContextUsageBreakdown,
@@ -58,26 +58,19 @@ export function useContextUsage(
   },
 ): ContextUsageData {
   return useMemo(() => {
-    const catalogWindow = getContextWindow(modelName, {
-      context1m: options?.context1m,
-      upstream: options?.upstreamModelId,
-    });
-
     const walk = walkContextUsage(messages);
     const baseline = walk.baseline;
 
-    // Window priority: [1m] runtime model name (highest — the name shown in
-    // the "Connected (…)" status line marks the 1M CLI variant; overrides
-    // every other source) → this record's SDK window → latest SDK window
-    // seen → provider-models window → static catalog → unknown.
-    // (Phase 2 将整链收敛到 resolveContextWindow 单一 resolver。)
-    const contextWindow: number | null = is1mContextModelName(walk.latestModel)
-      ? 1_000_000
-      : baseline?.sdkContextWindow ||
-        walk.latestSdkContextWindow ||
-        options?.modelContextWindow ||
-        catalogWindow ||
-        null;
+    // FIX(分母统一 2B): 窗口解析收敛到与服务端压缩共用的单一 resolver
+    // （[1m] 标记 → live context_window → 账号侧窗口 → 静态 catalog）。
+    const contextWindow = resolveContextWindow({
+      runtimeModelName: walk.latestModel,
+      liveWindow: baseline?.sdkContextWindow || walk.latestSdkContextWindow,
+      accountWindow: options?.modelContextWindow,
+      model: modelName,
+      upstreamModel: options?.upstreamModelId,
+      context1m: options?.context1m,
+    });
 
     const hasData = baseline !== null;
 
