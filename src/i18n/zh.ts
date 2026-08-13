@@ -2261,6 +2261,8 @@ const zh: Record<TranslationKey, string> = {
   'runStatus.loading': '正在加载运行状态…',
   'runStatus.contextCapacityUnknown': '容量未知',
   'runStatus.contextUsageLabel': '上下文用量',
+  'runStatus.contextSourceExact': '精确值 · 截至上一回合结束',
+  'runStatus.contextSourceApprox': '近似值 · 按最近一次请求用量估算',
   'runStatus.notConfigured': '未配置',
   'runStatus.totalCost': '本次花费',
   'runStatus.breakdownSystemPrompt': '系统提示',

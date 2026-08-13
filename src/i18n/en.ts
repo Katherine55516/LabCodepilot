@@ -2264,6 +2264,8 @@ const en = {
   'runStatus.loading': 'Loading run status...',
   'runStatus.contextCapacityUnknown': 'Capacity unknown',
   'runStatus.contextUsageLabel': 'Context usage',
+  'runStatus.contextSourceExact': 'Exact · as of the last completed turn',
+  'runStatus.contextSourceApprox': 'Approximate · estimated from the latest request usage',
   'runStatus.notConfigured': 'Not configured',
   'runStatus.totalCost': 'Total cost',
   'runStatus.breakdownSystemPrompt': 'System prompt',

@@ -2270,6 +2270,8 @@ const zhHK: Record<TranslationKey, string> = {
   'runStatus.loading': '正在加載運行狀態…',
   'runStatus.contextCapacityUnknown': '容量未知',
   'runStatus.contextUsageLabel': '上下文用量',
+  'runStatus.contextSourceExact': '精確值 · 截至上一回合結束',
+  'runStatus.contextSourceApprox': '近似值 · 按最近一次請求用量估算',
   'runStatus.notConfigured': '未配置',
   'runStatus.totalCost': '本次花費',
   'runStatus.breakdownSystemPrompt': '系統提示',

@@ -21,6 +21,24 @@
  *   探针结束整目录删除 —— 真实 ~/.claude 零写入,并发零风险。
  * - 临时 HOME 缺 skills/memory 不影响 totalTokens(实测不变,分类残差吸收)。
  *
+ * 已知覆盖盲区(卡片在这些场景回退近似口径,并由 popover 的来源标注如实
+ * 告知用户 —— 见 RunCockpitPopoverContent 的 contextSource*):
+ * - **win32**: transcript slug 规则(盘符/反斜杠)未实测,直接跳过;
+ * - **办公沙箱(cowork)**: CLI 跑在远程容器里(pathToClaudeCodeExecutable 指向
+ *   转发器),transcript 落在容器的持久卷,本机 ~/.claude/projects 下没有该
+ *   会话文件 → 下面的 existsSync 必然 false,静默放弃。要覆盖它得让 helper
+ *   从卷里读出 transcript 再在本地跑探针(另行立项,R 系列文件通道已具备
+ *   直读能力);
+ * - **native runtime**: 无 CLI transcript,本探针不适用。
+ *
+ * 分类明细为什么不落库(Phase 4A 实测结论,n=2):探针的临时 HOME 里没有
+ * ~/.claude.json 等配置,getContextUsage 返回的 categories 恒为
+ * {Skills, Messages, Free space},mcpTools/memoryFiles 恒 0,systemTools 与
+ * systemPromptSections 字段直接缺失 —— 这不是会话的真实构成。同理其
+ * maxTokens/autoCompactThreshold 属于 CLI 默认模型(实测两次分别是
+ * claude-fable-5 / claude-opus-5,与会话模型无关),也不可用。总量
+ * totalTokens 仍锚定 transcript 真实 usage,所以只取它。
+ *
  * 其他防御:
  * - env 剥离凭据(ANTHROPIC_ 前缀、Bedrock/Vertex 开关)+ NODE_ENV(泄漏
  *   纪律,见 sdk-subprocess-env.ts);

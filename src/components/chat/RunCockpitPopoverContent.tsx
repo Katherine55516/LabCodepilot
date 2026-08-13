@@ -70,6 +70,15 @@ export function RunCockpitPopoverContent({
             <p className="font-mono text-foreground">{headerTokensText}</p>
           </div>
           <ContextDotMatrix breakdown={usage.breakdown} />
+          {/* 来源标注(Phase 4B):exact = 回合末权威快照(Claude Code /context
+              同源口径);approx = 末次请求 usage 推导的近似值(探针未命中/
+              Windows/办公沙箱/流刚结束)。不标注就等于把近似值伪装成实时精确
+              值 —— 审计明确点名的展示准确性问题。 */}
+          <p className="text-[11px] leading-snug text-muted-foreground">
+            {usage.source === 'exact'
+              ? t('runStatus.contextSourceExact')
+              : t('runStatus.contextSourceApprox')}
+          </p>
         </div>
       )}
 
