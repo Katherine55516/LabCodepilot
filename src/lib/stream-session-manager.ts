@@ -155,7 +155,6 @@ function buildSnapshot(stream: ActiveStream): SessionStreamSnapshot {
     finalMessageContent: stream.snapshot.finalMessageContent,
     terminalReason: stream.snapshot.terminalReason,
     rateLimitInfo: stream.snapshot.rateLimitInfo,
-    contextUsageSnapshot: stream.snapshot.contextUsageSnapshot,
     // buildSnapshot is a field WHITELIST — every emit() rebuilds the snapshot
     // from scratch, so any field patched onto stream.snapshot by a callback
     // MUST be re-listed here or it is silently dropped before broadcast.
@@ -600,11 +599,6 @@ async function runStream(stream: ActiveStream, params: StartStreamParams): Promi
       onRateLimit: (info) => {
         markActive();
         stream.snapshot = { ...stream.snapshot, rateLimitInfo: info };
-        emit(stream, 'snapshot-updated');
-      },
-      onContextUsage: (snap) => {
-        markActive();
-        stream.snapshot = { ...stream.snapshot, contextUsageSnapshot: snap };
         emit(stream, 'snapshot-updated');
       },
       onVmArtifacts: (files) => {

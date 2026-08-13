@@ -1804,6 +1804,46 @@ export function patchLatestAssistantTokenUsage(
   return result.changes > 0;
 }
 
+/**
+ * FIX(权威分子·交付链): 读取会话最新一条 assistant 消息的上下文相关 usage
+ * 字段（白名单），供 /api/chat/sessions/[id]/context-usage 端点在回合结束后
+ * 轮询拉取探针后补的 context_used_tokens——探针只落库不推流（fire-and-forget
+ * 纪律），前端靠这个端点把权威值接进当前页面。input/output 一并返回，作为
+ * 前端 patch 内存消息时的防串扰 match 依据（与探针的 match 语义一致）。
+ */
+export function getLatestAssistantContextUsage(sessionId: string): {
+  input_tokens?: number;
+  output_tokens?: number;
+  context_used_tokens?: number;
+  context_window?: number;
+  context_accounting?: unknown;
+} | null {
+  const db = getDb();
+  const row = db.prepare(
+    "SELECT token_usage FROM messages WHERE session_id = ? AND role = 'assistant' ORDER BY rowid DESC LIMIT 1"
+  ).get(sessionId) as { token_usage: string | null } | undefined;
+  if (!row?.token_usage) return null;
+
+  let usage: Record<string, unknown>;
+  try {
+    usage = JSON.parse(row.token_usage) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+  const num = (v: unknown): number | undefined =>
+    typeof v === 'number' && Number.isFinite(v) ? v : undefined;
+  return {
+    input_tokens: num(usage.input_tokens),
+    output_tokens: num(usage.output_tokens),
+    context_used_tokens: num(usage.context_used_tokens),
+    context_window: num(usage.context_window),
+    context_accounting:
+      usage.context_accounting && typeof usage.context_accounting === 'object'
+        ? usage.context_accounting
+        : undefined,
+  };
+}
+
 export function updateMessageHeartbeatAck(messageId: string, isAck: boolean): void {
   const db = getDb();
   db.prepare('UPDATE messages SET is_heartbeat_ack = ? WHERE id = ?').run(isAck ? 1 : 0, messageId);

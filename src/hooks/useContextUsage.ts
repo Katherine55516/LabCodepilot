@@ -27,21 +27,20 @@ export interface ContextUsageData {
   /** Whether a session summary (compression) is active. */
   hasSummary: boolean;
   /**
-   * Data source for the rendered numbers:
-   *   - 'snapshot': fresh (<60s) SDK.getContextUsage() capture
-   *   - 'result_usage': computed from the last SDKResultMessage.usage
-   *   - 'none': no token data yet
+   * Data source for the rendered numbers（context-usage-accuracy-overhaul 1C）:
+   *   - 'exact': token_usage.context_used_tokens — 回合末探针的权威快照，
+   *     Claude Code /context 同源口径。语义是「截至上一回合结束」，一直有效
+   *     直到下一回合产生新记录，不做时间衰减（陈旧标注优于伪装实时）。
+   *   - 'approx': 末次主链请求的 input+cacheR+cacheC 近似回退
+   *     （探针未命中/win32/cowork 盲区/流刚结束尚未拉到）。
+   *   - 'none': no token data yet.
    */
-  source: 'snapshot' | 'result_usage' | 'none';
-  /** When the snapshot was taken (epoch ms). Undefined for result_usage. */
-  snapshotCapturedAt?: number;
+  source: 'exact' | 'approx' | 'none';
   /** Categorized breakdown for the RunCockpit card (dot-matrix + detail list). */
   breakdown: ContextUsageBreakdown;
   /** SDK total cost (USD) for this run — drives the card's Total cost line. */
   costUsd?: number;
 }
-
-const SNAPSHOT_FRESHNESS_MS = 60_000;
 
 export function useContextUsage(
   messages: Message[],
@@ -56,12 +55,6 @@ export function useContextUsage(
      * authoritative). Takes priority over the static catalog.
      */
     modelContextWindow?: number;
-    /** Fresh (<60s) SDK-authoritative snapshot. */
-    snapshot?: {
-      totalTokens: number;
-      maxTokens: number;
-      capturedAt: number;
-    };
   },
 ): ContextUsageData {
   return useMemo(() => {
@@ -73,48 +66,30 @@ export function useContextUsage(
     const walk = walkContextUsage(messages);
     const baseline = walk.baseline;
 
-    const snap = options?.snapshot;
-    // Date.now() is impure in useMemo, but this is a one-shot snapshot-vs-now
-    // freshness check that naturally re-evaluates whenever messages / model /
-    // snapshot identity changes — exactly when staleness matters.
-    // eslint-disable-next-line react-hooks/purity
-    const snapFresh = !!snap && Date.now() - snap.capturedAt < SNAPSHOT_FRESHNESS_MS;
-
     // Window priority: [1m] runtime model name (highest — the name shown in
     // the "Connected (…)" status line marks the 1M CLI variant; overrides
-    // every other source) → fresh snapshot → this record's SDK window →
-    // latest SDK window seen → provider-models window → static catalog →
-    // unknown.
+    // every other source) → this record's SDK window → latest SDK window
+    // seen → provider-models window → static catalog → unknown.
+    // (Phase 2 将整链收敛到 resolveContextWindow 单一 resolver。)
     const contextWindow: number | null = is1mContextModelName(walk.latestModel)
       ? 1_000_000
-      : (snapFresh && snap!.maxTokens > 0 ? snap!.maxTokens : null) ||
-        baseline?.sdkContextWindow ||
+      : baseline?.sdkContextWindow ||
         walk.latestSdkContextWindow ||
         options?.modelContextWindow ||
         catalogWindow ||
         null;
 
-    const hasData = snapFresh || baseline !== null;
+    const hasData = baseline !== null;
 
-    // Build the breakdown baseline from the chosen source.
-    const breakdownBaseline = snapFresh
-      ? {
-          used: snap!.totalTokens,
-          cacheReadTokens: 0,
-          cacheCreationTokens: 0,
-          outputTokens: 0,
-        }
-      : baseline
+    const breakdown = buildContextUsageBreakdown({
+      baseline: baseline
         ? {
             used: baseline.used,
             cacheReadTokens: baseline.cacheReadTokens,
             cacheCreationTokens: baseline.cacheCreationTokens,
             outputTokens: baseline.outputTokens,
           }
-        : undefined;
-
-    const breakdown = buildContextUsageBreakdown({
-      baseline: breakdownBaseline,
+        : undefined,
       contextWindow: contextWindow ?? undefined,
       // Runtime context accounting (tools/rules/mcp/…) is not wired up on this
       // backend yet — leaving compiler undefined means those rows render 0 and
@@ -123,9 +98,9 @@ export function useContextUsage(
     });
 
     const used = breakdown.usedTokens;
-    const cacheReadTokens = snapFresh ? 0 : (baseline?.cacheReadTokens ?? 0);
-    const cacheCreationTokens = snapFresh ? 0 : (baseline?.cacheCreationTokens ?? 0);
-    const outputTokens = snapFresh ? 0 : (baseline?.outputTokens ?? 0);
+    const cacheReadTokens = baseline?.cacheReadTokens ?? 0;
+    const cacheCreationTokens = baseline?.cacheCreationTokens ?? 0;
+    const outputTokens = baseline?.outputTokens ?? 0;
 
     const ratio = contextWindow ? Math.min(1, used / contextWindow) : 0;
     const estimatedNextTurn = hasData ? used + outputTokens + 200 : 0;
@@ -148,8 +123,7 @@ export function useContextUsage(
       hasData,
       state,
       hasSummary: options?.hasSummary || false,
-      source: snapFresh ? 'snapshot' : baseline ? 'result_usage' : 'none',
-      snapshotCapturedAt: snapFresh ? snap!.capturedAt : undefined,
+      source: baseline ? (baseline.authoritative ? 'exact' : 'approx') : 'none',
       breakdown,
       costUsd: walk.latestCostUsd,
     };
@@ -160,6 +134,5 @@ export function useContextUsage(
     options?.hasSummary,
     options?.upstreamModelId,
     options?.modelContextWindow,
-    options?.snapshot,
   ]);
 }

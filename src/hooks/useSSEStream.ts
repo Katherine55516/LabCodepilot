@@ -33,10 +33,6 @@ export interface SSECallbacks {
   /** SDK 0.2.111 subscription rate-limit telemetry. Fires only on
    *  claude.ai subscription paths; absent for API-key sessions. */
   onRateLimit?: (info: RateLimitInfo) => void;
-  /** SDK 0.2.111 post-turn context-usage snapshot. Used by the chat
-   *  page's indicator to replace char:token estimation for ~60s after
-   *  capture. */
-  onContextUsage?: (snapshot: ContextUsageSnapshot) => void;
   /** Cowork sandbox: files the agent created/modified in the VM this turn. */
   onVmArtifacts?: (files: VmArtifactFile[]) => void;
   /** Cowork sandbox: VM provisioning progress during the cold-start window. */
@@ -59,19 +55,6 @@ export interface SSECallbacks {
     mcp_servers?: unknown;
     output_style?: string;
   }) => void;
-}
-
-/**
- * Post-turn context-usage snapshot from Query.getContextUsage()
- * (SDK 0.2.111 Phase 5). Captured on the server and forwarded verbatim.
- */
-export interface ContextUsageSnapshot {
-  totalTokens: number;
-  maxTokens: number;
-  rawMaxTokens: number;
-  percentage: number;
-  model: string;
-  capturedAt: number;
 }
 
 /**
@@ -290,16 +273,6 @@ function handleSSEEvent(
       return accumulated;
     }
 
-    case 'context_usage': {
-      // Phase 5 — post-turn context-usage snapshot. Swallow parse errors
-      // silently; estimator fallback already covers the no-snapshot case.
-      try {
-        const snap = JSON.parse(event.data) as ContextUsageSnapshot;
-        callbacks.onContextUsage?.(snap);
-      } catch { /* estimator still applies */ }
-      return accumulated;
-    }
-
     case 'vm_artifacts': {
       // Cowork sandbox — 回合末权威全量快照(E4.2)。空表必须放行:纯删除
       // 回合(清单被删空)靠它清掉卡片 —— 曾有 length>0 守卫(增量语义残留)
@@ -504,7 +477,6 @@ export function useSSEStream() {
         onError: (a) => callbacksRef.current?.onError(a),
         onInitMeta: (m) => callbacksRef.current?.onInitMeta?.(m),
         onRateLimit: (info) => callbacksRef.current?.onRateLimit?.(info),
-        onContextUsage: (snap) => callbacksRef.current?.onContextUsage?.(snap),
       };
 
       return consumeSSEStream(reader, proxied);

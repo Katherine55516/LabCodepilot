@@ -65,6 +65,7 @@ describe('walkContextUsage — authoritative numerator (context_used_tokens)', (
     ]);
     assert.equal(r.baseline?.used, 65_432);
     assert.equal(r.baseline?.cacheReadTokens, 20_000); // cache detail preserved
+    assert.equal(r.baseline?.authoritative, true); // → 卡片 source: 'exact'
   });
 
   it('falls back to input+cache when context_used_tokens is absent (old records)', () => {
@@ -72,6 +73,7 @@ describe('walkContextUsage — authoritative numerator (context_used_tokens)', (
       asMsg('assistant', { input_tokens: 50_000, cache_read_input_tokens: 20_000, output_tokens: 800 }),
     ]);
     assert.equal(r.baseline?.used, 70_000);
+    assert.equal(r.baseline?.authoritative, false); // → 卡片 source: 'approx'
   });
 
   it('a snapshot-only record (zero API usage) still forms a strong baseline', () => {

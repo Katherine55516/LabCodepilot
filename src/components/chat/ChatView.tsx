@@ -44,6 +44,7 @@ import { warmSdkCommandCache } from '@/lib/sdk-init-cache';
 import { useChatCommands } from '@/hooks/useChatCommands';
 import { useAssistantTrigger } from '@/hooks/useAssistantTrigger';
 import { useStreamSubscription } from '@/hooks/useStreamSubscription';
+import { useContextUsageRefresh } from '@/hooks/useContextUsageRefresh';
 import {
   startStream,
   stopStream,
@@ -255,6 +256,28 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
       return trimmed;
     });
   }, []);
+
+  // FIX(权威分子·交付链): 回合结束后把探针后补的 context_used_tokens 拉进
+  // 当前页面（此前只落库,当前页面长期停留 fallback 口径,重进会话才跳到
+  // 权威值）。见 useContextUsageRefresh 头注释。
+  const { onTurnCompleted: refreshContextUsage, onMounted: refreshContextUsageOnMount } =
+    useContextUsageRefresh({ sessionId, setMessages: cappedSetMessages });
+  useEffect(() => {
+    // 首轮重定向/重进会话:初始加载可能早于探针落库 → 最后一条 assistant
+    // 缺 context_used_tokens 时补拉一轮(有值则零请求)。messages 每次变化
+    // 都可重调:每会话一次的去重在 hook 内部(StrictMode 双跑安全)。
+    if (messages.length === 0) return;
+    for (let i = messages.length - 1; i >= 0; i--) {
+      const m = messages[i];
+      if (m.role !== 'assistant' || !m.token_usage) continue;
+      try {
+        const u = JSON.parse(m.token_usage) as Record<string, unknown>;
+        const used = u.context_used_tokens;
+        if (!(typeof used === 'number' && used > 0)) refreshContextUsageOnMount();
+      } catch { /* token_usage 不可解析 → 不补拉 */ }
+      return;
+    }
+  }, [messages, refreshContextUsageOnMount]);
   const [mode, setMode] = useState<string>(initialMode || 'code');
   const [currentModel, setCurrentModel] = useState(() => modelName || (typeof window !== 'undefined' ? localStorage.getItem('codepilot:last-model') : null) || '');
   const [currentProviderId, setCurrentProviderId] = useState(() => providerId || (typeof window !== 'undefined' ? localStorage.getItem('codepilot:last-provider-id') : null) || '');
@@ -552,6 +575,11 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
       tailTrimmedRef.current = false;
       reconcileWithDb();
     }
+    // FIX(权威分子·交付链): 正常完成才轮询探针后补值 —— 停止/出错路径服务端
+    // 未必落库完整,且探针的 match(input/output)也对不上,轮询只会空转。
+    if (phase === 'completed') {
+      refreshContextUsage();
+    }
     // Cowork sandbox — refetch the artifact list at end of turn. Belt-and-
     // braces for the realtime vm_artifacts SSE path: completion clears the
     // manager snapshot, and event batching around done/completed has already
@@ -581,7 +609,7 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
         })
         .catch(() => { /* silent — sidebar poll will catch up */ });
     }
-  }, [reconcileWithDb, sandboxEnabled, sessionId, setSessionTitle]);
+  }, [reconcileWithDb, refreshContextUsage, sandboxEnabled, sessionId, setSessionTitle]);
 
   useStreamSubscription({
     sessionId,
@@ -1410,7 +1438,6 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
             upstreamModelId={currentModelUpstream}
             modelContextWindow={currentModelContextWindow}
             permissionProfile={permissionProfile}
-            contextUsageSnapshot={streamSnapshot?.contextUsageSnapshot}
           />
         }
       />

@@ -835,17 +835,6 @@ export default function NewChatPage() {
                   } catch { /* skip */ }
                   break;
                 }
-                case 'context_usage': {
-                  // Phase 5 extension-point; no producer currently (see
-                  // b65c6ac). Seed the snapshot for forward compatibility.
-                  try {
-                    const snap = JSON.parse(event.data);
-                    if (session?.id) {
-                      seedSnapshotPatch(session.id, { contextUsageSnapshot: snap });
-                    }
-                  } catch { /* skip */ }
-                  break;
-                }
                 case 'thinking': {
                   // Opus 4.7 with display: 'summarized' streams reasoning
                   // as thinking deltas. Accumulate them into the same

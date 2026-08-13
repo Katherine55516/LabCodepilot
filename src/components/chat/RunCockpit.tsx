@@ -42,12 +42,6 @@ interface RunCockpitProps {
   /** Window from /api/providers/models (account-provisioned, most authoritative). */
   modelContextWindow?: number;
   permissionProfile?: 'default' | 'full_access';
-  /** Fresh SDK context-usage snapshot, if any. */
-  contextUsageSnapshot?: {
-    totalTokens: number;
-    maxTokens: number;
-    capturedAt: number;
-  };
 }
 
 export function RunCockpit({
@@ -59,7 +53,6 @@ export function RunCockpit({
   upstreamModelId,
   modelContextWindow,
   permissionProfile = 'default',
-  contextUsageSnapshot,
 }: RunCockpitProps) {
   const { t } = useTranslation();
   const usage = useContextUsage(messages ?? [], modelName ?? '', {
@@ -67,7 +60,6 @@ export function RunCockpit({
     hasSummary,
     upstreamModelId,
     modelContextWindow,
-    snapshot: contextUsageSnapshot,
   });
 
   const hasFullCtx = usage.hasData && (usage.contextWindow ?? 0) > 0;

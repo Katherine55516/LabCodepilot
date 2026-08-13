@@ -29,6 +29,12 @@ export interface WalkBaseline {
   outputTokens: number;
   /** SDK-reported window on this specific record, if present. */
   sdkContextWindow: number | null;
+  /**
+   * True when `used` came from context_used_tokens（回合末探针的权威快照，
+   * Claude Code /context 同源口径）；false = input+cacheR+cacheC 近似回退。
+   * 驱动卡片的 exact/approx 来源标注。
+   */
+  authoritative: boolean;
 }
 
 export interface WalkResult {
@@ -131,6 +137,7 @@ export function walkContextUsage(messages: Message[]): WalkResult {
           cacheCreationTokens: cacheCreation,
           outputTokens,
           sdkContextWindow: baselineSdkContextWindow,
+          authoritative: contextUsed > 0,
         },
         latestSdkContextWindow,
         latestModel,
@@ -146,6 +153,7 @@ export function walkContextUsage(messages: Message[]): WalkResult {
         cacheCreationTokens: cacheCreation,
         outputTokens,
         sdkContextWindow: baselineSdkContextWindow,
+        authoritative: false,
       };
     }
   }

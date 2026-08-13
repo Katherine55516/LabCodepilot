@@ -754,7 +754,6 @@ export type SSEEventType =
   | 'keep_alive'         // SDK keep-alive heartbeat (resets idle timer)
   | 'rewind_point'       // SDK user message with rewind checkpoint
   | 'rate_limit'         // SDK 0.2.111 subscription rate-limit telemetry
-  | 'context_usage'      // SDK 0.2.111 post-turn context usage snapshot
   | 'vm_artifacts'       // cowork sandbox: files created/modified in the VM this turn
   | 'vm_status'          // cowork sandbox: VM provisioning progress (P1-D readiness window)
   | 'done';              // stream complete
@@ -1313,20 +1312,6 @@ export interface SessionStreamSnapshot {
     overageResetsAt?: number;
     overageDisabledReason?: string;
     isUsingOverage?: boolean;
-  };
-  /**
-   * Post-turn context-usage snapshot captured via Query.getContextUsage()
-   * (SDK 0.2.111 Phase 5). Consumers should treat this as authoritative
-   * for ~60s after capturedAt, then fall back to the char-based estimator.
-   */
-  contextUsageSnapshot?: {
-    totalTokens: number;
-    maxTokens: number;
-    rawMaxTokens: number;
-    percentage: number;
-    model: string;
-    /** Epoch ms at which the snapshot was taken */
-    capturedAt: number;
   };
   /**
    * Cowork sandbox: files the agent created/modified inside the VM this
