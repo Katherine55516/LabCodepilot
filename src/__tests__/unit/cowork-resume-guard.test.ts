@@ -26,10 +26,20 @@ describe('withTimeout — resume 首消息护栏', () => {
   });
 
   it('超时抛错,错误信息带 label 与时限(日志据此定位是哪一步挂了)', async () => {
-    await assert.rejects(
-      withTimeout(new Promise(() => { /* 永不 settle,模拟"首消息永远不来" */ }), 20, 'resume first message'),
-      /resume first message timed out after 20ms/,
-    );
+    // keepAlive 不是装饰:本用例 await 的 promise 永不 settle,而 withTimeout 的
+    // 超时定时器是 unref 的(生产上正确——不能为了一个超时把进程吊住)。于是这
+    // 20ms 里事件循环可能没有任何 ref 句柄,Node 直接退出进程,本用例连同其后的
+    // 用例被判 cancelledByParent。macOS 本地不复现(有别的句柄撑着),Linux CI 上
+    // 必现——2026-08-15 首次把 scheduler 合进 para 时,CI 连挂两轮就是这里。
+    const keepAlive = setInterval(() => { /* 撑住事件循环 */ }, 1000);
+    try {
+      await assert.rejects(
+        withTimeout(new Promise(() => { /* 永不 settle,模拟"首消息永远不来" */ }), 20, 'resume first message'),
+        /resume first message timed out after 20ms/,
+      );
+    } finally {
+      clearInterval(keepAlive);
+    }
   });
 
   it('超时后不吊住事件循环(定时器 unref + clear);先完成的一方不受后到的超时影响', async () => {
