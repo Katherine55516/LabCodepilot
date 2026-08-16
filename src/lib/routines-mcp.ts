@@ -55,7 +55,7 @@ export const ROUTINES_MCP_SYSTEM_PROMPT = `## 定时任务(跑在沙箱服务器
    —— 定时任务产生的会话**不在**办公对话列表里,不说这句用户会在这个对话里一直等。
 
 ### 其它约束
-- 最小触发间隔 **15 分钟**;实际触发会有几分钟固定偏移(错开服务器负载)
+- 最小触发间隔 **30 分钟**,更高频率(如每 10/15 分钟)会被拒绝;实际触发会有几分钟固定偏移(错开服务器负载)
 - 每人最多 **50 个**任务、每天 **20 次**运行
 - 每个任务**独占一个工作区**,多次运行之间**文件会累积保留**(昨天生成的表今天能接着读),
   但**上下文不累积**
@@ -65,7 +65,7 @@ export const ROUTINES_MCP_SYSTEM_PROMPT = `## 定时任务(跑在沙箱服务器
 
 const scheduleSchema = z.object({
   kind: z.enum(['cron', 'once', 'manual']).describe('cron=按表达式重复, once=指定时刻跑一次, manual=只能手动触发'),
-  expr: z.string().optional().describe('kind=cron 时的 5 字段表达式,如 "0 9 * * 1-5" 表示工作日 09:00'),
+  expr: z.string().optional().describe('kind=cron 时的 5 字段表达式,如 "0 9 * * 1-5" 表示工作日 09:00。最小触发间隔 30 分钟,更高频率会被服务端拒绝'),
   tz: z.string().optional().describe('kind=cron 时的 IANA 时区,如 Asia/Shanghai。不给则服务端用默认'),
   fireAt: z.string().optional().describe('kind=once 时的 ISO 触发时刻'),
 });
@@ -73,7 +73,7 @@ const scheduleSchema = z.object({
 /**
  * 错误 → 给模型看的一句话。
  *
- * 服务端的 400 校验消息本来就是**面向用户的中文**(如「触发间隔 5 分钟,低于最小间隔 15 分钟」),
+ * 服务端的 400 校验消息本来就是**面向用户的中文**(如「触发间隔 5 分钟,低于最小间隔 30 分钟」),
  * 原样透出去比自己编一句「创建失败」有用得多 —— 模型能据此直接告诉用户改哪儿。
  */
 function errText(e: unknown, action: string): string {

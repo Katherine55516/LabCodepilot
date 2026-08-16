@@ -75,7 +75,7 @@ async function api<T>(method: string, path: string, body?: unknown): Promise<T> 
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
   if (!res.ok) {
-    // 服务端的 400 校验消息是面向用户的中文(如「触发间隔 5 分钟,低于最小间隔 15 分钟」),
+    // 服务端的 400 校验消息是面向用户的中文(如「触发间隔 5 分钟,低于最小间隔 30 分钟」),
     // 必须原样带到 UI —— 自己编一句「创建失败」等于把服务端辛苦做的校验说明扔了。
     let detail = '';
     try { detail = String(((await res.json()) as { error?: string }).error || ''); } catch { /* 非 JSON */ }

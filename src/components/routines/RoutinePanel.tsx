@@ -231,7 +231,7 @@ export function RoutinePanel() {
       const res = await fn();
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        // 服务端的中文校验消息原样显示(如「触发间隔 5 分钟,低于最小间隔 15 分钟」)——
+        // 服务端的中文校验消息原样显示(如「触发间隔 5 分钟,低于最小间隔 30 分钟」)——
         // 自己编一句「操作失败」等于把服务端辛苦做的说明扔掉。
         showToast({ type: "error", message: data?.error || t("routines.toast.failed") });
         return false;

@@ -88,8 +88,14 @@ async function testPureLayers() {
   ok('cron 按 routine 时区求值(9:00 上海 → 01:00Z)', next?.toISOString() === '2026-08-05T01:00:00.000Z',
     String(next));
   ok('非法时区 → null', cron.getNextCronTime('0 9 * * *', 'Not/AZone') === null);
-  ok('最小间隔:每 5 分钟被判违规', cron.violatesMinInterval('*/5 * * * *', 'UTC', 900000).violates);
-  ok('最小间隔:每 20 分钟通过', !cron.violatesMinInterval('*/20 * * * *', 'UTC', 900000).violates);
+  ok('最小间隔:每 5 分钟被判违规', cron.violatesMinInterval('*/5 * * * *', 'UTC', 1800000).violates);
+  ok('最小间隔:每 20 分钟被判违规', cron.violatesMinInterval('*/20 * * * *', 'UTC', 1800000).violates);
+  ok('最小间隔:每小时通过', !cron.violatesMinInterval('0 * * * *', 'UTC', 1800000).violates);
+  // 不规则列表:45/15 分钟间隔交替。从 :50 出发第一个间隔是 45 分钟,
+  // 只看第一个间隔会漏判 —— 锁住「扫连续多个间隔」的行为。
+  ok('最小间隔:不规则列表 0,45 被判违规(任意创建时刻)',
+    cron.violatesMinInterval('0,45 * * * *', 'UTC', 1800000, new Date('2026-08-04T02:50:00Z')).violates);
+  ok('默认最小间隔为 30 分钟', store.MIN_INTERVAL_MS === 1800000);
   const j = cron.getJitterMs(id);
   ok('抖动确定性且有界(0..5min)', j === cron.getJitterMs(id) && j >= 0 && j <= 300000);
 
@@ -179,7 +185,7 @@ async function testRest() {
   let created;
 
   const bad = await api('POST', '/routines', { name: 'x', prompt: 'p', schedule: { kind: 'cron', expr: '*/5 * * * *', tz: 'UTC' } });
-  ok('最小间隔 15 分钟被拒(400 且给出可读原因)', bad.status === 400 && /最小间隔/.test(bad.body?.error || ''), JSON.stringify(bad.body));
+  ok('最小间隔 30 分钟被拒(400 且给出可读原因)', bad.status === 400 && /最小间隔/.test(bad.body?.error || ''), JSON.stringify(bad.body));
 
   const badTz = await api('POST', '/routines', { name: 'x', prompt: 'p', schedule: { kind: 'cron', expr: '0 9 * * *', tz: 'Not/AZone' } });
   ok('非法时区被拒', badTz.status === 400);

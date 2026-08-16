@@ -27,7 +27,7 @@ export const MAX_ROUTINES_PER_UID = parseInt(process.env.COWORK_ROUTINE_MAX_PER_
 /** 每用户每日运行上限(D8)。P8 的配额闸用它。 */
 export const DAILY_RUN_CAP = parseInt(process.env.COWORK_ROUTINE_DAILY_CAP || '20', 10);
 /** 最小调度间隔(D6)。 */
-export const MIN_INTERVAL_MS = parseInt(process.env.COWORK_ROUTINE_MIN_INTERVAL_MS || String(15 * 60_000), 10);
+export const MIN_INTERVAL_MS = parseInt(process.env.COWORK_ROUTINE_MIN_INTERVAL_MS || String(30 * 60_000), 10);
 
 const ID_RE = /^[a-f0-9]{32}$/;
 // uid 与 orchestrator/authz 同字符集。⚠️ 该字符集含 `.`,所以 `..` 能通过正则 ——

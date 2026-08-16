@@ -3112,7 +3112,7 @@ const zh: Record<TranslationKey, string> = {
   'routines.form.manualHint': '不自动触发，只能手动点「立即运行」。',
   'routines.form.advancedCron': '高级：直接写 cron 表达式',
   'routines.form.cronHint': '5 字段格式：分 时 日 月 周。例如 0 9 * * 1-5 表示工作日 09:00。',
-  'routines.form.intervalHint': '最小间隔 15 分钟；实际触发会有几分钟固定偏移，用于错开服务器负载。',
+  'routines.form.intervalHint': '最小间隔 30 分钟；实际触发会有几分钟固定偏移，用于错开服务器负载。',
   'routines.form.workspaceTitle': '关于工作区：',
   'routines.form.workspaceBody': '这个任务独占一个沙箱工作区，多次运行之间文件会累积保留——昨天生成的表，今天可以接着读。需要干净环境的话，在指令里自己清理。',
 

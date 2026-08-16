@@ -126,16 +126,25 @@ export function getJitterMs(routineId, maxMs = 5 * MINUTE) {
 }
 
 /**
- * 校验最小间隔(D6:15 分钟)。取未来两次触发算间隔 —— 比解析表达式语义可靠得多,
+ * 校验最小间隔(D6:30 分钟)。取未来连续触发算真实间隔 —— 比解析表达式语义可靠得多,
  * 也自动覆盖「每 5 分钟」那种 step 写法。只有一次触发(如每年一次)视为通过。
+ * 扫连续 6 个间隔而不是只看第一个:像 `0,45 * * * *` 这种不规则列表,45 分钟与
+ * 15 分钟的间隔交替出现,只看第一个会因创建时刻不同而漏判。
  */
 export function violatesMinInterval(expr, tz, minMs, from = new Date()) {
-  const a = getNextCronTime(expr, tz, from);
+  let a = getNextCronTime(expr, tz, from);
   if (!a) return { violates: false, reason: 'no_match' };
-  const b = getNextCronTime(expr, tz, a);
-  if (!b) return { violates: false, reason: 'single' };
-  const gap = b.getTime() - a.getTime();
-  return { violates: gap < minMs, gapMs: gap };
+  let minGap = Infinity;
+  for (let i = 0; i < 6; i++) {
+    const b = getNextCronTime(expr, tz, a);
+    if (!b) break;
+    const gap = b.getTime() - a.getTime();
+    if (gap < minGap) minGap = gap;
+    if (minGap < minMs) return { violates: true, gapMs: minGap };
+    a = b;
+  }
+  if (minGap === Infinity) return { violates: false, reason: 'single' };
+  return { violates: false, gapMs: minGap };
 }
 
 export const _internals = { matchField, MAX_DAYS, MINUTE };

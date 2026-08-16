@@ -3121,7 +3121,7 @@ const zhHK: Record<TranslationKey, string> = {
   'routines.form.manualHint': '不自動觸發，只能手動按「立即執行」。',
   'routines.form.advancedCron': '進階：直接寫 cron 運算式',
   'routines.form.cronHint': '5 欄位格式：分 時 日 月 週。例如 0 9 * * 1-5 表示工作日 09:00。',
-  'routines.form.intervalHint': '最小間隔 15 分鐘；實際觸發會有幾分鐘固定偏移，用於錯開伺服器負載。',
+  'routines.form.intervalHint': '最小間隔 30 分鐘；實際觸發會有幾分鐘固定偏移，用於錯開伺服器負載。',
   'routines.form.workspaceTitle': '關於工作區：',
   'routines.form.workspaceBody': '這個任務獨佔一個沙箱工作區，多次執行之間檔案會累積保留——昨天產生的表，今天可以接著讀。需要乾淨環境的話，在指令裡自己清理。',
 

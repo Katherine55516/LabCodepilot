@@ -3120,7 +3120,7 @@ const en = {
   'routines.form.manualHint': 'Never triggers automatically — only via "Run now".',
   'routines.form.advancedCron': 'Advanced: write a cron expression',
   'routines.form.cronHint': '5 fields: minute hour day month weekday. e.g. 0 9 * * 1-5 means weekdays at 09:00.',
-  'routines.form.intervalHint': 'Minimum interval is 15 minutes. Actual firing carries a fixed offset of a few minutes to spread server load.',
+  'routines.form.intervalHint': 'Minimum interval is 30 minutes. Actual firing carries a fixed offset of a few minutes to spread server load.',
   'routines.form.workspaceTitle': 'About the workspace: ',
   'routines.form.workspaceBody': 'This task gets its own sandbox workspace, and files persist across runs — today it can read the file it wrote yesterday. If you need a clean slate, clear it in the instructions.',
 

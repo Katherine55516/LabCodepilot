@@ -220,7 +220,7 @@ ssh cowork-prod 'cd /opt/cowork-server; set -a; . ./.env; set +a
 | D3 | 凭证走 RD4-C：服务端向账号后端直取 |
 | D4 | 凭证接口用**独立密钥** + 强制 `exp ≤ 60s` + 审计 + 频控 |
 | D5 | ~~P1 等指示再启动~~（已完成） |
-| D6 | 最小调度间隔 **15 分钟** |
+| D6 | 最小调度间隔 **30 分钟**（2026-08-16 由 15 分钟上调，防高频任务耗尽服务器；`COWORK_ROUTINE_MIN_INTERVAL_MS` 可覆盖） |
 | D7 | 并发上限 **4** |
 | D8 | 每用户日配额 **20 次/天** |
 | D9 | 建 routine 时可选模型，默认取账号下发配置的**第一个** |
@@ -402,7 +402,7 @@ listCoworkRoutines() / getCoworkRoutine(id) / replaceCoworkRoutines(rows) / purg
 | 正常 | `{routines:[...], offline:false}` |
 | 沙箱不可达 | `{routines:[缓存], offline:true, error}` → UI 挂横幅 + **禁止新建/编辑** |
 | 未开通 | **503 + `{reason:'not_provisioned'}`** → UI **隐藏整个入口**（不是置灰） |
-| 服务端校验失败 | 原样透传 400 + 中文消息（如「触发间隔 5 分钟,低于最小间隔 15 分钟」） |
+| 服务端校验失败 | 原样透传 400 + 中文消息（如「触发间隔 5 分钟,低于最小间隔 30 分钟」） |
 
 ---
 
