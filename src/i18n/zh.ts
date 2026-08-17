@@ -2372,6 +2372,13 @@ const zh: Record<TranslationKey, string> = {
   'terminal.stop_hook_prevented': 'Stop Hook 阻止了结束',
   'terminal.hook_stopped': 'Hook 中断本轮',
   'terminal.tool_deferred': '有工具等待响应',
+  'terminal.tool_deferred_unavailable': '工具暂不可用',
+  'terminal.api_error': '上游接口返回错误',
+  'terminal.malformed_tool_use_exhausted': '工具调用格式反复出错',
+  'terminal.structured_output_retry_exhausted': '结构化输出重试用尽',
+  'terminal.turn_setup_failed': '本轮初始化失败',
+  'terminal.budget_exhausted': '已达用量预算上限',
+  'terminal.background_requested': '已转入后台继续',
   'terminal.unknown': '本轮已结束',
 
   // ── TerminalReason action buttons (Phase 1b) ──

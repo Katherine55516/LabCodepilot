@@ -141,6 +141,53 @@ describe('prepareSdkSubprocessEnv — uniform provider-group ownership', () => {
   });
 });
 
+describe('prepareSdkSubprocessEnv — print-mode background wind-down ceiling', () => {
+  const originalCeiling = process.env.CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS;
+  afterEach(() => {
+    if (originalCeiling !== undefined) process.env.CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS = originalCeiling;
+    else delete process.env.CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS;
+  });
+
+  const envModeResolved = {
+    provider: undefined,
+    protocol: 'anthropic' as const,
+    authStyle: 'api_key' as const,
+    model: undefined,
+    modelDisplayName: undefined,
+    upstreamModel: undefined,
+    headers: {},
+    envOverrides: {},
+    roleModels: {},
+    hasCredentials: true,
+    availableModels: [],
+    settingSources: ['user', 'project', 'local'] as const,
+  };
+
+  it('caps the ceiling so an unbounded background task cannot hold the turn for 10 min', async () => {
+    delete process.env.CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS;
+    const { prepareSdkSubprocessEnv } = await import('../../lib/sdk-subprocess-env');
+    const setup = prepareSdkSubprocessEnv({ ...envModeResolved, settingSources: ['user'] });
+    try {
+      const raw = setup.env.CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS;
+      assert.ok(raw, 'ceiling must be set — the CLI default is 600_000 (10 min)');
+      const ms = Number(raw);
+      // 0 means "wait indefinitely" in the CLI (`dr > 0` gates the check), so
+      // it is strictly worse than the default despite what its stderr suggests.
+      assert.ok(ms > 0, 'must not be 0 — that makes the CLI wait forever');
+      assert.ok(ms < 600_000, 'must be below the CLI default to have any effect');
+    } finally { setup.shadow.cleanup(); }
+  });
+
+  it('does not override a value the user exported themselves', async () => {
+    process.env.CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS = '123456';
+    const { prepareSdkSubprocessEnv } = await import('../../lib/sdk-subprocess-env');
+    const setup = prepareSdkSubprocessEnv({ ...envModeResolved, settingSources: ['user'] });
+    try {
+      assert.equal(setup.env.CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS, '123456');
+    } finally { setup.shadow.cleanup(); }
+  });
+});
+
 describe('createStderrCollector — bounded stderr capture for spawn points', () => {
   it('accumulates appended chunks and snapshots them', async () => {
     const { createStderrCollector } = await import('../../lib/sdk-subprocess-env');

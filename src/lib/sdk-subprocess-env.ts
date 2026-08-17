@@ -21,6 +21,33 @@ import { findGitBash, getExpandedPath } from './platform';
 import { toClaudeCodeEnv, type ResolvedProvider } from './provider-resolver';
 import { createShadowClaudeHome, type ShadowHome } from './claude-home-shadow';
 
+/**
+ * Ceiling for the CLI's print-mode background-task wind-down, in ms.
+ *
+ * The CLI default is 600_000 (verified in the bundled binary: `Kuf()` returns
+ * `env.CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS ?? 600000`). After the turn's
+ * result is emitted, print mode keeps the process alive waiting on background
+ * tasks, then force-sweeps them and exits non-zero. A background task that
+ * never exits on its own — a dev server, a Playwright browser, `tail -f` —
+ * therefore burns the full 10 minutes every time.
+ *
+ * Field case (packaged v4.2.0 main.log, 2026-08-17): turn started 07:21:32,
+ * result arrived 07:23:19, process died 07:33:19 with "Background tasks still
+ * running after 600s; terminating." The answer had been delivered in full, but
+ * the stream stayed open for 10 more minutes and then surfaced as a
+ * PROCESS_CRASH ("check your API Key / Base URL") — plus it cleared
+ * sdk_session_id, pushing the next turn onto the replay-history-as-text path.
+ *
+ * 60s is the trade-off: long enough that a finite task launched in the
+ * background (an install, a one-shot build) still lands and gets recorded,
+ * short enough that an unbounded one caps the damage at a minute. Bounded
+ * tasks that finish on their own never reach the ceiling at all.
+ *
+ * NOT 0 — the CLI's own stderr hint suggests it, but `dr > 0` gates the
+ * ceiling check, so 0 means *wait forever*. That is strictly worse.
+ */
+const PRINT_BG_WAIT_CEILING_MS = '60000';
+
 export interface SdkSubprocessSetup {
   /** Env to pass to the SDK's `env` Option (already sanitized for spawn). */
   env: Record<string, string>;
@@ -77,6 +104,12 @@ export function prepareSdkSubprocessEnv(resolved: ResolvedProvider): SdkSubproce
   // (NODE_ENV undefined), which is exactly the unaffected baseline. A command
   // that genuinely wants NODE_ENV can still set it inline (e.g. `NODE_ENV=x …`).
   delete sdkEnv.NODE_ENV;
+
+  // Cap the print-mode background-task wind-down (see the constant's comment).
+  // Only when unset, so a user who exported their own value keeps it.
+  if (!sdkEnv.CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS) {
+    sdkEnv.CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS = PRINT_BG_WAIT_CEILING_MS;
+  }
 
   // Windows-only: auto-detect Git Bash if not already configured.
   if (process.platform === 'win32' && !process.env.CLAUDE_CODE_GIT_BASH_PATH) {

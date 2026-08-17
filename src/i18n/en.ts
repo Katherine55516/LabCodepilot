@@ -2375,6 +2375,13 @@ const en = {
   'terminal.stop_hook_prevented': 'Stop hook prevented',
   'terminal.hook_stopped': 'Hook stopped this turn',
   'terminal.tool_deferred': 'Tool awaiting response',
+  'terminal.tool_deferred_unavailable': 'Tool unavailable',
+  'terminal.api_error': 'Upstream API error',
+  'terminal.malformed_tool_use_exhausted': 'Malformed tool calls, retries exhausted',
+  'terminal.structured_output_retry_exhausted': 'Structured output retries exhausted',
+  'terminal.turn_setup_failed': 'Turn setup failed',
+  'terminal.budget_exhausted': 'Usage budget reached',
+  'terminal.background_requested': 'Moved to background',
   'terminal.unknown': 'Turn ended',
 
   // ── TerminalReason action buttons (Phase 1b) ──

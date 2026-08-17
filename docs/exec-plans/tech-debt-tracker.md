@@ -31,6 +31,7 @@
 | 22 | 回归用例库批量移除走「逐条 DELETE」循环（`/api/test/library` 的 DELETE 是单条/单任务口径）。条数量级为个位数~百时可接受，选中上千条会产生同等数量的请求与落盘 | 低 | 大批量移除慢；每条都触发一次原子写 | 2026-07-10 |
 | 24 | 执行进展面板的「收口中 / 疑似卡住」是**推断态**：最后一条 @@RESULT 到 run_json 之间服务端在做证据归集与归约，不发任何 SSE 帧。面板靠「多久没收到帧」推断，无心跳帧兜底。服务端若真卡死，面板只能靠 90s 超时提示，无法区分「归约慢」与「进程挂了」 | 低 | 收口阶段的可观测性依赖启发式 | 2026-07-10 |
 | 25 | 执行流事件在内存中无界增长：大回归套件（十几条用例 × 几百条工具调用）的 `libraryLive.cases[].events` 会持续膨胀。按用例分段 + 工具轨迹折叠缓解了渲染压力，但数组本身未封顶/虚拟化 | 低 | 超大套件长跑后滚动可能卡顿 | 2026-07-10 |
+| 31 | `claude-client.ts` 的 catch 块**不区分「本轮已成功交付」**：只要迭代器最终抛错，就一律分类 + 发 error SSE + 清 `sdk_session_id`。但 print 模式收尾阶段的失败（后台任务被强杀 → exit 1）发生在 result 之后，此时 SDK 报的是 `process exited with code N` 而非 `returned an error result`（按 SDK `lastErrorResultText` 逻辑，这只在 result 是 `is_error:false` 时可能），即答案已完整交付，报错纯属误报；更糟的是清掉 `sdk_session_id` 会把下一轮推上「历史当纯文本重发」路径，而那条路径正是上游内容策略拦截（CONTENT_BLOCKED）反复复发的入口。修法：本轮收到过 `is_error:false` 的 result 后，把后续进程退出错误降级为只记日志（不发 error SSE、不清 session）。已通过 `CLAUDE_CODE_PRINT_BG_WAIT_CEILING_MS=60000` 把等待窗口从 10 分钟压到 1 分钟，但**误报本身仍在**（sweep 照样 exit 1，只是提前了）。现场证据与推导见 [handover/provider-error-doctor.md](../handover/provider-error-doctor.md)「print 模式后台任务收尾上限」 | 中 | 成功回合被显示成失败并弹「检查 API Key / Base URL」；连带清 session 触发内容拦截复发 | 2026-08-17 |
 | 30 | Cowork 凭证探测无观测信号:坏 token 打到 cowork-proxy 只回 401 且故意不打日志(防敏感头落盘),宿主审计无 cred_reject 类事件(audit.mjs 注释曾预留未实现,R5-4 复查发现该注释误导过运维文档,已修正注释与文档)。修复思路:cred-proxy.py 把拒绝**计数**(不含头/路径)打 stdout 进 docker logs,或 server 周期 docker exec 收集计数写宿主审计 | 低 | 无法监控凭证暴力探测;审计链有盲区 | 2026-07-17 |
 
 ## 已解决

@@ -73,7 +73,23 @@ const ACTIONS_BY_REASON: Record<string, ActionDescriptor[]> = {
   model_error: [
     { id: 'retry_simple', labelKey: 'terminalAction.retry' as TranslationKey, variant: 'primary' },
   ],
+  // Transient-by-nature reasons: a plain resend is the correct first move.
+  turn_setup_failed: [
+    { id: 'retry_simple', labelKey: 'terminalAction.retry' as TranslationKey, variant: 'primary' },
+  ],
+  malformed_tool_use_exhausted: [
+    { id: 'retry_simple', labelKey: 'terminalAction.retry' as TranslationKey, variant: 'primary' },
+  ],
+  structured_output_retry_exhausted: [
+    { id: 'retry_simple', labelKey: 'terminalAction.retry' as TranslationKey, variant: 'primary' },
+  ],
   // tool_deferred handled by Phase 7b's deferred-tool card, no action here.
+  // Deliberately action-less:
+  // - api_error: covers upstream policy refusals (CONTENT_BLOCKED), where a
+  //   retry resends the blocked prefix and fails again. The classified error
+  //   banner carries the real guidance ("start a NEW session").
+  // - budget_exhausted / tool_deferred_unavailable / background_requested:
+  //   nothing the user can act on from this chip.
 };
 
 const TONE_BY_REASON: Record<string, Tone> = {
@@ -83,6 +99,13 @@ const TONE_BY_REASON: Record<string, Tone> = {
   rapid_refill_breaker: 'error',
   image_error: 'error',
   model_error: 'error',
+  api_error: 'error',
+  malformed_tool_use_exhausted: 'error',
+  turn_setup_failed: 'error',
+  budget_exhausted: 'error',
+  structured_output_retry_exhausted: 'error',
+  tool_deferred_unavailable: 'warning',
+  background_requested: 'info',
   stop_hook_prevented: 'muted',
   hook_stopped: 'muted',
   tool_deferred: 'info',
@@ -95,6 +118,13 @@ const SILENT_REASONS = new Set(['completed', 'aborted_streaming', 'aborted_tools
 // Whitelist of reasons we have explicit i18n labels for. Anything else
 // (e.g. a future SDK value we haven't translated yet) renders under the
 // 'unknown' key so the UI never leaks the raw reason string.
+//
+// MUST stay in sync with the SDK's `TerminalReason` union (sdk.d.ts). It drifted
+// once already: the whitelist covered 9 of the SDK's 19 values, so a real
+// upstream policy refusal (`api_error`) fell through to 'terminal.unknown' and
+// the user saw only "本轮已结束" for a turn that had actually been blocked.
+// SILENT_REASONS above holds the other 3 (completed + aborted_*); together the
+// two sets must cover all 19 — `terminal-reason-coverage.test.ts` asserts it.
 const KNOWN_REASONS = new Set([
   'max_turns',
   'prompt_too_long',
@@ -102,9 +132,16 @@ const KNOWN_REASONS = new Set([
   'rapid_refill_breaker',
   'image_error',
   'model_error',
+  'api_error',
+  'malformed_tool_use_exhausted',
   'stop_hook_prevented',
   'hook_stopped',
   'tool_deferred',
+  'tool_deferred_unavailable',
+  'background_requested',
+  'budget_exhausted',
+  'structured_output_retry_exhausted',
+  'turn_setup_failed',
 ]);
 
 const TONE_CLASSES: Record<Tone, string> = {

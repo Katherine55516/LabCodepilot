@@ -172,6 +172,8 @@ CLAUDE_SDK_POC=1 npm run test:sdk-poc
     - AskUserQuestion 是这套机制的一个具体应用，不是独立通道。
     - 三者必须拆三个 Phase 或至少三个独立子任务，不能写成「一条链」。Phase 7 拆成 7a / 7b。
   - **Phase 0 Hook POC 不够真实**：原计划「临时工程最小复现」只能证明 SDK 基础通路，证明不了 AI Native Lab 原 bug（canUseTool + in-process MCP + stderr capture + resume + capability capture + stream parse 组合）是否修好。Phase 0 增加「repo 内真 queryOptions POC harness」子任务。
+- 2026-08-17：**Phase 1 的白名单随 SDK 升级漂移，已补齐并上测试锁死。** Phase 1 落地时 `TerminalReason` 是 12 个值（0.2.111），`TerminalReasonChip.tsx` 白名单收了其中 9 个 + 3 个静默；升级到 **0.3.221 后该联合类型变成 19 个值**，新增的 7 个（`api_error` / `malformed_tool_use_exhausted` / `background_requested` / `budget_exhausted` / `structured_output_retry_exhausted` / `tool_deferred_unavailable` / `turn_setup_failed`）全部落进 `terminal.unknown` → 用户只看到「本轮已结束」。**现场代价**：上游内容策略拦截报的正是 `api_error`，于是一次被拦截的回合在 UI 上和普通结束毫无区别（打包版 v4.2.0 main.log，2026-08-17）。已补齐 19 个值的 tone/label/三语 i18n，并新增两条测试：`terminal-reason-coverage.test.ts` 直接解析 `sdk.d.ts` 的联合类型与组件里的两个 Set 做双向比对（SDK 新增值 → 失败；组件留了 SDK 已删的值 → 也失败），`terminal-reason-chip-render.test.ts` 用 `react-dom/server` + 真 `I18nContext` 实渲染，防止 `t(\`terminal.${reason}\` as TranslationKey)` 那个 cast 让缺 key 变成 UI 上的裸键名。**后续每次升 SDK 都靠这两条测试暴露漂移，不要手工比对。**
+  - 配套决定：`api_error` **不给操作按钮**。它覆盖上游 refusal，而 refusal 上重试等于把被拦的前缀再发一次；真正的指引由 `error-classifier.ts` 的 CONTENT_BLOCKED 分类（错误气泡）负责，见 [provider-error-doctor.md](../../handover/provider-error-doctor.md)。
 
 ---
 

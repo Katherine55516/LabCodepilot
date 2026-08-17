@@ -26,6 +26,7 @@ export type ClaudeErrorCategory =
   | 'RESUME_FAILED'
   | 'SESSION_STATE_ERROR'
   | 'PROVIDER_NOT_APPLIED'
+  | 'CONTENT_BLOCKED'         // Upstream safety/AUP refusal (stop_reason: refusal)
   | 'PROCESS_CRASH'
   // Native Runtime categories
   | 'NATIVE_STREAM_ERROR'    // Agent loop streamText() failure
@@ -120,6 +121,41 @@ const MISSING_GIT_BASH_ACTION_HINT =
   '也可以打开「设置 → Claude CLI」，安装向导会自动检测并引导安装 Git for Windows。' +
   '安装完成后重新发送消息即可，若仍报此错误请重启应用。';
 
+// ── Upstream safety / AUP refusal copy ──────────────────────────
+// Chinese-first: same rationale as MISSING_GIT_BASH / IMAGES_NOT_SUPPORTED.
+//
+// The CLI turns an upstream policy block into a synthetic assistant message
+// with `stop_reason: "refusal"` and an `invalid_request` error, which the SDK
+// re-throws as `Claude Code returned an error result: API Error: …`. Verified
+// verbatim shapes in the bundled binary (claude-agent-sdk-darwin-arm64/claude):
+//   1. `API Error: <Model> can't help with this. Start a new session to
+//      continue.\n\nLearn more: https://www.anthropic.com/legal/aup`
+//   2. `API Error: <Model>'s safeguards flagged this message
+//      (https://www.anthropic.com/legal/aup). … Claude Code can't respond to
+//      this message with <Model>. …`
+//   3. cyber category: `API Error: <Model>'s safeguards flagged this message.
+//      … Cyber Verification Program …` (no AUP url — own help-center link)
+// Shape 1 is what the field report hit (packaged v4.2.0 main.log, 4 occurrences
+// between 2026-08-13 and 2026-08-17); it matched no pattern and degraded to
+// UNKNOWN → "An unexpected error occurred … run Provider Doctor", sending the
+// user to diagnose a provider that was working fine.
+const CONTENT_BLOCKED_USER_MESSAGE =
+  '本轮请求被上游安全策略拦截，模型拒绝继续输出。这与 API Key、额度、Base URL 或网络都无关。';
+const CONTENT_BLOCKED_ACTION_HINT =
+  '这类拦截跟着整段对话历史复发 —— 在当前会话里说「继续」或重发只会再次被拦。' +
+  '请新建会话，只带上必要的上下文重新提问；换个说法仍被拦时，切换右下角的模型再试。';
+const CONTENT_BLOCKED_CYBER_SUFFIX =
+  ' 本次拦截被判定为网络安全类话题：若确属正常的安全研究/防御工作，可通过 Anthropic 的 ' +
+  'Cyber Verification Program 申请放行，或改用其他模型。';
+
+/** 复原 classifyErrorCore 的检索文本(pattern 回调只拿到 ctx,拿不到 searchText)。 */
+function ctxSearchText(ctx: ErrorContext): string {
+  const rawMessage = ctx.error instanceof Error ? ctx.error.message : String(ctx.error);
+  const cause = ctx.error instanceof Error ? (ctx.error as { cause?: unknown }).cause : undefined;
+  const causeMsg = cause instanceof Error ? cause.message : cause ? String(cause) : '';
+  return `${rawMessage}\n${ctx.stderr ?? ''}\n${causeMsg}`.toLowerCase();
+}
+
 const ERROR_PATTERNS: ErrorPattern[] = [
   // ── Missing shell on Windows (fatal CLI startup, must be FIRST) ──
   // Without Git for Windows / PowerShell the CLI exits with code 1 and
@@ -146,6 +182,33 @@ const ERROR_PATTERNS: ErrorPattern[] = [
     ],
     userMessage: () => MISSING_GIT_BASH_USER_MESSAGE,
     actionHint: () => MISSING_GIT_BASH_ACTION_HINT,
+    retryable: false,
+  },
+
+  // ── Upstream safety / AUP refusal (must be near the top) ──
+  // Placed second on purpose: every pattern here is an exact CLI phrase, so it
+  // cannot hijack anything, while several LATER entries are loose enough to
+  // swallow a refusal if the order ever changes (CLI_VERSION_TOO_OLD matches a
+  // bare 'version', UNSUPPORTED_FEATURE matches 'not supported').
+  // NOTE: apostrophes are plain ASCII 0x27 in the CLI strings — verified
+  // against both the binary and the field main.log bytes. Do not "fix" these
+  // into typographic quotes; the substring match would stop working.
+  {
+    category: 'CONTENT_BLOCKED',
+    patterns: [
+      "can't help with this",
+      'safeguards flagged this message',
+      "can't respond to this message with",
+      'anthropic.com/legal/aup',
+    ],
+    userMessage: (ctx) => `${CONTENT_BLOCKED_USER_MESSAGE}${providerHint(ctx)}`,
+    actionHint: (ctx) => {
+      const text = ctxSearchText(ctx);
+      const isCyber = text.includes('cyber verification program') ||
+        text.includes('cybersecurity topic');
+      return CONTENT_BLOCKED_ACTION_HINT + (isCyber ? CONTENT_BLOCKED_CYBER_SUFFIX : '');
+    },
+    // Not retryable: resending the same prefix is precisely what re-trips it.
     retryable: false,
   },
 
@@ -543,6 +606,13 @@ export function extractUpstreamMessage(text: string): string | null {
  */
 export function classifyError(ctx: ErrorContext): ClassifiedError {
   const result = classifyErrorCore(ctx);
+  // CONTENT_BLOCKED opts out of the upstream-message override. A gateway that
+  // wraps the refusal in JSON (`{"error":{"message":"… can't help with this …"}}`)
+  // would otherwise get its one raw sentence promoted while actionHint and
+  // recoveryActions are cleared — dropping the only thing the user needs to
+  // know (start a NEW session; continuing re-trips it). The raw upstream text
+  // is still shown under "Original error".
+  if (result.category === 'CONTENT_BLOCKED') return result;
   const rawMessage = ctx.error instanceof Error ? ctx.error.message : String(ctx.error);
   const cause = ctx.error instanceof Error ? (ctx.error as { cause?: unknown }).cause : undefined;
   const causeMsg = cause instanceof Error ? cause.message : cause ? String(cause) : '';
@@ -583,6 +653,14 @@ function buildRecoveryActions(category: ClaudeErrorCategory, ctx: ErrorContext):
     case 'RESUME_FAILED':
     case 'SESSION_STATE_ERROR':
       actions.push({ label: 'New Conversation', action: 'new_conversation' });
+      break;
+    case 'CONTENT_BLOCKED':
+      // Chinese labels to match the category's Chinese-first copy above.
+      // Deliberately NO 'retry' and NO 'Open Settings': retrying resends the
+      // blocked prefix, and Settings/Provider Doctor solve nothing here — that
+      // misdirection is the whole reason this category exists.
+      actions.push({ label: '新建会话', action: 'new_conversation' });
+      actions.push({ label: '查看内容政策', url: 'https://www.anthropic.com/legal/aup' });
       break;
     case 'MISSING_GIT_BASH':
       // Chinese labels to match the category's Chinese-first copy above.
