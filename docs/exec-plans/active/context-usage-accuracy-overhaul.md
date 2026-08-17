@@ -262,6 +262,15 @@ resolveContextWindow(输入: {
 
 建议提交粒度：1A 单独一个 commit（独立可验证的止血修复）→ 1B+1C → 2 → 3 → 4 → 5，每步 `npm run test` + 冒烟。
 
+## 九点五、验收期新发现：误纠偏清会话（2026-08-17，用户实测反馈驱动）
+
+**用户反馈**：多轮实测后用量仍"不准"——24% 后掉回 10%、7.6%。**取证结论：卡片没算错，上下文是真的被清了**，本改造把分子改准后反而暴露了一个自 07-27 起累计 28 次的老 bug：
+
+- 链路：`MessageInput` 的模型自动纠偏 effect 在 `/api/providers/models` 失败/中断/托管未同步的竞态窗口里，把顶替列表（内置 sonnet/opus/haiku 或别的服务商的组）当真 → 判定"当前模型不在列表" → PATCH 改模型 → 服务端 #343/#346 守卫清 `sdk_session_id` → 下一轮 resume 没了，上下文被静默重置成 fallback 文本包（真列表到达后又纠回来，模型看似没变，会话血统已毁）。
+- 实测数据（会话 1d47f5e2，deepseek-v4-flash[1m]）：08-14 三轮 resume 正常 143K→155K→244K；08-17 两轮各被一次误 PATCH 清会话（main.log 06:18:33 / 06:26:26），transcript 首条消息即 `<conversation_history>` fallback 指纹，探针如实测得 100K / 76K。
+- 修复：`useProviderModels` 新增 `modelListAuthoritative`（fetch 成功 + 组匹配本会话服务商才为真，判定函数导出单测），纠偏 effect 仅在 true 时开火；服务端守卫日志补 old/new model 值。CDP 注入网络故障复现竞态：修复后零 PATCH、UI 正常、DB 未被改写。
+- 关联：这是「幻影模型」家族（0151ff6 修显示层）漏掉的持久化路径。
+
 ## 十、交付结果与剩余事项（2026-08-13）
 
 **已交付（5 个 commit，全部 dev 态验证通过）：**

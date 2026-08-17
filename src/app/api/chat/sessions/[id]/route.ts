@@ -67,9 +67,19 @@ export async function PATCH(
     // the old one (which would fail with a different provider/model).
     if ((modelChanged || providerChanged) && body.sdk_session_id === undefined) {
       if (session.sdk_session_id) {
+        // 记录新旧模型串:2026-08-17 排查"上下文用量骤降"时,这里只有
+        // modelChanged=true 没有具体值,取证只能靠反推。误清会话的根因是
+        // MessageInput 在模型列表竞态窗口的误纠偏(已修,见
+        // useProviderModels.modelListAuthoritative);若此日志再现且
+        // oldModel/newModel 看起来"没换过模型",优先怀疑同类竞态。
         console.log(
           `[session-api] Provider/model changed for session ${id}, clearing stale sdk_session_id`,
-          { modelChanged, providerChanged, oldSdkSessionId: session.sdk_session_id.slice(0, 8) + '...' }
+          {
+            modelChanged, providerChanged,
+            oldModel: session.model, newModel: body.model,
+            oldProviderId: session.provider_id, newProviderId: body.provider_id,
+            oldSdkSessionId: session.sdk_session_id.slice(0, 8) + '...',
+          }
         );
       }
       updateSdkSessionId(id, '');

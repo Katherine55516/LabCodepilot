@@ -243,7 +243,7 @@ export function MessageInput({
 
   // --- Extracted hooks ---
   const popover = usePopoverState(modelName);
-  const { providerGroups, currentProviderIdValue, modelOptions, currentModelOption, globalDefaultModel, globalDefaultProvider } = useProviderModels(providerId, modelName);
+  const { providerGroups, currentProviderIdValue, modelOptions, currentModelOption, globalDefaultModel, globalDefaultProvider, modelListAuthoritative } = useProviderModels(providerId, modelName);
 
   // Multimodal upload guard: when the selected model is a managed provider we
   // can prove is NOT multimodal (its description lacks「多模态」), block media
@@ -279,13 +279,21 @@ export function MessageInput({
   // Existing sessions must keep their own selected model; if that model becomes
   // invalid (provider changed), fall back to the provider's first model, not the
   // global default, to avoid overwriting the session's model choice.
+  //
+  // FIX(误纠偏清会话,2026-08-17 线上取证): 必须 modelListAuthoritative 才允许
+  // 开火。/api/providers/models 失败/中断/托管未同步时 modelOptions 是顶替列表
+  // (内置 sonnet/opus/haiku 或别的服务商的组),托管模型必然"不在列表" → 误纠偏
+  // → PATCH → 服务端守卫清 sdk_session_id → 下一轮 resume 没了,上下文被静默
+  // 重置(用量卡片 24%→10% 的真凶,main.log 自 07-27 累计 28 次)。真列表到达后
+  // 纠回来,模型看似没变,会话血统已毁 —— 所以顶替状态下宁可不纠。
   useEffect(() => {
+    if (!modelListAuthoritative) return;
     if (modelName && modelOptions.length > 0 && !modelOptions.some(m => m.value === modelName)) {
       const fallback = modelOptions[0].value;
       onModelChange?.(fallback);
       onProviderModelChange?.(currentProviderIdValue, fallback);
     }
-  }, [modelName, modelOptions, currentProviderIdValue, onModelChange, onProviderModelChange]);
+  }, [modelName, modelOptions, modelListAuthoritative, currentProviderIdValue, onModelChange, onProviderModelChange]);
 
   const { badges, addBadge, removeBadge, clearBadges, cliBadge, setCliBadge, removeCliBadge, hasBadge } = useCommandBadge(textareaRef);
   const addBadgeWithOrder = useCallback((badge: { command: string; label: string; description: string; kind: 'agent_skill' | 'slash_command' | 'sdk_command' | 'codepilot_command'; installedSource?: 'agents' | 'claude' }) => {

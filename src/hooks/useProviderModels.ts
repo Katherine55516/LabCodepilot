@@ -39,6 +39,39 @@ export interface UseProviderModelsReturn {
   globalDefaultModel: string | undefined;
   /** Global default model's provider ID */
   globalDefaultProvider: string | undefined;
+  /**
+   * modelOptions 是否是"本会话服务商自己的、服务端成功返回的"列表 ——
+   * MessageInput 的模型自动纠偏(不在列表则回退第一项并 PATCH 持久化)
+   * **只允许在 true 时开火**。
+   *
+   * 为什么(2026-08-17 线上取证,main.log 共 28 次误清):/api/providers/models
+   * 请求失败/被中断/托管列表未同步时,本 hook 会把选项顶替成内置
+   * DEFAULT_MODEL_OPTIONS(sonnet/opus/haiku)或别的服务商的组 —— 托管会话
+   * 的模型(如 deepseek-v4-flash[1m])当然不在顶替列表里,纠偏误开火 →
+   * PATCH 改模型 → 服务端 #343/#346 守卫清 sdk_session_id → 下一轮 resume
+   * 没了,上下文被静默重置成 fallback 文本包(用户可感知:用量卡片 24%→10%)。
+   * 真列表几秒后到达再纠回来,模型看起来没变,会话血统已毁。
+   */
+  modelListAuthoritative: boolean;
+}
+
+/**
+ * 纯函数:判定"当前 modelOptions 可信,允许自动纠偏持久化"。
+ * 导出仅为单测(provider-models-authority.test.ts)。
+ */
+export function isModelListAuthoritative(params: {
+  /** /api/providers/models 是否已成功应答过(catch/未返回 = false)。 */
+  fetchSucceeded: boolean;
+  /** 实际选中的组的 provider_id(可能是 providerGroups[0] 顶替)。 */
+  currentGroupProviderId: string | undefined;
+  /** 会话解析出的 provider id(providerId ?? 全局默认 ?? 首组)。 */
+  resolvedProviderId: string;
+}): boolean {
+  return (
+    params.fetchSucceeded &&
+    !!params.currentGroupProviderId &&
+    params.currentGroupProviderId === params.resolvedProviderId
+  );
 }
 
 export function useProviderModels(
@@ -49,6 +82,9 @@ export function useProviderModels(
   const [defaultProviderId, setDefaultProviderId] = useState<string>('');
   const [globalDefaultModel, setGlobalDefaultModel] = useState<string | undefined>();
   const [globalDefaultProvider, setGlobalDefaultProvider] = useState<string | undefined>();
+  // 服务端是否成功应答过模型列表。catch(网络失败/中断)会顶替内置默认列表
+  // 用于**展示**,但那不是权威数据 —— 见 modelListAuthoritative。
+  const [fetchSucceeded, setFetchSucceeded] = useState(false);
 
   const fetchAll = useCallback(() => {
     fetch('/api/providers/models')
@@ -65,6 +101,7 @@ export function useProviderModels(
           }]);
         }
         setDefaultProviderId(data.default_provider_id || '');
+        setFetchSucceeded(true);
       })
       .catch(() => {
         setProviderGroups([{
@@ -74,6 +111,7 @@ export function useProviderModels(
           models: DEFAULT_MODEL_OPTIONS,
         }]);
         setDefaultProviderId('');
+        setFetchSucceeded(false); // 顶替列表不可信,禁自动纠偏
       });
 
     // Fetch global default model
@@ -106,6 +144,13 @@ export function useProviderModels(
   // (managed mode) rather than the bare 'sonnet' alias, which may not exist in
   // the managed catalog. env mode keeps sonnet via DEFAULT_MODEL_OPTIONS[0].
   const currentModelValue = modelName || modelOptions[0]?.value || 'sonnet';
+  // 在 useMemo 之前算好(而非 return 里内联):return 对象里引用 memo 依赖之外
+  // 的派生值会让 React Compiler 放弃保留下方手写 memo(preserve-manual-memoization)。
+  const modelListAuthoritative = isModelListAuthoritative({
+    fetchSucceeded,
+    currentGroupProviderId: currentGroup?.provider_id,
+    resolvedProviderId: currentProviderIdValue,
+  });
   const currentModelOption = useMemo(
     () => modelOptions.find((m) => m.value === currentModelValue) || modelOptions[0],
     [modelOptions, currentModelValue],
@@ -118,5 +163,6 @@ export function useProviderModels(
     currentModelOption,
     globalDefaultModel,
     globalDefaultProvider,
+    modelListAuthoritative,
   };
 }
