@@ -33,17 +33,26 @@ export async function GET(
     const searchParams = request.nextUrl.searchParams;
     const limitParam = searchParams.get('limit');
     const beforeParam = searchParams.get('before');
+    const afterParam = searchParams.get('after');
+    const aroundParam = searchParams.get('around');
 
     const limit = limitParam ? Math.min(Math.max(parseInt(limitParam, 10) || 30, 1), 500) : 30;
     const beforeRowId = beforeParam ? parseInt(beforeParam, 10) || undefined : undefined;
+    const afterRowId = afterParam ? parseInt(afterParam, 10) || undefined : undefined;
 
-    const { messages, hasMore } = getMessages(id, { limit, beforeRowId, excludeHeartbeatAck: true });
+    const { messages, hasMore, hasMoreAfter } = getMessages(id, {
+      limit,
+      beforeRowId,
+      afterRowId,
+      aroundMessageId: aroundParam || undefined,
+      excludeHeartbeatAck: true,
+    });
     // Sanitize: strip base64 data from file attachments in old messages
     const sanitizedMessages = messages.map(m => ({
       ...m,
       content: stripFileData(m.content),
     }));
-    const response: MessagesResponse = { messages: sanitizedMessages, hasMore };
+    const response: MessagesResponse = { messages: sanitizedMessages, hasMore, hasMoreAfter };
     return Response.json(response);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to fetch messages';

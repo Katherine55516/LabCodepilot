@@ -312,6 +312,12 @@
   margin: 0 -2px;
 }
 
+/* Whole-message flash when jumping to a message from global search */
+@utility message-target-flash {
+  animation: search-highlight-pulse 2.5s ease-out 1;
+  border-radius: var(--radius);
+}
+
 /* File tree item flash animation */
 @keyframes file-tree-pulse {
   0% {

@@ -1713,12 +1713,55 @@ export function setSessionDeidState(
 
 export function getMessages(
   sessionId: string,
-  options?: { limit?: number; beforeRowId?: number; excludeHeartbeatAck?: boolean },
-): { messages: Message[]; hasMore: boolean } {
+  options?: {
+    limit?: number;
+    beforeRowId?: number;
+    /** Forward pagination: rows strictly after this rowid (ASC). */
+    afterRowId?: number;
+    /** Window centered on this message id (deep-link from search). Falls back to latest window if the id is unknown. */
+    aroundMessageId?: string;
+    excludeHeartbeatAck?: boolean;
+  },
+): { messages: Message[]; hasMore: boolean; hasMoreAfter: boolean } {
   const db = getDb();
   const limit = options?.limit ?? 100;
   const beforeRowId = options?.beforeRowId;
+  const afterRowId = options?.afterRowId;
   const ackFilter = options?.excludeHeartbeatAck ? ' AND is_heartbeat_ack = 0' : '';
+
+  if (options?.aroundMessageId) {
+    const target = db.prepare(
+      'SELECT rowid as _rowid FROM messages WHERE session_id = ? AND id = ?'
+    ).get(sessionId, options.aroundMessageId) as { _rowid: number } | undefined;
+    if (target) {
+      // Target sits inside the window: half the budget above it (context the
+      // user was replying to), the rest from the target downward.
+      const beforeCount = Math.floor(limit / 2);
+      const afterCount = limit - beforeCount;
+      let beforeRows = db.prepare(
+        `SELECT *, rowid as _rowid FROM messages WHERE session_id = ? AND rowid < ?${ackFilter} ORDER BY rowid DESC LIMIT ?`
+      ).all(sessionId, target._rowid, beforeCount + 1) as Message[];
+      const hasMore = beforeRows.length > beforeCount;
+      if (hasMore) beforeRows = beforeRows.slice(0, beforeCount);
+      beforeRows.reverse();
+      let fromRows = db.prepare(
+        `SELECT *, rowid as _rowid FROM messages WHERE session_id = ? AND rowid >= ?${ackFilter} ORDER BY rowid ASC LIMIT ?`
+      ).all(sessionId, target._rowid, afterCount + 1) as Message[];
+      const hasMoreAfter = fromRows.length > afterCount;
+      if (hasMoreAfter) fromRows = fromRows.slice(0, afterCount);
+      return { messages: [...beforeRows, ...fromRows], hasMore, hasMoreAfter };
+    }
+    // Unknown/deleted target — fall through to the latest window.
+  }
+
+  if (afterRowId) {
+    let rows = db.prepare(
+      `SELECT *, rowid as _rowid FROM messages WHERE session_id = ? AND rowid > ?${ackFilter} ORDER BY rowid ASC LIMIT ?`
+    ).all(sessionId, afterRowId, limit + 1) as Message[];
+    const hasMoreAfter = rows.length > limit;
+    if (hasMoreAfter) rows = rows.slice(0, limit);
+    return { messages: rows, hasMore: false, hasMoreAfter };
+  }
 
   let rows: Message[];
   if (beforeRowId) {
@@ -1740,7 +1783,7 @@ export function getMessages(
 
   // Reverse to chronological order (ASC)
   rows.reverse();
-  return { messages: rows, hasMore };
+  return { messages: rows, hasMore, hasMoreAfter: false };
 }
 
 export function addMessage(

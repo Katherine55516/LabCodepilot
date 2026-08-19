@@ -677,6 +677,8 @@ export interface SessionResponse {
 export interface MessagesResponse {
   messages: Message[];
   hasMore?: boolean;
+  /** More messages exist after the returned window (deep-link / forward pagination). */
+  hasMoreAfter?: boolean;
 }
 
 export interface SuccessResponse {

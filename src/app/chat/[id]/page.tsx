@@ -18,6 +18,7 @@ export default function ChatSessionPage({ params }: ChatSessionPageProps) {
   const searchParams = useSearchParams();
   const [messages, setMessages] = useState<Message[]>([]);
   const [hasMore, setHasMore] = useState(false);
+  const [hasMoreAfter, setHasMoreAfter] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [sessionModel, setSessionModel] = useState<string>('');
@@ -30,6 +31,8 @@ export default function ChatSessionPage({ params }: ChatSessionPageProps) {
   const [sessionHasSummary, setSessionHasSummary] = useState(false);
   const { setWorkingDirectory, setSessionId, setSessionTitle: setPanelSessionTitle, setFileTreeOpen, setGitPanelOpen, setDashboardPanelOpen, setIsOfficeSession } = usePanel();
   const targetFilePath = searchParams.get('file') || undefined;
+  // Deep link from global search: load a window around this message and scroll to it.
+  const targetMessageId = searchParams.get('message') || undefined;
   const { t } = useTranslation();
   const defaultPanelAppliedRef = useRef(false);
 
@@ -93,12 +96,18 @@ export default function ChatSessionPage({ params }: ChatSessionPageProps) {
     setError(null);
     setMessages([]);
     setHasMore(false);
+    setHasMoreAfter(false);
 
     let cancelled = false;
 
     async function loadMessages() {
       try {
-        const res = await fetch(`/api/chat/sessions/${id}/messages?limit=30`);
+        // Deep link: load a window centered on the target so it's present even
+        // when it falls outside the latest page of a long conversation.
+        const query = targetMessageId
+          ? `around=${encodeURIComponent(targetMessageId)}&limit=60`
+          : 'limit=30';
+        const res = await fetch(`/api/chat/sessions/${id}/messages?${query}`);
         if (cancelled) return;
         if (!res.ok) {
           if (res.status === 404) {
@@ -111,6 +120,7 @@ export default function ChatSessionPage({ params }: ChatSessionPageProps) {
         if (cancelled) return;
         setMessages(data.messages);
         setHasMore(data.hasMore ?? false);
+        setHasMoreAfter(data.hasMoreAfter ?? false);
       } catch (err) {
         if (cancelled) return;
         setError(err instanceof Error ? err.message : 'Failed to load messages');
@@ -122,7 +132,7 @@ export default function ChatSessionPage({ params }: ChatSessionPageProps) {
     loadMessages();
 
     return () => { cancelled = true; };
-  }, [id]);
+  }, [id, targetMessageId]);
 
   // Auto-open file tree when jumping from a file search result
   useEffect(() => {
@@ -209,7 +219,7 @@ export default function ChatSessionPage({ params }: ChatSessionPageProps) {
 
   return (
     <div className="flex h-full min-h-0 flex-col">
-      <ChatView key={id} sessionId={id} initialMessages={messages} initialHasMore={hasMore} modelName={sessionModel} providerId={sessionProviderId} initialPermissionProfile={sessionPermissionProfile} initialSandbox={sessionSandbox} initialMode={sessionMode} initialHasSummary={sessionHasSummary} initialEffort={sessionEffort} />
+      <ChatView key={targetMessageId ? `${id}:${targetMessageId}` : id} sessionId={id} initialMessages={messages} initialHasMore={hasMore} initialHasMoreAfter={hasMoreAfter} targetMessageId={targetMessageId} modelName={sessionModel} providerId={sessionProviderId} initialPermissionProfile={sessionPermissionProfile} initialSandbox={sessionSandbox} initialMode={sessionMode} initialHasSummary={sessionHasSummary} initialEffort={sessionEffort} />
     </div>
   );
 }

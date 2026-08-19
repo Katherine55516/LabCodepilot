@@ -970,6 +970,7 @@ const en = {
   'messageList.claudeChat': 'AIMate',
   'messageList.emptyDescription': '',
   'messageList.loadEarlier': 'Load earlier messages',
+  'messageList.loadLater': 'Load later messages',
   'messageList.loading': 'Loading...',
   'messageList.userLabel': 'User',
   'messageList.assistantLabel': 'Assistant',

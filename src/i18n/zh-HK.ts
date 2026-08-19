@@ -978,6 +978,7 @@ const zhHK: Record<TranslationKey, string> = {
   'messageList.claudeChat': 'AIMate',
   'messageList.emptyDescription': '',
   'messageList.loadEarlier': '加載更早的消息',
+  'messageList.loadLater': '加載更晚的消息',
   'messageList.loading': '加載中...',
   'messageList.userLabel': '用户',
   'messageList.assistantLabel': '助手',

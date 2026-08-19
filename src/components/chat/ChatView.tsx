@@ -70,6 +70,10 @@ interface ChatViewProps {
   sessionId: string;
   initialMessages?: Message[];
   initialHasMore?: boolean;
+  /** True when initialMessages is a mid-history window (deep link) and newer messages exist below it. */
+  initialHasMoreAfter?: boolean;
+  /** Deep link from global search: scroll to and highlight this message after mount. */
+  targetMessageId?: string;
   modelName?: string;
   providerId?: string;
   initialPermissionProfile?: 'default' | 'full_access';
@@ -108,7 +112,7 @@ const MAX_MESSAGES_IN_MEMORY = 150;
  */
 const MAX_CONTENT_BYTES_IN_MEMORY = 24 * 1024 * 1024; // ~24MB
 
-export function ChatView({ sessionId, initialMessages = [], initialHasMore = false, modelName, providerId, initialPermissionProfile, initialSandbox, initialMode, initialHasSummary, initialEffort, isSplitColumn = false }: ChatViewProps) {
+export function ChatView({ sessionId, initialMessages = [], initialHasMore = false, initialHasMoreAfter = false, targetMessageId, modelName, providerId, initialPermissionProfile, initialSandbox, initialMode, initialHasSummary, initialEffort, isSplitColumn = false }: ChatViewProps) {
   const { setStreamingSessionId, workingDirectory, setPendingApprovalSessionId, setDashboardPanelOpen, setFileTreeOpen, setIsAssistantWorkspace, setTestPanelOpen, testPanelOpen, testPanelBaseSession, setSessionTitle } = usePanel();
   const { t } = useTranslation();
   const router = useRouter();
@@ -214,9 +218,13 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
   const [hasMore, setHasMore] = useState(initialHasMore);
   const [loadingMore, setLoadingMore] = useState(false);
   const loadingMoreRef = useRef(false);
+  // Deep-link window (jump-to-message): newer messages exist below the loaded tail.
+  const [hasMoreAfter, setHasMoreAfter] = useState(initialHasMoreAfter);
+  const [loadingLater, setLoadingLater] = useState(false);
+  const loadingLaterRef = useRef(false);
 
   /** Tracks whether the tail (newest messages) was trimmed during a prepend. */
-  const tailTrimmedRef = useRef(false);
+  const tailTrimmedRef = useRef(initialHasMoreAfter);
 
   /**
    * Capped message setter for append paths (user send, stream completion, commands).
@@ -237,6 +245,8 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
       .then(data => {
         if (!data?.messages) return;
         setHasMore(data.hasMore ?? true);
+        // Window is snapped back to the newest messages — no forward gap left.
+        setHasMoreAfter(false);
         const dbMessages: Message[] = data.messages;
         setMessages(current => {
           const localCommands = current.filter(m => m.id.startsWith('cmd-'));
@@ -950,6 +960,32 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
     }
   }, [sessionId, messages, hasMore]);
 
+  /** Forward pagination for the deep-link window: fill the gap below the loaded tail. */
+  const loadLaterMessages = useCallback(async () => {
+    if (loadingLaterRef.current || !hasMoreAfter || messages.length === 0) return;
+    loadingLaterRef.current = true;
+    setLoadingLater(true);
+    try {
+      const latest = messages[messages.length - 1];
+      const latestRowId = (latest as Message & { _rowid?: number })._rowid;
+      if (!latestRowId) return;
+      const res = await fetch(`/api/chat/sessions/${sessionId}/messages?limit=100&after=${latestRowId}`);
+      if (!res.ok) return;
+      const data: MessagesResponse = await res.json();
+      const stillMore = data.hasMoreAfter ?? false;
+      setHasMoreAfter(stillMore);
+      // Tail reached the newest message — post-turn reconciliation no longer needed.
+      if (!stillMore) tailTrimmedRef.current = false;
+      if (data.messages.length > 0) {
+        // cappedSetMessages trims the head (oldest) on overflow and flips hasMore back on.
+        cappedSetMessages(prev => [...prev, ...data.messages]);
+      }
+    } finally {
+      loadingLaterRef.current = false;
+      setLoadingLater(false);
+    }
+  }, [sessionId, messages, hasMoreAfter, cappedSetMessages]);
+
   const stopStreaming = useCallback(() => { stopStream(sessionId); }, [sessionId]);
 
   const handlePermissionResponse = useCallback(
@@ -1228,6 +1264,10 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
         hasMore={hasMore}
         loadingMore={loadingMore}
         onLoadMore={loadEarlierMessages}
+        hasMoreAfter={hasMoreAfter}
+        loadingLater={loadingLater}
+        onLoadLater={loadLaterMessages}
+        targetMessageId={targetMessageId}
         rewindPoints={rewindPoints}
         sessionId={sessionId}
         startedAt={streamSnapshot?.startedAt}

@@ -21,18 +21,24 @@ import { SPECIES_IMAGE_URL, EGG_IMAGE_URL, RARITY_BG_GRADIENT, type Species, typ
  * Scrolls to bottom when streaming starts or new messages are appended.
  * Must be rendered inside <Conversation> (StickToBottom provider).
  */
-function ScrollOnStream({ isStreaming, messageCount }: { isStreaming: boolean; messageCount: number }) {
+function ScrollOnStream({ isStreaming, messageCount, suppressAutoScrollRef }: { isStreaming: boolean; messageCount: number; suppressAutoScrollRef: React.MutableRefObject<boolean> }) {
   const { scrollToBottom } = useStickToBottomContext();
   const wasStreaming = useRef(false);
   const prevCount = useRef(messageCount);
 
-  // Scroll when new messages are appended (covers optimistic user message + assistant completion)
+  // Scroll when new messages are appended (covers optimistic user message + assistant completion).
+  // Pagination fetches (load earlier/later) set the suppress flag — those batches
+  // must keep the reader anchored instead of yanking the viewport to the bottom.
   useEffect(() => {
     if (messageCount > prevCount.current) {
-      scrollToBottom();
+      if (suppressAutoScrollRef.current) {
+        suppressAutoScrollRef.current = false;
+      } else {
+        scrollToBottom();
+      }
     }
     prevCount.current = messageCount;
-  }, [messageCount, scrollToBottom]);
+  }, [messageCount, scrollToBottom, suppressAutoScrollRef]);
 
   useEffect(() => {
     if (isStreaming && !wasStreaming.current) {
@@ -42,6 +48,30 @@ function ScrollOnStream({ isStreaming, messageCount }: { isStreaming: boolean; m
   }, [isStreaming, scrollToBottom]);
 
   return null;
+}
+
+/**
+ * Pagination button rendered inside the StickToBottom context. stopScroll()
+ * drops the bottom lock BEFORE the fetch, so the positive-resize auto-stick
+ * (and any in-flight scroll animation) can't pull the reader to the bottom
+ * when the new batch lands — scroll events during a resize are ignored by
+ * use-stick-to-bottom, so escaping after the fact doesn't work.
+ */
+function PaginationButton({ label, disabled, onClick }: { label: string; disabled?: boolean; onClick: () => void }) {
+  const { stopScroll } = useStickToBottomContext();
+  return (
+    <div className="flex justify-center">
+      <Button
+        variant="ghost"
+        size="sm"
+        disabled={disabled}
+        onClick={() => { stopScroll(); onClick(); }}
+        className="text-muted-foreground hover:text-foreground"
+      >
+        {label}
+      </Button>
+    </div>
+  );
 }
 
 /**
@@ -171,6 +201,12 @@ interface MessageListProps {
   hasMore?: boolean;
   loadingMore?: boolean;
   onLoadMore?: () => void;
+  /** Deep-link window: newer messages exist below the loaded tail. */
+  hasMoreAfter?: boolean;
+  loadingLater?: boolean;
+  onLoadLater?: () => void;
+  /** Scroll to and flash this message after mount (jump from global search). */
+  targetMessageId?: string;
   /** SDK rewind points — only emitted for visible prompt-level user messages (not tool results or auto-triggers), mapped by position */
   rewindPoints?: RewindPoint[];
   sessionId?: string;
@@ -197,6 +233,10 @@ export function MessageList({
   hasMore,
   loadingMore,
   onLoadMore,
+  hasMoreAfter,
+  loadingLater,
+  onLoadLater,
+  targetMessageId,
   rewindPoints = [],
   sessionId,
   startedAt,
@@ -205,28 +245,68 @@ export function MessageList({
   sandboxEnabled,
 }: MessageListProps) {
   const { t } = useTranslation();
-  // Scroll anchor: preserve position when older messages are prepended
-  const anchorIdRef = useRef<string | null>(null);
+  // Scroll anchor: preserve position when messages are prepended (block 'start')
+  // or appended via forward pagination (block 'end').
+  const anchorRef = useRef<{ id: string; block: ScrollLogicalPosition } | null>(null);
+  // One-shot flag telling ScrollOnStream to skip its scroll-to-bottom for the
+  // next count increase (pagination batch, not fresh conversation content).
+  const suppressAutoScrollRef = useRef(false);
   // Before loading more, record the first visible message ID
   const handleLoadMore = () => {
     if (messages.length > 0) {
-      anchorIdRef.current = messages[0].id;
+      anchorRef.current = { id: messages[0].id, block: 'start' };
+      suppressAutoScrollRef.current = true;
     }
     onLoadMore?.();
   };
 
-  // After messages are prepended, scroll the anchor element back into view.
+  // Before loading later messages, pin the current last message to the viewport
+  // bottom so the appended batch doesn't yank the reader to the new bottom.
+  const handleLoadLater = () => {
+    if (messages.length > 0) {
+      anchorRef.current = { id: messages[messages.length - 1].id, block: 'end' };
+      suppressAutoScrollRef.current = true;
+    }
+    onLoadLater?.();
+  };
+
+  // After messages change, scroll the anchor element back into view.
   // Uses the anchor ID (set before loading) rather than a length comparison,
   // because a capped prepend can swap messages without changing total count.
   useEffect(() => {
-    if (anchorIdRef.current) {
-      const el = document.getElementById(`msg-${anchorIdRef.current}`);
+    if (anchorRef.current) {
+      const el = document.getElementById(`msg-${anchorRef.current.id}`);
       if (el) {
-        el.scrollIntoView({ block: 'start' });
+        el.scrollIntoView({ block: anchorRef.current.block });
       }
-      anchorIdRef.current = null;
+      anchorRef.current = null;
     }
   }, [messages]);
+
+  // Jump-to-message (deep link from global search): scroll the target into view
+  // and flash it. Runs once per mount — ChatView is remounted per target (key).
+  const [flashMessageId, setFlashMessageId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!targetMessageId) return;
+    let realignTimer: ReturnType<typeof setTimeout> | undefined;
+    let flashTimer: ReturnType<typeof setTimeout> | undefined;
+    const raf = requestAnimationFrame(() => {
+      const el = document.getElementById(`msg-${targetMessageId}`);
+      if (!el) return; // target missing (deleted/filtered) — leave scroll as-is
+      el.scrollIntoView({ block: 'center' });
+      setFlashMessageId(targetMessageId);
+      // Re-align once after initial layout settles (images/widgets shift heights).
+      realignTimer = setTimeout(() => {
+        document.getElementById(`msg-${targetMessageId}`)?.scrollIntoView({ block: 'center' });
+      }, 300);
+      flashTimer = setTimeout(() => setFlashMessageId(null), 2600);
+    });
+    return () => {
+      cancelAnimationFrame(raf);
+      if (realignTimer) clearTimeout(realignTimer);
+      if (flashTimer) clearTimeout(flashTimer);
+    };
+  }, [targetMessageId]);
 
   if (messages.length === 0 && !isStreaming) {
     if (isAssistantProject) {
@@ -279,21 +359,17 @@ export function MessageList({
   }
 
   return (
-    <Conversation>
-      <ScrollOnStream isStreaming={isStreaming} messageCount={messages.length} />
+    // Deep link: suppress the initial scroll-to-bottom so the jump-to-message
+    // effect can position the viewport on the target instead.
+    <Conversation {...(targetMessageId ? { initial: false } : {})}>
+      <ScrollOnStream isStreaming={isStreaming} messageCount={messages.length} suppressAutoScrollRef={suppressAutoScrollRef} />
       <ConversationContent className="mx-auto max-w-3xl px-4 py-6 gap-6">
         {hasMore && (
-          <div className="flex justify-center">
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleLoadMore}
-              disabled={loadingMore}
-              className="text-muted-foreground hover:text-foreground"
-            >
-              {loadingMore ? t('messageList.loading') : t('messageList.loadEarlier')}
-            </Button>
-          </div>
+          <PaginationButton
+            label={loadingMore ? t('messageList.loading') : t('messageList.loadEarlier')}
+            disabled={loadingMore}
+            onClick={handleLoadMore}
+          />
         )}
         {messages.map((message) => {
           // Map rewind points to visible user messages by position:
@@ -309,7 +385,7 @@ export function MessageList({
           }
 
           return (
-            <div key={message.id} id={`msg-${message.id}`} className="group">
+            <div key={message.id} id={`msg-${message.id}`} className={message.id === flashMessageId ? 'group message-target-flash' : 'group'}>
               <MessageItem message={message} sessionId={sessionId} isAssistantProject={isAssistantProject} assistantName={assistantName} sandboxEnabled={sandboxEnabled} />
               {/* E4 (cowork): 回滚是研发工作流(跨 VM 恢复语义未验证),办公隐藏 */}
               {rewindSdkUuid && sessionId && !isStreaming && !sandboxEnabled && (
@@ -318,6 +394,14 @@ export function MessageList({
             </div>
           );
         })}
+
+        {hasMoreAfter && !isStreaming && (
+          <PaginationButton
+            label={loadingLater ? t('messageList.loading') : t('messageList.loadLater')}
+            disabled={loadingLater}
+            onClick={handleLoadLater}
+          />
+        )}
 
         {isStreaming && (
           <StreamingMessage

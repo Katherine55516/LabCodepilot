@@ -969,6 +969,7 @@ const zh: Record<TranslationKey, string> = {
   'messageList.claudeChat': 'AIMate',
   'messageList.emptyDescription': '',
   'messageList.loadEarlier': '加载更早的消息',
+  'messageList.loadLater': '加载更晚的消息',
   'messageList.loading': '加载中...',
   'messageList.userLabel': '用户',
   'messageList.assistantLabel': '助手',
