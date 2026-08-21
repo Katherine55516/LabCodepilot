@@ -14,6 +14,7 @@
 | P1 | admin usage API + pytest + admin web「沙箱用量」页 | ✅ 已完成 | 同 3be252a;web tsc+build 过 |
 | P2 | 运维动作(删会话 / 产物查看下载)+ 管理操作审计 | ✅ 已完成 | 同批交付;admin_remove/admin_download 生产验证落审计 |
 | 部署 | 沙箱侧同步重启 + selftest;账号后端由用户 pull+build | 🔄 沙箱侧已上线 | 沙箱侧 2026-08-03 已重启并真 secret 验证(20 卷/audit 210 行);**账号后端待用户 pull + migrate + build** |
+| D7 部署 | 性能修复(快照化/失败冷却)两仓库均已 commit 待部署 | ⏳ 待部署 | 沙箱侧重启 cowork-server + 跑 selftest-admin(18 项);账号后端 pull + 重启;部署后到宿主机 `time docker system df -v` 实测钉死 df 耗时 |
 
 ## 决策日志
 
