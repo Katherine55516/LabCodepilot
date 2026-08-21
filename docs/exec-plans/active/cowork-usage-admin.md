@@ -1,7 +1,7 @@
 # 沙箱使用情况管理后台(cowork-usage-admin)
 
 > 创建时间:2026-08-03
-> 最后更新:2026-08-03
+> 最后更新:2026-08-21
 > 跨仓库:LabCodepilot(apps/cowork-server)+ codeagent-server(API + admin web)
 
 ## 状态
@@ -32,6 +32,14 @@
   404),cowork-server 提供 `/admin/session/:sid/*` 专用端点直调 orch/files,绕过 owner 校验
 - 2026-08-03: **D6** 审计日志截断从 4MB 调大到 64MB(env 可覆盖),拉取器上线后日志只是缓冲区;
   fileId(首行哈希)变化 = 截断/重置信号 → 拉取器归零重拉,PG UNIQUE 兜底去重
+- 2026-08-21: **D7(性能)** 「每次查询都慢/经常超时」根因修复,三处联动:
+  ① 沙箱 `/admin/stats` 快照化(admin.mjs getStats):请求恒即答内存快照,采集转后台 ——
+  docker stats 天然 ~2s + `system df` 随卷数量涨到几十秒,现采叠加账号后端 10s 超时必爆;
+  df 加 in-flight 去重 + 失败保留旧值(此前并发各起一个 df,daemon 正反馈恶化);
+  ② overview 的惰性同步失败降级(sync_failed)而非整页 500 —— 沙箱不可达时历史统计必须可用;
+  ③ `_live_stats` 失败进 15s 冷却 + 回退 ≤10min 旧快照 —— 此前"失败不缓存",3 个被锁
+  串行化的请求各付一次 10s 超时,整页 ~30s 顶爆前端 30s 超时。
+  刻意不做启动预热:selftest 与冷启动首调依赖「现场采集」语义,冷启动只慢这一次
 
 ## 详细设计(摘要,完整讨论见会话)
 

@@ -33,7 +33,7 @@ import * as cred from './lib/cred-proxy.mjs';
 import { audit } from './lib/audit.mjs';
 import { resolveUser, authzEnabled } from './lib/authz.mjs';
 import { handleExec } from './lib/exec-bridge.mjs';
-import { ADMIN_UID, readAuditSince, collectStats } from './lib/admin.mjs';
+import { ADMIN_UID, readAuditSince, getStats } from './lib/admin.mjs';
 import * as routineApi from './lib/routine-api.mjs';
 import * as routineSched from './lib/routine-scheduler.mjs';
 
@@ -105,7 +105,8 @@ const server = http.createServer(async (req, res) => {
         return send(200, readAuditSince(offset));
       }
       if (req.method === 'GET' && url.pathname === '/admin/stats') {
-        return send(200, await collectStats());
+        // 快照即答(冷启动才现场采集):df/docker stats 的耗时不进请求路径
+        return send(200, await getStats());
       }
       const am = url.pathname.match(/^\/admin\/session\/([a-f0-9]{1,64})(?:\/(files|file|archive))?$/i);
       if (am) {

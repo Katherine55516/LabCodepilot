@@ -89,6 +89,12 @@ try {
   check('stats.volumes 卷大小可取(数值或 null)', !!vol && (typeof vol.sizeBytes === 'number' || vol.sizeBytes === null));
   const ctr = (st.body?.containers || []).find((c) => c.sid === SID);
   check('stats.containers 含运行中会话', !!ctr, JSON.stringify(ctr));
+  // 快照层:15s TTL 内的二次调用走内存快照(不再现场采集),形状不变且即时返回
+  const t0 = Date.now();
+  const st2 = await j('/admin/stats', tokenAdmin);
+  check('stats 快照命中(二次调用即答同形状)',
+    st2.status === 200 && Array.isArray(st2.body?.volumes) && Array.isArray(st2.body?.containers) && Date.now() - t0 < 1000,
+    `${Date.now() - t0}ms`);
 
   // —— admin 跨 uid 读/删(用户面语义下这是别人的会话) ——
   const lf = await j(`/admin/session/${SID}/files`, tokenAdmin);

@@ -6,8 +6,11 @@
  * - readAuditSince(offset):审计日志按字节增量读取。fileId = 首行 sha256 前 16 位,
  *   截断/清空/轮转后首行必变 → 拉取端(账号后端)检测到 fileId 变化即归零重拉,
  *   PG 侧 UNIQUE 约束兜底去重(见 exec-plan cowork-usage-admin D6)。
- * - collectStats():docker 现查现返(活跃容器资源 + 全部会话卷 + 大小)。
- *   卷大小走 docker system df(daemon 算,60s 缓存)—— 见 volumeSizes 注释。
+ * - getStats():/admin/stats 入口 —— **内存快照 + 后台异步刷新**,响应恒为毫秒级。
+ *   采集本体 collectStats()(活跃容器资源 + 全部会话卷 + 大小)只在后台跑:
+ *   docker stats --no-stream 天然 ~2s 采样,卷大小的 docker system df 随卷数量
+ *   线性变慢(几十上百个会话卷时可到几十秒)—— 在请求路径上现采,叠加账号后端
+ *   10s 超时,就是用量后台「每次都慢/经常超时」的根因。
  */
 import fs from 'node:fs';
 import crypto from 'node:crypto';
@@ -65,11 +68,14 @@ export function readAuditSince(offset = 0) {
   }
 }
 
-// —— 卷大小缓存(60s):docker system df 是唯一相对贵的操作 ——
+// —— 卷大小缓存(60s)+ in-flight 去重 + 陈旧回退:df 是本模块唯一分钟级操作 ——
 // 不用 du:服务进程跑在非 root 的 cowork 用户下,穿越不了 root 属主的 docker
 // data-root(userns-remap 子目录),du 恒失败(生产实测 sizeBytes 全 null)。
 // docker daemon 自己算则只需 docker 组权限,一次调用拿全部卷。
+// 缓存过期后**不等**新 df:先回旧值,df 后台跑完落缓存 —— 卷大小变化很慢,
+// 陈旧 ≤ 分钟级无所谓;并发请求共享同一次 df(此前各起一个,daemon 越忙越慢,正反馈恶化)。
 let volSizeCache = { at: 0, sizes: new Map() };
+let volSizeInflight = null;
 
 /** docker 的人类可读大小("7.368kB"/"1.2MB"/"0B",10 进制)→ 字节。 */
 function parseDockerSize(s) {
@@ -80,17 +86,27 @@ function parseDockerSize(s) {
 }
 
 async function volumeSizes() {
-  const now = Date.now();
-  if (now - volSizeCache.at < 60_000) return volSizeCache.sizes;
-  const sizes = new Map();
-  try {
-    const out = await docker(['system', 'df', '-v', '--format', 'json']);
-    for (const v of JSON.parse(out).Volumes || []) {
-      if (v?.Name) sizes.set(v.Name, parseDockerSize(v.Size));
-    }
-  } catch { /* 拿不到就空 map,volumes 全 null,不拖垮 stats */ }
-  volSizeCache = { at: now, sizes };
-  return sizes;
+  if (Date.now() - volSizeCache.at < 60_000) return volSizeCache.sizes;
+  if (!volSizeInflight) {
+    volSizeInflight = (async () => {
+      try {
+        const out = await docker(['system', 'df', '-v', '--format', 'json']);
+        const sizes = new Map();
+        for (const v of JSON.parse(out).Volumes || []) {
+          if (v?.Name) sizes.set(v.Name, parseDockerSize(v.Size));
+        }
+        volSizeCache = { at: Date.now(), sizes };
+      } catch {
+        // 拿不到:保留旧值(陈旧大小好过全 null),同样进入 60s 冷却,别连环撞失败的 df
+        volSizeCache = { at: Date.now(), sizes: volSizeCache.sizes };
+      } finally {
+        volSizeInflight = null;
+      }
+    })();
+  }
+  if (volSizeCache.at > 0) return volSizeCache.sizes; // 有旧值(含失败冷却)就不等这次 df
+  await volSizeInflight;                              // 冷启动首采:等一次
+  return volSizeCache.sizes;
 }
 
 /** 实时状态:活跃容器(资源占用)+ 全部会话卷(归属/大小)。 */
@@ -144,4 +160,28 @@ export async function collectStats() {
       return acc;
     }, new Map()).values()],
   };
+}
+
+// —— /admin/stats 快照层:请求恒即时返回,采集转后台(见模块 docstring)——
+// 刻意不做启动预热:selftest 与冷启动的第一次调用都依赖「现场采集」语义
+// (预热快照会早于测试造的会话,断言必挂);冷启动只慢这一次,之后恒快照。
+const STATS_SNAPSHOT_TTL = 15_000;
+let statsSnapshot = null; // { at, data }
+let statsInflight = null; // 采集去重:并发请求共享同一次 collectStats
+
+function refreshStats() {
+  if (!statsInflight) {
+    statsInflight = collectStats()
+      .then((data) => { statsSnapshot = { at: Date.now(), data }; return data; })
+      .finally(() => { statsInflight = null; });
+  }
+  return statsInflight;
+}
+
+/** /admin/stats 入口。有快照(哪怕过期)立即返回并后台刷新;冷启动等首采。 */
+export async function getStats() {
+  if (statsSnapshot && Date.now() - statsSnapshot.at < STATS_SNAPSHOT_TTL) return statsSnapshot.data;
+  const p = refreshStats();
+  if (statsSnapshot) { p.catch(() => {}); return statsSnapshot.data; } // 刷新失败留旧快照,下一请求再触发
+  return p; // 冷启动:等首采;失败抛给路由 → 非 200,账号后端按 live 降级处理
 }
