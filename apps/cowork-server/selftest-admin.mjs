@@ -28,6 +28,9 @@ const SECRET = 'admin-test-secret';
 const AUDIT = path.join(os.tmpdir(), `cowork-audit-selftest-${process.pid}.log`);
 // 末段直测 audit() 用动态 import —— audit.mjs 模块加载时读本进程 env,必须先设好
 process.env.COWORK_AUDIT_FILE = AUDIT;
+// 🔴 定时任务的 state 目录必须隔离到 tmp:不设的话默认 /data/cowork-state ——
+// 在生产上跑第 6 组会把自测 routine 写进真实用户目录
+const STATE = path.join(os.tmpdir(), `cowork-state-selftest-${process.pid}`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const results = [];
 function check(n, ok, d) { results.push(ok); console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}${d ? '  — ' + d : ''}`); }
@@ -41,7 +44,11 @@ async function j(pathname, token, opt = {}) {
   return { status: res.status, body };
 }
 
-sh('docker rm -f cowork-proxy $(docker ps -aq --filter label=cowork.managed=1) 2>/dev/null');
+// 🔴 不清场(与 selftest-r5 同姿态):只清测试自身的残留,绝不动 cowork-proxy 与
+// 其他受管容器 —— 全局 `docker rm -f $(docker ps -aq ...)` 会杀掉真实用户跑到一半的
+// 会话,曾迫使本自测只能等无人窗口。自测实例对陌生容器有重启宽限(reaper 首见即续命,
+// 30 分钟内不回收)、对已运行的 proxy 见 running 即复用,与活跃用户并存是安全的。
+sh('docker rm -f cowork-ad11a001 2>/dev/null; docker volume rm cowork-ws-ad11a001 cowork-st-ad11a001 2>/dev/null');
 try { fs.unlinkSync(AUDIT); } catch { /* fresh */ }
 
 const srv = spawn(NODE, [path.join(DIR, 'index.mjs')], {
@@ -51,6 +58,7 @@ const srv = spawn(NODE, [path.join(DIR, 'index.mjs')], {
     COWORK_SERVER_HOST: '127.0.0.1',
     COWORK_AUTH_SECRET: SECRET,
     COWORK_AUDIT_FILE: AUDIT,
+    COWORK_STATE_DIR: STATE,
   },
   stdio: ['ignore', 'inherit', 'inherit'],
 });
@@ -107,6 +115,81 @@ try {
   const a4 = await j(`/admin/audit?offset=${a1.body.nextOffset}`, tokenAdmin);
   check('admin_remove 落审计', (a4.body.lines || []).some((l) => l.includes('admin_remove') && l.includes(SID)));
 
+  // —— 第 6 组:定时任务管理面(cowork-routines-admin P0)——
+  const UID_USER = '11111111-2222-3333-4444-555555555555';
+  check('普通用户访问 /admin/routines → 404(防枚举)', (await j('/admin/routines', tokenUser)).status === 404);
+
+  // 造数据:普通用户建一个 manual routine(不触发运行,不需要凭证/容器)
+  const rc = await j('/routines', tokenUser, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name: '管理面自测', prompt: '自测占位', schedule: { kind: 'manual' } }),
+  });
+  check('普通用户建 routine 201', rc.status === 201, JSON.stringify(rc.body?.id));
+  const RID = rc.body?.id || '';
+
+  const rl = await j('/admin/routines', tokenAdmin);
+  const mine = (rl.body?.routines || []).find((r) => r.id === RID);
+  const metaOk = rl.body?.meta && typeof rl.body.meta.dailyCap === 'number'
+    && typeof rl.body.meta.concurrency === 'number' && rl.body.meta.runsToday
+    && typeof rl.body.meta.costTodayUsd === 'number';
+  check('admin 列表含该 routine 且带 uid', rl.status === 200 && !!mine && mine.uid === UID_USER, JSON.stringify(mine?.uid));
+  check('admin 列表 meta 形状(dailyCap/concurrency/runsToday/costTodayUsd)', !!metaOk, JSON.stringify(rl.body?.meta));
+
+  const dis = await j(`/admin/routines/${RID}`, tokenAdmin, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ uid: UID_USER, enabled: false, reason: '占用资源自测' }),
+  });
+  check('admin 停用 200 且 disabledReason 标明管理员', dis.status === 200 && dis.body?.enabled === false
+    && String(dis.body?.disabledReason).startsWith('管理员停用'), JSON.stringify(dis.body?.disabledReason));
+  const uv = await j(`/routines/${RID}`, tokenUser);
+  check('用户侧可见管理员停用原因(AD3 透明)', uv.status === 200 && uv.body?.enabled === false
+    && String(uv.body?.disabledReason).includes('占用资源自测'));
+
+  const ena = await j(`/admin/routines/${RID}`, tokenAdmin, {
+    method: 'PATCH',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ uid: UID_USER, enabled: true }),
+  });
+  check('admin 恢复:清 reason 与失败计数', ena.status === 200 && ena.body?.enabled === true
+    && ena.body?.disabledReason === '' && ena.body?.consecutiveErrors === 0);
+
+  const rr = await j(`/admin/routines/${RID}/runs?uid=${UID_USER}`, tokenAdmin);
+  check('admin 运行历史 200(空)', rr.status === 200 && Array.isArray(rr.body?.runs) && rr.body.runs.length === 0);
+  check('runs 打不中的 uid → 404(防枚举)',
+    (await j(`/admin/routines/${RID}/runs?uid=99999999-2222-3333-4444-555555555555`, tokenAdmin)).status === 404);
+
+  // transcript:直接在 state 目录造一份原文,验流式下载与审计归属
+  const RUNID = 'run_0123456789abcdef01234567';
+  fs.mkdirSync(path.join(STATE, 'runs'), { recursive: true });
+  fs.writeFileSync(path.join(STATE, 'runs', `${RUNID}.jsonl`), '{"type":"probe"}\n');
+  check('transcript 缺 uid → 400(审计归属必传)',
+    (await j(`/admin/runs/${RUNID}/transcript`, tokenAdmin)).status === 400);
+  const tr = await fetch(`${BASE}/admin/runs/${RUNID}/transcript?uid=${UID_USER}`,
+    { headers: { authorization: `Bearer ${tokenAdmin}` } });
+  check('transcript 流式下载内容一致', tr.status === 200 && (await tr.text()) === '{"type":"probe"}\n');
+  check('未知 runId → 404',
+    (await j('/admin/runs/run_ffffffffffffffffffffffff/transcript?uid=x', tokenAdmin)).status === 404);
+
+  const rd = await j(`/admin/routines/${RID}?uid=${UID_USER}`, tokenAdmin, { method: 'DELETE' });
+  check('admin 删除 routine 200', rd.status === 200);
+  check('删除后用户侧 404', (await j(`/routines/${RID}`, tokenUser)).status === 404);
+
+  // 审计契约(🔴 G15:detail 必须以 uid 开头,否则账号后端归属静默丢失)
+  await sleep(150);
+  const auditLines = fs.readFileSync(AUDIT, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  const evOf = (ev) => auditLines.filter((r) => r.event === ev);
+  const disEvts = evOf('admin_routine_disable');
+  check('admin_routine_disable 落审计 ×2(停用+恢复)且 detail 以 uid 开头',
+    disEvts.length === 2 && disEvts.every((r) => r.detail.startsWith(UID_USER))
+    && disEvts.some((r) => r.detail.includes('disable')) && disEvts.some((r) => r.detail.includes('enable')));
+  const delEvt = evOf('admin_routine_delete');
+  check('admin_routine_delete 落审计且 detail 以 uid 开头',
+    delEvt.length === 1 && delEvt[0].detail.startsWith(UID_USER) && delEvt[0].sessionId === RID);
+  check('transcript 下载落 admin_download 且 detail 以 uid 开头',
+    evOf('admin_download').some((r) => r.detail.startsWith(UID_USER) && r.detail.includes(RUNID)));
+
   // —— exec_end 字段存在性(靠 audit 模块直测,不起真 exec) ——
   const { audit } = await import('./lib/audit.mjs');
   audit('exec_end', { sessionId: 'deadbeef', detail: 'u', code: 0, durationMs: 1234 });
@@ -116,8 +199,9 @@ try {
   check('exec_end 记录 code/durationMs(code=0 不被丢)', rec.event === 'exec_end' && rec.code === 0 && rec.durationMs === 1234);
 } finally {
   try { srv.kill(); } catch { /* ignore */ }
-  sh(`docker rm -f cowork-${SID} 2>/dev/null; docker volume rm cowork-ws-${SID} 2>/dev/null`);
+  sh(`docker rm -f cowork-${SID} 2>/dev/null; docker volume rm cowork-ws-${SID} cowork-st-${SID} 2>/dev/null`);
   try { fs.unlinkSync(AUDIT); } catch { /* ignore */ }
+  try { fs.rmSync(STATE, { recursive: true, force: true }); } catch { /* ignore */ }
 }
 
 const pass = results.filter(Boolean).length;

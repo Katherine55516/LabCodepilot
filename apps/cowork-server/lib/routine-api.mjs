@@ -79,7 +79,8 @@ function normalizeSchedule(raw) {
 }
 
 /** 对外视图:不回传任何内部路径,prompt 全量回(客户端编辑要用)。 */
-function view(r) {
+// export:admin 管理面(admin-routines.mjs)复用同一份序列化,避免两处形状慢慢走样
+export function view(r) {
   return {
     id: r.id, name: r.name, description: r.description || '',
     prompt: r.prompt, model: r.model || '', configId: r.configId || '',

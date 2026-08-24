@@ -34,6 +34,7 @@ import { audit } from './lib/audit.mjs';
 import { resolveUser, authzEnabled } from './lib/authz.mjs';
 import { handleExec } from './lib/exec-bridge.mjs';
 import { ADMIN_UID, readAuditSince, getStats } from './lib/admin.mjs';
+import * as adminRt from './lib/admin-routines.mjs';
 import * as routineApi from './lib/routine-api.mjs';
 import * as routineSched from './lib/routine-scheduler.mjs';
 
@@ -108,6 +109,51 @@ const server = http.createServer(async (req, res) => {
         // 快照即答(冷启动才现场采集):df/docker stats 的耗时不进请求路径
         return send(200, await getStats());
       }
+
+      // —— 定时任务管理面(cowork-routines-admin P0):看 + 停 + 删,不代建不代改不代跑(AD1)——
+      if (req.method === 'GET' && url.pathname === '/admin/routines') {
+        return send(200, adminRt.adminListRoutines());
+      }
+      const arm = url.pathname.match(/^\/admin\/routines\/([a-f0-9]{32})(?:\/(runs))?$/i);
+      if (arm) {
+        const rid = arm[1];
+        // uid 必传:store 按 uid 分目录,且审计归属要它(G15)。打不中一律 404 防枚举。
+        if (arm[2] && req.method === 'GET') {
+          const runs = adminRt.adminListRuns(url.searchParams.get('uid') || '', rid, {
+            since: url.searchParams.get('since') || '',
+            limit: parseInt(url.searchParams.get('limit') || '200', 10) || 200,
+          });
+          return runs ? send(200, { runs }) : send(404, { error: 'not found' });
+        }
+        if (!arm[2] && req.method === 'PATCH') {
+          let body;
+          try { body = JSON.parse((await readBody(req)) || '{}'); } catch { return send(400, { error: '请求体不是合法 JSON' }); }
+          if (typeof body.enabled !== 'boolean' || !body.uid) return send(400, { error: 'uid 与 enabled 必传' });
+          const out = adminRt.adminSetEnabled(body.uid, rid, body.enabled, body.reason);
+          return out ? send(200, out) : send(404, { error: 'not found' });
+        }
+        if (!arm[2] && req.method === 'DELETE') {
+          const ok = await adminRt.adminDeleteRoutine(url.searchParams.get('uid') || '', rid);
+          return ok ? send(200, { ok: true }) : send(404, { error: 'not found' });
+        }
+        return send(404, { error: 'not found' });
+      }
+      const atr = url.pathname.match(/^\/admin\/runs\/(run_[a-f0-9]{24})\/transcript$/i);
+      if (atr && req.method === 'GET') {
+        // uid 必传:只为审计归属(文件本身不分 uid)。缺了就是 400 而不是静默丢归属。
+        const ruid = url.searchParams.get('uid') || '';
+        if (!ruid) return send(400, { error: 'uid 必传(审计归属)' });
+        const t = adminRt.adminTranscript(atr[1]);
+        if (!t) return send(404, { error: 'not found' });
+        audit('admin_download', { sessionId: '', detail: `${ruid} transcript ${atr[1]} (${t.size}B)` });
+        res.writeHead(200, { 'content-type': 'application/x-ndjson', 'content-length': t.size });
+        t.stream.on('error', () => { try { res.destroy(); } catch { /* ignore */ } });
+        res.on('error', () => { /* 客户端断开 */ });
+        t.stream.pipe(res);
+        res.on('close', () => { try { t.stream.destroy(); } catch { /* ignore */ } });
+        return;
+      }
+
       const am = url.pathname.match(/^\/admin\/session\/([a-f0-9]{1,64})(?:\/(files|file|archive))?$/i);
       if (am) {
         const sid = am[1];
