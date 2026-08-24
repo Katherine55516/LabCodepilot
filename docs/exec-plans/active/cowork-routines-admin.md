@@ -31,7 +31,7 @@
 | Phase | 内容 | 状态 | 备注 |
 |-------|------|------|------|
 | P0 | cowork-server 管理面：`/admin/routines*` 四端点 + 审计留痕 + selftest | ✅ 完成 | selftest-admin **35/35 生产实测**（2026-08-21）。三个附带产出：① selftest 改**不清场**（与 r5 同姿态：只动测试自身资源，可与活跃用户并存——原全局 `docker rm -f` 会杀真实会话，被迫等无人窗口）；② selftest 的 **state 目录 tmp 隔离**（不设的话生产跑会把自测 routine 写进真实用户目录）；③ `view()` 从 routine-api 导出复用。未决 1/2/3 已拍板：不做代跑 / 接受无硬锁 / 历史先永久保留 |
-| P1 | codeagent-server admin API 代理 + pytest + 用量页 routine 字段补显 | ⏳ 待开工 | |
+| P1 | codeagent-server admin API 代理 + pytest + 用量页 routine 字段补显 | ✅ 完成 | admin_routines.py 五端点(列表 JOIN users/历史/停启/删/transcript 流式);沙箱不可达 502 不降级(与用量页 live 降级刻意不同 —— 没有本地数据可退,假空列表会被读成「没有任务」);pytest 26 过(MockTransport 模拟沙箱);用量页补 today_routine_runs 卡 + 用户表定时列 + 会话表「定时任务」标(§L.2 旧账清);web build 过 |
 | P2 | admin web「定时任务」页（列表/筛选/运行历史/停用/删除） | ⏳ 待开工 | |
 | P3 | 部署（沙箱 install.sh + 账号后端 pull）+ 生产验证 | ⏳ 待开工 | |
 
