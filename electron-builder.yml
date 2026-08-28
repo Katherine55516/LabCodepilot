@@ -176,17 +176,12 @@ extraResources:
   - from: electron/test-auth-capture/
     to: test-auth-capture/
     filter: ["*.html", "*.css", "*.js"]
-  # Bundled GSD (gsd-build/get-shit-done, MIT) — packed at build time by
-  # `npm run vendor:gsd`. Loaded by electron/gsd-installer.ts at first launch
-  # (and on version drift) which copies it into
-  # ~/.claude/plugins/external_plugins/codepilot-gsd-vendor/ so AI Native Lab's
-  # slash-command scanner picks up /gsd-* commands automatically, and mirrors
-  # agents/ to ~/.claude/agents/ for Claude's subagent resolver.
-  - from: vendor/gsd-bundle/
-    to: gsd-bundle/
-    filter:
-      - "**/*"
-      - "!transform-report.json"
+  # GSD 残留清理清单（静态产物，随库提交）。内置 GSD 插件已下线，但历史版本往
+  # ~/.claude/ 镜像过 399 个文件；electron/gsd-purge.ts 首次启动时读这份清单把它们
+  # 精确清掉。⚠️ 这是单个文件不是目录 —— extraResources 对不存在的 from 是静默跳过，
+  # 删错路径不会报错，只会让老用户永远清不干净。
+  - from: vendor/gsd-purge-manifest.json
+    to: gsd-purge-manifest.json
   # Playwright headless_shell —— 由 scripts/bundle-chromium.mjs 在 electron-builder
   # 之前装到 ms-playwright-bundle/(当前打包平台的二进制)。测试执行阶段的 MCP server
   # (src/lib/test/prompts.ts buildPlaywrightMcp)运行时经 AILAB_RESOURCES_PATH/ms-playwright

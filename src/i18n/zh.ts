@@ -2816,37 +2816,10 @@ const zh: Record<TranslationKey, string> = {
   'auth.usageNotProvisioned': '额度未开通，请联系管理员',
   'auth.usageServiceDown': '额度服务暂不可用',
 
-  // ─── 内置插件面板（GSD） ───
+  // ─── 内置插件面板（公共外壳） ───
   'settings.plugins.title': '插件',
   'settings.plugins.subtitle': 'AIMate 内置的插件，可在此启用/禁用、重新同步或卸载。',
   'settings.plugins.electronOnly': '此面板需要在 Electron 桌面端运行。',
-
-  'settings.gsd.description': 'GSD（Get-Shit-Done）是 TÂCHES 出品的元提示词系统，提供 /gsd-* 斜杠命令和 33 个专用子 agent。基于 gsd-build/get-shit-done 内置打包（MIT 协议）。',
-  'settings.gsd.loading': '加载中…',
-  'settings.gsd.errorUnknown': '无法读取 GSD 状态。',
-  'settings.gsd.notInstalled': '未安装',
-  'settings.gsd.version': '版本',
-  'settings.gsd.commandCount': '斜杠命令',
-  'settings.gsd.agentCount': '子 agent',
-  'settings.gsd.agentMirrorPath': '会镜像到 ~/.claude/agents/，确保 Claude 能调起子 agent。',
-  'settings.gsd.source': '来源',
-  'settings.gsd.license': '协议',
-  'settings.gsd.licenseDesc': '按原始 MIT 协议打包，安装目录下保留了 LICENSE 原文。',
-  'settings.gsd.installPath': '安装路径',
-  'settings.gsd.conflictTitle': '检测到 {n} 个子 agent 与本地修改冲突，已跳过',
-  'settings.gsd.conflictBody': '~/.claude/agents/gsd-*.md 中与内置副本不一致的文件保持原状不被覆盖。删除本地改动后再重新同步即可拉回最新版本。',
-  'settings.gsd.status.enabled': '已启用',
-  'settings.gsd.status.disabled': '已禁用',
-  'settings.gsd.status.notInstalled': '未安装',
-  'settings.gsd.actions.enable': '启用',
-  'settings.gsd.actions.disable': '禁用',
-  'settings.gsd.actions.resync': '立即重新同步',
-  'settings.gsd.actions.uninstall': '卸载',
-  'settings.gsd.actions.openDir': '打开目录',
-  'settings.gsd.uninstallTitle': '确认卸载内置 GSD？',
-  'settings.gsd.uninstallDesc': '将删除内置 GSD 插件目录以及对应的镜像 agent 文件（仅删除与内置副本完全一致的文件，用户改过的副本会被保留）。之后可在此面板重新安装。',
-  'settings.gsd.cancel': '取消',
-  'settings.gsd.confirmUninstall': '确认卸载',
 
   // ─── 内置插件面板（AI_LabTest）───
   'settings.ailab.description': 'AI_LabTest QA 自动化测试框架 —— 提供 ai-lab-test:* slash 命令与 test-workflow 技能（用例设计 → AI 实时驱动 Playwright 执行 → 报告）。源自 qitianersheng/ai-lab-test-agent（MIT）。',

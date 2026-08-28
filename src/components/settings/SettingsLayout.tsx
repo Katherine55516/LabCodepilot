@@ -61,8 +61,8 @@ const sidebarItems: SidebarItem[] = [
   // Remote Bridge — IM channels (Telegram / Feishu / Discord / QQ / WeChat).
   // Standalone /bridge route still exists; this is the primary entry point.
   { id: "bridge", label: "Bridge", icon: WifiHigh },
-  // Built-in plugins panel — currently hosts vendor-bundled GSD.
-  // See electron/gsd-installer.ts + docs/handover/gsd-bundle.md.
+  // Built-in plugins panel — currently hosts vendor-bundled AI_LabTest.
+  // See electron/ailab-installer.ts + docs/handover/ailab-plugin.md.
   { id: "plugins", label: "Plugins", icon: Sparkle },
   // Test Accounts — multi-system test credentials, exported to AI_LabTest
   // environments.json. See docs/handover/test-account-settings.md.

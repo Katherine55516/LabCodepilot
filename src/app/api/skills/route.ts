@@ -22,7 +22,7 @@ interface SkillFile {
   projectCwd?: string;
   /**
    * True when this command comes from a plugin whose plugin.json has
-   * `builtIn: true` (i.e. AI Native Lab-bundled plugins like GSD). Bundled
+   * `builtIn: true` (i.e. AI Native Lab-bundled plugins like AI_LabTest). Bundled
    * plugins are always considered "loaded" — the SDK whitelist does not
    * apply because AI Native Lab itself put the files there.
    */
@@ -78,10 +78,10 @@ function getProjectSkillsDir(cwd?: string): string {
 
 /**
  * Returns true if the plugin at `pluginRoot` has `builtIn: true` in its
- * plugin.json. Bundled plugins (e.g. GSD) mirror their commands into
+ * plugin.json. Bundled plugins (e.g. AI_LabTest) mirror their commands into
  * `~/.claude/commands/` so the Claude Agent SDK can actually execute
  * them; we must skip the plugin-dir copy here or the popover shows each
- * /gsd-* twice (once from global, once from plugin).
+ * bundled commands twice (once from global, once from plugin).
  */
 function isPluginBuiltIn(pluginRoot: string): boolean {
   try {
@@ -342,7 +342,7 @@ function scanDirectory(
       const filePath = fullPath;
       const content = fs.readFileSync(filePath, "utf-8");
 
-      // Prefer YAML frontmatter `description:` (used by GSD and most modern
+      // Prefer YAML frontmatter `description:` (used by most modern
       // Claude Code slash-command files). Fall back to the first non-empty
       // line of the body (post-frontmatter), then a generic placeholder.
       let description = "";
@@ -487,7 +487,7 @@ export async function GET(request: NextRequest) {
     // Claude Code SDK doesn't actively register them, but AI Native Lab itself
     // put the files there so they are guaranteed available. Without this
     // override, the two SDK-whitelist filters in useSlashCommands.ts strip
-    // them out and the popover shows zero /gsd-* commands.
+    // them out and the popover shows zero bundled-plugin commands.
     const builtInCache = new Map<string, boolean>();
     const annotatedPluginSkills = pluginSkills.map(skill => {
       const builtIn = isBuiltInPlugin(skill.filePath, builtInCache);

@@ -165,58 +165,6 @@ interface ElectronAuthAPI {
 }
 
 /**
- * Vendor-bundled GSD plugin (gsd-build/get-shit-done, MIT) installer API.
- * See electron/gsd-installer.ts for the underlying implementation.
- */
-export interface GsdPluginManifest {
-  name: string;
-  displayName: string;
-  description: string;
-  source: string;
-  sourceUrl?: string;
-  sourceCommit: string;
-  transformVersion: number;
-  license: string;
-  licenseFile?: string;
-  commandCount: number;
-  agentCount: number;
-  commandPrefix: string;
-  bundledAt?: string;
-}
-
-export interface GsdConflict {
-  /** Bare name (no `.md` suffix, no `kind:` prefix). e.g. "gsd-debugger".
-   *  For `asset` kind, the relative path within ~/.claude/get-shit-done/. */
-  agentName: string;
-  /** Which mirror produced this conflict. */
-  kind?: 'agent' | 'command' | 'asset';
-  reason: 'hash-mismatch';
-  targetPath: string;
-}
-
-export interface GsdInstallStatus {
-  enabled: boolean;
-  installed: boolean;
-  bundledVersion: string | null;
-  installedVersion: string | null;
-  needsSync: boolean;
-  manifest: GsdPluginManifest | null;
-  installPath: string;
-  agentsMirrorPath: string;
-  conflicts: GsdConflict[];
-  lastError?: string;
-}
-
-interface ElectronGsdAPI {
-  getStatus: () => Promise<GsdInstallStatus>;
-  install: () => Promise<GsdInstallStatus>;
-  resync: () => Promise<GsdInstallStatus>;
-  enable: () => Promise<GsdInstallStatus>;
-  disable: () => Promise<GsdInstallStatus>;
-  uninstall: () => Promise<GsdInstallStatus>;
-}
-
-/**
  * Vendor-bundled AI_LabTest plugin (qitianersheng/ai-lab-test-agent, MIT)
  * installer API. See electron/ailab-installer.ts for the implementation.
  */
@@ -364,8 +312,6 @@ interface ElectronAPI {
   };
   /** Managed-account login. Isolated from any OpenAI OAuth flow. */
   auth?: ElectronAuthAPI;
-  /** Vendor-bundled GSD plugin (gsd-build/get-shit-done, MIT). */
-  gsd?: ElectronGsdAPI;
   /** Vendor-bundled AI_LabTest plugin (qitianersheng/ai-lab-test-agent, MIT). */
   ailab?: ElectronAilabAPI;
   /** Voice-to-text input (Bailian realtime ASR). Electron-only (renderer falls back to hidden button). */

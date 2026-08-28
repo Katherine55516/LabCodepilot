@@ -169,7 +169,7 @@ PDF 是四类里唯一需要外部静态资产的格式。脚本从 `node_module
 "prebuild":"node scripts/copy-doc-assets.js",   // next build 前自动跑
 "vendor:doc-assets": "node scripts/copy-doc-assets.js",
 "electron:dev":  "npm run vendor:doc-assets && concurrently -k \"next dev\" ...",
-"electron:build":"npm run vendor:gsd && npm run vendor:gsd:verify && npm run vendor:doc-assets && next build && ...",
+"electron:build":"npm run vendor:ailab && npm run vendor:ailab:verify && npm run vendor:doc-assets && next build && ...",
 ```
 
 > **易漏的真坑**：`dev = next dev` 是直接命令，npm 的 `predev` 钩子能覆盖 `npm run dev`，但 `electron:dev` 里内嵌的 `next dev` **不触发 `predev`**——所以 `electron:dev` 链开头显式 `npm run vendor:doc-assets`。四入口（predev / prebuild / electron:dev / electron:build）双重保险，加上幂等秒退，纯 `npm run dev` 不会出现 `public/pdf/` 缺失导致 worker 404、PDF 白屏。

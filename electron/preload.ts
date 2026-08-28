@@ -140,17 +140,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
       return () => { ipcRenderer.removeListener('notification:click', listener); };
     },
   },
-  // Vendor-bundled GSD plugin (gsd-build/get-shit-done, MIT). Installer
-  // lives in electron/gsd-installer.ts; sync runs at app start and on demand
-  // here. See docs/handover/gsd-bundle.md.
-  gsd: {
-    getStatus: () => ipcRenderer.invoke('gsd:status'),
-    install: () => ipcRenderer.invoke('gsd:install'),
-    resync: () => ipcRenderer.invoke('gsd:resync'),
-    enable: () => ipcRenderer.invoke('gsd:enable'),
-    disable: () => ipcRenderer.invoke('gsd:disable'),
-    uninstall: () => ipcRenderer.invoke('gsd:uninstall'),
-  },
   // Vendor-bundled AI_LabTest plugin (qitianersheng/ai-lab-test-agent, MIT).
   // Installer in electron/ailab-installer.ts. Default-disabled on first launch;
   // enabling mirrors ai-lab-test:* commands + the test-workflow skill. The

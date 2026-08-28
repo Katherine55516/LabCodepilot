@@ -1,4 +1,8 @@
-# 内置 GSD（gsd-build/get-shit-done）
+# 内置 GSD（gsd-build/get-shit-done）· 已下线
+
+> ⚠️ **本模块已于 v4.3.0 移除。** 本文保留为历史记录，描述的代码（`electron/gsd-installer.ts`、
+> `scripts/vendor-gsd-*.js`、`vendor/gsd-source/`）均已不存在。
+> 下线与残留清理见 [docs/handover/gsd-removal.md](./gsd-removal.md)。
 
 > 产品思考见 [docs/insights/gsd-bundle.md](../insights/gsd-bundle.md)
 

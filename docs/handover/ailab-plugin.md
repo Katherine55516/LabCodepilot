@@ -24,6 +24,10 @@ qitianersheng/ai-lab-test-agent → scripts/vendor-ailab-prepare.js → resource
 
 ## 与 GSD 的关键差异
 
+> GSD 内置插件已于 v4.3.0 下线（见 [gsd-removal.md](./gsd-removal.md)）。下表保留为设计理据：
+> AI_LabTest 的这些选择正是对照 GSD 做出的，其中「默认关闭」「停用真删」两条事后被证明更经得起检验。
+
+
 | 维度 | GSD | AI_LabTest |
 |------|-----|-----------|
 | 命名空间 | 平面化 `commands/gsd/x.md` → `gsd-x.md`,出 `/gsd-x` | **不平面化**:命令镜像进 `~/.claude/commands/ai-lab-test/` **子目录**,扫描器以 `<subdir>:<stem>` 命名 → `ai-lab-test:cases` |

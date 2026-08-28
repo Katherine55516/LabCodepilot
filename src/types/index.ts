@@ -130,7 +130,7 @@ export interface PopoverItem {
   installedSource?: 'agents' | 'claude';
   source?: 'global' | 'project' | 'plugin' | 'installed' | 'sdk';
   /**
-   * True when this command comes from a AI Native Lab-bundled plugin (e.g. GSD)
+   * True when this command comes from a AI Native Lab-bundled plugin (e.g. AI_LabTest)
    * — `plugin.json` has `builtIn: true`. Bundled plugins exist on disk
    * because AI Native Lab put them there, so they are always "loaded" regardless
    * of what the Claude Code SDK reports. The slash-command popover must

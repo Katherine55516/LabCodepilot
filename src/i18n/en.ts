@@ -2820,37 +2820,10 @@ const en = {
   'auth.usageNotProvisioned': 'Quota not enabled — contact your admin',
   'auth.usageServiceDown': 'Quota service unavailable',
 
-  // ─── Built-in plugins panel (GSD) ───
+  // ─── Built-in plugins panel (shared chrome) ───
   'settings.plugins.title': 'Plugins',
   'settings.plugins.subtitle': 'Built-in plugins shipped with AIMate. Toggle, re-sync, or uninstall here.',
   'settings.plugins.electronOnly': 'This panel requires the Electron desktop app.',
-
-  'settings.gsd.description': 'Get-Shit-Done meta-prompting system by TÂCHES — adds /gsd-* slash commands and 33 specialized subagents. Vendored from gsd-build/get-shit-done (MIT).',
-  'settings.gsd.loading': 'Loading…',
-  'settings.gsd.errorUnknown': 'Could not read GSD status.',
-  'settings.gsd.notInstalled': 'Not installed',
-  'settings.gsd.version': 'Version',
-  'settings.gsd.commandCount': 'Slash commands',
-  'settings.gsd.agentCount': 'Subagents',
-  'settings.gsd.agentMirrorPath': 'Mirrored to ~/.claude/agents/ so Claude can spawn them.',
-  'settings.gsd.source': 'Source',
-  'settings.gsd.license': 'License',
-  'settings.gsd.licenseDesc': 'Bundled under the original MIT license; see LICENSE in the install dir.',
-  'settings.gsd.installPath': 'Install path',
-  'settings.gsd.conflictTitle': '{n} subagent(s) skipped due to local modifications',
-  'settings.gsd.conflictBody': 'Files at ~/.claude/agents/gsd-*.md that differ from the bundled copies are left untouched. Resync after removing your edits to overwrite them.',
-  'settings.gsd.status.enabled': 'Enabled',
-  'settings.gsd.status.disabled': 'Disabled',
-  'settings.gsd.status.notInstalled': 'Not installed',
-  'settings.gsd.actions.enable': 'Enable',
-  'settings.gsd.actions.disable': 'Disable',
-  'settings.gsd.actions.resync': 'Re-sync now',
-  'settings.gsd.actions.uninstall': 'Uninstall',
-  'settings.gsd.actions.openDir': 'Open folder',
-  'settings.gsd.uninstallTitle': 'Uninstall built-in GSD?',
-  'settings.gsd.uninstallDesc': 'This removes the bundled GSD plugin directory and its mirrored agent files (only files unchanged from the bundle — user-edited copies are preserved). You can re-install it later from this panel.',
-  'settings.gsd.cancel': 'Cancel',
-  'settings.gsd.confirmUninstall': 'Uninstall',
 
   // ─── Built-in plugins panel (AI_LabTest) ───
   'settings.ailab.description': 'AI_LabTest QA automation framework — adds ai-lab-test:* slash commands and the test-workflow skill (case design → AI-driven Playwright execution → report). Vendored from qitianersheng/ai-lab-test-agent (MIT).',

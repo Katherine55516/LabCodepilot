@@ -4,8 +4,6 @@ import { useCallback, useRef, useState } from 'react';
 import { Terminal, NotePencil, Brain, GlobeSimple, Lightning, Folder, File } from '@/components/ui/icon';
 import { useTranslation } from '@/hooks/useTranslation';
 import type { TranslationKey } from '@/i18n';
-import { GSD_COMMAND_DESCRIPTIONS_ZH } from '@/i18n/gsd-command-descriptions';
-import { localize } from '@/i18n/zh-hk-runtime';
 import type { PopoverItem, PopoverMode } from '@/types';
 import {
   CommandList,
@@ -97,7 +95,7 @@ export function SlashCommandPopover({
   onClosePopover,
   onFocusTextarea,
 }: SlashCommandPopoverProps) {
-  const { t, locale } = useTranslation();
+  const { t } = useTranslation();
 
   const builtInItems = filteredItems.filter(item => item.builtIn);
   const slashCommandItems = filteredItems.filter(item => !item.builtIn && item.kind !== 'agent_skill');
@@ -162,16 +160,10 @@ export function SlashCommandPopover({
         // ellipsizes at the row edge — no fixed 200px cap. When it overflows,
         // hovering reveals the full text in a tooltip (short, fully-shown
         // descriptions don't trigger it). Localization fallback chain: built-in
-        // descriptionKey (already localized) → zh override for external/plugin
-        // commands when locale==='zh' → raw English frontmatter.
+        // descriptionKey (already localized) → raw English frontmatter for
+        // external/plugin commands.
         <OverflowTooltip
-          text={
-            (item.descriptionKey
-              ? t(item.descriptionKey)
-              : (GSD_COMMAND_DESCRIPTIONS_ZH[item.label]
-                  ? localize(locale, GSD_COMMAND_DESCRIPTIONS_ZH[item.label]!, item.description ?? '')
-                  : item.description)) ?? ''
-          }
+          text={(item.descriptionKey ? t(item.descriptionKey) : item.description) ?? ''}
           className="text-xs text-muted-foreground truncate flex-1 min-w-0"
         />
       )}

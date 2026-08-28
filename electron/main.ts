@@ -76,12 +76,9 @@ import { initFileLogger, openLogsFolder, getLogDir, logRendererConsole, register
 // infra (apiRequest Bearer + getBackendBase) for the authenticated check.
 import { initUpdater, registerUpdaterIpc, stopUpdater } from './updater';
 
-// Vendor-bundled GSD plugin — synced to ~/.claude/plugins/external_plugins/
-// on first launch and version drift. See electron/gsd-installer.ts.
-import {
-  install as installGsdBundle,
-  registerGsdIpc,
-} from './gsd-installer';
+// One-shot cleanup of the retired vendor-bundled GSD plugin. Removes the 399
+// files earlier versions mirrored into ~/.claude/. See electron/gsd-purge.ts.
+import { purge as purgeGsdResidue } from './gsd-purge';
 
 // 技能市场（内部）— codeagent-server Skills 商店 BFF 的主进程代理。
 import { registerSkillsStoreIpc } from './skills-store';
@@ -1694,23 +1691,20 @@ app.whenReady().then(async () => {
   // 方案见 docs/exec-plans/active/skills-store-internal.md。
   registerSkillsStoreIpc(ipcMain);
 
-  // --- Vendor-bundled GSD: sync (fire-and-forget, never blocks startup) ---
-  registerGsdIpc(ipcMain);
+  // --- Retired GSD bundle: one-shot residue purge (fire-and-forget) ---
+  // No-op after the first successful run (marker at ~/.codepilot/.gsd-purged).
   Promise.resolve()
     .then(() => {
-      const status = installGsdBundle({
-        log: (msg) => console.log(msg),
-      });
-      if (status.lastError) {
-        console.warn('[gsd-installer] startup sync had error:', status.lastError);
-      } else if (status.conflicts.length > 0) {
+      const result = purgeGsdResidue({ log: (msg) => console.log(msg) });
+      if (result.errors.length > 0) {
         console.warn(
-          `[gsd-installer] startup sync OK with ${status.conflicts.length} agent mirror conflicts (user-modified files skipped)`,
+          `[gsd-purge] completed with ${result.errors.length} error(s); will retry next launch:`,
+          result.errors.slice(0, 5).join('; '),
         );
       }
     })
     .catch((err) => {
-      console.error('[gsd-installer] startup sync threw:', err);
+      console.error('[gsd-purge] threw:', err);
     });
 
   // --- Vendor-bundled AI_LabTest: sync (fire-and-forget, never blocks startup) ---
@@ -1741,7 +1735,7 @@ app.whenReady().then(async () => {
   // WebFetch preflight call to api.anthropic.com is blocked. The function
   // is synchronous, never throws, and respects user's explicit value (true
   // OR false) if they've already set it. Wrapped in Promise.resolve() to
-  // match GSD's fire-and-forget pattern.
+  // match the other startup tasks' fire-and-forget pattern.
   Promise.resolve()
     .then(() => {
       const result = ensureSkipWebFetchPreflight();

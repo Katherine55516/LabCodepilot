@@ -7,7 +7,8 @@
  * up the `ai-lab-test:*` commands and the `test-workflow` skill — but only
  * while the plugin is ENABLED.
  *
- * Two surfaces (mirrors how GSD works, with deliberate divergences):
+ * Two surfaces (modelled on the retired GSD installer, with deliberate
+ * divergences — see docs/handover/gsd-removal.md for why GSD is gone):
  *   1. Plugin dir (installer-owned, full sync):
  *      `~/.claude/plugins/external_plugins/codepilot-ailab-vendor/`
  *      Holds the whole bundle incl. rules/ templates/ site-patterns/ .mcp.json.

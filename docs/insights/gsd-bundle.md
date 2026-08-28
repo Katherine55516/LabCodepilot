@@ -1,4 +1,8 @@
-# 内置 GSD —— 产品思考
+# 内置 GSD —— 产品思考 · 已下线
+
+> ⚠️ **本功能已于 v4.3.0 移除**（上游归档 + 常驻上下文开销）。本文保留为历史记录：
+> 当初内置的判断在当时是成立的，失效的是它的有效期。
+> 下线决策见 [docs/insights/gsd-removal.md](./gsd-removal.md)。
 
 > 技术实现见 [docs/handover/gsd-bundle.md](../handover/gsd-bundle.md)
 

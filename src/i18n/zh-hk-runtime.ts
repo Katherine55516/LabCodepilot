@@ -3,7 +3,7 @@
 /**
  * Runtime Simplified → Hong Kong Traditional conversion for strings that live
  * OUTSIDE the i18n dictionary — inline `isZh ? '简体' : 'English'` literals and
- * data-field zh values from catalogs / presets / GSD descriptions. The dictionary
+ * data-field zh values from catalogs / presets. The dictionary
  * (zh-HK.ts) is pre-converted at build time by scripts/gen-zh-hk.mjs; this mirrors
  * that for everything else, so a zh-HK user never sees Simplified or an English
  * fallback in the components that bypass the dictionary.

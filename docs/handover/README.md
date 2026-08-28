@@ -40,7 +40,8 @@
 | builtin-claude-code.md | 内置 Claude Code（v0.55+）：SDK 平台子包架构、自动发现 binary、asarUnpack 配置、CI 跨架构装包、Native runtime 应急 fallback |
 | markdown-artifact-overhaul.md | Markdown 渲染 × Artifact 预览体系：PreviewSource 联合、DiffSummary 卡片、Sandpack 单文件 React、CodeMirror 编辑+自动保存、长图导出 IPC、文件 I/O API 合同、loadedPath/freshPreview 防漂移 |
 | login-system.md | 登录账号体系：浏览器 OAuth + ModelConfig 下发镜像到 api_providers (source='managed') + 与 OpenAI OAuth 完全隔离、双进程 token 文件共享、broker.ts 桥接、字段映射矩阵、错误处理矩阵 |
-| gsd-bundle.md | 内置 GSD（gsd-build/get-shit-done, MIT）：vendor 流水线、平面化 + colon→hyphen 转换、Electron 同步 + IPC、agents 镜像 + hash 冲突跳过、Settings UI 完整面板、扫描器 frontmatter description 普惠修复 |
+| gsd-bundle.md ⚠️已下线 | 内置 GSD（gsd-build/get-shit-done, MIT）：vendor 流水线、平面化 + colon→hyphen 转换、Electron 同步 + IPC、agents 镜像 + hash 冲突跳过、Settings UI 完整面板、扫描器 frontmatter description 普惠修复 |
+| gsd-removal.md | GSD 下线与残留清理：为何删代码不够（399 个镜像文件由 Claude Code 直接读盘）、四类目标两种识别模式、平铺命令作为身份标志、路径成员 vs 哈希（v1/v2 老用户 + 手改用户）、官方安装判定信号、递归清空目录、两个顺序陷阱 |
 | ailab-plugin.md | 内置 AI_LabTest（qitianersheng/ai-lab-test-agent, MIT）：参照 GSD 的 vendor 流水线，差异为命名空间用 commands/ai-lab-test/ 子目录、安装时改写 ${CLAUDE_PLUGIN_ROOT} 为插件目录绝对路径、默认关闭、停用真删命名空间目录、启用时经 /api/plugins/mcp 注册 playwright MCP |
 | skill-agents-dir-mirror.md | Skill 目录镜像（`~/.agents/skills/` → `~/.claude/skills/`）：内置 binary 只扫 `~/.claude/skills/` 导致 `~/.agents/skills/` 技能 agent 不可见、复制非搬移 + 标记 + 哈希刷新 + 孤儿清理、5 个调用点、与 MCP `46caccd` 同类问题 |
 | conversation-interleaved-flow.md | 对话流交错渲染：文字/工具/思考按时间序交错；orderedBlocks 累积 + segmentsFromBlocks 保序配对 + MessageSegments 共享渲染；流式 + 持久双路径；旧消息 back-compat 限制 |
