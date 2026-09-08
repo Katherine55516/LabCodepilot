@@ -26,7 +26,12 @@ import { TerminalReasonChip } from '../../components/chat/TerminalReasonChip';
 import { translate, type Locale, type TranslationKey } from '../../i18n';
 
 /** Render the chip inside a real I18n provider for the given locale. */
-function render(reason: string | undefined, locale: Locale = 'zh', withActions = false): string {
+function render(
+  reason: string | undefined,
+  locale: Locale = 'zh',
+  withActions = false,
+  errorCategory?: string,
+): string {
   return renderToStaticMarkup(
     createElement(
       I18nContext.Provider,
@@ -40,6 +45,7 @@ function render(reason: string | undefined, locale: Locale = 'zh', withActions =
       },
       createElement(TerminalReasonChip, {
         reason,
+        errorCategory,
         onAction: withActions ? () => {} : undefined,
       }),
     ),
@@ -47,6 +53,38 @@ function render(reason: string | undefined, locale: Locale = 'zh', withActions =
 }
 
 describe('TerminalReasonChip render', () => {
+  // `api_error` is the terminal_reason for BOTH an upstream content block and
+  // a gateway dropping the stream mid-answer. Retry is right for the second
+  // and actively wrong for the first (it re-sends the blocked prefix), so the
+  // button is gated on the classifier category that came with the error frame.
+  it('api_error offers retry ONLY when the classifier says the stream dropped', () => {
+    const dropped = render('api_error', 'zh', true, 'STREAM_DISCONNECTED');
+    assert.ok(
+      dropped.includes('data-terminal-action="retry_simple"'),
+      `transient drop should offer a retry, got: ${dropped}`,
+    );
+
+    const blocked = render('api_error', 'zh', true, 'CONTENT_BLOCKED');
+    assert.ok(
+      !blocked.includes('data-terminal-action='),
+      `content block must stay action-less, got: ${blocked}`,
+    );
+
+    const noCategory = render('api_error', 'zh', true);
+    assert.ok(
+      !noCategory.includes('data-terminal-action='),
+      `without a category the chip must not guess, got: ${noCategory}`,
+    );
+  });
+
+  it('the gated retry never displaces a reason that already has its own actions', () => {
+    // A bogus category must not turn prompt_too_long's compress/1M actions
+    // into a bare resend.
+    const html = render('prompt_too_long', 'zh', true, 'STREAM_DISCONNECTED');
+    assert.ok(html.includes('data-terminal-action="compress_and_retry"'), html);
+    assert.ok(!html.includes('data-terminal-action="retry_simple"'), html);
+  });
+
   it('api_error renders its own label, NOT the "本轮已结束" fallback', () => {
     const html = render('api_error');
     assert.ok(html.includes('data-terminal-reason="api_error"'), 'chip should render');

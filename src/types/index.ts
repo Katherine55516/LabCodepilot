@@ -1300,6 +1300,13 @@ export interface SessionStreamSnapshot {
    */
   terminalReason?: string;
   /**
+   * error-classifier category from a server-sent SSE `error` frame. Lets the
+   * end-of-turn chip offer a retry ONLY for transient drops
+   * (STREAM_DISCONNECTED) — `api_error` also covers upstream content blocks,
+   * where replaying the same prompt just fails again.
+   */
+  errorCategory?: string;
+  /**
    * SDK 0.2.111 subscription rate-limit telemetry (Phase 2 of
    * agent-sdk-0-2-111-adoption). Populated from rate_limit_event
    * stream messages; only present on claude.ai subscription paths.

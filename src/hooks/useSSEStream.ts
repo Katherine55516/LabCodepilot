@@ -1,6 +1,7 @@
 import { useRef, useCallback } from 'react';
 import type { SSEEvent, TokenUsage, PermissionRequestEvent, MediaBlock, VmArtifactFile, VmStatusEvent } from '@/types';
 import { saveCachedSdkInitMeta } from '@/lib/sdk-init-cache';
+import { buildSseErrorNote, readSseErrorCategory } from '@/lib/sse-error-format';
 
 interface ToolUseInfo {
   id: string;
@@ -44,7 +45,15 @@ export interface SSECallbacks {
   onRewindPoint: (sdkUserMessageId: string) => void;
   onThinking?: (delta: string) => void;
   onKeepAlive: () => void;
-  onError: (accumulated: string) => void;
+  /**
+   * @param accumulated flat text with the error note already appended
+   * @param note        the note alone (`**Error:** …`), for callers that
+   *                    rebuild the message from ordered blocks and must
+   *                    append it as its own trailing text block
+   * @param category    error-classifier category, for category-specific
+   *                    affordances (e.g. retry only on transient drops)
+   */
+  onError: (accumulated: string, note?: string, category?: string) => void;
   onSkillNudge?: (data: SkillNudgeData) => void;
   onContextCompressed?: (data: { message: string; messagesCompressed: number; tokensSaved: number }) => void;
   onInitMeta?: (meta: {
@@ -349,45 +358,16 @@ function handleSSEEvent(
     }
 
     case 'error': {
-      // Try to parse structured error JSON from error-classifier
-      let errorDisplay: string;
-      try {
-        const parsed = JSON.parse(event.data);
-        if (parsed.category && parsed.userMessage) {
-          // Structured error from classifier
-          errorDisplay = parsed.userMessage;
-          if (parsed.actionHint) {
-            errorDisplay += `\n\n**What to do:** ${parsed.actionHint}`;
-          }
-          if (parsed.details) {
-            errorDisplay += `\n\nDetails: ${parsed.details}`;
-          }
-          // Render recovery actions as markdown links
-          if (parsed.recoveryActions && parsed.recoveryActions.length > 0) {
-            const links: string[] = [];
-            for (const a of parsed.recoveryActions as Array<{ label: string; url?: string; action?: string }>) {
-              if (a.url) {
-                links.push(`[${a.label}](${a.url})`);
-              } else if (a.action === 'open_settings') {
-                links.push(`[${a.label}](/settings#providers)`);
-              } else if (a.action === 'new_conversation') {
-                links.push(`[${a.label}](/chat)`);
-              }
-              // 'retry' is handled by the retryable flag, not as a link
-            }
-            if (links.length > 0) {
-              errorDisplay += '\n\n' + links.join(' · ');
-            }
-          }
-        } else {
-          errorDisplay = event.data;
-        }
-      } catch {
-        // Plain text error (backward compatible)
-        errorDisplay = event.data;
-      }
-      const next = accumulated + '\n\n**Error:** ' + errorDisplay;
-      callbacks.onError(next);
+      // Rendering lives in sse-error-format.ts so the server-side tee that
+      // writes the DB row produces byte-identical text — otherwise the note
+      // the user reads mid-turn changes wording after a reload.
+      const note = buildSseErrorNote(event.data);
+      const next = accumulated + '\n\n' + note;
+      // `note` is passed separately because the caller cannot recover it from
+      // `next`: the final message is rebuilt from ordered blocks, and the flat
+      // accumulated text is only an empty-blocks fallback. Without it the
+      // error silently vanished from every turn that had thinking or tools.
+      callbacks.onError(next, note, readSseErrorCategory(event.data));
       return next;
     }
 
@@ -474,7 +454,7 @@ export function useSSEStream() {
         onRewindPoint: (id) => callbacksRef.current?.onRewindPoint(id),
         onThinking: (d) => callbacksRef.current?.onThinking?.(d),
         onKeepAlive: () => callbacksRef.current?.onKeepAlive(),
-        onError: (a) => callbacksRef.current?.onError(a),
+        onError: (a, note, category) => callbacksRef.current?.onError(a, note, category),
         onInitMeta: (m) => callbacksRef.current?.onInitMeta?.(m),
         onRateLimit: (info) => callbacksRef.current?.onRateLimit?.(info),
       };

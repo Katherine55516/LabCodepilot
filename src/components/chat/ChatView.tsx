@@ -1279,6 +1279,7 @@ export function ChatView({ sessionId, initialMessages = [], initialHasMore = fal
       {!isStreaming && (
         <TerminalReasonChip
           reason={streamSnapshot?.terminalReason}
+          errorCategory={streamSnapshot?.errorCategory}
           onAction={handleTerminalAction}
         />
       )}

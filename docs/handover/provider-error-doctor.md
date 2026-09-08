@@ -15,7 +15,7 @@ CLI 进程 crash/exit
   ↓
 claude-client.ts catch 块
   ↓
-classifyError(ctx) — 模式匹配 16 种类别
+classifyError(ctx) — 模式匹配 20 种类别
   ↓
 结构化 JSON SSE error event
   { category, userMessage, actionHint, retryable }
@@ -43,7 +43,10 @@ useSSEStream.ts / page.tsx 解析
 | CLI_VERSION_TOO_OLD | version, upgrade | 否 |
 | MISSING_GIT_BASH | requires either Git for Windows / Git Bash was not found（CLI 致命启动文案，规则置顶） | 否 |
 | CONTENT_BLOCKED | can't help with this / safeguards flagged this message / anthropic.com/legal/aup（规则第二位） | 否 |
+| STREAM_DISCONNECTED | closed mid-response / closed mid-call / dropped mid-request（CLI 二进制原文） | 是 |
 | RESUME_FAILED | resume failed | 否 |
+| SESSION_STATE_ERROR | stale/corrupt session、sdk_session_id invalid | 是 |
+| IMAGES_NOT_SUPPORTED | 带图请求被上游拒（快速通道） | 否 |
 | PROCESS_CRASH | exit code N | 否 |
 | UNKNOWN | 兜底 | 否 |
 
@@ -60,6 +63,16 @@ useSSEStream.ts / page.tsx 解析
 规则要点：**置于列表第二位**（紧随 MISSING_GIT_BASH）——本规则四个模式全是 CLI 精确原文、不会劫持任何分类，而后面若干规则足够宽松（CLI_VERSION_TOO_OLD 匹配裸 `'version'`、UNSUPPORTED_FEATURE 匹配 `'not supported'`），顺序一变就可能把 refusal 吞掉。文案中文优先，直说与 API Key/额度/Base URL/网络无关，并点明「继续」会复发、要**新建会话**；cyber 类额外追加 Cyber Verification Program 一句。`retryable: false`，recoveryActions 只给「新建会话」+「查看内容政策」，**刻意不给 retry / Open Settings**（这两个误导正是本分类存在的理由）。
 
 **该分类不参与上游 message 覆盖**：`classifyError` 在 CONTENT_BLOCKED 上提前 return。否则网关把 refusal 包成 JSON（`{"error":{"message":"… can't help with this …"}}`）时，`extractUpstreamMessage()` 会把那一句原文提上来并清空 `actionHint`/`recoveryActions`，恰好丢掉用户唯一需要知道的信息。原文仍在 `rawMessage`（前端「Original error」）里可查。测试见 `src/__tests__/unit/error-classifier-refusal.test.ts`。
+
+**分类对了、但用户看不见：错误文案被有序块渲染吞掉（2026-09）：** 上面这些分类做得再准，也得先送到屏幕上。**现场案例**（打包版 v4.2.0 用户反馈日志，2026-08-04～09-08）：托管网关 + `qwen3.8-max[1m]` 的回合在 09-07 14:43（UTC 06:43:15）被网关中途断流，`STREAM_DISCONNECTED` 正常命中、结构化 error SSE 也正常下发 —— 但用户侧只看到回答断在半句「💡 选 20VU 而非」，外加一个语义为零的灰橙 chip，**没有任何报错**。105 个回合里 12 次断流，全部如此。
+
+根因是**投递链路**，不是分类：`useSSEStream` 的 `case 'error'` 把文案追加到扁平的 `accumulated` 文本，而最终消息由 `stream-session-manager.ts` 的 `buildFinalContentFromBlocks()` 从 `orderedBlocks` 重建 —— `accumulated` 只在 **orderedBlocks 全空**时才作为兜底使用。于是只要这一轮出现过 thinking / 工具调用 / 多段文本（本应用几乎每轮都有），错误文案就被丢弃。直播态同理：`StreamingMessage.tsx` 的 `if (blocks.length > 0) return segmentsFromBlocks(blocks)` 让它连一闪而过都没有。**正确写法当时就在隔壁** —— abort / 空转超时路径的 `buildFinalContent(note)` 是把提示 `push` 进 blocks 的，所以「用户手动停止」一直显示正常，唯独真正的错误看不见。服务端同样漏：`api/chat/route.ts` 的 tee 在 `event.type === 'error'` 分支只置 `hasError`/`errorMessage`，**从不写进 `contentBlocks`**，所以 DB 里那行 assistant 消息也没有任何出错痕迹，刷新后依旧是半句话。
+
+修法三处，文案统一由新模块 `src/lib/sse-error-format.ts` 渲染（客户端直播态、客户端落库态、服务端 tee 三个消费方必须逐字一致，否则回合中读到的提示和刷新后的不一样）：① `onError` 回调签名扩为 `(accumulated, note?, category?)`，把孤立的 note 单独传出来 —— 调用方无法从 `accumulated` 里反解它；② `buildFinalContentFromBlocks(stream, fallback, note)` 把 note 作为末尾 text 块拼进块数组；③ 服务端 tee 调 `pushErrorNoteBlock()`（先 flush 待落的 `currentText` 保证顺序，并自带 `\n\n` 分隔符 —— 纯文本回合是用 `join('')` 落库的，不带分隔符会把提示黏在断句尾巴上）。
+
+**断流不再清 `sdk_session_id`（2026-09）：** 同一份日志里 12 次断流 = 12 次会话重置（`claude-client.ts` 原本对**所有** stream error 一律 `updateSdkSessionId(sessionId, '')`）。断流场景下 CLI 侧会话本身是健康的，被切的只是网关的 HTTP body；清掉等于扔掉 CLI 侧已压缩的 transcript、todo 和已读文件，逼下一轮把 DB 全量历史重放 —— 更慢、更贵，也**更容易再撞上同一个断流**。现改为仅在 `classified.category === 'STREAM_DISCONNECTED'` 时保留。安全性来自 resume 路径本就有的三向兜底（抛错 / 零消息 / 挂住 → 清 id 并不带 resume 重跑），所以一个事后证明不可用的 session id 只多花一次尝试，不会把会话卡死。注意这**不等于** tech-debt-tracker 里记的那条更宽的守卫（「本轮已收到 `is_error:false` 的 result 后，进程退出错误只记日志」）—— 那条仍未做。
+
+**结束态 chip 的重试按钮按 category 收窄（2026-09）：** SDK 的 `terminal_reason` 把两件性质相反的事都归到 `api_error` —— 上游内容拦截（重试 = 把被拦前缀原样重发，必然复发，正是上面 CONTENT_BLOCKED 段描述的死循环）和网关中途断流（重试 = 通常就好了）。chip 本身分不出来，因此 `TerminalReasonChip` 新增 `errorCategory` 入参，只有 `RETRYABLE_API_ERROR_CATEGORIES`（当前仅 `STREAM_DISCONNECTED`）才挂 `retry_simple`。category 经 `SessionStreamSnapshot.errorCategory` 从 error 帧带到 chip —— 该字段必须同时登记进 `buildSnapshot()` 的**字段白名单**，否则每次 emit 都会被静默丢掉。测试见 `src/__tests__/unit/sse-error-note.test.ts` 与 `terminal-reason-chip-render.test.ts`。
 
 ### Provider 生效修复（P0-A1）
 
@@ -142,7 +155,8 @@ GET /api/doctor → runDiagnosis()
 
 | 文件 | 职责 |
 |------|------|
-| `src/lib/error-classifier.ts` | 16 类错误模式匹配 + 结构化输出 |
+| `src/lib/error-classifier.ts` | 20 类错误模式匹配 + 结构化输出 |
+| `src/lib/sse-error-format.ts` | error SSE 帧 → 用户可读文案（客户端/服务端共用，保证逐字一致）+ `pushErrorNoteBlock()` |
 | `src/lib/provider-doctor.ts` | 5 探针诊断引擎 + 修复动作 |
 | `src/lib/runtime-log.ts` | console 环形缓冲 + 脱敏 |
 | `src/instrumentation.ts` | 服务端启动 hook（initRuntimeLog） |

@@ -76,6 +76,16 @@ interface ActiveStream {
    * next onText starts a NEW text block instead of extending the previous one.
    */
   needNewTextBlock: boolean;
+  /**
+   * The `**Error:** …` note from an SSE `error` frame, kept separate from
+   * accumulatedText. The final message is rebuilt from orderedBlocks, which
+   * never carried the note — so on any turn with thinking or a tool call the
+   * classified error was silently dropped and the reply just stopped
+   * mid-sentence. Appended as a trailing text block instead.
+   */
+  errorNote: string | null;
+  /** error-classifier category for that frame — gates the retry affordance. */
+  errorCategory: string | null;
 }
 
 export interface StartStreamParams {
@@ -154,6 +164,7 @@ function buildSnapshot(stream: ActiveStream): SessionStreamSnapshot {
     error: stream.snapshot.error,
     finalMessageContent: stream.snapshot.finalMessageContent,
     terminalReason: stream.snapshot.terminalReason,
+    errorCategory: stream.snapshot.errorCategory,
     rateLimitInfo: stream.snapshot.rateLimitInfo,
     // buildSnapshot is a field WHITELIST — every emit() rebuilds the snapshot
     // from scratch, so any field patched onto stream.snapshot by a callback
@@ -269,6 +280,8 @@ export function startStream(params: StartStreamParams): void {
     orderedBlocks: [],
     currentTextOffset: 0,
     needNewTextBlock: false,
+    errorNote: null,
+    errorCategory: null,
   };
 
   map.set(params.sessionId, stream);
@@ -339,8 +352,19 @@ function pushOrderedToolResult(stream: ActiveStream, res: ToolResultInfo) {
   }
 }
 
-/** Serialize ordered blocks → final persisted message content. */
-function buildFinalContentFromBlocks(stream: ActiveStream, fallbackText: string): string {
+/**
+ * Serialize ordered blocks → final persisted message content.
+ *
+ * `note` is an optional trailing text block (e.g. a classified stream error).
+ * It is NOT added to the fallback path: `fallbackText` is the flat accumulated
+ * text, which already has the note appended by useSSEStream — adding it there
+ * too would print it twice.
+ */
+function buildFinalContentFromBlocks(
+  stream: ActiveStream,
+  fallbackText: string,
+  note?: string | null,
+): string {
   // Pair every tool_use with a result before persisting, so an interrupted /
   // permission-hung turn never writes an orphan tool_use into the DB (which
   // would later break history replay with AI_MissingToolResultsError).
@@ -348,15 +372,18 @@ function buildFinalContentFromBlocks(stream: ActiveStream, fallbackText: string)
     b => b.type !== 'text' || (b.text != null && b.text.trim().length > 0),
   );
   if (cleaned.length === 0) return fallbackText.trim();
-  const hasNonText = cleaned.some(b => b.type !== 'text');
-  const textCount = cleaned.filter(b => b.type === 'text').length;
+  const withNote: MessageContentBlock[] = note
+    ? [...cleaned, { type: 'text', text: note }]
+    : cleaned;
+  const hasNonText = withNote.some(b => b.type !== 'text');
+  const textCount = withNote.filter(b => b.type === 'text').length;
   // Single text-only message → persist as plain text (back-compat with readers
   // that expect bare text). Anything interleaved → ordered JSON array.
   if (!hasNonText && textCount <= 1) {
-    const only = cleaned[0];
+    const only = withNote[0];
     return only && only.type === 'text' ? only.text.trim() : fallbackText.trim();
   }
-  return JSON.stringify(cleaned);
+  return JSON.stringify(withNote);
 }
 
 async function runStream(stream: ActiveStream, params: StartStreamParams): Promise<void> {
@@ -641,9 +668,13 @@ async function runStream(stream: ActiveStream, params: StartStreamParams): Promi
       onKeepAlive: () => {
         markActive();
       },
-      onError: (acc) => {
+      onError: (acc, note, category) => {
         markActive();
         stream.accumulatedText = acc;
+        // Kept out of accumulatedText's shadow so the success path below can
+        // append it as its own block — see ActiveStream.errorNote.
+        if (note) stream.errorNote = note;
+        if (category) stream.errorCategory = category;
         emit(stream, 'snapshot-updated');
       },
       onInitMeta: (meta) => {
@@ -661,7 +692,12 @@ async function runStream(stream: ActiveStream, params: StartStreamParams): Promi
     // the interleaved render. `accumulated` is the back-compat fallback for
     // text-only turns where orderedBlocks may be empty.
     const accumulated = result.accumulated;
-    const messageContent = buildFinalContentFromBlocks(stream, accumulated);
+    // A server-sent `error` frame arrives INSIDE an otherwise healthy HTTP
+    // stream (upstream gateway drops, classified errors), so it lands here —
+    // not in the catch below. Carry the note into the blocks or it is lost.
+    const errorNote = stream.errorNote;
+    const errorCategory = stream.errorCategory;
+    const messageContent = buildFinalContentFromBlocks(stream, accumulated, errorNote);
 
     // Update snapshot with completion info
     stream.snapshot = {
@@ -670,6 +706,7 @@ async function runStream(stream: ActiveStream, params: StartStreamParams): Promi
       completedAt: Date.now(),
       tokenUsage: result.tokenUsage,
       finalMessageContent: messageContent || null,
+      ...(errorCategory ? { errorCategory } : {}),
       statusText: undefined,
       pendingPermission: null,
       permissionResolved: null,
@@ -684,6 +721,8 @@ async function runStream(stream: ActiveStream, params: StartStreamParams): Promi
     stream.orderedBlocks = [];
     stream.currentTextOffset = 0;
     stream.needNewTextBlock = false;
+    stream.errorNote = null;
+    stream.errorCategory = null;
 
     cleanupTimers(stream);
     emit(stream, 'completed');
@@ -1030,6 +1069,8 @@ export function seedSnapshotPatch(
     orderedBlocks: [],
     currentTextOffset: 0,
     needNewTextBlock: false,
+    errorNote: null,
+    errorCategory: null,
     snapshot: {
       sessionId,
       phase: 'completed',

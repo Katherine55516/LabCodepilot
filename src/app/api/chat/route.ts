@@ -6,6 +6,7 @@ import { remaskText } from '@/lib/deid-utils';
 import { getRecommendedSystemPrompt } from '@/lib/deid-client';
 import { resolveProvider as resolveProviderUnified } from '@/lib/provider-resolver';
 import { notifySessionStart, notifySessionComplete, notifySessionError } from '@/lib/telegram-bot';
+import { pushErrorNoteBlock } from '@/lib/sse-error-format';
 import { extractCompletion } from '@/lib/onboarding-completion';
 import { loadCodePilotMcpServers, loadAllMcpServers } from '@/lib/mcp-loader';
 import { assembleContext } from '@/lib/context-assembler';
@@ -870,6 +871,11 @@ async function collectStreamResponse(
             } else if (event.type === 'error') {
               hasError = true;
               errorMessage = event.data || 'Unknown error';
+              // Persist the classified error as a trailing text block. Without
+              // this the DB row kept only the partial reply: an upstream
+              // gateway dropping the stream mid-response left a message that
+              // just stopped mid-sentence, with nothing recording why.
+              currentText = pushErrorNoteBlock(contentBlocks, currentText, event.data);
             } else if (event.type === 'result') {
               try {
                 const resultData = JSON.parse(event.data);

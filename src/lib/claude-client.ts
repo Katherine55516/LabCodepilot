@@ -2579,17 +2579,35 @@ export function streamClaudeSdk(options: ClaudeStreamOptions): ReadableStream<st
         }));
         controller.enqueue(formatSSE({ type: 'done', data: '' }));
 
-        // Always clear sdk_session_id on crash so the next message starts fresh.
+        // Clear sdk_session_id on crash so the next message starts fresh.
         // Even for fresh sessions — the SDK may emit a session_id via status
         // event before crashing, which gets persisted by consumeStream/SSE
         // handlers. Leaving it would cause repeated resume failures.
-        if (sessionId) {
+        //
+        // EXCEPT for a transient upstream stream drop. There the CLI session
+        // itself is healthy — only the gateway's HTTP body was cut mid-answer
+        // — so wiping it throws away the CLI-side compacted transcript, todos
+        // and file reads, and forces the next turn to replay the full DB
+        // history (slower, more tokens, and more likely to trip the same drop
+        // again). Measured on a field log: 12 drops = 12 session resets.
+        // Safe to keep, because the resume path above already catches a bad
+        // resume three ways (throw / no messages / hang) and transparently
+        // re-runs without resume — so a session id that turns out to be
+        // unusable costs one attempt, not a stuck conversation.
+        const keepSdkSession = classified.category === 'STREAM_DISCONNECTED';
+        if (sessionId && !keepSdkSession) {
           try {
             updateSdkSessionId(sessionId, '');
             console.warn('[claude-client] Cleared stale sdk_session_id for session', sessionId);
           } catch {
             // best effort
           }
+        } else if (sessionId) {
+          console.warn(
+            '[claude-client] Kept sdk_session_id after transient stream drop (category=%s) for session %s',
+            classified.category,
+            sessionId,
+          );
         }
 
         controller.close();

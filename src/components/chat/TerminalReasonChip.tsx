@@ -32,6 +32,11 @@ export type TerminalActionId =
 
 interface Props {
   reason: string | undefined;
+  /**
+   * error-classifier category from the turn's SSE `error` frame, when there
+   * was one. Only used to narrow `api_error` — see RETRYABLE_API_ERROR_CATEGORIES.
+   */
+  errorCategory?: string;
   onAction?: (actionId: TerminalActionId) => void;
 }
 
@@ -88,9 +93,24 @@ const ACTIONS_BY_REASON: Record<string, ActionDescriptor[]> = {
   // - api_error: covers upstream policy refusals (CONTENT_BLOCKED), where a
   //   retry resends the blocked prefix and fails again. The classified error
   //   banner carries the real guidance ("start a NEW session").
+  //   EXCEPTION: when the classifier says the turn died from a transient
+  //   upstream stream drop, a plain resend IS the right move — see
+  //   RETRYABLE_API_ERROR_CATEGORIES below.
   // - budget_exhausted / tool_deferred_unavailable / background_requested:
   //   nothing the user can act on from this chip.
 };
+
+/**
+ * `api_error` is the SDK's terminal_reason for two very different situations:
+ * an upstream content block (retry = same failure, and it re-sends the blocked
+ * prefix) and a gateway dropping the stream mid-response (retry = usually
+ * works). The chip alone cannot tell them apart, so the retry button is gated
+ * on the error-classifier category that came with the turn's `error` frame.
+ *
+ * Field case this is for: a managed-gateway model was cut off mid-answer,
+ * leaving a reply that stopped mid-sentence and no way forward but retyping.
+ */
+const RETRYABLE_API_ERROR_CATEGORIES = new Set(['STREAM_DISCONNECTED']);
 
 const TONE_BY_REASON: Record<string, Tone> = {
   max_turns: 'warning',
@@ -151,7 +171,7 @@ const TONE_CLASSES: Record<Tone, string> = {
   muted: 'bg-muted text-muted-foreground border-border',
 };
 
-export function TerminalReasonChip({ reason, onAction }: Props) {
+export function TerminalReasonChip({ reason, errorCategory, onAction }: Props) {
   const { t } = useTranslation();
 
   if (!reason || SILENT_REASONS.has(reason)) return null;
@@ -164,7 +184,18 @@ export function TerminalReasonChip({ reason, onAction }: Props) {
   const label = isKnown
     ? t(`terminal.${reason}` as TranslationKey)
     : t('terminal.unknown' as TranslationKey);
-  const actions = onAction ? (ACTIONS_BY_REASON[reason] || []) : [];
+  let actions = onAction ? (ACTIONS_BY_REASON[reason] || []) : [];
+  if (
+    onAction &&
+    actions.length === 0 &&
+    reason === 'api_error' &&
+    errorCategory &&
+    RETRYABLE_API_ERROR_CATEGORIES.has(errorCategory)
+  ) {
+    actions = [
+      { id: 'retry_simple', labelKey: 'terminalAction.retry' as TranslationKey, variant: 'primary' },
+    ];
+  }
 
   return (
     <div className="mx-auto mt-2 flex w-full max-w-3xl flex-wrap items-center justify-start gap-2 px-4">
