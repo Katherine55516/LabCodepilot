@@ -40,15 +40,6 @@ describe('cowork status platform gate (R5-6)', () => {
     assert.equal(body.imageProvisioned, false);
   });
 
-  it('win32 respects the cowork_enabled switch alongside unsupported', async () => {
-    setPlatform('win32');
-    setSetting('cowork_enabled', 'true');
-    const { GET } = await import('../../app/api/cowork/status/route');
-    const body = await (await GET()).json();
-    assert.equal(body.enabled, true);
-    assert.equal(body.assets.overall, 'unsupported');
-  });
-
   it('win32 + delivered remote backend goes through the remote branch (not blocked)', async () => {
     setPlatform('win32');
     setSetting('cowork_backend', 'remote');

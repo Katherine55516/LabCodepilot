@@ -103,19 +103,23 @@ export default function NewChatPage() {
   const [mode, setMode] = useState('code');
 
   // E4 (cowork): 办公 tab 下的落地页变体 —— 显示「开始办公对话」引导卡,
-  // 替代研发的「项目对话/选择文件夹」。tab 初值读 localStorage,侧边栏切换
-  // 经 'workspace-tab-changed' 事件实时同步;cowork 可用性走状态 API(fail-closed)。
-  const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>(() => loadWorkspaceTab());
-  const [coworkAvailable, setCoworkAvailable] = useState(false);
+  // 替代研发的「项目对话/选择文件夹」。侧边栏切换经 'workspace-tab-changed' 事件同步。
+  //
+  // ⚠️ 初值必须恒为 'dev',不能惰性读 localStorage:服务端没有 localStorage 只会得到
+  // 'dev'(渲染研发空态),而客户端首帧能读到 'office'(渲染办公卡)—— 两边渲染的是
+  // 完全不同的子树,直接 hydration mismatch。真实 tab 在下面的 mount effect 里补。
+  // (从前这条分支还被一个初值 false 的 coworkAvailable 挡着,不一致才没暴露出来。)
+  const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>('dev');
   const [coworkImageProvisioned, setCoworkImageProvisioned] = useState(true);
   const [creatingOffice, setCreatingOffice] = useState(false);
 
   useEffect(() => {
+    // hydration 之后才读 localStorage —— 见上面 workspaceTab 初值的注释。
+    setWorkspaceTab(loadWorkspaceTab());
     fetch('/api/cowork/status')
       .then((r) => (r.ok ? r.json() : null))
       .then((d) => {
         if (!d) return;
-        setCoworkAvailable(!!d.enabled);
         setCoworkImageProvisioned(!!d.imageProvisioned);
       })
       .catch(() => {});
@@ -998,7 +1002,7 @@ export default function NewChatPage() {
   // E4 (cowork): 办公 tab 下的落地页只给「开始办公对话」引导 —— 不渲染研发
   // 的选文件夹空态与 composer(此页的首条消息流程按研发语义校验 workingDir,
   // 办公会话必须先建会话再进入 /chat/[id] 输入)。
-  if (coworkAvailable && workspaceTab === 'office' && messages.length === 0 && !isStreaming) {
+  if (workspaceTab === 'office' && messages.length === 0 && !isStreaming) {
     return (
       <div className="relative flex h-full min-h-0 flex-col">
         <OfficeEmptyCard

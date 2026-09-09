@@ -29,9 +29,9 @@ export interface SandboxUnavailableError {
 
 /**
  * 把 decideCowork 的失败 reason 映射成用户可读的结构化错误。
- * reason 码来源:src/lib/cowork-poc.ts(cowork_disabled_globally /
- * image_not_provisioned / forwarder_missing / vm_<phase>[:detail])
- * 以及 claude-client 捕获异常时的 'decision_error'。
+ * reason 码来源:src/lib/cowork-poc.ts(image_not_provisioned /
+ * forwarder_missing / sandbox_<phase>[:detail])以及 claude-client 捕获异常时
+ * 的 'decision_error'。
  */
 export function buildSandboxUnavailableError(reason?: string): SandboxUnavailableError {
   const raw = reason || 'unknown';
@@ -39,11 +39,7 @@ export function buildSandboxUnavailableError(reason?: string): SandboxUnavailabl
   let actionHint: string;
   let retryable: boolean;
 
-  if (raw === 'cowork_disabled_globally') {
-    userMessage = '此会话是沙箱会话,但 Cowork 沙箱功能当前未启用(全局开关关闭)。';
-    actionHint = '启用 Cowork 沙箱后重试,或新建普通(研发)会话继续。';
-    retryable = false;
-  } else if (raw === 'image_not_provisioned') {
+  if (raw === 'image_not_provisioned') {
     userMessage = '沙箱环境尚未下载完成,无法启动隔离环境。';
     actionHint = '到设置页或「办公」首页点击「下载沙箱环境」,完成后重试;或新建普通(研发)会话继续。';
     retryable = false;
@@ -51,9 +47,9 @@ export function buildSandboxUnavailableError(reason?: string): SandboxUnavailabl
     userMessage = '沙箱转发器脚本缺失,无法把执行转入虚拟机。';
     actionHint = '检查 cowork_forwarder_path 设置与 scripts/poc/cowork/ 目录后重试。';
     retryable = false;
-  } else if (raw.startsWith('vm_')) {
-    userMessage = `沙箱虚拟机未能就绪(${raw})。`;
-    actionHint = '稍后重试;若持续失败,查看 ~/.codepilot/cowork-poc/vm-console.log 排查。';
+  } else if (raw.startsWith('sandbox_') || raw.startsWith('vm_')) {
+    userMessage = `沙箱环境未能就绪(${raw})。`;
+    actionHint = '稍后重试;若持续失败,请把括号内的错误信息提供给管理员排查。';
     retryable = true;
   } else {
     userMessage = `沙箱环境检查失败(${raw})。`;

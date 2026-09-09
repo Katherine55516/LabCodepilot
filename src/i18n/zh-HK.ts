@@ -2213,8 +2213,6 @@ const zhHK: Record<TranslationKey, string> = {
   'sandbox.provisioning.failedHint': '請稍後重試,或檢查沙箱環境',
 
   // ── Cowork settings (E5) ──────────────────────────────────
-  'settings.coworkTitle': '辦公模式(Cowork 沙箱)',
-  'settings.coworkDesc': '實驗功能:開啟後側邊欄會出現「辦公 / 研發」切換。辦公對話喺隔離虛擬機內處理檔案,全程唔會接觸真機檔案。',
 
   // ── Workspace tabs (Cowork office mode, E3) ───────────────
   'workspace.tab.office': '辦公',
@@ -2224,8 +2222,7 @@ const zhHK: Record<TranslationKey, string> = {
   'workspace.office.start': '開始辦公對話',
   'workspace.office.imageMissing': '本機尚未下載沙箱環境,下載完成後即可使用辦公模式。',
   'workspace.office.remoteOnlyPlatform': '目前裝置的辦公模式由公司遠端沙箱提供,登入後自動開通;若持續無法使用請聯絡管理員。',
-  'workspace.office.sandboxDisabled': '辦公沙箱目前已在設定中關閉,開啟後即可在隔離環境中開始辦公對話。',
-  'workspace.office.enableInSettings': '前往設定開啟',
+  'workspace.office.remoteUnreachable': '暫時連唔到沙箱服務。請檢查網絡後稍等片刻重試;若持續咁樣請聯絡管理員。',
   'workspace.office.download': '下載沙箱環境(約 3.2 GB)',
   'workspace.office.retryDownload': '重試下載',
   'workspace.office.downloading': '正在下載沙箱環境…',

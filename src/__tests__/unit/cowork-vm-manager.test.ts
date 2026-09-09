@@ -12,21 +12,6 @@ describe('cowork-poc: decideCowork gate (safe early-returns, no VM start)', () =
     assert.deepEqual(await decideCowork(SID, undefined), { useSandbox: false });
     assert.deepEqual(await decideCowork(SID, false), { useSandbox: false });
   });
-
-  it('sandbox on but global cowork_enabled off → falls back with reason, never starts VM', async () => {
-    const { decideCowork } = await import(path.resolve(__dirname, '../../lib/cowork-poc.ts'));
-    const { getSetting, setSetting } = await import(path.resolve(__dirname, '../../lib/db.ts'));
-    const saved = getSetting('cowork_enabled');
-    try {
-      setSetting('cowork_enabled', 'false');
-      const decision = await decideCowork(SID, 1);
-      assert.equal(decision.useSandbox, false);
-      assert.equal(decision.reason, 'cowork_disabled_globally');
-    } finally {
-      // Restore exactly (may have been unset originally → clear to '')
-      setSetting('cowork_enabled', saved ?? '');
-    }
-  });
 });
 
 describe('db: mergeVmArtifactLists (pure merge semantics)', () => {

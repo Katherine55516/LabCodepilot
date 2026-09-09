@@ -13,8 +13,11 @@ export interface CoworkAssetProgress {
 export interface CoworkAssetsStatus {
   image: CoworkAssetProgress;
   claude: CoworkAssetProgress;
-  /** unsupported = 非 macOS 且未下发 remote(R5-6):办公由公司远程沙箱提供,本地无可下载资产。 */
-  overall: 'ready' | 'downloading' | 'missing' | 'failed' | 'unsupported';
+  /**
+   * unsupported = 非 macOS 且未下发 remote(R5-6):办公由公司远程沙箱提供,本地无可下载资产。
+   * unavailable = 已下发 remote 但服务端此刻不可达 —— 同样没有本地资产可下载。
+   */
+  overall: 'ready' | 'downloading' | 'missing' | 'failed' | 'unsupported' | 'unavailable';
   totalPct: number;
   /** 当前落盘资产可用(升级下载期间仍 true)——"能否开工/发消息"看这个,别看 overall。 */
   usable: boolean;
@@ -23,7 +26,6 @@ export interface CoworkAssetsStatus {
 }
 
 export interface CoworkStatusData {
-  enabled: boolean;
   imageProvisioned: boolean;
   vmPhase: string;
   assets?: CoworkAssetsStatus;

@@ -2207,8 +2207,6 @@ const en = {
   'sandbox.provisioning.failedHint': 'Please try again, or check the sandbox environment',
 
   // ── Cowork settings (E5) ──────────────────────────────────
-  'settings.coworkTitle': 'Work mode (Cowork sandbox)',
-  'settings.coworkDesc': 'Experimental: adds the Work / Code tabs to the sidebar. Work sessions run file operations inside an isolated VM and never touch files on this machine.',
 
   // ── Workspace tabs (Cowork office mode, E3) ───────────────
   'workspace.tab.office': 'Work',
@@ -2218,8 +2216,7 @@ const en = {
   'workspace.office.start': 'Start a work session',
   'workspace.office.imageMissing': 'The sandbox environment has not been downloaded on this machine yet. Work mode becomes available once the download completes.',
   'workspace.office.remoteOnlyPlatform': "Office mode on this device is provided by your organization's remote sandbox and is enabled automatically after sign-in. Contact your administrator if it stays unavailable.",
-  'workspace.office.sandboxDisabled': 'The office sandbox is currently turned off in Settings. Enable it to start office conversations in an isolated environment.',
-  'workspace.office.enableInSettings': 'Enable in Settings',
+  'workspace.office.remoteUnreachable': 'The sandbox service is unreachable right now. Check your network and try again shortly; contact your administrator if it persists.',
   'workspace.office.download': 'Download sandbox environment (~3.2 GB)',
   'workspace.office.retryDownload': 'Retry download',
   'workspace.office.downloading': 'Downloading sandbox environment…',

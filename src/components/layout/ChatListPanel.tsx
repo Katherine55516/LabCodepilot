@@ -119,16 +119,13 @@ export function ChatListPanel({ open, onToggle, width, hasUpdate, readyToInstall
 
   // E3 (cowork): 「办公 / 研发」双栏。办公 = 沙箱会话平铺(不按项目分组)。
   //
-  // 双栏是**固定信息架构,恒常渲染** —— 不再由 cowork_enabled 或状态探测决定
+  // 双栏是**固定信息架构,恒常渲染** —— 不由状态探测决定
   // 显隐。历史上它挂在 `/api/cowork/status` 的一次性 fetch 上:该请求静默
   // catch、失败不重试,首帧探测失败(打包版启动时内嵌服务未就绪等)双栏就永久
   // 消失,只能靠去设置页切开关或重启碰运气,表现为「功能莫名不见了」。
   // 现在探测结果只用于**办公 tab 内部的诚实降级**(见 OfficeEmptyCard),
   // 不再左右 tab 本身。tab 选择记忆在 localStorage(默认 dev,存量观感不变)。
   const [workspaceTab, setWorkspaceTab] = useState<WorkspaceTab>(() => loadWorkspaceTab());
-  // 执行门状态(settings.cowork_enabled)。仅用于办公空态卡的提示分支:关闭时
-  // 明说「已在设置中关闭」并给开启入口,而不是让用户建一个发消息才硬失败的会话。
-  const [coworkEnabled, setCoworkEnabled] = useState(true);
   const [coworkImageProvisioned, setCoworkImageProvisioned] = useState(true);
 
   useEffect(() => {
@@ -140,7 +137,6 @@ export function ChatListPanel({ open, onToggle, width, hasUpdate, readyToInstall
         .then((r) => (r.ok ? r.json() : null))
         .then((d) => {
           if (!d) return;
-          setCoworkEnabled(!!d.enabled);
           setCoworkImageProvisioned(!!d.imageProvisioned);
         })
         .catch(() => {});
@@ -677,7 +673,7 @@ export function ChatListPanel({ open, onToggle, width, hasUpdate, readyToInstall
         </Tooltip>
       </div>
 
-      {/* E3 (cowork): 办公/研发 分段切换 —— **恒常渲染**,不受 cowork_enabled
+      {/* E3 (cowork): 办公/研发 分段切换 —— **恒常渲染**,不受状态探测
           与状态探测影响(见上方 workspaceTab 处的说明:曾因一次性 fetch 静默
           失败导致双栏永久消失)。办公=沙箱会话平铺,研发=现有项目分组。
           切 tab 只换列表,不影响已打开会话。沙箱能否真的执行由服务端
@@ -851,7 +847,6 @@ export function ChatListPanel({ open, onToggle, width, hasUpdate, readyToInstall
             officeSessions.length === 0 ? (
               <OfficeEmptyCard
                 imageProvisioned={coworkImageProvisioned}
-                sandboxDisabled={!coworkEnabled}
                 creating={creatingChat}
                 onStart={handleNewOfficeChat}
               />

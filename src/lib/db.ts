@@ -459,9 +459,9 @@ function migrateDb(db: Database.Database): void {
   if (!colNames.includes('permission_profile')) {
     safeAddColumn(db, "ALTER TABLE chat_sessions ADD COLUMN permission_profile TEXT NOT NULL DEFAULT 'default'");
   }
-  // Cowork POC: when 1, the SDK CLI runs inside an isolated VM (see
-  // scripts/poc/cowork). Gated behind the cowork_enabled setting; default 0
-  // keeps every existing session on the host runtime.
+  // Cowork POC: when 1, the SDK CLI runs inside an isolated sandbox (see
+  // scripts/poc/cowork). Default 0 keeps every existing session on the host
+  // runtime; 办公会话在创建期置 1。
   if (!colNames.includes('sandbox_enabled')) {
     safeAddColumn(db, "ALTER TABLE chat_sessions ADD COLUMN sandbox_enabled INTEGER NOT NULL DEFAULT 0");
   }

@@ -1,20 +1,13 @@
 'use client';
 
-import Link from 'next/link';
 import { useTranslation } from '@/hooks/useTranslation';
 import { useCoworkStatus, type CoworkAssetsStatus } from '@/hooks/useCoworkStatus';
 import { Button } from '@/components/ui/button';
-import { Plus, ShieldCheck, DownloadSimple, Gear } from '@/components/ui/icon';
+import { Plus, ShieldCheck, DownloadSimple } from '@/components/ui/icon';
 
 interface OfficeEmptyCardProps {
   /** 兼容字段:assets 信息缺席时(旧 payload)回退用。就绪判定以 assets.overall 为准。 */
   imageProvisioned: boolean;
-  /**
-   * 全局沙箱执行开关(settings.cowork_enabled)已关闭。双栏恒常渲染后,
-   * 用户随时能进办公栏,但此时建会话发消息会被服务端 decideCowork 硬失败
-   * (cowork_disabled_globally)。这里明说原因并给开启入口,不让用户白建。
-   */
-  sandboxDisabled?: boolean;
   creating?: boolean;
   onStart: () => void;
   /**
@@ -96,6 +89,16 @@ export function CoworkAssetsAction({
     );
   }
 
+  // 已下发 remote 但服务端此刻不可达。绝不能掉进下面的下载兜底 —— 那下的是
+  // vfkit 的 mac 底镜(3.2 GB),对 remote 后端毫无用处。只说清楚 + 让用户重试。
+  if (assets?.overall === 'unavailable') {
+    return (
+      <p className={`${textClass} text-muted-foreground`}>
+        {t('workspace.office.remoteUnreachable')}
+      </p>
+    );
+  }
+
   if (assets?.overall === 'downloading') {
     const stateLine =
       assets.image.state === 'verifying' || assets.claude.state === 'installing'
@@ -136,25 +139,12 @@ export function CoworkAssetsAction({
  * 说明沙箱语义 + 一键开始;资产未就绪时给「下载沙箱环境」按钮与进度(D3 显式
  * 触发),就绪后变回开始按钮。
  */
-export function OfficeEmptyCard({ imageProvisioned, sandboxDisabled, creating, onStart, variant = 'sidebar' }: OfficeEmptyCardProps) {
+export function OfficeEmptyCard({ imageProvisioned, creating, onStart, variant = 'sidebar' }: OfficeEmptyCardProps) {
   const { t } = useTranslation();
   const { data, startDownload } = useCoworkStatus();
   const assets = data?.assets;
 
-  // 执行门关着时不给「开始」——建了也会在发消息时硬失败。直接说清楚 + 给入口。
-  const action = sandboxDisabled ? (
-    <div className="flex flex-col gap-1.5">
-      <p className={`${variant === 'landing' ? 'text-xs' : 'text-[11px]'} leading-relaxed text-muted-foreground`}>
-        {t('workspace.office.sandboxDisabled')}
-      </p>
-      <Link href="/settings#general">
-        <Button variant="outline" size={variant === 'landing' ? 'default' : 'sm'} className={variant === 'landing' ? 'gap-1.5' : 'h-7 gap-1 text-xs'}>
-          <Gear size={variant === 'landing' ? 15 : 13} />
-          {t('workspace.office.enableInSettings')}
-        </Button>
-      </Link>
-    </div>
-  ) : (
+  const action = (
     <CoworkAssetsAction
       assets={assets}
       fallbackProvisioned={imageProvisioned}

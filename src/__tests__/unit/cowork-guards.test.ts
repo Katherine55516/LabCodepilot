@@ -11,16 +11,6 @@ import path from 'path';
 const guardsPath = path.resolve(__dirname, '../../lib/cowork-guards.ts');
 
 describe('cowork-guards: buildSandboxUnavailableError', () => {
-  it('maps cowork_disabled_globally → non-retryable with enable hint', async () => {
-    const { buildSandboxUnavailableError } = await import(guardsPath);
-    const e = buildSandboxUnavailableError('cowork_disabled_globally');
-    assert.equal(e.category, 'sandbox_unavailable');
-    assert.equal(e.retryable, false);
-    assert.equal(e.rawMessage, 'cowork_disabled_globally');
-    assert.match(e.userMessage, /未启用/);
-    assert.match(e.actionHint, /启用 Cowork 沙箱/);
-  });
-
   it('maps image_not_provisioned → non-retryable with download guidance (M2)', async () => {
     const { buildSandboxUnavailableError } = await import(guardsPath);
     const e = buildSandboxUnavailableError('image_not_provisioned');
@@ -36,12 +26,16 @@ describe('cowork-guards: buildSandboxUnavailableError', () => {
     assert.match(e.userMessage, /转发器/);
   });
 
-  it('maps vm_* runtime failures → retryable, keeps the raw phase in the message', async () => {
+  it('maps sandbox_* / vm_* runtime failures → retryable, keeps the raw phase in the message', async () => {
     const { buildSandboxUnavailableError } = await import(guardsPath);
-    const e = buildSandboxUnavailableError('vm_crashed:spawn_failed');
-    assert.equal(e.retryable, true);
-    assert.match(e.userMessage, /vm_crashed:spawn_failed/);
-    assert.match(e.actionHint, /vm-console\.log/);
+    // sandbox_ 是 cowork-poc 现行的前缀(remote 后端),vm_ 是 vfkit 时代的遗留 —— 两者
+    // 都必须落进这条可重试分支,否则远程后端的每次失败都掉进兜底、拿不到排查指引。
+    for (const raw of ['sandbox_unavailable:cowork-server POST /session/x → 401', 'vm_crashed:spawn_failed']) {
+      const e = buildSandboxUnavailableError(raw);
+      assert.equal(e.retryable, true);
+      assert.match(e.userMessage, /未能就绪/);
+      assert.ok(e.userMessage.includes(raw));
+    }
   });
 
   it('falls back gracefully on unknown / missing reasons (retryable)', async () => {
@@ -57,7 +51,7 @@ describe('cowork-guards: buildSandboxUnavailableError', () => {
 
   it('every variant carries the isolation promise tail (绝不落真机)', async () => {
     const { buildSandboxUnavailableError } = await import(guardsPath);
-    const reasons = ['cowork_disabled_globally', 'image_not_provisioned', 'forwarder_missing', 'vm_starting', 'whatever'];
+    const reasons = ['image_not_provisioned', 'forwarder_missing', 'sandbox_unavailable:boom', 'vm_starting', 'whatever'];
     for (const r of reasons) {
       assert.match(buildSandboxUnavailableError(r).userMessage, /没有在真机上执行任何操作/);
     }
