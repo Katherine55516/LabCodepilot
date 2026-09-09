@@ -342,7 +342,7 @@ Next server(宿主)                                     VM guest(Debian, aarch64
 **应用内(src/,随包分发)**
 | 文件 | 职责 |
 |---|---|
-| `src/lib/cowork-poc.ts` | `decideCowork(sandboxEnabled)`:三重门(全局 `cowork_enabled` 设置 + 会话 `sandbox_enabled` + `ensureRunning` 就绪)→ 返回是否走沙箱 + 转发器路径。**async**(会等 VM 就绪)。`forwarderPath()` 解析 forwarder-vsock.sh。 |
+| `src/lib/cowork-poc.ts` | `decideCowork(sandboxEnabled)`:两重门(会话 `sandbox_enabled` + `backend.ensureReady` 就绪;vfkit 另加本地资产门)→ 返回是否走沙箱 + 转发器路径 + 连接 env。**async**(会等沙箱就绪)。**原先还有一道全局 `cowork_enabled` 门,已随办公模式转正删除**(见下方「设置键」)。 |
 | `src/lib/cowork-vm-manager.ts` | VM 生命周期**单例**(挂 globalThis 抗 hot-reload)。`ensureRunning()`(懒启动/复用/崩溃重建,幂等+并发安全 startingPromise)、`getStatus()`、`markSessionActive/releaseSession`(空闲回收计数)、`stop()`、`onVmProgress()`(P1-D 进度发射器)、`provisionGuest()`(M1:health 拿 version/claude,binary 缺则 vsock 推入)。**M1 起零 SSH**:就绪判定=轮询 vsock health,DHCP/`parseLeaseIp`/sshOk/scp 全删,`VmStatus` 不再有 ip 字段。 |
 | `src/lib/cowork-seed.ts` | **M1 新增:cloud-init seed 生成**。`SEED_TEMPLATE_VERSION`(决定 instance-id → 升级触发器)、`EXPECTED_DAEMON_VERSION`(跨层单测锁 daemon 版本)、`buildUserData`(daemon base64 内嵌 + systemd unit + mask ssh,纯函数)、`buildMetaData`、`ensureSeedIso()`(hdiutil makehybrid 造 cidata ISO,内容寻址缓存+旧版清理)、`resolveDaemonSource()`(原 hostDaemonPath 迁入)。 |
 | `src/lib/cowork-paths.ts` | **M3 新增:路径单一事实源**。资产目录正式化 `~/.codepilot/cowork-poc` → `cowork-assets`(模块加载时 renameSync 原子迁移,幂等;双存在用新告警,失败回退老);全部规范路径常量(IMAGE/CLAUDE/EFI/PID/CONSOLE/VSOCK/marker);`bundledCoworkResource()`(AILAB_RESOURCES_PATH/cowork 解析随包资源)、`vfkitBin()`(bundled 优先→PATH)。**server-only,勿被客户端组件引用**。 |
@@ -366,7 +366,7 @@ Next server(宿主)                                     VM guest(Debian, aarch64
 | `src/components/chat/ChatView.tsx` | 组装:产物卡/横幅挂载、`sandboxEnabled` 下发 MessageList/MessageInput、快照**整表替换**、回合完成自动重拉清单(E4.3)、办公隐藏 ModeIndicator/权限选择器。 |
 | `src/hooks/usePanel.ts` + `AppShell.tsx` + `UnifiedTopBar.tsx` | `isOfficeSession` 信号(E4):/chat/[id] 载入会话时设置;一处 gate 压制 PanelZone 全部侧板;顶栏四按钮+项目文件夹 chip 办公隐藏。 |
 | `src/hooks/useSlashCommands.ts` + `MessageInput.tsx` | `officeMode`(E4/E4.1):隐藏斜杠/CLI 按钮;输入 `/`、`@` 不触发补全弹窗(办公传空 workingDirectory 走既有优雅降级)。 |
-| `src/components/settings/GeneralSection.tsx` + `api/settings/app` | 设置页「办公模式(Cowork 沙箱)」开关(E5):写 `cowork_enabled`,广播 `cowork-status-changed` 双栏即时显隐;镜像未预置显示警示。 |
+| ~~`src/components/settings/GeneralSection.tsx` + `api/settings/app`~~ | ~~设置页「办公模式(Cowork 沙箱)」开关(E5)~~ —— **已删除**:办公模式转正后不再是实验功能,开关连同其下的沙箱资产下载区一并从设置页移除(资产下载在办公首页空态卡里仍有同一个组件)。设置页现已与 cowork 无关。 |
 | `scripts/poc/cowork/fs-audit.sh` | 真机零写入**强验收脚本**(E5):sudo fs_usage 包装,按进程树过滤写调用、剔除豁免面,violations 应为空。 |
 | `src/lib/stream-session-manager.ts` | snapshot 加 `vmArtifacts` / `vmStatus` 字段 + 回调。**注意 `buildSnapshot()` 是字段白名单**——加快照字段必须同步列进去(见 §9 bug④)。 |
 | `src/components/chat/ChatView.tsx` | 组装:沙箱开关状态、产物卡片、准备中横幅、消息内 DiffSummary 在沙箱下隐藏(传 `sandboxEnabled` 给 MessageList/MessageItem)。 |
@@ -434,7 +434,8 @@ bump DAEMON_VERSION + cowork-seed.ts 的 SEED_TEMPLATE_VERSION/EXPECTED_DAEMON_V
 - **办公会话的宿主 cwd**:合成暂存目录 `~/.codepilot/cowork/<sessionId>/`(D2,POST 无 working_directory 且 sandbox_enabled 时服务端生成),附件沿既有链路落 `<暂存>/.codepilot-uploads/`;权限创建期定 `full_access`(D3)。删除会话三级级联:DB 行 + 宿主暂存目录 + VM 会话目录(后者 best-effort,兜底见 daemon 对账)。
 - **SSE 事件**:`vm_artifacts` —— **回合末权威全量快照**(E4.2/E4.3:总是发、含空表;前端整表替换,空表=清卡;useSSEStream 不得加长度守卫);`vm_status`(冷启动进度 + 硬失败 failed)。
 - **daemon 对账**(E4.1):op `reconcileSessions {keep}` —— VM 每次 ready 后宿主带全量现存会话 id fire-and-forget 调用,删除 guest 内 DB 已不存在的 hex 目录(堵"休眠期删除会话"的孤儿残留,防 guest 磁盘占满)。
-- **设置键**:`cowork_enabled`(全局门,必须 `'true'`;设置页开关 E5 起可视化,写入后广播 `cowork-status-changed`)、`cowork_forwarder_path`(仍指旧 ssh 路径,`forwarderPath()` 同目录解析 vsock 版,无需改)。
+- **设置键**:~~`cowork_enabled`~~ **已废弃并从代码中删除** —— 它曾是必须为 `'true'` 的全局门,但账号下发链路(`setCoworkRemoteConfig`)从不写它,导致每个新开通的用户都被自己的客户端挡成「沙箱启动失败」(reason `cowork_disabled_globally`,线上工单实证)。现在开通与否只由配置下发决定,DB 里的存量残留值无人读取、无需迁移。`cowork_forwarder_path`(仍指旧 ssh 路径,`forwarderPath()` 同目录解析 vsock 版,无需改)。
+  事件 `cowork-status-changed` 仍在(资产下载启停等仍会广播),只是不再有开关写入它。
 - **前端状态**:localStorage `codepilot:workspace-tab`('dev'|'office');事件 `workspace-tab-changed`(tab 同步,双向)、`cowork-status-changed`(设置变更)、`vm-artifacts-refresh`(清单重拉)。
 - **env 过河**(claude-client 注入 queryOptions.env,forwarder 白名单透传):`COWORK_SESSION_ID`、`COWORK_VSOCK_PATH`、`COWORK_NODE_BIN`(= `process.execPath`)、`ELECTRON_RUN_AS_NODE=1`。
 - **凭证**:managed provider key 经 provider-resolver 注入 SDK env,不落 VM 磁盘(沿用现有"env 过河"纪律)。
