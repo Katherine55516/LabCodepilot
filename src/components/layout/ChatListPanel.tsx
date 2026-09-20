@@ -163,6 +163,13 @@ export function ChatListPanel({ open, onToggle, width, hasUpdate, readyToInstall
 
   const activeTab: WorkspaceTab = workspaceTab;
 
+  useEffect(() => {
+    if (pathname.startsWith('/ppt')) {
+      setWorkspaceTab('office');
+      saveWorkspaceTab('office');
+    }
+  }, [pathname]);
+
   // E4.1: 也监听外部发出的 tab 切换(如 /chat 页在预填跳转时强制切研发),
   // 保持侧边栏与主区一致。监听方只 setState 不再广播,不会成环。
   useEffect(() => {
@@ -766,6 +773,14 @@ export function ChatListPanel({ open, onToggle, width, hasUpdate, readyToInstall
                   {routineCount}
                 </span>
               )}
+            </Button>
+          </Link>
+        )}
+        {activeTab === 'office' && (
+          <Link href="/ppt">
+            <Button variant="ghost" size="sm" className={`w-full justify-start gap-2 h-8 text-xs ${pathname.startsWith('/ppt') ? 'bg-accent text-accent-foreground font-medium' : 'text-muted-foreground hover:text-foreground'}`}>
+              <FileArrowDown size={14} weight={pathname.startsWith('/ppt') ? 'fill' : 'regular'} />
+              {t('ppt.sidebarButton')}
             </Button>
           </Link>
         )}

@@ -70,6 +70,7 @@ export { CONCURRENCY };
  *        不传的话空闲回收器看不到这次运行(它只认 WS 连接),跑到第 30 分钟容器会被
  *        docker stop 掉 —— 机制是现成的,纯粹是「要记得调」。
  * @param {Function} [o.log]
+ * @param {string} [o.kind]         'routine' or server-owned 'ppt' workspace
  * @param {Function} [o.fetchCredentials]
  *        取凭证的实现,默认走账号后端。**这是给单测和联调用的注入接缝,不是后门** ——
  *        生产路径永远用默认值;routine-once.mjs 在账号后端还没部署时用它直接喂测试
@@ -77,6 +78,7 @@ export { CONCURRENCY };
  */
 export async function runRoutine({
   sid, uid, prompt, model, configId, transcriptPath, activity, log = () => {},
+  kind = 'routine',
   fetchCredentials = fetchModelCredentials,
 }) {
   if (active >= CONCURRENCY) {
@@ -115,14 +117,14 @@ export async function runRoutine({
     // ── 3. 确保容器就绪(TTL 回收过的会 docker start 复用)──────────
     // kind='routine':让容器与卷带上 cowork.kind 标签,reconcile 才会放过它们。
     // 漏了这个参数 = 用户下次打开 app 时定时任务的累积工作区被当孤儿删光。
-    const { name, reused } = await orch.ensureContainer(sid, uid, orch.KIND_ROUTINE);
+    const { name, reused } = await orch.ensureContainer(sid, uid, kind);
     audit('routine_fire', { sessionId: sid, detail: `${uid} ${reused ? 'reused' : 'new'}` });
 
     // ── 4. 跑 ────────────────────────────────────────────────
     activity?.start?.(sid);
     const r = await execOnce({
       sid, container: name, prompt, model, token, baseUrl, authStyle: c.authStyle, log,
-      defaultModels: c.defaultModels, effortLevel: c.effortLevel,
+      defaultModels: c.defaultModels, effortLevel: c.effortLevel, kind,
     });
     activity?.end?.(sid);
 
@@ -154,7 +156,7 @@ export async function runRoutine({
 }
 
 /** 真正 spawn 的那一段。返回 { status, exitCode, result, resultText, transcript, ... }。 */
-function execOnce({ sid, container, prompt, model, token, baseUrl, authStyle, log, defaultModels = {}, effortLevel = '' }) {
+function execOnce({ sid, container, prompt, model, token, baseUrl, authStyle, log, defaultModels = {}, effortLevel = '', kind = 'routine' }) {
   return new Promise((resolve) => {
     // 容器侧拿的是一次性 cwk_ token。cred-proxy 两种头都认(x-api-key 优先、
     // 回退 Authorization: Bearer),这里跟随 authStyle 保持与客户端同构。
@@ -192,6 +194,9 @@ function execOnce({ sid, container, prompt, model, token, baseUrl, authStyle, lo
       '-p', prompt,
       '--output-format', 'stream-json', '--verbose',
       '--dangerously-skip-permissions',
+      // PPT nodes are semantic transforms only. The renderer is separate code;
+      // the model must have no filesystem, shell, web, skill or MCP tools.
+      ...(kind === orch.KIND_PPT ? ['--tools', '', '--disallowedTools', 'mcp__*'] : []),
       ...(effectiveModel ? ['--model', effectiveModel] : []),
     ];
     log(`routine ${sid} spawn model=${effectiveModel || '容器默认'}${model ? '(显式)' : '(账号配置)'} authStyle=${authStyle}`);

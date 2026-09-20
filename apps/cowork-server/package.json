@@ -9,7 +9,14 @@
   },
   "scripts": {
     "start": "node index.mjs",
-    "selftest": "node selftest-r1.mjs"
+    "selftest": "node selftest-r1.mjs",
+    "selftest:ppt": "node selftest-ppt.mjs",
+    "selftest:ppt-m2": "node selftest-ppt-m2.mjs",
+    "selftest:ppt-m3": "node selftest-ppt-m3.mjs",
+    "selftest:ppt-m4": "node selftest-ppt-m4.mjs",
+    "selftest:ppt-m5": "node selftest-ppt-m5.mjs",
+    "selftest:ppt-structured": "node selftest-ppt-structured.mjs",
+    "benchmark:ppt-render": "node benchmark-ppt-render.mjs"
   },
   "dependencies": {
     "ws": "^8.19.0"

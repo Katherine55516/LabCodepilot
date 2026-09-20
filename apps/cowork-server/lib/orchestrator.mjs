@@ -52,6 +52,7 @@ const SINGLE_UID = '__single__';
 // 加它的成本是一行 label,不加的代价是数据丢失且用户无从察觉。
 const KIND_SESSION = 'session';
 const KIND_ROUTINE = 'routine';
+const KIND_PPT = 'ppt';
 const KIND_RE = /^[a-z]{1,16}$/;
 function assertKind(kind) {
   if (!KIND_RE.test(kind)) throw new Error('invalid kind');
@@ -303,7 +304,14 @@ export async function reconcile(keepSids, uid) {
   // ⚠️ excludeKind:'routine' 是本函数最重要的一个参数。keep 列表来自客户端,而客户端
   // 不知道 routine 的 sid(那是服务端实体)—— 不排掉的话每次 reconcile 都会把用户
   // 所有定时任务的累积工作区当孤儿删光。
-  for (const sid of await listSessions(uid, { excludeKind: KIND_ROUTINE })) {
+  // PPT projects are server-owned, cross-device artifacts just like routines.
+  // A client session inventory must never delete their persistent volumes.
+  const protectedSids = new Set([
+    ...await listSessionsOfKind(KIND_ROUTINE, uid),
+    ...await listSessionsOfKind(KIND_PPT, uid),
+  ]);
+  for (const sid of await listSessions(uid)) {
+    if (protectedSids.has(sid)) continue;
     if (!keep.has(sid)) { await removeContainer(sid, { keepVolume: false }); removed.push(sid); }
   }
   return removed;
@@ -321,5 +329,5 @@ export async function health() {
   return { ok: true, dockerVersion: ver, sessions: (await listSessions()).length };
 }
 
-export { AGENT_UID, IMAGE, SINGLE_UID, KIND_SESSION, KIND_ROUTINE };
+export { AGENT_UID, IMAGE, SINGLE_UID, KIND_SESSION, KIND_ROUTINE, KIND_PPT };
 export const _internals = { name, volumeName, stateVolumeName, IMAGE, ASSETS_DIR };

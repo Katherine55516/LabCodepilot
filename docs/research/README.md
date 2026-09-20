@@ -8,6 +8,7 @@
 
 | 文件 | 主题 |
 |------|------|
+| ppt-quality-review-and-benchmark.md | PPT M1–M5 质量评审与耗时基线：10 页可编辑样例、5 类本地渲染基准、Gamma-like 对照、质量门禁及当前完整 workflow |
 | chat-latency-investigation-2026-03-20.md | 聊天响应变慢问题排查报告（用户设置 / MCP / resume 链路） |
 | chat-sdk-integration-feasibility.md | Vercel Chat SDK 集成可行性调研 |
 | context-storage-migration-plan.md | 上下文共享与存储迁移设计（详细方案；执行跟踪见 `docs/exec-plans/active/context-storage-migration.md`） |

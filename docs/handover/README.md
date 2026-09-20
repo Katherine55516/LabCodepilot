@@ -8,6 +8,12 @@
 
 | 文件 | 主题 |
 |------|------|
+| ppt-workspace-m1.md | PPT M1：远程 Cowork 项目事实源、无工具逐页模型 DAG、确定性 PPTX、跨设备与导出边界、文件地图和部署验收 |
+| ppt-workspace-m2.md | PPT M2：Paste/File 解析与来源追溯、项目文件夹/回收站管理、PDF/演示、测试和远端验收边界 |
+| ppt-workspace-m3.md | PPT M3：旧版快照与版本谱系、差异大纲、未变节点复用、模板兼容性与 palette 映射、验收边界 |
+| ppt-workspace-m4.md | PPT M4：视觉块 IR、确定性 PPTX/PDF、局部保存与单页 AI、模板重渲染、编辑器与验收边界 |
+| ppt-workspace-m5.md | PPT M5：九类版式 registry、模板字体事实源、有界并行 DAG、确定性检查、一次整稿评审和 review→repair→publish 门禁 |
+| ppt-structured-artifact.md | PPT P0–P7：IR v3、持久 Run/DAG/Event、SSE、共享 Render Tree、Command Journal、对象编辑器、版本恢复、增量发布和外部 PPTX 保守保真编辑 |
 | skills-store-internal.md | 技能市场（内部）：Skills 设置页第三 tab 接 codeagent-server BFF（Hub 纯代理）；主进程 IPC 持 token（不走 Next route）、zip 安装事务（yauzl 三重守卫/原子落位/串行化）、台账 `.internal-store.json`（etag 原文/自愈）、目录名 slug 优先撞名加 id 后缀、错误码→UI 映射、`/api/skills/refresh` 缓存失效、假 JWKS+假 Hub 真实链路验证法（26 断言）与两个 `CODEPILOT_*_OVERRIDE` 测试注入口 |
 | test-usage-upload.md | 测试用量上报（跨仓，含功能 P1 + 回归 P2）：本地 test_stats_events（事件表/机器级）+ 各项目 AI_LabTest 文件态（回归/单项目→枚举工作台项目清单凑机器级）→ 按北京日聚合 → 主进程 loopback 取数 + Bearer 上报 → codeagent-server `test_usage_daily` **GREATEST upsert**（幂等 + 抗客户端删除）→ 管理端「测试用量统计」。三处致命口径：**状态型事件(cases_approved/复核)必须 last-wins 不能求和**（真实数据里采纳率曾算成 294%）、**熔断轮只计 executions/rounds 不计用例级结果**（服务端只拿求和值、无法事后剔除；功能与回归两侧同构）、**回归按项目明细必须并进同一个 payload.projects[] 并用列名 reg_***（否则服务端下钻静默恒为 0）。4 类触发 + 水位回补；比率永不落库、SUM(分子)/SUM(分母) 现算 |
 | regression-stats.md | 回归测试使用统计：Stats 面板二级 toggle（功能/回归）、**文件态聚合不复用事件表**（单项目口径）、套件执行趋势/用例执行趋势/脚本重放 vs AI/套件明细、run.json 近 50 轮护栏、circuitBroken/running 排除口径、纯核 aggregateRegressionStats + fs wrapper、CDP mock 验证 |

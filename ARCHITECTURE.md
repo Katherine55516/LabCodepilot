@@ -181,6 +181,7 @@ Schema 定义在 `src/lib/db.ts`，主要表（完整清单以 db.ts 为准）�
 | 测试模块使用统计（产品） | `docs/insights/test-usage-stats.md` | 量 AI 用例/判断/效率三把尺、采纳率首轮基线、准确度必配覆盖率、事件流水而非聚合表（口径可重算+二期上报）、只给指标不列用例、对抗评审驱动质量、已知局限 |
 | 回归测试使用统计 | `docs/handover/regression-stats.md` | Stats 面板二级 toggle（功能/回归）、文件态聚合不复用事件表（单项目口径）、套件执行/用例执行/脚本重放 vs AI 三图 + 套件明细、纯核 aggregateRegressionStats + fs wrapper、run.json 近 50 轮护栏、circuitBroken/running 排除口径、CDP mock 验证 |
 | 冒烟测试 | `docs/handover/smoke-test.md` | 测试工作台第三形态：任务子类型 + 三段页签 + 无门控创建即跑、轻场景落 cases.json（tags 恒空/verification 恒功能验证）、prompt 三变体 + @@OBSERVATION、Bug 复核三层模型（事实层派生 + md 初判 + bugs.json 覆盖层 runHash 绑定）、复核复用 report_reviewed |
+| 办公 PPT Structured Artifact | `docs/handover/ppt-structured-artifact.md`（以及 M1–M5 历史交接） | Cowork 跨设备事实源；IR v3 稳定对象 ID；持久 Run/DAG/Event + SSE；共享 Render Tree；Command Journal、Undo/Redo、冲突与版本恢复；对象画布和 AI 编辑；草稿/发布分离；外部 PPTX 保守保真编辑 |
 | 冒烟测试（产品） | `docs/insights/smoke-test.md` | 提示词产品化的判断标准（每次相同的沉淀进平台）、第三形态而非轻量模式的理由、无门控/缺预期不臆造/复核不发明新机制/双记录结论四个反直觉决策、三轮用户反馈记录 |
 | 回归测试使用统计（产品） | `docs/insights/regression-stats.md` | 三种子（套件新增/执行/用例执行）升级为趋势与结构、不复用事件表的理由、二级切换而非合并、诚实口径（熔断整轮排除/running 不出结论/flaky 只作候选）、用户主动收敛范围、对标 TestRail/Xray/Datadog 差异化落在脚本重放 vs AI |
 

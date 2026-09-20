@@ -37,6 +37,7 @@ import { ADMIN_UID, readAuditSince, getStats } from './lib/admin.mjs';
 import * as adminRt from './lib/admin-routines.mjs';
 import * as routineApi from './lib/routine-api.mjs';
 import * as routineSched from './lib/routine-scheduler.mjs';
+import * as pptApi from './lib/ppt-api.mjs';
 
 const PORT = parseInt(process.env.COWORK_SERVER_PORT || '8790', 10);
 // 监听地址:默认 0.0.0.0(客户端直连);上 TLS 反代时设 127.0.0.1,让 caddy/nginx
@@ -254,6 +255,7 @@ const server = http.createServer(async (req, res) => {
     const rctx = { uid, send, readBody, log, activity: ROUTINE_ACTIVITY, res };
     if (await routineApi.handleRoutines(req, url, rctx)) return;
     if (await routineApi.handleTranscript(req, url, rctx)) return;
+    if (await pptApi.handlePpt(req, url, rctx)) return;
 
     send(404, { error: 'not found' });
   } catch (e) { log('req error', e.message); send(500, { error: String(e.message || e) }); }
@@ -386,5 +388,8 @@ catch (e) {
   log('!!! routine scheduler FAILED TO START — 定时任务不会触发:', e.message);
   log('!!! 检查 COWORK_STATE_DIR 是否存在且属于服务用户 (默认 /data/cowork-state)');
 }
+
+try { pptApi.recoverPptJobs(ROUTINE_ACTIVITY, log); }
+catch (e) { log('!!! PPT job recovery failed:', e.message); }
 
 for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => { clearInterval(pinger); clearInterval(reaper); routineSched.stop(); server.close(); process.exit(0); });

@@ -44,6 +44,7 @@
 
 | 文件 | 主题 | 状态 |
 |------|------|------|
+| active/ppt-workspace.md | 办公区 PPT Workspace：M1 远程生成；M2 输入/治理；M3 版本/模板；M4 丰富编辑；M5 `review → repair → publish`、九类版式、模板字体、有界并行 DAG 与整稿评审 | M1–M5 本地实现并通过本地门禁；真实 Cowork/跨设备、容器 PDF 和安装包验收待补 |
 | completed/cowork-scheduled-routines.md | **沙箱定时任务（服务端调度·对标 Claude Routines）**：定时任务跑在公司沙箱服务器，关掉客户端也运行；客户端只做管理/拉取/展示。routineId 直接当 sid 用（自动获得独立容器+持久 volume，orchestrator 零改动）；凭证走 RD4-C 且**单独用 APP_COWORK_INTERNAL_SECRET**（不复用 COWORK_AUTH_SECRET，防沙箱失陷升级为全员 key 泄露）；运行仍物化成 chat_sessions 复用渲染，但**办公列表加 routine_id IS NULL 排除**，靠三层面包屑导航进入。P9 生产端到端全绿（调度器自主触发、审计链六事件归属正确、产物落卷、删除连带清卷） | ✅ P0-P9 全部完成（2026-08-10） |
 | active/context-usage-accuracy-overhaul.md | **上下文用量计算正确性改造**：四类根因（权威分子交付链断裂 / fallback 被 sidechain 污染 / UI 与压缩分母双轨分叉致 managed 1M 误压缩 / 压缩估算脱离真实 resume 上下文）→ 五 Phase：探针结果回合末拉取闭环 + sidechain 过滤 → 分母单一 resolver → resume 路径压缩权威交给 CLI auto-compact → 明细分类真实化（探针 categories 落库）+ source 徽标 → 回归与观测；决策点 D1 分母 live 优先 / D2 压缩二选一 / D3 cowork 探针缓做（均已拍板） | **Phase 1-5 全部完成**（c8d1109→560c7bf，6 commits，dev 态验证 2767 单测 + 冒烟 17/17 + CDP）；4A 明细分类经实测**改为不做**（探针临时 HOME 无配置，分类非真实构成）；剩打包态验收 / Windows slug / 办公沙箱盲区（另立项） |
 | active/cowork-usage-admin.md | **沙箱使用情况管理后台**:审计入库(exec_end 补全 + 惰性增量拉取 + fileId 截断容错)→ PG 统计(用户/会话/成功率,JOIN users 换人名)→ admin web「沙箱用量」页;admin 可删会话/看下载产物(UD2/UD3),动作写 admin_* 审计回流留痕;`__admin__` HMAC 鉴权零新密钥 | P0-P2 完成;沙箱侧已上线;账号后端待用户部署(pull+migrate+build) |
@@ -90,6 +91,7 @@
 
 | 文件 | 主题 | 完成日期 |
 |------|------|----------|
+| completed/ppt-structured-artifact.md | PPT Structured Artifact Runtime：稳定 IR、持久 Run/DAG/Event、SSE、共享 Render Tree、Command Journal、对象编辑器、增量发布与外部 PPTX 保守编辑 | 2026-09-20 |
 | completed/skills-store-internal.md | **技能市场（内部）**：Skills 页第三 tab 接 codeagent-server Skills 商店 BFF（acb6240）；主进程 IPC 持 token、yauzl 安装事务（zip 三重守卫/原子落位/台账自愈/串行化）、错误码分支 UI、「我的技能」互通（顺修 installed 删除残留 bug）；假 JWKS+假 Hub 真实链路 26 断言全过 | 2026-07-28 |
 | completed/cowork-remote-container.md | **Cowork 远程容器沙箱(R 系列,取代本地 VM)**:RD1-RD8 八决策(全平台统一远程/单公司服务器账号下发/凭证代理 sidecar/无状态 HMAC+禁内网放公网/粒度=归属隔离容器仍 per 会话);R0 POC→R1 控制面+CoworkBackend→R2 文件通道(helper 直读持久 volume)→R3 凭证代理(真 key 不进 agent 容器)→R4 多用户 authz/配额 TTL/出网禁内网→R5 打包版实测+部署包(install.sh+systemd 双单元+TLS 预留)+运维手册+账号下发客户端全链+Windows 平台 gate。剩:Win 真机实测/账号后端接口/裸金属迁移三件套(见文档头) | 2026-07-17 |
 | completed/cowork-p3-security.md | **Cowork P3 安全强化**:凭证不进 VM(宿主代理注入一次性 token,NAT 网关方案)+ 每会话非特权用户(setuid 降权,会话间不可越权互读)+ 宿主侧安全审计;明确不做出网白名单(用户接受 agent 自由上网) | 2026-07-15 |
