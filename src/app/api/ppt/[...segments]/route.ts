@@ -11,9 +11,10 @@ async function proxy(request: Request, context: Context) {
   const objectId = /^[a-zA-Z0-9_-]{1,80}$/;
   const legacyProject = segments[0] === 'projects' && segments.length <= 3 &&
     (segments.length === 1 || segments[1] === 'bulk' || projectId.test(segments[1])) &&
-    (segments.length < 3 || (segments[1] !== 'bulk' && ['outline', 'generate', 'retry', 'export', 'pdf', 'source', 'duplicate', 'trash', 'restore', 'permanent', 'versions', 'rewrite'].includes(segments[2])));
+    (segments.length < 3 || (segments[1] !== 'bulk' && ['outline', 'generate', 'retry', 'export', 'pdf', 'source', 'duplicate', 'trash', 'restore', 'permanent', 'versions', 'rewrite', 'blank'].includes(segments[2])));
   const structuredProject = segments[0] === 'projects' && projectId.test(segments[1] || '') && (
     (segments.length === 3 && ['run', 'events', 'commands', 'undo', 'redo', 'publish', 'revisions', 'ai-edit'].includes(segments[2])) ||
+    (segments.length === 4 && segments[2] === 'preview' && /^[a-zA-Z0-9_-]{1,80}\.svg$/.test(segments[3])) ||
     (segments.length === 5 && segments[2] === 'revisions' && /^\d+$/.test(segments[3]) && segments[4] === 'restore') ||
     (segments.length === 5 && segments[2] === 'slides' && objectId.test(segments[3]) && segments[4] === 'preview')
   );
@@ -32,7 +33,10 @@ async function proxy(request: Request, context: Context) {
   const token = getSetting('cowork_remote_token')?.trim();
   if (!base || !token) return Response.json({ error: 'Cowork sandbox is not provisioned' }, { status: 503 });
   try {
-    const upstream = await fetch(`${base}/ppt/${segments.join('/')}${request.url.includes('?') ? new URL(request.url).search : ''}`, {
+    const legacyPreview = segments.length === 4 && segments[0] === 'projects' && segments[2] === 'preview' && segments[3].endsWith('.svg');
+    const upstreamSegments = legacyPreview ? ['projects', segments[1], 'slides', segments[3].slice(0, -4), 'preview'] : segments;
+    const search = legacyPreview ? '?format=svg' : (request.url.includes('?') ? new URL(request.url).search : '');
+    const upstream = await fetch(`${base}/ppt/${upstreamSegments.join('/')}${search}`, {
       method: request.method,
       headers: {
         authorization: `Bearer ${token}`,

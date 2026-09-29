@@ -8,7 +8,7 @@ export async function publishProject(uid, projectId, deps) {
   const reviewed = reviewProject(project);
   project = reviewed.project;
   if (project.externalPptx) {
-    reviewed.deterministic.issues = reviewed.deterministic.issues.filter(issue => ['render_overflow', 'minimum_font_size', 'font_template', 'font_cjk_coverage'].includes(issue.code));
+    reviewed.deterministic.issues = reviewed.deterministic.issues.filter(issue => ['render_overflow', 'minimum_font_size', 'font_template', 'font_cjk_coverage', 'font_invalid_character'].includes(issue.code));
     reviewed.deterministic.hardErrors = reviewed.deterministic.issues.filter(issue => issue.severity === 'error').length;
   }
   project.quality = { ...(project.quality || {}), deterministic: reviewed.deterministic,

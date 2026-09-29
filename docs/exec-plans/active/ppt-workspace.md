@@ -1,11 +1,23 @@
 # 办公区 PPT Workspace 开发计划（M1–M5 本地实现）
 
 > 创建时间：2026-09-18
-> 最后更新：2026-09-19
-> 状态：M1–M5 代码已在本地实现并通过本地门禁；真实 Cowork 部署验收待补。下文原始 Phase 清单同时保留规划记录，不代表远端均已验收。
+> 最后更新：2026-09-20
+> 状态：M1–M5 代码已在本地实现并通过本地门禁；PPTX 媒体与中文字体保真加固复核已完成；真实 Cowork 部署验收待补。下文原始 Phase 清单同时保留规划记录，不代表远端均已验收。
 > 输入：[交互原型](../../../../prototype.html)、[需求文档](../../../../requirement.md)、[Gamma 架构分析](../../../../gamma.md)。三份输入位于仓库父目录，实施时不要把原型中的模拟数据、定时器和假导出当成生产逻辑。
 
 ## 0. 一页结论
+
+### 2026-09-20 PPTX 媒体与中文字体保真加固（本地完成）
+
+1. **模板包结构保真**：定位并修复 PPTX round-trip 重写图片节点、SVG/PNG fallback 与 relationship 的问题；最终产物以原始模板包为基底，只移植文字形状的 `p:txBody`，避免 PowerPoint 选择被重写的白色 SVG 分支。
+2. **生成字体保真**：PPTX 文本 run 同时保留模板 Latin 字体和明确的 East Asian 字体；中文 run 写入 `a:ea` 与 `zh-CN`，导出后解析 OOXML 并拒绝缺少东亚字体或含替换字符的产物。
+3. **导入编辑保真**：外部 PPTX 的对象级编辑在修改中文后补齐东亚字体，同时扫描文字形状和表格单元格，避免继承不支持中文的原字体。
+4. **预览与发布一致性**：PDF 渲染按文字脚本选择模板的 East Asian 字体；质量门禁覆盖 native text、表格和嵌套节点，并将 Unicode 替换字符作为发布硬错误。
+5. **回归验证**：补充生成、外部 PPTX 编辑、字体 fallback、质量门禁和示例文件的包级测试；运行 M1–M5 PPT 自测与全仓测试，记录无法在本机完成的真实 Cowork/PowerPoint 验收边界。
+
+复核发现：v5 虽已恢复全部模板媒体字节，但 Artifact Tool round-trip 还重写了图片 shape ID、relationship ID/target，以及 SVG 与 PNG fallback 的 OOXML 结构。Artifact Tool 预览使用 PNG fallback，因此预览正常；Microsoft PowerPoint 会解析被改写的 SVG 分支，所以第 2、3、6、7 页仍显示白色方框。最终修复不再把 round-trip 产物作为包基底：构建器先生成受控文字，再以原始 Gamma 模板 PPTX 为最终包，只按稳定 shape ID/name 移植 slide 与 notes 的 `p:txBody`。图片、SVG fallback、relationship、几何、层级、主题和嵌入字体全部保持模板原样；同时清理原模板中指向不存在 slide master 的 9 条陈旧 Content Types 声明，避免包校验误报且不改变视觉。
+
+v6 包级验证结果：全部媒体字节一致、全部 relationship 字节一致、全部图片节点一致、除文字体以外的 slide/notes XML 一致，Unicode 替换字符为 0；PPTX 包检查 0 finding，401 个文本脚本片段通过字体策略。另用本机 **Microsoft PowerPoint 原生打开 v6 并导出 PDF**，逐页渲染复核 10 页，第 2、3、6、7 页均无白色方框。这次验证覆盖 PowerPoint 实际解析路径，不再以 Artifact Tool 预览代替客户端验收。
 
 ### 2026-09-19 M5 质量门禁执行计划（本地完成）
 

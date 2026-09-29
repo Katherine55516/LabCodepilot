@@ -1,33 +1,772 @@
-'use client';
-/* eslint-disable @next/next/no-img-element -- IR images are local data URLs rendered inside the editor canvas. */
+"use client";
+/* eslint-disable @next/next/no-img-element -- Presentation IR images are bounded local data URLs. */
 
-import { useRef, useState } from 'react';
-import { useTranslation } from '@/hooks/useTranslation';
-import type { PptBounds, PptRenderElement, PptRenderSlide } from '../types';
+import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "@/hooks/useTranslation";
+import type { PptBounds, PptRenderElement, PptRenderSlide } from "../types";
 
-function ElementContent({ element }: { element: PptRenderElement }) {
-  const { t } = useTranslation();
-  const style = { color: element.style?.color, fontFamily: element.style?.eastAsiaFontFamily || element.style?.fontFamily, fontSize: `${(element.style?.fontSizePt || 18) / 10}vw`, fontWeight: element.style?.fontWeight };
-  if (element.kind === 'text') return <div className="h-full overflow-hidden whitespace-pre-wrap" style={style}>{element.content?.text}</div>;
-  if (['list', 'timeline', 'metric'].includes(element.kind)) return <div className="h-full overflow-hidden" style={style}>{element.content?.items?.map((item, index) => <div key={item.id}>{element.kind === 'timeline' ? `${index + 1}. ` : element.kind === 'list' ? '• ' : ''}{item.text}</div>)}</div>;
-  if (element.kind === 'image' && element.content?.dataUrl) return <img src={element.content.dataUrl} alt="" className="h-full w-full object-contain" />;
-  if (element.kind === 'table') return <div className="grid h-full place-items-center overflow-hidden text-xs">{t('ppt.structured.tableRows', { count: element.content?.rows?.length || 0 })}</div>;
-  if (element.kind === 'chart') return <div className="grid h-full place-items-center overflow-hidden text-xs">{t('ppt.structured.chartItems', { count: element.content?.labels?.length || 0 })}</div>;
-  return <div className="grid h-full place-items-center overflow-hidden text-xs">{element.content?.text || element.kind}</div>;
+type GeometryChange = { element: PptRenderElement; bounds: PptBounds };
+type ResizeHandle = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w";
+type DragState = {
+  mode: "move" | "resize" | "rotate" | "marquee";
+  startX: number;
+  startY: number;
+  handle?: ResizeHandle;
+  element?: PptRenderElement;
+  elements?: { element: PptRenderElement; bounds: PptBounds }[];
+  bounds?: PptBounds;
+  rotation?: number;
+};
+
+const handles: { id: ResizeHandle; className: string }[] = [
+  { id: "nw", className: "-left-1.5 -top-1.5 cursor-nwse-resize" },
+  { id: "n", className: "left-1/2 -top-1.5 -translate-x-1/2 cursor-ns-resize" },
+  { id: "ne", className: "-right-1.5 -top-1.5 cursor-nesw-resize" },
+  {
+    id: "e",
+    className: "-right-1.5 top-1/2 -translate-y-1/2 cursor-ew-resize",
+  },
+  { id: "se", className: "-bottom-1.5 -right-1.5 cursor-nwse-resize" },
+  {
+    id: "s",
+    className: "-bottom-1.5 left-1/2 -translate-x-1/2 cursor-ns-resize",
+  },
+  { id: "sw", className: "-bottom-1.5 -left-1.5 cursor-nesw-resize" },
+  { id: "w", className: "-left-1.5 top-1/2 -translate-y-1/2 cursor-ew-resize" },
+];
+
+const clamp = (value: number, min: number, max: number) =>
+  Math.max(min, Math.min(max, value));
+const intersects = (a: PptBounds, b: PptBounds) =>
+  a.x < b.x + b.width &&
+  a.x + a.width > b.x &&
+  a.y < b.y + b.height &&
+  a.y + a.height > b.y;
+
+function Chart({ element }: { element: PptRenderElement }) {
+  const labels = element.content?.labels || [];
+  const values = element.content?.values || [];
+  const max = Math.max(...values.map((value) => Math.abs(value)), 1);
+  const type = (element.content as { chartType?: string })?.chartType || "bar";
+  if (type === "pie") {
+    const total =
+      values.reduce((sum, value) => sum + Math.max(0, value), 0) || 1;
+    const stops = values.reduce<{ offset: number; values: string[] }>(
+      (result, value, index) => {
+        const end = result.offset + (Math.max(0, value) / total) * 100;
+        return {
+          offset: end,
+          values: [
+            ...result.values,
+            `hsl(${index * 67} 65% 55%) ${result.offset}% ${end}%`,
+          ],
+        };
+      },
+      { offset: 0, values: [] },
+    ).values;
+    return (
+      <div className="flex h-full items-center justify-center gap-3 p-2">
+        <div
+          className="aspect-square h-4/5 rounded-full"
+          style={{ background: `conic-gradient(${stops.join(",")})` }}
+        />
+        <div className="max-w-[45%] space-y-1 overflow-hidden text-[10px]">
+          {labels.map((label, index) => (
+            <div className="truncate" key={index}>
+              {label}: {values[index]}
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+  if (type === "line") {
+    const points = values
+      .map(
+        (value, index) =>
+          `${labels.length <= 1 ? 50 : (index / (labels.length - 1)) * 100},${90 - (value / max) * 75}`,
+      )
+      .join(" ");
+    return (
+      <svg viewBox="0 0 100 100" className="h-full w-full overflow-visible p-2">
+        <polyline
+          points={points}
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="3"
+        />
+        {values.map((value, index) => (
+          <circle
+            key={index}
+            cx={labels.length <= 1 ? 50 : (index / (labels.length - 1)) * 100}
+            cy={90 - (value / max) * 75}
+            r="2.5"
+            fill="currentColor"
+          />
+        ))}
+      </svg>
+    );
+  }
+  return (
+    <div className="flex h-full items-end justify-around gap-1 p-2">
+      {values.map((value, index) => (
+        <div
+          key={index}
+          className="flex h-full min-w-0 flex-1 flex-col justify-end text-center text-[9px]"
+        >
+          <span className="truncate">{value}</span>
+          <div
+            className="mx-auto w-4/5 rounded-t bg-current opacity-70"
+            style={{ height: `${Math.max(3, (Math.abs(value) / max) * 70)}%` }}
+          />
+          <span className="truncate">{labels[index]}</span>
+        </div>
+      ))}
+    </div>
+  );
 }
 
-export function PptCanvas({ slide, selectedId, onSelect, onGeometry }: { slide: PptRenderSlide; selectedId: string | null; onSelect: (id: string | null) => void; onGeometry: (element: PptRenderElement, bounds: PptBounds) => void }) {
+function ElementContent({
+  element,
+  scale,
+  editing,
+  onEdit,
+  onCommit,
+}: {
+  element: PptRenderElement;
+  scale: number;
+  editing: boolean;
+  onEdit: () => void;
+  onCommit: (text: string) => void;
+}) {
+  const textStyle = {
+    color: element.style?.color,
+    fontFamily: element.style?.eastAsiaFontFamily || element.style?.fontFamily,
+    // The canvas is 960 px wide for a 13.333 in slide: 72 px/in, so one
+    // PowerPoint point maps to one canvas pixel before responsive scaling.
+    fontSize: `${Math.max(6, (element.style?.fontSizePt || 18) * scale)}px`,
+    fontWeight: element.style?.fontWeight,
+    fontStyle: element.style?.fontStyle,
+    textAlign: element.style?.textAlign as
+      "left" | "center" | "right" | undefined,
+    lineHeight: element.style?.lineHeight,
+    letterSpacing: element.style?.letterSpacing
+      ? `${element.style.letterSpacing}px`
+      : undefined,
+    opacity: element.style?.opacity ?? 1,
+  };
+  const text =
+    element.kind === "text"
+      ? element.content?.text || ""
+      : (element.content?.items || []).map((item) => item.text).join("\n");
+  if (editing && !element.content?.pointLayout && ["text", "list", "timeline", "metric"].includes(element.kind))
+    return (
+      <textarea
+        autoFocus
+        defaultValue={text}
+        className="h-full w-full resize-none bg-transparent outline-none"
+        style={textStyle}
+        onClick={(event) => event.stopPropagation()}
+        onBlur={(event) => onCommit(event.currentTarget.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") event.currentTarget.blur();
+        }}
+      />
+    );
+  if (element.kind === "text")
+    return (
+      <div
+        className="h-full overflow-hidden whitespace-pre-wrap"
+        style={textStyle}
+        onDoubleClick={onEdit}
+      >
+        {element.content?.text}
+      </div>
+    );
+  if (["list", "timeline", "metric"].includes(element.kind))
+    return (
+      <div
+        className="relative h-full overflow-hidden"
+        style={textStyle}
+        onDoubleClick={element.content?.pointLayout ? undefined : onEdit}
+      >
+        {element.kind === "list" && element.content?.pointLayout?.boxes &&
+          element.content.items?.map((item, index) => {
+            const box = element.content?.pointLayout?.boxes[index];
+            if (!box) return null;
+            const parts = item.heading || item.body
+              ? { heading: item.heading || "", body: item.body || "" }
+              : item.text.includes("\n")
+                ? { heading: item.text.split("\n")[0], body: item.text.split("\n").slice(1).join("\n") }
+                : { heading: "", body: item.text };
+            return <div key={item.id} className="absolute overflow-hidden rounded-md border border-current/20 p-2"
+              style={{ left: `${box.x * 100}%`, top: `${box.y * 100}%`, width: `${box.w * 100}%`, height: `${box.h * 100}%`,
+                fontSize: `${(element.content?.pointLayout?.fontSizePt || 17) * scale}px` }}>
+              {parts.heading && <div className="mb-1 font-semibold">{parts.heading}</div>}
+              <div className="whitespace-pre-wrap">{parts.body}</div>
+            </div>;
+          })}
+        {!element.content?.pointLayout && element.content?.items?.map((item, index) => (
+          <div key={item.id}>
+            {element.kind === "timeline"
+              ? `${index + 1}. `
+              : element.kind === "list"
+                ? "• "
+                : ""}
+            {item.text}
+          </div>
+        ))}
+      </div>
+    );
+  if (element.kind === "image" && element.content?.dataUrl)
+    return (() => {
+      const crop = element.content?.crop || [0, 0, 0, 0];
+      const [left, top, right, bottom] = crop.map((value) => Math.max(0, Math.min(0.95, Number(value) || 0)));
+      const width = 100 / Math.max(0.01, 1 - left - right);
+      const height = 100 / Math.max(0.01, 1 - top - bottom);
+      return <div className="relative h-full w-full overflow-hidden"><img
+        src={element.content!.dataUrl}
+        alt={element.content!.text || ""}
+        className="absolute max-w-none"
+        style={{ width: `${width}%`, height: `${height}%`, left: `${-left * width}%`, top: `${-top * height}%` }}
+        draggable={false}
+      /></div>;
+    })();
+  if (element.kind === "table")
+    return (
+      <table className="h-full w-full table-fixed border-collapse text-[10px]">
+        <tbody>
+          {(element.content?.rows || []).map((row, rowIndex) => (
+            <tr key={rowIndex}>
+              {row.map((cell, columnIndex) => (
+                <td
+                  key={columnIndex}
+                  className={`border border-current/30 p-1 ${rowIndex === 0 ? "bg-current/10 font-semibold" : ""}`}
+                >
+                  {cell}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    );
+  if (element.kind === "chart") return <Chart element={element} />;
+  return (
+    <div className="grid h-full place-items-center overflow-hidden text-xs">
+      {element.content?.text || ""}
+    </div>
+  );
+}
+
+function resized(
+  start: PptBounds,
+  handle: ResizeHandle,
+  dx: number,
+  dy: number,
+  size: PptRenderSlide["size"],
+): PptBounds {
+  const min = 91440;
+  let { x, y, width, height } = start;
+  if (handle.includes("e"))
+    width = clamp(start.width + dx, min, size.width - x);
+  if (handle.includes("s"))
+    height = clamp(start.height + dy, min, size.height - y);
+  if (handle.includes("w")) {
+    const next = clamp(start.x + dx, 0, start.x + start.width - min);
+    width += x - next;
+    x = next;
+  }
+  if (handle.includes("n")) {
+    const next = clamp(start.y + dy, 0, start.y + start.height - min);
+    height += y - next;
+    y = next;
+  }
+  return {
+    x: Math.round(x),
+    y: Math.round(y),
+    width: Math.round(width),
+    height: Math.round(height),
+  };
+}
+
+export function PptCanvas({
+  slide,
+  selectedIds,
+  onSelect,
+  onSelectMany,
+  onGeometry,
+  onRotation,
+  onContent,
+  onAction,
+  allowStructure = true,
+  readOnly = false,
+}: {
+  slide: PptRenderSlide;
+  selectedIds: string[];
+  onSelect: (id: string | null, additive?: boolean) => void;
+  onSelectMany: (ids: string[]) => void;
+  onGeometry: (changes: GeometryChange[]) => void;
+  onRotation: (element: PptRenderElement, rotation: number) => void;
+  onContent: (element: PptRenderElement, text: string) => void;
+  onAction: (
+    action: "delete" | "duplicate" | "lock" | "front" | "back" | "ai",
+    element: PptRenderElement,
+  ) => void;
+  allowStructure?: boolean;
+  readOnly?: boolean;
+}) {
+  const { t } = useTranslation();
   const root = useRef<HTMLDivElement>(null);
+  const [scale, setScale] = useState(1);
   const [draft, setDraft] = useState<Record<string, PptBounds>>({});
-  const drag = useRef<{ element: PptRenderElement; mode: 'move' | 'resize'; startX: number; startY: number; bounds: PptBounds } | null>(null);
-  const pct = (value: number, total: number) => `${value / total * 100}%`;
-  return <div ref={root} className="relative aspect-video w-full overflow-hidden rounded-lg border border-border shadow-sm" style={{ background: slide.background || '#fff' }} onPointerMove={event => {
+  const [draftRotation, setDraftRotation] = useState<Record<string, number>>(
+    {},
+  );
+  const draftRef = useRef<Record<string, PptBounds>>({});
+  const rotationRef = useRef<Record<string, number>>({});
+  const [guides, setGuides] = useState<{ x?: number; y?: number }>({});
+  const [marquee, setMarquee] = useState<PptBounds | null>(null);
+  const marqueeRef = useRef<PptBounds | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [menu, setMenu] = useState<{
+    x: number;
+    y: number;
+    element: PptRenderElement;
+  } | null>(null);
+  const drag = useRef<DragState | null>(null);
+  useEffect(() => {
+    if (!root.current) return;
+    const observer = new ResizeObserver((entries) =>
+      setScale(entries[0]?.contentRect.width / 960 || 1),
+    );
+    observer.observe(root.current);
+    return () => observer.disconnect();
+  }, []);
+  const pct = (value: number, total: number) => `${(value / total) * 100}%`;
+  const point = (event: React.PointerEvent) => {
+    const rect = root.current!.getBoundingClientRect();
+    return {
+      x: ((event.clientX - rect.left) / rect.width) * slide.size.width,
+      y: ((event.clientY - rect.top) / rect.height) * slide.size.height,
+      rect,
+    };
+  };
+  function snapMove(bounds: PptBounds, movingIds: Set<string>) {
+    const threshold =
+      (slide.size.width * 6) / Math.max(1, root.current?.clientWidth || 960);
+    let x = clamp(bounds.x, 0, slide.size.width - bounds.width);
+    let y = clamp(bounds.y, 0, slide.size.height - bounds.height);
+    const xTargets = [0, slide.size.width / 2, slide.size.width];
+    const yTargets = [0, slide.size.height / 2, slide.size.height];
+    for (const element of slide.elements)
+      if (!movingIds.has(element.id)) {
+        xTargets.push(
+          element.bounds.x,
+          element.bounds.x + element.bounds.width / 2,
+          element.bounds.x + element.bounds.width,
+        );
+        yTargets.push(
+          element.bounds.y,
+          element.bounds.y + element.bounds.height / 2,
+          element.bounds.y + element.bounds.height,
+        );
+      }
+    const xPoints = [
+      { value: x, offset: 0 },
+      { value: x + bounds.width / 2, offset: bounds.width / 2 },
+      { value: x + bounds.width, offset: bounds.width },
+    ];
+    const yPoints = [
+      { value: y, offset: 0 },
+      { value: y + bounds.height / 2, offset: bounds.height / 2 },
+      { value: y + bounds.height, offset: bounds.height },
+    ];
+    let guideX: number | undefined;
+    let guideY: number | undefined;
+    outerX: for (const target of xTargets)
+      for (const candidate of xPoints)
+        if (Math.abs(target - candidate.value) <= threshold) {
+          x = target - candidate.offset;
+          guideX = target;
+          break outerX;
+        }
+    outerY: for (const target of yTargets)
+      for (const candidate of yPoints)
+        if (Math.abs(target - candidate.value) <= threshold) {
+          y = target - candidate.offset;
+          guideY = target;
+          break outerY;
+        }
+    setGuides({ x: guideX, y: guideY });
+    return {
+      ...bounds,
+      x: Math.round(clamp(x, 0, slide.size.width - bounds.width)),
+      y: Math.round(clamp(y, 0, slide.size.height - bounds.height)),
+    };
+  }
+  function startMove(event: React.PointerEvent, element: PptRenderElement) {
+    if (readOnly || element.locked) return;
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const selected = selectedIds.includes(element.nodeId || "")
+      ? selectedIds
+      : [element.nodeId!];
+    if (!selectedIds.includes(element.nodeId || "")) onSelect(element.nodeId);
+    const group = element.groupId
+      ? slide.elements.filter(
+          (item) => item.groupId === element.groupId && item.nodeId,
+        )
+      : [];
+    const ids = new Set(
+      group.length ? group.map((item) => item.nodeId!) : selected,
+    );
+    const elements = slide.elements
+      .filter((item) => item.nodeId && ids.has(item.nodeId) && !item.locked)
+      .map((item) => ({
+        element: item,
+        bounds: draft[item.id] || item.bounds,
+      }));
+    drag.current = {
+      mode: "move",
+      startX: event.clientX,
+      startY: event.clientY,
+      element,
+      elements,
+    };
+  }
+  function pointerMove(event: React.PointerEvent) {
     if (!drag.current || !root.current) return;
-    const rect = root.current.getBoundingClientRect(); const dx = (event.clientX - drag.current.startX) / rect.width * slide.size.width; const dy = (event.clientY - drag.current.startY) / rect.height * slide.size.height;
-    setDraft(current => ({ ...current, [drag.current!.element.id]: drag.current!.mode === 'move'
-      ? { ...drag.current!.bounds, x: Math.round(drag.current!.bounds.x + dx), y: Math.round(drag.current!.bounds.y + dy) }
-      : { ...drag.current!.bounds, width: Math.max(91440, Math.round(drag.current!.bounds.width + dx)), height: Math.max(91440, Math.round(drag.current!.bounds.height + dy)) } }));
-  }} onPointerUp={() => { if (!drag.current) return; const current = draft[drag.current.element.id]; if (current) onGeometry(drag.current.element, current); drag.current = null; }} onPointerLeave={() => { drag.current = null; }}>
-    {slide.elements.map(element => { const b = draft[element.id] || element.bounds; const movable = Boolean(element.nodeId && element.id === element.nodeId && !element.locked); return <button type="button" key={element.id} data-node-id={element.nodeId || undefined} onClick={event => { event.stopPropagation(); if (element.nodeId) onSelect(element.nodeId); }} onPointerDown={event => { if (!movable) return; event.currentTarget.setPointerCapture(event.pointerId); drag.current = { element, mode: 'move', startX: event.clientX, startY: event.clientY, bounds: b }; }} className={`absolute overflow-hidden text-left ${selectedId === element.nodeId ? 'ring-2 ring-primary' : ''} ${movable ? 'cursor-move' : 'cursor-default'}`} style={{ left: pct(b.x, slide.size.width), top: pct(b.y, slide.size.height), width: pct(b.width, slide.size.width), height: pct(b.height, slide.size.height), zIndex: element.zIndex, background: element.kind === 'shape' ? element.style?.fill : undefined }}><ElementContent element={element} />{movable && selectedId === element.nodeId && <span className="absolute bottom-0 right-0 h-3 w-3 cursor-se-resize bg-primary" onPointerDown={event => { event.stopPropagation(); drag.current = { element, mode: 'resize', startX: event.clientX, startY: event.clientY, bounds: b }; }} />}</button>; })}
-  </div>;
+    const rect = root.current.getBoundingClientRect();
+    const dx =
+      ((event.clientX - drag.current.startX) / rect.width) * slide.size.width;
+    const dy =
+      ((event.clientY - drag.current.startY) / rect.height) * slide.size.height;
+    if (drag.current.mode === "marquee") {
+      const origin = {
+        x: ((drag.current.startX - rect.left) / rect.width) * slide.size.width,
+        y: ((drag.current.startY - rect.top) / rect.height) * slide.size.height,
+      };
+      const current = point(event);
+      const next = {
+        x: Math.min(origin.x, current.x),
+        y: Math.min(origin.y, current.y),
+        width: Math.abs(current.x - origin.x),
+        height: Math.abs(current.y - origin.y),
+      };
+      marqueeRef.current = next;
+      setMarquee(next);
+      return;
+    }
+    if (drag.current.mode === "move" && drag.current.elements?.length) {
+      const ids = new Set(drag.current.elements.map((item) => item.element.id));
+      const primary =
+        drag.current.elements.find(
+          (item) => item.element.id === drag.current!.element!.id,
+        ) || drag.current.elements[0];
+      const snapped = snapMove(
+        {
+          ...primary.bounds,
+          x: primary.bounds.x + dx,
+          y: primary.bounds.y + dy,
+        },
+        ids,
+      );
+      const adjustX = snapped.x - primary.bounds.x;
+      const adjustY = snapped.y - primary.bounds.y;
+      setDraft((current) => {
+        const next = {
+          ...current,
+          ...Object.fromEntries(
+            drag.current!.elements!.map((item) => [
+              item.element.id,
+              {
+                ...item.bounds,
+                x: Math.round(
+                  clamp(
+                    item.bounds.x + adjustX,
+                    0,
+                    slide.size.width - item.bounds.width,
+                  ),
+                ),
+                y: Math.round(
+                  clamp(
+                    item.bounds.y + adjustY,
+                    0,
+                    slide.size.height - item.bounds.height,
+                  ),
+                ),
+              },
+            ]),
+          ),
+        };
+        draftRef.current = next;
+        return next;
+      });
+      return;
+    }
+    if (
+      drag.current.mode === "resize" &&
+      drag.current.element &&
+      drag.current.bounds &&
+      drag.current.handle
+    )
+      setDraft((current) => {
+        const next = {
+          ...current,
+          [drag.current!.element!.id]: resized(
+            drag.current!.bounds!,
+            drag.current!.handle!,
+            dx,
+            dy,
+            slide.size,
+          ),
+        };
+        draftRef.current = next;
+        return next;
+      });
+    if (
+      drag.current.mode === "rotate" &&
+      drag.current.element &&
+      drag.current.bounds
+    ) {
+      const p = point(event);
+      const cx = drag.current.bounds.x + drag.current.bounds.width / 2;
+      const cy = drag.current.bounds.y + drag.current.bounds.height / 2;
+      setDraftRotation((current) => {
+        const next = {
+          ...current,
+          [drag.current!.element!.id]: Math.round(
+            (Math.atan2(p.y - cy, p.x - cx) * 180) / Math.PI + 90,
+          ),
+        };
+        rotationRef.current = next;
+        return next;
+      });
+    }
+  }
+  function pointerUp() {
+    const active = drag.current;
+    if (!active) return;
+    if (active.mode === "marquee" && marqueeRef.current)
+      onSelectMany(
+        slide.elements
+          .filter(
+            (element) =>
+              element.nodeId && intersects(element.bounds, marqueeRef.current!),
+          )
+          .map((element) => element.nodeId!),
+      );
+    if (active.mode === "move" && active.elements)
+      onGeometry(
+        active.elements.map((item) => ({
+          element: item.element,
+          bounds: draftRef.current[item.element.id] || item.bounds,
+        })),
+      );
+    if (active.mode === "resize" && active.element)
+      onGeometry([
+        {
+          element: active.element,
+          bounds: draftRef.current[active.element.id] || active.bounds!,
+        },
+      ]);
+    if (active.mode === "rotate" && active.element)
+      onRotation(
+        active.element,
+        rotationRef.current[active.element.id] ?? active.rotation ?? 0,
+      );
+    drag.current = null;
+    setGuides({});
+    setMarquee(null);
+    marqueeRef.current = null;
+  }
+  return (
+    <div
+      ref={root}
+      tabIndex={0}
+      className="relative aspect-video w-full select-none overflow-hidden rounded-lg border border-border shadow-sm outline-none"
+      style={{ background: slide.background || "#fff" }}
+      onClick={() => {
+        setMenu(null);
+        if (!readOnly) onSelect(null);
+      }}
+      onContextMenu={(event) => event.preventDefault()}
+      onPointerDown={(event) => {
+        if (readOnly || event.target !== event.currentTarget) return;
+        drag.current = {
+          mode: "marquee",
+          startX: event.clientX,
+          startY: event.clientY,
+        };
+        setMarquee(null);
+        marqueeRef.current = null;
+      }}
+      onPointerMove={pointerMove}
+      onPointerUp={pointerUp}
+    >
+      {slide.elements.map((element) => {
+        const b = draft[element.id] || element.bounds;
+        const nodeId = element.nodeId;
+        const selected = Boolean(nodeId && selectedIds.includes(nodeId));
+        const movable = Boolean(
+          nodeId && element.id === nodeId && !element.locked && !readOnly,
+        );
+        const rotation = draftRotation[element.id] ?? element.rotation ?? 0;
+        return (
+          <button
+            type="button"
+            key={element.id}
+            data-node-id={nodeId || undefined}
+            onClick={(event) => {
+              event.stopPropagation();
+              if (nodeId && !readOnly)
+                onSelect(
+                  nodeId,
+                  event.shiftKey || event.metaKey || event.ctrlKey,
+                );
+            }}
+            onDoubleClick={(event) => {
+              event.stopPropagation();
+              if (
+                nodeId &&
+                !element.locked &&
+                ["text", "list", "timeline", "metric"].includes(element.kind)
+              )
+                setEditingId(element.id);
+            }}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              if (nodeId && !readOnly) {
+                onSelect(nodeId);
+                setMenu({ x: event.clientX, y: event.clientY, element });
+              }
+            }}
+            onPointerDown={(event) => {
+              event.stopPropagation();
+              if (movable) startMove(event, element);
+            }}
+            className={`absolute overflow-visible text-left ${selected ? "ring-2 ring-primary" : ""} ${movable ? "cursor-move" : "cursor-default"}`}
+            style={{
+              left: pct(b.x, slide.size.width),
+              top: pct(b.y, slide.size.height),
+              width: pct(b.width, slide.size.width),
+              height: pct(b.height, slide.size.height),
+              zIndex: element.zIndex,
+              background:
+                element.kind === "shape" ? element.style?.fill : undefined,
+              borderRadius:
+                element.kind === "shape" &&
+                (element.content as { shape?: string })?.shape === "ellipse"
+                  ? "9999px"
+                  : undefined,
+              transform: `rotate(${rotation}deg)`,
+              opacity: element.style?.opacity ?? 1,
+            }}
+          >
+            <div className="h-full w-full overflow-hidden">
+              <ElementContent
+                element={element}
+                scale={scale}
+                editing={editingId === element.id}
+                onEdit={() => setEditingId(element.id)}
+                onCommit={(text) => {
+                  setEditingId(null);
+                  onContent(element, text);
+                }}
+              />
+            </div>
+            {movable && selected && selectedIds.length === 1 && (
+              <>
+                {handles.map((handle) => (
+                  <span
+                    key={handle.id}
+                    className={`absolute z-10 h-3 w-3 rounded-full border border-primary bg-background ${handle.className}`}
+                    onPointerDown={(event) => {
+                      event.stopPropagation();
+                      event.currentTarget.setPointerCapture(event.pointerId);
+                      drag.current = {
+                        mode: "resize",
+                        handle: handle.id,
+                        element,
+                        startX: event.clientX,
+                        startY: event.clientY,
+                        bounds: b,
+                      };
+                    }}
+                  />
+                ))}
+                {allowStructure && !["chart", "table"].includes(element.kind) && (
+                  <span
+                    className="absolute -top-7 left-1/2 z-10 h-5 w-5 -translate-x-1/2 cursor-grab rounded-full border border-primary bg-background"
+                    onPointerDown={(event) => {
+                      event.stopPropagation();
+                      event.currentTarget.setPointerCapture(event.pointerId);
+                      drag.current = {
+                        mode: "rotate",
+                        element,
+                        startX: event.clientX,
+                        startY: event.clientY,
+                        bounds: b,
+                        rotation,
+                      };
+                    }}
+                  />
+                )}
+              </>
+            )}
+          </button>
+        );
+      })}
+      {guides.x !== undefined && (
+        <span
+          className="pointer-events-none absolute bottom-0 top-0 z-[200] w-px bg-primary"
+          style={{ left: pct(guides.x, slide.size.width) }}
+        />
+      )}{" "}
+      {guides.y !== undefined && (
+        <span
+          className="pointer-events-none absolute left-0 right-0 z-[200] h-px bg-primary"
+          style={{ top: pct(guides.y, slide.size.height) }}
+        />
+      )}{" "}
+      {marquee && (
+        <span
+          className="pointer-events-none absolute z-[201] border border-primary bg-primary/10"
+          style={{
+            left: pct(marquee.x, slide.size.width),
+            top: pct(marquee.y, slide.size.height),
+            width: pct(marquee.width, slide.size.width),
+            height: pct(marquee.height, slide.size.height),
+          }}
+        />
+      )}
+      {menu && (
+        <div
+          className="fixed z-[300] min-w-40 rounded-lg border border-border bg-background p-1 text-xs shadow-xl"
+          style={{ left: menu.x, top: menu.y }}
+          onClick={(event) => event.stopPropagation()}
+        >
+          {(["duplicate", "delete", "lock", "front", "back", "ai"] as const)
+            .filter(
+              (action) =>
+                allowStructure || (!["duplicate", "delete", "front", "back"].includes(action)
+                  && !(menu.element.kind !== "text" && ["lock", "ai"].includes(action))),
+            )
+            .map((action) => (
+              <button
+                key={action}
+                className="block w-full rounded px-3 py-2 text-left hover:bg-accent"
+                onClick={() => {
+                  onAction(action, menu.element);
+                  setMenu(null);
+                }}
+              >
+                {t(`ppt.editor.context.${action}` as never)}
+              </button>
+            ))}
+        </div>
+      )}
+    </div>
+  );
 }

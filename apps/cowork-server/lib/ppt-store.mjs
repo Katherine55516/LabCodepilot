@@ -4,6 +4,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { gzipSync, gunzipSync } from 'node:zlib';
 
 const ROOT = path.join(process.env.COWORK_STATE_DIR || '/data/cowork-state', 'ppt');
 const ID = /^[a-f0-9]{32}$/;
@@ -18,6 +19,18 @@ function projectId(id) {
   return id;
 }
 function file(uid, id) { return path.join(ROOT, owner(uid), `${projectId(id)}.json`); }
+function compressedFile(uid, id) { return `${file(uid, id)}.gz`; }
+const MEDIA_REF = '__pptStoredMediaRef';
+function reviveStoredMedia(value, assets) {
+  if (!value || typeof value !== 'object') return value;
+  if (Object.keys(value).length === 1 && Object.hasOwn(value, MEDIA_REF)) {
+    const media = assets[value[MEDIA_REF]];
+    if (typeof media !== 'string') throw new Error('PPT snapshot media reference is missing');
+    return media;
+  }
+  for (const [key, child] of Object.entries(value)) value[key] = reviveStoredMedia(child, assets);
+  return value;
+}
 function sourceFile(uid, id) { return path.join(ROOT, owner(uid), 'sources', `${projectId(id)}.bin`); }
 function foldersFile(uid) { return path.join(ROOT, owner(uid), '_folders.json'); }
 function templatesFile(uid) { return path.join(ROOT, owner(uid), '_templates.json'); }
@@ -30,8 +43,13 @@ function inputFile(uid, id, kind) {
 export function newId() { return crypto.randomBytes(16).toString('hex'); }
 
 export function get(uid, id) {
-  const target = file(uid, id);
-  try { return JSON.parse(fs.readFileSync(target, 'utf8')); }
+  const compressed = compressedFile(uid, id);
+  const target = fs.existsSync(compressed) ? compressed : file(uid, id);
+  try {
+    const bytes = fs.readFileSync(target);
+    const parsed = JSON.parse(target === compressed ? gunzipSync(bytes).toString('utf8') : bytes.toString('utf8'));
+    return parsed?.__pptStorageVersion === 1 ? reviveStoredMedia(parsed.project, parsed.assets || {}) : parsed;
+  }
   catch (error) {
     if (error?.code === 'ENOENT') return null;
     throw error;
@@ -43,19 +61,37 @@ export function list(uid) {
   let names;
   try { names = fs.readdirSync(dir); }
   catch (error) { if (error?.code === 'ENOENT') return []; throw error; }
-  return names.filter((name) => ID.test(name.slice(0, -5)) && name.endsWith('.json'))
-    .map((name) => get(uid, name.slice(0, -5))).filter(Boolean)
+  return [...new Set(names.flatMap(name => {
+    const match = name.match(/^([a-f0-9]{32})\.json(?:\.gz)?$/);
+    return match ? [match[1]] : [];
+  }))].map(id => get(uid, id)).filter(Boolean)
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 
-export function save(project) {
-  const target = file(project.uid, project.id);
-  fs.mkdirSync(path.dirname(target), { recursive: true });
+export function save(project, { touch = true } = {}) {
+  const plain = file(project.uid, project.id);
+  const compressed = compressedFile(project.uid, project.id);
+  fs.mkdirSync(path.dirname(plain), { recursive: true });
+  if (touch) project.updatedAt = new Date().toISOString();
+  const json = JSON.stringify(project);
+  const useGzip = Buffer.byteLength(json) > 2_000_000 || fs.existsSync(compressed);
+  const target = useGzip ? compressed : plain;
   const tmp = `${target}.${process.pid}.${crypto.randomBytes(4).toString('hex')}.tmp`;
-  project.updatedAt = new Date().toISOString();
   try {
-    fs.writeFileSync(tmp, JSON.stringify(project), { flag: 'wx', mode: 0o600 });
+    let output = json;
+    if (useGzip) {
+      const assetByValue = new Map(); const assets = {};
+      const reduced = JSON.stringify(project, (_key, value) => {
+        if (typeof value !== 'string' || !value.startsWith('data:image/') || value.length < 100) return value;
+        let id = assetByValue.get(value);
+        if (id === undefined) { id = String(assetByValue.size); assetByValue.set(value, id); assets[id] = value; }
+        return { [MEDIA_REF]: id };
+      });
+      output = JSON.stringify({ __pptStorageVersion: 1, assets }) .slice(0, -1) + ',"project":' + reduced + '}';
+    }
+    fs.writeFileSync(tmp, useGzip ? gzipSync(output, { level: 1 }) : output, { flag: 'wx', mode: 0o600 });
     fs.renameSync(tmp, target);
+    if (useGzip) fs.rmSync(plain, { force: true });
   } finally {
     try { fs.unlinkSync(tmp); } catch { /* renamed */ }
   }
@@ -73,6 +109,7 @@ export function readSource(uid, id) { return fs.readFileSync(sourceFile(uid, id)
 export function removeSource(uid, id) { fs.rmSync(sourceFile(uid, id), { force: true }); }
 export function remove(uid, id) {
   fs.rmSync(file(uid, id), { force: true });
+  fs.rmSync(compressedFile(uid, id), { force: true });
   removeSource(uid, id);
   for (const kind of ['base', 'progress']) fs.rmSync(inputFile(uid, id, kind), { force: true });
 }
@@ -126,6 +163,7 @@ export function writeTemplate(uid, id, bytes) {
   try { fs.writeFileSync(tmp, bytes, { flag: 'wx', mode: 0o600 }); fs.renameSync(tmp, target); }
   finally { try { fs.unlinkSync(tmp); } catch {} }
 }
+export function readTemplate(uid, id) { return fs.readFileSync(templateFile(uid, id)); }
 export function removeTemplate(uid, id) { fs.rmSync(templateFile(uid, id), { force: true }); }
 
 export function listPending() {

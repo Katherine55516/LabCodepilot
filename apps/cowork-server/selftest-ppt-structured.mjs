@@ -14,7 +14,7 @@ const [store, repo, ir, runs, events, commands, history, render, importer, struc
   import('./lib/ppt-render.mjs'), import('./lib/ppt/exporters/preview.mjs'),
 ]);
 const uid = 'structured-test'; const id = store.newId();
-const templateSpec = { fonts: { title: 'Arial', body: 'Arial', titleEastAsia: 'Arial', bodyEastAsia: 'Arial', cjkExplicit: true }, palette: { background: '#ffffff', accent: '#334155', foreground: '#111827', muted: '#475569' } };
+const templateSpec = { fonts: { title: 'Arial', body: 'Arial', titleEastAsia: 'Noto Sans CJK SC', bodyEastAsia: 'Noto Sans CJK SC', cjkExplicit: true }, palette: { background: '#ffffff', accent: '#334155', foreground: '#111827', muted: '#475569' } };
 
 try {
   let project = ir.ensureProjectV3({ id, uid, title: 'Structured', prompt: 'Test', pages: 2, template: 'light', templateSpec,
@@ -56,10 +56,78 @@ try {
   result = await commands.undo(uid, id); assert.equal(result.project.deck.slides[1].title, 'Two', 'redo must be undoable again');
   assert.ok(history.operationHistory(uid, id).length >= 5); assert.ok(repo.listRevisions(uid, id).length >= 6);
 
+  project = repo.getProject(uid, id);
+  await assert.rejects(() => commands.applyCommand(uid, id, { type: 'node.setGeometry', baseRevision: project.revision, payload: { slideId: slideOne.id, nodeId: titleOne.id, geometry: { x: -1, y: 0, width: 100, height: 100 } } }), error => error.statusCode === 400, 'geometry outside the slide must fail closed');
+  await assert.rejects(() => commands.applyCommand(uid, id, { type: 'node.setStyle', baseRevision: project.revision, payload: { slideId: slideOne.id, nodeId: titleOne.id, style: { color: 'red', dangerous: true } } }), error => error.statusCode === 400, 'unsupported style payload must fail closed');
+  await assert.rejects(() => commands.applyCommand(uid, id, { type: 'node.setStyle', baseRevision: project.revision, payload: { slideId: slideOne.id, nodeId: titleOne.id, style: { fontFamily: 'Comic Sans MS' } } }), error => error.statusCode === 400, 'a font outside the selected template must fail closed');
+  await assert.rejects(() => commands.applyCommand(uid, id, { type: 'node.setLocked', baseRevision: project.revision, payload: { slideId: slideOne.id, nodeId: titleOne.id, locked: 'false' } }), error => error.statusCode === 400, 'boolean fields must not coerce arbitrary strings');
+  await assert.rejects(() => commands.applyCommand(uid, id, { type: 'node.insert', baseRevision: project.revision, payload: { slideId: slideOne.id, node: { type: 'image', content: { dataUrl: 'data:image/png;base64,AAAA', text: '' }, geometry: { x: 0, y: 0, width: 914400, height: 914400 } } } }), error => error.statusCode === 400, 'invalid image bytes must fail closed');
+  const bodyOne = slideOne.nodes.find(node => node.semanticRole === 'body');
+  result = await commands.applyCommand(uid, id, { type: 'nodes.group', baseRevision: project.revision, payload: { slideId: slideOne.id, nodeIds: [titleOne.id, bodyOne.id] } });
+  assert.equal(result.project.deck.slides[0].nodes.find(node => node.id === titleOne.id).groupId, result.project.deck.slides[0].nodes.find(node => node.id === bodyOne.id).groupId);
+  result = await commands.undo(uid, id); assert.equal(result.project.deck.slides[0].nodes.find(node => node.id === titleOne.id).groupId, null, 'grouping must be undoable');
+  project = result.project; result = await commands.applyCommand(uid, id, { type: 'nodes.duplicate', baseRevision: project.revision, payload: { slideId: slideOne.id, nodeIds: [titleOne.id, bodyOne.id] } });
+  assert.equal(result.project.deck.slides[0].nodes.length, 4, 'multi-object duplicate must be atomic');
+  result = await commands.undo(uid, id); assert.equal(result.project.deck.slides[0].nodes.length, 2, 'multi-object duplicate must be undoable');
+
+  project = result.project;
+  result = await commands.applyCommand(uid, id, { type: 'node.setRotation', baseRevision: project.revision, payload: { slideId: slideOne.id, nodeId: titleOne.id, rotation: 27 } });
+  assert.equal(result.project.deck.slides[0].nodes.find(node => node.id === titleOne.id).rotation, 27);
+  result = await commands.undo(uid, id); assert.equal(result.project.deck.slides[0].nodes.find(node => node.id === titleOne.id).rotation ?? 0, 0, 'rotation must be undoable');
+  project = result.project;
+  result = await commands.applyCommand(uid, id, { type: 'nodes.delete', baseRevision: project.revision, payload: { slideId: slideOne.id, nodeIds: [bodyOne.id] } });
+  assert.equal(result.project.deck.slides[0].nodes.length, 1);
+  result = await commands.undo(uid, id); assert.equal(result.project.deck.slides[0].nodes.length, 2, 'multi-object deletion must restore the original object');
+  project = result.project;
+  const paletteBefore = structuredClone(project.templateSpec.palette);
+  const darkPalette = { background: '#181818', foreground: '#f7f7f7', muted: '#c9c9c9', accent: '#9b8cff' };
+  result = await commands.applyCommand(uid, id, { type: 'theme.setPalette', baseRevision: project.revision, payload: { palette: darkPalette } });
+  assert.deepEqual(result.project.templateSpec.palette, darkPalette);
+  result = await commands.undo(uid, id); assert.deepEqual(result.project.templateSpec.palette, paletteBefore, 'theme changes must be undoable');
+  project = result.project;
+  result = await commands.applyCommand(uid, id, { type: 'ai.slidePatch', baseRevision: project.revision, payload: { slideId: slideOne.id, patches: [{ nodeId: titleOne.id, content: { text: 'AI reviewed title' } }, { nodeId: bodyOne.id, content: { items: [{ id: 'item_ai', text: 'AI reviewed body' }] } }], layoutId: 'comparison' } });
+  assert.equal(result.project.deck.slides[0].title, 'AI reviewed title');
+  assert.equal(result.project.deck.slides[0].layoutId, 'comparison');
+  result = await commands.undo(uid, id); assert.notEqual(result.project.deck.slides[0].title, 'AI reviewed title', 'an AI page patch must be atomic and undoable');
+
+  project = result.project;
+  const visualGeometry = { x: 6400800, y: 3200400, width: 1828800, height: 1371600 };
+  result = await commands.applyCommand(uid, id, { type: 'node.insert', baseRevision: project.revision, payload: { slideId: slideOne.id, node: { type: 'chart', content: { chartType: 'line', labels: ['A', 'B'], values: [1, 2], unit: '' }, geometry: visualGeometry } } });
+  project = result.project;
+  result = await commands.applyCommand(uid, id, { type: 'node.insert', baseRevision: project.revision, payload: { slideId: slideOne.id, node: { type: 'table', content: { rows: [['指标', '目标'], ['质量', '通过']] }, geometry: { ...visualGeometry, x: 8229600 } } } });
+  project = result.project;
+  const pixel = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+  result = await commands.applyCommand(uid, id, { type: 'node.insert', baseRevision: project.revision, payload: { slideId: slideOne.id, node: { type: 'image', content: { dataUrl: pixel, text: 'pixel' }, geometry: { ...visualGeometry, x: 9144000, y: 1371600, width: 914400, height: 914400 } } } });
+  const imageNode = result.project.deck.slides[0].nodes.find(node => node.type === 'image');
+  project = result.project;
+  result = await commands.applyCommand(uid, id, { type: 'node.setRotation', baseRevision: project.revision, payload: { slideId: slideOne.id, nodeId: imageNode.id, rotation: 15 } });
+  const richProject = structuredClone(result.project); const richTree = structuredClone(result.project.renderTree);
+  const richSvg = previewExporter.slideSvg(richTree.slides[0]);
+  assert.match(richSvg, /<polyline/); assert.match(richSvg, />指标</); assert.match(richSvg, /<image /, 'SVG preview must render charts, tables and images rather than placeholders'); assert.match(richSvg, /rotate\(15 /);
+
+  let apiResponse;
+  const aiRequest = new EventEmitter(); aiRequest.method = 'POST'; aiRequest.headers = {};
+  await structuredApi.handleStructuredPpt(aiRequest, new URL(`http://test/ppt/projects/${id}/ai-edit`), {
+    uid, res: {}, readBody: async () => JSON.stringify({ scope: 'object', preview: true, slideId: slideOne.id, nodeId: titleOne.id, instruction: '聚焦标题', baseRevision: result.project.revision }),
+    send: (status, body) => { apiResponse = { status, body }; return true; }, deps: { modelCall: async () => ({ content: { text: 'API AI title' }, geometry: { x: -1 } }) }, activity: () => {}, log: () => {},
+  });
+  assert.equal(apiResponse.status, 200); assert.equal(apiResponse.body.proposal.content.text, 'API AI title'); assert.equal(apiResponse.body.proposal.geometry, undefined, 'AI proposals must not carry coordinates');
+  await structuredApi.handleStructuredPpt(aiRequest, new URL(`http://test/ppt/projects/${id}/ai-edit`), {
+    uid, res: {}, readBody: async () => JSON.stringify({ scope: 'slide', mode: 'relayout', preview: true, slideId: slideOne.id, instruction: '精简页面', baseRevision: result.project.revision }),
+    send: (status, body) => { apiResponse = { status, body }; return true; }, deps: { modelCall: async () => ({ patches: [{ nodeId: titleOne.id, content: { text: 'Reviewed page title' } }, { nodeId: 'made_up', content: { text: 'ignore' } }], layoutId: 'conclusion', coordinates: [] }) }, activity: () => {}, log: () => {},
+  });
+  assert.equal(apiResponse.status, 200); assert.deepEqual(apiResponse.body.proposal.patches.map(item => item.nodeId), [titleOne.id]); assert.equal(apiResponse.body.proposal.layoutId, 'conclusion');
+
+  const singleId = store.newId();
+  const single = ir.ensureProjectV3({ ...structuredClone(result.project), id: singleId, revision: 0, publishedRevision: 0, deck: { slides: [{ title: 'Only', bullets: [], blocks: [], layoutId: 'cover' }] } });
+  repo.saveProject(single);
+  await assert.rejects(() => commands.applyCommand(uid, singleId, { type: 'slide.delete', baseRevision: 0, payload: { slideId: single.deck.slides[0].id } }), error => error.statusCode === 400, 'the final slide cannot be deleted');
+
   project = repo.getProject(uid, id); project.externalPptx = { path: '/tmp/original.pptx', sha256: 'test' }; repo.saveProject(project);
   const restoreDeck = structuredClone(project.deck); restoreDeck.slides[0].nodes.find(node => node.semanticRole === 'title').content.text = 'Restored external title';
-  await assert.rejects(() => commands.applyCommand(uid, id, { id: 'external_public_replace', type: 'deck.replace', baseRevision: project.revision, payload: { deck: restoreDeck } }), error => error.statusCode === 409);
-  result = await commands.applyCommand(uid, id, { id: 'external_internal_restore', type: 'deck.replace', baseRevision: project.revision, payload: { deck: restoreDeck } }, { allowExternalStructure: true });
+  await assert.rejects(() => commands.applyCommand(uid, id, { id: 'external_public_replace', type: 'deck.replace', baseRevision: project.revision, payload: { deck: restoreDeck } }), error => error.statusCode === 400);
+  await assert.rejects(() => commands.applyCommand(uid, id, { type: 'nodes.setGroup', baseRevision: project.revision, payload: { slideId: slideOne.id, entries: [{ nodeId: titleOne.id, groupId: null }] } }), error => error.statusCode === 400, 'inverse-only commands must not be exposed by the public API');
+  result = await commands.applyCommand(uid, id, { id: 'external_internal_restore', type: 'deck.replace', baseRevision: project.revision, payload: { deck: restoreDeck } }, { allowExternalStructure: true, allowInternal: true });
   assert.equal(result.project.deck.slides[0].title, 'Restored external title', 'revision restore may replace an external deck through the internal path');
 
   const python = '/Users/dongli/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3';
@@ -71,19 +139,36 @@ try {
     const sharedCheck = spawnSync(python, ['-c', `from pptx import Presentation; import sys
 p=Presentation(sys.argv[1]); target=next(s for s in p.slides[0].shapes if getattr(s,'text','')=='One'); assert target.left==int(sys.argv[2]); assert target.top==int(sys.argv[3]); print('ok')`, sharedOutput, String(expectedTitle.bounds.x), String(expectedTitle.bounds.y)]);
     assert.equal(sharedCheck.status, 0, sharedCheck.stderr.toString());
+    const richOutput = path.join(root, 'rich-tree.pptx');
+    const rich = spawnSync(python, ['-c', pptxExporter._internals.SCRIPT], { input: JSON.stringify({ slides: richProject.deck.slides, renderTree: richTree, template: 'light', palette: templateSpec.palette, fonts: templateSpec.fonts }), env: { ...process.env, PPT_OUTPUT: richOutput }, maxBuffer: 4_000_000 });
+    assert.equal(rich.status, 0, rich.stderr.toString());
+    const richCheck = spawnSync(python, ['-c', `from pptx import Presentation; import sys
+p=Presentation(sys.argv[1]); shapes=list(p.slides[0].shapes); assert any(getattr(s,'has_chart',False) for s in shapes); assert any(getattr(s,'has_table',False) for s in shapes); assert any(s.shape_type==13 and round(s.rotation)==15 for s in shapes); print('ok')`, richOutput]);
+    assert.equal(richCheck.status, 0, richCheck.stderr.toString());
     const fixture = spawnSync(python, ['-c', `import io,sys
 from pptx import Presentation
 from pptx.util import Inches
-p=Presentation(); s=p.slides.add_slide(p.slide_layouts[6]); t=s.shapes.add_textbox(Inches(1),Inches(1),Inches(5),Inches(1)); t.text='Original'; s.shapes.add_shape(1,Inches(1),Inches(3),Inches(2),Inches(1)); b=io.BytesIO(); p.save(b); sys.stdout.buffer.write(b.getvalue())`], { maxBuffer: 4_000_000 });
+from PIL import Image
+p=Presentation(); s=p.slides.add_slide(p.slide_layouts[6]); t=s.shapes.add_textbox(Inches(1),Inches(1),Inches(5),Inches(1)); t.text='Original'; s.shapes.add_shape(1,Inches(1),Inches(3),Inches(2),Inches(1))
+image=io.BytesIO(); Image.new('RGBA',(80,40),(35,45,55,180)).save(image,'PNG'); image.seek(0); s.shapes.add_picture(image,Inches(4),Inches(3),Inches(2),Inches(1))
+b=io.BytesIO(); p.save(b); sys.stdout.buffer.write(b.getvalue())`], { maxBuffer: 4_000_000 });
     assert.equal(fixture.status, 0, fixture.stderr.toString());
     const externalDir = path.join(root, 'external');
     const parsed = spawnSync(python, ['-c', importer._internals.IMPORT_SCRIPT], { input: fixture.stdout, env: { ...process.env, PPT_EXTERNAL_DIR: externalDir }, maxBuffer: 4_000_000 });
     assert.equal(parsed.status, 0, parsed.stderr.toString()); const manifest = JSON.parse(parsed.stdout);
-    assert.equal(manifest.slides.length, 1); assert.equal(manifest.slides[0].shapes.length, 2);
+    assert.equal(manifest.slides.length, 1); assert.equal(manifest.slides[0].shapes.length, 3);
     const textShape = manifest.slides[0].shapes.find(shape => shape.kind === 'text'); const output = path.join(root, 'preserved.pptx');
-    const exported = spawnSync(python, ['-c', importer._internals.EXPORT_SCRIPT], { input: JSON.stringify({ original: manifest.path, slides: [{ nativeSlideIndex: 0, nodes: [{ nativeShapeId: textShape.shapeId, type: 'text', content: { text: 'Edited' }, geometry: { x: textShape.x, y: textShape.y, width: textShape.width, height: textShape.height } }] }] }), env: { ...process.env, PPT_OUTPUT: output }, maxBuffer: 4_000_000 });
+    const exported = spawnSync(python, ['-c', importer._internals.EXPORT_SCRIPT], { input: JSON.stringify({ original: manifest.path, fonts: templateSpec.fonts, slides: [{ nativeSlideIndex: 0, nodes: [{ nativeShapeId: textShape.shapeId, type: 'text', semanticRole: 'title', content: { text: '编辑后的中文标题' }, geometry: { x: textShape.x, y: textShape.y, width: textShape.width, height: textShape.height } }] }] }), env: { ...process.env, PPT_OUTPUT: output }, maxBuffer: 4_000_000 });
     assert.equal(exported.status, 0, exported.stderr.toString());
-    const inspected = spawnSync(python, ['-c', `from pptx import Presentation; import sys; p=Presentation(sys.argv[1]); assert len(p.slides[0].shapes)==2; assert any(getattr(s,'text','')=='Edited' for s in p.slides[0].shapes); print('ok')`, output]);
+    const inspected = spawnSync(python, ['-c', `from pptx import Presentation; from zipfile import ZipFile; import hashlib,sys
+p=Presentation(sys.argv[1]); assert len(p.slides[0].shapes)==3; assert any(getattr(s,'text','')=='编辑后的中文标题' for s in p.slides[0].shapes)
+with ZipFile(sys.argv[1]) as archive:
+    xml=archive.read('ppt/slides/slide1.xml').decode('utf-8'); assert 'typeface="Noto Sans CJK SC"' in xml; assert 'lang="zh-CN"' in xml
+    output_media={name:hashlib.sha256(archive.read(name)).hexdigest() for name in archive.namelist() if name.startswith('ppt/media/')}
+with ZipFile(sys.argv[2]) as archive:
+    original_media={name:hashlib.sha256(archive.read(name)).hexdigest() for name in archive.namelist() if name.startswith('ppt/media/')}
+assert output_media == original_media
+print('ok')`, output, manifest.path]);
     assert.equal(inspected.status, 0, inspected.stderr.toString());
   }
   console.log('PPT structured IR, run log, render tree, command journal, recovery and conservative PPTX edit: OK');

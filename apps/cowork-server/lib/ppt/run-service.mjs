@@ -16,8 +16,8 @@ export function currentRun(project) {
   return project?.currentRunId ? getRun(project.uid, project.id, project.currentRunId) : null;
 }
 
-export function transitionNode(projectInput, nodeId, status, detail = {}) {
-  const project = getProject(projectInput.uid, projectInput.id) || projectInput;
+export function transitionNode(projectInput, nodeId, status, detail = {}, { useInput = false } = {}) {
+  const project = useInput ? projectInput : getProject(projectInput.uid, projectInput.id) || projectInput;
   let run = currentRun(project) || startRun(project);
   const node = run.nodes[nodeId] || { id: nodeId, dependsOn: [], attempts: 0 };
   const now = new Date().toISOString();
@@ -77,5 +77,9 @@ export function recoverRun(project) {
   for (const node of Object.values(run.nodes)) if (node.status === 'running') node.status = 'pending';
   run.status = 'queued';
   saveRun(run);
+  // The API resumes from the project snapshot. Keep its DAG view in lockstep
+  // with the durable run before deciding which page checks to skip.
+  project.dagNodes = structuredClone(run.nodes);
+  saveProject(project);
   return appendEvent(run, 'run.recovered', { stage: run.stage }).run;
 }

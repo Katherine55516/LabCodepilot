@@ -26,11 +26,21 @@ function blockOfNode(node) {
   return { id: node.id, type: node.type, ...(node.content || {}) };
 }
 
-function ensureListItems(slideId, bullets, existing = []) {
+function ensureListItems(slideId, bullets, existing = [], blocks = []) {
   return bullets.map((text, index) => ({
+    ...existing[index],
     id: validId(existing[index]?.id) ? existing[index].id : stableId('item', slideId, 'body', index),
     text: String(text || ''),
+    ...(blocks[index] && !existing[index]?.heading && !existing[index]?.body ? {
+      heading: String(blocks[index].heading || ''), body: String(blocks[index].body || ''),
+      pointType: String(blocks[index].type || 'support'),
+    } : {}),
   }));
+}
+
+function copyTextNode(slideId, role, value) {
+  const text = String(value || '').trim();
+  return text ? { id: stableId('node', slideId, role), type: 'text', semanticRole: role, slotId: role, styleRef: `typography.${role}`, content: { text } } : null;
 }
 
 /**
@@ -41,21 +51,31 @@ function ensureListItems(slideId, bullets, existing = []) {
 export function ensureSlideV3(input, index = 0) {
   const slide = clone(input || {});
   slide.id = validId(slide.id) ? slide.id : newId('slide');
-  const canonical = Array.isArray(slide.nodes) && slide.nodes.length > 0;
+  // nodeOrder marks a slide that has already migrated to IR v3. An empty or
+  // partial canonical node list is intentional after object deletion and must
+  // not silently recreate the legacy title/body nodes.
+  const canonical = Array.isArray(slide.nodes) && (slide.nodes.length > 0 || Array.isArray(slide.nodeOrder));
   const nodes = canonical ? slide.nodes.map(clone) : [];
   let title = nodes.find(node => node?.type === 'text' && node.semanticRole === 'title');
-  if (!title) {
+  if (!title && !canonical) {
     title = { id: stableId('node', slide.id, 'title'), type: 'text', semanticRole: 'title', slotId: 'title', styleRef: 'typography.title', content: { text: String(slide.title || '') } };
     nodes.unshift(title);
-  } else title.content = { ...(title.content || {}), text: String(title.content?.text ?? slide.title ?? '') };
+  } else if (title) title.content = { ...(title.content || {}), text: String(title.content?.text ?? slide.title ?? '') };
 
   let body = nodes.find(node => node?.type === 'list' && node.semanticRole === 'body');
   const bullets = body ? (body.content?.items || []).map(item => String(item.text || '')) : (Array.isArray(slide.bullets) ? slide.bullets.map(String) : []);
-  if (!body) {
+  if (!body && !canonical) {
     body = { id: stableId('node', slide.id, 'body'), type: 'list', semanticRole: 'body', slotId: 'body', styleRef: 'typography.body', content: { items: [] } };
     nodes.push(body);
   }
-  body.content = { ...(body.content || {}), items: ensureListItems(slide.id, bullets, body.content?.items || []) };
+  if (body) body.content = { ...(body.content || {}), items: ensureListItems(slide.id, bullets, body.content?.items || [], slide.copy?.blocks || []) };
+
+  if (!canonical && slide.copy) {
+    for (const [role, value] of [['eyebrow', slide.copy.eyebrow], ['subtitle', slide.copy.subtitle], ['takeaway', slide.copy.takeaway]]) {
+      const node = copyTextNode(slide.id, role, value);
+      if (node) nodes.push(node);
+    }
+  }
 
   const visualIds = new Set();
   for (const block of canonical ? [] : (Array.isArray(slide.blocks) ? slide.blocks : [])) {

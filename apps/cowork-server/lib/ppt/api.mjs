@@ -6,6 +6,7 @@ import { getProject, listRevisions, readRevision, saveProject } from './reposito
 import { publishProject } from './publish-service.mjs';
 import { buildSlideRenderTree } from './render-tree.mjs';
 import { slideSvg } from './exporters/preview.mjs';
+import { validateNodeContent } from './command-schema.mjs';
 
 const PROJECT = '[a-f0-9]{32}';
 const RUN = 'run_[a-f0-9]{24}';
@@ -94,7 +95,7 @@ export async function handleStructuredPpt(req, url, ctx) {
       const project = projectOr404(uid, match[1]); const snapshot = readRevision(uid, project.id, Number(match[2]));
       if (!snapshot) return send(404, { error: 'revision not found' });
       if (req.method !== 'POST') return send(405, { error: 'method not allowed' });
-      const result = await applyCommand(uid, project.id, { type: 'deck.replace', baseRevision: project.revision, payload: { deck: snapshot.deck } }, { allowExternalStructure: true });
+      const result = await applyCommand(uid, project.id, { type: 'deck.replace', baseRevision: project.revision, payload: { deck: snapshot.deck } }, { allowExternalStructure: true, allowInternal: true });
       result.project.template = snapshot.template; result.project.templateSpec = snapshot.templateSpec;
       result.project.renderTree = snapshot.renderTree || result.project.renderTree; saveProject(result.project);
       return send(200, result);
@@ -111,15 +112,33 @@ export async function handleStructuredPpt(req, url, ctx) {
     if ((match = url.pathname.match(new RegExp(`^/ppt/projects/(${PROJECT})/ai-edit$`, 'i')))) {
       const project = projectOr404(uid, match[1]); if (req.method !== 'POST') return send(405, { error: 'method not allowed' });
       const data = await jsonBody(req, readBody); const slide = project.deck?.slides.find(item => item.id === data.slideId);
-      const node = slide?.nodes?.find(item => item.id === data.nodeId);
-      if (!node) return send(404, { error: 'node not found' });
+      if (!slide) return send(404, { error: 'slide not found' });
       const instruction = String(data.instruction || '').trim().slice(0, 1000);
       if (!instruction) return send(400, { error: 'instruction is required' });
-      const prompt = `你只修改给定演示文稿对象的语义内容。不得输出坐标、尺寸、字体、颜色或页面操作。对象：${JSON.stringify({ type: node.type, content: node.content })}\n用户指令：${instruction}\n只返回 JSON：{"content":{...}}，字段必须与原 content 兼容。`;
-      const answer = await deps.modelCall(project, prompt, activity, log);
-      const content = answer?.content && typeof answer.content === 'object' ? answer.content : answer;
-      const result = await applyCommand(uid, project.id, { type: 'ai.objectPatch', baseRevision: Number(data.baseRevision), payload: { slideId: data.slideId, nodeId: data.nodeId, patch: { content } } });
-      return send(200, result);
+      const scope = data.scope === 'slide' ? 'slide' : 'object'; const relayout = data.mode === 'relayout';
+      if (scope === 'object') {
+        const node = slide.nodes?.find(item => item.id === data.nodeId); if (!node) return send(404, { error: 'node not found' });
+        if (node.type === 'foreign' || node.locked) return send(409, { error: 'node is locked' });
+        const prompt = `你只修改给定演示文稿对象的语义内容。不得输出坐标、尺寸、字体、颜色、ID 或页面操作。对象：${JSON.stringify({ type: node.type, content: node.content })}\n用户指令：${instruction}\n只返回 JSON：{"content":{...}}，字段必须与原 content 兼容。`;
+        const answer = await deps.modelCall(project, prompt, activity, log);
+        const candidate = answer?.content && typeof answer.content === 'object' ? answer.content : answer;
+        const content = validateNodeContent(node.type, candidate);
+        const proposal = { scope, slideId: slide.id, nodeId: node.id, before: node.content, content };
+        if (data.preview !== false) return send(200, { proposal });
+        return send(200, await applyCommand(uid, project.id, { type: 'ai.objectPatch', baseRevision: Number(data.baseRevision), payload: { slideId: slide.id, nodeId: node.id, patch: { content } } }));
+      }
+      const editable = (slide.nodes || []).filter(node => !node.locked && ['text', 'list', 'chart', 'table', 'shape'].includes(node.type)).slice(0, 30);
+      if (!editable.length) return send(409, { error: 'slide has no editable semantic objects' });
+      const prompt = `你只修改当前演示文稿页面的语义内容${relayout ? '，并可从 cover, summary, editorial, big-number, comparison, chart, table, image-text, timeline, conclusion 中选择一个 layoutId' : ''}。不得输出坐标、尺寸、字体、颜色或新 ID。页面对象：${JSON.stringify(editable.map(node => ({ nodeId: node.id, type: node.type, content: node.content })))}\n用户指令：${instruction}\n只返回 JSON：{"patches":[{"nodeId":"现有ID","content":{...}}]${relayout ? ',"layoutId":"summary"' : ''}}。`;
+      const answer = await deps.modelCall(project, prompt, activity, log); const raw = answer?.patches ? answer : answer?.content?.patches ? answer.content : {};
+      const byId = new Map(editable.map(node => [node.id, node])); const patches = [];
+      for (const item of Array.isArray(raw.patches) ? raw.patches : []) { const node = byId.get(item?.nodeId); if (!node) continue; patches.push({ nodeId: node.id, before: node.content, content: validateNodeContent(node.type, item.content) }); }
+      if (!patches.length) return send(422, { error: 'AI returned no valid object patches' });
+      const layouts = new Set(['cover', 'summary', 'editorial', 'big-number', 'comparison', 'chart', 'table', 'image-text', 'timeline', 'conclusion']);
+      const layoutId = relayout && layouts.has(raw.layoutId) ? raw.layoutId : undefined;
+      const proposal = { scope, slideId: slide.id, patches, ...(layoutId ? { layoutId } : {}) };
+      if (data.preview !== false) return send(200, { proposal });
+      return send(200, await applyCommand(uid, project.id, { type: 'ai.slidePatch', baseRevision: Number(data.baseRevision), payload: { slideId: slide.id, patches: patches.map(({ nodeId, content }) => ({ nodeId, content })), ...(layoutId ? { layoutId } : {}) } }));
     }
     return false;
   } catch (error) {

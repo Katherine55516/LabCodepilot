@@ -4,7 +4,7 @@ import * as orch from './orchestrator.mjs';
 import { buildRenderTree } from './ppt/render-tree.mjs';
 
 const SCRIPT = String.raw`
-import base64, io, json, os, textwrap, sys
+import base64, io, json, os, re, textwrap, sys
 import matplotlib
 matplotlib.use('Agg')
 from matplotlib.figure import Figure
@@ -13,6 +13,8 @@ from matplotlib.font_manager import FontProperties, findfont
 from matplotlib.patches import Rectangle
 from matplotlib.patches import Ellipse
 from matplotlib.image import imread
+from matplotlib.transforms import Affine2D
+from PIL import Image as PillowImage
 
 data = json.load(sys.stdin)
 palettes = {'violet': ('#171b31', '#967fff', '#f5f6fc', '#c4c9d8'),
@@ -29,6 +31,13 @@ def exact_font(name):
     return FontProperties(fname=path)
 title_font = exact_font(fonts.get('title'))
 font = exact_font(fonts.get('body'))
+title_east_asia_font = exact_font(fonts.get('titleEastAsia'))
+east_asia_font = exact_font(fonts.get('bodyEastAsia'))
+CJK_RE = re.compile(r'[\u2e80-\u9fff\uf900-\ufaff]')
+def font_for(text, role='body'):
+    if CJK_RE.search(str(text or '')):
+        return title_east_asia_font if role == 'title' else east_asia_font
+    return title_font if role == 'title' else font
 target = os.environ.get('PPT_OUTPUT', '/workspace/presentation.pdf')
 tmp = target + '.part.' + str(os.getpid())
 scene = data.get('renderTree') or {}
@@ -42,7 +51,7 @@ def scene_box(element):
 
 def render_scene_element(fig, element):
     x, y, width, height = scene_box(element); kind = element['kind']; content = element.get('content') or {}; style = element.get('style') or {}
-    color = style.get('color') or muted; size = float(style.get('fontSizePt') or 18)
+    color = style.get('color') or muted; size = float(style.get('fontSizePt') or 18); rotation = float(element.get('rotation') or 0); opacity = float(style.get('opacity', 1))
     if kind in ('text', 'list', 'timeline', 'metric'):
         if kind == 'text': lines = [str(content.get('text') or '')]
         else:
@@ -52,25 +61,35 @@ def render_scene_element(fig, element):
                 lines.append(prefix + str(item.get('text') or ''))
         line_height = min(.06, height / max(1, len(lines)))
         for number, line in enumerate(lines):
+            title_role = element.get('semanticRole') == 'title' or (kind == 'metric' and number == 0)
             fig.text(x, y + height - number * line_height, line, color=color, size=size,
-                     fontproperties=title_font if element.get('semanticRole') == 'title' or (kind == 'metric' and number == 0) else font,
+                     fontproperties=font_for(line, 'title' if title_role else 'body'),
                      weight='bold' if style.get('fontWeight', 400) >= 600 or (kind == 'metric' and number == 0) else 'normal', va='top',
-                     ha='right' if style.get('textAlign') == 'right' else 'left')
+                     ha='right' if style.get('textAlign') == 'right' else ('center' if style.get('textAlign') == 'center' else 'left'), rotation=-rotation, alpha=opacity)
         return
     if kind == 'image' and content.get('dataUrl'):
-        picture = imread(io.BytesIO(base64.b64decode(content['dataUrl'].split(',', 1)[1])))
+        blob = base64.b64decode(content['dataUrl'].split(',', 1)[1]); picture = PillowImage.open(io.BytesIO(blob)).convert('RGBA')
+        if rotation: picture = picture.rotate(-rotation, expand=True, resample=PillowImage.Resampling.BICUBIC)
         image_ax = fig.add_axes([x, y, width, height]); image_ax.axis('off'); image_ax.imshow(picture); image_ax.set_aspect('auto'); return
     if kind == 'chart':
         chart_ax = fig.add_axes([x, y, width, height], facecolor='white')
-        if content.get('chartType') == 'pie': chart_ax.pie(content.get('values') or [], labels=content.get('labels') or [], textprops={'fontsize': 8, 'fontproperties': font})
-        else: chart_ax.bar(content.get('labels') or [], content.get('values') or [], color=accent)
-        chart_ax.set_title(content.get('unit', ''), fontsize=9, fontproperties=font); return
+        labels = content.get('labels') or []
+        if content.get('chartType') == 'pie': chart_ax.pie(content.get('values') or [], labels=labels, textprops={'fontsize': 8, 'fontproperties': font_for(' '.join(map(str, labels)))})
+        elif content.get('chartType') == 'line': chart_ax.plot(labels, content.get('values') or [], color=accent, marker='o')
+        else:
+            chart_ax.bar(labels, content.get('values') or [], color=accent)
+            for tick in chart_ax.get_xticklabels() + chart_ax.get_yticklabels(): tick.set_fontproperties(font_for(tick.get_text()))
+        unit = content.get('unit', '')
+        chart_ax.set_title(unit, fontsize=9, fontproperties=font_for(unit, 'title')); return
     if kind == 'table' and content.get('rows'):
         table_ax = fig.add_axes([x, y, width, height]); table_ax.axis('off'); rows = content['rows']
         table = table_ax.table(cellText=rows[1:], colLabels=rows[0], loc='center', cellLoc='center'); table.auto_set_font_size(False); table.set_fontsize(9)
-        for key, cell in table.get_celld().items(): cell.get_text().set_fontproperties(font)
+        for key, cell in table.get_celld().items(): cell.get_text().set_fontproperties(font_for(cell.get_text().get_text()))
         return
-    fig.patches.append(Rectangle((x, y), width, height, color=style.get('fill') or '#64748b', transform=fig.transFigure, alpha=1 if kind == 'shape' else .15))
+    patch = Ellipse((x + width / 2, y + height / 2), width, height, color=style.get('fill') or '#64748b', alpha=opacity) if content.get('shape') == 'ellipse' or style.get('shape') == 'ellipse' else Rectangle((x, y), width, height, color=style.get('fill') or '#64748b', alpha=opacity)
+    if rotation: patch.set_transform(Affine2D().rotate_deg_around(x + width / 2, y + height / 2, -rotation) + fig.transFigure)
+    else: patch.set_transform(fig.transFigure)
+    fig.patches.append(patch)
 
 with PdfPages(tmp) as pdf:
     for index, slide in enumerate(data['slides']):
@@ -86,7 +105,7 @@ with PdfPages(tmp) as pdf:
         title = slide['title']
         layout = slide.get('layoutId') or 'summary'
         size = max(38 if layout == 'cover' else (32 if layout == 'conclusion' else 28), 36 if len(title) <= 28 else 30)
-        fig.text(.5 if layout == 'cover' else .065, .68 if layout == 'cover' else .84, title, color=fg, size=size, fontproperties=title_font, va='top', ha='center' if layout == 'cover' else 'left')
+        fig.text(.5 if layout == 'cover' else .065, .68 if layout == 'cover' else .84, title, color=fg, size=size, fontproperties=font_for(title, 'title'), va='top', ha='center' if layout == 'cover' else 'left')
         bullets = slide.get('bullets', [])
         blocks = slide.get('blocks', [])
         visual_first = layout in ('chart', 'table')
@@ -100,7 +119,7 @@ with PdfPages(tmp) as pdf:
             y = .20 if visual_first else (.52 if layout == 'image-text' else (.50 if layout == 'cover' else (.72 if blocks else .68)))
             step = min(.045 if visual_first else (.055 if blocks else .095), (.13 if visual_first else (.22 if blocks else .56)) / max(1, len(lines)))
             for line in lines:
-                fig.text(.075, y, line, color=muted, size=size, fontproperties=font, va='top')
+                fig.text(.075, y, line, color=muted, size=size, fontproperties=font_for(line), va='top')
                 y -= step
         if blocks:
             top = .70 if visual_first else (.72 if layout == 'image-text' else (.48 if bullets else .70))
@@ -115,12 +134,15 @@ with PdfPages(tmp) as pdf:
                     image_ax.imshow(picture); image_ax.set_aspect('auto')
                 elif kind == 'chart':
                     chart_ax = fig.add_axes([x + .02, top - height + .04, width - .07, height - .07], facecolor='white')
+                    labels = block['labels']
                     if block['chartType'] == 'pie':
-                        chart_ax.pie(block['values'], labels=block['labels'], textprops={'fontsize': 8, 'fontproperties': font})
+                        chart_ax.pie(block['values'], labels=labels, textprops={'fontsize': 8, 'fontproperties': font_for(' '.join(map(str, labels)))})
                     else:
-                        chart_ax.bar(block['labels'], block['values'], color=accent)
+                        chart_ax.bar(labels, block['values'], color=accent)
                         chart_ax.tick_params(labelsize=8)
-                    chart_ax.set_title(block.get('unit', ''), fontsize=9, fontproperties=font)
+                        for tick in chart_ax.get_xticklabels() + chart_ax.get_yticklabels(): tick.set_fontproperties(font_for(tick.get_text()))
+                    unit = block.get('unit', '')
+                    chart_ax.set_title(unit, fontsize=9, fontproperties=font_for(unit, 'title'))
                 elif kind == 'table':
                     table_ax = fig.add_axes([x, top - height, width - .02, height]); table_ax.axis('off')
                     table = table_ax.table(cellText=block['rows'][1:], colLabels=block['rows'][0], loc='center', cellLoc='center')
@@ -129,22 +151,37 @@ with PdfPages(tmp) as pdf:
                         if key[0] == 0:
                             cell.set_facecolor(accent)
                             cell.get_text().set_color('white')
-                        cell.get_text().set_fontproperties(font)
+                        cell.get_text().set_fontproperties(font_for(cell.get_text().get_text()))
                 else:
                     center_x, center_y = x + width / 2, top - height / 2
                     patch = Ellipse((center_x, center_y), width * .65, height * .72, color=block['fill'], transform=fig.transFigure) if block['shape'] == 'ellipse' else Rectangle((x + width * .17, top - height * .85), width * .66, height * .7, color=block['fill'], transform=fig.transFigure)
                     fig.patches.append(patch)
-                    fig.text(center_x, center_y, block['text'], color='white', ha='center', va='center', size=14, fontproperties=font)
+                    fig.text(center_x, center_y, block['text'], color='white', ha='center', va='center', size=14, fontproperties=font_for(block['text']))
         fig.text(.93, .055, str(index + 1), color=muted, size=11, ha='right', fontproperties=font)
         pdf.savefig(fig, facecolor=fig.get_facecolor())
 os.replace(tmp, target)
 print(json.dumps({'slides': len(data['slides']), 'bytes': os.path.getsize(target)}))
 `;
 
+const PRESERVED_SCRIPT = String.raw`
+import json, os, subprocess
+source=os.environ.get('PPT_SOURCE','/workspace/presentation.pptx'); target=os.environ.get('PPT_OUTPUT','/workspace/presentation.pdf')
+if not os.path.isfile(source): raise ValueError('published presentation.pptx is missing')
+try: os.unlink(target)
+except FileNotFoundError: pass
+outdir=os.path.dirname(target); profile=os.path.join(outdir,'.libreoffice-ppt')
+result=subprocess.run(['soffice','-env:UserInstallation=file://'+profile,'--headless','--convert-to','pdf:impress_pdf_Export','--outdir',outdir,source], capture_output=True, text=True, timeout=120)
+converted=os.path.join(outdir,os.path.splitext(os.path.basename(source))[0]+'.pdf')
+if result.returncode or not os.path.isfile(converted): raise ValueError('native template PDF conversion failed: '+(result.stderr or result.stdout)[-500:])
+if converted != target: os.replace(converted,target)
+print(json.dumps({'bytes':os.path.getsize(target),'nativeTemplate':True}))
+`;
+
 export async function renderPdf(project) {
   const { name } = await orch.ensureContainer(project.id, project.uid, orch.KIND_PPT);
   return new Promise((resolve, reject) => {
-    const child = spawn('docker', ['exec', '-i', '-u', String(orch.AGENT_UID), name, 'python3', '-c', SCRIPT], { stdio: ['pipe', 'pipe', 'pipe'] });
+    const preserved = project.templateFidelity?.mode === 'preserve';
+    const child = spawn('docker', ['exec', '-i', '-u', String(orch.AGENT_UID), name, 'python3', '-c', preserved ? PRESERVED_SCRIPT : SCRIPT], { stdio: ['pipe', 'pipe', 'pipe'] });
     let output = ''; let error = '';
     child.stdout.on('data', c => { output = (output + c).slice(-10000); });
     child.stderr.on('data', c => { error = (error + c).slice(-2000); });
@@ -154,8 +191,8 @@ export async function renderPdf(project) {
       try { resolve(JSON.parse(output)); } catch { reject(new Error('PDF renderer returned invalid result')); }
     });
     child.stdin.on('error', () => {});
-    child.stdin.end(JSON.stringify({ slides: project.deck.slides, renderTree: project.renderTree || buildRenderTree(project), template: project.template, palette: project.templateSpec?.palette, fonts: project.templateSpec?.fonts }));
+    child.stdin.end(preserved ? '' : JSON.stringify({ slides: project.deck.slides, renderTree: project.renderTree || buildRenderTree(project), template: project.template, palette: project.templateSpec?.palette, fonts: project.templateSpec?.fonts }));
   });
 }
 
-export const _internals = { SCRIPT };
+export const _internals = { SCRIPT, PRESERVED_SCRIPT };

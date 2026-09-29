@@ -44,7 +44,14 @@
 
 | 文件 | 主题 | 状态 |
 |------|------|------|
+| active/ppt-gamma-depth-design-editor.md | Gamma 样例驱动的内容容量页数估算、语义版式和编辑器样式优化 | 实施中 |
+| completed/ppt-alpha-mining-gamma-comparison.md | Alpha Mining 双产物对照驱动的内容深度、原生模板槽位和无关媒体治理 | 已完成，含 16 页模拟产物与分析报告 |
+| completed/ppt-alpha-mining-performance-depth.md | Alpha Mining 与 Performance Review 模板样例对照：模板文字容量、写作深度和可见内容质检 | 已完成，旧产物确定性复核检出 10 个硬错误 |
+| completed/ppt-gamma-factor-zoo-parity.md | Factor Zoo 样例驱动的内容深度、point 篇幅/分布、自适应布局和可视化编辑改造 | 已完成，详见分析报告及 10 页模拟产物 |
+| active/ppt-evidence-semantic-quality.md | 49 页 LLM Compression 输出评估驱动的 P0–P4 来源证据、叙事深度、模板语义适配、质量门禁与回归验证 | 实施中 |
+| completed/ppt-html-semantic-content-repair.md | HTML 语义层级、逐页事实到原生模板槽位的内容一致性，以及模板变体图文可读性修复 | 已完成 |
 | active/ppt-workspace.md | 办公区 PPT Workspace：M1 远程生成；M2 输入/治理；M3 版本/模板；M4 丰富编辑；M5 `review → repair → publish`、九类版式、模板字体、有界并行 DAG 与整稿评审 | M1–M5 本地实现并通过本地门禁；真实 Cowork/跨设备、容器 PDF 和安装包验收待补 |
+| active/ppt-20260924-requirements-parity.md | 2026-09-24 需求与原型差异补齐：真实 outline 预览、版本更新大纲、手动排序、移动端导航、生成逐页展示、编辑器退出守卫及导入 LLM 顺序 | 本地实现与自检完成；真实登录 Cowork/跨设备验收待补 |
 | completed/cowork-scheduled-routines.md | **沙箱定时任务（服务端调度·对标 Claude Routines）**：定时任务跑在公司沙箱服务器，关掉客户端也运行；客户端只做管理/拉取/展示。routineId 直接当 sid 用（自动获得独立容器+持久 volume，orchestrator 零改动）；凭证走 RD4-C 且**单独用 APP_COWORK_INTERNAL_SECRET**（不复用 COWORK_AUTH_SECRET，防沙箱失陷升级为全员 key 泄露）；运行仍物化成 chat_sessions 复用渲染，但**办公列表加 routine_id IS NULL 排除**，靠三层面包屑导航进入。P9 生产端到端全绿（调度器自主触发、审计链六事件归属正确、产物落卷、删除连带清卷） | ✅ P0-P9 全部完成（2026-08-10） |
 | active/context-usage-accuracy-overhaul.md | **上下文用量计算正确性改造**：四类根因（权威分子交付链断裂 / fallback 被 sidechain 污染 / UI 与压缩分母双轨分叉致 managed 1M 误压缩 / 压缩估算脱离真实 resume 上下文）→ 五 Phase：探针结果回合末拉取闭环 + sidechain 过滤 → 分母单一 resolver → resume 路径压缩权威交给 CLI auto-compact → 明细分类真实化（探针 categories 落库）+ source 徽标 → 回归与观测；决策点 D1 分母 live 优先 / D2 压缩二选一 / D3 cowork 探针缓做（均已拍板） | **Phase 1-5 全部完成**（c8d1109→560c7bf，6 commits，dev 态验证 2767 单测 + 冒烟 17/17 + CDP）；4A 明细分类经实测**改为不做**（探针临时 HOME 无配置，分类非真实构成）；剩打包态验收 / Windows slug / 办公沙箱盲区（另立项） |
 | active/cowork-usage-admin.md | **沙箱使用情况管理后台**:审计入库(exec_end 补全 + 惰性增量拉取 + fileId 截断容错)→ PG 统计(用户/会话/成功率,JOIN users 换人名)→ admin web「沙箱用量」页;admin 可删会话/看下载产物(UD2/UD3),动作写 admin_* 审计回流留痕;`__admin__` HMAC 鉴权零新密钥 | P0-P2 完成;沙箱侧已上线;账号后端待用户部署(pull+migrate+build) |
@@ -91,6 +98,21 @@
 
 | 文件 | 主题 | 完成日期 |
 |------|------|----------|
+| completed/ppt-gamma-copy-media-repair.md | Gamma 20 页模板的页内/列表重复、媒体错配、原生组件省略与发布门禁修复，模拟 LLM 重跑及独立 PPTX 审计 | 2026-09-29 |
+| completed/ppt-content-depth-sparse-typography.md | PPT 短输入预规划、按角色控制 point 深度、排版舒适度与本地回归 | 2026-09-28 |
+| completed/ppt-visible-copy-integrity.md | PPT 模板可见内容完整性门禁、标题说明增量、原生导出文本核对和 27 页成品回归 | 2026-09-28 |
+| completed/ppt-template-semantic-expansion.md | 原生 PPTX 模板的语义版式/容量目录、内容适配扩页调度、安全卡片重排与媒体变体、长文稿来源/重复约束及真实 Gamma 模板导出核验 | 2026-09-24 |
+| completed/ppt-prototype-visual-parity.md | PPT 模块原型视觉对齐：局部深浅色与字体、工作区侧栏、模板四列、创建阶段、生成与编辑器布局；不改后端工作流 | 2026-09-24 |
+| completed/ppt-long-deck-template-variants.md | 上传 PPTX 长文稿：版式目录与受控裁切变体、100 页内容感知调度、API/编辑器页数接通、快照去重压缩、DAG 恢复和原生导出压力测试 | 2026-09-23 |
+| completed/ppt-template-variant-report-readiness.md | 复用模板页的原生布局/媒体变体与导出校验；职场报告 Brief、逐页文案规则、确定性内容评审和 20 页 Cowork 回放 | 2026-09-23 |
+| completed/ppt-template-reuse-diversity.md | 上传 PPTX 扩页：确定性无相邻重复调度、最多双次复用、版式与图片相似度、页数可行性提示及真实模板原生导出回归 | 2026-09-23 |
+| completed/ppt-uploaded-template-fidelity.md | 上传 PPTX 保真：原生对象与图片保留、shape ID 文本填槽、模板容量检查、预览与原文件导出校验 | 2026-09-22 |
+| completed/ppt-template-preview-copy-depth.md | 模板预览与可见要点说明：逐页 PNG 伴随预览、标题/说明/标签槽位配对、最短长度与重复检查、真实模板回归 | 2026-09-23 |
+| completed/ppt-native-paragraph-fit.md | 模板原生段落与文字适配：逐段 label/body、模板项目符号和字号、单行宽度约束、编辑兼容及 15 页真实模板回归 | 2026-09-23 |
+| completed/ppt-semantic-planning-optimization.md | PPT 语义分块、Brief/Story/Slide 规划、逐页事实整理和内容 QA；维持现有 DAG、模型调用轮次、界面与导出架构 | 2026-09-22 |
+| completed/ppt-visual-editor-hardening.md | PPT Visual Editor 完整性加固：真实预览路由、有界 mutation/AI schema、完整对象与页面编辑、共享 Render Tree、Command Journal、三语与响应式 | 2026-09-21 |
+| completed/ppt-prototype-parity.md | PPT 模块严格按 `prototype.html` 校对工作区、创建、任务、模板、生成、详情、编辑器和版本更新的布局、按钮与流程，同时保留生产后端架构 | 2026-09-20 |
+| completed/ppt-product-conformance.md | PPT 产品流程与交互补齐：保留生产后端能力，完成 Workspace、Task Center、创建/更新向导、真实渐进生成、模板治理、单一连续画布编辑器和三语交互 | 2026-09-20 |
 | completed/ppt-structured-artifact.md | PPT Structured Artifact Runtime：稳定 IR、持久 Run/DAG/Event、SSE、共享 Render Tree、Command Journal、对象编辑器、增量发布与外部 PPTX 保守编辑 | 2026-09-20 |
 | completed/skills-store-internal.md | **技能市场（内部）**：Skills 页第三 tab 接 codeagent-server Skills 商店 BFF（acb6240）；主进程 IPC 持 token、yauzl 安装事务（zip 三重守卫/原子落位/台账自愈/串行化）、错误码分支 UI、「我的技能」互通（顺修 installed 删除残留 bug）；假 JWKS+假 Hub 真实链路 26 断言全过 | 2026-07-28 |
 | completed/cowork-remote-container.md | **Cowork 远程容器沙箱(R 系列,取代本地 VM)**:RD1-RD8 八决策(全平台统一远程/单公司服务器账号下发/凭证代理 sidecar/无状态 HMAC+禁内网放公网/粒度=归属隔离容器仍 per 会话);R0 POC→R1 控制面+CoworkBackend→R2 文件通道(helper 直读持久 volume)→R3 凭证代理(真 key 不进 agent 容器)→R4 多用户 authz/配额 TTL/出网禁内网→R5 打包版实测+部署包(install.sh+systemd 双单元+TLS 预留)+运维手册+账号下发客户端全链+Windows 平台 gate。剩:Win 真机实测/账号后端接口/裸金属迁移三件套(见文档头) | 2026-07-17 |

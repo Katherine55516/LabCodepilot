@@ -7,6 +7,7 @@ import { buildRenderTree } from './ppt/render-tree.mjs';
 
 const SCRIPT = String.raw`
 import base64, io, json, math, os, re, sys
+import xml.etree.ElementTree as ET
 from zipfile import ZipFile, ZIP_DEFLATED
 from xml.sax.saxutils import escape
 from pptx import Presentation
@@ -19,21 +20,43 @@ from pptx.enum.chart import XL_CHART_TYPE, XL_DATA_LABEL_POSITION
 from pptx.parts.image import Image
 from PIL import Image as PillowImage
 from pptx.oxml.xmlchemy import OxmlElement
+from pptx.oxml.ns import qn
 
 TITLE_FONT = BODY_FONT = TITLE_EA = BODY_EA = ''
+CJK_RE = re.compile(r'[\u2e80-\u9fff\uf900-\ufaff]')
+HANT_RE = re.compile(r'[萬與為於後臺國學實體廣應當復雜雙發變這個們體繁臺灣]' )
+
+def language_for_text(text):
+    text = text or ''
+    if HANT_RE.search(text): return 'zh-TW'
+    if CJK_RE.search(text): return 'zh-CN'
+    return 'en-US'
+
+def set_east_asia_font(run, east_asia, language):
+    rpr = run._r.get_or_add_rPr()
+    for child in list(rpr):
+        if child.tag == qn('a:ea'):
+            rpr.remove(child)
+    ea = OxmlElement('a:ea')
+    ea.set('typeface', east_asia)
+    rpr.append(ea)
+    rpr.set('lang', language)
 
 def cjk_font(paragraph, size, color, bold=False, role='body'):
     latin = TITLE_FONT if role == 'title' else BODY_FONT
-    east_asia = TITLE_EA if role == 'title' else BODY_EA
     for run in paragraph.runs:
-        run.font.name = latin
+        language = language_for_text(run.text)
+        east_asia = (TITLE_HANT if role == 'title' else BODY_HANT) if language == 'zh-TW' else (TITLE_EA if role == 'title' else BODY_EA)
+        # PowerPoint reads a:ea for CJK text. LibreOffice's PPTX preview also
+        # requires the CJK family in a:latin, otherwise it can render a blank
+        # run when the template's Latin font has no Han glyphs. The same CJK
+        # template family is therefore set in both slots for Chinese runs;
+        # English continues to use the template's Latin family.
+        run.font.name = east_asia if language.startswith('zh-') else latin
         run.font.size = Pt(size)
         run.font.bold = bold
         run.font.color.rgb = color
-        rpr = run._r.get_or_add_rPr()
-        ea = OxmlElement('a:ea')
-        ea.set('typeface', east_asia)
-        rpr.append(ea)
+        set_east_asia_font(run, east_asia, language)
 
 def textbox(slide, x, y, w, h, text, size, color, bold=False, role='body', align=None):
     box = slide.shapes.add_textbox(Inches(x), Inches(y), Inches(w), Inches(h))
@@ -73,28 +96,31 @@ def visual(slide, block, x, y, w, h, accent, fg):
         iw, ih = image.size
         ratio = min(w / iw, h / ih)
         dw, dh = int(iw * ratio), int(ih * ratio)
-        slide.shapes.add_picture(io.BytesIO(blob), x + (w - dw) // 2, y + (h - dh) // 2, dw, dh)
-        return
+        return slide.shapes.add_picture(io.BytesIO(blob), x + (w - dw) // 2, y + (h - dh) // 2, dw, dh)
     if kind == 'chart':
         data = CategoryChartData()
         data.categories = block['labels']
         data.add_series(block.get('unit') or 'Values', block['values'])
-        chart_type = XL_CHART_TYPE.PIE if block['chartType'] == 'pie' else XL_CHART_TYPE.COLUMN_CLUSTERED
+        chart_type = XL_CHART_TYPE.PIE if block['chartType'] == 'pie' else (XL_CHART_TYPE.LINE_MARKERS if block['chartType'] == 'line' else XL_CHART_TYPE.COLUMN_CLUSTERED)
         card = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, x, y, w, h)
         card.fill.solid()
         card.fill.fore_color.rgb = RGBColor(255, 255, 255)
         card.line.color.rgb = RGBColor(222, 227, 235)
         inset = Inches(.14)
-        chart = slide.shapes.add_chart(chart_type, x + inset, y + inset, w - 2 * inset, h - 2 * inset, data).chart
+        chart_shape = slide.shapes.add_chart(chart_type, x + inset, y + inset, w - 2 * inset, h - 2 * inset, data)
+        chart = chart_shape.chart
         chart.has_title = bool(block.get('unit'))
         if chart.has_title:
             title_para = chart.chart_title.text_frame.paragraphs[0]
             title_para.text = block['unit']
             cjk_font(title_para, 12, RGBColor(45, 55, 72), True, 'title')
         chart.has_legend = block['chartType'] == 'pie'
-        if block['chartType'] == 'bar':
-            chart.series[0].format.fill.solid()
-            chart.series[0].format.fill.fore_color.rgb = RGBColor(*accent)
+        if block['chartType'] in ('bar', 'line'):
+            if block['chartType'] == 'bar':
+                chart.series[0].format.fill.solid()
+                chart.series[0].format.fill.fore_color.rgb = RGBColor(*accent)
+            else:
+                chart.series[0].format.line.color.rgb = RGBColor(*accent)
             chart.category_axis.tick_labels.font.name = BODY_FONT
             chart.category_axis.tick_labels.font.size = Pt(10)
             chart.category_axis.tick_labels.font.color.rgb = RGBColor(65, 75, 92)
@@ -117,10 +143,11 @@ def visual(slide, block, x, y, w, h, accent, fg):
             plot.data_labels.font.name = BODY_FONT
             plot.data_labels.font.size = Pt(10)
             plot.data_labels.font.color.rgb = RGBColor(45, 55, 72)
-        return
+        return [card, chart_shape]
     if kind == 'table':
         rows = block['rows']
-        table = slide.shapes.add_table(len(rows), len(rows[0]), x, y, w, h).table
+        table_shape = slide.shapes.add_table(len(rows), len(rows[0]), x, y, w, h)
+        table = table_shape.table
         for r, row in enumerate(rows):
             for c, value in enumerate(row):
                 cell = table.cell(r, c)
@@ -129,7 +156,7 @@ def visual(slide, block, x, y, w, h, accent, fg):
                 cell.fill.fore_color.rgb = RGBColor(*accent) if r == 0 else RGBColor(250, 250, 252)
                 for paragraph in cell.text_frame.paragraphs:
                     cjk_font(paragraph, 14 if r == 0 else 13, RGBColor(255, 255, 255) if r == 0 else RGBColor(30, 35, 50), r == 0)
-        return
+        return table_shape
     shape = slide.shapes.add_shape(MSO_SHAPE.OVAL if block['shape'] == 'ellipse' else MSO_SHAPE.ROUNDED_RECTANGLE,
                                    x + int(w * .12), y + int(h * .12), int(w * .76), int(h * .76))
     shape.fill.solid()
@@ -139,6 +166,7 @@ def visual(slide, block, x, y, w, h, accent, fg):
     para.text = block['text']
     para.alignment = PP_ALIGN.CENTER
     cjk_font(para, 18, RGBColor(255, 255, 255), True)
+    return shape
 
 data = json.load(sys.stdin)
 font_spec = data.get('fonts') or {}
@@ -149,6 +177,8 @@ TITLE_FONT = font_spec['title']
 BODY_FONT = font_spec['body']
 TITLE_EA = font_spec['titleEastAsia']
 BODY_EA = font_spec['bodyEastAsia']
+TITLE_HANT = font_spec.get('titleEastAsiaHant') or TITLE_EA
+BODY_HANT = font_spec.get('bodyEastAsiaHant') or BODY_EA
 prs = Presentation()
 prs.slide_width = Inches(13.333)
 prs.slide_height = Inches(7.5)
@@ -194,23 +224,60 @@ def render_scene_element(slide, element):
     if kind == 'text':
         shape = slide.shapes.add_textbox(x, y, w, h); para = shape.text_frame.paragraphs[0]
         para.text = str(content.get('text') or '')
+        para.line_spacing = float(item_style.get('lineHeight') or 1.12)
+        para.space_after = Pt(size * float(item_style.get('paragraphSpacingEm') or 0))
         if item_style.get('textAlign') == 'right': para.alignment = PP_ALIGN.RIGHT
         cjk_font(para, size, color, bool(item_style.get('fontWeight', 400) >= 600), 'title' if element.get('semanticRole') == 'title' else 'body')
+        para.alignment = PP_ALIGN.CENTER if item_style.get('textAlign') == 'center' else para.alignment
+        shape.rotation = float(element.get('rotation') or 0)
         return
     if kind in ('list', 'timeline', 'metric'):
         items = content.get('items') or []
+        point_layout = content.get('pointLayout') if kind == 'list' else None
+        if point_layout and point_layout.get('boxes'):
+            point_size = float(point_layout.get('fontSizePt') or size)
+            for number, item in enumerate(items):
+                if number >= len(point_layout['boxes']): break
+                bounds = point_layout['boxes'][number]
+                px = x + int(w * bounds['x']); py = y + int(h * bounds['y'])
+                pw = int(w * bounds['w']); ph = int(h * bounds['h'])
+                card = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, px, py, pw, ph)
+                card.fill.background(); card.line.color.rgb = RGBColor(*accent)
+                frame = card.text_frame; frame.clear(); frame.word_wrap = True
+                frame.margin_left = Inches(.11); frame.margin_right = Inches(.11)
+                frame.margin_top = Inches(.07); frame.margin_bottom = Inches(.04)
+                raw = str(item.get('text') or '')
+                parts = raw.split('\n', 1)
+                heading = str(item.get('heading') or (parts[0] if len(parts) > 1 else ''))
+                body = str(item.get('body') or (parts[1] if len(parts) > 1 else raw))
+                if heading:
+                    heading_para = frame.paragraphs[0]; heading_para.text = heading
+                    heading_para.space_after = Pt(3); heading_para.line_spacing = 1.08
+                    cjk_font(heading_para, point_size, color, True, 'body')
+                    body_para = frame.add_paragraph()
+                else: body_para = frame.paragraphs[0]
+                body_para.text = body; body_para.line_spacing = 1.13
+                body_para.space_after = Pt(0)
+                cjk_font(body_para, point_size, color)
+            return
         shape = slide.shapes.add_textbox(x, y, w, h); shape.text_frame.word_wrap = True
         for number, item in enumerate(items):
             para = shape.text_frame.paragraphs[0] if number == 0 else shape.text_frame.add_paragraph()
             prefix = (str(number + 1).zfill(2) + '  ') if kind == 'timeline' else ('' if kind == 'metric' and number == 0 else '•  ')
             para.text = prefix + str(item.get('text') or '')
-            para.space_after = Pt(size * .35); cjk_font(para, size, color, kind == 'metric' and number == 0, 'title' if kind == 'metric' and number == 0 else 'body')
+            para.line_spacing = float(item_style.get('lineHeight') or 1.12)
+            para.space_after = Pt(size * float(item_style.get('paragraphSpacingEm') if item_style.get('paragraphSpacingEm') is not None else .35))
+            cjk_font(para, size, color, kind == 'metric' and number == 0, 'title' if kind == 'metric' and number == 0 else 'body')
+        shape.rotation = float(element.get('rotation') or 0)
         return
     if kind in ('image', 'chart', 'table', 'shape'):
         block = dict(content); block['type'] = kind
         if kind == 'shape':
             block.setdefault('shape', 'rectangle'); block.setdefault('fill', item_style.get('fill') or '#64748b'); block.setdefault('text', '')
-        visual(slide, block, x, y, w, h, accent, fg); return
+        rendered = visual(slide, block, x, y, w, h, accent, fg)
+        for shape in rendered if isinstance(rendered, list) else [rendered]:
+            if shape is not None: shape.rotation = float(element.get('rotation') or 0)
+        return
     placeholder = slide.shapes.add_shape(MSO_SHAPE.RECTANGLE, x, y, w, h)
     placeholder.fill.background(); placeholder.line.color.rgb = muted
 
@@ -296,7 +363,7 @@ with ZipFile(temp, 'r') as source, ZipFile(normalized, 'w', ZIP_DEFLATED) as tar
         if info.filename.startswith('ppt/charts/chart') and info.filename.endswith('.xml'):
             chart_xml = blob.decode('utf-8')
             chart_xml = re.sub(r'(<c:(?:axId|crossAx) val=")-(\d+)(")', r'\1\2\3', chart_xml)
-            chart_xml = re.sub(r'(<a:latin typeface="[^"]+"/>)', lambda match: match.group(1) + '<a:ea typeface="'+escape(BODY_EA, {'"': '&quot;'})+'"/>', chart_xml)
+            chart_xml = re.sub(r'(<a:latin typeface="[^"]+"/>)(?!\s*<a:ea\b)', lambda match: match.group(1) + '<a:ea typeface="'+escape(BODY_EA, {'"': '&quot;'})+'"/>', chart_xml)
             latin_node = '<a:latin typeface="'+escape(BODY_FONT, {'"': '&quot;'})+'"/>'
             east_asia_node = '<a:ea typeface="'+escape(BODY_EA, {'"': '&quot;'})+'"/>'
             chart_xml = re.sub(r'<a:(defRPr|endParaRPr)([^>]*)/>', lambda match: '<a:'+match.group(1)+match.group(2)+'>'+latin_node+east_asia_node+'</a:'+match.group(1)+'>', chart_xml)
@@ -305,6 +372,31 @@ with ZipFile(temp, 'r') as source, ZipFile(normalized, 'w', ZIP_DEFLATED) as tar
                                chart_xml, flags=re.S)
             blob = chart_xml.encode('utf-8')
         target_zip.writestr(info, blob)
+
+def validate_font_integrity(package_path):
+    ns = {'a': 'http://schemas.openxmlformats.org/drawingml/2006/main'}
+    failures = []
+    with ZipFile(package_path, 'r') as archive:
+        for name in archive.namelist():
+            if not name.endswith('.xml') or not (name.startswith('ppt/slides/') or name.startswith('ppt/charts/')):
+                continue
+            raw_xml = archive.read(name)
+            if b'\xef\xbf\xbd' in raw_xml:
+                failures.append(name + ': contains Unicode replacement character')
+            root = ET.fromstring(raw_xml)
+            for tag in ('r', 'fld'):
+                for run in root.findall('.//a:' + tag, ns):
+                    text = ''.join((node.text or '') for node in run.findall('.//a:t', ns))
+                    if not CJK_RE.search(text):
+                        continue
+                    rpr = run.find('a:rPr', ns)
+                    ea = rpr.find('a:ea', ns) if rpr is not None else None
+                    if ea is None or not (ea.attrib.get('typeface') or '').strip():
+                        failures.append(name + ': CJK run is missing a:ea')
+    if failures:
+        raise ValueError('PPTX font integrity validation failed: ' + '; '.join(failures[:12]))
+
+validate_font_integrity(normalized)
 os.replace(normalized, temp)
 os.replace(temp, target)
 print(json.dumps({'slides': len(prs.slides), 'path': target, 'bytes': os.path.getsize(target)}))

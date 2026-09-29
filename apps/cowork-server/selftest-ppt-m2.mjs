@@ -13,9 +13,11 @@ const [{ handlePpt }, store, source, pdf] = await Promise.all([
 const uid = 'alice';
 let removed = [];
 const deps = {
-  modelCall: async (project, prompt) => prompt.includes('叙事规划器')
-    ? { slides: Array.from({ length: project.pages }, (_, i) => ({ title: `章节 ${i + 1}`, focus: `论点 ${i + 1}`, refs: project.source?.segments?.length ? [project.source.segments[0].id] : [] })) }
-    : { title: '内容页', bullets: ['可信来源'] },
+  modelCall: async (project, prompt) => prompt.includes('整稿演示文稿内容评审器')
+    ? { missing: [], repeated: [], conflicts: [], unsupported: [] }
+    : prompt.includes('叙事规划器')
+      ? { slides: Array.from({ length: project.pages }, (_, i) => ({ title: `章节 ${i + 1}`, focus: `论点 ${i + 1}`, refs: project.source?.segments?.length ? [project.source.segments[0].id] : [] })) }
+      : { title: '内容页', bullets: ['可信来源'] },
   extractFile: async (_project, name, bytes) => ({ kind: 'file', name, text: bytes.toString(), segments: [{ id: '1', location: '行 1', text: bytes.toString() }] }),
   renderPptx: async () => ({ bytes: 123 }),
   renderPdf: async () => ({ bytes: 456 }),
@@ -29,23 +31,26 @@ async function request(method, pathname, data, as = uid) {
   await handlePpt(req, new URL(`http://test${pathname}`), { uid: as, deps, activity: () => {}, send: (status, body) => { result = { status, body }; return true; }, res: { writeHead() {}, on() {}, destroy() {} } });
   return result;
 }
-async function settled(id, status) {
+async function settled(id, status, as = uid) {
   for (let n = 0; n < 100; n++) {
-    const project = store.get(uid, id);
+    const project = store.get(as, id);
     if (project?.status === status) return project;
     await new Promise(resolve => setTimeout(resolve, 10));
   }
-  throw new Error(`project ${id} did not reach ${status}`);
+  const latest = store.get(as, id);
+  throw new Error(`project ${id} did not reach ${status}: ${latest?.status} ${latest?.error || ''}`);
 }
 try {
   assert.throws(() => source.validateFile('old.doc', Buffer.from('doc')), /unsupported/);
   assert.throws(() => source.validateFile('../bad.md', Buffer.from('text')), /invalid/);
   assert.throws(() => source.validateFile('bad.pdf', Buffer.from('not pdf')), /signature/);
+  assert.equal(source.validateFile('spatial.csv', Buffer.from('x,y\n1,2\n')), 'csv');
   const pasted = await request('POST', '/ppt/projects', { inputKind: 'paste', title: '季度报告', text: '收入增长 10%\n\n来源：财务部', pages: 3, configId: 'test' });
   assert.equal(pasted.status, 201);
   const id = pasted.body.project.id;
   let project = await settled(id, 'outline_ready');
-  assert.equal(project.source.segments.length, 2);
+  assert.ok(project.source.segments.length >= 1);
+  assert.match(project.source.segments.map(segment => segment.text).join('\n'), /收入增长 10%[\s\S]*来源：财务部/);
   assert.deepEqual(project.outline[0].refs, ['1']);
   assert.equal((await request('GET', `/ppt/projects/${id}`, undefined, 'bob')).status, 404);
   assert.equal((await request('PATCH', `/ppt/projects/${id}/source`, { sourceRevision: 0, text: '新数据' })).status, 409);
@@ -57,6 +62,18 @@ try {
   assert.equal((await request('POST', `/ppt/projects/${id}/generate`)).status, 202);
   project = await settled(id, 'completed');
   assert.equal(project.deck.slides.length, 3);
+  const lockedTitle = '2026 AI Lab 产品能力与企业级智能 Agent 平台完整实施路线';
+  const titleUser = 'title-user';
+  const automatic = await request('POST', '/ppt/projects', { inputKind: 'prompt', title: lockedTitle, prompt: '解释平台架构和实施路线', pages: 4, configId: 'test' }, titleUser);
+  assert.equal(automatic.status, 201);
+  assert.equal((await request('POST', `/ppt/projects/${automatic.body.project.id}/generate`, undefined, titleUser)).status, 202, 'generation may be queued before outline completes');
+  const automaticProject = await settled(automatic.body.project.id, 'completed', titleUser);
+  assert.equal(automaticProject.pages, 4);
+  assert.equal(automaticProject.deck.slides.length, 4, 'output must match the user-confirmed page count');
+  assert.equal(automaticProject.pageDecision.finalPageCount, 4);
+  assert.equal(automaticProject.deckTitle.source, 'user');
+  assert.equal(automaticProject.deckTitle.locked, true);
+  assert.equal(automaticProject.deck.slides[0].title.replace(/\s/g, ''), lockedTitle.replace(/\s/g, ''), 'locked user title may only gain layout whitespace');
   const folder = await request('POST', '/ppt/folders', { name: '市场' });
   assert.equal(folder.status, 201);
   const folderId = folder.body.folder.id;
@@ -97,6 +114,7 @@ try {
   };
   assert.match(extract('sample.md', Buffer.from('# 中文主题\n\n数据增长')).text, /数据增长/);
   assert.match(extract('sample.html', Buffer.from('<p>有效内容</p><script>隐藏</script>')).text, /有效内容/);
+  assert.match(extract('sample.csv', Buffer.from('marker,value\nCD8A,90\n')).text, /marker=CD8A/);
   const fixtures = spawnSync(python, ['-c', `import io, json, base64
 from docx import Document
 from openpyxl import Workbook
@@ -104,6 +122,7 @@ from pptx import Presentation
 from pptx.util import Inches
 from reportlab.pdfgen import canvas
 out={}
+out['csv']=base64.b64encode(b'marker,value\\nCD8A,90\\n').decode()
 d=Document(); d.add_paragraph('Document facts'); b=io.BytesIO(); d.save(b); out['docx']=base64.b64encode(b.getvalue()).decode()
 w=Workbook(); w.active['A1']='Spreadsheet facts'; b=io.BytesIO(); w.save(b); out['xlsx']=base64.b64encode(b.getvalue()).decode()
 p=Presentation(); s=p.slides.add_slide(p.slide_layouts[6]); box=s.shapes.add_textbox(Inches(1), Inches(1), Inches(6), Inches(1)); box.text='Presentation facts'; b=io.BytesIO(); p.save(b); out['pptx']=base64.b64encode(b.getvalue()).decode()
@@ -111,7 +130,7 @@ b=io.BytesIO(); c=canvas.Canvas(b); c.drawString(30, 700, 'PDF facts'); c.save()
 print(json.dumps(out))`], { maxBuffer: 2_000_000 });
   assert.equal(fixtures.status, 0, fixtures.stderr.toString());
   for (const [ext, encoded] of Object.entries(JSON.parse(fixtures.stdout))) {
-    const expected = { docx: 'Document facts', xlsx: 'Spreadsheet facts', pptx: 'Presentation facts', pdf: 'PDF facts' }[ext];
+    const expected = { csv: 'marker=CD8A', docx: 'Document facts', xlsx: 'Spreadsheet facts', pptx: 'Presentation facts', pdf: 'PDF facts' }[ext];
     const parsed = extract(`sample.${ext}`, Buffer.from(encoded, 'base64'));
     assert.match(parsed.text, new RegExp(expected));
     if (ext === 'xlsx') assert.match(parsed.text, /A1=Spreadsheet facts/);

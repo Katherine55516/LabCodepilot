@@ -33,7 +33,8 @@ try {
   assert.throws(() => store.get('../other', id), /invalid uid/);
   assert.throws(() => store.get(uid, '../other'), /invalid project id/);
   assert.equal(api.pages(3), 3);
-  assert.throws(() => api.pages(51), /pages/);
+  assert.equal(api.pages(100), 100);
+  assert.throws(() => api.pages(101), /pages/);
   const outline = api.normalizeOutline({ slides: [{ title: 'Cover', focus: 'Intro' }, { title: 'Middle', focus: 'Detail' }, { title: 'End', focus: 'Summary' }] }, 3);
   const deck = api.normalizeDeck(api.parseModelJson('```json\n{"slides":[{"title":"Cover","bullets":[]},{"title":"Middle","bullets":["Point"]},{"title":"End","bullets":[]}]}\n```'), outline);
   assert.equal(deck.slides[1].bullets[0], 'Point');
@@ -46,6 +47,7 @@ try {
   const deps = {
     modelCall: async (_project, prompt) => {
       calls++;
+      if (prompt.includes('整稿演示文稿内容评审器')) return { missing: [], repeated: [], conflicts: [], unsupported: [] };
       if (prompt.includes('叙事规划器')) return { slides: [
         { title: '封面', focus: '介绍' }, { title: '进展', focus: '成果' }, { title: '结论', focus: '建议' },
       ] };
@@ -71,7 +73,8 @@ try {
       if (state.status === expected) return state;
       await new Promise((resolve) => setTimeout(resolve, 5));
     }
-    throw new Error(`PPT job did not reach ${expected}`);
+    const state = store.get(uid, projectId);
+    throw new Error(`PPT job did not reach ${expected}: ${state?.status} ${state?.error || ''}`);
   };
   const created = await invoke('POST', '/ppt/projects', { prompt: '季度复盘', title: '新项目', pages: 3, configId: 'test-config' });
   assert.equal(created.status, 201);

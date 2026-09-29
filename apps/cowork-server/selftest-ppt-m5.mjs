@@ -25,11 +25,15 @@ for (const slide of explicitLayouts) {
 }
 assert.notEqual(templates.BUILT_INS.find(item => item.id === 'violet').fonts.title, templates.BUILT_INS.find(item => item.id === 'light').fonts.title);
 const light = templates.snapshotTemplate(templates.BUILT_INS.find(item => item.id === 'light'));
+assert.equal(light.fonts.titleEastAsiaHant, 'Noto Serif CJK TC');
+assert.equal(light.fonts.bodyEastAsiaHant, 'Noto Sans CJK TC');
 const fontOutput = path.join(root, 'template-fonts.pptx');
 const strictRender = spawnSync(python, ['-c', render._internals.SCRIPT], {
   input: JSON.stringify({ template: 'light', palette: light.palette, fonts: light.fonts, slides: [
     { id: '1', title: '模板标题', bullets: ['模板正文'], blocks: [], layoutId: 'summary' },
     { id: '2', title: '模板图表', bullets: ['图表说明'], blocks: [{ id: 'chart', type: 'chart', chartType: 'bar', labels: ['一月', '二月'], values: [1, 2], unit: '数量' }], layoutId: 'chart' },
+    { id: '3', title: 'English title', bullets: ['English body'], blocks: [], layoutId: 'summary' },
+    { id: '4', title: '繁體標題', bullets: ['這是繁體中文內容'], blocks: [], layoutId: 'summary' },
   ] }),
   env: { ...process.env, PPT_OUTPUT: fontOutput }, encoding: 'utf8',
 });
@@ -38,6 +42,16 @@ const fontXml = spawnSync(python, ['-c', `from zipfile import ZipFile
 with ZipFile(${JSON.stringify(fontOutput)}) as z: print(z.read('ppt/slides/slide1.xml').decode())`], { encoding: 'utf8' });
 assert.match(fontXml.stdout, /Noto Serif CJK SC/);
 assert.match(fontXml.stdout, /Noto Sans CJK SC/);
+assert.match(fontXml.stdout, /lang="zh-CN"/);
+const englishXml = spawnSync(python, ['-c', `from zipfile import ZipFile
+with ZipFile(${JSON.stringify(fontOutput)}) as z: print(z.read('ppt/slides/slide3.xml').decode())`], { encoding: 'utf8' });
+assert.match(englishXml.stdout, /<a:latin typeface="Noto Serif CJK SC"\/>/);
+assert.match(englishXml.stdout, /lang="en-US"/);
+const traditionalXml = spawnSync(python, ['-c', `from zipfile import ZipFile
+with ZipFile(${JSON.stringify(fontOutput)}) as z: print(z.read('ppt/slides/slide4.xml').decode())`], { encoding: 'utf8' });
+assert.match(traditionalXml.stdout, /<a:ea typeface="Noto Serif CJK TC"\/>/);
+assert.match(traditionalXml.stdout, /<a:ea typeface="Noto Sans CJK TC"\/>/);
+assert.match(traditionalXml.stdout, /lang="zh-TW"/);
 const chartXml = spawnSync(python, ['-c', `from zipfile import ZipFile
 with ZipFile(${JSON.stringify(fontOutput)}) as z: print(z.read('ppt/charts/chart1.xml').decode())`], { encoding: 'utf8' }).stdout;
 for (const match of chartXml.matchAll(/<a:(defRPr|endParaRPr)\b[^>]*>([\s\S]*?)<\/a:\1>/g)) {
@@ -67,6 +81,10 @@ assert.ok(badReview.issues.some(issue => issue.code === 'font_cjk_coverage'));
 assert.ok(badReview.issues.some(issue => issue.code === 'contrast_foreground'));
 const chartFontReview = quality.deterministicReview({ ...badProject, deck: { slides: [{ id: '1', title: 'English', bullets: [], blocks: [{ id: 'c', type: 'chart', chartType: 'bar', labels: ['中文标签'], values: [1], unit: '' }], layoutId: 'chart' }] } });
 assert.ok(chartFontReview.issues.some(issue => issue.code === 'font_cjk_coverage'), 'chart labels must participate in CJK coverage checks');
+const nativeFontReview = quality.deterministicReview({ ...badProject, deck: { slides: [{ id: '1', title: 'English', bullets: [], blocks: [], layoutId: 'cover', nodes: [{ id: 'native', type: 'text', semanticRole: 'native-text', content: { text: '导入的中文文本' } }] }] } });
+assert.ok(nativeFontReview.issues.some(issue => issue.code === 'font_cjk_coverage'), 'imported native text must participate in CJK coverage checks');
+const replacementReview = quality.deterministicReview({ templateSpec: templates.snapshotTemplate(templates.BUILT_INS[0]), deck: { slides: [{ id: '1', title: 'Broken \ufffd text', bullets: [], blocks: [], layoutId: 'cover' }] } });
+assert.ok(replacementReview.issues.some(issue => issue.code === 'font_invalid_character'), 'replacement characters must block publishing');
 const repairedPalette = quality.repairProject({ ...badProject, templateSpec: templates.snapshotTemplate(templates.BUILT_INS[0]) }, quality.deterministicReview({ ...badProject, templateSpec: templates.snapshotTemplate(templates.BUILT_INS[0]) }));
 assert.ok(repairedPalette.review.hardErrors === 0);
 const mismatchedLayout = { templateSpec: templates.snapshotTemplate(templates.BUILT_INS[0]), deck: { slides: [
@@ -82,6 +100,10 @@ const emptyContentReview = quality.deterministicReview({ ...mismatchedLayout, de
   mismatchedLayout.deck.slides[0], { id: '2', title: 'Empty page', bullets: [], blocks: [], layoutId: 'summary' },
 ] } });
 assert.ok(emptyContentReview.issues.some(issue => issue.code === 'content_empty'));
+const intentionalBlankReview = quality.deterministicReview({ ...mismatchedLayout, deck: { slides: [
+  mismatchedLayout.deck.slides[0], { id: '2', title: 'New page', bullets: [], blocks: [], layoutId: 'summary', manualBlank: true },
+] } });
+assert.equal(intentionalBlankReview.issues.some(issue => issue.code === 'content_empty'), false, 'a user-inserted blank slide must survive the quality gate');
 const repeatedSingleBullet = { templateSpec: templates.snapshotTemplate(templates.BUILT_INS[0]), deck: { slides: [
   { id: '1', title: 'Cover', bullets: [], blocks: [], layoutId: 'cover' },
   { id: '2', title: 'First claim', bullets: ['The same supported claim'], blocks: [], layoutId: 'summary' },

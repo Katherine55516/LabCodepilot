@@ -7,10 +7,44 @@ import { enrichAssetRefs } from './assets.mjs';
 
 function fail(message, statusCode = 400, details) { throw Object.assign(new Error(message), { statusCode, details }); }
 function slide(deck, id) { const value = deck.slides.find(item => item.id === id); if (!value) fail(`slide not found: ${id}`, 404); return value; }
+const INTERNAL_COMMANDS = new Set(['nodes.restore', 'nodes.setGroup', 'deck.replace']);
 
-function syncSlide(value) { return materializeLegacySlide(ensureSlideV3(value)); }
+function nativeTextContent(node, candidate) {
+  const next = structuredClone(candidate);
+  if (!node.nativeRef || node.type !== 'text') return next;
+  const original = (node.nativeTextFrame?.paragraphs || []).filter(item => item.text?.trim());
+  if (original.length > 1) {
+    if (!next.paragraphs) {
+      const lines = String(next.text || '').split(/\r?\n/u).map(item => item.trim());
+      if (lines.length !== original.length) fail(`this template text box requires ${original.length} points`, 409);
+      next.paragraphs = lines.map((line, index) => {
+        const hasLabel = original[index].runs?.[0]?.bold && original[index].runs?.slice(1).some(run => !run.bold && run.text?.trim());
+        const parts = hasLabel ? line.split(/[：:]/u) : [];
+        return hasLabel ? { label: (parts.shift() || '').trim(), body: parts.join('：').trim() } : { label: '', body: line };
+      });
+    }
+    if (next.paragraphs.length !== original.length || next.paragraphs.some((item, index) => !item.body?.trim() ||
+      (original[index].runs?.[0]?.bold && original[index].runs?.slice(1).some(run => !run.bold && run.text?.trim()) && !item.label?.trim()))) {
+      fail('template point count or label/body structure is invalid', 409);
+    }
+    next.text = next.paragraphs.map(item => [item.label, item.body].filter(Boolean).join('：')).join('\n');
+  }
+  return { ...next, templateFit: Boolean(node.nativeTextFrame) };
+}
 
-function applyToDeck(deckInput, command) {
+function syncSlide(value) {
+  const slide = materializeLegacySlide(ensureSlideV3(value));
+  const items = slide.nodes?.find(node => node.type === 'list' && node.semanticRole === 'body')?.content?.items || [];
+  if (Array.isArray(slide.copy?.blocks)) slide.copy.blocks = items.map(item => {
+    const parts = String(item.text || '').split('\n');
+    const heading = String(item.heading ?? (parts.length > 1 ? parts[0] : ''));
+    const body = String(item.body ?? (parts.length > 1 ? parts.slice(1).join('\n') : parts[0] || ''));
+    return { type: item.pointType || 'support', heading, body };
+  });
+  return slide;
+}
+
+function applyToDeck(deckInput, command, project = {}) {
   const deck = ensureDeckV3(deckInput);
   const p = command.payload;
   let inverse;
@@ -21,6 +55,7 @@ function applyToDeck(deckInput, command) {
       deck.slides.splice(index, 0, value); inverse = { type: 'slide.delete', payload: { slideId: value.id } }; break;
     }
     case 'slide.delete': {
+      if (deck.slides.length <= 1) fail('a deck must contain at least one slide');
       const index = deck.slides.findIndex(item => item.id === p.slideId); if (index < 0) fail(`slide not found: ${p.slideId}`, 404);
       const [value] = deck.slides.splice(index, 1); inverse = { type: 'slide.insert', payload: { slide: value, index } }; break;
     }
@@ -45,27 +80,96 @@ function applyToDeck(deckInput, command) {
       const index = Math.max(0, Math.min(value.nodes.length, Number.isInteger(p.index) ? p.index : value.nodes.length));
       value.nodes.splice(index, 0, node); inverse = { type: 'node.delete', payload: { slideId: p.slideId, nodeId: node.id } }; break;
     }
+    case 'node.duplicate': {
+      const value = slide(deck, p.slideId); const source = value.nodes.find(node => node.id === p.nodeId); if (!source) fail(`node not found: ${p.nodeId}`, 404);
+      if (source.locked) fail('node is locked', 409);
+      const node = structuredClone(source); node.id = newId('node'); node.groupId = null;
+      if (node.content?.items) node.content.items = node.content.items.map(item => ({ ...item, id: newId('item') }));
+      if (node.geometry) node.geometry = { ...node.geometry, x: Math.min(node.geometry.x + 182880, 12191695 - node.geometry.width), y: Math.min(node.geometry.y + 182880, 6858000 - node.geometry.height) };
+      const index = value.nodes.indexOf(source) + 1; value.nodes.splice(index, 0, node); inverse = { type: 'node.delete', payload: { slideId: p.slideId, nodeId: node.id } }; break;
+    }
     case 'node.delete': {
       const value = slide(deck, p.slideId); const index = value.nodes.findIndex(node => node.id === p.nodeId); if (index < 0) fail(`node not found: ${p.nodeId}`, 404);
+      if (value.nodes[index].locked) fail('node is locked', 409);
       const [node] = value.nodes.splice(index, 1); inverse = { type: 'node.insert', payload: { slideId: p.slideId, node, index } }; break;
+    }
+    case 'nodes.delete': {
+      const value = slide(deck, p.slideId); const ids = new Set(p.nodeIds); const entries = value.nodes.map((node, index) => ({ node, index })).filter(entry => ids.has(entry.node.id));
+      if (entries.length !== ids.size) fail('one or more nodes were not found', 404); if (entries.some(entry => entry.node.locked)) fail('node is locked', 409);
+      for (const entry of [...entries].sort((a, b) => b.index - a.index)) value.nodes.splice(entry.index, 1);
+      inverse = { type: 'nodes.restore', payload: { slideId: p.slideId, entries } }; break;
+    }
+    case 'nodes.restore': {
+      const value = slide(deck, p.slideId); const restoredIds = [];
+      for (const entry of [...p.entries].sort((a, b) => a.index - b.index)) { value.nodes.splice(Math.min(entry.index, value.nodes.length), 0, structuredClone(entry.node)); restoredIds.push(entry.node.id); }
+      inverse = { type: 'nodes.delete', payload: { slideId: p.slideId, nodeIds: restoredIds } }; break;
+    }
+    case 'nodes.duplicate': {
+      const value = slide(deck, p.slideId); const ids = new Set(p.nodeIds); const sources = value.nodes.filter(node => ids.has(node.id)); if (sources.length !== ids.size) fail('one or more nodes were not found', 404);
+      if (sources.some(node => node.locked)) fail('node is locked', 409);
+      const copies = sources.map(source => { const node = structuredClone(source); node.id = newId('node'); node.groupId = null; if (node.content?.items) node.content.items = node.content.items.map(item => ({ ...item, id: newId('item') })); if (node.geometry) node.geometry = { ...node.geometry, x: Math.min(node.geometry.x + 182880, 12191695 - node.geometry.width), y: Math.min(node.geometry.y + 182880, 6858000 - node.geometry.height) }; return node; });
+      value.nodes.push(...copies); inverse = { type: 'nodes.delete', payload: { slideId: p.slideId, nodeIds: copies.map(node => node.id) } }; break;
     }
     case 'node.setContent':
     case 'node.setStyle':
     case 'node.setGeometry':
-    case 'node.setZIndex': {
+    case 'node.setZIndex':
+    case 'node.setRotation':
+    case 'node.setLocked': {
       const { node } = findNode(deck, p.slideId, p.nodeId); if (!node) fail(`node not found: ${p.nodeId}`, 404);
-      if (node.locked) fail('node is locked', 409);
+      if (node.locked && command.type !== 'node.setLocked') fail('node is locked', 409);
       const field = command.type.slice('node.set'.length); const key = field[0].toLowerCase() + field.slice(1);
-      const before = structuredClone(node[key]); node[key] = structuredClone(p[key]);
+      const before = node[key] === undefined ? null : structuredClone(node[key]);
+      if (p[key] === null) delete node[key]; else node[key] = key === 'content' ? nativeTextContent(node, p[key]) : structuredClone(p[key]);
       inverse = { type: command.type, payload: { slideId: p.slideId, nodeId: p.nodeId, [key]: before } }; break;
+    }
+    case 'nodes.setGeometry': {
+      const changes = []; const value = slide(deck, p.slideId);
+      for (const change of p.changes) {
+        const node = value.nodes.find(item => item.id === change.nodeId); if (!node) fail(`node not found: ${change.nodeId}`, 404); if (node.locked) fail('node is locked', 409);
+        changes.push({ nodeId: node.id, geometry: structuredClone(node.geometry) }); node.geometry = structuredClone(change.geometry);
+      }
+      inverse = { type: command.type, payload: { slideId: p.slideId, changes } }; break;
+    }
+    case 'nodes.group':
+    case 'nodes.ungroup':
+    case 'nodes.setGroup': {
+      const value = slide(deck, p.slideId); const requested = command.type === 'nodes.setGroup' ? p.entries : p.nodeIds.map(nodeId => ({ nodeId, groupId: command.type === 'nodes.group' ? null : null }));
+      const groupId = command.type === 'nodes.group' ? newId('group') : null; const entries = [];
+      for (const request of requested) {
+        const node = value.nodes.find(item => item.id === request.nodeId); if (!node) fail(`node not found: ${request.nodeId}`, 404); if (node.locked) fail('node is locked', 409);
+        entries.push({ nodeId: node.id, groupId: node.groupId || null }); node.groupId = command.type === 'nodes.setGroup' ? request.groupId : groupId;
+      }
+      inverse = { type: 'nodes.setGroup', payload: { slideId: p.slideId, entries } }; break;
     }
     case 'ai.objectPatch': {
       if (!p.slideId || !p.nodeId) fail('AI patch requires slideId and nodeId');
       const { node } = findNode(deck, p.slideId, p.nodeId); if (!node) fail(`node not found: ${p.nodeId}`, 404);
       if (node.locked) fail('node is locked', 409);
-      const before = { content: structuredClone(node.content), style: structuredClone(node.style), geometry: structuredClone(node.geometry) };
-      for (const key of ['content', 'style', 'geometry']) if (p.patch?.[key] !== undefined) node[key] = p.replace ? structuredClone(p.patch[key]) : { ...(node[key] || {}), ...structuredClone(p.patch[key]) };
+      const before = { content: structuredClone(node.content) };
+      const patchedContent = p.replace ? { ...p.patch.content } : { ...(node.content || {}), ...p.patch.content };
+      if (Object.hasOwn(p.patch.content, 'text') && !Object.hasOwn(p.patch.content, 'paragraphs')) delete patchedContent.paragraphs;
+      node.content = nativeTextContent(node, patchedContent);
       inverse = { type: 'ai.objectPatch', payload: { slideId: p.slideId, nodeId: p.nodeId, patch: before, replace: true } }; break;
+    }
+    case 'ai.slidePatch': {
+      const value = slide(deck, p.slideId); const patches = [];
+      for (const patch of p.patches) {
+        const node = value.nodes.find(item => item.id === patch.nodeId); if (!node) fail(`node not found: ${patch.nodeId}`, 404); if (node.locked) fail('node is locked', 409);
+        patches.push({ nodeId: node.id, content: structuredClone(node.content) }); node.content = nativeTextContent(node, patch.content);
+      }
+      const layoutId = value.layoutRef || value.layoutId; if (p.layoutId) { value.layoutRef = p.layoutId; value.layoutId = p.layoutId; }
+      inverse = { type: command.type, payload: { slideId: p.slideId, patches, ...(p.layoutId ? { layoutId } : {}) } }; break;
+    }
+    case 'theme.setPalette': {
+      const before = structuredClone(project.templateSpec?.palette || deck.themePalette || p.palette);
+      deck.themePalette = structuredClone(p.palette);
+      inverse = { type: command.type, payload: { palette: before } }; break;
+    }
+    case 'theme.setTokens': {
+      const before = structuredClone(deck.themeTokens || { titleScale: 1, bodyScale: 1, spacingScale: 1 });
+      deck.themeTokens = structuredClone(p.tokens);
+      inverse = { type: command.type, payload: { tokens: before } }; break;
     }
     case 'deck.replace': {
       inverse = { type: 'deck.replace', payload: { deck: structuredClone(deck) } }; return { deck: ensureDeckV3(p.deck), inverse };
@@ -88,11 +192,38 @@ async function commit(project, command, meta = {}) {
   if (command.baseRevision > project.revision) fail('baseRevision is newer than the project', 409, { currentRevision: project.revision });
   const conflicts = priorConflicts(project, command);
   if (conflicts.length) fail('command conflicts with newer changes', 409, { currentRevision: project.revision, conflicts: conflicts.map(item => ({ id: item.id, revision: item.revision, targets: item.targets })) });
-  if (project.externalPptx && !meta.allowExternalStructure && !['node.setContent', 'node.setStyle', 'node.setGeometry', 'node.setZIndex', 'ai.objectPatch'].includes(command.type)) {
+  if ((project.externalPptx || project.templateFidelity?.mode === 'preserve') && !meta.allowExternalStructure && !['node.setContent', 'node.setStyle', 'node.setGeometry', 'node.setLocked', 'nodes.setGeometry', 'ai.objectPatch', 'ai.slidePatch'].includes(command.type)) {
     fail('imported PPTX currently supports conservative object edits only', 409);
   }
-  const { deck, inverse } = applyToDeck(project.deck, command);
-  project.deck = deck; enrichAssetRefs(project);
+  if (project.templateFidelity?.mode === 'preserve' && !meta.allowExternalStructure) {
+    const ids = [command.payload.nodeId, ...(command.payload.changes || []).map(item => item.nodeId), ...(command.payload.patches || []).map(item => item.nodeId)].filter(Boolean);
+    const native = ids.map(nodeId => project.deck.slides.flatMap(item => item.nodes || []).find(node => node.id === nodeId));
+    if (native.some(node => !node?.nativeRef)) fail('template edits must target an original template object', 409);
+    if (['node.setContent', 'ai.objectPatch', 'ai.slidePatch'].includes(command.type) && native.some(node => node.type !== 'text')) {
+      fail('template content edits are limited to native text objects', 409);
+    }
+    if (command.type === 'node.setStyle' && native.some(node => node.type !== 'text' && node.type !== 'shape')) {
+      fail('template style edits are limited to native text and shapes', 409);
+    }
+    if (command.type === 'node.setLocked' && native.some(node => node.type !== 'text' && command.payload.locked === false)) {
+      fail('template artwork cannot be unlocked', 409);
+    }
+    if (command.type === 'ai.slidePatch' && command.payload.layoutId) fail('template slide layout cannot be replaced', 409);
+  }
+  const { deck, inverse } = applyToDeck(project.deck, command, project);
+  project.deck = deck;
+  if (project.templateFidelity?.mode === 'preserve') for (const slide of project.deck.slides) {
+    for (const node of slide.nodes.filter(item => item.templateSlot)) {
+      node.templateSlot.mapped = Boolean(String(node.content?.text || '').trim());
+      if (node.semanticRole === 'template-title') {
+        slide.title = String(node.content?.text || '');
+        const canonicalTitle = slide.nodes.find(item => item.semanticRole === 'title');
+        if (canonicalTitle) canonicalTitle.content = { ...(canonicalTitle.content || {}), text: slide.title };
+      }
+    }
+  }
+  if (command.type === 'theme.setPalette') project.templateSpec = { ...(project.templateSpec || {}), palette: structuredClone(command.payload.palette) };
+  enrichAssetRefs(project, { strict: true });
   project.revision += 1; project.draftRevision = project.revision; project.updatedAt = new Date().toISOString();
   const affectedSlideIds = [...new Set([command.payload.slideId].filter(Boolean))];
   project.renderTree = rebuildRenderTree(project, project.renderTree, command.type === 'deck.replace' || command.type.startsWith('slide.') ? [] : affectedSlideIds);
@@ -109,6 +240,7 @@ async function commit(project, command, meta = {}) {
 export function applyCommand(uid, projectId, input, options = {}) {
   return enqueueProject(uid, projectId, async () => {
     const project = getProject(uid, projectId); if (!project) fail('project not found', 404);
+    if (INTERNAL_COMMANDS.has(String(input?.type || '')) && !options.allowInternal) fail('internal command type is not available through the public command API');
     return commit(project, normalizeCommand(input, project), options);
   });
 }

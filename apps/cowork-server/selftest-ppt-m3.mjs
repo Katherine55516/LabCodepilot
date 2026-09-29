@@ -70,7 +70,7 @@ try {
   assert.equal((await request('POST', `/ppt/projects/${baseId}/generate`)).status, 202);
   const base = await settled(baseId, 'completed');
   const oldDeck = structuredClone(base.deck);
-  const updateInput = { baseProjectId: baseId, progressKind: 'paste', progressText: 'Latest fact', template: custom.id, pages: 6, configId: 'test', requestId: 'same-update-request' };
+  const updateInput = { baseProjectId: baseId, progressKind: 'paste', progressText: 'Latest fact', template: custom.id, templateMode: 'mapped', pages: 6, configId: 'test', requestId: 'same-update-request' };
   const updateCreate = await request('POST', '/ppt/updates', updateInput);
   assert.equal(updateCreate.status, 201);
   const nextId = updateCreate.body.project.id;
@@ -120,7 +120,29 @@ print(base64.b64encode((lambda b: (p.save(b),b.getvalue())[1])(io.BytesIO())).de
   assert.equal(pptx.status, 0, pptx.stderr.toString());
   const analyzed = spawnSync(python, ['-c', templates._internals.SCRIPT], { input: Buffer.from(pptx.stdout.toString().trim(), 'base64'), env: { ...process.env, PPT_TEMPLATE_EXT: 'pptx' } });
   assert.equal(analyzed.status, 0, analyzed.stderr.toString());
-  assert.equal(JSON.parse(analyzed.stdout).palette.accent, '#ddaa22');
+  const analyzedTemplate = JSON.parse(analyzed.stdout);
+  assert.equal(analyzedTemplate.palette.accent, '#ddaa22');
+  assert.ok(analyzedTemplate.fonts.titleEastAsia && analyzedTemplate.fonts.bodyEastAsia, 'template analysis must resolve East Asian fonts');
+  assert.equal(analyzedTemplate.fonts.cjkExplicit, true, 'resolved fallback fonts are explicit export tokens');
+  const cjkTemplate = spawnSync(python, ['-c', `import io,base64
+from pptx import Presentation
+from pptx.util import Inches, Pt
+from pptx.oxml.xmlchemy import OxmlElement
+def set_east_asia(run, face):
+    rpr=run._r.get_or_add_rPr()
+    ea=OxmlElement('a:ea'); ea.set('typeface', face); rpr.append(ea)
+p=Presentation(); s=p.slides.add_slide(p.slide_layouts[6])
+title=s.shapes.add_textbox(Inches(1), Inches(1), Inches(8), Inches(1)).text_frame.paragraphs[0].add_run()
+title.text='标题'; title.font.name='Brand Heading'; title.font.size=Pt(32); set_east_asia(title, 'Brand Heading CJK')
+body=s.shapes.add_textbox(Inches(1), Inches(2), Inches(8), Inches(1)).text_frame.paragraphs[0].add_run()
+body.text='正文'; body.font.name='Brand Text'; body.font.size=Pt(14); set_east_asia(body, 'Brand Text CJK')
+b=io.BytesIO(); p.save(b); print(base64.b64encode(b.getvalue()).decode())`], { maxBuffer: 2_000_000 });
+  assert.equal(cjkTemplate.status, 0, cjkTemplate.stderr.toString());
+  const cjkAnalysis = spawnSync(python, ['-c', templates._internals.SCRIPT], { input: Buffer.from(cjkTemplate.stdout.toString().trim(), 'base64'), env: { ...process.env, PPT_TEMPLATE_EXT: 'pptx' } });
+  assert.equal(cjkAnalysis.status, 0, cjkAnalysis.stderr.toString());
+  const cjkFonts = JSON.parse(cjkAnalysis.stdout).fonts;
+  assert.equal(cjkFonts.titleEastAsia, 'Brand Heading CJK', 'actual title run a:ea must override theme defaults');
+  assert.equal(cjkFonts.bodyEastAsia, 'Brand Text CJK', 'actual body run a:ea must override theme defaults');
   const renamedPotx = Buffer.from(pptx.stdout.toString().trim(), 'base64');
   assert.equal(templates.validateTemplate('brand.potx', renamedPotx), 'potx');
   const potxAnalysis = spawnSync(python, ['-c', templates._internals.SCRIPT], { input: renamedPotx, env: { ...process.env, PPT_TEMPLATE_EXT: 'potx' } });
