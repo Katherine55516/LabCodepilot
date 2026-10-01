@@ -8,6 +8,7 @@
 
 | 文件 | 主题 |
 |------|------|
+| ppt-visible-content-depth.md | Factor Zoo 双稿驱动的章节容量页数、完整 provenance、有界来源、原生正文深度、标题列表分组与严格发布门禁 |
 | ppt-mutation-runtime-unification.md | PPT 用户所选模型、计划与约束版本、页级真实预览、暂停恢复、类型化修改、结构提案、独立媒体重试、保护与审查失效，以及十项验收 |
 | ppt-edit-intent-proposal-architecture.md | PPT 四入口共用模板确认、服务端页数重规划、固定范围生成修改/epoch、持久 Proposal、真实前后预览、定向撤回、写前恢复、发布版本隔离与验收边界 |
 | ppt-workspace-m1.md | PPT M1：远程 Cowork 项目事实源、无工具逐页模型 DAG、确定性 PPTX、跨设备与导出边界、文件地图和部署验收 |

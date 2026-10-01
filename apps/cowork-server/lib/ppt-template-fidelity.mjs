@@ -5,8 +5,9 @@ import { importEditablePptx, renderImportedPptx } from './ppt/import-pptx.mjs';
 import { stableId } from './ppt/ir.mjs';
 import { planTemplateSlideMap, profileTemplateSlide, visualSimilarity, catalogTemplateLayouts, TEMPLATE_VARIANTS } from './ppt-template-scheduler.mjs';
 import { semanticMediaForSlide } from './ppt-semantic-media.mjs';
+import { visibleBodyTarget, templateVisualUnits } from './ppt-presentation-writing.mjs';
 
-const visualUnits = value => [...String(value || '')].reduce((sum, char) => sum + (char.codePointAt(0) > 127 ? 1 : .55), 0);
+const visualUnits = templateVisualUnits;
 const numericLabel = value => /^\s*(?:\d{1,2}|[IVX]{1,4})\s*$/i.test(value || '');
 const INCH = 914400;
 const comparable = value => String(value || '').toLocaleLowerCase().replace(/[\s\p{P}\p{S}]/gu, '');
@@ -16,6 +17,7 @@ const FRAGMENT_END = /(?:\b(?:a|an|the|and|or|of|to|for|with|by|in|on|at|from|th
 function incompletePhrase(value) {
   const text = String(value || '').trim().replace(/[.!?。！？]+$/u, '').trim();
   if (!text) return false;
+  if (/(?:^|\s)[A-Z][A-Z0-9]*\/[A-Z][A-Z0-9]*$/u.test(text)) return false;
   return FRAGMENT_END.test(text) || (text.match(/\(/g) || []).length > (text.match(/\)/g) || []).length ||
     (text.match(/（/g) || []).length > (text.match(/）/g) || []).length ||
     (text.split(/\s+/).length > 3 && /\b(?:one|two|three|four|five)\b$/iu.test(text));
@@ -48,7 +50,7 @@ function copyCoverage(expected, visible) {
 }
 
 function visibleSlotText(slide, slots) {
-  return slots.filter(slot => slot.role === 'content' && slot.purpose !== 'footnote').map(slot => {
+  return slots.filter(slot => slot.role === 'content' && !['footnote', 'group-heading'].includes(slot.purpose)).map(slot => {
     const value = slide.templateSlotTexts?.[String(slot.shapeId)];
     return Array.isArray(value) ? value.map(item => `${item?.label || ''} ${item?.body || ''}`).join(' ') : String(value || '');
   }).join(' ');
@@ -154,10 +156,12 @@ function templateSourceAffinity(project, spec) {
 function reclaimedMediaTextFrames(project, slide, size) {
   if (!project.source?.text || templateSourceAffinity(project, slide) >= .38) return new Map();
   const result = new Map();
+  const slotById=new Map(slotsFor(slide).map(slot=>[slot.shapeId,slot]));
   for (const media of contentMediaCandidates(slide, size)) {
     const rightEdge = media.geometry.x + media.geometry.width;
     const neighbor = (slide.nodes || []).filter(node => node.type === 'text' && node.nativeTextFrame &&
-      Number(node.style?.fontSizePt || 0) <= 18 && node.geometry.x >= rightEdge - size.width * .025 &&
+      Number(node.style?.fontSizePt || 0) <= 18 && Number(node.style?.fontWeight || 400) < 600 &&
+      visualUnits(node.content?.text) >= 24 && ['body','point-description'].includes(slotById.get(node.nativeRef.shapeId)?.purpose) && node.geometry.x >= rightEdge - size.width * .025 &&
       Math.abs(node.geometry.y - media.geometry.y) <= size.height * .08 &&
       node.geometry.y + node.geometry.height <= media.geometry.y + media.geometry.height + size.height * .08)
       .sort((a, b) => Math.abs(a.geometry.x - rightEdge) - Math.abs(b.geometry.x - rightEdge))[0];
@@ -167,7 +171,12 @@ function reclaimedMediaTextFrames(project, slide, size) {
     const right = Math.min(size.width, Math.max(rightEdge, neighbor.geometry.x + neighbor.geometry.width));
     const bottom = Math.min(size.height, Math.max(media.geometry.y + media.geometry.height,
       neighbor.geometry.y + neighbor.geometry.height));
-    result.set(neighbor.nativeRef.shapeId, { x, y, width: right - x, height: bottom - y });
+    const expanded={x,y,width:right-x,height:bottom-y};
+    const intersection=(a,b)=>Math.max(0,Math.min(a.x+a.width,b.x+b.width)-Math.max(a.x,b.x))*Math.max(0,Math.min(a.y+a.height,b.y+b.height)-Math.max(a.y,b.y));
+    // Existing intentional overlaps are not permission to increase them.
+    if ((slide.nodes||[]).some(other=>other!==neighbor && other.type==='text' &&
+      intersection(expanded,other.geometry)>intersection(neighbor.geometry,other.geometry)+INCH*INCH*.001)) continue;
+    result.set(neighbor.nativeRef.shapeId, expanded);
   }
   return result;
 }
@@ -245,11 +254,28 @@ function slotsFor(slide) {
   const byId = new Map(text.map(node => [node.nativeRef.shapeId, node]));
   for (const slot of content) {
     const node = byId.get(slot.shapeId);
-    slot.purpose = slot.paragraphCount > 1 ? 'list' : slot.fontSizePt <= 9.5 && node.geometry.width >= 2 * INCH && node.geometry.height <= .22 * INCH ? 'footnote'
-      : node.geometry.width < 1.8 * INCH || slot.capacity < 10 ? 'label' : 'body';
+    // Two native paragraphs can be a wrapped card heading, not two facts.
+    const wrappedHeading = slot.paragraphCount > 1 && slot.capacity < 35 &&
+      visualUnits(node.content.text) < 24 && content.some(other => {
+        const child = byId.get(other.shapeId)?.geometry;
+        const gap = child && child.y - node.geometry.y - node.geometry.height;
+        return other.shapeId !== slot.shapeId && other.fontSizePt <= slot.fontSizePt - 1.5 &&
+          child && gap >= -.05 * INCH && gap <= .8 * INCH && horizontalOverlap(child, node.geometry) >= .65;
+      });
+    const groupHeading = slot.paragraphCount <= 1 && slot.capacity < 70 && slot.fontSizePt >= 16 &&
+      node.geometry.width >= 5 * INCH && node.geometry.height <= .45 * INCH &&
+      content.filter(other => {
+        const child = byId.get(other.shapeId)?.geometry;
+        const gap = child && child.y - node.geometry.y - node.geometry.height;
+        return other.shapeId !== slot.shapeId && other.fontSizePt <= slot.fontSizePt - 1.5 && other.fontSizePt >= 12 &&
+          child && child.width < 3 * INCH && gap >= .05 * INCH && gap <= 2 * INCH;
+      }).length >= 2;
+    slot.purpose = groupHeading ? 'group-heading' : wrappedHeading ? 'point-heading' : slot.paragraphCount > 1 ? 'list' : slot.fontSizePt <= 9.5 && node.geometry.width >= 2 * INCH && node.geometry.height <= .22 * INCH ? 'footnote'
+      : slot.capacity < 10 || (Number(node.style?.fontWeight||400)>=600 && slot.maxLines<=1 && visualUnits(node.content.text)<24) || (node.geometry.width < 1.8 * INCH &&
+        (slot.maxLines <= 1 || visualUnits(node.content.text) < 18)) ? 'label' : 'body';
     if (slot.purpose === 'list' || slot.purpose === 'footnote') continue;
-    if (slot.purpose === 'label') continue;
-    const candidates = content.filter(other => other.shapeId !== slot.shapeId && other.fontSizePt >= slot.fontSizePt + 1.5)
+    if (['label', 'point-heading', 'group-heading'].includes(slot.purpose)) continue;
+    const candidates = content.filter(other => other.shapeId !== slot.shapeId && other.purpose !== 'group-heading' && other.fontSizePt >= slot.fontSizePt + 1.5)
       .map(other => ({ slot: other, node: byId.get(other.shapeId) }))
       .filter(({ node: parent }) => {
         const gap = node.geometry.y - parent.geometry.y - parent.geometry.height;
@@ -264,6 +290,16 @@ function slotsFor(slide) {
       Math.max(8, Math.ceil(visualUnits(slot.example) * .65))));
     parent.purpose = 'point-heading';
   }
+  // Inline status/caption text beside a heading belongs to the same card.
+  for (const slot of content.filter(item => ['body','label'].includes(item.purpose) && item.capacity < 70 && !item.pairedWith)) {
+    const child = byId.get(slot.shapeId)?.geometry;
+    const parent = content.filter(item => item.purpose === 'point-heading' && item.fontSizePt >= slot.fontSizePt + 1.5)
+      .map(item => ({slot:item, geometry:byId.get(item.shapeId)?.geometry}))
+      .filter(({geometry}) => geometry && child && Math.abs(child.y - geometry.y) <= .12 * INCH &&
+        child.x - geometry.x - geometry.width >= -.4 * INCH && child.x - geometry.x - geometry.width <= 1 * INCH)
+      .sort((a,b) => Math.abs(child.x-a.geometry.x-a.geometry.width)-Math.abs(child.x-b.geometry.x-b.geometry.width))[0];
+    if (parent) { slot.purpose = 'point-description'; slot.pairedWith = parent.slot.shapeId; }
+  }
   // Card headings, lists and captions are one semantic unit even when they
   // occupy separate native text boxes. Expose that relationship to the model
   // and to the whole-deck reviewer so a heading cannot silently describe a
@@ -272,13 +308,16 @@ function slotsFor(slide) {
     slot.groupId = slot.pairedWith || slot.shapeId;
     if (!['list', 'footnote'].includes(slot.purpose)) continue;
     const child = byId.get(slot.shapeId)?.geometry;
-    const parent = content.filter(other => ['body', 'point-heading'].includes(other.purpose))
+    const parent = content.filter(other => ['body', 'point-heading', 'label'].includes(other.purpose))
       .map(other => ({ slot: other, geometry: byId.get(other.shapeId)?.geometry }))
       .filter(({ geometry }) => geometry && child && horizontalOverlap(child, geometry) >= .4 &&
         child.y - geometry.y - geometry.height >= -0.05 * INCH &&
         child.y - geometry.y - geometry.height <= 0.8 * INCH)
       .sort((a, b) => (child.y - a.geometry.y - a.geometry.height) - (child.y - b.geometry.y - b.geometry.height))[0];
-    if (parent) slot.groupId = parent.slot.shapeId;
+    if (parent) {
+      slot.groupId = parent.slot.shapeId;
+      if (parent.slot.purpose === 'label' || parent.slot.capacity < 70) parent.slot.purpose = 'point-heading';
+    }
   }
   return slots;
 }
@@ -286,7 +325,15 @@ function slotsFor(slide) {
 // Projects created before semantic slot classification retain their native
 // nodes, so the contract can be upgraded without changing persisted IR IDs.
 function effectiveSlots(spec) {
-  return spec.slots.some(slot => slot.role === 'content' && (!slot.purpose || !slot.groupId)) ? slotsFor({ nodes: spec.nodes }) : spec.slots;
+  if (spec.slots.some(slot => slot.role === 'content' && (!slot.purpose || !slot.groupId ||
+    (slot.purpose === 'label' && slot.maxLines > 1 && slot.capacity >= 10 && visualUnits(slot.example) >= 18))))
+    return slotsFor({ nodes: spec.nodes });
+  if (spec.slots.some(slot => slot.purpose === 'label' || slot.purpose === 'body' && slot.capacity < 70 || slot.purpose === 'list' && slot.capacity < 35)) {
+    const upgraded = slotsFor({ nodes: spec.nodes });
+    if (upgraded.some(slot => (slot.purpose === 'point-heading' &&
+      ['label', 'list'].includes(spec.slots.find(old => old.shapeId === slot.shapeId)?.purpose)) || slot.purpose === 'point-description' && slot.pairedWith && !spec.slots.find(old => old.shapeId === slot.shapeId)?.pairedWith || slot.purpose === 'group-heading' && spec.slots.find(old => old.shapeId === slot.shapeId)?.purpose !== 'group-heading')) return upgraded;
+  }
+  return spec.slots;
 }
 
 function profileSourceSlide(slide, size, richSource = false) {
@@ -294,12 +341,12 @@ function profileSourceSlide(slide, size, richSource = false) {
   if (richSource) expandSafeDescriptions(prepared.nodes, size);
   const profile = profileTemplateSlide(prepared, size);
   const slots = slotsFor(prepared);
-  const content = slots.filter(slot => slot.role === 'content' && slot.purpose !== 'footnote');
+  const content = slots.filter(slot => slot.role === 'content' && !['footnote', 'group-heading'].includes(slot.purpose));
   const listItems = content.filter(slot => slot.purpose === 'list').reduce((sum, slot) => sum + slot.paragraphCount, 0);
-  const independent = content.filter(slot => !['list', 'point-description'].includes(slot.purpose)).length;
+  const independent = new Set(content.map(slot => slot.groupId || slot.pairedWith || slot.shapeId)).size;
   profile.semantic = { contentSlots: content.length, listItems,
     totalVisualCapacity: content.reduce((sum, slot) => sum + slot.capacity, 0),
-    semanticUnitCapacity: Math.max(1, Math.min(10, listItems + independent)) };
+    semanticUnitCapacity: Math.max(1, Math.min(10, independent)) };
   const ordinals = (prepared.nodes || []).filter(node => node.type === 'text' && /^0?[1-9]\d?$/.test(String(node.content?.text || '').trim()))
     .sort((a, b) => Math.abs(a.geometry.y - b.geometry.y) < size.height * .08
       ? a.geometry.x - b.geometry.x : a.geometry.y - b.geometry.y);
@@ -480,7 +527,6 @@ function buildFidelity(project, sourceSlides, externalPptx, templateHash, profil
         if (reclaimedFrames.has(base.nativeRef.shapeId)) {
           node.geometry = reclaimedFrames.get(base.nativeRef.shapeId);
           node.nativeTextFrame = { ...node.nativeTextFrame, wordWrap: true };
-          node.style = { ...node.style, fontSizePt: Math.max(17, Number(node.style?.fontSizePt || 0)) };
           node.content = { ...node.content, adaptiveMediaReclaim: true };
         }
         if (base.type === 'image' && repeated) {
@@ -570,14 +616,17 @@ export function templateSlotPrompt(project, index) {
     kind: 'source-content-image', widthRatio: Number((node.geometry.width / project.templateFidelity.width).toFixed(2)),
     heightRatio: Number((node.geometry.height / project.templateFidelity.height).toFixed(2)) }));
   const plan = project.planning?.slidePlan?.[index];
-  return `\n模板第 ${index + 1} 页：独立内容组容量 ${plan?.templatePointCapacity || new Set(readingOrder.filter(slot => slot.role === 'content' && slot.purpose !== 'footnote').map(slot => slot.groupId)).size}，本页计划至少 ${plan?.templatePointTarget || '按来源可支撑的数量'} 组；内容型原图 ${JSON.stringify(media)}。文本槽位：${JSON.stringify(readingOrder.map((slot, order) => ({ id: String(slot.shapeId), readingOrder: order + 1, role: slot.role, purpose: slot.purpose, pairedWith: slot.pairedWith,
+  return `\n模板第 ${index + 1} 页：独立内容组容量 ${plan?.templatePointCapacity || new Set(readingOrder.filter(slot => slot.role === 'content' && !['footnote', 'group-heading'].includes(slot.purpose)).map(slot => slot.groupId)).size}，本页计划至少 ${plan?.templatePointTarget || '按来源可支撑的数量'} 组；内容型原图 ${JSON.stringify(media)}。文本槽位：${JSON.stringify(readingOrder.map((slot, order) => ({ id: String(slot.shapeId), readingOrder: order + 1, role: slot.role, purpose: slot.purpose, pairedWith: slot.pairedWith,
     groupId: slot.groupId,
     example: slot.example, minVisualUnits: slot.minVisualUnits, maxVisualUnits: slot.capacity,
     requiredItems: slot.purpose === 'list' ? slot.paragraphCount : undefined, maxLines: slot.maxLines, lineVisualUnits: slot.lineVisualUnits, wordWrap: slot.wordWrap,
     paragraphPatterns: slot.purpose === 'list' ? slot.paragraphs.map(item => ({ hasLabelRun: item.hasLabelRun, example: item.example })) : undefined })))}。` +
     '请在 JSON 中额外返回 slotTexts 对象，key 为上述槽位 id，value 为替换文字。标题与 title 字段一致，section 使用短标签。优先填入互不重复、由来源支持的独立事实；原模板槽位与本页主题不符或来源事实不足时，在 omitTemplateShapes 中列出该内容槽位、不适配图片、图表或表格的 shapeId 和至少八字的具体 reason，并省略其 slotTexts。配对的标题与说明须同时保留或同时省略。内容型原图须有当前来源的事实/图像绑定，否则应省略；背景照片、图标及纯装饰可保留。不要以章节名、标题、focus 或首条要点循环填满所有槽位；不需要的媒体及其旧图解标签应一起省略。' +
+    'purpose=group-heading 是一组卡片的导航标题，不是独立事实；写简短分组标签，不消耗本页独立要点。' +
     'purpose=list 的 value 必须是恰好 requiredItems 个对象的数组，每项为 {"label":"加粗短名称","body":"常规字重的来源支持说明"}；hasLabelRun 为 true 时两部分都要有内容。每条必须不同，合计行数不得超过 maxLines，每行不超过 lineVisualUnits。' +
+    `富来源正文的可见目标为约 ${Math.ceil(visibleBodyTarget(readingOrder.filter(slot => slot.role === 'content' && !['footnote', 'group-heading'].includes(slot.purpose)).reduce((sum, slot) => sum + slot.capacity, 0), project.planning?.slidePlan?.[index]?.depth))} visual units（封面、分节页除外）。不足时补充本页来源支持的解释，不能以重复、空话、删正文区域凑数。` +
     'wordWrap 禁止的单行槽位只能写一行；其他槽位也要按给定 maxLines 和 lineVisualUnits 控制长度。若存在 maxVisualUnits≥70 的正文槽位，优先用于来源中的完整机制、算例、适用条件和限制；不要只填一句概括，却把大量依据留在不可见的 factSynthesis。补充说明 footnote 用简短说明，不承担正文要点。' +
+    '标题若承诺N类/种/方法，需在本页或同一来源表格的相关页面保留所有行名称；同语言使用来源规范名称，不能只呈现部分行却沿用完整数量。' +
     '先把本页来源整理成独立的事实单元，再把同一事实单元的短标题与说明填入配对槽位；相同 groupId 的卡片标题、列表或脚注必须共同解释一个小主题，列表中的每个名称和说明也必须对应同一事实。概念/机制与案例/演示步骤应分开展示并标注，不要把相邻章节的句子混入本页。不得用 Point A 等占位标签，不得按字符裁切原句；容量不足时改写成完整短句。' +
     'contentBlocks 只记录本页实际能呈现在模板槽位中的内容，其 body 的主要事实必须在 slotTexts 中可见；不能在 contentBlocks 写三条而只呈现一条。若模板只容纳一到两条独立要点，请写相同数量的完整内容块，将必讲细节合并为简洁完整的说明，或在规划阶段分配到其他页面。' +
     'point-heading 是短要点标题；与之配对的 point-description 必须用一句来源支持的简洁说明解释该要点是什么、如何起作用或带来什么结果，不能只重复标题或填几个词；对应的 contentBlocks heading/body 应表达同一事实。label 是图示短标签，不强制扩写。' +
@@ -591,7 +640,7 @@ export function templateOutlinePrompt(project) {
   const selected = slides.length > 30 ? [...slides.slice(0, 12), ...slides.slice(-3)] : slides;
   const contracts = selected.map((slide) => ({ page: slide.index + 1,
     titleExample: slide.slots.find(slot => slot.role === 'title')?.example || '',
-    pointGroups: new Set(effectiveSlots(slide).filter(slot => slot.role === 'content' && slot.purpose !== 'footnote')
+    pointGroups: new Set(effectiveSlots(slide).filter(slot => slot.role === 'content' && !['footnote', 'group-heading'].includes(slot.purpose))
       .map(slot => String(slot.groupId || slot.shapeId))).size,
     textSlots: effectiveSlots(slide).filter(slot => slot.role === 'content').map(slot => ({ purpose: slot.purpose,
       requiredItems: slot.purpose === 'list' ? slot.paragraphCount : undefined,
@@ -630,7 +679,7 @@ export function inspectTemplateSlotDraft(project, index, slide) {
   });
   issues.push(...omissionIssues);
   const groups = new Map();
-  for (const slot of slots.filter(item => item.role === 'content' && item.purpose !== 'footnote')) {
+  for (const slot of slots.filter(item => item.role === 'content' && !['footnote', 'group-heading'].includes(item.purpose))) {
     const id = String(slot.groupId || slot.pairedWith || slot.shapeId);
     groups.set(id, [...(groups.get(id) || []), slot]);
   }
@@ -645,18 +694,20 @@ export function inspectTemplateSlotDraft(project, index, slide) {
   const contract = project.planning?.slidePlan?.find(item => item.slideId === slide.id);
   const richSource = project.inputProfile?.level === 'rich' || String(project.source?.text || '').length >= 8000;
   if (richSource && contract?.role !== 'section' && index > 0 && index < (project.pages || project.outline?.length || Infinity) - 1) {
-    const activeContentSlots = slots.filter(item => item.role === 'content' && item.purpose !== 'footnote' && !omitted.has(String(item.shapeId)));
-    const available = activeContentSlots.reduce((sum, item) => sum + Number(item.capacity || 0), 0);
+    const activeContentSlots = slots.filter(item => item.role === 'content' && !['footnote', 'group-heading'].includes(item.purpose) && !omitted.has(String(item.shapeId)));
+    // Omitting body slots cannot lower the page's planned information target.
+    const available = slots.filter(item => item.role === 'content' && !['footnote', 'group-heading'].includes(item.purpose))
+      .reduce((sum, item) => sum + Number(item.capacity || 0), 0);
     const visible = visualUnits(visibleSlotText(slide, activeContentSlots));
-    const target = contract?.depth === 'detailed' ? 160 : 130;
+    const target = visibleBodyTarget(available, contract?.depth);
     const sourceBoundMedia = spec.nodes.some(node => node.content?.mediaReplacement);
-    if (!sourceBoundMedia && available >= target && visible < target * .8) issues.push({
+    if (!sourceBoundMedia && available >= 130 && visible < target) issues.push({
       code: 'template_copy_sparse', severity: 'error',
       message: `模板第 ${index + 1} 页可见正文约 ${Math.ceil(visible)} visual units，低于富来源页面的有效信息目标；使用可用正文空间补充不同的机制、条件或例子`,
-      repair: 'fill_template_slots', visibleUnits: visible, availableUnits: available });
+      repair: 'fill_template_slots', visibleUnits: visible, availableUnits: available, minVisualUnits: Math.ceil(target) });
     for (const slot of slots.filter(item => item.role === 'content' && item.purpose === 'body' && item.capacity >= 70 && !omitted.has(String(item.shapeId)))) {
       const used = visualUnits(slide.templateSlotTexts?.[String(slot.shapeId)]);
-      const minimum = Math.min(48, Math.ceil(slot.capacity * .3));
+      const minimum = Math.min(110, Math.ceil(slot.capacity * .4));
       if (used > 0 && used < minimum) issues.push({ code: 'template_body_underused', severity: 'error',
         message: `模板第 ${index + 1} 页正文槽位 ${slot.shapeId} 可容纳约 ${slot.capacity} visual units，仅使用 ${Math.ceil(used)}；请从本页来源补充机制、条件或例子，或将该区域明确省略`,
         repair: 'fill_template_slots', shapeId: slot.shapeId, capacity: slot.capacity, minVisualUnits: minimum });
@@ -797,7 +848,10 @@ export function inspectTemplateFidelity(project) {
       variantKeys.add(variantKey);
       const original = project.templateFidelity.slides.find((item, originalIndex) => originalIndex < index && item.sourceIndex === source.sourceIndex);
       const originalShapes = new Map((original?.nodes || []).map(node => [node.nativeRef.shapeId, node]));
-      const visualChanged = native.some(node => {
+      const retainedShapes = new Set(native.map(node => node.nativeRef.shapeId));
+      const removedComponent = [...originalShapes.keys()].some(shapeId => !retainedShapes.has(shapeId) &&
+        (slide.templateOmissions || []).some(item => String(item.shapeId) === String(shapeId)));
+      const visualChanged = removedComponent || native.some(node => {
         const base = originalShapes.get(node.nativeRef.shapeId);
         return base && (node.geometry.x !== base.geometry.x || node.geometry.y !== base.geometry.y ||
           node.geometry.width !== base.geometry.width || node.geometry.height !== base.geometry.height ||
@@ -835,4 +889,4 @@ export function inspectTemplateFidelity(project) {
   return issues;
 }
 
-export const _internals = { slotsFor, visualUnits, profileSourceSlide, panelSwapGeometry, ordinalReadingOrder, expandSafeDescriptions };
+export const _internals = { slotsFor, visualUnits, profileSourceSlide, panelSwapGeometry, ordinalReadingOrder, expandSafeDescriptions, reclaimedMediaTextFrames };

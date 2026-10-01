@@ -310,6 +310,16 @@ export function materializeCopy(value, outlineSlide, planning, previousTitles = 
   };
 }
 
+/** Native slot geometry and native body QA must use the same unit scale. */
+export function templateVisualUnits(value) {
+  return [...String(value || '')].reduce((sum, char) => sum + (char.codePointAt(0) > 127 ? 1 : .55), 0);
+}
+
+/** Visible body budget uses native geometry, never the amount of old copy. */
+export function visibleBodyTarget(capacity, depth) {
+  return Math.min(Math.max(0, Number(capacity || 0)) * .48, depth === 'detailed' ? 440 : 330);
+}
+
 function availableSupport(slide, visibleOnly = false) {
   const found = new Set(['main_claim']);
   const synthesis = slide.factSynthesis || {};
@@ -325,7 +335,8 @@ function availableSupport(slide, visibleOnly = false) {
     if (block.type === 'impact') found.add('implication');
     if (block.type === 'runtime') found.add('mechanism');
   }
-  if (slide.copy?.takeaway) found.add('implication');
+  if (slide.copy?.takeaway && (!visibleOnly || (slide.nodes || []).some(node => node.nativeRef &&
+    String(node.content?.text || '').includes(slide.copy.takeaway)))) found.add('implication');
   return found;
 }
 

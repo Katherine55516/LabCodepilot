@@ -111,8 +111,8 @@ function normalizeOutline(value, count, source, update = null, deckTitle = null)
     return { id: typeof s.id === 'string' && /^[a-zA-Z0-9_-]{1,80}$/.test(s.id) ? s.id : newIrId('slide'), title,
       focus, description: bounded(s.description || s.focus || s.title, 360, `slide ${index + 1} description`, false), children,
       section: compileSectionLabel(bounded(s.section || s.title, MAX_TEXT, `slide ${index + 1} section`)),
-      refs: Array.isArray(s.refs) ? [...new Set(s.refs.map(String))].filter(ref => validRefs.has(ref)).slice(0, 10) : [],
-      ...(Array.isArray(s.chunkRefs) ? { chunkRefs: [...new Set(s.chunkRefs.map(String))].filter(ref => validChunkRefs.has(ref)).slice(0, 12) } : {}),
+      refs: Array.isArray(s.refs) ? [...new Set(s.refs.map(String))].filter(ref => validRefs.has(ref)) : [],
+      ...(Array.isArray(s.chunkRefs) ? { chunkRefs: [...new Set(s.chunkRefs.map(String))].filter(ref => validChunkRefs.has(ref)) } : {}),
       ...(typeof s.role === 'string' ? { role: s.role.slice(0, 40) } : {}),
       ...(typeof s.question === 'string' ? { question: s.question.slice(0, 240) } : {}),
       ...(typeof s.headlineIntent === 'string' || typeof s.headline_intent === 'string' ? { headlineIntent: String(s.headlineIntent || s.headline_intent).slice(0, 160) } : {}),
@@ -307,8 +307,15 @@ function normalizeSlide(value, outlineSlide, project = null, previousTitles = []
     .filter(id => retrieval?.evidenceAtoms.some(atom => atom.id === id)).slice(0, 10);
   if (project?.templateFidelity?.mode === 'preserve') {
     const valid = new Set(project.templateFidelity.slides[project.outline.findIndex(item => item.id === outlineSlide.id)]?.slots.map(slot => String(slot.shapeId)) || []);
-    slide.templateSlotTexts = Object.fromEntries(Object.entries(value?.slotTexts || {}).filter(([key, text]) => valid.has(key) && (typeof text === 'string' || Array.isArray(text))).map(([key, text]) => [key,
-      typeof text === 'string' ? text.slice(0, 500) : text.slice(0, 30).map(item => ({ label: String(item?.label || '').slice(0, 120), body: String(item?.body || '').slice(0, 500) }))]));
+    slide.templateSlotTexts = Object.fromEntries(Object.entries(value?.slotTexts || {}).filter(([key, text]) => valid.has(key) && (typeof text === 'string' || Array.isArray(text))).map(([key, text]) => {
+      if (typeof text === 'string') {
+        if (text.length > 5000) throw new HttpError(400, `template slot ${key} exceeds the text safety limit; rewrite without truncation`);
+        return [key, text];
+      }
+      if (text.length > 30 || text.some(item => String(item?.label || '').length > 120 || String(item?.body || '').length > 2000))
+        throw new HttpError(400, `template slot ${key} exceeds the list safety limit; redistribute without truncation`);
+      return [key, text.map(item => ({ label: String(item?.label || ''), body: String(item?.body || '') }))];
+    }));
     const sourceNodes = project.templateFidelity.slides[project.outline.findIndex(item => item.id === outlineSlide.id)]?.nodes || [];
     const omittable = new Set(sourceNodes.filter(node => ['image', 'chart', 'table'].includes(node.type) ||
       (node.type === 'text' && project.templateFidelity.slides[project.outline.findIndex(item => item.id === outlineSlide.id)]?.slots.some(slot => slot.shapeId === node.nativeRef?.shapeId && slot.role === 'content')))

@@ -197,6 +197,7 @@ export function deterministicReview(project, deckInput = project.deck) {
   const report = inspectReportReadiness(project, deck);
   issues.push(...report.issues);
   return { version: 1, checkedAt: new Date().toISOString(), issues, hardErrors: issues.filter(item => item.severity === 'error').length,
+    strictCoverage: project.planning?.brief?.depthPolicy === 'strict' && !project.compressionApproved,
     contentMetrics: content.metrics, report };
 }
 
@@ -265,7 +266,7 @@ export function repairProject(project, initialReview) {
     }
     // Fact synthesis may already contain an implication. Surface it as a
     // compact takeaway instead of inventing extra prose during repair.
-    if (contract.depth === 'detailed' && !slide.copy?.takeaway && slide.factSynthesis?.implications?.[0]) {
+    if (updated.templateFidelity?.mode !== 'preserve' && contract.depth === 'detailed' && !slide.copy?.takeaway && slide.factSynthesis?.implications?.[0]) {
       slide.copy ||= {}; slide.copy.takeaway = slide.factSynthesis.implications[0].slice(0, 180);
       const node = slide.nodes?.find(item => item.semanticRole === 'takeaway');
       if (node) node.content = { ...(node.content || {}), text: slide.copy.takeaway };
@@ -299,7 +300,7 @@ export function deckReviewPrompt(project) {
     const visibleSlots = native.filter(node => node.templateSlot?.mapped && node.templateSlot?.role !== 'section')
       .slice(0, longDeck ? 24 : 30).map(node => ({ purpose: node.templateSlot.purpose || node.templateSlot.role,
         groupId: node.templateSlot.groupId,
-        text: String(node.content?.text || '').slice(0, 180) })).filter(slot => {
+        text: String(node.content?.text || '').slice(0, pageTextBudget) })).filter(slot => {
           const cost = slot.text.length + 40;
           if (remaining < cost) return false;
           remaining -= cost;
@@ -308,7 +309,7 @@ export function deckReviewPrompt(project) {
     const contract = project.planning?.slidePlan?.find(item => item.slideId === slide.id);
     const evidenceById = new Map((project.source?.semantic?.evidenceAtoms || []).map(atom => [atom.id, atom]));
     const evidence = (contract?.requiredEvidenceIds || []).map(id => evidenceById.get(id)).filter(Boolean)
-      .map(atom => ({ id: atom.id, kind: atom.kind, sourceRef: atom.sourceRef, location: atom.location,
+      .map(atom => ({ id: atom.id, kind: atom.kind, sourceRef: atom.sourceRef, sourceRefs: atom.sourceRefs || [], location: atom.location,
         excerpt: atom.exactText.slice(0, 330) }));
     // Canonical components can carry facts absent from legacy bullets. Never send
     // image base64 or geometry to the text critic; retain chart values and units.
@@ -324,11 +325,12 @@ export function deckReviewPrompt(project) {
       ...(semanticComponents.length ? { semanticComponents } : {}),
       ...(visiblePoints.length ? { visiblePoints } : {}), ...(visibleSlots.length ? { visibleSlots } : {}),
       ...(evidence.length ? { requiredEvidence: evidence } : {}),
+      requiredDetails: contract?.requiredDetails || [],
       sourceKinds: (slide.sourceChunks || []).map(id => project.source?.semantic?.chunks?.find(chunk => chunk.id === id)?.contentKind).filter(Boolean),
       sourceRefs: slide.sourceRefs || [], layoutId: slide.layoutId };
   });
-  const cited = new Set(slides.flatMap(slide => slide.requiredEvidence?.length ? slide.requiredEvidence.map(atom => atom.sourceRef)
-    : (slide.sourceRefs || []).slice(0, 1)));
+  const cited = new Set(slides.flatMap(slide => [...(slide.requiredEvidence || []).flatMap(atom => [atom.sourceRef, ...(atom.sourceRefs || [])].filter(Boolean)),
+    ...(slide.sourceRefs || []).slice(0, longDeck ? 4 : 12)]));
   const sources = (project.source?.segments || []).filter(segment => cited.has(segment.id)).slice(0, longDeck ? 80 : 120)
     .map(segment => ({ id: segment.id, location: segment.location, text: segment.text.slice(0, longDeck ? 240 : 500) }));
   const brief = project.planning?.brief;
@@ -358,7 +360,7 @@ export function normalizeModelReview(value, slideIds) {
 
 export function finalQualityReport(deterministic, repairs, modelReview, timings = {}) {
   const modelIssues = [
-    ...modelReview.missing.map(item => ({ code: 'model_missing', severity: 'warning', ...item })),
+    ...modelReview.missing.map(item => ({ code: 'model_missing', severity: deterministic.strictCoverage ? 'error' : 'warning', ...item })),
     ...modelReview.repeated.map(item => ({ code: 'model_repeated', severity: 'warning', ...item })),
     ...modelReview.conflicts.map(item => ({ code: 'model_conflict', severity: 'error', ...item })),
     ...modelReview.unsupported.map(item => ({ code: 'model_unsupported', severity: 'error', ...item })),

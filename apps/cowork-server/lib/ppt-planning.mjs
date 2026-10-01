@@ -56,20 +56,29 @@ export function sourceCapacityPlan(source, selectedPages = null) {
   // bilingual/source tokens can be synthesized into four to six substantive
   // points while keeping the deck near one teachable page per chapter.
   const sourceBudgetPerPage = 2700;
-  const recommended = clamp(2 + Math.max(Math.ceil(totalCost / sourceBudgetPerPage), Math.ceil(entries.length * .9)), 5, 100);
+  // Reserve readable space per chapter before adding the cover/closing pages.
+  // A long theory chapter must not lose its capacity to many short chapters.
+  // Root-level introductory material can be used on the cover; it is not an
+  // additional body chapter when the document has explicit subsections.
+  const intro = sharedRoot && entries.length > 1 ? entries.find(section => section.title === roots[0]) : null;
+  const chapterPages = section => section === intro ? 0 : Math.max(1, Math.ceil(section.contentCost / sourceBudgetPerPage));
+  const recommended = clamp(2 + entries.reduce((sum, section) => sum + chapterPages(section), 0), 5, 100);
   const pages = clamp(selectedPages || recommended);
   const bodyPages = Math.max(1, pages - 2);
   const allocations = entries.map(section => ({ ...section, slides: 0 }));
-  if (bodyPages >= allocations.length) for (const section of allocations) section.slides = 1;
-  else for (const section of [...allocations].sort((a, b) => b.contentCost - a.contentCost)
+  const bodySections = allocations.filter(section => section.title !== intro?.title);
+  const chapterMinimum = bodySections.reduce((sum, section) => sum + Math.max(1, Math.ceil(section.contentCost / sourceBudgetPerPage)), 0);
+  if (bodyPages >= chapterMinimum) for (const section of bodySections) section.slides = Math.max(1, Math.ceil(section.contentCost / sourceBudgetPerPage));
+  else if (bodyPages >= bodySections.length) for (const section of bodySections) section.slides = 1;
+  else for (const section of [...bodySections].sort((a, b) => b.contentCost - a.contentCost)
     .slice(0, bodyPages)) section.slides = 1;
   let remaining = bodyPages - allocations.reduce((sum, section) => sum + section.slides, 0);
-  while (remaining > 0 && allocations.length) {
-    const candidate = [...allocations].sort((a, b) => b.contentCost / (b.slides + 1) - a.contentCost / (a.slides + 1) ||
+  while (remaining > 0 && bodySections.length) {
+    const candidate = [...bodySections].sort((a, b) => b.contentCost / (b.slides + 1) - a.contentCost / (a.slides + 1) ||
       Number(b.priority === 'high') - Number(a.priority === 'high'))[0];
     candidate.slides++; remaining--;
   }
-  const compactSections = allocations.filter(section => section.slides === 0).map(section => section.title);
+  const compactSections = bodySections.filter(section => section.slides === 0).map(section => section.title);
   return { recommended, selected: pages, bodyPages, sourceTokens: entries.reduce((sum, section) => sum + section.sourceTokens, 0),
     contentCost: totalCost, sections: allocations, compactSections,
     preservedObjects: [...new Set(entries.flatMap(section => section.objects))],
@@ -99,7 +108,9 @@ export function estimatePageRecommendation(project) {
     ? Math.max(1, Math.ceil(semanticTokens / 550), Math.ceil(substantialSections * .85))
     : Math.max(1, headings, Math.ceil(text.length / 2400), fileWeight);
   const detailWeight = Math.min(6, Math.ceil((tables + implementationSignals) / 10));
-  const overviewIntent = /(?:overview|survey|概览|综述|导览|入门)/iu.test(`${project?.prompt || ''} ${source?.name || ''}`);
+  // A filename is source metadata, not authorization to compress a tutorial.
+  const intent = String(project?.prompt || '').replace(/\S+\.(?:md|txt|pdf|docx?|pptx?|html?)\b/giu, '');
+  const overviewIntent = /(?:\b(?:overview|survey)\b|概览|综述|导览|入门)/iu.test(intent);
   const chapters = (text.match(/^##\s+\d+[.)]\s+.+$/gm) || []).length;
   const overviewEstimate = overviewIntent && chapters >= 6 ? clamp(2 + Math.ceil(chapters / 1.75), 5, 100) : null;
   const recommended = sparseEstimate?.recommended || overviewEstimate || capacity?.recommended || clamp(2 + Math.ceil(semanticTopics * .7) + Math.ceil(highPriority * .25) + detailWeight, 5, 100);
@@ -464,9 +475,13 @@ export function retrieveSlideSources(project, outlineSlide, contract, maxChunks 
     const priority = chunk.priority === 'high' ? 40 : chunk.priority === 'medium' ? 10 : 0;
     return { chunk, score: directScore + priority + overlap * 12 };
   }).filter(item => item.score > 0).sort((a, b) => b.score - a.score || a.chunk.id.localeCompare(b.chunk.id)).slice(0, maxChunks).map(item => item.chunk);
-  const sourceRefs = [...new Set([...lockedRefs, ...directRefs, ...scored.flatMap(chunk => chunk.sourceRefs || [])])]
-    .slice(0, Math.max(12, lockedRefs.length));
-  const segments = (project.source?.segments || []).filter(segment => sourceRefs.includes(segment.id));
+  const sourceRefs = [...new Set([...lockedRefs, ...directRefs, ...scored.flatMap(chunk => chunk.sourceRefs || [])])];
+  // Provenance is complete; the writer's context is separately bounded. Put
+  // locked and retrieved excerpts first so long early chapters cannot hide a
+  // relevant later formula behind a character-budget truncation.
+  const contextRefs = [...new Set([...lockedRefs, ...scored.flatMap(chunk => chunk.sourceRefs || []), ...directRefs])];
+  const segmentById = new Map((project.source?.segments || []).map(segment => [segment.id, segment]));
+  const segments = contextRefs.map(id => segmentById.get(id)).filter(Boolean);
   const selectedEvidence = evidenceAtoms.filter(atom => scored.some(chunk => chunk.id === atom.chunkId) || locked.includes(atom))
     .map(atom => ({ atom, score: locked.includes(atom) ? 2 : evidenceRelevance(atom, query) }))
     .filter(item => item.score >= .12).sort((a, b) => b.score - a.score || a.atom.id.localeCompare(b.atom.id))

@@ -1,6 +1,6 @@
 /** Deterministic content diagnostics within the existing quality node. */
 import { evidenceMeasurements, evidenceVisible, missingRequiredEvidence, visibleSlideText } from './ppt-evidence.mjs';
-import { visualUnits } from './ppt-presentation-writing.mjs';
+import { visualUnits, visibleBodyTarget, templateVisualUnits } from './ppt-presentation-writing.mjs';
 function normalized(value) { return String(value || '').toLocaleLowerCase().replace(/[\s\p{P}\p{S}]+/gu, ''); }
 const formulaKey = value => String(value || '').replace(/[`\s]/g, '').toLocaleLowerCase();
 function formulaCalls(value) {
@@ -37,16 +37,37 @@ function significantNumbers(value) {
     }));
 }
 
+// A cardinality claim tied to a source table must retain every row label on
+// its mapped pages. This is a row-presence check, not semantic cell coverage.
+function promisedTableRows(title) {
+  const names = ['zero','one','two','three','four','five','six','seven','eight','nine','ten','eleven','twelve'];
+  const match = String(title || '').toLowerCase().match(/\b(\d{1,2}|zero|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve)\s+(?:factor\s+)?(?:families|categories|types|methods|features)\b/u);
+  return match ? names.includes(match[1]) ? names.indexOf(match[1]) : Number(match[1]) : null;
+}
+function rowLabelVisible(label, text) {
+  const englishAlias = label.replace(/\([^)]*\)/gu, '').split(/[\u3400-\u9fff]/u)[0].trim();
+  if (/[\u3400-\u9fff]/u.test(label) && normalized(text).includes(normalized(label))) return true;
+  const clean = value => String(value || '').toLowerCase().replace(/[\s\p{P}\p{S}]+/gu, ' ').trim();
+  return [label, englishAlias].filter(Boolean).some(alias => ` ${clean(text)} `.includes(` ${clean(alias)} `));
+}
+function tableRowLabels(block) {
+  const rows = String(block.text || '').split('\n').filter(line => /^\s*\|/u.test(line)).map(line => line.trim().slice(1).split(/(?<!\\)\|/u).map(cell => cell.trim()));
+  const divider = rows.findIndex(row => row.length > 1 && row.every(cell => !cell || /^[:\s-]+$/u.test(cell)));
+  if (divider < 0) return [];
+  return rows.slice(divider + 1).map(row => row[0].replace(/[*`$]/gu, '').trim()).filter(Boolean);
+}
+
 export function inspectContent(project, deck = project.deck) {
   const issues = [];
   const metrics = { coverageRatio: null, highPriorityCoverageRatio: null, copyLikeness: 0, adjacentRedundancy: 0, unsupportedNumberCount: 0,
     semanticUnitsPerSlide: [], requiredDetailCoverage: null, densityDistributionMatch: null, pageCountCompliant: true,
     unsupportedContentPages: 0, repeatedClaimsAcrossDeck: 0, sourceDensityRatio: null,
     plannedChunkCoverageRatio: null, evidenceCoverageRatio: null, requiredEvidenceCount: 0, renderedEvidenceCount: 0,
-    visibleContentUnitsPerSlide: [], templateCapacityWarnings: 0, chapterCoverageRatio: null };
+    visibleContentUnitsPerSlide: [], templateCapacityWarnings: 0, chapterCoverageRatio: null, requiredTableRows: 0, renderedTableRows: 0 };
   const slides = deck?.slides || [];
   const segments = project.source?.segments || [];
   const coverage = project.planning?.coverage || [];
+  const strictCoverage = project.planning?.brief?.depthPolicy === 'strict' && !project.compressionApproved;
   if (project.pages && slides.length !== project.pages) {
     metrics.pageCountCompliant = false;
     issues.push({ code: 'page_count_compliance', severity: 'error', message: `输出 ${slides.length} 页，与用户确认的 ${project.pages} 页不一致`, slideId: null, repairable: false });
@@ -56,7 +77,7 @@ export function inspectContent(project, deck = project.deck) {
     const important = coverage.filter(item => item.priority === 'high');
     metrics.plannedChunkCoverageRatio = included / coverage.length;
     for (const item of important.filter(item => item.action === 'unmapped').slice(0, 12)) {
-      issues.push({ code: 'source_coverage', severity: 'warning', message: `高优先级主题未映射到页面：${item.topic}`, slideId: null, repairable: false, chunkId: item.chunkId });
+      issues.push({ code: 'source_coverage', severity: strictCoverage ? 'error' : 'warning', message: `高优先级主题未映射到页面：${item.topic}`, slideId: null, repairable: false, chunkId: item.chunkId });
     }
   }
   const chapters = project.planning?.sourceCapacity?.sections || [];
@@ -68,13 +89,36 @@ export function inspectContent(project, deck = project.deck) {
       const explained = decisions.length && decisions.every(item => item.action === 'omitted' && item.reason);
       if (included) mapped++;
       else if (!explained && chapter.sourceTokens >= 200) issues.push({
-        code: 'source_chapter_unmapped', severity: 'warning', slideId: null, repairable: false,
+        code: 'source_chapter_unmapped', severity: strictCoverage ? 'error' : 'warning', slideId: null, repairable: false,
         message: `来源章节未映射且未说明取舍：${chapter.title}`,
       });
     }
     metrics.chapterCoverageRatio = mapped / chapters.length;
   }
   const chunks = project.source?.semantic?.chunks || [];
+  const sourceBlocks = project.source?.semantic?.blocks || [];
+  const checkedTables = new Set();
+  for (const slide of slides) {
+    const count = promisedTableRows(slide.title);
+    const outline = (project.outline || []).find(item => item.id === slide.id);
+    const tableIntent = outline?.visualIntent?.type === 'table';
+    if (!count && !tableIntent) continue;
+    const citedChunks = chunks.filter(chunk => outline?.chunkRefs?.includes(chunk.id));
+    for (const chunk of citedChunks) for (const block of sourceBlocks.filter(item => item.type === 'table' && chunk.sourceBlocks?.includes(item.id))) {
+      const labels = tableRowLabels(block);
+      if (labels.length < 2 || !tableIntent && labels.length !== count || checkedTables.has(block.id)) continue;
+      checkedTables.add(block.id);
+      if (count && tableIntent && count !== labels.length) issues.push({code:'source_table_cardinality',severity:strictCoverage?'error':'warning',slideId:slide.id,chunkId:chunk.id,blockId:block.id,repairable:false,message:`页面声明 ${count} 类/项，而对应来源表格为 ${labels.length} 行；需明确取舍或修正标题数量`});
+      const peers = (project.outline || []).filter(item => item.chunkRefs?.includes(chunk.id)).map(item => slides.find(page => page.id === item.id)).filter(Boolean);
+      const text = peers.map(visibleSlideText).join(' ');
+      const missing = labels.filter(label => !rowLabelVisible(label, text));
+      metrics.requiredTableRows += labels.length; metrics.renderedTableRows += labels.length - missing.length;
+      const translated = labels.every(label => !/[\u3400-\u9fff]/u.test(label)) && (text.match(/[\u3400-\u9fff]/gu)||[]).length > (text.match(/[a-z]/giu)||[]).length;
+      if (missing.length) issues.push({ code: 'source_table_rows_missing', severity: strictCoverage && !translated ? 'error' : 'warning',
+        slideId: slide.id, chunkId: chunk.id, blockId: block.id, repairable: false, missingRows: missing,
+        message: `页面规划 ${count || labels.length} 类/项，但来源表格中这些行未在相关页面呈现：${missing.join('、')}` });
+    }
+  }
   const atoms = project.source?.semantic?.evidenceAtoms || [];
   const atomById = new Map(atoms.map(atom => [atom.id, atom]));
   const visibleBySlide = new Map(slides.map(slide => [slide.id, visibleSlideText(slide)]));
@@ -120,27 +164,33 @@ export function inspectContent(project, deck = project.deck) {
     }
     const contract = project.planning?.slidePlan?.find(item => item.slideId === slide.id) || {};
     const visibleText = visibleBySlide.get(slide.id) || '';
-    const templateSlots = project.templateFidelity?.mode === 'preserve' ? project.templateFidelity.slides?.[index]?.slots || [] : [];
-    const contentSlots = templateSlots.filter(slot => slot.role === 'content' && slot.purpose !== 'footnote' &&
+    const templateSlots = project.templateFidelity?.mode === 'preserve' ? (project.templateFidelity.slides?.[index]?.slots || []).map(slot => {
+      const mapped = (slide.nodes || []).find(node => node.nativeRef?.shapeId === slot.shapeId)?.templateSlot;
+      return mapped ? { ...slot, purpose:mapped.purpose || slot.purpose, groupId:mapped.groupId || slot.groupId } : slot;
+    }) : [];
+    const contentSlots = templateSlots.filter(slot => slot.role === 'content' && !['footnote', 'group-heading'].includes(slot.purpose) &&
       !(slide.templateOmissions || []).some(item => String(item.shapeId) === String(slot.shapeId)));
-    const contentText = contentSlots.length ? contentSlots.flatMap(slot => {
+    const visibleNative = (slide.nodes || []).filter(node => node.nativeRef && node.templateSlot?.mapped &&
+      node.templateSlot.role === 'content' && !['footnote', 'group-heading'].includes(node.templateSlot.purpose));
+    const contentText = visibleNative.length ? visibleNative.map(node => node.content?.text || '').join(' ') : contentSlots.length ? contentSlots.flatMap(slot => {
       const value = slide.templateSlotTexts?.[String(slot.shapeId)];
       return Array.isArray(value) ? value.map(item => `${item.label || ''} ${item.body || ''}`) : [String(value || '')];
     }).join(' ') : (slide.copy?.blocks || []).map(block => `${block.heading || ''} ${block.body || ''}`).join(' ') ||
       (slide.bullets || []).join(' ');
-    const contentUnits = visualUnits(contentText);
-    const templateCapacity = contentSlots.reduce((sum, slot) => sum + Number(slot.capacity || 0), 0);
+    const contentUnits = templateSlots.length ? templateVisualUnits(contentText) : visualUnits(contentText);
+    const templateCapacity = templateSlots.filter(slot => slot.role === 'content' && !['footnote', 'group-heading'].includes(slot.purpose))
+      .reduce((sum, slot) => sum + Number(slot.capacity || 0), 0);
     metrics.visibleContentUnitsPerSlide.push({ slideId: slide.id, units: contentUnits, templateCapacity });
     if (index > 0 && index < slides.length - 1 && contract.role !== 'section' &&
       (project.inputProfile?.level === 'rich' || sourceText.length >= 8000)) {
-      const target = contract.depth === 'detailed' ? 160 : 130;
-      if (templateCapacity > 0 && templateCapacity < target) {
+      const target = templateCapacity > 0 ? visibleBodyTarget(templateCapacity, contract.depth) : contract.depth === 'detailed' ? 160 : 130;
+      if (templateCapacity > 0 && templateCapacity < 130) {
         metrics.templateCapacityWarnings++;
         issues.push({ code: 'template_depth_capacity', severity: 'warning',
-          message: `本页原生模板正文容量约 ${templateCapacity} visual units，低于富来源内容页约 ${target} 的目标；应在版式调度时选更大正文区域，或明确压缩本页内容范围`,
+          message: `本页原生模板正文容量约 ${templateCapacity} visual units，低于富来源内容页的最低解释容量；应在版式调度时选更大正文区域，或明确压缩本页内容范围`,
           slideId: slide.id, repairable: false });
-      } else if (contentUnits < target * .8) {
-        issues.push({ code: 'visible_content_sparse', severity: 'warning',
+      } else if (contentUnits < target) {
+        issues.push({ code: 'visible_content_sparse', severity: templateCapacity >= 130 ? 'error' : 'warning',
           message: `本页有来源内容且可见正文仅约 ${Math.ceil(contentUnits)} visual units；请补充来源支持的机制、条件、例子或判断，不要靠重复填字`,
           slideId: slide.id, repairable: true });
       }
@@ -192,7 +242,15 @@ export function inspectContent(project, deck = project.deck) {
           slideId: slide.id, repairable: false });
       else claimPages.set(claimId, { slideId: slide.id, narrativeRole: contract.narrativeRole });
     }
-    const semanticUnits = (slide.copy?.blocks || []).length || (slide.bullets || []).length;
+    const nativeContent = (slide.nodes || []).filter(node => node.nativeRef && node.templateSlot?.mapped &&
+      node.templateSlot.role === 'content' && !['footnote', 'group-heading'].includes(node.templateSlot.purpose) && String(node.content?.text || '').trim());
+    const nativeGroups = new Set(nativeContent.map(node => node.templateSlot.groupId || node.templateSlot.pairedWith || node.nativeRef.shapeId));
+    const semanticUnits = nativeContent.length ? nativeGroups.size : (slide.copy?.blocks || []).length || (slide.bullets || []).length;
+    if (project.inputProfile?.level === 'rich' && nativeContent.some(node =>
+      ['body', 'point-description', 'list'].includes(node.templateSlot.purpose) &&
+      /^(?:[\p{L}-]+\s+){1,2}(?:matters?|works?)\s*[.!]?$/iu.test(String(node.content?.text || '').trim()))) {
+      issues.push({ code: 'copy_generic_filler', severity: 'error', message: '富来源正文只有通用断言，未解释机制、条件或来源依据', slideId: slide.id, repairable: false });
+    }
     metrics.semanticUnitsPerSlide.push({ slideId: slide.id, units: semanticUnits, density: contract.density || 'medium' });
     const plannedBudget = Number(contract.semanticUnitBudget || 0);
     if (plannedBudget) {
