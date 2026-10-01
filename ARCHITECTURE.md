@@ -199,3 +199,13 @@ Schema 定义在 `src/lib/db.ts`，主要表（完整清单以 db.ts 为准）�
 | Markdown | react-markdown, streamdown, markdown-it |
 | 打包 | electron-builder (DMG + NSIS) |
 | 测试 | Playwright (E2E), tsx + node:test (单元) |
+
+### PPT 模板确认与编辑增量架构（2026-09-30）
+
+四入口共用模板预览与设置布局；生成时修改通过持久 Intent、固定 stable slideId 范围和页级 epoch 接入既有 Run/DAG；生成后 AI 先产服务端 Proposal，再经现有 Command/Journal 写草稿，显式 publish 才更新导出版本。详细数据契约、接口、恢复策略和验证边界见 [PPT 编辑架构交接](docs/handover/ppt-edit-intent-proposal-architecture.md)。
+
+### PPT 类型化修改与恢复运行时（2026-09-30）
+
+PlanRevision / ConstraintSet / ArtifactRevision 分离；文本任务固定使用用户所选模型，额度不足等待 FIFO 槽位。逐页 source→content→layout→preview→quality 使用 canonical IR 和共享 RenderTree，内容先持久化，渲染失败不重生成文字。生成暂停到安全边界落 checkpoint；恢复复用有效内容与页级 epoch，暂停时手动修改同步生成缓存，避免旧任务覆盖。
+
+title/content/layout/style/asset/data/structure 走类型化 mutation→validated Proposal→Command Journal→草稿→显式 publish。结构提案同步页数预算、证据 contract、叙事与页码；生成中结构修改在整稿完成后提供可确认预览。AssetTask 单独 attempt 与 retry，内容保护按实际 render hash 接受。语义变化使输入绑定的 review 失效，critic 读取 canonical 图表/表格数据。当前依然是单服务有界 coordinator，不是分布式通用 DAG 或自动多模型平台。详细契约、前端协议、测试与限制见 [统一运行时交接](docs/handover/ppt-mutation-runtime-unification.md)。

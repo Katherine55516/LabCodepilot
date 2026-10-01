@@ -3,6 +3,9 @@
 
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { prepareImage, type VisualBlock } from '../PptBlocks';
+import { useTranslation } from '@/hooks/useTranslation';
+import { TemplateBrowser } from './TemplateBrowser';
+import { TemplateSettingsLayout } from './TemplateSettingsLayout';
 import type { PptModel, PptTemplate } from '../types';
 
 export type CreateKind = 'prompt' | 'paste' | 'file';
@@ -71,6 +74,10 @@ export function PptCreateWizard({ models, templates, initialKind, entry, modelKe
   onCancel: () => void; onBackToChooser: () => void; onAnalyze: (draft: PptCreateDraft) => Promise<{ id: string; outline: Outline; pages: number; recommendation?: PageEstimate }>;
   onSubmit: (draft: PptCreateDraft) => Promise<void>;
 }) {
+  const { t } = useTranslation();
+  const mounted = useRef(true); const analysisAttempt = useRef(0);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; analysisAttempt.current++; }; }, []);
+  function previousStep() { analysisAttempt.current++; setAnalyzing(false); setStep((step - 1) as 1 | 2 | 3); }
   const direct = entry === 'direct';
   const [kind] = useState<CreateKind>(direct ? 'file' : initialKind || 'prompt');
   const [step, setStep] = useState<1 | 2 | 3>(1);
@@ -81,13 +88,16 @@ export function PptCreateWizard({ models, templates, initialKind, entry, modelKe
   const [localOutline, setLocalOutline] = useState<Outline>([]); const [outlineTouched, setOutlineTouched] = useState(false);
   const [pages, setPages] = useState(initialEstimate.recommended); const [pagesTouched, setPagesTouched] = useState(false);
   const [compressionApproved, setCompressionApproved] = useState(false);
-  const [templatePreviewPage, setTemplatePreviewPage] = useState(0);
-  const lastPreviewWheelAt = useRef(0);
+  const templateInitialized = useRef(Boolean(lockedTemplate || templates.some(item => item.compatibility === 'mapped')));
   const [template, setTemplate] = useState(lockedTemplate?.id || templates.find(item => item.compatibility === 'mapped')?.id || 'violet');
+  useEffect(() => { if (!templateInitialized.current) { const first = templates.find(item => item.compatibility === 'mapped'); if (first) { setTemplate(first.id); templateInitialized.current = true; } } }, [templates]);
   const [images, setImages] = useState<Extract<VisualBlock, { type: 'image' }>[]>([]);
-  const sourceSignature = [title, prompt, text, file?.name, file?.size, file?.lastModified, modelKey, ...images.map(image => image.id)].join('\u0000');
+  const fileIdentity = useRef<{ file: File | null; version: number }>({ file: null, version: 0 });
+  if (fileIdentity.current.file !== file) fileIdentity.current = { file, version: fileIdentity.current.version + 1 };
+  const sourceSignature = [fileIdentity.current.version, title, prompt, text, file?.name, file?.size, file?.lastModified, modelKey, ...images.map(image => image.id)].join('\u0000');
   const lastSourceSignature = useRef(sourceSignature);
   const [analyzedProjectId, setAnalyzedProjectId] = useState<string | null>(null);
+  const [analyzedTemplate, setAnalyzedTemplate] = useState<string | null>(null);
   const [analyzedPages, setAnalyzedPages] = useState<number | null>(null);
   const [serverEstimate, setServerEstimate] = useState<PageEstimate | null>(null);
   const [analyzing, setAnalyzing] = useState(false);
@@ -95,7 +105,7 @@ export function PptCreateWizard({ models, templates, initialKind, entry, modelKe
   useEffect(() => {
     if (lastSourceSignature.current === sourceSignature) return;
     lastSourceSignature.current = sourceSignature;
-    setAnalyzedProjectId(null); setAnalyzedPages(null); setLocalOutline([]);
+    setAnalyzedProjectId(null); setAnalyzedTemplate(null); setAnalyzedPages(null); setLocalOutline([]);
     setServerEstimate(null);
     setOutlineReady(false); setOutlineTouched(false);
   }, [sourceSignature]);
@@ -104,11 +114,12 @@ export function PptCreateWizard({ models, templates, initialKind, entry, modelKe
   const selectedTemplate = templates.find(item => item.id === (lockedTemplate?.id || template));
   const preservedPageCount = selectedTemplate?.kind === 'uploaded' && selectedTemplate.extension === 'pptx' ? selectedTemplate.pages : null;
   const effectivePages = pagesTouched ? pages : (analyzedPages ?? suggested.requested ?? suggested.recommended);
-  const maxPreservedPages = preservedPageCount === null ? null : preservedPageCount < 4 ? preservedPageCount : preservedPageCount < 8 ? preservedPageCount * 3 - 4 : 100;
+  const maxPreservedPages = preservedPageCount === null ? null : selectedTemplate?.capabilities?.maxPages ?? (preservedPageCount < 4 ? preservedPageCount : preservedPageCount < 8 ? preservedPageCount * 3 - 4 : 100);
   const templatePageMismatch = preservedPageCount !== null && effectivePages > (maxPreservedPages || 0);
   const editableImport = kind === 'file' && file?.name.toLowerCase().endsWith('.pptx') && importMode === 'editable';
   const currentModel = models.find(item => item.id === modelKey);
-  const resolvedTemplate = lockedTemplate?.id || (templates.some(item => item.id === template && item.compatibility === 'mapped') ? template : templates.find(item => item.compatibility === 'mapped')?.id || template);
+  const resolvedTemplate = lockedTemplate?.id || template;
+  const templateAvailable = selectedTemplate?.compatibility === 'mapped';
   const reviewStep = direct ? 3 : 2;
   const sourceReady = kind === 'prompt' ? Boolean(prompt.trim()) : kind === 'paste' ? Boolean(text.trim()) && outlineReady : Boolean(file);
   const compressionRisk = !editableImport && kind !== 'prompt' && effectivePages < suggested.min;
@@ -134,36 +145,40 @@ export function PptCreateWizard({ models, templates, initialKind, entry, modelKe
   }
   async function analyze() {
     if (!modelKey || (kind === 'paste' && !text.trim()) || (kind === 'file' && !file)) return false;
+    const attempt = ++analysisAttempt.current;
     setAnalyzing(true); setAnalysisError(''); setOutlineReady(false);
     try {
       const signature = sourceSignature;
       const result = await onAnalyze({ ...draft(), outline: outlineTouched ? localOutline : undefined });
+      if (!mounted.current || analysisAttempt.current !== attempt) return false;
       if (lastSourceSignature.current !== signature) throw new Error('输入内容已更改，请重新读取');
-      setAnalyzedProjectId(result.id); setAnalyzedPages(result.pages); setLocalOutline(result.outline);
+      setAnalyzedProjectId(result.id); setAnalyzedTemplate(resolvedTemplate); setAnalyzedPages(result.pages); setLocalOutline(result.outline);
       setServerEstimate(result.recommendation || null);
       setOutlineTouched(false); setOutlineReady(true);
       return true;
-    } catch (error) { setAnalysisError((error as Error).message); return false; }
-    finally { setAnalyzing(false); }
+    } catch (error) { if (mounted.current && analysisAttempt.current === attempt) setAnalysisError((error as Error).message); return false; }
+    finally { if (mounted.current && analysisAttempt.current === attempt) setAnalyzing(false); }
   }
   async function readPaste() { await analyze(); }
   async function parseFile() { if (editableImport) { setStep(3); return; } if (await analyze()) setStep(3); }
   async function next() {
     if (!sourceReady) return;
     if (direct) { setStep(2); return; }
-    if (kind === 'file' && !editableImport && !await analyze()) return;
+    if ((kind === 'file' || kind === 'prompt') && !editableImport && !await analyze()) return;
     setStep(2);
   }
   async function submit() {
+    if (!editableImport && !templateAvailable) { setAnalysisError(t('ppt.edit.templateMissing')); return; }
+    if (!editableImport && analyzedProjectId && localOutline.length < 3) { setAnalysisError(t('ppt.outline')); return; }
     if (templatePageMismatch) return;
-    if (analyzedProjectId && analyzedPages !== effectivePages) { await analyze(); return; }
+    if (analyzedProjectId && (analyzedPages !== effectivePages || analyzedTemplate !== resolvedTemplate)) { await analyze(); return; }
     await onSubmit({ ...draft(), outline: analyzedProjectId ? localOutline : undefined });
   }
   const titleForKind = kind === 'prompt' ? '从 Prompt 开始' : kind === 'paste' ? '粘贴文本' : '导入文件';
   const steps = direct ? ['上传文件', '选择 LLM 与补充内容', '确认大纲与模板'] : [kind === 'prompt' ? '输入 Prompt' : kind === 'paste' ? '粘贴文本' : '导入文件与补充内容', '确认模板与页数', '开始生成'];
 
   return <section className="ppt-prototype ppt-create-stage fixed inset-0 z-50 flex flex-col bg-background text-foreground" data-testid="ppt-create-wizard">
-    <header className="flex h-16 items-center gap-3 border-b border-border px-4"><button className="grid h-9 w-9 place-items-center rounded-lg border border-border" aria-label="返回" onClick={() => step > 1 ? setStep((step - 1) as 1 | 2 | 3) : direct ? onCancel() : onBackToChooser()}>←</button><span className="grid h-8 w-8 place-items-center rounded-lg bg-primary font-semibold text-primary-foreground">A</span><strong>新建 PPT / {titleForKind}</strong><span className="ml-auto rounded-full border border-border px-3 py-1 text-xs">LLM · {currentModel?.name || '未选择'}</span></header>
+    <header className="flex h-16 items-center gap-3 border-b border-border px-4"><button className="grid h-9 w-9 place-items-center rounded-lg border border-border" aria-label="返回" onClick={() => step > 1 ? previousStep() : direct ? onCancel() : onBackToChooser()}>←</button><span className="grid h-8 w-8 place-items-center rounded-lg bg-primary font-semibold text-primary-foreground">A</span><strong>新建 PPT / {titleForKind}</strong><span className="ml-auto rounded-full border border-border px-3 py-1 text-xs">LLM · {currentModel?.name || '未选择'}</span></header>
     <div className="ppt-create-body flex-1 overflow-y-auto p-4 md:p-8"><div className="ppt-create-wrap mx-auto max-w-6xl space-y-5">{analysisError && <div role="alert" className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">{analysisError}</div>}<div className="flex items-center justify-center gap-2 text-xs text-muted-foreground">{steps.map((label, index) => <div key={label} className="flex items-center gap-2">{index > 0 && <i className="h-px w-7 bg-border"/>}<span className={step === index + 1 ? 'font-medium text-foreground' : ''}><b className={`mr-1 inline-grid h-6 w-6 place-items-center rounded-full ${step >= index + 1 ? 'bg-primary text-primary-foreground' : 'bg-muted'}`}>{step > index + 1 ? '✓' : index + 1}</b>{label}</span></div>)}</div>
       {step === 1 && <><div><p className="text-xs font-semibold uppercase tracking-wider text-primary">新建 PPT · Step 1</p><h1 className="mt-2 text-2xl font-semibold">{titleForKind}</h1><p className="mt-2 text-sm text-muted-foreground">{kind === 'prompt' ? '当前 LLM 已确认。输入主题、目标和重点内容，下一步选择模板与页数。' : kind === 'paste' ? '当前 LLM 已确认。粘贴文本后由 Agent 读取并生成可编辑大纲。' : direct ? '先上传源文件；文件不会在这一步解析。' : '当前 LLM 已确认。上传源文件，可选补充生成要求，然后解析并生成可编辑大纲。'}</p></div>
         {kind === 'prompt' && <div className="ppt-create-split grid gap-5 lg:grid-cols-2"><section className="space-y-5 rounded-xl border border-border bg-card p-5"><label className="block space-y-1 text-sm">PPT 标题（可选）<input className={field} value={title} onChange={event => setTitle(event.target.value)} placeholder="例如：Q4 产品增长复盘" maxLength={160}/></label><label className="block space-y-1 text-sm">输入 Prompt<textarea aria-label="输入 Prompt" className={`${field} min-h-56`} value={prompt} onChange={event => setPrompt(event.target.value)} placeholder="告诉 AI 这份 PPT 要讲清楚什么、给谁看，以及希望他们记住什么…" maxLength={12000}/></label><div className="flex flex-wrap gap-2">{chips.map(chip => <button key={chip} className={button} onClick={() => setPrompt(`${chip}，请帮我整理成一份结构清晰的演示文稿。`)}>{chip}</button>)}</div></section><section className="rounded-xl border border-border bg-card p-5"><h3 className="font-medium">推荐写法</h3><p className="mt-2 text-sm text-muted-foreground">把对象、目标、内容重点和页数写进 Prompt，生成结构会更稳定。</p><div className="mt-4 rounded-lg border border-border bg-background p-3 text-xs"><strong>示例</strong><p className="mt-2 text-muted-foreground">面向管理层生成一份 Q4 产品增长复盘，重点说明增长来源、主要风险、下一季度行动计划，控制在 12 页以内。</p></div></section></div>}
@@ -172,12 +187,9 @@ export function PptCreateWizard({ models, templates, initialKind, entry, modelKe
         {kind === 'file' && <FileSource file={file} setFile={value => { setFile(value); setOutlineTouched(false); }} importMode={importMode} setImportMode={setImportMode} direct={direct} supplementMode={supplementMode} setSupplementMode={setSupplementMode} prompt={prompt} setPrompt={setPrompt} text={text} setText={setText}/>}
       </>}
       {step === 2 && direct && <><div><p className="text-xs font-semibold uppercase tracking-wider text-primary">导入 PPT · Step 2</p><h1 className="mt-2 text-2xl font-semibold">选择 LLM 与补充内容</h1><p className="mt-2 text-sm text-muted-foreground">文件会在确认 LLM 后解析；补充内容可选，用于说明重点、受众或最新信息。</p></div><div className="ppt-create-split grid gap-5 lg:grid-cols-2"><section className="rounded-xl border border-border bg-card p-5"><h3 className="font-medium">解析模型 <span className="text-destructive">*</span></h3><p className="mt-1 text-xs text-muted-foreground">模型用于读取文件、生成大纲和后续页面内容。</p><label className="mt-4 block space-y-1 text-sm">LLM（必填）<select className={field} aria-label="导入解析 LLM" value={modelKey} onChange={event => onModelKeyChange(event.target.value)}><option value="">请选择 LLM</option>{models.map(model => <option key={model.id} value={model.id}>{model.name}</option>)}</select></label></section><div className="space-y-4"><label className="block space-y-1 text-sm">PPT 标题（可选）<input className={field} value={title} onChange={event => setTitle(event.target.value)} placeholder="未填写时使用文件名" maxLength={160}/></label><Supplement mode={supplementMode} setMode={setSupplementMode} prompt={prompt} setPrompt={setPrompt} text={text} setText={setText}/></div></div></>}
-        {step === reviewStep && <><div><p className="text-xs font-semibold uppercase tracking-wider text-primary">{direct ? '导入 PPT · Step 3' : '新建 PPT · Step 2'}</p><h1 className="mt-2 text-2xl font-semibold">确认大纲与模板</h1><p className="mt-2 text-sm text-muted-foreground">模型已锁定。检查大纲，选择模板和最终页数后开始生成。</p></div><div className="ppt-create-split grid gap-5 lg:grid-cols-2">{kind === 'file' && !editableImport && <section className="rounded-xl border border-border bg-card p-5"><h3 className="font-medium">AI 生成大纲</h3>{analyzedPages !== effectivePages && <p className="mt-2 text-xs text-primary">页数已调整。点击下方按钮按最终页数重新生成大纲，确认后再开始生成。</p>}<OutlineEditor items={previewOutline} onChange={editOutline} onReorganize={() => void analyze()} busy={analyzing || busy}/></section>}<div className="space-y-4"><section className="rounded-xl border border-border bg-card p-5"><h3 className="font-medium">{lockedTemplate ? '已选模板' : '选择模板'}</h3>{lockedTemplate ? <div className="mt-4 rounded-lg border border-primary bg-primary/5 p-3"><strong>{lockedTemplate.name}</strong><p className="mt-1 text-xs text-muted-foreground">模板来自模板中心并保持锁定。</p></div> : <div className="mt-4 grid grid-cols-2 gap-3">{templates.filter(item => item.compatibility === 'mapped').map(item => <button key={item.id} className={`rounded-xl border p-3 text-left ${resolvedTemplate === item.id ? 'border-primary bg-primary/5' : 'border-border'}`} onClick={() => { setTemplate(item.id); setTemplatePreviewPage(0); }}><div className="aspect-video rounded-lg border-t-4 p-3" style={{ background: item.palette?.background || '#171b31', borderColor: item.palette?.accent || '#967fff', color: item.palette?.foreground || '#fff' }}>{item.sampleTitles?.[0] || item.name}</div><strong className="mt-2 block text-sm">{item.name}</strong></button>)}</div>}{selectedTemplate && <div className="mt-4 rounded-lg border border-border p-3" onWheel={event => { const now = Date.now(); if (Math.abs(event.deltaY) < 12 || now - lastPreviewWheelAt.current < 220) return; lastPreviewWheelAt.current = now; setTemplatePreviewPage(page => Math.max(0, Math.min(selectedTemplate.pages - 1, page + (event.deltaY > 0 ? 1 : -1)))); }}>
-  <div className="aspect-video rounded-lg border-t-4 p-[7%]" style={{ background: selectedTemplate.palette?.background || '#171b31', color: selectedTemplate.palette?.foreground || '#f5f6fc', borderColor: selectedTemplate.palette?.accent || '#967fff' }}><strong className="text-lg">{templatePreviewPage === 0 && title.trim() ? title.trim() : selectedTemplate.sampleTitles?.[templatePreviewPage % Math.max(1, selectedTemplate.sampleTitles.length)] || selectedTemplate.name}</strong></div>
-  <div className="mt-3 flex items-center justify-between gap-2"><button className={button} disabled={templatePreviewPage === 0} onClick={() => setTemplatePreviewPage(page => page - 1)}>← 上一页</button><span className="text-xs">{templatePreviewPage + 1} / {selectedTemplate.pages}</span><button className={button} disabled={templatePreviewPage >= selectedTemplate.pages - 1} onClick={() => setTemplatePreviewPage(page => page + 1)}>下一页 →</button></div>
-</div>}</section><ModelSummary model={currentModel}/><section className="rounded-xl border border-border bg-card p-5"><h3 className="font-medium">最终页数</h3><p className="mt-1 text-xs text-muted-foreground">Agent 建议 {suggested.recommended} 页（合理范围 {suggested.min}–{suggested.max} 页）。{suggested.reason}</p><div className="mt-4 flex flex-wrap items-center gap-3"><button className={button} disabled={effectivePages <= 3} onClick={() => { setPagesTouched(true); setPages(effectivePages - 1); setCompressionApproved(false); }}>−</button><b>{effectivePages} 页</b><button className={button} disabled={effectivePages >= 100} onClick={() => { setPagesTouched(true); setPages(effectivePages + 1); setCompressionApproved(false); }}>＋</button><button className="text-xs text-primary" onClick={() => { setPagesTouched(true); setPages(suggested.recommended); setCompressionApproved(false); }}>使用建议 {suggested.recommended} 页</button></div><p className="mt-3 text-xs text-muted-foreground">你确认的页数包含封面，并将作为 Story Planner 和最终输出的硬参数。</p>{preservedPageCount !== null && <p className={`mt-2 text-xs ${templatePageMismatch ? 'text-destructive' : 'text-muted-foreground'}`}>所选模板含 {preservedPageCount} 张原生页面；页数由你手动调整，其次采用 Agent 建议。输出少于模板页数时会选择适配页面；输出较多时才进行受控版式复用。此模板最多支持 {maxPreservedPages} 页。{templatePageMismatch && `当前模板无法安全扩展到 ${effectivePages} 页，请将页数降至 ${maxPreservedPages} 页以内或选择更适合的模板。`}</p>}{compressionRisk && <label className="mt-4 flex gap-2 rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-xs"><input type="checkbox" checked={compressionApproved} onChange={event => setCompressionApproved(event.target.checked)}/><span>当前页数低于保真建议范围，可能无法完整保留来源深度。我确认继续按 {effectivePages} 页生成并允许压缩低优先级细节。</span></label>}</section></div></div></>}
+        {step === reviewStep && <><div><p className="text-xs font-semibold uppercase tracking-wider text-primary">{direct ? '导入 PPT · Step 3' : '新建 PPT · Step 2'}</p><h1 className="mt-2 text-2xl font-semibold">确认大纲与模板</h1><p className="mt-2 text-sm text-muted-foreground">模型已锁定。检查大纲，选择模板和最终页数后开始生成。</p></div><TemplateSettingsLayout main={<TemplateBrowser templates={templates} selectedId={resolvedTemplate} onSelect={setTemplate} locked={Boolean(lockedTemplate)}/>} sidebar={<><ModelSummary model={currentModel}/><section className="rounded-xl border border-border bg-card p-5"><h3 className="font-medium">最终页数</h3><p className="mt-1 text-xs text-muted-foreground">Agent 建议 {suggested.recommended} 页（合理范围 {suggested.min}–{suggested.max} 页）。{suggested.reason}</p><div className="mt-4 flex flex-wrap items-center gap-3"><button className={button} disabled={effectivePages <= 3} onClick={() => { setPagesTouched(true); setPages(effectivePages - 1); setCompressionApproved(false); }}>−</button><b>{effectivePages} 页</b><button className={button} disabled={effectivePages >= 100} onClick={() => { setPagesTouched(true); setPages(effectivePages + 1); setCompressionApproved(false); }}>＋</button><button className="text-xs text-primary" onClick={() => { setPagesTouched(true); setPages(suggested.recommended); setCompressionApproved(false); }}>使用建议 {suggested.recommended} 页</button></div><p className="mt-3 text-xs text-muted-foreground">你确认的页数包含封面，并将作为 Story Planner 和最终输出的硬参数。</p>{preservedPageCount !== null && <p className={`mt-2 text-xs ${templatePageMismatch ? 'text-destructive' : 'text-muted-foreground'}`}>所选模板含 {preservedPageCount} 张原生页面；页数由你手动调整，其次采用 Agent 建议。输出少于模板页数时会选择适配页面；输出较多时才进行受控版式复用。此模板最多支持 {maxPreservedPages} 页。{templatePageMismatch && `当前模板无法安全扩展到 ${effectivePages} 页，请将页数降至 ${maxPreservedPages} 页以内或选择更适合的模板。`}</p>}{compressionRisk && <label className="mt-4 flex gap-2 rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-xs"><input type="checkbox" checked={compressionApproved} onChange={event => setCompressionApproved(event.target.checked)}/><span>当前页数低于保真建议范围，可能无法完整保留来源深度。我确认继续按 {effectivePages} 页生成并允许压缩低优先级细节。</span></label>}</section></>} outline={<>{outlineReady && !editableImport && <section className="rounded-xl border border-border bg-card p-5"><h3 className="font-medium">AI 生成大纲</h3>{analyzedPages !== effectivePages && <p className="mt-2 text-xs text-primary">页数已调整。点击下方按钮按最终页数重新生成大纲，确认后再开始生成。</p>}<OutlineEditor items={previewOutline} onChange={editOutline} onReorganize={() => void analyze()} busy={analyzing || busy}/></section>}</>}/></>}
     </div></div>
-    <footer className="flex min-h-16 flex-wrap items-center gap-3 border-t border-border px-4 py-3"><span className="text-xs text-muted-foreground">个人工作区 · 页面式创建流程</span><span className="ml-auto"/>{step === 1 ? <button className={button} onClick={direct ? onCancel : onBackToChooser}>← 返回{direct ? '工作区' : '创建方式'}</button> : <button className={button} onClick={() => setStep((step - 1) as 1 | 2 | 3)}>← 返回上一步</button>}{step === 1 ? <button className={primary} disabled={!sourceReady || busy || analyzing} onClick={() => void (editableImport && !direct ? submit() : next())}>{editableImport && !direct ? '打开并编辑 PPTX' : kind === 'paste' && !outlineReady ? '先生成大纲' : kind === 'file' && direct ? '下一步：选择 LLM →' : kind === 'file' ? '解析文件并生成大纲 →' : '下一步：选择模板与页数 →'}</button> : step === 2 && direct ? <button className={primary} disabled={!modelKey || analyzing || busy} onClick={() => void parseFile()}>{editableImport ? '下一步：确认模板 →' : '解析文件并生成大纲 →'}</button> : <button className={primary} disabled={busy || analyzing || templatePageMismatch || (!editableImport && !modelKey) || (compressionRisk && !compressionApproved)} onClick={() => void submit()}>{analyzing ? 'AI 正在生成大纲…' : editableImport ? '打开并编辑 PPTX' : analyzedProjectId && analyzedPages !== effectivePages ? '按最终页数重新生成大纲' : '开始生成'}</button>}</footer>
+    <footer className="flex min-h-16 flex-wrap items-center gap-3 border-t border-border px-4 py-3"><span className="text-xs text-muted-foreground">个人工作区 · 页面式创建流程</span><span className="ml-auto"/>{step === 1 ? <button className={button} onClick={direct ? onCancel : onBackToChooser}>← 返回{direct ? '工作区' : '创建方式'}</button> : <button className={button} onClick={() => previousStep()}>← 返回上一步</button>}{step === 1 ? <button className={primary} disabled={!sourceReady || busy || analyzing} onClick={() => void (editableImport && !direct ? submit() : next())}>{editableImport && !direct ? '打开并编辑 PPTX' : kind === 'paste' && !outlineReady ? '先生成大纲' : kind === 'file' && direct ? '下一步：选择 LLM →' : kind === 'file' ? '解析文件并生成大纲 →' : '下一步：选择模板与页数 →'}</button> : step === 2 && direct ? <button className={primary} disabled={!modelKey || analyzing || busy} onClick={() => void parseFile()}>{editableImport ? '下一步：确认模板 →' : '解析文件并生成大纲 →'}</button> : <button className={primary} disabled={busy || analyzing || (!editableImport && !templateAvailable) || templatePageMismatch || (!editableImport && !modelKey) || (compressionRisk && !compressionApproved)} onClick={() => void submit()}>{analyzing ? 'AI 正在生成大纲…' : editableImport ? '打开并编辑 PPTX' : analyzedProjectId && (analyzedPages !== effectivePages || analyzedTemplate !== resolvedTemplate) ? '按最终页数与模板重新生成大纲' : '开始生成'}</button>}</footer>
   </section>;
 }
 

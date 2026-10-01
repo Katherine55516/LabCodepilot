@@ -171,12 +171,18 @@ for index,source in enumerate(mapping):
   ] } }, imported, hash);
   assert.ok(ambiguousMediaFidelity.slides.every(slide => !slide.variant.mediaShapeId), 'multiple uncaptioned images must not be placed arbitrarily');
   const mediaFidelity = fidelityFromImported({ pages: 15, source: { images: [{ id: 'user-image', dataUrl: suppliedImage }] } }, imported, hash);
-  const replaced = mediaFidelity.slides.find(slide => slide.variant.mediaShapeId);
+  assert.ok(mediaFidelity.slides.every(slide => !slide.variant.mediaShapeId), 'inline content media must not be replaced as decoration');
+  const decorative = structuredClone(imported);
+  for (const slide of decorative.deck.slides) {
+    const image = slide.nodes.find(node => node.type === 'image'); image.geometry = { x: 0, y: 0, width: decorative.externalPptx.width, height: decorative.externalPptx.height };
+  }
+  const decorativeFidelity = fidelityFromImported({ pages: 15, source: { images: [{ id: 'user-image', dataUrl: suppliedImage }] } }, decorative, hash);
+  const replaced = decorativeFidelity.slides.find(slide => slide.variant.mediaShapeId);
   assert.ok(replaced, 'a large native picture on a reused slide can use supplied media');
   assert.equal(replaced.nodes.find(node => node.nativeRef.shapeId === replaced.variant.mediaShapeId).content.mediaReplacement, true);
   const mediaOutput = path.join(directory, 'output-media.pptx');
-  run(importer.EXPORT_SCRIPT, JSON.stringify({ original: fixture, sourceSlideMap: mediaFidelity.slideMap,
-    slides: mediaFidelity.slides.map((spec, index) => ({ nativeSlideIndex: index,
+  run(importer.EXPORT_SCRIPT, JSON.stringify({ original: fixture, sourceSlideMap: decorativeFidelity.slideMap,
+    slides: decorativeFidelity.slides.map((spec, index) => ({ nativeSlideIndex: index,
       nodes: spec.nodes.map(node => ({ type: node.type, nativeShapeId: node.nativeRef.shapeId,
         content: node.type === 'text' ? { text: `生成内容 ${index}` } : exportContent(node),
         geometry: node.geometry, style: node.style })) })),

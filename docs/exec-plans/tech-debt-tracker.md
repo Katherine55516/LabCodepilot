@@ -4,6 +4,17 @@
 
 **AI 须知：发现新的技术债务时添加到此文件；解决后标注完成日期。**
 
+## PPT 架构接入后待治理（2026-09-30）
+
+- 2026-09-30 已解决：历史自检 M3/M4/semantic/template-scheduler 的 fixture 按 planning v5、来源媒体绑定、安全装饰替换、当前模型审查和显式发布协议修订；18 组 PPT 自检通过，未降低生产门禁。
+- 项目队列与写前恢复仅保证单进程；若部署多 worker，迁移为跨进程锁/事务库。当前 publish 的渲染 I/O 会占住同项目队列，后续可做带版本校验的队列外导出。
+- Proposal/Intent/发布产物的过期归档与清理尚未实现；已明确数量上限与错误。未提交输入当前仅 sessionStorage，跨设备草稿另行设计。
+- 真实模型、远端 Cowork 导出、Electron 打包态和 Windows 需环境验收；原生组/未知媒体预览仍受现有 renderer 能力限制。
+- 页级依赖/attempt/checkpoint 已落地，仍是专用有界 coordinator；通用 DAG、跨主机 lease/事务、持久容量队列与 CRDT 协作未实现。PID 文件锁不解决多个 API 进程同时写 JSON 的问题。
+- 生成中结构修改在生成 barrier 后形成确认提案；asset/data 限完成后对象编辑，不支持所有类型实时改变未完成的大纲。文本模型保持用户选择；Research、自动模型路由和 VLM 质量审查未启用。
+- 数据数值/单位来源检查和文本 critic 不能证明完整事实正确；高密度组件/长表格整稿审查的上下文预算仍需专门治理。Imported PPTX 保守发布不具备同等全文语义 critic。
+- 首次生成发布与后续显式 publish 共用版本/渲染/评审协议，但仍有两个 coordinator 调用入口。AssetTask 结果并发可能留下不可应用的孤立 proposal，需结合 TTL 清理及跨进程幂等事务治理。
+
 ## 活跃项
 
 | # | 描述 | 优先级 | 影响范围 | 发现日期 |

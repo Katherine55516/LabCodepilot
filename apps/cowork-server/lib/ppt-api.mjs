@@ -17,7 +17,12 @@ import { deckReviewPrompt, deterministicReview, finalQualityReport, inspectMedia
 import { ensureDeckV3, ensureProjectV3, newId as newIrId, stableId } from './ppt/ir.mjs';
 import { buildRenderTree } from './ppt/render-tree.mjs';
 import { emitRunProgress, completeRun, recoverRun, startRun, transitionNode } from './ppt/run-service.mjs';
-import { getProject as getStructuredProject, saveProject as saveStructuredProject, saveRevision } from './ppt/repository.mjs';
+import { getProject as getStructuredProject, saveProject as saveStructuredProject, saveRevision, enqueueProject, readRevision } from './ppt/repository.mjs';
+import { editingState, generationEpoch, contentEditResult, recoverContentEdits, processGenerationEdits, recoverGenerationEdits } from './ppt/generation-edit-service.mjs';
+import { templatePreview } from './ppt/template-preview-service.mjs';
+import { editableCapabilities, templateCapabilities } from './ppt/edit-context.mjs';
+import { _internals as commandInternals } from './ppt/command-service.mjs';
+import { normalizeCommand } from './ppt/command-schema.mjs';
 import { handleStructuredPpt } from './ppt/api.mjs';
 import { importEditablePptx, renderImportedPptx } from './ppt/import-pptx.mjs';
 import { enrichAssetRefs } from './ppt/assets.mjs';
@@ -30,6 +35,11 @@ import { prepareTemplateFidelity, rescheduleTemplateFidelity, templateSlotPrompt
 import { templateReuseError } from './ppt-template-scheduler.mjs';
 import { inspectReportOutline } from './ppt-report-qa.mjs';
 import { reorderManual, sortManual } from './ppt-manual-order.mjs';
+import { runtimeState, checkpoint, updateSlidePreview, finishPause, reconcileCheckpoint, acquireGenerationLease } from './ppt/runtime.mjs';
+import { synchronizePlan, bindReview, reviewIsCurrent, semanticReviewKey } from './ppt/versioning.mjs';
+import { effectiveConstraints } from './ppt/mutation-router.mjs';
+import { digest } from './ppt/edit-context.mjs';
+import { transformGeneratedSlide } from './ppt/generation-edit-service.mjs';
 
 const running = new Set();
 const editing = new Set();
@@ -38,6 +48,7 @@ const MAX_TEXT = 160;
 const PPT_NODE_CONCURRENCY = Math.max(1, Math.min(3, Number(process.env.PPT_NODE_CONCURRENCY) || 3));
 const PPT_RE = /^\/ppt\/projects(?:\/([a-f0-9]{32}))?(?:\/(outline|generate|retry|export|pdf|source|duplicate|trash|restore|permanent|versions|rewrite|blank))?$/i;
 const FOLDER_RE = /^\/ppt\/folders(?:\/([a-f0-9]{32}))?$/i;
+const TEMPLATE_PREVIEW_RE = /^\/ppt\/templates\/(violet|blue|light|marketing|education|[a-f0-9]{32})\/preview$/i;
 const TEMPLATE_RE = /^\/ppt\/templates(?:\/(violet|blue|light|marketing|education|[a-f0-9]{32}))?$/i;
 
 class HttpError extends Error { constructor(status, message) { super(message); this.status = status; } }
@@ -196,7 +207,9 @@ function contentPrompt(p, slide, index) {
     : index === 0 ? '本页是封面且用户未提供 Deck Title；生成精炼 Deck Title，中文 6–18 字或英文 2–8 词，额外上下文放入 subtitle。' : '';
   const sourceCitationRule = /\b(?:sources?|references?|citations?)\b|来源|参考文献|引用/iu.test(slide.title || '') && p.source?.kind === 'file'
     ? `这是来源页；可见 slotTexts 或正文必须明确写出输入文件名「${p.source.name}」及本页引用来源的位置，不得只写“来源可追溯”之类的概括。` : '';
-  const editorial = `演示目标：${brief.objective || p.prompt}；受众：${brief.audience || '演示文稿读者'}；用途：${brief.presentationUse || 'technical_explainer'}；核心论点：${brief.thesis || p.prompt}；最终用户确认页数：${p.pages}（不得更改）；深度：${contract.depth || brief.depth || 'balanced'}；密度：${contract.density || 'medium'}；内容分布：${contract.distributionType || 'four_medium_cards'}；语义单元预算：${contract.semanticUnitBudget || 5}；point length profile：${contract.pointLengthProfile || 'standard'}；${pointRule} 必讲主题：${(brief.mustInclude || []).join('、').slice(0, 600)}。故事弧：${[storyArc.opening, storyArc.development, storyArc.turningPoint, storyArc.resolution].filter(Boolean).join(' → ').slice(0, 600)}。本页角色：${contract.role || 'evidence'}；本页要回答：${contract.question || slide.focus}；本页核心消息：${contract.message || slide.focus}；本页叙事作用：${contract.narrativeRole || contract.role || ''}；本页必需支撑：${(contract.requiredSupport || []).join('、').slice(0, 300)}；必须保留的细节：${(contract.requiredDetails || []).join('、').slice(0, 600)}；锁定证据 ID：${(contract.requiredEvidenceIds || []).join('、')}；视觉意图：${contract.visualIntent?.type || 'none'}。${deckTitleRule}${sourceCitationRule} 先基于原始页级召回完成 factSynthesis，再写 presentation-native 结构化内容。每页按“问题→主张→机制/例子/证据→启示”论证，并说明相对相邻页新增了什么；禁止同义改写凑页。详细页保留主张、机制、实现细节、约束、例子与启示中由来源支持且规划要求的部分；不得用上游摘要替代原始语义 chunk，不得编造来源没有的内容。evidence/results/benchmark 页面应给可复查的数值、对照或具体质性证据及条件；来源不足则明确说明或改成“评估方法”，不可只写空泛原则。不要为满足最短长度加无意义尾语；来源不足时用完整短句并标识待补证据。takeaway 必须提供新的综合判断，不能重复标题或正文。模型只决定语义，不给坐标、字号或 PPTX。非封面标题是 message-first headline，生成 3–5 个候选；标准内容标题最多 36 visual units、最多两行，不靠缩小字号解决。`;
+  const constraints = effectiveConstraints(p, slide.id);
+  const editInstructions = constraints.length ? constraints.filter(item => ['content', 'title'].includes(item.type)).map(item => item.instruction).join('\n') : (p.editing?.instructions?.[slide.id] || []).join('\n');
+  const editorial = `用户对本页追加的要求（累计执行，仍遵守来源和容量边界）：${editInstructions || '无'}。演示目标：${brief.objective || p.prompt}；受众：${brief.audience || '演示文稿读者'}；用途：${brief.presentationUse || 'technical_explainer'}；核心论点：${brief.thesis || p.prompt}；最终用户确认页数：${p.pages}（不得更改）；深度：${contract.depth || brief.depth || 'balanced'}；密度：${contract.density || 'medium'}；内容分布：${contract.distributionType || 'four_medium_cards'}；语义单元预算：${contract.semanticUnitBudget || 5}；point length profile：${contract.pointLengthProfile || 'standard'}；${pointRule} 必讲主题：${(brief.mustInclude || []).join('、').slice(0, 600)}。故事弧：${[storyArc.opening, storyArc.development, storyArc.turningPoint, storyArc.resolution].filter(Boolean).join(' → ').slice(0, 600)}。本页角色：${contract.role || 'evidence'}；本页要回答：${contract.question || slide.focus}；本页核心消息：${contract.message || slide.focus}；本页叙事作用：${contract.narrativeRole || contract.role || ''}；本页必需支撑：${(contract.requiredSupport || []).join('、').slice(0, 300)}；必须保留的细节：${(contract.requiredDetails || []).join('、').slice(0, 600)}；锁定证据 ID：${(contract.requiredEvidenceIds || []).join('、')}；视觉意图：${contract.visualIntent?.type || 'none'}。${deckTitleRule}${sourceCitationRule} 先基于原始页级召回完成 factSynthesis，再写 presentation-native 结构化内容。每页按“问题→主张→机制/例子/证据→启示”论证，并说明相对相邻页新增了什么；禁止同义改写凑页。详细页保留主张、机制、实现细节、约束、例子与启示中由来源支持且规划要求的部分；不得用上游摘要替代原始语义 chunk，不得编造来源没有的内容。evidence/results/benchmark 页面应给可复查的数值、对照或具体质性证据及条件；来源不足则明确说明或改成“评估方法”，不可只写空泛原则。不要为满足最短长度加无意义尾语；来源不足时用完整短句并标识待补证据。takeaway 必须提供新的综合判断，不能重复标题或正文。模型只决定语义，不给坐标、字号或 PPTX。非封面标题是 message-first headline，生成 3–5 个候选；标准内容标题最多 36 visual units、最多两行，不靠缩小字号解决。`;
   const reportEditorial = brief.reportMode === 'presentation' ? '' : `这是 ${brief.reportMode === 'decision' ? '决策' : '信息'}汇报。待回答的问题：${brief.decisionQuestion || '未指定'}；证据边界：${brief.sourceScope || '仅依据当前输入'}。summary 页先写读者可采取的结论及依据；process 或 architecture 页给出完整链路及分支条件；evidence 页区分来源事实、推断和未验证项；recommendation 或 decision 页只写由来源支持的条件、可执行的下一步与仍需核实的问题；appendix 页用于补充定义、异常与来源细节。每个要点写“判断或概念＋一句简洁解释”，禁止只重复名词，也不能通过同义改写把单一事实拆成多页。当前来源不足以支撑的行动建议要明确标为待验证。`;
   const contentSchema = '{"factSynthesis":{"claims":["主张"],"facts":["来源支持的事实"],"numbers":["来源数值"],"examples":["例子"],"relationships":["因果或结构关系"],"mechanisms":["机制"],"implications":["启示"],"constraints":["约束"],"limitations":["局限"]},"evidenceUsedIds":["在可见文字中实际表达的 evidence ID"],"titleCandidates":["候选标题"],"title":"结论式标题或锁定的用户 Deck Title","eyebrow":"可选短标签","subtitle":"可选背景句","contentBlocks":[{"type":"definition|mechanism|evidence|example|implication|contrast|constraint|tradeoff|decision|next_step|stage|runtime","heading":"短标题","body":"来源支持的说明"}],"takeaway":"可选且不可重复的结论","bullets":["仅用于兼容的结构化要点"],"slotTexts":{"普通模板 shape ID":"单行或多行文字","多点列表 shape ID":[{"label":"要点名称","body":"来源支持的简洁说明"}]},"omitTemplateShapes":[{"shapeId":123,"reason":"该原生图解与本页主题无关，且无来源支持"}]}';
   const slotContract = templateSlotPrompt(p, index);
@@ -223,7 +236,8 @@ function contentRepairPrompt(p, slide, index, draft, issues) {
 async function modelCall(p, prompt, activity, log, options = {}) {
   const sid = options.nodeKey ? sha256(Buffer.from(`${p.id}:${options.nodeKey}`)).slice(0, 32) : p.id;
   try {
-    const result = await runRoutine({ sid, uid: p.uid, kind: orch.KIND_PPT, prompt, model: p.model, configId: p.configId, activity, log });
+    const result = await runRoutine({ sid, uid: p.uid, kind: orch.KIND_PPT, prompt, model: p.model, configId: p.configId, activity, log,
+      canStart: () => { const latest = store.get(p.uid, p.id); return Boolean(latest && !latest.deletedAt && latest.status !== 'cancelled' && (!(options.nodeKey || '').startsWith('content:') && !(options.nodeKey || '').startsWith('review:deck') || (latest.status !== 'paused' && !latest.runtime?.pauseRequested))); } });
     if (!result.ok) throw new Error(result.error || `模型任务失败：${result.status}`);
     return parseModelJson(result.resultText);
   } finally {
@@ -312,21 +326,27 @@ function applySourceImages(deck, source) {
   if (!images.length || !deck?.slides?.length) return deck;
   // Place source images only on pages that explicitly request an image. An
   // incidental attachment must not consume an unrelated page's copy area.
-  const slides = deck.slides.map(({ nodes: _nodes, nodeOrder: _nodeOrder, ...slide }) => ({ ...slide, blocks: [...(slide.blocks || [])] }));
-  const targets = slides.filter(slide => slide.layoutId === 'image-text' && slide.blocks.length < 2);
-  if (!targets.length) return deck;
-  for (let index = 0; index < images.length; index++) {
-    const slide = targets[Math.floor(index / 2) % targets.length];
-    if (slide.blocks.length >= 2) continue;
-    slide.blocks.push(images[index]);
-    slide.layout = 'visual-first';
+  const slides = structuredClone(deck.slides);
+  const targets = slides.filter(slide => slide.layoutId === 'image-text' && (slide.blocks || []).length < 2);
+  const terms = text => new Set((String(text || '').toLowerCase().match(/[a-z][a-z0-9_-]{2,}|[\u3400-\u9fff]{2,4}/g) || []));
+  for (const image of images) {
+    const imageTerms = terms(`${image.caption || ''} ${image.text || ''}`);
+    const ranked = targets.filter(slide => (slide.blocks || []).length < 2).map(slide => {
+      const wanted = terms(`${slide.title} ${(slide.bullets || []).join(' ')} ${slide.copy?.visualIntent?.query || ''}`);
+      const refs = image.sourceRefs || (image.sourceRef ? [image.sourceRef] : []);
+      return { slide, score: [...imageTerms].filter(term => wanted.has(term)).length + (refs.some(ref => slide.sourceRefs?.includes(ref)) ? 10 : 0) + (slide.copy?.visualIntent?.assetId === image.id ? 100 : 0) };
+    }).filter(item => item.score > 0).sort((a, b) => b.score - a.score);
+    const slide = ranked[0]?.slide; if (!slide) continue;
+    slide.blocks ||= []; slide.blocks.push(image); slide.layout = 'visual-first';
+    slide.assetBindings ||= []; slide.assetBindings.push({ assetId: image.id, reason: 'source-or-topic-match', score: ranked[0].score });
+    if (slide.nodes) slide.nodes.push({ id: image.id, type: 'image', semanticRole: 'visual', slotId: 'visual', content: Object.fromEntries(Object.entries(image).filter(([key]) => !['id','type'].includes(key))) });
   }
   return { ...deck, slides };
 }
 
 function persistDagNode(uid, id, nodeId, status, patch = {}) {
   const project = store.get(uid, id);
-  if (!project) return null;
+  if (!project || project.deletedAt || project.status === 'cancelled') return null;
   try { return transitionNode(project, nodeId, status === 'done' ? 'completed' : status, patch, { useInput: true }).project.dagNodes[nodeId]; }
   catch {
     project.dagNodes ||= {};
@@ -355,9 +375,25 @@ function deterministicGate(project, modelReview = project.quality?.modelReview |
 function qualityError(project) {
   return project.quality?.deterministic?.issues?.filter(item => item.severity === 'error').slice(0, 3).map(item => item.message).join('；') || '';
 }
+
+/** Compatibility saves use the same revision journal and project writer as the structured editor. */
+function commitCompatibility(project, gated, deps) {
+  return enqueueProject(project.uid, project.id, async () => {
+    const latest = getStructuredProject(project.uid, project.id);
+    if (!latest || latest.deletedAt || latest.revision !== project.revision) throw new HttpError(409, 'presentation changed; reload first');
+    const result = await commandInternals.commit(latest, normalizeCommand({ type: 'deck.replace', baseRevision: project.revision, payload: { deck: gated.deck, projectState: { template: gated.template, templateSpec: gated.templateSpec, outline: gated.outline, pages: gated.pages } } }, latest));
+    const updated = result.project; updated.quality = gated.quality; updated.pdfRevision = 0;
+    if (gated.quality.status === 'blocked') {
+      updated.status = 'quality_blocked'; updated.stage = 'repair'; updated.error = `PPT quality gate blocked publish: ${qualityError(gated)}`;
+      saveStructuredProject(updated); return updated;
+    }
+    updated.status = 'completed'; updated.stage = 'completed'; updated.error = '';
+    saveStructuredProject(updated); return updated;
+  });
+}
 function fail(uid, id, stage, error, log) {
   const p = store.get(uid, id);
-  if (!p) return;
+  if (!p || p.deletedAt) return;
   if (p.status === 'cancelled') return;
   p.status = 'failed'; p.stage = stage;
   p.error = String(error?.message || error).slice(0, 400);
@@ -448,6 +484,7 @@ function startOutline(uid, id, activity, log, deps = defaultDeps) {
         current.deckTitle = { text: outline[0]?.title || current.title, raw: outline[0]?.title || current.title, source: 'agent', locked: false };
       }
       current.planning = buildPlanning(current, rawOutline, outline);
+      synchronizePlan(current, 'outline-confirmation');
       current.diff = diffSummary(current);
       generateAfterOutline = Boolean(current.autoGenerate);
       delete current.autoGenerate;
@@ -461,13 +498,16 @@ function startOutline(uid, id, activity, log, deps = defaultDeps) {
 }
 function startGeneration(uid, id, activity, log, deps = defaultDeps) {
   if (running.has(id)) return;
+  const lease = acquireGenerationLease(store.get(uid, id)); if (!lease) return;
   running.add(id);
   void (async () => {
     try {
       const p = ensureProjectTemplate(store.get(uid, id));
       if (!p || p.status !== 'generating') return;
       try { emitRunProgress(p, 'generation.started', { slideCount: p.outline.length }); } catch {}
-      p.stage = 'source-check'; p.nodes ||= {}; p.dagNodes ||= {}; store.save(p);
+      reconcileCheckpoint(p);
+      const runtime = runtimeState(p); runtime.lifecycle = 'active';
+      p.stage = 'source-check'; p.nodes ||= {}; p.dagNodes ||= {}; editingState(p).contentOpen = true; recoverContentEdits(p); synchronizePlan(p); store.save(p);
       if (p.update?.baseSnapshot?.deck) {
         for (const slide of p.outline.filter(slide => slide.change === 'keep' && slide.baseSlideId)) {
           if (p.nodes[slide.id]?.status === 'done') continue;
@@ -485,6 +525,9 @@ function startGeneration(uid, id, activity, log, deps = defaultDeps) {
       for (const slide of p.outline.filter(item => p.nodes?.[item.id]?.status === 'done')) {
         const latest = store.get(uid, id);
         const nodeId = dagNodeId('content', slide.id);
+        if (latest?.nodes?.[slide.id]?.status === 'done' && (!latest.runtime?.slides?.[slide.id]?.preview || latest.runtime.slides[slide.id].contentHash !== digest(latest.nodes[slide.id].slide) || latest.runtime.slides[slide.id].epoch !== generationEpoch(latest, slide.id))) { updateSlidePreview(latest, slide.id);
+          for (const stage of ['layout', 'preview', 'quality']) transitionNode(latest, `${stage}:${slide.id}`, 'completed', { slideId: slide.id, recovered: true, inputHash: latest.runtime.slides[slide.id].contentHash }, { useInput: true });
+          store.save(latest); }
         if (latest?.nodes?.[slide.id]?.status === 'done' && !['done', 'completed'].includes(latest.dagNodes?.[nodeId]?.status))
           transitionNode(latest, nodeId, 'completed', { slideId: slide.id, recovered: true }, { useInput: true });
       }
@@ -510,7 +553,7 @@ function startGeneration(uid, id, activity, log, deps = defaultDeps) {
         ...contentSlides.map(item => ({ kind: 'content', ...item })),
         ...sourceImages.map((image, index) => ({ kind: 'media', image, index })),
       ];
-      await boundedAll(readyNodes, PPT_NODE_CONCURRENCY, async (work) => {
+      const runWork = async (work) => {
         if (work.kind === 'media') {
           const targetIndex = p.outline.length > 1 ? 1 + Math.floor(work.index / 2) % (p.outline.length - 1) : 0;
           const slideId = p.outline[targetIndex].id;
@@ -525,15 +568,36 @@ function startGeneration(uid, id, activity, log, deps = defaultDeps) {
         }
         const { slide, index } = work;
         const nodeId = dagNodeId('content', slide.id);
-        const snapshot = store.get(uid, id);
-        if (!snapshot || snapshot.status !== 'generating') throw new Error('generation stopped');
-        if (snapshot.nodes?.[slide.id]?.status === 'done') return snapshot.nodes[slide.id].slide;
-        snapshot.stage = 'content'; snapshot.nodes ||= {};
-        snapshot.nodes[slide.id] = { status: 'running', attempts: (snapshot.nodes[slide.id]?.attempts || 0) + 1 };
-        transitionNode(snapshot, nodeId, 'running', { slideId: slide.id }, { useInput: true });
+        for (;;) {
+        const snapshot = await enqueueProject(uid, id, () => {
+          const latest = store.get(uid, id);
+          if (!latest || latest.deletedAt || latest.status !== 'generating' || latest.runtime?.pauseRequested || latest.nodes?.[slide.id]?.status === 'done') return null;
+          const epoch = generationEpoch(latest, slide.id);
+          latest.stage = 'content'; latest.nodes ||= {};
+          runtimeState(latest).attempts[`${nodeId}:${epoch}`] = { phase: 'content_running', runId: latest.currentRunId, epoch,
+            inputHash: digest({ plan: latest.planRevision?.hash, constraints: effectiveConstraints(latest, slide.id), slide }),
+            planRevision: latest.planRevision?.version, constraintRevision: latest.constraints?.version,
+            modelRef: { configId: latest.configId, model: latest.model }, startedAt: new Date().toISOString() };
+          latest.nodes[slide.id] = { ...latest.nodes[slide.id], status: 'running', epoch, attempts: (latest.nodes[slide.id]?.attempts || 0) + 1 };
+          contentEditResult(latest, slide.id, epoch, 'applying');
+          transitionNode(latest, nodeId, 'running', { slideId: slide.id, epoch }, { useInput: true });
+          return latest;
+        });
+        if (!snapshot) return;
+        const epoch = generationEpoch(snapshot, slide.id);
+        const runId = snapshot.currentRunId;
+
         try {
           const previousTitles = snapshot.outline.slice(0, index).map(item => item.title);
-          let content = normalizeSlide(await deps.modelCall(snapshot, contentPrompt(snapshot, slide, index), activity, log, { nodeKey: nodeId }), slide, snapshot, previousTitles);
+          const prior = snapshot.nodes?.[slide.id]?.slide;
+          const mutations = effectiveConstraints(snapshot, slide.id);
+          const requested = mutations.filter(item => { const result = snapshot.editing?.intents?.[item.intentId]?.perSlideResults?.[slide.id]; return result?.epoch === epoch && result.phase === 'content' && ['queued','applying'].includes(result.status); });
+          const mutation = requested.at(-1);
+          const minimal = prior && requested.length && requested.every(item => ['title', 'layout', 'style'].includes(item.type));
+          let content = minimal ? structuredClone(prior) : normalizeSlide(await deps.modelCall(snapshot, contentPrompt(snapshot, slide, index), activity, log, { nodeKey: nodeId }), slide, snapshot, previousTitles);
+          for (const item of (minimal ? requested : mutations.filter(item => ['layout', 'style'].includes(item.type)))) {
+            snapshot.nodes[slide.id].slide = content; content = await transformGeneratedSlide(snapshot, slide.id, item, deps, activity, log);
+          }
           const contract = snapshot.planning?.slidePlan?.find(item => item.slideId === slide.id);
           const copyIssues = [
             ...inspectSlideCopy(content, contract, index, snapshot.outline.length,
@@ -544,38 +608,86 @@ function startGeneration(uid, id, activity, log, deps = defaultDeps) {
           ];
           // A bounded local rewrite is still the same durable content node: it
           // does not add a DAG stage or restart other completed slides.
-          if (copyIssues.length) {
+          if (copyIssues.length && !minimal) {
             content = normalizeSlide(await deps.modelCall(snapshot, contentRepairPrompt(snapshot, slide, index, content, copyIssues), activity, log,
               { nodeKey: `${nodeId}:repair` }), slide, snapshot, previousTitles);
             content.localRepair = { attempts: 1, reasons: copyIssues.map(item => item.code) };
           }
-          const latest = store.get(uid, id);
-          if (!latest || latest.status !== 'generating') throw new Error('generation stopped');
-          latest.nodes[slide.id] = { ...latest.nodes[slide.id], status: 'done', slide: content };
-          if (index === 0 && latest.deckTitle?.source !== 'user') {
-            latest.deckTitle = { text: content.title, raw: content.title, source: 'agent', locked: false };
-          }
-          transitionNode(latest, nodeId, 'completed', { slideId: slide.id }, { useInput: true });
+          const committed = await enqueueProject(uid, id, () => {
+            const latest = store.get(uid, id);
+            if (!lease.owns() || !latest || latest.deletedAt || latest.status !== 'generating' || latest.currentRunId !== runId) return 'stopped';
+            if (generationEpoch(latest, slide.id) !== epoch) {
+              const mutation = effectiveConstraints(latest, slide.id).at(-1);
+              if (!latest.nodes[slide.id].slide && mutation && ['title', 'layout', 'style'].includes(mutation.type)) latest.nodes[slide.id].slide = content;
+              store.save(latest); return 'superseded';
+            }
+            latest.nodes[slide.id] = { ...latest.nodes[slide.id], status: 'done', epoch, slide: content };
+            runtimeState(latest).slides[slide.id] = { ...latest.runtime.slides[slide.id], phase: 'content_ready' };
+            transitionNode(latest, nodeId, 'completed', { slideId: slide.id, epoch }, { useInput: true });
+            updateSlidePreview(latest, slide.id);
+            latest.runtime.slides[slide.id].quality.issues.push(...copyIssues);
+            latest.runtime.attempts = { ...latest.runtime.attempts, ...snapshot.runtime?.attempts };
+            Object.assign(latest.runtime.attempts[`${nodeId}:${epoch}`], { phase: 'render_ready', completedAt: new Date().toISOString(), outputHash: latest.runtime.slides[slide.id].contentHash });
+            for (const stage of ['layout', 'preview', 'quality']) transitionNode(latest, `${stage}:${slide.id}`, 'completed', { slideId: slide.id, epoch, inputHash: latest.runtime.slides[slide.id].contentHash, renderHash: latest.runtime.slides[slide.id].renderHash }, { useInput: true });
+            checkpoint(latest, `slide:${slide.id}:content`);
+            if (index === 0 && latest.deckTitle?.source !== 'user') latest.deckTitle = { text: content.title, raw: content.title, source: 'agent', locked: false };
+            contentEditResult(latest, slide.id, epoch, 'applied');
+            store.save(latest); emitRunProgress(latest, 'slide.render_ready', { slideId: slide.id, epoch, renderHash: latest.runtime.slides[slide.id].renderHash });
+            return 'committed';
+          });
+          if (committed === 'superseded') continue;
           return content;
         } catch (error) {
-          persistDagNode(uid, id, nodeId, 'failed', { error: String(error?.message || error).slice(0, 300) });
+          const stale = await enqueueProject(uid, id, () => {
+            const latest = store.get(uid, id);
+            if (!latest || latest.deletedAt || latest.status !== 'generating' || latest.currentRunId !== runId) return true;
+            if (latest.runtime?.pauseRequested) { latest.nodes[slide.id].status = 'pending'; store.save(latest); return true; }
+            if (generationEpoch(latest, slide.id) !== epoch) return true;
+            contentEditResult(latest, slide.id, epoch, 'failed', String(error?.message || error));
+            store.save(latest);
+            persistDagNode(uid, id, latest.nodes?.[slide.id]?.status === 'done' ? `preview:${slide.id}` : nodeId, 'failed', { epoch, error: String(error?.message || error).slice(0, 300) });
+            return false;
+          });
+          if (stale) continue;
           throw error;
         }
-      });
+        }
+      };
+      await boundedAll(readyNodes, PPT_NODE_CONCURRENCY, runWork);
+      const afterWave = store.get(uid, id);
+      if (afterWave?.runtime?.pauseRequested) { await enqueueProject(uid, id, () => finishPause(store.get(uid, id))); return; }
+      let current;
+      for (;;) {
+        // The barrier closes content edits atomically. Later intents become draft edits.
+        const wave = await enqueueProject(uid, id, () => {
+          const latest = store.get(uid, id);
+          if (!latest || latest.deletedAt || latest.status !== 'generating') return null;
+          if (latest.runtime?.pauseRequested) { finishPause(latest); return null; }
+          const pending = latest.outline.map((slide, index) => ({ kind: 'content', slide, index })).filter(({ slide }) => latest.nodes?.[slide.id]?.status !== 'done');
+          if (pending.length) return { pending };
+          editingState(latest).contentOpen = false;
+          latest.deck = applyLayoutRegistry(applySourceImages({ schemaVersion: 2, slides: latest.outline.map((s) => latest.nodes[s.id].slide) }, latest.source));
+          latest.deck = ensureDeckV3(latest.deck);
+          bindTemplateFidelity(latest);
+          enrichAssetRefs(latest);
+          latest.renderTree = buildRenderTree(latest);
+          for (const tree of latest.renderTree.slides) runtimeState(latest).slides[tree.id] = { ...latest.runtime.slides[tree.id], phase: 'render_ready', preview: tree, renderHash: digest(tree) };
+          checkpoint(latest, 'content-barrier');
+          latest.stage = 'review'; store.save(latest);
+          return { project: latest };
+        });
+        if (!wave) return;
+        if (wave.project) { current = wave.project; break; }
+        await boundedAll(wave.pending, PPT_NODE_CONCURRENCY, runWork);
+      }
 
-      let current = store.get(uid, id);
       if (!current || current.status !== 'generating') return;
-      current.deck = applyLayoutRegistry(applySourceImages({ schemaVersion: 2, slides: current.outline.map((s) => current.nodes[s.id].slide) }, current.source));
-      current.deck = ensureDeckV3(current.deck);
-      bindTemplateFidelity(current);
-      enrichAssetRefs(current);
-      current.renderTree = buildRenderTree(current);
-      current.stage = 'review'; store.save(current);
       try { transitionNode(current, 'content', 'completed'); transitionNode(current, 'media', 'completed'); transitionNode(current, 'layout', 'completed'); transitionNode(current, 'preview', 'completed'); transitionNode(current, 'quality', 'running'); } catch {}
 
-      const initialReview = deterministicReview(current);
+      let initialReview = deterministicReview(current);
       const reviewNodeId = 'review:deck';
-      let modelReview = current.quality?.modelReview || current.dagNodes?.[reviewNodeId]?.result;
+      let reviewedInputHash = semanticReviewKey(current);
+      let modelReview = reviewIsCurrent(current) ? current.quality.modelReview : null;
       if (!modelReview) {
         persistDagNode(uid, id, reviewNodeId, 'running');
         const reviewStarted = Date.now();
@@ -590,12 +702,34 @@ function startGeneration(uid, id, activity, log, deps = defaultDeps) {
       }
 
       current = store.get(uid, id);
+      if (!current || current.deletedAt || current.status !== 'generating') return;
+      if (current.runtime?.pauseRequested) { await enqueueProject(uid, id, () => finishPause(store.get(uid, id))); return; }
+      for (let attempt = 0; semanticReviewKey(current) !== reviewedInputHash; attempt++) {
+        if (attempt >= 3) throw new Error('review inputs keep changing; retry after edits settle');
+        reviewedInputHash = semanticReviewKey(current); initialReview = deterministicReview(current);
+        modelReview = normalizeModelReview(await deps.modelCall(current, deckReviewPrompt(current), activity, log, { nodeKey: 'review:deck:refresh' }), current.deck.slides.map(slide => slide.id));
+        current = store.get(uid, id); if (!current || current.deletedAt || current.status !== 'generating') return;
+        if (current.runtime?.pauseRequested) { await enqueueProject(uid, id, () => finishPause(store.get(uid, id))); return; }
+      }
+      const repairBaseline = semanticReviewKey(current);
       current.stage = 'repair'; store.save(current);
       try { transitionNode(current, 'quality', 'completed'); transitionNode(current, 'review', 'completed'); transitionNode(current, 'repair', 'running'); } catch {}
       const repaired = repairProject(current, initialReview);
       current = repaired.project;
       const reviewDuration = current.dagNodes?.[reviewNodeId]?.durationMs || 0;
       current.quality = finalQualityReport(repaired.review, repaired.repairs, modelReview, { reviewMs: reviewDuration });
+      if (semanticReviewKey(current) !== reviewedInputHash) {
+        modelReview = normalizeModelReview(await deps.modelCall(current, deckReviewPrompt(current), activity, log, { nodeKey: 'review:deck:repair' }), current.deck.slides.map(slide => slide.id));
+        current.quality = finalQualityReport(repaired.review, repaired.repairs, modelReview, { reviewMs: reviewDuration });
+      }
+      const latestBeforePublish = store.get(uid, id);
+      if (!latestBeforePublish || latestBeforePublish.deletedAt || latestBeforePublish.status !== 'generating') return;
+      if (latestBeforePublish.runtime?.pauseRequested) { await enqueueProject(uid, id, () => finishPause(latestBeforePublish)); return; }
+      if (semanticReviewKey(latestBeforePublish) !== repairBaseline) throw new Error('content changed during repair review; retry before publishing');
+      current.editing = latestBeforePublish.editing; current.constraints = latestBeforePublish.constraints; current.runtime = latestBeforePublish.runtime;
+      current.renderTree = buildRenderTree(current);
+      for (const tree of current.renderTree.slides) runtimeState(current).slides[tree.id] = { ...current.runtime.slides[tree.id], preview: tree, renderHash: digest(tree) };
+      bindReview(current, modelReview);
       current.stage = 'publish'; store.save(current);
       try { transitionNode(current, 'repair', 'completed'); } catch {}
       if (current.quality.status === 'blocked') {
@@ -605,20 +739,30 @@ function startGeneration(uid, id, activity, log, deps = defaultDeps) {
         return;
       }
       persistDagNode(uid, id, 'publish:deck', 'running');
-      const exportInfo = await deps.renderPptx(current);
-      const finished = store.get(uid, id);
-      if (!finished || finished.status !== 'generating') return;
-      finished.exportBytes = exportInfo.bytes; finished.status = 'completed'; finished.stage = 'completed';
-      finished.dagNodes['publish:deck'] = nodeRecord('done', finished.dagNodes['publish:deck'], { bytes: exportInfo.bytes });
-      finished.error = ''; finished.revision = Math.max(1, Number(finished.revision || 0)); finished.draftRevision = finished.revision;
-      finished.publishedRevision = finished.revision; finished.renderTree = buildRenderTree(finished); saveStructuredProject(finished); saveRevision(finished, 'initial-publish');
-      try { transitionNode(finished, 'publish:deck', 'completed', { bytes: exportInfo.bytes }); transitionNode(finished, 'publish', 'completed', { bytes: exportInfo.bytes }); completeRun(finished, { revision: finished.revision }); } catch {}
+      const artifactPath = `/workspace/published-${Math.max(1, Number(current.revision || 0))}-${newIrId('artifact')}.pptx`;
+      const exportInfo = await deps.renderPptx({ ...current, renderOutput: artifactPath });
+      await enqueueProject(uid, id, () => {
+        const finished = store.get(uid, id);
+        if (!lease.owns() || !finished || finished.deletedAt || finished.status !== 'generating' || finished.currentRunId !== current.currentRunId) return;
+        if (finished.runtime?.pauseRequested) { finishPause(finished); return; }
+        if (semanticReviewKey(finished) !== semanticReviewKey(current)) throw new Error('generation changed during publication; retry review before publishing');
+        finished.exportBytes = exportInfo.bytes; finished.status = 'completed'; finished.stage = 'completed';
+        finished.dagNodes['publish:deck'] = nodeRecord('done', finished.dagNodes['publish:deck'], { bytes: exportInfo.bytes });
+        finished.error = ''; finished.revision = Math.max(1, Number(finished.revision || 0)); finished.draftRevision = finished.revision;
+        finished.publishedArtifactPath = artifactPath; finished.publishedRevision = finished.revision;
+        finished.renderTree = buildRenderTree(finished); saveStructuredProject(finished); saveRevision(finished, 'initial-publish');
+        runtimeState(finished).lifecycle = 'completed';
+        for (const tree of finished.renderTree.slides) finished.runtime.slides[tree.id] = { ...finished.runtime.slides[tree.id], phase: 'validated', preview: tree, renderHash: digest(tree) };
+        checkpoint(finished, 'initial-publish'); saveStructuredProject(finished);
+        try { transitionNode(finished, 'publish:deck', 'completed', { bytes: exportInfo.bytes }); transitionNode(finished, 'publish', 'completed', { bytes: exportInfo.bytes }); completeRun(finished, { revision: finished.revision }); } catch {}
+      });
     } catch (error) { fail(uid, id, 'generation', error, log); }
-    finally { running.delete(id); }
+    finally { lease.release(); running.delete(id); void processGenerationEdits(uid, id, deps, activity, log).catch(error => log(String(error))); }
   })();
 }
 
 export function recoverPptJobs(activity, log = () => {}, deps = defaultDeps) {
+  recoverGenerationEdits(deps, activity, log);
   for (const p of store.listPending()) {
     try { recoverRun(ensureProjectV3(p)); } catch {}
     if (p.status === 'ingesting') startIngest(p.uid, p.id, activity, log, deps);
@@ -725,7 +869,7 @@ function templateList(uid, url) {
   if (query) rows = rows.filter(item => `${item.name} ${item.category} ${item.description || ''} ${(item.tags || []).join(' ')}`.toLocaleLowerCase().includes(query));
   const category = url.searchParams.get('category');
   if (category && category !== '全部') rows = rows.filter(item => item.category === category);
-  return rows.sort((a, b) => Number(b.pinned) - Number(a.pinned) || a.name.localeCompare(b.name));
+  return rows.map(item => ({ ...item, capabilities: templateCapabilities(item) })).sort((a, b) => Number(b.pinned) - Number(a.pinned) || a.name.localeCompare(b.name));
 }
 async function handleTemplates(req, id, uid, url, send, deps) {
   const customs = store.listTemplates(uid);
@@ -837,7 +981,7 @@ async function handleUpdates(req, uid, send, activity, log, deps) {
     template: template.id, templateSpec: snapshotTemplate(template), inputKind: 'update',
     update, updateRequest: requestId ? { id: requestId, hash: requestHash } : null,
     version: { rootId: rootId || id, parentId: baseProject?.id || null, number: nextVersion, baseFileName: baseFile?.name || null }, source,
-    sourceRevision: 1, outlineRevision: 0, status: mustIngest ? 'ingesting' : 'outlining', stage: mustIngest ? 'ingest' : 'outline',
+    sourceRevision: 1, outlineRevision: 0, pageDecision: { finalPageCount: count, source: data.pages === undefined ? 'estimate' : 'user', includesCover: true }, status: mustIngest ? 'ingesting' : 'outlining', stage: mustIngest ? 'ingest' : 'outline',
     model: typeof data.model === 'string' ? data.model.slice(0, 120) : '', configId: bounded(data.configId, 120, 'configId'),
     outline: [], deck: null, nodes: {}, revision: 0, favorite: false, pinned: false, folderId: baseProject?.folderId || null,
     tags: ['更新', template.name.slice(0, 40)].slice(0, 10), deletedAt: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
@@ -875,7 +1019,7 @@ async function handleFolders(req, id, uid, send) {
     return send(200, { folder });
   }
   if (req.method === 'DELETE') {
-    for (const project of store.list(uid).filter(project => project.folderId === id)) { project.folderId = null; store.save(project); }
+    for (const project of store.list(uid).filter(project => project.folderId === id)) await enqueueProject(uid, project.id, () => { const latest = getStructuredProject(uid, project.id); if (latest?.folderId === id) { latest.folderId = null; store.save(latest); } });
     store.saveFolders(uid, folders.filter(item => item.id !== id));
     return send(200, { ok: true });
   }
@@ -902,7 +1046,7 @@ async function handleProjectOrder(req, uid, send) {
   try { group = reorderManual(projects, data.movedId, data.targetId, data.position,
     (a, b) => b.updatedAt.localeCompare(a.updatedAt)); }
   catch (error) { throw new HttpError(409, error.message); }
-  for (const project of group) store.save(project, { touch: false });
+  for (const project of group) await enqueueProject(uid, project.id, () => { const latest = getStructuredProject(uid, project.id); if (latest) { latest.manualOrder = project.manualOrder; store.save(latest, { touch: false }); } });
   return send(200, { order: group.map(item => item.id) });
 }
 
@@ -917,32 +1061,42 @@ async function handleBulk(req, uid, send, deps) {
   if (data.action === 'permanent' && projects.some(project => !project.deletedAt || running.has(project.id) || editing.has(project.id))) throw new HttpError(409, 'projects must be in trash and idle');
   if (data.action === 'restore' && store.list(uid).filter(project => !project.deletedAt).length + projects.filter(project => project.deletedAt).length > 50) throw new HttpError(409, 'workspace limit is 50 presentations');
   const at = new Date().toISOString();
-  for (const project of projects) {
-    if (data.action === 'move') project.folderId = data.folderId;
-    if (data.action === 'trash') project.deletedAt = at;
-    if (data.action === 'restore') project.deletedAt = null;
-    if (data.action === 'permanent') await permanentlyRemove(project, deps);
-    else store.save(project);
-  }
+  for (const project of projects) await enqueueProject(uid, project.id, async () => {
+    const latest = getStructuredProject(uid, project.id);
+    if (!latest) throw new HttpError(404, 'project not found');
+    if (data.action === 'move') latest.folderId = data.folderId;
+    if (data.action === 'trash') latest.deletedAt = at;
+    if (data.action === 'restore') latest.deletedAt = null;
+    if (data.action === 'permanent') {
+      if (!latest.deletedAt || running.has(latest.id) || editing.has(latest.id)) throw new HttpError(409, 'project must be in trash and idle');
+      await permanentlyRemove(latest, deps);
+    } else store.save(latest);
+  });
   return send(200, { ok: true, count: projects.length });
 }
 
 export async function handlePpt(req, url, { uid, send, res, readBody, activity, log = () => {}, deps = defaultDeps }) {
-  const structured = await handleStructuredPpt(req, url, { uid, send, res, readBody, activity, log, deps });
+  const structured = await handleStructuredPpt(req, url, { uid, send, res, readBody, activity, log, deps, resumeGeneration: (owner, id) => startGeneration(owner, id, activity, log, deps) });
   if (structured) return true;
   const folderMatch = url.pathname.match(FOLDER_RE);
   const templateMatch = url.pathname.match(TEMPLATE_RE);
+  const previewMatch = url.pathname.match(TEMPLATE_PREVIEW_RE);
   const updates = url.pathname === '/ppt/updates';
   const bulk = url.pathname === '/ppt/projects/bulk';
   const projectOrder = url.pathname === '/ppt/projects/order';
   const folderOrder = url.pathname === '/ppt/folders/order';
   const match = url.pathname.match(PPT_RE);
-  if (!match && !folderMatch && !templateMatch && !bulk && !updates && !projectOrder && !folderOrder) return false;
+  if (!match && !folderMatch && !templateMatch && !previewMatch && !bulk && !updates && !projectOrder && !folderOrder) return false;
   const [, id, action] = match || [];
   try {
     if (folderOrder) return await handleFolderOrder(req, uid, send);
     if (projectOrder) return await handleProjectOrder(req, uid, send);
     if (folderMatch) return await handleFolders(req, folderMatch[1], uid, send);
+    if (previewMatch && req.method === 'GET') {
+      const template = resolveTemplate(uid, previewMatch[1]);
+      const svg = await templatePreview(uid, template, Number(url.searchParams.get('slide') || 0), deps);
+      res.writeHead(200, { 'content-type': 'image/svg+xml; charset=utf-8', 'cache-control': 'private, max-age=60' }); res.end(svg); return true;
+    }
     if (templateMatch) return await handleTemplates(req, templateMatch[1], uid, url, send, deps);
     if (updates) return await handleUpdates(req, uid, send, activity, log, deps);
     if (bulk) return await handleBulk(req, uid, send, deps);
@@ -1031,17 +1185,15 @@ export async function handlePpt(req, url, { uid, send, res, readBody, activity, 
     if (project.deletedAt && !['restore', 'permanent'].includes(action)) return send(404, { error: 'not found' });
 
     if (action === 'trash' && req.method === 'POST') {
-      project.deletedAt = new Date().toISOString();
-      return send(200, { project: store.save(project) });
+      return send(200, { project: await enqueueProject(uid, id, () => { const latest = getStructuredProject(uid, id); latest.deletedAt = new Date().toISOString(); return store.save(latest); }) });
     }
     if (action === 'restore' && req.method === 'POST') {
       if (store.list(uid).filter(item => !item.deletedAt).length >= 50) return send(409, { error: 'workspace limit is 50 presentations' });
-      project.deletedAt = null;
-      return send(200, { project: store.save(project) });
+      return send(200, { project: await enqueueProject(uid, id, () => { const latest = getStructuredProject(uid, id); latest.deletedAt = null; return store.save(latest); }) });
     }
     if (action === 'permanent' && req.method === 'DELETE') {
       if (!project.deletedAt) return send(409, { error: 'move project to trash first' });
-      await permanentlyRemove(project, deps);
+      await enqueueProject(uid, id, () => permanentlyRemove(getStructuredProject(uid, id), deps));
       return send(200, { ok: true });
     }
     if (action === 'duplicate' && req.method === 'POST') {
@@ -1049,7 +1201,7 @@ export async function handlePpt(req, url, { uid, send, res, readBody, activity, 
       if (store.list(uid).filter(item => !item.deletedAt).length >= 50) return send(409, { error: 'workspace limit is 50 presentations' });
       const copy = structuredClone(project);
       copy.id = store.newId(); copy.title = `${project.title} · 副本`.slice(0, 160);
-      delete copy.update; delete copy.updateRequest; delete copy.diff;
+      delete copy.update; delete copy.updateRequest; delete copy.diff; delete copy.editing; delete copy.publishedArtifactPath; delete copy.currentRunId; delete copy.runId;
       copy.version = { rootId: copy.id, parentId: null, number: 1 };
       copy.favorite = false; copy.pinned = false; copy.deletedAt = null;
       copy.status = 'generating'; copy.stage = 'rendering'; copy.error = ''; copy.revision = 0; copy.pdfRevision = 0;
@@ -1062,8 +1214,8 @@ export async function handlePpt(req, url, { uid, send, res, readBody, activity, 
     }
 
     if (action === 'export' && req.method === 'GET') {
-      if (project.status !== 'completed') return send(409, { error: 'presentation is not ready' });
-      const { stream, size } = await deps.readFile(id, '/workspace/presentation.pptx');
+      if (!['completed', 'quality_blocked'].includes(project.status) || !project.publishedRevision) return send(409, { error: 'presentation has no published version' });
+      const { stream, size } = await deps.readFile(id, project.publishedArtifactPath || '/workspace/presentation.pptx');
       const safe = project.title.replace(/[\\/\r\n"<>|:*?]/g, '_').slice(0, 120) || 'presentation';
       res.writeHead(200, { 'content-type': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
         'content-length': size, 'content-disposition': `attachment; filename="presentation.pptx"; filename*=UTF-8''${encodeURIComponent(safe)}.pptx` });
@@ -1073,13 +1225,21 @@ export async function handlePpt(req, url, { uid, send, res, readBody, activity, 
       return true;
     }
     if (action === 'pdf' && req.method === 'GET') {
-      if (project.status !== 'completed') return send(409, { error: 'presentation is not ready' });
-      if (project.pdfRevision !== project.revision) {
-        await deps.renderPdf(project);
-        const latest = store.get(uid, id);
-        if (latest?.revision === project.revision) { latest.pdfRevision = project.revision; store.save(latest); }
-      }
-      const { stream, size } = await deps.readFile(id, '/workspace/presentation.pdf');
+      if (!['completed', 'quality_blocked'].includes(project.status) || !project.publishedRevision) return send(409, { error: 'presentation has no published version' });
+      const pdf = await enqueueProject(uid, id, async () => {
+        const latest = getStructuredProject(uid, id);
+        const revision = latest.publishedRevision;
+        if (latest.pdfRevision !== revision) {
+          const snapshot = readRevision(uid, id, revision);
+          if (!snapshot) throw new HttpError(409, 'published revision snapshot is unavailable');
+          if (!snapshot.templateSpec && latest.revision !== revision) throw new HttpError(409, 'legacy published template snapshot is unavailable; publish the draft before exporting PDF');
+          const pdfArtifactPath = `/workspace/published-${revision}.pdf`;
+          await deps.renderPdf({ ...latest, deck: snapshot.deck, renderTree: snapshot.renderTree, template: snapshot.template ?? latest.template, templateSpec: snapshot.templateSpec ?? latest.templateSpec, pdfArtifactPath });
+          latest.pdfRevision = revision; latest.pdfArtifactPath = pdfArtifactPath; store.save(latest);
+        }
+        return deps.readFile(id, latest.pdfArtifactPath || '/workspace/presentation.pdf');
+      });
+      const { stream, size } = pdf;
       const safe = project.title.replace(/[\\/\r\n"<>|:*?]/g, '_').slice(0, 120) || 'presentation';
       res.writeHead(200, { 'content-type': 'application/pdf', 'content-length': size,
         'content-disposition': `attachment; filename="presentation.pdf"; filename*=UTF-8''${encodeURIComponent(safe)}.pdf` });
@@ -1117,15 +1277,7 @@ export async function handlePpt(req, url, { uid, send, res, readBody, activity, 
           ? { ...item, [block.type === 'image' ? 'caption' : 'text']: bounded(result.text, 100, 'rewritten text') } : item) } : { ...result, blocks: slide.blocks || [], layout: slide.layout, layoutId: slide.layoutId };
         const rewritten = normalizeDeck({ slides: [raw] }, [project.outline[index]]).slides[0];
         const gated = deterministicGate({ ...project, deck: applyLayoutRegistry({ ...project.deck, slides: project.deck.slides.map(item => item.id === slide.id ? rewritten : item) }) });
-        gated.revision++;
-        gated.pdfRevision = 0;
-        if (gated.quality.status === 'blocked') {
-          gated.status = 'quality_blocked'; gated.stage = 'repair'; gated.error = `PPT quality gate blocked publish: ${qualityError(gated)}`;
-          return send(200, { project: store.save(gated) });
-        }
-        await deps.renderPptx(gated);
-        gated.status = 'completed'; gated.stage = 'completed'; gated.error = '';
-        return send(200, { project: store.save(gated) });
+        return send(200, { project: await commitCompatibility(project, gated, deps) });
       } finally { editing.delete(id); }
     }
     if (action === 'source' && req.method === 'PATCH') {
@@ -1214,21 +1366,24 @@ export async function handlePpt(req, url, { uid, send, res, readBody, activity, 
       return send(202, { project });
     }
     if (action === 'blank' && req.method === 'POST') {
-      if (project.status !== 'generating') return send(409, { error: 'presentation is not generating' });
-      if (project.outline.length >= 100) return send(409, { error: 'presentation already has 100 slides' });
       const data = await body(req);
-      const requested = typeof data.afterSlideId === 'string' ? project.outline.findIndex(slide => slide.id === data.afterSlideId) : -1;
-      const index = requested >= 0 ? requested + 1 : project.outline.length;
-      const id = newIrId('slide');
-      const outlineSlide = { id, section: '手动页面', title: '新页面', focus: 'manual blank', description: '', children: [], refs: [], manualBlank: true };
-      project.outline.splice(index, 0, outlineSlide);
-      project.nodes ||= {};
-      project.nodes[id] = { status: 'done', attempts: 0, slide: { id, title: '新页面', bullets: [], blocks: [], layoutId: 'summary', manualBlank: true } };
-      project.pages = project.outline.length;
-      project.updatedAt = new Date().toISOString();
-      store.save(project);
-      try { emitRunProgress(project, 'slide.manual-added', { slideId: id, index }); } catch {}
-      return send(201, { project });
+      const result = await enqueueProject(uid, id, () => {
+        const latest = store.get(uid, id);
+        if (latest?.status !== 'generating' || !latest.editing?.contentOpen) throw new HttpError(409, 'content generation has finished; add pages in the editor');
+        if (!editableCapabilities(latest).insertSlide) throw new HttpError(409, 'native templates do not support blank insertion');
+        if (latest.outline.length >= 100) throw new HttpError(409, 'presentation already has 100 slides');
+        const requested = typeof data.afterSlideId === 'string' ? latest.outline.findIndex(slide => slide.id === data.afterSlideId) : -1;
+        if (data.afterSlideId && requested < 0) throw new HttpError(409, 'target slide no longer exists');
+        const index = requested >= 0 ? requested + 1 : latest.outline.length;
+        const slideId = newIrId('slide');
+        latest.outline.splice(index, 0, { id: slideId, section: '手动页面', title: '新页面', focus: 'manual blank', description: '', children: [], refs: [], manualBlank: true });
+        latest.nodes ||= {};
+        latest.nodes[slideId] = { status: 'done', attempts: 0, slide: { id: slideId, title: '新页面', bullets: [], blocks: [], layoutId: 'summary', manualBlank: true } };
+        latest.pages = latest.outline.length; store.save(latest);
+        try { emitRunProgress(latest, 'slide.manual-added', { slideId, index }); } catch {}
+        return latest;
+      });
+      return send(201, { project: result });
     }
     if (action === 'retry' && req.method === 'POST') {
       if (project.status !== 'failed') return send(409, { error: 'project is not failed' });
@@ -1244,7 +1399,7 @@ export async function handlePpt(req, url, { uid, send, res, readBody, activity, 
       const data = await body(req);
       if (data.slides === undefined && data.slidePatches === undefined && data.template === undefined) {
         if (!['title', 'favorite', 'pinned', 'folderId', 'tags'].some(key => key in data)) return send(400, { error: 'no metadata changes' });
-        return send(200, { project: setMetadata(project, data) });
+        return send(200, { project: await enqueueProject(uid, id, () => setMetadata(getStructuredProject(uid, id), data)) });
       }
       if (!['completed', 'quality_blocked'].includes(project.status)) return send(409, { error: 'presentation is not editable' });
       if (editing.has(id)) return send(409, { error: 'another save is in progress' });
@@ -1274,15 +1429,7 @@ export async function handlePpt(req, url, { uid, send, res, readBody, activity, 
           template: template?.id || project.template,
           templateSpec: template ? snapshotTemplate(template) : project.templateSpec };
         const gated = deterministicGate(updated);
-        gated.revision++;
-        gated.pdfRevision = 0;
-        if (gated.quality.status === 'blocked') {
-          gated.status = 'quality_blocked'; gated.stage = 'repair'; gated.error = `PPT quality gate blocked publish: ${qualityError(gated)}`;
-          return send(200, { project: store.save(gated) });
-        }
-        await deps.renderPptx(gated);
-        gated.status = 'completed'; gated.stage = 'completed'; gated.error = '';
-        return send(200, { project: store.save(gated) });
+        return send(200, { project: await commitCompatibility(project, gated, deps) });
       } finally { editing.delete(id); }
     }
     return send(404, { error: 'not found' });

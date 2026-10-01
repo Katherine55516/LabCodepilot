@@ -1,4 +1,18 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
+
+async function mockCreationPlanner(page: Page) {
+  let project: Record<string, unknown> | null = null;
+  await page.route('**/api/ppt/projects**', route => {
+    const url = new URL(route.request().url());
+    if (route.request().method() === 'POST') {
+      const body = route.request().postDataJSON();
+      const count = Number(body.pages || String(body.prompt).match(/(\d+)\s*页/)?.[1] || 5);
+      project = { id: 'b'.repeat(32), title: 'Fixture', pages: count, status: 'outline_ready', inputKind: 'prompt', outline: Array.from({ length: count }, (_, index) => ({ id: String(index + 1), title: `Slide ${index + 1}`, focus: 'Source-backed point' })), deck: null };
+      return route.fulfill({ json: { project } });
+    }
+    return route.fulfill({ json: url.pathname === '/api/ppt/projects' ? { projects: [] } : { project } });
+  });
+}
 
 test('user page selection and module estimate take priority over template length @smoke', async ({ page }, testInfo) => {
   const errors: string[] = [];
@@ -11,7 +25,7 @@ test('user page selection and module estimate take priority over template length
     providers: [{ id: 'managed-demo', name: 'Test model', source: 'managed' }],
   } }));
   await page.route('**/api/ppt/folders**', route => route.fulfill({ json: { folders: [] } }));
-  await page.route('**/api/ppt/projects**', route => route.fulfill({ json: { projects: [] } }));
+  await mockCreationPlanner(page);
   await page.route('**/api/ppt/templates**', route => route.fulfill({ json: { templates: [{
     id: 'uploaded-four', name: 'Four page PPTX', category: '我的模板', kind: 'uploaded', extension: 'pptx',
     compatibility: 'mapped', pages: 4, palette: { background: '#202020', accent: '#b08866', foreground: '#ffffff', muted: '#aaaaaa' },
@@ -34,7 +48,7 @@ test('user page selection and module estimate take priority over template length
   await page.screenshot({ path: testInfo.outputPath('reuse-desktop.png'), fullPage: true });
   await expect(page.getByText('3 页', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: '开始生成' })).toBeEnabled();
-  const plus = page.getByRole('button', { name: '＋' });
+  const plus = page.getByRole('button', { name: '＋', exact: true });
   await plus.click();
   await expect(page.getByText('4 页', { exact: true })).toBeVisible();
   await page.getByRole('button', { name: /Ten page alternate/ }).click();
@@ -43,10 +57,10 @@ test('user page selection and module estimate take priority over template length
   await expect(page.getByText('4 页', { exact: true })).toBeVisible();
   await plus.click(); await plus.click(); await plus.click(); await plus.click();
   await expect(page.getByText('8 页', { exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: '开始生成' })).toBeEnabled();
+  await expect(page.getByRole('button', { name: '按最终页数与模板重新生成大纲' })).toBeEnabled();
   await plus.click();
   await expect(page.getByText(/当前模板无法安全扩展到 9 页/)).toBeVisible();
-  await expect(page.getByRole('button', { name: '开始生成' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: '按最终页数与模板重新生成大纲' })).toBeDisabled();
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByText(/模板最多支持 8 页/).scrollIntoViewIfNeeded();
   await page.screenshot({ path: testInfo.outputPath('reuse-mobile.png'), fullPage: true });
@@ -62,7 +76,7 @@ test('ten-page uploaded template accepts an explicit 100-page target @smoke', as
     providers: [{ id: 'managed-demo', name: 'Test model', source: 'managed' }],
   } }));
   await page.route('**/api/ppt/folders**', route => route.fulfill({ json: { folders: [] } }));
-  await page.route('**/api/ppt/projects**', route => route.fulfill({ json: { projects: [] } }));
+  await mockCreationPlanner(page);
   await page.route('**/api/ppt/templates**', route => route.fulfill({ json: { templates: [{
     id: 'uploaded-ten', name: 'Ten page PPTX', category: '我的模板', kind: 'uploaded', extension: 'pptx',
     compatibility: 'mapped', pages: 10, palette: { background: '#202020', accent: '#b08866', foreground: '#ffffff', muted: '#aaaaaa' },

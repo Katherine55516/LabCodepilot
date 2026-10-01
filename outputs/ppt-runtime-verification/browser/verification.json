@@ -1,0 +1,24 @@
+{
+  "date": "2026-09-30",
+  "transport": "CDP",
+  "model": "deterministic adapter",
+  "checks": [
+    "proposal preview writes no revision",
+    "server-owned proposal applies to selected page",
+    "targeted undo",
+    "scope drafts remain independent",
+    "unsubmitted scope and draft survive completion and reload",
+    "completed generation intent edits draft only",
+    "submitted intent history survives reload",
+    "real template preview paging and mobile layout"
+  ],
+  "consoleErrors": [],
+  "artifacts": [
+    "ai-comparison-desktop.png",
+    "ai-comparison-mobile.png",
+    "generation-edit-desktop.png",
+    "generation-edit-mobile.png",
+    "template-settings-desktop.png",
+    "template-settings-mobile.png"
+  ]
+}

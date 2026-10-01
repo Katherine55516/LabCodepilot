@@ -1,12 +1,15 @@
+import { startAssetTask, finishAssetTask, retryAssetTask } from './asset-task-service.mjs';
 import { applyCommand, redo, undo } from './command-service.mjs';
 import { operationHistory } from './command-history.mjs';
 import { getRun, listEvents, subscribe } from './event-store.mjs';
 import { currentRun, cancelRun } from './run-service.mjs';
-import { getProject, listRevisions, readRevision, saveProject } from './repository.mjs';
+import { getProject, listRevisions, readRevision, enqueueProject } from './repository.mjs';
 import { publishProject } from './publish-service.mjs';
 import { buildSlideRenderTree } from './render-tree.mjs';
 import { slideSvg } from './exporters/preview.mjs';
-import { validateNodeContent } from './command-schema.mjs';
+import { createProposal, applyProposal, discardProposal, proposalPreview } from './proposal-service.mjs';
+import { openGenerationScope, submitGenerationEdit, retryGenerationEdit, processGenerationEdits, recordIntentProposal } from './generation-edit-service.mjs';
+import { pauseSession, resumeSession, setPageAccepted } from './runtime.mjs';
 
 const PROJECT = '[a-f0-9]{32}';
 const RUN = 'run_[a-f0-9]{24}';
@@ -16,7 +19,7 @@ async function jsonBody(req, readBody) {
   if (readBody) raw = await readBody(req);
   else for await (const chunk of req) raw += chunk;
   if (raw.length > 2_000_000) throw Object.assign(new Error('request body too large'), { statusCode: 413 });
-  try { return JSON.parse(raw || '{}'); } catch { throw Object.assign(new Error('invalid JSON'), { statusCode: 400 }); }
+  try { const value = JSON.parse(raw || '{}'); if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('shape'); return value; } catch { throw Object.assign(new Error('invalid JSON'), { statusCode: 400 }); }
 }
 
 function projectOr404(uid, id) {
@@ -52,13 +55,24 @@ function sse(req, res, project, run, after) {
 }
 
 export async function handleStructuredPpt(req, url, ctx) {
-  const { uid, send, res, readBody, deps, activity, log = () => {} } = ctx;
+  const { uid, send, res, readBody, deps, activity, resumeGeneration, log = () => {} } = ctx;
   let match;
   try {
+    if ((match = url.pathname.match(new RegExp(`^/ppt/projects/(${PROJECT})/slides/([a-zA-Z0-9_-]{1,80})/accept$`, 'i')))) {
+      if (req.method !== 'POST') return send(405, { error: 'method not allowed' });
+      const data = await jsonBody(req, readBody);
+      return send(200, { project: await setPageAccepted(uid, match[1], match[2], data.accepted, data.renderHash, data.baseRevision) });
+    }
+    if ((match = url.pathname.match(new RegExp(`^/ppt/projects/(${PROJECT})/(pause|resume)$`, 'i')))) {
+      projectOr404(uid, match[1]); if (req.method !== 'POST') return send(405, { error: 'method not allowed' });
+      const project = match[2] === 'pause' ? await pauseSession(uid, match[1]) : await resumeSession(uid, match[1]);
+      if (match[2] === 'resume') resumeGeneration?.(uid, match[1]);
+      return send(202, { project });
+    }
     if ((match = url.pathname.match(new RegExp(`^/ppt/projects/(${PROJECT})/run$`, 'i')))) {
       const project = projectOr404(uid, match[1]); const run = currentRun(project);
       if (req.method === 'GET') return send(200, { project, run, events: run ? listEvents(uid, project.id, run.id, Number(url.searchParams.get('after') || 0)) : [] });
-      if (req.method === 'DELETE') { const cancelled = cancelRun(project); return send(200, { project: getProject(uid, project.id), run: cancelled }); }
+      if (req.method === 'DELETE') { const cancelled = await enqueueProject(uid, project.id, () => cancelRun(getProject(uid, project.id))); return send(200, { project: getProject(uid, project.id), run: cancelled }); }
     }
     if ((match = url.pathname.match(new RegExp(`^/ppt/projects/(${PROJECT})/events$`, 'i')))) {
       const project = projectOr404(uid, match[1]); const run = currentRun(project);
@@ -80,12 +94,13 @@ export async function handleStructuredPpt(req, url, ctx) {
     }
     if ((match = url.pathname.match(new RegExp(`^/ppt/projects/(${PROJECT})/(undo|redo)$`, 'i')))) {
       projectOr404(uid, match[1]); if (req.method !== 'POST') return send(405, { error: 'method not allowed' });
-      const result = match[2] === 'undo' ? await undo(uid, match[1]) : await redo(uid, match[1]);
+      const data = await jsonBody(req, readBody);
+      const result = match[2] === 'undo' ? await undo(uid, match[1], uid, data.operationId || null) : await redo(uid, match[1]);
       return send(200, result);
     }
     if ((match = url.pathname.match(new RegExp(`^/ppt/projects/(${PROJECT})/publish$`, 'i')))) {
       projectOr404(uid, match[1]); if (req.method !== 'POST') return send(405, { error: 'method not allowed' });
-      return send(200, await publishProject(uid, match[1], deps));
+      return send(200, await publishProject(uid, match[1], deps, activity, log));
     }
     if ((match = url.pathname.match(new RegExp(`^/ppt/projects/(${PROJECT})/revisions$`, 'i')))) {
       projectOr404(uid, match[1]);
@@ -95,13 +110,12 @@ export async function handleStructuredPpt(req, url, ctx) {
       const project = projectOr404(uid, match[1]); const snapshot = readRevision(uid, project.id, Number(match[2]));
       if (!snapshot) return send(404, { error: 'revision not found' });
       if (req.method !== 'POST') return send(405, { error: 'method not allowed' });
-      const result = await applyCommand(uid, project.id, { type: 'deck.replace', baseRevision: project.revision, payload: { deck: snapshot.deck } }, { allowExternalStructure: true, allowInternal: true });
-      result.project.template = snapshot.template; result.project.templateSpec = snapshot.templateSpec;
-      result.project.renderTree = snapshot.renderTree || result.project.renderTree; saveProject(result.project);
+      const result = await applyCommand(uid, project.id, { type: 'deck.replace', baseRevision: project.revision, payload: { deck: snapshot.deck, projectState: { template: snapshot.template ?? project.template, templateSpec: snapshot.templateSpec ?? project.templateSpec, outline: snapshot.outline || snapshot.deck.slides.map(slide => ({ id: slide.id, title: slide.title, refs: slide.sourceRefs || [] })), pages: snapshot.deck.slides.length, pageDecision: snapshot.pageDecision ?? { ...project.pageDecision, finalPageCount: snapshot.deck.slides.length }, planning: snapshot.planning, constraints: snapshot.constraints } } }, { allowExternalStructure: true, allowInternal: true });
       return send(200, result);
     }
     if ((match = url.pathname.match(new RegExp(`^/ppt/projects/(${PROJECT})/slides/([a-zA-Z0-9_-]{1,80})/preview$`, 'i')))) {
-      const project = projectOr404(uid, match[1]); const tree = buildSlideRenderTree(project, match[2]);
+      const project = projectOr404(uid, match[1]); const tree = ['generating', 'paused'].includes(project.status)
+        ? project.runtime?.slides?.[match[2]]?.preview : buildSlideRenderTree(project, match[2]);
       if (!tree) return send(404, { error: 'slide not found' });
       if (url.searchParams.get('format') === 'svg') {
         res.writeHead(200, { 'content-type': 'image/svg+xml; charset=utf-8', 'cache-control': 'no-store', etag: `"${project.renderTree?.hash || project.revision}"` });
@@ -111,34 +125,45 @@ export async function handleStructuredPpt(req, url, ctx) {
     }
     if ((match = url.pathname.match(new RegExp(`^/ppt/projects/(${PROJECT})/ai-edit$`, 'i')))) {
       const project = projectOr404(uid, match[1]); if (req.method !== 'POST') return send(405, { error: 'method not allowed' });
-      const data = await jsonBody(req, readBody); const slide = project.deck?.slides.find(item => item.id === data.slideId);
-      if (!slide) return send(404, { error: 'slide not found' });
-      const instruction = String(data.instruction || '').trim().slice(0, 1000);
-      if (!instruction) return send(400, { error: 'instruction is required' });
-      const scope = data.scope === 'slide' ? 'slide' : 'object'; const relayout = data.mode === 'relayout';
-      if (scope === 'object') {
-        const node = slide.nodes?.find(item => item.id === data.nodeId); if (!node) return send(404, { error: 'node not found' });
-        if (node.type === 'foreign' || node.locked) return send(409, { error: 'node is locked' });
-        const prompt = `你只修改给定演示文稿对象的语义内容。不得输出坐标、尺寸、字体、颜色、ID 或页面操作。对象：${JSON.stringify({ type: node.type, content: node.content })}\n用户指令：${instruction}\n只返回 JSON：{"content":{...}}，字段必须与原 content 兼容。`;
-        const answer = await deps.modelCall(project, prompt, activity, log);
-        const candidate = answer?.content && typeof answer.content === 'object' ? answer.content : answer;
-        const content = validateNodeContent(node.type, candidate);
-        const proposal = { scope, slideId: slide.id, nodeId: node.id, before: node.content, content };
-        if (data.preview !== false) return send(200, { proposal });
-        return send(200, await applyCommand(uid, project.id, { type: 'ai.objectPatch', baseRevision: Number(data.baseRevision), payload: { slideId: slide.id, nodeId: node.id, patch: { content } } }));
+      const data = await jsonBody(req, readBody);
+      const proposal = await createProposal(project, data, deps, activity, log);
+      // Compatibility clients requesting a direct edit still use a server-owned validated proposal.
+      return data.preview === false ? send(200, await applyProposal(uid, project.id, proposal.id)) : send(200, { proposal });
+    }
+    if ((match = url.pathname.match(new RegExp(`^/ppt/projects/(${PROJECT})/asset-tasks(?:/(asset_[a-f0-9]+)(/retry)?)?$`, 'i')))) {
+      if (req.method !== 'POST') return send(405, { error: 'method not allowed' });
+      const data = await jsonBody(req, readBody);
+      if (match[3]) return send(200, { task: await retryAssetTask(uid, match[1], match[2]) });
+      return send(200, match[2] ? await finishAssetTask(uid, match[1], match[2], data, deps, activity, log) : { task: await startAssetTask(uid, match[1], data) });
+    }
+    if ((match = url.pathname.match(new RegExp(`^/ppt/projects/(${PROJECT})/proposals/(proposal_[a-f0-9]+)(?:/(apply|discard))?$`, 'i')))) {
+      const project = projectOr404(uid, match[1]);
+      if (req.method === 'GET' && !match[3]) return send(200, { proposal: proposalPreview(project, match[2]) });
+      if (req.method !== 'POST' || !match[3]) return send(405, { error: 'method not allowed' });
+      if (match[3] === 'discard') {
+        const proposal = await discardProposal(uid, match[1], match[2]); await recordIntentProposal(uid, match[1], match[2], 'discarded');
+        return send(200, { proposal, project: getProject(uid, match[1]) });
       }
-      const editable = (slide.nodes || []).filter(node => !node.locked && ['text', 'list', 'chart', 'table', 'shape'].includes(node.type)).slice(0, 30);
-      if (!editable.length) return send(409, { error: 'slide has no editable semantic objects' });
-      const prompt = `你只修改当前演示文稿页面的语义内容${relayout ? '，并可从 cover, summary, editorial, big-number, comparison, chart, table, image-text, timeline, conclusion 中选择一个 layoutId' : ''}。不得输出坐标、尺寸、字体、颜色或新 ID。页面对象：${JSON.stringify(editable.map(node => ({ nodeId: node.id, type: node.type, content: node.content })))}\n用户指令：${instruction}\n只返回 JSON：{"patches":[{"nodeId":"现有ID","content":{...}}]${relayout ? ',"layoutId":"summary"' : ''}}。`;
-      const answer = await deps.modelCall(project, prompt, activity, log); const raw = answer?.patches ? answer : answer?.content?.patches ? answer.content : {};
-      const byId = new Map(editable.map(node => [node.id, node])); const patches = [];
-      for (const item of Array.isArray(raw.patches) ? raw.patches : []) { const node = byId.get(item?.nodeId); if (!node) continue; patches.push({ nodeId: node.id, before: node.content, content: validateNodeContent(node.type, item.content) }); }
-      if (!patches.length) return send(422, { error: 'AI returned no valid object patches' });
-      const layouts = new Set(['cover', 'summary', 'editorial', 'big-number', 'comparison', 'chart', 'table', 'image-text', 'timeline', 'conclusion']);
-      const layoutId = relayout && layouts.has(raw.layoutId) ? raw.layoutId : undefined;
-      const proposal = { scope, slideId: slide.id, patches, ...(layoutId ? { layoutId } : {}) };
-      if (data.preview !== false) return send(200, { proposal });
-      return send(200, await applyCommand(uid, project.id, { type: 'ai.slidePatch', baseRevision: Number(data.baseRevision), payload: { slideId: slide.id, patches: patches.map(({ nodeId, content }) => ({ nodeId, content })), ...(layoutId ? { layoutId } : {}) } }));
+      const result = await applyProposal(uid, match[1], match[2]);
+      await recordIntentProposal(uid, match[1], match[2], 'applied', result.operation.id);
+      return send(200, { ...result, project: getProject(uid, match[1]) });
+    }
+    if ((match = url.pathname.match(new RegExp(`^/ppt/projects/(${PROJECT})/generation-edit-scopes$`, 'i')))) {
+      projectOr404(uid, match[1]); if (req.method !== 'POST') return send(405, { error: 'method not allowed' });
+      const data = await jsonBody(req, readBody);
+      return send(200, { scope: await openGenerationScope(uid, match[1], data.slideId) });
+    }
+    if ((match = url.pathname.match(new RegExp(`^/ppt/projects/(${PROJECT})/generation-edits(?:/(intent_[a-f0-9]+)(/retry)?)?$`, 'i')))) {
+      const project = projectOr404(uid, match[1]);
+      if (req.method === 'GET') {
+        const intent = project.editing?.intents?.[match[2]];
+        return match[2] ? (intent ? send(200, { intent }) : send(404, { error: 'intent not found' })) : send(200, { intents: Object.values(project.editing?.intents || {}) });
+      }
+      if (req.method !== 'POST') return send(405, { error: 'method not allowed' });
+      if (match[2] && !match[3]) return send(405, { error: 'method not allowed' });
+      const result = match[3] ? await retryGenerationEdit(uid, match[1], match[2]) : await submitGenerationEdit(uid, match[1], await jsonBody(req, readBody));
+      void processGenerationEdits(uid, match[1], deps, activity, log).catch(error => log(String(error)));
+      return send(202, result);
     }
     return false;
   } catch (error) {

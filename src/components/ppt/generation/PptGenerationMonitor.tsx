@@ -1,46 +1,69 @@
 'use client';
+/* eslint-disable @next/next/no-img-element -- shared server-rendered PPT previews */
 
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useTranslation } from '@/hooks/useTranslation';
-import type { PptProject, PptRun, PptSlide } from '../types';
+import type { PptProject, PptSlide } from '../types';
 
 function pageState(project: PptProject, slide: PptSlide) {
   const node = project.nodes?.[slide.id];
-  if (node?.status === 'done' || node?.status === 'completed') return 'completed';
-  if (node?.status === 'running') return 'running';
-  return 'pending';
+  return ['done', 'completed'].includes(node?.status || '') ? 'completed' : node?.status === 'running' ? 'running' : 'pending';
 }
 
-export function PptGenerationMonitor({ project, onProject, onBackground }: { project: PptProject; onProject: (project: PptProject) => void; onBackground?: () => void }) {
+export function PptGenerationMonitor({ project, onProject, onBackground, onEdit }: { project: PptProject; onProject: (project: PptProject) => void; onBackground?: () => void; onEdit: (slideId: string) => void }) {
   const { t } = useTranslation();
-  const [run, setRun] = useState<PptRun | null>(null);
   const [connected, setConnected] = useState(false);
-  const [activeId, setActiveId] = useState(project.outline[0]?.id || '');
+  const [viewedId, setViewedId] = useState(project.outline[0]?.id || '');
+  const [liveId, setLiveId] = useState(project.outline[0]?.id || '');
+  const [followLive, setFollowLive] = useState(true);
+  const [filter, setFilter] = useState<'all' | 'started'>('all');
+  const [error, setError] = useState(''); const [blankBusy, setBlankBusy] = useState(false);
+  const liveRef = useRef(followLive); liveRef.current = followLive;
+  const projectRef = useRef(project); projectRef.current = project;
+  const acceptRef = useRef(onProject); acceptRef.current = onProject;
   const lastSeq = useRef(0);
+  const runId = useRef(project.currentRunId);
   useEffect(() => {
-    if (!['ingesting', 'outlining', 'generating'].includes(project.status)) return;
+    if (runId.current !== project.currentRunId) { runId.current = project.currentRunId; lastSeq.current = 0; }
+    if (!['ingesting', 'outlining', 'generating', 'paused'].includes(project.status)) return;
     let stopped = false; let refreshTimer: ReturnType<typeof setTimeout> | undefined;
-    const refresh = () => { clearTimeout(refreshTimer); refreshTimer = setTimeout(async () => { const response = await fetch(`/api/ppt/projects/${project.id}`, { cache: 'no-store' }); if (response.ok && !stopped) onProject((await response.json()).project); }, 100); };
+    const refresh = () => { clearTimeout(refreshTimer); refreshTimer = setTimeout(async () => { try { const response = await fetch(`/api/ppt/projects/${project.id}`, { cache: 'no-store' }); if (response.ok && !stopped) acceptRef.current((await response.json()).project); } catch {} }, 100); };
     const stream = new EventSource(`/api/ppt/projects/${project.id}/events?after=${lastSeq.current}`);
     stream.onopen = () => setConnected(true); stream.onerror = () => setConnected(false);
-    stream.addEventListener('snapshot', event => { const value = JSON.parse((event as MessageEvent).data) as { project: PptProject; run: PptRun }; setRun(value.run); lastSeq.current = Math.max(lastSeq.current, value.run.lastSeq || 0); onProject(value.project); });
-    stream.addEventListener('run-event', event => { const value = JSON.parse((event as MessageEvent).data) as { seq: number; payload?: { nodeId?: string; slideId?: string } }; lastSeq.current = Math.max(lastSeq.current, value.seq); const id = value.payload?.slideId || value.payload?.nodeId?.replace(/^content:/, ''); if (id) setActiveId(id); refresh(); });
+    stream.addEventListener('snapshot', event => { if (stopped) return; const value = JSON.parse((event as MessageEvent).data); lastSeq.current = Math.max(lastSeq.current, value.run.lastSeq || 0); acceptRef.current(value.project); });
+    stream.addEventListener('run-event', event => {
+      if (stopped) return; const value = JSON.parse((event as MessageEvent).data);
+      if (value.seq <= lastSeq.current) return; lastSeq.current = value.seq;
+      const id = value.payload?.slideId || (value.payload?.nodeId?.startsWith('content:') ? value.payload.nodeId.slice(8) : null);
+      if (id && projectRef.current.outline.some(slide => slide.id === id)) { setLiveId(id); if (liveRef.current) setViewedId(id); }
+      refresh();
+    });
     return () => { stopped = true; clearTimeout(refreshTimer); stream.close(); };
-  }, [project.id, project.status, onProject]);
-  const completed = project.outline.filter(slide => pageState(project, slide) === 'completed').length;
-  const firstPending = project.outline.findIndex(slide => pageState(project, slide) !== 'completed');
-  const visibleCount = Math.min(project.outline.length, firstPending < 0 ? project.outline.length : firstPending + 1);
-  const current = useMemo(() => project.outline.slice(0, visibleCount).find(slide => slide.id === activeId) || project.outline[Math.max(0, visibleCount - 1)], [project, activeId, visibleCount]);
-  const currentContent = current && project.nodes?.[current.id]?.slide;
+  }, [project.id, project.status, project.currentRunId]);
+  const aiPages = project.outline.filter(slide => !slide.manualBlank);
+  const completed = aiPages.filter(slide => pageState(project, slide) === 'completed').length;
+  const visible = project.outline.filter(slide => filter === 'all' || slide.manualBlank || pageState(project, slide) !== 'pending');
+  const current = project.outline.find(slide => slide.id === viewedId) || project.outline.find(slide => slide.id === liveId) || project.outline[0];
+  const previewState = current && project.runtime?.slides[current.id];
+  const previewUrl = (id: string) => `/api/ppt/projects/${project.id}/slides/${id}/preview?format=svg&v=${project.runtime?.slides[id]?.renderHash || ''}`;
+  const rendered = aiPages.filter(slide => pageState(project, slide) === 'completed' && project.runtime?.slides[slide.id]?.preview).length;
+  const percent = aiPages.length ? Math.round(completed / aiPages.length * 100) : 0;
   const palette = project.templateSpec?.palette || { background: '#171b31', foreground: '#f5f6fc', accent: '#967fff', muted: '#c4c9d8' };
-  const percent = project.outline.length ? Math.round(completed / project.outline.length * 100) : 0;
-  async function addBlank() { const response = await fetch(`/api/ppt/projects/${project.id}/blank`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ afterSlideId: current?.id }) }); if (response.ok) onProject((await response.json()).project); }
-  return <section data-testid="ppt-generation-monitor" className="ppt-prototype ppt-generation-stage fixed inset-0 z-50 overflow-hidden bg-background text-foreground">
-    <header className="flex h-16 flex-wrap items-center gap-3 border-b border-border px-4"><button className="grid h-9 w-9 place-items-center rounded-lg border border-border" aria-label="返回工作区" onClick={onBackground}>←</button><span className="grid h-8 w-8 place-items-center rounded-lg bg-primary font-semibold text-primary-foreground">A</span><strong className="min-w-0 truncate">{project.title}</strong><span className="rounded-full bg-primary/10 px-2 py-1 text-xs text-primary">AI 生成中</span><div className="ml-auto flex items-center gap-2"><span className={`h-2.5 w-2.5 rounded-full ${connected ? 'bg-primary' : 'bg-muted-foreground'}`} title={connected ? t('ppt.generation.live') : t('ppt.generation.reconnect')}/><span className="rounded-full border border-border px-3 py-1 text-xs">{project.model || 'LLM'}</span><button className="rounded-lg border border-border px-3 py-2 text-sm" onClick={onBackground}>转入后台</button></div></header>
-    <div className="ppt-generation-grid grid h-[calc(100vh-4rem)] lg:grid-cols-[14rem_minmax(0,1fr)_4rem]">
-      <aside className="border-r border-border p-3"><div className="flex items-center justify-between text-xs uppercase text-muted-foreground"><span>{t('ppt.generation.pages')}</span><span>{visibleCount} / {project.outline.length}</span></div><button className="mt-3 w-full rounded-lg border border-dashed border-border px-2 py-2 text-sm hover:bg-accent" onClick={() => void addBlank()}>＋ {t('ppt.generation.newPage')}</button><div className="mt-3 max-h-[29rem] space-y-2 overflow-y-auto">{project.outline.slice(0, visibleCount).map((slide, index) => { const status = pageState(project, slide); return <button key={slide.id} className={`w-full rounded-lg border p-2 text-left ${current?.id === slide.id ? 'border-primary bg-primary/5' : 'border-border'} ${status === 'pending' ? 'opacity-50' : ''}`} onClick={() => setActiveId(slide.id)}><div className="aspect-video rounded border-t-2 p-2 text-[10px]" style={{ background: palette.background, borderColor: palette.accent, color: palette.foreground }}>{project.nodes?.[slide.id]?.slide?.title || slide.title || t('ppt.generation.preparing')}</div><div className="mt-1 flex justify-between text-xs"><span>{index + 1}</span><span>{status === 'completed' ? '✓' : status === 'running' ? t('ppt.generation.generating') : slide.focus === 'manual blank' ? t('ppt.generation.blank') : t('ppt.generation.waiting')}</span></div></button>; })}</div></aside>
-      <main className="flex min-w-0 flex-col justify-center bg-background p-5"><div className="mx-auto aspect-video w-full max-w-4xl rounded-xl border-t-8 p-[7%] shadow-xl" style={{ background: palette.background, borderColor: palette.accent, color: palette.foreground }}><p className="text-xs uppercase tracking-widest opacity-60">AIMate · AI Presentation</p><h2 className="mt-5 text-3xl font-bold" style={{ fontFamily: project.templateSpec?.fonts?.titleEastAsia || project.templateSpec?.fonts?.title }}>{currentContent?.title || current?.title || t('ppt.generation.preparing')}</h2><div className="mt-5 h-1 w-28 rounded" style={{ background: palette.accent }}/>{currentContent?.bullets?.length ? <ul className="mt-6 grid gap-3 text-base" style={{ fontFamily: project.templateSpec?.fonts?.bodyEastAsia || project.templateSpec?.fonts?.body }}>{currentContent.bullets.map((bullet, index) => <li key={index} className="rounded border border-current/15 p-3">{bullet}</li>)}</ul> : <div className="mt-8 space-y-3"><div className="h-3 w-5/6 animate-pulse rounded bg-current opacity-15"/><div className="h-3 w-2/3 animate-pulse rounded bg-current opacity-15"/><p className="pt-4 text-sm opacity-60">{t('ppt.generation.truth')}</p></div>}<span className="mt-6 inline-block rounded-full bg-black/20 px-3 py-1 text-xs">✦ {currentContent ? '当前页面已完成' : 'AI 正在生成页面内容'}</span></div><div className="mx-auto mt-5 flex w-full max-w-4xl items-center gap-3"><b className="text-sm">正在生成第 {Math.min(completed + 1, project.outline.length)} / {project.outline.length} 页 · 当前 {project.outline.length} 页</b><div className="h-2 flex-1 overflow-hidden rounded-full bg-muted"><div className="h-full bg-primary transition-all" style={{ width: `${percent}%` }}/></div><span className="text-sm">{percent}%</span></div></main>
-      <aside className="hidden border-l border-border p-2 lg:flex lg:flex-col lg:items-center lg:gap-2">{['⌕', 'Aa', '▧', '▦', '▥', '☷', '✎'].map(tool => <span key={tool} className="grid h-9 w-9 place-items-center rounded border border-border text-xs text-muted-foreground">{tool}</span>)}</aside>
+  async function addBlank() {
+    if (blankBusy) return; setBlankBusy(true); setError('');
+    try { const response = await fetch(`/api/ppt/projects/${project.id}/blank`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ afterSlideId: current?.id }) }); const value = await response.json(); if (!response.ok) throw new Error(value.error); onProject(value.project); }
+    catch (reason) { setError(String((reason as Error).message)); } finally { setBlankBusy(false); }
+  }
+  async function sessionAction(action: 'pause' | 'resume' | 'cancel' | 'accept') {
+    setBlankBusy(true); setError('');
+    try { const response = await fetch(`/api/ppt/projects/${project.id}/${action === 'cancel' ? 'run' : action === 'accept' ? `slides/${current?.id}/accept` : action}`, { method: action === 'cancel' ? 'DELETE' : 'POST', headers: { 'content-type': 'application/json' }, body: action === 'accept' ? JSON.stringify({ accepted: !previewState?.accepted, renderHash: previewState?.renderHash, baseRevision: project.revision }) : undefined }); const value = await response.json(); if (!response.ok) throw new Error(value.error); onProject(value.project); } catch (reason) { setError(String((reason as Error).message)); } finally { setBlankBusy(false); }
+  }
+  const canAdd = project.status === 'generating' && project.editing?.contentOpen && !project.externalPptx && !project.templateFidelity && project.outline.length < 100;
+  return <section data-testid="ppt-generation-monitor" className="ppt-prototype ppt-generation-stage fixed inset-0 z-50 flex flex-col overflow-hidden bg-background text-foreground">
+    <header className="flex min-h-16 shrink-0 flex-wrap items-center gap-3 border-b border-border p-3"><button className="rounded border border-border px-3 py-2" onClick={onBackground}>← {t('ppt.edit.close')}</button><strong className="min-w-0 flex-1 truncate">{project.title}</strong><span className="rounded-full border border-border px-3 py-1 text-xs">{project.model || 'LLM'}</span><span className="text-xs text-muted-foreground">{project.status === 'paused' ? t('ppt.runtime.paused') : connected ? t('ppt.generation.live') : t('ppt.generation.reconnect')}</span><button className="rounded bg-primary px-3 py-2 text-sm text-primary-foreground disabled:opacity-50" disabled={!current || !['generating', 'paused'].includes(project.status)} onClick={() => current && onEdit(current.id)}>{t('ppt.edit.editDuring')}</button>{['generating', 'paused'].includes(project.status) && <><button className="rounded border border-border px-3 py-2 text-sm disabled:opacity-50" disabled={blankBusy || (project.status !== 'paused' && project.runtime?.pauseRequested)} onClick={() => void sessionAction(project.status === 'paused' ? 'resume' : 'pause')}>{t(project.status === 'paused' ? 'ppt.runtime.resume' : project.runtime?.pauseRequested ? 'ppt.runtime.pausing' : 'ppt.runtime.pause')}</button><button className="rounded border border-border px-3 py-2 text-sm" disabled={blankBusy} onClick={() => void sessionAction('cancel')}>{t('ppt.runtime.cancel')}</button></>}</header>
+    <div className="grid min-h-0 flex-1 grid-cols-[7rem_minmax(0,1fr)] md:grid-cols-[14rem_minmax(0,1fr)]">
+      <aside className="min-h-0 overflow-y-auto border-r border-border p-2"><label className="text-xs text-muted-foreground">{t('ppt.generation.pages')}<select className="mt-2 w-full rounded border border-border bg-background p-1 text-xs" value={filter} onChange={event => setFilter(event.target.value as 'all' | 'started')}><option value="all">{t('ppt.edit.allPages')}</option><option value="started">{t('ppt.edit.startedPages')}</option></select></label><button disabled={!canAdd || blankBusy} className="mt-3 w-full rounded border border-dashed border-border p-2 text-xs disabled:opacity-50" onClick={() => void addBlank()}>＋ {t('ppt.generation.newPage')}</button><div className="mt-3 space-y-2">{visible.map(slide => <button key={slide.id} className={`w-full rounded border p-2 text-left ${current?.id === slide.id ? 'border-primary bg-primary/5' : 'border-border'}`} onClick={() => { liveRef.current = false; setFollowLive(false); setViewedId(slide.id); }}><div className="aspect-video overflow-hidden rounded p-1 text-[10px]" style={{ background: palette.background, color: palette.foreground }}>{project.runtime?.slides[slide.id]?.preview ? <img className="h-full w-full object-contain" src={previewUrl(slide.id)} alt={slide.title}/> : slide.title}</div><div className="mt-1 flex flex-wrap justify-between gap-1 text-[10px]"><span>{project.outline.findIndex(item => item.id === slide.id) + 1}</span><span>{slide.manualBlank ? t('ppt.generation.blank') : pageState(project, slide) === 'completed' ? t('ppt.runtime.renderReady') : pageState(project, slide) === 'running' ? t('ppt.generation.generating') : t('ppt.generation.waiting')}</span></div></button>)}</div></aside>
+      <main className="min-w-0 overflow-y-auto p-3 md:p-6">{error && <p role="alert" className="text-sm text-destructive">{error}</p>}<label className="mb-4 flex items-center gap-2 text-xs"><input type="checkbox" checked={followLive} onChange={event => { setFollowLive(event.target.checked); liveRef.current = event.target.checked; if (event.target.checked) setViewedId(liveId); }}/>{t('ppt.edit.followLive')}</label><div className="mx-auto aspect-video w-full max-w-4xl overflow-hidden rounded-xl shadow-xl" style={{ background: palette.background, color: palette.foreground }}>{current && previewState?.preview ? <img className="h-full w-full object-contain" src={previewUrl(current.id)} alt={current.title}/> : <div className="p-[7%]"><h2 className="text-lg font-semibold md:text-3xl">{current?.title || t('ppt.generation.preparing')}</h2><p className="mt-6 text-sm opacity-70">{t('ppt.generation.truth')}</p></div>}</div><div className="mx-auto mt-3 flex max-w-4xl flex-wrap items-center gap-3 text-xs"><span>{t('ppt.runtime.contentReady')} {completed}/{aiPages.length} · {t('ppt.runtime.renderReady')} {rendered}/{aiPages.length} · {t('ppt.runtime.deckReviewPending')}</span>{previewState?.preview && <button className="rounded border border-border px-3 py-2" disabled={blankBusy} onClick={() => void sessionAction('accept')}>{t(previewState.accepted ? 'ppt.runtime.unlock' : 'ppt.runtime.accept')}</button>}</div><div className="mx-auto mt-5 flex max-w-4xl items-center gap-3 text-xs"><span>{completed} / {aiPages.length}</span><div className="h-2 flex-1 overflow-hidden rounded bg-muted"><div className="h-full bg-primary" style={{ width: `${percent}%` }}/></div><span>{percent}%</span></div></main>
     </div>
   </section>;
 }

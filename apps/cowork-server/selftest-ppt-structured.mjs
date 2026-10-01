@@ -111,12 +111,17 @@ try {
     uid, res: {}, readBody: async () => JSON.stringify({ scope: 'object', preview: true, slideId: slideOne.id, nodeId: titleOne.id, instruction: '聚焦标题', baseRevision: result.project.revision }),
     send: (status, body) => { apiResponse = { status, body }; return true; }, deps: { modelCall: async () => ({ content: { text: 'API AI title' }, geometry: { x: -1 } }) }, activity: () => {}, log: () => {},
   });
-  assert.equal(apiResponse.status, 200); assert.equal(apiResponse.body.proposal.content.text, 'API AI title'); assert.equal(apiResponse.body.proposal.geometry, undefined, 'AI proposals must not carry coordinates');
+  assert.equal(apiResponse.status, 200, JSON.stringify(apiResponse.body)); assert.equal(apiResponse.body.proposal.content.text, 'API AI title'); assert.equal(apiResponse.body.proposal.geometry, undefined, 'AI proposals must not carry coordinates');
   await structuredApi.handleStructuredPpt(aiRequest, new URL(`http://test/ppt/projects/${id}/ai-edit`), {
     uid, res: {}, readBody: async () => JSON.stringify({ scope: 'slide', mode: 'relayout', preview: true, slideId: slideOne.id, instruction: '精简页面', baseRevision: result.project.revision }),
     send: (status, body) => { apiResponse = { status, body }; return true; }, deps: { modelCall: async () => ({ patches: [{ nodeId: titleOne.id, content: { text: 'Reviewed page title' } }, { nodeId: 'made_up', content: { text: 'ignore' } }], layoutId: 'conclusion', coordinates: [] }) }, activity: () => {}, log: () => {},
   });
-  assert.equal(apiResponse.status, 200); assert.deepEqual(apiResponse.body.proposal.patches.map(item => item.nodeId), [titleOne.id]); assert.equal(apiResponse.body.proposal.layoutId, 'conclusion');
+  assert.equal(apiResponse.status, 422, 'out-of-scope model targets must fail closed');
+  await structuredApi.handleStructuredPpt(aiRequest, new URL(`http://test/ppt/projects/${id}/ai-edit`), {
+    uid, res: {}, readBody: async () => JSON.stringify({ scope: 'slide', mode: 'relayout', preview: true, slideId: slideOne.id, instruction: '精简页面', baseRevision: result.project.revision }),
+    send: (status, body) => { apiResponse = { status, body }; return true; }, deps: { modelCall: async () => ({ layoutId: 'conclusion' }) }, activity: () => {}, log: () => {},
+  });
+  assert.equal(apiResponse.status, 200, JSON.stringify(apiResponse.body)); assert.equal(apiResponse.body.proposal.commands[0].type, 'slide.setLayout'); assert.equal(apiResponse.body.proposal.commands[0].payload.layoutId, 'conclusion'); assert.equal(apiResponse.body.proposal.type, 'layout');
 
   const singleId = store.newId();
   const single = ir.ensureProjectV3({ ...structuredClone(result.project), id: singleId, revision: 0, publishedRevision: 0, deck: { slides: [{ title: 'Only', bullets: [], blocks: [], layoutId: 'cover' }] } });

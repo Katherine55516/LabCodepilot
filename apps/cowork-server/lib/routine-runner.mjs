@@ -42,6 +42,7 @@ import * as orch from './orchestrator.mjs';
 import * as cred from './cred-proxy.mjs';
 import { fetchModelCredentials, CredentialError } from './backend-credentials.mjs';
 import { audit } from './audit.mjs';
+import { createCapacity } from './model-capacity.mjs';
 
 const SHIM = process.env.COWORK_SHIM_PATH || '/opt/cowork/cowork-shim.py';
 const TIMEOUT_MS = parseInt(process.env.COWORK_ROUTINE_TIMEOUT_MS || String(15 * 60 * 1000), 10);
@@ -52,6 +53,7 @@ const KILL_GRACE_MS = 3000;
 const MAX_STDERR_BYTES = 16 * 1024;
 
 let active = 0;
+const capacity = createCapacity(CONCURRENCY);
 export function activeCount() { return active; }
 export { CONCURRENCY };
 
@@ -80,8 +82,10 @@ export async function runRoutine({
   sid, uid, prompt, model, configId, transcriptPath, activity, log = () => {},
   kind = 'routine',
   fetchCredentials = fetchModelCredentials,
+  canStart = () => true,
 }) {
-  if (active >= CONCURRENCY) {
+  const releaseSlot = kind === orch.KIND_PPT ? await capacity.acquire() : capacity.tryAcquire();
+  if (!releaseSlot) {
     // 不排队:排队会让「到点没跑」变成「几小时后突然跑了」,对定时任务是更坏的结果。
     log(`routine ${sid} skipped: concurrency ${active}/${CONCURRENCY}`);
     return { ok: false, status: 'skipped', skipReason: 'concurrency_limit', durationMs: 0 };
@@ -90,6 +94,7 @@ export async function runRoutine({
   const startedAt = Date.now();
   let credRegistered = false;
   try {
+    if (!canStart()) return { ok: false, status: 'cancelled', error: 'task stopped before model execution', durationMs: 0 };
     // ── 1. 取凭证(账号后端直取)────────────────────────────────
     let c;
     try {
@@ -152,6 +157,7 @@ export async function runRoutine({
     // 压到只存在于运行期间。best-effort,失败不影响结果。
     if (credRegistered) { try { await cred.revokeCredentials(sid); } catch { /* ignore */ } }
     active--;
+    releaseSlot();
   }
 }
 

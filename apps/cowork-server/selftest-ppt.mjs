@@ -99,7 +99,9 @@ try {
   assert.equal(saved.status, 200);
   assert.equal(saved.value.project.revision, 2);
   assert.equal(store.get(uid, flowId).deck.slides[1].title, '更新的标题');
-  assert.equal(renders, 2);
+  assert.equal(renders, 1, 'compatibility saves create drafts without implicit publication');
+  const published = await invoke('POST', `/ppt/projects/${flowId}/publish`);
+  assert.equal(published.value.published, true); assert.equal(renders, 2);
   let download = '';
   const response = {
     writeHead(status, headers) { assert.equal(status, 200); assert.equal(headers['content-length'], 10); },

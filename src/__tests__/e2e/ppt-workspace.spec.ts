@@ -328,6 +328,7 @@ test('PPT M4 visual blocks, undo, template switch and one-slide AI @smoke', asyn
 });
 
 test('PPT M1 creation, outline approval, editing and export entry @smoke', async ({ page }) => {
+  await page.route('**/api/ppt/templates**', route => route.fulfill({ json: { templates: [{ id: 'violet', name: 'Default', kind: 'built-in', compatibility: 'mapped', pages: 8, sampleTitles: ['Cover'] }] } }));
   const id = 'a'.repeat(32);
   let project: Record<string, unknown> | null = null;
   await page.route('**/api/ppt/folders**', (route) => route.fulfill({ json: { folders: [] } }));
@@ -363,12 +364,12 @@ test('PPT M1 creation, outline approval, editing and export entry @smoke', async
         id,
         title: body.title || body.prompt.slice(0, 60),
         prompt: body.prompt,
-        pages: body.pages,
+        pages: body.pages ?? 6,
         template: body.template,
         status: 'outline_ready',
         stage: 'outline',
         error: '',
-        outline: Array.from({ length: body.pages }, (_, i) => ({
+        outline: Array.from({ length: body.pages ?? 6 }, (_, i) => ({
           id: String(i + 1),
           title: `Slide ${i + 1}`,
           focus: `Focus ${i + 1}`,
@@ -602,17 +603,19 @@ test('PPT structured editor persists object commands, history, AI edits and publ
       });
     }
     if (method === 'POST' && url.pathname.endsWith('/ai-edit'))
-      return route.fulfill({
-        json: {
-          proposal: {
-            scope: 'object',
-            slideId,
-            nodeId,
-            before: { text: content },
-            content: { text: 'AI focused title' },
-          },
-        },
-      });
+      return route.fulfill({ json: { proposal: {
+        id: 'proposal_fixture', scope: 'object', slideId, nodeId, baseRevision: revision,
+        before: { text: content }, content: { text: 'AI focused title' },
+        beforeSvg: '<svg xmlns="http://www.w3.org/2000/svg" width="800" height="450"><text x="20" y="30">Original</text></svg>',
+        afterSvg: '<svg xmlns="http://www.w3.org/2000/svg" width="800" height="450"><text x="20" y="30">AI focused title</text></svg>',
+        quality: { issues: [], hardErrors: 0 },
+      } } });
+    if (method === 'POST' && url.pathname.endsWith('/proposals/proposal_fixture/apply')) {
+      content = 'AI focused title'; revision += 1;
+      operations.push({ id: 'proposal_fixture', kind: 'command', revision, command: { type: 'ai.objectPatch' }, at: now });
+      return route.fulfill({ json: { project: makeProject(), operation: operations.at(-1) } });
+    }
+    if (method === 'POST' && url.pathname.endsWith('/proposals/proposal_fixture/discard')) return route.fulfill({ json: { proposal: { status: 'discarded' } } });
     if (method === 'POST' && url.pathname.endsWith('/undo')) {
       revision += 1;
       content = 'Stable object title';
@@ -671,10 +674,11 @@ test('PPT structured editor persists object commands, history, AI edits and publ
   expect(lastPayload.nodeId).toBe(nodeTwoId);
   await expect(page.locator(`[data-node-id="${nodeTwoId}"]`)).toContainText('Edited second slide');
   await page.locator(`[data-node-id="${nodeId}"]`).click();
-  await page.getByRole('button', { name: 'AI 润色' }).click();
+  await page.getByRole('button', { name: 'AI 润色', exact: true }).click();
   await page.getByRole('textbox', { name: '编辑要求' }).fill('Make it more focused');
   await page.getByRole('button', { name: '预览所选对象修改' }).click();
-  await expect(page.getByText('AI focused title')).toBeVisible();
+  await expect(page.getByTestId('ppt-ai-comparison')).toBeVisible();
+  await expect(page.getByRole('img', { name: '候选页面' })).toBeVisible();
   await page.getByRole('button', { name: '应用修改' }).click();
   await expect(page.locator(`[data-node-id="${nodeId}"]`)).toContainText('AI focused title');
   await page.getByText('撤销、重做与命令记录').click();
@@ -823,6 +827,7 @@ test('PPT M2 library folders, favorites, search and trash @smoke', async ({ page
 });
 
 test('PPT M2 paste and file inputs reach source aware outlines @smoke', async ({ page }) => {
+  await page.route('**/api/ppt/templates**', route => route.fulfill({ json: { templates: [{ id: 'violet', name: 'Default', kind: 'built-in', compatibility: 'mapped', pages: 8, sampleTitles: ['Cover'] }] } }));
   let created: Record<string, unknown> | null = null;
   const payloads: Record<string, unknown>[] = [];
   await page.route('**/api/providers/models', (route) =>
@@ -1195,7 +1200,7 @@ test('PPT M3 template compatibility and version update workflow @smoke', async (
       ...base,
       id: updateId,
       title: 'Original plan · 更新版',
-      pages: 11,
+      pages: updatePayload?.pages ?? 6,
       template: customId,
       templateSpec: {
         id: customId,
@@ -1215,7 +1220,7 @@ test('PPT M3 template compatibility and version update workflow @smoke', async (
         text: 'Latest fact',
         segments: [{ id: 'U1', location: '进展', text: 'Latest fact' }],
       },
-      outline: Array.from({ length: 11 }, (_, i) => ({
+      outline: Array.from({ length: Number(updatePayload?.pages ?? 6) }, (_, i) => ({
         id: String(i + 1),
         title: `Updated ${i + 1}`,
         focus: 'Latest',

@@ -115,7 +115,6 @@
 }
 
 .ppt-create-stage > header,
-.ppt-generation-stage > header,
 .ppt-update-stage > header {
   height: 52px;
   min-height: 52px;
@@ -290,3 +289,6 @@
     border-radius: 9px;
   }
 }
+
+/* Generation controls wrap on narrow viewports; their header must grow with them. */
+.ppt-generation-stage > header { height: auto; min-height: 64px; }

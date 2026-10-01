@@ -405,7 +405,7 @@ print(json.dumps({'slides': len(prs.slides), 'path': target, 'bytes': os.path.ge
 export async function renderPptx(project) {
   const { name } = await orch.ensureContainer(project.id, project.uid, orch.KIND_PPT);
   return new Promise((resolve, reject) => {
-    const child = spawn('docker', ['exec', '-i', '-u', String(orch.AGENT_UID), name, 'python3', '-c', SCRIPT], { stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn('docker', ['exec', '-i', '-u', String(orch.AGENT_UID), '-e', `PPT_OUTPUT=${project.renderOutput || '/workspace/presentation.pptx'}`, name, 'python3', '-c', SCRIPT], { stdio: ['pipe', 'pipe', 'pipe'] });
     let out = ''; let err = '';
     child.stdout.on('data', (c) => { out = (out + c).slice(-10000); });
     child.stderr.on('data', (c) => { err = (err + c).slice(-10000); });

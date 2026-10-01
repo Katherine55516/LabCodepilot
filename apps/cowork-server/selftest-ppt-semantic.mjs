@@ -108,7 +108,7 @@ const longIssues = inspectLongDeckOutline({ source: { segments: [{ id: '1', text
 assert.ok(longIssues.some(item => item.code === 'outline_repeated_claim'));
 assert.ok(longIssues.some(item => item.code === 'outline_ungrounded_page'));
 assert.equal(planning.brief.audience, 'Engineering');
-assert.equal(planning.version, 4);
+assert.equal(planning.version, 5);
 assert.equal(planning.slidePlan[1].role, 'architecture');
 assert.equal(planning.slidePlan[1].sourceChunks[0], second.id);
 assert.equal(planning.slidePlan[1].depth, 'detailed');
@@ -136,7 +136,7 @@ const compiledTitle = compileTitle({
   candidates: ['先定目标，再定叙事'], message: 'Deck Brief stabilizes requirements before generation',
   registry: planning.terminology, previousTitles: [], budget: planning.slidePlan[1].copyBudget,
 });
-assert.equal(compiledTitle.title, '先定目标，再定叙事');
+assert.equal(compiledTitle.title, 'Deck Brief 与 Story Planner 先固定演示目标和叙事结构', 'a fitting source-supported title preserves protected terminology');
 assert.ok(compiledTitle.fits && compiledTitle.estimatedLines <= 2 && visualUnits(compiledTitle.title) <= compiledTitle.maxVisualUnits);
 assert.equal(normalizeHeadline('## **Presentation   Studio**：  标题\n'), 'Presentation Studio：标题');
 assert.equal(normalizeTypography('Presentation首个 +User /Data'), 'Presentation 首个 + User / Data');
@@ -161,7 +161,7 @@ const expandedCopy = materializeCopy({
   title: 'Deck Brief 与 Story Planner 先固定演示目标和叙事结构', titleCandidates: ['先定目标，再定叙事'],
   eyebrow: 'PLANNING', subtitle: 'Brief 固定约束，Story Planner 决定页面角色。', takeaway: '规划成为持久状态。',
   contentBlocks: [
-    { type: 'definition', heading: 'Deck Brief', body: '持久化演示目标、受众、页数、来源边界和质量约束，形成后续节点共享的输入契约。' },
+    { type: 'definition', heading: 'Deck Brief', body: '持久化演示目标、受众、页数、来源边界和质量约束，形成后续节点共享的输入契约；用户调整页数时重新分配信息，每页生成仍依据同一份约束检查来源覆盖。' },
     { type: 'mechanism', heading: 'Story Planner', body: '把 Brief 与原始语义单元转换成页面角色、核心消息、内容密度和逐页证据映射。' },
     { type: 'evidence', heading: '覆盖映射', body: '每个高优先级语义主题都要映射到页面，未采用的内容必须记录明确原因。' },
     { type: 'implication', heading: '结果', body: '规划成为可验证、可恢复的持久状态，内容节点无需重新猜测整稿意图。' },
@@ -172,7 +172,7 @@ const deduplicated = materializeCopy({ title: '稳定规划', contentBlocks: [{ 
 assert.equal(deduplicated.copy.takeaway, '', 'takeaway near-duplicates must be removed deterministically');
 const copyIssues = inspectSlideCopy({ id: 's2', title: expandedCopy.title.title, titleQuality: expandedCopy.title, bullets: expandedCopy.bullets,
   copy: expandedCopy.copy, factSynthesis: { mechanisms: ['Brief'], implications: ['Persistent planning'] } }, planning.slidePlan[1], 1, 3);
-assert.equal(copyIssues.length, 0, 'detailed role copy must satisfy its mechanism/implication contract');
+assert.equal(copyIssues.length, 0, JSON.stringify(copyIssues));
 
 const quality = inspectContent({ source: { segments: [{ id: '1', text: 'Revenue was 31 million.' }] }, planning: { coverage: [] } }, { slides: [
   { id: 's1', title: 'Cover', bullets: [], sourceRefs: [] },

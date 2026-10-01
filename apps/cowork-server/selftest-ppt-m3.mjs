@@ -14,6 +14,7 @@ const uid = 'alice';
 let renderCalls = 0;
 const deps = {
   modelCall: async (project, prompt) => {
+    if (prompt.includes('整稿演示文稿内容评审器')) return { missing: [], repeated: [], conflicts: [], unsupported: [] };
     if (prompt.includes('版本更新规划器') && !project.update.baseSnapshot.deck) return { slides: Array.from({ length: project.pages }, (_, i) => ({ title: `Imported ${i + 1}`, focus: 'New facts', change: 'add', refs: ['U1'] })) };
     if (prompt.includes('版本更新规划器')) return { slides: [
       { title: 'Base 1', focus: 'Base 1', baseSlideId: project.update.baseSnapshot.deck.slides[0].id, change: 'keep', refs: [] },
@@ -48,7 +49,7 @@ async function settled(id, status) {
     if (project?.status === status) return project;
     await new Promise(resolve => setTimeout(resolve, 10));
   }
-  throw new Error(`${id} did not reach ${status}`);
+  const latest = store.get(uid, id); throw new Error(`${id} did not reach ${status}: ${latest.status} ${latest.error}`);
 }
 try {
   assert.equal((await request('PATCH', '/ppt/templates/violet', { pinned: true })).body.template.pinned, true);

@@ -1,9 +1,11 @@
-import { appendJsonLine, enqueueProject, getProject, operationsFile, saveProject, saveRevision } from './repository.mjs';
+import { appendJsonLine, enqueueProject, getProject, operationsFile, saveProject, saveRevision, readRevision, checkpointCommit, finishCommit } from './repository.mjs';
 import { commandTargets, commandsConflict, normalizeCommand } from './command-schema.mjs';
 import { findOperation, latestRedoable, latestUndoable, operationHistory } from './command-history.mjs';
 import { ensureDeckV3, ensureSlideV3, findNode, materializeLegacySlide, newId } from './ir.mjs';
 import { rebuildRenderTree } from './render-tree.mjs';
 import { enrichAssetRefs } from './assets.mjs';
+import { digest } from './edit-context.mjs';
+import { invalidateReviews, semanticReviewKey, synchronizePlan } from './versioning.mjs';
 
 function fail(message, statusCode = 400, details) { throw Object.assign(new Error(message), { statusCode, details }); }
 function slide(deck, id) { const value = deck.slides.find(item => item.id === id); if (!value) fail(`slide not found: ${id}`, 404); return value; }
@@ -42,6 +44,21 @@ function syncSlide(value) {
     return { type: item.pointType || 'support', heading, body };
   });
   return slide;
+}
+
+function finalizeDeck(deck, project) {
+  deck.slides = deck.slides.map(syncSlide);
+  if (project.templateFidelity?.mode === 'preserve') for (const value of deck.slides) {
+    for (const node of value.nodes.filter(item => item.templateSlot)) {
+      node.templateSlot.mapped = Boolean(String(node.content?.text || '').trim());
+      if (node.semanticRole === 'template-title') {
+        value.title = String(node.content?.text || '');
+        const title = value.nodes.find(item => item.semanticRole === 'title');
+        if (title) title.content = { ...(title.content || {}), text: value.title };
+      }
+    }
+  }
+  return deck;
 }
 
 function applyToDeck(deckInput, command, project = {}) {
@@ -172,12 +189,13 @@ function applyToDeck(deckInput, command, project = {}) {
       inverse = { type: command.type, payload: { tokens: before } }; break;
     }
     case 'deck.replace': {
-      inverse = { type: 'deck.replace', payload: { deck: structuredClone(deck) } }; return { deck: ensureDeckV3(p.deck), inverse };
+      const before = Object.fromEntries(['template', 'templateSpec', 'outline', 'pages', 'pageDecision', 'planning', 'constraints'].map(key => [key, structuredClone(project[key] ?? null)]));
+      inverse = { type: 'deck.replace', payload: { deck: structuredClone(deck), projectState: before } };
+      return { deck: finalizeDeck(ensureDeckV3(p.deck), { ...project, ...(p.projectState || {}) }), inverse };
     }
     default: fail(`unsupported command: ${command.type}`);
   }
-  deck.slides = deck.slides.map(syncSlide);
-  return { deck, inverse };
+  return { deck: finalizeDeck(deck, project), inverse };
 }
 
 function priorConflicts(project, command) {
@@ -187,8 +205,12 @@ function priorConflicts(project, command) {
 }
 
 async function commit(project, command, meta = {}) {
+  const beforeReviewKey = semanticReviewKey(project);
   const existing = findOperation(project.uid, project.id, command.id);
   if (existing) return { project, operation: existing, idempotent: true };
+  if (meta.guard) meta.guard(project, command);
+  if (!['completed', 'quality_blocked', 'paused'].includes(project.status) && !meta.allowGenerating)
+    fail('project is not editable in its current state', 409);
   if (command.baseRevision > project.revision) fail('baseRevision is newer than the project', 409, { currentRevision: project.revision });
   const conflicts = priorConflicts(project, command);
   if (conflicts.length) fail('command conflicts with newer changes', 409, { currentRevision: project.revision, conflicts: conflicts.map(item => ({ id: item.id, revision: item.revision, targets: item.targets })) });
@@ -210,30 +232,67 @@ async function commit(project, command, meta = {}) {
     }
     if (command.type === 'ai.slidePatch' && command.payload.layoutId) fail('template slide layout cannot be replaced', 409);
   }
+  // Fill legacy published snapshots before the first draft mutation.
+  if (project.revision === project.publishedRevision && !readRevision(project.uid, project.id, project.revision)?.templateSpec)
+    saveRevision(project, 'published-baseline');
+  const beforeSlides = new Map(project.deck.slides.map(slide => [slide.id, digest(slide)]));
   const { deck, inverse } = applyToDeck(project.deck, command, project);
   project.deck = deck;
-  if (project.templateFidelity?.mode === 'preserve') for (const slide of project.deck.slides) {
-    for (const node of slide.nodes.filter(item => item.templateSlot)) {
-      node.templateSlot.mapped = Boolean(String(node.content?.text || '').trim());
-      if (node.semanticRole === 'template-title') {
-        slide.title = String(node.content?.text || '');
-        const canonicalTitle = slide.nodes.find(item => item.semanticRole === 'title');
-        if (canonicalTitle) canonicalTitle.content = { ...(canonicalTitle.content || {}), text: slide.title };
-      }
-    }
+  if (command.type === 'deck.replace' && command.payload.projectState) for (const key of ['template', 'templateSpec', 'outline', 'pages', 'pageDecision', 'planning', 'constraints']) {
+    if (Object.hasOwn(command.payload.projectState, key)) project[key] = structuredClone(command.payload.projectState[key]);
   }
   if (command.type === 'theme.setPalette') project.templateSpec = { ...(project.templateSpec || {}), palette: structuredClone(command.payload.palette) };
+  if (command.type === 'deck.replace') synchronizePlan(project, 'proposal');
   enrichAssetRefs(project, { strict: true });
   project.revision += 1; project.draftRevision = project.revision; project.updatedAt = new Date().toISOString();
+  if (command.type.startsWith('slide.') && command.type !== 'slide.setLayout') {
+    const previous = new Map((project.outline || []).map(item => [item.id, item]));
+    project.outline = project.deck.slides.map(item => previous.get(item.id) || { id: item.id, title: item.title, refs: item.sourceRefs || [] });
+    project.pages = project.deck.slides.length;
+    project.pageDecision = { ...project.pageDecision, finalPageCount: project.pages, source: 'user' };
+    synchronizePlan(project, command.type);
+  }
+  // A paused draft is also the generation cache. Resume must not reconstruct an older
+  // page from node.slide or execute an intent queued before this manual command.
+  if (project.status === 'paused' && !meta.allowGenerating) {
+    project.nodes ||= {};
+    const changed = new Set(project.deck.slides.filter(slide => beforeSlides.get(slide.id) !== digest(slide)).map(slide => slide.id));
+    for (const id of beforeSlides.keys()) if (!project.deck.slides.some(slide => slide.id === id)) { changed.add(id); delete project.nodes[id]; }
+    for (const slide of project.deck.slides) if (changed.has(slide.id)) {
+      if (project.editing) project.editing.epochs[slide.id] = (project.editing.epochs[slide.id] || 0) + 1;
+      project.nodes[slide.id] = { ...project.nodes[slide.id], status: 'done', slide: structuredClone(slide), epoch: project.editing?.epochs?.[slide.id] || 0 };
+      delete project.nodes[slide.id].error;
+    }
+    for (const intent of Object.values(project.editing?.intents || {})) {
+      for (const id of changed) {
+        const result = intent.perSlideResults?.[id];
+        if (!result || !['queued', 'applying', 'proposed'].includes(result.status)) continue;
+        Object.assign(result, { status: 'conflicted', error: 'manual draft edit superseded the pending mutation' });
+        for (const entry of project.constraints?.entries || []) if (entry.active && entry.intentId === intent.id && entry.slideId === id) { entry.active = false; project.constraints.version++; }
+      }
+      const statuses = Object.values(intent.perSlideResults || {}).map(result => result.status);
+      intent.status = statuses.includes('proposed') ? 'proposed' : statuses.includes('applying') ? 'applying' : statuses.includes('queued') ? 'queued' : statuses.includes('applied') && statuses.includes('conflicted') ? 'partially_applied' : statuses.includes('conflicted') ? 'conflicted' : intent.status;
+    }
+  }
+  invalidateReviews(project, beforeReviewKey);
   const affectedSlideIds = [...new Set([command.payload.slideId].filter(Boolean))];
   project.renderTree = rebuildRenderTree(project, project.renderTree, command.type === 'deck.replace' || command.type.startsWith('slide.') ? [] : affectedSlideIds);
-  saveProject(project); saveRevision(project, meta.kind || command.type);
+  if (project.runtime) {
+    for (const tree of project.renderTree.slides) {
+      const state = project.runtime.slides[tree.id] || {};
+      project.runtime.slides[tree.id] = { ...state, preview: tree, renderHash: digest(tree), phase: 'render_ready' };
+    }
+    for (const id of Object.keys(project.runtime.slides)) if (!project.deck.slides.some(slide => slide.id === id)) delete project.runtime.slides[id];
+  }
   const operation = {
     schemaVersion: 1, id: command.id, status: 'committed', kind: meta.kind || 'command', targetOperationId: meta.targetOperationId || null,
     projectId: project.id, revision: project.revision, baseRevision: command.baseRevision, at: new Date().toISOString(), actor: command.actor,
     targets: commandTargets(command), command, inverse: { ...inverse, baseRevision: project.revision }, affectedSlideIds,
   };
+  checkpointCommit(project, operation, meta.kind || command.type);
+  saveProject(project); saveRevision(project, meta.kind || command.type);
   appendJsonLine(operationsFile(project.uid, project.id), operation);
+  finishCommit(project);
   return { project, operation, idempotent: false };
 }
 
@@ -245,10 +304,16 @@ export function applyCommand(uid, projectId, input, options = {}) {
   });
 }
 
-export function undo(uid, projectId, actor = uid) {
+export function undo(uid, projectId, actor = uid, operationId = null) {
   return enqueueProject(uid, projectId, async () => {
     const project = getProject(uid, projectId); if (!project) fail('project not found', 404);
-    const target = latestUndoable(uid, projectId); if (!target) fail('nothing to undo', 409);
+    const target = operationId ? findOperation(uid, projectId, operationId) : latestUndoable(uid, projectId); if (!target) fail('nothing to undo', 409);
+    if (operationId) {
+      if (target.kind !== 'command') fail('only committed commands can be undone', 409);
+      const later = operationHistory(uid, projectId).filter(row => row.revision > target.revision);
+      if (later.some(row => row.command && commandsConflict(row.command, target.command)))
+        fail('the target has newer changes; preview the current page before restoring', 409);
+    }
     const command = normalizeCommand({ ...target.inverse, id: newId('undo'), baseRevision: project.revision, actor }, project);
     return commit(project, command, { kind: 'undo', targetOperationId: target.id });
   });

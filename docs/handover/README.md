@@ -8,6 +8,8 @@
 
 | 文件 | 主题 |
 |------|------|
+| ppt-mutation-runtime-unification.md | PPT 用户所选模型、计划与约束版本、页级真实预览、暂停恢复、类型化修改、结构提案、独立媒体重试、保护与审查失效，以及十项验收 |
+| ppt-edit-intent-proposal-architecture.md | PPT 四入口共用模板确认、服务端页数重规划、固定范围生成修改/epoch、持久 Proposal、真实前后预览、定向撤回、写前恢复、发布版本隔离与验收边界 |
 | ppt-workspace-m1.md | PPT M1：远程 Cowork 项目事实源、无工具逐页模型 DAG、确定性 PPTX、跨设备与导出边界、文件地图和部署验收 |
 | ppt-workspace-m2.md | PPT M2：Paste/File 解析与来源追溯、项目文件夹/回收站管理、PDF/演示、测试和远端验收边界 |
 | ppt-workspace-m3.md | PPT M3：旧版快照与版本谱系、差异大纲、未变节点复用、模板兼容性与 palette 映射、验收边界 |

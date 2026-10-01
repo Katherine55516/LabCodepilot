@@ -35,10 +35,32 @@ export function readJson(target, fallback = null) {
 }
 
 export function getProject(uid, projectId, { persistMigration = false } = {}) {
+  recoverCommit(uid, projectId);
   const raw = legacy.get(uid, projectId);
   const result = migrateProject(raw);
   if (result.changed && persistMigration) legacy.save(result.project);
   return result.project;
+}
+
+/** Single-process write-ahead checkpoint; JSONL and snapshots are not one filesystem transaction. */
+export function recoverCommit(uid, projectId) {
+  const marker = path.join(projectDataDir(uid, projectId), 'pending-command.json');
+  const pending = readJson(marker);
+  if (!pending) return;
+  if (pending.project?.uid !== uid || pending.project?.id !== projectId) throw new Error('invalid command checkpoint');
+  const current = legacy.get(uid, projectId);
+  if (!current || current.deletedAt) { fs.rmSync(marker, { force: true }); return; }
+  if (Number(current.revision || 0) < pending.project.revision) legacy.save(pending.project);
+  saveRevision(pending.project, pending.reason);
+  if (!readJsonLines(operationsFile(uid, projectId)).some(row => row.id === pending.operation.id)) appendJsonLine(operationsFile(uid, projectId), pending.operation);
+  fs.rmSync(marker, { force: true });
+}
+
+export function checkpointCommit(project, operation, reason) {
+  atomicJson(path.join(projectDataDir(project.uid, project.id), 'pending-command.json'), { project, operation, reason });
+}
+export function finishCommit(project) {
+  fs.rmSync(path.join(projectDataDir(project.uid, project.id), 'pending-command.json'), { force: true });
 }
 
 export function saveProject(project) {
@@ -82,6 +104,19 @@ export function revisionFile(uid, projectId, revision) {
 
 export function appendJsonLine(target, value) {
   fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
+  // A crashed append may leave an incomplete final record. Do not append
+  // behind it: readers would stop before every subsequent operation/event.
+  if (fs.existsSync(target)) {
+    const bytes = fs.readFileSync(target);
+    let end = bytes.length;
+    while (end && bytes[end - 1] === 10) end--;
+    const start = bytes.lastIndexOf(10, end - 1) + 1;
+    if (end > start) {
+      try { JSON.parse(bytes.subarray(start, end).toString('utf8')); }
+      catch { fs.truncateSync(target, start); }
+      if (end === bytes.length && fs.statSync(target).size === bytes.length) fs.appendFileSync(target, '\n');
+    }
+  }
   const fd = fs.openSync(target, 'a', 0o600);
   try { fs.writeSync(fd, `${JSON.stringify(value)}\n`); fs.fsyncSync(fd); }
   finally { fs.closeSync(fd); }
@@ -104,7 +139,8 @@ export function saveRevision(project, reason = 'checkpoint') {
   return atomicJson(revisionFile(project.uid, project.id, project.revision), {
     schemaVersion: 1, projectId: project.id, revision: project.revision, reason,
     createdAt: new Date().toISOString(), deck: project.deck, renderTree: project.renderTree || null,
-    template: project.template, templateSpec: project.templateSpec,
+    template: project.template, templateSpec: project.templateSpec, outline: project.outline, pages: project.pages,
+    pageDecision: project.pageDecision, planning: project.planning, planRevision: project.planRevision, constraints: project.constraints,
   });
 }
 

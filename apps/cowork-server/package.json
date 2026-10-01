@@ -27,7 +27,9 @@
     "selftest:ppt-long-limits": "node selftest-ppt-long-limits.mjs",
     "selftest:ppt-report-qa": "node selftest-ppt-report-qa.mjs",
     "selftest:ppt-structured": "node selftest-ppt-structured.mjs",
-    "benchmark:ppt-render": "node benchmark-ppt-render.mjs"
+    "benchmark:ppt-render": "node benchmark-ppt-render.mjs",
+    "selftest:ppt-mutation-runtime": "node selftest-ppt-mutation-runtime.mjs",
+    "selftest:ppt-edit-intent": "node selftest-ppt-edit-intent.mjs"
   },
   "dependencies": {
     "ws": "^8.19.0"

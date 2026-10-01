@@ -1,0 +1,34 @@
+{
+  "date": "2026-09-30",
+  "transport": "CDP",
+  "model": "deterministic adapter",
+  "checks": [
+    "proposal preview writes no revision",
+    "server-owned proposal applies to selected page",
+    "targeted undo",
+    "title UI preserves body",
+    "style UI follows typed proposal",
+    "protected page rejects content AI until explicitly unlocked",
+    "split previews all child pages before updating page budget",
+    "scope drafts remain independent",
+    "unsubmitted scope and draft survive completion and reload",
+    "completed generation intent edits draft only",
+    "submitted intent history survives reload",
+    "real generation pause and resume reuse rendered pages",
+    "real template preview paging and mobile layout"
+  ],
+  "consoleErrors": [],
+  "artifacts": [
+    "ai-comparison-desktop.png",
+    "ai-comparison-mobile.png",
+    "generation-edit-desktop.png",
+    "generation-edit-mobile.png",
+    "paused-generation-desktop.png",
+    "paused-generation-mobile.png",
+    "split-preview-desktop.png",
+    "split-preview-mobile.png",
+    "style-preview-desktop.png",
+    "template-settings-desktop.png",
+    "template-settings-mobile.png"
+  ]
+}

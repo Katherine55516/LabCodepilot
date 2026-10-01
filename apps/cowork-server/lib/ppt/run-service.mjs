@@ -19,7 +19,9 @@ export function currentRun(project) {
 export function transitionNode(projectInput, nodeId, status, detail = {}, { useInput = false } = {}) {
   const project = useInput ? projectInput : getProject(projectInput.uid, projectInput.id) || projectInput;
   let run = currentRun(project) || startRun(project);
-  const node = run.nodes[nodeId] || { id: nodeId, dependsOn: [], attempts: 0 };
+  const [kind, target] = nodeId.split(':');
+  const dependency = target ? ({ source: ['outline'], content: [`source:${target}`], media: ['outline'], layout: [`content:${target}`], preview: [`layout:${target}`], quality: [`preview:${target}`] }[kind] || []) : [];
+  const node = run.nodes[nodeId] || { id: nodeId, dependsOn: dependency, attempts: 0 };
   const now = new Date().toISOString();
   run.nodes[nodeId] = {
     ...node,
@@ -67,6 +69,10 @@ export function cancelRun(projectInput) {
   if (!run || ['completed', 'cancelled'].includes(run.status)) return run;
   run.status = 'cancelled'; run.cancelledAt = new Date().toISOString();
   ({ run } = appendEvent(run, 'run.cancelled'));
+  for (const intent of Object.values(project.editing?.intents || {})) {
+    for (const result of Object.values(intent.perSlideResults || {})) if (['queued', 'applying'].includes(result.status)) result.status = 'cancelled';
+    intent.status = Object.values(intent.perSlideResults || {}).some(result => result.status === 'applied') ? 'partially_applied' : 'cancelled';
+  }
   project.status = 'cancelled'; project.stage = 'cancelled'; saveProject(project);
   return run;
 }

@@ -180,8 +180,8 @@ print(json.dumps({'bytes':os.path.getsize(target),'nativeTemplate':True}))
 export async function renderPdf(project) {
   const { name } = await orch.ensureContainer(project.id, project.uid, orch.KIND_PPT);
   return new Promise((resolve, reject) => {
-    const preserved = project.templateFidelity?.mode === 'preserve';
-    const child = spawn('docker', ['exec', '-i', '-u', String(orch.AGENT_UID), name, 'python3', '-c', preserved ? PRESERVED_SCRIPT : SCRIPT], { stdio: ['pipe', 'pipe', 'pipe'] });
+    const preserved = Boolean(project.externalPptx || project.templateFidelity?.mode === 'preserve');
+    const child = spawn('docker', ['exec', '-i', '-u', String(orch.AGENT_UID), '-e', `PPT_SOURCE=${project.publishedArtifactPath || '/workspace/presentation.pptx'}`, '-e', `PPT_OUTPUT=${project.pdfArtifactPath || '/workspace/presentation.pdf'}`, name, 'python3', '-c', preserved ? PRESERVED_SCRIPT : SCRIPT], { stdio: ['pipe', 'pipe', 'pipe'] });
     let output = ''; let error = '';
     child.stdout.on('data', c => { output = (output + c).slice(-10000); });
     child.stderr.on('data', c => { error = (error + c).slice(-2000); });

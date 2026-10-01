@@ -72,26 +72,26 @@ export function PptInspector({
         </span>
       </div>
       {element.kind === "list" && element.content?.pointLayout && (
-        <section className="space-y-2" aria-label="要点 / Points">
+        <section className="space-y-2" aria-label={t("ppt.edit.points")}>
           {points.map((point, index) => <div key={point.id} className="space-y-1 rounded-lg border border-border p-2">
             <div className="flex items-center justify-between text-xs font-medium">
-              <span>要点 {index + 1}</span>
-              <button type="button" aria-label={`删除要点 ${index + 1}`} disabled={element.locked || !allowStructure}
+              <span>{t("ppt.edit.point", { index: index + 1 })}</span>
+              <button type="button" aria-label={t("ppt.edit.deletePoint", { index: index + 1 })} disabled={element.locked || !allowStructure}
                 onClick={() => setPoints((current) => current.filter((item) => item.id !== point.id))}>×</button>
             </div>
-            <input className={field} aria-label={`要点 ${index + 1} 标题`} value={point.heading}
+            <input className={field} aria-label={t("ppt.edit.pointHeading", { index: index + 1 })} value={point.heading}
               onChange={(event) => setPoints((current) => current.map((item) => item.id === point.id ? { ...item, heading: event.target.value } : item))} />
-            <textarea className={`${field} min-h-20`} aria-label={`要点 ${index + 1} 说明`} value={point.body}
+            <textarea className={`${field} min-h-20`} aria-label={t("ppt.edit.pointBody", { index: index + 1 })} value={point.body}
               onChange={(event) => setPoints((current) => current.map((item) => item.id === point.id ? { ...item, body: event.target.value } : item))} />
           </div>)}
           <div className="grid grid-cols-2 gap-2">
             <button type="button" className={button} disabled={element.locked || !allowStructure || points.length >= 10}
-              onClick={() => setPoints((current) => [...current, { id: crypto.randomUUID().replaceAll("-", ""), heading: "", body: "", pointType: "support" }])}>＋ 要点</button>
+              onClick={() => setPoints((current) => [...current, { id: crypto.randomUUID().replaceAll("-", ""), heading: "", body: "", pointType: "support" }])}>{t("ppt.edit.addPoint")}</button>
             <button type="button" className={button} disabled={element.locked || points.some((point) => !point.body.trim())}
               onClick={() => void onCommand("node.setContent", { ...node, content: { items: points.map((point) => ({ ...point,
-                text: point.heading.trim() ? `${point.heading.trim()}\n${point.body.trim()}` : point.body.trim() })) } })}>应用并重排</button>
+                text: point.heading.trim() ? `${point.heading.trim()}\n${point.body.trim()}` : point.body.trim() })) } })}>{t("ppt.edit.applyPoints")}</button>
           </div>
-          {element.content.pointLayout.overflow && <p className="text-xs text-amber-600">内容超出当前页面容量；请缩短、改版式或拆页。</p>}
+          {element.content.pointLayout.overflow && <p className="text-xs text-destructive">{t("ppt.edit.pointOverflow")}</p>}
         </section>
       )}
       {["text", "timeline", "metric"].includes(element.kind) && (

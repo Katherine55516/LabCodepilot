@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { digest, planKey, templateCapabilities } from './edit-context.mjs';
 
 const ID = /^[a-zA-Z0-9_-]{1,80}$/;
 
@@ -97,6 +98,10 @@ export function ensureSlideV3(input, index = 0) {
     node.semanticRole === 'title' || node.semanticRole === 'body' || visualIds.has(node.id) || !['image', 'chart', 'table', 'shape'].includes(node.type)
   ));
   slide.nodeOrder = slide.nodes.map(node => node.id);
+  slide.componentGraph = { schemaVersion: 1, readingOrder: slide.nodeOrder,
+    nodes: slide.nodes.map(node => ({ id: node.id, role: node.semanticRole || node.type, groupId: node.groupId || null,
+      styleRef: node.styleRef || `${node.type}.default`, sourceRefs: node.sourceRefs || slide.sourceRefs || [], nativeRef: node.nativeRef || null })),
+    edges: slide.nodes.flatMap(node => node.type === 'list' ? (node.content?.items || []).map(item => ({ from: node.id, to: item.id, relation: 'contains-point', role: item.pointType || 'support' })) : []) };
   slide.role ||= slide.layoutId || (index === 0 ? 'cover' : 'content');
   slide.layoutRef ||= slide.layoutId || 'summary';
   return materializeLegacySlide(slide);
@@ -136,6 +141,15 @@ export function ensureProjectV3(input) {
   project.publishedRevision = Number.isInteger(project.publishedRevision)
     ? project.publishedRevision
     : (project.status === 'completed' ? project.revision : 0);
+  project.creationContext = {
+    schemaVersion: 1, draftId: project.id, sourceRevision: project.sourceRevision || 0,
+    sourceHash: project.source?.sha256 || digest(project.source?.text || project.prompt),
+    modelRef: { configId: project.configId, model: project.model },
+    templateRef: { id: project.template, versionOrHash: project.templateSpec?.sha256 || digest(project.templateSpec), capabilities: templateCapabilities(project.templateSpec) },
+    outlineRevision: project.outlineRevision || 0,
+    pageBudget: { ...project.pageDecision, recommended: project.planning?.pageRecommendation?.recommended || null, requested: project.pageDecision?.source === 'user' ? project.pages : null, compressionApproved: Boolean(project.compressionApproved), confirmed: project.outline.length ? project.outline.filter(slide => !slide.manualBlank).length : project.pages },
+    planKey: planKey(project),
+  };
   return project;
 }
 

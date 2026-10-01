@@ -8,6 +8,7 @@
 
 | 文件 | 主题 |
 |------|------|
+| gamma-ai-editing-generation-queue-2026-09-29.md | Gamma 5 与 Classic 实机调研：生成中指令排队、成稿后段落级 AI 优化、版本对比、可视化编辑器与四页实验稿质量问题 |
 | nvidia-compressing-llms-49-slide-evaluation.md | 49 页 LLM Compression 模拟输出逐页评估：证据缺失、模板复用、投影可读性与现有 PPT DAG 内的分阶段改进方案 |
 | ppt-quality-review-and-benchmark.md | PPT M1–M5 质量评审与耗时基线：10 页可编辑样例、5 类本地渲染基准、Gamma-like 对照、质量门禁及当前完整 workflow |
 | chat-latency-investigation-2026-03-20.md | 聊天响应变慢问题排查报告（用户设置 / MCP / resume 链路） |

@@ -44,6 +44,7 @@
 
 | 文件 | 主题 | 状态 |
 |------|------|------|
+| completed/ppt-edit-intent-proposal-integration.md | 最新原型架构接入：共用模板确认、持久 Proposal/EditIntent、页级版本协调、单页 AI 前后预览与定向撤回 | 本地实现和回归完成；真实模型/远端/打包态待环境验收 |
 | active/ppt-gamma-depth-design-editor.md | Gamma 样例驱动的内容容量页数估算、语义版式和编辑器样式优化 | 实施中 |
 | completed/ppt-alpha-mining-gamma-comparison.md | Alpha Mining 双产物对照驱动的内容深度、原生模板槽位和无关媒体治理 | 已完成，含 16 页模拟产物与分析报告 |
 | completed/ppt-alpha-mining-performance-depth.md | Alpha Mining 与 Performance Review 模板样例对照：模板文字容量、写作深度和可见内容质检 | 已完成，旧产物确定性复核检出 10 个硬错误 |
@@ -98,6 +99,7 @@
 
 | 文件 | 主题 | 完成日期 |
 |------|------|----------|
+| completed/ppt-mutation-runtime-unification.md | PPT 类型化修改、版本与约束、逐页预览、暂停恢复、独立媒体 retry、结构提案与十项本地验收 | 2026-09-30 |
 | completed/ppt-gamma-copy-media-repair.md | Gamma 20 页模板的页内/列表重复、媒体错配、原生组件省略与发布门禁修复，模拟 LLM 重跑及独立 PPTX 审计 | 2026-09-29 |
 | completed/ppt-content-depth-sparse-typography.md | PPT 短输入预规划、按角色控制 point 深度、排版舒适度与本地回归 | 2026-09-28 |
 | completed/ppt-visible-copy-integrity.md | PPT 模板可见内容完整性门禁、标题说明增量、原生导出文本核对和 27 页成品回归 | 2026-09-28 |

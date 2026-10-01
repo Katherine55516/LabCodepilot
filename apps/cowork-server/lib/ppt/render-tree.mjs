@@ -51,7 +51,7 @@ function adaptiveList(node, region, slide, project) {
     distributionType: slide.copy?.distributionType,
     density: slide.copy?.density,
     depth: slide.copy?.depth,
-    bodyScale: project.deck?.themeTokens?.bodyScale || 1,
+    bodyScale: (project.deck?.themeTokens?.bodyScale || 1) * (slide.stylePreference?.bodyScale || 1),
   });
   content.pointLayout = plan;
   return { content, fontSizePt: plan.fontSizePt };
@@ -77,6 +77,7 @@ function buildSlide(project, input, index, total) {
   const slide = materializeLegacySlide(input);
   const regions = regionMap(slide);
   const typography = typographyFor(slide);
+  if (slide.stylePreference?.bodyScale) typography.bodyPt *= slide.stylePreference.bodyScale;
   const elements = [];
   const titleNode = slide.nodes.find(node => node.semanticRole === 'title');
   const bodyNode = slide.nodes.find(node => node.semanticRole === 'body');

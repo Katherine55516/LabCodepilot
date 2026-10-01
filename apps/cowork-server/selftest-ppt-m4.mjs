@@ -29,10 +29,11 @@ const slides = [
   { id: '3', title: 'Slide 3', bullets: ['Closing'], blocks: [] },
 ];
 let renders = 0;
-const deps = { modelCall: async (project, prompt) => prompt.includes('演示文稿叙事规划器')
+const deps = { modelCall: async (project, prompt) => prompt.includes('整稿演示文稿内容评审器') ? { missing: [], repeated: [], conflicts: [], unsupported: [] } : prompt.includes('演示文稿叙事规划器')
   ? { slides: Array.from({ length: project.pages }, (_, index) => ({ title: `Pasted ${index + 1}`, focus: 'Source facts', refs: ['1'] })) }
   : prompt.includes('视觉元素') ? { text: 'Better label' } : { title: 'Rewritten', bullets: ['Verified text'] },
-renderPptx: async () => { renders++; return { bytes: 123 }; }, renderPdf: async () => ({ bytes: 123 }) };
+renderPptx: async () => {
+ renders++; return { bytes: 123 }; }, renderPdf: async () => ({ bytes: 123 }) };
 async function request(method, pathname, data, as = uid) {
   const req = Readable.from(data === undefined ? [] : [Buffer.from(JSON.stringify(data))]);
   req.method = method;
@@ -64,7 +65,8 @@ try {
   assert.equal((await request('PATCH', `/ppt/projects/${id}`, { slides: [{ ...slides[0], blocks: [{ ...blocks[1], values: [1] }] }, ...slides.slice(1)], revision: 1 })).status, 400);
   assert.equal((await request('POST', `/ppt/projects/${id}/rewrite`, { slideId: '1', instruction: 'Shorten the text', revision: 1 })).status, 200);
   assert.equal(store.get(uid, id).deck.slides[0].title, 'Rewritten');
-  assert.deepEqual(store.get(uid, id).deck.slides[0].blocks, blocks.slice(0, 2));
+  assert.deepEqual(store.get(uid, id).deck.slides[0].blocks.map(({ assetId, assetHash, ...block }) => block), blocks.slice(0, 2));
+  assert.ok(store.get(uid, id).deck.slides[0].blocks[0].assetHash, 'images retain their server-owned asset binding');
   assert.equal((await request('POST', `/ppt/projects/${id}/rewrite`, { slideId: '1', instruction: 'Again', revision: 1 })).status, 409);
   assert.equal((await request('PATCH', `/ppt/projects/${id}`, { template: 'light', revision: 2 })).status, 200);
   assert.equal(store.get(uid, id).template, 'light');
@@ -82,10 +84,10 @@ try {
   assert.equal(pastedProject.source.images.length, 2);
   assert.equal((await request('POST', `/ppt/projects/${pastedProject.id}/generate`)).status, 202);
   pastedProject = await settled(pastedProject.id, 'completed');
-  assert.equal(pastedProject.deck.slides[1].blocks.length, 2);
-  assert.equal(pastedProject.deck.slides[1].layout, 'visual-first');
+  assert.equal(pastedProject.deck.slides[1].blocks.length, 0, 'unrequested images are not assigned to unrelated pages');
+  assert.notEqual(pastedProject.deck.slides[1].layout, 'visual-first');
   assert.equal(pastedProject.deck.slides[0].blocks.length, 0);
-  assert.equal(renders, 6);
+  assert.equal(renders, 1, 'draft mutations do not implicitly publish');
 
   const output = path.join(root, 'rich.pptx');
   const fonts = { title: 'Noto Sans CJK SC', body: 'Noto Sans CJK SC', titleEastAsia: 'Noto Sans CJK SC', bodyEastAsia: 'Noto Sans CJK SC' };

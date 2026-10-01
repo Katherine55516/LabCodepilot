@@ -314,7 +314,7 @@ print(json.dumps({'slides':len(prs.slides),'path':target,'bytes':os.path.getsize
 
 function runPython(project, script, input, max = 12_000_000) {
   return orch.ensureContainer(project.id, project.uid, orch.KIND_PPT).then(({ name }) => new Promise((resolve, reject) => {
-    const child = spawn('docker', ['exec', '-i', '-u', String(orch.AGENT_UID), name, 'python3', '-c', script], { stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn('docker', ['exec', '-i', '-u', String(orch.AGENT_UID), '-e', `PPT_OUTPUT=${project.renderOutput || '/workspace/presentation.pptx'}`, name, 'python3', '-c', script], { stdio: ['pipe', 'pipe', 'pipe'] });
     let out = ''; let err = '';
     child.stdout.on('data', chunk => { out += chunk; if (out.length > max) child.kill(); });
     child.stderr.on('data', chunk => { err = (err + chunk).slice(-3000); });

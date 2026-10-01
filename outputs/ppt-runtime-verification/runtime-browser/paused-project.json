@@ -1,0 +1,1578 @@
+{
+  "uid": "cdp-verification",
+  "id": "318dc2b023ca861d7d608088bc3352eb",
+  "title": "CDP runtime controls",
+  "prompt": "Explain the mechanism and limitations.",
+  "pages": 4,
+  "template": "light",
+  "templateSpec": {
+    "id": "light",
+    "name": "Light",
+    "version": 1,
+    "palette": {
+      "background": "#f8f9fc",
+      "accent": "#404b6b",
+      "foreground": "#242a3b",
+      "muted": "#505b6f"
+    },
+    "fonts": {
+      "title": "Noto Serif CJK SC",
+      "body": "Noto Sans CJK SC",
+      "titleEastAsia": "Noto Serif CJK SC",
+      "bodyEastAsia": "Noto Sans CJK SC",
+      "titleEastAsiaHant": "Noto Serif CJK TC",
+      "bodyEastAsiaHant": "Noto Sans CJK TC",
+      "cjkExplicit": true
+    }
+  },
+  "status": "paused",
+  "stage": "quality:slide_0",
+  "error": "",
+  "revision": 0,
+  "publishedRevision": 1,
+  "model": "fixture-model",
+  "configId": "fixture",
+  "outline": [
+    {
+      "id": "slide_0",
+      "title": "Overview",
+      "focus": "Overview",
+      "refs": []
+    },
+    {
+      "id": "slide_1",
+      "title": "Mechanism",
+      "focus": "Mechanism",
+      "refs": []
+    },
+    {
+      "id": "slide_2",
+      "title": "Constraints",
+      "focus": "Constraints",
+      "refs": []
+    },
+    {
+      "id": "slide_3",
+      "title": "Conclusion",
+      "focus": "Conclusion",
+      "refs": []
+    }
+  ],
+  "deck": null,
+  "nodes": {
+    "slide_0": {
+      "status": "done",
+      "epoch": 0,
+      "attempts": 1,
+      "slide": {
+        "id": "slide_0",
+        "title": "Generated claim",
+        "bullets": [
+          "Mechanism based on source evidence."
+        ],
+        "sourceRefs": [],
+        "blocks": [],
+        "layout": "text-first",
+        "classification": {
+          "method": "semantic-registry",
+          "role": "content",
+          "visualIntent": "none",
+          "explicitLayout": false,
+          "selectedLayout": "cover"
+        },
+        "nodes": [
+          {
+            "id": "node_7d23ffbf1d6fc0422dc6c6fc",
+            "type": "text",
+            "semanticRole": "title",
+            "slotId": "title",
+            "styleRef": "typography.title",
+            "content": {
+              "text": "Generated claim"
+            }
+          },
+          {
+            "id": "node_bdf9a2f272dda610f2b6a0a9",
+            "type": "list",
+            "semanticRole": "body",
+            "slotId": "body",
+            "styleRef": "typography.body",
+            "content": {
+              "items": [
+                {
+                  "id": "item_af85fb28d43f9424af02dcf2",
+                  "text": "Mechanism based on source evidence."
+                }
+              ]
+            }
+          }
+        ],
+        "nodeOrder": [
+          "node_7d23ffbf1d6fc0422dc6c6fc",
+          "node_bdf9a2f272dda610f2b6a0a9"
+        ],
+        "componentGraph": {
+          "schemaVersion": 1,
+          "readingOrder": [
+            "node_7d23ffbf1d6fc0422dc6c6fc",
+            "node_bdf9a2f272dda610f2b6a0a9"
+          ],
+          "nodes": [
+            {
+              "id": "node_7d23ffbf1d6fc0422dc6c6fc",
+              "role": "title",
+              "groupId": null,
+              "styleRef": "typography.title",
+              "sourceRefs": [],
+              "nativeRef": null
+            },
+            {
+              "id": "node_bdf9a2f272dda610f2b6a0a9",
+              "role": "body",
+              "groupId": null,
+              "styleRef": "typography.body",
+              "sourceRefs": [],
+              "nativeRef": null
+            }
+          ],
+          "edges": [
+            {
+              "from": "node_bdf9a2f272dda610f2b6a0a9",
+              "to": "item_af85fb28d43f9424af02dcf2",
+              "relation": "contains-point",
+              "role": "support"
+            }
+          ]
+        },
+        "role": "cover",
+        "titleQuality": {
+          "title": "Generated claim",
+          "candidates": [
+            {
+              "value": "Generated claim",
+              "units": 8.58,
+              "score": 1
+            }
+          ],
+          "visualUnits": 8.58,
+          "maxVisualUnits": 36,
+          "estimatedLines": 1,
+          "fits": true,
+          "source": "agent",
+          "locked": false,
+          "maxLineUnits": 8.58
+        },
+        "copy": {
+          "eyebrow": "",
+          "subtitle": "",
+          "takeaway": "",
+          "blocks": [],
+          "role": "evidence",
+          "depth": "balanced",
+          "density": "medium",
+          "distributionType": "four_medium_cards",
+          "pointLengthProfile": "standard",
+          "semanticUnitBudget": 8,
+          "requiredSupport": [],
+          "requiredDetails": [],
+          "copyBudget": {
+            "titlePreferredUnits": 28,
+            "titleHardUnits": 36,
+            "titleMaxLines": 2,
+            "titleMinPt": 32,
+            "bodyUnits": 750,
+            "maxSupportUnits": 8
+          }
+        },
+        "factSynthesis": {
+          "claims": [],
+          "facts": [],
+          "numbers": [],
+          "examples": [],
+          "relationships": [],
+          "mechanisms": [],
+          "implications": [],
+          "constraints": [],
+          "definitions": [],
+          "decisions": [],
+          "limitations": []
+        },
+        "evidenceUsedIds": []
+      }
+    },
+    "slide_1": {
+      "status": "done",
+      "epoch": 0,
+      "attempts": 1,
+      "slide": {
+        "id": "slide_1",
+        "title": "Generated claim",
+        "bullets": [
+          "Mechanism based on source evidence."
+        ],
+        "sourceRefs": [],
+        "blocks": [],
+        "layout": "text-first",
+        "classification": {
+          "method": "semantic-registry",
+          "role": "content",
+          "visualIntent": "none",
+          "explicitLayout": false,
+          "selectedLayout": "cover"
+        },
+        "nodes": [
+          {
+            "id": "node_b8202309cf24d4d27a6fbec8",
+            "type": "text",
+            "semanticRole": "title",
+            "slotId": "title",
+            "styleRef": "typography.title",
+            "content": {
+              "text": "Generated claim"
+            }
+          },
+          {
+            "id": "node_e84d48ddbae43f38c92a21c7",
+            "type": "list",
+            "semanticRole": "body",
+            "slotId": "body",
+            "styleRef": "typography.body",
+            "content": {
+              "items": [
+                {
+                  "id": "item_ecc2e4d13249be7dfcc408b3",
+                  "text": "Mechanism based on source evidence."
+                }
+              ]
+            }
+          }
+        ],
+        "nodeOrder": [
+          "node_b8202309cf24d4d27a6fbec8",
+          "node_e84d48ddbae43f38c92a21c7"
+        ],
+        "componentGraph": {
+          "schemaVersion": 1,
+          "readingOrder": [
+            "node_b8202309cf24d4d27a6fbec8",
+            "node_e84d48ddbae43f38c92a21c7"
+          ],
+          "nodes": [
+            {
+              "id": "node_b8202309cf24d4d27a6fbec8",
+              "role": "title",
+              "groupId": null,
+              "styleRef": "typography.title",
+              "sourceRefs": [],
+              "nativeRef": null
+            },
+            {
+              "id": "node_e84d48ddbae43f38c92a21c7",
+              "role": "body",
+              "groupId": null,
+              "styleRef": "typography.body",
+              "sourceRefs": [],
+              "nativeRef": null
+            }
+          ],
+          "edges": [
+            {
+              "from": "node_e84d48ddbae43f38c92a21c7",
+              "to": "item_ecc2e4d13249be7dfcc408b3",
+              "relation": "contains-point",
+              "role": "support"
+            }
+          ]
+        },
+        "role": "cover",
+        "titleQuality": {
+          "title": "Generated claim",
+          "candidates": [
+            {
+              "value": "Generated claim",
+              "units": 8.58,
+              "score": 1
+            }
+          ],
+          "visualUnits": 8.58,
+          "maxVisualUnits": 36,
+          "estimatedLines": 1,
+          "fits": true
+        },
+        "copy": {
+          "eyebrow": "",
+          "subtitle": "",
+          "takeaway": "",
+          "blocks": [],
+          "role": "evidence",
+          "depth": "balanced",
+          "density": "medium",
+          "distributionType": "four_medium_cards",
+          "pointLengthProfile": "standard",
+          "semanticUnitBudget": 8,
+          "requiredSupport": [],
+          "requiredDetails": [],
+          "copyBudget": {
+            "titlePreferredUnits": 28,
+            "titleHardUnits": 36,
+            "titleMaxLines": 2,
+            "titleMinPt": 32,
+            "bodyUnits": 750,
+            "maxSupportUnits": 8
+          }
+        },
+        "retrieval": {
+          "version": 2,
+          "query": "Mechanism Mechanism",
+          "chunkIds": [],
+          "sourceRefs": [],
+          "evidenceIds": [],
+          "requiredEvidenceIds": []
+        },
+        "factSynthesis": {
+          "claims": [],
+          "facts": [],
+          "numbers": [],
+          "examples": [],
+          "relationships": [],
+          "mechanisms": [],
+          "implications": [],
+          "constraints": [],
+          "definitions": [],
+          "decisions": [],
+          "limitations": []
+        },
+        "evidenceUsedIds": []
+      }
+    },
+    "slide_2": {
+      "status": "done",
+      "epoch": 0,
+      "attempts": 1,
+      "slide": {
+        "id": "slide_2",
+        "title": "Generated claim",
+        "bullets": [
+          "Mechanism based on source evidence."
+        ],
+        "sourceRefs": [],
+        "blocks": [],
+        "layout": "text-first",
+        "classification": {
+          "method": "semantic-registry",
+          "role": "content",
+          "visualIntent": "none",
+          "explicitLayout": false,
+          "selectedLayout": "cover"
+        },
+        "nodes": [
+          {
+            "id": "node_0cf14897a72a981dc8d2861b",
+            "type": "text",
+            "semanticRole": "title",
+            "slotId": "title",
+            "styleRef": "typography.title",
+            "content": {
+              "text": "Generated claim"
+            }
+          },
+          {
+            "id": "node_07f7a0754f874f8536c9bfa6",
+            "type": "list",
+            "semanticRole": "body",
+            "slotId": "body",
+            "styleRef": "typography.body",
+            "content": {
+              "items": [
+                {
+                  "id": "item_ec0a41a5112827cb87cddeac",
+                  "text": "Mechanism based on source evidence."
+                }
+              ]
+            }
+          }
+        ],
+        "nodeOrder": [
+          "node_0cf14897a72a981dc8d2861b",
+          "node_07f7a0754f874f8536c9bfa6"
+        ],
+        "componentGraph": {
+          "schemaVersion": 1,
+          "readingOrder": [
+            "node_0cf14897a72a981dc8d2861b",
+            "node_07f7a0754f874f8536c9bfa6"
+          ],
+          "nodes": [
+            {
+              "id": "node_0cf14897a72a981dc8d2861b",
+              "role": "title",
+              "groupId": null,
+              "styleRef": "typography.title",
+              "sourceRefs": [],
+              "nativeRef": null
+            },
+            {
+              "id": "node_07f7a0754f874f8536c9bfa6",
+              "role": "body",
+              "groupId": null,
+              "styleRef": "typography.body",
+              "sourceRefs": [],
+              "nativeRef": null
+            }
+          ],
+          "edges": [
+            {
+              "from": "node_07f7a0754f874f8536c9bfa6",
+              "to": "item_ec0a41a5112827cb87cddeac",
+              "relation": "contains-point",
+              "role": "support"
+            }
+          ]
+        },
+        "role": "cover",
+        "titleQuality": {
+          "title": "Generated claim",
+          "candidates": [
+            {
+              "value": "Generated claim",
+              "units": 8.58,
+              "score": 1
+            }
+          ],
+          "visualUnits": 8.58,
+          "maxVisualUnits": 36,
+          "estimatedLines": 1,
+          "fits": true
+        },
+        "copy": {
+          "eyebrow": "",
+          "subtitle": "",
+          "takeaway": "",
+          "blocks": [],
+          "role": "evidence",
+          "depth": "balanced",
+          "density": "medium",
+          "distributionType": "four_medium_cards",
+          "pointLengthProfile": "standard",
+          "semanticUnitBudget": 8,
+          "requiredSupport": [],
+          "requiredDetails": [],
+          "copyBudget": {
+            "titlePreferredUnits": 28,
+            "titleHardUnits": 36,
+            "titleMaxLines": 2,
+            "titleMinPt": 32,
+            "bodyUnits": 750,
+            "maxSupportUnits": 8
+          }
+        },
+        "retrieval": {
+          "version": 2,
+          "query": "Constraints Constraints",
+          "chunkIds": [],
+          "sourceRefs": [],
+          "evidenceIds": [],
+          "requiredEvidenceIds": []
+        },
+        "factSynthesis": {
+          "claims": [],
+          "facts": [],
+          "numbers": [],
+          "examples": [],
+          "relationships": [],
+          "mechanisms": [],
+          "implications": [],
+          "constraints": [],
+          "definitions": [],
+          "decisions": [],
+          "limitations": []
+        },
+        "evidenceUsedIds": []
+      }
+    }
+  },
+  "createdAt": "2026-09-30T09:05:32.375Z",
+  "updatedAt": "2026-09-30T09:05:48.050Z",
+  "schemaVersion": 3,
+  "draftRevision": 1,
+  "creationContext": {
+    "schemaVersion": 1,
+    "draftId": "318dc2b023ca861d7d608088bc3352eb",
+    "sourceRevision": 0,
+    "sourceHash": "e831ea5005ea1115cd3906e9417ce51242458013c91b82a029bb71c593ee4e9a",
+    "modelRef": {
+      "configId": "fixture",
+      "model": "fixture-model"
+    },
+    "templateRef": {
+      "id": "light",
+      "versionOrHash": "5ab6137060da96d358c47aa85ce9d00452f93f89efde9b0af9d06dd80c6608d4",
+      "capabilities": {
+        "relayout": true,
+        "insertSlide": true,
+        "minPages": 3,
+        "maxPages": 100,
+        "capacityCheck": "content-plan"
+      }
+    },
+    "outlineRevision": 0,
+    "pageBudget": {
+      "recommended": null,
+      "requested": null,
+      "compressionApproved": false,
+      "confirmed": 4
+    },
+    "planKey": "db6fc0df4ab2bfac6b2e65096a6e405c19ec76ef1e791c0b889a8ced14be0895"
+  },
+  "renderTree": null,
+  "quality": {
+    "status": "passed",
+    "deterministic": {
+      "hardErrors": 0,
+      "issues": []
+    },
+    "modelReview": {
+      "missing": [],
+      "repeated": [],
+      "conflicts": [],
+      "unsupported": []
+    },
+    "repairs": []
+  },
+  "runtime": {
+    "schemaVersion": 1,
+    "lifecycle": "paused",
+    "slides": {
+      "slide_1": {
+        "phase": "render_ready",
+        "epoch": 0,
+        "quality": {
+          "issues": [],
+          "pendingDeckReview": true
+        },
+        "contentHash": "93cea99dc165bd9933a76962efd8fa1c31581a3e03fb9bcb0158f64c419bf765",
+        "renderHash": "1aa24cee974b3a7f5d9cfca8246a88f96dcbc027e76111c53d7d493401f61377",
+        "preview": {
+          "id": "slide_1",
+          "slideId": "slide_1",
+          "index": 1,
+          "layoutId": "summary",
+          "size": {
+            "width": 12191695,
+            "height": 6858000
+          },
+          "background": "#f8f9fc",
+          "elements": [
+            {
+              "id": "decor_549a332669a087cfacd09304",
+              "nodeId": null,
+              "kind": "shape",
+              "bounds": {
+                "x": 0,
+                "y": 0,
+                "width": 12191695,
+                "height": 118872
+              },
+              "content": {
+                "shape": "rect"
+              },
+              "style": {
+                "fill": "#404b6b"
+              },
+              "zIndex": 0,
+              "locked": true
+            },
+            {
+              "id": "node_b8202309cf24d4d27a6fbec8",
+              "nodeId": "node_b8202309cf24d4d27a6fbec8",
+              "kind": "text",
+              "bounds": {
+                "x": 786384,
+                "y": 621792,
+                "width": 10561320,
+                "height": 1060704
+              },
+              "content": {
+                "text": "Generated claim"
+              },
+              "style": {
+                "fontFamily": "Noto Serif CJK SC",
+                "eastAsiaFontFamily": "Noto Serif CJK SC",
+                "eastAsiaFontFamilyHant": "Noto Serif CJK TC",
+                "fontSizePt": 36,
+                "lineHeight": 1.05,
+                "paragraphSpacingEm": 0,
+                "color": "#242a3b",
+                "fontWeight": 700
+              },
+              "zIndex": 10,
+              "rotation": 0,
+              "locked": false,
+              "groupId": null,
+              "semanticRole": "title"
+            },
+            {
+              "id": "node_e84d48ddbae43f38c92a21c7",
+              "nodeId": "node_e84d48ddbae43f38c92a21c7",
+              "kind": "list",
+              "bounds": {
+                "x": 914400,
+                "y": 2066544,
+                "width": 10287000,
+                "height": 3767328
+              },
+              "content": {
+                "items": [
+                  {
+                    "id": "item_ecc2e4d13249be7dfcc408b3",
+                    "text": "Mechanism based on source evidence."
+                  }
+                ],
+                "pointLayout": {
+                  "boxes": [
+                    {
+                      "x": 0,
+                      "y": 0,
+                      "w": 1,
+                      "h": 1
+                    }
+                  ],
+                  "fontSizePt": 18,
+                  "overflow": false,
+                  "suggestedSplitCount": 1,
+                  "columns": 1
+                }
+              },
+              "style": {
+                "fontFamily": "Noto Sans CJK SC",
+                "eastAsiaFontFamily": "Noto Sans CJK SC",
+                "eastAsiaFontFamilyHant": "Noto Sans CJK TC",
+                "fontSizePt": 18,
+                "lineHeight": 1.08,
+                "paragraphSpacingEm": 0.35,
+                "color": "#505b6f",
+                "fontWeight": 400
+              },
+              "zIndex": 20,
+              "rotation": 0,
+              "locked": false,
+              "groupId": null
+            },
+            {
+              "id": "decor_13050029e0abc6da78158b4b",
+              "nodeId": null,
+              "kind": "text",
+              "bounds": {
+                "x": 10881360,
+                "y": 6428232,
+                "width": 475488,
+                "height": 256032
+              },
+              "content": {
+                "text": "2"
+              },
+              "style": {
+                "fontFamily": "Noto Sans CJK SC",
+                "eastAsiaFontFamily": "Noto Sans CJK SC",
+                "eastAsiaFontFamilyHant": "Noto Sans CJK TC",
+                "fontSizePt": 11,
+                "lineHeight": 1.12,
+                "paragraphSpacingEm": 0.5,
+                "color": "#505b6f",
+                "fontWeight": 400,
+                "textAlign": "right"
+              },
+              "zIndex": 100,
+              "locked": true
+            }
+          ]
+        },
+        "updatedAt": "2026-09-30T09:05:47.341Z"
+      },
+      "slide_2": {
+        "phase": "render_ready",
+        "epoch": 0,
+        "quality": {
+          "issues": [
+            {
+              "code": "duplicate_title",
+              "severity": "warning",
+              "message": "标题与第 2 页重复",
+              "slideId": "slide_2",
+              "repairable": true
+            },
+            {
+              "code": "duplicate_bullet",
+              "severity": "warning",
+              "message": "要点与第 2 页重复",
+              "slideId": "slide_2",
+              "repairable": true,
+              "bullet": "Mechanism based on source evidence."
+            },
+            {
+              "code": "adjacent_redundancy",
+              "severity": "warning",
+              "message": "本页与前一页内容高度相似",
+              "slideId": "slide_2",
+              "repairable": false
+            }
+          ],
+          "pendingDeckReview": true
+        },
+        "contentHash": "0ae4ed0167c3b5d9017aece544b8a3dee47ca07d62bd46ee8067c0544c98ceac",
+        "renderHash": "4bc80f744ae87bc649f2c3f6360695f2bf2c59fc8c21e1c40be73303bd5d30ed",
+        "preview": {
+          "id": "slide_2",
+          "slideId": "slide_2",
+          "index": 2,
+          "layoutId": "summary",
+          "size": {
+            "width": 12191695,
+            "height": 6858000
+          },
+          "background": "#f8f9fc",
+          "elements": [
+            {
+              "id": "decor_0cac055019ef7cccd440a463",
+              "nodeId": null,
+              "kind": "shape",
+              "bounds": {
+                "x": 0,
+                "y": 0,
+                "width": 12191695,
+                "height": 118872
+              },
+              "content": {
+                "shape": "rect"
+              },
+              "style": {
+                "fill": "#404b6b"
+              },
+              "zIndex": 0,
+              "locked": true
+            },
+            {
+              "id": "node_0cf14897a72a981dc8d2861b",
+              "nodeId": "node_0cf14897a72a981dc8d2861b",
+              "kind": "text",
+              "bounds": {
+                "x": 786384,
+                "y": 621792,
+                "width": 10561320,
+                "height": 1060704
+              },
+              "content": {
+                "text": "Generated claim"
+              },
+              "style": {
+                "fontFamily": "Noto Serif CJK SC",
+                "eastAsiaFontFamily": "Noto Serif CJK SC",
+                "eastAsiaFontFamilyHant": "Noto Serif CJK TC",
+                "fontSizePt": 36,
+                "lineHeight": 1.05,
+                "paragraphSpacingEm": 0,
+                "color": "#242a3b",
+                "fontWeight": 700
+              },
+              "zIndex": 10,
+              "rotation": 0,
+              "locked": false,
+              "groupId": null,
+              "semanticRole": "title"
+            },
+            {
+              "id": "node_07f7a0754f874f8536c9bfa6",
+              "nodeId": "node_07f7a0754f874f8536c9bfa6",
+              "kind": "list",
+              "bounds": {
+                "x": 914400,
+                "y": 2066544,
+                "width": 10287000,
+                "height": 3767328
+              },
+              "content": {
+                "items": [
+                  {
+                    "id": "item_ec0a41a5112827cb87cddeac",
+                    "text": "Mechanism based on source evidence."
+                  }
+                ],
+                "pointLayout": {
+                  "boxes": [
+                    {
+                      "x": 0,
+                      "y": 0,
+                      "w": 1,
+                      "h": 1
+                    }
+                  ],
+                  "fontSizePt": 18,
+                  "overflow": false,
+                  "suggestedSplitCount": 1,
+                  "columns": 1
+                }
+              },
+              "style": {
+                "fontFamily": "Noto Sans CJK SC",
+                "eastAsiaFontFamily": "Noto Sans CJK SC",
+                "eastAsiaFontFamilyHant": "Noto Sans CJK TC",
+                "fontSizePt": 18,
+                "lineHeight": 1.08,
+                "paragraphSpacingEm": 0.35,
+                "color": "#505b6f",
+                "fontWeight": 400
+              },
+              "zIndex": 20,
+              "rotation": 0,
+              "locked": false,
+              "groupId": null
+            },
+            {
+              "id": "decor_b7b0529eee58e9f17689a6b4",
+              "nodeId": null,
+              "kind": "text",
+              "bounds": {
+                "x": 10881360,
+                "y": 6428232,
+                "width": 475488,
+                "height": 256032
+              },
+              "content": {
+                "text": "3"
+              },
+              "style": {
+                "fontFamily": "Noto Sans CJK SC",
+                "eastAsiaFontFamily": "Noto Sans CJK SC",
+                "eastAsiaFontFamilyHant": "Noto Sans CJK TC",
+                "fontSizePt": 11,
+                "lineHeight": 1.12,
+                "paragraphSpacingEm": 0.5,
+                "color": "#505b6f",
+                "fontWeight": 400,
+                "textAlign": "right"
+              },
+              "zIndex": 100,
+              "locked": true
+            }
+          ]
+        },
+        "updatedAt": "2026-09-30T09:05:47.647Z"
+      },
+      "slide_0": {
+        "phase": "render_ready",
+        "epoch": 0,
+        "quality": {
+          "issues": [],
+          "pendingDeckReview": true
+        },
+        "contentHash": "9fcc6ce90a31e4bdd52f7c440b63cb97e92bef1e21c22f7e22bc98117a3b7c09",
+        "renderHash": "6360ca39a73b14567aa20b2047f5c579a3938e0ef0c13b748bcf856caa36c6bf",
+        "preview": {
+          "id": "slide_0",
+          "slideId": "slide_0",
+          "index": 0,
+          "layoutId": "summary",
+          "size": {
+            "width": 12191695,
+            "height": 6858000
+          },
+          "background": "#f8f9fc",
+          "elements": [
+            {
+              "id": "decor_81cab7502dd518a5879aac18",
+              "nodeId": null,
+              "kind": "shape",
+              "bounds": {
+                "x": 0,
+                "y": 0,
+                "width": 12191695,
+                "height": 118872
+              },
+              "content": {
+                "shape": "rect"
+              },
+              "style": {
+                "fill": "#404b6b"
+              },
+              "zIndex": 0,
+              "locked": true
+            },
+            {
+              "id": "node_7d23ffbf1d6fc0422dc6c6fc",
+              "nodeId": "node_7d23ffbf1d6fc0422dc6c6fc",
+              "kind": "text",
+              "bounds": {
+                "x": 786384,
+                "y": 621792,
+                "width": 10561320,
+                "height": 1060704
+              },
+              "content": {
+                "text": "Generated claim"
+              },
+              "style": {
+                "fontFamily": "Noto Serif CJK SC",
+                "eastAsiaFontFamily": "Noto Serif CJK SC",
+                "eastAsiaFontFamilyHant": "Noto Serif CJK TC",
+                "fontSizePt": 36,
+                "lineHeight": 1.05,
+                "paragraphSpacingEm": 0,
+                "color": "#242a3b",
+                "fontWeight": 700
+              },
+              "zIndex": 10,
+              "rotation": 0,
+              "locked": false,
+              "groupId": null,
+              "semanticRole": "title"
+            },
+            {
+              "id": "node_bdf9a2f272dda610f2b6a0a9",
+              "nodeId": "node_bdf9a2f272dda610f2b6a0a9",
+              "kind": "list",
+              "bounds": {
+                "x": 914400,
+                "y": 2066544,
+                "width": 10287000,
+                "height": 3767328
+              },
+              "content": {
+                "items": [
+                  {
+                    "id": "item_af85fb28d43f9424af02dcf2",
+                    "text": "Mechanism based on source evidence."
+                  }
+                ],
+                "pointLayout": {
+                  "boxes": [
+                    {
+                      "x": 0,
+                      "y": 0,
+                      "w": 1,
+                      "h": 1
+                    }
+                  ],
+                  "fontSizePt": 18,
+                  "overflow": false,
+                  "suggestedSplitCount": 1,
+                  "columns": 1
+                }
+              },
+              "style": {
+                "fontFamily": "Noto Sans CJK SC",
+                "eastAsiaFontFamily": "Noto Sans CJK SC",
+                "eastAsiaFontFamilyHant": "Noto Sans CJK TC",
+                "fontSizePt": 18,
+                "lineHeight": 1.08,
+                "paragraphSpacingEm": 0.35,
+                "color": "#505b6f",
+                "fontWeight": 400
+              },
+              "zIndex": 20,
+              "rotation": 0,
+              "locked": false,
+              "groupId": null
+            },
+            {
+              "id": "decor_070a61db7b30fdd1c6ff5caa",
+              "nodeId": null,
+              "kind": "text",
+              "bounds": {
+                "x": 10881360,
+                "y": 6428232,
+                "width": 475488,
+                "height": 256032
+              },
+              "content": {
+                "text": "1"
+              },
+              "style": {
+                "fontFamily": "Noto Sans CJK SC",
+                "eastAsiaFontFamily": "Noto Sans CJK SC",
+                "eastAsiaFontFamilyHant": "Noto Sans CJK TC",
+                "fontSizePt": 11,
+                "lineHeight": 1.12,
+                "paragraphSpacingEm": 0.5,
+                "color": "#505b6f",
+                "fontWeight": 400,
+                "textAlign": "right"
+              },
+              "zIndex": 100,
+              "locked": true
+            }
+          ]
+        },
+        "updatedAt": "2026-09-30T09:05:47.868Z"
+      }
+    },
+    "attempts": {
+      "content:slide_0:0": {
+        "phase": "render_ready",
+        "runId": "run_c9c2977ec935d6a68d1bd80f",
+        "epoch": 0,
+        "inputHash": "c3e4b373daa316b2661d0641d1d5bf369bdd2d4ff6d11f0c5495067ffc2c1159",
+        "planRevision": 1,
+        "constraintRevision": 0,
+        "modelRef": {
+          "configId": "fixture",
+          "model": "fixture-model"
+        },
+        "startedAt": "2026-09-30T09:05:45.746Z",
+        "completedAt": "2026-09-30T09:05:47.868Z",
+        "outputHash": "9fcc6ce90a31e4bdd52f7c440b63cb97e92bef1e21c22f7e22bc98117a3b7c09"
+      },
+      "content:slide_1:0": {
+        "phase": "content_running",
+        "runId": "run_c9c2977ec935d6a68d1bd80f",
+        "epoch": 0,
+        "inputHash": "b5cec41ab6868e0e8912be8ac201455037bca167354cee2cd4b0698679c38eaa",
+        "planRevision": 1,
+        "constraintRevision": 0,
+        "modelRef": {
+          "configId": "fixture",
+          "model": "fixture-model"
+        },
+        "startedAt": "2026-09-30T09:05:45.794Z"
+      },
+      "content:slide_2:0": {
+        "phase": "render_ready",
+        "runId": "run_c9c2977ec935d6a68d1bd80f",
+        "epoch": 0,
+        "inputHash": "c6b1ff25951ebbb401c08d24dbc3d7d1aee799518753c94b3b9f3c8ab48f9a53",
+        "planRevision": 1,
+        "constraintRevision": 0,
+        "modelRef": {
+          "configId": "fixture",
+          "model": "fixture-model"
+        },
+        "startedAt": "2026-09-30T09:05:45.859Z",
+        "completedAt": "2026-09-30T09:05:47.647Z",
+        "outputHash": "0ae4ed0167c3b5d9017aece544b8a3dee47ca07d62bd46ee8067c0544c98ceac"
+      }
+    },
+    "checkpoint": {
+      "reason": "pause",
+      "at": "2026-09-30T09:05:48.048Z",
+      "inputHash": "03ad87548a1f69906012a25adb1421686923aa430902b6274ba0115458d098f5",
+      "artifactRevision": 0,
+      "planRevision": 1,
+      "constraintRevision": 0
+    },
+    "pauseRequested": true
+  },
+  "currentRunId": "run_c9c2977ec935d6a68d1bd80f",
+  "runId": "run_c9c2977ec935d6a68d1bd80f",
+  "dagNodes": {
+    "source": {
+      "id": "source",
+      "dependsOn": [],
+      "status": "pending",
+      "attempts": 0,
+      "startedAt": null,
+      "completedAt": null,
+      "error": null,
+      "updatedAt": "2026-09-30T09:05:32.397Z",
+      "projectRevision": 0
+    },
+    "outline": {
+      "id": "outline",
+      "dependsOn": [
+        "source"
+      ],
+      "status": "pending",
+      "attempts": 0,
+      "startedAt": null,
+      "completedAt": null,
+      "error": null,
+      "updatedAt": "2026-09-30T09:05:32.397Z",
+      "projectRevision": 0
+    },
+    "content": {
+      "id": "content",
+      "dependsOn": [
+        "outline"
+      ],
+      "status": "pending",
+      "attempts": 0,
+      "startedAt": null,
+      "completedAt": null,
+      "error": null,
+      "updatedAt": "2026-09-30T09:05:32.397Z",
+      "projectRevision": 0
+    },
+    "media": {
+      "id": "media",
+      "dependsOn": [
+        "outline"
+      ],
+      "status": "pending",
+      "attempts": 0,
+      "startedAt": null,
+      "completedAt": null,
+      "error": null,
+      "updatedAt": "2026-09-30T09:05:32.397Z",
+      "projectRevision": 0
+    },
+    "layout": {
+      "id": "layout",
+      "dependsOn": [
+        "content",
+        "media"
+      ],
+      "status": "pending",
+      "attempts": 0,
+      "startedAt": null,
+      "completedAt": null,
+      "error": null,
+      "updatedAt": "2026-09-30T09:05:32.397Z",
+      "projectRevision": 0
+    },
+    "preview": {
+      "id": "preview",
+      "dependsOn": [
+        "layout"
+      ],
+      "status": "pending",
+      "attempts": 0,
+      "startedAt": null,
+      "completedAt": null,
+      "error": null,
+      "updatedAt": "2026-09-30T09:05:32.397Z",
+      "projectRevision": 0
+    },
+    "quality": {
+      "id": "quality",
+      "dependsOn": [
+        "preview"
+      ],
+      "status": "pending",
+      "attempts": 0,
+      "startedAt": null,
+      "completedAt": null,
+      "error": null,
+      "updatedAt": "2026-09-30T09:05:32.397Z",
+      "projectRevision": 0
+    },
+    "review": {
+      "id": "review",
+      "dependsOn": [
+        "quality"
+      ],
+      "status": "pending",
+      "attempts": 0,
+      "startedAt": null,
+      "completedAt": null,
+      "error": null,
+      "updatedAt": "2026-09-30T09:05:32.397Z",
+      "projectRevision": 0
+    },
+    "repair": {
+      "id": "repair",
+      "dependsOn": [
+        "review"
+      ],
+      "status": "pending",
+      "attempts": 0,
+      "startedAt": null,
+      "completedAt": null,
+      "error": null,
+      "updatedAt": "2026-09-30T09:05:32.397Z",
+      "projectRevision": 0
+    },
+    "publish": {
+      "id": "publish",
+      "dependsOn": [
+        "repair"
+      ],
+      "status": "pending",
+      "attempts": 0,
+      "startedAt": null,
+      "completedAt": null,
+      "error": null,
+      "updatedAt": "2026-09-30T09:05:32.397Z",
+      "projectRevision": 0
+    },
+    "source:slide_0": {
+      "id": "source:slide_0",
+      "dependsOn": [
+        "outline"
+      ],
+      "attempts": 1,
+      "status": "completed",
+      "startedAt": "2026-09-30T09:05:45.358Z",
+      "error": null,
+      "updatedAt": "2026-09-30T09:05:45.419Z",
+      "completedAt": "2026-09-30T09:05:45.419Z",
+      "result": {
+        "passed": true,
+        "issues": []
+      }
+    },
+    "source:slide_1": {
+      "id": "source:slide_1",
+      "dependsOn": [
+        "outline"
+      ],
+      "attempts": 1,
+      "status": "completed",
+      "startedAt": "2026-09-30T09:05:45.442Z",
+      "error": null,
+      "updatedAt": "2026-09-30T09:05:45.502Z",
+      "completedAt": "2026-09-30T09:05:45.502Z",
+      "result": {
+        "passed": true,
+        "issues": []
+      }
+    },
+    "source:slide_2": {
+      "id": "source:slide_2",
+      "dependsOn": [
+        "outline"
+      ],
+      "attempts": 1,
+      "status": "completed",
+      "startedAt": "2026-09-30T09:05:45.525Z",
+      "error": null,
+      "updatedAt": "2026-09-30T09:05:45.601Z",
+      "completedAt": "2026-09-30T09:05:45.601Z",
+      "result": {
+        "passed": true,
+        "issues": []
+      }
+    },
+    "source:slide_3": {
+      "id": "source:slide_3",
+      "dependsOn": [
+        "outline"
+      ],
+      "attempts": 1,
+      "status": "completed",
+      "startedAt": "2026-09-30T09:05:45.642Z",
+      "error": null,
+      "updatedAt": "2026-09-30T09:05:45.683Z",
+      "completedAt": "2026-09-30T09:05:45.683Z",
+      "result": {
+        "passed": true,
+        "issues": []
+      }
+    },
+    "content:slide_0": {
+      "id": "content:slide_0",
+      "dependsOn": [
+        "source:slide_0"
+      ],
+      "attempts": 1,
+      "status": "completed",
+      "startedAt": "2026-09-30T09:05:45.746Z",
+      "error": null,
+      "updatedAt": "2026-09-30T09:05:47.810Z",
+      "slideId": "slide_0",
+      "epoch": 0,
+      "completedAt": "2026-09-30T09:05:47.810Z"
+    },
+    "content:slide_1": {
+      "id": "content:slide_1",
+      "dependsOn": [
+        "source:slide_1"
+      ],
+      "attempts": 1,
+      "status": "completed",
+      "startedAt": "2026-09-30T09:05:45.795Z",
+      "error": null,
+      "updatedAt": "2026-09-30T09:05:47.284Z",
+      "slideId": "slide_1",
+      "epoch": 0,
+      "completedAt": "2026-09-30T09:05:47.284Z"
+    },
+    "content:slide_2": {
+      "id": "content:slide_2",
+      "dependsOn": [
+        "source:slide_2"
+      ],
+      "attempts": 1,
+      "status": "completed",
+      "startedAt": "2026-09-30T09:05:45.860Z",
+      "error": null,
+      "updatedAt": "2026-09-30T09:05:47.535Z",
+      "slideId": "slide_2",
+      "epoch": 0,
+      "completedAt": "2026-09-30T09:05:47.535Z"
+    },
+    "layout:slide_1": {
+      "id": "layout:slide_1",
+      "dependsOn": [
+        "content:slide_1"
+      ],
+      "attempts": 0,
+      "status": "completed",
+      "completedAt": "2026-09-30T09:05:47.342Z",
+      "error": null,
+      "updatedAt": "2026-09-30T09:05:47.342Z",
+      "slideId": "slide_1",
+      "epoch": 0,
+      "inputHash": "93cea99dc165bd9933a76962efd8fa1c31581a3e03fb9bcb0158f64c419bf765",
+      "renderHash": "1aa24cee974b3a7f5d9cfca8246a88f96dcbc027e76111c53d7d493401f61377"
+    },
+    "preview:slide_1": {
+      "id": "preview:slide_1",
+      "dependsOn": [
+        "layout:slide_1"
+      ],
+      "attempts": 0,
+      "status": "completed",
+      "completedAt": "2026-09-30T09:05:47.386Z",
+      "error": null,
+      "updatedAt": "2026-09-30T09:05:47.386Z",
+      "slideId": "slide_1",
+      "epoch": 0,
+      "inputHash": "93cea99dc165bd9933a76962efd8fa1c31581a3e03fb9bcb0158f64c419bf765",
+      "renderHash": "1aa24cee974b3a7f5d9cfca8246a88f96dcbc027e76111c53d7d493401f61377"
+    },
+    "quality:slide_1": {
+      "id": "quality:slide_1",
+      "dependsOn": [
+        "preview:slide_1"
+      ],
+      "attempts": 0,
+      "status": "completed",
+      "completedAt": "2026-09-30T09:05:47.448Z",
+      "error": null,
+      "updatedAt": "2026-09-30T09:05:47.448Z",
+      "slideId": "slide_1",
+      "epoch": 0,
+      "inputHash": "93cea99dc165bd9933a76962efd8fa1c31581a3e03fb9bcb0158f64c419bf765",
+      "renderHash": "1aa24cee974b3a7f5d9cfca8246a88f96dcbc027e76111c53d7d493401f61377"
+    },
+    "layout:slide_2": {
+      "id": "layout:slide_2",
+      "dependsOn": [
+        "content:slide_2"
+      ],
+      "attempts": 0,
+      "status": "completed",
+      "completedAt": "2026-09-30T09:05:47.647Z",
+      "error": null,
+      "updatedAt": "2026-09-30T09:05:47.647Z",
+      "slideId": "slide_2",
+      "epoch": 0,
+      "inputHash": "0ae4ed0167c3b5d9017aece544b8a3dee47ca07d62bd46ee8067c0544c98ceac",
+      "renderHash": "4bc80f744ae87bc649f2c3f6360695f2bf2c59fc8c21e1c40be73303bd5d30ed"
+    },
+    "preview:slide_2": {
+      "id": "preview:slide_2",
+      "dependsOn": [
+        "layout:slide_2"
+      ],
+      "attempts": 0,
+      "status": "completed",
+      "completedAt": "2026-09-30T09:05:47.712Z",
+      "error": null,
+      "updatedAt": "2026-09-30T09:05:47.712Z",
+      "slideId": "slide_2",
+      "epoch": 0,
+      "inputHash": "0ae4ed0167c3b5d9017aece544b8a3dee47ca07d62bd46ee8067c0544c98ceac",
+      "renderHash": "4bc80f744ae87bc649f2c3f6360695f2bf2c59fc8c21e1c40be73303bd5d30ed"
+    },
+    "quality:slide_2": {
+      "id": "quality:slide_2",
+      "dependsOn": [
+        "preview:slide_2"
+      ],
+      "attempts": 0,
+      "status": "completed",
+      "completedAt": "2026-09-30T09:05:47.733Z",
+      "error": null,
+      "updatedAt": "2026-09-30T09:05:47.733Z",
+      "slideId": "slide_2",
+      "epoch": 0,
+      "inputHash": "0ae4ed0167c3b5d9017aece544b8a3dee47ca07d62bd46ee8067c0544c98ceac",
+      "renderHash": "4bc80f744ae87bc649f2c3f6360695f2bf2c59fc8c21e1c40be73303bd5d30ed"
+    },
+    "layout:slide_0": {
+      "id": "layout:slide_0",
+      "dependsOn": [
+        "content:slide_0"
+      ],
+      "attempts": 0,
+      "status": "completed",
+      "completedAt": "2026-09-30T09:05:47.869Z",
+      "error": null,
+      "updatedAt": "2026-09-30T09:05:47.869Z",
+      "slideId": "slide_0",
+      "epoch": 0,
+      "inputHash": "9fcc6ce90a31e4bdd52f7c440b63cb97e92bef1e21c22f7e22bc98117a3b7c09",
+      "renderHash": "6360ca39a73b14567aa20b2047f5c579a3938e0ef0c13b748bcf856caa36c6bf"
+    },
+    "preview:slide_0": {
+      "id": "preview:slide_0",
+      "dependsOn": [
+        "layout:slide_0"
+      ],
+      "attempts": 0,
+      "status": "completed",
+      "completedAt": "2026-09-30T09:05:47.916Z",
+      "error": null,
+      "updatedAt": "2026-09-30T09:05:47.916Z",
+      "slideId": "slide_0",
+      "epoch": 0,
+      "inputHash": "9fcc6ce90a31e4bdd52f7c440b63cb97e92bef1e21c22f7e22bc98117a3b7c09",
+      "renderHash": "6360ca39a73b14567aa20b2047f5c579a3938e0ef0c13b748bcf856caa36c6bf"
+    },
+    "quality:slide_0": {
+      "id": "quality:slide_0",
+      "dependsOn": [
+        "preview:slide_0"
+      ],
+      "attempts": 0,
+      "status": "completed",
+      "completedAt": "2026-09-30T09:05:47.947Z",
+      "error": null,
+      "updatedAt": "2026-09-30T09:05:47.947Z",
+      "slideId": "slide_0",
+      "epoch": 0,
+      "inputHash": "9fcc6ce90a31e4bdd52f7c440b63cb97e92bef1e21c22f7e22bc98117a3b7c09",
+      "renderHash": "6360ca39a73b14567aa20b2047f5c579a3938e0ef0c13b748bcf856caa36c6bf"
+    }
+  },
+  "planHistory": [
+    {
+      "version": 1,
+      "hash": "03ad87548a1f69906012a25adb1421686923aa430902b6274ba0115458d098f5",
+      "reason": "planning",
+      "createdAt": "2026-09-30T09:05:45.354Z",
+      "sourceRevision": 0,
+      "sourceHash": "e831ea5005ea1115cd3906e9417ce51242458013c91b82a029bb71c593ee4e9a",
+      "outline": [
+        {
+          "id": "slide_0",
+          "title": "Overview",
+          "focus": "Overview",
+          "refs": []
+        },
+        {
+          "id": "slide_1",
+          "title": "Mechanism",
+          "focus": "Mechanism",
+          "refs": []
+        },
+        {
+          "id": "slide_2",
+          "title": "Constraints",
+          "focus": "Constraints",
+          "refs": []
+        },
+        {
+          "id": "slide_3",
+          "title": "Conclusion",
+          "focus": "Conclusion",
+          "refs": []
+        }
+      ],
+      "template": {
+        "id": "light",
+        "name": "Light",
+        "version": 1,
+        "palette": {
+          "background": "#f8f9fc",
+          "accent": "#404b6b",
+          "foreground": "#242a3b",
+          "muted": "#505b6f"
+        },
+        "fonts": {
+          "title": "Noto Serif CJK SC",
+          "body": "Noto Sans CJK SC",
+          "titleEastAsia": "Noto Serif CJK SC",
+          "bodyEastAsia": "Noto Sans CJK SC",
+          "titleEastAsiaHant": "Noto Serif CJK TC",
+          "bodyEastAsiaHant": "Noto Sans CJK TC",
+          "cjkExplicit": true
+        }
+      },
+      "modelRef": {
+        "configId": "fixture",
+        "model": "fixture-model"
+      }
+    }
+  ],
+  "planRevision": {
+    "version": 1,
+    "hash": "03ad87548a1f69906012a25adb1421686923aa430902b6274ba0115458d098f5",
+    "reason": "planning",
+    "createdAt": "2026-09-30T09:05:45.354Z",
+    "sourceRevision": 0,
+    "sourceHash": "e831ea5005ea1115cd3906e9417ce51242458013c91b82a029bb71c593ee4e9a",
+    "outline": [
+      {
+        "id": "slide_0",
+        "title": "Overview",
+        "focus": "Overview",
+        "refs": []
+      },
+      {
+        "id": "slide_1",
+        "title": "Mechanism",
+        "focus": "Mechanism",
+        "refs": []
+      },
+      {
+        "id": "slide_2",
+        "title": "Constraints",
+        "focus": "Constraints",
+        "refs": []
+      },
+      {
+        "id": "slide_3",
+        "title": "Conclusion",
+        "focus": "Conclusion",
+        "refs": []
+      }
+    ],
+    "template": {
+      "id": "light",
+      "name": "Light",
+      "version": 1,
+      "palette": {
+        "background": "#f8f9fc",
+        "accent": "#404b6b",
+        "foreground": "#242a3b",
+        "muted": "#505b6f"
+      },
+      "fonts": {
+        "title": "Noto Serif CJK SC",
+        "body": "Noto Sans CJK SC",
+        "titleEastAsia": "Noto Serif CJK SC",
+        "bodyEastAsia": "Noto Sans CJK SC",
+        "titleEastAsiaHant": "Noto Serif CJK TC",
+        "bodyEastAsiaHant": "Noto Sans CJK TC",
+        "cjkExplicit": true
+      }
+    },
+    "modelRef": {
+      "configId": "fixture",
+      "model": "fixture-model"
+    }
+  },
+  "constraints": {
+    "version": 0,
+    "entries": []
+  },
+  "modelPolicy": {
+    "mode": "user_selected",
+    "model": "fixture-model",
+    "configId": "fixture"
+  },
+  "editing": {
+    "schemaVersion": 1,
+    "epochs": {},
+    "instructions": {},
+    "scopes": {},
+    "intents": {},
+    "contentOpen": true
+  },
+  "deckTitle": {
+    "text": "Generated claim",
+    "raw": "Generated claim",
+    "source": "agent",
+    "locked": false
+  }
+}

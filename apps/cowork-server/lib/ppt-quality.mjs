@@ -210,6 +210,7 @@ export function repairProject(project, initialReview) {
   for (const [index, slide] of updated.deck.slides.entries()) {
     // Exact repeats within one page are safe to remove. Across pages the same
     // wording may be a deliberate recap, so keep it visible for review.
+    if (updated.runtime?.slides?.[slide.id]?.accepted) continue;
     const seen = new Set();
     const contract = updated.planning?.slidePlan?.find(item => item.slideId === slide.id) || {};
     const titleIssue = initialReview.issues.find(item => item.slideId === slide.id && item.code === 'title_overflow');
@@ -309,7 +310,18 @@ export function deckReviewPrompt(project) {
     const evidence = (contract?.requiredEvidenceIds || []).map(id => evidenceById.get(id)).filter(Boolean)
       .map(atom => ({ id: atom.id, kind: atom.kind, sourceRef: atom.sourceRef, location: atom.location,
         excerpt: atom.exactText.slice(0, 330) }));
+    // Canonical components can carry facts absent from legacy bullets. Never send
+    // image base64 or geometry to the text critic; retain chart values and units.
+    const semanticComponents = (slide.nodes || []).filter(node => !node.nativeRef && node.type !== 'foreign').map(node => {
+      const content = node.content || {};
+      if (node.type === 'chart') return { nodeId: node.id, type: node.type, content, sourceRefs: node.sourceRefs || slide.sourceRefs || [] };
+      if (node.type === 'table') return { nodeId: node.id, type: node.type, content, sourceRefs: node.sourceRefs || slide.sourceRefs || [] };
+      return { nodeId: node.id, type: node.type, semanticRole: node.semanticRole,
+        text: String(content.text || '').slice(0, 500),
+        ...(content.items ? { points: content.items.map(item => ({ label: item.label, text: String(item.text || item.body || '').slice(0, 500) })) } : {}) };
+    });
     return { slideId: slide.id, page: index + 1, title: slide.title, bullets: slide.bullets,
+      ...(semanticComponents.length ? { semanticComponents } : {}),
       ...(visiblePoints.length ? { visiblePoints } : {}), ...(visibleSlots.length ? { visibleSlots } : {}),
       ...(evidence.length ? { requiredEvidence: evidence } : {}),
       sourceKinds: (slide.sourceChunks || []).map(id => project.source?.semantic?.chunks?.find(chunk => chunk.id === id)?.contentKind).filter(Boolean),
@@ -322,7 +334,7 @@ export function deckReviewPrompt(project) {
   const brief = project.planning?.brief;
   const coverage = (project.planning?.coverage || []).filter(item => item.priority === 'high').slice(0, 60)
     .map(item => ({ topic: item.topic, action: item.action, slideIds: item.slideIds }));
-  return `你是整稿演示文稿内容评审器。只评审内容，不调用工具，不搜索，不改写页面，不提供字体、坐标、布局或 PPTX 代码。visibleSlots 和 visiblePoints 是观众实际看到的模板文字。逐页核对标题、子标题、卡片及图解标签是否属于同一来源事实，说明是否完整，概念是否与样例混淆；把错配或自相矛盾记入 conflicts，把截断、空泛或缺失记入 missing，把无来源支撑的描述记入 unsupported。若是职场汇报，还要在同样四类中检查决策问题、前置摘要、主文信息分布和来源支撑，不增加输出类别。\n主题：${project.prompt}\n演示目标与必讲内容：${JSON.stringify(brief ? { objective: brief.objective, thesis: brief.thesis, mustInclude: brief.mustInclude, reportMode: brief.reportMode, decisionQuestion: brief.decisionQuestion, sourceScope: brief.sourceScope } : {})}\n高优先级主题映射：${JSON.stringify(coverage)}\n页面：${JSON.stringify(slides)}\n来源：${JSON.stringify(sources)}\n仅输出一个 JSON 对象：{"missing":[{"slideIds":["1"],"detail":"缺少的必要内容"}],"repeated":[{"slideIds":["2","4"],"detail":"重复点"}],"conflicts":[{"slideIds":["3","5"],"detail":"冲突事实"}],"unsupported":[{"slideIds":["6"],"bulletIndexes":[0],"detail":"证据不足"}]}。四个数组都必须存在；没有发现时返回空数组。slideIds 只能使用给定页面 ID，bulletIndexes 仅在报告 bullets 时填写，从 0 开始。不要输出建议、修订文本或其他字段。`;
+  return `你是整稿演示文稿内容评审器。只评审内容，不调用工具，不搜索，不改写页面，不提供字体、坐标、布局或 PPTX 代码。visibleSlots 和 visiblePoints 是观众实际看到的模板文字。逐页核对标题、子标题、卡片及图解标签是否属于同一来源事实，说明是否完整，概念是否与样例混淆；把错配或自相矛盾记入 conflicts，把截断、空泛或缺失记入 missing，把无来源支撑的描述记入 unsupported。若是职场汇报，还要在同样四类中检查决策问题、前置摘要、主文信息分布和来源支撑，不增加输出类别。\n主题：${project.prompt}\n当前语义修改约束：${JSON.stringify(project.constraints?.entries?.filter(entry => entry.active && ['content','title','data','structure'].includes(entry.type)) || [])}\n演示目标与必讲内容：${JSON.stringify(brief ? { objective: brief.objective, thesis: brief.thesis, mustInclude: brief.mustInclude, reportMode: brief.reportMode, decisionQuestion: brief.decisionQuestion, sourceScope: brief.sourceScope } : {})}\n高优先级主题映射：${JSON.stringify(coverage)}\n页面：${JSON.stringify(slides)}\n来源：${JSON.stringify(sources)}\n仅输出一个 JSON 对象：{"missing":[{"slideIds":["1"],"detail":"缺少的必要内容"}],"repeated":[{"slideIds":["2","4"],"detail":"重复点"}],"conflicts":[{"slideIds":["3","5"],"detail":"冲突事实"}],"unsupported":[{"slideIds":["6"],"bulletIndexes":[0],"detail":"证据不足"}]}。四个数组都必须存在；没有发现时返回空数组。slideIds 只能使用给定页面 ID，bulletIndexes 仅在报告 bullets 时填写，从 0 开始。不要输出建议、修订文本或其他字段。`;
 }
 
 export function normalizeModelReview(value, slideIds) {

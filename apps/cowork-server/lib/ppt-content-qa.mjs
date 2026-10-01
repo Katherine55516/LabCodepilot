@@ -225,13 +225,13 @@ export function inspectContent(project, deck = project.deck) {
         slideId: slide.id, repairable: true });
     }
     const cited = segments.filter(segment => (slide.sourceRefs || []).includes(segment.id));
-    const sourceText = cited.map(segment => segment.text).join(' ');
-    const sourceNumbers = new Set(significantNumbers(sourceText));
+    const citedSourceText = cited.map(segment => segment.text).join(' ');
+    const sourceNumbers = new Set(significantNumbers(citedSourceText));
     for (const bullet of slide.bullets || []) {
       const value = normalized(bullet);
       if (value.length >= 24 && cited.length) {
         checked++;
-        if (normalized(sourceText).includes(value)) {
+        if (normalized(citedSourceText).includes(value)) {
           copied++;
           issues.push({ code: 'copy_likeness', severity: 'warning', message: '要点与来源原句高度一致，建议改写成演示文稿语言', slideId: slide.id, repairable: false });
         }

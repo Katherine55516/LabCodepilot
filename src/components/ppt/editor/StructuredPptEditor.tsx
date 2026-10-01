@@ -4,10 +4,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "@/hooks/useTranslation";
 import { PptCanvas } from "../canvas/PptCanvas";
+import { AiBeforeAfterPreview } from "./AiBeforeAfterPreview";
 import { PptHistory } from "../history/PptHistory";
 import { PptInspector } from "../inspector/PptInspector";
 import { prepareImage } from "../PptBlocks";
 import type {
+  PptAiProposal, PptMutationType,
   PptBounds,
   PptRenderElement,
   PptRenderSlide,
@@ -44,21 +46,6 @@ type Tool =
   | "theme"
   | "arrange"
   | null;
-type AiProposal =
-  | {
-      scope: "object";
-      slideId: string;
-      nodeId: string;
-      before: unknown;
-      content: unknown;
-    }
-  | {
-      scope: "slide";
-      slideId: string;
-      patches: { nodeId: string; before: unknown; content: unknown }[];
-      layoutId?: string;
-    };
-
 async function request(
   projectId: string,
   path: string,
@@ -105,8 +92,13 @@ export function StructuredPptEditor({
   const [exitOpen, setExitOpen] = useState(false);
   const [exitBusy, setExitBusy] = useState(false);
   const [zoom, setZoom] = useState(100);
-  const [aiProposal, setAiProposal] = useState<AiProposal | null>(null);
+  const [aiProposal, setAiProposal] = useState<PptAiProposal | null>(null);
   const [aiBusy, setAiBusy] = useState(false);
+  const aiAttempt = useRef(0);
+  const imageRetry = useRef<{ taskId: string; key: string } | null>(null);
+  const [aiMode, setAiMode] = useState<PptMutationType>("auto");
+  const [lastAiOperation, setLastAiOperation] = useState<string | null>(null);
+  useEffect(() => () => { aiAttempt.current++; }, []);
   const [revisions, setRevisions] = useState<
     { revision: number; reason: string; createdAt: string }[]
   >([]);
@@ -117,6 +109,7 @@ export function StructuredPptEditor({
   const tree = project.renderTree;
   const slides = useMemo(() => tree?.slides || [], [tree]);
   const slide = slides[page];
+  useEffect(() => { aiAttempt.current++; setAiBusy(false); setAiProposal(null); }, [slide?.slideId, tool]);
   const pointElement = slide?.elements.find(
     (element) => element.kind === "list" && element.content?.pointLayout,
   );
@@ -203,20 +196,16 @@ export function StructuredPptEditor({
     async (type: string, payload: unknown) => {
       try {
         setError("");
-        accept(
-          (
-            await request(project.id, "/commands", "POST", {
-              id: crypto.randomUUID().replaceAll("-", ""),
-              type,
-              baseRevision: project.revision,
-              payload,
-            })
-          ).project,
-        );
+        const result = await request(project.id, "/commands", "POST", {
+          id: crypto.randomUUID().replaceAll("-", ""), type, baseRevision: project.revision, payload,
+        });
+        accept(result.project);
+        return result;
       } catch (reason) {
         const fault = reason as Error & { status?: number };
         setConflict(fault.status === 409);
         setError(fault.message);
+        return null;
       }
     },
     [accept, project.id, project.revision],
@@ -334,9 +323,17 @@ export function StructuredPptEditor({
   async function generateImage() {
     if (!selected || selected.kind !== "image" || !instruction.trim() || !slide)
       return;
+    const attempt = ++aiAttempt.current;
+    const originalSlideId = slide.slideId, originalNodeId = selected.nodeId, originalRevision = project.revision, originalInstruction = instruction;
+    let taskId: string | undefined; let assetAttempt = 1;
+    const assetKey = JSON.stringify([originalSlideId, originalNodeId, originalInstruction]);
     setAiBusy(true);
     setError("");
     try {
+      const registered = imageRetry.current?.key === assetKey
+        ? await request(project.id, `/asset-tasks/${imageRetry.current.taskId}/retry`, 'POST', {})
+        : await request(project.id, '/asset-tasks', 'POST', { slideId: originalSlideId, nodeId: originalNodeId, instruction: originalInstruction, baseRevision: originalRevision });
+      taskId = registered.task.id; assetAttempt = registered.task.attempts; imageRetry.current = { taskId: taskId!, key: assetKey };
       const response = await fetch("/api/image/generate", {
         method: "POST",
         headers: { "content-type": "application/json" },
@@ -357,68 +354,54 @@ export function StructuredPptEditor({
       const dataUrl = await prepareImage(
         new File([blob], "ai-image.png", { type: blob.type || "image/png" }),
       );
-      await command("node.setContent", {
-        slideId: slide.slideId,
-        nodeId: selected.nodeId,
-        content: { dataUrl, text: instruction.slice(0, 200) },
-      });
-      setInstruction("");
+      const result = await request(project.id, `/asset-tasks/${taskId}`, "POST", { attempt: assetAttempt, content: { dataUrl, text: originalInstruction.slice(0, 200) } });
+      if (aiAttempt.current === attempt) setAiProposal(result.proposal);
+      else { void request(project.id, `/proposals/${result.proposal.id}/discard`, 'POST').catch(() => {}); imageRetry.current = null; }
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : String(reason));
-    } finally {
-      setAiBusy(false);
-    }
+      const message = reason instanceof Error ? reason.message : String(reason);
+      if (taskId) void request(project.id, `/asset-tasks/${taskId}`, "POST", { error: message, attempt: assetAttempt }).catch(() => {});
+      if (aiAttempt.current === attempt) setError(message);
+    } finally { if (aiAttempt.current === attempt) setAiBusy(false); }
   }
-  async function proposeAi(
-    scope: "object" | "slide",
-    mode: "content" | "relayout" = "content",
-  ) {
-    if (
-      !instruction.trim() ||
-      !slide ||
-      (scope === "object" && !selected?.nodeId)
-    )
-      return;
-    setAiBusy(true);
-    setError("");
+  async function discardAi() {
+    aiAttempt.current++;
+    setAiBusy(false);
+    if (!aiProposal) return;
+    try { await request(project.id, `/proposals/${aiProposal.id}/discard`, "POST"); setAiProposal(null); if (aiProposal.type === 'asset') imageRetry.current = null; }
+    catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
+  }
+  async function proposeAi(scope: "object" | "slide" | "deck", mode: PptMutationType = aiMode) {
+    if (!instruction.trim() || !slide || (scope === "object" && !selected?.nodeId) || (["layout", "structure"].includes(mode) && preserveNative)) return;
+    const attempt = ++aiAttempt.current;
+    setAiBusy(true); setError("");
     try {
-      const value = await request(project.id, "/ai-edit", "POST", {
-        scope,
-        mode,
-        preview: true,
-        slideId: slide.slideId,
-        nodeId: selected?.nodeId,
-        instruction,
-        baseRevision: project.revision,
-      });
+      const value = await request(project.id, "/ai-edit", "POST", { scope, type: mode, preview: true, slideId: slide.slideId, nodeId: selected?.nodeId, instruction, baseRevision: project.revision });
+      if (aiAttempt.current !== attempt) { void request(project.id, `/proposals/${value.proposal.id}/discard`, "POST").catch(() => {}); return; }
       setAiProposal(value.proposal);
     } catch (reason) {
-      const fault = reason as Error & { status?: number };
-      setConflict(fault.status === 409);
-      setError(fault.message);
-    } finally {
-      setAiBusy(false);
-    }
+      if (aiAttempt.current !== attempt) return;
+      const fault = reason as Error & { status?: number }; setConflict(fault.status === 409); setError(fault.message);
+    } finally { if (aiAttempt.current === attempt) setAiBusy(false); }
   }
   async function applyAi() {
-    if (!aiProposal) return;
-    if (aiProposal.scope === "object")
-      await command("ai.objectPatch", {
-        slideId: aiProposal.slideId,
-        nodeId: aiProposal.nodeId,
-        patch: { content: aiProposal.content },
-      });
-    else
-      await command("ai.slidePatch", {
-        slideId: aiProposal.slideId,
-        patches: aiProposal.patches.map(({ nodeId, content }) => ({
-          nodeId,
-          content,
-        })),
-        ...(aiProposal.layoutId ? { layoutId: aiProposal.layoutId } : {}),
-      });
-    setAiProposal(null);
-    setInstruction("");
+    if (!aiProposal || aiBusy) return;
+    setAiBusy(true); setError("");
+    try {
+      const result = await request(project.id, `/proposals/${aiProposal.id}/apply`, "POST");
+      accept(result.project); if (aiProposal.type === 'asset') imageRetry.current = null; setLastAiOperation(result.operation.id);
+      const index = result.project.deck.slides.findIndex((item: { id: string }) => item.id === aiProposal.slideId);
+      if (index >= 0) setPage(index);
+      setAiProposal(null); setInstruction("");
+    } catch (reason) {
+      const fault = reason as Error & { status?: number }; setConflict(fault.status === 409); setError(fault.message);
+    } finally { setAiBusy(false); }
+  }
+  async function undoAi() {
+    if (!lastAiOperation || aiBusy) return;
+    setAiBusy(true);
+    try { accept((await request(project.id, "/undo", "POST", { operationId: lastAiOperation })).project); setLastAiOperation(null); }
+    catch (reason) { const fault = reason as Error & { status?: number }; setConflict(fault.status === 409); setError(fault.message); }
+    finally { setAiBusy(false); }
   }
   async function restore(revision: number) {
     try {
@@ -785,9 +768,9 @@ export function StructuredPptEditor({
         >
           {saved
             ? t("ppt.structured.published")
-            : t("ppt.structured.unpublished")}
+            : t("ppt.edit.draftStatus")}
         </span>
-        <div className="ml-auto flex items-center gap-1 md:gap-2">
+        <div className="ml-auto flex items-center gap-1 md:gap-2"><button className={button} onClick={() => setTool("ai")}>{t("ppt.edit.optimize")}</button>
           <button className={button} onClick={() => setTool("theme")}>
             ◐ <span className="hidden lg:inline">{t("ppt.editor.theme")}</span>
           </button>
@@ -1357,11 +1340,23 @@ export function StructuredPptEditor({
               )}
               {tool === "ai" && (
                 <>
+                  <label className="block space-y-2 text-sm">{t("ppt.edit.target")}
+                    <select className={field} value={slide.slideId} disabled={aiBusy} onChange={event => { setPage(slides.findIndex(item => item.slideId === event.target.value)); setSelectedIds([]); }}>
+                      {slides.map((item, index) => <option key={item.slideId} value={item.slideId}>{index + 1}. {item.elements.find(element => element.semanticRole === 'title')?.content?.text || item.slideId}</option>)}
+                    </select>
+                  </label>
+                  <label className="block space-y-2 text-sm">{t('ppt.mutation.type')}<select className={field} disabled={aiBusy || Boolean(aiProposal)} value={aiMode} onChange={event => setAiMode(event.target.value as PptMutationType)}>{(['auto', 'title', 'content', 'layout', 'style', 'data', 'structure'] as const).map(type => <option key={type} value={type} disabled={preserveNative && ['layout','data','structure'].includes(type)}>{t(`ppt.mutation.${type}`)}</option>)}</select></label>
+                  <button className={button} disabled={aiBusy} onClick={async () => { try { const value = await request(project.id, `/slides/${slide.slideId}/accept`, 'POST', { accepted: !project.runtime?.slides[slide.slideId]?.accepted, renderHash: project.runtime?.slides[slide.slideId]?.renderHash, baseRevision: project.revision }); accept(value.project); } catch (reason) { setError(String((reason as Error).message)); } }}>{t(project.runtime?.slides[slide.slideId]?.accepted ? 'ppt.runtime.unlock' : 'ppt.runtime.accept')}</button>
+                  <div className="flex flex-wrap gap-2">{(['shorten', 'enrich', 'executive', 'conclusion', 'columns'] as const).map(preset => <button key={preset} className={button} disabled={aiBusy || Boolean(aiProposal) || (preset === 'columns' && preserveNative)} onClick={() => { setInstruction(t(`ppt.edit.${preset}Prompt`)); setAiMode(preset === "columns" ? "layout" : "content"); }}>{t(`ppt.edit.${preset}`)}</button>)}</div>
+                  {preserveNative && <p className="text-xs text-muted-foreground">{t("ppt.edit.nativeReason")}</p>}
+                  {lastAiOperation && <button className={button} disabled={aiBusy} onClick={() => void undoAi()}>{t("ppt.edit.undoEdit")}</button>}
                   <label className="block space-y-2 text-sm">
                     {t("ppt.editor.instruction")}
                     <textarea
                       className={`${field} min-h-28`}
                       value={instruction}
+                      maxLength={1000}
+                      disabled={aiBusy || Boolean(aiProposal)}
                       onChange={(event) => setInstruction(event.target.value)}
                       placeholder={t("ppt.structured.aiPlaceholder")}
                     />
@@ -1373,7 +1368,7 @@ export function StructuredPptEditor({
                         !instruction.trim() ||
                         !selected ||
                         selected.kind === "image" ||
-                        aiBusy
+                        aiBusy || Boolean(aiProposal)
                       }
                       onClick={() => void proposeAi("object")}
                     >
@@ -1381,22 +1376,23 @@ export function StructuredPptEditor({
                     </button>
                     <button
                       className={button}
-                      disabled={!instruction.trim() || aiBusy}
-                      onClick={() => void proposeAi("slide")}
+                      disabled={!instruction.trim() || aiBusy || Boolean(aiProposal)}
+                      onClick={() => void proposeAi("slide", aiMode)}
                     >
                       {t("ppt.structured.aiEditSlide")}
                     </button>
                     <button
                       className={button}
-                      disabled={!instruction.trim() || aiBusy}
-                      onClick={() => void proposeAi("slide", "relayout")}
+                      disabled={!instruction.trim() || aiBusy || preserveNative || Boolean(aiProposal)}
+                      onClick={() => void proposeAi("slide", "layout")}
                     >
                       {t("ppt.editor.aiRelayout")}
                     </button>
+                    {aiMode === 'style' && !preserveNative && <button className={button} disabled={!instruction.trim() || aiBusy || Boolean(aiProposal)} onClick={() => void proposeAi('deck', 'style')}>{t('ppt.mutation.deckStyle')}</button>}
                     {selected?.kind === "image" && (
                       <button
                         className={button}
-                        disabled={!instruction.trim() || aiBusy}
+                        disabled={!instruction.trim() || aiBusy || Boolean(aiProposal) || preserveNative}
                         onClick={() => void generateImage()}
                       >
                         {t("ppt.editor.aiImage")}
@@ -1406,18 +1402,18 @@ export function StructuredPptEditor({
                   {aiProposal && (
                     <div className="rounded-xl border border-primary/40 bg-primary/5 p-3">
                       <b className="text-sm">{t("ppt.editor.aiPreview")}</b>
-                      <pre className="mt-2 max-h-52 overflow-auto whitespace-pre-wrap text-xs">
-                        {JSON.stringify(aiProposal, null, 2)}
-                      </pre>
-                      <div className="mt-3 grid grid-cols-2 gap-2">
+                      <AiBeforeAfterPreview proposal={aiProposal}/>
+                      <div className="mt-3 grid grid-cols-2 gap-2"><button className={button} disabled={aiBusy} onClick={() => { void discardAi(); }}>{t("ppt.cancel")}</button>
                         <button
                           className={button}
-                          onClick={() => setAiProposal(null)}
+                          disabled={aiBusy}
+                          onClick={() => void discardAi()}
                         >
-                          {t("ppt.cancel")}
+                          {t("ppt.edit.adjust")}
                         </button>
                         <button
                           className={primary}
+                          disabled={aiBusy}
                           onClick={() => void applyAi()}
                         >
                           {t("ppt.editor.applyAi")}

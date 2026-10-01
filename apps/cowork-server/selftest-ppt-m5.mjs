@@ -169,7 +169,8 @@ try {
   let project = await settled(id, 'completed');
   assert.ok(maxContentActive > 1 && maxContentActive <= 3);
   assert.equal(reviewCalls, 1);
-  assert.equal(project.quality.status, 'passed');
+  assert.ok(['passed', 'passed_with_warnings'].includes(project.quality.status));
+  assert.equal(project.quality.deterministic.hardErrors, 0);
   assert.equal(project.templateSpec.fonts.title, 'Noto Serif CJK SC');
   assert.ok(Object.keys(project.dagNodes).some(key => key.startsWith('source:')));
   assert.ok(project.dagNodes['media:source-image']);
@@ -190,9 +191,10 @@ try {
   let blocked = await settled(blockedId, 'quality_blocked');
   assert.equal(blocked.quality.status, 'blocked');
   assert.ok(blocked.quality.deterministic.issues.some(issue => issue.code === 'numeric_source'));
-  assert.ok(blocked.quality.deterministic.issues.some(issue => issue.code === 'image_decode'));
+  assert.ok(blocked.dagNodes['media:broken-image'].result.issues.some(issue => issue.code === 'image_decode'));
+  assert.ok(!blocked.deck.slides.some(slide => slide.blocks?.some(block => block.id === 'broken-image')), 'unrequested attachment must not consume a text page');
   assert.equal(blocked.dagNodes['media:broken-image'].result.passed, false);
-  assert.equal(renderCalls, 2, 'blocked generation must not render or publish');
+  assert.equal(renderCalls, 1, 'blocked generation must not render or publish');
   assert.equal((await request('GET', `/ppt/projects/${blockedId}/export`)).status, 409);
   const repairedSlides = blocked.deck.slides.map(slide => ({ ...slide, bullets: slide.bullets.map(() => 'Qualitative revenue evidence'), blocks: [] }));
   const repaired = await request('PATCH', `/ppt/projects/${blockedId}`, { slides: repairedSlides, revision: blocked.revision });
@@ -202,6 +204,9 @@ try {
   assert.equal(blocked.quality.status, 'passed_with_warnings');
   assert.ok(blocked.quality.deterministic.issues.some(issue => issue.code === 'source_missing'));
   assert.equal(reviewCalls, 2, 'repair saves reuse the single review from their own generation');
-  assert.equal(renderCalls, 3, 'a repaired deck is rendered exactly when it becomes publishable');
+  assert.equal(renderCalls, 1, 'repair saves change the draft only');
+  const publishResult = await request('POST', `/ppt/projects/${blockedId}/publish`, {});
+  assert.equal(publishResult.body.published, true, JSON.stringify(publishResult.body));
+  assert.equal(renderCalls, 2, 'explicit publication renders the repaired draft');
   console.log('PPT M5 template fonts, layout registry, bounded DAG and review-repair-publish gate: OK');
 } finally { fs.rmSync(root, { recursive: true, force: true }); }

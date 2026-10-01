@@ -54,6 +54,9 @@ export function applyLayoutRegistry(deck) {
     slides: deck.slides.map((slide, index) => ({
       ...slide,
       layoutId: chooseLayout(slide, index, deck.slides.length),
+      classification: { method: 'semantic-registry', role: slide.copy?.role || slide.role || 'content',
+        visualIntent: slide.copy?.visualIntent?.type || slide.visualIntent?.type || 'none',
+        explicitLayout: Boolean(LAYOUTS[slide.layoutId]), selectedLayout: chooseLayout(slide, index, deck.slides.length) },
     })),
   };
 }
