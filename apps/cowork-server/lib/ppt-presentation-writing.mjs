@@ -183,12 +183,12 @@ export function requiredSupportFor(role, depth = 'balanced', supportingPoints = 
   return depth === 'detailed' ? ['main_claim', ...required] : ['main_claim', required[0] || 'support'];
 }
 
-export function copyBudgetFor(role, layoutId) {
+export function copyBudgetFor(role, layoutId, language) {
   const cover = role === 'cover' || layoutId === 'cover';
   const section = role === 'section';
   return {
     titlePreferredUnits: cover ? 26 : section ? 18 : 28,
-    titleHardUnits: cover ? 32 : section ? 24 : 36,
+    titleHardUnits: cover ? 32 : section ? 24 : language === 'en' ? 44 : 36,
     titleMaxLines: section ? 1 : 2,
     titleMinPt: cover ? 38 : 32,
     bodyUnits: layoutId === 'comparison' ? 600 : layoutId === 'timeline' ? 500 : 750,
@@ -266,7 +266,7 @@ export function compileTitle({ title, candidates = [], message = '', registry = 
 }
 
 const BLOCK_TYPES = new Set(['definition', 'mechanism', 'evidence', 'example', 'contrast', 'constraint', 'tradeoff', 'impact', 'implication', 'decision', 'risk', 'next_step', 'stage', 'runtime']);
-export function normalizeContentBlocks(value) {
+export function normalizeContentBlocks(value, maxBody = 4000) {
   if (!Array.isArray(value)) return [];
   if (value.length > 10) throw new Error('contentBlocks exceeds 10 points; redistribute across pages');
   return value.map(item => {
@@ -274,8 +274,8 @@ export function normalizeContentBlocks(value) {
     const type = BLOCK_TYPES.has(item.type) ? item.type : 'support';
     const heading = normalizeTypography(text(item.heading || item.label, 48), 48);
     const sourceBody = String(item.body || item.text || item.description || '').trim();
-    if (sourceBody.length > 4000) throw new Error('point body exceeds 4000 characters; split it before rendering');
-    const body = normalizeTypography(sourceBody, 4000);
+    if (sourceBody.length > maxBody) throw new Error(`point body exceeds ${maxBody} characters; split it before rendering`);
+    const body = normalizeTypography(sourceBody, maxBody);
     if (!body) return null;
     return { type, heading, body };
   }).filter(Boolean);
@@ -286,9 +286,9 @@ export function materializeCopy(value, outlineSlide, planning, previousTitles = 
   const registry = planning?.terminology || { protectedPhrases: [] };
   const budget = contract.copyBudget || copyBudgetFor(contract.role, value.layoutId);
   const title = compileTitle({ title: value.title, candidates: value.titleCandidates || value.title_candidates, message: contract.message || outlineSlide.focus, registry, previousTitles, budget });
-  const blocks = normalizeContentBlocks(value.contentBlocks || value.content_blocks);
+  const blocks = normalizeContentBlocks(value.contentBlocks || value.content_blocks, value.nativeCopy ? 5000 : 4000);
   const bullets = blocks.length
-    ? blocks.map(block => normalizeTypography(block.heading ? `${block.heading}\n${block.body}` : block.body, 4200))
+    ? blocks.map(block => normalizeTypography(block.heading ? `${block.heading}\n${block.body}` : block.body, value.nativeCopy ? 5200 : 4200))
     : (Array.isArray(value.bullets) ? value.bullets.map(item => {
       if (typeof item !== 'string' || item.length > 4000) throw new Error('bullet exceeds 4000 characters; split it before rendering');
       return normalizeTypography(item, 4000);

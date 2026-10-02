@@ -13,6 +13,7 @@ import { commandsConflict } from './command-schema.mjs';
 import { routeMutation, impactFor, addConstraint, effectiveConstraints } from './mutation-router.mjs';
 import { checkpoint, runtimeState } from './runtime.mjs';
 import { invalidateReviews } from './versioning.mjs';
+import { promptPolicy } from '../ppt-prompt-contracts.mjs';
 
 const workers = new Set();
 export function editingState(project) {
@@ -198,7 +199,8 @@ export async function transformGeneratedSlide(project, slideId, mutation, deps, 
   const content = structuredClone(original);
   if (mutation.type === 'title') {
     if (project.deckTitle?.locked && project.outline[0]?.id === slideId) throw editError('the cover title is locked', 409);
-    const answer = await deps.modelCall(project, `Edit only this slide title. Preserve its claim, numbers, units and terminology. Do not return or change the body. Original: ${content.title}\nInstruction: ${mutation.instruction}\nReturn only JSON {"content":{"text":"revised title"}}`, activity, log, { nodeKey: `content:${slideId}:title` });
+    const contract = project.planning?.slidePlan?.find(item => item.slideId === slideId) || {};
+    const answer = await deps.modelCall(project, `${promptPolicy({ ...project, prompt: `${project.prompt || ''}\n${mutation.instruction}` })}\nEdit only this slide title. Preserve its claim, numbers, units and terminology. Do not return or change the body. Original: ${content.title}\nBody claim (reference only): ${JSON.stringify(content.copy?.blocks || content.bullets)}\nTitle capacity: ${JSON.stringify(contract.copyBudget || {})}\nInstruction: ${mutation.instruction}\nReturn only JSON {"content":{"text":"revised title"}}`, activity, log, { nodeKey: `content:${slideId}:title` });
     const title = answer?.content?.text || answer?.title;
     if (typeof title !== 'string' || !title.trim() || title.length > 160) throw editError('invalid revised title', 422);
     const originalNumbers = content.title.match(/[-+]?\d+(?:[.,]\d+)*(?:%|％)?/gu) || [];

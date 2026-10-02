@@ -23,6 +23,10 @@ const deps = {
       ...Array.from({ length: project.pages - 3 }, (_, i) => ({ title: `New ${i + 1}`, focus: 'Latest progress', change: 'add', refs: ['U1'] })),
     ] };
     if (prompt.includes('叙事规划器')) return { slides: Array.from({ length: project.pages }, (_, i) => ({ title: `Base ${i + 1}`, focus: `Base ${i + 1}` })) };
+    if (project.update) {
+      assert.match(prompt, /<source_packet>/);
+      return { title: 'Generated update', bullets: ['Latest fact'] };
+    }
     if (prompt.includes('当前任务只写第')) return { title: `Base ${prompt.match(/当前任务只写第 (\d+) 页/)?.[1]}`, bullets: ['Original fact'] };
     return { title: 'Generated update', bullets: ['Latest fact'] };
   },

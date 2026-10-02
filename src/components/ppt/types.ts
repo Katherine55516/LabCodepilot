@@ -10,6 +10,7 @@ export type PptSlide = {
   titleLocked?: boolean; density?: 'low' | 'medium' | 'high'; distributionType?: string; semanticUnitBudget?: number; pointLengthProfile?: string;
   chunkRefs?: string[]; role?: string; question?: string; headlineIntent?: string; audienceTakeaway?: string;
   sourceTopics?: string[]; supportingPoints?: string[]; requiredSupport?: string[]; requiredDetails?: string[];
+  keyPoints?: { text: string; refs: string[]; chunkRefs: string[] }[];
   requiredEvidenceIds?: string[]; claimIds?: string[]; narrativeRole?: string; evidenceIntent?: string;
   visualIntent?: { type: string }; transitionFromPrevious?: string; transitionToNext?: string;
 };
@@ -23,7 +24,7 @@ export type PptTemplate = {
 };
 export type PptModel = { id: string; name: string; configId: string; modelId: string; providerId?: string };
 export type PptSource = { kind: 'paste' | 'file' | 'update'; name: string; text: string; segments: { id: string; origin?: string; location: string; text: string }[]; images?: Extract<VisualBlock, { type: 'image' }>[]; truncated?: boolean; extension?: string; bytes?: number };
-export type PptModelFinding = { slideIds: string[]; detail: string; bulletIndexes?: number[] };
+export type PptModelFinding = { slideIds: string[]; detail: string; bulletIndexes?: number[]; reason?: 'shallow'; suggestedFix?: string };
 export type PptQualityReport = { status: 'passed' | 'passed_with_warnings' | 'blocked'; publishEligible?: boolean; editorialReady?: boolean; deterministic: { issues: { code: string; severity: string; message: string; slideId?: string | null }[]; hardErrors: number }; modelReview: null | { missing: PptModelFinding[]; repeated: PptModelFinding[]; conflicts: PptModelFinding[]; unsupported: PptModelFinding[] }; repairs: { code: string; slideId?: string; action: string }[];
   report?: { mode: 'presentation' | 'informational' | 'decision'; status: 'not_applicable' | 'ready' | 'needs_review'; issues: { code: string; message: string; slideId?: string | null }[]; metrics: { pages?: number; mainPages?: number; appendixPages?: number; sourceChars?: number; semanticChunks?: number; repeatedClaims?: number; smallTextPages?: number } } };
 export type PptRenderElement = {

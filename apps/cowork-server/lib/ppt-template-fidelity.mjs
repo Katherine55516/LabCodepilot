@@ -621,17 +621,17 @@ export function templateSlotPrompt(project, index) {
     example: slot.example, minVisualUnits: slot.minVisualUnits, maxVisualUnits: slot.capacity,
     requiredItems: slot.purpose === 'list' ? slot.paragraphCount : undefined, maxLines: slot.maxLines, lineVisualUnits: slot.lineVisualUnits, wordWrap: slot.wordWrap,
     paragraphPatterns: slot.purpose === 'list' ? slot.paragraphs.map(item => ({ hasLabelRun: item.hasLabelRun, example: item.example })) : undefined })))}。` +
-    '请在 JSON 中额外返回 slotTexts 对象，key 为上述槽位 id，value 为替换文字。标题与 title 字段一致，section 使用短标签。优先填入互不重复、由来源支持的独立事实；原模板槽位与本页主题不符或来源事实不足时，在 omitTemplateShapes 中列出该内容槽位、不适配图片、图表或表格的 shapeId 和至少八字的具体 reason，并省略其 slotTexts。配对的标题与说明须同时保留或同时省略。内容型原图须有当前来源的事实/图像绑定，否则应省略；背景照片、图标及纯装饰可保留。不要以章节名、标题、focus 或首条要点循环填满所有槽位；不需要的媒体及其旧图解标签应一起省略。' +
+    '请在 JSON 中返回 slotTexts 对象，key 为上述槽位 id，value 为替换文字。标题与 title 字段一致，section 使用短标签。优先填入互不重复、由来源支持的独立事实；原模板槽位与本页主题不符或来源事实不足时，在 omitTemplateShapes 中列出该内容槽位、不适配图片、图表或表格的 shapeId 和至少八字的具体 reason，并省略其 slotTexts。配对的标题与说明须同时保留或同时省略。内容型原图须有当前来源的事实/图像绑定，否则应省略；背景照片、图标及纯装饰可保留。不要以章节名、标题、focus 或首条要点循环填满所有槽位；不需要的媒体及其旧图解标签应一起省略。' +
     'purpose=group-heading 是一组卡片的导航标题，不是独立事实；写简短分组标签，不消耗本页独立要点。' +
     'purpose=list 的 value 必须是恰好 requiredItems 个对象的数组，每项为 {"label":"加粗短名称","body":"常规字重的来源支持说明"}；hasLabelRun 为 true 时两部分都要有内容。每条必须不同，合计行数不得超过 maxLines，每行不超过 lineVisualUnits。' +
     `富来源正文的可见目标为约 ${Math.ceil(visibleBodyTarget(readingOrder.filter(slot => slot.role === 'content' && !['footnote', 'group-heading'].includes(slot.purpose)).reduce((sum, slot) => sum + slot.capacity, 0), project.planning?.slidePlan?.[index]?.depth))} visual units（封面、分节页除外）。不足时补充本页来源支持的解释，不能以重复、空话、删正文区域凑数。` +
     'wordWrap 禁止的单行槽位只能写一行；其他槽位也要按给定 maxLines 和 lineVisualUnits 控制长度。若存在 maxVisualUnits≥70 的正文槽位，优先用于来源中的完整机制、算例、适用条件和限制；不要只填一句概括，却把大量依据留在不可见的 factSynthesis。补充说明 footnote 用简短说明，不承担正文要点。' +
     '标题若承诺N类/种/方法，需在本页或同一来源表格的相关页面保留所有行名称；同语言使用来源规范名称，不能只呈现部分行却沿用完整数量。' +
     '先把本页来源整理成独立的事实单元，再把同一事实单元的短标题与说明填入配对槽位；相同 groupId 的卡片标题、列表或脚注必须共同解释一个小主题，列表中的每个名称和说明也必须对应同一事实。概念/机制与案例/演示步骤应分开展示并标注，不要把相邻章节的句子混入本页。不得用 Point A 等占位标签，不得按字符裁切原句；容量不足时改写成完整短句。' +
-    'contentBlocks 只记录本页实际能呈现在模板槽位中的内容，其 body 的主要事实必须在 slotTexts 中可见；不能在 contentBlocks 写三条而只呈现一条。若模板只容纳一到两条独立要点，请写相同数量的完整内容块，将必讲细节合并为简洁完整的说明，或在规划阶段分配到其他页面。' +
-    'point-heading 是短要点标题；与之配对的 point-description 必须用一句来源支持的简洁说明解释该要点是什么、如何起作用或带来什么结果，不能只重复标题或填几个词；对应的 contentBlocks heading/body 应表达同一事实。label 是图示短标签，不强制扩写。' +
+    'slotTexts 是本页唯一正文输出；代码由配对槽位和列表派生兼容内容块。若模板只容纳一到两条独立要点，将必要关系合并为简洁完整的解释，不能输出一份不可见长正文冒充已完成。无法容纳的必要细节交给审查并建议调整版式或页数。' +
+    'point-heading 是短要点标题；与之配对的 point-description 必须用一到两句来源支持的完整说明解释该要点是什么、如何起作用或带来什么结果，不能只重复标题或填几个词；配对标题与正文应表达同一事实。label 是图示短标签，不强制扩写。' +
     '同一页如果既有列表又有卡片，列表只概括判断或步骤，卡片补充机制、例子或影响；不要把同一句完整说明复制到两处。每个 list 要有不同的信息职责，跨列表也不能循环相同的条目；同页不同槽位的短标签和完整解释不得重复。' +
-    '中文、繁体中文或英文沿用本页所需语言，不编造来源缺失的事实。不要返回坐标、字号、图片或旧文稿中的无关事实。每个槽位文字必须满足 minVisualUnits 和 maxVisualUnits，保持模板原字号。';
+    '中文、繁体中文或英文沿用本页所需语言，不编造来源缺失的事实。不要返回坐标、字号、图片或旧文稿中的无关事实。minVisualUnits 是解释目标，不用空话填补；每个槽位必须满足 maxVisualUnits，保持模板原字号。';
 }
 
 export function templateOutlinePrompt(project) {

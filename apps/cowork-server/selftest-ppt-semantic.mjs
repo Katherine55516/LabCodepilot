@@ -125,8 +125,8 @@ const normalized = api.normalizeOutline({ slides: outline.map(slide => ({ ...sli
 assert.equal(normalized[1].chunkRefs[0], second.id);
 assert.equal(normalized[1].role, 'architecture');
 assert.match(api.outlinePrompt({ ...project, title: 'Gamma' }), /Presentation Brief/);
-assert.match(api.contentPrompt({ ...project, title: 'Gamma', outline: normalized, planning }, normalized[1], 1), /factSynthesis/);
-assert.match(api.contentPrompt({ ...project, title: 'Gamma', outline: normalized, planning }, normalized[1], 1), /页级召回查询/);
+assert.match(api.contentPrompt({ ...project, title: 'Gamma', outline: normalized, planning }, normalized[1], 1), /bullets 由代码派生/);
+assert.match(api.contentPrompt({ ...project, title: 'Gamma', outline: normalized, planning }, normalized[1], 1), /<source_packet>/);
 
 const retrieval = retrieveSlideSources({ ...project, planning }, normalized[1], planning.slidePlan[1]);
 assert.ok(retrieval.chunkIds.includes(second.id), 'explicit chunk reference must win page-level retrieval');

@@ -2,6 +2,8 @@
 
 更新时间：2026-10-01
 
+2026-10-02 补充：[提示词深度契约、完整来源上下文与有界重写](ppt-prompt-depth-contracts.md)。本页描述上一轮确定性门禁基线。
+
 ## 目的与架构边界
 
 Factor Zoo 双稿比较暴露出页数被文件名压缩、长章节分配过少、来源元数据被截断、窄卡片配对错误，以及可见正文门槛过弱。详细证据见 [对照报告](../research/ppt-factor-zoo-content-depth-comparison.md)。

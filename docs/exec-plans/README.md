@@ -99,6 +99,7 @@
 
 | 文件 | 主题 | 完成日期 |
 |------|------|----------|
+| completed/ppt-prompt-depth-contracts.md | PPT 提示词与内容深度契约、完整来源上下文和有界 critic 重写；实现与模拟回归完成，真实 GPT A/B 待可用环境 | 2026-10-02 |
 | completed/ppt-factor-zoo-visible-depth.md | Factor Zoo 双稿比较：章节容量、完整来源、模板可见正文/源表行门禁、媒体回收安全及22页模拟原生导出 | 2026-10-01 |
 | completed/ppt-mutation-runtime-unification.md | PPT 类型化修改、版本与约束、逐页预览、暂停恢复、独立媒体 retry、结构提案与十项本地验收 | 2026-09-30 |
 | completed/ppt-gamma-copy-media-repair.md | Gamma 20 页模板的页内/列表重复、媒体错配、原生组件省略与发布门禁修复，模拟 LLM 重跑及独立 PPTX 审计 | 2026-09-29 |

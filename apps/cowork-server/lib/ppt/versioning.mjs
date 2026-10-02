@@ -1,4 +1,5 @@
 import { digest } from './edit-context.mjs';
+export const REVIEW_RUBRIC_VERSION = 2;
 
 export function planPayload(project) {
   return { sourceRevision: project.sourceRevision || 0, sourceHash: project.source?.sha256 || digest(project.source?.text || project.prompt),
@@ -38,10 +39,10 @@ export function invalidateReviews(project, beforeKey) {
 
 export function bindReview(project, review, meta = {}) {
   project.quality = { ...(project.quality || {}), modelReview: review, reviewState: 'valid',
-    reviewInputHash: semanticReviewKey(project), reviewerModel: { configId: project.configId, model: project.model }, rubricVersion: 1, ...meta };
+    reviewInputHash: semanticReviewKey(project), reviewerModel: { configId: project.configId, model: project.model }, rubricVersion: REVIEW_RUBRIC_VERSION, ...meta };
   return project.quality;
 }
 
 export function reviewIsCurrent(project) {
-  return Boolean(project.quality?.modelReview && project.quality.reviewState === 'valid' && project.quality.reviewInputHash === semanticReviewKey(project));
+  return Boolean(project.quality?.modelReview && project.quality.rubricVersion === REVIEW_RUBRIC_VERSION && project.quality.reviewState === 'valid' && project.quality.reviewInputHash === semanticReviewKey(project));
 }

@@ -4,6 +4,7 @@ import { _internals as commands } from './command-service.mjs';
 import { editableCapabilities, editError } from './edit-context.mjs';
 import { evidenceVisible, visibleSlideText } from '../ppt-evidence.mjs';
 import { refreshPlanning } from '../ppt-planning.mjs';
+import { promptPolicy, writingGuide, sourcePacket, narrativeContext } from '../ppt-prompt-contracts.mjs';
 
 const layoutIds = ['cover', 'summary', 'editorial', 'big-number', 'comparison', 'chart', 'table', 'image-text', 'timeline', 'conclusion'];
 const valuesIn = text => String(text).match(/[-+]?\d+(?:[.,]\d+)*(?:%|％)?/gu) || [];
@@ -17,7 +18,10 @@ function editable(project, data) {
 
 export async function typedCommands(project, data, deps, activity, log) {
   const { slide, nodes } = editable(project, data);
-  const call = async (prompt, task) => deps.modelCall(project, prompt, activity, log, { nodeKey: `ai:${data.proposalId}:${task}` });
+  const writingProject = { ...project, prompt: `${project.prompt || ''}\n${data.instruction || ''}` };
+  const localPolicy = promptPolicy(writingProject);
+  const contract = project.planning?.slidePlan?.find(item => item.slideId === slide.id) || {};
+  const call = async (prompt, task) => deps.modelCall(project, `${localPolicy}\n${['insert', 'data'].includes(task) ? writingGuide(writingProject, contract) : ''}\n${prompt}`, activity, log, { nodeKey: `ai:${data.proposalId}:${task}` });
   const instruction = data.instruction;
   const result = [];
   const command = (type, payload) => ({ type, payload });
@@ -100,7 +104,7 @@ export async function typedCommands(project, data, deps, activity, log) {
     } else if (action === 'insert') {
       const sources = project.source?.segments || [];
       if (!sources.length) throw editError('adding sourced content requires supplied material', 422);
-      const answer = await call(`Create one substantive new slide from supplied sources only, avoiding repetition of ${JSON.stringify(project.outline)}. Sources: ${JSON.stringify(sources).slice(0, 24000)}. Instruction: ${instruction}. Return {"title":"headline","points":["mechanism, evidence or condition"],"sourceRefs":["valid source ID"]}.`, 'insert');
+      const answer = await call(`Create one substantive new slide from supplied sources only, avoiding repetition of ${JSON.stringify(narrativeContext(project))}. Sources: ${JSON.stringify(sourcePacket({ segments: sources }, 24000))}. Instruction: ${instruction}. Return {"title":"headline","points":["mechanism, evidence or condition"],"sourceRefs":["valid source ID"]}.`, 'insert');
       if (!Array.isArray(answer.points) || !answer.points.length || !Array.isArray(answer.sourceRefs) || !answer.sourceRefs.length || answer.sourceRefs.some(id => !sources.some(source => source.id === id))) throw editError('the new slide needs content and valid sources', 422);
       const sourceText = sources.filter(source => answer.sourceRefs.includes(source.id)).map(source => source.text).join('\n');
       if (valuesIn(JSON.stringify([answer.title, answer.points])).some(value => !valuesIn(sourceText).includes(value))) throw editError('new slide contains an unsupported number', 422);

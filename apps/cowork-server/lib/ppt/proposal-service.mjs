@@ -10,6 +10,7 @@ import { slideSvg } from './exporters/preview.mjs';
 import { reviewProject } from './quality-service.mjs';
 import { missingRequiredEvidence, evidenceMeasurements } from '../ppt-evidence.mjs';
 import { retrieveSlideSources } from '../ppt-planning.mjs';
+import { promptPolicy, writingGuide, editPromptContext, objectWritingCapacity } from '../ppt-prompt-contracts.mjs';
 import { routeMutation, impactFor } from './mutation-router.mjs';
 import { typedCommands, materializeTypedCandidate } from './typed-proposal.mjs';
 
@@ -131,9 +132,11 @@ export async function createProposal(input, data, deps, activity, log) {
   const contract = project.planning?.slidePlan?.find(item => item.slideId === slide.id);
   const outline = project.outline?.find(item => item.id === slide.id) || slide;
   const sources = retrieveSlideSources(project, outline, contract || {});
-  const context = { brief: project.planning?.brief, contract, sources, narrative: project.outline?.map(item => ({ title: item.title, focus: item.focus })), lockedTitle: project.deckTitle };
+  const context = editPromptContext(project, outline, sources, contract || {});
+  const writingProject = { ...project, prompt: `${project.prompt || ''}\n${instruction}` };
+  const writingPolicy = promptPolicy(writingProject);
   const schema = data.scope === 'object' ? '{"content":{...}}' : '{"patches":[{"nodeId":"existing ID","content":{...}}]';
-  const prompt = `Only edit the semantic content of these existing presentation objects. Preserve sources, numeric values, units, conditions, equations, required evidence and locked titles. Keep chart data/type/dimensions and table dimensions/headers/numeric cells unchanged. Keep shape types unchanged. Do not invent facts, repeat neighboring pages, change other pages, theme, styles, IDs or coordinates. Source gaps must be explicit. Keep each point useful and within its capacity; do not truncate mechanically. ${native ? 'Preserve native text paragraph count and label/body structure.' : ''}\nContext: ${JSON.stringify(context).slice(0, 30000)}\nObjects: ${JSON.stringify(editable.map(node => ({ nodeId: node.id, type: node.type, content: node.content, nativeTextFrame: node.nativeTextFrame })))}\nInstruction: ${instruction}\nReturn only JSON: ${schema}${data.scope === 'slide' ? (data.mode === 'relayout' ? `,"layoutId":"one of ${[...layouts].join(',')}"}` : '}') : ''}.`;
+  const prompt = `${writingPolicy}\n${writingGuide(writingProject, contract || {}, native)}\nOnly edit the semantic content of these existing presentation objects. Preserve sources, numeric values, units, conditions, equations, required evidence and locked titles. Keep chart data/type/dimensions and table dimensions/headers/numeric cells unchanged. Keep shape types unchanged. Do not invent facts, repeat neighboring pages, change other pages, theme, styles, IDs or coordinates. Preserve material conditions and uncertainty; keep production/source bookkeeping out of visible copy. Keep each point useful and within its capacity; do not truncate mechanically. ${native ? 'Preserve native text paragraph count and label/body structure.' : ''}\nContext: ${context}\nObjects: ${JSON.stringify(editable.map(node => ({ nodeId: node.id, type: node.type, content: node.content, nativeTextFrame: node.nativeTextFrame, capacity: objectWritingCapacity(project, slide.id, node) })))}\nInstruction: ${instruction}\nReturn only JSON: ${schema}${data.scope === 'slide' ? (data.mode === 'relayout' ? `,"layoutId":"one of ${[...layouts].join(',')}"}` : '}') : ''}.`;
   const id = newId('proposal');
   const answer = await deps.modelCall(project, prompt, activity, log, { nodeKey: `ai:${id}` });
   const proposal = { id, projectId: project.id, slideId: slide.id, scope: data.scope, type: route.type, impact: impactFor(project, route, [slide.id]), mode: data.mode || 'content', instruction,

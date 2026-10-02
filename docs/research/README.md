@@ -8,6 +8,7 @@
 
 | 文件 | 主题 |
 |------|------|
+| ppt-prompt-audit-gamma-benchmark-20261002.md | 全部PPT提示词审计、12个开源仓库提示词取舍、Gamma Factor Zoo深度基准、分阶段prompt草案与受控评估方案（提案，未实施） |
 | ppt-factor-zoo-content-depth-comparison.md | Factor Zoo 原文、Gamma 与 Deal Review 模拟产物逐页差距、逻辑根因与可见深度修复 |
 | gamma-ai-editing-generation-queue-2026-09-29.md | Gamma 5 与 Classic 实机调研：生成中指令排队、成稿后段落级 AI 优化、版本对比、可视化编辑器与四页实验稿质量问题 |
 | nvidia-compressing-llms-49-slide-evaluation.md | 49 页 LLM Compression 模拟输出逐页评估：证据缺失、模板复用、投影可读性与现有 PPT DAG 内的分阶段改进方案 |

@@ -36,6 +36,7 @@
  *   **绝不读 result.subtype** —— 401 全程失败的回合它仍然是字面的 "success"。
  */
 import { spawn } from 'node:child_process';
+import { PPT_SYSTEM_PROMPT, pptPromptFrame } from './ppt-prompt-contracts.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import * as orch from './orchestrator.mjs';
@@ -197,12 +198,12 @@ function execOnce({ sid, container, prompt, model, token, baseUrl, authStyle, lo
       // 而你写的指令被丢掉。首次实测就踩了:回合 exit=0、status=success、花了 $0.39,
       // 模型却在一本正经地介绍 /opt/cowork/claude 是什么。
       // ——「绿色不等于任务达成」的活标本。
-      '-p', prompt,
+      '-p', ...(kind === orch.KIND_PPT ? [] : [prompt]),
       '--output-format', 'stream-json', '--verbose',
       '--dangerously-skip-permissions',
       // PPT nodes are semantic transforms only. The renderer is separate code;
       // the model must have no filesystem, shell, web, skill or MCP tools.
-      ...(kind === orch.KIND_PPT ? ['--tools', '', '--disallowedTools', 'mcp__*'] : []),
+      ...(kind === orch.KIND_PPT ? ['--system-prompt', PPT_SYSTEM_PROMPT, '--tools', '', '--disallowedTools', 'mcp__*'] : []),
       ...(effectiveModel ? ['--model', effectiveModel] : []),
     ];
     log(`routine ${sid} spawn model=${effectiveModel || '容器默认'}${model ? '(显式)' : '(账号配置)'} authStyle=${authStyle}`);
@@ -242,8 +243,10 @@ function execOnce({ sid, container, prompt, model, token, baseUrl, authStyle, lo
       if (msg.type === 'result') result = msg;
     };
 
-    child.stdin.end(Buffer.alloc(4));  // 零长帧 = 优雅 EOF(P0 结论 ②)
     child.stdin.on('error', () => { /* claude 先退出时的 EPIPE */ });
+    // PPT uses Claude print mode's plain stdin input through the same framed
+    // shim. Other routines keep their established positional-prompt transport.
+    child.stdin.end(kind === orch.KIND_PPT ? pptPromptFrame(prompt) : Buffer.alloc(4));
 
     child.stdout.on('data', (chunk) => {
       bytes += chunk.length;

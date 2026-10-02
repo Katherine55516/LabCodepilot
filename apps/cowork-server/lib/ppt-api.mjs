@@ -6,6 +6,7 @@ import * as store from './ppt-store.mjs';
 import * as orch from './orchestrator.mjs';
 import * as files from './files.mjs';
 import { runRoutine } from './routine-runner.mjs';
+import { promptPolicy, writingGuide, normalizeKeyPoints, canonicalWriterOutput, criticRewriteTargets, sourcePacket, slideSemanticContext, writerPrompt, writerRepairPrompt, outlineContentContract, OUTLINE_SCHEMA } from './ppt-prompt-contracts.mjs';
 import { renderPptx } from './ppt/exporters/pptx.mjs';
 import { renderPdf } from './ppt/exporters/pdf.mjs';
 import { extractFile, normalizePaste, validateFile, sha256 } from './ppt-source.mjs';
@@ -74,7 +75,7 @@ function parseModelJson(text) {
   }
 }
 function sourceFromDeck(base) {
-  const segments = (base.deck?.slides || []).map((slide, index) => ({ id: String(index + 1), location: `旧版第 ${index + 1} 页`, text: `${slide.title}\n${(slide.bullets || []).join('\n')}` }));
+  const segments = (base.deck?.slides || []).map((slide, index) => ({ id: String(index + 1), location: `旧版第 ${index + 1} 页`, text: JSON.stringify(slideSemanticContext(slide)) }));
   return { kind: 'base', name: base.title, text: segments.map(s => s.text).join('\n\n'), segments };
 }
 function mergeSources(parts) {
@@ -108,11 +109,12 @@ function normalizeOutline(value, count, source, update = null, deckTitle = null)
       title: bounded(child?.title || `子章节 ${childIndex + 1}`, MAX_TEXT, `slide ${index + 1} child title`),
       description: bounded(child?.description || child?.title || '', 360, `slide ${index + 1} child description`, false),
     })) : [];
+    const keyPoints = normalizeKeyPoints(s.keyPoints || s.key_points, source);
     return { id: typeof s.id === 'string' && /^[a-zA-Z0-9_-]{1,80}$/.test(s.id) ? s.id : newIrId('slide'), title,
       focus, description: bounded(s.description || s.focus || s.title, 360, `slide ${index + 1} description`, false), children,
       section: compileSectionLabel(bounded(s.section || s.title, MAX_TEXT, `slide ${index + 1} section`)),
-      refs: Array.isArray(s.refs) ? [...new Set(s.refs.map(String))].filter(ref => validRefs.has(ref)) : [],
-      ...(Array.isArray(s.chunkRefs) ? { chunkRefs: [...new Set(s.chunkRefs.map(String))].filter(ref => validChunkRefs.has(ref)) } : {}),
+      refs: [...new Set([...(Array.isArray(s.refs) ? s.refs.map(String) : []), ...keyPoints.flatMap(point => point.refs)])].filter(ref => validRefs.has(ref)),
+      ...((Array.isArray(s.chunkRefs) || keyPoints.some(point => point.chunkRefs.length)) ? { chunkRefs: [...new Set([...(Array.isArray(s.chunkRefs) ? s.chunkRefs.map(String) : []), ...keyPoints.flatMap(point => point.chunkRefs)])].filter(ref => validChunkRefs.has(ref)) } : {}),
       ...(typeof s.role === 'string' ? { role: s.role.slice(0, 40) } : {}),
       ...(typeof s.question === 'string' ? { question: s.question.slice(0, 240) } : {}),
       ...(typeof s.headlineIntent === 'string' || typeof s.headline_intent === 'string' ? { headlineIntent: String(s.headlineIntent || s.headline_intent).slice(0, 160) } : {}),
@@ -120,6 +122,7 @@ function normalizeOutline(value, count, source, update = null, deckTitle = null)
       ...(Array.isArray(s.sourceTopics || s.source_topics) ? { sourceTopics: (s.sourceTopics || s.source_topics).filter(item => typeof item === 'string').slice(0, 8).map(item => item.slice(0, 120)) } : {}),
       ...(typeof s.transitionFromPrevious === 'string' || typeof s.transition_from_previous === 'string' ? { transitionFromPrevious: String(s.transitionFromPrevious || s.transition_from_previous).slice(0, 180) } : {}),
       ...(typeof s.transitionToNext === 'string' || typeof s.transition_to_next === 'string' ? { transitionToNext: String(s.transitionToNext || s.transition_to_next).slice(0, 180) } : {}),
+      keyPoints,
       ...(Array.isArray(s.supportingPoints) ? { supportingPoints: s.supportingPoints.filter(item => typeof item === 'string').slice(0, 6).map(item => item.slice(0, 160)) } : {}),
       ...(Array.isArray(s.requiredSupport || s.required_support) ? { requiredSupport: (s.requiredSupport || s.required_support).filter(item => typeof item === 'string').slice(0, 6).map(item => item.slice(0, 48)) } : {}),
       ...(s.visualIntent && typeof s.visualIntent === 'object' && typeof s.visualIntent.type === 'string' ? { visualIntent: { type: s.visualIntent.type.slice(0, 40) } } : {}),
@@ -173,65 +176,35 @@ function outlinePrompt(p) {
   const pageRecommendation = estimatePageRecommendation(p);
   const capacity = sourceCapacityPlan(p.source, p.pages);
   const allocationContract = capacity ? `按用户最终 ${p.pages} 页重新分配内容：封面与结论各 1 页；以下章节建议为正文页配额（不是模板页号）：${capacity.sections.map(section => `${section.title}=${section.slides}页${section.objects.length ? `，保留${section.objects.join('/')}` : ''}`).join('；').slice(0, 6000)}。${capacity.compactSections.length ? `这些章节无独立页，必须并入相邻相关页并保留核心主张：${capacity.compactSections.join('、').slice(0, 1000)}。` : ''}来源内容负载/可读容量比约 ${capacity.compressionRatio}；低页数时优先明确合并和取舍，高页数时按不同问题、证据或算例拆开。coverage 对未映射的高优先级 chunk 必须给出具体省略理由，不得静默丢弃公式、代码、表格或案例。` : '';
-  const userOutlineContract = p.outlineSeed?.length ? `用户手动编辑过的大纲草稿：${JSON.stringify(p.outlineSeed).slice(0, 9000)}。在调整为 ${p.pages} 页时优先保留用户改过的标题和重点；需要合并或拆分时保持原意，不复制同一观点凑页。` : '';
+  const userOutlineContract = p.outlineSeed?.length ? `用户手动编辑过的大纲草稿：${JSON.stringify(p.outlineSeed)}。在调整为 ${p.pages} 页时优先保留用户改过的标题和重点；需要合并或拆分时保持原意，不复制同一观点凑页。` : '';
   const sparsePlan = p.contentPlan || planSparseInput(p);
   const userTitle = p.deckTitle?.source === 'user' ? p.deckTitle.raw : '';
   const titleContract = userTitle
     ? `用户 Deck Title 为「${userTitle}」。它已锁定：封面 title 必须保持原词、原语言和原术语，不得改写、缩短或翻译；只能由渲染器换行。`
     : '用户没有填写 Deck Title。为封面生成一个精炼标题：中文优先 6–18 字，英文优先 2–8 个词，最多两行；额外背景放入 focus 或后续 subtitle。';
-  const planningContract = `先在内部建立 Presentation Brief（目标、受众、核心论点、深度、mustInclude、reportMode、decisionQuestion、sourceScope），再规划有起承转合的 storyArc。reportMode 只选 presentation、informational 或 decision；决策或职场汇报需在前 3 页给出摘要或需要回答的决定，较早展示核心流程/证据，结尾给出来源支持的条件性建议与下一步；资料不足时不要虚构建议或案例，而应在 sourceScope 与页面中说明缺口。主文尽量集中，补充细节放 appendix。页数优先级固定为：用户手动调整或明确指定 > PPT 模块估算 > 模板原有页数。模板页数只决定原生版式选择和安全复用，不得更改输出页数。当前 project.pages=${p.pages} 是本轮最终页数硬参数（含封面），必须准确规划成 ${p.pages} 页；不得根据模板页数或固定 10/12 页假设改动。模块估算为 ${pageRecommendation.recommended} 页（范围 ${pageRecommendation.range[0]}–${pageRecommendation.range[1]}），只用于未指定页数时的默认值及判断内容密度、压缩风险。${allocationContract}${userOutlineContract}${titleContract} Story Planner 输出 section label、title intent 和 slide message，section 使用 4–12 个中文字符或 2–8 个英文词；不要直接复制来源长标题。同一页可整合多个来源，一个来源也可支持多页，但拆分后的每页须有不同的问题、独立主张或证据作用；不可用同义改写凑足页数。来源不足时在 sourceScope 和相应页面明确不足，不要补造材料。每页根据角色选择 low/medium/high 密度、内容分布、2–10 个语义单元和 point length profile；不要固定三条 bullet。整稿应有密度节奏：摘要与过渡、普通说明、高密度流程或深机制交错；不要连续多页都写成高密度卡片。若来源包含可复算的公式、代码或算例，必须把核心表达式、变量含义和适用条件列入相应页 requiredDetails，不能只保留流程概述；特殊数学符号要规划成可见的普通文本表示。每个高优先级主题必须出现在页面 refs 中，或在 coverage 中说明省略原因。${templateOutlinePrompt(p)}`;
-  const planningSchema = '{"brief":{"goal":"目标","audience":"受众","objective":"目的","thesis":"核心论点","presentationUse":"course_walkthrough|technical_explainer|workplace_report","reportMode":"presentation|informational|decision","decisionQuestion":"需要回答的决定","sourceScope":"来源和不足","tone":"语气","depth":"balanced|detailed","keyMessages":["关键消息"],"mustInclude":["必讲主题"]},"storyArc":{"opening":"开场","development":"展开","turningPoint":"转折","resolution":"结论"},"slides":[{"section":"短章节标签","title":"标题意图（封面按 Deck Title 规则）","focus":"本页 slide message","question":"本页要回答的问题","role":"cover|section|summary|thesis|problem|comparison|architecture|process|mechanism|runtime|evidence|decision|recommendation|appendix|closing","narrativeRole":"概念|算例|证据|决策之一","claimIds":["本页稳定主张 ID"],"requiredEvidenceIds":["来源语义目录中真实存在的 evidence ID"],"evidenceIntent":"required|supporting|none","headlineIntent":"标题要表达的判断","audienceTakeaway":"读者应带走的结论","sourceTopics":["来源主题"],"requiredSupport":["mechanism|evidence|example|contrast|constraint|implication|decision|next_step"],"requiredDetails":["必须保留的来源细节"],"supportingPoints":["要保留的来源主题"],"visualIntent":{"type":"none|image|comparison|pipeline|architecture|timeline|table|metric"},"density":"low|medium|high","distributionType":"three_deep_points|four_medium_cards|two_macro_regions|process_6_steps|comparison_2x3|architecture_layers|principles_grouped","semanticUnitBudget":6,"pointLengthProfile":"compact|standard|deep|very_deep|mixed","chunkRefs":["语义 chunk ID"],"refs":["原始来源编号"]}],"coverage":[{"chunkId":"c_001","action":"omitted","reason":"页数限制下的明确取舍"}]}';
+  const planningContract = `先在内部建立 Presentation Brief（目标、受众、核心论点、深度、mustInclude、reportMode、decisionQuestion、sourceScope），再规划有起承转合的 storyArc。reportMode 只选 presentation、informational 或 decision；决策或职场汇报需在前 3 页给出摘要或需要回答的决定，较早展示核心流程/证据，结尾给出来源支持的条件性建议与下一步；资料不足时不要虚构建议或案例，而应在 sourceScope 记录缺口，在页面保留影响理解的限制。主文尽量集中，补充细节放 appendix。页数优先级固定为：用户手动调整或明确指定 > PPT 模块估算 > 模板原有页数。模板页数只决定原生版式选择和安全复用，不得更改输出页数。当前 project.pages=${p.pages} 是本轮最终页数硬参数（含封面），必须准确规划成 ${p.pages} 页；不得根据模板页数或固定 10/12 页假设改动。模块估算为 ${pageRecommendation.recommended} 页（范围 ${pageRecommendation.range[0]}–${pageRecommendation.range[1]}），只用于未指定页数时的默认值及判断内容密度、压缩风险。${allocationContract}${userOutlineContract}${titleContract} Story Planner 输出 section label、title intent 和 slide message，section 使用 4–12 个中文字符或 2–8 个英文词；不要直接复制来源长标题。同一页可整合多个来源，一个来源也可支持多页，但拆分后的每页须有不同的问题、独立主张或证据作用；不可用同义改写凑足页数。来源不足时在 sourceScope 记录，并在页面保留必要的适用边界，不要补造材料。每页根据内容规划解释深度、分布和结构，不要固定三条 bullet。整稿应有密度节奏：摘要与过渡、普通说明、高密度流程或深机制交错；不要连续多页都写成高密度卡片。若来源包含可复算的公式、代码或算例，必须把核心表达式、变量含义和适用条件列入相应页 requiredDetails，不能只保留流程概述；特殊数学符号要规划成可见的普通文本表示。每个高优先级主题必须出现在页面 refs 中，或在 coverage 中说明省略原因。${templateOutlinePrompt(p)}`;
+  const planningSchema = OUTLINE_SCHEMA;
+  const contentPlanning = outlineContentContract(p);
+
   if (p.update) {
     const base = p.update.baseSnapshot;
-    const old = base.deck?.slides?.map(slide => `[${slide.id}] ${slide.title}: ${(slide.bullets || []).join('；')}`).join('\n').slice(0, 16000) || base.source?.text?.slice(0, 16000) || '';
+    const old = base.deck?.slides ? JSON.stringify(base.deck.slides.map(slide => ({ id: slide.id, ...slideSemanticContext(slide) }))) : base.source?.text || '';
     const progress = (p.source?.segments || []).filter(s => s.origin === 'progress').map(s => `[${s.id}] ${s.location}: ${s.text}`).join('\n').slice(0, 14000);
-    return `你是演示文稿版本更新规划器。${planningContract} 仅分析旧版与用户提供的新进展；不搜索、不调用工具、不编造数字。旧版：${base.title}\n旧版内容：\n${old}\n最新进展：\n${progress || p.prompt}\n语义索引：\n${sourceContext.slice(0, 12000)}\n生成恰好 ${p.pages} 页的新大纲，返回唯一 JSON：${planningSchema}。每个 slide 另加 baseSlideId（旧页 ID 或 null）和 change（keep|rewrite|add）。原样保留且内容不变的页用 keep；需要改写的旧页用 rewrite；新页用 add。不得虚构旧页 ID 或来源编号。只输出 JSON。`;
+    return `你是演示文稿版本更新规划器。${planningContract}${contentPlanning} 仅分析旧版与用户提供的新进展；不搜索、不调用工具、不编造数字。旧版：${base.title}\n旧版内容：\n${old}\n最新进展：\n${progress || p.prompt}\n语义索引：\n${sourceContext.slice(0, 12000)}\n生成恰好 ${p.pages} 页的新大纲，返回唯一 JSON：${planningSchema}。每个 slide 另加 baseSlideId（旧页 ID 或 null）和 change（keep|rewrite|add）。原样保留且内容不变的页用 keep；需要改写的旧页用 rewrite；新页用 add。不得虚构旧页 ID 或来源编号。只输出 JSON。`;
   }
   if (p.source?.segments?.length) {
-    return `你是演示文稿叙事规划器。${planningContract} 只分析以下用户提供的来源，不搜索、不调用工具、不编造数字。文件名：${p.title}；页数：${p.pages}。\n来源（chunkRefs 用语义 chunk ID；refs 用索引列出的原始来源编号）：\n${sourceContext}\n返回唯一 JSON：${planningSchema}。slides 恰好 ${p.pages} 个；第一页封面，最后一页总结。相邻页面可以共享 section，每页 chunkRefs 和 refs 只能引用上面实际存在的编号。只输出 JSON。`;
+    return `你是演示文稿叙事规划器。${planningContract}${contentPlanning} 只分析以下用户提供的来源，不搜索、不调用工具、不编造数字。文件名：${p.title}；页数：${p.pages}。\n来源（chunkRefs 用语义 chunk ID；refs 用索引列出的原始来源编号）：\n${sourceContext}\n返回唯一 JSON：${planningSchema}。slides 恰好 ${p.pages} 个；第一页封面，最后一页总结。相邻页面可以共享 section，每页 chunkRefs 和 refs 只能引用上面实际存在的编号。只输出 JSON。`;
   }
-  return `你是演示文稿叙事规划器。${planningContract} 只做内容结构，不写代码、不调用工具、不生成 PPTX、不搜索网页。\n主题：${p.prompt}\n短输入预规划（这些是待论证问题，不是已证实事实）：${JSON.stringify(sparsePlan || {})}\n先依据该 Content Plan 与 Semantic Unit Inventory 扩展完整的概念结构和故事骨架，再按用户确定的 ${p.pages} 页分配。缺乏来源时可解释通用机制、示意框架和评估方法；不得把公司特定数据、客户、项目、效果或财务数字写成事实。页数少时合并相邻问题，页数多时把机制、条件和评估拆开，不能添加同义 filler。\n文件名：${p.title}\n页数：${p.pages}。\n返回唯一 JSON：${planningSchema}。slides 必须恰好 ${p.pages} 个，第一页是封面，最后一页是结论。每页有不同的逻辑作用，不要编造具体数字；纯 Prompt 输入时 refs 为空。只输出 JSON。`;
+  return `你是演示文稿叙事规划器。${planningContract}${contentPlanning} 只做内容结构，不写代码、不调用工具、不生成 PPTX、不搜索网页。\n主题：${p.prompt}\n短输入预规划（这些是待论证问题，不是已证实事实）：${JSON.stringify(sparsePlan || {})}\n先依据该 Content Plan 与 Semantic Unit Inventory 扩展完整的概念结构和故事骨架，再按用户确定的 ${p.pages} 页分配。缺乏来源时可解释通用机制、示意框架和评估方法；不得把公司特定数据、客户、项目、效果或财务数字写成事实。页数少时合并相邻问题，页数多时把机制、条件和评估拆开，不能添加同义 filler。\n文件名：${p.title}\n页数：${p.pages}。\n返回唯一 JSON：${planningSchema}。slides 必须恰好 ${p.pages} 个，第一页是封面，最后一页是结论。每页有不同的逻辑作用，不要编造具体数字；纯 Prompt 输入时 refs 为空。只输出 JSON。`;
 }
 function contentPrompt(p, slide, index) {
-  const plan = p.outline.map((s, i) => `${i + 1}. ${s.title} — ${s.focus}`).join('\n');
-  const brief = p.planning?.brief || {};
-  const storyArc = p.planning?.storyArc || {};
   const contract = p.planning?.slidePlan?.find(item => item.slideId === slide.id) || {};
-  const pointBudget = contract.pointBudget || { min: 20, target: 35, max: 50, preferredCount: [3, 5] };
-  const pointRule = p.templateFidelity?.mode === 'preserve'
-    ? `原生模板的文本槽位数量、每槽容量和字体优先于通用 point 长度目标。本页内容组目标 ${contract.templatePointTarget || contract.semanticUnitBudget || 1}/${contract.templatePointCapacity || '模板容量'}；每一组应体现具体对象、机制、条件或结果，并在可见 slotTexts 中完整表达。用长短不同的点分配信息，不写只有主题名的空洞短句；来源支撑不足时说明缺口，不复制别的点。公式中的指数、根号、变量名和单位必须以 PowerPoint 可见的普通文本或可靠的原生公式表达，不得留下空白占位。`
-    : `本页 point 目标 ${pointBudget.preferredCount[0]}–${pointBudget.preferredCount[1]} 个；每条解释目标约 ${pointBudget.target} 个中英混排视觉字，通常在 ${pointBudget.min}–${pointBudget.max} 之间。${pointBudget.guidance || ''} 每个 point 应有独立信息功能（定义、机制、证据、例子、限制或启示）；长解释与短支撑可混排，不要机械等长。来源支撑的模型名称、公式变量、阈值和适用条件应保留。不能为了凑数编造证据或重复标题；证据不足可用更少但更完整的点，并明确缺口。过长内容先重组或换版式，不得机械截断。`;
-  const retrieval = retrieveSlideSources(p, slide, contract);
-  const deckTitleRule = index === 0 && p.deckTitle?.source === 'user'
-    ? `本页是封面。Deck Title 已由用户锁定为「${p.deckTitle.raw}」，title 字段必须逐字返回该标题，不得润色、缩短、翻译或改变术语。`
-    : index === 0 ? '本页是封面且用户未提供 Deck Title；生成精炼 Deck Title，中文 6–18 字或英文 2–8 词，额外上下文放入 subtitle。' : '';
-  const sourceCitationRule = /\b(?:sources?|references?|citations?)\b|来源|参考文献|引用/iu.test(slide.title || '') && p.source?.kind === 'file'
-    ? `这是来源页；可见 slotTexts 或正文必须明确写出输入文件名「${p.source.name}」及本页引用来源的位置，不得只写“来源可追溯”之类的概括。` : '';
   const constraints = effectiveConstraints(p, slide.id);
-  const editInstructions = constraints.length ? constraints.filter(item => ['content', 'title'].includes(item.type)).map(item => item.instruction).join('\n') : (p.editing?.instructions?.[slide.id] || []).join('\n');
-  const editorial = `用户对本页追加的要求（累计执行，仍遵守来源和容量边界）：${editInstructions || '无'}。演示目标：${brief.objective || p.prompt}；受众：${brief.audience || '演示文稿读者'}；用途：${brief.presentationUse || 'technical_explainer'}；核心论点：${brief.thesis || p.prompt}；最终用户确认页数：${p.pages}（不得更改）；深度：${contract.depth || brief.depth || 'balanced'}；密度：${contract.density || 'medium'}；内容分布：${contract.distributionType || 'four_medium_cards'}；语义单元预算：${contract.semanticUnitBudget || 5}；point length profile：${contract.pointLengthProfile || 'standard'}；${pointRule} 必讲主题：${(brief.mustInclude || []).join('、').slice(0, 600)}。故事弧：${[storyArc.opening, storyArc.development, storyArc.turningPoint, storyArc.resolution].filter(Boolean).join(' → ').slice(0, 600)}。本页角色：${contract.role || 'evidence'}；本页要回答：${contract.question || slide.focus}；本页核心消息：${contract.message || slide.focus}；本页叙事作用：${contract.narrativeRole || contract.role || ''}；本页必需支撑：${(contract.requiredSupport || []).join('、').slice(0, 300)}；必须保留的细节：${(contract.requiredDetails || []).join('、').slice(0, 600)}；锁定证据 ID：${(contract.requiredEvidenceIds || []).join('、')}；视觉意图：${contract.visualIntent?.type || 'none'}。${deckTitleRule}${sourceCitationRule} 先基于原始页级召回完成 factSynthesis，再写 presentation-native 结构化内容。每页按“问题→主张→机制/例子/证据→启示”论证，并说明相对相邻页新增了什么；禁止同义改写凑页。详细页保留主张、机制、实现细节、约束、例子与启示中由来源支持且规划要求的部分；不得用上游摘要替代原始语义 chunk，不得编造来源没有的内容。evidence/results/benchmark 页面应给可复查的数值、对照或具体质性证据及条件；来源不足则明确说明或改成“评估方法”，不可只写空泛原则。不要为满足最短长度加无意义尾语；来源不足时用完整短句并标识待补证据。takeaway 必须提供新的综合判断，不能重复标题或正文。模型只决定语义，不给坐标、字号或 PPTX。非封面标题是 message-first headline，生成 3–5 个候选；标准内容标题最多 36 visual units、最多两行，不靠缩小字号解决。`;
-  const reportEditorial = brief.reportMode === 'presentation' ? '' : `这是 ${brief.reportMode === 'decision' ? '决策' : '信息'}汇报。待回答的问题：${brief.decisionQuestion || '未指定'}；证据边界：${brief.sourceScope || '仅依据当前输入'}。summary 页先写读者可采取的结论及依据；process 或 architecture 页给出完整链路及分支条件；evidence 页区分来源事实、推断和未验证项；recommendation 或 decision 页只写由来源支持的条件、可执行的下一步与仍需核实的问题；appendix 页用于补充定义、异常与来源细节。每个要点写“判断或概念＋一句简洁解释”，禁止只重复名词，也不能通过同义改写把单一事实拆成多页。当前来源不足以支撑的行动建议要明确标为待验证。`;
-  const contentSchema = '{"factSynthesis":{"claims":["主张"],"facts":["来源支持的事实"],"numbers":["来源数值"],"examples":["例子"],"relationships":["因果或结构关系"],"mechanisms":["机制"],"implications":["启示"],"constraints":["约束"],"limitations":["局限"]},"evidenceUsedIds":["在可见文字中实际表达的 evidence ID"],"titleCandidates":["候选标题"],"title":"结论式标题或锁定的用户 Deck Title","eyebrow":"可选短标签","subtitle":"可选背景句","contentBlocks":[{"type":"definition|mechanism|evidence|example|implication|contrast|constraint|tradeoff|decision|next_step|stage|runtime","heading":"短标题","body":"来源支持的说明"}],"takeaway":"可选且不可重复的结论","bullets":["仅用于兼容的结构化要点"],"slotTexts":{"普通模板 shape ID":"单行或多行文字","多点列表 shape ID":[{"label":"要点名称","body":"来源支持的简洁说明"}]},"omitTemplateShapes":[{"shapeId":123,"reason":"该原生图解与本页主题无关，且无来源支持"}]}';
-  const slotContract = templateSlotPrompt(p, index);
-  if (p.update) {
-    const old = slide.baseSlideId ? p.update.baseSnapshot.deck?.slides.find(item => item.id === slide.baseSlideId) : null;
-    const selected = slide.refs?.length ? p.source.segments.filter(s => slide.refs.includes(s.id)) : p.source.segments.filter(s => s.origin === 'progress').slice(0, 8);
-    const progress = selected.map(s => `[${s.id}] ${s.location}: ${s.text}`).join('\n').slice(0, 16000);
-    return `你是演示文稿更新文案编辑。${editorial}${reportEditorial}${slotContract} 仅写第 ${index + 1} 页，不调用工具、不编造数字。旧页：${old ? `${old.title}；${(old.bullets || []).join('；')}` : '新增'}。最新进展：${progress}\n已确认大纲：\n${plan}\n本页主张：${slide.focus}\n返回唯一 JSON：${contentSchema}，contentBlocks 数量服从本页语义单元预算，每条说明服从 point length profile。先填 factSynthesis，再据此写 copy。只用旧版与最新进展中的事实。只输出 JSON。`;
-  }
-  if (p.source?.segments?.length) {
-    const selected = retrieval.segments.length ? retrieval.segments : (slide.refs?.length ? p.source.segments.filter(s => slide.refs.includes(s.id)) : p.source.segments.slice(0, 8));
-    const perSource = Math.max(500, Math.floor(15000 / Math.max(1, selected.length)));
-    const excerpts = selected.map(s => `[${s.id}] ${s.location}: ${s.text.slice(0, perSource)}${s.text.length > perSource ? '…' : ''}`).join('\n').slice(0, 16000);
-    const semantic = retrieval.chunks.map(chunk => `[${chunk.id}] ${chunk.topic} | ${chunk.semanticType} | ${chunk.contentKind || 'concept'} | ${chunk.discourseRole} | ${chunk.visualCandidates.join(',')}\n${chunk.text.slice(0, 900)}`).join('\n').slice(0, 6200);
-    const evidence = retrieval.evidenceAtoms.map(atom => `[${atom.id}] ${atom.kind} refs=${atom.sourceRefs.join(',')} ${atom.location}: ${atom.exactText}`).join('\n').slice(0, 6800);
-    return `你是演示文稿文案编辑。${editorial}${reportEditorial}${slotContract} 只用给定来源写第 ${index + 1} 页，不搜索、不调用工具、不编造数字、来源或单位。\n大纲：\n${plan}\n本页主张：${slide.focus}\n页级召回查询：${retrieval.query}\n来源证据原子（锁定 ID 必须在可见页面表达完整数值、单位和适用条件；不能只在 factSynthesis 中列出）：\n${evidence}\n相关语义单元：\n${semantic}\n本页来源：\n${excerpts}\n术语表：${JSON.stringify(p.planning?.terminology || {})}\n返回唯一 JSON：${contentSchema}。contentBlocks 数量与长度必须服从本页角色、分布和语义单元预算；先填 factSynthesis，再据此写 copy；保留来源支持的主张、机制、证据、细节和启示。来源没有的事实不要写。只输出 JSON。`;
-  }
-  return `你是演示文稿文案编辑。${editorial}${reportEditorial}${slotContract} 只写文本，不调用工具、不写代码、不生成坐标或 PPTX。不得编造数字或来源。\n用户主题：${p.prompt}\n已确认大纲：\n${plan}\n当前任务只写第 ${index + 1} 页，标题意图：${slide.title}；核心观点：${slide.focus}。\n返回唯一 JSON：${contentSchema}。contentBlocks 数量与长度服从本页角色和语义单元预算；封面可以 0 条。只输出 JSON。`;
+  const edits = constraints.length ? constraints.filter(item => ['content', 'title'].includes(item.type)).map(item => item.instruction) : p.editing?.instructions?.[slide.id] || [];
+  return writerPrompt(p, slide, index, { retrieval: retrieveSlideSources(p, slide, contract), contract, slotContract: templateSlotPrompt(p, index), edits });
 }
 function contentRepairPrompt(p, slide, index, draft, issues) {
-  const diagnostics = issues.map(item => ({ code: item.code, repair: item.repair, missingSupport: item.missingSupport || [], message: item.message })).slice(0, 6);
-  return `${contentPrompt(p, slide, index)}\n上一稿：${JSON.stringify({ title: draft.title, bullets: draft.bullets, copy: draft.copy, factSynthesis: draft.factSynthesis, slotTexts: draft.templateSlotTexts, omitTemplateShapes: draft.templateOmissions }).slice(0, 7000)}\n确定性检查结果：${JSON.stringify(diagnostics)}\n仅重写当前页。优先用给定来源补齐缺失的支撑类型；如果来源没有例子或数字，不得编造。标题超限时写更短的候选标题并将背景放入 subtitle。保持同一 JSON schema，只输出 JSON。`;
+  return writerRepairPrompt(contentPrompt(p, slide, index), draft, issues);
 }
 async function modelCall(p, prompt, activity, log, options = {}) {
   const sid = options.nodeKey ? sha256(Buffer.from(`${p.id}:${options.nodeKey}`)).slice(0, 32) : p.id;
@@ -247,6 +220,8 @@ async function modelCall(p, prompt, activity, log, options = {}) {
 const defaultDeps = { modelCall, renderPptx: project => project.templateFidelity?.mode === 'preserve' ? renderTemplatePptx(project) : renderPptx(project),
   prepareTemplateFidelity, renderPdf, extractFile, analyzeTemplate, readFile: files.readFile, removeContainer: orch.removeContainer };
 function normalizeSlide(value, outlineSlide, project = null, previousTitles = []) {
+  const index = project?.outline?.findIndex(item => item.id === outlineSlide.id) ?? -1;
+  value = canonicalWriterOutput(value || {}, project?.templateFidelity?.mode === 'preserve' ? project.templateFidelity.slides[index] : null);
   const visual = outlineSlide?.visualIntent?.type;
   const suggestedLayout = ({ image: 'image-text', comparison: 'comparison', pipeline: 'timeline', process: 'timeline', timeline: 'timeline', table: 'table', chart: 'chart', metric: 'big-number' })[visual];
   const compatible = suggestedLayout && (!['table', 'chart'].includes(suggestedLayout) || value?.blocks?.some(block => block.type === suggestedLayout));
@@ -471,7 +446,7 @@ function startOutline(uid, id, activity, log, deps = defaultDeps) {
         const initialIssues = [...inspectReportOutline(p, outline, initialPlanning.brief), ...inspectLongDeckOutline(p, outline)];
         const repairableIssues = initialIssues.filter(item => item.repairable !== false);
         if (repairableIssues.length) {
-          const repairPrompt = `${outlinePrompt(p)}\n初稿结构检查：${JSON.stringify(initialIssues.map(item => ({ code: item.code, message: item.message })))}。请在相同页数和有效来源编号内修订大纲，不改变用户锁定的标题，不虚构事实或证据。初稿：${JSON.stringify(rawOutline).slice(0, 14000)}。返回完整的同一 JSON schema。`;
+          const repairPrompt = `${outlinePrompt(p)}\n初稿结构检查：${JSON.stringify(initialIssues.map(item => ({ code: item.code, message: item.message })))}。请在相同页数和有效来源编号内修订大纲，不改变用户锁定的标题，不虚构事实或证据。初稿：${JSON.stringify(rawOutline)}。返回完整的同一 JSON schema。`;
           try {
             const revisedRaw = await deps.modelCall(p, repairPrompt, activity, log);
             const revisedOutline = normalizeOutline(revisedRaw, p.pages, p.source, p.update, p.deckTitle);
@@ -718,6 +693,66 @@ function startGeneration(uid, id, activity, log, deps = defaultDeps) {
         current = store.get(uid, id); if (!current || current.deletedAt || current.status !== 'generating') return;
         if (current.runtime?.pauseRequested) { await enqueueProject(uid, id, () => finishPause(store.get(uid, id))); return; }
       }
+      // Critic findings are actionable input to the writer, not just a final
+      // report. Persist the round bound so pause/recovery cannot loop forever.
+      for (;;) {
+        const targets = criticRewriteTargets(current, modelReview);
+        const prior = current.runtime?.criticRepair;
+        const round = prior?.runId === current.currentRunId ? prior.rounds || 0 : 0;
+        if (!targets.length || round >= 2) break;
+        current = await enqueueProject(uid, id, () => {
+          const latest = store.get(uid, id);
+          if (!lease.owns() || !latest || latest.deletedAt || latest.status !== 'generating') return null;
+          if (latest.runtime?.pauseRequested) { finishPause(latest); return null; }
+          if (latest.currentRunId !== current.currentRunId || semanticReviewKey(latest) !== reviewedInputHash) throw new Error('content changed before critic repair; retry after edits settle');
+          runtimeState(latest).criticRepair = { runId: latest.currentRunId, rounds: round + 1,
+            attempts: prior?.runId === latest.currentRunId ? prior.attempts || [] : [] };
+          store.save(latest); return latest;
+        });
+        if (!current) return;
+        for (const target of targets) {
+          const index = current.outline.findIndex(slide => slide.id === target.slideId);
+          const slide = current.outline[index];
+          const epoch = generationEpoch(current, slide.id);
+          const beforeKey = semanticReviewKey(current);
+          const draft = current.nodes[slide.id].slide;
+          const attemptKey = `content:${slide.id}:critic:${round + 1}`;
+          const started = Date.now();
+          const raw = await deps.modelCall(current, contentRepairPrompt(current, slide, index, draft, target.findings), activity, log, { nodeKey: attemptKey });
+          const candidate = normalizeSlide(raw, slide, current, current.deck.slides.slice(0, index).map(item => item.title));
+          current = await enqueueProject(uid, id, () => {
+            const latest = store.get(uid, id);
+            if (!lease.owns() || !latest || latest.deletedAt || latest.status !== 'generating') return null;
+            if (latest.runtime?.pauseRequested) { finishPause(latest); return null; }
+            if (latest.currentRunId !== current.currentRunId || generationEpoch(latest, slide.id) !== epoch || semanticReviewKey(latest) !== beforeKey)
+              throw new Error('content changed during critic repair; stale rewrite discarded');
+            if (criticRewriteTargets(latest, modelReview).some(item => item.slideId === slide.id)) {
+              latest.nodes[slide.id] = { ...latest.nodes[slide.id], status: 'done', slide: candidate };
+              latest.deck = ensureDeckV3(applyLayoutRegistry(applySourceImages({ schemaVersion: 2,
+                slides: latest.outline.map(item => latest.nodes[item.id].slide) }, latest.source)));
+              bindTemplateFidelity(latest); enrichAssetRefs(latest);
+              updateSlidePreview(latest, slide.id);
+              for (const stage of ['content', 'layout', 'preview', 'quality']) transitionNode(latest, `${stage}:${slide.id}`, 'completed',
+                { slideId: slide.id, epoch, criticRound: round + 1, inputHash: latest.runtime.slides[slide.id].contentHash, renderHash: latest.runtime.slides[slide.id].renderHash }, { useInput: true });
+              runtimeState(latest).criticRepair.attempts.push({ slideId: slide.id, nodeKey: attemptKey,
+                beforeHash: digest(draft), afterHash: digest(candidate), findings: target.findings, durationMs: Date.now() - started });
+              checkpoint(latest, 'critic-rewrite');
+            }
+            store.save(latest);
+            emitRunProgress(latest, 'slide.render_ready', { slideId: slide.id, epoch, criticRound: round + 1, renderHash: latest.runtime.slides[slide.id].renderHash });
+            return latest;
+          });
+          if (!current) return;
+        }
+        reviewedInputHash = semanticReviewKey(current);
+        modelReview = normalizeModelReview(await deps.modelCall(current, deckReviewPrompt(current), activity, log,
+          { nodeKey: `review:deck:critic:${round + 1}` }), current.deck.slides.map(slide => slide.id));
+        current = store.get(uid, id);
+        if (!current || current.deletedAt || current.status !== 'generating') return;
+        if (current.runtime?.pauseRequested) { await enqueueProject(uid, id, () => finishPause(current)); return; }
+        if (semanticReviewKey(current) !== reviewedInputHash) throw new Error('content changed during critic review; retry after edits settle');
+        initialReview = deterministicReview(current);
+      }
       const repairBaseline = semanticReviewKey(current);
       current.stage = 'repair'; store.save(current);
       try { transitionNode(current, 'quality', 'completed'); transitionNode(current, 'review', 'completed'); transitionNode(current, 'repair', 'running'); } catch {}
@@ -737,6 +772,8 @@ function startGeneration(uid, id, activity, log, deps = defaultDeps) {
       current.renderTree = buildRenderTree(current);
       for (const tree of current.renderTree.slides) runtimeState(current).slides[tree.id] = { ...current.runtime.slides[tree.id], preview: tree, renderHash: digest(tree) };
       bindReview(current, modelReview);
+      transitionNode(current, reviewNodeId, 'completed', { result: modelReview,
+        criticRounds: current.runtime?.criticRepair?.rounds || 0, inputHash: semanticReviewKey(current) }, { useInput: true });
       current.stage = 'publish'; store.save(current);
       try { transitionNode(current, 'repair', 'completed'); } catch {}
       if (current.quality.status === 'blocked') {
@@ -1272,12 +1309,13 @@ export async function handlePpt(req, url, { uid, send, res, readBody, activity, 
       const instruction = bounded(data.instruction, 1000, 'instruction');
       editing.add(id);
       try {
-        const source = (project.source?.segments || []).filter(item => slide.sourceRefs?.includes(item.id)).map(item => `[${item.id}] ${item.text}`).join('\n').slice(0, 8000);
+        const source = JSON.stringify(sourcePacket({ segments: (project.source?.segments || []).filter(item => slide.sourceRefs?.includes(item.id)) }, 12000));
         const block = data.blockId ? (slide.blocks || []).find(item => item.id === data.blockId) : null;
         if (data.blockId && (!block || !['image', 'shape'].includes(block.type))) throw new HttpError(400, 'only image captions and shape labels can be rewritten');
+        const localPolicy = `${promptPolicy({ ...project, prompt: `${project.prompt || ''}\n${instruction}` })}\n${writingGuide(project, slide.copy || {})}`;
         const prompt = block
-          ? `你只改写一个演示文稿视觉元素的文字，不调用工具，不改图片、图表数据、形状或坐标。用户指令：${instruction}\n元素原文：${block.type === 'image' ? block.caption : block.text}\n本页来源：${source || '无额外来源'}\n仅返回 JSON：{"text":"..."}，最多 100 字。`
-          : `你只修改一页演示文稿的标题和要点。不得调用工具、生成坐标、改变图表数据或添加没有来源的数字。用户指令：${instruction}\n当前页：${slide.title}\n${slide.bullets.join('\n')}\n来源：${source || '无额外来源'}\n仅返回 JSON：{"title":"...","bullets":["..."]}；不超过 6 个要点。`;
+          ? `${localPolicy}\n你只改写一个演示文稿视觉元素的文字，不调用工具，不改图片、图表数据、形状或坐标。用户指令：${instruction}\n元素原文：${block.type === 'image' ? block.caption : block.text}\n本页来源：${source || '无额外来源'}\n仅返回 JSON：{"text":"..."}，最多 100 字。`
+          : `${localPolicy}\n你只修改一页演示文稿的标题和要点。不得调用工具、生成坐标、改变图表数据或添加没有来源的数字。用户指令：${instruction}\n当前页：${slide.title}\n${slide.bullets.join('\n')}\n来源：${source || '无额外来源'}\n仅返回 JSON：{"title":"...","bullets":["..."]}；不超过 10 个要点，保留当前必要内容，不要为缩短而丢失机制、条件或对照。`;
         const result = await deps.modelCall(project, prompt, activity, log);
         const index = project.deck.slides.findIndex(item => item.id === slide.id);
         const raw = block ? { ...slide, blocks: slide.blocks.map(item => item.id === block.id

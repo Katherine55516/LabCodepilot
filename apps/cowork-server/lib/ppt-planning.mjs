@@ -2,9 +2,11 @@
 import { buildTerminologyRegistry, copyBudgetFor, requiredSupportFor } from './ppt-presentation-writing.mjs';
 import { evidenceRelevance, selectEvidenceForSlide } from './ppt-evidence.mjs';
 import { planSparseInput, pointBudgetFor, profilePptInput, sparsePageEstimate } from './ppt-content-depth.mjs';
+import { outputLanguage } from './ppt-prompt-contracts.mjs';
 
 const ROLES = new Set(['cover', 'section', 'thesis', 'problem', 'comparison', 'architecture', 'process', 'framework', 'evidence', 'metric', 'timeline', 'case', 'recommendation', 'summary', 'roadmap', 'closing', 'mechanism', 'system', 'runtime', 'decision', 'appendix']);
 const VISUALS = new Set(['none', 'hero', 'comparison', 'pipeline', 'architecture', 'timeline', 'matrix', 'cards', 'chart', 'table', 'metric', 'hub-and-spoke', 'before-after', 'process']);
+const userIntent = project => String(project?.prompt || '').replace(/\S+\.(?:md|txt|pdf|docx?|pptx?|html?)\b/giu, '');
 
 function bounded(value, max, fallback = '') {
   return typeof value === 'string' ? value.trim().slice(0, max) || fallback : fallback;
@@ -109,7 +111,7 @@ export function estimatePageRecommendation(project) {
     : Math.max(1, headings, Math.ceil(text.length / 2400), fileWeight);
   const detailWeight = Math.min(6, Math.ceil((tables + implementationSignals) / 10));
   // A filename is source metadata, not authorization to compress a tutorial.
-  const intent = String(project?.prompt || '').replace(/\S+\.(?:md|txt|pdf|docx?|pptx?|html?)\b/giu, '');
+  const intent = userIntent(project);
   const overviewIntent = /(?:\b(?:overview|survey)\b|概览|综述|导览|入门)/iu.test(intent);
   const chapters = (text.match(/^##\s+\d+[.)]\s+.+$/gm) || []).length;
   const overviewEstimate = overviewIntent && chapters >= 6 ? clamp(2 + Math.ceil(chapters / 1.75), 5, 100) : null;
@@ -188,18 +190,20 @@ export function normalizeBrief(value, project) {
     ? chunks.filter(chunk => chunk.priority === 'high').slice(0, 8).map(chunk => chunk.topic)
     : (project.contentPlan?.coreQuestions || []).slice(0, 8);
   const pageRecommendation = estimatePageRecommendation(project);
-  const requestedReport = /决策|管理层|行动建议|decision|executive/i.test(project.prompt || '') ? 'decision'
-    : /汇报|报告|report/i.test(project.prompt || '') ? 'informational' : 'presentation';
+  const intent = userIntent(project);
+  const requestedReport = /决策|管理层|行动建议|decision|executive/i.test(intent) ? 'decision'
+    : /汇报|报告|report/i.test(intent) ? 'informational' : 'presentation';
   const selectedReport = ['decision', 'informational', 'presentation'].includes(raw.reportMode) ? raw.reportMode : requestedReport;
   const reportMode = requestedReport === 'decision' ? 'decision'
     : requestedReport === 'informational' && selectedReport === 'presentation' ? 'informational' : selectedReport;
-  const requestedUse = /培训|课程|教学|tutorial|course|training|notebook/i.test(project.prompt || '') ? 'course_walkthrough'
+  const requestedUse = /培训|课程|教学|tutorial|course|training|notebook/i.test(intent) ? 'course_walkthrough'
     : reportMode !== 'presentation' ? 'workplace_report' : 'technical_explainer';
   const presentationUse = ['course_walkthrough', 'technical_explainer', 'workplace_report'].includes(raw.presentationUse)
     ? raw.presentationUse : requestedUse;
-  const conciseRequested = /摘要|简要|簡要|概览|概覽|overview|high.level|executive summary/iu.test(project.prompt || '');
+  const conciseRequested = /摘要|简要|簡要|概览|概覽|\b(?:overview|high.level|executive summary)\b/iu.test(intent);
   const richCourse = presentationUse === 'course_walkthrough' && chunks.length > project.pages * 2 && !conciseRequested;
   return {
+    outputLanguage: outputLanguage(project),
     goal: bounded(raw.goal, 240, project.prompt), audience: bounded(raw.audience, 160, '演示文稿读者'),
     objective: bounded(raw.objective, 240, project.prompt), thesis: bounded(raw.thesis, 360, project.prompt),
     reportMode, presentationUse, decisionQuestion: bounded(raw.decisionQuestion, 240), sourceScope: bounded(raw.sourceScope, 240,
@@ -209,9 +213,9 @@ export function normalizeBrief(value, project) {
     keyMessages: distinct(raw.keyMessages || raw.key_messages || defaultMessages, 12).map(item => item.slice(0, 160)),
     mustInclude: distinct(raw.mustInclude || raw.must_include || defaultMessages, 16).map(item => item.slice(0, 160)),
     slideBudget: project.pages, finalPageCount: project.pages, depthPolicy: pageRecommendation.depthPolicy,
-    evidencePolicy: project.contentPlan
-      ? '可解释通用概念、机制与示意框架；未经来源支持的组织专属数据、客户、项目、效果和数字不得输出'
-      : '只使用已提供来源；未经来源支持的数字和事实不得输出',
+    evidencePolicy: project.source?.segments?.length || project.update
+      ? '只使用已提供来源；未经来源支持的数字、引用和事实不得输出'
+      : '可解释通用概念、机制与示意框架；具体引用和数字需核实，未经核实的组织专属数据、客户、项目和效果不得输出',
   };
 }
 
@@ -343,7 +347,7 @@ export function slidePlan(outline, brief = {}, source = null, templateFidelity =
     // A preserved page has visible point regions of its own. Rich source pages
     // should plan against those regions, instead of carrying a generic three
     // point budget into a five or six point native layout.
-    const sourceDetailCount = new Set([...(slide.requiredDetails || []), ...(slide.supportingPoints || []),
+    const sourceDetailCount = new Set([...(slide.keyPoints || []).map(point => point.text), ...(slide.requiredDetails || []), ...(slide.supportingPoints || []),
       ...(slide.sourceTopics || [])].filter(Boolean).map(value => String(value).trim().toLocaleLowerCase())).size;
     const templatePointTarget = templateCapacity && index > 0 && index < outline.length - 1
       ? Math.min(templateCapacity, Math.max(density.semanticUnitBudget, richSource ? sourceDetailCount : 0)) : 0;
@@ -364,6 +368,7 @@ export function slidePlan(outline, brief = {}, source = null, templateFidelity =
     question: bounded(slide.question, 240, slide.focus), message: bounded(slide.focus, 360, slide.title), headlineIntent: bounded(slide.headlineIntent || slide.headline_intent, 160, slide.focus),
     audienceTakeaway: bounded(slide.audienceTakeaway || slide.audience_takeaway || slide.takeaway, 240, slide.focus),
     sourceRefs: [...(slide.refs || [])], sourceChunks: [...(slide.chunkRefs || [])], sourceTopics: distinct(slide.sourceTopics || slide.source_topics, 8).map(item => item.slice(0, 120)),
+    keyPoints: slide.keyPoints || [],
     supportingPoints: distinct(slide.supportingPoints, 6).map(item => item.slice(0, 160)),
     requiredSupport: requiredSupportFor(role, depth, slide.requiredSupport || slide.required_support || slide.supportingPoints),
     requiredDetails: sourceBackedDetails(slide, source),
@@ -373,7 +378,7 @@ export function slidePlan(outline, brief = {}, source = null, templateFidelity =
       semanticUnitBudget: templatePointTarget || Math.min(templateCapacity, density.semanticUnitBudget) } : {}),
     transitionFromPrevious: bounded(slide.transitionFromPrevious || slide.transition_from_previous, 180, index ? outline[index - 1]?.focus : ''),
     transitionToNext: bounded(slide.transitionToNext || slide.transition_to_next, 180, index < outline.length - 1 ? outline[index + 1]?.focus : ''),
-    copyBudget: copyBudgetFor(role, slide.layoutId),
+    copyBudget: copyBudgetFor(role, slide.layoutId, templateFidelity?.mode === 'preserve' ? undefined : outputLanguage({ source, prompt: brief.goal, outputLanguage: brief.outputLanguage })),
   }); });
 }
 
@@ -464,7 +469,7 @@ export function retrieveSlideSources(project, outlineSlide, contract, maxChunks 
     .map(id => atomById.get(id)).filter(Boolean);
   const lockedChunks = new Set(locked.map(atom => atom.chunkId));
   const lockedRefs = [...new Set(locked.flatMap(atom => atom.sourceRefs || [atom.sourceRef]).filter(Boolean))];
-  const query = [contract?.message, contract?.question, ...(contract?.requiredSupport || []), ...(contract?.sourceTopics || []), outlineSlide?.focus, outlineSlide?.title].filter(Boolean).join(' ');
+  const query = [contract?.message, contract?.question, ...(outlineSlide?.keyPoints || []).map(point => point.text), ...(contract?.requiredSupport || []), ...(contract?.sourceTopics || []), outlineSlide?.focus, outlineSlide?.title].filter(Boolean).join(' ');
   const wanted = retrievalTokens(query);
   const direct = new Set(outlineSlide?.chunkRefs || contract?.sourceChunks || []);
   const directRefs = new Set(outlineSlide?.refs || contract?.sourceRefs || []);
@@ -487,5 +492,6 @@ export function retrieveSlideSources(project, outlineSlide, contract, maxChunks 
     .filter(item => item.score >= .12).sort((a, b) => b.score - a.score || a.atom.id.localeCompare(b.atom.id))
     .slice(0, Math.max(8, locked.length)).map(item => item.atom);
   return { version: 2, query: query.slice(0, 600), chunkIds: scored.map(chunk => chunk.id), sourceRefs,
+    requiredChunkIds: [...new Set([...lockedChunks, ...direct])],
     requiredEvidenceIds: locked.map(atom => atom.id), evidenceAtoms: selectedEvidence, chunks: scored, segments };
 }

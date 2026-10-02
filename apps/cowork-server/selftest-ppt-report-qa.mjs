@@ -48,6 +48,6 @@ const writingProject = { ...good, planning: { ...good.planning, brief: { ...good
 prompt: 'MCP 汇报', pages: 8, deckTitle: { source: 'agent' } };
 const reportPrompt = pptInternals.contentPrompt(writingProject, writingProject.outline[1], 1);
 assert.match(reportPrompt, /选择哪条调用路径/);
-assert.match(reportPrompt, /每个要点写/);
-assert.match(reportPrompt, /来源不足/);
+assert.match(reportPrompt, /每个要点＝短名称＋完整解释/);
+assert.match(reportPrompt, /数据限制和不确定性必须可见/);
 console.log('PPT report readiness, evidence, distribution and copy checks: OK');
