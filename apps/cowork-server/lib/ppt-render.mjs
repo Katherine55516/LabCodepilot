@@ -221,8 +221,12 @@ def render_scene_element(slide, element):
     kind = element['kind']; content = element.get('content') or {}; item_style = element.get('style') or {}
     color = scene_color(item_style.get('color'), muted)
     size = float(item_style.get('fontSizePt') or 18)
+    source=element.get('sourceArtifact') or {}
+    source_name='AIMate source:'+str(source.get('sourceUnitId',''))+':'+str(source.get('type',''))
     if kind == 'text':
         shape = slide.shapes.add_textbox(x, y, w, h); para = shape.text_frame.paragraphs[0]
+        if source: shape.name=source_name
+        if element.get('sourceArtifact') and item_style.get('fill'): shape.fill.solid(); shape.fill.fore_color.rgb=scene_color(item_style['fill'],RGBColor(255,255,255))
         para.text = str(content.get('text') or '')
         para.line_spacing = float(item_style.get('lineHeight') or 1.12)
         para.space_after = Pt(size * float(item_style.get('paragraphSpacingEm') or 0))
@@ -261,6 +265,8 @@ def render_scene_element(slide, element):
                 cjk_font(body_para, point_size, color)
             return
         shape = slide.shapes.add_textbox(x, y, w, h); shape.text_frame.word_wrap = True
+        if source: shape.name=source_name
+        if element.get('sourceArtifact') and item_style.get('fill'): shape.fill.solid(); shape.fill.fore_color.rgb=scene_color(item_style['fill'],RGBColor(255,255,255))
         for number, item in enumerate(items):
             para = shape.text_frame.paragraphs[0] if number == 0 else shape.text_frame.add_paragraph()
             prefix = (str(number + 1).zfill(2) + '  ') if kind == 'timeline' else ('' if kind == 'metric' and number == 0 else '•  ')
@@ -275,6 +281,18 @@ def render_scene_element(slide, element):
         if kind == 'shape':
             block.setdefault('shape', 'rectangle'); block.setdefault('fill', item_style.get('fill') or '#64748b'); block.setdefault('text', '')
         rendered = visual(slide, block, x, y, w, h, accent, fg)
+        if source and rendered is not None: rendered.name=source_name
+        if kind == 'table' and element.get('sourceArtifact'):
+            table=rendered.table
+            weights=content.get('columnWeights') or [1]*len(table.columns)
+            for column,weight in zip(table.columns,weights): column.width=int(w*weight/sum(weights))
+            weights=content.get('rowWeights') or [1]*len(table.rows)
+            for row,weight in zip(table.rows,weights): row.height=int(h*weight/sum(weights))
+            for r,row in enumerate(table.rows):
+                for cell in row.cells:
+                    cell.margin_top=cell.margin_bottom=Pt(3)
+                    cell.fill.fore_color.rgb=scene_color(item_style.get('fill'),RGBColor(*accent)) if r==0 else RGBColor(255,255,255)
+                    for paragraph in cell.text_frame.paragraphs: cjk_font(paragraph,size,color,r==0)
         for shape in rendered if isinstance(rendered, list) else [rendered]:
             if shape is not None: shape.rotation = float(element.get('rotation') or 0)
         return

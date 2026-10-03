@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { withSemanticIndex } from './lib/ppt-semantic.mjs';
-import { evidenceMeasurements, evidenceVisible, missingRequiredEvidence } from './lib/ppt-evidence.mjs';
+import { evidenceMeasurements, evidenceVisible, missingRequiredEvidence, selectEvidenceForSlide } from './lib/ppt-evidence.mjs';
 import { buildPlanning, retrieveSlideSources } from './lib/ppt-planning.mjs';
 import { inspectContent } from './lib/ppt-content-qa.mjs';
 import { finalQualityReport, normalizeModelReview } from './lib/ppt-quality.mjs';
@@ -23,6 +23,8 @@ assert.ok(evidenceMeasurements('10,000 TPS/GPU').length === 1);
 assert.equal(evidenceVisible(atom, 'At 1k/1k load, GB200 delivered approximately 10,000 TPS/GPU.'), false,
   'one value from a multi-value source sentence cannot stand in for complete evidence');
 assert.equal(evidenceVisible(atom, 'At 1k/1k load, GB200 delivered about 10,000 TPS/GPU and 50 TPS/user, roughly 4× H200.'), true);
+assert.equal(evidenceVisible({ kind: 'example', exactText: String.raw`\mu - r_f\mathbf{1} \propto \Sigma\, w_{mkt}` },
+  'μ − r_f1 ∝ Σw_mkt'), true, 'source equations written in LaTeX match equivalent Unicode notation in the rendered slide');
 
 const outline = [
   { id: 'cover', title: 'Compression', focus: 'Compression', role: 'cover', refs: ['1'], chunkRefs: [source.semantic.chunks[0].id] },
@@ -37,6 +39,26 @@ const retrieval = retrieveSlideSources({ ...project, planning }, outline[1], pla
 assert.ok(retrieval.sourceRefs.includes('20'), 'locked evidence may not be cut by the first-12-ref limit');
 assert.ok(retrieval.evidenceAtoms.some(item => item.id === atom.id));
 assert.equal(retrieval.requiredEvidenceIds[0], atom.id);
+
+// When a slide carries precise semantic chunk IDs, overlapping segment refs
+// must not attach a neighboring chapter's facts or evidence to that slide.
+const neighboringAtom = { ...atom, id: 'e_neighboring_chapter', chunkId: 'neighboring-chapter' };
+const neighboringChunk = { id: 'neighboring-chapter', sourceRefs: ['20'], topic: 'Velvet quartz',
+  text: 'Velvet quartz orchid.' };
+const scopedSource = { ...source, semantic: { ...source.semantic,
+  chunks: [...source.semantic.chunks, neighboringChunk], evidenceAtoms: [...source.semantic.evidenceAtoms, neighboringAtom] } };
+const scopedSlide = { title: 'Serving throughput evidence', focus: 'Compare the serving benchmark',
+  chunkRefs: [atom.chunkId], refs: ['20'], visualIntent: { type: 'metric' } };
+assert.deepEqual(selectEvidenceForSlide(scopedSource, scopedSlide, 5), [atom.id],
+  'chunk IDs take precedence over overlapping segment refs when selecting evidence');
+const scopedOutline = [outline[0], { ...outline[1], requiredEvidenceIds: [neighboringAtom.id] }, outline[2]];
+const scopedPlanning = buildPlanning({ ...project, source: scopedSource },
+  { brief: { audience: 'Engineers', presentationUse: 'technical_explainer' } }, scopedOutline);
+assert.deepEqual(scopedPlanning.slidePlan[1].requiredEvidenceIds, [atom.id],
+  'an evidence ID from an adjacent chunk is rejected even when it shares a segment ref');
+const scopedRetrieval = retrieveSlideSources({ ...project, source: scopedSource }, scopedOutline[1], scopedPlanning.slidePlan[1]);
+assert.ok(!scopedRetrieval.chunkIds.includes('neighboring-chapter'),
+  'retrieval does not widen a precise chunk selection through an overlapping segment ref');
 
 const missingSlide = { id: 'evidence', title: 'Serving throughput evidence', bullets: ['Throughput improves.'], sourceRefs: ['20'] };
 assert.deepEqual(missingRequiredEvidence({ source }, missingSlide, planning.slidePlan[1]).map(item => item.id), [atom.id]);
@@ -101,4 +123,12 @@ const reusedMedia = { templateFidelity: { mode: 'preserve', width: 100, height: 
 const mediaIssues = inspectTemplateFidelity(reusedMedia);
 assert.ok(mediaIssues.some(item => item.code === 'template_dominant_media_reuse'));
 assert.ok(mediaIssues.some(item => item.code === 'template_semantic_media_mismatch'));
+const calloutImage = { type: 'image', geometry: { x: 70, y: 550, width: 1425, height: 165 },
+  content: { dataUrl: 'data:image/png;base64,placeholder' } };
+const calloutText = { type: 'text', geometry: { x: 86, y: 580, width: 1390, height: 100 },
+  content: { text: 'A new source-grounded callout.' } };
+assert.equal(fidelity.safeDecorativeMedia(calloutImage, { width: 1600, height: 900 },
+  { nodes: [calloutImage, calloutText] }), true, 'a wide raster banner behind editable text keeps its styling');
+assert.equal(fidelity.textOverlayCalloutPanel(calloutImage, { width: 1600, height: 900 },
+  { nodes: [calloutImage, calloutText] }), true, 'a text-backed callout retains its original high-contrast panel instead of receiving an unrelated generated image');
 console.log('PPT evidence atoms, retrieval, visible QA, publish gate and template read order: OK');

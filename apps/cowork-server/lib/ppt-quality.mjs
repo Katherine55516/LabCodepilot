@@ -121,7 +121,7 @@ export function deterministicReview(project, deckInput = project.deck) {
   deck.slides.forEach((slide, index) => {
     const layout = layoutFor(slide.layoutId);
     const contract = project.planning?.slidePlan?.find(item => item.slideId === slide.id) || {};
-    if (index > 0 && !slide.manualBlank && !(slide.bullets || []).length && !(slide.blocks || []).length) {
+    if (index > 0 && !slide.manualBlank && !(slide.bullets || []).length && !(slide.blocks || []).length && !(slide.nodes || []).some(node => node.sourceArtifact && (node.content?.text || node.content?.items?.length || node.content?.rows?.length))) {
       issues.push(issue('content_empty', 'error', '内容页没有正文或视觉元素', slide.id));
     }
     if (!layout) issues.push(issue('layout_unknown', 'error', `未知版式 ${slide.layoutId}`, slide.id, true));

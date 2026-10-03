@@ -92,7 +92,7 @@ export function PptM3({ mode, projects, models, modelKey = '', baseProjectId, on
   async function task(work: () => Promise<void>) { setBusy(true); setError(''); try { await work(); } catch (cause) { setError((cause as Error).message); } finally { setBusy(false); } }
   async function uploadTemplate() {
     if (!upload) return;
-    await task(async () => { await call('templates', 'POST', { fileName: upload.name, fileBase64: await toBase64(upload) }); setUpload(null); setUploadOpen(false); await refresh(); });
+    await task(async () => { const response = await fetch(`/api/ppt/templates?fileName=${encodeURIComponent(upload.name)}`, { method: 'POST', headers: { 'content-type': 'application/octet-stream' }, body: upload }); const result = await response.json(); if (!response.ok) throw new Error(result.error || 'Template upload failed'); setUpload(null); setUploadOpen(false); await refresh(); });
   }
   async function editTemplate(item: PptTemplate, action: 'pin' | 'delete') {
     if (action === 'delete' && deleteTarget?.id !== item.id) { setDeleteTarget(item); return; }

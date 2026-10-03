@@ -1192,7 +1192,9 @@ test('PPT M3 template compatibility and version update workflow @smoke', async (
   await page.route('**/api/ppt/templates**', (route) => {
     if (route.request().method() === 'GET') return route.fulfill({ json: { templates } });
     if (route.request().method() === 'POST') {
-      expect(route.request().postDataJSON().fileName).toBe('brand.pptx');
+      expect(new URL(route.request().url()).searchParams.get('fileName')).toBe('brand.pptx');
+      expect(route.request().headers()['content-type']).toBe('application/octet-stream');
+      expect(route.request().postDataBuffer()).toEqual(Buffer.from('PKsample'));
       templates.push(custom);
       return route.fulfill({ status: 201, json: { template: custom } });
     }

@@ -19,8 +19,14 @@ function chart(element, x, y, w, h) {
 
 function table(element, x, y, w, h) {
   const rows = element.content?.rows || []; const columns = rows[0]?.length || 0; if (!rows.length || !columns) return '';
-  const cellW = w / columns; const cellH = h / rows.length; let result = '';
-  rows.forEach((row, rowIndex) => row.forEach((cell, columnIndex) => { const cx = x + columnIndex * cellW; const cy = y + rowIndex * cellH; result += `<rect x="${cx}" y="${cy}" width="${cellW}" height="${cellH}" fill="${rowIndex === 0 ? esc(element.style?.fill || '#e7e5f4') : 'none'}" stroke="${esc(element.style?.color || '#777777')}" stroke-opacity=".35"/><text x="${cx + 7}" y="${cy + Math.min(cellH - 4, 16)}" font-size="11" fill="${esc(element.style?.color || '#111827')}">${esc(cell)}</text>`; })); return result;
+  const weights=element.content?.columnWeights || Array(columns).fill(1), sum=weights.reduce((a,b)=>a+b,0);
+  const rowWeights=element.content?.rowWeights || Array(rows.length).fill(1), rowSum=rowWeights.reduce((a,b)=>a+b,0);
+  const font=Number(element.style?.fontSizePt || 14)*96/72;
+  let cy=y; let result='';
+  rows.forEach((row,rowIndex)=>{ let cx=x; const cellH=h*rowWeights[rowIndex]/rowSum;
+    row.forEach((cell,columnIndex)=>{const cellW=w*weights[columnIndex]/sum;
+      result+=`<rect x="${cx}" y="${cy}" width="${cellW}" height="${cellH}" fill="${rowIndex===0?esc(element.style?.fill||'#e7e5f4'):'#ffffff'}" stroke="#777777" stroke-width="9525" stroke-opacity=".35"/><foreignObject x="${cx}" y="${cy}" width="${cellW}" height="${cellH}"><div xmlns="http://www.w3.org/1999/xhtml" style="box-sizing:border-box;width:${cellW/9525}px;height:${cellH/9525}px;overflow:hidden;transform:scale(9525);transform-origin:top left;padding:4px 7px;white-space:pre-wrap;overflow-wrap:break-word;font-family:${esc(element.style?.fontFamily||'sans-serif')},'${esc(element.style?.eastAsiaFontFamily||'sans-serif')}',sans-serif;font-size:${font}px;line-height:1.18;font-weight:${rowIndex===0?700:400};color:${esc(element.style?.color||'#111827')}">${esc(cell)}</div></foreignObject>`;
+      cx+=cellW; }); cy+=cellH; }); return result;
 }
 
 export function slideSvg(slide) {

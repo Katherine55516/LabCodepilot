@@ -1,0 +1,832 @@
+
+Running 183 tests using 3 workers
+
+[1/183] src/__tests__/e2e/chat-enhanced.spec.ts:7:16 › Chat UI Enhanced (V2) › Code Block Display › code blocks have dark background header bar when present
+(node:87342) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+(node:87343) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+(node:87344) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+(node:87342) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+(node:87343) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[2/183] src/__tests__/e2e/chat-enhanced.spec.ts:52:20 › Chat UI Enhanced (V2) › Tool Call Display › tool blocks render with expand/collapse toggle
+[3/183] src/__tests__/e2e/chat-enhanced.spec.ts:63:20 › Chat UI Enhanced (V2) › Tool Call Display › tool call labels have correct styling classes
+(node:87344) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[4/183] src/__tests__/e2e/chat-enhanced.spec.ts:35:20 › Chat UI Enhanced (V2) › Code Block Display › code blocks have copy button when present
+[5/183] src/__tests__/e2e/chat-enhanced.spec.ts:71:20 › Chat UI Enhanced (V2) › Tool Call Display › tool result labels have correct styling classes
+[6/183] src/__tests__/e2e/chat-enhanced.spec.ts:80:20 › Chat UI Enhanced (V2) › Message Layout (V2) › user messages render as right-aligned bubble
+[7/183] src/__tests__/e2e/chat-enhanced.spec.ts:93:20 › Chat UI Enhanced (V2) › Message Layout (V2) › assistant messages render with gradient avatar
+  1) src/__tests__/e2e/chat-enhanced.spec.ts:80:20 › Chat UI Enhanced (V2) › Message Layout (V2) › user messages render as right-aligned bubble
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: locator('.is-user').first()
+    Expected: visible
+    Timeout: 5000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toBeVisible" with timeout 5000ms
+      - waiting for locator('.is-user').first()
+
+
+      87 |     });
+      88 |
+    > 89 |     test('tool result labels have correct styling classes', async ({ page }) => {
+         |                                                                 ^
+      90 |       const labels = toolResultLabels(page);
+      91 |       const count = await labels.count();
+      92 |       expect(count).toBeGreaterThanOrEqual(0);
+        at /Users/dongli/Documents/ChatGPT/CodePilot/LabCodepilot-para/src/__tests__/e2e/chat-enhanced.spec.ts:89:65
+
+    Error Context: test-results/chat-enhanced-Chat-UI-Enha-3ac9c-der-as-right-aligned-bubble/error-context.md
+
+
+[8/183] src/__tests__/e2e/chat-enhanced.spec.ts:104:16 › Chat UI Enhanced (V2) › Message Layout (V2) › user messages have User icon avatar
+(node:87487) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+(node:87487) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[9/183] src/__tests__/e2e/chat-enhanced.spec.ts:114:20 › Chat UI Enhanced (V2) › Message Layout (V2) › assistant messages have Bot icon avatar
+  2) src/__tests__/e2e/chat-enhanced.spec.ts:35:20 › Chat UI Enhanced (V2) › Code Block Display › code blocks have copy button when present
+
+    Test timeout of 30000ms exceeded.
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: locator('.is-assistant').first()
+    Expected: visible
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toBeVisible" with timeout 30000ms
+      - waiting for locator('.is-assistant').first()
+
+
+      38 |         page.locator('.is-assistant').first()
+      39 |       ).toBeVisible({ timeout: 30_000 });
+    > 40 |
+         | ^
+      41 |       // Wait for streaming to complete
+      42 |       await waitForStreamingEnd(page);
+      43 |
+        at /Users/dongli/Documents/ChatGPT/CodePilot/LabCodepilot-para/src/__tests__/e2e/chat-enhanced.spec.ts:40:70
+
+    Error Context: test-results/chat-enhanced-Chat-UI-Enha-7b84b-ve-copy-button-when-present/error-context.md
+
+
+(node:87575) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+(node:87575) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[10/183] src/__tests__/e2e/chat-enhanced.spec.ts:127:20 › Chat UI Enhanced (V2) › Input Box Features (V2) › textarea renders with the default placeholder
+  3) src/__tests__/e2e/chat-enhanced.spec.ts:127:20 › Chat UI Enhanced (V2) › Input Box Features (V2) › textarea renders with the default placeholder
+
+    Error: expect(received).toMatch(expected)
+
+    Expected pattern: /message\s*claude/i
+    Received string:  "发送消息..."
+
+      133 |       await expect(
+      134 |         page.locator('.is-assistant').first()
+    > 135 |       ).toBeVisible({ timeout: 30_000 });
+          |                                      ^
+      136 |     });
+      137 |   });
+      138 |
+        at /Users/dongli/Documents/ChatGPT/CodePilot/LabCodepilot-para/src/__tests__/e2e/chat-enhanced.spec.ts:135:38
+
+    Error Context: test-results/chat-enhanced-Chat-UI-Enha-a0d57-ith-the-default-placeholder/error-context.md
+
+
+  4) src/__tests__/e2e/chat-enhanced.spec.ts:93:20 › Chat UI Enhanced (V2) › Message Layout (V2) › assistant messages render with gradient avatar
+
+    Test timeout of 30000ms exceeded.
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: locator('.is-assistant').first()
+    Expected: visible
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toBeVisible" with timeout 30000ms
+      - waiting for locator('.is-assistant').first()
+
+
+       98 |       await goToChat(page);
+       99 |       await sendMessage(page, 'Hello');
+    > 100 |
+          | ^
+      101 |       // ai-elements `<Message from="user">` adds `.is-user` + `ml-auto` to
+      102 |       // the wrapper. The old `.justify-end .bg-primary` pair was a V2-era
+      103 |       // styling hook that no longer exists.
+        at /Users/dongli/Documents/ChatGPT/CodePilot/LabCodepilot-para/src/__tests__/e2e/chat-enhanced.spec.ts:100:70
+
+    Error Context: test-results/chat-enhanced-Chat-UI-Enha-7c27a-render-with-gradient-avatar/error-context.md
+
+
+(node:87597) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+(node:87598) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+(node:87597) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+(node:87598) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[11/183] src/__tests__/e2e/chat-enhanced.spec.ts:137:20 › Chat UI Enhanced (V2) › Input Box Features (V2) › send button is visible with stable aria-label
+[12/183] src/__tests__/e2e/chat-enhanced.spec.ts:148:20 › Chat UI Enhanced (V2) › Input Box Features (V2) › stop button appears during streaming
+[13/183] src/__tests__/e2e/chat-enhanced.spec.ts:159:20 › Chat UI Enhanced (V2) › Input Box Features (V2) › stop button replaces send button during streaming
+  5) src/__tests__/e2e/chat-enhanced.spec.ts:114:20 › Chat UI Enhanced (V2) › Message Layout (V2) › assistant messages have Bot icon avatar
+
+    Test timeout of 30000ms exceeded.
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: locator('.is-assistant').first()
+    Expected: visible
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toBeVisible" with timeout 30000ms
+      - waiting for locator('.is-assistant').first()
+
+
+      119 |     test.skip('user messages have User icon avatar', async ({ page }) => {
+      120 |       // The user-message avatar was removed when ai-elements Message moved
+    > 121 |       // to the bubble-only style; `.bg-secondary:has(svg)` no longer
+          |                                                                      ^
+      122 |       // matches any sidebar/composer-neutral element either. Skip until a
+      123 |       // UX decision on bringing the avatar back vs dropping this test.
+      124 |       await goToChat(page);
+        at /Users/dongli/Documents/ChatGPT/CodePilot/LabCodepilot-para/src/__tests__/e2e/chat-enhanced.spec.ts:121:70
+
+    Error Context: test-results/chat-enhanced-Chat-UI-Enha-80e7f-ssages-have-Bot-icon-avatar/error-context.md
+
+
+[14/183] src/__tests__/e2e/chat-enhanced.spec.ts:172:16 › Chat UI Enhanced (V2) › Input Box Features (V2) › helper text is displayed below input
+(node:87658) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+(node:87658) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[15/183] src/__tests__/e2e/chat-enhanced.spec.ts:180:20 › Chat UI Enhanced (V2) › Input Box Features (V2) › input box renders inside a rounded border wrapper
+[16/183] src/__tests__/e2e/chat-enhanced.spec.ts:191:20 › Chat UI Enhanced (V2) › Token Usage Display › token usage shows input/output counts after response
+  6) src/__tests__/e2e/chat-enhanced.spec.ts:148:20 › Chat UI Enhanced (V2) › Input Box Features (V2) › stop button appears during streaming
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: locator('button[aria-label="Stop"]')
+    Expected: visible
+    Timeout: 10000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toBeVisible" with timeout 10000ms
+      - waiting for locator('button[aria-label="Stop"]')
+
+
+      152 |       await expect(btn).toBeVisible();
+      153 |       // The ai-elements PromptInputSubmit sets aria-label="Submit" when
+    > 154 |       // idle; `sendButton()` already keys on this, assert it here too so a
+          |                                     ^
+      155 |       // rename shows up as a targeted failure.
+      156 |       await expect(btn).toHaveAttribute('aria-label', 'Submit');
+      157 |     });
+        at /Users/dongli/Documents/ChatGPT/CodePilot/LabCodepilot-para/src/__tests__/e2e/chat-enhanced.spec.ts:154:37
+
+    Error Context: test-results/chat-enhanced-Chat-UI-Enha-97653-on-appears-during-streaming/error-context.md
+
+
+(node:87697) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+(node:87697) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[17/183] src/__tests__/e2e/chat-enhanced.spec.ts:220:20 › Chat UI Enhanced (V2) › Streaming Status › send button returns after streaming completes
+[18/183] src/__tests__/e2e/chat-enhanced.spec.ts:209:20 › Chat UI Enhanced (V2) › Streaming Status › streaming activates on message send
+  7) src/__tests__/e2e/chat-enhanced.spec.ts:159:20 › Chat UI Enhanced (V2) › Input Box Features (V2) › stop button replaces send button during streaming
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: locator('button[aria-label="Stop"]')
+    Expected: visible
+    Timeout: 10000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toBeVisible" with timeout 10000ms
+      - waiting for locator('button[aria-label="Stop"]')
+
+
+      166 |     });
+      167 |
+    > 168 |     test('stop button replaces send button during streaming', async ({ page }) => {
+          |                                                               ^
+      169 |       await goToChat(page);
+      170 |       await sendMessage(page, 'Hello world');
+      171 |
+        at /Users/dongli/Documents/ChatGPT/CodePilot/LabCodepilot-para/src/__tests__/e2e/chat-enhanced.spec.ts:168:63
+
+    Error Context: test-results/chat-enhanced-Chat-UI-Enha-fc9bf-end-button-during-streaming/error-context.md
+
+
+(node:87710) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[19/183] src/__tests__/e2e/chat-enhanced.spec.ts:253:20 › Chat UI Enhanced (V2) › No Console Errors › chat page has no console errors
+(node:87710) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[20/183] src/__tests__/e2e/chat-enhanced.spec.ts:232:20 › Chat UI Enhanced (V2) › Streaming Status › clicking stop button halts streaming
+[21/183] src/__tests__/e2e/chat.spec.ts:7:20 › Chat Page › Page Rendering › home page redirects to /chat
+[22/183] src/__tests__/e2e/chat.spec.ts:14:20 › Chat Page › Page Rendering › chat page loads within 3 seconds
+[23/183] src/__tests__/e2e/chat.spec.ts:19:20 › Chat Page › Page Rendering › chat page has no console errors
+[24/183] src/__tests__/e2e/chat.spec.ts:27:20 › Chat Page › Page Rendering › chat page shows empty state when no messages
+  8) src/__tests__/e2e/chat-enhanced.spec.ts:209:20 › Chat UI Enhanced (V2) › Streaming Status › streaming activates on message send
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: locator('button[aria-label="Stop"]')
+    Expected: visible
+    Timeout: 10000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toBeVisible" with timeout 10000ms
+      - waiting for locator('button[aria-label="Stop"]')
+
+
+      214 |       await sendMessage(page, 'Hello');
+      215 |
+    > 216 |       // Stop button should appear (indicating streaming)
+          |                                                          ^
+      217 |       await expect(stopButton(page)).toBeVisible({ timeout: 10_000 });
+      218 |     });
+      219 |
+        at /Users/dongli/Documents/ChatGPT/CodePilot/LabCodepilot-para/src/__tests__/e2e/chat-enhanced.spec.ts:216:63
+
+    Error Context: test-results/chat-enhanced-Chat-UI-Enha-7d750-g-activates-on-message-send/error-context.md
+
+
+(node:87801) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+(node:87801) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[25/183] src/__tests__/e2e/chat.spec.ts:44:20 › Chat Page › Chat UI Elements › New Chat button is visible in sidebar
+  9) src/__tests__/e2e/chat-enhanced.spec.ts:232:20 › Chat UI Enhanced (V2) › Streaming Status › clicking stop button halts streaming
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: locator('button[aria-label="Stop"]')
+    Expected: visible
+    Timeout: 10000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toBeVisible" with timeout 10000ms
+      - waiting for locator('button[aria-label="Stop"]')
+
+
+      237 |
+      238 |       // Click stop
+    > 239 |       await stopButton(page).click();
+          |                                      ^
+      240 |
+      241 |       // Send button should return
+      242 |       await expect(sendButton(page)).toBeVisible({ timeout: 10_000 });
+        at /Users/dongli/Documents/ChatGPT/CodePilot/LabCodepilot-para/src/__tests__/e2e/chat-enhanced.spec.ts:239:63
+
+    Error Context: test-results/chat-enhanced-Chat-UI-Enha-9a5ca-stop-button-halts-streaming/error-context.md
+
+
+(node:87807) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+  10) src/__tests__/e2e/chat.spec.ts:27:20 › Chat Page › Page Rendering › chat page shows empty state when no messages
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: getByRole('heading', { name: /(AI Native Lab|对话)/i }).first()
+    Expected: visible
+    Timeout: 5000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toBeVisible" with timeout 5000ms
+      - waiting for getByRole('heading', { name: /(AI Native Lab|对话)/i }).first()
+
+
+      35 |       const critical = filterCriticalErrors(errors);
+      36 |       expect(critical).toHaveLength(0);
+    > 37 |     });
+         |        ^
+      38 |
+      39 |     test('chat page shows empty state when no messages', async ({ page }) => {
+      40 |       await goToChat(page);
+        at /Users/dongli/Documents/ChatGPT/CodePilot/LabCodepilot-para/src/__tests__/e2e/chat.spec.ts:37:19
+
+    Error Context: test-results/chat-Chat-Page-Page-Render-57d52-mpty-state-when-no-messages/error-context.md
+
+
+(node:87814) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+(node:87807) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[26/183] src/__tests__/e2e/chat.spec.ts:50:20 › Chat Page › Chat UI Elements › chat textarea is visible with correct placeholder
+[27/183] src/__tests__/e2e/chat.spec.ts:68:16 › Chat Page › Chat UI Elements › helper text is displayed below input
+[28/183] src/__tests__/e2e/chat.spec.ts:80:20 › Chat Page › Send Message › can type in chat input
+(node:87814) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[29/183] src/__tests__/e2e/chat.spec.ts:62:20 › Chat Page › Chat UI Elements › send button is visible
+[30/183] src/__tests__/e2e/chat.spec.ts:88:16 › Chat Page › Send Message › send a message and see it in the conversation
+[31/183] src/__tests__/e2e/chat.spec.ts:99:20 › Chat Page › Send Message › stop button replaces send button during streaming
+  11) src/__tests__/e2e/chat.spec.ts:50:20 › Chat Page › Chat UI Elements › chat textarea is visible with correct placeholder
+
+    Error: expect(received).toMatch(expected)
+
+    Expected pattern: /message\s*claude/i
+    Received string:  "发送消息..."
+
+      58 |     });
+      59 |
+    > 60 |     test('chat textarea is visible with correct placeholder', async ({ page }) => {
+         |                                      ^
+      61 |       await goToChat(page);
+      62 |       const input = chatInput(page);
+      63 |       await expect(input).toBeVisible();
+        at /Users/dongli/Documents/ChatGPT/CodePilot/LabCodepilot-para/src/__tests__/e2e/chat.spec.ts:60:38
+
+    Error Context: test-results/chat-Chat-Page-Chat-UI-Ele-c58cc-le-with-correct-placeholder/error-context.md
+
+
+(node:87855) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[32/183] src/__tests__/e2e/chat.spec.ts:125:20 › Chat Page › Streaming Response › assistant avatar appears for assistant response
+(node:87855) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[33/183] src/__tests__/e2e/chat.spec.ts:114:20 › Chat Page › Streaming Response › stop button appears during streaming
+  12) src/__tests__/e2e/chat.spec.ts:99:20 › Chat Page › Send Message › stop button replaces send button during streaming
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: locator('button[aria-label="Stop"]')
+    Expected: visible
+    Timeout: 10000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toBeVisible" with timeout 10000ms
+      - waiting for locator('button[aria-label="Stop"]')
+
+
+      106 |       await sendMessage(page, 'Hello');
+      107 |
+    > 108 |       // Post-PromptInput refactor the textarea is no longer disabled mid-
+          |                                                               ^
+      109 |       // stream — users can queue a follow-up message. Instead, the submit
+      110 |       // button flips to aria-label="Stop".
+      111 |       await expect(stopButton(page)).toBeVisible({ timeout: 10_000 });
+        at /Users/dongli/Documents/ChatGPT/CodePilot/LabCodepilot-para/src/__tests__/e2e/chat.spec.ts:108:63
+
+    Error Context: test-results/chat-Chat-Page-Send-Messag-d8c01-end-button-during-streaming/error-context.md
+
+
+(node:87924) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+(node:87924) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[34/183] src/__tests__/e2e/chat.spec.ts:138:20 › Chat Page › Streaming Response › URL updates to session ID after response completes
+  13) src/__tests__/e2e/chat.spec.ts:125:20 › Chat Page › Streaming Response › assistant avatar appears for assistant response
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: locator('.is-assistant').first()
+    Expected: visible
+    Timeout: 10000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toBeVisible" with timeout 10000ms
+      - waiting for locator('.is-assistant').first()
+
+
+      132 |     });
+      133 |
+    > 134 |     test('URL updates to session ID after response completes', async ({ page }) => {
+          |                                                                     ^
+      135 |       await goToChat(page);
+      136 |       await sendMessage(page, 'Hi there');
+      137 |
+        at /Users/dongli/Documents/ChatGPT/CodePilot/LabCodepilot-para/src/__tests__/e2e/chat.spec.ts:134:69
+
+    Error Context: test-results/chat-Chat-Page-Streaming-R-d59cb-ears-for-assistant-response/error-context.md
+
+
+[35/183] src/__tests__/e2e/chat.spec.ts:150:16 › Chat Page › Streaming Response › conversation appears in sidebar after response
+(node:87931) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+(node:87931) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[36/183] src/__tests__/e2e/chat.spec.ts:168:20 › Chat Page › Abort Generation › clicking stop button halts streaming
+  14) src/__tests__/e2e/chat.spec.ts:114:20 › Chat Page › Streaming Response › stop button appears during streaming
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: locator('button[aria-label="Stop"]')
+    Expected: visible
+    Timeout: 10000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toBeVisible" with timeout 10000ms
+      - waiting for locator('button[aria-label="Stop"]')
+
+
+      119 |
+      120 |       // Stop button (destructive variant with square icon) should appear
+    > 121 |       await expect(stopButton(page)).toBeVisible({ timeout: 10_000 });
+          |                                                               ^
+      122 |     });
+      123 |
+      124 |     test('assistant avatar appears for assistant response', async ({ page }) => {
+        at /Users/dongli/Documents/ChatGPT/CodePilot/LabCodepilot-para/src/__tests__/e2e/chat.spec.ts:121:63
+
+    Error Context: test-results/chat-Chat-Page-Streaming-R-a52d5-on-appears-during-streaming/error-context.md
+
+
+(node:87945) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+(node:87945) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[37/183] src/__tests__/e2e/chat.spec.ts:189:20 › Chat Page › Chat History › sidebar has chat list section
+[38/183] src/__tests__/e2e/chat.spec.ts:199:20 › Chat Page › Chat History › empty state or session list is shown in sidebar
+  15) src/__tests__/e2e/chat.spec.ts:199:20 › Chat Page › Chat History › empty state or session list is shown in sidebar
+
+    Error: expect(received).toBeTruthy()
+
+    Received: false
+        at /Users/dongli/Documents/ChatGPT/CodePilot/LabCodepilot-para/src/__tests__/e2e/chat.spec.ts:208:47
+
+    Error Context: test-results/chat-Chat-Page-Chat-Histor-99630-on-list-is-shown-in-sidebar/error-context.md
+
+
+(node:87999) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+(node:87999) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[39/183] src/__tests__/e2e/global-search-file-seek.spec.ts:20:18 › Global Search file deep-link seek UX › same-session repeat seek and cross-session seek both locate target file
+  16) src/__tests__/e2e/chat.spec.ts:168:20 › Chat Page › Abort Generation › clicking stop button halts streaming
+
+    Error: expect(locator).toBeVisible() failed
+
+    Locator: locator('button[aria-label="Stop"]')
+    Expected: visible
+    Timeout: 10000ms
+    Error: element(s) not found
+
+    Call log:
+      - Expect "toBeVisible" with timeout 10000ms
+      - waiting for locator('button[aria-label="Stop"]')
+
+
+      173 |   test.describe('Chat History', () => {
+      174 |     test('sidebar has chat list section', async ({ page }) => {
+    > 175 |       await goToChat(page);
+          |                            ^
+      176 |       // Label was "Recent Chats" → now just "Chats" / "对话列表" depending
+      177 |       // on locale. Assert the sidebar contains either variant.
+      178 |       await expect(
+        at /Users/dongli/Documents/ChatGPT/CodePilot/LabCodepilot-para/src/__tests__/e2e/chat.spec.ts:175:63
+
+    Error Context: test-results/chat-Chat-Page-Abort-Gener-6e779-stop-button-halts-streaming/error-context.md
+
+
+(node:88037) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+(node:88037) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[40/183] src/__tests__/e2e/global-search-modes.spec.ts:37:18 › Global Search modes UX › supports all/session/message/file modes and keyboard open
+  17) src/__tests__/e2e/chat.spec.ts:138:20 › Chat Page › Streaming Response › URL updates to session ID after response completes
+
+    Test timeout of 30000ms exceeded.
+
+    Error: page.waitForURL: Test timeout of 30000ms exceeded.
+    =========================== logs ===========================
+    waiting for navigation to "**/chat/*" until "load"
+    ============================================================
+
+      143 |     test.skip('conversation appears in sidebar after response', async ({ page }) => {
+      144 |       // Same live-provider dependency as "send a message and see it in the
+    > 145 |       // conversation" above — needs a real stream to complete so the
+          |                  ^
+      146 |       // session row is persisted and the /chat → /chat/[id] redirect fires.
+      147 |       // Skipped with the other real-API tests pending a deterministic
+      148 |       // mocked-stream fixture.
+        at /Users/dongli/Documents/ChatGPT/CodePilot/LabCodepilot-para/src/__tests__/e2e/chat.spec.ts:145:18
+
+    Error Context: test-results/chat-Chat-Page-Streaming-R-8ebaa-ID-after-response-completes/error-context.md
+
+
+(node:88092) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+(node:88092) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[41/183] src/__tests__/e2e/layout.spec.ts:7:20 › Layout › Sidebar › sidebar is visible on desktop
+[42/183] src/__tests__/e2e/layout.spec.ts:21:16 › Layout › Sidebar › sidebar has navigation items
+[43/183] src/__tests__/e2e/layout.spec.ts:33:20 › Layout › Sidebar › sidebar has New Chat button
+[44/183] src/__tests__/e2e/layout.spec.ts:45:20 › Layout › Sidebar › sidebar has chat list section
+[45/183] src/__tests__/e2e/layout.spec.ts:64:20 › Layout › Sidebar Collapse/Expand › toggle button is in the header
+[46/183] src/__tests__/e2e/layout.spec.ts:70:20 › Layout › Sidebar Collapse/Expand › clicking toggle collapses sidebar
+[47/183] src/__tests__/e2e/layout.spec.ts:80:20 › Layout › Sidebar Collapse/Expand › clicking toggle again expands sidebar
+[48/183] src/__tests__/e2e/layout.spec.ts:99:20 › Layout › Sidebar Collapse/Expand › main content expands when sidebar collapses
+[49/183] src/__tests__/e2e/layout.spec.ts:111:20 › Layout › Theme Switch › theme toggle button is in the header
+[50/183] src/__tests__/e2e/layout.spec.ts:117:20 › Layout › Theme Switch › clicking toggle switches to dark mode
+[51/183] src/__tests__/e2e/layout.spec.ts:126:20 › Layout › Theme Switch › clicking toggle again switches back to light mode
+[52/183] src/__tests__/e2e/layout.spec.ts:136:20 › Layout › Theme Switch › dark mode applies correct color scheme
+[53/183] src/__tests__/e2e/layout.spec.ts:146:20 › Layout › Navigation Menu Highlight › Chat nav is highlighted on /chat
+[54/183] src/__tests__/e2e/layout.spec.ts:154:20 › Layout › Navigation Menu Highlight › Plugins nav is highlighted on /plugins
+[55/183] src/__tests__/e2e/layout.spec.ts:162:20 › Layout › Navigation Menu Highlight › Settings nav is highlighted on /settings
+[56/183] src/__tests__/e2e/layout.spec.ts:170:20 › Layout › Navigation Menu Highlight › navigating via sidebar updates highlight
+[57/183] src/__tests__/e2e/layout.spec.ts:198:20 › Layout › Header › header shows "Chat" title on /chat
+[58/183] src/__tests__/e2e/layout.spec.ts:204:20 › Layout › Header › header shows "Plugins" title on /plugins
+[59/183] src/__tests__/e2e/layout.spec.ts:210:20 › Layout › Header › header shows "Settings" title on /settings
+[60/183] src/__tests__/e2e/layout.spec.ts:216:20 › Layout › Header › header shows "MCP Servers" title on /plugins/mcp
+[61/183] src/__tests__/e2e/layout.spec.ts:231:20 › Layout › Mobile Responsive › sidebar toggle works as hamburger on mobile
+[62/183] src/__tests__/e2e/layout.spec.ts:280:20 › Layout › Mobile Responsive › mobile overlay backdrop appears when sidebar is open
+[63/183] src/__tests__/e2e/layout.spec.ts:295:20 › Layout › Mobile Responsive › chat page renders correctly on mobile
+[64/183] src/__tests__/e2e/layout.spec.ts:317:20 › Layout › Three-Column Layout (V2) › right panel is visible on /chat/[id]
+[65/183] src/__tests__/e2e/layout.spec.ts:328:20 › Layout › Three-Column Layout (V2) › right panel is hidden on non-chat routes
+[66/183] src/__tests__/e2e/layout.spec.ts:336:20 › Layout › Three-Column Layout (V2) › main content adjusts width when panel collapses
+[67/183] src/__tests__/e2e/mention-picker-style.spec.ts:37:18 › @ picker style smoke › @ opens a popover with search input, group header, and neutral icons @smoke
+[68/183] src/__tests__/e2e/mention-ui.spec.ts:6:18 › @mention UI/UX › typing @ keeps input shadow consistent with slash mode
+  18) src/__tests__/e2e/global-search-file-seek.spec.ts:20:18 › Global Search file deep-link seek UX › same-session repeat seek and cross-session seek both locate target file
+
+    Test timeout of 30000ms exceeded.
+
+    Error: page.goto: net::ERR_ABORTED; maybe frame was detached?
+    Call log:
+      - navigating to "http://localhost:3000/chat/66f9e10050514e42792001f2de4625ce?file=%2Fvar%2Ffolders%2Fzy%2F4dx7n1z104d4ydbfgxpff6x00000gn%2FT%2Fcodepilot-search-a-1791047629448-f43wz9%2Fsrc%2Ffeature-a%2Ftarget-a.ts&seek=seek1", waiting until "load"
+
+
+      46 |       // 2) Re-seek same file in same session; should remain stable and highlighted.
+      47 |       await page.goto(`/chat/${sessionA}?file=${encodeURIComponent(fileA)}&seek=seek2`);
+    > 48 |       await expect(page.locator('#file-tree-highlight')).toContainText('target-a.ts', { timeout: 15_000 });
+         |                  ^
+      49 |       await expect(page).toHaveURL(new RegExp(`/chat/${sessionA}\\?`));
+      50 |       await expect(page).toHaveURL(/seek=seek2/);
+      51 |
+        at /Users/dongli/Documents/ChatGPT/CodePilot/LabCodepilot-para/src/__tests__/e2e/global-search-file-seek.spec.ts:48:18
+
+
+[69/183] src/__tests__/e2e/mention-ui.spec.ts:19:14 › @mention UI/UX › @mentions send structured files/mentions without dumping directory contents
+[70/183] src/__tests__/e2e/mention-ui.spec.ts:151:14 › @mention UI/UX › removing one mention keeps others and chip order follows selection order
+[71/183] src/__tests__/e2e/plugins.spec.ts:12:20 › Plugins Page › Page Rendering › plugins page loads within 3 seconds
+[72/183] src/__tests__/e2e/plugins.spec.ts:17:20 › Plugins Page › Page Rendering › MCP management page loads within 3 seconds
+[73/183] src/__tests__/e2e/plugins.spec.ts:22:20 › Plugins Page › Page Rendering › plugins page has no console errors
+[74/183] src/__tests__/e2e/plugins.spec.ts:30:20 › Plugins Page › Page Rendering › MCP page has no console errors
+[75/183] src/__tests__/e2e/plugins.spec.ts:40:20 › Plugins Page › Plugins Landing Page (V2) › page title and description visible
+[76/183] src/__tests__/e2e/plugins.spec.ts:48:20 › Plugins Page › Plugins Landing Page (V2) › Manage Skills button links to /settings?tab=skills
+[77/183] src/__tests__/e2e/plugins.spec.ts:55:20 › Plugins Page › Plugins Landing Page (V2) › MCP Servers button links to /plugins/mcp
+[78/183] src/__tests__/e2e/plugins.spec.ts:63:20 › Plugins Page › Plugins Landing Page (V2) › clicking Manage Skills navigates to settings skills tab
+[79/183] src/__tests__/e2e/plugins.spec.ts:74:20 › Plugins Page › Navigate to MCP › clicking MCP Servers button navigates to /plugins/mcp
+[80/183] src/__tests__/e2e/plugins.spec.ts:85:20 › Plugins Page › MCP Server List › MCP page title and description visible
+[81/183] src/__tests__/e2e/plugins.spec.ts:93:20 › Plugins Page › MCP Server List › Add Server button is visible
+[82/183] src/__tests__/e2e/plugins.spec.ts:99:20 › Plugins Page › MCP Server List › Servers and JSON Config tabs are visible
+[83/183] src/__tests__/e2e/plugins.spec.ts:106:20 › Plugins Page › MCP Server List › empty state shows when no servers configured
+[84/183] src/__tests__/e2e/plugins.spec.ts:112:20 › Plugins Page › MCP Server List › back link navigates to /plugins
+[85/183] src/__tests__/e2e/plugins.spec.ts:121:20 › Plugins Page › Add MCP Server › clicking Add Server opens dialog
+[86/183] src/__tests__/e2e/plugins.spec.ts:131:20 › Plugins Page › Add MCP Server › dialog has Server Name field
+[87/183] src/__tests__/e2e/plugins.spec.ts:144:20 › Plugins Page › Add MCP Server › dialog has Server Type selector (stdio/SSE/HTTP)
+[88/183] src/__tests__/e2e/plugins.spec.ts:156:20 › Plugins Page › Add MCP Server › dialog has Command and Arguments fields
+[89/183] src/__tests__/e2e/plugins.spec.ts:166:20 › Plugins Page › Add MCP Server › Cancel button closes dialog
+[90/183] src/__tests__/e2e/plugins.spec.ts:178:20 › Plugins Page › JSON Configuration Editor › switching to JSON Config tab shows editor
+[91/183] src/__tests__/e2e/plugins.spec.ts:187:20 › Plugins Page › JSON Configuration Editor › JSON Config has Save and Format buttons
+(node:88170) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+(node:88170) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[92/183] src/__tests__/e2e/ppt-prototype-parity.spec.ts:26:5 › PPT template-first creation keeps manual pages, handles estimate races and sends policy @smoke
+[93/183] src/__tests__/e2e/ppt-prototype-parity.spec.ts:45:5 › PPT paste syllabus and composer remain reachable at 390 by 500 @smoke
+[94/183] src/__tests__/e2e/ppt-prototype-parity.spec.ts:59:5 › PPT generation dock preserves draft through close and supports two fixed-scope turns @smoke
+[95/183] src/__tests__/e2e/ppt-prototype-parity.spec.ts:80:5 › PPT local translate and expand send parameters and review real proposal metrics @smoke
+  19) src/__tests__/e2e/global-search-modes.spec.ts:37:18 › Global Search modes UX › supports all/session/message/file modes and keyboard open
+
+    Test timeout of 30000ms exceeded.
+
+    Error: page.goto: net::ERR_ABORTED; maybe frame was detached?
+    Call log:
+      - navigating to "http://localhost:3000/chat/43ead92c20d03299b552e9798b8d0e9b", waiting until "load"
+
+
+      60 |
+      61 |     try {
+    > 62 |       await page.goto(`/chat/${sessionA}`);
+         |                  ^
+      63 |
+      64 |       // Open global search from the sidebar trigger (language-agnostic fallback).
+      65 |       await page.getByRole('button', { name: /(搜索会话|Search sessions|Search)/i }).first().click();
+        at /Users/dongli/Documents/ChatGPT/CodePilot/LabCodepilot-para/src/__tests__/e2e/global-search-modes.spec.ts:62:18
+
+
+(node:88224) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+(node:88224) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[96/183] src/__tests__/e2e/ppt-prototype-parity.spec.ts:106:5 › PPT editable import keeps native page count independent of a small selected template @smoke
+[97/183] src/__tests__/e2e/ppt-template-reuse.spec.ts:18:5 › user page selection and module estimate take priority over template length @smoke
+[98/183] src/__tests__/e2e/ppt-template-reuse.spec.ts:77:5 › ten-page uploaded template accepts an explicit 100-page target @smoke
+[99/183] src/__tests__/e2e/ppt-workspace.spec.ts:3:5 › PPT M5 blocked quality gate stays editable and publishes only after repair @smoke
+[100/183] src/__tests__/e2e/ppt-workspace.spec.ts:140:5 › PPT M4 visual blocks, undo, template switch and one-slide AI @smoke
+[101/183] src/__tests__/e2e/ppt-workspace.spec.ts:330:5 › PPT M1 creation, outline approval, editing and export entry @smoke
+[102/183] src/__tests__/e2e/ppt-workspace.spec.ts:433:5 › PPT structured editor persists object commands, history, AI edits and publish @smoke
+[103/183] src/__tests__/e2e/ppt-workspace.spec.ts:709:5 › PPT M2 library folders, favorites, search and trash @smoke
+[104/183] src/__tests__/e2e/ppt-workspace.spec.ts:830:5 › PPT M2 paste and file inputs reach source aware outlines @smoke
+[105/183] src/__tests__/e2e/ppt-workspace.spec.ts:994:5 › PPTX fidelity import selects a model before opening the file @smoke
+[106/183] src/__tests__/e2e/ppt-workspace.spec.ts:1063:5 › PPT manual ordering persists and keeps pin groups separate @smoke
+[107/183] src/__tests__/e2e/ppt-workspace.spec.ts:1114:5 › PPT M3 template compatibility and version update workflow @smoke
+[108/183] src/__tests__/e2e/project-panel.spec.ts:11:20 › Project Panel (V3 — PanelZone) › Panel Toggle › file tree panel is hidden by default on /chat/[id] route
+[109/183] src/__tests__/e2e/project-panel.spec.ts:21:20 › Project Panel (V3 — PanelZone) › Panel Toggle › file tree toggle button is visible on /chat/[id] route
+[110/183] src/__tests__/e2e/project-panel.spec.ts:29:20 › Project Panel (V3 — PanelZone) › Panel Toggle › file tree panel is hidden on /settings route
+[111/183] src/__tests__/e2e/project-panel.spec.ts:36:20 › Project Panel (V3 — PanelZone) › Panel Toggle › file tree panel is hidden on /plugins route
+[112/183] src/__tests__/e2e/project-panel.spec.ts:43:20 › Project Panel (V3 — PanelZone) › Panel Toggle › file tree panel is hidden on /chat (no id) route
+[113/183] src/__tests__/e2e/project-panel.spec.ts:58:20 › Project Panel (V3 — PanelZone) › Panel Open/Close › clicking file tree toggle opens the panel
+[114/183] src/__tests__/e2e/project-panel.spec.ts:65:20 › Project Panel (V3 — PanelZone) › Panel Open/Close › close button inside panel hides it
+[115/183] src/__tests__/e2e/project-panel.spec.ts:78:20 › Project Panel (V3 — PanelZone) › Panel Open/Close › clicking file tree toggle again closes the panel
+[116/183] src/__tests__/e2e/project-panel.spec.ts:91:20 › Project Panel (V3 — PanelZone) › Panel Open/Close › panel has correct width when open
+[117/183] src/__tests__/e2e/project-panel.spec.ts:113:20 › Project Panel (V3 — PanelZone) › File Tree › file search input is visible
+[118/183] src/__tests__/e2e/project-panel.spec.ts:120:20 › Project Panel (V3 — PanelZone) › File Tree › refresh button is visible
+[119/183] src/__tests__/e2e/project-panel.spec.ts:125:20 › Project Panel (V3 — PanelZone) › File Tree › search input accepts text and filters
+[120/183] src/__tests__/e2e/project-panel.spec.ts:132:20 › Project Panel (V3 — PanelZone) › File Tree › clearing search restores the tree
+[121/183] src/__tests__/e2e/project-panel.spec.ts:144:20 › Project Panel (V3 — PanelZone) › No Console Errors › project panel page has no console errors
+[122/183] src/__tests__/e2e/settings.spec.ts:12:20 › Settings Page › Page Rendering › settings page loads within 3 seconds
+[123/183] src/__tests__/e2e/settings.spec.ts:17:20 › Settings Page › Page Rendering › settings page has no console errors
+[124/183] src/__tests__/e2e/settings.spec.ts:25:20 › Settings Page › Page Rendering › page title and description visible
+[125/183] src/__tests__/e2e/settings.spec.ts:34:20 › Settings Page › Read Current Settings › Visual Editor tab is selected by default
+[126/183] src/__tests__/e2e/settings.spec.ts:40:20 › Settings Page › Read Current Settings › Permissions section is visible
+[127/183] src/__tests__/e2e/settings.spec.ts:47:20 › Settings Page › Read Current Settings › Environment Variables section is visible
+[128/183] src/__tests__/e2e/settings.spec.ts:56:20 › Settings Page › Form Mode Edit › Save Changes button is visible
+[129/183] src/__tests__/e2e/settings.spec.ts:62:20 › Settings Page › Form Mode Edit › Reset button is visible
+[130/183] src/__tests__/e2e/settings.spec.ts:68:20 › Settings Page › Form Mode Edit › permissions textarea is editable
+[131/183] src/__tests__/e2e/settings.spec.ts:77:20 › Settings Page › Form Mode Edit › environment variables textarea shows current values
+[132/183] src/__tests__/e2e/settings.spec.ts:89:20 › Settings Page › JSON Mode Edit › switch to JSON editor mode
+[133/183] src/__tests__/e2e/settings.spec.ts:98:20 › Settings Page › JSON Mode Edit › JSON editor contains valid JSON
+[134/183] src/__tests__/e2e/settings.spec.ts:108:20 › Settings Page › JSON Mode Edit › JSON contains env settings
+[135/183] src/__tests__/e2e/settings.spec.ts:119:20 › Settings Page › JSON Mode Edit › JSON mode has Save JSON button
+[136/183] src/__tests__/e2e/settings.spec.ts:127:20 › Settings Page › JSON Mode Edit › JSON mode has Format button
+[137/183] src/__tests__/e2e/settings.spec.ts:137:20 › Settings Page › Mode Switch › toggle between Visual and JSON modes
+[138/183] src/__tests__/e2e/settings.spec.ts:152:20 › Settings Page › Mode Switch › Editor mode toggle has both options
+[139/183] src/__tests__/e2e/settings.spec.ts:161:20 › Settings Page › Save Settings › Save Changes button is visible and disabled when no changes
+[140/183] src/__tests__/e2e/settings.spec.ts:170:20 › Settings Page › Save Settings › Save Changes button enables after making a change
+[141/183] src/__tests__/e2e/settings.spec.ts:185:20 › Settings Page › Reset Settings › Reset button is visible and disabled when no changes
+[142/183] src/__tests__/e2e/settings.spec.ts:194:20 › Settings Page › Reset Settings › Reset button enables after making a change
+[143/183] src/__tests__/e2e/settings.spec.ts:208:20 › Settings Page › Settings Navigation (V2) › settings page has Skills tab or link
+[144/183] src/__tests__/e2e/settings.spec.ts:216:20 › Settings Page › Settings Navigation (V2) › navigating to /settings?tab=skills loads skills editor
+[145/183] src/__tests__/e2e/settings.spec.ts:224:20 › Settings Page › Settings Navigation (V2) › settings?tab=skills has no console errors
+[146/183] src/__tests__/e2e/skills.spec.ts:12:20 › Skills Editor (V2) › Settings Page Navigation › settings page has Skills tab trigger
+[147/183] src/__tests__/e2e/skills.spec.ts:20:20 › Skills Editor (V2) › Settings Page Navigation › navigating to /settings?tab=skills shows skills editor
+[148/183] src/__tests__/e2e/skills.spec.ts:35:20 › Skills Editor (V2) › Skills List › skills list area is rendered
+[149/183] src/__tests__/e2e/skills.spec.ts:44:20 › Skills Editor (V2) › Skills List › skills show source badges (global/project)
+[150/183] src/__tests__/e2e/skills.spec.ts:62:20 › Skills Editor (V2) › Skill Search › search input is visible
+[151/183] src/__tests__/e2e/skills.spec.ts:68:20 › Skills Editor (V2) › Skill Search › search input accepts text
+[152/183] src/__tests__/e2e/skills.spec.ts:75:20 › Skills Editor (V2) › Skill Search › clearing search resets the list
+[153/183] src/__tests__/e2e/skills.spec.ts:93:20 › Skills Editor (V2) › Create New Skill › create skill button is visible
+[154/183] src/__tests__/e2e/skills.spec.ts:99:20 › Skills Editor (V2) › Create New Skill › clicking create opens dialog
+[155/183] src/__tests__/e2e/skills.spec.ts:110:20 › Skills Editor (V2) › Create New Skill › dialog can be dismissed with Cancel
+[156/183] src/__tests__/e2e/skills.spec.ts:130:20 › Skills Editor (V2) › Edit Skill Content › editor area is present when a skill is selected
+[157/183] src/__tests__/e2e/skills.spec.ts:152:20 › Skills Editor (V2) › Preview Mode › preview toggle is visible when a skill is selected
+[158/183] src/__tests__/e2e/skills.spec.ts:172:20 › Skills Editor (V2) › Save/Delete Skill › save button is present
+[159/183] src/__tests__/e2e/skills.spec.ts:185:20 › Skills Editor (V2) › Save/Delete Skill › delete button appears on skill hover
+[160/183] src/__tests__/e2e/skills.spec.ts:200:20 › Skills Editor (V2) › Navigation from /plugins › plugins page has link to skills editor
+[161/183] src/__tests__/e2e/skills.spec.ts:213:20 › Skills Editor (V2) › No Console Errors › skills editor page has no console errors
+[162/183] src/__tests__/e2e/smoke.spec.ts:13:7 › Smoke @smoke › Home redirects to /chat @smoke
+[163/183] src/__tests__/e2e/smoke.spec.ts:32:7 › Smoke @smoke › Chat page loads @smoke
+[164/183] src/__tests__/e2e/smoke.spec.ts:47:7 › Smoke @smoke › Plugins page loads @smoke
+[165/183] src/__tests__/e2e/smoke.spec.ts:62:7 › Smoke @smoke › MCP page loads @smoke
+[166/183] src/__tests__/e2e/smoke.spec.ts:77:7 › Smoke @smoke › Settings page loads @smoke
+[167/183] src/__tests__/e2e/test-project-system-name.spec.ts:133:18 › Test project system name display › system name is primary while folder identity remains visible @smoke
+[168/183] src/__tests__/e2e/test-project-system-name.spec.ts:167:18 › Test project system name display › summary request failure falls back to folder names @smoke
+[169/183] src/__tests__/e2e/test-smoke-auth-stop.spec.ts:91:7 › Smoke auth-invalid hard stop › structured auth-invalid event stops execution and never requests the smoke report @smoke
+[170/183] src/__tests__/e2e/test-smoke-auth-stop.spec.ts:131:7 › Smoke auth-invalid hard stop › text marker stops the current frame before later scenario output @smoke
+[171/183] src/__tests__/e2e/test-smoke-auth-stop.spec.ts:159:7 › Smoke auth-invalid hard stop › legacy all-blocked run_json with explicit login-wall evidence also skips report @smoke
+[172/183] src/__tests__/e2e/test-smoke-auth-stop.spec.ts:193:7 › Smoke auth-invalid hard stop › single-endpoint 401 in an all-blocked legacy run still generates a report @smoke
+[173/183] src/__tests__/e2e/test-smoke-auth-stop.spec.ts:230:7 › Smoke auth-invalid hard stop › normal smoke execution still auto-chains to report @smoke
+[174/183] src/__tests__/e2e/test-smoke-env-summary.spec.ts:73:18 › Smoke task environment summary › dashboard and new-task modal show the selected SIT URL and captured login state @smoke
+[175/183] src/__tests__/e2e/test-smoke-report-deliverables.spec.ts:273:18 › Smoke report deliverables › smoke report is one card, has no defect/script side effects, and opens the full Markdown @smoke
+[176/183] src/__tests__/e2e/test-smoke-report-deliverables.spec.ts:356:18 › Smoke report deliverables › legacy functional task keeps four deliverable cards and existing defect/script behavior @smoke
+[177/183] src/__tests__/e2e/test-smoke-report-deliverables.spec.ts:372:18 › Smoke report deliverables › report browser keeps smoke as the same single report without compare, defect, or handoff actions @smoke
+[178/183] src/__tests__/e2e/visual-regression.spec.ts:18:18 › Visual Regression @visual › design system page
+[179/183] src/__tests__/e2e/visual-regression.spec.ts:30:18 › Visual Regression @visual › design system - buttons section
+[180/183] src/__tests__/e2e/visual-regression.spec.ts:40:18 › Visual Regression @visual › design system - status banners section
+[181/183] src/__tests__/e2e/visual-regression.spec.ts:50:18 › Visual Regression @visual › design system - settings card section
+[182/183] src/__tests__/e2e/visual-regression.spec.ts:60:18 › Visual Regression @visual › design system - field row section
+[183/183] src/__tests__/e2e/visual-regression.spec.ts:70:18 › Visual Regression @visual › settings page
+  19 failed
+    src/__tests__/e2e/chat-enhanced.spec.ts:35:20 › Chat UI Enhanced (V2) › Code Block Display › code blocks have copy button when present
+    src/__tests__/e2e/chat-enhanced.spec.ts:80:20 › Chat UI Enhanced (V2) › Message Layout (V2) › user messages render as right-aligned bubble
+    src/__tests__/e2e/chat-enhanced.spec.ts:93:20 › Chat UI Enhanced (V2) › Message Layout (V2) › assistant messages render with gradient avatar
+    src/__tests__/e2e/chat-enhanced.spec.ts:114:20 › Chat UI Enhanced (V2) › Message Layout (V2) › assistant messages have Bot icon avatar
+    src/__tests__/e2e/chat-enhanced.spec.ts:127:20 › Chat UI Enhanced (V2) › Input Box Features (V2) › textarea renders with the default placeholder
+    src/__tests__/e2e/chat-enhanced.spec.ts:148:20 › Chat UI Enhanced (V2) › Input Box Features (V2) › stop button appears during streaming
+    src/__tests__/e2e/chat-enhanced.spec.ts:159:20 › Chat UI Enhanced (V2) › Input Box Features (V2) › stop button replaces send button during streaming
+    src/__tests__/e2e/chat-enhanced.spec.ts:209:20 › Chat UI Enhanced (V2) › Streaming Status › streaming activates on message send
+    src/__tests__/e2e/chat-enhanced.spec.ts:232:20 › Chat UI Enhanced (V2) › Streaming Status › clicking stop button halts streaming
+    src/__tests__/e2e/chat.spec.ts:27:20 › Chat Page › Page Rendering › chat page shows empty state when no messages
+    src/__tests__/e2e/chat.spec.ts:50:20 › Chat Page › Chat UI Elements › chat textarea is visible with correct placeholder
+    src/__tests__/e2e/chat.spec.ts:99:20 › Chat Page › Send Message › stop button replaces send button during streaming
+    src/__tests__/e2e/chat.spec.ts:114:20 › Chat Page › Streaming Response › stop button appears during streaming
+    src/__tests__/e2e/chat.spec.ts:125:20 › Chat Page › Streaming Response › assistant avatar appears for assistant response
+    src/__tests__/e2e/chat.spec.ts:138:20 › Chat Page › Streaming Response › URL updates to session ID after response completes
+    src/__tests__/e2e/chat.spec.ts:168:20 › Chat Page › Abort Generation › clicking stop button halts streaming
+    src/__tests__/e2e/chat.spec.ts:199:20 › Chat Page › Chat History › empty state or session list is shown in sidebar
+    src/__tests__/e2e/global-search-file-seek.spec.ts:20:18 › Global Search file deep-link seek UX › same-session repeat seek and cross-session seek both locate target file
+    src/__tests__/e2e/global-search-modes.spec.ts:37:18 › Global Search modes UX › supports all/session/message/file modes and keyboard open
+  112 skipped
+  52 passed (3.0m)

@@ -1,0 +1,105 @@
+
+> codepilot@4.2.0 test:smoke
+> npx playwright test --grep @smoke
+
+
+Running 33 tests using 8 workers
+
+(node:79414) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+(node:79413) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+(node:79412) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+(node:79418) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+(node:79415) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+(node:79416) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+(node:79417) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+(node:79419) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+(node:79414) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+(node:79413) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+(node:79415) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+(node:79417) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+(node:79419) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+(node:79418) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+(node:79416) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+(node:79412) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1/33] src/__tests__/e2e/ppt-prototype-parity.spec.ts:80:5 › PPT local translate and expand send parameters and review real proposal metrics @smoke
+[2/33] src/__tests__/e2e/ppt-prototype-parity.spec.ts:59:5 › PPT generation dock preserves draft through close and supports two fixed-scope turns @smoke
+[3/33] src/__tests__/e2e/ppt-prototype-parity.spec.ts:26:5 › PPT template-first creation keeps manual pages, handles estimate races and sends policy @smoke
+[4/33] src/__tests__/e2e/ppt-template-reuse.spec.ts:77:5 › ten-page uploaded template accepts an explicit 100-page target @smoke
+[5/33] src/__tests__/e2e/ppt-prototype-parity.spec.ts:106:5 › PPT editable import keeps native page count independent of a small selected template @smoke
+[6/33] src/__tests__/e2e/ppt-template-reuse.spec.ts:18:5 › user page selection and module estimate take priority over template length @smoke
+[7/33] src/__tests__/e2e/ppt-prototype-parity.spec.ts:45:5 › PPT paste syllabus and composer remain reachable at 390 by 500 @smoke
+[8/33] src/__tests__/e2e/mention-picker-style.spec.ts:37:18 › @ picker style smoke › @ opens a popover with search input, group header, and neutral icons @smoke
+[9/33] src/__tests__/e2e/ppt-workspace.spec.ts:3:5 › PPT M5 blocked quality gate stays editable and publishes only after repair @smoke
+[10/33] src/__tests__/e2e/ppt-workspace.spec.ts:140:5 › PPT M4 visual blocks, undo, template switch and one-slide AI @smoke
+[11/33] src/__tests__/e2e/ppt-workspace.spec.ts:330:5 › PPT M1 creation, outline approval, editing and export entry @smoke
+[12/33] src/__tests__/e2e/ppt-workspace.spec.ts:433:5 › PPT structured editor persists object commands, history, AI edits and publish @smoke
+[13/33] src/__tests__/e2e/ppt-workspace.spec.ts:709:5 › PPT M2 library folders, favorites, search and trash @smoke
+[14/33] src/__tests__/e2e/ppt-workspace.spec.ts:830:5 › PPT M2 paste and file inputs reach source aware outlines @smoke
+[15/33] src/__tests__/e2e/ppt-workspace.spec.ts:994:5 › PPTX fidelity import selects a model before opening the file @smoke
+[16/33] src/__tests__/e2e/ppt-workspace.spec.ts:1063:5 › PPT manual ordering persists and keeps pin groups separate @smoke
+[17/33] src/__tests__/e2e/ppt-workspace.spec.ts:1114:5 › PPT M3 template compatibility and version update workflow @smoke
+[18/33] src/__tests__/e2e/smoke.spec.ts:13:7 › Smoke @smoke › Home redirects to /chat @smoke
+[19/33] src/__tests__/e2e/smoke.spec.ts:32:7 › Smoke @smoke › Chat page loads @smoke
+[20/33] src/__tests__/e2e/smoke.spec.ts:47:7 › Smoke @smoke › Plugins page loads @smoke
+[21/33] src/__tests__/e2e/smoke.spec.ts:62:7 › Smoke @smoke › MCP page loads @smoke
+[22/33] src/__tests__/e2e/smoke.spec.ts:77:7 › Smoke @smoke › Settings page loads @smoke
+[23/33] src/__tests__/e2e/test-project-system-name.spec.ts:133:18 › Test project system name display › system name is primary while folder identity remains visible @smoke
+[24/33] src/__tests__/e2e/test-project-system-name.spec.ts:167:18 › Test project system name display › summary request failure falls back to folder names @smoke
+[25/33] src/__tests__/e2e/test-smoke-auth-stop.spec.ts:91:7 › Smoke auth-invalid hard stop › structured auth-invalid event stops execution and never requests the smoke report @smoke
+[26/33] src/__tests__/e2e/test-smoke-auth-stop.spec.ts:131:7 › Smoke auth-invalid hard stop › text marker stops the current frame before later scenario output @smoke
+[27/33] src/__tests__/e2e/test-smoke-auth-stop.spec.ts:159:7 › Smoke auth-invalid hard stop › legacy all-blocked run_json with explicit login-wall evidence also skips report @smoke
+[28/33] src/__tests__/e2e/test-smoke-auth-stop.spec.ts:193:7 › Smoke auth-invalid hard stop › single-endpoint 401 in an all-blocked legacy run still generates a report @smoke
+[29/33] src/__tests__/e2e/test-smoke-auth-stop.spec.ts:230:7 › Smoke auth-invalid hard stop › normal smoke execution still auto-chains to report @smoke
+[30/33] src/__tests__/e2e/test-smoke-env-summary.spec.ts:73:18 › Smoke task environment summary › dashboard and new-task modal show the selected SIT URL and captured login state @smoke
+[31/33] src/__tests__/e2e/test-smoke-report-deliverables.spec.ts:273:18 › Smoke report deliverables › smoke report is one card, has no defect/script side effects, and opens the full Markdown @smoke
+[32/33] src/__tests__/e2e/test-smoke-report-deliverables.spec.ts:356:18 › Smoke report deliverables › legacy functional task keeps four deliverable cards and existing defect/script behavior @smoke
+[33/33] src/__tests__/e2e/test-smoke-report-deliverables.spec.ts:372:18 › Smoke report deliverables › report browser keeps smoke as the same single report without compare, defect, or handoff actions @smoke
+  33 passed (38.6s)

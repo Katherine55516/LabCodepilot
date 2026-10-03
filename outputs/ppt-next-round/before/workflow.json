@@ -1,0 +1,1523 @@
+{
+  "output": "/Users/dongli/Documents/ChatGPT/CodePilot/LabCodepilot-para/outputs/factor-zoo-process-improvement-22-slides-simulated.pptx",
+  "source": {
+    "file": "/Users/dongli/Documents/quant_research/quant_3.0/04_factor_zoo_overview.md",
+    "sha256": "ebacfacedb6138ccb30f6b6af2b7b23a74574c741d348105aa5a2b2dba4fee16",
+    "characters": 41416,
+    "normalizedCharacters": 41415,
+    "segments": 15,
+    "semanticChunks": 61,
+    "evidenceAtoms": 74,
+    "truncated": false,
+    "inputKind": "paste"
+  },
+  "template": {
+    "file": "/Users/dongli/Downloads/Copy-of-Process-Improvement-Proposal.pptx",
+    "transportCopy": "/Users/dongli/Documents/ChatGPT/CodePilot/LabCodepilot-para/outputs/factor-zoo-process-improvement-template-upload-optimized.pptx",
+    "transportOptimization": "Resampled four oversized embedded PNG photos to 1200px maximum dimension to fit the module upload limit while retaining presentation-scale clarity; slide dimensions, artwork placement, fonts, colors and editable shapes are unchanged.",
+    "id": "4e1820d43b6047d25eab019afef1662b",
+    "compatibility": "mapped",
+    "pages": 8,
+    "palette": {
+      "background": "#fcfcfc",
+      "accent": "#cc5500",
+      "foreground": "#242a3b",
+      "muted": "#505b6f"
+    },
+    "fonts": {
+      "title": "Roboto Medium",
+      "body": "Roboto",
+      "titleEastAsia": "等线 Light",
+      "bodyEastAsia": "等线",
+      "titleEastAsiaHant": "Songti TC",
+      "bodyEastAsiaHant": "Songti TC",
+      "cjkExplicit": true,
+      "cjkSource": "template"
+    }
+  },
+  "simulatedLlm": {
+    "id": "simulated-structured-llm",
+    "behavior": "deterministic, source-grounded JSON responses for Brief/Story/Outline, 22 content nodes, and one whole-deck review",
+    "profile": "factor-zoo"
+  },
+  "pageDecision": {
+    "source": "estimate",
+    "finalPageCount": 22,
+    "recommendedPageCount": 22,
+    "range": [
+      18,
+      26
+    ],
+    "depthPolicy": "strict"
+  },
+  "title": {
+    "text": "FACTOR ZOO",
+    "source": "agent",
+    "locked": false
+  },
+  "execution": {
+    "orchestration": "ppt-api handlePpt",
+    "templateAnalysis": "ppt-template SCRIPT via host Python",
+    "pptxRendering": "pptx/import-pptx EXPORT_SCRIPT via host Python",
+    "coworkSandbox": false,
+    "reason": "local Docker has no Cowork image; module scripts run locally with a deterministic simulated LLM"
+  },
+  "workflow": {
+    "projectId": "4410eb4c76f3580719a1ee8885ee3808",
+    "status": "completed",
+    "stage": "publish",
+    "slideCount": 22,
+    "layoutIds": [
+      "cover",
+      "summary",
+      "comparison",
+      "timeline",
+      "comparison",
+      "comparison",
+      "timeline",
+      "timeline",
+      "summary",
+      "timeline",
+      "comparison",
+      "comparison",
+      "comparison",
+      "comparison",
+      "summary",
+      "summary",
+      "comparison",
+      "comparison",
+      "timeline",
+      "summary",
+      "summary",
+      "conclusion"
+    ],
+    "templateSlideMap": [
+      0,
+      1,
+      2,
+      3,
+      4,
+      2,
+      1,
+      5,
+      6,
+      4,
+      3,
+      2,
+      5,
+      6,
+      1,
+      2,
+      3,
+      4,
+      1,
+      6,
+      5,
+      7
+    ],
+    "templateFidelity": {
+      "mode": "preserve",
+      "sourceSlides": 8,
+      "templateImageShapes": 47,
+      "outputPptx": {
+        "slides": 22,
+        "shapes": 430,
+        "pictures": 47,
+        "pictureShapeIdsBySlide": [
+          [
+            2
+          ],
+          [],
+          [
+            25,
+            27,
+            29,
+            31,
+            33,
+            35
+          ],
+          [
+            2
+          ],
+          [
+            16
+          ],
+          [
+            25,
+            27,
+            29,
+            31,
+            33,
+            35
+          ],
+          [],
+          [
+            2
+          ],
+          [
+            9,
+            14,
+            19,
+            22
+          ],
+          [
+            16
+          ],
+          [
+            2
+          ],
+          [
+            25,
+            27,
+            29,
+            31,
+            33,
+            35
+          ],
+          [
+            2
+          ],
+          [
+            9,
+            14,
+            19,
+            22
+          ],
+          [],
+          [
+            25,
+            27,
+            29,
+            31,
+            33,
+            35
+          ],
+          [
+            2
+          ],
+          [
+            16
+          ],
+          [],
+          [
+            9,
+            14,
+            19,
+            22
+          ],
+          [
+            2
+          ],
+          [
+            2
+          ]
+        ],
+        "mediaParts": 30,
+        "explicitFonts": [
+          "Roboto",
+          "Roboto Bold",
+          "Roboto Medium"
+        ]
+      }
+    },
+    "templateReusePlan": {
+      "repeatedPages": 14,
+      "omittedSourcePages": 0,
+      "maxSourceUse": 4,
+      "adjacentSameSource": 0,
+      "visualSimilarityPairs": [
+        0.147,
+        0.189,
+        0.106,
+        0.092,
+        0.108,
+        0.189,
+        0.155,
+        0.08,
+        0.186,
+        0.092,
+        0.106,
+        0.132,
+        0.08,
+        0.162,
+        0.189,
+        0.106,
+        0.092,
+        0.075,
+        0.162,
+        0.08,
+        0.137
+      ]
+    },
+    "slides": [
+      {
+        "page": 1,
+        "id": "slide_6a738756af6e9f813c977aa3",
+        "title": "FACTOR ZOO",
+        "bullets": [
+          "QUANT RESEARCH\nA research map for asset-pricing models, anomalies and investable tests."
+        ],
+        "blocks": [
+          {
+            "type": "mechanism",
+            "heading": "QUANT RESEARCH",
+            "body": "A research map for asset-pricing models, anomalies and investable tests."
+          }
+        ],
+        "sourceRefs": [
+          "1"
+        ]
+      },
+      {
+        "page": 2,
+        "id": "slide_288715e7624bbaaf80c34776",
+        "title": "Factor vs Alpha",
+        "bullets": [
+          "FOUNDATIONS\nTrait → sort → return",
+          "FACTOR\nA characteristic is an observable trait. Sorting creates factor returns such as HML; a signal ranks stocks. Alpha is the regression intercept left after the chosen model, which also determines whether a return pattern is anomalous.",
+          "FOUNDATIONS\nModels can absorb yesterday’s anomaly; what survives depends on the benchmark."
+        ],
+        "blocks": [
+          {
+            "type": "mechanism",
+            "heading": "FOUNDATIONS",
+            "body": "Trait → sort → return"
+          },
+          {
+            "type": "evidence",
+            "heading": "FACTOR",
+            "body": "A characteristic is an observable trait. Sorting creates factor returns such as HML; a signal ranks stocks. Alpha is the regression intercept left after the chosen model, which also determines whether a return pattern is anomalous."
+          },
+          {
+            "type": "implication",
+            "heading": "FOUNDATIONS",
+            "body": "Models can absorb yesterday’s anomaly; what survives depends on the benchmark."
+          }
+        ],
+        "sourceRefs": [
+          "1",
+          "2"
+        ]
+      },
+      {
+        "page": 3,
+        "id": "slide_ba8a0701e0722ea9a8a6a619",
+        "title": "Anomaly Is Relative",
+        "bullets": [
+          "DEFINITIONS\nAn anomaly is benchmark-dependent: specify the model before calling a return pattern unexplained. Tests against broader model sets ask whether the premium survives controls.",
+          "Characteristic\nAn observable firm trait, such as book-to-market.",
+          "Factor return\nA return series formed by sorting stocks on a characteristic, such as HML.",
+          "Signal\nA cross-sectional score ranks stocks for portfolio construction.",
+          "Unexplained\nA pattern the selected benchmark model fails to explain.",
+          "Alpha\nThe regression intercept left unexplained by chosen factors.",
+          "Model-relative\nExpanded benchmarks can absorb yesterday’s anomaly exposures."
+        ],
+        "blocks": [
+          {
+            "type": "mechanism",
+            "heading": "DEFINITIONS",
+            "body": "An anomaly is benchmark-dependent: specify the model before calling a return pattern unexplained. Tests against broader model sets ask whether the premium survives controls."
+          },
+          {
+            "type": "evidence",
+            "heading": "Characteristic",
+            "body": "An observable firm trait, such as book-to-market."
+          },
+          {
+            "type": "implication",
+            "heading": "Factor return",
+            "body": "A return series formed by sorting stocks on a characteristic, such as HML."
+          },
+          {
+            "type": "next_step",
+            "heading": "Signal",
+            "body": "A cross-sectional score ranks stocks for portfolio construction."
+          },
+          {
+            "type": "next_step",
+            "heading": "Unexplained",
+            "body": "A pattern the selected benchmark model fails to explain."
+          },
+          {
+            "type": "next_step",
+            "heading": "Alpha",
+            "body": "The regression intercept left unexplained by chosen factors."
+          },
+          {
+            "type": "next_step",
+            "heading": "Model-relative",
+            "body": "Expanded benchmarks can absorb yesterday’s anomaly exposures."
+          }
+        ],
+        "sourceRefs": [
+          "1",
+          "2"
+        ]
+      },
+      {
+        "page": 4,
+        "id": "slide_f14a856078c308737c31b400",
+        "title": "CAPM Prices Beta",
+        "bullets": [
+          "Pricing rule\nCAPM makes expected excess return proportional to market beta times the market risk premium; its Security Market Line is linear under the model assumptions.",
+          "Beta\nBeta is covariance with the market divided by market-return variance; only systematic risk is priced. Two-fund separation gives all investors the same risky mix; market clearing makes it the market portfolio.",
+          "Equilibrium\nw_mkt ∝ Σ⁻¹(μ − r_f1); μ − r_f1 ∝ Σw_mkt."
+        ],
+        "blocks": [
+          {
+            "type": "mechanism",
+            "heading": "Pricing rule",
+            "body": "CAPM makes expected excess return proportional to market beta times the market risk premium; its Security Market Line is linear under the model assumptions."
+          },
+          {
+            "type": "evidence",
+            "heading": "Beta",
+            "body": "Beta is covariance with the market divided by market-return variance; only systematic risk is priced. Two-fund separation gives all investors the same risky mix; market clearing makes it the market portfolio."
+          },
+          {
+            "type": "implication",
+            "heading": "Equilibrium",
+            "body": "w_mkt ∝ Σ⁻¹(μ − r_f1); μ − r_f1 ∝ Σw_mkt."
+          }
+        ],
+        "sourceRefs": [
+          "3",
+          "4",
+          "5"
+        ]
+      },
+      {
+        "page": 5,
+        "id": "slide_45963111283bc23844f34cb7",
+        "title": "CAPM Limits",
+        "bullets": [
+          "CAPM\nFlat SML",
+          "CAPM\nThe empirical SML was flatter than CAPM predicts; BAB formalizes the low-beta pattern. Size and value returns exceeded beta-only predictions. These failures did not kill factor-based asset pricing; research shifted to multifactor models.",
+          "ROLL (1977)\nThe true market spans unobservable bonds, real estate and human capital; equity-only CAPM tests are limited. This shifted research toward multifactor models."
+        ],
+        "blocks": [
+          {
+            "type": "mechanism",
+            "heading": "CAPM",
+            "body": "Flat SML"
+          },
+          {
+            "type": "evidence",
+            "heading": "CAPM",
+            "body": "The empirical SML was flatter than CAPM predicts; BAB formalizes the low-beta pattern. Size and value returns exceeded beta-only predictions. These failures did not kill factor-based asset pricing; research shifted to multifactor models."
+          },
+          {
+            "type": "implication",
+            "heading": "ROLL (1977)",
+            "body": "The true market spans unobservable bonds, real estate and human capital; equity-only CAPM tests are limited. This shifted research toward multifactor models."
+          }
+        ],
+        "sourceRefs": [
+          "5",
+          "6"
+        ]
+      },
+      {
+        "page": 6,
+        "id": "slide_c5b04b1b5f245d7229594c14",
+        "title": "Model Lineage",
+        "bullets": [
+          "MODEL LINEAGE\nModels broaden the benchmark from market risk to characteristic-based returns, investment, profitability and mispricing. Each extension absorbs patterns, but fit depends on factor construction, assumptions and model selection.",
+          "CAPM\nCAPM links expected excess returns to market beta under a mean-variance efficient market portfolio and homogeneous expectations.",
+          "APT\nAPT assumes a linear factor structure and no-arbitrage, without specifying the factors’ economic identities.",
+          "FF3\nAdds size (SMB) and value (HML) to market beta after CAPM leaves those return patterns unexplained.",
+          "Carhart\nAdds a winner-minus-loser momentum return because momentum-sorted portfolios retain alpha against FF3.",
+          "FF5 / q\nFF5 adds profitability and investment; q uses investment-to-assets and return on equity.",
+          "SY / q5\nMispricing clusters and expected growth broaden fit; selection still matters."
+        ],
+        "blocks": [
+          {
+            "type": "mechanism",
+            "heading": "MODEL LINEAGE",
+            "body": "Models broaden the benchmark from market risk to characteristic-based returns, investment, profitability and mispricing. Each extension absorbs patterns, but fit depends on factor construction, assumptions and model selection."
+          },
+          {
+            "type": "evidence",
+            "heading": "CAPM",
+            "body": "CAPM links expected excess returns to market beta under a mean-variance efficient market portfolio and homogeneous expectations."
+          },
+          {
+            "type": "implication",
+            "heading": "APT",
+            "body": "APT assumes a linear factor structure and no-arbitrage, without specifying the factors’ economic identities."
+          },
+          {
+            "type": "next_step",
+            "heading": "FF3",
+            "body": "Adds size (SMB) and value (HML) to market beta after CAPM leaves those return patterns unexplained."
+          },
+          {
+            "type": "next_step",
+            "heading": "Carhart",
+            "body": "Adds a winner-minus-loser momentum return because momentum-sorted portfolios retain alpha against FF3."
+          },
+          {
+            "type": "next_step",
+            "heading": "FF5 / q",
+            "body": "FF5 adds profitability and investment; q uses investment-to-assets and return on equity."
+          },
+          {
+            "type": "next_step",
+            "heading": "SY / q5",
+            "body": "Mispricing clusters and expected growth broaden fit; selection still matters."
+          }
+        ],
+        "sourceRefs": [
+          "11"
+        ]
+      },
+      {
+        "page": 7,
+        "id": "slide_f88c93541e4ce421363788ba",
+        "title": "Fama–French 3",
+        "bullets": [
+          "FAMA–FRENCH 3\nAnnual 2×3",
+          "SORT\nEach June, split size at the NYSE median and book-to-market at the 30th / 70th percentiles. The independent sorts form six value-weighted portfolios; SMB contrasts small with big, while HML contrasts high with low book-to-market.",
+          "FAMA–FRENCH 3\nIndependent sorts separate size and value exposures."
+        ],
+        "blocks": [
+          {
+            "type": "mechanism",
+            "heading": "FAMA–FRENCH 3",
+            "body": "Annual 2×3"
+          },
+          {
+            "type": "evidence",
+            "heading": "SORT",
+            "body": "Each June, split size at the NYSE median and book-to-market at the 30th / 70th percentiles. The independent sorts form six value-weighted portfolios; SMB contrasts small with big, while HML contrasts high with low book-to-market."
+          },
+          {
+            "type": "implication",
+            "heading": "FAMA–FRENCH 3",
+            "body": "Independent sorts separate size and value exposures."
+          }
+        ],
+        "sourceRefs": [
+          "6",
+          "7"
+        ]
+      },
+      {
+        "page": 8,
+        "id": "slide_89a46575c64b8509533e41ac",
+        "title": "Carhart MOM",
+        "bullets": [
+          "MOMENTUM\nMonthly rebalanced, value-weighted UMD adds winners-minus-losers to FF3; fund attribution links apparent manager skill to momentum. Rank t−12 to t−2 returns, skip the latest month, and form within-size 2×3 long-short 30% / decile spreads. Rebounds can crash momentum. r_i-r_f = α_i + β_iMKT + s_iSMB + h_iHML + m_iUMD + ε_i.",
+          "UMD\nLONG WINNER LEG Top minus bottom 30% or decile; within-size 2×3.",
+          "RANK\nSkip the most recent month.",
+          "RISK\nMOMENTUM CRASHES Rebounds can cause crashes.",
+          "MOMENTUM\nSkill reduces to passive tilt"
+        ],
+        "blocks": [
+          {
+            "type": "mechanism",
+            "heading": "MOMENTUM",
+            "body": "Monthly rebalanced, value-weighted UMD adds winners-minus-losers to FF3; fund attribution links apparent manager skill to momentum. Rank t−12 to t−2 returns, skip the latest month, and form within-size 2×3 long-short 30% / decile spreads. Rebounds can crash momentum. r_i-r_f = α_i + β_iMKT + s_iSMB + h_iHML + m_iUMD + ε_i."
+          },
+          {
+            "type": "evidence",
+            "heading": "UMD",
+            "body": "LONG WINNER LEG Top minus bottom 30% or decile; within-size 2×3."
+          },
+          {
+            "type": "implication",
+            "heading": "RANK",
+            "body": "Skip the most recent month."
+          },
+          {
+            "type": "next_step",
+            "heading": "RISK",
+            "body": "MOMENTUM CRASHES Rebounds can cause crashes."
+          },
+          {
+            "type": "next_step",
+            "heading": "MOMENTUM",
+            "body": "Skill reduces to passive tilt"
+          }
+        ],
+        "sourceRefs": [
+          "7",
+          "8"
+        ]
+      },
+      {
+        "page": 9,
+        "id": "slide_feac2c0c220ff25658e33917",
+        "title": "FF5 Adds RMW + CMA",
+        "bullets": [
+          "PROFITABILITY & INVESTMENT\nRMW + CMA",
+          "RMW\nRobust-minus-weak profitability adds operating profitability to the market, size and value factors; it captures differences in firms’ operating strength.",
+          "CMA\nConservative-minus-aggressive investment adds an investment dimension, motivated by dividend-discount logic and firms’ investment behavior.",
+          "HML\nHML can be partly redundant in some samples; its marginal role depends on the test assets and remains debated.",
+          "PROFITABILITY & INVESTMENT\nDividend-discount rationale; sample-dependent HML FF5 adds profitability (RMW) and investment (CMA). Broader fit is not a universal verdict; HML may be partly redundant in some samples."
+        ],
+        "blocks": [
+          {
+            "type": "mechanism",
+            "heading": "PROFITABILITY & INVESTMENT",
+            "body": "RMW + CMA"
+          },
+          {
+            "type": "evidence",
+            "heading": "RMW",
+            "body": "Robust-minus-weak profitability adds operating profitability to the market, size and value factors; it captures differences in firms’ operating strength."
+          },
+          {
+            "type": "implication",
+            "heading": "CMA",
+            "body": "Conservative-minus-aggressive investment adds an investment dimension, motivated by dividend-discount logic and firms’ investment behavior."
+          },
+          {
+            "type": "next_step",
+            "heading": "HML",
+            "body": "HML can be partly redundant in some samples; its marginal role depends on the test assets and remains debated."
+          },
+          {
+            "type": "next_step",
+            "heading": "PROFITABILITY & INVESTMENT",
+            "body": "Dividend-discount rationale; sample-dependent HML FF5 adds profitability (RMW) and investment (CMA). Broader fit is not a universal verdict; HML may be partly redundant in some samples."
+          }
+        ],
+        "sourceRefs": [
+          "8",
+          "9"
+        ]
+      },
+      {
+        "page": 10,
+        "id": "slide_309e04f0d6783d13348d5d95",
+        "title": "q and q5 Models",
+        "bullets": [
+          "Q-FACTOR MODELS\nProduction",
+          "Q-FACTOR MODELS\nThe q model uses market, investment-to-assets (I / A) and return on equity (ROE), linking expected returns to investment and profitability. q5 adds expected growth (EG); independent size, investment and profitability sorts form 27 portfolios.",
+          "Trade-off\nGreater structure still leaves results dependent on sample and construction choices."
+        ],
+        "blocks": [
+          {
+            "type": "mechanism",
+            "heading": "Q-FACTOR MODELS",
+            "body": "Production"
+          },
+          {
+            "type": "evidence",
+            "heading": "Q-FACTOR MODELS",
+            "body": "The q model uses market, investment-to-assets (I / A) and return on equity (ROE), linking expected returns to investment and profitability. q5 adds expected growth (EG); independent size, investment and profitability sorts form 27 portfolios."
+          },
+          {
+            "type": "implication",
+            "heading": "Trade-off",
+            "body": "Greater structure still leaves results dependent on sample and construction choices."
+          }
+        ],
+        "sourceRefs": [
+          "9",
+          "10"
+        ]
+      },
+      {
+        "page": 11,
+        "id": "slide_16d1e80f3cf671e37f92b5fd",
+        "title": "MGMT + PERF",
+        "bullets": [
+          "MGMT\nMGMT clusters investment and accrual anomalies into a composite mispricing factor; its design summarizes related characteristics rather than treating each signal as independent.",
+          "PERF\nPERF groups profitability and momentum patterns. Together, MGMT and PERF summarize 11 known anomaly characteristics in the Stambaugh–Yuan framework.",
+          "Post-hoc caveat\nIts horse-race advantage needs caution because construction is post hoc."
+        ],
+        "blocks": [
+          {
+            "type": "mechanism",
+            "heading": "MGMT",
+            "body": "MGMT clusters investment and accrual anomalies into a composite mispricing factor; its design summarizes related characteristics rather than treating each signal as independent."
+          },
+          {
+            "type": "evidence",
+            "heading": "PERF",
+            "body": "PERF groups profitability and momentum patterns. Together, MGMT and PERF summarize 11 known anomaly characteristics in the Stambaugh–Yuan framework."
+          },
+          {
+            "type": "implication",
+            "heading": "Post-hoc caveat",
+            "body": "Its horse-race advantage needs caution because construction is post hoc."
+          }
+        ],
+        "sourceRefs": [
+          "10",
+          "11"
+        ]
+      },
+      {
+        "page": 12,
+        "id": "slide_ba364164497157cabdfe0db2",
+        "title": "Testing Models",
+        "bullets": [
+          "MODEL TESTING\nDifferent tests answer different pricing questions; the test assets and covariance estimates shape the verdict. Regression fit alone does not settle the economic explanation.",
+          "Time series\nRegress portfolio returns on factor returns; inspect the intercept.",
+          "Cross section\nAsk whether betas or traits explain average-return differences.",
+          "GRS\nJointly test whether test-portfolio alphas equal zero.",
+          "Test assets\nChanging the portfolios can change the model comparison.",
+          "Covariance\nGRS depends on estimated residual covariance across portfolios.",
+          "Inference\nNo single regression settles the economic explanation."
+        ],
+        "blocks": [
+          {
+            "type": "mechanism",
+            "heading": "MODEL TESTING",
+            "body": "Different tests answer different pricing questions; the test assets and covariance estimates shape the verdict. Regression fit alone does not settle the economic explanation."
+          },
+          {
+            "type": "evidence",
+            "heading": "Time series",
+            "body": "Regress portfolio returns on factor returns; inspect the intercept."
+          },
+          {
+            "type": "implication",
+            "heading": "Cross section",
+            "body": "Ask whether betas or traits explain average-return differences."
+          },
+          {
+            "type": "next_step",
+            "heading": "GRS",
+            "body": "Jointly test whether test-portfolio alphas equal zero."
+          },
+          {
+            "type": "next_step",
+            "heading": "Test assets",
+            "body": "Changing the portfolios can change the model comparison."
+          },
+          {
+            "type": "next_step",
+            "heading": "Covariance",
+            "body": "GRS depends on estimated residual covariance across portfolios."
+          },
+          {
+            "type": "next_step",
+            "heading": "Inference",
+            "body": "No single regression settles the economic explanation."
+          }
+        ],
+        "sourceRefs": [
+          "11",
+          "12"
+        ]
+      },
+      {
+        "page": 13,
+        "id": "slide_2b1a54f6dad4b3061436039e",
+        "title": "Premia Stories",
+        "bullets": [
+          "WHY PREMIA EXIST\nRisk compensation, behavioral mispricing and limits to arbitrage compete; a factor may mix them. Risk pays for bad-state exposure. Behavioral errors include overreaction, underreaction and extrapolation. Trading frictions delay correction, while value, momentum, low-volatility and size each have failure stories.",
+          "RISK\nBAD-STATE LOSSES Pays for losses in adverse states.",
+          "BEHV\nOverreaction, underreaction and extrapolation move prices.",
+          "FRIC\nSHORTING LIMITS Shorting limits slow correction.",
+          "WHY PREMIA EXIST\nCompeting stories can overlap"
+        ],
+        "blocks": [
+          {
+            "type": "mechanism",
+            "heading": "WHY PREMIA EXIST",
+            "body": "Risk compensation, behavioral mispricing and limits to arbitrage compete; a factor may mix them. Risk pays for bad-state exposure. Behavioral errors include overreaction, underreaction and extrapolation. Trading frictions delay correction, while value, momentum, low-volatility and size each have failure stories."
+          },
+          {
+            "type": "evidence",
+            "heading": "RISK",
+            "body": "BAD-STATE LOSSES Pays for losses in adverse states."
+          },
+          {
+            "type": "implication",
+            "heading": "BEHV",
+            "body": "Overreaction, underreaction and extrapolation move prices."
+          },
+          {
+            "type": "next_step",
+            "heading": "FRIC",
+            "body": "SHORTING LIMITS Shorting limits slow correction."
+          },
+          {
+            "type": "next_step",
+            "heading": "WHY PREMIA EXIST",
+            "body": "Competing stories can overlap"
+          }
+        ],
+        "sourceRefs": [
+          "2",
+          "3",
+          "12"
+        ]
+      },
+      {
+        "page": 14,
+        "id": "slide_f5fc18da553daf5b5a262cb9",
+        "title": "Multiple Testing",
+        "bullets": [
+          "FACTOR ZOO\nTrials raise false-discovery risk",
+          "ALIASES\nSeveral labels may reflect one latent exposure rather than distinct sources of return; correlated definitions can repackage a signal.",
+          "ABSORBED\nA broader benchmark can explain an anomaly that appeared under CAPM or FF3, changing the residual claim.",
+          "SELECTION\nMany trials make a t-stat above 2 weak evidence; require a rationale, point-in-time data, robustness and independent confirmation.",
+          "FACTOR ZOO\nNet costs can erase a premium Trading costs may erase the premium. Test incremental value against known factors, model realistic implementation and record the full search process."
+        ],
+        "blocks": [
+          {
+            "type": "mechanism",
+            "heading": "FACTOR ZOO",
+            "body": "Trials raise false-discovery risk"
+          },
+          {
+            "type": "evidence",
+            "heading": "ALIASES",
+            "body": "Several labels may reflect one latent exposure rather than distinct sources of return; correlated definitions can repackage a signal."
+          },
+          {
+            "type": "implication",
+            "heading": "ABSORBED",
+            "body": "A broader benchmark can explain an anomaly that appeared under CAPM or FF3, changing the residual claim."
+          },
+          {
+            "type": "next_step",
+            "heading": "SELECTION",
+            "body": "Many trials make a t-stat above 2 weak evidence; require a rationale, point-in-time data, robustness and independent confirmation."
+          },
+          {
+            "type": "next_step",
+            "heading": "FACTOR ZOO",
+            "body": "Net costs can erase a premium Trading costs may erase the premium. Test incremental value against known factors, model realistic implementation and record the full search process."
+          }
+        ],
+        "sourceRefs": [
+          "12"
+        ]
+      },
+      {
+        "page": 15,
+        "id": "slide_303d8b3ad2cdd3a33b0e16d4",
+        "title": "Factor Scorecard",
+        "bullets": [
+          "FACTOR SCORECARD\nNo factor story is a verdict; each one needs a failure test.",
+          "TEST\nValue mixes distress / duration risk and extrapolation; metric choice creates a mining risk. Momentum carries crash exposure, underreaction stories and parameter-search risk. Quality and investment pair cash-flow or q-theory stories with definition choices.",
+          "FACTOR SCORECARD\nLow volatility, size and liquidity face leverage, funding, sector and trading-friction confounds."
+        ],
+        "blocks": [
+          {
+            "type": "mechanism",
+            "heading": "FACTOR SCORECARD",
+            "body": "No factor story is a verdict; each one needs a failure test."
+          },
+          {
+            "type": "evidence",
+            "heading": "TEST",
+            "body": "Value mixes distress / duration risk and extrapolation; metric choice creates a mining risk. Momentum carries crash exposure, underreaction stories and parameter-search risk. Quality and investment pair cash-flow or q-theory stories with definition choices."
+          },
+          {
+            "type": "implication",
+            "heading": "FACTOR SCORECARD",
+            "body": "Low volatility, size and liquidity face leverage, funding, sector and trading-friction confounds."
+          }
+        ],
+        "sourceRefs": [
+          "12",
+          "13"
+        ]
+      },
+      {
+        "page": 16,
+        "id": "slide_953a481e17dca6b36b8986f2",
+        "title": "Factor Families",
+        "bullets": [
+          "TAXONOMY\nEach factor family needs controls suited to its signal, data source and likely confounds. Families can overlap, but their measurement risks differ.",
+          "Value\nB / P, E / P and EBIT / EV; control industry, profitability and leverage.",
+          "Momentum\n12–1, residual and earnings signals; test reversal and crash exposure.",
+          "Quality\nGP / A, ROE and accruals; control sector, leverage and size.",
+          "Investment\nAsset growth, capex growth and net issuance; check profitability.",
+          "Risk / liq.\nBeta, volatility and spreads / turnover; control sector, leverage, size and price.",
+          "Sentiment / alt.\nRevisions, short interest, news and web data require coverage and timestamp controls."
+        ],
+        "blocks": [
+          {
+            "type": "mechanism",
+            "heading": "TAXONOMY",
+            "body": "Each factor family needs controls suited to its signal, data source and likely confounds. Families can overlap, but their measurement risks differ."
+          },
+          {
+            "type": "evidence",
+            "heading": "Value",
+            "body": "B / P, E / P and EBIT / EV; control industry, profitability and leverage."
+          },
+          {
+            "type": "implication",
+            "heading": "Momentum",
+            "body": "12–1, residual and earnings signals; test reversal and crash exposure."
+          },
+          {
+            "type": "next_step",
+            "heading": "Quality",
+            "body": "GP / A, ROE and accruals; control sector, leverage and size."
+          },
+          {
+            "type": "next_step",
+            "heading": "Investment",
+            "body": "Asset growth, capex growth and net issuance; check profitability."
+          },
+          {
+            "type": "next_step",
+            "heading": "Risk / liq.",
+            "body": "Beta, volatility and spreads / turnover; control sector, leverage, size and price."
+          },
+          {
+            "type": "next_step",
+            "heading": "Sentiment / alt.",
+            "body": "Revisions, short interest, news and web data require coverage and timestamp controls."
+          }
+        ],
+        "sourceRefs": [
+          "13"
+        ]
+      },
+      {
+        "page": 17,
+        "id": "slide_56e96b53c2c33cae84f8610f",
+        "title": "Portfolio Forms",
+        "bullets": [
+          "Long-short\nDecile or rank-weighted dollar-neutral portfolios test the premium; a long-only benchmark tilt tests constrained stock selection.",
+          "Optimizer\nResidualized signals fit constrained optimizers; factor-mimicking portfolios serve risk models. Report weighting, rebalancing frequency, breakpoint universe, sector and beta neutrality, leverage, and cost assumptions.",
+          "Report design\n必须报告构建选择：加权方式、调仓频率、断点股票池、行业中性、贝塔中性、杠杆和成本假设。"
+        ],
+        "blocks": [
+          {
+            "type": "mechanism",
+            "heading": "Long-short",
+            "body": "Decile or rank-weighted dollar-neutral portfolios test the premium; a long-only benchmark tilt tests constrained stock selection."
+          },
+          {
+            "type": "evidence",
+            "heading": "Optimizer",
+            "body": "Residualized signals fit constrained optimizers; factor-mimicking portfolios serve risk models. Report weighting, rebalancing frequency, breakpoint universe, sector and beta neutrality, leverage, and cost assumptions."
+          },
+          {
+            "type": "implication",
+            "heading": "Report design",
+            "body": "必须报告构建选择：加权方式、调仓频率、断点股票池、行业中性、贝塔中性、杠杆和成本假设。"
+          }
+        ],
+        "sourceRefs": [
+          "13"
+        ]
+      },
+      {
+        "page": 18,
+        "id": "slide_2bb174c158883e1eaa99f8be",
+        "title": "Timing & Crowding",
+        "bullets": [
+          "TIMING & CROWDING\nTiming",
+          "TIMING & CROWDING\nValuation spreads, recent factor returns, macro regimes and volatility may inform timing, but they add another layer of multiple testing. Crowded factors can persist until liquidity disappears, then unwind sharply.",
+          "Monitor\nTrack flows, common holdings, short interest, borrow, turnover and manager correlation."
+        ],
+        "blocks": [
+          {
+            "type": "mechanism",
+            "heading": "TIMING & CROWDING",
+            "body": "Timing"
+          },
+          {
+            "type": "evidence",
+            "heading": "TIMING & CROWDING",
+            "body": "Valuation spreads, recent factor returns, macro regimes and volatility may inform timing, but they add another layer of multiple testing. Crowded factors can persist until liquidity disappears, then unwind sharply."
+          },
+          {
+            "type": "implication",
+            "heading": "Monitor",
+            "body": "Track flows, common holdings, short interest, borrow, turnover and manager correlation."
+          }
+        ],
+        "sourceRefs": [
+          "13",
+          "14"
+        ]
+      },
+      {
+        "page": 19,
+        "id": "slide_15c305066e2c04e94906ef10",
+        "title": "U.S. vs A-Shares",
+        "bullets": [
+          "A-SHARES\nMarket transfer",
+          "CHECK\nUS momentum is canonical; A-share momentum is more horizon- and limit-event-dependent. Quality screens must watch subsidies, related parties and earnings management. 美股动量是经典稳健因子，而 A 股动量更依赖期限和涨跌停事件；A 股规模因子受壳价值和量化拥挤塑造；A 股质量筛选必须更关注补贴、关联方活动和盈余管理动机。",
+          "A-SHARES\nShell value and quant crowding have shaped A-share size behavior."
+        ],
+        "blocks": [
+          {
+            "type": "mechanism",
+            "heading": "A-SHARES",
+            "body": "Market transfer"
+          },
+          {
+            "type": "evidence",
+            "heading": "CHECK",
+            "body": "US momentum is canonical; A-share momentum is more horizon- and limit-event-dependent. Quality screens must watch subsidies, related parties and earnings management. 美股动量是经典稳健因子，而 A 股动量更依赖期限和涨跌停事件；A 股规模因子受壳价值和量化拥挤塑造；A 股质量筛选必须更关注补贴、关联方活动和盈余管理动机。"
+          },
+          {
+            "type": "implication",
+            "heading": "A-SHARES",
+            "body": "Shell value and quant crowding have shaped A-share size behavior."
+          }
+        ],
+        "sourceRefs": [
+          "14"
+        ]
+      },
+      {
+        "page": 20,
+        "id": "slide_eee737c6923de99144adcfdd",
+        "title": "The 2×3 Sort",
+        "bullets": [
+          "2×3 SORT\nIndependent sorts",
+          "SIZE\nSplit the universe into small and big by market capitalization; independently sort the chosen characteristic into low, middle and high buckets.",
+          "INTERSECT\nCross the two rankings to form six portfolios; compare high with low within each size group.",
+          "HML\nHML averages the high-characteristic portfolios and subtracts the low-characteristic average across size buckets.",
+          "2×3 SORT\nHML = ½(SmallHigh + BigHigh) − ½(SmallLow + BigLow). Higher characteristic returns minus lower, averaged across size.；A Fama-French-style 2×3 sort works as follows: split the universe into small / big by market cap, split the characteristic into low / mid / high by breakpoints, then form six portfolios. Independent sorting keeps the characteristic spread from merely proxying for firm size; the same template applies to profitability or investment."
+        ],
+        "blocks": [
+          {
+            "type": "mechanism",
+            "heading": "2×3 SORT",
+            "body": "Independent sorts"
+          },
+          {
+            "type": "evidence",
+            "heading": "SIZE",
+            "body": "Split the universe into small and big by market capitalization; independently sort the chosen characteristic into low, middle and high buckets."
+          },
+          {
+            "type": "implication",
+            "heading": "INTERSECT",
+            "body": "Cross the two rankings to form six portfolios; compare high with low within each size group."
+          },
+          {
+            "type": "next_step",
+            "heading": "HML",
+            "body": "HML averages the high-characteristic portfolios and subtracts the low-characteristic average across size buckets."
+          },
+          {
+            "type": "next_step",
+            "heading": "2×3 SORT",
+            "body": "HML = ½(SmallHigh + BigHigh) − ½(SmallLow + BigLow). Higher characteristic returns minus lower, averaged across size.；A Fama-French-style 2×3 sort works as follows: split the universe into small / big by market cap, split the characteristic into low / mid / high by breakpoints, then form six portfolios. Independent sorting keeps the characteristic spread from merely proxying for firm size; the same template applies to profitability or investment."
+          }
+        ],
+        "sourceRefs": [
+          "14"
+        ]
+      },
+      {
+        "page": 21,
+        "id": "slide_82a83089696e55b2036af2d6",
+        "title": "Strategy Path",
+        "bullets": [
+          "FACTOR TO STRATEGY\nA factor is not yet a strategy: define the universe, forecast, portfolio, execution, risk limits, capacity, monitoring and governance. Test rationale and incremental value, include costs, red-team the result, paper-trade, then consider a small live allocation.",
+          "PLAN\nINVESTABLE UNIV Define investable names and forecasts.",
+          "TEST\nCheck incrementality, costs and capacity.",
+          "RISK\nSET RISK LIMITS Set limits and monitor drawdowns.",
+          "FACTOR TO STRATEGY\nbefore live allocation"
+        ],
+        "blocks": [
+          {
+            "type": "mechanism",
+            "heading": "FACTOR TO STRATEGY",
+            "body": "A factor is not yet a strategy: define the universe, forecast, portfolio, execution, risk limits, capacity, monitoring and governance. Test rationale and incremental value, include costs, red-team the result, paper-trade, then consider a small live allocation."
+          },
+          {
+            "type": "evidence",
+            "heading": "PLAN",
+            "body": "INVESTABLE UNIV Define investable names and forecasts."
+          },
+          {
+            "type": "implication",
+            "heading": "TEST",
+            "body": "Check incrementality, costs and capacity."
+          },
+          {
+            "type": "next_step",
+            "heading": "RISK",
+            "body": "SET RISK LIMITS Set limits and monitor drawdowns."
+          },
+          {
+            "type": "next_step",
+            "heading": "FACTOR TO STRATEGY",
+            "body": "before live allocation"
+          }
+        ],
+        "sourceRefs": [
+          "14"
+        ]
+      },
+      {
+        "page": 22,
+        "id": "slide_82d925619759553c91283dcc",
+        "title": "Factor Checklist",
+        "bullets": [
+          "Evidence & rationale\nTHEORY: A priori case; DATA: Point-in-time; NEUTRAL: Control exposures; UNIQUE: Incremental value",
+          "Robustness\nMETHOD: Conservative tests; IC: Sorts agree; HORIZON: Reasonable range; UNIVERSE: Broader samples",
+          "Tradability\nCOSTS: Cost realism; TURNOVER: Realistic rates; BORROW: Available names; CAPACITY: Enough liquidity",
+          "Library & warning\nFAILURE: False discoveries; MONITOR: Track live risk; OWNER: Assign review; REGIME: Stay humble"
+        ],
+        "blocks": [
+          {
+            "type": "mechanism",
+            "heading": "Evidence & rationale",
+            "body": "THEORY: A priori case; DATA: Point-in-time; NEUTRAL: Control exposures; UNIQUE: Incremental value"
+          },
+          {
+            "type": "evidence",
+            "heading": "Robustness",
+            "body": "METHOD: Conservative tests; IC: Sorts agree; HORIZON: Reasonable range; UNIVERSE: Broader samples"
+          },
+          {
+            "type": "implication",
+            "heading": "Tradability",
+            "body": "COSTS: Cost realism; TURNOVER: Realistic rates; BORROW: Available names; CAPACITY: Enough liquidity"
+          },
+          {
+            "type": "next_step",
+            "heading": "Library & warning",
+            "body": "FAILURE: False discoveries; MONITOR: Track live risk; OWNER: Assign review; REGIME: Stay humble"
+          }
+        ],
+        "sourceRefs": [
+          "14",
+          "15"
+        ]
+      }
+    ],
+    "dagNodes": {
+      "source": "completed",
+      "outline": "completed",
+      "content": "completed",
+      "media": "completed",
+      "layout": "completed",
+      "preview": "completed",
+      "quality": "completed",
+      "review": "completed",
+      "repair": "completed",
+      "publish": "completed",
+      "source:slide_6a738756af6e9f813c977aa3": "completed",
+      "source:slide_288715e7624bbaaf80c34776": "completed",
+      "source:slide_ba8a0701e0722ea9a8a6a619": "completed",
+      "source:slide_f14a856078c308737c31b400": "completed",
+      "source:slide_45963111283bc23844f34cb7": "completed",
+      "source:slide_c5b04b1b5f245d7229594c14": "completed",
+      "source:slide_f88c93541e4ce421363788ba": "completed",
+      "source:slide_89a46575c64b8509533e41ac": "completed",
+      "source:slide_feac2c0c220ff25658e33917": "completed",
+      "source:slide_309e04f0d6783d13348d5d95": "completed",
+      "source:slide_16d1e80f3cf671e37f92b5fd": "completed",
+      "source:slide_ba364164497157cabdfe0db2": "completed",
+      "source:slide_2b1a54f6dad4b3061436039e": "completed",
+      "source:slide_f5fc18da553daf5b5a262cb9": "completed",
+      "source:slide_303d8b3ad2cdd3a33b0e16d4": "completed",
+      "source:slide_953a481e17dca6b36b8986f2": "completed",
+      "source:slide_56e96b53c2c33cae84f8610f": "completed",
+      "source:slide_2bb174c158883e1eaa99f8be": "completed",
+      "source:slide_15c305066e2c04e94906ef10": "completed",
+      "source:slide_eee737c6923de99144adcfdd": "completed",
+      "source:slide_82a83089696e55b2036af2d6": "completed",
+      "source:slide_82d925619759553c91283dcc": "completed",
+      "content:slide_6a738756af6e9f813c977aa3": "completed",
+      "content:slide_288715e7624bbaaf80c34776": "completed",
+      "content:slide_ba8a0701e0722ea9a8a6a619": "completed",
+      "layout:slide_6a738756af6e9f813c977aa3": "completed",
+      "preview:slide_6a738756af6e9f813c977aa3": "completed",
+      "quality:slide_6a738756af6e9f813c977aa3": "completed",
+      "content:slide_f14a856078c308737c31b400": "completed",
+      "layout:slide_288715e7624bbaaf80c34776": "completed",
+      "preview:slide_288715e7624bbaaf80c34776": "completed",
+      "quality:slide_288715e7624bbaaf80c34776": "completed",
+      "content:slide_45963111283bc23844f34cb7": "completed",
+      "layout:slide_ba8a0701e0722ea9a8a6a619": "completed",
+      "preview:slide_ba8a0701e0722ea9a8a6a619": "completed",
+      "quality:slide_ba8a0701e0722ea9a8a6a619": "completed",
+      "content:slide_c5b04b1b5f245d7229594c14": "completed",
+      "layout:slide_f14a856078c308737c31b400": "completed",
+      "preview:slide_f14a856078c308737c31b400": "completed",
+      "quality:slide_f14a856078c308737c31b400": "completed",
+      "content:slide_f88c93541e4ce421363788ba": "completed",
+      "layout:slide_45963111283bc23844f34cb7": "completed",
+      "preview:slide_45963111283bc23844f34cb7": "completed",
+      "quality:slide_45963111283bc23844f34cb7": "completed",
+      "content:slide_89a46575c64b8509533e41ac": "completed",
+      "layout:slide_c5b04b1b5f245d7229594c14": "completed",
+      "preview:slide_c5b04b1b5f245d7229594c14": "completed",
+      "quality:slide_c5b04b1b5f245d7229594c14": "completed",
+      "content:slide_feac2c0c220ff25658e33917": "completed",
+      "layout:slide_f88c93541e4ce421363788ba": "completed",
+      "preview:slide_f88c93541e4ce421363788ba": "completed",
+      "quality:slide_f88c93541e4ce421363788ba": "completed",
+      "content:slide_309e04f0d6783d13348d5d95": "completed",
+      "layout:slide_89a46575c64b8509533e41ac": "completed",
+      "preview:slide_89a46575c64b8509533e41ac": "completed",
+      "quality:slide_89a46575c64b8509533e41ac": "completed",
+      "content:slide_16d1e80f3cf671e37f92b5fd": "completed",
+      "layout:slide_feac2c0c220ff25658e33917": "completed",
+      "preview:slide_feac2c0c220ff25658e33917": "completed",
+      "quality:slide_feac2c0c220ff25658e33917": "completed",
+      "content:slide_ba364164497157cabdfe0db2": "completed",
+      "layout:slide_309e04f0d6783d13348d5d95": "completed",
+      "preview:slide_309e04f0d6783d13348d5d95": "completed",
+      "quality:slide_309e04f0d6783d13348d5d95": "completed",
+      "content:slide_2b1a54f6dad4b3061436039e": "completed",
+      "layout:slide_16d1e80f3cf671e37f92b5fd": "completed",
+      "preview:slide_16d1e80f3cf671e37f92b5fd": "completed",
+      "quality:slide_16d1e80f3cf671e37f92b5fd": "completed",
+      "content:slide_f5fc18da553daf5b5a262cb9": "completed",
+      "layout:slide_ba364164497157cabdfe0db2": "completed",
+      "preview:slide_ba364164497157cabdfe0db2": "completed",
+      "quality:slide_ba364164497157cabdfe0db2": "completed",
+      "content:slide_303d8b3ad2cdd3a33b0e16d4": "completed",
+      "layout:slide_2b1a54f6dad4b3061436039e": "completed",
+      "preview:slide_2b1a54f6dad4b3061436039e": "completed",
+      "quality:slide_2b1a54f6dad4b3061436039e": "completed",
+      "content:slide_953a481e17dca6b36b8986f2": "completed",
+      "layout:slide_f5fc18da553daf5b5a262cb9": "completed",
+      "preview:slide_f5fc18da553daf5b5a262cb9": "completed",
+      "quality:slide_f5fc18da553daf5b5a262cb9": "completed",
+      "content:slide_56e96b53c2c33cae84f8610f": "completed",
+      "layout:slide_303d8b3ad2cdd3a33b0e16d4": "completed",
+      "preview:slide_303d8b3ad2cdd3a33b0e16d4": "completed",
+      "quality:slide_303d8b3ad2cdd3a33b0e16d4": "completed",
+      "content:slide_2bb174c158883e1eaa99f8be": "completed",
+      "layout:slide_953a481e17dca6b36b8986f2": "completed",
+      "preview:slide_953a481e17dca6b36b8986f2": "completed",
+      "quality:slide_953a481e17dca6b36b8986f2": "completed",
+      "content:slide_15c305066e2c04e94906ef10": "completed",
+      "layout:slide_56e96b53c2c33cae84f8610f": "completed",
+      "preview:slide_56e96b53c2c33cae84f8610f": "completed",
+      "quality:slide_56e96b53c2c33cae84f8610f": "completed",
+      "content:slide_eee737c6923de99144adcfdd": "completed",
+      "layout:slide_2bb174c158883e1eaa99f8be": "completed",
+      "preview:slide_2bb174c158883e1eaa99f8be": "completed",
+      "quality:slide_2bb174c158883e1eaa99f8be": "completed",
+      "content:slide_82a83089696e55b2036af2d6": "completed",
+      "layout:slide_15c305066e2c04e94906ef10": "completed",
+      "preview:slide_15c305066e2c04e94906ef10": "completed",
+      "quality:slide_15c305066e2c04e94906ef10": "completed",
+      "content:slide_82d925619759553c91283dcc": "completed",
+      "layout:slide_eee737c6923de99144adcfdd": "completed",
+      "preview:slide_eee737c6923de99144adcfdd": "completed",
+      "quality:slide_eee737c6923de99144adcfdd": "completed",
+      "layout:slide_82a83089696e55b2036af2d6": "completed",
+      "preview:slide_82a83089696e55b2036af2d6": "completed",
+      "quality:slide_82a83089696e55b2036af2d6": "completed",
+      "layout:slide_82d925619759553c91283dcc": "completed",
+      "preview:slide_82d925619759553c91283dcc": "completed",
+      "quality:slide_82d925619759553c91283dcc": "completed",
+      "review:deck": "completed",
+      "publish:deck": "completed"
+    },
+    "quality": {
+      "version": 1,
+      "status": "passed",
+      "publishEligible": true,
+      "editorialReady": true,
+      "checkedAt": "2026-10-03T11:30:29.662Z",
+      "deterministic": {
+        "version": 1,
+        "checkedAt": "2026-10-03T11:30:29.662Z",
+        "issues": [],
+        "hardErrors": 0,
+        "strictCoverage": true,
+        "contentMetrics": {
+          "coverageRatio": 0.5357142857142857,
+          "highPriorityCoverageRatio": 1,
+          "copyLikeness": 0,
+          "adjacentRedundancy": 0,
+          "unsupportedNumberCount": 0,
+          "semanticUnitsPerSlide": [
+            {
+              "slideId": "slide_6a738756af6e9f813c977aa3",
+              "units": 1,
+              "density": "low"
+            },
+            {
+              "slideId": "slide_288715e7624bbaaf80c34776",
+              "units": 7,
+              "density": "medium"
+            },
+            {
+              "slideId": "slide_ba8a0701e0722ea9a8a6a619",
+              "units": 7,
+              "density": "medium"
+            },
+            {
+              "slideId": "slide_f14a856078c308737c31b400",
+              "units": 3,
+              "density": "medium"
+            },
+            {
+              "slideId": "slide_45963111283bc23844f34cb7",
+              "units": 5,
+              "density": "medium"
+            },
+            {
+              "slideId": "slide_c5b04b1b5f245d7229594c14",
+              "units": 7,
+              "density": "medium"
+            },
+            {
+              "slideId": "slide_f88c93541e4ce421363788ba",
+              "units": 7,
+              "density": "medium"
+            },
+            {
+              "slideId": "slide_89a46575c64b8509533e41ac",
+              "units": 7,
+              "density": "medium"
+            },
+            {
+              "slideId": "slide_feac2c0c220ff25658e33917",
+              "units": 5,
+              "density": "medium"
+            },
+            {
+              "slideId": "slide_309e04f0d6783d13348d5d95",
+              "units": 5,
+              "density": "medium"
+            },
+            {
+              "slideId": "slide_16d1e80f3cf671e37f92b5fd",
+              "units": 3,
+              "density": "medium"
+            },
+            {
+              "slideId": "slide_ba364164497157cabdfe0db2",
+              "units": 7,
+              "density": "medium"
+            },
+            {
+              "slideId": "slide_2b1a54f6dad4b3061436039e",
+              "units": 7,
+              "density": "medium"
+            },
+            {
+              "slideId": "slide_f5fc18da553daf5b5a262cb9",
+              "units": 5,
+              "density": "medium"
+            },
+            {
+              "slideId": "slide_303d8b3ad2cdd3a33b0e16d4",
+              "units": 7,
+              "density": "medium"
+            },
+            {
+              "slideId": "slide_953a481e17dca6b36b8986f2",
+              "units": 7,
+              "density": "medium"
+            },
+            {
+              "slideId": "slide_56e96b53c2c33cae84f8610f",
+              "units": 3,
+              "density": "medium"
+            },
+            {
+              "slideId": "slide_2bb174c158883e1eaa99f8be",
+              "units": 5,
+              "density": "medium"
+            },
+            {
+              "slideId": "slide_15c305066e2c04e94906ef10",
+              "units": 7,
+              "density": "medium"
+            },
+            {
+              "slideId": "slide_eee737c6923de99144adcfdd",
+              "units": 5,
+              "density": "medium"
+            },
+            {
+              "slideId": "slide_82a83089696e55b2036af2d6",
+              "units": 7,
+              "density": "medium"
+            },
+            {
+              "slideId": "slide_82d925619759553c91283dcc",
+              "units": 8,
+              "density": "medium"
+            }
+          ],
+          "requiredDetailCoverage": 1,
+          "densityDistributionMatch": 0.5909090909090909,
+          "pageCountCompliant": true,
+          "unsupportedContentPages": 0,
+          "repeatedClaimsAcrossDeck": 0,
+          "sourceDensityRatio": 3.05,
+          "plannedChunkCoverageRatio": 0.95,
+          "evidenceCoverageRatio": null,
+          "requiredEvidenceCount": 0,
+          "renderedEvidenceCount": 0,
+          "visibleContentUnitsPerSlide": [
+            {
+              "slideId": "slide_6a738756af6e9f813c977aa3",
+              "units": 39.59999999999999,
+              "templateCapacity": 66
+            },
+            {
+              "slideId": "slide_288715e7624bbaaf80c34776",
+              "units": 200.450000000001,
+              "templateCapacity": 325
+            },
+            {
+              "slideId": "slide_ba8a0701e0722ea9a8a6a619",
+              "units": 337.0500000000038,
+              "templateCapacity": 626
+            },
+            {
+              "slideId": "slide_f14a856078c308737c31b400",
+              "units": 244.85000000000176,
+              "templateCapacity": 394
+            },
+            {
+              "slideId": "slide_45963111283bc23844f34cb7",
+              "units": 240.90000000000188,
+              "templateCapacity": 303
+            },
+            {
+              "slideId": "slide_c5b04b1b5f245d7229594c14",
+              "units": 479.50000000000676,
+              "templateCapacity": 626
+            },
+            {
+              "slideId": "slide_f88c93541e4ce421363788ba",
+              "units": 172.50000000000045,
+              "templateCapacity": 325
+            },
+            {
+              "slideId": "slide_89a46575c64b8509533e41ac",
+              "units": 292.8000000000028,
+              "templateCapacity": 353
+            },
+            {
+              "slideId": "slide_feac2c0c220ff25658e33917",
+              "units": 337.50000000000387,
+              "templateCapacity": 704
+            },
+            {
+              "slideId": "slide_309e04f0d6783d13348d5d95",
+              "units": 200.20000000000104,
+              "templateCapacity": 303
+            },
+            {
+              "slideId": "slide_16d1e80f3cf671e37f92b5fd",
+              "units": 234.20000000000172,
+              "templateCapacity": 394
+            },
+            {
+              "slideId": "slide_ba364164497157cabdfe0db2",
+              "units": 330.0000000000037,
+              "templateCapacity": 626
+            },
+            {
+              "slideId": "slide_2b1a54f6dad4b3061436039e",
+              "units": 300.8500000000031,
+              "templateCapacity": 353
+            },
+            {
+              "slideId": "slide_f5fc18da553daf5b5a262cb9",
+              "units": 335.5000000000038,
+              "templateCapacity": 704
+            },
+            {
+              "slideId": "slide_303d8b3ad2cdd3a33b0e16d4",
+              "units": 248.05000000000203,
+              "templateCapacity": 325
+            },
+            {
+              "slideId": "slide_953a481e17dca6b36b8986f2",
+              "units": 353.00000000000415,
+              "templateCapacity": 626
+            },
+            {
+              "slideId": "slide_56e96b53c2c33cae84f8610f",
+              "units": 253.65000000000126,
+              "templateCapacity": 394
+            },
+            {
+              "slideId": "slide_2bb174c158883e1eaa99f8be",
+              "units": 183.7000000000007,
+              "templateCapacity": 303
+            },
+            {
+              "slideId": "slide_15c305066e2c04e94906ef10",
+              "units": 228.3000000000004,
+              "templateCapacity": 325
+            },
+            {
+              "slideId": "slide_eee737c6923de99144adcfdd",
+              "units": 459.8500000000063,
+              "templateCapacity": 704
+            },
+            {
+              "slideId": "slide_82a83089696e55b2036af2d6",
+              "units": 261.2500000000023,
+              "templateCapacity": 353
+            },
+            {
+              "slideId": "slide_82d925619759553c91283dcc",
+              "units": 259.6500000000021,
+              "templateCapacity": 468
+            }
+          ],
+          "templateCapacityWarnings": 0,
+          "chapterCoverageRatio": 1,
+          "requiredTableRows": 0,
+          "renderedTableRows": 0,
+          "highSimilarityAdjacentPages": 0
+        },
+        "report": {
+          "mode": "presentation",
+          "status": "not_applicable",
+          "issues": [],
+          "metrics": {}
+        }
+      },
+      "modelReview": {
+        "missing": [],
+        "repeated": [],
+        "conflicts": [],
+        "unsupported": []
+      },
+      "modelIssues": [],
+      "issueGroups": {
+        "factsAndEvidence": [],
+        "narrative": [],
+        "layout": [],
+        "media": []
+      },
+      "report": {
+        "mode": "presentation",
+        "status": "not_applicable",
+        "issues": [],
+        "metrics": {}
+      },
+      "repairs": [],
+      "timings": {
+        "reviewMs": 4
+      },
+      "reviewState": "valid",
+      "reviewInputHash": "2cc9d0269eb2f9f9396d2910bc296d150521e312d7f5d83d37ad31f9687cc4cc",
+      "reviewerModel": {
+        "configId": "simulated-structured-llm",
+        "model": "simulated-structured-llm"
+      },
+      "rubricVersion": 2
+    },
+    "modelCalls": {
+      "outline": 1,
+      "content": 22,
+      "deckReview": 1,
+      "maxParallelContent": 3,
+      "activeContent": 0
+    },
+    "events": 0,
+    "exportBytes": 4225760
+  },
+  "generatedAt": "2026-10-03T11:30:42.247Z"
+}

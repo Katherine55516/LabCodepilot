@@ -2,6 +2,10 @@
 
 2026-10-03；基线 de946f6。先更新外层 `AIMate_PPT_Implementation_Plan_and_Priorities.md`，随后实施本交接所列代码。原型文件没有修改。
 
+## 本轮后续补充（2026-10-03）
+
+最新[审计](../research/ppt_next_round_audit.md)、[性能实测](../research/ppt_performance_benchmark.md)和[代码/配置/迁移交接](../research/ppt_changes.md)已落地：binary模板上传、operator managed登记、模板IR/cache、媒体引用快照、source inventory/typed结构、可见深度QA与13里程碑。下文产品步骤与局部编辑协议保持；升级后snapshot v2回滚必须恢复完整备份，不能仅回滚代码。PPT回归通过；全仓E2E的19条Chat/Search失败与真实模型/远端验收边界见上述交接。
+
 ## 产品流程与兼容边界
 
 新建方式（Prompt / 粘贴 / 文件）→ LLM → 模板和翻页预览 → 输入与生成要求 → 生成。模板中心锁定所选模板，但仍选择输入方式和 LLM；工具栏导入预选文件方式，后续同流程。版本更新继续使用原来的来源/进展、模板/页数、大纲确认步骤。

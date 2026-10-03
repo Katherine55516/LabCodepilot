@@ -55,7 +55,9 @@ export function evidenceRelevance(atom, query) {
 export function selectEvidenceForSlide(source, slide, limit = 2) {
   const atoms = source?.semantic?.evidenceAtoms || [];
   const chunks = new Set(slide.chunkRefs || slide.sourceChunks || []);
-  const refs = new Set(slide.refs || slide.sourceRefs || []);
+  // Semantic chunk IDs are precise. Segment ranges can overlap at section
+  // boundaries, so use them only as a fallback when chunk IDs are absent.
+  const refs = chunks.size ? new Set() : new Set(slide.refs || slide.sourceRefs || []);
   const query = [slide.title, slide.focus, slide.question, slide.headlineIntent, ...(slide.requiredDetails || [])].filter(Boolean).join(' ');
   const quantitative = /\b(?:evidence|results?|benchmark|metrics?|size|cost|throughput|latency|formats?|structure|comparison|trade[- ]?off)\b|证据|结果|数据|指标|规模|吞吐|延迟|结构|对比/iu.test(`${slide.title || ''} ${slide.headlineIntent || ''}`)
     || ['metric', 'chart', 'table'].includes(slide.visualIntent?.type) || slide.evidenceIntent === 'required';
@@ -86,7 +88,14 @@ export function evidenceVisible(atom, text) {
     return quantitiesPresent && contextPresent && approximationPresent;
   }
   if (atom.kind === 'example') {
-    const canonical = value => String(value || '').normalize('NFKC').toLocaleLowerCase().replace(/[^\p{L}\p{N}\u3400-\u9fff]+/gu, '');
+    const canonical = value => String(value || '').normalize('NFKC')
+      .replace(/\\(?:mathbf|mathrm|mathit|text|operatorname)\s*/gu, '')
+      .replace(/\\(?:mu|gamma|Sigma|sigma|alpha|beta|epsilon)\b/gu, command => ({
+        '\\mu': 'μ', '\\gamma': 'γ', '\\Sigma': 'Σ', '\\sigma': 'σ', '\\alpha': 'α', '\\beta': 'β', '\\epsilon': 'ε',
+      })[command] || command)
+      .replace(/\\propto\b/gu, '∝').replace(/\\Longrightarrow\b/gu, '⇒')
+      .replace(/\\(?:,|;|quad|qquad|left|right)\b/gu, '')
+      .toLocaleLowerCase().replace(/[^\p{L}\p{N}\u3400-\u9fff]+/gu, '');
     const exact = canonical(atom.exactText);
     return exact.length >= 4 && canonical(text).includes(exact);
   }
@@ -97,11 +106,13 @@ export function evidenceVisible(atom, text) {
 export function visibleSlideText(slide) {
   const slotText = Object.values(slide?.templateSlotTexts || {}).flatMap(value => typeof value === 'string' ? [value]
     : Array.isArray(value) ? value.flatMap(item => [item.label, item.body]) : []);
+  const structured = (slide?.nodes || []).filter(node => node.sourceArtifact || node.nativeRef && node.type === 'table').flatMap(node => node.type === 'table' ? (node.content?.rows || []).flat() : node.content?.items ? node.content.items.map(item => item.text) : [node.content?.text || '']);
   const native = (slide?.nodes || []).filter(node => node.nativeRef && node.type === 'text').map(node => node.content?.text || '');
   const ordinary = (slide?.nodes || []).filter(node => !node.nativeRef && node.type === 'text').map(node => node.content?.text || '');
   // After native binding only node text is exported. A stale draft slot value
   // must never make an absent fact look visible in the published PPTX.
-  if (native.length) return native.filter(Boolean).join(' ');
+  if (native.length) return [...native, ...structured].filter(Boolean).join(' ');
+  if (structured.length) return [slide?.title,...structured].filter(Boolean).join(' ');
   if (slotText.length) return [slide?.title, ...slotText].filter(Boolean).join(' ');
   return [slide?.title, slide?.copy?.subtitle, slide?.copy?.takeaway, ...(slide?.bullets || []),
     ...(slide?.copy?.blocks || []).flatMap(block => [block.heading, block.body]), ...slotText, ...native, ...ordinary]

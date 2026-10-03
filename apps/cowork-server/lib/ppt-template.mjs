@@ -1,3 +1,4 @@
+import { templateLimits, TemplateError, templateError, TEMPLATE_SECURITY_SCRIPT } from './ppt-template-security.mjs';
 /** Versioned template registry. Uploaded decks are analyzed in Cowork; only
  * templates whose colors can be mapped to our deterministic layout are usable. */
 import { spawn } from 'node:child_process';
@@ -13,7 +14,7 @@ export const BUILT_INS = [
 
 export function snapshotTemplate(template) {
   return {
-    id: template.id,
+    id: template.id, kind: template.kind, ...(template.sha256 ? {sha256: template.sha256} : {}), ...(template.bytes ? {bytes: template.bytes} : {}),
     name: template.name,
     version: template.version,
     palette: structuredClone(template.palette),
@@ -22,16 +23,16 @@ export function snapshotTemplate(template) {
 }
 
 export function templateFor(uid, id, store) {
-  const template = BUILT_INS.find(item => item.id === id) || store.listTemplates(uid).find(item => item.id === id);
+  const template = BUILT_INS.find(item => item.id === id) || [...store.listTemplates(uid), ...store.listTemplates('managed')].find(item => item.id === id);
   if (!template || template.compatibility !== 'mapped') throw new Error('template is unavailable or reference-only');
   return template;
 }
 
-export function validateTemplate(name, bytes) {
+export function validateTemplate(name, bytes, managed = false) {
   if (typeof name !== 'string' || name.length > 200 || /[\\/\0]/.test(name)) throw new Error('invalid template name');
   const extension = name.toLowerCase().split('.').at(-1);
   if (!['pptx', 'potx', 'pdf'].includes(extension)) throw new Error('template must be PPTX, POTX or PDF');
-  if (!Buffer.isBuffer(bytes) || !bytes.length || bytes.length > 8 * 1024 * 1024) throw new Error('template must be 1 byte to 8 MB');
+  if (!Buffer.isBuffer(bytes) || !bytes.length || bytes.length > (managed ? templateLimits().managedBytes : templateLimits().userBytes)) throw new TemplateError('template_too_large', 'template exceeds configured binary limit');
   if (extension === 'pdf' && bytes.subarray(0, 5).toString() !== '%PDF-') throw new Error('invalid PDF');
   if (extension !== 'pdf' && bytes.subarray(0, 2).toString() !== 'PK') throw new Error('invalid Office ZIP');
   return extension;
@@ -42,6 +43,7 @@ import collections, io, json, os, sys, zipfile
 import xml.etree.ElementTree as ET
 raw = sys.stdin.buffer.read()
 ext = os.environ['PPT_TEMPLATE_EXT']
+${TEMPLATE_SECURITY_SCRIPT}
 result = {'compatibility': 'reference', 'reason': 'Only reference preview is available', 'pages': 0, 'palette': None, 'fonts': None, 'sampleTitles': []}
 if ext == 'pdf':
     from pypdf import PdfReader
@@ -53,7 +55,7 @@ if ext == 'pdf':
 else:
     with zipfile.ZipFile(io.BytesIO(raw)) as archive:
         parts = archive.infolist()
-        if len(parts) > 1500 or sum(p.file_size for p in parts) > 80 * 1024 * 1024: raise ValueError('Office template expands beyond the limit')
+        if len(parts) > limits.get('entries', 5000) or sum(p.file_size for p in parts) > limits.get('uncompressedBytes', 134217728): raise ValueError('Office template expands beyond the limit')
         for part in parts:
             path = part.filename.replace('\\', '/')
             if path.startswith('/') or '..' in path.split('/'): raise ValueError('unsafe Office template path')
@@ -257,21 +259,25 @@ if result['pages'] > 100: raise ValueError('template exceeds 100 pages')
 print(json.dumps(result, ensure_ascii=False))
 `;
 
-export async function analyzeTemplate(uid, id, extension, bytes) {
-  const { name } = await orch.ensureContainer(id, uid, orch.KIND_PPT);
+export function runTemplateParser(command, args, bytes, env = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn('docker', ['exec', '-i', '-u', String(orch.AGENT_UID), '-e', `PPT_TEMPLATE_EXT=${extension}`, name, 'python3', '-c', SCRIPT], { stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn(command, args, { env: { ...process.env, ...env }, stdio: ['pipe', 'pipe', 'pipe'] });
     let out = ''; let err = '';
-    child.stdout.on('data', chunk => { out += chunk; if (out.length > 100_000) child.kill(); });
+    const timer = setTimeout(() => { child.kill(); reject(new TemplateError('template_timeout', 'template parse timed out')); }, templateLimits().timeoutMs);
+    timer.unref();
+    child.stdout.on('data', chunk => { out += chunk; if (out.length > 100_000) { child.kill(); reject(new TemplateError('template_too_large', 'analyzer output exceeds limit')); } });
     child.stderr.on('data', chunk => { err = (err + chunk).slice(-2000); });
-    child.on('error', reject);
+    child.on('error', error => { clearTimeout(timer); reject(error); });
     child.on('close', code => {
-      if (code !== 0) return reject(new Error(`template analysis failed: ${err.slice(-400)}`));
-      try { resolve(JSON.parse(out)); } catch { reject(new Error('template analyzer returned invalid JSON')); }
+      clearTimeout(timer);
+      if (code !== 0) return reject(templateError(err));
+      try { resolve(JSON.parse(out)); } catch { reject(new TemplateError('template_corrupted', 'template analyzer returned invalid JSON')); }
     });
-    child.stdin.on('error', () => {});
-    child.stdin.end(bytes);
+    child.stdin.on('error', () => {}); child.stdin.end(bytes);
   });
 }
-
+export async function analyzeTemplate(uid, id, extension, bytes) {
+  const { name } = await orch.ensureContainer(id, uid, orch.KIND_PPT);
+  return runTemplateParser('docker', ['exec', '-i', '-u', String(orch.AGENT_UID), '-e', `PPT_TEMPLATE_EXT=${extension}`, '-e', `PPT_TEMPLATE_LIMITS=${JSON.stringify(templateLimits())}`, name, 'python3', '-c', SCRIPT], bytes);
+}
 export const _internals = { SCRIPT };

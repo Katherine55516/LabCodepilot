@@ -1,3 +1,6 @@
+import { visibleSlideText } from './ppt-evidence.mjs';
+import * as files from './files.mjs';
+import { Readable } from 'node:stream';
 /** Reuse an uploaded PPTX as native slide artwork with editable text slots.
  * The model fills slot IDs; deterministic variants change copied page artwork. */
 import crypto from 'node:crypto';
@@ -9,6 +12,7 @@ import { visibleBodyTarget, templateVisualUnits } from './ppt-presentation-writi
 
 const visualUnits = templateVisualUnits;
 const numericLabel = value => /^\s*(?:\d{1,2}|[IVX]{1,4})\s*$/i.test(value || '');
+const numericMetric = value => /^\s*[+-]?\d+(?:[.,]\d+)?\s*%\s*$/u.test(value || '');
 const INCH = 914400;
 const comparable = value => String(value || '').toLocaleLowerCase().replace(/[\s\p{P}\p{S}]/gu, '');
 const formulaKey = value => String(value || '').replace(/[`\s]/g, '').toLocaleLowerCase();
@@ -58,7 +62,7 @@ function visibleSlotText(slide, slots) {
 
 function contentCoverageIssues(project, slide, slots, index) {
   const blocks = slide.copy?.blocks || [];
-  const visible = visibleSlotText(slide, slots);
+  const visible = slide.sourceArtifactNodes?.length ? visibleSlideText(slide) : visibleSlotText(slide, slots);
   const issues = blocks.flatMap((block, blockIndex) => {
     const body = String(block.body || '').trim();
     if (!body || copyCoverage(body, visible) >= .82) return [];
@@ -113,15 +117,35 @@ function sourceMediaFor(project, index, use, frame) {
   return fitting.length ? fitting[(use - 1) % fitting.length] : null;
 }
 
+function textOverlayCalloutPanel(frame, size, slide) {
+  if (!frame || !size) return false;
+  const { x, y, width, height } = frame.geometry;
+  const textOverlay = (slide?.nodes || []).some(node => node !== frame && node.type === 'text' && node.content?.text?.trim() &&
+    Math.max(0, Math.min(x + width, node.geometry.x + node.geometry.width) - Math.max(x, node.geometry.x)) *
+      Math.max(0, Math.min(y + height, node.geometry.y + node.geometry.height) - Math.max(y, node.geometry.y)) >=
+        node.geometry.width * node.geometry.height * .75);
+  return frame.content?.dataUrl?.startsWith('data:image/png;base64,') && textOverlay &&
+    width >= size.width * .78 && width / Math.max(1, height) >= 6 &&
+    height >= size.height * .12 && height <= size.height * .24;
+}
+
 function safeDecorativeMedia(frame, size, slide) {
   if (!frame || !size) return false;
   const { x, y, width, height } = frame.geometry;
   const flushSide = x <= size.width * .035 || x + width >= size.width * .965;
   const sidePhoto = flushSide && y <= size.height * .035 && height >= size.height * .9 &&
     width >= size.width * .25 && width <= size.width * .55;
+  const jpegPanelPhoto = frame.content?.dataUrl?.startsWith('data:image/jpeg;base64,') &&
+    x >= size.width * .5 && y >= size.height * .36 && width >= size.width * .3 && width <= size.width * .48 &&
+    height >= size.height * .3 && height <= size.height * .5 && width / height >= 1.5 && width / height <= 2;
+  // Wide transparent PNG strips with an overlaid native text frame are
+  // template callout backgrounds (e.g. quote banners), not source screenshots.
+  // Preserve the original panel instead of placing a generated diagram under
+  // its white text, which would erase the contrast the panel provides.
+  const calloutPanel = textOverlayCalloutPanel(frame, size, slide);
   const standalone = !(slide?.nodes || []).some(node => node !== frame &&
     ['text', 'image', 'table'].includes(node.type) && overlaps(node.geometry, frame.geometry));
-  return isFullBleed(frame, size) || standalone && sidePhoto;
+  return isFullBleed(frame, size) || calloutPanel || standalone && (sidePhoto || jpegPanelPhoto);
 }
 
 function contentMediaCandidates(spec, size) {
@@ -228,7 +252,10 @@ function imageTextCoupled(slide, size) {
 
 function slotsFor(slide) {
   const text = slide.nodes.filter(node => node.type === 'text' && node.content?.text?.trim());
-  const candidates = text.filter(node => !numericLabel(node.content.text));
+  // Percent values are often sample metrics in template decks. Keep them
+  // editable and prevent the largest percentage from being mistaken for the
+  // page title (for example, a decorative "35%" callout).
+  const candidates = text.filter(node => !numericLabel(node.content.text) && !numericMetric(node.content.text));
   const title = [...candidates].sort((a, b) => {
     const score = node => Number(node.style?.fontSizePt || 14) * Math.min(2, node.geometry.width / 3_000_000);
     return score(b) - score(a);
@@ -517,7 +544,7 @@ function buildFidelity(project, sourceSlides, externalPptx, templateHash, profil
       if (mode === 'panel-swap' && !panelGeometry) throw new Error(`模板第 ${sourceIndex + 1} 页的卡片已不满足安全重排约束`);
       const mainImage = repeated ? slide.nodes.filter(node => node.type === 'image')
         .sort((a, b) => b.geometry.width * b.geometry.height - a.geometry.width * a.geometry.height)[0] : null;
-      const media = mainImage && safeDecorativeMedia(mainImage, externalPptx, slide)
+      const media = mainImage && safeDecorativeMedia(mainImage, externalPptx, slide) && !textOverlayCalloutPanel(mainImage, externalPptx, slide)
         ? sourceMediaFor(project, index, use, mainImage) || semanticMediaForSlide(project, index, mainImage) : null;
       const mediaHash = media ? crypto.createHash('sha256').update(Buffer.from(media.dataUrl.split(',')[1], 'base64')).digest('hex') : null;
       const nodes = slide.nodes.map((base, nodeIndex) => {
@@ -599,8 +626,21 @@ export function rescheduleTemplateFidelity(project) {
   return project;
 }
 
-export async function prepareTemplateFidelity(project, templateBytes, templateHash) {
-  const imported = await importEditablePptx({ id: project.id, uid: project.uid, title: project.title }, templateBytes, templateHash);
+export async function prepareTemplateFidelity(project, templateBytes, templateHash, template = null, io = { importPptx: importEditablePptx, writeFile: files.writeFile }) {
+  const templateStore = await import('./ppt-store.mjs');
+  const owner = template?.kind === 'managed' ? 'managed' : project.uid;
+  const cached = template && templateStore.readTemplateIR(owner, template.id, templateHash);
+  if (cached) {
+    // Copy the opaque package for native export, never parse it again at runtime.
+    const originalPath = await io.writeFile(project.id, 'template-original.pptx', Readable.from([templateBytes]), templateBytes.length, project.uid);
+    if (typeof originalPath !== 'string' || !originalPath.startsWith('/')) throw new Error('template copy did not return a sandbox path');
+    const imported = { ...cached.imported, externalPptx: { ...cached.imported.externalPptx, originalPath } };
+    project.templateCacheHit = true;
+    return fidelityFromImported(project, imported, templateHash);
+  }
+  project.templateCacheHit = false;
+  const imported = await io.importPptx({ id: project.id, uid: project.uid, title: project.title }, templateBytes, templateHash);
+  if (template) templateStore.writeTemplateIR(owner, template.id, { schemaVersion: 1, parserVersion: 'pptx-ir-2', sha256: templateHash, imported });
   return fidelityFromImported(project, imported, templateHash);
 }
 
@@ -678,6 +718,9 @@ export function inspectTemplateSlotDraft(project, index, slide) {
       repair: 'fill_template_slots', shapeId: slot.shapeId, capacity: slot.capacity, minVisualUnits: slot.minVisualUnits }];
   });
   issues.push(...omissionIssues);
+  // Body slots have been explicitly replaced and checked by source-owned layout.
+  // Title, section, retained slots and omission authorization still apply.
+  if (slide.sourceArtifactNodes?.length) return issues;
   const groups = new Map();
   for (const slot of slots.filter(item => item.role === 'content' && !['footnote', 'group-heading'].includes(item.purpose))) {
     const id = String(slot.groupId || slot.pairedWith || slot.shapeId);
@@ -889,4 +932,4 @@ export function inspectTemplateFidelity(project) {
   return issues;
 }
 
-export const _internals = { slotsFor, visualUnits, profileSourceSlide, panelSwapGeometry, ordinalReadingOrder, expandSafeDescriptions, reclaimedMediaTextFrames };
+export const _internals = { slotsFor, visualUnits, profileSourceSlide, panelSwapGeometry, ordinalReadingOrder, expandSafeDescriptions, reclaimedMediaTextFrames, safeDecorativeMedia, textOverlayCalloutPanel };

@@ -6,6 +6,23 @@ export const dynamic = 'force-dynamic';
 
 type Context = { params: Promise<{ segments: string[] }> };
 
+async function boundedTemplateBody(request: Request) {
+  // Same deployment setting as the Cowork intake; do not decode binary as UTF-8.
+  const max = Number(process.env.PPT_TEMPLATE_USER_MAX_BYTES || 16 * 1024 * 1024);
+  const reader = request.body?.getReader();
+  if (!reader) return new Uint8Array();
+  const parts: Uint8Array[] = []; let total = 0;
+  while (true) {
+    const { value, done } = await reader.read(); if (done) break;
+    total += value.byteLength;
+    if (!Number.isSafeInteger(max) || max < 1 || max > 64*1024*1024 || total > max) { await reader.cancel(); throw new Error('template_too_large: upload exceeds configured limit'); }
+    parts.push(value);
+  }
+  const body = new Uint8Array(total); let offset = 0;
+  for (const part of parts) { body.set(part, offset); offset += part.length; }
+  return body;
+}
+
 async function proxy(request: Request, context: Context) {
   const { segments } = await context.params;
   if (!isPptProxyPath(segments)) return Response.json({ error: 'Invalid PPT path' }, { status: 404 });
@@ -23,9 +40,9 @@ async function proxy(request: Request, context: Context) {
         authorization: `Bearer ${token}`,
         ...(request.headers.get('accept') ? { accept: request.headers.get('accept')! } : {}),
         ...(request.headers.get('last-event-id') ? { 'last-event-id': request.headers.get('last-event-id')! } : {}),
-        ...(request.method === 'GET' ? {} : { 'content-type': 'application/json' }),
+        ...(request.method === 'GET' ? {} : { 'content-type': request.headers.get('content-type') || 'application/json' }),
       },
-      body: request.method === 'GET' ? undefined : await request.text(),
+      body: request.method === 'GET' ? undefined : request.headers.get('content-type')?.startsWith('application/octet-stream') ? await boundedTemplateBody(request) : await request.text(),
       cache: 'no-store',
     });
     const headers = new Headers();
@@ -36,7 +53,7 @@ async function proxy(request: Request, context: Context) {
     headers.set('cache-control', 'no-store');
     return new Response(upstream.body, { status: upstream.status, headers });
   } catch (error) {
-    return Response.json({ error: error instanceof Error ? error.message : 'PPT service unavailable' }, { status: 503 });
+    return Response.json({ error: error instanceof Error ? error.message : 'PPT service unavailable' }, { status: error instanceof Error && error.message.startsWith('template_too_large:') ? 413 : 503 });
   }
 }
 

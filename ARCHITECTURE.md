@@ -209,3 +209,7 @@ Schema 定义在 `src/lib/db.ts`，主要表（完整清单以 db.ts 为准）�
 PlanRevision / ConstraintSet / ArtifactRevision 分离；文本任务固定使用用户所选模型，额度不足等待 FIFO 槽位。逐页 source→content→layout→preview→quality 使用 canonical IR 和共享 RenderTree，内容先持久化，渲染失败不重生成文字。生成暂停到安全边界落 checkpoint；恢复复用有效内容与页级 epoch，暂停时手动修改同步生成缓存，避免旧任务覆盖。
 
 title/content/layout/style/asset/data/structure 走类型化 mutation→validated Proposal→Command Journal→草稿→显式 publish。结构提案同步页数预算、证据 contract、叙事与页码；生成中结构修改在整稿完成后提供可确认预览。AssetTask 单独 attempt 与 retry，内容保护按实际 render hash 接受。语义变化使输入绑定的 review 失效，critic 读取 canonical 图表/表格数据。当前依然是单服务有界 coordinator，不是分布式通用 DAG 或自动多模型平台。详细契约、前端协议、测试与限制见 [统一运行时交接](docs/handover/ppt-mutation-runtime-unification.md)。
+
+### PPT 模板预处理、来源结构与观测（2026-10-03）
+
+上传/managed登记时安全校验并生成版本化Template IR；runtime按账号/hash/parser复用，复制原始文件到当前workspace用于保真导出。项目snapshot v2将媒体外置为账号内SHA引用，保留raw/v1读取。Source Inventory→Coverage v2→页级typed refs→确定性可编辑表格/流程/清单进入既有Render Tree与原生导出器；Run/DAG记录13里程碑和节点耗时。产品步骤、稳定ID、局部编辑和显式发布协议保持。部署配置、GC/回滚与未验证边界见[本轮PPT变更](docs/research/ppt_changes.md)。

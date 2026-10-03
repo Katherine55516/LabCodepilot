@@ -99,6 +99,7 @@
 
 | 文件 | 主题 | 完成日期 |
 |------|------|----------|
+| completed/ppt-next-round-audit-performance-content.md | PPT审计/模板IR与安全/媒体存储/来源结构/trace及Before–After；本地PPT通过，Chat/Search与生产验证限制保留 | 2026-10-03 |
 | completed/ppt-prototype-policy-chat-parity.md | PPT 最新原型对齐：模板先于输入、异步估算、策略契约、稳定多轮聊天、局部动作、尺寸与滚动；本地门禁完成，真实模型/远端/安装包待环境验收 | 2026-10-03 |
 | completed/ppt-prompt-depth-contracts.md | PPT 提示词与内容深度契约、完整来源上下文和有界 critic 重写；实现与模拟回归完成，真实 GPT A/B 待可用环境 | 2026-10-02 |
 | completed/ppt-factor-zoo-visible-depth.md | Factor Zoo 双稿比较：章节容量、完整来源、模板可见正文/源表行门禁、媒体回收安全及22页模拟原生导出 | 2026-10-01 |

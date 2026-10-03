@@ -108,7 +108,7 @@ const longIssues = inspectLongDeckOutline({ source: { segments: [{ id: '1', text
 assert.ok(longIssues.some(item => item.code === 'outline_repeated_claim'));
 assert.ok(longIssues.some(item => item.code === 'outline_ungrounded_page'));
 assert.equal(planning.brief.audience, 'Engineering');
-assert.equal(planning.version, 5);
+assert.equal(planning.version, 6);
 assert.equal(planning.slidePlan[1].role, 'architecture');
 assert.equal(planning.slidePlan[1].sourceChunks[0], second.id);
 assert.equal(planning.slidePlan[1].depth, 'detailed');

@@ -1,3 +1,4 @@
+import { buildContentInventory } from './ppt-content-inventory.mjs';
 /** Structure-aware, deterministic source index for the existing PPT source node.
  * Original source.segments remain the citation contract. Chunks can combine
  * several segments or split one segment, so chunk IDs never stand in for refs. */
@@ -94,12 +95,13 @@ function splitLongUnit(text, limit = 600) {
 function parseBlocks(segments) {
   const blocks = [];
   const section = [];
+  let mathFence = false; let mathLines = []; let mathRefs = [];
   let fence = false; let fenceLines = []; let fenceRefs = []; let fenceLocation = '';
   let origin = null;
   function add(type, text, segment) {
     const value = text.trim();
     if (!value) return;
-    for (const part of splitLongUnit(value)) {
+    for (const part of type === 'table' ? [value] : splitLongUnit(value)) {
       const kind = type === 'paragraph' && /(?:^|\n)\s*(?:[┌└│├┐┘─]+|[^\n]+(?:→|->)[^\n]+)/.test(part) ? 'diagram' : type;
       blocks.push({ id: `b_${String(blocks.length + 1).padStart(4, '0')}`, type: kind, text: part,
         sourceRefs: segment.sourceRefs || [String(segment.id)], location: segment.location || '', sectionPath: [...section],
@@ -123,6 +125,13 @@ function parseBlocks(segments) {
         continue;
       }
       if (fence) { fenceLines.push(line); if (!fenceRefs.includes(String(segment.id))) fenceRefs.push(String(segment.id)); continue; }
+      if (/^(?:\$\$|\\\[|\\\])$/.test(trimmed)) {
+        flush();
+        if (mathFence) { add('equation', '$$\n'+mathLines.join('\n')+'\n$$', {sourceRefs:[...new Set([...mathRefs,String(segment.id)])],location:segment.location}); mathLines=[]; mathRefs=[]; mathFence=false; }
+        else { mathFence=true; mathRefs=[String(segment.id)]; }
+        continue;
+      }
+      if (mathFence) { mathLines.push(line); mathRefs.push(String(segment.id)); continue; }
       const heading = trimmed.match(/^(#{1,6})\s+(.+)$/);
       if (heading) {
         flush(); const level = heading[1].length + (origin ? 1 : 0);
@@ -132,7 +141,7 @@ function parseBlocks(segments) {
         continue;
       }
       if (!trimmed) { flush(); continue; }
-      const type = /^\|.*\|$/.test(trimmed) || /^(?:CSV |工作表 |表 \d+ 行)/.test(segment.location || '') ? 'table'
+      const type = /^(?:\$\$|\\\[|\\\]|\\begin\{(?:align|equation)|\\end\{(?:align|equation))/.test(trimmed) ? 'equation' : /^\|.*\|$/.test(trimmed) || /^(?:CSV |工作表 |表 \d+ 行)/.test(segment.location || '') ? 'table'
         : /^(?:[-*+]\s+|\d+[.)]\s+)/.test(trimmed) ? 'list'
           : /^>\s?/.test(trimmed) ? 'quote'
             : /(?:^|\s)(?:→|->|↓|↑|⇄)(?:\s|$)|^[┌└│├┐┘─]/.test(trimmed) ? 'diagram'
@@ -142,6 +151,7 @@ function parseBlocks(segments) {
     }
     flush();
   }
+  if (mathLines.length) add('equation', mathLines.join('\n'), {sourceRefs:[...new Set(mathRefs)]});
   if (fenceLines.length) add('code', fenceLines.join('\n'), { sourceRefs: fenceRefs, location: fenceLocation });
   return blocks;
 }
@@ -221,7 +231,7 @@ export function buildSemanticIndex(segments) {
   for (const chunk of chunks) chunk.evidenceIds = evidenceByChunk.get(chunk.id) || [];
   const graph = chunks.slice(1).map((chunk, index) => ({ from: chunks[index].id, to: chunk.id,
     relation: chunk.semanticType === 'comparison' ? 'contrasts_with' : chunk.semanticType === 'process' ? 'precedes' : 'explains' }));
-  return { version: 2, blocks, chunks, evidenceAtoms, graph,
+  return { version: 3, blocks, chunks, evidenceAtoms, graph, inventory: buildContentInventory(blocks, chunks, graph),
     stats: { atomicBlockCount: blocks.length, initialChunkCount: initialCount, mergedChunkCount: mergedCount,
       splitChunkCount: Math.max(0, splitCount), finalChunkCount: chunks.length,
       evidenceAtomCount: evidenceAtoms.length, numericEvidenceCount: evidenceAtoms.filter(atom => atom.kind === 'number').length,

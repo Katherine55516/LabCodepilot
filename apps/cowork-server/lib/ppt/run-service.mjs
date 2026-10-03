@@ -1,8 +1,11 @@
+import { traceNode, markPptTime } from '../ppt-trace.mjs';
 import { createRun, appendEvent, getRun, saveRun } from './event-store.mjs';
 import { planGenerationDag } from './dag-planner.mjs';
 import { getProject, saveProject } from './repository.mjs';
 
 export function startRun(project, kind = 'generation') {
+  markPptTime(project, 't_input_accepted');
+  markPptTime(project, 't_template_ready');
   let run = createRun(project.uid, project.id, { kind, nodes: planGenerationDag(project), status: 'running', stage: 'source', startedAt: new Date().toISOString() });
   ({ run } = appendEvent(run, 'run.started', { kind, stage: run.stage }));
   project.currentRunId = run.id;
@@ -41,6 +44,7 @@ export function transitionNode(projectInput, nodeId, status, detail = {}, { useI
   project.runId = run.id;
   project.dagNodes = run.nodes;
   project.stage = nodeId;
+  traceNode(project, nodeId, status);
   saveProject(project);
   return { project, run };
 }

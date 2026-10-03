@@ -1,0 +1,34 @@
+
+Running 14 tests using 2 workers
+
+(node:76929) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+(node:76928) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+(node:76929) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+(node:76928) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1/14] src/__tests__/e2e/ppt-prototype-parity.spec.ts:26:5 › PPT template-first creation keeps manual pages, handles estimate races and sends policy @smoke
+[2/14] src/__tests__/e2e/ppt-prototype-parity.spec.ts:45:5 › PPT paste syllabus and composer remain reachable at 390 by 500 @smoke
+[3/14] src/__tests__/e2e/ppt-prototype-parity.spec.ts:59:5 › PPT generation dock preserves draft through close and supports two fixed-scope turns @smoke
+[4/14] src/__tests__/e2e/ppt-prototype-parity.spec.ts:80:5 › PPT local translate and expand send parameters and review real proposal metrics @smoke
+[5/14] src/__tests__/e2e/ppt-prototype-parity.spec.ts:106:5 › PPT editable import keeps native page count independent of a small selected template @smoke
+[6/14] src/__tests__/e2e/ppt-workspace.spec.ts:3:5 › PPT M5 blocked quality gate stays editable and publishes only after repair @smoke
+[7/14] src/__tests__/e2e/ppt-workspace.spec.ts:140:5 › PPT M4 visual blocks, undo, template switch and one-slide AI @smoke
+[8/14] src/__tests__/e2e/ppt-workspace.spec.ts:330:5 › PPT M1 creation, outline approval, editing and export entry @smoke
+[9/14] src/__tests__/e2e/ppt-workspace.spec.ts:433:5 › PPT structured editor persists object commands, history, AI edits and publish @smoke
+[10/14] src/__tests__/e2e/ppt-workspace.spec.ts:709:5 › PPT M2 library folders, favorites, search and trash @smoke
+[11/14] src/__tests__/e2e/ppt-workspace.spec.ts:830:5 › PPT M2 paste and file inputs reach source aware outlines @smoke
+[12/14] src/__tests__/e2e/ppt-workspace.spec.ts:994:5 › PPTX fidelity import selects a model before opening the file @smoke
+[13/14] src/__tests__/e2e/ppt-workspace.spec.ts:1063:5 › PPT manual ordering persists and keeps pin groups separate @smoke
+[14/14] src/__tests__/e2e/ppt-workspace.spec.ts:1114:5 › PPT M3 template compatibility and version update workflow @smoke
+  14 passed (37.5s)

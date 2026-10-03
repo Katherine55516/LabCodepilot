@@ -1,3 +1,4 @@
+import { inspectInventoryCoverage, recall } from './ppt-content-inventory.mjs';
 /** Deterministic content diagnostics within the existing quality node. */
 import { evidenceMeasurements, evidenceVisible, missingRequiredEvidence, visibleSlideText } from './ppt-evidence.mjs';
 import { visualUnits, visibleBodyTarget, templateVisualUnits } from './ppt-presentation-writing.mjs';
@@ -58,14 +59,33 @@ function tableRowLabels(block) {
 }
 
 export function inspectContent(project, deck = project.deck) {
-  const issues = [];
-  const metrics = { coverageRatio: null, highPriorityCoverageRatio: null, copyLikeness: 0, adjacentRedundancy: 0, unsupportedNumberCount: 0,
+  const inventoryReview = inspectInventoryCoverage(project.source, deck?.slides || [], visibleSlideText);
+  const issues = [...inventoryReview.issues];
+  const metrics = { ...inventoryReview.metrics, coverageRatio: null, highPriorityCoverageRatio: null, copyLikeness: 0, adjacentRedundancy: 0, unsupportedNumberCount: 0,
     semanticUnitsPerSlide: [], requiredDetailCoverage: null, densityDistributionMatch: null, pageCountCompliant: true,
     unsupportedContentPages: 0, repeatedClaimsAcrossDeck: 0, sourceDensityRatio: null,
     plannedChunkCoverageRatio: null, evidenceCoverageRatio: null, requiredEvidenceCount: 0, renderedEvidenceCount: 0,
     visibleContentUnitsPerSlide: [], templateCapacityWarnings: 0, chapterCoverageRatio: null, requiredTableRows: 0, renderedTableRows: 0 };
   const slides = deck?.slides || [];
   const segments = project.source?.segments || [];
+  const richSource = String(project.source?.text || '').length >= 8000;
+  const underfilled = [], fragments = [];
+  for (let index = 1; index < slides.length - 1; index++) {
+    const slide = slides[index], plan = project.planning?.slidePlan?.find(item => item.slideId === slide.id);
+    const artifacts=(slide.nodes||[]).filter(node=>node.sourceArtifact);
+    const units=artifacts.length?Math.max(...artifacts.map(node=>node.content?.rows?node.content.rows.length-1:node.content?.items?.length||1)):(slide.copy?.blocks || []).length;
+    const cited = (project.source?.semantic?.chunks || []).filter(chunk => plan?.sourceChunks?.includes(chunk.id));
+    if (richSource && !['cover','section'].includes(plan?.role) && units < Math.min(4, plan?.semanticUnitBudget || 3) && cited.some(chunk => chunk.tokenCount > 200)) {
+      underfilled.push(slide.id); issues.push({code:'rich_source_underfilled',severity:'warning',slideId:slide.id,repairable:false,message:'Available source detail exceeds the visible semantic units; review page capacity and role'});
+    }
+    const next = slides[index+1], nextPlan = project.planning?.slidePlan?.find(item => item.slideId === next?.id);
+    if (next && units <= 2 && (next.copy?.blocks || []).length <= 2 && plan?.sourceChunks?.some(id=>nextPlan?.sourceChunks?.includes(id)) && recall(plan?.message,nextPlan?.message)>.35) {
+      fragments.push([slide.id,next.id]); issues.push({code:'adjacent_micro_slide_merge_candidate',severity:'warning',slideId:slide.id,repairable:false,message:'Adjacent thin pages share source and question; review merge while retaining final page budget'});
+    }
+  }
+  metrics.underfillRate = slides.length>2?underfilled.length/(slides.length-2):0;
+  metrics.fragmentationRate = slides.length>2?fragments.length/(slides.length-2):0;
+  metrics.mergeCandidates = fragments;
   const coverage = project.planning?.coverage || [];
   const strictCoverage = project.planning?.brief?.depthPolicy === 'strict' && !project.compressionApproved;
   if (project.pages && slides.length !== project.pages) {
@@ -189,7 +209,7 @@ export function inspectContent(project, deck = project.deck) {
         issues.push({ code: 'template_depth_capacity', severity: 'warning',
           message: `本页原生模板正文容量约 ${templateCapacity} visual units，低于富来源内容页的最低解释容量；应在版式调度时选更大正文区域，或明确压缩本页内容范围`,
           slideId: slide.id, repairable: false });
-      } else if (contentUnits < target) {
+      } else if (contentUnits < target && !((slide.nodes||[]).filter(node=>node.sourceArtifact).some(node=>(node.content?.items?.length || (node.content?.rows?.length||0)-1)>=Math.min(4,contract.semanticUnitBudget||4)))) {
         issues.push({ code: 'visible_content_sparse', severity: templateCapacity >= 130 ? 'error' : 'warning',
           message: `本页有来源内容且可见正文仅约 ${Math.ceil(contentUnits)} visual units；请补充来源支持的机制、条件、例子或判断，不要靠重复填字`,
           slideId: slide.id, repairable: true });
@@ -216,8 +236,9 @@ export function inspectContent(project, deck = project.deck) {
       !normalized(visibleText).includes(normalized(project.source.name)))
       issues.push({ code: 'source_page_without_citation', severity: 'error',
         message: `来源页没有在可见文字中列出输入文件 ${project.source.name}`, slideId: slide.id, repairable: false });
-    const citedAtoms = atoms.filter(atom => (slide.sourceRefs || []).some(ref => atom.sourceRefs.includes(ref)) ||
-      (slide.sourceChunks || []).includes(atom.chunkId));
+    const citedAtoms = atoms.filter(atom => slide.sourceChunks?.length
+      ? slide.sourceChunks.includes(atom.chunkId)
+      : (slide.sourceRefs || []).some(ref => atom.sourceRefs.includes(ref)));
     if (evidenceTitle && citedAtoms.length && !citedAtoms.some(atom => evidenceVisible(atom, visibleText)))
       issues.push({ code: 'evidence_page_without_evidence', severity: 'error', message: '标题承诺证据或结果，但可见页面没有对应来源事实',
         slideId: slide.id, repairable: false });
@@ -245,7 +266,8 @@ export function inspectContent(project, deck = project.deck) {
     const nativeContent = (slide.nodes || []).filter(node => node.nativeRef && node.templateSlot?.mapped &&
       node.templateSlot.role === 'content' && !['footnote', 'group-heading'].includes(node.templateSlot.purpose) && String(node.content?.text || '').trim());
     const nativeGroups = new Set(nativeContent.map(node => node.templateSlot.groupId || node.templateSlot.pairedWith || node.nativeRef.shapeId));
-    const semanticUnits = nativeContent.length ? nativeGroups.size : (slide.copy?.blocks || []).length || (slide.bullets || []).length;
+    const artifactUnits=(slide.nodes||[]).filter(node=>node.sourceArtifact).map(node=>node.content?.rows?node.content.rows.length-1:node.content?.items?.length||1);
+    const semanticUnits = artifactUnits.length ? Math.max(...artifactUnits) : nativeContent.length ? nativeGroups.size : (slide.copy?.blocks || []).length || (slide.bullets || []).length;
     if (project.inputProfile?.level === 'rich' && nativeContent.some(node =>
       ['body', 'point-description', 'list'].includes(node.templateSlot.purpose) &&
       /^(?:[\p{L}-]+\s+){1,2}(?:matters?|works?)\s*[.!]?$/iu.test(String(node.content?.text || '').trim()))) {

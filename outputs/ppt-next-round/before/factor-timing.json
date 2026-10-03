@@ -1,0 +1,20 @@
+[
+  {
+    "iteration": 1,
+    "seconds": 109.095656213,
+    "exitCode": 0,
+    "cache": "fresh process/state; OS buffers may be warm"
+  },
+  {
+    "iteration": 2,
+    "seconds": 111.826622515,
+    "exitCode": 0,
+    "cache": "fresh process/state; OS buffers may be warm"
+  },
+  {
+    "iteration": 3,
+    "seconds": 109.91156820700002,
+    "exitCode": 0,
+    "cache": "fresh process/state; OS buffers may be warm"
+  }
+]

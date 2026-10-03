@@ -8,6 +8,9 @@
 
 | 文件 | 主题 |
 |------|------|
+| [ppt_next_round_audit.md](ppt_next_round_audit.md) | PPT全工作流/38项问题登记、模板分层限制、安全与Gamma同源内容对照 |
+| [ppt_performance_benchmark.md](ppt_performance_benchmark.md) | 七入口cold/warm、10页/22页Before–After实测、阶段耗时、Gamma公平比较及限制 |
+| [ppt_changes.md](ppt_changes.md) | 本轮代码/配置/迁移/回滚、25组PPT回归与成品证据、未通过的全仓E2E范围 |
 | ppt-prompt-audit-gamma-benchmark-20261002.md | 全部PPT提示词审计、12个开源仓库提示词取舍、Gamma Factor Zoo深度基准、分阶段prompt草案与受控评估方案（提案，未实施） |
 | ppt-factor-zoo-content-depth-comparison.md | Factor Zoo 原文、Gamma 与 Deal Review 模拟产物逐页差距、逻辑根因与可见深度修复 |
 | gamma-ai-editing-generation-queue-2026-09-29.md | Gamma 5 与 Classic 实机调研：生成中指令排队、成稿后段落级 AI 优化、版本对比、可视化编辑器与四页实验稿质量问题 |

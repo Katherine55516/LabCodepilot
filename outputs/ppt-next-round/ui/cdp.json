@@ -1,0 +1,13 @@
+{
+  "transport": "Playwright connectOverCDP (chrome-devtools MCP unavailable)",
+  "application": "real Next dev at localhost:3000",
+  "api": "UI fixture; not remote sandbox",
+  "consoleErrors": [],
+  "checks": [
+    "mode/model/template/input order",
+    "template preview",
+    "syllabus confirmation and mobile vertical scroll",
+    "generation edit submit",
+    "EMU table preview dimensions and all cells fit"
+  ]
+}

@@ -1,3 +1,4 @@
+import { coverageMapV2, topicGroupDecisions } from './ppt-content-inventory.mjs';
 /** Planning data stays inside the existing outline node and project JSON. */
 import { buildTerminologyRegistry, copyBudgetFor, requiredSupportFor } from './ppt-presentation-writing.mjs';
 import { evidenceRelevance, selectEvidenceForSlide } from './ppt-evidence.mjs';
@@ -286,6 +287,8 @@ function densityContract(slide, role, depth, index, count, richSource = false) {
   const density = ['low', 'medium', 'high'].includes(slide.density) ? slide.density
     : depth === 'concise' ? 'low' : complex && depth === 'detailed' ? 'high' : 'medium';
   const defaults = {
+    framework: ['four_medium_cards', 6, 'standard'],
+    closing: ['principles_grouped', 5, 'mixed'],
     process: ['process_6_steps', 6, 'compact'],
     timeline: ['process_6_steps', 6, 'compact'],
     roadmap: ['process_6_steps', 6, 'compact'],
@@ -355,9 +358,10 @@ export function slidePlan(outline, brief = {}, source = null, templateFidelity =
     const validEvidence = new Map((source?.semantic?.evidenceAtoms || []).map(atom => [atom.id, atom]));
     const explicitEvidence = distinct(slide.requiredEvidenceIds || slide.required_evidence_ids, 6).filter(id => {
       const atom = validEvidence.get(id);
-      return atom && (!(slide.chunkRefs || []).length && !(slide.refs || []).length ||
-        (slide.chunkRefs || []).includes(atom.chunkId) ||
-        (atom.sourceRefs || []).some(ref => (slide.refs || []).includes(ref)));
+      const chunkRefs = slide.chunkRefs || [];
+      return atom && (chunkRefs.length
+        ? chunkRefs.includes(atom.chunkId)
+        : (!(slide.refs || []).length || (atom.sourceRefs || []).some(ref => (slide.refs || []).includes(ref))));
     });
     const requiredEvidenceIds = explicitEvidence.length ? explicitEvidence : selectEvidenceForSlide(source, { ...slide, role }, 1);
     return ({
@@ -368,6 +372,7 @@ export function slidePlan(outline, brief = {}, source = null, templateFidelity =
       /\b(?:evidence|results?|benchmark)\b|证据|结果|数据/iu.test(slide.title || '') ? 'required' : requiredEvidenceIds.length ? 'supporting' : 'none'),
     question: bounded(slide.question, 240, slide.focus), message: bounded(slide.focus, 360, slide.title), headlineIntent: bounded(slide.headlineIntent || slide.headline_intent, 160, slide.focus),
     audienceTakeaway: bounded(slide.audienceTakeaway || slide.audience_takeaway || slide.takeaway, 240, slide.focus),
+    sourceArtifacts: (source?.semantic?.inventory?.items || []).filter(item => (item.must_preserve_structure || item.type === 'SummaryBlock') && item.chunkRefs.some(id => slide.chunkRefs?.includes(id))).map(({ id, type, rows }) => ({ sourceUnitId: id, type, rows: rows?.length, columns: rows?.[0]?.length })),
     sourceRefs: [...(slide.refs || [])], sourceChunks: [...(slide.chunkRefs || [])], sourceTopics: distinct(slide.sourceTopics || slide.source_topics, 8).map(item => item.slice(0, 120)),
     keyPoints: slide.keyPoints || [],
     supportingPoints: distinct(slide.supportingPoints, 6).map(item => item.slice(0, 160)),
@@ -424,7 +429,7 @@ export function inspectLongDeckOutline(project, outline) {
 export function buildPlanning(project, modelOutput, outline) {
   const brief = normalizeBrief(modelOutput?.brief, project);
   const pageRecommendation = estimatePageRecommendation(project);
-  return { version: 5, brief, inputProfile: project.inputProfile || profilePptInput(project),
+  return { version: 6, brief, inventory: project.source?.semantic?.inventory, coverageV2: coverageMapV2(project.source, outline, modelOutput?.coverageV2?.detail || []), topicGroups: topicGroupDecisions(project.source, outline, slidePlan(outline, brief, project.source, project.templateFidelity), modelOutput?.topicGroups || []), inputProfile: project.inputProfile || profilePptInput(project),
     contentPlan: project.contentPlan || planSparseInput(project),
     storyArc: normalizeStoryArc(modelOutput?.storyArc || modelOutput?.story_arc, outline),
     terminology: buildTerminologyRegistry(project.source, outline), slidePlan: slidePlan(outline, brief, project.source, project.templateFidelity), coverage: coverageMap(project.source, outline, modelOutput?.coverage),
@@ -442,7 +447,7 @@ export function buildPlanning(project, modelOutput, outline) {
 export function refreshPlanning(project) {
   const previous = project.planning || {};
   const pageRecommendation = estimatePageRecommendation(project);
-  return { ...previous, version: 5, terminology: buildTerminologyRegistry(project.source, project.outline || []), pageRecommendation,
+  return { ...previous, version: 6, inventory: project.source?.semantic?.inventory, coverageV2: coverageMapV2(project.source, project.outline || [], previous.coverageV2?.detail || []), topicGroups: topicGroupDecisions(project.source, project.outline || [], slidePlan(project.outline || [], previous.brief, project.source, project.templateFidelity), (previous.topicGroups || []).filter(item=>item.origin==='planner')), terminology: buildTerminologyRegistry(project.source, project.outline || []), pageRecommendation,
     sourceCapacity: sourceCapacityPlan(project.source, project.pages),
     feasibility: { userPages: project.pages, recommendedPages: pageRecommendation.recommended, depthPolicy: pageRecommendation.depthPolicy,
       feasibleWithoutCompression: pageRecommendation.feasibleWithoutCompression, compressionApproved: Boolean(project.compressionApproved) },
@@ -466,18 +471,19 @@ export function retrieveSlideSources(project, outlineSlide, contract, maxChunks 
   const chunks = substantiveChunks(project.source);
   const evidenceAtoms = project.source?.semantic?.evidenceAtoms || [];
   const atomById = new Map(evidenceAtoms.map(atom => [atom.id, atom]));
+  const direct = new Set(outlineSlide?.chunkRefs || contract?.sourceChunks || []);
+  const directRefs = new Set(outlineSlide?.refs || contract?.sourceRefs || []);
   const locked = [...new Set([...(contract?.requiredEvidenceIds || []), ...(outlineSlide?.requiredEvidenceIds || [])])]
-    .map(id => atomById.get(id)).filter(Boolean);
+    .map(id => atomById.get(id)).filter(atom => atom && (!direct.size || direct.has(atom.chunkId)));
   const lockedChunks = new Set(locked.map(atom => atom.chunkId));
   const lockedRefs = [...new Set(locked.flatMap(atom => atom.sourceRefs || [atom.sourceRef]).filter(Boolean))];
   const query = [contract?.message, contract?.question, ...(outlineSlide?.keyPoints || []).map(point => point.text), ...(contract?.requiredSupport || []), ...(contract?.sourceTopics || []), outlineSlide?.focus, outlineSlide?.title].filter(Boolean).join(' ');
   const wanted = retrievalTokens(query);
-  const direct = new Set(outlineSlide?.chunkRefs || contract?.sourceChunks || []);
-  const directRefs = new Set(outlineSlide?.refs || contract?.sourceRefs || []);
   const scored = chunks.map(chunk => {
     const terms = retrievalTokens(`${chunk.topic} ${chunk.text}`);
     const overlap = [...wanted].filter(term => terms.has(term)).length;
-    const directScore = lockedChunks.has(chunk.id) ? 1500 : direct.has(chunk.id) ? 1000 : chunk.sourceRefs.some(ref => directRefs.has(ref)) ? 600 : 0;
+    const directScore = lockedChunks.has(chunk.id) ? 1500 : direct.has(chunk.id) ? 1000 :
+      (!direct.size && chunk.sourceRefs.some(ref => directRefs.has(ref)) ? 600 : 0);
     const priority = chunk.priority === 'high' ? 40 : chunk.priority === 'medium' ? 10 : 0;
     return { chunk, score: directScore + priority + overlap * 12 };
   }).filter(item => item.score > 0).sort((a, b) => b.score - a.score || a.chunk.id.localeCompare(b.chunk.id)).slice(0, maxChunks).map(item => item.chunk);

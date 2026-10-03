@@ -1,0 +1,69 @@
+PPT sparse planning, point budgets and readable shared typography: OK
+PPT cross-domain inventory, typed retention, merge/split, cell recall, end-section and sparse source: OK
+PPT proposals, read-only previews, idempotency, target undo, checkpoint recovery, fixed scopes and generation epoch fences: OK
+PPT evidence atoms, retrieval, visible QA, publish gate and template read order: OK
+PPT 100-page API, planner and editor command limits: OK
+PPT large snapshot compression, recovery, list and deletion: OK
+PDF output check skipped locally: matplotlib is installed in the Cowork image, but unavailable in this host Python
+PPT M2 API, isolation and source formats: OK
+PPT M3 lineage, selective reuse, template analysis/mapping and isolation: OK
+PPT M4 blocks, local rewrite, theme rerender and editable PPTX elements: OK
+PPT M5 template fonts, layout registry, bounded DAG and review-repair-publish gate: OK
+{
+  "checks": 10,
+  "passed": [
+    "title-only preserves body and selected model",
+    "expanded scopes exclude protected pages",
+    "parallel scopes preserve frozen targets",
+    "late proposals reject manual edit conflicts",
+    "asset retry only replaces image after preview confirmation",
+    "checkpoint recovery preserves valid results and newer revisions",
+    "split synchronizes content page budget contracts narrative render order and undo",
+    "semantic changes invalidate review; preview and export share revision and render tree",
+    "capacity shortage queues FIFO rather than failing generation",
+    "pause/resume reuses completed page content and real previews"
+  ]
+}
+PPT prompt contracts: source/language, canonical copy, protected context, title budgets, critic bounds, locks, pause and UTF-8 shim transport: OK
+PPT prototype parity: policy/language/legacy, read-only estimates, action parameters/metrics, fixed-scope multi-turn and idempotency: OK
+page 14 evidence: [
+  '| Depth: 28 → 22 layers | 2.61 B | 18.8% | Inside the recommended 15–30% range'
+]
+page 30 evidence: [
+  'x̂ = q E2M1 × s block (E4M3) × s tensor (FP32) storage ≈ 4 + 8/16 = 4.5 bits / value'
+]
+page 36 evidence: [
+  'DeepSeek-R1-0528, FP8 baseline vs NVFP4 PTQ, shows differences within about ±1 point, which is noise level:'
+]
+page 37 evidence: [
+  'On Llama Nemotron Super, NVFP4 PTQ loses 22 points on AIME 2024, and QAD recovers all of it:'
+]
+page 42 evidence: [
+  "The slide's example (SemiAnalysis InferenceMAX v1, Llama 3.3 70B, 1k/1k): GB200 delivers about 10,000 TPS/GPU at around 50 TPS/user, 4× H200"
+]
+{
+  "semanticChunks": 103,
+  "evidenceAtoms": 372,
+  "templatePages": 10,
+  "outputPages": 49,
+  "replacedImages": 2,
+  "semanticDiagrams": 2,
+  "outputBytes": 2519884,
+  "output": "/var/folders/zy/4dx7n1z104d4ydbfgxpff6x00000gn/T/ppt-real-fixture-blQhRA/native-replay.pptx"
+}
+PPT Run/DAG/Event recovery state synchronization: OK
+PPT report readiness, evidence, distribution and copy checks: OK
+PPT ordering parity OK
+PPT semantic chunking, planning contracts and content QA: OK
+PPT structured IR, run log, render tree, command journal, recovery and conservative PPTX edit: OK
+PPT template fidelity, native pictures/components, text slots, render tree and export: OK
+{"timings":[{"stage":"managed_offline_ingest","seconds":0.46688333800000004},{"stage":"managed_runtime_warm","iteration":1,"seconds":0.00857894500000009},{"stage":"managed_runtime_warm","iteration":2,"seconds":0.0023878700000000207},{"stage":"managed_runtime_warm","iteration":3,"seconds":0.0015437899999999445}],"parsed":2,"analyses":2,"copies":3}
+PPT managed/uploaded shared IR, raw upload, duplicate cache, version/hash/owner and warm parsing: OK
+PPT template reuse scheduling, visual diversity, 10→15/20/100 native export: OK
+small 28276 accepted
+medium 4029607 accepted
+near_user 16733477 accepted
+near_managed 67048822 accepted
+PPT template binary bounds, expansion, unsafe package, XML, relationships and timeout: OK
+PPT chapter capacity, complete provenance, native visible depth and reviewer context: OK
+PPT store and IR validation: OK

@@ -1,3 +1,7 @@
+import { bindSourceArtifacts } from './ppt-source-artifacts.mjs';
+import { templateLimits } from './ppt-template-security.mjs';
+import { importEditablePptx as importTemplateIR } from './ppt/import-pptx.mjs';
+import { markPptTime } from './ppt-trace.mjs';
 import { normalizeGenerationPolicy, requestedPageCount, PPT_PROMPT_CONTRACT_VERSION } from './ppt-generation-policy.mjs';
 /** M1 PPT Workspace API and durable, server-side job orchestration.
  * All model calls and PPTX rendering run in a Cowork container. Project JSON
@@ -219,7 +223,7 @@ async function modelCall(p, prompt, activity, log, options = {}) {
   }
 }
 const defaultDeps = { modelCall, renderPptx: project => project.templateFidelity?.mode === 'preserve' ? renderTemplatePptx(project) : renderPptx(project),
-  prepareTemplateFidelity, renderPdf, extractFile, analyzeTemplate, readFile: files.readFile, removeContainer: orch.removeContainer };
+  prepareTemplateFidelity, importTemplateIR, renderPdf, extractFile, analyzeTemplate, readFile: files.readFile, removeContainer: orch.removeContainer };
 function normalizeSlide(value, outlineSlide, project = null, previousTitles = []) {
   const index = project?.outline?.findIndex(item => item.id === outlineSlide.id) ?? -1;
   value = canonicalWriterOutput(value || {}, project?.templateFidelity?.mode === 'preserve' ? project.templateFidelity.slides[index] : null);
@@ -302,6 +306,7 @@ function normalizeSlide(value, outlineSlide, project = null, previousTitles = []
     slide.templateOmissions.push(...autoTemplateMediaOmissions(project, project.outline.findIndex(item => item.id === outlineSlide.id), slide.templateOmissions));
   }
   if (prepared?.layoutId === undefined && !resolvedDistributionLayout) { delete slide.layoutId; delete slide.layoutRef; }
+  if (project) bindSourceArtifacts(project, slide, value?.sourceArtifacts, index);
   return slide;
 }
 function applySourceImages(deck, source) {
@@ -487,6 +492,7 @@ function startGeneration(uid, id, activity, log, deps = defaultDeps) {
     try {
       const p = ensureProjectTemplate(store.get(uid, id));
       if (!p || p.status !== 'generating') return;
+      markPptTime(p, 't_generation_started');
       try { emitRunProgress(p, 'generation.started', { slideCount: p.outline.length }); } catch {}
       reconcileCheckpoint(p);
       const runtime = runtimeState(p); runtime.lifecycle = 'active';
@@ -897,7 +903,7 @@ function createFolder(uid, name) {
   return folder;
 }
 function decodeFile(name, encoded, validator = validateFile) {
-  if (typeof encoded !== 'string' || encoded.length > 11_200_000 || !/^[A-Za-z0-9+/]+={0,2}$/.test(encoded)) throw new HttpError(400, 'invalid file payload');
+  if (typeof encoded !== 'string' || encoded.length > (validator === validateTemplate ? Math.ceil(templateLimits().userBytes / 3) * 4 : 11_200_000) || !/^[A-Za-z0-9+/]+={0,2}$/.test(encoded)) throw new HttpError(400, 'invalid file payload');
   const bytes = Buffer.from(encoded, 'base64');
   let extension;
   try { extension = validator(name, bytes); } catch (error) { throw new HttpError(400, error.message); }
@@ -909,7 +915,7 @@ function resolveTemplate(uid, id) {
 }
 function templateList(uid, url) {
   const pins = new Set(store.listTemplatePins(uid));
-  let rows = [...BUILT_INS.map(item => ({ ...item, pinned: pins.has(item.id) })), ...store.listTemplates(uid)];
+  let rows = [...BUILT_INS.map(item => ({ ...item, pinned: pins.has(item.id) })), ...store.listTemplates(uid), ...store.listTemplates('managed').map(item => ({ ...item, pinned: pins.has(item.id) }))];
   const query = (url.searchParams.get('q') || '').trim().toLocaleLowerCase();
   if (query) rows = rows.filter(item => `${item.name} ${item.category} ${item.description || ''} ${(item.tags || []).join(' ')}`.toLocaleLowerCase().includes(query));
   const category = url.searchParams.get('category');
@@ -920,12 +926,35 @@ async function handleTemplates(req, id, uid, url, send, deps) {
   const customs = store.listTemplates(uid);
   if (!id && req.method === 'GET') return send(200, { templates: templateList(uid, url) });
   if (!id && req.method === 'POST') {
-    const data = await body(req);
+    const binary = req.headers?.['content-type']?.startsWith('application/octet-stream');
+    let data, upload;
+    if (binary) {
+      data = { fileName: url.searchParams.get('fileName'), name: url.searchParams.get('name') || undefined };
+      const chunks = []; let size = 0;
+      for await (const chunk of req) {
+        size += chunk.length;
+        if (size > templateLimits().userBytes) throw new HttpError(413, 'template_too_large: upload exceeds configured limit');
+        chunks.push(chunk);
+      }
+      const bytes = Buffer.concat(chunks);
+      let extension;
+      try { extension = validateTemplate(data.fileName, bytes); } catch (error) { throw new HttpError(400, error.message); }
+      upload = { bytes, extension, sha256: sha256(bytes) };
+    } else {
+      data = await body(req);
+      // Compatibility for existing clients; new clients upload raw bytes.
+      upload = decodeFile(data.fileName, data.fileBase64, validateTemplate);
+    }
+    const duplicate = customs.find(item => item.sha256 === upload.sha256);
+    if (duplicate) return send(200, { template: duplicate, cacheHit: true });
     if (customs.length >= 30) throw new HttpError(409, 'template limit is 30');
-    const upload = decodeFile(data.fileName, data.fileBase64, validateTemplate);
     const templateId = store.newId();
-    let analysis;
-    try { analysis = await deps.analyzeTemplate(uid, templateId, upload.extension, upload.bytes); }
+    let analysis, imported;
+    try {
+      analysis = await deps.analyzeTemplate(uid, templateId, upload.extension, upload.bytes);
+      if (['pptx','potx'].includes(upload.extension) && deps.importTemplateIR)
+        imported = await deps.importTemplateIR({ uid, id: templateId }, upload.bytes, upload.sha256);
+    }
     catch (error) { throw new HttpError(422, String(error?.message || error).slice(0, 300)); }
     finally { await deps.removeContainer(templateId, { keepVolume: false }).catch(() => {}); }
     if (!analysis || !['mapped', 'reference'].includes(analysis.compatibility) || !Number.isInteger(analysis.pages) || analysis.pages < 1 || analysis.pages > 100) throw new HttpError(422, 'template analysis is invalid');
@@ -937,12 +966,13 @@ async function handleTemplates(req, id, uid, url, send, deps) {
     const item = { id: templateId, name: bounded(data.name || data.fileName.replace(/\.[^.]+$/, ''), 120, 'template name'), category: '我的模板',
       description: String(analysis.reason || '').slice(0, 300), kind: 'uploaded', compatibility: analysis.compatibility, version: 1,
       pages: analysis.pages, palette, fonts, sampleTitles: (analysis.sampleTitles || []).slice(0, 3), tags: ['自定义', '上传'], pinned: false,
-      fileName: data.fileName, extension: upload.extension, sha256: upload.sha256, createdAt: new Date().toISOString() };
+      fileName: data.fileName, extension: upload.extension, bytes: upload.bytes.length, sha256: upload.sha256, irVersion: imported ? 'pptx-ir-2' : null, createdAt: new Date().toISOString() };
     store.writeTemplate(uid, templateId, upload.bytes);
+    if (imported) store.writeTemplateIR(uid, templateId, { schemaVersion: 1, parserVersion: 'pptx-ir-2', sha256: upload.sha256, imported });
     store.saveTemplates(uid, [...customs, item]);
     return send(201, { template: item });
   }
-  const builtIn = BUILT_INS.find(row => row.id === id);
+  const builtIn = BUILT_INS.find(row => row.id === id) || store.listTemplates('managed').find(row => row.id === id);
   if (builtIn && req.method === 'PATCH') {
     const data = await body(req);
     if (typeof data.pinned !== 'boolean') throw new HttpError(400, 'pinned must be boolean');
@@ -1017,7 +1047,7 @@ async function handleUpdates(req, uid, send, activity, log, deps) {
   const estimateSource = source || { kind: 'file', bytes: (baseFile?.bytes?.length || 0) + (progressFile?.bytes?.length || 0), text: progressText };
   const count = pages(data.pages ?? Math.max(6, estimatePageRecommendation({ inputKind: 'update', source: estimateSource, prompt: progressText }).recommended));
   if (count < 6) throw new HttpError(400, 'update pages must be between 6 and 100');
-  if (template.kind === 'uploaded' && template.extension === 'pptx' && data.templateMode !== 'mapped') {
+  if (['uploaded','managed'].includes(template.kind) && ['pptx','potx'].includes(template.extension) && data.templateMode !== 'mapped') {
     const reuseError = templateReuseError(template.pages, count);
     if (reuseError) throw new HttpError(400, reuseError);
   }
@@ -1031,12 +1061,13 @@ async function handleUpdates(req, uid, send, activity, log, deps) {
     generationPolicy: normalizeGenerationPolicy(data.generationPolicy ?? baseProject?.generationPolicy), promptContractVersion: PPT_PROMPT_CONTRACT_VERSION,
     outline: [], deck: null, nodes: {}, revision: 0, favorite: false, pinned: false, folderId: baseProject?.folderId || null,
     tags: ['更新', template.name.slice(0, 40)].slice(0, 10), deletedAt: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
-  if (template.kind === 'uploaded' && template.extension === 'pptx' && data.templateMode !== 'mapped' && deps.prepareTemplateFidelity) {
-    project.templateFidelity = await deps.prepareTemplateFidelity(project, store.readTemplate(uid, template.id), template.sha256);
+  if (['uploaded','managed'].includes(template.kind) && ['pptx','potx'].includes(template.extension) && data.templateMode !== 'mapped' && deps.prepareTemplateFidelity) {
+    project.templateFidelity = await deps.prepareTemplateFidelity(project, store.readTemplate(template.kind === 'managed' ? 'managed' : uid, template.id), template.sha256, template);
   }
   if (baseFile) store.writeInput(uid, id, 'base', baseFile.bytes);
   if (progressFile) store.writeInput(uid, id, 'progress', progressFile.bytes);
   store.save(project);
+  startRun(ensureProjectV3(project), 'version-update');
   if (mustIngest) startIngest(uid, id, activity, log, deps); else startOutline(uid, id, activity, log, deps);
   return send(201, { project });
 }
@@ -1122,6 +1153,7 @@ async function handleBulk(req, uid, send, deps) {
 }
 
 export async function handlePpt(req, url, { uid, send, res, readBody, activity, log = () => {}, deps = defaultDeps }) {
+  if (uid === 'managed') return send(403, { error: 'reserved template registry namespace' });
   const structured = await handleStructuredPpt(req, url, { uid, send, res, readBody, activity, log, deps, resumeGeneration: (owner, id) => startGeneration(owner, id, activity, log, deps) });
   if (structured) return true;
   const folderMatch = url.pathname.match(FOLDER_RE);
@@ -1192,7 +1224,7 @@ export async function handlePpt(req, url, { uid, send, res, readBody, activity, 
         const requestedOutline = data.outline === undefined ? null : data.outline;
         if (requestedOutline !== null && (!Array.isArray(requestedOutline) || requestedOutline.length !== selectedPages)) throw new HttpError(400, 'outline must match the user-confirmed page count');
         const formattedUserTitle = userTitle ? formatUserDeckTitle(userTitle) : null;
-        if (template.kind === 'uploaded' && template.extension === 'pptx' && data.templateMode !== 'mapped') {
+        if (['uploaded','managed'].includes(template.kind) && ['pptx','potx'].includes(template.extension) && data.templateMode !== 'mapped') {
           const reuseError = templateReuseError(template.pages, selectedPages);
           if (reuseError) throw new HttpError(400, reuseError);
         }
@@ -1209,8 +1241,8 @@ export async function handlePpt(req, url, { uid, send, res, readBody, activity, 
           status: sourceBytes ? 'ingesting' : 'outlining', stage: sourceBytes ? 'ingest' : 'outline', error: '', outline: [], deck: null, nodes: {}, revision: 0,
           favorite: false, pinned: false, folderId: null, tags: [], deletedAt: null,
           createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
-        if (template.kind === 'uploaded' && template.extension === 'pptx' && data.templateMode !== 'mapped' && deps.prepareTemplateFidelity) {
-          project.templateFidelity = await deps.prepareTemplateFidelity(project, store.readTemplate(uid, template.id), template.sha256);
+        if (['uploaded','managed'].includes(template.kind) && ['pptx','potx'].includes(template.extension) && data.templateMode !== 'mapped' && deps.prepareTemplateFidelity) {
+          project.templateFidelity = await deps.prepareTemplateFidelity(project, store.readTemplate(template.kind === 'managed' ? 'managed' : uid, template.id), template.sha256, template);
         }
         if (sourceBytes) store.writeSource(uid, project.id, sourceBytes);
         store.save(project);
@@ -1363,14 +1395,14 @@ export async function handlePpt(req, url, { uid, send, res, readBody, activity, 
       if (data.finalPageCount !== undefined && nextPages !== pages(data.finalPageCount)) throw new HttpError(400, 'outline must match the user-confirmed page count');
       if (data.template !== undefined && data.template !== project.template) {
         const selectedTemplate = resolveTemplate(uid, data.template);
-        if (selectedTemplate.kind === 'uploaded' && selectedTemplate.extension === 'pptx') {
+        if (['uploaded','managed'].includes(selectedTemplate.kind) && ['pptx','potx'].includes(selectedTemplate.extension)) {
           const reuseError = templateReuseError(selectedTemplate.pages, nextPages);
           if (reuseError) throw new HttpError(400, reuseError);
         }
         project.template = selectedTemplate.id;
         project.templateSpec = snapshotTemplate(selectedTemplate);
-        project.templateFidelity = selectedTemplate.kind === 'uploaded' && selectedTemplate.extension === 'pptx' && deps.prepareTemplateFidelity
-          ? await deps.prepareTemplateFidelity(project, store.readTemplate(uid, selectedTemplate.id), selectedTemplate.sha256)
+        project.templateFidelity = ['uploaded','managed'].includes(selectedTemplate.kind) && ['pptx','potx'].includes(selectedTemplate.extension) && deps.prepareTemplateFidelity
+          ? await deps.prepareTemplateFidelity(project, store.readTemplate(selectedTemplate.kind === 'managed' ? 'managed' : uid, selectedTemplate.id), selectedTemplate.sha256, selectedTemplate)
           : undefined;
       }
       project.pages = nextPages;
@@ -1400,14 +1432,14 @@ export async function handlePpt(req, url, { uid, send, res, readBody, activity, 
       if (data.pages !== undefined) project.pages = pages(data.pages);
       if (data.template !== undefined && data.template !== project.template) {
         const selectedTemplate = resolveTemplate(uid, data.template);
-        if (selectedTemplate.kind === 'uploaded' && selectedTemplate.extension === 'pptx') {
+        if (['uploaded','managed'].includes(selectedTemplate.kind) && ['pptx','potx'].includes(selectedTemplate.extension)) {
           const reuseError = templateReuseError(selectedTemplate.pages, project.pages);
           if (reuseError) throw new HttpError(400, reuseError);
         }
         project.template = selectedTemplate.id;
         project.templateSpec = snapshotTemplate(selectedTemplate);
-        project.templateFidelity = selectedTemplate.kind === 'uploaded' && selectedTemplate.extension === 'pptx' && deps.prepareTemplateFidelity
-          ? await deps.prepareTemplateFidelity(project, store.readTemplate(uid, selectedTemplate.id), selectedTemplate.sha256)
+        project.templateFidelity = ['uploaded','managed'].includes(selectedTemplate.kind) && ['pptx','potx'].includes(selectedTemplate.extension) && deps.prepareTemplateFidelity
+          ? await deps.prepareTemplateFidelity(project, store.readTemplate(selectedTemplate.kind === 'managed' ? 'managed' : uid, selectedTemplate.id), selectedTemplate.sha256, selectedTemplate)
           : undefined;
       }
       project.pageDecision = { finalPageCount: project.pages, source: 'user', includesCover: true, confirmedAt: new Date().toISOString() };

@@ -59,7 +59,7 @@ function adaptiveList(node, region, slide, project) {
 
 function buildPreservedSlide(project, slide, index) {
   const source = project.templateFidelity.slides[slide.templateSlideIndex];
-  const elements = slide.nodes.filter(node => node.nativeRef?.slideIndex === slide.templateSlideIndex).map(node => ({
+  const elements = slide.nodes.filter(node => node.nativeRef?.slideIndex === slide.templateSlideIndex || node.sourceArtifact).map(node => ({
     id: node.id, nodeId: node.id, kind: node.type === 'foreign' ? 'shape' : node.type,
     bounds: node.geometry, content: node.content || {},
     style: { fontFamily: project.templateSpec?.fonts?.body, eastAsiaFontFamily: project.templateSpec?.fonts?.bodyEastAsia,
@@ -84,8 +84,8 @@ function buildSlide(project, input, index, total) {
   const eyebrowNode = slide.nodes.find(node => node.semanticRole === 'eyebrow');
   const subtitleNode = slide.nodes.find(node => node.semanticRole === 'subtitle');
   const takeawayNode = slide.nodes.find(node => node.semanticRole === 'takeaway');
-  const nativeTextNodes = slide.nodes.filter(node => node.type === 'text' && !['title', 'body', 'eyebrow', 'subtitle', 'takeaway'].includes(node.semanticRole));
-  const visualNodes = slide.nodes.filter(node => ['image', 'chart', 'table', 'shape', 'foreign'].includes(node.type));
+  const nativeTextNodes = slide.nodes.filter(node => !node.sourceArtifact && node.type === 'text' && !['title', 'body', 'eyebrow', 'subtitle', 'takeaway'].includes(node.semanticRole));
+  const visualNodes = slide.nodes.filter(node => !node.sourceArtifact && ['image', 'chart', 'table', 'shape', 'foreign'].includes(node.type));
   const layout = slide.layoutId;
   if (titleNode && regions.title) elements.push(element(titleNode, 'text', regions.title, titleNode.content, style(project, typography, 'title'), 10, { semanticRole: 'title' }));
   if (eyebrowNode?.content?.text && regions.eyebrow) elements.push(element(eyebrowNode, 'text', regions.eyebrow, eyebrowNode.content,
@@ -137,6 +137,11 @@ function buildSlide(project, input, index, total) {
       id: node.id, nodeId: node.id, kind: node.type, bounds: geometry,
       content: node.content || {}, style: node.style || {}, zIndex: Number(node.zIndex || 30 + visualIndex), rotation: Number(node.rotation || 0), locked: Boolean(node.locked), groupId: node.groupId || null,
     });
+  });
+  for (const node of slide.nodes.filter(node => node.sourceArtifact)) elements.push({
+    id:node.id,nodeId:node.id,kind:node.type,bounds:node.geometry,content:node.content,
+    style:{...style(project,typography,'body'),...node.style},zIndex:node.zIndex,
+    semanticRole:node.semanticRole,sourceArtifact:node.sourceArtifact,
   });
 
   elements.push({

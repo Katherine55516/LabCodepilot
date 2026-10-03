@@ -1,0 +1,3292 @@
+{
+  "version": 2,
+  "source": {
+    "file": "04_factor_zoo_overview.md",
+    "chars": 41415,
+    "chunks": 60,
+    "inventoryItems": 182
+  },
+  "aimate": {
+    "file": "factor-zoo.pptx",
+    "pageCount": 22,
+    "totalVisibleChars": 10295,
+    "medianVisibleChars": 460,
+    "nativeTables": 7,
+    "size": {
+      "width": 12191695,
+      "height": 6858000
+    },
+    "metrics": {
+      "relationshipRecall": 0.7777777777777778,
+      "endSectionRecall": 0.6086956521739131,
+      "endSectionBiasGap": -0.09770664118490213,
+      "topicRecall": 0.510989010989011,
+      "highPriorityDetailRecall": 0.8387096774193549,
+      "structureRecall": 0.3103448275862069,
+      "tableCellRecall": [
+        {
+          "id": "b_0016",
+          "recall": 1
+        },
+        {
+          "id": "b_0154",
+          "recall": 1
+        },
+        {
+          "id": "b_0179",
+          "recall": 1
+        },
+        {
+          "id": "b_0184",
+          "recall": 1
+        },
+        {
+          "id": "b_0224",
+          "recall": 1
+        }
+      ],
+      "equationRecall": 0.7777777777777778,
+      "workflowRecall": 0.75,
+      "checklistRecall": 1,
+      "summaryRecall": 1,
+      "sourceUtilization": 0.510989010989011,
+      "items": [
+        {
+          "id": "b_0002",
+          "type": "ComparisonBlock",
+          "priority": "normal",
+          "contentRecall": 0.4868421052631579,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0003",
+          "type": "ComparisonBlock",
+          "priority": "normal",
+          "contentRecall": 0.05,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0009",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.7407407407407407,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0010",
+          "type": "ComparisonBlock",
+          "priority": "normal",
+          "contentRecall": 0.13636363636363635,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0011",
+          "type": "EquationBlock",
+          "priority": "high",
+          "contentRecall": 1,
+          "structureRetained": false,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0012",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0.6774193548387096,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0013",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0.03125,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0014",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.6153846153846154,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0015",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0016",
+          "type": "TableBlock",
+          "priority": "high",
+          "contentRecall": 1,
+          "structureRetained": true,
+          "cellRecall": 1
+        },
+        {
+          "id": "b_0017",
+          "type": "ProcessBlock",
+          "priority": "high",
+          "contentRecall": 0.56,
+          "structureRetained": false,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0018",
+          "type": "ProcessBlock",
+          "priority": "high",
+          "contentRecall": 0.17391304347826086,
+          "structureRetained": false,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0020",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.38461538461538464,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0021",
+          "type": "EvidenceBlock",
+          "priority": "normal",
+          "contentRecall": 0.125,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0022",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0.3902439024390244,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0023",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0.09375,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0024",
+          "type": "EvidenceBlock",
+          "priority": "normal",
+          "contentRecall": 0.6086956521739131,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0025",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.06896551724137931,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0026",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0.5185185185185185,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0027",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0.14285714285714285,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0031",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.625,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0032",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.1111111111111111,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0033",
+          "type": "EquationBlock",
+          "priority": "high",
+          "contentRecall": 0.4,
+          "structureRetained": false,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0034",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.5454545454545454,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0035",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.125,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0037",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0.45161290322580644,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0038",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0.043478260869565216,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0039",
+          "type": "EquationBlock",
+          "priority": "high",
+          "contentRecall": 0.6666666666666666,
+          "structureRetained": false,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0040",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0.35714285714285715,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0041",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0.05263157894736842,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0042",
+          "type": "EquationBlock",
+          "priority": "high",
+          "contentRecall": 1,
+          "structureRetained": false,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0043",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0.5806451612903226,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0044",
+          "type": "ComparisonBlock",
+          "priority": "normal",
+          "contentRecall": 0.037037037037037035,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0045",
+          "type": "EquationBlock",
+          "priority": "high",
+          "contentRecall": 1,
+          "structureRetained": false,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0046",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.3888888888888889,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0047",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.06976744186046512,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0048",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.6,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0049",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.25,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0050",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0.6666666666666666,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0051",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0052",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.7142857142857143,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0053",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0054",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0.55,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0055",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0.09090909090909091,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0056",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.5,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0057",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.18181818181818182,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0058",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0.4174757281553398,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0059",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0.07865168539325842,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0060",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.4666666666666667,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0061",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.1,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0062",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.6,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0063",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.16666666666666666,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0064",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.6521739130434783,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0065",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.1,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0066",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.75,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0067",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.1875,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0069",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.5238095238095238,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0070",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.125,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0071",
+          "type": "EquationBlock",
+          "priority": "high",
+          "contentRecall": 1,
+          "structureRetained": false,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0072",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.6410256410256411,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0073",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0.09090909090909091,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0074",
+          "type": "EquationBlock",
+          "priority": "high",
+          "contentRecall": 1,
+          "structureRetained": false,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0075",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0.47368421052631576,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0076",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0077",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0.5576923076923077,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0078",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0.16666666666666666,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0080",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.7222222222222222,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0081",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.25,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0082",
+          "type": "EquationBlock",
+          "priority": "high",
+          "contentRecall": 0.7142857142857143,
+          "structureRetained": false,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0083",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.8888888888888888,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0084",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.4166666666666667,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0085",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.8888888888888888,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0086",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.42857142857142855,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0087",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.8888888888888888,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0088",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.07692307692307693,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0089",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.7419354838709677,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0090",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.22727272727272727,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0091",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.8888888888888888,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0092",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0093",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 1,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0094",
+          "type": "DefinitionBlock",
+          "priority": "normal",
+          "contentRecall": 0,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0095",
+          "type": "EquationBlock",
+          "priority": "high",
+          "contentRecall": 1,
+          "structureRetained": false,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0096",
+          "type": "EquationBlock",
+          "priority": "high",
+          "contentRecall": 1,
+          "structureRetained": false,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0097",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.6538461538461539,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0098",
+          "type": "ExampleBlock",
+          "priority": "normal",
+          "contentRecall": 0.23809523809523808,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0099",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.5675675675675675,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0100",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.0967741935483871,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0102",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.5714285714285714,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0103",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.4,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0104",
+          "type": "EquationBlock",
+          "priority": "high",
+          "contentRecall": 0.6666666666666666,
+          "structureRetained": false,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0105",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.5846153846153846,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0106",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.2,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0107",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.6923076923076923,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0108",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.16666666666666666,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0110",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.72,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0111",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.15789473684210525,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0112",
+          "type": "EquationBlock",
+          "priority": "high",
+          "contentRecall": 0.7,
+          "structureRetained": false,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0113",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.64,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0114",
+          "type": "DefinitionBlock",
+          "priority": "normal",
+          "contentRecall": 0.17391304347826086,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0115",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.625,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0116",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.08333333333333333,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0117",
+          "type": "EvidenceBlock",
+          "priority": "normal",
+          "contentRecall": 0.4117647058823529,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0118",
+          "type": "EvidenceBlock",
+          "priority": "normal",
+          "contentRecall": 0.09090909090909091,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0119",
+          "type": "EquationBlock",
+          "priority": "high",
+          "contentRecall": 0.25,
+          "structureRetained": false,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0120",
+          "type": "EvidenceBlock",
+          "priority": "normal",
+          "contentRecall": 0.5348837209302325,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0121",
+          "type": "EvidenceBlock",
+          "priority": "normal",
+          "contentRecall": 0.1267605633802817,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0123",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.6086956521739131,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0124",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.16666666666666666,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0125",
+          "type": "EquationBlock",
+          "priority": "high",
+          "contentRecall": 1,
+          "structureRetained": false,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0126",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.8,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0127",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0128",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.7142857142857143,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0129",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.2,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0130",
+          "type": "DefinitionBlock",
+          "priority": "normal",
+          "contentRecall": 0.5263157894736842,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0131",
+          "type": "DefinitionBlock",
+          "priority": "normal",
+          "contentRecall": 0.07692307692307693,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0132",
+          "type": "ComparisonBlock",
+          "priority": "normal",
+          "contentRecall": 0.3888888888888889,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0133",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.06666666666666667,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0134",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.65625,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0135",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.25,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0136",
+          "type": "ComparisonBlock",
+          "priority": "normal",
+          "contentRecall": 0.581081081081081,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0137",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.04918032786885246,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0138",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.46875,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0139",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.13636363636363635,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0140",
+          "type": "EquationBlock",
+          "priority": "high",
+          "contentRecall": 1,
+          "structureRetained": false,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0141",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.42105263157894735,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0142",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.045454545454545456,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0144",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0.6111111111111112,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0145",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0.10526315789473684,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0146",
+          "type": "EquationBlock",
+          "priority": "high",
+          "contentRecall": 0.4444444444444444,
+          "structureRetained": false,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0147",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.7368421052631579,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0148",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.08333333333333333,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0149",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.6153846153846154,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0150",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.09090909090909091,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0151",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0.38961038961038963,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0152",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0.05660377358490566,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0154",
+          "type": "TableBlock",
+          "priority": "high",
+          "contentRecall": 1,
+          "structureRetained": true,
+          "cellRecall": 1
+        },
+        {
+          "id": "b_0157",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.4444444444444444,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0158",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.14285714285714285,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0159",
+          "type": "EquationBlock",
+          "priority": "high",
+          "contentRecall": 0,
+          "structureRetained": false,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0160",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0.7575757575757576,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0161",
+          "type": "ComparisonBlock",
+          "priority": "normal",
+          "contentRecall": 0.045454545454545456,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0162",
+          "type": "EvidenceBlock",
+          "priority": "normal",
+          "contentRecall": 0.47619047619047616,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0163",
+          "type": "EvidenceBlock",
+          "priority": "normal",
+          "contentRecall": 0.06896551724137931,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0166",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.42857142857142855,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0167",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0168",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0.625,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0169",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0.5789473684210527,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0170",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0173",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0.7575757575757576,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0174",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0.047619047619047616,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0175",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.7575757575757576,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0176",
+          "type": "EvidenceBlock",
+          "priority": "normal",
+          "contentRecall": 0.10526315789473684,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0179",
+          "type": "TableBlock",
+          "priority": "high",
+          "contentRecall": 1,
+          "structureRetained": true,
+          "cellRecall": 1
+        },
+        {
+          "id": "b_0180",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.5333333333333333,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0181",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0184",
+          "type": "TableBlock",
+          "priority": "high",
+          "contentRecall": 1,
+          "structureRetained": true,
+          "cellRecall": 1
+        },
+        {
+          "id": "b_0187",
+          "type": "ComparisonBlock",
+          "priority": "normal",
+          "contentRecall": 0.7380952380952381,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0188",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0189",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.8823529411764706,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0190",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 1,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0193",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0.7105263157894737,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0194",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0195",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.6285714285714286,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0196",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0199",
+          "type": "EvidenceBlock",
+          "priority": "normal",
+          "contentRecall": 0.5,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0200",
+          "type": "EvidenceBlock",
+          "priority": "normal",
+          "contentRecall": 0.05263157894736842,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0201",
+          "type": "ExampleBlock",
+          "priority": "normal",
+          "contentRecall": 0.7241379310344828,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0202",
+          "type": "ExampleBlock",
+          "priority": "normal",
+          "contentRecall": 0.9444444444444444,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0205",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 1,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0206",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.15789473684210525,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0207",
+          "type": "EquationBlock",
+          "priority": "high",
+          "contentRecall": 1,
+          "structureRetained": false,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0208",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.7368421052631579,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0209",
+          "type": "DefinitionBlock",
+          "priority": "normal",
+          "contentRecall": 0,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0212",
+          "type": "ComparisonBlock",
+          "priority": "normal",
+          "contentRecall": 0.7058823529411765,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0213",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0214",
+          "type": "ProcessBlock",
+          "priority": "high",
+          "contentRecall": 1,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0215",
+          "type": "ProcessBlock",
+          "priority": "high",
+          "contentRecall": 1,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0218",
+          "type": "ChecklistBlock",
+          "priority": "high",
+          "contentRecall": 1,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0219",
+          "type": "ChecklistBlock",
+          "priority": "high",
+          "contentRecall": 1,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0222",
+          "type": "SummaryBlock",
+          "priority": "high",
+          "contentRecall": 1,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0223",
+          "type": "SummaryBlock",
+          "priority": "high",
+          "contentRecall": 1,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0224",
+          "type": "TableBlock",
+          "priority": "high",
+          "contentRecall": 1,
+          "structureRetained": true,
+          "cellRecall": 1
+        }
+      ]
+    },
+    "underfilledPages": [],
+    "fragmentationCandidates": [],
+    "fragmentationIndex": 0,
+    "adjacentRedundancy": [],
+    "pages": [
+      {
+        "page": 1,
+        "title": "",
+        "visibleChars": 84,
+        "visibleContentUnits": 1,
+        "tableCount": 0,
+        "text": "\nQUANT FINANCE\nFACTOR ZOO\nA research map for asset-pricing models, anomalies and investable tests."
+      },
+      {
+        "page": 2,
+        "title": "",
+        "visibleChars": 425,
+        "visibleContentUnits": 2,
+        "tableCount": 1,
+        "text": "\nFACTORS\nFactor vs Alpha\n\nTerm | Definition | Example\nCharacteristic 特征 | A firm-level observable at time t (accounting ratio, price statistic, sentiment score) 公司层面在时刻 t 可观察到的量（会计比率、价格统计量、情绪评分） | Book-to-market ratio B/M_(i,t) 账面市值比 B/M_(i,t)\nFactor 因子 | A return series (usually long-short) built by sorting stocks on a characteristic, or a statistical factor from PCA/regression 依据某特征对股票排序构建出的收益率序列（通常为多空组合），或由 PCA/回归得到的统计因子 | HML: high B/M minus low B/M portfolio return HML：高 B/M 减低 B/M 组合收益"
+      },
+      {
+        "page": 3,
+        "title": "",
+        "visibleChars": 842,
+        "visibleContentUnits": 3,
+        "tableCount": 1,
+        "text": "\nANOMALY\nAnomaly Is Relative\n\n\n\n\n\n\n\n\n\n\n\n\nTerm | Definition | Example\nSignal / Alpha 信号/阿尔法 | A cross-sectional score used to rank stocks for portfolio construction, may or may not correspond to a known academic factor 用于给股票排序以构建组合的横截面评分，可能对应也可能不对应某个已知的学术因子 | A proprietary blend of 40 characteristics, output as a single number per stock per day 由 40 个特征专有混合而成，每只股票每天输出一个数值\nAnomaly 异象 | An empirical pattern in average returns that a benchmark asset pricing model (usually CAPM or FF3) fails to explain — i.e., a factor is \"anomalous\" relative to *some* model, not in absolute terms 某个基准资产定价模型（通常是 CAPM 或 FF3）无法解释的平均收益率经验模式——即因子相对于*某个*模型而言是\"异常\"的，而非绝对意义上的异常 | Momentum was an anomaly relative to CAPM/FF3; it is not anomalous relative to Carhart's own 4-factor model (by construction) 动量相对于 CAPM/FF3 是异象；但相对于 Carhart 自己的四因子模型（按构造）就不是异象\nAlpha (α) 阿尔法 | The intercept in a factor-model regression — return unexplained by the chosen factors 因子模型回归中的截距项——所选因子无法解释的收益部分 | α_i in r_i - r_f = α_i + β_i^T f + ε_i"
+      },
+      {
+        "page": 4,
+        "title": "",
+        "visibleChars": 390,
+        "visibleContentUnits": 3,
+        "tableCount": 0,
+        "text": "\nCAPM\nCAPM Prices Beta\n\n1\nPricing rule\nCAPM makes expected excess return proportional to market beta times the market risk premium; its Security Market Line is linear under the model assumptions.\n\n2\nBeta\nBeta is covariance with the market divided by market-return variance; only systematic risk is priced. Two-fund separation gives all investors the same risky mix; market clearing makes it the market portfolio.\n\n3\nEquilibrium\nw_mkt ∝ Σ⁻¹(μ − r_f1); μ − r_f1 ∝ Σw_mkt."
+      },
+      {
+        "page": 5,
+        "title": "CAPM Limits",
+        "visibleChars": 385,
+        "visibleContentUnits": 2,
+        "tableCount": 0,
+        "text": "CAPM Limits\nFlat SML\n\nLOW BETA\n\nSIZE / VALUE\nThe empirical SML was flatter than CAPM predicts; BAB formalizes the low-beta pattern. Size and value returns exceeded beta-only predictions. These failures did not kill factor-based asset pricing; research shifted to multifactor models.\n\n\n\n\nROLL (1977)\nThe true market spans unobservable bonds, real estate and human capital; equity-only CAPM tests are limited. This shifted research toward multifactor models."
+      },
+      {
+        "page": 6,
+        "title": "",
+        "visibleChars": 690,
+        "visibleContentUnits": 7,
+        "tableCount": 1,
+        "text": "\nMODELS\nModel Lineage\n\n\n\n\n\n\n\n\n\n\n\n\nModel | Factors | What it adds | Main limitation\nCAPM | Market | One systematic risk source | Cannot explain size, value, momentum\nAPT | Multiple unspecified factors | Allows several priced risks | Does not identify factors\nFF3 | Market, size, value | Empirical cross-section fit | Misses momentum and profitability/investment\nCarhart4 | FF3 + momentum | Captures UMD anomaly | Momentum crash risk remains\nFF5 | Market, size, value, profitability, investment | Links to q-theory intuition | HML becomes partly redundant in some samples\nHXZ q/q5 | Market, size, investment, ROE, expected growth | Investment-based economics | More complex and still sample-dependent\nSY mispricing | Management, performance composites | Behavioral anomaly clustering | Requires careful multiple-testing control"
+      },
+      {
+        "page": 7,
+        "title": "",
+        "visibleChars": 307,
+        "visibleContentUnits": 2,
+        "tableCount": 0,
+        "text": "\nFF3\nFama–French 3\nAnnual 2×3\nMKT\nSMB\nHML\n2×3\nThree spreads; six portfolios\nSORT\nEach June, split size at the NYSE median and book-to-market at the 30th/70th percentiles. The independent sorts form six value-weighted portfolios; SMB contrasts small with big, while HML contrasts high with low book-to-market.\nIndependent sorts separate size and value exposures.\n"
+      },
+      {
+        "page": 8,
+        "title": "",
+        "visibleChars": 471,
+        "visibleContentUnits": 4,
+        "tableCount": 0,
+        "text": "\nMOMENTUM\nCarhart MOM\nMonthly rebalanced, value-weighted UMD adds winners-minus-losers to FF3; fund attribution links apparent manager skill to momentum. Rank t−12 to t−2 returns, skip the latest month, and form within-size 2×3 long-short 30%/decile spreads. Rebounds can crash momentum. r_i-r_f = α_i+β_iMKT+s_iSMB+h_iHML+m_iUMD+ε_i.\nUMD\nLONG WINNER LEG\nTop minus bottom 30% or decile; within-size 2×3.\nRANK\nt−12/t−2\nSkip the most recent month.\nRISK\nMOMENTUM CRASHES\nRebounds can cause crashes.\nATTR\nFund attribution\nSkill reduces to passive tilt"
+      },
+      {
+        "page": 9,
+        "title": "",
+        "visibleChars": 546,
+        "visibleContentUnits": 5,
+        "tableCount": 0,
+        "text": "\nFF5\nFF5 Adds RMW + CMA\nRMW + CMA\n\n\n\nRMW\nRobust-minus-weak profitability adds operating profitability to the market, size and value factors; it captures differences in firms’ operating strength.\n\n\nCMA\nConservative-minus-aggressive investment adds an investment dimension, motivated by dividend-discount logic and firms’ investment behavior.\n\n\nHML\nHML can be partly redundant in some samples; its marginal role depends on the test assets and remains debated.\nDividend-discount rationale; sample-dependent HML\nFF5 adds profitability (RMW) and investment (CMA). Broader fit is not a universal verdict; HML may be partly redundant in some samples."
+      },
+      {
+        "page": 10,
+        "title": "q and q5 Models",
+        "visibleChars": 325,
+        "visibleContentUnits": 2,
+        "tableCount": 0,
+        "text": "q and q5 Models\nProduction\n\nI/A + ROE\n\nq5 + EG\nThe q model uses market, investment-to-assets (I/A) and return on equity (ROE), linking expected returns to investment and profitability. q5 adds expected growth (EG); independent size, investment and profitability sorts form 27 portfolios.\n\n\n\n\nGRS test\nGRS jointly tests zero alphas; the test assets and residual covariance shape the verdict."
+      },
+      {
+        "page": 11,
+        "title": "",
+        "visibleChars": 637,
+        "visibleContentUnits": 5,
+        "tableCount": 1,
+        "text": "\nSY MODEL\nModel Foundations\n\n1\n\n2\n\n3\nModel 模型 | Year 年份 | Factors 因子 | # | Theoretical grounding 理论基础\nCAPM | 1964 | MKT | 1 | Mean-variance equilibrium 均值-方差均衡\nAPT | 1976 | Unspecified f_1,…,f_K 未指定 f_1,…,f_K | K | No-arbitrage, linear factor structure 无套利、线性因子结构\nFama-French 3 | 1993 | MKT, SMB, HML | 3 | Empirical + risk-based rationalization 实证 + 基于风险的理论化\nCarhart 4 | 1997 | MKT, SMB, HML, UMD | 4 | Empirical (momentum add-on) 实证（附加动量）\nThe factor zoo is both a library and a warning. It gives researchers a vocabulary for systematic return patterns, but it also shows how easily finite noisy data can produce beautiful false discoveries. Good factor research therefore combines theory, data discipline, conservative testing, cost realism, and humility about regimes."
+      },
+      {
+        "page": 12,
+        "title": "",
+        "visibleChars": 460,
+        "visibleContentUnits": 5,
+        "tableCount": 1,
+        "text": "\nTESTS\nTesting Models\n\n\n\n\n\n\n\n\n\n\n\n\nModel 模型 | Year 年份 | Factors 因子 | # | Theoretical grounding 理论基础\nFama-French 5 | 2015 | MKT, SMB, HML, RMW, CMA | 5 | Dividend-discount-model decomposition 股利折现模型分解\nq-factor (HXZ) | 2015 | MKT, ME, I/A, ROE | 4 | Investment-based (q-theory) 基于投资（q 理论）\nq5 | 2021 | + EG | 5 | q-theory + forward-looking expected growth q 理论 + 前瞻性预期增长\nStambaugh-Yuan | 2017 | MKT, SMB, MGMT, PERF | 4 | Behavioral mispricing clusters 行为金融错误定价簇\n因子动物园既是资料库，也是警告。它为系统性收益模式提供语言，但也说明有限噪声数据多么容易产生漂亮的虚假发现。因此，好的因子研究必须结合理论、数据纪律、保守检验、成本现实，以及对市场状态的谦逊。"
+      },
+      {
+        "page": 13,
+        "title": "",
+        "visibleChars": 496,
+        "visibleContentUnits": 3,
+        "tableCount": 0,
+        "text": "\nPREMIA\nPremia Stories\nRisk compensation, behavioral mispricing and limits to arbitrage compete; a factor may mix them. Risk pays for bad-state exposure. Behavioral errors include overreaction, underreaction and extrapolation. Trading frictions delay correction, while value, momentum, low-volatility and size each have failure stories.\nRISK\nBAD-STATE LOSSES\nPays for losses in adverse states.\nBEHV\nBehavior\nOverreaction, underreaction and extrapolation move prices.\nFRIC\nSHORTING LIMITS\nShorting limits slow correction.\nMIX\nStories overlap\nCompeting stories can overlap"
+      },
+      {
+        "page": 14,
+        "title": "",
+        "visibleChars": 541,
+        "visibleContentUnits": 5,
+        "tableCount": 0,
+        "text": "\nZOO\nMultiple Testing\nTrials raise false-discovery risk\n\n\n\nALIASES\nSeveral labels may reflect one latent exposure rather than distinct sources of return; correlated definitions can repackage a signal.\n\n\nABSORBED\nA broader benchmark can explain an anomaly that appeared under CAPM or FF3, changing the residual claim.\n\n\nSELECTION\nMany trials make a t-stat above 2 weak evidence; require a rationale, point-in-time data, robustness and independent confirmation.\nNet costs can erase a premium\nTrading costs may erase the premium. Test incremental value against known factors, model realistic implementation and record the full search process."
+      },
+      {
+        "page": 15,
+        "title": "",
+        "visibleChars": 620,
+        "visibleContentUnits": 7,
+        "tableCount": 1,
+        "text": "\nSCORE\nFactor Scorecard\n\nFactor | Risk story | Mispricing story | Data-mining concern\nValue | Distress and duration risk | Extrapolation and overreaction | Many metric choices\nMomentum | Crash exposure and optionality | Underreaction and slow diffusion | Parameter grids\nQuality | Defensive cash flows | Underappreciated persistence | Definition proliferation\nInvestment | q-theory investment risk | Overinvestment and empire building | Accounting variants\nLow volatility | Leverage constraints | Lottery demand for high beta | Hidden sector exposure\nSize | Illiquidity/funding risk | Neglected firms | Microcap and cost bias\nLiquidity | Compensation for trading frictions | Attention and segmentation | Measured spread quality"
+      },
+      {
+        "page": 16,
+        "title": "",
+        "visibleChars": 596,
+        "visibleContentUnits": 8,
+        "tableCount": 1,
+        "text": "\nFAMILIES\nFactor Families\n\n\n\n\n\n\n\n\n\n\n\n\nFamily | Representative signals | Typical controls\nValue | B/P, E/P, EBIT/EV, CFO/P | Industry, profitability, leverage\nMomentum | 12-1 return, residual momentum, earnings momentum | Reversal, volatility, crash risk\nQuality | GP/A, ROE, accruals, F-score, QMJ | Sector, leverage, size\nInvestment | asset growth, capex growth, net issuance | Profitability and financing\nLow risk | beta, idiosyncratic vol, downside vol | Sector and leverage\nLiquidity | Amihud, turnover, spread, ADV | Size and price\nSentiment | analyst revisions, short interest, news tone | Coverage and attention\nAlternative data | web traffic, app usage, supply chain, text | Coverage bias and timestamping"
+      },
+      {
+        "page": 17,
+        "title": "",
+        "visibleChars": 408,
+        "visibleContentUnits": 3,
+        "tableCount": 0,
+        "text": "\nPORTFOLIO\nPortfolio Forms\n\n1\nLong-short\nDecile or rank-weighted dollar-neutral portfolios test the premium; a long-only benchmark tilt tests constrained stock selection.\n\n2\nOptimizer\nResidualized signals fit constrained optimizers; factor-mimicking portfolios serve risk models. Report weighting, rebalancing frequency, breakpoint universe, sector and beta neutrality, leverage, and cost assumptions.\n\n3\nReport design\n必须报告构建选择：加权方式、调仓频率、断点股票池、行业中性、贝塔中性、杠杆和成本假设。"
+      },
+      {
+        "page": 18,
+        "title": "Timing & Crowding",
+        "visibleChars": 305,
+        "visibleContentUnits": 2,
+        "tableCount": 0,
+        "text": "Timing & Crowding\nTiming\n\nSpreads\n\nCrowding\nValuation spreads, recent factor returns, macro regimes and volatility may inform timing, but they add another layer of multiple testing. Crowded factors can persist until liquidity disappears, then unwind sharply.\n\n\n\n\nMonitor\nTrack flows, common holdings, short interest, borrow, turnover and manager correlation."
+      },
+      {
+        "page": 19,
+        "title": "",
+        "visibleChars": 357,
+        "visibleContentUnits": 2,
+        "tableCount": 0,
+        "text": "\nA-SHR\nU.S. vs A-Shares\nMarket transfer\nMOM\nSIZE\nQUALITY\nSTRUCT.\nRe-test, do not transplant\nCHECK\nUS momentum is canonical; A-share momentum is more horizon- and limit-event-dependent. Quality screens must watch subsidies, related parties and earnings management. 美股动量是经典稳健因子，而 A 股动量更依赖期限和涨跌停事件；A 股规模因子受壳价值和量化拥挤塑造；A 股质量筛选必须更关注补贴、关联方活动和盈余管理动机。\nShell value and quant crowding have shaped A-share size behavior.\n"
+      },
+      {
+        "page": 20,
+        "title": "",
+        "visibleChars": 730,
+        "visibleContentUnits": 5,
+        "tableCount": 0,
+        "text": "\nSORT\nThe 2×3 Sort\nIndependent sorts\n\n\n\nSIZE\nSplit the universe into small and big by market capitalization; independently sort the chosen characteristic into low, middle and high buckets.\n\n\nINTERSECT\nCross the two rankings to form six portfolios; compare high with low within each size group.\n\n\nHML\nHML averages the high-characteristic portfolios and subtracts the low-characteristic average across size buckets.\nHML = ½(SmallHigh + BigHigh) − ½(SmallLow + BigLow). Higher characteristic returns minus lower, averaged across size.；A Fama-French-style 2×3 sort works as follows: split the universe into small/big by market cap, split the characteristic into low/mid/high by breakpoints, then form six portfolios.\nIndependent sorting keeps the characteristic spread from merely proxying for firm size; the same template applies to profitability or investment."
+      },
+      {
+        "page": 21,
+        "title": "",
+        "visibleChars": 237,
+        "visibleContentUnits": 2,
+        "tableCount": 0,
+        "text": "\nSTRAT\nStrategy Path\n1. The workflow is: economic rationale\n2. clean signal\n3. single-factor test\n4. incrementality test\n5. backtest\n6. red team\n7. constrained portfolio\n8. paper trade\n9. small live allocation.\n1. 流程应为：经济逻辑\n2. 干净信号\n3. 单因子检验\n4. 增量性检验\n5. 回测\n6. 红队检验\n7. 约束组合\n8. 模拟盘\n9. 小规模实盘。"
+      },
+      {
+        "page": 22,
+        "title": "Research Checklist",
+        "visibleChars": 443,
+        "visibleContentUnits": 15,
+        "tableCount": 0,
+        "text": "Research Checklist\n\n\n\n1\n\n\n2\n\n\n3\n\n\n4\n• It is known at the time it is used.\n• It has a reason to exist before seeing the backtest.\n• It survives neutralization to obvious exposures.\n• Its IC, portfolio sorts, and regression tests agree directionally.\n• It works across reasonable horizons and universes.\n• It is not just a renamed existing factor.\n• It survives costs and turnover.\n• It has a failure story and monitoring plan.\n• 使用时确实已知。\n• 在看到回测前就有存在理由。\n• 对明显暴露中性化后仍存在。\n• IC、组合分层和回归检验方向一致。\n• 在合理期限和股票池中稳健。\n• 不是已有因子的改名。\n• 能扛住成本和换手。\n• 有失效故事和监控方案。"
+      }
+    ]
+  },
+  "reference": {
+    "file": "The-Factor-Zoo (1).pptx",
+    "pageCount": 10,
+    "totalVisibleChars": 9409,
+    "medianVisibleChars": 1019,
+    "nativeTables": 3,
+    "size": {
+      "width": 12191695,
+      "height": 6858000
+    },
+    "metrics": {
+      "relationshipRecall": 0.2222222222222222,
+      "endSectionRecall": 0.5217391304347826,
+      "endSectionBiasGap": -0.06569517439082656,
+      "topicRecall": 0.45604395604395603,
+      "highPriorityDetailRecall": 0.5806451612903226,
+      "structureRecall": 0,
+      "tableCellRecall": [
+        {
+          "id": "b_0016",
+          "recall": 0.4444444444444444
+        },
+        {
+          "id": "b_0154",
+          "recall": 0.84375
+        },
+        {
+          "id": "b_0179",
+          "recall": 0.8125
+        },
+        {
+          "id": "b_0184",
+          "recall": 0.8518518518518519
+        },
+        {
+          "id": "b_0224",
+          "recall": 0.6666666666666666
+        }
+      ],
+      "equationRecall": 0.5,
+      "workflowRecall": 0.5,
+      "checklistRecall": 1,
+      "summaryRecall": 0.5,
+      "sourceUtilization": 0.45604395604395603,
+      "items": [
+        {
+          "id": "b_0002",
+          "type": "ComparisonBlock",
+          "priority": "normal",
+          "contentRecall": 0.6842105263157895,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0003",
+          "type": "ComparisonBlock",
+          "priority": "normal",
+          "contentRecall": 0.16666666666666666,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0009",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.9629629629629629,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0010",
+          "type": "ComparisonBlock",
+          "priority": "normal",
+          "contentRecall": 0,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0011",
+          "type": "EquationBlock",
+          "priority": "high",
+          "contentRecall": 1,
+          "structureRetained": false,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0012",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0.8709677419354839,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0013",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0014",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.23076923076923078,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0015",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0016",
+          "type": "TableBlock",
+          "priority": "high",
+          "contentRecall": 0.4370860927152318,
+          "structureRetained": false,
+          "cellRecall": 0.4444444444444444
+        },
+        {
+          "id": "b_0017",
+          "type": "ProcessBlock",
+          "priority": "high",
+          "contentRecall": 0.8,
+          "structureRetained": false,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0018",
+          "type": "ProcessBlock",
+          "priority": "high",
+          "contentRecall": 0.15217391304347827,
+          "structureRetained": false,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0020",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.6153846153846154,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0021",
+          "type": "EvidenceBlock",
+          "priority": "normal",
+          "contentRecall": 0.125,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0022",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0.7804878048780488,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0023",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0.0625,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0024",
+          "type": "EvidenceBlock",
+          "priority": "normal",
+          "contentRecall": 0.8260869565217391,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0025",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.034482758620689655,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0026",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0.5925925925925926,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0027",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0.09523809523809523,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0031",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.6875,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0032",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.18518518518518517,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0033",
+          "type": "EquationBlock",
+          "priority": "high",
+          "contentRecall": 0,
+          "structureRetained": false,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0034",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.5909090909090909,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0035",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.0625,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0037",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0.5806451612903226,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0038",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0039",
+          "type": "EquationBlock",
+          "priority": "high",
+          "contentRecall": 0.6666666666666666,
+          "structureRetained": false,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0040",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0.35714285714285715,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0041",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0.05263157894736842,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0042",
+          "type": "EquationBlock",
+          "priority": "high",
+          "contentRecall": 0.5,
+          "structureRetained": false,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0043",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0.46774193548387094,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0044",
+          "type": "ComparisonBlock",
+          "priority": "normal",
+          "contentRecall": 0.018518518518518517,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0045",
+          "type": "EquationBlock",
+          "priority": "high",
+          "contentRecall": 0.6666666666666666,
+          "structureRetained": false,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0046",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.35185185185185186,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0047",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.046511627906976744,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0048",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.4,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0049",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.25,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0050",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0.6666666666666666,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0051",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0052",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.7142857142857143,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0053",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0054",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0.55,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0055",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0056",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.5714285714285714,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0057",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.18181818181818182,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0058",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0.42718446601941745,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0059",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0.056179775280898875,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0060",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.4666666666666667,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0061",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.1,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0062",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.5333333333333333,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0063",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.08333333333333333,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0064",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.4782608695652174,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0065",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.05,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0066",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.375,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0067",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.0625,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0069",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.6190476190476191,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0070",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.1875,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0071",
+          "type": "EquationBlock",
+          "priority": "high",
+          "contentRecall": 0.3333333333333333,
+          "structureRetained": false,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0072",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.6153846153846154,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0073",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0.06060606060606061,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0074",
+          "type": "EquationBlock",
+          "priority": "high",
+          "contentRecall": 0.3333333333333333,
+          "structureRetained": false,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0075",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0.5526315789473685,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0076",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0077",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0.6730769230769231,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0078",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0.08333333333333333,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0080",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.5,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0081",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.08333333333333333,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0082",
+          "type": "EquationBlock",
+          "priority": "high",
+          "contentRecall": 0.42857142857142855,
+          "structureRetained": false,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0083",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.6666666666666666,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0084",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.25,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0085",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.6666666666666666,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0086",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.42857142857142855,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0087",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.8333333333333334,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0088",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.07692307692307693,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0089",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.6451612903225806,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0090",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.22727272727272727,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0091",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.6666666666666666,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0092",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0093",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 1,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0094",
+          "type": "DefinitionBlock",
+          "priority": "normal",
+          "contentRecall": 0,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0095",
+          "type": "EquationBlock",
+          "priority": "high",
+          "contentRecall": 1,
+          "structureRetained": false,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0096",
+          "type": "EquationBlock",
+          "priority": "high",
+          "contentRecall": 1,
+          "structureRetained": false,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0097",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.5,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0098",
+          "type": "ExampleBlock",
+          "priority": "normal",
+          "contentRecall": 0.23809523809523808,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0099",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.6486486486486487,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0100",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.0967741935483871,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0102",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.5,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0103",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.4,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0104",
+          "type": "EquationBlock",
+          "priority": "high",
+          "contentRecall": 0.4444444444444444,
+          "structureRetained": false,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0105",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.5230769230769231,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0106",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.15555555555555556,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0107",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.6153846153846154,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0108",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.05555555555555555,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0110",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.68,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0111",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.05263157894736842,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0112",
+          "type": "EquationBlock",
+          "priority": "high",
+          "contentRecall": 0.5,
+          "structureRetained": false,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0113",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.56,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0114",
+          "type": "DefinitionBlock",
+          "priority": "normal",
+          "contentRecall": 0.17391304347826086,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0115",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.5,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0116",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.08333333333333333,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0117",
+          "type": "EvidenceBlock",
+          "priority": "normal",
+          "contentRecall": 0.47058823529411764,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0118",
+          "type": "EvidenceBlock",
+          "priority": "normal",
+          "contentRecall": 0.09090909090909091,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0119",
+          "type": "EquationBlock",
+          "priority": "high",
+          "contentRecall": 0.25,
+          "structureRetained": false,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0120",
+          "type": "EvidenceBlock",
+          "priority": "normal",
+          "contentRecall": 0.5,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0121",
+          "type": "EvidenceBlock",
+          "priority": "normal",
+          "contentRecall": 0.07042253521126761,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0123",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.5217391304347826,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0124",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.05555555555555555,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0125",
+          "type": "EquationBlock",
+          "priority": "high",
+          "contentRecall": 0.5,
+          "structureRetained": false,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0126",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.6,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0127",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0128",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.8571428571428571,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0129",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.4,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0130",
+          "type": "DefinitionBlock",
+          "priority": "normal",
+          "contentRecall": 0.3684210526315789,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0131",
+          "type": "DefinitionBlock",
+          "priority": "normal",
+          "contentRecall": 0.07692307692307693,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0132",
+          "type": "ComparisonBlock",
+          "priority": "normal",
+          "contentRecall": 0.4444444444444444,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0133",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.06666666666666667,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0134",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.53125,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0135",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.15,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0136",
+          "type": "ComparisonBlock",
+          "priority": "normal",
+          "contentRecall": 0.6081081081081081,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0137",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.03278688524590164,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0138",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.46875,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0139",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.13636363636363635,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0140",
+          "type": "EquationBlock",
+          "priority": "high",
+          "contentRecall": 0.5,
+          "structureRetained": false,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0141",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.47368421052631576,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0142",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.045454545454545456,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0144",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0.5555555555555556,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0145",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0.13157894736842105,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0146",
+          "type": "EquationBlock",
+          "priority": "high",
+          "contentRecall": 0,
+          "structureRetained": false,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0147",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.47368421052631576,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0148",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0149",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.38461538461538464,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0150",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.09090909090909091,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0151",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0.42857142857142855,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0152",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0.05660377358490566,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0154",
+          "type": "TableBlock",
+          "priority": "high",
+          "contentRecall": 0.6666666666666666,
+          "structureRetained": false,
+          "cellRecall": 0.84375
+        },
+        {
+          "id": "b_0157",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.7777777777777778,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0158",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0159",
+          "type": "EquationBlock",
+          "priority": "high",
+          "contentRecall": 0,
+          "structureRetained": false,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0160",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0.696969696969697,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0161",
+          "type": "ComparisonBlock",
+          "priority": "normal",
+          "contentRecall": 0.045454545454545456,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0162",
+          "type": "EvidenceBlock",
+          "priority": "normal",
+          "contentRecall": 0.8095238095238095,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0163",
+          "type": "EvidenceBlock",
+          "priority": "normal",
+          "contentRecall": 0.10344827586206896,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0166",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.42857142857142855,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0167",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0168",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0.6,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0169",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0.9210526315789473,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0170",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0173",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0.9696969696969697,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0174",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0.2857142857142857,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0175",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.8181818181818182,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0176",
+          "type": "EvidenceBlock",
+          "priority": "normal",
+          "contentRecall": 0.21052631578947367,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0179",
+          "type": "TableBlock",
+          "priority": "high",
+          "contentRecall": 0.7727272727272727,
+          "structureRetained": false,
+          "cellRecall": 0.8125
+        },
+        {
+          "id": "b_0180",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 1,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0181",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0184",
+          "type": "TableBlock",
+          "priority": "high",
+          "contentRecall": 0.8656716417910447,
+          "structureRetained": false,
+          "cellRecall": 0.8518518518518519
+        },
+        {
+          "id": "b_0187",
+          "type": "ComparisonBlock",
+          "priority": "normal",
+          "contentRecall": 0.6904761904761905,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0188",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0189",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.8823529411764706,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0190",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0193",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0.8421052631578947,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0194",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0195",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.6571428571428571,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0196",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.047619047619047616,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0199",
+          "type": "EvidenceBlock",
+          "priority": "normal",
+          "contentRecall": 0.8076923076923077,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0200",
+          "type": "EvidenceBlock",
+          "priority": "normal",
+          "contentRecall": 0,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0201",
+          "type": "ExampleBlock",
+          "priority": "normal",
+          "contentRecall": 0.9310344827586207,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0202",
+          "type": "ExampleBlock",
+          "priority": "normal",
+          "contentRecall": 0,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0205",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.71875,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0206",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.10526315789473684,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0207",
+          "type": "EquationBlock",
+          "priority": "high",
+          "contentRecall": 0.42857142857142855,
+          "structureRetained": false,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0208",
+          "type": "MechanismBlock",
+          "priority": "normal",
+          "contentRecall": 0.8421052631578947,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0209",
+          "type": "DefinitionBlock",
+          "priority": "normal",
+          "contentRecall": 0,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0212",
+          "type": "ComparisonBlock",
+          "priority": "normal",
+          "contentRecall": 0.8235294117647058,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0213",
+          "type": "WarningBlock",
+          "priority": "normal",
+          "contentRecall": 0,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0214",
+          "type": "ProcessBlock",
+          "priority": "high",
+          "contentRecall": 0.9473684210526315,
+          "structureRetained": false,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0215",
+          "type": "ProcessBlock",
+          "priority": "high",
+          "contentRecall": 0.2,
+          "structureRetained": false,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0218",
+          "type": "ChecklistBlock",
+          "priority": "high",
+          "contentRecall": 0.9736842105263158,
+          "structureRetained": false,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0219",
+          "type": "ChecklistBlock",
+          "priority": "high",
+          "contentRecall": 0.7142857142857143,
+          "structureRetained": false,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0222",
+          "type": "SummaryBlock",
+          "priority": "high",
+          "contentRecall": 0.7,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0223",
+          "type": "SummaryBlock",
+          "priority": "high",
+          "contentRecall": 0.17391304347826086,
+          "structureRetained": true,
+          "cellRecall": null
+        },
+        {
+          "id": "b_0224",
+          "type": "TableBlock",
+          "priority": "high",
+          "contentRecall": 0.6282051282051282,
+          "structureRetained": false,
+          "cellRecall": 0.6666666666666666
+        }
+      ]
+    },
+    "underfilledPages": [],
+    "fragmentationCandidates": [],
+    "fragmentationIndex": 0,
+    "adjacentRedundancy": [],
+    "pages": [
+      {
+        "page": 1,
+        "title": "",
+        "visibleChars": 250,
+        "visibleContentUnits": 2,
+        "tableCount": 0,
+        "text": "\nTUTORIAL 04 · PART II THEORY\nTHE FACTOR ZOO\n因子动物园 — Theory and Taxonomy of Equity Factors. Every subsequent factor tutorial drills into one family; this one builds the asset-pricing lineage, the taxonomy, the \"why do factors earn premia\" debate, and the sober statistical reality of the factor zoo."
+      },
+      {
+        "page": 2,
+        "title": "",
+        "visibleChars": 1094,
+        "visibleContentUnits": 9,
+        "tableCount": 0,
+        "text": "\nSECTION 1–2\nWHAT IS A FACTOR? 什么是因子？\nA factor in equity research is a systematic, cross-sectionally observable characteristic — or return series constructed from such a characteristic — that explains differences in expected returns across stocks. If we write the return-generating process as:\nthen    is a factor return,    is the stock's loading, and    is idiosyncratic noise. A factor is useful if it reduces the covariance matrix to a low-rank-plus-diagonal structure and/or commands a non-zero risk premium       .\nCritical epistemic point: \"Anomaly\" is model-relative, not absolute. As benchmark models expand (CAPM → FF3 → Carhart4 → FF5 → FF6), yesterday's anomaly becomes today's risk factor.\n\nCHARACTERISTIC 特征\nA firm-level observable at time   — e.g. book-to-market ratio     \n\nFACTOR 因子\nA return series (usually long-short) built by sorting stocks on a characteristic — e.g. HML\n\nANOMALY 异象\nAn empirical pattern a benchmark model fails to explain — model-relative, not absolute\n\nALPHA Α 阿尔法\nThe intercept in a factor-model regression: return unexplained by the chosen factors\nRisk factors earn premia as compensation for bad-state exposure; mispricing factors capture the slow correction of behavioral or friction-driven price deviations — most documented factors are argued to be some mixture of both."
+      },
+      {
+        "page": 3,
+        "title": "",
+        "visibleChars": 1019,
+        "visibleContentUnits": 6,
+        "tableCount": 0,
+        "text": "\nSECTION 2\nTHEORETICAL LINEAGE 理论谱系\n\n\n\nCAPM (1964–66)\nSharpe, Lintner, Mossin. One factor: market beta. The Security Market Line predicts every asset lies on             . Empirically rejected: flat SML, size effect, value effect, Roll's critique.\n\n\nAPT (ROSS 1976)\nDrops mean-variance machinery; assumes linear factor structure plus no-arbitrage. Justifies \"find   common factors\" empirically without requiring utility maximization. Expected returns are approximately linear in factor loadings:           .\n\n\nFF3 (1993)\nMKT + SMB (size) + HML (value). 2×3 independent sort: NYSE median size breakpoint; 30th/70th B/M breakpoints. Dramatically improved cross-section fit but could not explain momentum.\n\n\nCARHART 4 (1997)\nFF3 + UMD (12-1 momentum, skipping last month). Rebalanced monthly — reflecting momentum's short signal half-life. Became the standard academic benchmark for a decade.\n\n\nFF5 (2015) & Q-FACTOR (HXZ 2015)\nFF5 adds RMW (profitability) + CMA (investment), motivated by dividend-discount-model decomposition — HML becomes largely redundant. q-factor derives same premia from production-side q-theory: ME, I/A, ROE. Two independent routes converging validates the profitability/investment premium."
+      },
+      {
+        "page": 4,
+        "title": "",
+        "visibleChars": 1082,
+        "visibleContentUnits": 5,
+        "tableCount": 0,
+        "text": "\nSECTION 3–4\nGRS TEST & WHY FACTORS EARN PREMIA 检验与溢价来源\n\n1\nTIME-SERIES VS. CROSS-SECTIONAL TESTS\nTime-series regressions test whether a portfolio's alpha is zero given factors:              . The GRS test asks whether all test-asset alphas are jointly zero — preventing one pretty alpha from hiding broad model failure. Sensitive to test-asset choice; one diagnostic, not a final verdict. 防止单一漂亮阿尔法掩盖模型普遍失败。\n\n2\nRISK COMPENSATION 风险补偿\nExposure to factor   raises the volatility of consumption/wealth in bad states (recessions, liquidity crunches, tail events). The premium     is demanded by rational, risk-averse investors — permanent because bearing the risk is unavoidable in equilibrium.\n\n3\nBEHAVIORAL MISPRICING 行为错误定价\nPrices deviate from fundamental value due to investor psychology (overreaction, underreaction, extrapolation, lottery preference) or market frictions (limits to arbitrage, shorting costs, funding constraints). Premia can erode as more capital chases them or as trading costs rise. 原则上可被套利消除。\nNo serious practitioner needs a factor to belong purely to one camp. What matters: does the story predict when the factor should fail? Value fails when distress risk is realized; momentum crashes at sharp rebounds; low volatility suffers when leverage constraints relax."
+      },
+      {
+        "page": 5,
+        "title": "",
+        "visibleChars": 1196,
+        "visibleContentUnits": 8,
+        "tableCount": 0,
+        "text": "\nSECTION 5\nTHE FACTOR ZOO PROBLEM 因子动物园问题\nScale of the Problem 问题规模\n400+\nHundreds of published anomalies cannot all be independent sources of expected return. Some are aliases for the same latent exposure, some are subsumed by known factors, some are too expensive to trade, and some are false discoveries produced by multiple testing on the same finite dataset. 数百个已发表异象不可能都是独立预期收益来源。\nThe number of factors that \"survive against an expanding set of controls\" is far smaller than the number \"in the literature.\" A t-stat of 2.0 that was once the publication threshold implies a false-discovery rate of roughly 50% under realistic multiple-testing conditions.\nREDUNDANCY 冗余\nMany claimed factors are linear combinations of MKT, SMB, HML, UMD — correlated aliases that add no independent pricing information.\nDATA MINING 数据挖掘\nThousands of characteristics tried on the same US equity sample. Even random characteristics pass a t>2 filter with high frequency given enough tries.\nMULTIPLE-TESTING DISCIPLINE 多重检验纪律\nHarvey, Liu & Zhu (2016): adjust thresholds upward (t > 3.0 for new factors). Benjamini-Hochberg FDR control. Out-of-sample and international replication are the gold standards.\nMINIMUM STANDARD 最低标准\nEconomic rationale · point-in-time construction · robustness across periods and universes · low correlation to existing factors · implementable net of costs · multiple-testing-aware validation.\n"
+      },
+      {
+        "page": 6,
+        "title": "",
+        "visibleChars": 925,
+        "visibleContentUnits": 17,
+        "tableCount": 2,
+        "text": "\nSECTIONS 6–7\nFACTOR TAXONOMY & SCORECARD 因子分类与评分卡\nMASTER TAXONOMY 分类总表\nFamily 族 | Representative Signals 代表信号\nValue 价值 | B/P, E/P, EBIT/EV, CFO/P\nMomentum 动量 | 12-1 return, residual mom, earnings mom\nQuality 质量 | GP/A, ROE, accruals, F-score, QMJ\nInvestment 投资 | Asset growth, capex growth, net issuance\nLow Risk 低风险 | Beta, idio-vol, downside vol\nLiquidity 流动性 | Amihud, turnover, spread, ADV\nSentiment 情绪 | Analyst revisions, short interest, news tone\nAlt Data 另类数据 | Web traffic, app usage, supply chain text\n\n\n\n\n\n\n\n\nRISK VS. MISPRICING SCORECARD 逐因子评分\nFactor | Risk Story | Behavioral Story\nValue | Distress & duration risk | Extrapolation, overreaction\nMomentum | Crash & optionality exposure | Underreaction, slow diffusion\nQuality | Defensive cash flows | Underappreciated persistence\nInvestment | q-theory investment risk | Overinvestment, empire building\nLow Vol | Leverage constraints (BAB) | Lottery demand for high beta\nSize | Illiquidity / funding risk | Neglected firms\n\n\n\n\n\n\nThe scorecard is not a verdict — it is a prompt. For every factor, write down what evidence would convince you it is not real."
+      },
+      {
+        "page": 7,
+        "title": "",
+        "visibleChars": 917,
+        "visibleContentUnits": 6,
+        "tableCount": 0,
+        "text": "\nSECTIONS 8–9\nCONSTRUCTION STYLES & FACTOR TIMING 构建方式与因子择时\n\nLONG-SHORT ACADEMIC FACTOR\nDecile or 2×3 sort; value-weighted; tests whether the premium exists in principle. Reports pure factor return. Not directly investable due to shorting costs, turnover, and capacity.\n\nRANK-WEIGHTED DOLLAR-NEUTRAL\nWeights proportional to cross-sectional rank; dollar-neutral by construction; smoother exposure than decile sorts; still requires shorting but reduces turnover concentration.\n\nLONG-ONLY BENCHMARK TILT\nFactor expressed as overweights/underweights vs. a benchmark. Tests benchmark-relative stock selection under real constraints. Always report: weighting, rebalancing frequency, breakpoint universe, sector/beta neutrality.\n\nFACTOR TIMING & CROWDING 择时与拥挤\nValuation spreads, macro regimes, crowding indicators can contain information — but add another layer of multiple testing. Safer default: diversification across factors with drawdown-aware risk budgeting. Monitor common-manager holdings, ETF flows, short interest, borrow cost, turnover spikes.\n\n\n\n"
+      },
+      {
+        "page": 8,
+        "title": "",
+        "visibleChars": 996,
+        "visibleContentUnits": 8,
+        "tableCount": 0,
+        "text": "\nSECTIONS 10–11\nUS VS A-SHARES & THE 2×3 SORT 美股与A股 · 算例\nFACTORS IN US VS A-SHARES 市场差异\nMARKET STRUCTURE 市场结构\nA-share shorting constraints are more severe; limit-up/limit-down events distort momentum signals; disclosure quality and earnings-management incentives differ significantly from US markets.\nMOMENTUM 动量\nUS momentum is a robust canonical factor. A-share momentum is more horizon- and limit-event-dependent — treat any cross-market factor import as a hypothesis, not a parameter-free truth.\nSIZE & QUALITY A股规模/质量\nA-share size has been shaped by shell value and quant crowding. Quality screens must be more alert to subsidies, related-party activity, and earnings-management incentives unique to the A-share regulatory regime.\nWORKED EXAMPLE: THE 2×3 SORT 算例\nA Fama-French-style 2×3 sort on a toy universe works as follows:\nCOMPUTE HML FACTOR\nFORM 2×3 PORTFOLIOS\nRANK CHARACTERISTIC\nSPLIT BY SIZE\nIndependent sorting keeps the two dimensions near-orthogonal by construction. The same template applies to profitability, investment, and custom factors. Always use NYSE breakpoints (not the full universe) to avoid microcap domination of the sort breakpoints."
+      },
+      {
+        "page": 9,
+        "title": "FROM FACTORS TO STRATEGIES 从因子到策略",
+        "visibleChars": 802,
+        "visibleContentUnits": 16,
+        "tableCount": 0,
+        "text": "FROM FACTORS TO STRATEGIES 从因子到策略\n\n\n\n1\nECONOMIC RATIONALE & SIGNAL 经济逻辑与信号\nSteps 1–2\nArticulate the theoretical reason before seeing the backtest\nBuild a clean, point-in-time signal with no look-ahead\nConfirm IC, sorts, and regressions agree directionally\n\n\n2\nSINGLE-FACTOR & INCREMENTALITY TESTS 单因子与增量检验\nSteps 3–4\nSingle-factor sort across reasonable horizons and universes\nIncrementality vs. known factors (FF5, q5, Carhart)\nApply multiple-testing-aware thresholds (t > 3.0)\n\n\n3\nBACKTEST & RED TEAM 回测与红队\nSteps 5–6\nWalk-forward or out-of-sample evaluation\nRed-team stress: different universes, sub-periods, geographies\nCost and turnover realism — borrow cost, market impact\n\n\n4\nCONSTRAINED PORTFOLIO → LIVE 约束组合到实盘\nSteps 7–9\nConstrained portfolio construction with universe rules and risk limits\nPaper trade with full execution assumptions and capacity estimates\nSmall live allocation with monitoring and failure-scenario governance"
+      },
+      {
+        "page": 10,
+        "title": "",
+        "visibleChars": 1128,
+        "visibleContentUnits": 19,
+        "tableCount": 1,
+        "text": "\nSECTIONS 13–14\nPRACTICAL CHECKLIST & SUMMARY 实践清单与小结\nWHAT MAKES A GOOD FACTOR 好因子的标准\nIt is known at the time it is used — no look-ahead, point-in-time construction 使用时确实已知\nIt has a reason to exist before seeing the backtest — theory first 在看到回测前就有存在理由\nIt survives neutralization to obvious exposures (sector, size, beta) 对明显暴露中性化后仍存在\nIC, portfolio sorts, and regressions agree directionally IC、分层和回归方向一致\nIt works across reasonable horizons and universes — not just US large-cap 1990–2020 跨期限和股票池稳健\nIt is not just a renamed existing factor — passes incrementality tests 不是已有因子的改名\nIt survives costs, turnover, and capacity — t-stat net of friction 能扛住成本和换手\nIt has a failure story and a monitoring plan 有失效故事和监控方案\nMODEL LINEAGE SUMMARY 模型谱系汇总\nModel | Year | Factors # | Grounding\nCAPM | 1964 | 1 | Mean-variance equilibrium\nAPT | 1976 | K | No-arbitrage, linear factors\nFF3 | 1993 | 3 | Empirical + risk rationalization\nCarhart 4 | 1997 | 4 | Empirical momentum add-on\nFF5 | 2015 | 5 | Dividend-discount decomposition\nq (HXZ) | 2015 | 4 | Investment-based q-theory\nq5 | 2021 | 5 | q-theory + expected growth\nStambaugh-Yuan | 2017 | 4 | Behavioral mispricing clusters\n\n\n\n\n\n\n\n\nThe factor zoo is both a library and a warning. Good factor research combines theory, data discipline, conservative testing, cost realism, and humility about regimes. 因子动物园既是资料库，也是警告。"
+      }
+    ]
+  },
+  "limitations": [
+    "Token overlap is not semantic entailment",
+    "Visible content units count substantive paragraphs and table rows, not model-evaluated meaning",
+    "AIMate provenance identifies typed objects; reference structures without provenance require visual review, so their structure recall is a lower bound",
+    "Bilingual distribution, whitespace and table text extraction differ across producers",
+    "A zero short-paragraph fragmentation score does not exclude conceptual over-fragmentation; inspect planner and per-page evidence"
+  ]
+}

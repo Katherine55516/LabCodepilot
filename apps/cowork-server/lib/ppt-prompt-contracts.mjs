@@ -70,11 +70,11 @@ ${cjk ? `名称通常 4–10 字，普通解释约 25–55 字，深解释约 45
 ${deep ? '本页需要深入解释；必要时用一个主说明区解释机制，再以短支撑点展开条件、实现和对照。' : '按内容需要混合短支撑点与完整解释，封面/过渡/图示标签可更短。'}
 这些是写作建议，不是最少字数；完整而具体优先。${native ? '原生槽位的 maxVisualUnits、maxLines 和列表结构是硬限制；短 label 不是正文。大正文槽位优先承载深机制；小槽位写完整短句并分配不同事实，无法容纳的必要内容交给审查。' : '根据已规划的语义单元选择卡片、对照、步骤或真实表格；标题承诺的类别与表格关系需全部可见。'}
 范例只展示写法，不是本次来源：
-给定事实：SMB = small portfolio return minus big portfolio return; use the same holding period.
-浅薄：{"heading":"SMB","body":"Small less Big."}
-完整：{"heading":"SMB","body":"SMB compares small-stock and big-stock portfolio returns over the same holding period; the spread isolates the size-related return component."}
-给定事实：按规模和账面市值比做 2×3 排序；HML 比较高、低账面市值比组合。
-完整：{"heading":"构造 HML","body":"在大、小规模组内分别比较高与低账面市值比组合，再合并两组价差；规模分组让价值比较保持同一构造口径。"}
+给定事实：A staged rollout starts with a limited cohort and expands only after its validation checks pass.
+浅薄：{"heading":"Rollout","body":"Start small."}
+完整：{"heading":"Validate before expanding","body":"Start with a limited cohort and expand only after the defined checks pass; each cohort bounds the impact of an unexpected failure."}
+给定事实：先由负责人核对原始记录，再决定继续发布或回滚。
+完整：{"heading":"核验与决策","body":"负责人先将结果与原始记录核对，再依据已约定的检查标准决定继续发布或回滚；核验结果与决策责任必须一起记录。"}
 根据页角色选择有用的定义、机制、证据、对照、步骤与限制；不要求每页机械套同一论证序列。总结可简要回指前文，但应增加综合判断。
 </writing>`;
 }
@@ -198,6 +198,7 @@ export const OUTLINE_SCHEMA = JSON.stringify({ brief: { goal: '目标', audience
     keyPoints: [{ text: '具体事实及机制/条件/对照，通常 1–2 句，不是主题名', refs: ['原始来源编号'], chunkRefs: ['真实 chunk ID'] }],
     visualIntent: { type: 'none|image|comparison|pipeline|architecture|timeline|table|metric' },
     requiredDetails: ['必须可见的公式、表格关系与条件'], requiredEvidenceIds: ['本页需要完整表达的真实 evidence ID'], chunkRefs: ['真实 chunk ID'], refs: ['原始来源编号'] }],
+  topicGroups: [{ group_id: 'c_001', decision: 'merge|split|standalone', reason: '同一个受众问题与强关系，或不同问题/机制深度/容量要求', estimated_semantic_units: 6, layout_candidate: 'table|timeline|comparison', capacity_ok: true }],
   coverage: [{ chunkId: 'c_001', action: 'omitted', reason: '明确取舍' }] });
 
 export function outlineContentContract(project) {
@@ -206,6 +207,8 @@ keyPoints 是后续写作者必须展开的内容承诺；给出实际要讲的�
 复杂表格保留所有类别与列之间的关系，流程保留顺序/分支，公式保留变量、单位与条件；篇幅不足明确记录取舍，不能静默遗漏。
 角色、密度和篇幅预算由代码依据用途和内容推导，无需重复输出。纯 prompt 的通用问题清单只是参考，应替换成领域特有、有内容的解释计划。
 用户另行要求（来源正文之外）：${project.prompt || '无'}。</content_plan>
+<source_inventory>${JSON.stringify(project.source?.semantic?.inventory)}</source_inventory>
+<story_decisions>Use many-to-one for connected definitions/frameworks and one-to-many for dense mechanisms. Never map headings mechanically to pages. Each page owns a question, message, semantic units, relationships and a capacity-aware structural artifact. Record merge/split/standalone and reasons; retain final sections, all table columns, equations with conditions, workflows, checklists and summaries. Preserve the confirmed page count.</story_decisions>
 <source_objects>${JSON.stringify(sourceObjects(project.source))}</source_objects>
 source_objects 是完整的来源表格/表达式/代码；不要把行名清单当成关系说明。每一列的关系要由具体 keyPoints 承接，必要时分配到多个相关页面；不能只通过引用 chunk 就声称解释已完成。`;
 }
@@ -229,8 +232,8 @@ export function writerPrompt(project, slide, index, { retrieval, contract, slotC
   const citationRule = /\b(?:sources?|references?|citations?)\b|来源|参考文献|引用/iu.test(slide.title || '') && project.source?.kind === 'file'
     ? `来源页需可见输入文件名「${project.source.name}」与引用位置。` : '';
   const schema = native
-    ? { title: '标题', evidenceUsedIds: ['可见文本实际表达的真实 evidence ID'], slotTexts: { 'shape ID': '完整替换文字', '列表 shape ID': [{ label: '短名称', body: '解释' }] }, omitTemplateShapes: [{ shapeId: 123, reason: '具体不适配理由' }] }
-    : { title: '标题', eyebrow: '可选短标签', subtitle: '可选背景句', contentBlocks: [{ type: 'definition|mechanism|evidence|example|contrast|constraint|implication|stage|decision|next_step', heading: '短名称', body: '完整解释' }], takeaway: '可选综合判断', blocks: [{ type: 'table', rows: [['列名称', '列名称'], ['来源类别', '来源解释']] }], evidenceUsedIds: ['实际表达的真实 evidence ID'] };
+    ? { title: '标题', evidenceUsedIds: ['可见文本实际表达的真实 evidence ID'], slotTexts: { 'shape ID': '完整替换文字', '列表 shape ID': [{ label: '短名称', body: '解释' }] }, omitTemplateShapes: [{ shapeId: 123, reason: '具体不适配理由' }], sourceArtifacts: [{ sourceUnitId: '真实库存 ID', rowStart: 1, rowEnd: 5 }] }
+    : { title: '标题', eyebrow: '可选短标签', subtitle: '可选背景句', contentBlocks: [{ type: 'definition|mechanism|evidence|example|contrast|constraint|implication|stage|decision|next_step', heading: '短名称', body: '完整解释' }], takeaway: '可选综合判断', blocks: [{ type: 'table', rows: [['列名称', '列名称'], ['来源类别', '来源解释']] }], sourceArtifacts: [{sourceUnitId:'真实库存 ID',rowStart:1,rowEnd:5}], evidenceUsedIds: ['实际表达的真实 evidence ID'] };
   const old = project.update && slide.baseSlideId ? project.update.baseSnapshot.deck?.slides.find(item => item.id === slide.baseSlideId) : null;
   return `你是演示文稿文案编辑。当前任务只写第 ${index + 1} 页，共 ${project.pages} 页。
 ${promptPolicy(writingProject)}
@@ -241,12 +244,14 @@ ${writingGuide(writingProject, contract, native)}
 <slide_contract>${JSON.stringify({ ...contract, keyPoints: slide.keyPoints || [], focus: slide.focus })}</slide_contract>
 ${titleRule}${citationRule}
 ${native ? slotContract : ''}
+<source_artifacts>${JSON.stringify((project.source?.semantic?.inventory?.items || []).filter(item => contract?.sourceArtifacts?.some(ref => ref.sourceUnitId === item.id)))}</source_artifacts>
 <source_packet>${JSON.stringify(sourcePacket(retrieval))}</source_packet>
 ${old ? `<old_slide>${JSON.stringify(slideSemanticContext(old))}</old_slide>` : ''}
 <terminology>${JSON.stringify(project.planning?.terminology || {})}</terminology>
 <task>展开本页拥有的具体内容；相邻页 ownedPoints 是分工边界，避免全文重复。锁定证据 ID 与 requiredDetails 必须在可见文字表达完整关系与条件；上下文预算省略不等于来源没有内容。
 ${!project.source?.segments?.length ? `用户主题：${project.prompt}。使用领域特有的定义、机制和评估方法。` : ''}
-${native ? '只输出 slotTexts 这一份正文；代码从语义配对派生兼容文案，不另写 contentBlocks、bullets 或 factSynthesis。' : '只输出 contentBlocks 这一份正文；bullets 由代码派生。表格使用真实 rows。可选 blocks 不需要时返回 []；表格最多 6 行（含表头）、4 列，放不下则用正文完整解释分组关系并由审查报告容量问题。'}
+sourceArtifacts 可引用本页合同的真实库存 ID，由代码重建可编辑表格/公式/流程/清单，最多两个。表格第 0 行是表头；rowStart 从 1 开始，rowEnd 为不包含的结束索引；省略范围则保留全部行。容量不足拆到多页并重复表头，不删列、不截断单元格。结构替换正文区域，保留标题；使用 sourceArtifacts 时不要另写重复正文。
+${native ? '其他正文只输出 slotTexts；代码从语义配对派生兼容文案，不另写 contentBlocks、bullets 或 factSynthesis。' : '普通页面只输出 contentBlocks 这一份正文；bullets 由代码派生。优先引用 sourceArtifacts 保留原文表格的全部列；手写 blocks 表格兼容上限为 6 行（含表头）、4 列，不能用它静默降级更大的来源表格。'}
 不输出隐藏事实清单或候选标题。每点有不同信息职责；条件、对照和机制写完整句子，服从容量且保留已规划的具体深度。</task>
 返回唯一 JSON：${JSON.stringify(schema)}。只输出 JSON。`;
 }

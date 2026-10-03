@@ -1,0 +1,107 @@
+[
+  {
+    "iteration": 1,
+    "seconds": 70.513177197,
+    "exitCode": 0,
+    "cache": "fresh process/state; OS buffers may be warm",
+    "trace": {
+      "ppt_trace_id": "d38ab756-d26d-4ee2-8ad4-a5d955acd480",
+      "session_id": "3465d3a52d4d5792fd2b12fafd9bedd0",
+      "workflow": "paste",
+      "input_type": "paste",
+      "template_id": "c2d796614e70148621a9bad20cb0d12e",
+      "template_source": "uploaded",
+      "template_bytes": 4191988,
+      "page_count": 22,
+      "model": "simulated-structured-llm",
+      "cache": {
+        "template": "not_applicable"
+      },
+      "timestamps": {
+        "t_input_accepted": "2026-10-03T15:55:31.961Z",
+        "t_template_ready": "2026-10-03T15:55:31.961Z",
+        "t_file_parse_done": "2026-10-03T15:55:32.315Z",
+        "t_semantic_parse_done": "2026-10-03T15:55:32.315Z",
+        "t_outline_ready": "2026-10-03T15:55:33.473Z",
+        "t_story_plan_done": "2026-10-03T15:55:33.473Z",
+        "t_generation_started": "2026-10-03T15:55:34.453Z",
+        "t_first_slide_ready": "2026-10-03T15:55:48.547Z",
+        "t_half_deck_ready": "2026-10-03T15:56:16.564Z",
+        "t_all_slide_content_ready": "2026-10-03T15:56:30.077Z",
+        "t_all_slide_rendered": "2026-10-03T15:56:30.708Z",
+        "t_export_ready": "2026-10-03T15:56:36.750Z",
+        "t_editor_ready": "2026-10-03T15:56:36.750Z"
+      }
+    }
+  },
+  {
+    "iteration": 2,
+    "seconds": 33.28335382399999,
+    "exitCode": 0,
+    "cache": "fresh process/state; OS buffers may be warm",
+    "trace": {
+      "ppt_trace_id": "df437c47-851e-44d9-acb7-9b305f2a100f",
+      "session_id": "38b1a40a3fbc0d25a8d90deebac2aad2",
+      "workflow": "paste",
+      "input_type": "paste",
+      "template_id": "16dd41630acd5fe6dcad12e417a327d4",
+      "template_source": "uploaded",
+      "template_bytes": 4191988,
+      "page_count": 22,
+      "model": "simulated-structured-llm",
+      "cache": {
+        "template": "not_applicable"
+      },
+      "timestamps": {
+        "t_input_accepted": "2026-10-03T15:56:40.238Z",
+        "t_template_ready": "2026-10-03T15:56:40.238Z",
+        "t_file_parse_done": "2026-10-03T15:56:40.344Z",
+        "t_semantic_parse_done": "2026-10-03T15:56:40.344Z",
+        "t_outline_ready": "2026-10-03T15:56:41.062Z",
+        "t_story_plan_done": "2026-10-03T15:56:41.062Z",
+        "t_generation_started": "2026-10-03T15:56:41.336Z",
+        "t_first_slide_ready": "2026-10-03T15:56:46.381Z",
+        "t_half_deck_ready": "2026-10-03T15:56:54.807Z",
+        "t_all_slide_content_ready": "2026-10-03T15:57:04.285Z",
+        "t_all_slide_rendered": "2026-10-03T15:57:04.919Z",
+        "t_export_ready": "2026-10-03T15:57:10.464Z",
+        "t_editor_ready": "2026-10-03T15:57:10.464Z"
+      }
+    }
+  },
+  {
+    "iteration": 3,
+    "seconds": 31.56713110700001,
+    "exitCode": 0,
+    "cache": "fresh process/state; OS buffers may be warm",
+    "trace": {
+      "ppt_trace_id": "cf3a4034-0a8f-49b7-a0fe-7ef8a461cd17",
+      "session_id": "fff0fc856de32f9b0b9744e0e72887fc",
+      "workflow": "paste",
+      "input_type": "paste",
+      "template_id": "3a5cc1893d9ee33d7c33e79c7c44af90",
+      "template_source": "uploaded",
+      "template_bytes": 4191988,
+      "page_count": 22,
+      "model": "simulated-structured-llm",
+      "cache": {
+        "template": "not_applicable"
+      },
+      "timestamps": {
+        "t_input_accepted": "2026-10-03T15:57:12.920Z",
+        "t_template_ready": "2026-10-03T15:57:12.920Z",
+        "t_file_parse_done": "2026-10-03T15:57:13.012Z",
+        "t_semantic_parse_done": "2026-10-03T15:57:13.012Z",
+        "t_outline_ready": "2026-10-03T15:57:13.412Z",
+        "t_story_plan_done": "2026-10-03T15:57:13.412Z",
+        "t_generation_started": "2026-10-03T15:57:13.648Z",
+        "t_first_slide_ready": "2026-10-03T15:57:18.416Z",
+        "t_half_deck_ready": "2026-10-03T15:57:26.497Z",
+        "t_all_slide_content_ready": "2026-10-03T15:57:35.849Z",
+        "t_all_slide_rendered": "2026-10-03T15:57:36.468Z",
+        "t_export_ready": "2026-10-03T15:57:42.045Z",
+        "t_editor_ready": "2026-10-03T15:57:42.045Z"
+      }
+    }
+  }
+]

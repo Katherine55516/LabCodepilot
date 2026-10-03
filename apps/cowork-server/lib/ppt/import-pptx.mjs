@@ -1,3 +1,4 @@
+import { templateLimits, TEMPLATE_SECURITY_SCRIPT } from '../ppt-template-security.mjs';
 import { spawn } from 'node:child_process';
 import * as orch from '../orchestrator.mjs';
 import { ensureDeckV3, stableId } from './ir.mjs';
@@ -8,7 +9,9 @@ from pptx import Presentation
 from pptx.enum.shapes import MSO_SHAPE_TYPE
 from pptx.enum.dml import MSO_COLOR_TYPE
 from pptx.oxml.ns import qn
-raw=sys.stdin.buffer.read(); prs=Presentation(io.BytesIO(raw)); slides=[]
+raw=sys.stdin.buffer.read(); ext='pptx'
+${TEMPLATE_SECURITY_SCRIPT}
+prs=Presentation(io.BytesIO(raw)); slides=[]
 target=os.path.join(os.environ.get('PPT_EXTERNAL_DIR','/workspace/external'),'original.pptx'); os.makedirs(os.path.dirname(target), exist_ok=True)
 with open(target+'.part','wb') as f: f.write(raw)
 os.replace(target+'.part',target)
@@ -96,6 +99,7 @@ from pptx.oxml.ns import qn
 from pptx.util import Pt
 from pptx.dml.color import RGBColor
 from pptx.enum.text import MSO_AUTO_SIZE
+from pptx.enum.text import PP_ALIGN
 from pptx.enum.shapes import MSO_SHAPE_TYPE
 
 data=json.load(sys.stdin); original=data['original']; prs=Presentation(original)
@@ -161,6 +165,33 @@ def shape_text_frames(slide, shape):
     if shape.has_table:
         for row in shape.table.rows:
             for cell in row.cells: yield cell.text_frame, 'body'
+
+def add_source_artifact(slide, node):
+    g=node['geometry']; c=node.get('content') or {}; style=node.get('style') or {}
+    font=style.get('fontFamily') or fonts['body']; pt=float(style.get('fontSizePt',18))
+    if node['type']=='table':
+        rows=c['rows']; shape=slide.shapes.add_table(len(rows),len(rows[0]),int(g['x']),int(g['y']),int(g['width']),int(g['height']))
+        weights=c.get('columnWeights') or [1]*len(rows[0]); weight_sum=sum(weights)
+        for col,weight in enumerate(weights): shape.table.columns[col].width=int(g['width']*weight/weight_sum)
+        row_weights=c.get('rowWeights') or [1]*len(rows); row_sum=sum(row_weights)
+        for r,weight in enumerate(row_weights): shape.table.rows[r].height=int(g['height']*weight/row_sum)
+        for r,row in enumerate(rows):
+            for col,value in enumerate(row):
+                cell=shape.table.cell(r,col); cell.text=str(value); cell.margin_top=cell.margin_bottom=Pt(3); cell.fill.solid(); cell.fill.fore_color.rgb=RGBColor.from_string((style.get('fill','#e7e5f4') if r==0 else '#ffffff').lstrip('#'))
+                for p in cell.text_frame.paragraphs:
+                    for run in p.runs: run.font.name=fonts['bodyEastAsia'] if CJK_RE.search(run.text) else font; run.font.size=Pt(pt); run.font.bold=(r==0); run.font.color.rgb=RGBColor(36,42,59); set_east_asia(run)
+    else:
+        shape=slide.shapes.add_textbox(int(g['x']),int(g['y']),int(g['width']),int(g['height']))
+        shape.fill.solid(); shape.fill.fore_color.rgb=RGBColor.from_string(style.get('fill','#ffffff').lstrip('#'))
+        frame=shape.text_frame; frame.word_wrap=True
+        values=[item['text'] for item in c.get('items',[])] if node['type'] in ('list','timeline') else str(c.get('text','')).split('\n')
+        for i,value in enumerate(values):
+            p=frame.paragraphs[0] if i==0 else frame.add_paragraph(); p.text=(str(i+1)+'. ' if node['type']=='timeline' else '• ' if node['type']=='list' else '')+str(value); p.space_after=Pt(4)
+            for run in p.runs:
+                run.font.name=fonts['bodyEastAsia'] if CJK_RE.search(run.text) else font; run.font.size=Pt(pt); run.font.color.rgb=RGBColor.from_string(str(style.get('color','#333333')).lstrip('#')); set_east_asia(run)
+    source=node.get('sourceArtifact') or {}
+    shape.name='AIMate source:'+str(source.get('sourceUnitId',''))+':'+str(source.get('type',''))
+    return int(shape.shape_id)
 
 by_slide={int(item['nativeSlideIndex']):item for item in data['slides'] if item.get('nativeSlideIndex') is not None}
 role_overrides={}
@@ -261,6 +292,9 @@ for slide_index, slide in enumerate(prs.slides):
                         if ea is None or not (ea.get('typeface') or '').strip(): failures.append('slide '+str(slide_index + 1)+' has CJK without a:ea')
 if failures: raise ValueError('PPTX font integrity validation failed: '+'; '.join(failures[:12]))
 
+for slide_index,slide in enumerate(prs.slides):
+    update=by_slide.get(slide_index) or {}
+    update['addedShapeIds']=[add_source_artifact(slide,node) for node in update.get('sourceArtifacts',[])]
 target=os.environ.get('PPT_OUTPUT','/workspace/presentation.pptx'); tmp=target+'.part'; prs.save(tmp)
 from hashlib import sha256
 from pptx.enum.shapes import MSO_SHAPE_TYPE
@@ -272,7 +306,8 @@ for index,source_index in enumerate(expected_map):
     omitted={int(shape_id) for shape_id in by_slide.get(index,{}).get('omitShapeIds',[])}
     source_ids={int(shape.shape_id) for shape in left.shapes}
     output_ids={int(shape.shape_id) for shape in right.shapes}
-    if not omitted.issubset(source_ids) or output_ids!=source_ids-omitted: raise ValueError('undeclared template shape loss on slide '+str(index+1))
+    added=set(by_slide.get(index,{}).get('addedShapeIds',[]))
+    if not omitted.issubset(source_ids) or output_ids!=source_ids-omitted|added: raise ValueError('undeclared template shape loss on slide '+str(index+1))
     requested={int(node['nativeShapeId']):node for node in by_slide.get(index,{}).get('nodes',[]) if node.get('nativeShapeId') is not None}
     source_pictures={int(shape.shape_id):sha256(shape.image.blob).hexdigest() for shape in left.shapes if shape.shape_type==MSO_SHAPE_TYPE.PICTURE}
     output_pictures={int(shape.shape_id):sha256(shape.image.blob).hexdigest() for shape in right.shapes if shape.shape_type==MSO_SHAPE_TYPE.PICTURE}
@@ -312,14 +347,15 @@ os.replace(tmp,target)
 print(json.dumps({'slides':len(prs.slides),'path':target,'bytes':os.path.getsize(target),'preservedOriginal':True}))
 `;
 
-function runPython(project, script, input, max = 12_000_000) {
+function runPython(project, script, input, max = Math.min(templateLimits().managedBytes * 2, templateLimits().memoryBytes / 4)) {
   return orch.ensureContainer(project.id, project.uid, orch.KIND_PPT).then(({ name }) => new Promise((resolve, reject) => {
-    const child = spawn('docker', ['exec', '-i', '-u', String(orch.AGENT_UID), '-e', `PPT_OUTPUT=${project.renderOutput || '/workspace/presentation.pptx'}`, name, 'python3', '-c', script], { stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn('docker', ['exec', '-i', '-u', String(orch.AGENT_UID), '-e', `PPT_TEMPLATE_LIMITS=${JSON.stringify(templateLimits())}`, '-e', `PPT_OUTPUT=${project.renderOutput || '/workspace/presentation.pptx'}`, name, 'python3', '-c', script], { stdio: ['pipe', 'pipe', 'pipe'] });
     let out = ''; let err = '';
+    const timer = setTimeout(() => { child.kill(); reject(new Error('template_timeout: PPTX operation timed out')); }, script === IMPORT_SCRIPT ? templateLimits().timeoutMs : 120000); timer.unref();
     child.stdout.on('data', chunk => { out += chunk; if (out.length > max) child.kill(); });
     child.stderr.on('data', chunk => { err = (err + chunk).slice(-3000); });
-    child.on('error', reject);
-    child.on('close', code => { if (code) reject(new Error(`PPTX fidelity operation failed: ${err.slice(-500)}`)); else { try { resolve(JSON.parse(out)); } catch { reject(new Error('PPTX fidelity operation returned invalid JSON')); } } });
+    child.on('error', error => { clearTimeout(timer); reject(error); });
+    child.on('close', code => { clearTimeout(timer); if (code) reject(new Error(`PPTX fidelity operation failed: ${err.slice(-500)}`)); else { try { resolve(JSON.parse(out)); } catch { reject(new Error('PPTX fidelity operation returned invalid JSON')); } } });
     child.stdin.on('error', () => {}); child.stdin.end(input);
   }));
 }
@@ -360,6 +396,7 @@ export async function renderImportedPptx(project) {
   const slides = project.deck.slides.filter(slide => Number.isInteger(slide.nativeSlideIndex)).map(slide => ({
     nativeSlideIndex: slide.nativeSlideIndex,
     omitShapeIds: (slide.templateOmissions || []).map(item => item.shapeId),
+    sourceArtifacts: (slide.nodes || []).filter(node => node.sourceArtifact),
     nodes: slide.nodes.filter(node => node.nativeRef).map(node => ({ type: node.type, semanticRole: node.semanticRole,
       nativeShapeId: node.nativeRef.shapeId,
       // The original PPTX already owns unchanged image bytes. Sending the same
