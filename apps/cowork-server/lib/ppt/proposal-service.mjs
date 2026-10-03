@@ -1,3 +1,4 @@
+import { normalizeAiAction, aiActionPrompt, proposalMetrics, WRITING_ACTIONS } from './ai-actions.mjs';
 import path from 'node:path';
 import { atomicJson, readJson, projectDataDir, enqueueProject, getProject } from './repository.mjs';
 import { applyCommand, _internals as commands } from './command-service.mjs';
@@ -93,7 +94,9 @@ export async function createProposal(input, data, deps, activity, log) {
   const instruction = String(data.instruction || '').trim();
   if (!instruction || instruction.length > 1000) throw editError('instruction must contain 1–1000 characters', 400);
   if (!['slide', 'object', 'deck'].includes(data.scope)) throw editError('invalid scope', 400);
-  const route = routeMutation(project, instruction, { type: data.type, mode: data.mode });
+  const action = normalizeAiAction(data.action, data.parameters);
+  if (WRITING_ACTIONS.includes(action.action) && data.type && !['auto', 'content', 'title'].includes(data.type)) throw editError('writing actions cannot change layout, assets or data', 400);
+  const route = routeMutation(project, instruction, { type: WRITING_ACTIONS.includes(action.action) ? (data.type === 'title' ? 'title' : 'content') : data.type, mode: data.mode });
   if (project.runtime?.slides?.[slide.id]?.accepted && ['content', 'title', 'data', 'structure'].includes(route.type)) throw editError('this page is accepted; unlock it before changing its content', 409);
   if (['layout', 'style', 'asset', 'data', 'structure'].includes(route.type)) {
     const id = newId('proposal');
@@ -132,14 +135,14 @@ export async function createProposal(input, data, deps, activity, log) {
   const contract = project.planning?.slidePlan?.find(item => item.slideId === slide.id);
   const outline = project.outline?.find(item => item.id === slide.id) || slide;
   const sources = retrieveSlideSources(project, outline, contract || {});
-  const context = editPromptContext(project, outline, sources, contract || {});
-  const writingProject = { ...project, prompt: `${project.prompt || ''}\n${instruction}` };
+  const writingProject = { ...project, ...(action.action === 'translate' ? { editOutputLanguage: action.parameters.targetLanguage } : {}), prompt: `${project.prompt || ''}\n${instruction}` };
+  const context = editPromptContext(writingProject, outline, sources, contract || {});
   const writingPolicy = promptPolicy(writingProject);
   const schema = data.scope === 'object' ? '{"content":{...}}' : '{"patches":[{"nodeId":"existing ID","content":{...}}]';
-  const prompt = `${writingPolicy}\n${writingGuide(writingProject, contract || {}, native)}\nOnly edit the semantic content of these existing presentation objects. Preserve sources, numeric values, units, conditions, equations, required evidence and locked titles. Keep chart data/type/dimensions and table dimensions/headers/numeric cells unchanged. Keep shape types unchanged. Do not invent facts, repeat neighboring pages, change other pages, theme, styles, IDs or coordinates. Preserve material conditions and uncertainty; keep production/source bookkeeping out of visible copy. Keep each point useful and within its capacity; do not truncate mechanically. ${native ? 'Preserve native text paragraph count and label/body structure.' : ''}\nContext: ${context}\nObjects: ${JSON.stringify(editable.map(node => ({ nodeId: node.id, type: node.type, content: node.content, nativeTextFrame: node.nativeTextFrame, capacity: objectWritingCapacity(project, slide.id, node) })))}\nInstruction: ${instruction}\nReturn only JSON: ${schema}${data.scope === 'slide' ? (data.mode === 'relayout' ? `,"layoutId":"one of ${[...layouts].join(',')}"}` : '}') : ''}.`;
+  const prompt = `${aiActionPrompt(action.action, action.parameters)}\n${writingPolicy}\n${writingGuide(writingProject, contract || {}, native)}\nOnly edit the semantic content of these existing presentation objects. Preserve sources, numeric values, units, conditions, equations, required evidence and locked titles. Keep chart data/type/dimensions and table dimensions/headers/numeric cells unchanged. Keep shape types unchanged. Do not invent facts, repeat neighboring pages, change other pages, theme, styles, IDs or coordinates. Preserve material conditions and uncertainty; keep production/source bookkeeping out of visible copy. Keep each point useful and within its capacity; do not truncate mechanically. ${native ? 'Preserve native text paragraph count and label/body structure.' : ''}\nContext: ${context}\nObjects: ${JSON.stringify(editable.map(node => ({ nodeId: node.id, type: node.type, content: node.content, nativeTextFrame: node.nativeTextFrame, capacity: objectWritingCapacity(project, slide.id, node) })))}\nInstruction: ${instruction}\nReturn only JSON: ${schema}${data.scope === 'slide' ? (data.mode === 'relayout' ? `,"layoutId":"one of ${[...layouts].join(',')}"}` : '}') : ''}.`;
   const id = newId('proposal');
   const answer = await deps.modelCall(project, prompt, activity, log, { nodeKey: `ai:${id}` });
-  const proposal = { id, projectId: project.id, slideId: slide.id, scope: data.scope, type: route.type, impact: impactFor(project, route, [slide.id]), mode: data.mode || 'content', instruction,
+  const proposal = { id, projectId: project.id, slideId: slide.id, scope: data.scope, type: route.type, impact: impactFor(project, route, [slide.id]), mode: data.mode || 'content', action: action.action, parameters: action.parameters, generationPolicy: project.generationPolicy, promptContractVersion: project.promptContractVersion || 2, instruction,
     baseRevision: project.revision, sourceRevision: project.sourceRevision || 0, planKey: planKey(project), targetContentHash: slideFingerprint(project, slide.id),
     modelRef: { configId: project.configId, model: project.model }, status: 'proposed', createdAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 86400000).toISOString() };
   if (data.scope === 'object') {
@@ -161,6 +164,7 @@ export async function createProposal(input, data, deps, activity, log) {
     }
   }
   const result = candidate(project, proposal);
+  proposal.metrics = proposalMetrics(data.scope === 'object' ? [proposal.before] : proposal.patches.map(item => item.before), data.scope === 'object' ? [proposal.content] : proposal.patches.map(item => item.content), action.action, action.parameters);
   proposal.quality = validateCandidate(project, result.project, slide.id);
   const preview = { beforeSvg: slideSvg(buildSlideRenderTree(project, slide.id)), afterSvg: slideSvg(buildSlideRenderTree(result.project, slide.id)) };
   proposal.changedNodeIds = data.scope === 'object' ? [proposal.nodeId] : proposal.patches.map(item => item.nodeId);

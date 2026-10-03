@@ -142,7 +142,7 @@ export function ensureProjectV3(input) {
     ? project.publishedRevision
     : (project.status === 'completed' ? project.revision : 0);
   project.creationContext = {
-    schemaVersion: 1, draftId: project.id, sourceRevision: project.sourceRevision || 0,
+    schemaVersion: 1, draftId: project.id, generationPolicy: project.generationPolicy, promptContractVersion: project.promptContractVersion, sourceRevision: project.sourceRevision || 0,
     sourceHash: project.source?.sha256 || digest(project.source?.text || project.prompt),
     modelRef: { configId: project.configId, model: project.model },
     templateRef: { id: project.template, versionOrHash: project.templateSpec?.sha256 || digest(project.templateSpec), capabilities: templateCapabilities(project.templateSpec) },

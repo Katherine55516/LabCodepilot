@@ -4,7 +4,7 @@ import { ensureDeckV3, materializeLegacySlide, stableId } from './ir.mjs';
 import { layoutPoints } from './point-layout.mjs';
 
 export const EMU_PER_INCH = 914400;
-export const SLIDE_SIZE = Object.freeze({ width: Math.round(13.333 * EMU_PER_INCH), height: Math.round(7.5 * EMU_PER_INCH) });
+export const SLIDE_SIZE = Object.freeze({ width: 12192000, height: 6858000 });
 
 const emu = value => Math.round(Number(value || 0) * EMU_PER_INCH);
 const bounds = region => ({ x: emu(region.x), y: emu(region.y), width: emu(region.w), height: emu(region.h) });

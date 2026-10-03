@@ -1,0 +1,17 @@
+
+Running 5 tests using 1 worker
+
+[1A[2K(node:25140) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K(node:25140) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K[1/5] src/__tests__/e2e/ppt-prototype-parity.spec.ts:26:5 › PPT template-first creation keeps manual pages, handles estimate races and sends policy @smoke
+[1A[2K[2/5] src/__tests__/e2e/ppt-prototype-parity.spec.ts:45:5 › PPT paste syllabus and composer remain reachable at 390 by 500 @smoke
+[1A[2K[3/5] src/__tests__/e2e/ppt-prototype-parity.spec.ts:59:5 › PPT generation dock preserves draft through close and supports two fixed-scope turns @smoke
+[1A[2K[4/5] src/__tests__/e2e/ppt-prototype-parity.spec.ts:80:5 › PPT local translate and expand send parameters and review real proposal metrics @smoke
+[1A[2K[5/5] src/__tests__/e2e/ppt-prototype-parity.spec.ts:106:5 › PPT editable import keeps native page count independent of a small selected template @smoke
+[1A[2K  5 passed (24.8s)

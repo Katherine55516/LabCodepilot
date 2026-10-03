@@ -1,3 +1,4 @@
+import { normalizeGenerationPolicy, requestedPageCount, PPT_PROMPT_CONTRACT_VERSION } from './ppt-generation-policy.mjs';
 /** M1 PPT Workspace API and durable, server-side job orchestration.
  * All model calls and PPTX rendering run in a Cowork container. Project JSON
  * lives on the server data disk, so a second signed-in desktop sees the same
@@ -1027,6 +1028,7 @@ async function handleUpdates(req, uid, send, activity, log, deps) {
     version: { rootId: rootId || id, parentId: baseProject?.id || null, number: nextVersion, baseFileName: baseFile?.name || null }, source,
     sourceRevision: 1, outlineRevision: 0, pageDecision: { finalPageCount: count, source: data.pages === undefined ? 'estimate' : 'user', includesCover: true }, status: mustIngest ? 'ingesting' : 'outlining', stage: mustIngest ? 'ingest' : 'outline',
     model: typeof data.model === 'string' ? data.model.slice(0, 120) : '', configId: bounded(data.configId, 120, 'configId'),
+    generationPolicy: normalizeGenerationPolicy(data.generationPolicy ?? baseProject?.generationPolicy), promptContractVersion: PPT_PROMPT_CONTRACT_VERSION,
     outline: [], deck: null, nodes: {}, revision: 0, favorite: false, pinned: false, folderId: baseProject?.folderId || null,
     tags: ['更新', template.name.slice(0, 40)].slice(0, 10), deletedAt: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
   if (template.kind === 'uploaded' && template.extension === 'pptx' && data.templateMode !== 'mapped' && deps.prepareTemplateFidelity) {
@@ -1129,10 +1131,26 @@ export async function handlePpt(req, url, { uid, send, res, readBody, activity, 
   const bulk = url.pathname === '/ppt/projects/bulk';
   const projectOrder = url.pathname === '/ppt/projects/order';
   const folderOrder = url.pathname === '/ppt/folders/order';
+  const pageEstimate = url.pathname === '/ppt/page-estimate';
   const match = url.pathname.match(PPT_RE);
-  if (!match && !folderMatch && !templateMatch && !previewMatch && !bulk && !updates && !projectOrder && !folderOrder) return false;
+  if (!match && !folderMatch && !templateMatch && !previewMatch && !bulk && !updates && !projectOrder && !folderOrder && !pageEstimate) return false;
   const [, id, action] = match || [];
   try {
+    if (pageEstimate) {
+      if (req.method !== 'POST') return send(405, { error: 'method not allowed' });
+      const data = await body(req);
+      if (!['prompt', 'paste', 'file'].includes(data.inputKind)) throw new HttpError(400, 'invalid input kind');
+      const prompt = String(data.prompt || '').slice(0, MAX_PROMPT);
+      const text = String(data.text || '').slice(0, 80000);
+      const source = data.inputKind === 'paste' ? normalizePaste(text) : null;
+      const candidate = { inputKind: data.inputKind, source, prompt, generationPolicy: normalizeGenerationPolicy(data.generationPolicy) };
+      candidate.inputProfile = profilePptInput(candidate); candidate.contentPlan = planSparseInput(candidate, candidate.inputProfile);
+      const result = estimatePageRecommendation(candidate);
+      const weight = data.inputKind === 'file' ? Math.min(16, Math.ceil(Math.max(0, Number(data.fileBytes) || 0) / 180000)) : 0;
+      const recommended = Math.min(100, Math.max(result.recommended, weight ? 4 + weight : 3));
+      return send(200, { recommendation: { recommended, min: Math.min(result.range[0], recommended), max: Math.min(100, Math.max(result.range[1], recommended)),
+        requested: requestedPageCount(prompt, text), reason: data.inputKind === 'file' ? '文件体量与补充要求初估；解析来源后校准。' : result.reason } });
+    }
     if (folderOrder) return await handleFolderOrder(req, uid, send);
     if (projectOrder) return await handleProjectOrder(req, uid, send);
     if (folderMatch) return await handleFolders(req, folderMatch[1], uid, send);
@@ -1169,8 +1187,7 @@ export async function handlePpt(req, url, { uid, send, res, readBody, activity, 
         const inputProfile = profilePptInput({ inputKind, source, prompt });
         const contentPlan = planSparseInput({ inputKind, source, prompt }, inputProfile);
         const estimatedPages = estimatePageRecommendation({ inputKind, source, prompt, inputProfile, contentPlan }).recommended;
-        const promptPageMatch = prompt.match(/(?:^|[^第\d])(\d{1,3})\s*(?:页|slides?)/i);
-        const promptPages = promptPageMatch ? Number(promptPageMatch[1]) : undefined;
+        const promptPages = requestedPageCount(prompt, source?.text);
         const selectedPages = pages(data.pages ?? promptPages ?? estimatedPages);
         const requestedOutline = data.outline === undefined ? null : data.outline;
         if (requestedOutline !== null && (!Array.isArray(requestedOutline) || requestedOutline.length !== selectedPages)) throw new HttpError(400, 'outline must match the user-confirmed page count');
@@ -1179,7 +1196,8 @@ export async function handlePpt(req, url, { uid, send, res, readBody, activity, 
           const reuseError = templateReuseError(template.pages, selectedPages);
           if (reuseError) throw new HttpError(400, reuseError);
         }
-        const project = { id: store.newId(), uid, title, prompt, pages: selectedPages, inputProfile, contentPlan, template: template.id,
+        const generationPolicy = normalizeGenerationPolicy(data.generationPolicy);
+        const project = { id: store.newId(), uid, title, prompt, generationPolicy, promptContractVersion: PPT_PROMPT_CONTRACT_VERSION, pages: selectedPages, inputProfile, contentPlan, template: template.id,
           templateSpec: snapshotTemplate(template), inputKind, source, sourceRevision: source ? 1 : 0, outlineRevision: 0,
           deckTitle: userTitle ? { text: formattedUserTitle.title, raw: userTitle, source: 'user', locked: true } : { text: '', raw: '', source: 'agent', locked: false },
           pageDecision: { finalPageCount: selectedPages, source: data.pages === undefined && promptPages === undefined ? 'estimate' : 'user',
@@ -1340,6 +1358,7 @@ export async function handlePpt(req, url, { uid, send, res, readBody, activity, 
     if (action === 'outline' && req.method === 'PATCH') {
       if (project.status !== 'outline_ready') return send(409, { error: 'outline not ready' });
       const data = await body(req);
+      if (data.generationPolicy !== undefined) project.generationPolicy = normalizeGenerationPolicy(data.generationPolicy);
       const nextPages = pages(data.slides?.length);
       if (data.finalPageCount !== undefined && nextPages !== pages(data.finalPageCount)) throw new HttpError(400, 'outline must match the user-confirmed page count');
       if (data.template !== undefined && data.template !== project.template) {
@@ -1370,6 +1389,7 @@ export async function handlePpt(req, url, { uid, send, res, readBody, activity, 
     if (action === 'outline' && req.method === 'POST') {
       if (project.status !== 'outline_ready') return send(409, { error: 'outline not ready' });
       const data = await body(req);
+      if (data.generationPolicy !== undefined) project.generationPolicy = normalizeGenerationPolicy(data.generationPolicy);
       project.outlineSeed = Array.isArray(data.seedOutline) ? data.seedOutline.slice(0, 100).map(item => ({
         section: String(item?.section || '').slice(0, 120), title: String(item?.title || '').slice(0, 160),
         focus: String(item?.focus || '').slice(0, 360), description: String(item?.description || '').slice(0, 360),
@@ -1479,7 +1499,7 @@ export async function handlePpt(req, url, { uid, send, res, readBody, activity, 
     }
     return send(404, { error: 'not found' });
   } catch (error) {
-    const status = error instanceof HttpError ? error.status : error?.code === 'TEMPLATE_REUSE_UNAVAILABLE' ? 400 : 500;
+    const status = error instanceof HttpError ? error.status : error?.code === 'TEMPLATE_REUSE_UNAVAILABLE' ? 400 : error.statusCode === 400 ? 400 : 500;
     if (status === 500) log(`ppt API error: ${String(error?.message || error).slice(0, 300)}`);
     return send(status, { error: status === 500 ? 'PPT service error' : error.message });
   }

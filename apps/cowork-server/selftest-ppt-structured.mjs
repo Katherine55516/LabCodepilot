@@ -142,7 +142,7 @@ try {
     assert.equal(shared.status, 0, shared.stderr.toString());
     const expectedTitle = firstTree.slides[0].elements.find(element => element.semanticRole === 'title');
     const sharedCheck = spawnSync(python, ['-c', `from pptx import Presentation; import sys
-p=Presentation(sys.argv[1]); target=next(s for s in p.slides[0].shapes if getattr(s,'text','')=='One'); assert target.left==int(sys.argv[2]); assert target.top==int(sys.argv[3]); print('ok')`, sharedOutput, String(expectedTitle.bounds.x), String(expectedTitle.bounds.y)]);
+p=Presentation(sys.argv[1]); assert (p.slide_width,p.slide_height)==(12192000,6858000); target=next(s for s in p.slides[0].shapes if getattr(s,'text','')=='One'); assert target.left==int(sys.argv[2]); assert target.top==int(sys.argv[3]); print('ok')`, sharedOutput, String(expectedTitle.bounds.x), String(expectedTitle.bounds.y)]);
     assert.equal(sharedCheck.status, 0, sharedCheck.stderr.toString());
     const richOutput = path.join(root, 'rich-tree.pptx');
     const rich = spawnSync(python, ['-c', pptxExporter._internals.SCRIPT], { input: JSON.stringify({ slides: richProject.deck.slides, renderTree: richTree, template: 'light', palette: templateSpec.palette, fonts: templateSpec.fonts }), env: { ...process.env, PPT_OUTPUT: richOutput }, maxBuffer: 4_000_000 });
@@ -166,7 +166,7 @@ b=io.BytesIO(); p.save(b); sys.stdout.buffer.write(b.getvalue())`], { maxBuffer:
     const exported = spawnSync(python, ['-c', importer._internals.EXPORT_SCRIPT], { input: JSON.stringify({ original: manifest.path, fonts: templateSpec.fonts, slides: [{ nativeSlideIndex: 0, nodes: [{ nativeShapeId: textShape.shapeId, type: 'text', semanticRole: 'title', content: { text: '编辑后的中文标题' }, geometry: { x: textShape.x, y: textShape.y, width: textShape.width, height: textShape.height } }] }] }), env: { ...process.env, PPT_OUTPUT: output }, maxBuffer: 4_000_000 });
     assert.equal(exported.status, 0, exported.stderr.toString());
     const inspected = spawnSync(python, ['-c', `from pptx import Presentation; from zipfile import ZipFile; import hashlib,sys
-p=Presentation(sys.argv[1]); assert len(p.slides[0].shapes)==3; assert any(getattr(s,'text','')=='编辑后的中文标题' for s in p.slides[0].shapes)
+p=Presentation(sys.argv[1]); original=Presentation(sys.argv[2]); assert (p.slide_width,p.slide_height)==(original.slide_width,original.slide_height)==(9144000,6858000); assert len(p.slides[0].shapes)==3; assert any(getattr(s,'text','')=='编辑后的中文标题' for s in p.slides[0].shapes)
 with ZipFile(sys.argv[1]) as archive:
     xml=archive.read('ppt/slides/slide1.xml').decode('utf-8'); assert 'typeface="Noto Sans CJK SC"' in xml; assert 'lang="zh-CN"' in xml
     output_media={name:hashlib.sha256(archive.read(name)).hexdigest() for name in archive.namelist() if name.startswith('ppt/media/')}

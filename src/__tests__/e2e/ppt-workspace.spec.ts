@@ -415,11 +415,12 @@ test('PPT M1 creation, outline approval, editing and export entry @smoke', async
     .getByRole('button', { name: /＋ 新建|新建 PPT/ })
     .first()
     .click();
+  await page.getByRole('button', { name: /从 Prompt 开始/ }).click();
   await page.getByRole('combobox', { name: 'LLM（必填）' }).selectOption('managed-local-id::demo-model');
   await page.getByRole('button', { name: '确认并继续 →' }).click();
-  await page.getByRole('button', { name: /从 Prompt 开始/ }).click();
+  await page.getByRole('button', { name: /Default/ }).click();
+  await page.getByRole('button', { name: '下一步：输入内容 →' }).click();
   await page.getByRole('textbox', { name: '输入 Prompt' }).fill('Quarterly business review for management');
-  await page.getByRole('button', { name: '下一步：选择模板与页数 →' }).click();
   await page.getByText('当前解析模型').waitFor();
   await page.getByRole('button', { name: '开始生成' }).click();
   await page.getByRole('button', { name: '打开编辑器' }).click();
@@ -916,9 +917,11 @@ test('PPT M2 paste and file inputs reach source aware outlines @smoke', async ({
     .getByRole('button', { name: /＋ 新建|新建 PPT/ })
     .first()
     .click();
+  await page.getByRole('button', { name: /粘贴文本/ }).click();
   await page.getByRole('combobox', { name: 'LLM（必填）' }).selectOption('managed-demo::demo-model');
   await page.getByRole('button', { name: '确认并继续 →' }).click();
-  await page.getByRole('button', { name: /粘贴文本/ }).click();
+  await page.getByRole('button', { name: /Default/ }).click();
+  await page.getByRole('button', { name: '下一步：输入内容 →' }).click();
   const pasteBox = page.getByRole('textbox', { name: '粘贴文本' });
   await pasteBox.fill('Revenue grew 10%');
   const screenshot = await page.screenshot();
@@ -953,9 +956,8 @@ test('PPT M2 paste and file inputs reach source aware outlines @smoke', async ({
     });
     await page.setViewportSize({ width: 1280, height: 720 });
   }
-  await page.getByRole('button', { name: 'AI 读取文本并生成大纲' }).click();
-  await page.getByRole('button', { name: '下一步：选择模板与页数 →' }).click();
-  await page.getByRole('button', { name: '开始生成' }).click();
+  await page.getByRole('button', { name: '生成 Syllabus', exact:true }).click();
+  await page.getByRole('button', { name: '确认 Syllabus 并开始生成' }).click();
   expect(payloads[0]).toMatchObject({
     inputKind: 'paste',
     text: 'Revenue grew 10%',
@@ -966,9 +968,11 @@ test('PPT M2 paste and file inputs reach source aware outlines @smoke', async ({
     .getByRole('button', { name: /＋ 新建|新建 PPT/ })
     .first()
     .click();
+  await page.getByRole('button', { name: /导入文件/ }).click();
   await page.getByRole('combobox', { name: 'LLM（必填）' }).selectOption('managed-demo::demo-model');
   await page.getByRole('button', { name: '确认并继续 →' }).click();
-  await page.getByRole('button', { name: /导入文件/ }).click();
+  await page.getByRole('button', { name: /Default/ }).click();
+  await page.getByRole('button', { name: '下一步：输入内容 →' }).click();
   const sourceFileInput = page.locator('input[type=file]');
   await expect(sourceFileInput).toHaveAttribute('accept', /\.xlsx.*\.csv|\.csv.*\.xlsx/);
   await sourceFileInput.setInputFiles({
@@ -977,8 +981,8 @@ test('PPT M2 paste and file inputs reach source aware outlines @smoke', async ({
     buffer: Buffer.from('metric,value\nRevenue,10%'),
   });
   await page.getByRole('textbox', { name: '输入 Prompt' }).fill('提炼文件核心事实');
-  await page.getByRole('button', { name: '解析文件并生成大纲 →' }).click();
-  await page.getByRole('button', { name: '开始生成' }).click();
+  await page.getByRole('button', { name: '生成 Syllabus', exact:true }).click();
+  await page.getByRole('button', { name: '确认 Syllabus 并开始生成' }).click();
   await expect.poll(() => payloads.length).toBe(2);
   expect(payloads[1]).toMatchObject({
     inputKind: 'file',
@@ -993,7 +997,7 @@ test('PPTX fidelity import selects a model before opening the file @smoke', asyn
   await page.route('**/api/providers/models', (route) => route.fulfill({ json: { groups: [{ provider_id: 'managed-demo', models: [{ value: 'demo-model', label: 'Demo model' }] }] } }));
   await page.route('**/api/providers', (route) => route.fulfill({ json: { providers: [{ id: 'managed-demo', name: 'Test model', source: 'managed' }] } }));
   await page.route('**/api/ppt/folders**', (route) => route.fulfill({ json: { folders: [] } }));
-  await page.route('**/api/ppt/templates**', (route) => route.fulfill({ json: { templates: [] } }));
+  await page.route('**/api/ppt/templates**', (route) => route.fulfill({ json: { templates: [{id:'light',name:'Default',kind:'built-in',compatibility:'mapped',pages:8,sampleTitles:['Cover']}] } }));
   await page.route('**/api/ppt/projects**', (route) => {
     const url = new URL(route.request().url());
     if (route.request().method() === 'GET' && url.pathname === '/api/ppt/projects') return route.fulfill({ json: { projects: [] } });
@@ -1037,16 +1041,16 @@ test('PPTX fidelity import selects a model before opening the file @smoke', asyn
   });
   await page.goto('/ppt');
   await page.getByRole('button', { name: /↥ 导入|Import/ }).click();
+  await page.getByRole('combobox', { name: 'LLM（必填）' }).selectOption('managed-demo::demo-model');
+  await page.getByRole('button', { name: '确认并继续 →' }).click();
+  await page.getByRole('button', { name: /Default/ }).click();
+  await page.getByRole('button', { name: '下一步：输入内容 →' }).click();
   await page.locator('input[type=file]').setInputFiles({
     name: 'original.pptx',
     mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
     buffer: Buffer.from('PKsample'),
   });
   await page.getByRole('combobox', { name: /PPTX import mode|PPTX 导入方式/ }).selectOption('editable');
-  await expect(page.getByRole('combobox', { name: /导入解析 LLM/ })).toHaveCount(0);
-  await page.getByRole('button', { name: /下一步：选择 LLM/ }).click();
-  await page.getByRole('combobox', { name: /导入解析 LLM/ }).selectOption('managed-demo::demo-model');
-  await page.getByRole('button', { name: /下一步：确认模板/ }).click();
   await page.getByRole('button', { name: /Open editable PPTX|打开并编辑 PPTX/ }).click();
   await expect.poll(() => payload).not.toBeNull();
   expect(payload).toMatchObject({
@@ -1310,10 +1314,12 @@ test('PPT M3 template compatibility and version update workflow @smoke', async (
     .getByRole('dialog')
     .getByRole('button', { name: '选择 LLM 并继续' })
     .click();
+  await page.getByRole('button', { name: /从 Prompt 开始/ }).click();
   await page.getByRole('combobox', { name: 'LLM（必填）' }).selectOption('managed-demo::demo-model');
   await page.getByRole('button', { name: '确认并继续 →' }).click();
-  await expect(page.getByRole('dialog')).toContainText('模板 · Brand');
-  await page.getByRole('dialog').getByRole('button', { name: '关闭' }).click();
+  await expect(page.getByTestId('ppt-template-browser')).toContainText('Brand');
+  // Next.js dev indicator overlays the bottom-left footer; exercise its keyboard action.
+  await page.getByRole('button', { name: '取消', exact:true }).press('Enter');
   await page.getByRole('button', { name: /▣ 最近使用/ }).click();
   await page
     .getByRole('button', {

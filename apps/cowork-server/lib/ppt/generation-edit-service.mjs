@@ -1,3 +1,4 @@
+import { normalizeAiAction, aiActionPrompt, WRITING_ACTIONS } from './ai-actions.mjs';
 import fs from 'node:fs';
 import { getProject, saveProject, enqueueProject } from './repository.mjs';
 import { typedCommands, materializeTypedCandidate } from './typed-proposal.mjs';
@@ -30,19 +31,32 @@ function summarize(intent) {
   intent.updatedAt = new Date().toISOString();
 }
 
-export function openGenerationScope(uid, projectId, slideId) {
+export function openGenerationScope(uid, projectId, slideId, previousScopeId, scopeName = 'current') {
   return enqueueProject(uid, projectId, () => {
     const project = getProject(uid, projectId);
-    if (!project || project.deletedAt || !['generating', 'paused'].includes(project.status)) throw editError('presentation is not generating', 409);
+    if (!project || project.deletedAt || !['generating', 'paused', 'completed', 'quality_blocked'].includes(project.status)) throw editError('presentation is not editable', 409);
     if (!project.outline.some(slide => slide.id === slideId)) throw editError('slide not found', 404);
     const editing = editingState(project);
+    const previous = previousScopeId ? editing.scopes[previousScopeId] : null;
+    if (previousScopeId && (!previous || previous.runId !== project.currentRunId || previous.planKey !== planKey(project) || previous.currentSlideId !== slideId)) throw editError('the run or plan changed; reselect the scope', 409);
+    if (previous && [previous.currentSlideId, ...previous.remainingSlideIds, ...(previous.followingSlideIds || []), ...(previous.sectionSlideIds || []), ...(previous.deckSlideIds || [])].some(id => !project.outline.some(slide => slide.id === id))) throw editError('a frozen target was deleted; reselect the scope', 409);
+    if (previous) {
+      const candidates = { current: [previous.currentSlideId], remaining: previous.remainingSlideIds, following: previous.followingSlideIds || [], section: previous.sectionSlideIds || [], deck: previous.deckSlideIds || [] }[scopeName];
+      if (!candidates) throw editError('invalid scope', 400);
+      const targets = candidates.filter(id => !project.runtime?.slides?.[id]?.accepted);
+      const ownOperations = new Set(Object.values(editing.intents).filter(intent => intent.actor === uid && intent.scopeSnapshot.id === previous.id)
+        .flatMap(intent => Object.values(intent.perSlideResults).flatMap(result => [result.operationId, result.proposalId].filter(Boolean))));
+      if (operationHistory(uid, projectId).some(operation => operation.revision > (previous.baseRevision || 0) && !ownOperations.has(operation.id)
+        && targets.some(id => commandsConflict(operation.command, { type: 'ai.slidePatch', payload: { slideId: id, patches: [] } }))))
+        throw editError('the target was manually edited; explicitly reselect the scope', 409);
+    }
     const remaining = project.outline.filter(slide => !slide.manualBlank && !['running', 'done', 'completed'].includes(project.nodes?.[slide.id]?.status)).map(slide => slide.id);
     const selectedIndex = project.outline.findIndex(slide => slide.id === slideId);
     const selectedSection = project.outline[selectedIndex].section || project.outline[selectedIndex].sectionId;
     const following = project.outline.slice(selectedIndex + 1).filter(slide => !slide.manualBlank).map(slide => slide.id);
     const section = project.outline.filter(slide => !slide.manualBlank && selectedSection && (slide.section || slide.sectionId) === selectedSection).map(slide => slide.id);
     const scope = { id: newId('scope'), projectId, runId: project.currentRunId, baseRevision: project.revision, planKey: planKey(project), openedAt: new Date().toISOString(), currentSlideId: slideId,
-      remainingSlideIds: remaining, followingSlideIds: following, sectionSlideIds: section, deckSlideIds: project.outline.filter(slide => !slide.manualBlank).map(slide => slide.id),
+      remainingSlideIds: previous?.remainingSlideIds || remaining, followingSlideIds: previous?.followingSlideIds || following, sectionSlideIds: previous?.sectionSlideIds || section, deckSlideIds: previous?.deckSlideIds || project.outline.filter(slide => !slide.manualBlank).map(slide => slide.id),
       targetContentHashes: Object.fromEntries(project.outline.map(slide => [slide.id, targetHash(project, slide.id)])) };
     for (const [id, item] of Object.entries(editing.scopes)) if (Date.now() - Date.parse(item.openedAt) > 86400000) delete editing.scopes[id];
     if (Object.keys(editing.scopes).length >= 100) throw editError('too many open scope snapshots', 429);
@@ -59,9 +73,12 @@ export function submitGenerationEdit(uid, projectId, data) {
     if (!/^[a-zA-Z0-9_-]{8,80}$/u.test(key)) throw editError('invalid idempotency key', 400);
     const instruction = String(data.instruction || '').trim();
     if (!instruction || instruction.length > 1000) throw editError('instruction must contain 1–1000 characters', 400);
+    const action = normalizeAiAction(data.action, data.parameters);
+    if (WRITING_ACTIONS.includes(action.action) && data.type && !['auto', 'title', 'content'].includes(data.type)) throw editError('writing actions cannot change layout, assets or data', 400);
+    const requestHash = digest({ instruction, scope: data.scope, scopeId: data.scopeId, type: data.type || 'auto', action: action.action || null, parameters: action.parameters, count: data.count ?? null, conversationId: data.conversationId || null });
     const existing = Object.values(editing.intents).find(intent => intent.idempotencyKey === key);
     if (existing) {
-      if (existing.instruction !== instruction || existing.scope !== data.scope || existing.scopeSnapshot.id !== data.scopeId || (data.type && data.type !== 'auto' && data.type !== existing.type)) throw editError('idempotency key was used for a different request', 409);
+      if (existing.requestHash ? existing.requestHash !== requestHash : existing.instruction !== instruction || existing.scope !== data.scope || existing.scopeSnapshot.id !== data.scopeId || (data.type && data.type !== 'auto' && data.type !== existing.type)) throw editError('idempotency key was used for a different request', 409);
       return { project, intent: existing, idempotent: true };
     }
     const snapshot = editing.scopes[data.scopeId];
@@ -74,11 +91,11 @@ export function submitGenerationEdit(uid, projectId, data) {
     if (!targets.length) throw editError('the snapshot contains no pending AI pages', 409);
     if (targets.some(id => !project.outline.some(slide => slide.id === id))) throw editError('a target page was deleted', 409);
     if (Object.keys(editing.intents).length >= 200) throw editError('too many generation edit requests', 429);
-    const route = routeMutation(project, instruction, { type: data.type });
+    const route = routeMutation(project, instruction, { type: WRITING_ACTIONS.includes(action.action) ? (data.type === 'title' ? 'title' : 'content') : data.type });
     if (route.type === 'asset' || route.type === 'data') throw editError('select an image, chart or table in the completed editor for this object change', 409);
     if (route.type === 'structure' && data.scope !== 'current') throw editError('review one structure change at a time on the current page', 409);
     const inline = ['generating', 'paused'].includes(project.status) && editing.contentOpen && route.type !== 'structure';
-    const intent = { id: newId('intent'), idempotencyKey: key, actor: uid, scope: data.scope, scopeSnapshot: snapshot, instruction, action: data.action, count: data.count,
+    const intent = { id: newId('intent'), idempotencyKey: key, actor: uid, scope: data.scope, scopeSnapshot: snapshot, instruction, requestHash, action: action.action, parameters: action.parameters, conversationId: String(data.conversationId || '').slice(0, 100), count: data.count,
       type: route.type, impact: impactFor(project, route, targets), modelRef: { configId: project.configId, model: project.model }, status: 'queued', targetEpochs: {}, perSlideResults: {}, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
     addConstraint(project, intent, targets);
     for (const id of targets) {
@@ -88,7 +105,7 @@ export function submitGenerationEdit(uid, projectId, data) {
       if (inline) {
         const instructions = editing.instructions[id] || [];
         if (instructions.join('\n').length + instruction.length > 8000) throw editError('too many accumulated instructions for this page', 422);
-        editing.instructions[id] = effectiveConstraints(project, id).filter(item => ['title', 'content'].includes(item.type)).map(item => item.instruction);
+        editing.instructions[id] = effectiveConstraints(project, id).filter(item => ['title', 'content'].includes(item.type)).map(item => { const active = editing.intents[item.intentId] || (item.intentId === intent.id ? intent : null); return [aiActionPrompt(active?.action, active?.parameters), item.instruction].filter(Boolean).join('\n'); });
         const epoch = generationEpoch(project, id) + 1; editing.epochs[id] = epoch; intent.targetEpochs[id] = epoch;
         for (const earlier of Object.values(editing.intents)) {
           const result = earlier.perSlideResults[id];
@@ -163,7 +180,7 @@ export async function processGenerationEdits(uid, projectId, deps, activity, log
       try {
         let proposalId = work.result.proposalId;
         if (!proposalId) {
-          const proposal = await createProposal(work.project, { scope: 'slide', type: work.intent.type, action: work.intent.action, count: work.intent.count, slideId: work.slideId, instruction: work.intent.instruction, baseRevision: work.project.revision }, deps, activity, log);
+          const proposal = await createProposal(work.project, { scope: 'slide', type: work.intent.type, action: work.intent.action, parameters: work.intent.parameters, count: work.intent.count, slideId: work.slideId, instruction: work.intent.instruction, baseRevision: work.project.revision }, deps, activity, log);
           proposalId = proposal.id;
           await enqueueProject(uid, projectId, () => {
             const latest = getProject(uid, projectId); const result = latest?.editing?.intents?.[work.intent.id]?.perSlideResults[work.slideId];

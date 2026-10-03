@@ -40,7 +40,9 @@ export type PptRenderTree = { schemaVersion: number; units: 'emu'; deckId: strin
 export type PptRunNode = { id: string; dependsOn: string[]; status: string; attempts: number; error?: string | null; startedAt?: string | null; completedAt?: string | null; slideId?: string };
 export type PptRun = { id: string; status: string; stage: string; lastSeq: number; nodes: Record<string, PptRunNode>; createdAt?: string; startedAt?: string | null; completedAt?: string | null; error?: string | null };
 
+export type PptGenerationPolicy = { version: 1; detail: 'balanced' | 'detailed'; language: { mode: 'source' }; knowledge: 'source_only' | 'source_plus_explanation' };
 export type PptProject = {
+  generationPolicy?: PptGenerationPolicy; promptContractVersion?: number;
   id: string; title: string; prompt: string; pages: number; template: string;
   deckTitle?: { text: string; raw: string; source: 'user' | 'agent'; locked: boolean };
   pageDecision?: { finalPageCount: number; source: 'user' | 'estimate'; includesCover: boolean; confirmedAt: string };
@@ -59,7 +61,7 @@ export type PptProject = {
   runtime?: { lifecycle: string; pauseRequested?: boolean; slides: Record<string, { phase: string; accepted?: boolean; epoch?: number; renderHash?: string; preview?: PptRenderSlide }> };
   planRevision?: { version: number; hash: string }; constraints?: { version: number };
   editing?: { contentOpen: boolean; intents: Record<string, PptEditIntent> };
-  creationContext?: { planKey: string; sourceHash: string; pageBudget: { confirmed: number } };
+  creationContext?: { generationPolicy?: PptGenerationPolicy; promptContractVersion?: number; planKey: string; sourceHash: string; pageBudget: { confirmed: number } };
   externalPptx?: unknown;
   templateFidelity?: { mode: 'preserve'; originalPath: string; slides: unknown[] };
   favorite?: boolean; pinned?: boolean; manualOrder?: number; folderId?: string | null; tags?: string[]; deletedAt?: string | null; createdAt: string; updatedAt: string;
@@ -68,6 +70,7 @@ export type PptProject = {
 export type StructuredProjectView = PptProject;
 
 export type PptAiProposal = {
+  action?: string; parameters?: Record<string, unknown>; metrics?: { beforeLength: number; afterLength: number; ratio: number | null; requestedRatio?: number; unchanged: boolean; approximateTargetMet?: boolean };
   id: string; scope: 'object' | 'slide' | 'deck'; type?: PptMutationType; pageDelta?: number; afterSlides?: { slideId: string; svg: string }[]; slideId: string; nodeId?: string; instruction: string;
   baseRevision: number; targetContentHash: string; planKey: string; beforeSvg: string; afterSvg: string;
   content?: unknown; patches?: { nodeId: string; content: unknown }[]; layoutId?: PptLayoutId;

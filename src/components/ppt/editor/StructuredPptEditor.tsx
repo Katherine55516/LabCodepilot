@@ -69,10 +69,12 @@ async function request(
 
 export function StructuredPptEditor({
   project,
+  chatOpen = false,
   onProject,
   onClose,
 }: {
   project: StructuredProjectView;
+  chatOpen?: boolean;
   onProject: (project: StructuredProjectView) => void;
   onClose?: () => void;
 }) {
@@ -370,12 +372,18 @@ export function StructuredPptEditor({
     try { await request(project.id, `/proposals/${aiProposal.id}/discard`, "POST"); setAiProposal(null); if (aiProposal.type === 'asset') imageRetry.current = null; }
     catch (reason) { setError(reason instanceof Error ? reason.message : String(reason)); }
   }
+  const [aiAction, setAiAction] = useState('custom');
+  const [aiLanguage, setAiLanguage] = useState('en');
+  const [aiTranslationMode, setAiTranslationMode] = useState('replace');
+  const [aiRegion, setAiRegion] = useState('');
+  const [aiGlossary, setAiGlossary] = useState('');
+  const [aiRatio, setAiRatio] = useState(1.5);
   async function proposeAi(scope: "object" | "slide" | "deck", mode: PptMutationType = aiMode) {
     if (!instruction.trim() || !slide || (scope === "object" && !selected?.nodeId) || (["layout", "structure"].includes(mode) && preserveNative)) return;
     const attempt = ++aiAttempt.current;
     setAiBusy(true); setError("");
     try {
-      const value = await request(project.id, "/ai-edit", "POST", { scope, type: mode, preview: true, slideId: slide.slideId, nodeId: selected?.nodeId, instruction, baseRevision: project.revision });
+      const value = await request(project.id, "/ai-edit", "POST", { scope, type: mode, preview: true, ...(aiAction !== 'custom' && ['auto','title','content'].includes(mode) ? { action: aiAction, parameters: aiAction === 'translate' ? { targetLanguage: aiLanguage, mode: aiTranslationMode, region: aiRegion, glossary: aiGlossary } : aiAction === 'expand' ? { lengthRatio: aiRatio } : {} } : {}), slideId: slide.slideId, nodeId: selected?.nodeId, instruction, baseRevision: project.revision });
       if (aiAttempt.current !== attempt) { void request(project.id, `/proposals/${value.proposal.id}/discard`, "POST").catch(() => {}); return; }
       setAiProposal(value.proposal);
     } catch (reason) {
@@ -742,7 +750,7 @@ export function StructuredPptEditor({
   return (
     <section
       data-testid="ppt-structured-editor"
-      className="ppt-prototype fixed inset-0 z-[70] flex flex-col overflow-hidden bg-background text-foreground"
+      className={`ppt-prototype fixed inset-0 z-[70] flex flex-col overflow-hidden bg-background text-foreground ${chatOpen ? "lg:right-[400px]" : ""}`}
     >
       <header className="ppt-editor-header flex min-h-16 shrink-0 flex-wrap items-center gap-2 border-b border-border px-3 py-2 md:px-4">
         <button
@@ -1345,9 +1353,12 @@ export function StructuredPptEditor({
                       {slides.map((item, index) => <option key={item.slideId} value={item.slideId}>{index + 1}. {item.elements.find(element => element.semanticRole === 'title')?.content?.text || item.slideId}</option>)}
                     </select>
                   </label>
-                  <label className="block space-y-2 text-sm">{t('ppt.mutation.type')}<select className={field} disabled={aiBusy || Boolean(aiProposal)} value={aiMode} onChange={event => setAiMode(event.target.value as PptMutationType)}>{(['auto', 'title', 'content', 'layout', 'style', 'data', 'structure'] as const).map(type => <option key={type} value={type} disabled={preserveNative && ['layout','data','structure'].includes(type)}>{t(`ppt.mutation.${type}`)}</option>)}</select></label>
+                  <label className="block space-y-2 text-sm">{t('ppt.mutation.type')}<select className={field} disabled={aiBusy || Boolean(aiProposal)} value={aiMode} onChange={event => { setAiMode(event.target.value as PptMutationType); setAiAction('custom'); }}>{(['auto', 'title', 'content', 'layout', 'style', 'data', 'structure'] as const).map(type => <option key={type} value={type} disabled={preserveNative && ['layout','data','structure'].includes(type)}>{t(`ppt.mutation.${type}`)}</option>)}</select></label>
                   <button className={button} disabled={aiBusy} onClick={async () => { try { const value = await request(project.id, `/slides/${slide.slideId}/accept`, 'POST', { accepted: !project.runtime?.slides[slide.slideId]?.accepted, renderHash: project.runtime?.slides[slide.slideId]?.renderHash, baseRevision: project.revision }); accept(value.project); } catch (reason) { setError(String((reason as Error).message)); } }}>{t(project.runtime?.slides[slide.slideId]?.accepted ? 'ppt.runtime.unlock' : 'ppt.runtime.accept')}</button>
-                  <div className="flex flex-wrap gap-2">{(['shorten', 'enrich', 'executive', 'conclusion', 'columns'] as const).map(preset => <button key={preset} className={button} disabled={aiBusy || Boolean(aiProposal) || (preset === 'columns' && preserveNative)} onClick={() => { setInstruction(t(`ppt.edit.${preset}Prompt`)); setAiMode(preset === "columns" ? "layout" : "content"); }}>{t(`ppt.edit.${preset}`)}</button>)}</div>
+                  <div className="flex flex-wrap gap-2">{(['shorten', 'enrich', 'executive', 'conclusion', 'columns'] as const).map(preset => <button key={preset} className={button} disabled={aiBusy || Boolean(aiProposal) || (preset === 'columns' && preserveNative)} onClick={() => { setAiAction('custom'); setInstruction(t(`ppt.edit.${preset}Prompt`)); setAiMode(preset === "columns" ? "layout" : "content"); }}>{t(`ppt.edit.${preset}`)}</button>)}</div>
+                  <label className="block space-y-2 text-sm">{t('ppt.ai.action')}<select className={field} aria-label={t('ppt.ai.action')} disabled={aiBusy || Boolean(aiProposal)} value={aiAction} onChange={event => { const action = event.target.value; setAiAction(action); if (action !== 'custom') { setAiMode('content'); setInstruction(t(`ppt.ai.${action}` as never)); } }}>{['custom','improve','grammar','translate','expand','shorten','simplify','specific'].map(action => <option key={action} value={action}>{t(`ppt.ai.${action}` as never)}</option>)}</select></label>
+                  {aiAction === 'translate' && <div className="space-y-2"><label className="block text-sm">{t('ppt.ai.language')}<select className={field} value={aiLanguage} disabled={aiBusy || Boolean(aiProposal)} onChange={event => setAiLanguage(event.target.value)}>{['en','zh','zh-Hant','ja','ko','de','fr','es'].map(value => <option key={value} value={value}>{t(`ppt.ai.lang.${value}` as never)}</option>)}</select></label><select aria-label={t('ppt.ai.translationMode')} className={field} value={aiTranslationMode} disabled={aiBusy || Boolean(aiProposal)} onChange={event => setAiTranslationMode(event.target.value)}><option value="replace">{t('ppt.ai.replace')}</option><option value="bilingual">{t('ppt.ai.bilingual')}</option></select><input className={field} aria-label={t('ppt.ai.region')} placeholder={t('ppt.ai.region')} maxLength={120} value={aiRegion} disabled={aiBusy || Boolean(aiProposal)} onChange={event => setAiRegion(event.target.value)}/><textarea className={field} aria-label={t('ppt.ai.glossary')} placeholder={t('ppt.ai.glossary')} maxLength={1000} value={aiGlossary} disabled={aiBusy || Boolean(aiProposal)} onChange={event => setAiGlossary(event.target.value)}/></div>}
+                  {aiAction === 'expand' && <label className="block space-y-2 text-sm">{t('ppt.ai.ratio')}<select className={field} value={aiRatio} disabled={aiBusy || Boolean(aiProposal)} onChange={event => setAiRatio(Number(event.target.value))}>{[1.5,2,3].map(value => <option key={value} value={value}>≈ {value}×</option>)}</select></label>}
                   {preserveNative && <p className="text-xs text-muted-foreground">{t("ppt.edit.nativeReason")}</p>}
                   {lastAiOperation && <button className={button} disabled={aiBusy} onClick={() => void undoAi()}>{t("ppt.edit.undoEdit")}</button>}
                   <label className="block space-y-2 text-sm">

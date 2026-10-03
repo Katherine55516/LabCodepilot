@@ -1,0 +1,15 @@
+{
+  "checks": 10,
+  "passed": [
+    "title-only preserves body and selected model",
+    "expanded scopes exclude protected pages",
+    "parallel scopes preserve frozen targets",
+    "late proposals reject manual edit conflicts",
+    "asset retry only replaces image after preview confirmation",
+    "checkpoint recovery preserves valid results and newer revisions",
+    "split synchronizes content page budget contracts narrative render order and undo",
+    "semantic changes invalidate review; preview and export share revision and render tree",
+    "capacity shortage queues FIFO rather than failing generation",
+    "pause/resume reuses completed page content and real previews"
+  ]
+}

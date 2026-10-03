@@ -8,6 +8,7 @@
 
 | 文件 | 主题 |
 |------|------|
+| ppt-prototype-policy-chat-parity.md | 最新原型方式/LLM/模板/输入、异步估算、generationPolicy、稳定多轮聊天、局部写作参数、范围续期冲突与精确页尺寸；本地验收及真实模型限制 |
 | ppt-prompt-depth-contracts.md | PPT 专用角色、语言/来源政策、具体内容大纲、单份文案、完整来源上下文、深度审查与两轮重写、编辑共用契约及模拟验收边界 |
 | ppt-visible-content-depth.md | Factor Zoo 双稿驱动的章节容量页数、完整 provenance、有界来源、原生正文深度、标题列表分组与严格发布门禁 |
 | ppt-mutation-runtime-unification.md | PPT 用户所选模型、计划与约束版本、页级真实预览、暂停恢复、类型化修改、结构提案、独立媒体重试、保护与审查失效，以及十项验收 |

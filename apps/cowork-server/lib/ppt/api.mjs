@@ -151,7 +151,7 @@ export async function handleStructuredPpt(req, url, ctx) {
     if ((match = url.pathname.match(new RegExp(`^/ppt/projects/(${PROJECT})/generation-edit-scopes$`, 'i')))) {
       projectOr404(uid, match[1]); if (req.method !== 'POST') return send(405, { error: 'method not allowed' });
       const data = await jsonBody(req, readBody);
-      return send(200, { scope: await openGenerationScope(uid, match[1], data.slideId) });
+      return send(200, { scope: await openGenerationScope(uid, match[1], data.slideId, data.previousScopeId, data.scope) });
     }
     if ((match = url.pathname.match(new RegExp(`^/ppt/projects/(${PROJECT})/generation-edits(?:/(intent_[a-f0-9]+)(/retry)?)?$`, 'i')))) {
       const project = projectOr404(uid, match[1]);

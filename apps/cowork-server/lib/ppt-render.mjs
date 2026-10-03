@@ -180,8 +180,8 @@ BODY_EA = font_spec['bodyEastAsia']
 TITLE_HANT = font_spec.get('titleEastAsiaHant') or TITLE_EA
 BODY_HANT = font_spec.get('bodyEastAsiaHant') or BODY_EA
 prs = Presentation()
-prs.slide_width = Inches(13.333)
-prs.slide_height = Inches(7.5)
+prs.slide_width = 12192000
+prs.slide_height = 6858000
 themes = {
   'violet': ((23, 27, 49), (150, 127, 255)),
   'blue': ((16, 43, 67), (85, 173, 226)),

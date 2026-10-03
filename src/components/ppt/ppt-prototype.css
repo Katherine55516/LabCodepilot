@@ -292,3 +292,11 @@
 
 /* Generation controls wrap on narrow viewports; their header must grow with them. */
 .ppt-generation-stage > header { height: auto; min-height: 64px; }
+
+/* Keep the source/syllabus and composer reachable in short or narrow windows. */
+.ppt-create-stage > header, .ppt-create-stage > footer,
+.ppt-update-stage > header, .ppt-update-stage > footer { flex-shrink: 0; }
+.ppt-create-body { min-height: 0; }
+.ppt-generation-stage > .ppt-generation-grid { height: auto; min-height: 0; flex: 1; }
+[data-testid="ppt-generation-edit"] > * { flex-shrink: 0; }
+[data-testid="ppt-generation-edit"] > [data-testid="ppt-generation-messages"] { flex-shrink: 1; }

@@ -2,6 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 
 async function mockCreationPlanner(page: Page) {
   let project: Record<string, unknown> | null = null;
+  await page.route('**/api/ppt/page-estimate', route => { const body = route.request().postDataJSON(); const requested = String(body.prompt).match(/(\d+)\s*(?:页|slides?)/i)?.[1]; return route.fulfill({json:{recommendation:{recommended:5,min:3,max:8,requested:requested ? Number(requested) : undefined,reason:'Fixture estimate'}}}); });
   await page.route('**/api/ppt/projects**', route => {
     const url = new URL(route.request().url());
     if (route.request().method() === 'POST') {
@@ -37,34 +38,39 @@ test('user page selection and module estimate take priority over template length
   }] } }));
   await page.goto('/ppt');
   await page.getByRole('button', { name: /＋ 新建|新建 PPT/ }).first().click();
+  await page.getByRole('button', { name: /从 Prompt 开始/ }).click();
   await page.getByRole('combobox', { name: 'LLM（必填）' }).selectOption('managed-demo::demo-model');
   await page.getByRole('button', { name: '确认并继续 →' }).click();
-  await page.getByRole('button', { name: /从 Prompt 开始/ }).click();
+  await page.getByRole('button', { name: /Four page PPTX/ }).click();
+  await page.getByRole('button', { name: '下一步：输入内容 →' }).click();
   await page.getByRole('textbox', { name: '输入 Prompt' }).fill('Create a concise architecture review in 3 slides');
-  await page.getByRole('button', { name: '下一步：选择模板与页数 →' }).click();
-  const guidance = page.getByText(/输出少于模板页数/);
+  const guidance = page.getByText(/原生模板 4 页，最多支持 8 页/);
   await guidance.scrollIntoViewIfNeeded();
   await expect(guidance).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath('reuse-desktop.png'), fullPage: true });
   await expect(page.getByText('3 页', { exact: true })).toBeVisible();
   await expect(page.getByRole('button', { name: '开始生成' })).toBeEnabled();
-  const plus = page.getByRole('button', { name: '＋', exact: true });
+  const plus = page.getByRole('button', { name: '增加页数', exact: true });
   await plus.click();
   await expect(page.getByText('4 页', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: '← 返回模板' }).click();
   await page.getByRole('button', { name: /Ten page alternate/ }).click();
+  await page.getByRole('button', { name: '下一步：输入内容 →' }).click();
   await expect(page.getByText('4 页', { exact: true })).toBeVisible();
+  await page.getByRole('button', { name: '← 返回模板' }).click();
   await page.getByRole('button', { name: /Four page PPTX/ }).click();
+  await page.getByRole('button', { name: '下一步：输入内容 →' }).click();
   await expect(page.getByText('4 页', { exact: true })).toBeVisible();
   await plus.click(); await plus.click(); await plus.click(); await plus.click();
   await expect(page.getByText('8 页', { exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: '按最终页数与模板重新生成大纲' })).toBeEnabled();
+  await expect(page.getByRole('button', { name: '开始生成' })).toBeEnabled();
   await plus.click();
-  await expect(page.getByText(/当前模板无法安全扩展到 9 页/)).toBeVisible();
-  await expect(page.getByRole('button', { name: '按最终页数与模板重新生成大纲' })).toBeDisabled();
+  await expect(page.getByText(/原生模板 4 页，最多支持 8 页/)).toBeVisible();
+  await expect(page.getByRole('button', { name: '开始生成' })).toBeDisabled();
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.getByText(/模板最多支持 8 页/).scrollIntoViewIfNeeded();
+  await page.getByText(/原生模板 4 页，最多支持 8 页/).scrollIntoViewIfNeeded();
   await page.screenshot({ path: testInfo.outputPath('reuse-mobile.png'), fullPage: true });
-  await expect(page.getByText(/模板最多支持 8 页/)).toBeVisible();
+  await expect(page.getByText(/原生模板 4 页，最多支持 8 页/)).toBeVisible();
   expect(errors).toEqual([]);
 });
 
@@ -84,12 +90,13 @@ test('ten-page uploaded template accepts an explicit 100-page target @smoke', as
   }] } }));
   await page.goto('/ppt');
   await page.getByRole('button', { name: /＋ 新建|新建 PPT/ }).first().click();
+  await page.getByRole('button', { name: /从 Prompt 开始/ }).click();
   await page.getByRole('combobox', { name: 'LLM（必填）' }).selectOption('managed-demo::demo-model');
   await page.getByRole('button', { name: '确认并继续 →' }).click();
-  await page.getByRole('button', { name: /从 Prompt 开始/ }).click();
+  await page.getByRole('button', { name: /Ten page PPTX/ }).click();
+  await page.getByRole('button', { name: '下一步：输入内容 →' }).click();
   await page.getByRole('textbox', { name: '输入 Prompt' }).fill('请根据足量资料生成 100页的技术报告');
-  await page.getByRole('button', { name: '下一步：选择模板与页数 →' }).click();
   await expect(page.getByText(/100 页/).first()).toBeVisible();
-  await expect(page.getByText(/此模板最多支持 100 页/)).toBeVisible();
+  await expect(page.getByText(/原生模板 10 页，最多支持 100 页/)).toBeVisible();
   await expect(page.getByRole('button', { name: '开始生成' })).toBeEnabled();
 });

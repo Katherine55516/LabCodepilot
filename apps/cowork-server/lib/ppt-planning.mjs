@@ -2,6 +2,7 @@
 import { buildTerminologyRegistry, copyBudgetFor, requiredSupportFor } from './ppt-presentation-writing.mjs';
 import { evidenceRelevance, selectEvidenceForSlide } from './ppt-evidence.mjs';
 import { planSparseInput, pointBudgetFor, profilePptInput, sparsePageEstimate } from './ppt-content-depth.mjs';
+import { effectiveKnowledge } from './ppt-generation-policy.mjs';
 import { outputLanguage } from './ppt-prompt-contracts.mjs';
 
 const ROLES = new Set(['cover', 'section', 'thesis', 'problem', 'comparison', 'architecture', 'process', 'framework', 'evidence', 'metric', 'timeline', 'case', 'recommendation', 'summary', 'roadmap', 'closing', 'mechanism', 'system', 'runtime', 'decision', 'appendix']);
@@ -208,12 +209,12 @@ export function normalizeBrief(value, project) {
     objective: bounded(raw.objective, 240, project.prompt), thesis: bounded(raw.thesis, 360, project.prompt),
     reportMode, presentationUse, decisionQuestion: bounded(raw.decisionQuestion, 240), sourceScope: bounded(raw.sourceScope, 240,
       project.source?.name ? `仅依据 ${project.source.name}` : project.contentPlan ? '短输入仅提供主题，具体事实和效果待来源验证' : ''),
-    tone: bounded(raw.tone, 80, '清晰、专业'), depth: richCourse ? 'detailed'
-      : ['concise', 'balanced', 'detailed'].includes(raw.depth) ? raw.depth : chunks.length > project.pages * 2 ? 'detailed' : 'balanced',
+    tone: bounded(raw.tone, 80, '清晰、专业'), depth: project.generationPolicy?.detail || (richCourse ? 'detailed'
+      : ['concise', 'balanced', 'detailed'].includes(raw.depth) ? raw.depth : chunks.length > project.pages * 2 ? 'detailed' : 'balanced'),
     keyMessages: distinct(raw.keyMessages || raw.key_messages || defaultMessages, 12).map(item => item.slice(0, 160)),
     mustInclude: distinct(raw.mustInclude || raw.must_include || defaultMessages, 16).map(item => item.slice(0, 160)),
     slideBudget: project.pages, finalPageCount: project.pages, depthPolicy: pageRecommendation.depthPolicy,
-    evidencePolicy: project.source?.segments?.length || project.update
+    evidencePolicy: effectiveKnowledge(project) === 'source_only'
       ? '只使用已提供来源；未经来源支持的数字、引用和事实不得输出'
       : '可解释通用概念、机制与示意框架；具体引用和数字需核实，未经核实的组织专属数据、客户、项目和效果不得输出',
   };
