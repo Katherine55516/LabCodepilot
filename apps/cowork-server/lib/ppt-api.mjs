@@ -1,3 +1,5 @@
+import { automaticPages, densityProfile, densityPrompt } from './ppt-density-profile.mjs';
+import { packOutline, inspectDensityOutline, revalidateOutlineFits } from './ppt-density-packing.mjs';
 import { bindSourceArtifacts } from './ppt-source-artifacts.mjs';
 import { templateLimits } from './ppt-template-security.mjs';
 import { importEditablePptx as importTemplateIR } from './ppt/import-pptx.mjs';
@@ -34,7 +36,7 @@ import { importEditablePptx, renderImportedPptx } from './ppt/import-pptx.mjs';
 import { enrichAssetRefs } from './ppt/assets.mjs';
 import { withSemanticIndex } from './ppt-semantic.mjs';
 import { missingRequiredEvidence } from './ppt-evidence.mjs';
-import { buildPlanning, estimatePageRecommendation, inspectLongDeckOutline, normalizeFactSynthesis, refreshPlanning, retrieveSlideSources, sourceCapacityPlan, sourcePlanningContext } from './ppt-planning.mjs';
+import { buildPlanning, estimatePageRecommendation, inspectLongDeckOutline, normalizeFactSynthesis, refreshPlanning, retrieveSlideSources, sourceCapacityPlan, estimationSource, sourcePlanningContext } from './ppt-planning.mjs';
 import { planSparseInput, profilePptInput } from './ppt-content-depth.mjs';
 import { compileSectionLabel, formatUserDeckTitle, inspectSlideCopy, materializeCopy } from './ppt-presentation-writing.mjs';
 import { prepareTemplateFidelity, rescheduleTemplateFidelity, templateSlotPrompt, templateOutlinePrompt, inspectTemplateSlotDraft, autoTemplateMediaOmissions, bindTemplateFidelity, renderTemplatePptx } from './ppt-template-fidelity.mjs';
@@ -128,6 +130,11 @@ function normalizeOutline(value, count, source, update = null, deckTitle = null)
       ...(typeof s.transitionFromPrevious === 'string' || typeof s.transition_from_previous === 'string' ? { transitionFromPrevious: String(s.transitionFromPrevious || s.transition_from_previous).slice(0, 180) } : {}),
       ...(typeof s.transitionToNext === 'string' || typeof s.transition_to_next === 'string' ? { transitionToNext: String(s.transitionToNext || s.transition_to_next).slice(0, 180) } : {}),
       keyPoints,
+      ...(Array.isArray(s.sourceUnitIds) ? { sourceUnitIds: [...new Set(s.sourceUnitIds)].filter(id => source?.semantic?.inventory?.items?.some(item => item.id === id)) } : {}),
+      ...(Array.isArray(s.sourceArtifactRanges) ? { sourceArtifactRanges: s.sourceArtifactRanges } : {}),
+      ...(s.densityFit ? { densityFit: s.densityFit } : {}),
+      ...(Array.isArray(s.packedFrom) ? { packedFrom: s.packedFrom } : {}),
+      ...(typeof s.groupId === 'string' ? { groupId: s.groupId.slice(0, 80) } : {}),
       ...(Array.isArray(s.supportingPoints) ? { supportingPoints: s.supportingPoints.filter(item => typeof item === 'string').slice(0, 6).map(item => item.slice(0, 160)) } : {}),
       ...(Array.isArray(s.requiredSupport || s.required_support) ? { requiredSupport: (s.requiredSupport || s.required_support).filter(item => typeof item === 'string').slice(0, 6).map(item => item.slice(0, 48)) } : {}),
       ...(s.visualIntent && typeof s.visualIntent === 'object' && typeof s.visualIntent.type === 'string' ? { visualIntent: { type: s.visualIntent.type.slice(0, 40) } } : {}),
@@ -179,15 +186,19 @@ function normalizeDeck(value, outline) {
 function outlinePrompt(p) {
   const sourceContext = sourcePlanningContext(p.source);
   const pageRecommendation = estimatePageRecommendation(p);
-  const capacity = sourceCapacityPlan(p.source, p.pages);
-  const allocationContract = capacity ? `按用户最终 ${p.pages} 页重新分配内容：封面与结论各 1 页；以下章节建议为正文页配额（不是模板页号）：${capacity.sections.map(section => `${section.title}=${section.slides}页${section.objects.length ? `，保留${section.objects.join('/')}` : ''}`).join('；').slice(0, 6000)}。${capacity.compactSections.length ? `这些章节无独立页，必须并入相邻相关页并保留核心主张：${capacity.compactSections.join('、').slice(0, 1000)}。` : ''}来源内容负载/可读容量比约 ${capacity.compressionRatio}；低页数时优先明确合并和取舍，高页数时按不同问题、证据或算例拆开。coverage 对未映射的高优先级 chunk 必须给出具体省略理由，不得静默丢弃公式、代码、表格或案例。` : '';
+  const automatic = automaticPages(p);
+  const capacity = sourceCapacityPlan(estimationSource(p), p.pages, p);
+  const allocationContract = capacity ? `来源负载为 ${capacity.contentCost} projected_display_visual_units；候选内容组：${JSON.stringify(capacity.groups).slice(0, 14000)}。它们是可组合的初估，不是章节页配额。按受众问题将相关定义、条件、比较与实例组合，保留末尾总结、表格列、公式与条件、流程关系。` : '';
+  const pageContract = automatic
+    ? `project.pages=${p.pages} 是初步建议，不是最终页数命令；按候选语义组与真实版面容量输出3–100页的完整大纲。允许与初估不同，不以每章至少一页或固定10/12页决定数量。代码会校验分组与拟合后冻结数量。`
+    : `当前 project.pages=${p.pages} 是本轮最终页数硬参数（含封面），必须准确规划成 ${p.pages} 页；用户指定和最终确认优先，不得依据模板页数更改。`;
   const userOutlineContract = p.outlineSeed?.length ? `用户手动编辑过的大纲草稿：${JSON.stringify(p.outlineSeed)}。在调整为 ${p.pages} 页时优先保留用户改过的标题和重点；需要合并或拆分时保持原意，不复制同一观点凑页。` : '';
   const sparsePlan = p.contentPlan || planSparseInput(p);
   const userTitle = p.deckTitle?.source === 'user' ? p.deckTitle.raw : '';
   const titleContract = userTitle
     ? `用户 Deck Title 为「${userTitle}」。它已锁定：封面 title 必须保持原词、原语言和原术语，不得改写、缩短或翻译；只能由渲染器换行。`
     : '用户没有填写 Deck Title。为封面生成一个精炼标题：中文优先 6–18 字，英文优先 2–8 个词，最多两行；额外背景放入 focus 或后续 subtitle。';
-  const planningContract = `先在内部建立 Presentation Brief（目标、受众、核心论点、深度、mustInclude、reportMode、decisionQuestion、sourceScope），再规划有起承转合的 storyArc。reportMode 只选 presentation、informational 或 decision；决策或职场汇报需在前 3 页给出摘要或需要回答的决定，较早展示核心流程/证据，结尾给出来源支持的条件性建议与下一步；资料不足时不要虚构建议或案例，而应在 sourceScope 记录缺口，在页面保留影响理解的限制。主文尽量集中，补充细节放 appendix。页数优先级固定为：用户手动调整或明确指定 > PPT 模块估算 > 模板原有页数。模板页数只决定原生版式选择和安全复用，不得更改输出页数。当前 project.pages=${p.pages} 是本轮最终页数硬参数（含封面），必须准确规划成 ${p.pages} 页；不得根据模板页数或固定 10/12 页假设改动。模块估算为 ${pageRecommendation.recommended} 页（范围 ${pageRecommendation.range[0]}–${pageRecommendation.range[1]}），只用于未指定页数时的默认值及判断内容密度、压缩风险。${allocationContract}${userOutlineContract}${titleContract} Story Planner 输出 section label、title intent 和 slide message，section 使用 4–12 个中文字符或 2–8 个英文词；不要直接复制来源长标题。同一页可整合多个来源，一个来源也可支持多页，但拆分后的每页须有不同的问题、独立主张或证据作用；不可用同义改写凑足页数。来源不足时在 sourceScope 记录，并在页面保留必要的适用边界，不要补造材料。每页根据内容规划解释深度、分布和结构，不要固定三条 bullet。整稿应有密度节奏：摘要与过渡、普通说明、高密度流程或深机制交错；不要连续多页都写成高密度卡片。若来源包含可复算的公式、代码或算例，必须把核心表达式、变量含义和适用条件列入相应页 requiredDetails，不能只保留流程概述；特殊数学符号要规划成可见的普通文本表示。每个高优先级主题必须出现在页面 refs 中，或在 coverage 中说明省略原因。${templateOutlinePrompt(p)}`;
+  const planningContract = `先在内部建立 Presentation Brief（目标、受众、核心论点、深度、mustInclude、reportMode、decisionQuestion、sourceScope），再规划有起承转合的 storyArc。reportMode 只选 presentation、informational 或 decision；决策或职场汇报需在前 3 页给出摘要或需要回答的决定，较早展示核心流程/证据，结尾给出来源支持的条件性建议与下一步；资料不足时不要虚构建议或案例，而应在 sourceScope 记录缺口，在页面保留影响理解的限制。主文尽量集中，补充细节放 appendix。页数优先级固定为：用户手动调整或明确指定 > PPT 模块估算 > 模板原有页数。模板页数只决定原生版式选择和安全复用，不得更改输出页数。${pageContract}${densityPrompt(p)}模块估算为 ${pageRecommendation.recommended} 页（范围 ${pageRecommendation.range[0]}–${pageRecommendation.range[1]}），只用于未指定页数时的默认值及判断内容密度、压缩风险。${allocationContract}${userOutlineContract}${titleContract} Story Planner 输出 section label、title intent 和 slide message，section 使用 4–12 个中文字符或 2–8 个英文词；不要直接复制来源长标题。同一页可整合多个来源，一个来源也可支持多页，但拆分后的每页须有不同的问题、独立主张或证据作用；不可用同义改写凑足页数。来源不足时在 sourceScope 记录，并在页面保留必要的适用边界，不要补造材料。每页根据内容规划解释深度、分布和结构，不要固定三条 bullet。整稿应有密度节奏：摘要与过渡、普通说明、高密度流程或深机制交错；不要连续多页都写成高密度卡片。若来源包含可复算的公式、代码或算例，必须把核心表达式、变量含义和适用条件列入相应页 requiredDetails，不能只保留流程概述；特殊数学符号要规划成可见的普通文本表示。每个高优先级主题必须出现在页面 refs 中，或在 coverage 中说明省略原因。${templateOutlinePrompt(p)}`;
   const planningSchema = OUTLINE_SCHEMA;
   const contentPlanning = outlineContentContract(p);
 
@@ -198,9 +209,9 @@ function outlinePrompt(p) {
     return `你是演示文稿版本更新规划器。${planningContract}${contentPlanning} 仅分析旧版与用户提供的新进展；不搜索、不调用工具、不编造数字。旧版：${base.title}\n旧版内容：\n${old}\n最新进展：\n${progress || p.prompt}\n语义索引：\n${sourceContext.slice(0, 12000)}\n生成恰好 ${p.pages} 页的新大纲，返回唯一 JSON：${planningSchema}。每个 slide 另加 baseSlideId（旧页 ID 或 null）和 change（keep|rewrite|add）。原样保留且内容不变的页用 keep；需要改写的旧页用 rewrite；新页用 add。不得虚构旧页 ID 或来源编号。只输出 JSON。`;
   }
   if (p.source?.segments?.length) {
-    return `你是演示文稿叙事规划器。${planningContract}${contentPlanning} 只分析以下用户提供的来源，不搜索、不调用工具、不编造数字。文件名：${p.title}；页数：${p.pages}。\n来源（chunkRefs 用语义 chunk ID；refs 用索引列出的原始来源编号）：\n${sourceContext}\n返回唯一 JSON：${planningSchema}。slides 恰好 ${p.pages} 个；第一页封面，最后一页总结。相邻页面可以共享 section，每页 chunkRefs 和 refs 只能引用上面实际存在的编号。只输出 JSON。`;
+    return `你是演示文稿叙事规划器。${planningContract}${contentPlanning} 只分析以下用户提供的来源，不搜索、不调用工具、不编造数字。文件名：${p.title}；页数：${p.pages}。\n来源（chunkRefs 用语义 chunk ID；refs 用索引列出的原始来源编号）：\n${sourceContext}\n返回唯一 JSON：${planningSchema}。${automatic ? 'slides 数量按问题分组与拟合决定；' : `slides 恰好 ${p.pages} 个；`}第一页封面，最后一页总结。相邻页面可以共享 section，每页 chunkRefs 和 refs 只能引用上面实际存在的编号。只输出 JSON。`;
   }
-  return `你是演示文稿叙事规划器。${planningContract}${contentPlanning} 只做内容结构，不写代码、不调用工具、不生成 PPTX、不搜索网页。\n主题：${p.prompt}\n短输入预规划（这些是待论证问题，不是已证实事实）：${JSON.stringify(sparsePlan || {})}\n先依据该 Content Plan 与 Semantic Unit Inventory 扩展完整的概念结构和故事骨架，再按用户确定的 ${p.pages} 页分配。缺乏来源时可解释通用机制、示意框架和评估方法；不得把公司特定数据、客户、项目、效果或财务数字写成事实。页数少时合并相邻问题，页数多时把机制、条件和评估拆开，不能添加同义 filler。\n文件名：${p.title}\n页数：${p.pages}。\n返回唯一 JSON：${planningSchema}。slides 必须恰好 ${p.pages} 个，第一页是封面，最后一页是结论。每页有不同的逻辑作用，不要编造具体数字；纯 Prompt 输入时 refs 为空。只输出 JSON。`;
+  return `你是演示文稿叙事规划器。${planningContract}${contentPlanning} 只做内容结构，不写代码、不调用工具、不生成 PPTX、不搜索网页。\n主题：${p.prompt}\n短输入预规划（这些是待论证问题，不是已证实事实）：${JSON.stringify(sparsePlan || {})}\n先依据该 Content Plan 与 Semantic Unit Inventory 扩展完整的概念结构和故事骨架，${automatic ? '再组合成有容量依据的候选页面，不受初估数量约束。' : `再按用户确定的 ${p.pages} 页分配。`}缺乏来源时可解释通用机制、示意框架和评估方法；不得把公司特定数据、客户、项目、效果或财务数字写成事实。页数少时合并相邻问题，页数多时把机制、条件和评估拆开，不能添加同义 filler。\n文件名：${p.title}\n页数：${p.pages}。\n返回唯一 JSON：${planningSchema}。${automatic ? 'slides 数量按分组与容量决定，' : `slides 必须恰好 ${p.pages} 个，`}第一页是封面，最后一页是结论。每页有不同的逻辑作用，不要编造具体数字；纯 Prompt 输入时 refs 为空。只输出 JSON。`;
 }
 function contentPrompt(p, slide, index) {
   const contract = p.planning?.slidePlan?.find(item => item.slideId === slide.id) || {};
@@ -306,7 +317,7 @@ function normalizeSlide(value, outlineSlide, project = null, previousTitles = []
     slide.templateOmissions.push(...autoTemplateMediaOmissions(project, project.outline.findIndex(item => item.id === outlineSlide.id), slide.templateOmissions));
   }
   if (prepared?.layoutId === undefined && !resolvedDistributionLayout) { delete slide.layoutId; delete slide.layoutRef; }
-  if (project) bindSourceArtifacts(project, slide, value?.sourceArtifacts, index);
+  if (project) bindSourceArtifacts(project, slide, value?.sourceArtifacts, index, value?.sourceCommentary || []);
   return slide;
 }
 function applySourceImages(deck, source) {
@@ -416,7 +427,7 @@ function startIngest(uid, id, activity, log, deps = defaultDeps) {
       latest.source = withSemanticIndex(source); latest.status = 'outlining'; latest.stage = 'outline'; latest.error = '';
       latest.inputProfile = profilePptInput(latest);
       latest.contentPlan = planSparseInput(latest, latest.inputProfile);
-      if (latest.pageDecision?.source === 'estimate' && !latest.requestedOutline) {
+      if (automaticPages(latest)) {
         const suggestion = estimatePageRecommendation(latest);
         const reuseCount = latest.templateFidelity?.originalSlideCount || latest.templateFidelity?.slides?.length;
         const reuseError = latest.templateFidelity?.mode === 'preserve' && reuseCount
@@ -424,7 +435,7 @@ function startIngest(uid, id, activity, log, deps = defaultDeps) {
         if (!reuseError) {
           latest.pages = suggestion.recommended;
           latest.pageDecision = { ...latest.pageDecision, finalPageCount: latest.pages,
-            estimationBasis: suggestion.estimationBasis, estimatedAfterIngest: true };
+            initialPageCount: latest.pageDecision.initialPageCount || latest.pages, densityProfileId: densityProfile().id, recommended: suggestion.recommended, range: suggestion.range, estimationBasis: suggestion.estimationBasis, estimatedAfterIngest: true };
         }
       }
       store.save(latest); next = true;
@@ -432,6 +443,26 @@ function startIngest(uid, id, activity, log, deps = defaultDeps) {
     } catch (error) { fail(uid, id, 'ingest', error, log); }
     finally { running.delete(id); if (next) startOutline(uid, id, activity, log, deps); }
   })();
+}
+// Candidate assessment is isolated from the stored project. Native assignment
+// must finish before its fit is recorded or compared with a repaired candidate.
+function assessOutlineCandidate(project, raw) {
+  const automatic=automaticPages(project);
+  let rawOutline,outline;
+  const candidateProject={...project};
+  try {
+    rawOutline=project.requestedOutline?raw:packOutline(project,raw);
+    if(automatic)candidateProject.pages=pages(rawOutline.slides.length);
+    outline=normalizeOutline(rawOutline,candidateProject.pages,project.source,project.update,project.deckTitle);
+  } catch(error){error.code='ppt_outline_contract';throw error;}
+  candidateProject.outline=outline;
+  rescheduleTemplateFidelity(candidateProject);
+  rawOutline=revalidateOutlineFits(candidateProject,rawOutline,outline);
+  outline=outline.map((slide,index)=>({...slide,densityFit:rawOutline.slides[index].densityFit}));
+  candidateProject.outline=outline;
+  const planning=buildPlanning(candidateProject,rawOutline,outline);
+  const issues=[...inspectReportOutline(candidateProject,outline,planning.brief),...inspectLongDeckOutline(candidateProject,outline),...inspectDensityOutline(rawOutline)];
+  return {project:candidateProject,rawOutline,outline,planning,issues};
 }
 function startOutline(uid, id, activity, log, deps = defaultDeps) {
   if (running.has(id)) return;
@@ -443,30 +474,40 @@ function startOutline(uid, id, activity, log, deps = defaultDeps) {
       if (!p || p.status !== 'outlining') return;
       if (p.source?.segments?.length && !p.source.semantic) { p.source = withSemanticIndex(p.source); store.save(p); }
       try { transitionNode(p, 'outline', 'running'); } catch {}
+      const automatic = automaticPages(p);
+      if (automatic) p.pages = estimatePageRecommendation(p).recommended;
       let rawOutline = p.requestedOutline
         ? { slides: p.requestedOutline, brief: null, storyArc: null, coverage: [] }
         : await deps.modelCall(p, outlinePrompt(p), activity, log);
-      let outline = normalizeOutline(rawOutline, p.pages, p.source, p.update, p.deckTitle);
-      if (!p.requestedOutline) {
-        const initialPlanning = buildPlanning(p, rawOutline, outline);
-        const initialIssues = [...inspectReportOutline(p, outline, initialPlanning.brief), ...inspectLongDeckOutline(p, outline)];
-        const repairableIssues = initialIssues.filter(item => item.repairable !== false);
-        if (repairableIssues.length) {
-          const repairPrompt = `${outlinePrompt(p)}\n初稿结构检查：${JSON.stringify(initialIssues.map(item => ({ code: item.code, message: item.message })))}。请在相同页数和有效来源编号内修订大纲，不改变用户锁定的标题，不虚构事实或证据。初稿：${JSON.stringify(rawOutline)}。返回完整的同一 JSON schema。`;
-          try {
-            const revisedRaw = await deps.modelCall(p, repairPrompt, activity, log);
-            const revisedOutline = normalizeOutline(revisedRaw, p.pages, p.source, p.update, p.deckTitle);
-            const revisedPlanning = buildPlanning(p, revisedRaw, revisedOutline);
-            if (revisedPlanning.brief.reportMode === initialPlanning.brief.reportMode &&
-                [...inspectReportOutline(p, revisedOutline, revisedPlanning.brief), ...inspectLongDeckOutline(p, revisedOutline)].length < initialIssues.length) {
-              rawOutline = revisedRaw; outline = revisedOutline;
-            }
-          } catch (error) { log(`ppt ${id} outline revision skipped: ${String(error?.message || error).slice(0, 180)}`); }
-        }
+      let assessed,validationError;
+      try {assessed=assessOutlineCandidate(p,rawOutline);} catch(error){
+        if(error.code!=='ppt_outline_contract'||p.requestedOutline)throw error;
+        validationError=error;
       }
+      const initialIssues=assessed?.issues||[{code:'invalid_outline_contract',message:String(validationError?.message||'invalid candidate').slice(0,500),repairable:true}];
+      if(!p.requestedOutline && initialIssues.some(item=>item.repairable!==false)){
+        const repairPrompt=`${outlinePrompt(p)}\n初稿结构检查：${JSON.stringify(initialIssues.map(item=>({code:item.code,message:item.message})))}。${automatic?'请在有效来源编号、完整关系和可读容量内修订大纲，可合并或拆分，最终数量由代码拟合决定':'请在相同页数和有效来源编号内修订大纲'}，不改变用户锁定的标题，不虚构事实或证据；不同明确question不能靠相同groupId合并；表格分片必须是整数、仅用于表格且同页不重叠。初稿：${JSON.stringify(rawOutline)}。返回完整的同一 JSON schema。`;
+        try {
+          const revised=assessOutlineCandidate(p,await deps.modelCall(p,repairPrompt,activity,log));
+          if(!assessed || revised.planning.brief.reportMode===assessed.planning.brief.reportMode && revised.issues.length<initialIssues.length)assessed=revised;
+        } catch(error){log(`ppt ${id} outline revision skipped: ${String(error?.message||error).slice(0,180)}`);}
+      }
+      if(!assessed)throw validationError;
+      rawOutline=assessed.rawOutline;
+      const outline=assessed.outline;
+      if(automatic && inspectDensityOutline(rawOutline).length)throw new Error('density_capacity: candidate source structures still overflow after bounded outline repair');
       const current = store.get(uid, id);
       if (!current || current.status !== 'outlining') return;
-      current.outline = outline; rescheduleTemplateFidelity(current);
+      current.pages = assessed.project.pages;
+      if(assessed.project.templateFidelity)current.templateFidelity=assessed.project.templateFidelity;
+      const reuseCount = current.templateFidelity?.originalSlideCount;
+      const reuseError = reuseCount && templateReuseError(reuseCount, current.pages);
+      if (reuseError) throw new HttpError(400, reuseError);
+      current.pageDecision = { ...current.pageDecision, finalPageCount: current.pages, densityProfileId: densityProfile().id,
+        estimateVersion: 1, fitValidated: rawOutline.slides?.slice(1).every(s => s.densityFit?.capacity_ok) || false,
+        ...(automatic ? { mode: 'auto', initialPageCount: current.pageDecision.initialPageCount, calibratedAt: new Date().toISOString() } : {}),
+        ...(current.autoGenerate ? { confirmedAt: new Date().toISOString() } : {}) };
+      current.outline = outline;
       current.status = current.autoGenerate ? 'generating' : 'outline_ready'; current.stage = current.autoGenerate ? 'content' : 'outline'; current.error = '';
       if (current.deckTitle?.source !== 'user') {
         current.deckTitle = { text: outline[0]?.title || current.title, raw: outline[0]?.title || current.title, source: 'agent', locked: false };
@@ -1174,14 +1215,15 @@ export async function handlePpt(req, url, { uid, send, res, readBody, activity, 
       if (!['prompt', 'paste', 'file'].includes(data.inputKind)) throw new HttpError(400, 'invalid input kind');
       const prompt = String(data.prompt || '').slice(0, MAX_PROMPT);
       const text = String(data.text || '').slice(0, 80000);
-      const source = data.inputKind === 'paste' ? normalizePaste(text) : null;
-      const candidate = { inputKind: data.inputKind, source, prompt, generationPolicy: normalizeGenerationPolicy(data.generationPolicy) };
+      const source = data.inputKind === 'paste' && text.trim() ? normalizePaste(text) : data.inputKind === 'file' ? { kind: 'file', text: '', bytes: Number(data.fileBytes) || 0 } : null;
+      const estimateTemplate = data.template ? resolveTemplate(uid, data.template) : null;
+      const candidate = { templateSpec: estimateTemplate ? snapshotTemplate(estimateTemplate) : null, inputKind: data.inputKind, source, prompt, generationPolicy: normalizeGenerationPolicy(data.generationPolicy) };
       candidate.inputProfile = profilePptInput(candidate); candidate.contentPlan = planSparseInput(candidate, candidate.inputProfile);
       const result = estimatePageRecommendation(candidate);
       const weight = data.inputKind === 'file' ? Math.min(16, Math.ceil(Math.max(0, Number(data.fileBytes) || 0) / 180000)) : 0;
       const recommended = Math.min(100, Math.max(result.recommended, weight ? 4 + weight : 3));
       return send(200, { recommendation: { recommended, min: Math.min(result.range[0], recommended), max: Math.min(100, Math.max(result.range[1], recommended)),
-        requested: requestedPageCount(prompt, text), reason: data.inputKind === 'file' ? '文件体量与补充要求初估；解析来源后校准。' : result.reason } });
+        densityProfileId: result.densityProfileId, estimationBasis: result.estimationBasis, provisional: true, requested: requestedPageCount(prompt, text), reason: data.inputKind === 'file' ? '文件体量与补充要求初估；解析来源后校准。' : result.reason } });
     }
     if (folderOrder) return await handleFolderOrder(req, uid, send);
     if (projectOrder) return await handleProjectOrder(req, uid, send);
@@ -1216,9 +1258,11 @@ export async function handlePpt(req, url, { uid, send, res, readBody, activity, 
         const userTitle = typeof data.title === 'string' && data.title.trim() ? bounded(data.title, 160, 'title') : '';
         const title = bounded(userTitle || prompt.slice(0, 60), 160, 'title');
         const template = resolveTemplate(uid, data.template || 'violet');
+        const generationPolicy = normalizeGenerationPolicy(data.generationPolicy);
+        if (inputKind === 'prompt') source = estimationSource({ inputKind, prompt });
         const inputProfile = profilePptInput({ inputKind, source, prompt });
         const contentPlan = planSparseInput({ inputKind, source, prompt }, inputProfile);
-        const estimatedPages = estimatePageRecommendation({ inputKind, source, prompt, inputProfile, contentPlan }).recommended;
+        const estimatedPages = estimatePageRecommendation({ inputKind, source, prompt, inputProfile, contentPlan, generationPolicy, templateSpec: snapshotTemplate(template) }).recommended;
         const promptPages = requestedPageCount(prompt, source?.text);
         const selectedPages = pages(data.pages ?? promptPages ?? estimatedPages);
         const requestedOutline = data.outline === undefined ? null : data.outline;
@@ -1228,12 +1272,13 @@ export async function handlePpt(req, url, { uid, send, res, readBody, activity, 
           const reuseError = templateReuseError(template.pages, selectedPages);
           if (reuseError) throw new HttpError(400, reuseError);
         }
-        const generationPolicy = normalizeGenerationPolicy(data.generationPolicy);
         const project = { id: store.newId(), uid, title, prompt, generationPolicy, promptContractVersion: PPT_PROMPT_CONTRACT_VERSION, pages: selectedPages, inputProfile, contentPlan, template: template.id,
           templateSpec: snapshotTemplate(template), inputKind, source, sourceRevision: source ? 1 : 0, outlineRevision: 0,
           deckTitle: userTitle ? { text: formattedUserTitle.title, raw: userTitle, source: 'user', locked: true } : { text: '', raw: '', source: 'agent', locked: false },
           pageDecision: { finalPageCount: selectedPages, source: data.pages === undefined && promptPages === undefined ? 'estimate' : 'user',
-            includesCover: true, confirmedAt: new Date().toISOString() },
+            mode: data.pages === undefined && promptPages === undefined && !requestedOutline ? 'auto' : 'explicit', initialPageCount: selectedPages,
+            densityProfileId: densityProfile().id, estimateVersion: 1, estimatedBeforeParse: Boolean(sourceBytes), includesCover: true,
+            confirmedAt: data.pages === undefined && promptPages === undefined && !requestedOutline ? null : new Date().toISOString() },
           compressionApproved: data.compressionApproved === true,
           ...(requestedOutline ? { requestedOutline } : {}),
           model: typeof data.model === 'string' ? data.model.slice(0, 120) : '',
@@ -1407,7 +1452,7 @@ export async function handlePpt(req, url, { uid, send, res, readBody, activity, 
       }
       project.pages = nextPages;
       if (data.compressionApproved !== undefined) project.compressionApproved = data.compressionApproved === true;
-      project.pageDecision = { finalPageCount: nextPages, source: 'user', includesCover: true, confirmedAt: new Date().toISOString() };
+      project.pageDecision = { finalPageCount: nextPages, source: 'user', mode: 'explicit', includesCover: true, confirmedAt: new Date().toISOString() };
       if (project.update && project.pages < 6) throw new HttpError(400, 'update outline needs 6 to 100 slides');
       project.outline = normalizeOutline({ slides: data.slides }, project.pages, project.source, project.update, project.deckTitle);
       rescheduleTemplateFidelity(project);
@@ -1442,7 +1487,7 @@ export async function handlePpt(req, url, { uid, send, res, readBody, activity, 
           ? await deps.prepareTemplateFidelity(project, store.readTemplate(selectedTemplate.kind === 'managed' ? 'managed' : uid, selectedTemplate.id), selectedTemplate.sha256, selectedTemplate)
           : undefined;
       }
-      project.pageDecision = { finalPageCount: project.pages, source: 'user', includesCover: true, confirmedAt: new Date().toISOString() };
+      project.pageDecision = { finalPageCount: project.pages, source: 'user', mode: 'explicit', includesCover: true, confirmedAt: new Date().toISOString() };
       project.outline = []; project.nodes = {}; project.outlineRevision = 0;
       project.planning = null;
       project.diff = null;
@@ -1457,6 +1502,7 @@ export async function handlePpt(req, url, { uid, send, res, readBody, activity, 
         return send(202, { project });
       }
       if (project.status !== 'outline_ready') return send(409, { error: 'outline not ready' });
+      project.pageDecision = { ...project.pageDecision, finalPageCount: project.pages, confirmedAt: new Date().toISOString() };
       project.status = 'generating'; project.stage = 'content'; project.error = '';
       store.save(project);
       startGeneration(uid, id, activity, log, deps);
@@ -1537,4 +1583,4 @@ export async function handlePpt(req, url, { uid, send, res, readBody, activity, 
   }
 }
 
-export const _internals = { normalizeOutline, normalizeDeck, normalizeSlide, parseModelJson, pages, outlinePrompt, contentPrompt, defaultDeps };
+export const _internals = { assessOutlineCandidate, normalizeOutline, normalizeDeck, normalizeSlide, parseModelJson, pages, outlinePrompt, contentPrompt, defaultDeps };

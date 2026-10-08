@@ -1,3 +1,4 @@
+import { densityPrompt } from './ppt-density-profile.mjs';
 import { applyLayoutRegistry, chooseLayout, layoutFor, regionsFor, typographyFor } from './ppt-layout.mjs';
 import { inspectContent } from './ppt-content-qa.mjs';
 import { inspectTemplateFidelity } from './ppt-template-fidelity.mjs';
@@ -326,6 +327,7 @@ export function deckReviewPrompt(project) {
       ...(semanticComponents.length ? { semanticComponents } : {}),
       ...(visiblePoints.length ? { visiblePoints } : {}), ...(visibleSlots.length ? { visibleSlots } : {}),
       ...(evidence.length ? { requiredEvidence: evidence } : {}),
+      densityFit: contract?.densityFit, densityMeasurement: project.quality?.deterministic?.contentMetrics?.visibleDensityPerSlide?.find(m => m.slideId === slide.id),
       requiredDetails: contract?.requiredDetails || [],
       ownedPoints: contract?.keyPoints || [], depth: contract?.depth, role: contract?.role,
       sourceKinds: (slide.sourceChunks || []).map(id => project.source?.semantic?.chunks?.find(chunk => chunk.id === id)?.contentKind).filter(Boolean),
@@ -340,7 +342,8 @@ export function deckReviewPrompt(project) {
   const brief = project.planning?.brief;
   const coverage = (project.planning?.coverage || []).filter(item => item.priority === 'high').slice(0, 60)
     .map(item => ({ topic: item.topic, action: item.action, slideIds: item.slideIds }));
-  return `你是整稿演示文稿内容评审器。${promptPolicy(project)}<rubric>逐项检查 ownedPoints、requiredDetails、表格类别及关系是否在可见文案展开。missing 包括必要解释缺失或浅薄：标签代替解释、未讲机制/条件、通用口号、断句；浅薄项加 reason="shallow"。短图示 label、封面或过渡不因字少被判浅薄；具体信息与关系比字数重要。每项给 suggestedFix，指出哪一项来源关系/条件需补入哪个点；不能给未核实数字。必要的回顾或简短引用不判重复；同页名词标签与其解释相配不判重复。来源内部冲突要报告 conflicts，不能自行发明校正值。上下文预算漏掉的来源不能据此判 unsupported；只报告可核对的事实。纯 prompt 通用机制不要求不存在的文件引用，具体引用和数字仍须核实。</rubric>只评审内容，不调用工具，不搜索，不改写页面，不提供字体、坐标、布局或 PPTX 代码。visibleSlots 和 visiblePoints 是观众实际看到的模板文字。逐页核对标题、子标题、卡片及图解标签是否属于同一来源事实，说明是否完整，概念是否与样例混淆；把错配或自相矛盾记入 conflicts，把截断、空泛或缺失记入 missing，把无来源支撑的描述记入 unsupported。若是职场汇报，还要在同样四类中检查决策问题、前置摘要、主文信息分布和来源支撑，不增加输出类别。\n主题：${project.prompt}\n当前语义修改约束：${JSON.stringify(project.constraints?.entries?.filter(entry => entry.active && ['content','title','data','structure'].includes(entry.type)) || [])}\n演示目标与必讲内容：${JSON.stringify(brief ? { objective: brief.objective, thesis: brief.thesis, mustInclude: brief.mustInclude, reportMode: brief.reportMode, decisionQuestion: brief.decisionQuestion, sourceScope: brief.sourceScope } : {})}\n高优先级主题映射：${JSON.stringify(coverage)}\n页面：${JSON.stringify(slides)}\n来源：${JSON.stringify(sources)}\n仅输出一个 JSON 对象：{"missing":[{"slideIds":["1"],"detail":"缺少的必要内容"}],"repeated":[{"slideIds":["2","4"],"detail":"重复点"}],"conflicts":[{"slideIds":["3","5"],"detail":"冲突事实"}],"unsupported":[{"slideIds":["6"],"bulletIndexes":[0],"detail":"证据不足"}]}。四个数组都必须存在；没有发现时返回空数组。slideIds 只能使用给定页面 ID，bulletIndexes 仅在报告 bullets 时填写，从 0 开始。每项可增加 reason="shallow" 和 suggestedFix；不要输出整页修订文本、坐标或其他字段。`;
+  return `${densityPrompt(project)}
+你是整稿演示文稿内容评审器。${promptPolicy(project)}<rubric>逐项检查 ownedPoints、requiredDetails、表格类别及关系是否在可见文案展开。missing 包括必要解释缺失或浅薄：标签代替解释、未讲机制/条件、通用口号、断句；浅薄项加 reason="shallow"。短图示 label、封面或过渡不因字少被判浅薄；具体信息与关系比字数重要。每项给 suggestedFix，指出哪一项来源关系/条件需补入哪个点；不能给未核实数字。必要的回顾或简短引用不判重复；同页名词标签与其解释相配不判重复。来源内部冲突要报告 conflicts，不能自行发明校正值。上下文预算漏掉的来源不能据此判 unsupported；只报告可核对的事实。纯 prompt 通用机制不要求不存在的文件引用，具体引用和数字仍须核实。</rubric>只评审内容，不调用工具，不搜索，不改写页面，不提供字体、坐标、布局或 PPTX 代码。visibleSlots 和 visiblePoints 是观众实际看到的模板文字。逐页核对标题、子标题、卡片及图解标签是否属于同一来源事实，说明是否完整，概念是否与样例混淆；把错配或自相矛盾记入 conflicts，把截断、空泛或缺失记入 missing，把无来源支撑的描述记入 unsupported。若是职场汇报，还要在同样四类中检查决策问题、前置摘要、主文信息分布和来源支撑，不增加输出类别。\n主题：${project.prompt}\n当前语义修改约束：${JSON.stringify(project.constraints?.entries?.filter(entry => entry.active && ['content','title','data','structure'].includes(entry.type)) || [])}\n演示目标与必讲内容：${JSON.stringify(brief ? { objective: brief.objective, thesis: brief.thesis, mustInclude: brief.mustInclude, reportMode: brief.reportMode, decisionQuestion: brief.decisionQuestion, sourceScope: brief.sourceScope } : {})}\n高优先级主题映射：${JSON.stringify(coverage)}\n页面：${JSON.stringify(slides)}\n来源：${JSON.stringify(sources)}\n仅输出一个 JSON 对象：{"missing":[{"slideIds":["1"],"detail":"缺少的必要内容"}],"repeated":[{"slideIds":["2","4"],"detail":"重复点"}],"conflicts":[{"slideIds":["3","5"],"detail":"冲突事实"}],"unsupported":[{"slideIds":["6"],"bulletIndexes":[0],"detail":"证据不足"}]}。四个数组都必须存在；没有发现时返回空数组。slideIds 只能使用给定页面 ID，bulletIndexes 仅在报告 bullets 时填写，从 0 开始。每项可增加 reason="shallow" 和 suggestedFix；不要输出整页修订文本、坐标或其他字段。`;
 }
 
 export function normalizeModelReview(value, slideIds) {

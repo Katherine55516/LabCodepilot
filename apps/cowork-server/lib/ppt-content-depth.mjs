@@ -72,11 +72,11 @@ export function planSparseInput(project = {}, profile = profilePptInput(project)
   };
 }
 
-export function sparsePageEstimate(plan) {
+export function sparsePageEstimate(plan, detail = 'balanced') {
   if (!plan?.semanticUnits?.length) return null;
   const cost = plan.semanticUnits.reduce((sum, unit) => sum +
     (['architecture', 'mechanism'].includes(unit.role) ? .72 : ['implementation', 'evaluation'].includes(unit.role) ? .55 : .42), 0);
-  const recommended = Math.max(5, Math.min(100, Math.ceil(cost / .68) + 2));
+  const recommended = Math.max(5, Math.min(100, Math.ceil(cost / (detail === 'detailed' ? .54 : .68)) + 2));
   const spread = Math.max(2, Math.ceil(recommended * .18));
   return { recommended, range: [Math.max(3, recommended - spread), Math.min(100, recommended + spread)],
     semanticUnits: plan.semanticUnits.length, contentCost: Math.round(cost * 100) / 100 };

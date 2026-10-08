@@ -292,7 +292,9 @@ def render_scene_element(slide, element):
                 for cell in row.cells:
                     cell.margin_top=cell.margin_bottom=Pt(3)
                     cell.fill.fore_color.rgb=scene_color(item_style.get('fill'),RGBColor(*accent)) if r==0 else RGBColor(255,255,255)
-                    for paragraph in cell.text_frame.paragraphs: cjk_font(paragraph,size,color,r==0)
+                    for paragraph in cell.text_frame.paragraphs:
+                        paragraph.line_spacing=1.18; paragraph.space_after=Pt(0)
+                        cjk_font(paragraph,size,scene_color(item_style.get('tableHeaderColor'),color) if r==0 else color,r==0)
         for shape in rendered if isinstance(rendered, list) else [rendered]:
             if shape is not None: shape.rotation = float(element.get('rotation') or 0)
         return

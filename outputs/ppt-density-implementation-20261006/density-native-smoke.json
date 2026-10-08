@@ -1,0 +1,288 @@
+{
+  "pageDecision": {
+    "finalPageCount": 3,
+    "source": "estimate",
+    "mode": "auto",
+    "initialPageCount": 3,
+    "densityProfileId": "gamma-reference-v1",
+    "estimateVersion": 1,
+    "estimatedBeforeParse": false,
+    "includesCover": true,
+    "confirmedAt": "2026-10-06T08:56:45.848Z",
+    "fitValidated": true,
+    "calibratedAt": "2026-10-06T08:56:45.799Z"
+  },
+  "densityPacking": {
+    "version": 1,
+    "densityProfileId": "gamma-reference-v1",
+    "initialPageCount": 3,
+    "candidatePageCount": 4,
+    "finalPageCount": 3,
+    "automatic": true,
+    "mergeCount": 1,
+    "fits": [
+      {
+        "sourceUnitIds": [],
+        "plannedVisibleUnits": 0,
+        "densityProfileId": "gamma-reference-v1",
+        "predictedOverflow": 0,
+        "capacity_ok": false,
+        "layoutId": "unmeasured",
+        "fontSizePt": 18,
+        "targetVisualUnits": 670.6136949152542,
+        "maximumVisualUnits": 691.7909694915254,
+        "measurementBasis": "missing_display_plan"
+      },
+      {
+        "sourceUnitIds": [
+          "b_0003",
+          "b_0005"
+        ],
+        "plannedVisibleUnits": 136.39999999999984,
+        "densityProfileId": "gamma-reference-v1",
+        "predictedOverflow": 0,
+        "capacity_ok": true,
+        "layoutId": "parallel-source",
+        "fontSizePt": 18,
+        "targetVisualUnits": 670.6136949152542,
+        "maximumVisualUnits": 691.7909694915254,
+        "measurementBasis": "shared_line_estimator"
+      },
+      {
+        "sourceUnitIds": [
+          "b_0007"
+        ],
+        "plannedVisibleUnits": 37.949999999999996,
+        "densityProfileId": "gamma-reference-v1",
+        "predictedOverflow": 0,
+        "capacity_ok": true,
+        "layoutId": "stacked-source",
+        "fontSizePt": 18,
+        "targetVisualUnits": 670.6136949152542,
+        "maximumVisualUnits": 691.7909694915254,
+        "measurementBasis": "shared_line_estimator"
+      }
+    ]
+  },
+  "quality": {
+    "version": 1,
+    "status": "passed",
+    "publishEligible": true,
+    "editorialReady": true,
+    "checkedAt": "2026-10-06T08:56:47.172Z",
+    "deterministic": {
+      "version": 1,
+      "checkedAt": "2026-10-06T08:56:47.172Z",
+      "issues": [],
+      "hardErrors": 0,
+      "strictCoverage": true,
+      "contentMetrics": {
+        "relationshipRecall": 1,
+        "endSectionRecall": 1,
+        "endSectionBiasGap": 0,
+        "topicRecall": 1,
+        "highPriorityDetailRecall": 1,
+        "structureRecall": 1,
+        "tableCellRecall": [
+          {
+            "id": "b_0003",
+            "recall": 1
+          }
+        ],
+        "equationRecall": null,
+        "workflowRecall": null,
+        "checklistRecall": 1,
+        "summaryRecall": 1,
+        "sourceUtilization": 1,
+        "items": [
+          {
+            "id": "b_0003",
+            "type": "TableBlock",
+            "priority": "high",
+            "contentRecall": 1,
+            "structureRetained": true,
+            "cellRecall": 1
+          },
+          {
+            "id": "b_0005",
+            "type": "ChecklistBlock",
+            "priority": "high",
+            "contentRecall": 1,
+            "structureRetained": true,
+            "cellRecall": null
+          },
+          {
+            "id": "b_0007",
+            "type": "SummaryBlock",
+            "priority": "high",
+            "contentRecall": 1,
+            "structureRetained": true,
+            "cellRecall": null
+          }
+        ],
+        "coverageRatio": null,
+        "highPriorityCoverageRatio": null,
+        "copyLikeness": 0,
+        "adjacentRedundancy": 0,
+        "unsupportedNumberCount": 0,
+        "semanticUnitsPerSlide": [
+          {
+            "slideId": "cover",
+            "units": 0,
+            "density": "low"
+          },
+          {
+            "slideId": "a",
+            "units": 5,
+            "density": "medium"
+          },
+          {
+            "slideId": "end",
+            "units": 1,
+            "density": "low"
+          }
+        ],
+        "requiredDetailCoverage": 1,
+        "densityDistributionMatch": 1,
+        "pageCountCompliant": true,
+        "unsupportedContentPages": 0,
+        "repeatedClaimsAcrossDeck": 0,
+        "sourceDensityRatio": null,
+        "plannedChunkCoverageRatio": 1,
+        "evidenceCoverageRatio": null,
+        "requiredEvidenceCount": 0,
+        "renderedEvidenceCount": 0,
+        "visibleContentUnitsPerSlide": [
+          {
+            "slideId": "cover",
+            "units": 0,
+            "templateCapacity": 0
+          },
+          {
+            "slideId": "a",
+            "units": 118.1,
+            "templateCapacity": 0
+          },
+          {
+            "slideId": "end",
+            "units": 43.92,
+            "templateCapacity": 0
+          }
+        ],
+        "templateCapacityWarnings": 0,
+        "chapterCoverageRatio": 1,
+        "requiredTableRows": 0,
+        "renderedTableRows": 0,
+        "underfillRate": 0,
+        "fragmentationRate": 0,
+        "mergeCandidates": [],
+        "highSimilarityAdjacentPages": 0,
+        "densityProfileId": "gamma-reference-v1",
+        "visibleDensityPerSlide": [
+          {
+            "slideId": "cover",
+            "role": "cover",
+            "actualTextChars": 0,
+            "visibleVisualUnits": 0,
+            "referenceTargetVisualUnits": 670.6136949152542,
+            "densityRatio": 0,
+            "measurementBasis": "visible_native_content"
+          },
+          {
+            "slideId": "a",
+            "role": "comparison",
+            "actualTextChars": 168,
+            "visibleVisualUnits": 106.69999999999965,
+            "referenceTargetVisualUnits": 670.6136949152542,
+            "densityRatio": 0.16,
+            "measurementBasis": "visible_native_content"
+          },
+          {
+            "slideId": "end",
+            "role": "closing",
+            "actualTextChars": 70,
+            "visibleVisualUnits": 43.999999999999964,
+            "referenceTargetVisualUnits": 670.6136949152542,
+            "densityRatio": 0.07,
+            "measurementBasis": "visible_native_content"
+          }
+        ],
+        "densityUnderfillRate": 0,
+        "densityMergeCandidates": []
+      },
+      "report": {
+        "mode": "presentation",
+        "status": "not_applicable",
+        "issues": [],
+        "metrics": {}
+      }
+    },
+    "modelReview": {
+      "missing": [],
+      "repeated": [],
+      "conflicts": [],
+      "unsupported": []
+    },
+    "modelIssues": [],
+    "issueGroups": {
+      "factsAndEvidence": [],
+      "narrative": [],
+      "layout": [],
+      "media": []
+    },
+    "report": {
+      "mode": "presentation",
+      "status": "not_applicable",
+      "issues": [],
+      "metrics": {}
+    },
+    "repairs": [],
+    "timings": {
+      "reviewMs": 2
+    },
+    "reviewState": "valid",
+    "reviewInputHash": "d90430d8acf32af1745b5c2d08bf9a2e7d98e30ca2cd10658726508ad3c87079",
+    "reviewerModel": {
+      "configId": "simulation",
+      "model": ""
+    },
+    "rubricVersion": 3
+  },
+  "exported": {
+    "pages": 3,
+    "tables": [
+      [
+        [
+          "Object",
+          "Condition"
+        ],
+        [
+          "Queue",
+          "Before execution"
+        ],
+        [
+          "Result",
+          "After review"
+        ]
+      ]
+    ],
+    "texts": [
+      "",
+      "Validation",
+      "",
+      "1",
+      "",
+      "a",
+      "2",
+      "•  Verify owner.\n•  Confirm evidence.\n•  Record decision.",
+      "The owner compares the recorded result with the agreed condition before the decision.",
+      "",
+      "Validation summary",
+      "Validation\nValidation connects the result to evidence and the responsible owner.",
+      "3"
+    ],
+    "headerColors": [
+      "FFFFFF"
+    ]
+  }
+}

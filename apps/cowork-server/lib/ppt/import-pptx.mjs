@@ -1,5 +1,6 @@
 import { templateLimits, TEMPLATE_SECURITY_SCRIPT } from '../ppt-template-security.mjs';
 import { spawn } from 'node:child_process';
+import { isSourceOwnedNode } from '../ppt-source-artifacts.mjs';
 import * as orch from '../orchestrator.mjs';
 import { ensureDeckV3, stableId } from './ir.mjs';
 
@@ -179,14 +180,15 @@ def add_source_artifact(slide, node):
             for col,value in enumerate(row):
                 cell=shape.table.cell(r,col); cell.text=str(value); cell.margin_top=cell.margin_bottom=Pt(3); cell.fill.solid(); cell.fill.fore_color.rgb=RGBColor.from_string((style.get('fill','#e7e5f4') if r==0 else '#ffffff').lstrip('#'))
                 for p in cell.text_frame.paragraphs:
-                    for run in p.runs: run.font.name=fonts['bodyEastAsia'] if CJK_RE.search(run.text) else font; run.font.size=Pt(pt); run.font.bold=(r==0); run.font.color.rgb=RGBColor(36,42,59); set_east_asia(run)
+                    p.line_spacing=1.18; p.space_after=Pt(0)
+                    for run in p.runs: run.font.name=fonts['bodyEastAsia'] if CJK_RE.search(run.text) else font; run.font.size=Pt(pt); run.font.bold=(r==0); run.font.color.rgb=RGBColor.from_string(str(style.get('tableHeaderColor' if r==0 else 'color','#242a3b')).lstrip('#')); set_east_asia(run)
     else:
         shape=slide.shapes.add_textbox(int(g['x']),int(g['y']),int(g['width']),int(g['height']))
         shape.fill.solid(); shape.fill.fore_color.rgb=RGBColor.from_string(style.get('fill','#ffffff').lstrip('#'))
         frame=shape.text_frame; frame.word_wrap=True
         values=[item['text'] for item in c.get('items',[])] if node['type'] in ('list','timeline') else str(c.get('text','')).split('\n')
         for i,value in enumerate(values):
-            p=frame.paragraphs[0] if i==0 else frame.add_paragraph(); p.text=(str(i+1)+'. ' if node['type']=='timeline' else '• ' if node['type']=='list' else '')+str(value); p.space_after=Pt(4)
+            p=frame.paragraphs[0] if i==0 else frame.add_paragraph(); p.text=(str(i+1)+'. ' if node['type']=='timeline' else '• ' if node['type']=='list' else '')+str(value); p.line_spacing=float(style.get('lineHeight',1.18)); p.space_after=Pt(pt*float(style.get('paragraphSpacingEm',.4 if node['type'] in ('list','timeline') else 0)))
             for run in p.runs:
                 run.font.name=fonts['bodyEastAsia'] if CJK_RE.search(run.text) else font; run.font.size=Pt(pt); run.font.color.rgb=RGBColor.from_string(str(style.get('color','#333333')).lstrip('#')); set_east_asia(run)
     source=node.get('sourceArtifact') or {}
@@ -396,7 +398,7 @@ export async function renderImportedPptx(project) {
   const slides = project.deck.slides.filter(slide => Number.isInteger(slide.nativeSlideIndex)).map(slide => ({
     nativeSlideIndex: slide.nativeSlideIndex,
     omitShapeIds: (slide.templateOmissions || []).map(item => item.shapeId),
-    sourceArtifacts: (slide.nodes || []).filter(node => node.sourceArtifact),
+    sourceArtifacts: (slide.nodes || []).filter(isSourceOwnedNode),
     nodes: slide.nodes.filter(node => node.nativeRef).map(node => ({ type: node.type, semanticRole: node.semanticRole,
       nativeShapeId: node.nativeRef.shapeId,
       // The original PPTX already owns unchanged image bytes. Sending the same

@@ -1,3 +1,4 @@
+import { inspectDensity } from './ppt-density-qa.mjs';
 import { inspectInventoryCoverage, recall } from './ppt-content-inventory.mjs';
 /** Deterministic content diagnostics within the existing quality node. */
 import { evidenceMeasurements, evidenceVisible, missingRequiredEvidence, visibleSlideText } from './ppt-evidence.mjs';
@@ -73,7 +74,7 @@ export function inspectContent(project, deck = project.deck) {
   for (let index = 1; index < slides.length - 1; index++) {
     const slide = slides[index], plan = project.planning?.slidePlan?.find(item => item.slideId === slide.id);
     const artifacts=(slide.nodes||[]).filter(node=>node.sourceArtifact);
-    const units=artifacts.length?Math.max(...artifacts.map(node=>node.content?.rows?node.content.rows.length-1:node.content?.items?.length||1)):(slide.copy?.blocks || []).length;
+    const units=artifacts.length?artifacts.reduce((n,node)=>n+(node.content?.rows?node.content.rows.length-1:node.content?.items?.length||1),0):(slide.copy?.blocks || []).length;
     const cited = (project.source?.semantic?.chunks || []).filter(chunk => plan?.sourceChunks?.includes(chunk.id));
     if (richSource && !['cover','section'].includes(plan?.role) && units < Math.min(4, plan?.semanticUnitBudget || 3) && cited.some(chunk => chunk.tokenCount > 200)) {
       underfilled.push(slide.id); issues.push({code:'rich_source_underfilled',severity:'warning',slideId:slide.id,repairable:false,message:'Available source detail exceeds the visible semantic units; review page capacity and role'});
@@ -267,7 +268,7 @@ export function inspectContent(project, deck = project.deck) {
       node.templateSlot.role === 'content' && !['footnote', 'group-heading'].includes(node.templateSlot.purpose) && String(node.content?.text || '').trim());
     const nativeGroups = new Set(nativeContent.map(node => node.templateSlot.groupId || node.templateSlot.pairedWith || node.nativeRef.shapeId));
     const artifactUnits=(slide.nodes||[]).filter(node=>node.sourceArtifact).map(node=>node.content?.rows?node.content.rows.length-1:node.content?.items?.length||1);
-    const semanticUnits = artifactUnits.length ? Math.max(...artifactUnits) : nativeContent.length ? nativeGroups.size : (slide.copy?.blocks || []).length || (slide.bullets || []).length;
+    const semanticUnits = artifactUnits.length ? artifactUnits.reduce((n,v)=>n+v,0) : nativeContent.length ? nativeGroups.size : (slide.copy?.blocks || []).length || (slide.bullets || []).length;
     if (project.inputProfile?.level === 'rich' && nativeContent.some(node =>
       ['body', 'point-description', 'list'].includes(node.templateSlot.purpose) &&
       /^(?:[\p{L}-]+\s+){1,2}(?:matters?|works?)\s*[.!]?$/iu.test(String(node.content?.text || '').trim()))) {
@@ -346,5 +347,8 @@ export function inspectContent(project, deck = project.deck) {
     code: 'template_visual_repetition', severity: 'warning',
     message: `${similar} 组相邻页面视觉相似度过高；应检查版式或媒体变体是否足够`, slideId: null, repairable: false });
   metrics.highSimilarityAdjacentPages = similar;
+  const densityReview = inspectDensity(project, slides);
+  issues.push(...densityReview.issues);
+  Object.assign(metrics, densityReview.metrics);
   return { issues, metrics };
 }

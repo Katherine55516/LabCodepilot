@@ -1,3 +1,4 @@
+import { visibleNodes, nodeContentText } from './ppt-visible-content.mjs';
 /** Source-grounded evidence lives in the existing semantic index. These atoms
  * are deterministic excerpts, not claims invented by the planner or writer. */
 const QUANTITY = /(?<![\p{L}\p{N}_])(?<value>\d[\d,.]*(?:\s*(?:–|-|→|to)\s*\d[\d,.]*)?)\s*(?<unit>PFLOPS|TFLOPS|FLOPS|TPS\s*\/\s*(?:GPU|user)|tokens?\s*\/\s*(?:s|sec|second|GPU|user)|GB|GiB|TB|MB|ms|milliseconds?|seconds?|bits?\s*\/\s*value|bits?|bytes?|layers?|heads?|parameters?|points?|billion|million|万|亿|%|％|×|B\b|M\b)/giu;
@@ -104,18 +105,22 @@ export function evidenceVisible(atom, text) {
 }
 
 export function visibleSlideText(slide) {
+  const nodes = slide?.nodes || [], shown = visibleNodes(slide);
+  // Test binding against all nodes: hiding every exported node cannot revive
+  // old slot/copy text. Source explanations share the exported body ownership.
+  if (nodes.some(node => node.nativeRef && ['text', 'table'].includes(node.type))) {
+    return shown.filter(node => node.nativeRef || node.sourceArtifact || node.semanticRole === 'source-explanation')
+      .map(nodeContentText).filter(Boolean).join(' ');
+  }
+  if (nodes.length) {
+    const title = nodes.some(node => node.semanticRole === 'title') ? '' : slide?.title;
+    return [title, ...shown.map(nodeContentText)].filter(Boolean).join(' ');
+  }
   const slotText = Object.values(slide?.templateSlotTexts || {}).flatMap(value => typeof value === 'string' ? [value]
     : Array.isArray(value) ? value.flatMap(item => [item.label, item.body]) : []);
-  const structured = (slide?.nodes || []).filter(node => node.sourceArtifact || node.nativeRef && node.type === 'table').flatMap(node => node.type === 'table' ? (node.content?.rows || []).flat() : node.content?.items ? node.content.items.map(item => item.text) : [node.content?.text || '']);
-  const native = (slide?.nodes || []).filter(node => node.nativeRef && node.type === 'text').map(node => node.content?.text || '');
-  const ordinary = (slide?.nodes || []).filter(node => !node.nativeRef && node.type === 'text').map(node => node.content?.text || '');
-  // After native binding only node text is exported. A stale draft slot value
-  // must never make an absent fact look visible in the published PPTX.
-  if (native.length) return [...native, ...structured].filter(Boolean).join(' ');
-  if (structured.length) return [slide?.title,...structured].filter(Boolean).join(' ');
   if (slotText.length) return [slide?.title, ...slotText].filter(Boolean).join(' ');
   return [slide?.title, slide?.copy?.subtitle, slide?.copy?.takeaway, ...(slide?.bullets || []),
-    ...(slide?.copy?.blocks || []).flatMap(block => [block.heading, block.body]), ...slotText, ...native, ...ordinary]
+    ...(slide?.copy?.blocks || []).flatMap(block => [block.heading, block.body])]
     .filter(Boolean).join(' ');
 }
 

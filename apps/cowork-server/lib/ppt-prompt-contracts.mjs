@@ -1,7 +1,9 @@
+import { densityPrompt, automaticPages } from './ppt-density-profile.mjs';
 /** Shared semantic contracts for planning, writing, review and editing.
  * Geometry budgets remain renderer-owned; word targets are writing guidance. */
 import { effectiveKnowledge } from './ppt-generation-policy.mjs';
 import { visibleSlideText } from './ppt-evidence.mjs';
+import { visibleNodes } from './ppt-visible-content.mjs';
 export const PPT_SYSTEM_PROMPT = `You are a presentation planner, writer and editor in a structured pipeline.
 Your job is to turn the supplied material into accurate, useful explanations for the specified audience.
 Follow the requested stage and JSON schema. Return one JSON value, without code fences or commentary.
@@ -52,7 +54,7 @@ export function promptPolicy(project) {
   const languageRule = project.generationPolicy && !project.editOutputLanguage
     ? 'follow the language(s) of the actual input/source material; infer from source text, retain mixed/bilingual distribution. This takes priority over language hints in brief/copy budgets; do not translate the source into English by default'
     : languageNames[language] || language;
-  return `<policy>contract_version=2; detail=${project.generationPolicy?.detail || 'legacy_auto'}; language_mode=${project.editOutputLanguage ? 'local_translation_override' : project.generationPolicy ? 'follow_input (preserve mixed/bilingual source structure and equivalent facts)' : 'legacy'}. output_language=${languageRule}.
+  return `<policy>contract_version=4; detail=${project.generationPolicy?.detail || 'legacy_auto'}; language_mode=${project.editOutputLanguage ? 'local_translation_override' : project.generationPolicy ? 'follow_input (preserve mixed/bilingual source structure and equivalent facts)' : 'legacy'}. output_language=${languageRule}.
 ${sourced
     ? 'knowledge_mode=source_only. 本项目仅使用输入及所给来源的事实；可以解释其已给出的关系与机制。具体名称、数值、阈值、公式、适用条件和限制一起保留。来源内部矛盾应标明并交给审查，不能自行编造一个答案。'
     : 'knowledge_mode=general_explanation. 本项目可以补充明确标注的通用定义、机制、对照与明确标注的示意情境；具体论文引用、年份、经验范围、测试结果和数字只有在所给材料已核实时才能当作事实。无法核实时用定性解释或评估方法。'}
@@ -65,8 +67,9 @@ export function writingGuide(project, contract = {}, native = false) {
   const cjk = ['zh', 'zh-Hant', 'ja', 'ko'].includes(outputLanguage(project));
   const deep = project.generationPolicy ? project.generationPolicy.detail === 'detailed' : contract.depth === 'detailed' || ['deep', 'very_deep'].includes(contract.pointLengthProfile);
   return `<writing>
+${densityPrompt(project)}
 每个要点＝短名称＋完整解释；解释须说明对象、如何起作用、比较关系或成立条件，至少有一个来源支持的具体锚点。锚点可以是方法名称、构造步骤、变量关系或具体情境，不必是数字。
-${cjk ? `名称通常 4–10 字，普通解释约 25–55 字，深解释约 45–90 字。` : `Labels usually 2–6 words; ordinary explanations 15–35 words; deep explanations 25–50 words.`}
+${cjk ? `名称通常 4–10 字；解释按机制、条件、比较与例子完整展开，避免统一短句预算。` : `Labels usually 2–6 words; explanations retain the complete mechanism, conditions and comparisons rather than a fixed short-sentence budget.`}
 ${deep ? '本页需要深入解释；必要时用一个主说明区解释机制，再以短支撑点展开条件、实现和对照。' : '按内容需要混合短支撑点与完整解释，封面/过渡/图示标签可更短。'}
 这些是写作建议，不是最少字数；完整而具体优先。${native ? '原生槽位的 maxVisualUnits、maxLines 和列表结构是硬限制；短 label 不是正文。大正文槽位优先承载深机制；小槽位写完整短句并分配不同事实，无法容纳的必要内容交给审查。' : '根据已规划的语义单元选择卡片、对照、步骤或真实表格；标题承诺的类别与表格关系需全部可见。'}
 范例只展示写法，不是本次来源：
@@ -185,8 +188,8 @@ export function objectWritingCapacity(project, slideId, node) {
 }
 
 export function slideSemanticContext(slide) {
-  return { title: slide.title, visibleText: visibleSlideText(slide), components: (slide.nodes || [])
-    .filter(node => ['table', 'chart'].includes(node.type) && !node.hidden)
+  return { title: slide.title, visibleText: visibleSlideText(slide), components: visibleNodes(slide)
+    .filter(node => ['table', 'chart'].includes(node.type))
     .map(node => ({ type: node.type, content: node.content, sourceRefs: node.sourceRefs || slide.sourceRefs || [] })) };
 }
 
@@ -197,7 +200,7 @@ export const OUTLINE_SCHEMA = JSON.stringify({ brief: { goal: '目标', audience
   slides: [{ section: '短章节标签', title: '标题意图', focus: '独立主张', question: '读者问题',
     keyPoints: [{ text: '具体事实及机制/条件/对照，通常 1–2 句，不是主题名', refs: ['原始来源编号'], chunkRefs: ['真实 chunk ID'] }],
     visualIntent: { type: 'none|image|comparison|pipeline|architecture|timeline|table|metric' },
-    requiredDetails: ['必须可见的公式、表格关系与条件'], requiredEvidenceIds: ['本页需要完整表达的真实 evidence ID'], chunkRefs: ['真实 chunk ID'], refs: ['原始来源编号'] }],
+    requiredDetails: ['必须可见的公式、表格关系与条件'], requiredEvidenceIds: ['本页需要完整表达的真实 evidence ID'], chunkRefs: ['真实 chunk ID'], refs: ['原始来源编号'], sourceUnitIds: ['真实 inventory item ID'], groupId: '具体问题分组ID', sourceArtifactRanges: [{ sourceUnitId: '所属真实表格ID', rowStart: 1, rowEnd: 5 }] }],
   topicGroups: [{ group_id: 'c_001', decision: 'merge|split|standalone', reason: '同一个受众问题与强关系，或不同问题/机制深度/容量要求', estimated_semantic_units: 6, layout_candidate: 'table|timeline|comparison', capacity_ok: true }],
   coverage: [{ chunkId: 'c_001', action: 'omitted', reason: '明确取舍' }] });
 
@@ -208,7 +211,8 @@ keyPoints 是后续写作者必须展开的内容承诺；给出实际要讲的�
 角色、密度和篇幅预算由代码依据用途和内容推导，无需重复输出。纯 prompt 的通用问题清单只是参考，应替换成领域特有、有内容的解释计划。
 用户另行要求（来源正文之外）：${project.prompt || '无'}。</content_plan>
 <source_inventory>${JSON.stringify(project.source?.semantic?.inventory)}</source_inventory>
-<story_decisions>Use many-to-one for connected definitions/frameworks and one-to-many for dense mechanisms. Never map headings mechanically to pages. Each page owns a question, message, semantic units, relationships and a capacity-aware structural artifact. Record merge/split/standalone and reasons; retain final sections, all table columns, equations with conditions, workflows, checklists and summaries. Preserve the confirmed page count.</story_decisions>
+<story_decisions>Use many-to-one for connected definitions/frameworks and one-to-many for dense mechanisms. Never map headings mechanically to pages. Each page owns a question, message, semantic units, relationships and a capacity-aware structural artifact. Record merge/split/standalone and reasons; retain final sections, all table columns, equations with conditions, workflows, checklists and summaries. ${automaticPages(project) ? 'Propose capacity-aware candidate pages; provisional count may change before confirmation.' : 'Preserve the confirmed page count.'}</story_decisions>
+${densityPrompt(project)}
 <source_objects>${JSON.stringify(sourceObjects(project.source))}</source_objects>
 source_objects 是完整的来源表格/表达式/代码；不要把行名清单当成关系说明。每一列的关系要由具体 keyPoints 承接，必要时分配到多个相关页面；不能只通过引用 chunk 就声称解释已完成。`;
 }
@@ -232,8 +236,8 @@ export function writerPrompt(project, slide, index, { retrieval, contract, slotC
   const citationRule = /\b(?:sources?|references?|citations?)\b|来源|参考文献|引用/iu.test(slide.title || '') && project.source?.kind === 'file'
     ? `来源页需可见输入文件名「${project.source.name}」与引用位置。` : '';
   const schema = native
-    ? { title: '标题', evidenceUsedIds: ['可见文本实际表达的真实 evidence ID'], slotTexts: { 'shape ID': '完整替换文字', '列表 shape ID': [{ label: '短名称', body: '解释' }] }, omitTemplateShapes: [{ shapeId: 123, reason: '具体不适配理由' }], sourceArtifacts: [{ sourceUnitId: '真实库存 ID', rowStart: 1, rowEnd: 5 }] }
-    : { title: '标题', eyebrow: '可选短标签', subtitle: '可选背景句', contentBlocks: [{ type: 'definition|mechanism|evidence|example|contrast|constraint|implication|stage|decision|next_step', heading: '短名称', body: '完整解释' }], takeaway: '可选综合判断', blocks: [{ type: 'table', rows: [['列名称', '列名称'], ['来源类别', '来源解释']] }], sourceArtifacts: [{sourceUnitId:'真实库存 ID',rowStart:1,rowEnd:5}], evidenceUsedIds: ['实际表达的真实 evidence ID'] };
+    ? { title: '标题', evidenceUsedIds: ['可见文本实际表达的真实 evidence ID'], slotTexts: { 'shape ID': '完整替换文字', '列表 shape ID': [{ label: '短名称', body: '解释' }] }, omitTemplateShapes: [{ shapeId: 123, reason: '具体不适配理由' }], sourceCommentary: ['结构对应的解释；无重复正文'], sourceArtifacts: [{ sourceUnitId: '真实库存 ID', rowStart: 1, rowEnd: 5 }] }
+    : { title: '标题', eyebrow: '可选短标签', subtitle: '可选背景句', contentBlocks: [{ type: 'definition|mechanism|evidence|example|contrast|constraint|implication|stage|decision|next_step', heading: '短名称', body: '完整解释' }], takeaway: '可选综合判断', blocks: [{ type: 'table', rows: [['列名称', '列名称'], ['来源类别', '来源解释']] }], sourceCommentary: ['结构对应的解释；无重复正文'], sourceArtifacts: [{sourceUnitId:'真实库存 ID',rowStart:1,rowEnd:5}], evidenceUsedIds: ['实际表达的真实 evidence ID'] };
   const old = project.update && slide.baseSlideId ? project.update.baseSnapshot.deck?.slides.find(item => item.id === slide.baseSlideId) : null;
   return `你是演示文稿文案编辑。当前任务只写第 ${index + 1} 页，共 ${project.pages} 页。
 ${promptPolicy(writingProject)}
@@ -250,7 +254,7 @@ ${old ? `<old_slide>${JSON.stringify(slideSemanticContext(old))}</old_slide>` : 
 <terminology>${JSON.stringify(project.planning?.terminology || {})}</terminology>
 <task>展开本页拥有的具体内容；相邻页 ownedPoints 是分工边界，避免全文重复。锁定证据 ID 与 requiredDetails 必须在可见文字表达完整关系与条件；上下文预算省略不等于来源没有内容。
 ${!project.source?.segments?.length ? `用户主题：${project.prompt}。使用领域特有的定义、机制和评估方法。` : ''}
-sourceArtifacts 可引用本页合同的真实库存 ID，由代码重建可编辑表格/公式/流程/清单，最多两个。表格第 0 行是表头；rowStart 从 1 开始，rowEnd 为不包含的结束索引；省略范围则保留全部行。容量不足拆到多页并重复表头，不删列、不截断单元格。结构替换正文区域，保留标题；使用 sourceArtifacts 时不要另写重复正文。
+sourceArtifacts 可引用本页合同的真实库存 ID，由代码重建可编辑表格/公式/流程/清单及来源小结。组合数量由共用字体/行高/区域容量测量决定，允许双表、清单+总结表、机制+例子；不要为同一比较轴机械拆页。本页合同指定 rowStart/rowEnd 时必须遵守该范围，避免把完整大表在分片页重复。表格第 0 行是表头；rowStart 从 1 开始，rowEnd 为不包含的结束索引，两者必须是整数，范围只能用于表格；同页同一表的范围不能重叠，其他结构不能重复引用。省略范围则保留全部行。容量不足拆到多页并重复表头，不删列、不截断单元格。结构按自然高度组合，保留标题。sourceCommentary 可补充这些结构的条件、机制或综合判断，会显示在同一区域；不能重复抄写结构、写隐藏正文或指定坐标。
 ${native ? '其他正文只输出 slotTexts；代码从语义配对派生兼容文案，不另写 contentBlocks、bullets 或 factSynthesis。' : '普通页面只输出 contentBlocks 这一份正文；bullets 由代码派生。优先引用 sourceArtifacts 保留原文表格的全部列；手写 blocks 表格兼容上限为 6 行（含表头）、4 列，不能用它静默降级更大的来源表格。'}
 不输出隐藏事实清单或候选标题。每点有不同信息职责；条件、对照和机制写完整句子，服从容量且保留已规划的具体深度。</task>
 返回唯一 JSON：${JSON.stringify(schema)}。只输出 JSON。`;
@@ -260,9 +264,13 @@ export function writerRepairPrompt(prompt, draft, issues) {
   const diagnostics = issues.slice(0, 10).map(item => ({ code: item.code || item.category, repair: item.repair,
     shapeId: item.shapeId, missingSupport: item.missingSupport || [], message: item.message || item.detail,
     suggestedFix: item.suggestedFix, reason: item.reason }));
-  return `${prompt}\n<previous_draft>${JSON.stringify({ title: draft.title, contentBlocks: draft.copy?.blocks, bullets: draft.bullets, slotTexts: draft.templateSlotTexts })}</previous_draft>
+  const nodes=draft.nodes||draft.sourceArtifactNodes||[];
+  const sourceArtifacts=nodes.filter(node=>node.sourceArtifact).map(node=>node.sourceArtifact);
+  const sourceCommentary=nodes.filter(node=>node.semanticRole==='source-explanation').map(node=>node.content?.text).filter(Boolean);
+  return `${prompt}\n<previous_draft>${JSON.stringify({ title: draft.title, contentBlocks: sourceArtifacts.length?undefined:draft.copy?.blocks, bullets: sourceArtifacts.length?undefined:draft.bullets, slotTexts: draft.templateSlotTexts,
+    sourceArtifacts:sourceArtifacts.length?sourceArtifacts:undefined,sourceCommentary:sourceCommentary.length?sourceCommentary:undefined,omitTemplateShapes:draft.templateOmissions,evidenceUsedIds:draft.evidenceUsedIds })}</previous_draft>
 <findings>${JSON.stringify(diagnostics)}</findings>
-<repair>仅重写当前页，逐项解决具体问题。补充来源已有的解释、表格关系与条件；无来源事实不能编造。标题溢出保留主张并移出背景；必要内容无法容纳须由审查报告。返回相同 schema。</repair>`;
+<repair>仅重写当前页，逐项解决具体问题。保留已有sourceArtifacts的库存ID、合同分片范围、全部列与sourceCommentary中的必要关系，不退回主题标签或不可见正文；新增解释仍必须在当前可读容量内。补充来源已有的解释、表格关系与条件；无来源事实不能编造。标题溢出保留主张并移出背景；必要内容无法容纳须由审查报告。返回相同 schema。</repair>`;
 }
 
 export function criticRewriteTargets(project, review) {

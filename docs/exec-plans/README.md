@@ -44,6 +44,7 @@
 
 | 文件 | 主题 | 状态 |
 |------|------|------|
+| completed/ppt-gamma-density-packing.md | Gamma参照密度、语义分组/容量packing、自动syllabus页数与prompt/可见QA闭环 | 本地实现与模拟/原生导出/浏览器回归完成；真实模型待验收 |
 | completed/ppt-edit-intent-proposal-integration.md | 最新原型架构接入：共用模板确认、持久 Proposal/EditIntent、页级版本协调、单页 AI 前后预览与定向撤回 | 本地实现和回归完成；真实模型/远端/打包态待环境验收 |
 | active/ppt-gamma-depth-design-editor.md | Gamma 样例驱动的内容容量页数估算、语义版式和编辑器样式优化 | 实施中 |
 | completed/ppt-alpha-mining-gamma-comparison.md | Alpha Mining 双产物对照驱动的内容深度、原生模板槽位和无关媒体治理 | 已完成，含 16 页模拟产物与分析报告 |
@@ -99,6 +100,7 @@
 
 | 文件 | 主题 | 完成日期 |
 |------|------|----------|
+| completed/ppt-gamma-density-contract-audit-20261007.md | Gamma交接核对修复：最终模板fit、严格来源分片、slot/source写作与repair、共享可见QA和评审缓存；27项核对及本地回归通过 | 2026-10-07 |
 | completed/ppt-next-round-audit-performance-content.md | PPT审计/模板IR与安全/媒体存储/来源结构/trace及Before–After；本地PPT通过，Chat/Search与生产验证限制保留 | 2026-10-03 |
 | completed/ppt-prototype-policy-chat-parity.md | PPT 最新原型对齐：模板先于输入、异步估算、策略契约、稳定多轮聊天、局部动作、尺寸与滚动；本地门禁完成，真实模型/远端/安装包待环境验收 | 2026-10-03 |
 | completed/ppt-prompt-depth-contracts.md | PPT 提示词与内容深度契约、完整来源上下文和有界 critic 重写；实现与模拟回归完成，真实 GPT A/B 待可用环境 | 2026-10-02 |

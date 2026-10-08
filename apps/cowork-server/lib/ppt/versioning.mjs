@@ -1,8 +1,10 @@
 import { digest } from './edit-context.mjs';
-export const REVIEW_RUBRIC_VERSION = 2;
+import { PPT_PROMPT_CONTRACT_VERSION } from '../ppt-generation-policy.mjs';
+export const REVIEW_RUBRIC_VERSION = 4;
 
 export function planPayload(project) {
   return { sourceRevision: project.sourceRevision || 0, sourceHash: project.source?.sha256 || digest(project.source?.text || project.prompt),
+    promptContractVersion: project.promptContractVersion, activePromptContractVersion: PPT_PROMPT_CONTRACT_VERSION, densityProfile: project.planning?.densityProfile, densityPacking: project.planning?.densityPacking,
     brief: project.planning?.brief, storyArc: project.planning?.storyArc, contracts: project.planning?.slidePlan,
     coverage: project.planning?.coverage, outline: project.outline, pageDecision: project.pageDecision,
     template: project.templateSpec, modelRef: { configId: project.configId, model: project.model } };
@@ -24,8 +26,9 @@ export function synchronizePlan(project, reason = 'planning') {
 export function semanticReviewKey(project) {
   return digest({ source: project.source?.sha256 || project.source?.text || project.prompt,
     planning: project.planning, outline: project.outline, constraints: project.constraints?.entries?.filter(entry => entry.active && ['content','title','data','structure'].includes(entry.type)),
-    slides: project.deck?.slides?.map(slide => ({ id: slide.id, role: slide.role,
-      nodes: slide.nodes?.map(node => ({ id: node.id, type: node.type, content: node.content, semanticRole: node.semanticRole })) })) });
+    slides: project.deck?.slides?.map(slide => ({ id: slide.id, role: slide.role, templateOmissions: slide.templateOmissions,
+      nodes: slide.nodes?.map(node => ({ id: node.id, type: node.type, content: node.content, semanticRole: node.semanticRole,
+        hidden: Boolean(node.hidden), opacity: Number(node.style?.opacity ?? 1), nativeRef: node.nativeRef })) })) });
 }
 
 export function invalidateReviews(project, beforeKey) {

@@ -8,6 +8,7 @@
 
 | 文件 | 主题 |
 |------|------|
+| [ppt-gamma-density-page-estimation-review-20261006.md](ppt-gamma-density-page-estimation-review-20261006.md) | 以附件Gamma密度为标准：22页不变的代码/Prompt根因、实测与控制实验、通用grouping/packing/自动页数方案及P0–P2建议 |
 | [ppt_next_round_audit.md](ppt_next_round_audit.md) | PPT全工作流/38项问题登记、模板分层限制、安全与Gamma同源内容对照 |
 | [ppt_performance_benchmark.md](ppt_performance_benchmark.md) | 七入口cold/warm、10页/22页Before–After实测、阶段耗时、Gamma公平比较及限制 |
 | [ppt_changes.md](ppt_changes.md) | 本轮代码/配置/迁移/回滚、25组PPT回归与成品证据、未通过的全仓E2E范围 |

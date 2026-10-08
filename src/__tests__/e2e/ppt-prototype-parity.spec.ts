@@ -103,6 +103,29 @@ test('PPT local translate and expand send parameters and review real proposal me
   await expect(editor.getByTestId('ppt-ai-comparison')).toHaveCount(0);
 });
 
+test('PPT source table editor uses measured column/row weights and readable header @smoke',async({page},info)=>{
+  const fixture=await setup(page);
+  const project=fixture.projects.get('9'.repeat(32))!;
+  project.status='completed';
+  // Use production Render Tree data at the editor boundary, without model calls.
+  project.renderTree.slides[0].elements.push({id:'density-table',nodeId:'density-table',kind:'table',
+    bounds:{x:914400,y:2286000,width:7315200,height:1828800},
+    content:{rows:[['Object','Condition'],['Queue','Before execution'],['Result','After review']],columnWeights:[1,3],rowWeights:[1,2,1]},
+    style:{fontSizePt:18,color:'#242a3b',fill:'#404b6b',tableHeaderColor:'#ffffff'},zIndex:500,locked:false} as any);
+  await page.getByRole('heading',{name:'Workflow fixture',exact:true}).click();
+  await page.getByRole('button',{name:'打开编辑器',exact:true}).click();
+  const table=page.getByTestId('ppt-structured-editor').locator('[data-node-id="density-table"] table');
+  await expect(table).toBeVisible();
+  expect(await table.locator('col').evaluateAll(cols=>cols.map(col=>(col as HTMLElement).style.width))).toEqual(['25%','75%']);
+  expect(await table.locator('tr').evaluateAll(rows=>rows.map(row=>(row as HTMLElement).style.height))).toEqual(['25%','50%','25%']);
+  await expect(table.locator('td').first()).toHaveCSS('color','rgb(255, 255, 255)');
+  await expect(table.locator('td').first()).toHaveCSS('background-color','rgb(64, 75, 107)');
+  const cdp=await page.context().newCDPSession(page);
+  const screenshot=await cdp.send('Page.captureScreenshot',{format:'png'});
+  await import('node:fs').then(fs=>fs.writeFileSync(info.outputPath('source-table-cdp.png'),Buffer.from(screenshot.data,'base64')));
+  await cdp.detach();
+});
+
 test('PPT editable import keeps native page count independent of a small selected template @smoke',async({page})=>{
   const fixture=await setup(page);
   await page.route('**/api/ppt/templates',route=>route.fulfill({json:{templates:[{id:'a'.repeat(32),name:'Two page native template',pages:2,kind:'uploaded',extension:'pptx',compatibility:'mapped',capabilities:{maxPages:2},sampleTitles:['Cover']}]}}));
@@ -117,4 +140,48 @@ test('PPT editable import keeps native page count independent of a small selecte
   await page.getByRole('combobox',{name:/PPTX 导入方式/}).selectOption('editable');
   await page.getByRole('button',{name:'打开并编辑 PPTX',exact:true}).click();
   await expect.poll(()=>fixture.payloads.find(p=>p.inputKind==='file')).toMatchObject({importMode:'editable',fileName:'native.pptx'});
+});
+
+test('PPT auto estimate remains provisional until syllabus confirmation @smoke', async ({page}, info) => {
+  const fixture = await setup(page); await enter(page, '粘贴文本');
+  await page.getByRole('textbox', {name:'粘贴文本', exact:true}).fill('latest topic');
+  await expect(page.getByTestId('ppt-page-count')).toHaveText('9 页');
+  const requests: Record<string, unknown>[] = [];
+  page.on('request', request => { if(request.url().includes('/api/ppt/page-estimate') && request.method()==='POST') requests.push(request.postDataJSON()); });
+  await page.getByRole('combobox', {name:'内容详细程度'}).selectOption('detailed');
+  await expect.poll(() => requests.length).toBeGreaterThan(0);
+  expect(requests.at(-1)).toMatchObject({template:'light', generationPolicy:{detail:'detailed'}});
+  await page.getByRole('button', {name:'生成 Syllabus', exact:true}).click();
+  await expect(page.getByRole('textbox', {name:'大纲标题 8', exact:true})).toBeVisible();
+  expect(fixture.payloads.find(p => p.inputKind === 'paste')).not.toHaveProperty('pages');
+  await expect(page.getByTestId('ppt-page-count')).toHaveText('8 页');
+  const cdp = await page.context().newCDPSession(page);
+  const state = await cdp.send('Runtime.evaluate', {expression:'document.querySelector(".ppt-create-body").scrollHeight > 0', returnByValue:true});
+  expect(state.result.value).toBe(true);
+  const screenshot = await cdp.send('Page.captureScreenshot', {format:'png'});
+  await import('node:fs').then(fs => fs.writeFileSync(info.outputPath('auto-calibrated-cdp.png'), Buffer.from(screenshot.data,'base64')));
+  await cdp.detach();
+  await page.screenshot({path:info.outputPath('auto-calibrated-syllabus.png'), fullPage:true});
+  await page.getByRole('button', {name:'确认 Syllabus 并开始生成'}).click();
+  expect(fixture.payloads.find(p => p.action === 'outline')).toMatchObject({finalPageCount:8});
+});
+
+test('PPT template capacity changes invalidate provisional syllabus and estimate @smoke', async ({page}) => {
+  await setup(page);
+  const requests: string[] = [];
+  await page.route('**/api/ppt/page-estimate', async route => {
+    const body = route.request().postDataJSON(); requests.push(body.template);
+    await route.fulfill({json:{recommendation:{recommended:body.template==='blue'?6:9,min:3,max:15,reason:'Capacity fixture'}}});
+  });
+  await enter(page, '粘贴文本');
+  await page.getByRole('textbox', {name:'粘贴文本', exact:true}).fill('Conditions and the decision mechanism.');
+  await expect(page.getByTestId('ppt-page-count')).toHaveText('9 页');
+  await page.getByRole('button', {name:'生成 Syllabus', exact:true}).click();
+  await expect(page.getByRole('textbox', {name:'大纲标题 8', exact:true})).toBeVisible();
+  await page.getByRole('button', {name:'← 返回模板'}).click();
+  await page.getByRole('button', {name:/Blue template/}).click();
+  await page.getByRole('button', {name:'下一步：输入内容 →'}).click();
+  await expect(page.getByTestId('ppt-page-count')).toHaveText('6 页');
+  await expect(page.getByRole('textbox', {name:'大纲标题 8', exact:true})).toHaveCount(0);
+  expect(requests).toContain('blue');
 });

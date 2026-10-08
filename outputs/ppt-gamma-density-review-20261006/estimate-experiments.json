@@ -1,0 +1,1502 @@
+{
+  "sourcePath": "/Users/dongli/Documents/quant_research/quant_3.0/04_factor_zoo_overview.md",
+  "records": [
+    {
+      "name": "baseline",
+      "recommended": 22,
+      "range": [
+        18,
+        26
+      ],
+      "selected": 22,
+      "reason": "检测到 15 个内容章节和 20133 个来源 token；按每页可读容量并为公式、代码和表格留空间",
+      "estimationBasis": "readable_content_capacity",
+      "inputProfile": {
+        "level": "rich",
+        "tokenCount": 5593,
+        "paragraphCount": 218,
+        "headingCount": 51,
+        "numberCount": 232,
+        "exampleCount": 7,
+        "mechanismCount": 3,
+        "constraintCount": 107,
+        "claimCount": 334,
+        "semanticUnitCount": 60,
+        "richnessScore": 9257
+      },
+      "contentCost": 23653,
+      "preservedObjects": [
+        "formula",
+        "table",
+        "diagram"
+      ],
+      "sectionAllocation": [
+        {
+          "title": "Tutorial 04 — The Factor Zoo: Theory and Taxonomy of Equity Factors | 因子动物园：股票因子的理论与分类",
+          "slides": 0,
+          "sourceTokens": 550,
+          "objects": []
+        },
+        {
+          "title": "1. What Is a Factor? | 什么是因子？",
+          "slides": 2,
+          "sourceTokens": 2796,
+          "objects": [
+            "formula",
+            "table",
+            "diagram"
+          ]
+        },
+        {
+          "title": "2. Theoretical Lineage | 理论谱系",
+          "slides": 6,
+          "sourceTokens": 12105,
+          "objects": [
+            "formula",
+            "table"
+          ]
+        },
+        {
+          "title": "3. Time-Series vs. Cross-Sectional Models and the GRS Test | 时间序列模型与截面模型、GRS 检验",
+          "slides": 1,
+          "sourceTokens": 589,
+          "objects": [
+            "formula"
+          ]
+        },
+        {
+          "title": "4. Why Do Factors Earn Premia? | 因子为何能获得溢价？",
+          "slides": 1,
+          "sourceTokens": 371,
+          "objects": []
+        },
+        {
+          "title": "5. The Factor Zoo Problem | 因子动物园问题",
+          "slides": 1,
+          "sourceTokens": 391,
+          "objects": []
+        },
+        {
+          "title": "6. Risk vs. Mispricing vs. Data-Mining — A Factor-by-Factor Scorecard | 风险、错误定价与数据挖掘——逐因子评分卡",
+          "slides": 1,
+          "sourceTokens": 319,
+          "objects": [
+            "table"
+          ]
+        },
+        {
+          "title": "7. Factor Taxonomy — The Master Table | 因子分类总表",
+          "slides": 1,
+          "sourceTokens": 242,
+          "objects": [
+            "table"
+          ]
+        },
+        {
+          "title": "8. Styles of Factor Portfolio Construction | 因子组合构建方式",
+          "slides": 1,
+          "sourceTokens": 371,
+          "objects": []
+        },
+        {
+          "title": "9. Factor Timing and Factor Crowding | 因子择时与因子拥挤",
+          "slides": 1,
+          "sourceTokens": 410,
+          "objects": []
+        },
+        {
+          "title": "10. Factors in the US vs A-Shares | 美股与 A 股的因子表现对比",
+          "slides": 1,
+          "sourceTokens": 381,
+          "objects": []
+        },
+        {
+          "title": "11. Worked Example: A 2×3 Sort on a 12-Stock Toy Universe | 算例：12 只股票玩具宇宙上的 2×3 分组",
+          "slides": 1,
+          "sourceTokens": 383,
+          "objects": [
+            "formula"
+          ]
+        },
+        {
+          "title": "12. From Factors to Strategies | 从因子到策略",
+          "slides": 1,
+          "sourceTokens": 340,
+          "objects": [
+            "diagram"
+          ]
+        },
+        {
+          "title": "13. Practical Checklist: What Makes a Good Factor | 实践清单：什么才是好因子",
+          "slides": 1,
+          "sourceTokens": 270,
+          "objects": []
+        },
+        {
+          "title": "14. Summary | 小结",
+          "slides": 1,
+          "sourceTokens": 615,
+          "objects": [
+            "table"
+          ]
+        }
+      ],
+      "depthPolicy": "strict",
+      "compressionRisk": false,
+      "feasibleWithoutCompression": true,
+      "evidenceUnits": 57,
+      "independentSections": 23,
+      "evidenceThin": false,
+      "projectionRisk": false,
+      "userConfirmed": true
+    },
+    {
+      "name": "balanced",
+      "recommended": 22,
+      "range": [
+        18,
+        26
+      ],
+      "selected": 22,
+      "reason": "检测到 15 个内容章节和 20133 个来源 token；按每页可读容量并为公式、代码和表格留空间",
+      "estimationBasis": "readable_content_capacity",
+      "inputProfile": {
+        "level": "rich",
+        "tokenCount": 5593,
+        "paragraphCount": 218,
+        "headingCount": 51,
+        "numberCount": 232,
+        "exampleCount": 7,
+        "mechanismCount": 3,
+        "constraintCount": 107,
+        "claimCount": 334,
+        "semanticUnitCount": 60,
+        "richnessScore": 9257
+      },
+      "contentCost": 23653,
+      "preservedObjects": [
+        "formula",
+        "table",
+        "diagram"
+      ],
+      "sectionAllocation": [
+        {
+          "title": "Tutorial 04 — The Factor Zoo: Theory and Taxonomy of Equity Factors | 因子动物园：股票因子的理论与分类",
+          "slides": 0,
+          "sourceTokens": 550,
+          "objects": []
+        },
+        {
+          "title": "1. What Is a Factor? | 什么是因子？",
+          "slides": 2,
+          "sourceTokens": 2796,
+          "objects": [
+            "formula",
+            "table",
+            "diagram"
+          ]
+        },
+        {
+          "title": "2. Theoretical Lineage | 理论谱系",
+          "slides": 6,
+          "sourceTokens": 12105,
+          "objects": [
+            "formula",
+            "table"
+          ]
+        },
+        {
+          "title": "3. Time-Series vs. Cross-Sectional Models and the GRS Test | 时间序列模型与截面模型、GRS 检验",
+          "slides": 1,
+          "sourceTokens": 589,
+          "objects": [
+            "formula"
+          ]
+        },
+        {
+          "title": "4. Why Do Factors Earn Premia? | 因子为何能获得溢价？",
+          "slides": 1,
+          "sourceTokens": 371,
+          "objects": []
+        },
+        {
+          "title": "5. The Factor Zoo Problem | 因子动物园问题",
+          "slides": 1,
+          "sourceTokens": 391,
+          "objects": []
+        },
+        {
+          "title": "6. Risk vs. Mispricing vs. Data-Mining — A Factor-by-Factor Scorecard | 风险、错误定价与数据挖掘——逐因子评分卡",
+          "slides": 1,
+          "sourceTokens": 319,
+          "objects": [
+            "table"
+          ]
+        },
+        {
+          "title": "7. Factor Taxonomy — The Master Table | 因子分类总表",
+          "slides": 1,
+          "sourceTokens": 242,
+          "objects": [
+            "table"
+          ]
+        },
+        {
+          "title": "8. Styles of Factor Portfolio Construction | 因子组合构建方式",
+          "slides": 1,
+          "sourceTokens": 371,
+          "objects": []
+        },
+        {
+          "title": "9. Factor Timing and Factor Crowding | 因子择时与因子拥挤",
+          "slides": 1,
+          "sourceTokens": 410,
+          "objects": []
+        },
+        {
+          "title": "10. Factors in the US vs A-Shares | 美股与 A 股的因子表现对比",
+          "slides": 1,
+          "sourceTokens": 381,
+          "objects": []
+        },
+        {
+          "title": "11. Worked Example: A 2×3 Sort on a 12-Stock Toy Universe | 算例：12 只股票玩具宇宙上的 2×3 分组",
+          "slides": 1,
+          "sourceTokens": 383,
+          "objects": [
+            "formula"
+          ]
+        },
+        {
+          "title": "12. From Factors to Strategies | 从因子到策略",
+          "slides": 1,
+          "sourceTokens": 340,
+          "objects": [
+            "diagram"
+          ]
+        },
+        {
+          "title": "13. Practical Checklist: What Makes a Good Factor | 实践清单：什么才是好因子",
+          "slides": 1,
+          "sourceTokens": 270,
+          "objects": []
+        },
+        {
+          "title": "14. Summary | 小结",
+          "slides": 1,
+          "sourceTokens": 615,
+          "objects": [
+            "table"
+          ]
+        }
+      ],
+      "depthPolicy": "strict",
+      "compressionRisk": false,
+      "feasibleWithoutCompression": true,
+      "evidenceUnits": 57,
+      "independentSections": 23,
+      "evidenceThin": false,
+      "projectionRisk": false,
+      "userConfirmed": true
+    },
+    {
+      "name": "detailed",
+      "recommended": 22,
+      "range": [
+        18,
+        26
+      ],
+      "selected": 22,
+      "reason": "检测到 15 个内容章节和 20133 个来源 token；按每页可读容量并为公式、代码和表格留空间",
+      "estimationBasis": "readable_content_capacity",
+      "inputProfile": {
+        "level": "rich",
+        "tokenCount": 5593,
+        "paragraphCount": 218,
+        "headingCount": 51,
+        "numberCount": 232,
+        "exampleCount": 7,
+        "mechanismCount": 3,
+        "constraintCount": 107,
+        "claimCount": 334,
+        "semanticUnitCount": 60,
+        "richnessScore": 9257
+      },
+      "contentCost": 23653,
+      "preservedObjects": [
+        "formula",
+        "table",
+        "diagram"
+      ],
+      "sectionAllocation": [
+        {
+          "title": "Tutorial 04 — The Factor Zoo: Theory and Taxonomy of Equity Factors | 因子动物园：股票因子的理论与分类",
+          "slides": 0,
+          "sourceTokens": 550,
+          "objects": []
+        },
+        {
+          "title": "1. What Is a Factor? | 什么是因子？",
+          "slides": 2,
+          "sourceTokens": 2796,
+          "objects": [
+            "formula",
+            "table",
+            "diagram"
+          ]
+        },
+        {
+          "title": "2. Theoretical Lineage | 理论谱系",
+          "slides": 6,
+          "sourceTokens": 12105,
+          "objects": [
+            "formula",
+            "table"
+          ]
+        },
+        {
+          "title": "3. Time-Series vs. Cross-Sectional Models and the GRS Test | 时间序列模型与截面模型、GRS 检验",
+          "slides": 1,
+          "sourceTokens": 589,
+          "objects": [
+            "formula"
+          ]
+        },
+        {
+          "title": "4. Why Do Factors Earn Premia? | 因子为何能获得溢价？",
+          "slides": 1,
+          "sourceTokens": 371,
+          "objects": []
+        },
+        {
+          "title": "5. The Factor Zoo Problem | 因子动物园问题",
+          "slides": 1,
+          "sourceTokens": 391,
+          "objects": []
+        },
+        {
+          "title": "6. Risk vs. Mispricing vs. Data-Mining — A Factor-by-Factor Scorecard | 风险、错误定价与数据挖掘——逐因子评分卡",
+          "slides": 1,
+          "sourceTokens": 319,
+          "objects": [
+            "table"
+          ]
+        },
+        {
+          "title": "7. Factor Taxonomy — The Master Table | 因子分类总表",
+          "slides": 1,
+          "sourceTokens": 242,
+          "objects": [
+            "table"
+          ]
+        },
+        {
+          "title": "8. Styles of Factor Portfolio Construction | 因子组合构建方式",
+          "slides": 1,
+          "sourceTokens": 371,
+          "objects": []
+        },
+        {
+          "title": "9. Factor Timing and Factor Crowding | 因子择时与因子拥挤",
+          "slides": 1,
+          "sourceTokens": 410,
+          "objects": []
+        },
+        {
+          "title": "10. Factors in the US vs A-Shares | 美股与 A 股的因子表现对比",
+          "slides": 1,
+          "sourceTokens": 381,
+          "objects": []
+        },
+        {
+          "title": "11. Worked Example: A 2×3 Sort on a 12-Stock Toy Universe | 算例：12 只股票玩具宇宙上的 2×3 分组",
+          "slides": 1,
+          "sourceTokens": 383,
+          "objects": [
+            "formula"
+          ]
+        },
+        {
+          "title": "12. From Factors to Strategies | 从因子到策略",
+          "slides": 1,
+          "sourceTokens": 340,
+          "objects": [
+            "diagram"
+          ]
+        },
+        {
+          "title": "13. Practical Checklist: What Makes a Good Factor | 实践清单：什么才是好因子",
+          "slides": 1,
+          "sourceTokens": 270,
+          "objects": []
+        },
+        {
+          "title": "14. Summary | 小结",
+          "slides": 1,
+          "sourceTokens": 615,
+          "objects": [
+            "table"
+          ]
+        }
+      ],
+      "depthPolicy": "strict",
+      "compressionRisk": false,
+      "feasibleWithoutCompression": true,
+      "evidenceUnits": 57,
+      "independentSections": 23,
+      "evidenceThin": false,
+      "projectionRisk": false,
+      "userConfirmed": true
+    },
+    {
+      "name": "template_pages_8",
+      "recommended": 22,
+      "range": [
+        18,
+        26
+      ],
+      "selected": 22,
+      "reason": "检测到 15 个内容章节和 20133 个来源 token；按每页可读容量并为公式、代码和表格留空间",
+      "estimationBasis": "readable_content_capacity",
+      "inputProfile": {
+        "level": "rich",
+        "tokenCount": 5593,
+        "paragraphCount": 218,
+        "headingCount": 51,
+        "numberCount": 232,
+        "exampleCount": 7,
+        "mechanismCount": 3,
+        "constraintCount": 107,
+        "claimCount": 334,
+        "semanticUnitCount": 60,
+        "richnessScore": 9257
+      },
+      "contentCost": 23653,
+      "preservedObjects": [
+        "formula",
+        "table",
+        "diagram"
+      ],
+      "sectionAllocation": [
+        {
+          "title": "Tutorial 04 — The Factor Zoo: Theory and Taxonomy of Equity Factors | 因子动物园：股票因子的理论与分类",
+          "slides": 0,
+          "sourceTokens": 550,
+          "objects": []
+        },
+        {
+          "title": "1. What Is a Factor? | 什么是因子？",
+          "slides": 2,
+          "sourceTokens": 2796,
+          "objects": [
+            "formula",
+            "table",
+            "diagram"
+          ]
+        },
+        {
+          "title": "2. Theoretical Lineage | 理论谱系",
+          "slides": 6,
+          "sourceTokens": 12105,
+          "objects": [
+            "formula",
+            "table"
+          ]
+        },
+        {
+          "title": "3. Time-Series vs. Cross-Sectional Models and the GRS Test | 时间序列模型与截面模型、GRS 检验",
+          "slides": 1,
+          "sourceTokens": 589,
+          "objects": [
+            "formula"
+          ]
+        },
+        {
+          "title": "4. Why Do Factors Earn Premia? | 因子为何能获得溢价？",
+          "slides": 1,
+          "sourceTokens": 371,
+          "objects": []
+        },
+        {
+          "title": "5. The Factor Zoo Problem | 因子动物园问题",
+          "slides": 1,
+          "sourceTokens": 391,
+          "objects": []
+        },
+        {
+          "title": "6. Risk vs. Mispricing vs. Data-Mining — A Factor-by-Factor Scorecard | 风险、错误定价与数据挖掘——逐因子评分卡",
+          "slides": 1,
+          "sourceTokens": 319,
+          "objects": [
+            "table"
+          ]
+        },
+        {
+          "title": "7. Factor Taxonomy — The Master Table | 因子分类总表",
+          "slides": 1,
+          "sourceTokens": 242,
+          "objects": [
+            "table"
+          ]
+        },
+        {
+          "title": "8. Styles of Factor Portfolio Construction | 因子组合构建方式",
+          "slides": 1,
+          "sourceTokens": 371,
+          "objects": []
+        },
+        {
+          "title": "9. Factor Timing and Factor Crowding | 因子择时与因子拥挤",
+          "slides": 1,
+          "sourceTokens": 410,
+          "objects": []
+        },
+        {
+          "title": "10. Factors in the US vs A-Shares | 美股与 A 股的因子表现对比",
+          "slides": 1,
+          "sourceTokens": 381,
+          "objects": []
+        },
+        {
+          "title": "11. Worked Example: A 2×3 Sort on a 12-Stock Toy Universe | 算例：12 只股票玩具宇宙上的 2×3 分组",
+          "slides": 1,
+          "sourceTokens": 383,
+          "objects": [
+            "formula"
+          ]
+        },
+        {
+          "title": "12. From Factors to Strategies | 从因子到策略",
+          "slides": 1,
+          "sourceTokens": 340,
+          "objects": [
+            "diagram"
+          ]
+        },
+        {
+          "title": "13. Practical Checklist: What Makes a Good Factor | 实践清单：什么才是好因子",
+          "slides": 1,
+          "sourceTokens": 270,
+          "objects": []
+        },
+        {
+          "title": "14. Summary | 小结",
+          "slides": 1,
+          "sourceTokens": 615,
+          "objects": [
+            "table"
+          ]
+        }
+      ],
+      "depthPolicy": "strict",
+      "compressionRisk": false,
+      "feasibleWithoutCompression": true,
+      "evidenceUnits": 57,
+      "independentSections": 23,
+      "evidenceThin": false,
+      "projectionRisk": false,
+      "userConfirmed": true
+    },
+    {
+      "name": "template_pages_10",
+      "recommended": 22,
+      "range": [
+        18,
+        26
+      ],
+      "selected": 22,
+      "reason": "检测到 15 个内容章节和 20133 个来源 token；按每页可读容量并为公式、代码和表格留空间",
+      "estimationBasis": "readable_content_capacity",
+      "inputProfile": {
+        "level": "rich",
+        "tokenCount": 5593,
+        "paragraphCount": 218,
+        "headingCount": 51,
+        "numberCount": 232,
+        "exampleCount": 7,
+        "mechanismCount": 3,
+        "constraintCount": 107,
+        "claimCount": 334,
+        "semanticUnitCount": 60,
+        "richnessScore": 9257
+      },
+      "contentCost": 23653,
+      "preservedObjects": [
+        "formula",
+        "table",
+        "diagram"
+      ],
+      "sectionAllocation": [
+        {
+          "title": "Tutorial 04 — The Factor Zoo: Theory and Taxonomy of Equity Factors | 因子动物园：股票因子的理论与分类",
+          "slides": 0,
+          "sourceTokens": 550,
+          "objects": []
+        },
+        {
+          "title": "1. What Is a Factor? | 什么是因子？",
+          "slides": 2,
+          "sourceTokens": 2796,
+          "objects": [
+            "formula",
+            "table",
+            "diagram"
+          ]
+        },
+        {
+          "title": "2. Theoretical Lineage | 理论谱系",
+          "slides": 6,
+          "sourceTokens": 12105,
+          "objects": [
+            "formula",
+            "table"
+          ]
+        },
+        {
+          "title": "3. Time-Series vs. Cross-Sectional Models and the GRS Test | 时间序列模型与截面模型、GRS 检验",
+          "slides": 1,
+          "sourceTokens": 589,
+          "objects": [
+            "formula"
+          ]
+        },
+        {
+          "title": "4. Why Do Factors Earn Premia? | 因子为何能获得溢价？",
+          "slides": 1,
+          "sourceTokens": 371,
+          "objects": []
+        },
+        {
+          "title": "5. The Factor Zoo Problem | 因子动物园问题",
+          "slides": 1,
+          "sourceTokens": 391,
+          "objects": []
+        },
+        {
+          "title": "6. Risk vs. Mispricing vs. Data-Mining — A Factor-by-Factor Scorecard | 风险、错误定价与数据挖掘——逐因子评分卡",
+          "slides": 1,
+          "sourceTokens": 319,
+          "objects": [
+            "table"
+          ]
+        },
+        {
+          "title": "7. Factor Taxonomy — The Master Table | 因子分类总表",
+          "slides": 1,
+          "sourceTokens": 242,
+          "objects": [
+            "table"
+          ]
+        },
+        {
+          "title": "8. Styles of Factor Portfolio Construction | 因子组合构建方式",
+          "slides": 1,
+          "sourceTokens": 371,
+          "objects": []
+        },
+        {
+          "title": "9. Factor Timing and Factor Crowding | 因子择时与因子拥挤",
+          "slides": 1,
+          "sourceTokens": 410,
+          "objects": []
+        },
+        {
+          "title": "10. Factors in the US vs A-Shares | 美股与 A 股的因子表现对比",
+          "slides": 1,
+          "sourceTokens": 381,
+          "objects": []
+        },
+        {
+          "title": "11. Worked Example: A 2×3 Sort on a 12-Stock Toy Universe | 算例：12 只股票玩具宇宙上的 2×3 分组",
+          "slides": 1,
+          "sourceTokens": 383,
+          "objects": [
+            "formula"
+          ]
+        },
+        {
+          "title": "12. From Factors to Strategies | 从因子到策略",
+          "slides": 1,
+          "sourceTokens": 340,
+          "objects": [
+            "diagram"
+          ]
+        },
+        {
+          "title": "13. Practical Checklist: What Makes a Good Factor | 实践清单：什么才是好因子",
+          "slides": 1,
+          "sourceTokens": 270,
+          "objects": []
+        },
+        {
+          "title": "14. Summary | 小结",
+          "slides": 1,
+          "sourceTokens": 615,
+          "objects": [
+            "table"
+          ]
+        }
+      ],
+      "depthPolicy": "strict",
+      "compressionRisk": false,
+      "feasibleWithoutCompression": true,
+      "evidenceUnits": 57,
+      "independentSections": 23,
+      "evidenceThin": false,
+      "projectionRisk": false,
+      "userConfirmed": true
+    },
+    {
+      "name": "selected_pages_10",
+      "recommended": 22,
+      "range": [
+        18,
+        26
+      ],
+      "selected": 10,
+      "reason": "检测到 15 个内容章节和 20133 个来源 token；按每页可读容量并为公式、代码和表格留空间",
+      "estimationBasis": "readable_content_capacity",
+      "inputProfile": {
+        "level": "rich",
+        "tokenCount": 5593,
+        "paragraphCount": 218,
+        "headingCount": 51,
+        "numberCount": 232,
+        "exampleCount": 7,
+        "mechanismCount": 3,
+        "constraintCount": 107,
+        "claimCount": 334,
+        "semanticUnitCount": 60,
+        "richnessScore": 9257
+      },
+      "contentCost": 23653,
+      "preservedObjects": [
+        "formula",
+        "table",
+        "diagram"
+      ],
+      "sectionAllocation": [
+        {
+          "title": "Tutorial 04 — The Factor Zoo: Theory and Taxonomy of Equity Factors | 因子动物园：股票因子的理论与分类",
+          "slides": 0,
+          "sourceTokens": 550,
+          "objects": []
+        },
+        {
+          "title": "1. What Is a Factor? | 什么是因子？",
+          "slides": 1,
+          "sourceTokens": 2796,
+          "objects": [
+            "formula",
+            "table",
+            "diagram"
+          ]
+        },
+        {
+          "title": "2. Theoretical Lineage | 理论谱系",
+          "slides": 1,
+          "sourceTokens": 12105,
+          "objects": [
+            "formula",
+            "table"
+          ]
+        },
+        {
+          "title": "3. Time-Series vs. Cross-Sectional Models and the GRS Test | 时间序列模型与截面模型、GRS 检验",
+          "slides": 1,
+          "sourceTokens": 589,
+          "objects": [
+            "formula"
+          ]
+        },
+        {
+          "title": "4. Why Do Factors Earn Premia? | 因子为何能获得溢价？",
+          "slides": 0,
+          "sourceTokens": 371,
+          "objects": []
+        },
+        {
+          "title": "5. The Factor Zoo Problem | 因子动物园问题",
+          "slides": 0,
+          "sourceTokens": 391,
+          "objects": []
+        },
+        {
+          "title": "6. Risk vs. Mispricing vs. Data-Mining — A Factor-by-Factor Scorecard | 风险、错误定价与数据挖掘——逐因子评分卡",
+          "slides": 1,
+          "sourceTokens": 319,
+          "objects": [
+            "table"
+          ]
+        },
+        {
+          "title": "7. Factor Taxonomy — The Master Table | 因子分类总表",
+          "slides": 0,
+          "sourceTokens": 242,
+          "objects": [
+            "table"
+          ]
+        },
+        {
+          "title": "8. Styles of Factor Portfolio Construction | 因子组合构建方式",
+          "slides": 0,
+          "sourceTokens": 371,
+          "objects": []
+        },
+        {
+          "title": "9. Factor Timing and Factor Crowding | 因子择时与因子拥挤",
+          "slides": 0,
+          "sourceTokens": 410,
+          "objects": []
+        },
+        {
+          "title": "10. Factors in the US vs A-Shares | 美股与 A 股的因子表现对比",
+          "slides": 1,
+          "sourceTokens": 381,
+          "objects": []
+        },
+        {
+          "title": "11. Worked Example: A 2×3 Sort on a 12-Stock Toy Universe | 算例：12 只股票玩具宇宙上的 2×3 分组",
+          "slides": 1,
+          "sourceTokens": 383,
+          "objects": [
+            "formula"
+          ]
+        },
+        {
+          "title": "12. From Factors to Strategies | 从因子到策略",
+          "slides": 1,
+          "sourceTokens": 340,
+          "objects": [
+            "diagram"
+          ]
+        },
+        {
+          "title": "13. Practical Checklist: What Makes a Good Factor | 实践清单：什么才是好因子",
+          "slides": 0,
+          "sourceTokens": 270,
+          "objects": []
+        },
+        {
+          "title": "14. Summary | 小结",
+          "slides": 1,
+          "sourceTokens": 615,
+          "objects": [
+            "table"
+          ]
+        }
+      ],
+      "depthPolicy": "strict",
+      "compressionRisk": true,
+      "feasibleWithoutCompression": false,
+      "evidenceUnits": 57,
+      "independentSections": 23,
+      "evidenceThin": false,
+      "projectionRisk": false,
+      "userConfirmed": true
+    },
+    {
+      "name": "explicit_overview",
+      "recommended": 10,
+      "range": [
+        8,
+        12
+      ],
+      "selected": 10,
+      "reason": "检测到 14 个主章节；按概览用途将相关章节合并，详细推导仍需标注取舍",
+      "estimationBasis": "overview_chapters",
+      "inputProfile": {
+        "level": "rich",
+        "tokenCount": 5593,
+        "paragraphCount": 218,
+        "headingCount": 51,
+        "numberCount": 232,
+        "exampleCount": 7,
+        "mechanismCount": 3,
+        "constraintCount": 107,
+        "claimCount": 334,
+        "semanticUnitCount": 60,
+        "richnessScore": 9257
+      },
+      "contentCost": 23653,
+      "preservedObjects": [
+        "formula",
+        "table",
+        "diagram"
+      ],
+      "sectionAllocation": [
+        {
+          "title": "Tutorial 04 — The Factor Zoo: Theory and Taxonomy of Equity Factors | 因子动物园：股票因子的理论与分类",
+          "slides": 0,
+          "sourceTokens": 550,
+          "objects": []
+        },
+        {
+          "title": "1. What Is a Factor? | 什么是因子？",
+          "slides": 2,
+          "sourceTokens": 2796,
+          "objects": [
+            "formula",
+            "table",
+            "diagram"
+          ]
+        },
+        {
+          "title": "2. Theoretical Lineage | 理论谱系",
+          "slides": 6,
+          "sourceTokens": 12105,
+          "objects": [
+            "formula",
+            "table"
+          ]
+        },
+        {
+          "title": "3. Time-Series vs. Cross-Sectional Models and the GRS Test | 时间序列模型与截面模型、GRS 检验",
+          "slides": 1,
+          "sourceTokens": 589,
+          "objects": [
+            "formula"
+          ]
+        },
+        {
+          "title": "4. Why Do Factors Earn Premia? | 因子为何能获得溢价？",
+          "slides": 1,
+          "sourceTokens": 371,
+          "objects": []
+        },
+        {
+          "title": "5. The Factor Zoo Problem | 因子动物园问题",
+          "slides": 1,
+          "sourceTokens": 391,
+          "objects": []
+        },
+        {
+          "title": "6. Risk vs. Mispricing vs. Data-Mining — A Factor-by-Factor Scorecard | 风险、错误定价与数据挖掘——逐因子评分卡",
+          "slides": 1,
+          "sourceTokens": 319,
+          "objects": [
+            "table"
+          ]
+        },
+        {
+          "title": "7. Factor Taxonomy — The Master Table | 因子分类总表",
+          "slides": 1,
+          "sourceTokens": 242,
+          "objects": [
+            "table"
+          ]
+        },
+        {
+          "title": "8. Styles of Factor Portfolio Construction | 因子组合构建方式",
+          "slides": 1,
+          "sourceTokens": 371,
+          "objects": []
+        },
+        {
+          "title": "9. Factor Timing and Factor Crowding | 因子择时与因子拥挤",
+          "slides": 1,
+          "sourceTokens": 410,
+          "objects": []
+        },
+        {
+          "title": "10. Factors in the US vs A-Shares | 美股与 A 股的因子表现对比",
+          "slides": 1,
+          "sourceTokens": 381,
+          "objects": []
+        },
+        {
+          "title": "11. Worked Example: A 2×3 Sort on a 12-Stock Toy Universe | 算例：12 只股票玩具宇宙上的 2×3 分组",
+          "slides": 1,
+          "sourceTokens": 383,
+          "objects": [
+            "formula"
+          ]
+        },
+        {
+          "title": "12. From Factors to Strategies | 从因子到策略",
+          "slides": 1,
+          "sourceTokens": 340,
+          "objects": [
+            "diagram"
+          ]
+        },
+        {
+          "title": "13. Practical Checklist: What Makes a Good Factor | 实践清单：什么才是好因子",
+          "slides": 1,
+          "sourceTokens": 270,
+          "objects": []
+        },
+        {
+          "title": "14. Summary | 小结",
+          "slides": 1,
+          "sourceTokens": 615,
+          "objects": [
+            "table"
+          ]
+        }
+      ],
+      "depthPolicy": "balanced",
+      "compressionRisk": false,
+      "feasibleWithoutCompression": true,
+      "evidenceUnits": 57,
+      "independentSections": 23,
+      "evidenceThin": false,
+      "projectionRisk": false,
+      "userConfirmed": true
+    },
+    {
+      "name": "prompt_kind_same_full_text",
+      "recommended": 27,
+      "range": [
+        22,
+        32
+      ],
+      "selected": 27,
+      "reason": "检测到 27 个语义主题、29 个实现或约束信号",
+      "estimationBasis": "source_structure",
+      "inputProfile": {
+        "level": "rich",
+        "tokenCount": 5593,
+        "paragraphCount": 218,
+        "headingCount": 51,
+        "numberCount": 232,
+        "exampleCount": 7,
+        "mechanismCount": 3,
+        "constraintCount": 107,
+        "claimCount": 334,
+        "semanticUnitCount": 0,
+        "richnessScore": 8057
+      },
+      "depthPolicy": "flexible",
+      "compressionRisk": false,
+      "feasibleWithoutCompression": true,
+      "evidenceUnits": 0,
+      "independentSections": 27,
+      "evidenceThin": false,
+      "projectionRisk": false,
+      "userConfirmed": true
+    },
+    {
+      "name": "legal_10k_prompt",
+      "recommended": 10,
+      "range": [
+        8,
+        12
+      ],
+      "selected": 10,
+      "reason": "检测到 8 个语义主题、4 个实现或约束信号",
+      "estimationBasis": "source_structure",
+      "inputProfile": {
+        "level": "rich",
+        "tokenCount": 1424,
+        "paragraphCount": 44,
+        "headingCount": 22,
+        "numberCount": 70,
+        "exampleCount": 2,
+        "mechanismCount": 0,
+        "constraintCount": 42,
+        "claimCount": 85,
+        "semanticUnitCount": 0,
+        "richnessScore": 2148
+      },
+      "depthPolicy": "flexible",
+      "compressionRisk": false,
+      "feasibleWithoutCompression": true,
+      "evidenceUnits": 0,
+      "independentSections": 8,
+      "evidenceThin": false,
+      "projectionRisk": false,
+      "userConfirmed": true
+    },
+    {
+      "name": "legal_10k_paste",
+      "recommended": 5,
+      "range": [
+        3,
+        7
+      ],
+      "selected": 5,
+      "reason": "检测到 3 个内容章节和 4816 个来源 token；按每页可读容量并为公式、代码和表格留空间",
+      "estimationBasis": "readable_content_capacity",
+      "inputProfile": {
+        "level": "rich",
+        "tokenCount": 1424,
+        "paragraphCount": 44,
+        "headingCount": 22,
+        "numberCount": 70,
+        "exampleCount": 2,
+        "mechanismCount": 0,
+        "constraintCount": 42,
+        "claimCount": 85,
+        "semanticUnitCount": 13,
+        "richnessScore": 2408
+      },
+      "contentCost": 5936,
+      "preservedObjects": [
+        "formula",
+        "table",
+        "diagram"
+      ],
+      "sectionAllocation": [
+        {
+          "title": "Tutorial 04 — The Factor Zoo: Theory and Taxonomy of Equity Factors | 因子动物园：股票因子的理论与分类",
+          "slides": 0,
+          "sourceTokens": 550,
+          "objects": []
+        },
+        {
+          "title": "1. What Is a Factor? | 什么是因子？",
+          "slides": 2,
+          "sourceTokens": 2796,
+          "objects": [
+            "formula",
+            "table",
+            "diagram"
+          ]
+        },
+        {
+          "title": "2. Theoretical Lineage | 理论谱系",
+          "slides": 1,
+          "sourceTokens": 1470,
+          "objects": [
+            "formula"
+          ]
+        }
+      ],
+      "depthPolicy": "strict",
+      "compressionRisk": false,
+      "feasibleWithoutCompression": true,
+      "evidenceUnits": 14,
+      "independentSections": 4,
+      "evidenceThin": false,
+      "projectionRisk": false,
+      "userConfirmed": true
+    },
+    {
+      "name": "remove_h2_boundaries",
+      "recommended": 17,
+      "range": [
+        13,
+        21
+      ],
+      "selected": 17,
+      "reason": "检测到 12 个内容章节和 20503 个来源 token；按每页可读容量并为公式、代码和表格留空间",
+      "estimationBasis": "readable_content_capacity",
+      "inputProfile": {
+        "level": "rich",
+        "tokenCount": 5593,
+        "paragraphCount": 218,
+        "headingCount": 50,
+        "numberCount": 232,
+        "exampleCount": 7,
+        "mechanismCount": 3,
+        "constraintCount": 107,
+        "claimCount": 334,
+        "semanticUnitCount": 53,
+        "richnessScore": 9099
+      },
+      "contentCost": 24145,
+      "preservedObjects": [
+        "formula",
+        "table",
+        "diagram"
+      ],
+      "sectionAllocation": [
+        {
+          "title": "Tutorial 04 — The Factor Zoo: Theory and Taxonomy of Equity Factors | 因子动物园：股票因子的理论与分类",
+          "slides": 0,
+          "sourceTokens": 938,
+          "objects": []
+        },
+        {
+          "title": "1.1 Definitions | 定义",
+          "slides": 2,
+          "sourceTokens": 1939,
+          "objects": [
+            "formula",
+            "table",
+            "diagram"
+          ]
+        },
+        {
+          "title": "1.2 Risk Factors vs. Mispricing Factors | 风险因子与错误定价因子",
+          "slides": 1,
+          "sourceTokens": 851,
+          "objects": []
+        },
+        {
+          "title": "2.1 CAPM: The Starting Point | CAPM：起点",
+          "slides": 1,
+          "sourceTokens": 504,
+          "objects": [
+            "formula"
+          ]
+        },
+        {
+          "title": "2.1.1 Deriving CAPM from mean-variance optimization (sketch) | 从均值-方差优化推导 CAPM（推导概要）",
+          "slides": 2,
+          "sourceTokens": 3383,
+          "objects": [
+            "formula"
+          ]
+        },
+        {
+          "title": "2.2 Arbitrage Pricing Theory (APT) | 套利定价理论（APT）",
+          "slides": 1,
+          "sourceTokens": 1161,
+          "objects": [
+            "formula"
+          ]
+        },
+        {
+          "title": "2.3 Fama-French Three-Factor Model | Fama-French 三因子模型",
+          "slides": 1,
+          "sourceTokens": 1415,
+          "objects": [
+            "formula"
+          ]
+        },
+        {
+          "title": "2.4 Carhart Four-Factor Model | Carhart 四因子模型",
+          "slides": 1,
+          "sourceTokens": 736,
+          "objects": [
+            "formula"
+          ]
+        },
+        {
+          "title": "2.5 Fama-French Five-Factor Model | Fama-French 五因子模型",
+          "slides": 1,
+          "sourceTokens": 1483,
+          "objects": [
+            "formula"
+          ]
+        },
+        {
+          "title": "2.6 The q-Factor Model (Hou-Xue-Zhang) and q5 | q 因子模型（Hou-Xue-Zhang）与 q5",
+          "slides": 1,
+          "sourceTokens": 2062,
+          "objects": [
+            "formula"
+          ]
+        },
+        {
+          "title": "2.7 Stambaugh-Yuan Mispricing Factors | Stambaugh-Yuan 错误定价因子",
+          "slides": 1,
+          "sourceTokens": 1103,
+          "objects": [
+            "formula"
+          ]
+        },
+        {
+          "title": "2.8 Summary Table of Models | 模型汇总表",
+          "slides": 3,
+          "sourceTokens": 4928,
+          "objects": [
+            "table",
+            "formula",
+            "diagram"
+          ]
+        }
+      ],
+      "depthPolicy": "strict",
+      "compressionRisk": false,
+      "feasibleWithoutCompression": true,
+      "evidenceUnits": 53,
+      "independentSections": 11,
+      "evidenceThin": false,
+      "projectionRisk": false,
+      "userConfirmed": true
+    }
+  ],
+  "budgetExperiments": [
+    {
+      "budget": 2700,
+      "recommendationWithChapterFloor": 22,
+      "recommendationWithoutChapterFloor": 11
+    },
+    {
+      "budget": 4000,
+      "recommendationWithChapterFloor": 19,
+      "recommendationWithoutChapterFloor": 8
+    },
+    {
+      "budget": 8000,
+      "recommendationWithChapterFloor": 17,
+      "recommendationWithoutChapterFloor": 5
+    },
+    {
+      "budget": 1000000000,
+      "recommendationWithChapterFloor": 16,
+      "recommendationWithoutChapterFloor": 3
+    }
+  ],
+  "fixtures": [
+    {
+      "name": "short_prompt",
+      "recommended": 8,
+      "range": [
+        6,
+        10
+      ],
+      "selected": 8,
+      "reason": "先规划 7 个待论证语义单元，再按页面角色与容量估算；证据缺口须在内容阶段明确",
+      "estimationBasis": "planned_semantic_units",
+      "inputProfile": {
+        "level": "sparse",
+        "tokenCount": 11,
+        "paragraphCount": 1,
+        "headingCount": 0,
+        "numberCount": 0,
+        "exampleCount": 0,
+        "mechanismCount": 0,
+        "constraintCount": 0,
+        "claimCount": 0,
+        "semanticUnitCount": 0,
+        "richnessScore": 18
+      },
+      "plannedSemanticUnits": 7,
+      "plannedContentCost": 3.5,
+      "depthPolicy": "flexible",
+      "compressionRisk": false,
+      "feasibleWithoutCompression": true,
+      "evidenceUnits": 0,
+      "independentSections": 1,
+      "evidenceThin": false,
+      "projectionRisk": false,
+      "userConfirmed": true
+    },
+    {
+      "name": "architecture",
+      "recommended": 7,
+      "range": [
+        5,
+        9
+      ],
+      "selected": 7,
+      "reason": "检测到 5 个内容章节和 68 个来源 token；按每页可读容量并为公式、代码和表格留空间",
+      "estimationBasis": "readable_content_capacity",
+      "inputProfile": {
+        "level": "medium",
+        "tokenCount": 44,
+        "paragraphCount": 6,
+        "headingCount": 6,
+        "numberCount": 0,
+        "exampleCount": 0,
+        "mechanismCount": 1,
+        "constraintCount": 0,
+        "claimCount": 5,
+        "semanticUnitCount": 5,
+        "richnessScore": 297
+      },
+      "contentCost": 68,
+      "preservedObjects": [],
+      "sectionAllocation": [
+        {
+          "title": "Gateway",
+          "slides": 1,
+          "sourceTokens": 16,
+          "objects": []
+        },
+        {
+          "title": "Queue",
+          "slides": 1,
+          "sourceTokens": 14,
+          "objects": []
+        },
+        {
+          "title": "Worker",
+          "slides": 1,
+          "sourceTokens": 12,
+          "objects": []
+        },
+        {
+          "title": "Store",
+          "slides": 1,
+          "sourceTokens": 12,
+          "objects": []
+        },
+        {
+          "title": "Monitor",
+          "slides": 1,
+          "sourceTokens": 14,
+          "objects": []
+        }
+      ],
+      "depthPolicy": "strict",
+      "compressionRisk": false,
+      "feasibleWithoutCompression": true,
+      "evidenceUnits": 0,
+      "independentSections": 6,
+      "evidenceThin": false,
+      "projectionRisk": false,
+      "userConfirmed": true
+    },
+    {
+      "name": "business",
+      "recommended": 7,
+      "range": [
+        5,
+        9
+      ],
+      "selected": 7,
+      "reason": "检测到 5 个内容章节和 60 个来源 token；按每页可读容量并为公式、代码和表格留空间",
+      "estimationBasis": "readable_content_capacity",
+      "inputProfile": {
+        "level": "medium",
+        "tokenCount": 38,
+        "paragraphCount": 6,
+        "headingCount": 6,
+        "numberCount": 0,
+        "exampleCount": 0,
+        "mechanismCount": 0,
+        "constraintCount": 1,
+        "claimCount": 5,
+        "semanticUnitCount": 5,
+        "richnessScore": 291
+      },
+      "contentCost": 60,
+      "preservedObjects": [],
+      "sectionAllocation": [
+        {
+          "title": "Demand",
+          "slides": 1,
+          "sourceTokens": 14,
+          "objects": []
+        },
+        {
+          "title": "Delivery",
+          "slides": 1,
+          "sourceTokens": 10,
+          "objects": []
+        },
+        {
+          "title": "Margin",
+          "slides": 1,
+          "sourceTokens": 9,
+          "objects": []
+        },
+        {
+          "title": "Next period",
+          "slides": 1,
+          "sourceTokens": 12,
+          "objects": []
+        },
+        {
+          "title": "Risks",
+          "slides": 1,
+          "sourceTokens": 15,
+          "objects": []
+        }
+      ],
+      "depthPolicy": "strict",
+      "compressionRisk": false,
+      "feasibleWithoutCompression": true,
+      "evidenceUnits": 0,
+      "independentSections": 6,
+      "evidenceThin": false,
+      "projectionRisk": false,
+      "userConfirmed": true
+    }
+  ]
+}

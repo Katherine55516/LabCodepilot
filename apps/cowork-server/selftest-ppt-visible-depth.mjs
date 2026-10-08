@@ -1,3 +1,4 @@
+import { normalizePaste } from './lib/ppt-source.mjs';
 import assert from 'node:assert/strict';
 import { estimatePageRecommendation, sourceCapacityPlan, retrieveSlideSources } from './lib/ppt-planning.mjs';
 import { _internals as api } from './lib/ppt-api.mjs';
@@ -12,12 +13,12 @@ const source = { kind: 'file', name: 'course_overview.md', text: Array.from({ le
     sectionPath: ['Course', `Chapter ${i + 1}`], tokenCount: i === 1 ? 8100 : 200, priority: 'high', contentKind: 'concept', visualCandidates: [] })), blocks: [], evidenceAtoms: [] } };
 const project = { inputProfile: { level: 'rich' }, source, prompt: 'Create a rigorous presentation from course_overview.md.' };
 const estimate = estimatePageRecommendation(project);
-assert.equal(estimate.estimationBasis, 'readable_content_capacity');
+assert.equal(estimate.estimationBasis, 'gamma_density_capacity');
 assert.equal(estimate.depthPolicy, 'strict');
-assert.ok(estimate.recommended > 16);
+assert.ok(estimate.recommended < 16, 'headings and fake token costs cannot force a per-chapter page floor');
 assert.equal(estimatePageRecommendation({ ...project, pages: 10 }).selected, 10);
-assert.equal(estimatePageRecommendation({ ...project, prompt: 'Create an overview of this course' }).estimationBasis, 'overview_chapters');
-assert.ok(sourceCapacityPlan(source).sections.find(s => s.title === 'Chapter 2').slides >= 3);
+assert.equal(estimatePageRecommendation({ ...project, prompt: 'Create an overview of this course' }).estimationBasis, 'gamma_density_capacity');
+assert.ok(sourceCapacityPlan(normalizePaste(source.text)).sections.every(s => s.slides < 1), 'short sections receive fractional display allocations, not a one-page entitlement');
 const refs = source.segments.map(s => s.id);
 const chunks = source.semantic.chunks.map(c => c.id);
 const outline = api.normalizeOutline({ slides: Array.from({ length: 3 }, (_, i) => ({ title: `Page ${i}`, focus: 'Statement', refs: [...refs, 'invalid', '1'], chunkRefs: [...chunks, 'invalid'] })) }, 3, source);

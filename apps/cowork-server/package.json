@@ -10,6 +10,8 @@
   "scripts": {
     "start": "node index.mjs",
     "selftest": "node selftest-r1.mjs",
+    "selftest:ppt-density": "node selftest-ppt-density.mjs",
+    "selftest:ppt-density-audit": "node selftest-ppt-density-audit.mjs",
     "selftest:ppt": "node selftest-ppt.mjs",
     "selftest:ppt-m2": "node selftest-ppt-m2.mjs",
     "selftest:ppt-requirements-parity": "node selftest-ppt-requirements-parity.mjs",

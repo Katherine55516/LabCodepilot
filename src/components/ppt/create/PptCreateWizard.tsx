@@ -102,7 +102,7 @@ export function PptCreateWizard({ models, templates, initialKind, modelKey, lock
   const [outlineReady, setOutlineReady] = useState(false);
   const fileIdentity = useRef<{ file: File | null; version: number }>({ file: null, version: 0 });
   if (fileIdentity.current.file !== file) fileIdentity.current = { file, version: fileIdentity.current.version + 1 };
-  const sourceSignature = [fileIdentity.current.version, title, prompt, text, modelKey, importMode, supplementMode, JSON.stringify(policy), ...images.map(image => image.id)].join('\u0000');
+  const sourceSignature = [fileIdentity.current.version, title, prompt, text, modelKey, importMode, supplementMode, JSON.stringify(policy), resolvedTemplate, selectedTemplate?.version, ...images.map(image => image.id)].join('\u0000');
   const lastSourceSignature = useRef(sourceSignature);
   useEffect(() => {
     if (lastSourceSignature.current === sourceSignature) return;
@@ -110,7 +110,7 @@ export function PptCreateWizard({ models, templates, initialKind, modelKey, lock
     setAnalyzedProjectId(null); setAnalyzedTemplate(null); setAnalyzedPages(null); setLocalOutline([]);
     setServerEstimate(null); setOutlineReady(false); setOutlineTouched(false); setAnalysisError('');
   }, [sourceSignature]);
-  const estimateSignature = [kind, prompt, text, fileIdentity.current.version, JSON.stringify(policy)].join('\u0000');
+  const estimateSignature = [kind, prompt, text, fileIdentity.current.version, JSON.stringify(policy), resolvedTemplate, selectedTemplate?.version].join('\u0000');
   const hasInput = kind === 'prompt' ? Boolean(prompt.trim()) : kind === 'paste' ? Boolean(text.trim()) : Boolean(file);
   const localEstimate = useMemo(() => estimate(kind, prompt, text, file), [kind, prompt, text, file]);
   const suggested = serverEstimate || liveEstimate || localEstimate;
@@ -140,7 +140,7 @@ export function PptCreateWizard({ models, templates, initialKind, modelKey, lock
         .finally(() => { if (!controller.signal.aborted) setEstimating(false); });
     }, 450);
     return () => { clearTimeout(timer); controller.abort(); };
-    // Estimate depends on input, not page/manual selection, outline or template.
+    // Estimate follows input, policy and template; manual selection stays authoritative.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [estimateSignature, hasInput, editableImport]);
   function editOutline(items: Outline) {
@@ -157,8 +157,8 @@ export function PptCreateWizard({ models, templates, initialKind, modelKey, lock
     const token = ++analysisAttempt.current; const signature = sourceSignature;
     setAnalyzing(true); setAnalysisError(''); setOutlineReady(false);
     try {
-      // The visible page count is confirmed when asking for a syllabus.
-      const result = await onAnalyze({ ...draft(), pageSource: 'user', outline: outlineTouched ? localOutline : undefined });
+      // Asking for a syllabus does not make a provisional estimate a manual value.
+      const result = await onAnalyze({ ...draft(), pageSource: outlineTouched ? 'user' : draft().pageSource, outline: outlineTouched ? localOutline : undefined });
       if (!mounted.current || analysisAttempt.current !== token || lastSourceSignature.current !== signature) return false;
       setAnalyzedProjectId(result.id); setAnalyzedTemplate(resolvedTemplate); setAnalyzedPages(result.pages); setLocalOutline(result.outline);
       setServerEstimate(result.recommendation || null); setOutlineTouched(false); setOutlineReady(true); return result;

@@ -233,15 +233,24 @@ function ElementContent({
       /></div>;
     })();
   if (element.kind === "table")
-    return (
-      <table className="h-full w-full table-fixed border-collapse text-[10px]">
+    return (() => {
+      const rows = element.content?.rows || [];
+      const columns = element.content?.columnWeights || rows[0]?.map(() => 1) || [];
+      const rowWeights = element.content?.rowWeights || rows.map(() => 1);
+      const columnSum = columns.reduce((sum, value) => sum + value, 0) || 1;
+      const rowSum = rowWeights.reduce((sum, value) => sum + value, 0) || 1;
+      return <table className="h-full w-full table-fixed border-collapse" style={{...textStyle, lineHeight:1.18}}>
+        <colgroup>{columns.map((weight, index) => <col key={index} style={{width:`${weight / columnSum * 100}%`}} />)}</colgroup>
         <tbody>
-          {(element.content?.rows || []).map((row, rowIndex) => (
-            <tr key={rowIndex}>
+          {rows.map((row, rowIndex) => (
+            <tr key={rowIndex} style={{height:`${rowWeights[rowIndex] / rowSum * 100}%`}}>
               {row.map((cell, columnIndex) => (
                 <td
                   key={columnIndex}
-                  className={`border border-current/30 p-1 ${rowIndex === 0 ? "bg-current/10 font-semibold" : ""}`}
+                  className={`border border-current/30 whitespace-pre-wrap break-words ${rowIndex === 0 ? "font-semibold" : ""}`}
+                  style={{padding:`${3 * scale}px ${7.2 * scale}px`,verticalAlign:'top',
+                    background:rowIndex === 0 ? element.style?.fill || '#e7e5f4' : '#ffffff',
+                    color:rowIndex === 0 ? element.style?.tableHeaderColor || element.style?.color : element.style?.color}}
                 >
                   {cell}
                 </td>
@@ -249,8 +258,8 @@ function ElementContent({
             </tr>
           ))}
         </tbody>
-      </table>
-    );
+      </table>;
+    })();
   if (element.kind === "chart") return <Chart element={element} />;
   return (
     <div className="grid h-full place-items-center overflow-hidden text-xs">

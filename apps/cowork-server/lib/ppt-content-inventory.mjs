@@ -1,5 +1,6 @@
 /** Domain-independent content inventory and observed (not merely cited) coverage. */
 import {sourceDisplayText} from './ppt-source-text.mjs';
+import { visibleNodes } from './ppt-visible-content.mjs';
 const normalizedText=value=>sourceDisplayText(value).toLowerCase().replace(/\s+/gu,' ').trim();
 const structural = new Set(['TableBlock','EquationBlock','ProcessBlock','ChecklistBlock','TaxonomyBlock']);
 const tokens = text => [...new Set(String(text||'').toLowerCase().match(/[a-z][a-z0-9_-]{2,}|\d+(?:\.\d+)?|[\u3400-\u9fff]{2,4}/gu)||[])];
@@ -42,7 +43,10 @@ export function coverageMapV2(source, outline, explicit = []) {
   if (!inventory) return { version:2, topic:[], detail:[], structure:[], relationship:[] };
   const decisions=new Map((Array.isArray(explicit)?explicit:[]).filter(item=>item && typeof item==='object').map(item=>[item.sourceUnitId,item]));
   const detail=inventory.items.map(item=> {
-    const destinations=outline.filter(slide=>slide.chunkRefs?.some(id=>item.chunkRefs.includes(id))).map(slide=>slide.id);
+    // New plans own specific inventory units. A shared chunk citation must not
+    // claim that every table/formula/paragraph in that chunk was assigned.
+    const destinations=outline.filter(slide=>Array.isArray(slide.sourceUnitIds)
+      ? slide.sourceUnitIds.includes(item.id) : slide.chunkRefs?.some(id=>item.chunkRefs.includes(id))).map(slide=>slide.id);
     const decision=decisions.get(item.id);
     return {sourceUnitId:item.id,type:item.type,priority:item.priority,source_ref:item.source_ref,slideIds:destinations,
       representation:decision?.representation || (structural.has(item.type)?'structured':'explained'), compressed:Boolean(decision?.compressed),
@@ -58,12 +62,11 @@ export function topicGroupDecisions(source, outline, plans, explicit = []) {
     const plan=plans.find(item=>item.slideId===destinations[0]?.id);
     const merge=destinations.some(slide=>slide.chunkRefs?.length>1);
     const supplied = (Array.isArray(explicit)?explicit:[]).find(item=>item && item.group_id===chunk.id && ['merge','split','standalone'].includes(item.decision) && typeof item.reason==='string' && item.reason.trim());
-    const combined = new Set(destinations.flatMap(slide=>(source.semantic.chunks||[]).filter(item=>slide.chunkRefs?.includes(item.id)).flatMap(item=>item.sourceBlocks||[]))).size;
     return {group_id:chunk.id,decision:supplied?.decision || (destinations.length>1?'split':merge?'merge':'standalone'),
       origin:supplied?'planner':'derived_allocation',
       reason:supplied?supplied.reason.slice(0,800):destinations.length>1?'Source detail is allocated to multiple page questions; verify the distinct contribution':merge?'Source units share a destination page; verify cohesion and combined capacity':'Source unit has one destination; verify that focus is warranted',
       estimated_semantic_units:chunk.sourceBlocks?.length||0,layout_candidate:plan?.visualIntent?.type||'none',
-      capacity_ok:plan?Number(plan.semanticUnitBudget)>=combined:null, slideIds:destinations.map(slide=>slide.id)};
+      capacity_ok:plan?.densityFit?.capacity_ok ?? null, capacity_basis:plan?.densityFit?.measurementBasis || 'not_measured', slideIds:destinations.map(slide=>slide.id)};
   });
 }
 export function inspectInventoryCoverage(source, slides, visibleText) {
@@ -71,7 +74,7 @@ export function inspectInventoryCoverage(source, slides, visibleText) {
   if (!inventory) return {metrics:{},issues:[]};
   const text=slides.map(visibleText).join('\n');
   const items=inventory.items.map(item=> {
-    const nodes=slides.flatMap(slide=>slide.nodes||[]).filter(node=>node.sourceArtifact?.sourceUnitId===item.id);
+    const nodes=slides.flatMap(visibleNodes).filter(node=>node.sourceArtifact?.sourceUnitId===item.id);
     const nativeStructure=nodes.length>0 && (item.type!=='TableBlock' || nodes.some(node=>node.type==='table'));
     const contentRecall=recall(normalizedText(item.text),normalizedText(text));
     const actualCells=nodes.filter(node=>node.type==='table').flatMap(node=>node.content.rows.flat()).map(normalizedText);
@@ -82,7 +85,7 @@ export function inspectInventoryCoverage(source, slides, visibleText) {
   const ratio=list=>list.length?list.filter(item=>item.covered).length/list.length:null;
   const structures=items.filter(item=>item.must_preserve_structure);
   const relationships=inventory.relationships.map(edge=>{
-    const structured=slides.flatMap(slide=>slide.nodes||[]).filter(node=>node.sourceArtifact?.sourceUnitId===edge.sourceUnitId);
+    const structured=slides.flatMap(visibleNodes).filter(node=>node.sourceArtifact?.sourceUnitId===edge.sourceUnitId);
     const relatedText=structured.map(node=>node.content?.rows?.flat().join(' ') || node.content?.items?.map(item=>item.text).join(' ') || node.content?.text || '').join(' ');
     return {id:edge.id,covered:structured.length ? edge.steps.every(step=>recall(step,relatedText)>=.45)
       : slides.some(slide=>edge.steps.every(step=>recall(step,visibleText(slide))>=.45))};

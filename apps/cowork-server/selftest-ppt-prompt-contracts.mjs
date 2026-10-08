@@ -56,7 +56,7 @@ try {
   const writer = api.contentPrompt(project, outline[1], 1);
   assert.match(writer, /ownedPoints/);
   assert.match(writer, /Alternative data requires time alignment/);
-  assert.match(writer, /15–35 words/);
+  assert.match(writer, /complete mechanism, conditions and comparisons/);
   const schema = JSON.parse(writer.match(/返回唯一 JSON：([^\n]+)。只输出 JSON/)[1]);
   assert.ok(!('bullets' in schema) && !('factSynthesis' in schema) && !('titleCandidates' in schema));
   const next = api.normalizeSlide({ title: outline[1].title, contentBlocks: [{ type: 'constraint', heading: 'Time alignment', body: 'Alternative data requires time alignment so signals are known before the trading decision.' }] }, outline[1], project);

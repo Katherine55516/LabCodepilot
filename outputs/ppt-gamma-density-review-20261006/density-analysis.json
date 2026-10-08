@@ -1,0 +1,4696 @@
+{
+  "gamma": {
+    "path": "/Users/dongli/Downloads/The-Factor-Zoo (1).pptx",
+    "sha256": "c8be44407f0e757e8958c314b076143bc220566feacbea1dea7ddfe34b41ec49",
+    "pages": 10,
+    "sizeInches": [
+      13.333,
+      7.5
+    ],
+    "all": {
+      "totalChars": 9409,
+      "medianChars": 1007.5,
+      "q1Chars": 888.25,
+      "q3Chars": 1102.5
+    },
+    "excludingCover": {
+      "totalChars": 9159,
+      "medianChars": 1019,
+      "q1Chars": 921.0,
+      "q3Chars": 1111.0,
+      "medianFrameUnion": 0.2876
+    },
+    "nativeTables": 3,
+    "actualText": {
+      "totalChars": 9359,
+      "medianAllPages": 1007.5,
+      "bodyTotalChars": 9109,
+      "bodyMedianChars": 1019,
+      "bodyQ1Chars": 909.5,
+      "bodyQ3Chars": 1097.5,
+      "bodyMinChars": 802,
+      "bodyMaxChars": 1196
+    },
+    "slides": [
+      {
+        "page": 1,
+        "titleGuess": "TUTORIAL 04 · PART II THEORY",
+        "visibleChars": 250,
+        "textFrameUnionRatio": 0.1221,
+        "nonemptyParagraphs": 3,
+        "nativeTables": 0,
+        "textObjects": 3,
+        "explicitFontCharWeightedMedian": 13.0,
+        "explicitFontCountChars": 250,
+        "objects": [
+          {
+            "name": "Text 1",
+            "text": "TUTORIAL 04 · PART II THEORY",
+            "rows": [],
+            "chars": 23,
+            "boundsFraction": [
+              0.0624,
+              0.3521,
+              0.2006,
+              0.0222
+            ],
+            "explicitFontMedian": 10.0
+          },
+          {
+            "name": "Text 2",
+            "text": "THE FACTOR ZOO",
+            "rows": [],
+            "chars": 12,
+            "boundsFraction": [
+              0.0543,
+              0.3911,
+              0.5165,
+              0.0832
+            ],
+            "explicitFontMedian": 44.5
+          },
+          {
+            "name": "Text 3",
+            "text": "因子动物园 — Theory and Taxonomy of Equity Factors. Every subsequent factor tutorial drills into one family; this one builds the asset-pricing lineage, the taxonomy, the \"why do factors earn premia\" debate, and the sober statistical reality of the factor zoo.",
+            "rows": [],
+            "chars": 215,
+            "boundsFraction": [
+              0.0543,
+              0.5105,
+              0.5165,
+              0.1447
+            ],
+            "explicitFontMedian": 13.0
+          }
+        ],
+        "text": "TUTORIAL 04 · PART II THEORY\nTHE FACTOR ZOO\n因子动物园 — Theory and Taxonomy of Equity Factors. Every subsequent factor tutorial drills into one family; this one builds the asset-pricing lineage, the taxonomy, the \"why do factors earn premia\" debate, and the sober statistical reality of the factor zoo.",
+        "tableSerializationSeparators": 0,
+        "actualTextChars": 250
+      },
+      {
+        "page": 2,
+        "titleGuess": "SECTION 1–2",
+        "visibleChars": 1094,
+        "textFrameUnionRatio": 0.3686,
+        "nonemptyParagraphs": 14,
+        "nativeTables": 0,
+        "textObjects": 14,
+        "explicitFontCharWeightedMedian": 12.0,
+        "explicitFontCountChars": 1094,
+        "objects": [
+          {
+            "name": "Text 1",
+            "text": "SECTION 1–2",
+            "rows": [],
+            "chars": 10,
+            "boundsFraction": [
+              0.062,
+              0.1089,
+              0.1128,
+              0.0211
+            ],
+            "explicitFontMedian": 9.5
+          },
+          {
+            "name": "Text 2",
+            "text": "WHAT IS A FACTOR? 什么是因子？",
+            "rows": [],
+            "chars": 20,
+            "boundsFraction": [
+              0.0543,
+              0.1456,
+              0.8915,
+              0.0573
+            ],
+            "explicitFontMedian": 30.5
+          },
+          {
+            "name": "Text 3",
+            "text": "A factor in equity research is a systematic, cross-sectionally observable characteristic — or return series constructed from such a characteristic — that explains differences in expected returns across stocks. If we write the return-generating process as:",
+            "rows": [],
+            "chars": 220,
+            "boundsFraction": [
+              0.0543,
+              0.2551,
+              0.43,
+              0.134
+            ],
+            "explicitFontMedian": 12.0
+          },
+          {
+            "name": "Text 4",
+            "text": "then    is a factor return,    is the stock's loading, and    is idiosyncratic noise. A factor is useful if it reduces the covariance matrix to a low-rank-plus-diagonal structure and/or commands a non-zero risk premium       .",
+            "rows": [],
+            "chars": 178,
+            "boundsFraction": [
+              0.0543,
+              0.5418,
+              0.43,
+              0.134
+            ],
+            "explicitFontMedian": 12.0
+          },
+          {
+            "name": "Text 5",
+            "text": "Critical epistemic point: \"Anomaly\" is model-relative, not absolute. As benchmark models expand (CAPM → FF3 → Carhart4 → FF5 → FF6), yesterday's anomaly becomes today's risk factor.",
+            "rows": [],
+            "chars": 155,
+            "boundsFraction": [
+              0.0543,
+              0.6955,
+              0.43,
+              0.1005
+            ],
+            "explicitFontMedian": 12.0
+          },
+          {
+            "name": "Text 7",
+            "text": "CHARACTERISTIC 特征",
+            "rows": [],
+            "chars": 16,
+            "boundsFraction": [
+              0.5307,
+              0.2857,
+              0.18,
+              0.0286
+            ],
+            "explicitFontMedian": 15.0
+          },
+          {
+            "name": "Text 8",
+            "text": "A firm-level observable at time   — e.g. book-to-market ratio     ",
+            "rows": [],
+            "chars": 51,
+            "boundsFraction": [
+              0.5307,
+              0.3361,
+              0.18,
+              0.1005
+            ],
+            "explicitFontMedian": 12.0
+          },
+          {
+            "name": "Text 10",
+            "text": "FACTOR 因子",
+            "rows": [],
+            "chars": 8,
+            "boundsFraction": [
+              0.7518,
+              0.2857,
+              0.18,
+              0.0286
+            ],
+            "explicitFontMedian": 15.0
+          },
+          {
+            "name": "Text 11",
+            "text": "A return series (usually long-short) built by sorting stocks on a characteristic — e.g. HML",
+            "rows": [],
+            "chars": 77,
+            "boundsFraction": [
+              0.7518,
+              0.3361,
+              0.18,
+              0.1005
+            ],
+            "explicitFontMedian": 12.0
+          },
+          {
+            "name": "Text 13",
+            "text": "ANOMALY 异象",
+            "rows": [],
+            "chars": 9,
+            "boundsFraction": [
+              0.5307,
+              0.5097,
+              0.18,
+              0.0286
+            ],
+            "explicitFontMedian": 15.0
+          },
+          {
+            "name": "Text 14",
+            "text": "An empirical pattern a benchmark model fails to explain — model-relative, not absolute",
+            "rows": [],
+            "chars": 74,
+            "boundsFraction": [
+              0.5307,
+              0.5601,
+              0.18,
+              0.134
+            ],
+            "explicitFontMedian": 12.0
+          },
+          {
+            "name": "Text 16",
+            "text": "ALPHA Α 阿尔法",
+            "rows": [],
+            "chars": 9,
+            "boundsFraction": [
+              0.7518,
+              0.5097,
+              0.18,
+              0.0286
+            ],
+            "explicitFontMedian": 15.0
+          },
+          {
+            "name": "Text 17",
+            "text": "The intercept in a factor-model regression: return unexplained by the chosen factors",
+            "rows": [],
+            "chars": 73,
+            "boundsFraction": [
+              0.7518,
+              0.5601,
+              0.18,
+              0.1005
+            ],
+            "explicitFontMedian": 12.0
+          },
+          {
+            "name": "Text 18",
+            "text": "Risk factors earn premia as compensation for bad-state exposure; mispricing factors capture the slow correction of behavioral or friction-driven price deviations — most documented factors are argued to be some mixture of both.",
+            "rows": [],
+            "chars": 194,
+            "boundsFraction": [
+              0.5162,
+              0.7443,
+              0.43,
+              0.134
+            ],
+            "explicitFontMedian": 12.0
+          }
+        ],
+        "text": "SECTION 1–2\nWHAT IS A FACTOR? 什么是因子？\nA factor in equity research is a systematic, cross-sectionally observable characteristic — or return series constructed from such a characteristic — that explains differences in expected returns across stocks. If we write the return-generating process as:\nthen    is a factor return,    is the stock's loading, and    is idiosyncratic noise. A factor is useful if it reduces the covariance matrix to a low-rank-plus-diagonal structure and/or commands a non-zero risk premium       .\nCritical epistemic point: \"Anomaly\" is model-relative, not absolute. As benchmark models expand (CAPM → FF3 → Carhart4 → FF5 → FF6), yesterday's anomaly becomes today's risk factor.\nCHARACTERISTIC 特征\nA firm-level observable at time   — e.g. book-to-market ratio     \nFACTOR 因子\nA return series (usually long-short) built by sorting stocks on a characteristic — e.g. HML\nANOMALY 异象\nAn empirical pattern a benchmark model fails to explain — model-relative, not absolute\nALPHA Α 阿尔法\nThe intercept in a factor-model regression: return unexplained by the chosen factors\nRisk factors earn premia as compensation for bad-state exposure; mispricing factors capture the slow correction of behavioral or friction-driven price deviations — most documented factors are argued to be some mixture of both.",
+        "tableSerializationSeparators": 0,
+        "actualTextChars": 1094
+      },
+      {
+        "page": 3,
+        "titleGuess": "SECTION 2",
+        "visibleChars": 1019,
+        "textFrameUnionRatio": 0.3681,
+        "nonemptyParagraphs": 12,
+        "nativeTables": 0,
+        "textObjects": 12,
+        "explicitFontCharWeightedMedian": 12.0,
+        "explicitFontCountChars": 1019,
+        "objects": [
+          {
+            "name": "Text 1",
+            "text": "SECTION 2",
+            "rows": [],
+            "chars": 8,
+            "boundsFraction": [
+              0.062,
+              0.0888,
+              0.1003,
+              0.0211
+            ],
+            "explicitFontMedian": 9.5
+          },
+          {
+            "name": "Text 2",
+            "text": "THEORETICAL LINEAGE 理论谱系",
+            "rows": [],
+            "chars": 22,
+            "boundsFraction": [
+              0.0543,
+              0.1255,
+              0.8915,
+              0.0573
+            ],
+            "explicitFontMedian": 30.5
+          },
+          {
+            "name": "Text 6",
+            "text": "CAPM (1964–66)",
+            "rows": [],
+            "chars": 13,
+            "boundsFraction": [
+              0.0671,
+              0.3328,
+              0.1403,
+              0.0687
+            ],
+            "explicitFontMedian": 18.5
+          },
+          {
+            "name": "Text 7",
+            "text": "Sharpe, Lintner, Mossin. One factor: market beta. The Security Market Line predicts every asset lies on             . Empirically rejected: flat SML, size effect, value effect, Roll's critique.",
+            "rows": [],
+            "chars": 155,
+            "boundsFraction": [
+              0.0671,
+              0.4146,
+              0.1403,
+              0.3601
+            ],
+            "explicitFontMedian": 12.0
+          },
+          {
+            "name": "Text 10",
+            "text": "APT (ROSS 1976)",
+            "rows": [],
+            "chars": 13,
+            "boundsFraction": [
+              0.2485,
+              0.3328,
+              0.1403,
+              0.0687
+            ],
+            "explicitFontMedian": 18.5
+          },
+          {
+            "name": "Text 11",
+            "text": "Drops mean-variance machinery; assumes linear factor structure plus no-arbitrage. Justifies \"find   common factors\" empirically without requiring utility maximization. Expected returns are approximately linear in factor loadings:           .",
+            "rows": [],
+            "chars": 203,
+            "boundsFraction": [
+              0.2485,
+              0.4146,
+              0.1403,
+              0.4356
+            ],
+            "explicitFontMedian": 12.0
+          },
+          {
+            "name": "Text 14",
+            "text": "FF3 (1993)",
+            "rows": [],
+            "chars": 9,
+            "boundsFraction": [
+              0.4299,
+              0.3328,
+              0.1403,
+              0.0344
+            ],
+            "explicitFontMedian": 18.5
+          },
+          {
+            "name": "Text 15",
+            "text": "MKT + SMB (size) + HML (value). 2×3 independent sort: NYSE median size breakpoint; 30th/70th B/M breakpoints. Dramatically improved cross-section fit but could not explain momentum.",
+            "rows": [],
+            "chars": 156,
+            "boundsFraction": [
+              0.4299,
+              0.3802,
+              0.1403,
+              0.3351
+            ],
+            "explicitFontMedian": 12.0
+          },
+          {
+            "name": "Text 18",
+            "text": "CARHART 4 (1997)",
+            "rows": [],
+            "chars": 14,
+            "boundsFraction": [
+              0.6112,
+              0.3328,
+              0.1403,
+              0.0687
+            ],
+            "explicitFontMedian": 18.5
+          },
+          {
+            "name": "Text 19",
+            "text": "FF3 + UMD (12-1 momentum, skipping last month). Rebalanced monthly — reflecting momentum's short signal half-life. Became the standard academic benchmark for a decade.",
+            "rows": [],
+            "chars": 144,
+            "boundsFraction": [
+              0.6112,
+              0.4146,
+              0.1403,
+              0.3016
+            ],
+            "explicitFontMedian": 12.0
+          },
+          {
+            "name": "Text 22",
+            "text": "FF5 (2015) & Q-FACTOR (HXZ 2015)",
+            "rows": [],
+            "chars": 27,
+            "boundsFraction": [
+              0.7926,
+              0.3328,
+              0.1403,
+              0.1031
+            ],
+            "explicitFontMedian": 18.5
+          },
+          {
+            "name": "Text 23",
+            "text": "FF5 adds RMW (profitability) + CMA (investment), motivated by dividend-discount-model decomposition — HML becomes largely redundant. q-factor derives same premia from production-side q-theory: ME, I/A, ROE. Two independent routes converging validates the profitability/investment premium.",
+            "rows": [],
+            "chars": 255,
+            "boundsFraction": [
+              0.7926,
+              0.4489,
+              0.1403,
+              0.4691
+            ],
+            "explicitFontMedian": 12.0
+          }
+        ],
+        "text": "SECTION 2\nTHEORETICAL LINEAGE 理论谱系\nCAPM (1964–66)\nSharpe, Lintner, Mossin. One factor: market beta. The Security Market Line predicts every asset lies on             . Empirically rejected: flat SML, size effect, value effect, Roll's critique.\nAPT (ROSS 1976)\nDrops mean-variance machinery; assumes linear factor structure plus no-arbitrage. Justifies \"find   common factors\" empirically without requiring utility maximization. Expected returns are approximately linear in factor loadings:           .\nFF3 (1993)\nMKT + SMB (size) + HML (value). 2×3 independent sort: NYSE median size breakpoint; 30th/70th B/M breakpoints. Dramatically improved cross-section fit but could not explain momentum.\nCARHART 4 (1997)\nFF3 + UMD (12-1 momentum, skipping last month). Rebalanced monthly — reflecting momentum's short signal half-life. Became the standard academic benchmark for a decade.\nFF5 (2015) & Q-FACTOR (HXZ 2015)\nFF5 adds RMW (profitability) + CMA (investment), motivated by dividend-discount-model decomposition — HML becomes largely redundant. q-factor derives same premia from production-side q-theory: ME, I/A, ROE. Two independent routes converging validates the profitability/investment premium.",
+        "tableSerializationSeparators": 0,
+        "actualTextChars": 1019
+      },
+      {
+        "page": 4,
+        "titleGuess": "SECTION 3–4",
+        "visibleChars": 1082,
+        "textFrameUnionRatio": 0.2876,
+        "nonemptyParagraphs": 12,
+        "nativeTables": 0,
+        "textObjects": 12,
+        "explicitFontCharWeightedMedian": 11.0,
+        "explicitFontCountChars": 1082,
+        "objects": [
+          {
+            "name": "Text 1",
+            "text": "SECTION 3–4",
+            "rows": [],
+            "chars": 10,
+            "boundsFraction": [
+              0.4362,
+              0.0728,
+              0.1062,
+              0.0189
+            ],
+            "explicitFontMedian": 8.5
+          },
+          {
+            "name": "Text 2",
+            "text": "GRS TEST & WHY FACTORS EARN PREMIA 检验与溢价来源",
+            "rows": [],
+            "chars": 35,
+            "boundsFraction": [
+              0.4293,
+              0.1047,
+              0.5165,
+              0.1025
+            ],
+            "explicitFontMedian": 27.5
+          },
+          {
+            "name": "Text 4",
+            "text": "1",
+            "rows": [],
+            "chars": 1,
+            "boundsFraction": [
+              0.4437,
+              0.3162,
+              0.0173,
+              0.0307
+            ],
+            "explicitFontMedian": 16.5
+          },
+          {
+            "name": "Text 5",
+            "text": "TIME-SERIES VS. CROSS-SECTIONAL TESTS",
+            "rows": [],
+            "chars": 34,
+            "boundsFraction": [
+              0.4852,
+              0.2538,
+              0.4606,
+              0.0307
+            ],
+            "explicitFontMedian": 16.5
+          },
+          {
+            "name": "Text 6",
+            "text": "Time-series regressions test whether a portfolio's alpha is zero given factors:              . The GRS test asks whether all test-asset alphas are jointly zero — preventing one pretty alpha from hiding broad model failure. Sensitive to test-asset choice; one diagnostic, not a final verdict. 防止单一漂亮阿尔法掩盖模型普遍失败。",
+            "rows": [],
+            "chars": 254,
+            "boundsFraction": [
+              0.4852,
+              0.295,
+              0.4606,
+              0.1143
+            ],
+            "explicitFontMedian": 11.0
+          },
+          {
+            "name": "Text 8",
+            "text": "2",
+            "rows": [],
+            "chars": 1,
+            "boundsFraction": [
+              0.4437,
+              0.5158,
+              0.0173,
+              0.0307
+            ],
+            "explicitFontMedian": 16.5
+          },
+          {
+            "name": "Text 9",
+            "text": "RISK COMPENSATION 风险补偿",
+            "rows": [],
+            "chars": 20,
+            "boundsFraction": [
+              0.4852,
+              0.4677,
+              0.4606,
+              0.0307
+            ],
+            "explicitFontMedian": 16.5
+          },
+          {
+            "name": "Text 10",
+            "text": "Exposure to factor   raises the volatility of consumption/wealth in bad states (recessions, liquidity crunches, tail events). The premium     is demanded by rational, risk-averse investors — permanent because bearing the risk is unavoidable in equilibrium.",
+            "rows": [],
+            "chars": 217,
+            "boundsFraction": [
+              0.4852,
+              0.5089,
+              0.4606,
+              0.0857
+            ],
+            "explicitFontMedian": 11.0
+          },
+          {
+            "name": "Text 12",
+            "text": "3",
+            "rows": [],
+            "chars": 1,
+            "boundsFraction": [
+              0.4437,
+              0.7151,
+              0.0173,
+              0.0307
+            ],
+            "explicitFontMedian": 16.5
+          },
+          {
+            "name": "Text 13",
+            "text": "BEHAVIORAL MISPRICING 行为错误定价",
+            "rows": [],
+            "chars": 26,
+            "boundsFraction": [
+              0.4852,
+              0.653,
+              0.4606,
+              0.0307
+            ],
+            "explicitFontMedian": 16.5
+          },
+          {
+            "name": "Text 14",
+            "text": "Prices deviate from fundamental value due to investor psychology (overreaction, underreaction, extrapolation, lottery preference) or market frictions (limits to arbitrage, shorting costs, funding constraints). Premia can erode as more capital chases them or as trading costs rise. 原则上可被套利消除。",
+            "rows": [],
+            "chars": 254,
+            "boundsFraction": [
+              0.4852,
+              0.6942,
+              0.4606,
+              0.1138
+            ],
+            "explicitFontMedian": 11.0
+          },
+          {
+            "name": "Text 15",
+            "text": "No serious practitioner needs a factor to belong purely to one camp. What matters: does the story predict when the factor should fail? Value fails when distress risk is realized; momentum crashes at sharp rebounds; low volatility suffers when leverage constraints relax.",
+            "rows": [],
+            "chars": 229,
+            "boundsFraction": [
+              0.4293,
+              0.8481,
+              0.5165,
+              0.0853
+            ],
+            "explicitFontMedian": 11.0
+          }
+        ],
+        "text": "SECTION 3–4\nGRS TEST & WHY FACTORS EARN PREMIA 检验与溢价来源\n1\nTIME-SERIES VS. CROSS-SECTIONAL TESTS\nTime-series regressions test whether a portfolio's alpha is zero given factors:              . The GRS test asks whether all test-asset alphas are jointly zero — preventing one pretty alpha from hiding broad model failure. Sensitive to test-asset choice; one diagnostic, not a final verdict. 防止单一漂亮阿尔法掩盖模型普遍失败。\n2\nRISK COMPENSATION 风险补偿\nExposure to factor   raises the volatility of consumption/wealth in bad states (recessions, liquidity crunches, tail events). The premium     is demanded by rational, risk-averse investors — permanent because bearing the risk is unavoidable in equilibrium.\n3\nBEHAVIORAL MISPRICING 行为错误定价\nPrices deviate from fundamental value due to investor psychology (overreaction, underreaction, extrapolation, lottery preference) or market frictions (limits to arbitrage, shorting costs, funding constraints). Premia can erode as more capital chases them or as trading costs rise. 原则上可被套利消除。\nNo serious practitioner needs a factor to belong purely to one camp. What matters: does the story predict when the factor should fail? Value fails when distress risk is realized; momentum crashes at sharp rebounds; low volatility suffers when leverage constraints relax.",
+        "tableSerializationSeparators": 0,
+        "actualTextChars": 1082
+      },
+      {
+        "page": 5,
+        "titleGuess": "SECTION 5",
+        "visibleChars": 1196,
+        "textFrameUnionRatio": 0.3897,
+        "nonemptyParagraphs": 14,
+        "nativeTables": 0,
+        "textObjects": 14,
+        "explicitFontCharWeightedMedian": 11.5,
+        "explicitFontCountChars": 1196,
+        "objects": [
+          {
+            "name": "Text 1",
+            "text": "SECTION 5",
+            "rows": [],
+            "chars": 8,
+            "boundsFraction": [
+              0.0616,
+              0.1179,
+              0.0976,
+              0.02
+            ],
+            "explicitFontMedian": 9.0
+          },
+          {
+            "name": "Text 2",
+            "text": "THE FACTOR ZOO PROBLEM 因子动物园问题",
+            "rows": [],
+            "chars": 26,
+            "boundsFraction": [
+              0.0543,
+              0.1522,
+              0.8915,
+              0.0543
+            ],
+            "explicitFontMedian": 29.0
+          },
+          {
+            "name": "Text 3",
+            "text": "Scale of the Problem 问题规模",
+            "rows": [],
+            "chars": 21,
+            "boundsFraction": [
+              0.0543,
+              0.2533,
+              0.4624,
+              0.0386
+            ],
+            "explicitFontMedian": 14.5
+          },
+          {
+            "name": "Text 4",
+            "text": "400+",
+            "rows": [],
+            "chars": 4,
+            "boundsFraction": [
+              0.0543,
+              0.3115,
+              0.4124,
+              0.1085
+            ],
+            "explicitFontMedian": 58.5
+          },
+          {
+            "name": "Text 5",
+            "text": "Hundreds of published anomalies cannot all be independent sources of expected return. Some are aliases for the same latent exposure, some are subsumed by known factors, some are too expensive to trade, and some are false discoveries produced by multiple testing on the same finite dataset. 数百个已发表异象不可能都是独立预期收益来源。",
+            "rows": [],
+            "chars": 266,
+            "boundsFraction": [
+              0.0543,
+              0.4693,
+              0.4124,
+              0.1546
+            ],
+            "explicitFontMedian": 11.5
+          },
+          {
+            "name": "Text 6",
+            "text": "The number of factors that \"survive against an expanding set of controls\" is far smaller than the number \"in the literature.\" A t-stat of 2.0 that was once the publication threshold implies a false-discovery rate of roughly 50% under realistic multiple-testing conditions.",
+            "rows": [],
+            "chars": 231,
+            "boundsFraction": [
+              0.0543,
+              0.6458,
+              0.4124,
+              0.1237
+            ],
+            "explicitFontMedian": 11.5
+          },
+          {
+            "name": "Text 7",
+            "text": "REDUNDANCY 冗余",
+            "rows": [],
+            "chars": 12,
+            "boundsFraction": [
+              0.517,
+              0.2822,
+              0.1854,
+              0.0271
+            ],
+            "explicitFontMedian": 14.5
+          },
+          {
+            "name": "Text 8",
+            "text": "Many claimed factors are linear combinations of MKT, SMB, HML, UMD — correlated aliases that add no independent pricing information.",
+            "rows": [],
+            "chars": 113,
+            "boundsFraction": [
+              0.517,
+              0.3289,
+              0.1854,
+              0.1546
+            ],
+            "explicitFontMedian": 11.5
+          },
+          {
+            "name": "Text 9",
+            "text": "DATA MINING 数据挖掘",
+            "rows": [],
+            "chars": 14,
+            "boundsFraction": [
+              0.7471,
+              0.2822,
+              0.1854,
+              0.0271
+            ],
+            "explicitFontMedian": 14.5
+          },
+          {
+            "name": "Text 10",
+            "text": "Thousands of characteristics tried on the same US equity sample. Even random characteristics pass a t>2 filter with high frequency given enough tries.",
+            "rows": [],
+            "chars": 128,
+            "boundsFraction": [
+              0.7471,
+              0.3289,
+              0.1854,
+              0.1855
+            ],
+            "explicitFontMedian": 11.5
+          },
+          {
+            "name": "Text 11",
+            "text": "MULTIPLE-TESTING DISCIPLINE 多重检验纪律",
+            "rows": [],
+            "chars": 32,
+            "boundsFraction": [
+              0.517,
+              0.5829,
+              0.1854,
+              0.0543
+            ],
+            "explicitFontMedian": 14.5
+          },
+          {
+            "name": "Text 12",
+            "text": "Harvey, Liu & Zhu (2016): adjust thresholds upward (t > 3.0 for new factors). Benjamini-Hochberg FDR control. Out-of-sample and international replication are the gold standards.",
+            "rows": [],
+            "chars": 153,
+            "boundsFraction": [
+              0.517,
+              0.6566,
+              0.1854,
+              0.1855
+            ],
+            "explicitFontMedian": 11.5
+          },
+          {
+            "name": "Text 13",
+            "text": "MINIMUM STANDARD 最低标准",
+            "rows": [],
+            "chars": 19,
+            "boundsFraction": [
+              0.7471,
+              0.5829,
+              0.1854,
+              0.0543
+            ],
+            "explicitFontMedian": 14.5
+          },
+          {
+            "name": "Text 14",
+            "text": "Economic rationale · point-in-time construction · robustness across periods and universes · low correlation to existing factors · implementable net of costs · multiple-testing-aware validation.",
+            "rows": [],
+            "chars": 169,
+            "boundsFraction": [
+              0.7471,
+              0.6566,
+              0.1854,
+              0.1855
+            ],
+            "explicitFontMedian": 11.5
+          }
+        ],
+        "text": "SECTION 5\nTHE FACTOR ZOO PROBLEM 因子动物园问题\nScale of the Problem 问题规模\n400+\nHundreds of published anomalies cannot all be independent sources of expected return. Some are aliases for the same latent exposure, some are subsumed by known factors, some are too expensive to trade, and some are false discoveries produced by multiple testing on the same finite dataset. 数百个已发表异象不可能都是独立预期收益来源。\nThe number of factors that \"survive against an expanding set of controls\" is far smaller than the number \"in the literature.\" A t-stat of 2.0 that was once the publication threshold implies a false-discovery rate of roughly 50% under realistic multiple-testing conditions.\nREDUNDANCY 冗余\nMany claimed factors are linear combinations of MKT, SMB, HML, UMD — correlated aliases that add no independent pricing information.\nDATA MINING 数据挖掘\nThousands of characteristics tried on the same US equity sample. Even random characteristics pass a t>2 filter with high frequency given enough tries.\nMULTIPLE-TESTING DISCIPLINE 多重检验纪律\nHarvey, Liu & Zhu (2016): adjust thresholds upward (t > 3.0 for new factors). Benjamini-Hochberg FDR control. Out-of-sample and international replication are the gold standards.\nMINIMUM STANDARD 最低标准\nEconomic rationale · point-in-time construction · robustness across periods and universes · low correlation to existing factors · implementable net of costs · multiple-testing-aware validation.",
+        "tableSerializationSeparators": 0,
+        "actualTextChars": 1196
+      },
+      {
+        "page": 6,
+        "titleGuess": "SECTIONS 6–7",
+        "visibleChars": 925,
+        "textFrameUnionRatio": 0.2096,
+        "nonemptyParagraphs": 44,
+        "nativeTables": 2,
+        "textObjects": 7,
+        "explicitFontCharWeightedMedian": 11.0,
+        "explicitFontCountChars": 902,
+        "objects": [
+          {
+            "name": "Text 1",
+            "text": "SECTIONS 6–7",
+            "rows": [],
+            "chars": 11,
+            "boundsFraction": [
+              0.0612,
+              0.1154,
+              0.1117,
+              0.0189
+            ],
+            "explicitFontMedian": 8.5
+          },
+          {
+            "name": "Text 2",
+            "text": "FACTOR TAXONOMY & SCORECARD 因子分类与评分卡",
+            "rows": [],
+            "chars": 32,
+            "boundsFraction": [
+              0.0543,
+              0.1474,
+              0.8915,
+              0.0512
+            ],
+            "explicitFontMedian": 27.5
+          },
+          {
+            "name": "Text 3",
+            "text": "MASTER TAXONOMY 分类总表",
+            "rows": [],
+            "chars": 18,
+            "boundsFraction": [
+              0.0543,
+              0.2422,
+              0.4317,
+              0.0256
+            ],
+            "explicitFontMedian": 13.5
+          },
+          {
+            "name": "Table 0",
+            "text": "Family 族 | Representative Signals 代表信号\nValue 价值 | B/P, E/P, EBIT/EV, CFO/P\nMomentum 动量 | 12-1 return, residual mom, earnings mom\nQuality 质量 | GP/A, ROE, accruals, F-score, QMJ\nInvestment 投资 | Asset growth, capex growth, net issuance\nLow Risk 低风险 | Beta, idio-vol, downside vol\nLiquidity 流动性 | Amihud, turnover, spread, ADV\nSentiment 情绪 | Analyst revisions, short interest, news tone\nAlt Data 另类数据 | Web traffic, app usage, supply chain text",
+            "rows": [
+              [
+                "Family 族",
+                "Representative Signals 代表信号"
+              ],
+              [
+                "Value 价值",
+                "B/P, E/P, EBIT/EV, CFO/P"
+              ],
+              [
+                "Momentum 动量",
+                "12-1 return, residual mom, earnings mom"
+              ],
+              [
+                "Quality 质量",
+                "GP/A, ROE, accruals, F-score, QMJ"
+              ],
+              [
+                "Investment 投资",
+                "Asset growth, capex growth, net issuance"
+              ],
+              [
+                "Low Risk 低风险",
+                "Beta, idio-vol, downside vol"
+              ],
+              [
+                "Liquidity 流动性",
+                "Amihud, turnover, spread, ADV"
+              ],
+              [
+                "Sentiment 情绪",
+                "Analyst revisions, short interest, news tone"
+              ],
+              [
+                "Alt Data 另类数据",
+                "Web traffic, app usage, supply chain text"
+              ]
+            ],
+            "chars": 367,
+            "boundsFraction": [
+              0.0543,
+              0.2874,
+              0.4317,
+              0.1333
+            ],
+            "explicitFontMedian": 11.0
+          },
+          {
+            "name": "Text 12",
+            "text": "RISK VS. MISPRICING SCORECARD 逐因子评分",
+            "rows": [],
+            "chars": 31,
+            "boundsFraction": [
+              0.5146,
+              0.2422,
+              0.4317,
+              0.0256
+            ],
+            "explicitFontMedian": 13.5
+          },
+          {
+            "name": "Table 1",
+            "text": "Factor | Risk Story | Behavioral Story\nValue | Distress & duration risk | Extrapolation, overreaction\nMomentum | Crash & optionality exposure | Underreaction, slow diffusion\nQuality | Defensive cash flows | Underappreciated persistence\nInvestment | q-theory investment risk | Overinvestment, empire building\nLow Vol | Leverage constraints (BAB) | Lottery demand for high beta\nSize | Illiquidity / funding risk | Neglected firms",
+            "rows": [
+              [
+                "Factor",
+                "Risk Story",
+                "Behavioral Story"
+              ],
+              [
+                "Value",
+                "Distress & duration risk",
+                "Extrapolation, overreaction"
+              ],
+              [
+                "Momentum",
+                "Crash & optionality exposure",
+                "Underreaction, slow diffusion"
+              ],
+              [
+                "Quality",
+                "Defensive cash flows",
+                "Underappreciated persistence"
+              ],
+              [
+                "Investment",
+                "q-theory investment risk",
+                "Overinvestment, empire building"
+              ],
+              [
+                "Low Vol",
+                "Leverage constraints (BAB)",
+                "Lottery demand for high beta"
+              ],
+              [
+                "Size",
+                "Illiquidity / funding risk",
+                "Neglected firms"
+              ]
+            ],
+            "chars": 364,
+            "boundsFraction": [
+              0.5146,
+              0.2874,
+              0.4317,
+              0.1333
+            ],
+            "explicitFontMedian": 11.0
+          },
+          {
+            "name": "Text 19",
+            "text": "The scorecard is not a verdict — it is a prompt. For every factor, write down what evidence would convince you it is not real.",
+            "rows": [],
+            "chars": 102,
+            "boundsFraction": [
+              0.5146,
+              0.8149,
+              0.4317,
+              0.0569
+            ],
+            "explicitFontMedian": 11.0
+          }
+        ],
+        "text": "SECTIONS 6–7\nFACTOR TAXONOMY & SCORECARD 因子分类与评分卡\nMASTER TAXONOMY 分类总表\nFamily 族 | Representative Signals 代表信号\nValue 价值 | B/P, E/P, EBIT/EV, CFO/P\nMomentum 动量 | 12-1 return, residual mom, earnings mom\nQuality 质量 | GP/A, ROE, accruals, F-score, QMJ\nInvestment 投资 | Asset growth, capex growth, net issuance\nLow Risk 低风险 | Beta, idio-vol, downside vol\nLiquidity 流动性 | Amihud, turnover, spread, ADV\nSentiment 情绪 | Analyst revisions, short interest, news tone\nAlt Data 另类数据 | Web traffic, app usage, supply chain text\nRISK VS. MISPRICING SCORECARD 逐因子评分\nFactor | Risk Story | Behavioral Story\nValue | Distress & duration risk | Extrapolation, overreaction\nMomentum | Crash & optionality exposure | Underreaction, slow diffusion\nQuality | Defensive cash flows | Underappreciated persistence\nInvestment | q-theory investment risk | Overinvestment, empire building\nLow Vol | Leverage constraints (BAB) | Lottery demand for high beta\nSize | Illiquidity / funding risk | Neglected firms\nThe scorecard is not a verdict — it is a prompt. For every factor, write down what evidence would convince you it is not real.",
+        "tableSerializationSeparators": 23,
+        "actualTextChars": 902
+      },
+      {
+        "page": 7,
+        "titleGuess": "SECTIONS 8–9",
+        "visibleChars": 917,
+        "textFrameUnionRatio": 0.2478,
+        "nonemptyParagraphs": 10,
+        "nativeTables": 0,
+        "textObjects": 10,
+        "explicitFontCharWeightedMedian": 11.0,
+        "explicitFontCountChars": 917,
+        "objects": [
+          {
+            "name": "Text 1",
+            "text": "SECTIONS 8–9",
+            "rows": [],
+            "chars": 11,
+            "boundsFraction": [
+              0.4362,
+              0.0759,
+              0.1117,
+              0.0189
+            ],
+            "explicitFontMedian": 8.5
+          },
+          {
+            "name": "Text 2",
+            "text": "CONSTRUCTION STYLES & FACTOR TIMING 构建方式与因子择时",
+            "rows": [],
+            "chars": 40,
+            "boundsFraction": [
+              0.4293,
+              0.1079,
+              0.5165,
+              0.1025
+            ],
+            "explicitFontMedian": 27.5
+          },
+          {
+            "name": "Text 4",
+            "text": "LONG-SHORT ACADEMIC FACTOR",
+            "rows": [],
+            "chars": 24,
+            "boundsFraction": [
+              0.4736,
+              0.257,
+              0.4721,
+              0.0307
+            ],
+            "explicitFontMedian": 16.5
+          },
+          {
+            "name": "Text 5",
+            "text": "Decile or 2×3 sort; value-weighted; tests whether the premium exists in principle. Reports pure factor return. Not directly investable due to shorting costs, turnover, and capacity.",
+            "rows": [],
+            "chars": 156,
+            "boundsFraction": [
+              0.4736,
+              0.2981,
+              0.4721,
+              0.0569
+            ],
+            "explicitFontMedian": 11.0
+          },
+          {
+            "name": "Text 7",
+            "text": "RANK-WEIGHTED DOLLAR-NEUTRAL",
+            "rows": [],
+            "chars": 27,
+            "boundsFraction": [
+              0.4909,
+              0.4134,
+              0.4548,
+              0.0307
+            ],
+            "explicitFontMedian": 16.5
+          },
+          {
+            "name": "Text 8",
+            "text": "Weights proportional to cross-sectional rank; dollar-neutral by construction; smoother exposure than decile sorts; still requires shorting but reduces turnover concentration.",
+            "rows": [],
+            "chars": 155,
+            "boundsFraction": [
+              0.4909,
+              0.4546,
+              0.4548,
+              0.0569
+            ],
+            "explicitFontMedian": 11.0
+          },
+          {
+            "name": "Text 10",
+            "text": "LONG-ONLY BENCHMARK TILT",
+            "rows": [],
+            "chars": 22,
+            "boundsFraction": [
+              0.5082,
+              0.5699,
+              0.4375,
+              0.0307
+            ],
+            "explicitFontMedian": 16.5
+          },
+          {
+            "name": "Text 11",
+            "text": "Factor expressed as overweights/underweights vs. a benchmark. Tests benchmark-relative stock selection under real constraints. Always report: weighting, rebalancing frequency, breakpoint universe, sector/beta neutrality.",
+            "rows": [],
+            "chars": 198,
+            "boundsFraction": [
+              0.5082,
+              0.6111,
+              0.4375,
+              0.0853
+            ],
+            "explicitFontMedian": 11.0
+          },
+          {
+            "name": "Text 13",
+            "text": "FACTOR TIMING & CROWDING 择时与拥挤",
+            "rows": [],
+            "chars": 26,
+            "boundsFraction": [
+              0.5255,
+              0.7548,
+              0.4202,
+              0.0307
+            ],
+            "explicitFontMedian": 16.5
+          },
+          {
+            "name": "Text 14",
+            "text": "Valuation spreads, macro regimes, crowding indicators can contain information — but add another layer of multiple testing. Safer default: diversification across factors with drawdown-aware risk budgeting. Monitor common-manager holdings, ETF flows, short interest, borrow cost, turnover spikes.",
+            "rows": [],
+            "chars": 258,
+            "boundsFraction": [
+              0.5255,
+              0.796,
+              0.4202,
+              0.1138
+            ],
+            "explicitFontMedian": 11.0
+          }
+        ],
+        "text": "SECTIONS 8–9\nCONSTRUCTION STYLES & FACTOR TIMING 构建方式与因子择时\nLONG-SHORT ACADEMIC FACTOR\nDecile or 2×3 sort; value-weighted; tests whether the premium exists in principle. Reports pure factor return. Not directly investable due to shorting costs, turnover, and capacity.\nRANK-WEIGHTED DOLLAR-NEUTRAL\nWeights proportional to cross-sectional rank; dollar-neutral by construction; smoother exposure than decile sorts; still requires shorting but reduces turnover concentration.\nLONG-ONLY BENCHMARK TILT\nFactor expressed as overweights/underweights vs. a benchmark. Tests benchmark-relative stock selection under real constraints. Always report: weighting, rebalancing frequency, breakpoint universe, sector/beta neutrality.\nFACTOR TIMING & CROWDING 择时与拥挤\nValuation spreads, macro regimes, crowding indicators can contain information — but add another layer of multiple testing. Safer default: diversification across factors with drawdown-aware risk budgeting. Monitor common-manager holdings, ETF flows, short interest, borrow cost, turnover spikes.",
+        "tableSerializationSeparators": 0,
+        "actualTextChars": 917
+      },
+      {
+        "page": 8,
+        "titleGuess": "SECTIONS 10–11",
+        "visibleChars": 996,
+        "textFrameUnionRatio": 0.3091,
+        "nonemptyParagraphs": 16,
+        "nativeTables": 0,
+        "textObjects": 16,
+        "explicitFontCharWeightedMedian": 11.5,
+        "explicitFontCountChars": 996,
+        "objects": [
+          {
+            "name": "Text 1",
+            "text": "SECTIONS 10–11",
+            "rows": [],
+            "chars": 13,
+            "boundsFraction": [
+              0.0616,
+              0.0815,
+              0.1263,
+              0.02
+            ],
+            "explicitFontMedian": 9.0
+          },
+          {
+            "name": "Text 2",
+            "text": "US VS A-SHARES & THE 2×3 SORT 美股与A股 · 算例",
+            "rows": [],
+            "chars": 31,
+            "boundsFraction": [
+              0.0543,
+              0.1158,
+              0.8915,
+              0.0543
+            ],
+            "explicitFontMedian": 29.0
+          },
+          {
+            "name": "Text 3",
+            "text": "FACTORS IN US VS A-SHARES 市场差异",
+            "rows": [],
+            "chars": 25,
+            "boundsFraction": [
+              0.0543,
+              0.2189,
+              0.4309,
+              0.0271
+            ],
+            "explicitFontMedian": 14.5
+          },
+          {
+            "name": "Text 4",
+            "text": "MARKET STRUCTURE 市场结构",
+            "rows": [],
+            "chars": 19,
+            "boundsFraction": [
+              0.0743,
+              0.2924,
+              0.3971,
+              0.0271
+            ],
+            "explicitFontMedian": 14.5
+          },
+          {
+            "name": "Text 5",
+            "text": "A-share shorting constraints are more severe; limit-up/limit-down events distort momentum signals; disclosure quality and earnings-management incentives differ significantly from US markets.",
+            "rows": [],
+            "chars": 170,
+            "boundsFraction": [
+              0.0743,
+              0.3391,
+              0.3971,
+              0.0928
+            ],
+            "explicitFontMedian": 11.5
+          },
+          {
+            "name": "Text 6",
+            "text": "MOMENTUM 动量",
+            "rows": [],
+            "chars": 10,
+            "boundsFraction": [
+              0.0743,
+              0.5003,
+              0.3971,
+              0.0271
+            ],
+            "explicitFontMedian": 14.5
+          },
+          {
+            "name": "Text 7",
+            "text": "US momentum is a robust canonical factor. A-share momentum is more horizon- and limit-event-dependent — treat any cross-market factor import as a hypothesis, not a parameter-free truth.",
+            "rows": [],
+            "chars": 159,
+            "boundsFraction": [
+              0.0743,
+              0.547,
+              0.3971,
+              0.0928
+            ],
+            "explicitFontMedian": 11.5
+          },
+          {
+            "name": "Text 8",
+            "text": "SIZE & QUALITY A股规模/质量",
+            "rows": [],
+            "chars": 19,
+            "boundsFraction": [
+              0.0743,
+              0.7082,
+              0.3971,
+              0.0271
+            ],
+            "explicitFontMedian": 14.5
+          },
+          {
+            "name": "Text 9",
+            "text": "A-share size has been shaped by shell value and quant crowding. Quality screens must be more alert to subsidies, related-party activity, and earnings-management incentives unique to the A-share regulatory regime.",
+            "rows": [],
+            "chars": 183,
+            "boundsFraction": [
+              0.0743,
+              0.7549,
+              0.3971,
+              0.1237
+            ],
+            "explicitFontMedian": 11.5
+          },
+          {
+            "name": "Text 10",
+            "text": "WORKED EXAMPLE: THE 2×3 SORT 算例",
+            "rows": [],
+            "chars": 26,
+            "boundsFraction": [
+              0.5154,
+              0.2189,
+              0.4309,
+              0.0271
+            ],
+            "explicitFontMedian": 14.5
+          },
+          {
+            "name": "Text 11",
+            "text": "A Fama-French-style 2×3 sort on a toy universe works as follows:",
+            "rows": [],
+            "chars": 54,
+            "boundsFraction": [
+              0.5154,
+              0.2655,
+              0.4809,
+              0.0309
+            ],
+            "explicitFontMedian": 11.5
+          },
+          {
+            "name": "Text 12",
+            "text": "COMPUTE HML FACTOR",
+            "rows": [],
+            "chars": 16,
+            "boundsFraction": [
+              0.8339,
+              0.5515,
+              0.0728,
+              0.0399
+            ],
+            "explicitFontMedian": 10.5
+          },
+          {
+            "name": "Text 13",
+            "text": "FORM 2×3 PORTFOLIOS",
+            "rows": [],
+            "chars": 17,
+            "boundsFraction": [
+              0.7421,
+              0.5515,
+              0.0728,
+              0.0399
+            ],
+            "explicitFontMedian": 10.5
+          },
+          {
+            "name": "Text 14",
+            "text": "RANK CHARACTERISTIC",
+            "rows": [],
+            "chars": 18,
+            "boundsFraction": [
+              0.6509,
+              0.5415,
+              0.0728,
+              0.0598
+            ],
+            "explicitFontMedian": 10.5
+          },
+          {
+            "name": "Text 15",
+            "text": "SPLIT BY SIZE",
+            "rows": [],
+            "chars": 11,
+            "boundsFraction": [
+              0.5576,
+              0.5615,
+              0.0728,
+              0.0199
+            ],
+            "explicitFontMedian": 10.5
+          },
+          {
+            "name": "Text 16",
+            "text": "Independent sorting keeps the two dimensions near-orthogonal by construction. The same template applies to profitability, investment, and custom factors. Always use NYSE breakpoints (not the full universe) to avoid microcap domination of the sort breakpoints.",
+            "rows": [],
+            "chars": 225,
+            "boundsFraction": [
+              0.5154,
+              0.6559,
+              0.4309,
+              0.1237
+            ],
+            "explicitFontMedian": 11.5
+          }
+        ],
+        "text": "SECTIONS 10–11\nUS VS A-SHARES & THE 2×3 SORT 美股与A股 · 算例\nFACTORS IN US VS A-SHARES 市场差异\nMARKET STRUCTURE 市场结构\nA-share shorting constraints are more severe; limit-up/limit-down events distort momentum signals; disclosure quality and earnings-management incentives differ significantly from US markets.\nMOMENTUM 动量\nUS momentum is a robust canonical factor. A-share momentum is more horizon- and limit-event-dependent — treat any cross-market factor import as a hypothesis, not a parameter-free truth.\nSIZE & QUALITY A股规模/质量\nA-share size has been shaped by shell value and quant crowding. Quality screens must be more alert to subsidies, related-party activity, and earnings-management incentives unique to the A-share regulatory regime.\nWORKED EXAMPLE: THE 2×3 SORT 算例\nA Fama-French-style 2×3 sort on a toy universe works as follows:\nCOMPUTE HML FACTOR\nFORM 2×3 PORTFOLIOS\nRANK CHARACTERISTIC\nSPLIT BY SIZE\nIndependent sorting keeps the two dimensions near-orthogonal by construction. The same template applies to profitability, investment, and custom factors. Always use NYSE breakpoints (not the full universe) to avoid microcap domination of the sort breakpoints.",
+        "tableSerializationSeparators": 0,
+        "actualTextChars": 996
+      },
+      {
+        "page": 9,
+        "titleGuess": "FROM FACTORS TO STRATEGIES 从因子到策略",
+        "visibleChars": 802,
+        "textFrameUnionRatio": 0.2795,
+        "nonemptyParagraphs": 25,
+        "nativeTables": 0,
+        "textObjects": 17,
+        "explicitFontCharWeightedMedian": 10.0,
+        "explicitFontCountChars": 802,
+        "objects": [
+          {
+            "name": "Text 0",
+            "text": "FROM FACTORS TO STRATEGIES 从因子到策略",
+            "rows": [],
+            "chars": 29,
+            "boundsFraction": [
+              0.3043,
+              0.1011,
+              0.6415,
+              0.0482
+            ],
+            "explicitFontMedian": 26.0
+          },
+          {
+            "name": "Text 4",
+            "text": "1",
+            "rows": [],
+            "chars": 1,
+            "boundsFraction": [
+              0.6169,
+              0.1797,
+              0.0163,
+              0.0289
+            ],
+            "explicitFontMedian": 15.5
+          },
+          {
+            "name": "Text 5",
+            "text": "ECONOMIC RATIONALE & SIGNAL 经济逻辑与信号",
+            "rows": [],
+            "chars": 31,
+            "boundsFraction": [
+              0.3043,
+              0.1797,
+              0.2665,
+              0.0579
+            ],
+            "explicitFontMedian": 15.5
+          },
+          {
+            "name": "Text 6",
+            "text": "Steps 1–2",
+            "rows": [],
+            "chars": 8,
+            "boundsFraction": [
+              0.3043,
+              0.2468,
+              0.2665,
+              0.026
+            ],
+            "explicitFontMedian": 10.0
+          },
+          {
+            "name": "Text 7",
+            "text": "Articulate the theoretical reason before seeing the backtest\nBuild a clean, point-in-time signal with no look-ahead\nConfirm IC, sorts, and regressions agree directionally",
+            "rows": [],
+            "chars": 148,
+            "boundsFraction": [
+              0.3043,
+              0.2821,
+              0.2665,
+              0.167
+            ],
+            "explicitFontMedian": 10.0
+          },
+          {
+            "name": "Text 10",
+            "text": "2",
+            "rows": [],
+            "chars": 1,
+            "boundsFraction": [
+              0.6169,
+              0.2877,
+              0.0163,
+              0.0289
+            ],
+            "explicitFontMedian": 15.5
+          },
+          {
+            "name": "Text 11",
+            "text": "SINGLE-FACTOR & INCREMENTALITY TESTS 单因子与增量检验",
+            "rows": [],
+            "chars": 41,
+            "boundsFraction": [
+              0.6793,
+              0.2877,
+              0.2665,
+              0.0868
+            ],
+            "explicitFontMedian": 15.5
+          },
+          {
+            "name": "Text 12",
+            "text": "Steps 3–4",
+            "rows": [],
+            "chars": 8,
+            "boundsFraction": [
+              0.6793,
+              0.3838,
+              0.2665,
+              0.026
+            ],
+            "explicitFontMedian": 10.0
+          },
+          {
+            "name": "Text 13",
+            "text": "Single-factor sort across reasonable horizons and universes\nIncrementality vs. known factors (FF5, q5, Carhart)\nApply multiple-testing-aware thresholds (t > 3.0)",
+            "rows": [],
+            "chars": 142,
+            "boundsFraction": [
+              0.6793,
+              0.4191,
+              0.2665,
+              0.115
+            ],
+            "explicitFontMedian": 10.0
+          },
+          {
+            "name": "Text 16",
+            "text": "3",
+            "rows": [],
+            "chars": 1,
+            "boundsFraction": [
+              0.6169,
+              0.4872,
+              0.0163,
+              0.0289
+            ],
+            "explicitFontMedian": 15.5
+          },
+          {
+            "name": "Text 17",
+            "text": "BACKTEST & RED TEAM 回测与红队",
+            "rows": [],
+            "chars": 21,
+            "boundsFraction": [
+              0.3043,
+              0.4872,
+              0.2665,
+              0.0289
+            ],
+            "explicitFontMedian": 15.5
+          },
+          {
+            "name": "Text 18",
+            "text": "Steps 5–6",
+            "rows": [],
+            "chars": 8,
+            "boundsFraction": [
+              0.3043,
+              0.5254,
+              0.2665,
+              0.026
+            ],
+            "explicitFontMedian": 10.0
+          },
+          {
+            "name": "Text 19",
+            "text": "Walk-forward or out-of-sample evaluation\nRed-team stress: different universes, sub-periods, geographies\nCost and turnover realism — borrow cost, market impact",
+            "rows": [],
+            "chars": 140,
+            "boundsFraction": [
+              0.3043,
+              0.5607,
+              0.2665,
+              0.141
+            ],
+            "explicitFontMedian": 10.0
+          },
+          {
+            "name": "Text 22",
+            "text": "4",
+            "rows": [],
+            "chars": 1,
+            "boundsFraction": [
+              0.6169,
+              0.6295,
+              0.0163,
+              0.0289
+            ],
+            "explicitFontMedian": 15.5
+          },
+          {
+            "name": "Text 23",
+            "text": "CONSTRAINED PORTFOLIO → LIVE 约束组合到实盘",
+            "rows": [],
+            "chars": 32,
+            "boundsFraction": [
+              0.6793,
+              0.6295,
+              0.2665,
+              0.0579
+            ],
+            "explicitFontMedian": 15.5
+          },
+          {
+            "name": "Text 24",
+            "text": "Steps 7–9",
+            "rows": [],
+            "chars": 8,
+            "boundsFraction": [
+              0.6793,
+              0.6966,
+              0.2665,
+              0.026
+            ],
+            "explicitFontMedian": 10.0
+          },
+          {
+            "name": "Text 25",
+            "text": "Constrained portfolio construction with universe rules and risk limits\nPaper trade with full execution assumptions and capacity estimates\nSmall live allocation with monitoring and failure-scenario governance",
+            "rows": [],
+            "chars": 182,
+            "boundsFraction": [
+              0.6793,
+              0.7319,
+              0.2665,
+              0.167
+            ],
+            "explicitFontMedian": 10.0
+          }
+        ],
+        "text": "FROM FACTORS TO STRATEGIES 从因子到策略\n1\nECONOMIC RATIONALE & SIGNAL 经济逻辑与信号\nSteps 1–2\nArticulate the theoretical reason before seeing the backtest\nBuild a clean, point-in-time signal with no look-ahead\nConfirm IC, sorts, and regressions agree directionally\n2\nSINGLE-FACTOR & INCREMENTALITY TESTS 单因子与增量检验\nSteps 3–4\nSingle-factor sort across reasonable horizons and universes\nIncrementality vs. known factors (FF5, q5, Carhart)\nApply multiple-testing-aware thresholds (t > 3.0)\n3\nBACKTEST & RED TEAM 回测与红队\nSteps 5–6\nWalk-forward or out-of-sample evaluation\nRed-team stress: different universes, sub-periods, geographies\nCost and turnover realism — borrow cost, market impact\n4\nCONSTRAINED PORTFOLIO → LIVE 约束组合到实盘\nSteps 7–9\nConstrained portfolio construction with universe rules and risk limits\nPaper trade with full execution assumptions and capacity estimates\nSmall live allocation with monitoring and failure-scenario governance",
+        "tableSerializationSeparators": 0,
+        "actualTextChars": 802
+      },
+      {
+        "page": 10,
+        "titleGuess": "SECTIONS 13–14",
+        "visibleChars": 1128,
+        "textFrameUnionRatio": 0.2662,
+        "nonemptyParagraphs": 49,
+        "nativeTables": 1,
+        "textObjects": 14,
+        "explicitFontCharWeightedMedian": 9.5,
+        "explicitFontCountChars": 1101,
+        "objects": [
+          {
+            "name": "Text 1",
+            "text": "SECTIONS 13–14",
+            "rows": [],
+            "chars": 13,
+            "boundsFraction": [
+              0.0604,
+              0.1052,
+              0.1135,
+              0.0166
+            ],
+            "explicitFontMedian": 7.5
+          },
+          {
+            "name": "Text 2",
+            "text": "PRACTICAL CHECKLIST & SUMMARY 实践清单与小结",
+            "rows": [],
+            "chars": 33,
+            "boundsFraction": [
+              0.0543,
+              0.1327,
+              0.8915,
+              0.0452
+            ],
+            "explicitFontMedian": 24.0
+          },
+          {
+            "name": "Text 3",
+            "text": "WHAT MAKES A GOOD FACTOR 好因子的标准",
+            "rows": [],
+            "chars": 26,
+            "boundsFraction": [
+              0.0543,
+              0.2118,
+              0.3875,
+              0.0226
+            ],
+            "explicitFontMedian": 12.0
+          },
+          {
+            "name": "Text 4",
+            "text": "It is known at the time it is used — no look-ahead, point-in-time construction 使用时确实已知",
+            "rows": [],
+            "chars": 72,
+            "boundsFraction": [
+              0.0873,
+              0.2497,
+              0.3545,
+              0.0475
+            ],
+            "explicitFontMedian": 9.5
+          },
+          {
+            "name": "Text 5",
+            "text": "It has a reason to exist before seeing the backtest — theory first 在看到回测前就有存在理由",
+            "rows": [],
+            "chars": 66,
+            "boundsFraction": [
+              0.0873,
+              0.3311,
+              0.3545,
+              0.0475
+            ],
+            "explicitFontMedian": 9.5
+          },
+          {
+            "name": "Text 6",
+            "text": "It survives neutralization to obvious exposures (sector, size, beta) 对明显暴露中性化后仍存在",
+            "rows": [],
+            "chars": 72,
+            "boundsFraction": [
+              0.0873,
+              0.4124,
+              0.3545,
+              0.0475
+            ],
+            "explicitFontMedian": 9.5
+          },
+          {
+            "name": "Text 7",
+            "text": "IC, portfolio sorts, and regressions agree directionally IC、分层和回归方向一致",
+            "rows": [],
+            "chars": 62,
+            "boundsFraction": [
+              0.0873,
+              0.4938,
+              0.3545,
+              0.0237
+            ],
+            "explicitFontMedian": 9.5
+          },
+          {
+            "name": "Text 8",
+            "text": "It works across reasonable horizons and universes — not just US large-cap 1990–2020 跨期限和股票池稳健",
+            "rows": [],
+            "chars": 80,
+            "boundsFraction": [
+              0.0873,
+              0.5752,
+              0.3545,
+              0.0475
+            ],
+            "explicitFontMedian": 9.5
+          },
+          {
+            "name": "Text 9",
+            "text": "It is not just a renamed existing factor — passes incrementality tests 不是已有因子的改名",
+            "rows": [],
+            "chars": 68,
+            "boundsFraction": [
+              0.0873,
+              0.6566,
+              0.3545,
+              0.0475
+            ],
+            "explicitFontMedian": 9.5
+          },
+          {
+            "name": "Text 10",
+            "text": "It survives costs, turnover, and capacity — t-stat net of friction 能扛住成本和换手",
+            "rows": [],
+            "chars": 64,
+            "boundsFraction": [
+              0.0873,
+              0.738,
+              0.3545,
+              0.0475
+            ],
+            "explicitFontMedian": 9.5
+          },
+          {
+            "name": "Text 11",
+            "text": "It has a failure story and a monitoring plan 有失效故事和监控方案",
+            "rows": [],
+            "chars": 46,
+            "boundsFraction": [
+              0.0873,
+              0.8193,
+              0.3545,
+              0.0237
+            ],
+            "explicitFontMedian": 9.5
+          },
+          {
+            "name": "Text 12",
+            "text": "MODEL LINEAGE SUMMARY 模型谱系汇总",
+            "rows": [],
+            "chars": 25,
+            "boundsFraction": [
+              0.4671,
+              0.2118,
+              0.4791,
+              0.0226
+            ],
+            "explicitFontMedian": 12.0
+          },
+          {
+            "name": "Table 0",
+            "text": "Model | Year | Factors # | Grounding\nCAPM | 1964 | 1 | Mean-variance equilibrium\nAPT | 1976 | K | No-arbitrage, linear factors\nFF3 | 1993 | 3 | Empirical + risk rationalization\nCarhart 4 | 1997 | 4 | Empirical momentum add-on\nFF5 | 2015 | 5 | Dividend-discount decomposition\nq (HXZ) | 2015 | 4 | Investment-based q-theory\nq5 | 2021 | 5 | q-theory + expected growth\nStambaugh-Yuan | 2017 | 4 | Behavioral mispricing clusters",
+            "rows": [
+              [
+                "Model",
+                "Year",
+                "Factors #",
+                "Grounding"
+              ],
+              [
+                "CAPM",
+                "1964",
+                "1",
+                "Mean-variance equilibrium"
+              ],
+              [
+                "APT",
+                "1976",
+                "K",
+                "No-arbitrage, linear factors"
+              ],
+              [
+                "FF3",
+                "1993",
+                "3",
+                "Empirical + risk rationalization"
+              ],
+              [
+                "Carhart 4",
+                "1997",
+                "4",
+                "Empirical momentum add-on"
+              ],
+              [
+                "FF5",
+                "2015",
+                "5",
+                "Dividend-discount decomposition"
+              ],
+              [
+                "q (HXZ)",
+                "2015",
+                "4",
+                "Investment-based q-theory"
+              ],
+              [
+                "q5",
+                "2021",
+                "5",
+                "q-theory + expected growth"
+              ],
+              [
+                "Stambaugh-Yuan",
+                "2017",
+                "4",
+                "Behavioral mispricing clusters"
+              ]
+            ],
+            "chars": 343,
+            "boundsFraction": [
+              0.4671,
+              0.2497,
+              0.4791,
+              0.1333
+            ],
+            "explicitFontMedian": 9.5
+          },
+          {
+            "name": "Text 21",
+            "text": "The factor zoo is both a library and a warning. Good factor research combines theory, data discipline, conservative testing, cost realism, and humility about regimes. 因子动物园既是资料库，也是警告。",
+            "rows": [],
+            "chars": 158,
+            "boundsFraction": [
+              0.4671,
+              0.8406,
+              0.4791,
+              0.0475
+            ],
+            "explicitFontMedian": 9.5
+          }
+        ],
+        "text": "SECTIONS 13–14\nPRACTICAL CHECKLIST & SUMMARY 实践清单与小结\nWHAT MAKES A GOOD FACTOR 好因子的标准\nIt is known at the time it is used — no look-ahead, point-in-time construction 使用时确实已知\nIt has a reason to exist before seeing the backtest — theory first 在看到回测前就有存在理由\nIt survives neutralization to obvious exposures (sector, size, beta) 对明显暴露中性化后仍存在\nIC, portfolio sorts, and regressions agree directionally IC、分层和回归方向一致\nIt works across reasonable horizons and universes — not just US large-cap 1990–2020 跨期限和股票池稳健\nIt is not just a renamed existing factor — passes incrementality tests 不是已有因子的改名\nIt survives costs, turnover, and capacity — t-stat net of friction 能扛住成本和换手\nIt has a failure story and a monitoring plan 有失效故事和监控方案\nMODEL LINEAGE SUMMARY 模型谱系汇总\nModel | Year | Factors # | Grounding\nCAPM | 1964 | 1 | Mean-variance equilibrium\nAPT | 1976 | K | No-arbitrage, linear factors\nFF3 | 1993 | 3 | Empirical + risk rationalization\nCarhart 4 | 1997 | 4 | Empirical momentum add-on\nFF5 | 2015 | 5 | Dividend-discount decomposition\nq (HXZ) | 2015 | 4 | Investment-based q-theory\nq5 | 2021 | 5 | q-theory + expected growth\nStambaugh-Yuan | 2017 | 4 | Behavioral mispricing clusters\nThe factor zoo is both a library and a warning. Good factor research combines theory, data discipline, conservative testing, cost realism, and humility about regimes. 因子动物园既是资料库，也是警告。",
+        "tableSerializationSeparators": 27,
+        "actualTextChars": 1101
+      }
+    ]
+  },
+  "aimate": {
+    "path": "/Users/dongli/Documents/ChatGPT/CodePilot/LabCodepilot-para/outputs/ppt-next-round/after/factor-zoo-original-template.pptx",
+    "sha256": "85088f4f26508d904156efa1eb405116c7d6062e521f5e3ff6b03994fa47a1d4",
+    "pages": 22,
+    "sizeInches": [
+      13.333,
+      7.5
+    ],
+    "all": {
+      "totalChars": 10295,
+      "medianChars": 451.5,
+      "q1Chars": 349.0,
+      "q3Chars": 602.0
+    },
+    "excludingCover": {
+      "totalChars": 10211,
+      "medianChars": 460,
+      "q1Chars": 371.0,
+      "q3Chars": 608.0,
+      "medianFrameUnion": 0.4138
+    },
+    "nativeTables": 7,
+    "actualText": {
+      "totalChars": 10175,
+      "medianAllPages": 441.5,
+      "bodyTotalChars": 10091,
+      "bodyMedianChars": 443,
+      "bodyQ1Chars": 371.0,
+      "bodyQ3Chars": 587.0,
+      "bodyMinChars": 237,
+      "bodyMaxChars": 834
+    },
+    "slides": [
+      {
+        "page": 1,
+        "titleGuess": "QUANT FINANCE",
+        "visibleChars": 84,
+        "textFrameUnionRatio": 0.1285,
+        "nonemptyParagraphs": 3,
+        "nativeTables": 0,
+        "textObjects": 3,
+        "explicitFontCharWeightedMedian": 13.0,
+        "explicitFontCountChars": 84,
+        "objects": [
+          {
+            "name": "Text 1",
+            "text": "QUANT FINANCE",
+            "rows": [],
+            "chars": 12,
+            "boundsFraction": [
+              0.0624,
+              0.3466,
+              0.2357,
+              0.0222
+            ],
+            "explicitFontMedian": 10.0
+          },
+          {
+            "name": "Text 2",
+            "text": "FACTOR ZOO",
+            "rows": [],
+            "chars": 9,
+            "boundsFraction": [
+              0.0543,
+              0.3857,
+              0.5165,
+              0.1664
+            ],
+            "explicitFontMedian": 44.5
+          },
+          {
+            "name": "Text 3",
+            "text": "A research map for asset-pricing models, anomalies and investable tests.",
+            "rows": [],
+            "chars": 63,
+            "boundsFraction": [
+              0.0543,
+              0.5883,
+              0.5165,
+              0.0723
+            ],
+            "explicitFontMedian": 13.0
+          }
+        ],
+        "text": "QUANT FINANCE\nFACTOR ZOO\nA research map for asset-pricing models, anomalies and investable tests.",
+        "tableSerializationSeparators": 0,
+        "actualTextChars": 84
+      },
+      {
+        "page": 2,
+        "titleGuess": "FACTORS",
+        "visibleChars": 425,
+        "textFrameUnionRatio": 0.6475,
+        "nonemptyParagraphs": 11,
+        "nativeTables": 1,
+        "textObjects": 3,
+        "explicitFontCharWeightedMedian": 14.0,
+        "explicitFontCountChars": 419,
+        "objects": [
+          {
+            "name": "Text 1",
+            "text": "FACTORS",
+            "rows": [],
+            "chars": 7,
+            "boundsFraction": [
+              0.0624,
+              0.1507,
+              0.0988,
+              0.0222
+            ],
+            "explicitFontMedian": 10.0
+          },
+          {
+            "name": "Text 2",
+            "text": "Factor vs Alpha",
+            "rows": [],
+            "chars": 13,
+            "boundsFraction": [
+              0.0543,
+              0.1897,
+              0.8915,
+              0.0603
+            ],
+            "explicitFontMedian": 32.5
+          },
+          {
+            "name": "AIMate source:b_0016:TableBlock",
+            "text": "Term | Definition | Example\nCharacteristic 特征 | A firm-level observable at time t (accounting ratio, price statistic, sentiment score) 公司层面在时刻 t 可观察到的量（会计比率、价格统计量、情绪评分） | Book-to-market ratio B/M_(i,t) 账面市值比 B/M_(i,t)\nFactor 因子 | A return series (usually long-short) built by sorting stocks on a characteristic, or a statistical factor from PCA/regression 依据某特征对股票排序构建出的收益率序列（通常为多空组合），或由 PCA/回归得到的统计因子 | HML: high B/M minus low B/M portfolio return HML：高 B/M 减低 B/M 组合收益",
+            "rows": [
+              [
+                "Term",
+                "Definition",
+                "Example"
+              ],
+              [
+                "Characteristic 特征",
+                "A firm-level observable at time t (accounting ratio, price statistic, sentiment score) 公司层面在时刻 t 可观察到的量（会计比率、价格统计量、情绪评分）",
+                "Book-to-market ratio B/M_(i,t) 账面市值比 B/M_(i,t)"
+              ],
+              [
+                "Factor 因子",
+                "A return series (usually long-short) built by sorting stocks on a characteristic, or a statistical factor from PCA/regression 依据某特征对股票排序构建出的收益率序列（通常为多空组合），或由 PCA/回归得到的统计因子",
+                "HML: high B/M minus low B/M portfolio return HML：高 B/M 减低 B/M 组合收益"
+              ]
+            ],
+            "chars": 405,
+            "boundsFraction": [
+              0.065,
+              0.25,
+              0.87,
+              0.68
+            ],
+            "explicitFontMedian": 14.0
+          }
+        ],
+        "text": "FACTORS\nFactor vs Alpha\nTerm | Definition | Example\nCharacteristic 特征 | A firm-level observable at time t (accounting ratio, price statistic, sentiment score) 公司层面在时刻 t 可观察到的量（会计比率、价格统计量、情绪评分） | Book-to-market ratio B/M_(i,t) 账面市值比 B/M_(i,t)\nFactor 因子 | A return series (usually long-short) built by sorting stocks on a characteristic, or a statistical factor from PCA/regression 依据某特征对股票排序构建出的收益率序列（通常为多空组合），或由 PCA/回归得到的统计因子 | HML: high B/M minus low B/M portfolio return HML：高 B/M 减低 B/M 组合收益",
+        "tableSerializationSeparators": 6,
+        "actualTextChars": 419
+      },
+      {
+        "page": 3,
+        "titleGuess": "ANOMALY",
+        "visibleChars": 842,
+        "textFrameUnionRatio": 0.639,
+        "nonemptyParagraphs": 14,
+        "nativeTables": 1,
+        "textObjects": 3,
+        "explicitFontCharWeightedMedian": 14.0,
+        "explicitFontCountChars": 834,
+        "objects": [
+          {
+            "name": "Text 1",
+            "text": "ANOMALY",
+            "rows": [],
+            "chars": 7,
+            "boundsFraction": [
+              0.0612,
+              0.0856,
+              0.0912,
+              0.0189
+            ],
+            "explicitFontMedian": 8.5
+          },
+          {
+            "name": "Text 2",
+            "text": "Anomaly Is Relative",
+            "rows": [],
+            "chars": 17,
+            "boundsFraction": [
+              0.0543,
+              0.1176,
+              0.8915,
+              0.0512
+            ],
+            "explicitFontMedian": 27.5
+          },
+          {
+            "name": "AIMate source:b_0016:TableBlock",
+            "text": "Term | Definition | Example\nSignal / Alpha 信号/阿尔法 | A cross-sectional score used to rank stocks for portfolio construction, may or may not correspond to a known academic factor 用于给股票排序以构建组合的横截面评分，可能对应也可能不对应某个已知的学术因子 | A proprietary blend of 40 characteristics, output as a single number per stock per day 由 40 个特征专有混合而成，每只股票每天输出一个数值\nAnomaly 异象 | An empirical pattern in average returns that a benchmark asset pricing model (usually CAPM or FF3) fails to explain — i.e., a factor is \"anomalous\" relative to *some* model, not in absolute terms 某个基准资产定价模型（通常是 CAPM 或 FF3）无法解释的平均收益率经验模式——即因子相对于*某个*模型而言是\"异常\"的，而非绝对意义上的异常 | Momentum was an anomaly relative to CAPM/FF3; it is not anomalous relative to Carhart's own 4-factor model (by construction) 动量相对于 CAPM/FF3 是异象；但相对于 Carhart 自己的四因子模型（按构造）就不是异象\nAlpha (α) 阿尔法 | The intercept in a factor-model regression — return unexplained by the chosen factors 因子模型回归中的截距项——所选因子无法解释的收益部分 | α_i in r_i - r_f = α_i + β_i^T f + ε_i",
+            "rows": [
+              [
+                "Term",
+                "Definition",
+                "Example"
+              ],
+              [
+                "Signal / Alpha 信号/阿尔法",
+                "A cross-sectional score used to rank stocks for portfolio construction, may or may not correspond to a known academic factor 用于给股票排序以构建组合的横截面评分，可能对应也可能不对应某个已知的学术因子",
+                "A proprietary blend of 40 characteristics, output as a single number per stock per day 由 40 个特征专有混合而成，每只股票每天输出一个数值"
+              ],
+              [
+                "Anomaly 异象",
+                "An empirical pattern in average returns that a benchmark asset pricing model (usually CAPM or FF3) fails to explain — i.e., a factor is \"anomalous\" relative to *some* model, not in absolute terms 某个基准资产定价模型（通常是 CAPM 或 FF3）无法解释的平均收益率经验模式——即因子相对于*某个*模型而言是\"异常\"的，而非绝对意义上的异常",
+                "Momentum was an anomaly relative to CAPM/FF3; it is not anomalous relative to Carhart's own 4-factor model (by construction) 动量相对于 CAPM/FF3 是异象；但相对于 Carhart 自己的四因子模型（按构造）就不是异象"
+              ],
+              [
+                "Alpha (α) 阿尔法",
+                "The intercept in a factor-model regression — return unexplained by the chosen factors 因子模型回归中的截距项——所选因子无法解释的收益部分",
+                "α_i in r_i - r_f = α_i + β_i^T f + ε_i"
+              ]
+            ],
+            "chars": 818,
+            "boundsFraction": [
+              0.065,
+              0.25,
+              0.87,
+              0.68
+            ],
+            "explicitFontMedian": 14.0
+          }
+        ],
+        "text": "ANOMALY\nAnomaly Is Relative\nTerm | Definition | Example\nSignal / Alpha 信号/阿尔法 | A cross-sectional score used to rank stocks for portfolio construction, may or may not correspond to a known academic factor 用于给股票排序以构建组合的横截面评分，可能对应也可能不对应某个已知的学术因子 | A proprietary blend of 40 characteristics, output as a single number per stock per day 由 40 个特征专有混合而成，每只股票每天输出一个数值\nAnomaly 异象 | An empirical pattern in average returns that a benchmark asset pricing model (usually CAPM or FF3) fails to explain — i.e., a factor is \"anomalous\" relative to *some* model, not in absolute terms 某个基准资产定价模型（通常是 CAPM 或 FF3）无法解释的平均收益率经验模式——即因子相对于*某个*模型而言是\"异常\"的，而非绝对意义上的异常 | Momentum was an anomaly relative to CAPM/FF3; it is not anomalous relative to Carhart's own 4-factor model (by construction) 动量相对于 CAPM/FF3 是异象；但相对于 Carhart 自己的四因子模型（按构造）就不是异象\nAlpha (α) 阿尔法 | The intercept in a factor-model regression — return unexplained by the chosen factors 因子模型回归中的截距项——所选因子无法解释的收益部分 | α_i in r_i - r_f = α_i + β_i^T f + ε_i",
+        "tableSerializationSeparators": 8,
+        "actualTextChars": 834
+      },
+      {
+        "page": 4,
+        "titleGuess": "CAPM",
+        "visibleChars": 390,
+        "textFrameUnionRatio": 0.1993,
+        "nonemptyParagraphs": 11,
+        "nativeTables": 0,
+        "textObjects": 11,
+        "explicitFontCharWeightedMedian": 10.0,
+        "explicitFontCountChars": 390,
+        "objects": [
+          {
+            "name": "Text 1",
+            "text": "CAPM",
+            "rows": [],
+            "chars": 4,
+            "boundsFraction": [
+              0.4358,
+              0.1125,
+              0.1153,
+              0.0178
+            ],
+            "explicitFontMedian": 8.0
+          },
+          {
+            "name": "Text 2",
+            "text": "CAPM Prices Beta",
+            "rows": [],
+            "chars": 14,
+            "boundsFraction": [
+              0.4293,
+              0.1422,
+              0.5165,
+              0.0965
+            ],
+            "explicitFontMedian": 26.0
+          },
+          {
+            "name": "Text 4",
+            "text": "1",
+            "rows": [],
+            "chars": 1,
+            "boundsFraction": [
+              0.6794,
+              0.2763,
+              0.0163,
+              0.0289
+            ],
+            "explicitFontMedian": 15.5
+          },
+          {
+            "name": "Text 5",
+            "text": "Pricing rule",
+            "rows": [],
+            "chars": 11,
+            "boundsFraction": [
+              0.4401,
+              0.3351,
+              0.4948,
+              0.0289
+            ],
+            "explicitFontMedian": 15.5
+          },
+          {
+            "name": "Text 6",
+            "text": "CAPM makes expected excess return proportional to market beta times the market risk premium; its Security Market Line is linear under the model assumptions.",
+            "rows": [],
+            "chars": 133,
+            "boundsFraction": [
+              0.4401,
+              0.3733,
+              0.4948,
+              0.0781
+            ],
+            "explicitFontMedian": 10.0
+          },
+          {
+            "name": "Text 8",
+            "text": "2",
+            "rows": [],
+            "chars": 1,
+            "boundsFraction": [
+              0.6794,
+              0.5006,
+              0.0163,
+              0.0289
+            ],
+            "explicitFontMedian": 15.5
+          },
+          {
+            "name": "Text 9",
+            "text": "Beta",
+            "rows": [],
+            "chars": 4,
+            "boundsFraction": [
+              0.4401,
+              0.5594,
+              0.4948,
+              0.0289
+            ],
+            "explicitFontMedian": 15.5
+          },
+          {
+            "name": "Text 10",
+            "text": "Beta is covariance with the market divided by market-return variance; only systematic risk is priced. Two-fund separation gives all investors the same risky mix; market clearing makes it the market portfolio.",
+            "rows": [],
+            "chars": 178,
+            "boundsFraction": [
+              0.4401,
+              0.5976,
+              0.4948,
+              0.0781
+            ],
+            "explicitFontMedian": 10.0
+          },
+          {
+            "name": "Text 12",
+            "text": "3",
+            "rows": [],
+            "chars": 1,
+            "boundsFraction": [
+              0.6794,
+              0.7249,
+              0.0163,
+              0.0289
+            ],
+            "explicitFontMedian": 15.5
+          },
+          {
+            "name": "Text 13",
+            "text": "Equilibrium",
+            "rows": [],
+            "chars": 11,
+            "boundsFraction": [
+              0.4401,
+              0.7837,
+              0.4948,
+              0.0289
+            ],
+            "explicitFontMedian": 15.5
+          },
+          {
+            "name": "Text 14",
+            "text": "w_mkt ∝ Σ⁻¹(μ − r_f1); μ − r_f1 ∝ Σw_mkt.",
+            "rows": [],
+            "chars": 32,
+            "boundsFraction": [
+              0.4401,
+              0.8219,
+              0.4948,
+              0.0521
+            ],
+            "explicitFontMedian": 10.0
+          }
+        ],
+        "text": "CAPM\nCAPM Prices Beta\n1\nPricing rule\nCAPM makes expected excess return proportional to market beta times the market risk premium; its Security Market Line is linear under the model assumptions.\n2\nBeta\nBeta is covariance with the market divided by market-return variance; only systematic risk is priced. Two-fund separation gives all investors the same risky mix; market clearing makes it the market portfolio.\n3\nEquilibrium\nw_mkt ∝ Σ⁻¹(μ − r_f1); μ − r_f1 ∝ Σw_mkt.",
+        "tableSerializationSeparators": 0,
+        "actualTextChars": 390
+      },
+      {
+        "page": 5,
+        "titleGuess": "CAPM Limits",
+        "visibleChars": 385,
+        "textFrameUnionRatio": 0.1703,
+        "nonemptyParagraphs": 7,
+        "nativeTables": 0,
+        "textObjects": 7,
+        "explicitFontCharWeightedMedian": 11.5,
+        "explicitFontCountChars": 385,
+        "objects": [
+          {
+            "name": "Text 0",
+            "text": "CAPM Limits",
+            "rows": [],
+            "chars": 10,
+            "boundsFraction": [
+              0.0543,
+              0.0884,
+              0.8915,
+              0.0543
+            ],
+            "explicitFontMedian": 29.0
+          },
+          {
+            "name": "Text 1",
+            "text": "Flat SML",
+            "rows": [],
+            "chars": 7,
+            "boundsFraction": [
+              0.0543,
+              0.1915,
+              0.4309,
+              0.0271
+            ],
+            "explicitFontMedian": 14.5
+          },
+          {
+            "name": "Text 3",
+            "text": "LOW BETA",
+            "rows": [],
+            "chars": 7,
+            "boundsFraction": [
+              0.1597,
+              0.6832,
+              0.1429,
+              0.0217
+            ],
+            "explicitFontMedian": 11.5
+          },
+          {
+            "name": "Text 5",
+            "text": "SIZE / VALUE",
+            "rows": [],
+            "chars": 10,
+            "boundsFraction": [
+              0.2794,
+              0.6832,
+              0.1586,
+              0.0217
+            ],
+            "explicitFontMedian": 11.5
+          },
+          {
+            "name": "Text 6",
+            "text": "The empirical SML was flatter than CAPM predicts; BAB formalizes the low-beta pattern. Size and value returns exceeded beta-only predictions. These failures did not kill factor-based asset pricing; research shifted to multifactor models.",
+            "rows": [],
+            "chars": 205,
+            "boundsFraction": [
+              0.0543,
+              0.7703,
+              0.4309,
+              0.1237
+            ],
+            "explicitFontMedian": 11.5
+          },
+          {
+            "name": "Text 11",
+            "text": "ROLL (1977)",
+            "rows": [],
+            "chars": 10,
+            "boundsFraction": [
+              0.5276,
+              0.2157,
+              0.4064,
+              0.0326
+            ],
+            "explicitFontMedian": 17.5
+          },
+          {
+            "name": "Text 12",
+            "text": "The true market spans unobservable bonds, real estate and human capital; equity-only CAPM tests are limited. This shifted research toward multifactor models.",
+            "rows": [],
+            "chars": 136,
+            "boundsFraction": [
+              0.5276,
+              0.2678,
+              0.4064,
+              0.0928
+            ],
+            "explicitFontMedian": 11.5
+          }
+        ],
+        "text": "CAPM Limits\nFlat SML\nLOW BETA\nSIZE / VALUE\nThe empirical SML was flatter than CAPM predicts; BAB formalizes the low-beta pattern. Size and value returns exceeded beta-only predictions. These failures did not kill factor-based asset pricing; research shifted to multifactor models.\nROLL (1977)\nThe true market spans unobservable bonds, real estate and human capital; equity-only CAPM tests are limited. This shifted research toward multifactor models.",
+        "tableSerializationSeparators": 0,
+        "actualTextChars": 385
+      },
+      {
+        "page": 6,
+        "titleGuess": "MODELS",
+        "visibleChars": 690,
+        "textFrameUnionRatio": 0.639,
+        "nonemptyParagraphs": 34,
+        "nativeTables": 1,
+        "textObjects": 3,
+        "explicitFontCharWeightedMedian": 14.0,
+        "explicitFontCountChars": 666,
+        "objects": [
+          {
+            "name": "Text 1",
+            "text": "MODELS",
+            "rows": [],
+            "chars": 6,
+            "boundsFraction": [
+              0.0612,
+              0.0856,
+              0.0912,
+              0.0189
+            ],
+            "explicitFontMedian": 8.5
+          },
+          {
+            "name": "Text 2",
+            "text": "Model Lineage",
+            "rows": [],
+            "chars": 12,
+            "boundsFraction": [
+              0.0543,
+              0.1176,
+              0.8915,
+              0.0512
+            ],
+            "explicitFontMedian": 27.5
+          },
+          {
+            "name": "AIMate source:b_0154:TableBlock",
+            "text": "Model | Factors | What it adds | Main limitation\nCAPM | Market | One systematic risk source | Cannot explain size, value, momentum\nAPT | Multiple unspecified factors | Allows several priced risks | Does not identify factors\nFF3 | Market, size, value | Empirical cross-section fit | Misses momentum and profitability/investment\nCarhart4 | FF3 + momentum | Captures UMD anomaly | Momentum crash risk remains\nFF5 | Market, size, value, profitability, investment | Links to q-theory intuition | HML becomes partly redundant in some samples\nHXZ q/q5 | Market, size, investment, ROE, expected growth | Investment-based economics | More complex and still sample-dependent\nSY mispricing | Management, performance composites | Behavioral anomaly clustering | Requires careful multiple-testing control",
+            "rows": [
+              [
+                "Model",
+                "Factors",
+                "What it adds",
+                "Main limitation"
+              ],
+              [
+                "CAPM",
+                "Market",
+                "One systematic risk source",
+                "Cannot explain size, value, momentum"
+              ],
+              [
+                "APT",
+                "Multiple unspecified factors",
+                "Allows several priced risks",
+                "Does not identify factors"
+              ],
+              [
+                "FF3",
+                "Market, size, value",
+                "Empirical cross-section fit",
+                "Misses momentum and profitability/investment"
+              ],
+              [
+                "Carhart4",
+                "FF3 + momentum",
+                "Captures UMD anomaly",
+                "Momentum crash risk remains"
+              ],
+              [
+                "FF5",
+                "Market, size, value, profitability, investment",
+                "Links to q-theory intuition",
+                "HML becomes partly redundant in some samples"
+              ],
+              [
+                "HXZ q/q5",
+                "Market, size, investment, ROE, expected growth",
+                "Investment-based economics",
+                "More complex and still sample-dependent"
+              ],
+              [
+                "SY mispricing",
+                "Management, performance composites",
+                "Behavioral anomaly clustering",
+                "Requires careful multiple-testing control"
+              ]
+            ],
+            "chars": 672,
+            "boundsFraction": [
+              0.065,
+              0.25,
+              0.87,
+              0.68
+            ],
+            "explicitFontMedian": 14.0
+          }
+        ],
+        "text": "MODELS\nModel Lineage\nModel | Factors | What it adds | Main limitation\nCAPM | Market | One systematic risk source | Cannot explain size, value, momentum\nAPT | Multiple unspecified factors | Allows several priced risks | Does not identify factors\nFF3 | Market, size, value | Empirical cross-section fit | Misses momentum and profitability/investment\nCarhart4 | FF3 + momentum | Captures UMD anomaly | Momentum crash risk remains\nFF5 | Market, size, value, profitability, investment | Links to q-theory intuition | HML becomes partly redundant in some samples\nHXZ q/q5 | Market, size, investment, ROE, expected growth | Investment-based economics | More complex and still sample-dependent\nSY mispricing | Management, performance composites | Behavioral anomaly clustering | Requires careful multiple-testing control",
+        "tableSerializationSeparators": 24,
+        "actualTextChars": 666
+      },
+      {
+        "page": 7,
+        "titleGuess": "Fama–French 3",
+        "visibleChars": 307,
+        "textFrameUnionRatio": 0.3011,
+        "nonemptyParagraphs": 11,
+        "nativeTables": 0,
+        "textObjects": 11,
+        "explicitFontCharWeightedMedian": 13.0,
+        "explicitFontCountChars": 307,
+        "objects": [
+          {
+            "name": "Text 1",
+            "text": "FF3",
+            "rows": [],
+            "chars": 3,
+            "boundsFraction": [
+              0.0624,
+              0.1507,
+              0.0988,
+              0.0222
+            ],
+            "explicitFontMedian": 10.0
+          },
+          {
+            "name": "Text 2",
+            "text": "Fama–French 3",
+            "rows": [],
+            "chars": 12,
+            "boundsFraction": [
+              0.0543,
+              0.1897,
+              0.8915,
+              0.0603
+            ],
+            "explicitFontMedian": 32.5
+          },
+          {
+            "name": "Text 3",
+            "text": "Annual 2×3",
+            "rows": [],
+            "chars": 9,
+            "boundsFraction": [
+              0.0543,
+              0.3079,
+              0.383,
+              0.0723
+            ],
+            "explicitFontMedian": 13.0
+          },
+          {
+            "name": "Text 4",
+            "text": "MKT",
+            "rows": [],
+            "chars": 3,
+            "boundsFraction": [
+              0.0642,
+              0.4407,
+              0.1277,
+              0.0247
+            ],
+            "explicitFontMedian": 13.0
+          },
+          {
+            "name": "Text 5",
+            "text": "SMB",
+            "rows": [],
+            "chars": 3,
+            "boundsFraction": [
+              0.1395,
+              0.7598,
+              0.1277,
+              0.0247
+            ],
+            "explicitFontMedian": 13.0
+          },
+          {
+            "name": "Text 6",
+            "text": "HML",
+            "rows": [],
+            "chars": 3,
+            "boundsFraction": [
+              0.2161,
+              0.4407,
+              0.1373,
+              0.0247
+            ],
+            "explicitFontMedian": 13.0
+          },
+          {
+            "name": "Text 7",
+            "text": "2×3",
+            "rows": [],
+            "chars": 3,
+            "boundsFraction": [
+              0.2913,
+              0.7464,
+              0.1277,
+              0.0493
+            ],
+            "explicitFontMedian": 13.0
+          },
+          {
+            "name": "Text 8",
+            "text": "Three spreads; six portfolios",
+            "rows": [],
+            "chars": 26,
+            "boundsFraction": [
+              0.4708,
+              0.3079,
+              0.5254,
+              0.0452
+            ],
+            "explicitFontMedian": 16.0
+          },
+          {
+            "name": "Text 9",
+            "text": "SORT",
+            "rows": [],
+            "chars": 4,
+            "boundsFraction": [
+              0.4708,
+              0.3772,
+              0.4754,
+              0.1206
+            ],
+            "explicitFontMedian": 65.0
+          },
+          {
+            "name": "Text 10",
+            "text": "Each June, split size at the NYSE median and book-to-market at the 30th/70th percentiles. The independent sorts form six value-weighted portfolios; SMB contrasts small with big, while HML contrasts high with low book-to-market.",
+            "rows": [],
+            "chars": 195,
+            "boundsFraction": [
+              0.4708,
+              0.5546,
+              0.4754,
+              0.1808
+            ],
+            "explicitFontMedian": 13.0
+          },
+          {
+            "name": "Text 11",
+            "text": "Independent sorts separate size and value exposures.",
+            "rows": [],
+            "chars": 46,
+            "boundsFraction": [
+              0.4708,
+              0.7625,
+              0.4754,
+              0.0723
+            ],
+            "explicitFontMedian": 13.0
+          }
+        ],
+        "text": "FF3\nFama–French 3\nAnnual 2×3\nMKT\nSMB\nHML\n2×3\nThree spreads; six portfolios\nSORT\nEach June, split size at the NYSE median and book-to-market at the 30th/70th percentiles. The independent sorts form six value-weighted portfolios; SMB contrasts small with big, while HML contrasts high with low book-to-market.\nIndependent sorts separate size and value exposures.",
+        "tableSerializationSeparators": 0,
+        "actualTextChars": 307
+      },
+      {
+        "page": 8,
+        "titleGuess": "MOMENTUM",
+        "visibleChars": 471,
+        "textFrameUnionRatio": 0.2888,
+        "nonemptyParagraphs": 15,
+        "nativeTables": 0,
+        "textObjects": 15,
+        "explicitFontCharWeightedMedian": 12.0,
+        "explicitFontCountChars": 471,
+        "objects": [
+          {
+            "name": "Text 1",
+            "text": "MOMENTUM",
+            "rows": [],
+            "chars": 8,
+            "boundsFraction": [
+              0.437,
+              0.0946,
+              0.096,
+              0.0211
+            ],
+            "explicitFontMedian": 9.5
+          },
+          {
+            "name": "Text 2",
+            "text": "Carhart MOM",
+            "rows": [],
+            "chars": 10,
+            "boundsFraction": [
+              0.4293,
+              0.1312,
+              0.5165,
+              0.0573
+            ],
+            "explicitFontMedian": 30.5
+          },
+          {
+            "name": "Text 3",
+            "text": "Monthly rebalanced, value-weighted UMD adds winners-minus-losers to FF3; fund attribution links apparent manager skill to momentum. Rank t−12 to t−2 returns, skip the latest month, and form within-size 2×3 long-short 30%/decile spreads. Rebounds can crash momentum. r_i-r_f = α_i+β_iMKT+s_iSMB+h_iHML+m_iUMD+ε_i.",
+            "rows": [],
+            "chars": 274,
+            "boundsFraction": [
+              0.4293,
+              0.2212,
+              0.5165,
+              0.134
+            ],
+            "explicitFontMedian": 12.0
+          },
+          {
+            "name": "Text 4",
+            "text": "UMD",
+            "rows": [],
+            "chars": 3,
+            "boundsFraction": [
+              0.4293,
+              0.3911,
+              0.2381,
+              0.0905
+            ],
+            "explicitFontMedian": 48.5
+          },
+          {
+            "name": "Text 5",
+            "text": "LONG WINNER LEG",
+            "rows": [],
+            "chars": 13,
+            "boundsFraction": [
+              0.4293,
+              0.5094,
+              0.2506,
+              0.0344
+            ],
+            "explicitFontMedian": 18.5
+          },
+          {
+            "name": "Text 6",
+            "text": "Top minus bottom 30% or decile; within-size 2×3.",
+            "rows": [],
+            "chars": 41,
+            "boundsFraction": [
+              0.4293,
+              0.5568,
+              0.2506,
+              0.067
+            ],
+            "explicitFontMedian": 12.0
+          },
+          {
+            "name": "Text 7",
+            "text": "RANK",
+            "rows": [],
+            "chars": 4,
+            "boundsFraction": [
+              0.6951,
+              0.3911,
+              0.2381,
+              0.0905
+            ],
+            "explicitFontMedian": 48.5
+          },
+          {
+            "name": "Text 8",
+            "text": "t−12/t−2",
+            "rows": [],
+            "chars": 8,
+            "boundsFraction": [
+              0.6951,
+              0.5094,
+              0.2506,
+              0.0344
+            ],
+            "explicitFontMedian": 18.5
+          },
+          {
+            "name": "Text 9",
+            "text": "Skip the most recent month.",
+            "rows": [],
+            "chars": 23,
+            "boundsFraction": [
+              0.6951,
+              0.5568,
+              0.2506,
+              0.067
+            ],
+            "explicitFontMedian": 12.0
+          },
+          {
+            "name": "Text 10",
+            "text": "RISK",
+            "rows": [],
+            "chars": 4,
+            "boundsFraction": [
+              0.4293,
+              0.6787,
+              0.2381,
+              0.0905
+            ],
+            "explicitFontMedian": 48.5
+          },
+          {
+            "name": "Text 11",
+            "text": "MOMENTUM CRASHES",
+            "rows": [],
+            "chars": 15,
+            "boundsFraction": [
+              0.4293,
+              0.797,
+              0.2506,
+              0.0344
+            ],
+            "explicitFontMedian": 18.5
+          },
+          {
+            "name": "Text 12",
+            "text": "Rebounds can cause crashes.",
+            "rows": [],
+            "chars": 24,
+            "boundsFraction": [
+              0.4293,
+              0.8444,
+              0.2506,
+              0.067
+            ],
+            "explicitFontMedian": 12.0
+          },
+          {
+            "name": "Text 13",
+            "text": "ATTR",
+            "rows": [],
+            "chars": 4,
+            "boundsFraction": [
+              0.6951,
+              0.6787,
+              0.2381,
+              0.0905
+            ],
+            "explicitFontMedian": 48.5
+          },
+          {
+            "name": "Text 14",
+            "text": "Fund attribution",
+            "rows": [],
+            "chars": 15,
+            "boundsFraction": [
+              0.6951,
+              0.797,
+              0.2506,
+              0.0687
+            ],
+            "explicitFontMedian": 18.5
+          },
+          {
+            "name": "Text 15",
+            "text": "Skill reduces to passive tilt",
+            "rows": [],
+            "chars": 25,
+            "boundsFraction": [
+              0.6951,
+              0.8788,
+              0.2506,
+              0.0335
+            ],
+            "explicitFontMedian": 12.0
+          }
+        ],
+        "text": "MOMENTUM\nCarhart MOM\nMonthly rebalanced, value-weighted UMD adds winners-minus-losers to FF3; fund attribution links apparent manager skill to momentum. Rank t−12 to t−2 returns, skip the latest month, and form within-size 2×3 long-short 30%/decile spreads. Rebounds can crash momentum. r_i-r_f = α_i+β_iMKT+s_iSMB+h_iHML+m_iUMD+ε_i.\nUMD\nLONG WINNER LEG\nTop minus bottom 30% or decile; within-size 2×3.\nRANK\nt−12/t−2\nSkip the most recent month.\nRISK\nMOMENTUM CRASHES\nRebounds can cause crashes.\nATTR\nFund attribution\nSkill reduces to passive tilt",
+        "tableSerializationSeparators": 0,
+        "actualTextChars": 471
+      },
+      {
+        "page": 9,
+        "titleGuess": "FF5 Adds RMW + CMA",
+        "visibleChars": 546,
+        "textFrameUnionRatio": 0.4138,
+        "nonemptyParagraphs": 11,
+        "nativeTables": 0,
+        "textObjects": 11,
+        "explicitFontCharWeightedMedian": 11.5,
+        "explicitFontCountChars": 546,
+        "objects": [
+          {
+            "name": "Text 1",
+            "text": "FF5",
+            "rows": [],
+            "chars": 3,
+            "boundsFraction": [
+              0.0616,
+              0.0972,
+              0.1065,
+              0.02
+            ],
+            "explicitFontMedian": 9.0
+          },
+          {
+            "name": "Text 2",
+            "text": "FF5 Adds RMW + CMA",
+            "rows": [],
+            "chars": 14,
+            "boundsFraction": [
+              0.0543,
+              0.1315,
+              0.8915,
+              0.0543
+            ],
+            "explicitFontMedian": 29.0
+          },
+          {
+            "name": "Text 3",
+            "text": "RMW + CMA",
+            "rows": [],
+            "chars": 7,
+            "boundsFraction": [
+              0.0543,
+              0.1936,
+              0.8915,
+              0.0543
+            ],
+            "explicitFontMedian": 29.0
+          },
+          {
+            "name": "Text 7",
+            "text": "RMW",
+            "rows": [],
+            "chars": 3,
+            "boundsFraction": [
+              0.0665,
+              0.3884,
+              0.2636,
+              0.0326
+            ],
+            "explicitFontMedian": 17.5
+          },
+          {
+            "name": "Text 8",
+            "text": "Robust-minus-weak profitability adds operating profitability to the market, size and value factors; it captures differences in firms’ operating strength.",
+            "rows": [],
+            "chars": 135,
+            "boundsFraction": [
+              0.0665,
+              0.4326,
+              0.2636,
+              0.1237
+            ],
+            "explicitFontMedian": 11.5
+          },
+          {
+            "name": "Text 11",
+            "text": "CMA",
+            "rows": [],
+            "chars": 3,
+            "boundsFraction": [
+              0.3682,
+              0.3884,
+              0.2636,
+              0.0326
+            ],
+            "explicitFontMedian": 17.5
+          },
+          {
+            "name": "Text 12",
+            "text": "Conservative-minus-aggressive investment adds an investment dimension, motivated by dividend-discount logic and firms’ investment behavior.",
+            "rows": [],
+            "chars": 126,
+            "boundsFraction": [
+              0.3682,
+              0.4326,
+              0.2636,
+              0.1546
+            ],
+            "explicitFontMedian": 11.5
+          },
+          {
+            "name": "Text 15",
+            "text": "HML",
+            "rows": [],
+            "chars": 3,
+            "boundsFraction": [
+              0.6699,
+              0.3884,
+              0.2636,
+              0.0326
+            ],
+            "explicitFontMedian": 17.5
+          },
+          {
+            "name": "Text 16",
+            "text": "HML can be partly redundant in some samples; its marginal role depends on the test assets and remains debated.",
+            "rows": [],
+            "chars": 92,
+            "boundsFraction": [
+              0.6699,
+              0.4326,
+              0.2636,
+              0.1237
+            ],
+            "explicitFontMedian": 11.5
+          },
+          {
+            "name": "Text 17",
+            "text": "Dividend-discount rationale; sample-dependent HML",
+            "rows": [],
+            "chars": 46,
+            "boundsFraction": [
+              0.0543,
+              0.8166,
+              0.8915,
+              0.0928
+            ],
+            "explicitFontMedian": 11.5
+          },
+          {
+            "name": "Text 18",
+            "text": "FF5 adds profitability (RMW) and investment (CMA). Broader fit is not a universal verdict; HML may be partly redundant in some samples.",
+            "rows": [],
+            "chars": 114,
+            "boundsFraction": [
+              0.0665,
+              0.6309,
+              0.8671,
+              0.1159
+            ],
+            "explicitFontMedian": 14.5
+          }
+        ],
+        "text": "FF5\nFF5 Adds RMW + CMA\nRMW + CMA\nRMW\nRobust-minus-weak profitability adds operating profitability to the market, size and value factors; it captures differences in firms’ operating strength.\nCMA\nConservative-minus-aggressive investment adds an investment dimension, motivated by dividend-discount logic and firms’ investment behavior.\nHML\nHML can be partly redundant in some samples; its marginal role depends on the test assets and remains debated.\nDividend-discount rationale; sample-dependent HML\nFF5 adds profitability (RMW) and investment (CMA). Broader fit is not a universal verdict; HML may be partly redundant in some samples.",
+        "tableSerializationSeparators": 0,
+        "actualTextChars": 546
+      },
+      {
+        "page": 10,
+        "titleGuess": "q and q5 Models",
+        "visibleChars": 325,
+        "textFrameUnionRatio": 0.1703,
+        "nonemptyParagraphs": 7,
+        "nativeTables": 0,
+        "textObjects": 7,
+        "explicitFontCharWeightedMedian": 11.5,
+        "explicitFontCountChars": 325,
+        "objects": [
+          {
+            "name": "Text 0",
+            "text": "q and q5 Models",
+            "rows": [],
+            "chars": 12,
+            "boundsFraction": [
+              0.0543,
+              0.0884,
+              0.8915,
+              0.0543
+            ],
+            "explicitFontMedian": 29.0
+          },
+          {
+            "name": "Text 1",
+            "text": "Production",
+            "rows": [],
+            "chars": 10,
+            "boundsFraction": [
+              0.0543,
+              0.1915,
+              0.4309,
+              0.0271
+            ],
+            "explicitFontMedian": 14.5
+          },
+          {
+            "name": "Text 3",
+            "text": "I/A + ROE",
+            "rows": [],
+            "chars": 7,
+            "boundsFraction": [
+              0.1597,
+              0.6832,
+              0.1429,
+              0.0217
+            ],
+            "explicitFontMedian": 11.5
+          },
+          {
+            "name": "Text 5",
+            "text": "q5 + EG",
+            "rows": [],
+            "chars": 5,
+            "boundsFraction": [
+              0.2794,
+              0.6832,
+              0.1586,
+              0.0217
+            ],
+            "explicitFontMedian": 11.5
+          },
+          {
+            "name": "Text 6",
+            "text": "The q model uses market, investment-to-assets (I/A) and return on equity (ROE), linking expected returns to investment and profitability. q5 adds expected growth (EG); independent size, investment and profitability sorts form 27 portfolios.",
+            "rows": [],
+            "chars": 208,
+            "boundsFraction": [
+              0.0543,
+              0.7703,
+              0.4309,
+              0.1237
+            ],
+            "explicitFontMedian": 11.5
+          },
+          {
+            "name": "Text 11",
+            "text": "GRS test",
+            "rows": [],
+            "chars": 7,
+            "boundsFraction": [
+              0.5276,
+              0.2157,
+              0.4064,
+              0.0326
+            ],
+            "explicitFontMedian": 17.5
+          },
+          {
+            "name": "Text 12",
+            "text": "GRS jointly tests zero alphas; the test assets and residual covariance shape the verdict.",
+            "rows": [],
+            "chars": 76,
+            "boundsFraction": [
+              0.5276,
+              0.2678,
+              0.4064,
+              0.0928
+            ],
+            "explicitFontMedian": 11.5
+          }
+        ],
+        "text": "q and q5 Models\nProduction\nI/A + ROE\nq5 + EG\nThe q model uses market, investment-to-assets (I/A) and return on equity (ROE), linking expected returns to investment and profitability. q5 adds expected growth (EG); independent size, investment and profitability sorts form 27 portfolios.\nGRS test\nGRS jointly tests zero alphas; the test assets and residual covariance shape the verdict.",
+        "tableSerializationSeparators": 0,
+        "actualTextChars": 325
+      },
+      {
+        "page": 11,
+        "titleGuess": "SY MODEL",
+        "visibleChars": 637,
+        "textFrameUnionRatio": 0.6435,
+        "nonemptyParagraphs": 31,
+        "nativeTables": 1,
+        "textObjects": 7,
+        "explicitFontCharWeightedMedian": 14.0,
+        "explicitFontCountChars": 617,
+        "objects": [
+          {
+            "name": "Text 1",
+            "text": "SY MODEL",
+            "rows": [],
+            "chars": 7,
+            "boundsFraction": [
+              0.4358,
+              0.1125,
+              0.1153,
+              0.0178
+            ],
+            "explicitFontMedian": 8.0
+          },
+          {
+            "name": "Text 2",
+            "text": "Model Foundations",
+            "rows": [],
+            "chars": 16,
+            "boundsFraction": [
+              0.4293,
+              0.1422,
+              0.5165,
+              0.0965
+            ],
+            "explicitFontMedian": 26.0
+          },
+          {
+            "name": "Text 4",
+            "text": "1",
+            "rows": [],
+            "chars": 1,
+            "boundsFraction": [
+              0.6794,
+              0.2763,
+              0.0163,
+              0.0289
+            ],
+            "explicitFontMedian": 15.5
+          },
+          {
+            "name": "Text 8",
+            "text": "2",
+            "rows": [],
+            "chars": 1,
+            "boundsFraction": [
+              0.6794,
+              0.5006,
+              0.0163,
+              0.0289
+            ],
+            "explicitFontMedian": 15.5
+          },
+          {
+            "name": "Text 12",
+            "text": "3",
+            "rows": [],
+            "chars": 1,
+            "boundsFraction": [
+              0.6794,
+              0.7249,
+              0.0163,
+              0.0289
+            ],
+            "explicitFontMedian": 15.5
+          },
+          {
+            "name": "AIMate source:b_0224:TableBlock",
+            "text": "Model 模型 | Year 年份 | Factors 因子 | # | Theoretical grounding 理论基础\nCAPM | 1964 | MKT | 1 | Mean-variance equilibrium 均值-方差均衡\nAPT | 1976 | Unspecified f_1,…,f_K 未指定 f_1,…,f_K | K | No-arbitrage, linear factor structure 无套利、线性因子结构\nFama-French 3 | 1993 | MKT, SMB, HML | 3 | Empirical + risk-based rationalization 实证 + 基于风险的理论化\nCarhart 4 | 1997 | MKT, SMB, HML, UMD | 4 | Empirical (momentum add-on) 实证（附加动量）",
+            "rows": [
+              [
+                "Model 模型",
+                "Year 年份",
+                "Factors 因子",
+                "#",
+                "Theoretical grounding 理论基础"
+              ],
+              [
+                "CAPM",
+                "1964",
+                "MKT",
+                "1",
+                "Mean-variance equilibrium 均值-方差均衡"
+              ],
+              [
+                "APT",
+                "1976",
+                "Unspecified f_1,…,f_K 未指定 f_1,…,f_K",
+                "K",
+                "No-arbitrage, linear factor structure 无套利、线性因子结构"
+              ],
+              [
+                "Fama-French 3",
+                "1993",
+                "MKT, SMB, HML",
+                "3",
+                "Empirical + risk-based rationalization 实证 + 基于风险的理论化"
+              ],
+              [
+                "Carhart 4",
+                "1997",
+                "MKT, SMB, HML, UMD",
+                "4",
+                "Empirical (momentum add-on) 实证（附加动量）"
+              ]
+            ],
+            "chars": 329,
+            "boundsFraction": [
+              0.065,
+              0.25,
+              0.87,
+              0.5064
+            ],
+            "explicitFontMedian": 14.0
+          },
+          {
+            "name": "AIMate source:b_0222:SummaryBlock",
+            "text": "The factor zoo is both a library and a warning. It gives researchers a vocabulary for systematic return patterns, but it also shows how easily finite noisy data can produce beautiful false discoveries. Good factor research therefore combines theory, data discipline, conservative testing, cost realism, and humility about regimes.",
+            "rows": [],
+            "chars": 282,
+            "boundsFraction": [
+              0.065,
+              0.7564,
+              0.87,
+              0.1736
+            ],
+            "explicitFontMedian": 14.0
+          }
+        ],
+        "text": "SY MODEL\nModel Foundations\n1\n2\n3\nModel 模型 | Year 年份 | Factors 因子 | # | Theoretical grounding 理论基础\nCAPM | 1964 | MKT | 1 | Mean-variance equilibrium 均值-方差均衡\nAPT | 1976 | Unspecified f_1,…,f_K 未指定 f_1,…,f_K | K | No-arbitrage, linear factor structure 无套利、线性因子结构\nFama-French 3 | 1993 | MKT, SMB, HML | 3 | Empirical + risk-based rationalization 实证 + 基于风险的理论化\nCarhart 4 | 1997 | MKT, SMB, HML, UMD | 4 | Empirical (momentum add-on) 实证（附加动量）\nThe factor zoo is both a library and a warning. It gives researchers a vocabulary for systematic return patterns, but it also shows how easily finite noisy data can produce beautiful false discoveries. Good factor research therefore combines theory, data discipline, conservative testing, cost realism, and humility about regimes.",
+        "tableSerializationSeparators": 20,
+        "actualTextChars": 617
+      },
+      {
+        "page": 12,
+        "titleGuess": "TESTS",
+        "visibleChars": 460,
+        "textFrameUnionRatio": 0.639,
+        "nonemptyParagraphs": 28,
+        "nativeTables": 1,
+        "textObjects": 4,
+        "explicitFontCharWeightedMedian": 14.0,
+        "explicitFontCountChars": 440,
+        "objects": [
+          {
+            "name": "Text 1",
+            "text": "TESTS",
+            "rows": [],
+            "chars": 5,
+            "boundsFraction": [
+              0.0612,
+              0.0856,
+              0.0912,
+              0.0189
+            ],
+            "explicitFontMedian": 8.5
+          },
+          {
+            "name": "Text 2",
+            "text": "Testing Models",
+            "rows": [],
+            "chars": 13,
+            "boundsFraction": [
+              0.0543,
+              0.1176,
+              0.8915,
+              0.0512
+            ],
+            "explicitFontMedian": 27.5
+          },
+          {
+            "name": "AIMate source:b_0224:TableBlock",
+            "text": "Model 模型 | Year 年份 | Factors 因子 | # | Theoretical grounding 理论基础\nFama-French 5 | 2015 | MKT, SMB, HML, RMW, CMA | 5 | Dividend-discount-model decomposition 股利折现模型分解\nq-factor (HXZ) | 2015 | MKT, ME, I/A, ROE | 4 | Investment-based (q-theory) 基于投资（q 理论）\nq5 | 2021 | + EG | 5 | q-theory + forward-looking expected growth q 理论 + 前瞻性预期增长\nStambaugh-Yuan | 2017 | MKT, SMB, MGMT, PERF | 4 | Behavioral mispricing clusters 行为金融错误定价簇",
+            "rows": [
+              [
+                "Model 模型",
+                "Year 年份",
+                "Factors 因子",
+                "#",
+                "Theoretical grounding 理论基础"
+              ],
+              [
+                "Fama-French 5",
+                "2015",
+                "MKT, SMB, HML, RMW, CMA",
+                "5",
+                "Dividend-discount-model decomposition 股利折现模型分解"
+              ],
+              [
+                "q-factor (HXZ)",
+                "2015",
+                "MKT, ME, I/A, ROE",
+                "4",
+                "Investment-based (q-theory) 基于投资（q 理论）"
+              ],
+              [
+                "q5",
+                "2021",
+                "+ EG",
+                "5",
+                "q-theory + forward-looking expected growth q 理论 + 前瞻性预期增长"
+              ],
+              [
+                "Stambaugh-Yuan",
+                "2017",
+                "MKT, SMB, MGMT, PERF",
+                "4",
+                "Behavioral mispricing clusters 行为金融错误定价簇"
+              ]
+            ],
+            "chars": 346,
+            "boundsFraction": [
+              0.065,
+              0.25,
+              0.87,
+              0.5535
+            ],
+            "explicitFontMedian": 14.0
+          },
+          {
+            "name": "AIMate source:b_0223:SummaryBlock",
+            "text": "因子动物园既是资料库，也是警告。它为系统性收益模式提供语言，但也说明有限噪声数据多么容易产生漂亮的虚假发现。因此，好的因子研究必须结合理论、数据纪律、保守检验、成本现实，以及对市场状态的谦逊。",
+            "rows": [],
+            "chars": 96,
+            "boundsFraction": [
+              0.065,
+              0.8035,
+              0.87,
+              0.1265
+            ],
+            "explicitFontMedian": 14.0
+          }
+        ],
+        "text": "TESTS\nTesting Models\nModel 模型 | Year 年份 | Factors 因子 | # | Theoretical grounding 理论基础\nFama-French 5 | 2015 | MKT, SMB, HML, RMW, CMA | 5 | Dividend-discount-model decomposition 股利折现模型分解\nq-factor (HXZ) | 2015 | MKT, ME, I/A, ROE | 4 | Investment-based (q-theory) 基于投资（q 理论）\nq5 | 2021 | + EG | 5 | q-theory + forward-looking expected growth q 理论 + 前瞻性预期增长\nStambaugh-Yuan | 2017 | MKT, SMB, MGMT, PERF | 4 | Behavioral mispricing clusters 行为金融错误定价簇\n因子动物园既是资料库，也是警告。它为系统性收益模式提供语言，但也说明有限噪声数据多么容易产生漂亮的虚假发现。因此，好的因子研究必须结合理论、数据纪律、保守检验、成本现实，以及对市场状态的谦逊。",
+        "tableSerializationSeparators": 20,
+        "actualTextChars": 440
+      },
+      {
+        "page": 13,
+        "titleGuess": "PREMIA",
+        "visibleChars": 496,
+        "textFrameUnionRatio": 0.2888,
+        "nonemptyParagraphs": 15,
+        "nativeTables": 0,
+        "textObjects": 15,
+        "explicitFontCharWeightedMedian": 12.0,
+        "explicitFontCountChars": 496,
+        "objects": [
+          {
+            "name": "Text 1",
+            "text": "PREMIA",
+            "rows": [],
+            "chars": 6,
+            "boundsFraction": [
+              0.437,
+              0.0946,
+              0.096,
+              0.0211
+            ],
+            "explicitFontMedian": 9.5
+          },
+          {
+            "name": "Text 2",
+            "text": "Premia Stories",
+            "rows": [],
+            "chars": 13,
+            "boundsFraction": [
+              0.4293,
+              0.1312,
+              0.5165,
+              0.0573
+            ],
+            "explicitFontMedian": 30.5
+          },
+          {
+            "name": "Text 3",
+            "text": "Risk compensation, behavioral mispricing and limits to arbitrage compete; a factor may mix them. Risk pays for bad-state exposure. Behavioral errors include overreaction, underreaction and extrapolation. Trading frictions delay correction, while value, momentum, low-volatility and size each have failure stories.",
+            "rows": [],
+            "chars": 274,
+            "boundsFraction": [
+              0.4293,
+              0.2212,
+              0.5165,
+              0.134
+            ],
+            "explicitFontMedian": 12.0
+          },
+          {
+            "name": "Text 4",
+            "text": "RISK",
+            "rows": [],
+            "chars": 4,
+            "boundsFraction": [
+              0.4293,
+              0.3911,
+              0.2381,
+              0.0905
+            ],
+            "explicitFontMedian": 48.5
+          },
+          {
+            "name": "Text 5",
+            "text": "BAD-STATE LOSSES",
+            "rows": [],
+            "chars": 15,
+            "boundsFraction": [
+              0.4293,
+              0.5094,
+              0.2506,
+              0.0344
+            ],
+            "explicitFontMedian": 18.5
+          },
+          {
+            "name": "Text 6",
+            "text": "Pays for losses in adverse states.",
+            "rows": [],
+            "chars": 29,
+            "boundsFraction": [
+              0.4293,
+              0.5568,
+              0.2506,
+              0.067
+            ],
+            "explicitFontMedian": 12.0
+          },
+          {
+            "name": "Text 7",
+            "text": "BEHV",
+            "rows": [],
+            "chars": 4,
+            "boundsFraction": [
+              0.6951,
+              0.3911,
+              0.2381,
+              0.0905
+            ],
+            "explicitFontMedian": 48.5
+          },
+          {
+            "name": "Text 8",
+            "text": "Behavior",
+            "rows": [],
+            "chars": 8,
+            "boundsFraction": [
+              0.6951,
+              0.5094,
+              0.2506,
+              0.0344
+            ],
+            "explicitFontMedian": 18.5
+          },
+          {
+            "name": "Text 9",
+            "text": "Overreaction, underreaction and extrapolation move prices.",
+            "rows": [],
+            "chars": 53,
+            "boundsFraction": [
+              0.6951,
+              0.5568,
+              0.2506,
+              0.067
+            ],
+            "explicitFontMedian": 12.0
+          },
+          {
+            "name": "Text 10",
+            "text": "FRIC",
+            "rows": [],
+            "chars": 4,
+            "boundsFraction": [
+              0.4293,
+              0.6787,
+              0.2381,
+              0.0905
+            ],
+            "explicitFontMedian": 48.5
+          },
+          {
+            "name": "Text 11",
+            "text": "SHORTING LIMITS",
+            "rows": [],
+            "chars": 14,
+            "boundsFraction": [
+              0.4293,
+              0.797,
+              0.2506,
+              0.0344
+            ],
+            "explicitFontMedian": 18.5
+          },
+          {
+            "name": "Text 12",
+            "text": "Shorting limits slow correction.",
+            "rows": [],
+            "chars": 29,
+            "boundsFraction": [
+              0.4293,
+              0.8444,
+              0.2506,
+              0.067
+            ],
+            "explicitFontMedian": 12.0
+          },
+          {
+            "name": "Text 13",
+            "text": "MIX",
+            "rows": [],
+            "chars": 3,
+            "boundsFraction": [
+              0.6951,
+              0.6787,
+              0.2381,
+              0.0905
+            ],
+            "explicitFontMedian": 48.5
+          },
+          {
+            "name": "Text 14",
+            "text": "Stories overlap",
+            "rows": [],
+            "chars": 14,
+            "boundsFraction": [
+              0.6951,
+              0.797,
+              0.2506,
+              0.0687
+            ],
+            "explicitFontMedian": 18.5
+          },
+          {
+            "name": "Text 15",
+            "text": "Competing stories can overlap",
+            "rows": [],
+            "chars": 26,
+            "boundsFraction": [
+              0.6951,
+              0.8788,
+              0.2506,
+              0.0335
+            ],
+            "explicitFontMedian": 12.0
+          }
+        ],
+        "text": "PREMIA\nPremia Stories\nRisk compensation, behavioral mispricing and limits to arbitrage compete; a factor may mix them. Risk pays for bad-state exposure. Behavioral errors include overreaction, underreaction and extrapolation. Trading frictions delay correction, while value, momentum, low-volatility and size each have failure stories.\nRISK\nBAD-STATE LOSSES\nPays for losses in adverse states.\nBEHV\nBehavior\nOverreaction, underreaction and extrapolation move prices.\nFRIC\nSHORTING LIMITS\nShorting limits slow correction.\nMIX\nStories overlap\nCompeting stories can overlap",
+        "tableSerializationSeparators": 0,
+        "actualTextChars": 496
+      },
+      {
+        "page": 14,
+        "titleGuess": "Multiple Testing",
+        "visibleChars": 541,
+        "textFrameUnionRatio": 0.4138,
+        "nonemptyParagraphs": 11,
+        "nativeTables": 0,
+        "textObjects": 11,
+        "explicitFontCharWeightedMedian": 11.5,
+        "explicitFontCountChars": 541,
+        "objects": [
+          {
+            "name": "Text 1",
+            "text": "ZOO",
+            "rows": [],
+            "chars": 3,
+            "boundsFraction": [
+              0.0616,
+              0.0972,
+              0.1065,
+              0.02
+            ],
+            "explicitFontMedian": 9.0
+          },
+          {
+            "name": "Text 2",
+            "text": "Multiple Testing",
+            "rows": [],
+            "chars": 15,
+            "boundsFraction": [
+              0.0543,
+              0.1315,
+              0.8915,
+              0.0543
+            ],
+            "explicitFontMedian": 29.0
+          },
+          {
+            "name": "Text 3",
+            "text": "Trials raise false-discovery risk",
+            "rows": [],
+            "chars": 30,
+            "boundsFraction": [
+              0.0543,
+              0.1936,
+              0.8915,
+              0.0543
+            ],
+            "explicitFontMedian": 29.0
+          },
+          {
+            "name": "Text 7",
+            "text": "ALIASES",
+            "rows": [],
+            "chars": 7,
+            "boundsFraction": [
+              0.0665,
+              0.3884,
+              0.2636,
+              0.0326
+            ],
+            "explicitFontMedian": 17.5
+          },
+          {
+            "name": "Text 8",
+            "text": "Several labels may reflect one latent exposure rather than distinct sources of return; correlated definitions can repackage a signal.",
+            "rows": [],
+            "chars": 115,
+            "boundsFraction": [
+              0.0665,
+              0.4326,
+              0.2636,
+              0.1237
+            ],
+            "explicitFontMedian": 11.5
+          },
+          {
+            "name": "Text 11",
+            "text": "ABSORBED",
+            "rows": [],
+            "chars": 8,
+            "boundsFraction": [
+              0.3682,
+              0.3884,
+              0.2636,
+              0.0326
+            ],
+            "explicitFontMedian": 17.5
+          },
+          {
+            "name": "Text 12",
+            "text": "A broader benchmark can explain an anomaly that appeared under CAPM or FF3, changing the residual claim.",
+            "rows": [],
+            "chars": 88,
+            "boundsFraction": [
+              0.3682,
+              0.4326,
+              0.2636,
+              0.1546
+            ],
+            "explicitFontMedian": 11.5
+          },
+          {
+            "name": "Text 15",
+            "text": "SELECTION",
+            "rows": [],
+            "chars": 9,
+            "boundsFraction": [
+              0.6699,
+              0.3884,
+              0.2636,
+              0.0326
+            ],
+            "explicitFontMedian": 17.5
+          },
+          {
+            "name": "Text 16",
+            "text": "Many trials make a t-stat above 2 weak evidence; require a rationale, point-in-time data, robustness and independent confirmation.",
+            "rows": [],
+            "chars": 113,
+            "boundsFraction": [
+              0.6699,
+              0.4326,
+              0.2636,
+              0.1237
+            ],
+            "explicitFontMedian": 11.5
+          },
+          {
+            "name": "Text 17",
+            "text": "Net costs can erase a premium",
+            "rows": [],
+            "chars": 24,
+            "boundsFraction": [
+              0.0543,
+              0.8166,
+              0.8915,
+              0.0928
+            ],
+            "explicitFontMedian": 11.5
+          },
+          {
+            "name": "Text 18",
+            "text": "Trading costs may erase the premium. Test incremental value against known factors, model realistic implementation and record the full search process.",
+            "rows": [],
+            "chars": 129,
+            "boundsFraction": [
+              0.0665,
+              0.6309,
+              0.8671,
+              0.1159
+            ],
+            "explicitFontMedian": 14.5
+          }
+        ],
+        "text": "ZOO\nMultiple Testing\nTrials raise false-discovery risk\nALIASES\nSeveral labels may reflect one latent exposure rather than distinct sources of return; correlated definitions can repackage a signal.\nABSORBED\nA broader benchmark can explain an anomaly that appeared under CAPM or FF3, changing the residual claim.\nSELECTION\nMany trials make a t-stat above 2 weak evidence; require a rationale, point-in-time data, robustness and independent confirmation.\nNet costs can erase a premium\nTrading costs may erase the premium. Test incremental value against known factors, model realistic implementation and record the full search process.",
+        "tableSerializationSeparators": 0,
+        "actualTextChars": 541
+      },
+      {
+        "page": 15,
+        "titleGuess": "SCORE",
+        "visibleChars": 620,
+        "textFrameUnionRatio": 0.6475,
+        "nonemptyParagraphs": 34,
+        "nativeTables": 1,
+        "textObjects": 3,
+        "explicitFontCharWeightedMedian": 14.0,
+        "explicitFontCountChars": 596,
+        "objects": [
+          {
+            "name": "Text 1",
+            "text": "SCORE",
+            "rows": [],
+            "chars": 5,
+            "boundsFraction": [
+              0.0624,
+              0.1507,
+              0.0988,
+              0.0222
+            ],
+            "explicitFontMedian": 10.0
+          },
+          {
+            "name": "Text 2",
+            "text": "Factor Scorecard",
+            "rows": [],
+            "chars": 15,
+            "boundsFraction": [
+              0.0543,
+              0.1897,
+              0.8915,
+              0.0603
+            ],
+            "explicitFontMedian": 32.5
+          },
+          {
+            "name": "AIMate source:b_0179:TableBlock",
+            "text": "Factor | Risk story | Mispricing story | Data-mining concern\nValue | Distress and duration risk | Extrapolation and overreaction | Many metric choices\nMomentum | Crash exposure and optionality | Underreaction and slow diffusion | Parameter grids\nQuality | Defensive cash flows | Underappreciated persistence | Definition proliferation\nInvestment | q-theory investment risk | Overinvestment and empire building | Accounting variants\nLow volatility | Leverage constraints | Lottery demand for high beta | Hidden sector exposure\nSize | Illiquidity/funding risk | Neglected firms | Microcap and cost bias\nLiquidity | Compensation for trading frictions | Attention and segmentation | Measured spread quality",
+            "rows": [
+              [
+                "Factor",
+                "Risk story",
+                "Mispricing story",
+                "Data-mining concern"
+              ],
+              [
+                "Value",
+                "Distress and duration risk",
+                "Extrapolation and overreaction",
+                "Many metric choices"
+              ],
+              [
+                "Momentum",
+                "Crash exposure and optionality",
+                "Underreaction and slow diffusion",
+                "Parameter grids"
+              ],
+              [
+                "Quality",
+                "Defensive cash flows",
+                "Underappreciated persistence",
+                "Definition proliferation"
+              ],
+              [
+                "Investment",
+                "q-theory investment risk",
+                "Overinvestment and empire building",
+                "Accounting variants"
+              ],
+              [
+                "Low volatility",
+                "Leverage constraints",
+                "Lottery demand for high beta",
+                "Hidden sector exposure"
+              ],
+              [
+                "Size",
+                "Illiquidity/funding risk",
+                "Neglected firms",
+                "Microcap and cost bias"
+              ],
+              [
+                "Liquidity",
+                "Compensation for trading frictions",
+                "Attention and segmentation",
+                "Measured spread quality"
+              ]
+            ],
+            "chars": 600,
+            "boundsFraction": [
+              0.065,
+              0.25,
+              0.87,
+              0.68
+            ],
+            "explicitFontMedian": 14.0
+          }
+        ],
+        "text": "SCORE\nFactor Scorecard\nFactor | Risk story | Mispricing story | Data-mining concern\nValue | Distress and duration risk | Extrapolation and overreaction | Many metric choices\nMomentum | Crash exposure and optionality | Underreaction and slow diffusion | Parameter grids\nQuality | Defensive cash flows | Underappreciated persistence | Definition proliferation\nInvestment | q-theory investment risk | Overinvestment and empire building | Accounting variants\nLow volatility | Leverage constraints | Lottery demand for high beta | Hidden sector exposure\nSize | Illiquidity/funding risk | Neglected firms | Microcap and cost bias\nLiquidity | Compensation for trading frictions | Attention and segmentation | Measured spread quality",
+        "tableSerializationSeparators": 24,
+        "actualTextChars": 596
+      },
+      {
+        "page": 16,
+        "titleGuess": "FAMILIES",
+        "visibleChars": 596,
+        "textFrameUnionRatio": 0.639,
+        "nonemptyParagraphs": 29,
+        "nativeTables": 1,
+        "textObjects": 3,
+        "explicitFontCharWeightedMedian": 14.0,
+        "explicitFontCountChars": 578,
+        "objects": [
+          {
+            "name": "Text 1",
+            "text": "FAMILIES",
+            "rows": [],
+            "chars": 8,
+            "boundsFraction": [
+              0.0612,
+              0.0856,
+              0.0912,
+              0.0189
+            ],
+            "explicitFontMedian": 8.5
+          },
+          {
+            "name": "Text 2",
+            "text": "Factor Families",
+            "rows": [],
+            "chars": 14,
+            "boundsFraction": [
+              0.0543,
+              0.1176,
+              0.8915,
+              0.0512
+            ],
+            "explicitFontMedian": 27.5
+          },
+          {
+            "name": "AIMate source:b_0184:TableBlock",
+            "text": "Family | Representative signals | Typical controls\nValue | B/P, E/P, EBIT/EV, CFO/P | Industry, profitability, leverage\nMomentum | 12-1 return, residual momentum, earnings momentum | Reversal, volatility, crash risk\nQuality | GP/A, ROE, accruals, F-score, QMJ | Sector, leverage, size\nInvestment | asset growth, capex growth, net issuance | Profitability and financing\nLow risk | beta, idiosyncratic vol, downside vol | Sector and leverage\nLiquidity | Amihud, turnover, spread, ADV | Size and price\nSentiment | analyst revisions, short interest, news tone | Coverage and attention\nAlternative data | web traffic, app usage, supply chain, text | Coverage bias and timestamping",
+            "rows": [
+              [
+                "Family",
+                "Representative signals",
+                "Typical controls"
+              ],
+              [
+                "Value",
+                "B/P, E/P, EBIT/EV, CFO/P",
+                "Industry, profitability, leverage"
+              ],
+              [
+                "Momentum",
+                "12-1 return, residual momentum, earnings momentum",
+                "Reversal, volatility, crash risk"
+              ],
+              [
+                "Quality",
+                "GP/A, ROE, accruals, F-score, QMJ",
+                "Sector, leverage, size"
+              ],
+              [
+                "Investment",
+                "asset growth, capex growth, net issuance",
+                "Profitability and financing"
+              ],
+              [
+                "Low risk",
+                "beta, idiosyncratic vol, downside vol",
+                "Sector and leverage"
+              ],
+              [
+                "Liquidity",
+                "Amihud, turnover, spread, ADV",
+                "Size and price"
+              ],
+              [
+                "Sentiment",
+                "analyst revisions, short interest, news tone",
+                "Coverage and attention"
+              ],
+              [
+                "Alternative data",
+                "web traffic, app usage, supply chain, text",
+                "Coverage bias and timestamping"
+              ]
+            ],
+            "chars": 574,
+            "boundsFraction": [
+              0.065,
+              0.25,
+              0.87,
+              0.68
+            ],
+            "explicitFontMedian": 14.0
+          }
+        ],
+        "text": "FAMILIES\nFactor Families\nFamily | Representative signals | Typical controls\nValue | B/P, E/P, EBIT/EV, CFO/P | Industry, profitability, leverage\nMomentum | 12-1 return, residual momentum, earnings momentum | Reversal, volatility, crash risk\nQuality | GP/A, ROE, accruals, F-score, QMJ | Sector, leverage, size\nInvestment | asset growth, capex growth, net issuance | Profitability and financing\nLow risk | beta, idiosyncratic vol, downside vol | Sector and leverage\nLiquidity | Amihud, turnover, spread, ADV | Size and price\nSentiment | analyst revisions, short interest, news tone | Coverage and attention\nAlternative data | web traffic, app usage, supply chain, text | Coverage bias and timestamping",
+        "tableSerializationSeparators": 18,
+        "actualTextChars": 578
+      },
+      {
+        "page": 17,
+        "titleGuess": "PORTFOLIO",
+        "visibleChars": 408,
+        "textFrameUnionRatio": 0.1993,
+        "nonemptyParagraphs": 11,
+        "nativeTables": 0,
+        "textObjects": 11,
+        "explicitFontCharWeightedMedian": 10.0,
+        "explicitFontCountChars": 408,
+        "objects": [
+          {
+            "name": "Text 1",
+            "text": "PORTFOLIO",
+            "rows": [],
+            "chars": 9,
+            "boundsFraction": [
+              0.4358,
+              0.1125,
+              0.1153,
+              0.0178
+            ],
+            "explicitFontMedian": 8.0
+          },
+          {
+            "name": "Text 2",
+            "text": "Portfolio Forms",
+            "rows": [],
+            "chars": 14,
+            "boundsFraction": [
+              0.4293,
+              0.1422,
+              0.5165,
+              0.0965
+            ],
+            "explicitFontMedian": 26.0
+          },
+          {
+            "name": "Text 4",
+            "text": "1",
+            "rows": [],
+            "chars": 1,
+            "boundsFraction": [
+              0.6794,
+              0.2763,
+              0.0163,
+              0.0289
+            ],
+            "explicitFontMedian": 15.5
+          },
+          {
+            "name": "Text 5",
+            "text": "Long-short",
+            "rows": [],
+            "chars": 10,
+            "boundsFraction": [
+              0.4401,
+              0.3351,
+              0.4948,
+              0.0289
+            ],
+            "explicitFontMedian": 15.5
+          },
+          {
+            "name": "Text 6",
+            "text": "Decile or rank-weighted dollar-neutral portfolios test the premium; a long-only benchmark tilt tests constrained stock selection.",
+            "rows": [],
+            "chars": 114,
+            "boundsFraction": [
+              0.4401,
+              0.3733,
+              0.4948,
+              0.0781
+            ],
+            "explicitFontMedian": 10.0
+          },
+          {
+            "name": "Text 8",
+            "text": "2",
+            "rows": [],
+            "chars": 1,
+            "boundsFraction": [
+              0.6794,
+              0.5006,
+              0.0163,
+              0.0289
+            ],
+            "explicitFontMedian": 15.5
+          },
+          {
+            "name": "Text 9",
+            "text": "Optimizer",
+            "rows": [],
+            "chars": 9,
+            "boundsFraction": [
+              0.4401,
+              0.5594,
+              0.4948,
+              0.0289
+            ],
+            "explicitFontMedian": 15.5
+          },
+          {
+            "name": "Text 10",
+            "text": "Residualized signals fit constrained optimizers; factor-mimicking portfolios serve risk models. Report weighting, rebalancing frequency, breakpoint universe, sector and beta neutrality, leverage, and cost assumptions.",
+            "rows": [],
+            "chars": 194,
+            "boundsFraction": [
+              0.4401,
+              0.5976,
+              0.4948,
+              0.0781
+            ],
+            "explicitFontMedian": 10.0
+          },
+          {
+            "name": "Text 12",
+            "text": "3",
+            "rows": [],
+            "chars": 1,
+            "boundsFraction": [
+              0.6794,
+              0.7249,
+              0.0163,
+              0.0289
+            ],
+            "explicitFontMedian": 15.5
+          },
+          {
+            "name": "Text 13",
+            "text": "Report design",
+            "rows": [],
+            "chars": 12,
+            "boundsFraction": [
+              0.4401,
+              0.7837,
+              0.4948,
+              0.0289
+            ],
+            "explicitFontMedian": 15.5
+          },
+          {
+            "name": "Text 14",
+            "text": "必须报告构建选择：加权方式、调仓频率、断点股票池、行业中性、贝塔中性、杠杆和成本假设。",
+            "rows": [],
+            "chars": 43,
+            "boundsFraction": [
+              0.4401,
+              0.8219,
+              0.4948,
+              0.0521
+            ],
+            "explicitFontMedian": 10.0
+          }
+        ],
+        "text": "PORTFOLIO\nPortfolio Forms\n1\nLong-short\nDecile or rank-weighted dollar-neutral portfolios test the premium; a long-only benchmark tilt tests constrained stock selection.\n2\nOptimizer\nResidualized signals fit constrained optimizers; factor-mimicking portfolios serve risk models. Report weighting, rebalancing frequency, breakpoint universe, sector and beta neutrality, leverage, and cost assumptions.\n3\nReport design\n必须报告构建选择：加权方式、调仓频率、断点股票池、行业中性、贝塔中性、杠杆和成本假设。",
+        "tableSerializationSeparators": 0,
+        "actualTextChars": 408
+      },
+      {
+        "page": 18,
+        "titleGuess": "Timing & Crowding",
+        "visibleChars": 305,
+        "textFrameUnionRatio": 0.1703,
+        "nonemptyParagraphs": 7,
+        "nativeTables": 0,
+        "textObjects": 7,
+        "explicitFontCharWeightedMedian": 11.5,
+        "explicitFontCountChars": 305,
+        "objects": [
+          {
+            "name": "Text 0",
+            "text": "Timing & Crowding",
+            "rows": [],
+            "chars": 15,
+            "boundsFraction": [
+              0.0543,
+              0.0884,
+              0.8915,
+              0.0543
+            ],
+            "explicitFontMedian": 29.0
+          },
+          {
+            "name": "Text 1",
+            "text": "Timing",
+            "rows": [],
+            "chars": 6,
+            "boundsFraction": [
+              0.0543,
+              0.1915,
+              0.4309,
+              0.0271
+            ],
+            "explicitFontMedian": 14.5
+          },
+          {
+            "name": "Text 3",
+            "text": "Spreads",
+            "rows": [],
+            "chars": 7,
+            "boundsFraction": [
+              0.1597,
+              0.6832,
+              0.1429,
+              0.0217
+            ],
+            "explicitFontMedian": 11.5
+          },
+          {
+            "name": "Text 5",
+            "text": "Crowding",
+            "rows": [],
+            "chars": 8,
+            "boundsFraction": [
+              0.2794,
+              0.6832,
+              0.1586,
+              0.0217
+            ],
+            "explicitFontMedian": 11.5
+          },
+          {
+            "name": "Text 6",
+            "text": "Valuation spreads, recent factor returns, macro regimes and volatility may inform timing, but they add another layer of multiple testing. Crowded factors can persist until liquidity disappears, then unwind sharply.",
+            "rows": [],
+            "chars": 185,
+            "boundsFraction": [
+              0.0543,
+              0.7703,
+              0.4309,
+              0.1237
+            ],
+            "explicitFontMedian": 11.5
+          },
+          {
+            "name": "Text 11",
+            "text": "Monitor",
+            "rows": [],
+            "chars": 7,
+            "boundsFraction": [
+              0.5276,
+              0.2157,
+              0.4064,
+              0.0326
+            ],
+            "explicitFontMedian": 17.5
+          },
+          {
+            "name": "Text 12",
+            "text": "Track flows, common holdings, short interest, borrow, turnover and manager correlation.",
+            "rows": [],
+            "chars": 77,
+            "boundsFraction": [
+              0.5276,
+              0.2678,
+              0.4064,
+              0.0928
+            ],
+            "explicitFontMedian": 11.5
+          }
+        ],
+        "text": "Timing & Crowding\nTiming\nSpreads\nCrowding\nValuation spreads, recent factor returns, macro regimes and volatility may inform timing, but they add another layer of multiple testing. Crowded factors can persist until liquidity disappears, then unwind sharply.\nMonitor\nTrack flows, common holdings, short interest, borrow, turnover and manager correlation.",
+        "tableSerializationSeparators": 0,
+        "actualTextChars": 305
+      },
+      {
+        "page": 19,
+        "titleGuess": "A-SHR",
+        "visibleChars": 357,
+        "textFrameUnionRatio": 0.3011,
+        "nonemptyParagraphs": 11,
+        "nativeTables": 0,
+        "textObjects": 11,
+        "explicitFontCharWeightedMedian": 13.0,
+        "explicitFontCountChars": 357,
+        "objects": [
+          {
+            "name": "Text 1",
+            "text": "A-SHR",
+            "rows": [],
+            "chars": 5,
+            "boundsFraction": [
+              0.0624,
+              0.1507,
+              0.0988,
+              0.0222
+            ],
+            "explicitFontMedian": 10.0
+          },
+          {
+            "name": "Text 2",
+            "text": "U.S. vs A-Shares",
+            "rows": [],
+            "chars": 14,
+            "boundsFraction": [
+              0.0543,
+              0.1897,
+              0.8915,
+              0.0603
+            ],
+            "explicitFontMedian": 32.5
+          },
+          {
+            "name": "Text 3",
+            "text": "Market transfer",
+            "rows": [],
+            "chars": 14,
+            "boundsFraction": [
+              0.0543,
+              0.3079,
+              0.383,
+              0.0723
+            ],
+            "explicitFontMedian": 13.0
+          },
+          {
+            "name": "Text 4",
+            "text": "MOM",
+            "rows": [],
+            "chars": 3,
+            "boundsFraction": [
+              0.0642,
+              0.4407,
+              0.1277,
+              0.0247
+            ],
+            "explicitFontMedian": 13.0
+          },
+          {
+            "name": "Text 5",
+            "text": "SIZE",
+            "rows": [],
+            "chars": 4,
+            "boundsFraction": [
+              0.1395,
+              0.7598,
+              0.1277,
+              0.0247
+            ],
+            "explicitFontMedian": 13.0
+          },
+          {
+            "name": "Text 6",
+            "text": "QUALITY",
+            "rows": [],
+            "chars": 7,
+            "boundsFraction": [
+              0.2161,
+              0.4407,
+              0.1373,
+              0.0247
+            ],
+            "explicitFontMedian": 13.0
+          },
+          {
+            "name": "Text 7",
+            "text": "STRUCT.",
+            "rows": [],
+            "chars": 7,
+            "boundsFraction": [
+              0.2913,
+              0.7464,
+              0.1277,
+              0.0493
+            ],
+            "explicitFontMedian": 13.0
+          },
+          {
+            "name": "Text 8",
+            "text": "Re-test, do not transplant",
+            "rows": [],
+            "chars": 23,
+            "boundsFraction": [
+              0.4708,
+              0.3079,
+              0.5254,
+              0.0452
+            ],
+            "explicitFontMedian": 16.0
+          },
+          {
+            "name": "Text 9",
+            "text": "CHECK",
+            "rows": [],
+            "chars": 5,
+            "boundsFraction": [
+              0.4708,
+              0.3772,
+              0.4754,
+              0.1206
+            ],
+            "explicitFontMedian": 65.0
+          },
+          {
+            "name": "Text 10",
+            "text": "US momentum is canonical; A-share momentum is more horizon- and limit-event-dependent. Quality screens must watch subsidies, related parties and earnings management. 美股动量是经典稳健因子，而 A 股动量更依赖期限和涨跌停事件；A 股规模因子受壳价值和量化拥挤塑造；A 股质量筛选必须更关注补贴、关联方活动和盈余管理动机。",
+            "rows": [],
+            "chars": 219,
+            "boundsFraction": [
+              0.4708,
+              0.5546,
+              0.4754,
+              0.1808
+            ],
+            "explicitFontMedian": 13.0
+          },
+          {
+            "name": "Text 11",
+            "text": "Shell value and quant crowding have shaped A-share size behavior.",
+            "rows": [],
+            "chars": 56,
+            "boundsFraction": [
+              0.4708,
+              0.7625,
+              0.4754,
+              0.0723
+            ],
+            "explicitFontMedian": 13.0
+          }
+        ],
+        "text": "A-SHR\nU.S. vs A-Shares\nMarket transfer\nMOM\nSIZE\nQUALITY\nSTRUCT.\nRe-test, do not transplant\nCHECK\nUS momentum is canonical; A-share momentum is more horizon- and limit-event-dependent. Quality screens must watch subsidies, related parties and earnings management. 美股动量是经典稳健因子，而 A 股动量更依赖期限和涨跌停事件；A 股规模因子受壳价值和量化拥挤塑造；A 股质量筛选必须更关注补贴、关联方活动和盈余管理动机。\nShell value and quant crowding have shaped A-share size behavior.",
+        "tableSerializationSeparators": 0,
+        "actualTextChars": 357
+      },
+      {
+        "page": 20,
+        "titleGuess": "SORT",
+        "visibleChars": 730,
+        "textFrameUnionRatio": 0.4138,
+        "nonemptyParagraphs": 11,
+        "nativeTables": 0,
+        "textObjects": 11,
+        "explicitFontCharWeightedMedian": 11.5,
+        "explicitFontCountChars": 730,
+        "objects": [
+          {
+            "name": "Text 1",
+            "text": "SORT",
+            "rows": [],
+            "chars": 4,
+            "boundsFraction": [
+              0.0616,
+              0.0972,
+              0.1065,
+              0.02
+            ],
+            "explicitFontMedian": 9.0
+          },
+          {
+            "name": "Text 2",
+            "text": "The 2×3 Sort",
+            "rows": [],
+            "chars": 10,
+            "boundsFraction": [
+              0.0543,
+              0.1315,
+              0.8915,
+              0.0543
+            ],
+            "explicitFontMedian": 29.0
+          },
+          {
+            "name": "Text 3",
+            "text": "Independent sorts",
+            "rows": [],
+            "chars": 16,
+            "boundsFraction": [
+              0.0543,
+              0.1936,
+              0.8915,
+              0.0543
+            ],
+            "explicitFontMedian": 29.0
+          },
+          {
+            "name": "Text 7",
+            "text": "SIZE",
+            "rows": [],
+            "chars": 4,
+            "boundsFraction": [
+              0.0665,
+              0.3884,
+              0.2636,
+              0.0326
+            ],
+            "explicitFontMedian": 17.5
+          },
+          {
+            "name": "Text 8",
+            "text": "Split the universe into small and big by market capitalization; independently sort the chosen characteristic into low, middle and high buckets.",
+            "rows": [],
+            "chars": 123,
+            "boundsFraction": [
+              0.0665,
+              0.4326,
+              0.2636,
+              0.1237
+            ],
+            "explicitFontMedian": 11.5
+          },
+          {
+            "name": "Text 11",
+            "text": "INTERSECT",
+            "rows": [],
+            "chars": 9,
+            "boundsFraction": [
+              0.3682,
+              0.3884,
+              0.2636,
+              0.0326
+            ],
+            "explicitFontMedian": 17.5
+          },
+          {
+            "name": "Text 12",
+            "text": "Cross the two rankings to form six portfolios; compare high with low within each size group.",
+            "rows": [],
+            "chars": 77,
+            "boundsFraction": [
+              0.3682,
+              0.4326,
+              0.2636,
+              0.1546
+            ],
+            "explicitFontMedian": 11.5
+          },
+          {
+            "name": "Text 15",
+            "text": "HML",
+            "rows": [],
+            "chars": 3,
+            "boundsFraction": [
+              0.6699,
+              0.3884,
+              0.2636,
+              0.0326
+            ],
+            "explicitFontMedian": 17.5
+          },
+          {
+            "name": "Text 16",
+            "text": "HML averages the high-characteristic portfolios and subtracts the low-characteristic average across size buckets.",
+            "rows": [],
+            "chars": 101,
+            "boundsFraction": [
+              0.6699,
+              0.4326,
+              0.2636,
+              0.1237
+            ],
+            "explicitFontMedian": 11.5
+          },
+          {
+            "name": "Text 17",
+            "text": "HML = ½(SmallHigh + BigHigh) − ½(SmallLow + BigLow). Higher characteristic returns minus lower, averaged across size.；A Fama-French-style 2×3 sort works as follows: split the universe into small/big by market cap, split the characteristic into low/mid/high by breakpoints, then form six portfolios.",
+            "rows": [],
+            "chars": 257,
+            "boundsFraction": [
+              0.0543,
+              0.8166,
+              0.8915,
+              0.0928
+            ],
+            "explicitFontMedian": 11.5
+          },
+          {
+            "name": "Text 18",
+            "text": "Independent sorting keeps the characteristic spread from merely proxying for firm size; the same template applies to profitability or investment.",
+            "rows": [],
+            "chars": 126,
+            "boundsFraction": [
+              0.0665,
+              0.6309,
+              0.8671,
+              0.1159
+            ],
+            "explicitFontMedian": 14.5
+          }
+        ],
+        "text": "SORT\nThe 2×3 Sort\nIndependent sorts\nSIZE\nSplit the universe into small and big by market capitalization; independently sort the chosen characteristic into low, middle and high buckets.\nINTERSECT\nCross the two rankings to form six portfolios; compare high with low within each size group.\nHML\nHML averages the high-characteristic portfolios and subtracts the low-characteristic average across size buckets.\nHML = ½(SmallHigh + BigHigh) − ½(SmallLow + BigLow). Higher characteristic returns minus lower, averaged across size.；A Fama-French-style 2×3 sort works as follows: split the universe into small/big by market cap, split the characteristic into low/mid/high by breakpoints, then form six portfolios.\nIndependent sorting keeps the characteristic spread from merely proxying for firm size; the same template applies to profitability or investment.",
+        "tableSerializationSeparators": 0,
+        "actualTextChars": 730
+      },
+      {
+        "page": 21,
+        "titleGuess": "STRAT",
+        "visibleChars": 237,
+        "textFrameUnionRatio": 0.5995,
+        "nonemptyParagraphs": 20,
+        "nativeTables": 0,
+        "textObjects": 4,
+        "explicitFontCharWeightedMedian": 14.0,
+        "explicitFontCountChars": 237,
+        "objects": [
+          {
+            "name": "Text 1",
+            "text": "STRAT",
+            "rows": [],
+            "chars": 5,
+            "boundsFraction": [
+              0.437,
+              0.0946,
+              0.096,
+              0.0211
+            ],
+            "explicitFontMedian": 9.5
+          },
+          {
+            "name": "Text 2",
+            "text": "Strategy Path",
+            "rows": [],
+            "chars": 12,
+            "boundsFraction": [
+              0.4293,
+              0.1312,
+              0.5165,
+              0.0573
+            ],
+            "explicitFontMedian": 30.5
+          },
+          {
+            "name": "AIMate source:b_0214:ProcessBlock",
+            "text": "1. The workflow is: economic rationale\n2. clean signal\n3. single-factor test\n4. incrementality test\n5. backtest\n6. red team\n7. constrained portfolio\n8. paper trade\n9. small live allocation.",
+            "rows": [],
+            "chars": 160,
+            "boundsFraction": [
+              0.065,
+              0.25,
+              0.4176,
+              0.68
+            ],
+            "explicitFontMedian": 14.0
+          },
+          {
+            "name": "AIMate source:b_0215:ProcessBlock",
+            "text": "1. 流程应为：经济逻辑\n2. 干净信号\n3. 单因子检验\n4. 增量性检验\n5. 回测\n6. 红队检验\n7. 约束组合\n8. 模拟盘\n9. 小规模实盘。",
+            "rows": [],
+            "chars": 60,
+            "boundsFraction": [
+              0.5,
+              0.25,
+              0.4176,
+              0.68
+            ],
+            "explicitFontMedian": 14.0
+          }
+        ],
+        "text": "STRAT\nStrategy Path\n1. The workflow is: economic rationale\n2. clean signal\n3. single-factor test\n4. incrementality test\n5. backtest\n6. red team\n7. constrained portfolio\n8. paper trade\n9. small live allocation.\n1. 流程应为：经济逻辑\n2. 干净信号\n3. 单因子检验\n4. 增量性检验\n5. 回测\n6. 红队检验\n7. 约束组合\n8. 模拟盘\n9. 小规模实盘。",
+        "tableSerializationSeparators": 0,
+        "actualTextChars": 237
+      },
+      {
+        "page": 22,
+        "titleGuess": "Research Checklist",
+        "visibleChars": 443,
+        "textFrameUnionRatio": 0.6419,
+        "nonemptyParagraphs": 21,
+        "nativeTables": 0,
+        "textObjects": 7,
+        "explicitFontCharWeightedMedian": 14.0,
+        "explicitFontCountChars": 443,
+        "objects": [
+          {
+            "name": "Text 0",
+            "text": "Research Checklist",
+            "rows": [],
+            "chars": 17,
+            "boundsFraction": [
+              0.3043,
+              0.0695,
+              0.6415,
+              0.1146
+            ],
+            "explicitFontMedian": 30.5
+          },
+          {
+            "name": "Text 4",
+            "text": "1",
+            "rows": [],
+            "chars": 1,
+            "boundsFraction": [
+              0.6153,
+              0.2253,
+              0.0193,
+              0.0344
+            ],
+            "explicitFontMedian": 18.5
+          },
+          {
+            "name": "Text 10",
+            "text": "2",
+            "rows": [],
+            "chars": 1,
+            "boundsFraction": [
+              0.6153,
+              0.3604,
+              0.0193,
+              0.0344
+            ],
+            "explicitFontMedian": 18.5
+          },
+          {
+            "name": "Text 16",
+            "text": "3",
+            "rows": [],
+            "chars": 1,
+            "boundsFraction": [
+              0.6153,
+              0.5282,
+              0.0193,
+              0.0344
+            ],
+            "explicitFontMedian": 18.5
+          },
+          {
+            "name": "Text 22",
+            "text": "4",
+            "rows": [],
+            "chars": 1,
+            "boundsFraction": [
+              0.6153,
+              0.6797,
+              0.0193,
+              0.0344
+            ],
+            "explicitFontMedian": 18.5
+          },
+          {
+            "name": "AIMate source:b_0218:ChecklistBlock",
+            "text": "• It is known at the time it is used.\n• It has a reason to exist before seeing the backtest.\n• It survives neutralization to obvious exposures.\n• Its IC, portfolio sorts, and regression tests agree directionally.\n• It works across reasonable horizons and universes.\n• It is not just a renamed existing factor.\n• It survives costs and turnover.\n• It has a failure story and monitoring plan.",
+            "rows": [],
+            "chars": 320,
+            "boundsFraction": [
+              0.065,
+              0.25,
+              0.4176,
+              0.68
+            ],
+            "explicitFontMedian": 14.0
+          },
+          {
+            "name": "AIMate source:b_0219:ChecklistBlock",
+            "text": "• 使用时确实已知。\n• 在看到回测前就有存在理由。\n• 对明显暴露中性化后仍存在。\n• IC、组合分层和回归检验方向一致。\n• 在合理期限和股票池中稳健。\n• 不是已有因子的改名。\n• 能扛住成本和换手。\n• 有失效故事和监控方案。",
+            "rows": [],
+            "chars": 102,
+            "boundsFraction": [
+              0.5,
+              0.25,
+              0.4176,
+              0.68
+            ],
+            "explicitFontMedian": 14.0
+          }
+        ],
+        "text": "Research Checklist\n1\n2\n3\n4\n• It is known at the time it is used.\n• It has a reason to exist before seeing the backtest.\n• It survives neutralization to obvious exposures.\n• Its IC, portfolio sorts, and regression tests agree directionally.\n• It works across reasonable horizons and universes.\n• It is not just a renamed existing factor.\n• It survives costs and turnover.\n• It has a failure story and monitoring plan.\n• 使用时确实已知。\n• 在看到回测前就有存在理由。\n• 对明显暴露中性化后仍存在。\n• IC、组合分层和回归检验方向一致。\n• 在合理期限和股票池中稳健。\n• 不是已有因子的改名。\n• 能扛住成本和换手。\n• 有失效故事和监控方案。",
+        "tableSerializationSeparators": 0,
+        "actualTextChars": 443
+      }
+    ]
+  }
+}
