@@ -1,6 +1,7 @@
 /** Domain-independent content inventory and observed (not merely cited) coverage. */
 import {sourceDisplayText} from './ppt-source-text.mjs';
 import { visibleNodes } from './ppt-visible-content.mjs';
+import { inspectObjectIntegrity } from './ppt-object-integrity.mjs';
 const normalizedText=value=>sourceDisplayText(value).toLowerCase().replace(/\s+/gu,' ').trim();
 const structural = new Set(['TableBlock','EquationBlock','ProcessBlock','ChecklistBlock','TaxonomyBlock']);
 const tokens = text => [...new Set(String(text||'').toLowerCase().match(/[a-z][a-z0-9_-]{2,}|\d+(?:\.\d+)?|[\u3400-\u9fff]{2,4}/gu)||[])];
@@ -73,9 +74,10 @@ export function inspectInventoryCoverage(source, slides, visibleText) {
   const inventory=source?.semantic?.inventory;
   if (!inventory) return {metrics:{},issues:[]};
   const text=slides.map(visibleText).join('\n');
+  const verified=new Map(inspectObjectIntegrity({source},slides).ledger.objects.map(object=>[object.objectId,object.status==='rendered']));
   const items=inventory.items.map(item=> {
     const nodes=slides.flatMap(visibleNodes).filter(node=>node.sourceArtifact?.sourceUnitId===item.id);
-    const nativeStructure=nodes.length>0 && (item.type!=='TableBlock' || nodes.some(node=>node.type==='table'));
+    const nativeStructure=verified.get(item.id)===true;
     const contentRecall=recall(normalizedText(item.text),normalizedText(text));
     const actualCells=nodes.filter(node=>node.type==='table').flatMap(node=>node.content.rows.flat()).map(normalizedText);
     return {...item, contentRecall, covered:contentRecall>=.45, structureRetained:!item.must_preserve_structure||nativeStructure,

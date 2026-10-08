@@ -1,4 +1,7 @@
+import {visibleNodes,nodeContentText} from './ppt-visible-content.mjs';
 import { densityPrompt } from './ppt-density-profile.mjs';
+import { inspectVisibleCopy, normalizeSlideCopy } from './ppt-copy-integrity.mjs';
+import { inspectObjectIntegrity } from './ppt-object-integrity.mjs';
 import { applyLayoutRegistry, chooseLayout, layoutFor, regionsFor, typographyFor } from './ppt-layout.mjs';
 import { inspectContent } from './ppt-content-qa.mjs';
 import { inspectTemplateFidelity } from './ppt-template-fidelity.mjs';
@@ -99,12 +102,17 @@ export function inspectSourceForSlide(project, outlineSlide) {
 export function deterministicReview(project, deckInput = project.deck) {
   const deck = applyLayoutRegistry(deckInput);
   const issues = [];
+  issues.push(...inspectVisibleCopy(deck.slides));
+  const integrity=inspectObjectIntegrity(project,deck.slides);
+  issues.push(...integrity.issues);
+  for(const slide of deck.slides)for(const node of visibleNodes(slide))if(node.content?.mathStatus==='source_text_fallback')
+    issues.push(issue('math_source_text_fallback','warning','公式暂用完整来源文本显示，数学排版需检查：'+(node.content.mathWarning||''),slide.id));
   issues.push(...inspectTemplateFidelity({ ...project, deck }));
   for (const outlineSlide of project.outline || []) issues.push(...inspectSourceForSlide(project, outlineSlide));
   const fonts = project.templateSpec?.fonts;
   // Inspect the full object-level IR. Imported PPTX text lives in native nodes
   // rather than only in the legacy title/bullets/blocks projection.
-  const allText = collectText(deck.slides).filter(Boolean).join(' ');
+  const allText = deck.slides.flatMap(slide=>slide.nodes?.length ? visibleNodes(slide).map(nodeContentText) : collectText(slide)).filter(Boolean).join(' ');
   if (!fonts?.title || !fonts?.body) issues.push(issue('font_template', 'error', '模板缺少可验证的标题或正文字体 token'));
   if (CJK.test(allText) && (!fonts?.titleEastAsia || !fonts?.bodyEastAsia || fonts.cjkExplicit === false)) {
     issues.push(issue('font_cjk_coverage', 'error', '模板没有明确的东亚字体，无法保证中文严格沿用模板字体'));
@@ -122,7 +130,7 @@ export function deterministicReview(project, deckInput = project.deck) {
   deck.slides.forEach((slide, index) => {
     const layout = layoutFor(slide.layoutId);
     const contract = project.planning?.slidePlan?.find(item => item.slideId === slide.id) || {};
-    if (index > 0 && !slide.manualBlank && !(slide.bullets || []).length && !(slide.blocks || []).length && !(slide.nodes || []).some(node => node.sourceArtifact && (node.content?.text || node.content?.items?.length || node.content?.rows?.length))) {
+    if (index > 0 && !slide.manualBlank && !(slide.bullets || []).length && !(slide.blocks || []).length && !visibleNodes(slide).some(node => !['title','template-title','section','page-number','footnote'].includes(node.semanticRole) && (node.content?.text || node.content?.items?.length || node.content?.rows?.length || node.type==='image' || node.type==='chart'))) {
       issues.push(issue('content_empty', 'error', '内容页没有正文或视觉元素', slide.id));
     }
     if (!layout) issues.push(issue('layout_unknown', 'error', `未知版式 ${slide.layoutId}`, slide.id, true));
@@ -200,7 +208,7 @@ export function deterministicReview(project, deckInput = project.deck) {
   issues.push(...report.issues);
   return { version: 1, checkedAt: new Date().toISOString(), issues, hardErrors: issues.filter(item => item.severity === 'error').length,
     strictCoverage: project.planning?.brief?.depthPolicy === 'strict' && !project.compressionApproved,
-    contentMetrics: content.metrics, report };
+    contentMetrics: content.metrics, objectLedger:integrity.ledger, report };
 }
 
 function accessibleText(background) { return contrastRatio('#ffffff', background) >= 4.5 ? '#ffffff' : '#111827'; }
@@ -214,6 +222,7 @@ export function repairProject(project, initialReview) {
     // Exact repeats within one page are safe to remove. Across pages the same
     // wording may be a deliberate recap, so keep it visible for review.
     if (updated.runtime?.slides?.[slide.id]?.accepted) continue;
+    for (const change of normalizeSlideCopy(slide)) repairs.push({code:change.code,slideId:slide.id,action:'normalized exact redundant visible copy'});
     const seen = new Set();
     const contract = updated.planning?.slidePlan?.find(item => item.slideId === slide.id) || {};
     const titleIssue = initialReview.issues.find(item => item.slideId === slide.id && item.code === 'title_overflow');
@@ -266,15 +275,8 @@ export function repairProject(project, initialReview) {
         repairs.push({ code: 'layout_density', slideId: slide.id, action: `changed layout to ${alternative} without dropping content` });
       }
     }
-    // Fact synthesis may already contain an implication. Surface it as a
-    // compact takeaway instead of inventing extra prose during repair.
-    if (updated.templateFidelity?.mode !== 'preserve' && contract.depth === 'detailed' && !slide.copy?.takeaway && slide.factSynthesis?.implications?.[0]) {
-      slide.copy ||= {}; slide.copy.takeaway = slide.factSynthesis.implications[0].slice(0, 180);
-      const node = slide.nodes?.find(item => item.semanticRole === 'takeaway');
-      if (node) node.content = { ...(node.content || {}), text: slide.copy.takeaway };
-      else if (slide.nodes) slide.nodes.push({ id: `takeaway_${slide.id}`, type: 'text', semanticRole: 'takeaway', slotId: 'takeaway', styleRef: 'typography.takeaway', content: { text: slide.copy.takeaway } });
-      repairs.push({ code: 'under_expanded', slideId: slide.id, action: 'materialized source-grounded takeaway' });
-    }
+    // A missing optional takeaway is intentional. Only the writer can supply
+    // a distinct implication; legacy synthesis is never copied back to fill space.
   }
   const palette = updated.templateSpec?.palette;
   if (palette && initialReview.issues.some(item => item.code === 'contrast_foreground')) {
@@ -350,17 +352,18 @@ export function normalizeModelReview(value, slideIds) {
   if (!value || typeof value !== 'object' || !['missing', 'repeated', 'conflicts', 'unsupported'].every(key => Array.isArray(value[key])))
     throw new Error('whole-deck model review must return all four finding arrays');
   const valid = new Set(slideIds);
-  const normalize = (items, allowBullets = false) => !Array.isArray(items) ? [] : items.slice(0, 20).map(item => {
-    if (!item || typeof item !== 'object') return null;
-    const ids = Array.isArray(item.slideIds) ? [...new Set(item.slideIds.map(String))].filter(id => valid.has(id)).slice(0, 8) : [];
+  const normalize = (items, allowBullets = false) => items.map(item => {
+    if (!item || typeof item !== 'object') throw new Error('invalid whole-deck review finding');
+    const ids = Array.isArray(item.slideIds) ? [...new Set(item.slideIds.map(String))] : [];
     const detail = typeof item.detail === 'string' ? item.detail.trim().slice(0, 300) : '';
-    if (!ids.length || !detail) return null;
+    if (!ids.length || !detail || ids.some(id=>!valid.has(id))) throw new Error('whole-deck review finding requires valid slideIds and detail');
     return { slideIds: ids, detail,
       ...(item.reason === 'shallow' ? { reason: 'shallow' } : {}),
       ...(typeof item.suggestedFix === 'string' && item.suggestedFix.trim() ? { suggestedFix: item.suggestedFix.trim().slice(0, 700) } : {}),
       ...(allowBullets && Array.isArray(item.bulletIndexes) ? { bulletIndexes: [...new Set(item.bulletIndexes.map(Number).filter(Number.isInteger))].filter(index => index >= 0 && index < 10).slice(0, 10) } : {}) };
-  }).filter(Boolean);
+  });
   return {
+    evaluation: value.evaluation === 'not_evaluated' ? 'not_evaluated' : 'evaluated',
     missing: normalize(value?.missing),
     repeated: normalize(value?.repeated),
     conflicts: normalize(value?.conflicts),
@@ -371,7 +374,7 @@ export function normalizeModelReview(value, slideIds) {
 export function finalQualityReport(deterministic, repairs, modelReview, timings = {}) {
   const modelIssues = [
     ...modelReview.missing.map(item => ({ code: 'model_missing', severity: deterministic.strictCoverage ? 'error' : 'warning', ...item })),
-    ...modelReview.repeated.map(item => ({ code: 'model_repeated', severity: 'warning', ...item })),
+    ...modelReview.repeated.map(item => ({ code: 'model_repeated', severity: 'error', ...item })),
     ...modelReview.conflicts.map(item => ({ code: 'model_conflict', severity: 'error', ...item })),
     ...modelReview.unsupported.map(item => ({ code: 'model_unsupported', severity: 'error', ...item })),
   ];
@@ -388,8 +391,10 @@ export function finalQualityReport(deterministic, repairs, modelReview, timings 
     ...(deterministic.report?.mode !== 'presentation' && modelIssues.length ? { status: 'needs_review' } : {}) };
   return {
     version: 1,
-    status: blocked ? 'blocked' : (modelIssues.length || deterministic.issues.some(item => item.severity === 'warning')) ? 'passed_with_warnings' : 'passed',
-    publishEligible: !blocked, editorialReady: report.status === 'ready' || report.status === 'not_applicable',
+    status: blocked || modelReview.evaluation === 'not_evaluated' ? 'blocked' : (modelIssues.length || deterministic.issues.some(item => item.severity === 'warning')) ? 'passed_with_warnings' : 'passed',
+    publishEligible: !blocked && modelReview.evaluation !== 'not_evaluated', editorialReady: !blocked && modelReview.evaluation !== 'not_evaluated' && (report.status === 'ready' || report.status === 'not_applicable'),
+    contentReady: !blocked && modelReview.evaluation !== 'not_evaluated', exportable: false, visualVerified: false,
+    objectLedger: deterministic.objectLedger,
     checkedAt: new Date().toISOString(),
     deterministic,
     modelReview,

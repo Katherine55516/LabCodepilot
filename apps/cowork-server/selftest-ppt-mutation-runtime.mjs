@@ -26,7 +26,7 @@ const parsing = await import('./lib/ppt-semantic.mjs');
 const uid = 'runtime-test', noop = () => {}, checks = [];
 const clearReview = { missing: [], repeated: [], conflicts: [], unsupported: [] };
 function fixture() {
- const slides = ['Overview', 'Mechanisms', 'Conditions', 'Conclusion'].map((title, index) => ({ id: `s${index}`, title, layoutId: index === 0 ? 'cover' : index === 3 ? 'conclusion' : 'editorial', bullets: index ? ['Source evidence establishes this mechanism.', 'Stated limitations bound its applicability.', 'A distinct condition informs this decision.', 'Additional context explains its interpretation.'] : [] }));
+ const slides = ['Overview', 'Mechanisms', 'Conditions', 'Conclusion'].map((title, index) => ({ id: `s${index}`, title, layoutId: index === 0 ? 'cover' : index === 3 ? 'conclusion' : 'editorial', bullets: index === 1 ? ['Source evidence establishes this mechanism.', 'Stated limitations bound its applicability.', 'A distinct condition informs this decision.', 'Additional context explains its interpretation.'] : index === 2 ? ['Record the owner before accepting a result.', 'Verify the measurement against its baseline.', 'Check failures before advancing the queue.', 'Escalate a missing dependency to its owner.'] : index === 3 ? ['Approve the decision after reviewing evidence.', 'Assign the action to the responsible team.', 'Track delivery against the agreed deadline.', 'Revisit the outcome when new facts arrive.'] : [] }));
  const project = ir.ensureProjectV3({ id: store.newId(), uid, title: 'Runtime fixture', prompt: 'Explain mechanisms and conditions', pages: 4, template: 'light', templateSpec: templates.snapshotTemplate(templates.BUILT_INS.find(item => item.id === 'light')), model: 'user-selected-model', configId: 'user-selected-config', status: 'completed', stage: 'completed', revision: 1, publishedRevision: 1, outline: slides.map(slide => ({ id: slide.id, title: slide.title, focus: slide.title, role: slide.layoutId === 'cover' ? 'cover' : 'evidence', section: 'mechanisms', refs: [] })), deck: { slides }, nodes: Object.fromEntries(slides.map(slide => [slide.id, { status: 'done', slide }])) });
  project.renderTree = render.buildRenderTree(project); version.synchronizePlan(project); version.bindReview(project, clearReview); repo.saveProject(project); repo.saveRevision(project, 'baseline'); return project;
 }
@@ -95,12 +95,12 @@ try {
  assert(sourcedApplied.project.planning.slidePlan.some(contract => contract.requiredEvidenceIds.includes(atom.id)), 'split must keep required source evidence in a child contract');
  const chartPrompt = structuredClone(fixture()); chartPrompt.deck.slides[1].nodes.push({ id: 'chart_review', type: 'chart', content: { chartType: 'bar', labels: ['First', 'Second'], values: [12, 34], unit: '%' } });
  assert.match(quality.deckReviewPrompt(chartPrompt), /"values":\[12,34\],"unit":"%"/);
- // Review input binding distinguishes semantic content from geometry/style.
+ // Geometry/style affect visibility and object retention, so invalidate review.
  const reviewProject = fixture(); assert(version.reviewIsCurrent(reviewProject));
- const styled = await commands.applyCommand(uid, reviewProject.id, { type: 'node.setStyle', baseRevision: 1, payload: { slideId: 's1', nodeId: reviewProject.deck.slides[1].nodes[0].id, style: { fontWeight: 700 } } }); assert(version.reviewIsCurrent(styled.project));
+ const styled = await commands.applyCommand(uid, reviewProject.id, { type: 'node.setStyle', baseRevision: 1, payload: { slideId: 's1', nodeId: reviewProject.deck.slides[1].nodes[0].id, style: { fontWeight: 700 } } }); assert(!version.reviewIsCurrent(styled.project));
  const revised = await commands.applyCommand(uid, reviewProject.id, { type: 'node.setContent', baseRevision: 2, payload: { slideId: 's1', nodeId: reviewProject.deck.slides[1].nodes[0].id, content: { text: 'Changed semantic claim' } } }); assert.equal(revised.project.quality.reviewState, 'stale'); assert(!version.reviewIsCurrent(revised.project));
  let reviews = 0, exported;
- const published = await publish.publishProject(uid, reviewProject.id, { modelCall: async (project) => { assert.equal(project.configId, 'user-selected-config'); reviews++; return clearReview; }, renderPptx: async project => { exported = project; return { bytes: 123 }; } }, noop, noop);
+ const published = await publish.publishProject(uid, reviewProject.id, { modelCall: async (project) => { assert.equal(project.configId, 'user-selected-config'); reviews++; return clearReview; }, renderPptx: async project => { exported = project; return { bytes: 123, exportVerification: {status:"passed",basis:"test_double"} }; } }, noop, noop);
  assert.equal(reviews, 1); assert.equal(published.published, true); assert.equal(exported.renderTree.hash, published.project.renderTree.hash); assert.equal(published.project.publishedRevision, published.project.revision); checks.push('semantic changes invalidate review; preview and export share revision and render tree');
  const slots = capacity.createCapacity(1), first = await slots.acquire(); const order = [];
  const second = slots.acquire().then(release => { order.push(2); return release; }), third = slots.acquire().then(release => { order.push(3); return release; });
@@ -108,7 +108,7 @@ try {
  // Pause is a safe boundary; restore resumes cached pages, not an automatic restart of a paused run.
  const live = fixture(); live.status = 'outline_ready'; live.deck = null; live.nodes = {}; live.revision = 0; repo.saveProject(live); runs.startRun(live);
  const releases = []; let contentCalls = 0;
- const deps = { modelCall: async (project, prompt, _a, _l, meta) => { if (meta.nodeKey.startsWith('review:')) return clearReview; contentCalls++; if (!meta.nodeKey.endsWith(':repair') && releases.length < 2) await new Promise(resolve => releases.push(resolve)); const id = meta.nodeKey.split(':')[1]; return { title: `Claim ${id}`, bullets: id === 's0' ? [] : [`Distinct explanation for ${id} provides supported mechanism and conditions.`] }; }, renderPptx: async () => ({ bytes: 123 }) };
+ const deps = { modelCall: async (project, prompt, _a, _l, meta) => { if (meta.nodeKey.startsWith('review:')) return clearReview; contentCalls++; if (!meta.nodeKey.endsWith(':repair') && releases.length < 2) await new Promise(resolve => releases.push(resolve)); const id = meta.nodeKey.split(':')[1]; return { title: `Claim ${id}`, bullets: id === 's0' ? [] : [`Distinct explanation for ${id} provides supported mechanism and conditions.`] }; }, renderPptx: async () => ({ bytes: 123, exportVerification: {status:"passed",basis:"test_double"} }) };
  assert.equal((await request(live, '/generate', {}, deps)).status, 202); await until(() => releases.length === 2); await runtime.pauseSession(uid, live.id); releases.forEach(release => release()); await until(() => repo.getProject(uid, live.id).status === 'paused');
  const paused = repo.getProject(uid, live.id); const cached = Object.values(paused.nodes).filter(node => node.status === 'done').length; assert(cached >= 1); assert.equal(runs.currentRun(paused).status, 'paused'); const beforeResume = contentCalls;
  assert.equal((await request(live, '/resume', {}, deps)).status, 202);
@@ -120,7 +120,7 @@ try {
  const minimalScope = await edits.openGenerationScope(uid, minimal.id, 's1');
  await edits.submitGenerationEdit(uid, minimal.id, { scopeId: minimalScope.id, scope: 'current', instruction: 'Shorten only the title', type: 'title', idempotencyKey: 'minimal-after-depth' });
  let nonTitleCalls = 0;
- const minimalDeps = { modelCall: async (_p, _prompt, _a, _l, meta) => { if (meta.nodeKey.startsWith('review:')) return clearReview; if (meta.nodeKey.endsWith(':title')) return { content: { text: 'Minimal mechanism' } }; nonTitleCalls++; throw new Error('title mutation must not regenerate body'); }, renderPptx: async () => ({ bytes: 123 }) };
+ const minimalDeps = { modelCall: async (_p, _prompt, _a, _l, meta) => { if (meta.nodeKey.startsWith('review:')) return clearReview; if (meta.nodeKey.endsWith(':title')) return { content: { text: 'Minimal mechanism' } }; nonTitleCalls++; throw new Error('title mutation must not regenerate body'); }, renderPptx: async () => ({ bytes: 123, exportVerification: {status:"passed",basis:"test_double"} }) };
  await request(minimal, '/resume', {}, minimalDeps);
  const minimalDone = await until(() => { const p = repo.getProject(uid, minimal.id); if (p.status === 'failed') throw new Error(p.error); return ['completed','quality_blocked'].includes(p.status) && p; });
  assert.equal(nonTitleCalls, 0); assert.deepEqual(minimalDone.deck.slides[1].bullets, minimal.deck.slides[1].bullets); assert.equal(minimalDone.deck.slides[1].title, 'Minimal mechanism');
@@ -131,7 +131,7 @@ try {
  const manualTitle = manual.deck.slides[1].nodes.find(node => node.semanticRole === 'title');
  const manualResult = await commands.applyCommand(uid, manual.id, { type: 'node.setContent', baseRevision: manual.revision, payload: { slideId: 's1', nodeId: manualTitle.id, content: { text: 'Manual mechanism decision' } } });
  assert.equal(manualResult.project.editing.intents[manualIntent.intent.id].status, 'conflicted');
- const manualDeps = { modelCall: async (_p, _prompt, _a, _l, meta) => { assert(meta.nodeKey.startsWith('review:'), 'manual cached page must not be regenerated'); return clearReview; }, renderPptx: async () => ({ bytes: 123 }) };
+ const manualDeps = { modelCall: async (_p, _prompt, _a, _l, meta) => { assert(meta.nodeKey.startsWith('review:'), 'manual cached page must not be regenerated'); return clearReview; }, renderPptx: async () => ({ bytes: 123, exportVerification: {status:"passed",basis:"test_double"} }) };
  await request(manual, '/resume', {}, manualDeps);
  const manualDone = await until(() => { const p = repo.getProject(uid, manual.id); if (p.status === 'failed') throw new Error(p.error); return ['completed','quality_blocked'].includes(p.status) && p; });
  assert.equal(manualDone.deck.slides[1].title, 'Manual mechanism decision');
@@ -141,7 +141,7 @@ try {
  const plannedScope = await edits.openGenerationScope(uid, planned.id, 's1');
  const plannedIntent = await edits.submitGenerationEdit(uid, planned.id, { scopeId: plannedScope.id, scope: 'current', instruction: 'Split into two slides', type: 'structure', idempotencyKey: 'paused-structure-once' });
  const beforePlanRevision = planned.revision;
- const plannedDeps = { modelCall: async (p, prompt, _a, _l, meta) => { if (meta.nodeKey.startsWith('review:')) return clearReview; const items = p.deck.slides.find(slide => slide.id === 's1').nodes.find(node => node.semanticRole === 'body').content.items; return { groups: [{ title: 'Mechanism', itemIds: items.slice(0,2).map(item => item.id) }, { title: 'Boundaries', itemIds: items.slice(2).map(item => item.id) }] }; }, renderPptx: async () => ({ bytes: 123 }) };
+ const plannedDeps = { modelCall: async (p, prompt, _a, _l, meta) => { if (meta.nodeKey.startsWith('review:')) return clearReview; const items = p.deck.slides.find(slide => slide.id === 's1').nodes.find(node => node.semanticRole === 'body').content.items; return { groups: [{ title: 'Mechanism', itemIds: items.slice(0,2).map(item => item.id) }, { title: 'Boundaries', itemIds: items.slice(2).map(item => item.id) }] }; }, renderPptx: async () => ({ bytes: 123, exportVerification: {status:"passed",basis:"test_double"} }) };
  await request(planned, '/resume', {}, plannedDeps);
  const proposed = await until(() => { const p = repo.getProject(uid, planned.id); const intent = p.editing.intents[plannedIntent.intent.id]; if (['failed','conflicted'].includes(intent.status)) throw new Error(JSON.stringify(intent)); return intent.status === 'proposed' && p; });
  assert.equal(proposed.revision, beforePlanRevision); assert.equal(proposed.pages, 4);

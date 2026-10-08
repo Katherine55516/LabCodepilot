@@ -1,5 +1,5 @@
 /** Versioned, optional policy. Missing fields deliberately preserve legacy decks. */
-export const PPT_PROMPT_CONTRACT_VERSION = 4;
+export const PPT_PROMPT_CONTRACT_VERSION = 5;
 export function normalizeGenerationPolicy(value) {
   if (value === undefined) return undefined;
   if (!value || value.version !== 1 || !['balanced', 'detailed'].includes(value.detail)

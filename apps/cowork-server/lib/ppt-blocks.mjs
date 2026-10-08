@@ -49,6 +49,9 @@ export function normalizeSourceImages(input) {
     const block = normalizeBlocks([{ ...item, type: 'image', id: item?.id || `source-image-${index + 1}` }])[0];
     if (ids.has(block.id)) throw new Error('duplicate source image id');
     ids.add(block.id);
-    return block;
+    return { ...block, required:item.required!==false || Boolean(item.mustPreserve), role:item.role || 'source_content',
+      ...(item.sourceRef ? {sourceRef:String(item.sourceRef)} : {}),
+      ...(Array.isArray(item.sourceRefs) ? {sourceRefs:item.sourceRefs.map(String)} : {}),
+      ...(Number.isFinite(item.width) && Number.isFinite(item.height) ? {width:item.width,height:item.height} : {}) };
   });
 }

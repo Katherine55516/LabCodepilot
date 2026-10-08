@@ -7,7 +7,6 @@ import { finalQualityReport, normalizeModelReview } from './lib/ppt-quality.mjs'
 import { catalogTemplateLayouts, templateContentFit } from './lib/ppt-template-scheduler.mjs';
 import { _internals as fidelity, inspectTemplateFidelity } from './lib/ppt-template-fidelity.mjs';
 import { semanticMediaForSlide } from './lib/ppt-semantic-media.mjs';
-import { inflateSync } from 'node:zlib';
 
 const segments = Array.from({ length: 19 }, (_, index) => ({ id: String(index + 1), location: `chapter ${index + 1}`,
   text: `Background section ${index + 1} describes the general training and evaluation workflow.` }));
@@ -109,11 +108,7 @@ const mediaProject = { ...project, templateFidelity: { width: 960, height: 540 }
   templateSpec: { palette: { background: '#1c1c1c', accent: '#937331', foreground: '#f5f6fc' } },
   outline: [{ visualIntent: { type: 'process' } }] };
 const diagram = semanticMediaForSlide(mediaProject, 0, { geometry: { width: 500, height: 360 } });
-assert.ok(diagram?.dataUrl.startsWith('data:image/png;base64,'));
-const png = Buffer.from(diagram.dataUrl.split(',')[1], 'base64');
-assert.equal(png.readUInt32BE(16), 960);
-assert.equal(png.readUInt32BE(20), 540);
-assert.equal(inflateSync(png.subarray(41, png.length - 16)).length, 540 * (960 * 4 + 1));
+assert.equal(diagram,null,'unlabelled decorative rectangles must not be counted as semantic evidence');
 const reusedMedia = { templateFidelity: { mode: 'preserve', width: 100, height: 100,
   slides: Array.from({ length: 4 }, (_, index) => ({ index, shapeCount: 1, imageCount: 1, slots: [], variant: { kind: 'original' } })) },
   outline: Array.from({ length: 4 }, () => ({ visualIntent: { type: 'metric' } })),

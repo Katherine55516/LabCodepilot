@@ -30,7 +30,7 @@ const deps = {
     if (prompt.includes('当前任务只写第')) return { title: `Base ${prompt.match(/当前任务只写第 (\d+) 页/)?.[1]}`, bullets: ['Original fact'] };
     return { title: 'Generated update', bullets: ['Latest fact'] };
   },
-  renderPptx: async project => { renderCalls++; return { bytes: project.deck.slides.length * 100 }; },
+  renderPptx: async project => { renderCalls++; return { bytes: project.deck.slides.length * 100, exportVerification: {status:"passed",basis:"test_double"} }; },
   renderPdf: async () => ({ bytes: 100 }),
   extractFile: async (_project, name, bytes) => ({ kind: 'file', name, text: bytes.toString(), segments: [{ id: '1', location: 'page 1', text: bytes.toString() }] }),
   analyzeTemplate: async (_uid, _id, extension) => extension === 'pdf'

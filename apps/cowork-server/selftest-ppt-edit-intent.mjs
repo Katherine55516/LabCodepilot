@@ -16,7 +16,8 @@ const uid = 'edit-intent-test';
 const noop = () => {};
 const templateSpec = templates.snapshotTemplate(templates.BUILT_INS.find(item => item.id === 'light'));
 function fixture() {
-  const slides = ['Introduction', 'Mechanism', 'Limitations', 'Conclusion'].map((title, index) => ({ id: `s${index}`, title, bullets: index ? ['Source-backed context informs the assessment and its limitations.'] : [], layoutId: index === 0 ? 'cover' : index === 3 ? 'conclusion' : 'summary' }));
+  const bodies=['','The observed mechanism connects the measured exposure to the decision.','The assessment depends on timing alignment and comparable measurement conditions.','Validate assumptions and transaction costs before using the measured signal.'];
+  const slides = ['Introduction', 'Mechanism', 'Limitations', 'Conclusion'].map((title, index) => ({ id: `s${index}`, title, bullets: index ? [bodies[index]] : [], layoutId: index === 0 ? 'cover' : index === 3 ? 'conclusion' : 'summary' }));
   const project = ir.ensureProjectV3({ uid, id: store.newId(), title: 'Fixture', prompt: 'Explain a mechanism and its limitations.', template: 'light', templateSpec, pages: 4,
     status: 'completed', stage: 'completed', revision: 1, publishedRevision: 1, outline: slides.map(({ id, title }) => ({ id, title, focus: title, refs: [] })), deck: { slides }, nodes: {}, sourceRevision: 0 });
   repo.saveProject(project); repo.saveRevision(project, 'baseline'); return project;
@@ -60,6 +61,32 @@ try {
   await assert.rejects(() => proposals.createProposal(native, { ...data, scope: 'slide', mode: 'relayout', baseRevision: project.revision }, { modelCall: async () => { modelCalled = true; } }, noop, noop), error => error.statusCode === 409);
   assert.equal(modelCalled, false, 'native capability check precedes the model request');
 
+  // Source obligations must survive local changes/undo in either template mode.
+  const {normalizePaste}=await import('./lib/ppt-source.mjs');
+  const {bindSourceArtifacts}=await import('./lib/ppt-source-artifacts.mjs');
+  const {inspectObjectIntegrity}=await import('./lib/ppt-object-integrity.mjs');
+  const {semanticReviewKey}=await import('./lib/ppt/versioning.mjs');
+  let sourceProject=fixture();sourceProject.source=normalizePaste('# Mechanism\n\n$$r=\\alpha+\\beta f$$\n\n| Case | Condition |\n|---|---|\n| Signal | Timing alignment |\n\n## Checklist\n\n- Check assumptions.\n- Check costs.');
+  const objects=sourceProject.source.semantic.inventory.items.filter(item=>item.must_preserve_structure);
+  sourceProject.planning={slidePlan:objects.map((item,index)=>({slideId:`s${index+1}`,sourceArtifacts:[{sourceUnitId:item.id}]}))};
+  objects.forEach((item,index)=>bindSourceArtifacts(sourceProject,sourceProject.deck.slides[index+1],[{sourceUnitId:item.id}],index+1));
+  sourceProject.quality={reviewState:'valid',modelReview:{missing:[],repeated:[],conflicts:[],unsupported:[]}};repo.saveProject(sourceProject);
+  assert.equal(inspectObjectIntegrity(sourceProject).ledger.fulfilledCount,3);
+  const eqSlide=sourceProject.deck.slides.find(slide=>slide.nodes.some(node=>node.sourceArtifact?.type==='EquationBlock'));
+  const equation=eqSlide.nodes.find(node=>node.sourceArtifact?.type==='EquationBlock');
+  for(const templateMode of ['mapped','preserve']){
+    const candidateProject={...sourceProject,...(templateMode==='preserve'?{externalPptx:{mode:'preserve'}}:{})};
+    await assert.rejects(()=>proposals.createProposal(candidateProject,{scope:'object',slideId:eqSlide.id,nodeId:equation.id,instruction:'Shorten the equation',baseRevision:1},{modelCall:async()=>({content:{text:'r=alpha'}})},noop,noop),error=>error.statusCode===422,'shortening must not remove the beta relationship in either mode');
+  }
+  const oldKey=semanticReviewKey(sourceProject);
+  const changedSource=await commands.applyCommand(uid,sourceProject.id,{type:'node.setContent',baseRevision:1,payload:{slideId:eqSlide.id,nodeId:equation.id,content:{text:'r=alpha'}}});
+  assert.equal(changedSource.project.deck.slides.find(s=>s.id===eqSlide.id).nodes.find(n=>n.id===equation.id).sourceArtifact.sourceUnitId,equation.sourceArtifact.sourceUnitId);
+  assert.ok(inspectObjectIntegrity(changedSource.project).issues.some(i=>i.code==='required_source_object_missing'));
+  assert.equal(changedSource.project.quality.reviewState,'stale');
+  const restoredSource=await commands.undo(uid,sourceProject.id,uid,changedSource.operation.id);
+  assert.equal(inspectObjectIntegrity(restoredSource.project).ledger.fulfilledCount,3);
+  assert.equal(semanticReviewKey(restoredSource.project),oldKey,'undo must restore the equation, ownership and semantic review input');
+
   const chartProject = fixture();
   const withChart = await commands.applyCommand(uid, chartProject.id, { type: 'node.insert', baseRevision: 1, payload: { slideId: 's1', node: { type: 'chart', content: { chartType: 'bar', labels: ['A', 'B'], values: [2, 5], unit: '%' }, style: {} } } });
   const chart = withChart.project.deck.slides[1].nodes.find(item => item.type === 'chart');
@@ -94,7 +121,7 @@ try {
     }
     const changed = snapshot.editing?.instructions?.[slideId]?.length;
     return { title: `Distinct ${slideId} ${changed ? 'revised' : 'original'}`, titleCandidates: [`Distinct ${slideId} ${changed ? 'revised' : 'original'}`], bullets: slideId === 's0' ? [] : ['A source-backed mechanism explains the relationship.', 'Its assessment depends on the stated conditions.', 'Known limitations constrain the conclusion.'] };
-  }, renderPptx: async () => ({ bytes: 123 }), removeContainer: async () => {} };
+  }, renderPptx: async () => ({ bytes: 123, exportVerification: {status:"passed",basis:"test_double"} }), removeContainer: async () => {} };
   assert.equal((await request(generating, '/generate', {}, deps)).status, 202);
   await waitUntil(() => releases.size === 3, 'three parallel pages started');
   const during = await edits.openGenerationScope(uid, generating.id, 's0'); assert.deepEqual(during.remainingSlideIds, ['s3']);
@@ -156,7 +183,7 @@ try {
   repo.appendJsonLine(damaged, { id: 'second' });
   assert.deepEqual(repo.readJsonLines(damaged).map(row => row.id), ['first', 'second']);
   const published = fixture(); let renderPath;
-  await publish.publishProject(uid, published.id, { modelCall: async () => ({ missing: [], repeated: [], conflicts: [], unsupported: [] }), renderPptx: async value => { renderPath = value.renderOutput; return { bytes: 100 }; } });
+  await publish.publishProject(uid, published.id, { modelCall: async () => ({ missing: [], repeated: [], conflicts: [], unsupported: [] }), renderPptx: async value => { renderPath = value.renderOutput; return { bytes: 100, exportVerification: {status:"passed",basis:"test_double"} }; } });
   assert.match(renderPath, /^\/workspace\/published-1-artifact_/);
   const previousArtifact = repo.getProject(uid, published.id).publishedArtifactPath;
   const changed = await commands.applyCommand(uid, published.id, { type: 'node.setContent', baseRevision: 1, payload: { slideId: 's1', nodeId: published.deck.slides[1].nodes.find(item => item.semanticRole === 'title').id, content: { text: 'Updated claim' } } });

@@ -4,7 +4,7 @@ const ID = /^[a-zA-Z0-9_-]{1,80}$/;
 const COLOR = /^#[0-9a-f]{6}$/i;
 const DATA_URL = /^data:image\/(png|jpeg);base64,([A-Za-z0-9+/]+={0,2})$/;
 const LAYOUTS = new Set(['cover', 'summary', 'editorial', 'big-number', 'comparison', 'chart', 'table', 'image-text', 'timeline', 'conclusion']);
-const NODE_TYPES = new Set(['text', 'list', 'image', 'chart', 'table', 'shape', 'foreign']);
+const NODE_TYPES = new Set(['text', 'list', 'timeline', 'image', 'chart', 'table', 'shape', 'foreign']);
 const SLIDE = Object.freeze({ width: Math.round(13.333 * 914400), height: Math.round(7.5 * 914400) });
 const MAX_IMAGE_BYTES = 512 * 1024;
 const MAX_IMAGE_EDGE = 4096;
@@ -117,7 +117,7 @@ export function validateNodeContent(type, value) {
         body: string(row.body || '', `content.paragraphs[${index}].body`, 1000, { empty: false }) };
     }) };
   }
-  if (type === 'list') return { items: listItems(input.items || []) };
+  if (type === 'list' || type==='timeline') return { items: listItems(input.items || []) };
   if (type === 'image') {
     const result = { dataUrl: string(input.dataUrl, 'content.dataUrl', 700000, { empty: false }), text: string(input.text || '', 'content.text', 200) };
     validateImageDataUrl(result.dataUrl); return result;

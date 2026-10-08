@@ -1,3 +1,4 @@
+import {sourceDisplayText} from './ppt-source-text.mjs';
 import { inspectDensity } from './ppt-density-qa.mjs';
 import { inspectInventoryCoverage, recall } from './ppt-content-inventory.mjs';
 /** Deterministic content diagnostics within the existing quality node. */
@@ -9,6 +10,7 @@ function formulaCalls(value) {
   const text = String(value || '');
   const calls = [];
   for (const match of text.matchAll(/\b[A-Za-z_]\w*\s*\(/g)) {
+    if(match.index>0 && text[match.index-1]==='\\' && /^(?:big|Big|left|right)\b/u.test(match[0]))continue;
     let depth = 0; let end = -1;
     for (let index = text.indexOf('(', match.index); index < text.length; index++) {
       if (text[index] === '(') depth++;
@@ -211,13 +213,13 @@ export function inspectContent(project, deck = project.deck) {
           message: `本页原生模板正文容量约 ${templateCapacity} visual units，低于富来源内容页的最低解释容量；应在版式调度时选更大正文区域，或明确压缩本页内容范围`,
           slideId: slide.id, repairable: false });
       } else if (contentUnits < target && !((slide.nodes||[]).filter(node=>node.sourceArtifact).some(node=>(node.content?.items?.length || (node.content?.rows?.length||0)-1)>=Math.min(4,contract.semanticUnitBudget||4)))) {
-        issues.push({ code: 'visible_content_sparse', severity: templateCapacity >= 130 ? 'error' : 'warning',
+        issues.push({ code: 'visible_content_sparse', severity: templateCapacity >= 130 && !slide.sourceArtifactFit?.capacity_ok ? 'error' : 'warning',
           message: `本页有来源内容且可见正文仅约 ${Math.ceil(contentUnits)} visual units；请补充来源支持的机制、条件、例子或判断，不要靠重复填字`,
           slideId: slide.id, repairable: true });
       }
     }
     if (project.source?.text) for (const { expression } of formulaCalls(visibleText)) {
-      if (!formulaKey(project.source.text).includes(formulaKey(expression)))
+      if (!formulaKey(sourceDisplayText(project.source.text)).includes(formulaKey(sourceDisplayText(expression))))
         issues.push({ code: 'visible_formula_unverified', severity: 'error',
           message: `可见公式与输入来源不一致：${expression.slice(0, 100)}`, slideId: slide.id, repairable: false });
     }
@@ -246,7 +248,9 @@ export function inspectContent(project, deck = project.deck) {
     if (evidenceTitle && !citedAtoms.length && segments.length)
       issues.push({ code: 'evidence_page_source_absent', severity: 'error', message: '标题承诺证据或结果，但本页来源没有可核对的证据原子；应补充来源或改为评估方法页',
         slideId: slide.id, repairable: false });
-    const citedMeasurements = citedAtoms.flatMap(atom => atom.measurements || []);
+    const chunkIds=new Set(slide.sourceChunks || project.outline?.find(outline=>outline.id===slide.id)?.chunkRefs || []);
+    const directSources=[...segments.filter(segment=>slide.sourceRefs?.includes(segment.id)).map(segment=>sourceDisplayText(segment.text)),...(project.source?.semantic?.chunks||[]).filter(chunk=>chunkIds.has(chunk.id)).map(chunk=>sourceDisplayText(chunk.text))];
+    const citedMeasurements = [...citedAtoms.flatMap(atom => atom.measurements || []),...directSources.flatMap(evidenceMeasurements)];
     for (const measurement of evidenceMeasurements(visibleText)) {
       const sourceMatch = citedMeasurements.some(item => item.value === measurement.value && item.unit === measurement.unit);
       if (!sourceMatch && segments.length) {

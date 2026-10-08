@@ -1,6 +1,7 @@
 /** Shared geometry/line estimator for page planning and source-owned rendering.
  * A fit is an analytic prediction; final Render Tree/PPTX QA remains mandatory. */
 import { displayUnits } from './ppt-density-profile.mjs';
+import { equationContent, equationDimensions } from './ppt-math.mjs';
 export const INCH = 914400;
 export function contentCanvas(project = {}, index = 1) {
   const fidelity = project.templateFidelity;
@@ -17,17 +18,32 @@ export function contentCanvas(project = {}, index = 1) {
     right=Math.min(width,Math.max(...frames.map(node=>node.geometry.x+node.geometry.width)));
     top=Math.max(0,Math.min(...frames.map(node=>node.geometry.y)));
     bottom=Math.min(height,Math.max(...frames.map(node=>node.geometry.y+node.geometry.height)));
-    // Preserve title/navigation/footer zones; body objects replace only content.
+    // Source-owned components may use free vertical space in the content
+    // region. A short legacy textbox is not a limit on a complete table/math
+    // object. Keep its horizontal design and all title/footer/image zones.
+    const richSource=String(project.source?.text||'').length>=8000;
+    if(richSource){top=Math.min(top,height*.25);bottom=Math.max(bottom,height*.93);}
     const gap=INCH*.08;
     for(const node of spec.nodes||[]){
       if(!validBox(node.geometry))continue;
       const slot=spec.slots?.find(slot=>slot.shapeId===node.nativeRef?.shapeId);
       const header=['title','section'].includes(slot?.role),footer=slot?.purpose==='footnote'||node.semanticRole==='page-number';
-      if(!header&&!footer)continue;
       const g=node.geometry;
+      const banner=node.type==='image' && g.width>=width*.8 && g.height<height*.3 && g.y>height*.5;
+      if(!header&&!footer&&!banner)continue;
       if(g.x+g.width<=left||g.x>=right)continue;
-      if(header && g.y<(top+bottom)/2 && g.y+g.height>top-gap)top=Math.max(top,g.y+g.height+gap);
-      if(footer && g.y>top && g.y<bottom+gap)bottom=Math.min(bottom,g.y-gap);
+      if(header && g.y<(top+bottom)/2) {
+        // Native title boxes often intentionally allow text to extend beyond
+        // their tiny shape height. Reserve the actual line plus native padding,
+        // including fallback font metrics, before adding a table underneath.
+        const margins=node.nativeTextFrame?.margins||[0,0,0,0];
+        const linePt=Number(node.style?.fontSizePt||slot.fontSizePt||24)*1.25;
+        const lineCount=Math.max(1,node.nativeTextFrame?.paragraphs?.length||1);
+        const textHeight=linePt/72*INCH*lineCount+(Number(margins[1])||0)+(Number(margins[3])||0);
+        const headerBottom=g.y+Math.max(g.height,textHeight);
+        if(headerBottom>top-gap)top=Math.max(top,headerBottom+gap);
+      }
+      if((footer||banner) && g.y>top && g.y<bottom+gap)bottom=Math.min(bottom,g.y-gap);
     }
   }
   return { geometry:{x:Math.round(left),y:Math.round(top),width:Math.max(0,Math.round(right-left)),height:Math.max(0,Math.round(bottom-top))},fontSizePt,
@@ -47,8 +63,15 @@ export function measureComponent(component, geometry, fontSizePt) {
     rowWeights = rows.map(row => Math.max(...row.map((cell, col) => String(cell).split('\n').reduce((n, line) =>
       n + Math.max(1, Math.ceil(displayUnits(line) / (lineUnits * columnWeights[col] / total))), 0))) + .35);
     lines = rowWeights.reduce((n, v) => n + v, 0);
+  } else if(component.type==='image') {
+    const ratio=Math.max(.05,Number(component.content?.width||1)/Number(component.content?.height||1));
+    return {lines:0,height:Math.ceil(Math.min(geometry.height*.7,geometry.width/ratio)),lineUnits,overflow:false};
   } else if (['list', 'timeline'].includes(component.type)) {
     lines = (component.content.items || []).reduce((n, item) => n + linesOf(item.text) + .4, 0);
+  } else if(component.content?.mathMl) {
+    const dimensions=equationDimensions(component.content,fontSizePt);
+    const width=Math.ceil(dimensions.widthPt/72*INCH),height=Math.ceil(dimensions.heightPt/72*INCH);
+    return {lines:dimensions.heightPt/fontSizePt,width,height,lineUnits,overflow:width>geometry.width||height>geometry.height};
   } else lines = linesOf(component.content?.text || '');
   const height = Math.ceil((lines * fontSizePt * 1.18 + 7.2) / 72 * INCH);
   return { lines, height, lineUnits, columnWeights, rowWeights, overflow: height > geometry.height };
@@ -69,11 +92,12 @@ export function fitComponents(components, project = {}, index = 1) {
       const box = { x: Math.round(canvas.x + col * (widths + gap)), y: Math.round(canvas.y + heights[col]), width: Math.round(widths), height: canvas.height };
       const measurement = measureComponent(component, box, fontSizePt);
       box.height = measurement.height;
+      if(measurement.width)box.width=Math.min(box.width,measurement.width);
       boxes.push(box); measurements.push(measurement); heights[col] += measurement.height + gap;
     }
     const usedHeight = Math.max(0, ...heights.map(h => Math.max(0, h - gap)));
     candidates.push({ layoutId: columns === 2 ? 'parallel-source' : 'stacked-source', columns, boxes, measurements,
-      predictedOverflow: Math.max(0, usedHeight - canvas.height), usedHeight, availableHeight: canvas.height, fontSizePt, canvas });
+      predictedOverflow: Math.max(0, usedHeight - canvas.height,...measurements.map(m=>m.width?m.width-widths:0)), usedHeight, availableHeight: canvas.height, fontSizePt, canvas });
   }
   const best = candidates.sort((a, b) => Number(a.predictedOverflow > 0) - Number(b.predictedOverflow > 0) || a.usedHeight - b.usedHeight)[0];
   return { ...best, capacity_ok: best.predictedOverflow === 0, capacityBasis, measurementBasis: 'shared_line_estimator' };
@@ -99,6 +123,11 @@ export function validateSourceArtifactRefs(items, refs) {
   return refs;
 }
 export function sourceComponent(item, ref = {}) {
+  if(item.type==='SourceImage'){
+    const {id,type,...content}=item;
+    return {type:'image',content:{...content,sourceImageId:id}};
+  }
+  if(item.type==='EquationBlock')return {type:'text',content:equationContent(item.text)};
   if (item.type === 'TableBlock') {
     const start = ref.rowStart === undefined ? 1 : Number(ref.rowStart), end = ref.rowEnd === undefined ? item.rows.length : Number(ref.rowEnd);
     if (!Number.isInteger(start) || !Number.isInteger(end) || start < 1 || end <= start || end > item.rows.length) throw new Error('invalid source table row range');
@@ -107,4 +136,9 @@ export function sourceComponent(item, ref = {}) {
   if (item.type === 'ChecklistBlock') return { type: 'list', content: { items: item.text.split('\n').filter(line => /^\s*(?:[-*+]|\d+[.)])\s+/.test(line)).map(line => ({ text: line.replace(/^\s*(?:[-*+]|\d+[.)])\s+/, '') })) } };
   if (item.type === 'ProcessBlock') return { type: 'timeline', content: { items: item.text.split(/(?:->|→)/u).map(text => ({ text: text.trim() })) } };
   return { type: 'text', content: { text: item.text } };
+}
+/** Captions use visible source text and their own capacity budget. */
+export function sourceImageComponents(image) {
+  return [sourceComponent({...image,type:'SourceImage'}),...(image.caption?.trim()?
+    [{type:'text',content:{text:image.caption.trim(),sourceImageCaptionId:image.id}}]:[])];
 }

@@ -1,0 +1,118 @@
+[
+  {
+    "file": "selftest-ppt-content-depth.mjs",
+    "code": 0
+  },
+  {
+    "file": "selftest-ppt-copy-media-integrity.mjs",
+    "code": 0
+  },
+  {
+    "file": "selftest-ppt-density-audit.mjs",
+    "code": 0
+  },
+  {
+    "file": "selftest-ppt-content-inventory.mjs",
+    "code": 0
+  },
+  {
+    "file": "selftest-ppt-edit-intent.mjs",
+    "code": 0
+  },
+  {
+    "file": "selftest-ppt-evidence-quality.mjs",
+    "code": 0
+  },
+  {
+    "file": "selftest-ppt-density.mjs",
+    "code": 0
+  },
+  {
+    "file": "selftest-ppt-long-limits.mjs",
+    "code": 0
+  },
+  {
+    "file": "selftest-ppt-long-storage.mjs",
+    "code": 0
+  },
+  {
+    "file": "selftest-ppt-m2.mjs",
+    "code": 0
+  },
+  {
+    "file": "selftest-ppt-m3.mjs",
+    "code": 0
+  },
+  {
+    "file": "selftest-ppt-export-integrity.mjs",
+    "code": 0
+  },
+  {
+    "file": "selftest-ppt-m4.mjs",
+    "code": 0
+  },
+  {
+    "file": "selftest-ppt-mutation-runtime.mjs",
+    "code": 0
+  },
+  {
+    "file": "selftest-ppt-m5.mjs",
+    "code": 0
+  },
+  {
+    "file": "selftest-ppt-prototype-parity.mjs",
+    "code": 0
+  },
+  {
+    "file": "selftest-ppt-real-fixture.mjs",
+    "code": 0
+  },
+  {
+    "file": "selftest-ppt-recovery-sync.mjs",
+    "code": 0
+  },
+  {
+    "file": "selftest-ppt-report-qa.mjs",
+    "code": 0
+  },
+  {
+    "file": "selftest-ppt-requirements-parity.mjs",
+    "code": 0
+  },
+  {
+    "file": "selftest-ppt-semantic.mjs",
+    "code": 0
+  },
+  {
+    "file": "selftest-ppt-prompt-contracts.mjs",
+    "code": 0
+  },
+  {
+    "file": "selftest-ppt-structured.mjs",
+    "code": 0
+  },
+  {
+    "file": "selftest-ppt-template-registry.mjs",
+    "code": 0
+  },
+  {
+    "file": "selftest-ppt-template-fidelity.mjs",
+    "code": 0
+  },
+  {
+    "file": "selftest-ppt-template-scheduler.mjs",
+    "code": 0
+  },
+  {
+    "file": "selftest-ppt-visible-depth.mjs",
+    "code": 0
+  },
+  {
+    "file": "selftest-ppt.mjs",
+    "code": 0
+  },
+  {
+    "file": "selftest-ppt-template-security.mjs",
+    "code": 0
+  }
+]

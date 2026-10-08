@@ -23,7 +23,7 @@ export function buildEvidenceAtoms(blocks, chunks) {
     if (block.type === 'heading') continue;
     const sentences = splitSentences(block.text);
     for (let index = 0; index < sentences.length; index++) {
-      const exactText = sentences[index].slice(0, 650);
+      const exactText = sentences[index];
       const measurements = evidenceMeasurements(exactText);
       const kind = measurements.length ? 'number' : block.contentKind === 'example' ? 'example'
         : CONSTRAINT.test(exactText) ? 'constraint' : MECHANISM.test(exactText) && ['process', 'architecture', 'comparison', 'explanation', 'metric'].includes(block.semanticType) ? 'mechanism' : null;

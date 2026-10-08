@@ -2,6 +2,7 @@
 import { spawn } from 'node:child_process';
 import * as orch from './orchestrator.mjs';
 import { buildRenderTree } from './ppt/render-tree.mjs';
+import { OFFICE_FONT_ENV_SCRIPT } from './ppt-fonts.mjs';
 
 const SCRIPT = String.raw`
 import base64, io, json, os, re, textwrap, sys
@@ -165,24 +166,35 @@ print(json.dumps({'slides': len(data['slides']), 'bytes': os.path.getsize(target
 
 const PRESERVED_SCRIPT = String.raw`
 import json, os, subprocess
+${OFFICE_FONT_ENV_SCRIPT}
 source=os.environ.get('PPT_SOURCE','/workspace/presentation.pptx'); target=os.environ.get('PPT_OUTPUT','/workspace/presentation.pdf')
 if not os.path.isfile(source): raise ValueError('published presentation.pptx is missing')
 try: os.unlink(target)
 except FileNotFoundError: pass
 outdir=os.path.dirname(target); profile=os.path.join(outdir,'.libreoffice-ppt')
-result=subprocess.run(['soffice','-env:UserInstallation=file://'+profile,'--headless','--convert-to','pdf:impress_pdf_Export','--outdir',outdir,source], capture_output=True, text=True, timeout=120)
+# Some bundled headless builds use a private fontconfig cache which does not
+# discover installed CJK fonts. Configure this conversion only; never change
+# the host or Office installation. Linux keeps its system aliases/fallbacks.
+conversion_env=office_font_environment(profile)
+result=subprocess.run(['soffice','-env:UserInstallation=file://'+profile,'--headless','--convert-to','pdf:impress_pdf_Export','--outdir',outdir,source], capture_output=True, text=True, timeout=120,env=conversion_env)
 converted=os.path.join(outdir,os.path.splitext(os.path.basename(source))[0]+'.pdf')
 if result.returncode or not os.path.isfile(converted): raise ValueError('native template PDF conversion failed: '+(result.stderr or result.stdout)[-500:])
 if converted != target: os.replace(converted,target)
 print(json.dumps({'bytes':os.path.getsize(target),'nativeTemplate':True}))
 `;
 
-export async function renderPdf(project) {
+export async function renderPdf(project,io={}) {
+  // PDF is always derived from the verified PPTX. A second renderer cannot
+  // silently lose native equations, inherited artwork or table cell styles.
+  if(io.runPython)return io.runPython(project,PRESERVED_SCRIPT,'',{
+    PPT_SOURCE:project.publishedArtifactPath||'/workspace/presentation.pptx',PPT_OUTPUT:project.pdfArtifactPath||'/workspace/presentation.pdf'});
   const { name } = await orch.ensureContainer(project.id, project.uid, orch.KIND_PPT);
   return new Promise((resolve, reject) => {
-    const preserved = Boolean(project.externalPptx || project.templateFidelity?.mode === 'preserve');
+    const preserved = true;
     const child = spawn('docker', ['exec', '-i', '-u', String(orch.AGENT_UID), '-e', `PPT_SOURCE=${project.publishedArtifactPath || '/workspace/presentation.pptx'}`, '-e', `PPT_OUTPUT=${project.pdfArtifactPath || '/workspace/presentation.pdf'}`, name, 'python3', '-c', preserved ? PRESERVED_SCRIPT : SCRIPT], { stdio: ['pipe', 'pipe', 'pipe'] });
     let output = ''; let error = '';
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
     child.stdout.on('data', c => { output = (output + c).slice(-10000); });
     child.stderr.on('data', c => { error = (error + c).slice(-2000); });
     child.on('error', reject);

@@ -96,7 +96,7 @@ try {
   fs.writeFileSync(fake, '#!/usr/bin/env python3\nimport sys,json\nprint(json.dumps({"args":sys.argv[1:],"text":sys.stdin.read()},ensure_ascii=False))\n');
   fs.chmodSync(fake, 0o700);
   const huge = '完整中文表达与原始公式。'.repeat(16000);
-  const run = spawnSync('python3', ['apps/cowork-server/container/cowork-shim.py', '--', '-p', '--system-prompt', PPT_SYSTEM_PROMPT], {
+  const run = spawnSync('python3', [new URL('./container/cowork-shim.py',import.meta.url).pathname, '--', '-p', '--system-prompt', PPT_SYSTEM_PROMPT], {
     input: pptPromptFrame(huge), maxBuffer: 4 * 1024 * 1024, encoding: 'utf8',
     env: { ...process.env, COWORK_CLAUDE_BIN: fake, COWORK_WORKSPACE: root, COWORK_SKILLS_DIR: path.join(root, 'no-skills') },
   });
@@ -132,7 +132,7 @@ try {
     }
     const body = i === 1 ? bodies[0].split('. ').slice(0, writerRepairs > 0 ? 2 : 1).join('. ') : bodies[i - 1];
     return { title: p.outline[i].title, contentBlocks: i === 0 ? [] : [{ type: 'definition', heading: '', body: i === 7 ? 'Combine timing alignment, industry controls and transaction costs before evaluating the signal.' : body }] };
-  }, renderPptx: async () => { rendered++; return { bytes: 123 }; } };
+  }, renderPptx: async () => { rendered++; return { bytes: 123, exportVerification: {status:"passed",basis:"test_double"} }; } };
   const request = async (method, url, data) => {
     const req = Readable.from(data ? [Buffer.from(JSON.stringify(data))] : []); req.method = method;
     let result;
@@ -150,7 +150,7 @@ try {
   assert.equal((await request('POST', `/ppt/projects/${created.body.project.id}/generate`)).status, 202);
   const finished = await settled(created.body.project.id, ['completed', 'failed', 'quality_blocked']);
   assert.equal(finished.status, 'completed', finished.error);
-  assert.equal(writerRepairs, 2); assert.equal(criticCalls, 3); assert.equal(rendered, 1);
+  assert.equal(writerRepairs, 2); assert.equal(criticCalls, 4,'canonical normalization invalidates the previous final review'); assert.equal(rendered, 1);
   assert.equal(finished.runtime.criticRepair.rounds, 2);
   assert.equal(finished.runtime.criticRepair.attempts.length, 2);
   assert.equal(finished.dagNodes['review:deck'].result.missing.length, 0);
@@ -176,7 +176,8 @@ try {
   const blockedCreated = await create(); await settled(blockedCreated.body.project.id, ['outline_ready']);
   await request('POST', `/ppt/projects/${blockedCreated.body.project.id}/generate`);
   const blocked = await settled(blockedCreated.body.project.id, ['completed', 'quality_blocked', 'failed']);
-  assert.equal(blocked.runtime.criticRepair.rounds, 2);
+  assert.equal(blocked.runtime.criticRepair.rounds, 1);
+  assert.equal(blocked.runtime.criticRepair.stoppedReason,'no_progress');
   assert.equal(blocked.status, 'quality_blocked', blocked.error);
   assert.equal(blocked.quality.modelReview.missing[0].reason, 'shallow');
   assert.equal(rendered, 1, 'remaining strict-depth findings must not publish at the round limit');

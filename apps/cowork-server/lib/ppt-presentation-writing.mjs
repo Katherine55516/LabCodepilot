@@ -4,6 +4,7 @@
  * module owns copy contracts, title fitting, and source-grounded diagnostics.
  */
 import { pointBudgetFor } from './ppt-content-depth.mjs';
+import { normalizeVisibleCopy } from './ppt-copy-integrity.mjs';
 const CJK = /[\u2e80-\u9fff\uf900-\ufaff]/u;
 const WORD = /[A-Za-z][A-Za-z0-9_/-]*/g;
 const HAN = /[\u3400-\u9fff]/gu;
@@ -31,13 +32,13 @@ const GENERIC_TERMS = [
   'Media Engine', 'Render Tree', 'Structured Artifact Engine', 'PPTX Export',
 ];
 
-function text(value, max = 240) { return typeof value === 'string' ? value.trim().slice(0, max) : ''; }
+function text(value, max = 240) { return typeof value === 'string' ? value.trim() : ''; }
 function unique(values, max = 12) { return [...new Set((Array.isArray(values) ? values : []).map(value => text(value)).filter(Boolean))].slice(0, max); }
 function words(value) { return new Set((String(value || '').toLocaleLowerCase().match(WORD) || []).map(item => item.toLocaleLowerCase())); }
 function han(value) { return new Set(String(value || '').match(HAN) || []); }
 
 export function normalizeTypography(value, max = 240) {
-  return String(value || '')
+  const normalized=String(value || '')
     .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '')
     // Underscores are part of code/math identifiers (ts_mean, raw_group).
     // Strip surrounding Markdown emphasis only when it is delimited by
@@ -58,8 +59,9 @@ export function normalizeTypography(value, max = 240) {
     .replace(/(?<![:/])\s*\/\s*(?!\/)/g, ' / ')
     .replace(/[ \t]{2,}/g, ' ')
     .replace(/\s*([，。；：！？、])\s*/gu, '$1')
-    .trim()
-    .slice(0, max);
+    .trim();
+  if(normalized.length>max)throw new Error(`visible text exceeds ${max} characters; rewrite or redistribute without truncation`);
+  return normalized;
 }
 
 export function visualUnits(value) {
@@ -76,7 +78,7 @@ export function visualUnits(value) {
 }
 
 export function normalizeHeadline(value, registry = {}) {
-  let title = normalizeTypography(value, 240)
+  let title = normalizeTypography(value, Number.MAX_SAFE_INTEGER)
     .replace(/^[\s#>*•\-–—]+/gu, '')
     .replace(/[\r\n]+/g, ' ')
     .replace(/\s+/g, ' ')
@@ -90,7 +92,7 @@ export function normalizeHeadline(value, registry = {}) {
     const loose = term.replace(/\s+/g, '\\s+').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     title = title.replace(new RegExp(loose, 'gi'), term);
   }
-  return title.slice(0, 160);
+  return title;
 }
 
 function splitTitleAtBoundary(value, preferredUnits) {
@@ -277,7 +279,9 @@ export function normalizeContentBlocks(value, maxBody = 4000) {
     if (sourceBody.length > maxBody) throw new Error(`point body exceeds ${maxBody} characters; split it before rendering`);
     const body = normalizeTypography(sourceBody, maxBody);
     if (!body) return null;
-    return { type, heading, body };
+    return { type, heading, body, ...(item.claimId ? {claimId:String(item.claimId)} : {}),
+      ...(item.repeatPurpose ? {repeatPurpose:String(item.repeatPurpose)} : {}),
+      ...(Array.isArray(item.sourceRefs) ? {sourceRefs:item.sourceRefs.map(String)} : {}) };
   }).filter(Boolean);
 }
 
@@ -286,22 +290,21 @@ export function materializeCopy(value, outlineSlide, planning, previousTitles = 
   const registry = planning?.terminology || { protectedPhrases: [] };
   const budget = contract.copyBudget || copyBudgetFor(contract.role, value.layoutId);
   const title = compileTitle({ title: value.title, candidates: value.titleCandidates || value.title_candidates, message: contract.message || outlineSlide.focus, registry, previousTitles, budget });
-  const blocks = normalizeContentBlocks(value.contentBlocks || value.content_blocks, value.nativeCopy ? 5000 : 4000);
+  const normalized = normalizeVisibleCopy({ blocks: normalizeContentBlocks(value.contentBlocks || value.content_blocks, value.nativeCopy ? 5000 : 4000),
+    eyebrow: normalizeTypography(text(value.eyebrow, 48), 48), subtitle: normalizeTypography(text(value.subtitle || value.subhead, 180), 180),
+    takeaway: normalizeTypography(text(value.takeaway, 300), 300) }, title.title);
+  const blocks = normalized.copy.blocks;
   const bullets = blocks.length
     ? blocks.map(block => normalizeTypography(block.heading ? `${block.heading}\n${block.body}` : block.body, value.nativeCopy ? 5200 : 4200))
     : (Array.isArray(value.bullets) ? value.bullets.map(item => {
       if (typeof item !== 'string' || item.length > 4000) throw new Error('bullet exceeds 4000 characters; split it before rendering');
       return normalizeTypography(item, 4000);
     }).filter(Boolean) : []);
-  const takeaway = normalizeTypography(text(value.takeaway, 300), 300);
-  const duplicateTakeaway = takeaway && [title.title, value.subtitle, ...bullets, ...blocks.flatMap(block => [block.heading, block.body])]
-    .some(item => overlap(takeaway, item) >= .72);
   return {
     title,
     bullets,
     copy: {
-      eyebrow: normalizeTypography(text(value.eyebrow, 48), 48), subtitle: normalizeTypography(text(value.subtitle || value.subhead, 180), 180),
-      takeaway: duplicateTakeaway ? '' : takeaway, blocks,
+      ...normalized.copy, blocks, integrityChanges: normalized.changes,
       role: contract.role || outlineSlide.role || 'evidence', depth: contract.depth || planning?.brief?.depth || 'balanced',
       density: contract.density || 'medium', distributionType: contract.distributionType || 'four_medium_cards',
       pointLengthProfile: contract.pointLengthProfile || 'standard', semanticUnitBudget: contract.semanticUnitBudget || budget.maxSupportUnits,

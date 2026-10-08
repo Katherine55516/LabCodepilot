@@ -1,0 +1,74 @@
+[
+  {
+    "mode": "preserve",
+    "pages": 46,
+    "pdfPages": 46,
+    "pictures": 17,
+    "tables": 10,
+    "math": 18,
+    "duplicateExtraChars": 0,
+    "longExactParagraphDuplicates": [],
+    "crossSlideExactParagraphs": [],
+    "nativeChars": 20745,
+    "sha256": "c05aa355c4893300663a119da0f74cd17d0c83c8f4a16ee4175644c449a0e5ae",
+    "ChinesePdfTitlePresent": true,
+    "requiredObjectsFulfilled": 31,
+    "requiredObjectsTotal": 31,
+    "pageDecision": {
+      "finalPageCount": 46,
+      "source": "estimate",
+      "mode": "auto",
+      "initialPageCount": 5,
+      "densityProfileId": "gamma-reference-v1",
+      "estimateVersion": 1,
+      "estimatedBeforeParse": true,
+      "includesCover": true,
+      "confirmedAt": "2026-10-08T04:25:56.666Z",
+      "recommended": 21,
+      "range": [
+        20,
+        24
+      ],
+      "estimationBasis": "gamma_density_capacity",
+      "estimatedAfterIngest": true,
+      "fitValidated": true,
+      "calibratedAt": "2026-10-08T04:25:55.874Z"
+    }
+  },
+  {
+    "mode": "mapped",
+    "pages": 48,
+    "pdfPages": 48,
+    "pictures": 0,
+    "tables": 11,
+    "math": 18,
+    "duplicateExtraChars": 0,
+    "longExactParagraphDuplicates": [],
+    "crossSlideExactParagraphs": [],
+    "nativeChars": 20860,
+    "sha256": "e1bb456d6c9873f037c74c11f571349565c05166cb655bc1c38777749eb20c24",
+    "ChinesePdfTitlePresent": true,
+    "requiredObjectsFulfilled": 31,
+    "requiredObjectsTotal": 31,
+    "pageDecision": {
+      "finalPageCount": 48,
+      "source": "estimate",
+      "mode": "auto",
+      "initialPageCount": 5,
+      "densityProfileId": "gamma-reference-v1",
+      "estimateVersion": 1,
+      "estimatedBeforeParse": true,
+      "includesCover": true,
+      "confirmedAt": "2026-10-08T04:28:57.190Z",
+      "recommended": 21,
+      "range": [
+        21,
+        25
+      ],
+      "estimationBasis": "gamma_density_capacity",
+      "estimatedAfterIngest": true,
+      "fitValidated": true,
+      "calibratedAt": "2026-10-08T04:28:56.942Z"
+    }
+  }
+]

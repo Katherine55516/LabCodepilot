@@ -4,6 +4,14 @@
 
 **AI 须知：发现新的技术债务时添加到此文件；解决后标注完成日期。**
 
+## PPT 重复内容与媒体/来源结构丢失（2026-10-07 审计；2026-10-08 本地修复）
+
+- **P0-A：跨角色重复与修复回流。** Mood Board 模拟成品同页精确重复额外字符约32.30%。当前 `materializeCopy` 删除重复 takeaway 后，`repairProject` 可从 factSynthesis 再次插入相同句；独立复现后 `duplicateFindings` 仍为空。需统一 writer/repair/editor 的可见内容规范化与去重，增加幂等检查。
+- **P0-B：来源结构/媒体没有贯穿到最终文件的保留义务。** 当前成品21页、0图片/0原生表格；模拟脚本排除公式、mapped 分支不分配结构、模板媒体未复制。产品已有 sourceArtifacts，不能归因为 mapped 必然只支持文字。需来源/模板资产分类、对象→计划→IR→实际导出的账本与完整性检查。
+- **P0-C：质量及验证基线不可靠。** 结构保留代理指标为0、76条警告仍可 editorialReady；模拟 reviewer 固定无问题，且脚本切换模式、将推荐页数改为 explicit、导出后改色。必保留对象缺失应阻断正常交付；模拟仅替换LLM并如实标识未评估能力，导出后重新验证文件。
+- 以上为 10-07 冻结的缺陷基线。**2026-10-08 本地修复完成**：canonical 写作/精确重复/claim ownership、对象和资产账本、实际文件 gate、原生数学/表/流程、主题字体、完整预算 packing、legacy 保存和局部候选/评审失效。29 组 PPT 专项、2,808 全仓单测、37 smoke 场景通过。两模式忠实模拟必保留结构 31/31、精确重复额外字符 0，含真实 PPTX/PDF 及逐页渲染。见 [实施交接](../handover/ppt-copy-media-integrity.md)。
+- 剩余外部验收：真实所选 LLM 的近义重复/叙事压缩质量、部署 Cowork 镜像重建（本机 daemon 未运行）、Windows/桌面 PowerPoint 字体和编辑。模拟的 46/48 页保留大量原文，不能当作 Gamma 密度胜出或最终推荐页数。扫描/OCR、任意 PDF 矢量图语义重建、所有 OfficeMath 语法仍有明确支持边界；必要对象不能解析时硬诊断，不静默丢弃。
+
 ## PPT 下一轮审计剩余验收（2026-10-03）
 
 - [本轮实现与迁移](../research/ppt_changes.md)：25组PPT自检、PPT UI及本机原生导出已通过；真实模型、部署Cowork、Gamma同任务冷/温实测、Windows/PowerPoint字体仍未验收。
@@ -15,7 +23,7 @@
 
 - 2026-10-02 已解决提示词层缺口：PPT 专用角色、文件名深度误判、具体 keyPoints、完整来源对象、单份可见文案及有界 critic 重写；详见 [提示词深度契约](../handover/ppt-prompt-depth-contracts.md)。用户指定 GPT 但本地不可调用，本轮按用户要求模拟；真实模型质量/成本 A/B 仍待可用环境，不能由模拟结果替代。
 
-- 高优先级：建立来源对象/必需细节→实际渲染事实账本；本轮已加入来源表行名/部分基数检查，但章节映射和字数目标不能证明表格每列关系、公式条件、所有清单数量完整，也不能可靠识别所有标题正文语义错配。先以用户选定模型作同源A/B，再扩展对象级门禁；见 [Factor Zoo 对照](../research/ppt-factor-zoo-content-depth-comparison.md)。
+- 2026-10-08：来源对象→可见结构→实际文件账本、全表行列/公式/流程/清单/总结门禁已实施。真实模型的语义完整性和标题正文错配判断仍需同源 A/B；见 [完整性修复](../handover/ppt-copy-media-integrity.md) 与历史 [Factor Zoo 对照](../research/ppt-factor-zoo-content-depth-comparison.md)。
 - 中优先级：原生模板原页顺序保真与教学容量的协商仍有限，复制页可以择优，原页尚不能自由调换最合适组件；需在planning阶段显式分布/取舍，不能靠填短句保版式。
 - 中优先级：源码引用内部矛盾尚无统一 source-integrity 诊断；来源的数值/假设冲突应与生成错误区分，并保留用户认可修正的审计。
 

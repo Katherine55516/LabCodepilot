@@ -9,6 +9,7 @@ import { planKey, slideFingerprint, editableCapabilities, editError, digest } fr
 import { buildSlideRenderTree } from './render-tree.mjs';
 import { slideSvg } from './exporters/preview.mjs';
 import { reviewProject } from './quality-service.mjs';
+import { isSourceOwnedNode } from '../ppt-source-artifacts.mjs';
 import { missingRequiredEvidence, evidenceMeasurements } from '../ppt-evidence.mjs';
 import { retrieveSlideSources } from '../ppt-planning.mjs';
 import { promptPolicy, writingGuide, editPromptContext, objectWritingCapacity } from '../ppt-prompt-contracts.mjs';
@@ -47,7 +48,7 @@ function candidate(project, proposal) {
 }
 function semanticContent(node, input) {
   const content = validateNodeContent(node.type, input);
-  if (['text', 'list'].includes(node.type)) {
+  if (['text', 'list','timeline'].includes(node.type)) {
     const prose = value => String(node.type === 'text' ? value.text : (value.items || []).map(item => [item.text, item.heading, item.body].filter(Boolean).join(' ')).join(' '));
     const values = value => prose(value).match(/[-+]?\d+(?:[.,]\d+)*(?:%|％)?/gu) || [];
     const next = new Set(values(content));
@@ -81,7 +82,11 @@ function validateCandidate(before, after, slideId, type = 'content') {
   const quality = reviewProject(after).deterministic;
   const introduced = quality.issues.filter(issue => issue.severity === 'error' && !baseline.has(key(issue)));
   if (introduced.length) throw editError('candidate failed the quality gate', 422, { issues: introduced });
-  return { issues: quality.issues.filter(issue => !issue.slideId || issue.slideId === slideId), hardErrors: quality.hardErrors, introducedHardErrors: 0 };
+  const objectsBefore=reviewProject(before).deterministic.objectLedger?.objects||[];
+  const objectsAfter=quality.objectLedger?.objects||[];
+  return { issues: quality.issues.filter(issue => !issue.slideId || issue.slideId === slideId), hardErrors: quality.hardErrors, introducedHardErrors: 0,
+    objectChanges:objectsAfter.filter(after=>objectsBefore.find(prior=>prior.objectId===after.objectId)?.status!==after.status).map(object=>({objectId:object.objectId,status:object.status})),
+    preservedObjectIds:objectsAfter.filter(object=>object.status==='rendered').map(object=>object.objectId) };
 }
 
 /** The model produces semantic patches. IDs, layout capabilities and commit versions stay server-owned. */
@@ -127,8 +132,8 @@ export async function createProposal(input, data, deps, activity, log) {
   const capabilities = editableCapabilities(project);
   if (data.mode === 'relayout' && !capabilities.relayout) throw editError('native templates do not support relayout', 409);
   const native = !capabilities.relayout;
-  const editable = (slide.nodes || []).filter(node => !node.locked && ['text', 'list', 'chart', 'table', 'shape'].includes(node.type)
-    && (!native || (node.type === 'text' && node.nativeRef)) && (data.scope !== 'object' || node.id === data.nodeId)
+  const editable = (slide.nodes || []).filter(node => !node.locked && ['text', 'list', 'timeline', 'chart', 'table', 'shape'].includes(node.type)
+    && (!native || isSourceOwnedNode(node) || (node.type === 'text' && node.nativeRef)) && (data.scope !== 'object' || node.id === data.nodeId)
     && (route.type !== 'title' || ['title', 'template-title'].includes(node.semanticRole)));
   if (!editable.length) throw editError('no editable semantic objects in the target', 409);
   if (editable.length > 30) throw editError('select an object to edit this complex page', 422);

@@ -8,6 +8,8 @@
     "cowork-server": "index.mjs"
   },
   "scripts": {
+    "selftest:ppt-copy-media-integrity": "node selftest-ppt-copy-media-integrity.mjs",
+    "selftest:ppt-export-integrity": "node selftest-ppt-export-integrity.mjs",
     "start": "node index.mjs",
     "selftest": "node selftest-r1.mjs",
     "selftest:ppt-density": "node selftest-ppt-density.mjs",
@@ -35,6 +37,7 @@
     "selftest:ppt-edit-intent": "node selftest-ppt-edit-intent.mjs"
   },
   "dependencies": {
+    "katex": "0.19.0",
     "ws": "^8.19.0"
   }
 }

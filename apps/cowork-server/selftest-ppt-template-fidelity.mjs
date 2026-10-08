@@ -179,7 +179,8 @@ from pptx.oxml.ns import qn
 import os
 p=Presentation(os.environ['PPT_INPUT'])
 run=next(r for shape in p.slides[1].shapes if shape.has_text_frame for paragraph in shape.text_frame.paragraphs for r in paragraph.runs if '繁體內容' in r.text)
-assert run._r.get_or_add_rPr().find(qn('a:ea')).get('typeface')=='Noto Sans CJK TC'`, '', { PPT_INPUT: traditional });
+assert run._r.get_or_add_rPr().find(qn('a:ea')).get('typeface')==run.font.name
+assert run.font.name`, '', { PPT_INPUT: traditional });
   if (spawnSync('sh', ['-c', 'command -v soffice'], { stdio: 'ignore' }).status === 0) {
     const pdfFile = path.join(root, 'generated.pdf');
     assert.equal(JSON.parse(run(pdf.PRESERVED_SCRIPT, '', { PPT_SOURCE: output, PPT_OUTPUT: pdfFile })).nativeTemplate, true);

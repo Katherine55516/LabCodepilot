@@ -60,6 +60,7 @@ try {
   await check('a malformed model selection gets one bounded outline repair',async()=>{
     const store=await import('./lib/ppt-store.mjs');let calls=0;
     const good={brief:{presentationUse:'course_walkthrough'},...raw({...body('a','Compare the conditions'),sourceUnitIds:[table.id],chunkRefs:table.chunkRefs,refs:table.source_ref},{...body('b','Check responsibility'),sourceUnitIds:[checklist.id],chunkRefs:checklist.chunkRefs,refs:checklist.source_ref})};
+    good.slides.at(-1).sourceUnitIds=[source.semantic.inventory.items.find(i=>i.type==='SummaryBlock').id];
     const deps={...api._internals.defaultDeps,modelCall:async(p,prompt)=>{calls++;if(calls===1)return {...good,slides:good.slides.map((s,i)=>i===1?{...s,sourceArtifactRanges:[{sourceUnitId:table.id,rowStart:'bad',rowEnd:3}]}:s)};assert.match(prompt,/初稿结构检查/);return good;}};
     const req=Readable.from([Buffer.from(JSON.stringify({inputKind:'paste',text:source.text,prompt:'Explain validation',template:'light',configId:'simulated',model:'simulated'}))]);req.method='POST';let response;
     await api.handlePpt(req,new URL('http://test/ppt/projects'),{uid:'audit',deps,activity:()=>{},log:()=>{},res:{},send:(status,body)=>{response={status,body};return true;}});

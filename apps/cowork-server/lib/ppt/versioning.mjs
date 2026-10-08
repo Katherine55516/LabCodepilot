@@ -1,6 +1,6 @@
 import { digest } from './edit-context.mjs';
 import { PPT_PROMPT_CONTRACT_VERSION } from '../ppt-generation-policy.mjs';
-export const REVIEW_RUBRIC_VERSION = 4;
+export const REVIEW_RUBRIC_VERSION = 5;
 
 export function planPayload(project) {
   return { sourceRevision: project.sourceRevision || 0, sourceHash: project.source?.sha256 || digest(project.source?.text || project.prompt),
@@ -24,10 +24,12 @@ export function synchronizePlan(project, reason = 'planning') {
 }
 
 export function semanticReviewKey(project) {
-  return digest({ source: project.source?.sha256 || project.source?.text || project.prompt,
+  return digest({ activePromptContractVersion:PPT_PROMPT_CONTRACT_VERSION, source: project.source?.sha256 || project.source?.text || project.prompt, sourceMedia:project.source?.images?.map(image=>({id:image.id,contentHash:image.imageSha256||digest(image.dataUrl),caption:image.caption,required:image.required})), sourceObjectExclusions:project.sourceObjectExclusions,
+    template:project.templateSpec, templateFidelityHash:project.templateFidelity?.sha256,
     planning: project.planning, outline: project.outline, constraints: project.constraints?.entries?.filter(entry => entry.active && ['content','title','data','structure'].includes(entry.type)),
     slides: project.deck?.slides?.map(slide => ({ id: slide.id, role: slide.role, templateOmissions: slide.templateOmissions,
       nodes: slide.nodes?.map(node => ({ id: node.id, type: node.type, content: node.content, semanticRole: node.semanticRole,
+        sourceArtifact:node.sourceArtifact,claimId:node.claimId,repeatPurpose:node.repeatPurpose,geometry:node.geometry,style:node.style,
         hidden: Boolean(node.hidden), opacity: Number(node.style?.opacity ?? 1), nativeRef: node.nativeRef })) })) });
 }
 

@@ -1,6 +1,7 @@
 import { automaticPages, densityProfile, densityPrompt } from './ppt-density-profile.mjs';
 import { packOutline, inspectDensityOutline, revalidateOutlineFits } from './ppt-density-packing.mjs';
-import { bindSourceArtifacts } from './ppt-source-artifacts.mjs';
+import { bindSourceArtifacts, bindSourceMedia, isSourceOwnedNode } from './ppt-source-artifacts.mjs';
+import { acceptExportVerification } from './ppt-export-integrity.mjs';
 import { templateLimits } from './ppt-template-security.mjs';
 import { importEditablePptx as importTemplateIR } from './ppt/import-pptx.mjs';
 import { markPptTime } from './ppt-trace.mjs';
@@ -51,7 +52,7 @@ import { transformGeneratedSlide } from './ppt/generation-edit-service.mjs';
 
 const running = new Set();
 const editing = new Set();
-const MAX_PROMPT = 12000;
+const MAX_PROMPT = 80000;
 const MAX_TEXT = 160;
 const PPT_NODE_CONCURRENCY = Math.max(1, Math.min(3, Number(process.env.PPT_NODE_CONCURRENCY) || 3));
 const PPT_RE = /^\/ppt\/projects(?:\/([a-f0-9]{32}))?(?:\/(outline|generate|retry|export|pdf|source|duplicate|trash|restore|permanent|versions|rewrite|blank))?$/i;
@@ -92,6 +93,11 @@ function mergeSources(parts) {
   })));
   return withSemanticIndex({ kind: 'update', name: parts.map(p => p.info.name).join(' + '), text: segments.map(s => s.text).join('\n\n').slice(0, 80000), segments, truncated: parts.some(p => p.info.truncated) });
 }
+function outlineValues(values,count,max,field) {
+  if(!Array.isArray(values))return [];
+  if(values.length>count || values.some(value=>typeof value!=='string'||value.trim().length>max))throw new Error(`${field} exceeds its contract; redistribute full facts rather than truncating them`);
+  return values.map(value=>value.trim());
+}
 function normalizeOutline(value, count, source, update = null, deckTitle = null) {
   if (!Array.isArray(value?.slides) || value.slides.length !== count) throw new HttpError(400, `大纲需要恰好 ${count} 页`);
   const validRefs = new Set((source?.segments || []).map(s => s.id));
@@ -131,18 +137,19 @@ function normalizeOutline(value, count, source, update = null, deckTitle = null)
       ...(typeof s.transitionToNext === 'string' || typeof s.transition_to_next === 'string' ? { transitionToNext: String(s.transitionToNext || s.transition_to_next).slice(0, 180) } : {}),
       keyPoints,
       ...(Array.isArray(s.sourceUnitIds) ? { sourceUnitIds: [...new Set(s.sourceUnitIds)].filter(id => source?.semantic?.inventory?.items?.some(item => item.id === id)) } : {}),
+      ...(Array.isArray(s.sourceImageIds) ? {sourceImageIds:[...new Set(s.sourceImageIds)].filter(id=>source?.images?.some(image=>image.id===id))}:{}),
       ...(Array.isArray(s.sourceArtifactRanges) ? { sourceArtifactRanges: s.sourceArtifactRanges } : {}),
       ...(s.densityFit ? { densityFit: s.densityFit } : {}),
       ...(Array.isArray(s.packedFrom) ? { packedFrom: s.packedFrom } : {}),
       ...(typeof s.groupId === 'string' ? { groupId: s.groupId.slice(0, 80) } : {}),
-      ...(Array.isArray(s.supportingPoints) ? { supportingPoints: s.supportingPoints.filter(item => typeof item === 'string').slice(0, 6).map(item => item.slice(0, 160)) } : {}),
-      ...(Array.isArray(s.requiredSupport || s.required_support) ? { requiredSupport: (s.requiredSupport || s.required_support).filter(item => typeof item === 'string').slice(0, 6).map(item => item.slice(0, 48)) } : {}),
+      ...(Array.isArray(s.supportingPoints) ? { supportingPoints: outlineValues(s.supportingPoints,6,2000,'supportingPoints') } : {}),
+      ...(Array.isArray(s.requiredSupport || s.required_support) ? { requiredSupport: outlineValues(s.requiredSupport || s.required_support,6,200,'requiredSupport') } : {}),
       ...(s.visualIntent && typeof s.visualIntent === 'object' && typeof s.visualIntent.type === 'string' ? { visualIntent: { type: s.visualIntent.type.slice(0, 40) } } : {}),
       ...(typeof s.density === 'string' ? { density: s.density.slice(0, 20) } : {}),
       ...(typeof s.distributionType === 'string' || typeof s.distribution_type === 'string' ? { distributionType: String(s.distributionType || s.distribution_type).slice(0, 40) } : {}),
       ...(Number.isInteger(s.semanticUnitBudget || s.semantic_unit_budget) ? { semanticUnitBudget: Math.max(2, Math.min(10, Number(s.semanticUnitBudget || s.semantic_unit_budget))) } : {}),
       ...(typeof s.pointLengthProfile === 'string' || typeof s.point_length_profile === 'string' ? { pointLengthProfile: String(s.pointLengthProfile || s.point_length_profile).slice(0, 24) } : {}),
-      ...(Array.isArray(s.requiredDetails || s.required_details) ? { requiredDetails: (s.requiredDetails || s.required_details).filter(item => typeof item === 'string').slice(0, 10).map(item => item.slice(0, 160)) } : {}),
+      ...(Array.isArray(s.requiredDetails || s.required_details) ? { requiredDetails: outlineValues(s.requiredDetails || s.required_details,10,4000,'requiredDetails') } : {}),
       ...(Array.isArray(s.requiredEvidenceIds || s.required_evidence_ids) ? { requiredEvidenceIds: [...new Set(s.requiredEvidenceIds || s.required_evidence_ids)].filter(id =>
         (source?.semantic?.evidenceAtoms || []).some(atom => atom.id === id)).slice(0, 6) } : {}),
       ...(Array.isArray(s.claimIds || s.claim_ids) ? { claimIds: (s.claimIds || s.claim_ids).filter(id => typeof id === 'string').slice(0, 8) } : {}),
@@ -152,24 +159,31 @@ function normalizeOutline(value, count, source, update = null, deckTitle = null)
       ...(update ? { baseSlideId, change } : {}) };
   });
 }
-function normalizeDeck(value, outline) {
+function normalizeDeck(value, outline, previousDeck) {
   if (!Array.isArray(value?.slides) || value.slides.length !== outline.length) throw new HttpError(400, `内容需要恰好 ${outline.length} 页`);
   const deck = {
-    schemaVersion: 1,
+    ...(previousDeck || {}), schemaVersion: 1,
     slides: value.slides.map((s, index) => {
       if (!s || typeof s !== 'object') throw new HttpError(400, `slide ${index + 1} invalid`);
+      const previous=previousDeck?.slides?.find(slide=>slide.id===outline[index].id);
+      // Legacy fields are projections, not a second source of truth. A save
+      // round-trip must preserve rich tables, math, captions and stable IDs.
+      if(previous && ['title','bullets','blocks','layout','layoutId'].every(key=>JSON.stringify(s[key])===JSON.stringify(previous[key]))) return structuredClone(previous);
       if (!Array.isArray(s.bullets) || s.bullets.length > 10) throw new HttpError(400, `第 ${index + 1} 页要点无效`);
       if (s.bullets.reduce((n, b) => n + (typeof b === 'string' ? b.length : 0), 0) > 15000) {
         throw new HttpError(400, `第 ${index + 1} 页文字过多，请缩短要点`);
       }
       let blocks;
-      try { blocks = normalizeBlocks(s.blocks); } catch (error) { throw new HttpError(400, `slide ${index + 1}: ${error.message}`); }
+      const protectedNodes=previous?.nodes?.filter(node=>isSourceOwnedNode(node)||node.nativeRef)||[];
+      const protectedIds=new Set(protectedNodes.map(node=>node.id));
+      for(const block of s.blocks || []) if(protectedIds.has(block.id) && JSON.stringify(block)!==JSON.stringify(previous.blocks?.find(item=>item.id===block.id))) throw new HttpError(400,'Edit source or native objects through the component editor');
+      try { blocks = normalizeBlocks((s.blocks||[]).filter(block=>!protectedIds.has(block.id))); } catch (error) { throw new HttpError(400, `slide ${index + 1}: ${error.message}`); }
       if (blocks.length && (s.bullets.length > 10 || s.bullets.join('').length > 10000)) throw new HttpError(400, `slide ${index + 1}: visual slide copy exceeds capacity`);
       const layout = s.layout || 'text-first';
       if (!['text-first', 'visual-first'].includes(layout)) throw new HttpError(400, `slide ${index + 1}: invalid layout`);
       const layoutId = s.layoutId === undefined ? undefined : bounded(s.layoutId, 40, `slide ${index + 1} layout`);
       if (layoutId && !LAYOUTS[layoutId]) throw new HttpError(400, `slide ${index + 1}: unknown layout`);
-      return {
+      const normalized = {
         id: outline[index].id,
         title: bounded(s.title, MAX_TEXT, `slide ${index + 1} title`),
         bullets: s.bullets.map((b) => bounded(b, 4000, 'bullet')),
@@ -179,6 +193,25 @@ function normalizeDeck(value, outline) {
         ...(s.manualBlank || outline[index].manualBlank ? { manualBlank: true } : {}),
         ...(layoutId ? { layoutId } : {}),
       };
+      if(!previous)return normalized;
+      const updated=structuredClone(previous);
+      updated.title=normalized.title;updated.bullets=normalized.bullets;
+      updated.layoutId=normalized.layoutId||updated.layoutId;updated.layoutRef=updated.layoutId;
+      const titleNode=updated.nodes.find(node=>node.semanticRole==='title'&&node.type==='text');
+      if(titleNode)titleNode.content.text=normalized.title;
+      else if(normalized.title!==previous.title)throw new HttpError(400,'Edit native titles through the component editor');
+      const bodyNode=updated.nodes.find(node=>node.semanticRole==='body'&&node.type==='list');
+      if(bodyNode)bodyNode.content.items=normalized.bullets.map((text,n)=>{
+        const old=bodyNode.content.items[n];
+        return old?.text===text?old:{id:old?.id||stableId('item',updated.id,'body',n),text};
+      });
+      else if(normalized.bullets.length)throw new HttpError(400,'Edit structured source text through the component editor');
+      if(bodyNode && updated.copy)updated.copy.blocks=bodyNode.content.items.map(item=>({type:item.pointType||'support',heading:item.heading||'',body:item.body||item.text,
+        ...(item.claimId?{claimId:item.claimId}:{}),...(item.repeatPurpose?{repeatPurpose:item.repeatPurpose}:{}),...(item.sourceRefs?{sourceRefs:item.sourceRefs}:{})}));
+      updated.nodes=updated.nodes.filter(node=>!['image','chart','table','shape'].includes(node.type)||protectedIds.has(node.id));
+      for(const block of blocks){const {id,type,...content}=block;const old=previous.nodes.find(node=>node.id===id);updated.nodes.push({...old,id,type,content,semanticRole:old?.semanticRole||'visual',slotId:old?.slotId||'visual',styleRef:old?.styleRef||`${type}.default`});}
+      updated.nodeOrder=updated.nodes.map(node=>node.id);
+      return updated;
     }),
   };
   return ensureDeckV3(applyLayoutRegistry(deck));
@@ -200,7 +233,7 @@ function outlinePrompt(p) {
     : '用户没有填写 Deck Title。为封面生成一个精炼标题：中文优先 6–18 字，英文优先 2–8 个词，最多两行；额外背景放入 focus 或后续 subtitle。';
   const planningContract = `先在内部建立 Presentation Brief（目标、受众、核心论点、深度、mustInclude、reportMode、decisionQuestion、sourceScope），再规划有起承转合的 storyArc。reportMode 只选 presentation、informational 或 decision；决策或职场汇报需在前 3 页给出摘要或需要回答的决定，较早展示核心流程/证据，结尾给出来源支持的条件性建议与下一步；资料不足时不要虚构建议或案例，而应在 sourceScope 记录缺口，在页面保留影响理解的限制。主文尽量集中，补充细节放 appendix。页数优先级固定为：用户手动调整或明确指定 > PPT 模块估算 > 模板原有页数。模板页数只决定原生版式选择和安全复用，不得更改输出页数。${pageContract}${densityPrompt(p)}模块估算为 ${pageRecommendation.recommended} 页（范围 ${pageRecommendation.range[0]}–${pageRecommendation.range[1]}），只用于未指定页数时的默认值及判断内容密度、压缩风险。${allocationContract}${userOutlineContract}${titleContract} Story Planner 输出 section label、title intent 和 slide message，section 使用 4–12 个中文字符或 2–8 个英文词；不要直接复制来源长标题。同一页可整合多个来源，一个来源也可支持多页，但拆分后的每页须有不同的问题、独立主张或证据作用；不可用同义改写凑足页数。来源不足时在 sourceScope 记录，并在页面保留必要的适用边界，不要补造材料。每页根据内容规划解释深度、分布和结构，不要固定三条 bullet。整稿应有密度节奏：摘要与过渡、普通说明、高密度流程或深机制交错；不要连续多页都写成高密度卡片。若来源包含可复算的公式、代码或算例，必须把核心表达式、变量含义和适用条件列入相应页 requiredDetails，不能只保留流程概述；特殊数学符号要规划成可见的普通文本表示。每个高优先级主题必须出现在页面 refs 中，或在 coverage 中说明省略原因。${templateOutlinePrompt(p)}`;
   const planningSchema = OUTLINE_SCHEMA;
-  const contentPlanning = outlineContentContract(p);
+  const contentPlanning = outlineContentContract(p)+`\n来源媒体目录：${JSON.stringify((p.source?.images||[]).map(({id,caption,sourceRefs,width,height,role,required})=>({id,caption,sourceRefs,width,height,role,required})))}。必保留图片通过sourceImageIds分配到回答相关问题的页面，图片大小不是省略理由。`;
 
   if (p.update) {
     const base = p.update.baseSnapshot;
@@ -317,7 +350,18 @@ function normalizeSlide(value, outlineSlide, project = null, previousTitles = []
     slide.templateOmissions.push(...autoTemplateMediaOmissions(project, project.outline.findIndex(item => item.id === outlineSlide.id), slide.templateOmissions));
   }
   if (prepared?.layoutId === undefined && !resolvedDistributionLayout) { delete slide.layoutId; delete slide.layoutRef; }
-  if (project) bindSourceArtifacts(project, slide, value?.sourceArtifacts, index, value?.sourceCommentary || []);
+  if (project) {
+    const assigned=project.planning?.slidePlan?.find(plan=>plan.slideId===slide.id)?.sourceArtifacts||[];
+    // The planner owns required structures. A writer cannot drop them by
+    // returning an empty array; unsupported selections still fail validation.
+    const selected=value?.sourceArtifacts?.length?value.sourceArtifacts:assigned;
+    if(assigned.some(ref=>!selected.some(item=>item.sourceUnitId===ref.sourceUnitId &&
+      (item.rowStart??1)===(ref.rowStart??1) && (item.rowEnd??project.source?.semantic?.inventory?.items?.find(o=>o.id===ref.sourceUnitId)?.rows?.length)===(ref.rowEnd??project.source?.semantic?.inventory?.items?.find(o=>o.id===ref.sourceUnitId)?.rows?.length))))throw new HttpError(400,'writer omitted a required source object or changed its row selection');
+    const commentary=value?.sourceCommentary?.length?value.sourceCommentary:assigned.length && !value?.slotTexts
+      ? slide.copy.blocks.map(block=>block.body):[];
+    bindSourceArtifacts(project, slide, selected, index, commentary);
+    bindSourceMedia(project,slide,outlineSlide.sourceImageIds||[],index);
+  }
   return slide;
 }
 function applySourceImages(deck, source) {
@@ -329,6 +373,7 @@ function applySourceImages(deck, source) {
   const targets = slides.filter(slide => slide.layoutId === 'image-text' && (slide.blocks || []).length < 2);
   const terms = text => new Set((String(text || '').toLowerCase().match(/[a-z][a-z0-9_-]{2,}|[\u3400-\u9fff]{2,4}/g) || []));
   for (const image of images) {
+    if (slides.some(slide => slide.nodes?.some(node => node.type === 'image' && node.content?.dataUrl === image.dataUrl))) continue;
     const imageTerms = terms(`${image.caption || ''} ${image.text || ''}`);
     const ranked = targets.filter(slide => (slide.blocks || []).length < 2).map(slide => {
       const wanted = terms(`${slide.title} ${(slide.bullets || []).join(' ')} ${slide.copy?.visualIntent?.query || ''}`);
@@ -363,12 +408,16 @@ function ensureProjectTemplate(project) {
   return project;
 }
 
-function deterministicGate(project, modelReview = project.quality?.modelReview || { missing: [], repeated: [], conflicts: [], unsupported: [] }) {
+function deterministicGate(project) {
   project = ensureProjectTemplate(project);
+  const beforeKey=semanticReviewKey(project);
+  const current=reviewIsCurrent(project);
+  const unevaluated={evaluation:'not_evaluated',missing:[],repeated:[],conflicts:[],unsupported:[]};
   const initial = deterministicReview(project);
   const repaired = repairProject(project, initial);
-  const report = finalQualityReport(repaired.review, repaired.repairs, modelReview);
-  repaired.project.quality = report;
+  const unchanged=current && beforeKey===semanticReviewKey(repaired.project);
+  const report = finalQualityReport(repaired.review, repaired.repairs, unchanged?project.quality.modelReview:unevaluated);
+  repaired.project.quality = {...project.quality,...report,...(!unchanged?{reviewState:'stale',reviewInputHash:null}:{})};
   return repaired.project;
 }
 function qualityError(project) {
@@ -382,6 +431,7 @@ function commitCompatibility(project, gated, deps) {
     if (!latest || latest.deletedAt || latest.revision !== project.revision) throw new HttpError(409, 'presentation changed; reload first');
     const result = await commandInternals.commit(latest, normalizeCommand({ type: 'deck.replace', baseRevision: project.revision, payload: { deck: gated.deck, projectState: { template: gated.template, templateSpec: gated.templateSpec, outline: gated.outline, pages: gated.pages } } }, latest));
     const updated = result.project; updated.quality = gated.quality; updated.pdfRevision = 0;
+    if(gated.quality.reviewState==='valid')bindReview(updated,gated.quality.modelReview);
     if (gated.quality.status === 'blocked') {
       updated.status = 'quality_blocked'; updated.stage = 'repair'; updated.error = `PPT quality gate blocked publish: ${qualityError(gated)}`;
       saveStructuredProject(updated); return updated;
@@ -461,7 +511,7 @@ function assessOutlineCandidate(project, raw) {
   outline=outline.map((slide,index)=>({...slide,densityFit:rawOutline.slides[index].densityFit}));
   candidateProject.outline=outline;
   const planning=buildPlanning(candidateProject,rawOutline,outline);
-  const issues=[...inspectReportOutline(candidateProject,outline,planning.brief),...inspectLongDeckOutline(candidateProject,outline),...inspectDensityOutline(rawOutline)];
+  const issues=[...inspectReportOutline(candidateProject,outline,planning.brief),...inspectLongDeckOutline(candidateProject,outline),...inspectDensityOutline(rawOutline,candidateProject)];
   return {project:candidateProject,rawOutline,outline,planning,issues};
 }
 function startOutline(uid, id, activity, log, deps = defaultDeps) {
@@ -495,7 +545,7 @@ function startOutline(uid, id, activity, log, deps = defaultDeps) {
       if(!assessed)throw validationError;
       rawOutline=assessed.rawOutline;
       const outline=assessed.outline;
-      if(automatic && inspectDensityOutline(rawOutline).length)throw new Error('density_capacity: candidate source structures still overflow after bounded outline repair');
+      if(automatic && inspectDensityOutline(rawOutline,assessed.project).length)throw new Error('density_capacity: required source objects are missing or overflow after bounded outline repair');
       const current = store.get(uid, id);
       if (!current || current.status !== 'outlining') return;
       current.pages = assessed.project.pages;
@@ -624,7 +674,17 @@ function startGeneration(uid, id, activity, log, deps = defaultDeps) {
           const requested = mutations.filter(item => { const result = snapshot.editing?.intents?.[item.intentId]?.perSlideResults?.[slide.id]; return result?.epoch === epoch && result.phase === 'content' && ['queued','applying'].includes(result.status); });
           const mutation = requested.at(-1);
           const minimal = prior && requested.length && requested.every(item => ['title', 'layout', 'style'].includes(item.type));
-          let content = minimal ? structuredClone(prior) : normalizeSlide(await deps.modelCall(snapshot, contentPrompt(snapshot, slide, index), activity, log, { nodeKey: nodeId }), slide, snapshot, previousTitles);
+          let content;
+          if(minimal)content=structuredClone(prior);
+          else {
+            const response=await deps.modelCall(snapshot,contentPrompt(snapshot,slide,index),activity,log,{nodeKey:nodeId});
+            try {content=normalizeSlide(response,slide,snapshot,previousTitles);}
+            catch(error) {
+              const repairPrompt=`${contentPrompt(snapshot,slide,index)}\n<invalid_response>${JSON.stringify(response)}</invalid_response>\n<repair>Resolve this contract error without deleting required objects, cutting sentences or duplicating content: ${String(error.message)}. Return the same schema.</repair>`;
+              content=normalizeSlide(await deps.modelCall(snapshot,repairPrompt,activity,log,{nodeKey:`${nodeId}:contract-repair`}),slide,snapshot,previousTitles);
+              content.localRepair={attempts:1,reasons:['writer_contract']};
+            }
+          }
           for (const item of (minimal ? requested : mutations.filter(item => ['layout', 'style'].includes(item.type)))) {
             snapshot.nodes[slide.id].slide = content; content = await transformGeneratedSlide(snapshot, slide.id, item, deps, activity, log);
           }
@@ -783,7 +843,8 @@ function startGeneration(uid, id, activity, log, deps = defaultDeps) {
               for (const stage of ['content', 'layout', 'preview', 'quality']) transitionNode(latest, `${stage}:${slide.id}`, 'completed',
                 { slideId: slide.id, epoch, criticRound: round + 1, inputHash: latest.runtime.slides[slide.id].contentHash, renderHash: latest.runtime.slides[slide.id].renderHash }, { useInput: true });
               runtimeState(latest).criticRepair.attempts.push({ slideId: slide.id, nodeKey: attemptKey,
-                beforeHash: digest(draft), afterHash: digest(candidate), findings: target.findings, durationMs: Date.now() - started });
+                beforeHash: digest(draft), afterHash: digest(candidate), progressed:semanticReviewKey(latest)!==beforeKey,
+                findings: target.findings, durationMs: Date.now() - started });
               checkpoint(latest, 'critic-rewrite');
             }
             store.save(latest);
@@ -800,6 +861,10 @@ function startGeneration(uid, id, activity, log, deps = defaultDeps) {
         if (current.runtime?.pauseRequested) { await enqueueProject(uid, id, () => finishPause(current)); return; }
         if (semanticReviewKey(current) !== reviewedInputHash) throw new Error('content changed during critic review; retry after edits settle');
         initialReview = deterministicReview(current);
+        const thisRound=current.runtime?.criticRepair?.attempts?.filter(attempt=>attempt.nodeKey.endsWith(`:critic:${round+1}`))||[];
+        if(thisRound.length && thisRound.every(attempt=>attempt.progressed===false)){
+          current.runtime.criticRepair.stoppedReason='no_progress';store.save(current);break;
+        }
       }
       const repairBaseline = semanticReviewKey(current);
       current.stage = 'repair'; store.save(current);
@@ -824,7 +889,7 @@ function startGeneration(uid, id, activity, log, deps = defaultDeps) {
         criticRounds: current.runtime?.criticRepair?.rounds || 0, inputHash: semanticReviewKey(current) }, { useInput: true });
       current.stage = 'publish'; store.save(current);
       try { transitionNode(current, 'repair', 'completed'); } catch {}
-      if (current.quality.status === 'blocked') {
+      if (!current.quality.publishEligible) {
         current.status = 'quality_blocked'; current.stage = 'repair';
         current.error = `PPT quality gate blocked publish: ${qualityError(current) || current.quality.modelIssues?.find(item => item.severity === 'error')?.detail || 'content review failed'}`;
         store.save(current);
@@ -833,11 +898,13 @@ function startGeneration(uid, id, activity, log, deps = defaultDeps) {
       persistDagNode(uid, id, 'publish:deck', 'running');
       const artifactPath = `/workspace/published-${Math.max(1, Number(current.revision || 0))}-${newIrId('artifact')}.pptx`;
       const exportInfo = await deps.renderPptx({ ...current, renderOutput: artifactPath });
+      acceptExportVerification(current,exportInfo);
       await enqueueProject(uid, id, () => {
         const finished = store.get(uid, id);
         if (!lease.owns() || !finished || finished.deletedAt || finished.status !== 'generating' || finished.currentRunId !== current.currentRunId) return;
         if (finished.runtime?.pauseRequested) { finishPause(finished); return; }
         if (semanticReviewKey(finished) !== semanticReviewKey(current)) throw new Error('generation changed during publication; retry review before publishing');
+        acceptExportVerification(finished,exportInfo);
         finished.exportBytes = exportInfo.bytes; finished.status = 'completed'; finished.stage = 'completed';
         finished.dagNodes['publish:deck'] = nodeRecord('done', finished.dagNodes['publish:deck'], { bytes: exportInfo.bytes });
         finished.error = ''; finished.revision = Math.max(1, Number(finished.revision || 0)); finished.draftRevision = finished.revision;
@@ -1007,9 +1074,9 @@ async function handleTemplates(req, id, uid, url, send, deps) {
     const item = { id: templateId, name: bounded(data.name || data.fileName.replace(/\.[^.]+$/, ''), 120, 'template name'), category: '我的模板',
       description: String(analysis.reason || '').slice(0, 300), kind: 'uploaded', compatibility: analysis.compatibility, version: 1,
       pages: analysis.pages, palette, fonts, sampleTitles: (analysis.sampleTitles || []).slice(0, 3), tags: ['自定义', '上传'], pinned: false,
-      fileName: data.fileName, extension: upload.extension, bytes: upload.bytes.length, sha256: upload.sha256, irVersion: imported ? 'pptx-ir-2' : null, createdAt: new Date().toISOString() };
+      fileName: data.fileName, extension: upload.extension, bytes: upload.bytes.length, sha256: upload.sha256, irVersion: imported ? 'pptx-ir-3' : null, createdAt: new Date().toISOString() };
     store.writeTemplate(uid, templateId, upload.bytes);
-    if (imported) store.writeTemplateIR(uid, templateId, { schemaVersion: 1, parserVersion: 'pptx-ir-2', sha256: upload.sha256, imported });
+    if (imported) store.writeTemplateIR(uid, templateId, { schemaVersion: 1, parserVersion: 'pptx-ir-3', sha256: upload.sha256, imported });
     store.saveTemplates(uid, [...customs, item]);
     return send(201, { template: item });
   }
@@ -1245,7 +1312,10 @@ export async function handlePpt(req, url, { uid, send, res, readBody, activity, 
         if (!['prompt', 'paste', 'file'].includes(inputKind)) throw new HttpError(400, 'invalid input kind');
         let source = null; let sourceBytes = null;
         if (inputKind === 'paste') {
-          try { source = { ...normalizePaste(data.text), images: normalizeSourceImages(data.images) }; } catch (error) { throw new HttpError(400, error.message); }
+          try {
+            source = normalizePaste(data.text);source.images=[...(source.images||[]),...normalizeSourceImages(data.images)];
+            if(new Set(source.images.map(image=>image.id)).size!==source.images.length)throw new Error('source image IDs must be unique');
+          } catch (error) { throw new HttpError(400, error.message); }
         }
         if (inputKind === 'file') {
           if (typeof data.fileBase64 !== 'string' || data.fileBase64.length > 11_200_000 || !/^[A-Za-z0-9+/]+={0,2}$/.test(data.fileBase64)) throw new HttpError(400, 'invalid file payload');
@@ -1415,7 +1485,7 @@ export async function handlePpt(req, url, { uid, send, res, readBody, activity, 
         const index = project.deck.slides.findIndex(item => item.id === slide.id);
         const raw = block ? { ...slide, blocks: slide.blocks.map(item => item.id === block.id
           ? { ...item, [block.type === 'image' ? 'caption' : 'text']: bounded(result.text, 100, 'rewritten text') } : item) } : { ...result, blocks: slide.blocks || [], layout: slide.layout, layoutId: slide.layoutId };
-        const rewritten = normalizeDeck({ slides: [raw] }, [project.outline[index]]).slides[0];
+        const rewritten = normalizeDeck({ slides: [raw] }, [project.outline[index]], {slides:[slide]}).slides[0];
         const gated = deterministicGate({ ...project, deck: applyLayoutRegistry({ ...project.deck, slides: project.deck.slides.map(item => item.id === slide.id ? rewritten : item) }) });
         return send(200, { project: await commitCompatibility(project, gated, deps) });
       } finally { editing.delete(id); }
@@ -1425,8 +1495,8 @@ export async function handlePpt(req, url, { uid, send, res, readBody, activity, 
       const data = await body(req);
       if (data.sourceRevision !== project.sourceRevision) return send(409, { error: 'source changed on another device; reload first' });
       let source;
-      try { source = { ...normalizePaste(data.text), images: project.source?.images || [] }; } catch (error) { throw new HttpError(400, error.message); }
-      if (source.text === project.source.text) return send(200, { project });
+      try { source = normalizePaste(data.text);source.images=[...source.images,...(project.source?.images||[]).filter(image=>!image.id.startsWith('inline-image-'))]; } catch (error) { throw new HttpError(400, error.message); }
+      if (source.sha256 === project.source.sha256) return send(200, { project });
       project.source = source; project.sourceRevision++; project.outlineRevision = 0;
       project.outline = []; project.nodes = {}; project.status = 'outlining'; project.stage = 'outline';
       store.save(project); startOutline(uid, id, activity, log, deps);
@@ -1568,7 +1638,7 @@ export async function handlePpt(req, url, { uid, send, res, readBody, activity, 
           ? [...project.outline, { id: String(project.outline.length + 1), title: nextSlides.at(-1)?.title, focus: nextSlides.at(-1)?.title }]
           : project.outline;
         const template = data.template === undefined ? null : resolveTemplate(uid, data.template);
-        const updated = { ...project, outline, pages: outline.length, deck: normalizeDeck({ slides: nextSlides }, outline),
+        const updated = { ...project, outline, pages: outline.length, deck: normalizeDeck({ slides: nextSlides }, outline,project.deck),
           template: template?.id || project.template,
           templateSpec: template ? snapshotTemplate(template) : project.templateSpec };
         const gated = deterministicGate(updated);

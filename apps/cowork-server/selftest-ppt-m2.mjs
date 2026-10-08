@@ -19,7 +19,7 @@ const deps = {
       ? { slides: Array.from({ length: project.pages }, (_, i) => ({ title: `章节 ${i + 1}`, focus: `论点 ${i + 1}`, refs: project.source?.segments?.length ? [project.source.segments[0].id] : [] })) }
       : { title: '内容页', bullets: ['可信来源'] },
   extractFile: async (_project, name, bytes) => ({ kind: 'file', name, text: bytes.toString(), segments: [{ id: '1', location: '行 1', text: bytes.toString() }] }),
-  renderPptx: async () => ({ bytes: 123 }),
+  renderPptx: async () => ({ bytes: 123, exportVerification: {status:"passed",basis:"test_double"} }),
   renderPdf: async () => ({ bytes: 456 }),
   readFile: async () => ({ stream: Readable.from(Buffer.from('%PDF-1.4')), size: 8 }),
   removeContainer: async id => { removed.push(id); },

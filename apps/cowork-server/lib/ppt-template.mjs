@@ -3,6 +3,7 @@ import { templateLimits, TemplateError, templateError, TEMPLATE_SECURITY_SCRIPT 
  * templates whose colors can be mapped to our deterministic layout are usable. */
 import { spawn } from 'node:child_process';
 import * as orch from './orchestrator.mjs';
+import { THEME_SCRIPT } from './ppt-theme.mjs';
 
 export const BUILT_INS = [
   { id: 'violet', name: 'Violet', category: '商业汇报', description: '深色封面与紫色强调', pages: 10, sampleTitles: ['业务概览', '关键进展', '下一步'], palette: { background: '#171b31', accent: '#967fff', foreground: '#f5f6fc', muted: '#c4c9d8' }, fonts: { title: 'Noto Sans CJK SC', body: 'Noto Sans CJK SC', titleEastAsia: 'Noto Sans CJK SC', bodyEastAsia: 'Noto Sans CJK SC', titleEastAsiaHant: 'Noto Sans CJK TC', bodyEastAsiaHant: 'Noto Sans CJK TC', cjkExplicit: true } },
@@ -41,6 +42,7 @@ export function validateTemplate(name, bytes, managed = false) {
 const SCRIPT = String.raw`
 import collections, io, json, os, sys, zipfile
 import xml.etree.ElementTree as ET
+${THEME_SCRIPT}
 raw = sys.stdin.buffer.read()
 ext = os.environ['PPT_TEMPLATE_EXT']
 ${TEMPLATE_SECURITY_SCRIPT}
@@ -112,6 +114,9 @@ else:
     inferred_body_east_asia = collections.Counter()
     for index, slide in enumerate(deck.slides):
         if index >= 30: break
+        bg,bg_basis=effective_background(slide,int(deck.slide_width),int(deck.slide_height))
+        backgrounds[bg]+=1
+        result.setdefault('backgroundEvidence',[]).append({'slide':index,'color':'#'+bg.lower(),'basis':bg_basis})
         for shape in slide.shapes:
             if shape.has_text_frame and shape.text.strip() and len(result['sampleTitles']) < 3: result['sampleTitles'].append(shape.text.strip().splitlines()[0][:80])
             if shape.has_text_frame:
@@ -166,8 +171,8 @@ else:
                                 (inferred_title_east_asia if is_large else inferred_body_east_asia)[east_asia] += weight
             try:
                 fill = shape.fill
-                if fill.type and fill.fore_color.type == MSO_COLOR_TYPE.RGB:
-                    colors[str(fill.fore_color.rgb)] += 1
+                value=effective_color(shape._element.find('.//a:solidFill',THEME_NS),slide)
+                if value: colors[value] += min(1,shape.width*shape.height/(deck.slide_width*deck.slide_height))
             except (AttributeError, TypeError, ValueError): pass
             # Some design exports, including Gamma decks, use raster artwork
             # for a full-slide background or visual panels. There is no
@@ -176,13 +181,15 @@ else:
             # palette mapping only; geometry and artwork are never claimed as
             # editable template elements.
             try:
+                coverage=shape.width*shape.height/(deck.slide_width*deck.slide_height)
+                if coverage<.85:continue
                 blob = shape.image.blob
                 from PIL import Image
                 image = Image.open(io.BytesIO(blob)).convert('RGBA')
                 image.thumbnail((80, 80))
                 for red, green, blue, alpha in image.getdata():
                     if alpha > 200:
-                        picture_colors['%02X%02X%02X' % (red // 4 * 4, green // 4 * 4, blue // 4 * 4)] += 1
+                        picture_colors['%02X%02X%02X' % (red // 4 * 4, green // 4 * 4, blue // 4 * 4)] += coverage
             except (AttributeError, OSError, ValueError, ImportError): pass
         try:
             fill = slide.background.fill
@@ -195,6 +202,9 @@ else:
     if backgrounds:
         bg = backgrounds.most_common(1)[0][0]
         accents = [c for c, _ in colors.most_common() if c != bg]
+        if not accents:
+            _,theme_colors,_=theme_context(deck.slides[0])
+            accents=[theme_colors.get('accent1') or ('404B6B' if bg!='404B6B' else '967FFF')]
         if not accents and picture_colors:
             bg_rgb = tuple(int(bg[i:i+2], 16) / 255 for i in (0, 2, 4))
             bg_luminance = sum(v * w for v, w in zip(bg_rgb, (.2126, .7152, .0722)))
@@ -265,6 +275,8 @@ export function runTemplateParser(command, args, bytes, env = {}) {
     let out = ''; let err = '';
     const timer = setTimeout(() => { child.kill(); reject(new TemplateError('template_timeout', 'template parse timed out')); }, templateLimits().timeoutMs);
     timer.unref();
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
     child.stdout.on('data', chunk => { out += chunk; if (out.length > 100_000) { child.kill(); reject(new TemplateError('template_too_large', 'analyzer output exceeds limit')); } });
     child.stderr.on('data', chunk => { err = (err + chunk).slice(-2000); });
     child.on('error', error => { clearTimeout(timer); reject(error); });
@@ -276,7 +288,8 @@ export function runTemplateParser(command, args, bytes, env = {}) {
     child.stdin.on('error', () => {}); child.stdin.end(bytes);
   });
 }
-export async function analyzeTemplate(uid, id, extension, bytes) {
+export async function analyzeTemplate(uid, id, extension, bytes, io = {}) {
+  if(io.runPython)return io.runPython({uid,id},SCRIPT,bytes,{PPT_TEMPLATE_EXT:extension,PPT_TEMPLATE_LIMITS:JSON.stringify(templateLimits())});
   const { name } = await orch.ensureContainer(id, uid, orch.KIND_PPT);
   return runTemplateParser('docker', ['exec', '-i', '-u', String(orch.AGENT_UID), '-e', `PPT_TEMPLATE_EXT=${extension}`, '-e', `PPT_TEMPLATE_LIMITS=${JSON.stringify(templateLimits())}`, name, 'python3', '-c', SCRIPT], bytes);
 }

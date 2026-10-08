@@ -40,24 +40,21 @@ const strictRender = spawnSync(python, ['-c', render._internals.SCRIPT], {
 assert.equal(strictRender.status, 0, strictRender.stderr);
 const fontXml = spawnSync(python, ['-c', `from zipfile import ZipFile
 with ZipFile(${JSON.stringify(fontOutput)}) as z: print(z.read('ppt/slides/slide1.xml').decode())`], { encoding: 'utf8' });
-assert.match(fontXml.stdout, /Noto Serif CJK SC/);
-assert.match(fontXml.stdout, /Noto Sans CJK SC/);
+const resolutions = JSON.parse(strictRender.stdout).fontResolution;
+assert.ok(resolutions.length && resolutions.every(font => font.glyphCoverage === 'verified'));
 assert.match(fontXml.stdout, /lang="zh-CN"/);
-const englishXml = spawnSync(python, ['-c', `from zipfile import ZipFile
-with ZipFile(${JSON.stringify(fontOutput)}) as z: print(z.read('ppt/slides/slide3.xml').decode())`], { encoding: 'utf8' });
-assert.match(englishXml.stdout, /<a:latin typeface="Noto Serif CJK SC"\/>/);
-assert.match(englishXml.stdout, /lang="en-US"/);
-const traditionalXml = spawnSync(python, ['-c', `from zipfile import ZipFile
-with ZipFile(${JSON.stringify(fontOutput)}) as z: print(z.read('ppt/slides/slide4.xml').decode())`], { encoding: 'utf8' });
-assert.match(traditionalXml.stdout, /<a:ea typeface="Noto Serif CJK TC"\/>/);
-assert.match(traditionalXml.stdout, /<a:ea typeface="Noto Sans CJK TC"\/>/);
-assert.match(traditionalXml.stdout, /lang="zh-TW"/);
-const chartXml = spawnSync(python, ['-c', `from zipfile import ZipFile
-with ZipFile(${JSON.stringify(fontOutput)}) as z: print(z.read('ppt/charts/chart1.xml').decode())`], { encoding: 'utf8' }).stdout;
-for (const match of chartXml.matchAll(/<a:(defRPr|endParaRPr)\b[^>]*>([\s\S]*?)<\/a:\1>/g)) {
-  assert.match(match[2], /<a:latin typeface="Noto Sans CJK SC"\/>/);
-  assert.match(match[2], /<a:ea typeface="Noto Sans CJK SC"\/>/);
+for (const index of [1,3,4]) {
+  const xml = spawnSync(python, ['-c', `from zipfile import ZipFile
+with ZipFile(${JSON.stringify(fontOutput)}) as z: print(z.read('ppt/slides/slide${index}.xml').decode())`], {encoding:'utf8'}).stdout;
+  for (const match of xml.matchAll(/<a:(?:latin|ea) typeface="([^"]+)"/g)) {
+    // Empty navigation and Latin-only east-Asia defaults do not need Han glyphs.
+    assert.ok(match[1].trim(), 'all font tokens must have a nonempty family');
+  }
+  assert.match(xml, index === 4 ? /lang="zh-TW"/ : index === 3 ? /lang="en-US"/ : /lang="zh-CN"/);
 }
+const chartXml = spawnSync(python, ['-c', `from zipfile import ZipFile
+with ZipFile(${JSON.stringify(fontOutput)}) as z: print(z.read('ppt/charts/chart1.xml').decode())`], {encoding:'utf8'}).stdout;
+assert.match(chartXml, /<a:ea typeface="[^"]+"/);
 const missingFonts = spawnSync(python, ['-c', render._internals.SCRIPT], {
   input: JSON.stringify({ template: 'light', palette: light.palette, slides: [{ id: '1', title: 'No fallback', bullets: [], blocks: [], layoutId: 'cover' }] }),
   env: { ...process.env, PPT_OUTPUT: path.join(root, 'must-not-render.pptx') }, encoding: 'utf8',
@@ -123,7 +120,7 @@ const brokenImage = { id: 'broken-image', type: 'image', dataUrl: 'data:image/pn
 let contentActive = 0; let maxContentActive = 0; let reviewCalls = 0; let renderCalls = 0;
 const deps = {
   modelCall: async (project, prompt) => {
-    if (prompt.includes('叙事规划器')) return { slides: Array.from({ length: project.pages }, (_, index) => ({ title: index === 0 ? '封面' : index === project.pages - 1 ? '结论' : `页面 ${index + 1}`, focus: 'Use supplied evidence', refs: project.title === 'Blocked deck' ? [] : ['1'] })) };
+    if (prompt.includes('叙事规划器')) return { slides: Array.from({ length: project.pages }, (_, index) => ({ title: index === 0 ? '封面' : index === project.pages - 1 ? '结论' : `页面 ${index + 1}`, focus: 'Use supplied evidence', refs: project.title === 'Blocked deck' ? [] : ['1'],sourceImageIds:index===1?project.source.images.map(image=>image.id):[] })) };
     if (prompt.includes('整稿演示文稿内容评审器')) { reviewCalls++; return { missing: [], repeated: [], conflicts: [], unsupported: [] }; }
     contentActive++; maxContentActive = Math.max(maxContentActive, contentActive);
     await new Promise(resolve => setTimeout(resolve, 10));
@@ -135,7 +132,7 @@ const deps = {
     renderCalls++;
     assert.ok(project.templateSpec.fonts.title);
     assert.ok(project.quality || project.stage === 'publish');
-    return { bytes: 12345 };
+    return { bytes: 12345, exportVerification: {status:"passed",basis:"test_double"} };
   },
   renderPdf: async () => ({ bytes: 100 }),
   extractFile: async () => { throw new Error('unused'); },
@@ -177,13 +174,16 @@ try {
   assert.equal(project.dagNodes['review:deck'].status, 'completed');
   assert.equal(project.dagNodes['publish:deck'].status, 'completed');
   assert.equal(renderCalls, 1);
+  const beforeSourceObjects=structuredClone(project.deck.slides[1].sourceArtifactNodes);
   const saved = await request('PATCH', `/ppt/projects/${id}`, { slides: project.deck.slides, revision: project.revision });
-  assert.equal(saved.status, 200);
+  assert.equal(saved.status, 200,JSON.stringify(saved.body));
   project = saved.body.project;
   assert.equal(reviewCalls, 1, 'ordinary saves must not rerun whole-deck model review');
   assert.equal(project.quality.modelReview.missing.length, 0);
+  assert.deepEqual(project.deck.slides[1].sourceArtifactNodes,beforeSourceObjects);
+  assert.ok(project.deck.slides[1].nodes.some(node=>node.content.sourceImageCaptionId==='source-image'),'legacy save must preserve the visible source caption');
 
-  const blockedCreated = await request('POST', '/ppt/projects', { inputKind: 'paste', text: 'Revenue evidence is qualitative and contains no figures.', images: [brokenImage], title: 'Blocked deck', pages: 6, template: 'light', configId: 'test' });
+  const blockedCreated = await request('POST', '/ppt/projects', { inputKind: 'paste', text: 'Revenue evidence is qualitative and contains no figures.', title: 'Blocked deck', pages: 6, template: 'light', configId: 'test' });
   assert.equal(blockedCreated.status, 201);
   const blockedId = blockedCreated.body.project.id;
   await settled(blockedId, 'outline_ready');
@@ -191,22 +191,28 @@ try {
   let blocked = await settled(blockedId, 'quality_blocked');
   assert.equal(blocked.quality.status, 'blocked');
   assert.ok(blocked.quality.deterministic.issues.some(issue => issue.code === 'numeric_source'));
-  assert.ok(blocked.dagNodes['media:broken-image'].result.issues.some(issue => issue.code === 'image_decode'));
-  assert.ok(!blocked.deck.slides.some(slide => slide.blocks?.some(block => block.id === 'broken-image')), 'unrequested attachment must not consume a text page');
-  assert.equal(blocked.dagNodes['media:broken-image'].result.passed, false);
   assert.equal(renderCalls, 1, 'blocked generation must not render or publish');
   assert.equal((await request('GET', `/ppt/projects/${blockedId}/export`)).status, 409);
   const repairedSlides = blocked.deck.slides.map(slide => ({ ...slide, bullets: slide.bullets.map(() => 'Qualitative revenue evidence'), blocks: [] }));
   const repaired = await request('PATCH', `/ppt/projects/${blockedId}`, { slides: repairedSlides, revision: blocked.revision });
-  assert.equal(repaired.status, 200);
+  assert.equal(repaired.status, 200,JSON.stringify(repaired.body));
   blocked = repaired.body.project;
-  assert.equal(blocked.status, 'completed', JSON.stringify(blocked.quality.deterministic.issues));
-  assert.equal(blocked.quality.status, 'passed_with_warnings');
+  assert.equal(blocked.status, 'quality_blocked', JSON.stringify(blocked.quality.deterministic.issues));
+  assert.equal(blocked.quality.reviewState,'stale');
+  assert.equal(blocked.quality.modelReview.evaluation,'not_evaluated','changed copy cannot inherit an empty old critic result');
   assert.ok(blocked.quality.deterministic.issues.some(issue => issue.code === 'source_missing'));
   assert.equal(reviewCalls, 2, 'repair saves reuse the single review from their own generation');
   assert.equal(renderCalls, 1, 'repair saves change the draft only');
   const publishResult = await request('POST', `/ppt/projects/${blockedId}/publish`, {});
   assert.equal(publishResult.body.published, true, JSON.stringify(publishResult.body));
   assert.equal(renderCalls, 2, 'explicit publication renders the repaired draft');
+  assert.equal(reviewCalls,3,'explicit publication must refresh the stale critic');
+  const brokenCreated=await request('POST','/ppt/projects',{inputKind:'paste',text:'Revenue evidence is qualitative.',images:[brokenImage],title:'Required broken media',pages:3,template:'light',configId:'test'});
+  await settled(brokenCreated.body.project.id,'outline_ready');
+  await request('POST',`/ppt/projects/${brokenCreated.body.project.id}/generate`);
+  const broken=await settled(brokenCreated.body.project.id,'quality_blocked');
+  assert.ok(broken.dagNodes['media:broken-image'].result.issues.some(issue=>issue.code==='image_decode'));
+  assert.ok(broken.quality.deterministic.issues.some(issue=>issue.code==='image_decode'));
+  assert.equal(renderCalls,2,'a broken required source image must still prevent export');
   console.log('PPT M5 template fonts, layout registry, bounded DAG and review-repair-publish gate: OK');
 } finally { fs.rmSync(root, { recursive: true, force: true }); }

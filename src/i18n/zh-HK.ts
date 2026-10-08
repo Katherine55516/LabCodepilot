@@ -3738,6 +3738,8 @@ const zhHK: Record<TranslationKey, string> = {
   'ppt.ai.glossary': '術語規則（可選）',
   'ppt.ai.ratio': '近似長度目標',
   'ppt.ai.length': '正文長度',
+  'ppt.ai.preservedObjects': '保留的來源物件',
+  'ppt.ai.changedObjects': '變更的來源物件',
   'ppt.ai.noChange': '內容無變化',
   'ppt.ai.targetUnmet': '未達到近似目標，請查看容量與來源限制',
   'ppt.ai.lang.en': "English",

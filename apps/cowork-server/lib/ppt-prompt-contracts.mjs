@@ -41,7 +41,7 @@ export function outputLanguage(project) {
     if (/français|french/.test(requested)) return 'fr';
     return 'es';
   }
-  const sample = String(project.source?.text || project.prompt || '').replace(/```[\s\S]*?```/g, '').replace(/https?:\/\/\S+|\/[\w./_-]+/g, '');
+  const sample = String(project.source?.text || project.source?.images?.map(image=>image.caption||'').join(' ') || project.prompt || '').replace(/```[\s\S]*?```/g, '').replace(/https?:\/\/\S+|\/[\w./_-]+/g, '');
   if ((sample.match(/[\u3040-\u30ff]/g) || []).length > 8) return 'ja';
   if ((sample.match(/[\uac00-\ud7af]/g) || []).length > 8) return 'ko';
   const han = (sample.match(/\p{Script=Han}/gu) || []).length;
@@ -84,10 +84,12 @@ ${deep ? '本页需要深入解释；必要时用一个主说明区解释机制�
 
 export function normalizeKeyPoints(items, source) {
   if (!Array.isArray(items)) return [];
+  if(items.length>10 || items.some(item=>typeof item?.text==='string' && item.text.trim().length>700))throw new Error('keyPoints exceeds capacity; rewrite or redistribute without truncation');
   const refs = new Set((source?.segments || []).map(item => item.id));
   const chunks = new Set((source?.semantic?.chunks || []).map(item => item.id));
   return items.slice(0, 10).filter(item => item && typeof item.text === 'string' && item.text.trim()).map(item => ({
-    text: item.text.trim().slice(0, 700),
+    text: item.text.trim(), ...(typeof item.claimId==='string'?{claimId:item.claimId.slice(0,80)}:{}),
+    ...(typeof item.repeatPurpose==='string'?{repeatPurpose:item.repeatPurpose.slice(0,80)}:{}),
     refs: [...new Set((Array.isArray(item.refs) ? item.refs : []).map(String))].filter(id => refs.has(id)),
     chunkRefs: [...new Set((Array.isArray(item.chunkRefs) ? item.chunkRefs : []).map(String))].filter(id => chunks.has(id)),
   }));
@@ -149,6 +151,7 @@ export function canonicalWriterOutput(value, spec = null) {
   if (value.table && !value.blocks) result.blocks = [{ type: 'table', rows: [...(value.table.columns ? [value.table.columns] : []), ...(value.table.rows || [])] }];
   if (value.lede && !value.subtitle) result.subtitle = value.lede;
   if (value.callout && !value.takeaway) result.takeaway = value.callout;
+  if (Array.isArray(result.contentBlocks)) { delete result.bullets; delete result.factSynthesis; }
   if (spec && value.slotTexts) {
     for (const [id, text] of Object.entries(value.slotTexts)) {
       if (typeof text === 'string' && text.length > 5000) throw new Error(`template slot ${id} exceeds the text safety limit; rewrite without truncation`);
@@ -198,15 +201,17 @@ export const OUTLINE_SCHEMA = JSON.stringify({ brief: { goal: '目标', audience
   decisionQuestion: '可选', sourceScope: '事实边界与限制', depth: 'balanced|detailed', mustInclude: ['必讲内容'] },
   storyArc: { opening: '开场', development: '展开', turningPoint: '转折', resolution: '结论' },
   slides: [{ section: '短章节标签', title: '标题意图', focus: '独立主张', question: '读者问题',
-    keyPoints: [{ text: '具体事实及机制/条件/对照，通常 1–2 句，不是主题名', refs: ['原始来源编号'], chunkRefs: ['真实 chunk ID'] }],
+    keyPoints: [{ text: '具体事实及机制/条件/对照，通常 1–2 句，不是主题名', claimId:'稳定的来源主张ID', refs: ['原始来源编号'], chunkRefs: ['真实 chunk ID'] }],
+    recaps:[{claimId:'仅必要时复用的主张',repeatPurpose:'compare|apply_to_new_case|synthesis'}],
     visualIntent: { type: 'none|image|comparison|pipeline|architecture|timeline|table|metric' },
-    requiredDetails: ['必须可见的公式、表格关系与条件'], requiredEvidenceIds: ['本页需要完整表达的真实 evidence ID'], chunkRefs: ['真实 chunk ID'], refs: ['原始来源编号'], sourceUnitIds: ['真实 inventory item ID'], groupId: '具体问题分组ID', sourceArtifactRanges: [{ sourceUnitId: '所属真实表格ID', rowStart: 1, rowEnd: 5 }] }],
+    requiredDetails: ['必须可见的公式、表格关系与条件'], requiredEvidenceIds: ['本页需要完整表达的真实 evidence ID'], chunkRefs: ['真实 chunk ID'], refs: ['原始来源编号'], sourceUnitIds: ['真实 inventory item ID'], sourceImageIds:['相关来源媒体ID'], groupId: '具体问题分组ID', sourceArtifactRanges: [{ sourceUnitId: '所属真实表格ID', rowStart: 1, rowEnd: 5 }] }],
   topicGroups: [{ group_id: 'c_001', decision: 'merge|split|standalone', reason: '同一个受众问题与强关系，或不同问题/机制深度/容量要求', estimated_semantic_units: 6, layout_candidate: 'table|timeline|comparison', capacity_ok: true }],
   coverage: [{ chunkId: 'c_001', action: 'omitted', reason: '明确取舍' }] });
 
 export function outlineContentContract(project) {
   return `${promptPolicy(project)}\n<content_plan>先确定主题特有的定义、机制、构造步骤、对照与条件，再分配页数。
-keyPoints 是后续写作者必须展开的内容承诺；给出实际要讲的关系与解释，而不只列名词。每页拥有不同内容，邻页可以使用同一 chunk 的不同事实，总结可简要回指。
+keyPoints 是后续写作者必须展开的内容承诺；给出实际要讲的关系与解释，而不只列名词。每页拥有不同内容，邻页可以使用同一 chunk 的不同事实，总结可简要回指。以来源主张ID明确主讲页；必要回顾需给recaps及新的比较、应用或综合用途。
+密度衡量不同信息，不衡量重复字符。不要用同一段话、同义改写、反复章节名或重复结论填满卡片。来源不足时保留真实留白，确认前减少或合并页数。两个小节若回答同一问题，可以同页展示定义+公式+变量解释；同一小节若包含不同问题，按完整的解释关系拆页。
 复杂表格保留所有类别与列之间的关系，流程保留顺序/分支，公式保留变量、单位与条件；篇幅不足明确记录取舍，不能静默遗漏。
 角色、密度和篇幅预算由代码依据用途和内容推导，无需重复输出。纯 prompt 的通用问题清单只是参考，应替换成领域特有、有内容的解释计划。
 用户另行要求（来源正文之外）：${project.prompt || '无'}。</content_plan>
@@ -237,7 +242,7 @@ export function writerPrompt(project, slide, index, { retrieval, contract, slotC
     ? `来源页需可见输入文件名「${project.source.name}」与引用位置。` : '';
   const schema = native
     ? { title: '标题', evidenceUsedIds: ['可见文本实际表达的真实 evidence ID'], slotTexts: { 'shape ID': '完整替换文字', '列表 shape ID': [{ label: '短名称', body: '解释' }] }, omitTemplateShapes: [{ shapeId: 123, reason: '具体不适配理由' }], sourceCommentary: ['结构对应的解释；无重复正文'], sourceArtifacts: [{ sourceUnitId: '真实库存 ID', rowStart: 1, rowEnd: 5 }] }
-    : { title: '标题', eyebrow: '可选短标签', subtitle: '可选背景句', contentBlocks: [{ type: 'definition|mechanism|evidence|example|contrast|constraint|implication|stage|decision|next_step', heading: '短名称', body: '完整解释' }], takeaway: '可选综合判断', blocks: [{ type: 'table', rows: [['列名称', '列名称'], ['来源类别', '来源解释']] }], sourceCommentary: ['结构对应的解释；无重复正文'], sourceArtifacts: [{sourceUnitId:'真实库存 ID',rowStart:1,rowEnd:5}], evidenceUsedIds: ['实际表达的真实 evidence ID'] };
+    : { title: '标题', eyebrow: '可选导航标签', subtitle: '可选新增范围说明', contentBlocks: [{ type: 'definition|mechanism|evidence|example|contrast|constraint|implication|stage|decision|next_step', claimId:'来源主张ID', heading: '不同的短名称', body: '独立完整解释' }], takeaway: '可选新增推论，不能复制正文', blocks: [{ type: 'table', rows: [['列名称', '列名称'], ['来源类别', '来源解释']] }], sourceCommentary: ['结构对应的解释；无重复正文'], sourceArtifacts: [{sourceUnitId:'真实库存 ID',rowStart:1,rowEnd:5}], evidenceUsedIds: ['实际表达的真实 evidence ID'] };
   const old = project.update && slide.baseSlideId ? project.update.baseSnapshot.deck?.slides.find(item => item.id === slide.baseSlideId) : null;
   return `你是演示文稿文案编辑。当前任务只写第 ${index + 1} 页，共 ${project.pages} 页。
 ${promptPolicy(writingProject)}
@@ -253,6 +258,8 @@ ${native ? slotContract : ''}
 ${old ? `<old_slide>${JSON.stringify(slideSemanticContext(old))}</old_slide>` : ''}
 <terminology>${JSON.stringify(project.planning?.terminology || {})}</terminology>
 <task>展开本页拥有的具体内容；相邻页 ownedPoints 是分工边界，避免全文重复。锁定证据 ID 与 requiredDetails 必须在可见文字表达完整关系与条件；上下文预算省略不等于来源没有内容。
+标题回答本页问题，eyebrow仅导航，subtitle补充范围；各块分别提供定义、机制、证据/例子、条件或行动；takeaway仅在有新的推论时出现。可选字段可以为空。禁止相同完整句在不同角色重复出现，禁止多个卡片重复章节名，禁止为了达到字数/密度目标填入重复或无来源内容。容量冲突应报告对象和原因，不截断句子、变量、单元格或步骤。
+组件选择：真实表格/公式/流程/清单优先使用sourceArtifacts，系统保留结构与数学；sourceCommentary补充关系与边界。图片只能使用已有来源资产ID或系统支持的语义资产，不能把旧模板截图当作新事实。没有数据时不要编造图表；缺媒体或结构不能用重复文字代替。
 ${!project.source?.segments?.length ? `用户主题：${project.prompt}。使用领域特有的定义、机制和评估方法。` : ''}
 sourceArtifacts 可引用本页合同的真实库存 ID，由代码重建可编辑表格/公式/流程/清单及来源小结。组合数量由共用字体/行高/区域容量测量决定，允许双表、清单+总结表、机制+例子；不要为同一比较轴机械拆页。本页合同指定 rowStart/rowEnd 时必须遵守该范围，避免把完整大表在分片页重复。表格第 0 行是表头；rowStart 从 1 开始，rowEnd 为不包含的结束索引，两者必须是整数，范围只能用于表格；同页同一表的范围不能重叠，其他结构不能重复引用。省略范围则保留全部行。容量不足拆到多页并重复表头，不删列、不截断单元格。结构按自然高度组合，保留标题。sourceCommentary 可补充这些结构的条件、机制或综合判断，会显示在同一区域；不能重复抄写结构、写隐藏正文或指定坐标。
 ${native ? '其他正文只输出 slotTexts；代码从语义配对派生兼容文案，不另写 contentBlocks、bullets 或 factSynthesis。' : '普通页面只输出 contentBlocks 这一份正文；bullets 由代码派生。优先引用 sourceArtifacts 保留原文表格的全部列；手写 blocks 表格兼容上限为 6 行（含表头）、4 列，不能用它静默降级更大的来源表格。'}
@@ -261,8 +268,9 @@ ${native ? '其他正文只输出 slotTexts；代码从语义配对派生兼容�
 }
 
 export function writerRepairPrompt(prompt, draft, issues) {
-  const diagnostics = issues.slice(0, 10).map(item => ({ code: item.code || item.category, repair: item.repair,
-    shapeId: item.shapeId, missingSupport: item.missingSupport || [], message: item.message || item.detail,
+  const priority=item=>(item.severity==='error'?10:0)+(/required_source|media_decode|object_missing/.test(item.code||'')?8:/duplicate|repeated/.test(item.code||'')?4:0);
+  const diagnostics = [...issues].sort((a,b)=>priority(b)-priority(a)).slice(0,32).map(item => ({ code: item.code || item.category, repair: item.repair,
+    shapeId: item.shapeId, nodeIds:item.nodeIds, claimId:item.claimId, objectId:item.sourceUnitId || item.objectId, missingSupport: item.missingSupport || [], message: item.message || item.detail,
     suggestedFix: item.suggestedFix, reason: item.reason }));
   const nodes=draft.nodes||draft.sourceArtifactNodes||[];
   const sourceArtifacts=nodes.filter(node=>node.sourceArtifact).map(node=>node.sourceArtifact);
@@ -275,12 +283,12 @@ export function writerRepairPrompt(prompt, draft, issues) {
 
 export function criticRewriteTargets(project, review) {
   const scores = new Map(); const findings = new Map();
-  for (const [category, weight] of [['unsupported', 4], ['conflicts', 4], ['missing', 3], ['repeated', 1]])
+  for (const [category, weight] of [['unsupported', 4], ['conflicts', 4], ['missing', 4], ['repeated', 4]])
     for (const finding of review?.[category] || []) for (const id of finding.slideIds || []) {
       scores.set(id, (scores.get(id) || 0) + weight);
       findings.set(id, [...(findings.get(id) || []), { category, ...finding }]);
     }
-  const eligible = project.deck.slides.filter((slide, index) => index > 0 && index < project.deck.slides.length - 1 &&
+  const eligible = project.deck.slides.filter((slide, index) => index > 0 &&
     !slide.manualBlank && !project.runtime?.slides?.[slide.id]?.accepted && !(slide.nodes || []).some(node => node.locked &&
       (['text', 'list', 'chart', 'table'].includes(node.type) || node.type === 'shape' && node.content?.text)) &&
     !project.constraints?.entries?.some(entry => entry.active && (entry.slideId === slide.id || entry.slideIds?.includes(slide.id))));

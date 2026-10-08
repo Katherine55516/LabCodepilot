@@ -54,7 +54,7 @@ try {
       if (prompt.includes('第 2 页') && failOnce) { failOnce = false; throw new Error('temporary model outage'); }
       return { title: `第 ${/第 (\d+) 页/.exec(prompt)?.[1]} 页`, bullets: ['可编辑内容'] };
     },
-    renderPptx: async (project) => { renders++; assert.equal(project.deck.slides.length, project.pages); return { bytes: 1234 }; },
+    renderPptx: async (project) => { renders++; assert.equal(project.deck.slides.length, project.pages); return { bytes: 1234, exportVerification: {status:"passed",basis:"test_double"} }; },
     readFile: async () => ({ stream: Readable.from(Buffer.from('pptx-bytes')), size: 10 }),
   };
   const invoke = async (method, pathname, data, account = uid, response) => {

@@ -3727,6 +3727,8 @@ const zh: Record<TranslationKey, string> = {
   'ppt.ai.region': '地区（可选）',
   'ppt.ai.glossary': '术语规则（可选）',
   'ppt.ai.ratio': '近似长度目标',
+  'ppt.ai.preservedObjects': '保留的来源对象',
+  'ppt.ai.changedObjects': '对象状态变更',
   'ppt.ai.length': '正文长度',
   'ppt.ai.noChange': '内容无变化',
   'ppt.ai.targetUnmet': '未达到近似目标，请查看容量与来源限制',

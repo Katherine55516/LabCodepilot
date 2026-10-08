@@ -24,7 +24,7 @@ function contentOfBlock(block) {
 }
 
 function blockOfNode(node) {
-  return { id: node.id, type: node.type, ...(node.content || {}) };
+  return { ...(node.content || {}), id: node.id, type: node.type };
 }
 
 function ensureListItems(slideId, bullets, existing = [], blocks = []) {
@@ -35,6 +35,9 @@ function ensureListItems(slideId, bullets, existing = [], blocks = []) {
     ...(blocks[index] && !existing[index]?.heading && !existing[index]?.body ? {
       heading: String(blocks[index].heading || ''), body: String(blocks[index].body || ''),
       pointType: String(blocks[index].type || 'support'),
+      ...(blocks[index].claimId ? {claimId:blocks[index].claimId}:{}),
+      ...(blocks[index].repeatPurpose ? {repeatPurpose:blocks[index].repeatPurpose}:{}),
+      ...(blocks[index].sourceRefs ? {sourceRefs:blocks[index].sourceRefs}:{}),
     } : {}),
   }));
 }

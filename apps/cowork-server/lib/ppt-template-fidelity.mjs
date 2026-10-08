@@ -110,7 +110,10 @@ function sourceMediaFor(project, index, use, frame) {
   });
   const fitting = candidates.filter(image => {
     const size = sourceImageSize(image.dataUrl);
-    if (!size || size.width < 640 || size.height < 360) return false;
+    if (!size) return false;
+    const role=image.role||'source_content';
+    if(['equation','icon','diagram'].includes(role))return false; // owned structures, not photo frames
+    // Resolution is a quality warning, never grounds for silently dropping source media.
     const ratio = (size.width / size.height) / (frame.geometry.width / frame.geometry.height);
     return ratio >= .65 && ratio <= 1.55;
   });
@@ -215,7 +218,17 @@ export function autoTemplateMediaOmissions(project, index, existing = []) {
   return contentMediaCandidates(spec, project.templateFidelity).filter(node =>
     !node.content?.mediaReplacement && !already.has(String(node.nativeRef?.shapeId)))
     .map(node => ({ shapeId: Number(node.nativeRef.shapeId),
-      reason: '原模板内容型图片与当前来源主题不一致，且没有可核对的来源绑定。', automatic: true }));
+      reason: '原模板内容型图片与当前来源主题不一致，且没有可核对的来源绑定。', automatic: true,
+      role:'old_template_content',disposition:'excluded_approved',approvalBasis:'deterministic_topic_mismatch' }));
+}
+
+export function templateMediaRole(node,spec,size){
+  const declared=node.content?.mediaRole||node.content?.role;
+  if(declared)return declared;
+  if(safeDecorativeMedia(node,size,spec))return 'template_decoration';
+  if(contentMediaCandidates(spec,size).some(n=>n.id===node.id))return 'old_template_content';
+  const area=node.geometry?.width*node.geometry?.height/(size.width*size.height);
+  return area<.02?'template_icon':'template_artwork';
 }
 
 function frameContract(node, fontSizePt) {
@@ -640,7 +653,7 @@ export async function prepareTemplateFidelity(project, templateBytes, templateHa
   }
   project.templateCacheHit = false;
   const imported = await io.importPptx({ id: project.id, uid: project.uid, title: project.title }, templateBytes, templateHash);
-  if (template) templateStore.writeTemplateIR(owner, template.id, { schemaVersion: 1, parserVersion: 'pptx-ir-2', sha256: templateHash, imported });
+  if (template) templateStore.writeTemplateIR(owner, template.id, { schemaVersion: 1, parserVersion: 'pptx-ir-3', sha256: templateHash, imported });
   return fidelityFromImported(project, imported, templateHash);
 }
 
@@ -698,7 +711,8 @@ export function inspectTemplateSlotDraft(project, index, slide) {
   const slots = effectiveSlots(spec);
   const omitted = new Set((slide.templateOmissions || []).map(item => String(item.shapeId)));
   const invalidOmissions = [...omitted].filter(id => !spec.nodes.some(node => String(node.nativeRef?.shapeId) === id &&
-    (['image', 'chart', 'table'].includes(node.type) || (node.type === 'text' && slots.some(slot => String(slot.shapeId) === id && slot.role === 'content')))));
+    (['image', 'chart', 'table'].includes(node.type) || (node.type === 'text' && slots.some(slot => String(slot.shapeId) === id && slot.role === 'content')) ||
+      (slide.sourceArtifactNodes?.length && slide.templateOmissions.some(o=>String(o.shapeId)===id && o.automatic && o.approvalBasis==='source_region_replacement')))));
   const omissionIssues = invalidOmissions.map(id => ({ code: 'template_omission_invalid', severity: 'error',
     message: `模板第 ${index + 1} 页组件 ${id} 不是可省略的内容或媒体`, repair: 'fill_template_slots', shapeId: Number(id) }));
   const issues = slots.filter(slot => slot.role !== 'static' && !omitted.has(String(slot.shapeId))).flatMap(slot => {
@@ -841,12 +855,12 @@ export function bindTemplateFidelity(project) {
   return project;
 }
 
-export async function renderTemplatePptx(project) {
+export async function renderTemplatePptx(project,io={}) {
   if (project.templateFidelity?.mode !== 'preserve') throw new Error('template fidelity is unavailable');
   const copy = { ...project, externalPptx: { originalPath: project.templateFidelity.originalPath },
     templateSlideMap: project.templateFidelity.slideMap,
     deck: { ...project.deck, slides: project.deck.slides.map(slide => ({ ...slide, nativeSlideIndex: slide.templateSlideIndex })) } };
-  return renderImportedPptx(copy);
+  return renderImportedPptx(copy,io);
 }
 
 export function inspectTemplateFidelity(project) {

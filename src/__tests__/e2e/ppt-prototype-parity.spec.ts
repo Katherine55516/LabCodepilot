@@ -91,6 +91,7 @@ test('PPT local translate and expand send parameters and review real proposal me
   await editor.getByRole('textbox',{name:'术语规则（可选）'}).fill('mechanism=mécanisme');
   await editor.getByRole('button',{name:'用 AI 编辑当前页',exact:true}).click();
   await expect(editor.getByTestId('ppt-ai-length')).toContainText('20 → 40 (2×)');
+  await expect(editor.getByTestId('ppt-ai-object-integrity')).toContainText('2');
   expect(fixture.payloads.filter(p=>p.action==='ai-edit').at(-1)).toMatchObject({scope:'slide',type:'content',parameters:{targetLanguage:'fr',mode:'bilingual',region:'France',glossary:'mechanism=mécanisme'}});
   await editor.getByRole('button',{name:'取消',exact:true}).click();
   await editor.getByRole('combobox',{name:'文字动作'}).selectOption('expand');

@@ -6,6 +6,7 @@ import { rebuildRenderTree } from './render-tree.mjs';
 import { enrichAssetRefs } from './assets.mjs';
 import { digest } from './edit-context.mjs';
 import { invalidateReviews, semanticReviewKey, synchronizePlan } from './versioning.mjs';
+import { equationContent } from '../ppt-math.mjs';
 
 function fail(message, statusCode = 400, details) { throw Object.assign(new Error(message), { statusCode, details }); }
 function slide(deck, id) { const value = deck.slides.find(item => item.id === id); if (!value) fail(`slide not found: ${id}`, 404); return value; }
@@ -13,6 +14,17 @@ const INTERNAL_COMMANDS = new Set(['nodes.restore', 'nodes.setGroup', 'deck.repl
 
 function nativeTextContent(node, candidate) {
   const next = structuredClone(candidate);
+  if(node.content?.items && next.items){
+    next.items=next.items.map((item,index)=>{
+      const prior=node.content.items.find(old=>old.id===item.id) || (next.items.length===node.content.items.length?node.content.items[index]:null);
+      return {...item,...(prior?.claimId?{claimId:prior.claimId}:{}),...(prior?.repeatPurpose?{repeatPurpose:prior.repeatPurpose}:{}),...(prior?.sourceRefs?{sourceRefs:prior.sourceRefs}:{})};
+    });
+  }
+  if(node.sourceArtifact){
+    const merged={...node.content,...next};
+    if(node.sourceArtifact.type==='EquationBlock')return {...merged,...equationContent(next.text??node.content.mathText??node.content.text)};
+    return merged;
+  }
   if (!node.nativeRef || node.type !== 'text') return next;
   const original = (node.nativeTextFrame?.paragraphs || []).filter(item => item.text?.trim());
   if (original.length > 1) {
@@ -41,7 +53,9 @@ function syncSlide(value) {
     const parts = String(item.text || '').split('\n');
     const heading = String(item.heading ?? (parts.length > 1 ? parts[0] : ''));
     const body = String(item.body ?? (parts.length > 1 ? parts.slice(1).join('\n') : parts[0] || ''));
-    return { type: item.pointType || 'support', heading, body };
+    return { type: item.pointType || 'support', heading, body,
+      ...(item.claimId?{claimId:item.claimId}:{}),...(item.repeatPurpose?{repeatPurpose:item.repeatPurpose}:{}),
+      ...(item.sourceRefs?{sourceRefs:item.sourceRefs}:{}) };
   });
   return slide;
 }

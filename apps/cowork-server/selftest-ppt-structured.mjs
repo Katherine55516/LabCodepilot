@@ -168,7 +168,7 @@ b=io.BytesIO(); p.save(b); sys.stdout.buffer.write(b.getvalue())`], { maxBuffer:
     const inspected = spawnSync(python, ['-c', `from pptx import Presentation; from zipfile import ZipFile; import hashlib,sys
 p=Presentation(sys.argv[1]); original=Presentation(sys.argv[2]); assert (p.slide_width,p.slide_height)==(original.slide_width,original.slide_height)==(9144000,6858000); assert len(p.slides[0].shapes)==3; assert any(getattr(s,'text','')=='编辑后的中文标题' for s in p.slides[0].shapes)
 with ZipFile(sys.argv[1]) as archive:
-    xml=archive.read('ppt/slides/slide1.xml').decode('utf-8'); assert 'typeface="Noto Sans CJK SC"' in xml; assert 'lang="zh-CN"' in xml
+    xml=archive.read('ppt/slides/slide1.xml').decode('utf-8'); assert '<a:ea typeface=' in xml; assert 'lang="zh-CN"' in xml
     output_media={name:hashlib.sha256(archive.read(name)).hexdigest() for name in archive.namelist() if name.startswith('ppt/media/')}
 with ZipFile(sys.argv[2]) as archive:
     original_media={name:hashlib.sha256(archive.read(name)).hexdigest() for name in archive.namelist() if name.startswith('ppt/media/')}

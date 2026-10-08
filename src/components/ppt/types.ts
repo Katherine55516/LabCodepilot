@@ -26,13 +26,14 @@ export type PptTemplate = {
 export type PptModel = { id: string; name: string; configId: string; modelId: string; providerId?: string };
 export type PptSource = { kind: 'prompt' | 'paste' | 'file' | 'update'; name: string; text: string; segments: { id: string; origin?: string; location: string; text: string }[]; images?: Extract<VisualBlock, { type: 'image' }>[]; truncated?: boolean; extension?: string; bytes?: number };
 export type PptModelFinding = { slideIds: string[]; detail: string; bulletIndexes?: number[]; reason?: 'shallow'; suggestedFix?: string };
-export type PptQualityReport = { status: 'passed' | 'passed_with_warnings' | 'blocked'; publishEligible?: boolean; editorialReady?: boolean; deterministic: { issues: { code: string; severity: string; message: string; slideId?: string | null }[]; hardErrors: number }; modelReview: null | { missing: PptModelFinding[]; repeated: PptModelFinding[]; conflicts: PptModelFinding[]; unsupported: PptModelFinding[] }; repairs: { code: string; slideId?: string; action: string }[];
+export type PptQualityReport = { status: 'passed' | 'passed_with_warnings' | 'blocked'; publishEligible?: boolean; editorialReady?: boolean; deterministic: { issues: { code: string; severity: string; message: string; slideId?: string | null }[]; hardErrors: number }; modelReview: null | { evaluation?: 'evaluated' | 'not_evaluated'; missing: PptModelFinding[]; repeated: PptModelFinding[]; conflicts: PptModelFinding[]; unsupported: PptModelFinding[] }; repairs: { code: string; slideId?: string; action: string }[];
   report?: { mode: 'presentation' | 'informational' | 'decision'; status: 'not_applicable' | 'ready' | 'needs_review'; issues: { code: string; message: string; slideId?: string | null }[]; metrics: { pages?: number; mainPages?: number; appendixPages?: number; sourceChars?: number; semanticChunks?: number; repeatedClaims?: number; smallTextPages?: number } } };
 export type PptRenderElement = {
   id: string; nodeId: string | null; sourceNodeId?: string; kind: string; bounds: PptBounds;
   content?: { text?: string; items?: { id: string; text: string; heading?: string; body?: string; pointType?: string }[];
     pointLayout?: { boxes: { x: number; y: number; w: number; h: number }[]; fontSizePt: number; overflow: boolean; columns: number; suggestedSplitCount?: number };
-    dataUrl?: string; crop?: number[]; rows?: string[][]; rowWeights?: number[]; columnWeights?: number[]; labels?: string[]; values?: number[]; chartType?: 'bar' | 'pie' | 'line'; unit?: string; shape?: 'rect' | 'ellipse' };
+    mathMl?: string; mathText?: string; mathStatus?: string;
+    dataUrl?: string; sourceImageId?:string; crop?: number[]; rows?: string[][]; rowWeights?: number[]; columnWeights?: number[]; labels?: string[]; values?: number[]; chartType?: 'bar' | 'pie' | 'line'; unit?: string; shape?: 'rect' | 'ellipse' };
   style?: { color?: string; fill?: string; tableHeaderColor?: string; fontFamily?: string; eastAsiaFontFamily?: string; fontSizePt?: number; fontWeight?: number; fontStyle?: string; textAlign?: string; lineHeight?: number; paragraphSpacingEm?: number; letterSpacing?: number; opacity?: number; shape?: string };
   zIndex: number; rotation?: number; locked?: boolean; groupId?: string | null; semanticRole?: string;
 };
@@ -75,7 +76,7 @@ export type PptAiProposal = {
   id: string; scope: 'object' | 'slide' | 'deck'; type?: PptMutationType; pageDelta?: number; afterSlides?: { slideId: string; svg: string }[]; slideId: string; nodeId?: string; instruction: string;
   baseRevision: number; targetContentHash: string; planKey: string; beforeSvg: string; afterSvg: string;
   content?: unknown; patches?: { nodeId: string; content: unknown }[]; layoutId?: PptLayoutId;
-  quality: { issues: { code: string; severity: string; message: string }[]; hardErrors: number };
+  quality: { issues: { code: string; severity: string; message: string }[]; hardErrors: number; objectChanges?: {objectId:string;status:string}[]; preservedObjectIds?:string[] };
 };
 export type PptMutationType = 'auto' | 'title' | 'content' | 'layout' | 'style' | 'asset' | 'data' | 'structure';
 export type PptGenerationScope = 'current' | 'remaining' | 'following' | 'section' | 'deck';

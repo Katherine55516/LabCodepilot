@@ -1,4 +1,8 @@
 import { templateLimits, TEMPLATE_SECURITY_SCRIPT } from '../ppt-template-security.mjs';
+import { OFFICE_MATH_SCRIPT } from '../ppt-math.mjs';
+import { exportManifest, EXPORT_VERIFY_SCRIPT } from '../ppt-export-integrity.mjs';
+import { THEME_SCRIPT } from '../ppt-theme.mjs';
+import { FONT_SCRIPT } from '../ppt-fonts.mjs';
 import { spawn } from 'node:child_process';
 import { isSourceOwnedNode } from '../ppt-source-artifacts.mjs';
 import * as orch from '../orchestrator.mjs';
@@ -10,6 +14,7 @@ from pptx import Presentation
 from pptx.enum.shapes import MSO_SHAPE_TYPE
 from pptx.enum.dml import MSO_COLOR_TYPE
 from pptx.oxml.ns import qn
+${THEME_SCRIPT}
 raw=sys.stdin.buffer.read(); ext='pptx'
 ${TEMPLATE_SECURITY_SCRIPT}
 prs=Presentation(io.BytesIO(raw)); slides=[]
@@ -88,7 +93,8 @@ for slide_index, slide in enumerate(prs.slides):
         if slide.background.fill.type and slide.background.fill.fore_color.type == MSO_COLOR_TYPE.RGB:
             background='#'+str(slide.background.fill.fore_color.rgb).lower()
     except (AttributeError,TypeError,ValueError): pass
-    slides.append({'index':slide_index,'shapes':shapes,'background':background})
+    background,bg_basis=effective_background(slide,int(prs.slide_width),int(prs.slide_height))
+    slides.append({'index':slide_index,'shapes':shapes,'background':'#'+background.lower(),'backgroundBasis':bg_basis})
 print(json.dumps({'width':int(prs.slide_width),'height':int(prs.slide_height),'slides':slides,'path':target},ensure_ascii=False))
 `;
 
@@ -102,6 +108,10 @@ from pptx.dml.color import RGBColor
 from pptx.enum.text import MSO_AUTO_SIZE
 from pptx.enum.text import PP_ALIGN
 from pptx.enum.shapes import MSO_SHAPE_TYPE
+
+${OFFICE_MATH_SCRIPT}
+${EXPORT_VERIFY_SCRIPT}
+${FONT_SCRIPT}
 
 data=json.load(sys.stdin); original=data['original']; prs=Presentation(original)
 source_slide_map=data.get('sourceSlideMap')
@@ -146,11 +156,14 @@ CJK_RE=re.compile(r'[\u2e80-\u9fff\uf900-\ufaff]')
 HANT_RE=re.compile(r'[萬與為於後臺國學實體廣應當復雜雙發變這個們體繁臺灣]')
 
 def set_east_asia(run, role='body', family=None):
-    if not CJK_RE.search(run.text or ''): return
+    if not CJK_RE.search(run.text or ''):
+        run.font.name=resolve_font(family or run.font.name or fonts['body'],run.text)
+        return
     if HANT_RE.search(run.text or ''):
         east_asia=fonts.get('titleEastAsiaHant' if role == 'title' else 'bodyEastAsiaHant') or family or (fonts['titleEastAsia'] if role == 'title' else fonts['bodyEastAsia'])
     else:
         east_asia=family or (fonts['titleEastAsia'] if role == 'title' else fonts['bodyEastAsia'])
+    east_asia=resolve_font(east_asia,run.text);run.font.name=east_asia
     rpr=run._r.get_or_add_rPr()
     for child in list(rpr):
         if child.tag == qn('a:ea'): rpr.remove(child)
@@ -170,7 +183,12 @@ def shape_text_frames(slide, shape):
 def add_source_artifact(slide, node):
     g=node['geometry']; c=node.get('content') or {}; style=node.get('style') or {}
     font=style.get('fontFamily') or fonts['body']; pt=float(style.get('fontSizePt',18))
-    if node['type']=='table':
+    if node['type']=='image':
+        from PIL import Image as ArtifactImage
+        blob=base64.b64decode(c['dataUrl'].split(',',1)[1]);image=ArtifactImage.open(io.BytesIO(blob));image.load()
+        ratio=min(g['width']/image.width,g['height']/image.height);w=int(image.width*ratio);h=int(image.height*ratio)
+        shape=slide.shapes.add_picture(io.BytesIO(blob),int(g['x']+(g['width']-w)/2),int(g['y']+(g['height']-h)/2),w,h)
+    elif node['type']=='table':
         rows=c['rows']; shape=slide.shapes.add_table(len(rows),len(rows[0]),int(g['x']),int(g['y']),int(g['width']),int(g['height']))
         weights=c.get('columnWeights') or [1]*len(rows[0]); weight_sum=sum(weights)
         for col,weight in enumerate(weights): shape.table.columns[col].width=int(g['width']*weight/weight_sum)
@@ -186,7 +204,8 @@ def add_source_artifact(slide, node):
         shape=slide.shapes.add_textbox(int(g['x']),int(g['y']),int(g['width']),int(g['height']))
         shape.fill.solid(); shape.fill.fore_color.rgb=RGBColor.from_string(style.get('fill','#ffffff').lstrip('#'))
         frame=shape.text_frame; frame.word_wrap=True
-        values=[item['text'] for item in c.get('items',[])] if node['type'] in ('list','timeline') else str(c.get('text','')).split('\n')
+        if c.get('mathMl'):frame.margin_left=frame.margin_right=frame.margin_top=frame.margin_bottom=0
+        values=[] if c.get('mathMl') and write_office_math(frame.paragraphs[0],c,pt,style.get('color','#111111')) else [item['text'] for item in c.get('items',[])] if node['type'] in ('list','timeline') else str(c.get('text','')).split('\n')
         for i,value in enumerate(values):
             p=frame.paragraphs[0] if i==0 else frame.add_paragraph(); p.text=(str(i+1)+'. ' if node['type']=='timeline' else '• ' if node['type']=='list' else '')+str(value); p.line_spacing=float(style.get('lineHeight',1.18)); p.space_after=Pt(pt*float(style.get('paragraphSpacingEm',.4 if node['type'] in ('list','timeline') else 0)))
             for run in p.runs:
@@ -346,7 +365,8 @@ for index,source_index in enumerate(expected_map):
         if content.get('templateFit') and shape.text_frame.auto_size!=MSO_AUTO_SIZE.NONE:
             raise ValueError('native template unexpectedly shrinks font on slide '+str(index+1))
 os.replace(tmp,target)
-print(json.dumps({'slides':len(prs.slides),'path':target,'bytes':os.path.getsize(target),'preservedOriginal':True}))
+verification=verify_export(target,data.get('exportManifest'))
+print(json.dumps({'slides':len(prs.slides),'path':target,'bytes':os.path.getsize(target),'preservedOriginal':True,'exportVerification':verification,'fontResolution':list(FONT_RESOLUTIONS.values())}))
 `;
 
 function runPython(project, script, input, max = Math.min(templateLimits().managedBytes * 2, templateLimits().memoryBytes / 4)) {
@@ -354,6 +374,8 @@ function runPython(project, script, input, max = Math.min(templateLimits().manag
     const child = spawn('docker', ['exec', '-i', '-u', String(orch.AGENT_UID), '-e', `PPT_TEMPLATE_LIMITS=${JSON.stringify(templateLimits())}`, '-e', `PPT_OUTPUT=${project.renderOutput || '/workspace/presentation.pptx'}`, name, 'python3', '-c', script], { stdio: ['pipe', 'pipe', 'pipe'] });
     let out = ''; let err = '';
     const timer = setTimeout(() => { child.kill(); reject(new Error('template_timeout: PPTX operation timed out')); }, script === IMPORT_SCRIPT ? templateLimits().timeoutMs : 120000); timer.unref();
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
     child.stdout.on('data', chunk => { out += chunk; if (out.length > max) child.kill(); });
     child.stderr.on('data', chunk => { err = (err + chunk).slice(-3000); });
     child.on('error', error => { clearTimeout(timer); reject(error); });
@@ -389,12 +411,12 @@ export function projectFromImportedManifest(project, manifest, hash) {
   return project;
 }
 
-export async function importEditablePptx(project, bytes, hash) {
-  const manifest = await runPython(project, IMPORT_SCRIPT, bytes);
+export async function importEditablePptx(project, bytes, hash, io = {}) {
+  const manifest = await (io.runPython || runPython)(project, IMPORT_SCRIPT, bytes);
   return projectFromImportedManifest(project, manifest, hash);
 }
 
-export async function renderImportedPptx(project) {
+export async function renderImportedPptx(project, io = {}) {
   const slides = project.deck.slides.filter(slide => Number.isInteger(slide.nativeSlideIndex)).map(slide => ({
     nativeSlideIndex: slide.nativeSlideIndex,
     omitShapeIds: (slide.templateOmissions || []).map(item => item.shapeId),
@@ -407,8 +429,8 @@ export async function renderImportedPptx(project) {
         ? Object.fromEntries(Object.entries(node.content || {}).filter(([key]) => key !== 'dataUrl')) : node.content,
       geometry: node.geometry, style: node.style })),
   }));
-  return runPython(project, EXPORT_SCRIPT, JSON.stringify({ original: project.externalPptx.originalPath, slides,
-    sourceSlideMap: project.templateSlideMap, fonts: project.templateSpec?.fonts }));
+  return (io.runPython || runPython)(project, EXPORT_SCRIPT, JSON.stringify({ original: project.externalPptx.originalPath, slides,
+    sourceSlideMap: project.templateSlideMap, fonts: project.templateSpec?.fonts,exportManifest:exportManifest(project) }));
 }
 
 export const _internals = { IMPORT_SCRIPT, EXPORT_SCRIPT };

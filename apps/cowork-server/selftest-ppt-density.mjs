@@ -44,10 +44,13 @@ try {
     body('a', 'The owner compares the recorded result with the agreed condition.'),
     body('b', 'Review happens before the decision; record the evidence and responsibility.'),
     { id: 'end', title: 'Validation summary', focus: 'Retain evidence and responsibility.', keyPoints: [{ text: 'Retain evidence and responsibility.' }], refs: [] }] };
+  raw.slides[1].sourceUnitIds=[table.id,checklist.id];
+  raw.slides[2].sourceUnitIds=[];
+  raw.slides[3].sourceUnitIds=[source.semantic.inventory.items.find(i=>i.type==='SummaryBlock').id];
   const packed = packing.packOutline(base, raw);
   assert.equal(packed.slides.length, 3); assert.equal(packed.densityPacking.mergeCount, 1);
   assert.equal(packed.slides[1].keyPoints.length, 2); assert.ok(packed.slides[1].densityFit.capacity_ok);
-  assert.deepEqual(packed.slides[1].chunkRefs, table.chunkRefs); checked();
+  assert.deepEqual(packed.slides[1].chunkRefs, [...new Set([...table.chunkRefs,...checklist.chunkRefs])]); checked();
   assert.equal(packing.packOutline(base, {slides:raw.slides.map((s,i)=>i===2?{...s,question:'A different reader question'}:s)}).slides.length, 4); checked();
   assert.equal(packing.packOutline({ ...base, pageDecision: { source: 'user', mode: 'explicit' } }, raw).slides.length, 4);
   assert.throws(() => packing.packOutline(base, { slides: raw.slides.map(s => ({ ...s, sourceUnitIds: ['unknown'] })) }), /unknown source/); checked();
@@ -91,7 +94,7 @@ try {
     throw new Error('outline did not settle');
   }
   for (const kind of ['paste','file','prompt']) {
-    const created = await request('POST', 'projects', { inputKind: kind, text: source.text, prompt: kind === 'prompt' ? 'Explain validation' : 'Explain the supplied material',
+    const created = await request('POST', 'projects', { inputKind: kind, text: source.text, prompt: kind === 'prompt' ? source.text : 'Explain the supplied material',
       ...(kind === 'file' ? { fileName: 'validation.html', fileBase64: Buffer.from('<html><body>'+source.text+'</body></html>').toString('base64') } : {}), generationPolicy: config, template: 'light', model: 'simulated', configId: 'simulation' });
     assert.equal(created.status, 201, JSON.stringify(created.body));
     const ready = await settle(created.body.project.id);
@@ -120,10 +123,11 @@ try {
   };
   deps.renderPptx = async p => {
     const filename = path.join(exportDir,'density-native-smoke.pptx');
-    const data = {slides:p.deck.slides,renderTree:buildRenderTree(p),palette:p.templateSpec.palette,fonts:p.templateSpec.fonts};
+    const {exportManifest}=await import('./lib/ppt-export-integrity.mjs');
+    const data = {exportManifest:exportManifest(p),slides:p.deck.slides,renderTree:buildRenderTree(p),palette:p.templateSpec.palette,fonts:p.templateSpec.fonts};
     const result=spawnSync(python,['-c',renderer.SCRIPT],{input:JSON.stringify(data),env:{...process.env,PPT_OUTPUT:filename},encoding:'utf8',maxBuffer:2000000});
     assert.equal(result.status,0,result.stderr);
-    return {bytes:fs.statSync(filename).size};
+    return JSON.parse(result.stdout);
   };
   const native=await request('POST','projects',{inputKind:'paste',text:source.text,prompt:'Explain validation',generationPolicy:config,template:'light',configId:'simulation'});
   const ready=await settle(native.body.project.id);assert.equal(ready.pages,3);assert.equal(ready.status,'outline_ready',ready.error);

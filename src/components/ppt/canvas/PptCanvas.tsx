@@ -2,6 +2,7 @@
 /* eslint-disable @next/next/no-img-element -- Presentation IR images are bounded local data URLs. */
 
 import { useEffect, useRef, useState } from "react";
+import DOMPurify from "dompurify";
 import { useTranslation } from "@/hooks/useTranslation";
 import type { PptBounds, PptRenderElement, PptRenderSlide } from "../types";
 
@@ -141,7 +142,7 @@ function ElementContent({
 }) {
   const textStyle = {
     color: element.style?.color,
-    fontFamily: element.style?.eastAsiaFontFamily || element.style?.fontFamily,
+    fontFamily: `'${element.style?.fontFamily || 'sans-serif'}','${element.style?.eastAsiaFontFamily || 'sans-serif'}','Noto Sans CJK SC','PingFang SC','Hiragino Sans',sans-serif`,
     // The canvas is 960 px wide for a 13.333 in slide: 72 px/in, so one
     // PowerPoint point maps to one canvas pixel before responsive scaling.
     fontSize: `${Math.max(6, (element.style?.fontSizePt || 18) * scale)}px`,
@@ -173,6 +174,10 @@ function ElementContent({
         }}
       />
     );
+  if (element.kind === "text" && element.content?.mathMl)
+    return <div className="flex h-full items-center overflow-hidden" style={textStyle} onDoubleClick={onEdit}
+      aria-label={element.content.mathText || element.content.text}
+      dangerouslySetInnerHTML={{__html:DOMPurify.sanitize(element.content.mathMl,{USE_PROFILES:{mathMl:true}})}} />;
   if (element.kind === "text")
     return (
       <div
@@ -228,7 +233,7 @@ function ElementContent({
         src={element.content!.dataUrl}
         alt={element.content!.text || ""}
         className="absolute max-w-none"
-        style={{ width: `${width}%`, height: `${height}%`, left: `${-left * width}%`, top: `${-top * height}%` }}
+        style={{ width: `${width}%`, height: `${height}%`, left: `${-left * width}%`, top: `${-top * height}%`, objectFit: element.content?.sourceImageId ? 'contain' : 'fill' }}
         draggable={false}
       /></div>;
     })();

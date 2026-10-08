@@ -8,6 +8,7 @@
 
 | 文件 | 主题 |
 |------|------|
+| [ppt-factor-zoo-repetition-media-gamma-review-20261007.md](ppt-factor-zoo-repetition-media-gamma-review-20261007.md) | Mood Board 21页成品与Gamma逐页对照：重复32.30%、零图片/表格、模拟偏差与产品repair重复回流复现；P0修复、Prompt/组件契约与验收方案（待实施） |
 | [ppt-gamma-density-page-estimation-review-20261006.md](ppt-gamma-density-page-estimation-review-20261006.md) | 以附件Gamma密度为标准：22页不变的代码/Prompt根因、实测与控制实验、通用grouping/packing/自动页数方案及P0–P2建议 |
 | [ppt_next_round_audit.md](ppt_next_round_audit.md) | PPT全工作流/38项问题登记、模板分层限制、安全与Gamma同源内容对照 |
 | [ppt_performance_benchmark.md](ppt_performance_benchmark.md) | 七入口cold/warm、10页/22页Before–After实测、阶段耗时、Gamma公平比较及限制 |

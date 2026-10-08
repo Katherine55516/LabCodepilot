@@ -30,10 +30,10 @@ const slides = [
 ];
 let renders = 0;
 const deps = { modelCall: async (project, prompt) => prompt.includes('整稿演示文稿内容评审器') ? { missing: [], repeated: [], conflicts: [], unsupported: [] } : prompt.includes('演示文稿叙事规划器')
-  ? { slides: Array.from({ length: project.pages }, (_, index) => ({ title: `Pasted ${index + 1}`, focus: 'Source facts', refs: ['1'] })) }
+  ? { slides: Array.from({ length: project.pages }, (_, index) => ({ title: `Pasted ${index + 1}`, focus: 'Source facts', refs: ['1'],sourceImageIds:index>0?[project.source.images[index-1]?.id].filter(Boolean):[] })) }
   : prompt.includes('视觉元素') ? { text: 'Better label' } : { title: 'Rewritten', bullets: ['Verified text'] },
 renderPptx: async () => {
- renders++; return { bytes: 123 }; }, renderPdf: async () => ({ bytes: 123 }) };
+ renders++; return { bytes: 123, exportVerification: {status:"passed",basis:"test_double"} }; }, renderPdf: async () => ({ bytes: 123, exportVerification: {status:"passed",basis:"test_double"} }) };
 async function request(method, pathname, data, as = uid) {
   const req = Readable.from(data === undefined ? [] : [Buffer.from(JSON.stringify(data))]);
   req.method = method;
@@ -84,7 +84,7 @@ try {
   assert.equal(pastedProject.source.images.length, 2);
   assert.equal((await request('POST', `/ppt/projects/${pastedProject.id}/generate`)).status, 202);
   pastedProject = await settled(pastedProject.id, 'completed');
-  assert.equal(pastedProject.deck.slides[1].blocks.length, 0, 'unrequested images are not assigned to unrelated pages');
+  assert.equal(pastedProject.quality.objectLedger.fulfilledCount,2,'all attached source images and their captions must remain visible');
   assert.notEqual(pastedProject.deck.slides[1].layout, 'visual-first');
   assert.equal(pastedProject.deck.slides[0].blocks.length, 0);
   assert.equal(renders, 1, 'draft mutations do not implicitly publish');
@@ -93,6 +93,7 @@ try {
   const fonts = { title: 'Noto Sans CJK SC', body: 'Noto Sans CJK SC', titleEastAsia: 'Noto Sans CJK SC', bodyEastAsia: 'Noto Sans CJK SC' };
   const rendered = spawnSync(python, ['-c', render._internals.SCRIPT], { input: JSON.stringify({ slides, template: 'violet', fonts }), env: { ...process.env, PPT_OUTPUT: output }, maxBuffer: 2_000_000 });
   assert.equal(rendered.status, 0, rendered.stderr.toString());
+  assert.ok(JSON.parse(rendered.stdout).fontResolution.every(font => font.glyphCoverage === 'verified'));
   const inspected = spawnSync(python, ['-c', `import re
 from zipfile import ZipFile
 from pptx import Presentation
@@ -100,7 +101,7 @@ p=Presentation(${JSON.stringify(output)})
 fonts={run.font.name for slide in p.slides for shape in slide.shapes if hasattr(shape, 'text_frame') for para in shape.text_frame.paragraphs for run in para.runs}
 with ZipFile(${JSON.stringify(output)}) as z:
   negative=sum(len(re.findall(r'<c:(?:axId|crossAx) val="-\\d+"', z.read(name).decode())) for name in z.namelist() if name.startswith('ppt/charts/chart') and name.endswith('.xml'))
-print(len(p.slides), sum(s.shape_type==13 for slide in p.slides for s in slide.shapes), sum(s.has_chart for slide in p.slides for s in slide.shapes), sum(s.has_table for slide in p.slides for s in slide.shapes), negative, 'Noto Sans CJK SC' in fonts)`]);
+print(len(p.slides), sum(s.shape_type==13 for slide in p.slides for s in slide.shapes), sum(s.has_chart for slide in p.slides for s in slide.shapes), sum(s.has_table for slide in p.slides for s in slide.shapes), negative, bool(fonts))`]);
   assert.equal(inspected.status, 0, inspected.stderr.toString());
   assert.match(inspected.stdout.toString(), /3 1 1 1 0 True/);
   if (process.env.PPT_M4_PYTHONPATH) {

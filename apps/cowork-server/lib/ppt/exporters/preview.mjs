@@ -1,4 +1,5 @@
 import { SLIDE_SIZE } from '../render-tree.mjs';
+import { equationContent } from '../../ppt-math.mjs';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 const lines = element => element.kind === 'text' ? [element.content?.text || ''] : (element.content?.items || []).map((item, index) => element.kind === 'timeline' ? `${index + 1}. ${item.text}` : element.kind === 'list' ? `• ${item.text}` : item.text);
@@ -38,6 +39,10 @@ export function slideSvg(slide) {
       // Keep CSS text at a normal pixel size, then scale the HTML subtree
       // into the SVG's EMU viewBox (96 CSS pixels per inch).
       const size = Number(element.style?.fontSizePt || 18) * 96 / 72; const align = element.style?.textAlign === 'center' ? 'center' : element.style?.textAlign === 'right' ? 'right' : 'left';
+      if(element.content?.mathMl){
+        const math=equationContent(element.content.mathText||element.content.text).mathMl;
+        if(math)return `<foreignObject ${common} x="${b.x}" y="${b.y}" width="${b.width}" height="${b.height}"><div xmlns="http://www.w3.org/1999/xhtml" style="display:flex;align-items:center;width:${b.width/9525}px;height:${b.height/9525}px;transform:scale(9525);transform-origin:top left;font-size:${size}px;color:${esc(element.style?.color||'#111111')}">${math}</div></foreignObject>`;
+      }
       const text = lines(element).join('\n'); const latin = element.style?.fontFamily || 'sans-serif'; const eastAsia = HANT.test(text) ? (element.style?.eastAsiaFontFamilyHant || element.style?.eastAsiaFontFamily) : element.style?.eastAsiaFontFamily;
       const structured = element.content?.paragraphs;
       const pointLayout = element.kind === 'list' ? element.content?.pointLayout : null;

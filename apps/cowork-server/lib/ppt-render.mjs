@@ -4,6 +4,9 @@
 import { spawn } from 'node:child_process';
 import * as orch from './orchestrator.mjs';
 import { buildRenderTree } from './ppt/render-tree.mjs';
+import { OFFICE_MATH_SCRIPT } from './ppt-math.mjs';
+import { exportManifest, EXPORT_VERIFY_SCRIPT } from './ppt-export-integrity.mjs';
+import { FONT_SCRIPT } from './ppt-fonts.mjs';
 
 const SCRIPT = String.raw`
 import base64, io, json, math, os, re, sys
@@ -21,6 +24,10 @@ from pptx.parts.image import Image
 from PIL import Image as PillowImage
 from pptx.oxml.xmlchemy import OxmlElement
 from pptx.oxml.ns import qn
+
+${OFFICE_MATH_SCRIPT}
+${EXPORT_VERIFY_SCRIPT}
+${FONT_SCRIPT}
 
 TITLE_FONT = BODY_FONT = TITLE_EA = BODY_EA = ''
 CJK_RE = re.compile(r'[\u2e80-\u9fff\uf900-\ufaff]')
@@ -52,11 +59,12 @@ def cjk_font(paragraph, size, color, bold=False, role='body'):
         # run when the template's Latin font has no Han glyphs. The same CJK
         # template family is therefore set in both slots for Chinese runs;
         # English continues to use the template's Latin family.
-        run.font.name = east_asia if language.startswith('zh-') else latin
+        actual=resolve_font(east_asia if language.startswith('zh-') else latin,run.text)
+        run.font.name = actual
         run.font.size = Pt(size)
         run.font.bold = bold
         run.font.color.rgb = color
-        set_east_asia_font(run, east_asia, language)
+        set_east_asia_font(run, actual if language.startswith('zh-') else east_asia, language)
 
 def textbox(slide, x, y, w, h, text, size, color, bold=False, role='body', align=None):
     box = slide.shapes.add_textbox(Inches(x), Inches(y), Inches(w), Inches(h))
@@ -225,9 +233,10 @@ def render_scene_element(slide, element):
     source_name='AIMate source:'+str(source.get('sourceUnitId',''))+':'+str(source.get('type',''))
     if kind == 'text':
         shape = slide.shapes.add_textbox(x, y, w, h); para = shape.text_frame.paragraphs[0]
+        if content.get('mathMl'):shape.text_frame.margin_left=shape.text_frame.margin_right=shape.text_frame.margin_top=shape.text_frame.margin_bottom=0
         if source: shape.name=source_name
         if element.get('sourceArtifact') and item_style.get('fill'): shape.fill.solid(); shape.fill.fore_color.rgb=scene_color(item_style['fill'],RGBColor(255,255,255))
-        para.text = str(content.get('text') or '')
+        if not write_office_math(para,content,size,color): para.text = str(content.get('text') or '')
         para.line_spacing = float(item_style.get('lineHeight') or 1.12)
         para.space_after = Pt(size * float(item_style.get('paragraphSpacingEm') or 0))
         if item_style.get('textAlign') == 'right': para.alignment = PP_ALIGN.RIGHT
@@ -384,13 +393,25 @@ with ZipFile(temp, 'r') as source, ZipFile(normalized, 'w', ZIP_DEFLATED) as tar
             chart_xml = blob.decode('utf-8')
             chart_xml = re.sub(r'(<c:(?:axId|crossAx) val=")-(\d+)(")', r'\1\2\3', chart_xml)
             chart_xml = re.sub(r'(<a:latin typeface="[^"]+"/>)(?!\s*<a:ea\b)', lambda match: match.group(1) + '<a:ea typeface="'+escape(BODY_EA, {'"': '&quot;'})+'"/>', chart_xml)
-            latin_node = '<a:latin typeface="'+escape(BODY_FONT, {'"': '&quot;'})+'"/>'
-            east_asia_node = '<a:ea typeface="'+escape(BODY_EA, {'"': '&quot;'})+'"/>'
+            chart_text=' '.join(ET.fromstring(chart_xml).itertext())
+            chart_font=resolve_font(BODY_EA if CJK_RE.search(chart_text) else BODY_FONT,chart_text)
+            chart_xml=re.sub(r'<a:(?:latin|ea) typeface="[^"]+"/>','',chart_xml)
+            latin_node = '<a:latin typeface="'+escape(chart_font, {'"': '&quot;'})+'"/>'
+            east_asia_node = '<a:ea typeface="'+escape(chart_font, {'"': '&quot;'})+'"/>'
             chart_xml = re.sub(r'<a:(defRPr|endParaRPr)([^>]*)/>', lambda match: '<a:'+match.group(1)+match.group(2)+'>'+latin_node+east_asia_node+'</a:'+match.group(1)+'>', chart_xml)
             chart_xml = re.sub(r'<a:(defRPr|endParaRPr)([^>]*)>(.*?)</a:\1>',
                                lambda match: match.group(0) if '<a:latin ' in match.group(3) else '<a:'+match.group(1)+match.group(2)+'>'+match.group(3)+latin_node+east_asia_node+'</a:'+match.group(1)+'>',
                                chart_xml, flags=re.S)
-            blob = chart_xml.encode('utf-8')
+            ns_chart={'a':'http://schemas.openxmlformats.org/drawingml/2006/main'}
+            # Preserve prefixes used by Office chart parsers.
+            from lxml import etree as chart_etree
+            chart_lxml=chart_etree.fromstring(chart_xml.encode('utf-8'))
+            for run in chart_lxml.findall('.//a:r',ns_chart):
+                rpr=run.find('a:rPr',ns_chart)
+                if rpr is None:rpr=chart_etree.Element('{'+ns_chart['a']+'}rPr');run.insert(0,rpr)
+                for tag in ('latin','ea'):
+                    element=chart_etree.SubElement(rpr,'{'+ns_chart['a']+'}'+tag);element.set('typeface',chart_font)
+            blob = chart_etree.tostring(chart_lxml)
         target_zip.writestr(info, blob)
 
 def validate_font_integrity(package_path):
@@ -419,14 +440,19 @@ def validate_font_integrity(package_path):
 validate_font_integrity(normalized)
 os.replace(normalized, temp)
 os.replace(temp, target)
-print(json.dumps({'slides': len(prs.slides), 'path': target, 'bytes': os.path.getsize(target)}))
+verification=verify_export(target,data.get('exportManifest'))
+print(json.dumps({'slides': len(prs.slides), 'path': target, 'bytes': os.path.getsize(target),'exportVerification':verification,'fontResolution':list(FONT_RESOLUTIONS.values())}))
 `;
 
-export async function renderPptx(project) {
+export async function renderPptx(project, io = {}) {
+  const payload=JSON.stringify({ slides: project.deck.slides, renderTree: project.renderTree || buildRenderTree(project), exportManifest:exportManifest(project), template: project.template, palette: project.templateSpec?.palette, fonts: project.templateSpec?.fonts });
+  if(io.runPython)return io.runPython(project,SCRIPT,payload);
   const { name } = await orch.ensureContainer(project.id, project.uid, orch.KIND_PPT);
   return new Promise((resolve, reject) => {
     const child = spawn('docker', ['exec', '-i', '-u', String(orch.AGENT_UID), '-e', `PPT_OUTPUT=${project.renderOutput || '/workspace/presentation.pptx'}`, name, 'python3', '-c', SCRIPT], { stdio: ['pipe', 'pipe', 'pipe'] });
     let out = ''; let err = '';
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
     child.stdout.on('data', (c) => { out = (out + c).slice(-10000); });
     child.stderr.on('data', (c) => { err = (err + c).slice(-10000); });
     child.on('error', reject);
@@ -435,7 +461,7 @@ export async function renderPptx(project) {
       try { resolve(JSON.parse(out)); } catch { reject(new Error('PPTX renderer returned invalid result')); }
     });
     child.stdin.on('error', () => { /* child exit is handled above */ });
-    child.stdin.end(JSON.stringify({ slides: project.deck.slides, renderTree: project.renderTree || buildRenderTree(project), template: project.template, palette: project.templateSpec?.palette, fonts: project.templateSpec?.fonts }));
+    child.stdin.end(payload);
   });
 }
 

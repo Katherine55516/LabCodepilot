@@ -219,7 +219,7 @@ export function writeTemplateIR(uid, id, ir) {
 export function readTemplateIR(uid, id, hash) {
   try {
     const ir = JSON.parse(fs.readFileSync(templateFile(uid, id) + '.ir.json', 'utf8'));
-    if (ir.schemaVersion !== 1 || ir.parserVersion !== 'pptx-ir-2' || ir.sha256 !== hash) return null;
+    if (ir.schemaVersion !== 1 || ir.parserVersion !== 'pptx-ir-3' || ir.sha256 !== hash) return null;
     return reviveStoredMedia(ir, null, uid);
   } catch (error) { if (error.code === 'ENOENT') return null; throw error; }
 }

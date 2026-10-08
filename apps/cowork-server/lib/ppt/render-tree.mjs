@@ -66,7 +66,7 @@ function buildPreservedSlide(project, slide, index) {
     style: { fontFamily: project.templateSpec?.fonts?.body, eastAsiaFontFamily: project.templateSpec?.fonts?.bodyEastAsia,
       color: project.templateSpec?.palette?.foreground, ...(node.style || {}) },
     zIndex: Number(node.zIndex || 0), rotation: Number(node.rotation || 0), locked: Boolean(node.locked),
-    semanticRole: node.semanticRole, nativeRef: node.nativeRef, nativeTextFrame: node.nativeTextFrame,
+    semanticRole: node.semanticRole, nativeRef: node.nativeRef, nativeTextFrame: node.nativeTextFrame,sourceArtifact:node.sourceArtifact,
   })).sort((a, b) => a.zIndex - b.zIndex);
   return { id: slide.id, slideId: slide.id, index, layoutId: slide.layoutId,
     size: { width: project.templateFidelity.width, height: project.templateFidelity.height },

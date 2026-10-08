@@ -3735,6 +3735,8 @@ const en = {
   'ppt.ai.region': 'Region (optional)',
   'ppt.ai.glossary': 'Glossary (optional)',
   'ppt.ai.ratio': 'Approximate length target',
+  'ppt.ai.preservedObjects': 'Source objects preserved',
+  'ppt.ai.changedObjects': 'Object status changes',
   'ppt.ai.length': 'Prose length',
   'ppt.ai.noChange': 'No content change',
   'ppt.ai.targetUnmet': 'Approximate target unmet; review capacity and source constraints',
