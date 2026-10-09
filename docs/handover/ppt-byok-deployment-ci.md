@@ -1,6 +1,6 @@
 # PPT BYOK 配套部署与 Apple Silicon 验收
 
-更新：2026-10-09。GitHub 测试仓库：`Katherine516/LabCodepilot`（私有）；组织 origin 保留。本机 Intel，不把本地测试算成 arm64 验收。
+更新：2026-10-09。GitHub 测试仓库：`Katherine516/LabCodepilot`（创建时私有，2026-10-09运行CI时GitHub显示公开）；组织 origin 保留。本机 Intel，不把本地测试算成 arm64 验收。
 
 ## 推荐顺序与落实
 
@@ -49,3 +49,9 @@ GitHub 当前账号有仓库 push 权限，没有管理 runner 权限（runner-l
 - 用户已授权先推送到个人私有仓库 Katherine516/LabCodepilot 的 codex/ppt-byok-arm64-validation 分支；CI 尚未调度，远端主机与真实账号/沙箱仍未提供。
 
 官方依据：[runner 选择/架构](https://docs.github.com/en/actions/how-tos/write-workflows/choose-where-workflows-run/choose-the-runner-for-a-job)、[gh workflow run 与 ref](https://cli.github.com/manual/gh_workflow_run)。
+
+## 2026-10-09 arm64 CI 实际运行
+
+- 首次 dispatch 被 GitHub 拒绝：job 级 env 不支持 runner.temp，workflow 解析失败，未运行测试。将 CLAUDE_GUI_DATA_DIR 改为架构检查 step 内通过 RUNNER_TEMP / GITHUB_ENV 设置，保留隔离配置与原测试范围。
+- 同时补齐 PDF 渲染器直接依赖的 matplotlib，避免干净 runner 缺少本机已有库。
+- CI 必须核对修复 commit、runner.json、单元/selftests/browser/归档各步骤；结果与失败记录在此继续补充。

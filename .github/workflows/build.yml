@@ -82,7 +82,6 @@ jobs:
       contents: read
     env:
       PORT: '3110'
-      CLAUDE_GUI_DATA_DIR: ${{ runner.temp }}/ppt-ci-profile
       # Test-only AES key; no user's credential or live model key in CI.
       CLAUDE_GUI_SECRET_KEY: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
       PPT_CI_OUTPUT: ${{ github.workspace }}/outputs/ppt-ci
@@ -98,6 +97,7 @@ jobs:
       - name: Assert native Apple Silicon and record runtime
         run: |
           test "$(uname -m)" = arm64
+          echo "CLAUDE_GUI_DATA_DIR=$RUNNER_TEMP/ppt-ci-profile" >> "$GITHUB_ENV"
           mkdir -p outputs/ppt-ci
           node -e 'console.log(JSON.stringify({sha:process.env.GITHUB_SHA,arch:process.arch,platform:process.platform,cpu:require("os").cpus()[0].model,node:process.version},null,2))' > outputs/ppt-ci/runner.json
           echo "PPT_TEST_PYTHON=$(command -v python)" >> "$GITHUB_ENV"
@@ -105,7 +105,7 @@ jobs:
         run: |
           npm ci
           brew install cairo
-          python -m pip install python-pptx Pillow lxml python-docx openpyxl beautifulsoup4 cairosvg pypdf
+          python -m pip install python-pptx Pillow lxml python-docx openpyxl beautifulsoup4 cairosvg pypdf matplotlib
           echo "DYLD_FALLBACK_LIBRARY_PATH=$(brew --prefix)/lib" >> "$GITHUB_ENV"
           npx playwright install chromium
       - name: Unit and type checks
