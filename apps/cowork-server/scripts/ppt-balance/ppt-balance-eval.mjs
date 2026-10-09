@@ -3,15 +3,19 @@
  *
  *   node scripts/ppt-balance/ppt-balance-eval.mjs estimate [--out DIR]
  *   node scripts/ppt-balance/ppt-balance-eval.mjs inspect  [--out DIR] [--write-bands]
- *   node scripts/ppt-balance/ppt-balance-eval.mjs run --input ID --template ID --adapter dry|cli|routine [--pages N] [--out DIR]
+ *   node scripts/ppt-balance/ppt-balance-eval.mjs run --input ID --template ID --adapter dry|docker|cli|routine [--pages N] [--out DIR]
  *
  * estimate: deterministic page/assumption/allocation metrics for every input (no model).
  * inspect:  balance metrics (repetition, media scaling, density, numbers) for Gamma
  *           references and module outputs; --write-bands writes lib/ppt-gamma-reference-bands.json.
  * run:      end-to-end generation through the product API with a real model adapter.
- *           cli uses PPT_EVAL_CLAUDE_BIN (a local Claude Code CLI with the user's own
- *           credentials) and the production PPT system prompt; routine uses the product's
- *           Docker/Cowork model path; dry stops at the first model call to verify wiring.
+ *           docker runs the Linux Claude Code binary (PPT_EVAL_CLAUDE_LINUX_BIN, default: the
+ *           one bundled with the Claude desktop app) in a throwaway python:3-slim container,
+ *           like the product image; ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN is passed
+ *           through from the caller's own shell by name only. cli runs a local CLI
+ *           (PPT_EVAL_CLAUDE_BIN). Both use the production PPT system prompt with no tools.
+ *           routine uses the product's Cowork path (account-backend credentials); dry stops
+ *           at the first model call to verify wiring. PPT_EVAL_MODEL picks the model.
  * Python: PPT_TEST_PYTHON should point at a runtime with python-pptx (+ LibreOffice on
  * PATH for PDF); inspection itself only needs the standard library. */
 import fs from 'node:fs';
@@ -143,23 +147,50 @@ function writeBands(decks) {
 }
 
 // ---------------------------------------------------------------- run
-function cliAdapter(PPT_SYSTEM_PROMPT, parseModelJson) {
-  const bin = process.env.PPT_EVAL_CLAUDE_BIN;
-  if (!bin) throw new Error('cli adapter needs PPT_EVAL_CLAUDE_BIN (a local Claude Code CLI signed in with your own account or ANTHROPIC_API_KEY)');
-  return async (project, prompt) => new Promise((resolve, reject) => {
-    const child = spawn(bin, ['-p', '--output-format', 'json', '--system-prompt', PPT_SYSTEM_PROMPT, '--tools', '', '--disallowedTools', 'mcp__*',
-      ...(process.env.PPT_EVAL_MODEL ? ['--model', process.env.PPT_EVAL_MODEL] : [])], { stdio: ['pipe', 'pipe', 'pipe'] });
+// Same flags as the product's PPT nodes (routine-runner): print mode, the PPT
+// system prompt, no tools and no MCP; the prompt goes through stdin.
+const claudeArgs = PPT_SYSTEM_PROMPT => ['-p', '--output-format', 'json', '--system-prompt', PPT_SYSTEM_PROMPT, '--tools', '', '--disallowedTools', 'mcp__*',
+  ...(process.env.PPT_EVAL_MODEL ? ['--model', process.env.PPT_EVAL_MODEL] : [])];
+function claudeJson(command, args, prompt, parseModelJson) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, args, { stdio: ['pipe', 'pipe', 'pipe'] });
     let out = '', err = '';
     child.stdout.setEncoding('utf8'); child.stderr.setEncoding('utf8');
     child.stdout.on('data', data => { out += data; }); child.stderr.on('data', data => { err = (err + data).slice(-4000); });
     child.on('error', reject);
     child.on('close', code => {
-      if (code !== 0) return reject(new Error(`model CLI exit ${code}: ${err}`));
-      try { const result = JSON.parse(out); if (result.is_error) throw new Error(result.result || 'model error'); resolve(parseModelJson(result.result)); }
-      catch (error) { reject(error); }
+      let result = null; try { result = JSON.parse(out); } catch { /* reported below */ }
+      if (code !== 0 || !result || result.is_error) return reject(new Error(`model call failed (exit ${code}): ${String(result?.result || err || out).slice(0, 600)}`));
+      try { resolve(parseModelJson(result.result)); } catch (error) { reject(error); }
     });
+    child.stdin.on('error', () => {});
     child.stdin.end(prompt);
   });
+}
+function cliAdapter(PPT_SYSTEM_PROMPT, parseModelJson) {
+  const bin = process.env.PPT_EVAL_CLAUDE_BIN;
+  if (!bin) throw new Error('cli adapter needs PPT_EVAL_CLAUDE_BIN (a local Claude Code CLI signed in with your own account or ANTHROPIC_API_KEY)');
+  return async (_project, prompt) => claudeJson(bin, claudeArgs(PPT_SYSTEM_PROMPT), prompt, parseModelJson);
+}
+function linuxClaudeBinary() {
+  if (process.env.PPT_EVAL_CLAUDE_LINUX_BIN) return process.env.PPT_EVAL_CLAUDE_LINUX_BIN;
+  const root = path.join(os.homedir(), 'Library/Application Support/Claude/claude-code-vm');
+  const versions = fs.existsSync(root) ? fs.readdirSync(root).filter(name => fs.existsSync(path.join(root, name, 'claude'))) : [];
+  versions.sort((a, b) => a.localeCompare(b, undefined, { numeric: true }));
+  return versions.length ? path.join(root, versions.at(-1), 'claude') : null;
+}
+function dockerAdapter(PPT_SYSTEM_PROMPT, parseModelJson) {
+  const bin = linuxClaudeBinary();
+  if (!bin) throw new Error('docker adapter needs a Linux Claude Code binary (set PPT_EVAL_CLAUDE_LINUX_BIN)');
+  if (!process.env.ANTHROPIC_API_KEY && !process.env.CLAUDE_CODE_OAUTH_TOKEN)
+    throw new Error('docker adapter needs ANTHROPIC_API_KEY or CLAUDE_CODE_OAUTH_TOKEN exported in your own shell (it is passed to the container by name, never written anywhere)');
+  const image = process.env.PPT_EVAL_DOCKER_IMAGE || 'python:3-slim';
+  // Only the variable names are on the command line; docker copies the values
+  // from this process's environment. The caller's ANTHROPIC_BASE_URL is not
+  // forwarded unless PPT_EVAL_ANTHROPIC_BASE_URL is set explicitly.
+  const env = ['-e', 'HOME=/tmp', '-e', 'ANTHROPIC_API_KEY', '-e', 'CLAUDE_CODE_OAUTH_TOKEN',
+    ...(process.env.PPT_EVAL_ANTHROPIC_BASE_URL ? ['-e', `ANTHROPIC_BASE_URL=${process.env.PPT_EVAL_ANTHROPIC_BASE_URL}`] : [])];
+  return async (_project, prompt) => claudeJson('docker', ['run', '--rm', '-i', ...env, '-v', `${bin}:/opt/claude:ro`, image, '/opt/claude', ...claudeArgs(PPT_SYSTEM_PROMPT)], prompt, parseModelJson);
 }
 
 async function runMode() {
@@ -177,9 +208,10 @@ async function runMode() {
   const calls = [];
   const adapters = {
     dry: async (_project, prompt) => { calls.push({ chars: prompt.length }); throw new Error(`dry adapter: wiring reached the first model call (${prompt.length} chars)`); },
-    cli: null, routine: api.defaultDeps.modelCall,
+    routine: api.defaultDeps.modelCall,
   };
-  const adapter = adapterName === 'cli' ? cliAdapter(prompts.PPT_SYSTEM_PROMPT, api.parseModelJson) : adapters[adapterName];
+  const adapter = adapterName === 'cli' ? cliAdapter(prompts.PPT_SYSTEM_PROMPT, api.parseModelJson)
+    : adapterName === 'docker' ? dockerAdapter(prompts.PPT_SYSTEM_PROMPT, api.parseModelJson) : adapters[adapterName];
   if (!adapter) throw new Error(`unknown adapter ${adapterName}`);
   const uid = 'ppt-balance-eval';
   const deps = { ...api.defaultDeps,
@@ -201,7 +233,7 @@ async function runMode() {
     for (let i = 0; i < 36000; i++) { const p = store.get(uid, id); if (statuses.includes(p?.status)) return p; if (['failed', 'cancelled'].includes(p?.status)) return p; await new Promise(r => setTimeout(r, 100)); }
     throw new Error('timed out');
   };
-  const report = { input: input.id, template: template.id, adapter: adapterName, startedAt: new Date().toISOString(), calls };
+  const report = { input: input.id, template: template.id, adapter: adapterName, model: process.env.PPT_EVAL_MODEL || 'cli default', startedAt: new Date().toISOString(), calls };
   try {
     let templateId = template.builtin;
     if (!templateId) {
@@ -247,5 +279,7 @@ async function runMode() {
 
 const handlers = { estimate: estimateMode, inspect: inspectMode, run: runMode };
 if (!handlers[mode]) { console.error('usage: ppt-balance-eval.mjs estimate|inspect|run [options]'); process.exit(2); }
-const result = await handlers[mode]();
+let result;
+try { result = await handlers[mode](); }
+catch (error) { console.error(`ppt-balance-eval ${mode}: ${error.message}`); process.exit(1); }
 console.log(JSON.stringify({ mode, outDir, summary: Array.isArray(result) ? result.length : result?.decks ? result.decks.length : result?.error || result?.status }, null, 0));
