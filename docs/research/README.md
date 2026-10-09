@@ -8,6 +8,7 @@
 
 | 文件 | 主题 |
 |------|------|
+| [ppt-master-skill-review-20261009.md](ppt-master-skill-review-20261009.md) | PPT module/skill评审及Factor Zoo同源成品实证：master16页与Gamma10页逐主题对照、实际PPTX/PDF密度/字号/媒体角色、native路径边界；页面设计契约/关系类型/媒体账本/分层修复的补强、Gamma遗漏与无来源扩展、P0–P2实施与通用验收 |
 | [ppt-hard-rules-vs-gamma-current-audit-20261008.md](ppt-hard-rules-vs-gamma-current-audit-20261008.md) | 当前 PPT/Gamma hard rules 分层比较；五项 P0 负向复现；第11–17节逐项实施讨论：调用链/修改位置、发布事务、export v2/实际渲染、collision、完整义务与媒体处置schema、兼容迁移、联动施工及通用验收；第18节五项核心修复、真实PPTX/PDF和32组专项回归、未完成的复杂视觉/长输入/模型验收 |
 | [ppt-input-scope-harness-review-20261008.md](ppt-input-scope-harness-review-20261008.md) | PPT harness 输入框架评估与修复：bounded explanation、强制逐页范围审查、局部候选/应用门禁、导入基线、版本失效与跨输入对抗回归；真实模型判断边界 |
 | [ppt-alpha-mining-layout-content-gamma-review-20261008.md](ppt-alpha-mining-layout-content-gamma-review-20261008.md) | Alpha Mining 同源8页对比与 Gamma Compiler 实机创建：默认20页Plan→受限10页、流式布局/双语/换行与真实导出、单页/元素Agent入口、版本比较及修复告警；跨输入共享渲染契约、typed table/code/process、source-adaptive 深度与可见门禁已实施；生产 PPTX/PDF、单测/冒烟/CDP 证据与剩余 P0–P2 验收 |
