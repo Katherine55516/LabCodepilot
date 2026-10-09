@@ -104,8 +104,11 @@ jobs:
       - name: Install production and test dependencies
         run: |
           npm ci
-          brew install cairo
-          python -m pip install python-pptx Pillow lxml python-docx openpyxl beautifulsoup4 cairosvg pypdf matplotlib
+          brew install cairo fontconfig
+          brew install --cask libreoffice font-noto-sans-cjk-sc font-stix
+          fc-cache -f
+          soffice --version
+          python -m pip install python-pptx Pillow lxml python-docx openpyxl beautifulsoup4 cairosvg pypdf matplotlib pdfplumber reportlab
           echo "DYLD_FALLBACK_LIBRARY_PATH=$(brew --prefix)/lib" >> "$GITHUB_ENV"
           npx playwright install chromium
       - name: Unit and type checks

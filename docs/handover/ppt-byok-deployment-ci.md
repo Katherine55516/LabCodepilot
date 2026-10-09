@@ -55,3 +55,7 @@ GitHub 当前账号有仓库 push 权限，没有管理 runner 权限（runner-l
 - 首次 dispatch 被 GitHub 拒绝：job 级 env 不支持 runner.temp，workflow 解析失败，未运行测试。将 CLAUDE_GUI_DATA_DIR 改为架构检查 step 内通过 RUNNER_TEMP / GITHUB_ENV 设置，保留隔离配置与原测试范围。
 - 同时补齐 PDF 渲染器直接依赖的 matplotlib，避免干净 runner 缺少本机已有库。
 - CI 必须核对修复 commit、runner.json、单元/selftests/browser/归档各步骤；结果与失败记录在此继续补充。
+
+- 首次实际运行 [37930153189](https://github.com/Katherine516/LabCodepilot/actions/runs/37930153189)：1393df4；Apple M1 (Virtual)/Darwin arm64/Node22.23.2/Python3.12.10。2819单元通过、1skip；专项29通过、6失败、1缺失历史fixture跳过。5个失败来自缺少pdfplumber/reportlab；语义套件误用仓库外gamma.md，fallback不包含受保护术语。
+- 修复：干净runner安装pdfplumber/reportlab、实际LibreOffice、fontconfig及Noto CJK/STIX字体；语义套件统一使用固定输入且包含Deck Brief/Story Planner，原术语/标题/检索断言不变，不删除失败项或放宽生产质量门禁。
+- 安装依据：[LibreOffice](https://formulae.brew.sh/cask/libreoffice)、[Noto CJK](https://formulae.brew.sh/cask/font-noto-sans-cjk-sc)、[STIX](https://formulae.brew.sh/cask/font-stix)。

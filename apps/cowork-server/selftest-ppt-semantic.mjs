@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
 import { normalizePaste, _internals as sourceInternals } from './lib/ppt-source.mjs';
 import { spawnSync } from 'node:child_process';
 import os from 'node:os';
@@ -80,10 +79,10 @@ const tableSource = normalizePaste(longTable);
 assert.equal((tableSource.semantic.blocks.map(block => block.text).join('\n').match(/\| row_\d+ \| value_\d+ \|/g) || []).length, 150,
   'all table rows must survive oversized splitting');
 
-const gammaPath = new URL('../../../gamma.md', import.meta.url);
-const longDocument = fs.existsSync(gammaPath)
-  ? fs.readFileSync(gammaPath, 'utf8')
-  : Array.from({ length: 30 }, (_, index) => `## Topic ${index + 1}\n\nThe architecture connects the input, planning, content, and rendering stages. ${'Each stage preserves source evidence. '.repeat(20)}`).join('\n\n');
+// Keep the semantic/terminology fixture identical on local machines and CI.
+// A parent-directory gamma.md changed the tested source without being in Git.
+const longDocument = '# Gamma architecture\n\nDeck Brief captures constraints. Story Planner maps source evidence into page roles.\n\n'
+  + Array.from({ length: 30 }, (_, index) => `## Topic ${index + 1}\n\nThe architecture connects the input, planning, content, and rendering stages. ${'Each stage preserves source evidence. '.repeat(20)}`).join('\n\n');
 const gamma = normalizePaste(longDocument);
 assert.ok(gamma.semantic.chunks.length > 10, 'semantic indexing may split a packed source segment into multiple bounded chunks');
 assert.equal(gamma.semantic.stats.orphanHeadingCount, 0);
