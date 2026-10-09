@@ -1,0 +1,120 @@
+/** Typed source relations (matrix / order / alternative / definition) derived
+ * deterministically from the inventory, and checks that slides keep them.
+ * Relations come from source structure only; nothing here invents edges.
+ * Plan: docs/exec-plans/active/ppt-page-contract-relations-media-repair.md (A). */
+import { visibleNodes, nodeContentText } from './ppt-visible-content.mjs';
+
+const sectionKey = item => (item.sectionPath || []).join('\u0000');
+const stepLines = text => String(text || '').split('\n').map(line => line.trim()).filter(Boolean);
+const stepLabel = line => line.replace(/^\s*\d+[.)]\s*/u, '').split(/[:：]/u)[0].trim();
+const BRANCH = /\b(?:yes|no|if|otherwise|else)\b\s*[:：]|是\s*[:：]|否\s*[:：]|如果|否则/iu;
+const ALTERNATIVE_CUE = [
+  /(?:can be (?:expressed|implemented|constructed|built|measured|computed|done|defined)|(?:several|multiple|different|various|many) (?:ways|forms|styles|approaches|expressions|variants|methods))[^:：.。]{0,60}[:：]\s*([^.。]+)/iu,
+  /(?:多种|几种|若干|不同的?)(?:表达|构建|实现|方式|形式|做法|方法)[^：:。]{0,20}[：:]\s*([^。]+)/u,
+];
+const NOT_INTERCHANGEABLE = /not interchangeable|cannot be used interchangeably|不可互换|不能互换/iu;
+const EXPLAINS = /^\s*(?:where|here|then|with|in which|in this (?:formula|equation)|其中|这里|式中|此处|上式中)\b/iu;
+
+function alternativeMembers(text) {
+  for (const cue of ALTERNATIVE_CUE) {
+    const match = String(text || '').match(cue);
+    if (!match) continue;
+    const members = match[1].split(/\s*(?:,|;|，|；|、)\s*(?:or\s+|and\s+|或者?|以及)?|\s+or\s+|或者/u)
+      .map(item => item.replace(/^\s*(?:or|and|或|以及)\s+/iu, '').trim()).filter(item => item && item.length <= 120);
+    if (members.length >= 3) return members;
+  }
+  return null;
+}
+
+/** Builds typed relations; legacy fields keep coverage statistics working. */
+export function buildRelations(items) {
+  const relations = [];
+  const base = item => ({ sourceUnitId: item.id, source_ref: item.source_ref, chunkRefs: item.chunkRefs, priority: 'high' });
+  items.forEach((item, index) => {
+    if (item.presentation) return;
+    if (item.type === 'TableBlock' && Array.isArray(item.rows) && item.rows.length > 1) {
+      const [header, ...body] = item.rows;
+      relations.push({ id: `rel_${item.id}`, type: 'matrix', relation: 'comparison', ...base(item), unitIds: [item.id],
+        axes: header.map(String), members: body.map(row => String(row[0] ?? '')), rowCount: body.length, columnCount: header.length,
+        steps: item.rows.map(row => row.join(' | ')) });
+    } else if (item.type === 'ProcessBlock') {
+      const arrows = /->|→/u.test(item.text) && !/^\s*\d+[.)]\s/mu.test(item.text);
+      const steps = arrows ? item.text.split(/->|→/u).map(step => step.trim()).filter(Boolean) : stepLines(item.text);
+      relations.push({ id: `rel_${item.id}`, type: 'order', relation: 'precedes', ...base(item), unitIds: [item.id],
+        members: steps.map(stepLabel), branches: steps.filter(step => BRANCH.test(step)).map(step => ({ step: stepLabel(step), conditions: step.split(/[:：]/u).slice(1).join(':').trim() })),
+        steps });
+    } else {
+      const members = alternativeMembers(item.text);
+      // A translation of the same alternatives joins the existing relation.
+      const pairOf = members && item.languagePairId && relations.find(relation => relation.type === 'alternative' && relation.languagePairId === item.languagePairId);
+      if (pairOf) { pairOf.unitIds.push(item.id); pairOf.translatedMembers = members; if (NOT_INTERCHANGEABLE.test(item.text)) pairOf.interchangeable = false; }
+      else if (members) relations.push({ ...(item.languagePairId ? { languagePairId: item.languagePairId } : {}), id: `rel_alt_${item.id}`, type: 'alternative', relation: 'alternative_of', ...base(item), unitIds: [item.id],
+        members, interchangeable: !NOT_INTERCHANGEABLE.test(item.text) && !NOT_INTERCHANGEABLE.test(items[index + 1]?.text || '') ? null : false, steps: members });
+    }
+    if (item.type === 'EquationBlock') {
+      const explanation = items.slice(index + 1, index + 4).find(next => sectionKey(next) === sectionKey(item) && next.type !== 'EquationBlock' && EXPLAINS.test(next.text));
+      if (explanation) {
+        const pair = items.find(other => other !== explanation && other.languagePairId && other.languagePairId === explanation.languagePairId);
+        relations.push({ id: `rel_def_${item.id}`, type: 'definition', relation: 'defined_by', ...base(item),
+          unitIds: [item.id, explanation.id, ...(pair ? [pair.id] : [])], members: [], steps: [] });
+      }
+    }
+  });
+  return relations;
+}
+
+/** Unit IDs owned by each slide: planned ownership plus rendered source artifacts. */
+export function slideUnitOwnership(project, slides) {
+  const owners = new Map();
+  for (const slide of slides) {
+    const outline = (project.outline || []).find(item => item.id === slide.id) || {};
+    const plan = (project.planning?.slidePlan || []).find(item => item.slideId === slide.id) || {};
+    const ids = new Set([...(outline.sourceUnitIds || outline.densityFit?.sourceUnitIds || []), ...(plan.pageContract?.requiredUnits || []),
+      ...visibleNodes(slide).map(node => node.sourceArtifact?.sourceUnitId).filter(Boolean)]);
+    owners.set(slide.id, ids);
+  }
+  return owners;
+}
+
+const norm = text => String(text || '').toLowerCase().replace(/\s+/gu, ' ').trim();
+const sequenceLike = (slide, outline) => slide.layoutId === 'timeline' || ['pipeline', 'timeline', 'process'].includes(outline?.visualIntent?.type)
+  || visibleNodes(slide).some(node => node.type === 'timeline' || node.content?.ordered === true || node.content?.listStyle === 'numbered');
+
+export function inspectRelationFidelity(project, slides = project.deck?.slides || []) {
+  const relations = project.source?.semantic?.inventory?.relationships || [];
+  if (!relations.length) return [];
+  const owners = slideUnitOwnership(project, slides);
+  const issues = [];
+  for (const relation of relations) {
+    const owning = slides.filter(slide => relation.unitIds?.some(id => owners.get(slide.id)?.has(id)));
+    if (relation.type === 'alternative') {
+      for (const slide of owning) {
+        const outline = (project.outline || []).find(item => item.id === slide.id);
+        const text = norm(visibleNodes(slide).map(nodeContentText).join(' '));
+        const shown = relation.members.filter(member => text.includes(norm(member).split(' ').slice(0, 3).join(' '))).length;
+        if (sequenceLike(slide, outline) && shown >= 2)
+          issues.push({ code: 'relation_alternative_as_sequence', severity: 'error', slideId: slide.id, relationId: relation.id, repairable: true,
+            message: `Alternatives (${relation.members.slice(0, 4).join(' / ')}) are presented as ordered steps; use a comparison/collection structure — they are not a sequence.` });
+      }
+    }
+    if (relation.type === 'order') {
+      for (const slide of slides) for (const node of visibleNodes(slide).filter(node => node.type === 'timeline' && node.sourceArtifact?.sourceUnitId === relation.sourceUnitId)) {
+        const shown = (node.content?.items || []).map(item => norm(stepLabel(item.text || item.body || '')));
+        const expected = relation.members.map(member => norm(member));
+        const positions = expected.map(label => shown.findIndex(value => value && (value.includes(label) || label.includes(value)))).filter(at => at >= 0);
+        if (positions.some((at, i) => i > 0 && at < positions[i - 1]))
+          issues.push({ code: 'relation_order_changed', severity: 'error', slideId: slide.id, relationId: relation.id, nodeIds: [node.id], repairable: true,
+            message: 'Process steps are shown in a different order from the source.' });
+      }
+    }
+    if (relation.type === 'definition') {
+      const [formula, ...explanations] = relation.unitIds;
+      const formulaSlides = slides.filter(slide => owners.get(slide.id)?.has(formula)).map(slide => slide.id);
+      const explanationSlides = slides.filter(slide => explanations.some(id => owners.get(slide.id)?.has(id))).map(slide => slide.id);
+      if (formulaSlides.length && explanationSlides.length && !formulaSlides.some(id => explanationSlides.includes(id)))
+        issues.push({ code: 'relation_definition_split', severity: 'warning', slideId: explanationSlides[0], slideIds: [...formulaSlides, ...explanationSlides], relationId: relation.id, repairable: true,
+          message: 'A formula and the explanation of its variables are on different slides; keep them adjacent.' });
+    }
+  }
+  return issues;
+}

@@ -48,6 +48,7 @@
 | completed/ppt-edit-intent-proposal-integration.md | 最新原型架构接入：共用模板确认、持久 Proposal/EditIntent、页级版本协调、单页 AI 前后预览与定向撤回 | 本地实现和回归完成；真实模型/远端/打包态待环境验收 |
 | active/ppt-gamma-depth-design-editor.md | Gamma 样例驱动的内容容量页数估算、语义版式和编辑器样式优化 | 实施中 |
 | active/ppt-general-content-media-balance.md | 跨模板/跨输入通用化：模板组件档案 + 内容供给 + 页数/版式/媒体联合规划；去重复填写、媒体随页数伸缩（映射模式也保留）、Gamma 相对区间的分布/深度/密度；双语按输入保留、非代码模板代码不上页并说明；真实模型矩阵验收 | Phase 1 ✅；Phase 0 harness/基线完成，真实模型矩阵待环境；Phase 2–6 待开始 |
+| active/ppt-page-contract-relations-media-repair.md | PPT 四支柱确定性基础：类型化语义关系（矩阵/顺序/可替代/公式解释）及保真检查、页面设计契约（规划解析/推导/持久化/prompt v10/可见检查）、媒体角色账本、issue 所属层与修复路由（主题绑定、回滚） | A–D ✅；E（比例缩放/组件原型）与 F（真实模型）待开始 |
 | completed/ppt-alpha-mining-gamma-comparison.md | Alpha Mining 双产物对照驱动的内容深度、原生模板槽位和无关媒体治理 | 已完成，含 16 页模拟产物与分析报告 |
 | completed/ppt-alpha-mining-performance-depth.md | Alpha Mining 与 Performance Review 模板样例对照：模板文字容量、写作深度和可见内容质检 | 已完成，旧产物确定性复核检出 10 个硬错误 |
 | completed/ppt-gamma-factor-zoo-parity.md | Factor Zoo 样例驱动的内容深度、point 篇幅/分布、自适应布局和可视化编辑改造 | 已完成，详见分析报告及 10 页模拟产物 |

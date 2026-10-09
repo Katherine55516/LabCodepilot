@@ -99,7 +99,7 @@
 | 重复填写 | 页数估算偏高（09 输入为 46 页，Gamma 为 24 页），事实不够时，固定槽位只能被填满 | `ppt-density-packing.mjs` `sourceDensityPlan`（代码按实测全高计成本；双语两侧都计成本且不识别为同一 claim） |
 | 重复填写 | 只检查完全相同的文本；近义改写、槽位超填、无归属内容都检测不到 | `ppt-copy-integrity.mjs` `inspectVisibleCopy` |
 | 媒体消失 | 内置模板和上传后被判为 mapped 的模板只有配色和字体（“source geometry is not reused”） | `ppt-template.mjs:14,225`；`ppt-api.mjs:1084–1089` |
-| 媒体消失 | 正文区域替换时，与区域重叠 ≥ 35% 的图片、编号、连线一律退役，没有替代 | `ppt-source-artifacts.mjs:17–35`（`replaceTemplateSourceRegion`），调用方为 `bindSourceArtifacts:43`、`bindSourceMedia:109` |
+| 媒体消失 | 正文区域替换时，与区域重叠 ≥ 35% 的旧前景标签、编号徽章、连线退役，没有同角色替代（image/chart/table 与受保护资产已被跳过，2026-10-09 复核更正） | `ppt-source-artifacts.mjs:17–35`（`replaceTemplateSourceRegion`），调用方为 `bindSourceArtifacts:43`、`bindSourceMedia:109` |
 | 媒体消失 | 旧主题示例媒体因主题不符被退役后，不找同角色的替代 | `ppt-template-fidelity.mjs:220–222`；`ppt-template-dispositions.mjs` |
 | 媒体消失 / 分布 | 容量拟合只有单栏堆叠和双等宽栏两种，没有带条目图标的卡片、步骤、图文分栏 | `ppt-density-capacity.mjs` `fitComponents`；`ppt-layout.mjs` 中 10 个语义 layout |
 | 分布 | 页数按来源字节比例分配（09 输入：§2 分到 13.98 页，§10 分到 0.37 页） | `ppt-density-packing.mjs`、`ppt-planning.mjs` `estimatePageRecommendation` |

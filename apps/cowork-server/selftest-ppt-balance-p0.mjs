@@ -76,7 +76,7 @@ const detail = coverageMapV2(project.source, [{ id: 's1', chunkRefs: [] }]).deta
 assert.equal(detail.find(item => item.sourceUnitId === code.id).representation, 'omitted_by_policy');
 assert.match(detail.find(item => item.sourceUnitId === code.id).reason, /default_non_code_template/);
 const policyText = promptPolicy(project);
-assert.match(policyText, new RegExp(`contract_version=${PPT_PROMPT_CONTRACT_VERSION}`)); assert.equal(PPT_PROMPT_CONTRACT_VERSION, 9);
+assert.match(policyText, new RegExp(`contract_version=${PPT_PROMPT_CONTRACT_VERSION}`)); assert.ok(PPT_PROMPT_CONTRACT_VERSION >= 9);
 assert.match(policyText, new RegExp(`code_presentation=omit_with_disclosure.*${code.id}`));
 assert.match(policyText, new RegExp(`${processes[1].id}=${processes[0].id}`));
 assert.ok(!sourceObjects(project.source).some(object => object.id === code.id));

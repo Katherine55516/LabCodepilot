@@ -227,7 +227,10 @@ export const OUTLINE_SCHEMA = JSON.stringify({ brief: { goal: '目标', audience
     keyPoints: [{ text: '具体事实及机制/条件/对照，通常 1–2 句，不是主题名', claimId:'稳定的来源主张ID', refs: ['原始来源编号'], chunkRefs: ['真实 chunk ID'] }],
     recaps:[{claimId:'仅必要时复用的主张',repeatPurpose:'compare|apply_to_new_case|synthesis'}],
     visualIntent: { type: 'none|image|comparison|pipeline|architecture|timeline|table|metric' },
-    requiredDetails: ['必须可见的公式、表格关系与条件'], requiredEvidenceIds: ['本页需要完整表达的真实 evidence ID'], chunkRefs: ['真实 chunk ID'], refs: ['原始来源编号'], sourceUnitIds: ['真实 inventory item ID'], sourceImageIds:['相关来源媒体ID'], groupId: '具体问题分组ID', sourceArtifactRanges: [{ sourceUnitId: '所属真实表格ID', rowStart: 1, rowEnd: 5 }] }],
+    requiredDetails: ['必须可见的公式、表格关系与条件'], requiredEvidenceIds: ['本页需要完整表达的真实 evidence ID'], chunkRefs: ['真实 chunk ID'], refs: ['原始来源编号'], sourceUnitIds: ['真实 inventory item ID'], sourceImageIds:['相关来源媒体ID'], groupId: '具体问题分组ID', sourceArtifactRanges: [{ sourceUnitId: '所属真实表格ID', rowStart: 1, rowEnd: 5 }],
+    pageContract: { job: 'definition|comparison|mechanism|workflow|diagnostic|evidence|synthesis', requiredUnits: ['本页必须可见讲清的真实 inventory ID'], requiredRelations: ['inventory.relationships 中本页必须保留的关系ID'],
+      adjacencyPairs: [{ a: 'ID', b: 'ID', reason: '如公式与变量解释，必须同页相邻' }], comparisonAxes: ['来源实际支持的比较维度'], groupingReason: '合页理由：共同问题/互补/独立面板',
+      omissions: [{ sourceUnitId: 'ID', reason: '明确取舍' }], compositionCandidates: ['table-notes|dual-table|numbered-steps|comparison|collection-grid|formula-variables|two-panel|image-split|big-number|text'] } }],
   topicGroups: [{ group_id: 'c_001', decision: 'merge|split|standalone', reason: '同一个受众问题与强关系，或不同问题/机制深度/容量要求', estimated_semantic_units: 6, layout_candidate: 'table|timeline|comparison', capacity_ok: true }],
   coverage: [{ chunkId: 'c_001', action: 'omitted', reason: '明确取舍' }] });
 
@@ -242,6 +245,9 @@ keyPoints 是后续写作者必须展开的内容承诺；给出实际要讲的�
 <story_decisions>Use many-to-one for connected definitions/frameworks and one-to-many for dense mechanisms. Never map headings mechanically to pages. Each page owns a question, message, semantic units, relationships and a capacity-aware structural artifact. Record merge/split/standalone and reasons; retain final sections, all table columns, equations with conditions, workflows, checklists and summaries. ${automaticPages(project) ? 'Propose capacity-aware candidate pages; provisional count may change before confirmation.' : 'Preserve the confirmed page count.'}</story_decisions>
 ${densityPrompt(project)}
 <source_objects>${JSON.stringify(sourceObjects(project.source))}</source_objects>
+<page_contract_rules>每页给出 pageContract：一个页面职责 job；requiredUnits 列出本页必须可见讲清的不同来源单元（机制、条件、变量、类别），而不是章节名；合页必须写 groupingReason，相互独立的内容用独立面板，不要为合页编造因果。
+inventory.relationships 的类型必须保留：matrix 保留全部行类别和列轴，不合并或删列；order 保留步骤顺序和条件分支；alternative 是并列可替代的表达，不能画成先后步骤；definition 要求公式与变量解释同页相邻。
+compositionCandidates 只能从来源关系推出；big-number 只用于来源中存在的数值及其口径，不能承载 β≠α、模型名或无来源数字。</page_contract_rules>
 source_objects 是完整的来源表格/表达式/代码；不要把行名清单当成关系说明。每一列的关系要由具体 keyPoints 承接，必要时分配到多个相关页面；不能只通过引用 chunk 就声称解释已完成。`;
 }
 

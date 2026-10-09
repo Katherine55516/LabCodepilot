@@ -1,3 +1,7 @@
+import { inspectRelationFidelity } from './ppt-semantic-relations.mjs';
+import { inspectPageContracts } from './ppt-page-contract.mjs';
+import { buildMediaLedger, inspectMediaLedger } from './ppt-media-ledger.mjs';
+import { annotateIssues, routeIssue, themeBound, newHardErrors } from './ppt-repair-routing.mjs';
 import { obligationRegistry, normalizeObligationAudit, obligationFailures } from './ppt-obligations.mjs';
 import { inputFramework, normalizeScopeAudit } from './ppt-input-scope.mjs';
 import { buildRenderTree } from './ppt/render-tree.mjs';
@@ -109,9 +113,12 @@ export function deterministicReview(project, deckInput = project.deck) {
   issues.push(...inspectVisibleCopy(deck.slides));
   const integrity=inspectObjectIntegrity(project,deck.slides);
   issues.push(...integrity.issues);
+  const mediaLedger=buildMediaLedger(project,deck.slides,integrity.ledger);
+  issues.push(...inspectMediaLedger(mediaLedger));
   for(const slide of deck.slides)for(const node of visibleNodes(slide))if(node.content?.mathStatus==='source_text_fallback')
     issues.push(issue('math_source_text_fallback','warning','公式暂用完整来源文本显示，数学排版需检查：'+(node.content.mathWarning||''),slide.id));
   issues.push(...inspectTemplateFidelity({ ...project, deck }));
+  issues.push(...inspectRelationFidelity(project, deck.slides), ...inspectPageContracts(project, deck.slides));
   for (const outlineSlide of project.outline || []) issues.push(...inspectSourceForSlide(project, outlineSlide));
   const fonts = project.templateSpec?.fonts;
   // Inspect the full object-level IR. Imported PPTX text lives in native nodes
@@ -211,9 +218,11 @@ export function deterministicReview(project, deckInput = project.deck) {
   issues.push(...content.issues);
   const report = inspectReportReadiness(project, deck);
   issues.push(...report.issues);
-  return { version: 1, checkedAt: new Date().toISOString(), issues, hardErrors: issues.filter(item => item.severity === 'error').length,
+  // Every issue names its owning layer and the operations allowed there.
+  const routed = annotateIssues(issues);
+  return { version: 1, checkedAt: new Date().toISOString(), issues: routed, hardErrors: routed.filter(item => item.severity === 'error').length,
     strictCoverage: project.planning?.brief?.depthPolicy === 'strict' && !project.compressionApproved,
-    contentMetrics: content.metrics, objectLedger:integrity.ledger, report };
+    contentMetrics: content.metrics, objectLedger:integrity.ledger, mediaLedger, report };
 }
 
 function accessibleText(background) { return contrastRatio('#ffffff', background) >= 4.5 ? '#ffffff' : '#111827'; }
@@ -284,16 +293,22 @@ export function repairProject(project, initialReview) {
     // a distinct implication; legacy synthesis is never copied back to fill space.
   }
   const palette = updated.templateSpec?.palette;
-  if (palette && initialReview.issues.some(item => item.code === 'contrast_foreground')) {
-    palette.foreground = accessibleText(palette.background);
-    repairs.push({ code: 'contrast_foreground', action: `foreground changed to ${palette.foreground}` });
-  }
-  if (palette && initialReview.issues.some(item => item.code === 'contrast_muted')) {
-    palette.muted = mutedText(palette.background);
-    repairs.push({ code: 'contrast_muted', action: `muted changed to ${palette.muted}` });
+  // A bound theme token is never changed silently: the conflict is reported.
+  const bound = themeBound(updated);
+  for (const [code, token, value] of [['contrast_foreground', 'foreground', () => accessibleText(palette.background)], ['contrast_muted', 'muted', () => mutedText(palette.background)]]) {
+    if (!palette || !initialReview.issues.some(item => item.code === code)) continue;
+    if (bound) { repairs.push({ code, action: `theme token ${token} is bound; contrast conflict reported instead of changing it`, operation: 'report_binding_conflict' }); continue; }
+    palette[token] = value();
+    repairs.push({ code, action: `${token} changed to ${palette[token]}`, operation: 'adjust_unbound_token' });
   }
   const review = deterministicReview(updated, updated.deck);
-  return { project: updated, repairs, review };
+  const routedRepairs = repairs.map(item => ({ ...routeIssue(item.code), ...item }));
+  // A repair that introduces a new hard error is rolled back as a whole.
+  const regressions = newHardErrors(initialReview, review);
+  if (regressions.length) return { project, review: initialReview,
+    repairs: [...routedRepairs.map(item => ({ ...item, rolledBack: true })), { code: 'repair_rolled_back', ownerLayer: 'review', action: 'repair candidate introduced new hard errors and was discarded',
+      introduced: regressions.slice(0, 8).map(item => ({ code: item.code, slideId: item.slideId || null })) }] };
+  return { project: updated, repairs: routedRepairs, review };
 }
 
 export function deckReviewPrompt(project) {
@@ -388,6 +403,7 @@ export function finalQualityReport(deterministic, repairs, modelReview, timings 
     ...modelReview.conflicts.map(item => ({ code: 'model_conflict', severity: 'error', ...item })),
     ...modelReview.unsupported.map(item => ({ code: 'model_unsupported', severity: 'error', ...item })),
   ];
+  modelIssues.splice(0, modelIssues.length, ...annotateIssues(modelIssues));
   const blocked = Boolean(deterministic.hardErrors || modelIssues.some(item => item.severity === 'error'));
   const issueGroups = { factsAndEvidence: [], narrative: [], layout: [], media: [] };
   for (const item of [...(deterministic.issues || []), ...modelIssues]) {
@@ -404,7 +420,7 @@ export function finalQualityReport(deterministic, repairs, modelReview, timings 
     status: blocked || modelReview.evaluation === 'not_evaluated' ? 'blocked' : (modelIssues.length || deterministic.issues.some(item => item.severity === 'warning')) ? 'passed_with_warnings' : 'passed',
     publishEligible: !blocked && modelReview.evaluation !== 'not_evaluated', editorialReady: !blocked && modelReview.evaluation !== 'not_evaluated' && (report.status === 'ready' || report.status === 'not_applicable'),
     contentReady: !blocked && modelReview.evaluation !== 'not_evaluated', exportable: false, visualVerified: false,
-    objectLedger: deterministic.objectLedger,
+    objectLedger: deterministic.objectLedger, mediaLedger: deterministic.mediaLedger,
     checkedAt: new Date().toISOString(),
     deterministic,
     modelReview,

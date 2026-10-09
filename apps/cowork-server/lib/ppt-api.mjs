@@ -8,6 +8,7 @@ import { importEditablePptx as importTemplateIR } from './ppt/import-pptx.mjs';
 import { markPptTime } from './ppt-trace.mjs';
 import { normalizeGenerationPolicy, requestedPageCount, PPT_PROMPT_CONTRACT_VERSION } from './ppt-generation-policy.mjs';
 import { syncPresentationPolicy } from './ppt-presentation-policy.mjs';
+import { normalizePageContract } from './ppt-page-contract.mjs';
 /** M1 PPT Workspace API and durable, server-side job orchestration.
  * All model calls and PPTX rendering run in a Cowork container. Project JSON
  * lives on the server data disk, so a second signed-in desktop sees the same
@@ -139,6 +140,7 @@ function normalizeOutline(value, count, source, update = null, deckTitle = null)
       ...(typeof s.transitionToNext === 'string' || typeof s.transition_to_next === 'string' ? { transitionToNext: String(s.transitionToNext || s.transition_to_next).slice(0, 180) } : {}),
       keyPoints,
       ...(Array.isArray(s.sourceUnitIds) ? { sourceUnitIds: [...new Set(s.sourceUnitIds)].filter(id => source?.semantic?.inventory?.items?.some(item => item.id === id)) } : {}),
+      ...(s.pageContract && typeof s.pageContract === 'object' ? { pageContract: normalizePageContract(s.pageContract, source) } : {}),
       ...(Array.isArray(s.sourceImageIds) ? {sourceImageIds:[...new Set(s.sourceImageIds)].filter(id=>source?.images?.some(image=>image.id===id))}:{}),
       ...(Array.isArray(s.sourceArtifactRanges) ? { sourceArtifactRanges: s.sourceArtifactRanges } : {}),
       ...(s.densityFit ? { densityFit: s.densityFit } : {}),

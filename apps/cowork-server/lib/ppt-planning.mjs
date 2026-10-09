@@ -9,6 +9,7 @@ import { planSparseInput, pointBudgetFor, profilePptInput, sparsePageEstimate } 
 import { effectiveKnowledge } from './ppt-generation-policy.mjs';
 import { outputLanguage } from './ppt-prompt-contracts.mjs';
 import { applyPresentationPolicy, planningAssumptions, assumptionSummary } from './ppt-presentation-policy.mjs';
+import { pageContractFor } from './ppt-page-contract.mjs';
 
 const ROLES = new Set(['cover', 'section', 'thesis', 'problem', 'comparison', 'architecture', 'process', 'framework', 'evidence', 'metric', 'timeline', 'case', 'recommendation', 'summary', 'roadmap', 'closing', 'mechanism', 'system', 'runtime', 'decision', 'appendix']);
 const VISUALS = new Set(['none', 'hero', 'comparison', 'pipeline', 'architecture', 'timeline', 'matrix', 'cards', 'chart', 'table', 'metric', 'hub-and-spoke', 'before-after', 'process']);
@@ -343,6 +344,7 @@ export function slidePlan(outline, brief = {}, source = null, templateFidelity =
     requiredSupport: requiredSupportFor(role, depth, slide.requiredSupport || slide.required_support || slide.supportingPoints),
     requiredDetails: sourceBackedDetails(slide, source),
     visualIntent: inferVisualIntent(slide), depth, ...density,
+    pageContract: pageContractFor(slide, source, role),
     densityProfileId: densityProfile().id, densityFit: slide.densityFit || null, sourceUnitIds: slide.sourceUnitIds || [],
     ...(templateCapacity ? { templatePointCapacity: templateCapacity,
       templatePointTarget: templatePointTarget || Math.min(templateCapacity, density.semanticUnitBudget),

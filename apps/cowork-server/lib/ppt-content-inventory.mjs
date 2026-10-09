@@ -3,6 +3,7 @@ import {sourceDisplayText} from './ppt-source-text.mjs';
 import { visibleNodes } from './ppt-visible-content.mjs';
 import { inspectObjectIntegrity } from './ppt-object-integrity.mjs';
 import { markLanguagePairs, markEquivalentStructures } from './ppt-presentation-policy.mjs';
+import { buildRelations } from './ppt-semantic-relations.mjs';
 const normalizedText=value=>sourceDisplayText(value).toLowerCase().replace(/\s+/gu,' ').trim();
 const structural = new Set(['CodeBlock','TableBlock','EquationBlock','ProcessBlock','ChecklistBlock','TaxonomyBlock']);
 const tokens = text => [...new Set(String(text||'').toLowerCase().match(/[a-z][a-z0-9_-]{2,}|\d+(?:\.\d+)?|[\u3400-\u9fff]{2,4}/gu)||[])];
@@ -96,7 +97,9 @@ export function buildContentInventory(blocks, chunks, graph = []) {
     equations:items.filter(item=>item.type==='EquationBlock').map(item=>item.id), tables:items.filter(item=>item.type==='TableBlock').map(item=>item.id),
     workflows:items.filter(item=>item.type==='ProcessBlock').map(item=>item.id), comparisons:items.filter(item=>item.type==='ComparisonBlock').map(item=>item.id),
     checklists:items.filter(item=>item.type==='ChecklistBlock').map(item=>item.id), summary_items:items.filter(item=>item.type==='SummaryBlock').map(item=>item.id),
-    relationships:items.filter(item=>['ProcessBlock','TableBlock'].includes(item.type)).map(item=>({id:`rel_${item.id}`,sourceUnitId:item.id,source_ref:item.source_ref,chunkRefs:item.chunkRefs,relation:item.type==='TableBlock'?'comparison':'precedes',steps:item.type==='TableBlock'?item.rows.map(row=>row.join(' | ')):item.text.split(/(?:->|→)|\n(?=\s*\d+[.)]\s)/u).map(text=>text.trim()),priority:'high'})), adjacency:graph };
+    // Typed relations (matrix/order/alternative/definition) keep the legacy
+    // id/relation/steps fields used by coverage statistics.
+    relationships:buildRelations(items), adjacency:graph };
 }
 export function coverageMapV2(source, outline, explicit = []) {
   const inventory=source?.semantic?.inventory;
