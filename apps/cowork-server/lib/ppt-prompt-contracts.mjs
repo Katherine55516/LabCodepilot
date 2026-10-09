@@ -1,3 +1,4 @@
+import { routeIssue } from './ppt-repair-routing.mjs';
 import { densityPrompt, automaticPages } from './ppt-density-profile.mjs';
 /** Shared semantic contracts for planning, writing, review and editing.
  * Geometry budgets remain renderer-owned; word targets are writing guidance. */
@@ -311,7 +312,7 @@ ${old ? `<old_slide>${JSON.stringify(slideSemanticContext(old))}</old_slide>` : 
 ${!project.source?.segments?.length ? `用户主题：${project.prompt}。使用领域特有的定义、机制和评估方法。` : ''}
 sourceArtifacts 可引用本页合同的真实库存 ID，由代码重建可编辑表格/代码/公式/流程/清单及来源小结。组合数量由共用字体/行高/区域容量测量决定，允许双表、清单+总结表、机制+例子；不要为同一比较轴机械拆页。本页合同指定 rowStart/rowEnd 时必须遵守该范围，避免把完整大表在分片页重复。表格第 0 行是表头；rowStart 从 1 开始，rowEnd 为不包含的结束索引，两者必须是整数，范围只能用于表格；同页同一表的范围不能重叠，其他结构不能重复引用。省略范围则保留全部行。容量不足拆到多页并重复表头，不删列、不截断单元格。代码必须通过 CodeBlock 库存 ID 原样绑定，保留语言、缩进、空行和硬换行，禁止把代码改为 prose、关键词或截图；流程保留顺序/分支条件，表格保留负号、单位与空单元格。结构按自然高度组合，保留标题。sourceCommentary 可补充这些结构的条件、机制或综合判断，会显示在同一区域；不能重复抄写结构、写隐藏正文或指定坐标。
 ${native ? '其他正文只输出 slotTexts；代码从语义配对派生兼容文案，不另写 contentBlocks、bullets 或 factSynthesis。' : '普通页面只输出 contentBlocks 这一份正文；bullets 由代码派生。优先引用 sourceArtifacts 保留原文表格的全部列；手写 blocks 表格兼容上限为 6 行（含表头）、4 列，不能用它静默降级更大的来源表格。'}
-不输出隐藏事实清单或候选标题。每点有不同信息职责；条件、对照和机制写完整句子，服从容量且保留已规划的具体深度。</task>
+不输出隐藏事实清单或候选标题。组件契约中的 formula-variables、two-panel、item-icons 由共享渲染器安排位置。公式变量需保留来源公式及说明；并列条目不能变成有序步骤；模板图标只提供视觉辅助，不是事实证据。不要输出坐标或为填槽位重复内容。每点有不同信息职责；条件、对照和机制写完整句子，服从容量且保留已规划的具体深度。</task>
 返回唯一 JSON：${JSON.stringify(schema)}。只输出 JSON。`;
 }
 
@@ -326,13 +327,14 @@ export function writerRepairPrompt(prompt, draft, issues) {
   return `${prompt}\n<previous_draft>${JSON.stringify({ title: draft.title, contentBlocks: sourceArtifacts.length?undefined:draft.copy?.blocks, bullets: sourceArtifacts.length?undefined:draft.bullets, slotTexts: draft.templateSlotTexts,
     sourceArtifacts:sourceArtifacts.length?sourceArtifacts:undefined,sourceCommentary:sourceCommentary.length?sourceCommentary:undefined,omitTemplateShapes:draft.templateOmissions,evidenceUsedIds:draft.evidenceUsedIds })}</previous_draft>
 <findings>${JSON.stringify(diagnostics)}</findings>
-<repair>仅重写当前页，逐项解决具体问题。文本可见损失、单元格容量、图表符号/单位与图片裁切诊断不能降级成警告或声称误报；优先调整语义组织和 reflow，禁止缩小字体、重复填充或删除 required structures。保留已有sourceArtifacts的库存ID、合同分片范围、全部列与sourceCommentary中的必要关系，不退回主题标签或不可见正文；新增解释仍必须在当前可读容量内。补充来源已有的解释、表格关系与条件；无来源事实不能编造。标题溢出保留主张并移出背景；必要内容无法容纳须由审查报告。返回相同 schema。</repair>`;
+<repair>仅重写当前页。执行范围为内容/来源层；禁止修改媒体身份、裁切、表格结构、其他页、锁定对象或主题。数值必须保留指标/对象/时间、符号与单位，模板示例数字不是输入事实。逐项解决具体问题。文本可见损失、单元格容量、图表符号/单位与图片裁切诊断不能降级成警告或声称误报；优先调整语义组织和 reflow，禁止缩小字体、重复填充或删除 required structures。保留已有sourceArtifacts的库存ID、合同分片范围、全部列与sourceCommentary中的必要关系，不退回主题标签或不可见正文；新增解释仍必须在当前可读容量内。补充来源已有的解释、表格关系与条件；无来源事实不能编造。标题溢出保留主张并移出背景；必要内容无法容纳须由审查报告。返回相同 schema。</repair>`;
 }
 
 export function criticRewriteTargets(project, review) {
   const scores = new Map(); const findings = new Map();
   for (const [category, weight] of [['unsupported', 4], ['conflicts', 4], ['missing', 4], ['repeated', 4]])
     for (const finding of review?.[category] || []) for (const id of finding.slideIds || []) {
+      if (finding.code && !routeIssue(finding.code).allowedOperations.includes('rewrite_with_source') && !routeIssue(finding.code).allowedOperations.includes('remove_duplicate')) continue;
       scores.set(id, (scores.get(id) || 0) + weight);
       findings.set(id, [...(findings.get(id) || []), { category, ...finding }]);
     }

@@ -32,6 +32,9 @@ const layouts = [
   "table",
   "image-text",
   "timeline",
+  "two-panel",
+  "formula-variables",
+  "item-icons",
   "conclusion",
 ];
 type Tool =

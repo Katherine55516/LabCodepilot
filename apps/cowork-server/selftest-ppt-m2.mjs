@@ -106,7 +106,7 @@ try {
   assert.equal(store.readSource(uid, importedId).toString(), '真内容');
   assert.equal((await request('POST', '/ppt/projects', { inputKind: 'file', fileName: 'bad.pdf', fileBase64: Buffer.from('bad').toString('base64'), pages: 3, configId: 'test' })).status, 400);
 
-  const python = '/Users/dongli/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3';
+  const python = process.env.PPT_TEST_PYTHON || 'python3';
   const extract = (name, raw) => {
     const dir = path.join(root, 'sources');
     const result = spawnSync(python, ['-c', source._internals.SCRIPT], { input: raw, env: { ...process.env, PPT_SOURCE_NAME: name, PPT_SOURCE_DIR: dir }, maxBuffer: 2_000_000 });

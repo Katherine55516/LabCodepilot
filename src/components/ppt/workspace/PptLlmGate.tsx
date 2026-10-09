@@ -43,7 +43,8 @@ export function PptLlmGate({ context, models, modelKey, template, onModelKeyChan
         {template && <div className="rounded-lg border border-primary/30 bg-primary/5 p-3 text-sm"><strong>模板 · {template.name}</strong><p className="mt-1 text-xs text-muted-foreground">{template.category} · {template.pages} 页 · 模板保持锁定，后续不需要再次选择。</p></div>}
         <section className="rounded-xl border border-border bg-card p-4"><h3 className="font-medium">{content.heading} <span className="text-destructive">*</span></h3><p className="mt-1 text-sm text-muted-foreground">模型会在后续流程中持续沿用，不需要重复选择。</p>
           <label className="mt-4 block space-y-1 text-sm"><span>LLM（必填）</span><select className={field} aria-label="LLM（必填）" value={modelKey} onChange={event => onModelKeyChange(event.target.value)}><option value="">请选择 LLM</option>{models.map(model => <option key={model.id} value={model.id}>{model.name}</option>)}</select></label>
-          {!models.length && <p className="mt-3 text-xs text-destructive">当前没有可用于 Cowork 的 LLM。请先在 Agent 设置中配置托管模型。</p>}
+          {models.find(model => model.id === modelKey)?.configId.startsWith('byok:') && <p className="mt-3 text-xs text-muted-foreground">本地 API：密钥留在本机；生成时请保持 PPT 页面打开。需要服务端支持本地模型接口。</p>}
+          {!models.length && <p className="mt-3 text-xs text-destructive">当前没有可用 LLM。请在 Agent 设置中配置 API 服务商及模型，或登录加载托管模型。</p>}
         </section>
       </div>
       <footer className="flex justify-end gap-2 border-t border-border p-4"><button className={button} onClick={onClose}>取消</button><button className={primary} disabled={!modelKey} onClick={onConfirm}>确认并继续 →</button></footer>

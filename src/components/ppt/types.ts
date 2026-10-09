@@ -1,6 +1,6 @@
 import type { VisualBlock } from './PptBlocks';
 
-export type PptLayoutId = 'cover' | 'summary' | 'editorial' | 'big-number' | 'comparison' | 'chart' | 'table' | 'image-text' | 'timeline' | 'conclusion';
+export type PptLayoutId = 'cover' | 'summary' | 'editorial' | 'big-number' | 'comparison' | 'chart' | 'table' | 'image-text' | 'timeline' | 'two-panel' | 'formula-variables' | 'item-icons' | 'conclusion';
 export type PptBounds = { x: number; y: number; width: number; height: number };
 export type PptOutlineChild = { id: string; title: string; description: string };
 export type PptSlide = {
@@ -38,6 +38,7 @@ export type PptRenderElement = {
   textLayout?: {version:number; units:'pt';margins:number[];wrap:boolean;autoFit:'none';fontFamily?:string;tabSize:number;code:boolean;paragraphs:{text:string;label?:string;lineHeight:number;spaceAfterPt:number;runs?:{text:string;fontSizePt:number;bold:boolean}[]}[]};
   imageLayout?: {version:number;fit:'contain'|'cover'|'stretch'|'crop';crop:number[];valid:boolean};
   chartLayout?: {version:number;minimum:number;maximum:number;valid:boolean;unit:string;svg?:string};
+  mathLayout?: {bounds:PptBounds;overflow:boolean;widthPt:number;heightPt:number};
   tableLayout?: {version:number;margins:number[];lineHeight:number;wrap:boolean};
   zIndex: number; rotation?: number; locked?: boolean; groupId?: string | null; semanticRole?: string;
 };

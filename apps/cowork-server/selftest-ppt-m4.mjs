@@ -13,7 +13,7 @@ const [{ handlePpt, _internals }, store, { normalizeBlocks, normalizeSourceImage
 ]);
 const id = store.newId();
 const uid = 'alice';
-const python = '/Users/dongli/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3';
+const python = process.env.PPT_TEST_PYTHON || 'python3';
 const png = spawnSync(python, ['-c', "import io,base64; from PIL import Image; b=io.BytesIO(); Image.new('RGB',(8,8),'red').save(b,'PNG'); print(base64.b64encode(b.getvalue()).decode())"]);
 assert.equal(png.status, 0, png.stderr.toString());
 const image = 'data:image/png;base64,' + png.stdout.toString().trim();

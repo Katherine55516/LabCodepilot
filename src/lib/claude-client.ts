@@ -51,7 +51,7 @@ import { prepareSdkSubprocessEnv, createStderrCollector, type StderrCollector } 
 // registry.ts only imports types/db/claude-settings — no cycle. The actual
 // runtime registration still happens elsewhere (runtime/index is imported
 // via its own entry points at app startup).
-import { resolveRuntime, getRuntime } from './runtime/registry';
+import { resolveRuntime, getRuntime, providerRequiresNative } from './runtime/registry';
 import { detectTransport, isNativeCompatible } from './provider-transport';
 import os from 'os';
 import fs from 'fs';
@@ -758,7 +758,7 @@ export function streamClaude(options: ClaudeStreamOptions): ReadableStream<strin
 
   // Non-Anthropic providers (OpenAI OAuth, etc.) MUST use Native Runtime
   // because Claude Code SDK only supports Anthropic models.
-  const isNonAnthropicProvider = effectiveProvider === 'openai-oauth';
+  const isNonAnthropicProvider = providerRequiresNative(effectiveProvider || undefined);
 
   if (isNonAnthropicProvider) {
     runtime = getRuntime('native');

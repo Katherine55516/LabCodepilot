@@ -110,6 +110,7 @@ function toQuickPreset(vp: VendorPreset): QuickPreset {
       : vp.protocol === 'vertex' ? 'vertex'
       : vp.protocol === 'gemini-image' ? 'gemini-image'
       : vp.protocol === 'openai-image' ? 'openai-image'
+      : vp.protocol === 'openai-compatible' ? 'custom'
       : 'anthropic',
     protocol: vp.protocol,
     authStyle: vp.authStyle,
@@ -167,6 +168,7 @@ export function getOpenAIImageModel(provider: ApiProvider): string {
 // ---------------------------------------------------------------------------
 
 export function findMatchingPreset(provider: ApiProvider): QuickPreset | undefined {
+  if (provider.protocol === 'openai-compatible') return QUICK_PRESETS.find(p => p.key === 'openai-compatible');
   // Exact base_url match (most specific)
   if (provider.base_url) {
     const match = QUICK_PRESETS.find(p => p.base_url && p.base_url === provider.base_url);
@@ -200,7 +202,6 @@ export function findMatchingPreset(provider: ApiProvider): QuickPreset | undefin
   if (provider.provider_type === "anthropic" && provider.base_url) {
     return QUICK_PRESETS.find(p => p.key === "anthropic-thirdparty");
   }
-  // Custom providers no longer have a matching preset (OpenAI-compatible removed).
-  // They are deleted during DB migration; any survivors use the generic edit form.
+  // Unknown providers use the generic edit form.
   return undefined;
 }

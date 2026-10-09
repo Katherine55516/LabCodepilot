@@ -136,7 +136,7 @@ try {
   result = await commands.applyCommand(uid, id, { id: 'external_internal_restore', type: 'deck.replace', baseRevision: project.revision, payload: { deck: restoreDeck } }, { allowExternalStructure: true, allowInternal: true });
   assert.equal(result.project.deck.slides[0].title, 'Restored external title', 'revision restore may replace an external deck through the internal path');
 
-  const python = '/Users/dongli/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3';
+  const python = process.env.PPT_TEST_PYTHON || 'python3';
   if (fs.existsSync(python)) {
     const sharedOutput = path.join(root, 'shared-tree.pptx');
     const shared = spawnSync(python, ['-c', pptxExporter._internals.SCRIPT], { input: JSON.stringify({ slides: project.deck.slides, renderTree: firstTree, template: 'light', palette: templateSpec.palette, fonts: templateSpec.fonts }), env: { ...process.env, PPT_OUTPUT: sharedOutput }, maxBuffer: 4_000_000 });

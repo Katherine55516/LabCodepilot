@@ -1,4 +1,5 @@
 "use client";
+import { CompatibleModels } from "./CompatibleModels";
 
 import { useState, useEffect } from "react";
 import { Button } from "@/components/ui/button";
@@ -304,10 +305,10 @@ export function PresetConnectDialog({
     // first-party catalog (xhigh / Opus 4.7 upstream / 1M window). Mirrored
     // by server-side validation in /api/providers route; this pre-check is
     // just for a clearer UX.
-    if (preset.protocol === 'anthropic' && !preset.base_url && !baseUrl.trim()) {
+    if (['anthropic', 'openai-compatible'].includes(preset.protocol) && !preset.base_url && !baseUrl.trim()) {
       setError(localize(locale,
-        '请填写 Base URL（官方 API 使用 https://api.anthropic.com）',
-        'Please specify a base URL (use https://api.anthropic.com for the official API)'));
+        '请填写该 API 平台的 Base URL',
+        'Please specify this API provider’s Base URL'));
       return;
     }
     // Third-party media presets: empty baseUrl would silently resolve to the
@@ -645,7 +646,7 @@ export function PresetConnectDialog({
               <Input
                 value={modelName}
                 onChange={(e) => setModelName(e.target.value)}
-                placeholder="ark-code-latest"
+                placeholder={preset.protocol === 'openai-compatible' ? 'Exact model ID' : 'ark-code-latest'}
                 className="text-sm font-mono"
               />
               <p className="text-[11px] text-muted-foreground">
@@ -655,6 +656,8 @@ export function PresetConnectDialog({
               </p>
             </div>
           )}
+
+          {preset.protocol === 'openai-compatible' && isEdit && editProvider && <CompatibleModels providerId={editProvider.id}/>}
 
           {/* Extra env — bedrock/vertex/custom always shown */}
           {preset.fields.includes("extra_env") && (

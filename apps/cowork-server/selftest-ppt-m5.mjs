@@ -14,7 +14,7 @@ const [{ handlePpt }, store, layout, quality, dag, templates, render] = await Pr
   import('./lib/ppt-quality.mjs'), import('./lib/ppt-dag.mjs'), import('./lib/ppt-template.mjs'), import('./lib/ppt-render.mjs'),
 ]);
 const uid = 'alice';
-const python = '/Users/dongli/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3';
+const python = process.env.PPT_TEST_PYTHON || 'python3';
 
 const explicitLayouts = layout.LAYOUT_IDS.map((layoutId, index) => ({
   id: String(index + 1), title: `${layoutId} title`, bullets: layoutId === 'cover' ? [] : ['Evidence based point'], blocks: [], layoutId,
@@ -127,7 +127,7 @@ const deps = {
     await new Promise(resolve => setTimeout(resolve, 10));
     contentActive--;
     const page = Number(prompt.match(/第 (\d+) 页/)?.[1] || 1);
-    return { title: page === 1 ? '封面' : page === project.pages ? '结论' : `页面 ${page}`, bullets: page === 1 ? [] : [project.title === 'Blocked deck' ? 'Revenue 42 lacks a citation' : `来自来源的内容 ${page}`] };
+    return { title: page === 1 ? '封面' : page === project.pages ? '结论' : `页面 ${page}`, bullets: page === 1 ? [] : [project.title === 'Blocked deck' ? 'Revenue 42 lacks a citation' : `第${page}页：来自来源的内容`] };
   },
   renderPptx: async project => {
     renderCalls++;

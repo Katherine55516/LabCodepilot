@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { getProvider, updateProvider, deleteProvider, getDefaultProviderId, setDefaultProviderId, getAllProviders, getSetting, setSetting } from '@/lib/db';
 import { getEffectiveProviderProtocol, isValidProtocol } from '@/lib/provider-catalog';
+import { compatibleBaseUrl } from '@/lib/openai-compatible-api';
 import type { ProviderResponse, ErrorResponse, UpdateProviderRequest, ApiProvider } from '@/types';
 
 interface RouteContext {
@@ -81,6 +82,11 @@ export async function PUT(request: NextRequest, context: RouteContext) {
       mergedProtocol,
       mergedBaseUrl ?? '',
     );
+    if (effectiveProtocol === 'openai-compatible') {
+      try { body.base_url = compatibleBaseUrl(mergedBaseUrl || ''); }
+      catch { return NextResponse.json({ error: 'A valid OpenAI-compatible Base URL is required' }, { status: 400 }); }
+    }
+
     if (effectiveProtocol === 'anthropic' && !mergedBaseUrl?.trim()) {
       return NextResponse.json<ErrorResponse>(
         {

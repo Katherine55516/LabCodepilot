@@ -1,3 +1,4 @@
+import {LAYOUT_IDS} from '../ppt-layout.mjs';
 import { newId, ensureSlideV3, ensureDeckV3 } from './ir.mjs';
 import { normalizeCommand, validateNodeContent } from './command-schema.mjs';
 import { _internals as commands } from './command-service.mjs';
@@ -6,7 +7,7 @@ import { evidenceVisible, visibleSlideText } from '../ppt-evidence.mjs';
 import { refreshPlanning } from '../ppt-planning.mjs';
 import { promptPolicy, writingGuide, sourcePacket, narrativeContext } from '../ppt-prompt-contracts.mjs';
 
-const layoutIds = ['cover', 'summary', 'editorial', 'big-number', 'comparison', 'chart', 'table', 'image-text', 'timeline', 'conclusion'];
+const layoutIds = LAYOUT_IDS;
 const valuesIn = text => String(text).match(/[-+]?\d+(?:[.,]\d+)*(?:%|％)?/gu) || [];
 
 function editable(project, data) {

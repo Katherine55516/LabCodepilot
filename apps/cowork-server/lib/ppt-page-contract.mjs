@@ -67,7 +67,7 @@ export function pageContractFor(slide, source, role, proposed = null) {
   const job = model.job || ROLE_JOB[role] || (types.has('definition') ? 'definition' : types.has('alternative') || types.has('matrix') ? 'comparison' : types.has('order') ? 'workflow' : 'mechanism');
   return {
     version: 1, job, ...(model.question || slide.question ? { question: model.question || String(slide.question).slice(0, 240) } : {}),
-    requiredUnits: [...new Set([...model.requiredUnits, ...structural, ...extraUnits])].filter(id => !omitted.has(id)),
+    requiredUnits: [...new Set([...model.requiredUnits, ...structural, ...extraUnits])].filter(id => !omitted.has(id) || items.get(id)?.must_preserve_structure || extraUnits.includes(id)),
     requiredRelations: [...new Set([...model.requiredRelations, ...ownedRelations.filter(relation => relation.type !== 'definition' || owned.includes(relation.unitIds[0])).map(relation => relation.id)])],
     adjacencyPairs: [...model.adjacencyPairs, ...derivedPairs.filter(pair => !model.adjacencyPairs.some(item => item.a === pair.a && item.b === pair.b))],
     comparisonAxes: model.comparisonAxes.length ? model.comparisonAxes : ownedRelations.filter(relation => relation.type === 'matrix').flatMap(relation => relation.axes.slice(1)).slice(0, 8),
@@ -88,15 +88,23 @@ export function inspectPageContracts(project, slides = project.deck?.slides || [
   const owners = slideUnitOwnership(project, slides);
   const numbers = sourceNumbers(project.source);
   const visibleText = new Map(slides.map(slide => [slide.id, visibleNodes(slide).map(nodeContentText).join('\n')]));
-  const rendered = new Map(slides.map(slide => [slide.id, new Set(visibleNodes(slide).map(node => node.sourceArtifact?.sourceUnitId).filter(Boolean))]));
-  const visibleOn = (id, slideId) => rendered.get(slideId)?.has(id) || recall(items.get(id)?.text || '', visibleText.get(slideId) || '') >= .45;
+  // Source IDs establish provenance, not visible explanation. Evaluate the
+  // actual copy even when a node claims the right sourceArtifact ID.
+  const visibleOn = (id, slideId) => recall(items.get(id)?.text || '', visibleText.get(slideId) || '') >= .45;
   const issues = [];
   slides.forEach((slide, index) => {
     const contract = plans.get(slide.id)?.pageContract;
     if (contract && index > 0) {
+      const waived = (contract.omissions || []).filter(x => items.get(x.sourceUnitId)?.must_preserve_structure);
+      if (waived.length) issues.push({ code: 'page_contract_structure_waiver', severity: 'error', slideId: slide.id, sourceUnitIds: waived.map(x=>x.sourceUnitId), repairable: true, message: 'Planner omissions cannot waive source structure obligations; use the explicit presentation policy.' });
       const missing = contract.requiredUnits.filter(id => items.has(id) && !items.get(id).must_preserve_structure && !visibleOn(id, slide.id));
       if (missing.length) issues.push({ code: 'page_contract_unit_missing', severity: 'warning', slideId: slide.id, sourceUnitIds: missing, repairable: true,
         message: `Contracted source units are not visibly explained on this slide: ${missing.slice(0, 6).join(', ')}` });
+      for(const id of contract.requiredUnits.filter(id=>items.has(id)&&!items.get(id).must_preserve_structure&&visibleOn(id,slide.id))) {
+        const original=items.get(id).text,visible=visibleText.get(slide.id)||'';
+        const checks=[[/\b(?:not|cannot|never|no longer)\b|不得|不能|并非|不是/iu,/\b(?:not|cannot|never|no longer)\b|不得|不能|并非|不是/iu,'negation'],[/\b(?:only if|only when|unless|provided that)\b|只有|除非|仅当/iu,/\b(?:if|when|unless|provided that|conditional)\b|只有|除非|仅当|条件|前提/iu,'condition']];
+        for(const [sourceMarker,visibleMarker,kind] of checks)if(sourceMarker.test(original)&&!visibleMarker.test(visible))issues.push({code:'page_contract_qualifier_missing',severity:'warning',slideId:slide.id,sourceUnitIds:[id],repairable:true,message:`Required source ${kind} is not explicit in visible copy; lexical signal requires source review.`});
+      }
       for (const pair of contract.adjacencyPairs || []) {
         const here = [pair.a, pair.b].map(id => visibleOn(id, slide.id));
         if (here[0] === here[1]) continue;

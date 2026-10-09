@@ -2,7 +2,7 @@ import { inspectRelationFidelity } from './ppt-semantic-relations.mjs';
 import { inspectPageContracts } from './ppt-page-contract.mjs';
 import { inspectSourceNumbers } from './ppt-source-numbers.mjs';
 import { buildMediaLedger, inspectMediaLedger } from './ppt-media-ledger.mjs';
-import { annotateIssues, routeIssue, themeBound, newHardErrors } from './ppt-repair-routing.mjs';
+import { annotateIssues, routeIssue, themeBound, validateRepairCandidate } from './ppt-repair-routing.mjs';
 import { obligationRegistry, normalizeObligationAudit, obligationFailures } from './ppt-obligations.mjs';
 import { inputFramework, normalizeScopeAudit } from './ppt-input-scope.mjs';
 import { buildRenderTree } from './ppt/render-tree.mjs';
@@ -236,7 +236,7 @@ export function repairProject(project, initialReview) {
   for (const [index, slide] of updated.deck.slides.entries()) {
     // Exact repeats within one page are safe to remove. Across pages the same
     // wording may be a deliberate recap, so keep it visible for review.
-    if (updated.runtime?.slides?.[slide.id]?.accepted) continue;
+    if (slide.locked || updated.runtime?.slides?.[slide.id]?.accepted || (slide.nodes || []).some(node=>node.locked) || updated.constraints?.entries?.some(entry=>entry.active&&(entry.slideId===slide.id||entry.slideIds?.includes(slide.id)))) continue;
     for (const change of normalizeSlideCopy(slide)) repairs.push({code:change.code,slideId:slide.id,action:'normalized exact redundant visible copy'});
     const seen = new Set();
     const contract = updated.planning?.slidePlan?.find(item => item.slideId === slide.id) || {};
@@ -303,9 +303,9 @@ export function repairProject(project, initialReview) {
     repairs.push({ code, action: `${token} changed to ${palette[token]}`, operation: 'adjust_unbound_token' });
   }
   const review = deterministicReview(updated, updated.deck);
-  const routedRepairs = repairs.map(item => ({ ...routeIssue(item.code), ...item }));
+  const routedRepairs = repairs.map(item => ({ ...routeIssue(item.code), ...item, operation: item.operation || (/duplicate|redundant|repeat/.test(item.code)?'remove_duplicate':item.code==='title_overflow'?'select_title_candidate':'reflow') }));
   // A repair that introduces a new hard error is rolled back as a whole.
-  const regressions = newHardErrors(initialReview, review);
+  const regressions = [...validateRepairCandidate(project, updated, {scopeSlideIds: repairs.map(x=>x.slideId).filter(Boolean), beforeReview: initialReview, afterReview: review}), ...routedRepairs.filter(item=>!item.allowedOperations.includes(item.operation)).map(item=>({code:'repair_operation_not_allowed',slideId:item.slideId,operation:item.operation}))];
   if (regressions.length) return { project, review: initialReview,
     repairs: [...routedRepairs.map(item => ({ ...item, rolledBack: true })), { code: 'repair_rolled_back', ownerLayer: 'review', action: 'repair candidate introduced new hard errors and was discarded',
       introduced: regressions.slice(0, 8).map(item => ({ code: item.code, slideId: item.slideId || null })) }] };
@@ -380,6 +380,7 @@ export function normalizeModelReview(value, slideIds, project = null) {
     const detail = typeof item.detail === 'string' ? item.detail.trim().slice(0, 300) : '';
     if (!ids.length || !detail || ids.some(id=>!valid.has(id))) throw new Error('whole-deck review finding requires valid slideIds and detail');
     return { slideIds: ids, detail,
+      ...(typeof item.code==='string'&&routeIssue(item.code).ownerLayer!=='review'?{code:item.code}:{}),
       ...(['shallow', 'out_of_scope', 'unsupported_fact'].includes(item.reason) ? { reason: item.reason } : {}),
       ...(typeof item.suggestedFix === 'string' && item.suggestedFix.trim() ? { suggestedFix: item.suggestedFix.trim().slice(0, 700) } : {}),
       ...(allowBullets && Array.isArray(item.bulletIndexes) ? { bulletIndexes: [...new Set(item.bulletIndexes.map(Number).filter(Number.isInteger))].filter(index => index >= 0 && index < 10).slice(0, 10) } : {}) };

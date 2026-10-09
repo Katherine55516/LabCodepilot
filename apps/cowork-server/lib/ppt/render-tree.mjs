@@ -1,3 +1,4 @@
+import {componentElements} from './component-layout.mjs';
 import { visibleNodes } from '../ppt-visible-content.mjs';
 import crypto from 'node:crypto';
 import { applyRenderContract, RENDER_CONTRACT_VERSION } from './render-contract.mjs';
@@ -84,6 +85,8 @@ function buildSlide(project, input, index, total) {
   const regions = regionMap(slide);
   const typography = typographyFor(slide);
   if (slide.stylePreference?.bodyScale) typography.bodyPt *= slide.stylePreference.bodyScale;
+  const composed=componentElements(project,slide,typography);
+  if(composed) return {id:slide.id,slideId:slide.id,index,layoutId:slide.layoutId,size:SLIDE_SIZE,background:project.templateSpec?.palette?.background,elements:composed};
   const elements = [];
   const titleNode = slide.nodes.find(node => node.semanticRole === 'title');
   const bodyNode = slide.nodes.find(node => node.semanticRole === 'body');

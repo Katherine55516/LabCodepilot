@@ -1,0 +1,1300 @@
+{
+  "schemaVersion": 1,
+  "renderContractVersion": 2,
+  "units": "emu",
+  "deckId": "deck_0f171d34d6d0a0e75df3219e",
+  "size": {
+    "width": 12192000,
+    "height": 6858000
+  },
+  "layoutVersion": 2,
+  "slides": [
+    {
+      "id": "cover",
+      "slideId": "cover",
+      "index": 0,
+      "layoutId": "cover",
+      "size": {
+        "width": 12192000,
+        "height": 6858000
+      },
+      "background": "#f8f9fc",
+      "elements": [
+        {
+          "id": "decor_eed71a21b5b0ee70cd59a075",
+          "nodeId": null,
+          "kind": "shape",
+          "bounds": {
+            "x": 0,
+            "y": 0,
+            "width": 12192000,
+            "height": 118872
+          },
+          "content": {
+            "shape": "rect"
+          },
+          "style": {
+            "fill": "#404b6b"
+          },
+          "zIndex": 0,
+          "locked": true
+        },
+        {
+          "id": "node_68fae2bf438f398a8fea4a65",
+          "nodeId": "node_68fae2bf438f398a8fea4a65",
+          "kind": "text",
+          "bounds": {
+            "x": 1005840,
+            "y": 2029968,
+            "width": 10149840,
+            "height": 1353312
+          },
+          "content": {
+            "text": "Offline component evidence"
+          },
+          "style": {
+            "fontFamily": "Noto Serif CJK SC",
+            "eastAsiaFontFamily": "Noto Serif CJK SC",
+            "eastAsiaFontFamilyHant": "Noto Serif CJK TC",
+            "fontSizePt": 38,
+            "lineHeight": 1.05,
+            "paragraphSpacingEm": 0,
+            "color": "#242a3b",
+            "fontWeight": 700
+          },
+          "zIndex": 10,
+          "rotation": 0,
+          "locked": false,
+          "groupId": null,
+          "semanticRole": "title",
+          "textLayout": {
+            "version": 2,
+            "units": "pt",
+            "margins": [
+              3.6,
+              3.6,
+              3.6,
+              3.6
+            ],
+            "wrap": true,
+            "autoFit": "none",
+            "whiteSpace": "pre-wrap",
+            "overflowWrap": "anywhere",
+            "fontFamily": "Noto Serif CJK SC",
+            "tabSize": 4,
+            "paragraphs": [
+              {
+                "text": "Offline component evidence",
+                "lineHeight": 1.05,
+                "spaceAfterPt": 0
+              }
+            ],
+            "code": false
+          }
+        },
+        {
+          "id": "node_385731f95a45a05debe2f838",
+          "nodeId": "node_385731f95a45a05debe2f838",
+          "kind": "list",
+          "bounds": {
+            "x": 1234440,
+            "y": 3822192,
+            "width": 9692640,
+            "height": 777240
+          },
+          "content": {
+            "items": []
+          },
+          "style": {
+            "fontFamily": "Noto Sans CJK SC",
+            "eastAsiaFontFamily": "Noto Sans CJK SC",
+            "eastAsiaFontFamilyHant": "Noto Sans CJK TC",
+            "fontSizePt": 21,
+            "lineHeight": 1.05,
+            "paragraphSpacingEm": 0.5,
+            "color": "#505b6f",
+            "fontWeight": 400
+          },
+          "zIndex": 20,
+          "rotation": 0,
+          "locked": false,
+          "groupId": null,
+          "textLayout": {
+            "version": 2,
+            "units": "pt",
+            "margins": [
+              3.6,
+              3.6,
+              3.6,
+              3.6
+            ],
+            "wrap": true,
+            "autoFit": "none",
+            "whiteSpace": "pre-wrap",
+            "overflowWrap": "anywhere",
+            "fontFamily": "Noto Sans CJK SC",
+            "tabSize": 4,
+            "paragraphs": [],
+            "code": false
+          }
+        },
+        {
+          "id": "decor_aceb074aeb14ffa15da82cae",
+          "nodeId": null,
+          "kind": "text",
+          "bounds": {
+            "x": 10881360,
+            "y": 6428232,
+            "width": 475488,
+            "height": 256032
+          },
+          "content": {
+            "text": "1"
+          },
+          "style": {
+            "fontFamily": "Noto Sans CJK SC",
+            "eastAsiaFontFamily": "Noto Sans CJK SC",
+            "eastAsiaFontFamilyHant": "Noto Sans CJK TC",
+            "fontSizePt": 11,
+            "lineHeight": 1.12,
+            "paragraphSpacingEm": 0.5,
+            "color": "#505b6f",
+            "fontWeight": 400,
+            "textAlign": "right"
+          },
+          "zIndex": 100,
+          "locked": true,
+          "textLayout": {
+            "version": 2,
+            "units": "pt",
+            "margins": [
+              3.6,
+              3.6,
+              3.6,
+              3.6
+            ],
+            "wrap": true,
+            "autoFit": "none",
+            "whiteSpace": "pre-wrap",
+            "overflowWrap": "anywhere",
+            "fontFamily": "Noto Sans CJK SC",
+            "tabSize": 4,
+            "paragraphs": [
+              {
+                "text": "1",
+                "lineHeight": 1.12,
+                "spaceAfterPt": 5.5
+              }
+            ],
+            "code": false
+          }
+        }
+      ]
+    },
+    {
+      "id": "panels",
+      "slideId": "panels",
+      "index": 1,
+      "layoutId": "two-panel",
+      "size": {
+        "width": 12192000,
+        "height": 6858000
+      },
+      "background": "#f8f9fc",
+      "elements": [
+        {
+          "id": "node_520cf3e1677f626daee58000",
+          "nodeId": "node_520cf3e1677f626daee58000",
+          "kind": "text",
+          "bounds": {
+            "x": 786384,
+            "y": 530352,
+            "width": 10561320,
+            "height": 822960
+          },
+          "content": {
+            "text": "Methods and conditions"
+          },
+          "style": {
+            "fontFamily": "Noto Serif CJK SC",
+            "eastAsiaFontFamily": "Noto Sans CJK SC",
+            "color": "#242a3b",
+            "fontSizePt": 36,
+            "lineHeight": 1.18,
+            "paragraphSpacingEm": 0.2,
+            "fontWeight": 700
+          },
+          "zIndex": 20,
+          "locked": false,
+          "semanticRole": "title",
+          "rotation": 0,
+          "textLayout": {
+            "version": 2,
+            "units": "pt",
+            "margins": [
+              3.6,
+              3.6,
+              3.6,
+              3.6
+            ],
+            "wrap": true,
+            "autoFit": "none",
+            "whiteSpace": "pre-wrap",
+            "overflowWrap": "anywhere",
+            "fontFamily": "Noto Serif CJK SC",
+            "tabSize": 4,
+            "paragraphs": [
+              {
+                "text": "Methods and conditions",
+                "lineHeight": 1.18,
+                "spaceAfterPt": 7.2
+              }
+            ],
+            "code": false
+          }
+        },
+        {
+          "id": "node_4f65bc2e98fc1837f3e156b6",
+          "nodeId": "node_4f65bc2e98fc1837f3e156b6",
+          "kind": "list",
+          "bounds": {
+            "x": 786384,
+            "y": 1627632,
+            "width": 10561320,
+            "height": 4526280
+          },
+          "content": {
+            "items": [
+              {
+                "id": "item_180fa841ecde4123b209442c",
+                "text": "A ranked portfolio compares signals under a fixed universe."
+              },
+              {
+                "id": "item_758bf6162e45e887cf201d77",
+                "text": "A neutral portfolio constrains exposures and turnover."
+              },
+              {
+                "id": "item_b6918c9c0612233215b75be7",
+                "text": "Costs and liquidity determine implementation limits."
+              }
+            ],
+            "pointLayout": {
+              "boxes": [
+                {
+                  "x": 0,
+                  "y": 0,
+                  "w": 0.6331168831168831,
+                  "h": 0.4858585858585859
+                },
+                {
+                  "x": 0,
+                  "y": 0.5141414141414142,
+                  "w": 0.6331168831168831,
+                  "h": 0.4858585858585859
+                },
+                {
+                  "x": 0.6590909090909091,
+                  "y": 0,
+                  "w": 0.34090909090909083,
+                  "h": 1
+                }
+              ],
+              "fontSizePt": 18,
+              "overflow": false,
+              "columns": 2,
+              "suggestedSplitCount": 1
+            }
+          },
+          "style": {
+            "fontFamily": "Noto Sans CJK SC",
+            "eastAsiaFontFamily": "Noto Sans CJK SC",
+            "color": "#242a3b",
+            "fontSizePt": 18,
+            "lineHeight": 1.18,
+            "paragraphSpacingEm": 0.2
+          },
+          "zIndex": 20,
+          "locked": false,
+          "semanticRole": "body",
+          "rotation": 0,
+          "textLayout": {
+            "version": 2,
+            "units": "pt",
+            "margins": [
+              3.6,
+              3.6,
+              3.6,
+              3.6
+            ],
+            "wrap": true,
+            "autoFit": "none",
+            "whiteSpace": "pre-wrap",
+            "overflowWrap": "anywhere",
+            "fontFamily": "Noto Sans CJK SC",
+            "tabSize": 4,
+            "paragraphs": [
+              {
+                "text": "• A ranked portfolio compares signals under a fixed universe.",
+                "lineHeight": 1.18,
+                "spaceAfterPt": 3.6
+              },
+              {
+                "text": "• A neutral portfolio constrains exposures and turnover.",
+                "lineHeight": 1.18,
+                "spaceAfterPt": 3.6
+              },
+              {
+                "text": "• Costs and liquidity determine implementation limits.",
+                "lineHeight": 1.18,
+                "spaceAfterPt": 3.6
+              }
+            ],
+            "code": false
+          }
+        }
+      ]
+    },
+    {
+      "id": "formula",
+      "slideId": "formula",
+      "index": 2,
+      "layoutId": "formula-variables",
+      "size": {
+        "width": 12192000,
+        "height": 6858000
+      },
+      "background": "#f8f9fc",
+      "elements": [
+        {
+          "id": "formula-title",
+          "nodeId": "formula-title",
+          "kind": "text",
+          "bounds": {
+            "x": 786384,
+            "y": 530352,
+            "width": 10561320,
+            "height": 822960
+          },
+          "content": {
+            "text": "Model and variables"
+          },
+          "style": {
+            "fontFamily": "Noto Serif CJK SC",
+            "eastAsiaFontFamily": "Noto Sans CJK SC",
+            "color": "#242a3b",
+            "fontSizePt": 36,
+            "lineHeight": 1.18,
+            "paragraphSpacingEm": 0.2,
+            "fontWeight": 700
+          },
+          "zIndex": 20,
+          "locked": false,
+          "semanticRole": "title",
+          "rotation": 0,
+          "textLayout": {
+            "version": 2,
+            "units": "pt",
+            "margins": [
+              3.6,
+              3.6,
+              3.6,
+              3.6
+            ],
+            "wrap": true,
+            "autoFit": "none",
+            "whiteSpace": "pre-wrap",
+            "overflowWrap": "anywhere",
+            "fontFamily": "Noto Serif CJK SC",
+            "tabSize": 4,
+            "paragraphs": [
+              {
+                "text": "Model and variables",
+                "lineHeight": 1.18,
+                "spaceAfterPt": 7.2
+              }
+            ],
+            "code": false
+          }
+        },
+        {
+          "id": "eq",
+          "nodeId": "eq",
+          "kind": "text",
+          "bounds": {
+            "x": 786384,
+            "y": 1737360,
+            "width": 5989320,
+            "height": 3566160
+          },
+          "content": {
+            "text": "y=ax+b",
+            "mathText": "y=ax+b",
+            "tex": "y=ax+b",
+            "mathMl": "<math xmlns=\"http://www.w3.org/1998/Math/MathML\" display=\"block\"><semantics><mrow><mi>y</mi><mo>=</mo><mi>a</mi><mi>x</mi><mo>+</mo><mi>b</mi></mrow><annotation encoding=\"application/x-tex\">y=ax+b</annotation></semantics></math>",
+            "displayText": "y=ax+b",
+            "mathStatus": "native_math"
+          },
+          "style": {
+            "fontFamily": "Noto Sans CJK SC",
+            "eastAsiaFontFamily": "Noto Sans CJK SC",
+            "color": "#242a3b",
+            "fontSizePt": 21,
+            "lineHeight": 1.18,
+            "paragraphSpacingEm": 0.2
+          },
+          "zIndex": 20,
+          "locked": false,
+          "rotation": 0,
+          "mathLayout": {
+            "bounds": {
+              "x": 786384,
+              "y": 3347085,
+              "width": 962787,
+              "height": 346710
+            },
+            "overflow": false,
+            "widthPt": 75.81,
+            "heightPt": 27.3
+          },
+          "textLayout": {
+            "version": 2,
+            "units": "pt",
+            "margins": [
+              3.6,
+              3.6,
+              3.6,
+              3.6
+            ],
+            "wrap": true,
+            "autoFit": "none",
+            "whiteSpace": "pre-wrap",
+            "overflowWrap": "anywhere",
+            "fontFamily": "Noto Sans CJK SC",
+            "tabSize": 4,
+            "paragraphs": [
+              {
+                "text": "y=ax+b",
+                "lineHeight": 1.18,
+                "spaceAfterPt": 4.2
+              }
+            ],
+            "code": false
+          }
+        },
+        {
+          "id": "variables",
+          "nodeId": "variables",
+          "kind": "text",
+          "bounds": {
+            "x": 7040880,
+            "y": 1737360,
+            "width": 4306824,
+            "height": 4233672
+          },
+          "content": {
+            "text": "x is the input variable.\na is the slope coefficient.\nb is the intercept.\nThe expression defines a linear relation."
+          },
+          "style": {
+            "fontFamily": "Noto Sans CJK SC",
+            "eastAsiaFontFamily": "Noto Sans CJK SC",
+            "color": "#242a3b",
+            "fontSizePt": 21,
+            "lineHeight": 1.18,
+            "paragraphSpacingEm": 0.2
+          },
+          "zIndex": 20,
+          "locked": false,
+          "rotation": 0,
+          "textLayout": {
+            "version": 2,
+            "units": "pt",
+            "margins": [
+              3.6,
+              3.6,
+              3.6,
+              3.6
+            ],
+            "wrap": true,
+            "autoFit": "none",
+            "whiteSpace": "pre-wrap",
+            "overflowWrap": "anywhere",
+            "fontFamily": "Noto Sans CJK SC",
+            "tabSize": 4,
+            "paragraphs": [
+              {
+                "text": "x is the input variable.\na is the slope coefficient.\nb is the intercept.\nThe expression defines a linear relation.",
+                "lineHeight": 1.18,
+                "spaceAfterPt": 4.2
+              }
+            ],
+            "code": false
+          }
+        }
+      ]
+    },
+    {
+      "id": "items",
+      "slideId": "items",
+      "index": 3,
+      "layoutId": "item-icons",
+      "size": {
+        "width": 12192000,
+        "height": 6858000
+      },
+      "background": "#f8f9fc",
+      "elements": [
+        {
+          "id": "node_34f5cc909d8434aa41a63b66",
+          "nodeId": "node_34f5cc909d8434aa41a63b66",
+          "kind": "text",
+          "bounds": {
+            "x": 786384,
+            "y": 530352,
+            "width": 10561320,
+            "height": 822960
+          },
+          "content": {
+            "text": "Distinct research tasks"
+          },
+          "style": {
+            "fontFamily": "Noto Serif CJK SC",
+            "eastAsiaFontFamily": "Noto Sans CJK SC",
+            "color": "#242a3b",
+            "fontSizePt": 36,
+            "lineHeight": 1.18,
+            "paragraphSpacingEm": 0.2,
+            "fontWeight": 700
+          },
+          "zIndex": 20,
+          "locked": false,
+          "semanticRole": "title",
+          "rotation": 0,
+          "textLayout": {
+            "version": 2,
+            "units": "pt",
+            "margins": [
+              3.6,
+              3.6,
+              3.6,
+              3.6
+            ],
+            "wrap": true,
+            "autoFit": "none",
+            "whiteSpace": "pre-wrap",
+            "overflowWrap": "anywhere",
+            "fontFamily": "Noto Serif CJK SC",
+            "tabSize": 4,
+            "paragraphs": [
+              {
+                "text": "Distinct research tasks",
+                "lineHeight": 1.18,
+                "spaceAfterPt": 7.2
+              }
+            ],
+            "code": false
+          }
+        },
+        {
+          "id": "node_9a144f6c27c4999b44f9823a",
+          "nodeId": "node_9a144f6c27c4999b44f9823a",
+          "kind": "list",
+          "bounds": {
+            "x": 786384,
+            "y": 1627632,
+            "width": 10561320,
+            "height": 4434840
+          },
+          "content": {
+            "items": [
+              {
+                "id": "item_98ec1a9eeb224ba09153f55c",
+                "text": "State a testable hypothesis and its economic mechanism."
+              },
+              {
+                "id": "item_88f56487b3181f7648a3dbee",
+                "text": "Preserve conditions and compare alternatives on shared axes."
+              },
+              {
+                "id": "item_5ac8b5694764760ac2e7abdb",
+                "text": "Measure costs, evaluate results and monitor drift."
+              }
+            ],
+            "pointLayout": {
+              "boxes": [
+                {
+                  "x": 0.05541125541125541,
+                  "y": 0,
+                  "w": 0.9445887445887445,
+                  "h": 0.30309278350515456
+                },
+                {
+                  "x": 0.05541125541125541,
+                  "y": 0.3484536082474226,
+                  "w": 0.9445887445887445,
+                  "h": 0.30309278350515456
+                },
+                {
+                  "x": 0.05541125541125541,
+                  "y": 0.6969072164948452,
+                  "w": 0.9445887445887445,
+                  "h": 0.30309278350515456
+                }
+              ],
+              "fontSizePt": 18,
+              "overflow": false,
+              "columns": 1,
+              "suggestedSplitCount": 1
+            }
+          },
+          "style": {
+            "fontFamily": "Noto Sans CJK SC",
+            "eastAsiaFontFamily": "Noto Sans CJK SC",
+            "color": "#242a3b",
+            "fontSizePt": 18,
+            "lineHeight": 1.18,
+            "paragraphSpacingEm": 0.2
+          },
+          "zIndex": 20,
+          "locked": false,
+          "semanticRole": "body",
+          "rotation": 0,
+          "textLayout": {
+            "version": 2,
+            "units": "pt",
+            "margins": [
+              3.6,
+              3.6,
+              3.6,
+              3.6
+            ],
+            "wrap": true,
+            "autoFit": "none",
+            "whiteSpace": "pre-wrap",
+            "overflowWrap": "anywhere",
+            "fontFamily": "Noto Sans CJK SC",
+            "tabSize": 4,
+            "paragraphs": [
+              {
+                "text": "• State a testable hypothesis and its economic mechanism.",
+                "lineHeight": 1.18,
+                "spaceAfterPt": 3.6
+              },
+              {
+                "text": "• Preserve conditions and compare alternatives on shared axes.",
+                "lineHeight": 1.18,
+                "spaceAfterPt": 3.6
+              },
+              {
+                "text": "• Measure costs, evaluate results and monitor drift.",
+                "lineHeight": 1.18,
+                "spaceAfterPt": 3.6
+              }
+            ],
+            "code": false
+          }
+        },
+        {
+          "id": "carrier_mapped_items_0",
+          "nodeId": null,
+          "semanticRole": "icon-carrier",
+          "kind": "shape",
+          "bounds": {
+            "x": 786384,
+            "y": 1627632,
+            "width": 420624,
+            "height": 420624
+          },
+          "content": {
+            "shape": "rect"
+          },
+          "style": {
+            "fill": "#cc5500"
+          },
+          "zIndex": 29,
+          "groupId": "mapped_items_0",
+          "locked": true
+        },
+        {
+          "id": "carrier_mapped_items_1",
+          "nodeId": null,
+          "semanticRole": "icon-carrier",
+          "kind": "shape",
+          "bounds": {
+            "x": 786384,
+            "y": 3172968,
+            "width": 420624,
+            "height": 420624
+          },
+          "content": {
+            "shape": "rect"
+          },
+          "style": {
+            "fill": "#cc5500"
+          },
+          "zIndex": 29,
+          "groupId": "mapped_items_1",
+          "locked": true
+        },
+        {
+          "id": "carrier_mapped_items_2",
+          "nodeId": null,
+          "semanticRole": "icon-carrier",
+          "kind": "shape",
+          "bounds": {
+            "x": 786384,
+            "y": 4718304,
+            "width": 420624,
+            "height": 420624
+          },
+          "content": {
+            "shape": "rect"
+          },
+          "style": {
+            "fill": "#cc5500"
+          },
+          "zIndex": 29,
+          "groupId": "mapped_items_2",
+          "locked": true
+        },
+        {
+          "id": "mapped_items_0",
+          "nodeId": "mapped_items_0",
+          "kind": "image",
+          "bounds": {
+            "x": 786384,
+            "y": 1627632,
+            "width": 420624,
+            "height": 420624
+          },
+          "content": {
+            "dataUrl": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEcAAABHCAYAAABVsFofAAAACXBIWXMAABcSAAAXEgFnn9JSAAAEzUlEQVR4nO2ba6hVRRSAJzMr7WWaVvTSHhDljzB6UlQWBFERaRGVkSWFmmSakSVlBRVG5I8Iehva896eBpW9uChF9MQSzMqIyoxE0qz0Zl8s7uxYzD2vvffMPnNqPpg/Z+9Za+2198xas2aOMYlEIpFIJBKJRAwAewBDbTsIGA0cBYwy/weAIcC5wH3AauBvWuMn4GVgLnAcsL35LwAMAs4HXgL+xA8bgKeAU0wnAuwKzAa+b/Kg4rD1wNeqfQh8an/f3KT/CmASMNDEDjAQmAasq/EgW4G3gFnA8cDOLcrcGzgLuAf4rM5wlGF6abRDjr4J9OMahq8ErgH28qRnP+A2YG0NXcuBg00sANvZr0G+DI0MjbPlesD57ErgW0fvRuDyEDpzAQwGnneMW2/ngQGmAqyT5Mvc5NjxALBDFTb0AxgOvOcYtAQYadqADCc7rDQ9wLCqDRlmh03GNuDGUEMoZ0C413HQBxI9qzJgF+AjJxxPMBEBTHTyqneAnUIrHQC8qJRukUnXRAhwDtCrbO0K+mXTl8Jn/CXLARMxNveRIZ8xO5SiE503cZ3pAIBbnBc6LkS4XKmUdJuIAG4FVgFX1MnDdLrxJbCjT+VzlPAfpbRgIsEuKzK+abDW+07dd5PPsP2rEnyBiQTgbids39ng3gnqvt+AEb4N6DGRANzuOObhZlk58La6f76PnGaDEniSiQC78NQ80spyxQYVP18PcLUSttzEF32Ex/Ks44ClXiIusEwJusi0Gbv61zyed4Frk8OMZUUNOUAVlja2WpwKBTDTccwzRSqAEsbt82ATxH2LGDNZGbLYtBFghuOYZ8uURm3/jElFBKxQAvolV1UBXOs4pqtszdgWyf4dmkUEbFICjjVtAJju1Iy7fRSwgEOVzDVFBPyiBAwua1ATXbsBl9mK3nm2kDbZccyrPtN+4Acle2Te0kRvNhn7MqhOcep6m3M0Qva9BnnWLTWejLF5Oo5QHVf7NMrRcz/NWeLbMVb3IqWj9ZoUMKZ0LtBcxzHOsHkXuAv4Wf0m14cH0q+XRVfl6TgudHkCeFTpeNC5JrueGRcG0q8rDTPzdLxYdXwfuKFGk8lz9xLGvVlvzFvZGXcU1ZEjd7o5T8eFtMaTJYx7Rck5s0E2vKCojib6pxR6AfTf3qjHIk8lhy+A/e3vRzph9oyiOlqoHmbMytt5PvBEnSElbarkJyWM29PJpXodpwhrQh0OsIvWjPEmNoDT7PZOLSRqjQmoW6JjxtEmRoAj7Ap7s3LKwmyYBdQre/pZulA4sFSC3eGopCwCHKi+mq/ci0NtnrHUY+sGDjMdgGwSKOd0uRdlQg3BYtMBAM8pm6e7F093di99Mc1Ejq0A/N6wEmiPj4312A4xHYA9WJXxRrvtiQrgE+Wcie22JxqAU5Vj1gU/s9NJAK8r58wrcxR/ga3SS3uthVAu9w8xkSKlD+WYP+R8c1FBUwtGqykmQuw6Tk6HZMwtI+zkAqF+ayx76S7A08rOVaUL9fTteOYJ5UHXQp72veSFn9Bum6JA9vedM4Hzqjy9/pCt98bWPrebktuc7Z1q/l0DXELn0FPpQQjgcHVaIVakVvOC/E2yMsc4i7jRETb5j9Y+7T42k0gkEolEIpEw8fMPs0gzek45hegAAAAASUVORK5CYII=",
+            "fit": "contain",
+            "carrierColor": "#cc5500"
+          },
+          "style": {
+            "fontFamily": "Noto Sans CJK SC",
+            "eastAsiaFontFamily": "Noto Sans CJK SC",
+            "color": "#242a3b",
+            "fontSizePt": 18,
+            "lineHeight": 1.18,
+            "paragraphSpacingEm": 0.2
+          },
+          "zIndex": 30,
+          "locked": false,
+          "semanticRole": "item-icon",
+          "rotation": 0,
+          "imageLayout": {
+            "version": 2,
+            "crop": [
+              0,
+              0,
+              0,
+              0
+            ],
+            "valid": true,
+            "fit": "contain"
+          }
+        },
+        {
+          "id": "mapped_items_1",
+          "nodeId": "mapped_items_1",
+          "kind": "image",
+          "bounds": {
+            "x": 786384,
+            "y": 3172968,
+            "width": 420624,
+            "height": 420624
+          },
+          "content": {
+            "dataUrl": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEcAAABHCAYAAABVsFofAAAACXBIWXMAABcSAAAXEgFnn9JSAAAEGklEQVR4nO3ca6hmUxzH8UXGYHI/nMExGeRW5J7kVuOFQcmlNGjCG3IrRF4IE0W8mFDCEIrhhfLKJJLkUiYihMYtuaQp99sMxkfLXjvr7M55znnOOc85+3n2/r47nfU/rfVrr7XX//f/7xNCS/3BnliBY+d6LrUDaxT8jC3nej61Au/4n53nej61QivO+LTidKAVpwOtOB3Ae+2BHP4TYgjL8VB6Yn43ml/wEu7AmRgOgw5OSov+W3f8hWdwYhg0sFta3Hj8hI3Zzxs6jH0Oi8IggNOwvrLA7/E4lmHxGJfAhTgCl6Vxv1Xi1/f9U4TTsSlb1K+4CQu6uSFjB9yIH7Mxf8S/H/oRHJi2S8mb2G866QP2xtsVgfYJ/QQ2x+vZIl7D/JnIrbAdXsnGPhv6CVxSOR+GZ/ISmM6kfIudEfoFfJpNfHkvsnJck41fG/oBHJxN+kNs1iNxtsC3afw/GAl1B9dli7y9l34OHsxiLgx1R3EvKTmlx+Kcn8U8EOqO0a/akR6LsziLWRPqDt7PJrxjr21S3IxXcXyoO4rcp+SQLuIG30PGvdkiL+oirhHinJstcnUXcY0QZyH+zHyYgyYZN/jiRHB/ttC12CZMQJPE2bXi4cQkdKcJYpohTubllNsr8gGOCuPQKHEi8YacDK6SaHw9in1D08WJ4Bh8ky28PKifwFLMa6w4EWyPeyrbrOQ7rMLnjRSnBHulN1leaRiL26LNGpqI4i50RbI7cwO+ylu4OpZ2QhPBCC4dZ8uVxCLg8zgv+tOhaSjOnpL78FWHp+mE0CSMflsNpQrGEjxSKfGUPIVtQxMw2iQbqvxu62iD4suKQG9MdPMeeHFKYo6WOk43dFMTa4Q4JTi5cvN+OAwyuhAnjT81a2WJpZnDwqCiS3FSzF1ZzNNhUDE1cYayrrCNA5t2mII4Ke7JLO6cUFcUb5MbcMEsipNXWK8NdUXRYFRy9CyJE1OKkjtDXVEU2EqunCVxzs7iVoa6YvREV82SOFdlcStCzf2aknWzJE50FPujiQmfZJPdv8ev8nmpM1W6EO4S6ozCDi15rMfiXJzFvBzqDhZlNuimyXovU0gfhiu1sUm11805WJlN+jPsMcOJ53y8UCkaTqq9bs7BgsrZs67sVJ+uOKmS8WI2NmbnB4R+AodWrM+4BZZO0885HB9n4+IhvCz0I4rFVL97iEb5ki6dwCNTDpVXKqLhdVboZxR9e/mHZiWxiLc6lV6Oq4yJH5NcnrpF3x0j9otu05Pagq1wPX4wPeK3DncPpDWh+Poldp5/1KUoXyfvePfQBBQ9PHH73BI/7khPRUlsurw1+jOxI6NvXtO9Yqq5VSPQijM+rTgdaMXpQCtOB1pxOtCK04F014m0/3lpnA6veCFs/2dX6AP+Bfyuto+riy9MAAAAAElFTkSuQmCC",
+            "fit": "contain",
+            "carrierColor": "#cc5500"
+          },
+          "style": {
+            "fontFamily": "Noto Sans CJK SC",
+            "eastAsiaFontFamily": "Noto Sans CJK SC",
+            "color": "#242a3b",
+            "fontSizePt": 18,
+            "lineHeight": 1.18,
+            "paragraphSpacingEm": 0.2
+          },
+          "zIndex": 30,
+          "locked": false,
+          "semanticRole": "item-icon",
+          "rotation": 0,
+          "imageLayout": {
+            "version": 2,
+            "crop": [
+              0,
+              0,
+              0,
+              0
+            ],
+            "valid": true,
+            "fit": "contain"
+          }
+        },
+        {
+          "id": "mapped_items_2",
+          "nodeId": "mapped_items_2",
+          "kind": "image",
+          "bounds": {
+            "x": 786384,
+            "y": 4718304,
+            "width": 420624,
+            "height": 420624
+          },
+          "content": {
+            "dataUrl": "data:image/png;base64,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",
+            "fit": "contain",
+            "carrierColor": "#cc5500"
+          },
+          "style": {
+            "fontFamily": "Noto Sans CJK SC",
+            "eastAsiaFontFamily": "Noto Sans CJK SC",
+            "color": "#242a3b",
+            "fontSizePt": 18,
+            "lineHeight": 1.18,
+            "paragraphSpacingEm": 0.2
+          },
+          "zIndex": 30,
+          "locked": false,
+          "semanticRole": "item-icon",
+          "rotation": 0,
+          "imageLayout": {
+            "version": 2,
+            "crop": [
+              0,
+              0,
+              0,
+              0
+            ],
+            "valid": true,
+            "fit": "contain"
+          }
+        }
+      ]
+    }
+  ],
+  "hash": "0970c1ace7884e59fbd63d033bce73ef207a2d526f6eaa9c1944ad3ff8a6f509",
+  "fixtureDeck": {
+    "slides": [
+      {
+        "id": "cover",
+        "title": "Offline component evidence",
+        "layoutId": "cover",
+        "bullets": [],
+        "blocks": [],
+        "nodes": [
+          {
+            "id": "node_68fae2bf438f398a8fea4a65",
+            "type": "text",
+            "semanticRole": "title",
+            "slotId": "title",
+            "styleRef": "typography.title",
+            "content": {
+              "text": "Offline component evidence"
+            }
+          },
+          {
+            "id": "node_385731f95a45a05debe2f838",
+            "type": "list",
+            "semanticRole": "body",
+            "slotId": "body",
+            "styleRef": "typography.body",
+            "content": {
+              "items": []
+            }
+          }
+        ],
+        "nodeOrder": [
+          "node_68fae2bf438f398a8fea4a65",
+          "node_385731f95a45a05debe2f838"
+        ],
+        "componentGraph": {
+          "schemaVersion": 1,
+          "readingOrder": [
+            "node_68fae2bf438f398a8fea4a65",
+            "node_385731f95a45a05debe2f838"
+          ],
+          "nodes": [
+            {
+              "id": "node_68fae2bf438f398a8fea4a65",
+              "role": "title",
+              "groupId": null,
+              "styleRef": "typography.title",
+              "sourceRefs": [],
+              "nativeRef": null
+            },
+            {
+              "id": "node_385731f95a45a05debe2f838",
+              "role": "body",
+              "groupId": null,
+              "styleRef": "typography.body",
+              "sourceRefs": [],
+              "nativeRef": null
+            }
+          ],
+          "edges": []
+        },
+        "role": "cover",
+        "layoutRef": "cover"
+      },
+      {
+        "id": "panels",
+        "title": "Methods and conditions",
+        "layoutId": "two-panel",
+        "bullets": [
+          "A ranked portfolio compares signals under a fixed universe.",
+          "A neutral portfolio constrains exposures and turnover.",
+          "Costs and liquidity determine implementation limits."
+        ],
+        "blocks": [],
+        "nodes": [
+          {
+            "id": "node_520cf3e1677f626daee58000",
+            "type": "text",
+            "semanticRole": "title",
+            "slotId": "title",
+            "styleRef": "typography.title",
+            "content": {
+              "text": "Methods and conditions"
+            }
+          },
+          {
+            "id": "node_4f65bc2e98fc1837f3e156b6",
+            "type": "list",
+            "semanticRole": "body",
+            "slotId": "body",
+            "styleRef": "typography.body",
+            "content": {
+              "items": [
+                {
+                  "id": "item_180fa841ecde4123b209442c",
+                  "text": "A ranked portfolio compares signals under a fixed universe."
+                },
+                {
+                  "id": "item_758bf6162e45e887cf201d77",
+                  "text": "A neutral portfolio constrains exposures and turnover."
+                },
+                {
+                  "id": "item_b6918c9c0612233215b75be7",
+                  "text": "Costs and liquidity determine implementation limits."
+                }
+              ]
+            }
+          }
+        ],
+        "nodeOrder": [
+          "node_520cf3e1677f626daee58000",
+          "node_4f65bc2e98fc1837f3e156b6"
+        ],
+        "componentGraph": {
+          "schemaVersion": 1,
+          "readingOrder": [
+            "node_520cf3e1677f626daee58000",
+            "node_4f65bc2e98fc1837f3e156b6"
+          ],
+          "nodes": [
+            {
+              "id": "node_520cf3e1677f626daee58000",
+              "role": "title",
+              "groupId": null,
+              "styleRef": "typography.title",
+              "sourceRefs": [],
+              "nativeRef": null
+            },
+            {
+              "id": "node_4f65bc2e98fc1837f3e156b6",
+              "role": "body",
+              "groupId": null,
+              "styleRef": "typography.body",
+              "sourceRefs": [],
+              "nativeRef": null
+            }
+          ],
+          "edges": [
+            {
+              "from": "node_4f65bc2e98fc1837f3e156b6",
+              "to": "item_180fa841ecde4123b209442c",
+              "relation": "contains-point",
+              "role": "support"
+            },
+            {
+              "from": "node_4f65bc2e98fc1837f3e156b6",
+              "to": "item_758bf6162e45e887cf201d77",
+              "relation": "contains-point",
+              "role": "support"
+            },
+            {
+              "from": "node_4f65bc2e98fc1837f3e156b6",
+              "to": "item_b6918c9c0612233215b75be7",
+              "relation": "contains-point",
+              "role": "support"
+            }
+          ]
+        },
+        "role": "two-panel",
+        "layoutRef": "two-panel"
+      },
+      {
+        "id": "formula",
+        "title": "Model and variables",
+        "layoutId": "formula-variables",
+        "nodes": [
+          {
+            "id": "formula-title",
+            "type": "text",
+            "semanticRole": "title",
+            "content": {
+              "text": "Model and variables"
+            }
+          },
+          {
+            "id": "eq",
+            "type": "text",
+            "content": {
+              "text": "y=ax+b",
+              "mathText": "y=ax+b",
+              "tex": "y=ax+b",
+              "mathMl": "<math xmlns=\"http://www.w3.org/1998/Math/MathML\" display=\"block\"><semantics><mrow><mi>y</mi><mo>=</mo><mi>a</mi><mi>x</mi><mo>+</mo><mi>b</mi></mrow><annotation encoding=\"application/x-tex\">y=ax+b</annotation></semantics></math>",
+              "displayText": "y=ax+b",
+              "mathStatus": "native_math"
+            }
+          },
+          {
+            "id": "variables",
+            "type": "text",
+            "content": {
+              "text": "x is the input variable.\na is the slope coefficient.\nb is the intercept.\nThe expression defines a linear relation."
+            }
+          }
+        ],
+        "nodeOrder": [
+          "formula-title",
+          "eq",
+          "variables"
+        ],
+        "componentGraph": {
+          "schemaVersion": 1,
+          "readingOrder": [
+            "formula-title",
+            "eq",
+            "variables"
+          ],
+          "nodes": [
+            {
+              "id": "formula-title",
+              "role": "title",
+              "groupId": null,
+              "styleRef": "text.default",
+              "sourceRefs": [],
+              "nativeRef": null
+            },
+            {
+              "id": "eq",
+              "role": "text",
+              "groupId": null,
+              "styleRef": "text.default",
+              "sourceRefs": [],
+              "nativeRef": null
+            },
+            {
+              "id": "variables",
+              "role": "text",
+              "groupId": null,
+              "styleRef": "text.default",
+              "sourceRefs": [],
+              "nativeRef": null
+            }
+          ],
+          "edges": []
+        },
+        "role": "formula-variables",
+        "layoutRef": "formula-variables",
+        "bullets": [],
+        "blocks": []
+      },
+      {
+        "id": "items",
+        "title": "Distinct research tasks",
+        "layoutId": "item-icons",
+        "bullets": [
+          "State a testable hypothesis and its economic mechanism.",
+          "Preserve conditions and compare alternatives on shared axes.",
+          "Measure costs, evaluate results and monitor drift."
+        ],
+        "blocks": [],
+        "nodes": [
+          {
+            "id": "node_34f5cc909d8434aa41a63b66",
+            "type": "text",
+            "semanticRole": "title",
+            "slotId": "title",
+            "styleRef": "typography.title",
+            "content": {
+              "text": "Distinct research tasks"
+            }
+          },
+          {
+            "id": "node_9a144f6c27c4999b44f9823a",
+            "type": "list",
+            "semanticRole": "body",
+            "slotId": "body",
+            "styleRef": "typography.body",
+            "content": {
+              "items": [
+                {
+                  "id": "item_98ec1a9eeb224ba09153f55c",
+                  "text": "State a testable hypothesis and its economic mechanism."
+                },
+                {
+                  "id": "item_88f56487b3181f7648a3dbee",
+                  "text": "Preserve conditions and compare alternatives on shared axes."
+                },
+                {
+                  "id": "item_5ac8b5694764760ac2e7abdb",
+                  "text": "Measure costs, evaluate results and monitor drift."
+                }
+              ]
+            }
+          },
+          {
+            "id": "mapped_items_0",
+            "type": "image",
+            "semanticRole": "item-icon",
+            "content": {
+              "dataUrl": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEcAAABHCAYAAABVsFofAAAACXBIWXMAABcSAAAXEgFnn9JSAAAEzUlEQVR4nO2ba6hVRRSAJzMr7WWaVvTSHhDljzB6UlQWBFERaRGVkSWFmmSakSVlBRVG5I8Iehva896eBpW9uChF9MQSzMqIyoxE0qz0Zl8s7uxYzD2vvffMPnNqPpg/Z+9Za+2198xas2aOMYlEIpFIJBKJRAwAewBDbTsIGA0cBYwy/weAIcC5wH3AauBvWuMn4GVgLnAcsL35LwAMAs4HXgL+xA8bgKeAU0wnAuwKzAa+b/Kg4rD1wNeqfQh8an/f3KT/CmASMNDEDjAQmAasq/EgW4G3gFnA8cDOLcrcGzgLuAf4rM5wlGF6abRDjr4J9OMahq8ErgH28qRnP+A2YG0NXcuBg00sANvZr0G+DI0MjbPlesD57ErgW0fvRuDyEDpzAQwGnneMW2/ngQGmAqyT5Mvc5NjxALBDFTb0AxgOvOcYtAQYadqADCc7rDQ9wLCqDRlmh03GNuDGUEMoZ0C413HQBxI9qzJgF+AjJxxPMBEBTHTyqneAnUIrHQC8qJRukUnXRAhwDtCrbO0K+mXTl8Jn/CXLARMxNveRIZ8xO5SiE503cZ3pAIBbnBc6LkS4XKmUdJuIAG4FVgFX1MnDdLrxJbCjT+VzlPAfpbRgIsEuKzK+abDW+07dd5PPsP2rEnyBiQTgbids39ng3gnqvt+AEb4N6DGRANzuOObhZlk58La6f76PnGaDEniSiQC78NQ80spyxQYVP18PcLUSttzEF32Ex/Ks44ClXiIusEwJusi0Gbv61zyed4Frk8OMZUUNOUAVlja2WpwKBTDTccwzRSqAEsbt82ATxH2LGDNZGbLYtBFghuOYZ8uURm3/jElFBKxQAvolV1UBXOs4pqtszdgWyf4dmkUEbFICjjVtAJju1Iy7fRSwgEOVzDVFBPyiBAwua1ATXbsBl9mK3nm2kDbZccyrPtN+4Acle2Te0kRvNhn7MqhOcep6m3M0Qva9BnnWLTWejLF5Oo5QHVf7NMrRcz/NWeLbMVb3IqWj9ZoUMKZ0LtBcxzHOsHkXuAv4Wf0m14cH0q+XRVfl6TgudHkCeFTpeNC5JrueGRcG0q8rDTPzdLxYdXwfuKFGk8lz9xLGvVlvzFvZGXcU1ZEjd7o5T8eFtMaTJYx7Rck5s0E2vKCojib6pxR6AfTf3qjHIk8lhy+A/e3vRzph9oyiOlqoHmbMytt5PvBEnSElbarkJyWM29PJpXodpwhrQh0OsIvWjPEmNoDT7PZOLSRqjQmoW6JjxtEmRoAj7Ap7s3LKwmyYBdQre/pZulA4sFSC3eGopCwCHKi+mq/ci0NtnrHUY+sGDjMdgGwSKOd0uRdlQg3BYtMBAM8pm6e7F093di99Mc1Ejq0A/N6wEmiPj4312A4xHYA9WJXxRrvtiQrgE+Wcie22JxqAU5Vj1gU/s9NJAK8r58wrcxR/ga3SS3uthVAu9w8xkSKlD+WYP+R8c1FBUwtGqykmQuw6Tk6HZMwtI+zkAqF+ayx76S7A08rOVaUL9fTteOYJ5UHXQp72veSFn9Bum6JA9vedM4Hzqjy9/pCt98bWPrebktuc7Z1q/l0DXELn0FPpQQjgcHVaIVakVvOC/E2yMsc4i7jRETb5j9Y+7T42k0gkEolEIpEw8fMPs0gzek45hegAAAAASUVORK5CYII=",
+              "fit": "contain",
+              "carrierColor": "#cc5500"
+            },
+            "templateMediaBinding": {
+              "assetId": "990862c13d3069255e6de610b9796b60d7ee3fdc37789766216fc88d32ad298f",
+              "itemId": "item_98ec1a9eeb224ba09153f55c",
+              "itemIndex": 0,
+              "role": "template_icon",
+              "origin": "template",
+              "reason": "visual_aid_not_source_evidence"
+            },
+            "zIndex": 30
+          },
+          {
+            "id": "mapped_items_1",
+            "type": "image",
+            "semanticRole": "item-icon",
+            "content": {
+              "dataUrl": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEcAAABHCAYAAABVsFofAAAACXBIWXMAABcSAAAXEgFnn9JSAAAEGklEQVR4nO3ca6hmUxzH8UXGYHI/nMExGeRW5J7kVuOFQcmlNGjCG3IrRF4IE0W8mFDCEIrhhfLKJJLkUiYihMYtuaQp99sMxkfLXjvr7M55znnOOc85+3n2/r47nfU/rfVrr7XX//f/7xNCS/3BnliBY+d6LrUDaxT8jC3nej61Au/4n53nej61QivO+LTidKAVpwOtOB3Ae+2BHP4TYgjL8VB6Yn43ml/wEu7AmRgOgw5OSov+W3f8hWdwYhg0sFta3Hj8hI3Zzxs6jH0Oi8IggNOwvrLA7/E4lmHxGJfAhTgCl6Vxv1Xi1/f9U4TTsSlb1K+4CQu6uSFjB9yIH7Mxf8S/H/oRHJi2S8mb2G866QP2xtsVgfYJ/QQ2x+vZIl7D/JnIrbAdXsnGPhv6CVxSOR+GZ/ISmM6kfIudEfoFfJpNfHkvsnJck41fG/oBHJxN+kNs1iNxtsC3afw/GAl1B9dli7y9l34OHsxiLgx1R3EvKTmlx+Kcn8U8EOqO0a/akR6LsziLWRPqDt7PJrxjr21S3IxXcXyoO4rcp+SQLuIG30PGvdkiL+oirhHinJstcnUXcY0QZyH+zHyYgyYZN/jiRHB/ttC12CZMQJPE2bXi4cQkdKcJYpohTubllNsr8gGOCuPQKHEi8YacDK6SaHw9in1D08WJ4Bh8ky28PKifwFLMa6w4EWyPeyrbrOQ7rMLnjRSnBHulN1leaRiL26LNGpqI4i50RbI7cwO+ylu4OpZ2QhPBCC4dZ8uVxCLg8zgv+tOhaSjOnpL78FWHp+mE0CSMflsNpQrGEjxSKfGUPIVtQxMw2iQbqvxu62iD4suKQG9MdPMeeHFKYo6WOk43dFMTa4Q4JTi5cvN+OAwyuhAnjT81a2WJpZnDwqCiS3FSzF1ZzNNhUDE1cYayrrCNA5t2mII4Ke7JLO6cUFcUb5MbcMEsipNXWK8NdUXRYFRy9CyJE1OKkjtDXVEU2EqunCVxzs7iVoa6YvREV82SOFdlcStCzf2aknWzJE50FPujiQmfZJPdv8ev8nmpM1W6EO4S6ozCDi15rMfiXJzFvBzqDhZlNuimyXovU0gfhiu1sUm11805WJlN+jPsMcOJ53y8UCkaTqq9bs7BgsrZs67sVJ+uOKmS8WI2NmbnB4R+AodWrM+4BZZO0885HB9n4+IhvCz0I4rFVL97iEb5ki6dwCNTDpVXKqLhdVboZxR9e/mHZiWxiLc6lV6Oq4yJH5NcnrpF3x0j9otu05Pagq1wPX4wPeK3DncPpDWh+Poldp5/1KUoXyfvePfQBBQ9PHH73BI/7khPRUlsurw1+jOxI6NvXtO9Yqq5VSPQijM+rTgdaMXpQCtOB1pxOtCK04F014m0/3lpnA6veCFs/2dX6AP+Bfyuto+riy9MAAAAAElFTkSuQmCC",
+              "fit": "contain",
+              "carrierColor": "#cc5500"
+            },
+            "templateMediaBinding": {
+              "assetId": "0333aa6c04f393346fb50d4e349ef4c43a2d3a97fa12e3ad2d5e3e8ec4b0dc34",
+              "itemId": "item_88f56487b3181f7648a3dbee",
+              "itemIndex": 1,
+              "role": "template_icon",
+              "origin": "template",
+              "reason": "visual_aid_not_source_evidence"
+            },
+            "zIndex": 30
+          },
+          {
+            "id": "mapped_items_2",
+            "type": "image",
+            "semanticRole": "item-icon",
+            "content": {
+              "dataUrl": "data:image/png;base64,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",
+              "fit": "contain",
+              "carrierColor": "#cc5500"
+            },
+            "templateMediaBinding": {
+              "assetId": "55a0db65742a62e810b1cdb32aa7a7dd2a094fb8087e9b79f73b58faf71685e9",
+              "itemId": "item_5ac8b5694764760ac2e7abdb",
+              "itemIndex": 2,
+              "role": "template_icon",
+              "origin": "template",
+              "reason": "visual_aid_not_source_evidence"
+            },
+            "zIndex": 30
+          }
+        ],
+        "nodeOrder": [
+          "node_34f5cc909d8434aa41a63b66",
+          "node_9a144f6c27c4999b44f9823a",
+          "mapped_items_0",
+          "mapped_items_1",
+          "mapped_items_2"
+        ],
+        "componentGraph": {
+          "schemaVersion": 1,
+          "readingOrder": [
+            "node_34f5cc909d8434aa41a63b66",
+            "node_9a144f6c27c4999b44f9823a"
+          ],
+          "nodes": [
+            {
+              "id": "node_34f5cc909d8434aa41a63b66",
+              "role": "title",
+              "groupId": null,
+              "styleRef": "typography.title",
+              "sourceRefs": [],
+              "nativeRef": null
+            },
+            {
+              "id": "node_9a144f6c27c4999b44f9823a",
+              "role": "body",
+              "groupId": null,
+              "styleRef": "typography.body",
+              "sourceRefs": [],
+              "nativeRef": null
+            }
+          ],
+          "edges": [
+            {
+              "from": "node_9a144f6c27c4999b44f9823a",
+              "to": "item_98ec1a9eeb224ba09153f55c",
+              "relation": "contains-point",
+              "role": "support"
+            },
+            {
+              "from": "node_9a144f6c27c4999b44f9823a",
+              "to": "item_88f56487b3181f7648a3dbee",
+              "relation": "contains-point",
+              "role": "support"
+            },
+            {
+              "from": "node_9a144f6c27c4999b44f9823a",
+              "to": "item_5ac8b5694764760ac2e7abdb",
+              "relation": "contains-point",
+              "role": "support"
+            }
+          ]
+        },
+        "role": "summary",
+        "layoutRef": "item-icons"
+      }
+    ],
+    "deckId": "deck_0f171d34d6d0a0e75df3219e",
+    "schemaVersion": 3
+  },
+  "fixtureTemplateSpec": {
+    "id": "light",
+    "kind": "builtin",
+    "name": "Light",
+    "version": 1,
+    "palette": {
+      "background": "#f8f9fc",
+      "accent": "#404b6b",
+      "foreground": "#242a3b",
+      "muted": "#505b6f"
+    },
+    "fonts": {
+      "title": "Noto Serif CJK SC",
+      "body": "Noto Sans CJK SC",
+      "titleEastAsia": "Noto Serif CJK SC",
+      "bodyEastAsia": "Noto Sans CJK SC",
+      "titleEastAsiaHant": "Noto Serif CJK TC",
+      "bodyEastAsiaHant": "Noto Sans CJK TC",
+      "cjkExplicit": true
+    }
+  }
+}

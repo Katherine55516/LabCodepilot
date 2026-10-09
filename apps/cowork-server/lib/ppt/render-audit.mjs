@@ -25,6 +25,7 @@ export function renderIssues(tree) {
       if (b.x < 0 || b.y < 0 || b.x + b.width > slide.size.width || b.y + b.height > slide.size.height) {
         issues.push({ code: 'render_overflow', severity: 'error', message: `${element.id} 超出页面边界`, slideId: slide.id, nodeIds: [element.nodeId].filter(Boolean), repairable: true });
       }
+      if(element.mathLayout?.overflow)issues.push({code:'math_layout_capacity',severity:'error',slideId:slide.id,nodeIds:[element.nodeId],overflowPt:Math.max(element.mathLayout.widthPt-b.width/12700,element.mathLayout.heightPt-b.height/12700),repairable:false,message:'Equation exceeds its available frame; re-layout without deleting terms.'});
       if(element.kind==='chart'&&element.content?.chartType==='unsupported')issues.push({code:'chart_rendering_unsupported',severity:'error',slideId:slide.id,nodeIds:[element.nodeId],repairable:false,message:'Native chart type requires a supported representation before new publication.'});
       if (element.kind==='chart' && !element.chartLayout?.valid && element.content?.values) issues.push({code:'chart_data_invalid',severity:'error',slideId:slide.id,nodeIds:[element.nodeId],repairable:false,message:'Chart requires finite matched values and valid non-negative pie data.'});
       if (element.kind==='image' && element.imageLayout?.valid===false) issues.push({code:'image_crop_invalid',severity:'error',slideId:slide.id,nodeIds:[element.nodeId],repairable:false,message:'Image crop has invalid bounds.'});

@@ -25,6 +25,14 @@ export function buildMediaLedger(project, slides, objectLedger) {
   const content = slides.slice(1);
   let run = 0, longestTextOnlyRun = 0;
   for (const slide of content) { run = hasMedia(slide) ? 0 : run + 1; longestTextOnlyRun = Math.max(longestTextOnlyRun, run); }
+  if (fidelity?.mode === 'mapped' && fidelity.componentProfile) {
+    const profile=fidelity.componentProfile;
+    const entries=profile.assets.map(asset=>{
+      const bindings=slides.flatMap(slide=>(slide.nodes||[]).filter(node=>node.templateMediaBinding?.assetId===asset.assetId).map(node=>({slideId:slide.id,nodeId:node.id,itemId:node.templateMediaBinding.itemId})));
+      return {objectId:asset.assetId,origin:'template',role:asset.role,bucket:mediaBucket(asset.role),required:asset.required,cropPolicy:CROP[mediaBucket(asset.role)],boundUnitIds:[],bindings,status:bindings.length?'retained':asset.required?'missing':'not_selected',reason:bindings.length?'mapped_visual_aid':'optional template media not selected by composition'};
+    });
+    return {version:2,status:'profiled',basis:'mapped_component_profile',profileHash:profile.profileHash,entries:[...entries,...sourceObjects],longestTextOnlyRun,templateMediaShare:profile.pages.slice(1).filter(p=>p.media.length).length/Math.max(1,profile.pages.length-1),buckets:null,conservation:null};
+  }
   if (!fidelity?.slides?.length) return { version: 1, status: 'template_media_not_profiled', basis: project.templateFidelity ? 'template_without_slides' : 'mapped_or_builtin_template',
     entries: sourceObjects, longestTextOnlyRun, templateMediaShare: null, buckets: null };
   const entries = [...(objectLedger?.templateAssets || []).map(asset => {
@@ -52,6 +60,10 @@ export function buildMediaLedger(project, slides, objectLedger) {
 export function inspectMediaLedger(ledger) {
   if (!ledger || ledger.status !== 'profiled') return [];
   const issues = [];
+  if (ledger.basis === 'mapped_component_profile') {
+    for(const entry of ledger.entries.filter(x=>x.required&&x.status==='missing'))issues.push({code:'media_required_missing',severity:'error',objectId:entry.objectId,repairable:true,message:'Required template media cannot be silently omitted in mapped composition.'});
+    return issues;
+  }
   for (const bucket of ['aid', 'decoration']) {
     const item = ledger.buckets[bucket];
     if (item.expected > 0 && item.kept === 0) issues.push({ code: 'media_role_dropped', severity: 'warning', bucket, repairable: true,

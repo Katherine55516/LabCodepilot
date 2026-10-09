@@ -31,6 +31,7 @@ import {
   toAiSdkConfig,
 } from './provider-resolver';
 import { getOAuthCredentialsSync } from './openai-oauth-manager';
+import { compatibleBaseUrl } from './openai-compatible-api';
 import { hasClaudeSettingsCredentials } from './claude-settings';
 
 // ── Public API ──────────────────────────────────────────────────
@@ -255,10 +256,10 @@ function createLanguageModel(config: AiSdkConfig, isThirdPartyProxy: boolean): L
 
       const openai = createOpenAI({
         apiKey: config.apiKey,
-        baseURL: config.baseUrl,
+        baseURL: config.baseUrl ? compatibleBaseUrl(config.baseUrl) : undefined,
         ...(hasHeaders ? { headers: config.headers } : {}),
       });
-      return openai(config.modelId);
+      return openai.chat(config.modelId);
     }
 
     case 'google': {

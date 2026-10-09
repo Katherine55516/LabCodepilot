@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { getAllProviders, createProvider, getSetting } from '@/lib/db';
 import { getEffectiveProviderProtocol, isValidProtocol } from '@/lib/provider-catalog';
 import { parseManagedMultiplier } from '@/lib/model-multiplier';
+import { compatibleBaseUrl } from '@/lib/openai-compatible-api';
 import type { ProviderResponse, ErrorResponse, CreateProviderRequest, ApiProvider } from '@/types';
 
 function maskApiKey(provider: ApiProvider): ApiProvider {
@@ -131,6 +132,11 @@ export async function POST(request: NextRequest) {
       body.protocol,
       body.base_url ?? '',
     );
+    if (effectiveProtocol === 'openai-compatible') {
+      try { body.base_url = compatibleBaseUrl(body.base_url || ''); }
+      catch { return NextResponse.json({ error: 'A valid OpenAI-compatible Base URL is required' }, { status: 400 }); }
+    }
+
     if (effectiveProtocol === 'anthropic' && !body.base_url?.trim()) {
       return NextResponse.json<ErrorResponse>(
         {

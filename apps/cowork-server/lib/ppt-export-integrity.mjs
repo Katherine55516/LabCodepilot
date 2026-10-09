@@ -1,3 +1,4 @@
+import {_internals as pointMeasures} from './ppt/point-layout.mjs';
 import { visibleNodes } from './ppt-visible-content.mjs';
 import crypto from 'node:crypto';
 import { buildRenderTree } from './ppt/render-tree.mjs';
@@ -12,9 +13,9 @@ export function exportManifest(project, renderTree=buildRenderTree(project)) {
       if(e.nativeRef&&e.nativeRef.contractVersion!==2)throw new Error('native_contract_migration: re-import the PPTX or regenerate with the refreshed template before new publication');
       const imageSha256=content.dataUrl?crypto.createHash('sha256').update(Buffer.from(content.dataUrl.split(',')[1]||'','base64')).digest('hex'):content.imageSha256;
       return {id:e.id,nodeId:e.nodeId,type:e.kind,sourceArtifact:original.sourceArtifact||e.sourceArtifact,nativeRef:e.nativeRef||original.nativeRef,
-        geometry:e.bounds,rotation:Number(e.rotation||0),style:e.style,textLayout:e.textLayout,imageLayout:e.imageLayout,chartLayout:e.chartLayout?{...e.chartLayout,svg:undefined}:undefined,
+        geometry:e.content?.mathMl&&e.mathLayout?.bounds?e.mathLayout.bounds:e.bounds,rotation:Number(e.rotation||0),style:e.style,textLayout:e.textLayout,imageLayout:e.imageLayout,chartLayout:e.chartLayout?{...e.chartLayout,svg:undefined}:undefined,
         content:e.kind==='image'?{imageSha256,crop:content.crop,fit:content.fit,nativeMaskXml:content.nativeMaskXml}:content,
-        parts:e.kind==='list'&&content.pointLayout?.boxes?content.items.map((item,i)=>{const b=content.pointLayout.boxes[i];if(!b)throw new Error('export manifest has no frame for list point');const raw=String(item.text||''),split=raw.split('\n',2),heading=item.heading||(split.length>1?split[0]:''),body=item.body||(split.length>1?raw.slice(raw.indexOf('\n')+1):raw);return {id:`${e.id}:${i}`,geometry:{x:e.bounds.x+Math.trunc(e.bounds.width*b.x),y:e.bounds.y+Math.trunc(e.bounds.height*b.y),width:Math.trunc(e.bounds.width*b.w),height:Math.trunc(e.bounds.height*b.h)},text:[heading,body].filter(Boolean).join('\n')};}):undefined};
+        parts:e.kind==='list'&&content.pointLayout?.boxes?content.items.map((item,i)=>{const b=content.pointLayout.boxes[i];if(!b)throw new Error('export manifest has no frame for list point');const {heading,body}=pointMeasures.pointParts(item);return {id:`${e.id}:${i}`,geometry:{x:e.bounds.x+Math.trunc(e.bounds.width*b.x),y:e.bounds.y+Math.trunc(e.bounds.height*b.y),width:Math.trunc(e.bounds.width*b.w),height:Math.trunc(e.bounds.height*b.h)},text:[heading,body].filter(Boolean).join('\n')};}):undefined};
     });
     for(const node of canonical)if((node.content?.text||node.content?.rows?.length||node.content?.items?.length||['image','chart'].includes(node.type))&&!nodes.some(n=>n.nodeId===node.id))throw new Error('Visible canonical object has no exported render mapping: '+node.id);
     return {id:slide.id,size:slide.size,nodes};

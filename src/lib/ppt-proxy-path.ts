@@ -28,5 +28,7 @@ export function isPptProxyPath(segments: string[]): boolean {
     /^(violet|blue|light|marketing|education|[a-f0-9]{32})$/i.test(segments[1] || '') &&
     (segments.length === 2 || segments.length === 3 && segments[2] === 'preview'));
   const update = segments[0] === 'updates' && segments.length === 1;
-  return project || folder || template || update;
+  const modelJobs = segments[0] === 'model-jobs' && (segments.length === 1 || segments.length === 3 && projectId.test(segments[1]) && ['claim', 'complete'].includes(segments[2]));
+  const capabilities = segments.length === 1 && segments[0] === 'capabilities';
+  return project || folder || template || update || modelJobs || capabilities;
 }

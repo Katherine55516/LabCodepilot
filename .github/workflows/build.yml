@@ -12,6 +12,7 @@ on:
           - all
           - windows
           - macos
+          - ppt
   pull_request:
     branches: [main]
   push:
@@ -23,6 +24,7 @@ permissions:
 
 jobs:
   lint-test:
+    if: ${{ inputs.platform != 'ppt' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -70,6 +72,64 @@ jobs:
         with:
           name: playwright-report
           path: playwright-report/
+          retention-days: 7
+
+  ppt-arm64:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.platform == 'ppt' }}
+    runs-on: macos-15
+    timeout-minutes: 45
+    permissions:
+      contents: read
+    env:
+      PORT: '3110'
+      CLAUDE_GUI_DATA_DIR: ${{ runner.temp }}/ppt-ci-profile
+      # Test-only AES key; no user's credential or live model key in CI.
+      CLAUDE_GUI_SECRET_KEY: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+      PPT_CI_OUTPUT: ${{ github.workspace }}/outputs/ppt-ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Assert native Apple Silicon and record runtime
+        run: |
+          test "$(uname -m)" = arm64
+          mkdir -p outputs/ppt-ci
+          node -e 'console.log(JSON.stringify({sha:process.env.GITHUB_SHA,arch:process.arch,platform:process.platform,cpu:require("os").cpus()[0].model,node:process.version},null,2))' > outputs/ppt-ci/runner.json
+          echo "PPT_TEST_PYTHON=$(command -v python)" >> "$GITHUB_ENV"
+      - name: Install production and test dependencies
+        run: |
+          npm ci
+          brew install cairo
+          python -m pip install python-pptx Pillow lxml python-docx openpyxl beautifulsoup4 cairosvg pypdf
+          echo "DYLD_FALLBACK_LIBRARY_PATH=$(brew --prefix)/lib" >> "$GITHUB_ENV"
+          npx playwright install chromium
+      - name: Unit and type checks
+        run: npm run test > outputs/ppt-ci/unit.log 2>&1
+      - name: PPT API, contracts, density and real native exports
+        run: node apps/cowork-server/scripts/ppt-ci.mjs --require-arm64
+      - name: PPT workflows in the actual UI
+        run: npx playwright test 'ppt-.*\.spec\.ts' --workers=2 --timeout=90000 --reporter=line > outputs/ppt-ci/browser.log 2>&1
+      - name: Build and verify source-only server deployment artifact
+        run: |
+          node scripts/ppt/selftest-release-upgrade.mjs > outputs/ppt-ci/upgrade.log 2>&1
+          node scripts/ppt/package-cowork-release.mjs outputs/ppt-ci/cowork-release.tar.gz
+          mkdir -p "$RUNNER_TEMP/ppt-release-check"
+          tar -xzf outputs/ppt-ci/cowork-release.tar.gz -C "$RUNNER_TEMP/ppt-release-check"
+          node apps/cowork-server/deploy/verify-release.mjs "$RUNNER_TEMP/ppt-release-check/cowork-release"
+      - name: Upload evidence and deployment source
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ppt-arm64-validation
+          path: |
+            outputs/ppt-ci/
+            test-results/
+            playwright-report/
           retention-days: 7
 
   build-windows:

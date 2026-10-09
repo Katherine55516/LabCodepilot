@@ -240,7 +240,16 @@ def render_scene_element(slide, element):
     size = float(item_style.get('fontSizePt') or 18)
     source=element.get('sourceArtifact') or {}
     source_name='AIMate source:'+str(source.get('sourceUnitId',''))+':'+str(source.get('type',''))
+    if kind == 'shape' and element.get('semanticRole') == 'icon-carrier':
+        shape=slide.shapes.add_shape(MSO_SHAPE.RECTANGLE,x,y,w,h)
+        theme_style=shape._element.find(qn('p:style'))
+        if theme_style is not None: shape._element.remove(theme_style)
+        shape._element.spPr.append(OxmlElement('a:effectLst'))
+        shape.fill.solid();shape.fill.fore_color.rgb=scene_color(item_style.get('fill'),RGBColor(*accent));shape.line.fill.background()
+        return
     if kind == 'text':
+        if content.get('mathMl') and element.get('mathLayout'):
+            mb=element['mathLayout']['bounds'];x,y,w,h=mb['x'],mb['y'],mb['width'],mb['height']
         shape = slide.shapes.add_textbox(x, y, w, h); para = shape.text_frame.paragraphs[0]
         if content.get('mathMl'):shape.text_frame.margin_left=shape.text_frame.margin_right=shape.text_frame.margin_top=shape.text_frame.margin_bottom=0
         if source: shape.name=source_name
@@ -285,21 +294,32 @@ def render_scene_element(slide, element):
                 px = x + int(w * bounds['x']); py = y + int(h * bounds['y'])
                 pw = int(w * bounds['w']); ph = int(h * bounds['h'])
                 card = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, px, py, pw, ph)
-                card.fill.background(); card.line.color.rgb = RGBColor(*accent)
+                # No inherited theme effects or centered paragraph defaults:
+                # the same top alignment and fixed radius as the React/SVG cards.
+                theme_style=card._element.find(qn('p:style'))
+                if theme_style is not None: card._element.remove(theme_style)
+                card._element.spPr.append(OxmlElement('a:effectLst'))
+                card.adjustments[0]=min(.5,Pt(4.5)/max(1,min(pw,ph)))
+                card.fill.background(); card.line.color.rgb = color
+                card.line.width=Pt(.75)
+                rgb_node=card._element.spPr.find(qn('a:ln')).find(qn('a:solidFill')).find(qn('a:srgbClr'))
+                alpha=OxmlElement('a:alpha');alpha.set('val','20000');rgb_node.append(alpha)
                 frame = card.text_frame; frame.clear(); frame.word_wrap = True
-                frame.auto_size=MSO_AUTO_SIZE.NONE
+                frame.auto_size=MSO_AUTO_SIZE.NONE;frame.vertical_anchor=MSO_ANCHOR.TOP
                 frame.margin_left = Pt(7.92); frame.margin_right = Pt(7.92)
                 frame.margin_top = Pt(5.04); frame.margin_bottom = Pt(2.88)
                 raw = str(item.get('text') or '')
                 parts = raw.split('\n', 1)
-                heading = str(item.get('heading') or (parts[0] if len(parts) > 1 else ''))
-                body = str(item.get('body') or (parts[1] if len(parts) > 1 else raw))
+                structured = bool(item.get('heading') or item.get('body'))
+                heading = str(item.get('heading') or '') if structured else (parts[0] if len(parts) > 1 else '')
+                body = str(item.get('body') or '') if structured else (parts[1] if len(parts) > 1 else raw)
                 if heading:
                     heading_para = frame.paragraphs[0]; heading_para.text = heading
                     heading_para.space_after = Pt(3); heading_para.line_spacing = 1.18
                     cjk_font(heading_para, point_size, color, True, 'body')
                     body_para = frame.add_paragraph()
                 else: body_para = frame.paragraphs[0]
+                for paragraph in frame.paragraphs: paragraph.alignment=PP_ALIGN.LEFT;paragraph.space_before=Pt(0)
                 body_para.text = body; body_para.line_spacing = 1.18
                 body_para.space_after = Pt(0)
                 cjk_font(body_para, point_size, color)
@@ -361,7 +381,7 @@ for idx, item in enumerate(data['slides']):
     scene_slides = (data.get('renderTree') or {}).get('slides') or []
     if idx < len(scene_slides):
         for element in scene_slides[idx].get('elements', []):
-            if element.get('nodeId') is None and element.get('kind') == 'shape': continue
+            if element.get('nodeId') is None and element.get('kind') == 'shape' and element.get('semanticRole') != 'icon-carrier': continue
             prior_ids={shape.shape_id for shape in slide.shapes}
             render_scene_element(slide, element)
             created=[shape for shape in slide.shapes if shape.shape_id not in prior_ids]

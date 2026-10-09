@@ -1,3 +1,5 @@
+import { pptModelJobs, PPT_BYOK_CAPABILITIES } from './ppt-model-jobs.mjs';
+import { validateRepairCandidate } from './ppt-repair-routing.mjs';
 import { assertCandidateScope } from './ppt/input-scope-service.mjs';
 import { automaticPages, densityProfile, densityPrompt } from './ppt-density-profile.mjs';
 import { packOutline, inspectDensityOutline, revalidateOutlineFits } from './ppt-density-packing.mjs';
@@ -261,9 +263,11 @@ function contentRepairPrompt(p, slide, index, draft, issues) {
 }
 async function modelCall(p, prompt, activity, log, options = {}) {
   const sid = options.nodeKey ? sha256(Buffer.from(`${p.id}:${options.nodeKey}`)).slice(0, 32) : p.id;
+  const canStart = () => { const latest = store.get(p.uid, p.id); return Boolean(latest && !latest.deletedAt && latest.status !== 'cancelled' && (!(options.nodeKey || '').startsWith('content:') && !(options.nodeKey || '').startsWith('review:deck') || (latest.status !== 'paused' && !latest.runtime?.pauseRequested))); };
+  if (pptModelJobs.eligible(p.configId)) return parseModelJson(await pptModelJobs.request(p, prompt, canStart));
   try {
     const result = await runRoutine({ sid, uid: p.uid, kind: orch.KIND_PPT, prompt, model: p.model, configId: p.configId, activity, log,
-      canStart: () => { const latest = store.get(p.uid, p.id); return Boolean(latest && !latest.deletedAt && latest.status !== 'cancelled' && (!(options.nodeKey || '').startsWith('content:') && !(options.nodeKey || '').startsWith('review:deck') || (latest.status !== 'paused' && !latest.runtime?.pauseRequested))); } });
+      canStart });
     if (!result.ok) throw new Error(result.error || `模型任务失败：${result.status}`);
     return parseModelJson(result.resultText);
   } finally {
@@ -840,10 +844,18 @@ function startGeneration(uid, id, activity, log, deps = defaultDeps) {
             if (latest.currentRunId !== current.currentRunId || generationEpoch(latest, slide.id) !== epoch || semanticReviewKey(latest) !== beforeKey)
               throw new Error('content changed during critic repair; stale rewrite discarded');
             if (criticRewriteTargets(latest, modelReview).some(item => item.slideId === slide.id)) {
+              const beforeRepair = structuredClone(latest);
+              const beforeReview = deterministicReview(beforeRepair);
               latest.nodes[slide.id] = { ...latest.nodes[slide.id], status: 'done', slide: candidate };
               latest.deck = ensureDeckV3(applyLayoutRegistry(applySourceImages({ schemaVersion: 2,
                 slides: latest.outline.map(item => latest.nodes[item.id].slide) }, latest.source)));
               bindTemplateFidelity(latest); enrichAssetRefs(latest);
+              const repairViolations = validateRepairCandidate(beforeRepair, latest, { scopeSlideIds: [slide.id], operation: 'rewrite_with_source', beforeReview, afterReview: deterministicReview(latest) });
+              if (repairViolations.length) {
+                Object.assign(latest, beforeRepair);
+                runtimeState(latest).criticRepair.attempts.push({ slideId: slide.id, nodeKey: attemptKey, rolledBack: true, violations: repairViolations, beforeHash: digest(draft), afterHash: digest(candidate) });
+                store.save(latest); return latest;
+              }
               updateSlidePreview(latest, slide.id);
               for (const stage of ['content', 'layout', 'preview', 'quality']) transitionNode(latest, `${stage}:${slide.id}`, 'completed',
                 { slideId: slide.id, epoch, criticRound: round + 1, inputHash: latest.runtime.slides[slide.id].contentHash, renderHash: latest.runtime.slides[slide.id].renderHash }, { useInput: true });
@@ -1189,7 +1201,8 @@ async function handleUpdates(req, uid, send, activity, log, deps) {
     generationPolicy: normalizeGenerationPolicy(data.generationPolicy ?? baseProject?.generationPolicy), promptContractVersion: PPT_PROMPT_CONTRACT_VERSION,
     outline: [], deck: null, nodes: {}, revision: 0, favorite: false, pinned: false, folderId: baseProject?.folderId || null,
     tags: ['更新', template.name.slice(0, 40)].slice(0, 10), deletedAt: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
-  if (['uploaded','managed'].includes(template.kind) && ['pptx','potx'].includes(template.extension) && data.templateMode !== 'mapped' && deps.prepareTemplateFidelity) {
+  if (['uploaded','managed'].includes(template.kind) && ['pptx','potx'].includes(template.extension) && deps.prepareTemplateFidelity) {
+    project.templateMode = data.templateMode === 'mapped' ? 'mapped' : 'preserve';
     project.templateFidelity = await deps.prepareTemplateFidelity(project, store.readTemplate(template.kind === 'managed' ? 'managed' : uid, template.id), template.sha256, template);
   }
   if (baseFile) store.writeInput(uid, id, 'base', baseFile.bytes);
@@ -1282,6 +1295,19 @@ async function handleBulk(req, uid, send, deps) {
 
 export async function handlePpt(req, url, { uid, send, res, readBody, activity, log = () => {}, deps = defaultDeps }) {
   if (uid === 'managed') return send(403, { error: 'reserved template registry namespace' });
+  if (url.pathname === '/ppt/capabilities') return req.method === 'GET'
+    ? send(200, { byok: PPT_BYOK_CAPABILITIES }) : send(405, { error: 'method not allowed' });
+  const modelJob = url.pathname.match(/^\/ppt\/model-jobs(?:\/([a-f0-9]{32})\/(claim|complete))?$/);
+  if (modelJob) {
+    const [, id, action] = modelJob;
+    if (!id && req.method === 'GET') return send(200, { jobs: pptModelJobs.list(uid) });
+    if (id && req.method === 'POST') {
+      if (action === 'claim') { const job = pptModelJobs.claim(uid, id); return send(job ? 200 : 409, job || { error: 'Job unavailable' }); }
+      try { const accepted = pptModelJobs.complete(uid, id, await body(req)); return send(accepted ? 200 : 409, accepted ? { ok: true } : { error: 'Job unavailable' }); }
+      catch { return send(400, { error: 'Invalid model result' }); }
+    }
+    return send(405, { error: 'method not allowed' });
+  }
   const structured = await handleStructuredPpt(req, url, { uid, send, res, readBody, activity, log, deps, resumeGeneration: (owner, id) => startGeneration(owner, id, activity, log, deps) });
   if (structured) return true;
   const folderMatch = url.pathname.match(FOLDER_RE);
@@ -1377,7 +1403,8 @@ export async function handlePpt(req, url, { uid, send, res, readBody, activity, 
           status: sourceBytes ? 'ingesting' : 'outlining', stage: sourceBytes ? 'ingest' : 'outline', error: '', outline: [], deck: null, nodes: {}, revision: 0,
           favorite: false, pinned: false, folderId: null, tags: [], deletedAt: null,
           createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
-        if (['uploaded','managed'].includes(template.kind) && ['pptx','potx'].includes(template.extension) && data.templateMode !== 'mapped' && deps.prepareTemplateFidelity) {
+        if (['uploaded','managed'].includes(template.kind) && ['pptx','potx'].includes(template.extension) && deps.prepareTemplateFidelity) {
+          project.templateMode = data.templateMode === 'mapped' ? 'mapped' : 'preserve';
           project.templateFidelity = await deps.prepareTemplateFidelity(project, store.readTemplate(template.kind === 'managed' ? 'managed' : uid, template.id), template.sha256, template);
         }
         if (sourceBytes) store.writeSource(uid, project.id, sourceBytes);
@@ -1539,10 +1566,11 @@ export async function handlePpt(req, url, { uid, send, res, readBody, activity, 
       if (data.finalPageCount !== undefined && nextPages !== pages(data.finalPageCount)) throw new HttpError(400, 'outline must match the user-confirmed page count');
       if (data.template !== undefined && data.template !== project.template) {
         const selectedTemplate = resolveTemplate(uid, data.template);
-        if (['uploaded','managed'].includes(selectedTemplate.kind) && ['pptx','potx'].includes(selectedTemplate.extension)) {
+        if (['uploaded','managed'].includes(selectedTemplate.kind) && ['pptx','potx'].includes(selectedTemplate.extension) && (data.templateMode || project.templateMode) !== 'mapped') {
           const reuseError = templateReuseError(selectedTemplate.pages, nextPages);
           if (reuseError) throw new HttpError(400, reuseError);
         }
+        project.templateMode = data.templateMode || project.templateMode || 'preserve';
         project.template = selectedTemplate.id;
         project.templateSpec = snapshotTemplate(selectedTemplate);
         project.templateFidelity = ['uploaded','managed'].includes(selectedTemplate.kind) && ['pptx','potx'].includes(selectedTemplate.extension) && deps.prepareTemplateFidelity
@@ -1578,10 +1606,11 @@ export async function handlePpt(req, url, { uid, send, res, readBody, activity, 
       if (data.pages !== undefined) project.pages = pages(data.pages);
       if (data.template !== undefined && data.template !== project.template) {
         const selectedTemplate = resolveTemplate(uid, data.template);
-        if (['uploaded','managed'].includes(selectedTemplate.kind) && ['pptx','potx'].includes(selectedTemplate.extension)) {
+        if (['uploaded','managed'].includes(selectedTemplate.kind) && ['pptx','potx'].includes(selectedTemplate.extension) && (data.templateMode || project.templateMode) !== 'mapped') {
           const reuseError = templateReuseError(selectedTemplate.pages, project.pages);
           if (reuseError) throw new HttpError(400, reuseError);
         }
+        project.templateMode = data.templateMode || project.templateMode || 'preserve';
         project.template = selectedTemplate.id;
         project.templateSpec = snapshotTemplate(selectedTemplate);
         project.templateFidelity = ['uploaded','managed'].includes(selectedTemplate.kind) && ['pptx','potx'].includes(selectedTemplate.extension) && deps.prepareTemplateFidelity

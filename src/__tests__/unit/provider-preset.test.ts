@@ -13,7 +13,7 @@ describe('Preset Schema Validation', () => {
       });
 
       it('has at least one default model (or is volcengine/ollama)', () => {
-        if (preset.key === 'volcengine' || preset.key === 'ollama') return;
+        if (['volcengine', 'ollama', 'openai-compatible'].includes(preset.key)) return;
         assert.ok(preset.defaultModels.length > 0, `Preset ${preset.key} expected at least one default model`);
       });
 

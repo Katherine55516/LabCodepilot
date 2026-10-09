@@ -115,7 +115,7 @@ try {
   assert.equal(parsed.update.baseSnapshot.source.name, 'old.pdf');
   assert.equal(store.readInput(uid, uploadId, 'progress').toString(), 'New figures');
 
-  const python = '/Users/dongli/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3';
+  const python = process.env.PPT_TEST_PYTHON || 'python3';
   const pptx = spawnSync(python, ['-c', `import io,base64
 from pptx import Presentation
 from pptx.util import Inches

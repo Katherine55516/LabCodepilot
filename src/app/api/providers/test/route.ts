@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { testProviderConnection } from '@/lib/claude-client';
 import { getPreset } from '@/lib/provider-catalog';
 import { getProvider } from '@/lib/db';
+import { probeCompatibleModel, compatibleConnectionSuggestion } from '@/lib/openai-compatible-api';
 import type { ErrorResponse } from '@/types';
 
 /**
@@ -60,6 +61,14 @@ export async function POST(request: NextRequest) {
           suggestion: 'Please enter your API key',
         },
       });
+    }
+
+    if (protocol === 'openai-compatible') {
+      try { return NextResponse.json(await probeCompatibleModel(baseUrl || '', effectiveApiKey, modelName || '')); }
+      catch (error) {
+        const message = error instanceof Error ? error.message : 'API connection failed';
+        return NextResponse.json({ success: false, error: { code: 'OPENAI_COMPATIBLE_CONNECTION', message, suggestion: compatibleConnectionSuggestion(message) } });
+      }
     }
 
     // Look up preset meta for recovery action URLs

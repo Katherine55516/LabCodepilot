@@ -13,7 +13,7 @@ const ALTERNATIVE_CUE = [
   /(?:多种|几种|若干|不同的?)(?:表达|构建|实现|方式|形式|做法|方法)[^：:。]{0,20}[：:]\s*([^。]+)/u,
 ];
 const NOT_INTERCHANGEABLE = /not interchangeable|cannot be used interchangeably|不可互换|不能互换/iu;
-const EXPLAINS = /^\s*(?:where|here|then|with|in which|in this (?:formula|equation)|其中|这里|式中|此处|上式中)\b/iu;
+const EXPLAINS = /^\s*(?:(?:where|here|then|with|in which|in this (?:formula|equation))\b|其中|这里|式中|此处|上式中)/iu;
 
 function alternativeMembers(text) {
   for (const cue of ALTERNATIVE_CUE) {
@@ -21,7 +21,7 @@ function alternativeMembers(text) {
     if (!match) continue;
     const members = match[1].split(/\s*(?:,|;|，|；|、)\s*(?:or\s+|and\s+|或者?|以及)?|\s+or\s+|或者/u)
       .map(item => item.replace(/^\s*(?:or|and|或|以及)\s+/iu, '').trim()).filter(item => item && item.length <= 120);
-    if (members.length >= 3) return members;
+    if (members.length >= 2) return members;
   }
   return null;
 }

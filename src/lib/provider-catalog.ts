@@ -346,6 +346,16 @@ export const VENDOR_PRESETS: VendorPreset[] = [
     iconKey: 'anthropic',
   },
 
+  // ── OpenAI-compatible (BYOK; Native/PPT desktop model worker) ──
+  {
+    key: 'openai-compatible', name: 'OpenAI-compatible API',
+    description: 'Custom API endpoint and model IDs',
+    descriptionZh: '自定义 API 地址与模型 ID；支持 Native 和 PPT 本地模型请求',
+    protocol: 'openai-compatible', authStyle: 'auth_token', baseUrl: '',
+    defaultEnvOverrides: {}, defaultModels: [],
+    fields: ['name', 'api_key', 'base_url', 'model_names'], iconKey: 'server',
+  },
+
   // ── OpenRouter ──
   {
     key: 'openrouter',

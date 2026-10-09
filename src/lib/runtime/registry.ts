@@ -20,6 +20,13 @@
 
 import type { AgentRuntime } from './types';
 import { getSetting } from '@/lib/db';
+import { resolveProvider } from '@/lib/provider-resolver';
+
+export function providerRequiresNative(providerId?: string): boolean {
+  if (providerId === 'openai-oauth') return true;
+  const protocol = resolveProvider({ providerId }).protocol;
+  return ['openai-compatible', 'openrouter', 'google'].includes(protocol);
+}
 
 const runtimes = new Map<string, AgentRuntime>();
 
@@ -48,10 +55,15 @@ export function getAvailableRuntimes(): AgentRuntime[] {
  * 2. Global user setting (agent_runtime)
  * 3. Auto: SDK runtime (always available since Claude Code is bundled)
  */
-export function resolveRuntime(overrideId?: string, _providerId?: string): AgentRuntime {
+export function resolveRuntime(overrideId?: string, providerId?: string): AgentRuntime {
   // 0. cli_enabled=false is an absolute constraint — never return SDK.
   //    Kept as an emergency fallback for users hit by AV blocking the spawned
   //    binary, restrictive enterprise policies, etc.
+  if (providerRequiresNative(providerId)) {
+    const native = getRuntime('native');
+    if (native?.isAvailable()) return native;
+    throw new Error('This provider requires Native runtime');
+  }
   const cliDisabled = getSetting('cli_enabled') === 'false';
 
   if (cliDisabled) {
@@ -99,7 +111,7 @@ export function resolveRuntime(overrideId?: string, _providerId?: string): Agent
  */
 export function predictNativeRuntime(providerId?: string): boolean {
   // Non-Anthropic providers always force native
-  if (providerId === 'openai-oauth') return true;
+  if (providerRequiresNative(providerId)) return true;
 
   // cli_enabled=false → always native (emergency fallback)
   if (getSetting('cli_enabled') === 'false') return true;

@@ -41,10 +41,11 @@ export function slideSvg(slide) {
       const pointHtml = pointLayout?.boxes?.length ? (element.content?.items || []).map((item, index) => {
         const box = pointLayout.boxes[index]; if (!box) return '';
         const first = String(item.text || '').split('\n');
-        const heading = item.heading || (first.length > 1 ? first[0] : '');
-        const body = item.body || (first.length > 1 ? first.slice(1).join('\n') : item.text || '');
+        const structured = Boolean(item.heading || item.body);
+        const heading = structured ? item.heading || '' : (first.length > 1 ? first[0] : '');
+        const body = structured ? item.body || '' : (first.length > 1 ? first.slice(1).join('\n') : item.text || '');
         const fontPx = Number(pointLayout.fontSizePt || 17) * 96 / 72;
-        return `<div style="position:absolute;left:${box.x * 100}%;top:${box.y * 100}%;width:${box.w * 100}%;height:${box.h * 100}%;box-sizing:border-box;overflow:hidden;border:1px solid currentColor;border-radius:6px;padding:6.72px 10.56px 3.84px;font-size:${fontPx}px;line-height:1.18;white-space:pre-wrap;overflow-wrap:anywhere"><div style="font-weight:700;margin-bottom:4px">${esc(heading)}</div><div style="white-space:pre-wrap">${esc(body)}</div></div>`;
+        return `<div style="position:absolute;left:${box.x * 100}%;top:${box.y * 100}%;width:${box.w * 100}%;height:${box.h * 100}%;box-sizing:border-box;overflow:hidden;border:1px solid color-mix(in srgb,currentColor 20%,transparent);border-radius:6px;padding:6.72px 10.56px 3.84px;font-size:${fontPx}px;line-height:1.18;white-space:pre-wrap;overflow-wrap:anywhere">${heading ? `<div style="font-weight:700;margin-bottom:4px">${esc(heading)}</div>` : ''}<div style="white-space:pre-wrap">${esc(body)}</div></div>`;
       }).join('') : null;
       const contract=element.textLayout || textContract(element);
       const paragraphHtml = pointHtml || contract.paragraphs.map((p,i)=>`<div style="white-space:pre-wrap;overflow-wrap:anywhere;${p.runs?.length?`font-size:${Math.max(...p.runs.map(r=>r.fontSizePt))*96/72}px;`:""}min-height:${p.lineHeight}em;line-height:${p.lineHeight};margin-bottom:${i===contract.paragraphs.length-1?0:p.spaceAfterPt*96/72}px">${p.runs?p.runs.map(run=>`<${run.bold?"strong":"span"} style="font-size:${run.fontSizePt*96/72}px;font-weight:${run.bold?700:400}">${esc(run.text)}</${run.bold?"strong":"span"}>`).join(''):esc(p.text)}</div>`).join('');

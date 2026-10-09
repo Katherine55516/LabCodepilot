@@ -1,9 +1,10 @@
+import {LAYOUT_IDS} from '../ppt-layout.mjs';
 import { ensureSlideV3, newId } from './ir.mjs';
 
 const ID = /^[a-zA-Z0-9_-]{1,80}$/;
 const COLOR = /^#[0-9a-f]{6}$/i;
 const DATA_URL = /^data:image\/(png|jpeg);base64,([A-Za-z0-9+/]+={0,2})$/;
-const LAYOUTS = new Set(['cover', 'summary', 'editorial', 'big-number', 'comparison', 'chart', 'table', 'image-text', 'timeline', 'conclusion']);
+const LAYOUTS = new Set(LAYOUT_IDS);
 const NODE_TYPES = new Set(['text', 'list', 'timeline', 'image', 'chart', 'table', 'shape', 'foreign']);
 const SLIDE = Object.freeze({ width: Math.round(13.333 * 914400), height: Math.round(7.5 * 914400) });
 const MAX_IMAGE_BYTES = 512 * 1024;

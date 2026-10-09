@@ -1,6 +1,6 @@
 /** Versioned semantic layout registry. Models may suggest a role, but never
  * provide geometry. Preview, QA and exporters consume the same layout id. */
-export const LAYOUT_VERSION = 1;
+export const LAYOUT_VERSION = 2;
 import { typographyPolicy } from './ppt-content-depth.mjs';
 
 const COPY = Object.freeze({ titlePreferredUnits: 28, titleHardUnits: 36, titleMaxLines: 2, titleMinPt: 32 });
@@ -14,6 +14,9 @@ export const LAYOUTS = Object.freeze({
   table: { label: '表格', minTitlePt: 32, minBodyPt: 13, maxBullets: 3, allowedBlocks: ['table'], requiredBlockType: 'table', copy: COPY },
   'image-text': { label: '图文', minTitlePt: 32, minBodyPt: 17, maxBullets: 4, allowedBlocks: ['image'], requiredBlockType: 'image', copy: COPY },
   timeline: { label: '时间线', minTitlePt: 32, minBodyPt: 16, maxBullets: 8, allowedBlocks: ['shape'], requiredBlockType: null, copy: COPY },
+  'two-panel': { label: '不等宽面板', minTitlePt: 28, minBodyPt: 15, maxBullets: 10, allowedBlocks: ['table','image','chart','shape'], copy: { ...COPY, titleMinPt: 28 } },
+  'formula-variables': { label: '公式与变量', minTitlePt: 28, minBodyPt: 15, maxBullets: 8, allowedBlocks: ['shape','table'], copy: { ...COPY, titleMinPt: 28 } },
+  'item-icons': { label: '条目与图标', minTitlePt: 28, minBodyPt: 15, maxBullets: 8, allowedBlocks: ['image','shape'], copy: { ...COPY, titleMinPt: 28 } },
   conclusion: { label: '结论', minTitlePt: 32, minBodyPt: 18, maxBullets: 5, allowedBlocks: ['shape'], requiredBlockType: null, copy: COPY },
 });
 
@@ -95,6 +98,9 @@ export function regionsFor(slide) {
     { id: 'subtitle', x: 1.1, y: 3.78, w: 11.1, h: .34 },
     { id: 'body', x: 1.35, y: 4.18, w: 10.6, h: .85 },
     common[3],
+  ];
+  if (['two-panel','formula-variables','item-icons'].includes(id)) return [
+    { id:'title',x:.86,y:.58,w:11.55,h:.9 }, {id:'body',x:.86,y:1.78,w:11.55,h:4.95}, common[3],
   ];
   if (id === 'summary' || id === 'conclusion') return [...common, { id: 'body', x: 1.0, y: 2.26, w: 11.25, h: 4.12 }, { id: 'takeaway', x: 1.0, y: 6.45, w: 11.25, h: .25 }];
   if (id === 'editorial') {

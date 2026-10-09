@@ -1,3 +1,4 @@
+import {LAYOUT_IDS} from '../ppt-layout.mjs';
 import { assertCandidateScope, assertStoredCandidateScope } from './input-scope-service.mjs';
 import { normalizeAiAction, aiActionPrompt, proposalMetrics, WRITING_ACTIONS } from './ai-actions.mjs';
 import path from 'node:path';
@@ -17,7 +18,7 @@ import { promptPolicy, writingGuide, editPromptContext, objectWritingCapacity } 
 import { routeMutation, impactFor } from './mutation-router.mjs';
 import { typedCommands, materializeTypedCandidate } from './typed-proposal.mjs';
 
-const layouts = new Set(['cover', 'summary', 'editorial', 'big-number', 'comparison', 'chart', 'table', 'image-text', 'timeline', 'conclusion']);
+const layouts = new Set(LAYOUT_IDS);
 function file(uid, projectId, id) {
   if (!/^proposal_[a-f0-9]+$/u.test(String(id))) throw editError('invalid proposal id', 400);
   return path.join(projectDataDir(uid, projectId), 'proposals', `${id}.json`);

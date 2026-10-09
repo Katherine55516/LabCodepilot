@@ -1,3 +1,5 @@
+import {prepareComponentGeometry} from './ppt/component-layout.mjs';
+import { templateComponentProfile, bindMappedTemplateMedia } from './ppt-template-components.mjs';
 import { adaptationDisposition } from './ppt-template-dispositions.mjs';
 import { visibleSlideText } from './ppt-evidence.mjs';
 import * as files from './files.mjs';
@@ -595,6 +597,7 @@ function buildFidelity(project, sourceSlides, externalPptx, templateHash, profil
   const visualSimilarityPairs = finalProfiles.slice(1).map((profile, index) =>
     Number(visualSimilarity(finalProfiles[index], profile).toFixed(3)));
   return {
+    componentProfile: templateComponentProfile(sourceSlides.map(slide=>({...slide,slots:slotsFor(slide)})), externalPptx, templateHash, templateMediaRole),
     mode: 'preserve', originalPath: externalPptx.originalPath, sha256: templateHash,
     width: externalPptx.width, height: externalPptx.height, originalSlideCount: originalCount, slideMap, layoutCatalog: catalog,
     ...(project.pages < originalCount || project.templateFidelity?.sourceCatalog
@@ -649,12 +652,12 @@ export async function prepareTemplateFidelity(project, templateBytes, templateHa
     if (typeof originalPath !== 'string' || !originalPath.startsWith('/')) throw new Error('template copy did not return a sandbox path');
     const imported = { ...cached.imported, externalPptx: { ...cached.imported.externalPptx, originalPath } };
     project.templateCacheHit = true;
-    return fidelityFromImported(project, imported, templateHash);
+    return project.templateMode === 'mapped' ? {mode:'mapped',sha256:templateHash,componentProfile:templateComponentProfile(imported.deck.slides.map(slide=>({...slide,slots:slotsFor(slide)})),imported.externalPptx,templateHash,templateMediaRole)} : fidelityFromImported(project, imported, templateHash);
   }
   project.templateCacheHit = false;
   const imported = await io.importPptx({ id: project.id, uid: project.uid, title: project.title }, templateBytes, templateHash);
   if (template) templateStore.writeTemplateIR(owner, template.id, { schemaVersion: 1, parserVersion: 'pptx-ir-4', sha256: templateHash, imported });
-  return fidelityFromImported(project, imported, templateHash);
+  return project.templateMode === 'mapped' ? {mode:'mapped',sha256:templateHash,componentProfile:templateComponentProfile(imported.deck.slides.map(slide=>({...slide,slots:slotsFor(slide)})),imported.externalPptx,templateHash,templateMediaRole)} : fidelityFromImported(project, imported, templateHash);
 }
 
 export function templateSlotPrompt(project, index) {
@@ -815,7 +818,16 @@ function ordinalReadingOrder(nodes, size) {
 }
 
 export function bindTemplateFidelity(project) {
-  if (project.templateFidelity?.mode !== 'preserve') return project;
+  if (project.templateFidelity?.mode !== 'preserve') {
+    bindMappedTemplateMedia(project);
+    for(const slide of project.deck?.slides||[]) {
+      const contract=project.planning?.slidePlan?.find(x=>x.slideId===slide.id)?.pageContract;
+      if(!slide.componentPrepared&&!slide.locked&&contract?.compositionCandidates?.includes('formula-variables')&&slide.nodes.filter(x=>x.sourceArtifact).length===1&&slide.nodes.some(x=>x.content?.mathMl||x.content?.latex))slide.layoutId=slide.layoutRef='formula-variables';
+      if(!slide.componentPrepared&&!slide.locked&&contract?.compositionCandidates?.includes('two-panel')&&slide.nodes?.filter(x=>x.sourceArtifact).length===2)slide.layoutId=slide.layoutRef='two-panel';
+      prepareComponentGeometry(project,slide);
+    }
+    return project;
+  }
   if (project.deck?.slides?.length !== project.templateFidelity.slides.length) throw new Error('template slide count mismatch');
   project.deck.slides.forEach((slide, index) => {
     const source = project.templateFidelity.slides[index];

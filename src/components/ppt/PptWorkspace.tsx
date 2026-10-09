@@ -2,6 +2,8 @@
 /* eslint-disable @next/next/no-img-element -- pasted images are locally resized data URLs in the presentation IR */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { usePptDesktopModelWorker } from '@/hooks/usePptDesktopModelWorker';
+import { requirePptByokCapabilities } from '@/lib/ppt-byok-contract';
 import { useTranslation } from '@/hooks/useTranslation';
 import type { TranslationKey } from '@/i18n';
 import { PptM3 } from './PptM3';
@@ -35,7 +37,7 @@ const input = 'w-full rounded-lg border border-border bg-background px-3 py-2 te
 const button = 'rounded-lg border border-border px-3 py-2 text-sm hover:bg-accent disabled:opacity-50';
 const primary = 'rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90 disabled:opacity-50';
 const themes: Record<string, string> = { violet: 'bg-[#171b31] text-[#f5f6fc] border-t-[#967fff]', blue: 'bg-[#102b43] text-[#f5f6fc] border-t-[#55ade2]', light: 'bg-[#f8f9fc] text-[#242a3b] border-t-[#404b6b]' };
-const layoutIds: LayoutId[] = ['cover', 'summary', 'editorial', 'big-number', 'comparison', 'chart', 'table', 'image-text', 'timeline', 'conclusion'];
+const layoutIds: LayoutId[] = ['cover', 'summary', 'editorial', 'big-number', 'comparison', 'chart', 'table', 'image-text', 'timeline', 'two-panel', 'formula-variables', 'item-icons', 'conclusion'];
 
 function SlidePreview({ slide, template, palette, fonts, large = false }: { slide: Slide; template: string; palette?: PptTemplate['palette']; fonts?: PptTemplate['fonts']; large?: boolean }) {
   const layoutId = slide.layoutId || ((slide.blocks || []).length ? 'image-text' : 'summary');
@@ -148,24 +150,28 @@ export function PptWorkspace() {
     window.addEventListener('keydown', onKey); return () => window.removeEventListener('keydown', onKey);
   }, [presentation, slides.length]);
   useEffect(() => { if (!dirty) return; const guard = (event: BeforeUnloadEvent) => { event.preventDefault(); }; window.addEventListener('beforeunload', guard); return () => window.removeEventListener('beforeunload', guard); }, [dirty]);
+  usePptDesktopModelWorker(models.some(model => model.configId.startsWith('byok:')), message => setError(message));
   useEffect(() => {
-    Promise.all([fetch('/api/providers').then(r => r.json()), fetch('/api/providers/models').then(r => r.json())]).then(([p, m]) => {
-      const managed = new Map<string, { name: string; configId: string }>((p.providers || [])
-        .filter((x: { source?: string }) => x.source === 'managed')
-        .map((x: { id: string; name: string; managed_config_id?: string }) => [x.id, {
+    const refreshModels = () => Promise.all([fetch('/api/providers').then(r => r.json()), fetch('/api/providers/models').then(r => r.json())]).then(([p, m]) => {
+      const available = new Map<string, { name: string; configId: string }>((p.providers || [])
+        .filter((x: { source?: string; protocol?: string; api_key?: string }) => x.source === 'managed' || Boolean(x.api_key) && ['openai-compatible', 'anthropic', 'google', 'openrouter'].includes(x.protocol || ''))
+        .map((x: { id: string; name: string; managed_config_id?: string; source?: string }) => [x.id, {
           name: x.name,
           // managed_config_id is the account backend's canonical credential lookup key.
           // Older local records lacked it, so preserve the old ID convention as a fallback.
-          configId: x.managed_config_id || x.id.replace(/^managed-/, ''),
+          configId: x.source === 'managed' ? x.managed_config_id || x.id.replace(/^managed-/, '') : `byok:${x.id}`,
         }]));
-      const rows: Model[] = (m.groups || []).flatMap((group: { provider_id: string; models?: { value: string; label?: string }[] }) => {
-        const provider = managed.get(group.provider_id); if (!provider) return [];
+      const rows: Model[] = (m.groups || []).flatMap((group: { provider_id: string; sdkProxyOnly?: boolean; models?: { value: string; label?: string }[] }) => {
+        const provider = available.get(group.provider_id); if (!provider || provider.configId.startsWith('byok:') && group.sdkProxyOnly) return [];
         return (group.models || []).filter(model => model.value).map(model => ({ id: `${group.provider_id}::${model.value}`, name: `${provider.name} · ${model.label || model.value}`, providerId: group.provider_id, configId: provider.configId, modelId: model.value }));
       });
       setModels(rows);
       // The LLM gate deliberately starts empty. A provider default must not bypass
       // the required, user-visible model confirmation before parsing begins.
     }).catch(() => {});
+    void refreshModels();
+    window.addEventListener('provider-changed', refreshModels);
+    return () => window.removeEventListener('provider-changed', refreshModels);
   }, []);
   useEffect(() => {
     api<{ templates: PptTemplate[] }>('templates').then(result => setTemplateOptions(result.templates)).catch(() => {});
@@ -273,6 +279,7 @@ export function PptWorkspace() {
   async function analyzeDraft(value: PptCreateDraft) {
     const model = models.find(row => row.id === value.modelKey);
     if (!model) throw new Error(t('ppt.chooseModel'));
+    if (model.configId.startsWith('byok:')) await requirePptByokCapabilities();
     let id = value.analyzedProjectId;
     if (id) {
       await api('projects', `/${id}/outline`, 'POST', { pages: value.pages, template: value.template,
@@ -318,6 +325,10 @@ export function PptWorkspace() {
     const editablePptx = value.inputKind === 'file' && value.file?.name.toLowerCase().endsWith('.pptx') && value.importMode === 'editable';
     const model = models.find(row => row.id === value.modelKey);
     if (!model && !editablePptx) return;
+    if (model?.configId.startsWith('byok:')) {
+      try { await requirePptByokCapabilities(); }
+      catch (error) { setError(error instanceof Error ? error.message : 'PPT 服务连接失败。'); return; }
+    }
     await run(async () => {
       const filePayload = value.inputKind === 'file' && value.file && !value.analyzedProjectId ? await fileBase64(value.file) : undefined;
       const { project } = value.analyzedProjectId

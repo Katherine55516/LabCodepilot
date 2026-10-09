@@ -44,6 +44,7 @@
 
 | 文件 | 主题 | 状态 |
 |------|------|------|
+| active/ppt-byok-api-setup.md | OpenAI-compatible 持久化、PPT 本地模型队列、加密 API 设置与连接验证 | 本地实现/回归与真实 deepseek 连接完成；远端部署及真实整稿验收待执行 |
 | completed/ppt-gamma-density-packing.md | Gamma参照密度、语义分组/容量packing、自动syllabus页数与prompt/可见QA闭环 | 本地实现与模拟/原生导出/浏览器回归完成；真实模型待验收 |
 | completed/ppt-edit-intent-proposal-integration.md | 最新原型架构接入：共用模板确认、持久 Proposal/EditIntent、页级版本协调、单页 AI 前后预览与定向撤回 | 本地实现和回归完成；真实模型/远端/打包态待环境验收 |
 | active/ppt-gamma-depth-design-editor.md | Gamma 样例驱动的内容容量页数估算、语义版式和编辑器样式优化 | 实施中 |
@@ -102,6 +103,7 @@
 
 | 文件 | 主题 | 完成日期 |
 |------|------|----------|
+| completed/ppt-offline-contract-template-validation.md | 无 API 数值/可见合同、修复约束/回滚、两模板组件档案、三共享布局与真实导出/CDP 回归 | 2026-10-09 |
 | completed/ppt-hard-rule-remediation.md | 五项P0核心修复、实际PPTX/PDF实例合同、完整义务/媒体处置与32组专项回归；复杂视觉/长输入/真实模型边界 | 2026-10-08 |
 | completed/ppt-input-scope-harness.md | PPT harness 输入框架与受限扩展、强制审查、候选及缓存门禁；本地回归完成，真实模型语义准确率待评测 | 2026-10-08 |
 | completed/ppt-general-render-contract.md | 多输入共享文本/媒体契约、typed ingestion、深度密度与生成/发布门禁；PPTX/PDF/CDP/多格式回归 | 2026-10-08 |
