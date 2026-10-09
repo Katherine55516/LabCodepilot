@@ -25,7 +25,11 @@ export function acceptExportVerification(project, info) {
   const expected=exportManifest(project),v=info?.exportVerification;
   if(v?.status!=='passed'||v.version!==EXPORT_CONTRACT_VERSION||v.manifestHash!==expected.manifestHash||v.renderHash!==expected.renderHash||v.revision!==expected.revision||!v.sha256)throw new Error('PPTX export was not verified against the current instance contract; publication blocked');
   project.quality={...project.quality,exportable:true,exportVerification:info.exportVerification,
-    fontResolution:info.fontResolution||[],visualVerified:false, renderedTextVerified:v.renderedVisibility?.status==='passed'};
+    fontResolution:info.fontResolution||[],visualVerified:false, renderedTextVerified:v.renderedVisibility?.status==='passed',
+    // Page images and occlusion checks are evidence; a visual review must
+    // still evaluate them before anything is called visually verified.
+    visualEvidence:v.visualEvidence?{status:v.visualEvidence.status,pages:v.visualEvidence.pages?.length||0,occlusionChecks:v.visualEvidence.occlusionChecks||0,
+      softOcclusions:v.visualEvidence.softOcclusions?.length||0,engine:v.visualEvidence.engine||null,manifestHash:v.manifestHash}:{status:'not_evaluated'}};
 }
 export function blockExportVerification(project,error) {
   const issue={code:'export_integrity_failed',severity:'error',repairable:true,message:String(error?.message||error).slice(-1500)};

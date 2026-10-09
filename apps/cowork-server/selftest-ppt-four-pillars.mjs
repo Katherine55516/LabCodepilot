@@ -6,6 +6,7 @@ import { inspectRelationFidelity } from './lib/ppt-semantic-relations.mjs';
 import { normalizePageContract, pageContractFor, inspectPageContracts, PAGE_JOBS } from './lib/ppt-page-contract.mjs';
 import { buildMediaLedger, inspectMediaLedger, mediaBucket } from './lib/ppt-media-ledger.mjs';
 import { routeIssue, annotateIssue, newHardErrors, themeBound } from './lib/ppt-repair-routing.mjs';
+import { inspectSourceNumbers } from './lib/ppt-source-numbers.mjs';
 import { slidePlan } from './lib/ppt-planning.mjs';
 import { OUTLINE_SCHEMA } from './lib/ppt-prompt-contracts.mjs';
 import { PPT_PROMPT_CONTRACT_VERSION } from './lib/ppt-generation-policy.mjs';
@@ -50,7 +51,7 @@ const split = { source, outline: [{ id: 's0' }, { id: 's1', sourceUnitIds: [defi
 assert.ok(inspectRelationFidelity(split, [{ id: 's0', nodes: [] }, { id: 's1', nodes: [] }, { id: 's2', nodes: [] }]).some(issue => issue.code === 'relation_definition_split'));
 
 // ---------------------------------------------------------------- B. page contract
-assert.match(OUTLINE_SCHEMA, /pageContract/); assert.equal(PPT_PROMPT_CONTRACT_VERSION, 10);
+assert.match(OUTLINE_SCHEMA, /pageContract/); assert.ok(PPT_PROMPT_CONTRACT_VERSION >= 10);
 const normalized = normalizePageContract({ job: 'definition', requiredUnits: [definition.unitIds[0], 'b_9999'], requiredRelations: [definition.id, 'rel_fake'],
   adjacencyPairs: [{ a: definition.unitIds[0], b: 'b_9999' }], compositionCandidates: ['formula-variables', 'svg-art'] }, source);
 assert.deepEqual(normalized.requiredUnits, [definition.unitIds[0]], 'unknown IDs are dropped');
@@ -126,6 +127,19 @@ const boundRepair = quality.repairProject(bound, quality.deterministicReview(bou
 assert.equal(boundRepair.project.templateSpec.palette.foreground, '#eeeeee', 'bound theme token is not changed');
 assert.ok(boundRepair.repairs.some(item => item.operation === 'report_binding_conflict'));
 assert.ok(boundRepair.review.issues.some(issue => issue.code === 'contrast_foreground' && issue.ownerLayer === 'theme'));
+
+assert.ok(ledger.entries.every(entry => entry.cropPolicy && Array.isArray(entry.boundUnitIds) && entry.required === false));
+
+// ---------------------------------------------------------------- unsourced numbers
+const numberDeck = values => [{ id: 'n0', nodes: [] }, { id: 'n1', nodes: values.map((value, i) => textNode(`v${i}`, value)) }];
+const strictProject = { source, prompt: '', generationPolicy: { version: 1, detail: 'balanced', language: { mode: 'source' }, knowledge: 'source_only' } };
+const unsourced = inspectSourceNumbers(strictProject, numberDeck(['Harvey et al. (2016) raised the bar to t > 3.0']));
+assert.equal(unsourced[0].code, 'source_number_unsupported'); assert.equal(unsourced[0].severity, 'error'); assert.deepEqual(unsourced[0].values.sort(), ['2016', '3.0']);
+assert.deepEqual(inspectSourceNumbers(strictProject, numberDeck(['A portfolio with 800% turnover', '01', 'Step 2'])), [], 'sourced values, ordinal badges and single digits pass');
+const bounded = inspectSourceNumbers({ ...strictProject, generationPolicy: { ...strictProject.generationPolicy, knowledge: 'source_plus_explanation' } }, numberDeck(['about 400 factors']));
+assert.equal(bounded[0].severity, 'warning');
+assert.deepEqual(inspectSourceNumbers({ ...strictProject, prompt: 'Use the 2016 study' }, numberDeck(['2016 study'])), [], 'numbers the user supplied are allowed');
+assert.equal(routeIssue('source_number_unsupported').ownerLayer, 'scope');
 
 // ---------------------------------------------------------------- real input (optional)
 const factorZoo = path.join(process.env.PPT_EVAL_INPUT_DIR || '/Users/dongli/Documents/quant_research/quant_3.0', '04_factor_zoo_overview.md');

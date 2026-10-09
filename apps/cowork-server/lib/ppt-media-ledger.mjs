@@ -7,6 +7,8 @@ import { visibleNodes } from './ppt-visible-content.mjs';
 
 export const MEDIA_BUCKETS = ['evidence', 'brand', 'aid', 'decoration', 'unknown'];
 const KEPT = new Set(['retained', 'replaced_verified']);
+// Evidence must stay fully visible; decoration may be cropped to fit.
+const CROP = { evidence: 'no-crop', brand: 'no-crop', aid: 'contain', decoration: 'adaptive', unknown: 'contain' };
 export function mediaBucket(role, asset = {}) {
   if (asset.content?.mustPreserve || role === 'brand') return 'brand';
   if (['evidence', 'semanticDiagram', 'source'].includes(role)) return 'evidence';
@@ -19,7 +21,7 @@ const hasMedia = slide => visibleNodes(slide).some(node => ['image', 'chart', 't
 export function buildMediaLedger(project, slides, objectLedger) {
   const fidelity = project.templateFidelity;
   const sourceObjects = (objectLedger?.objects || []).filter(object => object.type === 'SourceImage')
-    .map(object => ({ objectId: object.objectId, bucket: 'evidence', origin: 'source', status: object.status }));
+    .map(object => ({ objectId: object.objectId, bucket: 'evidence', origin: 'source', status: object.status, required: true, cropPolicy: CROP.evidence, boundUnitIds: [] }));
   const content = slides.slice(1);
   let run = 0, longestTextOnlyRun = 0;
   for (const slide of content) { run = hasMedia(slide) ? 0 : run + 1; longestTextOnlyRun = Math.max(longestTextOnlyRun, run); }
@@ -28,8 +30,9 @@ export function buildMediaLedger(project, slides, objectLedger) {
   const entries = [...(objectLedger?.templateAssets || []).map(asset => {
     const spec = fidelity.slides[slides.findIndex(slide => slide.id === asset.slideId)];
     const node = spec?.nodes?.find(item => item.id === asset.objectId) || {};
-    return { objectId: asset.objectId, slideId: asset.slideId, origin: 'template', role: asset.role, bucket: mediaBucket(asset.role, node),
-      status: asset.status, ...(asset.reason ? { reason: asset.reason } : {}) };
+    const bucket = mediaBucket(asset.role, node);
+    return { objectId: asset.objectId, slideId: asset.slideId, origin: 'template', role: asset.role, bucket, status: asset.status,
+      required: ['evidence', 'brand'].includes(bucket), cropPolicy: CROP[bucket], boundUnitIds: node.content?.boundUnitIds || [], ...(asset.reason ? { reason: asset.reason } : {}) };
   }), ...sourceObjects];
   const templateContent = fidelity.slides.slice(1);
   const templateMediaShare = templateContent.length ? templateContent.filter(spec => (spec.nodes || []).some(node => ['image', 'chart', 'table'].includes(node.type))).length / templateContent.length : 0;

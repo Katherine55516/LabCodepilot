@@ -8,7 +8,7 @@
 
 计划见 [ppt-general-content-media-balance](active/ppt-general-content-media-balance.md)。
 
-- **P0 大纲 prompt 体量**：09_factor_testing（46k 字符）× Process Improvement 的首个模型调用（outline）为 **405,700 字符**（`scripts/ppt-balance` dry run 实测），主要来自完整 inventory、INPUT_FRAMEWORK 与 source_objects 重复内嵌。真实模型可能超出上下文或成本过高；需在 Phase 3 改为按问题分区的来源包，并给出上限与 not_evaluated 语义。
+- **P0 大纲 prompt 体量**：09_factor_testing（46k 字符）× Process Improvement 的首个模型调用（outline）为 **405,700 字符**（`scripts/ppt-balance` dry run 实测），主要来自完整 inventory、INPUT_FRAMEWORK 与 source_objects 重复内嵌。真实模型可能超出上下文或成本过高；需在 Phase 3 改为按问题分区的来源包，并给出上限与 not_evaluated 语义。 **2026-10-09 部分缓解**：INPUT_FRAMEWORK 与 inventory 去重后，Factor Zoo 大纲 prompt 348,280 → 198,965 字符，09 为 225,155 字符；批次审查与 token 预算回执仍未实现。
 - **P1 真实模型评测环境**：本机无 Docker、无本地 Claude CLI，`run --adapter routine|cli` 无法在此工作区执行；需在 Cowork 环境或提供 `PPT_EVAL_CLAUDE_BIN` 后跑 Phase 0 的真实矩阵。
 - **P1 测试运行时**：`density / export-integrity / hard-rules` 自测需要 python-pptx + LibreOffice；系统 python3 下会因缺 `pptx`/`soffice` 失败（环境问题）。需设置 `PPT_TEST_PYTHON` 并把 `soffice` 加入 PATH。
 

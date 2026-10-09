@@ -5,7 +5,7 @@
 
 // First match wins; specific codes come before broad keywords.
 const ROUTES = [
-  [/^(model_unsupported|model_conflict|numeric_source|source_unsupported|scope_)/u, 'scope', 'remove_or_source', ['rewrite_with_source', 'remove_unsupported_claim']],
+  [/^(model_unsupported|model_conflict|numeric_source|source_unsupported|source_number_unsupported|scope_)/u, 'scope', 'remove_or_source', ['rewrite_with_source', 'remove_unsupported_claim']],
   [/^(relation_|page_contract_adjacency)/u, 'semantic', 'restore_relation', ['change_prototype', 'regroup', 'restore_order']],
   [/^big_number_without_source_value$/u, 'composition', 'change_prototype', ['change_prototype', 'bind_sourced_value']],
   [/^(model_missing|mandatory_content|page_contract_unit_missing|source_structure_or_detail_missing|source_end_section_missing|required_source_object|content_depth|rich_source)/u, 'content', 'restore_source_units', ['rewrite_with_source', 'regroup', 'split_proposal']],

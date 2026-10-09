@@ -241,7 +241,7 @@ keyPoints 是后续写作者必须展开的内容承诺；给出实际要讲的�
 复杂表格保留所有类别与列之间的关系，流程保留顺序/分支，公式保留变量、单位与条件；篇幅不足明确记录取舍，不能静默遗漏。
 角色、密度和篇幅预算由代码依据用途和内容推导，无需重复输出。纯 prompt 的通用问题清单只是参考，应替换成领域特有、有内容的解释计划。
 用户另行要求（来源正文之外）：${project.prompt || '无'}。</content_plan>
-<source_inventory>${JSON.stringify(project.source?.semantic?.inventory)}</source_inventory>
+<source_inventory>${JSON.stringify(compactInventory(project.source?.semantic?.inventory))}</source_inventory>
 <story_decisions>Use many-to-one for connected definitions/frameworks and one-to-many for dense mechanisms. Never map headings mechanically to pages. Each page owns a question, message, semantic units, relationships and a capacity-aware structural artifact. Record merge/split/standalone and reasons; retain final sections, all table columns, equations with conditions, workflows, checklists and summaries. ${automaticPages(project) ? 'Propose capacity-aware candidate pages; provisional count may change before confirmation.' : 'Preserve the confirmed page count.'}</story_decisions>
 ${densityPrompt(project)}
 <source_objects>${JSON.stringify(sourceObjects(project.source))}</source_objects>
@@ -249,6 +249,22 @@ ${densityPrompt(project)}
 inventory.relationships 的类型必须保留：matrix 保留全部行类别和列轴，不合并或删列；order 保留步骤顺序和条件分支；alternative 是并列可替代的表达，不能画成先后步骤；definition 要求公式与变量解释同页相邻。
 compositionCandidates 只能从来源关系推出；big-number 只用于来源中存在的数值及其口径，不能承载 β≠α、模型名或无来源数字。</page_contract_rules>
 source_objects 是完整的来源表格/表达式/代码；不要把行名清单当成关系说明。每一列的关系要由具体 keyPoints 承接，必要时分配到多个相关页面；不能只通过引用 chunk 就声称解释已完成。`;
+}
+
+/** Inventory view for planning: IDs, roles, flags, relations and a short
+ * preview. Full wording is in INPUT_FRAMEWORK.sourceText (preview + section
+ * locate it); structured items keep their shape (rows/columns, steps). */
+export function compactInventory(inventory) {
+  if (!inventory) return inventory;
+  const preview = value => { const text = String(value || '').replace(/\s+/gu, ' ').trim(); return text.length > 160 ? `${text.slice(0, 157)}…` : text; };
+  return { version: inventory.version, warnings: inventory.warnings, presentationPolicy: inventory.presentationPolicy,
+    items: (inventory.items || []).map(item => ({ id: item.id, type: item.type, section: (item.sectionPath || []).at(-1) || '', chunkRefs: item.chunkRefs, preview: preview(item.text),
+      ...(item.must_preserve_structure ? { must_preserve_structure: true } : {}), ...(item.priority === 'high' ? { priority: 'high' } : {}),
+      ...(item.presentation ? { presentation: item.presentation, presentationBasis: item.presentationBasis } : {}), ...(item.equivalentTo ? { equivalentTo: item.equivalentTo } : {}),
+      ...(item.languagePairId ? { languagePairId: item.languagePairId, languageRole: item.languageRole } : {}),
+      ...(item.rows ? { tableShape: { rows: item.rows.length - 1, columns: item.rows[0]?.length || 0, header: item.rows[0] } } : {}) })),
+    relationships: (inventory.relationships || []).map(({ steps, source_ref, chunkRefs, priority, ...relation }) => relation),
+    must_cover_topics: inventory.must_cover_topics };
 }
 
 export function sourceObjects(source) {

@@ -1,5 +1,6 @@
 import { inspectRelationFidelity } from './ppt-semantic-relations.mjs';
 import { inspectPageContracts } from './ppt-page-contract.mjs';
+import { inspectSourceNumbers } from './ppt-source-numbers.mjs';
 import { buildMediaLedger, inspectMediaLedger } from './ppt-media-ledger.mjs';
 import { annotateIssues, routeIssue, themeBound, newHardErrors } from './ppt-repair-routing.mjs';
 import { obligationRegistry, normalizeObligationAudit, obligationFailures } from './ppt-obligations.mjs';
@@ -118,7 +119,7 @@ export function deterministicReview(project, deckInput = project.deck) {
   for(const slide of deck.slides)for(const node of visibleNodes(slide))if(node.content?.mathStatus==='source_text_fallback')
     issues.push(issue('math_source_text_fallback','warning','公式暂用完整来源文本显示，数学排版需检查：'+(node.content.mathWarning||''),slide.id));
   issues.push(...inspectTemplateFidelity({ ...project, deck }));
-  issues.push(...inspectRelationFidelity(project, deck.slides), ...inspectPageContracts(project, deck.slides));
+  issues.push(...inspectRelationFidelity(project, deck.slides), ...inspectPageContracts(project, deck.slides), ...inspectSourceNumbers(project, deck.slides));
   for (const outlineSlide of project.outline || []) issues.push(...inspectSourceForSlide(project, outlineSlide));
   const fonts = project.templateSpec?.fonts;
   // Inspect the full object-level IR. Imported PPTX text lives in native nodes

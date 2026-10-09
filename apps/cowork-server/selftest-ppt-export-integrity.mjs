@@ -16,6 +16,14 @@ try{
   if kind=='image' and hasattr(shape,'image'):shape._element.getparent().remove(shape._element)\n  if kind=='math_structure':\n   for element in shape._element.findall('.//{http://schemas.openxmlformats.org/officeDocument/2006/math}f'):element.tag='{http://schemas.openxmlformats.org/officeDocument/2006/math}sSub'\n  if kind=='math':\n   for element in list(shape._element.findall('.//{http://schemas.microsoft.com/office/drawing/2010/main}m')):element.getparent().remove(element)\np.save(sys.argv[2])`,mapped.path,target,fault],{encoding:'utf8'});assert.equal(mutation.status,0,mutation.stderr);
   const checked=spawnSync(python,['-c',script+"\nverify_export(sys.argv[1],json.load(sys.stdin))",target],{input:JSON.stringify(exportManifest(p)),encoding:'utf8'});assert.notEqual(checked.status,0,`real file corruption ${fault} must fail`);assert.match(checked.stderr,/PPTX export integrity/);
  }
+ // Visual evidence: page images of the actual export, and text hidden behind a
+ // later opaque picture is rejected even though its glyphs exist in the PDF.
+ const evidence=mapped.exportVerification.visualEvidence;assert.equal(evidence.status,'rendered');assert.equal(evidence.pages.length,4);assert.ok(evidence.occlusionChecks>0);
+ assert.ok(evidence.pages.every(page=>fs.existsSync(page.path)&&/^[0-9a-f]{64}$/.test(page.sha256)));
+ const blocker=path.join(root,'blocker.png');spawnSync(python,['-c',"from PIL import Image;import sys;Image.new('RGB',(400,200),'black').save(sys.argv[1])",blocker]);
+ const covered=path.join(root,'covered.pptx');const cover=spawnSync(python,['-c',`from pptx import Presentation\nimport sys\np=Presentation(sys.argv[1]);slide=p.slides[0]\nshape=[s for s in slide.shapes if s.has_text_frame and s.text_frame.text.strip()][0]\nslide.shapes.add_picture(sys.argv[3],shape.left,shape.top,shape.width,shape.height)\np.save(sys.argv[2])`,mapped.path,covered,blocker],{encoding:'utf8'});assert.equal(cover.status,0,cover.stderr);
+ const occluded=spawnSync(python,['-c',script+"\nverify_export(sys.argv[1],json.load(sys.stdin))",covered],{input:JSON.stringify(exportManifest(p)),encoding:'utf8'});
+ assert.notEqual(occluded.status,0,'text covered by a later opaque picture must fail');assert.match(occluded.stderr,/covered by later object/);
  const extracted=await extractFile({id:'source-test',uid:'file-test'},'source.pptx',fs.readFileSync(mapped.path),runtime.io);assert.equal(extracted.images.length,1,'extract a small source image, not only large photos');assert.ok(extracted.images[0].required);
  assert.ok(extracted.semantic.inventory.items.some(item=>item.type==='EquationBlock'&&item.text.includes('\\frac')),'native source equations must retain fraction/script structure');
  assert.ok(extracted.semantic.inventory.items.some(item=>item.type==='TableBlock'&&item.rows.flat().includes('Portfolio组合')),'native source tables must retain all cell relationships');

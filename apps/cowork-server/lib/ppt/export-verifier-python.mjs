@@ -163,10 +163,28 @@ def verify_export(path,manifest):
         converted=subprocess.run(['soffice','-env:UserInstallation=file://'+profile,'--headless','--convert-to','pdf:impress_pdf_Export','--outdir',temporary,path],capture_output=True,text=True,timeout=120,env=environment)
         pdf=os.path.join(temporary,os.path.splitext(os.path.basename(path))[0]+'.pdf')
         if converted.returncode or not os.path.isfile(pdf):raise ValueError('exported visibility conversion failed: '+(converted.stderr or converted.stdout)[-300:])
-        render_errors=[]
+        render_errors=[];soft_occlusions=[];occlusion_checks=0
+        def layer_boxes(index):
+            # Top-level shapes in z-order (group children use group coordinates and are skipped).
+            if index>=len(verified.slides):return []
+            boxes=[]
+            for z,shape in enumerate(verified.slides[index].shapes):
+                try:
+                    if shape.left is None or shape.top is None:continue
+                    box=(shape.left/12700,shape.top/12700,(shape.left+shape.width)/12700,(shape.top+shape.height)/12700)
+                    xml=shape._element.xml;head=xml.split('<p:txBody')[0]
+                    text=bool(getattr(shape,'has_text_frame',False) and shape.text_frame.text.strip())
+                    picture=shape.shape_type==13
+                    opaque=(picture or '<a:solidFill>' in head or '<a:blipFill' in head) and '<a:alpha ' not in xml and 'alphaModFix' not in xml
+                    boxes.append({'z':z,'box':box,'text':text,'opaque':opaque and not text,'id':shape.shape_id})
+                except Exception:continue
+            return boxes
+        def area(b):return max(0,b[2]-b[0])*max(0,b[3]-b[1])
+        def intersect(a,b):return (max(a[0],b[0]),max(a[1],b[1]),min(a[2],b[2]),min(a[3],b[3]))
         with pdfplumber.open(pdf) as document:
             if len(document.pages)!=len(expected):render_errors.append('rendered page count differs')
             for i,page in enumerate(document.pages):
+                layers=layer_boxes(i)
                 if any(c['text'].strip() and (c['x0']<-.5 or c['x1']>page.width+.5 or c['top']<-.5 or c['bottom']>page.height+.5) for c in page.chars):render_errors.append('page '+str(i+1)+' has out-of-page glyphs')
                 actual=verify_key(''.join(c['text'] for c in page.chars))
                 if '\ufffd' in actual:render_errors.append('page '+str(i+1)+' has replacement glyphs')
@@ -180,6 +198,16 @@ def verify_export(path,manifest):
                     inside=''.join(c['text'] for c in page.chars if c['x0']>=left-1 and c['x1']<=right+1 and c['top']>=top-1 and c['bottom']<=bottom+1)
                     wanted=Counter(verify_key(value));available=Counter(verify_key(inside))
                     if any(available[ch]<amount for ch,amount in wanted.items()):render_errors.append('page '+str(i+1)+' loses or overflows rendered instance '+instance['id']);break
+                    # Glyphs that exist in the PDF can still be hidden by a later
+                    # opaque picture/filled shape (PowerPoint z-order).
+                    glyphs=[c for c in page.chars if c['text'].strip() and c['x0']>=left-1 and c['x1']<=right+1 and c['top']>=top-1 and c['bottom']<=bottom+1]
+                    own=[l for l in layers if l['text'] and all(abs(a-b)<=2.5 for a,b in zip(l['box'],(g['x']/12700,g['y']/12700,(g['x']+g['width'])/12700,(g['y']+g['height'])/12700)))]
+                    if glyphs and own and not instance.get('rotation'):
+                        occlusion_checks+=1;ink=(min(c['x0'] for c in glyphs),min(c['top'] for c in glyphs),max(c['x1'] for c in glyphs),max(c['bottom'] for c in glyphs))
+                        for layer in [l for l in layers if l['opaque'] and l['z']>own[0]['z']]:
+                            share=area(intersect(ink,layer['box']))/max(1e-6,area(ink))
+                            if share>=.5:render_errors.append('page '+str(i+1)+' text instance '+instance['id']+' is covered by later object '+str(layer['id']));break
+                            if share>=.15:soft_occlusions.append({'page':i+1,'instance':instance['id'],'coveredBy':layer['id'],'share':round(share,2)})
             for check in chart_visuals:
                 page=document.pages[check['slide']];g=check['geometry'];left,top,right,bottom=g['x']/12700,g['y']/12700,(g['x']+g['width'])/12700,(g['y']+g['height'])/12700
                 values=[v for v in check['values'] if v!=0]
@@ -189,9 +217,22 @@ def verify_export(path,manifest):
                 zero=sum(r['bottom'] for r,v in zip(bars,values) if v>0)/sum(v>0 for v in values)
                 if any(abs((r['top'] if v<0 else r['bottom'])-zero)>1 or v<0 and r['bottom']<=zero or v>0 and r['top']>=zero for r,v in zip(bars,values)):render_errors.append('wrong rendered chart sign '+check['id'])
                 else:sign_checks+=1
+            # Page images of the actual export: evidence for visual review,
+            # bound to this manifest; not a visual pass by themselves.
+            import io as verify_io
+            pages_dir=path+'.verified-pages';dpi=int(os.environ.get('PPT_VISUAL_DPI','48'));page_evidence=[]
+            if not render_errors:
+                os.makedirs(pages_dir,exist_ok=True)
+                for i,page in enumerate(document.pages):
+                    buffer=verify_io.BytesIO();page.to_image(resolution=dpi).original.save(buffer,'PNG');data=buffer.getvalue()
+                    target=os.path.join(pages_dir,'page-%03d.png'%(i+1))
+                    with open(target,'wb') as f:f.write(data)
+                    page_evidence.append({'page':i+1,'sha256':verify_hash.sha256(data).hexdigest(),'path':target})
         if render_errors:raise ValueError('PPTX rendered visibility: '+'; '.join(render_errors[:8]))
         with open(pdf,'rb') as f:pdf_hash=verify_hash.sha256(f.read()).hexdigest()
         pdf_artifact=path+'.verified.pdf';shutil.copyfile(pdf,pdf_artifact+'.part');os.replace(pdf_artifact+'.part',pdf_artifact)
         engine=subprocess.run(['soffice','--version'],capture_output=True,text=True,env=environment).stdout.strip()
-    return {'status':'passed','basis':'reopened_pptx','version':2,'manifestHash':manifest['manifestHash'],'renderHash':manifest['renderHash'],'revision':manifest['revision'],'sha256':sha,'slides':len(verified.slides),'sourceObjectsChecked':len(source_ids),'imagesChecked':images_count,'copyEntriesChecked':copy_count,'renderedVisibility':{'status':'passed','basis':'actual_pptx_pdf_glyphs','engine':engine,'mixedSignColumnChartsChecked':sign_checks,'pdfSha256':pdf_hash,'pdfPath':pdf_artifact,'scope':'page/instance bounds and glyph retention; complex occlusion/ink not certified'}}
+    return {'status':'passed','basis':'reopened_pptx','version':2,'manifestHash':manifest['manifestHash'],'renderHash':manifest['renderHash'],'revision':manifest['revision'],'sha256':sha,'slides':len(verified.slides),'sourceObjectsChecked':len(source_ids),'imagesChecked':images_count,'copyEntriesChecked':copy_count,'renderedVisibility':{'status':'passed','basis':'actual_pptx_pdf_glyphs','engine':engine,'mixedSignColumnChartsChecked':sign_checks,'pdfSha256':pdf_hash,'pdfPath':pdf_artifact,'scope':'page/instance bounds and glyph retention; complex occlusion/ink not certified'},
+      'visualEvidence':{'status':'rendered','engine':engine,'dpi':dpi,'pages':page_evidence,'occlusionChecks':occlusion_checks,'softOcclusions':soft_occlusions[:40],
+        'scope':'top-level z-order occlusion of text by opaque pictures/filled shapes; page images await visual review'}}
 `;

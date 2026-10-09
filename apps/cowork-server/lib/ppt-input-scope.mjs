@@ -39,8 +39,35 @@ Do not derive facts or topic permissions from template/sample copy, desired dens
 When the input is insufficient, preserve uncertainty, report the gap or use fewer pages in automatic-page mode; never fill space by repetition or invented content. Preserve user-locked pages/titles and report an unresolved capacity gap.
 Local optimization changes expression/depth within this framework. A request to add an outside topic is an unresolved scope conflict, not permission to silently expand the source. Source updates must use the input workflow.`;
 
+/** Prompt view of the framework. The full material stays the authority and
+ * the hash is computed over it; the prompt carries the source text once and
+ * refers to segments/prose objects by [start,end) offsets into it, instead of
+ * repeating the same text three times. Tables, code and math keep their text. */
+function compactInputs(material) {
+  if (!material) return material;
+  const text = String(material.sourceText || '');
+  let cursor = 0;
+  const span = value => {
+    const needle = String(value || '').trim(); if (!needle) return null;
+    let at = text.indexOf(needle, cursor); if (at < 0) at = text.indexOf(needle);
+    if (at < 0) return null; cursor = at + needle.length; return [at, at + needle.length];
+  };
+  const segments = (material.segments || []).map(segment => { const range = span(segment.text); return range ? { id: segment.id, location: segment.location, span: range } : segment; });
+  cursor = 0;
+  const objects = (material.objects || []).map(object => {
+    if (['table', 'code', 'equation', 'math', 'diagram'].includes(object.kind) || object.rows) return object;
+    const range = span(object.text); return range ? { id: object.id, kind: object.kind, span: range } : object;
+  });
+  return { ...material, segments, objects };
+}
+export function compactFramework(framework) {
+  const material = framework.material;
+  return { version: framework.version, frameworkHash: framework.frameworkHash, encoding: 'segments/objects use [start,end) offsets into sourceText',
+    material: { ...compactInputs(material), previousVersionInput: material.previousVersionInput ? compactInputs(material.previousVersionInput) : null } };
+}
+
 export function inputScopeContext(project) {
-  return `<input_scope_rules>${INPUT_SCOPE_RULES}</input_scope_rules>\nINPUT_FRAMEWORK=${JSON.stringify(inputFramework(project))}`;
+  return `<input_scope_rules>${INPUT_SCOPE_RULES}</input_scope_rules>\nINPUT_FRAMEWORK=${JSON.stringify(compactFramework(inputFramework(project)))}`;
 }
 
 /** Protocol completeness is deterministic; semantic truth remains a model

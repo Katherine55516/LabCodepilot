@@ -1,5 +1,5 @@
 /** Versioned, optional policy. Missing fields deliberately preserve legacy decks. */
-export const PPT_PROMPT_CONTRACT_VERSION = 10;
+export const PPT_PROMPT_CONTRACT_VERSION = 11;
 export function normalizeGenerationPolicy(value) {
   if (value === undefined) return undefined;
   const code = value?.code?.presentation;

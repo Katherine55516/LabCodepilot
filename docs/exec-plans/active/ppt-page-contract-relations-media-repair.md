@@ -117,3 +117,67 @@
 - 新检查除关系类型错误外均为 warning，待真实模型基线后再校准严重级别。
 - 契约是否改善页面组织，需要真实模型运行（Phase F）才能判断；本轮只证明契约被正确生成、传递与检查。
 - 有下限的整页比例缩放、组件原型与可变槽位属于 Phase E。
+
+## 第二轮执行记录（2026-10-09）：补齐评审建议中可确定性落地的部分
+
+### 建议落实情况（对照 `ppt-master-skill-review-20261009.md`）
+
+| 建议 | 状态 | 说明 |
+|---|---|---|
+| 3.1 / 12.2 页面职责与契约 | ✅（首轮） | `explanationChains`、`subjobs` 未做：需要主张级 ID，待真实模型输出后定义 |
+| 3.2 / 13 语义关系 | ✅（首轮） | 层级、泳道、循环、overlap 未做：来源中尚无可靠识别依据 |
+| 3.3 模板组件档案 / mapped 媒体继承 | ❌ | 即 balance 计划 Phase 2 |
+| 3.4 / 14.2 媒体账本字段 | ✅（本轮补字段） | 增加 required、cropPolicy、boundUnitIds；focalPoint、derivedFrom 待 Phase 2 资产档案 |
+| 3.5 导出后视觉核验（P0） | ✅（本轮，确定性部分） | 见下文“视觉证据”；LLM/人工视觉评审未接入，`visualVerified` 仍为 false |
+| 3.6 / 15 分层修复 | ✅（首轮） | 所属层只作标注与修复记录；critic 重写仍按模型发现路由，未按所属层过滤 |
+| 3.7 组件原型与节奏 | ❌ | Phase E / balance Phase 4 |
+| 3.8 分阶段上下文（P1） | ✅（本轮，压缩部分） | 见下文“prompt 压缩”；批次 scope audit、预算回执未做 |
+| 3.9 原生最小重建回执（P2） | ❌ | 低优先级 |
+| 17 P0 无来源数字阻断 | ✅（本轮） | 见下文“来源外数字门禁” |
+| 18.2 有下限的整页比例缩放 | ❌ | 需要渲染契约支持，Phase E |
+| 17 P1 内容供给 × 复合页联合估算 | ❌ | balance 计划 Phase 3 |
+| F 真实模型验证 | ❌ | 需要模型凭证 |
+
+### 本轮实现
+
+**来源外数字门禁**（`lib/ppt-source-numbers.mjs`，进入 `deterministicReview`）
+
+- 页面上的数字必须出现在输入正文、用户要求、封面标题或模板原文中。
+- “1,000”等同于“1000”，“0.50”等同于“0.5”，但“3.0”不等同于“3”。
+- 编号徽章（01–09）、个位数和页码不计入。
+- source_only 下为 error（阻断发布），bounded explanation 下为 warning。
+- 所属层为 scope。
+
+**视觉证据**（`lib/ppt/export-verifier-python.mjs`、`ppt-export-integrity.mjs`）
+
+- 在已有“实际 PPTX → PDF → 字形”核验基础上，按 PowerPoint z-order 检查顶层文本是否被**后绘制的不透明图片或填充形状**遮挡：覆盖字形区域 ≥50% 为硬错误，15–50% 记为软发现。透明（alpha）对象不计。
+- 每页生成 PNG（默认 48 dpi，可用 `PPT_VISUAL_DPI` 调整），记录 sha256，与 manifestHash 绑定。
+- `quality.visualEvidence` 记录页数、遮挡检查次数与软发现数；`visualVerified` 保持 false，等待视觉评审。
+
+**Prompt 压缩**（`ppt-input-scope.mjs`、`ppt-prompt-contracts.mjs`；契约版本 11）
+
+- INPUT_FRAMEWORK 在 prompt 中只放一次正文，段落与普通正文对象改用 `[start,end)` 偏移；表格、代码、公式保留原文。hash 仍按完整材料计算，已有 scope audit 不失效。
+- `<source_inventory>` 改为 ID、类型、章节、标记、表格形状与 160 字预览。
+
+| 输入 | 大纲 prompt：改前 | 改后 |
+|---|---:|---:|
+| 04 Factor Zoo | 348,280 字符 | 198,965 字符（−43%） |
+| 09 Factor Testing | 405,700 字符（含模板） | 225,155 字符（无模板） |
+
+逐页写作 prompt 同样包含 INPUT_FRAMEWORK，每次调用约减少 7 万字符。
+
+### 验证
+
+- `selftest-ppt-export-integrity.mjs` 新增两项：实际导出带 4 页 PNG 证据与遮挡检查；在文本框上方插入不透明图片的篡改文件被拒绝（“covered by later object”）。
+- `selftest-ppt-four-pillars.mjs` 新增门禁测试：
+  - 无来源的 2016、3.0 报 error；
+  - 来源中的 800%、编号徽章 01、个位数通过；
+  - bounded 模式为 warning；
+  - 用户要求中给出的数字允许；
+  - 账本字段齐全。
+- 34 个 `selftest-ppt*.mjs` 通过；tsc 通过；单元测试 2808 通过。
+
+### 风险
+
+- 来源外数字门禁在真实模型输出上可能误报（例如由来源数值推导出的新数值）。若出现，应改由 writer 引用来源原值，或在 bounded 模式下标注示意，而不是放宽门禁。
+- 遮挡检查只看顶层形状；组合内对象与旋转文本暂不判定，结果中记录为未检查。
