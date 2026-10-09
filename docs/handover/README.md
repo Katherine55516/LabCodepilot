@@ -8,7 +8,7 @@
 
 | 文件 | 主题 |
 |------|------|
-| ppt-byok-deployment-ci.md | BYOK capabilities协议、无凭证源码包/校验/回滚升级、arm64 PPT-only Actions、gh精确commit验收与真实远端E2E依赖 |
+| ppt-byok-deployment-ci.md | BYOK capabilities协议、无凭证源码包/校验/回滚升级、M1 Virtual arm64 CI实跑通过/失败修复、gh精确commit验收与真实远端E2E依赖 |
 | ppt-byok-api-setup.md | 自定义 API 设置/目录/探针、持久化与 Native 协议、PPT 本地密钥队列、Keychain 开发配置、真实连接诊断与远端部署边界 |
 | ppt-offline-contract-template-validation.md | 无 API 的数值/可见页面契约、实际修复约束与回滚、两个模板结构档案、三共享组件、编辑完整性及离线导出/CDP验证边界 |
 | ppt-hard-rule-remediation.md | 五项P0核心修复：统一硬门禁、实例合同v2/实际PDF、locked与背景、完整义务及局部AI、媒体处置v2、原生图表符号和本地验收边界 |

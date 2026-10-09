@@ -46,7 +46,7 @@ GitHub 当前账号有仓库 push 权限，没有管理 runner 权限（runner-l
 - 服务源归档187文件、约628KB；SHA256、逐文件清单、配置/依赖排除与篡改拒绝通过。目录打包动态取当前源码，所以报告数字与最终commit包可能随后续源码增减变化。
 - `selftest-release-upgrade.mjs`：已有配置/自定义审计路径保留、成功升级保留备份、启动检查失败回滚、错误 WorkingDirectory在停服务前拒绝，全部通过。平台/root/systemd/npm使用隔离工具替身，真实Linux/root/npm/systemd未验收；没有操作远端服务。
 - `gh`实际读取仓库/workflow/运行列表成功；当前看到的旧 file_fix运行不是本轮验收。新分支未上传前不调度旧main替代新代码测试。
-- 用户已授权先推送到个人私有仓库 Katherine516/LabCodepilot 的 codex/ppt-byok-arm64-validation 分支；CI 尚未调度，远端主机与真实账号/沙箱仍未提供。
+- 已推送个人仓库 Katherine516/LabCodepilot 的 codex/ppt-byok-arm64-validation 分支，arm64 CI 已通过（见下方实跑记录）；远端主机与真实账号/沙箱仍未提供。
 
 官方依据：[runner 选择/架构](https://docs.github.com/en/actions/how-tos/write-workflows/choose-where-workflows-run/choose-the-runner-for-a-job)、[gh workflow run 与 ref](https://cli.github.com/manual/gh_workflow_run)。
 
@@ -59,3 +59,16 @@ GitHub 当前账号有仓库 push 权限，没有管理 runner 权限（runner-l
 - 首次实际运行 [37930153189](https://github.com/Katherine516/LabCodepilot/actions/runs/37930153189)：1393df4；Apple M1 (Virtual)/Darwin arm64/Node22.23.2/Python3.12.10。2819单元通过、1skip；专项29通过、6失败、1缺失历史fixture跳过。5个失败来自缺少pdfplumber/reportlab；语义套件误用仓库外gamma.md，fallback不包含受保护术语。
 - 修复：干净runner安装pdfplumber/reportlab、实际LibreOffice、fontconfig及Noto CJK/STIX字体；语义套件统一使用固定输入且包含Deck Brief/Story Planner，原术语/标题/检索断言不变，不删除失败项或放宽生产质量门禁。
 - 安装依据：[LibreOffice](https://formulae.brew.sh/cask/libreoffice)、[Noto CJK](https://formulae.brew.sh/cask/font-noto-sans-cjk-sc)、[STIX](https://formulae.brew.sh/cask/font-stix)。
+
+### 修复后最终验收
+
+- [运行 37931244082](https://github.com/Katherine516/LabCodepilot/actions/runs/37931244082)：**success**，被测源码 commit `08727bea7f3198ba1e4e2f3b57d5073e2c5b86d3`；job用时10分14秒。
+- `runner.json`：Darwin / arm64 / **Apple M1 (Virtual)** / Node v22.23.2；Python3.12.10。报告的是runner实际CPU标识，不推断物理独占设备。
+- typecheck/vendor准备通过；单元测试 **2819 passed / 1 skipped / 0 failed**。
+- PPT专项 **35 passed / 1 skipped-fixture / 0 failed**。唯一跳过为未上传的原始49页历史fixture，保留原skip说明；其余密度、来源约束、语义、模型队列、hard rules、实际PPTX/PDF渲染与原生模板门禁全部执行。
+- Playwright **24 passed / 0 failed / 0 flaky**（3.6分钟）。覆盖输入方式→模型→模板→输入、页数估算与确认、模板容量变更失效、390×500滚动可达性、生成聊天、局部AI/撤销、版本更新、导入/编辑/排序/发布、模型配置/目录同步与协议拒绝、中文/数学/代码/表格/正负值图表/图片裁切。浏览器使用真实React/Chromium/CDP、fixture API，不声称真实远端或真实模型运行。
+- 升级逻辑3场景通过：成功保留配置/备份、启动失败回滚、错误WorkingDirectory提前拒绝；仍使用platform/systemd/npm替身，不是实际Linux服务部署。
+- 部署源包187个文件；下载后重新验证逐文件清单与BYOK v1通过。归档SHA256：`4cdf96d08ad6b012954d8b98699fdc8dbdd4376a9b6c486705e8f4c713ac38d0`，与上传的`.sha256`一致；配置、node_modules、历史outputs排除检查通过。
+- 下载证据保存在本地 `outputs/ppt-arm64-ci-20261009/run-37931244082/`；首轮失败证据保存在 `run-37930153189/`。Actions产物 `ppt-arm64-validation` 保留7天。交接文档记录结果，原始日志/截图/归档留本地，未加入Git。
+- 人工抽查CI模型选择/CDP截图及渲染契约截图：正负柱在零线正确两侧，中文/英文文本、空表格单元格、表格换行、代码缩进可见；不把抽查扩大为全输入视觉质量认证。
+- 尚未验收：真实账号配发的远端沙箱、真实模型整稿内容质量/吞吐、真实Linux服务升级、Electron安装包及PowerPoint桌面软件。CI没有注入用户API key。

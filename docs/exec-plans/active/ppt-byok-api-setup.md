@@ -13,7 +13,7 @@
 | E | 远端部署、真实账号 PPT 端到端与安装包验收 | 未执行，保留为后续验收 |
 | E1 | 版本化 BYOK capability、客户端预检、公开 HTTP/worker 集成验证 | 完成，生产HTTP/单元/CDP通过 |
 | E2 | 排除凭证/历史输出的完整服务部署包、清单校验、备份回滚 | 包/脚本与隔离升级回滚测试通过；目标 SSH 未提供 |
-| E3 | 现有 Actions 增加 PPT-only arm64 验收、gh 调度与结果下载 | workflow实现；35项PPT、2819单元、41smoke通过；用户已授权推送个人私有仓库，CI待运行 |
+| E3 | 现有 Actions 增加 PPT-only arm64 验收、gh 调度与结果下载 | 已完成：M1 Virtual原生arm64 CI；2819单元/35PPT专项/24浏览器通过，见handover实跑记录 |
 | E4 | 真实登录配发、远端部署、真实模型整稿/局部编辑/导出 | 等待实际主机及登录；不得以 CI mock 验证替代 |
 
 ## 决策
@@ -47,3 +47,9 @@
 - 本地仓库目录已由 `LabCodepilot-para` 移至 `LabCodepilot`，Git HEAD 和本轮源码改动保持一致。
 - 提交范围为 PPT 确定性基础、BYOK/API 设置、协议预检、部署/CI源码、文档和测试。未跟踪的历史输出、node_modules、缓存、审计日志与本地凭证不提交。
 - 本次先完成推送；GitHub arm64 CI、实际部署及真实整稿验收仍分别待执行。
+
+## 2026-10-09 GitHub arm64 验收结果
+
+- 修复job级runner.temp上下文、补齐实际Office/PDF/字体环境、统一语义测试输入后，个人仓库[运行37931244082](https://github.com/Katherine516/LabCodepilot/actions/runs/37931244082)成功。
+- 被测源码commit为08727be；实际Apple M1 (Virtual)/Darwin arm64，2819单元、35专项、24浏览器通过，单元1skip及历史fixture1skip明确保留；部署包187文件重新核验通过。失败轮次、根因、证据和边界详见handover/ppt-byok-deployment-ci.md。
+- E3完成；E4保持待实际主机与登录，禁止用CI fixture/本地连接探针替代真实远端整稿验收。
