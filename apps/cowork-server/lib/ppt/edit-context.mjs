@@ -1,3 +1,4 @@
+import { inputFramework } from '../ppt-input-scope.mjs';
 import crypto from 'node:crypto';
 import { maxPreservedPages } from '../ppt-template-scheduler.mjs';
 
@@ -12,7 +13,7 @@ export function digest(value) {
 }
 
 export function planKey(project) {
-  return digest({ sourceRevision: project.sourceRevision || 0, source: project.source?.sha256 || project.source?.text || project.prompt,
+  return digest({ inputFrameworkHash: inputFramework(project).frameworkHash, sourceRevision: project.sourceRevision || 0, source: project.source?.sha256 || project.source?.text || project.prompt,
     template: project.templateSpec || project.template, decision: project.pageDecision,
     planning: project.planning, generationPolicy: project.generationPolicy, model: { configId: project.configId, model: project.model },
     outline: (project.outline || []).filter(slide => !slide.manualBlank).sort((a, b) => String(a.id).localeCompare(String(b.id))) });

@@ -165,7 +165,7 @@ export function normalizeBrief(value, project) {
     tone: bounded(raw.tone, 80, '清晰、专业'), depth: project.generationPolicy?.detail || (richCourse ? 'detailed'
       : ['concise', 'balanced', 'detailed'].includes(raw.depth) ? raw.depth : chunks.length > project.pages * 2 ? 'detailed' : 'balanced'),
     keyMessages: distinct(raw.keyMessages || raw.key_messages || defaultMessages, 12).map(item => item.slice(0, 160)),
-    mustInclude: distinct(raw.mustInclude || raw.must_include || defaultMessages, 16).map(item => item.slice(0, 160)),
+    mustInclude: distinct(raw.mustInclude || raw.must_include || defaultMessages, Infinity),
     slideBudget: project.pages, finalPageCount: project.pages, depthPolicy: pageRecommendation.depthPolicy,
     evidencePolicy: effectiveKnowledge(project) === 'source_only'
       ? '只使用已提供来源；未经来源支持的数字、引用和事实不得输出'
@@ -277,19 +277,19 @@ function sourceBackedDetails(slide, source) {
   const relevant = (source?.semantic?.chunks || []).filter(chunk => (slide.chunkRefs || []).includes(chunk.id));
   const sourceText = relevant.map(chunk => chunk.text || '').join('\n');
   const fullSource = String(source?.text || '');
-  const explicit = distinct(slide.requiredDetails || slide.required_details || slide.supportingPoints, 10)
+  const explicit = distinct(slide.requiredDetails || slide.required_details || slide.supportingPoints, Infinity)
     .filter(detail => !fullSource || !codeLikeDetail(detail) || formulaKey(fullSource).includes(formulaKey(detail)));
   // A worked example containing source code must keep its actual calculation.
   // Prefer the computed expression over a plausible formula reconstructed by
   // the outline model from the surrounding prose.
   if (/example|worked|loop|formula|算例|示例|案例|公式|实例/iu.test(`${slide.title || ''} ${slide.focus || ''}`)) {
-    const assignments = [...sourceText.matchAll(/^\s*([A-Za-z_]\w*)\s*=\s*([^\n]{6,140})/gm)]
+    const assignments = [...sourceText.matchAll(/^\s*([A-Za-z_]\w*)\s*=\s*([^\n]{6,})/gm)]
       .map(match => `${match[1]} = ${match[2].trim()}`)
       .filter(value => /[+*/-]/u.test(value.split('=').slice(1).join('=')));
     const formula = assignments.find(value => /^raw\s*=/iu.test(value)) || assignments[0];
     if (formula && !explicit.some(detail => formulaKey(detail) === formulaKey(formula))) explicit.unshift(formula);
   }
-  return distinct(explicit, 10).map(item => item.slice(0, 160));
+  return distinct(explicit, Infinity);
 }
 
 export function slidePlan(outline, brief = {}, source = null, templateFidelity = null) {

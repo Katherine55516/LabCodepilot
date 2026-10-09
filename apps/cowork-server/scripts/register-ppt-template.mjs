@@ -20,9 +20,9 @@ export async function registerManagedTemplate(file, options = {}, deps = { analy
     if (analysis.compatibility !== 'mapped' || !['pptx','potx'].includes(extension)) throw new Error('template_unsupported: managed template must have editable slots and mapped theme');
     const imported = await deps.importEditablePptx({ uid: 'managed', id }, bytes, sha256);
     const template = { ...analysis, id, name: options.name || fileName.replace(/\.[^.]+$/,''), kind: 'managed', version: 1, category: options.category || '内置模板',
-      extension, fileName, sha256, bytes: bytes.length, irVersion: 'pptx-ir-3', createdAt: new Date().toISOString() };
+      extension, fileName, sha256, bytes: bytes.length, irVersion: 'pptx-ir-4', createdAt: new Date().toISOString() };
     store.writeTemplate('managed', id, bytes);
-    store.writeTemplateIR('managed', id, { schemaVersion: 1, parserVersion: 'pptx-ir-3', sha256, imported });
+    store.writeTemplateIR('managed', id, { schemaVersion: 1, parserVersion: 'pptx-ir-4', sha256, imported });
     store.writeTemplateCover('managed', id, slideSvg(buildSlideRenderTree({...imported,templateSpec:template}, imported.deck.slides[0].id)));
     template.coverVersion = 'svg-preview-1';
     store.saveTemplates('managed', [...store.listTemplates('managed'), template]);

@@ -1,3 +1,4 @@
+import { scopeReview, simulatedExport } from './ppt-scope-test-helpers.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -29,11 +30,11 @@ const slides = [
   { id: '3', title: 'Slide 3', bullets: ['Closing'], blocks: [] },
 ];
 let renders = 0;
-const deps = { modelCall: async (project, prompt) => prompt.includes('整稿演示文稿内容评审器') ? { missing: [], repeated: [], conflicts: [], unsupported: [] } : prompt.includes('演示文稿叙事规划器')
+const deps = { modelCall: async (project, prompt) => prompt.includes('整稿演示文稿内容评审器') ? scopeReview(project) : prompt.includes('演示文稿叙事规划器')
   ? { slides: Array.from({ length: project.pages }, (_, index) => ({ title: `Pasted ${index + 1}`, focus: 'Source facts', refs: ['1'],sourceImageIds:index>0?[project.source.images[index-1]?.id].filter(Boolean):[] })) }
   : prompt.includes('视觉元素') ? { text: 'Better label' } : { title: 'Rewritten', bullets: ['Verified text'] },
-renderPptx: async () => {
- renders++; return { bytes: 123, exportVerification: {status:"passed",basis:"test_double"} }; }, renderPdf: async () => ({ bytes: 123, exportVerification: {status:"passed",basis:"test_double"} }) };
+renderPptx: async project => {
+ renders++; return simulatedExport(project); }, renderPdf: async project => simulatedExport(project) };
 async function request(method, pathname, data, as = uid) {
   const req = Readable.from(data === undefined ? [] : [Buffer.from(JSON.stringify(data))]);
   req.method = method;

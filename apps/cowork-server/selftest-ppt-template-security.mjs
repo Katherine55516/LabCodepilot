@@ -7,8 +7,26 @@ import io,sys,zipfile,os
 from pptx import Presentation
 from pptx.util import Inches
 p=Presentation();s=p.slides.add_slide(p.slide_layouts[6]);s.shapes.add_textbox(Inches(1),Inches(1),Inches(6),Inches(2)).text='Template validation'
-b=io.BytesIO();p.save(b);kind=sys.argv[1]
+kind=sys.argv[1]
+if kind=='safe_chart' or kind.startswith('chart_'):
+ from pptx.chart.data import CategoryChartData
+ from pptx.enum.chart import XL_CHART_TYPE
+ data=CategoryChartData();data.categories=['Loss','Gain'];data.add_series('Change',[-5,7]);s.shapes.add_chart(XL_CHART_TYPE.COLUMN_CLUSTERED,Inches(1),Inches(3),Inches(5),Inches(3),data)
+b=io.BytesIO();p.save(b)
 with zipfile.ZipFile(io.BytesIO(b.getvalue())) as z: parts={n:z.read(n) for n in z.namelist()}
+if kind.startswith('chart_'):
+ name=next(n for n in parts if n.endswith('.xlsx'))
+ with zipfile.ZipFile(io.BytesIO(parts[name])) as book:nested={n:book.read(n) for n in book.namelist()}
+ if kind=='chart_macro':nested['xl/vbaProject.bin']=b'x'
+ if kind=='chart_formula':nested['xl/unsafe.xml']=b'<x><f>WEBSERVICE("https://unsafe.test")</f></x>'
+ if kind=='chart_traversal':nested['../bad.xml']=b'<x/>'
+ if kind=='chart_external':nested['xl/_rels/unsafe.xml.rels']=b'<Relationships><Relationship TargetMode="External" Target="https://unsafe.test"/></Relationships>'
+ if kind=='chart_bomb':nested['xl/pad.xml']=b'<x>'+b'a'*2000000+b'</x>'
+ output=io.BytesIO()
+ with zipfile.ZipFile(output,'w',zipfile.ZIP_DEFLATED) as book:
+  for n,data in nested.items():book.writestr(n,data)
+ parts[name]=output.getvalue()
+if kind=='orphan_xlsx':parts['ppt/embeddings/unrelated.xlsx']=b'fake'
 if kind=='traversal': parts['../evil.txt']=b'x'
 if kind=='macro': parts['ppt/vbaProject.bin']=b'x'
 if kind=='ole': parts['ppt/embeddings/oleObject1.bin']=b'x'
@@ -36,6 +54,8 @@ sys.stdout.buffer.write(out.getvalue())
 `,kind],{maxBuffer:140_000_000});assert.equal(r.status,0,r.stderr.toString());return r.stdout;}
 const parser=(bytes)=>runTemplateParser(python,['-c',_internals.SCRIPT],bytes,{PPT_TEMPLATE_EXT:'pptx',PPT_TEMPLATE_LIMITS:JSON.stringify(templateLimits())});
 for(const [kind,pattern] of [['traversal',/template_unsafe/],['macro',/template_unsafe/],['ole',/template_unsafe/],['entity',/template_unsafe/],['xml',/template_corrupted/],['external',/template_unsafe/],['svg',/template_unsafe/],['bomb',/template_unsafe/],['slides',/template_too_large/],['objects',/template_(too_large|unsafe)/],['entries',/template_too_large/]])await assert.rejects(parser(fixture(kind)),pattern,kind);
+for(const kind of ['chart_macro','chart_formula','chart_traversal','chart_external','chart_bomb','orphan_xlsx'])await assert.rejects(parser(fixture(kind)),/template_(unsafe|unsupported)/,kind);
+assert.equal((await parser(fixture('safe_chart'))).pages,1,'static chart-owned native data is allowed');
 await assert.rejects(parser(Buffer.from('PKcorrupt')),/template_corrupted/);
 for(const kind of ['small','medium','near_user','near_managed']) {const bytes=fixture(kind);assert.equal(validateTemplate('valid.pptx',bytes,kind==='near_managed'),'pptx');const result=await parser(bytes);assert.equal(result.pages,1);console.log(kind,bytes.length,'accepted');}
 assert.throws(()=>validateTemplate('large.pptx',Buffer.alloc(templateLimits().userBytes+1)),/template_too_large/);

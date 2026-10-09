@@ -35,10 +35,14 @@ export type PptRenderElement = {
     mathMl?: string; mathText?: string; mathStatus?: string;
     dataUrl?: string; sourceImageId?:string; crop?: number[]; rows?: string[][]; rowWeights?: number[]; columnWeights?: number[]; labels?: string[]; values?: number[]; chartType?: 'bar' | 'pie' | 'line'; unit?: string; shape?: 'rect' | 'ellipse' };
   style?: { color?: string; fill?: string; tableHeaderColor?: string; fontFamily?: string; eastAsiaFontFamily?: string; fontSizePt?: number; fontWeight?: number; fontStyle?: string; textAlign?: string; lineHeight?: number; paragraphSpacingEm?: number; letterSpacing?: number; opacity?: number; shape?: string };
+  textLayout?: {version:number; units:'pt';margins:number[];wrap:boolean;autoFit:'none';fontFamily?:string;tabSize:number;code:boolean;paragraphs:{text:string;label?:string;lineHeight:number;spaceAfterPt:number;runs?:{text:string;fontSizePt:number;bold:boolean}[]}[]};
+  imageLayout?: {version:number;fit:'contain'|'cover'|'stretch'|'crop';crop:number[];valid:boolean};
+  chartLayout?: {version:number;minimum:number;maximum:number;valid:boolean;unit:string;svg?:string};
+  tableLayout?: {version:number;margins:number[];lineHeight:number;wrap:boolean};
   zIndex: number; rotation?: number; locked?: boolean; groupId?: string | null; semanticRole?: string;
 };
 export type PptRenderSlide = { id: string; slideId: string; index: number; layoutId: string; size: { width: number; height: number }; background?: string; elements: PptRenderElement[] };
-export type PptRenderTree = { schemaVersion: number; units: 'emu'; deckId: string; hash: string; size: { width: number; height: number }; slides: PptRenderSlide[] };
+export type PptRenderTree = { schemaVersion: number; renderContractVersion?: number; units: 'emu'; deckId: string; hash: string; size: { width: number; height: number }; slides: PptRenderSlide[] };
 export type PptRunNode = { id: string; dependsOn: string[]; status: string; attempts: number; error?: string | null; startedAt?: string | null; completedAt?: string | null; slideId?: string };
 export type PptRun = { id: string; status: string; stage: string; lastSeq: number; nodes: Record<string, PptRunNode>; createdAt?: string; startedAt?: string | null; completedAt?: string | null; error?: string | null };
 

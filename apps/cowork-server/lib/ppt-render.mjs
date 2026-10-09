@@ -1,3 +1,4 @@
+import { EXPORT_VERIFY_SCRIPT } from './ppt/export-verifier-python.mjs';
 /** Deterministic PPTX export. python-pptx executes INSIDE the project's Cowork
  * container, which already ships it in the bundled office image. The host only
  * passes validated IR and later streams the resulting file from its volume. */
@@ -5,7 +6,9 @@ import { spawn } from 'node:child_process';
 import * as orch from './orchestrator.mjs';
 import { buildRenderTree } from './ppt/render-tree.mjs';
 import { OFFICE_MATH_SCRIPT } from './ppt-math.mjs';
-import { exportManifest, EXPORT_VERIFY_SCRIPT } from './ppt-export-integrity.mjs';
+import { exportManifest } from './ppt-export-integrity.mjs';
+import { RENDER_CONTRACT_SCRIPT } from './ppt/render-contract-python.mjs';
+import { RENDER_CONTRACT_VERSION } from './ppt/render-contract.mjs';
 import { FONT_SCRIPT } from './ppt-fonts.mjs';
 
 const SCRIPT = String.raw`
@@ -16,7 +19,7 @@ from xml.sax.saxutils import escape
 from pptx import Presentation
 from pptx.util import Inches, Pt
 from pptx.dml.color import RGBColor
-from pptx.enum.text import PP_ALIGN
+from pptx.enum.text import MSO_ANCHOR, PP_ALIGN, MSO_AUTO_SIZE
 from pptx.enum.shapes import MSO_SHAPE
 from pptx.chart.data import CategoryChartData
 from pptx.enum.chart import XL_CHART_TYPE, XL_DATA_LABEL_POSITION
@@ -28,6 +31,7 @@ from pptx.oxml.ns import qn
 ${OFFICE_MATH_SCRIPT}
 ${EXPORT_VERIFY_SCRIPT}
 ${FONT_SCRIPT}
+${RENDER_CONTRACT_SCRIPT}
 
 TITLE_FONT = BODY_FONT = TITLE_EA = BODY_EA = ''
 CJK_RE = re.compile(r'[\u2e80-\u9fff\uf900-\ufaff]')
@@ -100,15 +104,12 @@ def visual(slide, block, x, y, w, h, accent, fg):
     if kind == 'image':
         blob = base64.b64decode(block['dataUrl'].split(',', 1)[1])
         PillowImage.open(io.BytesIO(blob)).verify()
-        image = Image.from_blob(blob)
-        iw, ih = image.size
-        ratio = min(w / iw, h / ih)
-        dw, dh = int(iw * ratio), int(ih * ratio)
-        return slide.shapes.add_picture(io.BytesIO(blob), x + (w - dw) // 2, y + (h - dh) // 2, dw, dh)
+        return contract_picture(slide,blob,x,y,w,h,block.get('imageLayout') or {'fit':'contain'})
     if kind == 'chart':
+        if block.get('chartLayout') and not block['chartLayout'].get('valid'):raise ValueError('invalid chart data contract')
         data = CategoryChartData()
         data.categories = block['labels']
-        data.add_series(block.get('unit') or 'Values', block['values'])
+        for series in block.get('series') or [{'name':block.get('unit') or 'Values','values':block['values']}]:data.add_series(series.get('name') or 'Values',series['values'])
         chart_type = XL_CHART_TYPE.PIE if block['chartType'] == 'pie' else (XL_CHART_TYPE.LINE_MARKERS if block['chartType'] == 'line' else XL_CHART_TYPE.COLUMN_CLUSTERED)
         card = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, x, y, w, h)
         card.fill.solid()
@@ -122,9 +123,17 @@ def visual(slide, block, x, y, w, h, accent, fg):
             title_para = chart.chart_title.text_frame.paragraphs[0]
             title_para.text = block['unit']
             cjk_font(title_para, 12, RGBColor(45, 55, 72), True, 'title')
-        chart.has_legend = block['chartType'] == 'pie'
+        chart.has_legend = block['chartType'] == 'pie' or len(block.get('series') or [])>1
         if block['chartType'] in ('bar', 'line'):
+            axis=block.get('chartLayout') or {}
+            if axis:
+                if not axis.get('valid'):raise ValueError('invalid chart data contract')
+                chart.value_axis.minimum_scale=float(axis['minimum']);chart.value_axis.maximum_scale=float(axis['maximum'])
+                chart.value_axis.crosses_at=0.0
+                chart.value_axis.tick_labels.number_format=axis.get('numberFormat','0.##')
+                chart.value_axis.tick_labels.number_format_is_linked=False
             if block['chartType'] == 'bar':
+                for series in chart.series:series.invert_if_negative=False
                 chart.series[0].format.fill.solid()
                 chart.series[0].format.fill.fore_color.rgb = RGBColor(*accent)
             else:
@@ -236,12 +245,33 @@ def render_scene_element(slide, element):
         if content.get('mathMl'):shape.text_frame.margin_left=shape.text_frame.margin_right=shape.text_frame.margin_top=shape.text_frame.margin_bottom=0
         if source: shape.name=source_name
         if element.get('sourceArtifact') and item_style.get('fill'): shape.fill.solid(); shape.fill.fore_color.rgb=scene_color(item_style['fill'],RGBColor(255,255,255))
-        if not write_office_math(para,content,size,color): para.text = str(content.get('text') or '')
+        if not write_office_math(para,content,size,color):
+            specs=(element.get('textLayout') or {}).get('paragraphs') or [{'text':str(content.get('text') or '')}]
+            for index,spec in enumerate(specs):
+                p=shape.text_frame.paragraphs[0] if index==0 else shape.text_frame.add_paragraph();p.text=spec['text']
+                if content.get('codeBlock'):
+                    p.clear()
+                    for piece in re.split(r'([\u2e80-\u9fff\uf900-\ufaff]+)',spec['text']):
+                        if piece:p.add_run().text=piece
+                cjk_font(p,size,color,bool(item_style.get('fontWeight',400)>=600),'title' if element.get('semanticRole') in ('title','template-title') else 'body')
+                if spec.get('runs'):
+                    p.clear()
+                    for item in spec['runs']:
+                        run=p.add_run();run.text=item['text'];run.font.size=Pt(item['fontSizePt']);run.font.bold=bool(item.get('bold'));run.font.name=resolve_font(item_style.get('fontFamily') or BODY_FONT,run.text);run.font.color.rgb=color
+                    cjk_font(p,size,color,False,'title' if element.get('semanticRole') in ('title','template-title') else 'body')
+                    for run,item in zip(p.runs,spec['runs']):
+                        run.font.size=Pt(item['fontSizePt']);run.font.bold=bool(item.get('bold'))
         para.line_spacing = float(item_style.get('lineHeight') or 1.12)
         para.space_after = Pt(size * float(item_style.get('paragraphSpacingEm') or 0))
-        if item_style.get('textAlign') == 'right': para.alignment = PP_ALIGN.RIGHT
-        cjk_font(para, size, color, bool(item_style.get('fontWeight', 400) >= 600), 'title' if element.get('semanticRole') == 'title' else 'body')
-        para.alignment = PP_ALIGN.CENTER if item_style.get('textAlign') == 'center' else para.alignment
+        for paragraph in shape.text_frame.paragraphs:
+            paragraph.alignment = {'right':PP_ALIGN.RIGHT,'center':PP_ALIGN.CENTER}.get(item_style.get('textAlign'),PP_ALIGN.LEFT)
+        if not any(spec.get('runs') for spec in (element.get('textLayout') or {}).get('paragraphs',[])):
+            cjk_font(para, size, color, bool(item_style.get('fontWeight', 400) >= 600), 'title' if element.get('semanticRole') in ('title','template-title') else 'body')
+        apply_text_contract(shape.text_frame,element.get('textLayout') or {})
+        if content.get('codeBlock'):
+            for paragraph in shape.text_frame.paragraphs:
+                for run in paragraph.runs:
+                    run.font.name=resolve_font('Consolas',run.text);set_east_asia_font(run,run.font.name,language_for_text(run.text))
         shape.rotation = float(element.get('rotation') or 0)
         return
     if kind in ('list', 'timeline', 'metric'):
@@ -257,19 +287,20 @@ def render_scene_element(slide, element):
                 card = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE, px, py, pw, ph)
                 card.fill.background(); card.line.color.rgb = RGBColor(*accent)
                 frame = card.text_frame; frame.clear(); frame.word_wrap = True
-                frame.margin_left = Inches(.11); frame.margin_right = Inches(.11)
-                frame.margin_top = Inches(.07); frame.margin_bottom = Inches(.04)
+                frame.auto_size=MSO_AUTO_SIZE.NONE
+                frame.margin_left = Pt(7.92); frame.margin_right = Pt(7.92)
+                frame.margin_top = Pt(5.04); frame.margin_bottom = Pt(2.88)
                 raw = str(item.get('text') or '')
                 parts = raw.split('\n', 1)
                 heading = str(item.get('heading') or (parts[0] if len(parts) > 1 else ''))
                 body = str(item.get('body') or (parts[1] if len(parts) > 1 else raw))
                 if heading:
                     heading_para = frame.paragraphs[0]; heading_para.text = heading
-                    heading_para.space_after = Pt(3); heading_para.line_spacing = 1.08
+                    heading_para.space_after = Pt(3); heading_para.line_spacing = 1.18
                     cjk_font(heading_para, point_size, color, True, 'body')
                     body_para = frame.add_paragraph()
                 else: body_para = frame.paragraphs[0]
-                body_para.text = body; body_para.line_spacing = 1.13
+                body_para.text = body; body_para.line_spacing = 1.18
                 body_para.space_after = Pt(0)
                 cjk_font(body_para, point_size, color)
             return
@@ -279,19 +310,27 @@ def render_scene_element(slide, element):
         for number, item in enumerate(items):
             para = shape.text_frame.paragraphs[0] if number == 0 else shape.text_frame.add_paragraph()
             prefix = (str(number + 1).zfill(2) + '  ') if kind == 'timeline' else ('' if kind == 'metric' and number == 0 else '•  ')
-            para.text = prefix + str(item.get('text') or '')
+            specs=(element.get('textLayout') or {}).get('paragraphs') or []
+            para.text = specs[number]['text'] if number<len(specs) else prefix + str(item.get('text') or '')
             para.line_spacing = float(item_style.get('lineHeight') or 1.12)
             para.space_after = Pt(size * float(item_style.get('paragraphSpacingEm') if item_style.get('paragraphSpacingEm') is not None else .35))
             cjk_font(para, size, color, kind == 'metric' and number == 0, 'title' if kind == 'metric' and number == 0 else 'body')
+        apply_text_contract(shape.text_frame,element.get('textLayout') or {})
+        if content.get('codeBlock'):
+            for paragraph in shape.text_frame.paragraphs:
+                for run in paragraph.runs:
+                    run.font.name=resolve_font('Consolas',run.text);set_east_asia_font(run,run.font.name,language_for_text(run.text))
         shape.rotation = float(element.get('rotation') or 0)
         return
     if kind in ('image', 'chart', 'table', 'shape'):
         block = dict(content); block['type'] = kind
+        block['imageLayout']=element.get('imageLayout');block['chartLayout']=element.get('chartLayout')
         if kind == 'shape':
             block.setdefault('shape', 'rectangle'); block.setdefault('fill', item_style.get('fill') or '#64748b'); block.setdefault('text', '')
         rendered = visual(slide, block, x, y, w, h, accent, fg)
-        if source and rendered is not None: rendered.name=source_name
-        if kind == 'table' and element.get('sourceArtifact'):
+        if source and rendered is not None:
+            for named in rendered if isinstance(rendered,list) else [rendered]:named.name=source_name
+        if kind == 'table':
             table=rendered.table
             weights=content.get('columnWeights') or [1]*len(table.columns)
             for column,weight in zip(table.columns,weights): column.width=int(w*weight/sum(weights))
@@ -299,10 +338,10 @@ def render_scene_element(slide, element):
             for row,weight in zip(table.rows,weights): row.height=int(h*weight/sum(weights))
             for r,row in enumerate(table.rows):
                 for cell in row.cells:
-                    cell.margin_top=cell.margin_bottom=Pt(3)
+                    cell.margin_top=cell.margin_bottom=Pt(3);cell.margin_left=cell.margin_right=Pt(7.2);cell.text_frame.word_wrap=True;cell.text_frame.auto_size=MSO_AUTO_SIZE.NONE;cell.vertical_anchor=MSO_ANCHOR.TOP
                     cell.fill.fore_color.rgb=scene_color(item_style.get('fill'),RGBColor(*accent)) if r==0 else RGBColor(255,255,255)
                     for paragraph in cell.text_frame.paragraphs:
-                        paragraph.line_spacing=1.18; paragraph.space_after=Pt(0)
+                        paragraph.line_spacing=1.18; paragraph.space_before=Pt(0); paragraph.space_after=Pt(0)
                         cjk_font(paragraph,size,scene_color(item_style.get('tableHeaderColor'),color) if r==0 else color,r==0)
         for shape in rendered if isinstance(rendered, list) else [rendered]:
             if shape is not None: shape.rotation = float(element.get('rotation') or 0)
@@ -323,7 +362,12 @@ for idx, item in enumerate(data['slides']):
     if idx < len(scene_slides):
         for element in scene_slides[idx].get('elements', []):
             if element.get('nodeId') is None and element.get('kind') == 'shape': continue
+            prior_ids={shape.shape_id for shape in slide.shapes}
             render_scene_element(slide, element)
+            created=[shape for shape in slide.shapes if shape.shape_id not in prior_ids]
+            for part,shape in enumerate(created):
+                prefix=shape.name+'|' if shape.name.startswith('AIMate source:') else ''
+                shape.name=prefix+'AIMate instance:'+str(element['id'])+':'+str(part)
         continue
     bullets = item.get('bullets', [])
     blocks = item.get('blocks', [])
@@ -445,7 +489,8 @@ print(json.dumps({'slides': len(prs.slides), 'path': target, 'bytes': os.path.ge
 `;
 
 export async function renderPptx(project, io = {}) {
-  const payload=JSON.stringify({ slides: project.deck.slides, renderTree: project.renderTree || buildRenderTree(project), exportManifest:exportManifest(project), template: project.template, palette: project.templateSpec?.palette, fonts: project.templateSpec?.fonts });
+  const tree=project.renderTree?.renderContractVersion===RENDER_CONTRACT_VERSION?project.renderTree:buildRenderTree(project);
+  const payload=JSON.stringify({ slides: project.deck.slides, renderTree: tree, exportManifest:exportManifest(project,tree), template: project.template, palette: project.templateSpec?.palette, fonts: project.templateSpec?.fonts });
   if(io.runPython)return io.runPython(project,SCRIPT,payload);
   const { name } = await orch.ensureContainer(project.id, project.uid, orch.KIND_PPT);
   return new Promise((resolve, reject) => {

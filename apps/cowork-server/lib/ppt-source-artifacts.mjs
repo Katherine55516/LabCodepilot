@@ -1,7 +1,8 @@
+import { adaptationDisposition } from './ppt-template-dispositions.mjs';
 /** Source-owned editable structures. The model selects inventory IDs/row ranges,
  * never invents cells or supplies geometry. Capacity failure asks for split. */
 import { stableId } from './ppt/ir.mjs';
-import { fitComponents, sourceComponent, sourceImageComponents, validateSourceArtifactRefs } from './ppt-density-capacity.mjs';
+import { fitComponents, protectedTemplateAsset, sourceComponent, sourceImageComponents, validateSourceArtifactRefs } from './ppt-density-capacity.mjs';
 import {sourceDisplayText} from './ppt-source-text.mjs';
 export {sourceDisplayText} from './ppt-source-text.mjs';
 const clean = sourceDisplayText;
@@ -22,14 +23,13 @@ export function replaceTemplateSourceRegion(project,slide,index,canvas) {
   const region={...canvas,x:titleLeft,width:canvas.x+canvas.width-titleLeft,y:Math.min(canvas.y,headerBottom+91440)};region.height=canvas.y+canvas.height-region.y;
   for(const node of spec.nodes||[]) {
     const g=node.geometry,id=node.nativeRef?.shapeId,slot=spec.slots?.find(s=>s.shapeId===id);
-    if(!g||id===undefined||['title','section'].includes(slot?.role)||slot?.purpose==='footnote'||node.semanticRole==='page-number'||node.content?.mediaReplacement)continue;
+    if(protectedTemplateAsset(node)||['image','chart','table'].includes(node.type)||!g||id===undefined||['title','section'].includes(slot?.role)||slot?.purpose==='footnote'||node.semanticRole==='page-number'||node.content?.mediaReplacement)continue;
     const size=project.templateFidelity;
     if(g.width>=size.width*.85&&g.height>=size.height*.85)continue;
     const overlap=Math.max(0,Math.min(g.x+g.width,region.x+region.width)-Math.max(g.x,region.x))*Math.max(0,Math.min(g.y+g.height,region.y+region.height)-Math.max(g.y,region.y));
     if(overlap/Math.max(1,g.width*g.height)<.35)continue;
     if(!slide.templateOmissions?.some(o=>o.shapeId===id)){
-      slide.templateOmissions||=[];slide.templateOmissions.push({shapeId:id,automatic:true,approvalBasis:'source_region_replacement',role:'old_template_content',disposition:'replaced_equivalent',
-        reason:'The original foreground diagram or label is replaced by complete, editable source-owned content in the same content region.'});
+      slide.templateOmissions||=[];slide.templateOmissions.push(adaptationDisposition(project,node,'old_template_content','source_region_replacement','Obsolete template foreground labels/artwork are retired for source-owned structures; this is not a media-equivalence claim.'));
     }
   }
 }
@@ -55,9 +55,9 @@ export function bindSourceArtifacts(project, slide, refs, index, commentary = []
     const assigned=project.planning?.slidePlan?.find(plan=>plan.slideId===slide.id)?.sourceArtifacts?.filter(a=>a.sourceUnitId===item.id)||[];
     if(assigned.some(a=>a.rowStart!==undefined) && !assigned.some(a=>a.rowStart===(ref.rowStart??1) && a.rowEnd===(ref.rowEnd??item.rows?.length))) throw new Error('source artifact row range differs from page contract');
     const component=sourceComponent(item,ref);
-    if(component.content.rows)component.content.rows=component.content.rows.map(row=>row.map(clean));
+    if(component.content.rows)component.content.rows=component.content.rows.map(row=>row.map(String));
     if(component.content.items)component.content.items=component.content.items.map((entry,n)=>({...entry,id:stableId('item',slide.id,item.id,n),text:clean(entry.text)}));
-    if(component.content.text && !component.content.mathMl)component.content.text=clean(component.content.text);
+    if(component.content.text && !component.content.mathMl && !component.content.codeBlock)component.content.text=clean(component.content.text);
     return {...component,item,ref};
   });
   if (!Array.isArray(commentary) || commentary.length > 4 || commentary.some(value=>typeof value!=='string'||value.length>2000)) throw new Error('invalid source commentary');

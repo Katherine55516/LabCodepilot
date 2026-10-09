@@ -1,3 +1,7 @@
+import { obligationRegistry, normalizeObligationAudit, obligationFailures } from './ppt-obligations.mjs';
+import { inputFramework, normalizeScopeAudit } from './ppt-input-scope.mjs';
+import { buildRenderTree } from './ppt/render-tree.mjs';
+import { renderIssues } from './ppt/render-audit.mjs';
 import {visibleNodes,nodeContentText} from './ppt-visible-content.mjs';
 import { densityPrompt } from './ppt-density-profile.mjs';
 import { inspectVisibleCopy, normalizeSlideCopy } from './ppt-copy-integrity.mjs';
@@ -202,6 +206,7 @@ export function deterministicReview(project, deckInput = project.deck) {
       issues.push(issue('numeric_source', 'error', '包含数字的内容页缺少来源引用', slide.id, false));
     }
   });
+  issues.push(...renderIssues(buildRenderTree({...project,deck})));
   const content = inspectContent(project, deck);
   issues.push(...content.issues);
   const report = inspectReportReadiness(project, deck);
@@ -294,22 +299,15 @@ export function repairProject(project, initialReview) {
 export function deckReviewPrompt(project) {
   const pageCount = project.deck.slides.length;
   const longDeck = pageCount >= 25;
-  const pageTextBudget = longDeck ? Math.max(900, Math.floor(65_000 / pageCount)) : 4_000;
   const slides = project.deck.slides.map((slide, index) => {
-    const native = (slide.nodes || []).filter(node => node.nativeRef);
+    const native = visibleNodes(slide).filter(node => node.nativeRef);
     const byShape = new Map(native.map(node => [node.nativeRef.shapeId, node]));
     const visiblePoints = (longDeck ? [] : native.filter(node => node.templateSlot?.purpose === 'point-description'))
       .map(node => ({ heading: byShape.get(node.templateSlot.pairedWith)?.content?.text || '', description: node.content?.text || '' }));
-    let remaining = pageTextBudget;
-    const visibleSlots = native.filter(node => node.templateSlot?.mapped && node.templateSlot?.role !== 'section')
-      .slice(0, longDeck ? 24 : 30).map(node => ({ purpose: node.templateSlot.purpose || node.templateSlot.role,
-        groupId: node.templateSlot.groupId,
-        text: String(node.content?.text || '').slice(0, pageTextBudget) })).filter(slot => {
-          const cost = slot.text.length + 40;
-          if (remaining < cost) return false;
-          remaining -= cost;
-          return true;
-        });
+    const visibleSlots = native.filter(node => nodeContentText(node))
+      .map(node => ({ purpose: node.templateSlot?.purpose || node.templateSlot?.role || node.semanticRole,
+        groupId: node.templateSlot?.groupId,
+        nodeId: node.id, text: nodeContentText(node) }));
     const contract = project.planning?.slidePlan?.find(item => item.slideId === slide.id);
     const evidenceById = new Map((project.source?.semantic?.evidenceAtoms || []).map(atom => [atom.id, atom]));
     const evidence = (contract?.requiredEvidenceIds || []).map(id => evidenceById.get(id)).filter(Boolean)
@@ -317,15 +315,17 @@ export function deckReviewPrompt(project) {
         excerpt: atom.exactText }));
     // Canonical components can carry facts absent from legacy bullets. Never send
     // image base64 or geometry to the text critic; retain chart values and units.
-    const semanticComponents = (slide.nodes || []).filter(node => !node.nativeRef && node.type !== 'foreign').map(node => {
+    const semanticComponents = visibleNodes(slide).filter(node => !node.nativeRef || ['table', 'chart', 'image'].includes(node.type)).map(node => {
       const content = node.content || {};
       if (node.type === 'chart') return { nodeId: node.id, type: node.type, content, sourceRefs: node.sourceRefs || slide.sourceRefs || [] };
       if (node.type === 'table') return { nodeId: node.id, type: node.type, content, sourceRefs: node.sourceRefs || slide.sourceRefs || [] };
       return { nodeId: node.id, type: node.type, semanticRole: node.semanticRole,
-        text: String(content.text || '').slice(0, 500),
-        ...(content.items ? { points: content.items.map(item => ({ label: item.label, text: String(item.text || item.body || '').slice(0, 500) })) } : {}) };
+        text: nodeContentText(node),
+        ...(node.type === 'image' ? { caption: content.caption || content.alt || '' } : {}),
+        ...(content.items ? { points: content.items.map(item => ({ label: item.label, text: String(item.text || item.body || '') })) } : {}) };
     });
-    return { slideId: slide.id, page: index + 1, title: slide.title, bullets: slide.bullets,
+    return { slideId: slide.id, page: index + 1, title: visibleNodes(slide).find(node => ['title', 'template-title'].includes(node.semanticRole))?.content?.text || ((slide.nodes || []).some(node => ['title', 'template-title'].includes(node.semanticRole)) ? '' : slide.title),
+      ...(!slide.nodes?.length ? { bullets: slide.bullets } : {}),
       ...(semanticComponents.length ? { semanticComponents } : {}),
       ...(visiblePoints.length ? { visiblePoints } : {}), ...(visibleSlots.length ? { visibleSlots } : {}),
       ...(evidence.length ? { requiredEvidence: evidence } : {}),
@@ -344,13 +344,19 @@ export function deckReviewPrompt(project) {
   const brief = project.planning?.brief;
   const coverage = (project.planning?.coverage || []).filter(item => item.priority === 'high').slice(0, 60)
     .map(item => ({ topic: item.topic, action: item.action, slideIds: item.slideIds }));
-  return `${densityPrompt(project)}
-你是整稿演示文稿内容评审器。${promptPolicy(project)}<rubric>逐项检查 ownedPoints、requiredDetails、表格类别及关系是否在可见文案展开。missing 包括必要解释缺失或浅薄：标签代替解释、未讲机制/条件、通用口号、断句；浅薄项加 reason="shallow"。短图示 label、封面或过渡不因字少被判浅薄；具体信息与关系比字数重要。每项给 suggestedFix，指出哪一项来源关系/条件需补入哪个点；不能给未核实数字。必要的回顾或简短引用不判重复；同页名词标签与其解释相配不判重复。来源内部冲突要报告 conflicts，不能自行发明校正值。上下文预算漏掉的来源不能据此判 unsupported；只报告可核对的事实。纯 prompt 通用机制不要求不存在的文件引用，具体引用和数字仍须核实。</rubric>只评审内容，不调用工具，不搜索，不改写页面，不提供字体、坐标、布局或 PPTX 代码。visibleSlots 和 visiblePoints 是观众实际看到的模板文字。逐页核对标题、子标题、卡片及图解标签是否属于同一来源事实，说明是否完整，概念是否与样例混淆；把错配或自相矛盾记入 conflicts，把截断、空泛或缺失记入 missing，把无来源支撑的描述记入 unsupported。若是职场汇报，还要在同样四类中检查决策问题、前置摘要、主文信息分布和来源支撑，不增加输出类别。\n主题：${project.prompt}\n当前语义修改约束：${JSON.stringify(project.constraints?.entries?.filter(entry => entry.active && ['content','title','data','structure'].includes(entry.type)) || [])}\n演示目标与必讲内容：${JSON.stringify(brief ? { objective: brief.objective, thesis: brief.thesis, mustInclude: brief.mustInclude, reportMode: brief.reportMode, decisionQuestion: brief.decisionQuestion, sourceScope: brief.sourceScope } : {})}\n高优先级主题映射：${JSON.stringify(coverage)}\n页面：${JSON.stringify(slides)}\n来源：${JSON.stringify(sources)}\n仅输出一个 JSON 对象：{"missing":[{"slideIds":["1"],"detail":"缺少的必要内容"}],"repeated":[{"slideIds":["2","4"],"detail":"重复点"}],"conflicts":[{"slideIds":["3","5"],"detail":"冲突事实"}],"unsupported":[{"slideIds":["6"],"bulletIndexes":[0],"detail":"证据不足"}]}。四个数组都必须存在；没有发现时返回空数组。slideIds 只能使用给定页面 ID，bulletIndexes 仅在报告 bullets 时填写，从 0 开始。每项可增加 reason="shallow" 和 suggestedFix；不要输出整页修订文本、坐标或其他字段。`;
+  const prompt = `${densityPrompt(project)}
+你是整稿演示文稿内容评审器。${promptPolicy(project)}<rubric>先独立对照 INPUT_FRAMEWORK 检查每页标题、正文、表/图/代码/流程与媒体说明的主题和事实边界；模型 brief/sourceScope/ownedPoints/引用 ID 不能证明支撑。无数字的越界话题、额外议程、无依据建议及未经标注的假设同样记入 unsupported，reason="out_of_scope" 或 "unsupported_fact"。框架内必要解释不因没有逐字来源而误判；但新增事实前提必须有输入依据。然后逐项检查 ownedPoints、requiredDetails、表格类别及关系是否在可见文案展开。missing 包括必要解释缺失或浅薄：标签代替解释、未讲机制/条件、通用口号、断句；浅薄项加 reason="shallow"。短图示 label、封面或过渡不因字少被判浅薄；具体信息与关系比字数重要。每项给 suggestedFix，指出哪一项来源关系/条件需补入哪个点；不能给未核实数字。必要的回顾或简短引用不判重复；同页名词标签与其解释相配不判重复。来源内部冲突要报告 conflicts，不能自行发明校正值。上下文预算漏掉的来源不能据此判 unsupported；只报告可核对的事实。纯 prompt 仅允许其主题内必要的通用解释，不能扩出新主题。完整可见文本和原始输入必须全部审查；如未能完成，scopeAudit.status="not_evaluated"，不能返回一个暗示通过的空报告。</rubric>只评审内容，不调用工具，不搜索，不改写页面，不提供字体、坐标、布局或 PPTX 代码。visibleSlots 和 visiblePoints 是观众实际看到的模板文字。逐页核对标题、子标题、卡片及图解标签是否属于同一来源事实，说明是否完整，概念是否与样例混淆；把错配或自相矛盾记入 conflicts，把截断、空泛或缺失记入 missing，把无来源支撑的描述记入 unsupported。若是职场汇报，还要在同样四类中检查决策问题、前置摘要、主文信息分布和来源支撑，不增加输出类别。\n主题：${project.prompt}\n当前语义修改约束：${JSON.stringify(project.constraints?.entries?.filter(entry => entry.active && ['content','title','data','structure'].includes(entry.type)) || [])}\n演示目标与必讲内容：${JSON.stringify(brief ? { objective: brief.objective, thesis: brief.thesis, mustInclude: brief.mustInclude, reportMode: brief.reportMode, decisionQuestion: brief.decisionQuestion, sourceScope: brief.sourceScope } : {})}\n高优先级主题映射：${JSON.stringify(coverage)}\n页面：${JSON.stringify(slides)}\n来源：${JSON.stringify(sources)}\n仅输出一个 JSON 对象：{"missing":[{"slideIds":["1"],"detail":"缺少的必要内容"}],"repeated":[{"slideIds":["2","4"],"detail":"重复点"}],"conflicts":[{"slideIds":["3","5"],"detail":"冲突事实"}],"unsupported":[{"slideIds":["6"],"bulletIndexes":[0],"detail":"证据不足"}]}。四个数组都必须存在；没有发现时返回空数组。必须逐项返回 obligationAudit={registryHash:MANDATORY_OBLIGATIONS.registryHash,status:"complete|not_evaluated",checks:[{obligationId:"真实义务ID",status:"satisfied|missing|altered|not_evaluated",evidence:[{slideId:"当前页ID",nodeId:"当前可见实例ID",excerpt:"承载完整关系的逐字可见原文"}]}]}。每个义务恰好一次；satisfied须绑定实际承载完整内容的实例，包括父条件、否定、例外及单位，每个证据 excerpt 必须逐字来自该实例，不能用关键词覆盖率或引用ID代替判断。允许正确同义表达；可选浅薄仍在missing。未查完须not_evaluated。必须另返回 scopeAudit=${JSON.stringify({frameworkHash:inputFramework(project).frameworkHash,checkedSlideIds:slides.map(slide=>slide.slideId),status:"complete"})}；仅实际完成全部页面的输入框架与事实审查时使用 complete，否则 not_evaluated。slideIds 只能使用给定页面 ID，bulletIndexes 仅在报告 bullets 时填写，从 0 开始。每项可增加 reason="shallow" 和 suggestedFix；不要输出整页修订文本或坐标。`;
+  // Explicit capacity failure, never a truncated authoritative source. The
+  // selected model must also return not_evaluated if its own window is smaller.
+  if(Buffer.byteLength(prompt,'utf8')>1024*1024)throw Object.assign(new Error('content_review_capacity: complete input/obligations exceed the review transport budget; split the input without losing conditions'),{code:'content_review_capacity'});
+  return prompt;
 }
 
-export function normalizeModelReview(value, slideIds) {
+export function normalizeModelReview(value, slideIds, project = null) {
   if (!value || typeof value !== 'object' || !['missing', 'repeated', 'conflicts', 'unsupported'].every(key => Array.isArray(value[key])))
     throw new Error('whole-deck model review must return all four finding arrays');
+  if (value.evaluation !== undefined && !['evaluated', 'not_evaluated'].includes(value.evaluation))
+    throw new Error('invalid whole-deck review evaluation');
   const valid = new Set(slideIds);
   const normalize = (items, allowBullets = false) => items.map(item => {
     if (!item || typeof item !== 'object') throw new Error('invalid whole-deck review finding');
@@ -358,12 +364,15 @@ export function normalizeModelReview(value, slideIds) {
     const detail = typeof item.detail === 'string' ? item.detail.trim().slice(0, 300) : '';
     if (!ids.length || !detail || ids.some(id=>!valid.has(id))) throw new Error('whole-deck review finding requires valid slideIds and detail');
     return { slideIds: ids, detail,
-      ...(item.reason === 'shallow' ? { reason: 'shallow' } : {}),
+      ...(['shallow', 'out_of_scope', 'unsupported_fact'].includes(item.reason) ? { reason: item.reason } : {}),
       ...(typeof item.suggestedFix === 'string' && item.suggestedFix.trim() ? { suggestedFix: item.suggestedFix.trim().slice(0, 700) } : {}),
       ...(allowBullets && Array.isArray(item.bulletIndexes) ? { bulletIndexes: [...new Set(item.bulletIndexes.map(Number).filter(Number.isInteger))].filter(index => index >= 0 && index < 10).slice(0, 10) } : {}) };
   });
+  const obligationAudit = project ? normalizeObligationAudit(value.obligationAudit, project) : undefined;
+  const scopeAudit = project ? normalizeScopeAudit(value.scopeAudit, project, slideIds) : undefined;
   return {
-    evaluation: value.evaluation === 'not_evaluated' ? 'not_evaluated' : 'evaluated',
+    ...(scopeAudit ? { scopeAudit } : {}), ...(obligationAudit ? { obligationAudit } : {}),
+    evaluation: value.evaluation === 'not_evaluated' || scopeAudit?.status === 'not_evaluated' || obligationAudit?.status === 'not_evaluated' ? 'not_evaluated' : 'evaluated',
     missing: normalize(value?.missing),
     repeated: normalize(value?.repeated),
     conflicts: normalize(value?.conflicts),
@@ -373,6 +382,7 @@ export function normalizeModelReview(value, slideIds) {
 
 export function finalQualityReport(deterministic, repairs, modelReview, timings = {}) {
   const modelIssues = [
+    ...obligationFailures(modelReview.obligationAudit),
     ...modelReview.missing.map(item => ({ code: 'model_missing', severity: deterministic.strictCoverage ? 'error' : 'warning', ...item })),
     ...modelReview.repeated.map(item => ({ code: 'model_repeated', severity: 'error', ...item })),
     ...modelReview.conflicts.map(item => ({ code: 'model_conflict', severity: 'error', ...item })),
@@ -390,7 +400,7 @@ export function finalQualityReport(deterministic, repairs, modelReview, timings 
   const report = { ...(deterministic.report || { mode: 'presentation', status: 'not_applicable', issues: [], metrics: {} }),
     ...(deterministic.report?.mode !== 'presentation' && modelIssues.length ? { status: 'needs_review' } : {}) };
   return {
-    version: 1,
+    version: 2, policyVersion: 2,
     status: blocked || modelReview.evaluation === 'not_evaluated' ? 'blocked' : (modelIssues.length || deterministic.issues.some(item => item.severity === 'warning')) ? 'passed_with_warnings' : 'passed',
     publishEligible: !blocked && modelReview.evaluation !== 'not_evaluated', editorialReady: !blocked && modelReview.evaluation !== 'not_evaluated' && (report.status === 'ready' || report.status === 'not_applicable'),
     contentReady: !blocked && modelReview.evaluation !== 'not_evaluated', exportable: false, visualVerified: false,

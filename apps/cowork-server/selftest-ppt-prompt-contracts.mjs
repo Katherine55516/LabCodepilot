@@ -1,3 +1,4 @@
+import { scopeReview, simulatedExport } from './ppt-scope-test-helpers.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -21,7 +22,7 @@ try {
   assert.equal(outputLanguage({ prompt: 'Deep learning for finance' }), 'en');
   assert.equal(outputLanguage({ source: { text: '中文输入内容说明机制与适用条件。' }, planning: { brief: { outputLanguage: 'zh' } }, prompt: 'write in English' }), 'en', 'a derived old brief language must not override a new explicit request');
   assert.match(promptPolicy({ source: { segments: [{ id: '1' }] } }), /knowledge_mode=source_only/);
-  assert.match(promptPolicy({ prompt: 'Explain machine learning' }), /knowledge_mode=general_explanation/);
+  assert.match(promptPolicy({ prompt: 'Explain machine learning' }), /knowledge_mode=bounded_explanation/);
   const tail = '| Alternative data | news signals | time alignment |';
   const source = { kind: 'file', name: 'lesson.md', text: 'English research source. '.repeat(150), segments: [{ id: '1', location: 'table', text: tail }],
     semantic: { chunks: [{ id: 'c1', topic: 'Factor taxonomy', sourceRefs: ['1'], sourceBlocks: ['b1'], text: 'detail '.repeat(400) + tail,
@@ -120,7 +121,7 @@ try {
     })) };
     if ((options.nodeKey || '').startsWith('review:deck')) {
       criticCalls++;
-      return { missing: writerRepairs < 2 || pauseDuringRewrite || conflictDuringRewrite || neverFix || cancelDuringRewrite ? [{ slideIds: ['s1'], detail: 'The mechanism needs its interpretation.', reason: 'shallow', suggestedFix: 'Explain how exposure identifies the systematic return component.' }] : [], repeated: [], conflicts: [], unsupported: [] };
+      return { ...scopeReview(p), missing: writerRepairs < 2 || pauseDuringRewrite || conflictDuringRewrite || neverFix || cancelDuringRewrite ? [{ slideIds: ['s1'], detail: 'The mechanism needs its interpretation.', reason: 'shallow', suggestedFix: 'Explain how exposure identifies the systematic return component.' }] : [], repeated: [], conflicts: [], unsupported: [] };
     }
     const i = Number(prompt.match(/第 (\d+) 页/)?.[1]) - 1;
     if ((options.nodeKey || '').includes(':critic:')) {
@@ -132,7 +133,7 @@ try {
     }
     const body = i === 1 ? bodies[0].split('. ').slice(0, writerRepairs > 0 ? 2 : 1).join('. ') : bodies[i - 1];
     return { title: p.outline[i].title, contentBlocks: i === 0 ? [] : [{ type: 'definition', heading: '', body: i === 7 ? 'Combine timing alignment, industry controls and transaction costs before evaluating the signal.' : body }] };
-  }, renderPptx: async () => { rendered++; return { bytes: 123, exportVerification: {status:"passed",basis:"test_double"} }; } };
+  }, renderPptx: async project => { rendered++; return simulatedExport(project); } };
   const request = async (method, url, data) => {
     const req = Readable.from(data ? [Buffer.from(JSON.stringify(data))] : []); req.method = method;
     let result;

@@ -1,3 +1,4 @@
+import { scopeReview, simulatedExport } from './ppt-scope-test-helpers.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -121,7 +122,7 @@ let contentActive = 0; let maxContentActive = 0; let reviewCalls = 0; let render
 const deps = {
   modelCall: async (project, prompt) => {
     if (prompt.includes('叙事规划器')) return { slides: Array.from({ length: project.pages }, (_, index) => ({ title: index === 0 ? '封面' : index === project.pages - 1 ? '结论' : `页面 ${index + 1}`, focus: 'Use supplied evidence', refs: project.title === 'Blocked deck' ? [] : ['1'],sourceImageIds:index===1?project.source.images.map(image=>image.id):[] })) };
-    if (prompt.includes('整稿演示文稿内容评审器')) { reviewCalls++; return { missing: [], repeated: [], conflicts: [], unsupported: [] }; }
+    if (prompt.includes('整稿演示文稿内容评审器')) { reviewCalls++; return scopeReview(project); }
     contentActive++; maxContentActive = Math.max(maxContentActive, contentActive);
     await new Promise(resolve => setTimeout(resolve, 10));
     contentActive--;
@@ -132,7 +133,7 @@ const deps = {
     renderCalls++;
     assert.ok(project.templateSpec.fonts.title);
     assert.ok(project.quality || project.stage === 'publish');
-    return { bytes: 12345, exportVerification: {status:"passed",basis:"test_double"} };
+    return simulatedExport(project,12345);
   },
   renderPdf: async () => ({ bytes: 100 }),
   extractFile: async () => { throw new Error('unused'); },

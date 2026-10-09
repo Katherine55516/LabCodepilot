@@ -3,22 +3,24 @@ import {sourceDisplayText} from './ppt-source-text.mjs';
 import { visibleNodes } from './ppt-visible-content.mjs';
 import { inspectObjectIntegrity } from './ppt-object-integrity.mjs';
 const normalizedText=value=>sourceDisplayText(value).toLowerCase().replace(/\s+/gu,' ').trim();
-const structural = new Set(['TableBlock','EquationBlock','ProcessBlock','ChecklistBlock','TaxonomyBlock']);
+const structural = new Set(['CodeBlock','TableBlock','EquationBlock','ProcessBlock','ChecklistBlock','TaxonomyBlock']);
 const tokens = text => [...new Set(String(text||'').toLowerCase().match(/[a-z][a-z0-9_-]{2,}|\d+(?:\.\d+)?|[\u3400-\u9fff]{2,4}/gu)||[])];
 export function recall(expected, actual) {
   const terms = tokens(expected), shown = new Set(tokens(actual));
   return terms.length ? terms.filter(term=>shown.has(term)).length / terms.length : 0;
 }
 export function markdownRows(text) {
-  return String(text).split('\n').filter(line=>/^\s*\|/.test(line)).map(line=>line.trim().replace(/^\||\|$/g,'').split(/(?<!\\)\|/u).map(cell=>cell.trim().replace(/\*\*|`/g,'')))
-    .filter(row=>!row.every(cell=>/^[:\s-]*$/.test(cell)));
+  return String(text).split('\n').filter(line=>/^\s*\|/.test(line)).map(line=>line.trim().replace(/^\||\|$/g,'').split(/(?<!\\)\|/u).map(cell=>cell.trim().replace(/\\\|/g,'|').replace(/<br\s*\/?\s*>/gi,'\n')))
+    .filter(row=>!row.every(cell=>/^:?-{3,}:?$/.test(cell)));
 }
 function role(block) {
   const section = (block.sectionPath||[]).join(' ');
+  if (block.type==='code') return 'CodeBlock';
   if (block.type==='table') return 'TableBlock';
   if (block.type==='equation' || /^\s*(?:\$\$|\\\[)/.test(block.text)) return 'EquationBlock';
   if (/checklist|检查清单|实践清单/i.test(section) && block.type==='list') return 'ChecklistBlock';
   if (/summary|conclusion|小结|总结|结论/i.test(section)) return 'SummaryBlock';
+  if (block.type==='list' && /workflow|process|procedure|流程|步骤/i.test(section)) return 'ProcessBlock';
   if (block.type==='diagram' || block.semanticType==='process' && /->|→|步骤|step/i.test(block.text)) return 'ProcessBlock';
   return ({ definition:'DefinitionBlock', comparison:'ComparisonBlock', timeline:'TimelineBlock', example:'ExampleBlock', problem:'WarningBlock', evidence:'EvidenceBlock' })[block.semanticType] || 'MechanismBlock';
 }
@@ -27,17 +29,18 @@ export function buildContentInventory(blocks, chunks, graph = []) {
     const type=role(block), chunkRefs=chunks.filter(chunk=>chunk.sourceBlocks.includes(block.id)).map(chunk=>chunk.id);
     return { id:block.id, type, semanticRole:type.replace('Block','').toLowerCase(), priority: structural.has(type)||type==='SummaryBlock'?'high':'normal',
       source_ref: block.sourceRefs, chunkRefs, sectionPath:block.sectionPath, text:block.text,
-      must_preserve_structure: structural.has(type), ...(type==='TableBlock'?{rows:markdownRows(block.text)}:{}) };
+      must_preserve_structure: structural.has(type), ...(type==='CodeBlock'?{language:block.language || ''}:{}), ...(type==='TableBlock'?{rows:block.rows || markdownRows(block.text)}:{}) };
   });
   return { version:1, source_sections:[...new Set(items.map(item=>item.sectionPath.join(' / ')))],
     must_cover_topics:items.filter(item=>item.priority==='high').map(item=>item.id), items,
     key_claims:items.filter(item=>item.type==='DefinitionBlock').map(item=>item.id),
     mechanisms:items.filter(item=>item.type==='MechanismBlock').map(item=>item.id),
     examples:items.filter(item=>item.type==='ExampleBlock').map(item=>item.id),
+    codes:items.filter(item=>item.type==='CodeBlock').map(item=>item.id),
     equations:items.filter(item=>item.type==='EquationBlock').map(item=>item.id), tables:items.filter(item=>item.type==='TableBlock').map(item=>item.id),
     workflows:items.filter(item=>item.type==='ProcessBlock').map(item=>item.id), comparisons:items.filter(item=>item.type==='ComparisonBlock').map(item=>item.id),
     checklists:items.filter(item=>item.type==='ChecklistBlock').map(item=>item.id), summary_items:items.filter(item=>item.type==='SummaryBlock').map(item=>item.id),
-    relationships:items.filter(item=>['ProcessBlock','TableBlock'].includes(item.type)).map(item=>({id:`rel_${item.id}`,sourceUnitId:item.id,source_ref:item.source_ref,chunkRefs:item.chunkRefs,relation:item.type==='TableBlock'?'comparison':'precedes',steps:item.type==='TableBlock'?item.rows.map(row=>row.join(' | ')):item.text.split(/(?:->|→)/u).map(text=>text.trim()),priority:'high'})), adjacency:graph };
+    relationships:items.filter(item=>['ProcessBlock','TableBlock'].includes(item.type)).map(item=>({id:`rel_${item.id}`,sourceUnitId:item.id,source_ref:item.source_ref,chunkRefs:item.chunkRefs,relation:item.type==='TableBlock'?'comparison':'precedes',steps:item.type==='TableBlock'?item.rows.map(row=>row.join(' | ')):item.text.split(/(?:->|→)|\n(?=\s*\d+[.)]\s)/u).map(text=>text.trim()),priority:'high'})), adjacency:graph };
 }
 export function coverageMapV2(source, outline, explicit = []) {
   const inventory=source?.semantic?.inventory;

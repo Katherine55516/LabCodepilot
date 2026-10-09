@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { scopeReview, simulatedExport } from './ppt-scope-test-helpers.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -47,14 +48,14 @@ try {
   const deps = {
     modelCall: async (_project, prompt) => {
       calls++;
-      if (prompt.includes('整稿演示文稿内容评审器')) return { missing: [], repeated: [], conflicts: [], unsupported: [] };
+      if (prompt.includes('整稿演示文稿内容评审器')) return scopeReview(_project);
       if (prompt.includes('叙事规划器')) return { slides: [
         { title: '封面', focus: '介绍' }, { title: '进展', focus: '成果' }, { title: '结论', focus: '建议' },
       ] };
       if (prompt.includes('第 2 页') && failOnce) { failOnce = false; throw new Error('temporary model outage'); }
       return { title: `第 ${/第 (\d+) 页/.exec(prompt)?.[1]} 页`, bullets: ['可编辑内容'] };
     },
-    renderPptx: async (project) => { renders++; assert.equal(project.deck.slides.length, project.pages); return { bytes: 1234, exportVerification: {status:"passed",basis:"test_double"} }; },
+    renderPptx: async (project) => { renders++; assert.equal(project.deck.slides.length, project.pages); return simulatedExport(project,1234); },
     readFile: async () => ({ stream: Readable.from(Buffer.from('pptx-bytes')), size: 10 }),
   };
   const invoke = async (method, pathname, data, account = uid, response) => {
@@ -91,6 +92,7 @@ try {
   const completed = await waitFor(flowId, 'completed');
   assert.equal(calls - callsBeforeRetry, 2, 'retry reuses the completed slide node');
   assert.equal(completed.deck.slides.length, 3);
+  assert.equal(completed.quality.exportVerification.revision,completed.revision,'initial export certificate must bind the final published revision');
   assert.equal(renders, 1);
   const edited = completed.deck.slides.map((s) => ({ ...s }));
   edited[1].title = '更新的标题';

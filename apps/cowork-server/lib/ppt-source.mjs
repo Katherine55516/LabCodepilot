@@ -38,6 +38,24 @@ export function normalizePaste(text) {
     }catch{mediaWarnings.push({code:'source_media_unresolved',required:true,location:'Pasted Markdown image',message:'Referenced source image requires a valid embedded PNG/JPEG or an attached source file: '+caption});}
     return '\n';
   });
+  // Fences are atomic source objects; blank lines and indentation inside them
+  // must not pass through paragraph trimming or ordinary chunk splitting.
+  if (/^\s*(?:`{3,}|~{3,})/m.test(prose)) {
+    const segments = []; let pending = [], code = null;
+    const flush = () => { if (pending.join('\n').trim()) segments.push({ location:'Markdown block', text:pending.join('\n') }); pending=[]; };
+    for (const line of prose.replace(/\r\n?/g,'\n').split('\n')) {
+      const fence = line.match(/^\s*(`{3,}|~{3,})(.*)$/);
+      if (code) {
+        if (fence && fence[1][0]===code.mark[0] && fence[1].length>=code.mark.length && !fence[2].trim()) {
+          segments.push({location:'Fenced code',kind:'code',language:code.language,text:code.lines.join('\n')}); code=null;
+        } else code.lines.push(line);
+      } else if (fence) { flush(); code={mark:fence[1],language:fence[2].trim(),lines:[]}; }
+      else pending.push(line);
+    }
+    if (code) segments.push({location:'Unclosed fenced code',kind:'code',language:code.language,text:code.lines.join('\n')});
+    flush(); segments.forEach((segment,index)=>segment.id=String(index+1));
+    return withSemanticIndex({kind:'paste',sha256:crypto.createHash('sha256').update(text).digest('hex'),name:'粘贴文本',text:prose,segments,truncated:false,images,mediaWarnings});
+  }
   const blocks = prose.replace(/\r\n?/g, '\n').split(/\n\s*\n/).map(s => s.trim()).filter(Boolean);
   const segments = [];
   let line = 1; let truncated = false;
@@ -138,7 +156,7 @@ def source_image(blob,location,caption='',source_refs=None):
 
 def add(location, value):
     global truncated
-    value = re.sub(r'[ \t]+', ' ', str(value or '')).strip()
+    value = str(value or '').replace('\r\n','\n').replace('\r','\n')
     if not value: return
     part = 0
     while value:
@@ -152,11 +170,33 @@ def add(location, value):
             word_break = value.rfind(' ', 0, cut)
             candidate = next((position for position in (line_break, sentence_break, word_break) if position >= 1500), None)
             if candidate is not None: cut = candidate + 1
-        piece = value[:cut].strip()
+        piece = value[:cut]
         if piece:
             segments.append({'id': str(len(segments) + 1), 'location': location + (' / 片段 %s' % (part + 1) if part else ''), 'text': piece})
-        value = value[cut:].lstrip()
+        value = value[cut:]
         part += 1
+
+def add_table(location, rows):
+    if not rows:return
+    width=max(len(row) for row in rows)
+    matrix=[[str(cell) if cell is not None else '' for cell in row]+['']*(width-len(row)) for row in rows]
+    text='\n'.join('| '+' | '.join(cell.replace('\\','\\\\').replace('|','\\|').replace('\n','<br>') for cell in row)+' |' for row in matrix)
+    segments.append({'id':str(len(segments)+1),'location':location,'kind':'table','rows':matrix,'text':text})
+
+def add_markdown(location, content):
+    pending=[];code=None
+    def prose(lines):add(location,'\n'.join(lines))
+    for line in content.replace('\r\n','\n').replace('\r','\n').split('\n'):
+        match=re.match(r'^\s*('+chr(96)+r'{3,}|~{3,})(.*)$',line)
+        if code is not None:
+            if match and match.group(1)[0]==code['mark'][0] and len(match.group(1))>=len(code['mark']) and not match.group(2).strip():
+                segments.append({'id':str(len(segments)+1),'location':location+' code','kind':'code','language':code['language'],'text':'\n'.join(code['lines'])});code=None
+            else:code['lines'].append(line)
+        elif match:
+            prose(pending);pending=[];code={'mark':match.group(1),'language':match.group(2).strip(),'lines':[]}
+        else:pending.append(line)
+    if code is not None:segments.append({'id':str(len(segments)+1),'location':location+' unclosed code','kind':'code','language':code['language'],'text':'\n'.join(code['lines'])})
+    prose(pending)
 
 if ext in ('docx', 'xlsx', 'pptx'):
     with zipfile.ZipFile(io.BytesIO(raw)) as archive:
@@ -175,51 +215,62 @@ if ext in ('md', 'markdown'):
         if re.fullmatch(r'data:image/(?:png|jpeg|svg\+xml);base64,[A-Za-z0-9+/]+=*',reference):source_image(base64.b64decode(reference.split(',',1)[1]),'Markdown embedded image',caption)
         else:media_warnings.append({'code':'source_media_unresolved','required':True,'location':'Markdown image','message':'Referenced source image requires an attached/embedded asset: '+caption})
     content=re.sub(r'!\[[^\]]*\]\([^)]+\)','\n',content)
-    for n, block in enumerate(re.split(r'\n\s*\n', content), 1): add('段落 %s' % n, block)
+    add_markdown('Markdown',content)
 elif ext in ('html', 'htm'):
     html_content=raw.decode('utf-8-sig')
     for match in re.finditer(r'<svg\b[\s\S]*?</svg\s*>',html_content,re.I):source_image(match.group().encode('utf8'),'HTML inline SVG')
     html_content=re.sub(r'<svg\b[\s\S]*?</svg\s*>','',html_content,flags=re.I)
     class Reader(HTMLParser):
-        def __init__(self): super().__init__(); self.skip = 0; self.parts = []
-        def handle_starttag(self, tag, attrs):
-            if tag=='img' and not self.skip:
-                attributes=dict(attrs);reference=attributes.get('src','');caption=attributes.get('alt','')
+        def __init__(self):
+            super().__init__();self.skip=0;self.parts=[];self.rows=None;self.row=None;self.cell=None;self.pre=False
+        def flush(self):
+            add_markdown('HTML',''.join(self.parts));self.parts=[]
+        def handle_starttag(self,tag,attrs):
+            attributes=dict(attrs)
+            if tag in ('script','style','noscript','svg'):self.skip+=1;return
+            if self.skip:return
+            if tag=='img':
+                reference=attributes.get('src','');caption=attributes.get('alt','')
                 if re.fullmatch(r'data:image/(?:png|jpeg|svg\+xml);base64,[A-Za-z0-9+/]+=*',reference):source_image(base64.b64decode(reference.split(',',1)[1]),'HTML embedded image',caption)
                 else:media_warnings.append({'code':'source_media_unresolved','required':True,'location':'HTML image','message':'Referenced source image requires an embedded asset: '+caption})
                 return
-            if tag in ('script', 'style', 'noscript', 'svg'):
-                self.skip += 1
+            if tag=='table':self.flush();self.rows=[];return
+            if self.rows is not None:
+                if tag=='tr':self.row=[]
+                elif tag in ('td','th'):
+                    self.cell=[]
+                    if attributes.get('rowspan','1')!='1' or attributes.get('colspan','1')!='1':media_warnings.append({'code':'source_table_span','required':True,'location':'HTML table','message':'Merged-cell relationships require explicit review; original file retained.'})
+                elif tag=='br' and self.cell is not None:self.cell.append('\n')
                 return
-            if self.skip: return
-            if re.fullmatch(r'h[1-6]', tag):
-                self.parts.extend(('\n', '#'*int(tag[1]) + ' '))
-            elif tag == 'li': self.parts.extend(('\n', '- '))
-            elif tag == 'pre': self.parts.append('\n' + chr(96)*3 + '\n')
-            elif tag in ('p', 'div', 'tr', 'br', 'dt', 'dd'): self.parts.append('\n')
-            elif tag in ('td', 'th'): self.parts.append(' | ')
-        def handle_endtag(self, tag):
-            if tag in ('script', 'style', 'noscript', 'svg') and self.skip:
-                self.skip -= 1
+            if tag=='pre':self.pre=True;self.parts.append('\n'+chr(96)*3+'\n');return
+            if self.pre:
+                if tag=='code' and self.parts and re.search(r'language-([\w+-]+)',attributes.get('class','')):
+                    language=re.search(r'language-([\w+-]+)',attributes.get('class','')).group(1);self.parts[-1]=self.parts[-1].rstrip('\n')+language+'\n'
                 return
-            if self.skip: return
-            if re.fullmatch(r'h[1-6]', tag) or tag in ('p', 'li', 'tr', 'dt', 'dd'): self.parts.append('\n')
-            elif tag == 'pre': self.parts.append('\n' + chr(96)*3 + '\n')
-        def handle_data(self, data):
-            if not self.skip:
-                previous = self.parts[-1] if self.parts else ''
-                if previous and data and not previous[-1].isspace() and not data[0].isspace(): self.parts.append(' ')
-                self.parts.append(data)
-    reader = Reader(); reader.feed(html_content)
-    for n, block in enumerate(''.join(reader.parts).splitlines(), 1): add('HTML 行 %s' % n, html.unescape(block))
+            if re.fullmatch(r'h[1-6]',tag):self.parts.extend(('\n','#'*int(tag[1])+' '))
+            elif tag=='li':self.parts.extend(('\n','- '))
+            elif tag in ('p','div','br','dt','dd'):self.parts.append('\n')
+        def handle_endtag(self,tag):
+            if tag in ('script','style','noscript','svg') and self.skip:self.skip-=1;return
+            if self.skip:return
+            if self.rows is not None:
+                if tag in ('td','th') and self.cell is not None:
+                    if self.row is None:self.row=[]
+                    self.row.append(''.join(self.cell));self.cell=None
+                elif tag=='tr' and self.row is not None:self.rows.append(self.row);self.row=None
+                elif tag=='table':add_table('HTML table',self.rows);self.rows=None
+                return
+            if tag=='pre':self.pre=False;self.parts.append('\n'+chr(96)*3+'\n');return
+            if not self.pre and (re.fullmatch(r'h[1-6]',tag) or tag in ('p','li','dt','dd')):self.parts.append('\n')
+        def handle_data(self,data):
+            if self.skip:return
+            if self.cell is not None:self.cell.append(data)
+            elif self.rows is None:self.parts.append(data)
+    reader=Reader();reader.feed(html_content);reader.flush()
 elif ext == 'csv':
     rows = list(csv.reader(io.StringIO(raw.decode('utf-8-sig'))))
     if not rows: raise ValueError('CSV contains no rows')
-    header = [str(value).strip() or ('列%s' % (index + 1)) for index, value in enumerate(rows[0])]
-    add('CSV 表头', ' | '.join(header))
-    for n, row in enumerate(rows[1:], 2):
-        values = ['%s=%s' % (header[index], value.strip()) for index, value in enumerate(row[:len(header)]) if value.strip()]
-        if values: add('CSV 行 %s' % n, ' | '.join(values))
+    add_table('CSV 表格',rows)
 elif ext == 'docx':
     from docx import Document
     doc = Document(io.BytesIO(raw))
@@ -250,9 +301,9 @@ elif ext == 'xlsx':
     workbook = load_workbook(io.BytesIO(raw), read_only=False, data_only=True)
     for sheet in workbook.worksheets[:20]:
         for number,image in enumerate(sheet._images,1):source_image(image._data(),'工作表 %s 图片 %s'%(sheet.title,number))
-        for n, row in enumerate(sheet.iter_rows(max_row=1000, max_col=100, values_only=True), 1):
-            cells = ['%s%s=%s' % (get_column_letter(c), n, value) for c, value in enumerate(row, 1) if value is not None]
-            if cells: add('工作表 %s 行 %s' % (sheet.title, n), ' | '.join(cells))
+        rows=list(sheet.iter_rows(max_row=min(1000,sheet.max_row),max_col=min(100,sheet.max_column),values_only=True))
+        if sheet.max_row>1000 or sheet.max_column>100:truncated=True
+        add_table('工作表 '+sheet.title,rows)
 elif ext == 'pptx':
     from pptx import Presentation
     deck = Presentation(io.BytesIO(raw))

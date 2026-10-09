@@ -36,7 +36,16 @@ if ext != 'pdf':
             parts=archive.infolist()
             if len(parts)>lim('entries',5000) or sum(p.file_size for p in parts)>lim('uncompressedBytes',134217728):
                 raise ValueError('template_too_large: Office archive expands beyond limit')
-            names=set(); objects=0; slide_count=0
+            names=set(); objects=0; slide_count=0; safe_chart_workbooks=set(); nested_bytes=0
+            # Native charts contain a static XLSX data package, not an OLE
+            # executable. Admit only chart-owned workbooks after nested checks.
+            for relpart in parts:
+                if not re.match(r'^ppt/charts/_rels/chart\d+\.xml\.rels$',relpart.filename):continue
+                relblob=archive.read(relpart)
+                if re.search(br'<!\s*(DOCTYPE|ENTITY)',relblob,re.I):raise ValueError('template_unsafe: XML entities forbidden')
+                for rel in ET.fromstring(relblob):
+                    target=posixpath.normpath(posixpath.join('ppt/charts',rel.get('Target','')))
+                    if rel.get('TargetMode','').lower()!='external' and rel.get('Type','').endswith('/package') and re.match(r'^ppt/embeddings/[^/]+\.xlsx$',target):safe_chart_workbooks.add(target)
             for part in parts:
                 name=part.filename; lower=name.lower()
                 if name in names: raise ValueError('template_corrupted: duplicate ZIP entry')
@@ -45,9 +54,33 @@ if ext != 'pdf':
                     raise ValueError('template_unsafe: ZIP path traversal')
                 if part.flag_bits & 1: raise ValueError('template_unsupported: encrypted archive')
                 if part.file_size/max(1,part.compress_size)>lim('ratio',200): raise ValueError('template_unsafe: compression ratio exceeds limit')
-                if any(x in lower for x in ('vbaproject','/embeddings/','activex','oleobject')): raise ValueError('template_unsafe: macro or embedded executable object')
+                if any(x in lower for x in ('vbaproject','activex','oleobject')) or '/embeddings/' in lower and name not in safe_chart_workbooks: raise ValueError('template_unsafe: macro or embedded executable object')
                 if re.match(r'^ppt/slides/slide\d+\.xml$',lower): slide_count+=1
                 blob=archive.read(part)
+                if name in safe_chart_workbooks:
+                    with zipfile.ZipFile(io.BytesIO(blob)) as workbook:
+                        members=workbook.infolist();nested_bytes+=sum(p.file_size for p in members)
+                        if len(members)>lim('entries',5000) or nested_bytes+sum(p.file_size for p in parts)>lim('uncompressedBytes',134217728):raise ValueError('template_too_large: nested chart workbook expands beyond limit')
+                        seen=set()
+                        for member in members:
+                            n=member.filename;l=n.lower()
+                            if n in seen or n.startswith(('/','\\')) or '\\' in n or '..' in n.split('/') or re.match(r'^[A-Za-z]:',n):raise ValueError('template_unsafe: nested workbook path')
+                            seen.add(n)
+                            if member.flag_bits&1 or member.file_size/max(1,member.compress_size)>lim('ratio',200):raise ValueError('template_unsafe: nested workbook compression/encryption')
+                            if not l.endswith(('.xml','.rels')) or any(x in l for x in ('vbaproject','activex','embeddings','externallinks','connections','macrosheet')):raise ValueError('template_unsafe: active chart workbook')
+                            data=workbook.read(member)
+                            if l.endswith(('.xml','.rels')):
+                                if re.search(br'<!\s*(DOCTYPE|ENTITY)',data,re.I):raise ValueError('template_unsafe: nested XML entities')
+                                parsed=ET.fromstring(data)
+                                if any(e.tag.rsplit('}',1)[-1]=='f' for e in parsed.iter()):raise ValueError('template_unsupported: chart workbook formulas require evaluation policy')
+                                if any(e.get('TargetMode','').lower()=='external' for e in parsed):raise ValueError('template_unsafe: linked chart workbook')
+                                if l.endswith('.rels'):
+                                    for rel in parsed:
+                                        target=rel.get('Target','')
+                                        resolved=posixpath.normpath(posixpath.join(posixpath.dirname(posixpath.dirname(n)),target))
+                                        if '\\' in target or ':' in target or target.startswith('/') or resolved.startswith('../'):raise ValueError('template_unsafe: nested relationship escape')
+                                if b'macroEnabled' in data or b'vbaProject' in data:raise ValueError('template_unsafe: macro workbook content type')
+                        if 'xl/workbook.xml' not in seen or '[Content_Types].xml' not in seen:raise ValueError('template_unsupported: invalid chart data workbook')
                 if lower.endswith(('.xml','.rels','.svg')):
                     if re.search(br'<!\s*(DOCTYPE|ENTITY)',blob,re.I): raise ValueError('template_unsafe: XML entities forbidden')
                     root=ET.fromstring(blob)

@@ -1,3 +1,4 @@
+import { scopeReview, simulatedExport } from './ppt-scope-test-helpers.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -14,7 +15,7 @@ const uid = 'alice';
 let renderCalls = 0;
 const deps = {
   modelCall: async (project, prompt) => {
-    if (prompt.includes('整稿演示文稿内容评审器')) return { missing: [], repeated: [], conflicts: [], unsupported: [] };
+    if (prompt.includes('整稿演示文稿内容评审器')) return scopeReview(project);
     if (prompt.includes('版本更新规划器') && !project.update.baseSnapshot.deck) return { slides: Array.from({ length: project.pages }, (_, i) => ({ title: `Imported ${i + 1}`, focus: 'New facts', change: 'add', refs: ['U1'] })) };
     if (prompt.includes('版本更新规划器')) return { slides: [
       { title: 'Base 1', focus: 'Base 1', baseSlideId: project.update.baseSnapshot.deck.slides[0].id, change: 'keep', refs: [] },
@@ -30,7 +31,7 @@ const deps = {
     if (prompt.includes('当前任务只写第')) return { title: `Base ${prompt.match(/当前任务只写第 (\d+) 页/)?.[1]}`, bullets: ['Original fact'] };
     return { title: 'Generated update', bullets: ['Latest fact'] };
   },
-  renderPptx: async project => { renderCalls++; return { bytes: project.deck.slides.length * 100, exportVerification: {status:"passed",basis:"test_double"} }; },
+  renderPptx: async project => { renderCalls++; return simulatedExport(project,project.deck.slides.length*100); },
   renderPdf: async () => ({ bytes: 100 }),
   extractFile: async (_project, name, bytes) => ({ kind: 'file', name, text: bytes.toString(), segments: [{ id: '1', location: 'page 1', text: bytes.toString() }] }),
   analyzeTemplate: async (_uid, _id, extension) => extension === 'pdf'

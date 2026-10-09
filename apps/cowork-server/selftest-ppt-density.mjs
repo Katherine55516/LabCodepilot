@@ -1,3 +1,4 @@
+import { scopeReview } from './ppt-scope-test-helpers.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -116,7 +117,7 @@ try {
   const python = process.env.PPT_TEST_PYTHON || 'python3';
   deps.modelCall = async (p, prompt, activity, log, options={}) => {
     if(prompt.includes('叙事规划器'))return {brief:{presentationUse:'course_walkthrough'},...smokeRaw};
-    if(options.nodeKey?.startsWith('review:deck'))return {missing:[],repeated:[],conflicts:[],unsupported:[]};
+    if(options.nodeKey?.startsWith('review:deck'))return scopeReview(p);
     const index=Number(prompt.match(/第 (\d+) 页/)?.[1])-1;
     return index===1 ? {title:p.outline[index].title,sourceArtifacts:[table,checklist].map(item=>({sourceUnitId:item.id})),sourceCommentary:['The owner compares the recorded result with the agreed condition before the decision.']} :
       {title:p.outline[index].title,contentBlocks:index===0?[]:[{type:'implication',heading:'Validation',body:summary.text}]};
@@ -125,6 +126,7 @@ try {
     const filename = path.join(exportDir,'density-native-smoke.pptx');
     const {exportManifest}=await import('./lib/ppt-export-integrity.mjs');
     const data = {exportManifest:exportManifest(p),slides:p.deck.slides,renderTree:buildRenderTree(p),palette:p.templateSpec.palette,fonts:p.templateSpec.fonts};
+    if(process.env.PPT_DENSITY_OUTPUT_DIR)fs.writeFileSync(path.join(exportDir,'density-render-payload.json'),JSON.stringify(data,null,2));
     const result=spawnSync(python,['-c',renderer.SCRIPT],{input:JSON.stringify(data),env:{...process.env,PPT_OUTPUT:filename},encoding:'utf8',maxBuffer:2000000});
     assert.equal(result.status,0,result.stderr);
     return JSON.parse(result.stdout);

@@ -1,7 +1,8 @@
+import { assertCandidateScope } from './ppt/input-scope-service.mjs';
 import { automaticPages, densityProfile, densityPrompt } from './ppt-density-profile.mjs';
 import { packOutline, inspectDensityOutline, revalidateOutlineFits } from './ppt-density-packing.mjs';
 import { bindSourceArtifacts, bindSourceMedia, isSourceOwnedNode } from './ppt-source-artifacts.mjs';
-import { acceptExportVerification } from './ppt-export-integrity.mjs';
+import { acceptExportVerification, blockExportVerification } from './ppt-export-integrity.mjs';
 import { templateLimits } from './ppt-template-security.mjs';
 import { importEditablePptx as importTemplateIR } from './ppt/import-pptx.mjs';
 import { markPptTime } from './ppt-trace.mjs';
@@ -149,7 +150,7 @@ function normalizeOutline(value, count, source, update = null, deckTitle = null)
       ...(typeof s.distributionType === 'string' || typeof s.distribution_type === 'string' ? { distributionType: String(s.distributionType || s.distribution_type).slice(0, 40) } : {}),
       ...(Number.isInteger(s.semanticUnitBudget || s.semantic_unit_budget) ? { semanticUnitBudget: Math.max(2, Math.min(10, Number(s.semanticUnitBudget || s.semantic_unit_budget))) } : {}),
       ...(typeof s.pointLengthProfile === 'string' || typeof s.point_length_profile === 'string' ? { pointLengthProfile: String(s.pointLengthProfile || s.point_length_profile).slice(0, 24) } : {}),
-      ...(Array.isArray(s.requiredDetails || s.required_details) ? { requiredDetails: outlineValues(s.requiredDetails || s.required_details,10,4000,'requiredDetails') } : {}),
+      ...(Array.isArray(s.requiredDetails || s.required_details) ? { requiredDetails: outlineValues(s.requiredDetails || s.required_details,1000,4000,'requiredDetails') } : {}),
       ...(Array.isArray(s.requiredEvidenceIds || s.required_evidence_ids) ? { requiredEvidenceIds: [...new Set(s.requiredEvidenceIds || s.required_evidence_ids)].filter(id =>
         (source?.semantic?.evidenceAtoms || []).some(atom => atom.id === id)).slice(0, 6) } : {}),
       ...(Array.isArray(s.claimIds || s.claim_ids) ? { claimIds: (s.claimIds || s.claim_ids).filter(id => typeof id === 'string').slice(0, 8) } : {}),
@@ -783,7 +784,7 @@ function startGeneration(uid, id, activity, log, deps = defaultDeps) {
         const reviewStarted = Date.now();
         try {
           const rawReview = await deps.modelCall(current, deckReviewPrompt(current), activity, log, { nodeKey: reviewNodeId });
-          modelReview = normalizeModelReview(rawReview, current.deck.slides.map(slide => slide.id));
+          modelReview = normalizeModelReview(rawReview, current.deck.slides.map(slide => slide.id), current);
           persistDagNode(uid, id, reviewNodeId, 'done', { durationMs: Date.now() - reviewStarted, result: modelReview });
         } catch (error) {
           persistDagNode(uid, id, reviewNodeId, 'failed', { durationMs: Date.now() - reviewStarted, error: String(error?.message || error).slice(0, 300) });
@@ -797,7 +798,7 @@ function startGeneration(uid, id, activity, log, deps = defaultDeps) {
       for (let attempt = 0; semanticReviewKey(current) !== reviewedInputHash; attempt++) {
         if (attempt >= 3) throw new Error('review inputs keep changing; retry after edits settle');
         reviewedInputHash = semanticReviewKey(current); initialReview = deterministicReview(current);
-        modelReview = normalizeModelReview(await deps.modelCall(current, deckReviewPrompt(current), activity, log, { nodeKey: 'review:deck:refresh' }), current.deck.slides.map(slide => slide.id));
+        modelReview = normalizeModelReview(await deps.modelCall(current, deckReviewPrompt(current), activity, log, { nodeKey: 'review:deck:refresh' }), current.deck.slides.map(slide => slide.id), current);
         current = store.get(uid, id); if (!current || current.deletedAt || current.status !== 'generating') return;
         if (current.runtime?.pauseRequested) { await enqueueProject(uid, id, () => finishPause(store.get(uid, id))); return; }
       }
@@ -855,7 +856,7 @@ function startGeneration(uid, id, activity, log, deps = defaultDeps) {
         }
         reviewedInputHash = semanticReviewKey(current);
         modelReview = normalizeModelReview(await deps.modelCall(current, deckReviewPrompt(current), activity, log,
-          { nodeKey: `review:deck:critic:${round + 1}` }), current.deck.slides.map(slide => slide.id));
+          { nodeKey: `review:deck:critic:${round + 1}` }), current.deck.slides.map(slide => slide.id), current);
         current = store.get(uid, id);
         if (!current || current.deletedAt || current.status !== 'generating') return;
         if (current.runtime?.pauseRequested) { await enqueueProject(uid, id, () => finishPause(current)); return; }
@@ -874,7 +875,7 @@ function startGeneration(uid, id, activity, log, deps = defaultDeps) {
       const reviewDuration = current.dagNodes?.[reviewNodeId]?.durationMs || 0;
       current.quality = finalQualityReport(repaired.review, repaired.repairs, modelReview, { reviewMs: reviewDuration });
       if (semanticReviewKey(current) !== reviewedInputHash) {
-        modelReview = normalizeModelReview(await deps.modelCall(current, deckReviewPrompt(current), activity, log, { nodeKey: 'review:deck:repair' }), current.deck.slides.map(slide => slide.id));
+        modelReview = normalizeModelReview(await deps.modelCall(current, deckReviewPrompt(current), activity, log, { nodeKey: 'review:deck:repair' }), current.deck.slides.map(slide => slide.id), current);
         current.quality = finalQualityReport(repaired.review, repaired.repairs, modelReview, { reviewMs: reviewDuration });
       }
       const latestBeforePublish = store.get(uid, id);
@@ -897,8 +898,23 @@ function startGeneration(uid, id, activity, log, deps = defaultDeps) {
       }
       persistDagNode(uid, id, 'publish:deck', 'running');
       const artifactPath = `/workspace/published-${Math.max(1, Number(current.revision || 0))}-${newIrId('artifact')}.pptx`;
-      const exportInfo = await deps.renderPptx({ ...current, renderOutput: artifactPath });
-      acceptExportVerification(current,exportInfo);
+      current=await enqueueProject(uid,id,()=>{
+        const latest=store.get(uid,id);
+        if(!latest||latest.status!=='generating'||semanticReviewKey(latest)!==semanticReviewKey(current))throw new Error('generation changed before export; review again');
+        latest.revision=Math.max(1,Number(latest.revision||0));latest.draftRevision=latest.revision;store.save(latest);return latest;
+      });
+      let exportInfo;
+      try {
+        exportInfo=await deps.renderPptx({...current,renderOutput:artifactPath});acceptExportVerification(current,exportInfo);
+      } catch(error) {
+        await enqueueProject(uid,id,()=>{
+          const latest=store.get(uid,id);
+          if(latest&&latest.status==='generating'&&semanticReviewKey(latest)===semanticReviewKey(current)){
+            blockExportVerification(latest,error);store.save(latest);persistDagNode(uid,id,'publish:deck','failed',{error:latest.error});
+          }
+        });
+        return;
+      }
       await enqueueProject(uid, id, () => {
         const finished = store.get(uid, id);
         if (!lease.owns() || !finished || finished.deletedAt || finished.status !== 'generating' || finished.currentRunId !== current.currentRunId) return;
@@ -1074,9 +1090,9 @@ async function handleTemplates(req, id, uid, url, send, deps) {
     const item = { id: templateId, name: bounded(data.name || data.fileName.replace(/\.[^.]+$/, ''), 120, 'template name'), category: '我的模板',
       description: String(analysis.reason || '').slice(0, 300), kind: 'uploaded', compatibility: analysis.compatibility, version: 1,
       pages: analysis.pages, palette, fonts, sampleTitles: (analysis.sampleTitles || []).slice(0, 3), tags: ['自定义', '上传'], pinned: false,
-      fileName: data.fileName, extension: upload.extension, bytes: upload.bytes.length, sha256: upload.sha256, irVersion: imported ? 'pptx-ir-3' : null, createdAt: new Date().toISOString() };
+      fileName: data.fileName, extension: upload.extension, bytes: upload.bytes.length, sha256: upload.sha256, irVersion: imported ? 'pptx-ir-4' : null, createdAt: new Date().toISOString() };
     store.writeTemplate(uid, templateId, upload.bytes);
-    if (imported) store.writeTemplateIR(uid, templateId, { schemaVersion: 1, parserVersion: 'pptx-ir-3', sha256: upload.sha256, imported });
+    if (imported) store.writeTemplateIR(uid, templateId, { schemaVersion: 1, parserVersion: 'pptx-ir-4', sha256: upload.sha256, imported });
     store.saveTemplates(uid, [...customs, item]);
     return send(201, { template: item });
   }
@@ -1371,8 +1387,14 @@ export async function handlePpt(req, url, { uid, send, res, readBody, activity, 
             if (analysis?.palette) imported.templateSpec.palette = analysis.palette;
             imported.renderTree = buildRenderTree(imported); imported.status = 'completed'; imported.stage = 'completed'; imported.error = '';
             imported.revision = 1; imported.draftRevision = 1; imported.publishedRevision = 1;
-            await renderImportedPptx(imported); saveStructuredProject(imported); saveRevision(imported, 'external-import');
-            for (const nodeId of ['source', 'outline', 'content', 'media', 'layout', 'preview', 'quality', 'review', 'repair', 'publish']) transitionNode(imported, nodeId, 'completed');
+            // Import creates an editable source baseline, not a certified new
+            // generation. Preserve the original even if its layout needs repair.
+            try {const importExport=await renderImportedPptx(imported);acceptExportVerification(imported,importExport);}
+            catch(error){imported.quality={...imported.quality,exportable:false,renderedTextVerified:false,exportVerification:{status:'not_evaluated',basis:'imported_original',sha256:source.sha256},baselineRenderError:String(error.message||error).slice(-1000)};imported.publishedArtifactPath=imported.externalPptx.originalPath;}
+            imported.quality={...imported.quality,status:'imported_baseline',publishEligible:false,contentReady:false,visualVerified:false,reviewState:'stale',baselineReason:'Imported original preserved; source/content quality not evaluated'};
+            saveStructuredProject(imported); saveRevision(imported, 'external-import');
+            for (const nodeId of ['source', 'outline', 'content', 'media', 'layout', 'preview', 'publish']) transitionNode(imported, nodeId, 'completed', {basis:'imported_baseline'});
+            for (const nodeId of ['quality','review','repair']) transitionNode(imported,nodeId,'pending');
             completeRun(imported, { imported: true, revision: 1 });
             return send(201, { project: getStructuredProject(uid, project.id) });
           } catch (error) {
@@ -1477,7 +1499,7 @@ export async function handlePpt(req, url, { uid, send, res, readBody, activity, 
         const source = JSON.stringify(sourcePacket({ segments: (project.source?.segments || []).filter(item => slide.sourceRefs?.includes(item.id)) }, 12000));
         const block = data.blockId ? (slide.blocks || []).find(item => item.id === data.blockId) : null;
         if (data.blockId && (!block || !['image', 'shape'].includes(block.type))) throw new HttpError(400, 'only image captions and shape labels can be rewritten');
-        const localPolicy = `${promptPolicy({ ...project, prompt: `${project.prompt || ''}\n${instruction}` })}\n${writingGuide(project, slide.copy || {})}`;
+        const localPolicy = `${promptPolicy(project)}\n${writingGuide(project, slide.copy || {})}`;
         const prompt = block
           ? `${localPolicy}\n你只改写一个演示文稿视觉元素的文字，不调用工具，不改图片、图表数据、形状或坐标。用户指令：${instruction}\n元素原文：${block.type === 'image' ? block.caption : block.text}\n本页来源：${source || '无额外来源'}\n仅返回 JSON：{"text":"..."}，最多 100 字。`
           : `${localPolicy}\n你只修改一页演示文稿的标题和要点。不得调用工具、生成坐标、改变图表数据或添加没有来源的数字。用户指令：${instruction}\n当前页：${slide.title}\n${slide.bullets.join('\n')}\n来源：${source || '无额外来源'}\n仅返回 JSON：{"title":"...","bullets":["..."]}；不超过 10 个要点，保留当前必要内容，不要为缩短而丢失机制、条件或对照。`;
@@ -1487,6 +1509,7 @@ export async function handlePpt(req, url, { uid, send, res, readBody, activity, 
           ? { ...item, [block.type === 'image' ? 'caption' : 'text']: bounded(result.text, 100, 'rewritten text') } : item) } : { ...result, blocks: slide.blocks || [], layout: slide.layout, layoutId: slide.layoutId };
         const rewritten = normalizeDeck({ slides: [raw] }, [project.outline[index]], {slides:[slide]}).slides[0];
         const gated = deterministicGate({ ...project, deck: applyLayoutRegistry({ ...project.deck, slides: project.deck.slides.map(item => item.id === slide.id ? rewritten : item) }) });
+        await assertCandidateScope(project, gated, deps, activity, log);
         return send(200, { project: await commitCompatibility(project, gated, deps) });
       } finally { editing.delete(id); }
     }

@@ -18,7 +18,7 @@ function editable(project, data) {
 
 export async function typedCommands(project, data, deps, activity, log) {
   const { slide, nodes } = editable(project, data);
-  const writingProject = { ...project, prompt: `${project.prompt || ''}\n${data.instruction || ''}` };
+  const writingProject = project;
   const localPolicy = promptPolicy(writingProject);
   const contract = project.planning?.slidePlan?.find(item => item.slideId === slide.id) || {};
   const call = async (prompt, task) => deps.modelCall(project, `${localPolicy}\n${['insert', 'data'].includes(task) ? writingGuide(writingProject, contract) : ''}\n${prompt}`, activity, log, { nodeKey: `ai:${data.proposalId}:${task}` });

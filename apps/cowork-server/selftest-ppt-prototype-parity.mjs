@@ -1,3 +1,4 @@
+import { scopeReview } from './ppt-scope-test-helpers.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -26,7 +27,7 @@ try {
   assert.equal(contracts.outputLanguage({ prompt: 'write in English', source: { text: '中文输入说明机制及成立条件。' }, generationPolicy: config }), 'zh');
   assert.equal(contracts.outputLanguage({ source: { text: '中文输入说明机制及成立条件。' }, generationPolicy: config, editOutputLanguage: 'fr' }), 'fr');
   assert.match(contracts.promptPolicy({ prompt: 'Sparse concept', generationPolicy: config }), /knowledge_mode=source_only/);
-  assert.match(contracts.promptPolicy({ source: { segments: [{ id: '1' }] }, generationPolicy: { ...config, knowledge: 'source_plus_explanation' } }), /knowledge_mode=general_explanation/);
+  assert.match(contracts.promptPolicy({ source: { segments: [{ id: '1' }] }, generationPolicy: { ...config, knowledge: 'source_plus_explanation' } }), /knowledge_mode=bounded_explanation/);
   assert.equal(planning.normalizeBrief({ depth: 'detailed' }, { pages: 4, prompt: '培训课程', generationPolicy: config }).depth, 'balanced');
   const estimate = await request('page-estimate', { inputKind: 'paste', text: '# Topic\n机制和限制\n整理成12页', generationPolicy: config });
   assert.equal(estimate.status, 200); assert.equal(estimate.body.recommendation.requested, 12);
@@ -40,7 +41,7 @@ try {
   assert.deepEqual(project.creationContext.generationPolicy, config);
   const node = project.deck.slides[1].nodes.find(item => item.semanticRole === 'title');
   let prompt;
-  const proposal = await proposals.createProposal(project, { scope: 'object', slideId: 's1', nodeId: node.id, instruction: 'Translate', type: 'content', action: 'translate', parameters: { targetLanguage: 'fr', mode: 'replace', region: 'France', glossary: 'mechanism=mécanisme' }, baseRevision: 1 }, { modelCall: async (_, value) => { prompt = value; return { content: { text: 'Mécanisme' } }; } }, noop, noop);
+  const proposal = await proposals.createProposal(project, { scope: 'object', slideId: 's1', nodeId: node.id, instruction: 'Translate', type: 'content', action: 'translate', parameters: { targetLanguage: 'fr', mode: 'replace', region: 'France', glossary: 'mechanism=mécanisme' }, baseRevision: 1 }, { modelCall: async (p, value) => { if (value.includes('整稿演示文稿内容评审器')) return scopeReview(p); prompt = value; return { content: { text: 'Mécanisme' } }; } }, noop, noop);
   assert.match(prompt, /output_language=Français/); assert.match(prompt, /local_action action="translate"/); assert.match(prompt, /source_only/);
   assert.equal(repo.getProject(uid, project.id).deck.slides[1].title, 'Mechanism', 'candidate is read-only');
   assert.deepEqual(proposal.parameters, { targetLanguage: 'fr', mode: 'replace', region: 'France', glossary: 'mechanism=mécanisme' });
@@ -56,13 +57,13 @@ try {
   const accepted = await edits.submitGenerationEdit(uid, project.id, payload);
   assert.equal((await edits.submitGenerationEdit(uid, project.id, payload)).idempotent, true);
   await assert.rejects(() => edits.submitGenerationEdit(uid, project.id, { ...payload, action: 'translate', parameters: { targetLanguage: 'en' } }), /different request/);
-  await edits.processGenerationEdits(uid, project.id, { modelCall: async () => ({ patches: [{ nodeId: node.id, content: { text: 'Mechanism explained' } }] }) }, noop, noop);
+  await edits.processGenerationEdits(uid, project.id, { modelCall: async (p, prompt) => prompt.includes('整稿演示文稿内容评审器') ? scopeReview(p) : ({ patches: [{ nodeId: node.id, content: { text: 'Mechanism explained' } }] }) }, noop, noop);
   assert.equal(repo.getProject(uid, project.id).editing.intents[accepted.intent.id].status, 'applied');
   const renewed = await edits.openGenerationScope(uid, project.id, 's1', scope.id);
   assert.deepEqual(renewed.followingSlideIds, scope.followingSlideIds);
   assert.ok(renewed.baseRevision > scope.baseRevision);
   const second = await edits.submitGenerationEdit(uid, project.id, { ...payload, scopeId: renewed.id, instruction: 'Clarify the mechanism', idempotencyKey: 'parity_second_request' });
-  await edits.processGenerationEdits(uid, project.id, { modelCall: async () => ({ patches: [{ nodeId: node.id, content: { text: 'How the mechanism works' } }] }) }, noop, noop);
+  await edits.processGenerationEdits(uid, project.id, { modelCall: async (p, prompt) => prompt.includes('整稿演示文稿内容评审器') ? scopeReview(p) : ({ patches: [{ nodeId: node.id, content: { text: 'How the mechanism works' } }] }) }, noop, noop);
   assert.equal(repo.getProject(uid, project.id).editing.intents[second.intent.id].status, 'applied');
   const third = await edits.openGenerationScope(uid, project.id, 's1', renewed.id);
   await commands.applyCommand(uid, project.id, {id:'manual_parity_update',actor:uid,type:'node.setContent',baseRevision:repo.getProject(uid,project.id).revision,payload:{slideId:'s1',nodeId:node.id,content:{text:'Manual title retained'}}});

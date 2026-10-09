@@ -37,6 +37,18 @@ try {
     visualIntent: { type: /workflow|path|pipeline|process/iu.test(slide.title) ? 'pipeline'
       : /trade.off|versus|comparison/iu.test(slide.title) ? 'comparison'
         : /evidence|benchmark|size|throughput/iu.test(slide.title) ? 'metric' : 'none' } }));
+  // This historical snapshot predates structural HTML segmentation. Its old
+  // IDs 611+ are no longer input segment IDs; c_074 now denotes a definition,
+  // not the old PTQ result. Migrate these fixed benchmark pages by their
+  // explicit source section, never by accepting a nearby unrelated number.
+  const benchmarkSections = new Map([[36, /^PTQ is enough for large models/iu],
+    [37, /^QAD is recommended over QAT/iu], [42, /^The latency.throughput trade-off/iu]]);
+  for (const [page, topic] of benchmarkSections) {
+    const matched = source.semantic.chunks.filter(chunk => topic.test(chunk.topic));
+    assert.equal(matched.length, 1, `fixture page ${page} must bind its unique original source section`);
+    outline[page - 1].chunkRefs = matched.map(chunk => chunk.id);
+    outline[page - 1].refs = [...new Set(matched.flatMap(chunk => chunk.sourceRefs))];
+  }
   const project = { pages: outline.length, prompt: 'LLM Compression', outline, source,
     templateSpec: { fonts: baseline.template.fonts, palette: baseline.template.palette } };
   project.planning = buildPlanning(project, { brief: { presentationUse: 'technical_explainer' } }, outline);

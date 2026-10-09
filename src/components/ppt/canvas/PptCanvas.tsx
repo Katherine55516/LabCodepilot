@@ -45,86 +45,15 @@ const intersects = (a: PptBounds, b: PptBounds) =>
   a.y + a.height > b.y;
 
 function Chart({ element }: { element: PptRenderElement }) {
-  const labels = element.content?.labels || [];
-  const values = element.content?.values || [];
-  const max = Math.max(...values.map((value) => Math.abs(value)), 1);
-  const type = (element.content as { chartType?: string })?.chartType || "bar";
-  if (type === "pie") {
-    const total =
-      values.reduce((sum, value) => sum + Math.max(0, value), 0) || 1;
-    const stops = values.reduce<{ offset: number; values: string[] }>(
-      (result, value, index) => {
-        const end = result.offset + (Math.max(0, value) / total) * 100;
-        return {
-          offset: end,
-          values: [
-            ...result.values,
-            `hsl(${index * 67} 65% 55%) ${result.offset}% ${end}%`,
-          ],
-        };
-      },
-      { offset: 0, values: [] },
-    ).values;
-    return (
-      <div className="flex h-full items-center justify-center gap-3 p-2">
-        <div
-          className="aspect-square h-4/5 rounded-full"
-          style={{ background: `conic-gradient(${stops.join(",")})` }}
-        />
-        <div className="max-w-[45%] space-y-1 overflow-hidden text-[10px]">
-          {labels.map((label, index) => (
-            <div className="truncate" key={index}>
-              {label}: {values[index]}
-            </div>
-          ))}
-        </div>
-      </div>
-    );
-  }
-  if (type === "line") {
-    const points = values
-      .map(
-        (value, index) =>
-          `${labels.length <= 1 ? 50 : (index / (labels.length - 1)) * 100},${90 - (value / max) * 75}`,
-      )
-      .join(" ");
-    return (
-      <svg viewBox="0 0 100 100" className="h-full w-full overflow-visible p-2">
-        <polyline
-          points={points}
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="3"
-        />
-        {values.map((value, index) => (
-          <circle
-            key={index}
-            cx={labels.length <= 1 ? 50 : (index / (labels.length - 1)) * 100}
-            cy={90 - (value / max) * 75}
-            r="2.5"
-            fill="currentColor"
-          />
-        ))}
-      </svg>
-    );
-  }
-  return (
-    <div className="flex h-full items-end justify-around gap-1 p-2">
-      {values.map((value, index) => (
-        <div
-          key={index}
-          className="flex h-full min-w-0 flex-1 flex-col justify-end text-center text-[9px]"
-        >
-          <span className="truncate">{value}</span>
-          <div
-            className="mx-auto w-4/5 rounded-t bg-current opacity-70"
-            style={{ height: `${Math.max(3, (Math.abs(value) / max) * 70)}%` }}
-          />
-          <span className="truncate">{labels[index]}</span>
-        </div>
-      ))}
-    </div>
-  );
+  const axis=element.chartLayout;
+  if(axis?.svg) return <svg viewBox={`0 0 ${element.bounds.width} ${element.bounds.height}`} className="h-full w-full"
+    role="img" aria-label={`${element.content?.unit || ''}: ${(element.content?.values || []).join(', ')}`}
+    dangerouslySetInnerHTML={{__html:DOMPurify.sanitize(`<svg xmlns="http://www.w3.org/2000/svg">${axis.svg}</svg>`,{USE_PROFILES:{svg:true},ADD_ATTR:['data-value']}).replace(/^<svg[^>]*>|<\/svg>$/g,'')}} />;
+  // Legacy trees are rebuilt on the server. Preserve signed values while that
+  // refresh is pending rather than showing an incorrect absolute-value chart.
+  return <div className="flex h-full flex-col justify-center text-xs">
+    {(element.content?.labels || []).map((label,i)=><div key={i}>{label}: {element.content?.values?.[i]} {element.content?.unit}</div>)}
+  </div>;
 }
 
 function ElementContent({
@@ -140,12 +69,15 @@ function ElementContent({
   onEdit: () => void;
   onCommit: (text: string) => void;
 }) {
+  const contract=element.textLayout;
+  const margins=contract?.margins || [3.6,3.6,3.6,3.6];
+  const padding=`${margins[1]*scale}px ${margins[2]*scale}px ${margins[3]*scale}px ${margins[0]*scale}px`;
   const textStyle = {
     color: element.style?.color,
-    fontFamily: `'${element.style?.fontFamily || 'sans-serif'}','${element.style?.eastAsiaFontFamily || 'sans-serif'}','Noto Sans CJK SC','PingFang SC','Hiragino Sans',sans-serif`,
+    fontFamily: contract?.code ? "'Consolas','Noto Sans Mono CJK SC','Noto Sans Mono CJK TC','DejaVu Sans Mono','Liberation Mono','Menlo',monospace" : `'${contract?.fontFamily || element.style?.fontFamily || 'sans-serif'}','${element.style?.eastAsiaFontFamily || 'sans-serif'}','Noto Sans CJK SC','PingFang SC','Hiragino Sans',sans-serif`,
     // The canvas is 960 px wide for a 13.333 in slide: 72 px/in, so one
     // PowerPoint point maps to one canvas pixel before responsive scaling.
-    fontSize: `${Math.max(6, (element.style?.fontSizePt || 18) * scale)}px`,
+    fontSize: `${(element.style?.fontSizePt || 18) * scale}px`,
     fontWeight: element.style?.fontWeight,
     fontStyle: element.style?.fontStyle,
     textAlign: element.style?.textAlign as
@@ -166,7 +98,7 @@ function ElementContent({
         autoFocus
         defaultValue={text}
         className="h-full w-full resize-none bg-transparent outline-none"
-        style={textStyle}
+        style={{...textStyle,padding,whiteSpace:"pre-wrap",overflowWrap:"anywhere",tabSize:4}}
         onClick={(event) => event.stopPropagation()}
         onBlur={(event) => onCommit(event.currentTarget.value)}
         onKeyDown={(event) => {
@@ -182,17 +114,18 @@ function ElementContent({
     return (
       <div
         className="h-full overflow-hidden whitespace-pre-wrap"
-        style={textStyle}
+        style={{...textStyle,padding,overflowWrap:"anywhere",tabSize:contract?.tabSize || 4}}
         onDoubleClick={onEdit}
       >
-        {element.content?.text}
+        {contract?.paragraphs ? contract.paragraphs.map((p,i)=><div key={i} style={{fontSize:p.runs?.length?Math.max(...p.runs.map(r=>r.fontSizePt))*scale:undefined,minHeight:`${p.lineHeight}em`,lineHeight:p.lineHeight,marginBottom:i===contract.paragraphs.length-1?0:p.spaceAfterPt*scale}}>
+          {p.runs?p.runs.map((run,j)=><span key={j} style={{fontSize:run.fontSizePt*scale,fontWeight:run.bold?700:400}}>{run.text}</span>):p.text}</div>) : element.content?.text}
       </div>
     );
   if (["list", "timeline", "metric"].includes(element.kind))
     return (
       <div
         className="relative h-full overflow-hidden"
-        style={textStyle}
+        style={{...textStyle,padding:element.content?.pointLayout?0:padding,whiteSpace:"pre-wrap",overflowWrap:"anywhere"}}
         onDoubleClick={element.content?.pointLayout ? undefined : onEdit}
       >
         {element.kind === "list" && element.content?.pointLayout?.boxes &&
@@ -204,15 +137,15 @@ function ElementContent({
               : item.text.includes("\n")
                 ? { heading: item.text.split("\n")[0], body: item.text.split("\n").slice(1).join("\n") }
                 : { heading: "", body: item.text };
-            return <div key={item.id} className="absolute overflow-hidden rounded-md border border-current/20 p-2"
+            return <div key={item.id} className="absolute overflow-hidden rounded-md border border-current/20"
               style={{ left: `${box.x * 100}%`, top: `${box.y * 100}%`, width: `${box.w * 100}%`, height: `${box.h * 100}%`,
-                fontSize: `${(element.content?.pointLayout?.fontSizePt || 17) * scale}px` }}>
-              {parts.heading && <div className="mb-1 font-semibold">{parts.heading}</div>}
+                padding:`${5.04*scale}px ${7.92*scale}px ${2.88*scale}px`,lineHeight:1.18,overflowWrap:"anywhere",whiteSpace:"pre-wrap",fontSize: `${(element.content?.pointLayout?.fontSizePt || 17) * scale}px` }}>
+              {parts.heading && <div className="font-semibold" style={{marginBottom:3*scale}}>{parts.heading}</div>}
               <div className="whitespace-pre-wrap">{parts.body}</div>
             </div>;
           })}
         {!element.content?.pointLayout && element.content?.items?.map((item, index) => (
-          <div key={item.id}>
+          <div key={item.id} style={{lineHeight:contract?.paragraphs[index]?.lineHeight,marginBottom:(contract?.paragraphs[index]?.spaceAfterPt || 0)*scale}}>
             {element.kind === "timeline"
               ? `${index + 1}. `
               : element.kind === "list"
@@ -225,15 +158,15 @@ function ElementContent({
     );
   if (element.kind === "image" && element.content?.dataUrl)
     return (() => {
-      const crop = element.content?.crop || [0, 0, 0, 0];
-      const [left, top, right, bottom] = crop.map((value) => Math.max(0, Math.min(0.95, Number(value) || 0)));
-      const width = 100 / Math.max(0.01, 1 - left - right);
-      const height = 100 / Math.max(0.01, 1 - top - bottom);
+      const crop = element.imageLayout?.valid ? element.imageLayout.crop : element.content?.crop || [0, 0, 0, 0];
+      const [left, top, right, bottom] = crop.map((value) => element.imageLayout?.valid ? value : Math.max(0, Math.min(0.95, Number(value) || 0)));
+      const width = 100 / Math.max(Number.EPSILON, 1 - left - right);
+      const height = 100 / Math.max(Number.EPSILON, 1 - top - bottom);
       return <div className="relative h-full w-full overflow-hidden"><img
         src={element.content!.dataUrl}
         alt={element.content!.text || ""}
         className="absolute max-w-none"
-        style={{ width: `${width}%`, height: `${height}%`, left: `${-left * width}%`, top: `${-top * height}%`, objectFit: element.content?.sourceImageId ? 'contain' : 'fill' }}
+        style={{ width: `${width}%`, height: `${height}%`, left: `${-left * width}%`, top: `${-top * height}%`, objectFit: element.imageLayout?.fit==='cover'?'cover':element.imageLayout?.fit==='stretch'||element.imageLayout?.fit==='crop'?'fill':'contain' }}
         draggable={false}
       /></div>;
     })();
@@ -252,8 +185,8 @@ function ElementContent({
               {row.map((cell, columnIndex) => (
                 <td
                   key={columnIndex}
-                  className={`border border-current/30 whitespace-pre-wrap break-words ${rowIndex === 0 ? "font-semibold" : ""}`}
-                  style={{padding:`${3 * scale}px ${7.2 * scale}px`,verticalAlign:'top',
+                  className={`border border-current/30 whitespace-pre-wrap break-words ${rowIndex === 0 ? "font-bold" : ""}`}
+                  style={{padding:`${3 * scale}px ${7.2 * scale}px`,verticalAlign:'top',overflowWrap:'anywhere',
                     background:rowIndex === 0 ? element.style?.fill || '#e7e5f4' : '#ffffff',
                     color:rowIndex === 0 ? element.style?.tableHeaderColor || element.style?.color : element.style?.color}}
                 >
@@ -352,11 +285,11 @@ export function PptCanvas({
   useEffect(() => {
     if (!root.current) return;
     const observer = new ResizeObserver((entries) =>
-      setScale(entries[0]?.contentRect.width / 960 || 1),
+      setScale(entries[0]?.contentRect.width / (slide.size.width / 12700) || 1),
     );
     observer.observe(root.current);
     return () => observer.disconnect();
-  }, []);
+  }, [slide.size.width]);
   const pct = (value: number, total: number) => `${(value / total) * 100}%`;
   const point = (event: React.PointerEvent) => {
     const rect = root.current!.getBoundingClientRect();
@@ -599,7 +532,7 @@ export function PptCanvas({
       ref={root}
       tabIndex={0}
       className="relative aspect-video w-full select-none overflow-hidden rounded-lg border border-border shadow-sm outline-none"
-      style={{ background: slide.background || "#fff" }}
+      style={{ background: slide.background || "#fff", aspectRatio: `${slide.size.width} / ${slide.size.height}` }}
       onClick={() => {
         setMenu(null);
         if (!readOnly) onSelect(null);

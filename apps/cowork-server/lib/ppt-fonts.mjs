@@ -27,7 +27,8 @@ def resolve_font(requested,text):
     needed={ord(c) for c in str(text) if not c.isspace() and font_unicode.category(c) not in ('Cf','Cc')}
     if not needed:return requested
     math_fonts=['STIX Two Math','STIXGeneral','Latin Modern Math','Cambria Math']
-    candidates=(math_fonts+[requested] if requested=='Cambria Math' else [requested])+['Noto Sans CJK SC','Noto Sans CJK TC','Arial Unicode MS','PingFang SC','Hiragino Sans','DejaVu Sans','DejaVu Serif','Noto Sans Symbols2','Apple Symbols','Symbola','FreeSerif']+math_fonts
+    mono_fonts=['Noto Sans Mono CJK SC','Noto Sans Mono CJK TC','DejaVu Sans Mono','Liberation Mono','Courier New','Menlo'] if requested in ('Consolas','Menlo','monospace') else []
+    candidates=(math_fonts+[requested] if requested=='Cambria Math' else [requested])+mono_fonts+['Noto Sans CJK SC','Noto Sans CJK TC','Arial Unicode MS','PingFang SC','Hiragino Sans','DejaVu Sans','DejaVu Serif','Noto Sans Symbols2','Apple Symbols','Symbola','FreeSerif']+math_fonts
     for candidate in dict.fromkeys(candidates):
         family,path,ranges=installed_font(candidate)
         # fc-match returns an unrelated default when the requested family is

@@ -1,7 +1,10 @@
+import { EXPORT_VERIFY_SCRIPT } from './export-verifier-python.mjs';
 import { templateLimits, TEMPLATE_SECURITY_SCRIPT } from '../ppt-template-security.mjs';
 import { OFFICE_MATH_SCRIPT } from '../ppt-math.mjs';
-import { exportManifest, EXPORT_VERIFY_SCRIPT } from '../ppt-export-integrity.mjs';
+import { exportManifest } from '../ppt-export-integrity.mjs';
 import { THEME_SCRIPT } from '../ppt-theme.mjs';
+import { textContract, imageContract, chartContract } from './render-contract.mjs';
+import { RENDER_CONTRACT_SCRIPT, NATIVE_CHART_CONTRACT_SCRIPT } from './render-contract-python.mjs';
 import { FONT_SCRIPT } from '../ppt-fonts.mjs';
 import { spawn } from 'node:child_process';
 import { isSourceOwnedNode } from '../ppt-source-artifacts.mjs';
@@ -15,6 +18,7 @@ from pptx.enum.shapes import MSO_SHAPE_TYPE
 from pptx.enum.dml import MSO_COLOR_TYPE
 from pptx.oxml.ns import qn
 ${THEME_SCRIPT}
+${NATIVE_CHART_CONTRACT_SCRIPT}
 raw=sys.stdin.buffer.read(); ext='pptx'
 ${TEMPLATE_SECURITY_SCRIPT}
 prs=Presentation(io.BytesIO(raw)); slides=[]
@@ -24,7 +28,7 @@ os.replace(target+'.part',target)
 for slide_index, slide in enumerate(prs.slides):
     shapes=[]
     for z_index, shape in enumerate(slide.shapes):
-        item={'shapeId': int(shape.shape_id), 'name': shape.name, 'x': int(shape.left), 'y': int(shape.top), 'width': int(shape.width), 'height': int(shape.height), 'kind':'foreign', 'locked':True, 'zIndex':z_index, 'shapeType':str(shape.shape_type)}
+        item={'shapeId': int(shape.shape_id), 'name': shape.name, 'x': int(shape.left), 'y': int(shape.top), 'width': int(shape.width), 'height': int(shape.height), 'kind':'foreign', 'locked':True, 'zIndex':z_index,'rotation':float(shape.rotation), 'shapeType':str(shape.shape_type)}
         if shape.shape_type == MSO_SHAPE_TYPE.AUTO_SHAPE:
             try: item['autoShapeType']=str(shape.auto_shape_type)
             except (AttributeError,TypeError,ValueError): pass
@@ -68,9 +72,10 @@ for slide_index, slide in enumerate(prs.slides):
         elif shape.shape_type == MSO_SHAPE_TYPE.AUTO_SHAPE:
             item.update({'kind':'shape','locked':True})
         elif shape.has_table:
-            item.update({'kind':'table','rows':[[cell.text for cell in row.cells] for row in shape.table.rows], 'locked':True})
+            item.update({'kind':'table','rows':[[cell.text for cell in row.cells] for row in shape.table.rows],'columnWeights':[int(col.width) for col in shape.table.columns],'rowWeights':[int(row.height) for row in shape.table.rows], 'locked':True})
         elif shape.has_chart:
-            item.update({'kind':'chart','locked':True})
+            chart=shape.chart
+            item.update({'kind':'chart','locked':True,'chartContent':{'labels':[str(c.label) for c in chart.plots[0].categories], 'values':list(chart.series[0].values) if chart.series else [],'series':[{'name':series.name,'values':list(series.values)} for series in chart.series], 'nativeChartType':str(chart.chart_type),'chartType':{'PIE':'pie','LINE':'line','LINE_MARKERS':'line','COLUMN_CLUSTERED':'bar','BAR_CLUSTERED':'bar'}.get(str(chart.chart_type).split(' ')[0],'unsupported'),'nativeChartStructureSha256':native_chart_structure_hash(chart),'nativeChartSha256':__import__('hashlib').sha256(chart.part.blob).hexdigest()}})
         elif shape.shape_type == MSO_SHAPE_TYPE.PICTURE:
             image=shape.image
             subtype={'jpg':'jpeg','jpeg':'jpeg','png':'png','gif':'gif','svg':'svg+xml','webp':'webp'}.get(image.ext.lower())
@@ -87,6 +92,19 @@ for slide_index, slide in enumerate(prs.slides):
             item.update({'kind':'image','dataUrl':('data:image/'+subtype+';base64,'+base64.b64encode(image.blob).decode()) if subtype else None,
                          'locked':True,'crop':[shape.crop_left,shape.crop_top,shape.crop_right,shape.crop_bottom],
                          'imageSha256':__import__('hashlib').sha256(image.blob).hexdigest(),'imageDhash':image_dhash})
+        if item['kind']=='image':
+            geometry=shape._element.find('.//'+qn('a:prstGeom'))
+            if geometry is None:geometry=shape._element.find('.//'+qn('a:custGeom'))
+            if geometry is not None:item['maskXml']=geometry.xml
+        if item['kind']=='foreign':
+            item['xmlHash']=__import__('hashlib').sha256(shape._element.xml.encode()).hexdigest()
+            def media_hashes(shapes):
+                result=[]
+                for nested in shapes:
+                    if hasattr(nested,'image'):result.append(__import__('hashlib').sha256(nested.image.blob).hexdigest())
+                    if hasattr(nested,'shapes'):result.extend(media_hashes(nested.shapes))
+                return result
+            item['nestedMediaHashes']=media_hashes(shape.shapes) if hasattr(shape,'shapes') else []
         shapes.append(item)
     background=None
     try:
@@ -105,13 +123,13 @@ from pptx.oxml.xmlchemy import OxmlElement
 from pptx.oxml.ns import qn
 from pptx.util import Pt
 from pptx.dml.color import RGBColor
-from pptx.enum.text import MSO_AUTO_SIZE
-from pptx.enum.text import PP_ALIGN
+from pptx.enum.text import MSO_ANCHOR, MSO_AUTO_SIZE, PP_ALIGN
 from pptx.enum.shapes import MSO_SHAPE_TYPE
 
 ${OFFICE_MATH_SCRIPT}
 ${EXPORT_VERIFY_SCRIPT}
 ${FONT_SCRIPT}
+${RENDER_CONTRACT_SCRIPT}
 
 data=json.load(sys.stdin); original=data['original']; prs=Presentation(original)
 source_slide_map=data.get('sourceSlideMap')
@@ -182,12 +200,11 @@ def shape_text_frames(slide, shape):
 
 def add_source_artifact(slide, node):
     g=node['geometry']; c=node.get('content') or {}; style=node.get('style') or {}
-    font=style.get('fontFamily') or fonts['body']; pt=float(style.get('fontSizePt',18))
+    font='Consolas' if c.get('codeBlock') else style.get('fontFamily') or fonts['body']; pt=float(style.get('fontSizePt',18))
     if node['type']=='image':
         from PIL import Image as ArtifactImage
         blob=base64.b64decode(c['dataUrl'].split(',',1)[1]);image=ArtifactImage.open(io.BytesIO(blob));image.load()
-        ratio=min(g['width']/image.width,g['height']/image.height);w=int(image.width*ratio);h=int(image.height*ratio)
-        shape=slide.shapes.add_picture(io.BytesIO(blob),int(g['x']+(g['width']-w)/2),int(g['y']+(g['height']-h)/2),w,h)
+        shape=contract_picture(slide,blob,g['x'],g['y'],g['width'],g['height'],node.get('imageLayout') or {'fit':'contain'})
     elif node['type']=='table':
         rows=c['rows']; shape=slide.shapes.add_table(len(rows),len(rows[0]),int(g['x']),int(g['y']),int(g['width']),int(g['height']))
         weights=c.get('columnWeights') or [1]*len(rows[0]); weight_sum=sum(weights)
@@ -196,9 +213,9 @@ def add_source_artifact(slide, node):
         for r,weight in enumerate(row_weights): shape.table.rows[r].height=int(g['height']*weight/row_sum)
         for r,row in enumerate(rows):
             for col,value in enumerate(row):
-                cell=shape.table.cell(r,col); cell.text=str(value); cell.margin_top=cell.margin_bottom=Pt(3); cell.fill.solid(); cell.fill.fore_color.rgb=RGBColor.from_string((style.get('fill','#e7e5f4') if r==0 else '#ffffff').lstrip('#'))
+                cell=shape.table.cell(r,col); cell.text=str(value); cell.margin_top=cell.margin_bottom=Pt(3); cell.margin_left=cell.margin_right=Pt(7.2); cell.text_frame.word_wrap=True; cell.text_frame.auto_size=MSO_AUTO_SIZE.NONE; cell.vertical_anchor=MSO_ANCHOR.TOP; cell.fill.solid(); cell.fill.fore_color.rgb=RGBColor.from_string((style.get('fill','#e7e5f4') if r==0 else '#ffffff').lstrip('#'))
                 for p in cell.text_frame.paragraphs:
-                    p.line_spacing=1.18; p.space_after=Pt(0)
+                    p.line_spacing=1.18; p.space_before=Pt(0); p.space_after=Pt(0)
                     for run in p.runs: run.font.name=fonts['bodyEastAsia'] if CJK_RE.search(run.text) else font; run.font.size=Pt(pt); run.font.bold=(r==0); run.font.color.rgb=RGBColor.from_string(str(style.get('tableHeaderColor' if r==0 else 'color','#242a3b')).lstrip('#')); set_east_asia(run)
     else:
         shape=slide.shapes.add_textbox(int(g['x']),int(g['y']),int(g['width']),int(g['height']))
@@ -208,10 +225,15 @@ def add_source_artifact(slide, node):
         values=[] if c.get('mathMl') and write_office_math(frame.paragraphs[0],c,pt,style.get('color','#111111')) else [item['text'] for item in c.get('items',[])] if node['type'] in ('list','timeline') else str(c.get('text','')).split('\n')
         for i,value in enumerate(values):
             p=frame.paragraphs[0] if i==0 else frame.add_paragraph(); p.text=(str(i+1)+'. ' if node['type']=='timeline' else '• ' if node['type']=='list' else '')+str(value); p.line_spacing=float(style.get('lineHeight',1.18)); p.space_after=Pt(pt*float(style.get('paragraphSpacingEm',.4 if node['type'] in ('list','timeline') else 0)))
+            if c.get('codeBlock'):
+                p.clear()
+                for piece in re.split(r'([\u2e80-\u9fff\uf900-\ufaff]+)',str(value)):
+                    if piece:p.add_run().text=piece
             for run in p.runs:
-                run.font.name=fonts['bodyEastAsia'] if CJK_RE.search(run.text) else font; run.font.size=Pt(pt); run.font.color.rgb=RGBColor.from_string(str(style.get('color','#333333')).lstrip('#')); set_east_asia(run)
+                run.font.name=fonts['bodyEastAsia'] if CJK_RE.search(run.text) else font; run.font.size=Pt(pt); run.font.color.rgb=RGBColor.from_string(str(style.get('color','#333333')).lstrip('#')); set_east_asia(run,family=font if c.get('codeBlock') else None)
+    if node['type'] in ('text','list','timeline'):apply_text_contract(shape.text_frame,node.get('textLayout') or {})
     source=node.get('sourceArtifact') or {}
-    shape.name='AIMate source:'+str(source.get('sourceUnitId',''))+':'+str(source.get('type',''))
+    shape.name='AIMate source:'+str(source.get('sourceUnitId',''))+':'+str(source.get('type',''))+'|AIMate instance:'+str(node.get('id',''))+':0'
     return int(shape.shape_id)
 
 by_slide={int(item['nativeSlideIndex']):item for item in data['slides'] if item.get('nativeSlideIndex') is not None}
@@ -233,6 +255,11 @@ for slide_index, slide in enumerate(prs.slides):
         for key in ('x','y','width','height'):
             if key in geometry: setattr(shape, {'x':'left','y':'top','width':'width','height':'height'}[key], int(geometry[key]))
         content=node.get('content') or {}
+        if node['type']=='chart' and shape.has_chart and content.get('chartType') in ('bar','line') and content.get('values'):
+            axis=node.get('chartLayout') or {}
+            shape.chart.value_axis.minimum_scale=axis['minimum'];shape.chart.value_axis.maximum_scale=axis['maximum'];shape.chart.value_axis.crosses_at=0
+            if content['chartType']=='bar':
+                for series in shape.chart.series:series.invert_if_negative=False
         if content.get('mediaReplacement'):
             if shape.shape_type!=MSO_SHAPE_TYPE.PICTURE or source_slide_map is None or source_slide_map[:slide_index].count(source_slide_map[slide_index])<1:
                 raise ValueError('native media replacement is only allowed on a copied picture')
@@ -245,7 +272,7 @@ for slide_index, slide in enumerate(prs.slides):
             shape._element.blipFill.blip.rEmbed=relationship_id
         crop=content.get('crop')
         if shape.shape_type==MSO_SHAPE_TYPE.PICTURE and isinstance(crop,list) and len(crop)==4:
-            if any(not isinstance(value,(int,float)) or value<0 or value>.4 for value in crop) or crop[0]+crop[2]>=.8 or crop[1]+crop[3]>=.8:
+            if any(not isinstance(value,(int,float)) or value<0 or value>=1 for value in crop) or crop[0]+crop[2]>=1 or crop[1]+crop[3]>=1:
                 raise ValueError('invalid native picture crop on slide '+str(slide_index+1))
             shape.crop_left,shape.crop_top,shape.crop_right,shape.crop_bottom=map(float,crop)
         style=node.get('style') or {}
@@ -283,6 +310,7 @@ for slide_index, slide in enumerate(prs.slides):
                     runs[0].text=value
                     for run in runs[1:]: run.text=''
                 else: shape.text=value
+            apply_text_contract(shape.text_frame,node.get('textLayout') or {})
             if content.get('templateFit'):
                 shape.text_frame.auto_size=MSO_AUTO_SIZE.NONE
                 if content.get('adaptiveMediaReclaim'):
@@ -392,22 +420,23 @@ export function projectFromImportedManifest(project, manifest, hash) {
       nodes: item.shapes.map(shape => ({
         id: stableId('node', hash, item.index, shape.shapeId), type: shape.kind,
         semanticRole: shape.isTitle ? 'title' : shape.kind === 'text' ? 'native-text' : 'visual',
-        slotId: 'absolute', styleRef: 'native', locked: shape.locked, zIndex: shape.zIndex,
+        slotId: 'absolute', styleRef: 'native', locked: shape.locked, zIndex: shape.zIndex, rotation:shape.rotation||0,
         style: { ...(shape.fill ? { fill: shape.fill } : {}), ...(shape.color ? { color: shape.color } : {}),
           ...(shape.fontFamily ? { fontFamily: shape.fontFamily } : {}), ...(shape.eastAsiaFontFamily ? { eastAsiaFontFamily: shape.eastAsiaFontFamily } : {}), ...(shape.fontSizePt ? { fontSizePt: shape.fontSizePt } : {}),
           ...(shape.bold !== undefined ? { fontWeight: shape.bold ? 700 : 400 } : {}) },
         geometry: { x: shape.x, y: shape.y, width: shape.width, height: shape.height },
-        nativeRef: { slideIndex: item.index, shapeId: shape.shapeId, name: shape.name,
-          shapeType: shape.shapeType, autoShapeType: shape.autoShapeType },
-        content: shape.kind === 'text' ? { text: shape.text } : shape.kind === 'image' ? { dataUrl: shape.dataUrl, crop: shape.crop, imageSha256: shape.imageSha256, imageDhash: shape.imageDhash } : shape.kind === 'table' ? { rows: shape.rows } : { label: shape.name, shape: 'rect' },
+        nativeRef: { contractVersion:2, slideIndex: item.index, shapeId: shape.shapeId, name: shape.name,
+          shapeType: shape.shapeType, autoShapeType: shape.autoShapeType, xmlHash:shape.xmlHash, nestedMediaHashes:shape.nestedMediaHashes },
+        content: shape.kind === 'text' ? { text: shape.text } : shape.kind === 'image' ? { dataUrl: shape.dataUrl, crop: shape.crop, imageSha256: shape.imageSha256, imageDhash: shape.imageDhash, nativeMaskXml:shape.maskXml } : shape.kind === 'table' ? { rows: shape.rows,columnWeights:shape.columnWeights,rowWeights:shape.rowWeights } : shape.kind === 'chart' ? shape.chartContent : { label: shape.name, shape: 'rect' },
         ...(shape.textFrame ? { nativeTextFrame: shape.textFrame } : {}),
       })),
     };
   });
   project.deck = ensureDeckV3({ schemaVersion: 3, deckId: stableId('deck', hash), slides });
+  project.importedInputScope = project.deck.slides.map(slide => ({ id: slide.id, nodes: slide.nodes.filter(node => ['text', 'table', 'chart'].includes(node.type)).map(node => ({ type: node.type, content: node.content })) }));
   project.outline = project.deck.slides.map((slide, index) => ({ id: slide.id, title: slide.title || `Slide ${index + 1}`, focus: '', refs: [] }));
   project.pages = slides.length;
-  project.externalPptx = { mode: 'preserve', sha256: hash, originalPath: manifest.path, width: manifest.width, height: manifest.height, importedAt: new Date().toISOString() };
+  project.externalPptx = { nativeContractVersion:2, mode: 'preserve', sha256: hash, originalPath: manifest.path, width: manifest.width, height: manifest.height, importedAt: new Date().toISOString() };
   return project;
 }
 
@@ -419,15 +448,15 @@ export async function importEditablePptx(project, bytes, hash, io = {}) {
 export async function renderImportedPptx(project, io = {}) {
   const slides = project.deck.slides.filter(slide => Number.isInteger(slide.nativeSlideIndex)).map(slide => ({
     nativeSlideIndex: slide.nativeSlideIndex,
-    omitShapeIds: (slide.templateOmissions || []).map(item => item.shapeId),
-    sourceArtifacts: (slide.nodes || []).filter(isSourceOwnedNode),
+    omitShapeIds: [...(slide.templateOmissions || []).map(item => item.shapeId),...(slide.nodes||[]).filter(n=>n.hidden||Number(n.style?.opacity??1)<=0).map(n=>n.nativeRef?.shapeId).filter(id=>id!==undefined)],
+    sourceArtifacts: (slide.nodes || []).filter(isSourceOwnedNode).map(node=>({...node,textLayout:textContract({...node,kind:node.type}),imageLayout:node.type==='image'?imageContract(node.content):undefined})),
     nodes: slide.nodes.filter(node => node.nativeRef).map(node => ({ type: node.type, semanticRole: node.semanticRole,
       nativeShapeId: node.nativeRef.shapeId,
       // The original PPTX already owns unchanged image bytes. Sending the same
       // base64 payload for every copy makes long-deck export unnecessarily huge.
       content: node.type === 'image' && !node.content?.mediaReplacement
         ? Object.fromEntries(Object.entries(node.content || {}).filter(([key]) => key !== 'dataUrl')) : node.content,
-      geometry: node.geometry, style: node.style })),
+      geometry: node.geometry, style: node.style, chartLayout:node.type==='chart'?chartContract(node.content):undefined, textLayout: textContract({...node,kind:node.type}) })),
   }));
   return (io.runPython || runPython)(project, EXPORT_SCRIPT, JSON.stringify({ original: project.externalPptx.originalPath, slides,
     sourceSlideMap: project.templateSlideMap, fonts: project.templateSpec?.fonts,exportManifest:exportManifest(project) }));

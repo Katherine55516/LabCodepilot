@@ -87,7 +87,8 @@ const longDocument = fs.existsSync(gammaPath)
 const gamma = normalizePaste(longDocument);
 assert.ok(gamma.semantic.chunks.length > 10, 'semantic indexing may split a packed source segment into multiple bounded chunks');
 assert.equal(gamma.semantic.stats.orphanHeadingCount, 0);
-assert.equal(gamma.semantic.stats.oversizedChunkCount, 0);
+const oversized=gamma.semantic.chunks.filter(chunk=>chunk.tokenCount>SEMANTIC_LIMITS.HARD_TOKENS);
+assert.ok(oversized.every(chunk=>chunk.sourceBlocks.some(id=>gamma.semantic.blocks.find(block=>block.id===id)?.type==='code')), 'only atomic code may exceed the retrieval chunk target; never split indentation as prose');
 const planningInput = sourcePlanningContext(gamma);
 assert.ok(planningInput.includes(gamma.semantic.chunks[0].id));
 assert.ok(planningInput.includes(gamma.semantic.chunks.at(-1).id));

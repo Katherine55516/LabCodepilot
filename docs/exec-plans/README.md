@@ -100,6 +100,9 @@
 
 | 文件 | 主题 | 完成日期 |
 |------|------|----------|
+| completed/ppt-hard-rule-remediation.md | 五项P0核心修复、实际PPTX/PDF实例合同、完整义务/媒体处置与32组专项回归；复杂视觉/长输入/真实模型边界 | 2026-10-08 |
+| completed/ppt-input-scope-harness.md | PPT harness 输入框架与受限扩展、强制审查、候选及缓存门禁；本地回归完成，真实模型语义准确率待评测 | 2026-10-08 |
+| completed/ppt-general-render-contract.md | 多输入共享文本/媒体契约、typed ingestion、深度密度与生成/发布门禁；PPTX/PDF/CDP/多格式回归 | 2026-10-08 |
 | completed/ppt-copy-media-integrity-20261007.md | PPT写作/重复、完整来源媒体与对象、实际文件门禁、唯一信息packing、字体主题和局部完整性；29专项/2808单测/37smoke/两模式模拟文件通过，外部验收单列 | 2026-10-08 |
 | completed/ppt-gamma-density-contract-audit-20261007.md | Gamma交接核对修复：最终模板fit、严格来源分片、slot/source写作与repair、共享可见QA和评审缓存；27项核对及本地回归通过 | 2026-10-07 |
 | completed/ppt-next-round-audit-performance-content.md | PPT审计/模板IR与安全/媒体存储/来源结构/trace及Before–After；本地PPT通过，Chat/Search与生产验证限制保留 | 2026-10-03 |

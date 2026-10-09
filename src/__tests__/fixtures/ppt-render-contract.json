@@ -1,0 +1,323 @@
+{
+  "id": "s",
+  "size": {
+    "width": 12192000,
+    "height": 6858000
+  },
+  "background": "#ffffff",
+  "elements": [
+    {
+      "id": "text0",
+      "nodeId": "text0",
+      "kind": "text",
+      "bounds": {
+        "x": 508000,
+        "y": 317500,
+        "width": 11049000,
+        "height": 762000
+      },
+      "content": {
+        "text": "多输入渲染契约 / Cross-input rendering"
+      },
+      "style": {
+        "fontSizePt": 28,
+        "lineHeight": 1.18,
+        "color": "#111827"
+      },
+      "zIndex": 1,
+      "textLayout": {
+        "version": 1,
+        "units": "pt",
+        "margins": [
+          3.6,
+          3.6,
+          3.6,
+          3.6
+        ],
+        "wrap": true,
+        "autoFit": "none",
+        "whiteSpace": "pre-wrap",
+        "overflowWrap": "anywhere",
+        "tabSize": 4,
+        "paragraphs": [
+          {
+            "text": "多输入渲染契约 / Cross-input rendering",
+            "lineHeight": 1.18,
+            "spaceAfterPt": 0
+          }
+        ],
+        "code": false
+      }
+    },
+    {
+      "id": "text1",
+      "nodeId": "text1",
+      "kind": "text",
+      "bounds": {
+        "x": 571500,
+        "y": 1333500,
+        "width": 4953000,
+        "height": 2286000
+      },
+      "content": {
+        "text": "def verify(value):\n    if value < 0:\n        return \"保留负号\"\n\n    return value",
+        "codeBlock": {
+          "language": "python",
+          "sourceText": "def verify(value):\n    if value < 0:\n        return \"保留负号\"\n\n    return value"
+        }
+      },
+      "style": {
+        "fontSizePt": 18,
+        "lineHeight": 1.18,
+        "color": "#111827",
+        "fontFamily": "Consolas"
+      },
+      "zIndex": 1,
+      "textLayout": {
+        "version": 1,
+        "units": "pt",
+        "margins": [
+          3.6,
+          3.6,
+          3.6,
+          3.6
+        ],
+        "wrap": true,
+        "autoFit": "none",
+        "whiteSpace": "pre-wrap",
+        "overflowWrap": "anywhere",
+        "fontFamily": "Consolas",
+        "tabSize": 4,
+        "paragraphs": [
+          {
+            "text": "def verify(value):",
+            "lineHeight": 1.18,
+            "spaceAfterPt": 0
+          },
+          {
+            "text": "    if value < 0:",
+            "lineHeight": 1.18,
+            "spaceAfterPt": 0
+          },
+          {
+            "text": "        return \"保留负号\"",
+            "lineHeight": 1.18,
+            "spaceAfterPt": 0
+          },
+          {
+            "text": "",
+            "lineHeight": 1.18,
+            "spaceAfterPt": 0
+          },
+          {
+            "text": "    return value",
+            "lineHeight": 1.18,
+            "spaceAfterPt": 0
+          }
+        ],
+        "code": true
+      }
+    },
+    {
+      "id": "table2",
+      "nodeId": "table2",
+      "kind": "table",
+      "bounds": {
+        "x": 5905500,
+        "y": 1333500,
+        "width": 5715000,
+        "height": 2540000
+      },
+      "content": {
+        "rows": [
+          [
+            "Metric",
+            "Value",
+            "Note"
+          ],
+          [
+            "Drawdown",
+            "-12.5",
+            "USD | net"
+          ],
+          [
+            "Missing",
+            "",
+            "two\nlines"
+          ]
+        ],
+        "columnWeights": [
+          12,
+          12,
+          12
+        ],
+        "rowWeights": [
+          27.24,
+          27.24,
+          48.48
+        ]
+      },
+      "style": {
+        "fontSizePt": 18,
+        "lineHeight": 1.18,
+        "color": "#111827",
+        "fill": "#e7e5f4"
+      },
+      "zIndex": 1,
+      "tableLayout": {
+        "version": 1,
+        "margins": [
+          7.2,
+          3,
+          7.2,
+          3
+        ],
+        "lineHeight": 1.18,
+        "autoFit": "none",
+        "wrap": true
+      }
+    },
+    {
+      "id": "chart3",
+      "nodeId": "chart3",
+      "kind": "chart",
+      "bounds": {
+        "x": 571500,
+        "y": 4000500,
+        "width": 4953000,
+        "height": 2349500
+      },
+      "content": {
+        "labels": [
+          "Profit",
+          "Loss",
+          "Zero"
+        ],
+        "values": [
+          5,
+          -4,
+          0
+        ],
+        "chartType": "bar",
+        "unit": "USD"
+      },
+      "style": {
+        "fontSizePt": 18,
+        "lineHeight": 1.18,
+        "color": "#111827"
+      },
+      "zIndex": 1,
+      "chartLayout": {
+        "version": 1,
+        "valid": true,
+        "minimum": -4.9,
+        "maximum": 5.9,
+        "zeroBaseline": true,
+        "unit": "USD",
+        "numberFormat": "0.##",
+        "svg": "<g transform=\"scale(12700)\"><text x=\"195\" y=\"10.175\" text-anchor=\"middle\" font-size=\"10.175\" fill=\"#111827\">USD</text><line x1=\"46.8\" x2=\"370.5\" y1=\"93.78472222222221\" y2=\"93.78472222222221\" stroke=\"#111827\" stroke-width=\"1\"/><text x=\"42.73\" y=\"34.225\" text-anchor=\"end\" font-size=\"10.175\" fill=\"#111827\">5.90</text><text x=\"42.73\" y=\"151.7\" text-anchor=\"end\" font-size=\"10.175\" fill=\"#111827\">-4.90</text><rect data-value=\"5\" x=\"68.38\" y=\"34.6875\" width=\"64.74\" height=\"59.097222222222214\" fill=\"#6758c8\"/><text x=\"100.75\" y=\"31.12625\" text-anchor=\"middle\" font-size=\"10.175\" fill=\"#111827\">5</text><text x=\"100.75\" y=\"173.89999999999998\" text-anchor=\"middle\" font-size=\"10.175\" fill=\"#111827\">Profit</text><rect data-value=\"-4\" x=\"176.27999999999997\" y=\"93.78472222222221\" width=\"64.74\" height=\"47.277777777777786\" fill=\"#6758c8\"/><text x=\"208.64999999999998\" y=\"151.2375\" text-anchor=\"middle\" font-size=\"10.175\" fill=\"#111827\">-4</text><text x=\"208.64999999999998\" y=\"173.89999999999998\" text-anchor=\"middle\" font-size=\"10.175\" fill=\"#111827\">Loss</text><rect data-value=\"0\" x=\"284.18\" y=\"93.78472222222221\" width=\"64.74\" height=\"0\" fill=\"#6758c8\"/><text x=\"316.55\" y=\"90.22347222222221\" text-anchor=\"middle\" font-size=\"10.175\" fill=\"#111827\">0</text><text x=\"316.55\" y=\"173.89999999999998\" text-anchor=\"middle\" font-size=\"10.175\" fill=\"#111827\">Zero</text></g>"
+      }
+    },
+    {
+      "id": "image4",
+      "nodeId": "image4",
+      "kind": "image",
+      "bounds": {
+        "x": 5905500,
+        "y": 4127500,
+        "width": 1651000,
+        "height": 2095500
+      },
+      "content": {
+        "dataUrl": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAZAAAABkCAIAAAAnqfEgAAABbElEQVR4nO3UsQnAQBADwT/33/O7hQsMZmEmVqRg5x7Wrrf43oxXt571EuBnggVkCBaQIVhAhmABGYIFZAgWkCFYQIZgARmCBWQIFpAhWECGYAEZggVkCBaQIVhAhmABGYIFZAgWkCFYQIZgARmCBWQIFpAhWECGYAEZggVkCBaQIVhAhmABGYIFZAgWkCFYQIZgARmCBWQIFpAhWECGYAEZggVkCBaQIVhAhmABGYIFZAgWkCFYQIZgARmCBWQIFpAhWECGYAEZggVkCBaQIVhAhmABGYIFZAgWkCFYQIZgARmCBWQIFpAhWECGYAEZggVkCBaQIVhAhmABGYIFZAgWkCFYQIZgARmCBWQIFpAhWECGYAEZggVkCBaQIVhAhmABGYIFZAgWkCFYQIZgARmCBWQIFpAhWECGYAEZggVkCBaQIVhAhmABGYIFZAgWkCFYQIZgARmCBWQIFpAhWECGYAEZggVkCBZwKl6obwPHnbWxDAAAAABJRU5ErkJggg==",
+        "fit": "contain"
+      },
+      "style": {
+        "fontSizePt": 18,
+        "lineHeight": 1.18,
+        "color": "#111827"
+      },
+      "zIndex": 1,
+      "imageLayout": {
+        "version": 1,
+        "crop": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "valid": true,
+        "fit": "contain"
+      }
+    },
+    {
+      "id": "image5",
+      "nodeId": "image5",
+      "kind": "image",
+      "bounds": {
+        "x": 7874000,
+        "y": 4127500,
+        "width": 1651000,
+        "height": 2095500
+      },
+      "content": {
+        "dataUrl": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAZAAAABkCAIAAAAnqfEgAAABbElEQVR4nO3UsQnAQBADwT/33/O7hQsMZmEmVqRg5x7Wrrf43oxXt571EuBnggVkCBaQIVhAhmABGYIFZAgWkCFYQIZgARmCBWQIFpAhWECGYAEZggVkCBaQIVhAhmABGYIFZAgWkCFYQIZgARmCBWQIFpAhWECGYAEZggVkCBaQIVhAhmABGYIFZAgWkCFYQIZgARmCBWQIFpAhWECGYAEZggVkCBaQIVhAhmABGYIFZAgWkCFYQIZgARmCBWQIFpAhWECGYAEZggVkCBaQIVhAhmABGYIFZAgWkCFYQIZgARmCBWQIFpAhWECGYAEZggVkCBaQIVhAhmABGYIFZAgWkCFYQIZgARmCBWQIFpAhWECGYAEZggVkCBaQIVhAhmABGYIFZAgWkCFYQIZgARmCBWQIFpAhWECGYAEZggVkCBaQIVhAhmABGYIFZAgWkCFYQIZgARmCBWQIFpAhWECGYAEZggVkCBZwKl6obwPHnbWxDAAAAABJRU5ErkJggg==",
+        "fit": "cover"
+      },
+      "style": {
+        "fontSizePt": 18,
+        "lineHeight": 1.18,
+        "color": "#111827"
+      },
+      "zIndex": 1,
+      "imageLayout": {
+        "version": 1,
+        "crop": [
+          0,
+          0,
+          0,
+          0
+        ],
+        "valid": true,
+        "fit": "cover"
+      }
+    },
+    {
+      "id": "image6",
+      "nodeId": "image6",
+      "kind": "image",
+      "bounds": {
+        "x": 9842500,
+        "y": 4127500,
+        "width": 1651000,
+        "height": 2095500
+      },
+      "content": {
+        "dataUrl": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAZAAAABkCAIAAAAnqfEgAAABbElEQVR4nO3UsQnAQBADwT/33/O7hQsMZmEmVqRg5x7Wrrf43oxXt571EuBnggVkCBaQIVhAhmABGYIFZAgWkCFYQIZgARmCBWQIFpAhWECGYAEZggVkCBaQIVhAhmABGYIFZAgWkCFYQIZgARmCBWQIFpAhWECGYAEZggVkCBaQIVhAhmABGYIFZAgWkCFYQIZgARmCBWQIFpAhWECGYAEZggVkCBaQIVhAhmABGYIFZAgWkCFYQIZgARmCBWQIFpAhWECGYAEZggVkCBaQIVhAhmABGYIFZAgWkCFYQIZgARmCBWQIFpAhWECGYAEZggVkCBaQIVhAhmABGYIFZAgWkCFYQIZgARmCBWQIFpAhWECGYAEZggVkCBaQIVhAhmABGYIFZAgWkCFYQIZgARmCBWQIFpAhWECGYAEZggVkCBaQIVhAhmABGYIFZAgWkCFYQIZgARmCBWQIFpAhWECGYAEZggVkCBZwKl6obwPHnbWxDAAAAABJRU5ErkJggg==",
+        "crop": [
+          0.25,
+          0,
+          0.25,
+          0
+        ]
+      },
+      "style": {
+        "fontSizePt": 18,
+        "lineHeight": 1.18,
+        "color": "#111827"
+      },
+      "zIndex": 1,
+      "imageLayout": {
+        "version": 1,
+        "crop": [
+          0.25,
+          0,
+          0.25,
+          0
+        ],
+        "valid": true,
+        "fit": "crop"
+      }
+    }
+  ]
+}

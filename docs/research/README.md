@@ -8,6 +8,9 @@
 
 | 文件 | 主题 |
 |------|------|
+| [ppt-hard-rules-vs-gamma-current-audit-20261008.md](ppt-hard-rules-vs-gamma-current-audit-20261008.md) | 当前 PPT/Gamma hard rules 分层比较；五项 P0 负向复现；第11–17节逐项实施讨论：调用链/修改位置、发布事务、export v2/实际渲染、collision、完整义务与媒体处置schema、兼容迁移、联动施工及通用验收；第18节五项核心修复、真实PPTX/PDF和32组专项回归、未完成的复杂视觉/长输入/模型验收 |
+| [ppt-input-scope-harness-review-20261008.md](ppt-input-scope-harness-review-20261008.md) | PPT harness 输入框架评估与修复：bounded explanation、强制逐页范围审查、局部候选/应用门禁、导入基线、版本失效与跨输入对抗回归；真实模型判断边界 |
+| [ppt-alpha-mining-layout-content-gamma-review-20261008.md](ppt-alpha-mining-layout-content-gamma-review-20261008.md) | Alpha Mining 同源8页对比与 Gamma Compiler 实机创建：默认20页Plan→受限10页、流式布局/双语/换行与真实导出、单页/元素Agent入口、版本比较及修复告警；跨输入共享渲染契约、typed table/code/process、source-adaptive 深度与可见门禁已实施；生产 PPTX/PDF、单测/冒烟/CDP 证据与剩余 P0–P2 验收 |
 | [ppt-factor-zoo-repetition-media-gamma-review-20261007.md](ppt-factor-zoo-repetition-media-gamma-review-20261007.md) | Mood Board 21页成品与Gamma逐页对照：重复32.30%、零图片/表格、模拟偏差与产品repair重复回流复现；P0修复、Prompt/组件契约与验收方案（待实施） |
 | [ppt-gamma-density-page-estimation-review-20261006.md](ppt-gamma-density-page-estimation-review-20261006.md) | 以附件Gamma密度为标准：22页不变的代码/Prompt根因、实测与控制实验、通用grouping/packing/自动页数方案及P0–P2建议 |
 | [ppt_next_round_audit.md](ppt_next_round_audit.md) | PPT全工作流/38项问题登记、模板分层限制、安全与Gamma同源内容对照 |

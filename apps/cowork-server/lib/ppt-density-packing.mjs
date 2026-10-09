@@ -1,7 +1,7 @@
 /** Bounded, traceable grouping and physical fit inside estimate/outline nodes.
  * Initial source projections are estimates of writing cost, not emitted copy. */
 import { densityProfile, densityText, displayUnits, automaticPages } from './ppt-density-profile.mjs';
-import { contentCanvas, fitComponents, sourceComponent, sourceImageComponents, isSourceArtifactItem, validateSourceArtifactRefs, INCH } from './ppt-density-capacity.mjs';
+import { contentCanvas, fitComponents, measureComponent, sourceComponent, sourceImageComponents, isSourceArtifactItem, validateSourceArtifactRefs, INCH } from './ppt-density-capacity.mjs';
 import { copyKey } from './ppt-copy-integrity.mjs';
 const unique = list => [...new Set(list.filter(Boolean))];
 function uniquePoints(points) {
@@ -25,10 +25,13 @@ export function pageCapacity(project = {}, index = 1) {
 function projection(item, detail) {
   const units = displayUnits(item.text);
   if (item.must_preserve_structure || ['SummaryBlock', 'ExampleBlock'].includes(item.type)) return units;
-  // Ordinary source prose is synthesized into an explanation. This bounded
-  // projection does not truncate data; writer/coverage QA owns actual copy.
-  const budget = detail === 'detailed' ? 95 : 65;
-  return Math.min(units, budget);
+  // Source-dependent synthesis cost: preserve distinct relationships rather
+  // than budgeting every paragraph as the same shallow 65/95-unit summary.
+  // This is an estimate, never a word minimum or authority to discard facts.
+  const anchors=(item.text.match(/\d+(?:\.\d+)?|\b(?:if|unless|because|therefore|however|when|before|after)\b|假设|条件|因此|但是|只有|除非|不(?:得|能|适用)/giu)||[]).length;
+  const retained=units*(detail==='detailed'?.8:.6);
+  return Math.min(units,Math.max(retained,Math.min(units,anchors*18)));
+
 }
 function sectionOf(item) { return (item.sectionPath || []).slice(0, 2).join(' / '); }
 export function sourceDensityPlan(source, project = {}) {
@@ -45,7 +48,11 @@ export function sourceDensityPlan(source, project = {}) {
       duplicate.sourceUnitIds.push(item.id); duplicate.chunkRefs.push(...item.chunkRefs); duplicate.refs.push(...item.source_ref);
       duplicate.relations.push('exact_repeated_claim'); continue;
     }
-    const units = projection(item, detail);
+    let units = projection(item, detail);
+    if(item.must_preserve_structure){
+      const measured=measureComponent(sourceComponent(item),capacity.geometry,capacity.fontSizePt);
+      units=Math.max(units,measured.height/Math.max(1,capacity.geometry.height)*capacity.target);
+    }
     // Language alternation is only a candidate relation, not proof of a
     // translation. Both languages retain display cost and source IDs.
     const translationPair = prev && sectionOf(item) === prev.section && prev.types.includes(item.type) &&
@@ -71,7 +78,7 @@ export function sourceDensityPlan(source, project = {}) {
   for (const g of groups) {
     const s = sectionMap.get(g.section) || { title: g.section.split(' / ').at(-1), chunkIds: [], sourceTokens: 0, contentCost: 0, objects: [], slides: 0 };
     s.chunkIds.push(...g.chunkRefs); s.contentCost += g.estimatedVisibleUnits;
-    s.objects.push(...g.types.filter(t => /Table|Equation|Process|Checklist/.test(t)));
+    s.objects.push(...g.types.filter(t => /Table|Code|Equation|Process|Checklist/.test(t)));
     sectionMap.set(g.section, s);
   }
   const sections = [...sectionMap.values()].map(s => ({ ...s, chunkIds: unique(s.chunkIds), objects: unique(s.objects),

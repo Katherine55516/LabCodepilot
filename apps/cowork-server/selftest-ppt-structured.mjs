@@ -1,3 +1,4 @@
+import { scopeReview } from './ppt-scope-test-helpers.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -109,7 +110,7 @@ try {
   const aiRequest = new EventEmitter(); aiRequest.method = 'POST'; aiRequest.headers = {};
   await structuredApi.handleStructuredPpt(aiRequest, new URL(`http://test/ppt/projects/${id}/ai-edit`), {
     uid, res: {}, readBody: async () => JSON.stringify({ scope: 'object', preview: true, slideId: slideOne.id, nodeId: titleOne.id, instruction: '聚焦标题', baseRevision: result.project.revision }),
-    send: (status, body) => { apiResponse = { status, body }; return true; }, deps: { modelCall: async () => ({ content: { text: 'API AI title' }, geometry: { x: -1 } }) }, activity: () => {}, log: () => {},
+    send: (status, body) => { apiResponse = { status, body }; return true; }, deps: { modelCall: async (p, prompt) => prompt.includes('整稿演示文稿内容评审器') ? scopeReview(p) : ({ content: { text: 'API AI title' }, geometry: { x: -1 } }) }, activity: () => {}, log: () => {},
   });
   assert.equal(apiResponse.status, 200, JSON.stringify(apiResponse.body)); assert.equal(apiResponse.body.proposal.content.text, 'API AI title'); assert.equal(apiResponse.body.proposal.geometry, undefined, 'AI proposals must not carry coordinates');
   await structuredApi.handleStructuredPpt(aiRequest, new URL(`http://test/ppt/projects/${id}/ai-edit`), {

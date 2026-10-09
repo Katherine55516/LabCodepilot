@@ -1,3 +1,4 @@
+import { adaptationDisposition } from './ppt-template-dispositions.mjs';
 import { visibleSlideText } from './ppt-evidence.mjs';
 import * as files from './files.mjs';
 import { Readable } from 'node:stream';
@@ -216,17 +217,16 @@ export function autoTemplateMediaOmissions(project, index, existing = []) {
   if (!spec || !project.source?.text || templateSourceAffinity(project, spec) >= .38) return [];
   const already = new Set(existing.map(item => String(item.shapeId)));
   return contentMediaCandidates(spec, project.templateFidelity).filter(node =>
+    node.content?.mediaRole==='old_template_content' && !node.content?.mustPreserve &&
     !node.content?.mediaReplacement && !already.has(String(node.nativeRef?.shapeId)))
-    .map(node => ({ shapeId: Number(node.nativeRef.shapeId),
-      reason: '原模板内容型图片与当前来源主题不一致，且没有可核对的来源绑定。', automatic: true,
-      role:'old_template_content',disposition:'excluded_approved',approvalBasis:'deterministic_topic_mismatch' }));
+    .map(node => adaptationDisposition(project,node,'old_template_content','deterministic_topic_mismatch','Explicit old sample media is retired after deterministic topic mismatch; no user approval or equivalent replacement is claimed.'));
 }
 
 export function templateMediaRole(node,spec,size){
   const declared=node.content?.mediaRole||node.content?.role;
   if(declared)return declared;
   if(safeDecorativeMedia(node,size,spec))return 'template_decoration';
-  if(contentMediaCandidates(spec,size).some(n=>n.id===node.id))return 'old_template_content';
+  if(contentMediaCandidates(spec,size).some(n=>n.id===node.id))return 'unknown';
   const area=node.geometry?.width*node.geometry?.height/(size.width*size.height);
   return area<.02?'template_icon':'template_artwork';
 }
@@ -643,7 +643,7 @@ export async function prepareTemplateFidelity(project, templateBytes, templateHa
   const templateStore = await import('./ppt-store.mjs');
   const owner = template?.kind === 'managed' ? 'managed' : project.uid;
   const cached = template && templateStore.readTemplateIR(owner, template.id, templateHash);
-  if (cached) {
+  if (cached?.parserVersion==='pptx-ir-4') {
     // Copy the opaque package for native export, never parse it again at runtime.
     const originalPath = await io.writeFile(project.id, 'template-original.pptx', Readable.from([templateBytes]), templateBytes.length, project.uid);
     if (typeof originalPath !== 'string' || !originalPath.startsWith('/')) throw new Error('template copy did not return a sandbox path');
@@ -653,7 +653,7 @@ export async function prepareTemplateFidelity(project, templateBytes, templateHa
   }
   project.templateCacheHit = false;
   const imported = await io.importPptx({ id: project.id, uid: project.uid, title: project.title }, templateBytes, templateHash);
-  if (template) templateStore.writeTemplateIR(owner, template.id, { schemaVersion: 1, parserVersion: 'pptx-ir-3', sha256: templateHash, imported });
+  if (template) templateStore.writeTemplateIR(owner, template.id, { schemaVersion: 1, parserVersion: 'pptx-ir-4', sha256: templateHash, imported });
   return fidelityFromImported(project, imported, templateHash);
 }
 
@@ -674,7 +674,7 @@ export function templateSlotPrompt(project, index) {
     example: slot.example, minVisualUnits: slot.minVisualUnits, maxVisualUnits: slot.capacity,
     requiredItems: slot.purpose === 'list' ? slot.paragraphCount : undefined, maxLines: slot.maxLines, lineVisualUnits: slot.lineVisualUnits, wordWrap: slot.wordWrap,
     paragraphPatterns: slot.purpose === 'list' ? slot.paragraphs.map(item => ({ hasLabelRun: item.hasLabelRun, example: item.example })) : undefined })))}。` +
-    '请在 JSON 中返回 slotTexts 对象，key 为上述槽位 id，value 为替换文字。标题与 title 字段一致，section 使用短标签。优先填入互不重复、由来源支持的独立事实；原模板槽位与本页主题不符或来源事实不足时，在 omitTemplateShapes 中列出该内容槽位、不适配图片、图表或表格的 shapeId 和至少八字的具体 reason，并省略其 slotTexts。配对的标题与说明须同时保留或同时省略。内容型原图须有当前来源的事实/图像绑定，否则应省略；背景照片、图标及纯装饰可保留。不要以章节名、标题、focus 或首条要点循环填满所有槽位；不需要的媒体及其旧图解标签应一起省略。' +
+    '请在 JSON 中返回 slotTexts 对象，key 为上述槽位 id，value 为替换文字。标题与 title 字段一致，section 使用短标签。优先填入互不重复、由来源支持的独立事实；原模板槽位与本页主题不符或来源事实不足时，在 omitTemplateShapes 中列出该内容槽位、不适配图片、图表或表格的 shapeId 和至少八字的具体 reason，并省略其 slotTexts。配对的标题与说明须同时保留或同时省略。承载证据、品牌、流程关系或角色不明的媒体必须保留；不能因主题不同或与新文字相交而删掉。旧样例媒体只有明确角色与系统处置证据才可退役；普通文字和source ID不能证明等价。omission reason仅为请求，不能写批准记录。背景照片、图标及纯装饰可保留。不要以章节名、标题、focus 或首条要点循环填满所有槽位；不需要的媒体及其旧图解标签应一起省略。' +
     'purpose=group-heading 是一组卡片的导航标题，不是独立事实；写简短分组标签，不消耗本页独立要点。' +
     'purpose=list 的 value 必须是恰好 requiredItems 个对象的数组，每项为 {"label":"加粗短名称","body":"常规字重的来源支持说明"}；hasLabelRun 为 true 时两部分都要有内容。每条必须不同，合计行数不得超过 maxLines，每行不超过 lineVisualUnits。' +
     `富来源正文的可见目标为约 ${Math.ceil(visibleBodyTarget(readingOrder.filter(slot => slot.role === 'content' && !['footnote', 'group-heading'].includes(slot.purpose)).reduce((sum, slot) => sum + slot.capacity, 0), project.planning?.slidePlan?.[index]?.depth))} visual units（封面、分节页除外）。不足时补充本页来源支持的解释，不能以重复、空话、删正文区域凑数。` +

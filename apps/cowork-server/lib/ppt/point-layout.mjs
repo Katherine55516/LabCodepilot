@@ -1,3 +1,4 @@
+import { measureText, textContract, PT_EMU, CARD_PADDING } from './render-contract.mjs';
 /** Fixed-slide reflow for semantic points. Values in boxes are fractions of
  * the parent list region, so browser preview and PPTX export share geometry. */
 const units = value => [...String(value || '')].reduce((sum, char) => sum + (char.codePointAt(0) > 127 ? 1 : .55), 0);
@@ -10,13 +11,10 @@ function pointParts(item = {}) {
 }
 
 function requiredHeight(parts, widthIn, fontSizePt) {
-  const innerWidthPt = Math.max(20, widthIn * 72 - 22);
-  // Visual units count a Han glyph as one full em and Latin text near half an
-  // em; a line therefore holds roughly width/fontSize units, not 1.65× that.
-  const lineCapacity = Math.max(8, innerWidthPt / fontSizePt * 1.05);
-  const lines = (parts.heading ? Math.max(1, Math.ceil(units(parts.heading) / lineCapacity)) : 0)
-    + Math.max(1, Math.ceil(units(parts.body) / lineCapacity));
-  return (lines * fontSizePt * 1.18 + (parts.heading ? 6 : 0) + 20) / 72;
+  const element={kind:'text',bounds:{width:widthIn*72*PT_EMU,height:1e12},style:{fontSizePt,lineHeight:1.18,paragraphSpacingEm:0},content:{text:parts.body}};
+  const contract=textContract(element,CARD_PADDING);
+  contract.paragraphs=[...(parts.heading?[{text:parts.heading,lineHeight:1.18,spaceAfterPt:3}]:[]),{text:parts.body,lineHeight:1.18,spaceAfterPt:0}];
+  return (measureText(element,contract).estimatedHeightPt+CARD_PADDING[1]+CARD_PADDING[3])/72;
 }
 
 export function layoutPoints(items = [], region = {}, options = {}) {

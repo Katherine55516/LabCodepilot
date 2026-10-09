@@ -8,6 +8,9 @@
 
 | 文件 | 主题 |
 |------|------|
+| ppt-hard-rule-remediation.md | 五项P0核心修复：统一硬门禁、实例合同v2/实际PDF、locked与背景、完整义务及局部AI、媒体处置v2、原生图表符号和本地验收边界 |
+| ppt-input-scope-harness.md | 原始 input 框架、框架内补充、v7 scopeAudit、局部 AI 候选绑定、导入输入/模板分离、审查完整性与验收限制 |
+| ppt-render-contract.md | 跨输入文本/段落/媒体共享规则、typed table/code/process、source-adaptive 深度密度、生成/发布可见损失门禁与实际 PPTX/PDF/CDP 回归 |
 | ppt-copy-media-integrity.md | 重复与写作归一化、source/media义务、原生数学/表/流程、文件核验门禁、唯一信息packing、字体与局部编辑完整性；P0/P1/P2实施及本地回归/模拟限制 |
 | ppt-gamma-density-packing.md | Gamma参照密度、自动syllabus、最终模板容量重测、严格分片/ownership、原生写作/repair契约、共享可见QA与评审失效；含10-07核对修复及验收限制 |
 | ppt-prototype-policy-chat-parity.md | 最新原型方式/LLM/模板/输入、异步估算、generationPolicy、稳定多轮聊天、局部写作参数、范围续期冲突与精确页尺寸；本地验收及真实模型限制 |

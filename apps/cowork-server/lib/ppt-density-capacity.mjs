@@ -1,8 +1,11 @@
+import { templateMediaRole } from './ppt-template-fidelity.mjs';
 /** Shared geometry/line estimator for page planning and source-owned rendering.
  * A fit is an analytic prediction; final Render Tree/PPTX QA remains mandatory. */
+import { measureText, textContract, PT_EMU } from './ppt/render-contract.mjs';
 import { displayUnits } from './ppt-density-profile.mjs';
 import { equationContent, equationDimensions } from './ppt-math.mjs';
 export const INCH = 914400;
+export const protectedTemplateAsset = node => Boolean(node?.content?.mustPreserve || ['evidence','semanticDiagram','source','brand'].includes(node?.content?.mediaRole));
 export function contentCanvas(project = {}, index = 1) {
   const fidelity = project.templateFidelity;
   const spec = fidelity?.slides?.[index];
@@ -46,6 +49,18 @@ export function contentCanvas(project = {}, index = 1) {
       if((footer||banner) && g.y>top && g.y<bottom+gap)bottom=Math.min(bottom,g.y-gap);
     }
   }
+  // Explicit evidence/brand assets are occupied space, not reclaimable old
+  // examples. Select a rectangular free region rather than hiding the asset.
+  const clearance=INCH*.08;
+  for(const node of (spec?.nodes || []).filter(node=>protectedTemplateAsset(node)||node.type==='image'&&templateMediaRole(node,spec,fidelity)==='unknown')){
+    if(!validBox(node.geometry))continue;
+    const g=node.geometry;if(g.x>=right||g.x+g.width<=left||g.y>=bottom||g.y+g.height<=top)continue;
+    const choices=[{l:left,r:Math.min(right,g.x-clearance),t:top,b:bottom},{l:Math.max(left,g.x+g.width+clearance),r:right,t:top,b:bottom},
+      {l:left,r:right,t:top,b:Math.min(bottom,g.y-clearance)},{l:left,r:right,t:Math.max(top,g.y+g.height+clearance),b:bottom}]
+      .filter(c=>c.r>c.l&&c.b>c.t).sort((a,b)=>(b.r-b.l)*(b.b-b.t)-(a.r-a.l)*(a.b-a.t));
+    if(!choices.length){right=left;bottom=top;break;}
+    const c=choices[0];left=c.l;right=c.r;top=c.t;bottom=c.b;
+  }
   return { geometry:{x:Math.round(left),y:Math.round(top),width:Math.max(0,Math.round(right-left)),height:Math.max(0,Math.round(bottom-top))},fontSizePt,
     capacityBasis:frames.length?'native_frame_geometry':'default_canvas_before_template_parse' };
 }
@@ -60,19 +75,28 @@ export function measureComponent(component, geometry, fontSizePt) {
     if (!rows.length || !rows[0].length || rows.some(row => row.length !== rows[0].length)) throw new Error('invalid source table geometry');
     columnWeights = rows[0].map((_, col) => Math.max(12, ...rows.map(row => Math.sqrt(displayUnits(row[col])) * 4)));
     const total = columnWeights.reduce((n, v) => n + v, 0);
-    rowWeights = rows.map(row => Math.max(...row.map((cell, col) => String(cell).split('\n').reduce((n, line) =>
-      n + Math.max(1, Math.ceil(displayUnits(line) / (lineUnits * columnWeights[col] / total))), 0))) + .35);
-    lines = rowWeights.reduce((n, v) => n + v, 0);
+    rowWeights = rows.map(row => Math.max(...row.map((cell,col)=>{
+      const e={kind:'text',content:{text:String(cell)},style:{fontSizePt,lineHeight:1.18,paragraphSpacingEm:0},bounds:{width:geometry.width*columnWeights[col]/total,height:1e12}};
+      return measureText(e,textContract(e,[7.2,3,7.2,3])).estimatedHeightPt+6;
+    })));
+    const height=Math.ceil(rowWeights.reduce((sum,v)=>sum+v,0)*PT_EMU);
+    return {lines:rowWeights.reduce((sum,v)=>sum+v/(fontSizePt*1.18),0),height,lineUnits,columnWeights,rowWeights,overflow:height>geometry.height};
   } else if(component.type==='image') {
     const ratio=Math.max(.05,Number(component.content?.width||1)/Number(component.content?.height||1));
     return {lines:0,height:Math.ceil(Math.min(geometry.height*.7,geometry.width/ratio)),lineUnits,overflow:false};
   } else if (['list', 'timeline'].includes(component.type)) {
-    lines = (component.content.items || []).reduce((n, item) => n + linesOf(item.text) + .4, 0);
+    const e={kind:component.type,bounds:{...geometry,height:1e12},content:component.content,style:{fontSizePt,lineHeight:1.18,paragraphSpacingEm:.4}};
+    const measured=measureText(e,textContract(e));
+    return {lines:measured.lines,height:Math.ceil((measured.estimatedHeightPt+7.2)*PT_EMU),lineUnits,overflow:measured.estimatedHeightPt*PT_EMU>geometry.height};
   } else if(component.content?.mathMl) {
     const dimensions=equationDimensions(component.content,fontSizePt);
     const width=Math.ceil(dimensions.widthPt/72*INCH),height=Math.ceil(dimensions.heightPt/72*INCH);
     return {lines:dimensions.heightPt/fontSizePt,width,height,lineUnits,overflow:width>geometry.width||height>geometry.height};
-  } else lines = linesOf(component.content?.text || '');
+  } else {
+    const e={kind:'text',bounds:{...geometry,height:1e12},content:component.content,style:{fontSizePt,lineHeight:1.18}};
+    const measured=measureText(e,textContract(e));
+    return {lines:measured.lines,height:Math.ceil((measured.estimatedHeightPt+7.2)*PT_EMU),lineUnits,overflow:measured.estimatedHeightPt*PT_EMU>geometry.height};
+  }
   const height = Math.ceil((lines * fontSizePt * 1.18 + 7.2) / 72 * INCH);
   return { lines, height, lineUnits, columnWeights, rowWeights, overflow: height > geometry.height };
 }
@@ -115,7 +139,7 @@ export function validateSourceArtifactRefs(items, refs) {
       intervals.set(item.id,[]);continue;
     }
     const start=ref.rowStart??1,end=ref.rowEnd??item.rows?.length;
-    if(!Number.isInteger(start)||!Number.isInteger(end)||start<1||end<=start||end>item.rows.length)throw new Error('invalid source table row range');
+    if(!Number.isInteger(start)||!Number.isInteger(end)||start<1||(end<start||end===start&&item.rows.length!==1)||end>item.rows.length)throw new Error('invalid source table row range');
     const existing=intervals.get(item.id)||[];
     if(existing.some(([a,b])=>start<b&&end>a))throw new Error('overlapping source table row ranges');
     existing.push([start,end]);intervals.set(item.id,existing);
@@ -127,14 +151,16 @@ export function sourceComponent(item, ref = {}) {
     const {id,type,...content}=item;
     return {type:'image',content:{...content,sourceImageId:id}};
   }
+  if(item.type==='CodeBlock')return {type:'text',content:{text:item.text,codeBlock:{language:item.language || '',sourceText:item.text}}};
   if(item.type==='EquationBlock')return {type:'text',content:equationContent(item.text)};
   if (item.type === 'TableBlock') {
     const start = ref.rowStart === undefined ? 1 : Number(ref.rowStart), end = ref.rowEnd === undefined ? item.rows.length : Number(ref.rowEnd);
-    if (!Number.isInteger(start) || !Number.isInteger(end) || start < 1 || end <= start || end > item.rows.length) throw new Error('invalid source table row range');
+    if (!Number.isInteger(start) || !Number.isInteger(end) || start < 1 || (end < start || end === start && item.rows.length !== 1) || end > item.rows.length) throw new Error('invalid source table row range');
     return { type: 'table', content: { rows: [item.rows[0], ...item.rows.slice(start, end)].map(row => row.map(String)) } };
   }
   if (item.type === 'ChecklistBlock') return { type: 'list', content: { items: item.text.split('\n').filter(line => /^\s*(?:[-*+]|\d+[.)])\s+/.test(line)).map(line => ({ text: line.replace(/^\s*(?:[-*+]|\d+[.)])\s+/, '') })) } };
-  if (item.type === 'ProcessBlock') return { type: 'timeline', content: { items: item.text.split(/(?:->|→)/u).map(text => ({ text: text.trim() })) } };
+  if (item.type==='ProcessBlock' && /branch|if\b|else\b|分支|否则|┌|├|└/i.test(item.text)) return {type:'text',content:{text:item.text,processSource:item.text}};
+  if (item.type === 'ProcessBlock') return { type: 'timeline', content: { items: item.text.split(/(?:->|→)|\n(?=\s*\d+[.)]\s)/u).map(text => ({ text: text.trim() })) } };
   return { type: 'text', content: { text: item.text } };
 }
 /** Captions use visible source text and their own capacity budget. */

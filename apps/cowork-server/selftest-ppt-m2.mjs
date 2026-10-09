@@ -1,3 +1,4 @@
+import { scopeReview, simulatedExport } from './ppt-scope-test-helpers.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -14,12 +15,12 @@ const uid = 'alice';
 let removed = [];
 const deps = {
   modelCall: async (project, prompt) => prompt.includes('整稿演示文稿内容评审器')
-    ? { missing: [], repeated: [], conflicts: [], unsupported: [] }
+    ? scopeReview(project)
     : prompt.includes('叙事规划器')
       ? { slides: Array.from({ length: project.pages }, (_, i) => ({ title: `章节 ${i + 1}`, focus: `论点 ${i + 1}`, refs: project.source?.segments?.length ? [project.source.segments[0].id] : [] })) }
       : { title: '内容页', bullets: ['可信来源'] },
   extractFile: async (_project, name, bytes) => ({ kind: 'file', name, text: bytes.toString(), segments: [{ id: '1', location: '行 1', text: bytes.toString() }] }),
-  renderPptx: async () => ({ bytes: 123, exportVerification: {status:"passed",basis:"test_double"} }),
+  renderPptx: async project => simulatedExport(project),
   renderPdf: async () => ({ bytes: 456 }),
   readFile: async () => ({ stream: Readable.from(Buffer.from('%PDF-1.4')), size: 8 }),
   removeContainer: async id => { removed.push(id); },
@@ -114,7 +115,7 @@ try {
   };
   assert.match(extract('sample.md', Buffer.from('# 中文主题\n\n数据增长')).text, /数据增长/);
   assert.match(extract('sample.html', Buffer.from('<p>有效内容</p><script>隐藏</script>')).text, /有效内容/);
-  assert.match(extract('sample.csv', Buffer.from('marker,value\nCD8A,90\n')).text, /marker=CD8A/);
+  assert.deepEqual(extract('sample.csv', Buffer.from('marker,value\nCD8A,90\n')).segments[0].rows,[['marker','value'],['CD8A','90']]);
   const fixtures = spawnSync(python, ['-c', `import io, json, base64
 from docx import Document
 from openpyxl import Workbook
@@ -130,10 +131,10 @@ b=io.BytesIO(); c=canvas.Canvas(b); c.drawString(30, 700, 'PDF facts'); c.save()
 print(json.dumps(out))`], { maxBuffer: 2_000_000 });
   assert.equal(fixtures.status, 0, fixtures.stderr.toString());
   for (const [ext, encoded] of Object.entries(JSON.parse(fixtures.stdout))) {
-    const expected = { csv: 'marker=CD8A', docx: 'Document facts', xlsx: 'Spreadsheet facts', pptx: 'Presentation facts', pdf: 'PDF facts' }[ext];
+    const expected = { csv: 'CD8A', docx: 'Document facts', xlsx: 'Spreadsheet facts', pptx: 'Presentation facts', pdf: 'PDF facts' }[ext];
     const parsed = extract(`sample.${ext}`, Buffer.from(encoded, 'base64'));
     assert.match(parsed.text, new RegExp(expected));
-    if (ext === 'xlsx') assert.match(parsed.text, /A1=Spreadsheet facts/);
+    if (ext === 'xlsx') assert.deepEqual(parsed.segments[0].rows,[['Spreadsheet facts']]);
   }
   const hasMatplotlib = spawnSync(python, ['-c', 'import matplotlib']).status === 0;
   if (hasMatplotlib) {

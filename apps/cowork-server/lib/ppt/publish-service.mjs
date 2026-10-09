@@ -5,7 +5,7 @@ import { renderImportedPptx } from './import-pptx.mjs';
 import { reviewSemantic } from './semantic-review-service.mjs';
 import { semanticReviewKey } from './versioning.mjs';
 import { finalQualityReport } from '../ppt-quality.mjs';
-import { acceptExportVerification } from '../ppt-export-integrity.mjs';
+import { acceptExportVerification, blockExportVerification } from '../ppt-export-integrity.mjs';
 
 export async function publishProject(uid, projectId, deps, activity, log) {
   const snapshot = getProject(uid, projectId);
@@ -23,19 +23,21 @@ async function publishLocked(uid, projectId, deps, snapshot, inputHash) {
   project.quality = snapshot.quality;
   const reviewed = reviewProject(project);
   project = reviewed.project;
-  if (project.externalPptx) {
-    reviewed.deterministic.issues = reviewed.deterministic.issues.filter(issue => ['render_overflow', 'minimum_font_size', 'font_template', 'font_cjk_coverage', 'font_invalid_character','media_replacement_missing','template_media_unaccounted','claim_multiple_primary_owners'].includes(issue.code)||/^(?:required_source_|visible_copy_)/u.test(issue.code));
-    reviewed.deterministic.hardErrors = reviewed.deterministic.issues.filter(issue => issue.severity === 'error').length;
-  }
-  project.quality = { ...(project.quality || {}), ...finalQualityReport(reviewed.deterministic, [], project.quality?.modelReview || { missing: [], repeated: [], conflicts: [], unsupported: [] }) };
+  // Native fidelity changes a rule's applicability at inspection time. It must
+  // never remove findings here: a clean critic cannot override visible loss.
+  project.quality = { ...(project.quality || {}), ...finalQualityReport(reviewed.deterministic, [], project.quality?.modelReview || { evaluation: 'not_evaluated', missing: [], repeated: [], conflicts: [], unsupported: [] }) };
   if (!project.quality.publishEligible) {
     project.status = 'quality_blocked'; project.stage = 'repair'; project.error = 'PPT quality gate blocked publish';
     saveProject(project); return { project, published: false };
   }
   const output = `/workspace/published-${project.revision}-${newId('artifact')}.pptx`;
   const candidate = { ...project, renderOutput: output };
-  const exportInfo=project.externalPptx ? await (deps.renderImportedPptx || renderImportedPptx)(candidate) : await deps.renderPptx(candidate);
-  acceptExportVerification(project,exportInfo);
+  try {
+    const exportInfo=project.externalPptx ? await (deps.renderImportedPptx || renderImportedPptx)(candidate) : await deps.renderPptx(candidate);
+    acceptExportVerification(project,exportInfo);
+  } catch(error) {
+    blockExportVerification(project,error);saveProject(project);return {project,published:false};
+  }
   project.publishedArtifactPath = output;
   project.status = 'completed'; project.stage = 'completed'; project.error = '';
   project.publishedRevision = project.revision; project.publishedAt = new Date().toISOString();

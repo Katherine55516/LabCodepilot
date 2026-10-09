@@ -4,6 +4,14 @@
 
 **AI 须知：发现新的技术债务时添加到此文件；解决后标注完成日期。**
 
+## PPT hard-rule 后续验收（2026-10-08）
+
+五项已复现漏洞的核心修复和本地回归已完成，见 [交接](../handover/ppt-hard-rule-remediation.md)。以下不得按当前 certificate passed 推定完成：
+
+- **P0 视觉边界**：复杂 group/alpha/曲线 ink 遮挡、任意 diagram 拓扑替换、复杂 chart 视觉符号未全认证。基础 collision/实际PDF glyph/frame和简单mixed-sign column已落地；unknown媒体保留，不支持替换阻断；visualVerified维持false。后续需要真实 ink/遮挡及关系fixtures。
+- **P1 长输入审查**：token-aware来源分区、父条件闭包和跨区结果合并未实现。当前完整原文不截断、超过1MiB review prompt显式容量失败；更小模型context需not_evaluated，不能返回空结果当通过。
+- **P1 外部验收**：live所选LLM的mandatory recall/框架/近义重复、部署Cowork字体/office运行环境、Windows/Microsoft PowerPoint未验收。缺真实转换环境时阻断，保留上次发布，不能降级payload-only证书。
+
 ## PPT 重复内容与媒体/来源结构丢失（2026-10-07 审计；2026-10-08 本地修复）
 
 - **P0-A：跨角色重复与修复回流。** Mood Board 模拟成品同页精确重复额外字符约32.30%。当前 `materializeCopy` 删除重复 takeaway 后，`repairProject` 可从 factSynthesis 再次插入相同句；独立复现后 `duplicateFindings` 仍为空。需统一 writer/repair/editor 的可见内容规范化与去重，增加幂等检查。

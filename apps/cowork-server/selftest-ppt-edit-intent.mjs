@@ -1,3 +1,4 @@
+import { scopeReview, simulatedExport } from './ppt-scope-test-helpers.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -37,7 +38,7 @@ try {
   let project = fixture(); const id = project.id;
   const node = project.deck.slides[1].nodes.find(item => item.semanticRole === 'title');
   const data = { scope: 'object', slideId: 's1', nodeId: node.id, instruction: 'Clarify the title', baseRevision: 1 };
-  const proposal = await proposals.createProposal(project, data, { modelCall: async () => ({ content: { text: 'How the mechanism works' } }) }, noop, noop);
+  const proposal = await proposals.createProposal(project, data, { modelCall: async (p, prompt) => prompt.includes('整稿演示文稿内容评审器') ? scopeReview(p) : ({ content: { text: 'How the mechanism works' } }) }, noop, noop);
   assert.match(proposal.beforeSvg, /^<svg/); assert.match(proposal.afterSvg, /How the mechanism works/);
   assert.equal(repo.getProject(uid, id).revision, 1); assert.equal(history.operationHistory(uid, id).length, 0, 'preview must be read-only');
   const otherNode = project.deck.slides[2].nodes.find(item => item.semanticRole === 'title');
@@ -50,11 +51,11 @@ try {
   assert.equal(undone.project.deck.slides[1].title, 'Mechanism'); assert.equal(undone.project.deck.slides[2].title, 'Other page preserved');
   await assert.rejects(() => commands.undo(uid, id, uid, applied.operation.id), error => error.statusCode === 409);
   project = repo.getProject(uid, id);
-  const stale = await proposals.createProposal(project, { ...data, baseRevision: project.revision }, { modelCall: async () => ({ content: { text: 'Proposed title' } }) }, noop, noop);
+  const stale = await proposals.createProposal(project, { ...data, baseRevision: project.revision }, { modelCall: async (p, prompt) => prompt.includes('整稿演示文稿内容评审器') ? scopeReview(p) : ({ content: { text: 'Proposed title' } }) }, noop, noop);
   await commands.applyCommand(uid, id, { type: 'node.setContent', baseRevision: project.revision, payload: { slideId: 's1', nodeId: node.id, content: { text: 'Manual title wins' } } });
   await assert.rejects(() => proposals.applyProposal(uid, id, stale.id), error => error.statusCode === 409);
   project = repo.getProject(uid, id);
-  const discarded = await proposals.createProposal(project, { ...data, baseRevision: project.revision }, { modelCall: async () => ({ content: { text: 'Discard this title' } }) }, noop, noop);
+  const discarded = await proposals.createProposal(project, { ...data, baseRevision: project.revision }, { modelCall: async (p, prompt) => prompt.includes('整稿演示文稿内容评审器') ? scopeReview(p) : ({ content: { text: 'Discard this title' } }) }, noop, noop);
   await proposals.discardProposal(uid, id, discarded.id);
   await assert.rejects(() => proposals.applyProposal(uid, id, discarded.id), error => error.statusCode === 409);
   const native = { ...project, externalPptx: { mode: 'preserve' } }; let modelCalled = false;
@@ -113,7 +114,7 @@ try {
   const generating = fixture(); generating.status = 'outline_ready'; generating.deck = null; generating.revision = 0; generating.nodes = {}; repo.saveProject(generating); runs.startRun(generating);
   const releases = new Map(); const calls = new Map();
   const deps = { modelCall: async (snapshot, prompt, _activity, _log, meta) => {
-    if (meta.nodeKey === 'review:deck') return { missing: [], repeated: [], conflicts: [], unsupported: [] };
+    if (meta.nodeKey?.startsWith('review:')) return scopeReview(snapshot);
     const slideId = meta.nodeKey.split(':')[1]; const epoch = edits.generationEpoch(snapshot, slideId);
     if (!meta.nodeKey.endsWith(':repair')) {
       calls.set(slideId, (calls.get(slideId) || 0) + 1);
@@ -121,7 +122,7 @@ try {
     }
     const changed = snapshot.editing?.instructions?.[slideId]?.length;
     return { title: `Distinct ${slideId} ${changed ? 'revised' : 'original'}`, titleCandidates: [`Distinct ${slideId} ${changed ? 'revised' : 'original'}`], bullets: slideId === 's0' ? [] : ['A source-backed mechanism explains the relationship.', 'Its assessment depends on the stated conditions.', 'Known limitations constrain the conclusion.'] };
-  }, renderPptx: async () => ({ bytes: 123, exportVerification: {status:"passed",basis:"test_double"} }), removeContainer: async () => {} };
+  }, renderPptx: async project => simulatedExport(project), removeContainer: async () => {} };
   assert.equal((await request(generating, '/generate', {}, deps)).status, 202);
   await waitUntil(() => releases.size === 3, 'three parallel pages started');
   const during = await edits.openGenerationScope(uid, generating.id, 's0'); assert.deepEqual(during.remainingSlideIds, ['s3']);
@@ -143,6 +144,7 @@ try {
   const batch = await edits.submitGenerationEdit(uid, deferred.id, { scopeId: fixed.id, scope: 'remaining', instruction: 'Clarify both pages', idempotencyKey: 'deferred_batch_once' });
   let failSecond = true; const editedCalls = new Map();
   const editDeps = { modelCall: async (_project, prompt) => {
+    if (prompt.includes('整稿演示文稿内容评审器')) return scopeReview(_project);
     const objects = JSON.parse(prompt.split('\nObjects: ')[1].split('\nInstruction: ')[0]);
     const target = objects.find(item => item.content.text)?.nodeId;
     editedCalls.set(target, (editedCalls.get(target) || 0) + 1);
@@ -183,14 +185,23 @@ try {
   repo.appendJsonLine(damaged, { id: 'second' });
   assert.deepEqual(repo.readJsonLines(damaged).map(row => row.id), ['first', 'second']);
   const published = fixture(); let renderPath;
-  await publish.publishProject(uid, published.id, { modelCall: async () => ({ missing: [], repeated: [], conflicts: [], unsupported: [] }), renderPptx: async value => { renderPath = value.renderOutput; return { bytes: 100, exportVerification: {status:"passed",basis:"test_double"} }; } });
+  await publish.publishProject(uid, published.id, { modelCall: async p => scopeReview(p), renderPptx: async value => { renderPath = value.renderOutput; return simulatedExport(value,100); } });
   assert.match(renderPath, /^\/workspace\/published-1-artifact_/);
   const previousArtifact = repo.getProject(uid, published.id).publishedArtifactPath;
   const changed = await commands.applyCommand(uid, published.id, { type: 'node.setContent', baseRevision: 1, payload: { slideId: 's1', nodeId: published.deck.slides[1].nodes.find(item => item.semanticRole === 'title').id, content: { text: 'Updated claim' } } });
-  await assert.rejects(() => publish.publishProject(uid, published.id, { modelCall: async () => ({ missing: [], repeated: [], conflicts: [], unsupported: [] }), renderPptx: async () => { throw new Error('render failure'); } }), /render failure/);
+  const failedExport=await publish.publishProject(uid, published.id, { modelCall: async p => scopeReview(p), renderPptx: async project => { throw new Error('render failure'); } });
+  assert.equal(failedExport.published,false);assert.equal(failedExport.project.status,'quality_blocked');assert.match(failedExport.project.error,/render failure/);
   assert.equal(repo.getProject(uid, published.id).publishedArtifactPath, previousArtifact);
   assert.equal(repo.getProject(uid, published.id).publishedRevision, 1);
   assert.equal(repo.getProject(uid, published.id).revision, changed.project.revision);
+
+  const clippedNative=fixture();clippedNative.externalPptx={mode:'preserve',width:9144000,height:6858000};
+  clippedNative.deck.slides.forEach((slide,index)=>{slide.nativeSlideIndex=index;slide.nodes.forEach((node,i)=>{node.nativeRef={slideIndex:index,shapeId:i+1};node.geometry={x:508000,y:(i?1270000:254000),width:7620000,height:(i?3810000:762000)};});});
+  const clipped=clippedNative.deck.slides[1].nodes.find(node=>node.semanticRole==='body');
+  clipped.content={text:'中英 mixed content '.repeat(60)};clipped.type='text';clipped.geometry={x:127000,y:127000,width:1270000,height:254000};clipped.style={fontSizePt:18};
+  repo.saveProject(clippedNative);let nativeExportCalled=false;
+  const blocked=await publish.publishProject(uid,clippedNative.id,{modelCall:async p=>scopeReview(p),renderImportedPptx:async()=>{nativeExportCalled=true;throw Error('must block before export');}},noop,noop);
+  assert.equal(blocked.published,false);assert.equal(nativeExportCalled,false);assert.ok(blocked.project.quality.deterministic.issues.some(i=>i.code==='typography_capacity'));
 
   const svg = await preview.templatePreview(uid, templates.BUILT_INS.find(item => item.id === 'light'), 1, deps); assert.match(svg, /^<svg/);
   await assert.rejects(() => preview.templatePreview(uid, templates.BUILT_INS.find(item => item.id === 'light'), -1, deps), error => error.statusCode === 400);

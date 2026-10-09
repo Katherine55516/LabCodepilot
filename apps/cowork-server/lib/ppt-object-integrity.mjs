@@ -1,5 +1,6 @@
+import { validAdaptation, verifiedReplacement } from './ppt-template-dispositions.mjs';
 /** The ownership ledger measures rendered objects, never mere citations. */
-import { sourceComponent, isSourceArtifactItem } from './ppt-density-capacity.mjs';
+import { sourceComponent, isSourceArtifactItem, protectedTemplateAsset } from './ppt-density-capacity.mjs';
 import { sourceDisplayText } from './ppt-source-text.mjs';
 import { visibleNodes, nodeContentText } from './ppt-visible-content.mjs';
 import { templateMediaRole } from './ppt-template-fidelity.mjs';
@@ -32,7 +33,7 @@ export function inspectObjectIntegrity(project, slides=project.deck?.slides||[])
       complete=missingRows.length===0 && rendered.length>0;
     } else {
       const expected=sourceComponent(item);
-      complete=rendered.some(({node})=>node.type===expected.type && key(textOf(node.content||{}))===key(textOf(expected.content)) &&
+      complete=rendered.some(({node})=>node.type===expected.type && (item.type==='CodeBlock' ? textOf(node.content||{})===item.text && node.content?.codeBlock?.language===(item.language||'') : key(textOf(node.content||{}))===key(textOf(expected.content))) &&
         (!expected.content.mathMl || node.content.mathMl===expected.content.mathMl));
     }
     const excluded=approved(project,item.id),status=excluded?'excluded_approved':complete?'rendered':'failed';
@@ -63,16 +64,20 @@ export function inspectObjectIntegrity(project, slides=project.deck?.slides||[])
     for(const asset of spec.nodes?.filter(node=>['image','chart','table'].includes(node.type))||[]){
       const visible=visibleNodes(slides[index]).find(node=>node.nativeRef?.shapeId===asset.nativeRef?.shapeId);
       const omission=slides[index].templateOmissions?.find(item=>item.shapeId===asset.nativeRef?.shapeId);
-      const replacements=visibleNodes(slides[index]).filter(node=>node.sourceArtifact);
-      const role=asset.type==='image'?templateMediaRole(asset,spec,project.templateFidelity):'old_template_content';
-      const status=visible?(visible.content?.mediaReplacement?'replaced_equivalent':'rendered'):
-        replacements.length?'replaced_equivalent':omission?.reason?.trim()?'excluded_approved':'failed';
+      const allVisible=visibleNodes(slides[index]);
+      const role=asset.type==='image'?templateMediaRole(asset,spec,project.templateFidelity):asset.content?.mediaRole||'unknown';
+      const sameAsset=visible&&visible.type===asset.type&&(asset.type==='image'
+        ? visible.content?.dataUrl===asset.content?.dataUrl&&visible.content?.imageSha256===asset.content?.imageSha256
+        : JSON.stringify(visible.content)===JSON.stringify(asset.content));
+      const artReplacement=visible&&visible.type==='image'&&visible.content?.mediaReplacement&&['template_decoration','template_icon','template_artwork'].includes(role)&&Boolean(visible.content.dataUrl)&&JSON.stringify(visible.geometry)===JSON.stringify(asset.geometry);
+      const replaced=verifiedReplacement(asset,omission,allVisible);
+      const status=sameAsset?'retained':artReplacement?'replaced_verified':approved(project,asset.id)?'excluded_by_user':replaced?'replaced_verified':!protectedTemplateAsset(asset)&&validAdaptation(project,asset,omission,role)?'retired_by_adaptation':'unresolved';
       templateAssets.push({objectId:asset.id,slideId:slides[index].id,role,status,
-        ...(omission?{reason:omission.reason,approvalBasis:omission.approvalBasis||'writer_topic_adaptation'}:{}),
-        replacementNodeIds:replacements.map(node=>node.id)});
-      if(status==='failed')issues.push({code:'template_media_unaccounted',severity:'error',slideId:slides[index].id,repairable:true,message:`Template asset ${asset.id} disappeared without a replacement or justified disposition.`});
+        ...(omission?{reason:omission.reason,approvalBasis:omission.approvalBasis||'unverified_request'}:{}),
+        replacementNodeIds:artReplacement?[visible.id]:replaced?omission.replacementNodeIds:[],...(artReplacement?{verificationBasis:'decorative_asset_in_same_frame'}:{})});
+      if(status==='unresolved')issues.push({code:'template_media_unaccounted',severity:'error',slideId:slides[index].id,repairable:true,message:`Template asset ${asset.id} disappeared without a replacement or justified disposition.`});
     }
   }
-  return {issues,ledger:{version:1,sourceHash:project.source?.sha256||null,objects,templateAssets,
+  return {issues,ledger:{version:2,sourceHash:project.source?.sha256||null,objects,templateAssets,
     requiredCount:objects.length,fulfilledCount:objects.filter(o=>['rendered','excluded_approved'].includes(o.status)).length}};
 }

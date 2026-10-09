@@ -96,15 +96,16 @@ function parseBlocks(segments) {
   const blocks = [];
   const section = [];
   let mathFence = false; let mathLines = []; let mathRefs = [];
-  let fence = false; let fenceLines = []; let fenceRefs = []; let fenceLocation = '';
+  let fenceLanguage = ''; let fenceMark = ''; let fence = false; let fenceLines = []; let fenceRefs = []; let fenceLocation = '';
   let origin = null;
   function add(type, text, segment) {
-    const value = text.trim();
+    const value = type === 'code' ? text : text.trim();
     if (!value) return;
-    for (const part of type === 'table' ? [value] : splitLongUnit(value)) {
+    for (const part of ['table','code'].includes(type) ? [value] : splitLongUnit(value)) {
       const kind = type === 'paragraph' && /(?:^|\n)\s*(?:[┌└│├┐┘─]+|[^\n]+(?:→|->)[^\n]+)/.test(part) ? 'diagram' : type;
       blocks.push({ id: `b_${String(blocks.length + 1).padStart(4, '0')}`, type: kind, text: part,
         sourceRefs: segment.sourceRefs || [String(segment.id)], location: segment.location || '', sectionPath: [...section],
+        ...(segment.rows ? { rows:segment.rows } : {}), ...(kind==='code'?{language:segment.language || ''}:{}),
         position: blocks.length, tokenCount: estimateTokens(part), semanticType: semanticType(part, kind),
         contentKind: contentKind(section, kind),
         discourseRole: discourseRole(part, kind) });
@@ -113,15 +114,17 @@ function parseBlocks(segments) {
   for (const segment of segments || []) {
     if (segment.origin && segment.origin !== origin) { origin = segment.origin; section.length = 0; section.push(origin === 'base' ? '旧版' : '最新进展'); }
     if (!segment.origin && /^(?:幻灯片|PDF 第)\s*\d+/.test(segment.location || '')) { section.length = 0; section.push(segment.location); }
+    if (segment.kind==='code' || segment.kind==='table') { add(segment.kind,segment.text,segment); continue; }
     const lines = String(segment.text || '').replace(/\r\n?/g, '\n').split('\n');
     let pending = []; let pendingType = 'paragraph';
     function flush() { if (pending.length) add(pendingType, pending.join('\n'), segment); pending = []; }
     for (const line of lines) {
       const trimmed = line.trim();
-      if (/^```|^~~~/.test(trimmed)) {
+      const codeFence=trimmed.match(/^(`{3,}|~{3,})(.*)$/);
+      if (codeFence && (!fence || codeFence[1][0]===fenceMark[0] && codeFence[1].length>=fenceMark.length && !codeFence[2].trim())) {
         flush();
-        if (fence) { add('code', fenceLines.join('\n'), { sourceRefs: [...new Set([...fenceRefs, String(segment.id)])], location: fenceLocation }); fenceLines = []; fenceRefs = []; fence = false; }
-        else { fence = true; fenceRefs = [String(segment.id)]; fenceLocation = segment.location || ''; }
+        if (fence) { add('code', fenceLines.join('\n'), { sourceRefs: [...new Set([...fenceRefs, String(segment.id)])], location: fenceLocation, language:fenceLanguage }); fenceLines = []; fenceRefs = []; fence = false; }
+        else { fenceLanguage=codeFence[2].trim(); fenceMark=codeFence[1]; fence = true; fenceRefs = [String(segment.id)]; fenceLocation = segment.location || ''; }
         continue;
       }
       if (fence) { fenceLines.push(line); if (!fenceRefs.includes(String(segment.id))) fenceRefs.push(String(segment.id)); continue; }
@@ -152,7 +155,7 @@ function parseBlocks(segments) {
     flush();
   }
   if (mathLines.length) add('equation', mathLines.join('\n'), {sourceRefs:[...new Set(mathRefs)]});
-  if (fenceLines.length) add('code', fenceLines.join('\n'), { sourceRefs: fenceRefs, location: fenceLocation });
+  if (fenceLines.length) add('code', fenceLines.join('\n'), { sourceRefs: fenceRefs, location: fenceLocation, language:fenceLanguage });
   return blocks;
 }
 
@@ -192,7 +195,7 @@ function groupBlocks(blocks) {
   for (const group of initial) {
     let part = []; let count = 0;
     for (const block of group) {
-      if (part.length && count + block.tokenCount > HARD_TOKENS) { groups.push(part); part = []; count = 0; }
+      if (part.length && count + block.tokenCount > HARD_TOKENS && !(block.type==='code' && part.every(item=>item.type==='heading'))) { groups.push(part); part = []; count = 0; }
       part.push(block); count += block.tokenCount;
     }
     if (part.length) groups.push(part);
@@ -236,6 +239,7 @@ export function buildSemanticIndex(segments) {
       splitChunkCount: Math.max(0, splitCount), finalChunkCount: chunks.length,
       evidenceAtomCount: evidenceAtoms.length, numericEvidenceCount: evidenceAtoms.filter(atom => atom.kind === 'number').length,
       orphanHeadingCount: chunks.filter(chunk => chunk.sourceBlocks.length === 1 && blocks.find(block => block.id === chunk.sourceBlocks[0])?.type === 'heading').length,
+      oversizedAtomicCodeCount: chunks.filter(chunk=>chunk.tokenCount>HARD_TOKENS&&chunk.sourceBlocks.some(id=>blocks.find(block=>block.id===id)?.type==='code')).length,
       oversizedChunkCount: chunks.filter(chunk => chunk.tokenCount > HARD_TOKENS).length } };
 }
 

@@ -1,4 +1,6 @@
+import { visibleNodes } from '../ppt-visible-content.mjs';
 import crypto from 'node:crypto';
+import { applyRenderContract, RENDER_CONTRACT_VERSION } from './render-contract.mjs';
 import { isSourceOwnedNode } from '../ppt-source-artifacts.mjs';
 import { applyLayoutRegistry, regionsFor, typographyFor } from '../ppt-layout.mjs';
 import { ensureDeckV3, materializeLegacySlide, stableId } from './ir.mjs';
@@ -59,8 +61,9 @@ function adaptiveList(node, region, slide, project) {
 }
 
 function buildPreservedSlide(project, slide, index) {
-  const source = project.templateFidelity.slides[slide.templateSlideIndex];
-  const elements = slide.nodes.filter(node => node.nativeRef?.slideIndex === slide.templateSlideIndex || isSourceOwnedNode(node)).map(node => ({
+  const origin=project.templateFidelity || project.externalPptx, originIndex=slide.templateSlideIndex ?? slide.nativeSlideIndex;
+  const source = origin.slides?.[originIndex] || {background:slide.nativeBackground};
+  const elements = visibleNodes(slide).filter(node => node.nativeRef?.slideIndex === originIndex || isSourceOwnedNode(node)).map(node => ({
     id: node.id, nodeId: node.id, kind: node.type === 'foreign' ? 'shape' : node.type,
     bounds: node.geometry, content: node.content || {},
     style: { fontFamily: project.templateSpec?.fonts?.body, eastAsiaFontFamily: project.templateSpec?.fonts?.bodyEastAsia,
@@ -69,13 +72,15 @@ function buildPreservedSlide(project, slide, index) {
     semanticRole: node.semanticRole, nativeRef: node.nativeRef, nativeTextFrame: node.nativeTextFrame,sourceArtifact:node.sourceArtifact,
   })).sort((a, b) => a.zIndex - b.zIndex);
   return { id: slide.id, slideId: slide.id, index, layoutId: slide.layoutId,
-    size: { width: project.templateFidelity.width, height: project.templateFidelity.height },
-    background: source.background || project.templateSpec?.palette?.background, elements, templatePreserved: true };
+    size: { width: origin.width || SLIDE_SIZE.width, height: origin.height || SLIDE_SIZE.height },
+    background: source.background || project.templateSpec?.palette?.background, elements: elements.map(applyRenderContract), templatePreserved: true };
 }
 
 function buildSlide(project, input, index, total) {
   if (project.templateFidelity?.mode === 'preserve' && Number.isInteger(input.templateSlideIndex)) return buildPreservedSlide(project, input, index);
+  if (project.externalPptx?.mode === 'preserve' && Number.isInteger(input.nativeSlideIndex)) return buildPreservedSlide(project,input,index);
   const slide = materializeLegacySlide(input);
+  slide.nodes=visibleNodes(slide);
   const regions = regionMap(slide);
   const typography = typographyFor(slide);
   if (slide.stylePreference?.bodyScale) typography.bodyPt *= slide.stylePreference.bodyScale;
@@ -115,7 +120,7 @@ function buildSlide(project, input, index, total) {
       bodyRegion = null;
     }
     if (bodyRegion) {
-      const kind = layout === 'timeline' ? 'timeline' : 'list';
+      const kind = bodyNode.type==='text' ? 'text' : layout === 'timeline' ? 'timeline' : 'list';
       const adaptive = kind === 'list' && bodyRegion.h >= 2 ? adaptiveList(bodyNode, bodyRegion, slide, project) : null;
       elements.push(element(bodyNode, kind, bodyRegion, adaptive?.content || bodyNode.content,
         { ...style(project, typography, 'body'), ...(adaptive ? { fontSizePt: adaptive.fontSizePt } : {}) }, 20));
@@ -155,26 +160,26 @@ function buildSlide(project, input, index, total) {
     content: { text: String(index + 1) }, style: { ...style(project, { bodyPt: 11 }, 'body'), fontSizePt: 11, textAlign: 'right' }, zIndex: 100, locked: true,
   });
   elements.sort((a, b) => a.zIndex - b.zIndex);
-  return { id: slide.id, slideId: slide.id, index, layoutId: slide.layoutId, size: SLIDE_SIZE, background: project.templateSpec?.palette?.background, elements };
+  return { id: slide.id, slideId: slide.id, index, layoutId: slide.layoutId, size: SLIDE_SIZE, background: project.templateSpec?.palette?.background, elements: elements.map(applyRenderContract) };
 }
 
 export function buildRenderTree(project, deckInput = project.deck) {
   const deck = ensureDeckV3(applyLayoutRegistry(deckInput));
   const slides = deck.slides.map((slide, index) => buildSlide(project, slide, index, deck.slides.length));
-  const scene = { schemaVersion: 1, units: 'emu', deckId: deck.deckId, size: SLIDE_SIZE, layoutVersion: deck.layoutVersion || 1, slides };
+  const scene = { schemaVersion: 1, renderContractVersion: RENDER_CONTRACT_VERSION, units: 'emu', deckId: deck.deckId, size: SLIDE_SIZE, layoutVersion: deck.layoutVersion || 1, slides };
   scene.hash = crypto.createHash('sha256').update(JSON.stringify(scene)).digest('hex');
   return scene;
 }
 
 export function rebuildRenderTree(project, previous, affectedSlideIds = []) {
-  if (!previous || !affectedSlideIds.length) return buildRenderTree(project);
+  if (!previous || previous.renderContractVersion!==RENDER_CONTRACT_VERSION || !affectedSlideIds.length) return buildRenderTree(project);
   const deck = ensureDeckV3(applyLayoutRegistry(project.deck));
   const affected = new Set(affectedSlideIds);
   const old = new Map(previous.slides?.map(slide => [slide.id, slide]) || []);
   const slides = deck.slides.map((slide, index) => affected.has(slide.id) || !old.has(slide.id)
     ? buildSlide(project, slide, index, deck.slides.length)
     : { ...old.get(slide.id), index });
-  const scene = { schemaVersion: 1, units: 'emu', deckId: deck.deckId, size: SLIDE_SIZE, layoutVersion: deck.layoutVersion || 1, slides };
+  const scene = { schemaVersion: 1, renderContractVersion: RENDER_CONTRACT_VERSION, units: 'emu', deckId: deck.deckId, size: SLIDE_SIZE, layoutVersion: deck.layoutVersion || 1, slides };
   scene.hash = crypto.createHash('sha256').update(JSON.stringify(scene)).digest('hex');
   return scene;
 }

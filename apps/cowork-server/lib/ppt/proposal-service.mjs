@@ -1,3 +1,4 @@
+import { assertCandidateScope, assertStoredCandidateScope } from './input-scope-service.mjs';
 import { normalizeAiAction, aiActionPrompt, proposalMetrics, WRITING_ACTIONS } from './ai-actions.mjs';
 import path from 'node:path';
 import { atomicJson, readJson, projectDataDir, enqueueProject, getProject } from './repository.mjs';
@@ -119,6 +120,7 @@ export async function createProposal(input, data, deps, activity, log) {
       if (missingRequiredEvidence(result.project, combined, contract).length) throw editError('structure change would remove required evidence', 422);
     }
     proposal.quality = validateCandidate(project, result.project, slide.id, route.type);
+    if (['data', 'structure', 'asset'].includes(route.type)) proposal.scopeAudit = await assertCandidateScope(project, result.project, deps, activity, log);
     const preview = { beforeSvg: slideSvg(buildSlideRenderTree(project, slide.id)),
       afterSvg: affected[0] ? slideSvg(buildSlideRenderTree(result.project, affected[0].id)) : '',
       afterSlides: affected.map(item => ({ slideId: item.id, svg: slideSvg(buildSlideRenderTree(result.project, item.id)) })) };
@@ -140,7 +142,7 @@ export async function createProposal(input, data, deps, activity, log) {
   const contract = project.planning?.slidePlan?.find(item => item.slideId === slide.id);
   const outline = project.outline?.find(item => item.id === slide.id) || slide;
   const sources = retrieveSlideSources(project, outline, contract || {});
-  const writingProject = { ...project, ...(action.action === 'translate' ? { editOutputLanguage: action.parameters.targetLanguage } : {}), prompt: `${project.prompt || ''}\n${instruction}` };
+  const writingProject = { ...project, ...(action.action === 'translate' ? { editOutputLanguage: action.parameters.targetLanguage } : {}) };
   const context = editPromptContext(writingProject, outline, sources, contract || {});
   const writingPolicy = promptPolicy(writingProject);
   const schema = data.scope === 'object' ? '{"content":{...}}' : '{"patches":[{"nodeId":"existing ID","content":{...}}]';
@@ -171,6 +173,8 @@ export async function createProposal(input, data, deps, activity, log) {
   const result = candidate(project, proposal);
   proposal.metrics = proposalMetrics(data.scope === 'object' ? [proposal.before] : proposal.patches.map(item => item.before), data.scope === 'object' ? [proposal.content] : proposal.patches.map(item => item.content), action.action, action.parameters);
   proposal.quality = validateCandidate(project, result.project, slide.id);
+  proposal.scopeAudit = await assertCandidateScope(project, { ...result.project,
+    ...(writingProject.editOutputLanguage ? { editOutputLanguage: writingProject.editOutputLanguage } : {}) }, deps, activity, log);
   const preview = { beforeSvg: slideSvg(buildSlideRenderTree(project, slide.id)), afterSvg: slideSvg(buildSlideRenderTree(result.project, slide.id)) };
   proposal.changedNodeIds = data.scope === 'object' ? [proposal.nodeId] : proposal.patches.map(item => item.nodeId);
   proposal.beforeRenderHash = digest(preview.beforeSvg); proposal.afterRenderHash = digest(preview.afterSvg);
@@ -188,10 +192,12 @@ export async function applyProposal(uid, projectId, id) {
   if (proposal.status !== 'proposed' || Date.parse(proposal.expiresAt) <= Date.now()) throw editError('proposal is discarded or expired', 409);
   const project = getProject(uid, projectId);
   checkContext(project, proposal);
+  assertStoredCandidateScope(project, candidate(project, proposal).project, proposal);
   const result = await applyCommand(uid, projectId, candidate(project, proposal).command, { allowInternal: Boolean(proposal.commands), allowExternalStructure: Boolean(proposal.commands), guard: latest => {
     const stored = readProposal(uid, projectId, id);
     if (stored.status !== 'proposed' || Date.parse(stored.expiresAt) <= Date.now()) throw editError('proposal is no longer available', 409);
     checkContext(latest, stored);
+    assertStoredCandidateScope(latest, candidate(latest, stored).project, stored);
     validateCandidate(latest, candidate(latest, stored).project, stored.slideId, stored.type);
   } });
   atomicJson(file(uid, projectId, id), { ...proposal, status: 'applied', operationId: result.operation.id });
