@@ -25,6 +25,14 @@ export function pptParityFixture(options: {completeAfterEdits?: number} = {}) {
       const text = String(body.prompt || body.text || '');
       await new Promise(resolve => setTimeout(resolve,text.includes('slow') ? 600 : 80));
       const requested = text.match(/(?:^|[^第\d])(\d+)\s*(?:页|slides?)/i)?.[1];
+      if (text.includes('with code')) {
+        // Mirrors the server's disclosed planning assumptions (code policy is reversible).
+        const keep = body.generationPolicy?.code?.presentation === 'keep';
+        return ok({recommendation:{recommended:keep?11:8,min:3,max:15,reason:'Semantic source capacity fixture. 2 段代码不上页',reasonBase:'Semantic source capacity fixture',
+          assumptions:[{topic:'code',decision:keep?'keep':'omit_with_disclosure',basis:keep?'user_choice':'default_non_code_template',reversible:true,affectedSourceIds:['b_0002','b_0004'],
+            reason:keep?'2 段代码按原文保留为代码组件。可改为不上页。':'2 段代码不上页（所选模板没有代码组件）；公式、阈值与流程逻辑仍以文字、步骤或公式呈现。可改为保留代码。'},
+            {topic:'language',decision:'bilingual_pairs',reversible:false,affectedSourceIds:[],reason:'输出语言与输入一致：3 组平行双语段落两种语言都保留，在同一组件内成对呈现；配对算一条内容，两种语言分别占用版面。'}]}});
+      }
       return ok({recommendation:{recommended:text.includes('latest')?9:8,min:3,max:15,requested:requested?Number(requested):undefined,reason:'Semantic source capacity fixture'}});
     }
     if (pathname === '/api/ppt/projects') {

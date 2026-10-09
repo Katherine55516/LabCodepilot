@@ -299,6 +299,8 @@ export function PptWorkspace() {
             recommended: project.planning.pageRecommendation.recommended,
             min: project.planning.pageRecommendation.range[0], max: project.planning.pageRecommendation.range[1],
             reason: project.planning.pageRecommendation.reason,
+            reasonBase: project.planning.pageRecommendation.reasonBase,
+            assumptions: project.planning.pageRecommendation.assumptions,
           } : undefined,
           outline: project.outline.map(slide => ({
           ...slide, id: slide.id, section: slide.section || slide.title, title: slide.title,

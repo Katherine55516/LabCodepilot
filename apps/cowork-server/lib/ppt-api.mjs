@@ -7,6 +7,7 @@ import { templateLimits } from './ppt-template-security.mjs';
 import { importEditablePptx as importTemplateIR } from './ppt/import-pptx.mjs';
 import { markPptTime } from './ppt-trace.mjs';
 import { normalizeGenerationPolicy, requestedPageCount, PPT_PROMPT_CONTRACT_VERSION } from './ppt-generation-policy.mjs';
+import { syncPresentationPolicy } from './ppt-presentation-policy.mjs';
 /** M1 PPT Workspace API and durable, server-side job orchestration.
  * All model calls and PPTX rendering run in a Cowork container. Project JSON
  * lives on the server data disk, so a second signed-in desktop sees the same
@@ -475,7 +476,7 @@ function startIngest(uid, id, activity, log, deps = defaultDeps) {
       const latest = store.get(uid, id);
       if (!latest || latest.status !== 'ingesting') return;
       if (baseSource) latest.update.baseSnapshot.source = baseSource;
-      latest.source = withSemanticIndex(source); latest.status = 'outlining'; latest.stage = 'outline'; latest.error = '';
+      latest.source = withSemanticIndex(source); syncPresentationPolicy(latest); latest.status = 'outlining'; latest.stage = 'outline'; latest.error = '';
       latest.inputProfile = profilePptInput(latest);
       latest.contentPlan = planSparseInput(latest, latest.inputProfile);
       if (automaticPages(latest)) {
@@ -524,6 +525,7 @@ function startOutline(uid, id, activity, log, deps = defaultDeps) {
       const p = store.get(uid, id);
       if (!p || p.status !== 'outlining') return;
       if (p.source?.segments?.length && !p.source.semantic) { p.source = withSemanticIndex(p.source); store.save(p); }
+      syncPresentationPolicy(p);
       try { transitionNode(p, 'outline', 'running'); } catch {}
       const automatic = automaticPages(p);
       if (automatic) p.pages = estimatePageRecommendation(p).recommended;
@@ -1306,7 +1308,8 @@ export async function handlePpt(req, url, { uid, send, res, readBody, activity, 
       const weight = data.inputKind === 'file' ? Math.min(16, Math.ceil(Math.max(0, Number(data.fileBytes) || 0) / 180000)) : 0;
       const recommended = Math.min(100, Math.max(result.recommended, weight ? 4 + weight : 3));
       return send(200, { recommendation: { recommended, min: Math.min(result.range[0], recommended), max: Math.min(100, Math.max(result.range[1], recommended)),
-        densityProfileId: result.densityProfileId, estimationBasis: result.estimationBasis, provisional: true, requested: requestedPageCount(prompt, text), reason: data.inputKind === 'file' ? '文件体量与补充要求初估；解析来源后校准。' : result.reason } });
+        densityProfileId: result.densityProfileId, estimationBasis: result.estimationBasis, provisional: true, requested: requestedPageCount(prompt, text), reason: data.inputKind === 'file' ? '文件体量与补充要求初估；解析来源后校准。' : result.reason,
+        reasonBase: data.inputKind === 'file' ? '文件体量与补充要求初估；解析来源后校准。' : result.reasonBase, assumptions: result.assumptions || [], warnings: result.warnings || [] } });
     }
     if (folderOrder) return await handleFolderOrder(req, uid, send);
     if (projectOrder) return await handleProjectOrder(req, uid, send);
@@ -1376,6 +1379,7 @@ export async function handlePpt(req, url, { uid, send, res, readBody, activity, 
           project.templateFidelity = await deps.prepareTemplateFidelity(project, store.readTemplate(template.kind === 'managed' ? 'managed' : uid, template.id), template.sha256, template);
         }
         if (sourceBytes) store.writeSource(uid, project.id, sourceBytes);
+        syncPresentationPolicy(project);
         store.save(project);
         const editableImport = Boolean(sourceBytes && source?.extension === 'pptx' && data.importMode === 'editable');
         if (editableImport) {
@@ -1520,7 +1524,7 @@ export async function handlePpt(req, url, { uid, send, res, readBody, activity, 
       let source;
       try { source = normalizePaste(data.text);source.images=[...source.images,...(project.source?.images||[]).filter(image=>!image.id.startsWith('inline-image-'))]; } catch (error) { throw new HttpError(400, error.message); }
       if (source.sha256 === project.source.sha256) return send(200, { project });
-      project.source = source; project.sourceRevision++; project.outlineRevision = 0;
+      project.source = source; syncPresentationPolicy(project); project.sourceRevision++; project.outlineRevision = 0;
       project.outline = []; project.nodes = {}; project.status = 'outlining'; project.stage = 'outline';
       store.save(project); startOutline(uid, id, activity, log, deps);
       return send(202, { project });
@@ -1547,6 +1551,7 @@ export async function handlePpt(req, url, { uid, send, res, readBody, activity, 
       if (data.compressionApproved !== undefined) project.compressionApproved = data.compressionApproved === true;
       project.pageDecision = { finalPageCount: nextPages, source: 'user', mode: 'explicit', includesCover: true, confirmedAt: new Date().toISOString() };
       if (project.update && project.pages < 6) throw new HttpError(400, 'update outline needs 6 to 100 slides');
+      syncPresentationPolicy(project);
       project.outline = normalizeOutline({ slides: data.slides }, project.pages, project.source, project.update, project.deckTitle);
       rescheduleTemplateFidelity(project);
       project.planning = refreshPlanning(project);
@@ -1560,6 +1565,7 @@ export async function handlePpt(req, url, { uid, send, res, readBody, activity, 
       if (project.status !== 'outline_ready') return send(409, { error: 'outline not ready' });
       const data = await body(req);
       if (data.generationPolicy !== undefined) project.generationPolicy = normalizeGenerationPolicy(data.generationPolicy);
+      syncPresentationPolicy(project);
       project.outlineSeed = Array.isArray(data.seedOutline) ? data.seedOutline.slice(0, 100).map(item => ({
         section: String(item?.section || '').slice(0, 120), title: String(item?.title || '').slice(0, 160),
         focus: String(item?.focus || '').slice(0, 360), description: String(item?.description || '').slice(0, 360),

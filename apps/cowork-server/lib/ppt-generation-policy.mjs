@@ -1,12 +1,17 @@
 /** Versioned, optional policy. Missing fields deliberately preserve legacy decks. */
-export const PPT_PROMPT_CONTRACT_VERSION = 8;
+export const PPT_PROMPT_CONTRACT_VERSION = 9;
 export function normalizeGenerationPolicy(value) {
   if (value === undefined) return undefined;
+  const code = value?.code?.presentation;
   if (!value || value.version !== 1 || !['balanced', 'detailed'].includes(value.detail)
-    || value.language?.mode !== 'source' || !['source_only', 'source_plus_explanation'].includes(value.knowledge)) {
+    || value.language?.mode !== 'source' || !['source_only', 'source_plus_explanation'].includes(value.knowledge)
+    || value.code !== undefined && !['auto', 'keep', 'omit'].includes(code)) {
     const error = new Error('invalid generation policy'); error.statusCode = 400; throw error;
   }
-  return { version: 1, detail: value.detail, language: { mode: 'source' }, knowledge: value.knowledge };
+  // code.presentation: auto derives from the request and template; keep/omit
+  // is the user's explicit choice from the Syllabus assumptions.
+  return { version: 1, detail: value.detail, language: { mode: 'source' }, knowledge: value.knowledge,
+    ...(code && code !== 'auto' ? { code: { presentation: code } } : {}) };
 }
 export function effectiveKnowledge(project) {
   return project.generationPolicy?.knowledge || (project.source?.segments?.length || project.update ? 'source_only' : 'source_plus_explanation');

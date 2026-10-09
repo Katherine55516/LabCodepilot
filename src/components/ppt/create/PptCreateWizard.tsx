@@ -5,7 +5,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { prepareImage, type VisualBlock } from '../PptBlocks';
 import { useTranslation } from '@/hooks/useTranslation';
 import { TemplateBrowser } from './TemplateBrowser';
-import type { PptModel, PptTemplate, PptGenerationPolicy } from '../types';
+import type { PptModel, PptTemplate, PptGenerationPolicy, PptPlanningAssumption } from '../types';
 
 export type CreateKind = 'prompt' | 'paste' | 'file';
 export type CreateEntry = 'new' | 'template' | 'direct';
@@ -22,7 +22,7 @@ const button = 'rounded-lg border border-border px-3 py-2 text-sm hover:bg-accen
 const primary = 'rounded-lg bg-primary px-4 py-2 text-sm font-medium text-primary-foreground disabled:opacity-50';
 const chips = ['季度业务复盘', '产品发布会', '客户解决方案提案', '培训课程'];
 
-export type PageEstimate = { recommended: number; min: number; max: number; reason: string; requested?: number };
+export type PageEstimate = { recommended: number; min: number; max: number; reason: string; requested?: number; reasonBase?: string; assumptions?: PptPlanningAssumption[]; warnings?: { code: string; message?: string }[] };
 function clampPages(value: number) { return Math.max(3, Math.min(100, Math.round(value))); }
 export function estimate(kind: CreateKind, prompt: string, text: string, file: File | null): PageEstimate {
   const pagePattern = /(?:^|[^第\d])(\d{1,3})\s*(?:页|slides?)(?!\w)/i;
@@ -195,11 +195,13 @@ export function PptCreateWizard({ models, templates, initialKind, modelKey, lock
           {kind === 'file' && <FileSource file={file} setFile={setFile} importMode={importMode} setImportMode={setImportMode} direct={false} supplementMode={supplementMode} setSupplementMode={setSupplementMode} prompt={prompt} setPrompt={setPrompt} text={text} setText={setText}/>}
           {!editableImport && kind !== 'prompt' && <button className={primary} disabled={!hasInput || estimating || analyzing || busy || templatePageMismatch} onClick={() => void analyze()}>{analyzing ? 'AI 正在生成大纲…' : outlineReady ? '重新生成 Syllabus' : '生成 Syllabus'}</button>}
         </section>
-        {outlineReady && !editableImport && kind !== 'prompt' && <section className="rounded-xl border border-border bg-card p-5"><h3 className="font-medium">Syllabus（大纲）</h3>{needsReplan && <p className="mt-2 text-xs text-primary">页数或模板已变化，请重新规划后确认。</p>}<OutlineEditor items={localOutline} onChange={editOutline} onReorganize={() => void analyze()} busy={analyzing || busy}/></section>}
+        {outlineReady && !editableImport && kind !== 'prompt' && <section className="rounded-xl border border-border bg-card p-5"><h3 className="font-medium">Syllabus（大纲）</h3>{needsReplan && <p className="mt-2 text-xs text-primary">页数或模板已变化，请重新规划后确认。</p>}{(suggested.assumptions?.length ?? 0) > 0 && <p className="mt-2 text-xs text-muted-foreground">{t('ppt.create.assumptionsHint')}</p>}<OutlineEditor items={localOutline} onChange={editOutline} onReorganize={() => void analyze()} busy={analyzing || busy}/></section>}
         </div>
         <aside className="min-w-0 space-y-4"><ModelSummary model={currentModel}/><section className="rounded-xl border border-border bg-card p-5"><h3 className="font-medium">模板 · {selectedTemplate?.name}</h3><button className="mt-2 text-xs text-primary" disabled={analyzing || busy} onClick={() => setStep(1)}>{t('ppt.create.changeTemplate')}</button></section>
         {!editableImport && <><section className="rounded-xl border border-border bg-card p-5" aria-busy={estimating}><h3 className="font-medium">{t('ppt.create.pages')}</h3><div className="mt-4 flex flex-wrap items-center gap-3"><button className={button} aria-label="减少页数" disabled={analyzing || busy || effectivePages <= 3} onClick={() => { setPagesTouched(true); setPages(effectivePages - 1); setCompressionApproved(false); }}>−</button><b data-testid="ppt-page-count">{effectivePages} 页</b><button className={button} aria-label="增加页数" disabled={analyzing || busy || effectivePages >= 100} onClick={() => { setPagesTouched(true); setPages(effectivePages + 1); setCompressionApproved(false); }}>＋</button><button className="text-xs text-primary" disabled={estimating || analyzing || busy} onClick={() => { setPagesTouched(false); setAnalyzedPages(null); setCompressionApproved(false); }}>{t('ppt.create.useEstimate')}</button></div>
-          <p className="mt-3 text-xs text-muted-foreground" role="status">{!hasInput ? t('ppt.create.templateBaseline') : estimating ? t('ppt.create.estimating') : `建议 ${suggested.requested || suggested.recommended} 页（${suggested.min}–${suggested.max}）· ${suggested.reason}`}</p>
+          <p className="mt-3 text-xs text-muted-foreground" role="status">{!hasInput ? t('ppt.create.templateBaseline') : estimating ? t('ppt.create.estimating') : `建议 ${suggested.requested || suggested.recommended} 页（${suggested.min}–${suggested.max}）· ${suggested.assumptions?.length ? suggested.reasonBase || suggested.reason : suggested.reason}`}</p>
+          {hasInput && !estimating && (suggested.assumptions?.length ?? 0) > 0 && <PlanningAssumptions assumptions={suggested.assumptions || []} codeChoice={policy.code?.presentation || 'auto'} disabled={analyzing || busy}
+            onCodeChoice={value => setPolicy(current => { const next = { ...current }; if (value === 'auto') delete next.code; else next.code = { presentation: value }; return next; })}/>}
           {estimateError && <p className="mt-2 text-xs text-destructive">{t('ppt.create.estimateFallback')} {estimateError}</p>}
           {pagesTouched && <p className="mt-2 text-xs text-primary">{t('ppt.create.manualPages')}</p>}
           {preservedPageCount !== null && <p className={`mt-2 text-xs ${templatePageMismatch ? 'text-destructive' : 'text-muted-foreground'}`}>原生模板 {preservedPageCount} 页，最多支持 {maxPreservedPages} 页。{templatePageMismatch && '请减少页数或更换模板。'}</p>}
@@ -210,6 +212,20 @@ export function PptCreateWizard({ models, templates, initialKind, modelKey, lock
     </div></div>
     <footer className="flex shrink-0 flex-wrap items-center gap-3 border-t border-border px-4 py-3"><button className={button} disabled={analyzing || busy} onClick={onCancel}>{t('ppt.cancel')}</button><button className={button} disabled={analyzing || busy} onClick={() => step === 2 ? setStep(1) : onBackToChooser()}>{step === 2 ? '← 返回模板' : '← 返回创建方式'}</button><span className="ml-auto"/>{step === 1 ? <button className={primary} disabled={selectedTemplate?.compatibility !== 'mapped'} onClick={() => setStep(2)}>{t('ppt.create.inputNext')}</button> : <button className={primary} disabled={!hasInput || busy || analyzing || estimating || templatePageMismatch || (compressionRisk && !compressionApproved) || !modelKey} onClick={() => void submit()}>{analyzing ? 'AI 正在生成大纲…' : editableImport ? '打开并编辑 PPTX' : kind === 'prompt' ? '开始生成' : !outlineReady || needsReplan ? '生成 Syllabus 并确认' : '确认 Syllabus 并开始生成'}</button>}</footer>
   </section>;
+}
+
+/** Disclosed planning decisions (Gamma's "calls to check"): the code choice is
+ * reversible here; changing it re-estimates and requires a new Syllabus. */
+function PlanningAssumptions({ assumptions, codeChoice, onCodeChoice, disabled }: { assumptions: PptPlanningAssumption[]; codeChoice: 'auto' | 'keep' | 'omit'; onCodeChoice: (value: 'auto' | 'keep' | 'omit') => void; disabled: boolean }) {
+  const { t } = useTranslation();
+  return <div className="mt-4 rounded-lg border border-border bg-muted/40 p-3" data-testid="ppt-planning-assumptions">
+    <h4 className="text-xs font-semibold">{t('ppt.create.assumptions')}</h4>
+    <ul className="mt-2 space-y-2 text-xs text-muted-foreground">{assumptions.map(item => <li key={`${item.topic}-${item.decision}`}>
+      <p>{item.reason}</p>
+      {item.topic === 'code' && <label className="mt-1 flex flex-wrap items-center gap-2 text-foreground">{t('ppt.create.codeChoice')}<select aria-label={t('ppt.create.codeChoice')} className="rounded border border-border bg-background px-2 py-1 text-xs" value={codeChoice} disabled={disabled} onChange={event => onCodeChoice(event.target.value as 'auto' | 'keep' | 'omit')}>
+        <option value="auto">{t('ppt.create.codeAuto')}</option><option value="keep">{t('ppt.create.codeKeep')}</option><option value="omit">{t('ppt.create.codeOmit')}</option></select></label>}
+    </li>)}</ul>
+  </div>;
 }
 
 function OutlineEditor({ items, onChange, onReorganize, busy = false }: { items: Outline; onChange: (items: Outline) => void; onReorganize?: () => void; busy?: boolean }) {

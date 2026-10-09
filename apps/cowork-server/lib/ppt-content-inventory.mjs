@@ -2,6 +2,7 @@
 import {sourceDisplayText} from './ppt-source-text.mjs';
 import { visibleNodes } from './ppt-visible-content.mjs';
 import { inspectObjectIntegrity } from './ppt-object-integrity.mjs';
+import { markLanguagePairs, markEquivalentStructures } from './ppt-presentation-policy.mjs';
 const normalizedText=value=>sourceDisplayText(value).toLowerCase().replace(/\s+/gu,' ').trim();
 const structural = new Set(['CodeBlock','TableBlock','EquationBlock','ProcessBlock','ChecklistBlock','TaxonomyBlock']);
 const tokens = text => [...new Set(String(text||'').toLowerCase().match(/[a-z][a-z0-9_-]{2,}|\d+(?:\.\d+)?|[\u3400-\u9fff]{2,4}/gu)||[])];
@@ -9,9 +10,58 @@ export function recall(expected, actual) {
   const terms = tokens(expected), shown = new Set(tokens(actual));
   return terms.length ? terms.filter(term=>shown.has(term)).length / terms.length : 0;
 }
+/** Splits one Markdown table row. A pipe inside inline math or inline code is
+ * content (e.g. the absolute value in `$|\overline{IC}|$`), not a column
+ * separator. Inline math follows the Pandoc rule so currency such as
+ * `$5 | $10` still splits: an opening `$` is followed by a non-space and a
+ * closing `$` is preceded by a non-space and not followed by a digit. */
+export function splitTableRow(line) {
+  const text = String(line).trim().replace(/^\|/, '').replace(/(?<!\\)\|$/, '');
+  const cells = []; let cell = '';
+  const closingDollar = start => {
+    for (let j = start; j < text.length; j++) {
+      if (text[j] === '\\') { j++; continue; }
+      if (text[j] === '$' && !/\s/u.test(text[j - 1] || ' ') && !/\d/u.test(text[j + 1] || '')) return j;
+    }
+    return -1;
+  };
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === '\\' && text[i + 1] === '|') { cell += '|'; i++; continue; }
+    if (ch === '`') {
+      const run = text.slice(i).match(/^`+/u)[0], end = text.indexOf(run, i + run.length);
+      if (end > i) { cell += text.slice(i, end + run.length); i = end + run.length - 1; continue; }
+    }
+    if (ch === '$' && text[i + 1] !== '$' && text[i + 1] && !/\s/u.test(text[i + 1])) {
+      const end = closingDollar(i + 1);
+      if (end > i) { cell += text.slice(i, end + 1); i = end; continue; }
+    }
+    if (ch === '\\' && text[i + 1] === '(') {
+      const end = text.indexOf('\\)', i + 2);
+      if (end > i) { cell += text.slice(i, end + 2); i = end + 1; continue; }
+    }
+    if (ch === '|') { cells.push(cell); cell = ''; continue; }
+    cell += ch;
+  }
+  cells.push(cell);
+  return cells.map(value => value.trim().replace(/<br\s*\/?\s*>/gi, '\n'));
+}
 export function markdownRows(text) {
-  return String(text).split('\n').filter(line=>/^\s*\|/.test(line)).map(line=>line.trim().replace(/^\||\|$/g,'').split(/(?<!\\)\|/u).map(cell=>cell.trim().replace(/\\\|/g,'|').replace(/<br\s*\/?\s*>/gi,'\n')))
+  return String(text).split('\n').filter(line=>/^\s*\|/.test(line)).map(splitTableRow)
     .filter(row=>!row.every(cell=>/^:?-{3,}:?$/.test(cell)));
+}
+/** Source tables must be rectangular for measurement and rendering. A ragged
+ * row is normalised to the header width (missing cells become empty, surplus
+ * cells are joined into the last cell) and reported, never thrown away. */
+export function normalizeTableRows(rows) {
+  const valid = (Array.isArray(rows) ? rows : []).filter(Array.isArray).map(row => row.map(cell => String(cell ?? '')));
+  const width = valid[0]?.length || 0;
+  const ragged = valid.map((row, index) => ({ index, width: row.length })).filter(row => row.width !== width);
+  if (!width || !ragged.length) return { rows: valid, warning: null };
+  const normalized = valid.map(row => row.length === width ? row
+    : row.length < width ? [...row, ...Array(width - row.length).fill('')]
+      : [...row.slice(0, width - 1), row.slice(width - 1).join(' | ')]);
+  return { rows: normalized, warning: { code: 'source_table_ragged_rows', headerWidth: width, raggedRows: ragged } };
 }
 function role(block) {
   const section = (block.sectionPath||[]).join(' ');
@@ -25,13 +75,19 @@ function role(block) {
   return ({ definition:'DefinitionBlock', comparison:'ComparisonBlock', timeline:'TimelineBlock', example:'ExampleBlock', problem:'WarningBlock', evidence:'EvidenceBlock' })[block.semanticType] || 'MechanismBlock';
 }
 export function buildContentInventory(blocks, chunks, graph = []) {
+  const warnings = [];
   const items = blocks.filter(block=>block.type!=='heading' && !/^(?:table of contents|contents|目录)(?:\s*\||$)/iu.test(block.sectionPath?.at(-1)||'') && !/^[-_*\s]+$/.test(block.text)).map(block=> {
     const type=role(block), chunkRefs=chunks.filter(chunk=>chunk.sourceBlocks.includes(block.id)).map(chunk=>chunk.id);
+    const table = type==='TableBlock' ? normalizeTableRows(block.rows || markdownRows(block.text)) : null;
+    if (table?.warning) warnings.push({ ...table.warning, sourceUnitId:block.id, sectionPath:block.sectionPath, source_ref:block.sourceRefs });
     return { id:block.id, type, semanticRole:type.replace('Block','').toLowerCase(), priority: structural.has(type)||type==='SummaryBlock'?'high':'normal',
       source_ref: block.sourceRefs, chunkRefs, sectionPath:block.sectionPath, text:block.text,
-      must_preserve_structure: structural.has(type), ...(type==='CodeBlock'?{language:block.language || ''}:{}), ...(type==='TableBlock'?{rows:block.rows || markdownRows(block.text)}:{}) };
+      must_preserve_structure: structural.has(type), ...(type==='CodeBlock'?{language:block.language || ''}:{}),
+      ...(block.diagramSource?{diagramSource:block.diagramSource}:{}),
+      ...(table?{rows:table.rows,...(table.warning?{tableGeometryWarning:table.warning}:{})}:{}) };
   });
-  return { version:1, source_sections:[...new Set(items.map(item=>item.sectionPath.join(' / ')))],
+  markLanguagePairs(items); markEquivalentStructures(items);
+  return { version:1, warnings, source_sections:[...new Set(items.map(item=>item.sectionPath.join(' / ')))],
     must_cover_topics:items.filter(item=>item.priority==='high').map(item=>item.id), items,
     key_claims:items.filter(item=>item.type==='DefinitionBlock').map(item=>item.id),
     mechanisms:items.filter(item=>item.type==='MechanismBlock').map(item=>item.id),
@@ -52,6 +108,9 @@ export function coverageMapV2(source, outline, explicit = []) {
     const destinations=outline.filter(slide=>Array.isArray(slide.sourceUnitIds)
       ? slide.sourceUnitIds.includes(item.id) : slide.chunkRefs?.some(id=>item.chunkRefs.includes(id))).map(slide=>slide.id);
     const decision=decisions.get(item.id);
+    if(item.presentation)return {sourceUnitId:item.id,type:item.type,priority:item.priority,source_ref:item.source_ref,slideIds:destinations,
+      representation:item.presentation,compressed:false,omitted:item.presentation==='omitted_by_policy',...(item.equivalentTo?{equivalentTo:item.equivalentTo}:{}),
+      reason:`${item.presentation}: ${item.presentationBasis||'presentation policy'}`};
     return {sourceUnitId:item.id,type:item.type,priority:item.priority,source_ref:item.source_ref,slideIds:destinations,
       representation:decision?.representation || (structural.has(item.type)?'structured':'explained'), compressed:Boolean(decision?.compressed),
       omitted:!destinations.length, reason:!destinations.length?String(decision?.reason||'unmapped; requires planner review'):''};
@@ -78,7 +137,9 @@ export function inspectInventoryCoverage(source, slides, visibleText) {
   if (!inventory) return {metrics:{},issues:[]};
   const text=slides.map(visibleText).join('\n');
   const verified=new Map(inspectObjectIntegrity({source},slides).ledger.objects.map(object=>[object.objectId,object.status==='rendered']));
-  const items=inventory.items.map(item=> {
+  // Items omitted or merged by a disclosed presentation policy are not
+  // expected on slides as separate objects and do not count against recall.
+  const items=inventory.items.filter(item=>!item.presentation).map(item=> {
     const nodes=slides.flatMap(visibleNodes).filter(node=>node.sourceArtifact?.sourceUnitId===item.id);
     const nativeStructure=verified.get(item.id)===true;
     const contentRecall=recall(normalizedText(item.text),normalizedText(text));

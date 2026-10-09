@@ -41,6 +41,9 @@ export function sourceDensityPlan(source, project = {}) {
   const detail = project.generationPolicy?.detail || 'balanced';
   const groups = [], seen = new Map();
   for (const item of inventory.items) {
+    // Policy-omitted or merged-equivalent items are disclosed in the planning
+    // assumptions and do not occupy slide space.
+    if (item.presentation) continue;
     const text = densityText(item.text), prev = groups.at(-1);
     const key = text.replace(/\s+/gu, ' ').trim();
     const duplicate = !item.must_preserve_structure && seen.get(key);
@@ -53,19 +56,21 @@ export function sourceDensityPlan(source, project = {}) {
       const measured=measureComponent(sourceComponent(item),capacity.geometry,capacity.fontSizePt);
       units=Math.max(units,measured.height/Math.max(1,capacity.geometry.height)*capacity.target);
     }
-    // Language alternation is only a candidate relation, not proof of a
-    // translation. Both languages retain display cost and source IDs.
-    const translationPair = prev && sectionOf(item) === prev.section && prev.types.includes(item.type) &&
+    // A detected language pair is one claim; the output language follows the
+    // input, so both languages keep their display cost and source IDs. Plain
+    // language alternation without a detected pair stays a candidate only.
+    const detectedPair = Boolean(prev && item.languagePairId && prev.lastPairId === item.languagePairId);
+    const translationPair = detectedPair || prev && sectionOf(item) === prev.section && prev.types.includes(item.type) &&
       /\p{Script=Han}/u.test(text) !== /\p{Script=Han}/u.test(prev.lastText);
-    const connected = prev && sectionOf(item) === prev.section && prev.estimatedVisibleUnits + units <= capacity.target;
-    const relation = translationPair ? 'possible_translation_pair' : connected ? 'same_source_context' : null;
+    const connected = prev && sectionOf(item) === prev.section && (detectedPair || prev.estimatedVisibleUnits + units <= capacity.target);
+    const relation = detectedPair ? 'translation_pair' : translationPair ? 'possible_translation_pair' : connected ? 'same_source_context' : null;
     if (connected) {
       prev.sourceUnitIds.push(item.id); prev.chunkRefs.push(...item.chunkRefs); prev.refs.push(...item.source_ref);
-      prev.estimatedVisibleUnits += units; prev.types.push(item.type); prev.lastText = text;
+      prev.estimatedVisibleUnits += units; prev.types.push(item.type); prev.lastText = text; prev.lastPairId = item.languagePairId || null;
       if (relation) prev.relations.push(relation);
     } else groups.push({ groupId: `density_${groups.length + 1}`, section: sectionOf(item), sourceUnitIds: [item.id],
       readerQuestion: item.sectionPath?.at(-1) || item.semanticRole, chunkRefs: [...item.chunkRefs], refs: [...item.source_ref],
-      estimatedVisibleUnits: units, types: [item.type], lastText: text, relations: [],
+      estimatedVisibleUnits: units, types: [item.type], lastText: text, lastPairId: item.languagePairId || null, relations: [],
       estimateBasis: 'source_display_projection', provisional: true });
     if (!item.must_preserve_structure) seen.set(key, groups.at(-1));
   }
@@ -87,7 +92,9 @@ export function sourceDensityPlan(source, project = {}) {
     slides: Math.round(s.contentCost / capacity.target * 100) / 100 }));
   return { version: 1, densityProfileId: profile.id, recommended, range: [Math.min(min, recommended), Math.max(max, recommended)],
     selected: project.pages || recommended, bodyPages: (project.pages || recommended) - 1,
-    contentCost: Math.round(totalUnits), costUnit: 'projected_display_visual_units', sections, groups: groups.map(({ lastText, ...g }) => ({ ...g, chunkRefs: unique(g.chunkRefs), refs: unique(g.refs) })),
+    languagePairs: new Set(inventory.items.map(item => item.languagePairId).filter(Boolean)).size,
+    policyOmitted: inventory.items.filter(item => item.presentation).map(item => ({ sourceUnitId: item.id, type: item.type, presentation: item.presentation, basis: item.presentationBasis || '' })),
+    contentCost: Math.round(totalUnits), costUnit: 'projected_display_visual_units', sections, groups: groups.map(({ lastText, lastPairId, ...g }) => ({ ...g, chunkRefs: unique(g.chunkRefs), refs: unique(g.refs) })),
     compactSections: sections.filter(s => s.slides < 1).map(s => s.title), preservedObjects: unique(sections.flatMap(s => s.objects)),
     sourceTokens: (source.semantic.chunks || []).reduce((n, c) => n + (c.tokenCount || 0), 0),
     compressionRatio: Math.round(totalUnits / (Math.max(1, (project.pages || recommended) - 1) * capacity.target) * 100) / 100,

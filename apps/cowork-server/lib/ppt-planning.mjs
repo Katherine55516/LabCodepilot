@@ -8,6 +8,7 @@ import { evidenceRelevance, selectEvidenceForSlide } from './ppt-evidence.mjs';
 import { planSparseInput, pointBudgetFor, profilePptInput, sparsePageEstimate } from './ppt-content-depth.mjs';
 import { effectiveKnowledge } from './ppt-generation-policy.mjs';
 import { outputLanguage } from './ppt-prompt-contracts.mjs';
+import { applyPresentationPolicy, planningAssumptions, assumptionSummary } from './ppt-presentation-policy.mjs';
 
 const ROLES = new Set(['cover', 'section', 'thesis', 'problem', 'comparison', 'architecture', 'process', 'framework', 'evidence', 'metric', 'timeline', 'case', 'recommendation', 'summary', 'roadmap', 'closing', 'mechanism', 'system', 'runtime', 'decision', 'appendix']);
 const VISUALS = new Set(['none', 'hero', 'comparison', 'pipeline', 'architecture', 'timeline', 'matrix', 'cards', 'chart', 'table', 'metric', 'hub-and-spoke', 'before-after', 'process']);
@@ -42,11 +43,20 @@ export function estimationSource(project) {
 }
 
 export function estimatePageRecommendation(project) {
-  const source = estimationSource(project);
+  const rawSource = estimationSource(project);
+  // The disclosed presentation policy (code on/off, merged equivalent flows)
+  // shapes the estimate; the stored source is never mutated here.
+  const source = rawSource ? applyPresentationPolicy(rawSource, project || {}) : rawSource;
   const inputProfile = project?.inputProfile || profilePptInput(project);
   const contentPlan = project?.contentPlan || (source?.kind === 'file' && !source?.text ? null : planSparseInput(project, inputProfile));
   const sparseEstimate = sparsePageEstimate(contentPlan, project?.generationPolicy?.detail);
-  const capacity = sourceCapacityPlan(source, project?.pages, project);
+  const warnings = [...(source?.semantic?.inventory?.warnings || [])];
+  let capacity = null;
+  // An estimate degrades, it never fails the step: a malformed source object
+  // is reported and the structural estimate is used instead.
+  try { capacity = sourceCapacityPlan(source, project?.pages, project); }
+  catch (error) { warnings.push({ code: 'capacity_estimate_failed', message: String(error?.message || error).slice(0, 300) }); }
+  const assumptions = source?.semantic?.inventory ? planningAssumptions(project || {}, source) : [];
   const chunks = substantiveChunks(source);
   const text = String(source?.text || project?.prompt || '');
   const headings = (text.match(/^#{1,4}\s+.+$/gm) || []).length;
@@ -77,11 +87,13 @@ export function estimatePageRecommendation(project) {
   const strict = ['file', 'paste', 'update', 'base'].includes(source?.kind || project?.inputKind);
   const independentSections = substantialSections || Math.max(1, headings);
   const evidenceUnits = (source?.semantic?.evidenceAtoms || []).filter(atom => atom.kind === 'number' || atom.kind === 'example').length;
+  const baseReason = capacity ? `按 ${capacity.groups.length} 个可组合内容组、Gamma参照密度与模板可读容量初估；章节不保底分页，大纲阶段校准` : sparseEstimate ? `先规划 ${sparseEstimate.semanticUnits} 个待论证语义单元，再按页面角色与容量估算；证据缺口须在内容阶段明确`
+      : overviewEstimate ? `检测到 ${chapters} 个主章节；按概览用途将相关章节合并，详细推导仍需标注取舍`
+      : `检测到 ${semanticTopics} 个语义主题${implementationSignals ? `、${implementationSignals} 个实现或约束信号` : ''}`;
   return {
     recommended, range: [min, max], selected,
-    reason: capacity ? `按 ${capacity.groups.length} 个可组合内容组、Gamma参照密度与模板可读容量初估；章节不保底分页，大纲阶段校准` : sparseEstimate ? `先规划 ${sparseEstimate.semanticUnits} 个待论证语义单元，再按页面角色与容量估算；证据缺口须在内容阶段明确`
-      : overviewEstimate ? `检测到 ${chapters} 个主章节；按概览用途将相关章节合并，详细推导仍需标注取舍`
-      : `检测到 ${semanticTopics} 个语义主题${implementationSignals ? `、${implementationSignals} 个实现或约束信号` : ''}`,
+    reason: [baseReason, assumptionSummary(assumptions)].filter(Boolean).join('。'),
+    reasonBase: baseReason, assumptions, warnings,
     densityProfileId: densityProfile().id, estimateVersion: 1, provisional: true,
     estimationBasis: capacity ? 'gamma_density_capacity' : sparseEstimate ? 'planned_semantic_units' : overviewEstimate ? 'overview_chapters' : 'source_structure', inputProfile,
     ...(capacity ? { contentCost: capacity.contentCost, costUnit: capacity.costUnit, groups: capacity.groups, capacity: capacity.capacity, preservedObjects: capacity.preservedObjects,

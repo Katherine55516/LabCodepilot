@@ -3,6 +3,7 @@ import { buildContentInventory } from './ppt-content-inventory.mjs';
  * Original source.segments remain the citation contract. Chunks can combine
  * several segments or split one segment, so chunk IDs never stand in for refs. */
 import { buildEvidenceAtoms } from './ppt-evidence.mjs';
+import { codeDiagram } from './ppt-presentation-policy.mjs';
 const HARD_TOKENS = 1200;
 const SOFT_TOKENS = 800;
 const TARGET_TOKENS = 550;
@@ -101,10 +102,15 @@ function parseBlocks(segments) {
   function add(type, text, segment) {
     const value = type === 'code' ? text : text.trim();
     if (!value) return;
-    for (const part of ['table','code'].includes(type) ? [value] : splitLongUnit(value)) {
-      const kind = type === 'paragraph' && /(?:^|\n)\s*(?:[┌└│├┐┘─]+|[^\n]+(?:→|->)[^\n]+)/.test(part) ? 'diagram' : type;
+    for (const original of ['table','code'].includes(type) ? [value] : splitLongUnit(value)) {
+      // A fenced ASCII/mermaid flowchart is a process, not code: it becomes
+      // ordered steps (the raw drawing stays in diagramSource for tracing).
+      const diagram = type === 'code' ? codeDiagram(original, segment.language || '') : null;
+      const part = diagram ? diagram.text : original;
+      const kind = diagram ? 'diagram' : type === 'paragraph' && /(?:^|\n)\s*(?:[┌└│├┐┘─]+|[^\n]+(?:→|->)[^\n]+)/.test(part) ? 'diagram' : type;
       blocks.push({ id: `b_${String(blocks.length + 1).padStart(4, '0')}`, type: kind, text: part,
         sourceRefs: segment.sourceRefs || [String(segment.id)], location: segment.location || '', sectionPath: [...section],
+        ...(diagram ? { diagramSource: { kind: diagram.kind, language: segment.language || '', text: original } } : {}),
         ...(segment.rows ? { rows:segment.rows } : {}), ...(kind==='code'?{language:segment.language || ''}:{}),
         position: blocks.length, tokenCount: estimateTokens(part), semanticType: semanticType(part, kind),
         contentKind: contentKind(section, kind),

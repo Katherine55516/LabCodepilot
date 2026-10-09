@@ -46,13 +46,15 @@ export type PptRenderTree = { schemaVersion: number; renderContractVersion?: num
 export type PptRunNode = { id: string; dependsOn: string[]; status: string; attempts: number; error?: string | null; startedAt?: string | null; completedAt?: string | null; slideId?: string };
 export type PptRun = { id: string; status: string; stage: string; lastSeq: number; nodes: Record<string, PptRunNode>; createdAt?: string; startedAt?: string | null; completedAt?: string | null; error?: string | null };
 
-export type PptGenerationPolicy = { version: 1; detail: 'balanced' | 'detailed'; language: { mode: 'source' }; knowledge: 'source_only' | 'source_plus_explanation' };
+export type PptGenerationPolicy = { version: 1; detail: 'balanced' | 'detailed'; language: { mode: 'source' }; knowledge: 'source_only' | 'source_plus_explanation'; code?: { presentation: 'keep' | 'omit' } };
+/** A disclosed planning decision shown with the estimate (code, diagrams, merges, language, tables). */
+export type PptPlanningAssumption = { topic: 'code' | 'diagram' | 'merge' | 'language' | 'table'; decision: string; basis?: string; reversible: boolean; affectedSourceIds: string[]; reason: string };
 export type PptProject = {
   generationPolicy?: PptGenerationPolicy; promptContractVersion?: number;
   id: string; title: string; prompt: string; pages: number; template: string;
   deckTitle?: { text: string; raw: string; source: 'user' | 'agent'; locked: boolean };
   pageDecision?: { finalPageCount: number; source: 'user' | 'estimate'; includesCover: boolean; confirmedAt: string | null; mode?: 'auto' | 'explicit' | 'preserve_import'; initialPageCount?: number; densityProfileId?: string; estimateVersion?: number; fitValidated?: boolean };
-  planning?: { pageRecommendation?: { recommended: number; range: [number, number]; reason: string } };
+  planning?: { pageRecommendation?: { recommended: number; range: [number, number]; reason: string; reasonBase?: string; assumptions?: PptPlanningAssumption[] } };
   compressionApproved?: boolean;
   templateSpec?: { id: string; name: string; version: number; palette?: PptTemplate['palette']; fonts?: PptTemplate['fonts'] };
   update?: { baseSnapshot: { title: string; deck?: { slides: PptSlide[] } | null } };
