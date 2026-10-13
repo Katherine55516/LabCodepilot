@@ -4,6 +4,9 @@ import { equationContent } from '../../ppt-math.mjs';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 const lines = element => element.kind === 'text' ? [element.content?.text || ''] : (element.content?.items || []).map((item, index) => element.kind === 'timeline' ? `${index + 1}. ${item.text}` : element.kind === 'list' ? `• ${item.text}` : item.text);
+// foreignObject uses normal CSS pixels. Scaling its SVG ancestor avoids browser
+// clipping/rounding of a 9525x transformed HTML layer (notably at small zoom).
+const htmlBox = (common, b, html) => `<g ${common}><g transform="translate(${b.x} ${b.y}) scale(9525)"><foreignObject x="0" y="0" width="${b.width/9525}" height="${b.height/9525}">${html}</foreignObject></g></g>`;
 const HANT = /[萬與為於後臺國學實體廣應當復雜雙發變這個們體繁臺灣]/;
 
 function chart(element, x, y) {
@@ -19,7 +22,7 @@ function table(element, x, y, w, h) {
   let cy=y; let result='';
   rows.forEach((row,rowIndex)=>{ let cx=x; const cellH=h*rowWeights[rowIndex]/rowSum;
     row.forEach((cell,columnIndex)=>{const cellW=w*weights[columnIndex]/sum;
-      result+=`<rect x="${cx}" y="${cy}" width="${cellW}" height="${cellH}" fill="${rowIndex===0?esc(element.style?.fill||'#e7e5f4'):'#ffffff'}" stroke="#777777" stroke-width="9525" stroke-opacity=".35"/><foreignObject x="${cx}" y="${cy}" width="${cellW}" height="${cellH}"><div xmlns="http://www.w3.org/1999/xhtml" style="box-sizing:border-box;width:${cellW/9525}px;height:${cellH/9525}px;overflow:hidden;transform:scale(9525);transform-origin:top left;padding:4px 9.6px;white-space:pre-wrap;overflow-wrap:anywhere;font-family:${esc(element.style?.fontFamily||'sans-serif')},'${esc(element.style?.eastAsiaFontFamily||'sans-serif')}',sans-serif;font-size:${font}px;line-height:1.18;font-weight:${rowIndex===0?700:400};color:${esc((rowIndex===0?element.style?.tableHeaderColor:null)||element.style?.color||'#111827')}">${esc(cell)}</div></foreignObject>`;
+      result+=`<rect x="${cx}" y="${cy}" width="${cellW}" height="${cellH}" fill="${rowIndex===0?esc(element.style?.fill||'#e7e5f4'):'#ffffff'}" stroke="#777777" stroke-width="9525" stroke-opacity=".35"/>${htmlBox('',{x:cx,y:cy,width:cellW,height:cellH},`<div xmlns="http://www.w3.org/1999/xhtml" style="box-sizing:border-box;width:${cellW/9525}px;height:${cellH/9525}px;overflow:hidden;padding:4px 9.6px;white-space:pre-wrap;overflow-wrap:anywhere;font-family:${esc(element.style?.fontFamily||'sans-serif')},'${esc(element.style?.eastAsiaFontFamily||'sans-serif')}',sans-serif;font-size:${font}px;line-height:1.18;font-weight:${rowIndex===0?700:400};color:${esc((rowIndex===0?element.style?.tableHeaderColor:null)||element.style?.color||'#111827')}">${esc(cell)}</div>`)}`;
       cx+=cellW; }); cy+=cellH; }); return result;
 }
 
@@ -29,12 +32,11 @@ export function slideSvg(slide) {
   const nodes = slide.elements.map(element => {
     const b = element.bounds; const rotation = Number(element.rotation || 0); const transform = rotation ? ` transform="rotate(${rotation} ${b.x + b.width / 2} ${b.y + b.height / 2})"` : ''; const common = `data-node-id="${esc(element.nodeId || '')}"${transform} opacity="${Number(element.style?.opacity ?? 1)}"`;
     if (['text', 'list', 'timeline', 'metric'].includes(element.kind)) {
-      // Keep CSS text at a normal pixel size, then scale the HTML subtree
-      // into the SVG's EMU viewBox (96 CSS pixels per inch).
+      // Use CSS pixels inside a scaled SVG group, shared with table cells.
       const size = Number(element.style?.fontSizePt || 18) * 96 / 72; const align = element.style?.textAlign === 'center' ? 'center' : element.style?.textAlign === 'right' ? 'right' : 'left';
       if(element.content?.mathMl){
         const math=equationContent(element.content.mathText||element.content.text).mathMl;
-        if(math)return `<foreignObject ${common} x="${b.x}" y="${b.y}" width="${b.width}" height="${b.height}"><div xmlns="http://www.w3.org/1999/xhtml" style="display:flex;align-items:center;width:${b.width/9525}px;height:${b.height/9525}px;transform:scale(9525);transform-origin:top left;font-size:${size}px;color:${esc(element.style?.color||'#111111')}">${math}</div></foreignObject>`;
+        if(math)return htmlBox(common,b,`<div xmlns="http://www.w3.org/1999/xhtml" style="display:flex;align-items:center;width:${b.width/9525}px;height:${b.height/9525}px;font-size:${size}px;color:${esc(element.style?.color||'#111111')}">${math}</div>`);
       }
       const text = lines(element).join('\n'); const latin = element.style?.fontFamily || 'sans-serif'; const eastAsia = HANT.test(text) ? (element.style?.eastAsiaFontFamilyHant || element.style?.eastAsiaFontFamily) : element.style?.eastAsiaFontFamily;
       const pointLayout = element.kind === 'list' ? element.content?.pointLayout : null;
@@ -50,7 +52,7 @@ export function slideSvg(slide) {
       const contract=element.textLayout || textContract(element);
       const paragraphHtml = pointHtml || contract.paragraphs.map((p,i)=>`<div style="white-space:pre-wrap;overflow-wrap:anywhere;${p.runs?.length?`font-size:${Math.max(...p.runs.map(r=>r.fontSizePt))*96/72}px;`:""}min-height:${p.lineHeight}em;line-height:${p.lineHeight};margin-bottom:${i===contract.paragraphs.length-1?0:p.spaceAfterPt*96/72}px">${p.runs?p.runs.map(run=>`<${run.bold?"strong":"span"} style="font-size:${run.fontSizePt*96/72}px;font-weight:${run.bold?700:400}">${esc(run.text)}</${run.bold?"strong":"span"}>`).join(''):esc(p.text)}</div>`).join('');
       const [ml,mt,mr,mb]=pointHtml?[0,0,0,0]:contract.margins;
-      return `<foreignObject ${common} x="${b.x}" y="${b.y}" width="${b.width}" height="${b.height}"><div xmlns="http://www.w3.org/1999/xhtml" style="position:relative;box-sizing:border-box;padding:${mt*96/72}px ${mr*96/72}px ${mb*96/72}px ${ml*96/72}px;white-space:pre-wrap;overflow-wrap:anywhere;tab-size:4;width:${b.width / 9525}px;height:${b.height / 9525}px;overflow:hidden;transform:scale(9525);transform-origin:top left;background:${esc(element.style?.fill || 'transparent')};color:${esc(element.style?.color || '#111827')};font-family:${contract.code?"'Consolas','Noto Sans Mono CJK SC','Noto Sans Mono CJK TC','DejaVu Sans Mono','Liberation Mono','Menlo',monospace":`'${esc(latin)}','${esc(eastAsia || latin)}',sans-serif`};font-size:${size}px;font-weight:${Number(element.style?.fontWeight || 400)};font-style:${esc(element.style?.fontStyle || 'normal')};line-height:${Number(element.style?.lineHeight || 1.2)};letter-spacing:${Number(element.style?.letterSpacing || 0)}px;text-align:${align}">${paragraphHtml}</div></foreignObject>`;
+      return htmlBox(common,b,`<div xmlns="http://www.w3.org/1999/xhtml" style="position:relative;box-sizing:border-box;padding:${mt*96/72}px ${mr*96/72}px ${mb*96/72}px ${ml*96/72}px;white-space:pre-wrap;overflow-wrap:anywhere;tab-size:4;width:${b.width / 9525}px;height:${b.height / 9525}px;overflow:hidden;background:${esc(element.style?.fill || 'transparent')};color:${esc(element.style?.color || '#111827')};font-family:${contract.code?"'Consolas','Noto Sans Mono CJK SC','Noto Sans Mono CJK TC','DejaVu Sans Mono','Liberation Mono','Menlo',monospace":`'${esc(latin)}','${esc(eastAsia || latin)}',sans-serif`};font-size:${size}px;font-weight:${Number(element.style?.fontWeight || 400)};font-style:${esc(element.style?.fontStyle || 'normal')};line-height:${Number(element.style?.lineHeight || 1.2)};letter-spacing:${Number(element.style?.letterSpacing || 0)}px;text-align:${align}">${paragraphHtml}</div>`);
     }
     if (element.kind === 'image' && element.content?.dataUrl) {
       const crop = element.imageLayout?.valid ? element.imageLayout.crop : element.content.crop || [0, 0, 0, 0];

@@ -42,3 +42,17 @@ PDF 测试要求 `soffice` 在 PATH，测试文件中有本机 bundled Python fa
 测量是 conservative prediction，不是 glyph shaping/ink bounds。native 未继承到显式 font 的表格仍需更精细解析；复杂 native masks 的预览可能近似，原生保真输出不因此重建。极长代码保留原文并阻止容量不合格发布，尚未实现带行映射的续页；跨格 HTML 表格有 required warning。PDF OCR、任意流程拓扑、复杂多 series 图表和真实模型 Gamma 内容盲评仍有独立验收。
 
 正确保真路径保留原图遮罩；中文字体覆盖/实际显示已有正面证据。不要把旧 generic route 的错误概括成当前所有 native 模板/中文输出失败。字体/渲染引擎差异需用真实转换检查，结构成功不等于画面完全一致。
+
+## 2026-10-13 图片输入和逐页编辑器
+
+- Prompt/paste/file supplement 共用图片入口，最多 16 个用户附件；服务端来源媒体按 SHA256 去重，并可按附件名解析 Markdown 图片引用。PNG/JPG 也可直接作为源文件。
+- 原始 DOCX/Office 媒体、HTML 内嵌 SVG、Excel 原生 chart 的 PDF 预览、PDF 矢量图页面都进入来源图片目录。解码或工具失败记录 required `mediaWarnings`，不能静默跳过；外链/本地引用由附件解析，不执行导入 HTML 的 JS。
+- 草稿主画布只有已开始页面；真实页面预览完成后立即填入，后续页面按阅读顺序开始。source/media 校验仍有界并行；模型适配器仍按结构化页返回，不模拟 token 打字。
+- SVG 文字和表格采用外层 SVG transform 加正常像素 foreignObject，避免对 HTML layer 放大 9525 倍。生成的 native 文字框使用共享测量预留字形高度；来源 canvas 避开保留的前景图片。
+- 单一表格/图片/图表及简短说明在标题下区域居中；手动几何优先。修改要求面板固定标题/按钮，主体和历史可以滚动，并保留需求、用户修改、处理结果和草稿。
+- 自动容量续页保留原标题；末页标题按语言为“感谢观看”/“Thanks for watching!”，正文结论保留；可见的备注替代文案进入 writer repair 门禁。
+- 页面 topic、章节和眉题按实际输入的主要语言生成，独立于旧正文语言提示；明确的中英平行标题只保留主要语言，正文双语证据、技术名称和人工锁定标题保真。末页使用同一语言决策，生成结束语仍可编辑。
+- 文件补充图表的媒体 refs 跟随补充段落的 `S` 编号，避免指向主文件同编号段落。
+- Tailwind 类发现和 TypeScript 输入限定于源码，避免将 `.ppt-build` 中的整份应用副本/生成产物当成新的源码扫描。
+- Next 16.2.1 的 NFT 全目录 glob 在初始追踪阶段跳过，生成目录也从最终追踪中排除；部署所需 external packages 仍通过显式 includes 保留。构建验收使用临时字体响应，不改变产品字体或提交字体文件。
+- 验证入口：`selftest-ppt-input-visuals.mjs`、`ppt-progressive-input.spec.ts`，其余回归和限制见本轮执行计划。

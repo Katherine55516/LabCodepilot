@@ -103,6 +103,7 @@
 
 | 文件 | 主题 | 完成日期 |
 |------|------|----------|
+| completed/ppt-input-progressive-editor-20261013.md | 七项图片输入、逐页预览、裁切/居中、聊天修改、内容/结束语和主要语言 topic；本地单元/领域/全站 smoke/CDP/生产构建通过 | 2026-10-13 |
 | completed/ppt-offline-contract-template-validation.md | 无 API 数值/可见合同、修复约束/回滚、两模板组件档案、三共享布局与真实导出/CDP 回归 | 2026-10-09 |
 | completed/ppt-hard-rule-remediation.md | 五项P0核心修复、实际PPTX/PDF实例合同、完整义务/媒体处置与32组专项回归；复杂视觉/长输入/真实模型边界 | 2026-10-08 |
 | completed/ppt-input-scope-harness.md | PPT harness 输入框架与受限扩展、强制审查、候选及缓存门禁；本地回归完成，真实模型语义准确率待评测 | 2026-10-08 |

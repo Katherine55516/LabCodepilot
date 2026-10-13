@@ -8,6 +8,7 @@ import { evidenceRelevance, selectEvidenceForSlide } from './ppt-evidence.mjs';
 import { planSparseInput, pointBudgetFor, profilePptInput, sparsePageEstimate } from './ppt-content-depth.mjs';
 import { effectiveKnowledge } from './ppt-generation-policy.mjs';
 import { outputLanguage } from './ppt-prompt-contracts.mjs';
+import { dominantInputLanguage } from './ppt-topic-language.mjs';
 import { applyPresentationPolicy, planningAssumptions, assumptionSummary } from './ppt-presentation-policy.mjs';
 import { pageContractFor } from './ppt-page-contract.mjs';
 
@@ -171,6 +172,7 @@ export function normalizeBrief(value, project) {
   const richCourse = presentationUse === 'course_walkthrough' && chunks.length > project.pages * 2 && !conciseRequested;
   return {
     outputLanguage: outputLanguage(project),
+    topicLanguage: project.editOutputLanguage || dominantInputLanguage(project),
     goal: bounded(raw.goal, 240, project.prompt), audience: bounded(raw.audience, 160, '演示文稿读者'),
     objective: bounded(raw.objective, 240, project.prompt), thesis: bounded(raw.thesis, 360, project.prompt),
     reportMode, presentationUse, decisionQuestion: bounded(raw.decisionQuestion, 240), sourceScope: bounded(raw.sourceScope, 240,

@@ -12,6 +12,7 @@ import { stableId } from './ppt/ir.mjs';
 import { planTemplateSlideMap, profileTemplateSlide, visualSimilarity, catalogTemplateLayouts, TEMPLATE_VARIANTS } from './ppt-template-scheduler.mjs';
 import { semanticMediaForSlide } from './ppt-semantic-media.mjs';
 import { visibleBodyTarget, templateVisualUnits } from './ppt-presentation-writing.mjs';
+import {measureText, textContract, PT_EMU} from './ppt/render-contract.mjs';
 
 const visualUnits = templateVisualUnits;
 const numericLabel = value => /^\s*(?:\d{1,2}|[IVX]{1,4})\s*$/i.test(value || '');
@@ -847,13 +848,22 @@ export function bindTemplateFidelity(project) {
         node.content = { ...node.content, text: paragraphs ? paragraphs.map(item => [item.label, item.body].filter(Boolean).join('：')).join('\n') : typeof text === 'string' ? text.trim() : '',
           templateFit: Boolean(node.nativeTextFrame), ...(paragraphs ? { paragraphs } : {}) };
         if (node.nativeTextFrame?.paragraphs) for (const paragraph of node.nativeTextFrame.paragraphs) {
-          if (Number(paragraph.lineSpacing) > 0 && Number(paragraph.lineSpacing) < .95) paragraph.lineSpacing = 1;
+          if (Number(paragraph.lineSpacing) > 0 && Number(paragraph.lineSpacing) < 1.15) paragraph.lineSpacing = 1.15;
         }
         node.semanticRole = slot.role === 'title' ? 'template-title' : 'template-text';
         node.locked = false;
         node.templateSlot = { role: slot.role, purpose: slot.purpose, pairedWith: slot.pairedWith, groupId: slot.groupId,
           minVisualUnits: slot.minVisualUnits, capacity: slot.capacity,
           mapped: paragraphs ? paragraphs.length === slot.paragraphCount && paragraphs.every(item => item.body) : typeof text === 'string' && Boolean(text.trim()) };
+        if(node.content.text && node.geometry){
+          const element={...node,kind:'text',bounds:node.geometry};
+          const contract=textContract(element), measured=measureText(element,contract);
+          const height=Math.ceil((measured.estimatedHeightPt+contract.margins[1]+contract.margins[3])*PT_EMU);
+          // PowerPoint often lets glyphs overflow a short template shape; the
+          // browser clips to the shape. Give generated copy its actual line box.
+          if(height>node.geometry.height && node.geometry.y+height<=project.templateFidelity.height)
+            node.geometry={...node.geometry,height};
+        }
       }
       return node;
     });

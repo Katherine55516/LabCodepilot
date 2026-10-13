@@ -4,7 +4,7 @@
 import { useTranslation } from '@/hooks/useTranslation';
 
 export type VisualBlock =
-  | { id: string; type: 'image'; dataUrl: string; caption: string }
+  | { id: string; type: 'image'; dataUrl: string; caption: string; fileName?: string }
   | { id: string; type: 'chart'; chartType: 'bar' | 'pie'; labels: string[]; values: number[]; unit: string }
   | { id: string; type: 'table'; rows: string[][] }
   | { id: string; type: 'shape'; shape: 'rect' | 'ellipse'; fill: string; text: string };

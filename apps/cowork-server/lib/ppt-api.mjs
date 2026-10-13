@@ -22,7 +22,7 @@ import { runRoutine } from './routine-runner.mjs';
 import { promptPolicy, writingGuide, normalizeKeyPoints, canonicalWriterOutput, criticRewriteTargets, sourcePacket, slideSemanticContext, writerPrompt, writerRepairPrompt, outlineContentContract, OUTLINE_SCHEMA } from './ppt-prompt-contracts.mjs';
 import { renderPptx } from './ppt/exporters/pptx.mjs';
 import { renderPdf } from './ppt/exporters/pdf.mjs';
-import { extractFile, normalizePaste, validateFile, sha256 } from './ppt-source.mjs';
+import { extractFile, normalizePaste, mergeSourceMedia, validateFile, sha256 } from './ppt-source.mjs';
 import { BUILT_INS, templateFor, validateTemplate, analyzeTemplate, snapshotTemplate } from './ppt-template.mjs';
 import { normalizeBlocks, normalizeSourceImages } from './ppt-blocks.mjs';
 import { applyLayoutRegistry, LAYOUTS } from './ppt-layout.mjs';
@@ -45,6 +45,7 @@ import { missingRequiredEvidence } from './ppt-evidence.mjs';
 import { buildPlanning, estimatePageRecommendation, inspectLongDeckOutline, normalizeFactSynthesis, refreshPlanning, retrieveSlideSources, sourceCapacityPlan, estimationSource, sourcePlanningContext } from './ppt-planning.mjs';
 import { planSparseInput, profilePptInput } from './ppt-content-depth.mjs';
 import { compileSectionLabel, formatUserDeckTitle, inspectSlideCopy, materializeCopy } from './ppt-presentation-writing.mjs';
+import { dominantInputLanguage, normalizeTopicTitle, closingTopic } from './ppt-topic-language.mjs';
 import { prepareTemplateFidelity, rescheduleTemplateFidelity, templateSlotPrompt, templateOutlinePrompt, inspectTemplateSlotDraft, autoTemplateMediaOmissions, bindTemplateFidelity, renderTemplatePptx } from './ppt-template-fidelity.mjs';
 import { templateReuseError } from './ppt-template-scheduler.mjs';
 import { inspectReportOutline } from './ppt-report-qa.mjs';
@@ -93,17 +94,28 @@ function sourceFromDeck(base) {
 }
 function mergeSources(parts) {
   const segments = parts.flatMap(({ origin, info }) => (info.segments || []).map((item, index) => ({
-    id: `${origin === 'base' ? 'B' : 'U'}${index + 1}`, origin,
+    ...item,id: `${origin === 'base' ? 'B' : 'U'}${index + 1}`, origin,
     location: `${origin === 'base' ? '旧版' : '进展'} · ${item.location}`, text: item.text,
   })));
-  return withSemanticIndex({ kind: 'update', name: parts.map(p => p.info.name).join(' + '), text: segments.map(s => s.text).join('\n\n').slice(0, 80000), segments, truncated: parts.some(p => p.info.truncated) });
+  const images=parts.flatMap(({origin,info})=>(info.images||[]).map(image=>({...image,
+    sourceRefs:(image.sourceRefs||[]).map(ref=>{const index=(info.segments||[]).findIndex(s=>s.id===ref);return index<0?ref:`${origin==='base'?'B':'U'}${index+1}`;})})));
+  return withSemanticIndex({ kind: 'update', name: parts.map(p => p.info.name).join(' + '), text: segments.map(s => s.text).join('\n\n').slice(0, 80000), segments, truncated: parts.some(p => p.info.truncated),...mergeSourceMedia({images}),mediaWarnings:parts.flatMap(p=>p.info.mediaWarnings||[]) });
+}
+function mergeSourceSupplement(source, supplement, prompt = '', includeSegments = true) {
+  if (includeSegments && supplement?.segments?.length && /^\s*\|.+\|\s*$|```|<svg\b/imu.test(prompt)) {
+    const extra=supplement.segments.map((segment,i)=>({...segment,id:`S${i+1}`,location:'补充输入 · '+segment.location}));
+    const refs=new Map(supplement.segments.map((segment,i)=>[segment.id,extra[i].id]));
+    supplement={...supplement,images:(supplement.images||[]).map(image=>({...image,sourceRefs:(image.sourceRefs||[]).map(ref=>refs.get(ref)||ref)}))};
+    source={...source,segments:[...(source.segments||[]),...extra],text:[source.text,...extra.map(s=>s.text)].filter(Boolean).join('\n\n')};
+  }
+  return {...source,...mergeSourceMedia({images:[...(source.images||[]),...(supplement?.images||[])]}),mediaWarnings:[...(source.mediaWarnings||[]),...(supplement?.mediaWarnings||[])]};
 }
 function outlineValues(values,count,max,field) {
   if(!Array.isArray(values))return [];
   if(values.length>count || values.some(value=>typeof value!=='string'||value.trim().length>max))throw new Error(`${field} exceeds its contract; redistribute full facts rather than truncating them`);
   return values.map(value=>value.trim());
 }
-function normalizeOutline(value, count, source, update = null, deckTitle = null) {
+function normalizeOutline(value, count, source, update = null, deckTitle = null, topicLanguage = null) {
   if (!Array.isArray(value?.slides) || value.slides.length !== count) throw new HttpError(400, `大纲需要恰好 ${count} 页`);
   const validRefs = new Set((source?.segments || []).map(s => s.id));
   const validChunkRefs = new Set((source?.semantic?.chunks || []).map(chunk => chunk.id));
@@ -117,20 +129,20 @@ function normalizeOutline(value, count, source, update = null, deckTitle = null)
     if (baseSlideId) usedBaseIds.add(baseSlideId);
     let change = update ? (baseSlideId ? (s.change === 'keep' ? 'keep' : 'rewrite') : 'add') : undefined;
     const base = baseSlideId ? update.baseSnapshot.deck.slides.find(slide => slide.id === baseSlideId) : null;
-    const generatedTitle = bounded(s.title, MAX_TEXT, `slide ${index + 1} title`);
+    const generatedTitle = normalizeTopicTitle(bounded(s.title, MAX_TEXT, `slide ${index + 1} title`), topicLanguage);
     const title = index === 0 && deckTitle?.source === 'user' && deckTitle?.text ? deckTitle.text : generatedTitle;
     const focus = bounded(s.focus || s.summary || s.title, 360, `slide ${index + 1} focus`);
     const oldFocus = update?.baseSnapshot.outline?.find(slide => slide.id === baseSlideId)?.focus;
     if (change === 'keep' && (title !== base.title || (oldFocus && focus !== oldFocus))) change = 'rewrite';
     const children = Array.isArray(s.children) ? s.children.slice(0, 12).map((child, childIndex) => ({
       id: typeof child?.id === 'string' && /^[a-zA-Z0-9_-]{1,80}$/.test(child.id) ? child.id : newIrId('item'),
-      title: bounded(child?.title || `子章节 ${childIndex + 1}`, MAX_TEXT, `slide ${index + 1} child title`),
+      title: normalizeTopicTitle(bounded(child?.title || `子章节 ${childIndex + 1}`, MAX_TEXT, `slide ${index + 1} child title`), topicLanguage),
       description: bounded(child?.description || child?.title || '', 360, `slide ${index + 1} child description`, false),
     })) : [];
     const keyPoints = normalizeKeyPoints(s.keyPoints || s.key_points, source);
     return { id: typeof s.id === 'string' && /^[a-zA-Z0-9_-]{1,80}$/.test(s.id) ? s.id : newIrId('slide'), title,
       focus, description: bounded(s.description || s.focus || s.title, 360, `slide ${index + 1} description`, false), children,
-      section: compileSectionLabel(bounded(s.section || s.title, MAX_TEXT, `slide ${index + 1} section`)),
+      section: compileSectionLabel(normalizeTopicTitle(bounded(s.section || s.title, MAX_TEXT, `slide ${index + 1} section`), topicLanguage)),
       refs: [...new Set([...(Array.isArray(s.refs) ? s.refs.map(String) : []), ...keyPoints.flatMap(point => point.refs)])].filter(ref => validRefs.has(ref)),
       ...((Array.isArray(s.chunkRefs) || keyPoints.some(point => point.chunkRefs.length)) ? { chunkRefs: [...new Set([...(Array.isArray(s.chunkRefs) ? s.chunkRefs.map(String) : []), ...keyPoints.flatMap(point => point.chunkRefs)])].filter(ref => validChunkRefs.has(ref)) } : {}),
       ...(typeof s.role === 'string' ? { role: s.role.slice(0, 40) } : {}),
@@ -147,6 +159,7 @@ function normalizeOutline(value, count, source, update = null, deckTitle = null)
       ...(Array.isArray(s.sourceArtifactRanges) ? { sourceArtifactRanges: s.sourceArtifactRanges } : {}),
       ...(s.densityFit ? { densityFit: s.densityFit } : {}),
       ...(Array.isArray(s.packedFrom) ? { packedFrom: s.packedFrom } : {}),
+      ...(s.capacityPartition ? {capacityPartition:true} : {}),
       ...(typeof s.groupId === 'string' ? { groupId: s.groupId.slice(0, 80) } : {}),
       ...(Array.isArray(s.supportingPoints) ? { supportingPoints: outlineValues(s.supportingPoints,6,2000,'supportingPoints') } : {}),
       ...(Array.isArray(s.requiredSupport || s.required_support) ? { requiredSupport: outlineValues(s.requiredSupport || s.required_support,6,200,'requiredSupport') } : {}),
@@ -285,7 +298,8 @@ function normalizeSlide(value, outlineSlide, project = null, previousTitles = []
   const preparedValue = { ...value, bullets: Array.isArray(value?.bullets) ? value.bullets : [] };
   const prepared = value?.layoutId || !compatible ? preparedValue : { ...preparedValue, layoutId: suggestedLayout };
   const slide = normalizeDeck({ slides: [prepared] }, [outlineSlide]).slides[0];
-  const compiled = materializeCopy(value || {}, outlineSlide, project?.planning, previousTitles);
+  const topicLanguage = project?.editOutputLanguage || dominantInputLanguage(project || {});
+  const compiled = materializeCopy(value || {}, outlineSlide, project?.planning, previousTitles, topicLanguage);
   slide.title = compiled.title.title || slide.title;
   slide.titleQuality = compiled.title;
   const isCover = Boolean(project?.outline?.[0]?.id && project.outline[0].id === outlineSlide.id);
@@ -302,6 +316,11 @@ function normalizeSlide(value, outlineSlide, project = null, previousTitles = []
   }
   slide.bullets = compiled.bullets;
   slide.copy = compiled.copy;
+  slide.section = normalizeTopicTitle(value?.section || outlineSlide.section || compiled.copy.eyebrow, topicLanguage);
+  if (index > 0 && index === project?.outline?.length - 1 && !outlineSlide.titleLocked) {
+    slide.title = closingTopic(topicLanguage);
+    slide.titleQuality = {...slide.titleQuality,...formatUserDeckTitle(slide.title,compiled.copy.copyBudget),source:'agent',locked:false};
+  }
   let resolvedDistributionLayout = false;
   if (!value?.layoutId && !compatible && slide.blocks.length === 0) {
     const distributionLayout = {
@@ -482,6 +501,10 @@ function startIngest(uid, id, activity, log, deps = defaultDeps) {
       const latest = store.get(uid, id);
       if (!latest || latest.status !== 'ingesting') return;
       if (baseSource) latest.update.baseSnapshot.source = baseSource;
+      const supplement = latest.prompt?.trim() ? /<svg\b/iu.test(latest.prompt)
+        ? await deps.extractFile(latest,'supplement.html',Buffer.from(latest.prompt))
+        : normalizePaste(latest.prompt, latest.source?.images || []) : latest.source;
+      source = mergeSourceSupplement(source, supplement, latest.prompt || '', !latest.update);
       latest.source = withSemanticIndex(source); syncPresentationPolicy(latest); latest.status = 'outlining'; latest.stage = 'outline'; latest.error = '';
       latest.inputProfile = profilePptInput(latest);
       latest.contentPlan = planSparseInput(latest, latest.inputProfile);
@@ -511,7 +534,7 @@ function assessOutlineCandidate(project, raw) {
   try {
     rawOutline=project.requestedOutline?raw:packOutline(project,raw);
     if(automatic)candidateProject.pages=pages(rawOutline.slides.length);
-    outline=normalizeOutline(rawOutline,candidateProject.pages,project.source,project.update,project.deckTitle);
+    outline=normalizeOutline(rawOutline,candidateProject.pages,project.source,project.update,project.deckTitle,project.requestedOutline ? null : project.editOutputLanguage || dominantInputLanguage(project));
   } catch(error){error.code='ppt_outline_contract';throw error;}
   candidateProject.outline=outline;
   rescheduleTemplateFidelity(candidateProject);
@@ -712,6 +735,8 @@ function startGeneration(uid, id, activity, log, deps = defaultDeps) {
               { nodeKey: `${nodeId}:repair` }), slide, snapshot, previousTitles);
             content.localRepair = { attempts: 1, reasons: copyIssues.map(item => item.code) };
           }
+          if (inspectSlideCopy(content, contract, index, snapshot.outline.length).some(issue => issue.code === 'visible_copy_placeholder'))
+            throw new Error('visible_copy_placeholder: show the actual source/table explanation before committing a page');
           const committed = await enqueueProject(uid, id, () => {
             const latest = store.get(uid, id);
             if (!lease.owns() || !latest || latest.deletedAt || latest.status !== 'generating' || latest.currentRunId !== runId) return 'stopped';
@@ -752,7 +777,10 @@ function startGeneration(uid, id, activity, log, deps = defaultDeps) {
         }
         }
       };
-      await boundedAll(readyNodes, PPT_NODE_CONCURRENCY, runWork);
+      // Source/media checks can run concurrently; visible page creation follows
+      // the reading order and commits each real preview before starting the next.
+      await boundedAll(readyNodes.filter(work=>work.kind==='media'), PPT_NODE_CONCURRENCY, runWork);
+      await boundedAll(readyNodes.filter(work=>work.kind==='content'), 1, runWork);
       const afterWave = store.get(uid, id);
       if (afterWave?.runtime?.pauseRequested) { await enqueueProject(uid, id, () => finishPause(store.get(uid, id))); return; }
       let current;
@@ -777,7 +805,7 @@ function startGeneration(uid, id, activity, log, deps = defaultDeps) {
         });
         if (!wave) return;
         if (wave.project) { current = wave.project; break; }
-        await boundedAll(wave.pending, PPT_NODE_CONCURRENCY, runWork);
+        await boundedAll(wave.pending, 1, runWork);
       }
 
       if (!current || current.status !== 'generating') return;
@@ -1360,8 +1388,7 @@ export async function handlePpt(req, url, { uid, send, res, readBody, activity, 
         let source = null; let sourceBytes = null;
         if (inputKind === 'paste') {
           try {
-            source = normalizePaste(data.text);source.images=[...(source.images||[]),...normalizeSourceImages(data.images)];
-            if(new Set(source.images.map(image=>image.id)).size!==source.images.length)throw new Error('source image IDs must be unique');
+            source = normalizePaste(data.text || '', data.images);
           } catch (error) { throw new HttpError(400, error.message); }
         }
         if (inputKind === 'file') {
@@ -1376,7 +1403,11 @@ export async function handlePpt(req, url, { uid, send, res, readBody, activity, 
         const title = bounded(userTitle || prompt.slice(0, 60), 160, 'title');
         const template = resolveTemplate(uid, data.template || 'violet');
         const generationPolicy = normalizeGenerationPolicy(data.generationPolicy);
-        if (inputKind === 'prompt') source = estimationSource({ inputKind, prompt });
+        if (inputKind === 'prompt') {
+          const parsed = normalizePaste(prompt, data.images);
+          source = estimationSource({inputKind,prompt}) || (parsed.images.length || parsed.mediaWarnings.length || /\|.*\||```|<svg\b/iu.test(prompt) ? {...parsed,kind:'prompt'} : null);
+          if (source) source = {...source,...mergeSourceMedia({images:[...(source.images||[]),...parsed.images]}),mediaWarnings:parsed.mediaWarnings};
+        } else if (inputKind === 'file') source = {...source,...mergeSourceMedia({},data.images)};
         const inputProfile = profilePptInput({ inputKind, source, prompt });
         const contentPlan = planSparseInput({ inputKind, source, prompt }, inputProfile);
         const estimatedPages = estimatePageRecommendation({ inputKind, source, prompt, inputProfile, contentPlan, generationPolicy, templateSpec: snapshotTemplate(template) }).recommended;
@@ -1403,6 +1434,12 @@ export async function handlePpt(req, url, { uid, send, res, readBody, activity, 
           status: sourceBytes ? 'ingesting' : 'outlining', stage: sourceBytes ? 'ingest' : 'outline', error: '', outline: [], deck: null, nodes: {}, revision: 0,
           favorite: false, pinned: false, folderId: null, tags: [], deletedAt: null,
           createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+        const inputText = inputKind==='paste' ? data.text || '' : prompt;
+        if (inputKind!=='file' && /<svg\b/iu.test(inputText)) {
+          const extracted = await deps.extractFile(project,'input.html',Buffer.from(inputText));
+          project.source = withSemanticIndex({...extracted,kind:inputKind,...mergeSourceMedia(extracted,data.images)});
+          project.sourceRevision=1;
+        }
         if (['uploaded','managed'].includes(template.kind) && ['pptx','potx'].includes(template.extension) && deps.prepareTemplateFidelity) {
           project.templateMode = data.templateMode === 'mapped' ? 'mapped' : 'preserve';
           project.templateFidelity = await deps.prepareTemplateFidelity(project, store.readTemplate(template.kind === 'managed' ? 'managed' : uid, template.id), template.sha256, template);
@@ -1713,4 +1750,4 @@ export async function handlePpt(req, url, { uid, send, res, readBody, activity, 
   }
 }
 
-export const _internals = { assessOutlineCandidate, normalizeOutline, normalizeDeck, normalizeSlide, parseModelJson, pages, outlinePrompt, contentPrompt, defaultDeps };
+export const _internals = { assessOutlineCandidate, mergeSourceSupplement, normalizeOutline, normalizeDeck, normalizeSlide, parseModelJson, pages, outlinePrompt, contentPrompt, defaultDeps };

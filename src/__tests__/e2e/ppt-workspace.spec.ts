@@ -973,7 +973,7 @@ test('PPT M2 paste and file inputs reach source aware outlines @smoke', async ({
   await page.getByRole('button', { name: '确认并继续 →' }).click();
   await page.getByRole('button', { name: /Default/ }).click();
   await page.getByRole('button', { name: '下一步：输入内容 →' }).click();
-  const sourceFileInput = page.locator('input[type=file]');
+  const sourceFileInput = page.locator('input[type=file][accept*=".xlsx"]');
   await expect(sourceFileInput).toHaveAttribute('accept', /\.xlsx.*\.csv|\.csv.*\.xlsx/);
   await sourceFileInput.setInputFiles({
     name: 'metrics.csv',
@@ -1045,7 +1045,7 @@ test('PPTX fidelity import selects a model before opening the file @smoke', asyn
   await page.getByRole('button', { name: '确认并继续 →' }).click();
   await page.getByRole('button', { name: /Default/ }).click();
   await page.getByRole('button', { name: '下一步：输入内容 →' }).click();
-  await page.locator('input[type=file]').setInputFiles({
+  await page.locator('input[type=file][accept*=".pptx"]').setInputFiles({
     name: 'original.pptx',
     mimeType: 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
     buffer: Buffer.from('PKsample'),

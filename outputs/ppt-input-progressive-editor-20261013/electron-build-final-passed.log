@@ -1,0 +1,348 @@
+
+> codepilot@4.2.0 electron:build
+> npm run vendor:ailab && npm run vendor:ailab:verify && npm run vendor:doc-assets && node scripts/bundle-vfkit.mjs && next build --webpack && node scripts/build-electron.mjs
+
+
+> codepilot@4.2.0 vendor:ailab
+> node scripts/vendor-ailab-prepare.js
+
+[vendor-ailab] source: /Users/dongli/Documents/ChatGPT/CodePilot/LabCodepilot/vendor/ailab-source
+[vendor-ailab] bundle: /Users/dongli/Documents/ChatGPT/CodePilot/LabCodepilot/vendor/ailab-bundle
+[vendor-ailab] source commit: bab7b0dcccee8286129baf1372b2d06579a3eac4
+[vendor-ailab] source plugin: ai-lab-test v0.14.0
+[vendor-ailab] commands: 6 files
+[vendor-ailab] skills: test-workflow/SKILL.md
+[vendor-ailab] rules: 5 files
+[vendor-ailab] templates: 5 files
+[vendor-ailab] site-patterns: 1 files
+[vendor-ailab] VERSION = bab7b0dcccee-v1
+[vendor-ailab] DONE. Bundle ready at /Users/dongli/Documents/ChatGPT/CodePilot/LabCodepilot/vendor/ailab-bundle
+
+> codepilot@4.2.0 vendor:ailab:verify
+> node scripts/vendor-ailab-verify.js
+
+[verify-ailab] OK  : exists: LICENSE
+[verify-ailab] OK  : exists: plugin.json
+[verify-ailab] OK  : exists: VERSION
+[verify-ailab] OK  : exists: transform-report.json
+[verify-ailab] OK  : exists: .mcp.json
+[verify-ailab] OK  : commands count = 6
+[verify-ailab] OK  : command stems = [cases, execute, init, knowledge-map, report, status]
+[verify-ailab] OK  : skill: test-workflow/SKILL.md
+[verify-ailab] OK  : rules count = 5
+[verify-ailab] OK  : templates count = 5
+[verify-ailab] OK  : site-patterns/_template.md
+[verify-ailab] OK  : .mcp.json declares playwright server
+[verify-ailab] OK  : plugin.json schema
+[verify-ailab] OK  : VERSION = bab7b0dcccee-v1
+[verify-ailab] OK  : LICENSE looks like MIT
+
+[verify-ailab] All checks passed.
+
+> codepilot@4.2.0 vendor:doc-assets
+> node scripts/copy-doc-assets.js
+
+[copy-doc-assets] public/pdf/ 已是 pdfjs 5.4.296，跳过。
+[bundle-vfkit] bundled /Users/dongli/Documents/ChatGPT/CodePilot/LabCodepilot/.ppt-build/ppt-task-tools/vfkit → vfkit-bundle/vfkit (vfkit version: v0.6.4, virtualization entitlement OK)
+▲ Next.js 16.2.1 (webpack)
+- Experiments (use with caution):
+  · optimizePackageImports
+
+  Creating an optimized production build ...
+⚠ Compiled with warnings in 2.3min
+
+./src/app/api/claude-status/route.ts
+Module not found: ESM packages (@anthropic-ai/claude-agent-sdk) need to be imported. Use 'import' to reference the package instead. https://nextjs.org/docs/messages/import-esm-externals
+
+Import trace for requested module:
+./src/app/api/claude-status/route.ts
+
+  Running TypeScript ...
+  Finished TypeScript in 52s ...
+  Collecting page data using 15 workers ...
+[scheduler] Started with 10s poll interval
+  Generating static pages using 15 workers (0/164) ...
+  Generating static pages using 15 workers (41/164) 
+  Generating static pages using 15 workers (82/164) 
+  Generating static pages using 15 workers (123/164) 
+✓ Generating static pages using 15 workers (164/164) in 1806ms
+  Finalizing page optimization ...
+  Collecting build traces ...
+[db] Received SIGINT, closing database...
+[db] Database closed gracefully
+[db] Received SIGINT, closing database...
+[db] Database closed gracefully
+[db] Received SIGINT, closing database...
+[db] Database closed gracefully
+[db] Received SIGINT, closing database...
+[db] Received SIGINT, closing database...
+[db] Received SIGINT, closing database...
+[db] Received SIGINT, closing database...
+[db] Received SIGINT, closing database...
+[db] Received SIGINT, closing database...
+[db] Received SIGINT, closing database...
+[db] Received SIGINT, closing database...
+[db] Received SIGINT, closing database...
+[db] Received SIGINT, closing database...
+[db] Received SIGINT, closing database...
+[db] Received SIGINT, closing database...
+
+Route (app)
+┌ ○ /
+├ ○ /_not-found
+├ ƒ /api/auth/cowork-config/purge
+├ ƒ /api/auth/cowork-config/sync
+├ ƒ /api/auth/current-user/sync
+├ ƒ /api/auth/image-config/purge
+├ ƒ /api/auth/image-config/sync
+├ ƒ /api/auth/managed-providers/count
+├ ƒ /api/auth/managed-providers/purge
+├ ƒ /api/auth/managed-providers/sync
+├ ƒ /api/bridge
+├ ƒ /api/bridge/channels
+├ ƒ /api/bridge/feishu/register/cancel
+├ ƒ /api/bridge/feishu/register/poll
+├ ƒ /api/bridge/feishu/register/start
+├ ƒ /api/bridge/settings
+├ ƒ /api/chat
+├ ƒ /api/chat/btw
+├ ƒ /api/chat/interrupt
+├ ƒ /api/chat/messages
+├ ƒ /api/chat/mode
+├ ƒ /api/chat/model
+├ ƒ /api/chat/permission
+├ ƒ /api/chat/rewind
+├ ƒ /api/chat/sessions
+├ ƒ /api/chat/sessions/[id]
+├ ƒ /api/chat/sessions/[id]/context-usage
+├ ƒ /api/chat/sessions/[id]/messages
+├ ƒ /api/chat/sessions/by-cwd
+├ ƒ /api/chat/structured
+├ ƒ /api/claude-auth
+├ ƒ /api/claude-sessions
+├ ƒ /api/claude-sessions/import
+├ ƒ /api/claude-sessions/import-batch
+├ ƒ /api/claude-status
+├ ƒ /api/claude-status/invalidate
+├ ƒ /api/claude-upgrade
+├ ƒ /api/cli-tools/[id]/describe
+├ ƒ /api/cli-tools/[id]/detail
+├ ƒ /api/cli-tools/[id]/install
+├ ƒ /api/cli-tools/[id]/status
+├ ƒ /api/cli-tools/catalog
+├ ƒ /api/cli-tools/custom
+├ ƒ /api/cli-tools/custom/[id]
+├ ƒ /api/cli-tools/descriptions
+├ ƒ /api/cli-tools/installed
+├ ƒ /api/cowork/artifacts
+├ ƒ /api/cowork/assets
+├ ƒ /api/cowork/status
+├ ƒ /api/dashboard
+├ ƒ /api/dashboard/refresh
+├ ƒ /api/deid/image
+├ ƒ /api/deid/reidentify
+├ ƒ /api/deid/state
+├ ƒ /api/deid/text
+├ ƒ /api/doctor
+├ ƒ /api/doctor/export
+├ ƒ /api/doctor/repair
+├ ƒ /api/files
+├ ƒ /api/files/browse
+├ ƒ /api/files/delete
+├ ƒ /api/files/mkdir
+├ ƒ /api/files/open
+├ ƒ /api/files/preview
+├ ƒ /api/files/raw
+├ ƒ /api/files/rename
+├ ƒ /api/files/reveal
+├ ƒ /api/files/serve
+├ ƒ /api/files/suggest
+├ ƒ /api/files/write
+├ ƒ /api/git/branches
+├ ƒ /api/git/checkout
+├ ƒ /api/git/commit
+├ ƒ /api/git/commit-detail/[sha]
+├ ƒ /api/git/log
+├ ƒ /api/git/push
+├ ƒ /api/git/status
+├ ƒ /api/git/worktrees
+├ ƒ /api/git/worktrees/derive
+├ ƒ /api/health
+├ ƒ /api/image/config
+├ ƒ /api/image/generate
+├ ƒ /api/media/[id]
+├ ƒ /api/media/[id]/favorite
+├ ƒ /api/media/[id]/tags
+├ ƒ /api/media/gallery
+├ ƒ /api/media/generate
+├ ƒ /api/media/jobs
+├ ƒ /api/media/jobs/[id]
+├ ƒ /api/media/jobs/[id]/cancel
+├ ƒ /api/media/jobs/[id]/items
+├ ƒ /api/media/jobs/[id]/pause
+├ ƒ /api/media/jobs/[id]/progress
+├ ƒ /api/media/jobs/[id]/resume
+├ ƒ /api/media/jobs/[id]/start
+├ ƒ /api/media/jobs/[id]/sync-context
+├ ƒ /api/media/jobs/plan
+├ ƒ /api/media/serve
+├ ƒ /api/media/tags
+├ ƒ /api/media/tags/[id]
+├ ƒ /api/openai-oauth/callback
+├ ƒ /api/openai-oauth/start
+├ ƒ /api/openai-oauth/status
+├ ƒ /api/plugins
+├ ƒ /api/plugins/[id]
+├ ƒ /api/plugins/mcp
+├ ƒ /api/plugins/mcp/[name]
+├ ƒ /api/plugins/mcp/marketplace/detail
+├ ƒ /api/plugins/mcp/marketplace/install
+├ ƒ /api/plugins/mcp/marketplace/search
+├ ƒ /api/plugins/mcp/marketplace/uninstall
+├ ƒ /api/plugins/mcp/reconnect
+├ ƒ /api/plugins/mcp/status
+├ ƒ /api/plugins/mcp/toggle
+├ ƒ /api/ppt/[...segments]
+├ ƒ /api/ppt/model-jobs/run
+├ ƒ /api/providers
+├ ƒ /api/providers/[id]
+├ ƒ /api/providers/[id]/activate
+├ ƒ /api/providers/[id]/models
+├ ƒ /api/providers/[id]/models/discover
+├ ƒ /api/providers/active-image
+├ ƒ /api/providers/models
+├ ƒ /api/providers/options
+├ ƒ /api/providers/set-default
+├ ƒ /api/providers/test
+├ ƒ /api/routines
+├ ƒ /api/routines/[id]
+├ ƒ /api/routines/[id]/artifacts
+├ ƒ /api/routines/[id]/run
+├ ƒ /api/routines/[id]/runs
+├ ƒ /api/routines/[id]/sessions
+├ ƒ /api/routines/count
+├ ƒ /api/routines/sync
+├ ƒ /api/sdk-commands
+├ ƒ /api/sdk/account
+├ ƒ /api/search
+├ ƒ /api/settings
+├ ƒ /api/settings/app
+├ ƒ /api/settings/discord
+├ ƒ /api/settings/discord/verify
+├ ƒ /api/settings/feishu
+├ ƒ /api/settings/feishu/verify
+├ ƒ /api/settings/qq
+├ ƒ /api/settings/qq/verify
+├ ƒ /api/settings/telegram
+├ ƒ /api/settings/telegram/verify
+├ ƒ /api/settings/weixin
+├ ƒ /api/settings/weixin/accounts
+├ ƒ /api/settings/weixin/accounts/[accountId]
+├ ƒ /api/settings/weixin/login/start
+├ ƒ /api/settings/weixin/login/wait
+├ ƒ /api/settings/workspace
+├ ƒ /api/setup
+├ ƒ /api/setup/recent-projects
+├ ƒ /api/skills
+├ ƒ /api/skills/[name]
+├ ƒ /api/skills/marketplace/install
+├ ƒ /api/skills/marketplace/readme
+├ ƒ /api/skills/marketplace/remove
+├ ƒ /api/skills/marketplace/search
+├ ƒ /api/skills/marketplace/translate
+├ ƒ /api/skills/refresh
+├ ƒ /api/skills/search
+├ ƒ /api/tasks
+├ ƒ /api/tasks/[id]
+├ ƒ /api/tasks/[id]/pause
+├ ƒ /api/tasks/[id]/run
+├ ƒ /api/tasks/list
+├ ƒ /api/tasks/notify
+├ ƒ /api/tasks/schedule
+├ ƒ /api/test-accounts
+├ ƒ /api/test-accounts/[id]
+├ ƒ /api/test-accounts/[id]/export
+├ ƒ /api/test-accounts/project-summaries
+├ ƒ /api/test-accounts/resolve
+├ ƒ /api/test/audit
+├ ƒ /api/test/bugs
+├ ƒ /api/test/cases
+├ ƒ /api/test/cases/export
+├ ƒ /api/test/cases/recommend
+├ ƒ /api/test/cases/recommend/apply
+├ ƒ /api/test/chat
+├ ƒ /api/test/defect
+├ ƒ /api/test/env-config
+├ ƒ /api/test/import
+├ ƒ /api/test/library
+├ ƒ /api/test/library/deposit
+├ ƒ /api/test/library/history
+├ ƒ /api/test/library/quarantine
+├ ƒ /api/test/library/review
+├ ƒ /api/test/library/rounds
+├ ƒ /api/test/library/rounds/detail
+├ ƒ /api/test/library/run
+├ ƒ /api/test/library/verdict
+├ ƒ /api/test/media
+├ ƒ /api/test/probe
+├ ƒ /api/test/regression-stats
+├ ƒ /api/test/report-xlsx
+├ ƒ /api/test/reports
+├ ƒ /api/test/reports/delete
+├ ƒ /api/test/reports/history
+├ ƒ /api/test/revise
+├ ƒ /api/test/run
+├ ƒ /api/test/scripts
+├ ƒ /api/test/scripts/confirm-mock
+├ ƒ /api/test/scripts/pipeline
+├ ƒ /api/test/scripts/repair
+├ ƒ /api/test/scripts/retry
+├ ƒ /api/test/scripts/run
+├ ƒ /api/test/stats
+├ ƒ /api/test/stats/daily-rollup
+├ ƒ /api/test/stats/export
+├ ƒ /api/test/suites
+├ ƒ /api/test/suites/eval
+├ ƒ /api/test/workbench
+├ ƒ /api/uploads
+├ ƒ /api/usage/stats
+├ ƒ /api/workspace/checkin
+├ ƒ /api/workspace/docs
+├ ƒ /api/workspace/evolve-buddy
+├ ƒ /api/workspace/hatch-buddy
+├ ƒ /api/workspace/hook-triggered
+├ ƒ /api/workspace/index
+├ ƒ /api/workspace/inspect
+├ ƒ /api/workspace/latest-session
+├ ƒ /api/workspace/onboarding
+├ ƒ /api/workspace/organize
+├ ƒ /api/workspace/quick-actions
+├ ƒ /api/workspace/search
+├ ƒ /api/workspace/session
+├ ƒ /api/workspace/summary
+├ ƒ /api/workspace/wizard
+├ ○ /bridge
+├ ○ /chat
+├ ƒ /chat/[id]
+├ ○ /cli-tools
+├ ○ /design-system
+├ ○ /extensions
+├ ○ /gallery
+├ ○ /image
+├ ○ /mcp
+├ ○ /plugins
+├ ○ /plugins/mcp
+├ ○ /ppt
+├ ○ /routines
+├ ○ /settings
+└ ○ /skills
+
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+
+Cleaned dist-electron/
+Electron build complete
+Obfuscated dist-electron/main.js (389 KB)
+Obfuscated dist-electron/preload.js (12 KB)
+✓ 构建产物校验通过：.next/standalone/server.js

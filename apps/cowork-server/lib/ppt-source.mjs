@@ -8,7 +8,7 @@ import { withSemanticIndex } from './ppt-semantic.mjs';
 import { normalizeSourceImages } from './ppt-blocks.mjs';
 import { OFFICE_FONT_ENV_SCRIPT } from './ppt-fonts.mjs';
 
-export const EXTENSIONS = new Set(['md', 'markdown', 'html', 'htm', 'csv', 'docx', 'pdf', 'xlsx', 'pptx']);
+export const EXTENSIONS = new Set(['md', 'markdown', 'html', 'htm', 'csv', 'docx', 'pdf', 'xlsx', 'pptx', 'png', 'jpg', 'jpeg']);
 export const MAX_FILE_BYTES = 8 * 1024 * 1024;
 export const MAX_PASTE_CHARS = 80_000;
 
@@ -18,6 +18,8 @@ export function validateFile(name, bytes) {
   if (!EXTENSIONS.has(ext)) throw new Error('unsupported format; convert .doc/.xls to .docx/.xlsx');
   if (!Buffer.isBuffer(bytes) || bytes.length === 0 || bytes.length > MAX_FILE_BYTES) throw new Error('source file must be 1 byte to 8 MB');
   if (ext === 'pdf' && bytes.subarray(0, 5).toString() !== '%PDF-') throw new Error('invalid PDF signature');
+  if (ext === 'png' && bytes.subarray(0, 8).toString('hex') !== '89504e470d0a1a0a') throw new Error('invalid PNG signature');
+  if (['jpg','jpeg'].includes(ext) && bytes.subarray(0, 3).toString('hex') !== 'ffd8ff') throw new Error('invalid JPEG signature');
   if (['docx', 'xlsx', 'pptx'].includes(ext) && bytes.subarray(0, 2).toString() !== 'PK') throw new Error('invalid Office ZIP signature');
   if (['md', 'markdown', 'html', 'htm', 'csv'].includes(ext)) {
     try { new TextDecoder('utf-8', { fatal: true }).decode(bytes); } catch { throw new Error('text source must be UTF-8'); }
@@ -26,18 +28,26 @@ export function validateFile(name, bytes) {
   return ext;
 }
 
-export function normalizePaste(text) {
-  if (typeof text !== 'string' || !text.trim() || text.length > MAX_PASTE_CHARS) throw new Error('pasted text must be 1 to 80000 characters');
+export function normalizePaste(text, attachments = []) {
+  if (typeof text !== 'string' || !text.trim() && !attachments?.length || text.length > MAX_PASTE_CHARS) throw new Error('pasted text must be 1 to 80000 characters or include an image');
   const images=[],mediaWarnings=[];
-  const prose=text.replace(/!\[([^\]]*)\]\(([^)]+)\)/gu,(_all,caption,reference)=>{
+  const collect = (caption, reference) => {
     try{
       const image=normalizeSourceImages([{id:'inline-image-'+(images.length+1),dataUrl:reference,caption,required:true}])[0];
       const bytes=Buffer.from(reference.split(',')[1],'base64');
       if(reference.startsWith('data:image/png')&&bytes.length>=24){image.width=bytes.readUInt32BE(16);image.height=bytes.readUInt32BE(20);}
       images.push(image);
-    }catch{mediaWarnings.push({code:'source_media_unresolved',required:true,location:'Pasted Markdown image',message:'Referenced source image requires a valid embedded PNG/JPEG or an attached source file: '+caption});}
+    }catch{mediaWarnings.push({code:'source_media_unresolved',required:true,reference,caption,location:'Pasted image',message:'Referenced source image requires a valid embedded PNG/JPEG or an attached source file: '+reference});}
     return '\n';
-  });
+  };
+  const prose=text.replace(/!\[([^\]]*)\]\(([^)]+)\)/gu,(_all,caption,reference)=>collect(caption,reference))
+    .replace(/<img\b[^>]*>/giu,tag=>{
+      const attribute=name=>tag.match(new RegExp('\\b'+name+'\\s*=\\s*["\u0027]([^"\u0027]*)["\u0027]','i'))?.[1] || '';
+      return collect(attribute('alt'),attribute('src'));
+    });
+  for (const match of prose.matchAll(/(?:https?:\/\/)?[\p{L}\p{N}_~%./:@+-]+\.(?:png|jpe?g)(?:\?[^\s<>"']*)?/giu))
+    mediaWarnings.push({code:'source_media_unresolved',required:true,reference:match[0],location:'Text image reference',message:'Attach the referenced PNG/JPEG to include it: '+match[0]});
+  const media = mergeSourceMedia({images,mediaWarnings}, attachments);
   // Fences are atomic source objects; blank lines and indentation inside them
   // must not pass through paragraph trimming or ordinary chunk splitting.
   if (/^\s*(?:`{3,}|~{3,})/m.test(prose)) {
@@ -54,7 +64,7 @@ export function normalizePaste(text) {
     }
     if (code) segments.push({location:'Unclosed fenced code',kind:'code',language:code.language,text:code.lines.join('\n')});
     flush(); segments.forEach((segment,index)=>segment.id=String(index+1));
-    return withSemanticIndex({kind:'paste',sha256:crypto.createHash('sha256').update(text).digest('hex'),name:'粘贴文本',text:prose,segments,truncated:false,images,mediaWarnings});
+    return withSemanticIndex({kind:'paste',sha256:crypto.createHash('sha256').update(text).digest('hex'),name:'粘贴文本',text:prose,segments,truncated:false,...media});
   }
   const blocks = prose.replace(/\r\n?/g, '\n').split(/\n\s*\n/).map(s => s.trim()).filter(Boolean);
   const segments = [];
@@ -93,7 +103,32 @@ export function normalizePaste(text) {
   }
   flush();
   const represented = segments.map(s => s.text).join('\n\n');
-  return withSemanticIndex({ kind: 'paste', sha256:crypto.createHash('sha256').update(text).digest('hex'), name: '粘贴文本', text: represented, segments, truncated,images,mediaWarnings });
+  return withSemanticIndex({ kind: 'paste', sha256:crypto.createHash('sha256').update(text).digest('hex'), name: '粘贴文本', text: represented, segments, truncated,...media });
+}
+
+/** One bounded media inventory across prompt, paste and imported supplements.
+ * Match unresolved file references by attachment name; never silently fetch a URL. */
+export function mergeSourceMedia(source = {}, attachments = []) {
+  const merged = new Map();
+  for (const image of [...(source.images || []), ...normalizeSourceImages(attachments)]) {
+    const hash = sha256(Buffer.from(image.dataUrl.split(',')[1], 'base64'));
+    const previous = merged.get(hash);
+    if (previous) {
+      previous.caption = [...new Set([previous.caption, image.caption].filter(Boolean))].join('\n');
+      previous.sourceRefs = [...new Set([...(previous.sourceRefs || []), ...(image.sourceRefs || [])])];
+    } else merged.set(hash, {...image, imageSha256:hash});
+  }
+  const images = [...merged.values()];
+  if (images.length > 64 || images.reduce((n,i)=>n+Buffer.byteLength(i.dataUrl),0)>24*1024*1024) throw new Error('source image budget exceeded');
+  if (new Set(images.map(i=>i.id)).size !== images.length) throw new Error('source image IDs must be unique');
+  const mediaWarnings = (source.mediaWarnings || []).filter(warning => {
+    if (warning.code !== 'source_media_unresolved' || !warning.reference) return true;
+    let name; try { name=decodeURIComponent(warning.reference).split(/[\\/]/).at(-1).split(/[?#]/)[0]; } catch { return true; }
+    const found=images.find(image=>image.fileName===name || image.caption===name || image.caption===name.replace(/\.(png|jpe?g)$/iu,''));
+    if (found && warning.caption && !found.caption.includes(warning.caption)) found.caption += '\n'+warning.caption;
+    return !found;
+  });
+  return {images,mediaWarnings};
 }
 
 const SCRIPT = String.raw`
@@ -198,6 +233,31 @@ def add_markdown(location, content):
     if code is not None:segments.append({'id':str(len(segments)+1),'location':location+' unclosed code','kind':'code','language':code['language'],'text':'\n'.join(code['lines'])})
     prose(pending)
 
+def pdf_visual_pages(blob, pages, caption):
+    # Preserve vector diagrams as evidence images instead of dropping all paths.
+    import tempfile,subprocess
+    with tempfile.TemporaryDirectory(prefix='ppt-source-pdf-') as folder:
+        source=os.path.join(folder,'source.pdf');open(source,'wb').write(blob)
+        for number in pages:
+            target=os.path.join(folder,'page-'+str(number))
+            result=subprocess.run(['pdftoppm','-f',str(number),'-l',str(number),'-singlefile','-scale-to','1800','-png',source,target],capture_output=True,timeout=45)
+            if result.returncode:raise ValueError('PDF visual rendering failed')
+            refs=[segment['id'] for segment in segments if segment['location'].startswith('PDF 第 %s 页'%number)] if caption.startswith('PDF ') else []
+            source_image(open(target+'.png','rb').read(),caption+' / page '+str(number),caption,refs)
+
+def office_chart_previews(blob, extension, caption):
+    import tempfile,subprocess
+    from pypdf import PdfReader
+    with tempfile.TemporaryDirectory(prefix='ppt-source-chart-') as folder:
+        source=os.path.join(folder,'charts.'+extension);open(source,'wb').write(blob)
+        profile=os.path.join(folder,'profile')
+        result=subprocess.run(['soffice','-env:UserInstallation=file://'+profile,'--headless','--convert-to','pdf','--outdir',folder,source],capture_output=True,timeout=90,env=office_font_environment(profile))
+        target=os.path.join(folder,'charts.pdf')
+        if result.returncode or not os.path.isfile(target):raise ValueError('Office native chart rendering failed')
+        pdf=open(target,'rb').read();count=len(PdfReader(io.BytesIO(pdf)).pages)
+        if count>64:raise ValueError('Office chart preview exceeds 64 pages; reduce print area')
+        pdf_visual_pages(pdf,range(1,count+1),caption)
+
 if ext in ('docx', 'xlsx', 'pptx'):
     with zipfile.ZipFile(io.BytesIO(raw)) as archive:
         members = archive.infolist()
@@ -208,7 +268,9 @@ if ext in ('docx', 'xlsx', 'pptx'):
             if p.startswith('/') or '..' in p.split('/'):
                 raise ValueError('Office archive contains an unsafe path')
 
-if ext in ('md', 'markdown'):
+if ext in ('png','jpg','jpeg'):
+    source_image(raw,'源图片',name)
+elif ext in ('md', 'markdown'):
     content = raw.decode('utf-8-sig')
     for match in re.finditer(r'!\[([^\]]*)\]\(([^)]+)\)',content):
         caption,reference=match.groups()
@@ -285,11 +347,23 @@ elif ext == 'docx':
         if rows:add('DOCX 表 %s' % t,'\n'.join(['| '+' | '.join(rows[0])+' |','| '+' | '.join(['---']*len(rows[0]))+' |']+['| '+' | '.join(row)+' |' for row in rows[1:]]))
     for rel in doc.part.rels.values():
         if rel.reltype.endswith('/image') and not rel.is_external:source_image(rel.target_part.blob,'DOCX embedded image')
+    with zipfile.ZipFile(io.BytesIO(raw)) as archive:
+        for member in archive.namelist():
+            if member.startswith('word/media/'):source_image(archive.read(member),'DOCX embedded media / '+member)
+        if any(member.startswith('word/charts/chart') and member.endswith('.xml') for member in archive.namelist()):
+            try:office_chart_previews(raw,'docx','DOCX native charts')
+            except Exception as error:media_warnings.append({'code':'source_chart_render','required':True,'location':'DOCX charts','message':str(error)})
 elif ext == 'pdf':
     import pdfplumber
     with pdfplumber.open(io.BytesIO(raw)) as pdf:
         if len(pdf.pages) > 100: raise ValueError('PDF has more than 100 pages')
-        for n, page in enumerate(pdf.pages, 1): add('PDF 第 %s 页' % n, page.extract_text() or '')
+        vector_pages=[]
+        for n, page in enumerate(pdf.pages, 1):
+            add('PDF 第 %s 页' % n, page.extract_text() or '')
+            if page.curves or len(page.lines)+len(page.rects)>2:vector_pages.append(n)
+    if vector_pages:
+        try:pdf_visual_pages(raw,vector_pages,'PDF vector chart / diagram')
+        except Exception as error:media_warnings.append({'code':'source_chart_render','required':True,'location':'PDF vector graphics','message':str(error)})
     from pypdf import PdfReader
     for n,page in enumerate(PdfReader(io.BytesIO(raw)).pages,1):
         try:
@@ -304,6 +378,9 @@ elif ext == 'xlsx':
         rows=list(sheet.iter_rows(max_row=min(1000,sheet.max_row),max_col=min(100,sheet.max_column),values_only=True))
         if sheet.max_row>1000 or sheet.max_column>100:truncated=True
         add_table('工作表 '+sheet.title,rows)
+    if any(sheet._charts for sheet in workbook.worksheets):
+        try:office_chart_previews(raw,'xlsx','XLSX native charts')
+        except Exception as error:media_warnings.append({'code':'source_chart_render','required':True,'location':'XLSX charts','message':str(error)})
 elif ext == 'pptx':
     from pptx import Presentation
     deck = Presentation(io.BytesIO(raw))

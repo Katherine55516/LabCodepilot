@@ -4,6 +4,7 @@
  * module owns copy contracts, title fitting, and source-grounded diagnostics.
  */
 import { pointBudgetFor } from './ppt-content-depth.mjs';
+import { normalizeTopicTitle, stripContinuationSuffix } from './ppt-topic-language.mjs';
 import { normalizeVisibleCopy } from './ppt-copy-integrity.mjs';
 const CJK = /[\u2e80-\u9fff\uf900-\ufaff]/u;
 const WORD = /[A-Za-z][A-Za-z0-9_/-]*/g;
@@ -285,13 +286,16 @@ export function normalizeContentBlocks(value, maxBody = 4000) {
   }).filter(Boolean);
 }
 
-export function materializeCopy(value, outlineSlide, planning, previousTitles = []) {
+export function materializeCopy(value, outlineSlide, planning, previousTitles = [], topicLanguage = planning?.brief?.topicLanguage) {
   const contract = planning?.slidePlan?.find(item => item.slideId === outlineSlide.id) || {};
   const registry = planning?.terminology || { protectedPhrases: [] };
   const budget = contract.copyBudget || copyBudgetFor(contract.role, value.layoutId);
-  const title = compileTitle({ title: value.title, candidates: value.titleCandidates || value.title_candidates, message: contract.message || outlineSlide.focus, registry, previousTitles, budget });
+  const cleanTitle = stripContinuationSuffix;
+  const topicTitle = v => normalizeTopicTitle(cleanTitle(v), topicLanguage);
+  const candidates=value.titleCandidates || value.title_candidates;
+  const title = compileTitle({ title: topicTitle(outlineSlide.capacityPartition ? outlineSlide.title : value.title), candidates: outlineSlide.capacityPartition ? [] : Array.isArray(candidates) ? candidates.map(topicTitle) : [], message: topicTitle(contract.message || outlineSlide.focus), registry, previousTitles: outlineSlide.capacityPartition ? [] : previousTitles, budget });
   const normalized = normalizeVisibleCopy({ blocks: normalizeContentBlocks(value.contentBlocks || value.content_blocks, value.nativeCopy ? 5000 : 4000),
-    eyebrow: normalizeTypography(text(value.eyebrow, 48), 48), subtitle: normalizeTypography(text(value.subtitle || value.subhead, 180), 180),
+    eyebrow: normalizeTypography(normalizeTopicTitle(text(value.eyebrow, 48), topicLanguage), 48), subtitle: normalizeTypography(text(value.subtitle || value.subhead, 180), 180),
     takeaway: normalizeTypography(text(value.takeaway, 300), 300) }, title.title);
   const blocks = normalized.copy.blocks;
   const bullets = blocks.length
@@ -344,8 +348,11 @@ function availableSupport(slide, visibleOnly = false) {
 }
 
 export function inspectSlideCopy(slide, contract, index, count, options = {}) {
-  if (index === 0 || index === count - 1) return [];
   const issues = [];
+  const generatedCopy = [slide.copy?.subtitle, slide.copy?.takeaway, ...(slide.bullets||[]), ...Object.values(slide.templateSlotTexts||{}).flatMap(v=>typeof v==='string'?[v]:v.map(p=>p.body||''))].filter(Boolean).join('\n');
+  if (/完整(?:来源(?:细节)?|表(?:格)?)\s*见(?:本页)?备注|(?:full|complete)\s+(?:source|table).*?(?:notes|speaker notes)/iu.test(generatedCopy))
+    issues.push({code:'visible_copy_placeholder',severity:'error',repair:'expand_support',message:'可见页面不能用备注指引替代实际来源、表格或解释；请在可读容量内显示本页实际内容。'});
+  if (index === 0 || index === count - 1) return issues;
   const title = slide.titleQuality || { visualUnits: visualUnits(slide.title), maxVisualUnits: contract?.copyBudget?.titleHardUnits || 46, estimatedLines: Math.ceil(visualUnits(slide.title) / 24) };
   if (title.visualUnits > title.maxVisualUnits || title.estimatedLines > 2) issues.push({ code: 'title_overflow', severity: 'error', repair: 'rewrite_title', message: '标题超过两行或版式宽度上限' });
   const support = availableSupport(slide, options.templatePreserved);

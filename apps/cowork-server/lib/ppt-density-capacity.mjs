@@ -1,4 +1,3 @@
-import { templateMediaRole } from './ppt-template-fidelity.mjs';
 /** Shared geometry/line estimator for page planning and source-owned rendering.
  * A fit is an analytic prediction; final Render Tree/PPTX QA remains mandatory. */
 import { measureText, textContract, PT_EMU } from './ppt/render-contract.mjs';
@@ -52,7 +51,8 @@ export function contentCanvas(project = {}, index = 1) {
   // Explicit evidence/brand assets are occupied space, not reclaimable old
   // examples. Select a rectangular free region rather than hiding the asset.
   const clearance=INCH*.08;
-  for(const node of (spec?.nodes || []).filter(node=>protectedTemplateAsset(node)||node.type==='image'&&templateMediaRole(node,spec,fidelity)==='unknown')){
+  for(const node of (spec?.nodes || []).filter(node=>protectedTemplateAsset(node)||node.type==='image'&&
+    !(node.geometry?.width>=width*.85&&node.geometry?.height>=height*.85))){
     if(!validBox(node.geometry))continue;
     const g=node.geometry;if(g.x>=right||g.x+g.width<=left||g.y>=bottom||g.y+g.height<=top)continue;
     const choices=[{l:left,r:Math.min(right,g.x-clearance),t:top,b:bottom},{l:Math.max(left,g.x+g.width+clearance),r:right,t:top,b:bottom},
@@ -124,6 +124,19 @@ export function fitComponents(components, project = {}, index = 1) {
       predictedOverflow: Math.max(0, usedHeight - canvas.height,...measurements.map(m=>m.width?m.width-widths:0)), usedHeight, availableHeight: canvas.height, fontSizePt, canvas });
   }
   const best = candidates.sort((a, b) => Number(a.predictedOverflow > 0) - Number(b.predictedOverflow > 0) || a.usedHeight - b.usedHeight)[0];
+  // A single primary component plus its caption/brief explanation belongs in
+  // the middle of the available region, not against an arbitrary template edge.
+  if (best.predictedOverflow === 0 && components.length <= 3 && components.filter(c=>['table','image','chart'].includes(c.type)).length === 1) {
+    const dy=Math.round((canvas.height-best.usedHeight)/2);
+    best.boxes.forEach((box,i)=>{
+      box.y+=dy;
+      if (components[i].type==='image') {
+        const c=components[i].content || {},ratio=Number(c.width)/Number(c.height);
+        if (ratio>0) box.width=Math.min(box.width,Math.round(box.height*ratio));
+      }
+      box.x=Math.round(canvas.x+(canvas.width-box.width)/2);
+    });
+  }
   return { ...best, capacity_ok: best.predictedOverflow === 0, capacityBasis, measurementBasis: 'shared_line_estimator' };
 }
 export const isSourceArtifactItem = item => Boolean(item?.must_preserve_structure || item?.type === 'SummaryBlock');

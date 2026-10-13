@@ -1,0 +1,15 @@
+
+Running 3 tests using 1 worker
+
+[1A[2K(node:18239) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K(node:18239) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K[1/3] src/__tests__/e2e/ppt-progressive-input.spec.ts:9:5 › Prompt carries pasted/selected images through analyze and generation @smoke
+[1A[2K[2/3] src/__tests__/e2e/ppt-progressive-input.spec.ts:24:5 › Progressive canvas hides future templates and keeps chat actions in short windows @smoke
+[1A[2K[3/3] src/__tests__/e2e/ppt-render-contract.spec.ts:6:5 › PPT shared contracts render signed charts, crops, code and tables @smoke
+[1A[2K  3 passed (1.2m)

@@ -1,0 +1,17 @@
+
+> codepilot@4.2.0 test:smoke
+> npx playwright test --grep @smoke --last-failed --workers=1 --timeout=120000 --reporter=line
+
+
+Running 1 test using 1 worker
+
+[1A[2K(node:31340) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K(node:31340) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+
+
+[1A[2K[1/1] src/__tests__/e2e/ppt-byok-setup.spec.ts:4:5 › API setup saves explicit protocol, synchronizes models and exposes them in PPT @smoke
+[1A[2K  1 passed (22.8s)

@@ -1,0 +1,26 @@
+
+/Users/dongli/Documents/ChatGPT/CodePilot/LabCodepilot/src/components/ppt/PptWorkspace.tsx
+   89:24  warning  'setStatusFilter' is assigned a value but never used                                                         @typescript-eslint/no-unused-vars
+  105:21  warning  'setInputKind' is assigned a value but never used                                                            @typescript-eslint/no-unused-vars
+  107:18  warning  'setPrompt' is assigned a value but never used                                                               @typescript-eslint/no-unused-vars
+  108:22  warning  'setSourceText' is assigned a value but never used                                                           @typescript-eslint/no-unused-vars
+  110:16  warning  'setFile' is assigned a value but never used                                                                 @typescript-eslint/no-unused-vars
+  111:22  warning  'setImportMode' is assigned a value but never used                                                           @typescript-eslint/no-unused-vars
+  113:17  warning  'setPages' is assigned a value but never used                                                                @typescript-eslint/no-unused-vars
+  186:6   warning  React Hook useEffect has a missing dependency: 'selected'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+  259:18  warning  'addClipboardImages' is defined but never used                                                               @typescript-eslint/no-unused-vars
+  432:9   warning  'completedCount' is assigned a value but never used                                                          @typescript-eslint/no-unused-vars
+
+/Users/dongli/Documents/ChatGPT/CodePilot/LabCodepilot/src/components/ppt/create/PptCreateWizard.tsx
+  81:101  warning  The ref value 'analysisAttempt.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'analysisAttempt.current' to a variable inside the effect, and use that variable in the cleanup function  react-hooks/exhaustive-deps
+
+/Users/dongli/Documents/ChatGPT/CodePilot/LabCodepilot/src/components/ppt/generation/GenerationEditDialog.tsx
+  30:53  warning  The ref value 'attempt.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'attempt.current' to a variable inside the effect, and use that variable in the cleanup function  react-hooks/exhaustive-deps
+  31:6   warning  React Hook useEffect has a missing dependency: 'slideId'. Either include it or remove the dependency array                                                                                                                                                     react-hooks/exhaustive-deps
+
+/Users/dongli/Documents/ChatGPT/CodePilot/LabCodepilot/src/components/ppt/generation/PptGenerationMonitor.tsx
+  48:6    warning  React Hook useEffect has a missing dependency: 'project'. Either include it or remove the dependency array                                react-hooks/exhaustive-deps
+  49:139  warning  React Hook useEffect has a complex expression in the dependency array. Extract it to a separate variable so it can be statically checked  react-hooks/exhaustive-deps
+
+✖ 15 problems (0 errors, 15 warnings)
+

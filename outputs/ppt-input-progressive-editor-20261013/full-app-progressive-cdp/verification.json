@@ -1,0 +1,12 @@
+{
+  "transport": "CDP",
+  "application": "http://localhost:3000/ppt",
+  "checks": [
+    "Completed/current pages remain visible; future blank templates are absent; follow scrolls to current page",
+    "1440px: scrolling works and submit remains inside viewport",
+    "390px: scrolling works and submit remains inside viewport",
+    "User request and assistant result are shown after submission",
+    "Selected and clipboard PNGs enter the actual Prompt creation payload"
+  ],
+  "errors": []
+}

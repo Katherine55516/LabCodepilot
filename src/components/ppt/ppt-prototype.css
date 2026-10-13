@@ -298,5 +298,5 @@
 .ppt-update-stage > header, .ppt-update-stage > footer { flex-shrink: 0; }
 .ppt-create-body { min-height: 0; }
 .ppt-generation-stage > .ppt-generation-grid { height: auto; min-height: 0; flex: 1; }
-[data-testid="ppt-generation-edit"] > * { flex-shrink: 0; }
-[data-testid="ppt-generation-edit"] > [data-testid="ppt-generation-messages"] { flex-shrink: 1; }
+[data-testid="ppt-generation-edit-scroll"] { min-height: 0; scrollbar-gutter: stable; }
+[data-testid="ppt-generation-edit-actions"] { padding-bottom: max(16px, env(safe-area-inset-bottom)); }

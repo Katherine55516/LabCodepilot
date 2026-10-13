@@ -1,0 +1,51 @@
+import assert from 'node:assert/strict';
+import { dominantInputLanguage, normalizeTopicTitle, stripContinuationSuffix } from './lib/ppt-topic-language.mjs';
+import { outputLanguage, promptPolicy } from './lib/ppt-prompt-contracts.mjs';
+import { materializeCopy } from './lib/ppt-presentation-writing.mjs';
+import { _internals as api } from './lib/ppt-api.mjs';
+const english = 'The model learns a representation from repeated observations, with validation before deployment. '.repeat(8) + '模型验证';
+const chinese = '模型从重复观察中学习表征，部署前需要验证，并保留适用条件和限制。'.repeat(8) + 'Deep learning';
+for (const [sample, expected] of [[english, 'en'], [chinese, 'zh'], ['日本語の資料では学習手順と検証条件を説明します。'.repeat(8), 'ja'], ['학습 과정과 검증 조건을 설명합니다.'.repeat(8), 'ko']]) {
+  assert.equal(dominantInputLanguage({ source: { text: sample } }), expected);
+  assert.equal(outputLanguage({ source: { text: sample } }), expected);
+}
+assert.equal(dominantInputLanguage({ source: { images: [{ caption: chinese }] }, prompt: english }), 'zh');
+assert.equal(dominantInputLanguage({ source: { segments: [{ text: english }] }, prompt: chinese }), 'en');
+assert.equal(dominantInputLanguage({ source: { segments: [{ text: english }, { text: chinese.repeat(10), kind: 'code' }] } }), 'en');
+assert.equal(dominantInputLanguage({ source: { text: chinese + 'こんにちは' } }), 'zh', 'an incidental Japanese phrase does not override dominant Chinese prose');
+assert.equal(dominantInputLanguage({}), 'en');
+assert.equal(dominantInputLanguage({ prompt: english + '\n```\n' + chinese.repeat(10) + '\n```\nhttps://example.test/' + 'x'.repeat(2000) }), 'en');
+assert.equal(dominantInputLanguage({ prompt: chinese + '\ndata:image/png;base64,' + 'x'.repeat(10000) }), 'zh');
+assert.equal(outputLanguage({ source: { text: chinese }, prompt: 'write in English' }), 'en', 'legacy explicit language still applies');
+assert.match(promptPolicy({ source: { text: chinese }, prompt: 'write in English' }), /topic_language=简体中文/, 'topic decision stays consistent with materialization even when legacy body hints differ');
+assert.equal(outputLanguage({ source: { text: chinese }, editOutputLanguage: 'en', generationPolicy: {} }), 'en', 'local translation remains supported');
+assert.equal(normalizeTopicTitle('Representation learning | 表征学习', 'en'), 'Representation learning');
+assert.equal(normalizeTopicTitle('Representation learning | 表征学习', 'zh'), '表征学习');
+assert.equal(normalizeTopicTitle('Overview 概览', 'zh'), '概览');
+assert.equal(normalizeTopicTitle('NN3 | 泛化能力', 'zh'), 'NN3 泛化能力');
+assert.equal(normalizeTopicTitle('Transformer 架构', 'zh'), 'Transformer 架构', 'a technical name is not a parallel translation');
+assert.equal(normalizeTopicTitle('Conditions | Limitations', 'en'), 'Conditions | Limitations', 'same-language parallel topics survive');
+assert.equal(stripContinuationSuffix('低频续'), '低频');
+assert.equal(stripContinuationSuffix('模型（续 2）'), '模型');
+assert.equal(stripContinuationSuffix('可持续'), '可持续');
+assert.equal(stripContinuationSuffix('业务延续'), '业务延续');
+const outline = [{ id: 'first', title: 'Overview | 概览', focus: 'Explain the source.', refs: [] }, { id: 'middle', title: 'Learning | 学习', focus: 'Explain the mechanism.', refs: [] }, { id: 'last', title: 'Summary | 总结', focus: 'Summarize.', refs: [] }];
+const body = ['Learning is verified before deployment. 部署前需要验证学习结果。'];
+for (const [sample, language, title, ending] of [[english, 'en', 'Learning', 'Thanks for watching!'], [chinese, 'zh', '学习', '感谢观看']]) {
+  const project = { source: { text: sample }, outline, generationPolicy: { language: { mode: 'source' } }, prompt: 'Make a deck.' };
+  assert.match(promptPolicy(project), new RegExp('topic_language=' + (language === 'en' ? 'English' : '简体中文')));
+  const normalized = api.normalizeOutline({ slides: outline.map(s => ({ ...s, section: s.title, children: [{ title: s.title }] })) }, 3, project.source, null, null, language);
+  assert.equal(normalized[1].title, title); assert.equal(normalized[1].section, title); assert.equal(normalized[1].children[0].title, title);
+  const slide = api.normalizeSlide({ title: outline[1].title, section: 'Mechanism | 机制', eyebrow: 'Mechanism | 机制', bullets: body }, outline[1], project);
+  assert.equal(slide.title, title); assert.deepEqual(slide.bullets, body, 'body evidence retains both languages');
+  assert.equal(slide.copy.eyebrow, language === 'en' ? 'Mechanism' : '机制');
+  assert.equal(slide.section, language === 'en' ? 'Mechanism' : '机制');
+  assert.equal(api.normalizeSlide({ title: 'Summary', bullets: body }, outline[2], project).title, ending);
+  assert.equal(api.normalizeSlide({ title: 'Summary', bullets: body }, outline[2], project).titleQuality.locked, false, 'generated closing is editable');
+  assert.equal(api.normalizeSlide({ title: language === 'en' ? '感谢观看' : 'Thanks for watching!', bullets: body }, outline[2], project).title, ending);
+  const locked = { ...project, deckTitle: { source: 'user', text: 'My title | 自定标题' } };
+  assert.equal(api.normalizeSlide({ title: 'Overview' }, outline[0], locked).title, 'My title | 自定标题');
+}
+const continuation = materializeCopy({ title: 'Unwanted (continued 2)' }, { ...outline[1], capacityPartition: true }, { brief: { topicLanguage: 'en' } });
+assert.equal(continuation.title.title, 'Learning');
+console.log('PPT dominant input language, single-language topics, bilingual evidence and locked title fidelity: OK');

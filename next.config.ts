@@ -23,6 +23,9 @@ const BUILD_ID = (() => {
 
 const nextConfig: NextConfig = {
   output: 'standalone',
+  // These large icon barrels otherwise enter every AppShell route in dev.
+  // Load the named icons only, keeping PPT cold compilation and hydration bounded.
+  experimental: { optimizePackageImports: ['@phosphor-icons/react', '@lobehub/icons'] },
   // Pin the file-tracing root to THIS project directory. Without it, Next.js
   // infers the monorepo/workspace root from the nearest ancestor lockfile. On a
   // dev machine that happens to have a stray ~/package-lock.json, the inferred
@@ -50,13 +53,23 @@ const nextConfig: NextConfig = {
   // 注意合并姿势:Next 默认 ignored 是**RegExp**,而 webpack schema 的数组形式只接受字符串
   // ——不能把 RegExp 塞进数组(会 ValidationError 起不来),按既有类型分别合并。
   webpack: (config, { dev }) => {
+    if (!dev) {
+      // Next 16.2.1 applies outputFileTracingExcludes after NFT enumerates assets.
+      // A dynamic cwd read can therefore walk every generated application copy.
+      // Ignore NFT's literal glob marker during its initial tracing pass. Runtime
+      // workspace files are supplied at runtime; external packages remain covered
+      // by the explicit outputFileTracingIncludes below.
+      type TracePlugin = { constructor?: { name?: string }; traceIgnores?: string[] };
+      const tracePlugin = (config.plugins as TracePlugin[] | undefined)?.find(plugin => plugin?.constructor?.name === 'TraceEntryPointsPlugin');
+      if (tracePlugin) tracePlugin.traceIgnores = [...(tracePlugin.traceIgnores || []), '\\*\\*/\\*'];
+    }
     if (dev) {
-      const extra = /[\\/]\.playwright-mcp[\\/]/;
+      const extra = /[\\/](?:\.playwright-mcp|\.ppt-build|outputs)[\\/]/;
       const prev = config.watchOptions?.ignored;
       const ignored =
         prev instanceof RegExp ? new RegExp(`${prev.source}|${extra.source}`)
-        : Array.isArray(prev) ? [...prev, '**/.playwright-mcp/**']
-        : typeof prev === 'string' ? [prev, '**/.playwright-mcp/**']
+        : Array.isArray(prev) ? [...prev, '**/.playwright-mcp/**', '**/.ppt-build/**', '**/outputs/**']
+        : typeof prev === 'string' ? [prev, '**/.playwright-mcp/**', '**/.ppt-build/**', '**/outputs/**']
         : extra;
       config.watchOptions = { ...config.watchOptions, ignored };
     }
@@ -199,6 +212,8 @@ const nextConfig: NextConfig = {
       'README_JA.md',
       'RELEASE_NOTES.md',
       '.codepilot/**',
+      '.ppt-build/**',
+      'outputs/**',
       // `.claude/` holds agent/editor state — incl. git worktrees under
       // `.claude/worktrees/` that may contain their own node_modules/.next/
       // release/. NFT would otherwise sweep a worktree's `release/*.app` into

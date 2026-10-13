@@ -1,5 +1,6 @@
 import { test, expect, type Page } from '@playwright/test';
 import { pptParityFixture } from '../fixtures/ppt-parity';
+import type { PptRenderElement } from '@/components/ppt/types';
 const uiErrors = new WeakMap<Page,string[]>();
 test.beforeEach(async({page})=>{ const errors:string[]=[]; uiErrors.set(page,errors); page.on('pageerror',error=>errors.push(error.message)); page.on('console',message=>{if(message.type()==='error')errors.push(message.text());}); });
 test.afterEach(async({page})=>{expect(uiErrors.get(page)).toEqual([]);});
@@ -109,10 +110,11 @@ test('PPT source table editor uses measured column/row weights and readable head
   const project=fixture.projects.get('9'.repeat(32))!;
   project.status='completed';
   // Use production Render Tree data at the editor boundary, without model calls.
-  project.renderTree.slides[0].elements.push({id:'density-table',nodeId:'density-table',kind:'table',
+  const elements = project.renderTree.slides[0].elements as unknown as PptRenderElement[];
+  elements.push({id:'density-table',nodeId:'density-table',kind:'table',
     bounds:{x:914400,y:2286000,width:7315200,height:1828800},
     content:{rows:[['Object','Condition'],['Queue','Before execution'],['Result','After review']],columnWeights:[1,3],rowWeights:[1,2,1]},
-    style:{fontSizePt:18,color:'#242a3b',fill:'#404b6b',tableHeaderColor:'#ffffff'},zIndex:500,locked:false} as any);
+    style:{fontSizePt:18,color:'#242a3b',fill:'#404b6b',tableHeaderColor:'#ffffff'},zIndex:500,locked:false});
   await page.getByRole('heading',{name:'Workflow fixture',exact:true}).click();
   await page.getByRole('button',{name:'打开编辑器',exact:true}).click();
   const table=page.getByTestId('ppt-structured-editor').locator('[data-node-id="density-table"] table');
@@ -137,7 +139,7 @@ test('PPT editable import keeps native page count independent of a small selecte
   await page.getByRole('button',{name:'确认并继续 →'}).click();
   await page.getByRole('button',{name:/Two page native template/}).click();
   await page.getByRole('button',{name:'下一步：输入内容 →'}).click();
-  await page.locator('input[type=file]').setInputFiles({name:'native.pptx',mimeType:'application/vnd.openxmlformats-officedocument.presentationml.presentation',buffer:Buffer.from('fixture-native-pptx')});
+  await page.locator('input[type=file][accept*=".pptx"]').setInputFiles({name:'native.pptx',mimeType:'application/vnd.openxmlformats-officedocument.presentationml.presentation',buffer:Buffer.from('fixture-native-pptx')});
   await page.getByRole('combobox',{name:/PPTX 导入方式/}).selectOption('editable');
   await page.getByRole('button',{name:'打开并编辑 PPTX',exact:true}).click();
   await expect.poll(()=>fixture.payloads.find(p=>p.inputKind==='file')).toMatchObject({importMode:'editable',fileName:'native.pptx'});

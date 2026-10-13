@@ -1,4 +1,5 @@
 import { routeIssue } from './ppt-repair-routing.mjs';
+import { dominantInputLanguage } from './ppt-topic-language.mjs';
 import { densityPrompt, automaticPages } from './ppt-density-profile.mjs';
 /** Shared semantic contracts for planning, writing, review and editing.
  * Geometry budgets remain renderer-owned; word targets are writing guidance. */
@@ -46,11 +47,7 @@ export function outputLanguage(project) {
     if (/français|french/.test(requested)) return 'fr';
     return 'es';
   }
-  const sample = String(project.source?.text || project.source?.images?.map(image=>image.caption||'').join(' ') || project.prompt || '').replace(/```[\s\S]*?```/g, '').replace(/https?:\/\/\S+|\/[\w./_-]+/g, '');
-  if ((sample.match(/[\u3040-\u30ff]/g) || []).length > 8) return 'ja';
-  if ((sample.match(/[\uac00-\ud7af]/g) || []).length > 8) return 'ko';
-  const han = (sample.match(/\p{Script=Han}/gu) || []).length;
-  return han > Math.max(3, sample.length * .03) ? 'zh' : 'en';
+  return dominantInputLanguage(project);
 }
 
 /** Disclosed presentation decisions shared by planner, writer, critic and
@@ -73,11 +70,13 @@ export function presentationPolicyPrompt(project) {
 
 export function promptPolicy(project) {
   const language = outputLanguage(project);
+  const topicLanguage = project.editOutputLanguage || dominantInputLanguage(project);
   const sourced = effectiveKnowledge(project) === 'source_only';
   const languageRule = project.generationPolicy && !project.editOutputLanguage
     ? 'follow the language(s) of the actual input/source material; infer from source text, retain mixed/bilingual distribution. This takes priority over language hints in brief/copy budgets; do not translate the source into English by default'
     : languageNames[language] || language;
   return `<policy>contract_version=${PPT_PROMPT_CONTRACT_VERSION}; detail=${project.generationPolicy?.detail || 'legacy_auto'}; language_mode=${project.editOutputLanguage ? 'local_translation_override' : project.generationPolicy ? 'follow_input (preserve mixed/bilingual source structure and equivalent facts)' : 'legacy'}. output_language=${languageRule}.
+topic_language=${languageNames[topicLanguage] || topicLanguage}. Every automatically generated page topic/title, section label and eyebrow uses this single dominant input language. Do not append a parallel English/Chinese translation. Preserve technical names/acronyms and user-locked titles; this topic rule does not remove bilingual evidence from the body.
 ${sourced
     ? 'knowledge_mode=source_only. 本项目仅使用输入及所给来源的事实；可以解释其已给出的关系与机制。具体名称、数值、阈值、公式、适用条件和限制一起保留。来源内部矛盾应标明并交给审查，不能自行编造一个答案。'
     : 'knowledge_mode=bounded_explanation. 仅补充理解输入已有主题所必需的定义、关系与条件，必须对应输入中的具体对象并保持原有内容框架；示意情境须标注为示意且不引入新的事实前提。不能扩展新主题、替输入增加议程或把合理猜测写成事实。具体引用、数字、结论、责任人及行动承诺均须有输入依据。'}
@@ -92,6 +91,7 @@ export function writingGuide(project, contract = {}, native = false) {
   return `<writing>
 ${densityPrompt(project)}
 每个要点＝短名称＋完整解释；详细模式、密度与模板槽位不能要求新增输入之外的事实或主题；解释须说明对象、如何起作用、比较关系或成立条件，至少有一个来源支持的具体锚点。锚点可以是方法名称、构造步骤、变量关系或具体情境，不必是数字。
+禁止“完整来源细节见本页备注”“完整表见备注”等占位文案：必要表格、图片、事实及解释必须实际在本页可见。对薄页补充来源支持的机制、条件或例子，或在规划时合并；不能重复标题/description填满空白。按容量拆分的连续页保持同一标题，不添加“续”“续2”或“continued”；末页包含按稿件语言的“感谢观看”或“Thanks for watching!”，并保留实际总结内容。
 ${cjk ? `名称通常 4–10 字；解释按机制、条件、比较与例子完整展开，避免统一短句预算。` : `Labels usually 2–6 words; explanations retain the complete mechanism, conditions and comparisons rather than a fixed short-sentence budget.`}
 ${deep ? '本页需要深入解释；必要时用一个主说明区解释机制，再以短支撑点展开条件、实现和对照。' : '按内容需要混合短支撑点与完整解释，封面/过渡/图示标签可更短。'}
 跨领域组织：业务简报保留决策依据与责任；研究材料保留假设、变量关系与限制；技术材料保留完整代码、数据表和流程顺序；长输入尾部也要有实质覆盖。每页主说明与支撑点承载不同事实；双语配对是同一主张，不增加 unique information。稀疏输入合并/减页，不能扩写同一事实填充所有槽位；详细模式增加来源支持的解释深度而非更多重复的短句。

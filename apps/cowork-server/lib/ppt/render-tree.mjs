@@ -134,14 +134,23 @@ function buildSlide(project, input, index, total) {
   if (visualNodes.length && layout === 'big-number') visualRegion = { x: 8.6, y: 2.35, w: 3.2, h: 1.75 };
   if (visualNodes.length && ['summary', 'editorial', 'conclusion'].includes(layout)) visualRegion = { x: 8.7, y: 2.15, w: 3.55, h: 4.55 };
   if (visualNodes.length && layout === 'timeline') visualRegion = { x: 1.0, y: 5.55, w: 11.25, h: .8 };
+  const singleVisual = visualNodes.length === 1 && !bodyNode?.content?.items?.length && !bodyNode?.content?.text && !nativeTextNodes.length;
+  if (singleVisual) visualRegion = {x:.86,y:2.15,w:SLIDE_SIZE.width/EMU_PER_INCH-1.72,h:4.5};
   visualNodes.forEach((node, visualIndex) => {
-    const region = layout === 'comparison'
+    const region = layout === 'comparison' && !singleVisual
       ? (() => { const base = visualIndex ? regions.right : regions.left; return { ...base, h: 3.65 }; })()
       : visualRegion;
     if (!region) return;
-    const geometry = node.geometry && ['x', 'y', 'width', 'height'].every(key => Number.isInteger(node.geometry[key]))
+    let geometry = node.geometry && ['x', 'y', 'width', 'height'].every(key => Number.isInteger(node.geometry[key]))
       ? node.geometry
       : splitBounds(region, visualNodes.length, visualIndex);
+    if(singleVisual && !node.geometry){
+      const frame=bounds(visualRegion),c=node.content || {};
+      const height=node.type==='table'?Math.min(frame.height,emu(Math.max(1.2,(c.rows?.length||2)*.48))):Math.round(frame.height*.85);
+      const ratio=Number(c.width)/Number(c.height);
+      const width=node.type==='image'&&ratio>0?Math.min(frame.width,Math.round(height*ratio)):Math.round(frame.width*.9);
+      geometry={x:Math.round(frame.x+(frame.width-width)/2),y:Math.round(frame.y+(frame.height-height)/2),width,height};
+    }
     elements.push({
       id: node.id, nodeId: node.id, kind: node.type, bounds: geometry,
       content: node.content || {}, style: node.style || {}, zIndex: Number(node.zIndex || 30 + visualIndex), rotation: Number(node.rotation || 0), locked: Boolean(node.locked), groupId: node.groupId || null,

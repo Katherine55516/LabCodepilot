@@ -1,6 +1,8 @@
+import path from "node:path";
+
 const config = {
   plugins: {
-    "@tailwindcss/postcss": {},
+    "@tailwindcss/postcss": { base: path.resolve("src") },
   },
 };
 

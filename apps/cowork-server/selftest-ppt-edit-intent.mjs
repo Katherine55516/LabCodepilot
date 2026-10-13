@@ -112,25 +112,26 @@ try {
   await assert.rejects(() => edits.submitGenerationEdit(uid, scopeProject.id, { scopeId: scope.id, scope: 'remaining', instruction: 'Different instruction', idempotencyKey: 'scope_request_once' }), error => error.statusCode === 409);
 
   const generating = fixture(); generating.status = 'outline_ready'; generating.deck = null; generating.revision = 0; generating.nodes = {}; repo.saveProject(generating); runs.startRun(generating);
-  const releases = new Map(); const calls = new Map();
+  const releases = new Map(); const calls = new Map(); let holdFirstPage = true;
   const deps = { modelCall: async (snapshot, prompt, _activity, _log, meta) => {
     if (meta.nodeKey?.startsWith('review:')) return scopeReview(snapshot);
     const slideId = meta.nodeKey.split(':')[1]; const epoch = edits.generationEpoch(snapshot, slideId);
     if (!meta.nodeKey.endsWith(':repair')) {
       calls.set(slideId, (calls.get(slideId) || 0) + 1);
-      if (epoch === 0 && ['s0', 's1', 's2'].includes(slideId)) await new Promise(resolve => releases.set(slideId, resolve));
+      if (holdFirstPage && epoch === 0 && slideId === 's0') await new Promise(resolve => releases.set(slideId, resolve));
     }
     const changed = snapshot.editing?.instructions?.[slideId]?.length;
     return { title: `Distinct ${slideId} ${changed ? 'revised' : 'original'}`, titleCandidates: [`Distinct ${slideId} ${changed ? 'revised' : 'original'}`], bullets: slideId === 's0' ? [] : ['A source-backed mechanism explains the relationship.', 'Its assessment depends on the stated conditions.', 'Known limitations constrain the conclusion.'] };
   }, renderPptx: async project => simulatedExport(project), removeContainer: async () => {} };
   assert.equal((await request(generating, '/generate', {}, deps)).status, 202);
-  await waitUntil(() => releases.size === 3, 'three parallel pages started');
-  const during = await edits.openGenerationScope(uid, generating.id, 's0'); assert.deepEqual(during.remainingSlideIds, ['s3']);
+  await waitUntil(() => releases.size === 1, 'first page started');
+  assert.ok(!repo.getProject(uid, generating.id).nodes.s1 || repo.getProject(uid, generating.id).nodes.s1.status==='pending','later pages start after the real current-page preview');
+  const during = await edits.openGenerationScope(uid, generating.id, 's0'); assert.deepEqual(during.remainingSlideIds, ['s1','s2','s3']);
   const currentEdit = await edits.submitGenerationEdit(uid, generating.id, { scopeId: during.id, scope: 'current', instruction: 'Rewrite with a clear claim', idempotencyKey: 'epoch_current_once' });
   const remainingEdit = await edits.submitGenerationEdit(uid, generating.id, { scopeId: during.id, scope: 'remaining', instruction: 'Explain the constraints', idempotencyKey: 'epoch_remaining_once' });
-  for (const release of releases.values()) release();
+  holdFirstPage = false; for (const release of releases.values()) release();
   const finished = await waitUntil(() => { const value = repo.getProject(uid, generating.id); if (value.status === 'failed') throw new Error(value.error); return ['completed', 'quality_blocked'].includes(value.status) && value; }, 'generation settled');
-  assert.match(finished.nodes.s0.slide.title, /revised/); assert.match(finished.nodes.s3.slide.title, /revised/);
+  assert.match(finished.nodes.s0.slide.title, /revised/); assert.equal(finished.nodes.s3.slide.title, 'Thanks for watching!');
   assert.equal(calls.get('s0'), 2, 'superseded epoch must be regenerated'); assert.equal(calls.get('s1'), 1, 'unaffected page is not regenerated');
   assert.equal(finished.editing.intents[currentEdit.intent.id].status, 'applied'); assert.equal(finished.editing.intents[remainingEdit.intent.id].status, 'applied');
 
