@@ -4,6 +4,7 @@ import {sourcePointListKind}from './ppt-source-list-kinds.mjs';
 import {sourceScriptOf}from './ppt-presentation-policy.mjs';
 import crypto from 'node:crypto';
 import {sourceSentences} from './ppt-source-boundaries.mjs';
+import {primaryLanguageEquivalents,concisionApplies,visibleRequiredSentence} from './ppt-outline-concision.mjs';
 const hash=v=>crypto.createHash('sha256').update(typeof v==='string'?v:JSON.stringify(v)).digest('hex');
 const factualNumber=/[-+]?\d+(?:[.,]\d+)*(?:%|％)?/u;
 const mandatorySentence=(item,sentence,index)=>item.type!=='CodeBlock'&&(critical.test(sentence)||item.type==='DefinitionBlock'&&index===0||factualNumber.test(sentence)&&(item.priority==='high'||['DefinitionBlock','EquationBlock','SummaryBlock','ConstraintBlock'].includes(item.type)||/risk|confidence|sample|threshold|independen|candidate|cost|capacity|turnover|multiple|trial|PBO|ICIR|Sharpe|交易日|独立|獨立|候选|候選|置信|风险|風險|成本|容量|阈值|門檻/iu.test(sentence)));
@@ -24,7 +25,11 @@ export function mandatorySelectionFacts(project){return (project.source?.semanti
 export function visibleEquivalentCandidates(project,item){
  const audited=auditedLanguagePairTargets(project,item);if(audited.length)return audited;
  const policy=project.generationPolicy,items=project.originalSourceInventory?.items||project.source?.semantic?.inventory?.items||[];
- if(policy?.content!=='overview'||policy.details!=='notes'||policy.language?.mode!=='output'||!item.languagePairId||item.mustDisplay||item.rows||sourcePointListKind(item)||['EquationBlock','CodeBlock','ProcessBlock','ChecklistBlock','TaxonomyBlock'].includes(item.type))return [];
+ if(policy?.content!=='overview'||policy.details!=='notes'||!item.languagePairId||item.mustDisplay||item.rows||sourcePointListKind(item)||['EquationBlock','CodeBlock','ProcessBlock','ChecklistBlock','TaxonomyBlock'].includes(item.type))return [];
+ // Source languages with a single body language: the translation side of a
+ // detected pair is carried by its original (outline concision, item 3).
+ if(policy.language?.mode==='source')return primaryLanguageEquivalents(project,item,items);
+ if(policy.language?.mode!=='output')return [];
  const target=policy.language.locale==='en'?'latin':'han',source=sourceScriptOf(item.text);
  // Reuse the pairing classifier. A few Chinese names inside English prose
  // (e.g. A 股 / 涨跌停) do not make it a Chinese target-language owner.
@@ -36,7 +41,10 @@ export function selectionConstraints(project){
  const rules=items.map(item=>{
  const mandatorySentenceIndices=sourceSentences(item.text||'').flatMap((s,i)=>mandatorySentence(item,s,i)?[i]:[]);
  const projectedTargets=visibleEquivalentCandidates(project,item);
- const requiresMainWithoutProjection=Boolean(sourcePointListKind(item))||item.type==='CodeBlock'&&project.generationPolicy?.code?.presentation==='keep'||item.mustDisplay===true||['DefinitionBlock','ChecklistBlock','ProcessBlock'].includes(item.type)||mandatorySentenceIndices.length>0;
+ // Overview: only definitions and hard conditions pin a unit to the slide;
+ // the broader mandatory set still binds any summary (outline concision, item 4).
+ const visibleRequired=concisionApplies(project)?sourceSentences(item.text||'').some((s,i)=>visibleRequiredSentence(item,s,i)):mandatorySentenceIndices.length>0;
+ const requiresMainWithoutProjection=Boolean(sourcePointListKind(item))||item.type==='CodeBlock'&&project.generationPolicy?.code?.presentation==='keep'||item.mustDisplay===true||['DefinitionBlock','ChecklistBlock','ProcessBlock'].includes(item.type)||visibleRequired;
  const notesBlocked=!projectedTargets.length&&requiresMainWithoutProjection;
  const summaryBlocked=Boolean(sourcePointListKind(item))||item.mustDisplay===true||['EquationBlock','CodeBlock','ProcessBlock','ChecklistBlock'].includes(item.type);
  const codeNotes=item.type==='CodeBlock'&&project.generationPolicy?.details==='notes'&&project.generationPolicy?.code?.presentation==='omit';
@@ -112,7 +120,7 @@ export function compileContentSelection(project,raw){
   if(equivalent!==undefined&&(entry.destination!=='notes'||!visibleEquivalentCandidates(project,item).includes(equivalent)||!owned.has(equivalent)||!raw.selection.some(e=>e.sourceUnitId===equivalent&&['slides','summary'].includes(e.destination))))invalid('A language projection requires an actual target-language primary owner in the same source pair; pair metadata alone is not entailment proof.',{
     entry,allowedTargetOwners:visibleEquivalentCandidates(project,item).map(id=>({sourceUnitId:id,destination:raw.selection.find(e=>e.sourceUnitId===id)?.destination,owningPageIndexes:raw.slides.flatMap((s,index)=>s.sourceUnitIds?.includes(id)?[index]:[])})),
     requiredCorrection:'Use ONLY an allowed target ID. Its selection destination must be slides or summary AND it must occur in an actual primary slide.sourceUnitIds. The notes source ID must not occur in any slide.sourceUnitIds. Never project both sides to notes or reference the source ID itself.'});
-  if(entry.destination==='notes'&&!equivalent&&(item.type==='CodeBlock'&&project.generationPolicy?.code?.presentation==='keep'||item.mustDisplay===true||item.type==='DefinitionBlock'||item.type==='ChecklistBlock'||item.type==='ProcessBlock'||sourceSentences(item.text||'').some((s,i)=>mandatorySentence(item,s,i))))invalid('A definition or explicit condition/risk needs a main-slide owner.',{sourceUnitId:item.id});
+  if(entry.destination==='notes'&&!equivalent&&(item.type==='CodeBlock'&&project.generationPolicy?.code?.presentation==='keep'||item.mustDisplay===true||item.type==='DefinitionBlock'||item.type==='ChecklistBlock'||item.type==='ProcessBlock'||sourceSentences(item.text||'').some((s,i)=>concisionApplies(project)?visibleRequiredSentence(item,s,i):mandatorySentence(item,s,i))))invalid('A definition or explicit condition/risk needs a main-slide owner.',{sourceUnitId:item.id});
   if(entry.destination==='summary'){
    if(item.rows&&entry.summaryText!==undefined)invalid('Tables retain exact selected original cells; semantic summary text is not a table replacement.',entry);
    if(item.mustDisplay===true)invalid('A must-display unit cannot become a summary.',entry);
@@ -141,7 +149,10 @@ export function compileContentSelection(project,raw){
  const missing=items.filter(i=>!i.presentation&&!seen.has(i.id));if(missing.length)invalid('Every source unit requires an explicit destination.',missing.map(i=>i.id));
  if(policy.language?.mode==='source'){
   const pairs=[...new Set(items.map(item=>item.languagePairId).filter(Boolean))];
-  const conflicts=pairs.flatMap(pair=>{const members=items.filter(item=>item.languagePairId===pair),destinations=new Set(members.map(item=>entries.find(entry=>entry.sourceUnitId===item.id)?.destination==='notes'?'notes':'slides'));return destinations.size>1?[{languagePairId:pair,sourceUnitIds:members.map(item=>item.id)}]:[];});
+  // A single body language (body=primary) keeps a translation in notes when
+  // its original is the verified visible equivalent; other splits stay invalid.
+  const carried=entry=>entry?.destination==='notes'&&entry.visibleEquivalentSourceUnitId&&visibleEquivalentCandidates(project,items.find(item=>item.id===entry.sourceUnitId)||{}).includes(entry.visibleEquivalentSourceUnitId);
+  const conflicts=pairs.flatMap(pair=>{const members=items.filter(item=>item.languagePairId===pair&&!carried(entries.find(entry=>entry.sourceUnitId===item.id))),destinations=new Set(members.map(item=>entries.find(entry=>entry.sourceUnitId===item.id)?.destination==='notes'?'notes':'slides'));return destinations.size>1?[{languagePairId:pair,sourceUnitIds:members.map(item=>item.id)}]:[];});
   if(conflicts.length)invalid('Both source languages must remain together: both visible or both in complete source notes.',{languagePairConflicts:conflicts});
  }
  const relations=(project.originalSourceInventory?.relationships||project.source?.semantic?.inventory?.relationships||[]).map(r=>{

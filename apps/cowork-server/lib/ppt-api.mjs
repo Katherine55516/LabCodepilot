@@ -21,7 +21,7 @@ import {confirmedPageDecision,automaticPageDecision} from './ppt-page-decision.m
 import {writerDeltaResponseSchema, writerLocalRepairScope,applyWriterLocalDelta,writerLocalRepairPrompt} from './ppt-writer-local-repair.mjs';
 import {RENDER_CONTRACT_VERSION} from './ppt/render-contract.mjs';
 import {renderIssues} from './ppt/render-audit.mjs';
-import {compileContentSelection,selectionSource,exactPageConflict,coalesceEquivalentSelections} from './ppt-content-selection.mjs';
+import {compileContentSelection,selectionSource,exactPageConflict,coalesceEquivalentSelections, visibleEquivalentCandidates } from './ppt-content-selection.mjs';
 import {taskSummary,liveProjectView} from './ppt/project-view.mjs';
 import { repeatedFocusMetadataError,pruneEmptySelectedPages,retainOutlineRepair,resumeOutlineRepair,outlineSummaryRepairPrompt,applyOutlineSummaryRepair,outlineMetadataRepairPrompt,applyOutlineMetadataRepair,outlineOwnershipRepairPrompt,applyOutlineOwnershipRepair,outlineRelationBatchRepairPrompt,applyOutlineRelationBatchRepair,outlineRelationRepairPrompt,applyOutlineRelationRepair,orderSourceConclusion, contentDistribution, inspectSkeletonOwnership, skeletonBatches, outlineDraftFromPartialJson, assembleSkeletonBatches, outlineResponseSchema, outlineDeltaPrompt, applyOutlineDelta, compileSkeleton, skeletonPrompt, parseOutlineJson, userRequirements, candidateRecord, promptTelemetry, fragmentTitle, outlineError } from './ppt-outline-protocol.mjs';
 import { pptModelJobs, PPT_BYOK_CAPABILITIES } from './ppt-model-jobs.mjs';
@@ -37,6 +37,8 @@ import { templateLimits } from './ppt-template-security.mjs';
 import { importEditablePptx as importTemplateIR } from './ppt/import-pptx.mjs';
 import { markPptTime } from './ppt-trace.mjs';
 import { normalizeGenerationPolicy, defaultGenerationPolicy, requestedPageCount, PPT_PROMPT_CONTRACT_VERSION } from './ppt-generation-policy.mjs';
+import { outlineGrowth, outlineConcisionMetrics, concisionPlannerRule, routeTranslationsToNotes } from './ppt-outline-concision.mjs';
+import { condenseOverflowingTables, mergeUnderfilledPages, pageLoad } from './ppt-outline-condense.mjs';
 import { syncPresentationPolicy } from './ppt-presentation-policy.mjs';
 import { normalizePageContract } from './ppt-page-contract.mjs';
 /** M1 PPT Workspace API and durable, server-side job orchestration.
@@ -254,8 +256,9 @@ function outlinePrompt(p) {
       :'Keep every required source object, all table columns/tail rows, formulas/variables/conditions.';
     const pairPolicy=overviewNotes&&p.generationPolicy?.language?.mode==='output'
       ?'Detected equivalent language pairs use one target-language visible owner, with the complete originals in notes and a verified visibleEquivalentSourceUnitId. Budget the target-language display only; protected structures still retain every member and condition.'
+      :overviewNotes&&p.generationPolicy?.language?.body==='primary'?'Detected bilingual pairs: the original-language unit is the one visible owner; its translation goes to notes with visibleEquivalentSourceUnitId. Budget one display cost per pair; titles and section labels stay bilingual.'
       :'Translation pairs are one claim with two display costs.';
-    return skeletonPrompt(p,`You are a source-grounded presentation planner. No tools, no fabricated facts. output_language=${p.generationPolicy?.language?.mode==='output'?outputLanguage(p):'preserve source languages'}; knowledge=${p.generationPolicy?.knowledge||'source_only'}; content_contract=${p.generationPolicy?.content||'full_source'}. ${auto?'Pages are provisional; choose 3–100 pages by semantic relationships and native capacity.':`Exactly ${p.pages} pages including cover and conclusion.`} ${preservation} ${pairPolicy} Avoid repeating tables as prose. Native capacity=${JSON.stringify(sourceCapacityPlan(estimationSource(p),p.pages,p)?.capacity)}. Locked cover title=${JSON.stringify(p.deckTitle?.source==='user'?p.deckTitle.raw:null)}; required images=${JSON.stringify((p.source?.images||[]).filter(x=>x.required||x.mustPreserve).map(x=>x.id))}.`);
+    return skeletonPrompt(p,`You are a source-grounded presentation planner. No tools, no fabricated facts. output_language=${p.generationPolicy?.language?.mode==='output'?outputLanguage(p):'preserve source languages'}; knowledge=${p.generationPolicy?.knowledge||'source_only'}; content_contract=${p.generationPolicy?.content||'full_source'}. ${auto?'Pages are provisional; choose 3–100 pages by semantic relationships and native capacity.':`Exactly ${p.pages} pages including cover and conclusion.`} ${preservation} ${pairPolicy} ${concisionPlannerRule(p)} Avoid repeating tables as prose. Native capacity=${JSON.stringify(sourceCapacityPlan(estimationSource(p),p.pages,p)?.capacity)}. Locked cover title=${JSON.stringify(p.deckTitle?.source==='user'?p.deckTitle.raw:null)}; required images=${JSON.stringify((p.source?.images||[]).filter(x=>x.required||x.mustPreserve).map(x=>x.id))}.`);
   }
   const sourceContext = sourcePlanningContext(p.source);
   const pageRecommendation = estimatePageRecommendation(p);
@@ -589,7 +592,7 @@ function startIngest(uid, id, activity, log, deps = defaultDeps) {
 // Candidate assessment is isolated from the stored project. Native assignment
 // must finish before its fit is recorded or compared with a repaired candidate.
 function assessOutlineCandidate(project, raw, {finalRepack=false}={}) {
-  raw=coalesceEquivalentSelections(raw);
+  raw=routeTranslationsToNotes(project,coalesceEquivalentSelections(raw),item=>visibleEquivalentCandidates(project,item));
   const automatic=automaticPages(project);
   let contentSelection;try{contentSelection=compileContentSelection(project,raw);}catch(error){error.outlineContract=true;error.code='coverage_invalid';throw error;}
   if(contentSelection||project.languageProjection)project={...project,...(contentSelection?{contentSelection}:{}),originalSourceInventory:project.originalSourceInventory||project.source.semantic.inventory,source:selectionSource(project,contentSelection)};
@@ -722,6 +725,9 @@ function startOutline(uid, id, activity, log, deps = defaultDeps) {
         const delta=await deps.modelCall(p,prompt,activity,log,{nodeKey:'outline:metadata:resumed:'+pass,maxOutputTokens:8192});
         assessed=assessOutlineCandidate(p,applyOutlineMetadataRepair(assessed.rawOutline,diagnostic,delta));rawOutline=assessed.rawOutline;saveAssessedCheckpoint(assessed);saveCandidate(rawOutline,assessed.issues);
       }
+      // Overview contract: condense (selected table rows, details in notes)
+      // before any measured partition adds pages (outline concision, item 5).
+      if(assessed&&automatic&&!p.requestedOutline){const condensed=condenseOverflowingTables(p,assessed,assessOutlineCandidate);if(condensed){assessed=condensed;saveAssessedCheckpoint(assessed);rawOutline=assessed.rawOutline;saveCandidate(rawOutline,assessed.issues);}}
       // Prefer a measured partition of unchanged source objects to asking a
       // model to create more explanatory pages. This keeps geometry repair
       // separate from semantic planning, with the same coverage/fit gates.
@@ -807,6 +813,9 @@ function startOutline(uid, id, activity, log, deps = defaultDeps) {
           }catch(error){log(`ppt ${id} outline partition batch rejected: ${String(error?.message||error).slice(0,180)}`);break;}
         }
       }
+      // Overview contract: condense (selected table rows, details in notes)
+      // before any measured partition adds pages (outline concision, item 5).
+      if(assessed&&automatic&&!p.requestedOutline){const condensed=condenseOverflowingTables(p,assessed,assessOutlineCandidate);if(condensed){assessed=condensed;saveAssessedCheckpoint(assessed);rawOutline=assessed.rawOutline;saveCandidate(rawOutline,assessed.issues);}}
       // No generated copy is changed by the measured fallback. It partitions
       // complete original atoms only after bounded model repair is exhausted.
       if(automatic&&!p.requestedOutline)assessed=assessOutlineCandidate(p,orderSourceConclusion(p,assessed.rawOutline));
@@ -834,6 +843,8 @@ function startOutline(uid, id, activity, log, deps = defaultDeps) {
         if(repacked.outline.length>=assessed.outline.length||inspectDensityOutline(repacked.rawOutline,repacked.project).length)break;
         assessed=repacked;
       }
+      // Underfilled neighbours merge (across sections) while above budget.
+      if(automatic&&!p.requestedOutline){const merged=mergeUnderfilledPages(p,assessed,assessOutlineCandidate,{capacity:assessed.rawOutline.slides[1]?.densityFit?.targetVisualUnits||671});if(merged){assessed=merged;saveAssessedCheckpoint(assessed);log(`ppt ${id} merged ${merged.concisionMerges} underfilled page pair(s): ${assessed.outline.length} pages`);}}
       // Physical partitions may keep identical planning focuses even though
       // their frozen source owners differ. Repair intent metadata only, then
       // re-run the same source and physical checks before explicit confirmation.
@@ -885,14 +896,19 @@ function startOutline(uid, id, activity, log, deps = defaultDeps) {
       const reuseCount = current.templateFidelity?.originalSlideCount;
       const reuseError = reuseCount && templateReuseError(reuseCount, current.pages);
       if (reuseError) throw new HttpError(400, reuseError);
+      const growth = automatic ? outlineGrowth(current, current.pages) : null;
       current.pageDecision = { ...current.pageDecision, finalPageCount: current.pages, densityProfileId: densityProfile().id,
         estimateVersion: 1, fitValidated: rawOutline.slides?.slice(1).every(s => s.densityFit?.capacity_ok) || false,
         ...(automatic ? { mode: 'auto', initialPageCount: current.pageDecision.initialPageCount, calibratedAt: new Date().toISOString() } : {}),
-        ...(current.autoGenerate ? { confirmedAt: new Date().toISOString() } : {}) };
+        ...(current.autoGenerate && !growth ? { confirmedAt: new Date().toISOString() } : {}),
+        concision: outlineConcisionMetrics(current, outline, slide => pageLoad(current, slide, rawOutline.selection || [])), ...(growth ? { growth } : {}) };
+      if (!growth) delete current.pageDecision.growth;
       current.outline = outline;
       current.candidateOutline=candidateRecord(current,rawOutline,[],true);
       delete current.failure;
-      current.status = current.autoGenerate ? 'generating' : 'outline_ready'; current.stage = current.autoGenerate ? 'content' : 'outline'; current.error = '';
+      // An automatic outline that outgrew its budget waits for confirmation.
+      const proceed = current.autoGenerate && !growth;
+      current.status = proceed ? 'generating' : 'outline_ready'; current.stage = proceed ? 'content' : 'outline'; current.error = '';
       if (current.deckTitle?.source !== 'user') {
         if(current.titleSource==='derived'&&outline[0]?.title){const identity=displayedDocumentTitle(current);current.title=identity?.variants?.map(v=>v.text).join(' | ').slice(0,160)||outline[0].title;}
         current.deckTitle = { text: outline[0]?.title || current.title, raw: outline[0]?.title || current.title, source: 'agent', locked: false };
@@ -901,7 +917,7 @@ function startOutline(uid, id, activity, log, deps = defaultDeps) {
       current.planning.contentDistribution=contentDistribution(current,outline);
       synchronizePlan(current, 'outline-confirmation');
       current.diff = diffSummary(current);
-      generateAfterOutline = Boolean(current.autoGenerate);
+      generateAfterOutline = proceed;
       delete current.autoGenerate;
       delete current.requestedOutline;
       delete current.outlineSeed;

@@ -4,6 +4,7 @@ import { densityProfile, densityText, displayUnits, automaticPages } from './ppt
 import { contentCanvas, fitComponents, measureComponent, sourceComponent,sourceComponentParts, prepareReadingComponents, sourceImageComponents, isSourceArtifactItem, validateSourceArtifactRefs, INCH } from './ppt-density-capacity.mjs';
 import { copyKey } from './ppt-copy-integrity.mjs';
 import { visibleEquivalentCandidates } from './ppt-content-selection.mjs';
+import { concisionCost } from './ppt-outline-concision.mjs';
 const unique = list => [...new Set(list.filter(Boolean))];
 function uniquePoints(points) {
   const map=new Map();
@@ -53,7 +54,7 @@ export function sourceDensityPlan(source, project = {}) {
       duplicate.sourceUnitIds.push(item.id); duplicate.chunkRefs.push(...item.chunkRefs); duplicate.refs.push(...item.source_ref);
       duplicate.relations.push('exact_repeated_claim'); continue;
     }
-    let units = projection(item, detail);
+    let units = concisionCost(estimateProject, item, projection(item, detail));
     if(item.must_preserve_structure){
       const measured=measureComponent(sourceComponent(item),capacity.geometry,capacity.fontSizePt);
       units=Math.max(units,measured.height/Math.max(1,capacity.geometry.height)*capacity.target);
@@ -148,6 +149,7 @@ export function candidateFit(slide, project, index = 1) {
   const capacity = pageCapacity(project, index);
   return { sourceUnitIds: owned, plannedVisibleUnits: plannedUnits, densityProfileId: densityProfile().id,
     predictedOverflow: fit?.predictedOverflow || 0, capacity_ok: Boolean(fit?.capacity_ok),
+    ...(fit?.availableHeight ? { usedHeight: fit.usedHeight, availableHeight: fit.availableHeight } : {}),
     layoutId: fit?.layoutId || 'unmeasured', fontSizePt: fit?.fontSizePt || capacity.fontSizePt,
     availableContentRect:fit?.canvas||capacity.geometry,capacityBasis:fit?.capacityBasis||capacity.capacityBasis,
     targetVisualUnits: capacity.target, maximumVisualUnits: capacity.high,

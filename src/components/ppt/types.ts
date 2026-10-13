@@ -50,7 +50,7 @@ export type PptRenderTree = { schemaVersion: number; renderContractVersion?: num
 export type PptRunNode = { id: string; dependsOn: string[]; status: string; attempts: number; error?: string | null; startedAt?: string | null; completedAt?: string | null; slideId?: string };
 export type PptRun = { id: string; status: string; stage: string; lastSeq: number; nodes: Record<string, PptRunNode>; createdAt?: string; startedAt?: string | null; completedAt?: string | null; error?: string | null };
 
-export type PptGenerationPolicy = { version: 1; detail: 'balanced' | 'detailed'; language: { mode: 'source' } | {mode:'output';locale:'zh'|'en'|'zh-HK'}; content?: 'overview'|'course'|'full_source';details?:'slides'|'notes'; knowledge: 'source_only' | 'source_plus_explanation'; code?: { presentation: 'keep' | 'omit' } };
+export type PptGenerationPolicy = { version: 1; detail: 'balanced' | 'detailed'; language: { mode: 'source'; body?: 'primary' | 'both' } | {mode:'output';locale:'zh'|'en'|'zh-HK'}; content?: 'overview'|'course'|'full_source';details?:'slides'|'notes'; knowledge: 'source_only' | 'source_plus_explanation'; code?: { presentation: 'keep' | 'omit' } };
 /** A disclosed planning decision shown with the estimate (code, diagrams, merges, language, tables). */
 export type PptPlanningAssumption = { topic: 'code' | 'diagram' | 'merge' | 'language' | 'table'; decision: string; basis?: string; reversible: boolean; affectedSourceIds: string[]; reason: string };
 export type PptProject = {
@@ -60,7 +60,9 @@ export type PptProject = {
   generationPolicy?: PptGenerationPolicy; promptContractVersion?: number;
   id: string; title: string; prompt: string; pages: number; template: string;
   deckTitle?: { text: string; raw: string; source: 'user' | 'agent'; locked: boolean };
-  pageDecision?: { finalPageCount: number; source: 'user' | 'estimate'; includesCover: boolean; confirmedAt: string | null; mode?: 'auto' | 'explicit' | 'preserve_import'; initialPageCount?: number; densityProfileId?: string; estimateVersion?: number; fitValidated?: boolean };
+  pageDecision?: { finalPageCount: number; source: 'user' | 'estimate'; includesCover: boolean; confirmedAt: string | null; mode?: 'auto' | 'explicit' | 'preserve_import'; initialPageCount?: number; densityProfileId?: string; estimateVersion?: number; fitValidated?: boolean;
+    growth?: { initial: number | null; final: number; limit: number; basis: 'presentation_budget' | 'initial_estimate'; needsConfirmation: boolean };
+    concision?: { pages: number; contentPages: number; majorSections: number; pagesPerSection: number | null; medianFill: number | null; withinBudget: boolean | null; budget: { target: number; max: number } | null; warnings: ('over_budget' | 'underfilled' | 'page_per_section')[] } };
   planning?: { pageRecommendation?: { recommended: number; range: [number, number]; reason: string; reasonBase?: string; assumptions?: PptPlanningAssumption[] } };
   displayStatus?: PptProject['status']|'waiting_client';
   /** Live generation view only: real per-page sub-stages and streaming drafts. */

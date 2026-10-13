@@ -108,7 +108,7 @@
 | active/image-model-managed-delivery-client.md | **文生图模型账号下发（客户端层）**：去编译期 key 注入，改登录后服务端下发百炼凭证+模型列表；以 `settings.bailian_image_config` 落地（不进 api_providers，结构上隔离对话下拉框），复刻 ASR 下发范式 + broker 写入嵌入式 Next | Phase 0-6 待开始 |
 | active/image-model-managed-delivery-server.md | **文生图模型账号下发（服务端层）**：新增 `GET /api/v1/image/config(/encrypted/hash)`，apiKey 复用 configs 的 AES-256-GCM 加密口令；图片配置独立于 configs 列表避免泄漏进对话下拉框 | S1-S5 待开始 |
 | active/ppt-alpha-mining-round5-priorities.md | **PPT 第五轮（Alpha Mining）**：模板文字色、保留媒体版式与媒体守恒门禁、封面副题、生成过程可视（骨架/流式草稿/大纲确认）、eyebrow 规范化、双语标题策略、术语锁、代码悬挂缩进 | A/B 完成，C 部分完成；F-P0-1 待用户授权 |
-| active/ppt-outline-concision.md | **PPT 大纲精炼**：页数预算、按卡片计费、双语原文正文单语、收窄必须上页、先压缩后加页的修复顺序、小节分组两阶段规划、精炼指标 | 进行中 |
+| active/ppt-outline-concision.md | **PPT 大纲精炼**：页数预算、按卡片计费、双语原文正文单语、收窄必须上页、先压缩后加页的修复顺序、小节分组两阶段规划、精炼指标 | 1–7 完成；待真实模型验证 |
 
 ### Completed
 

@@ -3,11 +3,18 @@ import {sourceScriptOf} from './ppt-presentation-policy.mjs';
 import {sourcePointListKind} from './ppt-source-list-kinds.mjs';
 import {digest} from './ppt/edit-context.mjs';
 const structured=item=>!item.mustDisplay&&!item.rows&&!['EquationBlock','CodeBlock','ProcessBlock'].includes(item.type)&&(sourcePointListKind(item)||['ChecklistBlock','TaxonomyBlock'].includes(item.type));
+// Source languages with one body language (outline concision, item 3): the
+// target is the original side of the detected paragraph pairs, and detected
+// bilingual flows are audited like lists.
+const primaryScript=items=>{const scripts=items.filter(item=>item.languageRole==='primary').map(item=>sourceScriptOf(item.text)),latin=scripts.filter(s=>s==='latin').length,han=scripts.filter(s=>s==='han').length;return latin||han?(latin>=han?'latin':'han'):null;};
 export function languagePairCandidates(project){
- const policy=project.generationPolicy;if(policy?.content!=='overview'||policy.details!=='notes'||policy.language?.mode!=='output')return [];
- const items=project.originalSourceInventory?.items||project.source?.semantic?.inventory?.items||[],target=policy.language.locale==='en'?'latin':'han';
- return items.filter(item=>structured(item)&&sourceScriptOf(item.text)!==target&&sourceScriptOf(item.text)!=='mixed').flatMap(item=>items.filter(other=>{
-  if(other.id===item.id||!structured(other)||sourceScriptOf(other.text)!==target)return false;
+ const policy=project.generationPolicy,single=policy?.content==='overview'&&policy.details==='notes'&&policy.language?.mode==='source'&&policy.language.body==='primary';
+ if(policy?.content!=='overview'||policy.details!=='notes'||policy.language?.mode!=='output'&&!single)return [];
+ const items=project.originalSourceInventory?.items||project.source?.semantic?.inventory?.items||[],target=single?primaryScript(items):policy.language.locale==='en'?'latin':'han';
+ if(!target)return [];
+ const eligible=item=>structured(item)||single&&item.type==='ProcessBlock'&&Boolean(item.languagePairId)&&!item.mustDisplay;
+ return items.filter(item=>eligible(item)&&sourceScriptOf(item.text)!==target&&sourceScriptOf(item.text)!=='mixed').flatMap(item=>items.filter(other=>{
+  if(other.id===item.id||!eligible(other)||sourceScriptOf(other.text)!==target)return false;
   // Taxonomy blocks are intentionally absent from the paragraph pairing
   // classifier. Adjacency proposes a candidate only; the independent audit
   // below, not adjacency or shared section labels, authorizes deduplication.

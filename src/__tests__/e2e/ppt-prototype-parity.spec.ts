@@ -214,3 +214,14 @@ test('Switching a failed fixed-page outline back to module estimation starts the
  expect(retries).toBe(0);expect(fixture.payloads.filter(p=>!p.action)).toHaveLength(2);expect(fixture.payloads.filter(p=>!p.action)[0].pages).toBe(16);expect(fixture.payloads.filter(p=>!p.action)[1].pages).toBeUndefined();
  expect([...fixture.projects.values()].find(p=>p.status==='failed')?.pages).toBe(16);await page.screenshot({path:info.outputPath('failed-fixed-to-module-auto.png')});
 });
+test('PPT source-language option keeps one body language by default and can keep both @smoke',async({page},info)=>{
+  const fixture=await setup(page);await enter(page);
+  const language=page.getByRole('combobox',{name:'输出语言'});
+  await expect(language).toContainText('正文用原文语言');
+  await page.getByRole('textbox',{name:'输入 Prompt',exact:true}).fill('为团队介绍平台架构与约束');
+  await selectPptOption(language,'source-both');
+  await expect(language).toContainText('正文保留两种语言');
+  await page.screenshot({path:info.outputPath('language-both.png')});
+  await page.getByRole('button',{name:'读取输入并生成大纲',exact:true}).click();
+  await expect.poll(()=>fixture.payloads.find(p=>p.inputKind==='prompt')?.generationPolicy?.language).toEqual({mode:'source',body:'both'});
+});

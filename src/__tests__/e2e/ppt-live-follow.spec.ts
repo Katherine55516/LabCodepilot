@@ -153,3 +153,20 @@ test('A failed later stage retains the verified editor and disables AI only on p
  await editor.getByRole('combobox',{name:'目标页面',exact:true}).click();await page.getByRole('option').nth(1).click();await expect(preview).toBeDisabled();
  await expect(editor).toContainText('请等待本页完成校验');await page.screenshot({path:info.outputPath('failed-stage-retains-verified-editor.png')});
 });
+
+test('An automatic outline that outgrew its page budget waits for confirmation and shows the concision metrics @smoke',async({page},info)=>{
+ const fixture=pptParityFixture(),id='9'.repeat(32),project=fixture.projects.get(id)! as unknown as {status:string;stage:string;pageDecision?:Record<string,unknown>};
+ project.status='outline_ready';project.stage='outline';
+ project.pageDecision={...(project.pageDecision||{}),source:'estimate',mode:'auto',confirmedAt:null,initialPageCount:8,finalPageCount:12,
+  growth:{version:1,initial:8,final:12,limit:10,basis:'presentation_budget',needsConfirmation:true},
+  concision:{version:1,pages:12,contentPages:9,majorSections:12,pagesPerSection:.75,medianFill:.55,withinBudget:false,budget:{target:8,max:10},warnings:['over_budget','underfilled','page_per_section']}};
+ await page.route('**/api/**',async route=>{const request=route.request(),url=new URL(request.url()),raw=request.postData();const result=await fixture.handle(request.method(),url.pathname,raw?JSON.parse(raw):{});if(!result)return route.continue();return route.fulfill({status:result.status,contentType:result.contentType||'application/json',body:typeof result.body==='string'?result.body:JSON.stringify(result.body)});});
+ await page.goto(`/ppt?projectId=${id}`);
+ const notice=page.getByTestId('ppt-outline-concision');
+ await expect(notice).toBeVisible();
+ await expect(notice.getByRole('alert')).toContainText(/12[\s\S]*10/);
+ await expect(notice).toContainText(/0\.75/);
+ await expect(notice).toContainText(/55%/);
+ await expect(notice.locator('li')).toHaveCount(3);
+ await notice.scrollIntoViewIfNeeded();await notice.screenshot({path:info.outputPath('outline-concision.png')});
+});

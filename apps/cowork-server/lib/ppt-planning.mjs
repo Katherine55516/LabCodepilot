@@ -5,6 +5,7 @@ import { normalizePaste } from './ppt-source.mjs';
 import { coverageMapV2, topicGroupDecisions } from './ppt-content-inventory.mjs';
 /** Planning data stays inside the existing outline node and project JSON. */
 import { buildTerminologyRegistry, copyBudgetFor, requiredSupportFor } from './ppt-presentation-writing.mjs';
+import { presentationBudget } from './ppt-outline-concision.mjs';
 import { withHeadingTerms } from './ppt-terminology-lock.mjs';
 import { evidenceRelevance, selectEvidenceForSlide } from './ppt-evidence.mjs';
 import { planSparseInput, pointBudgetFor, profilePptInput, sparsePageEstimate } from './ppt-content-depth.mjs';
@@ -82,10 +83,14 @@ export function estimatePageRecommendation(project) {
   const overviewIntent = /(?:\b(?:overview|survey)\b|概览|综述|导览|入门)/iu.test(intent);
   const chapters = (text.match(/^##\s+\d+[.)]\s+.+$/gm) || []).length;
   const overviewEstimate = overviewIntent && chapters >= 6 ? clamp(2 + Math.ceil(chapters / 1.75), 5, 100) : null;
-  const recommended = capacity?.recommended || sparseEstimate?.recommended || overviewEstimate || clamp(2 + Math.ceil(semanticTopics * .7) + Math.ceil(highPriority * .25) + detailWeight, 5, 100);
+  const uncapped = capacity?.recommended || sparseEstimate?.recommended || overviewEstimate || clamp(2 + Math.ceil(semanticTopics * .7) + Math.ceil(highPriority * .25) + detailWeight, 5, 100);
+  // Overview decks are sized by purpose first (major sections), then checked
+  // against capacity; the estimate never exceeds that budget's cap.
+  const budget = rawSource ? presentationBudget(project || {}, source) : null;
+  const recommended = budget ? Math.min(uncapped, budget.max) : uncapped;
   const spread = Math.max(2, Math.ceil(recommended * .18));
-  const min = capacity?.range[0] || sparseEstimate?.range[0] || clamp(recommended - spread, 3, 100);
-  const max = capacity?.range[1] || sparseEstimate?.range[1] || clamp(recommended + spread, 3, 100);
+  const min = Math.min(recommended, capacity?.range[0] || sparseEstimate?.range[0] || clamp(recommended - spread, 3, 100));
+  const max = Math.min(budget ? budget.max : 100, capacity?.range[1] || sparseEstimate?.range[1] || clamp(recommended + spread, 3, 100));
   const selected = clamp(project?.pages || recommended);
   const strict = ['file', 'paste', 'update', 'base'].includes(source?.kind || project?.inputKind);
   const independentSections = substantialSections || Math.max(1, headings);
@@ -95,10 +100,11 @@ export function estimatePageRecommendation(project) {
       : `检测到 ${semanticTopics} 个语义主题${implementationSignals ? `、${implementationSignals} 个实现或约束信号` : ''}`;
   return {
     recommended, range: [min, max], selected,
-    reason: [baseReason, assumptionSummary(assumptions)].filter(Boolean).join('。'),
+    reason: [baseReason, budget ? `按 ${budget.sections} 个主要小节规划约 ${budget.target} 页（上限 ${budget.max} 页），细节进备注` : '', assumptionSummary(assumptions)].filter(Boolean).join('。'),
     reasonBase: baseReason, assumptions, warnings,
     densityProfileId: densityProfile().id, estimateVersion: 1, provisional: true,
-    estimationBasis: capacity ? 'gamma_density_capacity' : sparseEstimate ? 'planned_semantic_units' : overviewEstimate ? 'overview_chapters' : 'source_structure', inputProfile,
+    ...(budget ? { presentationBudget: budget, uncappedRecommended: uncapped } : {}),
+    estimationBasis: budget && uncapped > budget.max ? 'presentation_budget' : capacity ? 'gamma_density_capacity' : sparseEstimate ? 'planned_semantic_units' : overviewEstimate ? 'overview_chapters' : 'source_structure', inputProfile,
     ...(capacity ? { contentCost: capacity.contentCost, costUnit: capacity.costUnit, groups: capacity.groups, capacity: capacity.capacity, preservedObjects: capacity.preservedObjects,
       sectionAllocation: capacity.sections.map(({ title, slides, sourceTokens, objects }) => ({ title, slides, sourceTokens, objects })) } : {}),
     ...(sparseEstimate ? { plannedSemanticUnits: sparseEstimate.semanticUnits, plannedContentCost: sparseEstimate.contentCost } : {}),
@@ -371,9 +377,11 @@ export function coverageMap(source, outline, explicit = []) {
   return chunks.map(chunk => {
     const slideIds = outline.filter(slide => slide.chunkRefs?.length ? slide.chunkRefs.includes(chunk.id) : (slide.refs || []).some(ref => chunk.sourceRefs.includes(ref))).map(slide => slide.id);
     const decision = decisions.get(chunk.id);
+    const units=(source.semantic?.inventory?.items||[]).filter(item=>item.chunkRefs?.includes(chunk.id));
+    const notesOnly=units.length&&units.every(item=>['notes_by_contract','omitted_by_policy'].includes(item.presentation)&&item.presentationBasis);
     return { chunkId: chunk.id, topic: chunk.topic, priority: chunk.priority, slideIds,
-      action: slideIds.length ? 'included' : decision?.action === 'omitted' ? 'omitted' : 'unmapped',
-      reason: !slideIds.length ? bounded(decision?.reason, 240, '') : '' };
+      action: slideIds.length ? 'included' : notesOnly ? 'notes' : decision?.action === 'omitted' ? 'omitted' : 'unmapped',
+      reason: !slideIds.length ? notesOnly?'Every source unit in this chunk is retained under its validated notes/code-presentation contract':bounded(decision?.reason, 240, '') : '' };
   });
 }
 

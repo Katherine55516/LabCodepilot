@@ -24,7 +24,7 @@ export function explicitLanguageRequest(value){
 
 export function defaultGenerationPolicy(request=''){
  const locale=explicitLanguageRequest(request);
- return {version:1,detail:'balanced',content:'overview',details:'notes',language:locale?{mode:'output',locale}:{mode:'source'},knowledge:'source_only',code:{presentation:'omit'}};
+ return {version:1,detail:'balanced',content:'overview',details:'notes',language:locale?{mode:'output',locale}:{mode:'source',body:'primary'},knowledge:'source_only',code:{presentation:'omit'}};
 }
 export function normalizeGenerationPolicy(value) {
   if (value === undefined) return undefined;
@@ -33,12 +33,16 @@ export function normalizeGenerationPolicy(value) {
     || !['source','output'].includes(value.language?.mode) || value.language?.mode === 'output' && !['zh','en','zh-HK','zh-Hant','zh-TW'].includes(value.language?.locale)
     || value.details!==undefined&&!['slides','notes'].includes(value.details) || value.content==='full_source'&&value.details==='notes'
     || value.content !== undefined && !['overview','course','full_source'].includes(value.content) || !['source_only', 'source_plus_explanation'].includes(value.knowledge)
-    || value.code !== undefined && !['auto', 'keep', 'omit'].includes(code)) {
+    || value.code !== undefined && !['auto', 'keep', 'omit'].includes(code)
+    || value.language?.body !== undefined && (value.language.mode !== 'source' || !['primary', 'both'].includes(value.language.body))) {
     const error = new Error('invalid generation policy'); error.statusCode = 400; throw error;
   }
   // code.presentation: auto derives from the request and template; keep/omit
   // is the user's explicit choice from the Syllabus assumptions.
-  return { version: 1, detail: value.detail, language: value.language.mode === 'source' ? { mode: 'source' } : { mode: 'output', locale: ['zh-Hant','zh-TW'].includes(value.language.locale) ? 'zh-HK' : value.language.locale },
+  // Bilingual source + overview/notes: one body language by default (the
+  // original side of each detected pair), bilingual titles; `both` is opt-in.
+  const body = value.language.body ?? (value.content === 'overview' && value.details === 'notes' ? 'primary' : undefined);
+  return { version: 1, detail: value.detail, language: value.language.mode === 'source' ? { mode: 'source', ...(body ? { body } : {}) } : { mode: 'output', locale: ['zh-Hant','zh-TW'].includes(value.language.locale) ? 'zh-HK' : value.language.locale },
     ...(value.content ? {content:value.content} : {}),...(value.details?{details:value.details}:{}), knowledge: value.knowledge,
     ...(code && code !== 'auto' ? { code: { presentation: code } } : {}) };
 }
