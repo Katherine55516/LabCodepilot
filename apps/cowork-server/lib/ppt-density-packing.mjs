@@ -1,8 +1,9 @@
 /** Bounded, traceable grouping and physical fit inside estimate/outline nodes.
  * Initial source projections are estimates of writing cost, not emitted copy. */
 import { densityProfile, densityText, displayUnits, automaticPages } from './ppt-density-profile.mjs';
-import { contentCanvas, fitComponents, measureComponent, sourceComponent, sourceImageComponents, isSourceArtifactItem, validateSourceArtifactRefs, INCH } from './ppt-density-capacity.mjs';
+import { contentCanvas, fitComponents, measureComponent, sourceComponent,sourceComponentParts, prepareReadingComponents, sourceImageComponents, isSourceArtifactItem, validateSourceArtifactRefs, INCH } from './ppt-density-capacity.mjs';
 import { copyKey } from './ppt-copy-integrity.mjs';
+import { visibleEquivalentCandidates } from './ppt-content-selection.mjs';
 const unique = list => [...new Set(list.filter(Boolean))];
 function uniquePoints(points) {
   const map=new Map();
@@ -39,6 +40,7 @@ export function sourceDensityPlan(source, project = {}) {
   if (!inventory?.items?.length) return null;
   const profile = densityProfile(), capacity = pageCapacity(project);
   const detail = project.generationPolicy?.detail || 'balanced';
+  const estimateProject = { ...project, source };
   const groups = [], seen = new Map();
   for (const item of inventory.items) {
     // Policy-omitted or merged-equivalent items are disclosed in the planning
@@ -56,6 +58,12 @@ export function sourceDensityPlan(source, project = {}) {
       const measured=measureComponent(sourceComponent(item),capacity.geometry,capacity.fontSizePt);
       units=Math.max(units,measured.height/Math.max(1,capacity.geometry.height)*capacity.target);
     }
+    // Only the explicit overview/notes/target-language contract can budget an
+    // equivalent language through its target owner. Keep both IDs for tracing;
+    // the planner must still validate ownership and semantic entailment. Other
+    // language alternation and protected structured objects keep their cost.
+    const targetOwners = visibleEquivalentCandidates(estimateProject, item);
+    if (targetOwners.length) units = 0;
     // A detected language pair is one claim; the output language follows the
     // input, so both languages keep their display cost and source IDs. Plain
     // language alternation without a detected pair stays a candidate only.
@@ -100,7 +108,14 @@ export function sourceDensityPlan(source, project = {}) {
     compressionRatio: Math.round(totalUnits / (Math.max(1, (project.pages || recommended) - 1) * capacity.target) * 100) / 100,
     capacity, capacityBasis: capacity.capacityBasis, provisional: true };
 }
-function related(a, b) {
+function related(a, b, items) {
+  // Display fragments of one comparison table do not become independent
+  // claims merely because the planner asked different row-specific questions.
+  const aaIds=a.sourceUnitIds||[],bbIds=b.sourceUnitIds||[];
+  if(aaIds.length===1&&bbIds.length===1&&aaIds[0]===bbIds[0]&&items.some(item=>item.id===aaIds[0]&&['TableBlock','SummaryTableBlock'].includes(item.type))){
+    const rangesA=(a.sourceArtifactRanges||[]).filter(ref=>ref.sourceUnitId===aaIds[0]),rangesB=(b.sourceArtifactRanges||[]).filter(ref=>ref.sourceUnitId===aaIds[0]);
+    if(rangesA.length===1&&rangesB.length===1&&(rangesA[0].rowEnd===rangesB[0].rowStart||rangesB[0].rowEnd===rangesA[0].rowStart))return true;
+  }
   if (a.question && b.question && a.question !== b.question) return false;
   if (a.question && a.question === b.question || a.groupId && a.groupId === b.groupId) return true;
   const aa = new Set(a.chunkRefs || []);
@@ -110,16 +125,24 @@ export function candidateFit(slide, project, index = 1) {
   const items = project.source?.semantic?.inventory?.items || [];
   const owned = Array.isArray(slide.sourceUnitIds) ? slide.sourceUnitIds : items.filter(item => isSourceArtifactItem(item) && item.chunkRefs.some(id => slide.chunkRefs?.includes(id))).map(item => item.id);
   const ranges = Array.isArray(slide.sourceArtifactRanges) ? slide.sourceArtifactRanges : [];
-  const components = items.filter(item => owned.includes(item.id) && isSourceArtifactItem(item)).flatMap(item => {
+  let components = items.filter(item => owned.includes(item.id) && isSourceArtifactItem(item)).flatMap(item => {
     const assigned = ranges.filter(ref => ref.sourceUnitId === item.id);
-    return assigned.length ? assigned.map(ref => sourceComponent(item, ref)) : [sourceComponent(item)];
+    return assigned.length ? assigned.flatMap(ref => sourceComponentParts(item, ref)) : sourceComponentParts(item);
   });
+  components=prepareReadingComponents(items,components);
   for(const id of slide.sourceImageIds||[]){
     const image=project.source?.images?.find(image=>image.id===id);if(!image)throw new Error('unknown source image');
     components.push(...sourceImageComponents(image));
   }
   for(const point of uniquePoints(slide.keyPoints))for(const text of point.text.split(/\n\s*\n/u).filter(part=>part.trim()))
     components.push({type:'text',content:{text}});
+  if(slide.planningProtocolVersion===2&&!slide.keyPoints?.length){
+    // A semantic contract preserves facts, not necessarily every original
+    // sentence verbatim. The writer has the complete units and qualifiers;
+    // final visible copy is measured independently. Never use a literal-source
+    // upper bound as an instruction to create more frozen pages.
+    if(!components.length&&slide.focus)components.push({type:'text',content:{text:slide.focus}});
+  }
   const fit = components.length ? fitComponents(components, project, index) : null;
   const plannedUnits = components.reduce((n, c) => n + displayUnits(c.content.displayText || c.content.text || c.content.rows?.flat().join(' ') || c.content.items?.map(i => i.text).join('\n')), 0);
   const capacity = pageCapacity(project, index);
@@ -127,11 +150,13 @@ export function candidateFit(slide, project, index = 1) {
     predictedOverflow: fit?.predictedOverflow || 0, capacity_ok: Boolean(fit?.capacity_ok),
     layoutId: fit?.layoutId || 'unmeasured', fontSizePt: fit?.fontSizePt || capacity.fontSizePt,
     availableContentRect:fit?.canvas||capacity.geometry,capacityBasis:fit?.capacityBasis||capacity.capacityBasis,
-    targetVisualUnits: capacity.target, maximumVisualUnits: capacity.high, measurementBasis: fit?.measurementBasis || 'missing_display_plan' };
+    targetVisualUnits: capacity.target, maximumVisualUnits: capacity.high,
+    ...(slide.planningProtocolVersion===2?{proseBasis:'outline_message_projection; complete source retrieved by writer; final body not yet measured'}:{}),
+    measurementBasis: fit?.measurementBasis || 'missing_display_plan' };
 }
 function mergedTableRanges(a,b,items) {
   const result=[];
-  for(const item of items.filter(item=>item.type==='TableBlock')){
+  for(const item of items.filter(item=>['TableBlock','SummaryTableBlock'].includes(item.type))){
     const selections=[a,b].flatMap(slide=>{
       if(!(slide.sourceUnitIds||slide.densityFit?.sourceUnitIds||[]).includes(item.id))return [];
       const ranges=(slide.sourceArtifactRanges||[]).filter(ref=>ref.sourceUnitId===item.id);
@@ -143,7 +168,7 @@ function mergedTableRanges(a,b,items) {
   }
   return result;
 }
-export function packOutline(project, raw) {
+export function packOutline(project, raw, {finalRepack=false}={}) {
   if (!Array.isArray(raw?.slides) || raw.slides.length < 3 || raw.slides.length > 100) throw new Error('outline must contain 3–100 candidate pages');
   const items = project.source?.semantic?.inventory?.items || [];
   const ids = new Set(items.map(i => i.id));
@@ -162,7 +187,7 @@ export function packOutline(project, raw) {
     const fit = candidateFit(s, project, slides.length);
     // Code only combines a documented common question/source context, with
     // measured copy, no locked user titles, and within the visible density budget.
-    if (auto && index > 1 && index < candidates.length - 1 && previous && !previous.titleLocked && !previous.title_locked && !s.titleLocked && !s.title_locked && related(previous, s)) {
+    if (auto && (finalRepack || !s.capacityPartition && !previous?.capacityPartition) && index > 1 && index < candidates.length - 1 && previous && !previous.titleLocked && !previous.title_locked && !s.titleLocked && !s.title_locked && related(previous, s, items)) {
       const merged = { ...previous, sourceArtifactRanges: mergedTableRanges(previous,{...s,densityFit:fit},items), sourceUnitIds: unique([...(previous.densityFit?.sourceUnitIds || []), ...fit.sourceUnitIds]),
         sourceImageIds:unique([...(previous.sourceImageIds||[]),...(s.sourceImageIds||[])]),
         refs: unique([...previous.refs, ...s.refs]), chunkRefs: unique([...previous.chunkRefs, ...s.chunkRefs]),
@@ -174,10 +199,11 @@ export function packOutline(project, raw) {
         claimIds: unique([...(previous.claimIds || []), ...(s.claimIds || [])]),
         sourceTopics: unique([...(previous.sourceTopics || []), ...(s.sourceTopics || [])]),
         children: [...(previous.children || []), ...(s.children || [])], transitionToNext: s.transitionToNext,
+        pageContract: {...previous.pageContract,requiredUnits:unique([...(previous.pageContract?.requiredUnits||[]),...(s.pageContract?.requiredUnits||[])]),requiredRelations:unique([...(previous.pageContract?.requiredRelations||[]),...(s.pageContract?.requiredRelations||[])]),adjacencyPairs:[...(previous.pageContract?.adjacencyPairs||[]),...(s.pageContract?.adjacencyPairs||[])],comparisonAxes:unique([...(previous.pageContract?.comparisonAxes||[]),...(s.pageContract?.comparisonAxes||[])])},
         focus: [previous.focus, s.focus].filter(Boolean).join(' '), packedFrom: [...(previous.packedFrom || [previous.id || String(index - 1)]), s.id || String(index)] };
       const mf = candidateFit(merged, project, slides.length - 1);
-      if (merged.keyPoints.length <= 10 && merged.supportingPoints.length <= 6 && merged.requiredSupport.length <= 6 && merged.claimIds.length <= 8 && merged.sourceTopics.length <= 8 && merged.children.length <= 12 && merged.focus.length <= 360 && merged.requiredDetails.length <= 10 && merged.requiredEvidenceIds.length <= 6 &&
-          fit.plannedVisibleUnits > 0 && previous.densityFit?.plannedVisibleUnits > 0 && mf.capacity_ok && mf.plannedVisibleUnits <= mf.maximumVisualUnits && items.filter(item => mf.sourceUnitIds.includes(item.id) && isSourceArtifactItem(item)).length <= 10) {
+      if (merged.keyPoints.length <= 10 && merged.supportingPoints.length <= 6 && merged.requiredSupport.length <= 6 && merged.claimIds.length <= 1000 && merged.sourceTopics.length <= 8 && merged.children.length <= 12 && merged.focus.length <= 360 && merged.requiredDetails.length <= 1000 && merged.requiredEvidenceIds.length <= 6 &&
+          fit.plannedVisibleUnits > 0 && previous.densityFit?.plannedVisibleUnits > 0 && mf.capacity_ok && items.filter(item => mf.sourceUnitIds.includes(item.id) && isSourceArtifactItem(item)).length <= 10) {
         slides[slides.length - 1] = { ...merged, densityFit: mf }; continue;
       }
     }
@@ -185,7 +211,7 @@ export function packOutline(project, raw) {
   }
   return { ...raw, slides, densityPacking: { version: 1, densityProfileId: densityProfile().id,
     initialPageCount: project.pages, candidatePageCount: candidates.length, finalPageCount: slides.length,
-    automatic: auto, mergeCount: candidates.length - slides.length, fits: slides.map(s => s.densityFit) } };
+    automatic: auto, mergeCount: Number(raw.densityPacking?.mergeCount||0)+candidates.length-slides.length,lastPassMergeCount:candidates.length-slides.length, fits: slides.map(s => s.densityFit) } };
 }
 export function revalidateOutlineFits(project, raw, outline=raw.slides) {
   const fits=outline.map((slide,index)=>candidateFit(slide,project,index));
@@ -193,20 +219,49 @@ export function revalidateOutlineFits(project, raw, outline=raw.slides) {
     densityPacking:{...raw.densityPacking,finalPageCount:outline.length,fits,templateAssignmentValidated:Boolean(project.templateFidelity?.mode==='preserve'),
       templateSlideMap:project.templateFidelity?.slideMap||null}};
 }
+/** Measured suggestions for the planner, never an automatic outline mutation.
+ * Final native assignment and all coverage/fit gates still validate its reply. */
+export function outlineCapacityAdvice(slide,project,index) {
+  const items=project?.source?.semantic?.inventory?.items||[],tableFragments=[],componentFits=[];
+  const measure=component=>{const fit=fitComponents([component],project,index);return {capacity_ok:fit.capacity_ok,usedHeightInches:Number((fit.usedHeight/INCH).toFixed(2)),availableHeightInches:Number((fit.availableHeight/INCH).toFixed(2))};};
+  for(const item of items.filter(item=>(slide.sourceUnitIds||slide.densityFit?.sourceUnitIds||[]).includes(item.id)&&isSourceArtifactItem(item))) {
+    const refs=slide.sourceArtifactRanges?.filter(ref=>ref.sourceUnitId===item.id)||[];
+    for(const ref of refs.length?refs:[{sourceUnitId:item.id}]) {
+      componentFits.push({sourceUnitId:item.id,...ref,...measure(sourceComponent(item,ref))});
+      if(!['TableBlock','SummaryTableBlock'].includes(item.type))continue;
+      let start=ref.rowStart??1;const end=ref.rowEnd??item.rows.length;
+      while(start<end){
+        let best;
+        for(let stop=start+1;stop<=end;stop++){
+          const selection={sourceUnitId:item.id,rowStart:start,rowEnd:stop};
+          const fit=fitComponents([sourceComponent(item,selection)],project,index);
+          if(!fit.capacity_ok)break;
+          if(stop===start+1||fit.usedHeight<=fit.availableHeight*.90)best={...selection,...measure(sourceComponent(item,selection))};
+          else break;
+        }
+        if(!best){tableFragments.push({sourceUnitId:item.id,rowStart:start,rowEnd:start+1,capacity_ok:false,requiresWiderNativeLayout:true});start++;}
+        else{tableFragments.push(best);start=best.rowEnd;}
+      }
+    }
+  }
+  for(const [keyPointIndex,point] of uniquePoints(slide.keyPoints).entries())componentFits.push({keyPointIndex,...measure({type:'text',content:{text:point.text||point}})});
+  return {tableFragments,componentFits,note:'Suggestions use the current native page, preserve every selected table cell and reserve space for explanation. Choose new pages with nonoverlapping table ranges; move independent explanations. Table cells need not be copied again as prose. Reassignment is remeasured by code.'};
+}
 export function inspectDensityOutline(raw,project) {
-  const issues=(raw.slides || []).slice(1).flatMap(s => s.densityFit?.predictedOverflow > 0 ? [{ code: 'planned_density_overflow', repairable: true,
-    message: `Candidate ${s.title} exceeds measured ${s.densityFit.fontSizePt}pt capacity; split the owned structures/relations without deleting cells or facts` }] : []);
+  const issues=(raw.slides || []).slice(1).flatMap((s,index) => s.densityFit?.predictedOverflow > 0 ? [{ code: 'planned_density_overflow', repairable: true,
+    message: `Candidate ${s.title} exceeds measured ${s.densityFit.fontSizePt}pt capacity; split the owned structures/relations without deleting cells or facts. Actual template fit: ${JSON.stringify({fontSizePt:s.densityFit.fontSizePt,layoutId:s.densityFit.layoutId,contentRectEMU:s.densityFit.availableContentRect,overflowEMU:s.densityFit.predictedOverflow,sourceUnitIds:s.sourceUnitIds||s.densityFit.sourceUnitIds,sourceArtifactRanges:s.sourceArtifactRanges||[]})}. Measured repair options: ${JSON.stringify(outlineCapacityAdvice(s,project,index+1))}. For automatic page count, add candidate pages or move complete units; do not retain the draft count at the expense of readable capacity.` }] : []);
   for(const item of project?.source?.semantic?.inventory?.items||[])if(isSourceArtifactItem(item)){
     const assigned=(raw.slides||[]).filter(slide=>(slide.sourceUnitIds||slide.densityFit?.sourceUnitIds||[]).includes(item.id));
-    if(item.type!=='TableBlock'&&assigned.filter(slide=>!['recap','application','translation'].includes(slide.repeatPurpose)).length>1)
+    if(!['TableBlock','SummaryTableBlock'].includes(item.type)&&assigned.filter(slide=>!slide.repeatSourceUnitIds?.includes(item.id)&&!['recap','application','translation'].includes(slide.repeatPurpose)).length>1)
       issues.push({code:'planned_source_object_duplicate',repairable:true,message:`Required object ${item.id} has several primary assignments. Assign one owner; use references or declared recap/application for later pages.`});
-    let complete=assigned.length>0;
-    if(complete&&item.type==='TableBlock'){
+    let complete=assigned.length>0,missingRows;
+    if(complete&&['TableBlock','SummaryTableBlock'].includes(item.type)){
       const rows=new Set();
       for(const slide of assigned){const selections=slide.sourceArtifactRanges?.filter(ref=>ref.sourceUnitId===item.id);for(const ref of selections?.length?selections:[{}])for(let row=ref.rowStart??1;row<(ref.rowEnd??item.rows.length);row++)rows.add(row);}
-      complete=rows.size===item.rows.length-1;
+      missingRows=Array.from({length:item.rows.length-1},(_,index)=>index+1).filter(row=>!rows.has(row));
+      complete=missingRows.length===0;
     }
-    if(!complete)issues.push({code:'planned_source_object_missing',repairable:true,message:`Required object ${item.id} (${item.type}) needs complete ownership including all rows/columns and tail summaries.`});
+    if(!complete)issues.push({code:'planned_source_object_missing',repairable:true,message:`Required object ${item.id} (${item.type}) needs complete ownership including all rows/columns and tail summaries.${['TableBlock','SummaryTableBlock'].includes(item.type)?` Table row contract: ${JSON.stringify({headerIndex:0,dataRowStart:1,dataRowEndExclusive:item.rows.length,missingDataRowIndexes:missingRows||Array.from({length:item.rows.length-1},(_,index)=>index+1)})}; rowEnd excludes that index. Preserve all data rows across contiguous page fragments.`:''}`});
   }
   for(const image of project?.source?.images||[])if((image.required||image.mustPreserve)&&!raw.slides?.some(slide=>slide.sourceImageIds?.includes(image.id)))issues.push({code:'planned_source_media_missing',repairable:true,message:`Required source image ${image.id} needs a visible sourceImageIds assignment and capacity budget.`});
   return issues;

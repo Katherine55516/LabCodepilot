@@ -4,12 +4,16 @@ export function isPptProxyPath(segments: string[]): boolean {
   const objectId = /^[a-zA-Z0-9_-]{1,80}$/;
   const legacyProject = segments[0] === 'projects' && segments.length <= 3 &&
     (segments.length === 1 || segments[1] === 'bulk' || projectId.test(segments[1])) &&
-    (segments.length < 3 || (segments[1] !== 'bulk' && ['outline', 'generate', 'retry', 'export', 'pdf', 'source', 'duplicate', 'trash', 'restore', 'permanent', 'versions', 'rewrite', 'blank'].includes(segments[2])));
+    (segments.length < 3 || (segments[1] !== 'bulk' && ['outline', 'generate', 'retry', 'export', 'pdf', 'source', 'duplicate', 'trash', 'restore', 'permanent', 'versions', 'rewrite', 'blank','page-policy','media-exclusions'].includes(segments[2])));
   const structuredProject = segments[0] === 'projects' && projectId.test(segments[1] || '') && (
+    (segments.length === 3 && segments[2] === 'native-fonts') ||
+    (segments.length === 4 && segments[2] === 'native-fonts' && /^[a-f0-9]{64}\.ttf$/.test(segments[3])) ||
     (segments.length === 3 && ['run', 'events', 'commands', 'undo', 'redo', 'publish', 'revisions', 'ai-edit'].includes(segments[2])) ||
     (segments.length === 4 && segments[2] === 'preview' && /^[a-zA-Z0-9_-]{1,80}\.svg$/.test(segments[3])) ||
     (segments.length === 5 && segments[2] === 'revisions' && /^\d+$/.test(segments[3]) && segments[4] === 'restore') ||
-    (segments.length === 5 && segments[2] === 'slides' && objectId.test(segments[3]) && segments[4] === 'preview')
+    (segments.length === 6 && segments[2] === 'slides' && objectId.test(segments[3]) && segments[4] === 'assets' && /^[a-zA-Z0-9_-]{1,100}$/.test(segments[5])) ||
+    (segments.length === 5 && segments[2] === 'slides' && objectId.test(segments[3]) && segments[4] === 'preview') ||
+    (segments.length === 7 && segments[2] === 'slides' && objectId.test(segments[3]) && segments[4] === 'repair-comparison' && projectId.test(segments[5]) && ['before','after'].includes(segments[6]))
   );
   const run = segments[0] === 'runs' && segments.length === 2 && /^run_[a-f0-9]{24}$/i.test(segments[1]);
   const editRoute = segments[0] === 'projects' && projectId.test(segments[1] || '') && (
@@ -28,7 +32,7 @@ export function isPptProxyPath(segments: string[]): boolean {
     /^(violet|blue|light|marketing|education|[a-f0-9]{32})$/i.test(segments[1] || '') &&
     (segments.length === 2 || segments.length === 3 && segments[2] === 'preview'));
   const update = segments[0] === 'updates' && segments.length === 1;
-  const modelJobs = segments[0] === 'model-jobs' && (segments.length === 1 || segments.length === 3 && projectId.test(segments[1]) && ['claim', 'complete'].includes(segments[2]));
+  const modelJobs = segments[0] === 'model-jobs' && (segments.length === 1 || segments.length === 3 && projectId.test(segments[1]) && ['claim', 'complete','progress'].includes(segments[2]));
   const capabilities = segments.length === 1 && segments[0] === 'capabilities';
   return project || folder || template || update || modelJobs || capabilities;
 }

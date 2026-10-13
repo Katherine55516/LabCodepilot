@@ -4,7 +4,15 @@
 import { useEffect, useRef, useState } from "react";
 import DOMPurify from "dompurify";
 import { useTranslation } from "@/hooks/useTranslation";
-import type { PptBounds, PptRenderElement, PptRenderSlide } from "../types";
+import type { PptBounds, PptRenderElement, PptRenderSlide, PptRichText } from "../types";
+import {imageMask} from '../../../../apps/cowork-server/lib/ppt/image-mask.mjs';
+
+export function RichText({value}:{value:PptRichText}){
+  return <>{value.runs.map((run,i)=>run.kind==='math'&&run.mathMl?
+    <span key={i} aria-label={run.source} style={{display:'inline',fontWeight:run.bold?700:undefined}}
+      dangerouslySetInnerHTML={{__html:DOMPurify.sanitize(run.mathMl,{USE_PROFILES:{mathMl:true}})}}/>:
+    <span key={i} style={{fontWeight:run.bold?700:undefined,fontStyle:run.italic?'italic':undefined,textDecoration:run.strike?'line-through':undefined,fontFamily:run.code?'Consolas,monospace':undefined}}>{run.text}</span>)}</>;
+}
 
 type GeometryChange = { element: PptRenderElement; bounds: PptBounds };
 type ResizeHandle = "nw" | "n" | "ne" | "e" | "se" | "s" | "sw" | "w";
@@ -90,16 +98,17 @@ function ElementContent({
   };
   const text =
     element.kind === "text"
-      ? element.content?.text || ""
-      : (element.content?.items || []).map((item) => item.text).join("\n");
+      ? element.content?.richText?.source ?? element.content?.rawText ?? element.content?.text ?? ""
+      : (element.content?.items || []).map((item) => item.richText?.source ?? item.text).join("\n");
   if (editing && !element.content?.pointLayout && ["text", "list", "timeline", "metric"].includes(element.kind))
     return (
       <textarea
         autoFocus
         defaultValue={text}
         className="h-full w-full resize-none bg-transparent outline-none"
-        style={{...textStyle,padding,whiteSpace:"pre-wrap",overflowWrap:"anywhere",tabSize:4}}
+        style={{...textStyle,padding,whiteSpace:"pre-wrap",overflowWrap:contract?.overflowWrap||"anywhere",tabSize:4}}
         onClick={(event) => event.stopPropagation()}
+        onPointerDown={(event) => event.stopPropagation()}
         onBlur={(event) => onCommit(event.currentTarget.value)}
         onKeyDown={(event) => {
           if (event.key === "Escape") event.currentTarget.blur();
@@ -110,22 +119,24 @@ function ElementContent({
     return <div className="flex h-full items-center overflow-hidden" style={textStyle} onDoubleClick={onEdit}
       aria-label={element.content.mathText || element.content.text}
       dangerouslySetInnerHTML={{__html:DOMPurify.sanitize(element.content.mathMl,{USE_PROFILES:{mathMl:true}})}} />;
+  if(element.kind==='text'&&element.content?.richText&&!element.nativeRef)
+    return <div className="h-full overflow-hidden whitespace-pre-wrap" style={{...textStyle,padding,overflowWrap:'anywhere'}} onDoubleClick={onEdit}><RichText value={element.content.richText}/></div>;
   if (element.kind === "text")
     return (
       <div
         className="h-full overflow-hidden whitespace-pre-wrap"
-        style={{...textStyle,padding,overflowWrap:"anywhere",tabSize:contract?.tabSize || 4}}
+        style={{...textStyle,padding,overflowWrap:contract?.overflowWrap||"anywhere",tabSize:contract?.tabSize || 4}}
         onDoubleClick={onEdit}
       >
         {contract?.paragraphs ? contract.paragraphs.map((p,i)=><div key={i} style={{fontSize:p.runs?.length?Math.max(...p.runs.map(r=>r.fontSizePt))*scale:undefined,minHeight:`${p.lineHeight}em`,lineHeight:p.lineHeight,marginBottom:i===contract.paragraphs.length-1?0:p.spaceAfterPt*scale}}>
-          {p.runs?p.runs.map((run,j)=><span key={j} style={{fontSize:run.fontSizePt*scale,fontWeight:run.bold?700:400}}>{run.text}</span>):p.text}</div>) : element.content?.text}
+          {p.runs?p.runs.map((run,j)=><span key={j} style={{fontSize:run.fontSizePt*scale,fontFamily:run.fontFamily || undefined,fontWeight:run.bold?700:400,fontStyle:run.italic?'italic':undefined}}><RichText value={{version:2,source:run.text,plainText:run.text,diagnostics:[],runs:[{...run,kind:run.kind==='math'?'math':'text'}]}}/></span>):p.text}</div>) : element.content?.text}
       </div>
     );
   if (["list", "timeline", "metric"].includes(element.kind))
     return (
       <div
         className="relative h-full overflow-hidden"
-        style={{...textStyle,padding:element.content?.pointLayout?0:padding,whiteSpace:"pre-wrap",overflowWrap:"anywhere"}}
+        style={{...textStyle,padding:element.content?.pointLayout?0:padding,whiteSpace:"pre-wrap",overflowWrap:contract?.overflowWrap||"anywhere"}}
         onDoubleClick={element.content?.pointLayout ? undefined : onEdit}
       >
         {element.kind === "list" && element.content?.pointLayout?.boxes &&
@@ -139,9 +150,9 @@ function ElementContent({
                 : { heading: "", body: item.text };
             return <div key={item.id} className="absolute overflow-hidden rounded-md border border-current/20"
               style={{ left: `${box.x * 100}%`, top: `${box.y * 100}%`, width: `${box.w * 100}%`, height: `${box.h * 100}%`,
-                padding:`${5.04*scale}px ${7.92*scale}px ${2.88*scale}px`,lineHeight:1.18,overflowWrap:"anywhere",whiteSpace:"pre-wrap",fontSize: `${(element.content?.pointLayout?.fontSizePt || 17) * scale}px` }}>
-              {parts.heading && <div className="font-semibold" style={{marginBottom:3*scale}}>{parts.heading}</div>}
-              <div className="whitespace-pre-wrap">{parts.body}</div>
+                padding:`${5.04*scale}px ${7.92*scale}px ${2.88*scale}px`,lineHeight:1.18,overflowWrap:contract?.overflowWrap||"anywhere",whiteSpace:"pre-wrap",fontSize: `${(element.content?.pointLayout?.fontSizePt || 17) * scale}px` }}>
+              {parts.heading && <div className="font-semibold" style={{marginBottom:3*scale}}>{item.headingRich?<RichText value={item.headingRich}/>:parts.heading}</div>}
+              <div className="whitespace-pre-wrap">{item.bodyRich?<RichText value={item.bodyRich}/>:parts.body}</div>
             </div>;
           })}
         {!element.content?.pointLayout && element.content?.items?.map((item, index) => (
@@ -151,7 +162,7 @@ function ElementContent({
               : element.kind === "list"
                 ? "• "
                 : ""}
-            {item.text}
+            {item.richText?<RichText value={item.richText}/>:item.text}
           </div>
         ))}
       </div>
@@ -162,7 +173,8 @@ function ElementContent({
       const [left, top, right, bottom] = crop.map((value) => element.imageLayout?.valid ? value : Math.max(0, Math.min(0.95, Number(value) || 0)));
       const width = 100 / Math.max(Number.EPSILON, 1 - left - right);
       const height = 100 / Math.max(Number.EPSILON, 1 - top - bottom);
-      return <div className="relative h-full w-full overflow-hidden"><img
+      const mask=element.imageLayout?.mask || imageMask(element.content?.nativeMaskXml || element.content?.maskXml);
+      return <div className="relative h-full w-full overflow-hidden" style={{clipPath:mask.status==='supported'?mask.css:undefined}}><img
         src={element.content!.dataUrl}
         alt={element.content!.text || ""}
         className="absolute max-w-none"
@@ -190,7 +202,7 @@ function ElementContent({
                     background:rowIndex === 0 ? element.style?.fill || '#e7e5f4' : '#ffffff',
                     color:rowIndex === 0 ? element.style?.tableHeaderColor || element.style?.color : element.style?.color}}
                 >
-                  {cell}
+                  {element.content?.cellRich?.[rowIndex]?.[columnIndex]?<RichText value={element.content.cellRich[rowIndex][columnIndex]}/>:cell}
                 </td>
               ))}
             </tr>
@@ -503,13 +515,13 @@ export function PptCanvas({
           )
           .map((element) => element.nodeId!),
       );
-    if (active.mode === "move" && active.elements)
-      onGeometry(
-        active.elements.map((item) => ({
+    if (active.mode === "move" && active.elements) {
+      const changes = active.elements.map((item) => ({
           element: item.element,
           bounds: draftRef.current[item.element.id] || item.bounds,
-        })),
-      );
+        })).filter(item => Object.entries(item.bounds).some(([key,value]) => value !== active.elements!.find(original => original.element.id === item.element.id)!.bounds[key as keyof PptBounds]));
+      if (changes.length) onGeometry(changes);
+    }
     if (active.mode === "resize" && active.element)
       onGeometry([
         {
@@ -531,7 +543,7 @@ export function PptCanvas({
     <div
       ref={root}
       tabIndex={0}
-      className="relative aspect-video w-full select-none overflow-hidden rounded-lg border border-border shadow-sm outline-none"
+      className="relative isolate aspect-video w-full select-none overflow-hidden rounded-lg border border-border shadow-sm outline-none"
       style={{ background: slide.background || "#fff", aspectRatio: `${slide.size.width} / ${slide.size.height}` }}
       onClick={() => {
         setMenu(null);
@@ -576,6 +588,7 @@ export function PptCanvas({
               event.stopPropagation();
               if (
                 nodeId &&
+                !readOnly &&
                 !element.locked &&
                 ["text", "list", "timeline", "metric"].includes(element.kind)
               )
@@ -591,7 +604,7 @@ export function PptCanvas({
             }}
             onPointerDown={(event) => {
               event.stopPropagation();
-              if (movable) startMove(event, element);
+              if (movable && editingId !== element.id) startMove(event, element);
             }}
             className={`absolute overflow-visible text-left ${selected ? "ring-2 ring-primary" : ""} ${movable ? "cursor-move" : "cursor-default"}`}
             style={{
@@ -697,7 +710,7 @@ export function PptCanvas({
           {(["duplicate", "delete", "lock", "front", "back", "ai"] as const)
             .filter(
               (action) =>
-                allowStructure || (!["duplicate", "delete", "front", "back"].includes(action)
+                allowStructure || (!["duplicate", "delete"].includes(action)
                   && !(menu.element.kind !== "text" && ["lock", "ai"].includes(action))),
             )
             .map((action) => (

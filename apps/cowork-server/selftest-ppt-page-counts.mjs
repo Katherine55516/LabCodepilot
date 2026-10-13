@@ -1,0 +1,10 @@
+import assert from 'node:assert/strict';
+import {presentationPageCounts,presentationTimeline} from './lib/ppt-page-counts.mjs';
+import {taskSummary} from './lib/ppt/project-view.mjs';
+const createdAt='2026-10-12T00:00:00Z',project={id:'counts',uid:'counts',status:'failed',stage:'outline',pages:28,publishedRevision:0,revision:0,outline:[],createdAt,updatedAt:'2026-10-12T12:00:00Z'};
+assert.deepEqual(presentationPageCounts(project),{estimated:28,planned:0,confirmed:null,draft:0,published:0});assert.deepEqual(presentationTimeline(project),[{stage:'created',at:createdAt}]);
+const edited={...project,status:'generating',stage:'generation',revision:3,publishedRevision:2,deck:{slides:[{},{},{},{}]},outline:[{id:'a'},{id:'b'},{id:'c'},{id:'d'}],confirmedOutline:{pages:4,confirmedAt:'2026-10-12T03:00:00Z'},quality:{exportVerification:{status:'passed',revision:2,slides:3}},runtime:{slides:{a:{phase:'validated',preview:{}},b:{phase:'render_ready',preview:{}},c:{phase:'writing'},d:{phase:'waiting'}}}};
+edited.nodes={a:{status:'done',slide:{id:'a'}},b:{status:'done',slide:{id:'b'}}};
+assert.equal(presentationPageCounts(edited).published,3);assert.equal(presentationPageCounts(edited).draft,4);assert.equal(presentationPageCounts(edited).confirmed,4);assert.equal(taskSummary(edited).progress.previewReady,2);assert.ok(presentationTimeline(edited).some(event=>event.stage==='outline'&&event.at===edited.confirmedOutline.confirmedAt));
+const unknown={...edited,quality:{}};assert.equal(presentationPageCounts(unknown).published,null);assert.equal(presentationPageCounts({...unknown,publishedPageCount:3}).published,3);
+console.log('PASS: rejected outlines have no published pages, a draft cannot change the prior file page count, validated previews count as ready, and unknown phase timestamps are never fabricated');

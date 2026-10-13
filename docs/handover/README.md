@@ -6,8 +6,13 @@
 
 ## 索引
 
+- [本机 PPT 手动测试启动器](ppt-manual-test-launcher.md)：固定 3141、现有钥匙串与真实 LLM、重复运行、冷启动及 Chrome 点击验证。
+
+- [PPT 五点改进与真实验证](ppt-five-point-improvements-20261013.md)：页数、全局/局部规划、字体保真、多选底栏、DL/Gamma 对照与 QuantPilot 测试边界。
+
 | 文件 | 主题 |
 |------|------|
+| ppt-live-editor-rich-text-compression.md | AppShell常驻BYOK/Home真实任务、生成中对象编辑、rich-text/OMML/native字体与缓存v3、exact-N取舍账本、短大纲/审查checkpoint和38-ID验收边界 |
 | ppt-byok-deployment-ci.md | BYOK capabilities协议、无凭证源码包/校验/回滚升级、arm64 PPT-only Actions、gh精确commit验收与真实远端E2E依赖 |
 | ppt-byok-api-setup.md | 自定义 API 设置/目录/探针、持久化与 Native 协议、PPT 本地密钥队列、Keychain 开发配置、真实连接诊断与远端部署边界 |
 | ppt-offline-contract-template-validation.md | 无 API 的数值/可见页面契约、实际修复约束与回滚、两个模板结构档案、三共享组件、编辑完整性及离线导出/CDP验证边界 |
@@ -90,3 +95,5 @@
 | cowork-vm-mode.md | **Cowork 办公模式(本地 VM 隔离 agent)完整交接** — 「办公/研发」双栏形态、转发桥架构(宿主 SDK 不动、CLI 进 VM)、文件地图、vsock daemon 协议(exec stdin 帧封装/EOF + reconcileSessions 对账)、VM 生命周期(server 侧单例/懒启动/自愈/回收)、创建期沙箱+暂存目录+三级删除级联、E1 三守卫(硬失败/native 拒绝/MCP 过滤)、产物权威快照语义、DB/SSE/设置接线、已完成(P0+P1-A~D+办公 E1-E5)与未完成(P2/P3/镜像流水线)、15 个踩坑、零写入验收记录、运行验证打包命令。上下文压缩后接手 cowork 读这份 |
 | deid-gateway.md | **办公模式脱敏网关(deid-service)** — 发送前 PII 脱敏 + 逐项确认 + 回复还原的完整链路:数据流(MessageInput 门 → /api/deid/text → 预览弹窗 → buildOutbound → displayOverride 分离 → 渲染层还原)、文件地图、两列 schema(deid_enabled/deid_state_json 含明文 PII)、配置优先级(env > setting > 内置)、四个关键决策(展示/外发分离、历史回灌 remask 及其过度替换误差、还原放渲染层单点、fail-closed)、边界(附件与桥接不过门/标题见占位符)、13 项真实链路验证记录、排障四条 |
 | cowork-scheduled-routines.md | **沙箱定时任务(服务端调度·对标 Claude Routines)** —— 任务跑在公司沙箱服务器,关掉客户端也运行;客户端只做管理/拉取/展示。**接手先读 §A 一分钟恢复**。含三仓库分支/commit、架构数据流、生产实况与运维速查、16 条已定决策、**3 条红线**(reconcile 误删/TTL 中途回收/办公列表必须排除 routine_id)、**17 个已踩过的坑**、文件地图、验证手册与 **§K.5 P9 生产端到端验收记录** | ✅ P0-P9 全部完成并上线(2026-08-10) |
+
+| ppt-report-completion-20261011.md | Gamma报告17步骤和64项闭环：原生完整组件、原子阅读单元、claim/span审计、写后事务、真实组件提交、输入格式与Office实测；实施与外部验收状态分开 |

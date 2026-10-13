@@ -300,3 +300,11 @@
 .ppt-generation-stage > .ppt-generation-grid { height: auto; min-height: 0; flex: 1; }
 [data-testid="ppt-generation-edit"] > * { flex-shrink: 0; }
 [data-testid="ppt-generation-edit"] > [data-testid="ppt-generation-messages"] { flex-shrink: 1; }
+.ppt-project-card {position:relative;isolation:isolate;overflow:hidden;z-index:0;}
+.ppt-project-select {position:absolute;top:9px;left:9px;z-index:3;width:16px;height:16px;accent-color:var(--primary);opacity:0;visibility:hidden;pointer-events:none;transition:opacity .15s;}
+.ppt-project-card:hover .ppt-project-select,
+.ppt-project-card:focus-within .ppt-project-select,
+.ppt-project-card[data-selected="true"] .ppt-project-select {opacity:1;visibility:visible;pointer-events:auto;}
+.ppt-project-card[data-selected="true"] {border-color:var(--primary);}
+.ppt-workspace-header {position:sticky;top:0;z-index:20;isolation:isolate;}
+@media (hover:none) {.ppt-project-select {opacity:1;visibility:visible;pointer-events:auto;}}

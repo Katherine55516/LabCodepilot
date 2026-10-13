@@ -23,6 +23,11 @@ const BUILD_ID = (() => {
 
 const nextConfig: NextConfig = {
   output: 'standalone',
+  // Keep the local PPT, Home and settings journeys warm during long BYOK calls.
+  // Development-only retention; production caching/rendering is unchanged.
+  onDemandEntries: { maxInactiveAge: 300000, pagesBufferLength: 8 },
+  // Isolated local verification servers must not share build caches.
+  distDir: process.env.CODEPILOT_NEXT_DIST_DIR || '.next',
   // Pin the file-tracing root to THIS project directory. Without it, Next.js
   // infers the monorepo/workspace root from the nearest ancestor lockfile. On a
   // dev machine that happens to have a stray ~/package-lock.json, the inferred
@@ -51,12 +56,12 @@ const nextConfig: NextConfig = {
   // ——不能把 RegExp 塞进数组(会 ValidationError 起不来),按既有类型分别合并。
   webpack: (config, { dev }) => {
     if (dev) {
-      const extra = /[\\/]\.playwright-mcp[\\/]/;
+      const extra = /[\\/](?:\.ppt-build|\.playwright-mcp|test-results|playwright-report|outputs|\.next(?:-ppt-[^\\/]+)?)[\\/]/;
       const prev = config.watchOptions?.ignored;
       const ignored =
         prev instanceof RegExp ? new RegExp(`${prev.source}|${extra.source}`)
-        : Array.isArray(prev) ? [...prev, '**/.playwright-mcp/**']
-        : typeof prev === 'string' ? [prev, '**/.playwright-mcp/**']
+        : Array.isArray(prev) ? [...prev, '**/.ppt-build/**','**/.playwright-mcp/**','**/test-results/**','**/playwright-report/**','**/outputs/**','**/.next-ppt-*/**']
+        : typeof prev === 'string' ? [prev, '**/.ppt-build/**','**/.playwright-mcp/**','**/test-results/**','**/playwright-report/**','**/outputs/**','**/.next-ppt-*/**']
         : extra;
       config.watchOptions = { ...config.watchOptions, ignored };
     }

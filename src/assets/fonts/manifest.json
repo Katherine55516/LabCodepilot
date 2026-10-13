@@ -1,0 +1,37 @@
+[
+  {
+    "file": "GeistVF.woff2",
+    "source": "https://github.com/vercel/geist-font/blob/10dc7658f13c38a474cde201bb09a4617267545b/fonts/Geist/webfonts/Geist[wght].woff2",
+    "commit": "10dc7658f13c38a474cde201bb09a4617267545b",
+    "sha256": "2ffebe993e969069a9789d15164b7715d42491b5835516c5e3b935d5f81b05f1",
+    "bytes": 69760
+  },
+  {
+    "file": "GeistMonoVF.woff2",
+    "source": "https://github.com/vercel/geist-font/blob/10dc7658f13c38a474cde201bb09a4617267545b/fonts/GeistMono/webfonts/GeistMono[wght].woff2",
+    "commit": "10dc7658f13c38a474cde201bb09a4617267545b",
+    "sha256": "afaacc4c5fbba89d2ebf7a02dc4070208540874592a5504d57175782fe893101",
+    "bytes": 71596
+  },
+  {
+    "file": "JetBrainsMonoVF.woff2",
+    "source": "https://github.com/JetBrains/JetBrainsMono/blob/19371302b95d218af43299bce79ddbddd0bc364d/fonts/archives/variable/JetBrainsMono[wght].woff2",
+    "commit": "19371302b95d218af43299bce79ddbddd0bc364d",
+    "sha256": "d83ad59c4993be97522e002df1e2881459472310e216ad0500e32f22b0044b63",
+    "bytes": 114020
+  },
+  {
+    "file": "Geist-OFL.txt",
+    "source": "https://github.com/vercel/geist-font/blob/10dc7658f13c38a474cde201bb09a4617267545b/OFL.txt",
+    "commit": "10dc7658f13c38a474cde201bb09a4617267545b",
+    "sha256": "c683bfbcc7e087f5d37a54ef628f10387c451a83ddc459b151403a164ac46c90",
+    "bytes": 4383
+  },
+  {
+    "file": "JetBrainsMono-OFL.txt",
+    "source": "https://github.com/JetBrains/JetBrainsMono/blob/19371302b95d218af43299bce79ddbddd0bc364d/OFL.txt",
+    "commit": "19371302b95d218af43299bce79ddbddd0bc364d",
+    "sha256": "a76abf002c49097d146e86740a3105a5d00450b1592e820a1109a8c5680cd697",
+    "bytes": 4399
+  }
+]

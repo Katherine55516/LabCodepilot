@@ -94,7 +94,8 @@ const ledger = buildMediaLedger({ templateFidelity: fidelity }, slides, { templa
 assert.equal(ledger.status, 'profiled'); assert.equal(ledger.buckets.aid.expected, 6); assert.equal(ledger.buckets.aid.kept, 0);
 assert.equal(ledger.conservation, 0); assert.equal(ledger.longestTextOnlyRun, 4); assert.equal(ledger.templateMediaShare, 1);
 const mediaCodes = inspectMediaLedger(ledger).map(issue => issue.code);
-assert.deepEqual(mediaCodes.sort(), ['media_conservation_low', 'media_role_dropped', 'media_text_only_run']);
+// MD-P0-3 (round 5): below 0.7 effective conservation blocks publishing until the user confirms each removal.
+assert.deepEqual(mediaCodes.sort(), ['media_conservation_blocked', 'media_role_dropped', 'media_text_only_run', 'media_weighted_conservation_blocked']);
 const keptLedger = buildMediaLedger({ templateFidelity: fidelity }, slides.map(slide => ({ ...slide, nodes: [{ id: 'i', type: 'image' }] })), { templateAssets: assets.map(asset => ({ ...asset, status: 'retained' })), objects: [] });
 assert.deepEqual(inspectMediaLedger(keptLedger), []);
 const mapped = buildMediaLedger({}, slides, { objects: [] });

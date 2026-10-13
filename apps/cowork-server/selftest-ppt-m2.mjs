@@ -14,11 +14,11 @@ const [{ handlePpt }, store, source, pdf] = await Promise.all([
 const uid = 'alice';
 let removed = [];
 const deps = {
-  modelCall: async (project, prompt) => prompt.includes('整稿演示文稿内容评审器')
+  modelCall: async (project, prompt, _activity, _log, options) => prompt.includes('整稿演示文稿内容评审器')
     ? scopeReview(project)
     : prompt.includes('叙事规划器')
-      ? { slides: Array.from({ length: project.pages }, (_, i) => ({ title: `章节 ${i + 1}`, focus: `论点 ${i + 1}`, refs: project.source?.segments?.length ? [project.source.segments[0].id] : [] })) }
-      : { title: '内容页', bullets: ['可信来源'] },
+      ? (await new Promise(resolve=>setTimeout(resolve,25)), { slides: Array.from({ length: project.pages }, (_, i) => ({ title: `章节 ${i + 1}`, focus: `论点 ${i + 1}`, refs: project.source?.segments?.length ? [project.source.segments[0].id] : [] })) })
+      : { title: project.outline.find(slide=>options?.nodeKey?.includes(slide.id))?.title || '内容页', bullets: ['可信来源'] },
   extractFile: async (_project, name, bytes) => ({ kind: 'file', name, text: bytes.toString(), segments: [{ id: '1', location: '行 1', text: bytes.toString() }] }),
   renderPptx: async project => simulatedExport(project),
   renderPdf: async () => ({ bytes: 456 }),
@@ -59,7 +59,7 @@ try {
   project = await settled(id, 'outline_ready');
   assert.equal(project.sourceRevision, 2);
   assert.equal(project.outlineRevision, 0);
-  assert.equal((await request('PATCH', `/ppt/projects/${id}/outline`, { slides: project.outline.map((slide, i) => ({ ...slide, title: `编辑 ${i}` })) })).status, 200);
+  assert.equal((await request('PATCH', `/ppt/projects/${id}/outline`, { slides: project.outline.map((slide, i) => ({ ...slide, title: `编辑 ${String.fromCharCode(65+i)}` })) })).status, 200);
   assert.equal((await request('POST', `/ppt/projects/${id}/generate`)).status, 202);
   project = await settled(id, 'completed');
   assert.equal(project.deck.slides.length, 3);
@@ -67,7 +67,9 @@ try {
   const titleUser = 'title-user';
   const automatic = await request('POST', '/ppt/projects', { inputKind: 'prompt', title: lockedTitle, prompt: '解释平台架构和实施路线', pages: 4, configId: 'test' }, titleUser);
   assert.equal(automatic.status, 201);
-  assert.equal((await request('POST', `/ppt/projects/${automatic.body.project.id}/generate`, undefined, titleUser)).status, 202, 'generation may be queued before outline completes');
+  assert.equal((await request('POST', `/ppt/projects/${automatic.body.project.id}/generate`, undefined, titleUser)).status, 409, 'unvalidated planning cannot queue slide generation before explicit confirmation');
+  await settled(automatic.body.project.id, 'outline_ready', titleUser);
+  assert.equal((await request('POST', `/ppt/projects/${automatic.body.project.id}/generate`, undefined, titleUser)).status,202);
   const automaticProject = await settled(automatic.body.project.id, 'completed', titleUser);
   assert.equal(automaticProject.pages, 4);
   assert.equal(automaticProject.deck.slides.length, 4, 'output must match the user-confirmed page count');
@@ -82,7 +84,7 @@ try {
   assert.equal((await request('PATCH', `/ppt/projects/${id}`, { favorite: true, pinned: true, tags: ['财务'], folderId })).status, 200);
   let list = await request('GET', '/ppt/projects?q=季度&favorite=1&folderId=' + folderId);
   assert.equal(list.body.projects.length, 1);
-  assert.equal(list.body.projects[0].source.text, undefined);
+  assert.equal(list.body.projects[0].source, undefined);
   assert.equal((await request('GET', '/ppt/projects?q=季度', undefined, 'bob')).body.projects.length, 0);
   const copy = await request('POST', `/ppt/projects/${id}/duplicate`);
   assert.equal(copy.status, 202);
@@ -134,12 +136,12 @@ print(json.dumps(out))`], { maxBuffer: 2_000_000 });
     const expected = { csv: 'CD8A', docx: 'Document facts', xlsx: 'Spreadsheet facts', pptx: 'Presentation facts', pdf: 'PDF facts' }[ext];
     const parsed = extract(`sample.${ext}`, Buffer.from(encoded, 'base64'));
     assert.match(parsed.text, new RegExp(expected));
-    if (ext === 'xlsx') assert.deepEqual(parsed.segments[0].rows,[['Spreadsheet facts']]);
+    if (ext === 'xlsx') assert.deepEqual(parsed.segments.find(s=>s.kind==='table').rows,[['Spreadsheet facts']]);
   }
   const hasMatplotlib = spawnSync(python, ['-c', 'import matplotlib']).status === 0;
   if (hasMatplotlib) {
     const output = path.join(root, 'presentation.pdf');
-    const rendered = spawnSync(python, ['-c', pdf._internals.SCRIPT], { input: JSON.stringify({ template: 'violet', fonts: { title: 'Noto Sans CJK SC', body: 'Noto Sans CJK SC', titleEastAsia: 'Noto Sans CJK SC', bodyEastAsia: 'Noto Sans CJK SC' }, slides: [{ title: 'Quarterly review', bullets: ['Revenue grew'] }, { title: 'Next steps', bullets: [] }] }), env: { ...process.env, PPT_OUTPUT: output }, maxBuffer: 2_000_000 });
+    const rendered = spawnSync(python, ['-c', pdf._internals.SCRIPT], { input: JSON.stringify({ template: 'violet', fonts: { title: 'DejaVu Sans', body: 'DejaVu Sans', titleEastAsia: 'DejaVu Sans', bodyEastAsia: 'DejaVu Sans' }, slides: [{ title: 'Quarterly review', bullets: ['Revenue grew'] }, { title: 'Next steps', bullets: [] }] }), env: { ...process.env, PPT_OUTPUT: output }, maxBuffer: 2_000_000 });
     assert.equal(rendered.status, 0, rendered.stderr.toString());
     const check = spawnSync(python, ['-c', `from pypdf import PdfReader; import sys; r=PdfReader(sys.argv[1]); assert len(r.pages)==2; assert 'Quarterly review' in r.pages[0].extract_text(); print('PDF OK')`, output]);
     assert.equal(check.status, 0, check.stderr.toString());

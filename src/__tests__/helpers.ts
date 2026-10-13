@@ -79,8 +79,9 @@ export async function goToSettingsTab(page: Page, tab: string) {
 
 /** Wait until the page has finished its initial load. */
 export async function waitForPageReady(page: Page) {
-  await page.waitForLoadState('networkidle');
-  await page.waitForTimeout(300);
+  // AppShell intentionally polls route-independent tasks; network idle is not readiness.
+  await page.waitForLoadState('domcontentloaded');
+  await expect(page.locator('main').first()).toBeVisible();
 }
 
 /** Wait for streaming dots indicator to appear (3 bouncing dots). */
@@ -511,4 +512,13 @@ export async function expectPageLoadTime(page: Page, url: string, maxMs: number 
   await waitForPageReady(page);
   const elapsed = Date.now() - start;
   expect(elapsed).toBeLessThan(maxMs);
+}
+
+/** Native and application-rendered PPT controls expose the same value semantics. */
+export async function selectPptOption(locator: Locator, value: string) {
+  if (await locator.evaluate(element => element.tagName === 'SELECT')) {
+    await locator.selectOption(value); return;
+  }
+  await locator.click();
+  await locator.page().locator(`[data-ppt-option-value="${value || '__empty__'}"]`).click();
 }

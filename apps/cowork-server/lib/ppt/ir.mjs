@@ -47,6 +47,15 @@ function copyTextNode(slideId, role, value) {
   return text ? { id: stableId('node', slideId, role), type: 'text', semanticRole: role, slotId: role, styleRef: `typography.${role}`, content: { text } } : null;
 }
 
+// A legacy migration title is only an alias when the native template already
+// carries its exact text. Positioned, locked, edited and user-created objects
+// remain canonical and must still satisfy the export mapping gate.
+export function removeNativeTitleAlias(slideId, nodes) {
+  const nativeTitles = nodes.filter(node => node?.type === 'text' && node.semanticRole === 'template-title' && node.nativeRef && node.geometry);
+  return nodes.filter(node => !(node?.id === stableId('node', slideId, 'title') && node.type === 'text' && node.semanticRole === 'title' &&
+    !node.nativeRef && !node.geometry && !node.locked && nativeTitles.some(title => String(title.content?.text ?? '') === String(node.content?.text ?? ''))));
+}
+
 /**
  * IR v3 keeps legacy title/bullets/blocks materialized during migration. Nodes
  * are canonical for commands; legacy fields keep M1-M5 clients/export fixtures
@@ -59,8 +68,8 @@ export function ensureSlideV3(input, index = 0) {
   // partial canonical node list is intentional after object deletion and must
   // not silently recreate the legacy title/body nodes.
   const canonical = Array.isArray(slide.nodes) && (slide.nodes.length > 0 || Array.isArray(slide.nodeOrder));
-  const nodes = canonical ? slide.nodes.map(clone) : [];
-  let title = nodes.find(node => node?.type === 'text' && node.semanticRole === 'title');
+  const nodes = canonical ? removeNativeTitleAlias(slide.id, slide.nodes.map(clone)) : [];
+  let title = nodes.find(node => node?.type === 'text' && node.semanticRole === 'template-title' && node.nativeRef) || nodes.find(node => node?.type === 'text' && node.semanticRole === 'title');
   if (!title && !canonical) {
     title = { id: stableId('node', slide.id, 'title'), type: 'text', semanticRole: 'title', slotId: 'title', styleRef: 'typography.title', content: { text: String(slide.title || '') } };
     nodes.unshift(title);
@@ -113,7 +122,7 @@ export function ensureSlideV3(input, index = 0) {
 export function materializeLegacySlide(input) {
   const slide = clone(input);
   const nodes = Array.isArray(slide.nodes) ? slide.nodes : [];
-  const title = nodes.find(node => node.type === 'text' && node.semanticRole === 'title');
+  const title = nodes.find(node => node.type === 'text' && node.semanticRole === 'template-title' && node.nativeRef) || nodes.find(node => node.type === 'text' && node.semanticRole === 'title');
   const body = nodes.find(node => node.type === 'list' && node.semanticRole === 'body');
   slide.title = String(title?.content?.text ?? slide.title ?? '');
   slide.bullets = (body?.content?.items || []).map(item => String(item.text || '')).filter(Boolean);

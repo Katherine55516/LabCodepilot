@@ -42,3 +42,25 @@ export function templateCapabilities(template) {
     maxPages: native ? maxPreservedPages(count) : 100,
     capacityCheck: native ? 'native-scheduler' : 'content-plan' };
 }
+
+/** A failed later stage must not make a verified page inaccessible. Pending
+ * pages and deck-wide mutations still require a frozen generation scope. */
+export function pageEditContext(project, slideId, type = 'content', scope = 'slide') {
+  if (!project || project.deletedAt) throw editError('project is unavailable', 409);
+  const live = ['generating', 'failed'].includes(project.status);
+  if (!live) {
+    if (!['completed', 'quality_blocked', 'paused'].includes(project.status)) throw editError('wait for the target page to finish before editing', 409);
+    return null;
+  }
+  if (project.status === 'failed' && project.stage !== 'generation') throw editError('resolve the input or outline failure before editing pages', 409);
+  if (scope === 'deck' || !['content', 'title', 'object'].includes(type)) throw editError('freeze generation scope before changing layout or the whole deck', 409);
+  const state = project.runtime?.slides?.[slideId];
+  if (project.nodes?.[slideId]?.status !== 'done' || !state?.preview || state.phase !== 'render_ready' || state.quality?.issues?.some(issue => issue.severity === 'error'))
+    throw editError('wait for this page to finish validation before editing', 409);
+  return { runId: project.currentRunId || null, epoch: Number(project.editing?.epochs?.[slideId] || 0) };
+}
+export function assertPageEditContext(project, proposal) {
+  pageEditContext(project, proposal.slideId, proposal.type || 'content', proposal.scope);
+  if (proposal.liveEditContext && (proposal.liveEditContext.runId !== (project.currentRunId || null) || proposal.liveEditContext.epoch !== Number(project.editing?.epochs?.[proposal.slideId] || 0)))
+    throw editError('the page generation changed; preview again', 409);
+}

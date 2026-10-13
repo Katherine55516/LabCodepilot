@@ -24,7 +24,7 @@ test('PPT offline components share canvas geometry and preserve navigation @smok
   return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({project,operation:{id:'op_fixture'}})});
  }
  const r=await fixture.handle(request.method(),new URL(request.url()).pathname,request.postData()?request.postDataJSON():{});if(!r)return route.continue();return route.fulfill({status:r.status,contentType:r.contentType||'application/json',body:typeof r.body==='string'?r.body:JSON.stringify(r.body)});});
- await page.goto('/ppt');await page.getByRole('heading',{name:'Workflow fixture',exact:true}).click();await page.getByRole('button',{name:'打开编辑器',exact:true}).click();
+ await page.goto('/ppt', {waitUntil:'domcontentloaded'});await page.getByRole('heading',{name:'Workflow fixture',exact:true}).click();await page.getByRole('button',{name:'打开编辑器',exact:true}).click();
  const editor=page.getByTestId('ppt-structured-editor');
  await editor.getByRole('button',{name:'2. Methods and conditions',exact:true}).click();
  await expect(editor.getByText('A ranked portfolio compares signals under a fixed universe.',{exact:false})).toBeVisible();

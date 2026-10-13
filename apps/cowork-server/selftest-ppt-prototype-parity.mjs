@@ -29,7 +29,7 @@ try {
   assert.match(contracts.promptPolicy({ prompt: 'Sparse concept', generationPolicy: config }), /knowledge_mode=source_only/);
   assert.match(contracts.promptPolicy({ source: { segments: [{ id: '1' }] }, generationPolicy: { ...config, knowledge: 'source_plus_explanation' } }), /knowledge_mode=bounded_explanation/);
   assert.equal(planning.normalizeBrief({ depth: 'detailed' }, { pages: 4, prompt: '培训课程', generationPolicy: config }).depth, 'balanced');
-  const estimate = await request('page-estimate', { inputKind: 'paste', text: '# Topic\n机制和限制\n整理成12页', generationPolicy: config });
+  const estimate = await request('page-estimate', { inputKind: 'paste', text: '# Topic\n机制和限制\n整理成12页', prompt:'整理成12页', generationPolicy: config });
   assert.equal(estimate.status, 200); assert.equal(estimate.body.recommendation.requested, 12);
   assert.equal(store.list(uid).length, 0, 'estimating does not create projects');
   assert.equal((await request('page-estimate', { inputKind: 'prompt', prompt: 'topic', generationPolicy: { ...config, detail: 'concise' } })).status, 400);

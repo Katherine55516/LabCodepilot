@@ -1,3 +1,4 @@
+import {sourcePointListKind}from './ppt-source-list-kinds.mjs';
 /** Domain-independent content inventory and observed (not merely cited) coverage. */
 import {sourceDisplayText} from './ppt-source-text.mjs';
 import { visibleNodes } from './ppt-visible-content.mjs';
@@ -5,7 +6,7 @@ import { inspectObjectIntegrity } from './ppt-object-integrity.mjs';
 import { markLanguagePairs, markEquivalentStructures } from './ppt-presentation-policy.mjs';
 import { buildRelations } from './ppt-semantic-relations.mjs';
 const normalizedText=value=>sourceDisplayText(value).toLowerCase().replace(/\s+/gu,' ').trim();
-const structural = new Set(['CodeBlock','TableBlock','EquationBlock','ProcessBlock','ChecklistBlock','TaxonomyBlock']);
+const structural = new Set(['ChartBlock','CodeBlock','TableBlock','EquationBlock','ProcessBlock','ChecklistBlock','TaxonomyBlock']);
 const tokens = text => [...new Set(String(text||'').toLowerCase().match(/[a-z][a-z0-9_-]{2,}|\d+(?:\.\d+)?|[\u3400-\u9fff]{2,4}/gu)||[])];
 export function recall(expected, actual) {
   const terms = tokens(expected), shown = new Set(tokens(actual));
@@ -66,12 +67,14 @@ export function normalizeTableRows(rows) {
 }
 function role(block) {
   const section = (block.sectionPath||[]).join(' ');
+  if(block.type==='chart')return 'ChartBlock';
   if (block.type==='code') return 'CodeBlock';
   if (block.type==='table') return 'TableBlock';
   if (block.type==='equation' || /^\s*(?:\$\$|\\\[)/.test(block.text)) return 'EquationBlock';
-  if (/checklist|检查清单|实践清单/i.test(section) && block.type==='list') return 'ChecklistBlock';
+  if(block.type==='list'){const kind=sourcePointListKind(block);if(kind)return kind;}
   if (/summary|conclusion|小结|总结|结论/i.test(section)) return 'SummaryBlock';
   if (block.type==='list' && /workflow|process|procedure|流程|步骤/i.test(section)) return 'ProcessBlock';
+  if(block.type==='diagram'&&['parallel','branching'].includes(block.diagramSource?.relation))return 'ComparisonBlock';
   if (block.type==='diagram' || block.semanticType==='process' && /->|→|步骤|step/i.test(block.text)) return 'ProcessBlock';
   return ({ definition:'DefinitionBlock', comparison:'ComparisonBlock', timeline:'TimelineBlock', example:'ExampleBlock', problem:'WarningBlock', evidence:'EvidenceBlock' })[block.semanticType] || 'MechanismBlock';
 }
@@ -84,6 +87,8 @@ export function buildContentInventory(blocks, chunks, graph = []) {
     return { id:block.id, type, semanticRole:type.replace('Block','').toLowerCase(), priority: structural.has(type)||type==='SummaryBlock'?'high':'normal',
       source_ref: block.sourceRefs, chunkRefs, sectionPath:block.sectionPath, text:block.text,
       must_preserve_structure: structural.has(type), ...(type==='CodeBlock'?{language:block.language || ''}:{}),
+      ...(block.diagramSource?{mustDisplay:true,must_preserve_structure:true}:{}),
+      ...(block.chart?{chart:structuredClone(block.chart)}:{}),
       ...(block.diagramSource?{diagramSource:block.diagramSource}:{}),
       ...(table?{rows:table.rows,...(table.warning?{tableGeometryWarning:table.warning}:{})}:{}) };
   });

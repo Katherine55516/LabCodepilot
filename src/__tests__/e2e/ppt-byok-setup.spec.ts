@@ -1,7 +1,10 @@
+import {selectPptOption} from '../helpers';
 import { test, expect } from '@playwright/test';
 import { pptParityFixture } from '../fixtures/ppt-parity';
 
 test('API setup saves explicit protocol, synchronizes models and exposes them in PPT @smoke', async ({ page }, info) => {
+  // This full settings/editor journey includes cold Next route compilation.
+  test.setTimeout(90000);
   const fixture = pptParityFixture();
   const errors: string[] = []; page.on('pageerror', error => errors.push(error.message));
   page.on('console', message => { if (message.type() === 'error') errors.push(message.text()); });
@@ -28,7 +31,7 @@ test('API setup saves explicit protocol, synchronizes models and exposes them in
     if (result) return route.fulfill({ status: result.status, contentType: result.contentType || 'application/json', body: typeof result.body === 'string' ? result.body : JSON.stringify(result.body) });
     return route.fulfill({ status: 200, contentType: 'application/json', body: '{}' });
   });
-  await page.goto('/settings#providers');
+  await page.goto('/settings#providers', {waitUntil:'domcontentloaded'});
   const preset = page.getByText('OpenAI-compatible API', { exact: true });
   await preset.locator('..').locator('..').getByRole('button').click();
   const dialog = page.getByRole('dialog').last();
@@ -49,12 +52,12 @@ test('API setup saves explicit protocol, synchronizes models and exposes them in
   await dialog.getByRole('button', { name: '添加', exact: true }).click();
   await expect(dialog.getByRole('status')).toContainText('模型已添加');
   await dialog.getByRole('button', { name: '更新', exact: true }).click();
-  await page.goto('/ppt');
+  await page.goto('/ppt', {waitUntil:'domcontentloaded'});await expect(page.getByText('加载中…',{exact:true})).toHaveCount(0);
   await page.getByRole('button', { name: '＋ 新建', exact: true }).click();
   await page.getByRole('button', { name: /从 Prompt 开始/ }).click();
   const selector = page.getByRole('combobox', { name: 'LLM（必填）' });
-  await expect(selector.locator('option')).toHaveCount(4);
-  await selector.selectOption('local-fixture::ppt应用测试');
+  await selector.click();await expect(page.getByRole('option')).toHaveCount(4);await page.keyboard.press('Escape');
+  await selectPptOption(selector, 'local-fixture::ppt应用测试');
   await expect(page.getByText(/本地 API：密钥留在本机/)).toBeVisible();
   const cdp = await page.context().newCDPSession(page); await cdp.send('Runtime.enable');
   await page.screenshot({ path: info.outputPath('ppt-byok-model-picker.png') });
@@ -64,7 +67,7 @@ test('API setup saves explicit protocol, synchronizes models and exposes them in
   await page.getByRole('button', { name: /Teaching template/ }).click();
   await page.getByRole('button', { name: '下一步：输入内容 →' }).click();
   await page.getByRole('textbox', { name: '输入 Prompt', exact: true }).fill('Explain input validation and implementation constraints in 12 pages.');
-  const generate = page.getByRole('button', { name: '开始生成', exact: true });
+  const generate = page.getByRole('button', { name: '读取输入并生成大纲', exact: true });
   await expect(generate).toBeEnabled(); await generate.click();
   await expect(page.getByText('PPT 客户端与服务端的本地模型协议不兼容，请更新配套服务。', { exact: true })).toBeVisible();
   expect(fixture.payloads.some(payload => payload.configId === 'byok:local-fixture')).toBe(false);

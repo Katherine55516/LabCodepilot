@@ -8,6 +8,9 @@
 
 | 文件 | 主题 |
 |------|------|
+| [ppt-dl29-gamma-semantic-comparison-20261013.md](ppt-dl29-gamma-semantic-comparison-20261013.md) | 指定 29 页与 Gamma 10 页的内容/排布/语义组织/分割差异，改进实施及 gamma.md 实测 |
+| [ppt-five-point-gamma-comparison-20261013.md](ppt-five-point-gamma-comparison-20261013.md) | 五点改进真实 DL/Gamma 与 QuantPilot 对照：指标、逐主题内容/语义/布局差异、候选门禁未通过项及通用改进 |
+| [ppt-factor-zoo-live-postmortem-20261009.md](ppt-factor-zoo-live-postmortem-20261009.md) | 真实 34→33→51 页对照 Gamma 10 页；页数/解析/长 syllabus 根因与逐项改进；当前 New API 四模型探针、生产 SDK JSON、Qwen 默认修复及配置边界 |
 | [ppt-master-skill-review-20261009.md](ppt-master-skill-review-20261009.md) | PPT module/skill评审及Factor Zoo同源成品实证：master16页与Gamma10页逐主题对照、实际PPTX/PDF密度/字号/媒体角色、native路径边界；页面设计契约/关系类型/媒体账本/分层修复的补强、Gamma遗漏与无来源扩展、P0–P2实施与通用验收 |
 | [ppt-hard-rules-vs-gamma-current-audit-20261008.md](ppt-hard-rules-vs-gamma-current-audit-20261008.md) | 当前 PPT/Gamma hard rules 分层比较；五项 P0 负向复现；第11–17节逐项实施讨论：调用链/修改位置、发布事务、export v2/实际渲染、collision、完整义务与媒体处置schema、兼容迁移、联动施工及通用验收；第18节五项核心修复、真实PPTX/PDF和32组专项回归、未完成的复杂视觉/长输入/模型验收 |
 | [ppt-input-scope-harness-review-20261008.md](ppt-input-scope-harness-review-20261008.md) | PPT harness 输入框架评估与修复：bounded explanation、强制逐页范围审查、局部候选/应用门禁、导入基线、版本失效与跨输入对抗回归；真实模型判断边界 |

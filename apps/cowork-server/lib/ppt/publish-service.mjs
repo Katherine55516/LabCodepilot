@@ -21,6 +21,11 @@ async function publishLocked(uid, projectId, deps, snapshot, inputHash) {
   if (!['completed', 'quality_blocked'].includes(project.status) || project.deletedAt) throw Object.assign(new Error('project is not ready to publish'), { statusCode: 409 });
   if (semanticReviewKey(project) !== inputHash) throw Object.assign(new Error('content changed during review; publish again'), { statusCode: 409 });
   project.quality = snapshot.quality;
+  // An editor mutation invalidates the generation DAG review node. Publishing
+  // performs a fresh review on a snapshot, so carry its validated result back
+  // with the current revision instead of leaving a completed deck "pending".
+  if(project.dagNodes?.['review:deck'])project.dagNodes['review:deck']={...project.dagNodes['review:deck'],status:'completed',error:null,result:project.quality.modelReview,inputHash,projectRevision:project.revision,
+    ...(project.quality.reviewStartedAt?{startedAt:project.quality.reviewStartedAt}:{}),completedAt:project.quality.reviewCompletedAt||new Date().toISOString(),updatedAt:new Date().toISOString()};
   const reviewed = reviewProject(project);
   project = reviewed.project;
   // Native fidelity changes a rule's applicability at inspection time. It must
@@ -40,7 +45,7 @@ async function publishLocked(uid, projectId, deps, snapshot, inputHash) {
   }
   project.publishedArtifactPath = output;
   project.status = 'completed'; project.stage = 'completed'; project.error = '';
-  project.publishedRevision = project.revision; project.publishedAt = new Date().toISOString();
+  project.publishedRevision = project.revision; project.publishedPageCount=project.deck.slides.length; project.publishedAt = new Date().toISOString();
   project.publishedRenderTree = project.renderTree;
   saveProject(project); saveRevision(project, 'publish');
   return { project, published: true };

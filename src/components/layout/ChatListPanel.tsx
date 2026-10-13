@@ -6,7 +6,6 @@ import Link from "next/link";
 import { motion, AnimatePresence } from "motion/react";
 import {
   MagnifyingGlass,
-  FileArrowDown,
   Plus,
   FolderPlus,
   Lightning,
@@ -779,7 +778,7 @@ export function ChatListPanel({ open, onToggle, width, hasUpdate, readyToInstall
         {activeTab === 'office' && (
           <Link href="/ppt">
             <Button variant="ghost" size="sm" className={`w-full justify-start gap-2 h-8 text-xs ${pathname.startsWith('/ppt') ? 'bg-accent text-accent-foreground font-medium' : 'text-muted-foreground hover:text-foreground'}`}>
-              <FileArrowDown size={14} weight={pathname.startsWith('/ppt') ? 'fill' : 'regular'} />
+              <span aria-hidden="true" data-testid="powerpoint-nav-icon" className="size-3.5 shrink-0" style={{backgroundColor:'currentColor',maskMode:'alpha',maskImage:"url(/icons/powerpoint-user.png?v=e65793b2f797)",WebkitMaskImage:"url(/icons/powerpoint-user.png?v=e65793b2f797)",maskRepeat:"no-repeat",WebkitMaskRepeat:"no-repeat",maskSize:"contain",WebkitMaskSize:"contain",maskPosition:"center",WebkitMaskPosition:"center"}} />
               {t('ppt.sidebarButton')}
             </Button>
           </Link>

@@ -1,0 +1,16 @@
+import assert from 'node:assert/strict';
+import {inspectNativeOutlineTitles,inspectTemplateSlotDraft} from './lib/ppt-template-fidelity.mjs';
+import {outlineMetadataRepairPrompt,applyOutlineMetadataRepair} from './lib/ppt-outline-protocol.mjs';
+const p={source:{text:'# Deep Learning | 深度学习',semantic:{inventory:{items:[]}}},templateFidelity:{mode:'preserve',slides:[{nodes:[],slots:[{shapeId:3,role:'title',capacity:6,fontSizePt:51}]}]}};
+const raw={version:2,selection:[],slides:[{title:'Deep Learning | 深度学习',sourceUnitIds:[],focus:'Introduce deep learning.'}]};
+const conflicts=inspectNativeOutlineTitles(p,raw.slides);assert.equal(conflicts.length,1);assert.equal(conflicts[0].capacityVisualUnits,6);
+const diagnostic={details:{metadataConflicts:conflicts}};const prompt=outlineMetadataRepairPrompt(p,raw,diagnostic);assert.match(prompt,/capacityVisualUnits/);assert.match(prompt,/Deep Learning/);
+const fixed=applyOutlineMetadataRepair(raw,diagnostic,{version:2,updates:[{pageIndex:0,field:'title',text:'DL深度学习'}]});
+assert.equal(inspectNativeOutlineTitles(p,fixed.slides).length,0);assert.equal(inspectTemplateSlotDraft(p,0,fixed.slides[0]).filter(x=>x.code==='template_slot_overflow').length,0);
+assert.deepEqual(fixed.selection,raw.selection);assert.deepEqual(fixed.slides.map(s=>s.sourceUnitIds),raw.slides.map(s=>s.sourceUnitIds));assert.equal(fixed.slides.length,raw.slides.length);
+assert.equal(inspectNativeOutlineTitles({templateFidelity:{mode:'mapped'}},raw.slides).length,0);
+console.log('PASS: native title budgets are checked before confirmation with unchanged font, source selection and N; repaired title also passes writer slot budget.');
+const mixedRaw={version:2,slides:[{title:'Subject',focus:'Long intent',section:'Long section',sourceUnitIds:[]}]},mixedError={details:{metadataConflicts:[{pageIndex:0,field:'focus',maxLength:360,reason:'metadata_too_long'},{pageIndex:0,field:'section',maxLength:80,reason:'metadata_too_long'}]}};
+const {outlineResponseSchema}=await import('./lib/ppt-outline-protocol.mjs');const mixedSchema=outlineResponseSchema(outlineMetadataRepairPrompt(p,mixedRaw,mixedError));assert.equal(mixedSchema.properties.updates.items.oneOf.find(b=>b.properties.field.const==='section').properties.text.maxLength,80);assert.equal(mixedSchema.properties.updates.items.oneOf.find(b=>b.properties.field.const==='focus').properties.text.maxLength,180);
+assert.throws(()=>applyOutlineMetadataRepair(mixedRaw,mixedError,{version:2,updates:[{pageIndex:0,field:'focus',text:'Brief intent'},{pageIndex:0,field:'section',text:'x'.repeat(91)}]}),e=>e.details?.field==='section'&&e.details.maxLength===80&&e.details.actualLength===91);
+assert.deepEqual(applyOutlineMetadataRepair(mixedRaw,mixedError,{version:2,updates:[{pageIndex:0,field:'focus',text:'Brief intent'},{pageIndex:0,field:'section',text:'Section'}]}).slides[0].sourceUnitIds,mixedRaw.slides[0].sourceUnitIds);

@@ -16,12 +16,14 @@ export function PptInspector({
   onCommand,
   onAi,
   allowStructure = true,
+  fonts = [],
 }: {
   element: PptRenderElement;
   slideId: string;
   onCommand: (type: string, payload: unknown) => Promise<void>;
   onAi?: () => void;
   allowStructure?: boolean;
+  fonts?: string[];
 }) {
   const { t } = useTranslation();
   const text =
@@ -34,7 +36,8 @@ export function PptInspector({
     body: item.body || (item.text.includes("\n") ? item.text.split("\n").slice(1).join("\n") : item.text),
     pointType: item.pointType || "support",
   })));
-  const [style, setStyle] = useState({ ...element.style });
+  const [style, setStyle] = useState(() => Object.fromEntries(Object.entries(element.style || {}).filter(([key]) =>
+    ["color","fill","fontFamily","eastAsiaFontFamily","fontSizePt","fontWeight","fontStyle","textAlign","lineHeight","paragraphSpacingEm","letterSpacing","opacity","shape"].includes(key))) as NonNullable<PptRenderElement["style"]>);
   const [bounds, setBounds] = useState<PptBounds>(element.bounds);
   const [zIndex, setZIndex] = useState(element.zIndex);
   const [rotation, setRotation] = useState(element.rotation || 0);
@@ -231,13 +234,31 @@ export function PptInspector({
           {t("ppt.inspector.textStyle")}
         </summary>
         <div className="mt-2 grid grid-cols-2 gap-2">
+          <label className="col-span-2 text-xs">
+            {t("ppt.inspector.fontFamily")}
+            <input aria-label={t("ppt.inspector.fontFamily")} className={field}
+              list="ppt-font-families" value={style.fontFamily || ""} maxLength={120}
+              onChange={event => setStyle(current => ({ ...current, fontFamily: event.target.value }))}/>
+            <datalist id="ppt-font-families">{[...new Set([...fonts, style.fontFamily,
+              "Arial", "Aptos", "Calibri", "Georgia", "Times New Roman", "Helvetica",
+              "Source Sans 3", "Libre Baskerville Bold", "DM Sans", "Fraunces SemiBold",
+              "Figtree", "Prata", "Consolas", "PingFang SC", "Noto Sans CJK SC"
+            ].filter((font): font is string => Boolean(font)))].map(font => <option key={font} value={font}/>)}</datalist>
+          </label>
+          <label className="col-span-2 text-xs">
+            {t("ppt.inspector.eastAsiaFontFamily")}
+            <input aria-label={t("ppt.inspector.eastAsiaFontFamily")} className={field}
+              list="ppt-font-families" value={style.eastAsiaFontFamily || ""} maxLength={120}
+              onChange={event => setStyle(current => ({ ...current, eastAsiaFontFamily: event.target.value }))}/>
+          </label>
           <label className="text-xs">
             {t("ppt.inspector.fontSize")}
             <input
               className={field}
               type="number"
-              min={10}
-              max={96}
+              min={1}
+              max={400}
+              step={0.5}
               value={style.fontSizePt || 18}
               onChange={(event) =>
                 setStyle((current) => ({
@@ -330,6 +351,11 @@ export function PptInspector({
           </label>
         </div>
         <div className="mt-2 grid grid-cols-2 gap-2">
+          <label className="col-span-2 flex items-center gap-2 text-xs">
+            <input type="checkbox" checked={style.fontStyle === "italic"}
+              onChange={event => setStyle(current => ({ ...current, fontStyle: event.target.checked ? "italic" : "normal" }))}/>
+            {t("ppt.inspector.italic")}
+          </label>
           <button
             className={button}
             disabled={element.locked}

@@ -30,7 +30,7 @@ assert.equal(inspectVisibleCopy([repeated,recap]).filter(i=>i.code==='visible_co
 const source=normalizePaste('# Research\n\n| Factor | Mechanism |\n|---|---|\n| Value | Risk or extrapolation |\n| Momentum | Slow diffusion |\n\n$$r_i=\\alpha_i+\\beta_i f+\\epsilon_i$$\n\n## Practical Checklist\n\n- Check timing.\n- Check costs.');
 const items=source.semantic.inventory.items.filter(item=>item.must_preserve_structure);
 const p={...project,source,planning:{slidePlan:items.map((item,index)=>({slideId:`object${index}`,sourceArtifacts:[{sourceUnitId:item.id}]}))}};
-const slides=items.map((item,index)=>bindSourceArtifacts(p,{id:`object${index}`,nodes:[],sourceRefs:item.source_ref},[{sourceUnitId:item.id}],index));
+const slides=items.map((item,index)=>bindSourceArtifacts(p,{id:`object${index}`,nodes:[],sourceRefs:item.source_ref},[{sourceUnitId:item.id}],index+1));
 assert.equal(inspectObjectIntegrity(p,slides).issues.length,0);
 assert.ok(inspectObjectIntegrity(p,[]).issues.every(i=>i.severity==='error'));
 const damaged=structuredClone(slides);damaged.find(s=>s.nodes.some(n=>n.type==='table')).nodes.find(n=>n.type==='table').content.rows[1][1]='';
@@ -49,7 +49,7 @@ assert.equal(finalQualityReport({issues:[],hardErrors:0},{},{evaluation:'not_eva
 const requiredImage={id:'small-formula-image',required:true,dataUrl:'data:image/png;base64,AA==',width:10,height:4};
 assert.equal(inspectObjectIntegrity({source:{images:[requiredImage]}},[]).issues[0].severity,'error');
 assert.equal(inspectObjectIntegrity({source:{images:[requiredImage]}},[{id:'image-page',nodes:[{id:'img',type:'image',content:{sourceImageId:requiredImage.id,dataUrl:'data:image/png;base64,AQ=='}}]}]).issues.length,1,'same ID cannot substitute incorrect image bytes');
-const withCommentary=bindSourceArtifacts(p,{id:'object0',nodes:[],sourceRefs:items[0].source_ref},[{sourceUnitId:items[0].id}],0,[items[0].type==='TableBlock'?items[0].rows.map(row=>row.join(' | ')).join('\n'):items[0].text]);
+const withCommentary=bindSourceArtifacts(p,{id:'object0',nodes:[],sourceRefs:items[0].source_ref},[{sourceUnitId:items[0].id}],1,[items[0].type==='TableBlock'?items[0].rows.map(row=>row.join(' | ')).join('\n'):items[0].text]);
 assert.equal(withCommentary.nodes.length,1,'do not repeat full table in visible commentary');
 const {normalizeModelReview}=await import('./lib/ppt-quality.mjs');
 assert.throws(()=>normalizeModelReview({missing:[{slideId:'a',reason:'Missing relation'}],repeated:[],conflicts:[],unsupported:[]},['a']),/valid slideIds/,'malformed findings must not become a false empty review');
@@ -83,7 +83,7 @@ for(const [kind,text] of [
 ]){
  const input=normalizePaste(text),required=input.semantic.inventory.items.filter(i=>i.must_preserve_structure||i.type==='SummaryBlock');
  const deckProject={...p,source:input,planning:{slidePlan:required.map((item,index)=>({slideId:`${kind}${index}`,sourceArtifacts:[{sourceUnitId:item.id}]}))}};
- const rendered=required.map((item,index)=>bindSourceArtifacts(deckProject,{id:`${kind}${index}`,nodes:[]},[{sourceUnitId:item.id}],index));
+ const rendered=required.map((item,index)=>bindSourceArtifacts(deckProject,{id:`${kind}${index}`,nodes:[]},[{sourceUnitId:item.id}],index+1));
  assert.equal(inspectObjectIntegrity(deckProject,rendered).ledger.fulfilledCount,required.length);
  assert.ok(required.some(i=>i.type==='SummaryBlock'),`${kind}: final summary is a mandatory object`);
  if(kind==='research')assert.ok(inspectObjectIntegrity(deckProject,[...rendered,{...structuredClone(rendered[0]),id:'duplicate-primary'}]).issues.some(i=>i.code==='required_source_object_duplicate'));
@@ -93,3 +93,10 @@ const unresolved=normalizePaste('# Architecture\n\n![System diagram](relative-di
 assert.equal(unresolved.mediaWarnings[0].required,true);
 assert.ok(inspectObjectIntegrity({source:unresolved},[]).issues.some(i=>i.code==='required_source_media_decode'));
 assert.ok(!unresolved.text.includes('relative-diagram.svg'),'asset references must not become body prose');
+const reorderedMathSource=normalizePaste('# Equations\n\n$$\\tfrac{1}{3}x$$');
+const reorderedMathItem=reorderedMathSource.semantic.inventory.items.find(i=>i.type==='EquationBlock');
+const reorderedMathExpected=equationContent(reorderedMathItem.text);
+const reorderedMathNode={id:'formula',type:'text',sourceArtifact:{sourceUnitId:reorderedMathItem.id},content:{...reorderedMathExpected,mathMl:reorderedMathExpected.mathMl.replace(/displaystyle="false" scriptlevel="0"/gu,'scriptlevel="0" displaystyle="false"')}};
+assert.equal(inspectObjectIntegrity({source:reorderedMathSource},[{id:'s',nodes:[reorderedMathNode]}]).ledger.fulfilledCount,1,'equivalent XML attribute order must preserve formula identity');
+const changedMath=structuredClone(reorderedMathNode);changedMath.content.mathMl=changedMath.content.mathMl.replace('<mn>3</mn>','<mn>4</mn>');
+assert.ok(inspectObjectIntegrity({source:reorderedMathSource},[{id:'s',nodes:[changedMath]}]).issues.some(i=>i.code==='required_source_object_missing'),'changed denominator must still fail');

@@ -6,17 +6,34 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { Readable } from 'node:stream';
 import { _internals as importer, projectFromImportedManifest } from './lib/ppt/import-pptx.mjs';
-import { _internals as fidelityInternals, fidelityFromImported, rescheduleTemplateFidelity, bindTemplateFidelity, inspectTemplateFidelity, inspectTemplateSlotDraft, templateOutlinePrompt, templateSlotPrompt } from './lib/ppt-template-fidelity.mjs';
+import { _internals as fidelityInternals, fidelityFromImported, rescheduleTemplateFidelity, bindTemplateFidelity, fitNativeTitleFrames, inspectTemplateFidelity, inspectTemplateSlotDraft, templateOutlinePrompt, templateSlotPrompt } from './lib/ppt-template-fidelity.mjs';
 import { buildRenderTree } from './lib/ppt/render-tree.mjs';
 import { slideSvg } from './lib/ppt/exporters/preview.mjs';
 import { _internals as pdf } from './lib/ppt-pdf.mjs';
 import { deckReviewPrompt } from './lib/ppt-quality.mjs';
+import { ensureDeckV3, stableId } from './lib/ppt/ir.mjs';
+import { exportManifest } from './lib/ppt-export-integrity.mjs';
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ppt-template-fidelity-'));
 process.env.COWORK_STATE_DIR = root;
 const python = process.env.PPT_TEST_PYTHON || '/Users/dongli/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3';
 const fixture = path.join(root, 'template.pptx');
 const output = path.join(root, 'generated.pptx');
+{
+  const node = { id: 'native-title', type: 'text', semanticRole: 'template-title', nativeRef: { shapeId: '1' }, content: { text: '中文标题' }, geometry: { x: 52*12700, y: 77*12700, width: 855*12700, height: 44.65*12700 }, style: { fontSizePt: 37, fontFamily: 'Original Font' } };
+  const before = structuredClone(node), slide = { nodes: [node, { id: 'equation', geometry: { x: 52*12700, y: 129*12700, width: 180*12700, height: 22*12700 } }] };
+  fitNativeTitleFrames({ templateFidelity: { height: 540*12700 } }, slide);
+  assert.equal(node.geometry.height, Math.ceil(37*1.35*12700));
+  assert.deepEqual({ ...node.geometry, height: before.geometry.height }, before.geometry);
+  assert.deepEqual(node.style, before.style);assert.deepEqual(node.content, before.content);
+  assert.ok(node.geometry.y + node.geometry.height < slide.nodes[1].geometry.y);
+  const once = structuredClone(node);fitNativeTitleFrames({ templateFidelity: { height: 540*12700 } }, slide);assert.deepEqual(node, once, 'frame adaptation is idempotent');
+  const twoLines = { nodes: [{ ...structuredClone(before), content: { text: 'CAPM 起点：定价方程与证券市场线' }, style: { fontSizePt: 34.5 }, nativeTextFrame: { margins: [0,0,0,0] }, geometry: { x: 52*12700, y: 74*12700, width: 495*12700, height: 83.5*12700 } }] };
+  fitNativeTitleFrames({ templateFidelity: { height: 540*12700 } }, twoLines);assert.equal(twoLines.nodes[0].geometry.height, Math.ceil(34.5*(1.35+1.25)*12700), 'wrapped CJK title reserves both native lines');assert.equal(twoLines.nodes[0].nativeTextFrame.margins[2], Math.ceil(34.5*.08*12700));
+  const blocked = { nodes: [structuredClone(before), { id: 'protected', geometry: { x: before.geometry.x, y: before.geometry.y+before.geometry.height, width: before.geometry.width, height: 20*12700 } }] };
+  fitNativeTitleFrames({ templateFidelity: { height: 540*12700 } }, blocked);assert.equal(blocked.nodes[0].templateTitleFrameAdaptation.status, 'blocked');assert.deepEqual(blocked.nodes[0].geometry, before.geometry);
+  for (const variant of [{ locked: true }]) { const candidate = { nodes: [{ ...structuredClone(before), ...variant }] };fitNativeTitleFrames({ templateFidelity: { height: 540*12700 } }, candidate);assert.deepEqual(candidate.nodes[0].geometry, before.geometry); }
+}
 const run = (script, input, extraEnv = {}) => {
   const result = spawnSync(python, ['-c', script], { input, env: { ...process.env, ...extraEnv }, maxBuffer: 30_000_000 });
   assert.equal(result.status, 0, result.stderr.toString());
@@ -100,6 +117,29 @@ delete semanticSlide.copy;
 assert.match(deckReviewPrompt({ ...semanticProject, prompt: '版本管理' }), /保存每次修改记录/);
 assert.match(deckReviewPrompt({ ...semanticProject, prompt: '版本管理' }), /groupId/);
 
+
+// Compound metadata, continuation groups and bound bilingual lists use actual
+// visible evidence; a standalone equation still needs the exact expression.
+{
+  const check=fidelityInternals.contentCoverageIssues;
+  const text=(id,value)=>({id,title:'Topic',sourceArtifactNodes:[{}],nodes:[{id:id+'-text',type:'text',semanticRole:'source-explanation',content:{text:value}}]});
+  const a=text('a','Risk story Value Momentum Quality Investment Liquidity Size Conditions Markets'),b=text('b','Mispricing');
+  const p={outline:[{id:'a',title:'Topic',groupId:'g'},{id:'b',title:'Topic（续 2）',groupId:'g'}],deck:{slides:[a,b]},planning:{slidePlan:[{slideId:'b',requiredDetails:['Value Momentum Quality Investment Liquidity Size Conditions Markets Risk story Mispricing']}]} };
+  assert.equal(check(p,b,[],1).length,0);
+  p.outline[0].groupId='unrelated';assert.ok(check(p,b,[],1).some(issue=>issue.code==='template_required_detail_missing'));
+  const equation=text('eq','x=1');p.deck.slides=[equation];p.outline=[];p.planning.slidePlan=[{slideId:'eq',requiredDetails:['x=2']}];
+  assert.ok(check(p,equation,[],0).some(issue=>issue.code==='template_required_detail_missing'));
+  p.planning.slidePlan[0].requiredDetails=['模型方程 x=1；变量定义与风险条件'];equation.nodes[0].content.text='模型方程 x=1，变量定义明确，风险条件保留';assert.equal(check(p,equation,[],0).length,0);
+  const bilingual=text('list','');bilingual.nodes=[{id:'en',type:'list',sourceArtifact:{sourceUnitId:'en-source'},content:{items:[{text:'Robust across markets'},{text:'Economic mechanism'}]}},{id:'zh',type:'list',sourceArtifact:{sourceUnitId:'zh-source'},content:{items:[{text:'跨市场稳健'},{text:'经济机制'}]}}];
+  p.source={semantic:{inventory:{items:[{id:'en-source',items:[{},{}]},{id:'zh-source',items:[{},{}]}]}}};p.planning.slidePlan=[{slideId:'list',requiredDetails:['2条清单完整呈现，保留中英双语']}];
+  assert.equal(check(p,bilingual,[],0).length,0);bilingual.nodes.pop();assert.ok(check(p,bilingual,[],0).length);
+  const nativeImage={id:'unknown',type:'image',nativeRef:{shapeId:99},geometry:{x:4e6,y:2e6,width:3e6,height:2e6},content:{dataUrl:'original-native-image'}};
+  const retained=structuredClone(semanticProject);retained.templateFidelity.width=12192000;retained.templateFidelity.height=6858000;retained.templateFidelity.slides[0].nodes.push(nativeImage);retained.templateFidelity.slides[0].shapeCount++;retained.templateFidelity.slides[0].imageCount++;
+  retained.deck.slides=[{...structuredClone(semanticSlide),templateOmissions:[{shapeId:99,reason:'The model requests deletion of an unknown image'}]}];bindTemplateFidelity(retained);
+  assert.ok(retained.deck.slides[0].nodes.some(node=>node.id==='unknown'&&node.content.dataUrl==='original-native-image'));
+  assert.equal(retained.deck.slides[0].templateOmissions.length,0);assert.equal(retained.deck.slides[0].templateRejectedOmissions.length,1);
+}
+
 try {
   run(`from pptx import Presentation
 from pptx.util import Inches, Pt
@@ -125,7 +165,7 @@ p.save(os.environ['PPT_OUTPUT'])`, '', { PPT_OUTPUT: fixture });
   assert.equal(reduced.slideMap[0], 0);
   assert.equal(reduced.slideMap.at(-1), 2);
   assert.equal(reduced.sourceCatalog.length, 3);
-  assert.ok(reduced.sourceCatalog[0].nodes.some(node => node.type === 'image' && !node.content.dataUrl), 'mapped source images are deduplicated in the catalog');
+  assert.ok(reduced.sourceCatalog[0].nodes.some(node => node.type === 'image' && node.content.dataUrl), 'catalog retains immutable image bytes for remapping');
   assert.ok(reduced.sourceCatalog[1].nodes.some(node => node.type === 'image' && node.content.dataUrl), 'omitted source images remain available for remapping');
   const rescheduledReduced = { pages: 2, outline: [], templateFidelity: reduced };
   rescheduledReduced.pages = 3;
@@ -148,6 +188,21 @@ p.save(os.environ['PPT_OUTPUT'])`, '', { PPT_OUTPUT: fixture });
   assert.equal(inspectTemplateSlotDraft(project, 0, project.deck.slides[0]).length, 0);
   assert.ok(inspectTemplateSlotDraft(project, 0, { ...project.deck.slides[0], templateSlotTexts: {} }).some(issue => issue.code === 'template_slot_unfilled'));
   bindTemplateFidelity(project);
+  const nativeTitle = project.deck.slides[0].nodes.find(node => node.semanticRole === 'template-title');
+  const alias = { id: stableId('node', project.deck.slides[0].id, 'title'), type: 'text', semanticRole: 'title', content: { text: nativeTitle.content.text } };
+  project.deck.slides[0].nodes.unshift(alias);
+  bindTemplateFidelity(project);
+  project.deck = ensureDeckV3(ensureDeckV3(project.deck));
+  assert.ok(!project.deck.slides[0].nodes.some(node => node.id === alias.id), 'exact migration alias is removed and not recreated');
+  assert.deepEqual(project.deck.slides[0].nodes.find(node => node.id === nativeTitle.id), nativeTitle, 'native title geometry and styling are unchanged');
+  exportManifest(project);
+  for (const mutation of [{ locked: true }, { content: { text: 'Different real title' } }, { id: 'user_title' }]) {
+    const candidate = structuredClone(project);
+    candidate.deck.slides[0].nodes.unshift({ ...alias, ...mutation });
+    candidate.deck = ensureDeckV3(candidate.deck);
+    assert.ok(candidate.deck.slides[0].nodes.some(node => node.id === (mutation.id || alias.id)), 'real or locked title must remain');
+    assert.throws(() => exportManifest(candidate), /no exported render mapping/, 'unmapped real content still blocks export');
+  }
   assert.equal(inspectTemplateFidelity(project).length, 0);
   assert.equal(project.deck.slides[0].nodes.filter(node => node.nativeRef).length, 4);
   const tree = buildRenderTree(project);
@@ -202,11 +257,22 @@ assert len(PdfReader(os.environ['PPT_INPUT']).pages)==3`, '', { PPT_INPUT: pdfFi
     payload: { slideId: project.deck.slides[0].id, nodeId: title.id, content: { text: '编辑后标题' } } });
   assert.equal(changed.project.deck.slides[0].title, '编辑后标题');
   assert.equal(changed.project.deck.slides[0].nodes.find(node => node.id === title.id).content.text, '编辑后标题');
-  await assert.rejects(() => applyCommand(project.uid, project.id, { type: 'node.delete', baseRevision: changed.project.revision,
-    payload: { slideId: project.deck.slides[0].id, nodeId: title.id } }), error => error.statusCode === 409);
-  const picture = changed.project.deck.slides[0].nodes.find(node => node.type === 'image');
-  await assert.rejects(() => applyCommand(project.uid, project.id, { type: 'node.setLocked', baseRevision: changed.project.revision,
-    payload: { slideId: project.deck.slides[0].id, nodeId: picture.id, locked: false } }), error => error.statusCode === 409);
+  const service=await import('./lib/ppt/command-service.mjs');
+  const removed=await applyCommand(project.uid,project.id,{type:'node.delete',baseRevision:changed.project.revision,payload:{slideId:project.deck.slides[0].id,nodeId:title.id}});
+  assert.ok(removed.project.deck.slides[0].templateOmissions.some(item=>item.shapeId===title.nativeRef.shapeId&&item.approvalBasis==='user_editor_delete'));
+  const restored=await service.undo(project.uid,project.id);
+  assert.deepEqual(restored.project.deck.slides[0].nodes.find(node=>node.id===title.id).nativeRef,JSON.parse(JSON.stringify(title.nativeRef)));
+  assert.deepEqual(restored.project.deck.slides[0].nodes.find(node=>node.id===title.id).nativeTextFrame,JSON.parse(JSON.stringify(title.nativeTextFrame)));
+  const copied=await applyCommand(project.uid,project.id,{type:'node.duplicate',baseRevision:restored.project.revision,payload:{slideId:project.deck.slides[0].id,nodeId:title.id}});
+  const clone=copied.project.deck.slides[0].nodes.find(node=>node.nativeRef?.cloneFromShapeId===title.nativeRef.shapeId);
+  assert.ok(clone);assert.notEqual(clone.nativeRef.shapeId,title.nativeRef.shapeId);assert.equal(clone.templateComponentBinding.origin,'user');
+  const uncopy=await service.undo(project.uid,project.id);assert.ok(!uncopy.project.deck.slides[0].nodes.some(node=>node.id===clone.id));
+  const redoCopy=await service.redo(project.uid,project.id);assert.ok(redoCopy.project.deck.slides[0].nodes.some(node=>node.nativeRef?.cloneFromShapeId===title.nativeRef.shapeId));
+  const back=await service.undo(project.uid,project.id);
+  const picture=back.project.deck.slides[0].nodes.find(node=>node.type==='image');
+  const unlocked=await applyCommand(project.uid,project.id,{type:'node.setLocked',baseRevision:back.project.revision,payload:{slideId:project.deck.slides[0].id,nodeId:picture.id,locked:false}});
+  assert.equal(unlocked.project.deck.slides[0].nodes.find(node=>node.id===picture.id).locked,false);
+  await service.undo(project.uid,project.id);
   const [{ handlePpt }, templateStore] = await Promise.all([import('./lib/ppt-api.mjs'), import('./lib/ppt-store.mjs')]);
   const templateId = 'b'.repeat(32); const templateUid = 'fidelity-api';
   templateStore.writeTemplate(templateUid, templateId, bytes);
@@ -279,14 +345,14 @@ p.save(os.environ['PPT_OUTPUT'])`, '', { PPT_OUTPUT: listFixture });
   bindTemplateFidelity(listProject);
   assert.equal(inspectTemplateFidelity(listProject).length, 0);
   const listElement = buildRenderTree(listProject).slides[0].elements.find(item => item.content?.paragraphs);
-  assert.match(slideSvg(buildRenderTree(listProject).slides[0]), /<strong[^>]*>来源<\/strong>/);
+  assert.match(slideSvg(buildRenderTree(listProject).slides[0]), /<strong[^>]*>(?:<span[^>]*>)?来源(?:<\/span>)?<\/strong>/);
   assert.equal(listElement.nativeTextFrame.paragraphs.length, 2);
   const { _internals: commandInternals } = await import('./lib/ppt/command-service.mjs');
   const listNode = listProject.deck.slides[0].nodes.find(node => node.content?.paragraphs);
   const editedList = commandInternals.applyToDeck(listProject.deck, { type: 'node.setContent',
     payload: { slideId: listProject.deck.slides[0].id, nodeId: listNode.id,
       content: { text: '来源：可查看文档位置\n引用：支持逐页核对' } } }, listProject);
-  assert.deepEqual(editedList.deck.slides[0].nodes.find(node => node.id === listNode.id).content.paragraphs,
+  assert.deepEqual(editedList.deck.slides[0].nodes.find(node => node.id === listNode.id).content.paragraphs.map(({label,body})=>({label,body})),
     [{ label: '来源', body: '可查看文档位置' }, { label: '引用', body: '支持逐页核对' }]);
   assert.throws(() => commandInternals.applyToDeck(listProject.deck, { type: 'node.setContent',
     payload: { slideId: listProject.deck.slides[0].id, nodeId: listNode.id, content: { text: '仅一条' } } }, listProject),

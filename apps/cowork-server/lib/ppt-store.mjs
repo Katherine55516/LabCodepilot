@@ -79,12 +79,13 @@ function inputFile(uid, id, kind) {
 }
 export function newId() { return crypto.randomBytes(16).toString('hex'); }
 
-export function get(uid, id) {
+export function get(uid, id, {hydrate = true} = {}) {
   const compressed = compressedFile(uid, id);
   const target = fs.existsSync(compressed) ? compressed : file(uid, id);
   try {
     const bytes = fs.readFileSync(target);
     const parsed = JSON.parse(target === compressed ? gunzipSync(bytes).toString('utf8') : bytes.toString('utf8'));
+    if(!hydrate&&[1,2].includes(parsed?.__pptStorageVersion))return parsed.project;
     return parsed?.__pptStorageVersion === 2 ? reviveStoredMedia(parsed.project, null, uid) : parsed?.__pptStorageVersion === 1 ? reviveStoredMedia(parsed.project, parsed.assets || {}, uid) : parsed;
   }
   catch (error) {
@@ -93,7 +94,7 @@ export function get(uid, id) {
   }
 }
 
-export function list(uid) {
+export function list(uid, {hydrate = true} = {}) {
   const dir = path.join(ROOT, owner(uid));
   let names;
   try { names = fs.readdirSync(dir); }
@@ -101,7 +102,7 @@ export function list(uid) {
   return [...new Set(names.flatMap(name => {
     const match = name.match(/^([a-f0-9]{32})\.json(?:\.gz)?$/);
     return match ? [match[1]] : [];
-  }))].map(id => get(uid, id)).filter(Boolean)
+  }))].map(id => get(uid, id, {hydrate})).filter(Boolean)
     .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 
@@ -219,7 +220,7 @@ export function writeTemplateIR(uid, id, ir) {
 export function readTemplateIR(uid, id, hash) {
   try {
     const ir = JSON.parse(fs.readFileSync(templateFile(uid, id) + '.ir.json', 'utf8'));
-    if (ir.schemaVersion !== 1 || ir.parserVersion !== 'pptx-ir-4' || ir.sha256 !== hash) return null;
+    if (ir.schemaVersion !== 1 || ir.parserVersion !== 'pptx-ir-7' || ir.sha256 !== hash) return null;
     return reviveStoredMedia(ir, null, uid);
   } catch (error) { if (error.code === 'ENOENT') return null; throw error; }
 }

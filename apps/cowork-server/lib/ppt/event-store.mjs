@@ -75,8 +75,19 @@ export function subscribe(runId, listener) {
   emitter.on('event', listener);
   return () => {
     emitter.off('event', listener);
-    if (!emitter.listenerCount('event')) buses.delete(runId);
+    if (!emitter.listenerCount('event') && !emitter.listenerCount('transient')) buses.delete(runId);
   };
 }
 
+/** Transient, non-durable notifications (streaming drafts). Not sequenced,
+ * not replayed and never written to the run's event log. */
+export function publishTransient(runId, type, payload = {}) {
+  if (!buses.has(runId)) return;
+  bus(runId).emit('transient', { type, at: new Date().toISOString(), payload });
+}
+export function subscribeTransient(runId, listener) {
+  const emitter = bus(runId);
+  emitter.on('transient', listener);
+  return () => { emitter.off('transient', listener); if (!emitter.listenerCount('event') && !emitter.listenerCount('transient')) buses.delete(runId); };
+}
 export const _internals = { buses, bus };

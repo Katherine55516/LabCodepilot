@@ -1,10 +1,11 @@
+import {fitNativeTextFrames,fitSourceMathFrames} from '../ppt-native-text-fit.mjs';
 import {componentElements} from './component-layout.mjs';
 import { visibleNodes } from '../ppt-visible-content.mjs';
 import crypto from 'node:crypto';
 import { applyRenderContract, RENDER_CONTRACT_VERSION } from './render-contract.mjs';
 import { isSourceOwnedNode } from '../ppt-source-artifacts.mjs';
 import { applyLayoutRegistry, regionsFor, typographyFor } from '../ppt-layout.mjs';
-import { ensureDeckV3, materializeLegacySlide, stableId } from './ir.mjs';
+import { ensureDeckV3, ensureSlideV3, materializeLegacySlide, stableId } from './ir.mjs';
 import { layoutPoints } from './point-layout.mjs';
 
 export const EMU_PER_INCH = 914400;
@@ -62,8 +63,10 @@ function adaptiveList(node, region, slide, project) {
 }
 
 function buildPreservedSlide(project, slide, index) {
+  fitSourceMathFrames(slide,project);
+  fitNativeTextFrames(project,slide);
   const origin=project.templateFidelity || project.externalPptx, originIndex=slide.templateSlideIndex ?? slide.nativeSlideIndex;
-  const source = origin.slides?.[originIndex] || {background:slide.nativeBackground};
+  const source = origin.sourceCatalog?.[originIndex] || origin.slides?.[index] || {background:slide.nativeBackground};
   const elements = visibleNodes(slide).filter(node => node.nativeRef?.slideIndex === originIndex || isSourceOwnedNode(node)).map(node => ({
     id: node.id, nodeId: node.id, kind: node.type === 'foreign' ? 'shape' : node.type,
     bounds: node.geometry, content: node.content || {},
@@ -71,6 +74,7 @@ function buildPreservedSlide(project, slide, index) {
       color: project.templateSpec?.palette?.foreground, ...(node.style || {}) },
     zIndex: Number(node.zIndex || 0), rotation: Number(node.rotation || 0), locked: Boolean(node.locked),
     semanticRole: node.semanticRole, nativeRef: node.nativeRef, nativeTextFrame: node.nativeTextFrame,sourceArtifact:node.sourceArtifact,
+    nativeStyleBaseline: node.nativeStyleBaseline || source.nodes?.find(base=>base.nativeRef?.shapeId===(node.nativeRef?.cloneFromShapeId??node.nativeRef?.shapeId))?.style,
   })).sort((a, b) => a.zIndex - b.zIndex);
   return { id: slide.id, slideId: slide.id, index, layoutId: slide.layoutId,
     size: { width: origin.width || SLIDE_SIZE.width, height: origin.height || SLIDE_SIZE.height },
@@ -159,7 +163,7 @@ function buildSlide(project, input, index, total) {
     content: { shape: 'rect' }, style: { fill: project.templateSpec?.palette?.accent }, zIndex: 0, locked: true,
   });
   if (regions.footer) elements.push({
-    id: stableId('decor', slide.id, 'footer'), nodeId: null, kind: 'text', bounds: bounds(regions.footer),
+    id: stableId('decor', slide.id, 'footer'), nodeId: null, kind: 'text', semanticRole:'page-number', bounds: bounds(regions.footer),
     content: { text: String(index + 1) }, style: { ...style(project, { bodyPt: 11 }, 'body'), fontSizePt: 11, textAlign: 'right' }, zIndex: 100, locked: true,
   });
   elements.sort((a, b) => a.zIndex - b.zIndex);
@@ -188,8 +192,13 @@ export function rebuildRenderTree(project, previous, affectedSlideIds = []) {
 }
 
 export function buildSlideRenderTree(project, slideId) {
-  const tree = buildRenderTree(project);
-  return tree.slides.find(slide => slide.id === slideId) || null;
+  const slides=project.deck?.slides||[],index=slides.findIndex(slide=>slide.id===slideId);
+  if(index<0)return null;
+  // Preserve the actual deck index/template slot/footer and total page count,
+  // but clone and lay out only this page. A per-page preview must not rebuild
+  // every native image and run the whole-deck review for every writer update.
+  const selected=applyLayoutRegistry({slides:slides.map((slide,position)=>position===index?slide:{id:slide.id,layoutId:'summary',nodes:[],bullets:[]})}).slides[index];
+  return buildSlide(project,ensureSlideV3(selected,index),index,slides.length);
 }
 
 export function boundsIntersect(a, b) {

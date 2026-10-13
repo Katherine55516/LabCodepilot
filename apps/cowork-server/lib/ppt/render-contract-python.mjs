@@ -8,11 +8,14 @@ def apply_text_contract(frame, contract):
     margins=contract.get('margins',[3.6,3.6,3.6,3.6])
     frame.margin_left,frame.margin_top,frame.margin_right,frame.margin_bottom=[Pt(float(v)) for v in margins]
     for index,paragraph in enumerate(frame.paragraphs):
+        if contract.get('hangingPunctuation') is False:paragraph._p.get_or_add_pPr().set('hangingPunct','0')
         specs=contract.get('paragraphs') or []
         spec=specs[min(index,len(specs)-1)] if specs else {}
         paragraph.space_before=Pt(0)
         paragraph.line_spacing=float(spec.get('lineHeight',1.18))
         paragraph.space_after=Pt(float(spec.get('spaceAfterPt',0)))
+        if spec.get('marginLeftPt') is not None:
+            pPr=paragraph._p.get_or_add_pPr();pPr.set('marL',str(int(round(float(spec['marginLeftPt'])*12700))));pPr.set('indent',str(int(round(float(spec['indentPt'])*12700))))
 
 def contract_picture(slide, blob, x, y, w, h, contract):
     crop=contract.get('crop',[0,0,0,0]);fit=contract.get('fit','contain')

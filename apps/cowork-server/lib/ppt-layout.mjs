@@ -89,13 +89,13 @@ export function regionsFor(slide) {
   const common = [
     { id: 'eyebrow', x: .86, y: .34, w: 11.55, h: .22 },
     { id: 'title', x: .86, y: .68, w: 11.55, h: 1.16 },
-    { id: 'subtitle', x: .86, y: 1.88, w: 11.55, h: .3 },
+    { id: 'subtitle', x: .86, y: 1.86, w: 11.55, h: .36 },
     { id: 'footer', x: 11.9, y: 7.03, w: .52, h: .28 },
   ];
   if (id === 'cover') return [
     { id: 'eyebrow', x: 1.1, y: 1.86, w: 11.1, h: .22 },
     { id: 'title', x: 1.1, y: 2.22, w: 11.1, h: 1.48 },
-    { id: 'subtitle', x: 1.1, y: 3.78, w: 11.1, h: .34 },
+    { id: 'subtitle', x: 1.1, y: 3.78, w: 11.1, h: .36 },
     { id: 'body', x: 1.35, y: 4.18, w: 10.6, h: .85 },
     common[3],
   ];
@@ -104,11 +104,11 @@ export function regionsFor(slide) {
   ];
   if (id === 'summary' || id === 'conclusion') return [...common, { id: 'body', x: 1.0, y: 2.26, w: 11.25, h: 4.12 }, { id: 'takeaway', x: 1.0, y: 6.45, w: 11.25, h: .25 }];
   if (id === 'editorial') {
-    const bodyY = slide.copy?.subtitle ? 1.88 : 1.78;
+    const bodyY = 1.88;
     return [
-      { id: 'eyebrow', x: .86, y: .28, w: 11.55, h: .19 },
+      { id: 'eyebrow', x: .86, y: .28, w: 11.55, h: .24 },
       { id: 'title', x: .86, y: .58, w: 11.55, h: .86 },
-      { id: 'subtitle', x: .86, y: 1.48, w: 11.55, h: .24 },
+      { id: 'subtitle', x: .86, y: 1.48, w: 11.55, h: .36 },
       { id: 'body', x: .86, y: bodyY, w: 11.55, h: 6.77 - bodyY },
       common[3],
     ];
@@ -127,7 +127,7 @@ export function regionsFor(slide) {
   ];
   if (id === 'timeline') return [...common, { id: 'timeline', x: 1.0, y: 2.36, w: 11.25, h: 4.0 }];
   return [...common,
-    { id: 'visual', x: 1.0, y: 2.18, w: 11.25, h: 3.5 },
+    { id: 'visual', x: 1.0, y: 2.26, w: 11.25, h: 3.42 },
     { id: 'body', x: 1.0, y: 5.88, w: 11.25, h: .82 },
   ];
 }

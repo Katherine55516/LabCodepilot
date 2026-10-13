@@ -14,22 +14,22 @@ const [{ handlePpt }, store, templates, render] = await Promise.all([
 const uid = 'alice';
 let renderCalls = 0;
 const deps = {
-  modelCall: async (project, prompt) => {
+  modelCall: async (project, prompt, _activity, _log, options) => {
     if (prompt.includes('整稿演示文稿内容评审器')) return scopeReview(project);
-    if (prompt.includes('版本更新规划器') && !project.update.baseSnapshot.deck) return { slides: Array.from({ length: project.pages }, (_, i) => ({ title: `Imported ${i + 1}`, focus: 'New facts', change: 'add', refs: ['U1'] })) };
+    if (prompt.includes('版本更新规划器') && !project.update.baseSnapshot.deck) return { slides: Array.from({ length: project.pages }, (_, i) => ({ title: `Imported ${i + 1}`, focus: `Imported progress section ${i+1}`, change: 'add', refs: ['U1'] })) };
     if (prompt.includes('版本更新规划器')) return { slides: [
       { title: 'Base 1', focus: 'Base 1', baseSlideId: project.update.baseSnapshot.deck.slides[0].id, change: 'keep', refs: [] },
-      { title: 'Revised 2', focus: 'New facts', baseSlideId: project.update.baseSnapshot.deck.slides[1].id, change: 'rewrite', refs: ['U1'] },
+      { title: 'Revised page', focus: 'New facts', baseSlideId: project.update.baseSnapshot.deck.slides[1].id, change: 'rewrite', refs: ['U1'] },
       { title: 'Base 3', focus: 'Base 3', baseSlideId: project.update.baseSnapshot.deck.slides[2].id, change: 'keep', refs: [] },
-      ...Array.from({ length: project.pages - 3 }, (_, i) => ({ title: `New ${i + 1}`, focus: 'Latest progress', change: 'add', refs: ['U1'] })),
+      ...Array.from({ length: project.pages - 3 }, (_, i) => ({ title: `New ${String.fromCharCode(65+i)}`, focus: ['Record the latest source fact','Explain the updated reference provenance','Retain the update version relationship'][i]||'Retain the prior context', change: 'add', refs: ['U1'] })),
     ] };
     if (prompt.includes('叙事规划器')) return { slides: Array.from({ length: project.pages }, (_, i) => ({ title: `Base ${i + 1}`, focus: `Base ${i + 1}` })) };
     if (project.update) {
       assert.match(prompt, /<source_packet>/);
-      return { title: 'Generated update', bullets: ['Latest fact'] };
+      return { title: project.confirmedOutline?.titlesFrozen!==false&&project.confirmedOutline ? project.outline.find(slide=>options?.nodeKey?.includes(slide.id))?.title || 'Generated update' : 'Generated update', bullets: ['Latest fact'] };
     }
     if (prompt.includes('当前任务只写第')) return { title: `Base ${prompt.match(/当前任务只写第 (\d+) 页/)?.[1]}`, bullets: ['Original fact'] };
-    return { title: 'Generated update', bullets: ['Latest fact'] };
+    return { title: project.confirmedOutline?.titlesFrozen!==false&&project.confirmedOutline ? project.outline.find(slide=>options?.nodeKey?.includes(slide.id))?.title || 'Generated update' : 'Generated update', bullets: ['Latest fact'] };
   },
   renderPptx: async project => { renderCalls++; return simulatedExport(project,project.deck.slides.length*100); },
   renderPdf: async () => ({ bytes: 100 }),
@@ -54,7 +54,7 @@ async function settled(id, status) {
     if (project?.status === status) return project;
     await new Promise(resolve => setTimeout(resolve, 10));
   }
-  const latest = store.get(uid, id); throw new Error(`${id} did not reach ${status}: ${latest.status} ${latest.error}`);
+  const latest = store.get(uid, id); throw new Error(`${id} did not reach ${status}: ${latest.status} ${latest.error} ${JSON.stringify({issues:latest.candidateOutline?.issues,sourceIds:latest.source?.segments?.map(s=>s.id)})}`);
 }
 try {
   assert.equal((await request('PATCH', '/ppt/templates/violet', { pinned: true })).body.template.pinned, true);
@@ -97,7 +97,7 @@ try {
   assert.equal(next.nodes[next.outline[0].id].attempts, 0);
   assert.equal(next.nodes[next.outline[2].id].attempts, 0);
   assert.equal(next.deck.slides[0].title, oldDeck.slides[0].title);
-  assert.equal(next.deck.slides[1].title, 'Generated update');
+  assert.equal(next.deck.slides[1].title, 'Revised page', 'writer keeps the user-confirmed outline title');
   assert.deepEqual(store.get(uid, baseId).deck, oldDeck);
   assert.equal(next.templateSpec.palette.accent, '#ddaa22');
   assert.equal(renderCalls, 2);

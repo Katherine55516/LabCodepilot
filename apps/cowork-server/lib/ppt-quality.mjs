@@ -1,9 +1,16 @@
+import {claimSemanticsChecklist,claimAuditRegistry,normalizeClaimAudit,claimAuditFailures,inspectCodeClaimScopes} from './ppt-claim-semantics.mjs';
+import {inspectSourceArithmetic} from './ppt-source-arithmetic.mjs';
+import crypto from 'node:crypto';
+import {reviewBatches,composeReviews} from './ppt-review-batches.mjs';
+import { userRequirements } from './ppt-outline-protocol.mjs';
+import { inspectEditorial } from './ppt-editorial-review.mjs';
 import { inspectRelationFidelity } from './ppt-semantic-relations.mjs';
 import { inspectPageContracts } from './ppt-page-contract.mjs';
 import { inspectSourceNumbers } from './ppt-source-numbers.mjs';
+import { inspectDeckCoherence } from './ppt-deck-coherence.mjs';
 import { buildMediaLedger, inspectMediaLedger } from './ppt-media-ledger.mjs';
 import { annotateIssues, routeIssue, themeBound, validateRepairCandidate } from './ppt-repair-routing.mjs';
-import { obligationRegistry, normalizeObligationAudit, obligationFailures } from './ppt-obligations.mjs';
+import { obligationRegistry, normalizeObligationAudit, obligationFailures, obligationEvidenceDiagnostics, visibleEvidenceQuoteId, resolveObligationQuoteReferences } from './ppt-obligations.mjs';
 import { inputFramework, normalizeScopeAudit } from './ppt-input-scope.mjs';
 import { buildRenderTree } from './ppt/render-tree.mjs';
 import { renderIssues } from './ppt/render-audit.mjs';
@@ -111,15 +118,18 @@ export function inspectSourceForSlide(project, outlineSlide) {
 export function deterministicReview(project, deckInput = project.deck) {
   const deck = applyLayoutRegistry(deckInput);
   const issues = [];
-  issues.push(...inspectVisibleCopy(deck.slides));
+  issues.push(...(project.notesDisclosureIssues||[]));
+  if(project.generationPolicy?.details==='notes'&&!project.contentSelection&&project.source?.semantic?.inventory?.items?.some(i=>i.presentation==='omitted_by_policy'))issues.push({code:'notes_disposition_ledger_missing',severity:'error',message:'Omitted source details require a complete explicit notes/summary disposition ledger before publication; replan with the current content contract.'});
+  issues.push(...inspectVisibleCopy(deck.slides),...inspectEditorial(project,deck.slides));
   const integrity=inspectObjectIntegrity(project,deck.slides);
-  issues.push(...integrity.issues);
+  issues.push(...integrity.issues,...inspectCodeClaimScopes({...project,deck}));
   const mediaLedger=buildMediaLedger(project,deck.slides,integrity.ledger);
   issues.push(...inspectMediaLedger(mediaLedger));
   for(const slide of deck.slides)for(const node of visibleNodes(slide))if(node.content?.mathStatus==='source_text_fallback')
     issues.push(issue('math_source_text_fallback','warning','公式暂用完整来源文本显示，数学排版需检查：'+(node.content.mathWarning||''),slide.id));
   issues.push(...inspectTemplateFidelity({ ...project, deck }));
-  issues.push(...inspectRelationFidelity(project, deck.slides), ...inspectPageContracts(project, deck.slides), ...inspectSourceNumbers(project, deck.slides));
+  issues.push(...inspectSourceArithmetic(project));
+  issues.push(...inspectRelationFidelity(project, deck.slides), ...inspectPageContracts(project, deck.slides), ...inspectSourceNumbers(project, deck.slides), ...inspectDeckCoherence(project, deck.slides));
   for (const outlineSlide of project.outline || []) issues.push(...inspectSourceForSlide(project, outlineSlide));
   const fonts = project.templateSpec?.fonts;
   // Inspect the full object-level IR. Imported PPTX text lives in native nodes
@@ -312,9 +322,17 @@ export function repairProject(project, initialReview) {
   return { project: updated, repairs: routedRepairs, review };
 }
 
+/** Preserve math structure alongside exact visible quote text. Flattened 10⁶
+ * can read as 106 without its superscript; the quote protocol stays unchanged. */
+export function reviewMathFormatting(content={}) {
+  const fields=[['text',content.richText],...(content.items||[]).map((item,i)=>['item:'+i,item.richText]),...(content.cellRich||[]).flatMap((row,r)=>row.map((cell,c)=>['cell:'+r+':'+c,cell]))];
+  return fields.flatMap(([field,rich])=>(rich?.runs||[]).filter(run=>run.kind==='math').map(run=>({field,tex:run.tex,status:run.status,mathMl:run.mathMl,fallbackRuns:run.fallbackRuns})));
+}
+
 export function deckReviewPrompt(project) {
   const pageCount = project.deck.slides.length;
   const longDeck = pageCount >= 25;
+  const compactReview=Boolean(project.reviewScope)||longDeck&&project.outline?.some(slide=>slide.planningProtocolVersion===2);
   const slides = project.deck.slides.map((slide, index) => {
     const native = visibleNodes(slide).filter(node => node.nativeRef);
     const byShape = new Map(native.map(node => [node.nativeRef.shapeId, node]));
@@ -323,7 +341,7 @@ export function deckReviewPrompt(project) {
     const visibleSlots = native.filter(node => nodeContentText(node))
       .map(node => ({ purpose: node.templateSlot?.purpose || node.templateSlot?.role || node.semanticRole,
         groupId: node.templateSlot?.groupId,
-        nodeId: node.id, text: nodeContentText(node) }));
+        nodeId: node.id, quoteId:visibleEvidenceQuoteId(slide.id,node), text: nodeContentText(node) }));
     const contract = project.planning?.slidePlan?.find(item => item.slideId === slide.id);
     const evidenceById = new Map((project.source?.semantic?.evidenceAtoms || []).map(atom => [atom.id, atom]));
     const evidence = (contract?.requiredEvidenceIds || []).map(id => evidenceById.get(id)).filter(Boolean)
@@ -331,21 +349,32 @@ export function deckReviewPrompt(project) {
         excerpt: atom.exactText }));
     // Canonical components can carry facts absent from legacy bullets. Never send
     // image base64 or geometry to the text critic; retain chart values and units.
-    const semanticComponents = visibleNodes(slide).filter(node => !node.nativeRef || ['table', 'chart', 'image'].includes(node.type)).map(node => {
+    const semanticComponents = visibleNodes(slide).filter(node => !(compactReview && !project.importedInputScope && project.templateFidelity?.mode==='preserve' && node.nativeRef && node.type==='image' && !node.sourceArtifact && !nodeContentText(node) && !node.content?.caption && !node.content?.alt)).filter(node => compactReview || !node.nativeRef || ['table', 'chart', 'image'].includes(node.type)).map(node => {
       const content = node.content || {};
-      if (node.type === 'chart') return { nodeId: node.id, type: node.type, content, sourceRefs: node.sourceRefs || slide.sourceRefs || [] };
-      if (node.type === 'table') return { nodeId: node.id, type: node.type, content, sourceRefs: node.sourceRefs || slide.sourceRefs || [] };
-      return { nodeId: node.id, type: node.type, semanticRole: node.semanticRole,
+      const formatting=reviewMathFormatting(content);
+      const mathFormatting=formatting.length?{mathFormatting:formatting}:{};
+      if(compactReview){
+        // Each visible node appears once, with unchanged quote identity.
+        // Raw source stays in the immutable framework; geometry has its own gate.
+        const identity={...mathFormatting,nodeId:node.id,quoteId:visibleEvidenceQuoteId(slide.id,node),type:node.type,semanticRole:node.semanticRole,sourceArtifact:node.sourceArtifact,sourceRefs:node.sourceRefs||slide.sourceRefs||[]};
+        if(node.type==='table'){const {rawRows,cellRich,rawText,richText,nativeMathStructures,...displayContent}=content;return {...identity,content:displayContent,textEncoding:'quoteId resolves to the complete current visible rows; no cells omitted'};}
+        if(node.type==='chart')return {...identity,content,text:nodeContentText(node)};
+        return {...identity,text:nodeContentText(node),...(node.type==='image'?{caption:content.caption||content.alt||''}:{})};
+      }
+      if (node.type === 'chart') return { ...mathFormatting,nodeId: node.id, quoteId:visibleEvidenceQuoteId(slide.id,node), type: node.type, sourceArtifact:node.sourceArtifact, text: nodeContentText(node), content, sourceRefs: node.sourceRefs || slide.sourceRefs || [] };
+      if (node.type === 'table') return { ...mathFormatting,nodeId: node.id, quoteId:visibleEvidenceQuoteId(slide.id,node), type: node.type, sourceArtifact:node.sourceArtifact, text: nodeContentText(node), content:{rows:content.rows,columnWeights:content.columnWeights}, sourceRefs: node.sourceRefs || slide.sourceRefs || [] };
+      return { ...mathFormatting,nodeId: node.id, quoteId:visibleEvidenceQuoteId(slide.id,node), type: node.type, semanticRole: node.semanticRole, sourceArtifact:node.sourceArtifact,
         text: nodeContentText(node),
         ...(node.type === 'image' ? { caption: content.caption || content.alt || '' } : {}),
         ...(content.items ? { points: content.items.map(item => ({ label: item.label, text: String(item.text || item.body || '') })) } : {}) };
     });
-    return { slideId: slide.id, page: index + 1, title: visibleNodes(slide).find(node => ['title', 'template-title'].includes(node.semanticRole))?.content?.text || ((slide.nodes || []).some(node => ['title', 'template-title'].includes(node.semanticRole)) ? '' : slide.title),
+    if(project.reviewScope?.mode==='global')return {slideId:slide.id,page:index+1,title:slide.title,semanticComponents:semanticComponents.map(n=>({nodeId:n.nodeId,quoteId:n.quoteId,type:n.type,mathFormatting:n.mathFormatting,sourceArtifact:n.sourceArtifact,...(n.content?.rows?{text:n.text,rows:n.content.rows}:{text:n.text})}))};
+    return { slideId: slide.id, page: Math.max(0,(project.outline||[]).findIndex(item=>item.id===slide.id)) + 1, title: visibleNodes(slide).find(node => ['title', 'template-title'].includes(node.semanticRole))?.content?.text || ((slide.nodes || []).some(node => ['title', 'template-title'].includes(node.semanticRole)) ? '' : slide.title),
       ...(!slide.nodes?.length ? { bullets: slide.bullets } : {}),
       ...(semanticComponents.length ? { semanticComponents } : {}),
-      ...(visiblePoints.length ? { visiblePoints } : {}), ...(visibleSlots.length ? { visibleSlots } : {}),
+      ...(visiblePoints.length ? { visiblePoints } : {}), ...(!compactReview&&visibleSlots.length ? { visibleSlots } : {}),
       ...(evidence.length ? { requiredEvidence: evidence } : {}),
-      densityFit: contract?.densityFit, densityMeasurement: project.quality?.deterministic?.contentMetrics?.visibleDensityPerSlide?.find(m => m.slideId === slide.id),
+      ...(!compactReview?{densityFit:contract?.densityFit}:{}), densityMeasurement: project.quality?.deterministic?.contentMetrics?.visibleDensityPerSlide?.find(m => m.slideId === slide.id),
       requiredDetails: contract?.requiredDetails || [],
       ownedPoints: contract?.keyPoints || [], depth: contract?.depth, role: contract?.role,
       sourceKinds: (slide.sourceChunks || []).map(id => project.source?.semantic?.chunks?.find(chunk => chunk.id === id)?.contentKind).filter(Boolean),
@@ -354,18 +383,39 @@ export function deckReviewPrompt(project) {
   const cited = new Set(slides.flatMap(slide => [...(slide.requiredEvidence || []).flatMap(atom => [atom.sourceRef, ...(atom.sourceRefs || [])].filter(Boolean)),
     ...(slide.sourceRefs || []).slice(0, longDeck ? 4 : 12)]));
   const requiredIds = [...new Set((project.planning?.slidePlan || []).flatMap(item => item.requiredEvidenceIds || []))];
-  const sources = sourcePacket({ segments: (project.source?.segments || []).filter(segment => cited.has(segment.id)),
+  const sources = compactReview?{contextScope:'reference view only; complete source remains in INPUT_FRAMEWORK, not replaced or truncated',segmentRefs:[...cited],requiredEvidenceIds:requiredIds}:sourcePacket({ segments: (project.source?.segments || []).filter(segment => cited.has(segment.id)),
     chunks: (project.source?.semantic?.chunks || []).filter(chunk => chunk.sourceRefs?.some(ref => cited.has(ref))),
     evidenceAtoms: (project.source?.semantic?.evidenceAtoms || []).filter(atom => requiredIds.includes(atom.id)), requiredEvidenceIds: requiredIds }, 45000);
   const brief = project.planning?.brief;
+  const reviewTopic=compactReview?(userRequirements(project)||project.deckTitle?.text||brief?.goal||project.source?.name||''):project.prompt;
   const coverage = (project.planning?.coverage || []).filter(item => item.priority === 'high').slice(0, 60)
     .map(item => ({ topic: item.topic, action: item.action, slideIds: item.slideIds }));
   const prompt = `${densityPrompt(project)}
-你是整稿演示文稿内容评审器。${promptPolicy(project)}<rubric>先独立对照 INPUT_FRAMEWORK 检查每页标题、正文、表/图/代码/流程与媒体说明的主题和事实边界；模型 brief/sourceScope/ownedPoints/引用 ID 不能证明支撑。无数字的越界话题、额外议程、无依据建议及未经标注的假设同样记入 unsupported，reason="out_of_scope" 或 "unsupported_fact"。框架内必要解释不因没有逐字来源而误判；但新增事实前提必须有输入依据。然后逐项检查 ownedPoints、requiredDetails、表格类别及关系是否在可见文案展开。missing 包括必要解释缺失或浅薄：标签代替解释、未讲机制/条件、通用口号、断句；浅薄项加 reason="shallow"。短图示 label、封面或过渡不因字少被判浅薄；具体信息与关系比字数重要。每项给 suggestedFix，指出哪一项来源关系/条件需补入哪个点；不能给未核实数字。必要的回顾或简短引用不判重复；同页名词标签与其解释相配不判重复。来源内部冲突要报告 conflicts，不能自行发明校正值。上下文预算漏掉的来源不能据此判 unsupported；只报告可核对的事实。纯 prompt 仅允许其主题内必要的通用解释，不能扩出新主题。完整可见文本和原始输入必须全部审查；如未能完成，scopeAudit.status="not_evaluated"，不能返回一个暗示通过的空报告。</rubric>只评审内容，不调用工具，不搜索，不改写页面，不提供字体、坐标、布局或 PPTX 代码。visibleSlots 和 visiblePoints 是观众实际看到的模板文字。逐页核对标题、子标题、卡片及图解标签是否属于同一来源事实，说明是否完整，概念是否与样例混淆；把错配或自相矛盾记入 conflicts，把截断、空泛或缺失记入 missing，把无来源支撑的描述记入 unsupported。若是职场汇报，还要在同样四类中检查决策问题、前置摘要、主文信息分布和来源支撑，不增加输出类别。\n主题：${project.prompt}\n当前语义修改约束：${JSON.stringify(project.constraints?.entries?.filter(entry => entry.active && ['content','title','data','structure'].includes(entry.type)) || [])}\n演示目标与必讲内容：${JSON.stringify(brief ? { objective: brief.objective, thesis: brief.thesis, mustInclude: brief.mustInclude, reportMode: brief.reportMode, decisionQuestion: brief.decisionQuestion, sourceScope: brief.sourceScope } : {})}\n高优先级主题映射：${JSON.stringify(coverage)}\n页面：${JSON.stringify(slides)}\n来源：${JSON.stringify(sources)}\n仅输出一个 JSON 对象：{"missing":[{"slideIds":["1"],"detail":"缺少的必要内容"}],"repeated":[{"slideIds":["2","4"],"detail":"重复点"}],"conflicts":[{"slideIds":["3","5"],"detail":"冲突事实"}],"unsupported":[{"slideIds":["6"],"bulletIndexes":[0],"detail":"证据不足"}]}。四个数组都必须存在；没有发现时返回空数组。必须逐项返回 obligationAudit={registryHash:MANDATORY_OBLIGATIONS.registryHash,status:"complete|not_evaluated",checks:[{obligationId:"真实义务ID",status:"satisfied|missing|altered|not_evaluated",evidence:[{slideId:"当前页ID",nodeId:"当前可见实例ID",excerpt:"承载完整关系的逐字可见原文"}]}]}。每个义务恰好一次；satisfied须绑定实际承载完整内容的实例，包括父条件、否定、例外及单位，每个证据 excerpt 必须逐字来自该实例，不能用关键词覆盖率或引用ID代替判断。允许正确同义表达；可选浅薄仍在missing。未查完须not_evaluated。必须另返回 scopeAudit=${JSON.stringify({frameworkHash:inputFramework(project).frameworkHash,checkedSlideIds:slides.map(slide=>slide.slideId),status:"complete"})}；仅实际完成全部页面的输入框架与事实审查时使用 complete，否则 not_evaluated。slideIds 只能使用给定页面 ID，bulletIndexes 仅在报告 bullets 时填写，从 0 开始。每项可增加 reason="shallow" 和 suggestedFix；不要输出整页修订文本或坐标。`;
+你是整稿演示文稿内容评审器。${promptPolicy(project,{includeObligations:!compactReview})}<rubric>先独立对照 INPUT_FRAMEWORK 检查每页标题、正文、表/图/代码/流程与媒体说明的主题和事实边界；模型 brief/sourceScope/ownedPoints/引用 ID 不能证明支撑。无数字的越界话题、额外议程、无依据建议及未经标注的假设同样记入 unsupported，reason="out_of_scope" 或 "unsupported_fact"。框架内必要解释不因没有逐字来源而误判；但新增事实前提必须有输入依据。然后逐项检查 ownedPoints、requiredDetails、表格类别及关系是否在可见文案展开。规划中的完整表格/全部行保留要求，默认指整稿中同一 sourceUnitId 所有可见分片的行列总和，不是每页或某个单页都要复制整张表。除非 INPUT_FRAMEWORK 明确要求该表不得跨页，否则不得仅因完整表分散在多页而报 missing/altered。先按 source_object_coverage 核对所有分片的真实单元格，再独立核对关系与解释。重复表头和一致的续页结构用于阅读，不是内容重复；只有相同的事实或说明被无必要地主讲多次才报 repeated。分片上实际缺行/改列/改值仍须报错。计划摘要是意图，封面不承载摘要正文不等于整稿缺失；正文的具体引导内容仍须在整稿真实可见节点核对。missing 包括必要解释缺失或浅薄：标签代替解释、未讲机制/条件、通用口号、断句；浅薄项加 reason="shallow"。短图示 label、封面或过渡不因字少被判浅薄；具体信息与关系比字数重要。每项给 suggestedFix，指出哪一项来源关系/条件需补入哪个点；不能给未核实数字。必要的回顾或简短引用不判重复；同页名词标签与其解释相配不判重复。仅 language.mode=source 时，原文与翻译语言对按双语保留，不因对应含义相同而判重复。language.mode=output 时只需目标语言忠实表达，不要求另一语言或逐字原句；同一事实翻译成目标语言后重复出现仍应报 repeated。来源内部冲突要报告 conflicts，不能自行发明校正值。上下文预算漏掉的来源不能据此判 unsupported；只报告可核对的事实。纯 prompt 仅允许其主题内必要的通用解释，不能扩出新主题。完整可见文本和原始输入必须全部审查；如未能完成，scopeAudit.status="not_evaluated"，不能返回一个暗示通过的空报告。</rubric>四类问题数组只能放真正未解决的问题；“不构成缺失/问题”“已包含，不再报”“属满足，此处无需报”等正面结论不要放入问题数组。只评审内容，不调用工具，不搜索，不改写页面，不提供字体、坐标、布局或 PPTX 代码。visibleSlots 和 visiblePoints 是观众实际看到的模板文字。逐页核对标题、子标题、卡片及图解标签是否属于同一来源事实，说明是否完整，概念是否与样例混淆；把错配或自相矛盾记入 conflicts，把截断、空泛或缺失记入 missing，把无来源支撑的描述记入 unsupported。缺少解释记 missing；只有两个实际可见陈述在同一适用条件下互相矛盾才记 conflicts，不能把单纯缺句当成事实冲突。若是职场汇报，还要在同样四类中检查决策问题、前置摘要、主文信息分布和来源支撑，不增加输出类别。\n主题：${reviewTopic}\n当前语义修改约束：${JSON.stringify(project.constraints?.entries?.filter(entry => entry.active && ['content','title','data','structure'].includes(entry.type)) || [])}\n演示目标与必讲内容：${JSON.stringify(brief ? { objective: brief.objective, thesis: brief.thesis, mustInclude: brief.mustInclude, reportMode: brief.reportMode, decisionQuestion: brief.decisionQuestion, sourceScope: brief.sourceScope } : {})}\n高优先级主题映射：${JSON.stringify(coverage)}\n页面：${JSON.stringify(slides)}\n来源：${JSON.stringify(sources)}\n仅输出一个 JSON 对象：{"missing":[{"slideIds":["1"],"detail":"缺少的必要内容"}],"repeated":[{"slideIds":["2","4"],"detail":"重复点"}],"conflicts":[{"slideIds":["3","5"],"detail":"冲突事实"}],"unsupported":[{"slideIds":["6"],"bulletIndexes":[0],"detail":"证据不足"}]}。四个数组都必须存在；没有发现时返回空数组。必须逐项返回 obligationAudit={registryHash:MANDATORY_OBLIGATIONS.registryHash,status:"complete|not_evaluated",checks:[{obligationId:"真实义务ID",status:"satisfied|missing|altered|not_evaluated",evidence:[{slideId:"当前页ID",nodeId:"当前可见实例ID",excerpt:"承载完整关系的逐字可见原文"}]}]}。每个义务恰好一次；satisfied须绑定实际承载完整内容的实例，包括父条件、否定、例外及单位，每个证据 excerpt 必须逐字来自该 slideId/nodeId 实例的 text（含表/图的展平 text）或 visibleSlots.text；不能添加表格竖线、改标点、缩写、拼接其他节点或用来源包原文冒充可见文字。跨节点或跨表分片承载的义务须分别引用各实际实例，合起来保留完整关系。不能用关键词覆盖率或引用ID代替判断。允许正确同义表达；可选浅薄仍在missing。未查完须not_evaluated。必须另返回 scopeAudit=${JSON.stringify({frameworkHash:inputFramework(project).frameworkHash,checkedSlideIds:slides.map(slide=>slide.slideId),status:"complete"})}；仅实际完成全部页面的输入框架与事实审查时使用 complete，否则 not_evaluated。slideIds 只能使用给定页面 ID，bulletIndexes 仅在报告 bullets 时填写，从 0 开始。每项可增加 reason="shallow" 和 suggestedFix；不要输出整页修订文本或坐标。`;
   // Explicit capacity failure, never a truncated authoritative source. The
   // selected model must also return not_evaluated if its own window is smaller.
-  if(Buffer.byteLength(prompt,'utf8')>1024*1024)throw Object.assign(new Error('content_review_capacity: complete input/obligations exceed the review transport budget; split the input without losing conditions'),{code:'content_review_capacity'});
-  return prompt;
+  const integrity=inspectObjectIntegrity(project),inventory=project.source?.semantic?.inventory?.items||[];
+  const objectCoverage=(project.reviewScope?.fullObjectCoverage||integrity.ledger.objects).map(object=>({...object,
+    languagePairId:inventory.find(item=>item.id===object.objectId)?.languagePairId,languageRole:inventory.find(item=>item.id===object.objectId)?.languageRole,
+    originalDataRows:inventory.find(item=>item.id===object.objectId)?.rows?.length-1||undefined,
+    instances:project.deck.slides.flatMap((slide,index)=>visibleNodes(slide).filter(node=>node.sourceArtifact?.sourceUnitId===object.objectId).map(node=>({slideId:slide.id,page:index+1,nodeId:node.id,quoteId:visibleEvidenceQuoteId(slide.id,node),...node.sourceArtifact,
+      ...(node.type==='table'?{displayedDataRowCount:Math.max(0,(node.content.rows?.length||0)-1),firstDisplayedRowLabel:node.content.rows?.[1]?.[0],lastDisplayedRowLabel:node.content.rows?.at(-1)?.[0]}:{})}))) }));
+  const dispositionContext={contract:project.generationPolicy,sourceHash:project.contentSelection?.sourceHash,entries:(project.contentSelection?.entries||[]).map(({sourceUnitId,destination,rowIndices,sentenceIndices,visibleEquivalentSourceUnitId})=>({sourceUnitId,destination,rowIndices,sentenceIndices,visibleEquivalentSourceUnitId,owningSlideIds:(project.outline||[]).filter(s=>s.sourceUnitIds?.includes(sourceUnitId)).map(s=>s.id)}))};
+  const dispositionRules='\n<presentation_disposition_review>'+JSON.stringify(dispositionContext)+'</presentation_disposition_review> The original input is factual authority; this validated ledger defines the selected main-deck scope. An allowed notes-only unit is not a slide omission: review complete notes separately and keep every mandatory main-deck obligation. A summary table selects ORIGINAL rowIndices; actual summary rowStart/rowEnd index its selected rows, with rowEnd EXCLUSIVE. Never infer an extra required row from a printed range. Check original-to-visible sourceCellMap and all fragments before alleging a missing selected row. Source-language slides/summary members must each have a genuine visible witness; a claim ID or the translation alone is insufficient. Notes-only parallel pairs are not required on slides. These scope rules do not excuse lost selected text, selected table cells, conditions, wrong translations or unsupported additions.';
+  const completePrompt=prompt+dispositionRules+'\n<source_object_coverage>'+JSON.stringify(objectCoverage)+'</source_object_coverage>\n<source_partition_rules>This ledger checks CURRENT visible source cells and content, not semantic adequacy. Table fragments sharing sourceUnitId jointly preserve the SAME original table. rowStart is inclusive, rowEnd exclusive, and repeated headers count once. Check the union of all original rows/columns across instances; do not require every fragment to duplicate the complete table. Separately enforce any explicit user request for a single-page table. Only status=rendered with no missingRows proves structural retention; failed objects and real omissions remain issues. Independently inspect explanations, relations, conditions and factual scope: structural completeness cannot make all obligations satisfied. Only source-language policy requires bilingual retention of primary/translation pairs. Explicit output-language policy requires faithful target-language content once, without restoring the other language or exact original phrasing. Judge equivalence using every member, condition and relation; duplicated target-language statements still need repetition review. Cite all necessary instances for a complete-table obligation, instead of assigning whole-table missing rows to every valid fragment.</source_partition_rules>\n<evidence_quote_protocol>数学显示协议：text 是用于精确引用的展平字符，可能将上标/下标连接（例如 10 的上标 6 展平为 106）；必须同时查看该节点 mathFormatting 的真实 MathML/TeX 与 fallbackRuns 的 baseline。若结构实际是 10^6，不能仅因展平 text 为 106 报数值冲突。结构与来源仍须独立逐项核对，真正改符号/变量/指数仍报错。优先使用精确引用协议：evidence条目输出 {slideId,nodeId,quoteId}，quoteId只能逐字选取该当前节点提供的值，无须重复输出excerpt。服务器将验证三个ID与当前文本哈希一致，并取该实例的完整逐字文字，再执行原来的证据与义务校验。这不是对错误摘录的自动修复。必须先独立核对被选文字确实承载整项关系；若由多个节点/表格分片承载，分别引用各实例，不能只选标题或空文本。未知、过期、错配的quoteId会失败。兼容原来的literal excerpt协议，但错误摘录仍会被拒绝。四类findings仅列实际问题，正面的“已经包含”“与来源一致”“无需修改”等结论不能放入问题数组。只有确认完整义务成立才能satisfied，真实缺失必须保留。</evidence_quote_protocol>';
+  if(Buffer.byteLength(completePrompt,'utf8')>1024*1024)throw Object.assign(new Error('content_review_capacity: complete input/obligations exceed the review transport budget; split the input without losing conditions'),{code:'content_review_capacity'});
+  const registry=obligationRegistry(project);
+  const auditChecklist={registryHash:registry.registryHash,expectedCheckCount:registry.entries.length,
+    requiredEntries:registry.entries.map((entry,index)=>({index:index+1,obligationId:entry.id,basis:entry.basis,text:entry.text,slideIds:entry.slideIds}))};
+  const auditScopeNote=project.reviewScope?.mode==='global'?'\n<partitioned_claim_audit>'+project.reviewScope.claimBasis+' Do not duplicate page-batch claimAudit records. Return cross-page findings against the complete visible deck and the listed global obligations.</partitioned_claim_audit>':'';
+  const auditedPrompt=completePrompt+auditScopeNote+'\n<claim_entailment_audit>'+JSON.stringify(claimAuditRegistry(project))+'</claim_entailment_audit>必须返回 claimAudit={version:2,registryHash:claim_entailment_audit.registryHash,status:"complete|not_evaluated",checks:[{claimId:"真实claim ID",textHash:"当前textHash",status:"entailed|unsupported|contradicted|redundant|not_evaluated",reason:"具体量词/条件/运算范围的蕴含判断",sourceEvidence:[{sourceUnitId:"所属来源ID",quoteId:"sourceQuotes中对应quoteId"}]}]}。sourceQuotes 的 quoteId 引用该来源单元完整原文，代码只恢复精确原文，不修正错误引用。优先用 sourceUnitId+quoteId，不复制公式/Markdown后再改成Unicode。使用quoteId不能替代蕴含判断；证据仅凭关键词或ID存在不得标entailed。claimId必须逐字使用claim_entailment_audit.entries[].id（该表claimId与id相同）；不得使用writerClaimId或semanticComponents中的旧claimId。每条新增解释恰好一次；sourceEvidence只引用该entry.ownedSourceUnitIds对应的sourceQuotes，不引用其他页的来源。unsupported/contradicted/not_evaluated可返回sourceEvidence=[]，不得为错误主张伪造或借用证据；entailed必须有真实owned来源。不能用来源对象完整或关键词重合证明蕴含；unsupported/contradicted须同时进入四类 findings。未完成时不得输出entailed。纯prompt无来源对象时引用user_prompt。逐一审核每个新增解释的主张、量词、条件和代码 AST 运算范围；逐字来源结构完整不能代替解释正确。代码 AST unavailable 时明确未核验，不得推定按日期 rank。错误定义/权限排他/无来源的顺序或独立性假设须进入 conflicts/unsupported，给出来源 span 与可见 nodeId。'+'\n<incremental_explanation_review>每条新增解释必须有独立用途。若只复述本页已经可见的完整来源内容（包括原句、表格/清单单元），没有补充原文拥有、尚未由当前可见对象讲清的必要关系/机制/条件，该条 claimAudit.checks[].status=redundant，并引用真实owned原文证据，写具体重复关系，加入repeated。不能因解释更长、措辞不同就假装有增量；不能把完整原文保留本身或本来要求的双语对应标成冗余，只审新增解释。必要框架内关系仍可entailed，真实新事实仍unsupported/contradicted。semanticSummary是overview授权摘要，保留核心原文主张是其职责，不因为它忠实原文就标redundant。</incremental_explanation_review>\n<visible_review_scope>评审对象只能是当前页的真实可见节点。INPUT_FRAMEWORK、source_packet、requiredEvidence、ownedPoints 是对照材料，不是已显示在每页的正文；不能把这些对照材料在各页重复出现误报为可见内容重复。full_source 合同要求保留原文单元：如果不同的原始来源单元本身回顾同一主题，正确逐字绑定这些不同单元不是writer重复；不得建议删除必保来源来修复它。仍须检查来源自身冲突，以及writer新增解释是否无必要重复。unsupported 应指出新增的事实前提、建议、条件变化或越界主张，不能仅以不是原文字面句式为依据。逐一核对否定、限定、因果、排名/分组范围与代码运算；等价转述和标明的框架内必要解释不因措辞变化变成新事实。对确实改变条件或新增事实的解释仍须报错，不可因sourceArtifact结构完整而免检。</visible_review_scope>\n<required_audit_checklist>'+JSON.stringify(auditChecklist)+'</required_audit_checklist>\n'+
+    '最后核对输出数量：requiredEntries 中每个 obligationId 都必须独立返回一次，包括 source_condition、source_detail、planned_detail 和 brief_requirement；不能只返回页面计划条目。按上面清单顺序审阅，返回前数清 checks 数量与 expectedCheckCount 相等，registryHash 必须逐字一致。清单不是已满足的结论；每项必须根据当前可见实例独立判断，未核实用 not_evaluated，实际缺失用 missing/altered，不可为补齐数量声称 satisfied。优先逐字选择当前提供的 quoteId，避免复制长摘录造成引用错误。';
+  if(Buffer.byteLength(auditedPrompt,'utf8')>1024*1024)throw new Error('content_review_capacity: complete audit checklist exceeds the review transport budget');
+  const visibleQuotes={frameworkHash:inputFramework(project).frameworkHash,slideIds:slides.map(slide=>slide.slideId),quotes:project.deck.slides.flatMap(slide=>visibleNodes(slide).filter(n=>nodeContentText(n)).map(n=>({slideId:slide.id,nodeId:n.id,quoteId:visibleEvidenceQuoteId(slide.id,n)})))};
+  const navigationContext={policy:project.generationPolicy,finalPageRegistry:(project.outline||[]).map((slide,index)=>({slideId:slide.id,page:index+1,title:slide.title})),navigation:project.navigation,visibleDerivedNodes:project.deck.slides.flatMap(slide=>visibleNodes(slide).filter(n=>n.content?.derivedFrom==='final-deck-navigation').map(n=>({slideId:slide.id,nodeId:n.id,text:nodeContentText(n),targets:n.content.navigationTargets})))};
+  const finalPrompt=auditedPrompt+'\n<visible_quote_registry>'+JSON.stringify(visibleQuotes)+'</visible_quote_registry>\n<derived_navigation_audit>'+JSON.stringify(navigationContext)+'</derived_navigation_audit> Page ranges in these explicitly marked navigation nodes are generated from the final stable slide registry, not claims about the external source. Verify every target ID/page/range against that registry and report any mismatch. Correct deck page references do not require a matching page number in the source Markdown. This exemption applies only to those marked navigation nodes; factual numbers elsewhere still require source support. In overview/explicit-output-language policy, require semantic preservation of every mandatory condition, not verbatim source wording. A quote must be literal CURRENT VISIBLE text as evidence; that does not require the visible wording to be identical to source text.';
+  if(Buffer.byteLength(finalPrompt,'utf8')>1024*1024)throw new Error('content_review_capacity: complete visible quote registry exceeds the review transport budget');
+  return finalPrompt;
 }
 
 export function normalizeModelReview(value, slideIds, project = null) {
@@ -377,29 +427,100 @@ export function normalizeModelReview(value, slideIds, project = null) {
   const normalize = (items, allowBullets = false) => items.map(item => {
     if (!item || typeof item !== 'object') throw new Error('invalid whole-deck review finding');
     const ids = Array.isArray(item.slideIds) ? [...new Set(item.slideIds.map(String))] : [];
-    const detail = typeof item.detail === 'string' ? item.detail.trim().slice(0, 300) : '';
+    const fullDetail = typeof item.detail === 'string' ? item.detail.trim() : '';
+    const detail = fullDetail.slice(0,300);
     if (!ids.length || !detail || ids.some(id=>!valid.has(id))) throw new Error('whole-deck review finding requires valid slideIds and detail');
+    if(/(?:\u6b64|\u8fd9|\u8be5)(?:\u9879)?(?:\u975e|\u4e0d\u662f|\u5e76\u975e)(?:\u51b2\u7a81|\u7f3a\u5931|\u95ee\u9898)|\u65e0\u9700\u4fee\u6539|\u65e0\u987b\u4fee\u6539|\u6ca1\u6709\u5b9e\u9645(?:\u51b2\u7a81|\u7f3a\u5931|\u95ee\u9898)|不构成(?:缺失|问题|冲突)|不再报|此处无需报/u.test(fullDetail))throw new Error('whole-deck review finding explicitly denies its own problem; return actual issues in the appropriate finding array');
     return { slideIds: ids, detail,
       ...(typeof item.code==='string'&&routeIssue(item.code).ownerLayer!=='review'?{code:item.code}:{}),
       ...(['shallow', 'out_of_scope', 'unsupported_fact'].includes(item.reason) ? { reason: item.reason } : {}),
       ...(typeof item.suggestedFix === 'string' && item.suggestedFix.trim() ? { suggestedFix: item.suggestedFix.trim().slice(0, 700) } : {}),
       ...(allowBullets && Array.isArray(item.bulletIndexes) ? { bulletIndexes: [...new Set(item.bulletIndexes.map(Number).filter(Number.isInteger))].filter(index => index >= 0 && index < 10).slice(0, 10) } : {}) };
   });
-  const obligationAudit = project ? normalizeObligationAudit(value.obligationAudit, project) : undefined;
+  const obligationAudit = project ? normalizeObligationAudit(resolveObligationQuoteReferences(value.obligationAudit,project), project) : undefined;
+  const claimAudit = project ? normalizeClaimAudit(value.claimAudit,project) : undefined;
   const scopeAudit = project ? normalizeScopeAudit(value.scopeAudit, project, slideIds) : undefined;
   return {
-    ...(scopeAudit ? { scopeAudit } : {}), ...(obligationAudit ? { obligationAudit } : {}),
-    evaluation: value.evaluation === 'not_evaluated' || scopeAudit?.status === 'not_evaluated' || obligationAudit?.status === 'not_evaluated' ? 'not_evaluated' : 'evaluated',
+    ...(scopeAudit ? { scopeAudit } : {}), ...(claimAudit?{claimAudit}:{}), ...(obligationAudit ? { obligationAudit } : {}),
+    evaluation: value.evaluation === 'not_evaluated' || scopeAudit?.status === 'not_evaluated' || obligationAudit?.status === 'not_evaluated' || claimAudit?.status==='not_evaluated' || claimAudit?.checks.some(c=>c.status==='not_evaluated') ? 'not_evaluated' : 'evaluated',
     missing: normalize(value?.missing),
-    repeated: normalize(value?.repeated),
+    repeated: [...normalize(value?.repeated),...claimAuditFailures(claimAudit).filter(f=>f.code==='claim_redundant')],
     conflicts: normalize(value?.conflicts),
-    unsupported: normalize(value?.unsupported, true),
+    unsupported: [...normalize(value?.unsupported,true),...claimAuditFailures(claimAudit).filter(f=>f.code!=='claim_redundant').map(f=>({...f,reason:'unsupported_fact'}))],
   };
+}
+
+/** Correct only malformed review JSON/evidence bindings, with all original
+ * source and audit gates retained. Semantic writer rounds are independent. */
+export function claimContractRepair(project, raw) {
+  const registry=claimAuditRegistry(project), audit=raw?.claimAudit;
+  if(audit?.registryHash!==registry.registryHash||!Array.isArray(audit.checks)||audit.checks.length!==registry.entries.length||new Set(audit.checks.map(c=>c.claimId)).size!==registry.entries.length||audit.checks.some(c=>!registry.entries.some(e=>e.id===c.claimId)))return null;
+  const invalid=audit.checks.filter(check=>{
+    const scoped={...project,reviewScope:{...project.reviewScope,claimIds:[check.claimId]}}, single=claimAuditRegistry(scoped);
+    try{normalizeClaimAudit({...audit,registryHash:single.registryHash,checks:[check]},scoped);return false;}catch{return true;}
+  });
+  if(!invalid.length)return null;
+  const claimIds=invalid.map(c=>c.claimId),scoped={...project,reviewScope:{...project.reviewScope,claimIds}}, narrow=claimAuditRegistry(scoped);
+  const owned=new Set(narrow.entries.flatMap(e=>e.ownedSourceUnitIds)), pages=new Set(narrow.entries.map(e=>e.slideId));
+  const source=(project.originalSourceInventory?.items||project.source?.semantic?.inventory?.items||[]).filter(i=>owned.has(i.id)).map(i=>({id:i.id,text:i.text}));
+  const visible=project.deck.slides.filter(s=>pages.has(s.id)).map(s=>({slideId:s.id,nodes:visibleNodes(s).map(n=>({nodeId:n.id,text:nodeContentText(n)}))}));
+  const prompt='Repair only the listed invalid claim audit records. All other review records and findings are frozen. Re-evaluate entailment using the complete owned source below; do not change a verdict merely to pass validation. Use only each entry.ownedSourceUnitIds and its exact sourceUnitId+quoteId pair. Unsupported or contradicted claims may have empty evidence; entailed/redundant requires real owned evidence. Preserve negation, conditions and scope. Return claimAudit for exactly these entries plus four finding arrays.\n'+JSON.stringify({generationPolicy:project.generationPolicy,source,userPrompt:source.length?undefined:userRequirements(project),visible,previousChecks:invalid})+'\n<claim_entailment_audit>'+JSON.stringify(narrow)+'</claim_entailment_audit>';
+  return {prompt,project:scoped,base:raw,claimIds};
+}
+
+export async function reviewWithContractRepair(project, call, {nodeKey='review:deck',maxRepairs=2,partition=true,checkpoint}={}) {
+  const batches=partition?reviewBatches(project):[];
+  if(batches.length){
+    const results=[];
+    // Independent page audits retain individual checkpoints. Bound concurrency
+    // to two so long decks do not serialize every complete-source review.
+    for(let start=0;start<batches.length;start+=2){
+      const settled=await Promise.allSettled(batches.slice(start,start+2).map(batch=>reviewWithContractRepair(batch.project,call,{nodeKey:`${nodeKey}:batch:${batch.index}`,maxRepairs,partition:false,checkpoint})));
+      const failed=settled.find(result=>result.status==='rejected');if(failed)throw failed.reason;
+      results.push(...settled.map(result=>result.value));
+    }
+    return composeReviews(project,batches,results,normalizeModelReview);
+  }
+  if(!Number.isInteger(maxRepairs)||maxRepairs<0||maxRepairs>2)throw new Error('invalid review correction bound');
+  const original=deckReviewPrompt(project), ids=project.deck.slides.map(s=>s.id);
+  const checkpointKey=crypto.createHash('sha256').update(JSON.stringify([project.configId,project.model,original])).digest('hex');
+  const cached=checkpoint?.load(checkpointKey);if(cached)return normalizeModelReview(cached,ids,project);
+  let prompt=original, patch=null;
+  for(let attempt=0;;attempt++) {
+    let raw;
+    try {
+      const response=await call(prompt,attempt?`${nodeKey}:contract:${attempt}`:nodeKey);
+      if(patch){
+        raw=patch.base;
+        const corrected=normalizeClaimAudit(response?.claimAudit,patch.project);
+        raw={...raw,claimAudit:{...raw.claimAudit,checks:raw.claimAudit.checks.map(check=>corrected.checks.find(c=>c.claimId===check.claimId)||check)}};
+      }else raw=response;
+      const reviewed=normalizeModelReview(raw,ids,project);await checkpoint?.save(checkpointKey,reviewed);return reviewed;
+    }
+    catch(error) {
+      if(attempt>=maxRepairs||!/模型未返回有效的结构化内容|whole-deck.*review|whole-deck.*finding|mandatory obligation|obligation evidence|invalid mandatory obligation|input scope audit|claim audit/iu.test(String(error.message)))throw error;
+      patch=claimContractRepair(project,raw);
+      if(patch){prompt=patch.prompt;continue;}
+      const registry=obligationRegistry(project),requiredIds=registry.entries.map(entry=>entry.id),checks=raw?.obligationAudit?.checks||[];
+      const suppliedIds=Array.isArray(checks)?checks.map(check=>check?.obligationId):[];
+      const claimRegistry=claimAuditRegistry(project),claimSupplied=(raw?.claimAudit?.checks||[]).map(c=>c.claimId);
+      const claimCompleteness={expectedRegistryHash:claimRegistry.registryHash,missingClaimIds:claimRegistry.entries.filter(e=>!claimSupplied.includes(e.id)).map(e=>e.id),unknownClaimIds:claimSupplied.filter(id=>!claimRegistry.entries.some(e=>e.id===id))};
+      const completeness={expectedRegistryHash:registry.registryHash,receivedRegistryHash:raw?.obligationAudit?.registryHash||null,
+        expectedCheckCount:requiredIds.length,receivedCheckCount:suppliedIds.length,
+        missingObligationIds:requiredIds.filter(id=>!suppliedIds.includes(id)),unknownObligationIds:suppliedIds.filter(id=>!requiredIds.includes(id)),
+        duplicateObligationIds:[...new Set(suppliedIds.filter((id,index)=>suppliedIds.indexOf(id)!==index))]};
+      const issues=/current registry and every obligation exactly once/u.test(String(error.message))?[]:obligationEvidenceDiagnostics(raw?.obligationAudit,project);
+      prompt=original+'\n<review_contract_repair>'+JSON.stringify({error:String(error.message),completeness,claimCompleteness,issues,previousReview:raw??null})+'</review_contract_repair>\n'+
+        '上次审查 JSON 或证据引用未通过校验。重新输出完整四类 findings、全部 obligationAudit、claimAudit checks 与 scopeAudit；claimAudit证据优先使用提供的sourceUnitId+quoteId以精确引用原文，不把源TeX转成Unicode后作逐字excerpt；不能删除义务或为了通过清空问题。每条 excerpt 必须逐字来自其 slideId/nodeId 对应的 text/visibleSlots.text，包括表格提供的展平 text；不能拼接多个节点、添加表格竖线、改标点、缩写或从来源包代替可见节点摘录。若完整义务由多个实例承载，分别引用这些实例。保持来源与事实边界，真实缺失仍标 missing/altered/not_evaluated；只有实际核对了完整关系才能 satisfied。';
+      if(Buffer.byteLength(prompt,'utf8')>1024*1024)throw new Error('content_review_capacity: complete review correction exceeds the review transport budget');
+    }
+  }
 }
 
 export function finalQualityReport(deterministic, repairs, modelReview, timings = {}) {
   const modelIssues = [
     ...obligationFailures(modelReview.obligationAudit),
+    ...claimAuditFailures(modelReview.claimAudit),
     ...modelReview.missing.map(item => ({ code: 'model_missing', severity: deterministic.strictCoverage ? 'error' : 'warning', ...item })),
     ...modelReview.repeated.map(item => ({ code: 'model_repeated', severity: 'error', ...item })),
     ...modelReview.conflicts.map(item => ({ code: 'model_conflict', severity: 'error', ...item })),
@@ -423,6 +544,12 @@ export function finalQualityReport(deterministic, repairs, modelReview, timings 
     publishEligible: !blocked && modelReview.evaluation !== 'not_evaluated', editorialReady: !blocked && modelReview.evaluation !== 'not_evaluated' && (report.status === 'ready' || report.status === 'not_applicable'),
     contentReady: !blocked && modelReview.evaluation !== 'not_evaluated', exportable: false, visualVerified: false,
     objectLedger: deterministic.objectLedger, mediaLedger: deterministic.mediaLedger,
+    acceptanceAxes: {
+      sourceCompleteness: {status:(deterministic.issues||[]).some(item=>item.severity==='error'&&/source|object|evidence|relation/iu.test(item.code))?'blocked':'automated_checked'},
+      semanticEditorial: {status:[...(deterministic.issues||[]),...modelIssues].some(item=>/editorial|fragment_title|workflow_sentence|raw_table|visible_source_markup/iu.test(item.code))?'needs_review':'automated_checked'},
+      physicalLayout: {status:(deterministic.issues||[]).some(item=>item.severity==='error'&&/overflow|bounds|fit|geometry/iu.test(item.code))?'blocked':'automated_checked'},
+      nativeExport: {status:'pending_export'}, humanVisualReview: {status:'not_verified'},
+    },
     checkedAt: new Date().toISOString(),
     deterministic,
     modelReview,

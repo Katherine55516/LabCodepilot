@@ -14,7 +14,7 @@ const MAX_NODES_PER_SLIDE = 200;
 
 export const COMMAND_TYPES = new Set([
   'slide.insert', 'slide.delete', 'slide.duplicate', 'slide.reorder', 'slide.setLayout',
-  'node.insert', 'node.delete', 'node.duplicate', 'node.setContent', 'node.setStyle', 'node.setGeometry', 'node.setZIndex', 'node.setRotation', 'node.setLocked',
+  'node.repairSourceSpan', 'node.insert', 'node.delete', 'node.duplicate', 'node.setContent', 'node.setStyle', 'node.setGeometry', 'node.setZIndex', 'node.setRotation', 'node.setLocked',
   'nodes.delete', 'nodes.duplicate', 'nodes.restore', 'nodes.setGeometry', 'nodes.group', 'nodes.ungroup', 'nodes.setGroup',
   'theme.setPalette', 'theme.setTokens', 'deck.replace', 'ai.objectPatch', 'ai.slidePatch',
 ]);
@@ -70,23 +70,22 @@ function geometry(value, field = 'geometry') {
 
 function style(value, project) {
   const input = record(value, 'style');
-  const allowed = new Set(['color', 'fill', 'fontFamily', 'eastAsiaFontFamily', 'fontSizePt', 'fontWeight', 'fontStyle', 'textAlign', 'lineHeight', 'letterSpacing', 'opacity', 'shape']);
+  const allowed = new Set(['color', 'fill', 'fontFamily', 'eastAsiaFontFamily', 'eastAsiaFontFamilyHant', 'fontSizePt', 'fontWeight', 'fontStyle', 'textAlign', 'lineHeight', 'paragraphSpacingEm', 'letterSpacing', 'opacity', 'shape']);
   if (Object.keys(input).some(key => !allowed.has(key))) fail('style contains unsupported fields');
   const result = {};
   for (const key of ['color', 'fill']) if (input[key] !== undefined) { if (!COLOR.test(input[key])) fail(`style.${key} is invalid`); result[key] = input[key].toLowerCase(); }
-  const templateFonts = new Set(Object.values(project?.templateSpec?.fonts || {}).filter(value => typeof value === 'string'));
-  if (project?.templateFidelity?.mode === 'preserve') for (const slide of project.templateFidelity.slides || []) {
-    for (const node of slide.nodes || []) {
-      if (node.style?.fontFamily) templateFonts.add(node.style.fontFamily);
-      if (node.style?.eastAsiaFontFamily) templateFonts.add(node.style.eastAsiaFontFamily);
-    }
+  for (const key of ['fontFamily', 'eastAsiaFontFamily', 'eastAsiaFontFamilyHant']) if (input[key] !== undefined) {
+    const font = string(input[key], `style.${key}`, 120).trim();
+    if (!font) continue; // Empty optional CJK field keeps the template fallback.
+    if (/[\x00-\x1f\x7f<>{};]/u.test(font)) fail(`style.${key} is invalid`);
+    result[key] = font;
   }
-  for (const key of ['fontFamily', 'eastAsiaFontFamily']) if (input[key] !== undefined) { const font = string(input[key], `style.${key}`, 120, { empty: false }); if (!templateFonts.has(font)) fail(`style.${key} must use a template font`); result[key] = font; }
-  if (input.fontSizePt !== undefined) result.fontSizePt = number(input.fontSizePt, 'style.fontSizePt', project?.templateFidelity?.mode === 'preserve' ? 8 : 10, 96);
+  if (input.fontSizePt !== undefined) result.fontSizePt = number(input.fontSizePt, 'style.fontSizePt', 1, 400);
   if (input.fontWeight !== undefined) result.fontWeight = number(input.fontWeight, 'style.fontWeight', 100, 900, true);
   if (input.fontStyle !== undefined) { if (!['normal', 'italic'].includes(input.fontStyle)) fail('style.fontStyle is invalid'); result.fontStyle = input.fontStyle; }
   if (input.textAlign !== undefined) { if (!['left', 'center', 'right'].includes(input.textAlign)) fail('style.textAlign is invalid'); result.textAlign = input.textAlign; }
   if (input.lineHeight !== undefined) result.lineHeight = number(input.lineHeight, 'style.lineHeight', .8, 3);
+  if (input.paragraphSpacingEm !== undefined) result.paragraphSpacingEm = number(input.paragraphSpacingEm, 'style.paragraphSpacingEm', 0, 3);
   if (input.letterSpacing !== undefined) result.letterSpacing = number(input.letterSpacing, 'style.letterSpacing', -5, 30);
   if (input.opacity !== undefined) result.opacity = number(input.opacity, 'style.opacity', 0, 1);
   if (input.shape !== undefined) { if (!['rect', 'ellipse'].includes(input.shape)) fail('style.shape is invalid'); result.shape = input.shape; }
@@ -193,6 +192,11 @@ function validatePayload(command, project) {
     id(p.slideId, 'payload.slideId'); const target = project.deck?.slides?.find(item => item.id === p.slideId); if (!target) fail('slide not found'); if ((target.nodes?.length || 0) >= MAX_NODES_PER_SLIDE) fail(`a slide can contain at most ${MAX_NODES_PER_SLIDE} objects`); p.node = nodeInput(p.node, project);
   } else if (command.type === 'node.duplicate' || command.type === 'node.delete') {
     id(p.slideId, 'payload.slideId'); id(p.nodeId, 'payload.nodeId');
+    if(command.type==='node.duplicate'&&(project.deck?.slides?.find(s=>s.id===p.slideId)?.nodes?.length||0)>=MAX_NODES_PER_SLIDE)fail('a slide can contain at most '+MAX_NODES_PER_SLIDE+' objects');
+  } else if(command.type==='node.repairSourceSpan'){
+    id(p.slideId,'payload.slideId');id(p.nodeId,'payload.nodeId');id(p.sourceUnitId,'payload.sourceUnitId');
+    string(p.sourceHash,'payload.sourceHash',64,{empty:false});number(p.start,'payload.start',0,80000,true);number(p.end,'payload.end',1,80000,true);
+    string(p.expectedRaw,'payload.expectedRaw',10000,{empty:false});string(p.replacement,'payload.replacement',10000,{empty:false});
   } else if (['node.setContent', 'node.setStyle', 'node.setGeometry', 'node.setZIndex', 'node.setRotation', 'node.setLocked'].includes(command.type)) {
     id(p.slideId, 'payload.slideId'); id(p.nodeId, 'payload.nodeId'); const node = nodeById(project, p.slideId, p.nodeId);
     if (command.type === 'node.setContent') p.content = validateNodeContent(node.type, p.content);

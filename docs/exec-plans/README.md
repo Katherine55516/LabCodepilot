@@ -10,6 +10,8 @@
 
 ## 什么时候需要执行计划
 
+本轮计划：[Claude 第五轮后的 PPT 核验与真实生成](active/ppt-claude-followup-live-20261011.md) — 2026-10-11，核验与真实生成进行中。
+
 - 涉及数据库 schema 变更
 - 跨 3 个以上模块的功能
 - 需要分阶段交付的中大型功能
@@ -42,8 +44,15 @@
 
 ### Active
 
+| active/ppt-report-completion-20261011.md | Gamma报告17步与原64项代码/真实UI/Office/质量闭环 | 实施中 |
+
+| active/ppt-alpha-mining-live-20261010.md | Alpha Mining完整prompt/原生模板/自动N/真实BYOK/UI/ARM64/逐页QA | 进行中 |
+
 | 文件 | 主题 | 状态 |
 |------|------|------|
+| [ppt-gamma-semantic-improvements-20261013.md](active/ppt-gamma-semantic-improvements-20261013.md) | DL 29/Gamma 10 对照、语义组织与视觉修复、gamma.md 真实 3141 测试 | 进行中 |
+| [ppt-five-point-improvements-20261012.md](active/ppt-five-point-improvements-20261012.md) | 页数、局部规划、模板字体、多选；DL/Gamma 对照与 QuantPilot 真模型实测 | 功能已实施；整稿质量验收未通过 |
+| active/ppt-factor-zoo-postmortem-remediation.md | 51/10 页逐页比较、三语/短合同/候选错误、原生容量及语义质量修复 | Phase 0 完成，Phase 1 进行中 |
 | active/ppt-byok-api-setup.md | OpenAI-compatible 持久化、PPT 本地模型队列、加密 API 设置与连接验证 | 本地实现/回归与真实 deepseek 连接完成；远端部署及真实整稿验收待执行 |
 | completed/ppt-gamma-density-packing.md | Gamma参照密度、语义分组/容量packing、自动syllabus页数与prompt/可见QA闭环 | 本地实现与模拟/原生导出/浏览器回归完成；真实模型待验收 |
 | completed/ppt-edit-intent-proposal-integration.md | 最新原型架构接入：共用模板确认、持久 Proposal/EditIntent、页级版本协调、单页 AI 前后预览与定向撤回 | 本地实现和回归完成；真实模型/远端/打包态待环境验收 |
@@ -98,6 +107,8 @@
 | active/btw-side-question.md | `/btw` 会话内临时问答浮层（对标 Claude Code CLI /btw）：无状态端点 native generateText（无工具/不取锁/不落库）+ 前端 `/btw <arg>` 解析 + BtwDialog 浮层 + 前端内存上下文快照（含 in-flight），主对话流式期间不打断 | Phase 0 完成，Phase 1-6 待开始 |
 | active/image-model-managed-delivery-client.md | **文生图模型账号下发（客户端层）**：去编译期 key 注入，改登录后服务端下发百炼凭证+模型列表；以 `settings.bailian_image_config` 落地（不进 api_providers，结构上隔离对话下拉框），复刻 ASR 下发范式 + broker 写入嵌入式 Next | Phase 0-6 待开始 |
 | active/image-model-managed-delivery-server.md | **文生图模型账号下发（服务端层）**：新增 `GET /api/v1/image/config(/encrypted/hash)`，apiKey 复用 configs 的 AES-256-GCM 加密口令；图片配置独立于 configs 列表避免泄漏进对话下拉框 | S1-S5 待开始 |
+| active/ppt-alpha-mining-round5-priorities.md | **PPT 第五轮（Alpha Mining）**：模板文字色、保留媒体版式与媒体守恒门禁、封面副题、生成过程可视（骨架/流式草稿/大纲确认）、eyebrow 规范化、双语标题策略、术语锁、代码悬挂缩进 | A/B 完成，C 部分完成；F-P0-1 待用户授权 |
+| active/ppt-outline-concision.md | **PPT 大纲精炼**：页数预算、按卡片计费、双语原文正文单语、收窄必须上页、先压缩后加页的修复顺序、小节分组两阶段规划、精炼指标 | 进行中 |
 
 ### Completed
 

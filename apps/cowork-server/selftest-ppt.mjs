@@ -53,7 +53,8 @@ try {
         { title: '封面', focus: '介绍' }, { title: '进展', focus: '成果' }, { title: '结论', focus: '建议' },
       ] };
       if (prompt.includes('第 2 页') && failOnce) { failOnce = false; throw new Error('temporary model outage'); }
-      return { title: `第 ${/第 (\d+) 页/.exec(prompt)?.[1]} 页`, bullets: ['可编辑内容'] };
+      const pageNumber=/第 (\d+) 页/.exec(prompt)?.[1];
+      return { title: `第 ${pageNumber} 页`, bullets: pageNumber==='1'?[]:['可编辑内容'] };
     },
     renderPptx: async (project) => { renders++; assert.equal(project.deck.slides.length, project.pages); return simulatedExport(project,1234); },
     readFile: async () => ({ stream: Readable.from(Buffer.from('pptx-bytes')), size: 10 }),
@@ -85,7 +86,7 @@ try {
   assert.equal((await invoke('POST', `/ppt/projects/${flowId}/generate`)).status, 202);
   const failed = await waitFor(flowId, 'failed');
   assert.equal(failed.nodes[failed.outline[0].id].status, 'done');
-  assert.equal(failed.nodes[failed.outline[1].id].status, 'running');
+  assert.equal(failed.nodes[failed.outline[1].id].status, 'failed');
   assert.equal((await invoke('GET', `/ppt/projects/${flowId}/export`)).status, 409);
   const callsBeforeRetry = calls;
   assert.equal((await invoke('POST', `/ppt/projects/${flowId}/retry`)).status, 202);
@@ -120,7 +121,7 @@ try {
       input: JSON.stringify({ slides: deck.slides, template: 'violet', fonts: { title: 'Noto Sans CJK SC', body: 'Noto Sans CJK SC', titleEastAsia: 'Noto Sans CJK SC', bodyEastAsia: 'Noto Sans CJK SC' } }), encoding: 'utf8', env: { ...process.env, PPT_OUTPUT: output },
     });
     assert.equal(render.status, 0, render.stderr);
-    const verify = spawnSync(process.env.PPT_PYTHON, ['-c', 'import sys,zipfile; from pptx import Presentation; p=Presentation(sys.argv[1]); assert len(p.slides)==3; assert p.slides[1].shapes[1].text=="季度业务复盘"; assert "收入增长与客户需求" in p.slides[1].shapes[2].text; z=zipfile.ZipFile(sys.argv[1]); assert b\'<a:ea typeface="Noto Sans CJK SC"\' in z.read("ppt/slides/slide2.xml")', output], { encoding: 'utf8' });
+    const verify = spawnSync(process.env.PPT_PYTHON, ['-c', 'import sys,zipfile; from pptx import Presentation; p=Presentation(sys.argv[1]); assert len(p.slides)==3; texts=[shape.text for shape in p.slides[1].shapes if shape.has_text_frame]; assert "季度业务复盘" in texts; assert any("收入增长与客户需求" in text for text in texts); z=zipfile.ZipFile(sys.argv[1]); assert b\'<a:ea typeface="Noto Sans CJK SC"\' in z.read("ppt/slides/slide2.xml")', output], { encoding: 'utf8' });
     assert.equal(verify.status, 0, verify.stderr);
     assert.ok(fs.statSync(output).size > 1000);
   }

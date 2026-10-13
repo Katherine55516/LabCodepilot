@@ -66,6 +66,65 @@ export function mermaidSteps(text) {
 /** Converts a fenced diagram into ordered step text. "→" inside a note is
  * rewritten to "⇒" because ProcessBlock steps are split on arrows. */
 export function codeDiagram(text, language = '') {
+  // Coordinate inventories describe objects; they are not executable code.
+  // Match the whole fenced block so ordinary assignments/programs stay code.
+  if (/^(?:|text|plaintext)$/iu.test(language)) {
+    const records = String(text).trim().split(/\n\s*\n/u);
+    const geometry = records.map(record => record.match(/^(Textbox|Image|Shape)\s+x=(-?\d+(?:\.\d+)?)\s+y=(-?\d+(?:\.\d+)?)\s*\n\s*w=(\d+(?:\.\d+)?)\s+h=(\d+(?:\.\d+)?)$/iu));
+    if (geometry.length >= 2 && geometry.every(Boolean)) {
+      const rows = [['Object','x','y','w','h'], ...geometry.map(match => match.slice(1))];
+      return {kind:'schema',relation:'absolute-geometry',rows,text:rows.slice(1).map(row=>`${row[0]}: x=${row[1]}, y=${row[2]}, w=${row[3]}, h=${row[4]}`).join('\n')};
+    }
+  }
+  if(!language&&/^T_[A-Za-z]+\s*=\s*$/mu.test(text)&&/[Σ+]|\bmax\(/u.test(text)&&!/[{};]/u.test(text))
+    return {kind:'definition',relation:'formula-definition',text:String(text).split('\n').map(line=>line.trim()).filter(Boolean).join(' ')};
+  const nonProgram=!PROGRAM_SYNTAX.test(text)&&!/^\s*(?:[{\[]|<\/?[A-Za-z])/mu.test(text)&&/^(?:|text|plaintext|yaml|yml)$/iu.test(language);
+  if(nonProgram){
+    // Preserve side-by-side lanes as parallel members. The previous single-box
+    // parser silently lost the second lane and invented a sequential ordering.
+    const levels=[];let columns=new Map();
+    const flush=()=>{if(columns.size){levels.push([...columns.values()].map(lines=>lines.join(' ').replace(/\s+/gu,' ').trim()));columns=new Map();}};
+    for(const line of String(text).split('\n')){
+      if(/[┌╔]/u.test(line))flush();
+      const boxed=[...line.matchAll(/[│║]([^│║]*)[│║]/gu)];
+      const free=BOX_CHARS.test(text)&&!BOX_CHARS.test(line)&&!/^\s*[↓↑→⇒▼▲│| -]*\s*$/u.test(line)
+        ? [...line.matchAll(/\S(?:.*?\S)?(?=\s{2,}|$)/gu)].map(match=>({index:match.index,1:match[0]})):[];
+      for(const match of [...boxed,...free]){
+        const label=match[1].trim();if(!label)continue;
+        const aligned=[...columns.keys()].find(index=>Math.abs(index-match.index)<=3)??match.index;
+        columns.set(aligned,[...(columns.get(aligned)||[]),label]);
+      }
+      if(/[└╚]/u.test(line))flush();
+    }
+    flush();
+    if(levels.some(labels=>labels.length>1))return {kind:'ascii',relation:'parallel',text:levels.map(labels=>labels.join(' / ')).join('\n'),levels};
+    // A centered connector on a box edge (┬/┴) also occurs in a linear flow;
+    // it does not by itself prove a branch. Parallel lanes were handled above.
+    if(/[├┤┼]/u.test(text))return {kind:'ascii',relation:'branching',text:String(text).trim()};
+    const lines=String(text).split('\n').map(line=>line.trim()).filter(Boolean);
+    const connectors=lines.filter(line=>/^[↓↑→⇒▼▲│|\s-]+$/u.test(line));
+    const labels=lines.filter(line=>!connectors.includes(line));
+    if(!BOX_CHARS.test(text)&&connectors.length>=2&&labels.length>=3&&labels.every(line=>!/[{};]/u.test(line))){
+      const steps=[];let pending=[];
+      for(const line of lines){if(connectors.includes(line)){if(pending.length)steps.push(pending.join(' '));pending=[];}else pending.push(line);}
+      if(pending.length)steps.push(pending.join(' '));
+      if(steps.length>=3)return {kind:'text-flow',relation:'ordered',text:steps.map((label,index)=>`${index+1}. ${label}`).join('\n')};
+    }
+    // Presentation briefs and card schemas are data fields, not executable
+    // examples. Keep complete values and their field bindings as an editable table.
+    if(/\b(?:PresentationBrief|Card|Theme|Layout|Job|Schema|goal|audience)\b/iu.test(text)){
+      const fields=[];let current=null;
+      for(const line of lines){
+        const field=line.match(/^([A-Za-z_][\w -]*):\s*(.*)$/u);
+        if(field){current=[field[1],field[2]];fields.push(current);}
+        else if(current)current[1]+=(current[1]?'\n':'')+line;
+      }
+      if(fields.length>=3&&fields.every(row=>row[1].trim()))return {kind:'schema',relation:'field-value',rows:[['Field','Value'],...fields],text:fields.map(([key,value])=>key+': '+value).join('\n')};
+      const record=lines[0]?.match(/^([A-Za-z][\w]*)\s*\{$/u),members=lines.slice(1,-1);
+      if(record&&lines.at(-1)==='}'&&members.length>=3&&members.every(line=>/^[A-Za-z][\w.-]*$/u.test(line)))
+        return {kind:'schema',relation:'record-fields',rows:[['Record','Field'],...members.map(field=>[record[1],field])],text:record[1]+': '+members.join(', ')};
+    }
+  }
   const steps = isMermaidFlow(text, language) ? mermaidSteps(text) : isAsciiDiagram(text) ? asciiDiagramSteps(text) : null;
   if (!steps?.length) return null;
   const clean = value => String(value || '').replace(/->|→/gu, '⇒').trim();
@@ -97,14 +156,14 @@ export function markEquivalentStructures(items) {
 }
 
 const HAN = /\p{Script=Han}/gu, LATIN = /[A-Za-z]+/gu;
-const scriptOf = text => {
+export const sourceScriptOf = text => {
   const han = (String(text).match(HAN) || []).length, latin = (String(text).match(LATIN) || []).length;
   return han > latin * 1.2 ? 'han' : latin > 0 && han <= latin * .25 ? 'latin' : 'mixed';
 };
 // Single digits are often written as words/numerals in the other language
 // ("eight stages" / "八个阶段"); multi-digit and decimal numbers must agree.
 const numbersOf = text => new Set((String(text).match(/\d+(?:\.\d+)?/gu) || []).filter(value => value.length > 1));
-const PAIRABLE = new Set(['MechanismBlock', 'DefinitionBlock', 'ComparisonBlock', 'ExampleBlock', 'WarningBlock', 'EvidenceBlock', 'SummaryBlock', 'ChecklistBlock', 'TimelineBlock']);
+const PAIRABLE = new Set(['MechanismBlock', 'DefinitionBlock', 'ComparisonBlock', 'ExampleBlock', 'WarningBlock', 'EvidenceBlock', 'SummaryBlock', 'ChecklistBlock', 'TimelineBlock', 'ProcessBlock']);
 /** Adjacent paragraphs in the same section, one Latin and one Han, with
  * compatible length and the same numbers, are a translation pair. A pair is
  * one claim for duplication/depth; both languages keep their display cost
@@ -114,7 +173,7 @@ export function markLanguagePairs(items) {
     const a = items[i], b = items[i + 1];
     if (a.languagePairId || b.languagePairId || !PAIRABLE.has(a.type) || !PAIRABLE.has(b.type)) continue;
     if ((a.sectionPath || []).join('\0') !== (b.sectionPath || []).join('\0')) continue;
-    const sa = scriptOf(a.text), sb = scriptOf(b.text);
+    const sa = sourceScriptOf(a.text), sb = sourceScriptOf(b.text);
     if (!(sa === 'latin' && sb === 'han' || sa === 'han' && sb === 'latin')) continue;
     const latin = sa === 'latin' ? a.text : b.text, han = sa === 'han' ? a.text : b.text;
     const ratio = (String(han).match(HAN) || []).length / Math.max(1, (String(latin).match(LATIN) || []).length);
@@ -147,6 +206,7 @@ export function codePresentation(project = {}) {
   const intent = String(project.inputKind === 'prompt' ? '' : project.prompt || '');
   if (CODE_OMIT_INTENT.test(intent)) return { mode: 'omit_with_disclosure', basis: 'user_intent' };
   if (CODE_KEEP_INTENT.test(intent)) return { mode: 'keep', basis: 'user_intent' };
+  if (project.generationPolicy?.content === 'full_source') return { mode: 'keep', basis: 'full_source_contract' };
   if (templateHasCodeComponent(project)) return { mode: 'keep', basis: 'template_code_component' };
   return { mode: 'omit_with_disclosure', basis: 'default_non_code_template' };
 }
@@ -159,7 +219,18 @@ export function applyPresentationPolicy(source, project = {}) {
   if (!inventory?.items) return source;
   const code = codePresentation(project);
   const items = inventory.items.map(item => {
-    if (item.type !== 'CodeBlock') return item;
+    if (item.type !== 'CodeBlock') {
+      // An explicit full-source/source-language contract freezes the complete
+      // source unit, including both sides of detected language pairs. Legacy
+      // and translated contracts retain their existing synthesis behaviour.
+      if (!item.presentation && project.generationPolicy?.content === 'full_source' && project.generationPolicy?.language?.mode === 'source')
+        return {...item, must_preserve_structure: true, priority: 'high', sourceTextRetention: 'full_source_language'};
+      if (item.sourceTextRetention) {
+        const {sourceTextRetention, ...rest} = item;
+        return {...rest, must_preserve_structure: ['TableBlock','EquationBlock','ProcessBlock','ChecklistBlock','TaxonomyBlock'].includes(item.type)};
+      }
+      return item;
+    }
     const { presentation, presentationBasis, ...rest } = item;
     return code.mode === 'keep' ? { ...rest, must_preserve_structure: true, priority: 'high' }
       : { ...rest, must_preserve_structure: false, priority: 'normal', presentation: 'omitted_by_policy', presentationBasis: code.basis };
@@ -194,7 +265,9 @@ export function planningAssumptions(project = {}, source = project.source) {
   if (merged.length) result.push({ topic: 'merge', decision: 'present_once', reversible: false, affectedSourceIds: merged.map(item => item.id),
     reason: `${merged.length} 处与前文表达同一流程的结构只呈现一次（${merged.map(item => `${sectionLabel(item)}`).filter(Boolean).slice(0, 3).join('、') || '同一章节'}）。` });
   const pairs = new Set(items.map(item => item.languagePairId).filter(Boolean)).size;
-  if (pairs) result.push({ topic: 'language', decision: 'bilingual_pairs', reversible: false, affectedSourceIds: [],
+  if (pairs && project.generationPolicy?.language?.mode === 'output') result.push({ topic: 'language', decision: 'output_language', basis: 'user_choice', reversible: true, affectedSourceIds: [],
+    reason: `正文输出为${project.generationPolicy.language.locale === 'en' ? '英文' : project.generationPolicy.language.locale === 'zh-HK' ? '繁体中文（香港）' : '中文'}；${pairs} 组双语配对按目标语言呈现，来源归属与必要事实仍需校验${project.generationPolicy.details === 'notes' ? '；完整双语原文与代码保存在备注' : ''}。估算不代替大纲取舍台账。` });
+  else if (pairs) result.push({ topic: 'language', decision: 'bilingual_pairs', reversible: false, affectedSourceIds: [],
     reason: `输出语言与输入一致：${pairs} 组平行双语段落两种语言都保留，在同一组件内成对呈现；配对算一条内容，两种语言分别占用版面。` });
   const tables = source?.semantic?.inventory?.warnings?.filter(item => item.code === 'source_table_ragged_rows') || [];
   if (tables.length) result.push({ topic: 'table', decision: 'normalized', reversible: false, affectedSourceIds: tables.map(item => item.sourceUnitId),

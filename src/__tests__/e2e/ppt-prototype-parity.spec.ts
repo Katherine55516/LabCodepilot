@@ -1,3 +1,4 @@
+import {selectPptOption} from '../helpers';
 import { test, expect, type Page } from '@playwright/test';
 import { pptParityFixture } from '../fixtures/ppt-parity';
 const uiErrors = new WeakMap<Page,string[]>();
@@ -10,14 +11,14 @@ async function setup(page:Page,options: {completeAfterEdits?: number} = {}) {
     if(!result)return route.continue();
     return route.fulfill({status:result.status,contentType:result.contentType || 'application/json',body:typeof result.body==='string'?result.body:JSON.stringify(result.body)});
   });
-  await page.goto('/ppt');await expect(page.getByText('加载中…',{exact:true})).toHaveCount(0);
+  await page.goto('/ppt', {waitUntil:'domcontentloaded'});await expect(page.getByText('加载中…',{exact:true})).toHaveCount(0);
   return fixture;
 }
 async function enter(page:Page,kind='从 Prompt 开始') {
   await page.getByRole('button',{name:'＋ 新建',exact:true}).click();
   await expect(page.getByRole('combobox',{name:'LLM（必填）'})).toHaveCount(0);
   await page.getByRole('button',{name:new RegExp(kind)}).click();
-  await page.getByRole('combobox',{name:'LLM（必填）'}).selectOption('managed-demo::demo-model');
+  await selectPptOption(page.getByRole('combobox',{name:'LLM（必填）'}), 'managed-demo::demo-model');
   await page.getByRole('button',{name:'确认并继续 →'}).click();
   await expect(page.getByRole('textbox',{name:'输入 Prompt',exact:true})).toHaveCount(0);
   await page.getByRole('button',{name:/Teaching template/}).click();
@@ -25,22 +26,27 @@ async function enter(page:Page,kind='从 Prompt 开始') {
 }
 test('PPT template-first creation keeps manual pages, handles estimate races and sends policy @smoke',async({page},info)=>{
   const fixture=await setup(page);await enter(page);
-  await expect(page.getByTestId('ppt-page-count')).toHaveText('12 页');
+  await expect(page.getByTestId('ppt-page-count')).toHaveValue('12');
   const input=page.getByRole('textbox',{name:'输入 Prompt',exact:true});
-  await input.fill('slow topic');await expect(page.getByTestId('ppt-page-count')).toHaveText('12 页');await expect(page.getByText('Agent 正在估算页数…')).toBeVisible();
-  await input.fill('latest topic');await expect(page.getByTestId('ppt-page-count')).toHaveText('9 页');
+  await input.fill('slow topic');await expect(page.getByTestId('ppt-page-count')).toHaveValue('12');await expect(page.getByText('Agent 正在估算页数…')).toBeVisible();
+  await input.fill('latest topic');await expect(page.getByTestId('ppt-page-count')).toHaveValue('9');
   await page.getByRole('button',{name:'增加页数',exact:true}).click();
-  await input.fill('Different topic');await expect(page.getByTestId('ppt-page-count')).toHaveText('10 页');
-  await input.fill('');await expect(page.getByTestId('ppt-page-count')).toHaveText('10 页');
-  await page.getByRole('button',{name:'采用当前建议',exact:true}).click();await expect(page.getByTestId('ppt-page-count')).toHaveText('12 页');
+  await input.fill('Different topic');await expect(page.getByTestId('ppt-page-count')).toHaveValue('10');
+  await input.fill('');await expect(page.getByTestId('ppt-page-count')).toHaveValue('10');
+  await page.getByRole('button',{name:'采用当前建议',exact:true}).click();await expect(page.getByTestId('ppt-page-count')).toHaveValue('12');
   await input.fill('为团队介绍平台架构与约束，生成8页');
-  await page.getByRole('combobox',{name:'内容详细程度'}).selectOption('detailed');
+  await selectPptOption(page.getByRole('combobox',{name:'内容详细程度'}), 'detailed');
   await page.getByRole('button',{name:'← 返回模板'}).click();
   await page.getByRole('button',{name:'下一步：输入内容 →'}).click();await expect(input).toHaveValue('为团队介绍平台架构与约束，生成8页');
   await page.screenshot({path:info.outputPath('input-desktop.png')});
-  await page.getByRole('button',{name:'开始生成',exact:true}).click();
-  await expect.poll(()=>fixture.payloads.find(p=>p.inputKind==='prompt')).toMatchObject({pages:8,generationPolicy:{version:1,detail:'detailed',language:{mode:'source'},knowledge:'source_plus_explanation'}});
-  await expect(page.getByTestId('ppt-create-wizard')).toHaveCount(0);
+  await page.getByRole('button',{name:'读取输入并生成大纲',exact:true}).click();
+  await expect.poll(()=>fixture.payloads.find(p=>p.inputKind==='prompt')).toMatchObject({pages:8,generationPolicy:{version:1,detail:'detailed',language:{mode:'source'},knowledge:'source_only'}});
+  // Planning cannot start writers before explicit confirmation.
+  await expect(page.getByTestId('ppt-outline-review')).toBeVisible();
+  await expect(page.getByTestId('ppt-outline-auto-continue')).toHaveCount(0);
+  expect(fixture.payloads.some(p=>p.action==='generate')).toBe(false);
+  await page.getByRole('button',{name:'确认大纲并生成页面',exact:true}).click();
+  await expect(page.getByTestId('ppt-create-wizard')).toHaveCount(0,{timeout:20000});
 });
 test('PPT paste syllabus and composer remain reachable at 390 by 500 @smoke',async({page},info)=>{
   const fixture=await setup(page);await enter(page,'粘贴文本');
@@ -51,9 +57,9 @@ test('PPT paste syllabus and composer remain reachable at 390 by 500 @smoke',asy
   await page.getByRole('textbox',{name:'大纲标题 8',exact:true}).fill('Verified last topic');
   const body=page.locator('.ppt-create-body'); await body.hover();await page.mouse.wheel(0,1800);
   expect(await body.evaluate(el=>el.scrollTop)).toBeGreaterThan(0);
-  await expect(page.getByRole('button',{name:'确认 Syllabus 并开始生成'})).toBeVisible();
+  await expect(page.getByRole('button',{name:'确认大纲并生成页面'})).toBeVisible();
   await page.screenshot({path:info.outputPath('paste-short.png')});
-  await page.getByRole('button',{name:'确认 Syllabus 并开始生成'}).click();
+  await page.getByRole('button',{name:'确认大纲并生成页面'}).click();
   expect(fixture.payloads.find(p=>p.action==='outline' && p.slides)?.slides.at(-1).title).toBe('Verified last topic');
 });
 test('PPT generation dock preserves draft through close and supports two fixed-scope turns @smoke',async({page},info)=>{
@@ -84,9 +90,9 @@ test('PPT local translate and expand send parameters and review real proposal me
   await page.getByRole('button',{name:'打开编辑器',exact:true}).click();
   const editor=page.getByTestId('ppt-structured-editor');
   await editor.getByRole('button',{name:'AI 局部优化',exact:true}).click();
-  await editor.getByRole('combobox',{name:'文字动作'}).selectOption('translate');
-  await editor.getByRole('combobox',{name:'目标语言'}).selectOption('fr');
-  await editor.getByRole('combobox',{name:'翻译方式'}).selectOption('bilingual');
+  await editor.getByRole('combobox',{name:'文字动作'}).click();await page.getByRole('option',{name:'翻译',exact:true}).click();
+  await editor.getByRole('combobox',{name:'目标语言'}).click();await page.getByRole('option',{name:'Français',exact:true}).click();
+  await editor.getByRole('combobox',{name:'翻译方式'}).click();await page.getByRole('option',{name:'保留原文并加译文',exact:true}).click();
   await editor.getByRole('textbox',{name:'地区（可选）'}).fill('France');
   await editor.getByRole('textbox',{name:'术语规则（可选）'}).fill('mechanism=mécanisme');
   await editor.getByRole('button',{name:'用 AI 编辑当前页',exact:true}).click();
@@ -94,8 +100,8 @@ test('PPT local translate and expand send parameters and review real proposal me
   await expect(editor.getByTestId('ppt-ai-object-integrity')).toContainText('2');
   expect(fixture.payloads.filter(p=>p.action==='ai-edit').at(-1)).toMatchObject({scope:'slide',type:'content',parameters:{targetLanguage:'fr',mode:'bilingual',region:'France',glossary:'mechanism=mécanisme'}});
   await editor.getByRole('button',{name:'取消',exact:true}).click();
-  await editor.getByRole('combobox',{name:'文字动作'}).selectOption('expand');
-  await editor.getByRole('combobox',{name:'近似长度目标'}).selectOption('2');
+  await editor.getByRole('combobox',{name:'文字动作'}).click();await page.getByRole('option',{name:'扩写',exact:true}).click();
+  await editor.getByRole('combobox',{name:'近似长度目标'}).click();await page.getByRole('option',{name:'≈ 2×',exact:true}).click();
   await editor.getByRole('button',{name:'用 AI 编辑当前页',exact:true}).click();
   await expect(editor.getByTestId('ppt-ai-length')).toContainText('≈2×');
   expect(fixture.payloads.filter(p=>p.action==='ai-edit').at(-1)?.parameters).toEqual({lengthRatio:2});
@@ -133,12 +139,12 @@ test('PPT editable import keeps native page count independent of a small selecte
   await page.reload();
   await page.getByRole('button',{name:'＋ 新建',exact:true}).click();
   await page.getByRole('button',{name:/导入文件/}).click();
-  await page.getByRole('combobox',{name:'LLM（必填）'}).selectOption('managed-demo::demo-model');
+  await selectPptOption(page.getByRole('combobox',{name:'LLM（必填）'}), 'managed-demo::demo-model');
   await page.getByRole('button',{name:'确认并继续 →'}).click();
   await page.getByRole('button',{name:/Two page native template/}).click();
   await page.getByRole('button',{name:'下一步：输入内容 →'}).click();
   await page.locator('input[type=file]').setInputFiles({name:'native.pptx',mimeType:'application/vnd.openxmlformats-officedocument.presentationml.presentation',buffer:Buffer.from('fixture-native-pptx')});
-  await page.getByRole('combobox',{name:/PPTX 导入方式/}).selectOption('editable');
+  await selectPptOption(page.getByRole('combobox',{name:/PPTX 导入方式/}), 'editable');
   await page.getByRole('button',{name:'打开并编辑 PPTX',exact:true}).click();
   await expect.poll(()=>fixture.payloads.find(p=>p.inputKind==='file')).toMatchObject({importMode:'editable',fileName:'native.pptx'});
 });
@@ -146,16 +152,16 @@ test('PPT editable import keeps native page count independent of a small selecte
 test('PPT auto estimate remains provisional until syllabus confirmation @smoke', async ({page}, info) => {
   const fixture = await setup(page); await enter(page, '粘贴文本');
   await page.getByRole('textbox', {name:'粘贴文本', exact:true}).fill('latest topic');
-  await expect(page.getByTestId('ppt-page-count')).toHaveText('9 页');
+  await expect(page.getByTestId('ppt-page-count')).toHaveValue('9');
   const requests: Record<string, unknown>[] = [];
   page.on('request', request => { if(request.url().includes('/api/ppt/page-estimate') && request.method()==='POST') requests.push(request.postDataJSON()); });
-  await page.getByRole('combobox', {name:'内容详细程度'}).selectOption('detailed');
+  await selectPptOption(page.getByRole('combobox', {name:'内容详细程度'}), 'detailed');
   await expect.poll(() => requests.length).toBeGreaterThan(0);
   expect(requests.at(-1)).toMatchObject({template:'light', generationPolicy:{detail:'detailed'}});
   await page.getByRole('button', {name:'生成 Syllabus', exact:true}).click();
   await expect(page.getByRole('textbox', {name:'大纲标题 8', exact:true})).toBeVisible();
   expect(fixture.payloads.find(p => p.inputKind === 'paste')).not.toHaveProperty('pages');
-  await expect(page.getByTestId('ppt-page-count')).toHaveText('8 页');
+  await expect(page.getByTestId('ppt-page-count')).toHaveValue('8');
   const cdp = await page.context().newCDPSession(page);
   const state = await cdp.send('Runtime.evaluate', {expression:'document.querySelector(".ppt-create-body").scrollHeight > 0', returnByValue:true});
   expect(state.result.value).toBe(true);
@@ -163,7 +169,7 @@ test('PPT auto estimate remains provisional until syllabus confirmation @smoke',
   await import('node:fs').then(fs => fs.writeFileSync(info.outputPath('auto-calibrated-cdp.png'), Buffer.from(screenshot.data,'base64')));
   await cdp.detach();
   await page.screenshot({path:info.outputPath('auto-calibrated-syllabus.png'), fullPage:true});
-  await page.getByRole('button', {name:'确认 Syllabus 并开始生成'}).click();
+  await page.getByRole('button', {name:'确认大纲并生成页面'}).click();
   expect(fixture.payloads.find(p => p.action === 'outline')).toMatchObject({finalPageCount:8});
 });
 
@@ -176,13 +182,35 @@ test('PPT template capacity changes invalidate provisional syllabus and estimate
   });
   await enter(page, '粘贴文本');
   await page.getByRole('textbox', {name:'粘贴文本', exact:true}).fill('Conditions and the decision mechanism.');
-  await expect(page.getByTestId('ppt-page-count')).toHaveText('9 页');
+  await expect(page.getByTestId('ppt-page-count')).toHaveValue('9');
   await page.getByRole('button', {name:'生成 Syllabus', exact:true}).click();
   await expect(page.getByRole('textbox', {name:'大纲标题 8', exact:true})).toBeVisible();
   await page.getByRole('button', {name:'← 返回模板'}).click();
   await page.getByRole('button', {name:/Blue template/}).click();
   await page.getByRole('button', {name:'下一步：输入内容 →'}).click();
-  await expect(page.getByTestId('ppt-page-count')).toHaveText('6 页');
+  await expect(page.getByTestId('ppt-page-count')).toHaveValue('6');
   await expect(page.getByRole('textbox', {name:'大纲标题 8', exact:true})).toHaveCount(0);
   expect(requests).toContain('blue');
+});
+
+test('Switching a failed fixed-page outline back to module estimation starts the matching contract @smoke',async({page},info)=>{
+ const fixture=await setup(page);let first=true,retries=0;
+ await page.route('**/api/ppt/projects**',async route=>{
+  const request=route.request(),url=new URL(request.url()),body=request.postData()?request.postDataJSON():{};
+  if(request.method()==='POST'&&url.pathname.endsWith('/retry')){retries++;return route.fulfill({status:409,json:{error:'The old fixed-page contract must not be retried'}});}
+  if(request.method()==='POST'&&url.pathname==='/api/ppt/projects'){
+   const result=await fixture.handle('POST',url.pathname,body);const project=(result!.body as any).project;
+   Object.assign(project,{configId:body.configId,model:body.model,publishedRevision:0,pageDecision:{mode:body.pages?'explicit':'auto'}});
+   if(first){first=false;project.status='failed';project.stage='outline';project.error='capacity_conflict_fixture';}
+   return route.fulfill({status:result!.status,json:{project}});
+  }
+  return route.fallback();
+ });
+ await enter(page);await page.getByRole('textbox',{name:'输入 Prompt',exact:true}).fill('Source relations and their conditions.');
+ await expect(page.getByTestId('ppt-page-count')).toHaveValue('8');await page.getByTestId('ppt-page-count').fill('16');
+ await page.getByRole('button',{name:'读取输入并生成大纲',exact:true}).click();await expect(page.getByText('capacity_conflict_fixture',{exact:false}).first()).toBeVisible();
+ await page.getByRole('button',{name:'采用当前建议',exact:true}).click();await expect(page.getByTestId('ppt-page-count')).toHaveValue('8');
+ await page.getByRole('button',{name:'读取输入并生成大纲',exact:true}).click();await expect(page.getByTestId('ppt-outline-review')).toBeVisible();
+ expect(retries).toBe(0);expect(fixture.payloads.filter(p=>!p.action)).toHaveLength(2);expect(fixture.payloads.filter(p=>!p.action)[0].pages).toBe(16);expect(fixture.payloads.filter(p=>!p.action)[1].pages).toBeUndefined();
+ expect([...fixture.projects.values()].find(p=>p.status==='failed')?.pages).toBe(16);await page.screenshot({path:info.outputPath('failed-fixed-to-module-auto.png')});
 });

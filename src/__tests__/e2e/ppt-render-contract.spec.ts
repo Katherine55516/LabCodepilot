@@ -9,7 +9,7 @@ test('PPT shared contracts render signed charts, crops, code and tables @smoke',
  Object.assign(project.renderTree.slides[0],slide);
  const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));page.on('console',message=>{if(message.type()==='error')errors.push(message.text());});
  await page.route('**/api/**',async route=>{const r=await fixture.handle(route.request().method(),new URL(route.request().url()).pathname,route.request().postData()?route.request().postDataJSON():{});if(!r)return route.continue();return route.fulfill({status:r.status,contentType:r.contentType||'application/json',body:typeof r.body==='string'?r.body:JSON.stringify(r.body)});});
- await page.goto('/ppt');await page.getByRole('heading',{name:'Workflow fixture',exact:true}).click();await page.getByRole('button',{name:'打开编辑器',exact:true}).click();
+ await page.goto('/ppt', {waitUntil:'domcontentloaded'});await page.getByRole('heading',{name:'Workflow fixture',exact:true}).click();await page.getByRole('button',{name:'打开编辑器',exact:true}).click();
  const editor=page.getByTestId('ppt-structured-editor');
  await expect(editor.getByText('def verify(value):',{exact:true})).toBeVisible();await expect(editor.getByText('return "保留负号"',{exact:false})).toBeVisible();
  await expect(editor.getByRole('cell',{name:'-12.5',exact:true})).toBeVisible();
@@ -27,7 +27,7 @@ test('PPT shared contracts render signed charts, crops, code and tables @smoke',
  // Native 4:3 decks must use their own page ratio and points-per-pixel scale.
  const nativeSlide=project.renderTree.slides[0];nativeSlide.size={width:9144000,height:6858000};
  nativeSlide.elements.forEach(e=>{e.bounds={...e.bounds,x:e.bounds.x*.75,width:e.bounds.width*.75};});
- await page.goto('/ppt');await page.getByRole('heading',{name:'Workflow fixture',exact:true}).click();await page.getByRole('button',{name:'打开编辑器',exact:true}).click();
+ await page.goto('/ppt', {waitUntil:'domcontentloaded'});await page.getByRole('heading',{name:'Workflow fixture',exact:true}).click();await page.getByRole('button',{name:'打开编辑器',exact:true}).click();
  const title=page.getByTestId('ppt-structured-editor').getByText('多输入渲染契约 / Cross-input rendering',{exact:true});
  const ratio=await title.evaluate(e=>{const canvas=e.closest('.aspect-video')!;const b=canvas.getBoundingClientRect();return {ratio:b.width/b.height,font:parseFloat(getComputedStyle(e.parentElement!).fontSize),contentWidth:canvas.clientWidth};});
  expect(ratio.ratio).toBeCloseTo(4/3,2);expect(ratio.font/28).toBeCloseTo(ratio.contentWidth/720,2);
