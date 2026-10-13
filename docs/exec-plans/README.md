@@ -45,6 +45,7 @@
 | 文件 | 主题 | 状态 |
 |------|------|------|
 | completed/ppt-editor-template-bilingual-20261013.md | 六项重新复核、创建操作栏、暂停/完成编辑、旧报告模板隔离和单语 topic/多语分组 | 本地实现/独立提交快照16领域/CDP/smoke通过；在线长稿及远端未验收 |
+| active/ppt-factor-zoo-live-ci.md | Factor Zoo 原文与 Deal Review 模板的真实模型 ARM64 CI、容量合同修复、浏览器证据与最终导出 | 大纲合同修复进行中；真实整稿待门禁通过 |
 | active/ppt-byok-api-setup.md | OpenAI-compatible 持久化、PPT 本地模型队列、加密 API 设置与连接验证 | 本地实现/回归与真实 deepseek 连接完成；远端部署及真实整稿验收待执行 |
 | completed/ppt-gamma-density-packing.md | Gamma参照密度、语义分组/容量packing、自动syllabus页数与prompt/可见QA闭环 | 本地实现与模拟/原生导出/浏览器回归完成；真实模型待验收 |
 | completed/ppt-edit-intent-proposal-integration.md | 最新原型架构接入：共用模板确认、持久 Proposal/EditIntent、页级版本协调、单页 AI 前后预览与定向撤回 | 本地实现和回归完成；真实模型/远端/打包态待环境验收 |

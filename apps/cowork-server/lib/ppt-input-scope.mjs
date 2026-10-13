@@ -58,7 +58,11 @@ function compactInputs(material) {
     if (['table', 'code', 'equation', 'math', 'diagram'].includes(object.kind) || object.rows) return object;
     const range = span(object.text); return range ? { id: object.id, kind: object.kind, span: range } : object;
   });
-  return { ...material, segments, objects };
+  const compact={ ...material, segments, objects };
+  // Keep the identical complete pasted document once in the prompt view. The
+  // immutable framework and its hash still retain both original fields.
+  if(text&&material.prompt===text){delete compact.prompt;compact.promptRef='sourceText';}
+  return compact;
 }
 export function compactFramework(framework) {
   const material = framework.material;

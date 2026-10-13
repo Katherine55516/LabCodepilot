@@ -5,10 +5,12 @@ import { getProvider } from '@/lib/db';
 type Job = { id: string; configId: string; model: string; prompt: string; lease: string };
 type JobRequest = (path: string, body: unknown) => Promise<Response>;
 
+export const PPT_DESKTOP_MODEL_MAX_OUTPUT_TOKENS = 32768;
+
 /** Claims the account-owned server prompt. Browser-supplied prompts/URLs/keys are never used. */
 export async function executeDesktopModelJob(id: string, upstream: JobRequest, generate = async (job: Job, providerId: string) => {
   const { languageModel } = createModel({ providerId, model: job.model });
-  const result = await generateText({ model: languageModel, prompt: job.prompt, maxOutputTokens: 16384, maxRetries: 0, abortSignal: AbortSignal.timeout(240000) });
+  const result = await generateText({ model: languageModel, prompt: job.prompt, maxOutputTokens: PPT_DESKTOP_MODEL_MAX_OUTPUT_TOKENS, maxRetries: 0, abortSignal: AbortSignal.timeout(240000) });
   if (result.finishReason === 'length') throw new Error('Model output was truncated');
   return result.text;
 }) {

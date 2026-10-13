@@ -24,6 +24,11 @@ assert.equal(evidenceVisible(atom, 'At 1k/1k load, GB200 delivered approximately
 assert.equal(evidenceVisible(atom, 'At 1k/1k load, GB200 delivered about 10,000 TPS/GPU and 50 TPS/user, roughly 4× H200.'), true);
 assert.equal(evidenceVisible({ kind: 'example', exactText: String.raw`\mu - r_f\mathbf{1} \propto \Sigma\, w_{mkt}` },
   'μ − r_f1 ∝ Σw_mkt'), true, 'source equations written in LaTeX match equivalent Unicode notation in the rendered slide');
+const sortExample={kind:'example',exactText:String.raw`Construction uses independent $2\times3\times3$ sorts on size, I/A, and ROE (27 portfolios).`};
+assert.equal(evidenceVisible(sortExample,'Construction uses independent 2×3×3 sorts on size, I/A, and ROE (27 portfolios).'),true,
+  'the exact source example remains visible after the production notation adapter');
+assert.equal(evidenceVisible(sortExample,'Construction uses independent 2×3 sorts on size, I/A, and ROE (6 portfolios).'),false,
+  'notation equivalence must not accept changed dimensions or portfolio counts');
 
 const outline = [
   { id: 'cover', title: 'Compression', focus: 'Compression', role: 'cover', refs: ['1'], chunkRefs: [source.semantic.chunks[0].id] },

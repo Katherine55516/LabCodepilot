@@ -13,14 +13,15 @@ const { executeDesktopModelJob } = require('../../lib/ppt-desktop-model-worker')
 after(() => { db.closeDb(); fs.rmSync(dir, { recursive: true, force: true }); });
 describe('PPT desktop model worker', () => {
   it('retains encrypted BYOK across startup and uses real SDK Chat Completions against a local fixture', async () => {
-    let actualPath = ''; let requestedModel = ''; let auth = '';
+    let actualPath = ''; let requestedModel = ''; let auth = ''; let finishReason = 'stop';
     const server = http.createServer(async (req, res) => {
       actualPath = req.url || ''; auth = req.headers.authorization || '';
       const parts: Buffer[] = []; for await (const chunk of req) parts.push(chunk);
       const body = JSON.parse(Buffer.concat(parts).toString()); requestedModel = body.model;
       assert.equal(body.messages[0].content, 'Server-owned prompt');
+      assert.equal(body.max_tokens, 32768, 'large template outlines need the full worker output budget on the wire');
       res.setHeader('content-type', 'application/json');
-      res.end(JSON.stringify({ id: 'fixture', object: 'chat.completion', created: 1, model: body.model, choices: [{ index: 0, message: { role: 'assistant', content: '{"slides":[]}' }, finish_reason: 'stop' }], usage: { prompt_tokens: 5, completion_tokens: 5, total_tokens: 10 } }));
+      res.end(JSON.stringify({ id: 'fixture', object: 'chat.completion', created: 1, model: body.model, choices: [{ index: 0, message: { role: 'assistant', content: '{"slides":[]}' }, finish_reason: finishReason }], usage: { prompt_tokens: 5, completion_tokens: 5, total_tokens: 10 } }));
     });
     await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
     try {
@@ -44,6 +45,13 @@ describe('PPT desktop model worker', () => {
       assert.equal(requestedModel, 'ppt应用测试'); assert.equal(auth, 'Bearer test-only-not-real');
       assert.equal(complete.text, '{"slides":[]}'); assert.equal(complete.lease, 'nonce');
       assert.ok(!JSON.stringify(complete).includes('test-only-not-real'));
+      finishReason = 'length';
+      const truncated = await executeDesktopModelJob(id, async (route, body) => {
+        if (route.endsWith('/claim')) return Response.json({ id, configId: `byok:${provider.id}`, model: 'ppt应用测试', prompt: 'Server-owned prompt', lease: 'nonce' });
+        complete = body as Record<string, unknown>; return Response.json({ ok: true });
+      });
+      assert.equal(truncated.status, 502, 'even valid-looking JSON must be rejected when truncated');
+      assert.equal(complete.error, 'local_api_failed'); assert.equal(complete.text, undefined);
     } finally { await new Promise<void>(resolve => server.close(() => resolve())); }
   });
   it('rejects managed/unknown providers and never sends SDK errors or credentials back', async () => {

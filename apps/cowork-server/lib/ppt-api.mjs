@@ -3,6 +3,7 @@ import { validateRepairCandidate } from './ppt-repair-routing.mjs';
 import { assertCandidateScope } from './ppt/input-scope-service.mjs';
 import { automaticPages, densityProfile, densityPrompt } from './ppt-density-profile.mjs';
 import { packOutline, inspectDensityOutline, revalidateOutlineFits } from './ppt-density-packing.mjs';
+import { outlineCapacityRepairPrompt, applyOutlineCapacityRepair, outlineCapacityRepairScopes, partitionOutlineWithMeasuredComponents, restoreMissingSourceArtifacts } from './ppt-outline-capacity-repair.mjs';
 import { bindSourceArtifacts, bindSourceMedia, isSourceOwnedNode } from './ppt-source-artifacts.mjs';
 import { acceptExportVerification, blockExportVerification } from './ppt-export-integrity.mjs';
 import { templateLimits } from './ppt-template-security.mjs';
@@ -19,7 +20,7 @@ import * as store from './ppt-store.mjs';
 import * as orch from './orchestrator.mjs';
 import * as files from './files.mjs';
 import { runRoutine } from './routine-runner.mjs';
-import { promptPolicy, writingGuide, normalizeKeyPoints, canonicalWriterOutput, criticRewriteTargets, sourcePacket, slideSemanticContext, writerPrompt, writerRepairPrompt, outlineContentContract, OUTLINE_SCHEMA } from './ppt-prompt-contracts.mjs';
+import { promptPolicy, writingGuide, normalizeKeyPoints, canonicalWriterOutput, criticRewriteTargets, sourcePacket, slideSemanticContext, writerPrompt, writerRepairPrompt, writerCorrectionContext, outlineContentContract, OUTLINE_SCHEMA } from './ppt-prompt-contracts.mjs';
 import { renderPptx } from './ppt/exporters/pptx.mjs';
 import { renderPdf } from './ppt/exporters/pdf.mjs';
 import { extractFile, normalizePaste, mergeSourceMedia, validateFile, sha256 } from './ppt-source.mjs';
@@ -27,7 +28,7 @@ import { BUILT_INS, templateFor, validateTemplate, analyzeTemplate, snapshotTemp
 import { normalizeBlocks, normalizeSourceImages } from './ppt-blocks.mjs';
 import { applyLayoutRegistry, LAYOUTS } from './ppt-layout.mjs';
 import { boundedAll, dagNodeId, nodeRecord } from './ppt-dag.mjs';
-import { deckReviewPrompt, deterministicReview, finalQualityReport, inspectMedia, inspectSourceForSlide, normalizeModelReview, repairProject } from './ppt-quality.mjs';
+import { deterministicReview, finalQualityReport, inspectMedia, inspectSourceForSlide, reviewWithContractRepair, repairProject } from './ppt-quality.mjs';
 import { ensureDeckV3, ensureProjectV3, newId as newIrId, stableId } from './ppt/ir.mjs';
 import { buildRenderTree } from './ppt/render-tree.mjs';
 import { emitRunProgress, completeRun, recoverRun, startRun, transitionNode } from './ppt/run-service.mjs';
@@ -357,6 +358,7 @@ function normalizeSlide(value, outlineSlide, project = null, previousTitles = []
   slide.evidenceUsedIds = [...new Set(Array.isArray(value?.evidenceUsedIds) ? value.evidenceUsedIds : [])]
     .filter(id => retrieval?.evidenceAtoms.some(atom => atom.id === id)).slice(0, 10);
   if (project?.templateFidelity?.mode === 'preserve') {
+    slide.templateSlotContentTypes = value?.slotContentTypes || {};
     const valid = new Set(project.templateFidelity.slides[project.outline.findIndex(item => item.id === outlineSlide.id)]?.slots.map(slot => String(slot.shapeId)) || []);
     slide.templateSlotTexts = Object.fromEntries(Object.entries(value?.slotTexts || {}).filter(([key, text]) => valid.has(key) && (typeof text === 'string' || Array.isArray(text))).map(([key, text]) => {
       if (typeof text === 'string') {
@@ -383,10 +385,12 @@ function normalizeSlide(value, outlineSlide, project = null, previousTitles = []
     // returning an empty array; unsupported selections still fail validation.
     const selected=value?.sourceArtifacts?.length?value.sourceArtifacts:assigned;
     if(assigned.some(ref=>!selected.some(item=>item.sourceUnitId===ref.sourceUnitId &&
-      (item.rowStart??1)===(ref.rowStart??1) && (item.rowEnd??project.source?.semantic?.inventory?.items?.find(o=>o.id===ref.sourceUnitId)?.rows?.length)===(ref.rowEnd??project.source?.semantic?.inventory?.items?.find(o=>o.id===ref.sourceUnitId)?.rows?.length))))throw new HttpError(400,'writer omitted a required source object or changed its row selection');
+      (item.rowStart??1)===(ref.rowStart??1) && (item.rowEnd??project.source?.semantic?.inventory?.items?.find(o=>o.id===ref.sourceUnitId)?.rows?.length)===(ref.rowEnd??project.source?.semantic?.inventory?.items?.find(o=>o.id===ref.sourceUnitId)?.rows?.length))))throw new HttpError(400,`writer omitted a required source object or changed its row selection: ${JSON.stringify({expected:assigned,received:selected})}. Copy the frozen source selection exactly; row ranges are only valid for tables.`);
     const commentary=Array.isArray(value?.sourceCommentary)?value.sourceCommentary:assigned.length && !value?.slotTexts
       ? slide.copy.blocks.map(block=>block.body):[];
-    bindSourceArtifacts(project, slide, selected, index, commentary);
+    const requiredEvidence=project.templateFidelity?.mode==='preserve'?retrieval?.requiredEvidenceIds||[]:[];
+    if(value?.sourceEvidenceIds?.some(id=>!requiredEvidence.includes(id)))throw new Error('invalid source evidence selection: only frozen required evidence IDs may be bound');
+    bindSourceArtifacts(project, slide, selected, index, commentary,requiredEvidence);
     bindSourceMedia(project,slide,outlineSlide.sourceImageIds||[],index);
   }
   return slide;
@@ -568,16 +572,83 @@ function startOutline(uid, id, activity, log, deps = defaultDeps) {
       }
       const initialIssues=assessed?.issues||[{code:'invalid_outline_contract',message:String(validationError?.message||'invalid candidate').slice(0,500),repairable:true}];
       if(!p.requestedOutline && initialIssues.some(item=>item.repairable!==false)){
-        const repairPrompt=`${outlinePrompt(p)}\n初稿结构检查：${JSON.stringify(initialIssues.map(item=>({code:item.code,message:item.message})))}。${automatic?'请在有效来源编号、完整关系和可读容量内修订大纲，可合并或拆分，最终数量由代码拟合决定':'请在相同页数和有效来源编号内修订大纲'}，不改变用户锁定的标题，不虚构事实或证据；不同明确question不能靠相同groupId合并；表格分片必须是整数、仅用于表格且同页不重叠。初稿：${JSON.stringify(rawOutline)}。返回完整的同一 JSON schema。`;
+        const repairTask=`这是修复任务，不是重述初稿。初稿结构检查：${JSON.stringify(initialIssues.map(item=>({code:item.code,message:item.message})))}。${automatic?'请在有效来源编号、完整关系和可读容量内实际修改 slides 数组：增加分片页或移动完整单元，允许改变初稿页数，最终数量由代码拟合决定':'请在相同页数和有效来源编号内修订大纲'}，不改变用户锁定的标题，不虚构事实或证据；不同明确question不能靠相同groupId合并；表格分片必须是整数、仅用于表格且同页不重叠。容量建议是代码对实际原生模板的测量结果，不是要抄到 keyPoints 的正文。不能仅修改 topicGroups 的 capacity_ok 来声明通过；实际分片与可见文字须解决列出的溢出。componentFits 中 capacity_ok=false 表示该来源组件单独放入也不能容纳，缩短 keyPoints 无法解决；对这样的表格必须实际改变 sourceArtifactRanges 并分配到多个页面，可采用完整覆盖的 tableFragments 测量方案，不能继续保留整表范围。保留全部语言和事实；若用户或来源未锁定同页，双语长段落/小结可放到连续两页，分别保留各语言完整来源单元，不得自行添加双语必须同页的 adjacencyPairs 使容量冲突。`;
+        const repairPrompt=`${repairTask}\n${outlinePrompt(p)}\n待修复初稿：${JSON.stringify(rawOutline)}\n${repairTask}\n返回完整的同一 JSON schema，使用紧凑 JSON 格式，不缩减事实内容。`;
         try {
           const revised=assessOutlineCandidate(p,await deps.modelCall(p,repairPrompt,activity,log));
           if(!assessed || revised.planning.brief.reportMode===assessed.planning.brief.reportMode && revised.issues.length<initialIssues.length)assessed=revised;
         } catch(error){log(`ppt ${id} outline revision skipped: ${String(error?.message||error).slice(0,180)}`);}
       }
       if(!assessed)throw validationError;
+      if(automatic&&!p.requestedOutline){
+        const restored=restoreMissingSourceArtifacts(assessed);
+        if(restored!==assessed.rawOutline){
+          assessed=assessOutlineCandidate(p,restored);
+          log(`ppt ${id} restored complete missing source artifacts: ${assessed.project.pages} candidate pages`);
+        }
+      }
+      // The original whole-outline repair is retained. Automatic-page drafts
+      // with complete ownership can then repair only physical overflows; copy
+      // and selected rows cannot change. Every batch rebinds native templates.
+      if(automatic && !p.requestedOutline){
+        const overflowLoad=candidate=>candidate.rawOutline.slides.reduce((sum,s)=>sum+(s.densityFit?.predictedOverflow||0),0);
+        for(let round=0;round<3;round++){
+          const density=inspectDensityOutline(assessed.rawOutline,assessed.project);
+          if(!density.length||density.some(issue=>!['planned_density_overflow','planned_source_object_duplicate'].includes(issue.code)))break;
+          const indexes=outlineCapacityRepairScopes(assessed);
+          if(!indexes.length||indexes.length>16)break;
+          log(`ppt ${id} outline capacity partition round ${round+1}: ${indexes.length} pages`);
+          const base=assessed;
+          const partitions=await boundedAll(indexes,PPT_NODE_CONCURRENCY,async index=>{
+            try{
+              const prompt=outlineCapacityRepairPrompt(base,index);
+              const response=await deps.modelCall(p,prompt,activity,log);
+              try{return applyOutlineCapacityRepair(base,index,response);}
+              catch(error){
+                const correction=`${prompt}\n<invalid_partition>${JSON.stringify(response)}</invalid_partition>\n<contract_error>${String(error.message)}</contract_error>\n修复此 JSON 分配合同。保留全部原索引和完整来源行；每个 keyPointIndexes / requiredDetailIndexes 索引只分配一次，不在每个表格分片上重复。按 measured_native_advice 的全部 tableFragments 分配，不合并会溢出的片段。返回修复后的同一 JSON schema。`;
+                return applyOutlineCapacityRepair(base,index,await deps.modelCall(p,correction,activity,log));
+              }
+            }catch(error){log(`ppt ${id} local outline partition skipped: ${String(error?.message||error).slice(0,180)}`);return null;}
+          });
+          const replacements=new Map(),removed=new Set();
+          for(const [i,scope] of indexes.entries())if(partitions[i]){replacements.set(scope[0],partitions[i]);for(const index of scope.slice(1))removed.add(index);}
+          const slides=base.rawOutline.slides.flatMap((s,index)=>removed.has(index)?[]:replacements.get(index)||[s]);
+          if(slides.length>100)break;
+          try{
+            const revised=assessOutlineCandidate(p,{...base.rawOutline,slides});
+            const revisedDensity=inspectDensityOutline(revised.rawOutline,revised.project);
+            const structural=d=>d.filter(issue=>issue.code!=='planned_density_overflow');
+            const previousStructural=structural(density),nextStructural=structural(revisedDensity);
+            if(nextStructural.some(issue=>!previousStructural.some(old=>old.code===issue.code&&old.message===issue.message))||
+              nextStructural.length>previousStructural.length||nextStructural.length===previousStructural.length&&overflowLoad(revised)>=overflowLoad(base))break;
+            assessed=revised;
+          }catch(error){log(`ppt ${id} outline partition batch rejected: ${String(error?.message||error).slice(0,180)}`);break;}
+        }
+      }
+      // No generated copy is changed by the measured fallback. It partitions
+      // complete original atoms only after bounded model repair is exhausted.
+      if(automatic&&!p.requestedOutline)for(let pass=0;pass<3;pass++){
+        const density=inspectDensityOutline(assessed.rawOutline,assessed.project);
+        if(!density.length||density.some(issue=>!['planned_density_overflow','planned_source_object_duplicate'].includes(issue.code)))break;
+        {
+          const base=assessed,scopes=outlineCapacityRepairScopes(base),replacements=new Map(),removed=new Set();
+          for(const scope of scopes)try{
+            replacements.set(scope[0],partitionOutlineWithMeasuredComponents(base,scope));for(const index of scope.slice(1))removed.add(index);
+          }catch(error){log(`ppt ${id} measured outline partition skipped: ${String(error?.message||error).slice(0,180)}`);}
+          if(!replacements.size)break;
+          const slides=base.rawOutline.slides.flatMap((s,index)=>removed.has(index)?[]:replacements.get(index)||[s]);
+          if(slides.length>100)break;
+          try{assessed=assessOutlineCandidate(p,{...base.rawOutline,slides});log(`ppt ${id} measured complete-component partition pass ${pass+1}: ${assessed.project.pages} candidate pages`);}
+          catch(error){log(`ppt ${id} measured outline partition rejected: ${String(error?.message||error).slice(0,180)}`);break;}
+        }
+      }
       rawOutline=assessed.rawOutline;
       const outline=assessed.outline;
-      if(automatic && inspectDensityOutline(rawOutline,assessed.project).length)throw new Error('density_capacity: required source objects are missing or overflow after bounded outline repair');
+      if(automatic && inspectDensityOutline(rawOutline,assessed.project).length){
+        const diagnostic=store.get(uid,id);
+        if(diagnostic?.status==='outlining'){diagnostic.outlineCapacityDiagnostic={diagnosticOnly:true,candidatePages:assessed.project.pages,rawOutline,issues:inspectDensityOutline(rawOutline,assessed.project)};store.save(diagnostic);}
+        throw new Error('density_capacity: required source objects are missing or overflow after bounded outline repair');
+      }
       const current = store.get(uid, id);
       if (!current || current.status !== 'outlining') return;
       current.pages = assessed.project.pages;
@@ -606,6 +677,30 @@ function startOutline(uid, id, activity, log, deps = defaultDeps) {
     } catch (error) { fail(uid, id, 'outline', error, log); }
     finally { running.delete(id); if (generateAfterOutline) startGeneration(uid, id, activity, log, deps); }
   })();
+}
+async function writeWithContractRepair({prompt,call,normalize,nodeKey,maxRepairs=3}) {
+  let nextPrompt=prompt,response;
+  for(let attempt=0;attempt<=maxRepairs;attempt++){
+    response=undefined;
+    try{return {content:normalize(response=await call(nextPrompt,attempt?`${nodeKey}:contract-repair:${attempt}`:nodeKey)),attempts:attempt};}
+    catch(error){
+      if(attempt===maxRepairs||!/模型未返回有效的结构化内容|source_artifact_capacity|invalid visible native copy type|invalid source commentary|writer omitted|source artifact|row range|range.*table|template slot.*safety/iu.test(String(error.message)))throw error;
+      nextPrompt=`${writerCorrectionContext(prompt)}\n<invalid_response>${response===undefined?'No parseable JSON was returned':JSON.stringify(response)}</invalid_response>\n<writer_contract_error>${String(error.message)}</writer_contract_error>\n<repair>Return valid JSON in the same schema. Preserve exact frozen sources, all selected cells and necessary facts. Correct the precise type/count/height error above; do not repeat a rejected expanded draft. For sourceFits=true, keep all frozen structures and required excerpts. Merge complete related commentary into one or two paragraphs without blank lines to save padding; remove only duplicate explanation, never required facts or locked excerpts. Do not change source row ranges, fonts or page count.</repair>`;
+    }
+  }
+}
+function revalidateCompletedCopy(project) {
+  const reopened=[];
+  for(const [index,slide]of project.outline.entries()){
+    const node=project.nodes?.[slide.id];if(node?.status!=='done'||!node.slide||project.runtime?.slides?.[slide.id]?.accepted)continue;
+    if((node.slide.nodes||[]).some(item=>item.locked&&['text','list','table','chart'].includes(item.type)))continue;
+    const issues=inspectTemplateSlotDraft(project,index,node.slide).filter(issue=>issue.severity==='error');
+    if(!issues.length)continue;
+    node.status='pending';node.retryCopyIssues=issues;
+    project.dagNodes ||= {};project.dagNodes[dagNodeId('content',slide.id)]=nodeRecord('pending',project.dagNodes[dagNodeId('content',slide.id)],{reason:'cached content does not pass current native copy gates'});
+    reopened.push({slideId:slide.id,issues});
+  }
+  return reopened;
 }
 function startGeneration(uid, id, activity, log, deps = defaultDeps) {
   if (running.has(id)) return;
@@ -709,32 +804,45 @@ function startGeneration(uid, id, activity, log, deps = defaultDeps) {
           let content;
           if(minimal)content=structuredClone(prior);
           else {
-            const response=await deps.modelCall(snapshot,contentPrompt(snapshot,slide,index),activity,log,{nodeKey:nodeId});
-            try {content=normalizeSlide(response,slide,snapshot,previousTitles);}
-            catch(error) {
-              const repairPrompt=`${contentPrompt(snapshot,slide,index)}\n<invalid_response>${JSON.stringify(response)}</invalid_response>\n<repair>Resolve this contract error without deleting required objects, cutting sentences or duplicating content: ${String(error.message)}. Return the same schema.</repair>`;
-              content=normalizeSlide(await deps.modelCall(snapshot,repairPrompt,activity,log,{nodeKey:`${nodeId}:contract-repair`}),slide,snapshot,previousTitles);
-              content.localRepair={attempts:1,reasons:['writer_contract']};
-            }
+            const prompt=snapshot.nodes[slide.id]?.retryCopyIssues?.length && prior
+              ? contentRepairPrompt(snapshot,slide,index,prior,snapshot.nodes[slide.id].retryCopyIssues)
+              : contentPrompt(snapshot,slide,index);
+            const written=await writeWithContractRepair({prompt,nodeKey:nodeId,call:(prompt,nodeKey)=>deps.modelCall(snapshot,prompt,activity,log,{nodeKey}),normalize:response=>normalizeSlide(response,slide,snapshot,previousTitles)});
+            content=written.content;if(written.attempts)content.localRepair={attempts:written.attempts,reasons:['writer_contract']};
           }
           for (const item of (minimal ? requested : mutations.filter(item => ['layout', 'style'].includes(item.type)))) {
             snapshot.nodes[slide.id].slide = content; content = await transformGeneratedSlide(snapshot, slide.id, item, deps, activity, log);
           }
           const contract = snapshot.planning?.slidePlan?.find(item => item.slideId === slide.id);
-          const copyIssues = [
-            ...inspectSlideCopy(content, contract, index, snapshot.outline.length,
+          const inspectCopy = candidate => [
+            ...inspectSlideCopy(candidate, contract, index, snapshot.outline.length,
               { templatePreserved: snapshot.templateFidelity?.mode === 'preserve' }).filter(item => ['rewrite_title', 'expand_support', 'redistribute'].includes(item.repair)),
-            ...inspectTemplateSlotDraft(snapshot, index, content),
-            ...missingRequiredEvidence(snapshot, content, contract).map(atom => ({ code: 'required_evidence_missing', severity: 'error',
+            ...inspectTemplateSlotDraft(snapshot, index, candidate),
+            ...missingRequiredEvidence(snapshot, candidate, contract).map(atom => ({ code: 'required_evidence_missing', severity: 'error',
               message: `锁定证据 ${atom.id} 尚未出现在可见页面：${atom.exactText.slice(0, 180)}`, repair: 'expand_support', missingSupport: [atom.id] })),
           ];
+          let copyIssues=inspectCopy(content),repairAttempts=0,rejectedCopy=[];
           // A bounded local rewrite is still the same durable content node: it
           // does not add a DAG stage or restart other completed slides.
-          if (copyIssues.length && !minimal) {
-            content = normalizeSlide(await deps.modelCall(snapshot, contentRepairPrompt(snapshot, slide, index, content, copyIssues), activity, log,
-              { nodeKey: `${nodeId}:repair` }), slide, snapshot, previousTitles);
-            content.localRepair = { attempts: 1, reasons: copyIssues.map(item => item.code) };
+          while (copyIssues.length && !minimal && repairAttempts<3) {
+            const reasons=copyIssues.map(item=>item.code);
+            const repairPrompt=contentRepairPrompt(snapshot,slide,index,content,[...copyIssues,...rejectedCopy]);
+            const nodeKey=repairAttempts?`${nodeId}:repair:${repairAttempts+1}`:`${nodeId}:repair`;repairAttempts++;
+            try{
+              const written=await writeWithContractRepair({prompt:repairPrompt,nodeKey,maxRepairs:1,call:(prompt,nodeKey)=>deps.modelCall(snapshot,prompt,activity,log,{nodeKey}),normalize:response=>normalizeSlide(response,slide,snapshot,previousTitles)});
+              const candidateIssues=inspectCopy(written.content);
+              if(candidateIssues.filter(issue=>issue.severity==='error').length>copyIssues.filter(issue=>issue.severity==='error').length){rejectedCopy=candidateIssues.filter(issue=>issue.severity==='error');continue;}
+              content=written.content;copyIssues=candidateIssues;rejectedCopy=[];
+            }catch(error){
+              if(!/模型未返回有效的结构化内容|source_artifact_capacity|invalid visible native copy type|invalid source commentary|writer omitted|source artifact|row range/iu.test(String(error.message)))throw error;
+              rejectedCopy=[{code:'writer_rejected_candidate',severity:'error',repair:'expand_support',message:String(error.message)}];
+            }
+            content.localRepair = { attempts:repairAttempts,reasons,rejectedCandidates:rejectedCopy };
+            if(!copyIssues.some(issue=>issue.severity==='error'))break;
           }
+          const unresolved=copyIssues.filter(issue=>issue.severity==='error');
+          if(unresolved.length&&!minimal)throw new Error(`writer_copy_gate: ${JSON.stringify(unresolved.map(({code,shapeId,message})=>({code,shapeId,message})))}`);
+          if(repairAttempts)content.localRepair={...content.localRepair,attempts:repairAttempts,rejectedCandidates:rejectedCopy};
           if (inspectSlideCopy(content, contract, index, snapshot.outline.length).some(issue => issue.code === 'visible_copy_placeholder'))
             throw new Error('visible_copy_placeholder: show the actual source/table explanation before committing a page');
           const committed = await enqueueProject(uid, id, () => {
@@ -819,8 +927,7 @@ function startGeneration(uid, id, activity, log, deps = defaultDeps) {
         persistDagNode(uid, id, reviewNodeId, 'running');
         const reviewStarted = Date.now();
         try {
-          const rawReview = await deps.modelCall(current, deckReviewPrompt(current), activity, log, { nodeKey: reviewNodeId });
-          modelReview = normalizeModelReview(rawReview, current.deck.slides.map(slide => slide.id), current);
+          modelReview = await reviewWithContractRepair(current,(prompt,nodeKey)=>deps.modelCall(current,prompt,activity,log,{nodeKey}),{nodeKey:reviewNodeId});
           persistDagNode(uid, id, reviewNodeId, 'done', { durationMs: Date.now() - reviewStarted, result: modelReview });
         } catch (error) {
           persistDagNode(uid, id, reviewNodeId, 'failed', { durationMs: Date.now() - reviewStarted, error: String(error?.message || error).slice(0, 300) });
@@ -834,7 +941,7 @@ function startGeneration(uid, id, activity, log, deps = defaultDeps) {
       for (let attempt = 0; semanticReviewKey(current) !== reviewedInputHash; attempt++) {
         if (attempt >= 3) throw new Error('review inputs keep changing; retry after edits settle');
         reviewedInputHash = semanticReviewKey(current); initialReview = deterministicReview(current);
-        modelReview = normalizeModelReview(await deps.modelCall(current, deckReviewPrompt(current), activity, log, { nodeKey: 'review:deck:refresh' }), current.deck.slides.map(slide => slide.id), current);
+        modelReview = await reviewWithContractRepair(current,(prompt,nodeKey)=>deps.modelCall(current,prompt,activity,log,{nodeKey}),{nodeKey:'review:deck:refresh'});
         current = store.get(uid, id); if (!current || current.deletedAt || current.status !== 'generating') return;
         if (current.runtime?.pauseRequested) { await enqueueProject(uid, id, () => finishPause(store.get(uid, id))); return; }
       }
@@ -899,8 +1006,7 @@ function startGeneration(uid, id, activity, log, deps = defaultDeps) {
           if (!current) return;
         }
         reviewedInputHash = semanticReviewKey(current);
-        modelReview = normalizeModelReview(await deps.modelCall(current, deckReviewPrompt(current), activity, log,
-          { nodeKey: `review:deck:critic:${round + 1}` }), current.deck.slides.map(slide => slide.id), current);
+        modelReview = await reviewWithContractRepair(current,(prompt,nodeKey)=>deps.modelCall(current,prompt,activity,log,{nodeKey}),{nodeKey:`review:deck:critic:${round+1}`});
         current = store.get(uid, id);
         if (!current || current.deletedAt || current.status !== 'generating') return;
         if (current.runtime?.pauseRequested) { await enqueueProject(uid, id, () => finishPause(current)); return; }
@@ -919,7 +1025,7 @@ function startGeneration(uid, id, activity, log, deps = defaultDeps) {
       const reviewDuration = current.dagNodes?.[reviewNodeId]?.durationMs || 0;
       current.quality = finalQualityReport(repaired.review, repaired.repairs, modelReview, { reviewMs: reviewDuration });
       if (semanticReviewKey(current) !== reviewedInputHash) {
-        modelReview = normalizeModelReview(await deps.modelCall(current, deckReviewPrompt(current), activity, log, { nodeKey: 'review:deck:repair' }), current.deck.slides.map(slide => slide.id), current);
+        modelReview = await reviewWithContractRepair(current,(prompt,nodeKey)=>deps.modelCall(current,prompt,activity,log,{nodeKey}),{nodeKey:'review:deck:repair'});
         current.quality = finalQualityReport(repaired.review, repaired.repairs, modelReview, { reviewMs: reviewDuration });
       }
       const latestBeforePublish = store.get(uid, id);
@@ -1697,6 +1803,7 @@ export async function handlePpt(req, url, { uid, send, res, readBody, activity, 
     }
     if (action === 'retry' && req.method === 'POST') {
       if (project.status !== 'failed') return send(409, { error: 'project is not failed' });
+      if(project.stage==='generation')revalidateCompletedCopy(project);
       project.status = project.stage === 'ingest' ? 'ingesting' : project.stage === 'outline' ? 'outlining' : 'generating';
       project.error = ''; store.save(project);
       if (project.status === 'ingesting') startIngest(uid, id, activity, log, deps);
@@ -1750,4 +1857,4 @@ export async function handlePpt(req, url, { uid, send, res, readBody, activity, 
   }
 }
 
-export const _internals = { assessOutlineCandidate, mergeSourceSupplement, normalizeOutline, normalizeDeck, normalizeSlide, parseModelJson, pages, outlinePrompt, contentPrompt, defaultDeps };
+export const _internals = { assessOutlineCandidate, writeWithContractRepair, revalidateCompletedCopy, mergeSourceSupplement, normalizeOutline, normalizeDeck, normalizeSlide, parseModelJson, pages, outlinePrompt, contentPrompt, defaultDeps };

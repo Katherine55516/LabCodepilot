@@ -203,6 +203,8 @@ export function inferRole(slide, index, count, source = null) {
   if (ROLES.has(slide.role)) return slide.role;
   if (index === 0) return 'cover';
   if (index === count - 1) return 'closing';
+  const plannedRole={definition:'framework',mechanism:'mechanism',workflow:'process',comparison:'comparison',diagnostic:'system',evidence:'evidence',synthesis:'evidence'}[slide.pageContract?.job];
+  if(plannedRole)return plannedRole;
   const text = `${slide.title || ''} ${slide.focus || ''} ${(slide.sourceTopics || []).join(' ')} ${slide.narrativeRole || ''}`;
   const intent = typeof slide.visualIntent === 'string' ? slide.visualIntent : slide.visualIntent?.type;
   if (intent === 'comparison') return 'comparison';

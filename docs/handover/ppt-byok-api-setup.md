@@ -33,7 +33,7 @@
 2. 本地 provider 分支将完整 prompt 放入 `ppt-model-jobs.mjs` 瞬时队列。工作按 UID 隔离，最多 12 个/账号、1000 个全局；领取时返回随机 lease，完成必须 UID 与 lease 均一致。重复领取/完成拒绝，暂停或取消移除工作；超时五分钟。
 3. PPT 页面 `usePptDesktopModelWorker` 从账号已认证的代理列出工作，最多并行三个。浏览器调用本地 `/api/ppt/model-jobs/run` 只传 job ID。
 4. Next route 检查当前登录、已配发 Cowork URL/token，在服务端领取该账号工作。`ppt-desktop-model-worker.ts` 读取本机加密 provider，用所选模型调用 AI SDK，不接受 renderer 提供 prompt、URL 或密钥；仅回传结果文本和 lease。
-5. 沙箱解析原有 JSON，继续归一化、内容范围检查、页面契约、媒体/渲染门禁和后续节点。模型错误不回传原始 SDK 内容；截断结果失败。模型执行上限四分钟、16384 output tokens，无自动重试，由现有 PPT 重试入口接管。
+5. 沙箱解析原有 JSON，继续归一化、内容范围检查、页面契约、媒体/渲染门禁和后续节点。模型错误不回传原始 SDK 内容；截断结果失败。模型执行上限四分钟、32768 output tokens，无自动重试，由现有 PPT 重试入口接管。
 
 队列未持久化。服务重启时在途工作失败，项目按现有 checkpoint 恢复；未领取工作依赖 PPT 页面保持打开，离开页面停止轮询，已发出的请求继续完成。用户本地 key 模式不承诺关客户端后台生成。
 
@@ -54,3 +54,26 @@ macOS 启动：用 Node 22 执行 `PORT=3109 node scripts/dev-secure-api-keychai
 - 待验收：部署后用真实账号跑输入→大纲→生成→局部 AI→审查→导出，验证暂停/重试、关闭页面提示、模型不可用时用户可见错误；完整 deck JSON 和复杂输出质量需单独 baseline。安装包凭证迁移/打包验收未执行。
 
 New API 接口参考：[API 使用指南](https://docs.newapi.pro/zh/docs/guide/feature-guide/user/api)、[Chat Completions 文档](https://docs.newapi.pro/zh/docs/api/ai-model/chat/openai/createchatcompletion)。本次可用性结论来自实际已认证请求，文档不作为模型授权证据。
+
+## Factor Zoo 真实模型 ARM64 运行诊断（2026-10-09）
+
+用户授权私有仓库 `Katherine516/ppt-factor-zoo-live-20261009`，输入 Markdown 原文作为 prompt，Deal Review PPTX 为模板。原始模块自动估算 34 页（最终页数须由模板容量与大纲规划确定）。CI 为 macOS arm64，保留原规划、模型队列、模板导入、生成、审查和导出门禁；仅以主机 IO 适配替代 Docker，不代表真实账号部署验收。
+
+- Run 37937054264：101041 input tokens，16384 reasoning tokens，正文为空；输出截断导致大纲失败。
+- Run 37938651254：同一 deepseek-v4-flash 设置 reasoning_effort=none，100962 input tokens，16384 text tokens / 41958 字符，仍被输出上限截断。
+- 本地 worker 输出上限改为 32768；真实 SDK fixture 验证传出的 max_tokens，以及截断时不提交部分正文。私有 workflow 应用该单一补丁，harness 从 worker 源码读取上限；原始 prompt、页数决策和门禁不变。完整整稿结果以该仓库后续运行报告为准，失败时不强制发布 PowerPoint。
+
+- Run 37940354660：两次完整输出（22909 / 23660 tokens），大纲候选 30 页；9 个模板容量溢出、5 张表遗漏末行，原门禁正确阻止后续生成。浏览器最终失败页已目视检查，pageerror=0。用户随后明确授权修复大纲合同并重跑。新增表格 dataRowRange 半开区间、缺失行和原生内容矩形/字体/溢出诊断；全量单元 2819 通过、1 跳过，30 项容量审计与 prompt 合同通过。
+
+- Runs 37942888517 / 37946083653 / 37948767757：完整输出后仍为容量失败；表格末行合同已正确，整稿修复仍不可靠。增加最多三轮局部容量分配，仅让模型重新分配原来源、表格行及内容承诺索引；代码拒绝遗漏/重复/越界，并按最终原生模板分配重测。页数不手工指定，原质量门禁继续决定是否可导出。该补丁尚待真实 CI 完整生成验收。
+
+Run 37968706171 froze 51 pages, completed 39 content nodes and failed 12. All 119 model calls completed; no HTTP 429 occurred. Nine cached completed pages still have hard native title/slot errors. The next run restores the genuine compressed production checkpoint and verified content-addressed media, validates identical full prompt/template/model, relocates only the original template file for host IO, and calls the original POST /retry route. The module reopens only cached pages with current hard native errors; valid/accepted content remains intact. Writer corrections now expose exact selected source rows, type/count/physical-height errors and native title capacity. Both initial JSON contract correction and local copy correction are bounded; invalid or worse rewrites are rejected, final hard copy issues cannot be marked completed, and all original whole-deck/quality/export gates still apply. No deck text, page count or successful status is supplied by the harness. Local full suite: 2819 passed/1 skipped; 47 density/contract/recovery audit checks passed.
+
+- Run 37980104821 已启动，私有执行提交 45f5785。源码补丁已验证可应用到固定 08727bea，并逐文件与本机测试代码完全相同。全量 2820 / 2819 pass / 1 skip / 0 fail；50 项审计与 prompt/evidence 专项通过。真实小范围诊断：封面、导航、CAPM 与 q 模型硬性错误为零（保留软性深度提示），只证明单页合同，不证明整稿或导出。绑定来源 ID 由模块原样编译到可见节点，不用模型翻译替代锁定原句；实际字体、容量、来源、critic、导出门禁全部保留。原始 51 页大纲不变，恢复验证为 38 页不变、13 页重试。
+
+
+## 2026-10-10 实测状态补记
+
+本次配置复核针对 `.aimate-api-development` 开发配置：global default 与 provider default 均为 `qwen3.8-max`，provider 为 OpenAI-compatible 网关，密钥仍加密保存；三个已授权模型 Qwen/Opus/Sonnet 的短请求成功，Opus/Sonnet 三语 JSON Schema 通过。GPT-6.1 Sol 不在该账户模型目录且请求返回503，不能因 Codex 账号可选该名称就认定网关有上游权限。Qwen 长稿部分超时；最新 Sonnet 51页内容全部完成，但整稿 reviewer 在240/420秒预算下仍 transport失败，不能声明整个PPT工作流通过。
+
+逐页比较、源码改进、实际 token/字节/字符、模型能力与未完成项见 `/Users/dongli/Documents/ChatGPT/CodePilot/LabCodepilot/outputs/ppt-factor-zoo-postmortem-20261009/analysis.md`。模块改动位于既有 `application-local-run17` 隔离工作树，尚未合并/部署；开发配置有效不等于已安装 Electron 的另一 profile 已迁移。检查稿仅有原生文件完整性/人工复核证据，仍未获最终语义/外观批准。

@@ -3,7 +3,7 @@ import { inspectPageContracts } from './ppt-page-contract.mjs';
 import { inspectSourceNumbers } from './ppt-source-numbers.mjs';
 import { buildMediaLedger, inspectMediaLedger } from './ppt-media-ledger.mjs';
 import { annotateIssues, routeIssue, themeBound, validateRepairCandidate } from './ppt-repair-routing.mjs';
-import { obligationRegistry, normalizeObligationAudit, obligationFailures } from './ppt-obligations.mjs';
+import { obligationRegistry, normalizeObligationAudit, obligationFailures, obligationEvidenceDiagnostics } from './ppt-obligations.mjs';
 import { inputFramework, normalizeScopeAudit } from './ppt-input-scope.mjs';
 import { buildRenderTree } from './ppt/render-tree.mjs';
 import { renderIssues } from './ppt/render-audit.mjs';
@@ -333,8 +333,8 @@ export function deckReviewPrompt(project) {
     // image base64 or geometry to the text critic; retain chart values and units.
     const semanticComponents = visibleNodes(slide).filter(node => !node.nativeRef || ['table', 'chart', 'image'].includes(node.type)).map(node => {
       const content = node.content || {};
-      if (node.type === 'chart') return { nodeId: node.id, type: node.type, content, sourceRefs: node.sourceRefs || slide.sourceRefs || [] };
-      if (node.type === 'table') return { nodeId: node.id, type: node.type, content, sourceRefs: node.sourceRefs || slide.sourceRefs || [] };
+      if (node.type === 'chart') return { nodeId: node.id, type: node.type, text: nodeContentText(node), content, sourceRefs: node.sourceRefs || slide.sourceRefs || [] };
+      if (node.type === 'table') return { nodeId: node.id, type: node.type, text: nodeContentText(node), content, sourceRefs: node.sourceRefs || slide.sourceRefs || [] };
       return { nodeId: node.id, type: node.type, semanticRole: node.semanticRole,
         text: nodeContentText(node),
         ...(node.type === 'image' ? { caption: content.caption || content.alt || '' } : {}),
@@ -361,7 +361,7 @@ export function deckReviewPrompt(project) {
   const coverage = (project.planning?.coverage || []).filter(item => item.priority === 'high').slice(0, 60)
     .map(item => ({ topic: item.topic, action: item.action, slideIds: item.slideIds }));
   const prompt = `${densityPrompt(project)}
-你是整稿演示文稿内容评审器。${promptPolicy(project)}<rubric>先独立对照 INPUT_FRAMEWORK 检查每页标题、正文、表/图/代码/流程与媒体说明的主题和事实边界；模型 brief/sourceScope/ownedPoints/引用 ID 不能证明支撑。无数字的越界话题、额外议程、无依据建议及未经标注的假设同样记入 unsupported，reason="out_of_scope" 或 "unsupported_fact"。框架内必要解释不因没有逐字来源而误判；但新增事实前提必须有输入依据。然后逐项检查 ownedPoints、requiredDetails、表格类别及关系是否在可见文案展开。missing 包括必要解释缺失或浅薄：标签代替解释、未讲机制/条件、通用口号、断句；浅薄项加 reason="shallow"。短图示 label、封面或过渡不因字少被判浅薄；具体信息与关系比字数重要。每项给 suggestedFix，指出哪一项来源关系/条件需补入哪个点；不能给未核实数字。必要的回顾或简短引用不判重复；同页名词标签与其解释相配不判重复。来源内部冲突要报告 conflicts，不能自行发明校正值。上下文预算漏掉的来源不能据此判 unsupported；只报告可核对的事实。纯 prompt 仅允许其主题内必要的通用解释，不能扩出新主题。完整可见文本和原始输入必须全部审查；如未能完成，scopeAudit.status="not_evaluated"，不能返回一个暗示通过的空报告。</rubric>只评审内容，不调用工具，不搜索，不改写页面，不提供字体、坐标、布局或 PPTX 代码。visibleSlots 和 visiblePoints 是观众实际看到的模板文字。逐页核对标题、子标题、卡片及图解标签是否属于同一来源事实，说明是否完整，概念是否与样例混淆；把错配或自相矛盾记入 conflicts，把截断、空泛或缺失记入 missing，把无来源支撑的描述记入 unsupported。若是职场汇报，还要在同样四类中检查决策问题、前置摘要、主文信息分布和来源支撑，不增加输出类别。\n主题：${project.prompt}\n当前语义修改约束：${JSON.stringify(project.constraints?.entries?.filter(entry => entry.active && ['content','title','data','structure'].includes(entry.type)) || [])}\n演示目标与必讲内容：${JSON.stringify(brief ? { objective: brief.objective, thesis: brief.thesis, mustInclude: brief.mustInclude, reportMode: brief.reportMode, decisionQuestion: brief.decisionQuestion, sourceScope: brief.sourceScope } : {})}\n高优先级主题映射：${JSON.stringify(coverage)}\n页面：${JSON.stringify(slides)}\n来源：${JSON.stringify(sources)}\n仅输出一个 JSON 对象：{"missing":[{"slideIds":["1"],"detail":"缺少的必要内容"}],"repeated":[{"slideIds":["2","4"],"detail":"重复点"}],"conflicts":[{"slideIds":["3","5"],"detail":"冲突事实"}],"unsupported":[{"slideIds":["6"],"bulletIndexes":[0],"detail":"证据不足"}]}。四个数组都必须存在；没有发现时返回空数组。必须逐项返回 obligationAudit={registryHash:MANDATORY_OBLIGATIONS.registryHash,status:"complete|not_evaluated",checks:[{obligationId:"真实义务ID",status:"satisfied|missing|altered|not_evaluated",evidence:[{slideId:"当前页ID",nodeId:"当前可见实例ID",excerpt:"承载完整关系的逐字可见原文"}]}]}。每个义务恰好一次；satisfied须绑定实际承载完整内容的实例，包括父条件、否定、例外及单位，每个证据 excerpt 必须逐字来自该实例，不能用关键词覆盖率或引用ID代替判断。允许正确同义表达；可选浅薄仍在missing。未查完须not_evaluated。必须另返回 scopeAudit=${JSON.stringify({frameworkHash:inputFramework(project).frameworkHash,checkedSlideIds:slides.map(slide=>slide.slideId),status:"complete"})}；仅实际完成全部页面的输入框架与事实审查时使用 complete，否则 not_evaluated。slideIds 只能使用给定页面 ID，bulletIndexes 仅在报告 bullets 时填写，从 0 开始。每项可增加 reason="shallow" 和 suggestedFix；不要输出整页修订文本或坐标。`;
+你是整稿演示文稿内容评审器。${promptPolicy(project)}<rubric>先独立对照 INPUT_FRAMEWORK 检查每页标题、正文、表/图/代码/流程与媒体说明的主题和事实边界；模型 brief/sourceScope/ownedPoints/引用 ID 不能证明支撑。无数字的越界话题、额外议程、无依据建议及未经标注的假设同样记入 unsupported，reason="out_of_scope" 或 "unsupported_fact"。框架内必要解释不因没有逐字来源而误判；但新增事实前提必须有输入依据。然后逐项检查 ownedPoints、requiredDetails、表格类别及关系是否在可见文案展开。missing 包括必要解释缺失或浅薄：标签代替解释、未讲机制/条件、通用口号、断句；浅薄项加 reason="shallow"。短图示 label、封面或过渡不因字少被判浅薄；具体信息与关系比字数重要。每项给 suggestedFix，指出哪一项来源关系/条件需补入哪个点；不能给未核实数字。必要的回顾或简短引用不判重复；同页名词标签与其解释相配不判重复。来源内部冲突要报告 conflicts，不能自行发明校正值。上下文预算漏掉的来源不能据此判 unsupported；只报告可核对的事实。纯 prompt 仅允许其主题内必要的通用解释，不能扩出新主题。完整可见文本和原始输入必须全部审查；如未能完成，scopeAudit.status="not_evaluated"，不能返回一个暗示通过的空报告。</rubric>只评审内容，不调用工具，不搜索，不改写页面，不提供字体、坐标、布局或 PPTX 代码。visibleSlots 和 visiblePoints 是观众实际看到的模板文字。逐页核对标题、子标题、卡片及图解标签是否属于同一来源事实，说明是否完整，概念是否与样例混淆；把错配或自相矛盾记入 conflicts，把截断、空泛或缺失记入 missing，把无来源支撑的描述记入 unsupported。若是职场汇报，还要在同样四类中检查决策问题、前置摘要、主文信息分布和来源支撑，不增加输出类别。\n主题：${project.prompt}\n当前语义修改约束：${JSON.stringify(project.constraints?.entries?.filter(entry => entry.active && ['content','title','data','structure'].includes(entry.type)) || [])}\n演示目标与必讲内容：${JSON.stringify(brief ? { objective: brief.objective, thesis: brief.thesis, mustInclude: brief.mustInclude, reportMode: brief.reportMode, decisionQuestion: brief.decisionQuestion, sourceScope: brief.sourceScope } : {})}\n高优先级主题映射：${JSON.stringify(coverage)}\n页面：${JSON.stringify(slides)}\n来源：${JSON.stringify(sources)}\n仅输出一个 JSON 对象：{"missing":[{"slideIds":["1"],"detail":"缺少的必要内容"}],"repeated":[{"slideIds":["2","4"],"detail":"重复点"}],"conflicts":[{"slideIds":["3","5"],"detail":"冲突事实"}],"unsupported":[{"slideIds":["6"],"bulletIndexes":[0],"detail":"证据不足"}]}。四个数组都必须存在；没有发现时返回空数组。必须逐项返回 obligationAudit={registryHash:MANDATORY_OBLIGATIONS.registryHash,status:"complete|not_evaluated",checks:[{obligationId:"真实义务ID",status:"satisfied|missing|altered|not_evaluated",evidence:[{slideId:"当前页ID",nodeId:"当前可见实例ID",excerpt:"承载完整关系的逐字可见原文"}]}]}。每个义务恰好一次；satisfied须绑定实际承载完整内容的实例，包括父条件、否定、例外及单位，每个证据 excerpt 必须逐字来自该 slideId/nodeId 实例的 text（含表/图的展平 text）或 visibleSlots.text；不能添加表格竖线、改标点、缩写、拼接其他节点或用来源包原文冒充可见文字。跨节点或跨表分片承载的义务须分别引用各实际实例，合起来保留完整关系。不能用关键词覆盖率或引用ID代替判断。允许正确同义表达；可选浅薄仍在missing。未查完须not_evaluated。必须另返回 scopeAudit=${JSON.stringify({frameworkHash:inputFramework(project).frameworkHash,checkedSlideIds:slides.map(slide=>slide.slideId),status:"complete"})}；仅实际完成全部页面的输入框架与事实审查时使用 complete，否则 not_evaluated。slideIds 只能使用给定页面 ID，bulletIndexes 仅在报告 bullets 时填写，从 0 开始。每项可增加 reason="shallow" 和 suggestedFix；不要输出整页修订文本或坐标。`;
   // Explicit capacity failure, never a truncated authoritative source. The
   // selected model must also return not_evaluated if its own window is smaller.
   if(Buffer.byteLength(prompt,'utf8')>1024*1024)throw Object.assign(new Error('content_review_capacity: complete input/obligations exceed the review transport budget; split the input without losing conditions'),{code:'content_review_capacity'});
@@ -395,6 +395,25 @@ export function normalizeModelReview(value, slideIds, project = null) {
     conflicts: normalize(value?.conflicts),
     unsupported: normalize(value?.unsupported, true),
   };
+}
+
+/** Correct only malformed review JSON/evidence bindings, with all original
+ * source and audit gates retained. Semantic writer rounds are independent. */
+export async function reviewWithContractRepair(project, call, {nodeKey='review:deck',maxRepairs=2}={}) {
+  if(!Number.isInteger(maxRepairs)||maxRepairs<0||maxRepairs>2)throw new Error('invalid review correction bound');
+  const original=deckReviewPrompt(project), ids=project.deck.slides.map(s=>s.id);
+  let prompt=original;
+  for(let attempt=0;;attempt++) {
+    let raw;
+    try { raw=await call(prompt,attempt?`${nodeKey}:contract:${attempt}`:nodeKey);return normalizeModelReview(raw,ids,project); }
+    catch(error) {
+      if(attempt>=maxRepairs||!/模型未返回有效的结构化内容|whole-deck.*review|whole-deck.*finding|mandatory obligation|obligation evidence|invalid mandatory obligation|input scope audit/iu.test(String(error.message)))throw error;
+      const issues=obligationEvidenceDiagnostics(raw?.obligationAudit,project);
+      prompt=original+'\n<review_contract_repair>'+JSON.stringify({error:String(error.message),issues,previousReview:raw??null})+'</review_contract_repair>\n'+
+        '上次审查 JSON 或证据引用未通过校验。重新输出完整四类 findings、全部 obligationAudit checks 与 scopeAudit；不能删除义务或为了通过清空问题。每条 excerpt 必须逐字来自其 slideId/nodeId 对应的 text/visibleSlots.text，包括表格提供的展平 text；不能拼接多个节点、添加表格竖线、改标点、缩写或从来源包代替可见节点摘录。若完整义务由多个实例承载，分别引用这些实例。保持来源与事实边界，真实缺失仍标 missing/altered/not_evaluated；只有实际核对了完整关系才能 satisfied。';
+      if(Buffer.byteLength(prompt,'utf8')>1024*1024)throw new Error('content_review_capacity: complete review correction exceeds the review transport budget');
+    }
+  }
 }
 
 export function finalQualityReport(deterministic, repairs, modelReview, timings = {}) {

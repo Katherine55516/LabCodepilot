@@ -739,9 +739,13 @@ export function inspectTemplateSlotDraft(project, index, slide) {
     const code = !used ? 'template_slot_unfilled' : used > slot.capacity ? 'template_slot_overflow' : 'template_description_too_short';
     return [{ code, severity: 'error',
       message: `模板第 ${index + 1} 页槽位 ${slot.shapeId} ${!used ? '必须填写' : used > slot.capacity ? `需要缩短至 ${slot.capacity} visual units` : `说明应达到至少 ${slot.minVisualUnits} visual units，并解释对应要点`}`,
-      repair: 'fill_template_slots', shapeId: slot.shapeId, capacity: slot.capacity, minVisualUnits: slot.minVisualUnits }];
+      repair: 'fill_template_slots', shapeId: slot.shapeId, slotRole: slot.role, capacity: slot.capacity, minVisualUnits: slot.minVisualUnits }];
   });
   issues.push(...omissionIssues);
+  if(index===0&&!slots.some(slot=>slot.role==='content'&&slot.purpose!=='footnote')&&
+    slide.sourceArtifactNodes?.some(node=>node.semanticRole==='source-explanation')&&
+    !slide.sourceArtifactNodes.some(node=>node.sourceArtifact))issues.push({code:'template_cover_body',severity:'error',repair:'fill_template_slots',
+      message:'原生封面只有标题/导航槽位，未规划正文区域；不能用来源解释覆盖封面装饰与标题。保留主题标题，移除重复背景说明；不得删除任何锁定来源结构。'});
   // Body slots have been explicitly replaced and checked by source-owned layout.
   // Title, section, retained slots and omission authorization still apply.
   if (slide.sourceArtifactNodes?.length) return issues;

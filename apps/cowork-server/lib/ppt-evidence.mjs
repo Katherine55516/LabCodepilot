@@ -1,4 +1,5 @@
 import { visibleNodes, nodeContentText } from './ppt-visible-content.mjs';
+import { sourceDisplayText } from './ppt-source-text.mjs';
 /** Source-grounded evidence lives in the existing semantic index. These atoms
  * are deterministic excerpts, not claims invented by the planner or writer. */
 const QUANTITY = /(?<![\p{L}\p{N}_])(?<value>\d[\d,.]*(?:\s*(?:–|-|→|to)\s*\d[\d,.]*)?)\s*(?<unit>PFLOPS|TFLOPS|FLOPS|TPS\s*\/\s*(?:GPU|user)|tokens?\s*\/\s*(?:s|sec|second|GPU|user)|GB|GiB|TB|MB|ms|milliseconds?|seconds?|bits?\s*\/\s*value|bits?|bytes?|layers?|heads?|parameters?|points?|billion|million|万|亿|%|％|×|B\b|M\b)/giu;
@@ -89,12 +90,13 @@ export function evidenceVisible(atom, text) {
     return quantitiesPresent && contextPresent && approximationPresent;
   }
   if (atom.kind === 'example') {
-    const canonical = value => String(value || '').normalize('NFKC')
+    const canonical = value => sourceDisplayText(value).normalize('NFKC')
       .replace(/\\(?:mathbf|mathrm|mathit|text|operatorname)\s*/gu, '')
       .replace(/\\(?:mu|gamma|Sigma|sigma|alpha|beta|epsilon)\b/gu, command => ({
         '\\mu': 'μ', '\\gamma': 'γ', '\\Sigma': 'Σ', '\\sigma': 'σ', '\\alpha': 'α', '\\beta': 'β', '\\epsilon': 'ε',
       })[command] || command)
       .replace(/\\propto\b/gu, '∝').replace(/\\Longrightarrow\b/gu, '⇒')
+      .replace(/\\times\b/gu, '×')
       .replace(/\\(?:,|;|quad|qquad|left|right)\b/gu, '')
       .toLocaleLowerCase().replace(/[^\p{L}\p{N}\u3400-\u9fff]+/gu, '');
     const exact = canonical(atom.exactText);
@@ -128,4 +130,15 @@ export function missingRequiredEvidence(project, slide, contract) {
   const atoms = new Map((project?.source?.semantic?.evidenceAtoms || []).map(atom => [atom.id, atom]));
   const visible = visibleSlideText(slide);
   return (contract?.requiredEvidenceIds || []).map(id => atoms.get(id)).filter(atom => atom && !evidenceVisible(atom, visible));
+}
+
+/** Compile immutable required excerpts, like source tables, into visible copy.
+ * It supplies no new fact and never replaces physical or semantic review. */
+export function lockedEvidenceComponents(project, ids, sourceComponents=[]) {
+  if(!Array.isArray(ids)||ids.length>10)throw Error('invalid source evidence selection');
+  const atoms=new Map((project.source?.semantic?.evidenceAtoms||[]).map(atom=>[atom.id,atom]));
+  const shown=sourceComponents.map(component=>nodeContentText(component)).join(' ');
+  const required=[...new Set(ids)].map(id=>{const atom=atoms.get(id);if(!atom)throw Error('invalid source evidence ID');return atom;})
+    .filter(atom=>!evidenceVisible(atom,shown));
+  return required.length?[{type:'text',content:{text:required.map(atom=>sourceDisplayText(atom.exactText)).join(' '),pointType:'example',sourceEvidenceIds:required.map(atom=>atom.id)}}]:[];
 }

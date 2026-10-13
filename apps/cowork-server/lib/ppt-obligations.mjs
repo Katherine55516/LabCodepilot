@@ -54,6 +54,22 @@ export function normalizeObligationAudit(value, project) {
   }
   return {registryHash:registry.registryHash,status:value.status,checks:structuredClone(checks)};
 }
+/** Diagnostics only. Never substitute a quote, locate evidence automatically,
+ * or change an audit verdict; the model must return a newly validated audit. */
+export function obligationEvidenceDiagnostics(value, project) {
+  const slides=project.deck?.slides||[], issues=[];
+  for(const check of Array.isArray(value?.checks)?value.checks:[])for(const ref of Array.isArray(check?.evidence)?check.evidence:[]) {
+    if(!ref||typeof ref!=='object')continue;
+    const slide=slides.find(s=>s.id===ref.slideId), nodes=slide?visibleNodes(slide):[];
+    const node=nodes.find(n=>n.id===ref.nodeId), legacy=slide&&ref.nodeId===`slide:${slide.id}`&&!slide.nodes?.length;
+    const text=node?nodeContentText(node):legacy?visibleSlideText(slide):null;
+    if(text===null || check.status==='satisfied'&&(typeof ref.excerpt!=='string'||!ref.excerpt.trim()||!text.includes(ref.excerpt)))issues.push({
+      obligationId:check.obligationId,slideId:ref.slideId,nodeId:ref.nodeId,providedExcerpt:ref.excerpt,
+      actualInstanceText:text,visibleInstances:nodes.map(n=>({nodeId:n.id,text:nodeContentText(n)})).filter(n=>n.text),
+    });
+  }
+  return issues;
+}
 export function obligationFailures(audit) {
   return (audit?.checks||[]).filter(check=>check.status!=='satisfied').map(check=>({code:'mandatory_content_'+check.status,severity:'error',obligationId:check.obligationId,slideIds:check.evidence.map(e=>e.slideId),detail:'Mandatory source condition/detail was not fully verified',repairable:true}));
 }

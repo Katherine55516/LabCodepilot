@@ -2,8 +2,9 @@ import { adaptationDisposition } from './ppt-template-dispositions.mjs';
 /** Source-owned editable structures. The model selects inventory IDs/row ranges,
  * never invents cells or supplies geometry. Capacity failure asks for split. */
 import { stableId } from './ppt/ir.mjs';
-import { fitComponents, protectedTemplateAsset, sourceComponent, sourceImageComponents, validateSourceArtifactRefs } from './ppt-density-capacity.mjs';
+import { fitComponents, explanationBudget, protectedTemplateAsset, sourceComponent, sourceImageComponents, validateSourceArtifactRefs } from './ppt-density-capacity.mjs';
 import {sourceDisplayText} from './ppt-source-text.mjs';
+import {lockedEvidenceComponents} from './ppt-evidence.mjs';
 export {sourceDisplayText} from './ppt-source-text.mjs';
 const clean = sourceDisplayText;
 // Absolute source-owned explanations have no inventory artifact ID, but must
@@ -40,9 +41,9 @@ function headerColor(fill) {
   const luminance = linear[0] * .2126 + linear[1] * .7152 + linear[2] * .0722;
   return luminance < .179 ? '#ffffff' : '#111111';
 }
-export function bindSourceArtifacts(project, slide, refs, index, commentary = []) {
+export function bindSourceArtifacts(project, slide, refs, index, commentary = [], sourceEvidenceIds = []) {
   if (!Array.isArray(refs)) throw new Error('invalid source artifact refs');
-  if (!refs.length && !commentary?.length) return slide;
+  if (!refs.length && !commentary?.length && !sourceEvidenceIds.length) return slide;
   if (refs.length > 10) throw new Error('source artifact safety limit exceeded');
   const spec=project.templateFidelity?.slides?.[index];
   const items=project.source?.semantic?.inventory?.items||[];
@@ -60,15 +61,22 @@ export function bindSourceArtifacts(project, slide, refs, index, commentary = []
     if(component.content.text && !component.content.mathMl && !component.content.codeBlock)component.content.text=clean(component.content.text);
     return {...component,item,ref};
   });
-  if (!Array.isArray(commentary) || commentary.length > 4 || commentary.some(value=>typeof value!=='string'||value.length>2000)) throw new Error('invalid source commentary');
+  components.push(...lockedEvidenceComponents(project,sourceEvidenceIds,components));
+  const copyTypes=new Set(['definition','mechanism','evidence','example','contrast','constraint','implication','stage','decision','next_step','support']);
+  if (!Array.isArray(commentary) || commentary.length > 4 || commentary.some(value=>typeof value==='string'?value.length>2000:!value||typeof value.text!=='string'||value.text.length>2000||!copyTypes.has(value.type))) throw new Error(`invalid source commentary: ${JSON.stringify({count:commentary?.length,maxEntries:4,maxTextCharacters:2000,receivedTypes:Array.isArray(commentary)?commentary.map(value=>typeof value==='string'?'legacy_string':value?.type):null,allowedTypes:[...copyTypes]})}; merge related complete explanations into at most four typed entries without deleting necessary facts`);
   const visibleTexts=new Set(components.map(component=>clean(component.content.text || component.content.rows?.map(row=>row.join(' | ')).join('\n') || component.content.items?.map(item=>item.text).join('\n') || '').replace(/\s+/gu,' ').trim()));
-  for(const text of commentary.filter(value=>value.trim())) {
+  for(const entry of commentary) {
+    const text=typeof entry==='string'?entry:entry.text;if(!text.trim())continue;
     const normalized=clean(text),key=normalized.replace(/\s+/gu,' ').trim();
     if(visibleTexts.has(key))continue;
-    visibleTexts.add(key);components.push(...sourceExplanationComponents([normalized]));
+    visibleTexts.add(key);components.push(...sourceExplanationComponents([normalized]).map(component=>({...component,content:{...component.content,pointType:typeof entry==='string'?'mechanism':entry.type}})));
   }
   const fit=fitComponents(components,project,index);
-  if(!fit.capacity_ok)throw new Error(`source_artifact_capacity: needs split; retain font ${fit.fontSizePt}pt and all cells`);
+  if(!fit.capacity_ok){
+    const sourceComponents=components.filter(component=>component.item||component.content.sourceEvidenceIds?.length);
+    const sourceFit=sourceComponents.length?fitComponents(sourceComponents,project,index):{capacity_ok:true,usedHeight:0};
+    throw new Error(`source_artifact_capacity: ${JSON.stringify({fontSizePt:fit.fontSizePt,availableHeightInches:fit.availableHeight/914400,usedHeightInches:fit.usedHeight/914400,predictedOverflowInches:fit.predictedOverflow/914400,sourceFits:sourceFit.capacity_ok,sourceHeightInches:sourceFit.usedHeight/914400,explanationBudget:explanationBudget(sourceComponents,project,index),boundSourceEvidenceIds:sourceEvidenceIds,commentaryEntries:commentary.length,commentaryCharacters:commentary.reduce((sum,value)=>sum+(typeof value==='string'?value:value.text).length,0)})}. Retain all frozen source cells, bound source excerpts and font. If sourceFits is true, the source is already portable: only rewrite commentary into complete concise relationships owned by this page, never repeat table/formula contents or bound excerpts or explain adjacent rows; do not change its row ranges or request an unnecessary split. Use the measured single-paragraph budget: merge related complete explanations into one or two entries without blank lines, removing only duplicate explanation, not source facts. Extra entries consume paragraph padding and gaps. With no bound source content, sourceCommentary IS the required visible body and cannot be empty. With bound source content already expressing all required facts, optional commentary may be empty.`);
+  }
   const background=project.templateSpec?.palette?.background||'#ffffff';
   const foreground=headerColor(background);
   const nodes=components.map((component,position)=> {
@@ -92,7 +100,7 @@ export function bindSourceArtifacts(project, slide, refs, index, commentary = []
   slide.sourceArtifactNodes=nodes;
   replaceTemplateSourceRegion(project,slide,index,fit.canvas);
   slide.bullets=[];
-  slide.copy={...slide.copy,blocks:nodes.map(node=>({type:'evidence',heading:node.sourceArtifact?.type.replace('Block','')||'',body:node.type==='table'?node.content.rows.map(row=>row.join(' | ')).join('\n'):node.content.text||(node.content.items||[]).map(item=>item.text).join('\n')})),takeaway:'',subtitle:''};
+  slide.copy={...slide.copy,blocks:nodes.map(node=>({type:node.content.pointType||'evidence',heading:node.sourceArtifact?.type.replace('Block','')||'',body:node.type==='table'?node.content.rows.map(row=>row.join(' | ')).join('\n'):node.content.text||(node.content.items||[]).map(item=>item.text).join('\n')})),takeaway:'',subtitle:''};
   if (spec) {
     for (const id of contentIds) if (!slide.templateOmissions?.some(item=>item.shapeId===id)) {
       slide.templateOmissions ||= []; slide.templateOmissions.push({shapeId:id,reason:'Source structure replaces the original content region with editable source-owned objects.'});

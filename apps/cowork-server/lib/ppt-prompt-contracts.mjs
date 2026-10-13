@@ -1,5 +1,6 @@
 import { routeIssue } from './ppt-repair-routing.mjs';
 import { dominantInputLanguage } from './ppt-topic-language.mjs';
+import crypto from 'node:crypto';
 import { densityPrompt, automaticPages } from './ppt-density-profile.mjs';
 /** Shared semantic contracts for planning, writing, review and editing.
  * Geometry budgets remain renderer-owned; word targets are writing guidance. */
@@ -7,8 +8,9 @@ import { obligationContext, obligationRegistry } from './ppt-obligations.mjs';
 import { inputScopeContext } from './ppt-input-scope.mjs';
 import { effectiveKnowledge, PPT_PROMPT_CONTRACT_VERSION } from './ppt-generation-policy.mjs';
 import { codePresentation } from './ppt-presentation-policy.mjs';
-import { visibleSlideText } from './ppt-evidence.mjs';
+import { visibleSlideText, lockedEvidenceComponents } from './ppt-evidence.mjs';
 import { visibleNodes } from './ppt-visible-content.mjs';
+import { fitComponents, explanationBudget, sourceComponent, INCH } from './ppt-density-capacity.mjs';
 export const PPT_SYSTEM_PROMPT = `You are a presentation planner, writer and editor in a structured pipeline.
 Your job is to turn the supplied material into accurate, useful explanations for the specified audience.
 Follow the requested stage and JSON schema. Return one JSON value, without code fences or commentary.
@@ -186,11 +188,13 @@ export function canonicalWriterOutput(value, spec = null) {
     result.nativeCopy = true;
     const slots = spec.slots || [];
     const blocks = [];
-    for (const slot of slots.filter(item => item.role === 'content' && !['footnote', 'group-heading', 'point-heading', 'label'].includes(item.purpose))) {
+    const types=new Set(['definition','mechanism','evidence','example','contrast','constraint','implication','stage','decision','next_step','support']);
+    const typeFor=id=>{const type=value.slotContentTypes?.[String(id)];if(type&&!types.has(type))throw new Error(`invalid visible native copy type: ${JSON.stringify({shapeId:id,received:type,allowed:[...types]})}; choose exactly one semantic type, not the slot geometry purpose`);return type||'mechanism';};
+    for (const slot of slots.filter(item => !value.sourceArtifacts?.length && !value.sourceEvidenceIds?.length && !value.sourceCommentary?.length && item.role === 'content' && !['footnote', 'group-heading', 'point-heading', 'label'].includes(item.purpose))) {
       const text = value.slotTexts[String(slot.shapeId)];
       if (Array.isArray(text)) {
-        for (const item of text) if (item?.body) blocks.push({ type: 'mechanism', heading: item.label || '', body: item.body });
-      } else if (typeof text === 'string' && text.trim()) blocks.push({ type: 'mechanism', heading: String(value.slotTexts[String(slot.pairedWith)] || ''), body: text });
+        for (const item of text) if (item?.body) blocks.push({ type: typeFor(slot.shapeId), heading: item.label || '', body: item.body });
+      } else if (typeof text === 'string' && text.trim()) blocks.push({ type: typeFor(slot.shapeId), heading: String(value.slotTexts[String(slot.pairedWith)] || ''), body: text });
     }
     // New prompts request slots only. Explicit legacy blocks stay compatible.
     if (!value.contentBlocks && !value.cards) result.contentBlocks = blocks.length <= 10 ? blocks : [
@@ -248,9 +252,11 @@ keyPoints 是后续写作者必须展开的内容承诺；给出实际要讲的�
 ${densityPrompt(project)}
 <source_objects>${JSON.stringify(sourceObjects(project.source))}</source_objects>
 <page_contract_rules>每页给出 pageContract：一个页面职责 job；requiredUnits 列出本页必须可见讲清的不同来源单元（机制、条件、变量、类别），而不是章节名；合页必须写 groupingReason，相互独立的内容用独立面板，不要为合页编造因果。
+双语来源须保留各语言内容和事实；除非用户或真实来源关系明确要求同页，容量不足可把两个完整语言单元放到连续页面，不能自行发明必须同页的邻接硬约束。
 inventory.relationships 的类型必须保留：matrix 保留全部行类别和列轴，不合并或删列；order 保留步骤顺序和条件分支；alternative 是并列可替代的表达，不能画成先后步骤；definition 要求公式与变量解释同页相邻。
 compositionCandidates 只能从来源关系推出；big-number 只用于来源中存在的数值及其口径，不能承载 β≠α、模型名或无来源数字。</page_contract_rules>
-source_objects 是完整的来源表格/表达式/代码；不要把行名清单当成关系说明。每一列的关系要由具体 keyPoints 承接，必要时分配到多个相关页面；不能只通过引用 chunk 就声称解释已完成。`;
+source_objects 是完整的来源表格/表达式/代码；不要把行名清单当成关系说明。每一列的关系要由具体 keyPoints 承接，必要时分配到多个相关页面；不能只通过引用 chunk 就声称解释已完成。
+sourceArtifactRanges 只用于真实表格。第 0 行是表头，rowStart 从 1 开始，rowEnd 是不包含的结束索引，必须为整数；完整表格的范围为 [1, tableShape.dataRowRange.endExclusive)，不是 [1, tableShape.rows)。例如 5 个数据行需要 rowStart=1、rowEnd=6。省略范围表示保留全部行。跨页分片须完整覆盖所有数据行（包括最后一行），每页重复表头，范围不能遗漏或重叠。模板容量不足时增加候选页面、拆分表格或移动完整解释单元；自动页数的初估和初稿数量均不要求保持。`;
 }
 
 /** Inventory view for planning: IDs, roles, flags, relations and a short
@@ -264,7 +270,7 @@ export function compactInventory(inventory) {
       ...(item.must_preserve_structure ? { must_preserve_structure: true } : {}), ...(item.priority === 'high' ? { priority: 'high' } : {}),
       ...(item.presentation ? { presentation: item.presentation, presentationBasis: item.presentationBasis } : {}), ...(item.equivalentTo ? { equivalentTo: item.equivalentTo } : {}),
       ...(item.languagePairId ? { languagePairId: item.languagePairId, languageRole: item.languageRole } : {}),
-      ...(item.rows ? { tableShape: { rows: item.rows.length - 1, columns: item.rows[0]?.length || 0, header: item.rows[0] } } : {}) })),
+      ...(item.rows ? { tableShape: { rows: item.rows.length - 1, columns: item.rows[0]?.length || 0, header: item.rows[0], dataRowRange: { start: 1, endExclusive: item.rows.length } } } : {}) })),
     relationships: (inventory.relationships || []).map(({ steps, source_ref, chunkRefs, priority, ...relation }) => relation),
     must_cover_topics: inventory.must_cover_topics };
 }
@@ -293,6 +299,28 @@ export function writerPrompt(project, slide, index, { retrieval, contract, slotC
   const schema = native
     ? { title: '标题', evidenceUsedIds: ['可见文本实际表达的真实 evidence ID'], slotTexts: { 'shape ID': '完整替换文字', '列表 shape ID': [{ label: '短名称', body: '解释' }] }, omitTemplateShapes: [{ shapeId: 123, reason: '具体不适配理由' }], sourceCommentary: ['结构对应的解释；无重复正文'], sourceArtifacts: [{ sourceUnitId: '真实库存 ID', rowStart: 1, rowEnd: 5 }] }
     : { title: '标题', eyebrow: '可选导航标签', subtitle: '可选新增范围说明', contentBlocks: [{ type: 'definition|mechanism|evidence|example|contrast|constraint|implication|stage|decision|next_step', claimId:'来源主张ID', heading: '不同的短名称', body: '独立完整解释' }], takeaway: '可选新增推论，不能复制正文', blocks: [{ type: 'table', rows: [['列名称', '列名称'], ['来源类别', '来源解释']] }], sourceCommentary: ['结构对应的解释；无重复正文'], sourceArtifacts: [{sourceUnitId:'真实库存 ID',rowStart:1,rowEnd:5}], evidenceUsedIds: ['实际表达的真实 evidence ID'] };
+  const selection=(contract?.sourceArtifacts||[]).map(({sourceUnitId,rowStart,rowEnd})=>({sourceUnitId,...(rowStart===undefined?{}:{rowStart}),...(rowEnd===undefined?{}:{rowEnd})}));
+  const sourceEvidenceIds=native&&index!==0?[...new Set([...(contract?.requiredEvidenceIds||[]),...(retrieval?.requiredEvidenceIds||[])])]:[];
+  const nativeCover=native&&index===0&&!selection.length&&!(project.templateFidelity.slides[index]?.slots||[]).some(slot=>slot.role==='content'&&slot.purpose!=='footnote');
+  schema.sourceArtifacts=selection;
+  schema.sourceEvidenceIds=sourceEvidenceIds;
+  const ownedSourceContent=selection.map(ref=>{const item=project.source.semantic.inventory.items.find(item=>item.id===ref.sourceUnitId);return {...ref,type:item.type,content:sourceComponent(item,ref).content};});
+  schema.sourceCommentary=[{type:'选一个 definition|mechanism|evidence|example|contrast|constraint|implication',text:'本页可见的完整来源解释；不重复来源结构'}];
+  if(nativeCover)schema.sourceCommentary=[];
+  if(native){schema.slotContentTypes=Object.fromEntries((project.templateFidelity.slides[index]?.slots||[]).filter(slot=>slot.role==='content'&&!['footnote','group-heading','point-heading','label'].includes(slot.purpose)).map(slot=>[String(slot.shapeId),'mechanism']));}
+  let measuredSources=null;
+  if(selection.length||sourceEvidenceIds.length){
+    schema.sourceCommentary=[{type:'mechanism',text:'仅本页拥有的必要关系或条件'}];
+    const items=project.source.semantic.inventory.items;
+    const sourceComponents=selection.map(ref=>sourceComponent(items.find(item=>item.id===ref.sourceUnitId),ref));
+    sourceComponents.push(...lockedEvidenceComponents(project,sourceEvidenceIds,sourceComponents));
+    const fit=fitComponents(sourceComponents,project,index);
+    measuredSources={fontSizePt:fit.fontSizePt,layoutId:fit.layoutId,usedHeightInches:fit.usedHeight/INCH,availableHeightInches:fit.availableHeight/INCH,
+      sourceCommentaryHeightInches:Math.max(0,(fit.availableHeight-fit.usedHeight)/INCH),explanationBudget:explanationBudget(sourceComponents,project,index),boundSourceEvidenceIds:sourceEvidenceIds,plannedExplanationTexts:(slide.keyPoints||[]).map(point=>point.text||point)};
+    if(measuredSources.explanationBudget.sourceFits&&measuredSources.explanationBudget.singleParagraphCjkCharacters===0)schema.sourceCommentary=[];
+    else if(measuredSources.explanationBudget.sourceFits)schema.sourceCommentary=[{type:'mechanism',text:`绑定来源未表达的必要关系；只用一段，约 ${measuredSources.explanationBudget.singleParagraphCjkCharacters} 个中文字符以内；不重复绑定原句。`}];
+    if(native){schema.slotTexts=Object.fromEntries((project.templateFidelity.slides[index]?.slots||[]).filter(slot=>['title','section'].includes(slot.role)).map(slot=>[String(slot.shapeId),slot.role==='title'?'本页标题':'本页原章节导航']));schema.slotContentTypes={};}
+  }
   const old = project.update && slide.baseSlideId ? project.update.baseSnapshot.deck?.slides.find(item => item.id === slide.baseSlideId) : null;
   return `你是演示文稿文案编辑。当前任务只写第 ${index + 1} 页，共 ${project.pages} 页。
 ${promptPolicy(writingProject)}
@@ -304,6 +332,9 @@ ${writingGuide(writingProject, contract, native)}
 ${titleRule}${citationRule}
 ${native ? slotContract : ''}
 <source_artifacts>${JSON.stringify((project.source?.semantic?.inventory?.items || []).filter(item => contract?.sourceArtifacts?.some(ref => ref.sourceUnitId === item.id)))}</source_artifacts>
+<frozen_source_selection>${JSON.stringify(selection)}</frozen_source_selection>
+<page_owned_source_content>${JSON.stringify(ownedSourceContent)}</page_owned_source_content>这是当前页实际可见的完整来源分片。全表问题由相邻页面共同回答，本页只解释这里选中的行/实体与列间关系；全文和检索中其他行只是背景，不能在本页重新介绍全表或相邻模型。
+${measuredSources?`<measured_source_capacity>${JSON.stringify(measuredSources)}</measured_source_capacity>`:''}
 <source_packet>${JSON.stringify(sourcePacket(retrieval))}</source_packet>
 ${old ? `<old_slide>${JSON.stringify(slideSemanticContext(old))}</old_slide>` : ''}
 <terminology>${JSON.stringify(project.planning?.terminology || {})}</terminology>
@@ -311,24 +342,76 @@ ${old ? `<old_slide>${JSON.stringify(slideSemanticContext(old))}</old_slide>` : 
 标题回答本页问题，eyebrow仅导航，subtitle补充范围；各块分别提供定义、机制、证据/例子、条件或行动；takeaway仅在有新的推论时出现。可选字段可以为空。禁止相同完整句在不同角色重复出现，禁止多个卡片重复章节名，禁止为了达到字数/密度目标填入重复或无来源内容。容量冲突应报告对象和原因，不截断句子、变量、单元格或步骤。
 组件选择：真实表格/代码/公式/流程/清单优先使用sourceArtifacts，系统保留结构与数学；sourceCommentary补充关系与边界。图片只能使用已有来源资产ID或系统支持的语义资产，不能把旧模板截图当作新事实。没有数据时不要编造图表；缺媒体或结构不能用重复文字代替。
 ${!project.source?.segments?.length ? `用户主题：${project.prompt}。使用领域特有的定义、机制和评估方法。` : ''}
-sourceArtifacts 可引用本页合同的真实库存 ID，由代码重建可编辑表格/代码/公式/流程/清单及来源小结。组合数量由共用字体/行高/区域容量测量决定，允许双表、清单+总结表、机制+例子；不要为同一比较轴机械拆页。本页合同指定 rowStart/rowEnd 时必须遵守该范围，避免把完整大表在分片页重复。表格第 0 行是表头；rowStart 从 1 开始，rowEnd 为不包含的结束索引，两者必须是整数，范围只能用于表格；同页同一表的范围不能重叠，其他结构不能重复引用。省略范围则保留全部行。容量不足拆到多页并重复表头，不删列、不截断单元格。代码必须通过 CodeBlock 库存 ID 原样绑定，保留语言、缩进、空行和硬换行，禁止把代码改为 prose、关键词或截图；流程保留顺序/分支条件，表格保留负号、单位与空单元格。结构按自然高度组合，保留标题。sourceCommentary 可补充这些结构的条件、机制或综合判断，会显示在同一区域；不能重复抄写结构、写隐藏正文或指定坐标。
+sourceArtifacts 必须逐字复制 frozen_source_selection 数组（最终 schema 已给出本页真实选择），不得增删 ID、修改分片、复制相邻页范围；空数组就是本页没有来源结构。公式、代码、流程、清单、小结只含 sourceUnitId，绝不能照抄表格示例的 rowStart/rowEnd。表格第 0 行是表头；rowStart 从 1 开始，rowEnd 为不包含的结束索引，保持已冻结范围，全部行/列已在不同页面规划，writer 不重新规划页数或行范围。代码由 CodeBlock 库存 ID 原样绑定，保留语言、缩进、空行与硬换行；流程保留顺序/分支条件，表格保留负号、单位与空单元格。来源结构由代码重建，其完整正文不再复制到 slotTexts；有来源结构的原生页 slotTexts 只写标题及章节导航，必要解释写 sourceCommentary。解释只覆盖本页拥有的 plannedExplanationTexts、变量与 requiredDetails，不能扩写其他页内容来填模板；保留完整关系与假设，避免抄写表格/公式已有事实。measured_source_capacity 给出结构已占空间和剩余解释高度；不可把一整页正文追加进有限余量，原计划要点可作为不扩写的完整说明，独立的长解释已安排到其他页。不可用缩字或删除必要条件通过容量。
 ${native ? '其他正文只输出 slotTexts；代码从语义配对派生兼容文案，不另写 contentBlocks、bullets 或 factSynthesis。' : '普通页面只输出 contentBlocks 这一份正文；bullets 由代码派生。优先引用 sourceArtifacts 保留原文表格的全部列；手写 blocks 表格兼容上限为 6 行（含表头）、4 列，不能用它静默降级更大的来源表格。'}
+slotContentTypes 仅标记 slotTexts 中真实可见正文的职责；type 必须从列出的类型中选一个，不输出类型列表或隐藏事实。sourceCommentary 使用 {type,text} 标记其可见关系、条件、对照或推论；类型应对应实际文字，不为通过检查虚标。结构正文与解释共同满足本页内容职责，不能为每页机械添加无来源对照或结论。
+${native?'严格区分槽位几何 purpose 与文案语义 type：point-description、point-heading、title、section 不是 slotContentTypes 的合法值。仅正文槽位标记 definition、mechanism、evidence、example、contrast、constraint、implication、stage、decision、next_step 或 support。普通原生页若正文能适配槽位，sourceCommentary 返回空数组，完整正文与职责写在 slotTexts 和 slotContentTypes；若单行/列表无法容纳必要机制或全部条件，使用现有 sourceCommentary 原生区域重排：只输出标题/章节槽位，最多四段完整、不重复且有实际语义 type 的可见说明，保留本页全部 keyPoints 与 requiredDetails，编译器按真实正文矩形重排，字体和全部原门禁不变。title 字段与标题槽位逐字一致，二者都必须满足标题槽位 maxVisualUnits；其他标题预算不能覆盖模板更小的实际容量。':''}
 不输出隐藏事实清单或候选标题。组件契约中的 formula-variables、two-panel、item-icons 由共享渲染器安排位置。公式变量需保留来源公式及说明；并列条目不能变成有序步骤；模板图标只提供视觉辅助，不是事实证据。不要输出坐标或为填槽位重复内容。每点有不同信息职责；条件、对照和机制写完整句子，服从容量且保留已规划的具体深度。</task>
+${native?`<final_native_limits>${JSON.stringify((project.templateFidelity.slides[index]?.slots||[]).filter(slot=>['title','section'].includes(slot.role)).map(slot=>({shapeId:slot.shapeId,role:slot.role,maxVisualUnits:slot.capacity})))}</final_native_limits>最后检查 title 与标题槽位相同且都不超此实际容量；section 用 2–4 个中文字或同等长度英文导航。${selection.length||sourceEvidenceIds.length?'slotTexts 只允许上述 title/section，正文通过 sourceArtifacts、绑定来源证据与 sourceCommentary 输出。':'槽位正文用 slotContentTypes 的语义类型；槽位无法容纳完整条件时只保留标题/导航槽位，将必要正文作为最多四段 typed sourceCommentary 交由原生区域重排，不得裁切事实。'}`:''}
+sourceCommentary 最多四个 {type,text} 条目；同一机制的相邻完整说明可以合并，但不能丢失原 keyPoints 或 requiredDetails。type 必须是一个明确值，不能写 prediction 或 purpose 标签；预测的具体含义用 definition、mechanism 或 evidence 表达。表格页解释只对 page_owned_source_content 中实际行/列作完整短句对照与推论，不能复制全表定义。公式已原生绑定，不在解释中重抄整条公式。JSON 字符串内部的双引号必须使用合法 JSON 转义。
+<required_visible_evidence>${JSON.stringify((project.source?.semantic?.evidenceAtoms||[]).filter(atom=>sourceEvidenceIds.includes(atom.id)).map(({id,kind,exactText,measurements,contextTerms})=>({id,kind,exactText,measurements,contextTerms})))}</required_visible_evidence>原生页以上锁定来源摘录由代码按 sourceEvidenceIds 原样绑定，真正显示在正文，不是隐藏事实。sourceEvidenceIds 必须复制 schema 的真实 ID；不能增删或改写绑定的来源。已经在 sourceArtifacts 可见的原句不会重复绑定。sourceCommentary 只补充绑定来源尚未表达的本页必要关系和条件，不重复这些完整摘录；实测预算包含全部绑定原句。其余非绑定的原槽位必要事实仍须保留在正文。
+来源表格/清单已经包含完整定义、示例、关系或条件时，不重复解释这些单元格。可选解释优先只写一个完整短句，服从 measured_source_capacity.explanationBudget 的实测预算；不得重复超过预算的前稿，不删除来源结构或必要证据。
+${nativeCover?'<native_cover_contract>原生封面只有标题/导航槽位；sourceCommentary 必须为空数组，只显示主题标题，不将来源背景引言铺在封面装饰和标题上。全文作为原始输入保留，其他内容页的事实与锁定结构不得改变。</native_cover_contract>':''}
+${measuredSources?.explanationBudget.sourceFits&&measuredSources.explanationBudget.singleParagraphCjkCharacters===0?'<no_commentary_capacity>绑定的完整来源已经适配页面，实际余量不能再容纳额外正文。sourceCommentary 必须为空数组。原始完整来源摘录由代码显示，不要重新用中文解释或复制这些已绑定原句。保留 sourceArtifacts 和 sourceEvidenceIds，任何未被来源表达的必要事实由原整稿审查报告，不得缩字或删来源。</no_commentary_capacity>':''}
+${measuredSources?.explanationBudget.sourceFits&&measuredSources.explanationBudget.singleParagraphCjkCharacters>0?`<source_commentary_budget>${JSON.stringify(measuredSources.explanationBudget)}</source_commentary_budget>解释余量只有单段约 ${measuredSources.explanationBudget.singleParagraphCjkCharacters} 个中文字符（不是整页字数），不要返回两段或重复概述已绑定的来源摘录。只补本页未被绑定原文表达的必要定义/条件；全部原来源仍由代码显示，不能缩字或删除来源。可选解释可为空。`:''}
 返回唯一 JSON：${JSON.stringify(schema)}。只输出 JSON。`;
+}
+
+export function writerCorrectionContext(prompt) {
+  // Repairs use complete retrieved objects and protected excerpts, instead of
+  // repeating the entire deck/source several times. The stored framework and
+  // its hash remain immutable; this is explicitly a request context view.
+  let repairContext=prompt;
+  if(prompt.length>30000&&prompt.includes('<source_packet>')){
+    const framework=JSON.parse(prompt.match(/^INPUT_FRAMEWORK=(.+)$/m)?.[1]||'null');
+    if(framework?.material){
+      const material=framework.material;
+      const identity={frameworkHash:framework.frameworkHash,contextScope:'retrieval_view_only; not a replacement input framework',
+        knowledge:material.knowledge,userPrompt:material.prompt,
+        sourceTextRef:{sha256:crypto.createHash('sha256').update(material.sourceText||'').digest('hex'),characters:(material.sourceText||'').length},
+        importedInput:material.importedInput,previousVersionInput:material.previousVersionInput};
+      const tags=['policy','input_scope_rules','writing','user_edits','brief','slide_contract','frozen_source_selection','page_owned_source_content','measured_source_capacity','source_packet','terminology','final_native_limits','required_visible_evidence','native_cover_contract','no_commentary_capacity','source_commentary_budget'];
+      repairContext=`${PPT_SYSTEM_PROMPT}\n${prompt.match(/当前任务只写第 \d+ 页，共 \d+ 页。/)?.[0]||''}\n<immutable_input_identity>${JSON.stringify(identity)}</immutable_input_identity>完整原输入仍存储且哈希不变；下面是本页完整的检索对象和锁定证据，未出现在此局部上下文的其他页内容不属于本次重写，不能改动。\n`+
+        tags.map(tag=>prompt.match(new RegExp(`<${tag}>[\\s\\S]*?<\\/${tag}>`))?.[0]||'').join('\n');
+    }
+  }
+  const schema=prompt.match(/返回唯一 JSON：([^\n]+)。只输出 JSON/);
+  return repairContext===prompt?prompt:repairContext+(schema?"\n"+schema[0]:"");
 }
 
 export function writerRepairPrompt(prompt, draft, issues) {
   const priority=item=>(item.severity==='error'?10:0)+(/required_source|media_decode|object_missing/.test(item.code||'')?8:/duplicate|repeated/.test(item.code||'')?4:0);
   const diagnostics = [...issues].sort((a,b)=>priority(b)-priority(a)).slice(0,32).map(item => ({ code: item.code || item.category, repair: item.repair,
-    shapeId: item.shapeId, nodeIds:item.nodeIds, claimId:item.claimId, objectId:item.sourceUnitId || item.objectId, missingSupport: item.missingSupport || [], message: item.message || item.detail,
+    shapeId: item.shapeId, slotRole:item.slotRole, capacity:item.capacity, minVisualUnits:item.minVisualUnits, requiredItems:item.requiredItems, expectedGroups:item.expectedGroups, nodeIds:item.nodeIds, claimId:item.claimId, objectId:item.sourceUnitId || item.objectId, missingSupport: item.missingSupport || [], message: item.message || item.detail,
     suggestedFix: item.suggestedFix, reason: item.reason }));
   const nodes=draft.nodes||draft.sourceArtifactNodes||[];
   const sourceArtifacts=nodes.filter(node=>node.sourceArtifact).map(node=>node.sourceArtifact);
-  const sourceCommentary=nodes.filter(node=>node.semanticRole==='source-explanation').map(node=>node.content?.text).filter(Boolean);
-  return `${prompt}\n<previous_draft>${JSON.stringify({ title: draft.title, contentBlocks: sourceArtifacts.length?undefined:draft.copy?.blocks, bullets: sourceArtifacts.length?undefined:draft.bullets, slotTexts: draft.templateSlotTexts,
-    sourceArtifacts:sourceArtifacts.length?sourceArtifacts:undefined,sourceCommentary:sourceCommentary.length?sourceCommentary:undefined,omitTemplateShapes:draft.templateOmissions,evidenceUsedIds:draft.evidenceUsedIds })}</previous_draft>
+  const sourceCommentary=nodes.filter(node=>node.semanticRole==='source-explanation'&&node.content?.text).map(node=>({type:node.content.pointType||'mechanism',text:node.content.text}));
+  const titleProblem=issues.some(issue=>issue.repair==='rewrite_title'||issue.code==='title_overflow'||issue.code==='template_slot_overflow'&&(issue.slotRole==='title'||draft.templateSlotTexts?.[String(issue.shapeId)]===draft.title));
+  const preserveTitle=titleProblem?'':`\n<preserve_valid_title>${JSON.stringify({title:draft.title,slotTexts:Object.fromEntries(Object.entries(draft.templateSlotTexts||{}).filter(([,text])=>text===draft.title))})}</preserve_valid_title>标题未报错，必须逐字保留这些已合格的标题字段，不因正文修复重写或扩大标题。`;
+  const headerLimits=JSON.parse(prompt.match(/<final_native_limits>(.*?)<\/final_native_limits>/s)?.[1]||'[]');
+  const sectionRepairs=issues.filter(issue=>issue.slotRole==='section');
+  const coverBody=issues.some(issue=>issue.code==='template_cover_body')||prompt.includes('<native_cover_contract>');
+  const bodyOverflow=issues.some(issue=>issue.code==='required_evidence_missing'||['template_slot_overflow','template_text_fit','template_body_depth','template_group_missing'].includes(issue.code)&&issue.shapeId!==undefined&&!['title','section'].includes(issue.slotRole)&&!headerLimits.some(slot=>slot.shapeId===issue.shapeId));
+  const repairContext=writerCorrectionContext(prompt);
+  const schema={title:draft.title,slotTexts:Object.fromEntries(headerLimits.map(slot=>[String(slot.shapeId),draft.templateSlotTexts?.[String(slot.shapeId)]||draft.title])),
+    sourceArtifacts:JSON.parse(prompt.match(/<frozen_source_selection>(.*?)<\/frozen_source_selection>/s)?.[1]||'[]'),
+    sourceEvidenceIds:JSON.parse(prompt.match(/<required_visible_evidence>(.*?)<\/required_visible_evidence>/s)?.[1]||'[]').map(atom=>atom.id),
+    sourceCommentary:[{type:'definition|mechanism|evidence|example|contrast|constraint|implication',text:'完整本页正文，必要锁定英文例子保留原句；最多四段，不重复源表单元格'}],evidenceUsedIds:draft.evidenceUsedIds||[]};
+  if(coverBody||prompt.includes('<no_commentary_capacity>'))schema.sourceCommentary=[];
+  const commentaryBudget=JSON.parse(prompt.match(/<source_commentary_budget>(.*?)<\/source_commentary_budget>/s)?.[1]||'null');
+  if(commentaryBudget?.sourceFits&&schema.sourceCommentary.length)schema.sourceCommentary=[{type:'mechanism',text:`只有一段约 ${commentaryBudget.singleParagraphCjkCharacters} 个中文字符内的必要非重复说明；所有绑定原句由代码完整显示。`}];
+  return `${repairContext}\n<previous_draft>${JSON.stringify({ title: draft.title, contentBlocks: sourceArtifacts.length?undefined:draft.copy?.blocks, bullets: sourceArtifacts.length?undefined:draft.bullets, slotTexts: draft.templateSlotTexts,
+    slotContentTypes:draft.templateSlotContentTypes,sourceArtifacts:sourceArtifacts.length?sourceArtifacts:undefined,sourceCommentary:sourceCommentary.length?sourceCommentary:undefined,omitTemplateShapes:draft.templateOmissions,evidenceUsedIds:draft.evidenceUsedIds })}</previous_draft>
 <findings>${JSON.stringify(diagnostics)}</findings>
-<repair>仅重写当前页。执行范围为内容/来源层；禁止修改媒体身份、裁切、表格结构、其他页、锁定对象或主题。数值必须保留指标/对象/时间、符号与单位，模板示例数字不是输入事实。逐项解决具体问题。文本可见损失、单元格容量、图表符号/单位与图片裁切诊断不能降级成警告或声称误报；优先调整语义组织和 reflow，禁止缩小字体、重复填充或删除 required structures。保留已有sourceArtifacts的库存ID、合同分片范围、全部列与sourceCommentary中的必要关系，不退回主题标签或不可见正文；新增解释仍必须在当前可读容量内。补充来源已有的解释、表格关系与条件；无来源事实不能编造。标题溢出保留主张并移出背景；必要内容无法容纳须由审查报告。返回相同 schema。</repair>`;
+${preserveTitle}
+${titleProblem?'标题当前未合格：必须重新选择能放入具体标题槽位的短主题/判断，不能重复超限前稿。CJK 字符通常各占一个 visual unit；例如容量 6 就只能用约 6 个中文字符，不能沿用通用 12–24 字的建议。这里允许改写未锁定的代理标题，必要的完整关系在本页正文或已有来源中保留。':''}
+<repair>仅重写当前页。执行范围为内容/来源层；禁止修改媒体身份、裁切、表格结构、其他页、锁定对象或主题。数值必须保留指标/对象/时间、符号与单位，模板示例数字不是输入事实。逐项解决具体问题。文本可见损失、单元格容量、图表符号/单位与图片裁切诊断不能降级成警告或声称误报；优先调整语义组织和 reflow，禁止缩小字体、重复填充或删除 required structures。保留已有sourceArtifacts的库存ID、合同分片范围、全部列与sourceCommentary中的必要关系，不退回主题标签或不可见正文；新增解释仍必须在当前可读容量内。补充来源已有的解释、表格关系与条件；无来源事实不能编造。标题溢出保留主张并移出背景；必要内容无法容纳须由审查报告。返回相同 schema。</repair>
+${sectionRepairs.length?`<section_slot_repairs>${JSON.stringify(sectionRepairs.map(({shapeId,capacity})=>({shapeId,maxVisualUnits:capacity})))}</section_slot_repairs>章节导航不是锁定的来源原文。只重写这些 section 槽位为 2–4 个中文字的导航，不沿用含问号/标点的超限前稿；完整主题已经在标题和正文保留，合格标题不能扩大。`:''}
+${bodyOverflow&&headerLimits.length?`<required_native_reflow>${JSON.stringify({slotTextsShapeIds:headerLimits.map(slot=>slot.shapeId),sourceCommentaryMaxEntries:4})}</required_native_reflow>前稿原生正文槽位无法容纳必要内容，本次必须使用已有 sourceCommentary 区域重排。slotTexts 仅输出以上 title/section 槽位；把前稿全部必要正文、原槽位事实、required_visible_evidence 和新增解释合并进最多四段 typed sourceCommentary，不能只写补充说明而丢弃原正文。不再重复返回已超限的正文槽位。字体、来源分片和整页全部质量门禁不变。
+原生页 required_visible_evidence 中原句由代码原样绑定；只复制 sourceEvidenceIds，sourceCommentary 不再重复已绑定原句的中文释义或英文正文。其余必要机制和未被绑定原句表达的条件保留。不要用多段可选解释挤占全部来源原句的空间。
+返回唯一 JSON：${JSON.stringify(schema)}。只输出 JSON。`:''}
+${coverBody?`<native_cover_repair>此封面没有正文槽位，也没有锁定来源结构；来源引言是背景上下文。只保留合格主题标题与模板支持的导航，sourceCommentary 必须为空数组，不能在装饰图上添加全文背景段落。不得改动其他页、媒体或输入框架。返回唯一 JSON：${JSON.stringify(schema)}。只输出 JSON。</native_cover_repair>`:''}`;
 }
 
 export function criticRewriteTargets(project, review) {

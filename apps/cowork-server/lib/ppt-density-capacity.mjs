@@ -139,6 +139,19 @@ export function fitComponents(components, project = {}, index = 1) {
   }
   return { ...best, capacity_ok: best.predictedOverflow === 0, capacityBasis, measurementBasis: 'shared_line_estimator' };
 }
+/** A measured guidance budget, never a text truncator or an acceptance override. */
+export function explanationBudget(components, project, index) {
+  const source = fitComponents(components, project, index);
+  if (components.length&&!source.capacity_ok) return { sourceFits: false, singleParagraphCjkCharacters: 0 };
+  let low=0,high=2000;
+  while(low<high){
+    const middle=Math.ceil((low+high)/2);
+    const fit=fitComponents([...components,{type:'text',content:{text:'字'.repeat(middle)}}],project,index);
+    if(fit.capacity_ok)low=middle;else high=middle-1;
+  }
+  return {sourceFits:true,singleParagraphCjkCharacters:low,paragraphCount:1,
+    basis:'shared_line_estimator; complete source plus one CJK paragraph; additional paragraphs consume gaps'};
+}
 export const isSourceArtifactItem = item => Boolean(item?.must_preserve_structure || item?.type === 'SummaryBlock');
 export function validateSourceArtifactRefs(items, refs) {
   if(!Array.isArray(refs))throw new Error('invalid source artifact refs');

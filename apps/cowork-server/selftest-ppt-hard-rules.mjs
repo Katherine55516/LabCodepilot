@@ -7,7 +7,7 @@ import fs from 'node:fs';import os from 'node:os';import path from 'node:path';i
 import {renderIssues} from './lib/ppt/render-audit.mjs';
 import {slidePlan} from './lib/ppt-planning.mjs';
 import {obligationRegistry} from './lib/ppt-obligations.mjs';
-import {normalizeModelReview,finalQualityReport,deckReviewPrompt} from './lib/ppt-quality.mjs';
+import {normalizeModelReview,finalQualityReport,deckReviewPrompt,reviewWithContractRepair} from './lib/ppt-quality.mjs';
 import {scopeReview,simulatedExport} from './ppt-scope-test-helpers.mjs';
 import {assertCandidateScope} from './lib/ppt/input-scope-service.mjs';
 import {replaceTemplateSourceRegion} from './lib/ppt-source-artifacts.mjs';
@@ -67,6 +67,20 @@ try{
  await test('obligation audit refuses stale registry, missing IDs and invisible evidence; correct paraphrase protocol passes',()=>{
   const p=fixture(),good=scopeReview(p);for(const mutation of [r=>r.obligationAudit.registryHash='old',r=>r.obligationAudit.checks=[],r=>r.obligationAudit.checks[0].evidence=[{slideId:'s1',nodeId:'invisible'}],r=>r.obligationAudit.checks[0].evidence[0].excerpt='invented quote']){const r=structuredClone(good);mutation(r);assert.throws(()=>normalizeModelReview(r,p.deck.slides.map(s=>s.id),p),/obligation/);}
   assert(finalQualityReport({issues:[],hardErrors:0},[],normalizeModelReview(good,p.deck.slides.map(s=>s.id),p)).publishEligible);
+ });
+ await test('malformed evidence gets bounded model correction; no quote or verdict is silently repaired',async()=>{
+  const p=fixture(),good=scopeReview(p),bad=structuredClone(good);bad.obligationAudit.checks[0].evidence[0].excerpt='invented quote';
+  const before=JSON.stringify(p);let calls=0;
+  const fixed=await reviewWithContractRepair(p,async(prompt,key)=>{calls++;if(calls===1)return bad;assert.match(key,/:contract:1$/);assert.match(prompt,/invented quote/);assert.match(prompt,/actualInstanceText/);return good;});
+  assert.equal(calls,2);assert.deepEqual(fixed.obligationAudit,good.obligationAudit);assert.equal(JSON.stringify(p),before);assert.equal(bad.obligationAudit.checks[0].evidence[0].excerpt,'invented quote');
+  calls=0;await assert.rejects(()=>reviewWithContractRepair(p,async()=>{calls++;return bad;}),/obligation evidence/);assert.equal(calls,3);
+  calls=0;await assert.rejects(()=>reviewWithContractRepair(p,async()=>{calls++;throw new Error('Desktop model request failed; check local API settings');}),/Desktop model request failed/);assert.equal(calls,1);
+  const missing=structuredClone(good);missing.obligationAudit.checks[0].status='missing';missing.obligationAudit.checks[0].evidence=[];
+  const result=await reviewWithContractRepair(p,async()=>missing);assert.equal(finalQualityReport({issues:[],hardErrors:0},[],result).publishEligible,false);
+ });
+ await test('critic receives exact table instance text in addition to structured cells',()=>{
+  const p=fixture();p.deck.slides[1].nodes=[{id:'table-proof',type:'table',content:{headers:['Term','Value'],rows:[['Alpha','7']]}}];
+  assert.match(deckReviewPrompt(p),/"nodeId":"table-proof","type":"table","text":"\| Alpha \| 7 \|"/);
  });
  await test('repeated claim and deleted-page mandatory loss block local candidates',async()=>{
   const p=fixture(),after=structuredClone(p);after.deck.slides[1].nodes[0].content.text='Duplicated title';

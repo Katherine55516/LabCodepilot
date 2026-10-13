@@ -6,7 +6,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { Readable } from 'node:stream';
 import { PPT_SYSTEM_PROMPT, outputLanguage, promptPolicy, sourcePacket, canonicalWriterOutput,
-  criticRewriteTargets, pptPromptFrame, narrativeContext, objectWritingCapacity, slideSemanticContext } from './lib/ppt-prompt-contracts.mjs';
+  criticRewriteTargets, pptPromptFrame, narrativeContext, objectWritingCapacity, slideSemanticContext, writerRepairPrompt } from './lib/ppt-prompt-contracts.mjs';
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ppt-prompt-contracts-'));
 process.env.COWORK_STATE_DIR = root;
@@ -46,6 +46,7 @@ try {
   const project = { pages: 3, source, prompt: 'USER_REQUIREMENT_SENTINEL: write in English', title: 'Course', outline };
   project.planning = planning.buildPlanning(project, raw, outline);
   assert.equal(project.planning.brief.outputLanguage, 'en');
+  assert.equal(planning.inferRole({pageContract:{job:'definition'},visualIntent:{type:'comparison'}},1,3,source),'framework');
   assert.equal(project.planning.slidePlan[1].copyBudget.titleHardUnits, 44);
   const richCourse = { ...project, pages: 3, prompt: 'Create a rigorous tutorial from lesson_overview.md.',
     source: { ...source, semantic: { ...source.semantic, chunks: Array.from({ length: 8 }, (_, i) => ({ ...source.semantic.chunks[0], id: `c${i}` })) } } };
@@ -71,6 +72,27 @@ try {
   assert.equal(native.title, 'Taxonomy');
   assert.deepEqual(native.contentBlocks.map(b => b.heading), ['Signals', 'Availability']);
   assert.equal(native.contentBlocks[0].body, 'Signals need timing controls.');
+  const typedNative=canonicalWriterOutput({slotTexts:{3:'Different timing rules have different consequences.'},slotContentTypes:{3:'contrast'}},nativeSpec);
+  assert.equal(typedNative.contentBlocks[0].type,'contrast');
+  assert.throws(()=>canonicalWriterOutput({slotTexts:{3:'Visible explanation'},slotContentTypes:{3:'point-description'}},nativeSpec),/invalid visible native copy type/);
+  const replacedNative=canonicalWriterOutput({slotTexts:{3:'Obsolete template body'},slotContentTypes:{3:'point-description'},sourceArtifacts:[{sourceUnitId:'formula'}]},nativeSpec);
+  assert.deepEqual(replacedNative.contentBlocks,[],'source-owned compiler replaces native body; old slot copy cannot become visible compatibility content');
+  const titleDraft={title:'A qualified title',templateSlotTexts:{1:'A qualified title'},copy:{blocks:[]}};
+  assert.match(writerRepairPrompt('prompt',titleDraft,[{code:'under_expanded',repair:'expand_support'}]),/<preserve_valid_title>/);
+  assert.doesNotMatch(writerRepairPrompt('prompt',{...titleDraft,templateSlotTexts:{1:'Different title'}},[{code:'template_slot_overflow',slotRole:'title',shapeId:1}]),/<preserve_valid_title>/);
+  const nativeTitleRepair=writerRepairPrompt('prompt',titleDraft,[{code:'template_slot_overflow',slotRole:'title',shapeId:1,capacity:6}]);
+  assert.match(nativeTitleRepair,/"capacity":6/);assert.match(nativeTitleRepair,/"slotRole":"title"/);assert.match(nativeTitleRepair,/约 6 个中文字符/);
+  const repairWithLimits='<final_native_limits>[{"shapeId":1,"role":"title","maxVisualUnits":6},{"shapeId":2,"role":"section","maxVisualUnits":5}]</final_native_limits>';
+  const navigationRepair=writerRepairPrompt(repairWithLimits,titleDraft,[{code:'template_slot_overflow',slotRole:'section',shapeId:2,capacity:5}]);
+  assert.match(navigationRepair,/<section_slot_repairs>/);assert.match(navigationRepair,/不是锁定的来源原文/);assert.match(navigationRepair,/<preserve_valid_title>/);assert.doesNotMatch(navigationRepair,/<required_native_reflow>/);
+  const bodyRepair=writerRepairPrompt(repairWithLimits,titleDraft,[{code:'template_text_fit',slotRole:'content',shapeId:9}]);
+  assert.match(bodyRepair,/<required_native_reflow>/);assert.match(bodyRepair,/"slotTextsShapeIds":\[1,2\]/);assert.match(bodyRepair,/原槽位事实、required_visible_evidence/);
+  const repairFramework={frameworkHash:'unchanged-framework',material:{sourceText:'Long immutable source. '.repeat(2000),knowledge:'source_only',prompt:'LOCKED_USER_REQUEST: preserve the supplied relationship.'}};
+  const longRepair=`当前任务只写第 2 页，共 3 页。\nINPUT_FRAMEWORK=${JSON.stringify(repairFramework)}\n<source_packet>{"evidence":[{"text":"Exact complete source relationship."}]}</source_packet>\n${repairWithLimits}`;
+  const focused=writerRepairPrompt(longRepair,titleDraft,[{code:'template_text_fit',slotRole:'content',shapeId:9}]);
+  assert.ok(focused.length<longRepair.length/2);assert.match(focused,/unchanged-framework/);assert.match(focused,/LOCKED_USER_REQUEST/);assert.match(focused,/Exact complete source relationship/);assert.match(focused,/not a replacement input framework/);
+  assert.equal(repairFramework.material.sourceText.length,'Long immutable source. '.repeat(2000).length);
+  const coverRepair=writerRepairPrompt(repairWithLimits,titleDraft,[{code:'template_cover_body'}]);assert.match(coverRepair,/<native_cover_repair>/);assert.match(coverRepair,/"sourceCommentary":\[\]/);
   assert.equal(objectWritingCapacity({ outline: [{ id: 'native' }], templateFidelity: { slides: [{ slots: [{ shapeId: 3, capacity: 90, maxLines: 3 }] }] } }, 'native', { nativeRef: { shapeId: 3 }, templateSlot: { capacity: 20 } }).maxLines, 3);
   assert.match(slideSemanticContext({ title: 'Visible', bullets: ['stale hidden text'], nodes: [{ type: 'text', nativeRef: { shapeId: 1 }, content: { text: 'Actual native explanation' } }] }).visibleText, /Actual native/);
   assert.ok(!slideSemanticContext({ title: 'Visible', bullets: ['stale hidden text'], nodes: [{ type: 'text', nativeRef: { shapeId: 1 }, content: { text: 'Actual native explanation' } }] }).visibleText.includes('stale hidden'));
