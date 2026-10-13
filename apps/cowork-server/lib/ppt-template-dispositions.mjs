@@ -9,7 +9,7 @@ export function adaptationDisposition(project,node,role,basis,reason) {
 }
 export function validAdaptation(project,node,record,role) {
   return Boolean(record?.sourceHash===createHash('sha256').update(String(project.source?.text||project.prompt||'')).digest('hex')&&record?.version===2&&record.policyVersion===2&&record.disposition==='retired_by_adaptation'&&record.beforeHash===templateAssetHash(node)&&record.templateHash===(project.templateFidelity?.sha256||null)&&record.role===role&&
-    (role==='old_template_content'&&record.approvalBasis==='deterministic_topic_mismatch'||!['image','chart','table'].includes(node.type)&&record.approvalBasis==='source_region_replacement'));
+    (role==='old_template_content'&&['deterministic_topic_mismatch','design_only_template'].includes(record.approvalBasis)||!['image','chart','table'].includes(node.type)&&record.approvalBasis==='source_region_replacement'));
 }
 export function verifiedReplacement(node,record,visible) {
   if(record?.version!==2||record.disposition!=='replaced_verified'||record.beforeHash!==templateAssetHash(node)||record.verification?.status!=='passed'||!record.replacementNodeIds?.length)return false;

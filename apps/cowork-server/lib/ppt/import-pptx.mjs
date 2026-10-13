@@ -1,3 +1,4 @@
+import {buildRenderTree} from './render-tree.mjs';
 import { EXPORT_VERIFY_SCRIPT } from './export-verifier-python.mjs';
 import { templateLimits, TEMPLATE_SECURITY_SCRIPT } from '../ppt-template-security.mjs';
 import { OFFICE_MATH_SCRIPT } from '../ppt-math.mjs';
@@ -132,6 +133,10 @@ ${FONT_SCRIPT}
 ${RENDER_CONTRACT_SCRIPT}
 
 data=json.load(sys.stdin); original=data['original']; prs=Presentation(original)
+if data.get('clearTemplateNotes'):
+    for slide in prs.slides:
+        for relationship in list(slide.part.rels.values()):
+            if relationship.reltype.endswith('/notesSlide'): slide.part.drop_rel(relationship.rId)
 source_slide_map=data.get('sourceSlideMap')
 if source_slide_map is not None:
     source_count=len(prs.slides)
@@ -175,7 +180,7 @@ HANT_RE=re.compile(r'[萬與為於後臺國學實體廣應當復雜雙發變這�
 
 def set_east_asia(run, role='body', family=None):
     if not CJK_RE.search(run.text or ''):
-        run.font.name=resolve_font(family or run.font.name or fonts['body'],run.text)
+        run.font.name=resolve_font(run.font.name or family or fonts['body'],run.text)
         return
     if HANT_RE.search(run.text or ''):
         east_asia=fonts.get('titleEastAsiaHant' if role == 'title' else 'bodyEastAsiaHant') or family or (fonts['titleEastAsia'] if role == 'title' else fonts['bodyEastAsia'])
@@ -200,7 +205,8 @@ def shape_text_frames(slide, shape):
 
 def add_source_artifact(slide, node):
     g=node['geometry']; c=node.get('content') or {}; style=node.get('style') or {}
-    font='Consolas' if c.get('codeBlock') else style.get('fontFamily') or fonts['body']; pt=float(style.get('fontSizePt',18))
+    overrides=set(node.get('textStyleOverrides') or [])
+    font='Consolas' if c.get('codeBlock') and 'fontFamily' not in overrides else style.get('fontFamily') or fonts['body']; pt=float(style.get('fontSizePt',18))
     if node['type']=='image':
         from PIL import Image as ArtifactImage
         blob=base64.b64decode(c['dataUrl'].split(',',1)[1]);image=ArtifactImage.open(io.BytesIO(blob));image.load()
@@ -231,7 +237,14 @@ def add_source_artifact(slide, node):
                     if piece:p.add_run().text=piece
             for run in p.runs:
                 run.font.name=fonts['bodyEastAsia'] if CJK_RE.search(run.text) else font; run.font.size=Pt(pt); run.font.color.rgb=RGBColor.from_string(str(style.get('color','#333333')).lstrip('#')); set_east_asia(run,family=font if c.get('codeBlock') else None)
-    if node['type'] in ('text','list','timeline'):apply_text_contract(shape.text_frame,node.get('textLayout') or {})
+    if node['type'] in ('text','list','timeline'):
+        apply_text_contract(shape.text_frame,node.get('textLayout') or {})
+        for paragraph in shape.text_frame.paragraphs:
+            paragraph.alignment={'right':PP_ALIGN.RIGHT,'center':PP_ALIGN.CENTER}.get(style.get('textAlign'),PP_ALIGN.LEFT)
+            for run in paragraph.runs:
+                run.font.italic=style.get('fontStyle')=='italic'
+                run.font.underline=style.get('textDecoration')=='underline'
+                if 'fontWeight' in overrides:run.font.bold=style['fontWeight']>=600
     source=node.get('sourceArtifact') or {}
     shape.name='AIMate source:'+str(source.get('sourceUnitId',''))+':'+str(source.get('type',''))+'|AIMate instance:'+str(node.get('id',''))+':0'
     return int(shape.shape_id)
@@ -247,7 +260,11 @@ for slide_index, slide in enumerate(prs.slides):
         raise ValueError('omitted template shape is also present in native nodes on slide '+str(slide_index+1))
     for shape in list(slide.shapes):
         if int(shape.shape_id) in omitted:
+            removed_relations={value for element in shape._element.iter() for key,value in element.attrib.items() if key.startswith('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}')}
             slide.shapes._spTree.remove(shape._element)
+            used={value for element in slide._element.iter() for key,value in element.attrib.items() if key.startswith('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}')}
+            for rid in removed_relations-used:
+                if rid in slide.part.rels: slide.part.drop_rel(rid)
             continue
         node=by_shape.get(int(shape.shape_id))
         if not node: continue
@@ -318,11 +335,17 @@ for slide_index, slide in enumerate(prs.slides):
                 for paragraph in shape.text_frame.paragraphs:
                     if isinstance(paragraph.line_spacing,(int,float)) and 0 < paragraph.line_spacing < .95:
                         paragraph.line_spacing=1.0
-            for run in shape.text_frame.paragraphs[0].runs[:1]:
-                if style.get('fontFamily'): run.font.name=style['fontFamily']
-                if style.get('fontSizePt'): run.font.size=Pt(style['fontSizePt'])
-                if style.get('fontWeight'): run.font.bold=bool(style['fontWeight'] >= 600)
-                if style.get('color'): run.font.color.rgb=RGBColor.from_string(style['color'].lstrip('#').upper())
+            overrides=set(node.get('textStyleOverrides') or [])
+            for paragraph in shape.text_frame.paragraphs:
+                if 'lineHeight' in overrides: paragraph.line_spacing=float(style['lineHeight'])
+                paragraph.alignment={'right':PP_ALIGN.RIGHT,'center':PP_ALIGN.CENTER}.get(style.get('textAlign'),PP_ALIGN.LEFT)
+                for run in paragraph.runs:
+                    if style.get('fontFamily'): run.font.name=style['fontFamily']
+                    if 'fontSizePt' in overrides: run.font.size=Pt(style['fontSizePt'])
+                    if 'fontWeight' in overrides: run.font.bold=bool(style['fontWeight']>=600)
+                    if style.get('fontStyle'): run.font.italic=style['fontStyle']=='italic'
+                    if style.get('textDecoration'): run.font.underline=style['textDecoration']=='underline'
+                    if style.get('color'): run.font.color.rgb=RGBColor.from_string(style['color'].lstrip('#').upper())
             apply_frame_fonts(shape.text_frame, role, family)
 
 # Imported files may already contain Chinese in a run that only declares a
@@ -446,6 +469,7 @@ export async function importEditablePptx(project, bytes, hash, io = {}) {
 }
 
 export async function renderImportedPptx(project, io = {}) {
+  const renderTree=buildRenderTree(project);
   const slides = project.deck.slides.filter(slide => Number.isInteger(slide.nativeSlideIndex)).map(slide => ({
     nativeSlideIndex: slide.nativeSlideIndex,
     omitShapeIds: [...(slide.templateOmissions || []).map(item => item.shapeId),...(slide.nodes||[]).filter(n=>n.hidden||Number(n.style?.opacity??1)<=0).map(n=>n.nativeRef?.shapeId).filter(id=>id!==undefined)],
@@ -456,10 +480,10 @@ export async function renderImportedPptx(project, io = {}) {
       // base64 payload for every copy makes long-deck export unnecessarily huge.
       content: node.type === 'image' && !node.content?.mediaReplacement
         ? Object.fromEntries(Object.entries(node.content || {}).filter(([key]) => key !== 'dataUrl')) : node.content,
-      geometry: node.geometry, style: node.style, chartLayout:node.type==='chart'?chartContract(node.content):undefined, textLayout: textContract({...node,kind:node.type}) })),
+      geometry: renderTree.slides.find(item=>item.slideId===slide.id)?.elements.find(element=>element.nodeId===node.id)?.bounds || node.geometry, style: node.style, textStyleOverrides:node.textStyleOverrides, chartLayout:node.type==='chart'?chartContract(node.content):undefined, textLayout: textContract({...node,kind:node.type}) })),
   }));
   return (io.runPython || runPython)(project, EXPORT_SCRIPT, JSON.stringify({ original: project.externalPptx.originalPath, slides,
-    sourceSlideMap: project.templateSlideMap, fonts: project.templateSpec?.fonts,exportManifest:exportManifest(project) }));
+    clearTemplateNotes: project.templateContentMode==='design_only', sourceSlideMap: project.templateSlideMap, fonts: project.templateSpec?.fonts,exportManifest:exportManifest(project,renderTree) }));
 }
 
 export const _internals = { IMPORT_SCRIPT, EXPORT_SCRIPT };

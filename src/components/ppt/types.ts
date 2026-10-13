@@ -34,8 +34,9 @@ export type PptRenderElement = {
     pointLayout?: { boxes: { x: number; y: number; w: number; h: number }[]; fontSizePt: number; overflow: boolean; columns: number; suggestedSplitCount?: number };
     mathMl?: string; mathText?: string; mathStatus?: string;
     dataUrl?: string; sourceImageId?:string; crop?: number[]; rows?: string[][]; rowWeights?: number[]; columnWeights?: number[]; labels?: string[]; values?: number[]; chartType?: 'bar' | 'pie' | 'line'; unit?: string; shape?: 'rect' | 'ellipse' };
-  style?: { color?: string; fill?: string; tableHeaderColor?: string; fontFamily?: string; eastAsiaFontFamily?: string; fontSizePt?: number; fontWeight?: number; fontStyle?: string; textAlign?: string; lineHeight?: number; paragraphSpacingEm?: number; letterSpacing?: number; opacity?: number; shape?: string };
+  style?: { color?: string; fill?: string; tableHeaderColor?: string; fontFamily?: string; eastAsiaFontFamily?: string; fontSizePt?: number; fontWeight?: number; fontStyle?: string; textDecoration?: 'none' | 'underline'; textAlign?: string; lineHeight?: number; paragraphSpacingEm?: number; letterSpacing?: number; opacity?: number; shape?: string };
   textLayout?: {version:number; units:'pt';margins:number[];wrap:boolean;autoFit:'none';fontFamily?:string;tabSize:number;code:boolean;paragraphs:{text:string;label?:string;lineHeight:number;spaceAfterPt:number;runs?:{text:string;fontSizePt:number;bold:boolean}[]}[]};
+  textStyleOverrides?: ('fontFamily' | 'eastAsiaFontFamily' | 'fontSizePt' | 'fontWeight' | 'lineHeight')[];
   imageLayout?: {version:number;fit:'contain'|'cover'|'stretch'|'crop';crop:number[];valid:boolean};
   chartLayout?: {version:number;minimum:number;maximum:number;valid:boolean;unit:string;svg?:string};
   mathLayout?: {bounds:PptBounds;overflow:boolean;widthPt:number;heightPt:number};
@@ -65,7 +66,7 @@ export type PptProject = {
   stage: string; error: string; outline: PptSlide[]; deck: { slides: PptSlide[]; deckId?: string; schemaVersion?: number;
     themeTokens?: { titleScale: number; bodyScale: number; spacingScale: number } } | null;
   nodes?: Record<string, { status: string; attempts?: number; slide?: PptSlide }>; dagNodes?: Record<string, PptRunNode>;
-  quality?: PptQualityReport; revision: number; draftRevision?: number; publishedRevision?: number; currentRunId?: string;
+  quality?: PptQualityReport; revision: number; draftRevision?: number; publishedRevision?: number; renderUpgradePending?: boolean; currentRunId?: string;
   renderTree?: PptRenderTree; sourceRevision?: number; source?: PptSource | null; inputKind?: string; model?: string; configId?: string;
   runtime?: { lifecycle: string; pauseRequested?: boolean; slides: Record<string, { phase: string; accepted?: boolean; epoch?: number; renderHash?: string; preview?: PptRenderSlide }> };
   planRevision?: { version: number; hash: string }; constraints?: { version: number };

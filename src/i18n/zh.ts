@@ -3755,6 +3755,19 @@ const zh: Record<TranslationKey, string> = {
   'ppt.ai.lang.fr': "Français",
   'ppt.ai.lang.es': "Español",
 
+  "ppt.inspector.fontFamily": "字体",
+  "ppt.editor.italic": "斜体",
+  "ppt.editor.underline": "下划线",
+  "ppt.editor.selectPageText": "选择本页文字",
+  "ppt.editor.pausedEditing": "生成已暂停。修改会保存为草稿，关闭编辑器后可继续生成。",
+  "ppt.editor.editPage": "编辑页面",
+  "ppt.create.templateContent": "模板内容",
+  "ppt.create.designOnly": "只复用设计（推荐）",
+  "ppt.create.keepFixed": "保留模板固定内容",
+  "ppt.create.templateContentHint": "原模板保持不变。替换旧文字和数据，保留背景与品牌。",
+  "ppt.editor.nativeLayout": "原生模板排版",
+  "ppt.editor.selectBodyObjects": "选择正文组件",
+  "ppt.editor.arrangeObjects": "对齐与分布组件",
 };
 
 export default zh;

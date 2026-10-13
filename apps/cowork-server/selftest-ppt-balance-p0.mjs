@@ -97,10 +97,11 @@ const bilingual = normalizePaste(['# Costs', '', '## Turnover', '',
   '先检查与已有信号的相关性，再做一次覆盖回归，最后检验组合中的增量贡献是否显著存在。', '',
   'Daily IC above 0.05 is rare.', '', '月频 IC 超过 0.10 通常需要先排查未来函数。', ''].join('\n'));
 const pairs = bilingual.semantic.inventory.items.filter(item => item.languagePairId);
-assert.equal(new Set(pairs.map(item => item.languagePairId)).size, 2, 'two pairs; the third has different numbers');
+assert.equal(new Set(pairs.map(item => item.languagePairId)).size, 1, 'only the pair with shared anchors is confirmed; plain adjacency stays a candidate');
 assert.ok(pairs.every(item => ['primary', 'translation'].includes(item.languageRole)));
 const plan = sourceDensityPlan(bilingual, { generationPolicy: policy() });
-assert.equal(plan.languagePairs, 2);
+assert.equal(plan.languagePairs, 1);
+assert.equal(bilingual.semantic.inventory.items.filter(item=>item.languagePairCandidate).length,2);
 assert.ok(plan.groups.some(group => group.relations.includes('translation_pair')));
 const bilingualEstimate = estimatePageRecommendation({ inputKind: 'paste', source: bilingual, prompt: '', generationPolicy: policy() });
 assert.ok(bilingualEstimate.assumptions.some(item => item.topic === 'language' && /输出语言与输入一致/.test(item.reason)));

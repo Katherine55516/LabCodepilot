@@ -233,6 +233,17 @@ def scene_color(value, fallback):
     try: return RGBColor(*bytes.fromhex(value.removeprefix('#')))
     except: return fallback
 
+def apply_scene_text_style(frame,style,overrides=()):
+    for paragraph in frame.paragraphs:
+        if style.get('textAlign'): paragraph.alignment={'right':PP_ALIGN.RIGHT,'center':PP_ALIGN.CENTER}.get(style['textAlign'],PP_ALIGN.LEFT)
+        for run in paragraph.runs:
+            if style.get('fontFamily'):
+                run.font.name=resolve_font(style['fontFamily'],run.text)
+                set_east_asia_font(run,run.font.name,language_for_text(run.text))
+            run.font.italic=style.get('fontStyle')=='italic'
+            run.font.underline=style.get('textDecoration')=='underline'
+            if 'fontWeight' in overrides: run.font.bold=bool(style['fontWeight']>=600)
+
 def render_scene_element(slide, element):
     box = element['bounds']; x, y, w, h = box['x'], box['y'], box['width'], box['height']
     kind = element['kind']; content = element.get('content') or {}; item_style = element.get('style') or {}
@@ -273,14 +284,20 @@ def render_scene_element(slide, element):
         para.line_spacing = float(item_style.get('lineHeight') or 1.12)
         para.space_after = Pt(size * float(item_style.get('paragraphSpacingEm') or 0))
         for paragraph in shape.text_frame.paragraphs:
+            for run in paragraph.runs:
+                if item_style.get('fontFamily'): run.font.name=resolve_font(item_style['fontFamily'],run.text)
+                run.font.italic=item_style.get('fontStyle')=='italic'
+                run.font.underline=item_style.get('textDecoration')=='underline'
             paragraph.alignment = {'right':PP_ALIGN.RIGHT,'center':PP_ALIGN.CENTER}.get(item_style.get('textAlign'),PP_ALIGN.LEFT)
         if not any(spec.get('runs') for spec in (element.get('textLayout') or {}).get('paragraphs',[])):
             cjk_font(para, size, color, bool(item_style.get('fontWeight', 400) >= 600), 'title' if element.get('semanticRole') in ('title','template-title') else 'body')
         apply_text_contract(shape.text_frame,element.get('textLayout') or {})
+        apply_scene_text_style(shape.text_frame,item_style,element.get('textStyleOverrides') or [])
         if content.get('codeBlock'):
             for paragraph in shape.text_frame.paragraphs:
                 for run in paragraph.runs:
-                    run.font.name=resolve_font('Consolas',run.text);set_east_asia_font(run,run.font.name,language_for_text(run.text))
+                    family=item_style.get('fontFamily') if 'fontFamily' in (element.get('textStyleOverrides') or []) else 'Consolas'
+                    run.font.name=resolve_font(family or 'Consolas',run.text);set_east_asia_font(run,run.font.name,language_for_text(run.text))
         shape.rotation = float(element.get('rotation') or 0)
         return
     if kind in ('list', 'timeline', 'metric'):
@@ -315,14 +332,15 @@ def render_scene_element(slide, element):
                 body = str(item.get('body') or '') if structured else (parts[1] if len(parts) > 1 else raw)
                 if heading:
                     heading_para = frame.paragraphs[0]; heading_para.text = heading
-                    heading_para.space_after = Pt(3); heading_para.line_spacing = 1.18
+                    heading_para.space_after = Pt(3); heading_para.line_spacing = float(item_style.get('lineHeight') or 1.18)
                     cjk_font(heading_para, point_size, color, True, 'body')
                     body_para = frame.add_paragraph()
                 else: body_para = frame.paragraphs[0]
                 for paragraph in frame.paragraphs: paragraph.alignment=PP_ALIGN.LEFT;paragraph.space_before=Pt(0)
-                body_para.text = body; body_para.line_spacing = 1.18
+                body_para.text = body; body_para.line_spacing = float(item_style.get('lineHeight') or 1.18)
                 body_para.space_after = Pt(0)
                 cjk_font(body_para, point_size, color)
+                apply_scene_text_style(frame,item_style,element.get('textStyleOverrides') or [])
             return
         shape = slide.shapes.add_textbox(x, y, w, h); shape.text_frame.word_wrap = True
         if source: shape.name=source_name
@@ -336,10 +354,12 @@ def render_scene_element(slide, element):
             para.space_after = Pt(size * float(item_style.get('paragraphSpacingEm') if item_style.get('paragraphSpacingEm') is not None else .35))
             cjk_font(para, size, color, kind == 'metric' and number == 0, 'title' if kind == 'metric' and number == 0 else 'body')
         apply_text_contract(shape.text_frame,element.get('textLayout') or {})
+        apply_scene_text_style(shape.text_frame,item_style,element.get('textStyleOverrides') or [])
         if content.get('codeBlock'):
             for paragraph in shape.text_frame.paragraphs:
                 for run in paragraph.runs:
-                    run.font.name=resolve_font('Consolas',run.text);set_east_asia_font(run,run.font.name,language_for_text(run.text))
+                    family=item_style.get('fontFamily') if 'fontFamily' in (element.get('textStyleOverrides') or []) else 'Consolas'
+                    run.font.name=resolve_font(family or 'Consolas',run.text);set_east_asia_font(run,run.font.name,language_for_text(run.text))
         shape.rotation = float(element.get('rotation') or 0)
         return
     if kind in ('image', 'chart', 'table', 'shape'):

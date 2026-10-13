@@ -384,7 +384,7 @@ function normalizeSlide(value, outlineSlide, project = null, previousTitles = []
     const selected=value?.sourceArtifacts?.length?value.sourceArtifacts:assigned;
     if(assigned.some(ref=>!selected.some(item=>item.sourceUnitId===ref.sourceUnitId &&
       (item.rowStart??1)===(ref.rowStart??1) && (item.rowEnd??project.source?.semantic?.inventory?.items?.find(o=>o.id===ref.sourceUnitId)?.rows?.length)===(ref.rowEnd??project.source?.semantic?.inventory?.items?.find(o=>o.id===ref.sourceUnitId)?.rows?.length))))throw new HttpError(400,'writer omitted a required source object or changed its row selection');
-    const commentary=value?.sourceCommentary?.length?value.sourceCommentary:assigned.length && !value?.slotTexts
+    const commentary=Array.isArray(value?.sourceCommentary)?value.sourceCommentary:assigned.length && !value?.slotTexts
       ? slide.copy.blocks.map(block=>block.body):[];
     bindSourceArtifacts(project, slide, selected, index, commentary);
     bindSourceMedia(project,slide,outlineSlide.sourceImageIds||[],index);
@@ -968,7 +968,7 @@ function startGeneration(uid, id, activity, log, deps = defaultDeps) {
         finished.exportBytes = exportInfo.bytes; finished.status = 'completed'; finished.stage = 'completed';
         finished.dagNodes['publish:deck'] = nodeRecord('done', finished.dagNodes['publish:deck'], { bytes: exportInfo.bytes });
         finished.error = ''; finished.revision = Math.max(1, Number(finished.revision || 0)); finished.draftRevision = finished.revision;
-        finished.publishedArtifactPath = artifactPath; finished.publishedRevision = finished.revision;
+        delete finished.renderUpgradePending; finished.publishedArtifactPath = artifactPath; finished.publishedRevision = finished.revision;
         finished.renderTree = buildRenderTree(finished); saveStructuredProject(finished); saveRevision(finished, 'initial-publish');
         runtimeState(finished).lifecycle = 'completed';
         for (const tree of finished.renderTree.slides) finished.runtime.slides[tree.id] = { ...finished.runtime.slides[tree.id], phase: 'validated', preview: tree, renderHash: digest(tree) };
@@ -1221,7 +1221,7 @@ async function handleUpdates(req, uid, send, activity, log, deps) {
   }
   const project = { id, uid, title: updateTitle || `${baseSnapshot.title} · 更新版`.slice(0, 160), prompt: progressText || progressFile.name, pages: count,
     deckTitle: updateTitle ? { text: formattedUpdateTitle.title, raw: updateTitle, source: 'user', locked: true } : { text: '', raw: '', source: 'agent', locked: false },
-    template: template.id, templateSpec: snapshotTemplate(template), inputKind: 'update',
+    template: template.id, templateContentMode: data.templateContentMode==='keep_fixed'?'keep_fixed':'design_only', templateSpec: snapshotTemplate(template), inputKind: 'update',
     update, updateRequest: requestId ? { id: requestId, hash: requestHash } : null,
     version: { rootId: rootId || id, parentId: baseProject?.id || null, number: nextVersion, baseFileName: baseFile?.name || null }, source,
     sourceRevision: 1, outlineRevision: 0, pageDecision: { finalPageCount: count, source: data.pages === undefined ? 'estimate' : 'user', includesCover: true }, status: mustIngest ? 'ingesting' : 'outlining', stage: mustIngest ? 'ingest' : 'outline',
@@ -1398,9 +1398,9 @@ export async function handlePpt(req, url, { uid, send, res, readBody, activity, 
           try { ext = validateFile(data.fileName, sourceBytes); } catch (error) { throw new HttpError(400, error.message); }
           source = { kind: 'file', name: data.fileName, extension: ext, bytes: sourceBytes.length, sha256: sha256(sourceBytes), text: '', segments: [], truncated: false };
         }
-        const prompt = inputKind === 'prompt' ? bounded(data.prompt, MAX_PROMPT, 'prompt') : bounded(data.prompt || source.name, MAX_PROMPT, 'prompt');
+        const prompt = inputKind === 'prompt' ? bounded(data.prompt || '', MAX_PROMPT, 'prompt', !(Array.isArray(data.images) && data.images.length)) : bounded(data.prompt || '', MAX_PROMPT, 'prompt', false);
         const userTitle = typeof data.title === 'string' && data.title.trim() ? bounded(data.title, 160, 'title') : '';
-        const title = bounded(userTitle || prompt.slice(0, 60), 160, 'title');
+        const title = bounded(userTitle || prompt.slice(0, 60) || source?.name?.replace(/\.[^.]+$/, '') || 'Presentation', 160, 'title');
         const template = resolveTemplate(uid, data.template || 'violet');
         const generationPolicy = normalizeGenerationPolicy(data.generationPolicy);
         if (inputKind === 'prompt') {
@@ -1420,7 +1420,7 @@ export async function handlePpt(req, url, { uid, send, res, readBody, activity, 
           const reuseError = templateReuseError(template.pages, selectedPages);
           if (reuseError) throw new HttpError(400, reuseError);
         }
-        const project = { id: store.newId(), uid, title, prompt, generationPolicy, promptContractVersion: PPT_PROMPT_CONTRACT_VERSION, pages: selectedPages, inputProfile, contentPlan, template: template.id,
+        const project = { id: store.newId(), uid, title, prompt, generationPolicy, promptContractVersion: PPT_PROMPT_CONTRACT_VERSION, pages: selectedPages, inputProfile, contentPlan, template: template.id, templateContentMode: data.templateContentMode==='keep_fixed'?'keep_fixed':'design_only',
           templateSpec: snapshotTemplate(template), inputKind, source, sourceRevision: source ? 1 : 0, outlineRevision: 0,
           deckTitle: userTitle ? { text: formattedUserTitle.title, raw: userTitle, source: 'user', locked: true } : { text: '', raw: '', source: 'agent', locked: false },
           pageDecision: { finalPageCount: selectedPages, source: data.pages === undefined && promptPages === undefined ? 'estimate' : 'user',

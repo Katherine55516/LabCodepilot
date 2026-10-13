@@ -39,6 +39,7 @@ async function publishLocked(uid, projectId, deps, snapshot, inputHash) {
     blockExportVerification(project,error);saveProject(project);return {project,published:false};
   }
   project.publishedArtifactPath = output;
+  delete project.renderUpgradePending;
   project.status = 'completed'; project.stage = 'completed'; project.error = '';
   project.publishedRevision = project.revision; project.publishedAt = new Date().toISOString();
   project.publishedRenderTree = project.renderTree;

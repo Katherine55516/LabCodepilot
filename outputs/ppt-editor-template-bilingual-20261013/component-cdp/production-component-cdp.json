@@ -1,0 +1,11 @@
+{
+  "checks": [
+    "Only completed and current pages appear in the main canvas",
+    "1440px: composer scrolls; submit and close remain in the viewport",
+    "390px: composer scrolls; submit and close remain in the viewport",
+    "User instruction and assistant result persist in the conversation",
+    "Production Prompt input includes its attached PNG in the analysis/submission draft",
+    "Production native SVG: large bilingual title and eyebrow fit their measured line boxes; media remains complete"
+  ],
+  "errors": []
+}

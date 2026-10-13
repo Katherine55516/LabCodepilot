@@ -62,7 +62,7 @@ export function sourceDensityPlan(source, project = {}) {
     const detectedPair = Boolean(prev && item.languagePairId && prev.lastPairId === item.languagePairId);
     const translationPair = detectedPair || prev && sectionOf(item) === prev.section && prev.types.includes(item.type) &&
       /\p{Script=Han}/u.test(text) !== /\p{Script=Han}/u.test(prev.lastText);
-    const connected = prev && sectionOf(item) === prev.section && (detectedPair || prev.estimatedVisibleUnits + units <= capacity.target);
+    const connected = prev && sectionOf(item) === prev.section && prev.estimatedVisibleUnits + units <= (detectedPair ? capacity.high : capacity.target);
     const relation = detectedPair ? 'translation_pair' : translationPair ? 'possible_translation_pair' : connected ? 'same_source_context' : null;
     if (connected) {
       prev.sourceUnitIds.push(item.id); prev.chunkRefs.push(...item.chunkRefs); prev.refs.push(...item.source_ref);
@@ -70,7 +70,7 @@ export function sourceDensityPlan(source, project = {}) {
       if (relation) prev.relations.push(relation);
     } else groups.push({ groupId: `density_${groups.length + 1}`, section: sectionOf(item), sourceUnitIds: [item.id],
       readerQuestion: item.sectionPath?.at(-1) || item.semanticRole, chunkRefs: [...item.chunkRefs], refs: [...item.source_ref],
-      estimatedVisibleUnits: units, types: [item.type], lastText: text, lastPairId: item.languagePairId || null, relations: [],
+      estimatedVisibleUnits: units, types: [item.type], lastText: text, lastPairId: item.languagePairId || null, relations: detectedPair ? ['translation_pair_capacity_continuation'] : [],
       estimateBasis: 'source_display_projection', provisional: true });
     if (!item.must_preserve_structure) seen.set(key, groups.at(-1));
   }

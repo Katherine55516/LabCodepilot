@@ -1,7 +1,7 @@
 import {componentElements} from './component-layout.mjs';
 import { visibleNodes } from '../ppt-visible-content.mjs';
 import crypto from 'node:crypto';
-import { applyRenderContract, RENDER_CONTRACT_VERSION } from './render-contract.mjs';
+import { applyRenderContract, prepareNativeTextElement, RENDER_CONTRACT_VERSION } from './render-contract.mjs';
 import { isSourceOwnedNode } from '../ppt-source-artifacts.mjs';
 import { applyLayoutRegistry, regionsFor, typographyFor } from '../ppt-layout.mjs';
 import { ensureDeckV3, materializeLegacySlide, stableId } from './ir.mjs';
@@ -46,12 +46,15 @@ function splitBounds(region, count, index, axis = 'x') {
 
 function element(node, kind, region, content, nodeStyle, zIndex, extra = {}) {
   const geometry = node.geometry && ['x', 'y', 'width', 'height'].every(key => Number.isInteger(node.geometry[key])) ? node.geometry : bounds(region);
-  return { id: node.id, nodeId: node.id, kind, bounds: geometry, content, style: { ...(nodeStyle || {}), ...(node.style || {}) }, zIndex: Number(node.zIndex ?? zIndex), rotation: Number(node.rotation || 0), locked: Boolean(node.locked), groupId: node.groupId || null, ...extra };
+  return { id: node.id, nodeId: node.id, kind, bounds: geometry, content, textStyleOverrides:node.textStyleOverrides, style: { ...(nodeStyle || {}), ...(node.style || {}) }, zIndex: Number(node.zIndex ?? zIndex), rotation: Number(node.rotation || 0), locked: Boolean(node.locked), groupId: node.groupId || null, ...extra };
 }
 
 function adaptiveList(node, region, slide, project) {
   const content = { ...(node.content || {}) };
-  const plan = layoutPoints(content.items || [], region, {
+  const actualRegion=node.geometry ? {w:node.geometry.width/914400,h:node.geometry.height/914400} : region;
+  const plan = layoutPoints(content.items || [], actualRegion, {
+    ...(node.textStyleOverrides?.includes('fontSizePt')?{fontSizePt:node.style.fontSizePt}:{}),
+    ...(node.textStyleOverrides?.includes('lineHeight')?{lineHeight:node.style.lineHeight}:{}),
     distributionType: slide.copy?.distributionType,
     density: slide.copy?.density,
     depth: slide.copy?.depth,
@@ -70,8 +73,8 @@ function buildPreservedSlide(project, slide, index) {
     style: { fontFamily: project.templateSpec?.fonts?.body, eastAsiaFontFamily: project.templateSpec?.fonts?.bodyEastAsia,
       color: project.templateSpec?.palette?.foreground, ...(node.style || {}) },
     zIndex: Number(node.zIndex || 0), rotation: Number(node.rotation || 0), locked: Boolean(node.locked),
-    semanticRole: node.semanticRole, nativeRef: node.nativeRef, nativeTextFrame: node.nativeTextFrame,sourceArtifact:node.sourceArtifact,
-  })).sort((a, b) => a.zIndex - b.zIndex);
+    semanticRole: node.semanticRole, nativeRef: node.nativeRef, nativeTextFrame: node.nativeTextFrame, textStyleOverrides: node.textStyleOverrides,userGeometry:node.userGeometry,sourceArtifact:node.sourceArtifact,
+  })).map(element=>prepareNativeTextElement(element,origin.height || SLIDE_SIZE.height)).sort((a, b) => a.zIndex - b.zIndex);
   return { id: slide.id, slideId: slide.id, index, layoutId: slide.layoutId,
     size: { width: origin.width || SLIDE_SIZE.width, height: origin.height || SLIDE_SIZE.height },
     background: source.background || project.templateSpec?.palette?.background, elements: elements.map(applyRenderContract), templatePreserved: true };

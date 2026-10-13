@@ -74,12 +74,13 @@ function ElementContent({
   const padding=`${margins[1]*scale}px ${margins[2]*scale}px ${margins[3]*scale}px ${margins[0]*scale}px`;
   const textStyle = {
     color: element.style?.color,
-    fontFamily: contract?.code ? "'Consolas','Noto Sans Mono CJK SC','Noto Sans Mono CJK TC','DejaVu Sans Mono','Liberation Mono','Menlo',monospace" : `'${contract?.fontFamily || element.style?.fontFamily || 'sans-serif'}','${element.style?.eastAsiaFontFamily || 'sans-serif'}','Noto Sans CJK SC','PingFang SC','Hiragino Sans',sans-serif`,
+    fontFamily: contract?.code && !element.textStyleOverrides?.includes('fontFamily') ? "'Consolas','Noto Sans Mono CJK SC','Noto Sans Mono CJK TC','DejaVu Sans Mono','Liberation Mono','Menlo',monospace" : `'${contract?.fontFamily || element.style?.fontFamily || 'sans-serif'}','${element.style?.eastAsiaFontFamily || 'sans-serif'}','Noto Sans CJK SC','PingFang SC','Hiragino Sans',sans-serif`,
     // The canvas is 960 px wide for a 13.333 in slide: 72 px/in, so one
     // PowerPoint point maps to one canvas pixel before responsive scaling.
     fontSize: `${(element.style?.fontSizePt || 18) * scale}px`,
     fontWeight: element.style?.fontWeight,
     fontStyle: element.style?.fontStyle,
+    textDecoration: element.style?.textDecoration,
     textAlign: element.style?.textAlign as
       "left" | "center" | "right" | undefined,
     lineHeight: element.style?.lineHeight,
@@ -139,8 +140,8 @@ function ElementContent({
                 : { heading: "", body: item.text };
             return <div key={item.id} className="absolute overflow-hidden rounded-md border border-current/20"
               style={{ left: `${box.x * 100}%`, top: `${box.y * 100}%`, width: `${box.w * 100}%`, height: `${box.h * 100}%`,
-                padding:`${5.04*scale}px ${7.92*scale}px ${2.88*scale}px`,lineHeight:1.18,overflowWrap:"anywhere",whiteSpace:"pre-wrap",fontSize: `${(element.content?.pointLayout?.fontSizePt || 17) * scale}px` }}>
-              {parts.heading && <div className="font-semibold" style={{marginBottom:3*scale}}>{parts.heading}</div>}
+                padding:`${5.04*scale}px ${7.92*scale}px ${2.88*scale}px`,lineHeight:element.style?.lineHeight || 1.18,overflowWrap:"anywhere",whiteSpace:"pre-wrap",fontSize: `${(element.content?.pointLayout?.fontSizePt || 17) * scale}px` }}>
+              {parts.heading && <div className="font-semibold" style={{marginBottom:3*scale,...(element.textStyleOverrides?.includes('fontWeight')?{fontWeight:element.style?.fontWeight}:{})}}>{parts.heading}</div>}
               <div className="whitespace-pre-wrap">{parts.body}</div>
             </div>;
           })}

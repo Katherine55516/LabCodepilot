@@ -15,7 +15,7 @@ const MAX_NODES_PER_SLIDE = 200;
 export const COMMAND_TYPES = new Set([
   'slide.insert', 'slide.delete', 'slide.duplicate', 'slide.reorder', 'slide.setLayout',
   'node.insert', 'node.delete', 'node.duplicate', 'node.setContent', 'node.setStyle', 'node.setGeometry', 'node.setZIndex', 'node.setRotation', 'node.setLocked',
-  'nodes.delete', 'nodes.duplicate', 'nodes.restore', 'nodes.setGeometry', 'nodes.group', 'nodes.ungroup', 'nodes.setGroup',
+  'nodes.setStyle', 'nodes.delete', 'nodes.duplicate', 'nodes.restore', 'nodes.setGeometry', 'nodes.group', 'nodes.ungroup', 'nodes.setGroup',
   'theme.setPalette', 'theme.setTokens', 'deck.replace', 'ai.objectPatch', 'ai.slidePatch',
 ]);
 
@@ -68,23 +68,26 @@ function geometry(value, field = 'geometry') {
   return result;
 }
 
+function overrides(value) {
+  if(value===undefined||value===null)return value;
+  if(!Array.isArray(value)||value.some(key=>!['fontFamily','eastAsiaFontFamily','fontSizePt','fontWeight','lineHeight'].includes(key)))fail('textStyleOverrides is invalid');
+  return [...new Set(value)];
+}
 function style(value, project) {
   const input = record(value, 'style');
-  const allowed = new Set(['color', 'fill', 'fontFamily', 'eastAsiaFontFamily', 'fontSizePt', 'fontWeight', 'fontStyle', 'textAlign', 'lineHeight', 'letterSpacing', 'opacity', 'shape']);
+  const allowed = new Set(['color', 'fill', 'fontFamily', 'eastAsiaFontFamily', 'fontSizePt', 'fontWeight', 'fontStyle', 'textDecoration', 'textAlign', 'lineHeight', 'letterSpacing', 'opacity', 'shape']);
   if (Object.keys(input).some(key => !allowed.has(key))) fail('style contains unsupported fields');
   const result = {};
   for (const key of ['color', 'fill']) if (input[key] !== undefined) { if (!COLOR.test(input[key])) fail(`style.${key} is invalid`); result[key] = input[key].toLowerCase(); }
-  const templateFonts = new Set(Object.values(project?.templateSpec?.fonts || {}).filter(value => typeof value === 'string'));
-  if (project?.templateFidelity?.mode === 'preserve') for (const slide of project.templateFidelity.slides || []) {
-    for (const node of slide.nodes || []) {
-      if (node.style?.fontFamily) templateFonts.add(node.style.fontFamily);
-      if (node.style?.eastAsiaFontFamily) templateFonts.add(node.style.eastAsiaFontFamily);
-    }
+  for (const key of ['fontFamily', 'eastAsiaFontFamily']) if (input[key] !== undefined) {
+    const font = string(input[key], `style.${key}`, 120, { empty: false });
+    if (!/^[\p{L}\p{N} ._+()-]+$/u.test(font)) fail(`style.${key} is invalid`);
+    result[key] = font;
   }
-  for (const key of ['fontFamily', 'eastAsiaFontFamily']) if (input[key] !== undefined) { const font = string(input[key], `style.${key}`, 120, { empty: false }); if (!templateFonts.has(font)) fail(`style.${key} must use a template font`); result[key] = font; }
-  if (input.fontSizePt !== undefined) result.fontSizePt = number(input.fontSizePt, 'style.fontSizePt', project?.templateFidelity?.mode === 'preserve' ? 8 : 10, 96);
+  if (input.fontSizePt !== undefined) result.fontSizePt = number(input.fontSizePt, 'style.fontSizePt', 8, 96);
   if (input.fontWeight !== undefined) result.fontWeight = number(input.fontWeight, 'style.fontWeight', 100, 900, true);
   if (input.fontStyle !== undefined) { if (!['normal', 'italic'].includes(input.fontStyle)) fail('style.fontStyle is invalid'); result.fontStyle = input.fontStyle; }
+  if (input.textDecoration !== undefined) { if (!['none','underline'].includes(input.textDecoration)) fail('style.textDecoration is invalid'); result.textDecoration = input.textDecoration; }
   if (input.textAlign !== undefined) { if (!['left', 'center', 'right'].includes(input.textAlign)) fail('style.textAlign is invalid'); result.textAlign = input.textAlign; }
   if (input.lineHeight !== undefined) result.lineHeight = number(input.lineHeight, 'style.lineHeight', .8, 3);
   if (input.letterSpacing !== undefined) result.letterSpacing = number(input.letterSpacing, 'style.letterSpacing', -5, 30);
@@ -196,11 +199,17 @@ function validatePayload(command, project) {
   } else if (['node.setContent', 'node.setStyle', 'node.setGeometry', 'node.setZIndex', 'node.setRotation', 'node.setLocked'].includes(command.type)) {
     id(p.slideId, 'payload.slideId'); id(p.nodeId, 'payload.nodeId'); const node = nodeById(project, p.slideId, p.nodeId);
     if (command.type === 'node.setContent') p.content = validateNodeContent(node.type, p.content);
+    if (command.type === 'node.setStyle') { if(Object.hasOwn(p,'textStyleOverrides'))p.textStyleOverrides=overrides(p.textStyleOverrides);if(Object.hasOwn(p,'userStyle'))boolean(p.userStyle,'userStyle'); if(Object.hasOwn(p,'styleGeometry') && p.styleGeometry!==null)p.styleGeometry=geometry(p.styleGeometry);if(Object.hasOwn(p,'userGeometry'))boolean(p.userGeometry,'userGeometry'); }
     if (command.type === 'node.setStyle') p.style = p.style === null ? null : style(p.style, project);
-    if (command.type === 'node.setGeometry') p.geometry = p.geometry === null ? null : geometry(p.geometry);
+    if (command.type === 'node.setGeometry') { p.geometry = p.geometry === null ? null : geometry(p.geometry); if(Object.hasOwn(p,'userGeometry'))boolean(p.userGeometry,'userGeometry'); }
     if (command.type === 'node.setZIndex') p.zIndex = p.zIndex === null ? null : number(p.zIndex, 'payload.zIndex', 0, 1000, true);
     if (command.type === 'node.setRotation') { p.rotation = p.rotation === null ? null : number(p.rotation, 'payload.rotation', -360, 360); if (['chart', 'table'].includes(node.type) && p.rotation !== null && p.rotation !== 0) fail('chart and table rotation is not supported'); }
     if (command.type === 'node.setLocked') p.locked = boolean(p.locked, 'payload.locked');
+  } else if (command.type === 'nodes.setStyle') {
+    id(p.slideId, 'payload.slideId');
+    if (!Array.isArray(p.changes) || !p.changes.length || p.changes.length > 50) fail('payload.changes is invalid');
+    const ids = nodeIds(p.changes.map(change => change.nodeId), 'payload.changes.nodeIds');
+    p.changes = p.changes.map((change,index) => { nodeById(project,p.slideId,ids[index]); if(Object.hasOwn(change,'merge'))boolean(change.merge,'merge'); if(Object.hasOwn(change,'userStyle'))boolean(change.userStyle,'userStyle');if(Object.hasOwn(change,'styleGeometry') && change.styleGeometry!==null)geometry(change.styleGeometry);if(Object.hasOwn(change,'userGeometry'))boolean(change.userGeometry,'userGeometry'); return { ...change,...(Object.hasOwn(change,'textStyleOverrides')?{textStyleOverrides:overrides(change.textStyleOverrides)}:{}),nodeId:ids[index],style:change.style === null ? null : style(change.style,project) }; });
   } else if (command.type === 'nodes.delete' || command.type === 'nodes.duplicate') {
     id(p.slideId, 'payload.slideId'); p.nodeIds = nodeIds(p.nodeIds, 'payload.nodeIds');
     if (command.type === 'nodes.duplicate') { const target = project.deck?.slides?.find(item => item.id === p.slideId); if (!target) fail('slide not found'); if ((target.nodes?.length || 0) + p.nodeIds.length > MAX_NODES_PER_SLIDE) fail(`a slide can contain at most ${MAX_NODES_PER_SLIDE} objects`); }
@@ -209,7 +218,7 @@ function validatePayload(command, project) {
     p.entries = p.entries.map((entry, index) => ({ index: number(entry?.index, `payload.entries[${index}].index`, 0, 200, true), node: nodeInput(entry?.node, project) }));
   } else if (command.type === 'nodes.setGeometry') {
     id(p.slideId, 'payload.slideId'); if (!Array.isArray(p.changes) || !p.changes.length || p.changes.length > 50) fail('payload.changes is invalid');
-    p.changes = p.changes.map((change, index) => ({ nodeId: id(change?.nodeId, `payload.changes[${index}].nodeId`), geometry: geometry(change?.geometry, `payload.changes[${index}].geometry`) }));
+    p.changes = p.changes.map((change, index) => ({ nodeId: id(change?.nodeId, `payload.changes[${index}].nodeId`), geometry: geometry(change?.geometry, `payload.changes[${index}].geometry`),...(Object.hasOwn(change,'userGeometry')?{userGeometry:boolean(change.userGeometry,'userGeometry')}:{}) }));
   } else if (command.type === 'nodes.group' || command.type === 'nodes.ungroup') {
     id(p.slideId, 'payload.slideId'); p.nodeIds = nodeIds(p.nodeIds, 'payload.nodeIds', { min: command.type === 'nodes.group' ? 2 : 1 });
   } else if (command.type === 'nodes.setGroup') {

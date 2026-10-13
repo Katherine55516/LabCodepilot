@@ -1,7 +1,7 @@
 /** Isolated CDP check of the production components, with the shared API fixture. */
 import fs from 'node:fs';import os from 'node:os';import path from 'node:path';import http from 'node:http';
 import assert from 'node:assert/strict';import {bindTemplateFidelity} from '../apps/cowork-server/lib/ppt-template-fidelity.mjs';import {buildRenderTree} from '../apps/cowork-server/lib/ppt/render-tree.mjs';import {slideSvg} from '../apps/cowork-server/lib/ppt/exporters/preview.mjs';import {build} from 'esbuild';import {compile} from '@tailwindcss/node';import {Scanner} from '@tailwindcss/oxide';import {chromium,expect} from '@playwright/test';
-const output=path.resolve('outputs/ppt-input-progressive-editor-20261013');fs.mkdirSync(output,{recursive:true});
+const output=path.resolve(process.env.PPT_CDP_OUTPUT || 'outputs/ppt-input-progressive-editor-20261013');fs.mkdirSync(output,{recursive:true});
 const temporary=fs.mkdtempSync(path.join(os.tmpdir(),'ppt-production-components-'));
 const entry=String.raw`
 import React,{useState} from 'react';import {createRoot} from 'react-dom/client';

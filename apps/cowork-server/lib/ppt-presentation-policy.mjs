@@ -121,6 +121,13 @@ export function markLanguagePairs(items) {
     const na = numbersOf(a.text), nb = numbersOf(b.text);
     const numbersMatch = [...na].every(n => nb.has(n)) && [...nb].every(n => na.has(n));
     if (ratio < .6 || ratio > 4.5 || !numbersMatch) continue;
+    // Length and language alternation alone do not prove equivalent facts.
+    const anchors=new Set((String(latin).match(/[A-Za-z][A-Za-z0-9_-]{1,}/gu)||[]).map(word=>word.toLowerCase()));
+    const shared=(String(han).match(/[A-Za-z][A-Za-z0-9_-]{1,}/gu)||[]).some(word=>anchors.has(word.toLowerCase()));
+    if(!shared && !/翻译|譯文|translation\s*:/iu.test(a.text+' '+b.text)) {
+      a.languagePairCandidate=b.languagePairCandidate=`lpc_${a.id}`;
+      continue;
+    }
     const id = `lp_${a.id}`;
     Object.assign(a, { languagePairId: id, languageRole: 'primary' });
     Object.assign(b, { languagePairId: id, languageRole: 'translation' });

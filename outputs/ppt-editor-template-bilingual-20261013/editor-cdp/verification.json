@@ -1,0 +1,22 @@
+{
+  "transport": "CDP",
+  "checks": [
+    "1440x600: template/input actions stay visible through long-source scrolling",
+    "390x500: template/input actions stay visible through long-source scrolling",
+    "Large UI text preserves creation actions",
+    "Paste syllabus confirmation stays in the short viewport",
+    "File parse and final confirmation remain accessible",
+    "Running deck pauses, edits finished page with production batch style command, and hides pending pages",
+    "Closing paused editor retains draft and exposes resume",
+    "Completed presentation shares the same formatting controls",
+    "Layout change preserves the edited text and style"
+  ],
+  "errors": [],
+  "calls": [
+    "pause",
+    "nodes.setStyle",
+    "resume",
+    "nodes.setStyle",
+    "slide.setLayout"
+  ]
+}

@@ -6,6 +6,7 @@ import { useTranslation } from "@/hooks/useTranslation";
 import { PptCanvas } from "../canvas/PptCanvas";
 import { AiBeforeAfterPreview } from "./AiBeforeAfterPreview";
 import { PptHistory } from "../history/PptHistory";
+import { PptTextToolbar } from "./PptTextToolbar";
 import { PptInspector } from "../inspector/PptInspector";
 import { prepareImage } from "../PptBlocks";
 import type {
@@ -75,9 +76,11 @@ export function StructuredPptEditor({
   chatOpen = false,
   onProject,
   onClose,
+  initialSlideId,
 }: {
   project: StructuredProjectView;
   chatOpen?: boolean;
+  initialSlideId?: string;
   onProject: (project: StructuredProjectView) => void;
   onClose?: () => void;
 }) {
@@ -112,7 +115,9 @@ export function StructuredPptEditor({
   const clipboard = useRef<string[]>([]);
   const preserveNative = Boolean(project.externalPptx || project.templateFidelity?.mode === "preserve");
   const tree = project.renderTree;
-  const slides = useMemo(() => tree?.slides || [], [tree]);
+  const paused = project.status === 'paused';
+  const slides = useMemo(() => (tree?.slides || []).filter(item => !paused || ['done', 'completed'].includes(project.nodes?.[item.slideId]?.status || '') || project.outline.find(outline => outline.id === item.slideId)?.manualBlank), [tree, paused, project.nodes, project.outline]);
+  useEffect(() => { if (initialSlideId) { const index = slides.findIndex(item => item.slideId === initialSlideId); if (index >= 0) setPage(index); } }, [initialSlideId, slides]);
   const slide = slides[page];
   useEffect(() => { aiAttempt.current++; setAiBusy(false); setAiProposal(null); }, [slide?.slideId, tool]);
   const pointElement = slide?.elements.find(
@@ -146,8 +151,8 @@ export function StructuredPptEditor({
         .slice(0, 100),
     [slides, project.deck, query],
   );
-  const saved = (project.publishedRevision ?? 0) === project.revision;
-  function requestExit() { if (saved) onClose?.(); else setExitOpen(true); }
+  const saved = (project.publishedRevision ?? 0) === project.revision && !project.renderUpgradePending;
+  function requestExit() { if (paused) { onClose?.(); return; } if (saved) onClose?.(); else setExitOpen(true); }
   async function finishExit(keep: boolean) {
     setExitBusy(true); setError("");
     try {
@@ -787,7 +792,7 @@ export function StructuredPptEditor({
           </button>
           <button
             className={button}
-            disabled={saved}
+            disabled={saved || paused}
             onClick={() => void direct("/publish")}
           >
             ✓ <span className="hidden sm:inline">{t("ppt.save")}</span>
@@ -800,6 +805,10 @@ export function StructuredPptEditor({
           </button>
         </div>
       </header>
+      <PptTextToolbar key={`${slide.slideId}:${project.revision}:${selectedIds.join(',')}`} elements={selectedElements.filter(element => ['text', 'list', 'timeline', 'metric'].includes(element.kind))} fonts={Object.values(project.templateSpec?.fonts || {}).filter((font): font is string => typeof font === 'string')}
+        onSelectText={() => setSelectedIds([...new Set(slide.elements.filter(element => element.nodeId && !element.locked && ['text', 'list', 'timeline', 'metric'].includes(element.kind)).map(element => element.nodeId!))])}
+        onApply={patch => command('nodes.setStyle', { slideId: slide.slideId, changes: selectedElements.filter(element => ['text', 'list', 'timeline', 'metric'].includes(element.kind)).map(element => ({ nodeId: element.nodeId, style: patch, merge: true })) })}/>
+      {paused && <p className="shrink-0 border-b border-border px-3 py-1 text-xs text-muted-foreground">{t('ppt.editor.pausedEditing')}</p>}
       {error && (
         <div
           role="alert"
@@ -1205,7 +1214,8 @@ export function StructuredPptEditor({
                   />
                 </label>
               )}
-              {tool === "layout" && (
+              {tool === "layout" && preserveNative && <div className="space-y-3"><p className="text-sm">{t('ppt.editor.nativeLayout')}</p><button className={`${button} w-full`} onClick={() => setSelectedIds(slide.elements.filter(element => element.nodeId && !element.locked && !['title','template-title','eyebrow'].includes(element.semanticRole || '')).map(element => element.nodeId!))}>{t('ppt.editor.selectBodyObjects')}</button><button className={`${button} w-full`} onClick={() => setTool('arrange')}>{t('ppt.editor.arrangeObjects')}</button></div>}
+              {tool === "layout" && !preserveNative && (
                 <div className="grid grid-cols-2 gap-2">
                   {layouts.map((value) => (
                     <button

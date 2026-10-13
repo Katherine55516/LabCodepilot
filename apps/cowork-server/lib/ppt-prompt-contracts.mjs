@@ -64,7 +64,7 @@ export function presentationPolicyPrompt(project) {
     ? `code_presentation=keep (${code.basis})：来源代码块作为原文代码组件保留（逐字、保留缩进与语言），说明文字与代码分开。`
     : `code_presentation=omit_with_disclosure (${code.basis})：代码块 ${omitted.join(',')} 不上页，已在规划假设中告知用户。不要在页面中展示代码、伪代码或代码截图；来源中已有的计算步骤、公式与阈值用步骤、公式或要点表达。`);
   if (merged.length) lines.push(`等价结构 ${merged.join(',')} 与等号右侧的结构表达同一流程：只呈现一次，不得重复成两页或两个组件。`);
-  if (pairs) lines.push(`输入含 ${pairs} 组平行双语段落（inventory 中 languagePairId 相同）：输出语言与输入一致，两种语言都保留；同一配对是一条内容，不算新增信息也不算重复；两侧的数字、变量、否定与条件必须一致；在同一组件内成对呈现，不拆成两个独立要点。`);
+  if (pairs) lines.push(`输入含 ${pairs} 组平行双语段落（inventory 中 languagePairId 相同）：输出语言与输入一致，两种语言都保留；同一配对是一条内容，不算新增信息也不算重复；两侧的数字、变量、否定与条件必须一致。保持已冻结的来源归属与容量分片；按主题而不是按语言切页；相关双语事实在容量允许时放在同一页/section，少量相关内容可以合并，不重复计算同一翻译的独立信息。若完整双语内容超过可读容量，在同一 section 的连续页按完整观点拆分，两种语言的显示成本都计入，不能截断句子或删除另一语言，也不把另一页拥有的来源重新主讲。`);
   return lines.length ? `\npresentation_policy: ${lines.join(' ')}` : '';
 }
 
@@ -76,6 +76,7 @@ export function promptPolicy(project) {
     ? 'follow the language(s) of the actual input/source material; infer from source text, retain mixed/bilingual distribution. This takes priority over language hints in brief/copy budgets; do not translate the source into English by default'
     : languageNames[language] || language;
   return `<policy>contract_version=${PPT_PROMPT_CONTRACT_VERSION}; detail=${project.generationPolicy?.detail || 'legacy_auto'}; language_mode=${project.editOutputLanguage ? 'local_translation_override' : project.generationPolicy ? 'follow_input (preserve mixed/bilingual source structure and equivalent facts)' : 'legacy'}. output_language=${languageRule}.
+Body grouping: retain every language in the input; group related facts together rather than splitting by language, merge sparse related material, and split long complete semantic units within the same section when capacity requires it. Language alternation alone is not translation equivalence.
 topic_language=${languageNames[topicLanguage] || topicLanguage}. Every automatically generated page topic/title, section label and eyebrow uses this single dominant input language. Do not append a parallel English/Chinese translation. Preserve technical names/acronyms and user-locked titles; this topic rule does not remove bilingual evidence from the body.
 ${sourced
     ? 'knowledge_mode=source_only. 本项目仅使用输入及所给来源的事实；可以解释其已给出的关系与机制。具体名称、数值、阈值、公式、适用条件和限制一起保留。来源内部矛盾应标明并交给审查，不能自行编造一个答案。'

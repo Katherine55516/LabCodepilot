@@ -1,3 +1,5 @@
+import { isSourceOwnedNode } from './ppt-source-artifacts.mjs';
+import { templateDesignView, isOrdinalSequence } from './ppt-template-design.mjs';
 import {prepareComponentGeometry} from './ppt/component-layout.mjs';
 import { templateComponentProfile, bindMappedTemplateMedia } from './ppt-template-components.mjs';
 import { adaptationDisposition } from './ppt-template-dispositions.mjs';
@@ -217,12 +219,12 @@ function reclaimedMediaTextFrames(project, slide, size) {
  * full-bleed photos, side photos, icons and layered artwork untouched. */
 export function autoTemplateMediaOmissions(project, index, existing = []) {
   const spec = project.templateFidelity?.slides?.[index];
-  if (!spec || !project.source?.text || templateSourceAffinity(project, spec) >= .38) return [];
+  if (!spec || project.templateContentMode!=='design_only' && (!project.source?.text || templateSourceAffinity(project, spec) >= .38)) return [];
   const already = new Set(existing.map(item => String(item.shapeId)));
-  return contentMediaCandidates(spec, project.templateFidelity).filter(node =>
+  return (project.templateContentMode==='design_only' ? spec.nodes : contentMediaCandidates(spec, project.templateFidelity)).filter(node =>
     node.content?.mediaRole==='old_template_content' && !node.content?.mustPreserve &&
     !node.content?.mediaReplacement && !already.has(String(node.nativeRef?.shapeId)))
-    .map(node => adaptationDisposition(project,node,'old_template_content','deterministic_topic_mismatch','Explicit old sample media is retired after deterministic topic mismatch; no user approval or equivalent replacement is claimed.'));
+    .map(node => adaptationDisposition(project,node,'old_template_content',project.templateContentMode==='design_only'?'design_only_template':'deterministic_topic_mismatch',project.templateContentMode==='design_only'?'Design reuse retires original report foreground data; current source assets supply the new evidence.':'Explicit old sample media is retired after deterministic topic mismatch; no user approval or equivalent replacement is claimed.'));
 }
 
 export function templateMediaRole(node,spec,size){
@@ -268,10 +270,11 @@ function imageTextCoupled(slide, size) {
 
 function slotsFor(slide) {
   const text = slide.nodes.filter(node => node.type === 'text' && node.content?.text?.trim());
+  const ordinals=isOrdinalSequence(slide.nodes);
   // Percent values are often sample metrics in template decks. Keep them
   // editable and prevent the largest percentage from being mistaken for the
   // page title (for example, a decorative "35%" callout).
-  const candidates = text.filter(node => !numericLabel(node.content.text) && !numericMetric(node.content.text));
+  const candidates = text.filter(node => node.content?.mediaRole!=='brand' && !numericLabel(node.content.text) && !numericMetric(node.content.text));
   const title = [...candidates].sort((a, b) => {
     const score = node => Number(node.style?.fontSizePt || 14) * Math.min(2, node.geometry.width / 3_000_000);
     return score(b) - score(a);
@@ -280,7 +283,7 @@ function slotsFor(slide) {
     .sort((a, b) => a.geometry.y - b.geometry.y)[0];
   const slots = text.map(node => {
     const original = node.content.text;
-    const role = numericLabel(original) ? 'static' : node.id === title?.id ? 'title' : node.id === section?.id ? 'section' : 'content';
+    const role = node.content?.mediaRole==='brand' || (numericLabel(original) && (!node.content?.templateDesignOnly || ordinals.has(node.id))) ? 'static' : node.id === title?.id ? 'title' : node.id === section?.id ? 'section' : 'content';
     const fontSizePt = Number(node.style?.fontSizePt || 14);
     const frame = frameContract(node, fontSizePt);
     return { nodeId: node.id, shapeId: node.nativeRef.shapeId, role,
@@ -651,13 +654,15 @@ export async function prepareTemplateFidelity(project, templateBytes, templateHa
     // Copy the opaque package for native export, never parse it again at runtime.
     const originalPath = await io.writeFile(project.id, 'template-original.pptx', Readable.from([templateBytes]), templateBytes.length, project.uid);
     if (typeof originalPath !== 'string' || !originalPath.startsWith('/')) throw new Error('template copy did not return a sandbox path');
-    const imported = { ...cached.imported, externalPptx: { ...cached.imported.externalPptx, originalPath } };
+    let imported = { ...cached.imported, externalPptx: { ...cached.imported.externalPptx, originalPath } };
+    if(project.templateContentMode==='design_only') imported=templateDesignView(imported,new Set(imported.deck.slides.flatMap(slide=>contentMediaCandidates(slide,imported.externalPptx).map(node=>node.id))));
     project.templateCacheHit = true;
     return project.templateMode === 'mapped' ? {mode:'mapped',sha256:templateHash,componentProfile:templateComponentProfile(imported.deck.slides.map(slide=>({...slide,slots:slotsFor(slide)})),imported.externalPptx,templateHash,templateMediaRole)} : fidelityFromImported(project, imported, templateHash);
   }
   project.templateCacheHit = false;
-  const imported = await io.importPptx({ id: project.id, uid: project.uid, title: project.title }, templateBytes, templateHash);
+  let imported = await io.importPptx({ id: project.id, uid: project.uid, title: project.title }, templateBytes, templateHash);
   if (template) templateStore.writeTemplateIR(owner, template.id, { schemaVersion: 1, parserVersion: 'pptx-ir-4', sha256: templateHash, imported });
+  if(project.templateContentMode==='design_only') imported=templateDesignView(imported,new Set(imported.deck.slides.flatMap(slide=>contentMediaCandidates(slide,imported.externalPptx).map(node=>node.id))));
   return project.templateMode === 'mapped' ? {mode:'mapped',sha256:templateHash,componentProfile:templateComponentProfile(imported.deck.slides.map(slide=>({...slide,slots:slotsFor(slide)})),imported.externalPptx,templateHash,templateMediaRole)} : fidelityFromImported(project, imported, templateHash);
 }
 
@@ -675,9 +680,9 @@ export function templateSlotPrompt(project, index) {
   const plan = project.planning?.slidePlan?.[index];
   return `\n模板第 ${index + 1} 页：独立内容组容量 ${plan?.templatePointCapacity || new Set(readingOrder.filter(slot => slot.role === 'content' && !['footnote', 'group-heading'].includes(slot.purpose)).map(slot => slot.groupId)).size}，本页计划至少 ${plan?.templatePointTarget || '按来源可支撑的数量'} 组；内容型原图 ${JSON.stringify(media)}。文本槽位：${JSON.stringify(readingOrder.map((slot, order) => ({ id: String(slot.shapeId), readingOrder: order + 1, role: slot.role, purpose: slot.purpose, pairedWith: slot.pairedWith,
     groupId: slot.groupId,
-    example: slot.example, minVisualUnits: slot.minVisualUnits, maxVisualUnits: slot.capacity,
+    example: project.templateContentMode==='design_only' ? undefined : slot.example, minVisualUnits: slot.minVisualUnits, maxVisualUnits: slot.capacity,
     requiredItems: slot.purpose === 'list' ? slot.paragraphCount : undefined, maxLines: slot.maxLines, lineVisualUnits: slot.lineVisualUnits, wordWrap: slot.wordWrap,
-    paragraphPatterns: slot.purpose === 'list' ? slot.paragraphs.map(item => ({ hasLabelRun: item.hasLabelRun, example: item.example })) : undefined })))}。` +
+    paragraphPatterns: slot.purpose === 'list' ? slot.paragraphs.map(item => ({ hasLabelRun: item.hasLabelRun, example: project.templateContentMode==='design_only' ? undefined : item.example })) : undefined })))}。` +
     '请在 JSON 中返回 slotTexts 对象，key 为上述槽位 id，value 为替换文字。标题与 title 字段一致，section 使用短标签。优先填入互不重复、由来源支持的独立事实；原模板槽位与本页主题不符或来源事实不足时，在 omitTemplateShapes 中列出该内容槽位、不适配图片、图表或表格的 shapeId 和至少八字的具体 reason，并省略其 slotTexts。配对的标题与说明须同时保留或同时省略。承载证据、品牌、流程关系或角色不明的媒体必须保留；不能因主题不同或与新文字相交而删掉。旧样例媒体只有明确角色与系统处置证据才可退役；普通文字和source ID不能证明等价。omission reason仅为请求，不能写批准记录。背景照片、图标及纯装饰可保留。不要以章节名、标题、focus 或首条要点循环填满所有槽位；不需要的媒体及其旧图解标签应一起省略。' +
     'purpose=group-heading 是一组卡片的导航标题，不是独立事实；写简短分组标签，不消耗本页独立要点。' +
     'purpose=list 的 value 必须是恰好 requiredItems 个对象的数组，每项为 {"label":"加粗短名称","body":"常规字重的来源支持说明"}；hasLabelRun 为 true 时两部分都要有内容。每条必须不同，合计行数不得超过 maxLines，每行不超过 lineVisualUnits。' +
@@ -702,7 +707,7 @@ export function templateOutlinePrompt(project) {
     textSlots: effectiveSlots(slide).filter(slot => slot.role === 'content').map(slot => ({ purpose: slot.purpose,
       requiredItems: slot.purpose === 'list' ? slot.paragraphCount : undefined,
       maxLines: slot.maxLines, lineVisualUnits: slot.lineVisualUnits, maxVisualUnits: slot.capacity,
-      example: slot.example.slice(0, 65) })),
+      example: project.templateContentMode==='design_only' ? undefined : slot.example.slice(0, 65) })),
     pictures: slide.imageCount, contentMediaShapeIds: contentMediaCandidates(slide, project.templateFidelity)
       .map(node => node.nativeRef.shapeId) }));
   const catalog = project.templateFidelity.layoutCatalog || [];
@@ -716,6 +721,7 @@ export function inspectTemplateSlotDraft(project, index, slide) {
   const omitted = new Set((slide.templateOmissions || []).map(item => String(item.shapeId)));
   const invalidOmissions = [...omitted].filter(id => !spec.nodes.some(node => String(node.nativeRef?.shapeId) === id &&
     (['image', 'chart', 'table'].includes(node.type) || (node.type === 'text' && slots.some(slot => String(slot.shapeId) === id && slot.role === 'content')) ||
+      (node.content?.templateSample && project.templateContentMode==='design_only') ||
       (slide.sourceArtifactNodes?.length && slide.templateOmissions.some(o=>String(o.shapeId)===id && o.automatic && o.approvalBasis==='source_region_replacement')))));
   const omissionIssues = invalidOmissions.map(id => ({ code: 'template_omission_invalid', severity: 'error',
     message: `模板第 ${index + 1} 页组件 ${id} 不是可省略的内容或媒体`, repair: 'fill_template_slots', shapeId: Number(id) }));
@@ -835,7 +841,9 @@ export function bindTemplateFidelity(project) {
     const ordinals = ordinalReadingOrder(source.nodes, project.templateFidelity);
     const slotById = new Map(effectiveSlots(source).map(slot => [String(slot.shapeId), slot]));
     const provided = slide.templateSlotTexts || {};
+    slide.templateOmissions=[...(slide.templateOmissions || []),...autoTemplateMediaOmissions(project,index,slide.templateOmissions || [])];
     const omitted = new Set((slide.templateOmissions || []).map(item => String(item.shapeId)));
+    const priorNodes=new Map((slide.nodes || []).filter(node=>node.nativeRef).map(node=>[node.id,node]));
     const native = source.nodes.filter(base => !omitted.has(String(base.nativeRef?.shapeId))).map(base => {
       const node = structuredClone(base);
       if (ordinals.has(node.nativeRef?.shapeId)) node.content = { ...node.content, text: ordinals.get(node.nativeRef.shapeId) };
@@ -858,19 +866,23 @@ export function bindTemplateFidelity(project) {
         if(node.content.text && node.geometry){
           const element={...node,kind:'text',bounds:node.geometry};
           const contract=textContract(element), measured=measureText(element,contract);
-          const height=Math.ceil((measured.estimatedHeightPt+contract.margins[1]+contract.margins[3])*PT_EMU);
+          const height=Math.ceil((measured.estimatedHeightPt*1.2+contract.margins[1]+contract.margins[3])*PT_EMU);
           // PowerPoint often lets glyphs overflow a short template shape; the
           // browser clips to the shape. Give generated copy its actual line box.
           if(height>node.geometry.height && node.geometry.y+height<=project.templateFidelity.height)
             node.geometry={...node.geometry,height};
         }
       }
+      const prior=priorNodes.get(node.id);
+      if(prior?.userStyle){node.style=structuredClone(prior.style);node.textStyleOverrides=prior.textStyleOverrides;node.userStyle=true;}
+      if(prior?.userGeometry){node.geometry=structuredClone(prior.geometry);node.userGeometry=true;}
+      if(prior?.locked && node.type==='text')node.locked=true;
       return node;
     });
     slide.templateSlideIndex = index;
     slide.templateShapeCount = source.shapeCount - omitted.size;
     slide.templateImageCount = source.imageCount - source.nodes.filter(node => omitted.has(String(node.nativeRef?.shapeId)) && node.type === 'image').length;
-    slide.nodes = slide.nodes.filter(node => !node.nativeRef);
+    slide.nodes = slide.nodes.filter(node => !node.nativeRef).map(node => isSourceOwnedNode(node) ? node : {...node,hidden:true});
     slide.nodes.push(...native);
     slide.nodeOrder = slide.nodes.map(node => node.id);
   });

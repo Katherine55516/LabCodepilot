@@ -1,7 +1,7 @@
 /** Serialized, point-based rendering rules. Consumers must not invent padding,
  * auto-fit or signed axes. Measurements are conservative predictions, not Office QA. */
 export const PT_EMU = 12700;
-export const RENDER_CONTRACT_VERSION = 2;
+export const RENDER_CONTRACT_VERSION = 3;
 export const CARD_PADDING = [7.92, 5.04, 7.92, 2.88];
 export const TABLE_PADDING = [7.2, 3, 7.2, 3];
 const finite = (value, fallback) => value !== null && value !== undefined && Number.isFinite(Number(value)) ? Number(value) : fallback;
@@ -11,14 +11,18 @@ export function textParagraphs(element) {
   const values = c.codeBlock ? String(c.text || '').split('\n').map(text=>({text})) : Array.isArray(c.paragraphs) ? c.paragraphs.map((p,i) => { const label=native[i]?.runs?.[0],body=native[i]?.runs?.find((r,j)=>j>0&&r.text?.trim()); return {text:[p.label,p.body].filter(Boolean).join('：'),label:p.label,runs:[...(p.label?[{text:p.label,fontSizePt:finite(label?.fontSizePt,finite(element.style?.fontSizePt,18)),bold:true}]:[]),{text:(p.label?'：':'')+(p.body||''),fontSizePt:finite(body?.fontSizePt,finite(element.style?.fontSizePt,18)),bold:Boolean(body?.bold)}]}; })
     : element.kind === 'text' ? preserved ? native.map(p=>({text:p.text,runs:p.runs?.map(r=>({text:r.text,fontSizePt:finite(r.fontSizePt,finite(element.style?.fontSizePt,18)),bold:Boolean(r.bold)}))})) : [{ text: String(c.text || '') }]
       : (c.items || []).map((p, i) => ({ text: `${element.kind === 'timeline' ? `${i + 1}. ` : element.kind === 'list' ? '• ' : ''}${p.text || ''}` }));
-  return values.map((p, i) => ({ ...p, lineHeight: finite(native[i]?.lineSpacing, finite(element.style?.lineHeight, 1.18)),
+  const overrides=new Set(element.textStyleOverrides || []);
+  return values.map((p, i) => ({ ...p, ...(p.runs ? {runs:p.runs.map(run=>({...run,
+    ...(overrides.has('fontSizePt')?{fontSizePt:element.style.fontSizePt}:{}),
+    ...(overrides.has('fontWeight')?{bold:element.style.fontWeight>=600}:{})}))} : {}),
+    lineHeight: overrides.has('lineHeight') ? element.style.lineHeight : finite(native[i]?.lineSpacing, finite(element.style?.lineHeight, 1.18)),
     spaceAfterPt: c.codeBlock ? 0 : finite(native[i]?.spaceAfterPt, finite(element.style?.paragraphSpacingEm, 0) * finite(element.style?.fontSizePt, 18)) }));
 }
 export function textContract(element, padding) {
   const code = element.content?.codeBlock;
   const margins = padding || element.nativeTextFrame?.margins?.map(v => v / PT_EMU) || [3.6, 3.6, 3.6, 3.6];
   return { version: RENDER_CONTRACT_VERSION, units: 'pt', margins, wrap: true, autoFit: 'none', whiteSpace: 'pre-wrap',
-    overflowWrap: 'anywhere', fontFamily: code ? 'Consolas' : element.style?.fontFamily,
+    overflowWrap: 'anywhere', fontFamily: code && !element.textStyleOverrides?.includes('fontFamily') ? 'Consolas' : element.style?.fontFamily,
     tabSize: 4, paragraphs: textParagraphs(element), code: Boolean(code) };
 }
 export function measureText(element, contract = element.textLayout || textContract(element)) {
@@ -97,6 +101,18 @@ export function imageContract(content = {}) {
   const crop = Array.isArray(raw) ? raw.map(v => finite(v, 0)) : [0, 0, 0, 0];
   const valid = Array.isArray(raw) && raw.length === 4 && raw.every(v => typeof v === 'number' && Number.isFinite(v) && v >= 0 && v < 1) && crop[0] + crop[2] < 1 && crop[1] + crop[3] < 1;
   return { version: RENDER_CONTRACT_VERSION, crop, valid, fit: crop.some(Boolean) ? 'crop' : ['cover', 'stretch'].includes(content.fit) ? content.fit : 'contain' };
+}
+/** Refresh generated native frames, including previews saved by older builds.
+ * Explicit user geometry and imported originals remain authoritative. */
+export function prepareNativeTextElement(element, pageHeight) {
+  if(element.kind!=='text' || !element.nativeTextFrame || !element.content?.templateFit || element.userGeometry) return element;
+  element.nativeTextFrame={...element.nativeTextFrame,paragraphs:(element.nativeTextFrame.paragraphs||[]).map(paragraph=>({...paragraph,
+    lineSpacing:Number(paragraph.lineSpacing)>0 && Number(paragraph.lineSpacing)<1.15 ? 1.15 : paragraph.lineSpacing}))};
+  const contract=textContract(element),measurement=measureText(element,contract);
+  const height=Math.ceil((measurement.estimatedHeightPt*1.2+contract.margins[1]+contract.margins[3])*PT_EMU);
+  if(height>element.bounds.height && element.bounds.y+height<=pageHeight)element.bounds={...element.bounds,height};
+  element.textLayout=contract;
+  return element;
 }
 export function applyRenderContract(element) {
   if (['text', 'list', 'timeline', 'metric'].includes(element.kind)) {

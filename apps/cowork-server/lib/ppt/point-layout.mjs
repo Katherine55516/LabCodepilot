@@ -10,10 +10,10 @@ function pointParts(item = {}) {
   return rest.length ? { heading, body: rest.join('\n') } : { heading: '', body: heading };
 }
 
-function requiredHeight(parts, widthIn, fontSizePt) {
-  const element={kind:'text',bounds:{width:widthIn*72*PT_EMU,height:1e12},style:{fontSizePt,lineHeight:1.18,paragraphSpacingEm:0},content:{text:parts.body}};
+function requiredHeight(parts, widthIn, fontSizePt, lineHeight = 1.18) {
+  const element={kind:'text',bounds:{width:widthIn*72*PT_EMU,height:1e12},style:{fontSizePt,lineHeight,paragraphSpacingEm:0},content:{text:parts.body}};
   const contract=textContract(element,CARD_PADDING);
-  contract.paragraphs=[...(parts.heading?[{text:parts.heading,lineHeight:1.18,spaceAfterPt:3}]:[]),{text:parts.body,lineHeight:1.18,spaceAfterPt:0}];
+  contract.paragraphs=[...(parts.heading?[{text:parts.heading,lineHeight,spaceAfterPt:3}]:[]),{text:parts.body,lineHeight,spaceAfterPt:0}];
   return (measureText(element,contract).estimatedHeightPt+CARD_PADDING[1]+CARD_PADDING[3])/72;
 }
 
@@ -32,8 +32,10 @@ export function layoutPoints(items = [], region = {}, options = {}) {
   const deep = /three_deep|single_deep|two_macro/u.test(distribution);
   const candidates = deep || width < 7 || items.length < 4 ? [1]
     : width >= 10 && items.length >= 6 && median < 75 ? [2, 3, 1] : [2, 1];
-  const floor = options.density === 'high' || options.depth === 'detailed' ? 14 : 15;
-  const preferredSize = clamp(Math.round(18 * Number(options.bodyScale || 1)), 18, 20);
+  const manualSize=Number(options.fontSizePt);
+  const lineHeight=Number(options.lineHeight)||1.18;
+  const floor = manualSize ? manualSize : options.density === 'high' || options.depth === 'detailed' ? 14 : 15;
+  const preferredSize = manualSize || clamp(Math.round(18 * Number(options.bodyScale || 1)), 18, 20);
   const plans = candidates.map(columns => {
     const rows = [];
     let start = 0;
@@ -42,7 +44,7 @@ export function layoutPoints(items = [], region = {}, options = {}) {
     const available = Math.max(.1, height - gap * (rows.length - 1));
     const needsAt = size => rows.map(row => {
       const cellWidth = (width - gap * (row.length - 1)) / row.length;
-      return Math.max(...row.map(index => requiredHeight(parts[index], cellWidth, size)));
+      return Math.max(...row.map(index => requiredHeight(parts[index], cellWidth, size, lineHeight)));
     });
     let fontSizePt = preferredSize;
     let needs = needsAt(fontSizePt);

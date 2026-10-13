@@ -1,0 +1,27 @@
+{
+  "snapshots": [
+    {
+      "firstPopulated": true,
+      "secondAbsent": true,
+      "futureAbsent": true
+    }
+  ],
+  "audit": {
+    "slides": 4,
+    "originalFigureHashPreserved": true,
+    "completeTable": true,
+    "closing": true
+  },
+  "tableBounds": {
+    "x": 792480,
+    "y": 3446374,
+    "width": 10607040,
+    "height": 1199693
+  },
+  "canvas": {
+    "x": 792480,
+    "y": 1714500,
+    "width": 10607040,
+    "height": 4663440
+  }
+}

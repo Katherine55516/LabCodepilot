@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useTranslation } from "@/hooks/useTranslation";
+import { editorFonts } from "../editor/PptTextToolbar";
 import { prepareImage } from "../PptBlocks";
 import type { PptBounds, PptRenderElement } from "../types";
 
@@ -34,7 +35,7 @@ export function PptInspector({
     body: item.body || (item.text.includes("\n") ? item.text.split("\n").slice(1).join("\n") : item.text),
     pointType: item.pointType || "support",
   })));
-  const [style, setStyle] = useState({ ...element.style });
+  const [style, setStyle] = useState<NonNullable<PptRenderElement['style']>>(Object.fromEntries(Object.entries(element.style || {}).filter(([key]) => ['color','fill','fontFamily','eastAsiaFontFamily','fontSizePt','fontWeight','fontStyle','textDecoration','textAlign','lineHeight','letterSpacing','opacity','shape'].includes(key))));
   const [bounds, setBounds] = useState<PptBounds>(element.bounds);
   const [zIndex, setZIndex] = useState(element.zIndex);
   const [rotation, setRotation] = useState(element.rotation || 0);
@@ -230,13 +231,15 @@ export function PptInspector({
         <summary className="cursor-pointer text-xs font-medium">
           {t("ppt.inspector.textStyle")}
         </summary>
+        <label className="mt-2 block text-xs">{t("ppt.inspector.fontFamily")}<select className={field} value={style.fontFamily || 'Arial'} onChange={event => setStyle(current => ({ ...current, fontFamily: event.target.value, eastAsiaFontFamily:event.target.value }))}>{[...new Set([style.fontFamily, ...editorFonts].filter((font): font is string => Boolean(font)))].map(font => <option key={font}>{font}</option>)}</select></label>
+        <div className="mt-2 flex gap-3 text-xs"><label><input type="checkbox" checked={style.fontStyle === 'italic'} onChange={event => setStyle(current => ({ ...current, fontStyle: event.target.checked ? 'italic' : 'normal' }))}/>{t("ppt.editor.italic")}</label><label><input type="checkbox" checked={style.textDecoration === 'underline'} onChange={event => setStyle(current => ({ ...current, textDecoration: event.target.checked ? 'underline' : 'none' }))}/>{t("ppt.editor.underline")}</label></div>
         <div className="mt-2 grid grid-cols-2 gap-2">
           <label className="text-xs">
             {t("ppt.inspector.fontSize")}
             <input
               className={field}
               type="number"
-              min={10}
+              min={8}
               max={96}
               value={style.fontSizePt || 18}
               onChange={(event) =>

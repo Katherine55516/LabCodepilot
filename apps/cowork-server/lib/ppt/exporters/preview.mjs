@@ -1,4 +1,4 @@
-import { textContract, imageContract, chartContract, chartMarkup } from '../render-contract.mjs';
+import { textContract, prepareNativeTextElement, imageContract, chartContract, chartMarkup } from '../render-contract.mjs';
 import { SLIDE_SIZE } from '../render-tree.mjs';
 import { equationContent } from '../../ppt-math.mjs';
 
@@ -28,6 +28,7 @@ function table(element, x, y, w, h) {
 
 export function slideSvg(slide) {
   if (!slide) return null;
+  slide={...slide,elements:slide.elements.map(element=>prepareNativeTextElement({...element},slide.size?.height || SLIDE_SIZE.height))};
   const width = slide.size?.width || SLIDE_SIZE.width; const height = slide.size?.height || SLIDE_SIZE.height;
   const nodes = slide.elements.map(element => {
     const b = element.bounds; const rotation = Number(element.rotation || 0); const transform = rotation ? ` transform="rotate(${rotation} ${b.x + b.width / 2} ${b.y + b.height / 2})"` : ''; const common = `data-node-id="${esc(element.nodeId || '')}"${transform} opacity="${Number(element.style?.opacity ?? 1)}"`;
@@ -47,12 +48,12 @@ export function slideSvg(slide) {
         const heading = structured ? item.heading || '' : (first.length > 1 ? first[0] : '');
         const body = structured ? item.body || '' : (first.length > 1 ? first.slice(1).join('\n') : item.text || '');
         const fontPx = Number(pointLayout.fontSizePt || 17) * 96 / 72;
-        return `<div style="position:absolute;left:${box.x * 100}%;top:${box.y * 100}%;width:${box.w * 100}%;height:${box.h * 100}%;box-sizing:border-box;overflow:hidden;border:1px solid color-mix(in srgb,currentColor 20%,transparent);border-radius:6px;padding:6.72px 10.56px 3.84px;font-size:${fontPx}px;line-height:1.18;white-space:pre-wrap;overflow-wrap:anywhere">${heading ? `<div style="font-weight:700;margin-bottom:4px">${esc(heading)}</div>` : ''}<div style="white-space:pre-wrap">${esc(body)}</div></div>`;
+        return `<div style="position:absolute;left:${box.x * 100}%;top:${box.y * 100}%;width:${box.w * 100}%;height:${box.h * 100}%;box-sizing:border-box;overflow:hidden;border:1px solid color-mix(in srgb,currentColor 20%,transparent);border-radius:6px;padding:6.72px 10.56px 3.84px;font-size:${fontPx}px;line-height:${Number(element.style?.lineHeight || 1.18)};text-align:${element.style?.textAlign || "left"};white-space:pre-wrap;overflow-wrap:anywhere">${heading ? `<div style="font-weight:${element.textStyleOverrides?.includes('fontWeight')?Number(element.style?.fontWeight || 400):700};margin-bottom:4px">${esc(heading)}</div>` : ''}<div style="white-space:pre-wrap">${esc(body)}</div></div>`;
       }).join('') : null;
       const contract=element.textLayout || textContract(element);
       const paragraphHtml = pointHtml || contract.paragraphs.map((p,i)=>`<div style="white-space:pre-wrap;overflow-wrap:anywhere;${p.runs?.length?`font-size:${Math.max(...p.runs.map(r=>r.fontSizePt))*96/72}px;`:""}min-height:${p.lineHeight}em;line-height:${p.lineHeight};margin-bottom:${i===contract.paragraphs.length-1?0:p.spaceAfterPt*96/72}px">${p.runs?p.runs.map(run=>`<${run.bold?"strong":"span"} style="font-size:${run.fontSizePt*96/72}px;font-weight:${run.bold?700:400}">${esc(run.text)}</${run.bold?"strong":"span"}>`).join(''):esc(p.text)}</div>`).join('');
       const [ml,mt,mr,mb]=pointHtml?[0,0,0,0]:contract.margins;
-      return htmlBox(common,b,`<div xmlns="http://www.w3.org/1999/xhtml" style="position:relative;box-sizing:border-box;padding:${mt*96/72}px ${mr*96/72}px ${mb*96/72}px ${ml*96/72}px;white-space:pre-wrap;overflow-wrap:anywhere;tab-size:4;width:${b.width / 9525}px;height:${b.height / 9525}px;overflow:hidden;background:${esc(element.style?.fill || 'transparent')};color:${esc(element.style?.color || '#111827')};font-family:${contract.code?"'Consolas','Noto Sans Mono CJK SC','Noto Sans Mono CJK TC','DejaVu Sans Mono','Liberation Mono','Menlo',monospace":`'${esc(latin)}','${esc(eastAsia || latin)}',sans-serif`};font-size:${size}px;font-weight:${Number(element.style?.fontWeight || 400)};font-style:${esc(element.style?.fontStyle || 'normal')};line-height:${Number(element.style?.lineHeight || 1.2)};letter-spacing:${Number(element.style?.letterSpacing || 0)}px;text-align:${align}">${paragraphHtml}</div>`);
+      return htmlBox(common,b,`<div xmlns="http://www.w3.org/1999/xhtml" style="position:relative;box-sizing:border-box;padding:${mt*96/72}px ${mr*96/72}px ${mb*96/72}px ${ml*96/72}px;white-space:pre-wrap;overflow-wrap:anywhere;tab-size:4;width:${b.width / 9525}px;height:${b.height / 9525}px;overflow:hidden;background:${esc(element.style?.fill || 'transparent')};color:${esc(element.style?.color || '#111827')};font-family:${contract.code && !element.textStyleOverrides?.includes('fontFamily')?"'Consolas','Noto Sans Mono CJK SC','Noto Sans Mono CJK TC','DejaVu Sans Mono','Liberation Mono','Menlo',monospace":`'${esc(latin)}','${esc(eastAsia || latin)}',sans-serif`};font-size:${size}px;font-weight:${Number(element.style?.fontWeight || 400)};font-style:${esc(element.style?.fontStyle || 'normal')};text-decoration:${element.style?.textDecoration==='underline'?'underline':'none'};line-height:${Number(element.style?.lineHeight || 1.2)};letter-spacing:${Number(element.style?.letterSpacing || 0)}px;text-align:${align}">${paragraphHtml}</div>`);
     }
     if (element.kind === 'image' && element.content?.dataUrl) {
       const crop = element.imageLayout?.valid ? element.imageLayout.crop : element.content.crop || [0, 0, 0, 0];

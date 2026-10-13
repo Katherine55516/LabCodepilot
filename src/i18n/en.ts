@@ -3763,6 +3763,19 @@ const en = {
   'ppt.ai.lang.fr': "Français",
   'ppt.ai.lang.es': "Español",
 
+  "ppt.inspector.fontFamily": "Font",
+  "ppt.editor.italic": "Italic",
+  "ppt.editor.underline": "Underline",
+  "ppt.editor.selectPageText": "Select page text",
+  "ppt.editor.pausedEditing": "Generation is paused. Edits are saved as drafts; close the editor to resume.",
+  "ppt.editor.editPage": "Edit page",
+  "ppt.create.templateContent": "Template content",
+  "ppt.create.designOnly": "Reuse design only (Recommended)",
+  "ppt.create.keepFixed": "Keep fixed template content",
+  "ppt.create.templateContentHint": "Original template stays unchanged. Sample copy and data are replaced; background and branding are retained.",
+  "ppt.editor.nativeLayout": "Native template arrangement",
+  "ppt.editor.selectBodyObjects": "Select body objects",
+  "ppt.editor.arrangeObjects": "Align and distribute objects",
 } as const;
 
 export type TranslationKey = keyof typeof en;

@@ -1,0 +1,66 @@
+[
+  {
+    "test": "input-visuals",
+    "exitCode": 0
+  },
+  {
+    "test": "topic-language",
+    "exitCode": 0
+  },
+  {
+    "test": "copy-media-integrity",
+    "exitCode": 0
+  },
+  {
+    "test": "balance-p0",
+    "exitCode": 0
+  },
+  {
+    "test": "density-audit",
+    "exitCode": 0
+  },
+  {
+    "test": "edit-intent",
+    "exitCode": 0
+  },
+  {
+    "test": "recovery-sync",
+    "exitCode": 0
+  },
+  {
+    "test": "requirements-parity",
+    "exitCode": 0
+  },
+  {
+    "test": "template-fidelity",
+    "exitCode": 0
+  },
+  {
+    "test": "hard-rules",
+    "exitCode": 0
+  },
+  {
+    "test": "m2",
+    "exitCode": 0
+  },
+  {
+    "test": "prompt-contracts",
+    "exitCode": 0
+  },
+  {
+    "test": "render-contract",
+    "exitCode": 0
+  },
+  {
+    "test": "editor-template-language",
+    "exitCode": 0
+  },
+  {
+    "test": "structured",
+    "exitCode": 0
+  },
+  {
+    "test": "generation-input-contract",
+    "exitCode": 0
+  }
+]
