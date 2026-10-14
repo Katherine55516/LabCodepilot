@@ -43,6 +43,9 @@ assert.equal(userHistoryAffectsSlide([{command:{type:'nodes.setGeometry',payload
 assert.equal(userHistoryAffectsSlide([{command:{type:'deck.replace',payload:{slideId:'other'}}}],'s1'),true,'whole-deck changes remain protected');
 assert.equal(userHistoryAffectsSlide([{}],'s1'),true,'unknown history is conservatively protected');
 const removed=optionalCopyRepair(op,finding,'s1',inspect);assert.ok(removed,'unsupported optional claim is removed while immutable source is preserved');assert.deepEqual(removed.removedNodeIds,[added.id]);assert.ok(os.sourceArtifactNodes.some(n=>n.id===added.id),'input remains unchanged');
+const overviewCopy=structuredClone(op);overviewCopy.generationPolicy={content:'overview',knowledge:'source_only',language:{mode:'source'}};
+assert.ok(optionalCopyRepair(overviewCopy,finding,'s1',inspect),'overview/source-only can remove an unsupported optional addition when every owned source remains bound');
+overviewCopy.generationPolicy.knowledge='augment';assert.equal(optionalCopyRepair(overviewCopy,finding,'s1',inspect),null,'augmentation remains a separate contract');
 const accepted=structuredClone(op);accepted.runtime.slides.s1={accepted:true};assert.equal(optionalCopyRepair(accepted,finding,'s1',inspect),null);
 const locked=structuredClone(op);locked.nodes.s1.slide.sourceArtifactNodes.find(n=>n.id===added.id).locked=true;assert.equal(optionalCopyRepair(locked,finding,'s1',inspect),null);
 assert.equal(optionalCopyRepair(op,finding,'s1',candidate=>({issues:candidate===op?[]:[{severity:'error',code:'new_source_loss',slideId:'s1'}]})),null,'new deterministic failure cannot be committed');

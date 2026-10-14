@@ -27,6 +27,12 @@ export function condenseOverflowingPages(project, assessed, assess, { passes = 6
   for (let pass = 0; pass < passes && overflowOf(current) > 0; pass++) {
     const raw = current.rawOutline;
     let selection = [...raw.selection], changed = 0;
+    const movedUnitIds = new Set();
+    const moveGroup = id => {
+      const item = items.get(id);
+      const both = project.generationPolicy?.language?.mode === 'source' && project.generationPolicy.language.body !== 'primary';
+      return both && item?.languagePairId ? [...items.values()].filter(other => other.languagePairId === item.languagePairId).map(other => other.id) : [id];
+    };
     const set = entry => { selection = [...selection.filter(candidate => candidate.sourceUnitId !== entry.sourceUnitId), entry]; };
     const slides = raw.slides.map((slide, index) => {
       if (!index || !(slide.densityFit?.predictedOverflow > 0)) return slide;
@@ -51,16 +57,25 @@ export function condenseOverflowingPages(project, assessed, assess, { passes = 6
       if (owned.length < 2) return next;
       const dependents = id => selection.filter(entry => entry.destination === 'notes' && entry.visibleEquivalentSourceUnitId === id);
       const movable = [...owned].reverse().find(id => {
-        const item = items.get(id), rule = rules.get(id);
-        return item && !item.rows && rule?.allowedDestinations.includes('notes') && rule.allowedDestinations.some(d => d === 'slides' || d === 'summary') &&
-          dependents(id).every(entry => rules.get(entry.sourceUnitId)?.notesWithoutVisibleEquivalentAllowed);
+        const group = moveGroup(id);
+        // This local pass neither empties a page nor changes an unrelated
+        // page's owners. Cross-page pair consolidation has its own planner.
+        if (!group.every(member => owned.includes(member)) || owned.every(member => group.includes(member))) return false;
+        return group.every(member => {
+          const item = items.get(member), rule = rules.get(member);
+          return item && !item.rows && rule?.allowedDestinations.includes('notes') && rule.allowedDestinations.some(d => d === 'slides' || d === 'summary') &&
+            dependents(member).every(entry => rules.get(entry.sourceUnitId)?.notesWithoutVisibleEquivalentAllowed);
+        });
       });
       if (!movable) return next;
-      for (const entry of dependents(movable)) { const { visibleEquivalentSourceUnitId, ...rest } = entry; set({ ...rest, reason: 'Capacity: kept in speaker notes with its original.' }); }
-      set({ sourceUnitId: movable, destination: 'notes', reason: 'Capacity: secondary detail kept in speaker notes (overview contract).' });
+      for (const member of moveGroup(movable)) {
+        for (const entry of dependents(member)) { const { visibleEquivalentSourceUnitId, ...rest } = entry; set({ ...rest, reason: 'Capacity: kept in speaker notes with its original.' }); }
+        set({ sourceUnitId: member, destination: 'notes', reason: 'Capacity: complete secondary language pair kept in notes (overview contract).' });
+        movedUnitIds.add(member);
+      }
       changed++;
       return { ...next, sourceUnitIds: owned.filter(id => id !== movable) };
-    });
+    }).map(slide => ({ ...slide, sourceUnitIds: (slide.sourceUnitIds || []).filter(id => !movedUnitIds.has(id)) }));
     if (!changed) break;
     let revised;
     try { revised = assess(project, { ...raw, slides, selection }); } catch { break; }

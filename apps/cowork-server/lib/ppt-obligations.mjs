@@ -23,6 +23,21 @@ export function resolveObligationQuoteReferences(audit,project) {
 }
 const qualifier = /\b(?:unless|except|only|solely|limited\s+to|provided\s+that|must|shall|not|never|without|uncertain|conditional|subject\s+to)\b|不得|不能|僅|仅|只有|限于|限於|除非|否則|否则|例外|不確定|不确定|前提|必須|必须|禁止|不保證|不保证/iu;
 
+/** Generated brief topics cannot undo the validated overview/notes scope.
+ * Explicit source conditions and page details remain independent obligations. */
+export function mainDeckBriefRequirements(project){
+  const requirements=project.planning?.brief?.mustInclude||[];
+  if(project.generationPolicy?.content!=='overview'||project.generationPolicy?.details!=='notes'||project.contentSelection?.sourceHash!==project.source?.sha256)return requirements;
+  const items=project.source?.semantic?.inventory?.items||[];
+  return requirements.filter(text=>{
+    if(String(project.userRequirements||project.prompt||'').includes(text)||(project.requestedOutline||[]).some(s=>JSON.stringify(s).includes(text)))return true;
+    const chunk=project.source?.semantic?.chunks?.find(c=>c.topic===text);
+    if(!chunk)return true;
+    const units=items.filter(i=>i.chunkRefs?.includes(chunk.id));
+    return !units.length||!units.every(i=>i.presentation==='notes_by_contract'&&i.presentationBasis===project.contentSelection.hash);
+  });
+}
+
 /** Full source spans are authority; plan summaries never replace them. This
  * deterministic registry finds explicit conditions; the critic also reviews
  * the full input for less explicit relations. It is not a semantic extractor. */
@@ -53,7 +68,7 @@ export function obligationRegistry(project) {
     const start=source.indexOf(fact.text),equivalent=project.contentSelection.entries.find(e=>e.sourceUnitId===fact.sourceUnitId)?.visibleEquivalentSourceUnitId,owners=project.outline.filter(o=>o.sourceUnitIds?.includes(equivalent||fact.sourceUnitId)).map(o=>o.id);
     add(fact.text,'source_summary_detail',owners,start>=0?{start,end:start+fact.text.length,encoding:'utf16'}:null);
   }
-  for(const text of project.planning?.brief?.mustInclude||[])add(text,'brief_requirement');
+  for(const text of mainDeckBriefRequirements(project))add(text,'brief_requirement');
   const selected=project.reviewScope?.obligationIds;
   if(selected&&(!Array.isArray(selected)||new Set(selected).size!==selected.length||selected.some(id=>!entries.some(e=>e.id===id))))throw new Error('invalid internal review obligation partition');
   const material={version:OBLIGATION_VERSION,frameworkHash:framework.frameworkHash,entries:selected?entries.filter(e=>selected.includes(e.id)):entries};

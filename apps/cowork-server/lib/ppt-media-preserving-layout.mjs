@@ -225,23 +225,40 @@ export function anchorCardIcons(project, index, components, fit, isCardIcon) {
   const spec = project.templateFidelity?.slides?.[index];
   const cards = icons.filter(icon => isCardIcon(icon, spec)).sort((a, b) => a.geometry.y - b.geometry.y || a.geometry.x - b.geometry.x);
   if (!fit?.capacity_ok || !cards.length) return null;
-  const size = Math.max(...cards.map(i => Math.max(i.geometry.width, i.geometry.height))), gutter = size + GAP;
+  const badges=cards.map(card=>{
+    const g=card.geometry;
+    const carrier=(spec.nodes||[]).filter(n=>n.type==='shape'&&n.geometry&&n.nativeRef?.shapeId!==undefined&&n.geometry.width<EMU_INCH*1.5&&n.geometry.height<EMU_INCH*1.5&&n.geometry.x<=g.x&&n.geometry.y<=g.y&&n.geometry.x+n.geometry.width>=g.x+g.width&&n.geometry.y+n.geometry.height>=g.y+g.height).sort((a,b)=>a.geometry.width*a.geometry.height-b.geometry.width*b.geometry.height)[0];
+    const scale=carrier?Math.min(1,.34*EMU_INCH/Math.max(carrier.geometry.width,carrier.geometry.height)):1;
+    return {card,carrier,scale,width:(carrier||card).geometry.width*scale,height:(carrier||card).geometry.height*scale};
+  });
+  const gutter=Math.max(...badges.map(b=>b.width))+GAP;
   // A complete table is one source object but has real row-level reading
   // units. Preserve the small original icons beside actual rows rather than
   // dropping every icon merely because the component is typed as a table.
-  if(components.length===1&&components[0].type==='table'&&components[0].content.rows?.length>1){
-    const box={...fit.boxes[0],x:fit.boxes[0].x+gutter,width:fit.boxes[0].width-gutter,height:fit.canvas.y+fit.canvas.height-fit.boxes[0].y};
-    const measurement=measureComponent(components[0],box,fit.fontSizePt);
+  const tableIndex=components.findIndex(component=>component.type==='table'&&component.content.rows?.length>1);
+  if(tableIndex>=0){
+    const component=components[tableIndex],originalBox=fit.boxes[tableIndex];
+    const below=fit.boxes.map((box,i)=>({box,i})).filter(({box,i})=>i!==tableIndex&&Math.abs(box.x-originalBox.x)<EMU_INCH*.03&&box.y>=originalBox.y+originalBox.height-EMU_INCH*.02);
+    const reserved=below.length?Math.max(...below.map(({box})=>box.y+box.height))-originalBox.y-originalBox.height:0;
+    const badgeGutter=Math.max(...badges.map(b=>b.width))+GAP;
+    const box={...originalBox,x:originalBox.x+badgeGutter,width:originalBox.width-badgeGutter,height:fit.canvas.y+fit.canvas.height-originalBox.y-reserved};
+    const measurement=measureComponent(component,box,fit.fontSizePt);
     if(measurement.height>box.height||!measurement.rowWeights)return null;
-    const placed=[],rows=components[0].content.rows;let y=box.y+measurement.rowWeights[0]/72*EMU_INCH;
+    const placed=[],rows=component.content.rows;let y=box.y+measurement.rowWeights[0]/72*EMU_INCH;
     for(let row=1;row<rows.length&&placed.length<cards.length;row++){
-      const height=measurement.rowWeights[row]/72*EMU_INCH,card=cards[placed.length];
-      if(height>=card.geometry.height){placed.push({node:card,shapeId:card.nativeRef.shapeId,geometry:{x:fit.boxes[0].x,y:Math.round(y+(height-card.geometry.height)/2),width:card.geometry.width,height:card.geometry.height},rowBinding:{sourceUnitId:components[0].sourceUnitId,sourceRowIndex:row,label:rows[row][0]}});}
+      const height=measurement.rowWeights[row]/72*EMU_INCH,badge=badges[placed.length],{card,carrier,scale}=badge;
+      if(height>=badge.height){
+        const origin=(carrier||card).geometry,left=originalBox.x,top=y+(height-badge.height)/2;
+        const transform=g=>({x:Math.round(left+(g.x-origin.x)*scale),y:Math.round(top+(g.y-origin.y)*scale),width:Math.round(g.width*scale),height:Math.round(g.height*scale)});
+        placed.push({node:card,shapeId:card.nativeRef.shapeId,geometry:transform(card.geometry),rowBinding:{sourceUnitId:component.sourceUnitId,sourceRowIndex:row,label:rows[row][0]},...(carrier?{carriers:[{shapeId:carrier.nativeRef.shapeId,geometry:transform(carrier.geometry)}],badgeScale:scale}:{})});
+      }
       y+=height;
     }
     if(!placed.length)return null;
     const finalBox={...box,height:measurement.height};
-    return {fit:{...fit,boxes:[finalBox],measurements:[measurement],usedHeight:measurement.height,iconGutter:gutter,anchoredIconShapeIds:placed.map(i=>i.shapeId),tableRowIconBindings:placed.map(i=>({shapeId:i.shapeId,...i.rowBinding}))},icons:placed};
+    const boxes=fit.boxes.map(g=>({...g})),measurements=[...fit.measurements];boxes[tableIndex]=finalBox;measurements[tableIndex]=measurement;
+    for(const {i}of below)boxes[i].y+=measurement.height-originalBox.height;
+    return {fit:{...fit,boxes,measurements,usedHeight:Math.max(...boxes.map(g=>g.y+g.height))-fit.canvas.y,iconGutter:badgeGutter,anchoredIconShapeIds:placed.map(i=>i.shapeId),tableRowIconBindings:placed.map(i=>({shapeId:i.shapeId,...i.rowBinding}))},icons:placed};
   }
   const order = fit.boxes.map((box, i) => ({ box, i })).sort((a, b) => a.box.x - b.box.x || a.box.y - b.box.y).map(v => v.i);
   const anchored = order.slice(0, cards.length).filter(i => components[i]?.type !== 'table');
@@ -251,7 +268,7 @@ export function anchorCardIcons(project, index, components, fit, isCardIcon) {
     const box = { ...boxes[i], x: boxes[i].x + gutter, width: boxes[i].width - gutter };
     const m = measureComponent(components[i], box, fit.fontSizePt);
     if (m.width && m.width > box.width) return null;
-    boxes[i] = { ...box, height: m.height }; measurements[i] = m;
+    boxes[i] = { ...box, height: Math.max(m.height,badges[anchored.indexOf(i)].height) }; measurements[i] = m;
   }
   // Restack each column (same x before narrowing) keeping the original order.
   const columns = new Map();
@@ -274,8 +291,11 @@ export function anchorCardIcons(project, index, components, fit, isCardIcon) {
     for (const i of members) { boxes[i].y = Math.round(y); y += boxes[i].height + GAP; }
     if (y - GAP > bottom) return null;
   }
-  const placedIcons = anchored.map((boxIndex, k) => ({ node: cards[k], shapeId: cards[k].nativeRef.shapeId,
-    geometry: { x: boxes[boxIndex].x - gutter, y: boxes[boxIndex].y, width: cards[k].geometry.width, height: cards[k].geometry.height } }));
+  const placedIcons=anchored.map((boxIndex,k)=>{
+    const {card,carrier,scale}=badges[k],origin=(carrier||card).geometry,left=boxes[boxIndex].x-gutter,top=boxes[boxIndex].y;
+    const transform=g=>({x:Math.round(left+(g.x-origin.x)*scale),y:Math.round(top+(g.y-origin.y)*scale),width:Math.round(g.width*scale),height:Math.round(g.height*scale)});
+    return {node:card,shapeId:card.nativeRef.shapeId,geometry:transform(card.geometry),...(carrier?{carriers:[{shapeId:carrier.nativeRef.shapeId,geometry:transform(carrier.geometry)}],badgeScale:scale}:{})};
+  });
   return { fit: { ...fit, boxes, measurements, iconGutter: gutter, anchoredIconShapeIds: placedIcons.map(i => i.shapeId) }, icons: placedIcons };
 }
 

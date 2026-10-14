@@ -11,6 +11,19 @@ const numericText=text=>String(text).replace(/([一二三四五六七八九十])
 const numbers=text=>(numericText(text).match(/\d+(?:[.,]\d+)*(?:%|％)?/gu)||[]).sort();
 const maths=text=>sourceRichText(String(text)).runs.filter(run=>run.kind==='math').map(run=>run.mathKey).sort();
 const prefix=text=>String(text).match(/^\s*(?:[-*+]\s+|\d+[.)]\s+|#{1,6}\s+)/u)?.[0]||'';
+function titleSegment(project,locale){
+ const heading=String(project.source?.text||'').match(/^#\s+(.+)$/mu)?.[1]?.trim();if(!heading)return null;
+ const variants=heading.split(/\s+\|\s+/u),text=variants.find(v=>locale==='en'?!/\p{Script=Han}/u.test(v):/\p{Script=Han}/u.test(v))||variants[0];
+ const needed=locale==='en'?/\p{Script=Han}/u.test(text):locale==='zh-HK'||/[A-Za-z]{3}/u.test(text);
+ return needed?{key:'document-title/line/0',sourceUnitId:'$document-title',role:'document-title',text,line:0}:null;
+}
+/** A title is visible only after the same independent language/meaning audit
+ * as source lines, with exact original text and inventory identity retained. */
+export function projectedDocumentTitleText(project){
+ const locale=project.generationPolicy?.language?.mode==='output'&&project.generationPolicy.language.locale,segment=locale&&titleSegment(project,locale),projection=project.languageProjection;
+ if(!segment||!projection||projection.locale!==locale||projection.originalInventoryHash!==hash(project.originalSourceInventory||project.source?.semantic?.inventory))return null;
+ return projection.groups?.filter(g=>g.audit?.status==='passed'&&g.hash===hash(g.translations)).flatMap(g=>g.translations).find(t=>t.role==='document-title'&&t.key===segment.key&&t.text===segment.text)?.translated||null;
+}
 export function languageProjectionGroups(project){
  if(project.generationPolicy?.language?.mode!=='output')return [];
  const locale=project.generationPolicy.language.locale,inventory=project.originalSourceInventory||project.source?.semantic?.inventory;
@@ -18,6 +31,7 @@ export function languageProjectionGroups(project){
   const list=item.rows?item.rows.flatMap((row,r)=>row.map((text,c)=>({key:item.id+'/cell/'+r+'/'+c,sourceUnitId:item.id,text:String(text),row:r,column:c}))):String(item.text||'').split('\n').map((text,line)=>({key:item.id+'/line/'+line,sourceUnitId:item.id,text,line}));
   return list.filter(segment=>segment.text.trim()&&(locale==='en'?/[\u3400-\u9fff]/u.test(segment.text):locale==='zh-HK'?/[\u3400-\u9fffA-Za-z]/u.test(segment.text):/[A-Za-z]{3}/u.test(segment.text)));
  });
+ const title=titleSegment(project,locale);if(title)segments.unshift(title);
  const groups=[];let group=[],bytes=0;
  for(const segment of segments){const cost=Buffer.byteLength(segment.text);if(cost>18000)throw failure('A single source line/cell exceeds the bounded translation budget; split the source structure without losing facts.');if(group.length&&(group.length>=24||bytes+cost>18000)){groups.push(group);group=[];bytes=0;}group.push(segment);bytes+=cost;}
  if(group.length)groups.push(group);if(groups.length>64)throw failure('Too many source translation groups.');

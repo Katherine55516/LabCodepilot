@@ -128,3 +128,17 @@ DL13项目24993bff3ff676abd1d9fced16e143c4经Chrome3141真实确认43页，生�
 固定3141后来切换到gamma-semantic frontend-snapshot及独立state，原fb项目被并行修改为explicit49，已保留未覆盖。本任务独立项目1a313b6e56f1ef06fba6835970ed2b79使用完整13输入/DealReview模板/Qwen、未提供pages。生成仍未发布；新record154从真实API创建记录，旧record152不冒充同一state连续生成。
 
 scope151、native标题/metadata159、统一workflow159专项通过；npm150 2887通过/1跳过，Chrome156在当前快照34/34通过。新增ownership-only优先级以保留既定semantic summary；metadata schema每个pageIndex+field对应真实上限，focus请求180字符意图，section80，最终validator仍严格；selection理由请求80字符内部标签，正文/源/notes不裁切。报告和64项清单：/Users/dongli/Documents/ChatGPT/CodePilot/LabCodepilot/outputs/ppt-unified-workflow-20261012/report.md、/Users/dongli/Documents/ChatGPT/CodePilot/LabCodepilot/outputs/ppt-unified-workflow-20261012/full-checklist.md。不得写全部改进已签收：DL13最终PPTX/PDF与新overview成功生产仍缺，原64项跨设备/复杂格式/独立人审见清单。
+
+
+### 2026-10-13 v167–v182检查点
+
+最新report.md/full-checklist.md已更新64项代码链接。DL13项目1a313...在Chrome明确确认模块51页，51个writer/render_ready完成；两轮critic均transport timeout，publishedRevision仍0。原生技术导出PPTX/PDF51页通过且逐页查看，仅作未发布诊断。record163有效自身项目连续片段约69分钟，record174独立续跑已结束并保留trace/video。
+
+purpose/type只兼容已知enum；部分失败新增canonicalSlide缓存和只读working-deck投影，waiting不可编辑、epoch/preview/quality严格校验。Alpha原生副本preview/apply/undo真实200，旁节点hash不变。标题重复在确认前受限metadata修复，用户锁保留。可选critic timeout/network保留原页与未解决finding，最终仍quality_blocked且不export；auth/取消/迟到编辑继续传播，完整API负例通过。
+
+用户最新要求来源双语标题及正文；默认/overview缺省body=both，Wizard未碰语言也both，明确中文/英文/香港繁体优先。历史显式primary保持，菜单明确其译文仅备注。不得为压缩页数隐式切回primary。未完成quality只在最终status存在时显示结果，避免undefined和误导零项统计。
+
+backend-v182完整63/63；npm182为2887通过/1跳过/0失败；build181完成。新前端快照位于隔离outputs/ppt-unified-workflow-20261012/frontend-v175。3141有并行Gamma项目，需空闲后安全加载新快照再实际Chrome核验。正式DL最终签收仍缺，不标整个计划complete。GitHub38336751369 runner0/steps=[]，无ARM64通过。主应用未push/merge/deploy。
+
+
+v184–v192：新前端build181已在固定3141加载，manual187实测双语默认/英文覆盖、Qwen、图标14px、下拉同宽、5文件统计及hover/bulk/portal通过、pageerror0。source title188对已确认旧合同兼容；新DL13 eb0caf... auto初估12/candidate11未接受，过早原生coverage恢复中止于source5。189只对auto未确认候选保留最小真实overflow映射，原8版式全保留且9实际溢出仍阻断，随后走原容量修复。源、字体、媒体和最终门禁不变。192局部取舍保持双语pair一起notes，只同页且仍有主稿owner；跨页、受保护结构不改。backend19163/63及pair192负例通过；后端189/192待并行Gamma任务空闲再加载，不能称新输入最终成功。

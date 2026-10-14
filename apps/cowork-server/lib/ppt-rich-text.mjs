@@ -1,6 +1,6 @@
 import MarkdownIt from 'markdown-it';
 import { equationContent, mathMarkupKey, mathFallbackRuns } from './ppt-math.mjs';
-export const DISPLAY_TRANSFORM_VERSION=5;
+export const DISPLAY_TRANSFORM_VERSION=6;
 const markdown=new MarkdownIt({html:false,linkify:false,typographer:false}),cache=new Map();
 const escaped=(text,at)=>{let n=0;while(at>0&&text[--at]==='\\')n++;return n%2===1;};
 function mathSpanAt(s,at){
@@ -111,12 +111,19 @@ export function sourceRichText(value,{code=false}={}){
   // Use the block parser so headings, lists and fenced code have semantic
   // boundaries. A code fence is data: dollars and underscores stay literal.
   let listDepth=0,ordered=0,first=true;
+  const sourceLines=source.split('\n');
   for(const block of markdown.parse(source,{})){
     if(['bullet_list_open','ordered_list_open'].includes(block.type)){listDepth++;ordered=block.type==='ordered_list_open'?Number(block.attrGet('start')||1):0;}
     else if(['bullet_list_close','ordered_list_close'].includes(block.type))listDepth--;
     else if(block.type==='inline'||block.type==='fence'||block.type==='code_block'){
       if(!first)tokens.push({type:'softbreak'});first=false;
-      if(listDepth)tokens.push({type:'text',content:ordered?`${ordered++}. `:'• '});
+      if(listDepth){
+        // Markdown renders 1, 5, 7 as 1, 2, 3. Source stage labels and
+        // enumerated identifiers are facts, so keep the literal marker.
+        const marker=ordered&&sourceLines[block.map?.[0]]?.match(/^\s*(\d+[.)])\s+/u)?.[1];
+        tokens.push({type:'text',content:ordered?`${marker||ordered+'.'} `:'• '});
+        if(ordered)ordered++;
+      }
       if(block.type==='inline')tokens.push(...block.children||[]);
       else tokens.push({type:'code_inline',content:block.content.replace(/\n$/u,'')});
     }

@@ -155,7 +155,7 @@ test('A failed later stage retains the verified editor and disables AI only on p
 });
 
 test('An automatic outline that outgrew its page budget waits for confirmation and shows the concision metrics @smoke',async({page},info)=>{
- const fixture=pptParityFixture(),id='9'.repeat(32),project=fixture.projects.get(id)! as unknown as {status:string;stage:string;pageDecision?:Record<string,unknown>};
+ const fixture=pptParityFixture(),id='9'.repeat(32),project:any=fixture.projects.get(id)!;
  project.status='outline_ready';project.stage='outline';
  project.pageDecision={...(project.pageDecision||{}),source:'estimate',mode:'auto',confirmedAt:null,initialPageCount:8,finalPageCount:12,
   growth:{version:1,initial:8,final:12,limit:10,basis:'presentation_budget',needsConfirmation:true},

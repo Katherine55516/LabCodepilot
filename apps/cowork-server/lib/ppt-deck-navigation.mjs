@@ -52,19 +52,22 @@ export function normalizePaginationTitles(project){
     slide.paginationTitle={basis:'final_same_stem_pages',part:i+1,count:parts.length,removedOrphan:parts.length===1};
   }
 }
+export function navigationCommentary(project,navigation=finalDeckNavigation(project)){
+  const english=project.generationPolicy?.language?.locale==='en'||project.generationPolicy?.language?.mode==='source'&&!navigation.entries.some(e=>/[\u3400-\u9fff]/u.test(e.section));
+  const numbered=project.navigationPlan?.audit?.status!=='passed';
+  const entries=navigation.entries.map(entry=>`${numbered&&entry.sectionNumber?entry.sectionNumber+'. ':''}${entry.displayLabel}  ·  ${english?'p.':'第'}${entry.pageRanges.map(range=>range.start===range.end?range.start:range.start+'–'+range.end).join(', ')}${english?'':'页'}`);
+  // Source-language bilingual chapter headings use facing language columns.
+  // Keep every complete label and the same final page ranges; per-entry
+  // paragraph gaps must not consume most of a small native contents frame.
+  const bilingual=project.generationPolicy?.language?.mode==='source'&&navigation.entries.some(e=>e.section.includes('|')&&/[\u3400-\u9fff]/u.test(e.section));
+  const rangeLabel=entry=>entry.pageRanges.map(range=>range.start===range.end?range.start:range.start+'–'+range.end).join(', ');
+  return bilingual?['en','zh'].map(locale=>({type:'support',text:navigation.entries.map(e=>`${numbered&&e.sectionNumber?e.sectionNumber+'. ':''}${navigationLabel(e.section,locale)} · ${locale==='en'?'p.':'第'}${rangeLabel(e)}${locale==='en'?'':'页'}`).join('\n')})):project.navigationPlan?.audit?.status==='passed'&&entries.length>1?[entries.slice(0,Math.ceil(entries.length/2)),entries.slice(Math.ceil(entries.length/2))].filter(p=>p.length).map(part=>({type:'support',text:part.join('\n')})):[{type:'support',text:entries.join('\n')}];
+}
 export function bindDeckNavigation(project){
   normalizePaginationTitles(project);const navigation=finalDeckNavigation(project);project.navigation=navigation;
   (project.deck?.slides||[]).forEach((slide,index)=>{
     if(project.outline?.find(o=>o.id===slide.id)?.role==='navigation'){
-      const english=project.generationPolicy?.language?.locale==='en'||project.generationPolicy?.language?.mode==='source'&&!navigation.entries.some(e=>/[\u3400-\u9fff]/u.test(e.section));
-      const numbered=project.navigationPlan?.audit?.status!=='passed';
-      const entries=navigation.entries.map(entry=>`${numbered&&entry.sectionNumber?entry.sectionNumber+'. ':''}${entry.displayLabel}  ·  ${english?'p.':'第'}${entry.pageRanges.map(range=>range.start===range.end?range.start:range.start+'–'+range.end).join(', ')}${english?'':'页'}`);
-      // Source-language bilingual chapter headings use facing language columns.
-      // Keep every complete label and the same final page ranges; per-entry
-      // paragraph gaps must not consume most of a small native contents frame.
-      const bilingual=project.generationPolicy?.language?.mode==='source'&&navigation.entries.some(e=>e.section.includes('|')&&/[\u3400-\u9fff]/u.test(e.section));
-      const rangeLabel=entry=>entry.pageRanges.map(range=>range.start===range.end?range.start:range.start+'–'+range.end).join(', ');
-      const commentary=bilingual?['en','zh'].map(locale=>({type:'support',text:navigation.entries.map(e=>`${numbered&&e.sectionNumber?e.sectionNumber+'. ':''}${navigationLabel(e.section,locale)} · ${locale==='en'?'p.':'第'}${rangeLabel(e)}${locale==='en'?'':'页'}`).join('\n')})):project.navigationPlan?.audit?.status==='passed'&&entries.length>1?[entries.slice(0,Math.ceil(entries.length/2)),entries.slice(Math.ceil(entries.length/2))].filter(p=>p.length).map(part=>({type:'support',text:part.join('\n')})):[{type:'support',text:entries.join('\n')}];
+      const commentary=navigationCommentary(project,navigation);
       try{bindSourceArtifacts(project,slide,[],index,commentary);}catch(error){
         if(!/source_artifact_capacity/u.test(error.message))throw error;
         const parts=sourceExplanationComponents(commentary.map(c=>c.text));
@@ -77,5 +80,44 @@ export function bindDeckNavigation(project){
       for(const n of slide.sourceArtifactNodes||[]){n.content.derivedFrom='final-deck-navigation';n.content.navigationTargets=navigation.entries.flatMap(e=>e.targets);}
       if(project.nodes?.[slide.id])project.nodes[slide.id].slide=slide;
     }
-  });return navigation;
+  });
+  for(const reference of sourceExampleReferences(project)){
+    const index=project.outline.findIndex(s=>s.id===reference.slideId),slide=project.deck.slides[index];
+    if(project.revision>0||project.editing?.epochs?.[slide.id]>0||project.runtime?.slides?.[slide.id]?.accepted||slide.locked||slide.sourceArtifactNodes?.some(n=>n.locked))continue;
+    const current=slide.sourceArtifactNodes||[];
+    const existing=current.find(n=>n.content?.derivedFrom==='source-example-navigation'&&n.content.text===reference.text&&JSON.stringify(n.content.navigationTargets)===JSON.stringify(reference.targets));
+    if(existing&&slide.nodes?.some(n=>n.id===existing.id&&n.content?.derivedFrom==='source-example-navigation'))continue;
+    const commentary=current.filter(n=>!n.sourceArtifact&&n.semanticRole==='source-explanation'&&!n.content?.derivedFrom).map(n=>({type:n.content?.pointType||'mechanism',text:n.content?.rawText||n.content?.richText?.source||n.content?.text}));
+    const evidence=[...new Set(current.flatMap(n=>n.content?.sourceEvidenceIds||[]))];
+    bindSourceArtifacts(project,slide,project.planning.slidePlan.find(p=>p.slideId===slide.id)?.sourceArtifacts||[],index,[...commentary,{type:'support',text:reference.text}],evidence);
+    const node=slide.sourceArtifactNodes.find(n=>!n.sourceArtifact&&n.content?.text===reference.text);
+    if(node){node.content.derivedFrom='source-example-navigation';node.content.navigationTargets=reference.targets;}
+    bindTemplateFidelity(project,{slideIds:[slide.id]});
+    if(project.nodes?.[slide.id])project.nodes[slide.id].slide=slide;
+  }
+  return navigation;
+}
+
+/** A definition followed by an actual schema example needs a visible handoff.
+ * Derive it only from adjacent displayed schema fragments in the same source
+ * chunk; this is navigation, never a generated fact or a completeness verdict. */
+export function sourceExampleReferences(project){
+ const inventory=project.source?.semantic?.inventory?.items||[],slides=project.deck?.slides||[],result=[];
+ for(let i=0;i<slides.length-1;i++){
+  const owned=project.outline?.find(s=>s.id===slides[i].id)?.sourceUnitIds||[];
+  const definitions=inventory.filter(item=>owned.includes(item.id)&&!item.diagramSource&&!item.rows);
+  if(!definitions.length||!slides[i].sourceArtifactNodes?.some(n=>definitions.some(d=>d.id===n.sourceArtifact?.sourceUnitId)))continue;
+  const chunks=new Set(definitions.flatMap(d=>d.chunkRefs||[]));
+  const exampleIds=new Set(inventory.filter(item=>item.diagramSource?.kind==='schema'&&item.chunkRefs?.some(id=>chunks.has(id))).map(item=>item.id));
+  const targets=[];
+  for(let j=i+1;j<slides.length;j++){
+   const nodes=(slides[j].sourceArtifactNodes||[]).filter(n=>exampleIds.has(n.sourceArtifact?.sourceUnitId)&&n.type==='table'&&n.content?.rows?.length>1);
+   if(!nodes.length)break;
+   targets.push({slideId:slides[j].id,page:j+1,sourceUnitIds:[...new Set(nodes.map(n=>n.sourceArtifact.sourceUnitId))]});
+  }
+  if(!targets.length)continue;
+  const english=project.generationPolicy?.language?.locale==='en'||project.generationPolicy?.language?.mode==='source'&&!definitions.some(d=>/[\p{Script=Han}]/u.test(d.text));
+  result.push({slideId:slides[i].id,text:english?'Structured field examples follow on the next pages.':'结构字段示例见后续页面。',targets});
+ }
+ return result;
 }

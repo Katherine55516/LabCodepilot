@@ -14,7 +14,8 @@ export function userHistoryAffectsSlide(history,slideId){
  * source copy. A user command on this page, accepted page or source loss leaves a proposal
  * only; source-derived requirements and all deterministic gates stay intact. */
 export function optionalCopyRepair(project,review,slideId,inspect,{onReject}={}){
- if(project.generationPolicy?.content!=='full_source'||project.generationPolicy?.language?.mode!=='source'||project.runtime?.slides?.[slideId]?.accepted||typeof inspect!=='function')return null;
+ const sourceCopy=project.generationPolicy?.content==='full_source'||project.generationPolicy?.content==='overview'&&project.generationPolicy?.knowledge==='source_only';
+ if(!sourceCopy||project.generationPolicy?.language?.mode!=='source'||project.runtime?.slides?.[slideId]?.accepted||typeof inspect!=='function')return null;
  if(project.uid&&project.id&&userHistoryAffectsSlide(operationHistory(project.uid,project.id),slideId))return null;
  const index=project.outline.findIndex(o=>o.id===slideId),before=project.deck?.slides?.find(s=>s.id===slideId)||project.nodes?.[slideId]?.slide;if(index<0||!before||before.nodes?.some(n=>n.locked&&['text','list','table','chart'].includes(n.type)))return null;
  const unsupported=new Set((review.claimAudit?.checks||[]).filter(c=>c.slideId===slideId&&['unsupported','contradicted','redundant'].includes(c.status)).map(c=>c.nodeId));

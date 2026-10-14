@@ -109,7 +109,8 @@ import { routeIssue } from './lib/ppt-repair-routing.mjs';
   const overviewTitle={...project,generationPolicy:{content:'overview',details:'notes',language:{mode:'output',locale:'zh'}}};
   const sourceCover={id:'source-cover',title:'因子挖掘：公式化因子',nodes:[{id:'title',type:'text',semanticRole:'title',content:{text:'因子挖掘：公式化因子'}}]};
   assert.equal(inspectCoverTitle(overviewTitle,[sourceCover]).length,0,'single-language overview does not force the other original cover title onto slides');
-  assert.ok(inspectCoverTitle({...overviewTitle,generationPolicy:{...overviewTitle.generationPolicy,content:'full_source',details:'slides'}},[sourceCover]).length,'full-source cover identity remains complete bilingual');
+  assert.equal(inspectCoverTitle({...overviewTitle,generationPolicy:{...overviewTitle.generationPolicy,content:'full_source',details:'slides'}},[sourceCover]).length,0,'an explicit output language also governs full-source cover titles');
+  assert.ok(inspectCoverTitle({...overviewTitle,generationPolicy:{...overviewTitle.generationPolicy,content:'full_source',details:'slides',language:{mode:'source',body:'both'}}},[sourceCover]).length,'source-language full-source cover identity remains bilingual');
 
   // A generated title that renames the heading term of its own section.
   project.source.semantic.inventory.items.push({ id: 'gp', text: '遗传编程把公式表示为树。', sectionPath: ['5. Genetic Programming | 遗传编程与因子挖掘'] });

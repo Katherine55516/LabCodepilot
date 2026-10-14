@@ -24,7 +24,7 @@ export function explicitLanguageRequest(value){
 
 export function defaultGenerationPolicy(request=''){
  const locale=explicitLanguageRequest(request);
- return {version:1,detail:'balanced',content:'overview',details:'notes',language:locale?{mode:'output',locale}:{mode:'source',body:'primary'},knowledge:'source_only',code:{presentation:'omit'}};
+ return {version:1,detail:'balanced',content:'overview',details:'notes',language:locale?{mode:'output',locale}:{mode:'source',body:'both'},knowledge:'source_only',code:{presentation:'omit'}};
 }
 export function normalizeGenerationPolicy(value) {
   if (value === undefined) return undefined;
@@ -39,9 +39,9 @@ export function normalizeGenerationPolicy(value) {
   }
   // code.presentation: auto derives from the request and template; keep/omit
   // is the user's explicit choice from the Syllabus assumptions.
-  // Bilingual source + overview/notes: one body language by default (the
-  // original side of each detected pair), bilingual titles; `both` is opt-in.
-  const body = value.language.body ?? (value.content === 'overview' && value.details === 'notes' ? 'primary' : undefined);
+  // Follow the user's source-language contract in visible titles AND body.
+  // Retain an explicitly selected legacy primary-only policy unchanged.
+  const body = value.language.body ?? (value.content === 'overview' && value.details === 'notes' ? 'both' : undefined);
   return { version: 1, detail: value.detail, language: value.language.mode === 'source' ? { mode: 'source', ...(body ? { body } : {}) } : { mode: 'output', locale: ['zh-Hant','zh-TW'].includes(value.language.locale) ? 'zh-HK' : value.language.locale },
     ...(value.content ? {content:value.content} : {}),...(value.details?{details:value.details}:{}), knowledge: value.knowledge,
     ...(code && code !== 'auto' ? { code: { presentation: code } } : {}) };

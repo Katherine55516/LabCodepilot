@@ -19,9 +19,10 @@ export function storeDataUrl(uid, projectId, dataUrl) {
   return { assetId: `asset_${hash.slice(0, 24)}`, hash, extension, bytes: bytes.length, path: target };
 }
 
-export function enrichAssetRefs(project, { strict = false } = {}) {
+export function enrichAssetRefs(project, { strict = false,slideIds } = {}) {
   if (!project?.deck) return project;
   for (const slide of project.deck.slides || []) {
+    if(slideIds&&!slideIds.includes(slide.id))continue;
     for (const node of slide.nodes || []) {
       if (node.type !== 'image' || !node.content?.dataUrl || node.content.assetId) continue;
       try {

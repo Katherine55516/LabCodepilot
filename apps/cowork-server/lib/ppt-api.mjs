@@ -23,7 +23,7 @@ import {RENDER_CONTRACT_VERSION} from './ppt/render-contract.mjs';
 import {renderIssues} from './ppt/render-audit.mjs';
 import {compileContentSelection,selectionSource,exactPageConflict,coalesceEquivalentSelections, visibleEquivalentCandidates } from './ppt-content-selection.mjs';
 import {taskSummary,liveProjectView} from './ppt/project-view.mjs';
-import { repeatedFocusMetadataError,pruneEmptySelectedPages,retainOutlineRepair,resumeOutlineRepair,outlineSummaryRepairPrompt,applyOutlineSummaryRepair,outlineMetadataRepairPrompt,applyOutlineMetadataRepair,outlineOwnershipRepairPrompt,applyOutlineOwnershipRepair,outlineRelationBatchRepairPrompt,applyOutlineRelationBatchRepair,outlineRelationRepairPrompt,applyOutlineRelationRepair,orderSourceConclusion, contentDistribution, inspectSkeletonOwnership, skeletonBatches, outlineDraftFromPartialJson, assembleSkeletonBatches, outlineResponseSchema, outlineDeltaPrompt, applyOutlineDelta, compileSkeleton, skeletonPrompt, parseOutlineJson, userRequirements, candidateRecord, promptTelemetry, fragmentTitle, outlineError } from './ppt-outline-protocol.mjs';
+import { repeatedFocusMetadataError,pruneEmptySelectedPages,retainOutlineRepair,resumeOutlineRepair,outlineSummaryRepairPrompt,applyOutlineSummaryRepair,outlineMetadataRepairPrompt,applyOutlineMetadataRepair,repairOutlineMetadataBatch,outlineOwnershipRepairPrompt,applyOutlineOwnershipRepair,outlineRelationBatchRepairPrompt,applyOutlineRelationBatchRepair,outlineRelationRepairPrompt,applyOutlineRelationRepair,orderSourceConclusion, contentDistribution, inspectSkeletonOwnership, skeletonBatches, outlineDraftFromPartialJson, assembleSkeletonBatches, outlineResponseSchema, outlineDeltaPrompt, applyOutlineDelta, compileSkeleton, skeletonPrompt, parseOutlineJson, userRequirements, candidateRecord, promptTelemetry, fragmentTitle, outlineError } from './ppt-outline-protocol.mjs';
 import { pptModelJobs, PPT_BYOK_CAPABILITIES } from './ppt-model-jobs.mjs';
 import { preserveCopyRepairFrame, validateRepairCandidate, validateSourceRewriteWithReflow } from './ppt-repair-routing.mjs';
 import { assertCandidateScope } from './ppt/input-scope-service.mjs';
@@ -608,7 +608,7 @@ function assessOutlineCandidate(project, raw, {finalRepack=false}={}) {
   candidateProject.outline=outline;
   // Explicit N fixes quantity, not a role-only layout reassignment. Preserve
   // an accepted assignment during title review; other plans choose by fit.
-  if(!project.nativeTitleRepairSeed)rescheduleTemplateFidelity(candidateProject,{scoreSlide:(p,index)=>candidateFit(outline[index],p,index).predictedOverflow});
+  if(!project.nativeTitleRepairSeed)rescheduleTemplateFidelity(candidateProject,{scoreSlide:(p,index)=>candidateFit(outline[index],p,index).predictedOverflow,allowOverflowCandidate:automatic&&!project.confirmedOutline});
   rawOutline=revalidateOutlineFits(candidateProject,rawOutline,outline);
   outline=outline.map((slide,index)=>({...slide,densityFit:rawOutline.slides[index].densityFit}));
   candidateProject.outline=outline;
@@ -860,13 +860,21 @@ function startOutline(uid, id, activity, log, deps = defaultDeps) {
         const conflicts=inspectNativeOutlineTitles(assessed.project,assessed.outline);if(!conflicts.length)break;
         const cover=conflicts.filter(c=>c.pageIndex===0),body=conflicts.filter(c=>c.pageIndex!==0),batches=cover.length?[cover]:[];
         for(let at=0;at<body.length;at+=8)batches.push(body.slice(at,at+8));
-        const base=assessed,repairs=await boundedAll(batches,PPT_NODE_CONCURRENCY,async(batch,index)=>{
-          const diagnostic={details:{metadataConflicts:batch}},prompt=outlineMetadataRepairPrompt(base.project,base.rawOutline,diagnostic);if(!prompt)throw outlineError('capacity_invalid');
-          let retryPrompt=prompt;
-          for(let correction=0;correction<3;correction++){
-            const delta=await deps.modelCall(p,retryPrompt,activity,log,{nodeKey:`outline:native-titles:${pass}:${index}:${correction}`,maxOutputTokens:4096});
-            try{applyOutlineMetadataRepair(base.rawOutline,diagnostic,delta);return {diagnostic,delta};}
-            catch(error){if(correction===2||!error.details)throw error;retryPrompt=prompt+`\n<rejected_title_delta>${JSON.stringify(error.details)}</rejected_title_delta>\nCorrect only this same batch. Each title must fit its precise Visual Unit limit and contain all required languages. Do not repeat the rejected title or invent abbreviations.`;}
+        const base=assessed;let retainedTitles=base.rawOutline;
+        saveCandidate(base.rawOutline,[...base.issues,...conflicts]);
+        const retainTitles=(diagnostic,delta)=>{
+          retainedTitles=applyOutlineMetadataRepair(retainedTitles,diagnostic,delta);
+          const latest=store.get(uid,id);if(latest?.status==='outlining'){latest.outlineRepairCheckpoint=retainOutlineRepair(retainedTitles,planningIdentity);store.save(latest);saveCandidate(retainedTitles,[...base.issues,...inspectNativeOutlineTitles(base.project,retainedTitles.slides)]);}
+        };
+        const repairs=await boundedAll(batches,PPT_NODE_CONCURRENCY,async(batch,index)=>{
+          const diagnostic={details:{metadataConflicts:batch}};
+          try{
+            const delta=await repairOutlineMetadataBatch(base.project,base.rawOutline,diagnostic,(prompt,correction)=>deps.modelCall(p,prompt,activity,log,{nodeKey:`outline:native-titles:${pass}:${index}:${correction}`,maxOutputTokens:4096}));
+            retainTitles(diagnostic,delta);return {diagnostic,delta};
+          }catch(error){
+            const valid=error.details?.validatedUpdates||[];
+            if(valid.length)retainTitles({details:{metadataConflicts:batch.filter(c=>valid.some(u=>u.pageIndex===c.pageIndex&&u.field===c.field))}},{version:2,updates:valid});
+            throw error;
           }
         });
         let revised=base.rawOutline;for(const {diagnostic,delta}of repairs)revised=applyOutlineMetadataRepair(revised,diagnostic,delta);
@@ -1274,6 +1282,7 @@ function startGeneration(uid, id, activity, log, deps = defaultDeps) {
 
       await prepareNavigationPlan(current,finalDeckNavigation({...current,navigationPlan:undefined}).entries,(prompt,nodeKey)=>deps.modelCall(current,prompt,activity,log,{nodeKey,maxOutputTokens:8192}),async planned=>{await enqueueProject(uid,id,()=>{const latest=store.get(uid,id);if(latest?.status==='generating'&&semanticReviewKey(latest)===semanticReviewKey(planned)){latest.navigationPlan=planned.navigationPlan;store.save(latest);}});});
       bindDeckNavigation(current);
+      enrichAssetRefs(current);
       current.postWriterPlan=postWriterPlan(current);store.save(current);
       const consolidateActualPages=async()=>{
         const actualPlan=await executePostWriterPlan(current,{inspect:deterministicReview,rewrite:async(candidate,outline,index,proposal)=>{
@@ -1286,7 +1295,7 @@ function startGeneration(uid, id, activity, log, deps = defaultDeps) {
         if(!lease.owns()||!latest||latest.currentRunId!==current.currentRunId||latest.status!=='generating'||semanticReviewKey(latest)!==semanticReviewKey(current))throw Error('postwriter transaction superseded by a user edit');
         const beforeReplan=current;current=actualPlan.project;recordRepairSet(beforeReplan,current,actualPlan.executions.filter(e=>e.status==='committed').map(e=>({code:'postwriter_consolidation',detail:e.proposal.reason})));store.save(current);emitRunProgress(current,'deck.replanned',{executions:actualPlan.executions});
       }
-        bindDeckNavigation(current);current.postWriterPlan=postWriterPlan(current);store.save(current);
+        bindDeckNavigation(current);enrichAssetRefs(current);current.postWriterPlan=postWriterPlan(current);store.save(current);
       };
       await consolidateActualPages();
       let initialReview = deterministicReview(current);
@@ -1354,12 +1363,16 @@ function startGeneration(uid, id, activity, log, deps = defaultDeps) {
             }})); } catch(error) {
             // An invalid bounded critic candidate must not destroy a verified
             // writer page or abort all remaining repair targets. Keep the old
-            // page and unresolved gate finding; transport/stale errors propagate.
-            if(!['capacity_invalid','coverage_invalid','schema_invalid'].includes(error.code))throw error;
+            // page and unresolved gate finding. An optional repair transport
+            // failure also retains the verified baseline: final review and
+            // publication gates still block unresolved findings. Cancellation,
+            // authentication and stale-edit failures must propagate.
+            const rejectedCode = error.code || (/^ppt_(?:timeout|network)$/u.test(error.message) ? error.message : undefined);
+            if(!['capacity_invalid','coverage_invalid','schema_invalid','timeout','network','ppt_timeout','ppt_network'].includes(rejectedCode))throw error;
             current=await enqueueProject(uid,id,()=>{
               const latest=store.get(uid,id);
               if(!lease.owns()||!latest||latest.status!=='generating'||latest.currentRunId!==current.currentRunId||semanticReviewKey(latest)!==beforeKey)throw Error('content changed during rejected critic repair');
-              runtimeState(latest).criticRepair.attempts.push({slideId:slide.id,nodeKey:attemptKey,rolledBack:true,progressed:false,violations:[{code:error.code,detail:String(error.message).slice(0,700)}],beforeHash:digest(draft),durationMs:Date.now()-started});
+              runtimeState(latest).criticRepair.attempts.push({slideId:slide.id,nodeKey:attemptKey,rolledBack:true,progressed:false,violations:[{code:rejectedCode,detail:String(error.message).slice(0,700)}],beforeHash:digest(draft),durationMs:Date.now()-started});
               store.save(latest);return latest;
             });
             continue;
@@ -1385,7 +1398,7 @@ function startGeneration(uid, id, activity, log, deps = defaultDeps) {
               // when its prose is generated and editable rather than frozen.
               if(draft.sourceArtifactNodes?.length)preserveCopyRepairFrame(beforeRepair.deck.slides[index],latest.deck.slides[index]);
               latest.nodes[slide.id].slide=structuredClone(latest.deck.slides[index]);
-              enrichAssetRefs(latest);
+              enrichAssetRefs(latest,{slideIds:[slide.id]});
               const repairViolations = validateSourceRewriteWithReflow(beforeRepair, latest, { scopeSlideIds: [slide.id], beforeReview, afterReview: deterministicReview(latest) });
               if (repairViolations.length) {
                 Object.assign(latest, beforeRepair);
@@ -1441,6 +1454,7 @@ function startGeneration(uid, id, activity, log, deps = defaultDeps) {
       current.editing = latestBeforePublish.editing; current.constraints = latestBeforePublish.constraints; current.runtime = latestBeforePublish.runtime;
       recordRepairSet(beforeFinalRepair,current,repaired.repairs);
       bindDeckNavigation(current);
+      enrichAssetRefs(current);
       current.postWriterPlan=postWriterPlan(current);
       current.renderTree = buildRenderTree(current);
       for (const tree of current.renderTree.slides) runtimeState(current).slides[tree.id] = { ...current.runtime.slides[tree.id], preview: tree, renderHash: digest(tree) };
@@ -2296,11 +2310,6 @@ export async function handlePpt(req, url, { uid, send:sendRaw, res, readBody, ac
     if (action === 'retry' && req.method === 'POST') {
       if (!['failed','quality_blocked'].includes(project.status)) return send(409, { error: 'project is not failed or quality blocked' });
       const retryRequest=await body(req);
-      if(retryRequest.refitTemplateMedia===true){
-        if(project.revision>0||project.publishedRevision||Object.values(project.runtime?.slides||{}).some(s=>s.accepted))return send(409,{error:'Preserve edited/accepted pages; use scoped layout recovery.'});
-        Object.assign(project,refitSourceMedia(project));
-        project.stage='generation';
-      }
       if(retryRequest.refreshDerivedSource===true){
         const refreshed=refreshDerivedSource(project,assessOutlineCandidate);
         if(refreshed.changedSourceIds.length){
@@ -2311,6 +2320,11 @@ export async function handlePpt(req, url, { uid, send:sendRaw, res, readBody, ac
           project.confirmedOutline={...project.confirmedOutline,hash:outlineConfirmationHash(project),sourceRefreshAt:new Date().toISOString(),basis:'Explicit source-refresh retry; identical immutable input and existing confirmed titles, IDs, page count and ownership retained'};
           project.stage='generation';
         }
+      }
+      if(retryRequest.refitTemplateMedia===true){
+        if(project.revision>0||project.publishedRevision||Object.values(project.runtime?.slides||{}).some(s=>s.accepted))return send(409,{error:'Preserve edited/accepted pages; use scoped layout recovery.'});
+        Object.assign(project,refitSourceMedia(project));
+        project.stage='generation';
       }
       if(retryRequest.repairOutlineTitles===true){
         const issues=inspectNativeOutlineTitles(project),seed=project.candidateOutline;

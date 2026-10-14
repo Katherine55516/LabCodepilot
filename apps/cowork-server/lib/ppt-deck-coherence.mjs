@@ -5,6 +5,7 @@
  * title that renames a source term, and commentary that only restates the page.
  * All findings are warnings until a real-model baseline calibrates them. */
 import { visibleNodes, nodeContentText } from './ppt-visible-content.mjs';
+import {projectedDocumentTitleText} from './ppt-language-projection.mjs';
 import { preservesReadingOrder } from './ppt-density-capacity.mjs';
 
 const HAN = /\p{Script=Han}/u;
@@ -72,12 +73,16 @@ export function sourceDocumentTitle(project) {
  * the complete notes archive instead of forcing bilingual cover reproduction. */
 export function displayedDocumentTitle(project){
   const title=sourceDocumentTitle(project),policy=project.generationPolicy;
-  if(!title||policy?.content!=='overview'||policy.details!=='notes'||policy.language?.mode!=='output')return title;
+  if(!title||policy?.language?.mode!=='output')return title;
+  const projected=projectedDocumentTitleText(project);
+  if(projected)return sourceDocumentTitle({source:{text:'# '+projected}});
+  if(policy.language.locale==='zh-HK')return null;
   const variants=title.variants.filter(v=>policy.language.locale==='en'?!/\p{Script=Han}/u.test(v.text):/\p{Script=Han}/u.test(v.text));
-  return variants.length?{...title,variants}:title;
+  return variants.length?{...title,variants}:null;
 }
 export function inspectCoverTitle(project, slides) {
   const title = displayedDocumentTitle(project), cover = slides[0];
+  if(!title&&cover&&project.deckTitle?.source!=='user'&&project.generationPolicy?.language?.mode==='output'&&sourceDocumentTitle(project))return [issue('cover_title_projection_missing',cover,'The complete source title needs an independently audited projection into the requested output language before confirmation; do not restore another language.')];
   if (!title || !cover || project.deckTitle?.source === 'user') return [];
   const visible = visibleNodes(cover).map(nodeContentText).join('\n') + '\n' + (cover.title || '');
   const norm = value => String(value).normalize('NFKC').replace(/\s+/gu, '').toLowerCase();

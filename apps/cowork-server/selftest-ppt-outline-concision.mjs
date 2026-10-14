@@ -8,12 +8,34 @@ import { withSemanticIndex } from './lib/ppt-semantic.mjs';
 import { applyPresentationPolicy } from './lib/ppt-presentation-policy.mjs';
 import { normalizeGenerationPolicy, defaultGenerationPolicy } from './lib/ppt-generation-policy.mjs';
 import { estimatePageRecommendation } from './lib/ppt-planning.mjs';
-import { selectionConstraints, visibleEquivalentCandidates } from './lib/ppt-content-selection.mjs';
+import { selectionConstraints, visibleEquivalentCandidates, compileContentSelection } from './lib/ppt-content-selection.mjs';
 import { skeletonBatches } from './lib/ppt-outline-protocol.mjs';
 import { globalOutlinePlan } from './lib/ppt-global-outline-plan.mjs';
 import { majorSections, presentationBudget, sectionPageGroups, outlineGrowth, routeTranslationsToNotes, concisionCost, CARD_UNITS,
   outlineConcisionMetrics, concisionPlannerRule, visibleRequiredSentence } from './lib/ppt-outline-concision.mjs';
 import { condenseOverflowingTables, mergeUnderfilledPages, pageLoad, condenseFirstRule } from './lib/ppt-outline-condense.mjs';
+
+// Main-deck bilingual retention and concise notes disposition are independent:
+// moving a secondary point must move the complete pair, preserving the other
+// bilingual point and every original sentence in the source inventory.
+{
+  const pairItems = [
+    {id:'core-en',text:'The core observation describes the model workflow.',languagePairId:'core',languageRole:'primary'},
+    {id:'core-zh',text:'核心观察描述模型的工作流程。',languagePairId:'core',languageRole:'translation'},
+    {id:'detail-en',text:'An auxiliary observation describes the data vendor format.',languagePairId:'detail',languageRole:'primary'},
+    {id:'detail-zh',text:'辅助观察描述数据供应商的格式。',languagePairId:'detail',languageRole:'translation'},
+  ].map(item=>({...item,type:'MechanismBlock',sectionPath:['Overview'],source_ref:[]}));
+  const pairProject={generationPolicy:defaultGenerationPolicy(),source:{text:pairItems.map(i=>i.text).join('\n'),semantic:{inventory:{items:pairItems,relationships:[]}}}};
+  const raw={version:2,selection:pairItems.map(i=>({sourceUnitId:i.id,destination:'slides',reason:'Main point'})),slides:[{title:'Cover',sourceUnitIds:[]},{title:'Observations',sourceUnitIds:pairItems.map(i=>i.id),densityFit:{predictedOverflow:100}},{title:'Close',sourceUnitIds:[]}]};
+  const assess=(project,outline)=>{compileContentSelection(project,outline);return {rawOutline:structuredClone(outline),issues:[],outline:outline.slides};};
+  const start=assess(pairProject,raw);
+  const result=condenseOverflowingTables(pairProject,start,(project,outline)=>{const candidate=assess(project,outline);candidate.rawOutline.slides[1].densityFit={predictedOverflow:Math.max(0,(outline.slides[1].sourceUnitIds.length-2)*50)};return candidate;});
+  assert.ok(result);
+  assert.deepEqual(result.rawOutline.slides[1].sourceUnitIds,['core-en','core-zh']);
+  assert.deepEqual(result.rawOutline.selection.filter(e=>e.destination==='notes').map(e=>e.sourceUnitId).sort(),['detail-en','detail-zh']);
+  assert.deepEqual(pairProject.source.semantic.inventory.items,pairItems,'complete bilingual originals are immutable');
+  assert.throws(()=>compileContentSelection(pairProject,{...raw,selection:raw.selection.map(e=>e.sourceUnitId==='detail-en'?{...e,destination:'notes'}:e),slides:raw.slides.map((s,i)=>i===1?{...s,sourceUnitIds:s.sourceUnitIds.filter(id=>id!=='detail-en')}:s)}),/Both source languages/);
+}
 
 // --- A bilingual tutorial: intro + 11 sections, English paragraph + Chinese translation each.
 const en = n => `Section ${n} explains how candidate formulas are generated, screened and recorded so that the research loop stays reproducible across 3 stages of review.`;
@@ -25,18 +47,18 @@ for (let n = 1; n <= 11; n++) {
   if (n === 7) md += 'Warning: you must never tune on the test period.\n\n';
 }
 const raw = withSemanticIndex(normalizePaste(md));
-const wizardPolicy = { version: 1, detail: 'balanced', content: 'overview', details: 'notes', knowledge: 'source_only', language: { mode: 'source' } };
+const wizardPolicy = { version: 1, detail: 'balanced', content: 'overview', details: 'notes', knowledge: 'source_only', language: { mode: 'source', body: 'primary' } };
 const project = (policy, extra = {}) => { const p = { id: 'p', uid: 'u', inputKind: 'paste', prompt: '', pages: null, pageDecision: { source: 'estimate', mode: 'auto' }, source: raw, generationPolicy: normalizeGenerationPolicy(policy), ...extra }; p.source = applyPresentationPolicy(raw, p); return p; };
 const items = raw.semantic.inventory.items;
 assert.ok(items.filter(item => item.languageRole === 'translation').length >= 20, 'paragraph pairs are detected');
 
-// --- Policy (item 3): overview + notes + source languages → one body language by default.
+// --- Explicit legacy primary-only contract is preserved; new defaults keep both.
 assert.deepEqual(normalizeGenerationPolicy(wizardPolicy).language, { mode: 'source', body: 'primary' });
 assert.deepEqual(normalizeGenerationPolicy({ ...wizardPolicy, language: { mode: 'source', body: 'both' } }).language, { mode: 'source', body: 'both' });
-assert.deepEqual(normalizeGenerationPolicy({ ...wizardPolicy, content: 'full_source', details: 'slides' }).language, { mode: 'source' }, 'full_source keeps both languages');
+assert.deepEqual(normalizeGenerationPolicy({ ...wizardPolicy, content: 'full_source', details: 'slides', language: {mode:'source'} }).language, { mode: 'source' }, 'full_source keeps both languages');
 assert.throws(() => normalizeGenerationPolicy({ ...wizardPolicy, language: { mode: 'output', locale: 'en', body: 'primary' } }), /invalid generation policy/u);
 assert.throws(() => normalizeGenerationPolicy({ ...wizardPolicy, language: { mode: 'source', body: 'translated' } }), /invalid generation policy/u);
-assert.deepEqual(defaultGenerationPolicy('').language, { mode: 'source', body: 'primary' });
+assert.deepEqual(defaultGenerationPolicy('').language, { mode: 'source', body: 'both' });
 
 // --- Budget (item 1).
 const overview = project(wizardPolicy), both = project({ ...wizardPolicy, language: { mode: 'source', body: 'both' } }), full = project({ ...wizardPolicy, content: 'full_source', details: 'slides' });

@@ -98,7 +98,7 @@ export function PptCreateWizard({ models, templates, initialKind, modelKey, lock
   const [pageInput, setPageInput] = useState<string | null>(null);
   const [compressionApproved, setCompressionApproved] = useState(false);
   const [languageTouched,setLanguageTouched]=useState(false);
-  useEffect(()=>{if(languageTouched)return;const locale=explicitLanguageRequest(prompt);const language:PptGenerationPolicy['language']=locale?{mode:'output',locale}:{mode:'source',body:'primary'};setPolicy(current=>JSON.stringify(current.language)===JSON.stringify(language)?current:{...current,language});},[prompt,languageTouched]);
+  useEffect(()=>{if(languageTouched)return;const locale=explicitLanguageRequest(prompt);const language:PptGenerationPolicy['language']=locale?{mode:'output',locale}:{mode:'source',body:'both'};setPolicy(current=>JSON.stringify(current.language)===JSON.stringify(language)?current:{...current,language});},[prompt,languageTouched]);
   const [images, setImages] = useState<Extract<VisualBlock, { type: 'image' }>[]>([]);
   const [localOutline, setLocalOutline] = useState<Outline>([]); const [outlineTouched, setOutlineTouched] = useState(false);
   const [analyzedProjectId, setAnalyzedProjectId] = useState<string | null>(null);

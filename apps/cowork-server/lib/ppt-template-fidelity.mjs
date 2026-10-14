@@ -650,7 +650,7 @@ function buildFidelity(project, sourceSlides, externalPptx, templateHash, profil
   };
 }
 
-export function restoreNativeTemplateCoverage(project,scoreSlide){
+export function restoreNativeTemplateCoverage(project,scoreSlide,{allowOverflowCandidate=false}={}){
  const fidelity=project.templateFidelity;
  if(fidelity?.mode!=='preserve'||project.pages<fidelity.originalSlideCount)return project;
  const sourceSlides=structuredClone(fidelity.sourceCatalog),external={originalPath:fidelity.originalPath,width:fidelity.width,height:fidelity.height};
@@ -658,11 +658,19 @@ export function restoreNativeTemplateCoverage(project,scoreSlide){
  const profiles=sourceSlides.map(slide=>profileSourceSlide(slide,external,rich));
  const missing=Array.from({length:sourceSlides.length},(_,i)=>i).filter(i=>!project.templateFidelity.slideMap.includes(i));
  for(const sourceIndex of missing){
-  const prior=project.templateFidelity,map=prior.slideMap;let chosen=null;
+  const prior=project.templateFidelity,map=prior.slideMap;let chosen=null,leastOverflow=null,leastScore=Infinity,leastIndex=null;
   for(let index=1;index<project.pages-1;index++){
    if(map.filter(i=>i===map[index]).length<=1||profiles[sourceIndex].directional||map[index-1]===sourceIndex||map[index+1]===sourceIndex)continue;
    const trial=[...map];trial[index]=sourceIndex;
-   try{project.templateFidelity=buildFidelity(project,sourceSlides,external,fidelity.sha256,profiles,trial);if(scoreSlide(project,index)<=0){chosen=project.templateFidelity;break;}}catch{}
+   try{project.templateFidelity=buildFidelity(project,sourceSlides,external,fidelity.sha256,profiles,trial);const score=scoreSlide(project,index);if(score<=0){chosen=project.templateFidelity;break;}if(Number.isFinite(score)&&score<leastScore){leastOverflow=project.templateFidelity;leastScore=score;leastIndex=index;}}catch{}
+  }
+  // An automatic, unconfirmed outline must reach the normal measured
+  // condensation/partition pipeline. Keep the required original media in the
+  // least-overflow candidate; revalidateOutlineFits still records its actual
+  // overflow and final confirmation cannot accept an unfitted page.
+  if(!chosen&&allowOverflowCandidate&&!project.confirmedOutline&&leastOverflow){
+   chosen=leastOverflow;
+   chosen.reusePlan.coverageCapacityCandidates=[...(prior.reusePlan?.coverageCapacityCandidates||[]),{sourceIndex,pageIndex:leastIndex,predictedOverflow:leastScore,basis:'unaccepted candidate; full capacity repair and final gates still required'}];
   }
   project.templateFidelity=chosen||prior;
   if(!chosen){const error=new Error('native_template_coverage_capacity: no readable unaccepted page can use original template page '+(sourceIndex+1)+' at the frozen font/page budget');error.code='capacity_invalid';error.outlineContract=true;throw error;}
@@ -672,7 +680,7 @@ export function restoreNativeTemplateCoverage(project,scoreSlide){
 
 /** Rebind only the native page assignment after the outline is known. The
  * existing outline/content DAG and original template remain unchanged. */
-export function rescheduleTemplateFidelity(project,{scoreSlide}={}) {
+export function rescheduleTemplateFidelity(project,{scoreSlide,allowOverflowCandidate=false}={}) {
   const fidelity = project.templateFidelity;
   if (fidelity?.mode !== 'preserve') return project;
   const sourceSlides = fidelity.sourceCatalog ? structuredClone(fidelity.sourceCatalog) : Array.from({ length: fidelity.originalSlideCount }, (_, sourceIndex) => {
@@ -719,7 +727,7 @@ export function rescheduleTemplateFidelity(project,{scoreSlide}={}) {
     project.templateFidelity=best;
     if(best!==prior)capacityAssignments.push({page:index+1,fromSource:prior.slideMap[index],toSource:best.slideMap[index],beforeOverflowEMU:before,afterOverflowEMU:bestScore,adjacentSourceReuse:best.slideMap[index]===best.slideMap[index-1]||best.slideMap[index]===best.slideMap[index+1],basis:'measured native body at unchanged font; physical fit before layout variety'});
   }
-  if(scoreSlide)restoreNativeTemplateCoverage(project,scoreSlide);
+  if(scoreSlide)restoreNativeTemplateCoverage(project,scoreSlide,{allowOverflowCandidate});
   if(scoreSlide)balanceTemplateMedia(project,scoreSlide,{sourceSlides,profiles,externalPptx,sha256:fidelity.sha256,capacityAssignments});
   if(capacityAssignments.length)project.templateFidelity.capacityAssignments=capacityAssignments;
   return project;
@@ -836,17 +844,40 @@ const slotCapacity = (slot, slide) => slot.role === 'section' && slide.sectionLa
  * writer. A body fit cannot authorize an oversized frozen title. */
 export function inspectNativeOutlineTitles(project, outline = project.outline || []) {
   if (project.templateFidelity?.mode !== 'preserve') return [];
-  return outline.flatMap((slide, pageIndex) => {
+  const conflicts = outline.flatMap((slide, pageIndex) => {
     const source=project.templateFidelity.slides[pageIndex] || { nodes: [] };
     return effectiveSlots({...source,nodes:source.nodes||[],slots:source.slots||slotsFor(source)})
     .filter(slot => slot.role === 'title' && visualUnits(slide.title) > slotCapacity(slot, slide))
     .map(slot => ({ code: 'planned_native_title_overflow', severity: 'error', pageIndex, field: 'title',
       maxLength: 160, reason: 'native_title_capacity', capacityVisualUnits: slotCapacity(slot, slide),
       requiredLanguages: !(pageIndex===0&&nativeCoverTitleHierarchy(project))&&project.generationPolicy?.language?.mode==='source'&&/[A-Za-z]{2}/u.test(slide.title)&&/[\u3400-\u9fff]/u.test(slide.title)?['English','Chinese']:undefined,
-      ...(pageIndex===0&&nativeCoverTitleHierarchy(project)?{titleHierarchy:'short headline + complete original source title in a visible measured subtitle; the combined title block retains all source languages'}:{}),
+      ...(pageIndex===0&&nativeCoverTitleHierarchy(project)?{titleHierarchy:project.generationPolicy?.language?.mode==='output'?'short headline + complete independently audited source-title translation in the requested output language, in a visible measured subtitle; original title remains in notes':'short headline + complete original source title in a visible measured subtitle; the combined title block retains all source languages'}:{}),
       usedVisualUnits: visualUnits(slide.title), shapeId: slot.shapeId, fontSizePt: slot.fontSizePt,
       message: `Page ${pageIndex + 1} title exceeds its unchanged native ${slot.fontSizePt}pt slot (${slotCapacity(slot, slide)} visual units). Shorten the topic label BEFORE confirmation; preserve original full document title in the measured cover subtitle and all facts in source/notes.` }));
   });
+  // Resume the already confirmed plan verbatim. A new identity rule cannot
+  // retroactively invalidate its metadata or force a second confirmation.
+  // Physical title capacity checks above still apply on resume.
+  if (project.confirmedOutline) return conflicts;
+  // Capacity partitions need distinct visible identities too. Do this before
+  // confirmation; writers must never rename a frozen, user-approved outline.
+  // A user-locked title is intentional and stays unchanged.
+  const seen = new Map();
+  outline.forEach((slide, pageIndex) => {
+    if (!pageIndex || ['cover', 'navigation', 'section'].includes(slide.role)) return;
+    const key = String(slide.title || '').normalize('NFKC').toLowerCase().replace(/\s+/gu, ' ').trim();
+    if (!key) return;
+    const prior = seen.get(key);
+    if (prior === undefined) { seen.set(key, pageIndex); return; }
+    if (slide.titleLocked || slide.title_locked) return;
+    const message = `Page ${pageIndex + 1} repeats the visible title of page ${prior + 1}. Name its own source-supported incremental message, or an explicit table continuation with its actual row labels. Preserve bilingual title languages; do not invent facts or change source owners, page count or selection.`;
+    const existing = conflicts.find(c => c.pageIndex === pageIndex && c.field === 'title');
+    if (existing) { existing.message += ' ' + message; existing.duplicatesPageIndex = prior; }
+    else conflicts.push({ code: 'planned_title_identity_duplicate', severity: 'error', pageIndex, field: 'title', maxLength: 160,
+      reason: 'duplicate_visible_title_before_confirmation', duplicatesPageIndex: prior, message,
+      requiredLanguages: project.generationPolicy?.language?.mode === 'source' && /[A-Za-z]{2}/u.test(slide.title) && /[\u3400-\u9fff]/u.test(slide.title) ? ['English', 'Chinese'] : undefined });
+  });
+  return conflicts;
 }
 export function inspectNativeCoverTitle(project,outline=project.outline||[]) {
   if(!nativeCoverTitleHierarchy(project)||!outline.length)return [];

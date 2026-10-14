@@ -67,7 +67,20 @@ assert.ok(preserved.boxes.every((b, i, all) => !i || b.x > all[i - 1].x || b.y >
 const long = Array.from({ length: 6 }, (_, i) => para(`Paragraph ${i}: `.padEnd(420, 'complete source sentence ')));
 const longBase = fitComponents(long, project, 1);
 if (longBase.capacity_ok) {const fitted=mediaPreservingFit(project,1,long,longBase);if(fitted){assert.ok(fitted.capacity_ok);assert.equal(fitted.boxes.length,long.length);assert.equal(fitted.fontSizePt,longBase.fontSizePt);}}
-assert.equal(mediaPreservingFit(project, 1, [{ type: 'table', content: { rows: [['a'], ['b']] } }], { ...base }), null, 'tables keep the full-width rebuild');
+// A table may now retain artwork when every cell fits beside it. Verify the
+// semantic and geometry contract rather than the former table-type exclusion.
+const tableComponents = [{ type: 'table', content: { rows: [['a'], ['b']] } }];
+const tableBefore = structuredClone(tableComponents);
+const tableBase = fitComponents(tableComponents, project, 1);
+const tableFit = mediaPreservingFit(project, 1, tableComponents, tableBase);
+assert.ok(tableFit?.capacity_ok, 'a small complete table fits beside retained artwork');
+assert.deepEqual(tableComponents, tableBefore, 'media adaptation preserves every table cell');
+assert.equal(tableFit.fontSizePt, tableBase.fontSizePt, 'media adaptation preserves the font floor');
+assert.equal(tableFit.boxes.length, tableComponents.length);
+for (const b of tableFit.boxes) for (const node of project.templateFidelity.slides[1].nodes.filter(n => tableFit.keptMediaShapeIds.includes(n.nativeRef?.shapeId))) {
+  const g = node.geometry;
+  assert.ok(b.x >= g.x + g.width || b.x + b.width <= g.x || b.y >= g.y + g.height || b.y + b.height <= g.y, 'table cells never overlap retained artwork');
+}
 
 // MD-P1-4: card-set icons are re-anchored in a gutter left of the first boxes.
 const iconPage = (() => { const page = cardPage(); page.nodes = page.nodes.filter(n => n.type !== 'image');

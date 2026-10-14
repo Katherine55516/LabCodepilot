@@ -109,7 +109,7 @@ export function bindSourceArtifacts(project, slide, refs, index, commentary = []
   let chosen=mediaPreservingFit(project,index,components,fit)||fit;
   for(const id of chosen.keptMediaShapeIds||[])keep.add(id);
   const anchored=chosen.componentInstances?null:anchorCardIcons(project,index,components,chosen,cardSetIcon);
-  if(anchored){chosen=anchored.fit;for(const icon of anchored.icons){keep.add(icon.shapeId);movedIcons.push(icon);}}
+  if(anchored){chosen=anchored.fit;for(const icon of anchored.icons){keep.add(icon.shapeId);for(const carrier of icon.carriers||[])keep.add(carrier.shapeId);movedIcons.push(icon);}}
   const primaryComponents=Boolean(chosen.componentInstances?.length);
   chosen=supplementaryNativeMedia(project,index,chosen);
   for(const id of chosen.keptMediaShapeIds||[])keep.add(id);
@@ -153,6 +153,10 @@ export function bindSourceArtifacts(project, slide, refs, index, commentary = []
     slide.templateAdaptations=[...(slide.templateAdaptations||[]).filter(item=>item.shapeId!==asset.shapeId),{shapeId:asset.shapeId,action:'scaled_artwork_rail',geometry:asset.geometry,originalGeometry:asset.originalGeometry,scale:asset.scale,basis:'same image bytes; contain aspect ratio; measured source fit and unchanged font'}];
   }
   for(const icon of movedIcons){
+    for(const carrier of icon.carriers||[]){
+      const live=(slide.nodes||[]).find(node=>node.nativeRef?.shapeId===carrier.shapeId);if(live)live.geometry={...carrier.geometry};
+      slide.templateAdaptations=[...(slide.templateAdaptations||[]).filter(a=>a.shapeId!==carrier.shapeId),{shapeId:carrier.shapeId,action:'reanchored_table_row_icon_carrier',geometry:carrier.geometry,rowBinding:icon.rowBinding,scale:icon.badgeScale,basis:'Original badge/carrier and icon move with one uniform scale; original colour and image identity retained'}];
+    }
     const live=(slide.nodes||[]).find(node=>node.nativeRef?.shapeId===icon.shapeId);
     if(live)live.geometry={...icon.geometry};
     slide.templateAdaptations=[...(slide.templateAdaptations||[]).filter(a=>a.shapeId!==icon.shapeId),{shapeId:icon.shapeId,action:icon.rowBinding?'reanchored_table_row_icon':'reanchored_card_icon',geometry:icon.geometry,...(icon.rowBinding?{rowBinding:icon.rowBinding}:{})}];

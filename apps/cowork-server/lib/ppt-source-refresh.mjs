@@ -2,8 +2,9 @@ import crypto from 'node:crypto';
 import {normalizePaste} from './ppt-source.mjs';
 import {applyPresentationPolicy} from './ppt-presentation-policy.mjs';
 import {compileContentSelection,selectionSource} from './ppt-content-selection.mjs';
+import {sourceRichText} from './ppt-rich-text.mjs';
 const hash=value=>crypto.createHash('sha256').update(JSON.stringify(value)).digest('hex');
-const content=item=>({type:item.type,text:item.text,rows:item.rows,diagramSource:item.diagramSource});
+const content=item=>({type:item.type,text:item.text,rows:item.rows,diagramSource:item.diagramSource,languagePairId:item.languagePairId,languageRole:item.languageRole,must_preserve_structure:item.must_preserve_structure});
 const reject=message=>{throw Object.assign(new Error(message),{statusCode:409});};
 function mapIds(value,ids){
  if(typeof value==='string')return ids.get(value)||value;
@@ -26,7 +27,8 @@ export function refreshDerivedSource(project,assess){
  if(hash(previous.items.map(i=>i.id))!==hash(next.originalSourceInventory.items.map(i=>i.id)))reject('Source IDs changed; reopen scoped source planning.');
  const raw=structuredClone(project.candidateOutline.executionPlan);
  next.contentSelection=compileContentSelection(next,raw);next.source=selectionSource(next,next.contentSelection);
- const changed=next.source.semantic.inventory.items.filter(item=>hash(content(item))!==hash(content(project.source.semantic.inventory.items.find(i=>i.id===item.id)||{}))).map(i=>i.id);
+ const displayChanged=new Set((project.deck?.slides||[]).flatMap(s=>(s.sourceArtifactNodes||[]).filter(n=>n.sourceArtifact&&n.content?.richText?.source&&sourceRichText(n.content.richText.source).plainText!==n.content.richText.plainText).map(n=>n.sourceArtifact.sourceUnitId)));
+ const changed=next.source.semantic.inventory.items.filter(item=>displayChanged.has(item.id)||hash(content(item))!==hash(content(project.source.semantic.inventory.items.find(i=>i.id===item.id)||{}))).map(i=>i.id);
  if(!changed.length)return {project,changedSourceIds:[],affectedSlideIds:[]};
  // Measure the accepted slots. Do not borrow authority to pick other layouts.
  const assessed=assess({...next,nativeTitleRepairSeed:{basis:'derived semantic refresh retains accepted layout and plan'}},raw,{finalRepack:true});

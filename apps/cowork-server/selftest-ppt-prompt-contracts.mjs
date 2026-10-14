@@ -141,7 +141,7 @@ try {
   // Full API workflow with simulated model responses: two critic rounds,
   // then publish. A second run pauses mid-rewrite and discards stale output.
   const uid = 'prompt-contract-test';
-  let criticCalls = 0, writerRepairs = 0, rendered = 0, pauseDuringReview = false, pauseDuringRewrite = false, conflictDuringRewrite = false, neverFix = false, cancelDuringRewrite = false;
+  let criticCalls = 0, writerRepairs = 0, rendered = 0, pauseDuringReview = false, pauseDuringRewrite = false, conflictDuringRewrite = false, neverFix = false, cancelDuringRewrite = false, criticTransportFailure = false;
   const bodies = ['Define exposure from the loading on the systematic return component. Larger loadings imply stronger sensitivity; interpret that sensitivity under the same model assumptions.', 'Compare return spreads under a consistent holding-period convention.',
     'Align each observation with the information available at the decision time.', 'Control for industry membership before evaluating a cross-sectional signal.',
     'Separate the signal definition from the portfolio weighting rule.', 'Evaluate the mechanism after transaction costs under the same assumptions.'];
@@ -155,12 +155,13 @@ try {
     if ((options.nodeKey || '').startsWith('review:deck')) {
       if(pauseDuringReview){const latest=store.get(uid,p.id);latest.runtime.pauseRequested=true;store.save(latest);throw Object.assign(new Error('ppt_cancelled'),{code:'cancelled'});}
       criticCalls++;
-      return { ...scopeReview(p), missing: writerRepairs < 2 || pauseDuringRewrite || conflictDuringRewrite || neverFix || cancelDuringRewrite ? [{ slideIds: ['s1'], detail: 'The mechanism needs its interpretation.', reason: 'shallow', suggestedFix: 'Explain how exposure identifies the systematic return component.' }] : [], repeated: [], conflicts: [], unsupported: [] };
+      return { ...scopeReview(p), missing: writerRepairs < 2 || pauseDuringRewrite || conflictDuringRewrite || neverFix || cancelDuringRewrite || criticTransportFailure ? [{ slideIds: ['s1'], detail: 'The mechanism needs its interpretation.', reason: 'shallow', suggestedFix: 'Explain how exposure identifies the systematic return component.' }] : [], repeated: [], conflicts: [], unsupported: [] };
     }
     const i = Number(prompt.match(/第 (\d+) 页/)?.[1]) - 1;
     if ((options.nodeKey || '').includes(':critic:')) {
       writerRepairs++;
       assert.match(prompt, /<findings>/);
+      if (criticTransportFailure) throw new Error('ppt_timeout');
       if (pauseDuringRewrite) { const latest = store.get(uid, p.id); latest.runtime.pauseRequested = true; store.save(latest); }
       if (conflictDuringRewrite) { const latest = store.get(uid, p.id); latest.editing.epochs.s1 = (latest.editing.epochs.s1 || 0) + 1; store.save(latest); }
       if (cancelDuringRewrite) { const latest = store.get(uid, p.id); latest.status = 'cancelled'; store.save(latest); }
@@ -192,6 +193,17 @@ try {
   assert.equal(finished.dagNodes['content:s1'].criticRound, 2);
   assert.equal(finished.quality.modelReview.missing.length, 0);
   assert.equal(finished.model, 'gpt');
+  criticTransportFailure = true;
+  const timeoutCreated = await create(); await settled(timeoutCreated.body.project.id, ['outline_ready']);
+  await request('POST', `/ppt/projects/${timeoutCreated.body.project.id}/generate`);
+  const timedRepair = await settled(timeoutCreated.body.project.id, ['completed', 'failed', 'quality_blocked']);
+  assert.equal(timedRepair.status, 'quality_blocked', 'optional repair timeout retains the actual unresolved gate rather than losing the whole working deck');
+  assert.equal(Object.values(timedRepair.nodes).filter(n=>n.status==='done').length, 8);
+  assert.ok(timedRepair.quality.modelReview.missing.length, 'timeout must not clear critic findings');
+  assert.ok(timedRepair.runtime.criticRepair.attempts.some(a=>a.rolledBack && a.violations.some(v=>v.code==='ppt_timeout')));
+  assert.ok(!timedRepair.publishedRevision, 'unresolved review remains unpublished');
+  assert.equal(rendered, 1, 'failed optional repair never bypasses export gates');
+  criticTransportFailure = false;
   pauseDuringReview=true;
   const pausedReviewCreated=await create();await settled(pausedReviewCreated.body.project.id,['outline_ready']);
   await request('POST',`/ppt/projects/${pausedReviewCreated.body.project.id}/generate`);

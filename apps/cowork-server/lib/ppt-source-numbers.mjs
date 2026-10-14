@@ -4,6 +4,7 @@
 import { visibleNodes, nodeContentText } from './ppt-visible-content.mjs';
 import { effectiveKnowledge } from './ppt-generation-policy.mjs';
 import { sourceDisplayText } from './ppt-source-text.mjs';
+import {finalDeckNavigation,navigationCommentary} from './ppt-deck-navigation.mjs';
 
 const NUMBER = /(?<![A-Za-z0-9_.])[-−+]?(?:\d+(?:[.,]\d+)*|\.\d+)(?:[eE][-+]?\d+)?(?![A-Za-z0-9_])/gu;
 const STOP = new Set('a an the is are was were be of for at to in on by with from and or as has have it its this that about approximately roughly input output step steps phase page slide million billion thousand metric amount value 指标 数值 万 亿'.split(' '));
@@ -75,8 +76,8 @@ function verifiedStepCounts(project,slide){
   }
   return counts;
 }
-function verifiedHeadingPrefix(project,node) {
-  if (!['section','template-text'].includes(node.semanticRole)) return 0;
+export function verifiedHeadingPrefix(project,node) {
+  if (!['section','template-text','eyebrow'].includes(node.semanticRole)) return 0;
   const text=sourceDisplayText(nodeContentText(node)).trim();
   const heading=text.match(/^(\d+(?:\.\d+)*)(?:[.)、])?\s+(.+)$/u);
   if(!heading||text.length>100||heading[2].length<3)return 0;
@@ -108,6 +109,14 @@ function verifiedPageCounter(node,index,total){
   const match=text.match(/^(?:第\s*(\d+)\s*[頁页]\s*[，,]\s*共\s*(\d+)\s*[頁页]|page\s+(\d+)\s+of\s+(\d+))$/iu);
   return Boolean(match&&Number(match[1]||match[3])===index+1&&Number(match[2]||match[4])===total);
 }
+function verifiedNavigationRanges(project,slide,node){
+ if(node.content?.derivedFrom!=='final-deck-navigation'||project.outline?.find(s=>s.id===slide.id)?.role!=='navigation')return [];
+ const navigation=finalDeckNavigation(project),targets=navigation.entries.flatMap(e=>e.targets);
+ if(JSON.stringify(node.content.navigationTargets)!==JSON.stringify(targets))return [];
+ const text=sourceDisplayText(nodeContentText(node)),expected=navigationCommentary(project,navigation).map(c=>sourceDisplayText(c.text));
+ if(!expected.includes(text))return [];
+ return [...text.matchAll(/(?:第\s*\d+(?:\s*[–-]\s*\d+)?(?:\s*,\s*\d+(?:\s*[–-]\s*\d+)?)*\s*页|p\.\s*\d+(?:\s*[–-]\s*\d+)?(?:\s*,\s*\d+(?:\s*[–-]\s*\d+)?)*)/gu)].map(m=>({start:m.index,end:m.index+m[0].length}));
+}
 export function inspectSourceNumbers(project, slides=project.deck?.slides||[]) {
   if(!project.source?.text&&!project.source?.segments?.length)return [];
   const source=sourceRecords(project);
@@ -119,6 +128,7 @@ export function inspectSourceNumbers(project, slides=project.deck?.slides||[]) {
       failures.push({...record,nodeId:node.id,reason:'dimension_not_supported',unit:'ordered_multiplication'});
     for(const node of visibleNodes(slide))for(const record of (node.type==='table'?tableRecords(node.content?.rows):numericRecords(nodeContentText(node),node.semanticRole))) {
       if(verifiedPageCounter(node,index,slides.length))continue;
+      if(verifiedNavigationRanges(project,slide,node).some(range=>record.offset>=range.start&&record.offset<range.end))continue;
       // Only a verified source chapter prefix or exact source-owned row range
       // is presentation navigation. A numeric-looking role never exempts facts.
       if(record.offset<verifiedHeadingPrefix(project,node))continue;

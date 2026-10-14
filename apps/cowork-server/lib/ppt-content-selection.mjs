@@ -183,11 +183,12 @@ export function selectionSource(project,ledger){
   return {...i,type:'SummaryTableBlock',rows,text:rows.map(r=>r.join(' | ')).join('\n'),title:partial?(i.title||'Table')+' — selected source rows':i.title,must_preserve_structure:true,derivedSummary:{label:partial?label:'',completeComparison:!partial,sourceUnitId:i.id,unitHash:entry.unitHash,sourceCellMap:entry.sourceCellMap,ledgerHash:ledger.hash}};
  }
  const listKind=i.diagramSource?null:sourcePointListKind(i);
+ const exactMain=project.generationPolicy?.knowledge==='source_only'&&entry?.destination==='slides';
  // A selected member of a source-language pair needs a real visible witness,
  // just like the paired summary. A planner claim ID alone is not rendered copy.
  const pairBound=project.generationPolicy?.language?.mode==='source'&&i.languagePairId&&entry?.destination==='slides';
  const visibleItem=pairBound?{...i,must_preserve_structure:true,sourceLanguageBinding:{languagePairId:i.languagePairId,ledgerHash:ledger.hash,basis:'selected_source_language_member'}}:i;
- return moved.has(i.id)?{...i,presentation:'notes_by_contract',presentationBasis:ledger.hash,must_preserve_structure:false,priority:'normal'}:listKind?{...visibleItem,type:listKind,must_preserve_structure:true,sourceListTyping:{originalType:i.type,basis:'explicit_source_list'}}:visibleItem;}),relationships:original.relationships.filter(r=>!r.unitIds.some(id=>{const e=ledger.entries.find(e=>e.sourceUnitId===id);return e?.destination==='notes'&&!e.visibleEquivalentSourceUnitId;})).map(r=>({...r,unitIds:[...new Set(r.unitIds.map(id=>ledger.entries.find(e=>e.sourceUnitId===id)?.visibleEquivalentSourceUnitId||id))]}))}}};
+ return moved.has(i.id)?{...i,presentation:'notes_by_contract',presentationBasis:ledger.hash,must_preserve_structure:false,priority:'normal'}:listKind?{...visibleItem,type:listKind,must_preserve_structure:true,sourceListTyping:{originalType:i.type,basis:'explicit_source_list'}}:exactMain?{...visibleItem,must_preserve_structure:true,selectedSourceBinding:{basis:'source_only slides disposition binds the complete selected unit; summaries require their separate audited contract',ledgerHash:ledger.hash}}:visibleItem;}),relationships:original.relationships.filter(r=>!r.unitIds.some(id=>{const e=ledger.entries.find(e=>e.sourceUnitId===id);return e?.destination==='notes'&&!e.visibleEquivalentSourceUnitId;})).map(r=>({...r,unitIds:[...new Set(r.unitIds.map(id=>ledger.entries.find(e=>e.sourceUnitId===id)?.visibleEquivalentSourceUnitId||id))]}))}}};
 }
 export function selectionNotes(project){
  const ledger=project.contentSelection;if(!ledger)return [];

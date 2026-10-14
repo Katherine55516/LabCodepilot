@@ -228,7 +228,7 @@ export function fitComponents(components, project = {}, index = 1, options = {})
       const left=languages[pairs[0][0]],boxes=[],measurements=[];let y=canvas.y;
       for(const row of rows){
         if(row.length===2){
-          const placed=row.map(i=>{const col=languages[i]===left?0:1,box={x:Math.round(canvas.x+col*(width+gap)),y:Math.round(y),width:Math.round(width),height:canvas.height};const m=measureComponent(components[i],box,fontSizePt);box.height=m.height;return [i,box,m];});
+          const placed=row.map((i,col)=>{const box={x:Math.round(canvas.x+col*(width+gap)),y:Math.round(y),width:Math.round(width),height:canvas.height};const m=measureComponent(components[i],box,fontSizePt);box.height=m.height;return [i,box,m];});
           for(const [i,box,m] of placed){boxes[i]=box;measurements[i]=m;}
           y+=Math.max(...placed.map(([, box])=>box.height))+gap;
         }else{

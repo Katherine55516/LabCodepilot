@@ -7,7 +7,7 @@ import {fitNativeTitleFrames} from './lib/ppt-template-fidelity.mjs';
 assert.equal(normalizeGenerationPolicy(undefined),undefined);
 const defaults=defaultGenerationPolicy('# 深度学习\nDeep Learning\nUse a loss function.');
 // Outline concision (item 3): source languages with one body language by default.
-assert.deepEqual(defaults.language,{mode:'source',body:'primary'});assert.equal(defaults.content,'overview');assert.equal(defaults.knowledge,'source_only');assert.equal(defaults.details,'notes');
+assert.deepEqual(defaults.language,{mode:'source',body:'both'});assert.equal(defaults.content,'overview');assert.equal(defaults.knowledge,'source_only');assert.equal(defaults.details,'notes');
 for(const [request,locale] of [['请用英文生成演示文稿','en'],['输出语言：英文','en'],['Please write the presentation in English','en'],['請用繁體中文（香港）生成簡報','zh-HK'],['请用简体中文生成PPT','zh']])assert.equal(explicitLanguageRequest(request),locale);
 for(const request of ['# English and Chinese methods','> 请用英文生成PPT','```\n请用英文\n```','本文讨论如何使用英文语料训练模型','使用英文语料训练模型','请使用英文语料训练模型'])assert.equal(explicitLanguageRequest(request),undefined);
 const deck={slides:[{id:'slide1'}]};

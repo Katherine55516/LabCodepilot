@@ -172,6 +172,7 @@ export function markLanguagePairs(items) {
   for (let i = 0; i + 1 < items.length; i++) {
     const a = items[i], b = items[i + 1];
     if (a.languagePairId || b.languagePairId || !PAIRABLE.has(a.type) || !PAIRABLE.has(b.type)) continue;
+    if(Boolean(a.diagramSource)!==Boolean(b.diagramSource))continue;
     if ((a.sectionPath || []).join('\0') !== (b.sectionPath || []).join('\0')) continue;
     const sa = sourceScriptOf(a.text), sb = sourceScriptOf(b.text);
     if (!(sa === 'latin' && sb === 'han' || sa === 'han' && sb === 'latin')) continue;

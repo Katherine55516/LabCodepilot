@@ -43,29 +43,30 @@ export function writerLocalRepairScope(value, error, {allOwnedSourceBound=false}
 
 const numbers = text => [...new Set(String(text).match(/[-+]?\d+(?:[.,]\d+)*(?:%|％)?/gu) || [])].sort();
 const mathBody = text => String(text).replace(/\$|\\[()[\]]|\s/gu, '');
+const invalidDelta=message=>Object.assign(Error(message),{code:message==='writer_local_repair_stale'?'stale_edit':'schema_invalid'});
 export function applyWriterLocalDelta(value, scope, delta) {
-  if (digest(value) !== scope?.baseHash) throw Error('writer_local_repair_stale');
-  if (!delta || Object.keys(delta).some(k => k !== 'edits') || !Array.isArray(delta.edits) || !delta.edits.length || delta.edits.length > scope.targets.length) throw Error('writer_local_repair_schema');
+  if (digest(value) !== scope?.baseHash) throw invalidDelta('writer_local_repair_stale');
+  if (!delta || Object.keys(delta).some(k => k !== 'edits') || !Array.isArray(delta.edits) || delta.edits.length > scope.targets.length) throw invalidDelta('writer_local_repair_schema');
   const result = structuredClone(value), used = new Set(), edits = [];
   for (const edit of delta.edits) {
-    if (!edit || Object.keys(edit).some(k => !['path','start','end','before','after'].includes(k))) throw Error('writer_local_repair_schema');
+    if (!edit || Object.keys(edit).some(k => !['path','start','end','before','after'].includes(k))) throw invalidDelta('writer_local_repair_schema');
     const key = JSON.stringify([edit.path, edit.start, edit.end]);
     const target = scope.targets.find(t => JSON.stringify(t.path) === JSON.stringify(edit.path) && t.start === edit.start && t.end === edit.end && t.before === edit.before);
-    if (!target || used.has(key) || typeof edit.after !== 'string' || edit.after.length > 5000) throw Error('writer_local_repair_outside_scope');
+    if (!target || used.has(key) || typeof edit.after !== 'string' || edit.after.length > 5000) throw invalidDelta('writer_local_repair_outside_scope');
     used.add(key);
-    if (target.kind === 'identifier' && !/^[A-Za-z0-9_-]{1,40}$/.test(edit.after)) throw Error('writer_local_repair_invalid_id');
-    if (target.kind !== 'identifier' && !(target.kind==='commentary'&&scope.optionalCommentaryCanOmit&&edit.after===''||target.kind==='title'&&scope.titleMayOmitBoundNumbers&&numbers(edit.after).every(n=>numbers(edit.before).includes(n))) && JSON.stringify(numbers(edit.before)) !== JSON.stringify(numbers(edit.after))) throw Error('writer_local_repair_numeric_change');
+    if (target.kind === 'identifier' && !/^[A-Za-z0-9_-]{1,40}$/.test(edit.after)) throw invalidDelta('writer_local_repair_invalid_id');
+    if (target.kind !== 'identifier' && !(target.kind==='commentary'&&scope.optionalCommentaryCanOmit&&edit.after===''||target.kind==='title'&&scope.titleMayOmitBoundNumbers&&numbers(edit.after).every(n=>numbers(edit.before).includes(n))) && JSON.stringify(numbers(edit.before)) !== JSON.stringify(numbers(edit.after))) throw invalidDelta('writer_local_repair_numeric_change');
     // A syntax-only formula repair cannot silently change variables/operators.
-    if (target.kind === 'math' && mathBody(edit.before) !== mathBody(edit.after)) throw Error('writer_local_repair_formula_change');
+    if (target.kind === 'math' && mathBody(edit.before) !== mathBody(edit.after)) throw invalidDelta('writer_local_repair_formula_change');
     let parent = result;
     for (const part of edit.path.slice(0, -1)) {
-      if (['__proto__','constructor','prototype'].includes(String(part)) || !Object.hasOwn(parent, part)) throw Error('writer_local_repair_path');
+      if (['__proto__','constructor','prototype'].includes(String(part)) || !Object.hasOwn(parent, part)) throw invalidDelta('writer_local_repair_path');
       parent = parent[part];
     }
     const leaf = edit.path.at(-1), current = parent[leaf];
-    if (typeof current !== 'string' || current.slice(edit.start, edit.end) !== edit.before) throw Error('writer_local_repair_stale');
+    if (typeof current !== 'string' || current.slice(edit.start, edit.end) !== edit.before) throw invalidDelta('writer_local_repair_stale');
     parent[leaf] = current.slice(0, edit.start) + edit.after + current.slice(edit.end);
-    if (target.kind === 'math' && sourceRichText(parent[leaf]).diagnostics.length) throw Error('writer_local_repair_math_unresolved');
+    if (target.kind === 'math' && sourceRichText(parent[leaf]).diagnostics.length) throw invalidDelta('writer_local_repair_math_unresolved');
     edits.push({ path: edit.path, start: edit.start, end: edit.end, kind: target.kind });
   }
   return { value: result, audit: { baseHash: scope.baseHash, afterHash: digest(result), edits, unchangedOutsideTargets: true } };

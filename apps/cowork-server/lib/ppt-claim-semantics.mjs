@@ -26,11 +26,22 @@ export function claimSemanticsChecklist(project){
 }
 
 import {digest} from './ppt/edit-context.mjs';
+/** Primary ownership governs coverage/repetition. A necessary explanation may
+ * use complete prose retained in notes from the SAME semantic chunk, without
+ * acquiring another page's primary source ownership or structural coverage. */
+export function claimSupportSourceIds(project,owned){
+ if(project.generationPolicy?.content!=='overview'||project.generationPolicy?.details!=='notes'||project.generationPolicy?.knowledge!=='source_only'||project.requestedOutline||project.contentSelection?.sourceHash!==project.source?.sha256)return [];
+ const items=project.source?.semantic?.inventory?.items||[],chunks=new Set(items.filter(i=>owned.includes(i.id)).flatMap(i=>i.chunkRefs||[]));
+ return items.filter(i=>!owned.includes(i.id)&&i.presentation==='notes_by_contract'&&i.presentationBasis===project.contentSelection.hash&&!i.rows&&!i.diagramSource&&!['CodeBlock','EquationBlock','SourceImage'].includes(i.type)&&project.contentSelection.entries.some(e=>e.sourceUnitId===i.id&&e.destination==='notes')&&i.chunkRefs?.some(id=>chunks.has(id))).map(i=>i.id);
+}
 export function claimAuditRegistry(project){
- const checklist=claimSemanticsChecklist(project),entries=checklist.claims.filter(c=>c.text.trim()).map(c=>({...c,id:'claim-'+digest([c.slideId,c.nodeId,c.text,c.ownedSourceUnitIds]).slice(0,24),textHash:digest(c.text),writerClaimId:c.claimId,claimId:'claim-'+digest([c.slideId,c.nodeId,c.text,c.ownedSourceUnitIds]).slice(0,24)}));
+ const checklist=claimSemanticsChecklist(project),entries=checklist.claims.filter(c=>c.text.trim()).map(c=>{
+  const supportSourceUnitIds=claimSupportSourceIds(project,c.ownedSourceUnitIds),basis=[c.slideId,c.nodeId,c.text,c.ownedSourceUnitIds],id='claim-'+digest(supportSourceUnitIds.length?[...basis,supportSourceUnitIds]:basis).slice(0,24);
+  return {...c,...(supportSourceUnitIds.length?{supportSourceUnitIds,permittedEvidenceSourceUnitIds:[...c.ownedSourceUnitIds,...supportSourceUnitIds]}:{}),id,textHash:digest(c.text),writerClaimId:c.claimId,claimId:id};
+ });
  const selected=project.reviewScope?.claimIds;
  const scopedEntries=Array.isArray(selected)?entries.filter(entry=>selected.includes(entry.id)):entries;
- const items=project.originalSourceInventory?.items||project.source?.semantic?.inventory?.items||[],ids=new Set(scopedEntries.flatMap(e=>e.ownedSourceUnitIds));
+ const items=project.originalSourceInventory?.items||project.source?.semantic?.inventory?.items||[],ids=new Set(scopedEntries.flatMap(e=>e.permittedEvidenceSourceUnitIds||e.ownedSourceUnitIds));
  const sourceQuotes=items.filter(i=>ids.has(i.id)).map(i=>({sourceUnitId:i.id,quoteId:'source-quote-'+digest([i.id,i.text]).slice(0,24),rawHash:digest(i.text),characters:String(i.text||'').length,preview:String(i.text||'').slice(0,180)}));
  if(!items.length)sourceQuotes.push({sourceUnitId:'user_prompt',quoteId:'source-quote-'+digest(['user_prompt',project.userRequirements||project.prompt||'']).slice(0,24)});
  return {version:2,registryHash:digest(scopedEntries),slideIds:(project.deck?.slides||[]).map(s=>s.id),entries:scopedEntries,sourceQuotes,codeScopes:checklist.codeScopes};
@@ -44,14 +55,15 @@ export function normalizeClaimAudit(value,project){
   const entry=registry.entries.find(e=>e.id===check.claimId);
   if(!entry||seen.has(entry.id)||!['entailed','unsupported','contradicted','redundant','not_evaluated'].includes(check.status))fail('unknown, duplicate or invalid check '+String(check.claimId)+'; expected '+JSON.stringify(registry.entries.map(e=>e.id)));seen.add(entry.id);
   if(check.textHash!==entry.textHash||typeof check.reason!=='string'||!check.reason.trim())fail('current text hash and reason required');
+  const permitted=entry.permittedEvidenceSourceUnitIds||entry.ownedSourceUnitIds;
   const supplied=check.sourceEvidence||[];
   if(!Array.isArray(supplied))fail('sourceEvidence must be an array');
   const evidence=supplied.map(e=>{if(!e.quoteId)return e;const q=registry.sourceQuotes.find(q=>q.quoteId===e.quoteId&&q.sourceUnitId===e.sourceUnitId);if(!q)fail('source quote is stale or belongs to another source');const excerpt=e.sourceUnitId==='user_prompt'?String(project.userRequirements||project.prompt||''):String(items.find(i=>i.id===e.sourceUnitId)?.text||'');if(e.excerpt!==undefined&&e.excerpt!==excerpt)fail('source quote conflicts with a literal excerpt');return {...e,excerpt};});
   for(const e of evidence){
    const item=items.find(i=>i.id===e.sourceUnitId),text=e.sourceUnitId==='user_prompt'&&!items.length?String(project.userRequirements||project.prompt||''):String(item?.text||'');
-   if(!text||typeof e.excerpt!=='string'||!e.excerpt.trim()||!text.includes(e.excerpt)||item&&!entry.ownedSourceUnitIds.includes(item.id))fail('evidence is not an exact owned source span: '+JSON.stringify({claimId:entry.id,sourceUnitId:e.sourceUnitId,allowedSourceUnitIds:entry.ownedSourceUnitIds,allowedQuotes:registry.sourceQuotes.filter(q=>entry.ownedSourceUnitIds.includes(q.sourceUnitId)).map(q=>({sourceUnitId:q.sourceUnitId,quoteId:q.quoteId})),hint:'Use a current owned sourceUnitId+quoteId without literal excerpt. Unsupported/contradicted claims may use empty evidence; do not borrow another page source.'}));
+   if(!text||typeof e.excerpt!=='string'||!e.excerpt.trim()||!text.includes(e.excerpt)||item&&!permitted.includes(item.id))fail('evidence is not an exact owned source span or permitted same-chunk note: '+JSON.stringify({claimId:entry.id,sourceUnitId:e.sourceUnitId,allowedSourceUnitIds:permitted,allowedQuotes:registry.sourceQuotes.filter(q=>permitted.includes(q.sourceUnitId)).map(q=>({sourceUnitId:q.sourceUnitId,quoteId:q.quoteId})),hint:'Use a current primary or same-chunk retained-note sourceUnitId+quoteId without literal excerpt. Unsupported/contradicted claims may use empty evidence; do not borrow another page primary source.'}));
   }
-  if(['entailed','redundant'].includes(check.status)&&!evidence.length)fail('entailed/redundant requires actual owned source evidence: '+JSON.stringify({claimId:entry.id,allowedQuotes:registry.sourceQuotes.filter(q=>entry.ownedSourceUnitIds.includes(q.sourceUnitId)),hint:'Use one current sourceUnitId+quoteId for each supported claim. If no source entails it, return unsupported; do not certify an empty evidence array.'}));
+  if(['entailed','redundant'].includes(check.status)&&!evidence.length)fail('entailed/redundant requires actual owned source evidence: '+JSON.stringify({claimId:entry.id,allowedQuotes:registry.sourceQuotes.filter(q=>permitted.includes(q.sourceUnitId)),hint:'Use one current sourceUnitId+quoteId for each supported claim. If no source entails it, return unsupported; do not certify an empty evidence array.'}));
   return {claimId:entry.id,slideId:entry.slideId,nodeId:entry.nodeId,textHash:entry.textHash,status:check.status,reason:check.reason.slice(0,1000),sourceEvidence:evidence};
  });
  return {version:2,registryHash:registry.registryHash,status:value.status,checks};

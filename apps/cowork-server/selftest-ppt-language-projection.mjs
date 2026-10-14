@@ -15,3 +15,18 @@ await prepareLanguageProjection(project,()=>{throw Error('cache must avoid a new
 const raw={version:2,selection:[{sourceUnitId:'t',destination:'slides',reason:'Main'},{sourceUnitId:'e',destination:'slides',reason:'Formula'},{sourceUnitId:'c',destination:'notes',reason:'Code original notes'}],slides:[{sourceUnitIds:[]},{sourceUnitIds:['t','e']},{sourceUnitIds:[]}]};const ledger=compileContentSelection(project,raw);project.contentSelection=ledger;const source=selectionSource(project,ledger);assert.equal(source.text,rawOriginal.text);assert.equal(source.semantic.inventory.items[0].rows[1][0],'Do not trade');assert.equal(selectionNotes(project)[0].text,'print("原文")');
 const changed=structuredClone(project);changed.originalSourceInventory.items[0].rows[1][1]='6%';assert.throws(()=>projectedSourceItem(changed,changed.originalSourceInventory.items[0]));const unaudited=structuredClone(project);unaudited.languageProjection.groups[0].audit.status='pending';assert.throws(()=>projectedSourceItem(unaudited,unaudited.originalSourceInventory.items[0]));
 console.log('PASS: explicit language projection translates complete editable lines/cells, retains original source/code/notes, enforces quantity/math/shape and independent equivalence/language audit, rejects stale/unaudited projections and reuses only exact accepted caches');
+// English-only source titles also obey explicit target-language output.
+{
+ const {displayedDocumentTitle,inspectCoverTitle}=await import('./lib/ppt-deck-coherence.mjs');
+ const titleProject={generationPolicy:{...defaultGenerationPolicy(),language:{mode:'output',locale:'zh'}},source:{text:'# Tutorial 13 — Deep Learning for Quantitative Finance',semantic:{inventory:{items:[],relationships:[]}}}};
+ assert.equal(displayedDocumentTitle(titleProject),null);
+ assert.equal(inspectCoverTitle(titleProject,[{id:'cover',title:'量化深度学习',nodes:[]}])[0].code,'cover_title_projection_missing');
+ const sourceBefore=structuredClone(titleProject.source);
+ await prepareLanguageProjection(titleProject,async prompt=>prompt.includes('JSON Language Audit')?{version:1,checks:[{key:'document-title/line/0',equivalent:true,targetLanguage:true,reason:'Preserves tutorial number, method and financial scope.'}]}:{version:1,translations:[{key:'document-title/line/0',text:'教程 13 — 深度学习在量化金融中的应用'}]},async()=>{});
+ assert.deepEqual(titleProject.source,sourceBefore);
+ assert.deepEqual(displayedDocumentTitle(titleProject).variants.map(v=>v.text),['教程 13 — 深度学习在量化金融中的应用']);
+ assert.equal(inspectCoverTitle(titleProject,[{id:'cover',title:'深度学习在量化金融中的应用',nodes:[]}]).length,0);
+ const stale=structuredClone(titleProject);stale.source.text='# Tutorial 14 — Deep Learning for Quantitative Finance';assert.equal(displayedDocumentTitle(stale),null);
+ const unverified=structuredClone(titleProject);unverified.languageProjection.groups[0].audit.status='pending';assert.equal(displayedDocumentTitle(unverified),null);
+ const group=languageProjectionGroups({...titleProject,languageProjection:undefined})[0];assert.throws(()=>validateLanguageProjection(group,{version:1,translations:[{key:'document-title/line/0',text:'教程 14 — 深度学习在量化金融中的应用'}]}));
+}

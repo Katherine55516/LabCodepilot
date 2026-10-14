@@ -2,6 +2,8 @@ import {claimAuditRegistry} from './ppt-claim-semantics.mjs';
 import {obligationRegistry} from './ppt-obligations.mjs';
 import {inspectObjectIntegrity} from './ppt-object-integrity.mjs';
 import {inputFramework} from './ppt-input-scope.mjs';
+import {visibleNodes,nodeContentText}from './ppt-visible-content.mjs';
+import {visibleEvidenceQuoteId}from './ppt-obligations.mjs';
 /** Internal read-only audit views. Full source authority is retained in every
  * view; only disjoint visible pages and obligation IDs are partitioned. */
 export function reviewBatches(project){
@@ -11,7 +13,14 @@ export function reviewBatches(project){
  const assignments=new Map(groups.map((_,index)=>[index,[]])),orphan=[];
  for(const entry of registry.entries){const owners=groups.map((g,i)=>g.some(s=>entry.slideIds.includes(s.id))?i:-1).filter(i=>i>=0);const at=owners.length===1?owners[0]:-1;if(at<0)orphan.push(entry.id);else assignments.get(at).push(entry.id);}
  const fullObjectCoverage=inspectObjectIntegrity(project).ledger.objects;
- const scoped=(part,ids,mode)=>({...project,reviewScope:{obligationIds:ids,mode,fullObjectCoverage,...(mode==='global'?{claimIds:[],claimBasis:'Every visible claim is checked exactly once in its page batch; final composition revalidates the complete unscoped claim registry. Global view still checks cross-page narrative, repetition, conflicts and orphan obligations.'}:{})},deck:{...project.deck,slides:part},planning:{...project.planning,slidePlan:(project.planning?.slidePlan||[]).filter(p=>part.some(s=>s.id===p.slideId))}});
+ const inventory=project.source?.semantic?.inventory?.items||[];
+ const chunksOf=slide=>new Set(inventory.filter(item=>(project.outline?.find(o=>o.id===slide.id)?.sourceUnitIds||[]).includes(item.id)).flatMap(item=>item.chunkRefs||[]));
+ const fullSourceInstances=slides.flatMap((slide,index)=>visibleNodes(slide).filter(n=>n.sourceArtifact).map(n=>({slideId:slide.id,page:index+1,nodeId:n.id,quoteId:visibleEvidenceQuoteId(slide.id,n),...n.sourceArtifact,text:nodeContentText(n),...(n.type==='table'?{rows:n.content.rows,displayedDataRowCount:Math.max(0,(n.content.rows?.length||0)-1)}:{})})));
+ const scoped=(part,ids,mode)=>{
+  const chunkIds=new Set(part.flatMap(s=>[...chunksOf(s)])),partIds=new Set(part.map(s=>s.id));
+  const companionInstances=slides.filter(s=>!partIds.has(s.id)&&[...chunksOf(s)].some(id=>chunkIds.has(id))).flatMap(s=>visibleNodes(s).filter(n=>nodeContentText(n)).map(n=>({slideId:s.id,nodeId:n.id,text:nodeContentText(n),sourceArtifact:n.sourceArtifact,derivedFrom:n.content?.derivedFrom,basis:'Actual visible same-chunk continuation; generated explanations still receive their own claim audit in their page batch'})));
+  return {...project,reviewScope:{obligationIds:ids,mode,fullObjectCoverage,fullSourceInstances,companionInstances,...(mode==='global'?{claimIds:[],claimBasis:'Every visible claim is checked exactly once in its page batch; final composition revalidates the complete unscoped claim registry. Global view still checks cross-page narrative, repetition, conflicts and orphan obligations.'}:{})},deck:{...project.deck,slides:part},planning:{...project.planning,slidePlan:(project.planning?.slidePlan||[]).filter(p=>part.some(s=>s.id===p.slideId))}};
+ };
  const batches=groups.map((part,index)=>({index,project:scoped(part,assignments.get(index),'pages')}));
  // Orphan obligations and cross-page narrative/repetition get the complete
  // visible deck. The global view removes duplicate metadata, never text/cells.

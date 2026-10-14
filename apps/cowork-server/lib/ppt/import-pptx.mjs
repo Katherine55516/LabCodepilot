@@ -282,10 +282,14 @@ def add_source_artifact(slide, node):
         if c.get('mathMl'):frame.margin_left=frame.margin_right=frame.margin_top=frame.margin_bottom=0
         values=[] if c.get('mathMl') and write_office_math(frame.paragraphs[0],c,pt,style.get('color','#111111')) else [item['text'] for item in c.get('items',[])] if node['type'] in ('list','timeline') else [paragraph['text'] for paragraph in (node.get('textLayout') or {}).get('paragraphs',[])] if (node.get('textLayout') or {}).get('paragraphs') else str(c.get('text','')).split('\n')
         for i,value in enumerate(values):
-            p=frame.paragraphs[0] if i==0 else frame.add_paragraph(); p.text=(str(i+1)+'. ' if node['type']=='timeline' else '• ' if node['type']=='list' else '')+str(value); p.line_spacing=float(style.get('lineHeight',1.18)); p.space_after=Pt(pt*float(style.get('paragraphSpacingEm',.4 if node['type'] in ('list','timeline') else 0)))
+            prefix=(('' if re.match(r'^\s*[0-9]+[.)]\s',str(value)) else str(i+1)+'. ') if node['type']=='timeline' else '• ' if node['type']=='list' else '')
+            specs=(node.get('textLayout') or {}).get('paragraphs') or []
+            expected=specs[i]['text'] if i<len(specs) else prefix+str(value)
+            if str(value) and expected.endswith(str(value)):prefix=expected[:-len(str(value))]
+            p=frame.paragraphs[0] if i==0 else frame.add_paragraph(); p.text=expected; p.line_spacing=float(style.get('lineHeight',1.18)); p.space_after=Pt(pt*float(style.get('paragraphSpacingEm',.4 if node['type'] in ('list','timeline') else 0)))
             if c.get('richText'):write_rich_text(p,c['richText'],pt,style.get('color','#333333'),font)
             elif c.get('items') and c['items'][i].get('richText'):
-                rich=dict(c['items'][i]['richText']);prefix=str(i+1)+'. ' if node['type']=='timeline' else '• ' if node['type']=='list' else ''
+                rich=dict(c['items'][i]['richText'])
                 rich['plainText']=prefix+rich['plainText'];rich['runs']=[{'kind':'text','text':prefix}]+rich['runs']
                 write_rich_text(p,rich,pt,style.get('color','#333333'),font)
             if c.get('codeBlock'):

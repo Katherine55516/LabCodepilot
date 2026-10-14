@@ -3,7 +3,7 @@ import { SLIDE_SIZE } from '../render-tree.mjs';
 import { equationContent } from '../../ppt-math.mjs';
 
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
-const lines = element => element.kind === 'text' ? [element.content?.text || ''] : (element.content?.items || []).map((item, index) => element.kind === 'timeline' ? `${index + 1}. ${item.text}` : element.kind === 'list' ? `• ${item.text}` : item.text);
+const lines = element => element.kind === 'text' ? [element.content?.text || ''] : ['timeline','list'].includes(element.kind) ? textContract(element).paragraphs.map(p=>p.text) : (element.content?.items || []).map(item=>item.text);
 const HANT = /[萬與為於後臺國學實體廣應當復雜雙發變這個們體繁臺灣]/;
 
 function richHtml(rich){

@@ -59,10 +59,28 @@ export function applyOutlineMetadataRepair(raw,error,delta){
  if(!conflicts?.length||delta?.version!==2||!Array.isArray(delta.updates)||delta.updates.length!==conflicts.length)throw outlineError('schema_invalid');
  const next=structuredClone(raw);
  for(const update of delta.updates){const key=update.pageIndex+':'+update.field,conflict=conflicts.find(c=>c.pageIndex===update.pageIndex&&c.field===update.field);if(!conflict||seen.has(key)||typeof update.text!=='string'||!update.text.trim()||update.text.length>conflict.maxLength)throw Object.assign(outlineError('schema_invalid'),{details:{pageIndex:update.pageIndex,field:update.field,actualLength:typeof update.text==='string'?update.text.length:null,maxLength:conflict?.maxLength,requiredCorrection:conflict?'Shorten only this non-visible planning metadata; complete source content remains frozen.':'Use each listed pageIndex+field exactly once; no unlisted update.'}});seen.add(key);
-  if(conflict.reason==='native_title_capacity'&&(templateVisualUnits(update.text)>conflict.capacityVisualUnits||(conflict.requiredLanguages?.includes('English')&&!/[A-Za-z]{2}/u.test(update.text))||(conflict.requiredLanguages?.includes('Chinese')&&!/[\u3400-\u9fff]/u.test(update.text))))
-    throw Object.assign(outlineError('schema_invalid'),{details:{rejectedTitle:update.text,pageIndex:update.pageIndex,capacityVisualUnits:conflict.capacityVisualUnits,requiredLanguages:conflict.requiredLanguages},message:'native_title_delta_invalid: obey the exact title capacity AND required languages'});
+  if(update.field==='title'&&((Number.isFinite(conflict.capacityVisualUnits)&&templateVisualUnits(update.text)>conflict.capacityVisualUnits)||(conflict.requiredLanguages?.includes('English')&&!/[A-Za-z]{2}/u.test(update.text))||(conflict.requiredLanguages?.includes('Chinese')&&!/[\u3400-\u9fff]/u.test(update.text))))
+    throw Object.assign(outlineError('schema_invalid'),{details:{rejectedTitle:update.text,pageIndex:update.pageIndex,field:update.field,capacityVisualUnits:conflict.capacityVisualUnits,usedVisualUnits:templateVisualUnits(update.text),requiredLanguages:conflict.requiredLanguages,missingLanguages:(conflict.requiredLanguages||[]).filter(language=>language==='English'?!/[A-Za-z]{2}/u.test(update.text):language==='Chinese'?!/[\u3400-\u9fff]/u.test(update.text):false)},message:'native_title_delta_invalid: obey the exact title capacity AND required languages'});
   next.slides[update.pageIndex][update.field]=update.text.trim();if(update.field==='title'&&conflict.reason==='native_title_capacity')next.slides[update.pageIndex].titleBasis='native_capacity_metadata_repair';}
  return next;
+}
+/** Retain validated metadata fields while retrying only rejected fields. Nothing
+ * is applied to the final candidate until every field passes the same validator. */
+export async function repairOutlineMetadataBatch(project,raw,error,call,{maxAttempts=3}={}){
+ if(!Number.isInteger(maxAttempts)||maxAttempts<1||maxAttempts>3)throw outlineError('schema_invalid');
+ const all=error?.details?.metadataConflicts||[],accepted=new Map();let pending=all,diagnostics=[];
+ for(let attempt=0;attempt<maxAttempts;attempt++){
+  const scoped={details:{metadataConflicts:pending}},base=outlineMetadataRepairPrompt(project,raw,scoped);if(!base)throw outlineError('schema_invalid');
+  const delta=await call(base+(diagnostics.length?'\n<exact_rejected_fields>'+JSON.stringify(diagnostics)+'</exact_rejected_fields>\nRepair ONLY these remaining fields. Validated fields are retained. Include each missing language and fit its actual visual-unit budget.':''),attempt);
+  if(delta?.version!==2||!Array.isArray(delta.updates)||delta.updates.length!==pending.length||new Set(delta.updates.map(u=>u.pageIndex+':'+u.field)).size!==pending.length||delta.updates.some(u=>!pending.some(c=>c.pageIndex===u.pageIndex&&c.field===u.field)))throw outlineError('schema_invalid');
+  const rejected=[];diagnostics=[];
+  for(const conflict of pending){const update=delta.updates.find(u=>u.pageIndex===conflict.pageIndex&&u.field===conflict.field);
+   try{applyOutlineMetadataRepair(raw,{details:{metadataConflicts:[conflict]}},{version:2,updates:[update]});accepted.set(update.pageIndex+':'+update.field,update);}
+   catch(error){if(error.code!=='schema_invalid')throw error;rejected.push(conflict);diagnostics.push(error.details||{pageIndex:conflict.pageIndex,field:conflict.field,error:error.message});}
+  }
+  pending=rejected;if(!pending.length){const result={version:2,updates:all.map(c=>accepted.get(c.pageIndex+':'+c.field))};applyOutlineMetadataRepair(raw,error,result);return result;}
+ }
+ throw Object.assign(outlineError('schema_invalid'),{message:'native_title_delta_invalid: remaining rejected fields after bounded repair',details:{metadataConflicts:pending,rejectedFields:diagnostics,validatedUpdates:[...accepted.values()]}});
 }
 function summaryRepairScopes(project,raw,error){
  const entries=error?.details?.summaryConflicts||[error?.details?.entry||error?.details];
