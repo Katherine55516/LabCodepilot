@@ -30,6 +30,18 @@ try {
     assert.equal(planning.estimatePageRecommendation({ ...base, pages: 10 }).selected, 10);
     checked();
   }
+  // A target-language estimate changes only authorized bilingual prose cost.
+  // Source IDs remain traceable and source-language/full-source costs stay intact.
+  const paired = normalizePaste('# Controls\n\nThe controller compares the recorded signal with the expected result before deciding.\n\n控制器在作出决定之前将记录的信号与预期结果进行比较。');
+  const pairPolicy = {version:1,detail:'balanced',content:'overview',details:'notes',language:{mode:'output',locale:'zh'},knowledge:'source_only',code:{presentation:'omit'}};
+  const bilingual = planning.estimatePageRecommendation({source:paired,generationPolicy:{...pairPolicy,language:{mode:'source'}}});
+  const single = planning.estimatePageRecommendation({source:paired,generationPolicy:pairPolicy});
+  assert.ok(single.contentCost < bilingual.contentCost);
+  assert.deepEqual(new Set(single.groups.flatMap(g=>g.sourceUnitIds)),new Set(bilingual.groups.flatMap(g=>g.sourceUnitIds)));
+  assert.equal(single.assumptions.find(a=>a.topic==='language').decision,'output_language');
+  assert.ok(!single.reason.includes('两种语言都保留'));
+  assert.equal(planning.estimatePageRecommendation({source:paired,generationPolicy:{...pairPolicy,content:'full_source',details:'slides'}}).contentCost,bilingual.contentCost);
+  checked();
   assert.equal(profile.automaticPages({ pageDecision: { ...auto, confirmedAt: '2026-10-06' } }), false);
   assert.equal(profile.automaticPages({ pageDecision: auto, externalPptx: {} }), false);
   assert.equal(profile.automaticPages({ pageDecision: auto, update: {} }), false);
@@ -68,7 +80,7 @@ try {
   const plan = { slidePlan: [{ slideId: 'main', sourceArtifacts: [table, checklist].map(i => ({ sourceUnitId: i.id })) }] };
   const slide = { id: 'main', sourceRefs: table.source_ref, nodes: [] };
   artifacts.bindSourceArtifacts({ ...base, planning: plan }, slide, [table, checklist].map(i => ({ sourceUnitId: i.id })), 1, ['Review the condition before deciding.']);
-  assert.equal(slide.nodes.length, 3); assert.deepEqual(slide.nodes.find(n => n.type === 'table').content.rows, table.rows);
+  assert.equal(slide.nodes.filter(n=>n.type==='list').length,capacity.sourceComponent(checklist).content.items.length); assert.equal(slide.nodes.length, capacity.sourceComponent(checklist).content.items.length+2); assert.deepEqual(slide.nodes.find(n => n.type === 'table').content.rows, table.rows);
   assert.ok(slide.nodes.some(n => n.semanticRole === 'source-explanation'));
   assert.equal(slide.nodes.find(n=>n.type==='table').style.tableHeaderColor,'#ffffff'); checked();
   assert.throws(() => artifacts.bindSourceArtifacts({ ...base, planning: { slidePlan: [{ slideId: 'main', sourceArtifacts: [{ sourceUnitId: table.id, rowStart: 1, rowEnd: 2 }] }] } }, { id: 'main', nodes: [] }, [{ sourceUnitId: table.id }], 1), /differs from page contract/); checked();
@@ -82,8 +94,8 @@ try {
   assert.ok(qr.metrics.densityMergeCandidates.some(m => m.slideIds.join(',') === 'a,b')); checked();
   const uid = 'density-test';
   const deps = { ...api._internals.defaultDeps, extractFile: async () => ({ ...source, kind: 'file' }), modelCall: async (p, prompt) => {
-    assert.match(prompt, /gamma-reference-v1/);
-    if (p.pageDecision.mode === 'auto') { assert.match(prompt, /初步建议，不是最终页数命令/); assert.ok(!prompt.includes(`slides 必须恰好 ${p.pages}`)); }
+    assert.match(prompt, /source-grounded presentation planner/);
+    if (p.pageDecision.mode === 'auto') { assert.match(prompt, /suggested count|页数|pages/i); assert.ok(!prompt.includes(`slides 必须恰好 ${p.pages}`)); }
     return { brief: { presentationUse: 'course_walkthrough' }, ...raw };
   } };
   async function request(method, route, data) {
@@ -160,7 +172,7 @@ try {
   assert.equal(preservedExport.texts.filter(text=>text==='The owner compares the recorded result with the agreed condition before the decision.').length,2,'existing and newly exported native explanation both survive');checked();
   const empty = await request('POST', 'page-estimate', { inputKind: 'paste', text: '', prompt: '', template: 'light' });
   assert.equal(empty.status, 200); checked();
-  assert.match(api._internals.outlinePrompt({ ...base, source: null, prompt: 'Explain validation' }), /初步建议，不是最终页数命令/);
+  assert.match(api._internals.outlinePrompt({ ...base, source: null, prompt: 'Explain validation' }), /Pages are provisional/);
   assert.ok(!api._internals.outlinePrompt({ ...base, source: null, prompt: 'Explain validation' }).includes('slides 必须恰好 8')); checked();
   console.log(`PPT Gamma density: ${checks} scenario groups passed (cross-domain/routes, explicit/auto, physical fit, native structures, visible QA, API file recalibration).`);
 } finally { fs.rmSync(root, { recursive: true, force: true }); }

@@ -54,7 +54,7 @@ try {
   await test('local writing instructions remain outside original input authority', () => {
     const p=fixture();const prompt=writerPrompt(p,p.outline[1],1,{retrieval:{},contract:{},edits:['Add a cryptocurrency launch agenda.']});
     const framework=JSON.parse(prompt.split('INPUT_FRAMEWORK=')[1].split('\n')[0]);
-    assert.equal(framework.material.prompt,p.prompt);assert(!framework.material.prompt.includes('cryptocurrency'));
+    assert.equal(framework.material.promptRef,'sourceText');assert.equal(framework.material.sourceText,p.prompt);assert(!framework.material.sourceText.includes('cryptocurrency'));
     assert.match(prompt, /<user_edits>.*cryptocurrency/);
     assert.match(outlineContentContract(p),/INPUT_FRAMEWORK/);
   });
@@ -126,6 +126,22 @@ try {
     await assert.rejects(()=>proposals.createProposal(p,data,{modelCall:async(x,prompt)=>prompt.includes('整稿演示文稿内容评审器')?scopeReview(x,{unsupported:[{slideIds:['s1'],detail:'Off-topic token launch',reason:'out_of_scope'}]}):{content:{text:'Launch a token'}}},noop,noop),/original input framework/);
     assert.equal(repo.getProject(p.uid,p.id).revision,1);
     const dir=path.join(repo.projectDataDir(p.uid,p.id),'proposals');assert(!fs.existsSync(dir)||fs.readdirSync(dir).length===0);
+  });
+  await test('large local edits audit changed pages and all shared obligation owners with full original authority',async()=>{
+    const p=fixture();const base=p.deck.slides[1];p.deck.slides=Array.from({length:25},(_,i)=>({...structuredClone(base),id:'s'+i,nodes:base.nodes.map(n=>({...structuredClone(n),id:'n'+i+'_'+n.id}))}));p.outline=p.deck.slides.map(x=>({id:x.id,title:x.title}));
+    p.planning={slidePlan:[{slideId:'s1',requiredDetails:['Queue workers advance only after validation succeeds.']},{slideId:'s9',requiredDetails:['Queue workers advance only after validation succeeds.']}]};
+    const q=mutate(p,'Check results before moving forward');let checked;
+    const audit=await assertCandidateScope(p,q,{modelCall:async view=>{checked=view.deck.slides.map(s=>s.id);assert.equal(view.source.text,p.source.text);assert.ok(Array.isArray(view.reviewScope.fullObjectCoverage));return scopeReview(view);}},noop);
+    assert.deepEqual(checked,['s1','s9']);assert.equal(audit.coverage,'changed_and_dependency_pages');assert.equal(audit.publicationReviewRequired,true);assertStoredCandidateScope(p,q,{scopeAudit:audit});
+    const drift=structuredClone(q);drift.deck.slides[12].nodes[0].content.text='Unrelated newer modification';assert.throws(()=>assertStoredCandidateScope(p,drift,{scopeAudit:audit}),/missing or stale/);
+    const latest=structuredClone(p),rebased=structuredClone(q);latest.deck.slides[12].nodes[0].content.text=rebased.deck.slides[12].nodes[0].content.text='User edit on another page';assertStoredCandidateScope(latest,rebased,{scopeAudit:audit});
+    const dependent=structuredClone(p),dependentCandidate=structuredClone(q);dependent.deck.slides[9].nodes[0].content.text=dependentCandidate.deck.slides[9].nodes[0].content.text='Changed shared obligation context';assert.throws(()=>assertStoredCandidateScope(dependent,dependentCandidate,{scopeAudit:audit}),/missing or stale/);
+    await assert.rejects(()=>assertCandidateScope(p,q,{modelCall:async view=>scopeReview(view,{unsupported:[{slideIds:['s1'],detail:'Unsupported new fact',reason:'unsupported_fact'}]})},noop),/original input framework/);
+  });
+  await test('local scope corrects malformed review identities without suppressing semantic findings',async()=>{
+    const p=fixture(),q=mutate(p,'Check results before moving forward');let calls=0;
+    const audit=await assertCandidateScope(p,q,{modelCall:async view=>++calls===1?scopeReview(view,{unsupported:[{slideIds:['unknown-page'],detail:'Invalid identity',reason:'unsupported_fact'}]}):scopeReview(view)},noop);assert.equal(calls,2);assert.equal(audit.status,'complete');
+    await assert.rejects(()=>assertCandidateScope(p,q,{modelCall:async view=>scopeReview(view,{unsupported:[{slideIds:['s1'],detail:'Actual unsupported fact',reason:'unsupported_fact'}]})},noop),/original input framework/);
   });
   console.log(JSON.stringify({status:'passed',scenarioCount:checks.length,checks,model:'simulated; protocol and gates verified, live semantic accuracy not measured'},null,2));
 } finally { fs.rmSync(root,{recursive:true,force:true}); }

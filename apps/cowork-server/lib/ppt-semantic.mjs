@@ -1,4 +1,5 @@
 import { buildContentInventory } from './ppt-content-inventory.mjs';
+import { sourceSentences } from './ppt-source-boundaries.mjs';
 /** Structure-aware, deterministic source index for the existing PPT source node.
  * Original source.segments remain the citation contract. Chunks can combine
  * several segments or split one segment, so chunk IDs never stand in for refs. */
@@ -36,7 +37,7 @@ function semanticType(text, blockType) {
   if (blockType === 'code') return 'code';
   if (/\b(?:vs\.?|versus|compare|comparison|before|after)\b|对比|比较|差异|优劣/.test(value)) return 'comparison';
   if (/架构|architecture|系统组成|模块关系|组件/.test(value)) return 'architecture';
-  if (/流程|步骤|pipeline|process|workflow|→|->/.test(value)) return 'process';
+  if (/流程|步骤|pipeline|process|workflow/.test(value)) return 'process';
   if (/时间线|里程碑|roadmap|timeline|计划阶段/.test(value)) return 'timeline';
   if (/风险|制约|挑战|问题|risk|problem/.test(value)) return 'problem';
   if (/建议|原则|应该|recommendation|solution/.test(value)) return 'recommendation';
@@ -77,7 +78,7 @@ function splitLongUnit(text, limit = 600) {
   if (estimateTokens(text) <= limit) return [text];
   // Preserve sentence boundaries; whitespace is a fallback for a long single
   // sentence. A final grapheme split is used only for unbroken source text.
-  const pieces = String(text).match(/[^。！？!?；;\n]+[。！？!?；;]?|\n/g) || [text];
+  const pieces = sourceSentences(text);
   const units = pieces.flatMap(piece => {
     if (estimateTokens(piece) <= limit) return [piece];
     const words = piece.match(/\S+\s*|\s+/g) || [piece];
@@ -102,25 +103,27 @@ function parseBlocks(segments) {
   function add(type, text, segment) {
     const value = type === 'code' ? text : text.trim();
     if (!value) return;
-    for (const original of ['table','code'].includes(type) ? [value] : splitLongUnit(value)) {
+    for (const original of ['table','code','chart'].includes(type) ? [value] : splitLongUnit(value)) {
       // A fenced ASCII/mermaid flowchart is a process, not code: it becomes
       // ordered steps (the raw drawing stays in diagramSource for tracing).
       const diagram = type === 'code' ? codeDiagram(original, segment.language || '') : null;
       const part = diagram ? diagram.text : original;
-      const kind = diagram ? 'diagram' : type === 'paragraph' && /(?:^|\n)\s*(?:[┌└│├┐┘─]+|[^\n]+(?:→|->)[^\n]+)/.test(part) ? 'diagram' : type;
+      const kind = diagram?.kind==='schema'?'table':diagram?.kind==='definition'?'paragraph':diagram ? 'diagram' : type === 'paragraph' && /(?:^|\n)\s*[┌└│├┐┘─]+/.test(part) ? 'diagram' : type;
       blocks.push({ id: `b_${String(blocks.length + 1).padStart(4, '0')}`, type: kind, text: part,
         sourceRefs: segment.sourceRefs || [String(segment.id)], location: segment.location || '', sectionPath: [...section],
-        ...(diagram ? { diagramSource: { kind: diagram.kind, language: segment.language || '', text: original } } : {}),
-        ...(segment.rows ? { rows:segment.rows } : {}), ...(kind==='code'?{language:segment.language || ''}:{}),
-        position: blocks.length, tokenCount: estimateTokens(part), semanticType: semanticType(part, kind),
+        ...(diagram ? { diagramSource: { kind: diagram.kind, relation:diagram.relation||'ordered', language: segment.language || '', text: original },...(diagram.rows?{rows:diagram.rows}:{}) } : {}),
+        ...(segment.rows ? { rows:segment.rows } : {}), ...(segment.chart?{chart:segment.chart}:{}), ...(kind==='code'?{language:segment.language || ''}:{}),
+        position: blocks.length, tokenCount: estimateTokens(part), semanticType: diagram?.kind==='definition'?'definition':diagram&&['parallel','branching'].includes(diagram.relation)?'comparison':semanticType(part, kind),
         contentKind: contentKind(section, kind),
         discourseRole: discourseRole(part, kind) });
     }
   }
   for (const segment of segments || []) {
     if (segment.origin && segment.origin !== origin) { origin = segment.origin; section.length = 0; section.push(origin === 'base' ? '旧版' : '最新进展'); }
-    if (!segment.origin && /^(?:幻灯片|PDF 第)\s*\d+/.test(segment.location || '')) { section.length = 0; section.push(segment.location); }
-    if (segment.kind==='code' || segment.kind==='table') { add(segment.kind,segment.text,segment); continue; }
+    // Page labels stand in for sections only when the file has no headings;
+    // a PDF section with real headings continues across page breaks.
+    if (!segment.origin && !segment.continuesSection && /^(?:幻灯片|PDF 第)\s*\d+/.test(segment.location || '')) { section.length = 0; section.push(segment.location); }
+    if (segment.kind==='code' || segment.kind==='table' || segment.kind==='chart') { add(segment.kind,segment.text,segment); continue; }
     const lines = String(segment.text || '').replace(/\r\n?/g, '\n').split('\n');
     let pending = []; let pendingType = 'paragraph';
     function flush() { if (pending.length) add(pendingType, pending.join('\n'), segment); pending = []; }

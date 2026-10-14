@@ -124,7 +124,7 @@ assert.equal(refreshed.coverage.find(item => item.chunkId === second.id).action,
 const normalized = api.normalizeOutline({ slides: outline.map(slide => ({ ...slide, supportingPoints: ['mechanism'], question: 'Why?' })) }, 3, gamma);
 assert.equal(normalized[1].chunkRefs[0], second.id);
 assert.equal(normalized[1].role, 'architecture');
-assert.match(api.outlinePrompt({ ...project, title: 'Gamma' }), /Presentation Brief/);
+assert.match(api.outlinePrompt({ ...project, title: 'Gamma' }), /source-grounded presentation planner/);
 assert.match(api.contentPrompt({ ...project, title: 'Gamma', outline: normalized, planning }, normalized[1], 1), /bullets 由代码派生/);
 assert.match(api.contentPrompt({ ...project, title: 'Gamma', outline: normalized, planning }, normalized[1], 1), /<source_packet>/);
 

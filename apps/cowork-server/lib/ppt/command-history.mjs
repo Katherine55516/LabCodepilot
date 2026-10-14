@@ -10,7 +10,6 @@ export function findOperation(uid, projectId, operationId) {
 
 export function latestUndoable(uid, projectId) {
   const rows = operationHistory(uid, projectId);
-  const originals = new Map(rows.filter(row => row.kind === 'command').map(row => [row.id, row]));
   const stack = [];
   for (const row of rows) {
     if (row.kind === 'command') stack.push(row);
@@ -19,8 +18,11 @@ export function latestUndoable(uid, projectId) {
       if (index >= 0) stack.splice(index, 1);
     }
     if (row.kind === 'redo') {
-      const original = originals.get(row.targetOperationId);
-      if (original) { const index = stack.findIndex(item => item.id === original.id); if (index >= 0) stack.splice(index, 1); stack.push(original); }
+      // Redo can allocate a new native clone ID. Its actual committed inverse
+      // owns that new object; replaying the original inverse targets a dead ID.
+      const index = stack.findIndex(item => item.id === row.targetOperationId);
+      if (index >= 0) stack.splice(index, 1);
+      stack.push(row);
     }
   }
   return stack.at(-1) || null;

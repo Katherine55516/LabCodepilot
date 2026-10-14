@@ -39,7 +39,7 @@ HANT_RE = re.compile(r'[萬與為於後臺國學實體廣應當復雜雙發變�
 
 def language_for_text(text):
     text = text or ''
-    if HANT_RE.search(text): return 'zh-TW'
+    if HANT_RE.search(text): return 'zh-HK'
     if CJK_RE.search(text): return 'zh-CN'
     return 'en-US'
 
@@ -53,22 +53,25 @@ def set_east_asia_font(run, east_asia, language):
     rpr.append(ea)
     rpr.set('lang', language)
 
+def cjk_run(run, size, color, bold=False, role='body', family=None):
+    latin = family or (TITLE_FONT if role == 'title' else BODY_FONT)
+    language = language_for_text(run.text)
+    east_asia = (TITLE_HANT if role == 'title' else BODY_HANT) if language == 'zh-HK' else (TITLE_EA if role == 'title' else BODY_EA)
+    # PowerPoint reads a:ea for CJK text. LibreOffice's PPTX preview also
+    # requires the CJK family in a:latin, otherwise it can render a blank
+    # run when the template's Latin font has no Han glyphs. The same CJK
+    # template family is therefore set in both slots for Chinese runs;
+    # English continues to use the template's Latin family.
+    for part,actual in font_runs(run,latin,east_asia if language.startswith('zh-') else None):
+        part.font.name = actual
+        part.font.size = Pt(size)
+        part.font.bold = bold
+        part.font.color.rgb = color
+        part_language=language_for_text(part.text)
+        set_east_asia_font(part,actual if part_language.startswith('zh-') else east_asia,part_language)
+
 def cjk_font(paragraph, size, color, bold=False, role='body'):
-    latin = TITLE_FONT if role == 'title' else BODY_FONT
-    for run in paragraph.runs:
-        language = language_for_text(run.text)
-        east_asia = (TITLE_HANT if role == 'title' else BODY_HANT) if language == 'zh-TW' else (TITLE_EA if role == 'title' else BODY_EA)
-        # PowerPoint reads a:ea for CJK text. LibreOffice's PPTX preview also
-        # requires the CJK family in a:latin, otherwise it can render a blank
-        # run when the template's Latin font has no Han glyphs. The same CJK
-        # template family is therefore set in both slots for Chinese runs;
-        # English continues to use the template's Latin family.
-        actual=resolve_font(east_asia if language.startswith('zh-') else latin,run.text)
-        run.font.name = actual
-        run.font.size = Pt(size)
-        run.font.bold = bold
-        run.font.color.rgb = color
-        set_east_asia_font(run, actual if language.startswith('zh-') else east_asia, language)
+    for run in list(paragraph.runs): cjk_run(run,size,color,bold,role)
 
 def textbox(slide, x, y, w, h, text, size, color, bold=False, role='body', align=None):
     box = slide.shapes.add_textbox(Inches(x), Inches(y), Inches(w), Inches(h))
@@ -237,11 +240,14 @@ def apply_scene_text_style(frame,style,overrides=()):
     for paragraph in frame.paragraphs:
         if style.get('textAlign'): paragraph.alignment={'right':PP_ALIGN.RIGHT,'center':PP_ALIGN.CENTER}.get(style['textAlign'],PP_ALIGN.LEFT)
         for run in paragraph.runs:
-            if style.get('fontFamily'):
+            # Object-level style adds to rich runs; it never clears a run's own
+            # italic/underline or replaces an inline code font.
+            code_run=str(run.font.name or '') in ('Consolas','Menlo','Courier New','DejaVu Sans Mono','Liberation Mono')
+            if style.get('fontFamily') and (not code_run or 'fontFamily' in overrides):
                 run.font.name=resolve_font(style['fontFamily'],run.text)
                 set_east_asia_font(run,run.font.name,language_for_text(run.text))
-            run.font.italic=style.get('fontStyle')=='italic'
-            run.font.underline=style.get('textDecoration')=='underline'
+            if style.get('fontStyle')=='italic': run.font.italic=True
+            if style.get('textDecoration')=='underline': run.font.underline=True
             if 'fontWeight' in overrides: run.font.bold=bool(style['fontWeight']>=600)
 
 def render_scene_element(slide, element):
@@ -269,6 +275,9 @@ def render_scene_element(slide, element):
             specs=(element.get('textLayout') or {}).get('paragraphs') or [{'text':str(content.get('text') or '')}]
             for index,spec in enumerate(specs):
                 p=shape.text_frame.paragraphs[0] if index==0 else shape.text_frame.add_paragraph();p.text=spec['text']
+                if content.get('richText'):
+                    write_rich_text(p,content['richText'],size,str(color),item_style.get('fontFamily') or BODY_FONT,bool(item_style.get('fontWeight',400)>=600))
+                    continue
                 if content.get('codeBlock'):
                     p.clear()
                     for piece in re.split(r'([\u2e80-\u9fff\uf900-\ufaff]+)',spec['text']):
@@ -278,18 +287,13 @@ def render_scene_element(slide, element):
                     p.clear()
                     for item in spec['runs']:
                         run=p.add_run();run.text=item['text'];run.font.size=Pt(item['fontSizePt']);run.font.bold=bool(item.get('bold'));run.font.name=resolve_font(item_style.get('fontFamily') or BODY_FONT,run.text);run.font.color.rgb=color
-                    cjk_font(p,size,color,False,'title' if element.get('semanticRole') in ('title','template-title') else 'body')
-                    for run,item in zip(p.runs,spec['runs']):
-                        run.font.size=Pt(item['fontSizePt']);run.font.bold=bool(item.get('bold'))
+                    for run,item in zip(list(p.runs),spec['runs']):
+                        cjk_run(run,item['fontSizePt'],color,bool(item.get('bold')),'title' if element.get('semanticRole') in ('title','template-title') else 'body',item_style.get('fontFamily'))
         para.line_spacing = float(item_style.get('lineHeight') or 1.12)
         para.space_after = Pt(size * float(item_style.get('paragraphSpacingEm') or 0))
         for paragraph in shape.text_frame.paragraphs:
-            for run in paragraph.runs:
-                if item_style.get('fontFamily'): run.font.name=resolve_font(item_style['fontFamily'],run.text)
-                run.font.italic=item_style.get('fontStyle')=='italic'
-                run.font.underline=item_style.get('textDecoration')=='underline'
             paragraph.alignment = {'right':PP_ALIGN.RIGHT,'center':PP_ALIGN.CENTER}.get(item_style.get('textAlign'),PP_ALIGN.LEFT)
-        if not any(spec.get('runs') for spec in (element.get('textLayout') or {}).get('paragraphs',[])):
+        if not content.get('richText') and not any(spec.get('runs') for spec in (element.get('textLayout') or {}).get('paragraphs',[])):
             cjk_font(para, size, color, bool(item_style.get('fontWeight', 400) >= 600), 'title' if element.get('semanticRole') in ('title','template-title') else 'body')
         apply_text_contract(shape.text_frame,element.get('textLayout') or {})
         apply_scene_text_style(shape.text_frame,item_style,element.get('textStyleOverrides') or [])
@@ -333,13 +337,16 @@ def render_scene_element(slide, element):
                 if heading:
                     heading_para = frame.paragraphs[0]; heading_para.text = heading
                     heading_para.space_after = Pt(3); heading_para.line_spacing = float(item_style.get('lineHeight') or 1.18)
-                    cjk_font(heading_para, point_size, color, True, 'body')
+                    if item.get('headingRich'):write_rich_text(heading_para,item['headingRich'],point_size,str(color),BODY_FONT,True)
+                    else:cjk_font(heading_para, point_size, color, True, 'body')
                     body_para = frame.add_paragraph()
                 else: body_para = frame.paragraphs[0]
                 for paragraph in frame.paragraphs: paragraph.alignment=PP_ALIGN.LEFT;paragraph.space_before=Pt(0)
                 body_para.text = body; body_para.line_spacing = float(item_style.get('lineHeight') or 1.18)
                 body_para.space_after = Pt(0)
-                cjk_font(body_para, point_size, color)
+                for paragraph in frame.paragraphs:paragraph._p.get_or_add_pPr().set('hangingPunct','0')
+                if item.get('bodyRich'):write_rich_text(body_para,item['bodyRich'],point_size,str(color),BODY_FONT)
+                else:cjk_font(body_para, point_size, color)
                 apply_scene_text_style(frame,item_style,element.get('textStyleOverrides') or [])
             return
         shape = slide.shapes.add_textbox(x, y, w, h); shape.text_frame.word_wrap = True
@@ -352,7 +359,11 @@ def render_scene_element(slide, element):
             para.text = specs[number]['text'] if number<len(specs) else prefix + str(item.get('text') or '')
             para.line_spacing = float(item_style.get('lineHeight') or 1.12)
             para.space_after = Pt(size * float(item_style.get('paragraphSpacingEm') if item_style.get('paragraphSpacingEm') is not None else .35))
-            cjk_font(para, size, color, kind == 'metric' and number == 0, 'title' if kind == 'metric' and number == 0 else 'body')
+            if item.get('richText'):
+                rich=dict(item['richText']);prefix_text=para.text[:-len(item['text'])] if item.get('text') else prefix
+                rich['plainText']=prefix_text+rich['plainText'];rich['runs']=[{'kind':'text','text':prefix_text}]+rich['runs']
+                write_rich_text(para,rich,size,str(color),item_style.get('fontFamily') or BODY_FONT,kind=='metric' and number==0)
+            else:cjk_font(para, size, color, kind == 'metric' and number == 0, 'title' if kind == 'metric' and number == 0 else 'body')
         apply_text_contract(shape.text_frame,element.get('textLayout') or {})
         apply_scene_text_style(shape.text_frame,item_style,element.get('textStyleOverrides') or [])
         if content.get('codeBlock'):
@@ -377,12 +388,15 @@ def render_scene_element(slide, element):
             weights=content.get('rowWeights') or [1]*len(table.rows)
             for row,weight in zip(table.rows,weights): row.height=int(h*weight/sum(weights))
             for r,row in enumerate(table.rows):
-                for cell in row.cells:
+                for col,cell in enumerate(row.cells):
                     cell.margin_top=cell.margin_bottom=Pt(3);cell.margin_left=cell.margin_right=Pt(7.2);cell.text_frame.word_wrap=True;cell.text_frame.auto_size=MSO_AUTO_SIZE.NONE;cell.vertical_anchor=MSO_ANCHOR.TOP
                     cell.fill.fore_color.rgb=scene_color(item_style.get('fill'),RGBColor(*accent)) if r==0 else RGBColor(255,255,255)
+                    if content.get('cellRich'):cell.text_frame.clear()
                     for paragraph in cell.text_frame.paragraphs:
                         paragraph.line_spacing=1.18; paragraph.space_before=Pt(0); paragraph.space_after=Pt(0)
-                        cjk_font(paragraph,size,scene_color(item_style.get('tableHeaderColor'),color) if r==0 else color,r==0)
+                        if content.get('cellRich'):
+                            write_rich_text(paragraph,content['cellRich'][r][col],size,str(scene_color(item_style.get('tableHeaderColor'),color) if r==0 else color),item_style.get('fontFamily') or BODY_FONT,r==0)
+                        else:cjk_font(paragraph,size,scene_color(item_style.get('tableHeaderColor'),color) if r==0 else color,r==0)
         for shape in rendered if isinstance(rendered, list) else [rendered]:
             if shape is not None: shape.rotation = float(element.get('rotation') or 0)
         return
@@ -465,6 +479,8 @@ for idx, item in enumerate(data['slides']):
     cjk_font(fp, 11, muted)
 target = os.environ.get('PPT_OUTPUT', '/workspace/presentation.pptx')
 temp = target + '.part'
+for note in (data.get('exportManifest') or {}).get('notes',[]):
+    prs.slides[note['index']].notes_slide.notes_text_frame.text=note['text']
 prs.save(temp)
 # python-pptx can emit signed chart axis IDs even though OOXML declares axId as
 # an unsigned integer. PowerPoint tolerates them, but strict readers reject the

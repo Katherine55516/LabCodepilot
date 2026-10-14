@@ -27,6 +27,8 @@ assert.equal(evidenceVisible({ kind: 'example', exactText: String.raw`\mu - r_f\
 const sortExample={kind:'example',exactText:String.raw`Construction uses independent $2\times3\times3$ sorts on size, I/A, and ROE (27 portfolios).`};
 assert.equal(evidenceVisible(sortExample,'Construction uses independent 2×3×3 sorts on size, I/A, and ROE (27 portfolios).'),true,
   'the exact source example remains visible after the production notation adapter');
+assert.deepEqual(evidenceMeasurements('Construction uses 2×3×3 sorts and 27 portfolios.'),[],'multiplication operators are not speedup units');
+assert.deepEqual(evidenceMeasurements('Throughput is 4× faster.'),[{raw:'4×',value:'4',unit:'×'}],'a true multiplier measurement remains checked');
 assert.equal(evidenceVisible(sortExample,'Construction uses independent 2×3 sorts on size, I/A, and ROE (6 portfolios).'),false,
   'notation equivalence must not accept changed dimensions or portfolio counts');
 
@@ -115,13 +117,14 @@ const mediaProject = { ...project, templateFidelity: { width: 960, height: 540 }
 const diagram = semanticMediaForSlide(mediaProject, 0, { geometry: { width: 500, height: 360 } });
 assert.equal(diagram,null,'unlabelled decorative rectangles must not be counted as semantic evidence');
 const reusedMedia = { templateFidelity: { mode: 'preserve', width: 100, height: 100,
-  slides: Array.from({ length: 4 }, (_, index) => ({ index, shapeCount: 1, imageCount: 1, slots: [], variant: { kind: 'original' } })) },
+  slides: Array.from({ length: 4 }, (_, index) => ({ index, shapeCount: 1, imageCount: 1, nodes:[{type:'image',nativeRef:{shapeId:7},content:{imageSha256:'same-photo'},geometry:{x:0,y:0,width:70,height:60}}], slots: [], variant: { kind: 'original' } })) },
   outline: Array.from({ length: 4 }, () => ({ visualIntent: { type: 'metric' } })),
   deck: { slides: Array.from({ length: 4 }, (_, index) => ({ id: `m${index}`, nodes: [{ type: 'image',
     nativeRef: { slideIndex: index, shapeId: 7 }, content: { imageSha256: 'same-photo' },
     geometry: { x: 0, y: 0, width: 70, height: 60 } }] })) } };
 const mediaIssues = inspectTemplateFidelity(reusedMedia);
 assert.ok(mediaIssues.some(item => item.code === 'template_dominant_media_reuse'));
+const missingNativeSnapshot=structuredClone(reusedMedia);delete missingNativeSnapshot.templateFidelity.slides[0].nodes;assert.ok(inspectTemplateFidelity(missingNativeSnapshot).some(i=>i.code==='template_asset_loss')); 
 assert.ok(mediaIssues.some(item => item.code === 'template_semantic_media_mismatch'));
 const calloutImage = { type: 'image', geometry: { x: 70, y: 550, width: 1425, height: 165 },
   content: { dataUrl: 'data:image/png;base64,placeholder' } };
@@ -132,3 +135,10 @@ assert.equal(fidelity.safeDecorativeMedia(calloutImage, { width: 1600, height: 9
 assert.equal(fidelity.textOverlayCalloutPanel(calloutImage, { width: 1600, height: 900 },
   { nodes: [calloutImage, calloutText] }), true, 'a text-backed callout retains its original high-contrast panel instead of receiving an unrelated generated image');
 console.log('PPT evidence atoms, retrieval, visible QA, publish gate and template read order: OK');
+
+// A v2 page owns its selected source units, not every formula in a coarse chapter chunk.
+const scopeExample={text:'y = a + b\nA separate explanation.',semantic:{chunks:[{id:'chapter',text:'y = a + b\nA separate explanation.'}],inventory:{items:[{id:'formula',type:'EquationBlock',text:'y = a + b',chunkRefs:['chapter'],source_ref:['1']},{id:'explanation',type:'MechanismBlock',text:'A separate explanation.',chunkRefs:['chapter'],source_ref:['1']}],relationships:[]},evidenceAtoms:[]}};
+const scopedPlans=buildPlanning({source:scopeExample,pages:3},{},[{id:'cover',title:'Cover'},{id:'body',title:'Worked explanation',focus:'Explain the condition',planningProtocolVersion:2,sourceUnitIds:['explanation'],chunkRefs:['chapter']},{id:'end',title:'Closing'}]).slidePlan;
+assert.deepEqual(scopedPlans[1].requiredDetails,[],"neighboring formula must not become this page's mandatory detail");
+const ownedFormulaPlans=buildPlanning({source:scopeExample,pages:3},{},[{id:'cover',title:'Cover'},{id:'body',title:'Worked example',planningProtocolVersion:2,sourceUnitIds:['formula'],chunkRefs:['chapter']},{id:'end',title:'Closing'}]).slidePlan;
+assert.ok(ownedFormulaPlans[1].requiredDetails.includes('y = a + b'),'actual owned formula remains required');

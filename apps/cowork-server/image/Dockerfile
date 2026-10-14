@@ -18,7 +18,7 @@ ARG PIP_INDEX=https://mirrors.aliyun.com/pypi/simple/
 
 # 中文字体(matplotlib 画图中文标签必需,slim 基础镜像没有 —— 缺了全是方块)。
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends fonts-noto-cjk fonts-stix fontconfig libreoffice-impress \
+    && apt-get install -y --no-install-recommends fonts-noto-cjk fonts-stix fontconfig libreoffice-impress tesseract-ocr tesseract-ocr-eng tesseract-ocr-chi-sim tesseract-ocr-chi-tra \
     && rm -rf /var/lib/apt/lists/*
 
 # 办公高频依赖预装(root 装进全局 site-packages,uid 1000 运行时可直接 import;
@@ -41,6 +41,7 @@ RUN set -eu; \
     python-pptx \
     pdfplumber \
     pypdf \
+    pypdfium2 \
     matplotlib \
     pillow \
     requests \

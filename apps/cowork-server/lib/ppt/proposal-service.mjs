@@ -7,7 +7,7 @@ import { applyCommand, _internals as commands } from './command-service.mjs';
 import { normalizeCommand, validateNodeContent } from './command-schema.mjs';
 import { findOperation } from './command-history.mjs';
 import { newId } from './ir.mjs';
-import { planKey, slideFingerprint, editableCapabilities, editError, digest } from './edit-context.mjs';
+import { planKey, slideFingerprint, editableCapabilities, editError, digest, pageEditContext, assertPageEditContext } from './edit-context.mjs';
 import { buildSlideRenderTree } from './render-tree.mjs';
 import { slideSvg } from './exporters/preview.mjs';
 import { reviewProject } from './quality-service.mjs';
@@ -29,7 +29,7 @@ export function readProposal(uid, projectId, id) {
   return proposal;
 }
 function checkContext(project, proposal) {
-  if (!project || project.deletedAt || !['completed', 'quality_blocked', 'paused'].includes(project.status)) throw editError('project is not editable', 409);
+  assertPageEditContext(project, proposal);
   if (planKey(project) !== proposal.planKey || slideFingerprint(project, proposal.slideId) !== proposal.targetContentHash)
     throw editError('the target or its plan changed; preview again', 409);
   if ((proposal.type === 'structure' || proposal.scope === 'deck') && project.revision !== proposal.baseRevision) throw editError('the deck changed after structure planning; preview again', 409);
@@ -94,7 +94,7 @@ function validateCandidate(before, after, slideId, type = 'content') {
 /** The model produces semantic patches. IDs, layout capabilities and commit versions stay server-owned. */
 export async function createProposal(input, data, deps, activity, log) {
   const project = structuredClone(input);
-  if (!['completed', 'quality_blocked', 'paused'].includes(project.status)) throw editError('project is not editable', 409);
+
   if (!Number.isInteger(data.baseRevision) || data.baseRevision !== project.revision) throw editError('refresh the project before previewing', 409);
   const slide = project.deck?.slides.find(item => item.id === data.slideId);
   if (!slide) throw editError('slide not found', 404);
@@ -104,10 +104,11 @@ export async function createProposal(input, data, deps, activity, log) {
   const action = normalizeAiAction(data.action, data.parameters);
   if (WRITING_ACTIONS.includes(action.action) && data.type && !['auto', 'content', 'title'].includes(data.type)) throw editError('writing actions cannot change layout, assets or data', 400);
   const route = routeMutation(project, instruction, { type: WRITING_ACTIONS.includes(action.action) ? (data.type === 'title' ? 'title' : 'content') : data.type, mode: data.mode });
+  const liveEditContext = pageEditContext(project, slide.id, route.type, data.scope);
   if (project.runtime?.slides?.[slide.id]?.accepted && ['content', 'title', 'data', 'structure'].includes(route.type)) throw editError('this page is accepted; unlock it before changing its content', 409);
   if (['layout', 'style', 'asset', 'data', 'structure'].includes(route.type)) {
     const id = newId('proposal');
-    const proposal = { id, projectId: project.id, slideId: slide.id, scope: data.scope, type: route.type, action: data.action, instruction,
+    const proposal = { id, liveEditContext, projectId: project.id, slideId: slide.id, scope: data.scope, type: route.type, action: data.action, instruction,
       baseRevision: project.revision, planKey: planKey(project), targetContentHash: slideFingerprint(project, slide.id),
       impact: impactFor(project, route, [slide.id]), modelRef: { configId: project.configId, model: project.model },
       status: 'proposed', createdAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 86400000).toISOString() };
@@ -150,7 +151,7 @@ export async function createProposal(input, data, deps, activity, log) {
   const prompt = `${aiActionPrompt(action.action, action.parameters)}\n${writingPolicy}\n${writingGuide(writingProject, contract || {}, native)}\nOnly edit the semantic content of these existing presentation objects. Preserve sources, numeric values, units, conditions, equations, required evidence and locked titles. Keep chart data/type/dimensions and table dimensions/headers/numeric cells unchanged. Keep shape types unchanged. Do not invent facts, repeat neighboring pages, change other pages, theme, styles, IDs or coordinates. Preserve material conditions and uncertainty; keep production/source bookkeeping out of visible copy. Keep each point useful and within its capacity; do not truncate mechanically. ${native ? 'Preserve native text paragraph count and label/body structure.' : ''}\nContext: ${context}\nObjects: ${JSON.stringify(editable.map(node => ({ nodeId: node.id, type: node.type, content: node.content, nativeTextFrame: node.nativeTextFrame, capacity: objectWritingCapacity(project, slide.id, node) })))}\nInstruction: ${instruction}\nReturn only JSON: ${schema}${data.scope === 'slide' ? (data.mode === 'relayout' ? `,"layoutId":"one of ${[...layouts].join(',')}"}` : '}') : ''}.`;
   const id = newId('proposal');
   const answer = await deps.modelCall(project, prompt, activity, log, { nodeKey: `ai:${id}` });
-  const proposal = { id, projectId: project.id, slideId: slide.id, scope: data.scope, type: route.type, impact: impactFor(project, route, [slide.id]), mode: data.mode || 'content', action: action.action, parameters: action.parameters, generationPolicy: project.generationPolicy, promptContractVersion: project.promptContractVersion || 2, instruction,
+  const proposal = { id, liveEditContext, projectId: project.id, slideId: slide.id, scope: data.scope, type: route.type, impact: impactFor(project, route, [slide.id]), mode: data.mode || 'content', action: action.action, parameters: action.parameters, generationPolicy: project.generationPolicy, promptContractVersion: project.promptContractVersion || 2, instruction,
     baseRevision: project.revision, sourceRevision: project.sourceRevision || 0, planKey: planKey(project), targetContentHash: slideFingerprint(project, slide.id),
     modelRef: { configId: project.configId, model: project.model }, status: 'proposed', createdAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 86400000).toISOString() };
   if (data.scope === 'object') {

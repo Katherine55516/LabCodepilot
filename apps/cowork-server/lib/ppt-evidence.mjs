@@ -1,5 +1,5 @@
 import { visibleNodes, nodeContentText } from './ppt-visible-content.mjs';
-import { sourceDisplayText } from './ppt-source-text.mjs';
+import { sourceDisplayText,richTextContent } from './ppt-source-text.mjs';
 /** Source-grounded evidence lives in the existing semantic index. These atoms
  * are deterministic excerpts, not claims invented by the planner or writer. */
 const QUANTITY = /(?<![\p{L}\p{N}_])(?<value>\d[\d,.]*(?:\s*(?:–|-|→|to)\s*\d[\d,.]*)?)\s*(?<unit>PFLOPS|TFLOPS|FLOPS|TPS\s*\/\s*(?:GPU|user)|tokens?\s*\/\s*(?:s|sec|second|GPU|user)|GB|GiB|TB|MB|ms|milliseconds?|seconds?|bits?\s*\/\s*value|bits?|bytes?|layers?|heads?|parameters?|points?|billion|million|万|亿|%|％|×|B\b|M\b)/giu;
@@ -9,7 +9,8 @@ const MECHANISM = /\b(?:because|therefore|uses?|enables?|reduces?|increases?|con
 const CONTEXT = /\b(?:[A-Z]{1,8}\d[A-Z\d.-]*|[A-Z]\d{2,}[A-Z]?|\d+k\s*\/\s*\d+k|(?:BF|FP|INT|NVFP)\d{1,2})\b/giu;
 
 export function evidenceMeasurements(value) {
-  return [...String(value || '').matchAll(QUANTITY)].map(match => ({ raw: match[0].trim(),
+  const text=sourceDisplayText(String(value || ''));
+  return [...text.matchAll(QUANTITY)].filter(match=>!(match.groups.unit==='×'&&/^\s*[-+−]?\d/u.test(text.slice(match.index+match[0].length)))).map(match => ({ raw: match[0].trim(),
     value: match.groups.value.replace(/,/g, '').replace(/\s+/g, ''), unit: match.groups.unit.replace(/\s+/g, '').toLowerCase().replace('％', '%') }));
 }
 
@@ -140,5 +141,5 @@ export function lockedEvidenceComponents(project, ids, sourceComponents=[]) {
   const shown=sourceComponents.map(component=>nodeContentText(component)).join(' ');
   const required=[...new Set(ids)].map(id=>{const atom=atoms.get(id);if(!atom)throw Error('invalid source evidence ID');return atom;})
     .filter(atom=>!evidenceVisible(atom,shown));
-  return required.length?[{type:'text',content:{text:required.map(atom=>sourceDisplayText(atom.exactText)).join(' '),pointType:'example',sourceEvidenceIds:required.map(atom=>atom.id)}}]:[];
+  return required.length?[{type:'text',content:richTextContent(required.map(atom=>atom.exactText).join(' '),{pointType:'example',sourceEvidenceIds:required.map(atom=>atom.id)})}]:[];
 }

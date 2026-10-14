@@ -1,6 +1,22 @@
 # PPT 自定义 API 设置与本地模型执行桥接
 
-更新：2026-10-09。实现处于本地开发环境；远端部署和真实整稿生成尚未验收。
+更新：2026-10-09。实现处于本地开发环境；真实 Factor Zoo 整稿已在本机 x64 完成原生导出，远端真实账号部署及最终 ARM64 版本尚未验收。当前默认模型与多模型验证见下方最新记录。
+
+## 最新配置验证与默认修复
+
+2026-10-09 本轮认证目录同步成功，33 个 ID。检查发现开发 profile 的 provider default 映射为 deepseek-v4-flash，但 global_default_model 仍为旧 ID「ppt应用测试」；两者不一致。此前明确指定 DeepSeek 的实际生成不受全局默认影响，不能由该快照把所有历史失败归因于默认模型。
+
+按用户指定，已将 provider default 和全局 default 统一为 qwen3.8-max。未向更新接口提交新 API key，现有 enc:v1: 加密保留。createModel() 无模型参数的实际解析为 qwen3.8-max，保存后生产 PPT worker 请求返回有效三页 JSON，设置 UI 默认也显示 qwen3.8-max。
+
+真实连接探针与 production createModel/executeDesktopModelJob 的小型 JSON 验证：qwen3.8-max、claude-opus-5-5、claude-sonnet-5-5 全部成功；gpt-6.1-sol 不在当前网关目录，精确请求 HTTP 503、worker 502，未自动换型号。三页 JSON 测试使用内存诊断队列，不是部署账号 E2E，也不证明这些新模型的长 Factor Zoo 整稿合同已通过。
+
+配置仍为 ~/.aimate-api-development，诊断服务端口 3115；不自动迁移至已安装 Electron profile。完整讨论、逐项建议和原始安全验证记录见 [真实运行问题分析](../research/ppt-factor-zoo-live-postmortem-20261009.md)。下方各运行与测试描述保留为历史记录。
+
+## 逐页复核后的验证更新
+
+默认仍为 qwen3.8-max。密钥/目录认证成功不等于长大纲生成成功：Qwen 的完整六组规划仅四组成功、两组 240 秒 transport 超时；Opus/Sonnet 各自 zh、en、zh-HK 三页 schema 均成功。Sonnet 六个 Factor Zoo 来源组完整成功，本轮用于后续正式 writer/critic/export 验证，没有修改默认模型。gpt-6.1-sol 当前授权目录缺失、精确请求 503，需网关上游/组权限，未配置假别名。
+
+模块已加入版本2短 skeleton、完整来源 ID 编译、分组 checkpoint、受控 schema/JSON fallback、安全失败分类与 candidate 下载。计划 fit、schema、实际 PowerPoint 导出和人工外观验收分开记录。三语输出策略用于标题与新增说明；绑定原始表格/代码/公式/证据保留原文，界面明确披露。详细实施与待验收项见 [问题分析](../research/ppt-factor-zoo-live-postmortem-20261009.md)，不能沿用上方或历史章节的小探针结论宣称全部模型整稿通过。
 
 ## 本次配置与诊断
 

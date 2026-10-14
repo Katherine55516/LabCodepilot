@@ -64,7 +64,7 @@ p.save(sys.argv[1])
  project.renderTree=buildRenderTree(project);saveProject(project);
  const legacy=structuredClone(project);legacy.renderTree.renderContractVersion=2;
  const oldTitle=legacy.deck.slides[0].nodes.find(node=>node.nativeRef&&node.semanticRole==='template-title');oldTitle.geometry.height=120000;
- const updated=migrateProject(legacy);assert.equal(updated.changed,true);assert.equal(updated.project.renderTree.renderContractVersion,3);
+ const updated=migrateProject(legacy);assert.equal(updated.changed,true);assert.equal(updated.project.renderTree.renderContractVersion,(await import("./lib/ppt/render-contract.mjs")).RENDER_CONTRACT_VERSION);
  assert.ok(updated.project.renderTree.slides[0].elements.find(element=>element.id===oldTitle.id).bounds.height>120000,'old cached frames receive refreshed preview geometry');
  const uid=project.uid,id=project.id,slide=project.deck.slides[1],text=slide.nodes.filter(node=>node.nativeRef&&node.type==='text'&&!node.locked);
  const command=async(type,payload)=>{const p=getProject(uid,id);return (await applyCommand(uid,id,{type,baseRevision:p.revision,payload})).project;};

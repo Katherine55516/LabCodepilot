@@ -1,3 +1,4 @@
+import {setImmediate as yieldToIO} from 'node:timers/promises';
 /** Small bounded worker pool used by durable PPT nodes. The caller owns node
  * persistence so recovery can rerun only unfinished items. */
 export async function boundedAll(items, concurrency, worker) {
@@ -12,6 +13,10 @@ export async function boundedAll(items, concurrency, worker) {
       if (index >= items.length) return;
       try { results[index] = await worker(items[index], index); }
       catch (error) { errors.push({ index, error }); }
+      // Source checks may finish synchronously. Chaining only resolved promises
+      // starves HTTP/SSE and BYOK claims until the entire batch has completed.
+      // Yield between durable nodes while retaining the bounded concurrency.
+      await yieldToIO();
     }
   }
   await Promise.all(Array.from({ length: Math.min(limit, items.length) }, run));

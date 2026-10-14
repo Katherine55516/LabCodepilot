@@ -1,10 +1,42 @@
 import { createHash } from 'node:crypto';
+import {mandatorySelectionFacts}from './ppt-content-selection.mjs';
 import { inputFramework } from './ppt-input-scope.mjs';
 import { visibleSlideText } from './ppt-evidence.mjs';
 import { nodeContentText, visibleNodes } from './ppt-visible-content.mjs';
 const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 export const OBLIGATION_VERSION = 1;
-const qualifier = /\b(?:unless|except|only\s+if|provided\s+that|must|shall|not|never|without|uncertain|conditional|subject\s+to)\b|不得|不能|仅当|只有|除非|否则|例外|不确定|前提|必须|禁止|不保证/iu;
+export const visibleEvidenceQuoteId=(slideId,node)=>'quote-'+hash({slideId,nodeId:node.id,text:nodeContentText(node)}).slice(0,24);
+/** Explicit quote references select the complete CURRENT visible instance.
+ * They are a transport protocol, not a heuristic correction of bad excerpts.
+ * Literal excerpts remain supported and are never changed or rebound. */
+export function resolveObligationQuoteReferences(audit,project) {
+  if(!Array.isArray(audit?.checks))return audit;
+  const quotes=new Map((project.deck?.slides||[]).flatMap(slide=>visibleNodes(slide).filter(node=>nodeContentText(node)).map(node=>
+    [visibleEvidenceQuoteId(slide.id,node),{slideId:slide.id,nodeId:node.id,text:nodeContentText(node)}])));
+  return {...audit,checks:audit.checks.map(check=>({...check,...(Array.isArray(check?.evidence)?{evidence:check.evidence.map(evidence=>{
+    if(!evidence?.quoteId)return evidence;
+    const quote=quotes.get(evidence.quoteId);
+    if(!quote||quote.slideId!==evidence.slideId||quote.nodeId!==evidence.nodeId)throw new Error('obligation evidence quote reference is stale, unknown or bound to another visible instance');
+    if(evidence.excerpt!==undefined&&evidence.excerpt!==quote.text)throw new Error('obligation evidence quote reference conflicts with its supplied literal excerpt');
+    return {...evidence,excerpt:quote.text};
+  })}:{})}))};
+}
+const qualifier = /\b(?:unless|except|only|solely|limited\s+to|provided\s+that|must|shall|not|never|without|uncertain|conditional|subject\s+to)\b|不得|不能|僅|仅|只有|限于|限於|除非|否則|否则|例外|不確定|不确定|前提|必須|必须|禁止|不保證|不保证/iu;
+
+/** Generated brief topics cannot undo the validated overview/notes scope.
+ * Explicit source conditions and page details remain independent obligations. */
+export function mainDeckBriefRequirements(project){
+  const requirements=project.planning?.brief?.mustInclude||[];
+  if(project.generationPolicy?.content!=='overview'||project.generationPolicy?.details!=='notes'||project.contentSelection?.sourceHash!==project.source?.sha256)return requirements;
+  const items=project.source?.semantic?.inventory?.items||[];
+  return requirements.filter(text=>{
+    if(String(project.userRequirements||project.prompt||'').includes(text)||(project.requestedOutline||[]).some(s=>JSON.stringify(s).includes(text)))return true;
+    const chunk=project.source?.semantic?.chunks?.find(c=>c.topic===text);
+    if(!chunk)return true;
+    const units=items.filter(i=>i.chunkRefs?.includes(chunk.id));
+    return !units.length||!units.every(i=>i.presentation==='notes_by_contract'&&i.presentationBasis===project.contentSelection.hash);
+  });
+}
 
 /** Full source spans are authority; plan summaries never replace them. This
  * deterministic registry finds explicit conditions; the critic also reviews
@@ -32,8 +64,14 @@ export function obligationRegistry(project) {
     const start=source.indexOf(text);
     add(text,start>=0?'source_detail':'planned_detail',[plan.slideId],start>=0?{start,end:start+text.length,encoding:'utf16'}:null);
   }
-  for(const text of project.planning?.brief?.mustInclude||[])add(text,'brief_requirement');
-  const material={version:OBLIGATION_VERSION,frameworkHash:framework.frameworkHash,entries};
+  if(project.contentSelection?.entries?.some(e=>e.summaryText||e.visibleEquivalentSourceUnitId))for(const fact of mandatorySelectionFacts({...project,source:{...project.source,semantic:{...project.source.semantic,inventory:project.originalSourceInventory||project.source.semantic.inventory}}})){
+    const start=source.indexOf(fact.text),equivalent=project.contentSelection.entries.find(e=>e.sourceUnitId===fact.sourceUnitId)?.visibleEquivalentSourceUnitId,owners=project.outline.filter(o=>o.sourceUnitIds?.includes(equivalent||fact.sourceUnitId)).map(o=>o.id);
+    add(fact.text,'source_summary_detail',owners,start>=0?{start,end:start+fact.text.length,encoding:'utf16'}:null);
+  }
+  for(const text of mainDeckBriefRequirements(project))add(text,'brief_requirement');
+  const selected=project.reviewScope?.obligationIds;
+  if(selected&&(!Array.isArray(selected)||new Set(selected).size!==selected.length||selected.some(id=>!entries.some(e=>e.id===id))))throw new Error('invalid internal review obligation partition');
+  const material={version:OBLIGATION_VERSION,frameworkHash:framework.frameworkHash,entries:selected?entries.filter(e=>selected.includes(e.id)):entries};
   return {...material,registryHash:hash(material)};
 }
 

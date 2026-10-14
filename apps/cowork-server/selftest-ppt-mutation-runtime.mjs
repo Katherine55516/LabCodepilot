@@ -98,19 +98,21 @@ try {
  assert.match(quality.deckReviewPrompt(chartPrompt), /"values":\[12,34\],"unit":"%"/);
  // Geometry/style affect visibility and object retention, so invalidate review.
  const reviewProject = fixture(); assert(version.reviewIsCurrent(reviewProject));
+ reviewProject.dagNodes={'review:deck':{id:'review:deck',status:'completed'}};repo.saveProject(reviewProject);
  const styled = await commands.applyCommand(uid, reviewProject.id, { type: 'node.setStyle', baseRevision: 1, payload: { slideId: 's1', nodeId: reviewProject.deck.slides[1].nodes[0].id, style: { fontWeight: 700 } } }); assert(!version.reviewIsCurrent(styled.project));
  const revised = await commands.applyCommand(uid, reviewProject.id, { type: 'node.setContent', baseRevision: 2, payload: { slideId: 's1', nodeId: reviewProject.deck.slides[1].nodes[0].id, content: { text: 'Changed semantic claim' } } }); assert.equal(revised.project.quality.reviewState, 'stale'); assert(!version.reviewIsCurrent(revised.project));
  let reviews = 0, exported;
  const published = await publish.publishProject(uid, reviewProject.id, { modelCall: async (project) => { assert.equal(project.configId, 'user-selected-config'); reviews++; return scopeReview(project); }, renderPptx: async project => { exported = project; return simulatedExport(project); } }, noop, noop);
  assert.equal(reviews, 1); assert.equal(published.published, true); assert.equal(exported.renderTree.hash, published.project.renderTree.hash); assert.equal(published.project.publishedRevision, published.project.revision); checks.push('semantic changes invalidate review; preview and export share revision and render tree');
+ assert.equal(published.project.dagNodes['review:deck'].status,'completed');assert.equal(published.project.dagNodes['review:deck'].projectRevision,published.project.revision);assert.equal(published.project.dagNodes['review:deck'].inputHash,version.semanticReviewKey(published.project));checks.push('editor publish carries the fresh validated review back to the DAG at the current revision');
  const slots = capacity.createCapacity(1), first = await slots.acquire(); const order = [];
  const second = slots.acquire().then(release => { order.push(2); return release; }), third = slots.acquire().then(release => { order.push(3); return release; });
  assert.equal(slots.snapshot().queued, 2); assert.equal(slots.tryAcquire(), null); first(); const secondRelease = await second; secondRelease(); (await third)(); assert.deepEqual(order, [2, 3]); assert.equal(slots.snapshot().active, 0); checks.push('capacity shortage queues FIFO rather than failing generation');
  // Pause is a safe boundary; restore resumes cached pages, not an automatic restart of a paused run.
  const live = fixture(); live.status = 'outline_ready'; live.deck = null; live.nodes = {}; live.revision = 0; repo.saveProject(live); runs.startRun(live);
  const releases = []; let contentCalls = 0;
- const deps = { modelCall: async (project, prompt, _a, _l, meta) => { if (meta.nodeKey.startsWith('review:')) return scopeReview(project); contentCalls++; if (!meta.nodeKey.endsWith(':repair') && releases.length < 2) await new Promise(resolve => releases.push(resolve)); const id = meta.nodeKey.split(':')[1]; return { title: `Claim ${id}`, bullets: id === 's0' ? [] : [`Distinct explanation for ${id} provides supported mechanism and conditions.`] }; }, renderPptx: async project => simulatedExport(project) };
- assert.equal((await request(live, '/generate', {}, deps)).status, 202); await until(() => releases.length === 2); await runtime.pauseSession(uid, live.id); releases.forEach(release => release()); await until(() => repo.getProject(uid, live.id).status === 'paused');
+ const deps = { modelCall: async (project, prompt, _a, _l, meta) => { if (meta.nodeKey.startsWith('review:')) return scopeReview(project); contentCalls++; if (!meta.nodeKey.endsWith(':repair') && releases.length < 1) await new Promise(resolve => releases.push(resolve)); const id = meta.nodeKey.split(':')[1]; return { title: `Claim ${id}`, bullets: id === 's0' ? [] : [`Distinct explanation for ${id} provides supported mechanism and conditions.`] }; }, renderPptx: async project => simulatedExport(project) };
+ assert.equal((await request(live, '/generate', {}, deps)).status, 202); await until(() => releases.length === 1); await runtime.pauseSession(uid, live.id); releases.forEach(release => release()); await until(() => repo.getProject(uid, live.id).status === 'paused');
  const paused = repo.getProject(uid, live.id); const cached = Object.values(paused.nodes).filter(node => node.status === 'done').length; assert(cached >= 1); assert.equal(runs.currentRun(paused).status, 'paused'); const beforeResume = contentCalls;
  assert.equal((await request(live, '/resume', {}, deps)).status, 202);
  const done = await until(() => { const p = repo.getProject(uid, live.id); if (p.status === 'failed') throw new Error(p.error); return ['completed', 'quality_blocked'].includes(p.status) && p; }); assert(done.runtime.slides.s1.preview); assert(contentCalls - beforeResume <= (4 - cached) * 2); checks.push('pause/resume reuses completed page content and real previews');
@@ -137,6 +139,20 @@ try {
  const manualDone = await until(() => { const p = repo.getProject(uid, manual.id); if (p.status === 'failed') throw new Error(p.error); return ['completed','quality_blocked'].includes(p.status) && p; });
  assert.equal(manualDone.deck.slides[1].title, 'Manual mechanism decision');
  assert.deepEqual(manualDone.deck.slides[1].bullets, manual.deck.slides[1].bullets);
+ // Live manual edits advance the epoch and never turn pending placeholders into previews.
+ const liveManual=fixture();liveManual.status='generating';edits.editingState(liveManual).contentOpen=true;runtime.runtimeState(liveManual);runs.startRun(liveManual);
+ delete liveManual.nodes.s2;delete liveManual.runtime.slides.s2;
+ runtime.updateSlidePreview(liveManual,'s1');liveManual.runtime.slides.s1.quality={issues:[],pendingDeckReview:true};repo.saveProject(liveManual);
+ const liveTitle=liveManual.deck.slides[1].nodes.find(n=>n.semanticRole==='title');
+ const liveChanged=await commands.applyCommand(uid,liveManual.id,{type:'node.setContent',baseRevision:liveManual.revision,payload:{slideId:'s1',nodeId:liveTitle.id,content:{text:'Manual live mechanism'}}});
+ assert.equal(liveChanged.project.nodes.s1.slide.title,'Manual live mechanism');assert.equal(liveChanged.project.editing.epochs.s1,1);assert(!liveChanged.project.runtime.slides.s2?.preview);
+ await assert.rejects(()=>commands.applyCommand(uid,liveManual.id,{type:'node.setStyle',baseRevision:liveChanged.project.revision,payload:{slideId:'s2',nodeId:liveManual.deck.slides[2].nodes[0].id,style:{fontWeight:700}}}),e=>e.statusCode===409);
+ checks.push('live verified objects preserve epoch and pending pages never acquire false previews');
+ // Live text editing must not invent a summary layout before canonical migration.
+ const coverLive=fixture();coverLive.status='generating';edits.editingState(coverLive).contentOpen=true;runtime.runtimeState(coverLive);runs.startRun(coverLive);coverLive.nodes.s0.slide=structuredClone(coverLive.deck.slides[0]);delete coverLive.nodes.s0.slide.layoutId;delete coverLive.nodes.s0.slide.layoutRef;runtime.updateSlidePreview(coverLive,'s0');coverLive.runtime.slides.s0.quality={issues:[]};repo.saveProject(coverLive);
+ const coverTitle=coverLive.nodes.s0.slide.nodes.find(n=>n.semanticRole==='title'),beforeCover=coverLive.runtime.slides.s0.preview.elements.find(n=>n.nodeId===coverTitle.id).bounds;
+ const coverChange=await commands.applyCommand(uid,coverLive.id,{type:'node.setContent',baseRevision:coverLive.revision,payload:{slideId:'s0',nodeId:coverTitle.id,content:{text:'Manual cover title'}}});
+ assert.equal(coverChange.project.deck.slides[0].layoutId,'cover');assert.deepEqual(coverChange.project.runtime.slides.s0.preview.elements.find(n=>n.nodeId===coverTitle.id).bounds,beforeCover);checks.push('live title save retains the actual cover layout and geometry');
  // A structure request submitted while paused becomes a durable preview after the barrier, never an automatic command.
  const planned = fixture(); planned.status = 'paused'; edits.editingState(planned).contentOpen = true; runtime.runtimeState(planned).pauseRequested = true; runs.startRun(planned); repo.saveProject(planned);
  const plannedScope = await edits.openGenerationScope(uid, planned.id, 's1');

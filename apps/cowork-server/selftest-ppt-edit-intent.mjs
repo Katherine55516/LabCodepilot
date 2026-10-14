@@ -20,12 +20,13 @@ function fixture() {
   const bodies=['','The observed mechanism connects the measured exposure to the decision.','The assessment depends on timing alignment and comparable measurement conditions.','Validate assumptions and transaction costs before using the measured signal.'];
   const slides = ['Introduction', 'Mechanism', 'Limitations', 'Conclusion'].map((title, index) => ({ id: `s${index}`, title, bullets: index ? [bodies[index]] : [], layoutId: index === 0 ? 'cover' : index === 3 ? 'conclusion' : 'summary' }));
   const project = ir.ensureProjectV3({ uid, id: store.newId(), title: 'Fixture', prompt: 'Explain a mechanism and its limitations.', template: 'light', templateSpec, pages: 4,
-    status: 'completed', stage: 'completed', revision: 1, publishedRevision: 1, outline: slides.map(({ id, title }) => ({ id, title, focus: title, refs: [] })), deck: { slides }, nodes: {}, sourceRevision: 0 });
+    status: 'completed', stage: 'completed', pageDecision:{mode:'explicit',source:'user',finalPageCount:4}, revision: 1, publishedRevision: 1, outline: slides.map(({ id, title }) => ({ id, title, focus: title, refs: [] })), deck: { slides }, nodes: {}, sourceRevision: 0 });
   repo.saveProject(project); repo.saveRevision(project, 'baseline'); return project;
 }
 async function waitUntil(check, description) {
   const deadline = Date.now() + 12000;
   while (Date.now() < deadline) { const result = check(); if (result) return result; await new Promise(resolve => setTimeout(resolve, 5)); }
+  if(process.env.PPT_SELFTEST_EVIDENCE)fs.writeFileSync(process.env.PPT_SELFTEST_EVIDENCE,JSON.stringify(store.list(uid).map(p=>repo.getProject(uid,p.id)),null,2));
   throw new Error(`timed out: ${description}`);
 }
 async function request(project, suffix, data, deps) {
@@ -121,7 +122,7 @@ try {
       if (holdFirstPage && epoch === 0 && slideId === 's0') await new Promise(resolve => releases.set(slideId, resolve));
     }
     const changed = snapshot.editing?.instructions?.[slideId]?.length;
-    return { title: `Distinct ${slideId} ${changed ? 'revised' : 'original'}`, titleCandidates: [`Distinct ${slideId} ${changed ? 'revised' : 'original'}`], bullets: slideId === 's0' ? [] : ['A source-backed mechanism explains the relationship.', 'Its assessment depends on the stated conditions.', 'Known limitations constrain the conclusion.'] };
+    return { title: `Distinct ${slideId} ${changed ? 'revised' : 'original'}`, contentBlocks:slideId==='s0'?[]:[{type:'mechanism',body:{s1:'The observed mechanism connects measured exposure to the decision.',s2:'Assessment requires timing alignment and comparable measurement conditions.',s3:'Validate assumptions and transaction costs before using the signal.'}[slideId]}] };
   }, renderPptx: async project => simulatedExport(project), removeContainer: async () => {} };
   assert.equal((await request(generating, '/generate', {}, deps)).status, 202);
   await waitUntil(() => releases.size === 1, 'first page started');

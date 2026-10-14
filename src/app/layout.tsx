@@ -1,5 +1,5 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono, JetBrains_Mono } from "next/font/google";
+import localFont from "next/font/local";
 import "./globals.css";
 import { ThemeProvider } from "@/components/layout/ThemeProvider";
 import { ThemeFamilyProvider } from "@/components/layout/ThemeFamilyProvider";
@@ -9,23 +9,29 @@ import { getAllThemeFamilies, getThemeFamilyMetas } from "@/lib/theme/loader";
 import { renderThemeFamilyCSS } from "@/lib/theme/render-css";
 import { getSetting } from "@/lib/db";
 
-const geistSans = Geist({
+const geistSans = localFont({
+  src: "../assets/fonts/GeistVF.woff2",
+  weight: "100 900",
+  display: "swap",
   variable: "--font-geist-sans",
-  subsets: ["latin"],
 });
 
-const geistMono = Geist_Mono({
+const geistMono = localFont({
+  src: "../assets/fonts/GeistMonoVF.woff2",
+  weight: "100 900",
+  display: "swap",
   variable: "--font-geist-mono",
-  subsets: ["latin"],
 });
 
 // Code-oriented monospace font used by CodeMirror (file edit/preview surface)
 // and any future code-display contexts. JetBrains Mono is purpose-built for
 // programming: tight glyph alignment, ligatures (`<=` / `=>` / `!=` / `->`
 // render as compound glyphs), and a clearly distinguishable 0/O/1/l/I set.
-const jetbrainsMono = JetBrains_Mono({
+const jetbrainsMono = localFont({
+  src: "../assets/fonts/JetBrainsMonoVF.woff2",
+  weight: "100 800",
+  display: "swap",
   variable: "--font-jetbrains-mono",
-  subsets: ["latin"],
 });
 
 export const metadata: Metadata = {

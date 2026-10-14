@@ -24,7 +24,7 @@ export function normalizePageContract(raw, source) {
   return {
     ...(PAGE_JOBS.includes(raw.job) ? { job: raw.job } : {}),
     ...(text(raw.question, 240) ? { question: text(raw.question, 240) } : {}),
-    requiredUnits: [...new Set(strings(raw.requiredUnits, 24, 40))].filter(id => unitIds.has(id)),
+    requiredUnits: [...new Set(strings(raw.requiredUnits, 1000, 40))].filter(id => unitIds.has(id)),
     requiredRelations: [...new Set(strings(raw.requiredRelations, 12, 60))].filter(id => relationIds.has(id)),
     adjacencyPairs: (Array.isArray(raw.adjacencyPairs) ? raw.adjacencyPairs : []).filter(pair => unitIds.has(pair?.a) && unitIds.has(pair?.b) && pair.a !== pair.b)
       .slice(0, 8).map(pair => ({ a: pair.a, b: pair.b, reason: text(pair.reason, 120) })),

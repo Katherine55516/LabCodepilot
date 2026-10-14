@@ -3,6 +3,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import * as legacy from '../ppt-store.mjs';
 import { migrateProject } from './migrations.mjs';
+import {withVerifiedWorkingDeck} from './working-deck.mjs';
 
 const ROOT = legacy._internals.ROOT;
 const ID = /^[a-zA-Z0-9_-]{1,80}$/;
@@ -39,7 +40,7 @@ export function getProject(uid, projectId, { persistMigration = false } = {}) {
   const raw = legacy.get(uid, projectId);
   const result = migrateProject(raw);
   if (result.changed && persistMigration) legacy.save(result.project);
-  return result.project;
+  return withVerifiedWorkingDeck(result.project);
 }
 
 /** Single-process write-ahead checkpoint; JSONL and snapshots are not one filesystem transaction. */

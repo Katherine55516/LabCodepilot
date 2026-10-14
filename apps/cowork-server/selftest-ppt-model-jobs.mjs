@@ -23,7 +23,7 @@ assert.equal(queue.complete('alice', id, { lease: job.lease, text: '{}' }), fals
 assert.deepEqual(queue.list('alice'), []);
 await assert.rejects(queue.request({ ...project, configId: 'managed-a' }, 'prompt'));
 const timeoutQueue = createPptModelJobs({ timeoutMs: 20 });
-await assert.rejects(timeoutQueue.request(project, 'prompt'), /timed out/);
+await assert.rejects(timeoutQueue.request(project, 'prompt'), error=>error.code==='timeout');
 const error = queue.request(project, 'prompt');
 const errorJob = queue.claim('alice', queue.list('alice')[0].id);
 queue.complete('alice', errorJob.id, { lease: errorJob.lease, error: 'secret must never escape' });
@@ -33,6 +33,22 @@ const first = bounded.request(project, 'prompt');
 await assert.rejects(bounded.request(project, 'second'), /full/);
 const claim = bounded.claim('alice', bounded.list('alice')[0].id);
 bounded.complete('alice', claim.id, { lease: claim.lease, text: '{}' }); await first;
+// The server owns the finite stage budget; custom queue deadlines remain authoritative.
+for (const [stage, size, expected] of [['review:deck',200000,420000],['review:deck',199999,420000],['review:deck:batch:2',90000,420000],['review:deck',89999,240000],['review:deck:batch:0',200000,420000],['outline',120000,420000],['outline',119999,240000],['content:s1',200000,240000]]) {
+ const result=queue.request(project,'x'.repeat(size),()=>true,{stage,timeoutMs:999999});
+ const budgetJob=queue.claim('alice',queue.list('alice')[0].id);
+ assert.equal(budgetJob.options.timeoutMs,expected);
+ queue.complete('alice',budgetJob.id,{lease:budgetJob.lease,text:'{}'});await result;
+}
+const queueDelay=createPptModelJobs({timeoutMs:250});
+const delayed=queueDelay.request(project,'queued task');
+await new Promise(resolve=>setTimeout(resolve,100));
+const delayedJob=queueDelay.claim('alice',queueDelay.list('alice')[0].id);
+await new Promise(resolve=>setTimeout(resolve,180));
+assert.equal(queueDelay.complete('alice',delayedJob.id,{lease:delayedJob.lease,text:'{}'}),true,'queue wait must not consume claimed execution budget');
+assert.equal(await delayed,'{}');
+const customDeadline=createPptModelJobs({timeoutMs:20});
+await assert.rejects(customDeadline.request(project,'x'.repeat(200000),()=>true,{stage:'review:deck'}),e=>e.code==='timeout');
 // Exercise the production modelCall and public HTTP routes, not only a queue double.
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'ppt-model-bridge-'));
 process.env.COWORK_STATE_DIR = temp;

@@ -3,13 +3,16 @@
 import {applyRenderContract,measureText} from './render-contract.mjs';
 import {equationDimensions} from '../ppt-math.mjs';
 import {_internals as pointMeasures} from './point-layout.mjs';
+import {templateTextColor} from '../ppt-template-colors.mjs';
 const E=914400;
 const bounds=(x,y,w,h)=>({x:Math.round(x*E),y:Math.round(y*E),width:Math.round(w*E),height:Math.round(h*E)});
 export const COMPONENT_LAYOUTS=['two-panel','formula-variables','item-icons'];
 export function componentElements(project,slide,typography) {
   if(!COMPONENT_LAYOUTS.includes(slide.layoutId))return null;
   const fonts=project.templateSpec?.fonts||{},palette=project.templateSpec?.palette||{},elements=[];
-  const style={fontFamily:fonts.body,eastAsiaFontFamily:fonts.bodyEastAsia,color:palette.foreground,fontSizePt:Math.max(15,typography.bodyPt||17),lineHeight:1.18,paragraphSpacingEm:.2};
+  // Imported templates: body text keeps the template's colour for this role.
+  const index=project.deck?.slides?.indexOf(slide)??-1,templated=project.templateFidelity?.slides?.length&&index>=0;
+  const style={fontFamily:fonts.body,eastAsiaFontFamily:fonts.bodyEastAsia,color:templated?templateTextColor(project,index,'body').color:palette.foreground,fontSizePt:Math.max(15,typography.bodyPt||17),lineHeight:1.18,paragraphSpacingEm:.2};
   const emit=(node,frame,kind=node.type,content=node.content,extra={})=>{
     const element={id:node.id,nodeId:node.id,kind,bounds:node.geometry||frame,content,style:{...style,...node.style},zIndex:node.zIndex??20,
       locked:Boolean(node.locked),semanticRole:node.semanticRole,sourceArtifact:node.sourceArtifact,groupId:node.groupId,rotation:node.rotation||0,...extra};

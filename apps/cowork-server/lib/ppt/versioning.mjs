@@ -1,8 +1,9 @@
+import {normalizeClaimAudit} from '../ppt-claim-semantics.mjs';
 import { obligationRegistry, normalizeObligationAudit } from '../ppt-obligations.mjs';
 import { inputFramework, normalizeScopeAudit, scopeAuditIsCurrent } from '../ppt-input-scope.mjs';
 import { digest } from './edit-context.mjs';
 import { PPT_PROMPT_CONTRACT_VERSION } from '../ppt-generation-policy.mjs';
-export const REVIEW_RUBRIC_VERSION = 8;
+export const REVIEW_RUBRIC_VERSION = 12;
 
 export function planPayload(project) {
   return { inputFrameworkHash: inputFramework(project).frameworkHash, generationPolicy: project.generationPolicy, sourceRevision: project.sourceRevision || 0, sourceHash: project.source?.sha256 || digest(project.source?.text || project.prompt),
@@ -26,7 +27,7 @@ export function synchronizePlan(project, reason = 'planning') {
 }
 
 export function semanticReviewKey(project) {
-  return digest({ obligationRegistryHash:obligationRegistry(project).registryHash, inputFrameworkHash: inputFramework(project).frameworkHash, generationPolicy: project.generationPolicy, activePromptContractVersion:PPT_PROMPT_CONTRACT_VERSION, source: project.source?.sha256 || project.source?.text || project.prompt, sourceMedia:project.source?.images?.map(image=>({id:image.id,contentHash:image.imageSha256||digest(image.dataUrl),caption:image.caption,required:image.required})), sourceObjectExclusions:project.sourceObjectExclusions,
+  return digest({ reviewRubricVersion:REVIEW_RUBRIC_VERSION, obligationRegistryHash:obligationRegistry(project).registryHash, inputFrameworkHash: inputFramework(project).frameworkHash, generationPolicy: project.generationPolicy, activePromptContractVersion:PPT_PROMPT_CONTRACT_VERSION, source: project.source?.sha256 || project.source?.text || project.prompt, sourceMedia:project.source?.images?.map(image=>({id:image.id,contentHash:image.imageSha256||digest(image.dataUrl),caption:image.caption,required:image.required})), sourceObjectExclusions:project.sourceObjectExclusions,
     template:project.templateSpec, templateFidelityHash:project.templateFidelity?.sha256,
     planning: project.planning, outline: project.outline, constraints: project.constraints?.entries?.filter(entry => entry.active && ['content','title','data','structure'].includes(entry.type)),
     slides: project.deck?.slides?.map(slide => ({ id: slide.id, role: slide.role, templateOmissions: slide.templateOmissions,
@@ -47,6 +48,7 @@ export function invalidateReviews(project, beforeKey) {
 export function bindReview(project, review, meta = {}) {
   normalizeScopeAudit(review?.scopeAudit, project, (project.deck?.slides || []).map(slide => slide.id));
   normalizeObligationAudit(review?.obligationAudit, project);
+  normalizeClaimAudit(review?.claimAudit,project);
   project.quality = { ...(project.quality || {}), modelReview: review, reviewState: 'valid',
     reviewInputHash: semanticReviewKey(project), reviewerModel: { configId: project.configId, model: project.model }, rubricVersion: REVIEW_RUBRIC_VERSION, ...meta };
   return project.quality;

@@ -1,15 +1,44 @@
+import {outlineRangeRepairPrompt,applyOutlineRangeRepair} from './ppt-outline-range-repair.mjs';
+import {prepareLanguagePairAudit,languagePairAuditSchema} from './ppt-language-pair-audit.mjs';
+import {prepareLanguageProjection} from './ppt-language-projection.mjs';
+import {displayedDocumentTitle}from './ppt-deck-coherence.mjs';
+import {operationHistory}from './ppt/command-history.mjs';
+import {optionalCopyRepair}from './ppt-optional-copy-repair.mjs';
+import {refreshDerivedSource}from './ppt-source-refresh.mjs';
+import {refitSourceMedia}from './ppt-media-refit.mjs';
+import {libraryEligible}from './ppt-library.mjs';
+import {reviewResponseSchema}from './ppt-review-schema.mjs';
+import {normalizeDeckEyebrows} from './ppt-section-eyebrow.mjs';
+import {recordRepairComparison,recordRepairSet} from './ppt/repair-comparison.mjs';
+import {confirmNativeOutlineFit,outlineConfirmationHash,recordOutlineConfirmation} from './ppt-outline-confirmation.mjs';
+import {outlineSelectionRepairPrompt,applyOutlineSelectionRepair,selectionDeltaResponseSchema} from './ppt-outline-selection-repair.mjs';
+import {prepareNavigationPlan,navigationResponseSchema} from './ppt-navigation-plan.mjs';
+import {bindDeckNavigation,finalDeckNavigation,navigationWriterHeaders} from './ppt-deck-navigation.mjs';
+import {commitSourceComponents,componentLeaseToken} from './ppt/component-commit.mjs';
+import {executePostWriterPlan} from './ppt-postwriter-executor.mjs';
+import {postWriterPlan} from './ppt-postwriter-plan.mjs';
+import {confirmedPageDecision,automaticPageDecision} from './ppt-page-decision.mjs';
+import {writerDeltaResponseSchema, writerLocalRepairScope,applyWriterLocalDelta,writerLocalRepairPrompt} from './ppt-writer-local-repair.mjs';
+import {RENDER_CONTRACT_VERSION} from './ppt/render-contract.mjs';
+import {renderIssues} from './ppt/render-audit.mjs';
+import {compileContentSelection,selectionSource,exactPageConflict,coalesceEquivalentSelections, visibleEquivalentCandidates } from './ppt-content-selection.mjs';
+import {taskSummary,liveProjectView} from './ppt/project-view.mjs';
+import { repeatedFocusMetadataError,pruneEmptySelectedPages,retainOutlineRepair,resumeOutlineRepair,outlineSummaryRepairPrompt,applyOutlineSummaryRepair,outlineMetadataRepairPrompt,applyOutlineMetadataRepair,repairOutlineMetadataBatch,outlineOwnershipRepairPrompt,applyOutlineOwnershipRepair,outlineRelationBatchRepairPrompt,applyOutlineRelationBatchRepair,outlineRelationRepairPrompt,applyOutlineRelationRepair,orderSourceConclusion, contentDistribution, inspectSkeletonOwnership, skeletonBatches, outlineDraftFromPartialJson, assembleSkeletonBatches, outlineResponseSchema, outlineDeltaPrompt, applyOutlineDelta, compileSkeleton, skeletonPrompt, parseOutlineJson, userRequirements, candidateRecord, promptTelemetry, fragmentTitle, outlineError } from './ppt-outline-protocol.mjs';
 import { pptModelJobs, PPT_BYOK_CAPABILITIES } from './ppt-model-jobs.mjs';
-import { validateRepairCandidate } from './ppt-repair-routing.mjs';
+import { preserveCopyRepairFrame, validateRepairCandidate, validateSourceRewriteWithReflow } from './ppt-repair-routing.mjs';
 import { assertCandidateScope } from './ppt/input-scope-service.mjs';
 import { automaticPages, densityProfile, densityPrompt } from './ppt-density-profile.mjs';
-import { packOutline, inspectDensityOutline, revalidateOutlineFits } from './ppt-density-packing.mjs';
-import { outlineCapacityRepairPrompt, applyOutlineCapacityRepair, outlineCapacityRepairScopes, partitionOutlineWithMeasuredComponents, restoreMissingSourceArtifacts } from './ppt-outline-capacity-repair.mjs';
-import { bindSourceArtifacts, bindSourceMedia, isSourceOwnedNode } from './ppt-source-artifacts.mjs';
+import { candidateFit, packOutline, inspectDensityOutline, revalidateOutlineFits } from './ppt-density-packing.mjs';
+import {isSourceArtifactItem} from './ppt-density-capacity.mjs';
+import { outlineCapacityRepairPrompt, applyOutlineCapacityRepair, outlineCapacityRepairScopes, partitionOutlineWithMeasuredComponents, restoreMissingSourceArtifacts, splitReadingUnits } from './ppt-outline-capacity-repair.mjs';
+import { replaceTemplateSourceRegion, bindSourceArtifacts, bindSourceMedia, isSourceOwnedNode } from './ppt-source-artifacts.mjs';
 import { acceptExportVerification, blockExportVerification } from './ppt-export-integrity.mjs';
 import { templateLimits } from './ppt-template-security.mjs';
 import { importEditablePptx as importTemplateIR } from './ppt/import-pptx.mjs';
 import { markPptTime } from './ppt-trace.mjs';
-import { normalizeGenerationPolicy, requestedPageCount, PPT_PROMPT_CONTRACT_VERSION } from './ppt-generation-policy.mjs';
+import { normalizeGenerationPolicy, defaultGenerationPolicy, requestedPageCount, PPT_PROMPT_CONTRACT_VERSION } from './ppt-generation-policy.mjs';
+import { outlineGrowth, outlineConcisionMetrics, concisionPlannerRule, routeTranslationsToNotes } from './ppt-outline-concision.mjs';
+import { condenseOverflowingTables, mergeUnderfilledPages, pageLoad } from './ppt-outline-condense.mjs';
 import { syncPresentationPolicy } from './ppt-presentation-policy.mjs';
 import { normalizePageContract } from './ppt-page-contract.mjs';
 /** M1 PPT Workspace API and durable, server-side job orchestration.
@@ -20,7 +49,7 @@ import * as store from './ppt-store.mjs';
 import * as orch from './orchestrator.mjs';
 import * as files from './files.mjs';
 import { runRoutine } from './routine-runner.mjs';
-import { promptPolicy, writingGuide, normalizeKeyPoints, canonicalWriterOutput, criticRewriteTargets, sourcePacket, slideSemanticContext, writerPrompt, writerRepairPrompt, writerCorrectionContext, outlineContentContract, OUTLINE_SCHEMA } from './ppt-prompt-contracts.mjs';
+import { writerSourceEvidenceIds, promptPolicy, writingGuide, outputLanguage, normalizeKeyPoints, canonicalWriterOutput, criticRewriteTargets, sourcePacket, slideSemanticContext, writerPrompt, writerRepairPrompt, writerCorrectionContext, outlineContentContract, OUTLINE_SCHEMA } from './ppt-prompt-contracts.mjs';
 import { renderPptx } from './ppt/exporters/pptx.mjs';
 import { renderPdf } from './ppt/exporters/pdf.mjs';
 import { extractFile, normalizePaste, mergeSourceMedia, validateFile, sha256 } from './ppt-source.mjs';
@@ -32,6 +61,7 @@ import { deterministicReview, finalQualityReport, inspectMedia, inspectSourceFor
 import { ensureDeckV3, ensureProjectV3, newId as newIrId, stableId } from './ppt/ir.mjs';
 import { buildRenderTree } from './ppt/render-tree.mjs';
 import { emitRunProgress, completeRun, recoverRun, startRun, transitionNode } from './ppt/run-service.mjs';
+import { updateDraft, clearDraft } from './ppt/draft-store.mjs';
 import { getProject as getStructuredProject, saveProject as saveStructuredProject, saveRevision, enqueueProject, readRevision } from './ppt/repository.mjs';
 import { editingState, generationEpoch, contentEditResult, recoverContentEdits, processGenerationEdits, recoverGenerationEdits } from './ppt/generation-edit-service.mjs';
 import { templatePreview } from './ppt/template-preview-service.mjs';
@@ -43,16 +73,16 @@ import { importEditablePptx, renderImportedPptx } from './ppt/import-pptx.mjs';
 import { enrichAssetRefs } from './ppt/assets.mjs';
 import { withSemanticIndex } from './ppt-semantic.mjs';
 import { missingRequiredEvidence } from './ppt-evidence.mjs';
-import { buildPlanning, estimatePageRecommendation, inspectLongDeckOutline, normalizeFactSynthesis, refreshPlanning, retrieveSlideSources, sourceCapacityPlan, estimationSource, sourcePlanningContext } from './ppt-planning.mjs';
+import { sourceBackedDetails, buildPlanning, estimatePageRecommendation, inspectLongDeckOutline, normalizeFactSynthesis, refreshPlanning, retrieveSlideSources, sourceCapacityPlan, estimationSource, sourcePlanningContext } from './ppt-planning.mjs';
 import { planSparseInput, profilePptInput } from './ppt-content-depth.mjs';
 import { compileSectionLabel, formatUserDeckTitle, inspectSlideCopy, materializeCopy } from './ppt-presentation-writing.mjs';
 import { dominantInputLanguage, normalizeTopicTitle, closingTopic } from './ppt-topic-language.mjs';
-import { prepareTemplateFidelity, rescheduleTemplateFidelity, templateSlotPrompt, templateOutlinePrompt, inspectTemplateSlotDraft, autoTemplateMediaOmissions, bindTemplateFidelity, renderTemplatePptx } from './ppt-template-fidelity.mjs';
+import { inspectNativeCoverTitle, inspectNativeOutlineTitles, prepareTemplateFidelity, repairNativePageAssignment, rescheduleTemplateFidelity, templateSlotPrompt, templateOutlinePrompt, inspectTemplateSlotDraft, autoTemplateMediaOmissions, bindTemplateFidelity, renderTemplatePptx } from './ppt-template-fidelity.mjs';
 import { templateReuseError } from './ppt-template-scheduler.mjs';
 import { inspectReportOutline } from './ppt-report-qa.mjs';
 import { reorderManual, sortManual } from './ppt-manual-order.mjs';
 import { runtimeState, checkpoint, updateSlidePreview, finishPause, reconcileCheckpoint, acquireGenerationLease } from './ppt/runtime.mjs';
-import { synchronizePlan, bindReview, reviewIsCurrent, semanticReviewKey } from './ppt/versioning.mjs';
+import { synchronizePlan, bindReview, reviewIsCurrent, semanticReviewKey, invalidateReviews } from './ppt/versioning.mjs';
 import { effectiveConstraints } from './ppt/mutation-router.mjs';
 import { digest } from './ppt/edit-context.mjs';
 import { transformGeneratedSlide } from './ppt/generation-edit-service.mjs';
@@ -62,7 +92,7 @@ const editing = new Set();
 const MAX_PROMPT = 80000;
 const MAX_TEXT = 160;
 const PPT_NODE_CONCURRENCY = Math.max(1, Math.min(3, Number(process.env.PPT_NODE_CONCURRENCY) || 3));
-const PPT_RE = /^\/ppt\/projects(?:\/([a-f0-9]{32}))?(?:\/(outline|generate|retry|export|pdf|source|duplicate|trash|restore|permanent|versions|rewrite|blank))?$/i;
+const PPT_RE = /^\/ppt\/projects(?:\/([a-f0-9]{32}))?(?:\/(outline|generate|retry|export|pdf|source|duplicate|trash|restore|permanent|versions|rewrite|blank|media-exclusions|page-policy))?$/i;
 const FOLDER_RE = /^\/ppt\/folders(?:\/([a-f0-9]{32}))?$/i;
 const TEMPLATE_PREVIEW_RE = /^\/ppt\/templates\/(violet|blue|light|marketing|education|[a-f0-9]{32})\/preview$/i;
 const TEMPLATE_RE = /^\/ppt\/templates(?:\/(violet|blue|light|marketing|education|[a-f0-9]{32}))?$/i;
@@ -79,16 +109,7 @@ function pages(value) {
   if (!Number.isInteger(n) || n < 3 || n > 100) throw new HttpError(400, 'pages must be between 3 and 100');
   return n;
 }
-function parseModelJson(text) {
-  let raw = String(text || '').trim().replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
-  try { return JSON.parse(raw); }
-  catch {
-    const first = raw.indexOf('{'); const last = raw.lastIndexOf('}');
-    if (first >= 0 && last > first) raw = raw.slice(first, last + 1);
-    try { return JSON.parse(raw); }
-    catch { throw new Error('模型未返回有效的结构化内容，请重试'); }
-  }
-}
+const parseModelJson = parseOutlineJson;
 function sourceFromDeck(base) {
   const segments = (base.deck?.slides || []).map((slide, index) => ({ id: String(index + 1), location: `旧版第 ${index + 1} 页`, text: JSON.stringify(slideSemanticContext(slide)) }));
   return { kind: 'base', name: base.title, text: segments.map(s => s.text).join('\n\n'), segments };
@@ -134,7 +155,10 @@ function normalizeOutline(value, count, source, update = null, deckTitle = null,
     const title = index === 0 && deckTitle?.source === 'user' && deckTitle?.text ? deckTitle.text : generatedTitle;
     const focus = bounded(s.focus || s.summary || s.title, 360, `slide ${index + 1} focus`);
     const oldFocus = update?.baseSnapshot.outline?.find(slide => slide.id === baseSlideId)?.focus;
-    if (change === 'keep' && (title !== base.title || (oldFocus && focus !== oldFocus))) change = 'rewrite';
+    // A former closing page shows the greeting as its deck title; its planned
+    // outline title is the identity a keep decision is compared with.
+    const baseTitles = new Set([base?.title, update?.baseSnapshot.outline?.find(slide => slide.id === baseSlideId)?.title].filter(Boolean));
+    if (change === 'keep' && (!baseTitles.has(title) || (oldFocus && focus !== oldFocus))) change = 'rewrite';
     const children = Array.isArray(s.children) ? s.children.slice(0, 12).map((child, childIndex) => ({
       id: typeof child?.id === 'string' && /^[a-zA-Z0-9_-]{1,80}$/.test(child.id) ? child.id : newIrId('item'),
       title: normalizeTopicTitle(bounded(child?.title || `子章节 ${childIndex + 1}`, MAX_TEXT, `slide ${index + 1} child title`), topicLanguage),
@@ -142,10 +166,12 @@ function normalizeOutline(value, count, source, update = null, deckTitle = null,
     })) : [];
     const keyPoints = normalizeKeyPoints(s.keyPoints || s.key_points, source);
     return { id: typeof s.id === 'string' && /^[a-zA-Z0-9_-]{1,80}$/.test(s.id) ? s.id : newIrId('slide'), title,
-      focus, description: bounded(s.description || s.focus || s.title, 360, `slide ${index + 1} description`, false), children,
+      focus, description: bounded(s.description && s.description !== focus ? s.description : '', 360, `slide ${index + 1} description`, false), children,
       section: compileSectionLabel(normalizeTopicTitle(bounded(s.section || s.title, MAX_TEXT, `slide ${index + 1} section`), topicLanguage)),
       refs: [...new Set([...(Array.isArray(s.refs) ? s.refs.map(String) : []), ...keyPoints.flatMap(point => point.refs)])].filter(ref => validRefs.has(ref)),
       ...((Array.isArray(s.chunkRefs) || keyPoints.some(point => point.chunkRefs.length)) ? { chunkRefs: [...new Set([...(Array.isArray(s.chunkRefs) ? s.chunkRefs.map(String) : []), ...keyPoints.flatMap(point => point.chunkRefs)])].filter(ref => validChunkRefs.has(ref)) } : {}),
+      ...(s.planningProtocolVersion===2?{planningProtocolVersion:2}:{}),
+      ...(s.region==='appendix'?{region:'appendix'}:{}),
       ...(typeof s.role === 'string' ? { role: s.role.slice(0, 40) } : {}),
       ...(typeof s.question === 'string' ? { question: s.question.slice(0, 240) } : {}),
       ...(typeof s.headlineIntent === 'string' || typeof s.headline_intent === 'string' ? { headlineIntent: String(s.headlineIntent || s.headline_intent).slice(0, 160) } : {}),
@@ -157,6 +183,7 @@ function normalizeOutline(value, count, source, update = null, deckTitle = null,
       ...(Array.isArray(s.sourceUnitIds) ? { sourceUnitIds: [...new Set(s.sourceUnitIds)].filter(id => source?.semantic?.inventory?.items?.some(item => item.id === id)) } : {}),
       ...(s.pageContract && typeof s.pageContract === 'object' ? { pageContract: normalizePageContract(s.pageContract, source) } : {}),
       ...(Array.isArray(s.sourceImageIds) ? {sourceImageIds:[...new Set(s.sourceImageIds)].filter(id=>source?.images?.some(image=>image.id===id))}:{}),
+      ...(Array.isArray(s.repeatSourceUnitIds)?{repeatSourceUnitIds:s.repeatSourceUnitIds}:{}),
       ...(Array.isArray(s.sourceArtifactRanges) ? { sourceArtifactRanges: s.sourceArtifactRanges } : {}),
       ...(s.densityFit ? { densityFit: s.densityFit } : {}),
       ...(Array.isArray(s.packedFrom) ? { packedFrom: s.packedFrom } : {}),
@@ -172,7 +199,7 @@ function normalizeOutline(value, count, source, update = null, deckTitle = null,
       ...(Array.isArray(s.requiredDetails || s.required_details) ? { requiredDetails: outlineValues(s.requiredDetails || s.required_details,1000,4000,'requiredDetails') } : {}),
       ...(Array.isArray(s.requiredEvidenceIds || s.required_evidence_ids) ? { requiredEvidenceIds: [...new Set(s.requiredEvidenceIds || s.required_evidence_ids)].filter(id =>
         (source?.semantic?.evidenceAtoms || []).some(atom => atom.id === id)).slice(0, 6) } : {}),
-      ...(Array.isArray(s.claimIds || s.claim_ids) ? { claimIds: (s.claimIds || s.claim_ids).filter(id => typeof id === 'string').slice(0, 8) } : {}),
+      ...(Array.isArray(s.claimIds || s.claim_ids) ? { claimIds: (s.claimIds || s.claim_ids).filter(id => typeof id === 'string').slice(0, 1000) } : {}),
       ...(typeof s.narrativeRole === 'string' || typeof s.narrative_role === 'string' ? { narrativeRole: String(s.narrativeRole || s.narrative_role).slice(0, 40) } : {}),
       ...(typeof s.evidenceIntent === 'string' || typeof s.evidence_intent === 'string' ? { evidenceIntent: String(s.evidenceIntent || s.evidence_intent).slice(0, 80) } : {}),
       ...(s.titleLocked === true || s.title_locked === true || (index === 0 && deckTitle?.locked) ? { titleLocked: true } : {}),
@@ -237,6 +264,18 @@ function normalizeDeck(value, outline, previousDeck) {
   return ensureDeckV3(applyLayoutRegistry(deck));
 }
 function outlinePrompt(p) {
+  if(!p.update && !p.requestedOutline){
+    const auto=automaticPages(p);
+    const overviewNotes=p.generationPolicy?.content==='overview'&&p.generationPolicy?.details==='notes';
+    const preservation=overviewNotes
+      ?'Preserve the complete immutable original in speaker notes. Main slides are a concise overview, NOT full-source reproduction: put core definitions, mechanisms, necessary numbers/formulas, conditions/limitations and explicit list members on slides. Use semantic summaryText for eligible non-structured target-language prose; move authorized secondary details and omitted code to notes with an explicit selection ledger. Never list a notes ID as a primary slide owner. Group several related units under one shared reader question and real measured component layout; neither one paragraph nor one source unit earns a page. Definitions, evidence and their qualifiers belong in one coherent reading group when they fit.'
+      :'Keep every required source object, all table columns/tail rows, formulas/variables/conditions.';
+    const pairPolicy=overviewNotes&&p.generationPolicy?.language?.mode==='output'
+      ?'Detected equivalent language pairs use one target-language visible owner, with the complete originals in notes and a verified visibleEquivalentSourceUnitId. Budget the target-language display only; protected structures still retain every member and condition.'
+      :overviewNotes&&p.generationPolicy?.language?.body==='primary'?'Detected bilingual pairs: the original-language unit is the one visible owner; its translation goes to notes with visibleEquivalentSourceUnitId. Budget one display cost per pair; titles and section labels stay bilingual.'
+      :'Translation pairs are one claim with two display costs.';
+    return skeletonPrompt(p,`You are a source-grounded presentation planner. No tools, no fabricated facts. output_language=${p.generationPolicy?.language?.mode==='output'?outputLanguage(p):'preserve source languages'}; knowledge=${p.generationPolicy?.knowledge||'source_only'}; content_contract=${p.generationPolicy?.content||'full_source'}. ${auto?'Pages are provisional; choose 3–100 pages by semantic relationships and native capacity.':`Exactly ${p.pages} pages including cover and conclusion.`} ${preservation} ${pairPolicy} ${concisionPlannerRule(p)} Avoid repeating tables as prose. Native capacity=${JSON.stringify(sourceCapacityPlan(estimationSource(p),p.pages,p)?.capacity)}. Locked cover title=${JSON.stringify(p.deckTitle?.source==='user'?p.deckTitle.raw:null)}; required images=${JSON.stringify((p.source?.images||[]).filter(x=>x.required||x.mustPreserve).map(x=>x.id))}.`);
+  }
   const sourceContext = sourcePlanningContext(p.source);
   const pageRecommendation = estimatePageRecommendation(p);
   const automatic = automaticPages(p);
@@ -277,8 +316,23 @@ function contentRepairPrompt(p, slide, index, draft, issues) {
 }
 async function modelCall(p, prompt, activity, log, options = {}) {
   const sid = options.nodeKey ? sha256(Buffer.from(`${p.id}:${options.nodeKey}`)).slice(0, 32) : p.id;
-  const canStart = () => { const latest = store.get(p.uid, p.id); return Boolean(latest && !latest.deletedAt && latest.status !== 'cancelled' && (!(options.nodeKey || '').startsWith('content:') && !(options.nodeKey || '').startsWith('review:deck') || (latest.status !== 'paused' && !latest.runtime?.pauseRequested))); };
-  if (pptModelJobs.eligible(p.configId)) return parseModelJson(await pptModelJobs.request(p, prompt, canStart));
+  const canStart = () => { const latest = store.get(p.uid, p.id,{hydrate:false}); return Boolean(latest && !latest.deletedAt && latest.status !== 'cancelled' && (!(options.nodeKey || '').startsWith('content:') && !(options.nodeKey || '').startsWith('review:deck') || (latest.status !== 'paused' && !latest.runtime?.pauseRequested))); };
+  const writerSlide=p.outline?.find(slide=>options.nodeKey===`content:${slide.id}`||String(options.nodeKey||'').startsWith(`content:${slide.id}:`));
+  const writerEpoch=writerSlide?generationEpoch(p,writerSlide.id):null,writerRun=p.currentRunId,writerBaseRevision=p.revision,writerLease=componentLeaseToken(p);
+  const onProgress=writerSlide?progress=>{
+    const latest=store.get(p.uid,p.id);
+    if(!latest||latest.deletedAt||latest.status!=='generating'||latest.currentRunId!==writerRun||generationEpoch(latest,writerSlide.id)!==writerEpoch)return;
+    const draft=updateDraft(latest,writerSlide.id,{...progress,runId:writerRun,epoch:writerEpoch,sourceHash:p.source?.sha256||''});
+    const refs=draft?.blocks?.map(block=>block.sourceRef).filter(Boolean)||[];
+    if(refs.length)void enqueueProject(p.uid,p.id,()=>{
+      const current=store.get(p.uid,p.id);if(!current)return;
+      const result=commitSourceComponents(current,{slideId:writerSlide.id,runId:writerRun,epoch:writerEpoch,baseRevision:writerBaseRevision,sourceHash:p.source?.sha256||'',lease:writerLease,refs});
+      if(result.status==='committed'){store.save(current);emitRunProgress(current,'slide.component_commit',result.commit);}
+    }).catch(error=>log?.warn?.('PPT component commit failed: '+String(error.message).slice(0,200)));
+  }:options.onProgress;
+  const selectionBudget=p.generationPolicy?.details==='notes'&&String(options.nodeKey||p.stage).startsWith('outline')
+    ?((p.originalSourceInventory?.items||p.source?.semantic?.inventory?.items||[]).length*96+Number(p.pages||3)*128>16384?32768:16384):undefined;
+  if (pptModelJobs.eligible(p.configId)) return parseModelJson(await pptModelJobs.request(p, prompt, canStart, {stage:options.nodeKey||p.stage,...(onProgress?{onProgress}:{}), ...promptTelemetry(prompt),maxOutputTokens:options.maxOutputTokens??selectionBudget,jsonSchema:languagePairAuditSchema(prompt)||writerDeltaResponseSchema(prompt)||selectionDeltaResponseSchema(prompt)||outlineResponseSchema(prompt)||reviewResponseSchema(prompt)||navigationResponseSchema(prompt),onTelemetry:telemetry=>{const latest=store.get(p.uid,p.id);if(latest){latest.modelUsage=[...(latest.modelUsage||[]).slice(-199),{stage:options.nodeKey||p.stage,model:p.model,...promptTelemetry(prompt),telemetry}];store.save(latest);}}}));
   try {
     const result = await runRoutine({ sid, uid: p.uid, kind: orch.KIND_PPT, prompt, model: p.model, configId: p.configId, activity, log,
       canStart });
@@ -293,6 +347,14 @@ const defaultDeps = { modelCall, renderPptx: project => project.templateFidelity
 function normalizeSlide(value, outlineSlide, project = null, previousTitles = []) {
   const index = project?.outline?.findIndex(item => item.id === outlineSlide.id) ?? -1;
   value = canonicalWriterOutput(value || {}, project?.templateFidelity?.mode === 'preserve' ? project.templateFidelity.slides[index] : null);
+  if(outlineSlide.role==='navigation'&&!(outlineSlide.sourceUnitIds||[]).length){
+    // The final approved plan owns chapter labels/ranges. A writer's unowned
+    // course introduction must not replace that derived navigation object.
+    value={...value,sourceCommentary:[],sourceArtifacts:[],sourceEvidenceIds:[],
+      ...(project?.templateFidelity?.mode==='preserve'?{slotTexts:navigationWriterHeaders(project,outlineSlide,index)}:{})};
+  }
+  const frozenTitle=project?.confirmedOutline&&project.confirmedOutline.titlesFrozen!==false&&!project.editOutputLanguage&&!effectiveConstraints(project,outlineSlide.id).some(c=>c.type==='title');
+  if(frozenTitle&&value.title!==outlineSlide.title)throw new Error('writer changed the confirmed outline title: return title exactly '+JSON.stringify(outlineSlide.title)+'; retain its frozen source ownership and page count');
   const visual = outlineSlide?.visualIntent?.type;
   const suggestedLayout = ({ image: 'image-text', comparison: 'comparison', pipeline: 'timeline', process: 'timeline', timeline: 'timeline', table: 'table', chart: 'chart', metric: 'big-number' })[visual];
   const compatible = suggestedLayout && (!['table', 'chart'].includes(suggestedLayout) || value?.blocks?.some(block => block.type === suggestedLayout));
@@ -301,6 +363,7 @@ function normalizeSlide(value, outlineSlide, project = null, previousTitles = []
   const slide = normalizeDeck({ slides: [prepared] }, [outlineSlide]).slides[0];
   const topicLanguage = project?.editOutputLanguage || dominantInputLanguage(project || {});
   const compiled = materializeCopy(value || {}, outlineSlide, project?.planning, previousTitles, topicLanguage);
+  if(index===0&&project?.templateFidelity?.mode!=='preserve'&&!(outlineSlide.sourceUnitIds||[]).length&&(compiled.copy.blocks.length||value?.sourceCommentary?.length||slide.blocks.length))throw new Error('writer cover contract: unowned cover body is forbidden. Return contentBlocks=[], blocks=[], sourceCommentary=[], subtitle="", takeaway=""; preserve title only. All factual source units belong to the content pages.');
   slide.title = compiled.title.title || slide.title;
   slide.titleQuality = compiled.title;
   const isCover = Boolean(project?.outline?.[0]?.id && project.outline[0].id === outlineSlide.id);
@@ -315,11 +378,16 @@ function normalizeSlide(value, outlineSlide, project = null, previousTitles = []
     slide.titleQuality = { ...compiled.title, ...formatted, source: 'agent', locked: false, maxVisualUnits: compiled.copy.copyBudget.titleHardUnits,
       fits: compiled.title.visualUnits <= compiled.copy.copyBudget.titleHardUnits && formatted.estimatedLines <= compiled.copy.copyBudget.titleMaxLines };
   }
+  if(frozenTitle)slide.title=outlineSlide.title;
   slide.bullets = compiled.bullets;
+  const sectionSlot=project?.templateFidelity?.mode==='preserve'?project.templateFidelity.slides[index]?.slots.find(slot=>slot.role==='section'):null;
+  const writtenSection=sectionSlot?value?.slotTexts?.[String(sectionSlot.shapeId)]:undefined;
+  // The source chapter remains in the outline/contract. The native section
+  // slot is a short navigation label, supplied and measured by the writer.
+  slide.section = normalizeTopicTitle(typeof writtenSection==='string'&&writtenSection.trim()?writtenSection: value?.section || outlineSlide.section || compiled.copy.eyebrow, topicLanguage);
   slide.copy = compiled.copy;
-  slide.section = normalizeTopicTitle(value?.section || outlineSlide.section || compiled.copy.eyebrow, topicLanguage);
   if (index > 0 && index === project?.outline?.length - 1 && !outlineSlide.titleLocked) {
-    slide.title = closingTopic(topicLanguage);
+    slide.title = closingTopic(topicLanguage); slide.closingGreeting = true;
     slide.titleQuality = {...slide.titleQuality,...formatUserDeckTitle(slide.title,compiled.copy.copyBudget),source:'agent',locked:false};
   }
   let resolvedDistributionLayout = false;
@@ -386,12 +454,25 @@ function normalizeSlide(value, outlineSlide, project = null, previousTitles = []
     const selected=value?.sourceArtifacts?.length?value.sourceArtifacts:assigned;
     if(assigned.some(ref=>!selected.some(item=>item.sourceUnitId===ref.sourceUnitId &&
       (item.rowStart??1)===(ref.rowStart??1) && (item.rowEnd??project.source?.semantic?.inventory?.items?.find(o=>o.id===ref.sourceUnitId)?.rows?.length)===(ref.rowEnd??project.source?.semantic?.inventory?.items?.find(o=>o.id===ref.sourceUnitId)?.rows?.length))))throw new HttpError(400,`writer omitted a required source object or changed its row selection: ${JSON.stringify({expected:assigned,received:selected})}. Copy the frozen source selection exactly; row ranges are only valid for tables.`);
-    const commentary=Array.isArray(value?.sourceCommentary)?value.sourceCommentary:assigned.length && !value?.slotTexts
+    const exactSourceOnly=project.generationPolicy?.content==='full_source'&&project.generationPolicy?.language?.mode==='source'&&project.generationPolicy?.knowledge==='source_only'&&assigned.length&&(outlineSlide.sourceUnitIds||[]).every(id=>assigned.some(ref=>ref.sourceUnitId===id));
+    if(exactSourceOnly&&value?.sourceCommentary?.some(entry=>(typeof entry==='string'?entry:entry.text)?.trim()))throw new Error('writer source-only contract: complete frozen source already owns the visible body; sourceCommentary must be []. Do not repeat its statements or add a paraphrase. All original source objects and conditions stay visible.');
+    const commentary=exactSourceOnly?[]:value?.sourceCommentary?.length?value.sourceCommentary:assigned.length && !value?.slotTexts
       ? slide.copy.blocks.map(block=>block.body):[];
-    const requiredEvidence=project.templateFidelity?.mode==='preserve'?retrieval?.requiredEvidenceIds||[]:[];
+    const requiredEvidence=writerSourceEvidenceIds(project,index,project.planning?.slidePlan?.find(plan=>plan.slideId===slide.id),retrieval);
     if(value?.sourceEvidenceIds?.some(id=>!requiredEvidence.includes(id)))throw new Error('invalid source evidence selection: only frozen required evidence IDs may be bound');
     bindSourceArtifacts(project, slide, selected, index, commentary,requiredEvidence);
     bindSourceMedia(project,slide,outlineSlide.sourceImageIds||[],index);
+    if(project.templateFidelity?.mode==='preserve')normalizeDeckEyebrows({...project,deck:{slides:project.outline.map((o,i)=>i===index?slide:{id:o.id,title:o.title,section:o.section,nodes:[]})}},{onlySlideId:slide.id});
+  }
+  if(project?.templateSpec&&project.templateFidelity?.mode!=='preserve'&&project.outline?.some(o=>o.id===slide.id)){
+    const slides=project.outline.map(o=>o.id===slide.id?slide:project.deck?.slides?.find(s=>s.id===o.id)||{id:o.id,title:o.title,nodes:[]});
+    const projected={...project,deck:ensureDeckV3(applyLayoutRegistry({slides}))};
+    const failure=renderIssues(buildRenderTree(projected)).find(issue=>issue.slideId===slide.id&&issue.code==='rendered_title_capacity');
+    if(failure)throw Object.assign(new Error(`rendered_title_capacity: ${JSON.stringify(failure.details)}. Shorten only the unlocked title to a complete concise topic; all body source facts and fonts remain unchanged.`),{code:'capacity_invalid'});
+  }
+  if(outlineSlide.role==='navigation'&&!(outlineSlide.sourceUnitIds||[]).length){
+    const projected={...project,deck:{slides:project.outline.map(o=>o.id===slide.id?slide:{id:o.id,title:o.title,section:o.section,nodes:[]})},nodes:{}};
+    bindDeckNavigation(projected);
   }
   return slide;
 }
@@ -446,6 +527,7 @@ function deterministicGate(project) {
   const unevaluated={evaluation:'not_evaluated',missing:[],repeated:[],conflicts:[],unsupported:[]};
   const initial = deterministicReview(project);
   const repaired = repairProject(project, initial);
+  recordRepairSet(project,repaired.project,repaired.repairs);
   const unchanged=current && beforeKey===semanticReviewKey(repaired.project);
   const report = finalQualityReport(repaired.review, repaired.repairs, unchanged?project.quality.modelReview:unevaluated);
   repaired.project.quality = {...project.quality,...report,...(!unchanged?{reviewState:'stale',reviewInputHash:null}:{})};
@@ -477,6 +559,9 @@ function fail(uid, id, stage, error, log) {
   if (p.status === 'cancelled') return;
   p.status = 'failed'; p.stage = stage;
   p.error = String(error?.message || error).slice(0, 400);
+  const message=String(error?.message||error);
+  const code=error?.code||error?.causes?.[0]?.error?.code||(/writer_copy_gate|writer.*contract|template_slot|template_text_fragment|source.*(?:coverage|capacity)|writer_math/u.test(message)?'content_invalid':/export verification|PPTX.*(?:integrity|visibility)|render.*(?:overflow|capacity)/iu.test(message)?'render_invalid':/review.*(?:contract|invalid)|claim.*(?:audit|invalid)/iu.test(message)?'review_invalid':stage==='outline'?'schema_invalid':'transport');
+  p.failure={version:2,stage,code,model:p.model,at:new Date().toISOString()};
   store.save(p);
   try { transitionNode(p, stage, 'failed', { error: p.error }); emitRunProgress(p, 'run.failed', { stage, error: p.error }); } catch {}
   log(`ppt ${id} ${stage} failed: ${p.error}`);
@@ -531,22 +616,29 @@ function startIngest(uid, id, activity, log, deps = defaultDeps) {
 }
 // Candidate assessment is isolated from the stored project. Native assignment
 // must finish before its fit is recorded or compared with a repaired candidate.
-function assessOutlineCandidate(project, raw) {
+function assessOutlineCandidate(project, raw, {finalRepack=false}={}) {
+  raw=routeTranslationsToNotes(project,coalesceEquivalentSelections(raw),item=>visibleEquivalentCandidates(project,item));
   const automatic=automaticPages(project);
+  let contentSelection;try{contentSelection=compileContentSelection(project,raw);}catch(error){error.outlineContract=true;error.code='coverage_invalid';throw error;}
+  if(contentSelection||project.languageProjection)project={...project,...(contentSelection?{contentSelection}:{}),originalSourceInventory:project.originalSourceInventory||project.source.semantic.inventory,source:selectionSource(project,contentSelection)};
+  try{raw=compileSkeleton(project,raw);if(automatic)raw=pruneEmptySelectedPages(project,raw);}catch(error){error.outlineContract=true;throw error;}
   let rawOutline,outline;
-  const candidateProject={...project};
+  const candidateProject={...project,...(automatic&&project.templateFidelity?{nativeCapacityAssignment:true}:{})};
   try {
-    rawOutline=project.requestedOutline?raw:packOutline(project,raw);
+    rawOutline=project.requestedOutline||project.nativeTitleRepairSeed?raw:packOutline(project,raw,{finalRepack});
     if(automatic)candidateProject.pages=pages(rawOutline.slides.length);
+    rawOutline={...rawOutline,slides:rawOutline.slides.map(slide=>fragmentTitle(slide,project.source))};
     outline=normalizeOutline(rawOutline,candidateProject.pages,project.source,project.update,project.deckTitle,project.requestedOutline ? null : project.editOutputLanguage || dominantInputLanguage(project));
-  } catch(error){error.code='ppt_outline_contract';throw error;}
+  } catch(error){error.code='schema_invalid';error.outlineContract=true;throw error;}
   candidateProject.outline=outline;
-  rescheduleTemplateFidelity(candidateProject);
+  // Explicit N fixes quantity, not a role-only layout reassignment. Preserve
+  // an accepted assignment during title review; other plans choose by fit.
+  if(!project.nativeTitleRepairSeed)rescheduleTemplateFidelity(candidateProject,{scoreSlide:(p,index)=>candidateFit(outline[index],p,index).predictedOverflow,allowOverflowCandidate:automatic&&!project.confirmedOutline});
   rawOutline=revalidateOutlineFits(candidateProject,rawOutline,outline);
   outline=outline.map((slide,index)=>({...slide,densityFit:rawOutline.slides[index].densityFit}));
   candidateProject.outline=outline;
   const planning=buildPlanning(candidateProject,rawOutline,outline);
-  const issues=[...inspectReportOutline(candidateProject,outline,planning.brief),...inspectLongDeckOutline(candidateProject,outline),...inspectDensityOutline(rawOutline,candidateProject)];
+  const issues=[...exactPageConflict(candidateProject,rawOutline),...inspectSkeletonOwnership(candidateProject,rawOutline),...inspectReportOutline(candidateProject,outline,planning.brief),...inspectLongDeckOutline(candidateProject,outline),...inspectDensityOutline(rawOutline,candidateProject)];
   return {project:candidateProject,rawOutline,outline,planning,issues};
 }
 function startOutline(uid, id, activity, log, deps = defaultDeps) {
@@ -557,27 +649,148 @@ function startOutline(uid, id, activity, log, deps = defaultDeps) {
     try {
       const p = store.get(uid, id);
       if (!p || p.status !== 'outlining') return;
+      if(p.failure){p.outlineFailureHistory=[...(p.outlineFailureHistory||[]).slice(-49),p.failure];delete p.failure;p.error='';store.save(p);}
       if (p.source?.segments?.length && !p.source.semantic) { p.source = withSemanticIndex(p.source); store.save(p); }
       syncPresentationPolicy(p);
+      await prepareLanguageProjection(p,(prompt,nodeKey)=>deps.modelCall(p,prompt,activity,log,{nodeKey,maxOutputTokens:8192}),async projected=>{const current=store.get(uid,id);if(current?.status!=='outlining')throw outlineError('cancelled');current.originalSourceInventory=projected.originalSourceInventory;current.languageProjection=projected.languageProjection;store.save(current);});
+      await prepareLanguagePairAudit(p,(prompt,nodeKey)=>deps.modelCall(p,prompt,activity,log,{nodeKey,maxOutputTokens:8192}),async audited=>{const current=store.get(uid,id);if(current?.status!=='outlining')throw outlineError('cancelled');current.languagePairAudit=audited.languagePairAudit;store.save(current);});
       try { transitionNode(p, 'outline', 'running'); } catch {}
       const automatic = automaticPages(p);
       if (automatic) p.pages = estimatePageRecommendation(p).recommended;
+      const saveCandidate=(raw,issues=[])=>{const current=store.get(uid,id);if(current?.status==='outlining'){current.candidateOutline=candidateRecord(current,raw,issues);current.outlineTrace=[...(current.outlineTrace||[]).slice(-99),{at:new Date().toISOString(),candidateHash:current.candidateOutline.hash,pages:raw?.slides?.length,issues:issues.map(item=>item.code),metrics:current.candidateOutline.metrics}];store.save(current);}};
+      const batches=skeletonBatches({...p,planningNativeCapacity:sourceCapacityPlan(estimationSource(p),p.pages,p)?.capacity});
+      const planningIdentity=sha256(Buffer.from(JSON.stringify({model:p.model,contractVersion:p.promptContractVersion,template:p.template,templateSpec:p.templateSpec,templateIdentity:p.templateFidelity?.sha256,policy:p.generationPolicy,prompts:batches.length?batches.map(batch=>batch.prompt):[outlinePrompt(p)]})));
+      const resumedRepair=!p.requestedOutline&&resumeOutlineRepair(p.outlineRepairCheckpoint,planningIdentity);
+      const saveAssessedCheckpoint=assessed=>{const current=store.get(uid,id);if(current?.status==='outlining'&&current.source?.sha256===p.source?.sha256&&current.model===p.model){current.outlineRepairCheckpoint=retainOutlineRepair(assessed.rawOutline,planningIdentity);store.save(current);}};
+      p.outlineBatchTotal=batches.length||1;store.save(p);
+      const batchResults=[],batchDrafts=[],draftTimes=new Map();
+      const planBatches=async()=>assembleSkeletonBatches(p,batches,await boundedAll(batches,PPT_NODE_CONCURRENCY,async batch=>{
+        const promptHash=sha256(Buffer.from(batch.prompt));
+        const current=store.get(uid,id),saved=current?.outlineBatches?.find(item=>item.index===batch.index&&item.promptHash===promptHash&&item.model===p.model);
+        let raw=saved?.raw||await deps.modelCall(p,batch.prompt,activity,log,{nodeKey:'outline:group:'+batch.index,maxOutputTokens:16384,onProgress:progress=>{
+          const now=Date.now();if(now-(draftTimes.get(batch.index)||0)<1000)return;
+          const current=store.get(uid,id);if(current?.status!=='outlining'||current.source?.sha256!==p.source?.sha256)return;
+          const slides=outlineDraftFromPartialJson(progress.text,batch.allowedIds);if(!slides.length)return;draftTimes.set(batch.index,now);batchDrafts[batch.index]=slides;
+          saveCandidate({version:2,slides:batches.flatMap(b=>batchResults[b.index]?.slides||batchDrafts[b.index]||[])},[{code:'outline_partial_unvalidated',message:'Closed streamed planning objects; global ownership, content and capacity are not yet accepted.'}]);
+          emitRunProgress(store.get(uid,id),'outline.partial',{groupIndex:batch.index,seq:progress.seq,closedPages:slides.length,chars:progress.chars});
+        }});
+        // Validate scoped IDs before retaining a restart checkpoint.
+        if(raw?.version!==2||!Array.isArray(raw.slides)||raw.slides.some(slide=>!Array.isArray(slide.sourceUnitIds)||slide.sourceUnitIds.some(id=>!batch.allowedIds.includes(id))))throw outlineError('schema_invalid');
+        const owned=new Set(raw.slides.flatMap(slide=>slide.sourceUnitIds));
+        const missing=(p.source?.semantic?.inventory?.items||[]).filter(item=>batch.allowedIds.includes(item.id)&&isSourceArtifactItem(item)&&!owned.has(item.id)).map(item=>item.id);
+        if(missing.length&&p.generationPolicy?.content==='full_source'){
+          const correction=await deps.modelCall(p,`${batch.prompt}\n<missing_source_coverage>${JSON.stringify(missing)}</missing_source_coverage>\nCoverage repair only: preserve the accepted pages unchanged. Return version 2 JSON with additional content slides assigning ALL and ONLY the missing IDs above. Keep bilingual/related reading units together. No cover, no invented facts, no selection outside this list. Native capacity is checked after assembly.`,activity,log,{nodeKey:'outline'});
+          const recovered=correction?.slides;
+          if(correction?.version!==2||!Array.isArray(recovered)||recovered.some(slide=>!Array.isArray(slide.sourceUnitIds)||slide.sourceUnitIds.some(id=>!missing.includes(id))))throw outlineError('coverage_invalid');
+          const repaired=new Set(recovered.flatMap(slide=>slide.sourceUnitIds));
+          if(missing.some(id=>!repaired.has(id)))throw outlineError('coverage_invalid');
+          const order=new Map((p.source.semantic.inventory.items||[]).map((item,index)=>[item.id,index]));
+          const rank=slide=>slide.role==='cover'?-1:Math.min(Infinity,...slide.sourceUnitIds.map(id=>order.get(id)??Infinity));
+          raw={...raw,slides:[...raw.slides,...recovered].sort((a,b)=>rank(a)-rank(b))};
+        }
+        batchResults[batch.index]=raw;
+        const latest=store.get(uid,id);
+        if(latest?.status==='outlining'){
+          latest.outlineBatches=[...(latest.outlineBatches||[]).filter(item=>item.index!==batch.index),{index:batch.index,promptHash,model:p.model,raw}];store.save(latest);
+          saveCandidate({version:2,slides:batchResults.flatMap(result=>result?.slides||[]),selection:batchResults.flatMap(result=>result?.selection||[])},[{code:'outline_groups_pending',message:`${batchResults.filter(Boolean).length}/${batches.length} source groups retained; global coverage and template fit are not yet accepted.`}]);
+          // V-P0-1: the editor shows the syllabus forming group by group.
+          try{emitRunProgress(store.get(uid,id),'outline.group_ready',{done:batchResults.filter(Boolean).length,total:batches.length});}catch{}
+        }
+        return raw;
+      }));
       let rawOutline = p.requestedOutline
         ? { slides: p.requestedOutline, brief: null, storyArc: null, coverage: [] }
-        : await deps.modelCall(p, outlinePrompt(p), activity, log);
+        : p.nativeTitleRepairSeed?.executionPlan || resumedRepair || (batches.length ? await planBatches() : await deps.modelCall(p, outlinePrompt(p), activity, log,{nodeKey:'outline',onProgress:progress=>{
+          const now=Date.now();if(now-(draftTimes.get('single')||0)<1500)return;
+          const closed=outlineDraftFromPartialJson(progress.text,(p.source?.semantic?.inventory?.items||[]).map(item=>item.id));if(!closed.length)return;
+          draftTimes.set('single',now);saveCandidate({version:2,slides:closed},[{code:'outline_partial_unvalidated',message:'Closed live planning pages; selection ownership, facts and native capacity are not yet accepted.'}]);
+          emitRunProgress(store.get(uid,id),'outline.partial',{seq:progress.seq,closedPages:closed.length,chars:progress.chars});
+        }}));
+      if(resumedRepair)emitRunProgress(store.get(uid,id),'outline.repair_resumed',{candidatePages:rawOutline.slides.length,validated:false});
+      saveCandidate(rawOutline);
       let assessed,validationError;
       try {assessed=assessOutlineCandidate(p,rawOutline);} catch(error){
-        if(error.code!=='ppt_outline_contract'||p.requestedOutline)throw error;
+        if(!error.outlineContract||p.requestedOutline)throw error;
         validationError=error;
       }
-      const initialIssues=assessed?.issues||[{code:'invalid_outline_contract',message:String(validationError?.message||'invalid candidate').slice(0,500),repairable:true}];
+      if(assessed)saveAssessedCheckpoint(assessed);
+      saveCandidate(assessed?.rawOutline||rawOutline,assessed?.issues||[{code:validationError?.code||'schema_invalid',message:validationError?.message,details:validationError?.details}]);
+      // Repairs compose over the retained candidate: an ownership fix may
+      // expose a bilingual conflict, then metadata. Never discard a valid delta
+      // merely because the NEXT independent gate discovers another issue.
+      for(let pass=0;!assessed&&!p.requestedOutline&&pass<10;pass++){
+        const rangePrompt=outlineRangeRepairPrompt(p,rawOutline,validationError);
+        const metadataPrompt=outlineMetadataRepairPrompt(p,rawOutline,validationError);
+        const summaryPrompt=outlineSummaryRepairPrompt(p,rawOutline,validationError);
+        const selectionPrompt=outlineSelectionRepairPrompt(p,rawOutline,validationError);
+        const ownerPrompt=outlineOwnershipRepairPrompt(p,rawOutline,validationError);
+        const batchPrompt=outlineRelationBatchRepairPrompt(p,rawOutline,validationError);
+        const relationPrompt=batchPrompt||outlineRelationRepairPrompt(p,rawOutline,validationError);
+        // Valid summary/notes dispositions with missing ownership need only an
+        // ownership delta. A broader selection repair would let the model turn
+        // audited concise summaries back into full source prose unnecessarily.
+        const prompt=rangePrompt||metadataPrompt||summaryPrompt||ownerPrompt||selectionPrompt||relationPrompt;if(!prompt)break;
+        const kind=rangePrompt?'artifact-range':metadataPrompt?'metadata':summaryPrompt?'summary':ownerPrompt?'ownership':selectionPrompt?'selection':'relations';
+        const applyDelta=delta=>rangePrompt?applyOutlineRangeRepair(p,rawOutline,validationError,delta):metadataPrompt?applyOutlineMetadataRepair(rawOutline,validationError,delta):summaryPrompt?applyOutlineSummaryRepair(p,rawOutline,validationError,delta):ownerPrompt?applyOutlineOwnershipRepair(rawOutline,delta,validationError):selectionPrompt?applyOutlineSelectionRepair(rawOutline,validationError,delta):batchPrompt?applyOutlineRelationBatchRepair(p,rawOutline,validationError,delta):applyOutlineRelationRepair(p,rawOutline,validationError,delta);
+        let revised,delta,deltaFailure;
+        for(let deltaAttempt=0;deltaAttempt<2;deltaAttempt++){
+          const correction=deltaAttempt?`\n<delta_validation_error>${JSON.stringify(deltaFailure)}</delta_validation_error>\n<rejected_delta>${JSON.stringify(delta)}</rejected_delta>\nThe delta violates the exact schema/dispositions above. Correct ONLY the actual reported validation error, using the EXACT delta schema above. Do not add notes, page-index or ownership fields unless that schema explicitly defines them. Preserve all valid content, frozen candidate, selections, source facts, titles and page count. Return the same delta schema, not a new outline.`:'';
+          delta=await deps.modelCall(p,prompt+correction,activity,log,{nodeKey:'outline:'+kind+':'+pass+(deltaAttempt?':delta-repair':''),maxOutputTokens:8192});
+          try{revised=applyDelta(delta);break;}catch(error){deltaFailure={code:error.code,message:String(error.message).slice(0,500),details:error.details};if(error.code!=='schema_invalid'||deltaAttempt===1)throw error;}
+        }
+        if(JSON.stringify(revised)===JSON.stringify(rawOutline))break;
+        rawOutline=revised;
+        const checkpointProject=store.get(uid,id);if(checkpointProject?.status==='outlining'){checkpointProject.outlineRepairCheckpoint=retainOutlineRepair(revised,planningIdentity);store.save(checkpointProject);}
+        try{assessed=assessOutlineCandidate(p,revised);validationError=undefined;saveCandidate(assessed.rawOutline,assessed.issues);}
+        catch(error){if(!error.outlineContract)throw error;validationError=error;saveCandidate(revised,[{code:error.code,message:error.message,details:error.details}]);}
+      }
+      for(let pass=0;assessed&&!p.requestedOutline&&pass<2;pass++){
+        const diagnostic=repeatedFocusMetadataError(assessed.issues);if(!diagnostic)break;
+        const prompt=outlineMetadataRepairPrompt(assessed.project,assessed.rawOutline,diagnostic);if(!prompt)break;
+        const delta=await deps.modelCall(p,prompt,activity,log,{nodeKey:'outline:metadata:resumed:'+pass,maxOutputTokens:8192});
+        assessed=assessOutlineCandidate(p,applyOutlineMetadataRepair(assessed.rawOutline,diagnostic,delta));rawOutline=assessed.rawOutline;saveAssessedCheckpoint(assessed);saveCandidate(rawOutline,assessed.issues);
+      }
+      // Overview contract: condense (selected table rows, details in notes)
+      // before any measured partition adds pages (outline concision, item 5).
+      if(assessed&&automatic&&!p.requestedOutline){const condensed=condenseOverflowingTables(p,assessed,assessOutlineCandidate);if(condensed){assessed=condensed;saveAssessedCheckpoint(assessed);rawOutline=assessed.rawOutline;saveCandidate(rawOutline,assessed.issues);}}
+      // Prefer a measured partition of unchanged source objects to asking a
+      // model to create more explanatory pages. This keeps geometry repair
+      // separate from semantic planning, with the same coverage/fit gates.
+      if (assessed && automatic && !p.requestedOutline) for(let pass=0;pass<3;pass++) {
+        const density=inspectDensityOutline(assessed.rawOutline,assessed.project);
+        if(!density.length||density.some(issue=>!['planned_density_overflow','planned_source_object_duplicate'].includes(issue.code)))break;
+        const replacements=new Map(),removed=new Set();
+        for(const scope of outlineCapacityRepairScopes(assessed))try{
+          replacements.set(scope[0],partitionOutlineWithMeasuredComponents(assessed,scope));scope.slice(1).forEach(index=>removed.add(index));
+        }catch(error){log(`ppt ${id} pre-model measured partition skipped: ${String(error?.message||error).slice(0,180)}`);}
+        if(!replacements.size)break;
+        const slides=assessed.rawOutline.slides.flatMap((slide,index)=>removed.has(index)?[]:replacements.get(index)||[slide]);
+        if(slides.length>100)break;
+        const revised=assessOutlineCandidate(p,{...assessed.rawOutline,slides});
+        const load=candidate=>candidate.rawOutline.slides.reduce((sum,slide)=>sum+(slide.densityFit?.predictedOverflow||0),0);
+        if(revised.issues.filter(issue=>issue.code!=='planned_density_overflow').length>assessed.issues.filter(issue=>issue.code!=='planned_density_overflow').length||load(revised)>=load(assessed))break;
+        assessed=revised;saveAssessedCheckpoint(assessed);rawOutline=revised.rawOutline;saveCandidate(rawOutline,assessed.issues);
+      }
+      const initialIssues=assessed?.issues||[{code:'invalid_outline_contract',message:String(validationError?.message||'invalid candidate').slice(0,500),details:validationError?.details,repairable:true}];
       if(!p.requestedOutline && initialIssues.some(item=>item.repairable!==false)){
-        const repairTask=`这是修复任务，不是重述初稿。初稿结构检查：${JSON.stringify(initialIssues.map(item=>({code:item.code,message:item.message})))}。${automatic?'请在有效来源编号、完整关系和可读容量内实际修改 slides 数组：增加分片页或移动完整单元，允许改变初稿页数，最终数量由代码拟合决定':'请在相同页数和有效来源编号内修订大纲'}，不改变用户锁定的标题，不虚构事实或证据；不同明确question不能靠相同groupId合并；表格分片必须是整数、仅用于表格且同页不重叠。容量建议是代码对实际原生模板的测量结果，不是要抄到 keyPoints 的正文。不能仅修改 topicGroups 的 capacity_ok 来声明通过；实际分片与可见文字须解决列出的溢出。componentFits 中 capacity_ok=false 表示该来源组件单独放入也不能容纳，缩短 keyPoints 无法解决；对这样的表格必须实际改变 sourceArtifactRanges 并分配到多个页面，可采用完整覆盖的 tableFragments 测量方案，不能继续保留整表范围。保留全部语言和事实；若用户或来源未锁定同页，双语长段落/小结可放到连续两页，分别保留各语言完整来源单元，不得自行添加双语必须同页的 adjacencyPairs 使容量冲突。`;
-        const repairPrompt=`${repairTask}\n${outlinePrompt(p)}\n待修复初稿：${JSON.stringify(rawOutline)}\n${repairTask}\n返回完整的同一 JSON schema，使用紧凑 JSON 格式，不缩减事实内容。`;
-        try {
-          const revised=assessOutlineCandidate(p,await deps.modelCall(p,repairPrompt,activity,log));
-          if(!assessed || revised.planning.brief.reportMode===assessed.planning.brief.reportMode && revised.issues.length<initialIssues.length)assessed=revised;
-        } catch(error){log(`ppt ${id} outline revision skipped: ${String(error?.message||error).slice(0,180)}`);}
+        const repairTask=`这是修复任务，不是重述初稿。初稿结构检查：${JSON.stringify(initialIssues.map(item=>({code:item.code,message:item.message,details:item.details})))}。${automatic?'请在有效来源编号、完整关系和可读容量内实际修改 slides 数组：增加分片页或移动完整单元，允许改变初稿页数，最终数量由代码拟合决定':'请在相同页数和有效来源编号内修订大纲'}，不改变用户锁定的标题，不虚构事实或证据；不同明确question不能靠相同groupId合并；表格分片必须是整数、仅用于表格且同页不重叠。容量建议是代码对实际原生模板的测量结果，不是要抄到 keyPoints 的正文。不能仅修改 topicGroups 的 capacity_ok 来声明通过；实际分片与可见文字须解决列出的溢出。componentFits 中 capacity_ok=false 表示该来源组件单独放入也不能容纳，缩短 keyPoints 无法解决；对这样的表格必须实际改变 sourceArtifactRanges 并分配到多个页面，可采用完整覆盖的 tableFragments 测量方案，不能继续保留整表范围。${p.generationPolicy?.language?.mode==='output'&&p.generationPolicy?.details==='notes'?'遵守用户的目标语言正文与完整原文备注合同：只对有实际目标语言主讲 owner 的可投影配对使用 visibleEquivalentSourceUnitId；destination=notes 的 ID 不得再次出现在任何 slides.sourceUnitIds 中；保留全部原文备注和正文必要事实。':'保留全部语言和事实；若用户或来源未锁定同页，双语长段落/小结可放到连续两页，分别保留各语言完整来源单元，不得自行添加双语必须同页的 adjacencyPairs 使容量冲突。'}`;
+        const shortProtocol=rawOutline.version===2;
+        const repairPrompt=shortProtocol?outlineDeltaPrompt(p,assessed?.rawOutline||rawOutline,initialIssues):`${repairTask}\n${outlinePrompt(p)}\n待修复初稿：${JSON.stringify(rawOutline)}\n返回完整的同一 JSON schema，使用紧凑 JSON 格式，不缩减事实内容。`;
+        let correctionPrompt=repairPrompt;
+        for(let attempt=0;repairPrompt&&attempt<2;attempt++){
+          let response;
+          try {
+            response=await deps.modelCall(p,correctionPrompt,activity,log,{nodeKey:'outline'});
+            const revised=assessOutlineCandidate(p,shortProtocol?applyOutlineDelta(p,assessed?.rawOutline||rawOutline,response,repairPrompt):response);
+            if(!assessed || revised.planning.brief.reportMode===assessed.planning.brief.reportMode && revised.issues.length<initialIssues.length){assessed=revised;saveAssessedCheckpoint(assessed);}
+            break;
+          } catch(error){
+            log(`ppt ${id} outline revision ${attempt+1} skipped: ${String(error?.message||error).slice(0,180)}`);
+            if(error.outlineContract&&response){saveCandidate(response,[{code:error.code,message:error.message,details:error.details}]);validationError=error;}
+            if(shortProtocol||!error.outlineContract||!response||attempt===1)break;
+            correctionPrompt=`${outlinePrompt(p)}\n<invalid_candidate>${JSON.stringify(response)}</invalid_candidate>\n<exact_contract_diagnostic>${JSON.stringify({code:error.code,message:error.message,details:error.details})}</exact_contract_diagnostic>\nReturn the complete corrected same schema, preserving every source ID according to its authorized disposition and the exact requested page count. Repair the specifically identified ownership/repeat conflict; never delete a required condition or change the original source.`;
+          }
+        }
       }
       if(!assessed)throw validationError;
       if(automatic&&!p.requestedOutline){
@@ -602,11 +815,11 @@ function startOutline(uid, id, activity, log, deps = defaultDeps) {
           const partitions=await boundedAll(indexes,PPT_NODE_CONCURRENCY,async index=>{
             try{
               const prompt=outlineCapacityRepairPrompt(base,index);
-              const response=await deps.modelCall(p,prompt,activity,log);
+              const response=await deps.modelCall(p,prompt,activity,log,{nodeKey:'outline:capacity:'+round+':'+index.join('-'),maxOutputTokens:8192});
               try{return applyOutlineCapacityRepair(base,index,response);}
               catch(error){
                 const correction=`${prompt}\n<invalid_partition>${JSON.stringify(response)}</invalid_partition>\n<contract_error>${String(error.message)}</contract_error>\n修复此 JSON 分配合同。保留全部原索引和完整来源行；每个 keyPointIndexes / requiredDetailIndexes 索引只分配一次，不在每个表格分片上重复。按 measured_native_advice 的全部 tableFragments 分配，不合并会溢出的片段。返回修复后的同一 JSON schema。`;
-                return applyOutlineCapacityRepair(base,index,await deps.modelCall(p,correction,activity,log));
+                return applyOutlineCapacityRepair(base,index,await deps.modelCall(p,correction,activity,log,{nodeKey:'outline:capacity:'+round+':'+index.join('-')+':repair',maxOutputTokens:8192}));
               }
             }catch(error){log(`ppt ${id} local outline partition skipped: ${String(error?.message||error).slice(0,180)}`);return null;}
           });
@@ -621,15 +834,22 @@ function startOutline(uid, id, activity, log, deps = defaultDeps) {
             const previousStructural=structural(density),nextStructural=structural(revisedDensity);
             if(nextStructural.some(issue=>!previousStructural.some(old=>old.code===issue.code&&old.message===issue.message))||
               nextStructural.length>previousStructural.length||nextStructural.length===previousStructural.length&&overflowLoad(revised)>=overflowLoad(base))break;
-            assessed=revised;
+            assessed=revised;saveAssessedCheckpoint(assessed);
           }catch(error){log(`ppt ${id} outline partition batch rejected: ${String(error?.message||error).slice(0,180)}`);break;}
         }
       }
+      // Overview contract: condense (selected table rows, details in notes)
+      // before any measured partition adds pages (outline concision, item 5).
+      if(assessed&&automatic&&!p.requestedOutline){const condensed=condenseOverflowingTables(p,assessed,assessOutlineCandidate);if(condensed){assessed=condensed;saveAssessedCheckpoint(assessed);rawOutline=assessed.rawOutline;saveCandidate(rawOutline,assessed.issues);}}
       // No generated copy is changed by the measured fallback. It partitions
       // complete original atoms only after bounded model repair is exhausted.
+      if(automatic&&!p.requestedOutline)assessed=assessOutlineCandidate(p,orderSourceConclusion(p,assessed.rawOutline));
       if(automatic&&!p.requestedOutline)for(let pass=0;pass<3;pass++){
         const density=inspectDensityOutline(assessed.rawOutline,assessed.project);
-        if(!density.length||density.some(issue=>!['planned_density_overflow','planned_source_object_duplicate'].includes(issue.code)))break;
+        // A translation pair or lead-in+list planned across pages is also
+        // re-partitioned here (measured, no new copy); it never fails the outline.
+        const splitUnits=splitReadingUnits(assessed);
+        if((!density.length&&!splitUnits.length)||density.some(issue=>!['planned_density_overflow','planned_source_object_duplicate'].includes(issue.code)))break;
         {
           const base=assessed,scopes=outlineCapacityRepairScopes(base),replacements=new Map(),removed=new Set();
           for(const scope of scopes)try{
@@ -638,40 +858,103 @@ function startOutline(uid, id, activity, log, deps = defaultDeps) {
           if(!replacements.size)break;
           const slides=base.rawOutline.slides.flatMap((s,index)=>removed.has(index)?[]:replacements.get(index)||[s]);
           if(slides.length>100)break;
-          try{assessed=assessOutlineCandidate(p,{...base.rawOutline,slides});log(`ppt ${id} measured complete-component partition pass ${pass+1}: ${assessed.project.pages} candidate pages`);}
+          try{assessed=assessOutlineCandidate(p,{...base.rawOutline,slides});saveAssessedCheckpoint(assessed);log(`ppt ${id} measured complete-component partition pass ${pass+1}: ${assessed.project.pages} candidate pages`);}
           catch(error){log(`ppt ${id} measured outline partition rejected: ${String(error?.message||error).slice(0,180)}`);break;}
         }
       }
-      rawOutline=assessed.rawOutline;
+      if(automatic&&!p.requestedOutline)assessed=assessOutlineCandidate(p,orderSourceConclusion(p,assessed.rawOutline));
+      if(automatic&&!p.requestedOutline)for(let pass=0;pass<3;pass++){
+        const repacked=assessOutlineCandidate(assessed.project,assessed.rawOutline,{finalRepack:true});
+        if(repacked.outline.length>=assessed.outline.length||inspectDensityOutline(repacked.rawOutline,repacked.project).length)break;
+        assessed=repacked;
+      }
+      // Underfilled neighbours merge (across sections) while above budget.
+      if(automatic&&!p.requestedOutline){const merged=mergeUnderfilledPages(p,assessed,assessOutlineCandidate,{capacity:assessed.rawOutline.slides[1]?.densityFit?.targetVisualUnits||671});if(merged){assessed=merged;saveAssessedCheckpoint(assessed);log(`ppt ${id} merged ${merged.concisionMerges} underfilled page pair(s): ${assessed.outline.length} pages`);}}
+      // Physical partitions may keep identical planning focuses even though
+      // their frozen source owners differ. Repair intent metadata only, then
+      // re-run the same source and physical checks before explicit confirmation.
+      for(let pass=0;!p.requestedOutline&&pass<2;pass++){
+        const diagnostic=repeatedFocusMetadataError(assessed.issues);if(!diagnostic)break;
+        const prompt=outlineMetadataRepairPrompt(assessed.project,assessed.rawOutline,diagnostic);if(!prompt)break;
+        const delta=await deps.modelCall(p,prompt,activity,log,{nodeKey:'outline:metadata:partition:'+pass,maxOutputTokens:8192});
+        assessed=assessOutlineCandidate(p,applyOutlineMetadataRepair(assessed.rawOutline,diagnostic,delta));saveAssessedCheckpoint(assessed);
+      }
+      // Metadata repair is confined to titles of the final measured native
+      // assignment. Never let a writer rename an already confirmed outline.
+      for(let pass=0;!p.requestedOutline&&pass<3;pass++){
+        const conflicts=inspectNativeOutlineTitles(assessed.project,assessed.outline);if(!conflicts.length)break;
+        const cover=conflicts.filter(c=>c.pageIndex===0),body=conflicts.filter(c=>c.pageIndex!==0),batches=cover.length?[cover]:[];
+        for(let at=0;at<body.length;at+=8)batches.push(body.slice(at,at+8));
+        const base=assessed;let retainedTitles=base.rawOutline;
+        saveCandidate(base.rawOutline,[...base.issues,...conflicts]);
+        const retainTitles=(diagnostic,delta)=>{
+          retainedTitles=applyOutlineMetadataRepair(retainedTitles,diagnostic,delta);
+          const latest=store.get(uid,id);if(latest?.status==='outlining'){latest.outlineRepairCheckpoint=retainOutlineRepair(retainedTitles,planningIdentity);store.save(latest);saveCandidate(retainedTitles,[...base.issues,...inspectNativeOutlineTitles(base.project,retainedTitles.slides)]);}
+        };
+        const repairs=await boundedAll(batches,PPT_NODE_CONCURRENCY,async(batch,index)=>{
+          const diagnostic={details:{metadataConflicts:batch}};
+          try{
+            const delta=await repairOutlineMetadataBatch(base.project,base.rawOutline,diagnostic,(prompt,correction)=>deps.modelCall(p,prompt,activity,log,{nodeKey:`outline:native-titles:${pass}:${index}:${correction}`,maxOutputTokens:4096}));
+            retainTitles(diagnostic,delta);return {diagnostic,delta};
+          }catch(error){
+            const valid=error.details?.validatedUpdates||[];
+            if(valid.length)retainTitles({details:{metadataConflicts:batch.filter(c=>valid.some(u=>u.pageIndex===c.pageIndex&&u.field===c.field))}},{version:2,updates:valid});
+            throw error;
+          }
+        });
+        let revised=base.rawOutline;for(const {diagnostic,delta}of repairs)revised=applyOutlineMetadataRepair(revised,diagnostic,delta);
+        assessed=assessOutlineCandidate(p,revised);saveAssessedCheckpoint(assessed);
+      }
+      const titleIssues=[...inspectNativeOutlineTitles(assessed.project,assessed.outline),...inspectNativeCoverTitle(assessed.project,assessed.outline)];
+      if(titleIssues.length){saveCandidate(assessed.rawOutline,titleIssues);throw outlineError('capacity_invalid');}
+      rawOutline=assessed.rawOutline;saveAssessedCheckpoint(assessed);
+      saveCandidate(rawOutline,assessed.issues);
+      if(assessed.issues.some(issue=>issue.code==='outline_repeated_claim'||issue.code==='outline_ungrounded_page'))throw outlineError('coverage_invalid');
       const outline=assessed.outline;
-      if(automatic && inspectDensityOutline(rawOutline,assessed.project).length){
+      if(exactPageConflict(assessed.project,rawOutline).length){const diagnostic=store.get(uid,id);diagnostic.pageBudgetConflict=exactPageConflict(assessed.project,rawOutline)[0];store.save(diagnostic);throw outlineError('capacity_invalid');}
+      if(inspectSkeletonOwnership(assessed.project,rawOutline).length)throw outlineError('coverage_invalid');
+      // Exact-N is a display budget, never an exemption from ownership or fit.
+      if(inspectDensityOutline(rawOutline,assessed.project).length){
         const diagnostic=store.get(uid,id);
         if(diagnostic?.status==='outlining'){diagnostic.outlineCapacityDiagnostic={diagnosticOnly:true,candidatePages:assessed.project.pages,rawOutline,issues:inspectDensityOutline(rawOutline,assessed.project)};store.save(diagnostic);}
-        throw new Error('density_capacity: required source objects are missing or overflow after bounded outline repair');
+        throw outlineError(inspectDensityOutline(rawOutline,assessed.project).some(x=>x.code!=='planned_density_overflow')?'coverage_invalid':'capacity_invalid');
       }
       const current = store.get(uid, id);
       if (!current || current.status !== 'outlining') return;
+      await prepareNavigationPlan(assessed.project,finalDeckNavigation({...assessed.project,navigationPlan:undefined,deck:null}).entries,(prompt,nodeKey)=>deps.modelCall(p,prompt,activity,log,{nodeKey,maxOutputTokens:8192}));
+      current.navigationPlan=assessed.project.navigationPlan;
       current.pages = assessed.project.pages;
+      if(assessed.project.contentSelection){current.contentSelection=assessed.project.contentSelection;current.originalSourceInventory=assessed.project.originalSourceInventory;current.source=assessed.project.source;}
       if(assessed.project.templateFidelity)current.templateFidelity=assessed.project.templateFidelity;
       const reuseCount = current.templateFidelity?.originalSlideCount;
       const reuseError = reuseCount && templateReuseError(reuseCount, current.pages);
       if (reuseError) throw new HttpError(400, reuseError);
+      const growth = automatic ? outlineGrowth(current, current.pages) : null;
       current.pageDecision = { ...current.pageDecision, finalPageCount: current.pages, densityProfileId: densityProfile().id,
         estimateVersion: 1, fitValidated: rawOutline.slides?.slice(1).every(s => s.densityFit?.capacity_ok) || false,
         ...(automatic ? { mode: 'auto', initialPageCount: current.pageDecision.initialPageCount, calibratedAt: new Date().toISOString() } : {}),
-        ...(current.autoGenerate ? { confirmedAt: new Date().toISOString() } : {}) };
+        ...(current.autoGenerate && !growth ? { confirmedAt: new Date().toISOString() } : {}),
+        concision: outlineConcisionMetrics(current, outline, slide => pageLoad(current, slide, rawOutline.selection || [])), ...(growth ? { growth } : {}) };
+      if (!growth) delete current.pageDecision.growth;
       current.outline = outline;
-      current.status = current.autoGenerate ? 'generating' : 'outline_ready'; current.stage = current.autoGenerate ? 'content' : 'outline'; current.error = '';
+      current.candidateOutline=candidateRecord(current,rawOutline,[],true);
+      delete current.failure;
+      // An automatic outline that outgrew its budget waits for confirmation.
+      const proceed = current.autoGenerate && !growth;
+      current.status = proceed ? 'generating' : 'outline_ready'; current.stage = proceed ? 'content' : 'outline'; current.error = '';
       if (current.deckTitle?.source !== 'user') {
+        if(current.titleSource==='derived'&&outline[0]?.title){const identity=displayedDocumentTitle(current);current.title=identity?.variants?.map(v=>v.text).join(' | ').slice(0,160)||outline[0].title;}
         current.deckTitle = { text: outline[0]?.title || current.title, raw: outline[0]?.title || current.title, source: 'agent', locked: false };
       }
       current.planning = buildPlanning(current, rawOutline, outline);
+      current.planning.contentDistribution=contentDistribution(current,outline);
       synchronizePlan(current, 'outline-confirmation');
       current.diff = diffSummary(current);
-      generateAfterOutline = Boolean(current.autoGenerate);
+      generateAfterOutline = proceed;
       delete current.autoGenerate;
       delete current.requestedOutline;
       delete current.outlineSeed;
+      delete current.nativeTitleRepairSeed;
       store.save(current);
       try { transitionNode(current, 'outline', 'completed', { slideCount: outline.length }); emitRunProgress(current, 'outline.ready', { outline }); } catch {}
     } catch (error) { fail(uid, id, 'outline', error, log); }
@@ -679,22 +962,126 @@ function startOutline(uid, id, activity, log, deps = defaultDeps) {
   })();
 }
 async function writeWithContractRepair({prompt,call,normalize,nodeKey,maxRepairs=3}) {
-  let nextPrompt=prompt,response;
+  let nextPrompt=prompt,response,localScope=null,localBase=null,localAudit=[];
   for(let attempt=0;attempt<=maxRepairs;attempt++){
     response=undefined;
-    try{return {content:normalize(response=await call(nextPrompt,attempt?`${nodeKey}:contract-repair:${attempt}`:nodeKey)),attempts:attempt};}
+    try{
+      const reply=await call(nextPrompt,attempt?`${nodeKey}:contract-repair:${attempt}`:nodeKey);
+      if(localScope){const applied=applyWriterLocalDelta(localBase,localScope,reply);response=applied.value;localAudit.push(applied.audit);}
+      else response=reply;
+      const mathScope=writerLocalRepairScope(response,new Error('writer_math_invalid'));
+      if(mathScope)throw new Error(`writer_math_invalid: ${JSON.stringify(mathScope.targets.map(({path,start,end})=>({path,start,end})))}`);
+      const content=normalize(response);
+      if(localAudit.length)content.localSpanRepair={attempts:localAudit.length,audit:localAudit};
+      return {content,attempts:attempt};
+    }
     catch(error){
-      if(attempt===maxRepairs||!/模型未返回有效的结构化内容|source_artifact_capacity|invalid visible native copy type|invalid source commentary|writer omitted|source artifact|row range|range.*table|template slot.*safety/iu.test(String(error.message)))throw error;
-      nextPrompt=`${writerCorrectionContext(prompt)}\n<invalid_response>${response===undefined?'No parseable JSON was returned':JSON.stringify(response)}</invalid_response>\n<writer_contract_error>${String(error.message)}</writer_contract_error>\n<repair>Return valid JSON in the same schema. Preserve exact frozen sources, all selected cells and necessary facts. Correct the precise type/count/height error above; do not repeat a rejected expanded draft. For sourceFits=true, keep all frozen structures and required excerpts. Merge complete related commentary into one or two paragraphs without blank lines to save padding; remove only duplicate explanation, never required facts or locked excerpts. Do not change source row ranges, fonts or page count.</repair>`;
+      // Invalid deltas never fall back to a broad page rewrite. Reuse the
+      // immutable base and the same finite scope within the original bound.
+      if(/^writer_local_repair_/u.test(String(error.message))){if(attempt===maxRepairs)throw error;nextPrompt=writerLocalRepairPrompt(writerCorrectionContext(prompt),localBase,localScope,error)+'\n<rejected_delta>'+JSON.stringify({error:error.message,response:response??null})+'</rejected_delta> The previous delta was invalid. Preserve the exact numeric tokens of each allowed string, including numeric identifiers such as p05; shorten the surrounding words instead. The unchanged base and allowed targets remain authoritative.';continue;}
+      const contractFailure=/writer changed the confirmed outline title|rendered_title_capacity|writer_math_invalid|模型未返回有效的结构化内容|slide \d+ title must be text|bullet must be text|source_artifact_capacity|writer cover contract|writer source-only contract|invalid visible native copy type|invalid source commentary|invalid source evidence selection|writer omitted|source artifact|row range|range.*table|template slot.*safety|block id|block \d+ invalid|duplicate block|visual blocks per slide|unsupported visual block|table dimensions invalid|chart data invalid|shape invalid/iu.test(String(error.message));
+      if(contractFailure&&!error.code)error.code=/source_artifact_capacity/iu.test(error.message)?'capacity_invalid':/writer omitted|source evidence selection|row range|range.*table/iu.test(error.message)?'coverage_invalid':'schema_invalid';
+      if(attempt===maxRepairs||!contractFailure)throw error;
+      let contract;try{contract=JSON.parse(prompt.match(/<slide_contract>([\s\S]*?)<\/slide_contract>/u)?.[1]||'null');}catch{}
+      const boundIds=new Set([...(response?.sourceArtifacts||[]).map(ref=>ref.sourceUnitId),...(response?.sourceEvidenceIds||[])]);
+      const allOwnedSourceBound=Boolean(contract?.sourceUnitIds?.length&&contract.sourceUnitIds.every(id=>boundIds.has(id)));
+      localScope=writerLocalRepairScope(response,error,{allOwnedSourceBound});localBase=response;
+      if(localScope){
+        if(localScope.optionalCommentaryCanOmit&&localScope.targets.every(t=>t.kind==='commentary')){
+          const omitted=applyWriterLocalDelta(response,localScope,{edits:localScope.targets.map(t=>({path:t.path,start:t.start,end:t.end,before:t.before,after:''}))});
+          try{const content=normalize(omitted.value);content.localSpanRepair={attempts:localAudit.length+1,audit:[...localAudit,{...omitted.audit,basis:'measured overflowing optional commentary; all owned frozen source retained and normal validator passed'}]};return {content,attempts:attempt+1};}catch{ /* The full validator rejected omission; use the same bounded model repair. */ }
+        }
+        nextPrompt=writerLocalRepairPrompt(writerCorrectionContext(prompt),response,localScope,error);continue;}
+      nextPrompt=`${writerCorrectionContext(prompt)}\n<invalid_response>${response===undefined?'No parseable JSON was returned':JSON.stringify(response)}</invalid_response>\n<writer_contract_error>${String(error.message)}</writer_contract_error>\n<repair>Return valid JSON in the same schema. Preserve exact frozen sources, all selected cells and necessary facts. Visual block id must match ^[A-Za-z0-9_-]{1,40}$ and be unique; do not put human labels or step captions in id. Correct the precise type/count/height error above; do not repeat a rejected expanded draft. For sourceFits=true, keep all frozen structures and required excerpts. Use the measured source_commentary_budget: if its paragraphCount is one, return no more than one paragraph, targeting 85% of singleParagraphCjkCharacters in total including punctuation/formula text. Never repeat facts already automatically displayed by frozen sourceArtifacts/sourceEvidenceIds. Remove only duplicate explanation, never required facts or locked excerpts. Do not change source row ranges, fonts or page count.</repair>`;
     }
   }
 }
 function revalidateCompletedCopy(project) {
   const reopened=[];
+  const fidelity=project.templateFidelity;
+  if(fidelity?.mode==='preserve'&&project.deck?.slides?.length){
+    if(fidelity.sourceCatalog?.some(s=>s.nodes?.some(n=>n.type==='image'&&!n.content?.dataUrl))){
+      const cached=store.readTemplateIR(project.templateSpec?.kind==='managed'?'managed':project.uid,project.template,fidelity.sha256);
+      if(cached?.parserVersion==='pptx-ir-7'&&cached.imported?.deck?.slides?.length===fidelity.originalSlideCount){
+        fidelity.sourceCatalog=structuredClone(cached.imported.deck.slides);
+        project.runtime ||= {};project.runtime.templateCatalogRecovery={templateHash:fidelity.sha256,basis:'complete original parser cache; immutable native media retained'};
+      }
+    }
+    project.sourceFontFloors={...project.sourceFontFloors};
+    for(const s of project.deck.slides){const fonts=s.nodes?.filter(isSourceOwnedNode).map(n=>Number(n.style?.fontSizePt)||0)||[];if(fonts.length)project.sourceFontFloors[s.id]=Math.max(project.sourceFontFloors[s.id]||0,...fonts);}
+    const beforeMap=[...fidelity.slideMap];confirmNativeOutlineFit(project,{useRenderedLegacyTitles:true});
+    const changed=project.outline.flatMap((s,index)=>beforeMap[index]!==project.templateFidelity.slideMap[index]?[{slideId:s.id,page:index+1,beforeSource:beforeMap[index],afterSource:project.templateFidelity.slideMap[index]}]:[]);
+    if(changed.length){
+      project.planning=refreshPlanning(project);invalidateReviews(project);
+      for(const change of changed){const node=project.nodes?.[change.slideId];if(!node)continue;node.status='pending';delete node.retryCopyIssues;
+        project.dagNodes ||= {};project.dagNodes[dagNodeId('content',change.slideId)]=nodeRecord('pending',project.dagNodes[dagNodeId('content',change.slideId)],{reason:'native coverage assignment changed; regenerate only this page with complete frozen source and unchanged font floor'});
+        if(project.runtime?.slides?.[change.slideId]){project.runtime.slides[change.slideId]={...project.runtime.slides[change.slideId],phase:'content',preview:undefined,renderHash:undefined,accepted:false};}
+      }
+      project.runtime ||= {}; (project.runtime.nativeCoverageRevalidation ||= []).push({runId:project.currentRunId,pages:project.pages,changes:changed,sourceHash:project.source?.sha256,basis:'restore original template coverage at frozen N and existing source fonts'});
+    }
+  }
+  for(const outline of project.outline.filter(slide=>slide.planningProtocolVersion===2)){
+    const contract=project.planning?.slidePlan?.find(item=>item.slideId===outline.id);if(!contract)continue;
+    const details=sourceBackedDetails(outline,project.source);
+    if(JSON.stringify(contract.requiredDetails||[])!==JSON.stringify(details)){
+      project.runtime ||= {};
+      (project.runtime.sourceDetailRevalidation ||= []).push({slideId:outline.id,runId:project.currentRunId,previousDetails:contract.requiredDetails||[],currentDetails:details,basis:'current source-owned units; neighboring chapter formulas cannot create obligations'});
+      contract.requiredDetails=details;
+    }
+  }
   for(const [index,slide]of project.outline.entries()){
     const node=project.nodes?.[slide.id];if(node?.status!=='done'||!node.slide||project.runtime?.slides?.[slide.id]?.accepted)continue;
     if((node.slide.nodes||[]).some(item=>item.locked&&['text','list','table','chart'].includes(item.type)))continue;
-    const issues=inspectTemplateSlotDraft(project,index,node.slide).filter(issue=>issue.severity==='error');
+    const coverNeedsRewrite=index===0&&!(slide.sourceUnitIds||[]).length&&!(node.slide.sourceArtifactNodes||[]).some(n=>n.sourceArtifact)&&
+      (project.templateFidelity?.mode!=='preserve'||!project.templateFidelity.slides[index]?.slots?.some(slot=>slot.role==='content'&&slot.purpose!=='footnote'))&&
+      ((node.slide.copy?.blocks||[]).length||(node.slide.bullets||[]).length||(node.slide.sourceArtifactNodes||[]).some(n=>n.semanticRole==='source-explanation'&&!n.content?.derivedFrom));
+    if(coverNeedsRewrite&&(!project.uid||!operationHistory(project.uid,project.id).length)){
+      const issues=[{code:'template_cover_body',severity:'error',repair:'recompose',message:'The title-only cover has an old unowned body draft. Regenerate title/navigation only; retain all frozen source units on their existing content pages.'}];node.status='pending';node.retryCopyIssues=issues;
+      project.dagNodes ||= {};project.dagNodes[dagNodeId('content',slide.id)]=nodeRecord('pending',project.dagNodes[dagNodeId('content',slide.id)],{reason:'revalidate title-only cover contract'});reopened.push({slideId:slide.id,issues});continue;
+    }
+    if(node.slide.sourceArtifactFit?.canvas&&project.templateFidelity){
+      // Recompute media-aware geometry from the same canonical source selection.
+      // A retry must not retire artwork that the accepted fit deliberately kept.
+      const before=digest(node.slide),sourceNodes=node.slide.sourceArtifactNodes||[];
+      const refs=sourceNodes.filter(item=>item.sourceArtifact).map(item=>{const {sourceUnitId,rowStart,rowEnd}=item.sourceArtifact;return {sourceUnitId,...(rowStart!==undefined?{rowStart,rowEnd}:{})};});
+      const uniqueRefs=[...new Map(refs.map(ref=>[JSON.stringify(ref),ref])).values()];
+      const evidenceIds=[...new Set(sourceNodes.flatMap(item=>item.content?.sourceEvidenceIds||[]))];
+      const commentary=sourceNodes.filter(item=>!item.sourceArtifact&&!item.content?.derivedFrom&&!item.content?.sourceEvidenceIds?.length).map(item=>({type:item.content?.pointType||'mechanism',text:item.content?.rawText||item.content?.richText?.source||item.content?.text||''}));
+      const original=structuredClone(node.slide);
+      try{bindSourceArtifacts(project,node.slide,uniqueRefs,index,commentary,evidenceIds);}
+      catch(error){
+        if(!/^source_artifact_capacity:/u.test(String(error.message)))throw error;
+        // A cached page can become infeasible under the current native fit.
+        // Retain its draft for comparison and let the real writer repair it;
+        // a failed cache rebind must not prevent the retry itself from starting.
+        node.slide=original;node.status='pending';
+        const issues=[{code:'source_artifact_capacity',severity:'error',repair:'recompose',message:String(error.message)}];
+        node.retryCopyIssues=issues;project.dagNodes ||= {};
+        project.dagNodes[dagNodeId('content',slide.id)]=nodeRecord('pending',project.dagNodes[dagNodeId('content',slide.id)],{reason:'cached source fit failed current capacity; regenerate with unchanged source and font'});
+        reopened.push({slideId:slide.id,issues});continue;
+      }
+      if(before!==digest(node.slide)){
+        project.runtime ||= {}; (project.runtime.templateDispositionRevalidation ||= []).push({slideId:slide.id,runId:project.currentRunId,beforeHash:before,afterHash:digest(node.slide),basis:'recompute measured media-aware fit from the unchanged frozen source IDs, excerpts, commentary and font floor; preserve kept media on retry'});
+        invalidateReviews(project);
+      }
+      if(commentary.length&&project.generationPolicy?.content==='full_source'){
+        const candidate=structuredClone(node.slide);
+        try{
+          bindSourceArtifacts(project,candidate,uniqueRefs,index,[],evidenceIds);
+          const images=new Set(project.templateFidelity.slides[index].nodes.filter(n=>n.type==='image').map(n=>n.nativeRef.shapeId));
+          const count=s=>(s.sourceArtifactFit?.keptMediaShapeIds||[]).filter(id=>images.has(id)).length;
+          if(count(candidate)>count(node.slide)){
+            const issue={code:'native_component_reflow',severity:'error',repair:'recompose',message:'Measured complete frozen sources fit native point cards when optional added commentary is omitted. Resolve the commentary: retain any necessary relationship not already in source, remove only redundant/unsupported additions; do not alter source IDs, content, font or page count.',details:{beforeMedia:count(node.slide),candidateMedia:count(candidate),sourceHash:project.source.sha256,layout:candidate.sourceArtifactFit.layoutId}};
+            node.status='pending';node.retryCopyIssues=[issue];
+            project.dagNodes ||= {};project.dagNodes[dagNodeId('content',slide.id)]=nodeRecord('pending',project.dagNodes[dagNodeId('content',slide.id)],{reason:'measured source-preserving native component recovery; requires real writer and all gates'});
+            reopened.push({slideId:slide.id,issues:[issue]});continue;
+          }
+        }catch{/* An infeasible optional-copy candidate never changes the accepted page. */}
+      }
+    }
+    const contract=project.planning?.slidePlan?.find(item=>item.slideId===slide.id);
+    const issues=[...inspectTemplateSlotDraft(project,index,node.slide).filter(issue=>issue.severity==='error'),
+      ...missingRequiredEvidence(project,node.slide,contract).map(atom=>({code:'required_evidence_missing',severity:'error',repair:'expand_support',evidenceId:atom.id,message:`Frozen source evidence ${atom.id} is absent from the cached visible page`}))];
     if(!issues.length)continue;
     node.status='pending';node.retryCopyIssues=issues;
     project.dagNodes ||= {};project.dagNodes[dagNodeId('content',slide.id)]=nodeRecord('pending',project.dagNodes[dagNodeId('content',slide.id)],{reason:'cached content does not pass current native copy gates'});
@@ -710,6 +1097,8 @@ function startGeneration(uid, id, activity, log, deps = defaultDeps) {
     try {
       const p = ensureProjectTemplate(store.get(uid, id));
       if (!p || p.status !== 'generating') return;
+      if(p.titleSource==='derived'){const identity=displayedDocumentTitle(p);if(identity?.variants?.length)p.title=identity.variants.map(v=>v.text).join(' | ').slice(0,160);}
+      for(let index=1;index<p.outline.length-1;index++){const changed=repairNativePageAssignment(p,index,(q,i)=>candidateFit(q.outline[i],q,i));if(changed){p.runtime||={};(p.runtime.nativePageRepairs||=[]).push(changed);log(`ppt ${id} measured native page reassignment: page ${index+1}`);}await new Promise(resolve=>setImmediate(resolve));}
       markPptTime(p, 't_generation_started');
       try { emitRunProgress(p, 'generation.started', { slideCount: p.outline.length }); } catch {}
       reconcileCheckpoint(p);
@@ -720,7 +1109,10 @@ function startGeneration(uid, id, activity, log, deps = defaultDeps) {
           if (p.nodes[slide.id]?.status === 'done') continue;
           const original = p.update.baseSnapshot.deck.slides.find(item => item.id === slide.baseSlideId);
           if (original) {
-            p.nodes[slide.id] = { status: 'done', attempts: 0, slide: { ...original, id: slide.id, sourceRefs: slide.refs } };
+            // A kept former closing page that is no longer last regains its topic title.
+            const last = p.outline.at(-1)?.id === slide.id;
+            const title = original.closingGreeting && !last ? slide.title : original.title;
+            p.nodes[slide.id] = { status: 'done', attempts: 0, slide: { ...original, id: slide.id, sourceRefs: slide.refs, title, ...(original.closingGreeting && !last ? { closingGreeting: false } : {}) } };
             p.dagNodes[dagNodeId('content', slide.id)] = nodeRecord('done', p.dagNodes[dagNodeId('content', slide.id)], { reused: true });
           }
         }
@@ -732,11 +1124,12 @@ function startGeneration(uid, id, activity, log, deps = defaultDeps) {
       for (const slide of p.outline.filter(item => p.nodes?.[item.id]?.status === 'done')) {
         const latest = store.get(uid, id);
         const nodeId = dagNodeId('content', slide.id);
-        if (latest?.nodes?.[slide.id]?.status === 'done' && (!latest.runtime?.slides?.[slide.id]?.preview || latest.runtime.slides[slide.id].contentHash !== digest(latest.nodes[slide.id].slide) || latest.runtime.slides[slide.id].epoch !== generationEpoch(latest, slide.id))) { updateSlidePreview(latest, slide.id);
+        if (latest?.nodes?.[slide.id]?.status === 'done' && (!latest.runtime?.slides?.[slide.id]?.preview || !latest.runtime.slides[slide.id].canonicalSlide || latest.runtime.slides[slide.id].renderContractVersion !== RENDER_CONTRACT_VERSION || latest.runtime.slides[slide.id].contentHash !== digest(latest.nodes[slide.id].slide) || latest.runtime.slides[slide.id].epoch !== generationEpoch(latest, slide.id))) { updateSlidePreview(latest, slide.id);
           for (const stage of ['layout', 'preview', 'quality']) transitionNode(latest, `${stage}:${slide.id}`, 'completed', { slideId: slide.id, recovered: true, inputHash: latest.runtime.slides[slide.id].contentHash }, { useInput: true });
           store.save(latest); }
         if (latest?.nodes?.[slide.id]?.status === 'done' && !['done', 'completed'].includes(latest.dagNodes?.[nodeId]?.status))
           transitionNode(latest, nodeId, 'completed', { slideId: slide.id, recovered: true }, { useInput: true });
+        await new Promise(resolve=>setImmediate(resolve));
       }
 
       await boundedAll(p.outline, PPT_NODE_CONCURRENCY, async (slide) => {
@@ -834,7 +1227,7 @@ function startGeneration(uid, id, activity, log, deps = defaultDeps) {
               if(candidateIssues.filter(issue=>issue.severity==='error').length>copyIssues.filter(issue=>issue.severity==='error').length){rejectedCopy=candidateIssues.filter(issue=>issue.severity==='error');continue;}
               content=written.content;copyIssues=candidateIssues;rejectedCopy=[];
             }catch(error){
-              if(!/模型未返回有效的结构化内容|source_artifact_capacity|invalid visible native copy type|invalid source commentary|writer omitted|source artifact|row range/iu.test(String(error.message)))throw error;
+              if(!/模型未返回有效的结构化内容|source_artifact_capacity|writer cover contract|writer source-only contract|invalid visible native copy type|invalid source commentary|writer omitted|source artifact|row range/iu.test(String(error.message)))throw error;
               rejectedCopy=[{code:'writer_rejected_candidate',severity:'error',repair:'expand_support',message:String(error.message)}];
             }
             content.localRepair = { attempts:repairAttempts,reasons,rejectedCandidates:rejectedCopy };
@@ -862,9 +1255,9 @@ function startGeneration(uid, id, activity, log, deps = defaultDeps) {
             Object.assign(latest.runtime.attempts[`${nodeId}:${epoch}`], { phase: 'render_ready', completedAt: new Date().toISOString(), outputHash: latest.runtime.slides[slide.id].contentHash });
             for (const stage of ['layout', 'preview', 'quality']) transitionNode(latest, `${stage}:${slide.id}`, 'completed', { slideId: slide.id, epoch, inputHash: latest.runtime.slides[slide.id].contentHash, renderHash: latest.runtime.slides[slide.id].renderHash }, { useInput: true });
             checkpoint(latest, `slide:${slide.id}:content`);
-            if (index === 0 && latest.deckTitle?.source !== 'user') latest.deckTitle = { text: content.title, raw: content.title, source: 'agent', locked: false };
+            if (index === 0 && latest.deckTitle?.source !== 'user') {latest.deckTitle = { text: content.title, raw: content.title, source: 'agent', locked: false };if(latest.titleSource!=='user'){const identity=displayedDocumentTitle(latest);latest.title=identity?.variants?.map(v=>v.text).join(' | ').slice(0,160)||content.title;}}
             contentEditResult(latest, slide.id, epoch, 'applied');
-            store.save(latest); emitRunProgress(latest, 'slide.render_ready', { slideId: slide.id, epoch, renderHash: latest.runtime.slides[slide.id].renderHash });
+            store.save(latest); clearDraft(latest.id, slide.id); emitRunProgress(latest, 'slide.render_ready', { slideId: slide.id, epoch, renderHash: latest.runtime.slides[slide.id].renderHash });
             return 'committed';
           });
           if (committed === 'superseded') continue;
@@ -875,6 +1268,7 @@ function startGeneration(uid, id, activity, log, deps = defaultDeps) {
             if (!latest || latest.deletedAt || latest.status !== 'generating' || latest.currentRunId !== runId) return true;
             if (latest.runtime?.pauseRequested) { latest.nodes[slide.id].status = 'pending'; store.save(latest); return true; }
             if (generationEpoch(latest, slide.id) !== epoch) return true;
+            if(latest.nodes[slide.id]?.status!=='done')latest.nodes[slide.id].status='failed';
             contentEditResult(latest, slide.id, epoch, 'failed', String(error?.message || error));
             store.save(latest);
             persistDagNode(uid, id, latest.nodes?.[slide.id]?.status === 'done' ? `preview:${slide.id}` : nodeId, 'failed', { epoch, error: String(error?.message || error).slice(0, 300) });
@@ -886,7 +1280,9 @@ function startGeneration(uid, id, activity, log, deps = defaultDeps) {
         }
       };
       // Source/media checks can run concurrently; visible page creation follows
-      // the reading order and commits each real preview before starting the next.
+      // the reading order and commits each real preview before starting the
+      // next (Gamma: finished pages, then the current page; edits to the
+      // remaining pages apply before those pages are written).
       await boundedAll(readyNodes.filter(work=>work.kind==='media'), PPT_NODE_CONCURRENCY, runWork);
       await boundedAll(readyNodes.filter(work=>work.kind==='content'), 1, runWork);
       const afterWave = store.get(uid, id);
@@ -919,6 +1315,24 @@ function startGeneration(uid, id, activity, log, deps = defaultDeps) {
       if (!current || current.status !== 'generating') return;
       try { transitionNode(current, 'content', 'completed'); transitionNode(current, 'media', 'completed'); transitionNode(current, 'layout', 'completed'); transitionNode(current, 'preview', 'completed'); transitionNode(current, 'quality', 'running'); } catch {}
 
+      await prepareNavigationPlan(current,finalDeckNavigation({...current,navigationPlan:undefined}).entries,(prompt,nodeKey)=>deps.modelCall(current,prompt,activity,log,{nodeKey,maxOutputTokens:8192}),async planned=>{await enqueueProject(uid,id,()=>{const latest=store.get(uid,id);if(latest?.status==='generating'&&semanticReviewKey(latest)===semanticReviewKey(planned)){latest.navigationPlan=planned.navigationPlan;store.save(latest);}});});
+      bindDeckNavigation(current);
+      enrichAssetRefs(current);
+      current.postWriterPlan=postWriterPlan(current);store.save(current);
+      const consolidateActualPages=async()=>{
+        const actualPlan=await executePostWriterPlan(current,{inspect:deterministicReview,rewrite:async(candidate,outline,index,proposal)=>{
+        const prompt=contentPrompt(candidate,outline,index)+'\n<actual_object_consolidation>'+JSON.stringify({slideIds:proposal.slideIds,sourceUnitIds:proposal.sourceUnitIds})+'</actual_object_consolidation>Rewrite one coherent page title and only necessary explanations. Keep every frozen source object/range and every condition; no font shrink or invented facts.';
+        const result=await writeWithContractRepair({prompt,nodeKey:`content:${outline.id}:postwriter`,call:text=>deps.modelCall(candidate,text,activity,log,{nodeKey:`content:${outline.id}:postwriter`}),normalize:raw=>normalizeSlide(raw,outline,candidate,candidate.deck.slides.slice(0,index).map(s=>s.title))});
+        return result.content;
+      }});
+      if(actualPlan.executions.length){
+        const latest=store.get(uid,id);
+        if(!lease.owns()||!latest||latest.currentRunId!==current.currentRunId||latest.status!=='generating'||semanticReviewKey(latest)!==semanticReviewKey(current))throw Error('postwriter transaction superseded by a user edit');
+        const beforeReplan=current;current=actualPlan.project;recordRepairSet(beforeReplan,current,actualPlan.executions.filter(e=>e.status==='committed').map(e=>({code:'postwriter_consolidation',detail:e.proposal.reason})));store.save(current);emitRunProgress(current,'deck.replanned',{executions:actualPlan.executions});
+      }
+        bindDeckNavigation(current);enrichAssetRefs(current);current.postWriterPlan=postWriterPlan(current);store.save(current);
+      };
+      await consolidateActualPages();
       let initialReview = deterministicReview(current);
       const reviewNodeId = 'review:deck';
       let reviewedInputHash = semanticReviewKey(current);
@@ -927,7 +1341,7 @@ function startGeneration(uid, id, activity, log, deps = defaultDeps) {
         persistDagNode(uid, id, reviewNodeId, 'running');
         const reviewStarted = Date.now();
         try {
-          modelReview = await reviewWithContractRepair(current,(prompt,nodeKey)=>deps.modelCall(current,prompt,activity,log,{nodeKey}),{nodeKey:reviewNodeId});
+          modelReview = await checkpointedDeckReview(current,(prompt,nodeKey)=>deps.modelCall(current,prompt,activity,log,{nodeKey}),{nodeKey:reviewNodeId});
           persistDagNode(uid, id, reviewNodeId, 'done', { durationMs: Date.now() - reviewStarted, result: modelReview });
         } catch (error) {
           persistDagNode(uid, id, reviewNodeId, 'failed', { durationMs: Date.now() - reviewStarted, error: String(error?.message || error).slice(0, 300) });
@@ -941,14 +1355,14 @@ function startGeneration(uid, id, activity, log, deps = defaultDeps) {
       for (let attempt = 0; semanticReviewKey(current) !== reviewedInputHash; attempt++) {
         if (attempt >= 3) throw new Error('review inputs keep changing; retry after edits settle');
         reviewedInputHash = semanticReviewKey(current); initialReview = deterministicReview(current);
-        modelReview = await reviewWithContractRepair(current,(prompt,nodeKey)=>deps.modelCall(current,prompt,activity,log,{nodeKey}),{nodeKey:'review:deck:refresh'});
+        modelReview = await checkpointedDeckReview(current,(prompt,nodeKey)=>deps.modelCall(current,prompt,activity,log,{nodeKey}),{nodeKey:'review:deck:refresh'});
         current = store.get(uid, id); if (!current || current.deletedAt || current.status !== 'generating') return;
         if (current.runtime?.pauseRequested) { await enqueueProject(uid, id, () => finishPause(store.get(uid, id))); return; }
       }
       // Critic findings are actionable input to the writer, not just a final
       // report. Persist the round bound so pause/recovery cannot loop forever.
       for (;;) {
-        const targets = criticRewriteTargets(current, modelReview);
+        const targets = criticRewriteTargets(current, modelReview, initialReview);
         const prior = current.runtime?.criticRepair;
         const round = prior?.runId === current.currentRunId ? prior.rounds || 0 : 0;
         if (!targets.length || round >= 2) break;
@@ -968,30 +1382,66 @@ function startGeneration(uid, id, activity, log, deps = defaultDeps) {
           const epoch = generationEpoch(current, slide.id);
           const beforeKey = semanticReviewKey(current);
           const draft = current.nodes[slide.id].slide;
+          const frozenSource = hasFrozenSourceArtifacts(draft);
           const attemptKey = `content:${slide.id}:critic:${round + 1}`;
           const started = Date.now();
-          const raw = await deps.modelCall(current, contentRepairPrompt(current, slide, index, draft, target.findings), activity, log, { nodeKey: attemptKey });
-          const candidate = normalizeSlide(raw, slide, current, current.deck.slides.slice(0, index).map(item => item.title));
+          const optional=optionalCopyRepair(current,modelReview,slide.id,deterministicReview);
+          let candidate;
+          try { ({content:candidate}=optional?{content:optional.slide}:await writeWithContractRepair({prompt:contentRepairPrompt(current,slide,index,draft,target.findings),nodeKey:attemptKey,
+            call:(prompt,nodeKey)=>deps.modelCall(current,prompt,activity,log,{nodeKey}),normalize:raw=>{
+              // The critic edits source copy; native header/section slots stay frozen.
+              const candidate=normalizeSlide(frozenSource?{...raw,slotTexts:draft.templateSlotTexts,omitTemplateShapes:draft.templateOmissions}:raw,slide,current,current.deck.slides.slice(0,index).map(item=>item.title));
+              if(frozenSource)candidate.templateOmissions=(candidate.templateOmissions||[]).map(item=>{
+                const prior=draft.templateOmissions?.find(old=>old.shapeId===item.shapeId&&old.version===2);return prior?structuredClone(prior):item;
+              });
+              return candidate;
+            }})); } catch(error) {
+            // An invalid bounded critic candidate must not destroy a verified
+            // writer page or abort all remaining repair targets. Keep the old
+            // page and unresolved gate finding. An optional repair transport
+            // failure also retains the verified baseline: final review and
+            // publication gates still block unresolved findings. Cancellation,
+            // authentication and stale-edit failures must propagate.
+            const rejectedCode = error.code || (/^ppt_(?:timeout|network)$/u.test(error.message) ? error.message : undefined);
+            if(!['capacity_invalid','coverage_invalid','schema_invalid','timeout','network','ppt_timeout','ppt_network'].includes(rejectedCode))throw error;
+            current=await enqueueProject(uid,id,()=>{
+              const latest=store.get(uid,id);
+              if(!lease.owns()||!latest||latest.status!=='generating'||latest.currentRunId!==current.currentRunId||semanticReviewKey(latest)!==beforeKey)throw Error('content changed during rejected critic repair');
+              runtimeState(latest).criticRepair.attempts.push({slideId:slide.id,nodeKey:attemptKey,rolledBack:true,progressed:false,violations:[{code:rejectedCode,detail:String(error.message).slice(0,700)}],beforeHash:digest(draft),durationMs:Date.now()-started});
+              store.save(latest);return latest;
+            });
+            continue;
+          }
           current = await enqueueProject(uid, id, () => {
             const latest = store.get(uid, id);
             if (!lease.owns() || !latest || latest.deletedAt || latest.status !== 'generating') return null;
             if (latest.runtime?.pauseRequested) { finishPause(latest); return null; }
             if (latest.currentRunId !== current.currentRunId || generationEpoch(latest, slide.id) !== epoch || semanticReviewKey(latest) !== beforeKey)
               throw new Error('content changed during critic repair; stale rewrite discarded');
-            if (criticRewriteTargets(latest, modelReview).some(item => item.slideId === slide.id)) {
+            if (criticRewriteTargets(latest, modelReview, deterministicReview(latest)).some(item => item.slideId === slide.id)) {
               const beforeRepair = structuredClone(latest);
               const beforeReview = deterministicReview(beforeRepair);
               latest.nodes[slide.id] = { ...latest.nodes[slide.id], status: 'done', slide: candidate };
-              latest.deck = ensureDeckV3(applyLayoutRegistry(applySourceImages({ schemaVersion: 2,
-                slides: latest.outline.map(item => latest.nodes[item.id].slide) }, latest.source)));
-              bindTemplateFidelity(latest); enrichAssetRefs(latest);
-              const repairViolations = validateRepairCandidate(beforeRepair, latest, { scopeSlideIds: [slide.id], operation: 'rewrite_with_source', beforeReview, afterReview: deterministicReview(latest) });
+              // A single-page critic must not rematerialize neighboring pages
+              // from older writer caches or regenerate their derived navigation.
+              const untouched=new Map(latest.deck.slides.filter(item=>item.id!==slide.id).map(item=>[item.id,structuredClone(item)]));
+              latest.deck.slides[index]=structuredClone(candidate);
+              latest.deck=ensureDeckV3(latest.deck);
+              bindTemplateFidelity(latest);
+              latest.deck.slides=latest.deck.slides.map(item=>untouched.get(item.id)||item);
+              // Copy remains inside the actual current layout/media frame even
+              // when its prose is generated and editable rather than frozen.
+              if(draft.sourceArtifactNodes?.length)preserveCopyRepairFrame(beforeRepair.deck.slides[index],latest.deck.slides[index]);
+              latest.nodes[slide.id].slide=structuredClone(latest.deck.slides[index]);
+              enrichAssetRefs(latest,{slideIds:[slide.id]});
+              const repairViolations = validateSourceRewriteWithReflow(beforeRepair, latest, { scopeSlideIds: [slide.id], beforeReview, afterReview: deterministicReview(latest) });
               if (repairViolations.length) {
                 Object.assign(latest, beforeRepair);
-                runtimeState(latest).criticRepair.attempts.push({ slideId: slide.id, nodeKey: attemptKey, rolledBack: true, violations: repairViolations, beforeHash: digest(draft), afterHash: digest(candidate) });
+                runtimeState(latest).criticRepair.attempts.push({ slideId: slide.id, nodeKey: attemptKey, rolledBack: true, progressed:false, operations:optional?.operations||['rewrite_with_source','reflow'], violations: repairViolations, beforeHash: digest(draft), afterHash: digest(candidate) });
                 store.save(latest); return latest;
               }
               updateSlidePreview(latest, slide.id);
+              latest.runtime.slides[slide.id].repairComparison=recordRepairComparison(beforeRepair,latest,slide.id,target.findings);
               for (const stage of ['content', 'layout', 'preview', 'quality']) transitionNode(latest, `${stage}:${slide.id}`, 'completed',
                 { slideId: slide.id, epoch, criticRound: round + 1, inputHash: latest.runtime.slides[slide.id].contentHash, renderHash: latest.runtime.slides[slide.id].renderHash }, { useInput: true });
               runtimeState(latest).criticRepair.attempts.push({ slideId: slide.id, nodeKey: attemptKey,
@@ -1000,13 +1450,16 @@ function startGeneration(uid, id, activity, log, deps = defaultDeps) {
               checkpoint(latest, 'critic-rewrite');
             }
             store.save(latest);
-            emitRunProgress(latest, 'slide.render_ready', { slideId: slide.id, epoch, criticRound: round + 1, renderHash: latest.runtime.slides[slide.id].renderHash });
+            clearDraft(latest.id, slide.id); emitRunProgress(latest, 'slide.render_ready', { slideId: slide.id, epoch, criticRound: round + 1, renderHash: latest.runtime.slides[slide.id].renderHash });
             return latest;
           });
           if (!current) return;
         }
+        // Optional-copy removals can expose a genuinely smaller complete-source
+        // layout. Re-measure/execute atomically, then audit the actual new deck.
+        await consolidateActualPages();
         reviewedInputHash = semanticReviewKey(current);
-        modelReview = await reviewWithContractRepair(current,(prompt,nodeKey)=>deps.modelCall(current,prompt,activity,log,{nodeKey}),{nodeKey:`review:deck:critic:${round+1}`});
+        modelReview = await checkpointedDeckReview(current,(prompt,nodeKey)=>deps.modelCall(current,prompt,activity,log,{nodeKey}),{nodeKey:`review:deck:critic:${round+1}`});
         current = store.get(uid, id);
         if (!current || current.deletedAt || current.status !== 'generating') return;
         if (current.runtime?.pauseRequested) { await enqueueProject(uid, id, () => finishPause(current)); return; }
@@ -1020,12 +1473,13 @@ function startGeneration(uid, id, activity, log, deps = defaultDeps) {
       const repairBaseline = semanticReviewKey(current);
       current.stage = 'repair'; store.save(current);
       try { transitionNode(current, 'quality', 'completed'); transitionNode(current, 'review', 'completed'); transitionNode(current, 'repair', 'running'); } catch {}
+      const beforeFinalRepair=structuredClone(current);
       const repaired = repairProject(current, initialReview);
       current = repaired.project;
       const reviewDuration = current.dagNodes?.[reviewNodeId]?.durationMs || 0;
       current.quality = finalQualityReport(repaired.review, repaired.repairs, modelReview, { reviewMs: reviewDuration });
       if (semanticReviewKey(current) !== reviewedInputHash) {
-        modelReview = await reviewWithContractRepair(current,(prompt,nodeKey)=>deps.modelCall(current,prompt,activity,log,{nodeKey}),{nodeKey:'review:deck:repair'});
+        modelReview = await checkpointedDeckReview(current,(prompt,nodeKey)=>deps.modelCall(current,prompt,activity,log,{nodeKey}),{nodeKey:'review:deck:repair'});
         current.quality = finalQualityReport(repaired.review, repaired.repairs, modelReview, { reviewMs: reviewDuration });
       }
       const latestBeforePublish = store.get(uid, id);
@@ -1033,6 +1487,10 @@ function startGeneration(uid, id, activity, log, deps = defaultDeps) {
       if (latestBeforePublish.runtime?.pauseRequested) { await enqueueProject(uid, id, () => finishPause(latestBeforePublish)); return; }
       if (semanticReviewKey(latestBeforePublish) !== repairBaseline) throw new Error('content changed during repair review; retry before publishing');
       current.editing = latestBeforePublish.editing; current.constraints = latestBeforePublish.constraints; current.runtime = latestBeforePublish.runtime;
+      recordRepairSet(beforeFinalRepair,current,repaired.repairs);
+      bindDeckNavigation(current);
+      enrichAssetRefs(current);
+      current.postWriterPlan=postWriterPlan(current);
       current.renderTree = buildRenderTree(current);
       for (const tree of current.renderTree.slides) runtimeState(current).slides[tree.id] = { ...current.runtime.slides[tree.id], preview: tree, renderHash: digest(tree) };
       bindReview(current, modelReview);
@@ -1074,14 +1532,18 @@ function startGeneration(uid, id, activity, log, deps = defaultDeps) {
         finished.exportBytes = exportInfo.bytes; finished.status = 'completed'; finished.stage = 'completed';
         finished.dagNodes['publish:deck'] = nodeRecord('done', finished.dagNodes['publish:deck'], { bytes: exportInfo.bytes });
         finished.error = ''; finished.revision = Math.max(1, Number(finished.revision || 0)); finished.draftRevision = finished.revision;
-        delete finished.renderUpgradePending; finished.publishedArtifactPath = artifactPath; finished.publishedRevision = finished.revision;
+        delete finished.renderUpgradePending; finished.publishedArtifactPath = artifactPath; finished.publishedRevision = finished.revision;finished.publishedPageCount=finished.deck.slides.length;finished.publishedAt=new Date().toISOString();
         finished.renderTree = buildRenderTree(finished); saveStructuredProject(finished); saveRevision(finished, 'initial-publish');
         runtimeState(finished).lifecycle = 'completed';
         for (const tree of finished.renderTree.slides) finished.runtime.slides[tree.id] = { ...finished.runtime.slides[tree.id], phase: 'validated', preview: tree, renderHash: digest(tree) };
         checkpoint(finished, 'initial-publish'); saveStructuredProject(finished);
         try { transitionNode(finished, 'publish:deck', 'completed', { bytes: exportInfo.bytes }); transitionNode(finished, 'publish', 'completed', { bytes: exportInfo.bytes }); completeRun(finished, { revision: finished.revision }); } catch {}
       });
-    } catch (error) { fail(uid, id, 'generation', error, log); }
+    } catch (error) {
+      const latest=store.get(uid,id);
+      if(error.code==='cancelled'&&latest?.status==='generating'&&latest.runtime?.pauseRequested)finishPause(latest);
+      else fail(uid, id, 'generation', error, log);
+    }
     finally { lease.release(); running.delete(id); void processGenerationEdits(uid, id, deps, activity, log).catch(error => log(String(error))); }
   })();
 }
@@ -1115,12 +1577,13 @@ async function body(req) {
 function folderName(value) { return bounded(value, 80, 'folder name'); }
 function folderExists(uid, id) { return store.listFolders(uid).some(folder => folder.id === id); }
 function folderSummary(uid) {
-  const projects = store.list(uid).filter(project => !project.deletedAt);
+  const projects = store.list(uid,{hydrate:false}).filter(project => !project.deletedAt&&libraryEligible(project));
   return sortManual(store.listFolders(uid).map(folder => ({ ...folder, count: projects.filter(project => project.folderId === folder.id).length })),
     (a, b) => a.name.localeCompare(b.name));
 }
 function listProjects(uid, url) {
-  let projects = store.list(uid);
+  // The account task list needs statuses/counts, never hydrated image payloads.
+  let projects = store.list(uid,{hydrate:false});
   const trash = url.searchParams.get('trash') === '1';
   projects = projects.filter(project => Boolean(project.deletedAt) === trash);
   const q = (url.searchParams.get('q') || '').trim().toLocaleLowerCase();
@@ -1132,12 +1595,7 @@ function listProjects(uid, url) {
   const order = { manual: (a, b) => b.updatedAt.localeCompare(a.updatedAt), updated: (a, b) => b.updatedAt.localeCompare(a.updatedAt), created: (a, b) => b.createdAt.localeCompare(a.createdAt), name: (a, b) => a.title.localeCompare(b.title) }[sort];
   if (!order) throw new HttpError(400, 'invalid sort mode');
   return (sort === 'manual' ? sortManual(projects, order) : projects.sort((a, b) => Number(b.pinned) - Number(a.pinned) || order(a, b)))
-    .map(({ source, nodes, update, updateRequest, ...project }) => ({
-      ...project,
-      source: source ? { kind: source.kind, name: source.name, extension: source.extension } : null,
-      deck: project.deck ? { slides: project.deck.slides.slice(0, 1).map(slide => ({ title: slide.title })) } : null,
-      outline: project.outline?.slice(0, 1).map(slide => ({ title: slide.title })) || [],
-    }));
+    .map(taskSummary);
 }
 async function permanentlyRemove(project, deps = defaultDeps) {
   if (running.has(project.id) || editing.has(project.id)) throw new HttpError(409, 'project has an active job');
@@ -1148,7 +1606,7 @@ function setMetadata(project, data) {
   if (data.title !== undefined) {
     const title = bounded(data.title, 160, 'title');
     if (title === project.title) throw new HttpError(400, 'name is unchanged');
-    project.title = title;
+    project.title = title;project.titleSource='user';
   }
   if (data.favorite !== undefined) {
     if (typeof data.favorite !== 'boolean') throw new HttpError(400, 'favorite must be boolean');
@@ -1240,9 +1698,9 @@ async function handleTemplates(req, id, uid, url, send, deps) {
     const item = { id: templateId, name: bounded(data.name || data.fileName.replace(/\.[^.]+$/, ''), 120, 'template name'), category: '我的模板',
       description: String(analysis.reason || '').slice(0, 300), kind: 'uploaded', compatibility: analysis.compatibility, version: 1,
       pages: analysis.pages, palette, fonts, sampleTitles: (analysis.sampleTitles || []).slice(0, 3), tags: ['自定义', '上传'], pinned: false,
-      fileName: data.fileName, extension: upload.extension, bytes: upload.bytes.length, sha256: upload.sha256, irVersion: imported ? 'pptx-ir-4' : null, createdAt: new Date().toISOString() };
+      fileName: data.fileName, extension: upload.extension, bytes: upload.bytes.length, sha256: upload.sha256, irVersion: imported ? 'pptx-ir-7' : null, createdAt: new Date().toISOString() };
     store.writeTemplate(uid, templateId, upload.bytes);
-    if (imported) store.writeTemplateIR(uid, templateId, { schemaVersion: 1, parserVersion: 'pptx-ir-4', sha256: upload.sha256, imported });
+    if (imported) store.writeTemplateIR(uid, templateId, { schemaVersion: 1, parserVersion: 'pptx-ir-7', sha256: upload.sha256, imported });
     store.saveTemplates(uid, [...customs, item]);
     return send(201, { template: item });
   }
@@ -1292,7 +1750,7 @@ async function handleUpdates(req, uid, send, activity, log, deps) {
       return send(200, { project: prior });
     }
   }
-  if (store.list(uid).filter(item => !item.deletedAt).length >= 50) throw new HttpError(409, 'workspace limit is 50 presentations');
+  if (store.list(uid).filter(item => !item.deletedAt).length >= 50) throw new HttpError(409, 'workspace limit is 50 stored projects, including presentations and tasks; move unused tasks to trash');
   if (Boolean(data.baseProjectId) === Boolean(data.baseFileBase64)) throw new HttpError(400, 'choose exactly one base version');
   if (data.baseProjectId && (typeof data.baseProjectId !== 'string' || !/^[a-f0-9]{32}$/.test(data.baseProjectId))) throw new HttpError(400, 'invalid base project id');
   let baseProject = null; let baseFile = null;
@@ -1411,7 +1869,7 @@ async function handleBulk(req, uid, send, deps) {
   if (!['move', 'trash', 'restore', 'permanent'].includes(data.action)) throw new HttpError(400, 'invalid bulk action');
   if (data.action === 'move' && data.folderId !== null && !folderExists(uid, data.folderId)) throw new HttpError(400, 'folder does not exist');
   if (data.action === 'permanent' && projects.some(project => !project.deletedAt || running.has(project.id) || editing.has(project.id))) throw new HttpError(409, 'projects must be in trash and idle');
-  if (data.action === 'restore' && store.list(uid).filter(project => !project.deletedAt).length + projects.filter(project => project.deletedAt).length > 50) throw new HttpError(409, 'workspace limit is 50 presentations');
+  if (data.action === 'restore' && store.list(uid).filter(project => !project.deletedAt).length + projects.filter(project => project.deletedAt).length > 50) throw new HttpError(409, 'workspace limit is 50 stored projects, including presentations and tasks; move unused tasks to trash');
   const at = new Date().toISOString();
   for (const project of projects) await enqueueProject(uid, project.id, async () => {
     const latest = getStructuredProject(uid, project.id);
@@ -1427,16 +1885,42 @@ async function handleBulk(req, uid, send, deps) {
   return send(200, { ok: true, count: projects.length });
 }
 
-export async function handlePpt(req, url, { uid, send, res, readBody, activity, log = () => {}, deps = defaultDeps }) {
+async function checkpointedDeckReview(project,call,options){
+ const visibleCall=async(prompt,nodeKey)=>{
+  await enqueueProject(project.uid,project.id,()=>{
+   const latest=store.get(project.uid,project.id);
+   if(!latest||latest.deletedAt||latest.status!=='generating'||latest.currentRunId!==project.currentRunId)return;
+   latest.stage='review:deck';latest.runtime ||= {};
+   latest.runtime.reviewProgress={nodeKey,phase:'writing',startedAt:new Date().toISOString()};
+   store.save(latest);emitRunProgress(latest,'review.batch_started',{nodeKey});
+  });
+  return call(prompt,nodeKey);
+ };
+ return reviewWithContractRepair(project,visibleCall,{...options,checkpoint:{
+  load:key=>store.get(project.uid,project.id)?.reviewCheckpoints?.[key]?.review,
+  save:(key,review)=>enqueueProject(project.uid,project.id,()=>{
+   const latest=store.get(project.uid,project.id);if(!latest||latest.deletedAt)return;
+   const records=latest.reviewCheckpoints||{};records[key]={review,at:new Date().toISOString(),model:project.model};
+   latest.reviewCheckpoints=Object.fromEntries(Object.entries(records).slice(-20));store.save(latest);
+  })
+ }});
+}
+
+export async function handlePpt(req, url, { uid, send:sendRaw, res, readBody, activity, log = () => {}, deps = defaultDeps }) {
+  // Mutations use the same lean scene as polling. Returning the full durable
+  // project here can ship tens of MB of repeated template image data and
+  // freeze the editor just when it should show the next real stage.
+  const send=(status,value)=>sendRaw(status,url.searchParams.get('view')==='live'&&value?.project?.uid?{...value,project:liveProjectView(value.project)}:value);
   if (uid === 'managed') return send(403, { error: 'reserved template registry namespace' });
   if (url.pathname === '/ppt/capabilities') return req.method === 'GET'
     ? send(200, { byok: PPT_BYOK_CAPABILITIES }) : send(405, { error: 'method not allowed' });
-  const modelJob = url.pathname.match(/^\/ppt\/model-jobs(?:\/([a-f0-9]{32})\/(claim|complete))?$/);
+  const modelJob = url.pathname.match(/^\/ppt\/model-jobs(?:\/([a-f0-9]{32})\/(claim|complete|progress))?$/);
   if (modelJob) {
     const [, id, action] = modelJob;
     if (!id && req.method === 'GET') return send(200, { jobs: pptModelJobs.list(uid) });
     if (id && req.method === 'POST') {
       if (action === 'claim') { const job = pptModelJobs.claim(uid, id); return send(job ? 200 : 409, job || { error: 'Job unavailable' }); }
+      if (action === 'progress') { try { const accepted = pptModelJobs.progress(uid, id, await body(req)); return send(accepted ? 200 : 409, accepted ? { ok: true } : { error: 'Job unavailable' }); } catch { return send(400, { error: 'Invalid progress' }); } }
       try { const accepted = pptModelJobs.complete(uid, id, await body(req)); return send(accepted ? 200 : 409, accepted ? { ok: true } : { error: 'Job unavailable' }); }
       catch { return send(400, { error: 'Invalid model result' }); }
     }
@@ -1464,13 +1948,13 @@ export async function handlePpt(req, url, { uid, send, res, readBody, activity, 
       const text = String(data.text || '').slice(0, 80000);
       const source = data.inputKind === 'paste' && text.trim() ? normalizePaste(text) : data.inputKind === 'file' ? { kind: 'file', text: '', bytes: Number(data.fileBytes) || 0 } : null;
       const estimateTemplate = data.template ? resolveTemplate(uid, data.template) : null;
-      const candidate = { templateSpec: estimateTemplate ? snapshotTemplate(estimateTemplate) : null, inputKind: data.inputKind, source, prompt, generationPolicy: normalizeGenerationPolicy(data.generationPolicy) };
+      const candidate = { templateSpec: estimateTemplate ? snapshotTemplate(estimateTemplate) : null, inputKind: data.inputKind, source, prompt, generationPolicy: normalizeGenerationPolicy(data.generationPolicy)||defaultGenerationPolicy(prompt) };
       candidate.inputProfile = profilePptInput(candidate); candidate.contentPlan = planSparseInput(candidate, candidate.inputProfile);
       const result = estimatePageRecommendation(candidate);
       const weight = data.inputKind === 'file' ? Math.min(16, Math.ceil(Math.max(0, Number(data.fileBytes) || 0) / 180000)) : 0;
       const recommended = Math.min(100, Math.max(result.recommended, weight ? 4 + weight : 3));
       return send(200, { recommendation: { recommended, min: Math.min(result.range[0], recommended), max: Math.min(100, Math.max(result.range[1], recommended)),
-        densityProfileId: result.densityProfileId, estimationBasis: result.estimationBasis, provisional: true, requested: requestedPageCount(prompt, text), reason: data.inputKind === 'file' ? '文件体量与补充要求初估；解析来源后校准。' : result.reason,
+        densityProfileId: result.densityProfileId, estimationBasis: result.estimationBasis, provisional: true, requested: requestedPageCount(candidate.source?.text?.trim()===prompt.trim()?'':prompt), reason: data.inputKind === 'file' ? '文件体量与补充要求初估；解析来源后校准。' : result.reason,
         reasonBase: data.inputKind === 'file' ? '文件体量与补充要求初估；解析来源后校准。' : result.reasonBase, assumptions: result.assumptions || [], warnings: result.warnings || [] } });
     }
     if (folderOrder) return await handleFolderOrder(req, uid, send);
@@ -1488,7 +1972,7 @@ export async function handlePpt(req, url, { uid, send, res, readBody, activity, 
       if (req.method === 'GET') return send(200, { projects: listProjects(uid, url) });
       if (req.method === 'POST') {
         const data = await body(req);
-        if (store.list(uid).filter(project => !project.deletedAt).length >= 50) throw new HttpError(409, 'workspace limit is 50 presentations');
+        if (store.list(uid).filter(project => !project.deletedAt).length >= 50) throw new HttpError(409, 'workspace limit is 50 stored projects, including presentations and tasks; move unused tasks to trash');
         const inputKind = data.inputKind || 'prompt';
         if (!['prompt', 'paste', 'file'].includes(inputKind)) throw new HttpError(400, 'invalid input kind');
         let source = null; let sourceBytes = null;
@@ -1506,18 +1990,23 @@ export async function handlePpt(req, url, { uid, send, res, readBody, activity, 
         }
         const prompt = inputKind === 'prompt' ? bounded(data.prompt || '', MAX_PROMPT, 'prompt', !(Array.isArray(data.images) && data.images.length)) : bounded(data.prompt || '', MAX_PROMPT, 'prompt', false);
         const userTitle = typeof data.title === 'string' && data.title.trim() ? bounded(data.title, 160, 'title') : '';
-        const title = bounded(userTitle || prompt.slice(0, 60) || source?.name?.replace(/\.[^.]+$/, '') || 'Presentation', 160, 'title');
+        const sourceTitle=source?displayedDocumentTitle({source,generationPolicy:data.generationPolicy}):null;
+        const derivedTitle=sourceTitle?.variants.map(v=>v.main||v.text).join(' | ')||prompt.replace(/^\s*#{1,6}\s+/u,'').split('\n')[0].trim()||source?.name?.replace(/\.[^.]+$/,'')||'Presentation';
+        const title = bounded(userTitle || derivedTitle.slice(0,160), 160, 'title');
         const template = resolveTemplate(uid, data.template || 'violet');
-        const generationPolicy = normalizeGenerationPolicy(data.generationPolicy);
+        const generationPolicy = normalizeGenerationPolicy(data.generationPolicy)||defaultGenerationPolicy(prompt);
         if (inputKind === 'prompt') {
+          // Prompt text, pasted images, Markdown/HTML image references and
+          // inline tables/SVG enter the same semantic source as a file.
           const parsed = normalizePaste(prompt, data.images);
-          source = estimationSource({inputKind,prompt}) || (parsed.images.length || parsed.mediaWarnings.length || /\|.*\||```|<svg\b/iu.test(prompt) ? {...parsed,kind:'prompt'} : null);
-          if (source) source = {...source,...mergeSourceMedia({images:[...(source.images||[]),...parsed.images]}),mediaWarnings:parsed.mediaWarnings};
+          source = estimationSource({ inputKind, prompt, generationPolicy }) || (parsed.images.length || parsed.mediaWarnings.length || /\|.*\||```|<svg\b/iu.test(prompt) ? {...parsed,kind:'prompt'} : null);
+          if (source) source = {...source,...mergeSourceMedia({images:[...(source.images||[]),...parsed.images]}),mediaWarnings:[...(source.mediaWarnings||[]),...parsed.mediaWarnings]};
         } else if (inputKind === 'file') source = {...source,...mergeSourceMedia({},data.images)};
         const inputProfile = profilePptInput({ inputKind, source, prompt });
         const contentPlan = planSparseInput({ inputKind, source, prompt }, inputProfile);
         const estimatedPages = estimatePageRecommendation({ inputKind, source, prompt, inputProfile, contentPlan, generationPolicy, templateSpec: snapshotTemplate(template) }).recommended;
-        const promptPages = requestedPageCount(prompt, source?.text);
+        const requirements = source?.text?.trim()===prompt.trim()?'':prompt;
+        const promptPages = requestedPageCount(requirements);
         const selectedPages = pages(data.pages ?? promptPages ?? estimatedPages);
         const requestedOutline = data.outline === undefined ? null : data.outline;
         if (requestedOutline !== null && (!Array.isArray(requestedOutline) || requestedOutline.length !== selectedPages)) throw new HttpError(400, 'outline must match the user-confirmed page count');
@@ -1526,7 +2015,7 @@ export async function handlePpt(req, url, { uid, send, res, readBody, activity, 
           const reuseError = templateReuseError(template.pages, selectedPages);
           if (reuseError) throw new HttpError(400, reuseError);
         }
-        const project = { id: store.newId(), uid, title, prompt, generationPolicy, promptContractVersion: PPT_PROMPT_CONTRACT_VERSION, pages: selectedPages, inputProfile, contentPlan, template: template.id, templateContentMode: data.templateContentMode==='keep_fixed'?'keep_fixed':'design_only',
+        const project = { id: store.newId(), uid, title, titleSource:userTitle?'user':'derived', prompt, userRequirements:requirements, generationPolicy, promptContractVersion: PPT_PROMPT_CONTRACT_VERSION, pages: selectedPages, inputProfile, contentPlan, template: template.id, templateContentMode: data.templateContentMode==='keep_fixed'?'keep_fixed':'design_only',
           templateSpec: snapshotTemplate(template), inputKind, source, sourceRevision: source ? 1 : 0, outlineRevision: 0,
           deckTitle: userTitle ? { text: formattedUserTitle.title, raw: userTitle, source: 'user', locked: true } : { text: '', raw: '', source: 'agent', locked: false },
           pageDecision: { finalPageCount: selectedPages, source: data.pages === undefined && promptPages === undefined ? 'estimate' : 'user',
@@ -1550,6 +2039,12 @@ export async function handlePpt(req, url, { uid, send, res, readBody, activity, 
           project.templateMode = data.templateMode === 'mapped' ? 'mapped' : 'preserve';
           project.templateFidelity = await deps.prepareTemplateFidelity(project, store.readTemplate(template.kind === 'managed' ? 'managed' : uid, template.id), template.sha256, template);
         }
+        if(project.templateFidelity && !sourceBytes){
+          const calibrated=estimatePageRecommendation(project);
+          project.pageDecision.parsedRecommendation=calibrated.recommended;
+          project.pageDecision.capacityBasis=calibrated.estimationBasis;
+          if(automaticPages(project)){project.pages=calibrated.recommended;rescheduleTemplateFidelity(project);}
+        }
         if (sourceBytes) store.writeSource(uid, project.id, sourceBytes);
         syncPresentationPolicy(project);
         store.save(project);
@@ -1562,7 +2057,7 @@ export async function handlePpt(req, url, { uid, send, res, readBody, activity, 
             if (analysis?.fonts) imported.templateSpec.fonts = analysis.fonts;
             if (analysis?.palette) imported.templateSpec.palette = analysis.palette;
             imported.renderTree = buildRenderTree(imported); imported.status = 'completed'; imported.stage = 'completed'; imported.error = '';
-            imported.revision = 1; imported.draftRevision = 1; imported.publishedRevision = 1;
+            imported.revision = 1; imported.draftRevision = 1; imported.publishedRevision = 1;imported.publishedPageCount=imported.deck.slides.length;imported.publishedAt=new Date().toISOString();
             // Import creates an editable source baseline, not a certified new
             // generation. Preserve the original even if its layout needs repair.
             try {const importExport=await renderImportedPptx(imported);acceptExportVerification(imported,importExport);}
@@ -1595,7 +2090,7 @@ export async function handlePpt(req, url, { uid, send, res, readBody, activity, 
       return send(200, { project: await enqueueProject(uid, id, () => { const latest = getStructuredProject(uid, id); latest.deletedAt = new Date().toISOString(); return store.save(latest); }) });
     }
     if (action === 'restore' && req.method === 'POST') {
-      if (store.list(uid).filter(item => !item.deletedAt).length >= 50) return send(409, { error: 'workspace limit is 50 presentations' });
+      if (store.list(uid).filter(item => !item.deletedAt).length >= 50) return send(409, { error: 'workspace limit is 50 stored projects, including presentations and tasks; move unused tasks to trash' });
       return send(200, { project: await enqueueProject(uid, id, () => { const latest = getStructuredProject(uid, id); latest.deletedAt = null; return store.save(latest); }) });
     }
     if (action === 'permanent' && req.method === 'DELETE') {
@@ -1605,10 +2100,29 @@ export async function handlePpt(req, url, { uid, send, res, readBody, activity, 
     }
     if (action === 'duplicate' && req.method === 'POST') {
       if (project.status !== 'completed') return send(409, { error: 'only completed presentations can be duplicated' });
-      if (store.list(uid).filter(item => !item.deletedAt).length >= 50) return send(409, { error: 'workspace limit is 50 presentations' });
+      if (store.list(uid).filter(item => !item.deletedAt).length >= 50) return send(409, { error: 'workspace limit is 50 stored projects, including presentations and tasks; move unused tasks to trash' });
       const copy = structuredClone(project);
       copy.id = store.newId(); copy.title = `${project.title} · 副本`.slice(0, 160);
       delete copy.update; delete copy.updateRequest; delete copy.diff; delete copy.editing; delete copy.publishedArtifactPath; delete copy.currentRunId; delete copy.runId;
+      delete copy.publishedPageCount;delete copy.publishedAt;delete copy.publishedRenderTree;delete copy.publishedRevision; delete copy.exportManifest; delete copy.pdfArtifactPath; delete copy.quality; delete copy.runtime; delete copy.renderOutput;
+      // The copy is a new task until its own native export passes publication.
+      if (copy.templateFidelity?.mode === "preserve" && deps.prepareTemplateFidelity || copy.externalPptx?.mode==='preserve'&&deps.importTemplateIR) {
+        const original=copy.templateFidelity?.mode==='preserve'?copy.templateFidelity:copy.externalPptx;
+        const file=await deps.readFile(project.id,original.originalPath),chunks=[];let total=0;
+        for await(const chunk of file.stream){const bytes=Buffer.from(chunk);total+=bytes.length;if(total>64*1024*1024)throw new HttpError(413,'native original exceeds copy limit');chunks.push(bytes);}
+        const archive=Buffer.concat(chunks),hash=sha256(archive);
+        if(original.sha256&&hash!==original.sha256)throw new HttpError(409,'native original hash changed; copy cannot replace source assets');
+        if(copy.templateFidelity?.mode==='preserve'){
+          // Use this project's exact opaque original, even when the template
+          // catalog was renamed, deleted or updated. Do not mutate the deck.
+          const scratch={uid,id:copy.id,pages:copy.pages,outline:copy.outline,templateSpec:copy.templateSpec};
+          const prepared=await deps.prepareTemplateFidelity(scratch,archive,hash,null);
+          copy.templateFidelity.originalPath=prepared.originalPath;
+        }else{
+          const baseline=await deps.importTemplateIR({uid,id:copy.id,templateSpec:copy.templateSpec},archive,hash);
+          copy.externalPptx.originalPath=baseline.externalPptx.originalPath;
+        }
+      }
       copy.version = { rootId: copy.id, parentId: null, number: 1 };
       copy.favorite = false; copy.pinned = false; copy.deletedAt = null;
       copy.status = 'generating'; copy.stage = 'rendering'; copy.error = ''; copy.revision = 0; copy.pdfRevision = 0;
@@ -1706,6 +2220,7 @@ export async function handlePpt(req, url, { uid, send, res, readBody, activity, 
       const data = await body(req);
       if (data.generationPolicy !== undefined) project.generationPolicy = normalizeGenerationPolicy(data.generationPolicy);
       const nextPages = pages(data.slides?.length);
+      const confirmedDecision = confirmedPageDecision(project, { nextPages, pageSource: data.pageSource, template: data.template });
       if (data.finalPageCount !== undefined && nextPages !== pages(data.finalPageCount)) throw new HttpError(400, 'outline must match the user-confirmed page count');
       if (data.template !== undefined && data.template !== project.template) {
         const selectedTemplate = resolveTemplate(uid, data.template);
@@ -1722,15 +2237,16 @@ export async function handlePpt(req, url, { uid, send, res, readBody, activity, 
       }
       project.pages = nextPages;
       if (data.compressionApproved !== undefined) project.compressionApproved = data.compressionApproved === true;
-      project.pageDecision = { finalPageCount: nextPages, source: 'user', mode: 'explicit', includesCover: true, confirmedAt: new Date().toISOString() };
+      project.pageDecision = confirmedDecision;
       if (project.update && project.pages < 6) throw new HttpError(400, 'update outline needs 6 to 100 slides');
       syncPresentationPolicy(project);
       project.outline = normalizeOutline({ slides: data.slides }, project.pages, project.source, project.update, project.deckTitle);
-      rescheduleTemplateFidelity(project);
+      try{confirmNativeOutlineFit(project);}catch(error){throw new HttpError(409,error.message);}
       project.planning = refreshPlanning(project);
       project.outlineRevision = (project.outlineRevision || 0) + 1;
       project.nodes = {};
       project.diff = diffSummary(project);
+      recordOutlineConfirmation(project);
       store.save(project);
       return send(200, { project });
     }
@@ -1760,7 +2276,10 @@ export async function handlePpt(req, url, { uid, send, res, readBody, activity, 
           ? await deps.prepareTemplateFidelity(project, store.readTemplate(selectedTemplate.kind === 'managed' ? 'managed' : uid, selectedTemplate.id), selectedTemplate.sha256, selectedTemplate)
           : undefined;
       }
-      project.pageDecision = { finalPageCount: project.pages, source: 'user', mode: 'explicit', includesCover: true, confirmedAt: new Date().toISOString() };
+      if(data.pageSource==='estimate'){
+        project.pages=estimatePageRecommendation(project).recommended;
+        project.pageDecision={finalPageCount:project.pages,initialPageCount:project.pages,source:'estimate',mode:'auto',includesCover:true,confirmedAt:null};
+      }else project.pageDecision = { finalPageCount: project.pages, source: 'user', mode: 'explicit', includesCover: true, confirmedAt: new Date().toISOString() };
       project.outline = []; project.nodes = {}; project.outlineRevision = 0;
       project.planning = null;
       project.diff = null;
@@ -1770,11 +2289,14 @@ export async function handlePpt(req, url, { uid, send, res, readBody, activity, 
     }
     if (action === 'generate' && req.method === 'POST') {
       if (['ingesting', 'outlining'].includes(project.status)) {
-        project.autoGenerate = true;
-        store.save(project);
-        return send(202, { project });
+        return send(409,{error:'Read the input and finish the validated outline first; confirm that outline before generating slides.'});
       }
       if (project.status !== 'outline_ready') return send(409, { error: 'outline not ready' });
+      if(project.confirmedOutline&&project.confirmedOutline.hash!==outlineConfirmationHash(project))return send(409,{error:'The outline, source or presentation policy changed; confirm the current outline again.'});
+      if(!project.confirmedOutline)recordOutlineConfirmation(project,{titlesFrozen:false});project.autoGenerate=false;
+      // A new explicit confirmation starts generation anew. A pause requested
+      // in a prior failed run is not a request to pause this new run.
+      if(project.runtime){project.runtime.pauseRequested=false;project.runtime.lifecycle='active';}
       project.pageDecision = { ...project.pageDecision, finalPageCount: project.pages, confirmedAt: new Date().toISOString() };
       project.status = 'generating'; project.stage = 'content'; project.error = '';
       store.save(project);
@@ -1801,9 +2323,91 @@ export async function handlePpt(req, url, { uid, send, res, readBody, activity, 
       });
       return send(201, { project: result });
     }
+    if (action === 'media-exclusions' && req.method === 'POST') {
+      // MD-P0-3: a retired template image is only accepted as removed when the
+      // user confirms it, with a reason, against the current source hash.
+      const data = await body(req), retired = new Set((project.quality?.mediaLedger?.retired || []).map(item => item.objectId));
+      const ids = Array.isArray(data.objectIds) ? [...new Set(data.objectIds.map(String))] : [];
+      const reason = typeof data.reason === 'string' ? data.reason.trim().slice(0, 300) : '';
+      if (!ids.length || ids.length > 64 || !reason) return send(400, { error: 'objectIds and a reason are required' });
+      if (ids.some(objectId => !retired.has(objectId))) return send(409, { error: 'only media listed as retired in the current quality report can be excluded' });
+      if (!project.source?.sha256) return send(409, { error: 'source hash unavailable' });
+      const saved = await enqueueProject(uid, id, () => {
+        const latest = getStructuredProject(uid, id);
+        const at = new Date().toISOString(), kept = (latest.sourceObjectExclusions || []).filter(item => !ids.includes(item.objectId));
+        latest.sourceObjectExclusions = [...kept, ...ids.map(objectId => ({ objectId, approvedBy: 'user', sourceHash: latest.source.sha256, reason, approvedAt: at, kind: 'template_media' }))];
+        // Refresh the media ledger so the confirmation is visible now; the
+        // publish gate itself is re-evaluated by the next quality run (retry).
+        if (latest.quality?.deterministic) {
+          const review = deterministicReview(latest), media = issue => /^media_(conservation|text_only)/u.test(issue.code);
+          const issues = [...latest.quality.deterministic.issues.filter(issue => !media(issue)), ...review.issues.filter(media)];
+          latest.quality = { ...latest.quality, mediaLedger: review.mediaLedger,
+            deterministic: { ...latest.quality.deterministic, issues, hardErrors: issues.filter(issue => issue.severity === 'error').length } };
+        }
+        return store.save(latest);
+      });
+      return send(200, { project: saved, excluded: ids.length });
+    }
+    if(action==='page-policy'&&req.method==='POST'){
+      const data=await body(req);if(data.mode!=='auto')throw new HttpError(400,'unsupported page policy');
+      const saved=await enqueueProject(uid,id,()=>{const latest=store.get(uid,id),decision=automaticPageDecision(latest,data.baseRevision);latest.pageDecisionHistory=[...(latest.pageDecisionHistory||[]),{...latest.pageDecision,changedBy:'user',at:decision.confirmedAt}];latest.pageDecision=decision;latest.revision++;invalidateReviews(latest);latest.renderTree=buildRenderTree(latest);store.save(latest);saveRevision(latest,'user-released-page-budget');return latest;});
+      return send(200,{project:saved});
+    }
     if (action === 'retry' && req.method === 'POST') {
-      if (project.status !== 'failed') return send(409, { error: 'project is not failed' });
-      if(project.stage==='generation')revalidateCompletedCopy(project);
+      if (!['failed','quality_blocked'].includes(project.status)) return send(409, { error: 'project is not failed or quality blocked' });
+      const retryRequest=await body(req);
+      if(retryRequest.refreshDerivedSource===true){
+        const refreshed=refreshDerivedSource(project,assessOutlineCandidate);
+        if(refreshed.changedSourceIds.length){
+          Object.assign(project,refreshed.project);
+          project.runtime ||= {};
+          if(project.runtime.criticRepair)(project.runtime.criticRepairHistory ||= []).push(structuredClone(project.runtime.criticRepair));
+          startRun(project,'derived-source-refresh');invalidateReviews(project);
+          project.confirmedOutline={...project.confirmedOutline,hash:outlineConfirmationHash(project),sourceRefreshAt:new Date().toISOString(),basis:'Explicit source-refresh retry; identical immutable input and existing confirmed titles, IDs, page count and ownership retained'};
+          project.stage='generation';
+        }
+      }
+      if(retryRequest.refitTemplateMedia===true){
+        if(project.revision>0||project.publishedRevision||Object.values(project.runtime?.slides||{}).some(s=>s.accepted))return send(409,{error:'Preserve edited/accepted pages; use scoped layout recovery.'});
+        Object.assign(project,refitSourceMedia(project));
+        project.stage='generation';
+      }
+      if(retryRequest.repairOutlineTitles===true){
+        const issues=inspectNativeOutlineTitles(project),seed=project.candidateOutline;
+        if(project.stage!=='generation'||!issues.length||!seed?.accepted||!seed.executionPlan||seed.executionPlan.slides.length!==project.pages)
+          return send(409,{error:'Only a failed generation with an accepted outline and oversized native titles can reopen title planning.'});
+        if(project.revision>0||Object.values(project.editing?.epochs||{}).some(epoch=>epoch>0)||Object.values(project.runtime?.slides||{}).some(s=>s.accepted))
+          return send(409,{error:'This draft contains user edits or accepted pages. Preserve them and use scoped page editing; global title review cannot replace protected objects.'});
+        // Explicit user action; preserve the complete accepted source selection
+        // and N, but require a fresh visible confirmation after model repair.
+        project.outlineRepairHistory=[...(project.outlineRepairHistory||[]),{at:new Date().toISOString(),confirmedOutline:project.confirmedOutline,candidateHash:seed.hash,issues,nodes:project.nodes,runtime:project.runtime}];
+        project.nativeTitleRepairSeed={executionPlan:structuredClone(seed.executionPlan),basis:'explicit native title review; accepted ownership and N retained'};
+        delete project.confirmedOutline;project.nodes={};project.runtime={schemaVersion:1,lifecycle:'active',pauseRequested:false,slides:{},attempts:{},checkpoint:null};project.status='outlining';project.stage='outline';project.error='';project.autoGenerate=false;
+        store.save(project);startOutline(uid,id,activity,log,deps);return send(202,{project});
+      }
+      if(project.stage==='outline')project.promptContractVersion=PPT_PROMPT_CONTRACT_VERSION;
+      // A legacy completed-page checkpoint already has a settled outline.
+      // Retrying quality/export must not silently consolidate or replan it.
+      if(project.stage!=='outline'&&project.outline?.length&&!project.confirmedOutline)recordOutlineConfirmation(project,{titlesFrozen:false});
+      if(project.stage==='outline'&&project.titleSource==='derived'&&project.deckTitle?.source!=='user'){
+        const identity=displayedDocumentTitle(project);
+        if(identity?.variants.length)project.title=identity.variants.map(v=>v.main||v.text).join(' | ').slice(0,160);
+      }
+      // Older clients treated the BYOK cancellation used by Pause as failure.
+      // Explicit Retry resumes that retained checkpoint, rather than remaining
+      // stuck with pauseRequested=true or discarding completed page work.
+      if(project.failure?.code==='cancelled'&&project.runtime?.pauseRequested){project.runtime.pauseRequested=false;project.runtime.lifecycle='recovering';}
+      // An explicit quality retry creates a new auditable run. Keep the prior
+      // critic's results and its round limit intact; never resume that run with
+      // a silently reset counter or inherit its review as an approval.
+      if(project.status==='quality_blocked'||retryRequest.restartReviewRun===true&&project.stage==='generation'){
+        project.runtime ||= {};
+        if(project.runtime.criticRepair)(project.runtime.criticRepairHistory ||= []).push(structuredClone(project.runtime.criticRepair));
+        startRun(project,'quality-retry');
+        invalidateReviews(project);
+        project.stage='generation';
+      }
+      if(project.stage==='generation'){try{revalidateCompletedCopy(project);}catch(error){if(['capacity_invalid','coverage_invalid','schema_invalid'].includes(error.code))throw new HttpError(409,error.message);throw error;}}
       project.status = project.stage === 'ingest' ? 'ingesting' : project.stage === 'outline' ? 'outlining' : 'generating';
       project.error = ''; store.save(project);
       if (project.status === 'ingesting') startIngest(uid, id, activity, log, deps);
@@ -1857,4 +2461,9 @@ export async function handlePpt(req, url, { uid, send, res, readBody, activity, 
   }
 }
 
-export const _internals = { assessOutlineCandidate, writeWithContractRepair, revalidateCompletedCopy, mergeSourceSupplement, normalizeOutline, normalizeDeck, normalizeSlide, parseModelJson, pages, outlinePrompt, contentPrompt, defaultDeps };
+// Generated explanation frames are editable prose, even when the renderer puts
+// them in sourceArtifactNodes. Only actual bound originals freeze carriers.
+function hasFrozenSourceArtifacts(slide) {
+  return Boolean(slide.sourceArtifactNodes?.some(node => node.sourceArtifact || node.content?.sourceEvidenceIds?.length));
+}
+export const _internals = { assessOutlineCandidate, writeWithContractRepair, revalidateCompletedCopy, mergeSourceSupplement, hasFrozenSourceArtifacts, normalizeOutline, normalizeDeck, normalizeSlide, parseModelJson, pages, outlinePrompt, contentPrompt, defaultDeps };

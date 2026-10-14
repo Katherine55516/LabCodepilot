@@ -81,3 +81,10 @@ apps/site/node_modules/
 
 # claude code session data
 .claude/
+
+# Isolated live-test binary artifacts must not become Tailwind source.
+/outputs/
+/.next-incomplete-dependency-startup/
+/.next-css-artifact-startup/
+
+/.next-ppt-*/

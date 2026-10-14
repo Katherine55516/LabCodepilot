@@ -18,6 +18,7 @@ export function pptParityFixture(options: {completeAfterEdits?: number} = {}) {
     if (pathname === '/api/providers') return ok({providers:[{id:'managed-demo',name:'Fixture model',source:'managed'}]});
     if (pathname === '/api/providers/models') return ok({groups:[{provider_id:'managed-demo',models:[{value:'demo-model',label:'Demo LLM'}]}]});
     if (!pathname.startsWith('/api/ppt/')) return null;
+    if (pathname === '/api/ppt/model-jobs') return ok({jobs:[]});
     if (pathname.includes('/templates/') && pathname.endsWith('/preview')) return {status:200,contentType:'image/svg+xml',body:'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720"><rect width="1280" height="720" fill="#eee"/><text x="100" y="200" font-size="60">Template preview</text></svg>'};
     if (pathname.includes('/templates')) return ok({templates});
     if (pathname.includes('/folders')) return ok({folders:[]});

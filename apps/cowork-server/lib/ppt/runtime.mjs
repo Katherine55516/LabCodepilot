@@ -2,14 +2,17 @@ import path from 'node:path';
 import fs from 'node:fs';
 import crypto from 'node:crypto';
 import { atomicJson, readJson, projectDataDir, getProject, saveProject, enqueueProject } from './repository.mjs';
-import { reviewProject } from './quality-service.mjs';
+import {renderIssues} from './render-audit.mjs';
+import {inspectVisibleCopy} from '../ppt-copy-integrity.mjs';
 import { buildSlideRenderTree } from './render-tree.mjs';
-import { ensureDeckV3 } from './ir.mjs';
+import { ensureDeckV3,ensureSlideV3 } from './ir.mjs';
 import { bindTemplateFidelity } from '../ppt-template-fidelity.mjs';
 import { synchronizePlan } from './versioning.mjs';
 import { saveRun } from './event-store.mjs';
 import { emitRunProgress, currentRun } from './run-service.mjs';
 import { editError, digest } from './edit-context.mjs';
+import {RENDER_CONTRACT_VERSION} from './render-contract.mjs';
+import {applyLayoutRegistry} from '../ppt-layout.mjs';
 
 export function runtimeState(project) {
   project.runtime ||= { schemaVersion: 1, lifecycle: 'active', slides: {}, attempts: {}, checkpoint: null };
@@ -33,14 +36,18 @@ export function checkpoint(project, reason) {
 
 export function updateSlidePreview(project, slideId, phase = 'render_ready') {
   const node = project.nodes?.[slideId]; if (!node?.slide) return null;
-  const slides = project.outline.map(outline => project.nodes?.[outline.id]?.slide || { id: outline.id, title: outline.title, bullets: [], layoutId: outline.role === 'cover' ? 'cover' : 'summary' });
-  const candidate = { ...project, deck: ensureDeckV3({ slides }) };
-  if (project.templateFidelity?.mode === 'preserve') bindTemplateFidelity(candidate);
+  const planned=project.outline.map((outline,index)=>outline.id===slideId?node.slide:{id:outline.id,title:outline.title,bullets:[],nodes:[],layoutId:outline.role==='cover'?'cover':'summary'});
+  const slides=applyLayoutRegistry({slides:planned}).slides.map((slide,index)=>slide.id===slideId?ensureSlideV3(slide,index):slide);
+  const candidate={...project,deck:{...project.deck,slides}};
+  if(project.templateFidelity?.mode==='preserve')bindTemplateFidelity(candidate,{slideIds:[slideId]});
   const tree = buildSlideRenderTree(candidate, slideId);
-  const quality = reviewProject(candidate).deterministic;
+  const previewSlide=candidate.deck.slides.find(slide=>slide.id===slideId);
+  const quality={issues:[...inspectVisibleCopy([previewSlide]),...renderIssues({slides:[tree]})]};
   const state = runtimeState(project); const previous = state.slides[slideId] || {};
   state.slides[slideId] = { ...previous, phase, epoch: project.editing?.epochs?.[slideId] || 0,
-    quality: { issues: quality.issues.filter(issue => issue.slideId === slideId), pendingDeckReview: true },
+    renderContractVersion:RENDER_CONTRACT_VERSION,
+    canonicalSlide:structuredClone(previewSlide),
+    quality: { scope:'page_preview',issues: quality.issues.filter(issue => issue.slideId === slideId), pendingDeckReview: true },
     contentHash: digest(node.slide), renderHash: digest(tree), preview: tree, updatedAt: new Date().toISOString() };
   return tree;
 }

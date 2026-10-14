@@ -1,3 +1,4 @@
+import {selectPptOption} from '../helpers';
 import { test, expect, type Page } from '@playwright/test';
 import { pptParityFixture } from '../fixtures/ppt-parity';
 
@@ -8,10 +9,10 @@ async function enterPaste(page: Page) {
     if (!result) return route.continue();
     return route.fulfill({ status: result.status, contentType: result.contentType || 'application/json', body: typeof result.body === 'string' ? result.body : JSON.stringify(result.body) });
   });
-  await page.goto('/ppt'); await expect(page.getByText('加载中…', { exact: true })).toHaveCount(0);
+  await page.goto('/ppt', {waitUntil:'domcontentloaded'}); await expect(page.getByText('加载中…', { exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: '＋ 新建', exact: true }).click();
   await page.getByRole('button', { name: /粘贴文本/ }).click();
-  await page.getByRole('combobox', { name: 'LLM（必填）' }).selectOption('managed-demo::demo-model');
+  await selectPptOption(page.getByRole('combobox', { name: 'LLM（必填）' }), 'managed-demo::demo-model');
   await page.getByRole('button', { name: '确认并继续 →' }).click();
   await page.getByRole('button', { name: /Teaching template/ }).click();
   await page.getByRole('button', { name: '下一步：输入内容 →' }).click();
@@ -31,19 +32,19 @@ test('PPT planning assumptions are disclosed and the code choice re-estimates @s
   await expect(panel.getByText('规划假设（生成前请检查）')).toBeVisible();
   await expect(panel.getByText(/2 段代码不上页/)).toBeVisible();
   await expect(panel.getByText(/输出语言与输入一致/)).toBeVisible();
-  await expect(page.getByTestId('ppt-page-count')).toHaveText('8 页');
+  await expect(page.getByTestId('ppt-page-count')).toHaveValue('8');
   // The estimate note shows the base reason; the assumptions are listed once.
   await expect(page.getByRole('status').filter({ hasText: '建议 8 页' })).not.toContainText('不上页');
   await page.screenshot({ path: info.outputPath('assumptions-default.png') });
 
-  await panel.getByRole('combobox', { name: '代码' }).selectOption('keep');
+  await selectPptOption(panel.getByRole('combobox', { name: '代码' }), 'keep');
   await expect.poll(() => requests.at(-1)).toMatchObject({ generationPolicy: { code: { presentation: 'keep' } } });
-  await expect(page.getByTestId('ppt-page-count')).toHaveText('11 页');
+  await expect(page.getByTestId('ppt-page-count')).toHaveValue('11');
   await expect(panel.getByText(/按原文保留为代码组件/)).toBeVisible();
 
-  await panel.getByRole('combobox', { name: '代码' }).selectOption('auto');
+  await selectPptOption(panel.getByRole('combobox', { name: '代码' }), 'auto');
   await expect.poll(() => (requests.at(-1)?.generationPolicy as Record<string, unknown> | undefined)?.code).toBeUndefined();
-  await expect(page.getByTestId('ppt-page-count')).toHaveText('8 页');
+  await expect(page.getByTestId('ppt-page-count')).toHaveValue('8');
 
   await page.setViewportSize({ width: 390, height: 844 });
   await panel.scrollIntoViewIfNeeded(); await expect(panel).toBeInViewport();

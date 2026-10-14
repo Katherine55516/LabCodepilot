@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';import os from 'node:os';import path from 'node:path';import {spawnSync} from 'node:child_process';
 import {renderIssues} from './lib/ppt/render-audit.mjs';
 import {slidePlan} from './lib/ppt-planning.mjs';
-import {obligationRegistry} from './lib/ppt-obligations.mjs';
+import {obligationRegistry,visibleEvidenceQuoteId} from './lib/ppt-obligations.mjs';
 import {normalizeModelReview,finalQualityReport,deckReviewPrompt,reviewWithContractRepair} from './lib/ppt-quality.mjs';
 import {scopeReview,simulatedExport} from './ppt-scope-test-helpers.mjs';
 import {assertCandidateScope} from './lib/ppt/input-scope-service.mjs';
@@ -30,6 +30,21 @@ function fixture(external=false){
  return p;
 }
 try{
+ await test('explicit visible quote references bind exact current text; stale references and conflicting literals still fail',()=>{
+  const p=fixture(),raw=scopeReview(p);
+  for(const check of raw.obligationAudit.checks)for(const evidence of check.evidence){
+    const node=p.deck.slides.find(s=>s.id===evidence.slideId).nodes.find(n=>n.id===evidence.nodeId);
+    evidence.quoteId=visibleEvidenceQuoteId(evidence.slideId,node);delete evidence.excerpt;
+  }
+  const original=structuredClone(raw),valid=normalizeModelReview(raw,p.deck.slides.map(s=>s.id),p);
+  assert(valid.obligationAudit.checks.every(check=>check.evidence.every(ref=>typeof ref.excerpt==='string')));assert.deepEqual(raw,original);
+  const stale=structuredClone(raw);stale.obligationAudit.checks[0].evidence[0].quoteId='quote-expired';
+  assert.throws(()=>normalizeModelReview(stale,p.deck.slides.map(s=>s.id),p),/quote reference/);
+  const conflicting=structuredClone(raw);conflicting.obligationAudit.checks[0].evidence[0].excerpt='Invented relation';
+  assert.throws(()=>normalizeModelReview(conflicting,p.deck.slides.map(s=>s.id),p),/conflicts/);
+  const missing=structuredClone(raw);missing.obligationAudit.checks[0].status='missing';missing.obligationAudit.checks[0].evidence=[];
+  assert.equal(finalQualityReport({issues:[],hardErrors:0},[],normalizeModelReview(missing,p.deck.slides.map(s=>s.id),p)).publishEligible,false);
+ });
  await test('legal background containment passes; locked collisions and foreground occlusion block',()=>{
   assert(!renderIssues(tree([{id:'bg',nodeId:'bg',kind:'shape',bounds:box,style:{fill:'#eee'},zIndex:0},text('fg')])).some(i=>i.severity==='error'));
   assert(renderIssues(tree([text('one',true),text('two',true)])).some(i=>i.code==='render_overlap'&&i.severity==='error'));
@@ -50,7 +65,7 @@ try{
  await test('render verification failure retains prior publication and enters repair',async()=>{
   const p=fixture();repo.saveProject(p);
   const result=await publishProject(p.uid,p.id,{modelCall:async q=>scopeReview(q),renderPptx:async()=>{throw new Error('PPTX rendered visibility: test loss');}},noop,noop);
-  assert.equal(result.published,false);assert.equal(result.project.publishedRevision,4);assert.equal(result.project.status,'quality_blocked');assert.equal(result.project.quality.exportable,false);assert.match(result.project.error,/export verification/);
+  assert.equal(result.published,false);assert.equal(result.project.publishedRevision,4);assert.equal(result.project.status,'quality_blocked');assert.equal(result.project.quality.exportable,false);assert.match(result.project.error,/export verification/,JSON.stringify(result.project.quality));
  });
  const detail='Preserve the mechanism and its assumptions. '+ 'Compare each result to its source record before taking any action. '.repeat(5)+'Critical condition: do not apply this method unless validation succeeds, except under the explicitly documented exception.';
  await test('mandatory detail tail and more than ten requirements survive planning',()=>{
@@ -68,6 +83,13 @@ try{
   const p=fixture(),good=scopeReview(p);for(const mutation of [r=>r.obligationAudit.registryHash='old',r=>r.obligationAudit.checks=[],r=>r.obligationAudit.checks[0].evidence=[{slideId:'s1',nodeId:'invisible'}],r=>r.obligationAudit.checks[0].evidence[0].excerpt='invented quote']){const r=structuredClone(good);mutation(r);assert.throws(()=>normalizeModelReview(r,p.deck.slides.map(s=>s.id),p),/obligation/);}
   assert(finalQualityReport({issues:[],hardErrors:0},[],normalizeModelReview(good,p.deck.slides.map(s=>s.id),p)).publishEligible);
  });
+ await test('self-negating findings require fresh bounded model review instead of an invented writer repair',async()=>{
+  const p=fixture(),good=scopeReview(p),bad=structuredClone(good);bad.conflicts=[{slideIds:[p.deck.slides[0].id],detail:'\u6b64\u975e\u51b2\u7a81'}];
+  assert.throws(()=>normalizeModelReview(bad,p.deck.slides.map(s=>s.id),p),/explicitly denies/);
+  for(const detail of ['不构成缺失','已包含，不再报','不构成问题']){const positive=structuredClone(good);positive.missing=[{slideIds:[p.deck.slides[0].id],detail}];assert.throws(()=>normalizeModelReview(positive,p.deck.slides.map(s=>s.id),p),/explicitly denies/);}
+  let calls=0;const result=await reviewWithContractRepair(p,async(prompt,key)=>{calls++;if(calls===1)return bad;assert.match(key,/:contract:1$/);assert.match(prompt,/explicitly denies/);return good;});
+  assert.equal(calls,2);assert.equal(result.conflicts.length,0);assert.equal(bad.conflicts.length,1);
+ });
  await test('malformed evidence gets bounded model correction; no quote or verdict is silently repaired',async()=>{
   const p=fixture(),good=scopeReview(p),bad=structuredClone(good);bad.obligationAudit.checks[0].evidence[0].excerpt='invented quote';
   const before=JSON.stringify(p);let calls=0;
@@ -78,9 +100,21 @@ try{
   const missing=structuredClone(good);missing.obligationAudit.checks[0].status='missing';missing.obligationAudit.checks[0].evidence=[];
   const result=await reviewWithContractRepair(p,async()=>missing);assert.equal(finalQualityReport({issues:[],hardErrors:0},[],result).publishEligible,false);
  });
+ await test('incomplete audit feedback names missing, duplicate and foreign IDs without completing verdicts',async()=>{
+  const p=fixture(),good=scopeReview(p),bad=structuredClone(good),id=good.obligationAudit.checks[0].obligationId;
+  bad.obligationAudit.checks=[{...good.obligationAudit.checks[0],obligationId:'foreign'},{...good.obligationAudit.checks[0],obligationId:'foreign'}];
+  const before=JSON.stringify(bad);let calls=0;
+  const fixed=await reviewWithContractRepair(p,async(prompt)=>{calls++;const list=JSON.parse(prompt.match(/<required_audit_checklist>(.*?)<\/required_audit_checklist>/s)[1]);assert.equal(list.expectedCheckCount,good.obligationAudit.checks.length);assert.ok(list.requiredEntries.some(entry=>entry.obligationId===id));if(calls===1)return bad;
+   const diagnostic=JSON.parse(prompt.match(/<review_contract_repair>(.*?)<\/review_contract_repair>/s)[1]).completeness;
+   assert.ok(diagnostic.missingObligationIds.includes(id));assert.deepEqual(diagnostic.duplicateObligationIds,['foreign']);assert.deepEqual(diagnostic.unknownObligationIds,['foreign','foreign']);return good;});
+  assert.equal(calls,2);assert.deepEqual(fixed.obligationAudit,good.obligationAudit);assert.equal(JSON.stringify(bad),before);
+  calls=0;await assert.rejects(()=>reviewWithContractRepair(p,async()=>{calls++;return bad;}),/every obligation exactly once/);assert.equal(calls,3);
+ });
  await test('critic receives exact table instance text in addition to structured cells',()=>{
   const p=fixture();p.deck.slides[1].nodes=[{id:'table-proof',type:'table',content:{headers:['Term','Value'],rows:[['Alpha','7']]}}];
-  assert.match(deckReviewPrompt(p),/"nodeId":"table-proof","type":"table","text":"\| Alpha \| 7 \|"/);
+  const pages=JSON.parse(deckReviewPrompt(p).match(/页面：([^\n]+)\n来源/u)[1]);
+  const component=pages[1].semanticComponents.find(node=>node.nodeId==='table-proof');
+  assert.equal(component.type,'table');assert.equal(component.text,'Alpha 7');assert.match(component.quoteId,/^quote-/u);
  });
  await test('repeated claim and deleted-page mandatory loss block local candidates',async()=>{
   const p=fixture(),after=structuredClone(p);after.deck.slides[1].nodes[0].content.text='Duplicated title';

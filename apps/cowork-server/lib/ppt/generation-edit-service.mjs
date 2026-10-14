@@ -6,7 +6,7 @@ import { ensureDeckV3, materializeLegacySlide } from './ir.mjs';
 import { evidenceMeasurements } from '../ppt-evidence.mjs';
 import { newId } from './ir.mjs';
 import { emitRunProgress } from './run-service.mjs';
-import { planKey, slideFingerprint, editError, digest } from './edit-context.mjs';
+import { planKey, slideFingerprint, editError, digest, pageEditContext } from './edit-context.mjs';
 import { createProposal, applyProposal } from './proposal-service.mjs';
 import * as store from '../ppt-store.mjs';
 import { findOperation, operationHistory } from './command-history.mjs';
@@ -34,7 +34,8 @@ function summarize(intent) {
 export function openGenerationScope(uid, projectId, slideId, previousScopeId, scopeName = 'current') {
   return enqueueProject(uid, projectId, () => {
     const project = getProject(uid, projectId);
-    if (!project || project.deletedAt || !['generating', 'paused', 'completed', 'quality_blocked'].includes(project.status)) throw editError('presentation is not editable', 409);
+    if (!project || project.deletedAt || !['generating', 'paused', 'completed', 'quality_blocked', 'failed'].includes(project.status)) throw editError('presentation is not editable', 409);
+    if(project.status==='failed')pageEditContext(project,slideId,'content','slide');
     if (!project.outline.some(slide => slide.id === slideId)) throw editError('slide not found', 404);
     const editing = editingState(project);
     const previous = previousScopeId ? editing.scopes[previousScopeId] : null;
@@ -44,6 +45,7 @@ export function openGenerationScope(uid, projectId, slideId, previousScopeId, sc
       const candidates = { current: [previous.currentSlideId], remaining: previous.remainingSlideIds, following: previous.followingSlideIds || [], section: previous.sectionSlideIds || [], deck: previous.deckSlideIds || [] }[scopeName];
       if (!candidates) throw editError('invalid scope', 400);
       const targets = candidates.filter(id => !project.runtime?.slides?.[id]?.accepted);
+    if(project.status==='failed'){if(data.scope!=='current')throw editError('retry generation before changing unfinished pages',409);pageEditContext(project,snapshot.currentSlideId,data.type==='title'?'title':'content','slide');if(data.type&&!['auto','title','content'].includes(data.type))throw editError('freeze generation scope before changing layout or the whole deck',409);}
       const ownOperations = new Set(Object.values(editing.intents).filter(intent => intent.actor === uid && intent.scopeSnapshot.id === previous.id)
         .flatMap(intent => Object.values(intent.perSlideResults).flatMap(result => [result.operationId, result.proposalId].filter(Boolean))));
       if (operationHistory(uid, projectId).some(operation => operation.revision > (previous.baseRevision || 0) && !ownOperations.has(operation.id)
@@ -84,10 +86,11 @@ export function submitGenerationEdit(uid, projectId, data) {
     const snapshot = editing.scopes[data.scopeId];
     if (!snapshot || Date.now() - Date.parse(snapshot.openedAt) > 86400000) throw editError('scope snapshot expired; reopen the panel', 409);
     if (!['current', 'remaining', 'following', 'section', 'deck'].includes(data.scope)) throw editError('invalid scope', 400);
-    if (!['generating', 'paused', 'completed', 'quality_blocked'].includes(project.status) || project.currentRunId !== snapshot.runId || planKey(project) !== snapshot.planKey)
+    if (!['generating', 'paused', 'completed', 'quality_blocked', 'failed'].includes(project.status) || project.currentRunId !== snapshot.runId || planKey(project) !== snapshot.planKey)
       throw editError('the run or plan changed; reopen the panel', 409);
     const candidates = { current: [snapshot.currentSlideId], remaining: snapshot.remainingSlideIds, following: snapshot.followingSlideIds, section: snapshot.sectionSlideIds, deck: snapshot.deckSlideIds }[data.scope] || [];
     const targets = candidates.filter(id => !project.runtime?.slides?.[id]?.accepted);
+    if(project.status==='failed'){if(data.scope!=='current')throw editError('retry generation before changing unfinished pages',409);pageEditContext(project,snapshot.currentSlideId,data.type==='title'?'title':'content','slide');if(data.type&&!['auto','title','content'].includes(data.type))throw editError('freeze generation scope before changing layout or the whole deck',409);}
     if (!targets.length) throw editError('the snapshot contains no pending AI pages', 409);
     if (targets.some(id => !project.outline.some(slide => slide.id === id))) throw editError('a target page was deleted', 409);
     if (Object.keys(editing.intents).length >= 200) throw editError('too many generation edit requests', 429);
@@ -146,7 +149,7 @@ export function retryGenerationEdit(uid, projectId, intentId) {
   return enqueueProject(uid, projectId, () => {
     const project = getProject(uid, projectId); const intent = project?.editing?.intents?.[intentId];
     if (!intent) throw editError('intent not found', 404);
-    if (!['completed', 'quality_blocked'].includes(project.status)) throw editError('finish or retry the generation run first', 409);
+    if (!['completed', 'quality_blocked','failed'].includes(project.status)) throw editError('finish or retry the generation run first', 409);
     for (const [id, result] of Object.entries(intent.perSlideResults)) if (['failed', 'conflicted'].includes(result.status)) {
       Object.assign(result, { status: 'queued', phase: 'draft', proposalId: undefined, error: undefined, expectedHash: targetHash(project, id) });
     }
@@ -163,7 +166,7 @@ export async function processGenerationEdits(uid, projectId, deps, activity, log
     for (;;) {
       const work = await enqueueProject(uid, projectId, () => {
         const project = getProject(uid, projectId);
-        if (!project || project.deletedAt || !['completed', 'quality_blocked'].includes(project.status)) return null;
+        if (!project || project.deletedAt || !['completed', 'quality_blocked','failed'].includes(project.status)) return null;
         for (const intent of Object.values(project.editing?.intents || {})) for (const [slideId, result] of Object.entries(intent.perSlideResults)) {
           if (!['queued', 'applying'].includes(result.status) || result.phase !== 'draft') continue;
           if (result.expectedHash && result.expectedHash !== targetHash(project, slideId) && !(result.proposalId && findOperation(uid, projectId, result.proposalId))) {

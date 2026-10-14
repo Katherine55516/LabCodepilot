@@ -3,6 +3,7 @@
  * Relations come from source structure only; nothing here invents edges.
  * Plan: docs/exec-plans/active/ppt-page-contract-relations-media-repair.md (A). */
 import { visibleNodes, nodeContentText } from './ppt-visible-content.mjs';
+import { orderedSourceSteps } from './ppt-source-boundaries.mjs';
 
 const sectionKey = item => (item.sectionPath || []).join('\u0000');
 const stepLines = text => String(text || '').split('\n').map(line => line.trim()).filter(Boolean);
@@ -38,8 +39,7 @@ export function buildRelations(items) {
         axes: header.map(String), members: body.map(row => String(row[0] ?? '')), rowCount: body.length, columnCount: header.length,
         steps: item.rows.map(row => row.join(' | ')) });
     } else if (item.type === 'ProcessBlock') {
-      const arrows = /->|→/u.test(item.text) && !/^\s*\d+[.)]\s/mu.test(item.text);
-      const steps = arrows ? item.text.split(/->|→/u).map(step => step.trim()).filter(Boolean) : stepLines(item.text);
+      const steps = orderedSourceSteps(item.text);
       relations.push({ id: `rel_${item.id}`, type: 'order', relation: 'precedes', ...base(item), unitIds: [item.id],
         members: steps.map(stepLabel), branches: steps.filter(step => BRANCH.test(step)).map(step => ({ step: stepLabel(step), conditions: step.split(/[:：]/u).slice(1).join(':').trim() })),
         steps });
@@ -117,4 +117,26 @@ export function inspectRelationFidelity(project, slides = project.deck?.slides |
     }
   }
   return issues;
+}
+
+/** Reading units among a page's source units, in source order: a translation
+ * pair, and a lead-in sentence ending in ":" together with the list it opens
+ * (and the lead-in's translation). Splitting a unit across pages is allowed
+ * only when the unit alone does not fit one page. */
+export function readingUnits(items, ids) {
+  const wanted = new Set(ids), ordered = items.filter(item => wanted.has(item.id)), units = [];
+  const isList = item => /^\s*(?:[-*+•]|\d+[.)])\s+/mu.test(String(item?.text || ''));
+  const leadIn = item => /[:：]\s*$/u.test(String(item?.text || '').trim());
+  for (let i = 0; i < ordered.length;) {
+    const unit = [ordered[i]];
+    const pairEnd = () => { while (i + unit.length < ordered.length && unit.at(-1).languagePairId && ordered[i + unit.length].languagePairId === unit.at(-1).languagePairId) unit.push(ordered[i + unit.length]); };
+    pairEnd();
+    if (unit.every(leadIn)) {
+      // A bilingual lead-in may be two consecutive unpaired items ("You define:" / "你需要定义：").
+      while (i + unit.length < ordered.length && leadIn(ordered[i + unit.length]) && unit.length < 2) unit.push(ordered[i + unit.length]);
+      if (isList(ordered[i + unit.length])) { unit.push(ordered[i + unit.length]); pairEnd(); }
+    }
+    units.push(unit.map(item => item.id)); i += unit.length;
+  }
+  return units;
 }

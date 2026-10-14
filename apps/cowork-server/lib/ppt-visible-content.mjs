@@ -11,7 +11,7 @@ export function visibleNodes(slide) {
 
 export function nodeContentText(node) {
   const content = node.content || {};
-  if (node.type === 'table') return (content.rows || []).map(row=>'| '+row.join(' | ')+' |').join('\n');
+  if (node.type === 'table') return (content.rows || []).flat().join(' ');
   if (content.items) return content.items.map(item => item.text || [item.heading || item.label, item.body].filter(Boolean).join(' ')).join('\n');
   return content.text || '';
 }

@@ -51,7 +51,7 @@ with ZipFile(${JSON.stringify(fontOutput)}) as z: print(z.read('ppt/slides/slide
     // Empty navigation and Latin-only east-Asia defaults do not need Han glyphs.
     assert.ok(match[1].trim(), 'all font tokens must have a nonempty family');
   }
-  assert.match(xml, index === 4 ? /lang="zh-TW"/ : index === 3 ? /lang="en-US"/ : /lang="zh-CN"/);
+  assert.match(xml, index === 4 ? /lang="zh-HK"/ : index === 3 ? /lang="en-US"/ : /lang="zh-CN"/);
 }
 const chartXml = spawnSync(python, ['-c', `from zipfile import ZipFile
 with ZipFile(${JSON.stringify(fontOutput)}) as z: print(z.read('ppt/charts/chart1.xml').decode())`], {encoding:'utf8'}).stdout;
@@ -69,6 +69,11 @@ await dag.boundedAll(Array.from({ length: 12 }), 3, async () => {
   active--;
 });
 assert.equal(maxActive, 3);
+let ioObservedAt=0,finishedChecks=0;
+const ioTurn=new Promise(resolve=>setImmediate(()=>{ioObservedAt=finishedChecks;resolve();}));
+const orderedChecks=await dag.boundedAll(Array.from({length:30},(_,index)=>index),3,async index=>{finishedChecks++;return index;});
+await ioTurn;assert.ok(ioObservedAt>0&&ioObservedAt<30,'synchronous source checks must permit an HTTP/SSE I/O turn before the full deck is done');
+assert.deepEqual(orderedChecks,Array.from({length:30},(_,index)=>index),'yielding preserves node result order');
 
 const badProject = {
   templateSpec: { palette: { background: '#ffffff', foreground: '#eeeeee', muted: '#dddddd', accent: '#cccccc' }, fonts: { title: 'Latin', body: 'Latin', titleEastAsia: '', bodyEastAsia: '', cjkExplicit: false } },
@@ -121,7 +126,7 @@ const brokenImage = { id: 'broken-image', type: 'image', dataUrl: 'data:image/pn
 let contentActive = 0; let maxContentActive = 0; let reviewCalls = 0; let renderCalls = 0;
 const deps = {
   modelCall: async (project, prompt) => {
-    if (prompt.includes('叙事规划器')) return { slides: Array.from({ length: project.pages }, (_, index) => ({ title: index === 0 ? '封面' : index === project.pages - 1 ? '结论' : `页面 ${index + 1}`, focus: 'Use supplied evidence', refs: project.title === 'Blocked deck' ? [] : ['1'],sourceImageIds:index===1?project.source.images.map(image=>image.id):[] })) };
+    if (prompt.includes('叙事规划器')) return { slides: Array.from({ length: project.pages }, (_, index) => ({ title: index === 0 ? '封面' : index === project.pages - 1 ? '结论' : `页面 ${index + 1}`, focus: ['Revenue scope','Preserve the supplied revenue claim','Show the supplied image evidence','State the absence of invented figures','Check the source reference','Keep image ownership','Use original evidence captions','Review the evidence conditions','Conclude with the supplied evidence'][index], refs: project.source.segments.map(s=>s.id),sourceImageIds:index===1?project.source.images.map(image=>image.id):[] })) };
     if (prompt.includes('整稿演示文稿内容评审器')) { reviewCalls++; return scopeReview(project); }
     contentActive++; maxContentActive = Math.max(maxContentActive, contentActive);
     await new Promise(resolve => setTimeout(resolve, 10));
@@ -165,7 +170,7 @@ try {
   await settled(id, 'outline_ready');
   assert.equal((await request('POST', `/ppt/projects/${id}/generate`)).status, 202);
   let project = await settled(id, 'completed');
-  assert.ok(maxContentActive > 1 && maxContentActive <= 3);
+  assert.equal(maxContentActive, 1, 'pages are written one at a time in reading order (Gamma page-by-page)');
   assert.equal(reviewCalls, 1);
   assert.ok(['passed', 'passed_with_warnings'].includes(project.quality.status));
   assert.equal(project.quality.deterministic.hardErrors, 0);
@@ -191,7 +196,7 @@ try {
   assert.equal((await request('POST', `/ppt/projects/${blockedId}/generate`)).status, 202);
   let blocked = await settled(blockedId, 'quality_blocked');
   assert.equal(blocked.quality.status, 'blocked');
-  assert.ok(blocked.quality.deterministic.issues.some(issue => issue.code === 'numeric_source'));
+  assert.ok(blocked.quality.deterministic.issues.some(issue => issue.severity==='error'&&(issue.code==='numeric_source'||issue.code==='source_number_unsupported'&&issue.values?.includes('42'))),'An unsupported source number must block publication even when the page has a valid source reference');
   assert.equal(renderCalls, 1, 'blocked generation must not render or publish');
   assert.equal((await request('GET', `/ppt/projects/${blockedId}/export`)).status, 409);
   const repairedSlides = blocked.deck.slides.map(slide => ({ ...slide, bullets: slide.bullets.map(() => 'Qualitative revenue evidence'), blocks: [] }));
@@ -201,7 +206,7 @@ try {
   assert.equal(blocked.status, 'quality_blocked', JSON.stringify(blocked.quality.deterministic.issues));
   assert.equal(blocked.quality.reviewState,'stale');
   assert.equal(blocked.quality.modelReview.evaluation,'not_evaluated','changed copy cannot inherit an empty old critic result');
-  assert.ok(blocked.quality.deterministic.issues.some(issue => issue.code === 'source_missing'));
+  assert.ok(!blocked.quality.deterministic.issues.some(issue=>issue.code==='source_number_unsupported'),'The repaired qualitative draft must remove the fabricated number; stale review still prevents publication');
   assert.equal(reviewCalls, 2, 'repair saves reuse the single review from their own generation');
   assert.equal(renderCalls, 1, 'repair saves change the draft only');
   const publishResult = await request('POST', `/ppt/projects/${blockedId}/publish`, {});

@@ -1,5 +1,14 @@
 import { isSourceOwnedNode } from './ppt-source-artifacts.mjs';
 import { templateDesignView, isOrdinalSequence } from './ppt-template-design.mjs';
+import {fitNativeTitleFrames} from './ppt-native-text-fit.mjs';
+import {bindNotesDisclosures}from './ppt-notes-disclosure.mjs';
+import {regionArtwork} from './ppt-media-preserving-layout.mjs';
+import {contentCanvas,measureComponent} from './ppt-density-capacity.mjs';
+import {displayedDocumentTitle,inspectCoverTitle} from './ppt-deck-coherence.mjs';
+import {nativeCoverTitleHierarchy} from './ppt-cover-title-contract.mjs';
+import {templateTextColor} from './ppt-template-colors.mjs';
+import {normalizeDeckEyebrows} from './ppt-section-eyebrow.mjs';
+import {ensureRichContent,sourceRichText,richTextContent} from './ppt-source-text.mjs';
 import {prepareComponentGeometry} from './ppt/component-layout.mjs';
 import { templateComponentProfile, bindMappedTemplateMedia } from './ppt-template-components.mjs';
 import { adaptationDisposition } from './ppt-template-dispositions.mjs';
@@ -10,7 +19,7 @@ import { Readable } from 'node:stream';
  * The model fills slot IDs; deterministic variants change copied page artwork. */
 import crypto from 'node:crypto';
 import { importEditablePptx, renderImportedPptx } from './ppt/import-pptx.mjs';
-import { stableId } from './ppt/ir.mjs';
+import { stableId, removeNativeTitleAlias } from './ppt/ir.mjs';
 import { planTemplateSlideMap, profileTemplateSlide, visualSimilarity, catalogTemplateLayouts, TEMPLATE_VARIANTS } from './ppt-template-scheduler.mjs';
 import { semanticMediaForSlide } from './ppt-semantic-media.mjs';
 import { visibleBodyTarget, templateVisualUnits } from './ppt-presentation-writing.mjs';
@@ -28,6 +37,10 @@ function incompletePhrase(value) {
   const text = String(value || '').trim().replace(/[.!?。！？]+$/u, '').trim();
   if (!text) return false;
   if (/(?:^|\s)[A-Z][A-Z0-9]*\/[A-Z][A-Z0-9]*$/u.test(text)) return false;
+  // Relative-clause headings may legitimately strand a preposition:
+  // "Costs you're signing up for" / "Risks we are exposed to".
+  // This does not exempt incomplete body phrases such as "Keep history for".
+  if (/^.+\s(?:you|we|they|he|she|it|I)(?:['’](?:re|ve|d|ll)|\s+(?:are|is|have|will|were))\b.+\b(?:for|with|on|at|of|to)$/iu.test(text)) return false;
   return FRAGMENT_END.test(text) || (text.match(/\(/g) || []).length > (text.match(/\)/g) || []).length ||
     (text.match(/（/g) || []).length > (text.match(/）/g) || []).length ||
     (text.split(/\s+/).length > 3 && /\b(?:one|two|three|four|five)\b$/iu.test(text));
@@ -66,6 +79,20 @@ function visibleSlotText(slide, slots) {
   }).join(' ');
 }
 
+function detailEvidenceText(project,slide,visible){
+  const outline=project.outline?.find(item=>item.id===slide.id);
+  const base=title=>String(title||'').replace(/[（(]续\s*\d+[）)]$/u,'').trim();
+  if(!outline?.groupId)return `${slide.title||''} ${visible}`;
+  const siblings=new Set(project.outline.filter(item=>item.groupId===outline.groupId&&base(item.title)===base(outline.title)).map(item=>item.id));
+  return (project.deck?.slides||[]).filter(item=>siblings.has(item.id)).map(item=>`${item.title||''} ${visibleSlideText(item)}`).join(' ')||`${slide.title||''} ${visible}`;
+}
+function boundBilingualListPresent(project,slide,detail){
+  const match=String(detail).match(/^(\d+)条清单完整呈现，保留中英双语$/u);if(!match)return false;
+  const count=Number(match[1]),inventory=project.source?.semantic?.inventory?.items||[];
+  const lists=(slide.nodes||[]).filter(node=>node.type==='list'&&node.sourceArtifact?.sourceUnitId&&node.content?.items?.length===count&&
+    inventory.some(item=>item.id===node.sourceArtifact.sourceUnitId&&(item.items?.length||String(item.text||'').split('\n').filter(line=>/^\s*[-*]\s+/u.test(line)).length)===count));
+  return lists.some(node=>node.content.items.every(item=>/[A-Za-z]/u.test(item.text)))&&lists.some(node=>node.content.items.every(item=>/[\u3400-\u9fff]/u.test(item.text)));
+}
 function contentCoverageIssues(project, slide, slots, index) {
   const blocks = slide.copy?.blocks || [];
   const visible = slide.sourceArtifactNodes?.length ? visibleSlideText(slide) : visibleSlotText(slide, slots);
@@ -78,9 +105,14 @@ function contentCoverageIssues(project, slide, slots, index) {
   });
   const contract = project.planning?.slidePlan?.find(item => item.slideId === slide.id);
   for (const [detailIndex, detail] of (contract?.requiredDetails || []).entries()) {
-    const formula = /\b[A-Za-z_]\w*\s*=|\b[A-Za-z_]\w*\s*\([^\n]*[-+*/][^\n]*\)/u.test(detail);
-    const coverage = formula ? Number(formulaKey(`${slide.title || ''} ${visible}`).includes(formulaKey(detail)))
-      : copyCoverage(detail, `${slide.title || ''} ${visible}`);
+    // A metadata sentence may describe several equations, definitions and
+    // conditions. Only a standalone equation has a verbatim equation contract;
+    // source-object integrity and the semantic obligation audit still validate
+    // all formulas and conditions in a compound prose requirement.
+    const formula = !/[\u3400-\u9fff；;。]/u.test(detail)&&/^\s*[A-Za-z_][^=]*=[^=]+$/u.test(detail);
+    const evidence=detailEvidenceText(project,slide,visible);
+    const coverage = boundBilingualListPresent(project,slide,detail)?1:formula ? Number(formulaKey(evidence).includes(formulaKey(detail)))
+      : copyCoverage(detail, evidence);
     if (coverage < (formula ? 1 : .25)) issues.push({ code: 'template_required_detail_missing', severity: 'error',
       message: `模板第 ${index + 1} 页第 ${detailIndex + 1} 条必讲细节没有进入可见文字`,
       repair: 'fill_template_slots', detailIndex, coverage: Number(coverage.toFixed(3)) });
@@ -230,6 +262,17 @@ export function autoTemplateMediaOmissions(project, index, existing = []) {
 export function templateMediaRole(node,spec,size){
   const declared=node.content?.mediaRole||node.content?.role;
   if(declared)return declared;
+  // A content-bearing caption is not decoration. Unknown assets must survive
+  // unless an explicit user decision or verified equivalent accounts for them.
+  if(node.content?.caption?.trim()||node.content?.altText?.trim())return 'unknown';
+  // Pixel verification proves this asset has no internal diagram/text. Native
+  // content frames prove its purpose is a card background. Geometry alone or
+  // an empty colour sample is never enough to retire an arbitrary image.
+  if(node.content?.monochromePanel === true && !node.content?.mustPreserve && size){
+    const g=node.geometry,area=g.width*g.height/(size.width*size.height);
+    const labels=(spec?.nodes||[]).filter(n=>n.type==='text'&&n.content?.text?.trim()&&n.geometry.x>=g.x&&n.geometry.y>=g.y&&n.geometry.x+n.geometry.width<=g.x+g.width&&n.geometry.y+n.geometry.height<=g.y+g.height);
+    if(area>=.015&&area<=.2&&(labels.length>=2||node.content.panelColor&&labels.length>=1))return 'template_decoration';
+  }
   if(safeDecorativeMedia(node,size,spec))return 'template_decoration';
   if(contentMediaCandidates(spec,size).some(n=>n.id===node.id))return 'unknown';
   const area=node.geometry?.width*node.geometry?.height/(size.width*size.height);
@@ -275,7 +318,7 @@ function slotsFor(slide) {
   // editable and prevent the largest percentage from being mistaken for the
   // page title (for example, a decorative "35%" callout).
   const candidates = text.filter(node => node.content?.mediaRole!=='brand' && !numericLabel(node.content.text) && !numericMetric(node.content.text));
-  const title = [...candidates].sort((a, b) => {
+  const title = candidates.find(node=>node.semanticRole==='title') || [...candidates].sort((a, b) => {
     const score = node => Number(node.style?.fontSizePt || 14) * Math.min(2, node.geometry.width / 3_000_000);
     return score(b) - score(a);
   })[0];
@@ -520,15 +563,10 @@ function inspectListSlot(slot, value, index) {
   return lines > slot.maxLines ? [error('template_text_fit', `预计占 ${lines} 行，模板只容纳 ${slot.maxLines} 行；需改写为更短的要点`)] : [];
 }
 
-function compactSourceCatalog(sourceSlides, slideMap) {
-  const mapped = new Set(slideMap);
-  return sourceSlides.map((source, sourceIndex) => {
-    const slide = structuredClone(source);
-    if (mapped.has(sourceIndex)) for (const node of slide.nodes || []) {
-      if (node.type === 'image' && node.content) delete node.content.dataUrl;
-    }
-    return slide;
-  });
+function compactSourceCatalog(sourceSlides) {
+  // Storage already deduplicates data URLs by hash. Removing the only catalog
+  // copy loses media when a capacity schedule temporarily omits that source.
+  return structuredClone(sourceSlides);
 }
 
 export function fidelityFromImported(project, imported, templateHash) {
@@ -604,8 +642,10 @@ function buildFidelity(project, sourceSlides, externalPptx, templateHash, profil
     componentProfile: templateComponentProfile(sourceSlides.map(slide=>({...slide,slots:slotsFor(slide)})), externalPptx, templateHash, templateMediaRole),
     mode: 'preserve', originalPath: externalPptx.originalPath, sha256: templateHash,
     width: externalPptx.width, height: externalPptx.height, originalSlideCount: originalCount, slideMap, layoutCatalog: catalog,
-    ...(project.pages < originalCount || project.templateFidelity?.sourceCatalog
-      ? { sourceCatalog: project.templateFidelity?.sourceCatalog || compactSourceCatalog(sourceSlides, slideMap) } : {}),
+    // Even N >= originalCount can omit a source layout after capacity/role
+    // selection. Preserve the full original catalog for later rescheduling;
+    // mapped media is compacted and rehydrated from the output asset ledger.
+    sourceCatalog: project.templateFidelity?.sourceCatalog || compactSourceCatalog(sourceSlides, slideMap),
     reusePlan: { repeatedPages: Math.max(0, project.pages - originalCount), omittedSourcePages: Math.max(0, originalCount - new Set(slideMap).size),
       maxSourceUse: Math.max(...slideMap.map(source => slideMap.filter(value => value === source).length)),
       adjacentSameSource: 0, visualSimilarityPairs },
@@ -613,9 +653,37 @@ function buildFidelity(project, sourceSlides, externalPptx, templateHash, profil
   };
 }
 
+export function restoreNativeTemplateCoverage(project,scoreSlide,{allowOverflowCandidate=false}={}){
+ const fidelity=project.templateFidelity;
+ if(fidelity?.mode!=='preserve'||project.pages<fidelity.originalSlideCount)return project;
+ const sourceSlides=structuredClone(fidelity.sourceCatalog),external={originalPath:fidelity.originalPath,width:fidelity.width,height:fidelity.height};
+ const rich=project.inputProfile?.level==='rich'||String(project.source?.text||'').length>=8000;
+ const profiles=sourceSlides.map(slide=>profileSourceSlide(slide,external,rich));
+ const missing=Array.from({length:sourceSlides.length},(_,i)=>i).filter(i=>!project.templateFidelity.slideMap.includes(i));
+ for(const sourceIndex of missing){
+  const prior=project.templateFidelity,map=prior.slideMap;let chosen=null,leastOverflow=null,leastScore=Infinity,leastIndex=null;
+  for(let index=1;index<project.pages-1;index++){
+   if(map.filter(i=>i===map[index]).length<=1||profiles[sourceIndex].directional||map[index-1]===sourceIndex||map[index+1]===sourceIndex)continue;
+   const trial=[...map];trial[index]=sourceIndex;
+   try{project.templateFidelity=buildFidelity(project,sourceSlides,external,fidelity.sha256,profiles,trial);const score=scoreSlide(project,index);if(score<=0){chosen=project.templateFidelity;break;}if(Number.isFinite(score)&&score<leastScore){leastOverflow=project.templateFidelity;leastScore=score;leastIndex=index;}}catch{}
+  }
+  // An automatic, unconfirmed outline must reach the normal measured
+  // condensation/partition pipeline. Keep the required original media in the
+  // least-overflow candidate; revalidateOutlineFits still records its actual
+  // overflow and final confirmation cannot accept an unfitted page.
+  if(!chosen&&allowOverflowCandidate&&!project.confirmedOutline&&leastOverflow){
+   chosen=leastOverflow;
+   chosen.reusePlan.coverageCapacityCandidates=[...(prior.reusePlan?.coverageCapacityCandidates||[]),{sourceIndex,pageIndex:leastIndex,predictedOverflow:leastScore,basis:'unaccepted candidate; full capacity repair and final gates still required'}];
+  }
+  project.templateFidelity=chosen||prior;
+  if(!chosen){const error=new Error('native_template_coverage_capacity: no readable unaccepted page can use original template page '+(sourceIndex+1)+' at the frozen font/page budget');error.code='capacity_invalid';error.outlineContract=true;throw error;}
+ }
+ return project;
+}
+
 /** Rebind only the native page assignment after the outline is known. The
  * existing outline/content DAG and original template remain unchanged. */
-export function rescheduleTemplateFidelity(project) {
+export function rescheduleTemplateFidelity(project,{scoreSlide,allowOverflowCandidate=false}={}) {
   const fidelity = project.templateFidelity;
   if (fidelity?.mode !== 'preserve') return project;
   const sourceSlides = fidelity.sourceCatalog ? structuredClone(fidelity.sourceCatalog) : Array.from({ length: fidelity.originalSlideCount }, (_, sourceIndex) => {
@@ -643,6 +711,66 @@ export function rescheduleTemplateFidelity(project) {
   const profiles = sourceSlides.map(slide => profileSourceSlide(slide, externalPptx, richSource));
   const slideMap = planTemplateSlideMap(sourceSlides.length, project.pages, { profiles, outline: project.outline });
   project.templateFidelity = buildFidelity(project, sourceSlides, externalPptx, fidelity.sha256, profiles, slideMap);
+  const capacityAssignments=[];
+  if(scoreSlide)for(let index=1;index<project.pages-1;index++){
+    const before=scoreSlide(project,index);if(!(before>0))continue;
+    const currentMap=project.templateFidelity.slideMap,prior=project.templateFidelity;let best=prior,bestScore=before;
+    for(let sourceIndex=1;sourceIndex<sourceSlides.length-1;sourceIndex++){
+      // This pass runs only for a physical overflow. Native readability takes
+      // priority over avoiding an adjacent repeat; the initial role plan still
+      // supplies visual variety whenever its body already fits.
+      if(sourceIndex===currentMap[index]||profiles[sourceIndex].directional)continue;
+      const trial=[...currentMap];trial[index]=sourceIndex;
+      try{
+        project.templateFidelity=buildFidelity(project,sourceSlides,externalPptx,fidelity.sha256,profiles,trial);
+        const score=scoreSlide(project,index);
+        if(score<bestScore){best=project.templateFidelity;bestScore=score;}
+      }catch{/* A native variation rejected by the fidelity contract is not a candidate. */}
+    }
+    project.templateFidelity=best;
+    if(best!==prior)capacityAssignments.push({page:index+1,fromSource:prior.slideMap[index],toSource:best.slideMap[index],beforeOverflowEMU:before,afterOverflowEMU:bestScore,adjacentSourceReuse:best.slideMap[index]===best.slideMap[index-1]||best.slideMap[index]===best.slideMap[index+1],basis:'measured native body at unchanged font; physical fit before layout variety'});
+  }
+  if(scoreSlide)restoreNativeTemplateCoverage(project,scoreSlide,{allowOverflowCandidate});
+  if(scoreSlide)balanceTemplateMedia(project,scoreSlide,{sourceSlides,profiles,externalPptx,sha256:fidelity.sha256,capacityAssignments});
+  if(capacityAssignments.length)project.templateFidelity.capacityAssignments=capacityAssignments;
+  return project;
+}
+
+/** Media budget (MD-P0-2): capacity alone picks the image-free layout again
+ * and again. Break runs of text-only pages by moving a page to a template page
+ * with media when the measured body still fits, no neighbour repeats the same
+ * template page and every original template page stays in use. */
+function pageMedia(project,index){
+  const spec=project.templateFidelity?.slides?.[index];if(!spec)return 0;
+  const {artwork,icons}=regionArtwork(project,index,contentCanvas(project,index).geometry);
+  const inRegion=new Set([...artwork,...icons].map(node=>node.nativeRef?.shapeId));
+  // Only media outside the rebuilt source region is certain to survive; region
+  // artwork survives only if the text fits beside it, decided at binding time.
+  return (spec.nodes||[]).filter(node=>node.type==='image'&&!inRegion.has(node.nativeRef?.shapeId)).length;
+}
+export function balanceTemplateMedia(project,scoreSlide,{sourceSlides,profiles,externalPptx,sha256,capacityAssignments=[]}){
+  const pages=project.pages,original=sourceSlides.length;
+  const textOnlyRun=()=>{let run=[];for(let index=1;index<pages-1;index++){if(pageMedia(project,index)===0)run.push(index);else{if(run.length>=2)return run;run=[];}}return run.length>=2?run:null;};
+  for(let attempt=0;attempt<pages;attempt++){
+    const run=textOnlyRun();if(!run)break;
+    let improved=false;
+    for(const index of [run[Math.floor(run.length/2)],...run.filter(i=>i!==run[Math.floor(run.length/2)])]){
+      const prior=project.templateFidelity,map=prior.slideMap;let best=null,bestMedia=0;
+      for(let sourceIndex=1;sourceIndex<original-1;sourceIndex++){
+        if(sourceIndex===map[index]||sourceIndex===map[index-1]||sourceIndex===map[index+1]||profiles[sourceIndex]?.directional)continue;
+        const trial=[...map];trial[index]=sourceIndex;
+        if(pages>=original&&Array.from({length:original},(_,i)=>i).some(i=>!trial.includes(i)))continue;
+        try{
+          project.templateFidelity=buildFidelity(project,sourceSlides,externalPptx,sha256,profiles,trial);
+          const media=pageMedia(project,index);
+          if(media>bestMedia&&scoreSlide(project,index)<=0){best=project.templateFidelity;bestMedia=media;}
+        }catch{/* rejected by the fidelity contract */}
+        project.templateFidelity=prior;
+      }
+      if(best){project.templateFidelity=best;capacityAssignments.push({page:index+1,fromSource:prior.slideMap[index],toSource:best.slideMap[index],basis:'media budget: break text-only run at unchanged font'});improved=true;break;}
+    }
+    if(!improved)break;
+  }
   return project;
 }
 
@@ -650,7 +778,7 @@ export async function prepareTemplateFidelity(project, templateBytes, templateHa
   const templateStore = await import('./ppt-store.mjs');
   const owner = template?.kind === 'managed' ? 'managed' : project.uid;
   const cached = template && templateStore.readTemplateIR(owner, template.id, templateHash);
-  if (cached?.parserVersion==='pptx-ir-4') {
+  if (cached?.parserVersion==='pptx-ir-7') {
     // Copy the opaque package for native export, never parse it again at runtime.
     const originalPath = await io.writeFile(project.id, 'template-original.pptx', Readable.from([templateBytes]), templateBytes.length, project.uid);
     if (typeof originalPath !== 'string' || !originalPath.startsWith('/')) throw new Error('template copy did not return a sandbox path');
@@ -661,7 +789,7 @@ export async function prepareTemplateFidelity(project, templateBytes, templateHa
   }
   project.templateCacheHit = false;
   let imported = await io.importPptx({ id: project.id, uid: project.uid, title: project.title }, templateBytes, templateHash);
-  if (template) templateStore.writeTemplateIR(owner, template.id, { schemaVersion: 1, parserVersion: 'pptx-ir-4', sha256: templateHash, imported });
+  if (template) templateStore.writeTemplateIR(owner, template.id, { schemaVersion: 1, parserVersion: 'pptx-ir-7', sha256: templateHash, imported });
   if(project.templateContentMode==='design_only') imported=templateDesignView(imported,new Set(imported.deck.slides.flatMap(slide=>contentMediaCandidates(slide,imported.externalPptx).map(node=>node.id))));
   return project.templateMode === 'mapped' ? {mode:'mapped',sha256:templateHash,componentProfile:templateComponentProfile(imported.deck.slides.map(slide=>({...slide,slots:slotsFor(slide)})),imported.externalPptx,templateHash,templateMediaRole)} : fidelityFromImported(project, imported, templateHash);
 }
@@ -714,6 +842,62 @@ export function templateOutlinePrompt(project) {
   return `\n模板保真约束：必须按已确认的 ${project.pages} 页及页面顺序安排内容。额外页面复用原生模板页；原图解与新主题无关且无法安全替换时，可在逐页写作阶段明确省略该媒体及关联旧标签。规划时参考每页独立内容组数、每组长度与示例语义，为有来源支撑的组安排不同机制、例子或条件；如果来源不足，换更适合的主题或明确标注缺口，不能用同义句凑满。内容型原图是待核对的旧主题证据，不能把它当作当前来源的图表。模板版式目录：${JSON.stringify(catalog)}。代表性页面结构：${JSON.stringify(contracts)}。原稿示例只说明槽位功能，不是本次来源事实。`;
 }
 
+// F-P1-11: a normalized section label measured to the title edge (one line, no wrap).
+const slotCapacity = (slot, slide) => slot.role === 'section' && slide.sectionLabel?.shapeId === slot.shapeId && slide.sectionLabel.capacity
+  ? Math.max(slot.capacity, slide.sectionLabel.capacity) : slot.capacity;
+/** The same native title budget is checked before confirmation and by every
+ * writer. A body fit cannot authorize an oversized frozen title. */
+export function inspectNativeOutlineTitles(project, outline = project.outline || []) {
+  if (project.templateFidelity?.mode !== 'preserve') return [];
+  const conflicts = outline.flatMap((slide, pageIndex) => {
+    const source=project.templateFidelity.slides[pageIndex] || { nodes: [] };
+    return effectiveSlots({...source,nodes:source.nodes||[],slots:source.slots||slotsFor(source)})
+    .filter(slot => slot.role === 'title' && visualUnits(slide.title) > slotCapacity(slot, slide))
+    .map(slot => ({ code: 'planned_native_title_overflow', severity: 'error', pageIndex, field: 'title',
+      maxLength: 160, reason: 'native_title_capacity', capacityVisualUnits: slotCapacity(slot, slide),
+      requiredLanguages: !(pageIndex===0&&nativeCoverTitleHierarchy(project))&&project.generationPolicy?.language?.mode==='source'&&/[A-Za-z]{2}/u.test(slide.title)&&/[\u3400-\u9fff]/u.test(slide.title)?['English','Chinese']:undefined,
+      ...(pageIndex===0&&nativeCoverTitleHierarchy(project)?{titleHierarchy:project.generationPolicy?.language?.mode==='output'?'short headline + complete independently audited source-title translation in the requested output language, in a visible measured subtitle; original title remains in notes':'short headline + complete original source title in a visible measured subtitle; the combined title block retains all source languages'}:{}),
+      usedVisualUnits: visualUnits(slide.title), shapeId: slot.shapeId, fontSizePt: slot.fontSizePt,
+      message: `Page ${pageIndex + 1} title exceeds its unchanged native ${slot.fontSizePt}pt slot (${slotCapacity(slot, slide)} visual units). Shorten the topic label BEFORE confirmation; preserve original full document title in the measured cover subtitle and all facts in source/notes.` }));
+  });
+  // Resume the already confirmed plan verbatim. A new identity rule cannot
+  // retroactively invalidate its metadata or force a second confirmation.
+  // Physical title capacity checks above still apply on resume.
+  if (project.confirmedOutline) return conflicts;
+  // Capacity partitions need distinct visible identities too. Do this before
+  // confirmation; writers must never rename a frozen, user-approved outline.
+  // A user-locked title is intentional and stays unchanged.
+  const seen = new Map();
+  outline.forEach((slide, pageIndex) => {
+    if (!pageIndex || ['cover', 'navigation', 'section'].includes(slide.role)) return;
+    const key = String(slide.title || '').normalize('NFKC').toLowerCase().replace(/\s+/gu, ' ').trim();
+    if (!key) return;
+    const prior = seen.get(key);
+    if (prior === undefined) { seen.set(key, pageIndex); return; }
+    if (slide.titleLocked || slide.title_locked) return;
+    const message = `Page ${pageIndex + 1} repeats the visible title of page ${prior + 1}. Name its own source-supported incremental message, or an explicit table continuation with its actual row labels. Preserve bilingual title languages; do not invent facts or change source owners, page count or selection.`;
+    const existing = conflicts.find(c => c.pageIndex === pageIndex && c.field === 'title');
+    if (existing) { existing.message += ' ' + message; existing.duplicatesPageIndex = prior; }
+    else conflicts.push({ code: 'planned_title_identity_duplicate', severity: 'error', pageIndex, field: 'title', maxLength: 160,
+      reason: 'duplicate_visible_title_before_confirmation', duplicatesPageIndex: prior, message,
+      requiredLanguages: project.generationPolicy?.language?.mode === 'source' && /[A-Za-z]{2}/u.test(slide.title) && /[\u3400-\u9fff]/u.test(slide.title) ? ['English', 'Chinese'] : undefined });
+  });
+  return conflicts;
+}
+export function inspectNativeCoverTitle(project,outline=project.outline||[]) {
+  if(!nativeCoverTitleHierarchy(project)||!outline.length)return [];
+  const probe={...project,outline,deck:{slides:outline.map(s=>({id:s.id,title:s.title,section:s.section,nodes:[]}))}};
+  bindTemplateFidelity(probe,{slideIds:[outline[0].id]});
+  const cover=probe.deck.slides[0],issues=inspectCoverTitle(probe,[cover]);
+  for(const node of cover.nodes.filter(n=>n.type==='text'&&(n.semanticRole==='template-title'||n.content?.derivedFrom==='document-title'))){
+    const fit=measureText({...node,kind:'text',bounds:node.geometry});
+    if(fit.overflow)issues.push({code:'planned_native_cover_title_overflow',severity:'error',message:'The unchanged-font cover headline/full-source subtitle does not fit its actual frame.',details:{nodeId:node.id,fit}});
+  }
+  const headline=cover.nodes.find(n=>n.semanticRole==='template-title'),subtitle=cover.nodes.find(n=>n.content?.derivedFrom==='document-title');
+  if(headline&&subtitle&&headline.geometry.y+headline.geometry.height>subtitle.geometry.y)
+    issues.push({code:'planned_native_cover_title_overlap',severity:'error',message:'The cover headline overlaps its complete source-title subtitle.'});
+  return issues;
+}
 export function inspectTemplateSlotDraft(project, index, slide) {
   const spec = project.templateFidelity?.slides?.[index];
   if (!spec) return [];
@@ -722,7 +906,7 @@ export function inspectTemplateSlotDraft(project, index, slide) {
   const invalidOmissions = [...omitted].filter(id => !spec.nodes.some(node => String(node.nativeRef?.shapeId) === id &&
     (['image', 'chart', 'table'].includes(node.type) || (node.type === 'text' && slots.some(slot => String(slot.shapeId) === id && slot.role === 'content')) ||
       (node.content?.templateSample && project.templateContentMode==='design_only') ||
-      (slide.sourceArtifactNodes?.length && slide.templateOmissions.some(o=>String(o.shapeId)===id && o.automatic && o.approvalBasis==='source_region_replacement')))));
+      slide.templateOmissions.some(o=>String(o.shapeId)===id && o.version===1 && o.approvalBasis==='user_editor_delete') || (slide.sourceArtifactNodes?.length && slide.templateOmissions.some(o=>String(o.shapeId)===id && o.automatic && o.approvalBasis==='source_region_replacement')))));
   const omissionIssues = invalidOmissions.map(id => ({ code: 'template_omission_invalid', severity: 'error',
     message: `模板第 ${index + 1} 页组件 ${id} 不是可省略的内容或媒体`, repair: 'fill_template_slots', shapeId: Number(id) }));
   const issues = slots.filter(slot => slot.role !== 'static' && !omitted.has(String(slot.shapeId))).flatMap(slot => {
@@ -735,10 +919,10 @@ export function inspectTemplateSlotDraft(project, index, slide) {
     const heading = slot.pairedWith ? slide.templateSlotTexts?.[String(slot.pairedWith)] : '';
     if (slot.pairedWith && explanationRepeatsHeading(heading, value)) return [{ code: 'template_description_repeats_heading', severity: 'error',
       message: `模板第 ${index + 1} 页槽位 ${slot.shapeId} 重复要点标题，应补充解释`, repair: 'fill_template_slots', shapeId: slot.shapeId }];
-    if (used > 0 && used <= slot.capacity && (!slot.minVisualUnits || used >= slot.minVisualUnits)) return [];
-    const code = !used ? 'template_slot_unfilled' : used > slot.capacity ? 'template_slot_overflow' : 'template_description_too_short';
+    if (used > 0 && used <= slotCapacity(slot, slide) && (!slot.minVisualUnits || used >= slot.minVisualUnits)) return [];
+    const code = !used ? 'template_slot_unfilled' : used > slotCapacity(slot, slide) ? 'template_slot_overflow' : 'template_description_too_short';
     return [{ code, severity: 'error',
-      message: `模板第 ${index + 1} 页槽位 ${slot.shapeId} ${!used ? '必须填写' : used > slot.capacity ? `需要缩短至 ${slot.capacity} visual units` : `说明应达到至少 ${slot.minVisualUnits} visual units，并解释对应要点`}`,
+      message: `模板第 ${index + 1} 页槽位 ${slot.shapeId} ${!used ? '必须填写' : used > slotCapacity(slot, slide) ? `需要缩短至 ${slotCapacity(slot, slide)} visual units` : `说明应达到至少 ${slot.minVisualUnits} visual units，并解释对应要点`}`,
       repair: 'fill_template_slots', shapeId: slot.shapeId, slotRole: slot.role, capacity: slot.capacity, minVisualUnits: slot.minVisualUnits }];
   });
   issues.push(...omissionIssues);
@@ -828,7 +1012,10 @@ function ordinalReadingOrder(nodes, size) {
     /^0\d/.test(String(node.content.text).trim()) ? String(index + 1).padStart(2, '0') : String(index + 1)]));
 }
 
-export function bindTemplateFidelity(project) {
+export {fitNativeTitleFrames} from './ppt-native-text-fit.mjs';
+
+export function bindTemplateFidelity(project,{slideIds=null}={}) {
+  normalizeDeckEyebrows(project);
   if (project.templateFidelity?.mode !== 'preserve') {
     bindMappedTemplateMedia(project);
     for(const slide of project.deck?.slides||[]) {
@@ -837,31 +1024,45 @@ export function bindTemplateFidelity(project) {
       if(!slide.componentPrepared&&!slide.locked&&contract?.compositionCandidates?.includes('two-panel')&&slide.nodes?.filter(x=>x.sourceArtifact).length===2)slide.layoutId=slide.layoutRef='two-panel';
       prepareComponentGeometry(project,slide);
     }
-    return project;
+    return bindNotesDisclosures(project);
   }
   if (project.deck?.slides?.length !== project.templateFidelity.slides.length) throw new Error('template slide count mismatch');
   project.deck.slides.forEach((slide, index) => {
+    if(slideIds&&!slideIds.includes(slide.id))return;
     const source = project.templateFidelity.slides[index];
     const ordinals = ordinalReadingOrder(source.nodes, project.templateFidelity);
     const slotById = new Map(effectiveSlots(source).map(slot => [String(slot.shapeId), slot]));
     const provided = slide.templateSlotTexts || {};
+    // Plain model omission requests cannot authorize loss of unclassified or
+    // protected media. Keep the exact native asset in its reserved region.
+    const rejected=(slide.templateOmissions||[]).filter(record=>record.version===undefined&&source.nodes.some(node=>
+      String(node.nativeRef?.shapeId)===String(record.shapeId)&&['image','chart','table'].includes(node.type)&&
+      !['template_decoration','template_icon','template_artwork'].includes(templateMediaRole(node,source,project.templateFidelity))));
+    if(rejected.length){slide.templateRejectedOmissions=[...(slide.templateRejectedOmissions||[]),...rejected];slide.templateOmissions=slide.templateOmissions.filter(record=>!rejected.includes(record));}
     slide.templateOmissions=[...(slide.templateOmissions || []),...autoTemplateMediaOmissions(project,index,slide.templateOmissions || [])];
     const omitted = new Set((slide.templateOmissions || []).map(item => String(item.shapeId)));
     const priorNodes=new Map((slide.nodes || []).filter(node=>node.nativeRef).map(node=>[node.id,node]));
     const native = source.nodes.filter(base => !omitted.has(String(base.nativeRef?.shapeId))).map(base => {
       const node = structuredClone(base);
+      if(node.nativeTextFrame)node.nativeTextFrame={...node.nativeTextFrame,originalHeight:node.nativeTextFrame.originalHeight||base.geometry?.height};
       if (ordinals.has(node.nativeRef?.shapeId)) node.content = { ...node.content, text: ordinals.get(node.nativeRef.shapeId) };
       const slot = slotById.get(String(node.nativeRef?.shapeId));
       if (slot && slot.role !== 'static') {
         let text = provided[String(slot.shapeId)];
         if (slot.role === 'title') text = slide.title;
         if (slot.role === 'section') text = slide.section || text;
+        // F-P1-11: an unwrapped section label measured past its example width
+        // runs toward the title's right edge, never over another object.
+        if (slot.role === 'section' && slide.sectionLabel?.width > node.geometry.width && slide.sectionLabel.shapeId === slot.shapeId) node.geometry = { ...node.geometry, width: slide.sectionLabel.width };
+        if (slot.role === 'section' && slide.sectionLabel?.height > node.geometry.height && slide.sectionLabel.shapeId === slot.shapeId) node.geometry = { ...node.geometry, height: slide.sectionLabel.height };
         const paragraphs = slot.purpose === 'list' ? slotParagraphs(text) : null;
         node.content = { ...node.content, text: paragraphs ? paragraphs.map(item => [item.label, item.body].filter(Boolean).join('：')).join('\n') : typeof text === 'string' ? text.trim() : '',
           templateFit: Boolean(node.nativeTextFrame), ...(paragraphs ? { paragraphs } : {}) };
         if (node.nativeTextFrame?.paragraphs) for (const paragraph of node.nativeTextFrame.paragraphs) {
           if (Number(paragraph.lineSpacing) > 0 && Number(paragraph.lineSpacing) < 1.15) paragraph.lineSpacing = 1.15;
         }
+        if(paragraphs)node.content=ensureRichContent(node.content);
+        if(!paragraphs&&typeof text==='string'){const rich=sourceRichText(text);if(rich.runs.some(r=>r.kind==='math'||r.bold||r.italic||r.code)||rich.diagnostics.length)node.content={...node.content,...richTextContent(text)};}
         node.semanticRole = slot.role === 'title' ? 'template-title' : 'template-text';
         node.locked = false;
         node.templateSlot = { role: slot.role, purpose: slot.purpose, pairedWith: slot.pairedWith, groupId: slot.groupId,
@@ -886,11 +1087,53 @@ export function bindTemplateFidelity(project) {
     slide.templateSlideIndex = index;
     slide.templateShapeCount = source.shapeCount - omitted.size;
     slide.templateImageCount = source.imageCount - source.nodes.filter(node => omitted.has(String(node.nativeRef?.shapeId)) && node.type === 'image').length;
-    slide.nodes = slide.nodes.filter(node => !node.nativeRef).map(node => isSourceOwnedNode(node) ? node : {...node,hidden:true});
-    slide.nodes.push(...native);
+    // Re-apply measured adaptations (re-anchored card icons) made when source
+    // structures were bound; rebuilding from the IR must not undo them.
+    for (const adaptation of slide.templateAdaptations || []) {
+      const node = native.find(item => String(item.nativeRef?.shapeId) === String(adaptation.shapeId));
+      if (node && adaptation.geometry) {node.geometry = { ...adaptation.geometry };if(adaptation.componentBinding)node.templateComponentBinding=adaptation.componentBinding;}
+    }
+    // Legacy generic nodes (no geometry) would overlap the template design;
+    // keep source-owned and user-placed objects visible.
+    slide.nodes = removeNativeTitleAlias(slide.id, [...slide.nodes.filter(node => !node.nativeRef).map(node => isSourceOwnedNode(node) || node.geometry ? node : {...node,hidden:true}), ...native, ...(slide.templateComponentClones||[])]);
+    if (index === 0) bindDerivedCoverSubtitle(project, slide, source);
+    fitNativeTitleFrames(project, slide);
     slide.nodeOrder = slide.nodes.map(node => node.id);
   });
-  return project;
+  return bindNotesDisclosures(project);
+}
+
+/** F-P0-2: a template cover with only a title slot cannot show the source's
+ * subtitle or second-language title. Add one measured text box under the title
+ * (template body size and colour), only when it fits beside the artwork. */
+export function bindDerivedCoverSubtitle(project, slide, source) {
+  slide.nodes = (slide.nodes || []).filter(node => node.content?.derivedFrom !== 'document-title');
+  if (project.deckTitle?.source === 'user') return;
+  const title = displayedDocumentTitle(project);
+  const titleNode = slide.nodes.find(node => node.semanticRole === 'template-title');
+  if (!title || !titleNode?.geometry) return;
+  if ((source.slots || []).some(slot => slot.role === 'content' || slot.purpose === 'subtitle')) return;
+  const shown = String(slide.title || titleNode.content?.text || '').replace(/\s+/gu, '');
+  const lines = title.variants.map(variant => shown.includes(variant.main.replace(/\s+/gu, '')) ? variant.subtitle : variant.text).filter(Boolean);
+  if (!lines.length) return;
+  const size = project.templateFidelity, g = titleNode.geometry, gap = 91440 * 1.5;
+  const box = { x: g.x, y: g.y + g.height + gap, width: g.width, height: Math.max(0, size.height - (g.y + g.height + gap) - 457200) };
+  const bodyPt = contentCanvas(project, 1).fontSizePt || 14;
+  const blocked = (source.nodes || []).some(node => node.type === 'image' && node.geometry && node.geometry.width < size.width * .85 &&
+    node.geometry.x < box.x + box.width && node.geometry.x + node.geometry.width > box.x && node.geometry.y < box.y + box.height && node.geometry.y + node.geometry.height > box.y);
+  if (blocked || box.height < 91440 * 4) return;
+  for (const candidate of [lines, title.variants.map(variant => variant.subtitle).filter(Boolean)]) {
+    if (!candidate.length) continue;
+    const content = richTextContent(candidate.join('\n'));
+    const measured = measureComponent({ type: 'text', content }, box, bodyPt);
+    if (measured.height > box.height || measured.width && measured.width > box.width) continue;
+    const chosen = templateTextColor(project, 0, 'body');
+    slide.nodes.push({ id: 'node_cover_subtitle_' + slide.id.slice(-12), type: 'text', semanticRole: 'source-explanation', slotId: 'absolute',
+      geometry: { ...box, height: measured.height }, content: { ...content, derivedFrom: 'document-title', pointType: 'support' }, sourceRefs: [],
+      style: { fontSizePt: bodyPt, fontFamily: project.templateSpec?.fonts?.body, eastAsiaFontFamily: project.templateSpec?.fonts?.bodyEastAsia, lineHeight: 1.18, paragraphSpacingEm: 0,
+        color: chosen.color, colorBasis: chosen.basis, fill: source.background || project.templateSpec?.palette?.background || '#ffffff' }, zIndex: 500 });
+    return;
+  }
 }
 
 export async function renderTemplatePptx(project,io={}) {
@@ -908,14 +1151,18 @@ export function inspectTemplateFidelity(project) {
   const dominantMediaPages = new Map();
   project.deck?.slides?.forEach((slide, index) => {
     const source = project.templateFidelity.slides[index];
+    for (const node of slide.nodes || []) if (node.templateTitleFrameAdaptation?.status === 'blocked') issues.push({ code: 'template_cjk_title_frame_capacity', severity: 'error', slideId: slide.id, nodeId: node.id, repairable: true, message: '原生标题的字形高度无法在相邻对象之间容纳；不能缩字或覆盖其他对象' });
     const native = slide.nodes.filter(node => node.nativeRef?.slideIndex === index);
+    const originals=native.filter(node=>node.nativeRef.cloneFromShapeId===undefined),clones=native.filter(node=>node.nativeRef.cloneFromShapeId!==undefined);
     const omitted = new Set((slide.templateOmissions || []).map(item => String(item.shapeId)));
     const omittedImages = source?.nodes?.filter(node => omitted.has(String(node.nativeRef?.shapeId)) && node.type === 'image').length || 0;
-    if (!source || native.length + omitted.size !== source.shapeCount || native.filter(node => node.type === 'image').length + omittedImages !== source.imageCount ||
+    if (!source || !Array.isArray(source.nodes) || originals.length + omitted.size !== source.shapeCount || originals.filter(node => node.type === 'image').length + omittedImages !== source.imageCount ||
+      new Set(originals.map(n=>n.nativeRef.shapeId)).size!==originals.length||source.nodes.some(n=>!originals.some(actual=>actual.nativeRef.shapeId===n.nativeRef.shapeId)&&!omitted.has(String(n.nativeRef.shapeId)))||
       [...omitted].some(id => !source.nodes.some(node => String(node.nativeRef?.shapeId) === id))) {
       issues.push({ code: 'template_asset_loss', severity: 'error', message: '模板图片或组件丢失', slideId: slide.id, repairable: false });
       return;
     }
+    if(new Set(native.map(n=>n.nativeRef.shapeId)).size!==native.length||clones.some(n=>!(['image','shape'].includes(n.type) || n.type==='text'&&n.templateComponentBinding?.origin==='user')||!source.nodes.some(base=>base.type===n.type&&base.nativeRef.shapeId===n.nativeRef.cloneFromShapeId)||!n.templateComponentBinding?.componentSpecId||!Number.isInteger(n.templateComponentBinding.unitIndex)))issues.push({code:'template_component_clone_invalid',severity:'error',slideId:slide.id,message:'Native component clone has a duplicate identity, unsupported member or missing source/component binding.'});
     const dominant = native.filter(node => node.type === 'image').sort((a, b) =>
       b.geometry.width * b.geometry.height - a.geometry.width * a.geometry.height)[0];
     const dominantArea = dominant ? dominant.geometry.width * dominant.geometry.height /
@@ -969,7 +1216,7 @@ export function inspectTemplateFidelity(project) {
       }
       if (!node?.templateSlot?.mapped || !String(node.content?.text || '').trim()) issues.push({ code: 'template_slot_unfilled', severity: 'error', message: `模板文字槽位 ${slot.shapeId} 未填写`, slideId: slide.id, repairable: false });
       else if (incompletePhrase(node.content.text)) issues.push({ code: 'template_text_fragment', severity: 'error', message: `模板文字槽位 ${slot.shapeId} 停在句中`, slideId: slide.id, repairable: false });
-      else if (visualUnits(node.content.text) > slot.capacity) issues.push({ code: 'template_slot_overflow', severity: 'error', message: `模板文字槽位 ${slot.shapeId} 超过容量`, slideId: slide.id, repairable: false });
+      else if (visualUnits(node.content.text) > slotCapacity(slot, slide)) issues.push({ code: 'template_slot_overflow', severity: 'error', message: `模板文字槽位 ${slot.shapeId} 超过容量`, slideId: slide.id, repairable: false });
       else if (slot.minVisualUnits && visualUnits(node.content.text) < slot.minVisualUnits) issues.push({ code: 'template_description_too_short', severity: 'error', message: `模板文字槽位 ${slot.shapeId} 的要点说明过短`, slideId: slide.id, repairable: false });
       else if (slot.pairedWith && explanationRepeatsHeading(native.find(item => item.nativeRef.shapeId === slot.pairedWith)?.content?.text, node.content.text)) issues.push({ code: 'template_description_repeats_heading', severity: 'error', message: `模板文字槽位 ${slot.shapeId} 重复要点标题`, slideId: slide.id, repairable: false });
     }
@@ -984,4 +1231,23 @@ export function inspectTemplateFidelity(project) {
   return issues;
 }
 
-export const _internals = { slotsFor, visualUnits, profileSourceSlide, panelSwapGeometry, ordinalReadingOrder, expandSafeDescriptions, reclaimedMediaTextFrames, safeDecorativeMedia, textOverlayCalloutPanel };
+export const _internals = { slotsFor, visualUnits, profileSourceSlide, panelSwapGeometry, ordinalReadingOrder, expandSafeDescriptions, reclaimedMediaTextFrames, safeDecorativeMedia, textOverlayCalloutPanel, contentCoverageIssues, detailEvidenceText };
+
+/** Repair only an unwritten native page. Completed/user-accepted pages retain
+ * their original assignment; no missing template origin or font shrink allowed. */
+export function repairNativePageAssignment(project,index,scorePage,{derivedNavigation=false}={}){
+ const prior=project.templateFidelity,slide=project.outline?.[index];
+ if(prior?.mode!=='preserve'||!prior.sourceCatalog||!slide||index===0||index===project.pages-1||project.nodes?.[slide.id]?.status==='done'&&!(derivedNavigation&&slide.role==='navigation')||project.runtime?.slides?.[slide.id]?.accepted||slide.titleLocked)return null;
+ const baseline=scorePage(project,index);if(baseline.capacity_ok)return null;
+ const sources=structuredClone(prior.sourceCatalog),external={originalPath:prior.originalPath,width:prior.width,height:prior.height},rich=project.inputProfile?.level==='rich'||String(project.source?.text||'').length>=8000,profiles=sources.map(s=>profileSourceSlide(s,external,rich));
+ let best=null;
+ for(let origin=1;origin<sources.length-1;origin++){
+  const map=[...prior.slideMap];if(origin===map[index]||origin===map[index-1]||origin===map[index+1]||profiles[origin].directional)continue;map[index]=origin;
+  if(project.pages>=sources.length&&Array.from({length:sources.length},(_,i)=>i).some(i=>!map.includes(i)))continue;
+  try{project.templateFidelity=buildFidelity(project,sources,external,prior.sha256,profiles,map);const fit=scorePage(project,index);if(fit.capacity_ok&&fit.fontSizePt>=baseline.fontSizePt){best=project.templateFidelity;break;}}catch{}
+  finally{project.templateFidelity=prior;}
+ }
+ if(!best)return null;
+ const record={page:index+1,slideId:slide.id,fromSource:prior.slideMap[index],toSource:best.slideMap[index],fontFloor:baseline.fontSizePt,basis:derivedNavigation?'derived navigation layout only; original template coverage and every factual page assignment unchanged':'unwritten page only; shared atomic source measurement; original template coverage and completed page assignments unchanged'};
+ best.capacityAssignments=[...(prior.capacityAssignments||[]),record];project.templateFidelity=best;project.templateSlideMap=[...best.slideMap];return record;
+}

@@ -41,7 +41,7 @@ open(r+'/evidence.html','w').write('<h1>Measured evidence</h1><p>Compare A and B
   const bytes=fs.readFileSync(path.join(root,'evidence.'+ext));assert.equal(validateFile('evidence.'+ext,bytes),ext);
   const source=await extractFile({id:ext},'evidence.'+ext,bytes,runtime.io);
   assert.ok(source.images.length>=1,ext+' includes visuals');assert.deepEqual(source.mediaWarnings,[],ext+' has no hidden extraction error');
-  if(ext==='xlsx')assert.ok(source.images.length>=2,'native Excel chart was rendered alongside the embedded image');
+  if(ext==='xlsx')assert.ok(source.images.length>=2||source.segments.some(segment=>segment.kind==='chart'&&segment.chart?.series?.length),'native Excel chart is kept (editable chart data, or a rendered preview) alongside the embedded image');
   if(ext==='html')assert.equal(source.images.length,2,'HTML PNG and inline SVG');
   if(ext==='docx')assert.equal(source.images.length,1,'duplicate header/document images use one inventory asset');
   console.log(ext+': '+source.images.length+' visual assets, '+source.segments.length+' source segments');

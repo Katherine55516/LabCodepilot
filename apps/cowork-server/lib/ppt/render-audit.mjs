@@ -68,9 +68,9 @@ export function renderIssues(tree) {
           nodeIds: [element.nodeId].filter(Boolean), repairable: false });
         const fit = textFitEstimate(element);
         if (fit.overflow) issues.push({
-          code: 'typography_capacity', severity: 'error',
-          message: `${element.id} 正文估计超过文本框容量，应先重组内容或版式`, slideId: slide.id,
-          nodeIds: [element.nodeId].filter(Boolean), details: fit, repairable: true,
+          code: ['title','template-title'].includes(element.semanticRole)?'rendered_title_capacity':'typography_capacity', severity: 'error',
+          message: ['title','template-title'].includes(element.semanticRole)?`${element.id} 标题超过实际文本框容量；保字号，改写完整短标题或明确报告锁定冲突`:`${element.id} 正文估计超过文本框容量，应先重组内容或版式`, slideId: slide.id,
+          nodeIds: [element.nodeId].filter(Boolean), details: {...fit,fontSizePt:element.style?.fontSizePt,lineHeight:element.style?.lineHeight,bounds:element.bounds}, repairable: !element.locked,
         });
       }
     }

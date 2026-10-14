@@ -7,6 +7,10 @@ export function classifyMutation(instruction, requested) {
     return requested;
   }
   if (requested === 'relayout') return 'layout';
+  // Preservation clauses constrain the edit; their nouns are not requested
+  // operations ("修正说明，保留字体" must not route to a style model).
+  instruction=String(instruction).replace(/(^|[。；;,\n，])\s*(?:保留|保持|維持|不(?:要)?(?:改|修改|改变|更改)|不要(?:修改|改变|更改)|勿(?:修改|改变|更改)|(?:keep|preserve|retain)\b|(?:do not|don’t|don't)\s+(?:change|modify|replace)\b)[^。；;,\n，]*/giu,'$1')
+    .replace(/\bwhile\s+(?:keeping|preserving|retaining)\b[^.;\n]*/giu,'');
   if (/拆(?:成|分)?.{0,5}(?:页|slide)|合并.{0,8}(?:页|slide)|删除.{0,5}页|split.{0,10}slide|merge.{0,10}slide|insert.{0,10}slide|新增.{0,5}页/iu.test(instruction)) return 'structure';
   if (/图片|配图|image|photo|illustration/iu.test(instruction) && /换|替|生成|更|replace|generate|swap/iu.test(instruction)) return 'asset';
   if (/配色|颜色|字体|字号|行距|风格|主题|style|theme|colou?r|font|spacing/iu.test(instruction)) return 'style';

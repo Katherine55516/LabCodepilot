@@ -1,9 +1,12 @@
+import { userRequirements } from './ppt-outline-protocol.mjs';
 import { densityProfile } from './ppt-density-profile.mjs';
 import { sourceDensityPlan, pageCapacity } from './ppt-density-packing.mjs';
 import { normalizePaste } from './ppt-source.mjs';
 import { coverageMapV2, topicGroupDecisions } from './ppt-content-inventory.mjs';
 /** Planning data stays inside the existing outline node and project JSON. */
 import { buildTerminologyRegistry, copyBudgetFor, requiredSupportFor } from './ppt-presentation-writing.mjs';
+import { presentationBudget } from './ppt-outline-concision.mjs';
+import { withHeadingTerms } from './ppt-terminology-lock.mjs';
 import { evidenceRelevance, selectEvidenceForSlide } from './ppt-evidence.mjs';
 import { planSparseInput, pointBudgetFor, profilePptInput, sparsePageEstimate } from './ppt-content-depth.mjs';
 import { effectiveKnowledge } from './ppt-generation-policy.mjs';
@@ -12,12 +15,12 @@ import { dominantInputLanguage } from './ppt-topic-language.mjs';
 import { applyPresentationPolicy, planningAssumptions, assumptionSummary } from './ppt-presentation-policy.mjs';
 import { pageContractFor } from './ppt-page-contract.mjs';
 
-const ROLES = new Set(['cover', 'section', 'thesis', 'problem', 'comparison', 'architecture', 'process', 'framework', 'evidence', 'metric', 'timeline', 'case', 'recommendation', 'summary', 'roadmap', 'closing', 'mechanism', 'system', 'runtime', 'decision', 'appendix']);
+const ROLES = new Set(['navigation', 'cover', 'section', 'thesis', 'problem', 'comparison', 'architecture', 'process', 'framework', 'evidence', 'metric', 'timeline', 'case', 'recommendation', 'summary', 'roadmap', 'closing', 'mechanism', 'system', 'runtime', 'decision', 'appendix']);
 const VISUALS = new Set(['none', 'hero', 'comparison', 'pipeline', 'architecture', 'timeline', 'matrix', 'cards', 'chart', 'table', 'metric', 'hub-and-spoke', 'before-after', 'process']);
-const userIntent = project => String(project?.prompt || '').replace(/\S+\.(?:md|txt|pdf|docx?|pptx?|html?)\b/giu, '');
+const userIntent = project => String(userRequirements(project)||'').replace(/\S+\.(?:md|txt|pdf|docx?|pptx?|html?)\b/giu, '');
 
 function bounded(value, max, fallback = '') {
-  return typeof value === 'string' ? value.trim().slice(0, max) || fallback : fallback;
+  return (typeof value === 'string' && value.trim() ? value : String(fallback || '')).trim().slice(0, max);
 }
 
 function distinct(values, max = 20) {
@@ -39,7 +42,7 @@ export function estimationSource(project) {
   if (!text || project.source?.kind === 'file' && !project.source.text) return null;
   // Substantial Prompt/Paste/File text shares one semantic source path. Short
   // topic prompts remain conceptual plans rather than claims of source facts.
-  if (project.source?.text || text.length >= 1200 || (text.match(/^#{1,4}\s+/gm) || []).length >= 2)
+  if (project.source?.text || project.generationPolicy?.content==='full_source'&&/^#{1,4}\s+/mu.test(text)&&text.includes('\n\n')&&/\d/u.test(text)&&!/(?:^|\n)\s*(?:please\s+)?(?:write|create|generate|make|produce)\b|(?:^|\n)\s*(?:请|請|帮我|幫我)/iu.test(text) || text.length >= 1200 || (text.match(/^#{1,4}\s+/gm) || []).length >= 2)
     return { ...normalizePaste(text), kind: project.source?.kind || project.inputKind || 'prompt' };
   return null;
 }
@@ -81,10 +84,14 @@ export function estimatePageRecommendation(project) {
   const overviewIntent = /(?:\b(?:overview|survey)\b|概览|综述|导览|入门)/iu.test(intent);
   const chapters = (text.match(/^##\s+\d+[.)]\s+.+$/gm) || []).length;
   const overviewEstimate = overviewIntent && chapters >= 6 ? clamp(2 + Math.ceil(chapters / 1.75), 5, 100) : null;
-  const recommended = capacity?.recommended || sparseEstimate?.recommended || overviewEstimate || clamp(2 + Math.ceil(semanticTopics * .7) + Math.ceil(highPriority * .25) + detailWeight, 5, 100);
+  const uncapped = capacity?.recommended || sparseEstimate?.recommended || overviewEstimate || clamp(2 + Math.ceil(semanticTopics * .7) + Math.ceil(highPriority * .25) + detailWeight, 5, 100);
+  // Overview decks are sized by purpose first (major sections), then checked
+  // against capacity; the estimate never exceeds that budget's cap.
+  const budget = rawSource ? presentationBudget(project || {}, source) : null;
+  const recommended = budget ? Math.min(uncapped, budget.max) : uncapped;
   const spread = Math.max(2, Math.ceil(recommended * .18));
-  const min = capacity?.range[0] || sparseEstimate?.range[0] || clamp(recommended - spread, 3, 100);
-  const max = capacity?.range[1] || sparseEstimate?.range[1] || clamp(recommended + spread, 3, 100);
+  const min = Math.min(recommended, capacity?.range[0] || sparseEstimate?.range[0] || clamp(recommended - spread, 3, 100));
+  const max = Math.min(budget ? budget.max : 100, capacity?.range[1] || sparseEstimate?.range[1] || clamp(recommended + spread, 3, 100));
   const selected = clamp(project?.pages || recommended);
   const strict = ['file', 'paste', 'update', 'base'].includes(source?.kind || project?.inputKind);
   const independentSections = substantialSections || Math.max(1, headings);
@@ -94,10 +101,11 @@ export function estimatePageRecommendation(project) {
       : `检测到 ${semanticTopics} 个语义主题${implementationSignals ? `、${implementationSignals} 个实现或约束信号` : ''}`;
   return {
     recommended, range: [min, max], selected,
-    reason: [baseReason, assumptionSummary(assumptions)].filter(Boolean).join('。'),
+    reason: [baseReason, budget ? `按 ${budget.sections} 个主要小节规划约 ${budget.target} 页（上限 ${budget.max} 页），细节进备注` : '', assumptionSummary(assumptions)].filter(Boolean).join('。'),
     reasonBase: baseReason, assumptions, warnings,
     densityProfileId: densityProfile().id, estimateVersion: 1, provisional: true,
-    estimationBasis: capacity ? 'gamma_density_capacity' : sparseEstimate ? 'planned_semantic_units' : overviewEstimate ? 'overview_chapters' : 'source_structure', inputProfile,
+    ...(budget ? { presentationBudget: budget, uncappedRecommended: uncapped } : {}),
+    estimationBasis: budget && uncapped > budget.max ? 'presentation_budget' : capacity ? 'gamma_density_capacity' : sparseEstimate ? 'planned_semantic_units' : overviewEstimate ? 'overview_chapters' : 'source_structure', inputProfile,
     ...(capacity ? { contentCost: capacity.contentCost, costUnit: capacity.costUnit, groups: capacity.groups, capacity: capacity.capacity, preservedObjects: capacity.preservedObjects,
       sectionAllocation: capacity.sections.map(({ title, slides, sourceTokens, objects }) => ({ title, slides, sourceTokens, objects })) } : {}),
     ...(sparseEstimate ? { plannedSemanticUnits: sparseEstimate.semanticUnits, plannedContentCost: sparseEstimate.contentCost } : {}),
@@ -164,17 +172,20 @@ export function normalizeBrief(value, project) {
   const selectedReport = ['decision', 'informational', 'presentation'].includes(raw.reportMode) ? raw.reportMode : requestedReport;
   const reportMode = requestedReport === 'decision' ? 'decision'
     : requestedReport === 'informational' && selectedReport === 'presentation' ? 'informational' : selectedReport;
-  const requestedUse = /培训|课程|教学|tutorial|course|training|notebook/i.test(intent) ? 'course_walkthrough'
+  const requestedUse = project.generationPolicy?.content==='course'||/培训|课程|教学|tutorial|course|training|notebook/i.test(intent) ? 'course_walkthrough'
     : reportMode !== 'presentation' ? 'workplace_report' : 'technical_explainer';
   const presentationUse = ['course_walkthrough', 'technical_explainer', 'workplace_report'].includes(raw.presentationUse)
     ? raw.presentationUse : requestedUse;
   const conciseRequested = /摘要|简要|簡要|概览|概覽|\b(?:overview|high.level|executive summary)\b/iu.test(intent);
   const richCourse = presentationUse === 'course_walkthrough' && chunks.length > project.pages * 2 && !conciseRequested;
+  // A pasted document is material, not a presentation goal. Repeating it in
+  // three fallback fields made every writer request contain the source again.
+  const defaultGoal = intent || project.source?.semantic?.blocks?.find(block => block.type === 'heading')?.text || project.source?.name || project.title || '';
   return {
     outputLanguage: outputLanguage(project),
     topicLanguage: project.editOutputLanguage || dominantInputLanguage(project),
-    goal: bounded(raw.goal, 240, project.prompt), audience: bounded(raw.audience, 160, '演示文稿读者'),
-    objective: bounded(raw.objective, 240, project.prompt), thesis: bounded(raw.thesis, 360, project.prompt),
+    goal: bounded(raw.goal, 240, defaultGoal), audience: bounded(raw.audience, 160, '演示文稿读者'),
+    objective: bounded(raw.objective, 240, defaultGoal), thesis: bounded(raw.thesis, 360, defaultGoal),
     reportMode, presentationUse, decisionQuestion: bounded(raw.decisionQuestion, 240), sourceScope: bounded(raw.sourceScope, 240,
       project.source?.name ? `仅依据 ${project.source.name}` : project.contentPlan ? '短输入仅提供主题，具体事实和效果待来源验证' : ''),
     tone: bounded(raw.tone, 80, '清晰、专业'), depth: project.generationPolicy?.detail || (richCourse ? 'detailed'
@@ -290,9 +301,11 @@ function codeLikeDetail(value) {
     /\b[A-Za-z_]\w*\s*\([^\n]*[-+*/][^\n]*\)/u.test(text);
 }
 
-function sourceBackedDetails(slide, source) {
+export function sourceBackedDetails(slide, source) {
   const relevant = (source?.semantic?.chunks || []).filter(chunk => (slide.chunkRefs || []).includes(chunk.id));
-  const sourceText = relevant.map(chunk => chunk.text || '').join('\n');
+  const owned = slide.planningProtocolVersion === 2 && Array.isArray(slide.sourceUnitIds)
+    ? (source?.semantic?.inventory?.items || []).filter(item => slide.sourceUnitIds.includes(item.id)) : null;
+  const sourceText = (owned || relevant).map(item => item.text || '').join('\n');
   const fullSource = String(source?.text || '');
   const explicit = distinct(slide.requiredDetails || slide.required_details || slide.supportingPoints, Infinity)
     .filter(detail => !fullSource || !codeLikeDetail(detail) || formulaKey(fullSource).includes(formulaKey(detail)));
@@ -366,27 +379,52 @@ export function coverageMap(source, outline, explicit = []) {
   return chunks.map(chunk => {
     const slideIds = outline.filter(slide => slide.chunkRefs?.length ? slide.chunkRefs.includes(chunk.id) : (slide.refs || []).some(ref => chunk.sourceRefs.includes(ref))).map(slide => slide.id);
     const decision = decisions.get(chunk.id);
+    const units=(source.semantic?.inventory?.items||[]).filter(item=>item.chunkRefs?.includes(chunk.id));
+    const notesOnly=units.length&&units.every(item=>['notes_by_contract','omitted_by_policy'].includes(item.presentation)&&item.presentationBasis);
     return { chunkId: chunk.id, topic: chunk.topic, priority: chunk.priority, slideIds,
-      action: slideIds.length ? 'included' : decision?.action === 'omitted' ? 'omitted' : 'unmapped',
-      reason: !slideIds.length ? bounded(decision?.reason, 240, '') : '' };
+      action: slideIds.length ? 'included' : notesOnly ? 'notes' : decision?.action === 'omitted' ? 'omitted' : 'unmapped',
+      reason: !slideIds.length ? notesOnly?'Every source unit in this chunk is retained under its validated notes/code-presentation contract':bounded(decision?.reason, 240, '') : '' };
   });
 }
 
 /** One outline-node revision can fix repeated or ungrounded page claims.
  * Source insufficiency is recorded for QA, never "repaired" by inventing facts. */
 export function inspectLongDeckOutline(project, outline) {
-  if (!Array.isArray(outline) || outline.length < 12) return [];
+  if (!Array.isArray(outline) || outline.length < 3) return [];
   const chunks = substantiveChunks(project.source);
-  const hasSource = Boolean(project.source?.segments?.length || chunks.length);
+  const hasSource = Boolean(project.source?.segments?.length || chunks.length) &&
+    !(project.inputKind === 'prompt' && project.inputProfile?.level === 'sparse');
   const issues = [];
   const seen = new Map();
+  if(project.generationPolicy?.content==='overview'&&outline.length>=6&&!project.requestedOutline){
+    const last=outline.at(-1),items=project.source?.semantic?.inventory?.items||[];
+    const owned=items.filter(item=>last.sourceUnitIds?.includes(item.id));
+    const isConclusion=/summary|conclusion|closing|decision|总结|小结|結論|總結|结论|结语|結語|决策|決策/iu.test(last.title||'');
+    if(!last.titleLocked&&!isConclusion&&owned.length&&owned.every(item=>['EquationBlock','CodeBlock'].includes(item.type))){
+      const preceding=outline.slice(1,-1).map((slide,index)=>({slide,index:index+1})).filter(({slide})=>/summary|conclusion|closing|decision|decide|总结|结论|结语|决策/iu.test(slide.title||slide.section||'')).at(-1)?.index;
+      issues.push({code:'outline_closing_new_structure',repairable:true,message:'The final overview page introduces only a new technical formula/code object. Move that complete object before the actual decision/conclusion page; preserve every source ID and use the closing to conclude the story.',
+        details:{pageIndex:outline.length-1,relatedPageIndexes:[preceding??outline.length-2],sourceUnitIds:owned.map(item=>item.id)}});
+    }
+  }
   for (const [index, slide] of outline.entries()) {
-    if (index === 0 || index === outline.length - 1 || slide.role === 'section') continue;
+    if (index === 0 || index === outline.length - 1 || ['section','navigation'].includes(slide.role)) continue;
     const focus = String(slide.focus || '').toLocaleLowerCase().replace(/[\s\p{P}\p{S}]/gu, '');
-    if (focus.length >= 6 && seen.has(focus)) issues.push({ code: 'outline_repeated_claim',
-      message: `第 ${index + 1} 页与第 ${seen.get(focus) + 1} 页重复同一核心消息`, repairable: true });
+    const prior = seen.get(focus), previous = prior === undefined ? null : outline[prior];
+    // A real table continuation carries a distinct row interval. Repeating
+    // its topic is legitimate; repeating the same complete claim is not.
+    const ranges = slide.sourceArtifactRanges || [], oldRanges = previous?.sourceArtifactRanges || [];
+    const continuation = ranges.length && oldRanges.length && ranges.every(a=>oldRanges.some(b=>a.sourceUnitId===b.sourceUnitId)) &&
+      ranges.every(a=>oldRanges.every(b=>a.sourceUnitId!==b.sourceUnitId || a.rowEnd<=b.rowStart || b.rowEnd<=a.rowStart));
+    const recap = slide.repeatSourceUnitIds?.length && slide.repeatSourceUnitIds.every(id=>previous?.sourceUnitIds?.includes(id));
+    if (focus.length >= 6 && seen.has(focus) && !continuation && !recap) issues.push({ code: 'outline_repeated_claim',
+      message: `第 ${index + 1} 页与第 ${seen.get(focus) + 1} 页重复同一核心消息`, details:{pageIndex:index,duplicatesPageIndex:seen.get(focus),field:'focus'},repairable: true });
     else if (focus) seen.set(focus, index);
-    if (hasSource && !(slide.chunkRefs?.length || slide.refs?.length)) issues.push({ code: 'outline_ungrounded_page',
+    const knownUnits=new Set((project.source?.semantic?.inventory?.items||[]).map(item=>item.id));
+    const knownImages=new Set((project.source?.images||[]).map(image=>image.id));
+    // A page that presents a supplied source image is grounded by that image.
+    const semanticOwner=(slide.sourceUnitIds||[]).some(id=>knownUnits.has(id))||(slide.sourceArtifactRanges||[]).some(ref=>knownUnits.has(ref.sourceUnitId))||(slide.sourceImageIds||[]).some(id=>knownImages.has(id));
+    const inheritedOwner=slide.change==='keep'&&project.update?.baseSnapshot?.deck?.slides?.some(prior=>prior.id===slide.baseSlideId);
+    if (hasSource && !(slide.chunkRefs?.length || slide.refs?.length || semanticOwner || inheritedOwner)) issues.push({ code: 'outline_ungrounded_page',
       message: `第 ${index + 1} 页没有对应来源；请引用实际来源或把它改为明确的结构/过渡页`, repairable: true });
   }
   let highRun = 0;
@@ -404,7 +442,7 @@ export function buildPlanning(project, modelOutput, outline) {
   return { version: 8, densityProfile: densityProfile(), densityPacking: modelOutput?.densityPacking || project.planning?.densityPacking || null, brief, inventory: project.source?.semantic?.inventory, coverageV2: coverageMapV2(project.source, outline, modelOutput?.coverageV2?.detail || []), topicGroups: topicGroupDecisions(project.source, outline, slidePlan(outline, brief, project.source, project.templateFidelity), modelOutput?.topicGroups || []), inputProfile: project.inputProfile || profilePptInput(project),
     contentPlan: project.contentPlan || planSparseInput(project),
     storyArc: normalizeStoryArc(modelOutput?.storyArc || modelOutput?.story_arc, outline),
-    terminology: buildTerminologyRegistry(project.source, outline), slidePlan: slidePlan(outline, brief, project.source, project.templateFidelity), coverage: coverageMap(project.source, outline, modelOutput?.coverage),
+    terminology: withHeadingTerms(buildTerminologyRegistry(project.source, outline), project.source), slidePlan: slidePlan(outline, brief, project.source, project.templateFidelity), coverage: coverageMap(project.source, outline, modelOutput?.coverage),
     sourceStats: project.source?.semantic?.stats || null, sourceCapacity: sourceCapacityPlan(estimationSource(project), project.pages, project), sourceDetailInventory: {
       chunks: substantiveChunks(project.source).length,
       highPriorityChunks: substantiveChunks(project.source).filter(chunk => chunk.priority === 'high').length,
@@ -419,7 +457,7 @@ export function buildPlanning(project, modelOutput, outline) {
 export function refreshPlanning(project) {
   const previous = project.planning || {};
   const pageRecommendation = estimatePageRecommendation(project);
-  return { ...previous, version: 8, densityProfile: densityProfile(), inventory: project.source?.semantic?.inventory, coverageV2: coverageMapV2(project.source, project.outline || [], previous.coverageV2?.detail || []), topicGroups: topicGroupDecisions(project.source, project.outline || [], slidePlan(project.outline || [], previous.brief, project.source, project.templateFidelity), (previous.topicGroups || []).filter(item=>item.origin==='planner')), terminology: buildTerminologyRegistry(project.source, project.outline || []), pageRecommendation,
+  return { ...previous, version: 8, densityProfile: densityProfile(), inventory: project.source?.semantic?.inventory, coverageV2: coverageMapV2(project.source, project.outline || [], previous.coverageV2?.detail || []), topicGroups: topicGroupDecisions(project.source, project.outline || [], slidePlan(project.outline || [], previous.brief, project.source, project.templateFidelity), (previous.topicGroups || []).filter(item=>item.origin==='planner')), terminology: withHeadingTerms(buildTerminologyRegistry(project.source, project.outline || []), project.source), pageRecommendation,
     sourceCapacity: sourceCapacityPlan(estimationSource(project), project.pages, project),
     feasibility: { userPages: project.pages, recommendedPages: pageRecommendation.recommended, depthPolicy: pageRecommendation.depthPolicy,
       feasibleWithoutCompression: pageRecommendation.feasibleWithoutCompression, compressionApproved: Boolean(project.compressionApproved) },

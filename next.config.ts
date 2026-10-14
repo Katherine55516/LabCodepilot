@@ -26,6 +26,11 @@ const nextConfig: NextConfig = {
   // These large icon barrels otherwise enter every AppShell route in dev.
   // Load the named icons only, keeping PPT cold compilation and hydration bounded.
   experimental: { optimizePackageImports: ['@phosphor-icons/react', '@lobehub/icons'] },
+  // Keep the local PPT, Home and settings journeys warm during long BYOK calls.
+  // Development-only retention; production caching/rendering is unchanged.
+  onDemandEntries: { maxInactiveAge: 300000, pagesBufferLength: 8 },
+  // Isolated local verification servers must not share build caches.
+  distDir: process.env.CODEPILOT_NEXT_DIST_DIR || '.next',
   // Pin the file-tracing root to THIS project directory. Without it, Next.js
   // infers the monorepo/workspace root from the nearest ancestor lockfile. On a
   // dev machine that happens to have a stray ~/package-lock.json, the inferred
@@ -64,12 +69,12 @@ const nextConfig: NextConfig = {
       if (tracePlugin) tracePlugin.traceIgnores = [...(tracePlugin.traceIgnores || []), '\\*\\*/\\*'];
     }
     if (dev) {
-      const extra = /[\\/](?:\.playwright-mcp|\.ppt-build|outputs)[\\/]/;
+      const extra = /[\\/](?:\.ppt-build|\.playwright-mcp|test-results|playwright-report|outputs|\.next(?:-ppt-[^\\/]+)?)[\\/]/;
       const prev = config.watchOptions?.ignored;
       const ignored =
         prev instanceof RegExp ? new RegExp(`${prev.source}|${extra.source}`)
-        : Array.isArray(prev) ? [...prev, '**/.playwright-mcp/**', '**/.ppt-build/**', '**/outputs/**']
-        : typeof prev === 'string' ? [prev, '**/.playwright-mcp/**', '**/.ppt-build/**', '**/outputs/**']
+        : Array.isArray(prev) ? [...prev, '**/.ppt-build/**','**/.playwright-mcp/**','**/test-results/**','**/playwright-report/**','**/outputs/**','**/.next-ppt-*/**']
+        : typeof prev === 'string' ? [prev, '**/.ppt-build/**','**/.playwright-mcp/**','**/test-results/**','**/playwright-report/**','**/outputs/**','**/.next-ppt-*/**']
         : extra;
       config.watchOptions = { ...config.watchOptions, ignored };
     }

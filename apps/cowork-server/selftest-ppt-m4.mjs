@@ -57,7 +57,7 @@ try {
   assert.throws(() => normalizeBlocks([{ ...blocks[0], dataUrl: 'data:image/png;base64,YWJj' }]));
   assert.throws(() => normalizeBlocks([blocks[0], blocks[1], blocks[2]]));
   assert.equal(normalizeSourceImages([blocks[0]]).length, 1);
-  assert.throws(() => normalizeSourceImages(Array.from({ length: 5 }, (_, index) => ({ ...blocks[0], id: `too-many-${index}` }))));
+  assert.throws(() => normalizeSourceImages(Array.from({ length: 65 }, (_, index) => ({ ...blocks[0], id: `too-many-${index}` }))));
   const deck = _internals.normalizeDeck({ slides }, outline);
   store.save({ id, uid, title: 'M4 deck', prompt: 'Facts', pages: 3, template: 'violet', templateSpec: null,
     status: 'completed', outline, deck, revision: 0, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
@@ -76,7 +76,7 @@ try {
   assert.equal((await request('POST', `/ppt/projects/${id}/rewrite`, { slideId: '2', blockId: 'shape', instruction: 'Shorten label', revision: 4 })).status, 200);
   assert.equal(store.get(uid, id).deck.slides[1].blocks[1].text, 'Better label');
   assert.equal((await request('POST', `/ppt/projects/${id}/rewrite`, { slideId: '1', instruction: 'Again', revision: 5 }, 'bob')).status, 404);
-  const pasted = await request('POST', '/ppt/projects', { inputKind: 'paste', text: 'Facts with screenshots', pages: 3, configId: 'test', images: [blocks[0], { ...blocks[0], id: 'img-2', caption: 'Second' }] });
+  const pasted = await request('POST', '/ppt/projects', { inputKind: 'paste', text: 'Facts with screenshots', pages: 3, configId: 'test', images: [blocks[0], { ...blocks[0], id: 'img-2', caption: 'Second', dataUrl: 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGMQqTgBAAH4AVXJRJqUAAAAAElFTkSuQmCC' }] });
   assert.equal(pasted.status, 201);
   let pastedProject = await settled(pasted.body.project.id, 'outline_ready');
   assert.equal(pastedProject.source.images.length, 2);

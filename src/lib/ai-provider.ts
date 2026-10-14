@@ -41,6 +41,8 @@ export interface CreateModelOptions {
   sessionProviderId?: string;
   model?: string;
   sessionModel?: string;
+  /** Explicit DeepSeek compatibility; other model families keep provider defaults. */
+  thinkingMode?: 'enabled' | 'disabled';
 }
 
 export interface CreateModelResult {
@@ -109,7 +111,7 @@ export function createModel(opts: CreateModelOptions = {}): CreateModelResult {
   const isThirdPartyProxy = config.sdkType === 'anthropic' &&
     !!config.baseUrl && !isOfficialAnthropicUrl(config.baseUrl);
 
-  const rawModel = createLanguageModel(config, isThirdPartyProxy);
+  const rawModel = createLanguageModel(config, isThirdPartyProxy, opts.thinkingMode);
 
   // Apply middleware pipeline
   const languageModel = applyMiddleware(rawModel, config, isThirdPartyProxy);
@@ -157,7 +159,7 @@ const ANTHROPIC_BETA_HEADERS = [
   'interleaved-thinking-2025-05-14',
 ];
 
-function createLanguageModel(config: AiSdkConfig, isThirdPartyProxy: boolean): LanguageModel {
+function createLanguageModel(config: AiSdkConfig, isThirdPartyProxy: boolean, thinkingMode?: 'enabled'|'disabled'): LanguageModel {
   const hasHeaders = Object.keys(config.headers || {}).length > 0;
 
   switch (config.sdkType) {
@@ -257,6 +259,10 @@ function createLanguageModel(config: AiSdkConfig, isThirdPartyProxy: boolean): L
       const openai = createOpenAI({
         apiKey: config.apiKey,
         baseURL: config.baseUrl ? compatibleBaseUrl(config.baseUrl) : undefined,
+        ...(/^(?:deepseek(?:-|\/)|qwen(?:3[.\/-]|-))/i.test(config.modelId)&&thinkingMode?{fetch:async(url:RequestInfo|URL,init?:RequestInit)=>{
+          const body=typeof init?.body==='string'?JSON.parse(init.body):null;
+          return fetch(url,{...init,...(body?{body:JSON.stringify({...body,...(/^qwen/i.test(config.modelId)?{enable_thinking:thinkingMode==='enabled'}:{thinking:{type:thinkingMode}})})}:{})});
+        }}:{}),
         ...(hasHeaders ? { headers: config.headers } : {}),
       });
       return openai.chat(config.modelId);

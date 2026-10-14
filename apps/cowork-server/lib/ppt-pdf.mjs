@@ -175,7 +175,7 @@ outdir=os.path.dirname(target); profile=os.path.join(outdir,'.libreoffice-ppt')
 # Some bundled headless builds use a private fontconfig cache which does not
 # discover installed CJK fonts. Configure this conversion only; never change
 # the host or Office installation. Linux keeps its system aliases/fallbacks.
-conversion_env=office_font_environment(profile)
+conversion_env=office_font_environment(profile,source)
 result=subprocess.run(['soffice','-env:UserInstallation=file://'+profile,'--headless','--convert-to','pdf:impress_pdf_Export','--outdir',outdir,source], capture_output=True, text=True, timeout=120,env=conversion_env)
 converted=os.path.join(outdir,os.path.splitext(os.path.basename(source))[0]+'.pdf')
 if result.returncode or not os.path.isfile(converted): raise ValueError('native template PDF conversion failed: '+(result.stderr or result.stdout)[-500:])

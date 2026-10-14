@@ -18,6 +18,20 @@ const body=(id,question='How is validation performed?')=>({id,title:id,question,
 const raw=(a=body('a'),b=body('b'))=>({slides:[{id:'cover',title:'Validation',refs:[]},a,b,{id:'end',title:'Summary',keyPoints:[{text:'Retain the owner and evidence.'}],refs:[]}]});
 const native={...auto,templateFidelity:{width:12192000,height:6858000,slides:[{}, {slots:[{role:'content',purpose:'body',shapeId:2,capacity:200,maxLines:10,lineVisualUnits:20}],nodes:[{id:'native-body',nativeRef:{shapeId:2},type:'text',geometry:{x:1828800,y:2286000,width:3657600,height:1828800},style:{fontSizePt:24,fontWeight:400},content:{text:'Body'}}]}]}};
 try {
+  await check('rich source uses free space below real native headers without overlapping them',()=>{
+    const p=structuredClone(native),inch=914400;
+    p.source.text='Source authority. '.repeat(600);
+    const spec=p.templateFidelity.slides[1];
+    spec.slots.push({role:'title',shapeId:1,fontSizePt:36});
+    spec.nodes[0].geometry={x:inch*.7,y:inch*2.5,width:inch*10,height:inch*4};spec.nodes[0].style.fontSizePt=14.5;
+    spec.nodes.push({id:'native-title',type:'text',nativeRef:{shapeId:1},content:{text:'Model assumptions'},geometry:{x:inch*.7,y:inch*.5,width:inch*10,height:inch*.7},style:{fontSizePt:36}});
+    const canvas=capacity.contentCanvas(p,1).geometry;
+    assert.ok(canvas.y>=inch*1.2+inch*.08);assert.ok(canvas.y<inch*1.875);
+    const complete='Expected returns reflect covariance with the market portfolio when all investors share assumptions. '.repeat(10);
+    const fit=capacity.fitComponents([{type:'text',content:{text:complete}}],p,1);
+    assert.equal(fit.capacity_ok,true);assert.ok(complete.length>900);
+    assert.ok(fit.boxes[0].y>=canvas.y);assert.ok(fit.boxes[0].y+fit.boxes[0].height<=canvas.y+canvas.height);
+  });
   await check('prompt compaction losslessly deduplicates an identical document while retaining input authority and tail conditions',async()=>{
     const {inputFramework,compactFramework}=await import('./lib/ppt-input-scope.mjs');
     const project={...auto,prompt:source.text};const original=inputFramework(project),before=JSON.stringify(original),view=compactFramework(original);
@@ -130,6 +144,12 @@ try {
     calls=0;await assert.rejects(api._internals.writeWithContractRepair({prompt:'source',nodeKey:'network',call:async()=>{calls++;throw Error('HTTP 429 upstream rate limit');},normalize:value=>value}),/429/);assert.equal(calls,1);
   });
   await check('unresolved writer capacity is bounded and never accepted as valid content',async()=>{let calls=0;await assert.rejects(api._internals.writeWithContractRepair({prompt:'source',nodeKey:'capacity',call:async()=>{calls++;return {commentary:'Too tall'};},normalize:()=>{throw Error('source_artifact_capacity: sourceFits=true, preserve every cell');}}),/source_artifact_capacity/);assert.equal(calls,4);});
+  await check('foreign evidence IDs require bounded model correction and are never silently discarded',async()=>{
+    let calls=0;
+    const repaired=await api._internals.writeWithContractRepair({prompt:'FROZEN_EVIDENCE_ALLOWED: valid-id',nodeKey:'evidence',call:async prompt=>{calls++;if(calls>1)assert.match(prompt,/invalid source evidence selection/);return {evidenceIds:[calls===1?'foreign-id':'valid-id']};},normalize:value=>{if(value.evidenceIds[0]!=='valid-id')throw Error('invalid source evidence selection: only frozen required evidence IDs may be bound');return value;}});
+    assert.equal(calls,2);assert.deepEqual(repaired.content.evidenceIds,['valid-id']);
+    calls=0;await assert.rejects(api._internals.writeWithContractRepair({prompt:'FROZEN_EVIDENCE_ALLOWED: valid-id',nodeKey:'evidence-invalid',call:async()=>{calls++;return {evidenceIds:['foreign-id']};},normalize:()=>{throw Error('invalid source evidence selection: only frozen required evidence IDs may be bound');}}),/invalid source evidence selection/);assert.equal(calls,4);
+  });
   await check('retry preserves valid and accepted cached content while reopening actual native overflow with its original draft',()=>{
     const outline=['bad','valid','accepted'].map(id=>({id,title:id}));
     const drafts=outline.map(({id})=>({id,title:id==='valid'?'短标题':'超过原生单行容量的标题',templateSlotTexts:{3:'导航'},nodes:[]}));
@@ -154,7 +174,7 @@ try {
   });
   await check('a malformed model selection gets one bounded outline repair',async()=>{
     const store=await import('./lib/ppt-store.mjs');let calls=0;
-    const good={brief:{presentationUse:'course_walkthrough'},...raw({...body('a','Compare the conditions'),sourceUnitIds:[table.id],chunkRefs:table.chunkRefs,refs:table.source_ref},{...body('b','Check responsibility'),sourceUnitIds:[checklist.id],chunkRefs:checklist.chunkRefs,refs:checklist.source_ref})};
+    const good={brief:{presentationUse:'course_walkthrough'},...raw({...body('a','Compare the conditions'),focus:'Queue before execution; result after review.',sourceUnitIds:[table.id],chunkRefs:table.chunkRefs,refs:table.source_ref},{...body('b','Check responsibility'),focus:'Verify the owner and confirm the evidence.',sourceUnitIds:[checklist.id],chunkRefs:checklist.chunkRefs,refs:checklist.source_ref})};
     good.slides.at(-1).sourceUnitIds=[source.semantic.inventory.items.find(i=>i.type==='SummaryBlock').id];
     const deps={...api._internals.defaultDeps,modelCall:async(p,prompt)=>{calls++;if(calls===1)return {...good,slides:good.slides.map((s,i)=>i===1?{...s,sourceArtifactRanges:[{sourceUnitId:table.id,rowStart:'bad',rowEnd:3}]}:s)};assert.match(prompt,/^这是修复任务/);assert.match(prompt,/初稿结构检查/);assert.match(prompt,/不能仅修改 topicGroups/);assert.match(prompt,/缩短 keyPoints 无法解决/);assert.match(prompt,/连续两页/);return good;}};
     const req=Readable.from([Buffer.from(JSON.stringify({inputKind:'paste',text:source.text,prompt:'Explain validation',template:'light',configId:'simulated',model:'simulated'}))]);req.method='POST';let response;
@@ -198,15 +218,16 @@ try {
     await api.handlePpt(req,new URL('http://test/ppt/projects'),{uid:'audit',deps,activity:()=>{},log:()=>{},res:{},send:(status,body)=>{response={status,body};return true;}});
     assert.equal(response.status,201,JSON.stringify(response));let project;
     for(let n=0;n<300;n++){project=store.get('audit',response.body.project.id);if(['outline_ready','failed'].includes(project.status))break;await new Promise(r=>setTimeout(r,10));}
-    assert.equal(project.status,'outline_ready',project.error);assert.equal(calls,4);assert.equal(project.pages,12);assert.equal(project.pageDecision.fitValidated,true);
-    assert.equal(project.outline[1].keyPoints[0].text,initial.slides[1].keyPoints[0].text);assert.equal(project.pageDecision.confirmedAt,null);
+    assert.equal(project.status,'outline_ready',project.error);assert.ok(calls>=1&&calls<=4,'measured repair can avoid model calls, and model repair stays bounded');assert.ok(project.pages>3&&project.pages<=12,'complete measured components fit within the former model partition budget');assert.equal(project.pageDecision.fitValidated,true);
+    assert.deepEqual(project.outline.flatMap(slide=>slide.sourceArtifactRanges||[]).filter(ref=>ref.sourceUnitId===large.id).flatMap(ref=>capacity.sourceComponent(large,ref).content.rows.slice(1)),large.rows.slice(1),'measured-first repair retains every table row');
+    assert.equal(project.outline.flatMap(slide=>slide.keyPoints||[]).filter(point=>point.text===initial.slides[1].keyPoints[0].text).length,1,'the complete explanation is retained exactly once, independent of its measured page');assert.equal(project.pageDecision.confirmedAt,null);
   });
   await check('duplicate source owners enter one local scope even without physical overflow',async()=>{
     const store=await import('./lib/ppt-store.mjs');let calls=0;
     const summary=source.semantic.inventory.items.find(i=>i.type==='SummaryBlock');
     const initial={brief:{presentationUse:'course_walkthrough'},slides:[{title:'Validation',refs:[]},
-      {...body('table','Compare conditions'),sourceUnitIds:[table.id]},
-      {...body('checklist','Check responsibility'),sourceUnitIds:[checklist.id]},
+      {...body('table','Compare conditions'),focus:'Queue before execution; result after review.',sourceUnitIds:[table.id]},
+      {...body('checklist','Check responsibility'),focus:'Verify the owner and confirm the evidence.',sourceUnitIds:[checklist.id]},
       {...body('summary','Connect the evidence'),sourceUnitIds:[summary.id],keyPoints:[{text:'Connect the result to the evidence.'}]},
       {title:'Conclusion',question:'Who is responsible?',sourceUnitIds:[summary.id],keyPoints:[{text:'Retain the responsible owner.'}]}]};
     const base=api._internals.assessOutlineCandidate(auto,initial),scopes=localRepair.outlineCapacityRepairScopes(base);

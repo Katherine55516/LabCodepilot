@@ -1,3 +1,4 @@
+import {selectPptOption} from '../helpers';
 import { expect, test, type Page } from '@playwright/test';
 
 async function mockCreationPlanner(page: Page) {
@@ -26,6 +27,8 @@ test('user page selection and module estimate take priority over template length
     providers: [{ id: 'managed-demo', name: 'Test model', source: 'managed' }],
   } }));
   await page.route('**/api/ppt/folders**', route => route.fulfill({ json: { folders: [] } }));
+  // The background task strip polls desktop model jobs on every page.
+  await page.route('**/api/ppt/model-jobs', route => route.fulfill({ json: { jobs: [] } }));
   await mockCreationPlanner(page);
   await page.route('**/api/ppt/templates**', route => route.fulfill({ json: { templates: [{
     id: 'uploaded-four', name: 'Four page PPTX', category: '我的模板', kind: 'uploaded', extension: 'pptx',
@@ -36,10 +39,10 @@ test('user page selection and module estimate take priority over template length
     compatibility: 'mapped', pages: 10, palette: { background: '#202020', accent: '#8899bb', foreground: '#ffffff', muted: '#aaaaaa' },
     sampleTitles: ['Cover'], tags: [], pinned: false,
   }] } }));
-  await page.goto('/ppt');
+  await page.goto('/ppt', {waitUntil:'domcontentloaded'});await expect(page.getByText('加载中…',{exact:true})).toHaveCount(0);
   await page.getByRole('button', { name: /＋ 新建|新建 PPT/ }).first().click();
   await page.getByRole('button', { name: /从 Prompt 开始/ }).click();
-  await page.getByRole('combobox', { name: 'LLM（必填）' }).selectOption('managed-demo::demo-model');
+  await selectPptOption(page.getByRole('combobox', { name: 'LLM（必填）' }), 'managed-demo::demo-model');
   await page.getByRole('button', { name: '确认并继续 →' }).click();
   await page.getByRole('button', { name: /Four page PPTX/ }).click();
   await page.getByRole('button', { name: '下一步：输入内容 →' }).click();
@@ -48,25 +51,25 @@ test('user page selection and module estimate take priority over template length
   await guidance.scrollIntoViewIfNeeded();
   await expect(guidance).toBeVisible();
   await page.screenshot({ path: testInfo.outputPath('reuse-desktop.png'), fullPage: true });
-  await expect(page.getByText('3 页', { exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: '开始生成' })).toBeEnabled();
+  await expect(page.getByTestId('ppt-page-count')).toHaveValue('3');
+  await expect(page.getByRole('button', { name: '读取输入并生成大纲' })).toBeEnabled();
   const plus = page.getByRole('button', { name: '增加页数', exact: true });
   await plus.click();
-  await expect(page.getByText('4 页', { exact: true })).toBeVisible();
+  await expect(page.getByTestId('ppt-page-count')).toHaveValue('4');
   await page.getByRole('button', { name: '← 返回模板' }).click();
   await page.getByRole('button', { name: /Ten page alternate/ }).click();
   await page.getByRole('button', { name: '下一步：输入内容 →' }).click();
-  await expect(page.getByText('4 页', { exact: true })).toBeVisible();
+  await expect(page.getByTestId('ppt-page-count')).toHaveValue('4');
   await page.getByRole('button', { name: '← 返回模板' }).click();
   await page.getByRole('button', { name: /Four page PPTX/ }).click();
   await page.getByRole('button', { name: '下一步：输入内容 →' }).click();
-  await expect(page.getByText('4 页', { exact: true })).toBeVisible();
+  await expect(page.getByTestId('ppt-page-count')).toHaveValue('4');
   await plus.click(); await plus.click(); await plus.click(); await plus.click();
-  await expect(page.getByText('8 页', { exact: true })).toBeVisible();
-  await expect(page.getByRole('button', { name: '开始生成' })).toBeEnabled();
+  await expect(page.getByTestId('ppt-page-count')).toHaveValue('8');
+  await expect(page.getByRole('button', { name: '读取输入并生成大纲' })).toBeEnabled();
   await plus.click();
   await expect(page.getByText(/原生模板 4 页，最多支持 8 页/)).toBeVisible();
-  await expect(page.getByRole('button', { name: '开始生成' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: '读取输入并生成大纲' })).toBeDisabled();
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByText(/原生模板 4 页，最多支持 8 页/).scrollIntoViewIfNeeded();
   await page.screenshot({ path: testInfo.outputPath('reuse-mobile.png'), fullPage: true });
@@ -88,15 +91,15 @@ test('ten-page uploaded template accepts an explicit 100-page target @smoke', as
     compatibility: 'mapped', pages: 10, palette: { background: '#202020', accent: '#b08866', foreground: '#ffffff', muted: '#aaaaaa' },
     sampleTitles: ['Cover'], tags: [], pinned: false,
   }] } }));
-  await page.goto('/ppt');
+  await page.goto('/ppt', {waitUntil:'domcontentloaded'});await expect(page.getByText('加载中…',{exact:true})).toHaveCount(0);
   await page.getByRole('button', { name: /＋ 新建|新建 PPT/ }).first().click();
   await page.getByRole('button', { name: /从 Prompt 开始/ }).click();
-  await page.getByRole('combobox', { name: 'LLM（必填）' }).selectOption('managed-demo::demo-model');
+  await selectPptOption(page.getByRole('combobox', { name: 'LLM（必填）' }), 'managed-demo::demo-model');
   await page.getByRole('button', { name: '确认并继续 →' }).click();
   await page.getByRole('button', { name: /Ten page PPTX/ }).click();
   await page.getByRole('button', { name: '下一步：输入内容 →' }).click();
   await page.getByRole('textbox', { name: '输入 Prompt' }).fill('请根据足量资料生成 100页的技术报告');
   await expect(page.getByText(/100 页/).first()).toBeVisible();
   await expect(page.getByText(/原生模板 10 页，最多支持 100 页/)).toBeVisible();
-  await expect(page.getByRole('button', { name: '开始生成' })).toBeEnabled();
+  await expect(page.getByRole('button', { name: '读取输入并生成大纲' })).toBeEnabled();
 });

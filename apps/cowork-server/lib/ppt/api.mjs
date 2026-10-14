@@ -1,12 +1,16 @@
+import {fontManifest,projectNativeFonts,withNativeFontCss} from '../ppt-native-fonts.mjs';
+import {readRepairComparison} from './repair-comparison.mjs';
+import {liveProjectView} from './project-view.mjs';
 import { startAssetTask, finishAssetTask, retryAssetTask } from './asset-task-service.mjs';
 import { applyCommand, redo, undo } from './command-service.mjs';
 import { operationHistory } from './command-history.mjs';
-import { getRun, listEvents, subscribe } from './event-store.mjs';
+import { getRun, listEvents, subscribe, subscribeTransient } from './event-store.mjs';
 import { currentRun, cancelRun } from './run-service.mjs';
 import { getProject, listRevisions, readRevision, enqueueProject } from './repository.mjs';
 import { publishProject } from './publish-service.mjs';
 import { buildSlideRenderTree } from './render-tree.mjs';
 import { slideSvg } from './exporters/preview.mjs';
+import {buildTemplateSkeleton} from './generation-skeleton.mjs';
 import { createProposal, applyProposal, discardProposal, proposalPreview } from './proposal-service.mjs';
 import { openGenerationScope, submitGenerationEdit, retryGenerationEdit, processGenerationEdits, recordIntentProposal } from './generation-edit-service.mjs';
 import { pauseSession, resumeSession, setPageAccepted } from './runtime.mjs';
@@ -39,7 +43,7 @@ function sse(req, res, project, run, after) {
     if (id) { last = id; res.write(`id: ${id}\n`); }
     res.write(`event: ${type}\ndata: ${JSON.stringify(data)}\n\n`);
   };
-  write('snapshot', { project, run });
+  write('snapshot', { project:liveProjectView(project), run });
   const pending = [];
   let replaying = true;
   const unsubscribe = subscribe(run.id, event => {
@@ -48,14 +52,16 @@ function sse(req, res, project, run, after) {
   for (const event of listEvents(project.uid, project.id, run.id, last)) write('run-event', event, event.seq);
   replaying = false;
   for (const event of pending) write('run-event', event, event.seq);
+  const unsubscribeDraft = subscribeTransient(run.id, event => write('draft', event.payload));
   const heartbeat = setInterval(() => { try { res.write(': heartbeat\n\n'); } catch {} }, 15000);
-  const close = () => { clearInterval(heartbeat); unsubscribe(); try { res.end(); } catch {} };
+  const close = () => { clearInterval(heartbeat); unsubscribe(); unsubscribeDraft(); try { res.end(); } catch {} };
   req.on('close', close); res.on('close', close);
   return true;
 }
 
 export async function handleStructuredPpt(req, url, ctx) {
-  const { uid, send, res, readBody, deps, activity, resumeGeneration, log = () => {} } = ctx;
+  const { uid, send:rawSend, res, readBody, deps, activity, resumeGeneration, log = () => {} } = ctx;
+  const send=(status,value)=>rawSend(status,url.searchParams.get('view')==='live'&&value?.project?{...value,project:liveProjectView(value.project)}:value);
   let match;
   try {
     if ((match = url.pathname.match(new RegExp(`^/ppt/projects/(${PROJECT})/slides/([a-zA-Z0-9_-]{1,80})/accept$`, 'i')))) {
@@ -113,13 +119,34 @@ export async function handleStructuredPpt(req, url, ctx) {
       const result = await applyCommand(uid, project.id, { type: 'deck.replace', baseRevision: project.revision, payload: { deck: snapshot.deck, projectState: { template: snapshot.template ?? project.template, templateSpec: snapshot.templateSpec ?? project.templateSpec, outline: snapshot.outline || snapshot.deck.slides.map(slide => ({ id: slide.id, title: slide.title, refs: slide.sourceRefs || [] })), pages: snapshot.deck.slides.length, pageDecision: snapshot.pageDecision ?? { ...project.pageDecision, finalPageCount: snapshot.deck.slides.length }, planning: snapshot.planning, constraints: snapshot.constraints } } }, { allowExternalStructure: true, allowInternal: true });
       return send(200, result);
     }
+    if((match=url.pathname.match(new RegExp(`^/ppt/projects/(${PROJECT})/native-fonts(?:/([a-f0-9]{64})\\.ttf)?$`,'i')))){
+      if(req.method!=='GET')return send(405,{error:'method not allowed'});
+      const project=projectOr404(uid,match[1]);
+      if(!match[2])return send(200,{fonts:fontManifest(project)});
+      const font=projectNativeFonts(project).find(font=>font.sha256===match[2]);if(!font)return send(404,{error:'font not found'});
+      res.writeHead(200,{'content-type':'font/ttf','cache-control':'private, max-age=3600','x-content-type-options':'nosniff'});res.end(font.bytes);return true;
+    }
+    if ((match = url.pathname.match(new RegExp(`^/ppt/projects/(${PROJECT})/slides/([a-zA-Z0-9_-]{1,80})/assets/([a-zA-Z0-9_-]{1,100})$`, 'i')))) {
+      if(req.method!=='GET')return send(405,{error:'method not allowed'});
+      const project=projectOr404(uid,match[1]);
+      const tree=project.runtime?.slides?.[match[2]]?.preview||buildTemplateSkeleton(project,match[2])||buildSlideRenderTree(project,match[2]);
+      const data=tree?.elements?.find(e=>(e.nodeId||e.id)===match[3])?.content?.dataUrl;
+      const asset=/^data:image\/(png|jpeg|gif|webp);base64,([A-Za-z0-9+/=]+)$/u.exec(data||'');
+      if(!asset)return send(404,{error:'asset not found'});
+      res.writeHead(200,{'content-type':'image/'+asset[1],'cache-control':'private, no-store'});res.end(Buffer.from(asset[2],'base64'));return true;
+    }
+    if ((match=url.pathname.match(new RegExp(`^/ppt/projects/(${PROJECT})/slides/([a-zA-Z0-9_-]{1,80})/repair-comparison/([a-f0-9]{32})/(before|after)$`,'i')))) {
+      if(req.method!=='GET')return send(405,{error:'method not allowed'});
+      const project=projectOr404(uid,match[1]),svg=readRepairComparison(project,match[2],match[3],match[4]);if(!svg)return send(404,{error:'repair comparison not found'});
+      res.writeHead(200,{'content-type':'image/svg+xml; charset=utf-8','cache-control':'private, no-store'});res.end(svg);return true;
+    }
     if ((match = url.pathname.match(new RegExp(`^/ppt/projects/(${PROJECT})/slides/([a-zA-Z0-9_-]{1,80})/preview$`, 'i')))) {
       const project = projectOr404(uid, match[1]); const tree = ['generating', 'paused'].includes(project.status)
-        ? project.runtime?.slides?.[match[2]]?.preview : buildSlideRenderTree(project, match[2]);
+        ? project.runtime?.slides?.[match[2]]?.preview||(url.searchParams.get('draft')==='1'?buildTemplateSkeleton(project,match[2]):null) : buildSlideRenderTree(project, match[2]);
       if (!tree) return send(404, { error: 'slide not found' });
       if (url.searchParams.get('format') === 'svg') {
         res.writeHead(200, { 'content-type': 'image/svg+xml; charset=utf-8', 'cache-control': 'no-store', etag: `"${project.renderTree?.hash || project.revision}"` });
-        res.end(slideSvg(tree)); return true;
+        res.end(withNativeFontCss(project,slideSvg(tree))); return true;
       }
       return send(200, { slide: tree, revision: project.revision });
     }

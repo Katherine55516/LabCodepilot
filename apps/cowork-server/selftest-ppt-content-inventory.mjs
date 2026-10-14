@@ -33,7 +33,7 @@ for(const domain of ['Research measurement','Business operating review','Product
  }
 }
 const sparse={source:normalizePaste('A short statement.'),deck:{slides:[{id:'a',title:'Intro'},{id:'b',title:'Message',bullets:['Short point']},{id:'c',title:'End'}]}};
-assert.equal(sourceDisplayText(String.raw`Alpha ($\alpha_i$) and $\frac{a}{b}$`),'Alpha (α_i) and (a)/(b)');
-assert.equal(sourceDisplayText(String.raw`$\unsupported{x}$`),String.raw`\unsupported{x}`,'unsupported notation must remain visible');
+assert.equal(sourceDisplayText(String.raw`Alpha ($\alpha_i$) and $\frac{a}{b}$`),'Alpha (αi) and (a)/(b)');
+assert.equal(sourceDisplayText(String.raw`$\unsupported{x}$`),String.raw`$\unsupported{x}$`,'unsupported notation must remain visible');
 assert.ok(!inspectContent(sparse).issues.some(issue=>issue.code==='rich_source_underfilled'));
 console.log('PPT cross-domain inventory, typed retention, merge/split, cell recall, end-section and sparse source: OK');

@@ -1,8 +1,9 @@
 /** Versioned structural profiles from imported IR; no model and no sample copy
  * becomes authority. Media roles derived from geometry are marked heuristic. */
 import crypto from 'node:crypto';
+import {nativeComponentSpecs} from './ppt-native-components.mjs';
 import {measureText,applyRenderContract} from './ppt/render-contract.mjs';
-export const TEMPLATE_COMPONENT_VERSION=1;
+export const TEMPLATE_COMPONENT_VERSION=2;
 const digest=x=>crypto.createHash('sha256').update(x).digest('hex');
 const distance=(a,b)=>Math.hypot((a.x+a.width/2)-(b.x+b.width/2),(a.y+a.height/2)-(b.y+b.height/2));
 export function templateComponentProfile(slides,size={},hash='',roleFor=null) {
@@ -33,7 +34,7 @@ export function templateComponentProfile(slides,size={},hash='',roleFor=null) {
     const repeatedGroups=[...groups].map(([id,nodeIds])=>({id,nodeIds,mediaIds:media.filter(m=>nodeIds.includes(m.boundSlotId)).map(m=>m.nodeId),reflow:false}));
     const directional=nodes.some(x=>/ARROW|CONNECTOR|CHEVRON|FLOWCHART/i.test(`${x.nativeRef?.autoShapeType||''} ${x.nativeRef?.name||''}`));
     const layoutType=index===0?'cover':directional?'relationship':repeatedGroups.length>1||itemMedia.length>1?'item-icons':media.some(x=>x.role==='template_decoration')?'image-split':'text';
-    return {index,layoutType,textSlots,repeatedGroups,itemCapacity:Math.max(repeatedGroups.length,itemMedia.length),media,
+    return {index,layoutType,textSlots,repeatedGroups,componentSpecs:nativeComponentSpecs(slide,{width,height}).map(({members,...spec})=>spec),itemCapacity:Math.max(repeatedGroups.length,itemMedia.length),media,
       protectionRegions:nodes.filter(x=>x.locked||x.type==='foreign'||x.content?.mustPreserve).map(x=>({nodeId:x.id,type:x.type,geometry:x.geometry})),
       capacityBasis:'shared_render_contract_conservative_prediction'};
   });
