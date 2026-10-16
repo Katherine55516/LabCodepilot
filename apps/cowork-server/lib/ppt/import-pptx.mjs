@@ -1,3 +1,4 @@
+import {NATIVE_SHAPE_IDS_SCRIPT} from '../ppt-native-shape-ids.mjs';
 import {buildRenderTree} from './render-tree.mjs';
 import {fitNativeTextFrames,fitSourceMathFrames} from '../ppt-native-text-fit.mjs';
 import {SOURCE_MATH_SCRIPT} from '../ppt-source-math-python.mjs';
@@ -24,11 +25,12 @@ from pptx.oxml.ns import qn
 ${THEME_SCRIPT}
 ${OFFICE_MATH_SCRIPT}
 ${SOURCE_MATH_SCRIPT}
+${NATIVE_SHAPE_IDS_SCRIPT}
 media_warnings=[]
 ${NATIVE_CHART_CONTRACT_SCRIPT}
 raw=sys.stdin.buffer.read(); ext='pptx'
 ${TEMPLATE_SECURITY_SCRIPT}
-prs=Presentation(io.BytesIO(raw)); slides=[]
+prs=Presentation(io.BytesIO(raw)); native_ids=normalize_native_shape_ids(prs); slides=[]
 target=os.path.join(os.environ.get('PPT_EXTERNAL_DIR','/workspace/external'),'original.pptx'); os.makedirs(os.path.dirname(target), exist_ok=True)
 with open(target+'.part','wb') as f: f.write(raw)
 os.replace(target+'.part',target)
@@ -132,7 +134,7 @@ for slide_index, slide in enumerate(prs.slides):
     except (AttributeError,TypeError,ValueError): pass
     background,bg_basis=effective_background(slide,int(prs.slide_width),int(prs.slide_height))
     slides.append({'index':slide_index,'shapes':shapes,'background':'#'+background.lower(),'backgroundBasis':bg_basis})
-print(json.dumps({'width':int(prs.slide_width),'height':int(prs.slide_height),'slides':slides,'path':target},ensure_ascii=False))
+print(json.dumps({'width':int(prs.slide_width),'height':int(prs.slide_height),'slides':slides,'path':target,'nativeIdNormalization':native_ids},ensure_ascii=False))
 `;
 
 const EXPORT_SCRIPT = String.raw`
@@ -149,8 +151,12 @@ ${OFFICE_MATH_SCRIPT}
 ${EXPORT_VERIFY_SCRIPT}
 ${FONT_SCRIPT}
 ${RENDER_CONTRACT_SCRIPT}
+${NATIVE_SHAPE_IDS_SCRIPT}
 
 data=json.load(sys.stdin); original=data['original']; prs=Presentation(original)
+if data.get('nativeIdNormalization'):
+    normalized=normalize_native_shape_ids(prs)
+    if normalized!=data['nativeIdNormalization']:raise ValueError('native_shape_id_normalization_mismatch: source or normalization contract changed')
 if data.get('clearTemplateNotes'):
     for slide in prs.slides:
         for relationship in list(slide.part.rels.values()):
@@ -160,9 +166,10 @@ os.environ.update(office_font_environment(os.path.join(os.path.dirname(original)
 source_slide_map=data.get('sourceSlideMap')
 if source_slide_map is not None:
     source_count=len(prs.slides)
-    if not isinstance(source_slide_map,list) or len(source_slide_map)<source_count or any(type(index) is not int or index<0 or index>=source_count for index in source_slide_map):
+    reuse=data.get('templateReuseMode') in ('design_only','keep_fixed')
+    if not isinstance(source_slide_map,list) or not 1<=len(source_slide_map)<=100 or (not reuse and len(source_slide_map)<source_count) or any(type(index) is not int or index<0 or index>=source_count for index in source_slide_map):
         raise ValueError('invalid native template slide map')
-    if sorted(set(source_slide_map))!=list(range(source_count)):
+    if not reuse and sorted(set(source_slide_map))!=list(range(source_count)):
         raise ValueError('native template slide map must preserve every original slide')
     original_ids=list(prs.slides._sldIdLst)
     occurrence={}
@@ -186,7 +193,9 @@ if source_slide_map is not None:
                     element.set(key,relation_ids[value])
         ordered_ids.append(list(prs.slides._sldIdLst)[-1])
     slide_ids=prs.slides._sldIdLst
-    for slide_id in list(slide_ids): slide_ids.remove(slide_id)
+    for slide_id in list(slide_ids):
+        slide_ids.remove(slide_id)
+        if reuse and slide_id not in ordered_ids:prs.part.drop_rel(slide_id.rId)
     for slide_id in ordered_ids: slide_ids.append(slide_id)
     # python-pptx caches slide objects while the list is mutated. Reload the
     # reordered deck so output indices address the cloned slides correctly.
@@ -308,9 +317,10 @@ def add_source_artifact(slide, node):
         apply_text_contract(shape.text_frame,node.get('textLayout') or {})
         for paragraph in shape.text_frame.paragraphs:
             paragraph.alignment={'right':PP_ALIGN.RIGHT,'center':PP_ALIGN.CENTER}.get(style.get('textAlign'),PP_ALIGN.LEFT)
+            rich_content=bool(c.get('richText') or any(item.get('richText') for item in c.get('items',[])))
             for run in paragraph.runs:
-                run.font.italic=style.get('fontStyle')=='italic'
-                run.font.underline=style.get('textDecoration')=='underline'
+                if not rich_content or 'fontStyle' in overrides:run.font.italic=style.get('fontStyle')=='italic'
+                if not rich_content or 'textDecoration' in overrides:run.font.underline=style.get('textDecoration')=='underline'
                 if 'fontWeight' in overrides:run.font.bold=style['fontWeight']>=600
     source=node.get('sourceArtifact') or {}
     shape.name='AIMate source:'+str(source.get('sourceUnitId',''))+':'+str(source.get('type',''))+'|AIMate instance:'+str(node.get('id',''))+(':1' if node['type']=='chart' else ':0')
@@ -499,6 +509,7 @@ target=os.environ.get('PPT_OUTPUT','/workspace/presentation.pptx'); tmp=target+'
 from hashlib import sha256
 from pptx.enum.shapes import MSO_SHAPE_TYPE, MSO_SHAPE
 before=Presentation(original); after=Presentation(tmp)
+if data.get('nativeIdNormalization'):normalize_native_shape_ids(before)
 expected_map=source_slide_map if source_slide_map is not None else list(range(len(before.slides)))
 if len(expected_map)!=len(after.slides): raise ValueError('template slide count changed during export')
 for index,source_index in enumerate(expected_map):
@@ -593,7 +604,7 @@ export function projectFromImportedManifest(project, manifest, hash) {
   project.importedInputScope = project.deck.slides.map(slide => ({ id: slide.id, nodes: slide.nodes.filter(node => ['text', 'table', 'chart'].includes(node.type)).map(node => ({ type: node.type, content: node.content })) }));
   project.outline = project.deck.slides.map((slide, index) => ({ id: slide.id, title: slide.title || `Slide ${index + 1}`, focus: '', refs: [] }));
   project.pages = slides.length;
-  project.externalPptx = { nativeContractVersion:2, mode: 'preserve', sha256: hash, originalPath: manifest.path, width: manifest.width, height: manifest.height, importedAt: new Date().toISOString() };
+  project.externalPptx = { nativeContractVersion:2, mode: 'preserve', sha256: hash, originalPath: manifest.path, ...(manifest.nativeIdNormalization?{nativeIdNormalization:manifest.nativeIdNormalization}:{}), width: manifest.width, height: manifest.height, importedAt: new Date().toISOString() };
   return project;
 }
 
@@ -603,6 +614,9 @@ export async function importEditablePptx(project, bytes, hash, io = {}) {
 }
 
 export async function renderImportedPptx(project, io = {}) {
+  // Renderer preparation must not mutate the reviewed/editor candidate, even
+  // when native export fails before a file is produced.
+  project={...project,deck:structuredClone(project.deck)};
   for(const slide of project.deck.slides){fitSourceMathFrames(slide,project);fitNativeTextFrames(project,slide);}
   const renderTree=buildRenderTree(project);
   // Preview, export and verification share the prepared native text contract.
@@ -610,7 +624,7 @@ export async function renderImportedPptx(project, io = {}) {
   const slides = project.deck.slides.filter(slide => Number.isInteger(slide.nativeSlideIndex)).map(slide => ({
     nativeSlideIndex: slide.nativeSlideIndex,
     omitShapeIds: [...(slide.templateOmissions || []).map(item => item.shapeId),...(slide.nodes||[]).filter(n=>n.hidden||Number(n.style?.opacity??1)<=0).map(n=>n.nativeRef?.shapeId).filter(id=>id!==undefined)],
-    sourceArtifacts: (slide.nodes || []).filter(isSourceOwnedNode).map(node=>({...node,textLayout:textContract({...node,kind:node.type}),imageLayout:node.type==='image'?imageContract(node.content):undefined,chartLayout:node.type==='chart'?chartContract(node.content):undefined})),
+    sourceArtifacts: (slide.nodes || []).filter(node=>isSourceOwnedNode(node)||node.semanticRole==='closing-greeting').map(node=>({...node,textLayout:textContract({...node,kind:node.type}),imageLayout:node.type==='image'?imageContract(node.content):undefined,chartLayout:node.type==='chart'?chartContract(node.content):undefined})),
     nodes: slide.nodes.filter(node => node.nativeRef).map(node => ({ type: node.type, semanticRole: node.semanticRole,
       nativeShapeId: node.nativeRef.shapeId,componentBinding:node.templateComponentBinding,
       ...(node.nativeRef.cloneFromShapeId!==undefined?{cloneFromShapeId:node.nativeRef.cloneFromShapeId}:{}),
@@ -620,8 +634,8 @@ export async function renderImportedPptx(project, io = {}) {
         ? Object.fromEntries(Object.entries(node.content || {}).filter(([key]) => key !== 'dataUrl')) : node.content,
       geometry: rendered(slide,node)?.bounds || node.geometry, style: node.style, textStyleOverrides:node.textStyleOverrides, rotation: node.rotation, zIndex: node.zIndex, chartLayout:node.type==='chart'?chartContract(node.content):undefined, textLayout: rendered(slide,node)?.textLayout || textContract({...node,kind:node.type}) })),
   }));
-  return (io.runPython || runPython)(project, EXPORT_SCRIPT, JSON.stringify({ original: project.externalPptx.originalPath, title:project.title, slides,
-    clearTemplateNotes: project.templateContentMode==='design_only', sourceSlideMap: project.templateSlideMap, fonts: project.templateSpec?.fonts,exportManifest:exportManifest(project,renderTree) }));
+  return (io.runPython || runPython)(project, EXPORT_SCRIPT, JSON.stringify({ original: project.externalPptx.originalPath, nativeIdNormalization:project.externalPptx.nativeIdNormalization, title:project.title, slides,
+    clearTemplateNotes: ['design_only','keep_fixed'].includes(project.templateContentMode), sourceSlideMap: project.templateSlideMap, templateReuseMode:project.templateFidelity?.mode==='preserve'?project.templateContentMode:undefined, fonts: project.templateSpec?.fonts,exportManifest:exportManifest(project,renderTree) }));
 }
 
 export const _internals = { IMPORT_SCRIPT, EXPORT_SCRIPT };

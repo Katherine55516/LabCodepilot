@@ -159,7 +159,7 @@ function ElementContent({
         {!element.content?.pointLayout && element.content?.items?.map((item, index) => (
           <div key={item.id} style={{lineHeight:contract?.paragraphs[index]?.lineHeight,marginBottom:(contract?.paragraphs[index]?.spaceAfterPt || 0)*scale}}>
             {element.kind === "timeline"
-              ? `${index + 1}. `
+              ? /^\s*\d+[.)]\s/u.test(item.text || "") ? "" : `${index + 1}. `
               : element.kind === "list"
                 ? "• "
                 : ""}

@@ -12,6 +12,8 @@
 
 | 文件 | 主题 |
 |------|------|
+| [ppt-experience-quality-routing.md](ppt-experience-quality-routing.md) | PPT 工作区/创建/编辑/聊天、三档质量、能力目录与生产队列路由；[代表性视觉证据](assets/ppt-experience-quality-routing/README.md)，最终119项回归通过，原84次矩阵及恢复分别记录；按用户要求先提交，Factor最终整稿验收待续 |
+| ppt-gamma-parity-round7.md | Round 7 大纲编译、统一主题语言、真实逐页草稿、输入媒体/原生图表、批量与聊天、语言检测性能及验收边界 |
 | ppt-editor-template-bilingual.md | 六项重新复核、创建固定按钮、暂停/完成字体编辑、模板旧报告隔离、单语标题/多语分组；真实解析/命令/导出/CDP证据与在线验收边界 |
 | ppt-byok-deployment-ci.md | BYOK capabilities协议、无凭证源码包/校验/回滚升级、M1 Virtual arm64 CI实跑通过/失败修复、gh精确commit验收与真实远端E2E依赖 |
 | ppt-live-editor-rich-text-compression.md | AppShell常驻BYOK/Home真实任务、生成中对象编辑、rich-text/OMML/native字体与缓存v3、exact-N取舍账本、短大纲/审查checkpoint和38-ID验收边界 |

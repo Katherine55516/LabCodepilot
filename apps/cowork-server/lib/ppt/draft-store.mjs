@@ -1,9 +1,11 @@
+import {sourceLineRange} from '../ppt-source-line-ranges.mjs';
 /** Streaming writer drafts (V-P0-3). A draft is a non-authoritative preview of
  * what the model is writing for a page: only closed JSON strings are shown,
- * nothing is persisted, editable or exportable, and render_ready replaces it.
+ * snapshots are persisted separately for recovery, never editable or exportable, and render_ready replaces them.
  * Drafts travel on a transient bus channel, never in the durable event log. */
 import { publishTransient } from './event-store.mjs';
 import {sourceRichText} from '../ppt-rich-text.mjs';
+import {saveDraft,readDraft} from '../ppt-store.mjs';
 
 const drafts = new Map(), lastSent = new Map();
 const key = (projectId, slideId) => `${projectId}:${slideId}`;
@@ -36,13 +38,16 @@ export function draftFromPartialJson(text, inventory = []) {
       const start=stack.pop();let value;try{value=JSON.parse(source.slice(start,i+1));}catch{continue;}
       if(typeof value.sourceUnitId==='string'){
         const item=inventory.find(entry=>entry.id===value.sourceUnitId);
+        let lineRange=null;try{if(value.lineStart!==undefined||value.lineEnd!==undefined)lineRange=sourceLineRange(item,value);}catch{continue;}
         const validRange=value.rowStart===undefined&&value.rowEnd===undefined||Number.isInteger(value.rowStart)&&Number.isInteger(value.rowEnd)&&value.rowStart>=1&&value.rowEnd>value.rowStart&&value.rowEnd<=(item?.rows?.length||0);
-        if(item&&validRange){const text=item.rows?.length?[item.rows[0],...item.rows.slice(value.rowStart??1,value.rowEnd??item.rows.length)].map(row=>row.join(' | ')).join('\n'):item.text;if(text)add({sourceUnitId:item.id,sourceRef:{sourceUnitId:item.id,...(value.rowStart!==undefined?{rowStart:value.rowStart,rowEnd:value.rowEnd}:{})},type:item.type,text:String(text)});}
+        if(item&&validRange){const text=lineRange?String(item.text).split('\n').slice(lineRange.lineStart,lineRange.lineEnd).join('\n'):item.rows?.length?[item.rows[0],...item.rows.slice(value.rowStart??1,value.rowEnd??item.rows.length)].map(row=>row.join(' | ')).join('\n'):item.text;if(text)add({sourceUnitId:item.id,sourceRef:{sourceUnitId:item.id,...(lineRange||{}),...(value.rowStart!==undefined?{rowStart:value.rowStart,rowEnd:value.rowEnd}:{})},type:item.type,text:String(text)});}
       }else if(copyTypes.has(value.type)&&typeof value.text==='string'&&value.text.length<=2000){add({field:'text',text:value.text});}
-      else if(typeof value.id==='string'&&/^[A-Za-z0-9_-]{1,40}$/u.test(value.id)&&typeof value.body==='string'&&value.body.length<=2000){add({field:'body',text:value.body});}
+      // A point streams as its short heading, then its body (round 7, A7).
+      else if(typeof value.body==='string'&&value.body.length<=2000&&(typeof value.id==='string'&&/^[A-Za-z0-9_-]{1,40}$/u.test(value.id)||typeof value.heading==='string'||copyTypes.has(value.type))){add({field:'body',text:value.body,...(typeof value.heading==='string'&&value.heading.trim()?{heading:value.heading.trim().slice(0,200)}:{})});}
     }
   }
-  return {title,blocks:blocks.slice(-6),typing};
+  // Keep the page's points in order (bounded); the draft grows like the page.
+  return {title,blocks:blocks.slice(0,12),typing};
 }
 
 export function updateDraft(project, slideId, { text, chars, seq, jobId, runId=project.currentRunId, epoch=Number(project.editing?.epochs?.[slideId]||0), sourceHash=project.source?.sha256||'' }, { throttleMs = 700 } = {}) {
@@ -50,15 +55,20 @@ export function updateDraft(project, slideId, { text, chars, seq, jobId, runId=p
   const previousDraft=drafts.get(key(project.id,slideId));
   if(seq&&previousDraft?.runId===runId&&previousDraft?.jobId===jobId&&seq<=previousDraft.seq)return null;
   const draft = { ...draftFromPartialJson(text, (project.source?.semantic?.inventory?.items || []).filter(item=>!project.planning?.slidePlan?.length||project.planning.slidePlan.find(plan=>plan.slideId===slideId)?.sourceArtifacts?.some(ref=>ref.sourceUnitId===item.id))), chars, seq, jobId, runId, epoch, sourceHash, updatedAt: new Date().toISOString() };
+  const assigned=project.planning?.slidePlan?.find(plan=>plan.slideId===slideId)?.sourceArtifacts;
+  if(assigned)draft.blocks=draft.blocks.filter(block=>!block.sourceRef||assigned.some(ref=>['sourceUnitId','rowStart','rowEnd','lineStart','lineEnd'].every(key=>ref[key]===block.sourceRef[key])));
   draft.blocks=draft.blocks.map(block=>({...block,...(block.type==='CodeBlock'?{}:{richText:sourceRichText(block.text)})}));
   drafts.set(key(project.id, slideId), draft);
   const now = Date.now(), previous = lastSent.get(key(project.id, slideId)) || 0;
   if (now - previous < throttleMs || !project.currentRunId) return draft;
   lastSent.set(key(project.id, slideId), now);
+  // A recoverable, non-authoritative snapshot. Run/source/epoch checks below
+  // prevent a restarted bridge from reviving a superseded draft.
+  if(project.uid)saveDraft(project.uid,project.id,slideId,draft);
   publishTransient(project.currentRunId, 'slide.draft', { slideId, draft });
   return draft;
 }
 export function clearDraft(projectId, slideId) { drafts.delete(key(projectId, slideId)); lastSent.delete(key(projectId, slideId)); }
 export function draftsFor(projectId, slideIds = [], project) {
-  return Object.fromEntries(slideIds.map(id => [id, drafts.get(key(projectId, id))]).filter(([id, value]) => value&&(!project||value.runId===project.currentRunId&&value.epoch===Number(project.editing?.epochs?.[id]||0)&&value.sourceHash===(project.source?.sha256||''))));
+  return Object.fromEntries(slideIds.map(id => [id, drafts.get(key(projectId, id))||(project?.uid?readDraft(project.uid,projectId,id):null)]).filter(([id, value]) => value&&(!project||value.runId===project.currentRunId&&value.epoch===Number(project.editing?.epochs?.[id]||0)&&value.sourceHash===(project.source?.sha256||''))));
 }

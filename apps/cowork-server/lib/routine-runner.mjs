@@ -36,7 +36,8 @@
  *   **绝不读 result.subtype** —— 401 全程失败的回合它仍然是字面的 "success"。
  */
 import { spawn } from 'node:child_process';
-import { PPT_SYSTEM_PROMPT, pptPromptFrame } from './ppt-prompt-contracts.mjs';
+import {pptModelInput} from './ppt-model-input.mjs';
+import { PPT_SYSTEM_PROMPT } from './ppt-prompt-contracts.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import * as orch from './orchestrator.mjs';
@@ -57,6 +58,14 @@ let active = 0;
 const capacity = createCapacity(CONCURRENCY);
 export function activeCount() { return active; }
 export { CONCURRENCY };
+
+/** Consume only actual text deltas from the CLI. Neither tool events nor a
+ * completed response are expanded into a simulated typing sequence. */
+export function routineTextProgress(onProgress, now = Date.now) {
+  let text='',sent=0,seq=0,dirty=false;
+  const flush=()=>{if(!dirty||typeof onProgress!=='function')return;dirty=false;sent=now();try{onProgress({chars:text.length,text:text.slice(0,60000),seq:++seq});}catch{ /* transient draft only */ }};
+  return {accept:msg=>{if(msg?.type!=='stream_event'||msg.event?.type!=='content_block_delta'||msg.event.delta?.type!=='text_delta'||typeof msg.event.delta.text!=='string')return;text+=msg.event.delta.text;dirty=true;if(now()-sent>=700)flush();},flush};
+}
 
 /**
  * 跑一轮定时任务。绝不抛异常 —— 一律以结构化结果返回,让调度器只需看 status。
@@ -84,6 +93,7 @@ export async function runRoutine({
   kind = 'routine',
   fetchCredentials = fetchModelCredentials,
   canStart = () => true,
+  onProgress, images, maxWireAttempts, maxOutputTokens,
 }) {
   const releaseSlot = kind === orch.KIND_PPT ? await capacity.acquire() : capacity.tryAcquire();
   if (!releaseSlot) {
@@ -128,10 +138,14 @@ export async function runRoutine({
 
     // ── 4. 跑 ────────────────────────────────────────────────
     activity?.start?.(sid);
-    const r = await execOnce({
+    const run = partial => execOnce({
       sid, container: name, prompt, model, token, baseUrl, authStyle: c.authStyle, log,
-      defaultModels: c.defaultModels, effortLevel: c.effortLevel, kind,
+      defaultModels: c.defaultModels, effortLevel: c.effortLevel, images, maxWireAttempts, maxOutputTokens, kind, onProgress: partial ? onProgress : undefined,
     });
+    // PPT writers stream partial text for the live draft (round 7, A7). A CLI
+    // without partial-message support is retried once without streaming.
+    let r = await run(Boolean(onProgress) && kind === orch.KIND_PPT);
+    if (r.status === 'partial_unsupported') { log(`routine ${sid} partial messages unsupported; rerunning without streaming`); r = await run(false); }
     activity?.end?.(sid);
 
     // ── 5. transcript 落盘 ───────────────────────────────────
@@ -163,7 +177,7 @@ export async function runRoutine({
 }
 
 /** 真正 spawn 的那一段。返回 { status, exitCode, result, resultText, transcript, ... }。 */
-function execOnce({ sid, container, prompt, model, token, baseUrl, authStyle, log, defaultModels = {}, effortLevel = '', kind = 'routine' }) {
+function execOnce({ sid, container, prompt, model, token, baseUrl, authStyle, log, defaultModels = {}, effortLevel = '', kind = 'routine', onProgress, images, maxWireAttempts=5, maxOutputTokens }) {
   return new Promise((resolve) => {
     // 容器侧拿的是一次性 cwk_ token。cred-proxy 两种头都认(x-api-key 优先、
     // 回退 Authorization: Bearer),这里跟随 authStyle 保持与客户端同构。
@@ -174,12 +188,14 @@ function execOnce({ sid, container, prompt, model, token, baseUrl, authStyle, lo
     // claude-opus-4-8[1m] 上 —— 网关恰好放行了,所以既没报错也没人发现,只有去读
     // transcript 的 init 消息才看得出来。与客户端 managed-providers.ts 的映射保持一致。
     const roleEnv = [];
+    const input=kind===orch.KIND_PPT?pptModelInput(prompt,images):null;
     const pushEnv = (k, v) => { if (v) roleEnv.push('-e', `${k}=${v}`); };
     pushEnv('ANTHROPIC_DEFAULT_OPUS_MODEL', defaultModels.opus);
     pushEnv('ANTHROPIC_DEFAULT_SONNET_MODEL', defaultModels.sonnet);
     pushEnv('ANTHROPIC_DEFAULT_HAIKU_MODEL', defaultModels.haiku);
     pushEnv('CLAUDE_CODE_SUBAGENT_MODEL', defaultModels.subagent);
     pushEnv('CLAUDE_CODE_EFFORT_LEVEL', effortLevel);
+    if(kind===orch.KIND_PPT&&Number.isInteger(maxOutputTokens)&&maxOutputTokens>=256&&maxOutputTokens<=32768)pushEnv('CLAUDE_CODE_MAX_OUTPUT_TOKENS',String(maxOutputTokens));
 
     // routine 没显式选模型时,退到账号配置的 opus 角色(与客户端「默认取配置第一条」同义);
     // 都没有才交给容器内置默认。
@@ -198,8 +214,9 @@ function execOnce({ sid, container, prompt, model, token, baseUrl, authStyle, lo
       // 而你写的指令被丢掉。首次实测就踩了:回合 exit=0、status=success、花了 $0.39,
       // 模型却在一本正经地介绍 /opt/cowork/claude 是什么。
       // ——「绿色不等于任务达成」的活标本。
-      '-p', ...(kind === orch.KIND_PPT ? [] : [prompt]),
+      '-p', ...(kind === orch.KIND_PPT ? input.args : [prompt]),
       '--output-format', 'stream-json', '--verbose',
+      ...(onProgress ? ['--include-partial-messages'] : []),
       '--dangerously-skip-permissions',
       // PPT nodes are semantic transforms only. The renderer is separate code;
       // the model must have no filesystem, shell, web, skill or MCP tools.
@@ -210,10 +227,12 @@ function execOnce({ sid, container, prompt, model, token, baseUrl, authStyle, lo
 
     const child = spawn('docker', args, { stdio: ['pipe', 'pipe', 'pipe'] });
     const transcript = [];
+    let wireAttempts=1;
     let bytes = 0;
     let buf = '';
     let stderr = '';
     let result = null;
+    const partial = routineTextProgress(onProgress);
     let status = null;       // 非 null = 已判定终态(401/超时/溢出),不再被覆盖
     let settled = false;
 
@@ -235,18 +254,21 @@ function execOnce({ sid, container, prompt, model, token, baseUrl, authStyle, lo
       let msg;
       try { msg = JSON.parse(line); } catch { return; }  // 非 JSON 行照收,不解析
       // 401 立即中止 —— 唯一的"提前止损"分支。非 401 的重试让它自己退避。
+      if(kind===orch.KIND_PPT&&msg.type==='system'&&msg.subtype==='api_retry'&&++wireAttempts>maxWireAttempts){kill('attempt_limit');return;}
       if (msg.type === 'system' && msg.subtype === 'api_retry' && msg.error_status === 401) {
         log(`routine ${sid} aborting on 401 (attempt ${msg.attempt}) — 不等它退避完 10 次`);
         kill('credential_error');
         return;
       }
       if (msg.type === 'result') result = msg;
+      // Partial assistant text (only with --include-partial-messages).
+      if (onProgress) partial.accept(msg);
     };
 
     child.stdin.on('error', () => { /* claude 先退出时的 EPIPE */ });
     // PPT uses Claude print mode's plain stdin input through the same framed
     // shim. Other routines keep their established positional-prompt transport.
-    child.stdin.end(kind === orch.KIND_PPT ? pptPromptFrame(prompt) : Buffer.alloc(4));
+    child.stdin.end(kind === orch.KIND_PPT ? input.frame : Buffer.alloc(4));
 
     child.stdout.on('data', (chunk) => {
       bytes += chunk.length;
@@ -273,13 +295,16 @@ function execOnce({ sid, container, prompt, model, token, baseUrl, authStyle, lo
       settled = true;
       clearTimeout(timer);
       if (buf.trim()) onLine(buf.trim());  // 收尾:最后一行可能没有换行符
+      partial.flush();
 
       // ⚠️ 判定口径写死。绝不读 result.subtype —— P0 实测 401 全失败时它仍是 "success"。
       const clean = exitCode === 0 && result?.is_error !== true && result?.api_error_status == null;
-      const finalStatus = status ?? (clean ? 'success' : 'error');
+      const partialUnsupported = Boolean(onProgress) && !clean && !result && /(?:unknown|unrecognized|unexpected)\s+(?:option|argument)[^\n]*include-partial-messages/iu.test(stderr);
+      const finalStatus = status ?? (partialUnsupported ? 'partial_unsupported' : clean ? 'success' : 'error');
       // 主动中止的三种终态自带确定的原因,别回落去捡 stderr —— 那里往往是 shim 的
       // 无关信息(如"预制 skill 已挂载: 5 个"),而这串字会原样进用户看到的运行历史。
       const ABORT_REASON = {
+        attempt_limit: '模型调用已达本任务上限，请检查后再重试',
         credential_error: '模型凭证被上游拒绝(401),已立即中止而不等它退避重试',
         timeout: `超过 ${Math.round(TIMEOUT_MS / 1000)} 秒未结束,已中止`,
         // 不能写死 MB —— 阈值被调小时(联调/单测)会四舍五入成"超过 0MB",很傻
@@ -294,7 +319,7 @@ function execOnce({ sid, container, prompt, model, token, baseUrl, authStyle, lo
         resultText: typeof result?.result === 'string' ? result.result : '',
         apiErrorStatus: result?.api_error_status ?? null,
         costUsd: result?.total_cost_usd ?? null,
-        usage: result?.usage ?? null,
+        usage: result?.usage ?? null,wireAttempts,
         numTurns: result?.num_turns ?? null,
         transcript,
         transcriptBytes: bytes,

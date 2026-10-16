@@ -33,7 +33,10 @@ export function finalDeckNavigation(project){
     const outline=project.outline?.find(item=>item.id===slide.id);
     if(index===0||outline?.role==='navigation')return;
     const sections=originalChapters?[...new Set((outline?.sourceUnitIds||[]).map(id=>sourceChapter(byId.get(id))).filter(Boolean))]:[];
-    if(!sections.length&&(!originalChapters||!inventory.length))sections.push(outline?.section||slide.section);
+    // Unnumbered introductions remain navigable when later source chapters
+    // have ordinals. Only source-owned pages get this fallback; a closing
+    // slide is not a new source chapter.
+    if(!sections.length&&(!originalChapters||!inventory.length||(outline?.sourceUnitIds||[]).some(id=>byId.has(id))))sections.push(outline?.section||slide.section||(outline?.sourceUnitIds||[]).map(id=>byId.get(id)?.sectionPath?.[0]).find(Boolean));
     for(const section of sections.filter(Boolean)){
       const list=groups.get(section)||[];list.push({slideId:slide.id,page:index+1});groups.set(section,list);
     }

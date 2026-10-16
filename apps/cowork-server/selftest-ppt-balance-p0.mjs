@@ -107,12 +107,15 @@ const bilingualEstimate = estimatePageRecommendation({ inputKind: 'paste', sourc
 assert.ok(bilingualEstimate.assumptions.some(item => item.topic === 'language' && /输出语言与输入一致/.test(item.reason)));
 
 // 7. Optional real fixture: the 09 tutorial estimate no longer throws and,
-// with code omitted and both languages kept, lands in the planned range.
+// with code omitted and both languages kept, lands in a bounded capacity estimate. Editable multi-stage source flows now
+// reserve their actual height instead of treating a long TeX arrow as one line.
 const fixture = path.join(process.env.PPT_EVAL_INPUT_DIR || '/Users/dongli/Documents/quant_research/quant_3.0', '09_factor_testing.md');
 if (fs.existsSync(fixture)) {
   const source = normalizePaste(fs.readFileSync(fixture, 'utf8'));
   const estimate = estimatePageRecommendation({ inputKind: 'paste', source, prompt: '', generationPolicy: policy() });
-  assert.ok(estimate.recommended >= 26 && estimate.recommended <= 34, `09 estimate ${estimate.recommended}`);
+  assert.ok(estimate.recommended >= 26 && estimate.recommended <= 40, `09 estimate ${estimate.recommended}`);
+  assert.equal(source.semantic.inventory.items.length,233,'real original units are not removed to fit the estimate');
+  const flow=source.semantic.inventory.items.find(item=>item.diagramSource?.kind==='text-flow');assert.ok(flow?.text.includes('Neutralize (industry + size)'));assert.ok(source.text.includes(flow.diagramSource.text),'original TeX remains immutable');
   const keep = estimatePageRecommendation({ inputKind: 'paste', source, prompt: '', generationPolicy: policy('keep') });
   assert.ok(keep.recommended > estimate.recommended, 'keeping code raises the estimate');
   console.log(`09 fixture: ${estimate.recommended} pages with code omitted, ${keep.recommended} with code kept`);

@@ -18,6 +18,11 @@ export async function POST(request: NextRequest) {
       method: 'POST', headers: { authorization: `Bearer ${token}`, 'content-type': 'application/json' },
       body: JSON.stringify(body), cache: 'no-store', redirect: 'error', signal: AbortSignal.timeout(30000),
     }); });
+    // A pause, cancellation or another client may retire a listed job before
+    // this request claims/completes it. Acknowledge that expected no-op; real
+    // authentication, provider and transport failures keep their error status.
+    if ([404,409].includes(outcome.status) && ['Model job unavailable','Model job expired before completion'].includes(outcome.error || ''))
+      return NextResponse.json({ok:true,skipped:true,reason:'superseded_model_job'});
     return NextResponse.json({ ok: outcome.status === 200, ...(outcome.error ? { error: outcome.error } : {}) }, { status: outcome.status });
   } catch { return NextResponse.json({ error: 'Desktop model bridge unavailable' }, { status: 503 }); }
 }

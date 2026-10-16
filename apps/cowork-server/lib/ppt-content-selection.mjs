@@ -21,6 +21,9 @@ export function comparisonTableSelection(project,item){
  if(!comparison)return null;
  return {minimumDataRows:Math.min(2,rows.length-1),requiredRowIndices:rows.length<=9?rows.slice(1).map((_,index)=>index+1):[],basis:'retain-comparison-set'};
 }
+/** Shared with the outline compiler so corrections use the same rules. */
+export const isMandatorySentence=(item,sentence,index)=>mandatorySentence(item,sentence,index);
+export const isCriticalCondition=text=>critical.test(text);
 export function mandatorySelectionFacts(project){return (project.source?.semantic?.inventory?.items||[]).flatMap(item=>sourceSentences(item.text||'').filter((s,index)=>mandatorySentence(item,s,index)).map(text=>({sourceUnitId:item.id,text:text.trim()})));}
 export function visibleEquivalentCandidates(project,item){
  const audited=auditedLanguagePairTargets(project,item);if(audited.length)return audited;
@@ -176,11 +179,11 @@ export function selectionSource(project,ledger){
   return {...i,type:'SummaryBlock',text,must_preserve_structure:true,derivedSummary:{sourceUnitId:i.id,unitHash:entry.unitHash,sentenceIndices:entry.sentenceIndices,...(entry.summaryText?{summaryMode:'semantic',summaryHash:hash(text),requiresOriginalEntailment:true}:{}),ledgerHash:ledger.hash}};
  }
  if(entry?.destination==='summary'){
-  const label=project.generationPolicy.language?.locale==='en'?'Selected rows; complete table in notes':project.generationPolicy.language?.locale==='zh-HK'?'摘要：完整表見備註':'摘要：完整表见备注';
+  // Selected rows show as they are; the complete table is in speaker notes.
+  // No visible "see notes" label on the slide (round 7, A5).
   const rows=[0,...entry.rowIndices].map(r=>[...i.rows[r]]);
   const partial=entry.rowIndices.length<i.rows.length-1;
-  if(partial)rows[0][0]+='\n'+label;
-  return {...i,type:'SummaryTableBlock',rows,text:rows.map(r=>r.join(' | ')).join('\n'),title:partial?(i.title||'Table')+' — selected source rows':i.title,must_preserve_structure:true,derivedSummary:{label:partial?label:'',completeComparison:!partial,sourceUnitId:i.id,unitHash:entry.unitHash,sourceCellMap:entry.sourceCellMap,ledgerHash:ledger.hash}};
+  return {...i,type:'SummaryTableBlock',rows,text:rows.map(r=>r.join(' | ')).join('\n'),title:i.title,must_preserve_structure:true,derivedSummary:{label:'',selectedRows:partial,completeComparison:!partial,sourceUnitId:i.id,unitHash:entry.unitHash,sourceCellMap:entry.sourceCellMap,ledgerHash:ledger.hash}};
  }
  const listKind=i.diagramSource?null:sourcePointListKind(i);
  const exactMain=project.generationPolicy?.knowledge==='source_only'&&entry?.destination==='slides';

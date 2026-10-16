@@ -1,3 +1,4 @@
+import {outlineConfirmationHash} from '../ppt-outline-confirmation.mjs';
 import {sourceSpanRepairCandidate} from '../ppt-source-span-repair.mjs';
 import {sourceRichText,richTextContent,ensureRichContent} from '../ppt-rich-text.mjs';
 import {isSourceOwnedNode} from '../ppt-source-artifacts.mjs';
@@ -365,9 +366,27 @@ async function commit(project, command, meta = {}) {
   // Fill legacy published snapshots before the first draft mutation.
   if (project.revision === project.publishedRevision && !readRevision(project.uid, project.id, project.revision)?.templateSpec)
     saveRevision(project, 'published-baseline');
+  const beforeTitles = new Map(project.deck.slides.map(slide => [slide.id, slide.title]));
   const beforeSlides = new Map(project.deck.slides.map(slide => [slide.id, digest(slide)]));
   const { deck, inverse } = applyToDeck(project.deck, command, project);
   project.deck = deck;
+  // A manual title edit changes the effective frozen title used by later
+  // critic writers too, not only the rendered node and generation cache.
+  // Preserve the original confirmation and every owner/range in the audit.
+  if (!meta.allowGenerating && !['deck.replace','slide.delete','slide.duplicate'].includes(command.type)) {
+    const changedTitles=deck.slides.filter(slide=>beforeTitles.has(slide.id)&&beforeTitles.get(slide.id)!==slide.title);
+    if(changedTitles.length){
+      const originalConfirmation=project.confirmedOutline&&structuredClone(project.confirmedOutline);
+      for(const slide of changedTitles){
+        const outline=project.outline?.find(item=>item.id===slide.id);if(!outline)continue;
+        (project.outlineTitleEditHistory ||= []).push({slideId:slide.id,before:outline.title,title:slide.title,commandId:command.id,revision:project.revision+1,at:new Date().toISOString(),confirmation:originalConfirmation,basis:'Explicit editor title; source ownership, focus, ranges and page count retained'});
+        outline.titleEditBaseline ||= {title:outline.title,titleLocked:outline.titleLocked};
+        outline.title=slide.title;outline.titleLocked=true;
+        if(slide.copy)slide.copy.title=slide.title;
+      }
+      if(project.confirmedOutline)project.confirmedOutline={...project.confirmedOutline,hash:outlineConfirmationHash(project),titleEditRevision:project.revision+1};
+    }
+  }
   if (command.type === 'deck.replace' && command.payload.projectState) for (const key of ['template', 'templateSpec', 'outline', 'pages', 'pageDecision', 'planning', 'constraints']) {
     if (Object.hasOwn(command.payload.projectState, key)) project[key] = structuredClone(command.payload.projectState[key]);
   }
@@ -384,7 +403,7 @@ async function commit(project, command, meta = {}) {
   }
   // A paused draft is also the generation cache. Resume must not reconstruct an older
   // page from node.slide or execute an intent queued before this manual command.
-  if (['paused','generating','failed'].includes(project.status) && !meta.allowGenerating) {
+  if (['paused','generating','failed','completed','quality_blocked'].includes(project.status) && !meta.allowGenerating) {
     project.nodes ||= {};
     const changed = new Set(project.deck.slides.filter(slide => {
       if (beforeSlides.get(slide.id) === digest(slide)) return false;

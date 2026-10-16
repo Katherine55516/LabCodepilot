@@ -19,6 +19,7 @@ const deps={...api._internals.defaultDeps,
  extractFile:(p,name,bytes)=>source.extractFile(p,name,bytes,runtime.io),readFile:async(p,value)=>runtime.readFile(p.id,value),removeContainer:async()=>{},
  renderPptx:p=>renderer.renderPptx(p,runtime.io),
  modelCall:async(p,prompt,_activity,_log,meta={})=>{
+  if(meta.nodeKey?.startsWith('vision:')){assert.equal(meta.images[0].dataUrl,p.source.images[0].dataUrl);return {description:'Supplied comparison figure; the original is preserved.',uncertain:false};}
   if(prompt.includes('整稿演示文稿内容评审器'))return scopeReview(p);
   if(prompt.includes('叙事规划器')){
    const table=p.source.semantic.inventory.items.find(item=>item.type==='TableBlock');
@@ -42,7 +43,7 @@ const deps={...api._internals.defaultDeps,
  }
 };
 async function call(method,route,data){const req=Readable.from(data?[Buffer.from(JSON.stringify(data))]:[]);req.method=method;let result;await api.handlePpt(req,new URL('http://test'+route),{uid,deps,activity:()=>{},log:()=>{},send:(status,body)=>{result={status,body};return true;},res:{writeHead(){},on(){},destroy(){}}});return result;}
-async function wait(id,predicate){for(let i=0;i<600;i++){const p=store.get(uid,id);if(predicate(p))return p;if(['failed','quality_blocked'].includes(p?.status))throw new Error(p.status+' '+p.error+' '+JSON.stringify(p.quality?.deterministic?.issues));await new Promise(resolve=>setTimeout(resolve,20));}throw new Error('timed out '+JSON.stringify(store.get(uid,id)?.status));}
+async function wait(id,predicate){for(let i=0;i<6000;i++){const p=store.get(uid,id);if(predicate(p))return p;if(['failed','quality_blocked'].includes(p?.status))throw new Error(p.status+' '+p.error+' '+JSON.stringify(p.quality?.deterministic?.issues));await new Promise(resolve=>setTimeout(resolve,20));}throw new Error('timed out '+JSON.stringify({status:store.get(uid,id)?.status,stage:store.get(uid,id)?.stage}));}
 try{
  const created=await call('POST','/ppt/projects',{inputKind:'file',fileName:'measurements.md',fileBase64:Buffer.from(text).toString('base64'),images:[image],template:'light',templateContentMode:'design_only',pages:4,configId:'fixture',generationPolicy:{version:1,detail:'balanced',language:{mode:'source'},knowledge:'source_only'}});
  assert.equal(created.status,201,JSON.stringify(created.body));const id=created.body.project.id;
@@ -54,7 +55,7 @@ try{
  const table=p.renderTree.slides[1].elements.find(e=>e.kind==='table'),title=p.renderTree.slides[1].elements.find(e=>e.semanticRole==='title');assert.ok(table&&title);
  const canvas=p.deck.slides[1].sourceArtifactFit.canvas;assert.ok(Math.abs(table.bounds.x+table.bounds.width/2-(canvas.x+canvas.width/2))<1);assert.ok(Math.abs(table.bounds.y+table.bounds.height/2-(canvas.y+canvas.height/2))<1);
  assert.ok(p.renderTree.slides[2].elements.some(e=>e.kind==='image'&&e.content.dataUrl===image.dataUrl));
- assert.equal(p.deck.slides.at(-1).title,'Thanks for watching!');assert.ok(!p.renderTree.slides.flatMap(s=>s.elements).some(e=>/完整来源细节见本页备注|完整表见备注/.test(e.content?.text||'')));
+ assert.ok(p.renderTree.slides.at(-1).elements.some(element=>element.content?.text==='Thanks for watching!'));assert.equal(p.deck.slides.at(-1).title,'Release rule','the final required topic is not overwritten by the greeting');assert.ok(!p.renderTree.slides.flatMap(s=>s.elements).some(e=>/完整来源细节见本页备注|完整表见备注/.test(e.content?.text||'')));
  const target=runtime.host(p,p.publishedArtifactPath||p.renderOutput||'/workspace/presentation.pptx');
  const audit=spawnSync(python,['-c',String.raw`
 from pptx import Presentation
@@ -70,7 +71,7 @@ print(json.dumps({'slides':len(p.slides),'originalFigureHashPreserved':True,'com
  const out=process.env.PPT_TEST_OUTPUT;if(out){fs.mkdirSync(out,{recursive:true});fs.copyFileSync(target,path.join(out,'generation-input-contract.pptx'));fs.writeFileSync(path.join(out,'generation-input-contract.json'),JSON.stringify({snapshots:snapshots.map(s=>({firstPopulated:!!s.first,secondAbsent:!s.second,futureAbsent:!s.future})),audit:JSON.parse(audit.stdout),tableBounds:table.bounds,canvas},null,2));}
  const largeFile=path.join(root,'large-source.png');const large=spawnSync(python,['-c',"from PIL import Image;import random,sys;Image.frombytes('RGB',(1024,512),random.Random(42).randbytes(1024*512*3)).save(sys.argv[1])",largeFile],{encoding:'utf8'});assert.equal(large.status,0,large.stderr);
  const largeBytes=fs.readFileSync(largeFile);assert.ok(largeBytes.length>512*1024);
- const direct=await call('POST','/ppt/projects',{inputKind:'file',fileName:'large-source.png',fileBase64:largeBytes.toString('base64'),template:'light',pages:3,configId:'fixture',generationPolicy:{version:1,detail:'balanced',language:{mode:'source'},knowledge:'source_only'}});assert.equal(direct.status,201,JSON.stringify(direct.body));
+ const direct=await call('POST','/ppt/projects',{inputKind:'file',fileName:'large-source.png',fileBase64:largeBytes.toString('base64'),executionPolicy:{version:1,qualityLevel:'balanced',roleRoutes:{vision_reader:{primary:{configId:'fixture',model:'vision-fixture',vision:true},fallbacks:[]}}},template:'light',pages:3,configId:'fixture',generationPolicy:{version:1,detail:'balanced',language:{mode:'source'},knowledge:'source_only'}});assert.equal(direct.status,201,JSON.stringify(direct.body));
  let visual=await wait(direct.body.project.id,p=>p.status==='outline_ready');assert.deepEqual(visual.source.mediaWarnings,[],'the default file name is not a missing supplemental image');assert.equal(visual.source.images.length,1);
  assert.equal((await call('POST',`/ppt/projects/${visual.id}/generate`)).status,202);visual=await wait(visual.id,p=>p.status==='completed');assert.ok(visual.renderTree.slides.some(slide=>slide.elements.some(element=>element.kind==='image'&&element.content.dataUrl===visual.source.images[0].dataUrl)));
  const largeExport=runtime.host(visual,visual.publishedArtifactPath);

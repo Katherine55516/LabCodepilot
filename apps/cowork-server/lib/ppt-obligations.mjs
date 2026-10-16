@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
-import {mandatorySelectionFacts}from './ppt-content-selection.mjs';
+import {mandatorySelectionFacts,selectionConstraints}from './ppt-content-selection.mjs';
+import {visibleRequiredSentence} from './ppt-outline-concision.mjs';
 import { inputFramework } from './ppt-input-scope.mjs';
 import { visibleSlideText } from './ppt-evidence.mjs';
 import { nodeContentText, visibleNodes } from './ppt-visible-content.mjs';
@@ -43,17 +44,39 @@ export function mainDeckBriefRequirements(project){
  * the full input for less explicit relations. It is not a semantic extractor. */
 export function obligationRegistry(project) {
   const framework=inputFramework(project), source=String(project.source?.text || project.prompt || ''), entries=[];
-  const add=(text,basis,slideIds=[],span=null)=>{
+  const add=(text,basis,slideIds=[],span=null,sourceBinding={})=>{
     text=String(text||'').trim();if(!text)return;
     const id='ob-'+hash({text,basis,span}).slice(0,20),prior=entries.find(e=>e.id===id);
     if(prior){prior.slideIds=[...new Set([...prior.slideIds,...slideIds])];return;}
-    entries.push({id,priority:'mandatory',text,basis,sourceSpan:span,slideIds:[...new Set(slideIds)]});
+    entries.push({id,priority:'mandatory',text,basis,sourceSpan:span,slideIds:[...new Set(slideIds)],...sourceBinding});
   };
+  // Overview notes resolve optional source detail only when the current
+  // compiled ledger and its source-item marker agree. Explicit conditions
+  // above, visible equivalents and illegal notes choices remain obligations.
+  const notesResolved=new Set();
+  if(project.generationPolicy?.content==='overview'&&project.generationPolicy?.details==='notes'&&project.source?.sha256&&project.contentSelection?.sourceHash===project.source.sha256){
+    const rules=new Map(selectionConstraints(project).map(rule=>[rule.sourceUnitId,rule]));
+    for(const entry of project.contentSelection.entries||[]){
+      const item=project.source.semantic.inventory.items.find(item=>item.id===entry.sourceUnitId),rule=rules.get(entry.sourceUnitId);
+      if(entry.destination==='notes'&&!entry.visibleEquivalentSourceUnitId&&item?.presentation==='notes_by_contract'&&item.presentationBasis===project.contentSelection.hash&&rule?.allowedDestinations.includes('notes')&&rule.notesWithoutVisibleEquivalentAllowed)notesResolved.add(entry.sourceUnitId);
+    }
+  }
+  // body=primary in source mode: a verified other-language side of a pair is
+  // complete in notes and its visible deck-language unit carries its facts.
+  const flat=value=>String(value||'').replace(/[*_`\s]/gu,'');
+  const carriedInNotes=project.generationPolicy?.language?.mode==='source'?(project.contentSelection?.entries||[]).filter(entry=>entry.destination==='notes'&&entry.visibleEquivalentSourceUnitId)
+    .map(entry=>(project.originalSourceInventory?.items||project.source?.semantic?.inventory?.items||[]).find(item=>item.id===entry.sourceUnitId)).filter(Boolean).map(item=>flat(item.text)):[];
+  const pairCarried=line=>{const key=flat(line);return key.length>=8&&carriedInNotes.some(text=>text.includes(key));};
+  // Overview contract: only a definition or a hard condition pins a sentence
+  // to the slides (the same rule the selection ledger enforces). A softer
+  // qualifier inside a unit legitimately kept in notes is resolved there.
+  const resolvedTexts=[...notesResolved].map(id=>(project.originalSourceInventory?.items||project.source?.semantic?.inventory?.items||[]).find(item=>item.id===id)).filter(Boolean);
+  const notesCarried=line=>{const key=flat(line);if(key.length<8)return false;const item=resolvedTexts.find(unit=>flat(unit.text).includes(key));return Boolean(item)&&!String(line).split(/(?<=[。！？.!?])\s*/u).some((sentence,index)=>visibleRequiredSentence(item,sentence,index));};
   // Fences and Markdown tables are independently checked as source objects.
   let fenced=false,offset=0;
   for(const line of source.split(/(?<=\n)/u)) {
     if(/^\s*(```|~~~)/u.test(line))fenced=!fenced;
-    else if(!fenced&&!/^\s*\|/u.test(line)&&qualifier.test(line)) {
+    else if(!fenced&&!/^\s*\|/u.test(line)&&qualifier.test(line)&&!pairCarried(line)&&!notesCarried(line)) {
       const chunks=(project.source?.semantic?.chunks||[]).filter(c=>c.text?.includes(line.trim())).map(c=>c.id);
       const owners=(project.planning?.slidePlan||[]).filter(p=>p.sourceChunks?.some(id=>chunks.includes(id))).map(p=>p.slideId);
       add(line,'source_condition',owners,{start:offset,end:offset+line.length,encoding:'utf16'});
@@ -65,8 +88,14 @@ export function obligationRegistry(project) {
     add(text,start>=0?'source_detail':'planned_detail',[plan.slideId],start>=0?{start,end:start+text.length,encoding:'utf16'}:null);
   }
   if(project.contentSelection?.entries?.some(e=>e.summaryText||e.visibleEquivalentSourceUnitId))for(const fact of mandatorySelectionFacts({...project,source:{...project.source,semantic:{...project.source.semantic,inventory:project.originalSourceInventory||project.source.semantic.inventory}}})){
-    const start=source.indexOf(fact.text),equivalent=project.contentSelection.entries.find(e=>e.sourceUnitId===fact.sourceUnitId)?.visibleEquivalentSourceUnitId,owners=project.outline.filter(o=>o.sourceUnitIds?.includes(equivalent||fact.sourceUnitId)).map(o=>o.id);
-    add(fact.text,'source_summary_detail',owners,start>=0?{start,end:start+fact.text.length,encoding:'utf16'}:null);
+    if(notesResolved.has(fact.sourceUnitId)&&!String(project.userRequirements||project.prompt||'').includes(fact.text))continue;
+    const pairedEquivalent=project.contentSelection.entries.find(e=>e.sourceUnitId===fact.sourceUnitId)?.visibleEquivalentSourceUnitId;
+    // Source languages, one body language (body=primary): the other-language
+    // side of a verified pair stays complete in notes, and its visible
+    // deck-language unit already carries the same facts as its own obligations.
+    if(pairedEquivalent&&project.generationPolicy?.language?.mode==='source')continue;
+    const start=source.indexOf(fact.text),equivalent=pairedEquivalent,owners=project.outline.filter(o=>o.sourceUnitIds?.includes(equivalent||fact.sourceUnitId)).map(o=>o.id);
+    add(fact.text,'source_summary_detail',owners,start>=0?{start,end:start+fact.text.length,encoding:'utf16'}:null,{sourceUnitId:fact.sourceUnitId,...(equivalent?{visibleEquivalentSourceUnitId:equivalent}:{})});
   }
   for(const text of mainDeckBriefRequirements(project))add(text,'brief_requirement');
   const selected=project.reviewScope?.obligationIds;
@@ -113,4 +142,13 @@ export function obligationFailures(audit) {
 }
 export function obligationContext(project) {
   return `\nMANDATORY_OBLIGATIONS=${JSON.stringify(obligationRegistry(project))}\nPreserve full conditions, negation, exceptions, units, uncertainty and relationships. Full spans outrank summaries. Planned details must be checked against INPUT_FRAMEWORK, never used as new fact authority. Density is filled with distinct supported content; if capacity is insufficient, reflow/split or report conflict, never truncate an obligation or repeat filler.\n`;
+}
+
+/** Candidate locations only: IDs never certify semantic preservation. The critic
+ * still checks the actual current text/rows and returns its own verdict. */
+export function obligationVisibleCandidates(project,entry){
+ const sourceId=entry.visibleEquivalentSourceUnitId||entry.sourceUnitId;
+ return (project.deck?.slides||[]).flatMap(slide=>visibleNodes(slide).filter(node=>nodeContentText(node)&&
+   (sourceId?node.sourceArtifact?.sourceUnitId===sourceId:(entry.slideIds||[]).includes(slide.id)))
+  .map(node=>({slideId:slide.id,nodeId:node.id,quoteId:visibleEvidenceQuoteId(slide.id,node),type:node.type,...(node.sourceArtifact?{sourceArtifact:node.sourceArtifact}:{})})));
 }

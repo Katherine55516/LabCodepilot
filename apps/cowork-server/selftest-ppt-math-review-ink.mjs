@@ -1,0 +1,30 @@
+import assert from 'node:assert/strict';import fs from 'node:fs';import path from 'node:path';import os from 'node:os';
+import {richTextContent}from './lib/ppt-rich-text.mjs';
+import {sourceComponent,measureComponent}from './lib/ppt-density-capacity.mjs';
+import {reviewDisplayText,reviewDisplayRows}from './lib/ppt-review-display.mjs';
+import {deckReviewPrompt}from './lib/ppt-quality.mjs';import {reviewBatches}from './lib/ppt-review-batches.mjs';
+import {visibleEvidenceQuoteId,resolveObligationQuoteReferences}from './lib/ppt-obligations.mjs';
+import {inspectObjectIntegrity}from './lib/ppt-object-integrity.mjs';
+import {BUILT_INS,snapshotTemplate}from './lib/ppt-template.mjs';import {renderPptx}from './lib/ppt-render.mjs';import {localPptRuntime}from './test/ppt-local-runtime.mjs';
+
+const content=richTextContent('Searching $10^6$ candidate formulas.'),node={id:'formula',type:'text',semanticRole:'source-structure',sourceArtifact:{sourceUnitId:'search'},content};
+assert.match(content.text,/106/);assert.equal(reviewDisplayText(node),String.raw`Searching \(10^6\) candidate formulas.`);
+assert.equal(reviewDisplayText({type:'text',content:{text:'Searching 106 candidate formulas.'}}),'Searching 106 candidate formulas.');
+assert.equal(reviewDisplayText({type:'text',content:richTextContent('Searching $10^7$ candidate formulas.')}),String.raw`Searching \(10^7\) candidate formulas.`);
+assert.deepEqual(reviewDisplayRows({rows:[[content.text,'plain 106']],cellRich:[[content.richText,null]]}),[[String.raw`Searching \(10^6\) candidate formulas.`,'plain 106']]);
+const item={id:'search',type:'MechanismBlock',must_preserve_structure:true,text:'Searching $10^6$ candidate formulas.',chunkRefs:['search']};
+const p={source:{text:item.text,semantic:{inventory:{items:[item]}}},outline:[{id:'s',sourceUnitIds:[item.id]}],deck:{slides:[{id:'s',title:'Search',nodes:[node]}]},planning:{slidePlan:[{slideId:'s',sourceArtifacts:[{sourceUnitId:item.id}]}]}};
+assert.deepEqual(inspectObjectIntegrity(p).issues,[]);const quote=visibleEvidenceQuoteId('s',node);
+const view={...p,reviewScope:{mode:'global'}},prompt=deckReviewPrompt(view);assert.ok(prompt.includes('"text":'+JSON.stringify(reviewDisplayText(node))));assert.ok(!prompt.includes('"text":"Searching 106 candidate formulas."'));
+assert.equal(resolveObligationQuoteReferences({checks:[{evidence:[{slideId:'s',nodeId:node.id,quoteId:quote}]}]},p).checks[0].evidence[0].excerpt,content.text,'quote identity/excerpt remain bound to the literal current carrier');
+const lost=structuredClone(p);delete lost.deck.slides[0].nodes[0].content.richText;assert.ok(inspectObjectIntegrity(lost).issues.some(i=>i.sourceUnitId===item.id),'flattened characters cannot prove preservation of an exponent');
+const wrong=structuredClone(p);wrong.deck.slides[0].nodes[0].content=richTextContent('Searching $10^7$ candidate formulas.');assert.ok(inspectObjectIntegrity(wrong).issues.some(i=>i.sourceUnitId===item.id));
+const long=structuredClone(p);long.deck.slides.push(...Array.from({length:19},(_,i)=>({id:'extra'+i,title:'Context',nodes:[]})));const batch=reviewBatches(long)[0].project;
+assert.equal(batch.reviewScope.fullSourceInstances[0].text,reviewDisplayText(node));assert.equal(batch.reviewScope.fullSourceInstances[0].quoteId,quote);
+const field={id:'library',type:'ChecklistBlock',must_preserve_structure:true,text:String.raw`- 一个**字段库** $\mathcal{F} = \{f_1, \dots, f_m\}$，包含原始及轻度衍生的数据序列（开盘价、收盘价、成交量、换手率、账面价值……）；`};
+const component=sourceComponent(field),geometry={x:792480,y:4693617,width:5230368,height:1e12},fit=measureComponent(component,geometry,18);
+assert.ok(fit.height/12700>=85.6,'reserve the measured inline-math ink without shrinking the 18pt text');
+const native={id:'library-node',type:component.type,semanticRole:'source-structure',sourceArtifact:{sourceUnitId:field.id},geometry:{...geometry,height:fit.height},content:component.content,style:{fontSizePt:18,fontFamily:'Noto Sans CJK SC',eastAsiaFontFamily:'Noto Sans CJK SC',lineHeight:1.18,paragraphSpacingEm:.4}};
+const exported={id:'math-ink',template:'violet',templateSpec:snapshotTemplate(BUILT_INS.find(t=>t.id==='violet')),source:{text:field.text,semantic:{inventory:{items:[field]}}},deck:{slides:[{id:'library-page',title:'Field Library',nodes:[native]}]}};
+const dir=fs.mkdtempSync(path.join(os.tmpdir(),'ppt-math-ink-'));try{const result=await renderPptx(exported,localPptRuntime(dir).io);assert.equal(result.exportVerification.status,'passed');}finally{fs.rmSync(dir,{recursive:true,force:true});}
+console.log('Typed review text/rows/witnesses, immutable quote identities, missing/wrong exponent negatives, measured 18pt CJK inline-math ink and actual PPTX visibility passed.');

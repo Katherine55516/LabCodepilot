@@ -29,7 +29,7 @@ export function fitSourceMathFrames(slide,project={}){
 /** Reserve native glyph ink without changing the selected font or point size. */
 export function fitNativeTitleFrames(project, slide, {allText=false}={}) {
   for (const node of slide.nodes || []) {
-    if ((allText ? node.type !== 'text' : node.semanticRole !== 'template-title') || node.locked || !node.nativeRef || !node.geometry || !String(node.content?.text || '').trim()) continue;
+    if ((allText ? node.type !== 'text' : node.semanticRole !== 'template-title') || node.locked || node.content?.mustPreserve || !node.nativeRef || !node.geometry || !String(node.content?.text || '').trim()) continue;
     const original = node.templateTitleFrameAdaptation?.originalGeometry || structuredClone(node.geometry);
     const pointSize = Number(node.style?.fontSizePt);
     if (!(pointSize > 0)) continue;
@@ -87,3 +87,24 @@ export function fitNativeTitleFrames(project, slide, {allText=false}={}) {
 }
 
 export const fitNativeTextFrames=(project,slide)=>fitNativeTitleFrames(project,slide,{allText:true});
+
+
+/** A native section label and its small enclosing pill are one visual group.
+ * Automatic labels may grow together; user geometry/fixed objects are exact. */
+export function fitNativeSectionDecorations(project,slide,index){
+ if(slide.sectionLabel?.basis!=='source-heading')return;
+ const shapeId=slide.sectionLabel.shapeId,spec=project.templateFidelity?.slides?.[index];
+ const label=slide.nodes?.find(node=>node.nativeRef?.shapeId===shapeId&&node.type==='text');
+ const original=spec?.nodes?.find(node=>node.nativeRef?.shapeId===shapeId)?.geometry;
+ if(!label||!original||label.locked||label.userGeometry||label.content?.mustPreserve)return;
+ const candidates=(slide.nodes||[]).filter(node=>{const g=node.geometry;return node.type==='shape'&&g&&!node.locked&&!node.userGeometry&&!node.content?.mustPreserve&&g.width<project.templateFidelity.width*.6&&g.height<project.templateFidelity.height*.12&&g.x<=original.x&&g.x+g.width>=original.x+original.width*.5&&g.y<=original.y+original.height*.5&&g.y+g.height>=original.y+original.height*.5;});
+ const pill=candidates.sort((a,b)=>a.geometry.width*a.geometry.height-b.geometry.width*b.geometry.height)[0];if(!pill)return;
+ const base=pill.sectionDecorationFrameAdaptation?.originalGeometry||structuredClone(pill.geometry),font=Number(label.style?.fontSizePt)||11,margins=label.nativeTextFrame?.margins||[0,0,0,0];
+ const textWidth=Math.ceil([...String(label.content?.text||'')].reduce((sum,char)=>sum+font*(char.codePointAt(0)>127?1:/[MW@]/u.test(char)?.85:.55),0)/.9*12700)+Number(margins[0]||0)+Number(margins[2]||0);
+ const inset=Math.max(25400,original.x-base.x),width=Math.max(base.width,inset*2+textWidth);
+ let right=project.templateFidelity.width-91440;
+ for(const node of slide.nodes||[]){const g=node.geometry;if(node===label||node===pill||!g||g.width*g.height>project.templateFidelity.width*project.templateFidelity.height*.6)continue;if(g.x>=base.x+base.width&&g.y<base.y+base.height&&g.y+g.height>base.y)right=Math.min(right,g.x-12700);}
+ if(base.x+width>right){pill.sectionDecorationFrameAdaptation={status:'blocked',originalGeometry:base,requiredWidth:width,availableWidth:right-base.x};return;}
+ pill.geometry={...base,width};pill.sectionDecorationFrameAdaptation={status:'adapted',originalGeometry:base,basis:'source-heading label and enclosing decoration, same font; within neighboring-object bounds'};
+ label.geometry={...label.geometry,width:Math.max(original.width,textWidth)};
+}

@@ -522,3 +522,12 @@ export async function selectPptOption(locator: Locator, value: string) {
   await locator.click();
   await locator.page().locator(`[data-ppt-option-value="${value || '__empty__'}"]`).click();
 }
+
+/** Configure one available model for the roles when a legacy flow test needs a fixed provider. */
+export async function choosePptRoleModel(page: Page, modelId: string) {
+  const settings=page.getByTestId('ppt-quality-settings');
+  await expect(settings.getByRole('button',{name:/均衡/})).toHaveAttribute('aria-pressed','true');
+  await settings.locator('summary').click();
+  const selectors=settings.getByRole('combobox');
+  for(const selector of (await selectors.all()).slice(0,6))await selectPptOption(selector,modelId);
+}

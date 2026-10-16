@@ -1,11 +1,13 @@
 /** Outline concision for the default overview contract (postmortem round 6,
  * docs/exec-plans/active/ppt-outline-concision.md). Reference: Gamma turns a
  * tutorial into about one content page per two major source sections, 3–4
- * cards per page, one body language with bilingual labels and the detail in
+ * cards per page, topics in the deck language (round 7) and the detail in
  * speaker notes. full_source/course contracts, explicit page counts and user
  * outlines keep their existing behaviour: every helper here is a no-op for them. */
+import { deckScript, topicLanguageRule } from './ppt-presentation-contract.mjs';
 import { displayUnits } from './ppt-density-profile.mjs';
 import { sourcePointListKind } from './ppt-source-list-kinds.mjs';
+import { sourceScriptOf } from './ppt-presentation-policy.mjs';
 
 /** One visible claim: a short heading plus at most two sentences. */
 export const CARD_UNITS = 140;
@@ -58,9 +60,11 @@ export function outlineGrowth(project, finalPages) {
 // audited here), exactly as in the explicit output-language contract.
 const PROTECTED_PAIR_TYPES = new Set(['EquationBlock', 'CodeBlock', 'ProcessBlock', 'ChecklistBlock', 'TaxonomyBlock']);
 export function primaryLanguageEquivalents(project, item, items) {
-  if (!singleLanguageBody(project) || !item.languagePairId || item.languageRole !== 'translation') return [];
+  // The visible side of a pair is the one in the deck language (round 7, B1),
+  // so titles and body share one main language.
+  if (!singleLanguageBody(project) || !item.languagePairId || sourceScriptOf(item.text) === deckScript(project)) return [];
   if (item.mustDisplay || item.rows || sourcePointListKind(item) || PROTECTED_PAIR_TYPES.has(item.type)) return [];
-  return items.filter(other => other.id !== item.id && other.languagePairId === item.languagePairId && other.languageRole !== 'translation').map(other => other.id);
+  return items.filter(other => other.id !== item.id && other.languagePairId === item.languagePairId && sourceScriptOf(other.text) === deckScript(project)).map(other => other.id);
 }
 
 /** Item 2: under the overview contract a prose unit costs one card; protected
@@ -139,7 +143,7 @@ export function concisionPlannerRule(project) {
   const budget = presentationBudget(project);
   return `<concision>Each content page carries 3–4 cards (short heading + at most two sentences); original detail stays in speaker notes.` +
     (budget ? ` Deck budget: about ${budget.target} pages including cover${budget.navigation ? ' and navigation' : ''}, at most ${budget.max}; combine adjacent sections rather than adding pages.` : '') +
-    (singleLanguageBody(project) ? ' Bilingual source: the original-language unit of each detected pair is the visible owner; its translation stays in notes (visibleEquivalentSourceUnitId); titles and section labels stay bilingual.' : '') +
+    (singleLanguageBody(project) ? ` Bilingual source: the unit of each detected pair in the deck language is the visible owner; the other language stays in notes (visibleEquivalentSourceUnitId). ${topicLanguageRule(project)}` : '') +
     '</concision>';
 }
 
@@ -179,7 +183,7 @@ export function routeTranslationsToNotes(project, raw, equivalentsOf = (item, it
     });
     selection = selection.filter(entry => entry.sourceUnitId !== item.id && !(entry.sourceUnitId === original && entry.destination === 'notes'));
     if (!selection.some(entry => entry.sourceUnitId === original)) selection.push({ sourceUnitId: original, destination: 'slides', reason: 'Original-language owner of a bilingual pair.' });
-    selection.push({ sourceUnitId: item.id, destination: 'notes', visibleEquivalentSourceUnitId: original, reason: 'Translation kept in speaker notes; the original-language unit carries the slide.' });
+    selection.push({ sourceUnitId: item.id, destination: 'notes', visibleEquivalentSourceUnitId: original, reason: 'Other-language side kept in speaker notes; the deck-language unit carries the slide.' });
     moved++;
   }
   return moved ? { ...raw, slides, selection, translationRouting: { version: 1, moved } } : raw;

@@ -18,7 +18,11 @@ function formulaCalls(value) {
     }
     if (end < 0) continue;
     const expression = text.slice(match.index, end);
-    if (expression.length >= 15 && /[+*/-]/u.test(expression)) calls.push({ start: match.index, end, expression });
+    // Pagination locators are editorial metadata, not function calls. Require
+    // the complete locator grammar and the space before '('; arithmetic calls
+    // (including spaced calls and a variable named Rows) still use source checks.
+    const locator = /\s+\(\s*(?:rows?|pages?|items?|sections?|slides?|lines?)\s+\d+\s*[-–—]\s*\d+\s*\)$/iu.test(expression);
+    if (!locator && expression.length >= 15 && /[+*/-]/u.test(expression)) calls.push({ start: match.index, end, expression });
   }
   return calls.filter(call => !calls.some(other => other !== call && other.start < call.start && other.end >= call.end));
 }
@@ -59,6 +63,15 @@ function tableRowLabels(block) {
   const divider = rows.findIndex(row => row.length > 1 && row.every(cell => !cell || /^[:\s-]+$/u.test(cell)));
   if (divider < 0) return [];
   return rows.slice(divider + 1).map(row => row[0].replace(/[*`$]/gu, '').trim()).filter(Boolean);
+}
+
+/** Evidence preservation/collection is a procedure, not a claim of measured
+ * results. A title explicitly promising results still needs real evidence. */
+export function titlePromisesEvidence(title='') {
+ const text=String(title);
+ if(/\bresults?\b|实测结果|基准结果|测试结果/iu.test(text))return true;
+ const procedural=/\b(?:(?:evidence|benchmark)\s+(?:retention|preservation|collection|handling|storage|protocol|method(?:s|ology)?|design|plan(?:ning)?)|(?:retain(?:ing)?|preserv(?:e|ing)|collect(?:ing)?|handl(?:e|ing)|stor(?:e|ing))\s+evidence)\b|证据(?:保留|保全|保存|留存|收集|采集|管理)|(?:保留|保全|保存|留存|收集|采集|管理)证据/iu;
+ return /\b(?:evidence|benchmark)\b|证据/iu.test(text)&&!procedural.test(text);
 }
 
 export function inspectContent(project, deck = project.deck) {
@@ -219,7 +232,7 @@ export function inspectContent(project, deck = project.deck) {
       }
     }
     if (project.source?.text) for (const { expression } of formulaCalls(visibleText)) {
-      if (!formulaKey(sourceDisplayText(project.source.text)).includes(formulaKey(sourceDisplayText(expression))))
+      if (!formulaKey(project.source.text).includes(formulaKey(expression)) && !formulaKey(sourceDisplayText(project.source.text)).includes(formulaKey(sourceDisplayText(expression))))
         issues.push({ code: 'visible_formula_unverified', severity: 'error',
           message: `可见公式与输入来源不一致：${expression.slice(0, 100)}`, slideId: slide.id, repairable: false });
     }
@@ -233,14 +246,15 @@ export function inspectContent(project, deck = project.deck) {
     for (const atom of missingRequiredEvidence(project, slide, contract))
       issues.push({ code: 'required_evidence_missing', severity: 'error', message: `锁定来源证据未出现在可见页面：${atom.id}`,
         slideId: slide.id, repairable: false, evidenceId: atom.id });
-    const evidenceTitle = /\b(?:evidence|results?|benchmark)\b|证据|实测结果|基准结果/iu.test(slide.title || '');
+    const evidenceTitle = titlePromisesEvidence(slide.title);
     const sourcesTitle = /\b(?:sources?|references?|citations?)\b|来源|参考文献|引用/iu.test(slide.title || '');
     if (sourcesTitle && project.source?.kind === 'file' && project.source.name &&
       !normalized(visibleText).includes(normalized(project.source.name)))
       issues.push({ code: 'source_page_without_citation', severity: 'error',
         message: `来源页没有在可见文字中列出输入文件 ${project.source.name}`, slideId: slide.id, repairable: false });
-    const citedAtoms = atoms.filter(atom => slide.sourceChunks?.length
-      ? slide.sourceChunks.includes(atom.chunkId)
+    const chunkIds=new Set(slide.sourceChunks?.length ? slide.sourceChunks : project.outline?.find(outline=>outline.id===slide.id)?.chunkRefs || []);
+    const citedAtoms = atoms.filter(atom => chunkIds.size
+      ? chunkIds.has(atom.chunkId)
       : (slide.sourceRefs || []).some(ref => atom.sourceRefs.includes(ref)));
     if (evidenceTitle && citedAtoms.length && !citedAtoms.some(atom => evidenceVisible(atom, visibleText)))
       issues.push({ code: 'evidence_page_without_evidence', severity: 'error', message: '标题承诺证据或结果，但可见页面没有对应来源事实',
@@ -248,7 +262,6 @@ export function inspectContent(project, deck = project.deck) {
     if (evidenceTitle && !citedAtoms.length && segments.length)
       issues.push({ code: 'evidence_page_source_absent', severity: 'error', message: '标题承诺证据或结果，但本页来源没有可核对的证据原子；应补充来源或改为评估方法页',
         slideId: slide.id, repairable: false });
-    const chunkIds=new Set(slide.sourceChunks || project.outline?.find(outline=>outline.id===slide.id)?.chunkRefs || []);
     const directSources=[...segments.filter(segment=>slide.sourceRefs?.includes(segment.id)).map(segment=>sourceDisplayText(segment.text)),...(project.source?.semantic?.chunks||[]).filter(chunk=>chunkIds.has(chunk.id)).map(chunk=>sourceDisplayText(chunk.text))];
     const citedMeasurements = [...citedAtoms.flatMap(atom => atom.measurements || []),...directSources.flatMap(evidenceMeasurements)];
     for (const measurement of evidenceMeasurements(visibleText)) {

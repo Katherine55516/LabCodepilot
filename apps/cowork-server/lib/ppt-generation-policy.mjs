@@ -1,5 +1,5 @@
 /** Versioned, optional policy. Missing fields deliberately preserve legacy decks. */
-export const PPT_PROMPT_CONTRACT_VERSION = 31;
+export const PPT_PROMPT_CONTRACT_VERSION = 44;
 /** Only an explicit presentation-generation request overrides source languages.
  * Ignore fenced code, quotations and ordinary bilingual subject headings. */
 export function explicitLanguageRequest(value){
@@ -24,7 +24,7 @@ export function explicitLanguageRequest(value){
 
 export function defaultGenerationPolicy(request=''){
  const locale=explicitLanguageRequest(request);
- return {version:1,detail:'balanced',content:'overview',details:'notes',language:locale?{mode:'output',locale}:{mode:'source',body:'both'},knowledge:'source_only',code:{presentation:'omit'}};
+ return {version:1,detail:'balanced',content:'overview',details:'notes',language:locale?{mode:'output',locale}:{mode:'source',body:'primary'},knowledge:'source_only',code:{presentation:'omit'}};
 }
 export function normalizeGenerationPolicy(value) {
   if (value === undefined) return undefined;

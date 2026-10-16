@@ -4,8 +4,11 @@
  * list split across pages, a cover that drops the document title, a generated
  * title that renames a source term, and commentary that only restates the page.
  * All findings are warnings until a real-model baseline calibrates them. */
+import {deckScript} from './ppt-presentation-contract.mjs';
+import {inspectDuplicatePageTitles} from './ppt-page-titles.mjs';
 import { visibleNodes, nodeContentText } from './ppt-visible-content.mjs';
 import {projectedDocumentTitleText} from './ppt-language-projection.mjs';
+import {projectedTopicTitleText,topicTitleProjectionGroup} from './ppt-topic-title-projection.mjs';
 import { preservesReadingOrder } from './ppt-density-capacity.mjs';
 
 const HAN = /\p{Script=Han}/u;
@@ -73,7 +76,16 @@ export function sourceDocumentTitle(project) {
  * the complete notes archive instead of forcing bilingual cover reproduction. */
 export function displayedDocumentTitle(project){
   const title=sourceDocumentTitle(project),policy=project.generationPolicy;
-  if(!title||policy?.language?.mode!=='output')return title;
+  if(!title)return title;
+  if(policy?.language?.mode!=='output'){
+    const projected=projectedTopicTitleText(project);
+    if(projected)return sourceDocumentTitle({source:{text:'# '+projected}});
+    if(topicTitleProjectionGroup(project))return null;
+    // Source languages: the cover topic uses the deck language only (round 7, B1).
+    if(title.variants.length<2||project.deckTitle?.source==='user')return title;
+    const han=deckScript(project)==='han',variants=title.variants.filter(v=>han?/\p{Script=Han}/u.test(v.text):!/\p{Script=Han}/u.test(v.text));
+    return variants.length?{...title,variants}:title;
+  }
   const projected=projectedDocumentTitleText(project);
   if(projected)return sourceDocumentTitle({source:{text:'# '+projected}});
   if(policy.language.locale==='zh-HK')return null;
@@ -82,7 +94,7 @@ export function displayedDocumentTitle(project){
 }
 export function inspectCoverTitle(project, slides) {
   const title = displayedDocumentTitle(project), cover = slides[0];
-  if(!title&&cover&&project.deckTitle?.source!=='user'&&project.generationPolicy?.language?.mode==='output'&&sourceDocumentTitle(project))return [issue('cover_title_projection_missing',cover,'The complete source title needs an independently audited projection into the requested output language before confirmation; do not restore another language.')];
+  if(!title&&cover&&project.deckTitle?.source!=='user'&&(project.generationPolicy?.language?.mode==='output'||topicTitleProjectionGroup(project))&&sourceDocumentTitle(project))return [issue('cover_title_projection_missing',cover,'The source title needs an independently audited projection into the deck topic language before confirmation; do not restore another language.')];
   if (!title || !cover || project.deckTitle?.source === 'user') return [];
   const visible = visibleNodes(cover).map(nodeContentText).join('\n') + '\n' + (cover.title || '');
   const norm = value => String(value).normalize('NFKC').replace(/\s+/gu, '').toLowerCase();
@@ -149,21 +161,19 @@ export function inspectExplanationNovelty(project, slides) {
 
 /** Bilingual source preserved in both languages, but titles in one: the deck
  * reads as two languages under a monolingual navigation. */
+/** Round 7 (B1): topic titles use the deck language only. Report content
+ * titles written in the other language, and titles that pair both languages
+ * ("English | 中文"). Technical names inside a title are allowed; locked user
+ * titles are never second-guessed. */
 export function inspectTitleLanguage(project, slides) {
-  const items = project.source?.semantic?.inventory?.items || [];
-  const paired = items.filter(item => item.languagePairId).length;
-  if (project.generationPolicy?.language?.mode === 'output' || paired < Math.max(4, items.length * .3)) return [];
-  const content = slides.slice(1).filter(slide => slide.title);
-  const mixed = content.filter(slide => HAN.test(slide.title) && /[A-Za-z]{3,}/u.test(slide.title.replace(/\b(?:IC|ICIR|LLM|GP|RL|PBO|SPA|ST|alpha|Alpha\d*|WorldQuant|A)\b/gu, '')));
-  const cjkOnly = content.filter(slide => HAN.test(slide.title)).length, latinOnly = content.length - cjkOnly;
-  // F-P1-5: a recorded policy (primary-language titles, other language in the
-  // bilingual eyebrow) is deliberate; only titles off that language are reported.
-  if (project.titlePolicy?.otherLanguage === 'eyebrow') {
-    const off = content.filter(slide => project.titlePolicy.primary === 'zh' ? !HAN.test(slide.title) : HAN.test(slide.title));
-    return off.length ? [issue('title_language_inconsistent', off[0], `${off.length} title(s) leave the deck's ${project.titlePolicy.primary} title language; the other language belongs in the bilingual eyebrow.`, { off: off.map(slide => slide.id), policy: project.titlePolicy })] : [];
-  }
-  if (content.length < 4 || mixed.length >= content.length * .5) return [];
-  return [issue('title_language_inconsistent', content[0], `Body text keeps both source languages, but ${Math.max(cjkOnly, latinOnly)}/${content.length} titles use one language. Keep titles bilingual (e.g. “English | 中文”) or record a deliberate single-language title policy.`, { cjkOnly, latinOnly, bilingual: mixed.length })];
+  const han = deckScript(project) === 'han';
+  const content = slides.slice(1).filter(slide => slide.title && !slide.titleLocked && !slide.titleQuality?.locked && !slide.closingGreeting);
+  const off = content.filter(slide => han ? !HAN.test(slide.title) : HAN.test(slide.title));
+  const paired = content.filter(slide => HAN.test(slide.title) && /[A-Za-z]{3,}/u.test(slide.title) && /\s[|｜·]\s|[｜]/u.test(slide.title));
+  const issues = [];
+  if (off.length) issues.push(issue('title_language_inconsistent', off[0], `${off.length} title(s) are not in the deck language (${han ? 'Chinese' : 'English'}); topics use one language and the body may keep both.`, { off: off.map(slide => slide.id), deckScript: han ? 'han' : 'latin' }));
+  if (paired.length) issues.push(issue('title_language_paired', paired[0], `${paired.length} title(s) pair two languages; keep only the deck-language topic.`, { off: paired.map(slide => slide.id) }));
+  return issues;
 }
 
 /** Wrapped code without a hanging indent (fits made before F-P1-9) restarts
@@ -175,5 +185,5 @@ export function inspectCodeWrap(slides) {
 
 export function inspectDeckCoherence(project, slides = project.deck?.slides || []) {
   return [...inspectRelationGroups(project, slides), ...inspectReadingOrder(slides), ...inspectCodeWrap(slides), ...inspectCoverTitle(project, slides),
-    ...inspectTerminology(project, slides), ...inspectExplanationNovelty(project, slides), ...inspectTitleLanguage(project, slides)];
+    ...inspectTerminology(project, slides), ...inspectExplanationNovelty(project, slides), ...inspectTitleLanguage(project, slides), ...inspectDuplicatePageTitles(slides)];
 }

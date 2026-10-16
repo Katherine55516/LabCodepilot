@@ -23,3 +23,15 @@ export function buildTemplateSkeleton(project, slideId) {
     size:{width:project.templateFidelity.width,height:project.templateFidelity.height},
     background:spec.background||project.templateSpec?.palette?.background,elements};
 }
+
+/** A browser may request the in-flight page just after resume cleared its old
+ * component scene. Keep a labelled, non-authoritative current-page preview;
+ * future pages and missing IDs remain absent. This never enters export state. */
+export function buildPendingSlidePreview(project,slideId) {
+ if(!['generating','paused'].includes(project.status))return null;
+ const current=(project.outline||[]).find(slide=>!slide.manualBlank&&!['done','completed'].includes(project.nodes?.[slide.id]?.status));
+ if(!current||current.id!==slideId)return null;
+ const native=buildTemplateSkeleton(project,slideId);if(native)return native;
+ const size=project.renderTree?.size||{width:12192000,height:6858000};
+ return {id:slideId,slideId,index:project.outline.findIndex(s=>s.id===slideId),layoutId:'pending-page',draft:true,size,background:project.templateSpec?.palette?.background||'#ffffff',elements:[applyRenderContract({id:'pending-title-'+slideId,nodeId:'pending-title-'+slideId,kind:'text',semanticRole:'title',locked:true,bounds:{x:Math.round(size.width*.065),y:Math.round(size.height*.08),width:Math.round(size.width*.87),height:Math.round(size.height*.18)},content:{text:current.title||''},style:{fontSizePt:32,fontWeight:700,fontFamily:project.templateSpec?.fonts?.title,color:project.templateSpec?.palette?.foreground||'#111111',lineHeight:1.18},zIndex:1})]};
+}

@@ -1,4 +1,5 @@
-import {fitNativeTextFrames,fitSourceMathFrames} from '../ppt-native-text-fit.mjs';
+import {fitSystemTitleFrames} from '../ppt-system-title-fit.mjs';
+import {fitNativeTextFrames,fitSourceMathFrames,fitNativeSectionDecorations} from '../ppt-native-text-fit.mjs';
 import {componentElements} from './component-layout.mjs';
 import { visibleNodes } from '../ppt-visible-content.mjs';
 import crypto from 'node:crypto';
@@ -47,7 +48,7 @@ function splitBounds(region, count, index, axis = 'x') {
 
 function element(node, kind, region, content, nodeStyle, zIndex, extra = {}) {
   const geometry = node.geometry && ['x', 'y', 'width', 'height'].every(key => Number.isInteger(node.geometry[key])) ? node.geometry : bounds(region);
-  return { id: node.id, nodeId: node.id, kind, bounds: geometry, content, textStyleOverrides:node.textStyleOverrides, style: { ...(nodeStyle || {}), ...(node.style || {}) }, zIndex: Number(node.zIndex ?? zIndex), rotation: Number(node.rotation || 0), locked: Boolean(node.locked), groupId: node.groupId || null, ...extra };
+  return { id: node.id, nodeId: node.id, kind, bounds: geometry, content, textStyleOverrides:node.textStyleOverrides, style: { ...(nodeStyle || {}), ...(node.style || {}) }, zIndex: Number(node.zIndex ?? zIndex), rotation: Number(node.rotation || 0), locked: Boolean(node.locked), userGeometry:node.userGeometry, groupId: node.groupId || null, ...extra };
 }
 
 function adaptiveList(node, region, slide, project) {
@@ -68,9 +69,10 @@ function adaptiveList(node, region, slide, project) {
 function buildPreservedSlide(project, slide, index) {
   fitSourceMathFrames(slide,project);
   fitNativeTextFrames(project,slide);
+  fitNativeSectionDecorations(project,slide,index);
   const origin=project.templateFidelity || project.externalPptx, originIndex=slide.templateSlideIndex ?? slide.nativeSlideIndex;
-  const source = origin.sourceCatalog?.[originIndex] || origin.slides?.[index] || {background:slide.nativeBackground};
-  const elements = visibleNodes(slide).filter(node => node.nativeRef?.slideIndex === originIndex || isSourceOwnedNode(node)).map(node => ({
+  const source = origin.slides?.[index] || origin.sourceCatalog?.[origin.slideMap?.[originIndex]??originIndex] || {background:slide.nativeBackground};
+  const elements = visibleNodes(slide).filter(node => node.nativeRef?.slideIndex === originIndex || isSourceOwnedNode(node)||node.semanticRole==='closing-greeting').map(node => ({
     id: node.id, nodeId: node.id, kind: node.type === 'foreign' ? 'shape' : node.type,
     bounds: node.geometry, content: node.content || {},
     style: { fontFamily: project.templateSpec?.fonts?.body, eastAsiaFontFamily: project.templateSpec?.fonts?.bodyEastAsia,
@@ -84,7 +86,7 @@ function buildPreservedSlide(project, slide, index) {
     background: source.background || project.templateSpec?.palette?.background, elements: elements.map(applyRenderContract), templatePreserved: true };
 }
 
-function buildSlide(project, input, index, total) {
+function buildSlideUnfitted(project, input, index, total) {
   if (project.templateFidelity?.mode === 'preserve' && Number.isInteger(input.templateSlideIndex)) return buildPreservedSlide(project, input, index);
   if (project.externalPptx?.mode === 'preserve' && Number.isInteger(input.nativeSlideIndex)) return buildPreservedSlide(project,input,index);
   const slide = materializeLegacySlide(input);
@@ -160,13 +162,13 @@ function buildSlide(project, input, index, total) {
     }
     elements.push({
       id: node.id, nodeId: node.id, kind: node.type, bounds: geometry,
-      content: node.content || {}, style: node.style || {}, zIndex: Number(node.zIndex || 30 + visualIndex), rotation: Number(node.rotation || 0), locked: Boolean(node.locked), groupId: node.groupId || null,
+      content: node.content || {}, style: node.style || {}, zIndex: Number(node.zIndex || 30 + visualIndex), rotation: Number(node.rotation || 0), locked: Boolean(node.locked), userGeometry:node.userGeometry, groupId: node.groupId || null,
     });
   });
   for (const node of slide.nodes.filter(isSourceOwnedNode)) elements.push({
     id:node.id,nodeId:node.id,kind:node.type,bounds:node.geometry,content:node.content,
     style:{...style(project,typography,'body'),...node.style},zIndex:node.zIndex,
-    semanticRole:node.semanticRole,sourceArtifact:node.sourceArtifact,
+    semanticRole:node.semanticRole,sourceArtifact:node.sourceArtifact,userGeometry:node.userGeometry,
   });
 
   elements.push({
@@ -181,6 +183,8 @@ function buildSlide(project, input, index, total) {
   elements.sort((a, b) => a.zIndex - b.zIndex);
   return { id: slide.id, slideId: slide.id, index, layoutId: slide.layoutId, size: SLIDE_SIZE, background: project.templateSpec?.palette?.background, elements: elements.map(applyRenderContract) };
 }
+
+function buildSlide(project,input,index,total){return fitSystemTitleFrames(buildSlideUnfitted(project,input,index,total));}
 
 export function buildRenderTree(project, deckInput = project.deck) {
   const deck = ensureDeckV3(applyLayoutRegistry(deckInput));

@@ -1,5 +1,6 @@
 'use client';
 
+import {PptPin} from './PptPin';
 import { useState } from 'react';
 import { useTranslation } from '@/hooks/useTranslation';
 import type { PptProject } from '../types';
@@ -33,14 +34,14 @@ export function PptWorkspaceRail({ folders, projects, trashCount, view, tab, fol
       onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); const moved = event.dataTransfer.getData('application/x-aimate-ppt-folder') || dragId; if (moved && moved !== folder.id) onReorderFolder(moved, folder.id); setDragId(null); }}>
       <button type="button" draggable aria-label={`${t('ppt.order.dragFolder')} ${folder.name}`} title={t('ppt.order.dragFolder')} className="cursor-grab px-1.5 text-muted-foreground"
         onDragStart={event => { setDragId(folder.id); event.dataTransfer.setData('application/x-aimate-ppt-folder', folder.id); event.dataTransfer.effectAllowed = 'move'; }} onDragEnd={() => setDragId(null)}>⋮⋮</button>
-      <button className="min-w-0 flex-1 truncate px-1 py-2 text-left text-sm" onClick={() => onFolder(folder.id)}>{folder.pinned ? '📌 ' : '▱ '}{folder.name} ({countsReady?folder.count:"…"})</button>
-      <button className="px-2 text-xs" aria-label={`${t('ppt.folderMenu')} ${folder.name}`} onClick={() => setMenuId(menuId === folder.id ? null : folder.id)}>⋯</button>
+      <button className="min-w-0 flex-1 truncate px-1 py-2 text-left text-sm" onClick={() => onFolder(folder.id)}>▱ {folder.name} ({countsReady?folder.count:"…"})</button>
+      <button title={folder.pinned?t('ppt.unpin'):t('ppt.pin')} aria-label={`${folder.pinned?t('ppt.unpin'):t('ppt.pin')} ${folder.name}`} className="ppt-folder-pin px-1" onClick={()=>onPinFolder(folder)}><PptPin active={folder.pinned}/></button><button className="px-2 text-xs" aria-label={`${t('ppt.folderMenu')} ${folder.name}`} onClick={() => setMenuId(menuId === folder.id ? null : folder.id)}>⋯</button>
       {menuId === folder.id && <div className="absolute right-0 top-full z-30 min-w-32 rounded-lg border border-border bg-popover p-2 shadow-lg">
         <button className="block p-1 text-sm" onClick={() => { setMenuId(null); onPinFolder(folder); }}>{folder.pinned ? t('ppt.unpin') : t('ppt.pin')}</button>
         <button className="block p-1 text-sm" onClick={() => { setMenuId(null); onRenameFolder(folder); }}>{t('ppt.rename')}</button>
         <button className="block p-1 text-sm text-destructive" onClick={() => { setMenuId(null); onDeleteFolder(folder); }}>{t('ppt.delete')}</button>
       </div>}</div>)}
     <button className={`mt-3 block w-full rounded-lg px-3 py-2 text-left text-sm ${view === 'list' && tab === 'trash' ? 'bg-accent font-medium' : 'hover:bg-accent/60'}`} onClick={() => onNav('trash')}>⌫ {t('ppt.tab.trash')} ({countsReady?trashCount:"…"})</button>
-    <div className="ppt-workspace-footer mt-4 rounded-lg border border-border bg-card px-3 py-3 text-xs text-muted-foreground"><strong className="block text-foreground">个人工作区</strong><span>演示文稿仅自己可见</span><p className="mt-2">{countsReady?completed:"…"} 个演示文稿 · {countsReady?running:"…"} 个待处理任务</p><p>{countsReady?projects.length:"…"} / 50 个存储项目</p></div>
+    <div className="ppt-workspace-footer mt-4 rounded-lg border border-border bg-card px-3 py-3 text-xs text-muted-foreground"><strong className="block text-foreground">个人工作区</strong><span>演示文稿仅自己可见</span><p className="mt-2">{countsReady?completed:"…"} 个演示文稿 · {countsReady?running:"…"} 个待处理任务</p><p className="mt-2">{t('ppt.workspace.capacity',{count:countsReady?projects.length:"…"})}</p><progress className="mt-1 w-full" aria-label={t('ppt.workspace.capacity',{count:projects.length})} max={50} value={projects.length}/></div>
   </nav>;
 }

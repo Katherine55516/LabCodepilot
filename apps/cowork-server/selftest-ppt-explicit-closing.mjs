@@ -1,0 +1,14 @@
+import assert from 'node:assert/strict';
+import {normalizePaste} from './lib/ppt-source.mjs';
+import {ensureOutlineClosing,isDedicatedClosing,deterministicClosingDraft} from './lib/ppt-closing-page.mjs';
+import {_internals as api} from './lib/ppt-api.mjs';
+const source=normalizePaste('# Pilot readiness\n\nThe pilot covers 12 test accounts. One owner approves access.\n\n## Recovery\nObserve accounts for 7 days. Keep the retry limit at 3. Pause expansion when acceptance fails.');
+const items=source.semantic.inventory.items.filter(i=>i.type!=='HeadingBlock');
+const p={pages:3,template:'violet',inputKind:'paste',source,pageDecision:{source:'user',mode:'explicit'},generationPolicy:{content:'full_source',details:'slides',knowledge:'source_only',language:{mode:'source'}}};
+const raw={version:2,slides:[{title:'Pilot readiness',role:'cover',sourceUnitIds:[]},{title:'Acceptance and recovery',role:'mechanism',sourceUnitIds:items.map(i=>i.id),focus:'Retain the complete source.'},{title:'Conclusion',role:'closing',sourceUnitIds:[],focus:'Repeat 12 accounts, 7 days and 3 retries.'}]};
+const before=JSON.stringify(source),closed=ensureOutlineClosing(p,structuredClone(raw));assert.equal(closed.slides.length,3);assert.equal(closed.slides.at(-1).title,'Thanks for watching!');assert.ok(isDedicatedClosing(closed.slides.at(-1)));assert.ok(!/12|7|3/.test(closed.slides.at(-1).focus));assert.deepEqual(closed.slides[1].sourceUnitIds,items.map(i=>i.id));assert.deepEqual(deterministicClosingDraft(p,closed.slides.at(-1),2).sourceCommentary,[]);
+const assessed=api.assessOutlineCandidate(p,structuredClone(raw));assert.equal(assessed.outline.length,3);assert.equal(assessed.outline.at(-1).title,'Thanks for watching!');assert.deepEqual(assessed.outline[1].sourceUnitIds,items.map(i=>i.id));assert.equal(JSON.stringify(source),before);
+for(const patch of [{requestedOutline:[{title:'User closing'}]},{update:{baseId:'earlier'}},{source:{text:'An open prompt.'}}])assert.deepEqual(ensureOutlineClosing({...p,...patch},structuredClone(raw)),raw);
+const owned=structuredClone(raw);owned.slides[2].sourceUnitIds=[items.at(-1).id];assert.deepEqual(ensureOutlineClosing(p,structuredClone(owned)),owned,'a substantive final source page keeps its topic and facts');
+const locked=structuredClone(raw);locked.slides[2].titleLocked=true;assert.deepEqual(ensureOutlineClosing(p,structuredClone(locked)),locked,'a manually locked closing topic is not rewritten');
+console.log('Explicit page counts normalize only unowned source closing placeholders before confirmation; source, owned last pages, updates, open prompts and manual locks preserved.');

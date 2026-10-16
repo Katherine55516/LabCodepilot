@@ -143,7 +143,18 @@ def write_rich_text(paragraph,rich,size,color=None,family='Calibri',bold=False):
         run=paragraph.add_run();run.text=spec.get('text','')
         run.font.size=Pt(float(spec.get('fontSizePt',size))*float(spec.get('scale',1)))
         run.font.name=family;run.font.bold=bool(spec.get('bold',bold));run.font.italic=bool(spec.get('italic',False))
-        if spec.get('href'):run.hyperlink.address=spec['href']
+        if spec.get('href'):
+            run.hyperlink.address=spec['href']
+            # Office's hyperlink theme otherwise overrides explicit text paint
+            # in both PowerPoint and LibreOffice/PDF. Use the run's measured
+            # foreground (also correct inside light table cells on dark slides).
+            # MS-ODRAWXML 2.35.1.1 / 5.33: hlinkClr val=tx.
+            from lxml import etree as hyperlink_ET
+            link=run._r.get_or_add_rPr().find(qn('a:hlinkClick'))
+            ext_list=OxmlElement('a:extLst');extension=OxmlElement('a:ext')
+            extension.set('uri','{A12FA001-AC4F-418D-AE19-62706E023703}')
+            paint=hyperlink_ET.Element('{http://schemas.microsoft.com/office/drawing/2018/hyperlinkcolor}hlinkClr',nsmap={'ahyp':'http://schemas.microsoft.com/office/drawing/2018/hyperlinkcolor'})
+            paint.set('val','tx');extension.append(paint);ext_list.append(extension);link.append(ext_list)
         pr=run._r.get_or_add_rPr();pr.set('baseline',str(spec.get('baseline',0)))
         # DrawingML stores hundredths of a point; python-pptx truncates through EMU.
         # Write the nearest representable value directly, exactly as verified.

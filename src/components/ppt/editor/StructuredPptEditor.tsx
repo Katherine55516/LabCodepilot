@@ -8,6 +8,7 @@ import {PptSelect} from "../PptSelect";
 import { PptCanvas } from "../canvas/PptCanvas";
 import { AiBeforeAfterPreview } from "./AiBeforeAfterPreview";
 import { PptHistory } from "../history/PptHistory";
+import {PptExecutionPanel} from './PptExecutionPanel';
 import { PptTextToolbar } from "./PptTextToolbar";
 import { PptInspector } from "../inspector/PptInspector";
 import { prepareImage } from "../PptBlocks";
@@ -87,6 +88,7 @@ export function StructuredPptEditor({
   onClose,
   onFailureDetails,
   initialSlideId,
+  onUserScroll,
 }: {
   project: StructuredProjectView;
   chatOpen?: boolean;
@@ -95,6 +97,8 @@ export function StructuredPptEditor({
   initialSlideId?: string;
   drafts?: Record<string, PptDraft>;
   onPageChange?: (id:string)=>void;
+  /** Called when the user scrolls the canvas themselves (pauses follow). */
+  onUserScroll?: () => void;
   onProject: (project: StructuredProjectView) => void;
   onClose?: () => void;
   onFailureDetails?: () => void;
@@ -108,6 +112,9 @@ export function StructuredPptEditor({
   const [error, setError] = useState("");
   const [conflict, setConflict] = useState(false);
   const [query, setQuery] = useState("");
+  const [conversionOpen,setConversionOpen]=useState(false);
+  const [railCollapsed,setRailCollapsed]=useState(false);
+  const [railWidth,setRailWidth]=useState(208);
   const [thumbMode, setThumbMode] = useState<"list" | "grid">("grid");
   const [presenting, setPresenting] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
@@ -138,7 +145,14 @@ export function StructuredPptEditor({
   const templateFontState=usePptTemplateFonts(project.id,project.template);
   const tree = project.renderTree;
   const paused = project.status === 'paused';
-  const slides = useMemo(() => (tree?.slides || []).filter(item => !paused || ['done', 'completed'].includes(project.nodes?.[item.slideId]?.status || '') || project.outline.find(outline => outline.id === item.slideId)?.manualBlank), [tree, paused, project.nodes, project.outline]);
+  const pageDone = (id: string) => ['done', 'completed'].includes(project.nodes?.[id]?.status || '') || Boolean(project.outline.find(outline => outline.id === id)?.manualBlank);
+  // Gamma page by page (round 7, A2/A7): while generating, the canvas shows the
+  // finished pages and the page being written; later pages are only listed.
+  const writingId = generating ? project.outline.find(outline => !pageDone(outline.id))?.id : undefined;
+  const slides = useMemo(() => (tree?.slides || []).filter(item => generating ? pageDone(item.slideId) || item.slideId === writingId : true),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [tree, paused, project.status, project.nodes, project.outline, writingId]);
+  const plannedPages = project.status === 'generating' ? project.outline.map((outline, index) => ({ outline, index })).filter(({ outline }) => !pageDone(outline.id) && outline.id !== writingId) : [];
   useEffect(() => { if (initialSlideId) { const index = slides.findIndex(item => item.slideId === initialSlideId); if (index >= 0) setPage(index); } }, [initialSlideId, slides]);
   const slide = slides[page];
   const liveEditing = ['generating','failed'].includes(project.status);
@@ -405,6 +419,7 @@ export function StructuredPptEditor({
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           prompt: instruction,
+          qualityLevel:project.executionPolicy?.qualityLevel,
           aspectRatio: "16:9",
           n: 1,
         }),
@@ -841,7 +856,7 @@ export function StructuredPptEditor({
             ? t("ppt.structured.published")
             : t("ppt.edit.draftStatus")}
         </span>
-        <div className="ml-auto flex items-center gap-1 md:gap-2">{project.status==='failed'&&onFailureDetails&&<button className={button} onClick={onFailureDetails}>{t('ppt.failure.details')}</button>}{['failed','quality_blocked'].includes(project.status)&&<button className={button} onClick={()=>void direct('/retry')}>{t(project.status==='failed'?'ppt.retry':'ppt.media.recheck')}</button>}{['completed','quality_blocked'].includes(project.status)&&project.pageDecision?.mode==='explicit'&&!project.externalPptx&&<button className={button} onClick={()=>void direct('/page-policy',{mode:'auto',baseRevision:project.revision})}>{t('ppt.editor.autoPageBudget')}</button>}<button className={button} onClick={() => setTool("ai")}>{t("ppt.edit.optimize")}</button>
+        <div className="ml-auto flex flex-wrap items-center gap-1 md:gap-2"><button className={button} aria-expanded={!railCollapsed} aria-label={t('ppt.editor.toggleRail')} onClick={()=>setRailCollapsed(value=>!value)}>☷</button>{project.status==='failed'&&onFailureDetails&&<button className={button} onClick={onFailureDetails}>{t('ppt.failure.details')}</button>}{['failed','quality_blocked'].includes(project.status)&&<button className={button} onClick={()=>void direct('/retry')}>{t(project.status==='failed'?'ppt.retry':'ppt.media.recheck')}</button>}{['completed','quality_blocked'].includes(project.status)&&project.pageDecision?.mode==='explicit'&&!project.externalPptx&&<button className={button} onClick={()=>void direct('/page-policy',{mode:'auto',baseRevision:project.revision})}>{t('ppt.editor.autoPageBudget')}</button>}<button className={button} onClick={() => setTool("ai")}>{t("ppt.edit.optimize")}</button>
           <button className={button} onClick={() => setTool("theme")}>
             ◐ <span className="hidden lg:inline">{t("ppt.editor.theme")}</span>
           </button>
@@ -861,9 +876,10 @@ export function StructuredPptEditor({
         </div>
       </header>
       <PptTextToolbar key={`${slide.slideId}:${project.revision}:${selectedIds.join(',')}`} elements={selectedElements.filter(element => ['text', 'list', 'timeline', 'metric'].includes(element.kind))} fonts={Object.values(project.templateSpec?.fonts || {}).filter((font): font is string => typeof font === 'string')}
-        onSelectText={() => setSelectedIds([...new Set(slide.elements.filter(element => element.nodeId && !element.locked && ['text', 'list', 'timeline', 'metric'].includes(element.kind)).map(element => element.nodeId!))])}
+        disabledReason={generating&&!pageDone(slide.slideId)?t('ppt.editor.currentDraftReadonly'):undefined} onSelectTitle={()=>setSelectedIds(slide.elements.filter(element=>element.nodeId&&['title','template-title'].includes(element.semanticRole||'')).map(element=>element.nodeId!))} onSelectBody={()=>setSelectedIds(slide.elements.filter(element=>element.nodeId&&['text','list','timeline','metric'].includes(element.kind)&&!['title','template-title','eyebrow'].includes(element.semanticRole||'')).map(element=>element.nodeId!))} onSelectText={() => setSelectedIds([...new Set(slide.elements.filter(element => element.nodeId && !element.locked && ['text', 'list', 'timeline', 'metric'].includes(element.kind)).map(element => element.nodeId!))])}
         onApply={patch => command('nodes.setStyle', { slideId: slide.slideId, changes: selectedElements.filter(element => ['text', 'list', 'timeline', 'metric'].includes(element.kind)).map(element => ({ nodeId: element.nodeId, style: patch, merge: true })) })}/>
       {paused && <p className="shrink-0 border-b border-border px-3 py-1 text-xs text-muted-foreground">{t('ppt.editor.pausedEditing')}</p>}
+      {conversionOpen&&<div role="dialog" aria-modal="true" aria-label={t('ppt.template.convertCopy')} className="fixed inset-0 z-[90] grid place-items-center bg-black/60 p-4"><section className="max-w-lg space-y-4 rounded-xl bg-background p-5"><h2 className="font-semibold">{t('ppt.template.convertCopy')}</h2><p className="text-sm">{t('ppt.template.convertWarning')}</p><div className="flex justify-end gap-2"><button className={button} onClick={()=>setConversionOpen(false)}>{t('ppt.cancel')}</button><button className={primary} onClick={()=>void request(project.id,'/component-copy','POST',{baseRevision:project.revision}).then(result=>{setConversionOpen(false);accept(result.project);history.replaceState(null,'',`/ppt?projectId=${result.project.id}`);}).catch(error=>setError(error.message))}>{t('ppt.template.openCopy')}</button></div></section></div>}
       {error && (
         <div
           role="alert"
@@ -877,11 +893,12 @@ export function StructuredPptEditor({
           )}
         </div>
       )}
-      <div className="ppt-editor-body relative grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[13rem_minmax(0,1fr)_4rem] xl:grid-cols-[15rem_minmax(0,1fr)_4rem]">
+      <div style={{"--ppt-editor-rail":railCollapsed?"0px":`${railWidth}px`} as React.CSSProperties} className="ppt-editor-body ppt-editor-resizable relative grid min-h-0 flex-1 grid-cols-1">
         <aside
-          className="hidden min-h-0 overflow-y-auto border-r border-border p-3 md:block"
+          className={`${railCollapsed?'invisible overflow-hidden p-0':'hidden md:block'} min-h-0 overflow-y-auto border-r border-border p-3`}
           aria-label={t("ppt.editor.thumbnails")}
         >
+          <label className="mb-2 block text-xs text-muted-foreground">{t('ppt.editor.railWidth')}<input aria-label={t('ppt.editor.railWidth')} type="range" min={160} max={300} step={10} value={railWidth} className="w-full" onChange={event=>setRailWidth(Number(event.target.value))}/></label>
           <div className="flex items-center justify-between">
             <div className="flex rounded-lg border border-border p-1">
               <button
@@ -954,7 +971,7 @@ export function StructuredPptEditor({
                   </div>
                   {generating&&<span className="block text-[10px] text-muted-foreground">{t(`ppt.stage.${project.generationStages?.pages?.[item.slideId]||'waiting'}` as TranslationKey)}</span>}
                   <span className="mt-1 block truncate text-xs">
-                    {index + 1}.{" "}
+                    {item.index + 1}.{" "}
                     {project.deck?.slides.find(
                       (value) => value.id === item.slideId,
                     )?.title || item.layoutId}
@@ -987,13 +1004,21 @@ export function StructuredPptEditor({
               </div>
             ))}
           </div>
+          {plannedPages.length > 0 && <ol className="mt-4 space-y-1 border-t border-border pt-3 text-xs text-muted-foreground" data-testid="ppt-planned-pages" aria-label={t('ppt.generation.plannedPages')}>
+            <li className="font-medium text-foreground">{t('ppt.generation.plannedPages')}</li>
+            {plannedPages.map(({ outline, index }) => <li key={outline.id} className="flex gap-1 truncate"><span>{index + 1}.</span><span className="truncate">{outline.title}</span><span className="ml-auto shrink-0">{t('ppt.stage.waiting')}</span></li>)}
+          </ol>}
         </aside>
         <main
           className={`min-h-0 space-y-8 overflow-y-auto bg-background p-3 pb-20 md:p-6 md:pb-6 ${tool ? "md:mr-[23rem]" : ""}`}
+          onWheel={() => onUserScroll?.()}
+          onTouchMove={() => onUserScroll?.()}
+          onKeyDown={event => { if (['PageUp', 'PageDown', 'ArrowUp', 'ArrowDown', 'Home', 'End', ' '].includes(event.key)) onUserScroll?.(); }}
           ref={canvasRef}
           onScroll={event=>sessionStorage.setItem(`ppt-editor-scroll:${project.id}`,JSON.stringify({slideId:activeSlideId||slide?.slideId,scrollTop:event.currentTarget.scrollTop}))}
           id="ppt-editor-canvas"
         >
+          <PptExecutionPanel key={project.id+String(project.executionPolicy?.qualityLevel)} project={project} onProject={onProject}/>
           {project.postWriterPlan && !generating && <details className="mx-auto max-w-6xl rounded border border-border p-3 text-xs" data-testid="ppt-postwriter-plan"><summary>{t('ppt.task.replanning')} · {project.postWriterPlan.mergeProposals.length}</summary><p className="my-2">{project.postWriterPlan.application}</p>{project.postWriterPlan.mergeProposals.map((proposal,index)=><p key={index} className="my-2">{proposal.slideIds.join(' + ')} · {proposal.layoutId} · {proposal.fontSizePt} pt · {proposal.reason}</p>)}<button className={button} onClick={()=>{const url=URL.createObjectURL(new Blob([JSON.stringify(project.postWriterPlan,null,2)],{type:'application/json'}));const a=document.createElement('a');a.href=url;a.download='ppt-postwriter-plan.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);}}>{t('ppt.candidate.download')}</button></details>}
           {slide && project.runtime?.slides[slide.slideId]?.repairComparison && <details className="mb-4 rounded border border-border bg-card p-3" data-testid="ppt-repair-comparison"><summary>{t('ppt.stage.repairing')} · {slide.index+1}</summary><div className="mt-3 grid gap-3 md:grid-cols-2">{(['before','after'] as const).map(part=>{const comparison=project.runtime!.slides[slide.slideId].repairComparison!;return <figure key={part}><figcaption className="text-xs">{t(part==='before'?'ppt.edit.before':'ppt.edit.after')}</figcaption><img src={part==='before'?comparison.beforeUrl:comparison.afterUrl} alt={t(part==='before'?'ppt.edit.before':'ppt.edit.after')} className="w-full rounded border border-border"/></figure>;})}</div></details>}
           {slides.map((item, index) => (
@@ -1010,7 +1035,7 @@ export function StructuredPptEditor({
             >
               <div className="mb-2 flex items-center justify-between text-xs text-muted-foreground">
                 <span>
-                  {t("ppt.structured.slide")} {index + 1}
+                  {t("ppt.structured.slide")} {item.index + 1}
                   {generating && project.generationStages?.pages?.[item.slideId] === "repairing" && <span data-testid="ppt-page-repairing" className="ml-2 rounded bg-primary/10 px-2 py-0.5 text-primary">{t("ppt.stage.repairing")}</span>}
                 </span>
                 <div className="flex items-center gap-3">
@@ -1021,7 +1046,7 @@ export function StructuredPptEditor({
                   </button>
                 </div>
               </div>
-              {generating && !item.elements.length && <GenerationSkeleton project={project} index={index}
+              {generating && !item.elements.length && <GenerationSkeleton project={project} index={item.index}
                 slide={project.outline?.find(outlineSlide => outlineSlide.id === (item.slideId || item.id))}
                 stage={project.generationStages?.pages?.[item.slideId || item.id] || (project.nodes?.[item.id]?.status === "running" ? "writing" : "waiting")}
                 draft={(drafts || project.drafts)?.[item.slideId || item.id]} />}
@@ -1098,12 +1123,12 @@ export function StructuredPptEditor({
           <i
             className="block h-full bg-primary"
             style={{
-              width: `${Math.round(((page + 1) / slides.length) * 100)}%`,
+              width: `${Math.round((((slide?.index ?? page) + 1) / (project.outline.length || slides.length)) * 100)}%`,
             }}
           />
         </div>
         <span>
-          {page + 1}/{slides.length}
+          {(slide?.index ?? page) + 1}/{project.outline.length || slides.length}
         </span>
       </div>
 
@@ -1122,7 +1147,7 @@ export function StructuredPptEditor({
                     t("ppt.editor.theme")}
                 </h2>
                 <p className="mt-1 text-xs text-muted-foreground">
-                  {t("ppt.structured.slide")} {page + 1}
+                  {t("ppt.structured.slide")} {(slide?.index ?? page) + 1}
                 </p>
                 {pointLayout && (
                   <p className={`mt-2 text-xs ${pointLayout.overflow ? "text-destructive" : "text-muted-foreground"}`} role={pointLayout.overflow ? "alert" : undefined}>
@@ -1283,7 +1308,7 @@ export function StructuredPptEditor({
                   />
                 </label>
               )}
-              {tool === "layout" && preserveNative && <div className="space-y-3"><p className="text-sm">{t('ppt.editor.nativeLayout')}</p><button className={`${button} w-full`} onClick={() => setSelectedIds(slide.elements.filter(element => element.nodeId && !element.locked && !['title','template-title','eyebrow'].includes(element.semanticRole || '')).map(element => element.nodeId!))}>{t('ppt.editor.selectBodyObjects')}</button><button className={`${button} w-full`} onClick={() => setTool('arrange')}>{t('ppt.editor.arrangeObjects')}</button></div>}
+              {tool === "layout" && preserveNative && <div className="space-y-3"><p className="text-sm">{t('ppt.editor.nativeLayout')}</p><button className={`${button} w-full`} onClick={() => setSelectedIds(slide.elements.filter(element => element.nodeId && !element.locked && !['title','template-title','eyebrow'].includes(element.semanticRole || '')).map(element => element.nodeId!))}>{t('ppt.editor.selectBodyObjects')}</button><button className={`${button} w-full`} onClick={() => setTool('arrange')}>{t('ppt.editor.arrangeObjects')}</button><button disabled={generating&&!paused} className={`${button} w-full`} onClick={()=>setConversionOpen(true)}>{t('ppt.template.convertCopy')}</button></div>}
               {tool === "layout" && !preserveNative && (
                 <div className="grid grid-cols-2 gap-2">
                   {layouts.map((value) => (
@@ -1560,7 +1585,7 @@ export function StructuredPptEditor({
           <div className="mb-3 flex justify-between text-sm text-white">
             <span>▶ {project.title}</span>
             <span>
-              {page + 1} / {slides.length}
+              {(slide?.index ?? page) + 1} / {project.outline.length || slides.length}
             </span>
             <button
               className="rounded border border-white/40 px-3 py-1"

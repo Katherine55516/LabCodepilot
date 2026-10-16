@@ -1,3 +1,5 @@
+import {isDedicatedClosing} from './ppt-closing-page.mjs';
+import { deckLanguage } from './ppt-presentation-contract.mjs';
 import { userRequirements } from './ppt-outline-protocol.mjs';
 import { densityProfile } from './ppt-density-profile.mjs';
 import { sourceDensityPlan, pageCapacity } from './ppt-density-packing.mjs';
@@ -7,11 +9,10 @@ import { coverageMapV2, topicGroupDecisions } from './ppt-content-inventory.mjs'
 import { buildTerminologyRegistry, copyBudgetFor, requiredSupportFor } from './ppt-presentation-writing.mjs';
 import { presentationBudget } from './ppt-outline-concision.mjs';
 import { withHeadingTerms } from './ppt-terminology-lock.mjs';
-import { evidenceRelevance, selectEvidenceForSlide } from './ppt-evidence.mjs';
+import { evidenceRelevance, selectEvidenceForSlide, evidenceBelongsToSlide } from './ppt-evidence.mjs';
 import { planSparseInput, pointBudgetFor, profilePptInput, sparsePageEstimate } from './ppt-content-depth.mjs';
 import { effectiveKnowledge } from './ppt-generation-policy.mjs';
 import { outputLanguage } from './ppt-prompt-contracts.mjs';
-import { dominantInputLanguage } from './ppt-topic-language.mjs';
 import { applyPresentationPolicy, planningAssumptions, assumptionSummary } from './ppt-presentation-policy.mjs';
 import { pageContractFor } from './ppt-page-contract.mjs';
 
@@ -88,10 +89,13 @@ export function estimatePageRecommendation(project) {
   // Overview decks are sized by purpose first (major sections), then checked
   // against capacity; the estimate never exceeds that budget's cap.
   const budget = rawSource ? presentationBudget(project || {}, source) : null;
-  const recommended = budget ? Math.min(uncapped, budget.max) : uncapped;
+  // A short source with several distinct major sections still gets about one
+  // content page per two sections (Gamma reference); capacity alone would pack
+  // five topics onto one page.
+  const recommended = budget ? clamp(Math.max(Math.min(uncapped, budget.max), Math.min(budget.max, 1 + budget.contentPages)), 3, 100) : uncapped;
   const spread = Math.max(2, Math.ceil(recommended * .18));
   const min = Math.min(recommended, capacity?.range[0] || sparseEstimate?.range[0] || clamp(recommended - spread, 3, 100));
-  const max = Math.min(budget ? budget.max : 100, capacity?.range[1] || sparseEstimate?.range[1] || clamp(recommended + spread, 3, 100));
+  const max = Math.max(recommended, Math.min(budget ? budget.max : 100, capacity?.range[1] || sparseEstimate?.range[1] || clamp(recommended + spread, 3, 100)));
   const selected = clamp(project?.pages || recommended);
   const strict = ['file', 'paste', 'update', 'base'].includes(source?.kind || project?.inputKind);
   const independentSections = substantialSections || Math.max(1, headings);
@@ -183,7 +187,7 @@ export function normalizeBrief(value, project) {
   const defaultGoal = intent || project.source?.semantic?.blocks?.find(block => block.type === 'heading')?.text || project.source?.name || project.title || '';
   return {
     outputLanguage: outputLanguage(project),
-    topicLanguage: project.editOutputLanguage || dominantInputLanguage(project),
+    topicLanguage: deckLanguage(project),
     goal: bounded(raw.goal, 240, defaultGoal), audience: bounded(raw.audience, 160, '演示文稿读者'),
     objective: bounded(raw.objective, 240, defaultGoal), thesis: bounded(raw.thesis, 360, defaultGoal),
     reportMode, presentationUse, decisionQuestion: bounded(raw.decisionQuestion, 240), sourceScope: bounded(raw.sourceScope, 240,
@@ -322,9 +326,14 @@ export function sourceBackedDetails(slide, source) {
   return distinct(explicit, Infinity);
 }
 
+/** @param {any} [source] Normalized source inventory, or null for a prompt-only draft.
+ * @param {any} [templateFidelity] Optional native template contract. */
 export function slidePlan(outline, brief = {}, source = null, templateFidelity = null) {
   return outline.map((slide, index) => {
     const role = inferRole(slide, index, outline.length, source);
+    const dedicatedClosing=isDedicatedClosing(slide);
+    const topicOnlyCover=index===0&&slide.planningProtocolVersion===2&&Array.isArray(slide.sourceUnitIds)&&!slide.sourceUnitIds.length&&Boolean(source?.semantic?.inventory?.items?.length);
+    const nonFactualFrame=dedicatedClosing||topicOnlyCover;
     const depth = slideDepth(slide, brief, index, outline.length);
     const richSource = String(source?.text || '').length >= 8000 && outline.length <= 24 &&
       ['course_walkthrough', 'technical_explainer'].includes(brief?.presentationUse);
@@ -340,12 +349,9 @@ export function slidePlan(outline, brief = {}, source = null, templateFidelity =
     const validEvidence = new Map((source?.semantic?.evidenceAtoms || []).map(atom => [atom.id, atom]));
     const explicitEvidence = distinct(slide.requiredEvidenceIds || slide.required_evidence_ids, 6).filter(id => {
       const atom = validEvidence.get(id);
-      const chunkRefs = slide.chunkRefs || [];
-      return atom && (chunkRefs.length
-        ? chunkRefs.includes(atom.chunkId)
-        : (!(slide.refs || []).length || (atom.sourceRefs || []).some(ref => (slide.refs || []).includes(ref))));
+      return evidenceBelongsToSlide(source, slide, atom);
     });
-    const requiredEvidenceIds = explicitEvidence.length ? explicitEvidence : selectEvidenceForSlide(source, { ...slide, role }, 1);
+    const requiredEvidenceIds = nonFactualFrame?[]:explicitEvidence.length ? explicitEvidence : selectEvidenceForSlide(source, { ...slide, role }, 1);
     return ({
     slideId: slide.id, role, section: slide.section,
     narrativeRole: bounded(slide.narrativeRole || slide.narrative_role, 40, role),
@@ -358,13 +364,13 @@ export function slidePlan(outline, brief = {}, source = null, templateFidelity =
     sourceRefs: [...(slide.refs || [])], sourceChunks: [...(slide.chunkRefs || [])], sourceTopics: distinct(slide.sourceTopics || slide.source_topics, 8).map(item => item.slice(0, 120)),
     keyPoints: slide.keyPoints || [],
     supportingPoints: distinct(slide.supportingPoints, 6).map(item => item.slice(0, 160)),
-    requiredSupport: requiredSupportFor(role, depth, slide.requiredSupport || slide.required_support || slide.supportingPoints),
+    requiredSupport: nonFactualFrame?[]:requiredSupportFor(role, depth, slide.requiredSupport || slide.required_support || slide.supportingPoints),
     requiredDetails: sourceBackedDetails(slide, source),
     visualIntent: inferVisualIntent(slide), depth, ...density,
     pageContract: pageContractFor(slide, source, role),
     densityProfileId: densityProfile().id, densityFit: slide.densityFit || null, sourceUnitIds: slide.sourceUnitIds || [],
     ...(templateCapacity ? { templatePointCapacity: templateCapacity,
-      templatePointTarget: templatePointTarget || Math.min(templateCapacity, density.semanticUnitBudget),
+      templatePointTarget: nonFactualFrame?0:templatePointTarget || Math.min(templateCapacity, density.semanticUnitBudget),
       semanticUnitBudget: templatePointTarget || Math.min(templateCapacity, density.semanticUnitBudget) } : {}),
     transitionFromPrevious: bounded(slide.transitionFromPrevious || slide.transition_from_previous, 180, index ? outline[index - 1]?.focus : ''),
     transitionToNext: bounded(slide.transitionToNext || slide.transition_to_next, 180, index < outline.length - 1 ? outline[index + 1]?.focus : ''),
@@ -414,7 +420,7 @@ export function inspectLongDeckOutline(project, outline) {
     // its topic is legitimate; repeating the same complete claim is not.
     const ranges = slide.sourceArtifactRanges || [], oldRanges = previous?.sourceArtifactRanges || [];
     const continuation = ranges.length && oldRanges.length && ranges.every(a=>oldRanges.some(b=>a.sourceUnitId===b.sourceUnitId)) &&
-      ranges.every(a=>oldRanges.every(b=>a.sourceUnitId!==b.sourceUnitId || a.rowEnd<=b.rowStart || b.rowEnd<=a.rowStart));
+      ranges.every(a=>oldRanges.every(b=>a.sourceUnitId!==b.sourceUnitId || (Number.isInteger(a.lineStart)&&Number.isInteger(b.lineStart)?a.lineEnd<=b.lineStart||b.lineEnd<=a.lineStart:a.rowEnd<=b.rowStart||b.rowEnd<=a.rowStart)));
     const recap = slide.repeatSourceUnitIds?.length && slide.repeatSourceUnitIds.every(id=>previous?.sourceUnitIds?.includes(id));
     if (focus.length >= 6 && seen.has(focus) && !continuation && !recap) issues.push({ code: 'outline_repeated_claim',
       message: `第 ${index + 1} 页与第 ${seen.get(focus) + 1} 页重复同一核心消息`, details:{pageIndex:index,duplicatesPageIndex:seen.get(focus),field:'focus'},repairable: true });

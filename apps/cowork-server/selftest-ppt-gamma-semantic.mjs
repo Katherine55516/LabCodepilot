@@ -164,7 +164,7 @@ const flowRaw={version:2,selection:[{sourceUnitId:flowId,destination:'slides',re
 const flowProject={inputKind:'paste',status:'failed',revision:0,publishedRevision:0,source:flowSource,originalSourceInventory:structuredClone(flowSource.semantic.inventory),generationPolicy:{content:'overview',details:'notes',language:{mode:'source'},code:{presentation:'omit'}},candidateOutline:{accepted:true,executionPlan:flowRaw},outline:flowRaw.slides.map((s,i)=>({...s,id:'stable-'+i})),nodes:Object.fromEntries([0,1,2].map(i=>['stable-'+i,{status:'done',slide:{title:'Page '+i}}])),runtime:{slides:{}}};
 flowProject.contentSelection=compileContentSelection(flowProject,flowRaw);
 flowProject.source=selectionSource(flowProject,flowProject.contentSelection);
-assert.equal(flowProject.source.semantic.inventory.items[0].type,'ComparisonBlock','selection must not turn explicit parallel diagrams into sequential lists');
+const selectedGraph=flowProject.source.semantic.inventory.items[0];assert.equal(selectedGraph.type,'TableBlock','tall parallel diagrams use whole-level editable rows');assert.equal(selectedGraph.diagramSource.relation,'parallel','selection must not turn explicit parallel diagrams into a sequential workflow');assert.equal(selectedGraph.diagramSource.text,mixed);for(const label of ['Research','Content','Theme Engine','Media Engine','Export layer'])assert.ok(selectedGraph.rows.flat().join(' ').includes(label),'parallel label retained: '+label);
 flowProject.source.semantic.inventory.items[0].type='ProcessBlock';flowProject.source.semantic.inventory.items[0].text='Story / Research';
 const oldFlow=structuredClone(flowProject);
 const flowAssess=p=>({issues:[],outline:p.outline.map((s,i)=>({...s,id:'new-'+i,densityFit:{capacity_ok:true}})),planning:{slidePlan:p.outline.map((s,i)=>({slideId:'new-'+i}))}});
@@ -200,3 +200,27 @@ const {fitComponents}=await import('./lib/ppt-density-capacity.mjs');
 const pairedFit=fitComponents([{type:'text',pairId:'same',content:{text:'First independent description.'}},{type:'text',pairId:'same',content:{text:'Second independent description.'}}],{},1);
 if(pairedFit.layoutId==='bilingual-rows-source')assert.notEqual(pairedFit.boxes[0].x,pairedFit.boxes[1].x,'same detected script cannot collapse paired blocks onto the same column');
 console.log('PASS: comparison-set retention, noncomparison/user scopes, output-language metadata, natural immutable math frames, scoped closing repair, complete parallel/branch/flow/schema source typing');
+
+// A summary elsewhere must not promote legal optional notes back to the body.
+const {createHash}=await import('node:crypto');
+const optionalDetail='The generator explores 1000 candidate expressions.';
+const notesOriginal={items:[{id:'core',type:'DefinitionBlock',text:'Exposure measures sensitivity.',sectionPath:['Model'],source_ref:[]},{id:'detail',type:'MechanismBlock',text:optionalDetail,sectionPath:['Model'],source_ref:[]}],relationships:[]};
+const notesText=notesOriginal.items.map(i=>i.text).join('\n');
+const notesPolicy={pages:3,generationPolicy:{content:'overview',details:'notes',knowledge:'source_only'},source:{text:notesText,sha256:createHash('sha256').update(notesText).digest('hex'),semantic:{inventory:notesOriginal}},outline:[{id:'cover'},{id:'body',sourceUnitIds:['core']},{id:'end'}]};
+const notesRaw={slides:notesPolicy.outline,selection:[{sourceUnitId:'core',destination:'summary',summaryText:notesOriginal.items[0].text,reason:'Complete source definition'},{sourceUnitId:'detail',destination:'notes',reason:'Optional implementation detail'}]};
+const notesLedger=compileContentSelection(notesPolicy,notesRaw),notesScoped={...notesPolicy,originalSourceInventory:notesOriginal,contentSelection:notesLedger,source:selectionSource(notesPolicy,notesLedger)};
+assert.ok(!obligationRegistry(notesScoped).entries.some(e=>e.basis==='source_summary_detail'&&e.text===optionalDetail),'optional notes stay in notes even when another unit has a summary');
+for(const changed of [{...notesScoped,contentSelection:{...notesLedger,sourceHash:'stale'}},{...notesScoped,userRequirements:optionalDetail},{...notesScoped,source:{...notesScoped.source,semantic:{...notesScoped.source.semantic,inventory:{...notesScoped.source.semantic.inventory,items:notesScoped.source.semantic.inventory.items.map(i=>({...i,presentationBasis:'unverified'}))}}}}])assert.ok(obligationRegistry(changed).entries.some(e=>e.basis==='source_summary_detail'&&e.text===optionalDetail),'stale/unverified notes and explicit user requirements retain their obligation');
+const badNotes=structuredClone(notesScoped);badNotes.originalSourceInventory.items[1].mustDisplay=true;assert.ok(obligationRegistry(badNotes).entries.some(e=>e.text===optionalDetail),'illegal notes choices cannot hide mandatory display content');
+assert.ok(obligationRegistry({...notesScoped,source:{...notesScoped.source,text:notesText+'\nMust retain this independent condition.'}}).entries.some(e=>e.basis==='source_condition'&&e.text.includes('independent condition')));
+console.log('PASS: current legal overview notes resolve only their optional summary details; explicit conditions, user requests, stale ledgers, invalid markers and must-display facts remain mandatory');
+
+const {obligationVisibleCandidates,visibleEvidenceQuoteId}=await import('./lib/ppt-obligations.mjs');
+const linkedProject={...notesScoped,deck:{slides:[{id:'body',nodes:[{id:'visible-core',type:'text',content:{text:'Exposure measures sensitivity.'},sourceArtifact:{sourceUnitId:'core'}},{id:'hidden-copy',type:'text',hidden:true,content:{text:'Hidden source'},sourceArtifact:{sourceUnitId:'core'}},{id:'other',type:'text',content:{text:'Unrelated content'},sourceArtifact:{sourceUnitId:'unrelated'}}]}]}};
+const coreObligation=obligationRegistry(linkedProject).entries.find(e=>e.sourceUnitId==='core');assert.ok(coreObligation);
+const candidates=obligationVisibleCandidates(linkedProject,coreObligation);assert.equal(candidates.length,1);assert.equal(candidates[0].nodeId,'visible-core');assert.equal(candidates[0].quoteId,visibleEvidenceQuoteId('body',linkedProject.deck.slides[0].nodes[0]));assert.ok(!('status' in candidates[0]));
+linkedProject.deck.slides[0].nodes[0].content.text='An edited current claim.';assert.notEqual(obligationVisibleCandidates(linkedProject,coreObligation)[0].quoteId,candidates[0].quoteId,'edited visible text invalidates old candidate quote identity');
+assert.deepEqual(obligationVisibleCandidates(linkedProject,{...coreObligation,sourceUnitId:'unbound'}),[],'source IDs without visible objects produce no invented witness');
+console.log('PASS: obligation candidate locations contain only current visible source instances, preserve independent verdicts and invalidate edited quote IDs');
+
+const preservedFlow=normalizePaste('# Media\n\n'+String.fromCharCode(96).repeat(3)+'\nPlanner\n  ↓\nimage_required?\n\n  ├─ No → render\n  │\n  └─ Yes\n       ↓\n    Image Intent\n       ↓\n    Source Router\n   ↙    ↓    ↘\n stock web   gen\n   ↓    ↓    ↓\n    result media\n       ↓\n      Card\n'+String.fromCharCode(96).repeat(3));const preservedItem=preservedFlow.semantic.inventory.items.find(i=>i.diagramSource?.kind==='ascii');assert.equal(preservedItem.rows.slice(1).map(row=>row[0]).join('\n'),preservedItem.diagramSource.text,'tall source diagram tables retain all raw lines and every branch');

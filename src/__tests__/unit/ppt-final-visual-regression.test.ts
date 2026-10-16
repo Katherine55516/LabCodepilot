@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-explicit-any -- Legacy MJS/IR boundary fixtures intentionally mutate partial and invalid payloads to exercise runtime validators. */
 import {it} from 'node:test';
 import assert from 'node:assert/strict';
 const m=(name:string)=>import(process.cwd()+'/apps/cowork-server/lib/'+name+'.mjs');
@@ -38,7 +39,7 @@ it('outline confirmation remeasures a changed native map once, then preserves th
  const {fidelityFromImported}=await m('ppt-template-fidelity'),{confirmNativeOutlineFit}=await m('ppt-outline-confirmation');
  const owned={id:'unit',type:'MechanismBlock',text:'Independent hypotheses need out-of-sample validation. '.repeat(12),must_preserve_structure:true};
  const imported:any={externalPptx:{width:12000000,height:7000000,originalPath:'/workspace/template.pptx'},deck:{slides:Array.from({length:6},(_,i)=>({id:'native'+i,nodes:[{id:'title'+i,type:'text',nativeRef:{shapeId:2},geometry:{x:500000,y:400000,width:10000000,height:700000},style:{fontSizePt:28},content:{text:'Topic'}},{id:'body'+i,type:'text',nativeRef:{shapeId:3},geometry:{x:500000,y:1800000,width:i===2?1000000:10000000,height:3500000},style:{fontSizePt:18},content:{text:'Original content'}}]}))}};
- const p:any={pages:4,source:{text:'s'.repeat(9000),semantic:{inventory:{items:[owned]}}},pageDecision:{mode:'auto'},outline:Array.from({length:4},(_,i)=>({id:'s'+i,title:'Page '+i,focus:'Explain the scope',sourceUnitIds:i===2?['unit']:[],planningProtocolVersion:2}))};
+ const p:any={pages:4,source:{text:'s'.repeat(9000),semantic:{inventory:{items:[owned]}}},pageDecision:{mode:'auto'},outline:Array.from({length:4},(_,i)=>({id:'s'+i,title:['Scope','Rules','Test','Thanks'][i],focus:'Explain the scope',sourceUnitIds:i===2?['unit']:[],planningProtocolVersion:2}))};
  p.templateFidelity=fidelityFromImported({...p,pages:6},imported,'hash');const catalog=p.templateFidelity.sourceCatalog;
  p.templateFidelity.slides=[catalog[0],catalog[1],catalog[2],catalog[5]];p.templateFidelity.slideMap=[0,1,2,5];
  confirmNativeOutlineFit(p);assert.ok(p.outline[2].densityFit.capacity_ok);const accepted=p.templateFidelity;confirmNativeOutlineFit(p);assert.equal(p.templateFidelity,accepted);assert.equal(p.pages,4);

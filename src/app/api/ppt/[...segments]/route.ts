@@ -1,3 +1,4 @@
+import {retryPptUpstreamRead} from '@/lib/ppt-read-retry';
 import { isPptProxyPath } from '@/lib/ppt-proxy-path';
 import { getCurrentUserUid, getSetting } from '@/lib/db';
 
@@ -34,7 +35,7 @@ async function proxy(request: Request, context: Context) {
     const legacyPreview = segments.length === 4 && segments[0] === 'projects' && segments[2] === 'preview' && segments[3].endsWith('.svg');
     const upstreamSegments = legacyPreview ? ['projects', segments[1], 'slides', segments[3].slice(0, -4), 'preview'] : segments;
     const search = legacyPreview ? '?format=svg' : (request.url.includes('?') ? new URL(request.url).search : '');
-    const upstream = await fetch(`${base}/ppt/${upstreamSegments.join('/')}${search}`, {
+    const upstream = await retryPptUpstreamRead(request.method, async () => fetch(`${base}/ppt/${upstreamSegments.join('/')}${search}`, {
       method: request.method,
       headers: {
         authorization: `Bearer ${token}`,
@@ -44,7 +45,7 @@ async function proxy(request: Request, context: Context) {
       },
       body: request.method === 'GET' ? undefined : request.headers.get('content-type')?.startsWith('application/octet-stream') ? await boundedTemplateBody(request) : await request.text(),
       cache: 'no-store',
-    });
+    }), {signal:request.signal});
     const headers = new Headers();
     for (const key of ['content-type', 'content-length', 'content-disposition', 'etag', 'x-accel-buffering']) {
       const value = upstream.headers.get(key);

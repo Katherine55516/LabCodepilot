@@ -1,6 +1,6 @@
 import MarkdownIt from 'markdown-it';
 import { equationContent, mathMarkupKey, mathFallbackRuns } from './ppt-math.mjs';
-export const DISPLAY_TRANSFORM_VERSION=6;
+export const DISPLAY_TRANSFORM_VERSION=7;
 const markdown=new MarkdownIt({html:false,linkify:false,typographer:false}),cache=new Map();
 const escaped=(text,at)=>{let n=0;while(at>0&&text[--at]==='\\')n++;return n%2===1;};
 function mathSpanAt(s,at){
@@ -94,10 +94,11 @@ function mathDiagnostic(math){
 }
 /** Raw source never changes. Plain text is a search/capacity projection;
  * typed runs carry the actual emphasis, code, links and mathematical structure. */
-export function sourceRichText(value,{code=false}={}){
+export function sourceRichText(value,{code=false,inline=false}={}){
   const source=String(value??'');
   if(code)return {version:DISPLAY_TRANSFORM_VERSION,source,plainText:source,runs:[{kind:'text',text:source,code:true}],diagnostics:[]};
-  if(cache.has(source))return structuredClone(cache.get(source));
+  const cacheKey=inline?'inline\0'+source:source;
+  if(cache.has(cacheKey))return structuredClone(cache.get(cacheKey));
   const runs=[],diagnostics=[],stack={bold:0,italic:0,strike:0};
   const append=(text,extra={})=>{
     if(!text)return;
@@ -112,7 +113,7 @@ export function sourceRichText(value,{code=false}={}){
   // boundaries. A code fence is data: dollars and underscores stay literal.
   let listDepth=0,ordered=0,first=true;
   const sourceLines=source.split('\n');
-  for(const block of markdown.parse(source,{})){
+  for(const block of inline?markdown.parseInline(source,{}):markdown.parse(source,{})){
     if(['bullet_list_open','ordered_list_open'].includes(block.type)){listDepth++;ordered=block.type==='ordered_list_open'?Number(block.attrGet('start')||1):0;}
     else if(['bullet_list_close','ordered_list_close'].includes(block.type))listDepth--;
     else if(block.type==='inline'||block.type==='fence'||block.type==='code_block'){
@@ -147,10 +148,10 @@ export function sourceRichText(value,{code=false}={}){
   for(const run of runs)if(run.kind==='text'&&!run.code&&(/\\(?:alpha|beta|gamma|lambda|sigma|epsilon|frac|sqrt|mathbb|mathbf|neq|top|begin|end)(?![A-Za-z])/u.test(run.text)||/[A-Za-z0-9][_^]\{[^}]+\}/u.test(run.text)||/[\u0370-\u03ff][_^](?:[A-Za-z0-9]|\{)/u.test(run.text)))
     diagnostics.push({code:'math_delimiter_missing',source:run.text});
   const result={version:DISPLAY_TRANSFORM_VERSION,source,plainText:runs.map(r=>r.text).join(''),runs,diagnostics};
-  if(source.length<50000){if(cache.size>=512)cache.delete(cache.keys().next().value);cache.set(source,result);}
+  if(source.length<50000){if(cache.size>=512)cache.delete(cache.keys().next().value);cache.set(cacheKey,result);}
   return structuredClone(result);
 }
-export const sourceDisplayText=value=>sourceRichText(value).plainText.trim();
+export const sourceDisplayText=value=>{const source=String(value??'');return (cache.get(source)?.plainText??sourceRichText(source).plainText).trim();};
 export function richTextContent(value,extra={}){
   const richText=sourceRichText(value,{code:Boolean(extra.codeBlock)});
   return {...extra,text:richText.plainText,rawText:String(value??''),richText,displayTransformVersion:DISPLAY_TRANSFORM_VERSION};
@@ -162,7 +163,7 @@ export function ensureRichContent(content={}){
   if(Array.isArray(content.rows)){
     const valid=content.cellRich?.length===content.rows.length&&content.cellRich.every((row,r)=>row.length===content.rows[r].length&&row.every((cell,c)=>cell.version===DISPLAY_TRANSFORM_VERSION&&cell.plainText===String(content.rows[r][c])));
     if(valid)return content;
-    const raw=content.rows.map((row,r)=>row.map((cell,c)=>{const previous=content.cellRich?.[r]?.[c];return previous?previous.plainText===String(cell)?previous.source:cell:content.rawRows?.[r]?.[c]??cell;})),cellRich=raw.map(row=>row.map(cell=>sourceRichText(cell)));
+    const raw=content.rows.map((row,r)=>row.map((cell,c)=>{const previous=content.cellRich?.[r]?.[c];return previous?previous.plainText===String(cell)?previous.source:cell:content.rawRows?.[r]?.[c]??cell;})),cellRich=raw.map(row=>row.map(cell=>sourceRichText(cell,{inline:true})));
     return {...content,rows:cellRich.map(row=>row.map(cell=>cell.plainText)),rawRows:raw,cellRich,displayTransformVersion:DISPLAY_TRANSFORM_VERSION};
   }
   if(content.paragraphs){

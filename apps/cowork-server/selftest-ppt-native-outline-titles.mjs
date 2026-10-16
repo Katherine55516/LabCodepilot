@@ -5,7 +5,7 @@ const p={source:{text:'# Deep Learning | 深度学习',semantic:{inventory:{item
 const raw={version:2,selection:[],slides:[{title:'Deep Learning | 深度学习',sourceUnitIds:[],focus:'Introduce deep learning.'}]};
 const conflicts=inspectNativeOutlineTitles(p,raw.slides);assert.equal(conflicts.length,1);assert.equal(conflicts[0].capacityVisualUnits,6);
 const diagnostic={details:{metadataConflicts:conflicts}};const prompt=outlineMetadataRepairPrompt(p,raw,diagnostic);assert.match(prompt,/capacityVisualUnits/);assert.match(prompt,/Deep Learning/);
-const fixed=applyOutlineMetadataRepair(raw,diagnostic,{version:2,updates:[{pageIndex:0,field:'title',text:'DL深度学习'}]});
+const fixed=applyOutlineMetadataRepair(raw,diagnostic,{version:2,updates:[{pageIndex:0,field:'title',text:'DL'}]});
 assert.equal(inspectNativeOutlineTitles(p,fixed.slides).length,0);assert.equal(inspectTemplateSlotDraft(p,0,fixed.slides[0]).filter(x=>x.code==='template_slot_overflow').length,0);
 assert.deepEqual(fixed.selection,raw.selection);assert.deepEqual(fixed.slides.map(s=>s.sourceUnitIds),raw.slides.map(s=>s.sourceUnitIds));assert.equal(fixed.slides.length,raw.slides.length);
 assert.equal(inspectNativeOutlineTitles({templateFidelity:{mode:'mapped'}},raw.slides).length,0);
@@ -14,11 +14,11 @@ const mixedRaw={version:2,slides:[{title:'Subject',focus:'Long intent',section:'
 const {outlineResponseSchema}=await import('./lib/ppt-outline-protocol.mjs');const mixedSchema=outlineResponseSchema(outlineMetadataRepairPrompt(p,mixedRaw,mixedError));assert.equal(mixedSchema.properties.updates.items.oneOf.find(b=>b.properties.field.const==='section').properties.text.maxLength,80);assert.equal(mixedSchema.properties.updates.items.oneOf.find(b=>b.properties.field.const==='focus').properties.text.maxLength,180);
 assert.throws(()=>applyOutlineMetadataRepair(mixedRaw,mixedError,{version:2,updates:[{pageIndex:0,field:'focus',text:'Brief intent'},{pageIndex:0,field:'section',text:'x'.repeat(91)}]}),e=>e.details?.field==='section'&&e.details.maxLength===80&&e.details.actualLength===91);
 assert.deepEqual(applyOutlineMetadataRepair(mixedRaw,mixedError,{version:2,updates:[{pageIndex:0,field:'focus',text:'Brief intent'},{pageIndex:0,field:'section',text:'Section'}]}).slides[0].sourceUnitIds,mixedRaw.slides[0].sourceUnitIds);
-const repeatedRaw = {version:2,selection:[],slides:[{title:'Cover',sourceUnitIds:[]},{title:'Rep Learning | 表征学习',sourceUnitIds:['a'],focus:'Raw inputs'},{title:'Rep Learning | 表征学习',sourceUnitIds:['b'],focus:'Structural advantages'}]};
+const repeatedRaw = {version:2,selection:[],slides:[{title:'Cover',sourceUnitIds:[]},{title:'Representation Learning',sourceUnitIds:['a'],focus:'Raw inputs'},{title:'Representation Learning',sourceUnitIds:['b'],focus:'Structural advantages'}]};
 const repeatedProject = {generationPolicy:{language:{mode:'source'}},templateFidelity:{mode:'preserve',slides:repeatedRaw.slides.map(()=>({nodes:[],slots:[]}))}};
 const repeatedErrors = inspectNativeOutlineTitles(repeatedProject,repeatedRaw.slides);
-assert.equal(repeatedErrors.length,1);assert.equal(repeatedErrors[0].pageIndex,2);assert.equal(repeatedErrors[0].duplicatesPageIndex,1);assert.deepEqual(repeatedErrors[0].requiredLanguages,['English','Chinese']);
-const renamed = applyOutlineMetadataRepair(repeatedRaw,{details:{metadataConflicts:repeatedErrors}},{version:2,updates:[{pageIndex:2,field:'title',text:'DL Advantages | 深度学习优势'}]});
+assert.equal(repeatedErrors.length,1);assert.equal(repeatedErrors[0].pageIndex,2);assert.equal(repeatedErrors[0].duplicatesPageIndex,1);assert.deepEqual(repeatedErrors[0].requiredLanguages,['English'],'native title repair follows the single deck-language contract');
+const renamed = applyOutlineMetadataRepair(repeatedRaw,{details:{metadataConflicts:repeatedErrors}},{version:2,updates:[{pageIndex:2,field:'title',text:'DL Advantages'}]});
 assert.equal(inspectNativeOutlineTitles(repeatedProject,renamed.slides).length,0);assert.deepEqual(renamed.slides.map(s=>s.sourceUnitIds),repeatedRaw.slides.map(s=>s.sourceUnitIds));assert.equal(renamed.slides.length,repeatedRaw.slides.length);
 assert.equal(inspectNativeOutlineTitles(repeatedProject,repeatedRaw.slides.map((s,i)=>i===2?{...s,titleLocked:true}:s)).length,0,'user-locked repeated title stays unchanged');
 assert.equal(inspectNativeOutlineTitles({...repeatedProject,confirmedOutline:{hash:'frozen'}},repeatedRaw.slides).length,0,'a confirmed legacy plan resumes without retroactive metadata repair');

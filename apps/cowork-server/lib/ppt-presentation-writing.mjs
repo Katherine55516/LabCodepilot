@@ -38,7 +38,7 @@ function unique(values, max = 12) { return [...new Set((Array.isArray(values) ? 
 function words(value) { return new Set((String(value || '').toLocaleLowerCase().match(WORD) || []).map(item => item.toLocaleLowerCase())); }
 function han(value) { return new Set(String(value || '').match(HAN) || []); }
 
-export function normalizeTypography(value, max = 240) {
+export function normalizeTypography(value, max = 240, writerFieldPath) {
   const normalized=String(value || '')
     .replace(/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/g, '')
     // Underscores are part of code/math identifiers (ts_mean, raw_group).
@@ -61,7 +61,7 @@ export function normalizeTypography(value, max = 240) {
     .replace(/[ \t]{2,}/g, ' ')
     .replace(/\s*([，。；：！？、])\s*/gu, '$1')
     .trim();
-  if(normalized.length>max)throw new Error(`visible text exceeds ${max} characters; rewrite or redistribute without truncation`);
+  if(normalized.length>max)throw Object.assign(new Error(`visible text exceeds ${max} characters; rewrite or redistribute without truncation`),Array.isArray(writerFieldPath)?{writerFieldPath,maxCharacters:max}:{});
   return normalized;
 }
 
@@ -269,13 +269,13 @@ export function compileTitle({ title, candidates = [], message = '', registry = 
 }
 
 const BLOCK_TYPES = new Set(['definition', 'mechanism', 'evidence', 'example', 'contrast', 'constraint', 'tradeoff', 'impact', 'implication', 'decision', 'risk', 'next_step', 'stage', 'runtime']);
-export function normalizeContentBlocks(value, maxBody = 4000) {
+export function normalizeContentBlocks(value, maxBody = 4000, field='contentBlocks') {
   if (!Array.isArray(value)) return [];
   if (value.length > 10) throw new Error('contentBlocks exceeds 10 points; redistribute across pages');
-  return value.map(item => {
+  return value.map((item,index) => {
     if (!item || typeof item !== 'object') return null;
     const type = BLOCK_TYPES.has(item.type) ? item.type : 'support';
-    const heading = normalizeTypography(text(item.heading || item.label, 48), 48);
+    const heading = normalizeTypography(text(item.heading || item.label, 48), 48, [field,index,item.heading?'heading':'label']);
     const sourceBody = String(item.body || item.text || item.description || '').trim();
     if (sourceBody.length > maxBody) throw new Error(`point body exceeds ${maxBody} characters; split it before rendering`);
     const body = normalizeTypography(sourceBody, maxBody);
@@ -294,9 +294,9 @@ export function materializeCopy(value, outlineSlide, planning, previousTitles = 
   const topicTitle = v => normalizeTopicTitle(cleanTitle(v), topicLanguage);
   const candidates=value.titleCandidates || value.title_candidates;
   const title = compileTitle({ title: topicTitle(outlineSlide.capacityPartition ? outlineSlide.title : value.title), candidates: outlineSlide.capacityPartition ? [] : Array.isArray(candidates) ? candidates.map(topicTitle) : [], message: topicTitle(contract.message || outlineSlide.focus), registry, previousTitles: outlineSlide.capacityPartition ? [] : previousTitles, budget });
-  const normalized = normalizeVisibleCopy({ blocks: normalizeContentBlocks(value.contentBlocks || value.content_blocks, value.nativeCopy ? 5000 : 4000),
-    eyebrow: normalizeTypography(normalizeTopicTitle(text(value.eyebrow, 48), topicLanguage), 48), subtitle: normalizeTypography(text(value.subtitle || value.subhead, 180), 180),
-    takeaway: normalizeTypography(text(value.takeaway, 300), 300) }, title.title);
+  const normalized = normalizeVisibleCopy({ blocks: normalizeContentBlocks(value.contentBlocks || value.content_blocks, value.nativeCopy ? 5000 : 4000, value.contentBlocks?'contentBlocks':'content_blocks'),
+    eyebrow: normalizeTypography(normalizeTopicTitle(text(value.eyebrow, 48), topicLanguage), 48, ['eyebrow']), subtitle: normalizeTypography(text(value.subtitle || value.subhead, 180), 180, [value.subtitle?'subtitle':'subhead']),
+    takeaway: normalizeTypography(text(value.takeaway, 300), 300, ['takeaway']) }, title.title);
   const blocks = normalized.copy.blocks;
   const bullets = blocks.length
     ? blocks.map(block => normalizeTypography(block.heading ? `${block.heading}\n${block.body}` : block.body, value.nativeCopy ? 5200 : 4200))
@@ -319,7 +319,9 @@ export function materializeCopy(value, outlineSlide, planning, previousTitles = 
 
 /** Native slot geometry and native body QA must use the same unit scale. */
 export function templateVisualUnits(value) {
-  return [...String(value || '')].reduce((sum, char) => sum + (char.codePointAt(0) > 127 ? 1 : .55), 0);
+  // Integer hundredths avoid an exact 11-unit title becoming
+  // 11.000000000000002 and failing unchanged native capacity.
+  return [...String(value || '')].reduce((sum, char) => sum + (char.codePointAt(0) > 127 ? 100 : 55), 0) / 100;
 }
 
 /** Visible body budget uses native geometry, never the amount of old copy. */
@@ -347,12 +349,33 @@ function availableSupport(slide, visibleOnly = false) {
   return found;
 }
 
+/** Round 7 (A5): rich but not redundant. A card that only restates the page
+ * title, or two cards that say the same thing, waste a page's space. */
+const copyKey = value => String(value || '').normalize('NFKC').toLowerCase().replace(/[\s\p{P}\p{S}]/gu, '');
+const cardBigrams = value => { const k = copyKey(value), set = new Set(); for (let i = 0; i + 1 < k.length; i++) set.add(k.slice(i, i + 2)); return set; };
+const cardOverlap = (a, b) => { const x = cardBigrams(a), y = cardBigrams(b); if (!x.size || !y.size) return 0; let shared = 0; for (const gram of x) if (y.has(gram)) shared++; return shared / Math.min(x.size, y.size); };
+export function inspectCardRedundancy(slide) {
+  const issues = [], cards = (slide.copy?.blocks || []).map(block => ({ heading: block.heading || '', body: block.body || '' })).filter(card => card.body.trim());
+  const title = copyKey(slide.title);
+  cards.forEach((card, i) => {
+    const body = copyKey(card.body);
+    if (title.length >= 4 && body.length <= title.length * 1.3 && (body.includes(title) || title.includes(body)))
+      issues.push({ code: 'card_restates_title', severity: 'warning', repair: 'expand_support', cardIndex: i, message: `第 ${i + 1} 个要点只复述了页标题；请写出来源中的机制、条件或含义。` });
+  });
+  for (let i = 0; i < cards.length; i++) for (let j = i + 1; j < cards.length; j++) {
+    if (copyKey(cards[i].body).length >= 12 && copyKey(cards[j].body).length >= 12 && cardOverlap(cards[i].body, cards[j].body) >= .8)
+      issues.push({ code: 'card_duplicate', severity: 'warning', repair: 'redistribute', cardIndexes: [i, j], message: `第 ${i + 1} 和第 ${j + 1} 个要点内容重复；合并为一个，并用来源中其他相关事实补足。` });
+  }
+  return issues;
+}
+
 export function inspectSlideCopy(slide, contract, index, count, options = {}) {
   const issues = [];
   const generatedCopy = [slide.copy?.subtitle, slide.copy?.takeaway, ...(slide.bullets||[]), ...Object.values(slide.templateSlotTexts||{}).flatMap(v=>typeof v==='string'?[v]:v.map(p=>p.body||''))].filter(Boolean).join('\n');
   if (/完整(?:来源(?:细节)?|表(?:格)?)\s*见(?:本页)?备注|(?:full|complete)\s+(?:source|table).*?(?:notes|speaker notes)/iu.test(generatedCopy))
     issues.push({code:'visible_copy_placeholder',severity:'error',repair:'expand_support',message:'可见页面不能用备注指引替代实际来源、表格或解释；请在可读容量内显示本页实际内容。'});
   if (index === 0 || index === count - 1) return issues;
+  issues.push(...inspectCardRedundancy(slide));
   const title = slide.titleQuality || { visualUnits: visualUnits(slide.title), maxVisualUnits: contract?.copyBudget?.titleHardUnits || 46, estimatedLines: Math.ceil(visualUnits(slide.title) / 24) };
   if (title.visualUnits > title.maxVisualUnits || title.estimatedLines > 2) issues.push({ code: 'title_overflow', severity: 'error', repair: 'rewrite_title', message: '标题超过两行或版式宽度上限' });
   const support = availableSupport(slide, options.templatePreserved);

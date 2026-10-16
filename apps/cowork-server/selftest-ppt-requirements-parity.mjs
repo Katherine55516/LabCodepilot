@@ -9,7 +9,7 @@ process.env.COWORK_STATE_DIR = state;
 const [{ handlePpt }, store] = await Promise.all([import('./lib/ppt-api.mjs'), import('./lib/ppt-store.mjs')]);
 const uid = 'parity-user';
 const deps = { modelCall: async project => ({ slides: Array.from({ length: project.pages }, (_, index) => ({
-  title: `第 ${index + 1} 页`, focus: `核心观点 ${index + 1}`, description: `说明 ${index + 1}`, children: [], refs: (project.source?.segments||[]).map(s=>s.id),
+  title: ['报告概览','正文要点','内容说明','核心观点','补充说明','报告结论'][index], focus: `核心观点 ${index + 1}`, description: `说明 ${index + 1}`, children: [], refs: (project.source?.segments||[]).map(s=>s.id),
 })) }) };
 async function call(method, route, payload) {
   const req = Readable.from(payload === undefined ? [] : [Buffer.from(JSON.stringify(payload))]);

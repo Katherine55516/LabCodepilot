@@ -9,7 +9,7 @@ import { localPptRuntime } from './test/ppt-local-runtime.mjs';
 const root=fs.mkdtempSync(path.join(os.tmpdir(),'ppt-editor-template-'));
 process.env.COWORK_STATE_DIR=root;
 const { importEditablePptx } = await import('./lib/ppt/import-pptx.mjs');
-const { prepareTemplateFidelity, bindTemplateFidelity, renderTemplatePptx, templateSlotPrompt } = await import('./lib/ppt-template-fidelity.mjs');
+const { prepareTemplateFidelity, bindTemplateFidelity, renderTemplatePptx, rescheduleTemplateFidelity, inspectTemplateFidelity, templateSlotPrompt } = await import('./lib/ppt-template-fidelity.mjs');
 const { normalizePaste } = await import('./lib/ppt-source.mjs');
 const { ensureProjectV3 } = await import('./lib/ppt/ir.mjs');
 const { applyCommand, undo, redo } = await import('./lib/ppt/command-service.mjs');
@@ -53,8 +53,30 @@ p.save(sys.argv[1])
   source:normalizePaste('# New mechanism\n24 current records are validated before release.\n当前记录在发布前进行核验。'),outline:Array.from({length:4},(_,i)=>({id:`page_${i}`,title:`New topic ${i}`,section:'New section'})),deck:{slides:Array.from({length:4},(_,i)=>({id:`page_${i}`,title:`New topic ${i}`,section:'New section',nodes:[]}))}});
  project.templateFidelity=await prepareTemplateFidelity(project,bytes,originalHash,null,{writeFile:runtime.writeFile,importPptx:(p,b,h)=>importEditablePptx(p,b,h,runtime.io)});
  project.deck.slides.forEach((slide,i)=>{slide.templateSlotTexts=Object.fromEntries(project.templateFidelity.slides[i].slots.filter(slot=>slot.role!=='static').map(slot=>[String(slot.shapeId),slot.example==='35' ? '24' : `Current source explanation ${i} ${slot.shapeId}`]));});
+ // Design-only clears unselected report images, including previously inferred brands.
+ assert.ok(project.templateFidelity.slides.every(s=>s.nodes.filter(n=>n.type==='image').every(n=>n.content.templateSample&&!n.content.mustPreserve)));
+ const fixedLogos=project.templateFidelity.slides.flatMap(s=>s.nodes).filter(n=>n.type==='image'&&n.nativeRef.name==='Brand logo').map(n=>n.id);assert.equal(fixedLogos.length,4);
+ project.templateContentMode='keep_fixed';project.templateFixedObjectIds=fixedLogos;
+ project.templateFidelity=await prepareTemplateFidelity(project,bytes,originalHash,null,{writeFile:runtime.writeFile,importPptx:(p,b,h)=>importEditablePptx(p,b,h,runtime.io)});
+ const repeated=structuredClone(project);repeated.pages=8;repeated.outline=Array.from({length:8},(_,i)=>({...structuredClone(project.outline[i%4]),id:'repeat-'+i,title:'Repeat topic '+i}));repeated.deck.slides=repeated.outline.map(slide=>({...slide,nodes:[]}));
+ repeated.templateFidelity=await prepareTemplateFidelity(repeated,bytes,originalHash,null,{writeFile:runtime.writeFile,importPptx:(p,b,h)=>importEditablePptx(p,b,h,runtime.io)});
+ assert.ok(repeated.templateFidelity.slideMap.some((source,index,map)=>map.indexOf(source)!==index));
+ for(const mapped of repeated.templateFidelity.slides)for(const node of mapped.nodes.filter(n=>n.content?.mustPreserve)){
+  const original=repeated.templateFidelity.sourceCatalog[mapped.sourceIndex].nodes.find(n=>n.nativeRef.shapeId===node.nativeRef.shapeId);assert.deepEqual(node.geometry,original.geometry,'selected fixed geometry is never mirrored by automatic reuse');assert.deepEqual(node.content.crop,original.content.crop,'selected fixed logo is never cropped by a reuse variant');
+ }
+ repeated.deck.slides.forEach((slide,index)=>{slide.templateSlotTexts=Object.fromEntries(repeated.templateFidelity.slides[index].slots.filter(slot=>slot.role!=='static').map(slot=>[String(slot.shapeId),slot.role==='title'?slide.title:slot.role==='section'?'Current scope':'The current source describes approved scope and required review.']));});
+ bindTemplateFidelity(repeated);
+ const repeatedVariantIssues=inspectTemplateFidelity(repeated).filter(issue=>['template_variant_unchanged','template_variant_duplicate','template_variant_media'].includes(issue.code));
+ if(repeatedVariantIssues.length)console.error(JSON.stringify(repeated.deck.slides.map((slide,index)=>({index,source:repeated.templateFidelity.slides[index].sourceIndex,variant:repeated.templateFidelity.slides[index].variant,protected:slide.nodes.filter(node=>node.content?.mustPreserve).map(node=>{const base=repeated.templateFidelity.sourceCatalog[repeated.templateFidelity.slides[index].sourceIndex].nodes.find(base=>base.nativeRef.shapeId===node.nativeRef.shapeId);return {id:node.id,baseId:base?.id,selected:repeated.templateFixedObjectIds.includes(base?.id),geometry:node.geometry,baseGeometry:base?.geometry,crop:node.content.crop,baseCrop:base?.content.crop};})})),null,2));
+ assert.ok(!inspectTemplateFidelity(repeated).some(issue=>['template_variant_unchanged','template_variant_duplicate','template_variant_media'].includes(issue.code)),'honest fixed-layout reuse does not require moving or cropping protected brand objects: '+JSON.stringify(inspectTemplateFidelity(repeated).filter(issue=>['template_variant_unchanged','template_variant_duplicate','template_variant_media'].includes(issue.code))));
+ const repeatedExport=await renderTemplatePptx(repeated,runtime.io);assert.ok(repeatedExport.bytes>0,'actual eight-page editable native export preserves repeated fixed logos');
+ const smaller=structuredClone(project);smaller.pages=3;smaller.outline=smaller.outline.slice(0,3);smaller.deck.slides=smaller.deck.slides.slice(0,3);
+ const middleLogo=smaller.templateFidelity.sourceCatalog[2].nodes.find(n=>n.type==='image'&&n.nativeRef.name==='Brand logo');assert.ok(middleLogo);
+ smaller.templateFixedObjectIds=[middleLogo.id];rescheduleTemplateFidelity(smaller,{scoreSlide:()=>0});assert.ok(smaller.templateFidelity.slideMap.includes(2),'a selected fixed object constrains native assignment before confirmation even when N < original pages');
+ const impossible=structuredClone(smaller);impossible.templateFixedObjectIds=project.templateFidelity.sourceCatalog.flatMap(s=>s.nodes.filter(n=>n.type==='image'&&n.nativeRef.name==='Brand logo').map(n=>n.id));
+ assert.throws(()=>rescheduleTemplateFidelity(impossible,{scoreSlide:()=>0}),/selected fixed objects.*Increase the page budget/,'four distinct selected source layouts cannot silently disappear inside a three-page budget');
  bindTemplateFidelity(project);
- assert.ok(project.deck.slides.every(slide=>slide.templateOmissions.length===2),'old chart and table receive a recorded disposition');
+ assert.ok(project.deck.slides.every(slide=>slide.templateOmissions.length===2),'old chart and table receive a recorded disposition: '+JSON.stringify(project.deck.slides.map(s=>({omissions:s.templateOmissions,nodes:s.nodes.map(n=>({id:n.id,type:n.type,role:n.content?.mediaRole,name:n.nativeRef?.name}))}))));
  assert.ok(project.deck.slides.every(slide=>!slide.nodes.some(node=>['chart','table'].includes(node.type))));
  assert.ok(project.deck.slides.every(slide=>slide.nodes.some(node=>node.content?.mediaRole==='brand')),'brand retained');
  assert.ok(!templateSlotPrompt(project,0).includes('OLD_CLIENT_49M'),'sample copy cannot enter the writer prompt');

@@ -1,3 +1,4 @@
+import {choosePptRoleModel} from '../helpers';
 import {selectPptOption} from '../helpers';
 import { test, expect, type Page } from '@playwright/test';
 import { pptParityFixture } from '../fixtures/ppt-parity';
@@ -12,7 +13,7 @@ async function enterPaste(page: Page) {
   await page.goto('/ppt', {waitUntil:'domcontentloaded'}); await expect(page.getByText('加载中…', { exact: true })).toHaveCount(0);
   await page.getByRole('button', { name: '＋ 新建', exact: true }).click();
   await page.getByRole('button', { name: /粘贴文本/ }).click();
-  await selectPptOption(page.getByRole('combobox', { name: 'LLM（必填）' }), 'managed-demo::demo-model');
+  await choosePptRoleModel(page,'managed-demo::demo-model');
   await page.getByRole('button', { name: '确认并继续 →' }).click();
   await page.getByRole('button', { name: /Teaching template/ }).click();
   await page.getByRole('button', { name: '下一步：输入内容 →' }).click();

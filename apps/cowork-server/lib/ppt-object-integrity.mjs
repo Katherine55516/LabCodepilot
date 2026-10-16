@@ -1,3 +1,4 @@
+import {supportsSourceLineRanges,hasExplicitSourceLineRanges,inspectSourceLineCoverage,materializeSourceLineRange} from './ppt-source-line-ranges.mjs';
 import { validAdaptation, verifiedReplacement } from './ppt-template-dispositions.mjs';
 /** The ownership ledger measures rendered objects, never mere citations. */
 import { sourceComponent, isSourceArtifactItem, protectedTemplateAsset } from './ppt-density-capacity.mjs';
@@ -6,6 +7,8 @@ import { visibleNodes, nodeContentText } from './ppt-visible-content.mjs';
 import { templateMediaRole } from './ppt-template-fidelity.mjs';
 import { mathMarkupKey } from './ppt-math.mjs';
 const key=value=>sourceDisplayText(value).normalize('NFKC').replace(/\s+/gu,' ').trim();
+const cellKey=value=>sourceRichText(value,{inline:true}).plainText.normalize('NFKC').replace(/\s+/gu,' ').trim();
+const inlineMathKeys=content=>[content.richText,...(content.items||[]).map(item=>item.richText),...(content.cellRich||[]).flat()].flatMap(rich=>(rich?.runs||[]).filter(run=>run.kind==='math').map(run=>run.mathKey||mathMarkupKey(run.mathMl)));
 const textOf=content=>content.mathText || content.text || (content.items||[]).map(item=>item.body||item.text||'').join('\n');
 const approved=(project,id)=>project.sourceObjectExclusions?.some(item=>item.objectId===id && item.approvedBy==='user' &&
   Boolean(project.source?.sha256) && item.sourceHash===project.source.sha256 && typeof item.reason==='string' && item.reason.trim());
@@ -17,27 +20,35 @@ export function inspectObjectIntegrity(project, slides=project.deck?.slides||[])
     const rendered=nodes.filter(({node})=>node.sourceArtifact?.sourceUnitId===item.id);
     const assignments=(project.planning?.slidePlan||[]).filter(plan=>plan.sourceArtifacts?.some(ref=>ref.sourceUnitId===item.id));
     const primaryPages=[...new Set(rendered.filter(({node,slide})=>!['recap','application','translation'].includes(node.repeatPurpose||node.content?.repeatPurpose||slide.repeatPurpose)).map(({slide})=>slide.id))];
-    if(!['TableBlock','SummaryTableBlock'].includes(item.type)&&primaryPages.length>1)issues.push({code:'required_source_object_duplicate',severity:'error',sourceUnitId:item.id,slideIds:primaryPages,slideId:primaryPages[1],repairable:true,
+    if(!['TableBlock','SummaryTableBlock'].includes(item.type)&&primaryPages.length>1&&!rendered.every(({node})=>node.sourceArtifact.lineStart!==undefined&&node.sourceArtifact.lineEnd!==undefined))issues.push({code:'required_source_object_duplicate',severity:'error',sourceUnitId:item.id,slideIds:primaryPages,slideId:primaryPages[1],repairable:true,
       message:`Required object ${item.id} has multiple primary pages; retain one complete primary representation and declare any purposeful recap explicitly.`});
     let complete=false,missingRows=[];
-    if(['TableBlock','SummaryTableBlock'].includes(item.type)) {
+    const legacyDrawing=item.type==='TableBlock'&&item.diagramSource?.kind==='ascii'?sourceComponent(item):null;
+    if(legacyDrawing?.content?.codeBlock?.language==='diagram'){
+      complete=primaryPages.length===1&&rendered.some(({node})=>node.type==='text'&&node.content?.text===legacyDrawing.content.text&&node.content?.codeBlock?.sourceText===legacyDrawing.content.text&&node.content?.codeBlock?.language==='diagram');
+    } else if(['TableBlock','SummaryTableBlock'].includes(item.type)) {
       const rows=new Map();
       for(const {node} of rendered.filter(({node})=>node.type==='table')) {
         const start=node.sourceArtifact.rowStart??1,actual=node.content?.rows||[];
-        if(key(actual[0]?.join('\u241f'))!==key(item.rows[0]?.join('\u241f')))continue;
+        if(cellKey(actual[0]?.join('\u241f'))!==cellKey(item.rows[0]?.join('\u241f')))continue;
         actual.slice(1).forEach((row,index)=>{
           const original=start+index;
-          if(row.length===item.rows[original]?.length && row.every((cell,col)=>key(cell)===key(item.rows[original][col])&&JSON.stringify((node.content?.cellRich?.[index+1]?.[col]||sourceRichText(cell)).runs.filter(r=>r.kind==='math').map(r=>r.mathKey))===JSON.stringify(sourceRichText(item.rows[original][col]).runs.filter(r=>r.kind==='math').map(r=>r.mathKey))))rows.set(original,true);
+          if(row.length===item.rows[original]?.length && row.every((cell,col)=>(item.diagramSource?.kind==='ascii'?String(cell)===sourceRichText(item.rows[original][col],{inline:true}).plainText:cellKey(cell)===cellKey(item.rows[original][col]))&&JSON.stringify((node.content?.cellRich?.[index+1]?.[col]||sourceRichText(cell,{inline:true})).runs.filter(r=>r.kind==='math').map(r=>r.mathKey))===JSON.stringify(sourceRichText(item.rows[original][col],{inline:true}).runs.filter(r=>r.kind==='math').map(r=>r.mathKey))))rows.set(original,true);
         });
       }
       missingRows=item.rows.slice(1).flatMap((_,index)=>rows.has(index+1)?[]:[index+1]);
       complete=missingRows.length===0 && rendered.length>0;
+    } else if(supportsSourceLineRanges(item)&&rendered.some(({node})=>node.sourceArtifact.lineStart!==undefined)){
+      const primary=rendered.filter(({node,slide})=>!['recap','application','translation'].includes(node.repeatPurpose||node.content?.repeatPurpose||slide.repeatPurpose));
+      const proof=inspectSourceLineCoverage(item,primary.map(({node})=>({...node.sourceArtifact,nodeId:node.id,text:item.type==='CodeBlock'?node.content?.text:node.content?.processSource,language:node.content?.codeBlock?.language})));
+      complete=proof.complete&&primary.every(({node})=>{const expected=sourceComponent(item,node.sourceArtifact);return node.type===expected.type&&(item.type==='CodeBlock'?node.content?.text===expected.content.text:key(textOf(node.content||{}))===key(textOf(expected.content)))&&(!expected.content.mathMl||mathMarkupKey(node.content.mathMl)===mathMarkupKey(expected.content.mathMl))&&JSON.stringify(inlineMathKeys(node.content||{}))===JSON.stringify(inlineMathKeys(expected.content));});
+      if(!proof.complete)issues.push(...proof.issues.map(issue=>({...issue,severity:'error',sourceUnitId:item.id,slideId:primary.find(({node})=>node.id===issue.nodeId)?.slide.id||primary[0]?.slide.id,repairable:true,message:'Source line fragments must preserve every original line, language, indentation and deck reading order exactly.'})));
     } else if(item.type==='ChartBlock'){
       complete=rendered.some(({node})=>node.type==='chart'&&['chartType','labels','values','series','unit','numberFormat','chartSource','chartTitle','axisTitles'].every(k=>JSON.stringify(node.content?.[k])===JSON.stringify(item.chart?.[k])));
     } else {
       const expected=sourceComponent(item);
       complete=rendered.some(({node})=>node.type===expected.type && (item.type==='CodeBlock' ? textOf(node.content||{})===item.text && node.content?.codeBlock?.language===(item.language||'') : key(textOf(node.content||{}))===key(textOf(expected.content))) &&
-        (!expected.content.mathMl || mathMarkupKey(node.content.mathMl)===mathMarkupKey(expected.content.mathMl)));
+        (!expected.content.mathMl || mathMarkupKey(node.content.mathMl)===mathMarkupKey(expected.content.mathMl))&&JSON.stringify(inlineMathKeys(node.content||{}))===JSON.stringify(inlineMathKeys(expected.content)));
       if(!complete&&expected.type==='list'&&rendered.length){
         const fragments=rendered.map(({node})=>node).sort((a,b)=>(a.sourceArtifact.itemStart??Infinity)-(b.sourceArtifact.itemStart??Infinity));
         const count=expected.content.items.length;

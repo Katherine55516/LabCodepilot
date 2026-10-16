@@ -50,3 +50,13 @@ try{
  fs.writeFileSync(path.join(root,'report.json'),JSON.stringify({parser:'passed',mapped:'passed',nativeRoundtrip:'passed',negative:['omml','baseline','tail','bold','size'],visual:exported.exportVerification.visualEvidence},null,2));
  console.log('rich text parser, real inline/cell OMML, editable fallback, native reimport and corruption checks: passed');
 }catch(e){console.error('Evidence:',root);throw e;}
+
+{
+ const {sourceSentences}=await import('./lib/ppt-source-boundaries.mjs');
+ for(const text of ['**Empirical failures.** CAPM was tested extensively. Another complete sentence.','1. **Only beta matters.** Idiosyncratic risk is diversifiable.','**只有贝塔重要。** 特异性风险可以分散。','The condition is *important; preserve its scope*. Next sentence.','Use `first(); second()` before release. Then validate.','Use $x=1; y=2$ as the stated condition. Then validate.']){
+  const pieces=sourceSentences(text);assert.equal(pieces.join(''),text,'sentence indexing preserves every exact original character');
+  for(const piece of pieces)assert.equal(sourceRichText(piece).plainText.includes('**'),false,'complete bold spans remain renderable after segmentation');
+ }
+ const bold=sourceSentences('**Empirical failures.** CAPM was tested. Another sentence.');assert.ok(bold[0].startsWith('**Empirical failures.** CAPM'));
+ console.log('PASS source boundaries: complete emphasis/code/math spans survive segmentation with exact original text and no leaked bold markup');
+}

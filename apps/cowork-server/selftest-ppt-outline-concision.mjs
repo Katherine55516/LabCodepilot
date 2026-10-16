@@ -25,11 +25,11 @@ import { condenseOverflowingTables, mergeUnderfilledPages, pageLoad, condenseFir
     {id:'detail-en',text:'An auxiliary observation describes the data vendor format.',languagePairId:'detail',languageRole:'primary'},
     {id:'detail-zh',text:'辅助观察描述数据供应商的格式。',languagePairId:'detail',languageRole:'translation'},
   ].map(item=>({...item,type:'MechanismBlock',sectionPath:['Overview'],source_ref:[]}));
-  const pairProject={generationPolicy:defaultGenerationPolicy(),source:{text:pairItems.map(i=>i.text).join('\n'),semantic:{inventory:{items:pairItems,relationships:[]}}}};
+  const pairProject={generationPolicy:{...defaultGenerationPolicy(),language:{mode:'source',body:'both'}},source:{text:pairItems.map(i=>i.text).join('\n'),semantic:{inventory:{items:pairItems,relationships:[]}}}};
   const raw={version:2,selection:pairItems.map(i=>({sourceUnitId:i.id,destination:'slides',reason:'Main point'})),slides:[{title:'Cover',sourceUnitIds:[]},{title:'Observations',sourceUnitIds:pairItems.map(i=>i.id),densityFit:{predictedOverflow:100}},{title:'Close',sourceUnitIds:[]}]};
   const assess=(project,outline)=>{compileContentSelection(project,outline);return {rawOutline:structuredClone(outline),issues:[],outline:outline.slides};};
   const start=assess(pairProject,raw);
-  const result=condenseOverflowingTables(pairProject,start,(project,outline)=>{const candidate=assess(project,outline);candidate.rawOutline.slides[1].densityFit={predictedOverflow:Math.max(0,(outline.slides[1].sourceUnitIds.length-2)*50)};return candidate;});
+  const result=await condenseOverflowingTables(pairProject,start,(project,outline)=>{const candidate=assess(project,outline);candidate.rawOutline.slides[1].densityFit={predictedOverflow:Math.max(0,(outline.slides[1].sourceUnitIds.length-2)*50)};return candidate;});
   assert.ok(result);
   assert.deepEqual(result.rawOutline.slides[1].sourceUnitIds,['core-en','core-zh']);
   assert.deepEqual(result.rawOutline.selection.filter(e=>e.destination==='notes').map(e=>e.sourceUnitId).sort(),['detail-en','detail-zh']);
@@ -58,7 +58,7 @@ assert.deepEqual(normalizeGenerationPolicy({ ...wizardPolicy, language: { mode: 
 assert.deepEqual(normalizeGenerationPolicy({ ...wizardPolicy, content: 'full_source', details: 'slides', language: {mode:'source'} }).language, { mode: 'source' }, 'full_source keeps both languages');
 assert.throws(() => normalizeGenerationPolicy({ ...wizardPolicy, language: { mode: 'output', locale: 'en', body: 'primary' } }), /invalid generation policy/u);
 assert.throws(() => normalizeGenerationPolicy({ ...wizardPolicy, language: { mode: 'source', body: 'translated' } }), /invalid generation policy/u);
-assert.deepEqual(defaultGenerationPolicy('').language, { mode: 'source', body: 'both' });
+assert.deepEqual(defaultGenerationPolicy('').language, { mode: 'source', body: 'primary' }, 'round 7 plan: new decks default to one body language (the deck language); both stays selectable');
 
 // --- Budget (item 1).
 const overview = project(wizardPolicy), both = project({ ...wizardPolicy, language: { mode: 'source', body: 'both' } }), full = project({ ...wizardPolicy, content: 'full_source', details: 'slides' });
@@ -80,7 +80,7 @@ const paragraph = items.find(item => item.type !== 'TableBlock' && item.text.len
 assert.equal(concisionCost(overview, { ...paragraph, text: 'x'.repeat(2000) }, 900), CARD_UNITS);
 assert.equal(concisionCost(full, paragraph, 900), 900);
 assert.equal(concisionCost(overview, items.find(item => item.type === 'TableBlock'), 900), 900, 'tables keep their measured cost');
-assert.match(concisionPlannerRule(overview), /3–4 cards[\s\S]*about 8 pages[\s\S]*at most 10[\s\S]*original-language unit/u);
+assert.match(concisionPlannerRule(overview), /3–4 cards[\s\S]*about 8 pages[\s\S]*at most 10[\s\S]*deck language/u);
 assert.equal(concisionPlannerRule(full), '');
 
 // --- One body language (item 3).
@@ -93,7 +93,7 @@ assert.deepEqual(rules.get(translation.id).allowedDestinations, ['notes']);
 const routed = routeTranslationsToNotes(overview, { version: 2, slides: [{ title: 'Cover', sourceUnitIds: [] }, { title: 'A', sourceUnitIds: [original.id, translation.id] }, { title: 'B', sourceUnitIds: [] }],
   selection: [{ sourceUnitId: original.id, destination: 'slides', reason: 'r' }, { sourceUnitId: translation.id, destination: 'slides', reason: 'r' }] });
 assert.deepEqual(routed.slides[1].sourceUnitIds, [original.id]);
-assert.deepEqual(routed.selection.find(entry => entry.sourceUnitId === translation.id), { sourceUnitId: translation.id, destination: 'notes', visibleEquivalentSourceUnitId: original.id, reason: 'Translation kept in speaker notes; the original-language unit carries the slide.' });
+assert.deepEqual(routed.selection.find(entry => entry.sourceUnitId === translation.id), { sourceUnitId: translation.id, destination: 'notes', visibleEquivalentSourceUnitId: original.id, reason: 'Other-language side kept in speaker notes; the deck-language unit carries the slide.' });
 const swapped = routeTranslationsToNotes(overview, { version: 2, slides: [{ sourceUnitIds: [] }, { sourceUnitIds: [translation.id] }, { sourceUnitIds: [translation.id] }], selection: [{ sourceUnitId: translation.id, destination: 'slides', reason: 'r' }] });
 assert.deepEqual(swapped.slides.map(slide => slide.sourceUnitIds), [[], [original.id], []], 'a translation alone on a page is replaced by its original exactly once');
 assert.equal(routeTranslationsToNotes(both, routed), routed, 'no routing when both languages are chosen');
@@ -134,19 +134,19 @@ assert.ok(!legacyPlan.pageGroups && legacyPlan.sections.every(section => section
 const table = items.find(item => item.type === 'TableBlock'), stubAssess = (_project, outline) => ({ rawOutline: { ...outline, slides: outline.slides.map(slide => ({ ...slide, densityFit: { predictedOverflow: 0, targetVisualUnits: 671 } })) }, outline: outline.slides, issues: [] });
 const tableRules = new Map(selectionConstraints(overview).map(rule => [rule.sourceUnitId, rule]));
 const overflowing = { rawOutline: { version: 2, selection: [{ sourceUnitId: table.id, destination: 'slides', reason: 'r' }], slides: [{ title: 'Cover', sourceUnitIds: [] }, { title: 'Models', sourceUnitIds: [table.id], densityFit: { predictedOverflow: 400 } }, { title: 'End', sourceUnitIds: [] }] }, issues: [{ code: 'planned_density_overflow' }] };
-const condensed = condenseOverflowingTables(overview, overflowing, stubAssess);
+const condensed = await condenseOverflowingTables(overview, overflowing, stubAssess);
 const summary = condensed.rawOutline.selection.find(entry => entry.sourceUnitId === table.id);
 assert.equal(summary.destination, 'summary');
 assert.ok(tableRules.get(table.id).mandatoryRowIndices.every(row => summary.rowIndices.includes(row)), 'condition/risk rows stay on the slide');
 assert.ok(summary.rowIndices.length < table.rows.length - 1 && summary.rowIndices.every((row, i, all) => !i || row > all[i - 1]));
-assert.equal(condenseOverflowingTables(full, overflowing, stubAssess), null, 'full_source is never condensed');
+assert.equal(await condenseOverflowingTables(full, overflowing, stubAssess), null, 'full_source is never condensed');
 const units = id => ({ sourceUnitIds: [id] });
 const thin = { rawOutline: { version: 2, selection: [], slides: [{ title: 'Cover', sourceUnitIds: [] }, { title: 'Nav', role: 'navigation', sourceUnitIds: [] },
   ...groups.slice(0, 6).flatMap(group => [units(group.sourceUnitIds[0]), units(group.sourceUnitIds[1])]).map((slide, i) => ({ ...slide, title: 'P' + i })), { title: 'End', sourceUnitIds: [] }] }, issues: [] };
-const merged = mergeUnderfilledPages(overview, thin, stubAssess);
+const merged = await mergeUnderfilledPages(overview, thin, stubAssess);
 assert.ok(merged && merged.rawOutline.slides.length < thin.rawOutline.slides.length && merged.rawOutline.slides.length >= presentationBudget(overview).target, 'underfilled neighbours merge down toward the budget target');
 assert.ok(merged.rawOutline.slides.some(slide => slide.mergedFrom?.length >= 2));
-assert.equal(mergeUnderfilledPages(full, thin, stubAssess), null);
+assert.equal(await mergeUnderfilledPages(full, thin, stubAssess), null);
 assert.ok(pageLoad(overview, units(translation.id), [{ sourceUnitId: translation.id, destination: 'notes' }]) === 0, 'notes cost nothing');
 assert.match(condenseFirstRule(overview), /\(1\) move secondary units to speaker notes[\s\S]*\(3\) only then split[\s\S]*10 pages/u);
 

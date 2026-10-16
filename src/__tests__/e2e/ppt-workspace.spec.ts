@@ -1,5 +1,14 @@
+import {choosePptRoleModel} from '../helpers';
 import {selectPptOption} from '../helpers';
 import { test, expect } from '@playwright/test';
+
+// This file tests production UI with fixture APIs. Its model-protocol check
+// must not reach a live backend (or depend on a cold dev API compilation).
+test.beforeEach(async({page})=>{
+  await page.route('**/api/ppt/model-jobs',route=>route.fulfill({json:{jobs:[]}}));
+  await page.route('**/api/ppt/capabilities',route=>route.fulfill({json:{byok:{protocolVersion:1,executionPolicyVersion:1,multimodalVersion:1,transport:'desktop-model-jobs',credentialLocation:'desktop',requiresOpenClient:true,maxPromptBytes:2000000,maxResultBytes:4000000,jobTimeoutMs:900000,concurrency:3}}}));
+  await page.route('**/api/providers/options?**',route=>route.fulfill({json:{options:{}}}));
+});
 
 test('PPT M5 blocked quality gate stays editable and publishes only after repair @smoke', async ({ page }) => {
   // This full settings/editor journey includes cold Next route compilation.
@@ -123,7 +132,7 @@ test('PPT M5 blocked quality gate stays editable and publishes only after repair
     }
     return route.fulfill({ status: 404, json: { error: 'not found' } });
   });
-  await page.goto('/ppt', {waitUntil:'domcontentloaded'});await expect(page.getByText('加载中…',{exact:true})).toHaveCount(0);
+  await page.goto('/ppt', {waitUntil:'domcontentloaded'});await expect(page.getByText('加载中…',{exact:true})).toHaveCount(0,{timeout:30000});
   await page.getByRole('navigation',{name:'PPT 工作区导航'}).getByRole('button',{name:/任务中心/}).click();
   await page.getByTestId('ppt-task-center').locator('article').filter({hasText:'Needs repair'}).getByRole('button',{name:/查看任务/}).click();
   await page.getByRole('button', { name: '打开编辑器' }).click();
@@ -281,7 +290,7 @@ test('PPT M4 visual blocks, undo, template switch and one-slide AI @smoke', asyn
     }
     return route.fulfill({ status: 404, json: { error: 'not found' } });
   });
-  await page.goto('/ppt', {waitUntil:'domcontentloaded'});await expect(page.getByText('加载中…',{exact:true})).toHaveCount(0);
+  await page.goto('/ppt', {waitUntil:'domcontentloaded'});await expect(page.getByText('加载中…',{exact:true})).toHaveCount(0,{timeout:30000});
   await page
     .getByRole('button', { name: /Rich deck/ })
     .first()
@@ -414,18 +423,18 @@ test('PPT M1 creation, outline approval, editing and export entry @smoke', async
     return route.fulfill({ status: 404, json: { error: 'not found' } });
   });
 
-  await page.goto('/ppt', {waitUntil:'domcontentloaded'});await expect(page.getByText('加载中…',{exact:true})).toHaveCount(0);
+  await page.goto('/ppt', {waitUntil:'domcontentloaded'});await expect(page.getByText('加载中…',{exact:true})).toHaveCount(0,{timeout:30000});
   await page
     .getByRole('button', { name: /＋ 新建|新建 PPT/ })
     .first()
     .click();
   await page.getByRole('button', { name: /从 Prompt 开始/ }).click();
-  await selectPptOption(page.getByRole('combobox', { name: 'LLM（必填）' }), 'managed-local-id::demo-model');
+  await choosePptRoleModel(page,'managed-local-id::demo-model');
   await page.getByRole('button', { name: '确认并继续 →' }).click();
   await page.getByRole('button', { name: /Default/ }).click();
   await page.getByRole('button', { name: '下一步：输入内容 →' }).click();
   await page.getByRole('textbox', { name: '输入 Prompt' }).fill('Quarterly business review for management');
-  await page.getByText('当前解析模型').waitFor();
+  await expect(page.getByRole('heading', {name:'生成质量',exact:true})).toBeVisible();
   await page.getByRole('button', { name: '读取输入并生成大纲' }).click();
   await expect(page.getByTestId('ppt-outline-review')).toBeVisible();
   await expect(page.getByText('Syllabus（大纲）')).toBeVisible();
@@ -650,7 +659,7 @@ test('PPT structured editor persists object commands, history, AI edits and publ
     if (method === 'GET' && url.pathname.endsWith(id)) return route.fulfill({ json: { project: makeProject() } });
     return route.fulfill({ status: 404, json: { error: 'not found' } });
   });
-  await page.goto('/ppt', {waitUntil:'domcontentloaded'});await expect(page.getByText('加载中…',{exact:true})).toHaveCount(0);
+  await page.goto('/ppt', {waitUntil:'domcontentloaded'});await expect(page.getByText('加载中…',{exact:true})).toHaveCount(0,{timeout:30000});
   await page
     .getByRole('button', { name: /Structured deck/ })
     .first()
@@ -788,7 +797,7 @@ test('PPT M2 library folders, favorites, search and trash @smoke', async ({ page
     if (method === 'GET' && url.pathname.endsWith(id)) return route.fulfill({ json: { project: item } });
     return route.fulfill({ status: 404, json: { error: 'not found' } });
   });
-  await page.goto('/ppt', {waitUntil:'domcontentloaded'});await expect(page.getByText('加载中…',{exact:true})).toHaveCount(0);
+  await page.goto('/ppt', {waitUntil:'domcontentloaded'});await expect(page.getByText('加载中…',{exact:true})).toHaveCount(0,{timeout:30000});
   await expect(page.getByText('Quarterly plan')).toBeVisible();
   await page.locator('article').filter({ hasText: 'Quarterly plan' }).getByRole('button', { name: '收藏', exact: true }).click();
   await page
@@ -921,13 +930,13 @@ test('PPT M2 paste and file inputs reach source aware outlines @smoke', async ({
     if (route.request().method() === 'GET' && created && url.pathname.endsWith(String(created.id))) return route.fulfill({ json: { project: created } });
     return route.fulfill({ status: 404, json: { error: 'not found' } });
   });
-  await page.goto('/ppt', {waitUntil:'domcontentloaded'});await expect(page.getByText('加载中…',{exact:true})).toHaveCount(0);
+  await page.goto('/ppt', {waitUntil:'domcontentloaded'});await expect(page.getByText('加载中…',{exact:true})).toHaveCount(0,{timeout:30000});
   await page
     .getByRole('button', { name: /＋ 新建|新建 PPT/ })
     .first()
     .click();
   await page.getByRole('button', { name: /粘贴文本/ }).click();
-  await selectPptOption(page.getByRole('combobox', { name: 'LLM（必填）' }), 'managed-demo::demo-model');
+  await choosePptRoleModel(page,'managed-demo::demo-model');
   await page.getByRole('button', { name: '确认并继续 →' }).click();
   await page.getByRole('button', { name: /Default/ }).click();
   await page.getByRole('button', { name: '下一步：输入内容 →' }).click();
@@ -953,6 +962,7 @@ test('PPT M2 paste and file inputs reach source aware outlines @smoke', async ({
     [...screenshot],
   );
   await expect(page.getByAltText('dashboard')).toBeVisible();
+  await expect(page.getByTestId('ppt-input-images').getByRole('img')).toHaveCount(1);
   if (process.env.PPT_PASTE_CAPTURE) {
     await page.screenshot({
       path: '/tmp/codepilot-ppt-paste-images-desktop.png',
@@ -965,7 +975,7 @@ test('PPT M2 paste and file inputs reach source aware outlines @smoke', async ({
     });
     await page.setViewportSize({ width: 1280, height: 720 });
   }
-  await page.getByRole('button', { name: '生成 Syllabus', exact:true }).click();
+  await page.getByRole('button', { name: '读取输入并生成大纲', exact:true }).click();
   await page.getByRole('button', { name: '确认大纲并生成页面' }).click();
   expect(payloads[0]).toMatchObject({
     inputKind: 'paste',
@@ -978,7 +988,7 @@ test('PPT M2 paste and file inputs reach source aware outlines @smoke', async ({
     .first()
     .click();
   await page.getByRole('button', { name: /导入文件/ }).click();
-  await selectPptOption(page.getByRole('combobox', { name: 'LLM（必填）' }), 'managed-demo::demo-model');
+  await choosePptRoleModel(page,'managed-demo::demo-model');
   await page.getByRole('button', { name: '确认并继续 →' }).click();
   await page.getByRole('button', { name: /Default/ }).click();
   await page.getByRole('button', { name: '下一步：输入内容 →' }).click();
@@ -990,7 +1000,7 @@ test('PPT M2 paste and file inputs reach source aware outlines @smoke', async ({
     buffer: Buffer.from('metric,value\nRevenue,10%'),
   });
   await page.getByRole('textbox', { name: '输入 Prompt' }).fill('提炼文件核心事实');
-  await page.getByRole('button', { name: '生成 Syllabus', exact:true }).click();
+  await page.getByRole('button', { name: '读取输入并生成大纲', exact:true }).click();
   await page.getByRole('button', { name: '确认大纲并生成页面' }).click();
   await expect.poll(() => payloads.length).toBe(2);
   expect(payloads[1]).toMatchObject({
@@ -1048,9 +1058,9 @@ test('PPTX fidelity import selects a model before opening the file @smoke', asyn
       });
     return route.fulfill({ status: 404, json: { error: 'not found' } });
   });
-  await page.goto('/ppt', {waitUntil:'domcontentloaded'});await expect(page.getByText('加载中…',{exact:true})).toHaveCount(0);
+  await page.goto('/ppt', {waitUntil:'domcontentloaded'});await expect(page.getByText('加载中…',{exact:true})).toHaveCount(0,{timeout:30000});
   await page.getByRole('button', { name: /↥ 导入|Import/ }).click();
-  await selectPptOption(page.getByRole('combobox', { name: 'LLM（必填）' }), 'managed-demo::demo-model');
+  await choosePptRoleModel(page,'managed-demo::demo-model');
   await page.getByRole('button', { name: '确认并继续 →' }).click();
   await page.getByRole('button', { name: /Default/ }).click();
   await page.getByRole('button', { name: '下一步：输入内容 →' }).click();
@@ -1108,7 +1118,7 @@ test('PPT manual ordering persists and keeps pin groups separate @smoke', async 
     }
     return route.fulfill({ json: { projects: url.searchParams.get('trash') === '1' ? [] : projects } });
   });
-  await page.goto('/ppt', {waitUntil:'domcontentloaded'});await expect(page.getByText('加载中…',{exact:true})).toHaveCount(0);
+  await page.goto('/ppt', {waitUntil:'domcontentloaded'});await expect(page.getByText('加载中…',{exact:true})).toHaveCount(0,{timeout:30000});
   await page.getByRole('button', { name: '▤ 全部 PPT (3)' }).click();
   await page.getByRole('button', { name: '拖动调整项目顺序 Regular B' }).dragTo(page.locator('article').filter({ hasText: 'Regular A' }));
   await expect.poll(() => projectReorders).toBe(1);
@@ -1292,7 +1302,7 @@ test('PPT M3 template compatibility and version update workflow @smoke', async (
       },
     });
   });
-  await page.goto('/ppt', {waitUntil:'domcontentloaded'});await expect(page.getByText('加载中…',{exact:true})).toHaveCount(0);
+  await page.goto('/ppt', {waitUntil:'domcontentloaded'});await expect(page.getByText('加载中…',{exact:true})).toHaveCount(0,{timeout:30000});
   await page.getByText('Original plan', { exact: true }).waitFor();
   await page.waitForTimeout(500);
   await page
@@ -1323,10 +1333,11 @@ test('PPT M3 template compatibility and version update workflow @smoke', async (
   await expect(page.getByRole('dialog')).toContainText('Brand');
   await page
     .getByRole('dialog')
-    .getByRole('button', { name: '选择 LLM 并继续' })
+    .getByRole('button', { name: '选择质量等级并继续' })
     .click();
   await page.getByRole('button', { name: /从 Prompt 开始/ }).click();
-  await selectPptOption(page.getByRole('combobox', { name: 'LLM（必填）' }), 'managed-demo::demo-model');
+  await expect(page.getByRole('dialog',{name:'生成质量',exact:true})).toBeVisible();
+  await choosePptRoleModel(page,'managed-demo::demo-model');
   await page.getByRole('button', { name: '确认并继续 →' }).click();
   await expect(page.getByTestId('ppt-template-browser')).toContainText('Brand');
   // Next.js dev indicator overlays the bottom-left footer; exercise its keyboard action.
@@ -1337,7 +1348,7 @@ test('PPT M3 template compatibility and version update workflow @smoke', async (
       name: /基于上一版更新|Update from previous version/,
     })
     .click();
-  await selectPptOption(page.getByRole('combobox', { name: 'LLM（必填）' }), 'managed-demo::demo-model');
+  await choosePptRoleModel(page,'managed-demo::demo-model');
   await page.getByRole('button', { name: '确认并继续 →' }).click();
   await expect(page.locator('input[type=file]')).toHaveAttribute('accept', /\.xlsx.*\.csv|\.csv.*\.xlsx/);
   await page.getByRole('button', { name: '上传文件' }).click();

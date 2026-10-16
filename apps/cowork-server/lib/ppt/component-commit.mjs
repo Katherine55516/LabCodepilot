@@ -17,7 +17,7 @@ export function commitSourceComponents(project,envelope,{leaseToken=componentLea
   if(project.revision!==baseRevision||Number(project.editing?.epochs?.[slideId]||0)!==epoch)return reject('user_revision_or_epoch_changed');
   if(!lease||leaseToken(project)!==lease||project.source?.sha256!==sourceHash)return reject('lease_or_source_changed');
   const assigned=project.planning?.slidePlan?.find(s=>s.slideId===slideId)?.sourceArtifacts||[],refs=envelope.refs||[];
-  if(!refs.length||refs.some(ref=>!assigned.some(a=>a.sourceUnitId===ref.sourceUnitId&&(a.rowStart===undefined||a.rowStart===ref.rowStart&&a.rowEnd===ref.rowEnd))))return reject('unassigned_source_range');
+  if(!refs.length||refs.some(ref=>!assigned.some(a=>['sourceUnitId','rowStart','rowEnd','lineStart','lineEnd'].every(key=>a[key]===ref[key]))))return reject('unassigned_source_range');
   const saved=project.runtime?.slides?.[slideId]?.componentCommit,previous=saved?.epoch===epoch&&saved?.runId===runId?saved:null;
   const union=[...(previous?.refs||[]),...refs].filter((r,i,all)=>all.findIndex(x=>digest(x)===digest(r))===i);
   if(digest(union)===digest(previous?.refs||[]))return {status:'unchanged'};

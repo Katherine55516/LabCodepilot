@@ -1,0 +1,24 @@
+import assert from 'node:assert/strict';
+import {_internals as api}from './lib/ppt-api.mjs';
+import {inspectSystemOutlineTitles}from './lib/ppt-outline-title-fit.mjs';
+import {applyOutlineMetadataRepair}from './lib/ppt-outline-protocol.mjs';
+import {topicLanguageMismatch}from './lib/ppt-topic-title-validation.mjs';
+import {BUILT_INS,snapshotTemplate}from './lib/ppt-template.mjs';
+
+const item={id:'source-code',type:'CodeBlock',text:Array.from({length:24},(_,i)=>'print("original condition '+i+'")').join('\n'),language:'python',must_preserve_structure:true,source_ref:['1'],chunkRefs:['c1'],sectionPath:['Generic Skill 的串行链路太长']};
+const source={text:'The original English tutorial explains a complete implementation pipeline. '.repeat(20),segments:[{id:'1',text:'Implementation'}],semantic:{inventory:{items:[item],relationships:[]},chunks:[{id:'c1',text:item.text}]}};
+const project={pages:4,template:'violet',templateSpec:snapshotTemplate(BUILT_INS.find(t=>t.id==='violet')),source,generationPolicy:{content:'full_source',knowledge:'source_only',language:{mode:'source',body:'both'}},pageDecision:{source:'estimate',mode:'auto'}};
+const raw={version:2,slides:[{title:'Implementation',focus:'Complete source pipeline',role:'cover',sourceUnitIds:[]},...[0,12].map(start=>({title:'Implementation pipeline',focus:'Complete original implementation',planningProtocolVersion:2,sourceUnitIds:[item.id],sourceArtifactRanges:[{sourceUnitId:item.id,lineStart:start,lineEnd:start+12}],keyPoints:[]})),{title:'Thanks for watching!',role:'closing',sourceUnitIds:[]}]};
+const original=JSON.stringify(source),a=api.assessOutlineCandidate(project,raw);
+const errors=inspectSystemOutlineTitles(a.project,a.rawOutline.slides).filter(c=>c.reason==='topic_language_mismatch');
+assert.equal(errors.length,2,'validate the intact candidates before display normalization can discard their subject or fragment scope');
+const delta={version:2,updates:errors.map(c=>({pageIndex:c.pageIndex,field:'title',text:'Skill Pipeline (lines '+c.requiredTopicRange.join('–')+')'}))};
+const repaired=applyOutlineMetadataRepair(a.rawOutline,{details:{metadataConflicts:errors}},delta),b=api.assessOutlineCandidate(a.project,repaired);
+assert.deepEqual(inspectSystemOutlineTitles(b.project,b.rawOutline.slides),[]);
+assert.deepEqual(b.outline.slice(1,-1).map(s=>s.title),['Skill Pipeline (lines 1–12)','Skill Pipeline (lines 13–24)']);
+assert.equal(JSON.stringify(source),original);
+assert.equal(topicLanguageMismatch('Story Planner 与 Presentation Brief','en'),true,'a Chinese connective is still a second topic language');
+const chineseRange={slides:[{title:'原始流程 (第 1–12 行)',sourceUnitIds:[item.id],sourceArtifactRanges:[{sourceUnitId:item.id,lineStart:0,lineEnd:12}]}]},error={details:{metadataConflicts:[{pageIndex:0,field:'title',reason:'topic_language_mismatch',topicLanguage:'en',requiredTopicRange:['1','12'],maxLength:160}]}};
+assert.equal(applyOutlineMetadataRepair(chineseRange,error,{version:2,updates:[{pageIndex:0,field:'title',text:'Skill Pipeline (lines 1–12)'}]}).slides[0].title,'Skill Pipeline (lines 1–12)','translate the locator language while preserving its exact numeric bounds');
+assert.throws(()=>applyOutlineMetadataRepair(chineseRange,error,{version:2,updates:[{pageIndex:0,field:'title',text:'Skill Pipeline (lines 1–13)'}]}),/topic_range_mismatch/);
+console.log('Intact source topic validation, complete single-language metadata, stable exact fragment ranges and immutable body languages: OK');

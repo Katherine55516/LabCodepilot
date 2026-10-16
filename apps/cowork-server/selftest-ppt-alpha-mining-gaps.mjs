@@ -104,7 +104,9 @@ import { routeIssue } from './lib/ppt-repair-routing.mjs';
   assert.deepEqual(sourceDocumentTitle(project).variants.map(v => [v.main, v.subtitle]), [['Alpha Mining', 'Formulaic Alphas'], ['因子挖掘', '公式化因子']]);
   const cover = inspectCoverTitle(project, slides);
   assert.equal(cover[0]?.code, 'cover_source_title_incomplete');
-  assert.deepEqual(cover[0].missing, ['Alpha Mining', 'Formulaic Alphas', '公式化因子']);
+  // Round 7 (B1): the cover topic uses the deck language only (English here by
+  // visible width), so only the English title parts are required.
+  assert.deepEqual(cover[0].missing, ['Alpha Mining', 'Formulaic Alphas']);
   assert.equal(inspectCoverTitle({ ...project, deckTitle: { source: 'user' } }, slides).length, 0, 'a user title is not second-guessed');
   const overviewTitle={...project,generationPolicy:{content:'overview',details:'notes',language:{mode:'output',locale:'zh'}}};
   const sourceCover={id:'source-cover',title:'因子挖掘：公式化因子',nodes:[{id:'title',type:'text',semanticRole:'title',content:{text:'因子挖掘：公式化因子'}}]};
@@ -126,11 +128,12 @@ import { routeIssue } from './lib/ppt-repair-routing.mjs';
   assert.equal(inspectReadingOrder([shuffled])[0]?.code, 'layout_reading_order_broken');
   assert.equal(inspectReadingOrder([{ ...shuffled, sourceArtifactFit: { ...shuffled.sourceArtifactFit, readingOrder: true } }]).length, 0);
   assert.equal(inspectCodeWrap([{ id: 'c', sourceArtifactFit: { layoutId: 'parallel-source', codeWraps: 5 } }])[0]?.code, 'code_line_wrapped');
-  // Bilingual body, monolingual titles.
+  // Round 7 (B1): bilingual body, titles in the deck language only.
   const pairs = Array.from({ length: 6 }, (_, i) => [{ id: 'a' + i, languagePairId: 'p' + i }, { id: 'b' + i, languagePairId: 'p' + i }]).flat();
   const titled = ['因子挖掘', '两种研究范式对比', '算子代数', '遗传编程', '因子组合'].map((title, i) => ({ id: 't' + i, title }));
-  assert.equal(inspectTitleLanguage({ source: { semantic: { inventory: { items: pairs } } }, generationPolicy: {} }, titled)[0]?.code, 'title_language_inconsistent');
-  assert.equal(inspectTitleLanguage({ source: { semantic: { inventory: { items: pairs } } }, generationPolicy: { language: { mode: 'output' } } }, titled).length, 0);
+  const chineseSource = { text: '因子挖掘教程以中文为主，包含少量 English。', semantic: { inventory: { items: pairs } } };
+  assert.equal(inspectTitleLanguage({ source: chineseSource, generationPolicy: { language: { mode: 'source' } } }, titled).length, 0, 'Chinese deck, Chinese titles');
+  assert.equal(inspectTitleLanguage({ source: chineseSource, generationPolicy: { language: { mode: 'output', locale: 'en' } } }, titled)[0]?.code, 'title_language_inconsistent', 'English output, Chinese titles');
 }
 
 // 5. Source components carry their translation-pair identity for layout.

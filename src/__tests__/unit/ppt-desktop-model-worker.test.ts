@@ -4,6 +4,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
+type WireRequest={model:string;response_format:{type:string};max_tokens:number;stream?:boolean;thinking?:{type:string};reasoning_effort?:string;enable_thinking?:boolean};
+type JobOutput={text:string;telemetry:{outputMode:string;inputTokens:number;outputTokens:number}};
+type ProgressBody={lease:string;chars:number;text:string};
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ppt-byok-'));
 process.env.CLAUDE_GUI_DATA_DIR = dir;
 process.env.CLAUDE_GUI_SECRET_KEY = 'a'.repeat(64);
@@ -23,35 +26,44 @@ describe('PPT desktop model worker', () => {
     const timeout=classifyModelFailure({message:'secret',cause:{code:'UND_ERR_HEADERS_TIMEOUT',url:'secret'}});
     assert.equal(timeout.diagnostic?.kind,'timeout');assert.ok(!JSON.stringify(timeout).includes('secret'));
     assert.equal(classifyModelFailure({cause:{statusCode:429,responseBody:'secret'}}).diagnostic?.httpStatus,429);
+    const connect=classifyModelFailure({message:'secret',cause:{code:'UND_ERR_CONNECT_TIMEOUT'}});
+    assert.equal(connect.code,'network','a connect timeout never reached the gateway and is retried as a network failure');
   });
   it('uses the schema and stage budget on the wire, falling back only for an explicit unsupported schema',async()=>{
-    const requests:Record<string,any>[]=[];let rejectSchema=true;
+    const requests:WireRequest[]=[];let rejectSchema=true,responseText='{"ok":true}';
     const schema={type:'object',additionalProperties:false,properties:{ok:{type:'boolean'}},required:['ok']};
     const server=http.createServer(async(req,res)=>{
       const chunks:Buffer[]=[];for await(const chunk of req)chunks.push(chunk);const body=JSON.parse(Buffer.concat(chunks).toString());requests.push(body);
       if(rejectSchema&&body.response_format.type==='json_schema'){res.writeHead(400,{'content-type':'application/json'});res.end(JSON.stringify({error:{message:'response_format json_schema is unsupported',type:'invalid_request_error'}}));return;}
-      if(body.stream){res.writeHead(200,{'content-type':'text/event-stream'});for(const delta of [{content:'{\"ok\":true}'},{}])res.write(`data: ${JSON.stringify({id:'schema-fixture',object:'chat.completion.chunk',created:1,model:body.model,choices:[{index:0,delta,finish_reason:delta.content?null:'stop'}],...(!delta.content?{usage:{prompt_tokens:21,completion_tokens:4,total_tokens:25}}:{})})}\n\n`);res.end('data: [DONE]\n\n');return;}
+      if(body.stream){res.writeHead(200,{'content-type':'text/event-stream'});for(const delta of [{content:responseText},{}])res.write(`data: ${JSON.stringify({id:'schema-fixture',object:'chat.completion.chunk',created:1,model:body.model,choices:[{index:0,delta,finish_reason:delta.content?null:'stop'}],...(!delta.content?{usage:{prompt_tokens:21,completion_tokens:4,total_tokens:25}}:{})})}\n\n`);res.end('data: [DONE]\n\n');return;}
       res.setHeader('content-type','application/json');res.end(JSON.stringify({id:'schema-fixture',object:'chat.completion',created:1,model:body.model,choices:[{index:0,message:{role:'assistant',content:'{"ok":true}'},finish_reason:'stop'}],usage:{prompt_tokens:21,completion_tokens:4,total_tokens:25}}));
     });
     await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
     try{
       const provider=db.createProvider({name:'Schema fixture',provider_type:'custom',protocol:'openai-compatible',base_url:`http://127.0.0.1:${(server.address() as {port:number}).port}/v1`,api_key:'test-only'});
-      const id='c'.repeat(32);let completion:any;
-      const run=(model:string,stage='outline')=>executeDesktopModelJob(id,async(route,body)=>{if(route.endsWith('/claim'))return Response.json({id,configId:'byok:'+provider.id,model,prompt:'Server schema request',lease:'nonce',options:{stage,maxOutputTokens:8192,jsonSchema:schema}});completion=body;return Response.json({ok:true});});
+      const id='c'.repeat(32);let completion={} as JobOutput;
+      const run=(model:string,stage='outline')=>executeDesktopModelJob(id,async(route,body)=>{if(route.endsWith('/claim'))return Response.json({id,configId:'byok:'+provider.id,model,prompt:'Server schema request',lease:'nonce',options:{stage,maxOutputTokens:8192,jsonSchema:schema}});completion=body as JobOutput;return Response.json({ok:true});});
       assert.equal((await run('schema-fallback')).status,200);assert.equal(requests.length,2);assert.equal(requests[0].response_format.type,'json_schema');assert.equal(requests[1].response_format.type,'json_object');assert.equal(requests[0].max_tokens,8192);assert.equal(completion.telemetry.outputMode,'json_fallback');
       rejectSchema=false;assert.equal((await run('schema-supported')).status,200);assert.equal(completion.telemetry.outputMode,'schema');assert.equal(completion.telemetry.inputTokens,21);
-      assert.equal((await run('deepseek-v4-flash')).status,200);assert.equal(requests.at(-1)!.thinking.type,'disabled');assert.ok(!requests[0].thinking);assert.ok(!requests[0].reasoning_effort);
-      assert.equal((await run('deepseek-v4-flash','review:deck:batch:1')).status,200);assert.equal(requests.at(-1)!.thinking.type,'disabled');assert.equal(requests.at(-1)!.stream,true);assert.equal(completion.text,'{"ok":true}');
+      assert.equal((await run('deepseek-v4-flash')).status,200);assert.equal(requests.at(-1)!.thinking!.type,'disabled');assert.ok(!requests[0].thinking);assert.ok(!requests[0].reasoning_effort);
+      assert.equal((await run('deepseek-v4-flash','review:deck:batch:1')).status,200);assert.equal(requests.at(-1)!.thinking!.type,'disabled');assert.equal(requests.at(-1)!.stream,true);assert.equal(completion.text,'{"ok":true}');
       assert.equal((await run('deepseek-v4-flash','content:slide_one')).status,200);assert.ok(!requests.at(-1)!.thinking);assert.equal(requests.at(-1)!.stream,true);assert.equal(requests.at(-1)!.response_format.type,'json_schema');
       assert.equal((await run('qwen3.8-max','outline')).status,200);assert.equal(requests.at(-1)!.enable_thinking,false);assert.ok(!requests.at(-1)!.thinking);
       assert.equal((await run('qwen3.8-max','content:slide_one')).status,200);assert.equal(requests.at(-1)!.enable_thinking,false);
       assert.equal((await run('qwen3.8-max','planning:navigation:0')).status,200);assert.equal(requests.at(-1)!.enable_thinking,false);
+      assert.equal(requests.at(-1)!.stream,true,'navigation keeps the model transport open');
+      assert.equal((await run('qwen3.8-max','planning:language-pairs:0')).status,200);assert.equal(requests.at(-1)!.stream,true,'language-pair audits stream transport without becoming page drafts');
       assert.equal((await run('qwen3.8-max','planning:navigation:audit:0')).status,200);assert.equal(requests.at(-1)!.enable_thinking,false);
       assert.equal((await run('gpt-6.1-sol','review:deck')).status,200);assert.ok(!requests.at(-1)!.thinking);assert.ok(!requests.at(-1)!.reasoning_effort);
+      responseText='{"ok":"wrong type"}';
+      assert.equal((await run('schema-supported')).status,200);
+      assert.equal(completion.text,responseText,'the authoritative server receives original valid JSON to compile or reject');
+      assert.equal(completion.telemetry.outputMode,'schema','a compatible provider may ignore shape constraints; server compilation/validation remains authoritative');
+      responseText='{';assert.equal((await run('schema-supported')).status,502,'incomplete JSON never becomes an accepted model result');
     }finally{await new Promise<void>(resolve=>server.close(()=>resolve()));}
   });
   it('streams writer pages and reports bounded progress with the lease, completing with the full validated text',async()=>{
-    const requests:Record<string,any>[]=[];const parts=['{"title":"核心张力",','"blocks":[{"body":"候选极多时',"，最优 IC 是极值\"}]}"];
+    const requests:WireRequest[]=[];const parts=['{"title":"核心张力",','"blocks":[{"body":"候选极多时',"，最优 IC 是极值\"}]}"];
     const server=http.createServer(async(req,res)=>{
       const chunks:Buffer[]=[];for await(const chunk of req)chunks.push(chunk);const body=JSON.parse(Buffer.concat(chunks).toString());requests.push(body);
       res.writeHead(200,{'content-type':'text/event-stream'});
@@ -62,11 +74,11 @@ describe('PPT desktop model worker', () => {
     await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
     try{
       const provider=db.createProvider({name:'Stream fixture',provider_type:'custom',protocol:'openai-compatible',base_url:`http://127.0.0.1:${(server.address() as {port:number}).port}/v1`,api_key:'test-only'});
-      const id='e'.repeat(32),progress:any[]=[];let completion:any;
+      const id='e'.repeat(32),progress:ProgressBody[]=[];let completion={} as JobOutput;
       const outcome=await executeDesktopModelJob(id,async(route,body)=>{
         if(route.endsWith('/claim'))return Response.json({id,configId:'byok:'+provider.id,model:'writer-model',prompt:'Write page',lease:'nonce',options:{stage:'content:slide_a',maxOutputTokens:8192}});
-        if(route.endsWith('/progress')){progress.push(body);return Response.json({ok:true});}
-        completion=body;return Response.json({ok:true});
+        if(route.endsWith('/progress')){progress.push(body as ProgressBody);return Response.json({ok:true});}
+        completion=body as JobOutput;return Response.json({ok:true});
       });
       assert.equal(outcome.status,200);
       assert.equal(requests[0].stream,true,'writer stages stream');
@@ -145,4 +157,20 @@ test('Schema compiler errors permit one format fallback, never auth/rate/semanti
  assert.equal(pptSchemaFallback({statusCode:400,message:'response_format unsupported'},true),'unsupported_schema');
  for(const error of [{statusCode:401},{statusCode:403},{statusCode:429},{statusCode:400,message:'invalid content'},{message:'invalid source ownership'}])assert.equal(pptSchemaFallback(error,true),null);
  assert.equal(pptSchemaFallback({statusCode:500},false),null);
+});
+
+test('PPT vision reaches the SDK wire and failed schema fallbacks retain the real attempt count',async()=>{
+ const requests:Record<string,unknown>[]=[];let reject=false;
+ const server=http.createServer(async(req,res)=>{const chunks:Buffer[]=[];for await(const chunk of req)chunks.push(chunk);const body=JSON.parse(Buffer.concat(chunks).toString());requests.push(body);res.setHeader('content-type','application/json');if(reject){res.statusCode=400;res.end(JSON.stringify({error:{message:body.response_format?.type==='json_schema'?'response_format json_schema unsupported':'Invalid request',type:'invalid_request_error'}}));return;}res.end(JSON.stringify({id:'vision',object:'chat.completion',created:1,model:body.model,choices:[{index:0,message:{role:'assistant',content:'{"description":"source figure","uncertain":false}'},finish_reason:'stop'}],usage:{prompt_tokens:17,completion_tokens:8,total_tokens:25}}));});
+ await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
+ try{
+  const provider=db.createProvider({name:'Vision wire fixture',provider_type:'custom',protocol:'openai-compatible',base_url:`http://127.0.0.1:${(server.address() as {port:number}).port}/v1`,api_key:'test-only'});
+  const id='f'.repeat(32),image='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jB5kAAAAASUVORK5CYII=';let completion:{telemetry?:{wireAttempts?:number};error?:string}={};
+  const run=(model:string,maxWireAttempts:number)=>executeDesktopModelJob(id,async(route,body)=>{if(route.endsWith('/claim'))return Response.json({id,configId:'byok:'+provider.id,model,prompt:'Read the attached source',lease:'vision-lease',options:{stage:'vision:source',role:'vision_reader',images:[{id:'source',dataUrl:image}],maxOutputTokens:2048,maxWireAttempts,jsonSchema:{type:'object',properties:{description:{type:'string'},uncertain:{type:'boolean'}},required:['description','uncertain']}}});completion=body as typeof completion;return Response.json({ok:true});});
+  assert.equal((await run('vision-fixture',2)).status,200);
+  const content=(requests[0].messages as {content:{type:string;image_url?:{url:string}}[]}[])[0].content;
+  assert.ok(content.some(part=>part.type==='image_url'&&part.image_url?.url===image),'image bytes reach the provider');assert.equal(requests[0].max_tokens,2048);assert.ok(!requests[0].thinking&&!requests[0].enable_thinking,'unknown reasoning controls stay off the wire');
+  reject=true;const before=requests.length;assert.equal((await run('one-attempt-fixture',1)).status,502);assert.equal(requests.length-before,1);assert.equal(completion.telemetry?.wireAttempts,1);
+  const second=requests.length;assert.equal((await run('two-attempt-fixture',2)).status,502);assert.equal(requests.length-second,2);assert.equal(completion.telemetry?.wireAttempts,2);
+ }finally{await new Promise<void>(resolve=>server.close(()=>resolve()));}
 });

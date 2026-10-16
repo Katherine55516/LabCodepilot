@@ -1,3 +1,4 @@
+import {PPTX_IR_VERSION} from '../ppt-native-shape-ids.mjs';
 import { importEditablePptx } from './import-pptx.mjs';
 import { ensureProjectV3 } from './ir.mjs';
 import { buildSlideRenderTree } from './render-tree.mjs';
@@ -21,7 +22,7 @@ export async function templatePreview(uid, template, page, deps) {
       if (['uploaded','managed'].includes(template.kind) && ['pptx','potx'].includes(template.extension)) {
         const owner = template.kind === 'managed' ? 'managed' : uid;
         const cached = store.readTemplateIR(owner, template.id, template.sha256);
-        if (cached?.parserVersion==='pptx-ir-7') return { ...cached.imported, templateSpec: template };
+        if (cached?.parserVersion===PPTX_IR_VERSION) return { ...cached.imported, templateSpec: template };
         try { return await importEditablePptx(base, store.readTemplate(owner, template.id), template.sha256); }
         finally { await deps.removeContainer(template.id, { keepVolume: false }).catch(() => {}); }
       }

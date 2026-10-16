@@ -1,9 +1,10 @@
+import {sourceReadingContinuation} from './ppt-source-continuations.mjs';
 import { adaptationDisposition } from './ppt-template-dispositions.mjs';
 /** Source-owned editable structures. The model selects inventory IDs/row ranges,
  * never invents cells or supplies geometry. Capacity failure asks for split. */
 import {readingUnits} from './ppt-semantic-relations.mjs';
 import { stableId } from './ppt/ir.mjs';
-import { fitComponents, explanationBudget, protectedTemplateAsset, sourceComponent, sourceComponentParts, prepareReadingComponents, sourceImageComponents, validateSourceArtifactRefs } from './ppt-density-capacity.mjs';
+import { contentCanvas, fitComponents, explanationBudget, protectedTemplateAsset, sourceComponent, sourceComponentParts, prepareReadingComponents, sourceImageComponents, validateSourceArtifactRefs } from './ppt-density-capacity.mjs';
 import {sourceDisplayText,richTextContent,ensureRichContent} from './ppt-source-text.mjs';
 import {templateMediaRole} from './ppt-template-fidelity.mjs';
 import {lockedEvidenceComponents} from './ppt-evidence.mjs';
@@ -13,7 +14,15 @@ export {sourceDisplayText} from './ppt-source-text.mjs';
 const clean = sourceDisplayText;
 // Absolute source-owned explanations have no inventory artifact ID, but must
 // survive the same preview and export paths as the referenced structures.
-export const isSourceOwnedNode = node => Boolean(node.sourceArtifact || node.semanticRole === 'source-explanation'||['source-navigation','notes-disclosure'].includes(node.content?.derivedFrom));
+export const isSourceOwnedNode = node => Boolean(node.sourceArtifact || node.semanticRole === 'source-explanation'||['source-navigation','source-reading-navigation','notes-disclosure'].includes(node.content?.derivedFrom));
+function appendReadingHandoff(project,slide,index,nodes) {
+ const ref=sourceReadingContinuation(project,index),geometry=contentCanvas(project,index).continuationRect;
+ if(!ref?.targets.length||!geometry||!nodes.some(n=>ref.sourceUnitIds.includes(n.sourceArtifact?.sourceUnitId)))return;
+ const color=templateTextColor(project,index,'body');
+ nodes.push({id:stableId('node',slide.id,'source-reading-navigation'),type:'text',semanticRole:'footnote',slotId:'absolute',geometry,
+  content:{...richTextContent(ref.text),derivedFrom:'source-reading-navigation',navigationTargets:ref.targets,sourceLeadUnitIds:ref.sourceUnitIds},
+  style:{fontSizePt:14,fontFamily:project.templateSpec?.fonts?.body,eastAsiaFontFamily:project.templateSpec?.fonts?.bodyEastAsia,color:color.color,lineHeight:1.18,paragraphSpacingEm:0},zIndex:500});
+}
 export function sourceExplanationComponents(texts) {
   return texts.flatMap(text=>String(text).split(/\n\s*\n/u).filter(part=>part.trim()).map(text=>({type:'text',content:richTextContent(text)})));
 }
@@ -79,6 +88,7 @@ export function bindSourceArtifacts(project, slide, refs, index, commentary = []
     if (!item||!permitted.has(item.id)) throw new Error('source artifact not assigned to this page');
     const assigned=project.planning?.slidePlan?.find(plan=>plan.slideId===slide.id)?.sourceArtifacts?.filter(a=>a.sourceUnitId===item.id)||[];
     if(assigned.some(a=>a.rowStart!==undefined) && !assigned.some(a=>a.rowStart===(ref.rowStart??1) && a.rowEnd===(ref.rowEnd??item.rows?.length))) throw new Error('source artifact row range differs from page contract');
+    if((ref.lineStart!==undefined||assigned.some(a=>a.lineStart!==undefined))&&!assigned.some(a=>a.lineStart===ref.lineStart&&a.lineEnd===ref.lineEnd))throw new Error('source artifact line range differs from the frozen page contract');
     return sourceComponentParts(item,ref).map(component=>{
     if(component.content.rows)component.content.rows=component.content.rows.map(row=>row.map(String));
     if(component.content.items)component.content.items=component.content.items.map((entry,n)=>({...entry,id:stableId('item',slide.id,item.id,(component.itemFragment?.itemStart||0)+n),...richTextContent(entry.richText?.source??entry.text)}));
@@ -128,17 +138,18 @@ export function bindSourceArtifacts(project, slide, refs, index, commentary = []
     const panelColor=chosen.panelFamily?chosen.panelColors[chosen.readingUnits.findIndex(u=>u.includes(position))]:null;
     const measurement=chosen.measurements[position];
     if(type==='table'){content.columnWeights=measurement.columnWeights;content.rowWeights=measurement.rowWeights;}
-    return {id:stableId('node',slide.id,item?.id||'source-commentary',ref?.rowStart||position),type,
+    return {id:stableId('node',slide.id,item?.id||'source-commentary',ref?.lineStart??ref?.rowStart??position),type,
       semanticRole:item?'source-structure':'source-explanation',slotId:'absolute',geometry:chosen.boxes[position],content,
       ...(primaryComponents?{semanticComponentBinding:{unitIndex:chosen.readingUnits.findIndex(u=>u.includes(position)),sourceUnitIds:chosen.readingUnits.find(u=>u.includes(position))?.map(i=>components[i].item?.id).filter(Boolean)||[],relationship:'atomic source reading unit',textSlot:'native style, measured source-owned replacement'}}:{}),
       ...(item&&project.outline?.[index]?.repeatSourceUnitIds?.includes(item.id)?{repeatPurpose:'recap'}:{}),
-      ...(item?{sourceArtifact:{sourceUnitId:item.id,type:item.type,rowStart:ref.rowStart,rowEnd:ref.rowEnd,...(component.itemFragment||{})},sourceRefs:item.source_ref}:{sourceRefs:slide.sourceRefs||[]}),
+      ...(item?{sourceArtifact:{sourceUnitId:item.id,type:item.type,rowStart:ref.rowStart,rowEnd:ref.rowEnd,lineStart:ref.lineStart,lineEnd:ref.lineEnd,...(component.itemFragment||{})},sourceRefs:item.source_ref}:{sourceRefs:slide.sourceRefs||[]}),
       style:{fontSizePt:chosen.fontSizePt,fontFamily:project.templateSpec?.fonts?.body,eastAsiaFontFamily:project.templateSpec?.fonts?.bodyEastAsia,
         lineHeight:1.18,paragraphSpacingEm:type==='timeline'?.15:type==='list'?.4:0,
         ...(type==='table'?{tableHeaderColor:headerColor(project.templateSpec?.palette?.accent||'#e7e5f4')}:{}),
         color:panelColor?headerColor(panelColor):type==='table'?tableBodyColor(project,index):bodyColor.color,colorBasis:type==='table'?'template_table_body':bodyColor.basis,fill:panelColor|| (type==='table'?(project.templateSpec?.palette?.accent||'#e7e5f4'):background)},zIndex:500};
   });
   slide.sourceArtifactFit={...chosen,boxes:chosen.boxes,measurements:chosen.measurements};
+  appendReadingHandoff(project,slide,index,nodes);
   slide.sourceArtifactNodes=nodes;
   replaceTemplateSourceRegion(project,slide,index,chosen.canvas,{keep});
   slide.templateComponentClones=(chosen.componentInstances||[]).filter(n=>n.nativeRef.cloneFromShapeId!==undefined);
@@ -183,7 +194,7 @@ export function bindSourceMedia(project,slide,imageIds,index) {
     if(!image)throw new Error('unknown source image '+id);
     return {...image,type:'SourceImage'};
   });
-  const existing=(slide.nodes||[]).filter(isSourceOwnedNode);
+  const existing=(slide.nodes||[]).filter(n=>isSourceOwnedNode(n)&&n.content?.derivedFrom!=='source-reading-navigation');
   const commentary=existing.length?[]:(slide.copy?.blocks||[]).map(block=>({type:'text',content:{text:block.body}}));
   const components=[...existing.map(node=>({type:node.type,content:node.content})),...commentary,...images.flatMap(sourceImageComponents)];
   const fit=fitComponents(components,project,index);
@@ -199,6 +210,7 @@ export function bindSourceMedia(project,slide,imageIds,index) {
     slide.templateOmissions||=[];slide.templateOmissions.push({shapeId:slot.shapeId,reason:'Source media and its explanation replace the original content region.'});
   }
   slide.nodes=(slide.nodes||[]).filter(node=>!isSourceOwnedNode(node)&&!['body','subtitle','takeaway'].includes(node.semanticRole));
+  appendReadingHandoff(project,slide,index,nodes);
   slide.nodes.push(...nodes);slide.sourceArtifactNodes=nodes;slide.nodeOrder=slide.nodes.map(node=>node.id);
   slide.bullets=[];slide.copy={...slide.copy,subtitle:'',takeaway:''};slide.sourceArtifactFit=fit;
   replaceTemplateSourceRegion(project,slide,index,fit.canvas);

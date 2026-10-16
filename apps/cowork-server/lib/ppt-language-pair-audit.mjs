@@ -1,3 +1,4 @@
+import {deckScript} from './ppt-presentation-contract.mjs';
 import {promptSchema} from './ppt-prompt-schema.mjs';
 import {sourceScriptOf} from './ppt-presentation-policy.mjs';
 import {sourcePointListKind} from './ppt-source-list-kinds.mjs';
@@ -6,11 +7,11 @@ const structured=item=>!item.mustDisplay&&!item.rows&&!['EquationBlock','CodeBlo
 // Source languages with one body language (outline concision, item 3): the
 // target is the original side of the detected paragraph pairs, and detected
 // bilingual flows are audited like lists.
-const primaryScript=items=>{const scripts=items.filter(item=>item.languageRole==='primary').map(item=>sourceScriptOf(item.text)),latin=scripts.filter(s=>s==='latin').length,han=scripts.filter(s=>s==='han').length;return latin||han?(latin>=han?'latin':'han'):null;};
+
 export function languagePairCandidates(project){
  const policy=project.generationPolicy,single=policy?.content==='overview'&&policy.details==='notes'&&policy.language?.mode==='source'&&policy.language.body==='primary';
  if(policy?.content!=='overview'||policy.details!=='notes'||policy.language?.mode!=='output'&&!single)return [];
- const items=project.originalSourceInventory?.items||project.source?.semantic?.inventory?.items||[],target=single?primaryScript(items):policy.language.locale==='en'?'latin':'han';
+ const items=project.originalSourceInventory?.items||project.source?.semantic?.inventory?.items||[],target=single?(deckScript(project)==='han'?'han':'latin'):policy.language.locale==='en'?'latin':'han';
  if(!target)return [];
  const eligible=item=>structured(item)||single&&item.type==='ProcessBlock'&&Boolean(item.languagePairId)&&!item.mustDisplay;
  return items.filter(item=>eligible(item)&&sourceScriptOf(item.text)!==target&&sourceScriptOf(item.text)!=='mixed').flatMap(item=>items.filter(other=>{

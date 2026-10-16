@@ -1,21 +1,33 @@
+import type {PptEditScope,PptExecutionPolicy,PptGenerationPolicy} from '@/components/ppt/types';
 /** Isolated UI fixture: production components, deterministic API responses, no user account writes. */
 export function pptParityFixture(options: {completeAfterEdits?: number} = {}) {
   const size = { width: 12192000, height: 6858000 };
   const now = new Date().toISOString();
   const templates = [12, 10].map((pages, index) => ({ id: index ? 'blue' : 'light', name: index ? 'Blue template' : 'Teaching template', category: '通用模板', description: 'Fixture template', pages, kind: 'builtin', compatibility: 'mapped', pinned: false, tags: [], sampleTitles: ['Cover','Mechanism','Summary'] }));
   const outlineFor = (pages: number) => Array.from({length:pages}, (_, index) => ({id:`s${index}`,title:`Topic ${index+1}`,focus:'Explain the source relationship',section:'Source',description:'Mechanism, conditions and source evidence.',children:[{id:`c${index}`,title:'Conditions',description:'Retain assumptions and uncertainty.'}]}));
+  type FixturePayload={
+    [key:string]:unknown;
+    prompt?:string;text?:string;title?:string;template?:string;inputKind?:string;importMode?:string;pages?:number;
+    images?:{fileName:string;[key:string]:unknown}[];
+    generationPolicy?:PptGenerationPolicy;executionPolicy?:PptExecutionPolicy;
+    slides?:ReturnType<typeof outlineFor>;finalPageCount?:number;
+    previousScopeId?:string;slideId?:string;scopeId?:string;action?:string;
+    parameters?:{[key:string]:unknown;lengthRatio?:number};
+  };
   const renderFor = (outline: ReturnType<typeof outlineFor>) => ({ schemaVersion:3, units:'emu', deckId:'deck_fixture', hash:'fixture', size, slides:outline.map((slide,index) => ({id:`render${index}`,slideId:slide.id,index,layoutId:index ? 'summary':'cover',size,background:'#ffffff',elements:[{id:`e${index}`,nodeId:`n${index}`,kind:'text',bounds:{x:500000,y:500000,width:10000000,height:1000000},content:{text:slide.title},style:{fontSizePt:28,color:'#111111'},zIndex:1,locked:false,semanticRole:'title'}]})) });
   const makeProject = (id: string, pages: number, status = 'outline_ready') => {
     const outline = outlineFor(pages), renderTree = renderFor(outline);
-    return {id,title:'Workflow fixture',prompt:'Explain mechanisms',inputKind:'prompt',pages,template:'light',model:'demo-model',configId:'demo',status,stage:status,error:'',outline,deck:{slides:outline.map(slide => ({...slide,bullets:['Source-backed relationship and conditions'],blocks:[],layoutId:'summary'}))},renderTree,revision:1,publishedRevision:1,currentRunId:`run_${'a'.repeat(24)}`,createdAt:now,updatedAt:now,editing:{contentOpen:true,intents:{} as Record<string, any>},nodes:Object.fromEntries(outline.map(slide => [slide.id,{status:'pending'}])),runtime:{slides:Object.fromEntries(outline.map((slide,index) => [slide.id,{phase:'content',epoch:0,accepted:false,preview:renderTree.slides[index]}]))}};
+    return {id,title:'Workflow fixture',prompt:'Explain mechanisms',inputKind:'prompt',pages,template:'light',model:'demo-model',configId:'demo',status,stage:status,error:'',outline,deck:{slides:outline.map(slide => ({...slide,bullets:['Source-backed relationship and conditions'],blocks:[],layoutId:'summary'}))},renderTree,revision:1,publishedRevision:1,currentRunId:`run_${'a'.repeat(24)}`,createdAt:now,updatedAt:now,editing:{contentOpen:true,intents:{} as Record<string, unknown>},nodes:Object.fromEntries(outline.map(slide => [slide.id,{status:'pending'}])),runtime:{slides:Object.fromEntries(outline.map((slide,index) => [slide.id,{phase:'content',epoch:0,accepted:false,preview:renderTree.slides[index]}]))}};
   };
   const projects = new Map<string, ReturnType<typeof makeProject>>();
   projects.set('9'.repeat(32),makeProject('9'.repeat(32),12,'generating'));
-  const payloads: any[] = [], scopes = new Map<string, any>(); let counter=0;
-  async function handle(method: string, pathname: string, body: any = {}): Promise<{status:number;body:unknown;contentType?:string} | null> {
+  const payloads: FixturePayload[] = [], scopes = new Map<string, PptEditScope>(); let counter=0;
+  async function handle(method: string, pathname: string, body: FixturePayload = {}): Promise<{status:number;body:unknown;contentType?:string} | null> {
     const ok = (data: unknown,status=200) => ({status,body:data});
     if (pathname === '/__fixture/state') return ok({payloads,projects:[...projects.values()]});
+    if(pathname==='/api/ppt/capabilities')return ok({byok:{protocolVersion:1,executionPolicyVersion:1,multimodalVersion:1,transport:'desktop-model-jobs',credentialLocation:'desktop',requiresOpenClient:true,maxPromptBytes:2000000,maxResultBytes:4000000,jobTimeoutMs:900000,concurrency:3}});
     if (pathname === '/api/providers') return ok({providers:[{id:'managed-demo',name:'Fixture model',source:'managed'}]});
+    if(pathname==='/api/providers/options')return ok({options:{default_model_provider:'managed-demo',default_model:'demo-model'}});
     if (pathname === '/api/providers/models') return ok({groups:[{provider_id:'managed-demo',models:[{value:'demo-model',label:'Demo LLM'}]}]});
     if (!pathname.startsWith('/api/ppt/')) return null;
     if (pathname === '/api/ppt/model-jobs') return ok({jobs:[]});
@@ -47,22 +59,23 @@ export function pptParityFixture(options: {completeAfterEdits?: number} = {}) {
     if (action === 'preview' || action === 'slides' && decision === 'preview') return {status:200,contentType:'image/svg+xml',body:'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 720"><rect width="1280" height="720" fill="#fff"/><text x="100" y="200" font-size="60">Source relationship</text></svg>'};
     if (action === 'events') return {status:200,body:`event: snapshot\ndata: ${JSON.stringify({project,run:{lastSeq:1}})}\n\n`,contentType:'text/event-stream'};
     if (action === 'versions') return ok({versions:[]});
+    if(action==='conversation')return ok({initialRequest:project.prompt||'',intents:project.editing?.intents||{}});
     if (action === 'outline') {
       payloads.push({...body,action});
-      if (method === 'PATCH') {project.outline=body.slides; project.pages=body.finalPageCount;}
+      if (method === 'PATCH') {project.outline=body.slides!; project.pages=body.finalPageCount!;}
       if (body.generationPolicy) Object.assign(project,{generationPolicy:body.generationPolicy});
       return ok({project});
     }
     if (action === 'generate') {project.status='completed'; project.stage='completed'; project.editing.contentOpen=false; return ok({project},202);}
     if (action === 'generation-edit-scopes') {
-      const previous = scopes.get(body.previousScopeId), slideId = previous?.currentSlideId || body.slideId;
+      const previous = scopes.get(body.previousScopeId!), slideId = previous?.currentSlideId || body.slideId!;
       const selected = project.outline.findIndex(slide => slide.id === slideId);
       const scope = {id:`scope_${++counter}`,runId:project.currentRunId,planKey:'fixture',baseRevision:project.revision,openedAt:now,currentSlideId:slideId,remainingSlideIds:previous?.remainingSlideIds || project.outline.map(slide=>slide.id),followingSlideIds:previous?.followingSlideIds || project.outline.slice(selected+1).map(slide=>slide.id),sectionSlideIds:project.outline.map(slide=>slide.id),deckSlideIds:project.outline.map(slide=>slide.id)};
       scopes.set(scope.id,scope); return ok({scope});
     }
     if (action === 'generation-edits') {
       if (method === 'GET') return ok({intent:project.editing.intents[objectId]});
-      payloads.push({...body,action}); if(options.completeAfterEdits && payloads.filter(value=>value.action==='generation-edits').length >= options.completeAfterEdits) {project.status='completed'; project.editing.contentOpen=false;} const snapshot=scopes.get(body.scopeId);
+      payloads.push({...body,action}); if(options.completeAfterEdits && payloads.filter(value=>value.action==='generation-edits').length >= options.completeAfterEdits) {project.status='completed'; project.editing.contentOpen=false;} const snapshot=scopes.get(body.scopeId!)!;
       const intent={id:`intent_${++counter}`,scope:body.scope,scopeSnapshot:snapshot,instruction:body.instruction,status:'applied',perSlideResults:{[snapshot.currentSlideId]:{status:'applied',revision:++project.revision}}}; project.editing.intents[intent.id]=intent; return ok({project,intent});
     }
     if (action === 'ai-edit') {

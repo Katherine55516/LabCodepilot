@@ -1,5 +1,5 @@
-/** A native cover may express its bilingual title as a short headline plus
- * the complete original title in a measured subtitle. Notes alone do not count.
+/** A native cover may express its deck-language subject as a short headline
+ * plus a complete measured subtitle. Other original title languages stay in notes.
  * Actual subtitle completeness and fit are checked before confirmation. */
 export function nativeCoverTitleHierarchy(project) {
   const cover=project.templateFidelity?.slides?.[0];

@@ -1,3 +1,4 @@
+import fs from 'node:fs';
 import {selectPptOption} from '../helpers';
 import { test, expect } from '@playwright/test';
 import { pptParityFixture } from '../fixtures/ppt-parity';
@@ -25,7 +26,7 @@ test('API setup saves explicit protocol, synchronizes models and exposes them in
     else if (path === '/api/providers/local-fixture/models/discover') { modelIds.push('another-supported-id'); body = { discovered: 2, models: modelIds.map(model_id => ({ model_id })) }; }
     else if (path === '/api/providers/local-fixture/models') { modelIds.push(req.postDataJSON().model_id); body = { models: modelIds.map(model_id => ({ model_id })) }; }
     else if (path === '/api/ppt/model-jobs') body = { jobs: [] };
-    else if (path === '/api/ppt/capabilities') body = { byok: { protocolVersion, transport: 'desktop-model-jobs', credentialLocation: 'desktop', requiresOpenClient: true, maxPromptBytes: 2000000, maxResultBytes: 4000000, jobTimeoutMs: 300000, concurrency: 3 } };
+    else if (path === '/api/ppt/capabilities') body = { byok: { protocolVersion,executionPolicyVersion:1,multimodalVersion:1, transport: 'desktop-model-jobs', credentialLocation: 'desktop', requiresOpenClient: true, maxPromptBytes: 2000000, maxResultBytes: 4000000, jobTimeoutMs: 300000, concurrency: 3 } };
     if (body !== undefined) return route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify(body) });
     const result = await fixture.handle(req.method(), path, req.postData() ? req.postDataJSON() : {});
     if (result) return route.fulfill({ status: result.status, contentType: result.contentType || 'application/json', body: typeof result.body === 'string' ? result.body : JSON.stringify(result.body) });
@@ -55,14 +56,15 @@ test('API setup saves explicit protocol, synchronizes models and exposes them in
   await page.goto('/ppt', {waitUntil:'domcontentloaded'});await expect(page.getByText('加载中…',{exact:true})).toHaveCount(0);
   await page.getByRole('button', { name: '＋ 新建', exact: true }).click();
   await page.getByRole('button', { name: /从 Prompt 开始/ }).click();
-  const selector = page.getByRole('combobox', { name: 'LLM（必填）' });
-  await selector.click();await expect(page.getByRole('option')).toHaveCount(4);await page.keyboard.press('Escape');
-  await selectPptOption(selector, 'local-fixture::ppt应用测试');
+  await page.getByTestId('ppt-quality-settings').locator('summary').click();
+  const selector = page.getByTestId('ppt-quality-settings').getByRole('combobox').first();
+  await selector.click();await expect(page.getByRole('option')).toHaveCount(modelIds.length);await page.keyboard.press('Escape');
+  for(const field of (await page.getByTestId('ppt-quality-settings').getByRole('combobox').all()).slice(0,6))await selectPptOption(field,'local-fixture::ppt应用测试');
   await expect(page.getByText(/本地 API：密钥留在本机/)).toBeVisible();
   const cdp = await page.context().newCDPSession(page); await cdp.send('Runtime.enable');
   await page.screenshot({ path: info.outputPath('ppt-byok-model-picker.png') });
   const snapshot = await cdp.send('Page.captureScreenshot', { format: 'png' });
-  require('node:fs').writeFileSync(info.outputPath('ppt-byok-cdp.png'), Buffer.from(snapshot.data, 'base64'));
+  fs.writeFileSync(info.outputPath('ppt-byok-cdp.png'), Buffer.from(snapshot.data, 'base64'));
   await page.getByRole('button', { name: '确认并继续 →' }).click();
   await page.getByRole('button', { name: /Teaching template/ }).click();
   await page.getByRole('button', { name: '下一步：输入内容 →' }).click();

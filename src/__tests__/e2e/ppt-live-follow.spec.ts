@@ -1,11 +1,14 @@
 import {test,expect} from '@playwright/test';
 import {pptParityFixture} from '../fixtures/ppt-parity';
+import type {PptProject,PptRenderSlide,PptSlide} from '@/components/ppt/types';
+type LiveFixture = PptProject & {nodes:NonNullable<PptProject['nodes']>; runtime:NonNullable<PptProject['runtime']>;renderTree:NonNullable<PptProject['renderTree']>;sourceObjectExclusions?:{objectId:string;approvedBy:string;reason:string}[]};
 
 test('PPT live follow moves the canvas to the earliest unfinished page in page order and repeated snapshots preserve scroll @smoke',async({page},info)=>{
- const fixture=pptParityFixture(),id='9'.repeat(32),project:any=fixture.projects.get(id)!;
+ const fixture=pptParityFixture(),id='9'.repeat(32),project=fixture.projects.get(id)! as unknown as LiveFixture;
  // Pages finish out of order under concurrent writers; follow targets the earliest page that is not render-ready (s2).
  for(const ready of ['s0','s1']){project.nodes[ready].status='completed';project.runtime.slides[ready].phase='render_ready';}
  project.nodes.s3.status='completed';project.runtime.slides.s3.phase='render_ready';let streams=0;
+ project.nodes.s7.status='completed';project.runtime.slides.s7.phase='render_ready';
  await page.route('**/api/**',async route=>{
   const request=route.request(),url=new URL(request.url());
   if(url.pathname===`/api/ppt/projects/${id}/events`){
@@ -19,6 +22,7 @@ test('PPT live follow moves the canvas to the earliest unfinished page in page o
  await page.goto(`/ppt?projectId=${id}`, {waitUntil:'domcontentloaded'});
  const canvas=page.locator('#ppt-editor-canvas'),article=canvas.locator('article').nth(2);
  await expect(canvas).toBeVisible();
+ await expect(canvas.locator('[data-render-slide-id="render7"]').getByText('页面 8',{exact:true})).toBeVisible();
  await expect.poll(()=>canvas.evaluate(el=>el.scrollTop)).toBeGreaterThan(500);
  await expect.poll(async()=>{const a=await article.boundingBox(),c=await canvas.boundingBox();return !!a&&!!c&&Math.abs(a.y-c.y)<70;}).toBe(true);
  await page.screenshot({path:info.outputPath('live-follow-actual-canvas.png')});
@@ -29,7 +33,7 @@ test('PPT live follow moves the canvas to the earliest unfinished page in page o
 
 
 test('PPT render snapshot restores live canvas while remembered manual browsing stays selected @smoke',async({page},info)=>{
- const fixture=pptParityFixture(),id='9'.repeat(32),project:any=fixture.projects.get(id)!;
+ const fixture=pptParityFixture(),id='9'.repeat(32),project=fixture.projects.get(id)! as unknown as LiveFixture;
  for(const ready of ['s0','s1','s2','s3']){project.nodes[ready].status='completed';project.runtime.slides[ready].phase='render_ready';project.runtime.slides[ready].updatedAt=new Date().toISOString();}
  await page.route('**/api/**',async route=>{const req=route.request(),url=new URL(req.url()),raw=req.postData();const result=await fixture.handle(req.method(),url.pathname,raw?JSON.parse(raw):{});if(!result)return route.continue();return route.fulfill({status:result.status,contentType:result.contentType||'application/json',body:typeof result.body==='string'?result.body:JSON.stringify(result.body)});});
  await page.goto(`/ppt?projectId=${id}`, {waitUntil:'domcontentloaded'});const canvas=page.locator('#ppt-editor-canvas');await expect.poll(()=>canvas.evaluate(el=>el.scrollTop)).toBeGreaterThan(1500);
@@ -39,16 +43,16 @@ test('PPT render snapshot restores live canvas while remembered manual browsing 
 });
 
 test('Home can start a fresh quality retry without removing the retained PPT checkpoint @smoke',async({page})=>{
- const fixture=pptParityFixture(),id='9'.repeat(32),project:any=fixture.projects.get(id)!;project.status='quality_blocked';let retries=0;
+ const fixture=pptParityFixture(),id='9'.repeat(32),project=fixture.projects.get(id)! as unknown as LiveFixture;project.status='quality_blocked';let retries=0;
  await page.route('**/api/**',async route=>{const req=route.request(),url=new URL(req.url()),raw=req.postData();if(url.pathname===`/api/ppt/projects/${id}/retry`&&req.method()==='POST'){retries++;project.status='generating';}const result=await fixture.handle(req.method(),url.pathname,raw?JSON.parse(raw):{});if(!result)return route.continue();return route.fulfill({status:result.status,contentType:result.contentType||'application/json',body:typeof result.body==='string'?result.body:JSON.stringify(result.body)});});
  await page.goto('/chat', {waitUntil:'domcontentloaded'});const tasks=page.getByTestId('ppt-background-tasks');await expect(tasks).toBeVisible();await tasks.getByRole('button',{name:/重试.*Workflow fixture|Retry.*Workflow fixture/}).click();await expect.poll(()=>retries).toBe(1);await expect(tasks.getByRole('link')).toHaveAttribute('href',`/ppt?projectId=${id}`);await expect(tasks).toContainText('Workflow fixture');
 });
 
-test('PPT unfinished pages show planned skeletons, real stages and a non-editable streaming draft @smoke',async({page},info)=>{
- const fixture=pptParityFixture(),id='9'.repeat(32),project:any=fixture.projects.get(id)!;
+test('PPT canvas shows completed pages and the current real draft; future titles stay in the plan @smoke',async({page},info)=>{
+ const fixture=pptParityFixture(),id='9'.repeat(32),project=fixture.projects.get(id)! as unknown as LiveFixture;
  for(const ready of ['s0','s1']){project.nodes[ready].status='completed';project.runtime.slides[ready].phase='render_ready';}
- for(const pending of ['s2','s3','s4'])project.renderTree.slides.find((slide:any)=>slide.slideId===pending||slide.id===pending).elements=[];
- project.outline=project.outline.map((slide:any)=>slide.id==='s3'?{...slide,section:'Section 3',focus:'Planned claim for page four',keyPoints:[{text:'First planned point',refs:[],chunkRefs:[]}]}:slide);
+ for(const pending of ['s2','s3','s4'])project.renderTree.slides.find((slide:PptRenderSlide)=>slide.slideId===pending||slide.id===pending)!.elements=[];
+ project.outline=project.outline.map((slide:PptSlide)=>slide.id==='s3'?{...slide,section:'Section 3',focus:'Planned claim for page four',keyPoints:[{text:'First planned point',refs:[],chunkRefs:[]}]}:slide);
  project.nodes.s2.status='running';
  project.generationStages={deck:'writing',pages:{s0:'ready',s1:'ready',s2:'writing',s3:'retrieving',s4:'waiting'}};
  const draft={title:'Streaming title for page three',blocks:[{field:'body',text:'A closed paragraph already written.'}],typing:'The sentence being typed',chars:128};
@@ -66,15 +70,16 @@ test('PPT unfinished pages show planned skeletons, real stages and a non-editabl
  await expect(writing.getByTestId('ppt-generation-draft')).toContainText('A closed paragraph already written.');
  await expect(writing).toContainText('Streaming title for page three');
  await expect(writing).toContainText('The sentence being typed');
- const planned=page.locator('[data-testid="ppt-generation-skeleton"][data-stage="retrieving"]');
- await expect(planned).toContainText('Planned claim for page four');await expect(planned).toContainText('First planned point');
- await expect(page.locator('[data-testid="ppt-generation-skeleton"][data-stage="waiting"]')).toHaveCount(1);
+ await expect(page.locator('[data-testid="ppt-generation-skeleton"][data-stage="retrieving"]')).toHaveCount(0);
+ await expect(page.locator('[data-testid="ppt-generation-skeleton"][data-stage="waiting"]')).toHaveCount(0);
+ await expect(page.getByTestId('ppt-planned-pages')).toContainText(project.outline[3].title);
+ await expect(page.locator('#ppt-editor-canvas article')).toHaveCount(3);
  await writing.scrollIntoViewIfNeeded();
  await page.screenshot({path:info.outputPath('generation-skeleton-draft.png')});
 });
 
 test('Home task strip shows the user-facing deck stage and current page, never internal node IDs @smoke',async({page})=>{
- const fixture=pptParityFixture(),id='9'.repeat(32),project:any=fixture.projects.get(id)!;
+ const fixture=pptParityFixture(),id='9'.repeat(32),project=fixture.projects.get(id)! as unknown as LiveFixture;
  const summary={...project,stage:'review:deck',deckStage:'reviewing',currentPage:{index:4,title:'Core tension',stage:'repairing'},progress:{contentReady:12,previewReady:12,total:12,phase:'review:deck',quality:'pending',lastUpdated:new Date().toISOString()}};
  await page.route('**/api/**',async route=>{
   const request=route.request(),url=new URL(request.url());
@@ -91,13 +96,13 @@ test('Home task strip shows the user-facing deck stage and current page, never i
 });
 
 test('Retired template images are listed with page and reason and need an explicit user confirmation @smoke',async({page},info)=>{
- const fixture=pptParityFixture(),id='9'.repeat(32),project:any=fixture.projects.get(id)!;project.status='quality_blocked';
+ const fixture=pptParityFixture(),id='9'.repeat(32),project=fixture.projects.get(id)! as unknown as LiveFixture;project.status='quality_blocked';
  const retired=[{objectId:'tpl_img_7a',page:7,role:'template_artwork',status:'retired_by_adaptation',reason:'source text needs the area',approvalBasis:'source_region_artwork_avoidance'},{objectId:'tpl_icon_15',page:15,role:'template_icon',status:'retired_by_adaptation',reason:null,approvalBasis:'unverified_request'}];
  project.quality={status:'blocked',deterministic:{issues:[{code:'media_conservation_blocked',severity:'error',message:'Only 45% of the template media remain'}],hardErrors:1},modelReview:null,repairs:[],mediaLedger:{conservation:.45,effectiveConservation:.45,approvedExclusions:0,retired}};
- let posted:any=null,retries=0;
+ let posted:{objectIds:string[];reason:string}|null=null,retries=0;
  await page.route('**/api/**',async route=>{
   const request=route.request(),url=new URL(request.url()),raw=request.postData();
-  if(url.pathname===`/api/ppt/projects/${id}/media-exclusions`&&request.method()==='POST'){posted=JSON.parse(raw||'{}');project.sourceObjectExclusions=posted.objectIds.map((objectId:string)=>({objectId,approvedBy:'user',reason:posted.reason}));project.quality={...project.quality,mediaLedger:{conservation:.45,effectiveConservation:.55,approvedExclusions:1,retired:retired.filter(item=>!posted.objectIds.includes(item.objectId))}};return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({project,excluded:posted.objectIds.length})});}
+  if(url.pathname===`/api/ppt/projects/${id}/media-exclusions`&&request.method()==='POST'){posted=JSON.parse(raw||'{}');project.sourceObjectExclusions=posted!.objectIds.map((objectId:string)=>({objectId,approvedBy:'user',reason:posted!.reason}));project.quality={...project.quality!,mediaLedger:{conservation:.45,effectiveConservation:.55,approvedExclusions:1,retired:retired.filter(item=>!posted!.objectIds.includes(item.objectId))}};return route.fulfill({status:200,contentType:'application/json',body:JSON.stringify({project,excluded:posted!.objectIds.length})});}
   if(url.pathname===`/api/ppt/projects/${id}/retry`&&request.method()==='POST')retries++;
   const result=await fixture.handle(request.method(),url.pathname,raw?JSON.parse(raw):{});
   if(!result)return route.continue();
@@ -117,7 +122,7 @@ test('Retired template images are listed with page and reason and need an explic
  await panel.getByRole('textbox').fill('Decorative only; the source table needs the width');
  await confirm.click();
  await expect.poll(()=>posted?.objectIds).toEqual(['tpl_img_7a']);
- expect(posted.reason).toBe('Decorative only; the source table needs the width');
+ expect(posted!.reason).toBe('Decorative only; the source table needs the width');
  await expect(panel.getByRole('status')).toContainText(/1/);
  await expect(panel).not.toContainText(/第 7 页|Page 7|第 7 頁/);
  await panel.scrollIntoViewIfNeeded();await panel.screenshot({path:info.outputPath('media-retirements.png')});
@@ -127,7 +132,7 @@ test('Retired template images are listed with page and reason and need an explic
 
 
 test('A retry started from another tab reconnects a retained failed detail to the live editor @smoke',async({page},info)=>{
- const fixture=pptParityFixture(),id='9'.repeat(32),project:any=fixture.projects.get(id)!;
+ const fixture=pptParityFixture(),id='9'.repeat(32),project=fixture.projects.get(id)! as unknown as LiveFixture;
  project.status='failed';project.error='Earlier review could not complete';let restarted=false;
  await page.route('**/api/**',async route=>{const req=route.request(),url=new URL(req.url()),raw=req.postData();
   const result=await fixture.handle(req.method(),url.pathname,raw?JSON.parse(raw):{});if(!result)return route.continue();
@@ -141,9 +146,9 @@ test('A retry started from another tab reconnects a retained failed detail to th
 });
 
 test('A failed later stage retains the verified editor and disables AI only on pending pages @smoke',async({page},info)=>{
- const fixture=pptParityFixture(),id='9'.repeat(32),project:any=fixture.projects.get(id)!;
+ const fixture=pptParityFixture(),id='9'.repeat(32),project=fixture.projects.get(id)! as unknown as LiveFixture;
  project.status='failed';project.stage='generation';project.error='Later review transport failed';
- for(const slide of project.outline){project.nodes[slide.id].status='done';project.runtime.slides[slide.id].phase='render_ready';project.runtime.slides[slide.id].preview=project.renderTree.slides.find((tree:any)=>tree.slideId===slide.id||tree.id===slide.id);}
+ for(const slide of project.outline){project.nodes[slide.id].status='done';project.runtime.slides[slide.id].phase='render_ready';project.runtime.slides[slide.id].preview=project.renderTree.slides.find((tree:PptRenderSlide)=>tree.slideId===slide.id||tree.id===slide.id);}
  project.nodes.s1.status='pending';delete project.runtime.slides.s1.preview;project.runtime.slides.s1.phase='queued';
  await page.route('**/api/**',async route=>{const req=route.request(),url=new URL(req.url()),raw=req.postData(),result=await fixture.handle(req.method(),url.pathname,raw?JSON.parse(raw):{});if(!result)return route.continue();return route.fulfill({status:result.status,contentType:result.contentType||'application/json',body:typeof result.body==='string'?result.body:JSON.stringify(result.body)});});
  await page.goto('/ppt?projectId='+id, {waitUntil:'domcontentloaded'});const editor=page.getByTestId('ppt-structured-editor');await expect(editor).toBeVisible();
@@ -155,11 +160,11 @@ test('A failed later stage retains the verified editor and disables AI only on p
 });
 
 test('An automatic outline that outgrew its page budget waits for confirmation and shows the concision metrics @smoke',async({page},info)=>{
- const fixture=pptParityFixture(),id='9'.repeat(32),project:any=fixture.projects.get(id)!;
+ const fixture=pptParityFixture(),id='9'.repeat(32),project=fixture.projects.get(id)! as unknown as LiveFixture;
  project.status='outline_ready';project.stage='outline';
- project.pageDecision={...(project.pageDecision||{}),source:'estimate',mode:'auto',confirmedAt:null,initialPageCount:8,finalPageCount:12,
-  growth:{version:1,initial:8,final:12,limit:10,basis:'presentation_budget',needsConfirmation:true},
-  concision:{version:1,pages:12,contentPages:9,majorSections:12,pagesPerSection:.75,medianFill:.55,withinBudget:false,budget:{target:8,max:10},warnings:['over_budget','underfilled','page_per_section']}};
+ project.pageDecision={...(project.pageDecision||{}),source:'estimate',mode:'auto',includesCover:true,confirmedAt:null,initialPageCount:8,finalPageCount:12,
+  growth:{initial:8,final:12,limit:10,basis:'presentation_budget',needsConfirmation:true},
+  concision:{pages:12,contentPages:9,majorSections:12,pagesPerSection:.75,medianFill:.55,withinBudget:false,budget:{target:8,max:10},warnings:['over_budget','underfilled','page_per_section']}};
  await page.route('**/api/**',async route=>{const request=route.request(),url=new URL(request.url()),raw=request.postData();const result=await fixture.handle(request.method(),url.pathname,raw?JSON.parse(raw):{});if(!result)return route.continue();return route.fulfill({status:result.status,contentType:result.contentType||'application/json',body:typeof result.body==='string'?result.body:JSON.stringify(result.body)});});
  await page.goto(`/ppt?projectId=${id}`);
  const notice=page.getByTestId('ppt-outline-concision');

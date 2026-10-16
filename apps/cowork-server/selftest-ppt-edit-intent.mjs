@@ -132,7 +132,7 @@ try {
   const remainingEdit = await edits.submitGenerationEdit(uid, generating.id, { scopeId: during.id, scope: 'remaining', instruction: 'Explain the constraints', idempotencyKey: 'epoch_remaining_once' });
   holdFirstPage = false; for (const release of releases.values()) release();
   const finished = await waitUntil(() => { const value = repo.getProject(uid, generating.id); if (value.status === 'failed') throw new Error(value.error); return ['completed', 'quality_blocked'].includes(value.status) && value; }, 'generation settled');
-  assert.match(finished.nodes.s0.slide.title, /revised/); assert.equal(finished.nodes.s3.slide.title, 'Thanks for watching!');
+  assert.match(finished.nodes.s0.slide.title, /revised/); assert.equal(finished.nodes.s3.slide.title, 'Distinct s3 revised');assert.ok(finished.nodes.s3.slide.nodes.some(node=>node.semanticRole==='closing-greeting'&&node.content.text==='Thanks for watching!'));assert.ok(JSON.stringify(finished.nodes.s3.slide).includes('transaction costs'));
   assert.equal(calls.get('s0'), 2, 'superseded epoch must be regenerated'); assert.equal(calls.get('s1'), 1, 'unaffected page is not regenerated');
   assert.equal(finished.editing.intents[currentEdit.intent.id].status, 'applied'); assert.equal(finished.editing.intents[remainingEdit.intent.id].status, 'applied');
 

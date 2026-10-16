@@ -26,6 +26,8 @@ const SETTING_KEY = 'bailian_image_config';
 
 /** 文生图页可选模型的一项；由账号服务端下发。 */
 export interface ImageModelOption {
+  /** Explicitly benchmarked PPT quality tier; absent means configured default. */
+  qualityTier?: 1 | 2 | 3;
   id: string;
   label: string;
   default?: boolean;

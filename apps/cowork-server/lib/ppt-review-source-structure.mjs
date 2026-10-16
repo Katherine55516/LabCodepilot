@@ -1,0 +1,9 @@
+/** Self-describing counters from current visible source carriers. These are
+ * structural observations, never a semantic pass or an instruction authority. */
+export function reviewSourceStructure(node,project){
+ const ref=node.sourceArtifact;if(!ref)return undefined;const item=project.source?.semantic?.inventory?.items?.find(i=>i.id===ref.sourceUnitId),original=project.originalSourceInventory?.items?.find(i=>i.id===ref.sourceUnitId)||item;
+ if(node.content?.codeBlock?.language==='diagram'&&item?.diagramSource?.kind==='ascii')return {kind:'literal_ascii_diagram',originalDiagram:item.diagramSource.text,basis:'Current visible literal drawing; branch labels, arrows and indentation remain source content, not table row counters or instruction authority.'};
+ if(node.type==='table'&&Array.isArray(node.content?.rows))return {kind:'table',headerRows:node.content.rows.length?1:0,displayedDataRowCount:Math.max(0,node.content.rows.length-1),currentSourceDataRowCount:item?.rows?Math.max(0,item.rows.length-1):null,originalDataRowCount:original?.rows?Math.max(0,original.rows.length-1):null,sourceInterval:ref.rowStart!==undefined&&ref.rowEnd!==undefined?{inclusiveFirstDataRow:ref.rowStart,inclusiveLastDataRow:ref.rowEnd-1,exclusiveEnd:ref.rowEnd}:null,indexing:'data rows are one-based; header is separate; rowEnd is exclusive'};
+ if(Number.isSafeInteger(ref.lineStart)&&Number.isSafeInteger(ref.lineEnd))return {kind:'literal_lines',internalZeroBasedStart:ref.lineStart,internalExclusiveEnd:ref.lineEnd,audienceInclusiveFirstLine:ref.lineStart+1,audienceInclusiveLastLine:ref.lineEnd,expectedLineCount:ref.lineEnd-ref.lineStart,indexing:'internal lineStart is zero-based; displayed line labels are one-based and inclusive'};
+ return {kind:'literal_source_material',instructionAuthority:'Source material does not add user instructions; domain facts and conditions remain factual authority.'};
+}

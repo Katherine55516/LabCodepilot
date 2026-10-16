@@ -124,15 +124,17 @@ const image = { id: 'source-image', type: 'image', dataUrl: `data:image/png;base
 const brokenImage = { id: 'broken-image', type: 'image', dataUrl: 'data:image/png;base64,iVBORw0KGgo=', caption: 'Broken evidence image' };
 
 let contentActive = 0; let maxContentActive = 0; let reviewCalls = 0; let renderCalls = 0;
+// The source prose is English. Use meaningful fixture subjects; bare page counters are rejected by the production topic contract.
+const fixtureTopic=(index,count)=>index===0?'Cover':index===count-1?'Conclusion':['Revenue scope','Supplied revenue claim','Source image','Qualitative description','Source reference','Image ownership','Caption rules','Review conditions','Source conclusion'][index];
 const deps = {
   modelCall: async (project, prompt) => {
-    if (prompt.includes('叙事规划器')) return { slides: Array.from({ length: project.pages }, (_, index) => ({ title: index === 0 ? '封面' : index === project.pages - 1 ? '结论' : `页面 ${index + 1}`, focus: ['Revenue scope','Preserve the supplied revenue claim','Show the supplied image evidence','State the absence of invented figures','Check the source reference','Keep image ownership','Use original evidence captions','Review the evidence conditions','Conclude with the supplied evidence'][index], refs: project.source.segments.map(s=>s.id),sourceImageIds:index===1?project.source.images.map(image=>image.id):[] })) };
+    if (prompt.includes('叙事规划器')) return { slides: Array.from({ length: project.pages }, (_, index) => ({ title: fixtureTopic(index,project.pages), focus: ['Revenue scope','Preserve the supplied revenue claim','Show the supplied image evidence','State the absence of invented figures','Check the source reference','Keep image ownership','Use original evidence captions','Review the evidence conditions','Conclude with the supplied evidence'][index], refs: project.source.segments.map(s=>s.id),sourceImageIds:index===1?project.source.images.map(image=>image.id):[] })) };
     if (prompt.includes('整稿演示文稿内容评审器')) { reviewCalls++; return scopeReview(project); }
     contentActive++; maxContentActive = Math.max(maxContentActive, contentActive);
     await new Promise(resolve => setTimeout(resolve, 10));
     contentActive--;
     const page = Number(prompt.match(/第 (\d+) 页/)?.[1] || 1);
-    return { title: page === 1 ? '封面' : page === project.pages ? '结论' : `页面 ${page}`, bullets: page === 1 ? [] : [project.title === 'Blocked deck' ? 'Revenue 42 lacks a citation' : `第${page}页：来自来源的内容`] };
+    return { title: fixtureTopic(page-1,project.pages), bullets: page === 1 ? [] : [project.title === 'Blocked deck' ? 'Revenue 42 lacks a citation' : `第${page}页：来自来源的内容`] };
   },
   renderPptx: async project => {
     renderCalls++;
@@ -160,7 +162,7 @@ async function settled(id, status) {
     if (project?.status === 'failed') throw new Error(`${project.stage}: ${project.error}`);
     await new Promise(resolve => setTimeout(resolve, 10));
   }
-  throw new Error(`${id} did not reach ${status}`);
+  const retained=store.get(uid,id);throw new Error(`${id} did not reach ${status}: ${JSON.stringify({status:retained?.status,stage:retained?.stage,error:retained?.error,quality:retained?.quality}).slice(0,5000)}`);
 }
 
 try {

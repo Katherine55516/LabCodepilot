@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef, useSyncExternalStore } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { TooltipProvider } from "@/components/ui/tooltip";
 // NavRail removed — navigation merged into ChatListPanel
@@ -91,17 +91,21 @@ const LG_BREAKPOINT = 1024;
 
 // 侧边栏折叠偏好(手动点折叠按钮时写入;"1"=展开,"0"=收起)
 const CHATLIST_OPEN_KEY = "codepilot_chatlist_open";
+const subscribeDesktopHost=()=>()=>{};
+const desktopHostSnapshot=()=>Boolean(window.electronAPI);
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
+  const desktopHost=useSyncExternalStore(subscribeDesktopHost,desktopHostSnapshot,()=>false);
+  const standalonePpt=pathname==='/ppt'&&!desktopHost;
 
   const [chatListOpenRaw, setChatListOpenRaw] = useState(false);
   const [setupOpen, setSetupOpen] = useState(false);
   const [setupInitialCard, setSetupInitialCard] = useState<'claude' | 'provider' | 'project' | undefined>();
   const [searchOpen, setSearchOpen] = useState(false);
 
-  useGlobalSearchShortcut(() => setSearchOpen(true));
+  useGlobalSearchShortcut(() => {if(!pathname.startsWith('/ppt'))setSearchOpen(true);});
 
   // Poll server-side notification queue and display as toasts
   useNotificationPoll();
@@ -666,7 +670,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <BatchImageGenContext.Provider value={batchImageGenValue}>
         <TooltipProvider delayDuration={300}>
           <div className="flex h-screen overflow-hidden">
-            <ErrorBoundary>
+            {!standalonePpt&&<ErrorBoundary>
               <ChatListPanel
                 open={chatListOpen}
                 onToggle={toggleChatList}
@@ -674,18 +678,18 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 hasUpdate={updateContextValue.updateInfo?.updateAvailable ?? false}
                 readyToInstall={updateContextValue.updateInfo?.readyToInstall ?? false}
               />
-            </ErrorBoundary>
-            {chatListOpen && (
+            </ErrorBoundary>}
+            {!standalonePpt&&chatListOpen && (
               <ResizeHandle side="left" onResize={handleChatListResize} onResizeEnd={handleChatListResizeEnd} />
             )}
             <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-              <UnifiedTopBar />
+              {!standalonePpt&&<UnifiedTopBar />}
               <UpdateBanner />
               <PptBackgroundTasks />
               <div className="flex flex-1 min-h-0 overflow-hidden">
                 <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
                   <main className="relative flex-1 overflow-hidden">
-                    {isSplitActive ? (
+                    {isSplitActive&&!standalonePpt ? (
                       <SplitChatContainer />
                     ) : (
                       <ErrorBoundary>{children}</ErrorBoundary>

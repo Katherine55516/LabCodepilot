@@ -4,7 +4,7 @@ export function isPptProxyPath(segments: string[]): boolean {
   const objectId = /^[a-zA-Z0-9_-]{1,80}$/;
   const legacyProject = segments[0] === 'projects' && segments.length <= 3 &&
     (segments.length === 1 || segments[1] === 'bulk' || projectId.test(segments[1])) &&
-    (segments.length < 3 || (segments[1] !== 'bulk' && ['outline', 'generate', 'retry', 'export', 'pdf', 'source', 'duplicate', 'trash', 'restore', 'permanent', 'versions', 'rewrite', 'blank','page-policy','media-exclusions'].includes(segments[2])));
+    (segments.length < 3 || (segments[1] !== 'bulk' && ['outline', 'generate', 'retry', 'export', 'pdf', 'source', 'duplicate', 'trash', 'restore', 'permanent', 'versions','execution','execution-policy','conversation','source-assets','component-copy', 'rewrite', 'blank','page-policy','media-exclusions'].includes(segments[2])));
   const structuredProject = segments[0] === 'projects' && projectId.test(segments[1] || '') && (
     (segments.length === 3 && segments[2] === 'native-fonts') ||
     (segments.length === 4 && segments[2] === 'native-fonts' && /^[a-f0-9]{64}\.ttf$/.test(segments[3])) ||

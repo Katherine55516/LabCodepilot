@@ -15,7 +15,7 @@ export function componentElements(project,slide,typography) {
   const style={fontFamily:fonts.body,eastAsiaFontFamily:fonts.bodyEastAsia,color:templated?templateTextColor(project,index,'body').color:palette.foreground,fontSizePt:Math.max(15,typography.bodyPt||17),lineHeight:1.18,paragraphSpacingEm:.2};
   const emit=(node,frame,kind=node.type,content=node.content,extra={})=>{
     const element={id:node.id,nodeId:node.id,kind,bounds:node.geometry||frame,content,style:{...style,...node.style},zIndex:node.zIndex??20,
-      locked:Boolean(node.locked),semanticRole:node.semanticRole,sourceArtifact:node.sourceArtifact,groupId:node.groupId,rotation:node.rotation||0,...extra};
+      locked:Boolean(node.locked),userGeometry:node.userGeometry,semanticRole:node.semanticRole,sourceArtifact:node.sourceArtifact,groupId:node.groupId,rotation:node.rotation||0,...extra};
     if(content?.mathMl) {
       const natural=equationDimensions(content,Number(element.style.fontSizePt||17));
       const width=natural.widthPt*12700,height=natural.heightPt*12700,box=element.bounds;

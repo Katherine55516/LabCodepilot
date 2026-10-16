@@ -1,3 +1,6 @@
+import {deckScript}from './ppt-presentation-contract.mjs';
+import {projectedSourceHeading}from './ppt-topic-title-projection.mjs';
+import {supportsSourceLineRanges,hasExplicitSourceLineRanges,inspectSourceLinePlan,sourceLineRange,paginateSourceLines,mergedSourceRanges} from './ppt-source-line-ranges.mjs';
 /** Bounded structural repair of overflowing outline pages. The model partitions
  * source ownership; code preserves original copy and checks every selected row.
  * Native reassignment and the existing global gates remain authoritative. */
@@ -44,17 +47,7 @@ function scopeSlide(assessed,scope){
   if(slides.length===1)return slides[0];
   if(slides.some(s=>s.titleLocked||s.title_locked))throw new Error('cannot repartition several locked titles');
   const items=(assessed.project.source?.semantic?.inventory?.items||[]);
-  const sourceArtifactRanges=[];
-  for(const item of items.filter(item=>['TableBlock','SummaryTableBlock'].includes(item.type))){
-    const rows=new Set();
-    for(const slide of slides.filter(s=>s.sourceUnitIds?.includes(item.id))){
-      const refs=slide.sourceArtifactRanges?.filter(r=>r.sourceUnitId===item.id)||[];
-      for(const ref of refs.length?refs:[{}])for(let row=ref.rowStart??1;row<(ref.rowEnd??item.rows.length);row++)rows.add(row);
-    }
-    const ordered=[...rows].sort((a,b)=>a-b);let start=ordered[0],last=start;
-    for(const row of ordered.slice(1)){if(row!==last+1){sourceArtifactRanges.push({sourceUnitId:item.id,rowStart:start,rowEnd:last+1});start=row;}last=row;}
-    if(start!==undefined)sourceArtifactRanges.push({sourceUnitId:item.id,rowStart:start,rowEnd:last+1});
-  }
+  const sourceArtifactRanges=mergedSourceRanges(slides,items);
   return {title:slides.map(s=>s.title).join(' / '),originalTitles:slides.map(s=>s.title),
     ...(slides.some(s=>s.planningProtocolVersion===2)?{planningProtocolVersion:2}:{}),
     sourceUnitIds:unique(slides.flatMap(s=>s.sourceUnitIds||[])),sourceImageIds:unique(slides.flatMap(s=>s.sourceImageIds||[])),
@@ -67,7 +60,10 @@ export function outlineCapacityPartitionSchema(assessed,index){
  const ids=list=>({type:'array',maxItems:(list||[]).length,items:{type:'string',...((list||[]).length?{enum:list}:{})}});
  const indexes=total=>({type:'array',maxItems:total,items:{type:'integer',minimum:0,maximum:Math.max(0,total-1)}});
  const tables=items.filter(item=>old.sourceUnitIds?.includes(item.id)&&['TableBlock','SummaryTableBlock'].includes(item.type));
- const range={type:'object',additionalProperties:false,required:['sourceUnitId','rowStart','rowEnd'],properties:{sourceUnitId:{type:'string',...(tables.length?{enum:tables.map(item=>item.id)}:{})},rowStart:{type:'integer',minimum:1},rowEnd:{type:'integer',minimum:1}}};
+ const lineIds=items.filter(item=>old.sourceUnitIds?.includes(item.id)&&supportsSourceLineRanges(item)).map(item=>item.id);
+ const tableRange={type:'object',additionalProperties:false,required:['sourceUnitId','rowStart','rowEnd'],properties:{sourceUnitId:{type:'string',...(tables.length?{enum:tables.map(item=>item.id)}:{})},rowStart:{type:'integer',minimum:1},rowEnd:{type:'integer',minimum:1}}};
+ const lineRange={type:'object',additionalProperties:false,required:['sourceUnitId','lineStart','lineEnd'],properties:{sourceUnitId:{type:'string',enum:lineIds},lineStart:{type:'integer',minimum:0},lineEnd:{type:'integer',minimum:1}}};
+ const range=lineIds.length?{oneOf:[...(tables.length?[tableRange]:[]),lineRange]}:tableRange;
  const properties={title:{type:'string',minLength:1,maxLength:160},focus:{type:'string',minLength:1,maxLength:360},section:{type:'string',maxLength:80},question:{type:'string',maxLength:240},groupId:{type:'string',maxLength:100},sourceUnitIds:ids(old.sourceUnitIds),sourceImageIds:ids(old.sourceImageIds),sourceArtifactRanges:{type:'array',maxItems:100,items:range},keyPointIndexes:indexes(old.keyPoints?.length||0),requiredDetailIndexes:indexes(old.requiredDetails?.length||0),requiredEvidenceIds:ids(old.requiredEvidenceIds),visualIntent:{type:'object',additionalProperties:false,required:['type'],properties:{type:{type:'string',maxLength:40}}},pageContract:{type:'object',additionalProperties:false,required:['job','requiredUnits'],properties:{job:{type:'string',maxLength:40},requiredUnits:ids(old.sourceUnitIds)}}};
  return {type:'object',additionalProperties:false,required:['slides'],properties:{slides:{type:'array',minItems:1,maxItems:16,items:{type:'object',additionalProperties:false,required:Object.keys(properties),properties}}}};
 }
@@ -75,10 +71,10 @@ export function outlineCapacityRepairPrompt(assessed,index){
   const slide=scopeSlide(assessed,index),project=assessed.project;
   const owned=(project.source?.semantic?.inventory?.items||[]).filter(item=>slide.sourceUnitIds?.includes(item.id));
   return `局部大纲容量修复。只重新分配给出的失败页面范围，不改写正文，不重做整份大纲。重复来源的多个主讲页已合为一个范围，必须把非表格完整来源分配给唯一主讲页。返回 JSON {"slides":[...]}。可增加候选页，最终页数仍由代码重新拟合决定。\n
-每页给 section,title,focus,question,groupId,visualIntent,pageContract,sourceUnitIds,sourceImageIds,sourceArtifactRanges，以及 keyPointIndexes、requiredDetailIndexes、requiredEvidenceIds。不要返回 keyPoints 或 requiredDetails 的新正文，代码会按索引保留初稿的完整文字。keyPointIndexes 覆盖初稿所有 keyPoints 的 0-based 索引，恰好一次；requiredDetailIndexes 同理。保留全部原 sourceUnitIds/sourceImageIds/requiredEvidenceIds，不引入其他来源。非表格来源只主讲一次。翻译对（同一 languagePairId 的两种语言）与“引导语：+清单”是一个阅读单元：二者合起来能放入一个原生正文时必须同页，只有单元本身放不下时才可分到连续页。\n
+每页给 section,title,focus,question,groupId,visualIntent,pageContract,sourceUnitIds,sourceImageIds,sourceArtifactRanges，以及 keyPointIndexes、requiredDetailIndexes、requiredEvidenceIds。不要返回 keyPoints 或 requiredDetails 的新正文，代码会按索引保留初稿的完整文字。keyPointIndexes 覆盖初稿所有 keyPoints 的 0-based 索引，恰好一次；requiredDetailIndexes 同理。保留全部原 sourceUnitIds/sourceImageIds/requiredEvidenceIds，不引入其他来源。除显式代码/流程逐行范围外，非表格来源只主讲一次。代码/流程可用 lineStart（0-based）/lineEnd（exclusive）分页，原文每行按页面顺序完整保留恰好一次，不得改写、删空行或缩进；同一行内的条件/分支不可截开。翻译对（同一 languagePairId 的两种语言）与“引导语：+清单”是一个阅读单元：二者合起来能放入一个原生正文时必须同页，只有单元本身放不下时才可分到连续页。\n
 表格按 rowStart 包含、rowEnd 不包含分片，保留原稿选中的全部行和列，且每行恰好一次。原稿没有范围时表示 [1,rows.length) 全表。表格建议已按所有实际原生正文版式测量，当 tableFragments 的 fitsEveryNativeBody 全部为 true 时，按此测量方案每个 fragment 分配独立页面，不合并不同片段。每页只放一个表格分片与少量相关解释。独立完整小结与长表分开，全部语言保留；双语同页只由上述阅读单元与实测容量决定，不另造 adjacencyPairs。不同页给各自具体 question/groupId，避免不同职责误合并。表格本身已完整承载事实，避免再复制表格为段落。每页都必须有真实来源单元或原 keyPoint。\n
 实际重新分配后还会再次检查容量，不可用 capacity_ok 字段自称通过。保留真实来源关系、公式变量和用户锁定标题，不能删除事实来通过。原 pageContract 是模型草案，不是用户要求；草案中超出阅读单元的同页要求无效。一对完整语言 SummaryBlock 若实测同页无法容纳，才分别主讲。原内容索引只能分配给一个页面，其他页面使用 []。\n
-<deck_context>${JSON.stringify({brief:assessed.rawOutline.brief,titles:assessed.outline.map(s=>s.title)})}</deck_context>\n<failed_page>${JSON.stringify({title:slide.title,originalTitles:slide.originalTitles,focus:slide.focus,titleLocked:slide.titleLocked||slide.title_locked,sourceUnitIds:slide.sourceUnitIds,sourceImageIds:slide.sourceImageIds,sourceArtifactRanges:slide.sourceArtifactRanges,keyPoints:slide.keyPoints,requiredDetails:slide.requiredDetails,requiredEvidenceIds:slide.requiredEvidenceIds,densityFit:slide.densityFit})}</failed_page>\n<indexed_copy>${JSON.stringify({keyPoints:(slide.keyPoints||[]).map((point,index)=>({index,...point})),requiredDetails:(slide.requiredDetails||[]).map((text,index)=>({index,text}))})}</indexed_copy>\n<owned_source>${JSON.stringify(owned)}</owned_source>\n<measured_native_advice>${JSON.stringify(conservativeAdvice(slide,project))}</measured_native_advice>\n同页原文拥有中英两语言时，title保留简洁中英双语；显式output语言按目标语言。focus针对实际本片的来源/表行，不能把原整页focus重复到每个分片。\nJSON Capacity Partition Schema v2=${JSON.stringify(outlineCapacityPartitionSchema(assessed,index))}\n仅返回紧凑 JSON。`;
+<deck_context>${JSON.stringify({brief:assessed.rawOutline.brief,titles:assessed.outline.map(s=>s.title)})}</deck_context>\n<failed_page>${JSON.stringify({title:slide.title,originalTitles:slide.originalTitles,focus:slide.focus,titleLocked:slide.titleLocked||slide.title_locked,sourceUnitIds:slide.sourceUnitIds,sourceImageIds:slide.sourceImageIds,sourceArtifactRanges:slide.sourceArtifactRanges,keyPoints:slide.keyPoints,requiredDetails:slide.requiredDetails,requiredEvidenceIds:slide.requiredEvidenceIds,densityFit:slide.densityFit})}</failed_page>\n<indexed_copy>${JSON.stringify({keyPoints:(slide.keyPoints||[]).map((point,index)=>({index,...point})),requiredDetails:(slide.requiredDetails||[]).map((text,index)=>({index,text}))})}</indexed_copy>\n<owned_source>${JSON.stringify(owned)}</owned_source>\n<measured_native_advice>${JSON.stringify(conservativeAdvice(slide,project))}</measured_native_advice>\n每页 title 仅用输入主要语言；显式 output 语言按目标语言。正文保留合同要求的所有语言，不把两个语言拼成双语主题。focus针对实际本片的来源/表行，不能把原整页focus重复到每个分片。\nJSON Capacity Partition Schema v2=${JSON.stringify(outlineCapacityPartitionSchema(assessed,index))}\n仅返回紧凑 JSON。`;
 }
 function requireExactIndexes(slides,key,total){
   const assigned=slides.flatMap(slide=>slide[key]||[]);
@@ -100,6 +96,10 @@ export function applyOutlineCapacityRepair(assessed,index,response){
   const items=(assessed.project.source?.semantic?.inventory?.items||[]);
   for(const id of old.sourceUnitIds||[]){
     const item=items.find(item=>item.id===id),owners=replacements.filter(s=>s.sourceUnitIds?.includes(id));
+    if(hasExplicitSourceLineRanges(item,owners)){
+      const refs=(old.sourceArtifactRanges||[]).filter(ref=>ref.sourceUnitId===id);
+      if(!inspectSourceLinePlan(item,owners,refs).complete)throw new Error('literal source partition dropped, duplicated or reordered original lines');continue;
+    }
     if(!['TableBlock','SummaryTableBlock'].includes(item.type)){if(owners.length!==1)throw new Error('non-table ownership must remain unique');continue;}
     const rowsFor=slides=>slides.flatMap(s=>{
       const refs=(s.sourceArtifactRanges||[]).filter(r=>r.sourceUnitId===id);
@@ -114,7 +114,7 @@ export function applyOutlineCapacityRepair(assessed,index,response){
   }
   const result=replacements.map((s,part)=>{
     if(old.titleLocked||old.title_locked)if(s.title!==old.title)throw new Error('locked outline title changed');
-    if(!(s.sourceUnitIds?.length||s.keyPointIndexes?.length))throw new Error('empty page partition');
+    if(!(s.sourceUnitIds?.length||s.sourceImageIds?.length||s.keyPointIndexes?.length))throw new Error('empty page partition');
     const {keyPointIndexes,requiredDetailIndexes,keyPoints,requiredDetails,densityFit,id,...fields}=s;
     return {...fields,...(old.planningProtocolVersion===2?{planningProtocolVersion:2}:{}),...(old.titleLocked?{titleLocked:true}:{}),...(old.title_locked?{title_locked:true}:{}),
       keyPoints:(keyPointIndexes||[]).map(i=>structuredClone(old.keyPoints[i])),requiredDetails:(requiredDetailIndexes||[]).map(i=>old.requiredDetails[i])};
@@ -238,12 +238,47 @@ export function partitionOutlineWithMeasuredComponents(assessed,scope){
   if(indexes.length>1&&indexes.some(i=>assessed.rawOutline.slides[i].titleLocked||assessed.rawOutline.slides[i].title_locked))throw new Error('cannot repartition several locked titles');
   const items=(assessed.project.source?.semantic?.inventory?.items||[]),targets=nativeTargets(assessed.project),atoms=[];
   const empty=()=>({sourceUnitIds:[],sourceImageIds:[],sourceArtifactRanges:[],keyPointIndexes:[],requiredDetailIndexes:[],requiredEvidenceIds:[]});
+  const heading=item=>{
+    const raw=item.sectionPath?.at(-1)||'',name=String(projectedSourceHeading(assessed.project,raw)||raw).replace(/^(?:\d+\.)*\d+\.?\s+/u,'');
+    return name.split(/\s+[|｜]\s+/u).map(value=>value.trim()).find(value=>deckScript(assessed.project)==='han'?/\p{Script=Han}/u.test(value):!/\p{Script=Han}/u.test(value))||'';
+  };
+  const headingItems=items.filter(item=>old.sourceUnitIds?.includes(item.id)),allHeadings=unique(headingItems.map(heading).filter(Boolean));
+  const key=value=>String(value||'').normalize('NFKC').replace(/[\s\p{P}\p{S}]/gu,'').toLowerCase();
+  const titleFor=(origin,part)=>{
+    if(origin.titleLocked||origin.title_locked||allHeadings.length<2)return origin.title;
+    const ownHeadings=unique(headingItems.filter(item=>part.sourceUnitIds.includes(item.id)).map(heading).filter(Boolean));
+    // A split of a multi-section page cannot retain an exact subject prefix
+    // belonging exclusively to a different section of that original page.
+    if(ownHeadings.length===1&&ownHeadings[0].length<=160&&allHeadings.some(name=>!ownHeadings.includes(name)&&key(name).length>=8&&key(origin.title).includes(key(name))))return ownHeadings[0];
+    return origin.title;
+  };
+  const metadata=(origin,part)=>({title:titleFor(origin,part),section:origin.section,focus:origin.focus,question:origin.question,groupId:origin.groupId,planningProtocolVersion:origin.planningProtocolVersion});
+  const visible=part=>({...part,...metadata(original,part),pageContract:{job:original.pageContract?.job||'mechanism',requiredUnits:part.sourceUnitIds,requiredRelations:[],adjacencyPairs:[],comparisonAxes:original.pageContract?.comparisonAxes||[],compositionCandidates:['text']},keyPoints:part.keyPointIndexes.map(i=>old.keyPoints[i])});
+  const fits=part=>{const results=targets.map(index=>candidateFit(visible(part),assessed.project,index).capacity_ok);return assessed.project.nativeCapacityAssignment?results.some(Boolean):results.every(Boolean);};
   const advice=conservativeAdvice(old,assessed.project);
   for(const item of items.filter(item=>old.sourceUnitIds?.includes(item.id)&&isSourceArtifactItem(item))){
     if(['TableBlock','SummaryTableBlock'].includes(item.type)){
       const fragments=advice.tableFragments.filter(ref=>ref.sourceUnitId===item.id);
       if(fragments.some(ref=>assessed.project.nativeCapacityAssignment?!ref.fitsAvailableNativeBody:!ref.fitsEveryNativeBody))throw new Error('a complete table row cannot fit an eligible native body frame');
-      for(const fragment of fragments){const {fitsEveryNativeBody,fitsAvailableNativeBody,...ref}=fragment;atoms.push({...empty(),sourceUnitIds:[item.id],sourceArtifactRanges:[ref]});}
+      for(const fragment of fragments){
+        // Advice measures the component alone. Its actual page header and
+        // continuation band must also fit before freezing a row interval.
+        let start=fragment.rowStart;
+        while(start<fragment.rowEnd){
+          let best;
+          for(let end=start+1;end<=fragment.rowEnd;end++){
+            const atom={...empty(),sourceUnitIds:[item.id],sourceArtifactRanges:[{sourceUnitId:item.id,rowStart:start,rowEnd:end}]};
+            if(!fits(atom))break;best=atom;
+          }
+          if(!best)throw new Error('a complete table row cannot fit with its actual page header');
+          atoms.push(best);start=best.sourceArtifactRanges[0].rowEnd;
+        }
+      }
+    }else if(supportsSourceLineRanges(item)){
+      const existing=(old.sourceArtifactRanges||[]).filter(ref=>ref.sourceUnitId===item.id);
+      const measure=ref=>{const candidate={sourceUnitIds:[item.id],sourceArtifactRanges:[ref],keyPoints:[],planningProtocolVersion:old.planningProtocolVersion,pageContract:{requiredUnits:[item.id]}};const fits=targets.map(target=>candidateFit(candidate,assessed.project,target).capacity_ok);return assessed.project.nativeCapacityAssignment?fits.some(Boolean):fits.every(Boolean);};
+      if(!existing.length&&measure({sourceUnitId:item.id}))atoms.push({...empty(),sourceUnitIds:[item.id]});
+      else for(const scope of existing.length?existing:[{}])for(const ref of paginateSourceLines(item,measure,scope))atoms.push({...empty(),sourceUnitIds:[item.id],sourceArtifactRanges:[ref]});
     }else atoms.push({...empty(),sourceUnitIds:[item.id]});
   }
   // A translation pair or a lead-in with its list is one reading unit: keep it
@@ -262,12 +297,10 @@ export function partitionOutlineWithMeasuredComponents(assessed,scope){
   for(let i=0;i<(old.keyPoints?.length||0);i++)atoms.push({...empty(),keyPointIndexes:[i]});
   const merge=(a,b)=>{
     const result={...empty(),sourceUnitIds:unique([...a.sourceUnitIds,...b.sourceUnitIds]),sourceImageIds:unique([...a.sourceImageIds,...b.sourceImageIds]),keyPointIndexes:[...a.keyPointIndexes,...b.keyPointIndexes]};
-    const ranges=[...a.sourceArtifactRanges,...b.sourceArtifactRanges].sort((x,y)=>x.sourceUnitId.localeCompare(y.sourceUnitId)||x.rowStart-y.rowStart);
-    for(const ref of ranges){const previous=result.sourceArtifactRanges.at(-1);if(previous?.sourceUnitId===ref.sourceUnitId&&previous.rowEnd===ref.rowStart)previous.rowEnd=ref.rowEnd;else result.sourceArtifactRanges.push({...ref});}
+    const ranges=[...a.sourceArtifactRanges,...b.sourceArtifactRanges].sort((x,y)=>x.sourceUnitId.localeCompare(y.sourceUnitId)||(x.lineStart??x.rowStart)-(y.lineStart??y.rowStart));
+    for(const ref of ranges){const previous=result.sourceArtifactRanges.at(-1);if(previous?.sourceUnitId===ref.sourceUnitId&&previous.lineEnd!==undefined&&previous.lineEnd===ref.lineStart)previous.lineEnd=ref.lineEnd;else if(previous?.sourceUnitId===ref.sourceUnitId&&previous.rowEnd!==undefined&&previous.rowEnd===ref.rowStart)previous.rowEnd=ref.rowEnd;else result.sourceArtifactRanges.push({...ref});}
     return result;
   };
-  const visible=part=>({...part,focus:original.focus,planningProtocolVersion:original.planningProtocolVersion,pageContract:{requiredUnits:part.sourceUnitIds},keyPoints:part.keyPointIndexes.map(i=>old.keyPoints[i])});
-  const fits=part=>{const results=targets.map(index=>candidateFit(visible(part),assessed.project,index).capacity_ok);return assessed.project.nativeCapacityAssignment?results.some(Boolean):results.every(Boolean);};
   const parts=[];
   for(const atom of atoms){
     if(!fits(atom))throw new Error('a complete source component cannot fit every native body frame');
@@ -299,8 +332,24 @@ export function partitionOutlineWithMeasuredComponents(assessed,scope){
   // its planned title and question instead of becoming "（续 n）" of the first.
   const originals=indexes.map(i=>assessed.rawOutline.slides[i]),own=index=>parts.length===originals.length?originals[index]:original;
   const slides=parts.map((part,index)=>({...part,capacityPartition:true,section:own(index).section,
-    title:own(index).titleLocked||own(index).title_locked||parts.length===originals.length?own(index).title:index?`${original.title}（续 ${index+1}）`:original.title,
+    title:titleFor(own(index),part),
     focus:own(index).focus,question:own(index).question,groupId:own(index).groupId,
     pageContract:{job:own(index).pageContract?.job||'mechanism',requiredUnits:part.sourceUnitIds,requiredRelations:[],adjacencyPairs:[],comparisonAxes:own(index).pageContract?.comparisonAxes||[],compositionCandidates:['text']}}));
   return applyOutlineCapacityRepair(assessed,scope,{slides});
+}
+
+/** Keep valid independent partitions that fit the hard budget, deferring only
+ * the scopes that do not. A later measured repack may free their needed pages.
+ * Every applied scope is replaced atomically in original reading order. */
+export function boundedCapacityPartitions(raw,scopes,partitions){
+  if(!Array.isArray(raw?.slides)||raw.slides.length>100||scopes.length!==partitions.length)throw new Error('invalid bounded capacity batch');
+  const replacements=new Map(),removed=new Set(),used=new Set(),deferred=[];let pageCount=raw.slides.length;
+  for(const [i,scope]of scopes.entries()){
+    const parts=partitions[i];if(!parts)continue;
+    if(!scope.length||scope.some(index=>!Number.isInteger(index)||index<0||index>=raw.slides.length||used.has(index))||!parts.length||parts.length>16)throw new Error('invalid or overlapping capacity scope');
+    scope.forEach(index=>used.add(index));
+    if(pageCount+parts.length-scope.length>100){deferred.push(scope);continue;}
+    pageCount+=parts.length-scope.length;replacements.set(scope[0],parts);scope.slice(1).forEach(index=>removed.add(index));
+  }
+  return {raw:{...raw,slides:raw.slides.flatMap((slide,index)=>removed.has(index)?[]:replacements.get(index)||[slide])},applied:replacements.size,deferred};
 }

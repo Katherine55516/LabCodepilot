@@ -1,3 +1,6 @@
+import {mergedTopicTitle} from './ppt-merged-topic.mjs';
+import {mergedSourceRanges} from './ppt-source-line-ranges.mjs';
+import {supportsSourceLineRanges,hasExplicitSourceLineRanges,inspectSourceLinePlan,sourceLineRange,paginateSourceLines} from './ppt-source-line-ranges.mjs';
 /** Bounded, traceable grouping and physical fit inside estimate/outline nodes.
  * Initial source projections are estimates of writing cost, not emitted copy. */
 import { densityProfile, densityText, displayUnits, automaticPages } from './ppt-density-profile.mjs';
@@ -123,6 +126,11 @@ function related(a, b, items) {
   return (b.chunkRefs || []).some(id => aa.has(id)) || a.section && a.section === b.section;
 }
 export function candidateFit(slide, project, index = 1) {
+  // The candidate's topic determines its measured header reservation. Do not
+  // paginate against an absent or previous page title and move sources later.
+  project={...project,outline:[...(project.outline||[])],...(project.deck?{deck:{...project.deck,slides:[...(project.deck.slides||[])]}}:{})};
+  project.outline[index]=slide;if(project.deck)project.deck.slides[index]=slide;
+
   const items = project.source?.semantic?.inventory?.items || [];
   const owned = Array.isArray(slide.sourceUnitIds) ? slide.sourceUnitIds : items.filter(item => isSourceArtifactItem(item) && item.chunkRefs.some(id => slide.chunkRefs?.includes(id))).map(item => item.id);
   const ranges = Array.isArray(slide.sourceArtifactRanges) ? slide.sourceArtifactRanges : [];
@@ -144,31 +152,19 @@ export function candidateFit(slide, project, index = 1) {
     // upper bound as an instruction to create more frozen pages.
     if(!components.length&&slide.focus)components.push({type:'text',content:{text:slide.focus}});
   }
+  const sourceRefCount=items.filter(item=>owned.includes(item.id)&&isSourceArtifactItem(item)).reduce((count,item)=>count+Math.max(1,(slide.sourceArtifactRanges||[]).filter(ref=>ref.sourceUnitId===item.id).length),0);
+  const bindingCapacity=sourceRefCount<=10;
   const fit = components.length ? fitComponents(components, project, index) : null;
   const plannedUnits = components.reduce((n, c) => n + displayUnits(c.content.displayText || c.content.text || c.content.rows?.flat().join(' ') || c.content.items?.map(i => i.text).join('\n')), 0);
   const capacity = pageCapacity(project, index);
   return { sourceUnitIds: owned, plannedVisibleUnits: plannedUnits, densityProfileId: densityProfile().id,
-    predictedOverflow: fit?.predictedOverflow || 0, capacity_ok: Boolean(fit?.capacity_ok),
+    predictedOverflow: Math.max(fit?.predictedOverflow||0,bindingCapacity?0:1), capacity_ok: Boolean(fit?.capacity_ok)&&bindingCapacity,sourceRefCount,...(!bindingCapacity?{bindingLimit:'at most 10 frozen source references per page'}:{}),
     ...(fit?.availableHeight ? { usedHeight: fit.usedHeight, availableHeight: fit.availableHeight } : {}),
     layoutId: fit?.layoutId || 'unmeasured', fontSizePt: fit?.fontSizePt || capacity.fontSizePt,
     availableContentRect:fit?.canvas||capacity.geometry,capacityBasis:fit?.capacityBasis||capacity.capacityBasis,
     targetVisualUnits: capacity.target, maximumVisualUnits: capacity.high,
     ...(slide.planningProtocolVersion===2?{proseBasis:'outline_message_projection; complete source retrieved by writer; final body not yet measured'}:{}),
     measurementBasis: fit?.measurementBasis || 'missing_display_plan' };
-}
-function mergedTableRanges(a,b,items) {
-  const result=[];
-  for(const item of items.filter(item=>['TableBlock','SummaryTableBlock'].includes(item.type))){
-    const selections=[a,b].flatMap(slide=>{
-      if(!(slide.sourceUnitIds||slide.densityFit?.sourceUnitIds||[]).includes(item.id))return [];
-      const ranges=(slide.sourceArtifactRanges||[]).filter(ref=>ref.sourceUnitId===item.id);
-      return (ranges.length?ranges:[{sourceUnitId:item.id}]).map(ref=>({sourceUnitId:item.id,rowStart:ref.rowStart??1,rowEnd:ref.rowEnd??item.rows.length}));
-    }).sort((a,b)=>a.rowStart-b.rowStart);
-    const combined=[];
-    for(const ref of selections){const previous=combined.at(-1);if(previous && ref.rowStart<=previous.rowEnd)previous.rowEnd=Math.max(previous.rowEnd,ref.rowEnd);else combined.push({...ref});}
-    result.push(...combined);
-  }
-  return result;
 }
 export function packOutline(project, raw, {finalRepack=false}={}) {
   if (!Array.isArray(raw?.slides) || raw.slides.length < 3 || raw.slides.length > 100) throw new Error('outline must contain 3–100 candidate pages');
@@ -190,7 +186,9 @@ export function packOutline(project, raw, {finalRepack=false}={}) {
     // Code only combines a documented common question/source context, with
     // measured copy, no locked user titles, and within the visible density budget.
     if (auto && (finalRepack || !s.capacityPartition && !previous?.capacityPartition) && index > 1 && index < candidates.length - 1 && previous && !previous.titleLocked && !previous.title_locked && !s.titleLocked && !s.title_locked && related(previous, s, items)) {
-      const merged = { ...previous, sourceArtifactRanges: mergedTableRanges(previous,{...s,densityFit:fit},items), sourceUnitIds: unique([...(previous.densityFit?.sourceUnitIds || []), ...fit.sourceUnitIds]),
+      const title=mergedTopicTitle(project,previous.title,s.title);
+      if(!title){slides.push({...s,densityFit:fit});continue;}
+      const merged = { ...previous,title, sourceArtifactRanges: mergedSourceRanges([previous,{...s,densityFit:fit}],items), sourceUnitIds: unique([...(previous.densityFit?.sourceUnitIds || []), ...fit.sourceUnitIds]),
         sourceImageIds:unique([...(previous.sourceImageIds||[]),...(s.sourceImageIds||[])]),
         refs: unique([...previous.refs, ...s.refs]), chunkRefs: unique([...previous.chunkRefs, ...s.chunkRefs]),
         keyPoints: uniquePoints([...(previous.keyPoints || []), ...(s.keyPoints || [])]),
@@ -254,9 +252,10 @@ export function inspectDensityOutline(raw,project) {
     message: `Candidate ${s.title} exceeds measured ${s.densityFit.fontSizePt}pt capacity; split the owned structures/relations without deleting cells or facts. Actual template fit: ${JSON.stringify({fontSizePt:s.densityFit.fontSizePt,layoutId:s.densityFit.layoutId,contentRectEMU:s.densityFit.availableContentRect,overflowEMU:s.densityFit.predictedOverflow,sourceUnitIds:s.sourceUnitIds||s.densityFit.sourceUnitIds,sourceArtifactRanges:s.sourceArtifactRanges||[]})}. Measured repair options: ${JSON.stringify(outlineCapacityAdvice(s,project,index+1))}. For automatic page count, add candidate pages or move complete units; do not retain the draft count at the expense of readable capacity.` }] : []);
   for(const item of project?.source?.semantic?.inventory?.items||[])if(isSourceArtifactItem(item)){
     const assigned=(raw.slides||[]).filter(slide=>(slide.sourceUnitIds||slide.densityFit?.sourceUnitIds||[]).includes(item.id));
-    if(!['TableBlock','SummaryTableBlock'].includes(item.type)&&assigned.filter(slide=>!slide.repeatSourceUnitIds?.includes(item.id)&&!['recap','application','translation'].includes(slide.repeatPurpose)).length>1)
+    if(!['TableBlock','SummaryTableBlock'].includes(item.type)&&assigned.filter(slide=>!slide.repeatSourceUnitIds?.includes(item.id)&&!['recap','application','translation'].includes(slide.repeatPurpose)).length>1&&!(hasExplicitSourceLineRanges(item,assigned)&&inspectSourceLinePlan(item,assigned).complete))
       issues.push({code:'planned_source_object_duplicate',repairable:true,message:`Required object ${item.id} has several primary assignments. Assign one owner; use references or declared recap/application for later pages.`});
     let complete=assigned.length>0,missingRows;
+    if(complete&&hasExplicitSourceLineRanges(item,assigned))complete=inspectSourceLinePlan(item,assigned).complete;
     if(complete&&['TableBlock','SummaryTableBlock'].includes(item.type)){
       const rows=new Set();
       for(const slide of assigned){const selections=slide.sourceArtifactRanges?.filter(ref=>ref.sourceUnitId===item.id);for(const ref of selections?.length?selections:[{}])for(let row=ref.rowStart??1;row<(ref.rowEnd??item.rows.length);row++)rows.add(row);}

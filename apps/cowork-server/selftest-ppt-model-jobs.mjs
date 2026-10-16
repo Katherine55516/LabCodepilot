@@ -21,6 +21,16 @@ assert.equal(queue.complete('alice', id, { lease: job.lease, text: '{"slides":[]
 assert.equal(await pending, '{"slides":[]}');
 assert.equal(queue.complete('alice', id, { lease: job.lease, text: '{}' }), false);
 assert.deepEqual(queue.list('alice'), []);
+// The advertised provider concurrency is per account, including multiple
+// projects/tabs; each tab's local worker limit cannot enforce this on its own.
+const multi=createPptModelJobs({timeoutMs:5000}),requests=Array.from({length:4},(_,i)=>multi.request({...project,id:'project-'+i},'prompt '+i));
+const leased=[];for(let i=0;i<3;i++){const next=multi.list('alice')[0];leased.push(multi.claim('alice',next.id));}
+assert.deepEqual(multi.list('alice'),[],'a fourth tab cannot create a fourth provider call');
+assert.equal(multi.state('alice','project-3').pending,1);
+multi.complete('alice',leased[0].id,{lease:leased[0].lease,text:'{}'});
+const fourth=multi.claim('alice',multi.list('alice')[0].id);assert.ok(fourth,'a finished lease releases the shared slot');
+for(const job of [...leased.slice(1),fourth])multi.complete('alice',job.id,{lease:job.lease,text:'{}'});
+await Promise.all(requests);
 await assert.rejects(queue.request({ ...project, configId: 'managed-a' }, 'prompt'));
 const timeoutQueue = createPptModelJobs({ timeoutMs: 20 });
 await assert.rejects(timeoutQueue.request(project, 'prompt'), error=>error.code==='timeout');

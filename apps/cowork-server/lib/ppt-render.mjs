@@ -251,7 +251,9 @@ def apply_scene_text_style(frame,style,overrides=()):
             if 'fontWeight' in overrides: run.font.bold=bool(style['fontWeight']>=600)
 
 def render_scene_element(slide, element):
-    box = element['bounds']; x, y, w, h = box['x'], box['y'], box['width'], box['height']
+    # Layout may use fractional EMU; DrawingML coordinates require integers.
+    # Quantize only at serialization, preserving the editor/source geometry.
+    box = element['bounds']; x, y, w, h = (int(round(float(box[key]))) for key in ('x','y','width','height'))
     kind = element['kind']; content = element.get('content') or {}; item_style = element.get('style') or {}
     color = scene_color(item_style.get('color'), muted)
     size = float(item_style.get('fontSizePt') or 18)
@@ -266,7 +268,7 @@ def render_scene_element(slide, element):
         return
     if kind == 'text':
         if content.get('mathMl') and element.get('mathLayout'):
-            mb=element['mathLayout']['bounds'];x,y,w,h=mb['x'],mb['y'],mb['width'],mb['height']
+            mb=element['mathLayout']['bounds'];x,y,w,h=(int(round(float(mb[key]))) for key in ('x','y','width','height'))
         shape = slide.shapes.add_textbox(x, y, w, h); para = shape.text_frame.paragraphs[0]
         if content.get('mathMl'):shape.text_frame.margin_left=shape.text_frame.margin_right=shape.text_frame.margin_top=shape.text_frame.margin_bottom=0
         if source: shape.name=source_name

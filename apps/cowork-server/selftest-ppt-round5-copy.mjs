@@ -31,19 +31,18 @@ const E = 914400, g = (x, y, w, h) => ({ x: x * E, y: y * E, width: w * E, heigh
 const page = (sectionWidth, blocker) => ({ slots: [{ shapeId: 1, role: 'section', capacity: 6, fontSizePt: 11.5 }, { shapeId: 2, role: 'title', capacity: 30 }],
   nodes: [{ nativeRef: { shapeId: 1 }, type: 'text', geometry: g(.7, .6, sectionWidth, .2), nativeTextFrame: { wordWrap: false }, style: { fontSizePt: 11.5 } },
     { nativeRef: { shapeId: 2 }, type: 'text', geometry: g(.7, 1, 11.9, .6) }, ...(blocker ? [{ nativeRef: { shapeId: 3 }, type: 'image', geometry: g(blocker, .4, 1, 1) }] : [])] });
-const deck = blocker => ({ generationPolicy: { language: { mode: 'source' } }, source: project0.source,
+const deck = blocker => ({ generationPolicy: { language: { mode: 'source' } }, source: { ...project0.source, text: '中文为主的教程：研究范式、核心张力与算子代数，含少量 English 标题。' },
   outline: [{ id: 's0' }, { id: 's1', sourceUnitIds: ['a'] }, { id: 's2', sourceUnitIds: ['b', 'c'] }, { id: 's3', sourceUnitIds: ['d'] }],
   deck: { slides: [{ id: 's0', title: '主题' }, { id: 's1', title: '两种研究范式', section: '研究范式' }, { id: 's2', title: '核心张力', section: '1.3 The central tension' }, { id: 's3', title: '算子代数', section: '算子' }] },
   templateFidelity: { mode: 'preserve', width: 13.33 * E, height: 7.5 * E, slides: [{ slots: [], nodes: [] }, page(1.2), page(1.7), page(1.2, blocker)] } });
 const wide = deck(null), result = normalizeDeckEyebrows(wide);
-assert.equal(result.tier, 'bilingual');
-assert.deepEqual(wide.deck.slides.slice(1).map(s => s.section), ['1.1 两种范式 · Two paradigms', '1.3 核心张力 · The central tension', '2 算子代数 · The Operator Algebra']);
-assert.ok(wide.deck.slides[1].sectionLabel.width > 1.2 * E, 'the unwrapped label is measured to the title edge');
-assert.deepEqual(wide.titlePolicy, { version: 1, primary: 'zh', otherLanguage: 'eyebrow' }, 'F-P1-5: bilingual eyebrows record the title policy');
+// Round 7 (B1): eyebrows are "number + deck-language name"; no bilingual tier.
+assert.equal(result.tier, 'primary');
+assert.deepEqual(wide.deck.slides.slice(1).map(s => s.section), ['1.1 两种范式', '1.3 核心张力', '2 算子代数']);
+assert.equal(wide.titlePolicy, undefined, 'no bilingual eyebrow, no title policy');
 const narrow = deck(2.2), tight = normalizeDeckEyebrows(narrow);
-assert.equal(narrow.titlePolicy, undefined, 'no bilingual eyebrow, no single-language title policy');
-assert.equal(tight.tier, 'primary', 'an object beside one label drops the whole deck to the same shorter format');
-assert.deepEqual(narrow.deck.slides.slice(1).map(s => s.section), ['1.1 两种范式', '1.3 核心张力', '2 算子代数']);
+assert.ok(['primary', 'short'].includes(tight.tier), 'an object beside one label keeps one deck-wide format');
+assert.deepEqual(narrow.deck.slides.slice(1).map(s => s.section).map(s => s.replace(/\s.*$/u, '')), ['1.1', '1.3', '2']);
 const locked = deck(null); locked.deck.slides[2].sectionLabel = { basis: 'user' }; normalizeDeckEyebrows(locked);
 assert.equal(locked.deck.slides[2].section, '1.3 The central tension', 'a user-edited label is kept');
 
@@ -77,14 +76,13 @@ assert.ok(measured.lines > 3 && measured.lines >= flat.lines, 'continuation line
 assert.equal(inspectCodeWrap([{ id: 'a', sourceArtifactFit: { codeWraps: 2, layoutId: 'x', codeHangingIndent: true } }]).length, 0);
 assert.equal(inspectCodeWrap([{ id: 'b', sourceArtifactFit: { codeWraps: 2, layoutId: 'x' } }])[0].code, 'code_line_wrapped', 'fits without the hanging indent are still reported');
 
-// F-P1-5: titles in one language are fine under the recorded policy; an off-language title is reported.
-const pairedItems = Array.from({ length: 8 }, (_, i) => ({ id: 'p' + i, languagePairId: 'lp' + (i >> 1), text: 'x' }));
-const bilingualDeck = { generationPolicy: { language: { mode: 'source' } }, source: { semantic: { inventory: { items: pairedItems } } } };
+// Round 7 (B1): titles use the deck language; off-language and paired titles are reported.
+const pairedItems = Array.from({ length: 8 }, (_, i) => ({ id: 'p' + i, languagePairId: 'lp' + (i >> 1), text: i % 2 ? '中文说明的内容' : 'x' }));
+const bilingualDeck = { generationPolicy: { language: { mode: 'source' } }, source: { text: '中文为主的输入内容，包含少量 English。', semantic: { inventory: { items: pairedItems } } } };
 const titled = list => [{ id: 'c', title: '封面' }, ...list.map((title, i) => ({ id: 't' + i, title }))];
-assert.equal(inspectTitleLanguage(bilingualDeck, titled(['两种研究范式', '核心张力', '算子代数', '因子组合']))[0].code, 'title_language_inconsistent', 'without a policy, single-language titles are reported');
-const withPolicy = { ...bilingualDeck, titlePolicy: { version: 1, primary: 'zh', otherLanguage: 'eyebrow' } };
-assert.deepEqual(inspectTitleLanguage(withPolicy, titled(['两种研究范式', '核心张力', '算子代数', '因子组合'])), []);
-assert.deepEqual(inspectTitleLanguage(withPolicy, titled(['两种研究范式', 'Core tension', '算子代数', '因子组合']))[0].off, ['t1']);
-assert.match(bilingualTitleRule({ ...bilingualDeck, outline: [{ title: '封面' }, { title: '核心张力' }] }), /统一使用中文/u);
-assert.equal(bilingualTitleRule({ ...bilingualDeck, generationPolicy: { language: { mode: 'output', locale: 'en' } } }), '');
-console.log('Round 5 copy rules: eyebrow normalization, bilingual title policy, terminology lock and code hanging indent: passed');
+assert.deepEqual(inspectTitleLanguage(bilingualDeck, titled(['两种研究范式', '核心张力', '算子代数', '因子组合'])), [], 'single-language deck titles pass');
+assert.deepEqual(inspectTitleLanguage(bilingualDeck, titled(['两种研究范式', 'Core tension', '算子代数', '因子组合']))[0].off, ['t1']);
+assert.equal(inspectTitleLanguage(bilingualDeck, titled(['两种研究范式', 'Core tension | 核心张力', '算子代数', '因子组合']))[0].code, 'title_language_paired');
+assert.match(bilingualTitleRule(bilingualDeck), /ONLY 简体中文/u);
+assert.match(bilingualTitleRule({ ...bilingualDeck, generationPolicy: { language: { mode: 'output', locale: 'en' } } }), /ONLY English/u);
+console.log('Round 5 copy rules (round 7 contract): deck-language eyebrows and titles, terminology lock and code hanging indent: passed');

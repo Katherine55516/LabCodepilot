@@ -1,14 +1,15 @@
 /** F-P1-11: eyebrow / section-label normalization. The navigation label above
  * a page title is derived from the source heading the page's units come from
- * ("section number + section name", both languages when the deck keeps the
- * source languages), and the whole deck uses one format tier, so pages never
+ * ("section number + section name" in the deck language), and the whole deck uses one format tier, so pages never
  * mix "1.3 核心张力" with "研究范式" or an English chapter line. */
+import {projectedSourceHeading} from './ppt-topic-title-projection.mjs';
 import {stableId} from './ppt/ir.mjs';
+import {deckLanguage as contractDeckLanguage,topicLanguageRule} from './ppt-presentation-contract.mjs';
 import {templateTextColor} from './ppt-template-colors.mjs';
 import { visualUnits, compileSectionLabel } from './ppt-presentation-writing.mjs';
 
 const EMU_PT = 12700, CJK = /[㐀-鿿豈-﫿]/u;
-const TIERS = ['bilingual', 'primary', 'short'];
+const TIERS = ['primary', 'short'];
 
 /** `1.3 The central tension: mining power vs. overfitting | 核心张力：…` */
 export function parseSourceHeading(value) {
@@ -26,21 +27,28 @@ const shortName = name => {
 };
 const isCjk = name => CJK.test(name);
 
+/** Eyebrow language: the deck language only (round 7, B1). The bilingual
+ * eyebrow tier of round 5 is withdrawn: topics never pair two languages. */
 export function deckLanguage(project) {
-  const policy = project.generationPolicy?.language;
-  if (policy?.mode === 'output') return { locale: policy.locale, bilingual: false };
-  const titles = (project.deck?.slides || project.outline || []).map(slide => slide.title || '');
-  const cjk = titles.filter(title => CJK.test(title)).length;
-  return { locale: cjk * 2 >= titles.length ? 'zh' : 'en', bilingual: true };
+  const language = contractDeckLanguage(project);
+  return { locale: language === 'zh-Hant' ? 'zh-HK' : language === 'en' ? 'en' : language, bilingual: false };
 }
 
-/** The deepest non-root heading shared by most of the page's source units. */
+/** Frozen source pages use a heading shared by every owned unit. Legacy
+ * outline contracts retain their earlier majority projection. */
 export function slideSourceHeading(project, outlineSlide) {
   const semantic = project.source?.semantic || {};
   const items = new Map((semantic.inventory?.items || []).map(item => [item.id, item]));
   const chunks = new Map((semantic.chunks || []).map(chunk => [chunk.id, chunk]));
   const paths = (outlineSlide?.sourceUnitIds || []).map(id => items.get(id)?.sectionPath).filter(Boolean);
   if (!paths.length) for (const id of outlineSlide?.chunkRefs || []) if (chunks.get(id)?.sectionPath) paths.push(chunks.get(id).sectionPath);
+  if(outlineSlide?.planningProtocolVersion===2&&paths.length){
+    const common=paths[0].filter((heading,index)=>paths.every(path=>path[index]===heading));
+    // A page spanning sibling sections belongs to their common parent, or to
+    // the source document. Naming only the most frequent child mislabels the
+    // other complete sections rendered on that page.
+    return common.at(-1)||null;
+  }
   const counts = new Map();
   for (const path of paths) {
     if (path.length < 2) continue; // the document title (H1) is the cover, not a section
@@ -53,6 +61,9 @@ export function slideSourceHeading(project, outlineSlide) {
 export function eyebrowCandidates(heading, { locale = 'zh', bilingual = true } = {}, fallbackName = '') {
   const { number, names } = parseSourceHeading(heading);
   const wantCjk = locale !== 'en';
+  // The writer may receive a previously derived label on a checkpoint rebind.
+  // Strip complete repeated section prefixes before adding the source number once.
+  for(let i=0;i<8&&/^\d+(?:\.\d+)*(?:[.)、])?\s+/u.test(fallbackName);i++)fallbackName=fallbackName.replace(/^\d+(?:\.\d+)*(?:[.)、])?\s+/u,'');
   // zh-HK output: the source CJK name may be simplified; keep the writer's
   // localized label behind the source number instead of mixing scripts.
   const primary = locale === 'zh-HK' && !bilingual ? fallbackName : names.find(name => isCjk(name) === wantCjk) || (bilingual ? names[0] : fallbackName);
@@ -106,7 +117,9 @@ export function normalizeDeckEyebrows(project,{onlySlideId}={}) {
     let slot = preserve ? project.templateFidelity.slides[index]?.slots?.find(item => item.role === 'section') : null;
     const eyebrow = !preserve && slide.copy?.eyebrow;
     let derived=null,numberSlot=null;
-    const proposed=eyebrowCandidates(heading,language,compileSectionLabel(slide.section||'')),number=parseSourceHeading(heading).number;
+    const projected=projectedSourceHeading(project,heading)||heading;
+    const fallback=slide.sectionLabel?.canonicalName||slide.section||'';
+    const proposed=eyebrowCandidates(projected,language,compileSectionLabel(fallback)),number=parseSourceHeading(heading).number;
     if(slot&&number&&proposed&&Object.values(proposed).filter(Boolean).every(label=>visualUnits(label)>sectionSlotCapacity(project,index,slot).capacity)&&visualUnits(number)<=slot.capacity){numberSlot=slot;slot=null;}
     if(!slot&&!eyebrow&&preserve){
       const spec=project.templateFidelity.slides[index],title=spec?.nodes?.find(n=>spec.slots?.some(s=>s.role==='title'&&s.shapeId===n.nativeRef?.shapeId));
@@ -119,9 +132,9 @@ export function normalizeDeckEyebrows(project,{onlySlideId}={}) {
       if(!derived){slide.sectionLabelDiagnostic={status:'blocked',reason:'no safe measured navigation band'};return;}
     }
     if(!slot&&!eyebrow&&!derived)return;
-    const candidates = eyebrowCandidates(heading, language, compileSectionLabel(slide.section || ''));
+    const candidates = eyebrowCandidates(projected, language, compileSectionLabel(fallback));
     if (!candidates) return;
-    rows.push({ slide, slot,numberSlot, derived, heading, candidates, capacity: slot ? sectionSlotCapacity(project, index, slot) : { capacity: derived?Math.floor(derived.geometry.width/EMU_PT/derived.fontSizePt*.88):64 } });
+    rows.push({ slide, slot,numberSlot, derived, heading, projected, candidates, capacity: slot ? sectionSlotCapacity(project, index, slot) : { capacity: derived?Math.floor(derived.geometry.width/EMU_PT/derived.fontSizePt*.88):64 } });
   });
   if (!rows.length) { delete project.titlePolicy; return { tier: null, pages: 0 }; }
   const tier = TIERS.find(name => rows.every(row => row.candidates[name] && visualUnits(row.candidates[name]) <= row.capacity.capacity))
@@ -130,7 +143,7 @@ export function normalizeDeckEyebrows(project,{onlySlideId}={}) {
     const text = row.candidates[tier] || row.candidates.short;
     if (row.slot) {
       row.slide.section = text;
-      row.slide.sectionLabel = { basis: 'source-heading', tier, heading: row.heading, shapeId: row.slot.shapeId,
+      row.slide.sectionLabel = { basis: 'source-heading', tier, heading: row.heading,canonicalName:parseSourceHeading(row.projected).names.join(' '),projectedHeading:row.projected, shapeId: row.slot.shapeId,
         ...(row.capacity.height?{height:row.capacity.height,heightBasis:'original font plus CJK line box and native vertical margins; below title safety gap'}:{}),
         ...(visualUnits(text) > row.slot.capacity ? { width: row.capacity.width, capacity: row.capacity.capacity } : {}) };
     } else {
@@ -142,21 +155,16 @@ export function normalizeDeckEyebrows(project,{onlySlideId}={}) {
         row.slide.nodes=[...(row.slide.nodes||[]).filter(n=>n.content?.derivedFrom!=='source-navigation'),node];row.slide.nodeOrder=row.slide.nodes.map(n=>n.id);
       }
       for (const node of row.slide.nodes || []) if (node.semanticRole === 'eyebrow') node.content = { ...(node.content || {}), text };
-      row.slide.sectionLabel = { basis: 'source-heading', tier, heading: row.heading,...(row.numberSlot?{numberSlotShapeId:row.numberSlot.shapeId,layout:'number_slot_plus_complete_derived_label'}:{}) };
+      row.slide.sectionLabel = { basis: 'source-heading', tier, heading: row.heading,canonicalName:parseSourceHeading(row.projected).names.join(' '),projectedHeading:row.projected,...(row.numberSlot?{numberSlotShapeId:row.numberSlot.shapeId,layout:'number_slot_plus_complete_derived_label'}:{}) };
     }
   }
-  // F-P1-5: with both source languages kept, titles use one primary language
-  // and the other language is carried by the bilingual eyebrow on every page.
-  if (tier === 'bilingual' && language.bilingual) project.titlePolicy = { version: 1, primary: language.locale === 'en' ? 'en' : 'zh', otherLanguage: 'eyebrow' };
-  else delete project.titlePolicy;
+  delete project.titlePolicy;
   return { tier, pages: rows.length };
 }
 
-/** F-P1-5 writer rule: one title language when the deck keeps both source languages. */
+/** Writer rule: topics use the deck language only (round 7, B1). */
 export function bilingualTitleRule(project) {
   const items = project.source?.semantic?.inventory?.items || [];
-  const paired = items.filter(item => item.languagePairId).length;
-  if (project.generationPolicy?.language?.mode === 'output' || paired < Math.max(4, items.length * .3)) return '';
-  const primary = deckLanguage(project).locale === 'en' ? 'English' : '中文';
-  return `来源为双语：所有内容页标题统一使用${primary}，不在标题里混排两种语言；另一语言的章节名由系统放在 eyebrow。`;
+  const scripts = new Set(items.map(item => /\p{Script=Han}/u.test(item.text || '') ? 'han' : 'latin'));
+  return scripts.size > 1 || project.generationPolicy?.language?.mode === 'output' ? topicLanguageRule(project) : '';
 }

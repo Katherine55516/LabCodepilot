@@ -1,9 +1,13 @@
+import {approvedFixedTemplateCopy} from './ppt-template-fixed-authority.mjs';
+import {supportsSourceLineRanges,sourceLineRange} from './ppt-source-line-ranges.mjs';
 /** Conservative numeric provenance. Template examples are never factual authority.
  * Checks values, signs, units and local attribution; ambiguous context is a
  * review warning, not a claim that lexical overlap proves semantic truth. */
 import { visibleNodes, nodeContentText } from './ppt-visible-content.mjs';
 import { effectiveKnowledge } from './ppt-generation-policy.mjs';
 import { sourceDisplayText } from './ppt-source-text.mjs';
+import {orderedSourceSteps} from './ppt-source-boundaries.mjs';
+import {projectedSourceHeading} from './ppt-topic-title-projection.mjs';
 import {finalDeckNavigation,navigationCommentary} from './ppt-deck-navigation.mjs';
 
 const NUMBER = /(?<![A-Za-z0-9_.])[-−+]?(?:\d+(?:[.,]\d+)*|\.\d+)(?:[eE][-+]?\d+)?(?![A-Za-z0-9_])/gu;
@@ -70,8 +74,8 @@ function verifiedStepCounts(project,slide){
   for(const node of visibleNodes(slide)){
     const item=inventory.find(item=>item.id===node.sourceArtifact?.sourceUnitId&&item.type==='ProcessBlock');
     if(!item||node.type!=='timeline')continue;
-    const expected=sourceDisplayText(item.text).split(/(?:->|→)|\n(?=\s*\d+[.)]\s)/u).map(text=>text.trim());
-    const actual=(node.content?.items||[]).map(item=>item.text?.trim());
+    const expected=orderedSourceSteps(item.text).map(text=>sourceDisplayText(text).trim());
+    const actual=(node.content?.items||[]).map(item=>sourceDisplayText(item.text||'').trim());
     if(expected.length>1&&JSON.stringify(expected)===JSON.stringify(actual))counts.add(String(expected.length));
   }
   return counts;
@@ -89,19 +93,53 @@ export function verifiedHeadingPrefix(project,node) {
   const sourceHeadings=authorities(project).flatMap(value=>value.split('\n').filter(line=>/^\s*#{1,6}\s+/u.test(line)));
   return sourceHeadings.some(line=>{
     const original=line.replace(/^\s*#{1,6}\s+/u,'').match(/^(\d+(?:\.\d+)*)(?:[.)、])?\s+(.+)$/u);
-    return original&&original[1]===heading[1]&&labels(heading[2]).every(label=>labels(original[2]).some(source=>source.includes(label)));
+    const projected=projectedSourceHeading(project,line),translated=projected?.match(/^(\d+(?:\.\d+)*)(?:[.)、])?\s+(.+)$/u);
+    return original&&original[1]===heading[1]&&labels(heading[2]).every(label=>[...labels(original[2]),...(translated&&translated[1]===original[1]?labels(translated[2]):[])].some(source=>source.includes(label)));
   })?heading[1].length:0;
 }
+// A merged title may contain several original section labels. Only the
+// exact ordinal plus its original heading is navigation; nearby claims remain
+// subject to numeric provenance (including source-looking financial numbers).
+function verifiedTitleHeadingOrdinals(project,node){
+ if(!['title','template-title'].includes(node.semanticRole))return [];
+ const text=sourceDisplayText(nodeContentText(node));
+ const ranges=[];
+ for(const original of authorities(project).flatMap(value=>value.split('\n'))){
+  const heading=original.match(/^\s*#{1,6}\s+(\d+(?:\.\d+)*[.)、]?)\s+(.+?)\s*$/u);
+  if(!heading)continue;
+  const label=heading[2].trim();if(label.length<3)continue;
+  const escaped=value=>value.replace(/[.*+?^${}()|[\]\\]/gu,'\\$&');
+  const expression=new RegExp('(?<![A-Za-z0-9_.])'+escaped(heading[1])+'\\s*'+escaped(label)+'(?=$|[\\s:：、；;与&])','gu');
+  for(const match of text.matchAll(expression))ranges.push({start:match.index,end:match.index+heading[1].length});
+ }
+ return ranges;
+}
 function verifiedFragmentRange(project,slide,node){
-  if(node.semanticRole!=='template-title'||nodeContentText(node)!==slide.title)return null;
-  const range=String(slide.title).match(/[（(](\d+)–(\d+)[）)]$/u);if(!range)return null;
+  if(!['title','template-title'].includes(node.semanticRole)||nodeContentText(node)!==slide.title)return null;
+  const literal=String(slide.title).match(/\((?:lines |第 )(\d+)\s*[–-]\s*(\d+)(?: 行)?\)$/u);
+  if(literal){
+    const refs=slide.sourceArtifactRanges||project.outline?.find(s=>s.id===slide.id)?.sourceArtifactRanges||[];
+    const items=project.source?.semantic?.inventory?.items||[];
+    const valid=visibleNodes(slide).some(source=>{
+      const a=source.sourceArtifact,item=items.find(item=>item.id===a?.sourceUnitId);
+      if(!item||!supportsSourceLineRanges(item)||!refs.some(ref=>ref.sourceUnitId===item.id&&ref.lineStart===a.lineStart&&ref.lineEnd===a.lineEnd))return false;
+      try{const range=sourceLineRange(item,a);return range.lineStart===Number(literal[1])-1&&range.lineEnd===Number(literal[2])&&String(source.content?.text??source.content?.processSource??'')===String(item.text).split('\n').slice(range.lineStart,range.lineEnd).join('\n');}catch{return false;}
+    });
+    if(valid)return {start:literal.index,end:literal.index+literal[0].length};
+  }
+  const title=String(slide.title),range=title.match(/(?:[（(])?(?:rows?\s+)?(\d+)\s*[-–—]\s*(\d+)(?:[）)])?$/iu);
+  const single=title.match(/[（(](?:rows?\s+(\d+)|第\s*(\d+)\s*行)[）)]$/iu);
+  if(!range&&!single)return null;
+  const start=Number(range?.[1]??single[1]??single[2]),end=Number(range?.[2]??start),locator=range||single;
+  const refs=slide.sourceArtifactRanges||project.outline?.find(s=>s.id===slide.id)?.sourceArtifactRanges||[];
   const items=project.source?.semantic?.inventory?.items||[];
   const bound=visibleNodes(slide).some(table=>{
     const a=table.sourceArtifact,item=items.find(item=>item.id===a?.sourceUnitId);
-    return table.type==='table'&&item?.rows&&a.rowStart===Number(range[1])&&a.rowEnd===Number(range[2])+1&&
+    return table.type==='table'&&item?.rows&&a.rowStart===start&&a.rowEnd===end+1&&(!refs.some(ref=>ref.sourceUnitId===item.id)||refs.some(ref=>ref.sourceUnitId===item.id&&ref.rowStart===a.rowStart&&ref.rowEnd===a.rowEnd))&&
+      JSON.stringify(table.content?.rows?.[0]?.map(sourceDisplayText))===JSON.stringify(item.rows[0].map(sourceDisplayText))&&
       JSON.stringify(table.content?.rows?.slice(1).map(row=>row.map(sourceDisplayText)))===JSON.stringify(item.rows.slice(a.rowStart,a.rowEnd).map(row=>row.map(sourceDisplayText)));
   });
-  return bound?{start:range.index,end:range.index+range[0].length}:null;
+  return bound?{start:locator.index,end:locator.index+locator[0].length}:null;
 }
 function verifiedPageCounter(node,index,total){
   if(!['eyebrow','page-number','slide-number'].includes(node.semanticRole))return false;
@@ -124,20 +162,22 @@ export function inspectSourceNumbers(project, slides=project.deck?.slides||[]) {
   const strict=effectiveKnowledge(project)==='source_only', issues=[];
   slides.forEach((slide,index)=>{
     const failures=[],stepCounts=verifiedStepCounts(project,slide);
-    for(const node of visibleNodes(slide))for(const record of dimensions(nodeContentText(node)))if(!sourceDimensions.has(record.value))
+    for(const node of visibleNodes(slide).filter(node=>!approvedFixedTemplateCopy(project,node)))for(const record of dimensions(nodeContentText(node)))if(!sourceDimensions.has(record.value))
       failures.push({...record,nodeId:node.id,reason:'dimension_not_supported',unit:'ordered_multiplication'});
     for(const node of visibleNodes(slide))for(const record of (node.type==='table'?tableRecords(node.content?.rows):numericRecords(nodeContentText(node),node.semanticRole))) {
+      if(approvedFixedTemplateCopy(project,node))continue;
       if(verifiedPageCounter(node,index,slides.length))continue;
       if(verifiedNavigationRanges(project,slide,node).some(range=>record.offset>=range.start&&record.offset<range.end))continue;
       // Only a verified source chapter prefix or exact source-owned row range
       // is presentation navigation. A numeric-looking role never exempts facts.
       if(record.offset<verifiedHeadingPrefix(project,node))continue;
+      if(verifiedTitleHeadingOrdinals(project,node).some(range=>record.offset>=range.start&&record.offset<range.end))continue;
       const fragment=verifiedFragmentRange(project,slide,node);
       if(fragment&&record.offset>=fragment.start&&record.offset<fragment.end)continue;
       // A visible count of steps is derived only from an exactly preserved
       // source-owned process on this page, never from model-written prose.
       const tail=sourceDisplayText(nodeContentText(node)).slice(record.offset+record.raw.length);
-      if(!record.unit&&stepCounts.has(record.value)&&/^\s*(?:步|steps?\b)/iu.test(tail))continue;
+      if(!record.unit&&stepCounts.has(record.value)&&/^\s*(?:[-–]\s*)?(?:步|steps?\b)/iu.test(tail))continue;
       const same=source.filter(x=>x.value===record.value);
       let reason=!same.length?'value_or_sign_not_in_input':null;
       const compatible=same.filter(x=>!record.unit||x.unit===record.unit);

@@ -16,7 +16,7 @@ export function planKey(project) {
   return digest({ inputFrameworkHash: inputFramework(project).frameworkHash, sourceRevision: project.sourceRevision || 0, source: project.source?.sha256 || project.source?.text || project.prompt,
     template: project.templateSpec || project.template, decision: project.pageDecision,
     planning: project.planning, generationPolicy: project.generationPolicy, model: { configId: project.configId, model: project.model },
-    outline: (project.outline || []).filter(slide => !slide.manualBlank).sort((a, b) => String(a.id).localeCompare(String(b.id))) });
+    outline: (project.outline || []).filter(slide => !slide.manualBlank).map(slide=>{const {titleEditBaseline,...planning}=slide;return titleEditBaseline?{...planning,title:titleEditBaseline.title,titleLocked:titleEditBaseline.titleLocked}:planning;}).sort((a, b) => String(a.id).localeCompare(String(b.id))) });
 }
 
 export function slideFingerprint(project, slideId) {

@@ -1,4 +1,5 @@
 'use client';
+import {TemplateFixedObjects} from './TemplateFixedObjects';
 import {PptFailureDialog} from '../workspace/PptFailureDialog';
 /* eslint-disable @next/next/no-img-element -- local pasted image previews */
 
@@ -9,18 +10,20 @@ import { prepareImage, type VisualBlock } from '../PptBlocks';
 import { useTranslation } from '@/hooks/useTranslation';
 import { pptFailureMessage } from '@/lib/ppt-error';
 import { PptOutlineDiagnostic } from '../PptOutlineDiagnostic';
+import { PptOutlineConcision } from '../workspace/PptOutlineConcision';
+import { PptOutlineCorrections } from '../workspace/PptOutlineCorrections';
 import { TemplateBrowser } from './TemplateBrowser';
-import type { PptModel, PptTemplate, PptGenerationPolicy, PptPlanningAssumption, PptProject } from '../types';
+import type { PptExecutionPolicy, PptModel, PptTemplate, PptGenerationPolicy, PptPlanningAssumption, PptProject } from '../types';
 
 export type CreateKind = 'prompt' | 'paste' | 'file';
 export type CreateEntry = 'new' | 'template' | 'direct';
 export type PptCreateDraft = {
-  inputKind: CreateKind; title: string; prompt: string; text: string; file: File | null; importMode: 'generate' | 'editable';
+  executionPolicy?:PptExecutionPolicy; inputKind: CreateKind; title: string; prompt: string; text: string; file: File | null; importMode: 'generate' | 'editable';
   pages: number; compressionApproved: boolean; template: string; modelKey: string; images: Extract<VisualBlock, { type: 'image' }>[];
   pageSource?: 'estimate' | 'user'; generationPolicy?: PptGenerationPolicy;
   outline?: { id: string; section: string; title: string; focus: string; description: string; children: { id: string; title: string; description: string }[] }[];
-  templateContentMode?: 'design_only' | 'keep_fixed';
-  analyzedProjectId?: string;
+  templateContentMode?: 'design_only' | 'keep_fixed';templateFixedObjectIds?:string[];
+  analyzedProjectId?: string; resumeAnalysis?: boolean;
 };
 
 const field = 'w-full rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/30';
@@ -70,16 +73,17 @@ export function estimate(kind: CreateKind, prompt: string, text: string, file: F
 
 type Outline = NonNullable<PptCreateDraft['outline']>;
 
-function ModelSummary({ model }: { model?: PptModel }) {
-  return <section className="rounded-xl border border-border bg-card p-5"><h3 className="font-medium">当前解析模型</h3><p className="mt-1 text-xs text-muted-foreground">该模型会沿用到内容理解、大纲生成和页面生成。</p><div className="mt-4 rounded-lg bg-muted p-3 text-sm"><strong>{model?.name || '未选择'}</strong></div></section>;
+function ModelSummary({ model,policy }: { model?: PptModel;policy?:PptExecutionPolicy }) {
+  const {t}=useTranslation();
+  return <section className="rounded-xl border border-border bg-card p-5"><h3 className="font-medium">{t('ppt.execution.qualityTitle')}</h3><p className="mt-1 text-xs text-muted-foreground">{t('ppt.quality.sameContract')}</p><div className="mt-4 rounded-lg bg-muted p-3 text-sm"><strong>{policy?t(`ppt.quality.${policy.qualityLevel==='legacy_single_model'?'balanced':policy.qualityLevel}`):model?.name || '未选择'}</strong></div></section>;
 }
 
-export function PptCreateWizard({ models, templates, initialKind, modelKey, lockedTemplate, busy, onCancel, onBackToChooser, onBackToModel, onAnalyze, onEstimate, onSubmit, formingOutline }: {
-  formingOutline?:PptProject|null;
+export function PptCreateWizard({ models, templates, initialKind, modelKey, lockedTemplate, busy, onCancel, onBackToChooser, onBackToModel, onAnalyze, onEstimate, onSubmit, formingOutline, executionPolicy }: {
+  executionPolicy?:PptExecutionPolicy; formingOutline?:PptProject|null;
   models: PptModel[]; templates: PptTemplate[]; initialKind?: CreateKind; entry: CreateEntry; modelKey: string;
   onModelKeyChange: (key: string) => void; lockedTemplate?: PptTemplate | null; busy: boolean;
   onCancel: () => void; onBackToChooser: () => void; onBackToModel: () => void;
-  onAnalyze: (draft: PptCreateDraft) => Promise<{ id: string; outline: Outline; pages: number; recommendation?: PageEstimate }>;
+  onAnalyze: (draft: PptCreateDraft) => Promise<{ id: string; outline: Outline; pages: number; recommendation?: PageEstimate; project?: PptProject }>;
   onEstimate: (draft: PptCreateDraft, signal: AbortSignal) => Promise<PageEstimate>;
   onSubmit: (draft: PptCreateDraft) => Promise<void>;
 }) {
@@ -92,6 +96,7 @@ export function PptCreateWizard({ models, templates, initialKind, modelKey, lock
   const [file, setFile] = useState<File | null>(null); const [importMode, setImportMode] = useState<'generate' | 'editable'>('generate');
   const [supplementMode, setSupplementMode] = useState<'prompt' | 'paste'>('prompt');
   const [policy, setPolicy] = useState<PptGenerationPolicy>(unifiedGenerationPolicy());
+  const [templateFixedObjectIds,setTemplateFixedObjectIds]=useState<string[]>([]);
   const [templateContentMode, setTemplateContentMode] = useState<'design_only' | 'keep_fixed'>('design_only');
   const [template, setTemplate] = useState(lockedTemplate?.id || '');
   const resolvedTemplate = lockedTemplate?.id || template;
@@ -100,10 +105,11 @@ export function PptCreateWizard({ models, templates, initialKind, modelKey, lock
   const [pageInput, setPageInput] = useState<string | null>(null);
   const [compressionApproved, setCompressionApproved] = useState(false);
   const [languageTouched,setLanguageTouched]=useState(false);
-  useEffect(()=>{if(languageTouched)return;const locale=explicitLanguageRequest(prompt);const language:PptGenerationPolicy['language']=locale?{mode:'output',locale}:{mode:'source',body:'both'};setPolicy(current=>JSON.stringify(current.language)===JSON.stringify(language)?current:{...current,language});},[prompt,languageTouched]);
+  useEffect(()=>{if(languageTouched)return;const locale=explicitLanguageRequest(prompt);const language:PptGenerationPolicy['language']=locale?{mode:'output',locale}:{mode:'source',body:'primary'};setPolicy(current=>JSON.stringify(current.language)===JSON.stringify(language)?current:{...current,language});},[prompt,languageTouched]);
   const [images, setImages] = useState<Extract<VisualBlock, { type: 'image' }>[]>([]);
   const [localOutline, setLocalOutline] = useState<Outline>([]); const [outlineTouched, setOutlineTouched] = useState(false);
   const [analyzedProjectId, setAnalyzedProjectId] = useState<string | null>(null);
+  const [analyzedProject, setAnalyzedProject] = useState<PptProject | null>(null);
   const [analyzedPages, setAnalyzedPages] = useState<number | null>(null);
   const [analyzedTemplate, setAnalyzedTemplate] = useState<string | null>(null);
   const [serverEstimate, setServerEstimate] = useState<PageEstimate | null>(null);
@@ -115,7 +121,7 @@ export function PptCreateWizard({ models, templates, initialKind, modelKey, lock
   const [outlineReady, setOutlineReady] = useState(false);
   const fileIdentity = useRef<{ file: File | null; version: number }>({ file: null, version: 0 });
   if (fileIdentity.current.file !== file) fileIdentity.current = { file, version: fileIdentity.current.version + 1 };
-  const sourceSignature = [fileIdentity.current.version, title, prompt, text, modelKey, importMode, supplementMode, JSON.stringify(policy), templateContentMode, resolvedTemplate, selectedTemplate?.version, ...images.map(image => image.id)].join('\u0000');
+  const sourceSignature = [fileIdentity.current.version, title, prompt, text, modelKey, importMode, supplementMode, JSON.stringify(policy), JSON.stringify(templateFixedObjectIds), templateContentMode, resolvedTemplate, selectedTemplate?.version, ...images.map(image => image.id)].join('\u0000');
   const lastSourceSignature = useRef(sourceSignature);
   useEffect(() => {
     if (lastSourceSignature.current === sourceSignature) return;
@@ -138,8 +144,8 @@ export function PptCreateWizard({ models, templates, initialKind, modelKey, lock
   const compressionRisk = !editableImport && kind !== 'prompt' && hasInput && effectivePages < suggested.min;
   function draft(): PptCreateDraft {
     return { inputKind: kind, title, prompt: kind === 'file' && supplementMode === 'paste' ? text : prompt, text, file, importMode,
-      pages: effectivePages, pageSource: pagesTouched || suggested.requested ? 'user' : 'estimate', generationPolicy: !languageTouched&&explicitLanguageRequest(prompt)?{...policy,language:{mode:'output',locale:explicitLanguageRequest(prompt)!}}:policy,
-      compressionApproved, templateContentMode, template: resolvedTemplate, modelKey, images, analyzedProjectId: analyzedProjectId || failedCandidate?.id || undefined };
+      executionPolicy, pages: effectivePages, pageSource: pagesTouched || suggested.requested ? 'user' : 'estimate', generationPolicy: !languageTouched&&explicitLanguageRequest(prompt)?{...policy,language:{mode:'output',locale:explicitLanguageRequest(prompt)!}}:policy,
+      compressionApproved, templateContentMode,templateFixedObjectIds, template: resolvedTemplate, modelKey, images, resumeAnalysis: Boolean(!analyzedProjectId && failedCandidate), analyzedProjectId: analyzedProjectId || failedCandidate?.id || undefined };
   }
   useEffect(() => {
     setLiveEstimate(null);
@@ -180,22 +186,24 @@ export function PptCreateWizard({ models, templates, initialKind, modelKey, lock
     else setPageInput(null);
   }
   async function addImages(files: File[]) {
-    const accepted = files.filter(item => ['image/png', 'image/jpeg'].includes(item.type)).slice(0, 16 - images.length);
+    const supported=files.filter(item=>['image/png','image/jpeg'].includes(item.type));
+    if(supported.length!==files.length||supported.length>16-images.length)setAnalysisError(t('ppt.create.imageLimitExplanation'));
+    const accepted = supported.slice(0, 16 - images.length);
     try { const prepared = await Promise.all(accepted.map(async item => ({ id: crypto.randomUUID().replaceAll('-', '').slice(0, 32), type: 'image' as const, dataUrl: await prepareImage(item), fileName: item.name, caption: item.name.replace(/\.(png|jpe?g)$/i, '').slice(0, 100) })));
-    if (mounted.current) setImages(current => [...current, ...prepared].slice(0, 16));
+    if (mounted.current) setImages(current => {const unique=new Map(current.map(image=>[image.dataUrl,image]));for(const image of prepared)if(!unique.has(image.dataUrl))unique.set(image.dataUrl,image);return [...unique.values()].slice(0,16);});
     } catch (error) { if (mounted.current) setAnalysisError((error as Error).message); }
   }
   async function analyze() {
     if (!modelKey || !hasInput || editableImport) return false;
-    const token = ++analysisAttempt.current; const signature = sourceSignature;
+    const token = ++analysisAttempt.current; const signature = sourceSignature; const previousCandidate=failedCandidate;
     setAnalyzing(true);setFailedCandidate(null); setAnalysisError(''); setOutlineReady(false);
     try {
       // Asking for a syllabus does not make a provisional estimate a manual value.
       const result = await onAnalyze({ ...draft(), outline: outlineTouched ? localOutline : undefined });
       if (!mounted.current || analysisAttempt.current !== token || lastSourceSignature.current !== signature) return false;
-      setAnalyzedProjectId(result.id); setAnalyzedTemplate(resolvedTemplate); setAnalyzedPages(result.pages); setLocalOutline(result.outline);
+      setAnalyzedProjectId(result.id); setAnalyzedProject(result.project || null); setAnalyzedTemplate(resolvedTemplate); setAnalyzedPages(result.pages); setLocalOutline(result.outline);
       setServerEstimate(result.recommendation || null); setOutlineTouched(false); setOutlineReady(true); return result;
-    } catch (error) { if (mounted.current && analysisAttempt.current === token) {setAnalysisError((error as Error).message);setFailedCandidate((error as Error & {project?:PptProject}).project||null);setFailureOpen(false);} return false; }
+    } catch (error) { if (mounted.current && analysisAttempt.current === token) {setAnalysisError((error as Error).message);setFailedCandidate((error as Error & {project?:PptProject}).project||previousCandidate);setFailureOpen(false);} return false; }
     finally { if (mounted.current && analysisAttempt.current === token) setAnalyzing(false); }
   }
   const needsReplan = analyzedProjectId && (analyzedPages !== effectivePages || analyzedTemplate !== resolvedTemplate);
@@ -216,23 +224,26 @@ export function PptCreateWizard({ models, templates, initialKind, modelKey, lock
   const titleForKind = kind === 'prompt' ? '从 Prompt 开始' : kind === 'paste' ? '粘贴文本' : '导入文件';
   return <section className="ppt-prototype ppt-create-stage fixed inset-0 z-50 flex min-h-0 flex-col bg-background text-foreground" data-testid="ppt-create-wizard">
     {failureOpen&&analysisError&&<PptFailureDialog message={analysisError} onClose={()=>setFailureOpen(false)}/>}
-    <header className="flex min-h-16 shrink-0 flex-wrap items-center gap-3 border-b border-border px-4 py-2"><button className={button} aria-label="返回" disabled={analyzing || busy} onClick={() => step === 2 ? setStep(1) : onBackToModel()}>←</button><strong>新建 PPT / {titleForKind}</strong><button className="ml-auto rounded-full border border-border px-3 py-1 text-xs" disabled={analyzing || busy} onClick={onBackToModel}>LLM · {currentModel?.name || '未选择'}</button></header>
+    <header className="flex min-h-16 shrink-0 flex-wrap items-center gap-3 border-b border-border px-4 py-2"><button className={button} aria-label="返回" disabled={analyzing || busy} onClick={() => step === 2 ? setStep(1) : onBackToModel()}>←</button><strong>新建 PPT / {titleForKind}</strong><button className="ml-auto rounded-full border border-border px-3 py-1 text-xs" disabled={analyzing || busy} onClick={onBackToModel}>{t('ppt.execution.qualityTitle')} · {executionPolicy?t(`ppt.quality.${executionPolicy.qualityLevel==='legacy_single_model'?'balanced':executionPolicy.qualityLevel}`):currentModel?.name || '未选择'}</button></header>
     <div className="ppt-create-body min-h-0 flex-1 overflow-y-auto p-4 md:p-8" key={step}><div className="ppt-create-wrap mx-auto max-w-6xl space-y-5">
+    {analyzing&&formingOutline?.candidateOutline&&<section data-testid="ppt-outline-forming" className="rounded border border-border p-3"><p className="text-sm font-medium">{formingOutline.outlineProgress?.total?t('ppt.outline.forming').replace('{done}',String(formingOutline.outlineProgress.done)).replace('{total}',String(formingOutline.outlineProgress.total)):t('ppt.outline.streaming').replace('{count}',String(formingOutline.candidateOutline.syllabus.length))}</p><ol className="mt-2 grid gap-2 text-sm md:grid-cols-2">{formingOutline.candidateOutline.syllabus.map((item,i)=><li key={item.id||i}><b>{i+1}. {item.title}</b><p className="text-xs text-muted-foreground">{item.message}</p></li>)}</ol></section>}
+    {failedCandidate&&<PptOutlineDiagnostic project={failedCandidate}/>}
+
       {analysisError && <div role="alert" className="rounded border border-destructive/40 p-3 text-sm text-destructive"><p>{pptFailureMessage(analysisError, locale)}</p><button className="mt-2 text-xs underline" onClick={()=>setFailureOpen(true)}>{t('ppt.failure.details')}</button></div>}
       <ol className="flex flex-wrap items-center gap-4 text-xs text-muted-foreground">{[t('ppt.create.templateStep'), t('ppt.create.inputStep'), t('ppt.create.generateStep')].map((label, index) => <li key={label} className={step === index + 1 ? 'font-semibold text-primary' : ''}>{index + 1}. {label}</li>)}</ol>
       <h1 className="text-2xl font-semibold">{step === 1 ? t('ppt.create.templateStep') : t('ppt.create.inputStep')}</h1>
-      {step === 1 ? <TemplateBrowser templates={templates} selectedId={resolvedTemplate} onSelect={setTemplate} locked={Boolean(lockedTemplate)}/> : <div className="ppt-create-split grid items-start gap-5 lg:grid-cols-2">
+      {step === 1 ? <TemplateBrowser templates={templates} selectedId={resolvedTemplate} onSelect={value=>{setTemplate(value);setTemplateFixedObjectIds([]);}} locked={Boolean(lockedTemplate)}/> : <div className="ppt-create-split grid items-start gap-5 lg:grid-cols-2">
         <div className="min-w-0 space-y-5"><section className="space-y-4 rounded-xl border border-border bg-card p-5" onPaste={event => { const files = [...event.clipboardData.items].filter(item => item.kind === "file").map(item => item.getAsFile()).filter((item): item is File => Boolean(item)); void addImages(files); }} onDragOver={event => { if ([...event.dataTransfer.items].some(item => item.type.startsWith("image/"))) event.preventDefault(); }} onDrop={event => { const files = [...event.dataTransfer.files].filter(item => item.type.startsWith("image/")); if (files.length) { event.preventDefault(); void addImages(files); } }}>
           <label className="block space-y-1 text-sm">PPT 标题（可选）<input className={field} value={title} onChange={event => setTitle(event.target.value)} maxLength={160}/></label>
           {kind === 'prompt' && <><label className="block space-y-1 text-sm">输入 Prompt<textarea aria-label="输入 Prompt" className={`${field} min-h-56`} value={prompt} onChange={event => setPrompt(event.target.value)} placeholder="告诉 AI 主题、受众、目标和重点内容…" maxLength={80000}/></label><p className="text-xs text-muted-foreground">{t('ppt.create.inlineGuide')}</p><details className="text-xs text-muted-foreground"><summary className="cursor-pointer">{t('ppt.create.example')}</summary><p className="mt-2">面向管理层生成 Q4 产品增长复盘，说明增长来源、主要风险、下季度行动，控制在 12 页以内。</p></details><div className="flex flex-wrap gap-2">{chips.map(chip => <button key={chip} className={button} onClick={() => setPrompt(`${chip}，请整理成结构清晰的演示文稿。`)}>{chip}</button>)}</div></>}
-          {kind === 'paste' && <><label className="block space-y-1 text-sm">粘贴文本<textarea aria-label="粘贴文本" className={`${field} min-h-72`} value={text} onChange={event => setText(event.target.value)} onPaste={event => { const files = [...event.clipboardData.items].filter(item => item.kind === 'file' && ['image/png', 'image/jpeg'].includes(item.type)).map(item => item.getAsFile()).filter((item): item is File => Boolean(item)); void addImages(files); }} maxLength={80000}/></label>{images.length > 0 && <div className="grid grid-cols-4 gap-2">{images.map(image => <img key={image.id} src={image.dataUrl} alt={image.caption || '粘贴图片'} className="aspect-video w-full rounded border border-border object-cover"/>)}</div>}</>}
+          {kind === 'paste' && <><label className="block space-y-1 text-sm">粘贴文本<textarea aria-label="粘贴文本" className={`${field} min-h-72`} value={text} onChange={event => setText(event.target.value)} maxLength={80000}/></label></>}
           {kind === 'file' && <FileSource file={file} setFile={setFile} importMode={importMode} setImportMode={setImportMode} direct={false} supplementMode={supplementMode} setSupplementMode={setSupplementMode} prompt={prompt} setPrompt={setPrompt} text={text} setText={setText}/>}
           {!editableImport && <div className="space-y-2" data-testid="ppt-input-images"><label className={`${button} inline-block cursor-pointer`}>{t('ppt.create.addImages')}<input type="file" className="sr-only" aria-label={t('ppt.create.addImages')} accept="image/png,image/jpeg,.png,.jpg,.jpeg" multiple disabled={images.length >= 16 || analyzing || busy} onChange={event => { void addImages([...event.target.files || []]); event.target.value = ''; }}/></label><p className="text-xs text-muted-foreground">{t('ppt.create.imageInputHint')}</p>{images.length > 0 && <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">{images.map(image => <figure key={image.id} className="relative rounded border border-border p-2"><img src={image.dataUrl} alt={image.caption} className="aspect-video w-full object-contain"/><figcaption className="truncate text-xs">{image.caption}</figcaption><button aria-label={`${t('ppt.delete')} ${image.caption}`} className="absolute right-0 top-0 rounded bg-background px-2" disabled={analyzing || busy} onClick={() => setImages(current => current.filter(item => item.id !== image.id))}>×</button></figure>)}</div>}</div>}
-          {!editableImport && kind !== 'prompt' && <button className={primary} disabled={!hasInput || estimating || analyzing || busy || templatePageMismatch} onClick={() => void analyze()}>{analyzing ? 'AI 正在生成大纲…' : outlineReady ? '重新生成 Syllabus' : '生成 Syllabus'}</button>}
         </section>
-        {outlineReady && !editableImport && <section className="rounded-xl border border-border bg-card p-5" data-testid="ppt-outline-review"><h3 className="font-medium">Syllabus（大纲）</h3>{needsReplan && <p className="mt-2 text-xs text-primary">页数或模板已变化，请重新规划后确认。</p>}{(suggested.assumptions?.length ?? 0) > 0 && <p className="mt-2 text-xs text-muted-foreground">{t('ppt.create.assumptionsHint')}</p>}<OutlineEditor items={localOutline} onChange={editOutline} onReorganize={() => void analyze()} busy={analyzing || busy}/></section>}
+        {outlineReady && !editableImport && <section className="rounded-xl border border-border bg-card p-5" data-testid="ppt-outline-review"><h3 className="font-medium">Syllabus（大纲）</h3>{needsReplan && <p className="mt-2 text-xs text-primary">页数或模板已变化，请重新规划后确认。</p>}{(suggested.assumptions?.length ?? 0) > 0 && <p className="mt-2 text-xs text-muted-foreground">{t('ppt.create.assumptionsHint')}</p>}{analyzedProject && <div className="mt-3 space-y-3"><PptOutlineConcision project={analyzedProject}/><PptOutlineCorrections project={analyzedProject}/></div>}<OutlineEditor items={localOutline} onChange={editOutline} onReorganize={() => void analyze()} busy={analyzing || busy}/></section>}
+        {analyzedProject&&<section className="space-y-3 rounded-xl border border-border p-4" data-testid="ppt-source-assets"><h3 className="font-semibold">{t('ppt.create.sourceAssets')}</h3><p className="text-xs text-muted-foreground">{t('ppt.create.sourceAssetsHint')}</p><div className="grid gap-3 sm:grid-cols-3">{analyzedProject.sourceAssets?.map(asset=><article key={asset.id} className="min-w-0 rounded border border-border p-2"><img className="h-28 w-full object-contain" alt={asset.caption} src={`/api/ppt/projects/${analyzedProject.id}/source-assets?assetId=${encodeURIComponent(asset.id)}`}/><p className="break-words text-xs">{asset.caption}</p><p className="text-xs text-muted-foreground">{asset.slideIds.map(id=>analyzedProject.outline.findIndex(slide=>slide.id===id)+1).join(', ')||t('ppt.create.assetUnassigned')}</p></article>)}</div>{analyzedProject.sourceMediaWarnings?.map((warning,i)=><p key={i} role="status" className="text-xs text-destructive">{warning.location}: {warning.message}</p>)}</section>}
         </div>
-        <aside className="min-w-0 space-y-4"><ModelSummary model={currentModel}/><section className="rounded-xl border border-border bg-card p-5"><h3 className="font-medium">模板 · {selectedTemplate?.name}</h3><button className="mt-2 text-xs text-primary" disabled={analyzing || busy} onClick={() => setStep(1)}>{t('ppt.create.changeTemplate')}</button>{['uploaded','managed'].includes(selectedTemplate?.kind || '') && <label className="mt-3 block space-y-2 text-xs">{t('ppt.create.templateContent')}<PptSelectField aria-label={t('ppt.create.templateContent')} className={field} value={templateContentMode} onValueChange={value => setTemplateContentMode(value as 'design_only' | 'keep_fixed')}><option value="design_only">{t('ppt.create.designOnly')}</option><option value="keep_fixed">{t('ppt.create.keepFixed')}</option></PptSelectField><span className="block text-muted-foreground">{t('ppt.create.templateContentHint')}</span></label>}</section>
+        <aside className="min-w-0 space-y-4"><ModelSummary model={currentModel} policy={executionPolicy}/><section className="rounded-xl border border-border bg-card p-5"><h3 className="font-medium">模板 · {selectedTemplate?.name}</h3><button className="mt-2 text-xs text-primary" disabled={analyzing || busy} onClick={() => setStep(1)}>{t('ppt.create.changeTemplate')}</button>{['uploaded','managed'].includes(selectedTemplate?.kind || '') && <div className="mt-3 block space-y-2 text-xs"><span>{t('ppt.create.templateContent')}</span><PptSelectField aria-label={t('ppt.create.templateContent')} className={field} value={templateContentMode} onValueChange={value => setTemplateContentMode(value as 'design_only' | 'keep_fixed')}><option value="design_only">{t('ppt.create.designOnly')}</option><option value="keep_fixed">{t('ppt.create.keepFixed')}</option></PptSelectField><span className="block text-muted-foreground">{t('ppt.create.templateContentHint')}</span>{templateContentMode==='keep_fixed'&&<TemplateFixedObjects key={resolvedTemplate} templateId={resolvedTemplate} value={templateFixedObjectIds} onChange={setTemplateFixedObjectIds}/>}</div>}</section>
         {!editableImport && <><section className="rounded-xl border border-border bg-card p-5" aria-busy={estimating}><h3 className="font-medium">{t('ppt.create.pages')}</h3><div className="mt-4 flex flex-wrap items-center gap-3"><button className={button} aria-label="减少页数" disabled={busy || effectivePages <= 3} onClick={() => choosePages(effectivePages - 1)}>−</button><label className="flex items-center gap-2 text-sm"><input aria-label={t('ppt.create.pageCount')} data-testid="ppt-page-count" className={`${field} w-20 text-center font-semibold`} type="number" min={3} max={100} step={1} disabled={busy} value={pageInput ?? effectivePages} onChange={event => { const value = event.target.value; setPageInput(value); if (value && Number.isInteger(Number(value)) && Number(value) >= 3 && Number(value) <= 100) { choosePages(Number(value)); setPageInput(value); } }} onBlur={commitPageInput} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); commitPageInput(); } }}/><span>{t('ppt.create.pageUnit')}</span></label><button className={button} aria-label="增加页数" disabled={busy || effectivePages >= 100} onClick={() => choosePages(effectivePages + 1)}>＋</button><button className="text-xs text-primary" disabled={estimating || busy} onClick={restoreEstimate}>{t('ppt.create.useEstimate')}</button></div>
           <p className="mt-3 text-xs text-muted-foreground" role="status">{!hasInput ? t('ppt.create.templateBaseline') : estimating ? t('ppt.create.estimating') : `${suggested.requested ? `用户指定 ${suggested.requested} 页；` : ''}建议 ${suggested.recommended} 页（${suggested.min}–${suggested.max}）· ${suggested.assumptions?.length ? suggested.reasonBase || suggested.reason : suggested.reason}`}</p>
           {hasInput && !estimating && (suggested.assumptions?.length ?? 0) > 0 && <PlanningAssumptions assumptions={suggested.assumptions || []} codeChoice={policy.code?.presentation || 'auto'} disabled={analyzing || busy}
@@ -246,9 +257,7 @@ export function PptCreateWizard({ models, templates, initialKind, modelKey, lock
         </aside>
       </div>}
     </div></div>
-    {analyzing&&formingOutline?.candidateOutline&&<section data-testid="ppt-outline-forming" className="max-h-64 shrink-0 overflow-y-auto border-t border-border p-3"><p className="text-sm font-medium">{formingOutline.outlineProgress?.total?t('ppt.outline.forming').replace('{done}',String(formingOutline.outlineProgress.done)).replace('{total}',String(formingOutline.outlineProgress.total)):t('ppt.outline.streaming').replace('{count}',String(formingOutline.candidateOutline.syllabus.length))}</p><ol className="mt-2 grid gap-2 text-sm md:grid-cols-2">{formingOutline.candidateOutline.syllabus.map((item,i)=><li key={item.id||i}><b>{i+1}. {item.title}</b><p className="text-xs text-muted-foreground">{item.message}</p></li>)}</ol></section>}
-    {failedCandidate&&<PptOutlineDiagnostic project={failedCandidate}/>}
-    <footer data-testid="ppt-create-actions" className="flex shrink-0 flex-wrap items-center gap-3 border-t border-border px-4 py-3"><button className={button} disabled={analyzing || busy} onClick={onCancel}>{t('ppt.cancel')}</button><button className={button} disabled={analyzing || busy} onClick={() => step === 2 ? setStep(1) : onBackToChooser()}>{step === 2 ? '← 返回模板' : '← 返回创建方式'}</button><span className="ml-auto"/>{step === 1 ? <button className={primary} disabled={selectedTemplate?.compatibility !== 'mapped'} onClick={() => setStep(2)}>{t('ppt.create.inputNext')}</button> : <button className={primary} disabled={!hasInput || busy || analyzing || estimating || templatePageMismatch || (compressionRisk && !compressionApproved) || !modelKey} onClick={() => void submit()}>{analyzing ? 'AI 正在生成大纲…' : editableImport ? '打开并编辑 PPTX' : !outlineReady || needsReplan ? '读取输入并生成大纲' : '确认大纲并生成页面'}</button>}</footer>
+    <footer data-testid="ppt-create-actions" className="flex shrink-0 flex-wrap items-center gap-3 border-t border-border px-4 py-3"><button className={button} disabled={busy} onClick={onCancel}>{analyzing?t('ppt.create.background'):t('ppt.cancel')}</button><button className={button} disabled={analyzing || busy} onClick={() => step === 2 ? setStep(1) : onBackToChooser()}>{step === 2 ? '← 返回模板' : '← 返回创建方式'}</button><span className="ml-auto"/>{step === 1 ? <button className={primary} disabled={selectedTemplate?.compatibility !== 'mapped'} onClick={() => setStep(2)}>{t('ppt.create.inputNext')}</button> : <button className={primary} disabled={!hasInput || busy || analyzing || estimating || templatePageMismatch || (compressionRisk && !compressionApproved) || !modelKey} onClick={() => void submit()}>{analyzing ? 'AI 正在生成大纲…' : editableImport ? '打开并编辑 PPTX' : !outlineReady || needsReplan ? '读取输入并生成大纲' : '确认大纲并生成页面'}</button>}</footer>
   </section>;
 }
 
@@ -297,7 +306,7 @@ function OutlineEditor({ items, onChange, onReorganize, busy = false }: { items:
 }
 
 function FileSource({ file, setFile, importMode, setImportMode, direct, supplementMode, setSupplementMode, prompt, setPrompt, text, setText }: { file: File | null; setFile: (file: File | null) => void; importMode: 'generate' | 'editable'; setImportMode: (mode: 'generate' | 'editable') => void; direct: boolean; supplementMode: 'prompt' | 'paste'; setSupplementMode: (mode: 'prompt' | 'paste') => void; prompt: string; setPrompt: (value: string) => void; text: string; setText: (value: string) => void }) {
-  return <div className="ppt-create-split grid gap-5 lg:grid-cols-2"><section className="rounded-xl border border-border bg-card p-5"><h3 className="font-medium">选择源文件</h3><p className="mt-1 text-sm text-muted-foreground">支持演示文稿、PDF、Word、Excel（.xlsx）、CSV、Markdown 与 HTML。</p><div className="mt-5 flex min-h-64 flex-col items-center justify-center rounded-xl border border-dashed border-border p-5 text-center" onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); event.stopPropagation(); setFile(event.dataTransfer.files[0] || null); }}><span className="text-3xl text-primary">↥</span><strong className="mt-3">{file?.name ? `✓ ${file.name}` : '拖放文件到这里，或点击选择文件'}</strong><small className="mt-1 text-muted-foreground">支持 .pptx、.pdf、.docx、.xlsx、.csv、.md、.txt、.html、.png、.jpg</small><label className={`${button} mt-4`}>{file ? '重新选择文件' : '选择文件'}<input className="sr-only" type="file" accept=".md,.markdown,.txt,.html,.htm,.docx,.pdf,.xlsx,.csv,.pptx,.png,.jpg,.jpeg" onChange={event => setFile(event.target.files?.[0] || null)}/></label>{file?.name.toLowerCase().endsWith('.pptx') && <PptSelectField aria-label="PPTX 导入方式" className={`${field} mt-4`} value={importMode} onValueChange={value=>setImportMode(value as 'generate' | 'editable')}><option value="generate">读取内容并生成新演示文稿</option><option value="editable">保守编辑原始 PPTX</option></PptSelectField>}</div></section>{direct ? <section className="rounded-xl border border-border bg-card p-5"><h3 className="font-medium">下一步选择 LLM</h3><p className="mt-2 text-sm text-muted-foreground">先上传文件；下一步选择解析模型并按需补充 Prompt 或文本。文件在模型确认前不会解析。</p></section> : <Supplement mode={supplementMode} setMode={setSupplementMode} prompt={prompt} setPrompt={setPrompt} text={text} setText={setText}/>}</div>;
+  return <div className="ppt-create-split grid gap-5 lg:grid-cols-2"><section className="rounded-xl border border-border bg-card p-5"><h3 className="font-medium">选择源文件</h3><p className="mt-1 text-sm text-muted-foreground">支持演示文稿、PDF、Word、Excel（.xlsx）、CSV、Markdown 与 HTML。</p><div className="mt-5 flex min-h-64 flex-col items-center justify-center rounded-xl border border-dashed border-border p-5 text-center" onDragOver={event => event.preventDefault()} onDrop={event => { event.preventDefault(); event.stopPropagation(); setFile(event.dataTransfer.files[0] || null); }}><span className="text-3xl text-primary">↥</span><strong className="mt-3">{file?.name ? `✓ ${file.name}` : '拖放文件到这里，或点击选择文件'}</strong><small className="mt-1 text-muted-foreground">支持 .pptx、.pdf、.docx、.xlsx、.csv、.md、.txt、.html、.png、.jpg</small><label className={`${button} mt-4`}>{file ? '重新选择文件' : '选择文件'}<input className="sr-only" type="file" accept=".md,.markdown,.txt,.html,.htm,.docx,.pdf,.xlsx,.csv,.pptx,.png,.jpg,.jpeg" onChange={event => setFile(event.target.files?.[0] || null)}/></label>{file?.name.toLowerCase().endsWith('.pptx') && <PptSelectField aria-label="PPTX 导入方式" className={`${field} mt-4`} value={importMode} onValueChange={value=>setImportMode(value as 'generate' | 'editable')}><option value="generate">读取内容并生成新演示文稿</option><option value="editable">保守编辑原始 PPTX</option></PptSelectField>}</div></section>{direct ? <section className="rounded-xl border border-border bg-card p-5"><h3 className="font-medium">下一步选择质量等级</h3><p className="mt-2 text-sm text-muted-foreground">先选择文件；下一步选择质量等级，并按需补充 Prompt 或文本。确认内容后才开始解析。</p></section> : <Supplement mode={supplementMode} setMode={setSupplementMode} prompt={prompt} setPrompt={setPrompt} text={text} setText={setText}/>}</div>;
 }
 
 function Supplement({ mode, setMode, prompt, setPrompt, text, setText }: { mode: 'prompt' | 'paste'; setMode: (mode: 'prompt' | 'paste') => void; prompt: string; setPrompt: (value: string) => void; text: string; setText: (value: string) => void }) {

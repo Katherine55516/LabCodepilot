@@ -72,7 +72,7 @@ export function resumeSession(uid, projectId) {
     const project = getProject(uid, projectId);
     if (!project || project.deletedAt || project.status !== 'paused') throw editError('session is not paused', 409);
     const state = runtimeState(project); state.lifecycle = 'recovering'; state.pauseRequested = false;
-    project.status = 'generating'; const run = currentRun(project); if (run) { run.status = 'queued'; saveRun(run); } saveProject(project); emitRunProgress(project, 'session.resumed'); return project;
+    project.status = state.resumePhase==='outlining'?'outlining':'generating'; const run = currentRun(project); if (run) { run.status = 'queued'; saveRun(run); } saveProject(project); emitRunProgress(project, 'session.resumed'); return project;
   });
 }
 

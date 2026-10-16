@@ -44,12 +44,15 @@
 
 ### Active
 
+- [PPT 真实模型失败矩阵与修复](active/ppt-real-model-failure-remediation-20261015.md)：完整84次中8次失败的根因、修复与恢复记录；119项回归通过，按用户要求先提交，Factor最终整稿验收待续。
+
 | active/ppt-report-completion-20261011.md | Gamma报告17步与原64项代码/真实UI/Office/质量闭环 | 实施中 |
 
 | active/ppt-alpha-mining-live-20261010.md | Alpha Mining完整prompt/原生模板/自动N/真实BYOK/UI/ARM64/逐页QA | 进行中 |
 
 | 文件 | 主题 | 状态 |
 |------|------|------|
+| [ppt-experience-quality-routing-20261014.md](active/ppt-experience-quality-routing-20261014.md) | PPT 工作区/创建/Visual Editor/聊天差异取舍与逐项改进；用户质量等级、按页难度多模型路由、预算/恢复及真实验收方案 | 按用户要求先提交；最终119项回归、npm2922/0/1、UI73+15及Gamma48页通过；84次矩阵原8失败保留并另列恢复，Factor98页最终验收暂停待续 |
 | completed/ppt-editor-template-bilingual-20261013.md | 六项重新复核、创建操作栏、暂停/完成编辑、旧报告模板隔离和单语 topic/多语分组 | 本地实现/独立提交快照16领域/CDP/smoke通过；在线长稿及远端未验收 |
 | active/ppt-factor-zoo-live-ci.md | Factor Zoo 原文与 Deal Review 模板的真实模型 ARM64 CI、容量合同修复、浏览器证据与最终导出 | 大纲合同修复进行中；真实整稿待门禁通过 |
 | [ppt-gamma-semantic-improvements-20261013.md](active/ppt-gamma-semantic-improvements-20261013.md) | DL 29/Gamma 10 对照、语义组织与视觉修复、gamma.md 真实 3141 测试 | 进行中 |
@@ -111,7 +114,7 @@
 | active/image-model-managed-delivery-server.md | **文生图模型账号下发（服务端层）**：新增 `GET /api/v1/image/config(/encrypted/hash)`，apiKey 复用 configs 的 AES-256-GCM 加密口令；图片配置独立于 configs 列表避免泄漏进对话下拉框 | S1-S5 待开始 |
 | active/ppt-alpha-mining-round5-priorities.md | **PPT 第五轮（Alpha Mining）**：模板文字色、保留媒体版式与媒体守恒门禁、封面副题、生成过程可视（骨架/流式草稿/大纲确认）、eyebrow 规范化、双语标题策略、术语锁、代码悬挂缩进 | A/B 完成，C 部分完成；F-P0-1 待用户授权 |
 | active/ppt-outline-concision.md | **PPT 大纲精炼**：页数预算、按卡片计费、双语原文正文单语、收窄必须上页、先压缩后加页的修复顺序、小节分组两阶段规划、精炼指标 | 1–7 完成；待真实模型验证 |
-| active/ppt-gamma-parity-round7-20261013.md | PPT 第七轮十点问题：两条代码线合并、大纲编译而非拒绝、主要语言主题、Gamma 式逐页生成、内容/标题/结束语、图片输入与自适应位置、修改面板与批量操作、真实模型验收 | 📋 计划已定，待开始 |
+| active/ppt-gamma-parity-round7-20261013.md | PPT 第七轮十点问题：两条代码线合并、大纲编译而非拒绝、主要语言主题、Gamma 式逐页生成、内容/标题/结束语、图片输入与自适应位置、修改面板与批量操作、真实模型验收 | 🧪 Round 7 集成与功能回归完成；真实模型验收及后续修复进行中 |
 
 ### Completed
 

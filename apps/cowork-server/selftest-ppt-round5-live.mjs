@@ -66,3 +66,8 @@ const view = liveProjectView({ ...state, id: 'p3', uid: 'u', title: 'T', pages: 
 assert.equal(view.generationStages.pages.b, 'writing');
 assert.deepEqual(Object.keys(view.drafts), ['b'], 'a ready page never shows a stale draft');
 console.log('Round 5 live generation: drafts, progress lease, transient channel, stages and live view: passed');
+
+const withMedia=liveProjectView({...state,id:'media-draft',uid:'u',outline:outline.map(s=>s.id==='b'?{...s,sourceImageIds:['source-photo','unknown']}:s),source:{images:[{id:'source-photo',caption:'Observed comparison',width:640,height:480,dataUrl:'never-send-image-bytes-here'}]}});
+assert.deepEqual(withMedia.generationMedia,{b:[{id:'source-photo',caption:'Observed comparison',width:640,height:480}]});
+assert.ok(!JSON.stringify(withMedia.generationMedia).includes('never-send-image-bytes-here'));
+console.log('Draft source media: current-page assignment, exact aspect ratio and caption; image bytes remain outside the transient draft');

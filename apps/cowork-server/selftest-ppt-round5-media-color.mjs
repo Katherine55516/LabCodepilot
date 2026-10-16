@@ -108,7 +108,7 @@ bindDerivedCoverSubtitle(project, slide, cover);
 const subtitle = slide.nodes.find(n => n.content?.derivedFrom === 'document-title');
 assert.ok(subtitle, 'subtitle added');
 assert.match(subtitle.content.text, /Alpha Mining: Formulaic Alphas/u);
-assert.match(subtitle.content.text, /公式化因子、算子与自动化搜索/u);
+assert.doesNotMatch(subtitle.content.text, /\p{Script=Han}/u, 'round 7 (B1): the cover subtitle uses the deck language only');
 assert.ok(!subtitle.content.text.includes('因子挖掘：'), 'the title already shown is not repeated');
 assert.equal(subtitle.style.color, '#6f7680');
 assert.ok(subtitle.geometry.x >= cover.nodes[0].geometry.x + cover.nodes[0].geometry.width, 'subtitle stays beside the cover artwork');
@@ -116,3 +116,19 @@ const locked = { ...slide, nodes: slide.nodes.filter(n => n !== subtitle) };
 bindDerivedCoverSubtitle({ ...project, deckTitle: { source: 'user' } }, locked, cover);
 assert.ok(!locked.nodes.some(n => n.content?.derivedFrom), 'a user-locked title is not supplemented');
 console.log('Round 5 template colour, media-preserving layout, icon anchoring, media gate and cover subtitle: passed');
+
+{
+ const {buildMediaLedger}=await import('./lib/ppt-media-ledger.mjs');
+ const make=()=>({templateContentMode:'design_only',templateFidelity:{mode:'preserve',width:1200,height:700,slides:[{nodes:[]},{nodes:[]}]}});
+ const slides=[{id:'cover',nodes:[]},{id:'body',nodes:[]}];
+ const assets=Array.from({length:5},(_,i)=>({objectId:'old-report-'+i,slideId:'body',role:'old_template_content',status:'retired_by_adaptation',approvalBasis:'design_only_template',reason:'Design-only source isolation'}));
+ const resolved=buildMediaLedger(make(),slides,{templateAssets:assets,objects:[]});
+ assert.equal(resolved.policyRetirements,5);assert.equal(resolved.approvedExclusions,0,'design policy is never represented as individual user approval');assert.equal(resolved.effectiveConservation,1);assert.equal(resolved.retired.length,0);
+ assert.ok(!inspectMediaLedger(resolved).some(i=>i.severity==='error'));
+ for(const patch of [{role:'evidence'},{role:'brand'},{role:'template_artwork'},{approvalBasis:'unverified_request'},{status:'unresolved'}]){
+  const unresolved=buildMediaLedger(make(),slides,{templateAssets:assets.map(a=>({...a,...patch})),objects:[]});assert.equal(unresolved.policyRetirements,0);assert.ok(inspectMediaLedger(unresolved).some(i=>i.severity==='error'),'evidence/brand/artwork and invalid adaptations remain governed by the existing gate');
+ }
+ const contentMode=make();contentMode.templateContentMode='preserve_content';assert.equal(buildMediaLedger(contentMode,slides,{templateAssets:assets,objects:[]}).policyRetirements,0);
+ const source=buildMediaLedger(make(),slides,{templateAssets:assets,objects:[{objectId:'source-image',type:'SourceImage',status:'failed'}]});assert.equal(source.entries.find(e=>e.origin==='source').status,'failed','source evidence is not resolved by template-use policy');
+ console.log('PASS media design policy: validated old-report retirement resolves the design-only gate; source/evidence/brand/artwork and unverified removals never inherit this exemption');
+}

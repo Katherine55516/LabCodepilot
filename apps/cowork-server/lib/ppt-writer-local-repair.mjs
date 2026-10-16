@@ -8,7 +8,10 @@ export function writerLocalRepairScope(value, error, {allOwnedSourceBound=false}
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const message = String(error?.message || error), targets = [];
   const add = (path, text, kind, start = 0, end = text.length) => targets.push({ path, kind, start, end, before: text.slice(start, end) });
-  if (/block id|duplicate block/iu.test(message)) {
+  if (Array.isArray(error.writerFieldPath) && Number.isFinite(error.maxCharacters)) {
+    let current=value;for(const key of error.writerFieldPath)current=current?.[key];
+    if(typeof current==='string'){add(error.writerFieldPath,current,'field');targets.at(-1).maxCharacters=error.maxCharacters;}
+  } else if (/block id|duplicate block/iu.test(message)) {
     const seen = new Set();
     for (const [i, block] of (Array.isArray(value.blocks) ? value.blocks : []).entries()) {
       if (typeof block.id === 'string' && (!/^[A-Za-z0-9_-]{1,40}$/.test(block.id) || seen.has(block.id))) add(['blocks', i, 'id'], block.id, 'identifier');
@@ -79,6 +82,7 @@ export function writerLocalRepairPrompt(context, value, scope, error) {
   // The page schema is read-only data, not the response contract for a delta.
   context=context.replace(/返回唯一 JSON：[^\n]+。只输出 JSON/g,'').replace(/返回相同 schema。/gu,'');
   let capacityInstruction='';
+  if(scope.targets.some(target=>target.kind==='field'))capacityInstruction=' The diagnosed metadata string exceeds its unchanged character limit. Shorten ONLY the allowed strings to their listed maxCharacters, as complete source-supported labels in the authoritative topic language. Do not cut a sentence mid-word or alter any other field, frozen title, body, source or numeric token.';
   if(scope.targets?.some(target=>target.kind==='title'))capacityInstruction=' The title exceeds its actual unchanged-font frame. Shorten ONLY the allowed title strings to one complete short topic or claim; do not return the rejected long title, alter the font, or edit any body/source string. Required numbers and conditions already owned by the body stay intact there.';
   if(scope.targets.some(target=>target.kind==='commentary')){
     const match=String(error.message).match(/"singleParagraphCjkCharacters":(\d+)/u);

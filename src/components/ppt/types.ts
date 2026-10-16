@@ -1,14 +1,23 @@
+import type {PptModelCapabilities} from '@/lib/ppt-model-catalog';
+export type PptModelRef={configId:string;model:string;thinkingControl?:boolean;vision?:boolean;contextTokens?:number;maxOutputTokens?:number};
+export type PptExecutionPolicy = {
+  version:1;qualityLevel:'fast'|'balanced'|'rigorous'|'legacy_single_model';catalogVersion?:string;routingPolicyVersion?:string;legacy?:boolean;visionMode?:'preserve'|'understand';
+  roleRoutes:Record<string,{primary:PptModelRef;complexPrimary?:PptModelRef;selection?:'automatic'|'manual';fallbacks:PptModelRef[]}>;
+  budget:{maxAttemptsPerTask:number;maxInputTokens?:number;maxOutputTokens?:number};
+};
+export type PptExecutionRecord={thinkingMode?:'enabled'|'disabled';id:string;taskKey:string;stage:string;role:string;model:string;configId:string;status:string;attempt:number;startedAt:string;elapsedMs?:number;inputTokens?:number;outputTokens?:number;errorCode?:string;complexity:{level:string;reasons:string[]};costStatus:string};
 import type { VisualBlock } from './PptBlocks';
 
 export type PptLayoutId = 'cover' | 'summary' | 'editorial' | 'big-number' | 'comparison' | 'chart' | 'table' | 'image-text' | 'timeline' | 'two-panel' | 'formula-variables' | 'item-icons' | 'conclusion';
 export type PptBounds = { x: number; y: number; width: number; height: number };
+export type PptSourceArtifactRef={sourceUnitId:string;rowStart?:number;rowEnd?:number;lineStart?:number;lineEnd?:number};
 export type PptOutlineChild = { id: string; title: string; description: string };
 export type PptSlide = {
   id: string; title: string; focus?: string; description?: string; section?: string; children?: PptOutlineChild[]; refs?: string[];
   bullets?: string[]; blocks?: VisualBlock[]; layoutId?: PptLayoutId; layout?: 'text-first' | 'visual-first'; sourceRefs?: string[];
   baseSlideId?: string | null; change?: 'keep' | 'rewrite' | 'add'; manualBlank?: boolean;
   titleLocked?: boolean; density?: 'low' | 'medium' | 'high'; distributionType?: string; semanticUnitBudget?: number; pointLengthProfile?: string;
-  sourceUnitIds?: string[]; groupId?: string;
+  sourceUnitIds?: string[]; sourceImageIds?:string[]; sourceArtifactRanges?:PptSourceArtifactRef[]; planningProtocolVersion?:2; groupId?: string;
   chunkRefs?: string[]; role?: string; question?: string; headlineIntent?: string; audienceTakeaway?: string;
   sourceTopics?: string[]; supportingPoints?: string[]; requiredSupport?: string[]; requiredDetails?: string[];
   keyPoints?: { text: string; refs: string[]; chunkRefs: string[] }[];
@@ -23,7 +32,7 @@ export type PptTemplate = {
   palette?: { background: string; accent: string; foreground: string; muted: string } | null;
   fonts?: { title: string; body: string; titleEastAsia: string; bodyEastAsia: string; cjkExplicit?: boolean } | null;
 };
-export type PptModel = { id: string; name: string; configId: string; modelId: string; providerId?: string };
+export type PptModel = { id: string; name: string; configId: string; modelId: string; providerId?: string; capabilities?:PptModelCapabilities };
 export type PptSource = { kind: 'prompt' | 'paste' | 'file' | 'update'; name: string; text: string; segments: { id: string; origin?: string; location: string; text: string }[]; images?: Extract<VisualBlock, { type: 'image' }>[]; mediaWarnings?: {code:string;message:string;location?:string}[]; truncated?: boolean; extension?: string; bytes?: number };
 export type PptModelFinding = { slideIds: string[]; detail: string; bulletIndexes?: number[]; reason?: 'shallow'; suggestedFix?: string };
 export type PptMediaLedger = { conservation?: number | null; effectiveConservation?: number | null; approvedExclusions?: number; retired?: { objectId: string; page: number; role?: string; status?: string; reason?: string | null; approvalBasis?: string | null }[] };
@@ -65,14 +74,20 @@ export type PptProject = {
     growth?: { initial: number | null; final: number; limit: number; basis: 'presentation_budget' | 'initial_estimate'; needsConfirmation: boolean };
     concision?: { pages: number; contentPages: number; majorSections: number; pagesPerSection: number | null; medianFill: number | null; withinBudget: boolean | null; budget: { target: number; max: number } | null; warnings: ('over_budget' | 'underfilled' | 'page_per_section')[] } };
   planning?: { pageRecommendation?: { recommended: number; range: [number, number]; reason: string; reasonBase?: string; assumptions?: PptPlanningAssumption[] } };
+  /** Round 7: deterministic outline corrections and remaining listed warnings. */
+  outlineCorrections?: { version: number; items: { code: string; sourceUnitId?: string; pageIndex?: number }[]; summary: { code: string; count: number }[];
+    warnings: { code: string; pageIndex?: number; message?: string; resolution: 'writer_fits_title' | 'review_in_outline' | 'confirm_page_count' | 'fit_inside_page'; blocking?: boolean }[] };
   displayStatus?: PptProject['status']|'waiting_client';
   /** Live generation view only: real per-page sub-stages and streaming drafts. */
   generationStages?: { deck: string; pages: Record<string, string> };
   generationSkeletons?: Record<string,PptRenderSlide>;
+  generationMedia?: Record<string,{id:string;caption:string;width:number;height:number}[]>;
   outlineProgress?:{done:number;total:number};
   deckStage?: string; currentPage?: { index: number; title: string; stage?: string };
-  drafts?: Record<string, { title?: string; blocks?: { text: string; field?: string; type?:string; sourceUnitId?: string;richText?:PptRichText }[]; typing?: string; chars?: number;runId?:string;epoch?:number;seq?:number;jobId?:string }>;
+  drafts?: Record<string, { title?: string; blocks?: { text: string; heading?: string; field?: string; type?:string; sourceUnitId?: string;sourceRef?:PptSourceArtifactRef;richText?:PptRichText }[]; typing?: string; chars?: number;runId?:string;epoch?:number;seq?:number;jobId?:string }>;
   progress?: {contentReady:number;previewReady:number;total:number;phase:string;quality:string;lastUpdated:string};
+  sourceAssets?:{id:string;caption:string;width?:number;height?:number;required:boolean;slideIds:string[]}[];sourceMediaWarnings?:{code:string;message:string;location?:string}[];
+  executionPolicy?:PptExecutionPolicy;executionHistory?:PptExecutionRecord[];
   compressionApproved?: boolean;
   templateSpec?: { id: string; name: string; version: number; palette?: PptTemplate['palette']; fonts?: PptTemplate['fonts'] };
   update?: { baseSnapshot: { title: string; deck?: { slides: PptSlide[] } | null } };
@@ -91,9 +106,9 @@ export type PptProject = {
   nodes?: Record<string, { status: string; attempts?: number; slide?: PptSlide;epoch?:number }>; dagNodes?: Record<string, PptRunNode>;
   quality?: PptQualityReport; revision: number; draftRevision?: number; publishedRevision?: number; renderUpgradePending?: boolean; currentRunId?: string;
   renderTree?: PptRenderTree; sourceRevision?: number; source?: PptSource | null; inputKind?: string; model?: string; configId?: string;
-  runtime?: { lifecycle: string; pauseRequested?: boolean; slides: Record<string, { phase: string; updatedAt?:string; accepted?: boolean; epoch?: number; renderHash?: string; quality?: {issues?: {severity?: string; code?: string; message?: string}[]}; componentCommit?: {seq:number;renderHash:string;componentHash:string;refs:{sourceUnitId:string}[]}; repairComparison?: {id:string;slideId:string;revision:number;beforeHash:string;afterHash:string;beforeUrl:string;afterUrl:string;at:string;findings:{code?:string;detail?:string}[]}; preview?: PptRenderSlide }> };
+  runtime?: { lifecycle: string; pauseRequested?: boolean; slides: Record<string, { phase: string; updatedAt?:string; accepted?: boolean; epoch?: number; renderHash?: string; quality?: {issues?: {severity?: string; code?: string; message?: string}[]}; componentCommit?: {seq:number;renderHash:string;componentHash:string;refs:PptSourceArtifactRef[]}; repairComparison?: {id:string;slideId:string;revision:number;beforeHash:string;afterHash:string;beforeUrl:string;afterUrl:string;at:string;findings:{code?:string;detail?:string}[]}; preview?: PptRenderSlide }> };
   planRevision?: { version: number; hash: string }; constraints?: { version: number };
-  editing?: { contentOpen: boolean; intents: Record<string, PptEditIntent> };
+  editing?: { conversationVersion?:string; contentOpen: boolean; intents: Record<string, PptEditIntent> };
   creationContext?: { generationPolicy?: PptGenerationPolicy; promptContractVersion?: number; planKey: string; sourceHash: string; pageBudget: { confirmed: number } };
   externalPptx?: unknown;
   templateFidelity?: { mode: 'preserve'; originalPath: string; slides: unknown[] };

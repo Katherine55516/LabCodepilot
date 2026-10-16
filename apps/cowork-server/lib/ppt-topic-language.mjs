@@ -1,9 +1,18 @@
 /** Page topics follow the dominant prose language, independently of bilingual
  * evidence in the body. Count approximate displayed width rather than bytes. */
+// Capacity planning asks for the deck language inside source-unit and layout
+// loops. Re-scanning every Unicode character there stalled the real three-deck
+// run for minutes (CPU profile: >90% in this detector). Cache by actual prose,
+// not project ID/object identity: source edits, including in-place segment
+// changes, must invalidate it. Keep at most 8 MiB of UTF-16 source keys.
+const languageCache=new Map();let languageCacheChars=0;
+const CACHE_CHARS=4*1024*1024;
 export function dominantInputLanguage(project = {}) {
   const source = project.source || {};
   const prose = source.segments?.length ? source.segments.filter(segment => segment.kind !== 'code').map(segment => segment.text || '').join('\n') : source.text;
-  const sample = String(prose || source.images?.map(image => image.caption || '').join('\n') || project.prompt || '')
+  const sourceKey=String(prose || source.images?.map(image => image.caption || '').join('\n') || project.prompt || '');
+  if(languageCache.has(sourceKey))return languageCache.get(sourceKey);
+  const sample = sourceKey
     .replace(/```[\s\S]*?```|~~~[\s\S]*?~~~/g, '')
     .replace(/data:[^\s"')]+|https?:\/\/[^\s)]+|(?:\/[\w.-]+){2,}/g, '')
     .replace(/[\p{L}\p{N}_.-]+\.(?:png|jpe?g|pdf|docx|xlsx|html?)\b/giu, '')
@@ -22,7 +31,12 @@ export function dominantInputLanguage(project = {}) {
       widths[language] += language === 'en' ? .58 : 1;
     }
   }
-  return first ? Object.keys(widths).sort((a, b) => widths[b] - widths[a] || (a === first ? -1 : b === first ? 1 : 0))[0] : 'en';
+  const language=first ? Object.keys(widths).sort((a, b) => widths[b] - widths[a] || (a === first ? -1 : b === first ? 1 : 0))[0] : 'en';
+  if(sourceKey.length<=CACHE_CHARS){
+    while(languageCache.size>=24||languageCacheChars+sourceKey.length>CACHE_CHARS){const oldest=languageCache.keys().next().value;languageCacheChars-=oldest.length;languageCache.delete(oldest);}
+    languageCache.set(sourceKey,language);languageCacheChars+=sourceKey.length;
+  }
+  return language;
 }
 
 /** Select a supplied parallel translation; never invent a translation or
@@ -36,6 +50,10 @@ export function stripContinuationSuffix(value) {
 
 export function normalizeTopicTitle(value, language) {
   const title = language ? stripContinuationSuffix(value) : String(value || '').trim();
+  // Stock greetings are application copy, not source facts. Match the deck's
+  // topic language just as the program-generated ending does. User locks
+  // bypass this normalizer at their existing call sites.
+  if (language && /^(?:thanks?(?:\s+for\s+watching)?[!.！]?|thank\s+you[!.！]?|感谢(?:观看|聆听)|感謝(?:觀看|聆聽)|谢谢(?:观看)?|謝謝(?:觀看)?)$/iu.test(title)) return closingTopic(language);
   if (!language || !/\p{Script=Han}/u.test(title) || !/[A-Za-z]/.test(title)) return title;
   let parts = title.split(/\s*[|｜·]\s*|\s+[—–/]\s+|\n/).filter(Boolean);
   if (parts.length === 1) {

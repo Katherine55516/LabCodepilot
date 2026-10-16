@@ -8,6 +8,8 @@
 
 | 文档 | 对应交接文档 | 主题 |
 |------|------------|------|
+| [ppt-experience-quality-routing.md](ppt-experience-quality-routing.md) | [handover/ppt-experience-quality-routing.md](../handover/ppt-experience-quality-routing.md) | 内容合同与质量投入分离、逐页反馈、可解释路由、模板事实隔离及真实评测边界 |
+| [ppt-gamma-parity-round7.md](./ppt-gamma-parity-round7.md) | [handover/ppt-gamma-parity-round7.md](../handover/ppt-gamma-parity-round7.md) | 逐页内容信任、主题/证据语言分离、大纲编译与事实门禁、媒体原生验收、真实长稿性能 |
 | [skills-store-internal.md](./skills-store-internal.md) | [handover/skills-store-internal.md](../handover/skills-store-internal.md) | 技能市场（内部）：组织内技能分发的空白（外部市场解决不了内部资产）、客户端只做浏览+安装不落权限数据、走主进程而非复用外部链路（token 边界）、目录名可读性赢唯一性建议（slug 优先）、「不变不传」与下架温和度、未启用即不存在、与「我的技能」一份事实互通；局限（无灰度审批/无批量更新/更新靠打开列表）与方向 |
 | [cowork-vm-mode.md](./cowork-vm-mode.md) | [handover/cowork-vm-mode.md](../handover/cowork-vm-mode.md) | Cowork 办公模式:办公场景的信任门槛、双栏 vs 会话内开关(模式建时定死)、拷贝语义 vs 官方挂载、隔离承诺刚性(宁报错不降级)、能力做减法的逐项理由、产物卡片=取件口必须真实、启动时对账的存储自治、实测驱动六轮修复的共性教训、局限(镜像手动预置/网络未收口)与方向(镜像流水线/WSL2/办公工具链) |
 | [cowork-scheduled-routines.md](./cowork-scheduled-routines.md) | [handover/cowork-scheduled-routines.md](../handover/cowork-scheduled-routines.md) | 沙箱定时任务（服务端调度）：例行工作的价值在于「不用我记得」，所以本机调度的「定时」承诺不可信（关机=迟到的日报），宁可付出服务端自主取凭证/驱动 agent/自建存储的代价；定时会话不进办公对话列表（用户否掉「很乱很疑惑」）→ 拆开存储复用与导航归属；任务独占持久工作区（与官方 Routines 每次全新 clone 相反，因为办公例行天然增量）；凭证独立密钥的质变论证；护栏按「没人盯着」设计；**「会话正常退出」不等于「任务达成」**（exit 0 + success + $0.39 但指令根本没执行的活标本）；与 Claude Routines 逐项对比；局限（历史永久保留/不能访问内网/离线不推送）与方向 |

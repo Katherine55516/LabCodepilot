@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { withSemanticIndex } from './lib/ppt-semantic.mjs';
-import { evidenceMeasurements, evidenceVisible, missingRequiredEvidence, selectEvidenceForSlide } from './lib/ppt-evidence.mjs';
-import { buildPlanning, retrieveSlideSources } from './lib/ppt-planning.mjs';
+import { evidenceBelongsToSlide, evidenceMeasurements, evidenceVisible, missingRequiredEvidence, selectEvidenceForSlide } from './lib/ppt-evidence.mjs';
+import { buildPlanning, slidePlan, retrieveSlideSources } from './lib/ppt-planning.mjs';
 import { inspectContent } from './lib/ppt-content-qa.mjs';
 import { finalQualityReport, normalizeModelReview } from './lib/ppt-quality.mjs';
 import { catalogTemplateLayouts, templateContentFit } from './lib/ppt-template-scheduler.mjs';
@@ -19,6 +19,7 @@ assert.equal(atom.kind, 'number');
 assert.equal(atom.location, 'serving benchmark slide 6');
 assert.ok(atom.measurements.some(item => item.value === '10000' && item.unit === 'tps/gpu'));
 assert.ok(evidenceMeasurements('10,000 TPS/GPU').length === 1);
+assert.deepEqual(evidenceMeasurements('Manual work fell from 6 hours to 4 hours.'),[{raw:'6 hours',value:'6',unit:'hours'},{raw:'4 hours',value:'4',unit:'hours'}], 'business duration facts become evidence atoms');
 assert.equal(evidenceVisible(atom, 'At 1k/1k load, GB200 delivered approximately 10,000 TPS/GPU.'), false,
   'one value from a multi-value source sentence cannot stand in for complete evidence');
 assert.equal(evidenceVisible(atom, 'At 1k/1k load, GB200 delivered about 10,000 TPS/GPU and 50 TPS/user, roughly 4× H200.'), true);
@@ -62,6 +63,22 @@ const scopedPlanning = buildPlanning({ ...project, source: scopedSource },
   { brief: { audience: 'Engineers', presentationUse: 'technical_explainer' } }, scopedOutline);
 assert.deepEqual(scopedPlanning.slidePlan[1].requiredEvidenceIds, [atom.id],
   'an evidence ID from an adjacent chunk is rejected even when it shares a segment ref');
+// Shared chunks may span multiple V2 pages: exact unit/range ownership wins.
+const ownUnit={id:'owned',chunkRefs:[atom.chunkId],text:atom.exactText,type:'MechanismBlock'},foreignUnit={id:'foreign',chunkRefs:[atom.chunkId],text:'The neighboring configuration uses about 8 GB at 20 ms.',type:'MechanismBlock'};
+const ownAtom={...atom,id:'owned_atom',sourceUnitId:ownUnit.id},foreignAtom={...atom,id:'foreign_atom',sourceUnitId:foreignUnit.id,exactText:foreignUnit.text};
+const exactSource={...source,semantic:{...source.semantic,inventory:{items:[ownUnit,foreignUnit],relationships:[]},evidenceAtoms:[ownAtom,foreignAtom]}};
+const exactSlide={...scopedSlide,planningProtocolVersion:2,sourceUnitIds:['owned'],requiredEvidenceIds:[foreignAtom.id]};
+assert.equal(evidenceBelongsToSlide(exactSource,exactSlide,foreignAtom),false,'a shared chunk cannot force the next page numerical example');
+assert.deepEqual(selectEvidenceForSlide(exactSource,exactSlide,5),[ownAtom.id]);
+assert.equal(evidenceBelongsToSlide(exactSource,exactSlide,{...ownAtom,sourceUnitId:undefined}),true,'old atoms use an exact owned source excerpt');
+assert.equal(evidenceBelongsToSlide(exactSource,exactSlide,{...foreignAtom,sourceUnitId:undefined}),false,'legacy fallback cannot widen chunk scope');
+assert.equal(evidenceBelongsToSlide(exactSource,{...exactSlide,repeatSourceUnitIds:['foreign']},foreignAtom),true,'explicit authorized repeat ownership remains supported');
+const exactPlan=slidePlan([outline[0],exactSlide,outline[2]],{presentationUse:'technical_explainer'},exactSource);
+assert.deepEqual(exactPlan[1].requiredEvidenceIds,[ownAtom.id],'foreign explicit obligations are replaced only by genuinely owned evidence');
+const rangedSource={semantic:{inventory:{items:[{id:'literal',type:'CodeBlock',text:ownAtom.exactText+'\n'+foreignAtom.exactText}]}}};
+assert.equal(evidenceBelongsToSlide(rangedSource,{planningProtocolVersion:2,sourceUnitIds:['literal'],sourceArtifactRanges:[{sourceUnitId:'literal',lineStart:0,lineEnd:1}]},{...foreignAtom,sourceUnitId:'literal'}),false,'partial code ownership must not force facts from later literal lines');
+assert.equal(missingRequiredEvidence({source:exactSource},{nodes:[{type:'text',content:{text:'No evidence shown'}}]},{requiredEvidenceIds:[ownAtom.id]}).length,1,'the missing-visible-evidence gate remains strict');
+
 const scopedRetrieval = retrieveSlideSources({ ...project, source: scopedSource }, scopedOutline[1], scopedPlanning.slidePlan[1]);
 assert.ok(!scopedRetrieval.chunkIds.includes('neighboring-chapter'),
   'retrieval does not widen a precise chunk selection through an overlapping segment ref');
@@ -87,6 +104,20 @@ assert.equal(present.metrics.evidenceCoverageRatio, 1);
 deck.slides[1].bullets = ['At the matched workload, GB200 delivers 12,000 TPS/GPU.'];
 const fabricated = inspectContent({ ...project, outline, planning }, deck);
 assert.ok(fabricated.issues.some(item => item.code === 'visible_numeric_fidelity' && item.severity === 'error'));
+
+// Production canonical slides can retain precise chunk ownership only in
+// their confirmed outline. A shared import segment must not pull another
+// section's evidence into this page's gate.
+const durationText='Automation reduced median manual migration effort from 6 hours to 4 hours in the completed migrations.';
+const durationSource=withSemanticIndex({kind:'paste',text:durationText,segments:[{id:'1',text:durationText,location:'Automation'}]});
+const durationAtom=durationSource.semantic.evidenceAtoms.find(item=>item.kind==='number');assert.ok(durationAtom);
+const unrelated={...atom,id:'other-source-fact',chunkId:'other-chunk',sourceRefs:['1']};durationSource.semantic.evidenceAtoms.push(unrelated);
+const durationOutline=[{id:'duration',title:'Automation effort evidence',chunkRefs:[durationAtom.chunkId],refs:['1']}];
+const durationSlide={id:'duration',title:durationOutline[0].title,sourceRefs:['1'],bullets:[durationText]};
+const durationIssues=inspectContent({source:durationSource,outline:durationOutline},{slides:[durationSlide]}).issues;
+assert.ok(!durationIssues.some(issue=>['evidence_page_without_evidence','evidence_page_source_absent','visible_numeric_fidelity'].includes(issue.code)));
+const alteredDuration=inspectContent({source:durationSource,outline:durationOutline},{slides:[{...durationSlide,bullets:[durationText.replace('4 hours','2 hours')]}]}).issues;
+assert.ok(alteredDuration.some(issue=>issue.code==='visible_numeric_fidelity'),'a changed duration still blocks');
 
 const quality = finalQualityReport({ issues: [], hardErrors: 0, report: { mode: 'informational', status: 'needs_review', issues: [], metrics: {} } }, [],
   { missing: [], repeated: [], conflicts: [{ slideIds: ['evidence'], detail: 'The benchmark conflicts with its source.' }], unsupported: [] });

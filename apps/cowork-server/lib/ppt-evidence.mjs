@@ -1,8 +1,9 @@
+import { materializeSourceLineRange, supportsSourceLineRanges } from './ppt-source-line-ranges.mjs';
 import { visibleNodes, nodeContentText } from './ppt-visible-content.mjs';
 import { sourceDisplayText,richTextContent } from './ppt-source-text.mjs';
 /** Source-grounded evidence lives in the existing semantic index. These atoms
  * are deterministic excerpts, not claims invented by the planner or writer. */
-const QUANTITY = /(?<![\p{L}\p{N}_])(?<value>\d[\d,.]*(?:\s*(?:–|-|→|to)\s*\d[\d,.]*)?)\s*(?<unit>PFLOPS|TFLOPS|FLOPS|TPS\s*\/\s*(?:GPU|user)|tokens?\s*\/\s*(?:s|sec|second|GPU|user)|GB|GiB|TB|MB|ms|milliseconds?|seconds?|bits?\s*\/\s*value|bits?|bytes?|layers?|heads?|parameters?|points?|billion|million|万|亿|%|％|×|B\b|M\b)/giu;
+const QUANTITY = /(?<![\p{L}\p{N}_])(?<value>\d[\d,.]*(?:\s*(?:–|-|→|to)\s*\d[\d,.]*)?)\s*(?<unit>PFLOPS|TFLOPS|FLOPS|TPS\s*\/\s*(?:GPU|user)|tokens?\s*\/\s*(?:s|sec|second|GPU|user)|GB|GiB|TB|MB|ms|milliseconds?|seconds?|minutes?|hours?|days?|weeks?|bits?\s*\/\s*value|bits?|bytes?|layers?|heads?|parameters?|points?|billion|million|万|亿|%|％|×|B\b|M\b)/giu;
 const QUALIFIER = /\b(?:about|approximately|around|roughly|at least|up to|estimated?|under|for|with|at|compared with|versus)\b|约|大约|估算|至少|最高|相较|在[^，。；;]{1,25}(?:下|时)/giu;
 const CONSTRAINT = /\b(?:unless|only if|requires?|limited by|cannot|must|depends on|bottleneck)\b|仅当|必须|取决于|不能|受限/iu;
 const MECHANISM = /\b(?:because|therefore|uses?|enables?|reduces?|increases?|converts?|transfers?)\b|因为|通过|使得|导致|降低|提升/iu;
@@ -31,7 +32,7 @@ export function buildEvidenceAtoms(blocks, chunks) {
         : CONSTRAINT.test(exactText) ? 'constraint' : MECHANISM.test(exactText) && ['process', 'architecture', 'comparison', 'explanation', 'metric'].includes(block.semanticType) ? 'mechanism' : null;
       if (!kind) continue;
       atoms.push({ id: `e_${block.id}_${String(index + 1).padStart(2, '0')}`, chunkId: chunkByBlock.get(block.id) || null,
-        sourceRef: String(block.sourceRefs?.[0] || ''), sourceRefs: (block.sourceRefs || []).map(String), location: block.location || '',
+        sourceUnitId: block.id, sourceRef: String(block.sourceRefs?.[0] || ''), sourceRefs: (block.sourceRefs || []).map(String), location: block.location || '',
         kind, exactText, value: measurements[0]?.value || null, unit: measurements[0]?.unit || null,
         measurements, qualifiers: [...new Set((exactText.match(QUALIFIER) || []).map(item => item.trim()))].slice(0, 8),
         contextTerms: [...new Set((exactText.match(CONTEXT) || []).map(item => item.replace(/\s+/g, '').toLowerCase()))].slice(0, 8),
@@ -53,6 +54,33 @@ export function evidenceRelevance(atom, query) {
   return [...wanted].filter(word => found.has(word)).length / Math.sqrt(wanted.size * Math.max(1, found.size));
 }
 
+/** V2 inventory ownership is narrower than semantic retrieval chunks. Legacy
+ * atoms without provenance must have their exact excerpt in an owned unit. */
+export function evidenceBelongsToSlide(source, slide, atom) {
+  if (!atom) return false;
+  if (slide.planningProtocolVersion === 2 && Array.isArray(slide.sourceUnitIds)) {
+    const ids = new Set([...slide.sourceUnitIds, ...(slide.repeatSourceUnitIds || [])]);
+    const owned = (source?.semantic?.inventory?.items || []).filter(item => ids.has(item.id));
+    const canonical = value => String(value || '').normalize('NFKC').replace(/\s+/gu, ' ').trim();
+    const exact = canonical(atom.exactText);
+    return Boolean(exact) && owned.some(item => {
+      if (atom.sourceUnitId && atom.sourceUnitId !== item.id) return false;
+      const ranges = (slide.sourceArtifactRanges || []).filter(ref => ref.sourceUnitId === item.id);
+      return (ranges.length ? ranges : [{}]).some(ref => {
+        if (supportsSourceLineRanges(item)) return canonical(materializeSourceLineRange(item, ref).text).includes(exact);
+        if (ref.rowStart !== undefined && Array.isArray(item.rows)) {
+          const rows = [item.rows[0], ...item.rows.slice(ref.rowStart, ref.rowEnd)];
+          return canonical(rows.map(row => row.join(' | ')).join('\n')).includes(exact);
+        }
+        return canonical(item.text).includes(exact);
+      });
+    });
+  }
+  const chunks = slide.chunkRefs || slide.sourceChunks || [];
+  return chunks.length ? chunks.includes(atom.chunkId) : !(slide.refs || slide.sourceRefs || []).length ||
+    (atom.sourceRefs || []).some(ref => (slide.refs || slide.sourceRefs || []).includes(ref));
+}
+
 /** Require only a small, topical subset. Other atoms remain available for
  * retrieval; a generic chunk reference must not force unrelated numbers. */
 export function selectEvidenceForSlide(source, slide, limit = 2) {
@@ -65,7 +93,7 @@ export function selectEvidenceForSlide(source, slide, limit = 2) {
   const quantitative = /\b(?:evidence|results?|benchmark|metrics?|size|cost|throughput|latency|formats?|structure|comparison|trade[- ]?off)\b|证据|结果|数据|指标|规模|吞吐|延迟|结构|对比/iu.test(`${slide.title || ''} ${slide.headlineIntent || ''}`)
     || ['metric', 'chart', 'table'].includes(slide.visualIntent?.type) || slide.evidenceIntent === 'required';
   if (!quantitative) return [];
-  const scored = atoms.filter(atom => chunks.has(atom.chunkId) || atom.sourceRefs.some(ref => refs.has(ref)))
+  const scored = atoms.filter(atom => evidenceBelongsToSlide(source, slide, atom) && (slide.planningProtocolVersion === 2 && Array.isArray(slide.sourceUnitIds) || chunks.has(atom.chunkId) || atom.sourceRefs.some(ref => refs.has(ref))))
     .filter(atom => atom.kind === 'number')
     .map(atom => {
       const units = atom.measurements.map(item => item.unit);

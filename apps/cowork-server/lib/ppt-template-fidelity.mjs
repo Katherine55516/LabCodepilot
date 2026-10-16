@@ -1,3 +1,6 @@
+import {inspectOutlineTopicLanguages,topicRangeConstraint}from './ppt-topic-title-validation.mjs';
+import {PPTX_IR_VERSION} from './ppt-native-shape-ids.mjs';
+import {deckLanguage,deckLanguageName} from './ppt-presentation-contract.mjs';
 import { isSourceOwnedNode } from './ppt-source-artifacts.mjs';
 import { templateDesignView, isOrdinalSequence } from './ppt-template-design.mjs';
 import {fitNativeTitleFrames} from './ppt-native-text-fit.mjs';
@@ -25,6 +28,14 @@ import { semanticMediaForSlide } from './ppt-semantic-media.mjs';
 import { visibleBodyTarget, templateVisualUnits } from './ppt-presentation-writing.mjs';
 import {measureText, textContract, PT_EMU} from './ppt/render-contract.mjs';
 
+// Native nodes are JSON records. Copy every mutable container while retaining
+// immutable string leaves (notably multi-megabyte template images). structuredClone
+// recopied those bytes for every layout candidate and monopolized the event loop.
+function cloneTemplateValue(value) {
+  if (Array.isArray(value)) return value.map(cloneTemplateValue);
+  if (value && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, cloneTemplateValue(child)]));
+  return value;
+}
 const visualUnits = templateVisualUnits;
 const numericLabel = value => /^\s*(?:\d{1,2}|[IVX]{1,4})\s*$/i.test(value || '');
 const numericMetric = value => /^\s*[+-]?\d+(?:[.,]\d+)?\s*%\s*$/u.test(value || '');
@@ -251,12 +262,13 @@ function reclaimedMediaTextFrames(project, slide, size) {
  * full-bleed photos, side photos, icons and layered artwork untouched. */
 export function autoTemplateMediaOmissions(project, index, existing = []) {
   const spec = project.templateFidelity?.slides?.[index];
-  if (!spec || project.templateContentMode!=='design_only' && (!project.source?.text || templateSourceAffinity(project, spec) >= .38)) return [];
+  const designReuse=['design_only','keep_fixed'].includes(project.templateContentMode);
+  if (!spec || !designReuse && (!project.source?.text || templateSourceAffinity(project, spec) >= .38)) return [];
   const already = new Set(existing.map(item => String(item.shapeId)));
-  return (project.templateContentMode==='design_only' ? spec.nodes : contentMediaCandidates(spec, project.templateFidelity)).filter(node =>
+  return (designReuse ? spec.nodes : contentMediaCandidates(spec, project.templateFidelity)).filter(node =>
     node.content?.mediaRole==='old_template_content' && !node.content?.mustPreserve &&
     !node.content?.mediaReplacement && !already.has(String(node.nativeRef?.shapeId)))
-    .map(node => adaptationDisposition(project,node,'old_template_content',project.templateContentMode==='design_only'?'design_only_template':'deterministic_topic_mismatch',project.templateContentMode==='design_only'?'Design reuse retires original report foreground data; current source assets supply the new evidence.':'Explicit old sample media is retired after deterministic topic mismatch; no user approval or equivalent replacement is claimed.'));
+    .map(node => adaptationDisposition(project,node,'old_template_content',designReuse?'design_only_template':'deterministic_topic_mismatch',designReuse?'Design reuse retires unselected original report media; explicitly selected fixed objects and current source evidence are preserved.':'Explicit old sample media is retired after deterministic topic mismatch; no user approval or equivalent replacement is claimed.'));
 }
 
 export function templateMediaRole(node,spec,size){
@@ -464,7 +476,7 @@ function isFullBleed(node, size) {
 }
 
 function variantGeometry(node, mode, role, size) {
-  if (mode === 'media-focus' || isFullBleed(node, size)) return node.geometry;
+  if (mode === 'media-focus' || mode==='fixed-content-preserved' || isFullBleed(node, size)) return node.geometry;
   const inContentBand = node.geometry.y + node.geometry.height / 2 >= size.height * .24;
   if (!inContentBand && !(mode === 'title-content-mirror' && role === 'title')) return node.geometry;
   return { ...node.geometry, x: size.width - node.geometry.x - node.geometry.width };
@@ -591,7 +603,8 @@ function buildFidelity(project, sourceSlides, externalPptx, templateHash, profil
       const repeated = use > 0;
       const profile = profiles[sourceIndex];
       const modes = profile.safeGeometryModes || [];
-      const mode = !repeated ? 'original' : modes.length ? modes[(use - 1) % modes.length] : 'media-focus';
+      const preserveFixedLayout=repeated&&project.templateContentMode==='keep_fixed'&&slide.nodes.some(node=>node.content?.mustPreserve&&project.templateFixedObjectIds?.includes(node.id));
+      const mode = preserveFixedLayout?'fixed-content-preserved':!repeated ? 'original' : modes.length ? modes[(use - 1) % modes.length] : 'media-focus';
       const cropVariant = repeated ? TEMPLATE_VARIANTS[1 + Math.floor((use - 1) / Math.max(1, modes.length)) % (TEMPLATE_VARIANTS.length - 1)] : TEMPLATE_VARIANTS[0];
       if (repeated && mode === 'media-focus' && !slide.nodes.some(node => node.type === 'image'))
         throw new Error(`模板第 ${sourceIndex + 1} 页包含方向性图解或图表，且没有可安全变化的媒体，不能复用`);
@@ -599,21 +612,21 @@ function buildFidelity(project, sourceSlides, externalPptx, templateHash, profil
       const panelGeometry = mode === 'panel-swap' ? panelSwapGeometry(slide, externalPptx) : null;
       const reclaimedFrames = reclaimedMediaTextFrames(project, slide, externalPptx);
       if (mode === 'panel-swap' && !panelGeometry) throw new Error(`模板第 ${sourceIndex + 1} 页的卡片已不满足安全重排约束`);
-      const mainImage = repeated ? slide.nodes.filter(node => node.type === 'image')
+      const mainImage = repeated ? slide.nodes.filter(node => node.type === 'image'&&!node.content?.mustPreserve)
         .sort((a, b) => b.geometry.width * b.geometry.height - a.geometry.width * a.geometry.height)[0] : null;
-      const media = mainImage && safeDecorativeMedia(mainImage, externalPptx, slide) && !textOverlayCalloutPanel(mainImage, externalPptx, slide)
+      const media = !preserveFixedLayout&&mainImage && safeDecorativeMedia(mainImage, externalPptx, slide) && !textOverlayCalloutPanel(mainImage, externalPptx, slide)
         ? sourceMediaFor(project, index, use, mainImage) || semanticMediaForSlide(project, index, mainImage) : null;
       const mediaHash = media ? crypto.createHash('sha256').update(Buffer.from(media.dataUrl.split(',')[1], 'base64')).digest('hex') : null;
       const nodes = slide.nodes.map((base, nodeIndex) => {
-        const node = { ...structuredClone(base), id: stableId('node', templateHash, index, base.nativeRef.shapeId),
+        const node = { ...cloneTemplateValue(base), id: stableId('node', templateHash, index, base.nativeRef.shapeId),
           nativeRef: { ...base.nativeRef, slideIndex: index, sourceSlideIndex: sourceIndex } };
-        if (repeated) node.geometry = panelGeometry?.[nodeIndex] || variantGeometry(node, mode, roles.get(base.nativeRef.shapeId), externalPptx);
+        if (repeated&&!base.content?.mustPreserve) node.geometry = panelGeometry?.[nodeIndex] || variantGeometry(node, mode, roles.get(base.nativeRef.shapeId), externalPptx);
         if (reclaimedFrames.has(base.nativeRef.shapeId)) {
           node.geometry = reclaimedFrames.get(base.nativeRef.shapeId);
           node.nativeTextFrame = { ...node.nativeTextFrame, wordWrap: true };
           node.content = { ...node.content, adaptiveMediaReclaim: true };
         }
-        if (base.type === 'image' && repeated) {
+        if (base.type === 'image' && repeated&&!preserveFixedLayout&&!base.content?.mustPreserve) {
           node.content = { ...node.content, crop: (base.content?.crop || [0, 0, 0, 0]).map((value, cropIndex) =>
             Math.min(.4, Math.max(0, Number(value || 0) + cropVariant.crop[cropIndex]))) };
           if (media && base.nativeRef.shapeId === mainImage.nativeRef.shapeId) node.content = {
@@ -628,9 +641,10 @@ function buildFidelity(project, sourceSlides, externalPptx, templateHash, profil
       const visualChanged = repeated && nodes.some((node, nodeIndex) => node.geometry.x !== slide.nodes[nodeIndex].geometry.x ||
         node.content?.imageSha256 !== slide.nodes[nodeIndex].content?.imageSha256 ||
         JSON.stringify(node.content?.crop) !== JSON.stringify(slide.nodes[nodeIndex].content?.crop));
-      if (repeated && !visualChanged) throw new Error(`模板第 ${sourceIndex + 1} 页没有安全的媒体或布局变体`);
-      return { index, sourceIndex, variantId: repeated ? `${mode}-${cropVariant.id}${media ? '-source-media' : ''}` : 'original',
-        variant: { kind: mode, mediaShapeId: media ? mainImage.nativeRef.shapeId : null,
+      const fixedReuse=repeated&&!visualChanged&&project.templateContentMode==='keep_fixed'&&slide.nodes.some(node=>node.content?.mustPreserve&&project.templateFixedObjectIds?.includes(node.id));
+      if (repeated && !visualChanged&&!fixedReuse) throw new Error(`模板第 ${sourceIndex + 1} 页没有安全的媒体或布局变体`);
+      return { index, sourceIndex, variantId: fixedReuse?'fixed-content-preserved':repeated ? `${mode}-${cropVariant.id}${media ? '-source-media' : ''}` : 'original',
+        variant: { kind: fixedReuse?'fixed-content-preserved':mode, mediaShapeId: media ? mainImage.nativeRef.shapeId : null,
           mediaSourceId: media?.id || null, imageSha256: mediaHash },
         background: slide.nativeBackground, nodes, slots: slotsFor({ nodes }),
         shapeCount: nodes.length, imageCount: nodes.filter(node => node.type === 'image').length };
@@ -640,12 +654,15 @@ function buildFidelity(project, sourceSlides, externalPptx, templateHash, profil
     Number(visualSimilarity(finalProfiles[index], profile).toFixed(3)));
   return {
     componentProfile: templateComponentProfile(sourceSlides.map(slide=>({...slide,slots:slotsFor(slide)})), externalPptx, templateHash, templateMediaRole),
-    mode: 'preserve', originalPath: externalPptx.originalPath, sha256: templateHash,
+    mode: 'preserve', originalPath: externalPptx.originalPath, nativeIdNormalization:externalPptx.nativeIdNormalization||project.templateFidelity?.nativeIdNormalization, sha256: templateHash,
     width: externalPptx.width, height: externalPptx.height, originalSlideCount: originalCount, slideMap, layoutCatalog: catalog,
     // Even N >= originalCount can omit a source layout after capacity/role
     // selection. Preserve the full original catalog for later rescheduling;
     // mapped media is compacted and rehydrated from the output asset ledger.
-    sourceCatalog: project.templateFidelity?.sourceCatalog || compactSourceCatalog(sourceSlides, slideMap),
+    // Reparse/mode/fixed-selection changes own a freshly processed view. A
+    // previous design-only catalog cannot override newly selected fixed copy.
+    // sourceSlides includes every original layout and its media bytes.
+    sourceCatalog: compactSourceCatalog(sourceSlides),
     reusePlan: { repeatedPages: Math.max(0, project.pages - originalCount), omittedSourcePages: Math.max(0, originalCount - new Set(slideMap).size),
       maxSourceUse: Math.max(...slideMap.map(source => slideMap.filter(value => value === source).length)),
       adjacentSameSource: 0, visualSimilarityPairs },
@@ -655,15 +672,19 @@ function buildFidelity(project, sourceSlides, externalPptx, templateHash, profil
 
 export function restoreNativeTemplateCoverage(project,scoreSlide,{allowOverflowCandidate=false}={}){
  const fidelity=project.templateFidelity;
- if(fidelity?.mode!=='preserve'||project.pages<fidelity.originalSlideCount)return project;
+ if(fidelity?.mode!=='preserve')return project;
+ const allOriginal=project.pages>=fidelity.originalSlideCount;
+ const fixedIds=new Set(project.templateContentMode==='keep_fixed'?project.templateFixedObjectIds||[]:[]);
+ const required=allOriginal?Array.from({length:fidelity.originalSlideCount},(_,index)=>index):(fidelity.sourceCatalog||[]).flatMap((slide,index)=>slide.nodes?.some(node=>fixedIds.has(node.id))?[index]:[]);
+ if(!required.length)return project;
  const sourceSlides=structuredClone(fidelity.sourceCatalog),external={originalPath:fidelity.originalPath,width:fidelity.width,height:fidelity.height};
  const rich=project.inputProfile?.level==='rich'||String(project.source?.text||'').length>=8000;
  const profiles=sourceSlides.map(slide=>profileSourceSlide(slide,external,rich));
- const missing=Array.from({length:sourceSlides.length},(_,i)=>i).filter(i=>!project.templateFidelity.slideMap.includes(i));
+ const missing=required.filter(i=>!project.templateFidelity.slideMap.includes(i));
  for(const sourceIndex of missing){
   const prior=project.templateFidelity,map=prior.slideMap;let chosen=null,leastOverflow=null,leastScore=Infinity,leastIndex=null;
   for(let index=1;index<project.pages-1;index++){
-   if(map.filter(i=>i===map[index]).length<=1||profiles[sourceIndex].directional||map[index-1]===sourceIndex||map[index+1]===sourceIndex)continue;
+   if(required.includes(map[index])&&map.filter(i=>i===map[index]).length<=1||profiles[sourceIndex].directional||map[index-1]===sourceIndex||map[index+1]===sourceIndex)continue;
    const trial=[...map];trial[index]=sourceIndex;
    try{project.templateFidelity=buildFidelity(project,sourceSlides,external,fidelity.sha256,profiles,trial);const score=scoreSlide(project,index);if(score<=0){chosen=project.templateFidelity;break;}if(Number.isFinite(score)&&score<leastScore){leastOverflow=project.templateFidelity;leastScore=score;leastIndex=index;}}catch{}
   }
@@ -676,7 +697,7 @@ export function restoreNativeTemplateCoverage(project,scoreSlide,{allowOverflowC
    chosen.reusePlan.coverageCapacityCandidates=[...(prior.reusePlan?.coverageCapacityCandidates||[]),{sourceIndex,pageIndex:leastIndex,predictedOverflow:leastScore,basis:'unaccepted candidate; full capacity repair and final gates still required'}];
   }
   project.templateFidelity=chosen||prior;
-  if(!chosen){const error=new Error('native_template_coverage_capacity: no readable unaccepted page can use original template page '+(sourceIndex+1)+' at the frozen font/page budget');error.code='capacity_invalid';error.outlineContract=true;throw error;}
+  if(!chosen){const error=new Error('native_template_coverage_capacity: no readable unaccepted page can preserve '+(allOriginal?'original template page ':'selected fixed objects on template page ')+(sourceIndex+1)+' at the current font/page budget. Increase the page budget or revise the fixed-object selection before confirming; the original template remains unchanged.');error.code='capacity_invalid';error.outlineContract=true;throw error;}
  }
  return project;
 }
@@ -732,6 +753,7 @@ export function rescheduleTemplateFidelity(project,{scoreSlide,allowOverflowCand
   }
   if(scoreSlide)restoreNativeTemplateCoverage(project,scoreSlide,{allowOverflowCandidate});
   if(scoreSlide)balanceTemplateMedia(project,scoreSlide,{sourceSlides,profiles,externalPptx,sha256:fidelity.sha256,capacityAssignments});
+  if(scoreSlide)restoreNativeTemplateCoverage(project,scoreSlide,{allowOverflowCandidate});
   if(capacityAssignments.length)project.templateFidelity.capacityAssignments=capacityAssignments;
   return project;
 }
@@ -778,19 +800,19 @@ export async function prepareTemplateFidelity(project, templateBytes, templateHa
   const templateStore = await import('./ppt-store.mjs');
   const owner = template?.kind === 'managed' ? 'managed' : project.uid;
   const cached = template && templateStore.readTemplateIR(owner, template.id, templateHash);
-  if (cached?.parserVersion==='pptx-ir-7') {
+  if (cached?.parserVersion===PPTX_IR_VERSION) {
     // Copy the opaque package for native export, never parse it again at runtime.
     const originalPath = await io.writeFile(project.id, 'template-original.pptx', Readable.from([templateBytes]), templateBytes.length, project.uid);
     if (typeof originalPath !== 'string' || !originalPath.startsWith('/')) throw new Error('template copy did not return a sandbox path');
     let imported = { ...cached.imported, externalPptx: { ...cached.imported.externalPptx, originalPath } };
-    if(project.templateContentMode==='design_only') imported=templateDesignView(imported,new Set(imported.deck.slides.flatMap(slide=>contentMediaCandidates(slide,imported.externalPptx).map(node=>node.id))));
+    if(['design_only','keep_fixed'].includes(project.templateContentMode)) imported=templateDesignView(imported,new Set(imported.deck.slides.flatMap(slide=>contentMediaCandidates(slide,imported.externalPptx).map(node=>node.id))),new Set(project.templateContentMode==='keep_fixed'?project.templateFixedObjectIds||[]:[]));
     project.templateCacheHit = true;
     return project.templateMode === 'mapped' ? {mode:'mapped',sha256:templateHash,componentProfile:templateComponentProfile(imported.deck.slides.map(slide=>({...slide,slots:slotsFor(slide)})),imported.externalPptx,templateHash,templateMediaRole)} : fidelityFromImported(project, imported, templateHash);
   }
   project.templateCacheHit = false;
   let imported = await io.importPptx({ id: project.id, uid: project.uid, title: project.title }, templateBytes, templateHash);
-  if (template) templateStore.writeTemplateIR(owner, template.id, { schemaVersion: 1, parserVersion: 'pptx-ir-7', sha256: templateHash, imported });
-  if(project.templateContentMode==='design_only') imported=templateDesignView(imported,new Set(imported.deck.slides.flatMap(slide=>contentMediaCandidates(slide,imported.externalPptx).map(node=>node.id))));
+  if (template) templateStore.writeTemplateIR(owner, template.id, { schemaVersion: 1, parserVersion: PPTX_IR_VERSION, sha256: templateHash, imported });
+  if(['design_only','keep_fixed'].includes(project.templateContentMode)) imported=templateDesignView(imported,new Set(imported.deck.slides.flatMap(slide=>contentMediaCandidates(slide,imported.externalPptx).map(node=>node.id))),new Set(project.templateContentMode==='keep_fixed'?project.templateFixedObjectIds||[]:[]));
   return project.templateMode === 'mapped' ? {mode:'mapped',sha256:templateHash,componentProfile:templateComponentProfile(imported.deck.slides.map(slide=>({...slide,slots:slotsFor(slide)})),imported.externalPptx,templateHash,templateMediaRole)} : fidelityFromImported(project, imported, templateHash);
 }
 
@@ -808,9 +830,9 @@ export function templateSlotPrompt(project, index) {
   const plan = project.planning?.slidePlan?.[index];
   return `\n模板第 ${index + 1} 页：独立内容组容量 ${plan?.templatePointCapacity || new Set(readingOrder.filter(slot => slot.role === 'content' && !['footnote', 'group-heading'].includes(slot.purpose)).map(slot => slot.groupId)).size}，本页计划至少 ${plan?.templatePointTarget || '按来源可支撑的数量'} 组；内容型原图 ${JSON.stringify(media)}。文本槽位：${JSON.stringify(readingOrder.map((slot, order) => ({ id: String(slot.shapeId), readingOrder: order + 1, role: slot.role, purpose: slot.purpose, pairedWith: slot.pairedWith,
     groupId: slot.groupId,
-    example: project.templateContentMode==='design_only' ? undefined : slot.example, minVisualUnits: slot.minVisualUnits, maxVisualUnits: slot.capacity,
+    example: ['design_only','keep_fixed'].includes(project.templateContentMode) ? undefined : slot.example, minVisualUnits: slot.minVisualUnits, maxVisualUnits: slot.capacity,
     requiredItems: slot.purpose === 'list' ? slot.paragraphCount : undefined, maxLines: slot.maxLines, lineVisualUnits: slot.lineVisualUnits, wordWrap: slot.wordWrap,
-    paragraphPatterns: slot.purpose === 'list' ? slot.paragraphs.map(item => ({ hasLabelRun: item.hasLabelRun, example: project.templateContentMode==='design_only' ? undefined : item.example })) : undefined })))}。` +
+    paragraphPatterns: slot.purpose === 'list' ? slot.paragraphs.map(item => ({ hasLabelRun: item.hasLabelRun, example: ['design_only','keep_fixed'].includes(project.templateContentMode) ? undefined : item.example })) : undefined })))}。` +
     '请在 JSON 中返回 slotTexts 对象，key 为上述槽位 id，value 为替换文字。标题与 title 字段一致，section 使用短标签。优先填入互不重复、由来源支持的独立事实；原模板槽位与本页主题不符或来源事实不足时，在 omitTemplateShapes 中列出该内容槽位、不适配图片、图表或表格的 shapeId 和至少八字的具体 reason，并省略其 slotTexts。配对的标题与说明须同时保留或同时省略。承载证据、品牌、流程关系或角色不明的媒体必须保留；不能因主题不同或与新文字相交而删掉。旧样例媒体只有明确角色与系统处置证据才可退役；普通文字和source ID不能证明等价。omission reason仅为请求，不能写批准记录。背景照片、图标及纯装饰可保留。不要以章节名、标题、focus 或首条要点循环填满所有槽位；不需要的媒体及其旧图解标签应一起省略。' +
     'purpose=group-heading 是一组卡片的导航标题，不是独立事实；写简短分组标签，不消耗本页独立要点。' +
     'purpose=list 的 value 必须是恰好 requiredItems 个对象的数组，每项为 {"label":"加粗短名称","body":"常规字重的来源支持说明"}；hasLabelRun 为 true 时两部分都要有内容。每条必须不同，合计行数不得超过 maxLines，每行不超过 lineVisualUnits。' +
@@ -835,7 +857,7 @@ export function templateOutlinePrompt(project) {
     textSlots: effectiveSlots(slide).filter(slot => slot.role === 'content').map(slot => ({ purpose: slot.purpose,
       requiredItems: slot.purpose === 'list' ? slot.paragraphCount : undefined,
       maxLines: slot.maxLines, lineVisualUnits: slot.lineVisualUnits, maxVisualUnits: slot.capacity,
-      example: project.templateContentMode==='design_only' ? undefined : slot.example.slice(0, 65) })),
+      example: ['design_only','keep_fixed'].includes(project.templateContentMode) ? undefined : slot.example.slice(0, 65) })),
     pictures: slide.imageCount, contentMediaShapeIds: contentMediaCandidates(slide, project.templateFidelity)
       .map(node => node.nativeRef.shapeId) }));
   const catalog = project.templateFidelity.layoutCatalog || [];
@@ -845,6 +867,19 @@ export function templateOutlinePrompt(project) {
 // F-P1-11: a normalized section label measured to the title edge (one line, no wrap).
 const slotCapacity = (slot, slide) => slot.role === 'section' && slide.sectionLabel?.shapeId === slot.shapeId && slide.sectionLabel.capacity
   ? Math.max(slot.capacity, slide.sectionLabel.capacity) : slot.capacity;
+/** Slot character budgets are conservative planning guidance. A title that
+ * exceeds that coarse budget can still fit the immutable native frame. Reuse
+ * the final renderer's width/height and native line contract instead of
+ * renaming a locked title or shrinking its font. Export checks remain final. */
+export function nativeTitleFitsFrame(spec,slot,text,actualNode=null){
+ if(slot.role!=='title'||!String(text||'').trim())return false;
+ const node=actualNode||spec.nodes?.find(node=>node.nativeRef?.shapeId===slot.shapeId);
+ if(!node?.nativeTextFrame||!node.nativeRef||!node.geometry?.width||!node.geometry?.height)return false;
+ const element={...node,semanticRole:'template-title',kind:'text',bounds:node.geometry,
+  content:node.content?.text===text?node.content:{text:String(text)}};
+ const fit=measureText(element);
+ return !fit.overflow&&fit.lines<=Math.max(1,slot.maxLines||1);
+}
 /** The same native title budget is checked before confirmation and by every
  * writer. A body fit cannot authorize an oversized frozen title. */
 export function inspectNativeOutlineTitles(project, outline = project.outline || []) {
@@ -852,18 +887,25 @@ export function inspectNativeOutlineTitles(project, outline = project.outline ||
   const conflicts = outline.flatMap((slide, pageIndex) => {
     const source=project.templateFidelity.slides[pageIndex] || { nodes: [] };
     return effectiveSlots({...source,nodes:source.nodes||[],slots:source.slots||slotsFor(source)})
-    .filter(slot => slot.role === 'title' && visualUnits(slide.title) > slotCapacity(slot, slide))
+    .filter(slot => slot.role === 'title' && visualUnits(slide.title) > slotCapacity(slot, slide) && !nativeTitleFitsFrame(source,slot,slide.title))
     .map(slot => ({ code: 'planned_native_title_overflow', severity: 'error', pageIndex, field: 'title',
       maxLength: 160, reason: 'native_title_capacity', capacityVisualUnits: slotCapacity(slot, slide),
-      requiredLanguages: !(pageIndex===0&&nativeCoverTitleHierarchy(project))&&project.generationPolicy?.language?.mode==='source'&&/[A-Za-z]{2}/u.test(slide.title)&&/[\u3400-\u9fff]/u.test(slide.title)?['English','Chinese']:undefined,
-      ...(pageIndex===0&&nativeCoverTitleHierarchy(project)?{titleHierarchy:project.generationPolicy?.language?.mode==='output'?'short headline + complete independently audited source-title translation in the requested output language, in a visible measured subtitle; original title remains in notes':'short headline + complete original source title in a visible measured subtitle; the combined title block retains all source languages'}:{}),
+      requiredLanguages: [deckLanguageName(project)],...topicRangeConstraint(slide),...(!project.confirmedOutline?{topicLanguage:deckLanguage(project)}:{}),
+      ...(pageIndex===0&&nativeCoverTitleHierarchy(project)?{titleHierarchy:'short headline + complete deck-language source subject in a measured subtitle; use its audited topic-title projection when present; all original title languages remain in source/notes, not parallel topic labels'}:{}),
       usedVisualUnits: visualUnits(slide.title), shapeId: slot.shapeId, fontSizePt: slot.fontSizePt,
-      message: `Page ${pageIndex + 1} title exceeds its unchanged native ${slot.fontSizePt}pt slot (${slotCapacity(slot, slide)} visual units). Shorten the topic label BEFORE confirmation; preserve original full document title in the measured cover subtitle and all facts in source/notes.` }));
+      message: `Page ${pageIndex + 1} title exceeds its unchanged native ${slot.fontSizePt}pt slot (${slotCapacity(slot, slide)} visual units). Shorten the topic label BEFORE confirmation; preserve the complete deck-language source subject in the measured cover subtitle and the original heading/facts in source/notes.` }));
   });
   // Resume the already confirmed plan verbatim. A new identity rule cannot
   // retroactively invalidate its metadata or force a second confirmation.
   // Physical title capacity checks above still apply on resume.
   if (project.confirmedOutline) return conflicts;
+  // Merge topic language and physical capacity into one delta per field.
+  // Native title repair batches cannot contain two updates for one title.
+  for(const languageIssue of inspectOutlineTopicLanguages(project,outline)){
+    const existing=conflicts.find(issue=>issue.pageIndex===languageIssue.pageIndex&&issue.field===languageIssue.field);
+    if(existing)Object.assign(existing,{topicLanguage:languageIssue.topicLanguage,requiredTopicRange:languageIssue.requiredTopicRange,topicRangeKind:languageIssue.topicRangeKind,requiredLanguages:languageIssue.requiredLanguages,message:existing.message+' '+languageIssue.message});
+    else conflicts.push(languageIssue);
+  }
   // Capacity partitions need distinct visible identities too. Do this before
   // confirmation; writers must never rename a frozen, user-approved outline.
   // A user-locked title is intentional and stays unchanged.
@@ -875,12 +917,12 @@ export function inspectNativeOutlineTitles(project, outline = project.outline ||
     const prior = seen.get(key);
     if (prior === undefined) { seen.set(key, pageIndex); return; }
     if (slide.titleLocked || slide.title_locked) return;
-    const message = `Page ${pageIndex + 1} repeats the visible title of page ${prior + 1}. Name its own source-supported incremental message, or an explicit table continuation with its actual row labels. Preserve bilingual title languages; do not invent facts or change source owners, page count or selection.`;
+    const message = `Page ${pageIndex + 1} repeats the visible title of page ${prior + 1}. Name its own source-supported incremental message, or an explicit table continuation with its actual row labels. Use only the deck topic language; do not invent facts or change source owners, page count or selection.`;
     const existing = conflicts.find(c => c.pageIndex === pageIndex && c.field === 'title');
     if (existing) { existing.message += ' ' + message; existing.duplicatesPageIndex = prior; }
     else conflicts.push({ code: 'planned_title_identity_duplicate', severity: 'error', pageIndex, field: 'title', maxLength: 160,
-      reason: 'duplicate_visible_title_before_confirmation', duplicatesPageIndex: prior, message,
-      requiredLanguages: project.generationPolicy?.language?.mode === 'source' && /[A-Za-z]{2}/u.test(slide.title) && /[\u3400-\u9fff]/u.test(slide.title) ? ['English', 'Chinese'] : undefined });
+      reason: 'duplicate_visible_title_before_confirmation', duplicatesPageIndex: prior, message,...topicRangeConstraint(slide),topicLanguage:deckLanguage(project),
+      requiredLanguages: [deckLanguageName(project)] });
   });
   return conflicts;
 }
@@ -905,7 +947,7 @@ export function inspectTemplateSlotDraft(project, index, slide) {
   const omitted = new Set((slide.templateOmissions || []).map(item => String(item.shapeId)));
   const invalidOmissions = [...omitted].filter(id => !spec.nodes.some(node => String(node.nativeRef?.shapeId) === id &&
     (['image', 'chart', 'table'].includes(node.type) || (node.type === 'text' && slots.some(slot => String(slot.shapeId) === id && slot.role === 'content')) ||
-      (node.content?.templateSample && project.templateContentMode==='design_only') ||
+      (node.content?.templateSample && ['design_only','keep_fixed'].includes(project.templateContentMode)) ||
       slide.templateOmissions.some(o=>String(o.shapeId)===id && o.version===1 && o.approvalBasis==='user_editor_delete') || (slide.sourceArtifactNodes?.length && slide.templateOmissions.some(o=>String(o.shapeId)===id && o.automatic && o.approvalBasis==='source_region_replacement')))));
   const omissionIssues = invalidOmissions.map(id => ({ code: 'template_omission_invalid', severity: 'error',
     message: `模板第 ${index + 1} 页组件 ${id} 不是可省略的内容或媒体`, repair: 'fill_template_slots', shapeId: Number(id) }));
@@ -919,7 +961,7 @@ export function inspectTemplateSlotDraft(project, index, slide) {
     const heading = slot.pairedWith ? slide.templateSlotTexts?.[String(slot.pairedWith)] : '';
     if (slot.pairedWith && explanationRepeatsHeading(heading, value)) return [{ code: 'template_description_repeats_heading', severity: 'error',
       message: `模板第 ${index + 1} 页槽位 ${slot.shapeId} 重复要点标题，应补充解释`, repair: 'fill_template_slots', shapeId: slot.shapeId }];
-    if (used > 0 && used <= slotCapacity(slot, slide) && (!slot.minVisualUnits || used >= slot.minVisualUnits)) return [];
+    if (used > 0 && (used <= slotCapacity(slot, slide) || nativeTitleFitsFrame(spec,slot,value)) && (!slot.minVisualUnits || used >= slot.minVisualUnits)) return [];
     const code = !used ? 'template_slot_unfilled' : used > slotCapacity(slot, slide) ? 'template_slot_overflow' : 'template_description_too_short';
     return [{ code, severity: 'error',
       message: `模板第 ${index + 1} 页槽位 ${slot.shapeId} ${!used ? '必须填写' : used > slotCapacity(slot, slide) ? `需要缩短至 ${slotCapacity(slot, slide)} visual units` : `说明应达到至少 ${slot.minVisualUnits} visual units，并解释对应要点`}`,
@@ -1138,7 +1180,12 @@ export function bindDerivedCoverSubtitle(project, slide, source) {
 
 export async function renderTemplatePptx(project,io={}) {
   if (project.templateFidelity?.mode !== 'preserve') throw new Error('template fidelity is unavailable');
-  const copy = { ...project, externalPptx: { originalPath: project.templateFidelity.originalPath },
+  if(project.templateContentMode==='keep_fixed'){
+    const selected=new Set(project.templateFixedObjectIds||[]),catalog=project.templateFidelity.sourceCatalog||[];
+    const missing=catalog.flatMap((slide,index)=>slide.nodes?.some(node=>selected.has(node.id))&&!project.templateFidelity.slideMap.includes(index)?[index+1]:[]);
+    if(missing.length)throw new Error('template_fixed_objects_unmapped: selected fixed objects belong to unused template pages '+missing.join(', ')+'. Include those layouts or revise the fixed-object selection before exporting.');
+  }
+  const copy = { ...project, externalPptx: { originalPath: project.templateFidelity.originalPath, nativeIdNormalization:project.templateFidelity.nativeIdNormalization },
     templateSlideMap: project.templateFidelity.slideMap,
     deck: { ...project.deck, slides: project.deck.slides.map(slide => ({ ...slide, nativeSlideIndex: slide.templateSlideIndex })) } };
   return renderImportedPptx(copy,io);
@@ -1152,6 +1199,7 @@ export function inspectTemplateFidelity(project) {
   project.deck?.slides?.forEach((slide, index) => {
     const source = project.templateFidelity.slides[index];
     for (const node of slide.nodes || []) if (node.templateTitleFrameAdaptation?.status === 'blocked') issues.push({ code: 'template_cjk_title_frame_capacity', severity: 'error', slideId: slide.id, nodeId: node.id, repairable: true, message: '原生标题的字形高度无法在相邻对象之间容纳；不能缩字或覆盖其他对象' });
+    for(const node of slide.nodes||[])if(node.sectionDecorationFrameAdaptation?.status==='blocked')issues.push({code:'template_section_decoration_capacity',severity:'error',slideId:slide.id,nodeId:node.id,repairable:true,message:'The section label cannot fit its enclosing decoration without crossing a neighboring object; shorten the automatic label or adjust the layout.'});
     const native = slide.nodes.filter(node => node.nativeRef?.slideIndex === index);
     const originals=native.filter(node=>node.nativeRef.cloneFromShapeId===undefined),clones=native.filter(node=>node.nativeRef.cloneFromShapeId!==undefined);
     const omitted = new Set((slide.templateOmissions || []).map(item => String(item.shapeId)));
@@ -1184,8 +1232,15 @@ export function inspectTemplateFidelity(project) {
           slideId: slide.id, repairable: false });
     }
     if (source.variant && source.variant.kind !== 'original') {
+      const catalog=project.templateFidelity.sourceCatalog?.[source.sourceIndex];
+      const preserved=native.filter(node=>node.content?.mustPreserve);
+      const fixedReuse=source.variant.kind==='fixed-content-preserved'&&project.templateContentMode==='keep_fixed'&&preserved.length>0&&preserved.every(node=>{
+        const base=catalog?.nodes?.find(original=>original.nativeRef?.shapeId===node.nativeRef.shapeId);
+        return base&&project.templateFixedObjectIds?.includes(base.id)&&base.content?.mustPreserve&&
+          (node.userGeometry||JSON.stringify(node.geometry)===JSON.stringify(base.geometry))&&JSON.stringify(node.content?.crop)===JSON.stringify(base.content?.crop);
+      });
       const variantKey = `${source.sourceIndex}:${source.variantId}`;
-      if (variantKeys.has(variantKey)) issues.push({ code: 'template_variant_duplicate', severity: 'error',
+      if (variantKeys.has(variantKey)&&!fixedReuse) issues.push({ code: 'template_variant_duplicate', severity: 'error',
         message: `模板第 ${index + 1} 页重复使用同一原生版式和媒体变体`, slideId: slide.id, repairable: false });
       variantKeys.add(variantKey);
       const original = project.templateFidelity.slides.find((item, originalIndex) => originalIndex < index && item.sourceIndex === source.sourceIndex);
@@ -1200,7 +1255,7 @@ export function inspectTemplateFidelity(project) {
           node.content?.imageSha256 !== base.content?.imageSha256 ||
           JSON.stringify(node.content?.crop) !== JSON.stringify(base.content?.crop));
       });
-      if (!original || !visualChanged) issues.push({ code: 'template_variant_unchanged', severity: 'error',
+      if (!original || !visualChanged&&!fixedReuse) issues.push({ code: 'template_variant_unchanged', severity: 'error',
         message: `模板第 ${index + 1} 页复用了原版式，但媒体与布局均未改变`, slideId: slide.id, repairable: false });
       if (source.variant.mediaShapeId) {
         const mediaNode = native.find(node => node.nativeRef.shapeId === source.variant.mediaShapeId);
@@ -1216,7 +1271,7 @@ export function inspectTemplateFidelity(project) {
       }
       if (!node?.templateSlot?.mapped || !String(node.content?.text || '').trim()) issues.push({ code: 'template_slot_unfilled', severity: 'error', message: `模板文字槽位 ${slot.shapeId} 未填写`, slideId: slide.id, repairable: false });
       else if (incompletePhrase(node.content.text)) issues.push({ code: 'template_text_fragment', severity: 'error', message: `模板文字槽位 ${slot.shapeId} 停在句中`, slideId: slide.id, repairable: false });
-      else if (visualUnits(node.content.text) > slotCapacity(slot, slide)) issues.push({ code: 'template_slot_overflow', severity: 'error', message: `模板文字槽位 ${slot.shapeId} 超过容量`, slideId: slide.id, repairable: false });
+      else if (visualUnits(node.content.text) > slotCapacity(slot, slide) && !nativeTitleFitsFrame(source,slot,node.content.text,node)) issues.push({ code: 'template_slot_overflow', severity: 'error', message: `模板文字槽位 ${slot.shapeId} 超过容量`, slideId: slide.id, repairable: false });
       else if (slot.minVisualUnits && visualUnits(node.content.text) < slot.minVisualUnits) issues.push({ code: 'template_description_too_short', severity: 'error', message: `模板文字槽位 ${slot.shapeId} 的要点说明过短`, slideId: slide.id, repairable: false });
       else if (slot.pairedWith && explanationRepeatsHeading(native.find(item => item.nativeRef.shapeId === slot.pairedWith)?.content?.text, node.content.text)) issues.push({ code: 'template_description_repeats_heading', severity: 'error', message: `模板文字槽位 ${slot.shapeId} 重复要点标题`, slideId: slide.id, repairable: false });
     }
@@ -1231,7 +1286,7 @@ export function inspectTemplateFidelity(project) {
   return issues;
 }
 
-export const _internals = { slotsFor, visualUnits, profileSourceSlide, panelSwapGeometry, ordinalReadingOrder, expandSafeDescriptions, reclaimedMediaTextFrames, safeDecorativeMedia, textOverlayCalloutPanel, contentCoverageIssues, detailEvidenceText };
+export const _internals = { cloneTemplateValue, slotsFor, visualUnits, profileSourceSlide, panelSwapGeometry, ordinalReadingOrder, expandSafeDescriptions, reclaimedMediaTextFrames, safeDecorativeMedia, textOverlayCalloutPanel, contentCoverageIssues, detailEvidenceText };
 
 /** Repair only an unwritten native page. Completed/user-accepted pages retain
  * their original assignment; no missing template origin or font shrink allowed. */

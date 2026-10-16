@@ -40,9 +40,14 @@ for (const [sample, language, title, ending] of [[english, 'en', 'Learning', 'Th
   assert.equal(slide.title, title); assert.deepEqual(slide.bullets, body, 'body evidence retains both languages');
   assert.equal(slide.copy.eyebrow, language === 'en' ? 'Mechanism' : '机制');
   assert.equal(slide.section, language === 'en' ? 'Mechanism' : '机制');
-  assert.equal(api.normalizeSlide({ title: 'Summary', bullets: body }, outline[2], project).title, ending);
-  assert.equal(api.normalizeSlide({ title: 'Summary', bullets: body }, outline[2], project).titleQuality.locked, false, 'generated closing is editable');
-  assert.equal(api.normalizeSlide({ title: language === 'en' ? '感谢观看' : 'Thanks for watching!', bullets: body }, outline[2], project).title, ending);
+  const summary = api.normalizeSlide({ title: 'Summary', bullets: body }, outline[2], project);
+  assert.equal(summary.title, 'Summary', 'a substantive last page retains its topic');
+  assert.deepEqual(summary.bullets, body, 'the bilingual summary remains visible');
+  assert.ok(summary.nodes.some(node => node.semanticRole === 'closing-greeting' && node.content.text === ending), 'the actual canonical footer contains the greeting');
+  assert.notEqual(summary.titleQuality.locked, true, 'the generated topic is editable');
+  const translatedGreeting = api.normalizeSlide({ title: language === 'en' ? '感谢观看' : 'Thanks for watching!', bullets: body }, outline[2], project);
+  assert.deepEqual(translatedGreeting.bullets, body);
+  assert.ok(translatedGreeting.title === ending || translatedGreeting.nodes.some(node => node.semanticRole === 'closing-greeting' && node.content.text === ending));
   const locked = { ...project, deckTitle: { source: 'user', text: 'My title | 自定标题' } };
   assert.equal(api.normalizeSlide({ title: 'Overview' }, outline[0], locked).title, 'My title | 自定标题');
 }

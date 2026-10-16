@@ -111,7 +111,7 @@ try {
       ...(kind === 'file' ? { fileName: 'validation.html', fileBase64: Buffer.from('<html><body>'+source.text+'</body></html>').toString('base64') } : {}), generationPolicy: config, template: 'light', model: 'simulated', configId: 'simulation' });
     assert.equal(created.status, 201, JSON.stringify(created.body));
     const ready = await settle(created.body.project.id);
-    assert.equal(ready.status, 'outline_ready', ready.error); assert.equal(ready.pages, 3);
+    assert.equal(ready.status, 'outline_ready', ready.error); assert.equal(ready.pages, 4);assert.equal(ready.outline.at(-1).title,'Thanks for watching!');assert.equal(ready.outline.at(-1).sourceUnitIds.length,0);
     assert.equal(ready.pageDecision.mode, 'auto'); assert.equal(ready.pageDecision.confirmedAt, null);
     assert.equal(ready.planning.densityPacking.mergeCount, 1); checked();
     await request('DELETE', `projects/${ready.id}`);
@@ -144,15 +144,22 @@ try {
     return JSON.parse(result.stdout);
   };
   const native=await request('POST','projects',{inputKind:'paste',text:source.text,prompt:'Explain validation',generationPolicy:config,template:'light',configId:'simulation'});
-  const ready=await settle(native.body.project.id);assert.equal(ready.pages,3);assert.equal(ready.status,'outline_ready',ready.error);
+  const ready=await settle(native.body.project.id);assert.equal(ready.pages,4);assert.equal(ready.outline.at(-1).title,'Thanks for watching!');assert.equal(ready.status,'outline_ready',ready.error);
   assert.equal((await request('POST',`projects/${ready.id}/generate`)).status,202);
   let published;
   for(let n=0;n<600;n++){published=store.get(uid,ready.id);if(['completed','quality_blocked','failed'].includes(published.status))break;await new Promise(r=>setTimeout(r,10));}
   assert.equal(published.status,'completed',JSON.stringify({error:published.error,quality:published.quality}));
-  assert.ok(published.pageDecision.confirmedAt);assert.equal(published.pages,3);assert.ok(published.pageDecision.fitValidated);
+  assert.ok(published.pageDecision.confirmedAt);assert.equal(published.pages,4);assert.equal(published.deck.slides.at(-1).title,'Thanks for watching!');assert.ok(published.pageDecision.fitValidated);
+  // The production generation path must report renderer failures even when a
+  // renderer mutates its scratch copy before throwing. Preserve reviewed text.
+  const goodRenderer=deps.renderPptx;deps.renderPptx=async candidate=>{candidate.deck.slides[0].nodes[0].content.text='EXPORT-SCRATCH';throw new Error('intentional native export failure');};
+  const badExport=await request('POST','projects',{inputKind:'paste',text:source.text,prompt:'Explain validation',generationPolicy:config,template:'light',configId:'simulation'});
+  const badReady=await settle(badExport.body.project.id);assert.equal(badReady.status,'outline_ready');await request('POST',`projects/${badReady.id}/generate`);
+  let blocked;for(let n=0;n<600;n++){blocked=store.get(uid,badReady.id);if(['completed','quality_blocked','failed'].includes(blocked.status))break;await new Promise(r=>setTimeout(r,10));}
+  assert.equal(blocked.status,'quality_blocked',blocked.error);assert.match(blocked.error,/intentional native export failure/);assert.ok(!JSON.stringify(blocked.deck).includes('EXPORT-SCRATCH'),'renderer scratch mutations cannot change reviewed text');deps.renderPptx=goodRenderer;
   const inspectScript="import sys,json\nfrom pptx import Presentation\np=Presentation(sys.argv[1]);t=[s.table for slide in p.slides for s in slide.shapes if s.has_table]\nprint(json.dumps({'pages':len(p.slides),'tables':[[[c.text for c in r.cells] for r in v.rows] for v in t],'texts':[s.text for slide in p.slides for s in slide.shapes if s.has_text_frame],'headerColors':[str(v.cell(0,0).text_frame.paragraphs[0].runs[0].font.color.rgb) for v in t]}))";
   const inspected=spawnSync(python,['-c',inspectScript,path.join(exportDir,'density-native-smoke.pptx')],{encoding:'utf8'});
-  assert.equal(inspected.status,0,inspected.stderr);const exported=JSON.parse(inspected.stdout);assert.equal(exported.pages,3);assert.deepEqual(exported.tables[0],table.rows);
+  assert.equal(inspected.status,0,inspected.stderr);const exported=JSON.parse(inspected.stdout);assert.equal(exported.pages,4);assert.ok(exported.texts.includes('Thanks for watching!'));assert.deepEqual(exported.tables[0],table.rows);
   assert.ok(exported.texts.includes('The owner compares the recorded result with the agreed condition before the decision.'));
   assert.equal(exported.headerColors[0],'FFFFFF');
   fs.writeFileSync(path.join(exportDir,'density-native-smoke.json'),JSON.stringify({pageDecision:published.pageDecision,densityPacking:published.planning.densityPacking,quality:published.quality,exported},null,2));checked();
@@ -167,7 +174,7 @@ try {
   const preservedInspect=spawnSync(python,['-c',inspectScript,preservedPath],{encoding:'utf8'});
   assert.equal(preservedInspect.status,0,preservedInspect.stderr);
   const preservedExport=JSON.parse(preservedInspect.stdout);
-  assert.equal(preservedExport.pages,3);assert.deepEqual(preservedExport.tables.at(-1),table.rows);
+  assert.equal(preservedExport.pages,4);assert.ok(preservedExport.texts.includes('Thanks for watching!'));assert.deepEqual(preservedExport.tables.at(-1),table.rows);
   assert.equal(preservedExport.headerColors.at(-1),'FFFFFF');
   assert.equal(preservedExport.texts.filter(text=>text==='The owner compares the recorded result with the agreed condition before the decision.').length,2,'existing and newly exported native explanation both survive');checked();
   const empty = await request('POST', 'page-estimate', { inputKind: 'paste', text: '', prompt: '', template: 'light' });

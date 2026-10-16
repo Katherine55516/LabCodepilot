@@ -16,7 +16,7 @@ test.describe('Smoke @smoke', () => {
     await waitForPageReady(page);
 
     expect(response?.status()).toBeLessThan(400);
-    expect(page.url()).toContain('/chat');
+    await expect(page).toHaveURL(/\/chat(?:[/?#]|$)/);
 
     const title = await page.title();
     expect(title).not.toContain('404');

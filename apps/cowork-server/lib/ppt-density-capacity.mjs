@@ -1,3 +1,5 @@
+import {sourceReadingContinuation} from './ppt-source-continuations.mjs';
+import {supportsSourceLineRanges,sourceLineRange,materializeSourceLineRange} from './ppt-source-line-ranges.mjs';
 import { sourceDisplayText, sourceRichText, richTextContent } from './ppt-source-text.mjs';
 import {ensureRichContent} from './ppt-rich-text.mjs';
 import {readingUnits} from './ppt-semantic-relations.mjs';
@@ -6,10 +8,10 @@ import { orderedSourceSteps } from './ppt-source-boundaries.mjs';
 import { templateMediaRole } from './ppt-template-fidelity.mjs';
 /** Shared geometry/line estimator for page planning and source-owned rendering.
  * A fit is an analytic prediction; final Render Tree/PPTX QA remains mandatory. */
-import { measureText, textContract, PT_EMU } from './ppt/render-contract.mjs';
+import { measureText, textContract, PT_EMU, RENDER_CONTRACT_VERSION } from './ppt/render-contract.mjs';
 import { displayUnits } from './ppt-density-profile.mjs';
 import { equationContent, equationDimensions } from './ppt-math.mjs';
-import {chooseLayout,regionsFor} from './ppt-layout.mjs';
+import {chooseLayout,regionsFor,typographyFor} from './ppt-layout.mjs';
 export const INCH = 914400;
 export const protectedTemplateAsset = node => Boolean(node?.content?.mustPreserve || ['evidence','semanticDiagram','source','brand'].includes(node?.content?.mediaRole));
 export function contentCanvas(project = {}, index = 1) {
@@ -29,6 +31,22 @@ export function contentCanvas(project = {}, index = 1) {
   if(!spec&&page&&chooseLayout(page,index,project.pages||project.outline?.length||1)==='cover'){
     const body=regionsFor({layoutId:'cover'}).find(region=>region.id==='body');
     left=body.x*INCH;right=(body.x+body.w)*INCH;top=body.y*INCH;bottom=(body.y+body.h)*INCH;
+  }
+  if(!spec){
+    const headerPage=page||{layoutId:'summary'};
+    // Plan with the actual title ink and footer, before source pagination.
+    // Render-time title growth cannot borrow space already assigned to code,
+    // a table or another immutable source object.
+    const layoutId=chooseLayout(headerPage,index,project.pages||project.outline?.length||project.deck?.slides?.length||3);
+    const regions=regionsFor({...headerPage,layoutId}),region=regions.find(r=>r.id==='title'),footer=regions.find(r=>r.id==='footer');
+    if(region){
+      const node=headerPage.nodes?.find(n=>n.semanticRole==='title'),font=typographyFor({...headerPage,layoutId}).titlePt;
+      const title={kind:'text',semanticRole:'title',bounds:node?.geometry||{x:region.x*INCH,y:region.y*INCH,width:region.w*INCH,height:region.h*INCH},content:node?.content||{text:headerPage.title||''},style:{fontFamily:project.templateSpec?.fonts?.title,fontSizePt:Math.round(font*(project.deck?.themeTokens?.titleScale||1)*10)/10,lineHeight:1.05,paragraphSpacingEm:0,fontWeight:700,...node?.style}};
+      const contract=textContract(title),measured=measureText(title,contract);
+      const inkHeight=!measured.widthOverflow&&measured.lines<=2?Math.ceil((measured.estimatedHeightPt+contract.margins[1]+contract.margins[3]+1)*PT_EMU):title.bounds.height;
+      top=Math.max(top,title.bounds.y+Math.max(title.bounds.height,inkHeight)+INCH*.08);
+    }
+    if(footer)bottom=Math.min(bottom,footer.y*INCH-INCH*.08);
   }
   if(frames.length){
     left=Math.max(0,Math.min(...frames.map(node=>node.geometry.x)));
@@ -79,8 +97,10 @@ export function contentCanvas(project = {}, index = 1) {
     if(!choices.length){right=left;bottom=top;break;}
     const c=choices[0];left=c.l;right=c.r;top=c.t;bottom=c.b;
   }
-  if(project.contentSelection?.entries?.some(e=>['notes','summary'].includes(e.destination)))bottom=Math.min(bottom,height-INCH*.64);
-  return { geometry:{x:Math.round(left),y:Math.round(top),width:Math.max(0,Math.round(right-left)),height:Math.max(0,Math.round(bottom-top))},fontSizePt,
+  const continuation=sourceReadingContinuation(project,index);
+  const continuationRect=continuation?{x:Math.round(left),y:Math.round(bottom-INCH*.42),width:Math.max(0,Math.round(right-left)),height:Math.round(INCH*.42)}:undefined;
+  if(continuation)bottom-=INCH*.5;
+  return { continuationRect,geometry:{x:Math.round(left),y:Math.round(top),width:Math.max(0,Math.round(right-left)),height:Math.max(0,Math.round(bottom-top))},fontSizePt,
     capacityBasis:frames.length?'native_frame_geometry':'default_canvas_before_template_parse' };
 }
 export function measureComponent(component, geometry, fontSizePt) {
@@ -117,7 +137,10 @@ export function measureComponent(component, geometry, fontSizePt) {
   } else if (['list', 'timeline'].includes(component.type)) {
     const e={kind:component.type,bounds:{...geometry,height:1e12},content:component.content,style:{fontSizePt,lineHeight:1.18,paragraphSpacingEm:component.type==='timeline'?.15:.4}};
     const measured=measureText(e,textContract(e));
-    return {lines:measured.lines,height:Math.ceil((measured.estimatedHeightPt+7.2)*PT_EMU),lineUnits,overflow:measured.estimatedHeightPt*PT_EMU>geometry.height};
+    // Actual CJK inline OMML ink exceeded the conservative frame by 1.38pt.
+    // Reserve 2pt before pagination; retain the template font and all source.
+    const mathInk=(component.content.items||[]).some(item=>(item.richText?.runs||[]).some(run=>run.kind==='math'))?2:0;
+    return {lines:measured.lines,height:Math.ceil((measured.estimatedHeightPt+7.2+mathInk)*PT_EMU),lineUnits,overflow:(measured.estimatedHeightPt+mathInk)*PT_EMU>geometry.height};
   } else if(component.content?.mathMl) {
     const dimensions=equationDimensions(component.content,fontSizePt);
     const width=Math.ceil(dimensions.widthPt/72*INCH),height=Math.ceil(dimensions.heightPt/72*INCH);
@@ -166,7 +189,11 @@ export function fitComponents(components, project = {}, index = 1, options = {})
   // A merge proposal must not gain capacity by shrinking already visible type.
   const fontSizePt=Math.max(defaultFont,Number(options.fontSizePt)||0,...components.map(c=>Number(c.fontSizePt)||0));
   if(!components.length||canvas.width<=0||canvas.height<=0)return {capacity_ok:false,predictedOverflow:components.length?1:0,fontSizePt,canvas,boxes:[],measurements:[],capacityBasis,measurementBasis:components.length?'invalid_content_geometry':'missing_display_plan'};
-  const gapInches=options.gapInches===.12?.12:.16;
+  const oneFragmentedList=components.length>1&&typeof components[0].sourceUnitId==='string'&&components.every(c=>c.type==='list'&&c.itemFragment&&c.sourceUnitId===components[0].sourceUnitId);
+  // Each split list point already retains its measured paragraph spacing and
+  // text-frame padding. A second outer object gap is optional, not a font or
+  // content requirement; remove only that duplicate gap if the full list needs it.
+  const gapInches=options.gapInches===0&&oneFragmentedList?0:options.gapInches===.12?.12:.16;
   const gap = Math.round(INCH * gapInches);
   const candidates = [];
   const languages=components.map(componentLanguage);
@@ -270,17 +297,33 @@ export function fitComponents(components, project = {}, index = 1, options = {})
   // Atomic pairs are a capacity constraint: overflow is preferable to a false
   // pass obtained by interleaving unrelated languages in shortest columns.
   const eligible=candidates.filter(candidate=>candidate.atomicReadingUnits&&candidate.readingOrder);
+  const primaryFirst = components.length === 2 && ['table','chart','image'].includes(components[0].type) && components[1].type === 'text';
+  const balancedPair = candidate => primaryFirst && candidate.layoutId === 'asymmetric-source' && candidate.columnRatio === .65 ? 1 : 0;
   const best = (eligible.length?eligible:candidates).sort((a, b) => Number(a.predictedOverflow > 0) - Number(b.predictedOverflow > 0)
+    || (a.predictedOverflow === 0 && b.predictedOverflow === 0 ? balancedPair(b) - balancedPair(a) : 0)
     || (a.predictedOverflow > 0 ? a.usedHeight - b.usedHeight : a.codeWraps - b.codeWraps || readability(b) - readability(a) || a.usedHeight - b.usedHeight))[0];
-  if(best.predictedOverflow>0&&options.gapInches===undefined){const compact=fitComponents(components,project,index,{...options,gapInches:.12});if(compact.capacity_ok)return {...compact,spacingBasis:'measured 0.12in object gaps, unchanged text font/line spacing/source'};}
+  if(best.predictedOverflow>0&&options.gapInches===undefined){const compact=fitComponents(components,project,index,{...options,gapInches:.12});if(compact.capacity_ok)return {...compact,spacingBasis:'measured 0.12in object gaps, unchanged text font/line spacing/source'};if(oneFragmentedList){const listFit=fitComponents(components,project,index,{...options,gapInches:0});if(listFit.capacity_ok)return {...listFit,spacingBasis:'contiguous list fragments retain native paragraph spacing and frame padding; no duplicate outer object gap'};}}
   // A single primary component plus its caption/brief explanation belongs in
   // the middle of the available region, not against an arbitrary template edge.
   if (best.predictedOverflow === 0 && components.length <= 3 && components.filter(c=>['table','image','chart'].includes(c.type)).length === 1) {
     const dy=Math.round((canvas.height-best.usedHeight)/2);
     // Stacked boxes centre one by one; side-by-side columns move as a group.
     const stacked=best.boxes.every((box,i)=>best.boxes.every((other,j)=>i===j||box.y>=other.y+other.height-1||other.y>=box.y+box.height-1));
+    // Components sharing horizontal space form one column/stack. Shift that
+    // group as a whole: independently centering two paragraphs overlaps them.
+    const shifts=new Map(),remaining=new Set(best.boxes.map((_,i)=>i));
+    while(remaining.size){
+      const group=[remaining.values().next().value];remaining.delete(group[0]);
+      for(let n=0;n<group.length;n++)for(const other of [...remaining]){
+        const a=best.boxes[group[n]],b=best.boxes[other];
+        if(Math.min(a.x+a.width,b.x+b.width)>Math.max(a.x,b.x)+1){group.push(other);remaining.delete(other);}
+      }
+      const top=Math.min(...group.map(i=>best.boxes[i].y)),bottom=Math.max(...group.map(i=>best.boxes[i].y+best.boxes[i].height));
+      const shift=Math.round(canvas.y+(canvas.height-(bottom-top))/2-top);
+      for(const i of group)shifts.set(i,shift);
+    }
     best.boxes.forEach((box,i)=>{
-      box.y+=dy;
+      box.y+=stacked?dy:shifts.get(i);
       if (components[i].type==='image') {
         const c=components[i].content || {},ratio=Number(c.width)/Number(c.height);
         if (ratio>0) box.width=Math.min(box.width,Math.round(box.height*ratio));
@@ -294,7 +337,7 @@ export function fitComponents(components, project = {}, index = 1, options = {})
     }
     best.balanced='centered';
   }
-  return { ...best, layoutGapInches:gapInches, capacity_ok: best.predictedOverflow === 0&&best.atomicReadingUnits&&best.readingOrder, capacityBasis, measurementBasis: 'shared_line_estimator',
+  return { ...best, renderContractVersion:RENDER_CONTRACT_VERSION, layoutGapInches:gapInches, capacity_ok: best.predictedOverflow === 0&&best.atomicReadingUnits&&best.readingOrder, capacityBasis, measurementBasis: 'shared_line_estimator',
     ...(process.env.PPT_FIT_DEBUG ? { alternatives: candidates.map(c => ({ layoutId: c.layoutId, overflow: Math.round(c.predictedOverflow / INCH * 100) / 100, used: Math.round(c.usedHeight / INCH * 100) / 100, readingOrder: c.readingOrder })) } : {}) };
 }
 /** A measured guidance budget, never a text truncator or an acceptance override. */
@@ -317,6 +360,11 @@ export function validateSourceArtifactRefs(items, refs) {
   for(const ref of refs){
     const item=items.find(item=>item.id===ref?.sourceUnitId);
     if(!isSourceArtifactItem(item))throw new Error('source artifact not assigned to a structure or summary');
+    if(ref.lineStart!==undefined||ref.lineEnd!==undefined){
+      const range=sourceLineRange(item,ref),ranges=intervals.get(item.id)||[];
+      if(ranges.some(([a,b])=>range.lineStart<b&&range.lineEnd>a))throw new Error('overlapping source line ranges');
+      ranges.push([range.lineStart,range.lineEnd]);intervals.set(item.id,ranges);continue;
+    }
     if(!['TableBlock','SummaryTableBlock'].includes(item.type)){
       if(ref.rowStart!==undefined||ref.rowEnd!==undefined)throw new Error('row range is only valid for a table');
       if(intervals.has(item.id))throw new Error('duplicate source artifact');
@@ -332,7 +380,8 @@ export function validateSourceArtifactRefs(items, refs) {
 }
 /** Source components keep their translation-pair identity for layout. */
 export function sourceComponent(item, ref = {}) {
-  const raw = sourceComponentBody(item, ref),component={...raw,sourceUnitId:item.id,content:ensureRichContent(raw.content)};
+  const displayed=ref.lineStart!==undefined||ref.lineEnd!==undefined?materializeSourceLineRange(item,ref):item;
+  const raw = sourceComponentBody(displayed, ref),component={...raw,sourceUnitId:item.id,content:ensureRichContent(raw.content)};
   return item?.languagePairId ? { ...component, pairId: item.languagePairId } : component;
 }
 /** Checklist members are semantic points, not one paragraph-count proxy.
@@ -354,16 +403,32 @@ function sourceComponentBody(item, ref = {}) {
   if(item.type==='ChartBlock')return {type:'chart',content:structuredClone(item.chart)};
   if(item.type==='CodeBlock')return {type:'text',content:{text:item.text,codeBlock:{language:item.language || '',sourceText:item.text}}};
   if(item.type==='EquationBlock')return {type:'text',content:equationContent(item.text)};
+  // Older parsed snapshots stored compact ASCII branches as lossy table
+  // rows but retained the complete immutable diagram alongside them. Render
+  // that drawing directly when the reference owns the whole legacy object.
+  const legacyDrawing=item.type==='TableBlock'&&item.diagramSource?.kind==='ascii'&&item.rows?.slice(1).map(row=>row.length===1?String(row[0]):'').join('\n')!==String(item.diagramSource.text||'')&&/├|└|\b(?:Yes|No)\s*→/u.test(item.diagramSource.text||'')?String(item.diagramSource.text).replace(/\s+$/u,''):'';
+  if(legacyDrawing&&legacyDrawing.split('\n').length<=20&&Math.max(...legacyDrawing.split('\n').map(line=>line.length))<=64){
+    if(ref.rowStart!==undefined&&(ref.rowStart!==1||ref.rowEnd!==item.rows.length))throw new Error('Legacy ASCII diagram requires its complete original source scope');
+    return {type:'text',content:{text:legacyDrawing,codeBlock:{language:'diagram',sourceText:legacyDrawing},processSource:legacyDrawing}};
+  }
   if (['TableBlock','SummaryTableBlock'].includes(item.type)) {
     const start = ref.rowStart === undefined ? 1 : Number(ref.rowStart), end = ref.rowEnd === undefined ? item.rows.length : Number(ref.rowEnd);
     if (!Number.isInteger(start) || !Number.isInteger(end) || start < 1 || (end < start || end === start && item.rows.length !== 1) || end > item.rows.length) throw new Error('invalid source table row range');
-    const rawRows=[item.rows[0],...item.rows.slice(start,end)].map(row=>row.map(String)),cellRich=rawRows.map(row=>row.map(value=>sourceRichText(value)));
+    const rawRows=[item.rows[0],...item.rows.slice(start,end)].map(row=>row.map(String)),cellRich=rawRows.map(row=>row.map(value=>sourceRichText(value,{inline:true})));
     return {type:'table',content:{rows:cellRich.map(row=>row.map(cell=>cell.plainText)),rawRows,cellRich,derivedSummary:item.derivedSummary,displayTransformVersion:2}};
   }
+  // A fanned-out or branching ASCII drawing reads as its original drawing in a
+  // monospace box; flattening its columns with " / " garbles the arrows.
+  const drawing=item.diagramSource?.kind==='ascii'&&['parallel','branching'].includes(item.diagramSource.relation)?(item.sourceLineRange?item.text:String(item.diagramSource.text||'').replace(/\s+$/u,'')):'';
+  if(drawing&&(item.sourceLineRange||drawing.split('\n').length<=20&&Math.max(...drawing.split('\n').map(line=>line.length))<=64))
+    return {type:'text',content:{text:drawing,codeBlock:{language:'diagram',sourceText:drawing},processSource:item.text}};
+  // A drawing too wide for a slide keeps its source text, one box per line; a
+  // timeline would add per-stage chrome and overflow a long architecture.
   const sourceLines=item.text.split('\n').filter(line=>line.trim()),bullet=/^\s*(?:[-*+]|\d+[.)])\s+/;
   // Warning/role/taxonomy classification must not erase the source's list
   // structure. Only a wholly explicit list is split; mixed prose stays whole.
   if (item.type === 'ChecklistBlock'||['WarningBlock','TaxonomyBlock'].includes(item.type)&&sourceLines.length>=1&&sourceLines.every(line=>bullet.test(line))) return { type: 'list', content: { items: sourceLines.filter(line=>bullet.test(line)).map(line => ({ text: line.replace(bullet, '') })) } };
+  if(item.type==='ProcessBlock'&&item.diagramSource?.kind==='text-flow')return {type:'timeline',content:{items:item.text.split('\n').map(text=>richTextContent(text)),processSource:item.text}};
   if (item.type==='ProcessBlock' && /branch|if\b|else\b|分支|否则|┌|├|└/i.test(item.text)) return {type:'text',content:{text:item.text,processSource:item.text}};
   if (item.type === 'ProcessBlock') {
     const steps=orderedSourceSteps(item.text);

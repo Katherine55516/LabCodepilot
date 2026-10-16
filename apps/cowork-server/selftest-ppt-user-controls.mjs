@@ -58,13 +58,36 @@ assert.throws(()=>validateLanguageProjection({locale:"en",hash:"bilingual-cell",
 const fullBoundScope=writerLocalRepairScope(rawComment,Error('source_artifact_capacity: {"sourceFits":true,"singleParagraphCjkCharacters":15}'),{allOwnedSourceBound:true});
 assert.equal(fullBoundScope.optionalCommentaryCanOmit,true);
 
-const {validateNavigationPlan,navigationPlanEntries}=await import("./lib/ppt-navigation-plan.mjs");
+const {validateNavigationPlan,navigationPlanEntries,compileNavigationLabels,prepareNavigationPlan}=await import("./lib/ppt-navigation-plan.mjs");
 const sections=[{section:"Architecture Assessment",targets:[{slideId:"s1",page:3}]},{section:"Capability Maturity",targets:[{slideId:"s2",page:4}]},{section:"Research Roadmap",targets:[{slideId:"s3",page:6}]}];
 const navPlan=validateNavigationPlan(sections,{version:1,groups:[{label:"Assessment",memberIndexes:[0,1]},{label:"Roadmap",memberIndexes:[2]}]},{maxGroups:2,maxVisualUnits:10});
 assert.deepEqual(navigationPlanEntries(sections,{...navPlan,audit:{status:"passed"}})[0].pageRanges,[{start:3,end:4}]);
 assert.throws(()=>validateNavigationPlan(sections,{version:1,groups:[{label:"Assessment",memberIndexes:[0,1]}]},{maxGroups:2,maxVisualUnits:10}));
 assert.throws(()=>validateNavigationPlan(sections,{version:1,groups:[{label:"Assessment",memberIndexes:[0,1]},{label:"Roadmap",memberIndexes:[1,2]}]},{maxGroups:2,maxVisualUnits:10}));
 assert.equal(navigationPlanEntries(sections,navPlan),sections,"unaudited navigation labels cannot become visible");
+const navCompiled=compileNavigationLabels({prompt:'English content'.repeat(20)},{version:1,groups:[{label:'Architecture Assessment and Capability Maturity',memberIndexes:[0,1]},{label:'Research Roadmap and Future Deliverables',memberIndexes:[2]}]},10);
+assert.deepEqual(navCompiled.value.groups.map(group=>group.label),['Architecture Assessment and Capability Maturity','Research Roadmap and Future Deliverables']);
+assert.equal(navCompiled.corrections.length,2);
+assert.throws(()=>validateNavigationPlan(sections,navCompiled.value,{maxGroups:2,maxVisualUnits:10}),/label capacity/,'a too-long topic must be rewritten; preserving section IDs cannot justify clipping its words');
+assert.equal(navigationPlanEntries(sections,{...navCompiled.value,registryHash:navPlan.registryHash}),sections,'unrepaired labels still require the independent audit');
+const mergedNav=compileNavigationLabels({prompt:'English source'},{version:1,groups:[{label:'Research Roadmap one',memberIndexes:[0]},{label:'Research Roadmap two',memberIndexes:[1]}]},9);
+assert.equal(mergedNav.value.groups.length,2,'different topics never merge merely because their prefixes would match');
+const mixedNavProject={prompt:'The English source explains architecture and research methods. '.repeat(30),outline:[{id:'nav',role:'navigation'}]};
+const mixedEntries=sections.map(entry=>({...entry,displayLabel:entry.section+' | 来源章节主题名称'}));let auditSeen=false;
+await prepareNavigationPlan(mixedNavProject,mixedEntries,async prompt=>{
+ if(prompt.includes('Navigation Plan Schema='))return {version:1,groups:[{label:'Architecture',memberIndexes:[0,1]},{label:'Research',memberIndexes:[2]}]};
+ auditSeen=true;assert.ok(prompt.includes('ONLY English')&&prompt.includes('do not require both original languages'),'navigation audit must not restore the retired bilingual topic rule');
+ return {version:1,checks:[0,1].map(groupIndex=>({groupIndex,faithful:true,reason:'The single-language name retains its original source topic.'}))};
+});
+assert.ok(auditSeen);assert.equal(mixedNavProject.navigationPlan.audit.status,'passed');
+const completeLedger=[{section:'Layout and Design Engine',displayLabel:'Layout and Design Engine with complete component and typography responsibilities',targets:[{slideId:'d',page:2}]},{section:'Image and Media Pipeline',displayLabel:'Image and Media Pipeline including all original assets and figures',targets:[{slideId:'m',page:3}]}];
+const conciseProject={...mixedNavProject,navigationPlan:undefined};let planCalls=0,auditCalls=0;
+await prepareNavigationPlan(conciseProject,completeLedger,async prompt=>{
+ if(prompt.includes('Navigation Plan Schema=')){planCalls++;if(planCalls===1)return {version:1,groups:[{label:'Layout, Theme, Design Engine, Image and Media Pipeline',memberIndexes:[0,1]}]};assert.match(prompt,/label capacity/);return {version:1,groups:[{label:'Design and Media',memberIndexes:[0,1]}]};}
+ auditCalls++;assert.match(prompt,/Design and Media/);assert.ok(!prompt.includes('Layout, Theme, Design Engine, Image and Media Pipeline'),'unfaithful word-prefix truncation never reaches the auditor');return {version:1,checks:[{groupIndex:0,faithful:true,reason:'Both design and media subjects are explicitly represented.'}]};
+});
+assert.equal(planCalls,2);assert.equal(auditCalls,1);assert.equal(conciseProject.navigationPlan.groups[0].label,'Design and Media');assert.deepEqual(conciseProject.navigationPlan.groups[0].memberIndexes,[0,1]);
+
 const {navigationWriterHeaders}=await import('./lib/ppt-deck-navigation.mjs');
 const navProject={generationPolicy:{language:{mode:'output',locale:'en'}},templateFidelity:{slides:[{slots:[{shapeId:2,role:'section',capacity:5},{shapeId:3,role:'title'},{shapeId:4,role:'content'}]}]}};
 assert.deepEqual(navigationWriterHeaders(navProject,{title:'Deck Navigation'},0),{'2':'Agenda','3':'Deck Navigation'},'compiled navigation owns short headers and keeps writer prose out of native label slots');

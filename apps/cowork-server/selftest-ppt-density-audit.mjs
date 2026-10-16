@@ -143,6 +143,11 @@ try {
     assert.equal(calls,3);assert.equal(result.content.contentBlocks[0].type,'mechanism');assert.ok(seen.every(prompt=>prompt.startsWith('FROZEN_SOURCE_SENTINEL')));assert.match(seen[2],/"received":"prediction"/);assert.match(seen[2],/"allowed"/);
     calls=0;await assert.rejects(api._internals.writeWithContractRepair({prompt:'source',nodeKey:'network',call:async()=>{calls++;throw Error('HTTP 429 upstream rate limit');},normalize:value=>value}),/429/);assert.equal(calls,1);
   });
+  await check('invalid JSON retries within the original contract bound without changing frozen source',async()=>{
+    let calls=0;const keys=[];const repaired=await api._internals.writeWithContractRepair({prompt:'FROZEN_SOURCE_SENTINEL',nodeKey:'content:json',maxRepairs:1,call:async(prompt,key)=>{keys.push(key);calls++;if(calls===1)throw Object.assign(Error('ppt_invalid_json'),{code:'invalid_json'});assert.match(prompt,/FROZEN_SOURCE_SENTINEL/);assert.match(prompt,/<writer_contract_error>ppt_invalid_json/);return {title:'Valid frozen page'};},normalize:value=>value});
+    assert.equal(repaired.content.title,'Valid frozen page');assert.equal(repaired.attempts,1);assert.deepEqual(keys,['content:json','content:json:contract-repair:1']);
+    calls=0;await assert.rejects(api._internals.writeWithContractRepair({prompt:'FROZEN_SOURCE_SENTINEL',nodeKey:'content:json',maxRepairs:1,call:async()=>{calls++;throw Object.assign(Error('ppt_invalid_json'),{code:'invalid_json'});},normalize:value=>value}),error=>error.code==='invalid_json');assert.equal(calls,2,'invalid JSON must not become an unlimited retry loop');
+  });
   await check('unresolved writer capacity is bounded and never accepted as valid content',async()=>{let calls=0;await assert.rejects(api._internals.writeWithContractRepair({prompt:'source',nodeKey:'capacity',call:async()=>{calls++;return {commentary:'Too tall'};},normalize:()=>{throw Error('source_artifact_capacity: sourceFits=true, preserve every cell');}}),/source_artifact_capacity/);assert.equal(calls,4);});
   await check('foreign evidence IDs require bounded model correction and are never silently discarded',async()=>{
     let calls=0;
@@ -166,9 +171,9 @@ try {
       {id:`body-${index}`,type:'text',nativeRef:{shapeId:2,slideIndex:index},geometry:{x:900000,y:2000000,width:index===3?5000000:8500000,height:3000000},style:{fontSizePt:index===3?24:18},content:{text:'A complete mechanism, condition and comparison.'}}]}))}};
     const project={...auto,templateFidelity:fidelity.fidelityFromImported({...auto,pages:4},imported,'audit-template')};
     const assessed=api._internals.assessOutlineCandidate(project,raw());
-    assert.equal(assessed.project.pages,3);assert.ok(assessed.rawOutline.densityPacking.templateAssignmentValidated);
+    assert.equal(assessed.project.pages,4);assert.equal(assessed.outline.at(-1).title,'Thanks for watching!');assert.ok(assessed.rawOutline.densityPacking.templateAssignmentValidated);
     assert.equal(project.pages,4,'assessment must not mutate stored page count');
-    const fit=assessed.outline.at(-1).densityFit,canvas=capacity.contentCanvas(assessed.project,2);
+    const fit=assessed.outline[2].densityFit,canvas=capacity.contentCanvas(assessed.project,2);
     assert.deepEqual(fit.availableContentRect,canvas.geometry);assert.equal(fit.fontSizePt,canvas.fontSizePt);
     assert.deepEqual(assessed.rawOutline.densityPacking.templateSlideMap,assessed.project.templateFidelity.slideMap);
   });
@@ -218,7 +223,7 @@ try {
     await api.handlePpt(req,new URL('http://test/ppt/projects'),{uid:'audit',deps,activity:()=>{},log:()=>{},res:{},send:(status,body)=>{response={status,body};return true;}});
     assert.equal(response.status,201,JSON.stringify(response));let project;
     for(let n=0;n<300;n++){project=store.get('audit',response.body.project.id);if(['outline_ready','failed'].includes(project.status))break;await new Promise(r=>setTimeout(r,10));}
-    assert.equal(project.status,'outline_ready',project.error);assert.ok(calls>=1&&calls<=4,'measured repair can avoid model calls, and model repair stays bounded');assert.ok(project.pages>3&&project.pages<=12,'complete measured components fit within the former model partition budget');assert.equal(project.pageDecision.fitValidated,true);
+    assert.equal(project.status,'outline_ready',project.error);assert.ok(calls>=1&&calls<=4,'measured repair can avoid model calls, and model repair stays bounded');assert.ok(project.pages>3&&project.pages<=12,'complete measured components fit within the former model partition budget');assert.equal(project.pageDecision.fitValidated,true,JSON.stringify(project.outline.map(slide=>({title:slide.title,fit:slide.densityFit}))));
     assert.deepEqual(project.outline.flatMap(slide=>slide.sourceArtifactRanges||[]).filter(ref=>ref.sourceUnitId===large.id).flatMap(ref=>capacity.sourceComponent(large,ref).content.rows.slice(1)),large.rows.slice(1),'measured-first repair retains every table row');
     assert.equal(project.outline.flatMap(slide=>slide.keyPoints||[]).filter(point=>point.text===initial.slides[1].keyPoints[0].text).length,1,'the complete explanation is retained exactly once, independent of its measured page');assert.equal(project.pageDecision.confirmedAt,null);
   });
@@ -241,9 +246,9 @@ try {
     await api.handlePpt(req,new URL('http://test/ppt/projects'),{uid:'audit',deps,activity:()=>{},log:()=>{},res:{},send:(status,body)=>{response={status,body};return true;}});
     assert.equal(response.status,201,JSON.stringify(response));let project;
     for(let n=0;n<300;n++){project=store.get('audit',response.body.project.id);if(['outline_ready','failed'].includes(project.status))break;await new Promise(r=>setTimeout(r,10));}
-    assert.equal(project.status,'outline_ready',project.error);assert.equal(calls,3);assert.equal(project.pages,4);
+    assert.equal(project.status,'outline_ready',project.error);assert.equal(calls,3);assert.equal(project.pages,5);assert.equal(project.outline.at(-1).title,'Thanks for watching!');
     assert.equal(project.outline.filter(s=>s.sourceUnitIds?.includes(summary.id)).length,1);
-    assert.deepEqual(project.outline.at(-1).keyPoints.map(p=>p.text),['Connect the result to the evidence.','Retain the responsible owner.']);
+    assert.deepEqual(project.outline.find(slide=>slide.sourceUnitIds?.includes(summary.id)).keyPoints.map(p=>p.text),['Connect the result to the evidence.','Retain the responsible owner.']);
   });
   await check('overlapping copies of a failed table share a scope while disjoint fragments remain independent',()=>{
     const huge={...body('overflow'),question:'Long mechanism',keyPoints:[{text:'Necessary explanation. '.repeat(500)}],sourceUnitIds:[table.id],sourceArtifactRanges:[{sourceUnitId:table.id,rowStart:1,rowEnd:2}]};
@@ -277,7 +282,7 @@ try {
     for(const part of parts)for(let index=1;index<project.pages;index++)assert.equal(packing.candidateFit(part,project,index).capacity_ok,true);
     const reassessed=api._internals.assessOutlineCandidate(project,{slides:[{title:'Cover'},...parts,{title:'End',question:'Conclusion',keyPoints:[{text:'Retain evidence and scope.'}]}]});
     assert.equal(packing.inspectDensityOutline(reassessed.rawOutline,reassessed.project).length,0);
-    assert.equal(reassessed.outline.length,parts.length+2,'portable fragments must not be merged on a wider provisional page');
+    assert.equal(reassessed.outline.length,parts.length+3,'portable fragments and existing conclusion remain intact, followed by a source-free closing');assert.equal(reassessed.outline.at(-1).title,'Thanks for watching!');
   });
   await check('coverage restoration preserves existing copy and adds only missing original objects and table rows',()=>{
     const summary=source.semantic.inventory.items.find(i=>i.type==='SummaryBlock');
@@ -304,7 +309,7 @@ try {
     await api.handlePpt(req,new URL('http://test/ppt/projects'),{uid:'audit',deps,activity:()=>{},log:()=>{},res:{},send:(status,body)=>{response={status,body};return true;}});
     assert.equal(response.status,201,JSON.stringify(response));let project;
     for(let n=0;n<300;n++){project=store.get('audit',response.body.project.id);if(['outline_ready','failed'].includes(project.status))break;await new Promise(r=>setTimeout(r,10));}
-    assert.equal(project.status,'outline_ready',project.error);assert.equal(calls,4);assert.ok(project.pages>3&&project.pages<=100);assert.equal(project.pageDecision.fitValidated,true);
+    assert.equal(project.status,'outline_ready',project.error);assert.equal(calls,4);assert.ok(project.pages>3&&project.pages<=100);assert.equal(project.pageDecision.fitValidated,true,JSON.stringify(project.outline.map(slide=>({title:slide.title,fit:slide.densityFit}))));
     const selections=project.outline.flatMap(s=>s.sourceArtifactRanges||[]).filter(ref=>ref.sourceUnitId===large.id);
     assert.deepEqual(selections.flatMap(ref=>capacity.sourceComponent(large,ref).content.rows.slice(1)),large.rows.slice(1));
     assert.equal(project.outline.flatMap(s=>s.keyPoints).filter(point=>point.text===initial.slides[1].keyPoints[0].text).length,1);

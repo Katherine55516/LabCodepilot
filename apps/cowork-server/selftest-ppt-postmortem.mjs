@@ -50,7 +50,7 @@ const reviewPages=JSON.parse(compactReview.split('页面：')[1].split(/(?:\\n|\
 assert.equal(reviewPages.length,25);
 for(const [index,page] of reviewPages.entries()){
  assert.equal(page.visibleSlots,undefined,'visible table is not serialized a second time as native slots');
- assert.equal(page.semanticComponents.length,1);assert.deepEqual(page.semanticComponents[0].content.rows,component.content.rows);
+ assert.equal(page.semanticComponents.length,1);assert.deepEqual(page.semanticComponents[0].content.rows,[['Name','Description'],['First',String.raw`\(f_1,\ldots,f_K\)`],['Second',String.raw`\(\alpha\)`],['Third','Tail condition']],'critic rows preserve typed indices/math; literal node rows and quote identities remain unchanged');
  assert.equal(page.semanticComponents[0].content.rawRows,undefined);assert.equal(page.semanticComponents[0].quoteId,visibleEvidenceQuoteId(reviewSlides[index].id,reviewSlides[index].nodes[0]));
 }
 assert.equal(JSON.stringify(reviewProject),unchangedReview,'review projection cannot alter source or rendered nodes');

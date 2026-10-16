@@ -3,7 +3,7 @@
 import {ensureRichContent} from '../ppt-source-text.mjs';
 import {imageMask} from './image-mask.mjs';
 export const PT_EMU = 12700;
-export const RENDER_CONTRACT_VERSION = 5;
+export const RENDER_CONTRACT_VERSION = 9;
 export const CARD_PADDING = [7.92, 5.04, 7.92, 2.88];
 export const TABLE_PADDING = [7.2, 3, 7.2, 3];
 const finite = (value, fallback) => value !== null && value !== undefined && Number.isFinite(Number(value)) ? Number(value) : fallback;
@@ -79,13 +79,16 @@ export function measureText(element, contract = element.textLayout || textContra
     for(const run of runs){
       const pt=finite(run.fontSizePt,font);
       const advanceFor=value=>pt*Array.from(value).reduce((sum,char)=>sum+(char.codePointAt(0)>127?1:contract.code?.6:/[MW@]/.test(char)?.85:.55),0);
-      const tokens=contract.code?Array.from(String(run.text)):(String(run.text).match(/[A-Za-z0-9]+(?:[-'’][A-Za-z0-9]+)*|[^A-Za-z0-9]/gu)||[]).flatMap(token=>contract.overflowWrap==='anywhere'&&advanceFor(token)>widthPt*.9?Array.from(token):[token]);
+      // Monospace advances are explicit; reserve one point for engine rounding.
+      // Preserve code word boundaries before falling back to glyph wrapping.
+      const wrapWidth=contract.code?Math.max(1,widthPt-1):widthPt*.9;
+      const tokens=contract.code?(String(run.text).match(/[^\s]+|[ \t]+|[\n\v]/gu)||[]).flatMap(token=>advanceFor(token)>wrapWidth?Array.from(token):[token]):(String(run.text).match(/[A-Za-z0-9]+(?:[-'’][A-Za-z0-9]+)*|[^A-Za-z0-9]/gu)||[]).flatMap(token=>contract.overflowWrap==='anywhere'&&advanceFor(token)>wrapWidth?Array.from(token):[token]);
       for(const ch of tokens){
       if(ch==='\n'||ch==='\v'){finish();continue;}
       const tabs=ch==='\t'?contract.tabSize-column%contract.tabSize:1;
       const advance=pt*(ch==='\t'?tabs*.6:Array.from(ch).reduce((sum,char)=>sum+(char.codePointAt(0)>127?1:contract.code?.6:/[MW@]/.test(char)?.85:.55),0));
       if (advance > widthPt || !contract.wrap && used + advance > widthPt) widthOverflow = true;
-      if(contract.wrap&&used>0&&used+advance>widthPt*.9){finish();used=finite(p.marginLeftPt,0);}
+      if(contract.wrap&&used>0&&used+advance>wrapWidth){finish();used=finite(p.marginLeftPt,0);}
       used+=advance;column+=tabs;lineFont=Math.max(lineFont,pt);
       }
     }

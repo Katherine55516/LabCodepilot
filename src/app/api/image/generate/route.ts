@@ -1,8 +1,11 @@
+import {selectPptImageModel} from '@/lib/ppt-image-routing';
+import {getBailianImageConfig} from '@/lib/bailian-image-config';
 import { NextRequest } from 'next/server';
 import { generateTextToImage, NoImageProviderError, ImageGatewayError } from '@/lib/text-to-image';
 
 interface GenerateRequest {
   prompt: string;
+  qualityLevel?:string;
   model?: string;
   aspectRatio?: string;
   n?: number;
@@ -23,7 +26,7 @@ export async function POST(request: NextRequest) {
 
     const result = await generateTextToImage({
       prompt: body.prompt,
-      model: body.model,
+      model: body.qualityLevel?selectPptImageModel(getBailianImageConfig(),body.qualityLevel):body.model,
       aspectRatio: body.aspectRatio,
       n: body.n,
       negativePrompt: body.negativePrompt,

@@ -1,4 +1,4 @@
-import {selectPptOption} from '../helpers';
+import {choosePptRoleModel} from '../helpers';
 import { expect, test, type Page } from '@playwright/test';
 
 async function mockCreationPlanner(page: Page) {
@@ -42,7 +42,7 @@ test('user page selection and module estimate take priority over template length
   await page.goto('/ppt', {waitUntil:'domcontentloaded'});await expect(page.getByText('加载中…',{exact:true})).toHaveCount(0);
   await page.getByRole('button', { name: /＋ 新建|新建 PPT/ }).first().click();
   await page.getByRole('button', { name: /从 Prompt 开始/ }).click();
-  await selectPptOption(page.getByRole('combobox', { name: 'LLM（必填）' }), 'managed-demo::demo-model');
+  await choosePptRoleModel(page,'managed-demo::demo-model');
   await page.getByRole('button', { name: '确认并继续 →' }).click();
   await page.getByRole('button', { name: /Four page PPTX/ }).click();
   await page.getByRole('button', { name: '下一步：输入内容 →' }).click();
@@ -94,7 +94,7 @@ test('ten-page uploaded template accepts an explicit 100-page target @smoke', as
   await page.goto('/ppt', {waitUntil:'domcontentloaded'});await expect(page.getByText('加载中…',{exact:true})).toHaveCount(0);
   await page.getByRole('button', { name: /＋ 新建|新建 PPT/ }).first().click();
   await page.getByRole('button', { name: /从 Prompt 开始/ }).click();
-  await selectPptOption(page.getByRole('combobox', { name: 'LLM（必填）' }), 'managed-demo::demo-model');
+  await choosePptRoleModel(page,'managed-demo::demo-model');
   await page.getByRole('button', { name: '确认并继续 →' }).click();
   await page.getByRole('button', { name: /Ten page PPTX/ }).click();
   await page.getByRole('button', { name: '下一步：输入内容 →' }).click();

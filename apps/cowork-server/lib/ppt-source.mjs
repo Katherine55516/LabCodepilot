@@ -360,7 +360,14 @@ elif ext in ('md', 'markdown', 'txt', 'text'):
     add_markdown('Markdown' if ext in ('md','markdown') else 'Text',content)
 elif ext in ('html', 'htm'):
     html_content=raw.decode('utf-8-sig')
-    for match in re.finditer(r'<svg\b[\s\S]*?</svg\s*>',html_content,re.I):source_image(match.group().encode('utf8'),'HTML inline SVG')
+    for match in re.finditer(r'<svg\b[\s\S]*?</svg\s*>',html_content,re.I):
+        # Only author-provided accessibility text is a visible caption. The
+        # extraction location belongs to provenance, never slide body copy.
+        import xml.etree.ElementTree as source_et
+        try:
+            svg=source_et.fromstring(match.group());caption=svg.get('aria-label','') or '\n'.join(''.join(node.itertext()).strip() for node in svg if node.tag.split('}')[-1] in ('title','desc'))
+        except source_et.ParseError:caption=''
+        source_image(match.group().encode('utf8'),'HTML inline SVG',caption)
     html_content=re.sub(r'<svg\b[\s\S]*?</svg\s*>','',html_content,flags=re.I)
     SUPERSCRIPT=str.maketrans('0123456789+-−=()','⁰¹²³⁴⁵⁶⁷⁸⁹⁺⁻⁻⁼⁽⁾');SUBSCRIPT=str.maketrans('0123456789+-−=()','₀₁₂₃₄₅₆₇₈₉₊₋₋₌₍₎')
     INLINE={'strong':'**','b':'**','em':'*','i':'*','code':chr(96)}
@@ -452,6 +459,17 @@ elif ext == 'docx':
                     if int(note.get(W+'id','-1'))>=0:notes[(tag,note.get(W+'id'))]=note
     emitted_notes=set()
     def docx_extras(child,location):
+        # Extract at the drawing's actual position, before the ZIP fallback.
+        # Word often has no alt text: retain the neighbouring paragraph as
+        # context, and bind it by source ID instead of guessing image content.
+        refs=[segments[-1]['id']] if segments else []
+        context=segments[-1]['text'] if segments else ''
+        props=[node for node in child.iter() if node.tag.rsplit('}',1)[-1] in ('docPr','cNvPr')]
+        alt=' / '.join(dict.fromkeys(value for node in props for value in [node.get('descr') or node.get('title') or ''] if value))
+        for drawing in child.iter('{http://schemas.openxmlformats.org/drawingml/2006/main}blip'):
+            rid=drawing.get('{http://schemas.openxmlformats.org/officeDocument/2006/relationships}embed')
+            rel=doc.part.rels.get(rid) if rid else None
+            if rel is not None and not rel.is_external:source_image(rel.target_part.blob,location+' / image',alt or context,refs)
         for index,box in enumerate(child.iter(W+'txbxContent'),1):
             add(location+' / 文本框 '+str(index),source_formula_text(box,location+' textbox'),sourceContainer='textbox')
         for kind in ('footnote','endnote'):

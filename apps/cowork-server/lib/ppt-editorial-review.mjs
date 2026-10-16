@@ -54,7 +54,10 @@ export function inspectEditorial(project,slides=project.deck?.slides||[]){
       if(node.type!=='table'||!node.sourceArtifact)continue;
       const item=items.find(item=>item.id===node.sourceArtifact.sourceUnitId);if(!item?.rows)continue;
       const all=item.rows.slice(1).map(row=>sourceDisplayText(row[0]).trim()),actual=node.content.rows?.slice(1).map(row=>key(row[0]))||[],title=key(slide.title);
-      const wrong=all.filter(label=>key(label).length>=3 && title.includes(key(label)) && !actual.includes(key(label)));
+      // A row label that is also a word of the table's own section heading names
+      // the subject (e.g. "Story Planner" for a row "story"), not a category.
+      const subject=key((item.sectionPath||[]).at(-1)||'');
+      const wrong=all.filter(label=>key(label).length>=3 && title.includes(key(label)) && !actual.includes(key(label)) && !subject.includes(key(label)));
       if(wrong.length)add('fragment_title_mismatch',slide,`Title names categories absent from its displayed table fragment: ${wrong.join(', ')}.`,[node.id]);
       const start=node.sourceArtifact.rowStart??1,end=node.sourceArtifact.rowEnd??item.rows.length;
       if((start!==1||end!==item.rows.length)&&!slide.titleLocked&&!actual.some(label=>label.length>=3&&title.includes(label))&&!title.includes(`${start}–${end-1}`))

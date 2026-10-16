@@ -1,3 +1,4 @@
+import { deckLanguage } from './ppt-presentation-contract.mjs';
 import { routeIssue } from './ppt-repair-routing.mjs';
 import { dominantInputLanguage } from './ppt-topic-language.mjs';
 import crypto from 'node:crypto';
@@ -79,7 +80,7 @@ export function presentationPolicyPrompt(project) {
 
 export function promptPolicy(project, { includeObligations = true } = {}) {
   const language = outputLanguage(project);
-  const topicLanguage = project.editOutputLanguage || dominantInputLanguage(project);
+  const topicLanguage = deckLanguage(project);
   const sourced = effectiveKnowledge(project) === 'source_only';
   const languageRule = project.generationPolicy?.language?.mode==='source' && !project.editOutputLanguage
     ? 'follow the language(s) of the actual input/source material; infer from source text, retain mixed/bilingual distribution. This takes priority over language hints in brief/copy budgets; do not translate the source into English by default'
@@ -88,7 +89,7 @@ export function promptPolicy(project, { includeObligations = true } = {}) {
 ${project.generationPolicy?.language?.body==='primary'?'Body language: one primary language per translation pair (the deck language side); the other side stays in speaker notes. Unpaired facts keep their own language.':'Body grouping: retain every language in the input; group related facts together rather than splitting by language, merge sparse related material, and split long complete semantic units within the same section when capacity requires it. Language alternation alone is not translation equivalence.'}
 topic_language=${languageNames[topicLanguage] || topicLanguage}. Every automatically generated page topic/title, section label and eyebrow uses this single dominant input language. Do not append a parallel English/Chinese translation. Preserve technical names/acronyms and user-locked titles; this topic rule does not remove bilingual evidence from the body.
 ${sourced
-    ? 'knowledge_mode=source_only. 本项目仅使用输入及所给来源的事实；可以解释其已给出的关系与机制。具体名称、数值、阈值、公式、适用条件和限制一起保留。来源内部矛盾应标明并交给审查，不能自行编造一个答案。'
+    ? 'knowledge_mode=source_only. 本项目仅使用输入及所给来源的事实；可以解释其已给出的关系与机制。具体名称、数值、阈值、公式、适用条件和限制一起保留。来源内部矛盾应标明并交给审查，不能自行编造一个答案。审查深度必须服从本项目 detail：balanced/concise 不要求额外 detailed 扩写。原文已完整可见且明确给出因果或条件时，不因未加额外解释而报 shallow/missing。每项 missing 必须指出输入中确实存在且尚未表达的具体关系或条件；可选的扩展建议不进入问题数组。不得为了所谓因果桥新增未提供的 SLA、指标、流程或事实前提，也不得为填满空白重复来源。'
     : 'knowledge_mode=bounded_explanation. 仅补充理解输入已有主题所必需的定义、关系与条件，必须对应输入中的具体对象并保持原有内容框架；示意情境须标注为示意且不引入新的事实前提。不能扩展新主题、替输入增加议程或把合理猜测写成事实。具体引用、数字、结论、责任人及行动承诺均须有输入依据。'}
 制作过程的元信息（“来源可追溯”“待补证据”）留给审查，不作为填充文案；影响读者理解或行动的适用条件、数据限制和不确定性必须可见。
 正文直接表达主题，不写“本页解释第…节”“本页来源…”，不在成品中声明双语保留、字符预算、容量、测试或审查结果。sourceArtifacts 已完整显示来源，sourceCommentary 不需要复述它们或证明制作流程；必要增量解释为零时返回空数组。
@@ -102,7 +103,7 @@ export function writingGuide(project, contract = {}, native = false) {
   return `<writing>
 ${densityPrompt(project)}
 每个要点＝短名称＋完整解释；详细模式、密度与模板槽位不能要求新增输入之外的事实或主题；解释须说明对象、如何起作用、比较关系或成立条件，至少有一个来源支持的具体锚点。锚点可以是方法名称、构造步骤、变量关系或具体情境，不必是数字。
-禁止“完整来源细节见本页备注”“完整表见备注”等占位文案：必要表格、图片、事实及解释必须实际在本页可见。对薄页补充来源支持的机制、条件或例子，或在规划时合并；不能重复标题/description填满空白。按容量拆分的连续页保持同一标题，不添加“续”“续2”或“continued”；末页包含按稿件语言的“感谢观看”或“Thanks for watching!”，并保留实际总结内容。
+禁止“完整来源细节见本页备注”“完整表见备注”等占位文案：必要表格、图片、事实及解释必须实际在本页可见。对薄页补充来源支持的机制、条件或例子，或在规划时合并；不能重复标题/description填满空白。按容量拆分的连续页按各自实际内容取不同标题，禁止同名以及“续”“续2”“（上）/（下）”或“continued”；末页包含按稿件语言的“感谢观看”或“Thanks for watching!”，并保留实际总结内容。
 ${cjk ? `名称通常 4–10 字；解释按机制、条件、比较与例子完整展开，避免统一短句预算。` : `Labels usually 2–6 words; explanations retain the complete mechanism, conditions and comparisons rather than a fixed short-sentence budget.`}
 ${deep ? '本页需要深入解释；必要时用一个主说明区解释机制，再以短支撑点展开条件、实现和对照。' : '按内容需要混合短支撑点与完整解释，封面/过渡/图示标签可更短。'}
 跨领域组织：业务简报保留决策依据与责任；研究材料保留假设、变量关系与限制；技术材料保留完整代码、数据表和流程顺序；长输入尾部也要有实质覆盖。每页主说明与支撑点承载不同事实；双语配对是同一主张，不增加 unique information。稀疏输入合并/减页，不能扩写同一事实填充所有槽位；详细模式增加来源支持的解释深度而非更多重复的短句。
@@ -319,17 +320,17 @@ export function writerPrompt(project, slide, index, { retrieval, contract, slotC
   const writingProject = project; // Local instructions never become original input authority.
   const native = project.templateFidelity?.mode === 'preserve';
   const confirmedRule=project.confirmedOutline&&project.confirmedOutline.titlesFrozen!==false?`User confirmed this outline. Keep title exactly ${JSON.stringify(slide.title)}, its source IDs, roles and total page count. Do not replan or rename it in the editor; only an explicit scoped user edit may change it.`:'';
-  const titleRule = index === 0 && project.deckTitle?.source === 'user'
+  const titleRule = project.confirmedOutline ? `本页标题已确认，title 必须逐字返回 ${JSON.stringify(slide.title)}，不改写、不另拟判断句。` : index === 0 && project.deckTitle?.source === 'user'
     ? `用户封面标题已锁定：${project.deckTitle.raw}；title 逐字保留，语言和术语不改。`
     : index === 0 ? '封面写精炼主题标题。' : '标题表达本页完整判断，通常英文 6–12 词或中文 12–24 字，服从标题容量；选一个标题，溢出修复时才给替代标题。' + bilingualTitleRule(project);
   const citationRule = /\b(?:sources?|references?|citations?)\b|来源|参考文献|引用/iu.test(slide.title || '') && project.source?.kind === 'file'
     ? `来源页需可见输入文件名「${project.source.name}」与引用位置。` : '';
   const schema = native
     ? { title: '标题', evidenceUsedIds: ['可见文本实际表达的真实 evidence ID'], slotTexts: { 'shape ID': '完整替换文字', '列表 shape ID': [{ label: '短名称', body: '解释' }] }, omitTemplateShapes: [{ shapeId: 123, reason: '具体不适配理由' }], sourceCommentary: ['结构对应的解释；无重复正文'], sourceArtifacts: [{ sourceUnitId: '真实库存 ID', rowStart: 1, rowEnd: 5 }] }
-    : { title: '标题', eyebrow: '可选导航标签', subtitle: '可选新增范围说明', contentBlocks: [{ type: 'definition|mechanism|evidence|example|contrast|constraint|implication|stage|decision|next_step', claimId:'来源主张ID', heading: '不同的短名称', body: '独立完整解释' }], takeaway: '可选新增推论，不能复制正文', blocks: [{ type: 'table', rows: [['列名称', '列名称'], ['来源类别', '来源解释']] }], sourceCommentary: ['结构对应的解释；无重复正文'], sourceArtifacts: [{sourceUnitId:'真实库存 ID',rowStart:1,rowEnd:5}], evidenceUsedIds: ['实际表达的真实 evidence ID'] };
-  const selection=(contract?.sourceArtifacts||[]).map(({sourceUnitId,rowStart,rowEnd})=>({sourceUnitId,...(rowStart===undefined?{}:{rowStart}),...(rowEnd===undefined?{}:{rowEnd})}));
+    : { title: '标题', eyebrow: '可选导航标签', subtitle: '可选新增范围说明', contentBlocks: [{ type: 'definition|mechanism|evidence|example|contrast|constraint|implication|stage|decision|next_step', claimId:'来源主张ID', heading: '不同的短名称', body: '独立完整解释' }], takeaway: '可选新增推论，不能复制正文', blocks: [{ id: 'source-table', type: 'table', rows: [['列名称', '列名称'], ['来源类别', '来源解释']] }], sourceCommentary: ['结构对应的解释；无重复正文'], sourceArtifacts: [{sourceUnitId:'真实库存 ID',rowStart:1,rowEnd:5}], evidenceUsedIds: ['实际表达的真实 evidence ID'] };
+  const selection=(contract?.sourceArtifacts||[]).map(({sourceUnitId,rowStart,rowEnd,lineStart,lineEnd})=>({sourceUnitId,...(rowStart===undefined?{}:{rowStart}),...(rowEnd===undefined?{}:{rowEnd}),...(lineStart===undefined?{}:{lineStart,lineEnd})}));
   const sourceEvidenceIds=writerSourceEvidenceIds(project,index,contract,retrieval);
-  const nativeCover=index===0&&!selection.length&&!(slide.sourceUnitIds||[]).length&&(!native||!(project.templateFidelity.slides[index]?.slots||[]).some(slot=>slot.role==='content'&&slot.purpose!=='footnote')); 
+  const nativeCover=index===0&&!selection.length&&!(slide.sourceUnitIds||[]).length&&(!native||slide.planningProtocolVersion===2&&project.generationPolicy?.knowledge==='source_only'||!(project.templateFidelity.slides[index]?.slots||[]).some(slot=>slot.role==='content'&&slot.purpose!=='footnote'));
   schema.sourceArtifacts=selection;
   schema.sourceEvidenceIds=sourceEvidenceIds;
   const ownedSourceContent=selection.map(ref=>{const item=project.source.semantic.inventory.items.find(item=>item.id===ref.sourceUnitId);return {...ref,type:item.type,content:sourceComponent(item,ref).content};});
@@ -349,10 +350,14 @@ export function writerPrompt(project, slide, index, { retrieval, contract, slotC
     else if(measuredSources.explanationBudget.sourceFits)schema.sourceCommentary=[];
     if(native){schema.slotTexts=Object.fromEntries((project.templateFidelity.slides[index]?.slots||[]).filter(slot=>['title','section'].includes(slot.role)).map(slot=>[String(slot.shapeId),slot.role==='title'?'本页标题':'本页原章节导航']));schema.slotContentTypes={};}
   }
+  const programBound=!native&&project.generationPolicy?.knowledge==='source_only'&&slide.sourceUnitIds?.length>0&&slide.sourceUnitIds.every(id=>selection.some(ref=>ref.sourceUnitId===id));
+  if(programBound){schema.contentBlocks=[];schema.blocks=[];schema.sourceCommentary=[];schema.subtitle='';schema.takeaway='';}
+  if(project.confirmedOutline||programBound)schema.title=slide.title;
+  if(nativeCover&&native){const slots=project.templateFidelity.slides[index]?.slots||[];schema.slotTexts=Object.fromEntries(slots.filter(slot=>['title','section'].includes(slot.role)).map(slot=>[String(slot.shapeId),slot.role==='title'?slide.title:'Overview']));schema.slotContentTypes={};schema.omitTemplateShapes=slots.filter(slot=>slot.role==='content').map(slot=>({shapeId:slot.shapeId,reason:'Topic-only cover owns no source body; the complete facts belong to the following content pages.'}));}
   const old = project.update && slide.baseSlideId ? project.update.baseSnapshot.deck?.slides.find(item => item.id === slide.baseSlideId) : null;
   const prompt=`你是演示文稿文案编辑。当前任务只写第 ${index + 1} 页，共 ${project.pages} 页。
 ${promptPolicy(writingProject)}
-${writingGuide(writingProject, contract, native)}
+${programBound?'<writing>All visible body content is already bound from the frozen source selection. This task only returns the confirmed title, optional short navigation label, and exact source selection. Do not write or paraphrase a second body in any field.</writing>':writingGuide(writingProject, contract, native)}
 <user_edits>${JSON.stringify(edits)}</user_edits>
 <brief>${JSON.stringify({ ...(project.planning?.brief || {}), outputLanguage: outputLanguage(writingProject) })}</brief>
 <deck_plan>${JSON.stringify(narrativeContext(project, slide.id))}</deck_plan>
@@ -370,7 +375,7 @@ ${project.planning?.terminology?.headingTerms?.length ? 'terminology.headingTerm
 标题回答本页问题，eyebrow仅导航，subtitle补充范围；各块分别提供定义、机制、证据/例子、条件或行动；takeaway仅在有新的推论时出现。可选字段可以为空。禁止相同完整句在不同角色重复出现，禁止多个卡片重复章节名，禁止为了达到字数/密度目标填入重复或无来源内容。容量冲突应报告对象和原因，不截断句子、变量、单元格或步骤。
 组件选择：真实表格/代码/公式/流程/清单优先使用sourceArtifacts，系统保留结构与数学；sourceCommentary补充关系与边界。图片只能使用已有来源资产ID或系统支持的语义资产，不能把旧模板截图当作新事实。没有数据时不要编造图表；缺媒体或结构不能用重复文字代替。
 ${!project.source?.segments?.length ? `用户主题：${project.prompt}。使用领域特有的定义、机制和评估方法。` : ''}
-sourceArtifacts 必须逐字复制 frozen_source_selection 数组（最终 schema 已给出本页真实选择），不得增删 ID、修改分片、复制相邻页范围；空数组就是本页没有来源结构。公式、代码、流程、清单、小结只含 sourceUnitId，绝不能照抄表格示例的 rowStart/rowEnd。表格第 0 行是表头；rowStart 从 1 开始，rowEnd 为不包含的结束索引，保持已冻结范围，全部行/列已在不同页面规划，writer 不重新规划页数或行范围。代码由 CodeBlock 库存 ID 原样绑定，保留语言、缩进、空行与硬换行；流程保留顺序/分支条件，表格保留负号、单位与空单元格。来源结构由代码重建，其完整正文不再复制到 slotTexts；有来源结构的原生页 slotTexts 只写标题及章节导航，必要解释写 sourceCommentary。解释只覆盖本页拥有的 plannedExplanationTexts、变量与 requiredDetails，不能扩写其他页内容来填模板；保留完整关系与假设，避免抄写表格/公式已有事实。measured_source_capacity 给出结构已占空间和剩余解释高度；不可把一整页正文追加进有限余量，原计划要点可作为不扩写的完整说明，独立的长解释已安排到其他页。不可用缩字或删除必要条件通过容量。
+sourceArtifacts 必须逐字复制 frozen_source_selection 数组（最终 schema 已给出本页真实选择），不得增删 ID、修改分片、复制相邻页范围；空数组就是本页没有来源结构。代码/流程可能带程序已冻结的 lineStart/lineEnd（0-based，end-exclusive），逐字复制，保留原行/缩进/空行；没有这些字段时不可自行添加。公式、清单、小结只含 sourceUnitId，绝不能照抄表格示例的 rowStart/rowEnd。表格第 0 行是表头；rowStart 从 1 开始，rowEnd 为不包含的结束索引，保持已冻结范围，全部行/列已在不同页面规划，writer 不重新规划页数或行范围。代码由 CodeBlock 库存 ID 原样绑定，保留语言、缩进、空行与硬换行；流程保留顺序/分支条件，表格保留负号、单位与空单元格。来源结构由代码重建，其完整正文不再复制到 slotTexts；有来源结构的原生页 slotTexts 只写标题及章节导航，必要解释写 sourceCommentary。解释只覆盖本页拥有的 plannedExplanationTexts、变量与 requiredDetails，不能扩写其他页内容来填模板；保留完整关系与假设，避免抄写表格/公式已有事实。measured_source_capacity 给出结构已占空间和剩余解释高度；不可把一整页正文追加进有限余量，原计划要点可作为不扩写的完整说明，独立的长解释已安排到其他页。不可用缩字或删除必要条件通过容量。
 ${native ? '其他正文只输出 slotTexts；代码从语义配对派生兼容文案，不另写 contentBlocks、bullets 或 factSynthesis。' : '普通页面只输出 contentBlocks 这一份正文；bullets 由代码派生。优先引用 sourceArtifacts 保留原文表格的全部列；手写 blocks 表格兼容上限为 6 行（含表头）、4 列，不能用它静默降级更大的来源表格。'}
 slotContentTypes 仅标记 slotTexts 中真实可见正文的职责；type 必须从列出的类型中选一个，不输出类型列表或隐藏事实。sourceCommentary 使用 {type,text} 标记其可见关系、条件、对照或推论；类型应对应实际文字，不为通过检查虚标。结构正文与解释共同满足本页内容职责，不能为每页机械添加无来源对照或结论。
 ${native?'严格区分槽位几何 purpose 与文案语义 type：point-description、point-heading、title、section 不是 slotContentTypes 的合法值。仅正文槽位标记 definition、mechanism、evidence、example、contrast、constraint、implication、stage、decision、next_step 或 support。普通原生页若正文能适配槽位，sourceCommentary 返回空数组，完整正文与职责写在 slotTexts 和 slotContentTypes；若单行/列表无法容纳必要机制或全部条件，使用现有 sourceCommentary 原生区域重排：只输出标题/章节槽位，最多四段完整、不重复且有实际语义 type 的可见说明，保留本页全部 keyPoints 与 requiredDetails，编译器按真实正文矩形重排，字体和全部原门禁不变。title 字段与标题槽位逐字一致，二者都必须满足标题槽位 maxVisualUnits；其他标题预算不能覆盖模板更小的实际容量。':''}
@@ -381,9 +386,10 @@ sourceCommentary 最多四个 {type,text} 条目；同一机制的相邻完整�
 <required_visible_evidence>${JSON.stringify((project.source?.semantic?.evidenceAtoms||[]).filter(atom=>sourceEvidenceIds.includes(atom.id)).map(({id,kind,exactText,measurements,contextTerms})=>({id,kind,exactText,measurements,contextTerms})))}</required_visible_evidence>原生页以上锁定来源摘录由代码按 sourceEvidenceIds 原样绑定，真正显示在正文，不是隐藏事实。sourceEvidenceIds 必须复制 schema 的真实 ID；不能增删或改写绑定的来源。已经在 sourceArtifacts 可见的原句不会重复绑定。sourceCommentary 只补充绑定来源尚未表达的本页必要关系和条件，不重复这些完整摘录；实测预算包含全部绑定原句。其余非绑定的原槽位必要事实仍须保留在正文。
 来源表格/清单已经包含完整定义、示例、关系或条件时，不重复解释这些单元格。可选解释优先只写一个完整短句，服从 measured_source_capacity.explanationBudget 的实测预算；不得重复超过预算的前稿，不删除来源结构或必要证据。
 ${project.generationPolicy?.knowledge==='source_only'&&(project.generationPolicy?.content||'full_source')==='full_source'&&(selection.length||sourceEvidenceIds.length)?'<source_only_commentary>完整来源已由原生对象绑定。source-language/full_source/source_only且本页全部sourceUnitIds均在冻结来源中时，sourceCommentary必须严格为[]，不允许重复复述。其他合同也默认[]；只有必讲关系未被表达且有明确来源依据时才提供短说明。不要为填满页面重复正文或添加新的事实前提。原文只是说进入同一评估队列，不能推断所有方法使用同一语法、算子库或目标；清楚区分原文关系与新假设。遗漏的来源必须通过原合同补齐，不能靠编造解释代替。</source_only_commentary>':''}
-${nativeCover?'<native_cover_contract>原生封面只有标题/导航槽位；sourceCommentary 必须为空数组，只显示主题标题，不将来源背景引言铺在封面装饰和标题上。全文作为原始输入保留，其他内容页的事实与锁定结构不得改变。</native_cover_contract>':''}
+${nativeCover?'<native_cover_contract>当前封面没有来源正文归属；sourceCommentary 必须为空数组，slotTexts 只写标题/导航，旧报告正文槽位按 schema 全部省略，不得重复后面内容页拥有的引言或事实。原始完整来源仍保留，其他内容页的事实与锁定结构不得改变。</native_cover_contract>':''}
 ${measuredSources?.explanationBudget.sourceFits&&measuredSources.explanationBudget.singleParagraphCjkCharacters===0?'<no_commentary_capacity>绑定的完整来源已经适配页面，实际余量不能再容纳额外正文。sourceCommentary 必须为空数组。原始完整来源摘录由代码显示，不要重新用中文解释或复制这些已绑定原句。保留 sourceArtifacts 和 sourceEvidenceIds，任何未被来源表达的必要事实由原整稿审查报告，不得缩字或删来源。</no_commentary_capacity>':''}
 ${measuredSources?.explanationBudget.sourceFits&&measuredSources.explanationBudget.singleParagraphCjkCharacters>0?`<source_commentary_budget>${JSON.stringify(measuredSources.explanationBudget)}</source_commentary_budget>解释余量只有单段约 ${measuredSources.explanationBudget.singleParagraphCjkCharacters} 个中文字符（不是整页字数），不要返回两段或重复概述已绑定的来源摘录。只补本页未被绑定原文表达的必要定义/条件；全部原来源仍由代码显示，不能缩字或删除来源。可选解释可为空。`:''}
+${programBound?'<bound_source_body>本页全部正文由 frozen_source_selection 中的来源对象原样绑定到可见页面，所需事实与条件已经在 page_owned_source_content 中。不要再生成第二份正文：contentBlocks、blocks、sourceCommentary 必须全部为空数组；subtitle/takeaway 为空。返回确认标题和完整来源选择；不删除来源、不概括来源对象。</bound_source_body>':''}
 返回唯一 JSON：${JSON.stringify(schema)}。只输出 JSON。`;
   return slide.planningProtocolVersion===2?writerCorrectionContext(prompt):prompt;
 }
@@ -401,13 +407,34 @@ export function writerCorrectionContext(prompt) {
         knowledge:material.knowledge,userPrompt:material.prompt===material.sourceText?'':material.prompt,
         sourceTextRef:{sha256:crypto.createHash('sha256').update(material.sourceText||'').digest('hex'),characters:(material.sourceText||'').length},
         importedInput:material.importedInput,previousVersionInput:material.previousVersionInput};
-      const tags=['policy','input_scope_rules','writing','user_edits','brief','deck_plan','slide_contract','frozen_source_selection','page_owned_source_content','measured_source_capacity','source_packet','terminology','final_native_limits','required_visible_evidence','native_cover_contract','no_commentary_capacity','source_commentary_budget','source_only_commentary'];
+      const tags=['policy','input_scope_rules','writing','user_edits','brief','deck_plan','slide_contract','frozen_source_selection','page_owned_source_content','measured_source_capacity','source_packet','terminology','final_native_limits','required_visible_evidence','native_cover_contract','no_commentary_capacity','source_commentary_budget','source_only_commentary','bound_source_body'];
       repairContext=`${PPT_SYSTEM_PROMPT}\n${prompt.match(/当前任务只写第 \d+ 页，共 \d+ 页。/)?.[0]||''}\n<immutable_input_identity>${JSON.stringify(identity)}</immutable_input_identity>完整原输入仍存储且哈希不变；下面是本页完整的检索对象和锁定证据，未出现在此局部上下文的其他页内容不属于本次重写，不能改动。\n`+
         tags.map(tag=>prompt.match(new RegExp(`<${tag}>[\\s\\S]*?<\\/${tag}>`))?.[0]||'').join('\n');
     }
   }
   const schema=[...prompt.matchAll(/返回唯一 JSON：([^\n]+)。只输出 JSON/g)].at(-1);
   return repairContext===prompt?prompt:repairContext+(schema?"\n"+schema[0]:"");
+}
+
+/** Bound-source pages have no model-authored body. Enforce the same exact
+ * contract at the SDK boundary; JSON-only gateways still use server validators. */
+export function boundWriterResponseSchema(prompt) {
+  if(!(prompt.includes('<bound_source_body>')||prompt.includes('<native_cover_contract>'))||prompt.includes('<previous_draft>'))return undefined;
+  const match=[...prompt.matchAll(/返回唯一 JSON：([^\n]+)。只输出 JSON/g)].at(-1);
+  if(!match)return undefined;
+  let value;try{value=JSON.parse(match[1]);}catch{return undefined;}
+  if(!['contentBlocks','blocks','sourceCommentary'].every(key=>Array.isArray(value[key])&&value[key].length===0))return undefined;
+  const empty={type:'array',items:{type:'string'},maxItems:0};
+  const refProperties={sourceUnitId:{type:'string'}};
+  if(value.sourceArtifacts.some(ref=>ref.rowStart!==undefined))refProperties.rowStart={type:'integer'};
+  if(value.sourceArtifacts.some(ref=>ref.rowEnd!==undefined))refProperties.rowEnd={type:'integer'};
+  if(value.sourceArtifacts.some(ref=>ref.lineStart!==undefined)){refProperties.lineStart={type:'integer'};refProperties.lineEnd={type:'integer'};}
+  return {type:'object',additionalProperties:false,properties:{
+    title:{type:'string',const:value.title},eyebrow:{type:'string'},subtitle:{type:'string',const:''},takeaway:{type:'string',const:''},
+    contentBlocks:empty,blocks:empty,sourceCommentary:empty,
+    sourceArtifacts:{type:'array',items:{type:'object',properties:refProperties,required:['sourceUnitId'],additionalProperties:false},const:value.sourceArtifacts},
+    sourceEvidenceIds:{type:'array',items:{type:'string'},const:value.sourceEvidenceIds||[]},evidenceUsedIds:{type:'array',items:{type:'string'}}
+  },required:['title','contentBlocks','blocks','sourceCommentary','sourceArtifacts','sourceEvidenceIds']};
 }
 
 export function writerRepairPrompt(prompt, draft, issues) {

@@ -139,6 +139,25 @@ try {
  const manualDone = await until(() => { const p = repo.getProject(uid, manual.id); if (p.status === 'failed') throw new Error(p.error); return ['completed','quality_blocked'].includes(p.status) && p; });
  assert.equal(manualDone.deck.slides[1].title, 'Manual mechanism decision');
  assert.deepEqual(manualDone.deck.slides[1].bullets, manual.deck.slides[1].bullets);
+ // Quality-blocked/completed editor commands must survive the next generation retry.
+ for(const status of ['quality_blocked','completed']){
+  const cached=fixture();cached.confirmedOutline={titlesFrozen:true,hash:'previous-confirmed-hash'};cached.status=status;runs.startRun(cached);runtime.runtimeState(cached);repo.saveProject(cached);
+  const title=cached.deck.slides[1].nodes.find(n=>n.semanticRole==='title');
+  const edited=await commands.applyCommand(uid,cached.id,{type:'node.setContent',baseRevision:cached.revision,payload:{slideId:'s1',nodeId:title.id,content:{text:'Retained reviewed topic'}}});
+  assert.equal(edited.project.nodes.s1.slide.title,'Retained reviewed topic');
+  assert.equal(edited.project.outline[1].title,'Retained reviewed topic');
+  assert.equal(edited.project.outline[1].titleLocked,true);
+  assert.equal(edited.project.outlineTitleEditHistory.at(-1).before,'Mechanisms');
+  assert.equal(edited.project.outlineTitleEditHistory.at(-1).confirmation.hash,'previous-confirmed-hash');
+  const rewritten=api._internals.normalizeSlide({title:'Retained reviewed topic',contentBlocks:[],blocks:[]},edited.project.outline[1],edited.project,[]);
+  assert.equal(rewritten.title,'Retained reviewed topic','critic writer normalizes against the effective manual title');
+  assert.equal(api._internals.normalizeSlide({title:'Mechanisms',contentBlocks:[],blocks:[]},edited.project.outline[1],edited.project,[]).title,'Retained reviewed topic','critic cannot restore the stale pre-edit title');
+  assert.equal(repo.getProject(uid,cached.id).runtime.slides.s1.canonicalSlide.title,'Retained reviewed topic');
+  await request(edited.project,'/retry',{},manualDeps);
+  const reviewed=await until(()=>{const p=repo.getProject(uid,cached.id);if(p.status==='failed')throw Error(p.error);return ['completed','quality_blocked'].includes(p.status)&&p;});
+  assert.equal(reviewed.deck.slides[1].title,'Retained reviewed topic');
+ }
+ checks.push('quality-blocked and completed manual titles survive retry without body regeneration');
  // Live manual edits advance the epoch and never turn pending placeholders into previews.
  const liveManual=fixture();liveManual.status='generating';edits.editingState(liveManual).contentOpen=true;runtime.runtimeState(liveManual);runs.startRun(liveManual);
  delete liveManual.nodes.s2;delete liveManual.runtime.slides.s2;

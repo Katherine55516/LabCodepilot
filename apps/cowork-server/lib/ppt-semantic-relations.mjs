@@ -1,3 +1,4 @@
+import {sourceDisplayText}from './ppt-source-text.mjs';
 /** Typed source relations (matrix / order / alternative / definition) derived
  * deterministically from the inventory, and checks that slides keep them.
  * Relations come from source structure only; nothing here invents edges.
@@ -125,16 +126,23 @@ export function inspectRelationFidelity(project, slides = project.deck?.slides |
  * only when the unit alone does not fit one page. */
 export function readingUnits(items, ids) {
   const wanted = new Set(ids), ordered = items.filter(item => wanted.has(item.id)), units = [];
+  const positions=new Map(items.map((item,index)=>[item.id,index]));
+  const adjacent=(a,b)=>Boolean(a&&b)&&positions.get(b.id)===positions.get(a.id)+1&&JSON.stringify(a.sectionPath||[])===JSON.stringify(b.sectionPath||[]);
   const isList = item => /^\s*(?:[-*+•]|\d+[.)])\s+/mu.test(String(item?.text || ''));
-  const leadIn = item => /[:：]\s*$/u.test(String(item?.text || '').trim());
+  const leadIn = item => /[:：]\s*$/u.test(sourceDisplayText(item?.text || '').trim());
   for (let i = 0; i < ordered.length;) {
     const unit = [ordered[i]];
     const pairEnd = () => { while (i + unit.length < ordered.length && unit.at(-1).languagePairId && ordered[i + unit.length].languagePairId === unit.at(-1).languagePairId) unit.push(ordered[i + unit.length]); };
     pairEnd();
     if (unit.every(leadIn)) {
       // A bilingual lead-in may be two consecutive unpaired items ("You define:" / "你需要定义：").
-      while (i + unit.length < ordered.length && leadIn(ordered[i + unit.length]) && unit.length < 2) unit.push(ordered[i + unit.length]);
-      if (isList(ordered[i + unit.length])) { unit.push(ordered[i + unit.length]); pairEnd(); }
+      while (i + unit.length < ordered.length && leadIn(ordered[i + unit.length]) && adjacent(unit.at(-1),ordered[i + unit.length]) && unit.length < 2) unit.push(ordered[i + unit.length]);
+      // Keep the complete consecutive list, not only its first item.
+      // The wanted-ID filter must never bridge an omitted source unit.
+      while (isList(ordered[i + unit.length])&&adjacent(unit.at(-1),ordered[i + unit.length])) { unit.push(ordered[i + unit.length]); pairEnd(); }
+      // A colon can introduce a prose pipeline or code/diagram, too. Keep
+      // its first complete adjacent body object with it when measured to fit.
+      if(unit.every(leadIn)&&ordered[i+unit.length]?.type!=='HeadingBlock'&&adjacent(unit.at(-1),ordered[i+unit.length])){unit.push(ordered[i+unit.length]);pairEnd();}
     }
     units.push(unit.map(item => item.id)); i += unit.length;
   }

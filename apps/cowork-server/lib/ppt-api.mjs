@@ -1,3 +1,16 @@
+import { recoverSourceCheckpoint } from './ppt-source-checkpoint-recovery.mjs';
+import { evidenceBelongsToSlide } from './ppt-evidence.mjs';
+import {inspectFrozenOutlineSources} from './ppt-outline-source-fit.mjs';
+import {unmappedFixedTemplatePages} from './ppt-template-fixed-authority.mjs';
+import {inspectSystemOutlineTitles} from './ppt-outline-title-fit.mjs';
+import {PPTX_IR_VERSION} from './ppt-native-shape-ids.mjs';
+import {ensureOutlineClosing,ownsClosingContent,appendClosingGreeting,isDedicatedClosing,deterministicClosingDraft,prepareClosingLayout} from './ppt-closing-page.mjs';
+import {componentCopyDeck} from './ppt-component-copy.mjs';
+import {prepareSourceVision} from './ppt-source-vision.mjs';
+import {normalizeExecutionPolicy,resolveTaskRoute,thinkingModeForRoute,taskFingerprint,reserveModelAttempt,recoverExecutionHistory} from './ppt-execution-policy.mjs';
+import {taskComplexity,taskRole} from './ppt-task-complexity.mjs';
+import {inspectSourceArithmetic} from './ppt-source-arithmetic.mjs';
+import { deckLanguage, deckScript, deckLanguageVariant, topicLanguageRule } from './ppt-presentation-contract.mjs';
 import {outlineRangeRepairPrompt,applyOutlineRangeRepair} from './ppt-outline-range-repair.mjs';
 import {prepareLanguagePairAudit,languagePairAuditSchema} from './ppt-language-pair-audit.mjs';
 import {prepareLanguageProjection} from './ppt-language-projection.mjs';
@@ -30,7 +43,7 @@ import { assertCandidateScope } from './ppt/input-scope-service.mjs';
 import { automaticPages, densityProfile, densityPrompt } from './ppt-density-profile.mjs';
 import { candidateFit, packOutline, inspectDensityOutline, revalidateOutlineFits } from './ppt-density-packing.mjs';
 import {isSourceArtifactItem} from './ppt-density-capacity.mjs';
-import { outlineCapacityRepairPrompt, applyOutlineCapacityRepair, outlineCapacityRepairScopes, partitionOutlineWithMeasuredComponents, restoreMissingSourceArtifacts, splitReadingUnits } from './ppt-outline-capacity-repair.mjs';
+import { outlineCapacityRepairPrompt, applyOutlineCapacityRepair, outlineCapacityRepairScopes, boundedCapacityPartitions, partitionOutlineWithMeasuredComponents, restoreMissingSourceArtifacts, splitReadingUnits } from './ppt-outline-capacity-repair.mjs';
 import { replaceTemplateSourceRegion, bindSourceArtifacts, bindSourceMedia, isSourceOwnedNode } from './ppt-source-artifacts.mjs';
 import { acceptExportVerification, blockExportVerification } from './ppt-export-integrity.mjs';
 import { templateLimits } from './ppt-template-security.mjs';
@@ -38,7 +51,9 @@ import { importEditablePptx as importTemplateIR } from './ppt/import-pptx.mjs';
 import { markPptTime } from './ppt-trace.mjs';
 import { normalizeGenerationPolicy, defaultGenerationPolicy, requestedPageCount, PPT_PROMPT_CONTRACT_VERSION } from './ppt-generation-policy.mjs';
 import { outlineGrowth, outlineConcisionMetrics, concisionPlannerRule, routeTranslationsToNotes } from './ppt-outline-concision.mjs';
-import { condenseOverflowingTables, mergeUnderfilledPages, pageLoad } from './ppt-outline-condense.mjs';
+import { condenseOverflowingTables, mergeUnderfilledPages, enrichUnderfilledPages, pageLoad } from './ppt-outline-condense.mjs';
+import {balanceUnderfilledPages} from './ppt-outline-balance.mjs';
+import { compileOutlineCandidate, summarizeOutlineCorrections } from './ppt-outline-compile.mjs';
 import { syncPresentationPolicy } from './ppt-presentation-policy.mjs';
 import { normalizePageContract } from './ppt-page-contract.mjs';
 /** M1 PPT Workspace API and durable, server-side job orchestration.
@@ -49,20 +64,20 @@ import * as store from './ppt-store.mjs';
 import * as orch from './orchestrator.mjs';
 import * as files from './files.mjs';
 import { runRoutine } from './routine-runner.mjs';
-import { writerSourceEvidenceIds, promptPolicy, writingGuide, outputLanguage, normalizeKeyPoints, canonicalWriterOutput, criticRewriteTargets, sourcePacket, slideSemanticContext, writerPrompt, writerRepairPrompt, writerCorrectionContext, outlineContentContract, OUTLINE_SCHEMA } from './ppt-prompt-contracts.mjs';
+import { boundWriterResponseSchema, writerSourceEvidenceIds, promptPolicy, writingGuide, outputLanguage, normalizeKeyPoints, canonicalWriterOutput, criticRewriteTargets, sourcePacket, slideSemanticContext, writerPrompt, writerRepairPrompt, writerCorrectionContext, outlineContentContract, OUTLINE_SCHEMA } from './ppt-prompt-contracts.mjs';
 import { renderPptx } from './ppt/exporters/pptx.mjs';
 import { renderPdf } from './ppt/exporters/pdf.mjs';
 import { extractFile, normalizePaste, mergeSourceMedia, validateFile, sha256 } from './ppt-source.mjs';
 import { BUILT_INS, templateFor, validateTemplate, analyzeTemplate, snapshotTemplate } from './ppt-template.mjs';
 import { normalizeBlocks, normalizeSourceImages } from './ppt-blocks.mjs';
-import { applyLayoutRegistry, LAYOUTS } from './ppt-layout.mjs';
+import { applyLayoutRegistry, chooseLayout, LAYOUTS } from './ppt-layout.mjs';
 import { boundedAll, dagNodeId, nodeRecord } from './ppt-dag.mjs';
 import { deterministicReview, finalQualityReport, inspectMedia, inspectSourceForSlide, reviewWithContractRepair, repairProject } from './ppt-quality.mjs';
 import { ensureDeckV3, ensureProjectV3, newId as newIrId, stableId } from './ppt/ir.mjs';
 import { buildRenderTree } from './ppt/render-tree.mjs';
 import { emitRunProgress, completeRun, recoverRun, startRun, transitionNode } from './ppt/run-service.mjs';
-import { updateDraft, clearDraft } from './ppt/draft-store.mjs';
-import { getProject as getStructuredProject, saveProject as saveStructuredProject, saveRevision, enqueueProject, readRevision } from './ppt/repository.mjs';
+import { updateDraft, clearDraft, draftsFor } from './ppt/draft-store.mjs';
+import { getProject as getStructuredProject, saveProject as saveStructuredProject, saveRevision, enqueueProject, readRevision, recoverCommit } from './ppt/repository.mjs';
 import { editingState, generationEpoch, contentEditResult, recoverContentEdits, processGenerationEdits, recoverGenerationEdits } from './ppt/generation-edit-service.mjs';
 import { templatePreview } from './ppt/template-preview-service.mjs';
 import { editableCapabilities, templateCapabilities } from './ppt/edit-context.mjs';
@@ -76,7 +91,8 @@ import { missingRequiredEvidence } from './ppt-evidence.mjs';
 import { sourceBackedDetails, buildPlanning, estimatePageRecommendation, inspectLongDeckOutline, normalizeFactSynthesis, refreshPlanning, retrieveSlideSources, sourceCapacityPlan, estimationSource, sourcePlanningContext } from './ppt-planning.mjs';
 import { planSparseInput, profilePptInput } from './ppt-content-depth.mjs';
 import { compileSectionLabel, formatUserDeckTitle, inspectSlideCopy, materializeCopy } from './ppt-presentation-writing.mjs';
-import { dominantInputLanguage, normalizeTopicTitle, closingTopic } from './ppt-topic-language.mjs';
+import { normalizeTopicTitle, closingTopic } from './ppt-topic-language.mjs';
+import {prepareTopicTitleProjection} from './ppt-topic-title-projection.mjs';
 import { inspectNativeCoverTitle, inspectNativeOutlineTitles, prepareTemplateFidelity, repairNativePageAssignment, rescheduleTemplateFidelity, templateSlotPrompt, templateOutlinePrompt, inspectTemplateSlotDraft, autoTemplateMediaOmissions, bindTemplateFidelity, renderTemplatePptx } from './ppt-template-fidelity.mjs';
 import { templateReuseError } from './ppt-template-scheduler.mjs';
 import { inspectReportOutline } from './ppt-report-qa.mjs';
@@ -92,7 +108,7 @@ const editing = new Set();
 const MAX_PROMPT = 80000;
 const MAX_TEXT = 160;
 const PPT_NODE_CONCURRENCY = Math.max(1, Math.min(3, Number(process.env.PPT_NODE_CONCURRENCY) || 3));
-const PPT_RE = /^\/ppt\/projects(?:\/([a-f0-9]{32}))?(?:\/(outline|generate|retry|export|pdf|source|duplicate|trash|restore|permanent|versions|rewrite|blank|media-exclusions|page-policy))?$/i;
+const PPT_RE = /^\/ppt\/projects(?:\/([a-f0-9]{32}))?(?:\/(outline|generate|retry|export|pdf|source|duplicate|trash|restore|permanent|versions|rewrite|blank|media-exclusions|page-policy|execution|execution-policy|conversation|source-assets|component-copy))?$/i;
 const FOLDER_RE = /^\/ppt\/folders(?:\/([a-f0-9]{32}))?$/i;
 const TEMPLATE_PREVIEW_RE = /^\/ppt\/templates\/(violet|blue|light|marketing|education|[a-f0-9]{32})\/preview$/i;
 const TEMPLATE_RE = /^\/ppt\/templates(?:\/(violet|blue|light|marketing|education|[a-f0-9]{32}))?$/i;
@@ -272,8 +288,8 @@ function outlinePrompt(p) {
       :'Keep every required source object, all table columns/tail rows, formulas/variables/conditions.';
     const pairPolicy=overviewNotes&&p.generationPolicy?.language?.mode==='output'
       ?'Detected equivalent language pairs use one target-language visible owner, with the complete originals in notes and a verified visibleEquivalentSourceUnitId. Budget the target-language display only; protected structures still retain every member and condition.'
-      :overviewNotes&&p.generationPolicy?.language?.body==='primary'?'Detected bilingual pairs: the original-language unit is the one visible owner; its translation goes to notes with visibleEquivalentSourceUnitId. Budget one display cost per pair; titles and section labels stay bilingual.'
-      :'Translation pairs are one claim with two display costs.';
+      :overviewNotes&&p.generationPolicy?.language?.body==='primary'?`Detected bilingual pairs: the unit in the deck language (${deckScript(p)==='han'?'Chinese':'English'}) is the one visible owner; the other language goes to notes with visibleEquivalentSourceUnitId. Budget one display cost per pair. ${topicLanguageRule(p)}`
+      :'ALLOCATION CONTROL ONLY (never slide content): paired language originals express one claim; retain both counterparts and measure both for capacity. Never turn these planning/display rules into a title, question, focus or audience assertion. Use the owned source section and its actual facts for every topic.';
     return skeletonPrompt(p,`You are a source-grounded presentation planner. No tools, no fabricated facts. output_language=${p.generationPolicy?.language?.mode==='output'?outputLanguage(p):'preserve source languages'}; knowledge=${p.generationPolicy?.knowledge||'source_only'}; content_contract=${p.generationPolicy?.content||'full_source'}. ${auto?'Pages are provisional; choose 3–100 pages by semantic relationships and native capacity.':`Exactly ${p.pages} pages including cover and conclusion.`} ${preservation} ${pairPolicy} ${concisionPlannerRule(p)} Avoid repeating tables as prose. Native capacity=${JSON.stringify(sourceCapacityPlan(estimationSource(p),p.pages,p)?.capacity)}. Locked cover title=${JSON.stringify(p.deckTitle?.source==='user'?p.deckTitle.raw:null)}; required images=${JSON.stringify((p.source?.images||[]).filter(x=>x.required||x.mustPreserve).map(x=>x.id))}.`);
   }
   const sourceContext = sourcePlanningContext(p.source);
@@ -292,7 +308,7 @@ function outlinePrompt(p) {
     : '用户没有填写 Deck Title。为封面生成一个精炼标题：中文优先 6–18 字，英文优先 2–8 个词，最多两行；额外背景放入 focus 或后续 subtitle。';
   const planningContract = `先在内部建立 Presentation Brief（目标、受众、核心论点、深度、mustInclude、reportMode、decisionQuestion、sourceScope），再规划有起承转合的 storyArc。reportMode 只选 presentation、informational 或 decision；决策或职场汇报需在前 3 页给出摘要或需要回答的决定，较早展示核心流程/证据，结尾给出来源支持的条件性建议与下一步；资料不足时不要虚构建议或案例，而应在 sourceScope 记录缺口，在页面保留影响理解的限制。主文尽量集中，补充细节放 appendix。页数优先级固定为：用户手动调整或明确指定 > PPT 模块估算 > 模板原有页数。模板页数只决定原生版式选择和安全复用，不得更改输出页数。${pageContract}${densityPrompt(p)}模块估算为 ${pageRecommendation.recommended} 页（范围 ${pageRecommendation.range[0]}–${pageRecommendation.range[1]}），只用于未指定页数时的默认值及判断内容密度、压缩风险。${allocationContract}${userOutlineContract}${titleContract} Story Planner 输出 section label、title intent 和 slide message，section 使用 4–12 个中文字符或 2–8 个英文词；不要直接复制来源长标题。同一页可整合多个来源，一个来源也可支持多页，但拆分后的每页须有不同的问题、独立主张或证据作用；不可用同义改写凑足页数。来源不足时在 sourceScope 记录，并在页面保留必要的适用边界，不要补造材料。每页根据内容规划解释深度、分布和结构，不要固定三条 bullet。整稿应有密度节奏：摘要与过渡、普通说明、高密度流程或深机制交错；不要连续多页都写成高密度卡片。若来源包含可复算的公式、代码或算例，必须把核心表达式、变量含义和适用条件列入相应页 requiredDetails，不能只保留流程概述；特殊数学符号要规划成可见的普通文本表示。每个高优先级主题必须出现在页面 refs 中，或在 coverage 中说明省略原因。${templateOutlinePrompt(p)}`;
   const planningSchema = OUTLINE_SCHEMA;
-  const contentPlanning = outlineContentContract(p)+`\n来源媒体目录：${JSON.stringify((p.source?.images||[]).map(({id,caption,sourceRefs,width,height,role,required})=>({id,caption,sourceRefs,width,height,role,required})))}。必保留图片通过sourceImageIds分配到回答相关问题的页面，图片大小不是省略理由。`;
+  const contentPlanning = outlineContentContract(p)+`\n来源媒体目录：${JSON.stringify((p.source?.images||[]).map(({id,caption,sourceRefs,width,height,role,required})=>({id,caption,sourceRefs,width,height,role,required})))}。必保留图片通过sourceImageIds分配到回答相关问题的页面，图片大小不是省略理由。source_content 图片须放在具有相关正文的内容页，不放在仅标题封面、自动目录或仅感谢语的结束页。`;
 
   if (p.update) {
     const base = p.update.baseSnapshot;
@@ -314,38 +330,102 @@ function contentPrompt(p, slide, index) {
 function contentRepairPrompt(p, slide, index, draft, issues) {
   return writerRepairPrompt(contentPrompt(p, slide, index), draft, issues);
 }
-async function modelCall(p, prompt, activity, log, options = {}) {
+function readExecutionPolicy(value){try{return normalizeExecutionPolicy(value);}catch(error){throw new HttpError(400,error.message);}}
+async function modelCallTransport(p, prompt, activity, log, options = {}) {
+  if(p.sourceVisualAnalysis?.items?.length&&!String(options.nodeKey||'').startsWith('vision:'))prompt+='\n<derived_visual_observations>Unverified visual interpretations for image selection, not numerical source facts: '+JSON.stringify(p.sourceVisualAnalysis.items)+'</derived_visual_observations>';
+
   const sid = options.nodeKey ? sha256(Buffer.from(`${p.id}:${options.nodeKey}`)).slice(0, 32) : p.id;
-  const canStart = () => { const latest = store.get(p.uid, p.id,{hydrate:false}); return Boolean(latest && !latest.deletedAt && latest.status !== 'cancelled' && (!(options.nodeKey || '').startsWith('content:') && !(options.nodeKey || '').startsWith('review:deck') || (latest.status !== 'paused' && !latest.runtime?.pauseRequested))); };
+  const canStart = () => { const latest = store.getProjected(p.uid,p.id,'model-availability-v1',project=>({status:project.status,deletedAt:project.deletedAt,runtime:{pauseRequested:project.runtime?.pauseRequested}})); return Boolean(latest && !latest.deletedAt && latest.status !== 'cancelled' && (!(options.nodeKey || '').startsWith('content:') && !(options.nodeKey || '').startsWith('review:deck') || (latest.status !== 'paused' && !latest.runtime?.pauseRequested))); };
   const writerSlide=p.outline?.find(slide=>options.nodeKey===`content:${slide.id}`||String(options.nodeKey||'').startsWith(`content:${slide.id}:`));
   const writerEpoch=writerSlide?generationEpoch(p,writerSlide.id):null,writerRun=p.currentRunId,writerBaseRevision=p.revision,writerLease=componentLeaseToken(p);
+  const queuedProgressRefs=new Set();let committedProgressRefs='';
   const onProgress=writerSlide?progress=>{
-    const latest=store.get(p.uid,p.id);
+    const latest=store.getProjected(p.uid,p.id,'writer-draft-state-v1',project=>({id:project.id,uid:project.uid,status:project.status,deletedAt:project.deletedAt,currentRunId:project.currentRunId,editing:{epochs:project.editing?.epochs},source:{sha256:project.source?.sha256,semantic:{inventory:project.source?.semantic?.inventory}},planning:{slidePlan:project.planning?.slidePlan}}));
     if(!latest||latest.deletedAt||latest.status!=='generating'||latest.currentRunId!==writerRun||generationEpoch(latest,writerSlide.id)!==writerEpoch)return;
     const draft=updateDraft(latest,writerSlide.id,{...progress,runId:writerRun,epoch:writerEpoch,sourceHash:p.source?.sha256||''});
     const refs=draft?.blocks?.map(block=>block.sourceRef).filter(Boolean)||[];
-    if(refs.length)void enqueueProject(p.uid,p.id,()=>{
+    const refsKey=JSON.stringify(refs);
+    // Partial JSON tokens can report the same closed source references many
+    // times. Re-commit only when the set changes, retaining full authoritative
+    // lease/revision/source checks inside the project transaction.
+    if(refs.length&&refsKey!==committedProgressRefs&&!queuedProgressRefs.has(refsKey)){queuedProgressRefs.add(refsKey);void enqueueProject(p.uid,p.id,()=>{
       const current=store.get(p.uid,p.id);if(!current)return;
       const result=commitSourceComponents(current,{slideId:writerSlide.id,runId:writerRun,epoch:writerEpoch,baseRevision:writerBaseRevision,sourceHash:p.source?.sha256||'',lease:writerLease,refs});
+      if(['committed','unchanged'].includes(result.status))committedProgressRefs=refsKey;
       if(result.status==='committed'){store.save(current);emitRunProgress(current,'slide.component_commit',result.commit);}
-    }).catch(error=>log?.warn?.('PPT component commit failed: '+String(error.message).slice(0,200)));
+    }).catch(error=>log?.warn?.('PPT component commit failed: '+String(error.message).slice(0,200))).finally(()=>queuedProgressRefs.delete(refsKey));}
   }:options.onProgress;
   const selectionBudget=p.generationPolicy?.details==='notes'&&String(options.nodeKey||p.stage).startsWith('outline')
     ?((p.originalSourceInventory?.items||p.source?.semantic?.inventory?.items||[]).length*96+Number(p.pages||3)*128>16384?32768:16384):undefined;
-  if (pptModelJobs.eligible(p.configId)) return parseModelJson(await pptModelJobs.request(p, prompt, canStart, {stage:options.nodeKey||p.stage,...(onProgress?{onProgress}:{}), ...promptTelemetry(prompt),maxOutputTokens:options.maxOutputTokens??selectionBudget,jsonSchema:languagePairAuditSchema(prompt)||writerDeltaResponseSchema(prompt)||selectionDeltaResponseSchema(prompt)||outlineResponseSchema(prompt)||reviewResponseSchema(prompt)||navigationResponseSchema(prompt),onTelemetry:telemetry=>{const latest=store.get(p.uid,p.id);if(latest){latest.modelUsage=[...(latest.modelUsage||[]).slice(-199),{stage:options.nodeKey||p.stage,model:p.model,...promptTelemetry(prompt),telemetry}];store.save(latest);}}}));
+  if (pptModelJobs.eligible(p.configId)) return parseModelJson(await pptModelJobs.request(p, prompt, canStart, {stage:options.nodeKey||p.stage,...(options.images?{images:options.images}:{}),...(p.executionTask?{role:p.executionTask.role,thinkingMode:p.executionTask.thinkingMode,maxWireAttempts:p.executionTask.maxWireAttempts}:{}),...(onProgress?{onProgress}:{}), ...promptTelemetry(prompt),maxOutputTokens:options.maxOutputTokens??selectionBudget,jsonSchema:modelResponseSchema(prompt,options),onTelemetry:telemetry=>{options.onTelemetry?.(telemetry);const latest=store.get(p.uid,p.id);if(latest){latest.modelUsage=[...(latest.modelUsage||[]).slice(-199),{stage:options.nodeKey||p.stage,model:p.model,...promptTelemetry(prompt),telemetry}];store.save(latest);}}}));
   try {
     const result = await runRoutine({ sid, uid: p.uid, kind: orch.KIND_PPT, prompt, model: p.model, configId: p.configId, activity, log,
-      canStart });
-    if (!result.ok) throw new Error(result.error || `模型任务失败：${result.status}`);
+      canStart, ...(onProgress ? { onProgress } : {}), images:options.images,maxWireAttempts:p.executionTask?.maxWireAttempts,maxOutputTokens:options.maxOutputTokens });
+    options.onTelemetry?.({wireAttempts:result.wireAttempts||1,inputTokens:result.usage?.input_tokens,outputTokens:result.usage?.output_tokens});
+    if (!result.ok) throw Object.assign(new Error(result.error || `模型任务失败：${result.status}`),{code:result.status==='credential_error'?'auth':result.status==='attempt_limit'?'execution_attempt_limit':'transport'});
     return parseModelJson(result.resultText);
   } finally {
     if (sid !== p.id) await orch.removeContainer(sid, { keepVolume: false }).catch(() => {});
   }
 }
+function modelResponseSchema(prompt,options){return options.jsonSchema||languagePairAuditSchema(prompt)||writerDeltaResponseSchema(prompt)||selectionDeltaResponseSchema(prompt)||boundWriterResponseSchema(prompt)||outlineResponseSchema(prompt)||reviewResponseSchema(prompt)||navigationResponseSchema(prompt);}
+async function modelCall(p, prompt, activity, log, options = {}) {
+  if (!p.executionPolicy || p.executionPolicy.legacy) return modelCallTransport(p,prompt,activity,log,options);
+  const stage=String(options.nodeKey||p.stage),complexity=taskComplexity(p,stage,prompt),role=taskRole(stage,complexity);
+  const contractRepair=stage.startsWith('content:')&&(/:contract-repair(?::|$)/u.test(stage)||/<(?:writer_local_repair|writer_contract_error)>/u.test(prompt));
+  // Logical task accounting spans local repair prompts and transport fallbacks.
+  const logicalStage=stage.startsWith('content:')?stage.split(':').slice(0,2).join(':'):stage.replace(/:(?:retry|repair|delta-repair|source-witness|contract)(?::\d+)?$/u,'');
+  const taskKey=taskFingerprint(p,logicalStage,''),inputHash=taskFingerprint(p,stage,prompt);
+  let transientRetries=0;
+  for (;;) {
+    let record,route;
+    await enqueueProject(p.uid,p.id,()=>{
+      const latest=store.get(p.uid,p.id);if(!latest||latest.deletedAt||latest.status==='cancelled')throw outlineError('cancelled');
+      const prior=(latest.executionHistory||[]).filter(row=>row.taskKey===taskKey);
+      const repairStage=value=>/:(?:contract-repair|repair|postwriter|critic)(?::|$)/u.test(value);
+      // Format corrections belong to their existing semantic repair round.
+      // All wire calls still consume the shared five-attempt reservation.
+      const qualityRepairs=prior.filter(row=>repairStage(row.stage||'')&&row.routingReason?.repairKind!=='contract'&&!/:contract-repair(?::|$)/u.test(row.stage||'')&&(row.status==='completed'||row.status==='failed'&&!['transport','network','rate_limit','model_unavailable','timeout'].includes(row.errorCode)));
+      if(!contractRepair&&repairStage(stage)&&qualityRepairs.length>=(latest.executionPolicy.maxQualityRepairs??2))throw Object.assign(new Error('Quality repair budget reached for this task; inspect the preserved candidate before retrying'),{code:'execution_repair_limit'});
+      const semanticAttempts=prior.filter(row=>row.routingReason?.repairKind!=='contract'&&!/:contract-repair(?::|$)/u.test(row.stage||'')&&(row.status==='completed'||row.status==='failed'&&!['transport','network','rate_limit','model_unavailable','timeout'].includes(row.errorCode))).length;
+      route=resolveTaskRoute(latest,role,complexity,contractRepair?0:semanticAttempts);
+      record=reserveModelAttempt(latest,taskKey,route,prompt,Math.min(options.maxOutputTokens||32768,route.maxOutputTokens||32768),{images:options.images,schemaBytes:Buffer.byteLength(JSON.stringify(modelResponseSchema(prompt,options)||{}),'utf8')});
+      record.stage=stage;record.cacheKey=inputHash;record.slideIds=complexity.slideIds;record.schemaVersion='ppt-model-contract-v1';record.routingReason={role,selectedRole:route.role,complexity,previousAttempts:prior.length,previousSemanticAttempts:semanticAttempts,repairKind:contractRepair?'contract':/:(?:critic|postwriter|repair)(?::|$)/u.test(stage)?'semantic':undefined};const ownedSlide=latest.outline?.find(slide=>complexity.slideIds.includes(slide.id));record.contract={sourceRefs:ownedSlide?.sourceUnitIds||[],requiredFacts:ownedSlide?.requiredDetails||[],requiredAssetIds:ownedSlide?.sourceImageIds||[],languageContract:latest.generationPolicy?.language,layoutBudget:{pages:latest.pages,template:latest.template,fonts:latest.templateSpec?.fonts},sourceHash:latest.source?.sha256,outlineHash:latest.confirmedOutline?.hash,generationPolicy:latest.generationPolicy,userLocks:latest.userLocks||null,templateHash:latest.templateFidelity?.sha256||latest.template,baseRevision:latest.revision};
+      record.thinkingMode=thinkingModeForRoute(route,complexity,{contractRepair});
+      store.save(latest);
+    });
+    let telemetry;
+    const finish=async(status,result,error)=>enqueueProject(p.uid,p.id,()=>{
+      const latest=store.get(p.uid,p.id);if(!latest)return;
+      const row=latest.executionHistory?.find(item=>item.id===record.id);if(!row)return;
+      Object.assign(row,{status,completedAt:new Date().toISOString(),elapsedMs:Date.now()-Date.parse(row.startedAt),...(telemetry||{}),...(error?{errorCode:error.code||'transport'}:{}),...(result?{outputHash:sha256(Buffer.from(JSON.stringify(result)))}:{})});
+      store.save(latest);
+    });
+    try {
+      const thinkingMode=record.thinkingMode;
+      const result=await modelCallTransport({...p,...route,executionTask:{role:route.role,thinkingMode,maxWireAttempts:record.wireRemaining}},prompt,activity,log,{...options,maxOutputTokens:record.outputReservation,onTelemetry:value=>{telemetry=value;}});
+      await finish('completed',result);return result;
+    } catch(error) {
+      await finish('failed',null,error);
+      if (!['rate_limit','network','transport','model_unavailable'].includes(error.code)||transientRetries++>=2)throw error;
+      await new Promise(resolve=>setTimeout(resolve,Math.max(telemetry?.retryAfterMs||0,Math.min(4000,500*2**transientRetries))));
+    }
+  }
+}
 const defaultDeps = { modelCall, renderPptx: project => project.templateFidelity?.mode === 'preserve' ? renderTemplatePptx(project) : renderPptx(project),
   prepareTemplateFidelity, importTemplateIR, renderPdf, extractFile, analyzeTemplate, readFile: files.readFile, removeContainer: orch.removeContainer };
+function sourceBindingProject(project,slide,index){
+  return {...project,deck:{...(project.deck||{}),slides:project.outline.map((entry,i)=>i===index?{...slide,layoutId:chooseLayout(slide,i,project.outline.length)}:project.deck?.slides?.[i]||entry)}};
+}
+/** @param {Record<string, any> | null} [project] */
 function normalizeSlide(value, outlineSlide, project = null, previousTitles = []) {
   const index = project?.outline?.findIndex(item => item.id === outlineSlide.id) ?? -1;
+  const nativeTopicCover=index===0&&project?.templateFidelity?.mode==='preserve'&&outlineSlide.planningProtocolVersion===2&&project.generationPolicy?.knowledge==='source_only'&&!(outlineSlide.sourceUnitIds||[]).length;
+  if(nativeTopicCover){
+    const slots=project.templateFidelity.slides[index]?.slots||[],body=slots.filter(slot=>slot.role==='content');
+    if(value?.sourceCommentary?.length||value?.sourceArtifacts?.length||value?.sourceEvidenceIds?.length||value?.contentBlocks?.length||body.some(slot=>{const text=value?.slotTexts?.[String(slot.shapeId)];return typeof text==='string'?text.trim():Array.isArray(text)&&text.length;}))throw new Error('writer cover contract: this native topic-only cover owns no source body. Return only title/section slotTexts, empty body/source arrays, and omit the old content slots; preserve the complete facts on their assigned content pages.');
+    value={...value,contentBlocks:[],omitTemplateShapes:[...(value?.omitTemplateShapes||[]),...body.map(slot=>({shapeId:slot.shapeId,reason:'Topic-only cover has no body ownership; old template content is retired without duplicating following source pages.'}))]};
+  }
   value = canonicalWriterOutput(value || {}, project?.templateFidelity?.mode === 'preserve' ? project.templateFidelity.slides[index] : null);
   if(outlineSlide.role==='navigation'&&!(outlineSlide.sourceUnitIds||[]).length){
     // The final approved plan owns chapter labels/ranges. A writer's unowned
@@ -354,18 +434,26 @@ function normalizeSlide(value, outlineSlide, project = null, previousTitles = []
       ...(project?.templateFidelity?.mode==='preserve'?{slotTexts:navigationWriterHeaders(project,outlineSlide,index)}:{})};
   }
   const frozenTitle=project?.confirmedOutline&&project.confirmedOutline.titlesFrozen!==false&&!project.editOutputLanguage&&!effectiveConstraints(project,outlineSlide.id).some(c=>c.type==='title');
-  if(frozenTitle&&value.title!==outlineSlide.title)throw new Error('writer changed the confirmed outline title: return title exactly '+JSON.stringify(outlineSlide.title)+'; retain its frozen source ownership and page count');
+  let writerCorrections=[];
+  if(frozenTitle){
+    const titleSlots=project.templateFidelity?.mode==='preserve'?(project.templateFidelity.slides[index]?.slots||[]).filter(slot=>slot.role==='title'):[];
+    if(value.title!==outlineSlide.title||titleSlots.some(slot=>value.slotTexts?.[String(slot.shapeId)]!==outlineSlide.title)){
+      writerCorrections=[{field:'title',before:value.title,after:outlineSlide.title,basis:'user_confirmed_outline; body and frozen source ownership unchanged'}];
+      value={...value,title:outlineSlide.title,...(value.slotTexts?{slotTexts:{...value.slotTexts,...Object.fromEntries(titleSlots.map(slot=>[String(slot.shapeId),outlineSlide.title]))}}:{})};
+    }
+  }
   const visual = outlineSlide?.visualIntent?.type;
   const suggestedLayout = ({ image: 'image-text', comparison: 'comparison', pipeline: 'timeline', process: 'timeline', timeline: 'timeline', table: 'table', chart: 'chart', metric: 'big-number' })[visual];
   const compatible = suggestedLayout && (!['table', 'chart'].includes(suggestedLayout) || value?.blocks?.some(block => block.type === suggestedLayout));
   const preparedValue = { ...value, bullets: Array.isArray(value?.bullets) ? value.bullets : [] };
   const prepared = value?.layoutId || !compatible ? preparedValue : { ...preparedValue, layoutId: suggestedLayout };
   const slide = normalizeDeck({ slides: [prepared] }, [outlineSlide]).slides[0];
-  const topicLanguage = project?.editOutputLanguage || dominantInputLanguage(project || {});
+  const topicLanguage = deckLanguage(project || {});
   const compiled = materializeCopy(value || {}, outlineSlide, project?.planning, previousTitles, topicLanguage);
-  if(index===0&&project?.templateFidelity?.mode!=='preserve'&&!(outlineSlide.sourceUnitIds||[]).length&&(compiled.copy.blocks.length||value?.sourceCommentary?.length||slide.blocks.length))throw new Error('writer cover contract: unowned cover body is forbidden. Return contentBlocks=[], blocks=[], sourceCommentary=[], subtitle="", takeaway=""; preserve title only. All factual source units belong to the content pages.');
+  if(index===0&&project?.templateFidelity?.mode!=='preserve'&&!(outlineSlide.sourceUnitIds||[]).length&&(compiled.copy.blocks.length||value?.sourceCommentary?.length||slide.blocks.length||String(value?.subtitle||'').trim()||String(value?.takeaway||'').trim()))throw new Error('writer cover contract: unowned cover body is forbidden. Return contentBlocks=[], blocks=[], sourceCommentary=[], subtitle="", takeaway=""; preserve title only. All factual source units belong to the content pages.');
   slide.title = compiled.title.title || slide.title;
   slide.titleQuality = compiled.title;
+  if(writerCorrections.length)slide.writerCorrections=writerCorrections;
   const isCover = Boolean(project?.outline?.[0]?.id && project.outline[0].id === outlineSlide.id);
   if (isCover && project?.deckTitle?.source === 'user' && project.deckTitle.text) {
     const locked = formatUserDeckTitle(project.deckTitle.raw || project.deckTitle.text, compiled.copy.copyBudget);
@@ -386,7 +474,7 @@ function normalizeSlide(value, outlineSlide, project = null, previousTitles = []
   // slot is a short navigation label, supplied and measured by the writer.
   slide.section = normalizeTopicTitle(typeof writtenSection==='string'&&writtenSection.trim()?writtenSection: value?.section || outlineSlide.section || compiled.copy.eyebrow, topicLanguage);
   slide.copy = compiled.copy;
-  if (index > 0 && index === project?.outline?.length - 1 && !outlineSlide.titleLocked) {
+  if (index > 0 && index === project?.outline?.length - 1 && !outlineSlide.titleLocked&&!ownsClosingContent(outlineSlide)&&!slide.bullets?.length&&!slide.blocks?.length) {
     slide.title = closingTopic(topicLanguage); slide.closingGreeting = true;
     slide.titleQuality = {...slide.titleQuality,...formatUserDeckTitle(slide.title,compiled.copy.copyBudget),source:'agent',locked:false};
   }
@@ -453,15 +541,17 @@ function normalizeSlide(value, outlineSlide, project = null, previousTitles = []
     // returning an empty array; unsupported selections still fail validation.
     const selected=value?.sourceArtifacts?.length?value.sourceArtifacts:assigned;
     if(assigned.some(ref=>!selected.some(item=>item.sourceUnitId===ref.sourceUnitId &&
-      (item.rowStart??1)===(ref.rowStart??1) && (item.rowEnd??project.source?.semantic?.inventory?.items?.find(o=>o.id===ref.sourceUnitId)?.rows?.length)===(ref.rowEnd??project.source?.semantic?.inventory?.items?.find(o=>o.id===ref.sourceUnitId)?.rows?.length))))throw new HttpError(400,`writer omitted a required source object or changed its row selection: ${JSON.stringify({expected:assigned,received:selected})}. Copy the frozen source selection exactly; row ranges are only valid for tables.`);
+      item.lineStart===ref.lineStart&&item.lineEnd===ref.lineEnd&&(item.rowStart??1)===(ref.rowStart??1) && (item.rowEnd??project.source?.semantic?.inventory?.items?.find(o=>o.id===ref.sourceUnitId)?.rows?.length)===(ref.rowEnd??project.source?.semantic?.inventory?.items?.find(o=>o.id===ref.sourceUnitId)?.rows?.length))))throw new HttpError(400,`writer omitted a required source object or changed its row selection: ${JSON.stringify({expected:assigned,received:selected})}. Copy the frozen source selection exactly; table rows and literal source lines have distinct immutable ranges.`);
     const exactSourceOnly=project.generationPolicy?.content==='full_source'&&project.generationPolicy?.language?.mode==='source'&&project.generationPolicy?.knowledge==='source_only'&&assigned.length&&(outlineSlide.sourceUnitIds||[]).every(id=>assigned.some(ref=>ref.sourceUnitId===id));
     if(exactSourceOnly&&value?.sourceCommentary?.some(entry=>(typeof entry==='string'?entry:entry.text)?.trim()))throw new Error('writer source-only contract: complete frozen source already owns the visible body; sourceCommentary must be []. Do not repeat its statements or add a paraphrase. All original source objects and conditions stay visible.');
     const commentary=exactSourceOnly?[]:value?.sourceCommentary?.length?value.sourceCommentary:assigned.length && !value?.slotTexts
       ? slide.copy.blocks.map(block=>block.body):[];
     const requiredEvidence=writerSourceEvidenceIds(project,index,project.planning?.slidePlan?.find(plan=>plan.slideId===slide.id),retrieval);
     if(value?.sourceEvidenceIds?.some(id=>!requiredEvidence.includes(id)))throw new Error('invalid source evidence selection: only frozen required evidence IDs may be bound');
-    bindSourceArtifacts(project, slide, selected, index, commentary,requiredEvidence);
-    bindSourceMedia(project,slide,outlineSlide.sourceImageIds||[],index);
+    // Measure the new semantic slide, not the previous placeholder/header.
+    const bindingProject=sourceBindingProject(project,slide,index);
+    bindSourceArtifacts(bindingProject, slide, selected, index, commentary,requiredEvidence);
+    bindSourceMedia(bindingProject,slide,outlineSlide.sourceImageIds||[],index);
     if(project.templateFidelity?.mode==='preserve')normalizeDeckEyebrows({...project,deck:{slides:project.outline.map((o,i)=>i===index?slide:{id:o.id,title:o.title,section:o.section,nodes:[]})}},{onlySlideId:slide.id});
   }
   if(project?.templateSpec&&project.templateFidelity?.mode!=='preserve'&&project.outline?.some(o=>o.id===slide.id)){
@@ -474,6 +564,7 @@ function normalizeSlide(value, outlineSlide, project = null, previousTitles = []
     const projected={...project,deck:{slides:project.outline.map(o=>o.id===slide.id?slide:{id:o.id,title:o.title,section:o.section,nodes:[]})},nodes:{}};
     bindDeckNavigation(projected);
   }
+  if(index>0&&index===project?.outline?.length-1&&!slide.closingGreeting)appendClosingGreeting(project,slide);
   return slide;
 }
 function applySourceImages(deck, source) {
@@ -557,6 +648,8 @@ function fail(uid, id, stage, error, log) {
   const p = store.get(uid, id);
   if (!p || p.deletedAt) return;
   if (p.status === 'cancelled') return;
+  if (error?.code === 'execution_budget') { runtimeState(p).resumePhase=p.status==='outlining'?'outlining':'generating'; p.status='paused'; p.stage=stage; p.error=error.message; runtimeState(p).pauseRequested=true; store.save(p); return; }
+  if (p.status === 'paused' && p.runtime?.pauseRequested) return;
   p.status = 'failed'; p.stage = stage;
   p.error = String(error?.message || error).slice(0, 400);
   const message=String(error?.message||error);
@@ -565,6 +658,11 @@ function fail(uid, id, stage, error, log) {
   store.save(p);
   try { transitionNode(p, stage, 'failed', { error: p.error }); emitRunProgress(p, 'run.failed', { stage, error: p.error }); } catch {}
   log(`ppt ${id} ${stage} failed: ${p.error}`);
+}
+function preflightSourceArithmetic(source) {
+  const conflicts=inspectSourceArithmetic({source});if(!conflicts.length)return;
+  const first=conflicts[0].details;
+  throw new HttpError(422,`原始输入的分组数量矛盾：${first.expression} = ${first.calculated}，原文却写 ${first.claimed}。请核对并修改输入后重新读取；原文不会被自动更改。`);
 }
 function startIngest(uid, id, activity, log, deps = defaultDeps) {
   if (running.has(id)) return;
@@ -594,6 +692,7 @@ function startIngest(uid, id, activity, log, deps = defaultDeps) {
         ? await deps.extractFile(latest,'supplement.html',Buffer.from(latest.prompt))
         : normalizePaste(latest.prompt, latest.source?.images || []) : latest.source;
       source = mergeSourceSupplement(source, supplement, latest.prompt || '', !latest.update);
+      preflightSourceArithmetic(source);
       latest.source = withSemanticIndex(source); syncPresentationPolicy(latest); latest.status = 'outlining'; latest.stage = 'outline'; latest.error = '';
       latest.inputProfile = profilePptInput(latest);
       latest.contentPlan = planSparseInput(latest, latest.inputProfile);
@@ -618,6 +717,8 @@ function startIngest(uid, id, activity, log, deps = defaultDeps) {
 // must finish before its fit is recorded or compared with a repaired candidate.
 function assessOutlineCandidate(project, raw, {finalRepack=false}={}) {
   raw=routeTranslationsToNotes(project,coalesceEquivalentSelections(raw),item=>visibleEquivalentCandidates(project,item));
+  // Compile, not reject: correct deterministic contract slips and list them.
+  const compiled=project.requestedOutline?{raw,corrections:[]}:compileOutlineCandidate(project,raw);raw=compiled.raw;
   const automatic=automaticPages(project);
   let contentSelection;try{contentSelection=compileContentSelection(project,raw);}catch(error){error.outlineContract=true;error.code='coverage_invalid';throw error;}
   if(contentSelection||project.languageProjection)project={...project,...(contentSelection?{contentSelection}:{}),originalSourceInventory:project.originalSourceInventory||project.source.semantic.inventory,source:selectionSource(project,contentSelection)};
@@ -626,9 +727,10 @@ function assessOutlineCandidate(project, raw, {finalRepack=false}={}) {
   const candidateProject={...project,...(automatic&&project.templateFidelity?{nativeCapacityAssignment:true}:{})};
   try {
     rawOutline=project.requestedOutline||project.nativeTitleRepairSeed?raw:packOutline(project,raw,{finalRepack});
+    rawOutline=ensureOutlineClosing(project,rawOutline);
     if(automatic)candidateProject.pages=pages(rawOutline.slides.length);
-    rawOutline={...rawOutline,slides:rawOutline.slides.map(slide=>fragmentTitle(slide,project.source))};
-    outline=normalizeOutline(rawOutline,candidateProject.pages,project.source,project.update,project.deckTitle,project.requestedOutline ? null : project.editOutputLanguage || dominantInputLanguage(project));
+    rawOutline={...rawOutline,slides:rawOutline.slides.map(slide=>fragmentTitle(slide,project.source,{cleanWholeLocators:!project.confirmedOutline&&!project.requestedOutline}))};
+    outline=normalizeOutline(rawOutline,candidateProject.pages,project.source,project.update,project.deckTitle,project.requestedOutline ? null : deckLanguage(project));
   } catch(error){error.code='schema_invalid';error.outlineContract=true;throw error;}
   candidateProject.outline=outline;
   // Explicit N fixes quantity, not a role-only layout reassignment. Preserve
@@ -639,19 +741,24 @@ function assessOutlineCandidate(project, raw, {finalRepack=false}={}) {
   candidateProject.outline=outline;
   const planning=buildPlanning(candidateProject,rawOutline,outline);
   const issues=[...exactPageConflict(candidateProject,rawOutline),...inspectSkeletonOwnership(candidateProject,rawOutline),...inspectReportOutline(candidateProject,outline,planning.brief),...inspectLongDeckOutline(candidateProject,outline),...inspectDensityOutline(rawOutline,candidateProject)];
-  return {project:candidateProject,rawOutline,outline,planning,issues};
+  return {project:candidateProject,rawOutline,outline,planning,issues,corrections:compiled.corrections};
 }
 function startOutline(uid, id, activity, log, deps = defaultDeps) {
   if (running.has(id)) return;
   running.add(id);
   let generateAfterOutline = false;
   void (async () => {
+    // A sequence of resolved model promises plus synchronous capacity passes
+    // can monopolize the event loop. Yield around each independent assessment
+    // so other tabs can create projects, read status and submit model results.
+    const assessCandidate=async(...args)=>{await new Promise(resolve=>setImmediate(resolve));const result=assessOutlineCandidate(...args);await new Promise(resolve=>setImmediate(resolve));return result;};
     try {
       const p = store.get(uid, id);
       if (!p || p.status !== 'outlining') return;
       if(p.failure){p.outlineFailureHistory=[...(p.outlineFailureHistory||[]).slice(-49),p.failure];delete p.failure;p.error='';store.save(p);}
       if (p.source?.segments?.length && !p.source.semantic) { p.source = withSemanticIndex(p.source); store.save(p); }
       syncPresentationPolicy(p);
+      await prepareTopicTitleProjection(p,(prompt,nodeKey)=>deps.modelCall(p,prompt,activity,log,{nodeKey,maxOutputTokens:8192}),async projected=>{const current=store.get(uid,id);if(current?.status!=='outlining')throw outlineError('cancelled');current.topicTitleProjection=projected.topicTitleProjection;store.save(current);});
       await prepareLanguageProjection(p,(prompt,nodeKey)=>deps.modelCall(p,prompt,activity,log,{nodeKey,maxOutputTokens:8192}),async projected=>{const current=store.get(uid,id);if(current?.status!=='outlining')throw outlineError('cancelled');current.originalSourceInventory=projected.originalSourceInventory;current.languageProjection=projected.languageProjection;store.save(current);});
       await prepareLanguagePairAudit(p,(prompt,nodeKey)=>deps.modelCall(p,prompt,activity,log,{nodeKey,maxOutputTokens:8192}),async audited=>{const current=store.get(uid,id);if(current?.status!=='outlining')throw outlineError('cancelled');current.languagePairAudit=audited.languagePairAudit;store.save(current);});
       try { transitionNode(p, 'outline', 'running'); } catch {}
@@ -659,7 +766,8 @@ function startOutline(uid, id, activity, log, deps = defaultDeps) {
       if (automatic) p.pages = estimatePageRecommendation(p).recommended;
       const saveCandidate=(raw,issues=[])=>{const current=store.get(uid,id);if(current?.status==='outlining'){current.candidateOutline=candidateRecord(current,raw,issues);current.outlineTrace=[...(current.outlineTrace||[]).slice(-99),{at:new Date().toISOString(),candidateHash:current.candidateOutline.hash,pages:raw?.slides?.length,issues:issues.map(item=>item.code),metrics:current.candidateOutline.metrics}];store.save(current);}};
       const batches=skeletonBatches({...p,planningNativeCapacity:sourceCapacityPlan(estimationSource(p),p.pages,p)?.capacity});
-      const planningIdentity=sha256(Buffer.from(JSON.stringify({model:p.model,contractVersion:p.promptContractVersion,template:p.template,templateSpec:p.templateSpec,templateIdentity:p.templateFidelity?.sha256,policy:p.generationPolicy,prompts:batches.length?batches.map(batch=>batch.prompt):[outlinePrompt(p)]})));
+      await prepareSourceVision(p,(project,prompt,options)=>deps.modelCall(project,prompt,activity,log,options),async analysis=>{await enqueueProject(uid,id,()=>{const latest=store.get(uid,id);latest.sourceVisualAnalysis=analysis;store.save(latest);});});
+      const planningIdentity=sha256(Buffer.from(JSON.stringify({model:p.model,executionPolicy:p.executionPolicy,contractVersion:p.promptContractVersion,template:p.template,templateSpec:p.templateSpec,templateIdentity:p.templateFidelity?.sha256,policy:p.generationPolicy,prompts:batches.length?batches.map(batch=>batch.prompt):[outlinePrompt(p)]})));
       const resumedRepair=!p.requestedOutline&&resumeOutlineRepair(p.outlineRepairCheckpoint,planningIdentity);
       const saveAssessedCheckpoint=assessed=>{const current=store.get(uid,id);if(current?.status==='outlining'&&current.source?.sha256===p.source?.sha256&&current.model===p.model){current.outlineRepairCheckpoint=retainOutlineRepair(assessed.rawOutline,planningIdentity);store.save(current);}};
       p.outlineBatchTotal=batches.length||1;store.save(p);
@@ -667,7 +775,19 @@ function startOutline(uid, id, activity, log, deps = defaultDeps) {
       const planBatches=async()=>assembleSkeletonBatches(p,batches,await boundedAll(batches,PPT_NODE_CONCURRENCY,async batch=>{
         const promptHash=sha256(Buffer.from(batch.prompt));
         const current=store.get(uid,id),saved=current?.outlineBatches?.find(item=>item.index===batch.index&&item.promptHash===promptHash&&item.model===p.model);
-        let raw=saved?.raw||await deps.modelCall(p,batch.prompt,activity,log,{nodeKey:'outline:group:'+batch.index,maxOutputTokens:16384,onProgress:progress=>{
+        // One bounded retry per source group: a truncated, unparsable or
+        // dropped response re-runs only this group (larger output budget for
+        // truncation); completed groups stay checkpointed.
+        const groupCall=async options=>{
+          try{return await deps.modelCall(p,batch.prompt,activity,log,options);}
+          catch(error){
+            const code=error?.code||(/truncat/iu.test(String(error?.message))?'truncated_output':/json/iu.test(String(error?.message))?'invalid_json':'');
+            if(!['truncated_output','invalid_json','empty_visible_output','timeout','transport','network'].includes(code))throw error;
+            log(`ppt ${id} outline group ${batch.index+1} retried after ${code}`);
+            return deps.modelCall(p,batch.prompt,activity,log,{...options,nodeKey:options.nodeKey+':retry',...(code==='truncated_output'?{maxOutputTokens:32768}:{})});
+          }
+        };
+        let raw=saved?.raw||await groupCall({nodeKey:'outline:group:'+batch.index,maxOutputTokens:16384,onProgress:progress=>{
           const now=Date.now();if(now-(draftTimes.get(batch.index)||0)<1000)return;
           const current=store.get(uid,id);if(current?.status!=='outlining'||current.source?.sha256!==p.source?.sha256)return;
           const slides=outlineDraftFromPartialJson(progress.text,batch.allowedIds);if(!slides.length)return;draftTimes.set(batch.index,now);batchDrafts[batch.index]=slides;
@@ -675,15 +795,19 @@ function startOutline(uid, id, activity, log, deps = defaultDeps) {
           emitRunProgress(store.get(uid,id),'outline.partial',{groupIndex:batch.index,seq:progress.seq,closedPages:slides.length,chars:progress.chars});
         }});
         // Validate scoped IDs before retaining a restart checkpoint.
-        if(raw?.version!==2||!Array.isArray(raw.slides)||raw.slides.some(slide=>!Array.isArray(slide.sourceUnitIds)||slide.sourceUnitIds.some(id=>!batch.allowedIds.includes(id))))throw outlineError('schema_invalid');
+        if(raw?.version!==2||!Array.isArray(raw.slides))throw outlineError('schema_invalid');
+        // IDs outside this group belong to another group's pages: drop them here
+        // instead of rejecting the group (round 7 compile-not-reject).
+        raw={...raw,slides:raw.slides.filter(slide=>slide&&typeof slide==='object').map(slide=>({...slide,sourceUnitIds:(Array.isArray(slide.sourceUnitIds)?slide.sourceUnitIds:[]).filter(id=>batch.allowedIds.includes(id)),...(Array.isArray(slide.sourceArtifactRanges)?{sourceArtifactRanges:slide.sourceArtifactRanges.filter(ref=>batch.allowedIds.includes(ref?.sourceUnitId))}:{})})),
+          ...(Array.isArray(raw.selection)?{selection:raw.selection.filter(entry=>batch.allowedIds.includes(entry?.sourceUnitId))}:{})};
+        if(!raw.slides.length)throw outlineError('schema_invalid');
         const owned=new Set(raw.slides.flatMap(slide=>slide.sourceUnitIds));
         const missing=(p.source?.semantic?.inventory?.items||[]).filter(item=>batch.allowedIds.includes(item.id)&&isSourceArtifactItem(item)&&!owned.has(item.id)).map(item=>item.id);
         if(missing.length&&p.generationPolicy?.content==='full_source'){
           const correction=await deps.modelCall(p,`${batch.prompt}\n<missing_source_coverage>${JSON.stringify(missing)}</missing_source_coverage>\nCoverage repair only: preserve the accepted pages unchanged. Return version 2 JSON with additional content slides assigning ALL and ONLY the missing IDs above. Keep bilingual/related reading units together. No cover, no invented facts, no selection outside this list. Native capacity is checked after assembly.`,activity,log,{nodeKey:'outline'});
-          const recovered=correction?.slides;
-          if(correction?.version!==2||!Array.isArray(recovered)||recovered.some(slide=>!Array.isArray(slide.sourceUnitIds)||slide.sourceUnitIds.some(id=>!missing.includes(id))))throw outlineError('coverage_invalid');
-          const repaired=new Set(recovered.flatMap(slide=>slide.sourceUnitIds));
-          if(missing.some(id=>!repaired.has(id)))throw outlineError('coverage_invalid');
+          // Units the correction still leaves unowned are attached to their
+          // nearest page by the outline compiler; invalid IDs are dropped.
+          const recovered=(correction?.version===2&&Array.isArray(correction.slides)?correction.slides:[]).filter(slide=>slide&&Array.isArray(slide.sourceUnitIds)).map(slide=>({...slide,sourceUnitIds:slide.sourceUnitIds.filter(id=>missing.includes(id))})).filter(slide=>slide.sourceUnitIds.length);
           const order=new Map((p.source.semantic.inventory.items||[]).map((item,index)=>[item.id,index]));
           const rank=slide=>slide.role==='cover'?-1:Math.min(Infinity,...slide.sourceUnitIds.map(id=>order.get(id)??Infinity));
           raw={...raw,slides:[...raw.slides,...recovered].sort((a,b)=>rank(a)-rank(b))};
@@ -709,7 +833,7 @@ function startOutline(uid, id, activity, log, deps = defaultDeps) {
       if(resumedRepair)emitRunProgress(store.get(uid,id),'outline.repair_resumed',{candidatePages:rawOutline.slides.length,validated:false});
       saveCandidate(rawOutline);
       let assessed,validationError;
-      try {assessed=assessOutlineCandidate(p,rawOutline);} catch(error){
+      try {assessed=await assessCandidate(p,rawOutline);} catch(error){
         if(!error.outlineContract||p.requestedOutline)throw error;
         validationError=error;
       }
@@ -741,34 +865,33 @@ function startOutline(uid, id, activity, log, deps = defaultDeps) {
         if(JSON.stringify(revised)===JSON.stringify(rawOutline))break;
         rawOutline=revised;
         const checkpointProject=store.get(uid,id);if(checkpointProject?.status==='outlining'){checkpointProject.outlineRepairCheckpoint=retainOutlineRepair(revised,planningIdentity);store.save(checkpointProject);}
-        try{assessed=assessOutlineCandidate(p,revised);validationError=undefined;saveCandidate(assessed.rawOutline,assessed.issues);}
+        try{assessed=await assessCandidate(p,revised);validationError=undefined;saveCandidate(assessed.rawOutline,assessed.issues);}
         catch(error){if(!error.outlineContract)throw error;validationError=error;saveCandidate(revised,[{code:error.code,message:error.message,details:error.details}]);}
       }
       for(let pass=0;assessed&&!p.requestedOutline&&pass<2;pass++){
         const diagnostic=repeatedFocusMetadataError(assessed.issues);if(!diagnostic)break;
         const prompt=outlineMetadataRepairPrompt(assessed.project,assessed.rawOutline,diagnostic);if(!prompt)break;
         const delta=await deps.modelCall(p,prompt,activity,log,{nodeKey:'outline:metadata:resumed:'+pass,maxOutputTokens:8192});
-        assessed=assessOutlineCandidate(p,applyOutlineMetadataRepair(assessed.rawOutline,diagnostic,delta));rawOutline=assessed.rawOutline;saveAssessedCheckpoint(assessed);saveCandidate(rawOutline,assessed.issues);
+        assessed=await assessCandidate(p,applyOutlineMetadataRepair(assessed.rawOutline,diagnostic,delta));rawOutline=assessed.rawOutline;saveAssessedCheckpoint(assessed);saveCandidate(rawOutline,assessed.issues);
       }
       // Overview contract: condense (selected table rows, details in notes)
       // before any measured partition adds pages (outline concision, item 5).
-      if(assessed&&automatic&&!p.requestedOutline){const condensed=condenseOverflowingTables(p,assessed,assessOutlineCandidate);if(condensed){assessed=condensed;saveAssessedCheckpoint(assessed);rawOutline=assessed.rawOutline;saveCandidate(rawOutline,assessed.issues);}}
+      if(assessed&&automatic&&!p.requestedOutline){const condensed=await condenseOverflowingTables(p,assessed,assessCandidate);if(condensed){assessed=condensed;saveAssessedCheckpoint(assessed);rawOutline=assessed.rawOutline;saveCandidate(rawOutline,assessed.issues);}}
       // Prefer a measured partition of unchanged source objects to asking a
       // model to create more explanatory pages. This keeps geometry repair
       // separate from semantic planning, with the same coverage/fit gates.
       if (assessed && automatic && !p.requestedOutline) for(let pass=0;pass<3;pass++) {
         const density=inspectDensityOutline(assessed.rawOutline,assessed.project);
         if(!density.length||density.some(issue=>!['planned_density_overflow','planned_source_object_duplicate'].includes(issue.code)))break;
-        const replacements=new Map(),removed=new Set();
-        for(const scope of outlineCapacityRepairScopes(assessed))try{
-          replacements.set(scope[0],partitionOutlineWithMeasuredComponents(assessed,scope));scope.slice(1).forEach(index=>removed.add(index));
-        }catch(error){log(`ppt ${id} pre-model measured partition skipped: ${String(error?.message||error).slice(0,180)}`);}
-        if(!replacements.size)break;
-        const slides=assessed.rawOutline.slides.flatMap((slide,index)=>removed.has(index)?[]:replacements.get(index)||[slide]);
-        if(slides.length>100)break;
-        const revised=assessOutlineCandidate(p,{...assessed.rawOutline,slides});
+        const scopes=outlineCapacityRepairScopes(assessed),partitions=scopes.map(scope=>{
+          try{return partitionOutlineWithMeasuredComponents(assessed,scope);}
+          catch(error){log(`ppt ${id} pre-model measured partition skipped: ${String(error?.message||error).slice(0,180)}`);return null;}
+        });
+        const batch=boundedCapacityPartitions(assessed.rawOutline,scopes,partitions);if(!batch.applied)break;
+        let revised=await assessCandidate(assessed.project,batch.raw,{finalRepack:true});
+        if(batch.deferred.length){const reclaimed=await mergeUnderfilledPages(revised.project,revised,assessCandidate,{ignoreBudget:true,low:.95});if(reclaimed)revised=reclaimed;log(`ppt ${id} retained ${batch.applied} measured scopes; ${batch.deferred.length} deferred at hard page budget`);}
         const load=candidate=>candidate.rawOutline.slides.reduce((sum,slide)=>sum+(slide.densityFit?.predictedOverflow||0),0);
-        if(revised.issues.filter(issue=>issue.code!=='planned_density_overflow').length>assessed.issues.filter(issue=>issue.code!=='planned_density_overflow').length||load(revised)>=load(assessed))break;
+        if(revised.issues.filter(issue=>!['planned_density_overflow','outline_repeated_claim'].includes(issue.code)).length>assessed.issues.filter(issue=>!['planned_density_overflow','outline_repeated_claim'].includes(issue.code)).length||load(revised)>=load(assessed))break;
         assessed=revised;saveAssessedCheckpoint(assessed);rawOutline=revised.rawOutline;saveCandidate(rawOutline,assessed.issues);
       }
       const initialIssues=assessed?.issues||[{code:'invalid_outline_contract',message:String(validationError?.message||'invalid candidate').slice(0,500),details:validationError?.details,repairable:true}];
@@ -781,7 +904,7 @@ function startOutline(uid, id, activity, log, deps = defaultDeps) {
           let response;
           try {
             response=await deps.modelCall(p,correctionPrompt,activity,log,{nodeKey:'outline'});
-            const revised=assessOutlineCandidate(p,shortProtocol?applyOutlineDelta(p,assessed?.rawOutline||rawOutline,response,repairPrompt):response);
+            const revised=await assessCandidate(p,shortProtocol?applyOutlineDelta(p,assessed?.rawOutline||rawOutline,response,repairPrompt):response);
             if(!assessed || revised.planning.brief.reportMode===assessed.planning.brief.reportMode && revised.issues.length<initialIssues.length){assessed=revised;saveAssessedCheckpoint(assessed);}
             break;
           } catch(error){
@@ -796,7 +919,7 @@ function startOutline(uid, id, activity, log, deps = defaultDeps) {
       if(automatic&&!p.requestedOutline){
         const restored=restoreMissingSourceArtifacts(assessed);
         if(restored!==assessed.rawOutline){
-          assessed=assessOutlineCandidate(p,restored);
+          assessed=await assessCandidate(p,restored);
           log(`ppt ${id} restored complete missing source artifacts: ${assessed.project.pages} candidate pages`);
         }
       }
@@ -823,12 +946,10 @@ function startOutline(uid, id, activity, log, deps = defaultDeps) {
               }
             }catch(error){log(`ppt ${id} local outline partition skipped: ${String(error?.message||error).slice(0,180)}`);return null;}
           });
-          const replacements=new Map(),removed=new Set();
-          for(const [i,scope] of indexes.entries())if(partitions[i]){replacements.set(scope[0],partitions[i]);for(const index of scope.slice(1))removed.add(index);}
-          const slides=base.rawOutline.slides.flatMap((s,index)=>removed.has(index)?[]:replacements.get(index)||[s]);
-          if(slides.length>100)break;
+          const batch=boundedCapacityPartitions(base.rawOutline,indexes,partitions);if(!batch.applied)break;
           try{
-            const revised=assessOutlineCandidate(p,{...base.rawOutline,slides});
+            let revised=await assessCandidate(base.project,batch.raw,{finalRepack:true});
+            if(batch.deferred.length){const reclaimed=await mergeUnderfilledPages(revised.project,revised,assessCandidate,{ignoreBudget:true,low:.95});if(reclaimed)revised=reclaimed;}
             const revisedDensity=inspectDensityOutline(revised.rawOutline,revised.project);
             const structural=d=>d.filter(issue=>issue.code!=='planned_density_overflow');
             const previousStructural=structural(density),nextStructural=structural(revisedDensity);
@@ -840,10 +961,10 @@ function startOutline(uid, id, activity, log, deps = defaultDeps) {
       }
       // Overview contract: condense (selected table rows, details in notes)
       // before any measured partition adds pages (outline concision, item 5).
-      if(assessed&&automatic&&!p.requestedOutline){const condensed=condenseOverflowingTables(p,assessed,assessOutlineCandidate);if(condensed){assessed=condensed;saveAssessedCheckpoint(assessed);rawOutline=assessed.rawOutline;saveCandidate(rawOutline,assessed.issues);}}
+      if(assessed&&automatic&&!p.requestedOutline){const condensed=await condenseOverflowingTables(p,assessed,assessCandidate);if(condensed){assessed=condensed;saveAssessedCheckpoint(assessed);rawOutline=assessed.rawOutline;saveCandidate(rawOutline,assessed.issues);}}
       // No generated copy is changed by the measured fallback. It partitions
       // complete original atoms only after bounded model repair is exhausted.
-      if(automatic&&!p.requestedOutline)assessed=assessOutlineCandidate(p,orderSourceConclusion(p,assessed.rawOutline));
+      if(automatic&&!p.requestedOutline)assessed=await assessCandidate(p,orderSourceConclusion(p,assessed.rawOutline));
       if(automatic&&!p.requestedOutline)for(let pass=0;pass<3;pass++){
         const density=inspectDensityOutline(assessed.rawOutline,assessed.project);
         // A translation pair or lead-in+list planned across pages is also
@@ -851,25 +972,34 @@ function startOutline(uid, id, activity, log, deps = defaultDeps) {
         const splitUnits=splitReadingUnits(assessed);
         if((!density.length&&!splitUnits.length)||density.some(issue=>!['planned_density_overflow','planned_source_object_duplicate'].includes(issue.code)))break;
         {
-          const base=assessed,scopes=outlineCapacityRepairScopes(base),replacements=new Map(),removed=new Set();
-          for(const scope of scopes)try{
-            replacements.set(scope[0],partitionOutlineWithMeasuredComponents(base,scope));for(const index of scope.slice(1))removed.add(index);
-          }catch(error){log(`ppt ${id} measured outline partition skipped: ${String(error?.message||error).slice(0,180)}`);}
-          if(!replacements.size)break;
-          const slides=base.rawOutline.slides.flatMap((s,index)=>removed.has(index)?[]:replacements.get(index)||[s]);
-          if(slides.length>100)break;
-          try{assessed=assessOutlineCandidate(p,{...base.rawOutline,slides});saveAssessedCheckpoint(assessed);log(`ppt ${id} measured complete-component partition pass ${pass+1}: ${assessed.project.pages} candidate pages`);}
+          const base=assessed,scopes=outlineCapacityRepairScopes(base),partitions=scopes.map(scope=>{
+            try{return partitionOutlineWithMeasuredComponents(base,scope);}
+            catch(error){log(`ppt ${id} measured outline partition skipped: ${String(error?.message||error).slice(0,180)}`);return null;}
+          });
+          const batch=boundedCapacityPartitions(base.rawOutline,scopes,partitions);if(!batch.applied)break;
+          try{
+            assessed=await assessCandidate(base.project,batch.raw,{finalRepack:true});
+            if(batch.deferred.length){const reclaimed=await mergeUnderfilledPages(assessed.project,assessed,assessCandidate,{ignoreBudget:true,low:.95});if(reclaimed)assessed=reclaimed;}
+            saveAssessedCheckpoint(assessed);log(`ppt ${id} measured complete-component partition pass ${pass+1}: ${assessed.project.pages} candidate pages; deferred ${batch.deferred.length} scopes`);
+          }
           catch(error){log(`ppt ${id} measured outline partition rejected: ${String(error?.message||error).slice(0,180)}`);break;}
         }
       }
-      if(automatic&&!p.requestedOutline)assessed=assessOutlineCandidate(p,orderSourceConclusion(p,assessed.rawOutline));
+      if(automatic&&!p.requestedOutline)assessed=await assessCandidate(p,orderSourceConclusion(p,assessed.rawOutline));
       if(automatic&&!p.requestedOutline)for(let pass=0;pass<3;pass++){
-        const repacked=assessOutlineCandidate(assessed.project,assessed.rawOutline,{finalRepack:true});
+        const repacked=await assessCandidate(assessed.project,assessed.rawOutline,{finalRepack:true});
         if(repacked.outline.length>=assessed.outline.length||inspectDensityOutline(repacked.rawOutline,repacked.project).length)break;
         assessed=repacked;
       }
+      if(automatic&&!p.requestedOutline){const balanced=await balanceUnderfilledPages(p,assessed,assessCandidate);if(balanced){assessed=balanced;saveAssessedCheckpoint(assessed);log(`ppt ${id} balanced ${balanced.concisionBalances} thin/full source pairs at the retained font`);}}
       // Underfilled neighbours merge (across sections) while above budget.
-      if(automatic&&!p.requestedOutline){const merged=mergeUnderfilledPages(p,assessed,assessOutlineCandidate,{capacity:assessed.rawOutline.slides[1]?.densityFit?.targetVisualUnits||671});if(merged){assessed=merged;saveAssessedCheckpoint(assessed);log(`ppt ${id} merged ${merged.concisionMerges} underfilled page pair(s): ${assessed.outline.length} pages`);}}
+      if(automatic&&!p.requestedOutline){const merged=await mergeUnderfilledPages(p,assessed,assessCandidate,{capacity:assessed.rawOutline.slides[1]?.densityFit?.targetVisualUnits||671});if(merged){assessed=merged;saveAssessedCheckpoint(assessed);log(`ppt ${id} merged ${merged.concisionMerges} underfilled page pair(s): ${assessed.outline.length} pages`);}}
+      // Thin pages (round 7, A5): take back related points from notes, then
+      // merge remaining thin neighbours, so content pages land at 55-95% fill.
+      if(automatic&&!p.requestedOutline){
+        const enriched=await enrichUnderfilledPages(p,assessed,assessCandidate);if(enriched){assessed=enriched;saveAssessedCheckpoint(assessed);log(`ppt ${id} filled ${enriched.enrichedPages} thin page(s) from related notes`);}
+        const thin=await mergeUnderfilledPages(p,assessed,assessCandidate,{capacity:assessed.rawOutline.slides[1]?.densityFit?.targetVisualUnits||671,low:.55,ignoreBudget:true});if(thin){assessed=thin;saveAssessedCheckpoint(assessed);log(`ppt ${id} merged ${thin.concisionMerges} thin page pair(s): ${assessed.outline.length} pages`);}
+      }
       // Physical partitions may keep identical planning focuses even though
       // their frozen source owners differ. Repair intent metadata only, then
       // re-run the same source and physical checks before explicit confirmation.
@@ -877,19 +1007,19 @@ function startOutline(uid, id, activity, log, deps = defaultDeps) {
         const diagnostic=repeatedFocusMetadataError(assessed.issues);if(!diagnostic)break;
         const prompt=outlineMetadataRepairPrompt(assessed.project,assessed.rawOutline,diagnostic);if(!prompt)break;
         const delta=await deps.modelCall(p,prompt,activity,log,{nodeKey:'outline:metadata:partition:'+pass,maxOutputTokens:8192});
-        assessed=assessOutlineCandidate(p,applyOutlineMetadataRepair(assessed.rawOutline,diagnostic,delta));saveAssessedCheckpoint(assessed);
+        assessed=await assessCandidate(p,applyOutlineMetadataRepair(assessed.rawOutline,diagnostic,delta));saveAssessedCheckpoint(assessed);
       }
       // Metadata repair is confined to titles of the final measured native
       // assignment. Never let a writer rename an already confirmed outline.
       for(let pass=0;!p.requestedOutline&&pass<3;pass++){
-        const conflicts=inspectNativeOutlineTitles(assessed.project,assessed.outline);if(!conflicts.length)break;
+        const conflicts=[...inspectNativeOutlineTitles(assessed.project,assessed.rawOutline.slides),...inspectSystemOutlineTitles(assessed.project,assessed.rawOutline.slides)];if(!conflicts.length)break;
         const cover=conflicts.filter(c=>c.pageIndex===0),body=conflicts.filter(c=>c.pageIndex!==0),batches=cover.length?[cover]:[];
         for(let at=0;at<body.length;at+=8)batches.push(body.slice(at,at+8));
         const base=assessed;let retainedTitles=base.rawOutline;
         saveCandidate(base.rawOutline,[...base.issues,...conflicts]);
         const retainTitles=(diagnostic,delta)=>{
           retainedTitles=applyOutlineMetadataRepair(retainedTitles,diagnostic,delta);
-          const latest=store.get(uid,id);if(latest?.status==='outlining'){latest.outlineRepairCheckpoint=retainOutlineRepair(retainedTitles,planningIdentity);store.save(latest);saveCandidate(retainedTitles,[...base.issues,...inspectNativeOutlineTitles(base.project,retainedTitles.slides)]);}
+          const latest=store.get(uid,id);if(latest?.status==='outlining'){latest.outlineRepairCheckpoint=retainOutlineRepair(retainedTitles,planningIdentity);store.save(latest);saveCandidate(retainedTitles,[...base.issues,...inspectNativeOutlineTitles(base.project,retainedTitles.slides),...inspectSystemOutlineTitles(base.project,retainedTitles.slides)]);}
         };
         const repairs=await boundedAll(batches,PPT_NODE_CONCURRENCY,async(batch,index)=>{
           const diagnostic={details:{metadataConflicts:batch}};
@@ -903,22 +1033,28 @@ function startOutline(uid, id, activity, log, deps = defaultDeps) {
           }
         });
         let revised=base.rawOutline;for(const {diagnostic,delta}of repairs)revised=applyOutlineMetadataRepair(revised,diagnostic,delta);
-        assessed=assessOutlineCandidate(p,revised);saveAssessedCheckpoint(assessed);
+        assessed=await assessCandidate(p,revised);saveAssessedCheckpoint(assessed);
       }
-      const titleIssues=[...inspectNativeOutlineTitles(assessed.project,assessed.outline),...inspectNativeCoverTitle(assessed.project,assessed.outline)];
-      if(titleIssues.length){saveCandidate(assessed.rawOutline,titleIssues);throw outlineError('capacity_invalid');}
+      // Compile, not reject (round 7, B3). Remaining planning findings become
+      // listed warnings on the confirmation page; capacity is resolved inside
+      // each page (layout, condensing), and an explicit page-count conflict
+      // waits for the user's confirmation instead of failing the outline.
+      const titleIssues=[...inspectNativeOutlineTitles(assessed.project,assessed.rawOutline.slides),...inspectSystemOutlineTitles(assessed.project,assessed.rawOutline.slides),...inspectNativeCoverTitle(assessed.project,assessed.outline)];
       rawOutline=assessed.rawOutline;saveAssessedCheckpoint(assessed);
       saveCandidate(rawOutline,assessed.issues);
-      if(assessed.issues.some(issue=>issue.code==='outline_repeated_claim'||issue.code==='outline_ungrounded_page'))throw outlineError('coverage_invalid');
       const outline=assessed.outline;
-      if(exactPageConflict(assessed.project,rawOutline).length){const diagnostic=store.get(uid,id);diagnostic.pageBudgetConflict=exactPageConflict(assessed.project,rawOutline)[0];store.save(diagnostic);throw outlineError('capacity_invalid');}
-      if(inspectSkeletonOwnership(assessed.project,rawOutline).length)throw outlineError('coverage_invalid');
-      // Exact-N is a display budget, never an exemption from ownership or fit.
-      if(inspectDensityOutline(rawOutline,assessed.project).length){
-        const diagnostic=store.get(uid,id);
-        if(diagnostic?.status==='outlining'){diagnostic.outlineCapacityDiagnostic={diagnosticOnly:true,candidatePages:assessed.project.pages,rawOutline,issues:inspectDensityOutline(rawOutline,assessed.project)};store.save(diagnostic);}
-        throw outlineError(inspectDensityOutline(rawOutline,assessed.project).some(x=>x.code!=='planned_density_overflow')?'coverage_invalid':'capacity_invalid');
-      }
+      const pageConflicts=exactPageConflict(assessed.project,rawOutline);
+      const frozenSourceIssues=inspectFrozenOutlineSources(assessed.project,assessed.outline,assessed.planning);
+      const outlineWarnings=[
+        ...frozenSourceIssues.map(issue=>({...issue,resolution:'repartition_source_before_confirmation',blocking:true})),
+        ...titleIssues.map(issue=>({code:issue.code||'native_title_capacity',pageIndex:issue.pageIndex,message:issue.message,resolution:'shorten_topic_before_confirmation',blocking:true})),
+        ...assessed.issues.filter(issue=>['outline_repeated_claim','outline_ungrounded_page'].includes(issue.code)).map(issue=>({code:issue.code,pageIndex:issue.details?.pageIndex,message:issue.message,resolution:'review_in_outline'})),
+        ...pageConflicts.map(issue=>({code:issue.code,message:issue.message,details:issue.details,resolution:'confirm_page_count',blocking:true})),
+        ...inspectSkeletonOwnership(assessed.project,rawOutline).map(issue=>({code:issue.code,sourceUnitIds:issue.sourceUnitIds,message:issue.message,resolution:'review_in_outline'})),
+        ...inspectDensityOutline(rawOutline,assessed.project).map(issue=>({code:issue.code,message:issue.message,pageIndex:issue.details?.pageIndex,resolution:issue.code==='planned_density_overflow'?'fit_inside_page':'review_in_outline'})),
+      ];
+      if(pageConflicts.length){const diagnostic=store.get(uid,id);if(diagnostic){diagnostic.pageBudgetConflict=pageConflicts[0];store.save(diagnostic);}}
+      if(outlineWarnings.length)log(`ppt ${id} outline accepted with ${outlineWarnings.length} listed warning(s): ${[...new Set(outlineWarnings.map(w=>w.code))].join(', ')}`);
       const current = store.get(uid, id);
       if (!current || current.status !== 'outlining') return;
       await prepareNavigationPlan(assessed.project,finalDeckNavigation({...assessed.project,navigationPlan:undefined,deck:null}).entries,(prompt,nodeKey)=>deps.modelCall(p,prompt,activity,log,{nodeKey,maxOutputTokens:8192}));
@@ -930,17 +1066,19 @@ function startOutline(uid, id, activity, log, deps = defaultDeps) {
       const reuseError = reuseCount && templateReuseError(reuseCount, current.pages);
       if (reuseError) throw new HttpError(400, reuseError);
       const growth = automatic ? outlineGrowth(current, current.pages) : null;
+      const corrections=[...(assessed.corrections||[]),...(assessed.project.navigationPlan?.corrections||[])];
+      current.outlineCorrections = { version: 1, items: corrections.slice(0, 200), summary: summarizeOutlineCorrections(corrections), warnings: outlineWarnings.slice(0, 100) };
       current.pageDecision = { ...current.pageDecision, finalPageCount: current.pages, densityProfileId: densityProfile().id,
         estimateVersion: 1, fitValidated: rawOutline.slides?.slice(1).every(s => s.densityFit?.capacity_ok) || false,
         ...(automatic ? { mode: 'auto', initialPageCount: current.pageDecision.initialPageCount, calibratedAt: new Date().toISOString() } : {}),
-        ...(current.autoGenerate && !growth ? { confirmedAt: new Date().toISOString() } : {}),
+        ...(current.autoGenerate && !growth && !outlineWarnings.some(warning => warning.blocking) ? { confirmedAt: new Date().toISOString() } : {}),
         concision: outlineConcisionMetrics(current, outline, slide => pageLoad(current, slide, rawOutline.selection || [])), ...(growth ? { growth } : {}) };
       if (!growth) delete current.pageDecision.growth;
       current.outline = outline;
       current.candidateOutline=candidateRecord(current,rawOutline,[],true);
       delete current.failure;
       // An automatic outline that outgrew its budget waits for confirmation.
-      const proceed = current.autoGenerate && !growth;
+      const proceed = current.autoGenerate && !growth && !outlineWarnings.some(warning => warning.blocking);
       current.status = proceed ? 'generating' : 'outline_ready'; current.stage = proceed ? 'content' : 'outline'; current.error = '';
       if (current.deckTitle?.source !== 'user') {
         if(current.titleSource==='derived'&&outline[0]?.title){const identity=displayedDocumentTitle(current);current.title=identity?.variants?.map(v=>v.text).join(' | ').slice(0,160)||outline[0].title;}
@@ -979,7 +1117,7 @@ async function writeWithContractRepair({prompt,call,normalize,nodeKey,maxRepairs
       // Invalid deltas never fall back to a broad page rewrite. Reuse the
       // immutable base and the same finite scope within the original bound.
       if(/^writer_local_repair_/u.test(String(error.message))){if(attempt===maxRepairs)throw error;nextPrompt=writerLocalRepairPrompt(writerCorrectionContext(prompt),localBase,localScope,error)+'\n<rejected_delta>'+JSON.stringify({error:error.message,response:response??null})+'</rejected_delta> The previous delta was invalid. Preserve the exact numeric tokens of each allowed string, including numeric identifiers such as p05; shorten the surrounding words instead. The unchanged base and allowed targets remain authoritative.';continue;}
-      const contractFailure=/writer changed the confirmed outline title|rendered_title_capacity|writer_math_invalid|模型未返回有效的结构化内容|slide \d+ title must be text|bullet must be text|source_artifact_capacity|writer cover contract|writer source-only contract|invalid visible native copy type|invalid source commentary|invalid source evidence selection|writer omitted|source artifact|row range|range.*table|template slot.*safety|block id|block \d+ invalid|duplicate block|visual blocks per slide|unsupported visual block|table dimensions invalid|chart data invalid|shape invalid/iu.test(String(error.message));
+      const contractFailure=Array.isArray(error.writerFieldPath)||error.code==='invalid_json'||/^ppt_invalid_json$/u.test(String(error.message))||/writer changed the confirmed outline title|rendered_title_capacity|writer_math_invalid|模型未返回有效的结构化内容|slide \d+ title must be text|bullet must be text|source_artifact_capacity|writer cover contract|writer source-only contract|invalid visible native copy type|invalid source commentary|invalid source evidence selection|writer omitted|source artifact|row range|range.*table|template slot.*safety|block id|block \d+ invalid|duplicate block|visual blocks per slide|unsupported visual block|table dimensions invalid|chart data invalid|shape invalid/iu.test(String(error.message));
       if(contractFailure&&!error.code)error.code=/source_artifact_capacity/iu.test(error.message)?'capacity_invalid':/writer omitted|source evidence selection|row range|range.*table/iu.test(error.message)?'coverage_invalid':'schema_invalid';
       if(attempt===maxRepairs||!contractFailure)throw error;
       let contract;try{contract=JSON.parse(prompt.match(/<slide_contract>([\s\S]*?)<\/slide_contract>/u)?.[1]||'null');}catch{}
@@ -992,7 +1130,7 @@ async function writeWithContractRepair({prompt,call,normalize,nodeKey,maxRepairs
           try{const content=normalize(omitted.value);content.localSpanRepair={attempts:localAudit.length+1,audit:[...localAudit,{...omitted.audit,basis:'measured overflowing optional commentary; all owned frozen source retained and normal validator passed'}]};return {content,attempts:attempt+1};}catch{ /* The full validator rejected omission; use the same bounded model repair. */ }
         }
         nextPrompt=writerLocalRepairPrompt(writerCorrectionContext(prompt),response,localScope,error);continue;}
-      nextPrompt=`${writerCorrectionContext(prompt)}\n<invalid_response>${response===undefined?'No parseable JSON was returned':JSON.stringify(response)}</invalid_response>\n<writer_contract_error>${String(error.message)}</writer_contract_error>\n<repair>Return valid JSON in the same schema. Preserve exact frozen sources, all selected cells and necessary facts. Visual block id must match ^[A-Za-z0-9_-]{1,40}$ and be unique; do not put human labels or step captions in id. Correct the precise type/count/height error above; do not repeat a rejected expanded draft. For sourceFits=true, keep all frozen structures and required excerpts. Use the measured source_commentary_budget: if its paragraphCount is one, return no more than one paragraph, targeting 85% of singleParagraphCjkCharacters in total including punctuation/formula text. Never repeat facts already automatically displayed by frozen sourceArtifacts/sourceEvidenceIds. Remove only duplicate explanation, never required facts or locked excerpts. Do not change source row ranges, fonts or page count.</repair>`;
+      nextPrompt=`${writerCorrectionContext(prompt)}\n<invalid_response>${response===undefined?'No parseable JSON was returned':JSON.stringify(response)}</invalid_response>\n<writer_contract_error>${String(error.message)}</writer_contract_error>\n<repair>Return valid JSON in the same schema. Preserve exact frozen sources, all selected cells and necessary facts. Visual block id must match ^[A-Za-z0-9_-]{1,40}$ and be unique; do not put human labels or step captions in id. blocks is only for image/chart/table/shape with valid IDs; textual headings and paragraphs belong in contentBlocks, never blocks. When <bound_source_body> is present, contentBlocks, blocks and sourceCommentary must ALL be []; the frozen source objects already display every required fact. Correct the precise type/count/height error above; do not repeat a rejected expanded draft. For sourceFits=true, keep all frozen structures and required excerpts. Use the measured source_commentary_budget: if its paragraphCount is one, return no more than one paragraph, targeting 85% of singleParagraphCjkCharacters in total including punctuation/formula text. Never repeat facts already automatically displayed by frozen sourceArtifacts/sourceEvidenceIds. Remove only duplicate explanation, never required facts or locked excerpts. Do not change source row ranges, fonts or page count.</repair>`;
     }
   }
 }
@@ -1002,14 +1140,14 @@ function revalidateCompletedCopy(project) {
   if(fidelity?.mode==='preserve'&&project.deck?.slides?.length){
     if(fidelity.sourceCatalog?.some(s=>s.nodes?.some(n=>n.type==='image'&&!n.content?.dataUrl))){
       const cached=store.readTemplateIR(project.templateSpec?.kind==='managed'?'managed':project.uid,project.template,fidelity.sha256);
-      if(cached?.parserVersion==='pptx-ir-7'&&cached.imported?.deck?.slides?.length===fidelity.originalSlideCount){
+      if(cached?.parserVersion===PPTX_IR_VERSION&&cached.imported?.deck?.slides?.length===fidelity.originalSlideCount){
         fidelity.sourceCatalog=structuredClone(cached.imported.deck.slides);
         project.runtime ||= {};project.runtime.templateCatalogRecovery={templateHash:fidelity.sha256,basis:'complete original parser cache; immutable native media retained'};
       }
     }
     project.sourceFontFloors={...project.sourceFontFloors};
     for(const s of project.deck.slides){const fonts=s.nodes?.filter(isSourceOwnedNode).map(n=>Number(n.style?.fontSizePt)||0)||[];if(fonts.length)project.sourceFontFloors[s.id]=Math.max(project.sourceFontFloors[s.id]||0,...fonts);}
-    const beforeMap=[...fidelity.slideMap];confirmNativeOutlineFit(project,{useRenderedLegacyTitles:true});
+    const beforeMap=[...fidelity.slideMap];confirmNativeOutlineFit(project,{useRenderedLegacyTitles:true,...(project.confirmedOutline?{warnOnly:true,preserveAssignment:true}:{})});
     const changed=project.outline.flatMap((s,index)=>beforeMap[index]!==project.templateFidelity.slideMap[index]?[{slideId:s.id,page:index+1,beforeSource:beforeMap[index],afterSource:project.templateFidelity.slideMap[index]}]:[]);
     if(changed.length){
       project.planning=refreshPlanning(project);invalidateReviews(project);
@@ -1022,6 +1160,13 @@ function revalidateCompletedCopy(project) {
   }
   for(const outline of project.outline.filter(slide=>slide.planningProtocolVersion===2)){
     const contract=project.planning?.slidePlan?.find(item=>item.slideId===outline.id);if(!contract)continue;
+    const previousEvidence=contract.requiredEvidenceIds||[];
+    const ownedEvidence=previousEvidence.filter(id=>evidenceBelongsToSlide(project.source,outline,(project.source?.semantic?.evidenceAtoms||[]).find(atom=>atom.id===id)));
+    if(JSON.stringify(previousEvidence)!==JSON.stringify(ownedEvidence)){
+      project.runtime ||= {};
+      (project.runtime.sourceEvidenceRevalidation ||= []).push({slideId:outline.id,runId:project.currentRunId,sourceHash:project.source?.sha256,previousEvidence,currentEvidence:ownedEvidence,basis:'exact frozen source-unit/range ownership; retrieval chunks may span neighboring pages'});
+      contract.requiredEvidenceIds=ownedEvidence;
+    }
     const details=sourceBackedDetails(outline,project.source);
     if(JSON.stringify(contract.requiredDetails||[])!==JSON.stringify(details)){
       project.runtime ||= {};
@@ -1030,6 +1175,14 @@ function revalidateCompletedCopy(project) {
     }
   }
   for(const [index,slide]of project.outline.entries()){
+    const recovered=recoverSourceCheckpoint(project,slide,index);
+    if(recovered){
+      project.nodes[slide.id]={...project.nodes[slide.id],status:'done',slide:recovered.slide};
+      project.runtime.slides[slide.id]=recovered.state;
+      (project.runtime.sourceCheckpointRevalidation ||= []).push(recovered.audit);
+      project.dagNodes ||= {};project.dagNodes[dagNodeId('content',slide.id)]=nodeRecord('done',project.dagNodes[dagNodeId('content',slide.id)],{reason:recovered.audit.basis});
+      invalidateReviews(project);
+    }
     const node=project.nodes?.[slide.id];if(node?.status!=='done'||!node.slide||project.runtime?.slides?.[slide.id]?.accepted)continue;
     if((node.slide.nodes||[]).some(item=>item.locked&&['text','list','table','chart'].includes(item.type)))continue;
     const coverNeedsRewrite=index===0&&!(slide.sourceUnitIds||[]).length&&!(node.slide.sourceArtifactNodes||[]).some(n=>n.sourceArtifact)&&
@@ -1039,16 +1192,17 @@ function revalidateCompletedCopy(project) {
       const issues=[{code:'template_cover_body',severity:'error',repair:'recompose',message:'The title-only cover has an old unowned body draft. Regenerate title/navigation only; retain all frozen source units on their existing content pages.'}];node.status='pending';node.retryCopyIssues=issues;
       project.dagNodes ||= {};project.dagNodes[dagNodeId('content',slide.id)]=nodeRecord('pending',project.dagNodes[dagNodeId('content',slide.id)],{reason:'revalidate title-only cover contract'});reopened.push({slideId:slide.id,issues});continue;
     }
-    if(node.slide.sourceArtifactFit?.canvas&&project.templateFidelity){
+    const staleCodeFit=!project.templateFidelity&&!project.editing?.epochs?.[slide.id]&&node.slide.sourceArtifactFit?.renderContractVersion!==RENDER_CONTRACT_VERSION&&node.slide.sourceArtifactNodes?.some(n=>n.content?.codeBlock);
+    if(node.slide.sourceArtifactFit?.canvas&&(project.templateFidelity||staleCodeFit)){
       // Recompute media-aware geometry from the same canonical source selection.
       // A retry must not retire artwork that the accepted fit deliberately kept.
       const before=digest(node.slide),sourceNodes=node.slide.sourceArtifactNodes||[];
-      const refs=sourceNodes.filter(item=>item.sourceArtifact).map(item=>{const {sourceUnitId,rowStart,rowEnd}=item.sourceArtifact;return {sourceUnitId,...(rowStart!==undefined?{rowStart,rowEnd}:{})};});
+      const refs=sourceNodes.filter(item=>item.sourceArtifact).map(item=>{const {sourceUnitId,rowStart,rowEnd,lineStart,lineEnd}=item.sourceArtifact;return {sourceUnitId,...(rowStart!==undefined?{rowStart,rowEnd}:{}),...(lineStart!==undefined?{lineStart,lineEnd}:{})};});
       const uniqueRefs=[...new Map(refs.map(ref=>[JSON.stringify(ref),ref])).values()];
       const evidenceIds=[...new Set(sourceNodes.flatMap(item=>item.content?.sourceEvidenceIds||[]))];
       const commentary=sourceNodes.filter(item=>!item.sourceArtifact&&!item.content?.derivedFrom&&!item.content?.sourceEvidenceIds?.length).map(item=>({type:item.content?.pointType||'mechanism',text:item.content?.rawText||item.content?.richText?.source||item.content?.text||''}));
       const original=structuredClone(node.slide);
-      try{bindSourceArtifacts(project,node.slide,uniqueRefs,index,commentary,evidenceIds);}
+      try{bindSourceArtifacts(sourceBindingProject(project,node.slide,index),node.slide,uniqueRefs,index,commentary,evidenceIds);}
       catch(error){
         if(!/^source_artifact_capacity:/u.test(String(error.message)))throw error;
         // A cached page can become infeasible under the current native fit.
@@ -1064,7 +1218,7 @@ function revalidateCompletedCopy(project) {
         project.runtime ||= {}; (project.runtime.templateDispositionRevalidation ||= []).push({slideId:slide.id,runId:project.currentRunId,beforeHash:before,afterHash:digest(node.slide),basis:'recompute measured media-aware fit from the unchanged frozen source IDs, excerpts, commentary and font floor; preserve kept media on retry'});
         invalidateReviews(project);
       }
-      if(commentary.length&&project.generationPolicy?.content==='full_source'){
+      if(project.templateFidelity&&commentary.length&&project.generationPolicy?.content==='full_source'){
         const candidate=structuredClone(node.slide);
         try{
           bindSourceArtifacts(project,candidate,uniqueRefs,index,[],evidenceIds);
@@ -1097,6 +1251,9 @@ function startGeneration(uid, id, activity, log, deps = defaultDeps) {
     try {
       const p = ensureProjectTemplate(store.get(uid, id));
       if (!p || p.status !== 'generating') return;
+      // Decks confirmed before topic projection existed still need their
+      // minority-language section headings in the deck language (B1).
+      if(!p.update)try{await prepareTopicTitleProjection(p,(prompt,nodeKey)=>deps.modelCall(p,prompt,activity,log,{nodeKey,maxOutputTokens:8192}),async projected=>{const current=store.get(uid,id);if(current){current.topicTitleProjection=projected.topicTitleProjection;store.save(current);}});}catch(error){log(`ppt ${id} topic projection skipped: ${String(error?.message||error).slice(0,160)}`);}
       if(p.titleSource==='derived'){const identity=displayedDocumentTitle(p);if(identity?.variants?.length)p.title=identity.variants.map(v=>v.text).join(' | ').slice(0,160);}
       for(let index=1;index<p.outline.length-1;index++){const changed=repairNativePageAssignment(p,index,(q,i)=>candidateFit(q.outline[i],q,i));if(changed){p.runtime||={};(p.runtime.nativePageRepairs||=[]).push(changed);log(`ppt ${id} measured native page reassignment: page ${index+1}`);}await new Promise(resolve=>setImmediate(resolve));}
       markPptTime(p, 't_generation_started');
@@ -1196,11 +1353,12 @@ function startGeneration(uid, id, activity, log, deps = defaultDeps) {
           const minimal = prior && requested.length && requested.every(item => ['title', 'layout', 'style'].includes(item.type));
           let content;
           if(minimal)content=structuredClone(prior);
+          else if(index===snapshot.outline.length-1&&isDedicatedClosing(slide)){content=normalizeSlide(deterministicClosingDraft(snapshot,slide,index),slide,snapshot,previousTitles);prepareClosingLayout(snapshot,content);content.programGenerated={role:'closing',basis:'fixed greeting in deck language; no source obligations or invented facts'};}
           else {
             const prompt=snapshot.nodes[slide.id]?.retryCopyIssues?.length && prior
               ? contentRepairPrompt(snapshot,slide,index,prior,snapshot.nodes[slide.id].retryCopyIssues)
               : contentPrompt(snapshot,slide,index);
-            const written=await writeWithContractRepair({prompt,nodeKey:nodeId,call:(prompt,nodeKey)=>deps.modelCall(snapshot,prompt,activity,log,{nodeKey}),normalize:response=>normalizeSlide(response,slide,snapshot,previousTitles)});
+            const written=await writeWithContractRepair({prompt,nodeKey:nodeId,maxRepairs:snapshot.executionPolicy?.maxQualityRepairs??3,call:(prompt,nodeKey)=>deps.modelCall(snapshot,prompt,activity,log,{nodeKey}),normalize:response=>normalizeSlide(response,slide,snapshot,previousTitles)});
             content=written.content;if(written.attempts)content.localRepair={attempts:written.attempts,reasons:['writer_contract']};
           }
           for (const item of (minimal ? requested : mutations.filter(item => ['layout', 'style'].includes(item.type)))) {
@@ -1217,7 +1375,9 @@ function startGeneration(uid, id, activity, log, deps = defaultDeps) {
           let copyIssues=inspectCopy(content),repairAttempts=0,rejectedCopy=[];
           // A bounded local rewrite is still the same durable content node: it
           // does not add a DAG stage or restart other completed slides.
-          while (copyIssues.length && !minimal && repairAttempts<3) {
+          const onlyFrozenLengthAdvice=()=>hasFrozenSourceArtifacts(content)&&content.sourceArtifactFit?.capacity_ok===true&&copyIssues.every(issue=>issue.severity==='warning'&&issue.code==='point_too_long');
+          if(copyIssues.length&&onlyFrozenLengthAdvice())content.copyAdvisories=copyIssues;
+          while (copyIssues.length && !minimal && !onlyFrozenLengthAdvice() && repairAttempts<3) {
             const reasons=copyIssues.map(item=>item.code);
             const repairPrompt=contentRepairPrompt(snapshot,slide,index,content,[...copyIssues,...rejectedCopy]);
             const nodeKey=repairAttempts?`${nodeId}:repair:${repairAttempts+1}`:`${nodeId}:repair`;repairAttempts++;
@@ -1322,7 +1482,7 @@ function startGeneration(uid, id, activity, log, deps = defaultDeps) {
       const consolidateActualPages=async()=>{
         const actualPlan=await executePostWriterPlan(current,{inspect:deterministicReview,rewrite:async(candidate,outline,index,proposal)=>{
         const prompt=contentPrompt(candidate,outline,index)+'\n<actual_object_consolidation>'+JSON.stringify({slideIds:proposal.slideIds,sourceUnitIds:proposal.sourceUnitIds})+'</actual_object_consolidation>Rewrite one coherent page title and only necessary explanations. Keep every frozen source object/range and every condition; no font shrink or invented facts.';
-        const result=await writeWithContractRepair({prompt,nodeKey:`content:${outline.id}:postwriter`,call:text=>deps.modelCall(candidate,text,activity,log,{nodeKey:`content:${outline.id}:postwriter`}),normalize:raw=>normalizeSlide(raw,outline,candidate,candidate.deck.slides.slice(0,index).map(s=>s.title))});
+        const result=await writeWithContractRepair({prompt,nodeKey:`content:${outline.id}:postwriter`,maxRepairs:candidate.executionPolicy?.maxQualityRepairs??3,call:(text,nodeKey)=>deps.modelCall(candidate,text,activity,log,{nodeKey}),normalize:raw=>normalizeSlide(raw,outline,candidate,candidate.deck.slides.slice(0,index).map(s=>s.title))});
         return result.content;
       }});
       if(actualPlan.executions.length){
@@ -1365,7 +1525,7 @@ function startGeneration(uid, id, activity, log, deps = defaultDeps) {
         const targets = criticRewriteTargets(current, modelReview, initialReview);
         const prior = current.runtime?.criticRepair;
         const round = prior?.runId === current.currentRunId ? prior.rounds || 0 : 0;
-        if (!targets.length || round >= 2) break;
+        if (!targets.length || round >= (current.executionPolicy?.maxQualityRepairs??2)) break;
         current = await enqueueProject(uid, id, () => {
           const latest = store.get(uid, id);
           if (!lease.owns() || !latest || latest.deletedAt || latest.status !== 'generating') return null;
@@ -1513,7 +1673,7 @@ function startGeneration(uid, id, activity, log, deps = defaultDeps) {
       });
       let exportInfo;
       try {
-        exportInfo=await deps.renderPptx({...current,renderOutput:artifactPath});acceptExportVerification(current,exportInfo);
+        exportInfo=await deps.renderPptx(structuredClone({...current,renderOutput:artifactPath}));acceptExportVerification(current,exportInfo);
       } catch(error) {
         await enqueueProject(uid,id,()=>{
           const latest=store.get(uid,id);
@@ -1551,6 +1711,7 @@ function startGeneration(uid, id, activity, log, deps = defaultDeps) {
 export function recoverPptJobs(activity, log = () => {}, deps = defaultDeps) {
   recoverGenerationEdits(deps, activity, log);
   for (const p of store.listPending()) {
+    if(recoverExecutionHistory(p)){store.save(p);continue;}
     try { recoverRun(ensureProjectV3(p)); } catch {}
     if (p.status === 'ingesting') startIngest(p.uid, p.id, activity, log, deps);
     else if (p.status === 'outlining') startOutline(p.uid, p.id, activity, log, deps);
@@ -1577,13 +1738,13 @@ async function body(req) {
 function folderName(value) { return bounded(value, 80, 'folder name'); }
 function folderExists(uid, id) { return store.listFolders(uid).some(folder => folder.id === id); }
 function folderSummary(uid) {
-  const projects = store.list(uid,{hydrate:false}).filter(project => !project.deletedAt&&libraryEligible(project));
+  const projects = store.listProjected(uid,'task-summary-v1',taskSummary).filter(project => !project.deletedAt&&project.libraryEligible);
   return sortManual(store.listFolders(uid).map(folder => ({ ...folder, count: projects.filter(project => project.folderId === folder.id).length })),
     (a, b) => a.name.localeCompare(b.name));
 }
 function listProjects(uid, url) {
   // The account task list needs statuses/counts, never hydrated image payloads.
-  let projects = store.list(uid,{hydrate:false});
+  let projects = store.listProjected(uid,'task-summary-v1',taskSummary);
   const trash = url.searchParams.get('trash') === '1';
   projects = projects.filter(project => Boolean(project.deletedAt) === trash);
   const q = (url.searchParams.get('q') || '').trim().toLocaleLowerCase();
@@ -1595,7 +1756,7 @@ function listProjects(uid, url) {
   const order = { manual: (a, b) => b.updatedAt.localeCompare(a.updatedAt), updated: (a, b) => b.updatedAt.localeCompare(a.updatedAt), created: (a, b) => b.createdAt.localeCompare(a.createdAt), name: (a, b) => a.title.localeCompare(b.title) }[sort];
   if (!order) throw new HttpError(400, 'invalid sort mode');
   return (sort === 'manual' ? sortManual(projects, order) : projects.sort((a, b) => Number(b.pinned) - Number(a.pinned) || order(a, b)))
-    .map(taskSummary);
+    .map(summary=>{const client=pptModelJobs.state(uid,summary.id);return {...summary,displayStatus:['outlining','generating'].includes(summary.status)&&client.pending&&!client.leased&&Date.now()-client.lastSeen>20000?'waiting_client':summary.status};});
 }
 async function permanentlyRemove(project, deps = defaultDeps) {
   if (running.has(project.id) || editing.has(project.id)) throw new HttpError(409, 'project has an active job');
@@ -1654,8 +1815,24 @@ function templateList(uid, url) {
   if (category && category !== '全部') rows = rows.filter(item => item.category === category);
   return rows.map(item => ({ ...item, capabilities: templateCapabilities(item) })).sort((a, b) => Number(b.pinned) - Number(a.pinned) || a.name.localeCompare(b.name));
 }
+function readFixedObjectIds(value){if(value===undefined)return [];if(!Array.isArray(value)||value.length>300||value.some(id=>typeof id!=='string'||!/^[A-Za-z0-9_-]{1,100}$/u.test(id)))throw new HttpError(400,'Invalid fixed template objects');return [...new Set(value)];}
+function validateTemplateAnalysis(analysis) {
+  if (!analysis || !['mapped', 'reference'].includes(analysis.compatibility) || !Number.isInteger(analysis.pages) || analysis.pages < 1 || analysis.pages > 100) throw new HttpError(422, 'template analysis is invalid');
+  const palette = analysis.compatibility === 'mapped' ? analysis.palette : null;
+  if (palette && ['background', 'accent', 'foreground', 'muted'].some(key => !/^#[a-f0-9]{6}$/i.test(palette[key] || ''))) throw new HttpError(422, 'template colors are invalid');
+  const fonts = analysis.compatibility === 'mapped' ? analysis.fonts : null;
+  if (fonts && ['title', 'body', 'titleEastAsia', 'bodyEastAsia'].some(key => typeof fonts[key] !== 'string' || !fonts[key].trim() || fonts[key].length > 120)) throw new HttpError(422, 'template fonts are invalid');
+  if (analysis.compatibility === 'mapped' && !fonts) throw new HttpError(422, 'mapped template must include extracted fonts');
+  return {palette, fonts};
+}
 async function handleTemplates(req, id, uid, url, send, deps) {
   const customs = store.listTemplates(uid);
+  if(id&&req.method==='GET'&&url.searchParams.get('view')==='objects'){
+    const template=[...BUILT_INS,...store.listTemplates(uid),...store.listTemplates('managed')].find(item=>item.id===id),owner=template?.kind==='managed'?'managed':uid;
+    if(!template)return send(404,{error:'template not found'});
+    const cached=BUILT_INS.some(item=>item.id===id)?null:store.readTemplateIR(owner,id,template.sha256);
+    return send(200,{templateHash:template.sha256,size:{width:cached?.imported?.externalPptx?.width||12192000,height:cached?.imported?.externalPptx?.height||6858000},objects:(cached?.imported?.deck?.slides||[]).flatMap((slide,index)=>(slide.nodes||[]).map(node=>({id:node.id,page:index+1,kind:node.type,geometry:node.geometry,name:node.nativeRef?.name||node.semanticRole||node.id,text:String(node.content?.text||'').slice(0,240),brand:node.content?.mediaRole==='brand'})))});
+  }
   if (!id && req.method === 'GET') return send(200, { templates: templateList(uid, url) });
   if (!id && req.method === 'POST') {
     const binary = req.headers?.['content-type']?.startsWith('application/octet-stream');
@@ -1689,18 +1866,13 @@ async function handleTemplates(req, id, uid, url, send, deps) {
     }
     catch (error) { throw new HttpError(422, String(error?.message || error).slice(0, 300)); }
     finally { await deps.removeContainer(templateId, { keepVolume: false }).catch(() => {}); }
-    if (!analysis || !['mapped', 'reference'].includes(analysis.compatibility) || !Number.isInteger(analysis.pages) || analysis.pages < 1 || analysis.pages > 100) throw new HttpError(422, 'template analysis is invalid');
-    const palette = analysis.compatibility === 'mapped' ? analysis.palette : null;
-    if (palette && ['background', 'accent', 'foreground', 'muted'].some(key => !/^#[a-f0-9]{6}$/i.test(palette[key] || ''))) throw new HttpError(422, 'template colors are invalid');
-    const fonts = analysis.compatibility === 'mapped' ? analysis.fonts : null;
-    if (fonts && ['title', 'body', 'titleEastAsia', 'bodyEastAsia'].some(key => typeof fonts[key] !== 'string' || !fonts[key].trim() || fonts[key].length > 120)) throw new HttpError(422, 'template fonts are invalid');
-    if (analysis.compatibility === 'mapped' && !fonts) throw new HttpError(422, 'mapped template must include extracted fonts');
+    const {palette, fonts} = validateTemplateAnalysis(analysis);
     const item = { id: templateId, name: bounded(data.name || data.fileName.replace(/\.[^.]+$/, ''), 120, 'template name'), category: '我的模板',
       description: String(analysis.reason || '').slice(0, 300), kind: 'uploaded', compatibility: analysis.compatibility, version: 1,
       pages: analysis.pages, palette, fonts, sampleTitles: (analysis.sampleTitles || []).slice(0, 3), tags: ['自定义', '上传'], pinned: false,
-      fileName: data.fileName, extension: upload.extension, bytes: upload.bytes.length, sha256: upload.sha256, irVersion: imported ? 'pptx-ir-7' : null, createdAt: new Date().toISOString() };
+      fileName: data.fileName, extension: upload.extension, bytes: upload.bytes.length, sha256: upload.sha256, irVersion: imported ? PPTX_IR_VERSION : null, createdAt: new Date().toISOString() };
     store.writeTemplate(uid, templateId, upload.bytes);
-    if (imported) store.writeTemplateIR(uid, templateId, { schemaVersion: 1, parserVersion: 'pptx-ir-7', sha256: upload.sha256, imported });
+    if (imported) store.writeTemplateIR(uid, templateId, { schemaVersion: 1, parserVersion: PPTX_IR_VERSION, sha256: upload.sha256, imported });
     store.saveTemplates(uid, [...customs, item]);
     return send(201, { template: item });
   }
@@ -1717,6 +1889,21 @@ async function handleTemplates(req, id, uid, url, send, deps) {
   if (!item) return send(404, { error: 'template not found' });
   if (req.method === 'PATCH') {
     const data = await body(req);
+    if(data.reparse===true){
+      const bytes=store.readTemplate(uid,id);
+      let analysis, imported;
+      try {
+        analysis=await deps.analyzeTemplate(uid,id,item.extension,bytes);
+        validateTemplateAnalysis(analysis);
+        if(['pptx','potx'].includes(item.extension)&&deps.importTemplateIR)imported=await deps.importTemplateIR({uid,id},bytes,item.sha256);
+      } catch(error) {
+        if(error instanceof HttpError)throw error;
+        throw new HttpError(422,String(error?.message||error).slice(0,300));
+      } finally { await deps.removeContainer(id,{keepVolume:false}).catch(()=>{}); }
+      const {palette,fonts}=validateTemplateAnalysis(analysis);
+      if(imported)store.writeTemplateIR(uid,id,{schemaVersion:1,parserVersion:PPTX_IR_VERSION,sha256:item.sha256,imported});
+      Object.assign(item,{compatibility:analysis.compatibility,description:String(analysis.reason||'').slice(0,300),pages:analysis.pages,palette,fonts,version:(item.version||1)+1});
+    }
     if (data.pinned !== undefined) { if (typeof data.pinned !== 'boolean') throw new HttpError(400, 'pinned must be boolean'); item.pinned = data.pinned; }
     if (data.name !== undefined) item.name = bounded(data.name, 120, 'template name');
     store.saveTemplates(uid, customs);
@@ -1783,9 +1970,9 @@ async function handleUpdates(req, uid, send, activity, log, deps) {
     const reuseError = templateReuseError(template.pages, count);
     if (reuseError) throw new HttpError(400, reuseError);
   }
-  const project = { id, uid, title: updateTitle || `${baseSnapshot.title} · 更新版`.slice(0, 160), prompt: progressText || progressFile.name, pages: count,
+  const project = { executionPolicy:readExecutionPolicy(data.executionPolicy??baseProject?.executionPolicy), id, uid, title: updateTitle || `${baseSnapshot.title} · 更新版`.slice(0, 160), prompt: progressText || progressFile.name, pages: count,
     deckTitle: updateTitle ? { text: formattedUpdateTitle.title, raw: updateTitle, source: 'user', locked: true } : { text: '', raw: '', source: 'agent', locked: false },
-    template: template.id, templateContentMode: data.templateContentMode==='keep_fixed'?'keep_fixed':'design_only', templateSpec: snapshotTemplate(template), inputKind: 'update',
+    template: template.id, templateContentMode: data.templateContentMode==='keep_fixed'?'keep_fixed':'design_only',templateFixedObjectIds:readFixedObjectIds(data.templateFixedObjectIds), templateSpec: snapshotTemplate(template), inputKind: 'update',
     update, updateRequest: requestId ? { id: requestId, hash: requestHash } : null,
     version: { rootId: rootId || id, parentId: baseProject?.id || null, number: nextVersion, baseFileName: baseFile?.name || null }, source,
     sourceRevision: 1, outlineRevision: 0, pageDecision: { finalPageCount: count, source: data.pages === undefined ? 'estimate' : 'user', includesCover: true }, status: mustIngest ? 'ingesting' : 'outlining', stage: mustIngest ? 'ingest' : 'outline',
@@ -1871,7 +2058,8 @@ async function handleBulk(req, uid, send, deps) {
   if (data.action === 'permanent' && projects.some(project => !project.deletedAt || running.has(project.id) || editing.has(project.id))) throw new HttpError(409, 'projects must be in trash and idle');
   if (data.action === 'restore' && store.list(uid).filter(project => !project.deletedAt).length + projects.filter(project => project.deletedAt).length > 50) throw new HttpError(409, 'workspace limit is 50 stored projects, including presentations and tasks; move unused tasks to trash');
   const at = new Date().toISOString();
-  for (const project of projects) await enqueueProject(uid, project.id, async () => {
+  const succeeded=[],failed=[];
+  for (const project of projects) {try {await enqueueProject(uid, project.id, async () => {
     const latest = getStructuredProject(uid, project.id);
     if (!latest) throw new HttpError(404, 'project not found');
     if (data.action === 'move') latest.folderId = data.folderId;
@@ -1882,7 +2070,10 @@ async function handleBulk(req, uid, send, deps) {
       await permanentlyRemove(latest, deps);
     } else store.save(latest);
   });
-  return send(200, { ok: true, count: projects.length });
+    succeeded.push(project.id);
+    }catch(error){failed.push({id:project.id,error:error instanceof HttpError?error.message:'Operation failed; retry this project'});}
+  }
+  return send(failed.length?207:200, { ok: failed.length===0, count:succeeded.length,succeeded,failed });
 }
 
 async function checkpointedDeckReview(project,call,options){
@@ -1926,7 +2117,7 @@ export async function handlePpt(req, url, { uid, send:sendRaw, res, readBody, ac
     }
     return send(405, { error: 'method not allowed' });
   }
-  const structured = await handleStructuredPpt(req, url, { uid, send, res, readBody, activity, log, deps, resumeGeneration: (owner, id) => startGeneration(owner, id, activity, log, deps) });
+  const structured = await handleStructuredPpt(req, url, { uid, send, res, readBody, activity, log, deps, resumeGeneration: (owner, id) => store.get(owner,id)?.status==='outlining'?startOutline(owner,id,activity,log,deps):startGeneration(owner, id, activity, log, deps) });
   if (structured) return true;
   const folderMatch = url.pathname.match(FOLDER_RE);
   const templateMatch = url.pathname.match(TEMPLATE_RE);
@@ -1991,7 +2182,7 @@ export async function handlePpt(req, url, { uid, send:sendRaw, res, readBody, ac
         const prompt = inputKind === 'prompt' ? bounded(data.prompt || '', MAX_PROMPT, 'prompt', !(Array.isArray(data.images) && data.images.length)) : bounded(data.prompt || '', MAX_PROMPT, 'prompt', false);
         const userTitle = typeof data.title === 'string' && data.title.trim() ? bounded(data.title, 160, 'title') : '';
         const sourceTitle=source?displayedDocumentTitle({source,generationPolicy:data.generationPolicy}):null;
-        const derivedTitle=sourceTitle?.variants.map(v=>v.main||v.text).join(' | ')||prompt.replace(/^\s*#{1,6}\s+/u,'').split('\n')[0].trim()||source?.name?.replace(/\.[^.]+$/,'')||'Presentation';
+        const derivedTitle=deckLanguageVariant({source,generationPolicy:data.generationPolicy,prompt:data.prompt},sourceTitle?.variants.map(v=>v.main||v.text)||[])||prompt.replace(/^\s*#{1,6}\s+/u,'').split('\n')[0].trim()||source?.name?.replace(/\.[^.]+$/,'')||'Presentation';
         const title = bounded(userTitle || derivedTitle.slice(0,160), 160, 'title');
         const template = resolveTemplate(uid, data.template || 'violet');
         const generationPolicy = normalizeGenerationPolicy(data.generationPolicy)||defaultGenerationPolicy(prompt);
@@ -2002,6 +2193,7 @@ export async function handlePpt(req, url, { uid, send:sendRaw, res, readBody, ac
           source = estimationSource({ inputKind, prompt, generationPolicy }) || (parsed.images.length || parsed.mediaWarnings.length || /\|.*\||```|<svg\b/iu.test(prompt) ? {...parsed,kind:'prompt'} : null);
           if (source) source = {...source,...mergeSourceMedia({images:[...(source.images||[]),...parsed.images]}),mediaWarnings:[...(source.mediaWarnings||[]),...parsed.mediaWarnings]};
         } else if (inputKind === 'file') source = {...source,...mergeSourceMedia({},data.images)};
+        if(inputKind!=='prompt'&&source?.text)preflightSourceArithmetic(source);
         const inputProfile = profilePptInput({ inputKind, source, prompt });
         const contentPlan = planSparseInput({ inputKind, source, prompt }, inputProfile);
         const estimatedPages = estimatePageRecommendation({ inputKind, source, prompt, inputProfile, contentPlan, generationPolicy, templateSpec: snapshotTemplate(template) }).recommended;
@@ -2015,7 +2207,7 @@ export async function handlePpt(req, url, { uid, send:sendRaw, res, readBody, ac
           const reuseError = templateReuseError(template.pages, selectedPages);
           if (reuseError) throw new HttpError(400, reuseError);
         }
-        const project = { id: store.newId(), uid, title, titleSource:userTitle?'user':'derived', prompt, userRequirements:requirements, generationPolicy, promptContractVersion: PPT_PROMPT_CONTRACT_VERSION, pages: selectedPages, inputProfile, contentPlan, template: template.id, templateContentMode: data.templateContentMode==='keep_fixed'?'keep_fixed':'design_only',
+        const project = { executionPolicy: readExecutionPolicy(data.executionPolicy), id: store.newId(), uid, title, titleSource:userTitle?'user':'derived', prompt, userRequirements:requirements, generationPolicy, promptContractVersion: PPT_PROMPT_CONTRACT_VERSION, pages: selectedPages, inputProfile, contentPlan, template: template.id, templateContentMode: data.templateContentMode==='keep_fixed'?'keep_fixed':'design_only',templateFixedObjectIds:readFixedObjectIds(data.templateFixedObjectIds),
           templateSpec: snapshotTemplate(template), inputKind, source, sourceRevision: source ? 1 : 0, outlineRevision: 0,
           deckTitle: userTitle ? { text: formattedUserTitle.title, raw: userTitle, source: 'user', locked: true } : { text: '', raw: '', source: 'agent', locked: false },
           pageDecision: { finalPageCount: selectedPages, source: data.pages === undefined && promptPages === undefined ? 'estimate' : 'user',
@@ -2082,6 +2274,21 @@ export async function handlePpt(req, url, { uid, send:sendRaw, res, readBody, ac
       }
       return send(404, { error: 'not found' });
     }
+    if(!action&&req.method==='GET'&&url.searchParams.get('view')==='live'){
+      // Recover command journals exactly as a full read does. Cache the small
+      // verified read projection, never editable project state. Transient
+      // drafts and desktop availability must still be refreshed on every read.
+      recoverCommit(uid,id);
+      const snapshot=store.getProjected(uid,id,'verified-live-view-v1',()=>{
+        const current=getStructuredProject(uid,id,{persistMigration:true});
+        return {view:liveProjectView(current),draftContext:{uid:current.uid,currentRunId:current.currentRunId,editing:{epochs:current.editing?.epochs},source:{sha256:current.source?.sha256}}};
+      });
+      if(!snapshot||snapshot.view.deletedAt)return sendRaw(404,{error:'not found'});
+      const view=snapshot.view,client=pptModelJobs.state(uid,id);
+      view.displayStatus=['outlining','generating'].includes(view.status)&&client.pending&&!client.leased&&Date.now()-client.lastSeen>20000?'waiting_client':view.status;
+      view.drafts=draftsFor(id,view.outline.filter(s=>view.generationStages.pages[s.id]==='writing'||view.status==='paused'&&s.id===view.outline.find(item=>!['done','completed'].includes(view.nodes?.[item.id]?.status)&&!item.manualBlank)?.id).map(s=>s.id),snapshot.draftContext);
+      return sendRaw(200,{project:view});
+    }
     const project = getStructuredProject(uid, id, { persistMigration: true });
     if (!project) return send(404, { error: 'not found' });
     if (project.deletedAt && !['restore', 'permanent'].includes(action)) return send(404, { error: 'not found' });
@@ -2097,6 +2304,20 @@ export async function handlePpt(req, url, { uid, send:sendRaw, res, readBody, ac
       if (!project.deletedAt) return send(409, { error: 'move project to trash first' });
       await enqueueProject(uid, id, () => permanentlyRemove(getStructuredProject(uid, id), deps));
       return send(200, { ok: true });
+    }
+    if(action==='component-copy'&&req.method==='POST'){
+      const data=await body(req);
+      if(data.baseRevision!==project.revision)throw new HttpError(409,'Project changed; reload before converting a copy');
+      if(!['completed','quality_blocked','paused'].includes(project.status)||!project.deck?.slides?.length)throw new HttpError(409,'Pause generation or finish the presentation before converting a copy');
+      if(store.list(uid).filter(item=>!item.deletedAt).length>=50)throw new HttpError(409,'Workspace limit is 50 stored projects');
+      let deck;try{deck=componentCopyDeck(project);}catch(error){throw new HttpError(409,error.message);}const copy=structuredClone(project);copy.id=store.newId();copy.title=(project.title+' · Component copy').slice(0,160);copy.deck=deck;copy.nodes=Object.fromEntries(deck.slides.map(slide=>[slide.id,{status:'done',attempts:0,slide}]));
+      for(const key of ['externalPptx','templateFidelity','publishedArtifactPath','publishedRenderTree','publishedRevision','publishedAt','publishedPageCount','exportManifest','pdfArtifactPath','renderOutput','editing','currentRunId','runId','runtime','modelUsage','executionHistory','quality','update','updateRequest','diff'])delete copy[key];
+      copy.template='violet';copy.templateMode='mapped';copy.status='quality_blocked';copy.stage='component_copy_review';copy.error='';copy.revision=1;copy.createdAt=new Date().toISOString();copy.favorite=false;copy.pinned=false;copy.version={rootId:copy.id,parentId:project.id,number:1};
+      copy.componentConversion={sourceProjectId:project.id,sourceRevision:project.revision,at:copy.createdAt,reviewRequired:true};
+      copy.renderTree=buildRenderTree(copy);
+      if(copy.source?.kind==='file')store.writeSource(uid,copy.id,store.readSource(uid,project.id));
+      store.save(copy);saveRevision(copy,'component-copy-preview');
+      return send(201,{project:copy});
     }
     if (action === 'duplicate' && req.method === 'POST') {
       if (project.status !== 'completed') return send(409, { error: 'only completed presentations can be duplicated' });
@@ -2169,6 +2390,28 @@ export async function handlePpt(req, url, { uid, send:sendRaw, res, readBody, ac
       res.on('close', () => { try { stream.destroy(); } catch {} });
       return true;
     }
+    if(action==='source-assets'&&req.method==='GET') {
+      const assetId=url.searchParams.get('assetId');
+      const asset=project.source?.images?.find(image=>image.id===assetId);
+      const matched=asset?.dataUrl?.match(/^data:(image\/(?:png|jpeg|webp));base64,([A-Za-z0-9+/=]+)$/u);
+      if(!matched)return send(404,{error:'Source image unavailable'});
+      res.writeHead(200,{'content-type':matched[1],'cache-control':'private, no-store','x-content-type-options':'nosniff'});res.end(Buffer.from(matched[2],'base64'));return true;
+    }
+    if(action==='conversation'&&req.method==='GET')return send(200,{initialRequest:project.prompt||project.userRequirements||project.source?.text||'',sourceName:project.source?.name,intents:project.editing?.intents||{}});
+    if(action==='execution'&&req.method==='GET')return send(200,{executionPolicy:project.executionPolicy||normalizeExecutionPolicy(),history:(project.executionHistory||[]).slice(-500)});
+    if(action==='execution-policy'&&req.method==='PATCH') {
+      const data=await body(req);
+      if(!['paused','outline_ready','failed','quality_blocked','completed'].includes(project.status))throw new HttpError(409,'Pause generation before changing its execution policy');
+      const updated=await enqueueProject(uid,id,()=>{
+        const latest=getStructuredProject(uid,id);if(!['paused','outline_ready','failed','quality_blocked','completed'].includes(latest.status))throw new HttpError(409,'Pause generation before changing its execution policy');if(latest.revision!==data.baseRevision)throw new HttpError(409,'Project changed; reload first');
+        let policy;try{policy=normalizeExecutionPolicy(data.executionPolicy);}catch(error){throw new HttpError(400,error.message);}
+        latest.executionPolicyHistory=[...(latest.executionPolicyHistory||[]),{policy:latest.executionPolicy,at:new Date().toISOString()}];
+        latest.executionPolicy=policy;latest.executionPolicyRevision=(latest.executionPolicyRevision||0)+1;
+        // No content, outline, source, user locks or published revision is rewritten.
+        if(latest.status==='paused'&&latest.error?.includes('budget'))latest.error='';
+        store.save(latest);return latest;
+      });return send(200,{project:updated});
+    }
     if (action === 'versions' && req.method === 'GET') {
       const rootId = project.version?.rootId || project.id;
       const versions = store.list(uid).filter(item => !item.deletedAt && (item.id === rootId || item.version?.rootId === rootId))
@@ -2219,6 +2462,7 @@ export async function handlePpt(req, url, { uid, send:sendRaw, res, readBody, ac
       if (project.status !== 'outline_ready') return send(409, { error: 'outline not ready' });
       const data = await body(req);
       if (data.generationPolicy !== undefined) project.generationPolicy = normalizeGenerationPolicy(data.generationPolicy);
+      if(data.executionPolicy!==undefined)project.executionPolicy=readExecutionPolicy(data.executionPolicy);
       const nextPages = pages(data.slides?.length);
       const confirmedDecision = confirmedPageDecision(project, { nextPages, pageSource: data.pageSource, template: data.template });
       if (data.finalPageCount !== undefined && nextPages !== pages(data.finalPageCount)) throw new HttpError(400, 'outline must match the user-confirmed page count');
@@ -2241,8 +2485,19 @@ export async function handlePpt(req, url, { uid, send:sendRaw, res, readBody, ac
       if (project.update && project.pages < 6) throw new HttpError(400, 'update outline needs 6 to 100 slides');
       syncPresentationPolicy(project);
       project.outline = normalizeOutline({ slides: data.slides }, project.pages, project.source, project.update, project.deckTitle);
-      try{confirmNativeOutlineFit(project);}catch(error){throw new HttpError(409,error.message);}
+      // The user's confirmed outline is compiled, never rejected: remaining
+      // findings are listed as warnings and resolved during page writing.
+      if(project.outlineCorrections)project.outlineCorrections={...project.outlineCorrections,warnings:[]};
+      const titleCapacityIssues=[...inspectNativeOutlineTitles(project),...inspectSystemOutlineTitles(project)];
+      if(titleCapacityIssues.length)return send(409,{error:'Shorten the topics on pages '+titleCapacityIssues.map(issue=>issue.pageIndex+1).join(', ')+' before confirming; source content and font size are preserved.',issues:titleCapacityIssues});
+      confirmNativeOutlineFit(project,{warnOnly:true});
+      const finalTitleCapacityIssues=[...inspectNativeOutlineTitles(project),...inspectSystemOutlineTitles(project)];
+      if(finalTitleCapacityIssues.length)return send(409,{error:'The chosen layout cannot fit topics on pages '+finalTitleCapacityIssues.map(issue=>issue.pageIndex+1).join(', ')+'. Shorten those topics before confirming.',issues:finalTitleCapacityIssues});
+      const missingFixedPages=unmappedFixedTemplatePages(project);
+      if(missingFixedPages.length)return send(409,{error:'The selected fixed objects need additional template layouts. Increase the page budget or revise fixed-object selection before confirming.',sourcePages:missingFixedPages});
       project.planning = refreshPlanning(project);
+      const frozenSourceIssues=inspectFrozenOutlineSources(project);
+      if(frozenSourceIssues.length)return send(409,{error:'The outline still has missing/duplicated source objects or overfull source pages. Repartition the listed original objects or increase the page budget before confirming. '+frozenSourceIssues.map(issue=>issue.pageIndex!==undefined?'Page '+(issue.pageIndex+1):issue.code).join(', '),issues:frozenSourceIssues});
       project.outlineRevision = (project.outlineRevision || 0) + 1;
       project.nodes = {};
       project.diff = diffSummary(project);
@@ -2254,6 +2509,7 @@ export async function handlePpt(req, url, { uid, send:sendRaw, res, readBody, ac
       if (project.status !== 'outline_ready') return send(409, { error: 'outline not ready' });
       const data = await body(req);
       if (data.generationPolicy !== undefined) project.generationPolicy = normalizeGenerationPolicy(data.generationPolicy);
+      if(data.executionPolicy!==undefined)project.executionPolicy=readExecutionPolicy(data.executionPolicy);
       syncPresentationPolicy(project);
       project.outlineSeed = Array.isArray(data.seedOutline) ? data.seedOutline.slice(0, 100).map(item => ({
         section: String(item?.section || '').slice(0, 120), title: String(item?.title || '').slice(0, 160),
@@ -2281,6 +2537,7 @@ export async function handlePpt(req, url, { uid, send:sendRaw, res, readBody, ac
         project.pageDecision={finalPageCount:project.pages,initialPageCount:project.pages,source:'estimate',mode:'auto',includesCover:true,confirmedAt:null};
       }else project.pageDecision = { finalPageCount: project.pages, source: 'user', mode: 'explicit', includesCover: true, confirmedAt: new Date().toISOString() };
       project.outline = []; project.nodes = {}; project.outlineRevision = 0;
+      project.promptContractVersion = PPT_PROMPT_CONTRACT_VERSION;
       project.planning = null;
       project.diff = null;
       project.status = 'outlining'; project.stage = 'outline'; project.error = '';
@@ -2293,6 +2550,12 @@ export async function handlePpt(req, url, { uid, send:sendRaw, res, readBody, ac
       }
       if (project.status !== 'outline_ready') return send(409, { error: 'outline not ready' });
       if(project.confirmedOutline&&project.confirmedOutline.hash!==outlineConfirmationHash(project))return send(409,{error:'The outline, source or presentation policy changed; confirm the current outline again.'});
+      const frozenSourceIssues=inspectFrozenOutlineSources(project);
+      if(frozenSourceIssues.length)return send(409,{error:'The original source selection is incomplete or cannot fit on its frozen pages. Repartition or increase the page budget before generating. '+frozenSourceIssues.map(issue=>issue.pageIndex!==undefined?'Page '+(issue.pageIndex+1):issue.code).join(', '),issues:frozenSourceIssues});
+      const titleCapacityIssues=[...inspectNativeOutlineTitles(project),...inspectSystemOutlineTitles(project)];
+      if(titleCapacityIssues.length)return send(409,{error:'Shorten the topics on pages '+titleCapacityIssues.map(issue=>issue.pageIndex+1).join(', ')+' before generating; source content and font size are preserved.',issues:titleCapacityIssues});
+      const missingFixedPages=unmappedFixedTemplatePages(project);
+      if(missingFixedPages.length)return send(409,{error:'Selected fixed objects are on unused template pages; revise page budget or fixed-object selection before generating.',sourcePages:missingFixedPages});
       if(!project.confirmedOutline)recordOutlineConfirmation(project,{titlesFrozen:false});project.autoGenerate=false;
       // A new explicit confirmation starts generation anew. A pause requested
       // in a prior failed run is not a request to pause this new run.
@@ -2373,9 +2636,9 @@ export async function handlePpt(req, url, { uid, send:sendRaw, res, readBody, ac
         project.stage='generation';
       }
       if(retryRequest.repairOutlineTitles===true){
-        const issues=inspectNativeOutlineTitles(project),seed=project.candidateOutline;
+        const issues=[...inspectNativeOutlineTitles(project),...inspectSystemOutlineTitles(project)],seed=project.candidateOutline;
         if(project.stage!=='generation'||!issues.length||!seed?.accepted||!seed.executionPlan||seed.executionPlan.slides.length!==project.pages)
-          return send(409,{error:'Only a failed generation with an accepted outline and oversized native titles can reopen title planning.'});
+          return send(409,{error:'Only a failed generation with an accepted outline and oversized page titles can reopen title planning.'});
         if(project.revision>0||Object.values(project.editing?.epochs||{}).some(epoch=>epoch>0)||Object.values(project.runtime?.slides||{}).some(s=>s.accepted))
           return send(409,{error:'This draft contains user edits or accepted pages. Preserve them and use scoped page editing; global title review cannot replace protected objects.'});
         // Explicit user action; preserve the complete accepted source selection

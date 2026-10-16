@@ -1,4 +1,6 @@
-import { buildContentInventory } from './ppt-content-inventory.mjs';
+import {literalTextFlow} from './ppt-text-flow.mjs';
+import { buildContentInventory, markdownRows } from './ppt-content-inventory.mjs';
+import { sourceChart } from './ppt-source-chart.mjs';
 import { sourceSentences } from './ppt-source-boundaries.mjs';
 /** Structure-aware, deterministic source index for the existing PPT source node.
  * Original source.segments remain the citation contract. Chunks can combine
@@ -33,9 +35,11 @@ function similarity(a, b) {
 function semanticType(text, blockType) {
   const value = String(text || '').toLocaleLowerCase();
   if (blockType === 'table') return 'table';
+  if (blockType === 'chart') return 'chart';
   if (blockType === 'diagram') return 'diagram';
   if (blockType === 'code') return 'code';
-  if (/\b(?:vs\.?|versus|compare|comparison|before|after)\b|对比|比较|差异|优劣/.test(value)) return 'comparison';
+  // Temporal prerequisites (before/after acceptance) are not comparisons.
+  if (/\b(?:vs\.?|versus|compare|comparison)\b|\bbefore\s*:[\s\S]*\bafter\s*:|对比|比较|差异|优劣/.test(value)) return 'comparison';
   if (/架构|architecture|系统组成|模块关系|组件/.test(value)) return 'architecture';
   if (/流程|步骤|pipeline|process|workflow/.test(value)) return 'process';
   if (/时间线|里程碑|roadmap|timeline|计划阶段/.test(value)) return 'timeline';
@@ -70,6 +74,7 @@ function visualCandidates(type, text) {
   if (['process', 'timeline', 'diagram'].includes(type) || /→|->/.test(text)) result.push(type === 'timeline' ? 'timeline' : 'pipeline');
   if (type === 'architecture') result.push('architecture');
   if (type === 'table') result.push('table');
+  if (type === 'chart') result.push('chart');
   if (type === 'metric') result.push('metric');
   return result;
 }
@@ -94,6 +99,20 @@ function splitLongUnit(text, limit = 600) {
   return result;
 }
 
+/** Wide ASCII architecture labels already have a normalized level order. A
+ * compact drawing stays verbatim; a large one uses one editable table row per
+ * complete normalized level, allowing the existing exact row-range paginator
+ * to split it without cutting branches/labels or shrinking readable text. */
+export function diagramPresentationRows(diagram,original){
+  if(diagram?.kind!=='ascii'||!['parallel','branching'].includes(diagram.relation))return null;
+  const raw=String(original||'').split('\n'),levels=String(diagram.text||'').split('\n').filter(line=>line.trim());
+  if(raw.length<=13&&Math.max(...raw.map(line=>line.length))<=64||levels.length<2)return null;
+  // Preserve the complete original lines, including condition labels, arrows,
+  // indentation and blank lines. Normalized diagram.text is a navigation
+  // summary and can omit branch edges; it cannot be the source of table cells.
+  return [[''],...raw.map(line=>[line])];
+}
+
 function parseBlocks(segments) {
   const blocks = [];
   const section = [];
@@ -103,16 +122,18 @@ function parseBlocks(segments) {
   function add(type, text, segment) {
     const value = type === 'code' ? text : text.trim();
     if (!value) return;
-    for (const original of ['table','code','chart'].includes(type) ? [value] : splitLongUnit(value)) {
+    for (const original of ['table','code','chart','equation'].includes(type) ? [value] : splitLongUnit(value)) {
       // A fenced ASCII/mermaid flowchart is a process, not code: it becomes
       // ordered steps (the raw drawing stays in diagramSource for tracing).
-      const diagram = type === 'code' ? codeDiagram(original, segment.language || '') : null;
+      const diagram = type === 'code' ? codeDiagram(original, segment.language || '') : type==='equation'?literalTextFlow(original):null;
       const part = diagram ? diagram.text : original;
-      const kind = diagram?.kind==='schema'?'table':diagram?.kind==='definition'?'paragraph':diagram ? 'diagram' : type === 'paragraph' && /(?:^|\n)\s*[┌└│├┐┘─]+/.test(part) ? 'diagram' : type;
+      const chart = segment.chart || (!diagram && ['paragraph','table'].includes(type) ? sourceChart(part, { ...(type === 'table' ? {rows:segment.rows || markdownRows(part)} : {}), context:section.join(' ') }) : null);
+      const diagramRows=diagramPresentationRows(diagram,original);
+      const kind = diagramRows ? 'table' : chart ? 'chart' : diagram?.kind==='schema'?'table':diagram?.kind==='definition'?'paragraph':diagram ? 'diagram' : type === 'paragraph' && /(?:^|\n)\s*[┌└│├┐┘─]+/.test(part) ? 'diagram' : type;
       blocks.push({ id: `b_${String(blocks.length + 1).padStart(4, '0')}`, type: kind, text: part,
         sourceRefs: segment.sourceRefs || [String(segment.id)], location: segment.location || '', sectionPath: [...section],
-        ...(diagram ? { diagramSource: { kind: diagram.kind, relation:diagram.relation||'ordered', language: segment.language || '', text: original },...(diagram.rows?{rows:diagram.rows}:{}) } : {}),
-        ...(segment.rows ? { rows:segment.rows } : {}), ...(segment.chart?{chart:segment.chart}:{}), ...(kind==='code'?{language:segment.language || ''}:{}),
+        ...(diagram ? { diagramSource: { kind: diagram.kind, relation:diagram.relation||'ordered', language: segment.language || '', text: original,...(diagramRows?{presentation:'ordered_rows'}:{}) },...(diagram.rows?{rows:diagram.rows}:{}) } : {}),
+        ...(diagramRows?{rows:diagramRows}:segment.rows ? { rows:segment.rows } : {}), ...(chart?{chart}:{}), ...(kind==='code'?{language:segment.language || ''}:{}),
         position: blocks.length, tokenCount: estimateTokens(part), semanticType: diagram?.kind==='definition'?'definition':diagram&&['parallel','branching'].includes(diagram.relation)?'comparison':semanticType(part, kind),
         contentKind: contentKind(section, kind),
         discourseRole: discourseRole(part, kind) });

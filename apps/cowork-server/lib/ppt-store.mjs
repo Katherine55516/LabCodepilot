@@ -1,3 +1,4 @@
+import {PPTX_IR_VERSION} from './ppt-native-shape-ids.mjs';
 /** Server-owned, per-account PPT metadata. The editable deck is the source of truth;
  * /workspace/presentation.pptx is a regenerable export artifact in the project's
  * Cowork volume. Keeping metadata here makes the library available on every device. */
@@ -20,6 +21,21 @@ function projectId(id) {
 }
 function file(uid, id) { return path.join(ROOT, owner(uid), `${projectId(id)}.json`); }
 function compressedFile(uid, id) { return `${file(uid, id)}.gz`; }
+
+function draftFile(uid,id,slideId) {
+  if(typeof slideId!=='string'||!/^[A-Za-z0-9_-]{1,80}$/u.test(slideId))throw new Error('invalid draft slide');
+  return path.join(ROOT,owner(uid),'drafts',projectId(id),slideId+'.json');
+}
+export function saveDraft(uid,id,slideId,draft) {
+  const target=draftFile(uid,id,slideId),text=JSON.stringify(draft);
+  if(Buffer.byteLength(text)>256000)return;
+  fs.mkdirSync(path.dirname(target),{recursive:true});
+  const temporary=target+'.'+crypto.randomBytes(6).toString('hex')+'.tmp';
+  try{fs.writeFileSync(temporary,text,{flag:'wx',mode:0o600});fs.renameSync(temporary,target);}finally{try{fs.unlinkSync(temporary);}catch{}}
+}
+export function readDraft(uid,id,slideId) {
+  try{return JSON.parse(fs.readFileSync(draftFile(uid,id,slideId),'utf8'));}catch{return null;}
+}
 const MEDIA_REF = '__pptStoredMediaRef';
 // Immutable media is account-scoped and content-addressed. Snapshots contain
 // small references, so each DAG transition never recompresses the same artwork.
@@ -79,6 +95,36 @@ function inputFile(uid, id, kind) {
 }
 export function newId() { return crypto.randomBytes(16).toString('hex'); }
 
+// Frequent library/status polling must not repeatedly decompress every native
+// deck. Cache only caller-defined, small read projections; full mutable reads
+// stay uncached. Atomic-file identity invalidates across processes and restarts.
+const projectionCache = new Map(); let projectionBytes = 0;
+const PROJECTION_MAX_BYTES = 8 * 1024 * 1024;
+function invalidateProjections(uid, id) {
+  const prefix=file(uid,id)+'\0';
+  for(const [key, entry] of projectionCache)if(key.startsWith(prefix)){projectionBytes-=entry.bytes;projectionCache.delete(key);}
+}
+export function getProjected(uid,id,cacheKey,projector) {
+  const compressed=compressedFile(uid,id),target=fs.existsSync(compressed)?compressed:file(uid,id);
+  let stat;try{stat=fs.statSync(target);}catch(error){if(error.code==='ENOENT'){invalidateProjections(uid,id);return null;}throw error;}
+  const identity=[target,stat.ino,stat.size,stat.mtimeMs,stat.ctimeMs].join(':');
+  const key=file(uid,id)+'\0'+cacheKey,cached=projectionCache.get(key);
+  if(cached?.identity===identity)return structuredClone(cached.value);
+  if(cached){projectionBytes-=cached.bytes;projectionCache.delete(key);}
+  const project=get(uid,id,{hydrate:false});if(!project)return null;
+  const value=projector(project),bytes=Buffer.byteLength(JSON.stringify(value));
+  if(bytes<=PROJECTION_MAX_BYTES){
+    while(projectionCache.size>=128||projectionBytes+bytes>PROJECTION_MAX_BYTES){const [oldKey,entry]=projectionCache.entries().next().value;projectionBytes-=entry.bytes;projectionCache.delete(oldKey);}
+    projectionCache.set(key,{identity,value:structuredClone(value),bytes});projectionBytes+=bytes;
+  }
+  return value;
+}
+export function listProjected(uid,cacheKey,projector) {
+  let names;try{names=fs.readdirSync(path.join(ROOT,owner(uid)));}catch(error){if(error.code==='ENOENT')return [];throw error;}
+  const ids=[...new Set(names.flatMap(name=>name.match(/^([a-f0-9]{32})\.json(?:\.gz)?$/)?.[1]||[]))];
+  return ids.map(id=>getProjected(uid,id,cacheKey,projector)).filter(Boolean).sort((a,b)=>b.updatedAt.localeCompare(a.updatedAt));
+}
+
 export function get(uid, id, {hydrate = true} = {}) {
   const compressed = compressedFile(uid, id);
   const target = fs.existsSync(compressed) ? compressed : file(uid, id);
@@ -107,6 +153,7 @@ export function list(uid, {hydrate = true} = {}) {
 }
 
 export function save(project, { touch = true } = {}) {
+  invalidateProjections(project.uid,project.id);
   const plain = file(project.uid, project.id);
   const compressed = compressedFile(project.uid, project.id);
   fs.mkdirSync(path.dirname(plain), { recursive: true });
@@ -142,6 +189,7 @@ export function writeSource(uid, id, bytes) {
 export function readSource(uid, id) { return fs.readFileSync(sourceFile(uid, id)); }
 export function removeSource(uid, id) { fs.rmSync(sourceFile(uid, id), { force: true }); }
 export function remove(uid, id) {
+  invalidateProjections(uid,id);
   fs.rmSync(file(uid, id), { force: true });
   fs.rmSync(compressedFile(uid, id), { force: true });
   removeSource(uid, id);
@@ -220,7 +268,7 @@ export function writeTemplateIR(uid, id, ir) {
 export function readTemplateIR(uid, id, hash) {
   try {
     const ir = JSON.parse(fs.readFileSync(templateFile(uid, id) + '.ir.json', 'utf8'));
-    if (ir.schemaVersion !== 1 || ir.parserVersion !== 'pptx-ir-7' || ir.sha256 !== hash) return null;
+    if (ir.schemaVersion !== 1 || ir.parserVersion !== PPTX_IR_VERSION || ir.sha256 !== hash) return null;
     return reviveStoredMedia(ir, null, uid);
   } catch (error) { if (error.code === 'ENOENT') return null; throw error; }
 }

@@ -69,14 +69,20 @@ export function buildMediaLedger(project, slides, objectLedger) {
   // Every retired illustrative asset is listed with its page and reason; a
   // user-approved exclusion counts as resolved for the publish gate (MD-P0-3).
   const illustrative = entries.filter(entry => entry.origin === 'template' && ['aid', 'decoration', 'unknown'].includes(entry.bucket));
-  const retired = illustrative.filter(entry => !KEPT.has(entry.status) && entry.status !== 'excluded_by_user')
+  const policyResolved=entry=>['design_only','keep_fixed'].includes(project.templateContentMode)&&entry.origin==='template'&&entry.role==='old_template_content'&&entry.bucket==='decoration'&&!entry.required&&entry.status==='retired_by_adaptation'&&entry.approvalBasis==='design_only_template';
+  const retired = illustrative.filter(entry => !KEPT.has(entry.status) && entry.status !== 'excluded_by_user' && !policyResolved(entry))
     .map(entry => ({ objectId: entry.objectId, page: slides.findIndex(slide => slide.id === entry.slideId) + 1, role: entry.role, status: entry.status, reason: entry.reason || null, approvalBasis: entry.approvalBasis || null }));
   const approvedExclusions = illustrative.filter(entry => entry.status === 'excluded_by_user').length;
-  return { version: 2, status: 'profiled', entries, buckets,componentEntries,componentIssues,roleWeightedEffectiveConservation:entries.filter(e=>e.origin==='template').reduce((n,e)=>n+(KEPT.has(e.status)||e.status==='excluded_by_user'?weights[e.bucket]:0),0)/Math.max(1,entries.filter(e=>e.origin==='template').reduce((n,e)=>n+weights[e.bucket],0)),roleWeightedConservation:entries.filter(e=>e.origin==='template').reduce((n,e)=>n+(KEPT.has(e.status)?weights[e.bucket]:0),0)/Math.max(1,entries.filter(e=>e.origin==='template').reduce((n,e)=>n+weights[e.bucket],0)), longestTextOnlyRun, templateMediaShare: Math.round(templateMediaShare * 100) / 100,
+  // Object integrity has already checked each adaptation. A design-only
+  // template deliberately retires old report evidence; this is an explicit
+  // template-use policy, not a user exclusion or an equivalent new fact.
+  const policyRetirements=illustrative.filter(policyResolved).length;
+  const templateEntries=entries.filter(entry=>entry.origin==='template'),templateWeight=templateEntries.reduce((n,entry)=>n+weights[entry.bucket],0);
+  return { version: 2, status: 'profiled', entries, buckets,componentEntries,componentIssues,roleWeightedEffectiveConservation:templateWeight?templateEntries.reduce((n,e)=>n+(KEPT.has(e.status)||e.status==='excluded_by_user'||policyResolved(e)?weights[e.bucket]:0),0)/templateWeight:null,roleWeightedConservation:templateWeight?templateEntries.reduce((n,e)=>n+(KEPT.has(e.status)?weights[e.bucket]:0),0)/templateWeight:null, longestTextOnlyRun, templateMediaShare: Math.round(templateMediaShare * 100) / 100,
     // Evidence and brand media are governed by object integrity (required);
     // conservation covers the template's illustrative roles.
     conservation: expected ? Math.round(kept / expected * 100) / 100 : null,
-    effectiveConservation: expected ? Math.round((kept + approvedExclusions) / expected * 100) / 100 : null, retired, approvedExclusions };
+    effectiveConservation: expected ? Math.round((kept + approvedExclusions + policyRetirements) / expected * 100) / 100 : null, retired, approvedExclusions, policyRetirements };
 }
 
 export function inspectMediaLedger(ledger) {
@@ -91,12 +97,12 @@ export function inspectMediaLedger(ledger) {
     if (item.expected > 0 && item.kept === 0) issues.push({ code: 'media_role_dropped', severity: 'warning', bucket, repairable: true,
       message: `All ${item.expected} template ${bucket === 'aid' ? 'item icons' : 'decorative/photo'} media were removed${item.reasons.length ? ` (${item.reasons.join('; ')})` : ''}; rebind them to items or choose a prototype that keeps the template's media role.` });
   }
-  if(ledger.roleWeightedEffectiveConservation!==undefined&&ledger.roleWeightedEffectiveConservation<.7)issues.push({code:'media_weighted_conservation_blocked',severity:'error',repairable:true,message:'Role-weighted media conservation is below 70%; preserve meaningful media/carriers or record a valid user exclusion.'});
+  if(Number.isFinite(ledger.roleWeightedEffectiveConservation)&&ledger.roleWeightedEffectiveConservation<.7)issues.push({code:'media_weighted_conservation_blocked',severity:'error',repairable:true,message:'Role-weighted media conservation is below 70%; preserve meaningful media/carriers or record a valid user exclusion.'});
   const effective = ledger.effectiveConservation ?? ledger.conservation;
   if (effective !== null && effective < .7) issues.push({ code: 'media_conservation_blocked', severity: 'error', repairable: true,
     retired: (ledger.retired || []).slice(0, 40),
     message: `Only ${Math.round(effective * 100)}% of the template's illustrative media remain; ${(ledger.retired || []).length} were retired on pages ${[...new Set((ledger.retired || []).map(item => item.page))].join(', ')}. Re-lay out those pages to keep the media, or confirm each removal explicitly; publishing does not drop them silently.` });
-  else if (ledger.conservation !== null && ledger.conservation < .7) issues.push({ code: 'media_conservation_low', severity: 'warning', repairable: true,
+  else if (ledger.conservation !== null && ledger.conservation < .7 && !ledger.policyRetirements) issues.push({ code: 'media_conservation_low', severity: 'warning', repairable: true,
     message: `Only ${Math.round(ledger.conservation * 100)}% of the template's illustrative media survive in the generated pages.` });
   if (ledger.longestTextOnlyRun >= 3 && ledger.templateMediaShare >= .5) issues.push({ code: 'media_text_only_run', severity: 'error', repairable: true,
     message: `${ledger.longestTextOnlyRun} consecutive content slides have no image, chart or table although most template pages carry media.` });

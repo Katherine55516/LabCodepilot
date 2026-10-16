@@ -1,6 +1,6 @@
 import {fontManifest,projectNativeFonts,withNativeFontCss} from '../ppt-native-fonts.mjs';
 import {readRepairComparison} from './repair-comparison.mjs';
-import {liveProjectView} from './project-view.mjs';
+import {liveProjectView,currentSlidePreview} from './project-view.mjs';
 import { startAssetTask, finishAssetTask, retryAssetTask } from './asset-task-service.mjs';
 import { applyCommand, redo, undo } from './command-service.mjs';
 import { operationHistory } from './command-history.mjs';
@@ -10,7 +10,7 @@ import { getProject, listRevisions, readRevision, enqueueProject } from './repos
 import { publishProject } from './publish-service.mjs';
 import { buildSlideRenderTree } from './render-tree.mjs';
 import { slideSvg } from './exporters/preview.mjs';
-import {buildTemplateSkeleton} from './generation-skeleton.mjs';
+import {buildTemplateSkeleton,buildPendingSlidePreview} from './generation-skeleton.mjs';
 import { createProposal, applyProposal, discardProposal, proposalPreview } from './proposal-service.mjs';
 import { openGenerationScope, submitGenerationEdit, retryGenerationEdit, processGenerationEdits, recordIntentProposal } from './generation-edit-service.mjs';
 import { pauseSession, resumeSession, setPageAccepted } from './runtime.mjs';
@@ -142,7 +142,7 @@ export async function handleStructuredPpt(req, url, ctx) {
     }
     if ((match = url.pathname.match(new RegExp(`^/ppt/projects/(${PROJECT})/slides/([a-zA-Z0-9_-]{1,80})/preview$`, 'i')))) {
       const project = projectOr404(uid, match[1]); const tree = ['generating', 'paused'].includes(project.status)
-        ? project.runtime?.slides?.[match[2]]?.preview||(url.searchParams.get('draft')==='1'?buildTemplateSkeleton(project,match[2]):null) : buildSlideRenderTree(project, match[2]);
+        ? currentSlidePreview(project,match[2])||buildPendingSlidePreview(project,match[2])||(url.searchParams.get('draft')==='1'?buildTemplateSkeleton(project,match[2]):null) : buildSlideRenderTree(project, match[2]);
       if (!tree) return send(404, { error: 'slide not found' });
       if (url.searchParams.get('format') === 'svg') {
         res.writeHead(200, { 'content-type': 'image/svg+xml; charset=utf-8', 'cache-control': 'no-store', etag: `"${project.renderTree?.hash || project.revision}"` });
