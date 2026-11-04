@@ -125,7 +125,19 @@
 17. **SDK 通道的流式草稿**：Fable 之前的 Q4 决定是先不做，单独立项。
 18. **main 合并与 3186 切换**：等用户确认。合并前按 memory “Merge acceptance: all 7 inputs” 重跑 7 个输入。
 
-## 4. 如何复现与验证
+## 4. 代码位置与新环境准备
+
+- 代码：GitHub `Katherine55516/LabCodepilot` 的 `main`。这是 main `335fb8b3` 的单提交快照，不带历史，因为旧历史里有超过 100MB 的测试视频；完整历史在公司 origin 和本地仓库。
+- 2026-11-04 在全新 clone 上实测过：`npm ci`（约 2 分钟，Claude Agent SDK 本机二进制随依赖装好）→ `npm run test`（3181 通过）→ PPT selftest（只有 4 个基线失败）→ `npm run build`（干净 clone 用默认构建即可）→ 用 Claude SDK 生成 JEPA × Mood-Board，20 页，completed，38 次调用全是 `agent_sdk_schema`。
+- 新机器需要准备：
+  - Node 22；
+  - AIMate 设置 → 服务商里添加一个 Anthropic 协议服务商（填 key，PPT 会自动走 SDK）；验收用的 qwen 走 openai-compatible 直连；
+  - Python，用 `PPT_PYTHON` 指定解释器（跑 selftest 时用 `PPT_TEST_PYTHON`），需要装 `pdfplumber pypdfium2 pillow lxml python-docx openpyxl python-pptx`；
+  - LibreOffice，用于导出检查和页面渲染；
+  - 上传自定义模板（模板和测试项目不在仓库里）；
+  - 在浏览器里跑 PPT 时，`/ppt` 页面要保持打开，模型调用由它发起。
+
+## 5. 如何复现与验证
 
 - 3197 启动与重启：
   ```bash
@@ -139,7 +151,7 @@
 - 页面渲染评审：用 LibreOffice 把导出的 PPTX 转成 PDF，再用 pypdfium2 拼缩略图，逐页查看。不要只看编辑器预览：编辑器里的圆角矩形渲染有已知偏差（A2）。
 - 测试输入：轮换使用 `/Users/dongli/Documents/ChatGPT/CodePilot/testing_input` 里的 7 个文件，搭配 `/Users/dongli/Documents/ChatGPT/CodePilot/templates` 里的不同模板，不要只用 world_models。
 
-## 5. 决策日志（本轮）
+## 6. 决策日志（本轮）
 
 | 日期 | 决策 | 来源 |
 |---|---|---|
