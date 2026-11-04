@@ -79,7 +79,7 @@ export function chromePlan(project, index) {
   const slides = project.templateFidelity?.slides || [];
   if (!slides[index]) return [];
   const uses = new Map(), pool = contentPool(project);
-  const use = (hash, j) => uses.set(hash, [...(uses.get(hash) || []), j]);
+  const recordUse = (hash, j) => uses.set(hash, [...(uses.get(hash) || []), j]);
   const allowed = (item, j) => { const prior = uses.get(item.hash) || []; return prior.length < paintingUseLimit(project, item.node, pool) && (!prior.length || j - prior.at(-1) >= MIN_GAP); };
   // A second use waits until every painting of its size class in the pool has shown once.
   const poolLeft = node => pool.some(item => item.hash !== node.content.imageSha256 && !uses.has(item.hash) && sameSlotSize(item.geometry, node.geometry));
@@ -90,7 +90,7 @@ export function chromePlan(project, index) {
     for (const node of paintings) {
       const hash = node.content.imageSha256, prior = uses.get(hash) || [];
       const repeat = prior.length >= paintingUseLimit(project, node, pool) || prior.length && (j - prior.at(-1) < MIN_GAP || poolLeft(node));
-      if (!repeat) { use(hash, j); shown.push({ node, show: node }); continue; }
+      if (!repeat) { recordUse(hash, j); shown.push({ node, show: node }); continue; }
       // An unused painting first, then the longest unseen; never one this page already shows.
       const candidates = pool.filter(item => item.hash !== hash && sameSlotSize(item.geometry, node.geometry) && allowed(item, j) && !shown.some(entry => entry.show?.content?.imageSha256 === item.hash));
       const pick = candidates.sort((a, b) => (uses.get(a.hash)?.length || 0) - (uses.get(b.hash)?.length || 0) || (uses.get(a.hash)?.at(-1) ?? -1) - (uses.get(b.hash)?.at(-1) ?? -1))[0];
@@ -99,7 +99,7 @@ export function chromePlan(project, index) {
       const again = pick || pool.filter(item => sameSlotSize(item.geometry, node.geometry) && !shown.some(entry => entry.show?.content?.imageSha256 === item.hash) && j - ((uses.get(item.hash) || []).at(-1) ?? -Infinity) >= 2)
         .sort((a, b) => (uses.get(a.hash)?.length || 0) - (uses.get(b.hash)?.length || 0) || (uses.get(a.hash)?.at(-1) ?? -1) - (uses.get(b.hash)?.at(-1) ?? -1))[0];
       const show = again ? again.node : node;
-      use(show.content.imageSha256, j); shown.push({ node, show });
+      recordUse(show.content.imageSha256, j); shown.push({ node, show });
     }
     if (j === index) plan = shown;
   }

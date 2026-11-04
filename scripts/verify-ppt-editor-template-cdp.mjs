@@ -10,8 +10,8 @@ import { buildRenderTree } from '../apps/cowork-server/lib/ppt/render-tree.mjs';
 import { normalizeCommand } from '../apps/cowork-server/lib/ppt/command-schema.mjs';
 import { _internals as commands } from '../apps/cowork-server/lib/ppt/command-service.mjs';
 
-const module=await transform(fs.readFileSync('src/__tests__/fixtures/ppt-parity.ts','utf8'),{loader:'ts',format:'esm'});
-const {pptParityFixture}=await import('data:text/javascript;base64,'+Buffer.from(module.code).toString('base64'));
+const compiled=await transform(fs.readFileSync('src/__tests__/fixtures/ppt-parity.ts','utf8'),{loader:'ts',format:'esm'});
+const {pptParityFixture}=await import('data:text/javascript;base64,'+Buffer.from(compiled.code).toString('base64'));
 const fixture=pptParityFixture(),output=path.resolve(process.env.PPT_CDP_OUTPUT || 'outputs/ppt-editor-template-bilingual-20261013/editor-cdp');
 fs.mkdirSync(output,{recursive:true});
 const base=process.env.PPT_CDP_URL || 'http://localhost:3000';
