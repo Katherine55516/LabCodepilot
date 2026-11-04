@@ -8,7 +8,7 @@ import assert from 'node:assert/strict';import fs from 'node:fs';import os from 
 import {applyRenderContract,measureText,textContract,CARD_PADDING,PT_EMU} from './lib/ppt/render-contract.mjs';
 import {_internals as exporter,renderPptx} from './lib/ppt-render.mjs';
 import {_internals as nativeExporter} from './lib/ppt/import-pptx.mjs';
-import {localPptRuntime} from './test/ppt-local-runtime.mjs';import {slideSvg} from './lib/ppt/exporters/preview.mjs';
+import {localPptRuntime,spawnPythonSync} from './test/ppt-local-runtime.mjs';import {slideSvg} from './lib/ppt/exporters/preview.mjs';
 import {BUILT_INS,snapshotTemplate} from './lib/ppt-template.mjs';import {ensureProjectV3} from './lib/ppt/ir.mjs';
 const python=process.env.PPT_TEST_PYTHON||process.env.PPT_PYTHON||'python3',root=fs.mkdtempSync(path.join(os.tmpdir(),'ppt-card-style-'));
 const size={width:12192000,height:6858000},fonts={title:'Arial',body:'Arial',titleEastAsia:'PingFang SC',bodyEastAsia:'PingFang SC'},palette={background:'#ffffff',accent:'#6758c8',foreground:'#111827',muted:'#222222'};
@@ -54,7 +54,7 @@ try{
  assert.equal(blank.status,0,blank.stderr);
  const node=(id,y,extra)=>({id,type:'list',geometry:{x:60*PT_EMU,y:y*PT_EMU,width:600*PT_EMU,height:120*PT_EMU},content:{items,pointLayout:{...pointLayout,...(extra?.textStyleOverrides?{fontSizePt:22.5,lineHeight:1.55}:{})}},sourceArtifact:{sourceUnitId:id,type:'ChecklistBlock'},...extra});
  const preserved=path.join(root,'preserved.pptx');
- const nativeOut=spawnSync(python,['-c',nativeExporter.EXPORT_SCRIPT],{input:JSON.stringify({original,slides:[{nativeSlideIndex:0,nodes:[],sourceArtifacts:[
+ const nativeOut=spawnPythonSync(python,nativeExporter.EXPORT_SCRIPT,[],{input:JSON.stringify({original,slides:[{nativeSlideIndex:0,nodes:[],sourceArtifacts:[
   node('manual',40,{style:manual,textStyleOverrides:overrides}),node('plain',220,{style:{...manual}})]}],fonts}),env:{...process.env,PPT_SOURCE:original,PPT_OUTPUT:preserved},maxBuffer:4e6});
  assert.equal(nativeOut.status,0,nativeOut.stderr.toString());
  const preservedRuns=readRuns(preserved);assertStyled(preservedRuns.manual,'preserved');assertDefault(preservedRuns.plain,'preserved');assertTypography(preserved);

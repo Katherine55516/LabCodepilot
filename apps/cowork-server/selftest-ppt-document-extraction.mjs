@@ -3,7 +3,7 @@ import {snapshotTemplate,BUILT_INS} from './lib/ppt-template.mjs';
 import {fidelityFromImported,bindTemplateFidelity} from './lib/ppt-template-fidelity.mjs';
 import {bindSourceArtifacts} from './lib/ppt-source-artifacts.mjs';
 import {importEditablePptx,renderImportedPptx} from './lib/ppt/import-pptx.mjs';
-import {extractFile} from './lib/ppt-source.mjs';import {localPptRuntime} from './test/ppt-local-runtime.mjs';
+import {extractFile} from './lib/ppt-source.mjs';import {localPptRuntime} from './test/ppt-local-runtime.mjs';import {sansFontFile} from './test/ppt-local-fonts.mjs';
 const out=process.env.PPT_DOCUMENT_OUTPUT||fs.mkdtempSync(path.join(os.tmpdir(),'ppt-documents-')),python=process.env.PPT_TEST_PYTHON||'python3';fs.mkdirSync(out,{recursive:true});const runtime=localPptRuntime(out,python),report=[];
 const build=spawnSync(python,['-c',String.raw`
 from pathlib import Path
@@ -22,7 +22,7 @@ c=canvas.Canvas(str(out/'columns.pdf'),pagesize=(612,792));c.setFont('Helvetica-
 for i in range(8):c.drawString(40,710-i*25,'Left topic %s retains its condition.'%i);c.drawString(330,710-i*25,'Right topic %s retains its evidence.'%i)
 c.save()
 w=Workbook();s=w.active;s.title='Risk data';s.append(['Period','Risk']);s.append(['One',10]);s.append(['Two',20]);s.append(['Tail',30]);chart=BarChart();chart.add_data(Reference(s,min_col=2,min_row=1,max_row=4),titles_from_data=True);chart.set_categories(Reference(s,min_col=1,min_row=2,max_row=4));chart.title='Saved risk chart';chart.x_axis.title='Period';chart.y_axis.title='Risk units';chart.y_axis.numFmt='0.0';s.add_chart(chart,'D1');w.save(out/'chart.xlsx');chart.y_axis.scaling.logBase=10;w.save(out/'log-chart.xlsx')
-im=Image.new('RGB',(1800,2400),'white');draw=ImageDraw.Draw(im);font=ImageFont.truetype('/System/Library/Fonts/Supplemental/Arial.ttf',60)
+im=Image.new('RGB',(1800,2400),'white');draw=ImageDraw.Draw(im);font=ImageFont.truetype(${JSON.stringify(sansFontFile())},60)
 for i,text in enumerate(['Scanned evidence','Preserve cost and timing.','Only independent samples qualify.']):draw.text((120,200+i*160),text,fill='black',font=font)
 im.save(out/'scanned.pdf','PDF',resolution=200)
 ` ,out],{encoding:'utf8'});assert.equal(build.status,0,build.stderr);

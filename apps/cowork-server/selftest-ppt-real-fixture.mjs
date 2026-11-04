@@ -5,7 +5,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawnPythonSync } from './test/ppt-local-runtime.mjs';
 import { _internals as sourceParser } from './lib/ppt-source.mjs';
 import { withSemanticIndex } from './lib/ppt-semantic.mjs';
 import { buildPlanning, retrieveSlideSources } from './lib/ppt-planning.mjs';
@@ -23,7 +23,7 @@ if (![sourceFile, templateFile, baselineFile].every(fs.existsSync)) {
 const python = process.env.PPT_TEST_PYTHON || '/Users/dongli/.cache/codex-runtimes/codex-primary-runtime/dependencies/python/bin/python3';
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ppt-real-fixture-'));
 const run = (script, input, env = {}) => {
-  const result = spawnSync(python, ['-c', script], { input, env: { ...process.env, ...env }, maxBuffer: 70_000_000 });
+  const result = spawnPythonSync(python, script, [], { input, env: { ...process.env, ...env }, maxBuffer: 70_000_000 });
   assert.equal(result.status, 0, result.stderr.toString().slice(-2000));
   return JSON.parse(result.stdout.toString());
 };

@@ -1,6 +1,7 @@
 import fs from 'node:fs';import path from 'node:path';import assert from 'node:assert/strict';
 import {createPptHttpHarness}from'./test/ppt-http-harness.mjs';import{gammaModelFixture}from'./test/ppt-gamma-model-fixture.mjs';
 const sourcePath=process.env.PPT_GAMMA_INPUT||'/Users/dongli/Documents/ChatGPT/CodePilot/gamma.md';
+if(!fs.existsSync(sourcePath)){console.log('Gamma input unavailable (set PPT_GAMMA_INPUT); optional replay skipped.');process.exit(0);}
 const root=path.resolve(process.env.PPT_GAMMA_OUTPUT||'outputs/ppt-fixture-implementation-20261019/gamma-http');
 import {cardModel} from './ppt-scope-test-helpers.mjs';
 // Card outline (2026-10-23): the deck/finish/writer doubles first, the Gamma fixture for the rest.

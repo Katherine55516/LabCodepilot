@@ -3,7 +3,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { spawnSync } from 'node:child_process';
+import { spawnPythonSync } from './test/ppt-local-runtime.mjs';
 import { _internals as importer, projectFromImportedManifest } from './lib/ppt/import-pptx.mjs';
 import { fidelityFromImported, bindTemplateFidelity, templateMediaRole } from './lib/ppt-template-fidelity.mjs';
 import { templateDesignView } from './lib/ppt-template-design.mjs';
@@ -16,7 +16,7 @@ import { _internals as api } from './lib/ppt-api.mjs';
 const python = process.env.PPT_TEST_PYTHON || '/Users/dongli/.cache/labcodepilot/ppt-python/bin/python';
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ppt-template-inherited-'));
 process.env.COWORK_STATE_DIR = root;
-const run = (script, input, env = {}) => { const r = spawnSync(python, ['-c', script], { input, env: { ...process.env, ...env }, maxBuffer: 50_000_000 }); assert.equal(r.status, 0, r.stderr.toString()); return r.stdout.toString(); };
+const run = (script, input, env = {}) => { const r = spawnPythonSync(python, script, [], { input, env: { ...process.env, ...env }, maxBuffer: 50_000_000 }); assert.equal(r.status, 0, r.stderr.toString()); return r.stdout.toString(); };
 try {
   const template = path.join(root, 'template.pptx');
   run(`from pptx import Presentation

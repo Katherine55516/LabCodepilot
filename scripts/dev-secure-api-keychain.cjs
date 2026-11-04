@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-require-imports */
 /* macOS development setup without an Electron download. A dedicated profile
  * uses an OS Keychain master key and the production AES-GCM DB layer.
  * This profile is intentionally separate from packaged app safeStorage data. */

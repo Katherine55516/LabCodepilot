@@ -14,7 +14,7 @@ for (const name of fs.readdirSync(root).filter(name => /^selftest-ppt(?:-.+)?\.m
   const started = Date.now();
   const run = spawnSync(process.execPath, [path.join(root, name)], { cwd: root, env: process.env, encoding: 'utf8', timeout: 180000, maxBuffer: 4000000 });
   fs.writeFileSync(path.join(output, name + '.log'), (run.stdout || '') + (run.stderr || '') + (run.error ? '\n' + run.error.message : ''));
-  const optionalFixtureAbsent = name === 'selftest-ppt-real-fixture.mjs' && /skip/i.test(run.stdout || '');
+  const optionalFixtureAbsent = ['selftest-ppt-real-fixture.mjs', 'selftest-ppt-gamma-http.mjs'].includes(name) && /skip/i.test(run.stdout || '');
   records.push({ name, status: run.status === 0 ? optionalFixtureAbsent ? 'skipped-fixture' : 'passed' : 'failed', exitCode: run.status, ms: Date.now() - started });
   console.log(`${records.at(-1).status}: ${name}`);
 }

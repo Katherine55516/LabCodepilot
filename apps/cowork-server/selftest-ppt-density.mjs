@@ -5,6 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { Readable } from 'node:stream';
 import { spawnSync } from 'node:child_process';
+import { spawnPythonSync } from './test/ppt-local-runtime.mjs';
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ppt-density-'));
 process.env.COWORK_STATE_DIR = root;
 const [{ normalizePaste }, planning, capacity, packing, profile, qa, artifacts, api, store, templates] = await Promise.all([
@@ -169,7 +170,7 @@ try {
   assert.ok(preservedTree.slides[0].elements.some(n=>n.sourceArtifact?.sourceUnitId===table.id),'the preserved page draws the source table');
   const importer=(await import('./lib/ppt/import-pptx.mjs'))._internals;
   const preservedPath=path.join(exportDir,'density-preserved-smoke.pptx');
-  const nativeResult=spawnSync(python,['-c',importer.EXPORT_SCRIPT],{input:JSON.stringify({original:path.join(exportDir,'density-native-smoke.pptx'),fonts:published.templateSpec.fonts,slides:[{nativeSlideIndex:1,nodes:[],sourceArtifacts:sourceNodes}]}),env:{...process.env,PPT_OUTPUT:preservedPath},encoding:'utf8'});
+  const nativeResult=spawnPythonSync(python,importer.EXPORT_SCRIPT,[],{input:JSON.stringify({original:path.join(exportDir,'density-native-smoke.pptx'),fonts:published.templateSpec.fonts,slides:[{nativeSlideIndex:1,nodes:[],sourceArtifacts:sourceNodes}]}),env:{...process.env,PPT_OUTPUT:preservedPath},encoding:'utf8'});
   assert.equal(nativeResult.status,0,nativeResult.stderr);
   const preservedInspect=spawnSync(python,['-c',inspectScript,preservedPath],{encoding:'utf8'});
   assert.equal(preservedInspect.status,0,preservedInspect.stderr);

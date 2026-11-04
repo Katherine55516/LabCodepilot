@@ -1,6 +1,7 @@
 import { measureFigureText, knownFigureHashes } from './ppt-template-picture-read.mjs';
 import {DOCUMENT_EXTRACTION_SCRIPT} from './ppt-document-extraction-python.mjs';
 import {SOURCE_MATH_SCRIPT} from './ppt-source-math-python.mjs';
+import {PYTHON_STDIN_ARGS,pythonStdinInput} from './ppt-python-stdin.mjs';
 /** Deterministic source extraction inside the project's Cowork container.
  * No model participates in file decoding. Original bytes stay in the volume;
  * the bounded, location-tagged text is persisted in the project IR. */
@@ -996,7 +997,7 @@ async function extractRaw(project, name, bytes, io = {}) {
   if(io.runPython)return withSemanticIndex(await io.runPython(project,SCRIPT,bytes,{PPT_SOURCE_NAME:name,PPT_FIGURE_KNOWN:known}));
   const { name: container } = await orch.ensureContainer(project.id, project.uid, orch.KIND_PPT);
   return new Promise((resolve, reject) => {
-    const child = spawn('docker', ['exec', '-i', '-u', String(orch.AGENT_UID), '-e', `PPT_SOURCE_NAME=${name}`, '-e', `PPT_FIGURE_KNOWN=${known}`, container, 'python3', '-c', SCRIPT], { stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn('docker', ['exec', '-i', '-u', String(orch.AGENT_UID), '-e', `PPT_SOURCE_NAME=${name}`, '-e', `PPT_FIGURE_KNOWN=${known}`, container, 'python3', ...PYTHON_STDIN_ARGS], { stdio: ['pipe', 'pipe', 'pipe'] });
     let output = ''; let error = '';
     child.stdout.setEncoding('utf8');
     child.stderr.setEncoding('utf8');
@@ -1008,7 +1009,7 @@ async function extractRaw(project, name, bytes, io = {}) {
       try { resolve(withSemanticIndex(JSON.parse(output))); } catch { reject(new Error('source extractor returned invalid JSON')); }
     });
     child.stdin.on('error', () => {});
-    child.stdin.end(bytes);
+    child.stdin.end(pythonStdinInput(SCRIPT, bytes));
   });
 }
 
